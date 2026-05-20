@@ -1,0 +1,22 @@
+app:
+  name: hyperliquid-smart-wallet-observer
+  environment: paper
+  database_url: sqlite:///./logs/hl_observer.sqlite3
+  logs_dir: ./logs
+
+hyperliquid:
+  info_base_url: https://api.hyperliquid.xyz/info
+  testnet_info_base_url: https://api.hyperliquid-testnet.xyz/info
+  ws_base_url: wss://api.hyperliquid.xyz/ws
+  testnet_ws_base_url: wss://api.hyperliquid-testnet.xyz/ws
+  timeout_seconds: 10
+  max_retries: 3
+  backoff_base_seconds: 0.25
+
+execution:
+  enable_mainnet_execution: false
+  enable_testnet_execution: false
+  require_confirm_testnet_only: true
+  require_cloid: true
+  require_schedule_cancel: true
+  require_reduce_only_exits: true
