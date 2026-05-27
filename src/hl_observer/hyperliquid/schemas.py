@@ -6,6 +6,15 @@ from typing import Literal
 from pydantic import BaseModel, Field, field_validator
 
 
+class WalletStatus(StrEnum):
+    REJECTED = "REJECTED"
+    INSUFFICIENT_DATA = "INSUFFICIENT_DATA"
+    WATCH_ONLY = "WATCH_ONLY"
+    SHORTLISTED = "SHORTLISTED"
+    ACTIVE_LEADER = "ACTIVE_LEADER"
+    BLOCKED = "BLOCKED"
+
+
 class SignalDecision(StrEnum):
     IGNORE = "IGNORE"
     OBSERVE_ONLY = "OBSERVE_ONLY"
@@ -93,19 +102,33 @@ class OrderStatus(BaseModel):
 class WalletProfile(BaseModel):
     address: str
     trades_count: int = 0
+    fills_count: int = 0
+    closed_pnl_count: int = 0
     active_days: int = 0
+    history_days: float = 0.0
     pnl_bps: float = 0.0
+    pnl_total_usdc: float = 0.0
+    pnl_net_after_fees_usdc: float = 0.0
     win_rate: float = 0.0
     profit_factor: float = 0.0
     max_drawdown_bps: float = 0.0
+    max_drawdown_pct: float = 0.0
+    pnl_concentration: float = 0.0
     top_trade_pnl_share: float = 0.0
+    coins_traded_count: int = 0
+    main_coin: str | None = None
+    recent_activity_score: float = 0.0
+    regularity_score: float = 0.0
+    copyability_score: float = 0.0
     toxicity_score: float = 0.0
     style: WalletStyle = WalletStyle.UNKNOWN
+    status: WalletStatus = WalletStatus.INSUFFICIENT_DATA
 
 
 class WalletScore(BaseModel):
     address: str
     score: float
+    status: WalletStatus = WalletStatus.INSUFFICIENT_DATA
     decision: SignalDecision
     reasons: list[str] = Field(default_factory=list)
     metrics: dict[str, float] = Field(default_factory=dict)

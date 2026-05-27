@@ -361,6 +361,7 @@ async def _backfill_wallets(
             deltas=rebuild.deltas,
             window_start_ms=start_ms,
             window_end_ms=end_ms,
+            fills=unique_fills,
         )
         repo.store_wallet_activity_summary(summary)
         result.activity_summaries_stored += 1

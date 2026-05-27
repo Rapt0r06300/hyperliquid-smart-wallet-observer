@@ -554,8 +554,14 @@ class CollectionRepository:
             window_start_ms=summary.window_start_ms,
             window_end_ms=summary.window_end_ms,
             fills_count=summary.fills_count,
+            closed_pnl_count=summary.closed_pnl_count,
             coins_count=summary.coins_count,
             total_volume_estimated=summary.total_volume_estimated,
+            pnl_total_usdc=summary.pnl_total_usdc,
+            pnl_net_after_fees_usdc=summary.pnl_net_after_fees_usdc,
+            win_rate=summary.win_rate,
+            profit_factor=summary.profit_factor,
+            max_drawdown_pct=summary.max_drawdown_pct,
             long_actions_count=summary.long_actions_count,
             short_actions_count=summary.short_actions_count,
             open_count=summary.open_count,
@@ -563,6 +569,12 @@ class CollectionRepository:
             reduce_count=summary.reduce_count,
             close_count=summary.close_count,
             flip_count=summary.flip_count,
+            history_days=summary.history_days,
+            regularity_score=summary.regularity_score,
+            recent_activity_score=summary.recent_activity_score,
+            copyability_score=summary.copyability_score,
+            top_trade_pnl_share=summary.top_trade_pnl_share,
+            main_coin=summary.main_coin,
             created_at_ms=summary.created_at_ms,
         )
         self.session.add(model)
@@ -589,6 +601,18 @@ class CollectionRepository:
             final_coin_score=profile.final_coin_score,
             confidence_score=profile.confidence_score,
             status=profile.status,
+        )
+        self.session.add(model)
+        return model
+
+    def store_wallet_score(self, score: WalletScore) -> WalletScoreModel:
+        model = WalletScoreModel(
+            wallet_address=score.address,
+            score=score.score,
+            status=score.status.value,
+            decision=score.decision.value,
+            reasons_json=score.reasons,
+            metrics_json=score.metrics,
         )
         self.session.add(model)
         return model
