@@ -1289,17 +1289,18 @@ def paper_run() -> None:
     settings = _settings()
     edge = compute_edge_remaining(
         EdgeRemainingInputs(
-            leader_expected_move_bps=30,
-            taker_fee_bps=4,
-            spread_cost_bps=2,
-            estimated_slippage_bps=3,
-            latency_decay_bps=2,
+            edge_leader_bps=30,
+            fees_bps=4,
+            spread_bps=2,
+            slippage_bps=3,
+            delay_cost_bps=2,
+            observed_price=100.0,
         ),
         min_edge_required_bps=settings.risk.min_edge_required_bps,
     )
     context = RiskContext(
         spread_bps=2,
-        estimated_slippage_bps=3,
+        slippage_bps=3,
         orderbook_depth_usdc=10000,
         wallet_score=90,
         signal_score=90,

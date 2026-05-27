@@ -29,7 +29,7 @@ class PaperExecutor:
                 requested_price=signal.observed_price,
                 simulated_fill_price=signal.observed_price,
                 fee_bps=self.fee_bps,
-                slippage_bps=signal.estimated_slippage_bps,
+                slippage_bps=signal.slippage_bps,
                 decision=risk_decision.decision,
                 rejected_reason="; ".join(risk_decision.reasons),
             )
@@ -39,8 +39,8 @@ class PaperExecutor:
         fill_price = pessimistic_fill_price(
             signal.side,
             signal.observed_price,
-            signal.estimated_spread_bps,
-            signal.estimated_slippage_bps,
+            signal.spread_bps,
+            signal.slippage_bps,
         )
         order = PaperOrder(
             order_id=order_id,
@@ -51,7 +51,7 @@ class PaperExecutor:
             requested_price=signal.observed_price,
             simulated_fill_price=fill_price,
             fee_bps=self.fee_bps,
-            slippage_bps=signal.estimated_slippage_bps,
+            slippage_bps=signal.slippage_bps,
             decision=SignalDecision.PAPER_TRADE,
         )
         self.orders.append(order)

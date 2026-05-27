@@ -1,5 +1,4 @@
 from hl_observer.config.loader import load_settings
-from hl_observer.hyperliquid.schemas import SignalDecision
 from hl_observer.risk.gates import RiskContext
 from hl_observer.risk.risk_engine import RiskEngine
 
@@ -10,7 +9,7 @@ def test_risk_engine_rejects_late_signal(monkeypatch):
     decision = RiskEngine(settings).evaluate(
         RiskContext(
             spread_bps=1,
-            estimated_slippage_bps=1,
+            slippage_bps=1,
             orderbook_depth_usdc=10000,
             wallet_score=90,
             signal_score=90,
@@ -20,7 +19,7 @@ def test_risk_engine_rejects_late_signal(monkeypatch):
     )
 
     assert not decision.allowed
-    assert decision.decision == SignalDecision.REJECT_TOO_LATE
+    assert "signal is too old" in decision.reasons
 
 
 def test_risk_engine_rejects_too_small_edge(monkeypatch):
@@ -29,7 +28,7 @@ def test_risk_engine_rejects_too_small_edge(monkeypatch):
     decision = RiskEngine(settings).evaluate(
         RiskContext(
             spread_bps=1,
-            estimated_slippage_bps=1,
+            slippage_bps=1,
             orderbook_depth_usdc=10000,
             wallet_score=90,
             signal_score=90,
@@ -38,4 +37,5 @@ def test_risk_engine_rejects_too_small_edge(monkeypatch):
         )
     )
 
-    assert decision.decision == SignalDecision.REJECT_EDGE_TOO_SMALL
+    assert not decision.allowed
+    assert "edge remaining below minimum" in decision.reasons

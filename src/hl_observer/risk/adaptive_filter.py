@@ -36,7 +36,7 @@ def apply_adaptive_risk_filter(context: AdaptiveRiskContext, settings: Settings)
         return AdaptiveRiskDecision(allowed=False, risk_level=AdaptiveRiskLevel.BLOCK, reasons=["signal_stale"])
     if context.spread_bps > cfg.max_spread_bps:
         return AdaptiveRiskDecision(allowed=False, risk_level=AdaptiveRiskLevel.BLOCK, reasons=["spread_too_wide"])
-    if context.estimated_slippage_bps > cfg.max_estimated_slippage_bps:
+    if context.slippage_bps > cfg.max_estimated_slippage_bps:
         return AdaptiveRiskDecision(allowed=False, risk_level=AdaptiveRiskLevel.BLOCK, reasons=["slippage_too_high"])
     if context.depth_usdc < cfg.min_orderbook_depth_usdc:
         return AdaptiveRiskDecision(allowed=False, risk_level=AdaptiveRiskLevel.BLOCK, reasons=["liquidity_too_low"])

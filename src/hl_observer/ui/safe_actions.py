@@ -315,18 +315,19 @@ async def _detect_signals(action: str, _settings: Settings, _state: UiState) -> 
 async def _paper_run(action: str, settings: Settings, state: UiState) -> UiActionResult:
     edge = compute_edge_remaining(
         EdgeRemainingInputs(
-            leader_expected_move_bps=30,
-            taker_fee_bps=4,
-            spread_cost_bps=2,
-            estimated_slippage_bps=3,
-            latency_decay_bps=2,
+            edge_leader_bps=30,
+            fees_bps=4,
+            spread_bps=2,
+            slippage_bps=3,
+            delay_cost_bps=2,
+            observed_price=100.0,
         ),
         min_edge_required_bps=settings.risk.min_edge_required_bps,
     )
     risk = RiskEngine(settings).evaluate(
         RiskContext(
             spread_bps=2,
-            estimated_slippage_bps=3,
+            slippage_bps=3,
             orderbook_depth_usdc=10000,
             wallet_score=90,
             signal_score=90,
@@ -978,7 +979,7 @@ async def _adaptive_risk_check(action: str, settings: Settings, _state: UiState)
         AdaptiveRiskContext(
             signal_age_ms=100,
             spread_bps=1,
-            estimated_slippage_bps=1,
+            slippage_bps=1,
             depth_usdc=settings.adaptive_risk_filter.min_orderbook_depth_usdc,
             wallet_score=90,
             wallet_coin_score=90,

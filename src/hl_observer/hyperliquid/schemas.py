@@ -45,6 +45,8 @@ class SignalDecision(StrEnum):
     REJECT_COPY_DEGRADATION_TOO_HIGH = "REJECT_COPY_DEGRADATION_TOO_HIGH"
     REJECT_UNKNOWN_POSITION_STATE = "REJECT_UNKNOWN_POSITION_STATE"
     REJECT_ORDERBOOK_STALE = "REJECT_ORDERBOOK_STALE"
+    REJECT_INVALID_PRICE = "REJECT_INVALID_PRICE"
+    REJECT_COSTS_TOO_HIGH = "REJECT_COSTS_TOO_HIGH"
 
 
 class WalletStyle(StrEnum):
@@ -122,11 +124,18 @@ class SignalCandidate(BaseModel):
     signal_age_ms: int
     wallet_score: float = 0.0
     signal_score: float = 0.0
+    edge_leader_bps: float = 0.0
+    consistency_factor: float = 1.0
+    freshness_factor: float = 1.0
     edge_remaining_bps: float = 0.0
-    estimated_fee_bps: float = 0.0
-    estimated_spread_bps: float = 0.0
-    estimated_slippage_bps: float = 0.0
-    estimated_latency_decay_bps: float = 0.0
+    delay_cost_bps: float = 0.0
+    spread_bps: float = 0.0
+    slippage_bps: float = 0.0
+    fees_bps: float = 0.0
+    liquidity_penalty_bps: float = 0.0
+    crowding_penalty_bps: float = 0.0
+    adverse_selection_bps: float = 0.0
+    funding_penalty_bps: float = 0.0
     orderbook_depth_usdc: float = 0.0
     crowding_score: float = 0.0
     exit_plan_id: str | None = None
@@ -149,16 +158,18 @@ class SignalScore(BaseModel):
 
 
 class EdgeRemainingInputs(BaseModel):
-    leader_expected_move_bps: float = 0.0
-    cluster_confirmation_bps: float = 0.0
-    orderbook_confirmation_bps: float = 0.0
-    regime_bonus_bps: float = 0.0
-    taker_fee_bps: float = 0.0
-    spread_cost_bps: float = 0.0
-    estimated_slippage_bps: float = 0.0
-    latency_decay_bps: float = 0.0
+    edge_leader_bps: float = 0.0
+    consistency_factor: float = 1.0
+    freshness_factor: float = 1.0
+    delay_cost_bps: float = 0.0
+    spread_bps: float = 0.0
+    slippage_bps: float = 0.0
+    fees_bps: float = 0.0
+    liquidity_penalty_bps: float = 0.0
+    crowding_penalty_bps: float = 0.0
     adverse_selection_bps: float = 0.0
-    funding_expected_cost_bps: float = 0.0
+    funding_penalty_bps: float = 0.0
+    observed_price: float = 0.0
 
 
 class EdgeRemaining(BaseModel):

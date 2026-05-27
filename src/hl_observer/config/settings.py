@@ -182,6 +182,8 @@ class RiskSettings(BaseModel):
     max_spread_bps: float = 6.0
     max_slippage_bps: float = 10.0
     min_orderbook_depth_usdc: float = 5000.0
+    max_liquidity_penalty_bps: float = 50.0
+    max_total_costs_bps: float = 100.0
     min_edge_required_bps: float = 8.0
     min_wallet_score: float = 75.0
     min_signal_score: float = 80.0

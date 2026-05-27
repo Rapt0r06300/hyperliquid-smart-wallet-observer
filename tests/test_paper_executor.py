@@ -22,8 +22,9 @@ def test_paper_executor_refuses_if_risk_refuses():
 
     order = PaperExecutor().submit(signal, risk, notional_usdc=10)
 
-    assert order.notional_usdc == 0
-    assert order.rejected_reason
+    assert order.notional_usdc == 0.0
+    assert order.decision == SignalDecision.REJECT_EDGE_NEGATIVE
+    assert order.rejected_reason == "edge remaining is negative"
 
 
 def test_paper_executor_uses_pessimistic_fill():
@@ -36,8 +37,8 @@ def test_paper_executor_uses_pessimistic_fill():
         observed_price=100,
         timestamp_ms=1,
         signal_age_ms=100,
-        estimated_spread_bps=2,
-        estimated_slippage_bps=3,
+        spread_bps=2,
+        slippage_bps=3,
     )
     risk = RiskDecision(
         allowed=True,
@@ -49,3 +50,4 @@ def test_paper_executor_uses_pessimistic_fill():
     order = PaperExecutor().submit(signal, risk, notional_usdc=10)
 
     assert order.simulated_fill_price > order.requested_price
+    assert order.slippage_bps == 3

@@ -9,7 +9,7 @@ def score_signal(signal: SignalCandidate) -> SignalScore:
     freshness = clamp(1.0 - signal.signal_age_ms / 3500.0, 0.0, 1.0) * 30.0
     edge = clamp(signal.edge_remaining_bps / 25.0, 0.0, 1.0) * 35.0
     liquidity = clamp(signal.orderbook_depth_usdc / 25000.0, 0.0, 1.0) * 20.0
-    spread_penalty = clamp(signal.estimated_spread_bps / 10.0, 0.0, 1.0) * 10.0
+    spread_penalty = clamp(signal.spread_bps / 10.0, 0.0, 1.0) * 10.0
     crowding_penalty = clamp(signal.crowding_score, 0.0, 1.0) * 10.0
     score = clamp(freshness + edge + liquidity - spread_penalty - crowding_penalty + 15.0, 0.0, 100.0)
 

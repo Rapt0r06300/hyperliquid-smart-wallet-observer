@@ -19,7 +19,7 @@ class RiskEngine:
             or self.settings.environment == ExecutionEnvironment.TESTNET,
             "signal_age": context.signal_age_ms <= self.settings.risk.max_signal_age_ms,
             "spread": context.spread_bps <= self.settings.risk.max_spread_bps,
-            "slippage": context.estimated_slippage_bps <= self.settings.risk.max_slippage_bps,
+            "slippage": context.slippage_bps <= self.settings.risk.max_slippage_bps,
             "liquidity": context.orderbook_depth_usdc >= self.settings.risk.min_orderbook_depth_usdc,
             "edge_remaining": context.edge_remaining_bps >= self.settings.risk.min_edge_required_bps,
             "wallet_score": context.wallet_score >= self.settings.risk.min_wallet_score,

@@ -21,16 +21,17 @@ class CopySourceMode(StrEnum):
 
 
 class CopySignalTuning(BaseModel):
-    leader_expected_move_bps: float = 35.0
-    cluster_confirmation_bps: float = 0.0
-    orderbook_confirmation_bps: float = 0.0
-    regime_bonus_bps: float = 0.0
-    taker_fee_bps: float = 4.0
-    spread_cost_bps: float = 3.0
-    estimated_slippage_bps: float = 5.0
-    latency_decay_bps: float = 2.0
+    edge_leader_bps: float = 35.0
+    consistency_factor: float = 1.0
+    freshness_factor: float = 1.0
+    delay_cost_bps: float = 2.0
+    spread_bps: float = 3.0
+    slippage_bps: float = 5.0
+    fees_bps: float = 4.0
+    liquidity_penalty_bps: float = 0.0
+    crowding_penalty_bps: float = 0.0
     adverse_selection_bps: float = 3.0
-    funding_expected_cost_bps: float = 0.0
+    funding_penalty_bps: float = 0.0
     orderbook_depth_usdc: float = 25_000.0
 
 
@@ -90,18 +91,22 @@ def detect_copy_signals_from_deltas(
             continue
         edge = compute_edge_remaining(
             EdgeRemainingInputs(
-                leader_expected_move_bps=cfg.leader_expected_move_bps,
-                cluster_confirmation_bps=cfg.cluster_confirmation_bps,
-                orderbook_confirmation_bps=cfg.orderbook_confirmation_bps,
-                regime_bonus_bps=cfg.regime_bonus_bps,
-                taker_fee_bps=cfg.taker_fee_bps,
-                spread_cost_bps=cfg.spread_cost_bps,
-                estimated_slippage_bps=cfg.estimated_slippage_bps,
-                latency_decay_bps=cfg.latency_decay_bps,
+                edge_leader_bps=cfg.edge_leader_bps,
+                consistency_factor=cfg.consistency_factor,
+                freshness_factor=cfg.freshness_factor,
+                delay_cost_bps=cfg.delay_cost_bps,
+                spread_bps=cfg.spread_bps,
+                slippage_bps=cfg.slippage_bps,
+                fees_bps=cfg.fees_bps,
+                liquidity_penalty_bps=cfg.liquidity_penalty_bps,
+                crowding_penalty_bps=cfg.crowding_penalty_bps,
                 adverse_selection_bps=cfg.adverse_selection_bps,
-                funding_expected_cost_bps=cfg.funding_expected_cost_bps,
+                funding_penalty_bps=cfg.funding_penalty_bps,
+                observed_price=float(delta.price),
             ),
             min_edge_required_bps=settings.risk.min_edge_required_bps,
+            max_liquidity_penalty_bps=settings.risk.max_liquidity_penalty_bps,
+            max_total_costs_bps=settings.risk.max_total_costs_bps,
         )
         if edge.edge_remaining_bps <= 0:
             _count(no_trade, "edge_remaining_bps_non_positive")
@@ -116,11 +121,18 @@ def detect_copy_signals_from_deltas(
             timestamp_ms=timestamp_ms,
             signal_age_ms=max(0, current_ms - timestamp_ms),
             wallet_score=followed_scores.get(wallet_address, 75.0),
+            edge_leader_bps=cfg.edge_leader_bps,
+            consistency_factor=cfg.consistency_factor,
+            freshness_factor=cfg.freshness_factor,
             edge_remaining_bps=edge.edge_remaining_bps,
-            estimated_fee_bps=cfg.taker_fee_bps,
-            estimated_spread_bps=cfg.spread_cost_bps,
-            estimated_slippage_bps=cfg.estimated_slippage_bps,
-            estimated_latency_decay_bps=cfg.latency_decay_bps,
+            delay_cost_bps=cfg.delay_cost_bps,
+            spread_bps=cfg.spread_bps,
+            slippage_bps=cfg.slippage_bps,
+            fees_bps=cfg.fees_bps,
+            liquidity_penalty_bps=cfg.liquidity_penalty_bps,
+            crowding_penalty_bps=cfg.crowding_penalty_bps,
+            adverse_selection_bps=cfg.adverse_selection_bps,
+            funding_penalty_bps=cfg.funding_penalty_bps,
             orderbook_depth_usdc=cfg.orderbook_depth_usdc,
             crowding_score=0.0,
             exit_plan_id=f"exit:{wallet_address}:{delta.coin}",
@@ -130,8 +142,8 @@ def detect_copy_signals_from_deltas(
         scored = score_signal(signal)
         risk = RiskEngine(settings).evaluate(
             RiskContext(
-                spread_bps=cfg.spread_cost_bps,
-                estimated_slippage_bps=cfg.estimated_slippage_bps,
+                spread_bps=cfg.spread_bps,
+                slippage_bps=cfg.slippage_bps,
                 orderbook_depth_usdc=cfg.orderbook_depth_usdc,
                 wallet_score=signal.wallet_score,
                 signal_score=scored.score,
@@ -145,6 +157,11 @@ def detect_copy_signals_from_deltas(
             scored = scored.model_copy(update={"decision": risk.decision, "reasons": [*scored.reasons, *risk.reasons]})
         else:
             signal = signal.model_copy(update={"decision": SignalDecision.PAPER_TRADE, "signal_score": scored.score})
+
+        # Ensure we keep the signal score in the signal object
+        if signal.signal_score == 0.0 and scored.score > 0.0:
+            signal = signal.model_copy(update={"signal_score": scored.score})
+
         signals.append(signal)
         scores.append(scored)
 

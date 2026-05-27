@@ -55,7 +55,7 @@ def test_copy_signal_detector_creates_paper_candidate_from_open_long():
         settings=_settings(),
         followed_wallets=[_leader()],
         now_timestamp_ms=1_000,
-        tuning=CopySignalTuning(leader_expected_move_bps=70.0),
+        tuning=CopySignalTuning(edge_leader_bps=70.0),
     )
 
     assert report.dry_run is True
@@ -84,7 +84,7 @@ def test_copy_signal_detector_requires_positive_edge_remaining():
         settings=_settings(),
         followed_wallets=[_leader()],
         now_timestamp_ms=1_000,
-        tuning=CopySignalTuning(leader_expected_move_bps=5.0),
+        tuning=CopySignalTuning(edge_leader_bps=5.0),
     )
 
     assert report.signals_created == 1

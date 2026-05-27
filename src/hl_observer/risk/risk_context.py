@@ -7,7 +7,7 @@ class AdaptiveRiskContext(BaseModel):
     signal_age_ms: int = 0
     price_moved_bps: float = 0.0
     spread_bps: float = 0.0
-    estimated_slippage_bps: float = 0.0
+    slippage_bps: float = 0.0
     depth_usdc: float = 0.0
     wallet_score: float = 0.0
     wallet_coin_score: float = 0.0

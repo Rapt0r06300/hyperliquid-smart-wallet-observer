@@ -5,7 +5,7 @@ from pydantic import BaseModel
 
 class RiskContext(BaseModel):
     spread_bps: float
-    estimated_slippage_bps: float
+    slippage_bps: float
     orderbook_depth_usdc: float
     wallet_score: float
     signal_score: float
