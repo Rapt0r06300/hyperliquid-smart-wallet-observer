@@ -1,8 +1,9 @@
 from __future__ import annotations
 
 from datetime import datetime
+from enum import StrEnum
 
-from sqlalchemy import Boolean, JSON, DateTime, Float, ForeignKey, Integer, String, Text, UniqueConstraint
+from sqlalchemy import BigInteger, Boolean, JSON, DateTime, Float, ForeignKey, Integer, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from hl_observer.storage.database import Base
@@ -11,6 +12,29 @@ from hl_observer.utils.time import utc_now
 
 class TimestampMixin:
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+
+
+class FreshnessStatus(StrEnum):
+    FRESH = "FRESH"
+    STALE = "STALE"
+    DEAD = "DEAD"
+    UNKNOWN = "UNKNOWN"
+    ABSENT = "ABSENT"
+    DELAYED = "DELAYED"
+    CONTRADICTORY = "CONTRADICTORY"
+
+
+class SourceHealth(Base, TimestampMixin):
+    __tablename__ = "source_health"
+    source_name: Mapped[str] = mapped_column(String(64), primary_key=True)
+    last_event_at_ms: Mapped[int | None] = mapped_column(BigInteger)
+    last_success_at_ms: Mapped[int | None] = mapped_column(BigInteger)
+    seconds_since_last_event: Mapped[int | None] = mapped_column(Integer)
+    observed_latency_ms: Mapped[int | None] = mapped_column(Integer)
+    freshness_status: Mapped[str] = mapped_column(String(32), default=FreshnessStatus.UNKNOWN)
+    is_consistent: Mapped[bool] = mapped_column(Boolean, default=True)
+    is_heartbeat: Mapped[bool] = mapped_column(Boolean, default=False)
+    error_message: Mapped[str | None] = mapped_column(Text)
 
 
 class Wallet(Base, TimestampMixin):

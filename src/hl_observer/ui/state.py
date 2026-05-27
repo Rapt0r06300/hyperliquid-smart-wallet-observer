@@ -27,6 +27,7 @@ class UiState:
     simulation_processed_delta_keys: set[str] = field(default_factory=set)
     simulation_virtual_positions: dict[str, dict[str, Any]] = field(default_factory=dict)
     simulation_ledger_events: list[dict[str, Any]] = field(default_factory=list)
+    source_health_map: dict[str, dict[str, Any]] = field(default_factory=dict)
 
     def add_event(
         self,

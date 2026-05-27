@@ -482,6 +482,30 @@ function renderSimulationOverview(payload) {
     `;
   }
 
+  const healthGrid = $("#simulationHealthGrid");
+  if (healthGrid && payload.source_health) {
+    healthGrid.innerHTML = payload.source_health.map((h) => {
+      const statusClass = h.status?.toLowerCase() || "unknown";
+      const seconds = h.seconds_since !== null ? `${h.seconds_since}s` : "---";
+      const latency = h.latency_ms !== null ? `${h.latency_ms}ms` : "";
+      const errorHint = h.error ? ` title="${escapeHtml(h.error)}"` : "";
+      const statusIcon = h.is_consistent === false ? "⚠️" : "";
+
+      return `
+        <div class="health-pill ${escapeHtml(statusClass)}"${errorHint}>
+          <div class="health-main">
+            <span class="source-name">${escapeHtml(h.source)}</span>
+            <span class="source-status-text">${escapeHtml(h.status)} ${statusIcon}</span>
+          </div>
+          <div class="health-stats">
+            <span class="source-age">${escapeHtml(seconds)}</span>
+            <span class="source-latency">${escapeHtml(latency)}</span>
+          </div>
+        </div>
+      `;
+    }).join("");
+  }
+
   const walletsTarget = $("#simulationWalletsFeed");
   const consensusTarget = $("#simulationConsensusFeed");
   const deltasTarget = $("#simulationDeltasFeed");

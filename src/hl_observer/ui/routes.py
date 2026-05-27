@@ -18,6 +18,7 @@ from hl_observer.copying.realtime_magic_score import (
 )
 from hl_observer.security.safety_audit import run_safety_audit
 from hl_observer.storage.database import create_session_factory, create_sqlite_engine
+from hl_observer.storage.repositories import CollectionRepository
 from hl_observer.storage.models import (
     ApiHealth,
     CollectionRun,
@@ -49,6 +50,8 @@ from hl_observer.storage.models import (
     RawEvent,
     RejectedSignal,
     RiskEvent,
+    SourceHealth,
+    FreshnessStatus,
     Signal,
     SignalScoreModel,
     TopWallet,
@@ -301,6 +304,7 @@ def create_router(settings: Settings, state: UiState, bus: UiEventBus) -> APIRou
         existing_positions: dict[str, dict[str, Any]] | None = None,
         existing_events: list[dict[str, Any]] | None = None,
         processed_delta_keys: set[str] | None = None,
+            health_map: dict[str, SourceHealth] | None = None,
     ) -> dict[str, Any]:
         """Simulate the bot's local no-money decisions from the incoming leader delta stream.
 
@@ -359,6 +363,34 @@ def create_router(settings: Settings, state: UiState, bus: UiEventBus) -> APIRou
             max_position_notional_usdt=max_position_notional_usdt,
             max_total_exposure_usdt=max_position_notional_usdt * 4.0,
         )
+
+        is_data_stale = False
+        stale_sources = []
+        if settings.adaptive_risk_filter.block_if_data_stale and health_map:
+            for src_name, health in health_map.items():
+                if not health.is_consistent:
+                    is_data_stale = True
+                    stale_sources.append(f"{src_name}:CONTRADICTORY")
+                    continue
+
+                if not health.is_heartbeat:
+                    continue
+
+                stale_threshold = settings.adaptive_risk_filter.stale_threshold_seconds
+                dead_threshold = settings.adaptive_risk_filter.dead_threshold_seconds
+
+                # Pro refinement: tighter thresholds for price and public trades
+                if src_name in {"allMids", "hyperliquid_ws_public_trades"}:
+                    stale_threshold = min(stale_threshold, 5)
+                    dead_threshold = min(dead_threshold, 30)
+
+                age = health.seconds_since_last_event or 9999
+                if age >= dead_threshold:
+                    is_data_stale = True
+                    stale_sources.append(f"{src_name}:DEAD({age}s)")
+                elif age >= stale_threshold:
+                    is_data_stale = True
+                    stale_sources.append(f"{src_name}:STALE({age}s)")
 
         chronological = sorted(deltas, key=delta_event_time_ms)
 
@@ -471,12 +503,17 @@ def create_router(settings: Settings, state: UiState, bus: UiEventBus) -> APIRou
             metrics = opportunity_metrics(row, direction)
             event.update(metrics)
             leader_size = abs(float(row.delta_size or row.fill_size or 0.0))
-            if action in {"OPEN_LONG", "OPEN_SHORT", "ADD", "INCREASE"} and metrics["decision_reason"] != "EDGE_OK_FOR_LOCAL_SIMULATION":
-                event["reason"] = str(metrics["decision_reason"])
-                ledger_events.append(event)
-                continue
-
             if action in {"OPEN_LONG", "OPEN_SHORT", "ADD", "INCREASE"}:
+                if is_data_stale:
+                    event["reason"] = f"REJECT_STALE_DATA:{','.join(stale_sources)}"
+                    ledger_events.append(event)
+                    continue
+
+                if metrics["decision_reason"] != "EDGE_OK_FOR_LOCAL_SIMULATION":
+                    event["reason"] = str(metrics["decision_reason"])
+                    ledger_events.append(event)
+                    continue
+
                 desired_notional = float(metrics.get("simulated_notional_usdt") or 0.0)
                 if desired_notional <= 0:
                     event["reason"] = "MAX_EXPOSURE_REACHED"
@@ -652,6 +689,8 @@ def create_router(settings: Settings, state: UiState, bus: UiEventBus) -> APIRou
             "exit_costs_paid_usdc": round(exit_costs_paid, 6),
             "total_costs_paid_usdc": round(entry_costs_paid + exit_costs_paid, 6),
             "cost_model_bps": cost_bps,
+            "is_data_stale": is_data_stale,
+            "stale_sources": stale_sources,
             "magic_profile": {
                 "mode": "fresh_leader_following_simulation",
                 "starting_equity_usdt": starting_equity_usdt,
@@ -1112,12 +1151,25 @@ def create_router(settings: Settings, state: UiState, bus: UiEventBus) -> APIRou
             paper_orders = session.scalars(select(PaperFollowOrder).order_by(PaperFollowOrder.created_at_ms.desc()).limit(limit)).all()
             pnl_fills = session.scalars(select(Fill).where(Fill.closed_pnl.is_not(None)).order_by(Fill.exchange_ts.asc()).limit(500)).all()
             latest_market_snapshot = session.scalars(select(MarketSnapshot).order_by(MarketSnapshot.id.desc()).limit(1)).first()
+            repo = CollectionRepository(session)
+            health_map = repo.get_source_health_map()
             latest_public_trade_event = session.scalars(
                 select(RawEvent)
                 .where(RawEvent.source == "hyperliquid_ws_public_trades")
                 .order_by(RawEvent.fetched_at_ms.desc())
                 .limit(1)
             ).first()
+            if latest_public_trade_event:
+                # Still useful to reflect latest seen from DB, but properly identifying as heartbeat
+                repo.update_source_health(
+                    "hyperliquid_ws_public_trades",
+                    is_success=True,
+                    is_heartbeat=True,
+                    event_timestamp_ms=latest_public_trade_event.fetched_at_ms,
+                )
+                session.commit()
+                health_map = repo.get_source_health_map()
+
             public_trade_wallets_seen = int(
                 session.scalar(
                     select(func.count(func.distinct(WalletCandidateModel.address))).where(
@@ -1258,6 +1310,7 @@ def create_router(settings: Settings, state: UiState, bus: UiEventBus) -> APIRou
             existing_positions=state.simulation_virtual_positions,
             existing_events=state.simulation_ledger_events,
             processed_delta_keys=state.simulation_processed_delta_keys,
+            health_map=health_map,
         )
         state.simulation_virtual_positions = bot_simulation["virtual_positions_state"]
         state.simulation_ledger_events = bot_simulation["ledger_events"]
@@ -1307,6 +1360,20 @@ def create_router(settings: Settings, state: UiState, bus: UiEventBus) -> APIRou
         else:
             readiness = "RESEARCH_SIMULATION_READY"
             next_step = "Comparer edge_remaining_bps, couts, delai et consensus avant toute simulation locale."
+
+        source_health_data = [
+            {
+                "source": h.source_name,
+                "last_event_ms": h.last_event_at_ms,
+                "last_success_ms": h.last_success_at_ms,
+                "seconds_since": h.seconds_since_last_event,
+                "latency_ms": h.observed_latency_ms,
+                "status": h.freshness_status,
+                "is_consistent": h.is_consistent,
+                "error": h.error_message,
+            }
+            for h in health_map.values()
+        ]
 
         return {
             "mode": "LOCAL_RESEARCH_SIMULATION_ONLY",
@@ -1400,6 +1467,7 @@ def create_router(settings: Settings, state: UiState, bus: UiEventBus) -> APIRou
             "magic_profile": bot_simulation["magic_profile"],
             "reproduction": bot_simulation,
             "leaders": leader_cards,
+            "source_health": source_health_data,
             "entry_deltas": entry_deltas[:25],
             "consensus": consensus[:10],
             "public_trade_activity": public_trade_activity[:12],

@@ -395,6 +395,11 @@ async def _record_call(
     except Exception as exc:  # noqa: BLE001 - stored for audit instead of hidden.
         error_message = str(exc)
         result.errors_count += 1
+        repo.update_source_health(
+            f"hyperliquid_info:{item_type}",
+            is_success=False,
+            error_message=error_message,
+        )
         repo.add_collection_item(
             run_id=run_id,
             item_type=item_type,
@@ -431,6 +436,16 @@ async def _record_call(
         coin=coin,
         status="ok",
     )
+    repo.update_source_health(
+        f"hyperliquid_info:{item_type}",
+        is_success=True,
+    )
+    if item_type == "userFills" or item_type.startswith("userFillsByTime"):
+        repo.update_source_health(
+            "leader_fills",
+            is_success=True,
+        )
+
     repo.store_api_health(
         service=f"hyperliquid_info:{item_type}",
         ok=True,

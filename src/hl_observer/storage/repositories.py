@@ -32,6 +32,8 @@ from hl_observer.storage.models import (
     WalletDiscoveryRun,
     WalletDiscoverySourceModel,
     WalletSnapshot,
+    SourceHealth,
+    FreshnessStatus,
 )
 from hl_observer.signals.position_delta_detector import PositionDelta
 from hl_observer.utils.time import now_ms
@@ -114,6 +116,73 @@ class CollectionRepository:
         self.session = session
         self._seen_fill_hashes: set[str] = set()
         self._seen_delta_hashes: set[str] = set()
+
+    def update_source_health(
+        self,
+        source_name: str,
+        *,
+        is_success: bool = True,
+        error_message: str | None = None,
+        event_timestamp_ms: int | None = None,
+        observed_latency_ms: int | None = None,
+        is_consistent: bool = True,
+        is_heartbeat: bool | None = None,
+        stale_threshold_seconds: int = 10,
+        dead_threshold_seconds: int = 60,
+        delayed_threshold_ms: int = 2000,
+    ) -> SourceHealth:
+        now = now_ms()
+        health = self.session.get(SourceHealth, source_name)
+        if health is None:
+            health = SourceHealth(source_name=source_name)
+            if is_heartbeat is not None:
+                health.is_heartbeat = is_heartbeat
+            self.session.add(health)
+
+        if is_success:
+            health.last_success_at_ms = now
+            health.error_message = None
+        else:
+            health.error_message = error_message
+
+        if event_timestamp_ms:
+            health.last_event_at_ms = event_timestamp_ms
+            # Calculate latency if possible
+            if not observed_latency_ms:
+                observed_latency_ms = max(0, now - event_timestamp_ms)
+
+        if observed_latency_ms is not None:
+            health.observed_latency_ms = observed_latency_ms
+
+        health.is_consistent = is_consistent
+
+        effective_event_at = health.last_event_at_ms or health.last_success_at_ms or 0
+        if effective_event_at > 0:
+            diff_ms = max(0, now - effective_event_at)
+            health.seconds_since_last_event = int(diff_ms / 1000)
+        else:
+            health.seconds_since_last_event = None
+
+        # Determine freshness status
+        if not health.is_consistent:
+            health.freshness_status = FreshnessStatus.CONTRADICTORY
+        elif health.seconds_since_last_event is None:
+            health.freshness_status = FreshnessStatus.ABSENT
+        elif health.seconds_since_last_event >= dead_threshold_seconds:
+            health.freshness_status = FreshnessStatus.DEAD
+        elif health.seconds_since_last_event >= stale_threshold_seconds:
+            health.freshness_status = FreshnessStatus.STALE
+        elif health.observed_latency_ms and health.observed_latency_ms >= delayed_threshold_ms:
+            health.freshness_status = FreshnessStatus.DELAYED
+        else:
+            health.freshness_status = FreshnessStatus.FRESH
+
+        self.session.add(health)
+        return health
+
+    def get_source_health_map(self) -> dict[str, SourceHealth]:
+        rows = self.session.query(SourceHealth).all()
+        return {row.source_name: row for row in rows}
 
     def create_collection_run(
         self,
@@ -255,6 +324,7 @@ class CollectionRepository:
     def store_market_snapshot_from_all_mids(self, response_payload: dict[str, Any]) -> MarketSnapshot:
         snapshot = MarketSnapshot(source="allMids", exchange_ts=None, raw_json=response_payload)
         self.session.add(snapshot)
+        self.update_source_health("allMids", is_success=True, is_heartbeat=True)
         return snapshot
 
     def store_orderbook_snapshot(self, coin: str, response_payload: dict[str, Any]) -> OrderbookSnapshot:
@@ -267,6 +337,7 @@ class CollectionRepository:
             raw_json=response_payload,
         )
         self.session.add(snapshot)
+        self.update_source_health("l2Book", is_success=True, is_heartbeat=True)
         return snapshot
 
     def store_market_universe_item(self, item: MarketUniverseItem) -> MarketUniverseModel:
@@ -516,6 +587,11 @@ class CollectionRepository:
         )
         self.session.add(model)
         self._seen_delta_hashes.add(delta_hash)
+        self.update_source_health(
+            "position_deltas",
+            is_success=True,
+            event_timestamp_ms=exchange_ts,
+        )
         return model
 
     def store_position_deltas(self, deltas: list[PositionDelta | PositionDeltaRecord]) -> list[PositionDeltaModel]:

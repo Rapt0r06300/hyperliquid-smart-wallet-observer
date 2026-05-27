@@ -378,6 +378,42 @@ input {
   font: 20px "Cascadia Code", Consolas, monospace;
 }
 
+.simulation-health-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: 8px;
+  margin-bottom: 14px;
+}
+
+.health-pill {
+  padding: 10px 14px;
+  border-radius: 8px;
+  background: rgba(255,255,255,0.02);
+  border: 1px solid rgba(255,255,255,0.08);
+  font-size: 11px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  transition: all 0.2s ease;
+}
+
+.health-pill.fresh { border-color: rgba(0,255,127,0.3); background: rgba(0,255,127,0.04); }
+.health-pill.stale { border-color: rgba(255,165,0,0.4); background: rgba(255,165,0,0.06); }
+.health-pill.delayed { border-color: rgba(255,215,0,0.4); background: rgba(255,215,0,0.06); }
+.health-pill.dead { border-color: rgba(255,69,0,0.5); background: rgba(255,69,0,0.08); }
+.health-pill.contradictory { border-color: var(--magenta); background: rgba(255,0,255,0.05); }
+
+.health-main { display: flex; justify-content: space-between; align-items: center; }
+.health-stats { display: flex; justify-content: space-between; align-items: center; opacity: 0.8; }
+
+.health-pill .source-name { font-weight: 700; color: var(--fg); font-size: 12px; }
+.health-pill .source-status-text { color: var(--muted); font-size: 10px; text-transform: uppercase; letter-spacing: 0.5px; }
+.health-pill .source-age { font-family: "Cascadia Code", monospace; color: var(--cyan); }
+.health-pill .source-latency { font-family: "Cascadia Code", monospace; color: var(--muted); font-size: 10px; }
+
+.health-pill.dead .source-name { color: var(--red); }
+.health-pill.stale .source-name { color: var(--orange); }
+
 .simulation-metric:first-child {
   border-color: rgba(0,255,136,0.45);
   background: linear-gradient(180deg, rgba(0,255,136,0.12), rgba(0,217,255,0.05));
