@@ -670,28 +670,45 @@ function drawSimulationMetaGraph(candles, equity) {
     return;
   }
 
-  const values = candles.flatMap((row) => [row.ha_high, row.ha_low, row.equity_close]);
+  const values = candles.flatMap((row) => [row.ha_high, row.ha_low, row.equity_close, row.equity_open]);
   let minValue = Math.min(...values, 0);
   let maxValue = Math.max(...values, 0);
-  if (minValue === maxValue) {
-    minValue -= 1;
-    maxValue += 1;
-  }
-  const plotLeft = 54;
+  const range = maxValue - minValue;
+  const padding = range * 0.15 || 10;
+  minValue -= padding;
+  maxValue += padding;
+
+  const plotLeft = 64;
   const plotRight = width - 24;
-  const plotTop = 18;
-  const plotBottom = height - 34;
+  const plotTop = 24;
+  const plotBottom = height - 44;
   const plotHeight = plotBottom - plotTop;
   const xStep = (plotRight - plotLeft) / Math.max(1, candles.length);
-  const candleWidth = Math.max(5, Math.min(18, xStep * 0.58));
+  const candleWidth = Math.max(4, Math.min(14, xStep * 0.5));
   const yFor = (value) => plotBottom - ((value - minValue) / (maxValue - minValue)) * plotHeight;
 
+  // Zero Line
   const zeroY = yFor(0);
-  ctx.strokeStyle = "rgba(232,250,255,0.28)";
+  ctx.strokeStyle = "rgba(255,255,255,0.4)";
+  ctx.setLineDash([4, 4]);
   ctx.beginPath();
   ctx.moveTo(plotLeft, zeroY);
   ctx.lineTo(plotRight, zeroY);
   ctx.stroke();
+  ctx.setLineDash([]);
+
+  // Equity Line
+  ctx.strokeStyle = "rgba(0,217,255,0.6)";
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  candles.forEach((row, index) => {
+    const x = plotLeft + index * xStep + xStep / 2;
+    const y = yFor(row.equity_close);
+    if (index === 0) ctx.moveTo(x, y);
+    else ctx.lineTo(x, y);
+  });
+  ctx.stroke();
+  ctx.lineWidth = 1;
 
   const hitboxes = [];
   candles.forEach((row, index) => {
@@ -701,45 +718,81 @@ function drawSimulationMetaGraph(candles, equity) {
     const highY = yFor(row.ha_high);
     const lowY = yFor(row.ha_low);
     const top = Math.min(openY, closeY);
-    const bodyHeight = Math.max(3, Math.abs(closeY - openY));
+    const bodyHeight = Math.max(2, Math.abs(closeY - openY));
     const color = row.color === "green" ? "#00ff88" : "#ff3b5f";
+
+    // Wicks
     ctx.strokeStyle = color;
-    ctx.fillStyle = color;
     ctx.beginPath();
     ctx.moveTo(x, highY);
     ctx.lineTo(x, lowY);
     ctx.stroke();
-    ctx.globalAlpha = 0.86;
+
+    // Body
+    ctx.fillStyle = color;
+    ctx.globalAlpha = 0.6;
     ctx.fillRect(x - candleWidth / 2, top, candleWidth, bodyHeight);
     ctx.globalAlpha = 1;
+
+    // Action Markers
+    const action = row.action_type || "";
+    if (action.includes("ENTRY") || action.includes("ADD") || action.includes("JOIN")) {
+      ctx.fillStyle = "#00ff88";
+      ctx.beginPath();
+      ctx.moveTo(x, lowY + 8);
+      ctx.lineTo(x - 4, lowY + 16);
+      ctx.lineTo(x + 4, lowY + 16);
+      ctx.fill();
+    } else if (action.includes("CLOSE") || action.includes("REDUCE")) {
+      ctx.strokeStyle = "#ffffff";
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.moveTo(x - 4, highY - 12);
+      ctx.lineTo(x + 4, highY - 4);
+      ctx.moveTo(x + 4, highY - 12);
+      ctx.lineTo(x - 4, highY - 4);
+      ctx.stroke();
+      ctx.lineWidth = 1;
+    }
+
     hitboxes.push({ x, row });
   });
 
   ctx.fillStyle = "#8aa0b6";
-  ctx.font = "12px Cascadia Code, Consolas, monospace";
-  ctx.fillText(formatUsd(maxValue), 8, plotTop + 10);
-  ctx.fillText(formatUsd(minValue), 8, plotBottom);
-  const current = Number(equity.current_pnl_usdc || candles[candles.length - 1].equity_close || 0);
+  ctx.font = "11px Cascadia Code, Consolas, monospace";
+  ctx.fillText(formatUsd(maxValue), 8, plotTop + 4);
+  ctx.fillText(formatUsd(minValue), 8, plotBottom + 12);
+  const current = Number(equity.current_pnl_usdc || (candles.length ? candles[candles.length - 1].equity_close : 0));
   state.textContent = `PNL ${formatUsd(current)}`;
   state.className = `badge ${current >= 0 ? "green" : "red"}`;
 
   canvas.onmousemove = (event) => {
     const bounds = canvas.getBoundingClientRect();
-    const mouseX = event.clientX - bounds.left;
+    const mouseX = (event.clientX - bounds.left) * (width / bounds.width);
     let nearest = hitboxes[0];
     for (const item of hitboxes) {
       if (Math.abs(item.x - mouseX) < Math.abs(nearest.x - mouseX)) nearest = item;
     }
     if (!nearest) return;
     const row = nearest.row;
+    const dateStr = new Date(row.timestamp_ms).toLocaleTimeString();
+
     tooltip.classList.remove("hidden");
-    tooltip.style.left = `${Math.min(width - 250, Math.max(8, mouseX + 14))}px`;
+    tooltip.style.left = `${Math.min(width - 280, Math.max(8, (nearest.x * bounds.width / width) + 14))}px`;
     tooltip.style.top = `${Math.max(8, event.clientY - bounds.top - 18)}px`;
     tooltip.innerHTML = `
-      <strong>${escapeHtml(row.coin)} ${escapeHtml(shortAddress(row.wallet_address))}</strong><br>
-      PnL: ${escapeHtml(formatUsd(row.pnl_usdc))}<br>
-      Equity: ${escapeHtml(formatUsd(row.equity_close))}<br>
-      Source: ${escapeHtml(row.source)}
+      <div style="border-bottom:1px solid rgba(255,255,255,0.1);padding-bottom:4px;margin-bottom:4px;">
+        <strong>${escapeHtml(row.coin)} ${escapeHtml(shortAddress(row.wallet_address || ""))}</strong>
+        <span style="float:right;opacity:0.6">${escapeHtml(dateStr)}</span>
+      </div>
+      Action: <span class="cyan">${escapeHtml(row.action_type || "MARK_TO_MARKET")}</span><br>
+      Delta P&L: <span class="${row.pnl_usdc >= 0 ? "green" : "red"}">${escapeHtml(formatUsd(row.pnl_usdc))}</span><br>
+      Equity Before: ${escapeHtml(formatUsd(row.equity_open))}<br>
+      Equity After: <strong>${escapeHtml(formatUsd(row.equity_close))}</strong>
+      <span style="opacity:0.6;font-size:0.9em">(${row.is_unrealized ? "latent" : "réalisé"})</span><br>
+      Coûts: ${escapeHtml(formatUsd(row.costs || 0))}<br>
+      ID: <span style="font-family:monospace;font-size:0.85em;opacity:0.7">${escapeHtml(row.position_id || "-")}</span><br>
+      <em>${escapeHtml(row.reason || "")}</em>
     `;
   };
   canvas.onmouseleave = () => tooltip.classList.add("hidden");

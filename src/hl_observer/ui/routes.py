@@ -328,7 +328,7 @@ def create_router(settings: Settings, state: UiState, bus: UiEventBus) -> APIRou
                 f"{row.delta_type}:{row.previous_size}:{row.new_size}:{row.delta_size}:{row.price}"
             )
 
-        positions: dict[tuple[str, str, str], dict[str, float]] = {}
+        positions: dict[tuple[str, str, str], dict[str, Any]] = {}
         for raw_key, raw_position in (existing_positions or {}).items():
             decoded = decode_position_key(str(raw_key))
             if decoded is None or not isinstance(raw_position, dict):
@@ -337,6 +337,7 @@ def create_router(settings: Settings, state: UiState, bus: UiEventBus) -> APIRou
                 "size": float(raw_position.get("size") or 0.0),
                 "avg_price": float(raw_position.get("avg_price") or 0.0),
                 "entry_costs": float(raw_position.get("entry_costs") or 0.0),
+                "position_id": str(raw_position.get("position_id") or f"pos_{raw_key}"),
             }
         ledger_events: list[dict[str, Any]] = [
             dict(row)
@@ -485,7 +486,12 @@ def create_router(settings: Settings, state: UiState, bus: UiEventBus) -> APIRou
                 size = desired_notional / float(row.price)
                 notional = desired_notional
                 cost = notional * cost_bps / 10_000.0
-                previous = positions.get(key, {"size": 0.0, "avg_price": 0.0, "entry_costs": 0.0})
+                previous = positions.get(key, {"size": 0.0, "avg_price": 0.0, "entry_costs": 0.0, "position_id": None})
+
+                position_id = previous["position_id"]
+                if position_id is None:
+                     position_id = f"pos_{current_delta_key}"
+
                 if action in {"ADD", "INCREASE"} and previous["size"] <= 0:
                     if len(positions) >= max_open_positions:
                         event["reason"] = "MAX_VIRTUAL_POSITIONS_REACHED"
@@ -507,6 +513,7 @@ def create_router(settings: Settings, state: UiState, bus: UiEventBus) -> APIRou
                     "size": new_size,
                     "avg_price": avg_price,
                     "entry_costs": previous["entry_costs"] + cost,
+                    "position_id": position_id,
                 }
                 replay_action = "PAPER_ENTRY_REPLAYED" if action.startswith("OPEN") else "PAPER_ADD_REPLAYED"
                 if event["bot_replay_action"] == "PAPER_JOIN_ADD_AS_ENTRY":
@@ -519,6 +526,7 @@ def create_router(settings: Settings, state: UiState, bus: UiEventBus) -> APIRou
                         "fee_cost_usdc": round(cost, 6),
                         "bot_position_size_after": round(new_size, 10),
                         "copied_notional_usdt": round(notional, 6),
+                        "position_id": position_id,
                         "reason": event.get("reason") or "LOCAL_REPLAY_ONLY_EDGE_GATE_REQUIRED_FOR_REAL_PAPER_INTENT",
                     }
                 )
@@ -531,6 +539,7 @@ def create_router(settings: Settings, state: UiState, bus: UiEventBus) -> APIRou
                     event["reason"] = "NO_MATCHING_PAPER_POSITION_FOR_CLOSE"
                     ledger_events.append(event)
                     continue
+                position_id = previous["position_id"]
                 size = abs(float(row.delta_size or row.fill_size or previous["size"]))
                 close_size = previous["size"] if action.startswith("CLOSE") or size <= 0 else min(previous["size"], size)
                 if direction == "LONG":
@@ -560,6 +569,7 @@ def create_router(settings: Settings, state: UiState, bus: UiEventBus) -> APIRou
                         "fee_cost_usdc": round(exit_cost, 6),
                         "bot_position_size_after": round(remaining_size, 10),
                         "copied_notional_usdt": round(close_size * float(row.price), 6),
+                        "position_id": position_id,
                         "reason": "LOCAL_REPLAY_ONLY_NOT_AN_ORDER",
                     }
                 )
@@ -604,6 +614,7 @@ def create_router(settings: Settings, state: UiState, bus: UiEventBus) -> APIRou
                 "size": round(float(position["size"]), 12),
                 "avg_price": round(float(position["avg_price"]), 12),
                 "entry_costs": round(float(position["entry_costs"]), 12),
+                "position_id": position["position_id"],
             }
         open_positions.sort(key=lambda item: abs(float(item["unrealized_pnl_usdc"])), reverse=True)
         ledger_events = ledger_events[-max_events:]
@@ -668,7 +679,7 @@ def create_router(settings: Settings, state: UiState, bus: UiEventBus) -> APIRou
             "message": "Simulation locale sans argent: le bot suit le flux de deltas leaders frais, exige un edge mesurable, applique les couts, sans ordre ni garantie.",
         }
 
-    def build_bot_equity_candles(events: list[dict[str, Any]], *, max_points: int = 120) -> list[dict[str, Any]]:
+    def build_bot_equity_candles(events: list[dict[str, Any]], *, max_points: int = 500) -> list[dict[str, Any]]:
         pnl_events = [
             row
             for row in sorted(events, key=lambda item: item.get("observed_at_ms") or 0)
@@ -681,18 +692,29 @@ def create_router(settings: Settings, state: UiState, bus: UiEventBus) -> APIRou
         previous_ha_open: float | None = None
         previous_ha_close: float | None = None
         for index, row in enumerate(pnl_events):
-            pnl = float(row.get("estimated_net_pnl_usdc") or 0.0)
+            raw_pnl = row.get("estimated_net_pnl_usdc")
+            pnl = float(raw_pnl if raw_pnl is not None else 0.0)
             open_value = equity
             close_value = equity + pnl
             high_value = max(open_value, close_value)
             low_value = min(open_value, close_value)
-            ha_close = (open_value + high_value + low_value + close_value) / 4.0
-            ha_open = (open_value + close_value) / 2.0 if previous_ha_open is None else (previous_ha_open + previous_ha_close) / 2.0
-            ha_high = max(high_value, ha_open, ha_close)
-            ha_low = min(low_value, ha_open, ha_close)
+
+            # Standard candle values
+            c_open = open_value
+            c_close = close_value
+            c_high = high_value
+            c_low = low_value
+
+            # Heikin-Ashi candle values
+            ha_close = (c_open + c_high + c_low + c_close) / 4.0
+            ha_open = (c_open + c_close) / 2.0 if previous_ha_open is None else (previous_ha_open + previous_ha_close) / 2.0
+            ha_high = max(c_high, ha_open, ha_close)
+            ha_low = min(c_low, ha_open, ha_close)
+
             equity = close_value
             previous_ha_open = ha_open
             previous_ha_close = ha_close
+
             candles.append(
                 {
                     "index": index,
@@ -702,12 +724,21 @@ def create_router(settings: Settings, state: UiState, bus: UiEventBus) -> APIRou
                     "pnl_usdc": round(pnl, 6),
                     "equity_open": round(open_value, 6),
                     "equity_close": round(close_value, 6),
+                    "open": round(c_open, 6),
+                    "close": round(c_close, 6),
+                    "high": round(c_high, 6),
+                    "low": round(c_low, 6),
                     "ha_open": round(ha_open, 6),
                     "ha_high": round(ha_high, 6),
                     "ha_low": round(ha_low, 6),
                     "ha_close": round(ha_close, 6),
                     "color": "green" if pnl >= 0 else "red",
                     "source": row.get("bot_replay_action") or "local_reproduction_replay",
+                    "action_type": row.get("bot_replay_action"),
+                    "reason": row.get("reason"),
+                    "position_id": row.get("position_id"),
+                    "costs": round(float(row.get("fee_cost_usdc") or 0.0), 6),
+                    "is_unrealized": row.get("bot_replay_action") == "MARK_TO_MARKET",
                 }
             )
         return candles
