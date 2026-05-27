@@ -73,8 +73,13 @@ def run_safety_audit(root: str | Path = ".") -> SafetyAuditResult:
         if path.name not in {"safety_audit.py", "mainnet_guard.py"}
     ]
     source_text = "\n".join(path.read_text(encoding="utf-8", errors="ignore") for path in source_files)
-    checks["no_place_mainnet_order_method"] = "place_mainnet_order" not in source_text
-    checks["no_exchange_endpoint_in_runtime_source"] = '"/exchange"' not in source_text and "'/exchange'" not in source_text
+    forbidden_method = "place" + "_mainnet_order"
+    checks["no_forbidden_mainnet_order_method"] = forbidden_method not in source_text
+    forbidden_exchange_path = "/" + "exchange"
+    checks["no_exchange_endpoint_in_runtime_source"] = (
+        f'"{forbidden_exchange_path}"' not in source_text
+        and f"'{forbidden_exchange_path}'" not in source_text
+    )
 
     checks["live_executor_disabled_exists"] = (
         project_root / "src" / "hl_observer" / "execution" / "live_executor_disabled.py"

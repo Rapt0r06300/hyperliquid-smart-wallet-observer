@@ -1,6 +1,13 @@
 wallets:
+  watchlist: []
+  discovery_sources: []
   candidates: []
   shortlist: []
-  notes:
-    - Add public Hyperliquid wallet addresses only.
-    - Never store private keys or seed phrases here.
+  notes: "Ajouter ici des wallets Hyperliquid publics a observer en lecture seule. Ne jamais stocker de cle privee ou seed phrase."
+
+wallet_analysis:
+  analyze_all_coins: true
+  per_coin_metrics: true
+  include_altcoins: true
+  ignore_unknown_coins: false
+  min_coin_fills_for_score: 3

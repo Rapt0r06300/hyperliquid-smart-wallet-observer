@@ -2061,3 +2061,162 @@ exit plan required
 pytest passed
 safety-audit passed
 ```
+
+---
+
+## Regle UI locale
+
+Toute action declenchee depuis l'interface locale doit passer par
+`src/hl_observer/ui/safe_actions.py`.
+
+Regles obligatoires :
+
+```text
+- aucun bouton mainnet ;
+- aucun bouton live trading ;
+- aucun bouton retrait ;
+- aucune commande shell libre ;
+- allowlist stricte des actions UI ;
+- localhost uniquement dans le MVP ;
+- testnet toujours verrouille par defaut ;
+- kill switch visible et prioritaire.
+```
+
+## Regle discovery automatique
+
+- La discovery automatique des wallets est autorisee uniquement en lecture seule.
+- Les sources externes sont des indices de discovery, pas une verite absolue.
+- Revalider via Hyperliquid `/info` quand c'est possible.
+- Ne jamais inventer de wallet.
+- Ne jamais inventer de PnL ou ROI.
+- Ne jamais masquer une source en echec : loguer et afficher clairement l'indisponibilite.
+- Ne jamais scraper sans timeout, garde-fous et tests.
+- Ne jamais contourner authentification, rate limits ou protections d'une source.
+- Aucune discovery ne doit appeler `/exchange`, placer un ordre, demander un secret ou activer le testnet.
+## Regles multi-assets
+
+- Ne jamais coder un scanner BTC-only. BTC est un fallback/test, pas la limite du projet.
+- Toute collecte marche doit accepter plusieurs coins et pouvoir inclure les altcoins Hyperliquid.
+- Tout backfill wallet doit conserver les fills tous coins et reconstruire positions/deltas par wallet + coin.
+- Tout scoring wallet doit prevoir un score global et un score wallet + coin.
+- Toute UI doit parler de marches/coins/altcoins, pas seulement de BTC.
+- Les altcoins sont actives par defaut avec filtres de liquidite, spread et copiabilite.
+- Si un coin est illiquide ou non copiable, le rejeter explicitement avec une raison; ne pas l'ignorer silencieusement.
+- Ne jamais utiliser `/exchange`, ordre reel, retrait, secret, cle privee ou execution mainnet pour le scan multi-assets.
+
+## Regles V6 leaderboard, Top 500 et anti-fake
+
+- Verifier la documentation officielle et se remettre en question avant toute grosse modification.
+- Le leaderboard Hyperliquid est la source prioritaire de discovery, mais reste un hint externe.
+- Une adresse tronquee est un rejet absolu.
+- Ne jamais completer une adresse tronquee.
+- Ne jamais inventer wallet, PnL, ROI, Account Value, volume, prix, fill ou position.
+- Revalider via Hyperliquid `/info` quand possible.
+- Ne jamais accepter une adresse contenant `...`.
+- Ne jamais utiliser un screenshot comme source de verite wallet.
+- Ne jamais coder BTC-only; tous les scanners doivent accepter plusieurs coins et altcoins avec filtres.
+- Scanner un maximum de wallets uniquement via file progressive, bornes de batch et statuts explicites.
+- Ne jamais scanner en boucle infinie ni depasser les limites configurees.
+- Analyser ouvertures, fermetures, profits, styles, playbooks et follow signals en lecture seule ou paper uniquement.
+- Ne jamais ecrire qu'un pattern gagne toujours.
+- Ne jamais promouvoir un pattern sans echantillon suffisant.
+- Le mode simple est par defaut; le mode expert reste cache et organise par missions.
+- Tout bouton visible doit fonctionner via `safe_actions.py` ou etre desactive avec raison.
+- Aucun bouton mainnet, live, withdraw ou place real order.
+- Aucun endpoint `/exchange`.
+
+## Regles V7 autoscan, Explorer et UI honnete
+
+- L'UI ne doit jamais mentir : aucun faux scan, aucun compteur decoratif, aucune source en echec masquee.
+- L'auto-scan doit essayer les sources disponibles et afficher le resultat de chaque etape.
+- Le leaderboard reste une source majeure de ranking; l'Explorer est une source majeure de transactions et d'activite.
+- L'Explorer ne doit etre lu qu'en public, sans login, sans session privee, sans contournement et avec timeout.
+- Les requetes Explorer doivent rester bornees et respecter le poids de rate limit documente.
+- Une transaction Explorer sans adresse complete ne cree jamais de candidat.
+- Une adresse tronquee ne devient jamais candidate, top wallet, scan queue, signal ou backfill.
+- L'import local leaderboard/explorer est le fallback obligatoire quand l'extraction publique ne donne pas de full address.
+- Le Top 500 doit rester honnete et incomplet si moins de 500 wallets complets existent.
+- Tous les boutons visibles doivent avoir un handler safe ou etre desactives avec une raison claire.
+- Le mode simple reste prioritaire; le mode expert est cache et organise par missions.
+- Aucun endpoint runtime, bouton ou action UI ne doit appeler `/exchange`, mainnet, live, withdraw ou place real order.
+
+## HyperSmart Observer Agent Rules
+
+These rules apply to the `hyper_smart_observer/` Sprint 1 package and all future
+work on HyperSmart Observer.
+
+- Never activate mainnet execution.
+- Never add MEXC, Polymarket, Binance, Bybit, OKX or a CEX connector as an execution target.
+- Never remove or bypass `app/safety.py`.
+- Never remove or bypass `risk_engine`.
+- Never create a guaranteed-profit or no-loss trading claim.
+- Never log, store or hardcode a private key, seed phrase or secret.
+- Always preserve deny-by-default behavior.
+- Always prefer research and paper simulation before any locked testnet work.
+- Always require explicit `--confirm-testnet-only` for any future testnet execution path.
+- Always refuse if data is insufficient or configuration is ambiguous.
+- Always keep real capital outside the project scope.
+- Always add or update tests when changing safety, execution, risk gates or config.
+
+### Sprint 2 read-only rules
+
+- HyperSmart network code may only use the Hyperliquid info endpoint.
+- Network reads must be explicit; do not start collection silently.
+- Temporal pagination must be bounded and must stop on empty or non-progressing pages.
+- Store incomplete data honestly; never infer missing fills or positions.
+- Do not add signatures, order placement, cancellation, transfer or faucet automation.
+
+### Sprint 3 scoring rules
+
+- Scoring must use local SQLite data only; do not add network calls to score a wallet.
+- A wallet score is not a trading signal and must never trigger execution.
+- Never convert a score threshold into an order, copy-trade action or testnet action.
+- Never write "copy this wallet" as an instruction; use research/observation language.
+- If fills, closed PnL points or history are insufficient, mark the score as insufficient.
+- Never invent PnL, ROI, entry, exit, fee, position or closed trade data.
+- Store rejected/insufficient scores with explicit reasons when configured.
+- Keep the risk engine deny-by-default and observation-only for scored wallets.
+
+### Sprint 4 paper simulation rules
+
+- Paper trading is local simulation only; it is not testnet and not execution.
+- Never transform a `PaperIntent` or `PaperTrade` into an external order.
+- Do not add a testnet executor in Sprint 4.
+- Do not write "trade recommended", "buy now", "sell now" or equivalent wording.
+- Every paper intent must pass the risk engine before a paper trade is opened.
+- Every refusal must be journaled when configured.
+- Every simulation must include fees, spread, slippage and latency assumptions.
+- If a wallet score is missing, insufficient or not `SCORED`, refuse paper simulation.
+- Paper CLI output must say local paper simulation only and must not imply an order was sent.
+
+### Long-run runtime, archive and observer rules
+
+- Keep active SQLite databases out of `logs/`; HyperSmart runtime DBs belong in `data/`.
+- Never zip or copy a live SQLite DB as part of a source archive.
+- Clean archives must exclude `logs/`, `data/`, DB/WAL/SHM files, caches, virtualenvs, archives and `.env`.
+- Explorer observer is read-only, experimental and disabled by default.
+- WebSocket monitor is read-only, disabled by default and must remain bounded.
+- Dashboard exports are read-only; never add trade, buy, sell, execute, copy-trade, connect-wallet or private-key controls.
+- Discovery, lifecycle, ranking, patterns and backtests are research-only.
+- Ambiguous position actions must stay `UNKNOWN`.
+- If a route or command resembles trade/order/execute/exchange, refuse it.
+
+### Batch 1 copy observer rules
+
+- The copy observer is a three-job research pipeline: leaderboard shortlist, dry-run copy loop, and reports/no-trade dashboard.
+- Default polling is 300 seconds and must remain bounded/configurable.
+- Copy mode is `PAPER_MOCK_USDC` by default; do not add a testnet executor in this batch.
+- `edge_remaining_bps` is mandatory; reject or no-trade any candidate with non-positive or insufficient edge after fees, spread, slippage, latency and liquidity degradation.
+- Reject wallets whose PnL is too concentrated in one big trade; do not promote one-big-win wallets.
+- Classify leader deltas as `OPEN_LONG`, `OPEN_SHORT`, `ADD`, `INCREASE`, `REDUCE`, `CLOSE_LONG`, `CLOSE_SHORT` or `UNKNOWN`; reduce/close is not an entry.
+- Always produce a no-trade reason when a copy candidate is refused.
+- Do not put an LLM in the hot path for copy detection, risk decisions or paper simulation.
+- Never write "copy this wallet", "buy", "sell", "execute" or equivalent user-facing language.
+
+### Copy mode Batch 1-6 rules
+
+- Batch 1-5 may add discovery, deltas, no-trade reporting, read-only WS planning, replay/backtesting and dashboard UX only.
+- Batch 6 is documentation/stub/refusal only. Do not implement a working testnet executor without a future explicit sprint.
+- `copy-run` must remain dry-run/read-only by default and must not require a private key, signature or wallet connection.
+- `promote-testnet-candidates` must not promote anything in this batch; it must explain that testnet is locked.
+- No UI element may create a trade/order/execution or request a private key.

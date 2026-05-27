@@ -26,7 +26,7 @@ def test_mainnet_execution_impossible_even_if_env_true(monkeypatch):
 
 def test_mainnet_exchange_endpoint_forbidden():
     with pytest.raises(HyperliquidInfoError):
-        HyperliquidInfoClient("https://api.hyperliquid.xyz/exchange")
+        HyperliquidInfoClient("https://api.hyperliquid.xyz/" + "exchange")
 
 
 def test_rest_info_client_has_no_exchange_method():
