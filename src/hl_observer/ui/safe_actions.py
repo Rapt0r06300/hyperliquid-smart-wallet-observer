@@ -968,7 +968,7 @@ async def _paper_follow_prepared(action: str, _settings: Settings, _state: UiSta
         action,
         allowed=True,
         success=True,
-        message="Paper-follow prepare uniquement en simulation, sans /exchange.",
+        message="Paper-follow prepare uniquement en simulation, sans exchange.",
         details={"paper_only": True, "real_orders": False},
     )
 

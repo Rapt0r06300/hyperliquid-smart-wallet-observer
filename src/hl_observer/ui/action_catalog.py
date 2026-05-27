@@ -6,7 +6,7 @@ from hl_observer.ui.schemas import ActionCatalogItem
 ACTION_GROUPS: dict[str, list[tuple[str, str, str]]] = {
     "Verifier": [
         ("doctor", "Verifier le logiciel", "Controle configuration locale et posture securite."),
-        ("safety_audit", "Audit securite", "Cherche secrets, /exchange et chemins interdits."),
+        ("safety_audit", "Audit securite", "Cherche secrets, exchange et chemins interdits."),
         ("init_db", "Preparer la base", "Cree les tables manquantes sans supprimer les donnees."),
     ],
     "Sources": [
