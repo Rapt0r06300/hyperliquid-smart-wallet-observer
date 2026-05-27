@@ -22,6 +22,12 @@ class PositionAction(StrEnum):
     UNKNOWN = "UNKNOWN"
 
 
+class ConfidenceLevel(StrEnum):
+    HIGH = "HIGH"
+    MEDIUM = "MEDIUM"
+    UNKNOWN = "UNKNOWN"
+
+
 class PositionDeltaRecord(BaseModel):
     wallet_address: str
     coin: str
@@ -39,6 +45,10 @@ class PositionDeltaRecord(BaseModel):
     price: float | None = None
     fill_size: float | None = None
     confidence_score: float = 0.0
+    confidence_level: ConfidenceLevel = ConfidenceLevel.UNKNOWN
+    warnings: list[str] = Field(default_factory=list)
+    reason: str | None = None
+    source_evidence: dict[str, Any] = Field(default_factory=dict)
     source: str = "user_fills"
     notes: list[str] = Field(default_factory=list)
     raw: dict[str, Any] = Field(default_factory=dict)

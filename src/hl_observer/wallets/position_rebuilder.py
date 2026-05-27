@@ -8,14 +8,16 @@ from hl_observer.wallets.position_delta_engine import (
     PositionAction,
     PositionDeltaRecord,
     PositionSide,
-    build_position_delta_from_fill,
+    ConfidenceLevel,
     fill_coin,
     fill_price,
     fill_size,
     fill_timestamp,
     position_side,
     start_position,
+    signed_fill_size,
 )
+from hl_observer.wallets.snapshot_engine import IntelligentDeltaDetector
 
 
 class RebuiltPosition(BaseModel):
@@ -64,6 +66,7 @@ def rebuild_positions_from_fills(wallet_address: str, fills: list[dict[str, Any]
     states: dict[str, _CoinState] = {}
     deltas: list[PositionDeltaRecord] = []
     global_notes: list[str] = []
+    detector = IntelligentDeltaDetector()
 
     for fill in sorted_fills:
         coin = fill_coin(fill)
@@ -71,13 +74,22 @@ def rebuild_positions_from_fills(wallet_address: str, fills: list[dict[str, Any]
         previous_size = start_position(fill)
         if previous_size is None:
             previous_size = state.size
-        delta = build_position_delta_from_fill(wallet_address, fill, previous_size=previous_size)
+
+        # We need a new_size to use the detector.
+        # From a fill, new_size = previous_size + signed_fill_size
+        s_size = signed_fill_size(fill)
+        if s_size is not None:
+            new_size = previous_size + s_size
+        else:
+            new_size = previous_size
+
+        delta = detector.detect(wallet_address, coin, previous_size, new_size, fill=fill)
         deltas.append(delta)
         state.confidence_scores.append(delta.confidence_score)
         state.notes.extend(delta.notes)
         state.last_raw = fill
 
-        if delta.action == PositionAction.UNKNOWN:
+        if delta.action == PositionAction.UNKNOWN or delta.confidence_level == ConfidenceLevel.UNKNOWN:
             global_notes.extend(delta.notes)
             state.last_px = fill_price(fill) or state.last_px
             state.updated_at_ms = delta.exchange_ts or state.updated_at_ms
@@ -128,7 +140,7 @@ def _position_from_state(wallet_address: str, coin: str, state: _CoinState) -> R
         else 0.0
     )
     status = "OPEN" if side in {PositionSide.LONG, PositionSide.SHORT} else "CLOSED"
-    if confidence < 0.5 or "direction_unclear" in state.notes:
+    if confidence < 0.5 or "direction_unclear" in state.notes or "flip_detected_as_unknown" in state.notes:
         status = "INCOMPLETE"
     notional = abs(state.size) * state.last_px if state.last_px is not None else None
     return RebuiltPosition(
