@@ -122,7 +122,7 @@ def _safe_position_payload(positions: dict[str, dict]) -> dict[str, dict]:
         safe[str(key)] = {
             item_key: item_value
             for item_key, item_value in value.items()
-            if isinstance(item_value, (str, int, float, bool)) or item_value is None
+            if isinstance(item_value, (str, int, float, bool, list)) or item_value is None
         }
     return safe
 

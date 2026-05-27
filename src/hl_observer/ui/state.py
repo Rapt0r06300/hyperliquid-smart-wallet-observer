@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any
 
-from hl_observer.ui.schemas import UiEvent, UiLogLine
+from hl_observer.ui.schemas import UiEvent, UiLogLine, VirtualPosition
 from hl_observer.utils.time import now_ms
 
 
@@ -25,7 +25,7 @@ class UiState:
     simulation_started_at_ms: int = field(default_factory=now_ms)
     simulation_starting_equity_usdt: float = 1000.0
     simulation_processed_delta_keys: set[str] = field(default_factory=set)
-    simulation_virtual_positions: dict[str, dict[str, Any]] = field(default_factory=dict)
+    simulation_virtual_positions: dict[str, VirtualPosition | dict[str, Any]] = field(default_factory=dict)
     simulation_ledger_events: list[dict[str, Any]] = field(default_factory=list)
 
     def add_event(

@@ -580,7 +580,8 @@ function renderSimulationOverview(payload) {
           <span class="${pnl >= 0 ? "green" : "red"}">[${escapeHtml(row.direction)}]</span>
           ${escapeHtml(shortAddress(row.wallet_address))} :: ${escapeHtml(row.coin)} ::
           size ${escapeHtml(row.size)} :: entry ${escapeHtml(row.avg_entry_price)} :: mark ${escapeHtml(row.mark_price)} ::
-          ${escapeHtml(formatUsd(pnl))}
+          real ${escapeHtml(formatUsd(row.realized_pnl_usdc || 0))} ::
+          lat ${escapeHtml(formatUsd(pnl))}
         </div>
       `;
     }).join("")

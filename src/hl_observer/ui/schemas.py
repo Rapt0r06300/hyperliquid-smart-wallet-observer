@@ -91,6 +91,24 @@ class ActionCatalogItem(BaseModel):
     test_id: str
 
 
+class VirtualPosition(BaseModel):
+    position_id: str
+    wallet_address: str
+    coin: str
+    direction: Literal["LONG", "SHORT"]
+    entry_at_ms: int
+    entry_price: float
+    size: float
+    avg_price: float
+    notional_usdc: float
+    fees_usdc: float
+    realized_pnl_usdc: float = 0.0
+    unrealized_pnl_usdc: float = 0.0
+    status: str = "OPEN"
+    close_reason: str | None = None
+    source_delta_ids: list[str] = Field(default_factory=list)
+
+
 class UiStatus(BaseModel):
     app_name: str
     version: str

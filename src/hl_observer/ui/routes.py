@@ -328,15 +328,26 @@ def create_router(settings: Settings, state: UiState, bus: UiEventBus) -> APIRou
                 f"{row.delta_type}:{row.previous_size}:{row.new_size}:{row.delta_size}:{row.price}"
             )
 
-        positions: dict[tuple[str, str, str], dict[str, float]] = {}
+        positions: dict[tuple[str, str, str], dict[str, Any]] = {}
         for raw_key, raw_position in (existing_positions or {}).items():
             decoded = decode_position_key(str(raw_key))
             if decoded is None or not isinstance(raw_position, dict):
                 continue
             positions[decoded] = {
+                "position_id": str(raw_position.get("position_id") or f"pos:{raw_key}"),
+                "wallet_address": str(raw_position.get("wallet_address") or decoded[0]),
+                "coin": str(raw_position.get("coin") or decoded[1]),
+                "direction": str(raw_position.get("direction") or decoded[2]),
+                "entry_at_ms": int(raw_position.get("entry_at_ms") or current_ms),
+                "entry_price": float(raw_position.get("entry_price") or raw_position.get("avg_price") or 0.0),
                 "size": float(raw_position.get("size") or 0.0),
                 "avg_price": float(raw_position.get("avg_price") or 0.0),
-                "entry_costs": float(raw_position.get("entry_costs") or 0.0),
+                "notional_usdc": float(raw_position.get("notional_usdc") or 0.0),
+                "fees_usdc": float(raw_position.get("fees_usdc") or raw_position.get("entry_costs") or 0.0),
+                "realized_pnl_usdc": float(raw_position.get("realized_pnl_usdc") or 0.0),
+                "status": str(raw_position.get("status") or "OPEN"),
+                "close_reason": raw_position.get("close_reason"),
+                "source_delta_ids": list(raw_position.get("source_delta_ids") or []),
             }
         ledger_events: list[dict[str, Any]] = [
             dict(row)
@@ -485,29 +496,49 @@ def create_router(settings: Settings, state: UiState, bus: UiEventBus) -> APIRou
                 size = desired_notional / float(row.price)
                 notional = desired_notional
                 cost = notional * cost_bps / 10_000.0
-                previous = positions.get(key, {"size": 0.0, "avg_price": 0.0, "entry_costs": 0.0})
-                if action in {"ADD", "INCREASE"} and previous["size"] <= 0:
+                previous = positions.get(key)
+                is_new = previous is None or previous["size"] <= 0
+                if action in {"ADD", "INCREASE"} and is_new:
                     if len(positions) >= max_open_positions:
                         event["reason"] = "MAX_VIRTUAL_POSITIONS_REACHED"
                         ledger_events.append(event)
                         continue
                     event["bot_replay_action"] = "PAPER_JOIN_ADD_AS_ENTRY"
                     event["reason"] = "JOINED_LEADER_ADD_WITH_SMALL_CAPPED_POSITION"
-                elif len(positions) >= max_open_positions and previous["size"] <= 0:
+                elif len(positions) >= max_open_positions and is_new:
                     event["reason"] = "MAX_VIRTUAL_POSITIONS_REACHED"
                     ledger_events.append(event)
                     continue
-                new_size = previous["size"] + size
-                avg_price = (
-                    ((previous["avg_price"] * previous["size"]) + (float(row.price) * size)) / new_size
-                    if new_size > 0
-                    else float(row.price)
-                )
-                positions[key] = {
-                    "size": new_size,
-                    "avg_price": avg_price,
-                    "entry_costs": previous["entry_costs"] + cost,
-                }
+
+                if is_new:
+                    pos_id = f"vpos-{current_delta_key}"
+                    positions[key] = {
+                        "position_id": pos_id,
+                        "wallet_address": row.wallet_address,
+                        "coin": row.coin,
+                        "direction": direction,
+                        "entry_at_ms": delta_event_time_ms(row),
+                        "entry_price": float(row.price),
+                        "size": size,
+                        "avg_price": float(row.price),
+                        "notional_usdc": notional,
+                        "fees_usdc": cost,
+                        "realized_pnl_usdc": 0.0,
+                        "status": "OPEN",
+                        "close_reason": None,
+                        "source_delta_ids": [current_delta_key],
+                    }
+                else:
+                    new_size = previous["size"] + size
+                    avg_price = ((previous["avg_price"] * previous["size"]) + (float(row.price) * size)) / new_size
+                    previous["size"] = new_size
+                    previous["avg_price"] = avg_price
+                    previous["notional_usdc"] += notional
+                    previous["fees_usdc"] += cost
+                    if current_delta_key not in previous["source_delta_ids"]:
+                        previous["source_delta_ids"].append(current_delta_key)
+
+                new_size = positions[key]["size"]
                 replay_action = "PAPER_ENTRY_REPLAYED" if action.startswith("OPEN") else "PAPER_ADD_REPLAYED"
                 if event["bot_replay_action"] == "PAPER_JOIN_ADD_AS_ENTRY":
                     replay_action = "PAPER_JOIN_ADD_AS_ENTRY"
@@ -538,19 +569,21 @@ def create_router(settings: Settings, state: UiState, bus: UiEventBus) -> APIRou
                 else:
                     gross_pnl = (previous["avg_price"] - float(row.price)) * close_size
                 exit_cost = close_size * float(row.price) * cost_bps / 10_000.0
-                allocated_entry_cost = previous["entry_costs"] * (close_size / previous["size"])
-                # Entry costs are recorded when a virtual entry is opened; close events
-                # only subtract exit costs to avoid double-counting fees in the graph.
                 net_pnl = gross_pnl - exit_cost
                 remaining_size = max(0.0, previous["size"] - close_size)
+
+                previous["realized_pnl_usdc"] += net_pnl
+                previous["fees_usdc"] += exit_cost
+                if current_delta_key not in previous["source_delta_ids"]:
+                    previous["source_delta_ids"].append(current_delta_key)
+
                 if remaining_size <= 1e-12:
+                    previous["size"] = 0.0
+                    previous["status"] = "CLOSED"
+                    previous["close_reason"] = f"LEADER_{action}"
                     positions.pop(key, None)
                 else:
-                    positions[key] = {
-                        "size": remaining_size,
-                        "avg_price": previous["avg_price"],
-                        "entry_costs": previous["entry_costs"] - allocated_entry_cost,
-                    }
+                    previous["size"] = remaining_size
                 event.update(
                     {
                         "bot_replay_action": "PAPER_CLOSE_REPLAYED" if action.startswith("CLOSE") else "PAPER_REDUCE_REPLAYED",
@@ -586,24 +619,35 @@ def create_router(settings: Settings, state: UiState, bus: UiEventBus) -> APIRou
             unrealized_pnl += net_unrealized
             open_positions.append(
                 {
+                    "position_id": position["position_id"],
                     "wallet_address": wallet,
                     "coin": coin,
                     "direction": direction,
                     "size": round(position["size"], 10),
                     "avg_entry_price": round(position["avg_price"], 8),
                     "mark_price": round(mark_price, 8),
-                    "entry_costs_remaining": round(position["entry_costs"], 6),
+                    "fees_usdc": round(position["fees_usdc"], 6),
+                    "realized_pnl_usdc": round(position["realized_pnl_usdc"], 6),
                     "unrealized_pnl_usdc": round(net_unrealized, 6),
                     "research_only": True,
                 }
             )
             persisted_positions[encode_position_key(wallet, coin, direction)] = {
+                "position_id": position["position_id"],
                 "wallet_address": wallet,
                 "coin": coin,
                 "direction": direction,
+                "entry_at_ms": position["entry_at_ms"],
+                "entry_price": round(float(position["entry_price"]), 12),
                 "size": round(float(position["size"]), 12),
                 "avg_price": round(float(position["avg_price"]), 12),
-                "entry_costs": round(float(position["entry_costs"]), 12),
+                "notional_usdc": round(float(position["notional_usdc"]), 12),
+                "fees_usdc": round(float(position["fees_usdc"]), 12),
+                "realized_pnl_usdc": round(float(position["realized_pnl_usdc"]), 12),
+                "unrealized_pnl_usdc": round(float(net_unrealized), 12),
+                "status": position["status"],
+                "close_reason": position["close_reason"],
+                "source_delta_ids": position["source_delta_ids"],
             }
         open_positions.sort(key=lambda item: abs(float(item["unrealized_pnl_usdc"])), reverse=True)
         ledger_events = ledger_events[-max_events:]
