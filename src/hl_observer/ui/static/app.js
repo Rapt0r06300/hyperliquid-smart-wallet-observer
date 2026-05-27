@@ -434,6 +434,25 @@ function renderSimulationOverview(payload) {
   const equity = payload.equity || {};
   const scanner = payload.scanner || {};
   const autopilot = payload.autopilot || {};
+
+  // Simple Dashboard Metrics
+  const dashPnl = $("#dashPnl");
+  if (dashPnl) dashPnl.textContent = formatUsd(equity.current_pnl_usdc ?? 0);
+  const dashEquity = $("#dashEquity");
+  if (dashEquity) dashEquity.textContent = formatUsd(equity.current_equity_usdt ?? 1000);
+  const dashOpenPos = $("#dashOpenPos");
+  const virtualPositions = (payload.bot_simulation || payload.reproduction || {}).open_positions || [];
+  if (dashOpenPos) dashOpenPos.textContent = virtualPositions.length;
+  const dashLastEvent = $("#dashLastEvent");
+  if (dashLastEvent) {
+    const sec = payload.seconds_since_last_live_event;
+    dashLastEvent.textContent = (sec !== null && sec !== undefined) ? `${sec}s` : "--";
+  }
+  const dashScanner = $("#dashScanner");
+  if (dashScanner) dashScanner.textContent = scanner.active ? "ACTIF" : "IDLE";
+  const dashFreshness = $("#dashFreshness");
+  if (dashFreshness) dashFreshness.textContent = payload.last_live_event_ms ? formatClockMs(payload.last_live_event_ms) : "--";
+
   const metrics = [
     ["P&L bot", formatUsd(equity.current_pnl_usdc ?? 0)],
     ["Capital", `${formatUsd(equity.current_equity_usdt ?? 1000)} USDT`],
@@ -912,9 +931,8 @@ function wireUi() {
     button.addEventListener("click", () => runAction(button.dataset.action));
   });
   $("#expertToggle").addEventListener("click", () => {
-    const hidden = $("#expertPanel").classList.toggle("hidden");
-    $("#terminalPanel").classList.toggle("hidden", hidden);
-    $("#expertToggle").textContent = hidden ? "Afficher les details techniques" : "Masquer les details techniques";
+    const hidden = $("#expertView").classList.toggle("hidden");
+    $("#expertToggle").textContent = hidden ? "Mode Expert" : "Masquer les details techniques";
   });
   $$("[data-filter]").forEach((button) => {
     button.addEventListener("click", () => {

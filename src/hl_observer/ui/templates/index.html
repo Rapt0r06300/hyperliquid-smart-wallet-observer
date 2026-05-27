@@ -11,60 +11,106 @@
     <header class="topbar">
       <div>
         <p class="eyebrow">Hyperliquid Smart-Wallet Observer</p>
-        <h1>Recherche automatique des meilleurs wallets Hyperliquid</h1>
+        <h1>Command Center</h1>
       </div>
       <div class="status-strip">
         <span id="modeBadge" class="badge cyan">PAPER</span>
         <span id="testnetBadge" class="badge orange">TESTNET LOCKED</span>
         <span id="safetyBadge" class="badge green pulse">SAFE</span>
         <span id="clock" class="clock">--:--:--</span>
+        <button id="expertToggle" type="button">Mode Expert</button>
         <button class="danger" data-action="activate_kill_switch">Emergency Stop</button>
       </div>
     </header>
 
     <main class="shell">
-      <nav class="quick-tabs" aria-label="Navigation des vues principales">
-        <a href="#simulationPanel">Simulation</a>
-        <a href="#copyPanel">Copy dry-run</a>
-        <a href="#dataWatchPanel">Donnees analysees</a>
-        <a href="#activityPanel">Activite</a>
-        <a href="#expertPanel">Mode expert</a>
-      </nav>
-
-      <section class="panel data-watch hero-simulation" id="simulationPanel">
+      <!-- DASHBOARD PRINCIPAL SIMPLIFIE -->
+      <section id="mainDashboard" class="panel">
         <div class="panel-title">
           <span class="dot green pulse"></span>
-          <h2>P&L bot en simulation</h2>
+          <h2>Dashboard Simulation</h2>
         </div>
-        <p class="section-help">
-          Vue principale volontairement reduite au resultat du bot simule. Le P&L demarre a 0, ignore les anciens evenements,
-          et bouge seulement sur ouvertures/fermetures fraiches detectees apres le lancement. Aucun ordre, aucun mainnet.
-        </p>
-        <div class="simulation-summary" id="simulationSummary">
-          <div class="simulation-metric"><span>P&L bot</span><strong>$0.00</strong></div>
-          <div class="simulation-metric"><span>Capital</span><strong>+$1000.00 USDT</strong></div>
-          <div class="simulation-metric"><span>Latent</span><strong>$0.00</strong></div>
-          <div class="simulation-metric"><span>Realise</span><strong>$0.00</strong></div>
-        </div>
-        <div class="simulation-live-strip" id="simulationLiveStrip">
-          <div class="simulation-live-pill orange"><span>Etat</span><strong>Connexion a la simulation locale...</strong></div>
-        </div>
-        <div class="metagraph-wrap">
-          <div class="metagraph-header">
-            <div>
-              <p class="eyebrow">Metagraphe local</p>
-              <h3>P&L du bot simule</h3>
-            </div>
-            <span id="simulationGraphState" class="badge cyan">En attente de donnees</span>
+
+        <!-- Bloc Haut : Metriques Cles -->
+        <div class="top-block" id="topBlock">
+          <div class="dashboard-card">
+            <span>P&L Bot</span>
+            <strong id="dashPnl">$0.00</strong>
           </div>
-          <canvas id="simulationMetaGraph" width="1180" height="320" aria-label="Metagraphe de simulation"></canvas>
-          <div id="simulationGraphTooltip" class="chart-tooltip hidden"></div>
+          <div class="dashboard-card">
+            <span>Equity</span>
+            <strong id="dashEquity">$1000.00</strong>
+          </div>
+          <div class="dashboard-card">
+            <span>Positions Ouvertes</span>
+            <strong id="dashOpenPos">0</strong>
+          </div>
+          <div class="dashboard-card">
+            <span>Dernier Event</span>
+            <strong id="dashLastEvent">--</strong>
+          </div>
+          <div class="dashboard-card">
+            <span>Statut Scanner</span>
+            <strong id="dashScanner">--</strong>
+          </div>
+          <div class="dashboard-card">
+            <span>Fraîcheur</span>
+            <strong id="dashFreshness">--</strong>
+          </div>
         </div>
-        <div class="simulation-decision-tape" id="simulationDecisionTape">
-          <div class="feed-line"><span class="cyan">[INIT]</span> Connexion a la simulation locale...</div>
+
+        <!-- Bloc Central : Metagraphe -->
+        <div class="central-block">
+          <div class="metagraph-wrap">
+            <div class="metagraph-header">
+              <div>
+                <p class="eyebrow">Metagraphe local</p>
+                <h3>P&L du bot simule</h3>
+              </div>
+              <span id="simulationGraphState" class="badge cyan">En attente de donnees</span>
+            </div>
+            <canvas id="simulationMetaGraph" width="1180" height="320" aria-label="Metagraphe de simulation"></canvas>
+            <div id="simulationGraphTooltip" class="chart-tooltip hidden"></div>
+          </div>
         </div>
-        <details class="simulation-details">
-          <summary>Voir les details d'observation</summary>
+
+        <!-- Bloc Bas : Feeds de decision -->
+        <div class="bottom-block">
+          <article class="feed-container">
+            <h3>Positions Virtuelles</h3>
+            <div id="simulationPositionsFeed" class="feed"></div>
+          </article>
+          <article class="feed-container">
+            <h3>Decisions du Bot</h3>
+            <div id="simulationReplayFeed" class="feed"></div>
+          </article>
+          <article class="feed-container">
+            <h3>Refus No-Trade</h3>
+            <div id="simulationNoTradeFeed" class="feed"></div>
+          </article>
+        </div>
+      </section>
+
+      <!-- MODE EXPERT : CACHE PAR DEFAUT -->
+      <div id="expertView" class="hidden">
+        <nav class="quick-tabs" aria-label="Navigation des vues principales">
+          <a href="#simulationPanel">Simulation Detail</a>
+          <a href="#copyPanel">Copy dry-run</a>
+          <a href="#dataWatchPanel">Donnees analysees</a>
+          <a href="#activityPanel">Activite</a>
+          <a href="#expertPanel">Config Expert</a>
+        </nav>
+
+        <section class="panel data-watch hero-simulation" id="simulationPanel">
+          <div class="panel-title">
+            <span class="dot green pulse"></span>
+            <h2>Details de simulation</h2>
+          </div>
+          <!-- Les metriques globales sont deja dans le Bloc Haut du Dashboard Principal -->
+          <div id="simulationSummary" class="hidden"></div>
+          <div class="simulation-live-strip" id="simulationLiveStrip"></div>
+          <div class="simulation-decision-tape" id="simulationDecisionTape"></div>
+
           <div class="data-grid">
             <article>
               <h3>Wallets suivis</h3>
@@ -78,274 +124,79 @@
               <h3>Ouvertures detectees</h3>
               <div id="simulationDeltasFeed" class="feed"></div>
             </article>
-            <article>
-              <h3>Decisions du bot</h3>
-              <div id="simulationReplayFeed" class="feed"></div>
-            </article>
-            <article>
-              <h3>Positions virtuelles</h3>
-              <div id="simulationPositionsFeed" class="feed"></div>
-            </article>
-            <article>
-              <h3>Refus no-trade</h3>
-              <div id="simulationNoTradeFeed" class="feed"></div>
-            </article>
           </div>
-        </details>
-      </section>
-
-      <section class="hero panel">
-        <div class="hero-copy">
-          <p class="eyebrow">Auto-Pilot Discovery</p>
-          <h2 id="autopilotTitle">Recherche automatique en cours</h2>
-          <p id="autopilotSubtitle">
-            Le logiciel cherche automatiquement les meilleurs wallets Hyperliquid, notamment via le leaderboard,
-            puis analyse positions, ouvertures, fermetures, profits, altcoins, methodologies et signaux paper.
-          </p>
-          <div class="hero-actions">
-            <a class="hero-link" href="#simulationPanel">Voir la simulation active</a>
-            <button id="expertToggle" type="button">Afficher les details techniques</button>
-          </div>
-        </div>
-        <div class="autopilot-orbit">
-          <div class="orbit-ring"></div>
-          <div class="orbit-core">SCAN</div>
-        </div>
-      </section>
-
-      <section class="panel scan-overview">
-        <div class="scan-status">
-          <p class="eyebrow">Scan automatique</p>
-          <h2 id="scanStepTitle">En attente</h2>
-          <div class="progress-track" aria-label="Progression du scan">
-            <div id="scanProgressBar" class="progress-bar"></div>
-          </div>
-          <p id="scanProgressText">Le scan se lance automatiquement au chargement.</p>
-        </div>
-        <div>
-          <p class="eyebrow">Vue globale</p>
-          <h2>Tout ce que le logiciel analyse</h2>
-          <div id="analysisMap" class="analysis-map"></div>
-        </div>
-      </section>
-
-      <details class="panel analysis-details" id="fullTimeline">
-        <summary>Voir le parcours complet du scan</summary>
-        <section class="timeline" aria-label="Progression auto-pilot">
-          <div data-step="startup">Demarrage</div>
-          <div data-step="security">Securite</div>
-          <div data-step="markets">Marches</div>
-          <div data-step="prices">Prix coins</div>
-          <div data-step="liquidity">Liquidite</div>
-          <div data-step="leaderboard">Leaderboard</div>
-          <div data-step="validation">Adresses</div>
-          <div data-step="sources">Wallets</div>
-          <div data-step="filters">PnL/ROI</div>
-          <div data-step="top500">Top 500</div>
-          <div data-step="queue">Queue</div>
-          <div data-step="backfill">Backfill</div>
-          <div data-step="deltas">Deltas</div>
-          <div data-step="openings">Ouvertures</div>
-          <div data-step="closings">Fermetures</div>
-          <div data-step="profits">Profits</div>
-          <div data-step="playbooks">Playbooks</div>
-          <div data-step="follow">Paper</div>
-          <div data-step="risk">Risque</div>
-          <div data-step="summary">Resume</div>
         </section>
-      </details>
 
-      <section class="simple-cards" id="simpleCards">
-        <article class="panel result-card">
-          <span>Sources</span>
-          <strong id="cardMarket">Initialisation</strong>
-          <p id="cardMarketDetail">Leaderboard, Explorer, imports et DB locale.</p>
-        </article>
-        <article class="panel result-card">
-          <span>Wallets</span>
-          <strong id="cardDiscovery">0 source</strong>
-          <p id="cardDiscoveryDetail">Candidats, selectionnes, rejetes et file de scan.</p>
-        </article>
-        <article class="panel result-card">
-          <span>Intelligence trading</span>
-          <strong id="cardBestWallets">0 selection</strong>
-          <p id="cardBestWalletsDetail">Ouvertures, fermetures, playbooks et signaux paper.</p>
-        </article>
-        <article class="panel result-card">
-          <span>Securite</span>
-          <strong id="cardSecurity">Lecture seule</strong>
-          <p id="cardSecurityDetail">Testnet verrouille, aucune execution reelle.</p>
-        </article>
-      </section>
+        <section class="hero panel">
+          <div class="hero-copy">
+            <p class="eyebrow">Auto-Pilot Discovery</p>
+            <h2 id="autopilotTitle">Recherche automatique en cours</h2>
+            <p id="autopilotSubtitle">
+              Le logiciel cherche automatiquement les meilleurs wallets Hyperliquid.
+            </p>
+          </div>
+          <div class="autopilot-orbit">
+            <div class="orbit-ring"></div>
+            <div class="orbit-core">SCAN</div>
+          </div>
+        </section>
 
-      <section class="panel empty-state" id="discoveryMessage">
-        Aucun wallet exploitable trouve automatiquement pour le moment.
-      </section>
+        <section class="panel scan-overview">
+          <div class="scan-status">
+            <p class="eyebrow">Scan automatique</p>
+            <h2 id="scanStepTitle">En attente</h2>
+            <div class="progress-track">
+              <div id="scanProgressBar" class="progress-bar"></div>
+            </div>
+            <p id="scanProgressText">Le scan se lance automatiquement.</p>
+          </div>
+          <div>
+            <p class="eyebrow">Vue globale</p>
+            <h2>Analyse en cours</h2>
+            <div id="analysisMap" class="analysis-map"></div>
+          </div>
+        </section>
 
-      <section class="simple-sections">
-        <article class="panel">
+        <section class="panel activity" id="activityPanel">
+          <div class="panel-title">
+            <span class="dot green pulse"></span>
+            <h2>Activite recente</h2>
+          </div>
+          <div class="feed" id="eventFeed"></div>
+        </section>
+
+        <section class="panel data-watch" id="dataWatchPanel">
+          <div class="panel-title">
+            <span class="dot green pulse"></span>
+            <h2>Vue live des donnees analysees</h2>
+          </div>
+          <div class="data-grid">
+            <article><h3>Wallets</h3><div id="walletsFeed" class="feed"></div></article>
+            <article><h3>Positions</h3><div id="positionsFeed" class="feed"></div></article>
+            <article><h3>Fills</h3><div id="fillsFeed" class="feed"></div></article>
+          </div>
+        </section>
+
+        <section class="panel expert" id="expertPanel">
           <div class="panel-title">
             <span class="dot cyan"></span>
-            <h2>Sources essayees</h2>
+            <h2>Configuration Expert</h2>
           </div>
-          <div id="sourceBreakdown" class="feed"></div>
-        </article>
-        <article class="panel">
+          <div class="expert-actions" id="actionCatalog"></div>
+          <div class="expert-grid">
+             <div><h3>Metriques coins</h3><div id="coinMetrics"></div></div>
+             <div><h3>Risk gates</h3><div id="riskGates" class="gates"></div></div>
+          </div>
+        </section>
+
+        <section class="panel terminal" id="terminalPanel">
           <div class="panel-title">
-            <span class="dot green"></span>
-            <h2>Explorer / Transactions</h2>
+            <span class="dot green pulse"></span>
+            <h2>Logs techniques</h2>
           </div>
-          <div id="explorerTape" class="feed"></div>
-        </article>
-        <article class="panel">
-          <div class="panel-title">
-            <span class="dot orange"></span>
-            <h2>Wallets rejetes</h2>
-          </div>
-          <div id="rejectedWallets" class="feed"></div>
-        </article>
-      </section>
-
-      <section class="panel data-watch" id="dataWatchPanel">
-        <div class="panel-title">
-          <span class="dot green pulse"></span>
-          <h2>Vue live des donnees analysees</h2>
-        </div>
-        <p class="section-help">
-          Ici tu vois les donnees reelles stockees par le scanner : wallets, positions, fills, deltas et ordres ouverts publics.
-          Si c'est vide, le logiciel l'affiche clairement au lieu d'inventer.
-        </p>
-        <div class="data-grid">
-          <article>
-            <h3>Wallets candidats</h3>
-            <div id="walletsFeed" class="feed"></div>
-          </article>
-          <article>
-            <h3>Positions reconstruites</h3>
-            <div id="positionsFeed" class="feed"></div>
-          </article>
-          <article>
-            <h3>Fills recuperes</h3>
-            <div id="fillsFeed" class="feed"></div>
-          </article>
-          <article>
-            <h3>Deltas de position</h3>
-            <div id="deltasFeed" class="feed"></div>
-          </article>
-          <article>
-            <h3>Ordres ouverts publics</h3>
-            <div id="openOrdersFeed" class="feed"></div>
-          </article>
-          <article>
-            <h3>Top wallets par marche</h3>
-            <div id="topByCoinFeed" class="feed"></div>
-          </article>
-        </div>
-      </section>
-
-      <section class="panel data-watch" id="copyPanel">
-        <div class="panel-title">
-          <span class="dot cyan pulse"></span>
-          <h2>Copy dry-run / mock USDC</h2>
-        </div>
-        <p class="section-help">
-          Cette zone observe les leaders, detecte open/add/reduce/close, calcule l'edge restant et explique les refus.
-          Tout reste en recherche paper locale : aucun ordre, aucune signature, aucun mainnet.
-        </p>
-        <div class="data-grid">
-          <article>
-            <h3>Copy status</h3>
-            <div id="copyStatusFeed" class="feed"></div>
-          </article>
-          <article>
-            <h3>Leader activity</h3>
-            <div id="leaderActivityFeed" class="feed"></div>
-          </article>
-          <article>
-            <h3>No-trade report</h3>
-            <div id="noTradeFeed" class="feed"></div>
-          </article>
-        </div>
-      </section>
-
-      <section class="panel multi-assets-note">
-        Le logiciel ne regarde pas seulement BTC. Il analyse aussi les altcoins disponibles avec assez de liquidite.
-      </section>
-
-      <section class="panel multi-assets-note">
-        Certaines adresses du leaderboard sont tronquees. Elles sont ignorees tant que le logiciel ne recupere pas l'adresse complete. Aucun wallet n'est invente.
-      </section>
-
-      <section class="panel activity">
-        <div class="panel-title">
-          <span class="dot green pulse"></span>
-          <h2>Activite recente</h2>
-        </div>
-        <div class="feed" id="eventFeed"></div>
-      </section>
-
-      <section class="panel manual">
-        <div>
-          <p class="eyebrow">Option secondaire</p>
-          <h2>Analyser une adresse précise</h2>
-          <p>La recherche automatique reste prioritaire. Utilise ce champ seulement pour inspecter une adresse publique specifique.</p>
-        </div>
-        <div class="manual-form">
-          <input id="manualWallet" placeholder="0x..." autocomplete="off" />
-          <button data-action="discovery_dry_run">Preparer l'analyse</button>
-        </div>
-      </section>
-
-      <section class="panel expert hidden" id="expertPanel">
-        <div class="panel-title">
-          <span class="dot cyan"></span>
-          <h2>Mode expert</h2>
-        </div>
-        <div class="expert-actions" id="actionCatalog"></div>
-        <div class="expert-grid">
-          <div>
-            <h3>Metriques coins</h3>
-            <div id="coinMetrics"></div>
-          </div>
-          <div>
-            <h3>Sources discovery</h3>
-            <pre id="discoveryStatus">{}</pre>
-          </div>
-          <div>
-            <h3>Candidats</h3>
-            <div class="table-wrap">
-              <table>
-                <thead><tr><th>Wallet</th><th>Coin</th><th>Source</th><th>PnL</th><th>ROI</th><th>Score</th><th>Decision</th></tr></thead>
-                <tbody id="candidateTable"></tbody>
-              </table>
-            </div>
-          </div>
-          <div>
-            <h3>Wallets selectionnes</h3>
-            <div id="selectedWallets"></div>
-          </div>
-          <div>
-            <h3>Risk gates</h3>
-            <div id="riskGates" class="gates"></div>
-          </div>
-        </div>
-      </section>
-
-      <section class="panel terminal hidden" id="terminalPanel">
-        <div class="panel-title">
-          <span class="dot green pulse"></span>
-          <h2>Logs techniques</h2>
-          <div class="filters">
-            <button data-filter="ALL" class="active">ALL</button>
-            <button data-filter="INFO">INFO</button>
-            <button data-filter="WARN">WARN</button>
-            <button data-filter="RISK">RISK</button>
-            <button data-filter="ERROR">ERROR</button>
-            <button data-filter="SECURITY">SECURITY</button>
-          </div>
-        </div>
-        <pre id="logConsole"></pre>
-      </section>
+          <pre id="logConsole"></pre>
+        </section>
+      </div>
     </main>
     <script src="/static/app.js"></script>
   </body>

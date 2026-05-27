@@ -325,6 +325,59 @@ input {
   background: rgba(0,255,136,0.06);
 }
 
+.top-block {
+  display: grid;
+  grid-template-columns: repeat(6, 1fr);
+  gap: 12px;
+  margin-bottom: 20px;
+}
+
+.dashboard-card {
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.dashboard-card span {
+  font-size: 11px;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.dashboard-card strong {
+  font-size: 18px;
+  color: var(--cyan);
+  font-family: "Cascadia Code", Consolas, monospace;
+}
+
+.central-block {
+  margin-bottom: 20px;
+}
+
+.bottom-block {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 16px;
+}
+
+.feed-container {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 12px;
+  background: rgba(5, 7, 13, 0.4);
+}
+
+.feed-container h3 {
+  margin-bottom: 10px;
+  border-bottom: 1px solid rgba(0, 217, 255, 0.1);
+  padding-bottom: 6px;
+}
+
 .simple-cards {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
@@ -680,6 +733,8 @@ th {
 
 @media (max-width: 1080px) {
   .hero, .manual, .expert-grid, .scan-overview { grid-template-columns: 1fr; }
+  .top-block { grid-template-columns: repeat(3, 1fr); }
+  .bottom-block { grid-template-columns: 1fr; }
   .simple-cards { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .data-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .timeline { grid-template-columns: repeat(5, minmax(0, 1fr)); }
