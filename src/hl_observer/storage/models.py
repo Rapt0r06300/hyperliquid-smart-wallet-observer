@@ -35,8 +35,18 @@ class WalletSnapshot(Base, TimestampMixin):
     __tablename__ = "wallet_snapshots"
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     wallet_address: Mapped[str] = mapped_column(String(64), index=True)
+    collection_run_id: Mapped[int | None] = mapped_column(Integer, index=True)
+    local_received_ts: Mapped[int | None] = mapped_column(Integer)
     exchange_ts: Mapped[int | None] = mapped_column(Integer)
+    positions_json: Mapped[list | None] = mapped_column(JSON)
+    open_orders_json: Mapped[list | None] = mapped_column(JSON)
+    frontend_open_orders_json: Mapped[list | None] = mapped_column(JSON)
+    fills_json: Mapped[list | None] = mapped_column(JSON)
+    all_mids_json: Mapped[dict | None] = mapped_column(JSON)
     raw_json: Mapped[dict] = mapped_column(JSON, default=dict)
+    source: Mapped[str | None] = mapped_column(String(64))
+    stopped_reason: Mapped[str | None] = mapped_column(String(255))
+    errors_json: Mapped[list | None] = mapped_column(JSON)
 
 
 class WalletScoreModel(Base, TimestampMixin):

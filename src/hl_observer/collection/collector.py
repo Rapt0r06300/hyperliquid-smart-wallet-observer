@@ -57,6 +57,7 @@ class CollectionPlan(BaseModel):
     frontend_open_orders: bool = False
     user_fills: bool = False
     user_fills_by_time: bool = False
+    clearinghouse_state: bool = False
     candles: bool = False
     interval: str = "1m"
     start_ms: int | None = None
@@ -90,6 +91,8 @@ class CollectionPlan(BaseModel):
                 items.append(f"userFills:{wallet}")
             if self.user_fills_by_time:
                 items.append(f"userFillsByTime:{wallet}")
+        if self.clearinghouse_state:
+            items.append(f"clearinghouseState:{wallet}")
             if self.oid_or_cloid is not None:
                 items.append(f"orderStatus:{wallet}:{self.oid_or_cloid}")
         if self.candles:
@@ -125,6 +128,7 @@ def build_default_collection_plan(
     frontend_open_orders: bool,
     user_fills: bool,
     user_fills_by_time: bool,
+    clearinghouse_state: bool = False,
     candles: bool,
     interval: str,
     start_ms: int | None,
@@ -141,6 +145,7 @@ def build_default_collection_plan(
             frontend_open_orders,
             user_fills,
             user_fills_by_time,
+            clearinghouse_state,
             candles,
             oid_or_cloid is not None,
         ]
@@ -162,6 +167,7 @@ def build_default_collection_plan(
         frontend_open_orders=frontend_open_orders,
         user_fills=user_fills,
         user_fills_by_time=user_fills_by_time,
+        clearinghouse_state=clearinghouse_state,
         candles=candles,
         interval=interval,
         start_ms=start_ms,
@@ -347,6 +353,18 @@ async def _collect_plan(
                     result.raw_events_stored += 1
                 repo.store_fills(wallet, page)
                 result.fetched_items += 1
+        if plan.clearinghouse_state:
+            from hl_observer.hyperliquid.rest_info_client import build_clearinghouse_state_payload
+            await _record_call(
+                repo,
+                run_id,
+                plan,
+                result,
+                item_type="clearinghouseState",
+                request_payload=build_clearinghouse_state_payload(wallet),
+                wallet_address=wallet,
+                call=lambda wallet=wallet: client.clearinghouse_state(wallet),
+            )
         if plan.oid_or_cloid is not None:
             await _record_call(
                 repo,

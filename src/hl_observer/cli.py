@@ -77,6 +77,7 @@ from hl_observer.wallets.backfill import (
     format_wallet_backfill_report,
     run_wallet_backfill,
 )
+from hl_observer.wallets.snapshot_engine import SnapshotEngine, SnapshotData
 from hl_observer.wallets.discovery import (
     build_wallet_discovery_plan,
     discovery_result_json,
@@ -1189,6 +1190,61 @@ def copy_run_command(
             report=report,
         )
         backfill_result = asyncio.run(run_wallet_backfill(backfill_plan, settings))
+
+        # Enriched snapshot storage after backfill
+        from hl_observer.storage.repositories import CollectionRepository
+        from hl_observer.storage.models import RawEvent, MarketSnapshot, Position, OpenOrder, Fill
+        with session_factory() as session:
+            repo = CollectionRepository(session)
+            engine = SnapshotEngine()
+            for wallet in followed:
+                addr = wallet.wallet_address
+                # Get latest raw events for this wallet to build snapshot data
+                latest_raw = session.query(RawEvent).filter(RawEvent.wallet_address == addr).order_by(RawEvent.id.desc()).first()
+                latest_mids = session.query(MarketSnapshot).order_by(MarketSnapshot.id.desc()).first()
+
+                # Build a robust snapshot from the latest state in DB
+                db_positions = session.query(Position).filter(Position.wallet_address == addr).all()
+                db_orders = session.query(OpenOrder).filter(OpenOrder.wallet_address == addr).all()
+                db_fills = session.query(Fill).filter(Fill.wallet_address == addr).order_by(Fill.exchange_ts.desc()).limit(100).all()
+
+                snapshot_data = SnapshotData(
+                    wallet_address=addr,
+                    collection_run_id=backfill_result.run_id,
+                    local_received_ts=now_ms(),
+                    exchange_ts=latest_raw.exchange_ts if latest_raw else now_ms(),
+                    positions=[p.raw_json for p in db_positions if p.raw_json],
+                    open_orders=[o.raw_json for o in db_orders if o.raw_json],
+                    fills=[f.raw_json for f in db_fills if f.raw_json],
+                    all_mids=latest_mids.raw_json if latest_mids else {},
+                    source="copy-run-network-read"
+                )
+
+                previous_model = repo.get_latest_wallet_snapshot(addr)
+                previous_data = engine.from_model(previous_model) if previous_model else None
+
+                comparison = engine.compare_snapshots(snapshot_data, previous_data)
+
+                # Store the new snapshot
+                repo.store_wallet_snapshot(
+                    wallet_address=addr,
+                    raw_json=snapshot_data.model_dump(),
+                    collection_run_id=snapshot_data.collection_run_id,
+                    local_received_ts=snapshot_data.local_received_ts,
+                    exchange_ts=snapshot_data.exchange_ts,
+                    positions=snapshot_data.positions,
+                    open_orders=snapshot_data.open_orders,
+                    fills=snapshot_data.fills,
+                    all_mids=snapshot_data.all_mids,
+                    source=snapshot_data.source
+                )
+
+                # If there are deltas from snapshot engine, they are stored and will be picked up
+                # by the following signal detection logic.
+                if comparison.deltas:
+                    repo.store_position_deltas(comparison.deltas)
+
+            session.commit()
 
     with session_factory() as session:
         followed_addresses = {wallet.wallet_address.lower() for wallet in followed}

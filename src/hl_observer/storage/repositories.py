@@ -327,17 +327,45 @@ class CollectionRepository:
     def store_wallet_snapshot(
         self,
         wallet_address: str,
-        response_payload: dict[str, Any],
+        raw_json: dict[str, Any],
         *,
+        collection_run_id: int | None = None,
+        local_received_ts: int | None = None,
         exchange_ts: int | None = None,
+        positions: list | None = None,
+        open_orders: list | None = None,
+        frontend_open_orders: list | None = None,
+        fills: list | None = None,
+        all_mids: dict | None = None,
+        source: str | None = None,
+        stopped_reason: str | None = None,
+        errors: list | None = None,
     ) -> WalletSnapshot:
         snapshot = WalletSnapshot(
             wallet_address=wallet_address,
+            collection_run_id=collection_run_id,
+            local_received_ts=local_received_ts,
             exchange_ts=exchange_ts,
-            raw_json=response_payload,
+            positions_json=positions,
+            open_orders_json=open_orders,
+            frontend_open_orders_json=frontend_open_orders,
+            fills_json=fills,
+            all_mids_json=all_mids,
+            raw_json=raw_json,
+            source=source,
+            stopped_reason=stopped_reason,
+            errors_json=errors,
         )
         self.session.add(snapshot)
         return snapshot
+
+    def get_latest_wallet_snapshot(self, wallet_address: str) -> WalletSnapshot | None:
+        return (
+            self.session.query(WalletSnapshot)
+            .filter(WalletSnapshot.wallet_address == wallet_address)
+            .order_by(WalletSnapshot.id.desc())
+            .first()
+        )
 
     def store_fills(self, wallet_address: str, response_payload: list[dict[str, Any]]) -> list[Fill]:
         stored: list[Fill] = []
