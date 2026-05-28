@@ -178,6 +178,7 @@ class CollectionRepository:
             health.freshness_status = FreshnessStatus.FRESH
 
         self.session.add(health)
+        self.session.commit()
         return health
 
     def get_source_health_map(self) -> dict[str, SourceHealth]:

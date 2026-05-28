@@ -1159,16 +1159,6 @@ def create_router(settings: Settings, state: UiState, bus: UiEventBus) -> APIRou
                 .order_by(RawEvent.fetched_at_ms.desc())
                 .limit(1)
             ).first()
-            if latest_public_trade_event:
-                # Still useful to reflect latest seen from DB, but properly identifying as heartbeat
-                repo.update_source_health(
-                    "hyperliquid_ws_public_trades",
-                    is_success=True,
-                    is_heartbeat=True,
-                    event_timestamp_ms=latest_public_trade_event.fetched_at_ms,
-                )
-                session.commit()
-                health_map = repo.get_source_health_map()
 
             public_trade_wallets_seen = int(
                 session.scalar(

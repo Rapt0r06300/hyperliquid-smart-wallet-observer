@@ -59,7 +59,7 @@ class WalletSnapshot(Base, TimestampMixin):
     __tablename__ = "wallet_snapshots"
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     wallet_address: Mapped[str] = mapped_column(String(64), index=True)
-    exchange_ts: Mapped[int | None] = mapped_column(Integer)
+    exchange_ts: Mapped[int | None] = mapped_column(BigInteger)
     raw_json: Mapped[dict] = mapped_column(JSON, default=dict)
 
 
@@ -78,9 +78,9 @@ class WalletBackfillRun(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     wallet_address: Mapped[str] = mapped_column(String(64), index=True)
     started_at_ms: Mapped[int] = mapped_column(Integer, index=True)
-    finished_at_ms: Mapped[int | None] = mapped_column(Integer)
-    start_ms: Mapped[int | None] = mapped_column(Integer)
-    end_ms: Mapped[int | None] = mapped_column(Integer)
+    finished_at_ms: Mapped[int | None] = mapped_column(BigInteger)
+    start_ms: Mapped[int | None] = mapped_column(BigInteger)
+    end_ms: Mapped[int | None] = mapped_column(BigInteger)
     status: Mapped[str] = mapped_column(String(32), default="RUNNING")
     fills_count: Mapped[int] = mapped_column(Integer, default=0)
     open_orders_count: Mapped[int] = mapped_column(Integer, default=0)
@@ -94,7 +94,7 @@ class WalletDiscoveryRun(Base):
     __tablename__ = "wallet_discovery_runs"
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     started_at_ms: Mapped[int] = mapped_column(Integer, index=True)
-    finished_at_ms: Mapped[int | None] = mapped_column(Integer)
+    finished_at_ms: Mapped[int | None] = mapped_column(BigInteger)
     status: Mapped[str] = mapped_column(String(32), default="RUNNING")
     sources_attempted: Mapped[int] = mapped_column(Integer, default=0)
     candidates_found: Mapped[int] = mapped_column(Integer, default=0)
@@ -134,8 +134,8 @@ class WalletCandidateModel(Base):
     external_position_usdc: Mapped[float | None] = mapped_column(Float)
     external_unrealized_pnl: Mapped[float | None] = mapped_column(Float)
     external_funding_fee: Mapped[float | None] = mapped_column(Float)
-    first_seen_ms: Mapped[int] = mapped_column(Integer)
-    last_seen_ms: Mapped[int] = mapped_column(Integer)
+    first_seen_ms: Mapped[int] = mapped_column(BigInteger)
+    last_seen_ms: Mapped[int] = mapped_column(BigInteger)
     raw_payload_json: Mapped[dict | None] = mapped_column(JSON)
     confidence_score: Mapped[float] = mapped_column(Float, default=0.0)
     selected_for_backfill: Mapped[bool] = mapped_column(Boolean, default=False)
@@ -152,7 +152,7 @@ class AutoWatchlist(Base):
     added_at_ms: Mapped[int] = mapped_column(Integer, index=True)
     status: Mapped[str] = mapped_column(String(32), default="selected")
     discovery_score: Mapped[float] = mapped_column(Float, default=0.0)
-    last_backfill_ms: Mapped[int | None] = mapped_column(Integer)
+    last_backfill_ms: Mapped[int | None] = mapped_column(BigInteger)
     notes: Mapped[str | None] = mapped_column(Text)
 
 
@@ -217,8 +217,8 @@ class Position(Base, TimestampMixin):
     notional_usdc: Mapped[float | None] = mapped_column(Float)
     source: Mapped[str] = mapped_column(String(64), default="fills")
     confidence_score: Mapped[float] = mapped_column(Float, default=0.0)
-    opened_at_ms: Mapped[int | None] = mapped_column(Integer)
-    updated_at_ms: Mapped[int | None] = mapped_column(Integer)
+    opened_at_ms: Mapped[int | None] = mapped_column(BigInteger)
+    updated_at_ms: Mapped[int | None] = mapped_column(BigInteger)
     status: Mapped[str] = mapped_column(String(32), default="INCOMPLETE")
     raw_json: Mapped[dict] = mapped_column(JSON, default=dict)
 
@@ -236,7 +236,7 @@ class PositionDeltaModel(Base, TimestampMixin):
     delta_size: Mapped[float] = mapped_column(Float)
     delta_notional_usdc: Mapped[float | None] = mapped_column(Float)
     action: Mapped[str] = mapped_column(String(32), default="UNKNOWN")
-    exchange_ts: Mapped[int | None] = mapped_column(Integer)
+    exchange_ts: Mapped[int | None] = mapped_column(BigInteger)
     fill_id: Mapped[int | None] = mapped_column(Integer, index=True)
     source_event_id: Mapped[int | None] = mapped_column(Integer, index=True)
     side: Mapped[str | None] = mapped_column(String(16))
@@ -245,7 +245,7 @@ class PositionDeltaModel(Base, TimestampMixin):
     delta_type: Mapped[str] = mapped_column(String(64), default="unknown")
     confidence: Mapped[str] = mapped_column(String(32), default="medium")
     confidence_score: Mapped[float] = mapped_column(Float, default=0.0)
-    detected_at_ms: Mapped[int | None] = mapped_column(Integer)
+    detected_at_ms: Mapped[int | None] = mapped_column(BigInteger)
     source: Mapped[str] = mapped_column(String(64), default="fills")
     delta_hash: Mapped[str | None] = mapped_column(String(64), index=True)
     raw_json: Mapped[dict] = mapped_column(JSON, default=dict)
@@ -255,8 +255,8 @@ class WalletActivitySummary(Base):
     __tablename__ = "wallet_activity_summary"
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     wallet_address: Mapped[str] = mapped_column(String(64), index=True)
-    window_start_ms: Mapped[int | None] = mapped_column(Integer)
-    window_end_ms: Mapped[int | None] = mapped_column(Integer)
+    window_start_ms: Mapped[int | None] = mapped_column(BigInteger)
+    window_end_ms: Mapped[int | None] = mapped_column(BigInteger)
     fills_count: Mapped[int] = mapped_column(Integer, default=0)
     coins_count: Mapped[int] = mapped_column(Integer, default=0)
     total_volume_estimated: Mapped[float] = mapped_column(Float, default=0.0)
@@ -267,14 +267,14 @@ class WalletActivitySummary(Base):
     reduce_count: Mapped[int] = mapped_column(Integer, default=0)
     close_count: Mapped[int] = mapped_column(Integer, default=0)
     flip_count: Mapped[int] = mapped_column(Integer, default=0)
-    created_at_ms: Mapped[int] = mapped_column(Integer)
+    created_at_ms: Mapped[int] = mapped_column(BigInteger)
 
 
 class MarketSnapshot(Base, TimestampMixin):
     __tablename__ = "market_snapshots"
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     source: Mapped[str] = mapped_column(String(32), default="allMids")
-    exchange_ts: Mapped[int | None] = mapped_column(Integer)
+    exchange_ts: Mapped[int | None] = mapped_column(BigInteger)
     raw_json: Mapped[dict] = mapped_column(JSON, default=dict)
 
 
@@ -285,7 +285,7 @@ class MarketUniverseModel(Base):
     source: Mapped[str] = mapped_column(String(64), index=True)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     is_spot: Mapped[bool] = mapped_column(Boolean, default=False)
-    first_seen_ms: Mapped[int] = mapped_column(Integer)
+    first_seen_ms: Mapped[int] = mapped_column(BigInteger)
     last_seen_ms: Mapped[int] = mapped_column(Integer, index=True)
     mid_price: Mapped[float | None] = mapped_column(Float)
     notes: Mapped[str | None] = mapped_column(Text)
@@ -322,7 +322,7 @@ class WalletCoinProfileModel(Base):
     win_rate: Mapped[float | None] = mapped_column(Float)
     profit_factor: Mapped[float | None] = mapped_column(Float)
     max_drawdown_pct: Mapped[float | None] = mapped_column(Float)
-    last_activity_ms: Mapped[int | None] = mapped_column(Integer)
+    last_activity_ms: Mapped[int | None] = mapped_column(BigInteger)
     copyability_score: Mapped[float] = mapped_column(Float, default=0.0)
     liquidity_score: Mapped[float] = mapped_column(Float, default=0.0)
     toxicity_score: Mapped[float] = mapped_column(Float, default=0.0)
@@ -381,7 +381,7 @@ class LeaderboardRun(Base):
     __tablename__ = "leaderboard_runs"
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     started_at_ms: Mapped[int] = mapped_column(Integer, index=True)
-    finished_at_ms: Mapped[int | None] = mapped_column(Integer)
+    finished_at_ms: Mapped[int | None] = mapped_column(BigInteger)
     status: Mapped[str] = mapped_column(String(64))
     source_method: Mapped[str] = mapped_column(String(64))
     period: Mapped[str] = mapped_column(String(16), default="30D")
@@ -397,7 +397,7 @@ class LeaderboardExtractionAttempt(Base):
     __tablename__ = "leaderboard_extraction_attempts"
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     started_at_ms: Mapped[int] = mapped_column(Integer, index=True)
-    finished_at_ms: Mapped[int | None] = mapped_column(Integer)
+    finished_at_ms: Mapped[int | None] = mapped_column(BigInteger)
     method: Mapped[str] = mapped_column(String(64))
     url: Mapped[str | None] = mapped_column(Text)
     status: Mapped[str] = mapped_column(String(64))
@@ -451,7 +451,7 @@ class LeaderboardWalletCandidate(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     run_id: Mapped[int | None] = mapped_column(Integer, index=True)
     wallet_address: Mapped[str] = mapped_column(String(64), index=True)
-    rank: Mapped[int | None] = mapped_column(Integer)
+    rank: Mapped[int | None] = mapped_column(BigInteger)
     period: Mapped[str] = mapped_column(String(16), default="30D")
     account_value_usdc: Mapped[float | None] = mapped_column(Float)
     pnl_usdc: Mapped[float | None] = mapped_column(Float)
@@ -468,7 +468,7 @@ class ExplorerRun(Base):
     __tablename__ = "explorer_runs"
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     started_at_ms: Mapped[int] = mapped_column(Integer, index=True)
-    finished_at_ms: Mapped[int | None] = mapped_column(Integer)
+    finished_at_ms: Mapped[int | None] = mapped_column(BigInteger)
     status: Mapped[str] = mapped_column(String(64))
     method: Mapped[str] = mapped_column(String(64))
     endpoints_found: Mapped[int] = mapped_column(Integer, default=0)
@@ -585,7 +585,7 @@ class WalletBootstrapRun(Base):
     __tablename__ = "wallet_bootstrap_runs"
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     started_at_ms: Mapped[int] = mapped_column(Integer, index=True)
-    finished_at_ms: Mapped[int | None] = mapped_column(Integer)
+    finished_at_ms: Mapped[int | None] = mapped_column(BigInteger)
     target_wallets: Mapped[int] = mapped_column(Integer, default=500)
     source: Mapped[str] = mapped_column(String(64))
     status: Mapped[str] = mapped_column(String(64))
@@ -645,7 +645,7 @@ class WalletScanQueue(Base):
     source: Mapped[str] = mapped_column(String(64))
     status: Mapped[str] = mapped_column(String(64), default="QUEUED")
     queued_at_ms: Mapped[int] = mapped_column(Integer, index=True)
-    last_attempt_ms: Mapped[int | None] = mapped_column(Integer)
+    last_attempt_ms: Mapped[int | None] = mapped_column(BigInteger)
     attempts: Mapped[int] = mapped_column(Integer, default=0)
     rejection_reason: Mapped[str | None] = mapped_column(Text)
 
@@ -654,7 +654,7 @@ class WalletScanJob(Base):
     __tablename__ = "wallet_scan_jobs"
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     started_at_ms: Mapped[int] = mapped_column(Integer, index=True)
-    finished_at_ms: Mapped[int | None] = mapped_column(Integer)
+    finished_at_ms: Mapped[int | None] = mapped_column(BigInteger)
     status: Mapped[str] = mapped_column(String(64))
     wallets_requested: Mapped[int] = mapped_column(Integer, default=0)
     wallets_scanned: Mapped[int] = mapped_column(Integer, default=0)
@@ -680,8 +680,8 @@ class WalletTradeLifecycle(Base):
     wallet_address: Mapped[str] = mapped_column(String(64), index=True)
     coin: Mapped[str] = mapped_column(String(32), index=True)
     side: Mapped[str | None] = mapped_column(String(16))
-    opened_at_ms: Mapped[int | None] = mapped_column(Integer)
-    closed_at_ms: Mapped[int | None] = mapped_column(Integer)
+    opened_at_ms: Mapped[int | None] = mapped_column(BigInteger)
+    closed_at_ms: Mapped[int | None] = mapped_column(BigInteger)
     realized_pnl_usdc: Mapped[float | None] = mapped_column(Float)
     status: Mapped[str] = mapped_column(String(64), default="OPEN")
     confidence_score: Mapped[float] = mapped_column(Float, default=0.0)
@@ -716,7 +716,7 @@ class WalletOpeningOutcome(Base):
     opening_type: Mapped[str] = mapped_column(String(64))
     pnl_usdc: Mapped[float | None] = mapped_column(Float)
     roi_pct: Mapped[float | None] = mapped_column(Float)
-    hold_time_ms: Mapped[int | None] = mapped_column(Integer)
+    hold_time_ms: Mapped[int | None] = mapped_column(BigInteger)
     confidence_score: Mapped[float] = mapped_column(Float, default=0.0)
 
 
@@ -767,7 +767,7 @@ class WalletMethodologyProfile(Base):
     best_opening_types_json: Mapped[list] = mapped_column(JSON, default=list)
     worst_opening_types_json: Mapped[list] = mapped_column(JSON, default=list)
     best_closing_types_json: Mapped[list] = mapped_column(JSON, default=list)
-    average_hold_time_ms: Mapped[int | None] = mapped_column(Integer)
+    average_hold_time_ms: Mapped[int | None] = mapped_column(BigInteger)
     scale_in_behavior: Mapped[str | None] = mapped_column(Text)
     reduce_behavior: Mapped[str | None] = mapped_column(Text)
     take_profit_behavior: Mapped[str | None] = mapped_column(Text)
@@ -843,7 +843,7 @@ class OrderbookSnapshot(Base, TimestampMixin):
     __tablename__ = "orderbook_snapshots"
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     coin: Mapped[str] = mapped_column(String(32), index=True)
-    exchange_ts: Mapped[int | None] = mapped_column(Integer)
+    exchange_ts: Mapped[int | None] = mapped_column(BigInteger)
     depth_usdc: Mapped[float | None] = mapped_column(Float)
     spread_bps: Mapped[float | None] = mapped_column(Float)
     raw_json: Mapped[dict] = mapped_column(JSON, default=dict)
@@ -938,7 +938,7 @@ class CollectionRun(Base):
     __tablename__ = "collection_runs"
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     started_at_ms: Mapped[int] = mapped_column(Integer, index=True)
-    finished_at_ms: Mapped[int | None] = mapped_column(Integer)
+    finished_at_ms: Mapped[int | None] = mapped_column(BigInteger)
     mode: Mapped[str] = mapped_column(String(32))
     success: Mapped[bool] = mapped_column(Boolean, default=False)
     errors_count: Mapped[int] = mapped_column(Integer, default=0)

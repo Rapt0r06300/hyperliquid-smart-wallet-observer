@@ -399,6 +399,8 @@ async def _record_call(
             f"hyperliquid_info:{item_type}",
             is_success=False,
             error_message=error_message,
+            observed_latency_ms=now_ms() - started,
+            is_heartbeat=item_type in {"allMids", "l2Book"},
         )
         repo.add_collection_item(
             run_id=run_id,
@@ -439,6 +441,8 @@ async def _record_call(
     repo.update_source_health(
         f"hyperliquid_info:{item_type}",
         is_success=True,
+        observed_latency_ms=now_ms() - started,
+        is_heartbeat=item_type in {"allMids", "l2Book"},
     )
     if item_type == "userFills" or item_type.startswith("userFillsByTime"):
         repo.update_source_health(

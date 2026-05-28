@@ -16,7 +16,7 @@ from hl_observer.storage.models import (
     WalletCandidateModel,
     WalletDiscoveryRun,
 )
-from hl_observer.storage.repositories import stable_payload_hash
+from hl_observer.storage.repositories import CollectionRepository, stable_payload_hash
 from hl_observer.utils.time import now_ms
 
 DEFAULT_PUBLIC_TRADE_COINS = ["BTC", "ETH", "SOL", "HYPE", "DOGE", "XRP", "BNB", "ENA", "AVAX", "LINK"]
@@ -234,6 +234,14 @@ def store_public_trade_scan(
     *,
     promote_top: int = 50,
 ) -> PublicTradeScanResult:
+    repo = CollectionRepository(session)
+    repo.update_source_health(
+        result.source,
+        is_success=result.stopped_reason != "SOURCE_UNAVAILABLE",
+        is_heartbeat=True,
+        error_message="; ".join(result.warnings) if result.warnings else None,
+    )
+
     run = WalletDiscoveryRun(
         started_at_ms=now_ms(),
         finished_at_ms=now_ms(),
