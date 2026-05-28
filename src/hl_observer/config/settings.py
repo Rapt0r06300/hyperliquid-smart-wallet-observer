@@ -159,13 +159,13 @@ class AdaptiveRiskFilterSettings(BaseModel):
     block_if_wallet_closing: bool = True
     block_if_dca_toxic: bool = True
     block_if_data_stale: bool = True
-    paper_max_size_usdc: float = 10.0
-    paper_tiny_size_usdc: float = 1.0
-    paper_small_size_usdc: float = 3.0
-    paper_normal_size_usdc: float = 5.0
-    max_daily_paper_loss_usdc: float = 10.0
-    max_coin_exposure_usdc: float = 20.0
-    max_wallet_exposure_usdc: float = 20.0
+    paper_max_size_usdc: float = 50.0
+    paper_tiny_size_usdc: float = 5.0
+    paper_small_size_usdc: float = 10.0
+    paper_normal_size_usdc: float = 20.0
+    max_daily_paper_loss_usdc: float = 100.0
+    max_coin_exposure_usdc: float = 200.0
+    max_wallet_exposure_usdc: float = 200.0
 
 
 class ExecutionSettings(BaseModel):
@@ -204,6 +204,15 @@ class CopyTradingSettings(BaseModel):
     dry_run_default: bool = True
 
 
+class PaperSimulationSettings(BaseModel):
+    starting_equity: float = 1000.0
+    max_position_notional: float = 50.0
+    max_total_exposure: float = 200.0
+    max_open_trades: int = 3
+    max_risk_per_trade_pct: float = 1.0
+    max_drawdown_stop_pct: float = 10.0
+
+
 class Settings(BaseModel):
     environment: ExecutionEnvironment = ExecutionEnvironment.PAPER
     database_url: str = "sqlite:///./data/hl_observer.sqlite3"
@@ -220,6 +229,7 @@ class Settings(BaseModel):
     execution: ExecutionSettings = Field(default_factory=ExecutionSettings)
     risk: RiskSettings = Field(default_factory=RiskSettings)
     copy_trading: CopyTradingSettings = Field(default_factory=CopyTradingSettings)
+    paper_simulation: PaperSimulationSettings = Field(default_factory=PaperSimulationSettings)
 
     @property
     def read_only_or_paper(self) -> bool:

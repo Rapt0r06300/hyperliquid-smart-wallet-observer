@@ -295,7 +295,7 @@ def create_router(settings: Settings, state: UiState, bus: UiEventBus) -> APIRou
         mid_prices: dict[str, float] | None = None,
         starting_equity_usdt: float = 1000.0,
         max_position_notional_usdt: float = 50.0,
-        max_open_positions: int = 20,
+        max_open_positions: int = 3,
         max_events: int = 2_000,
         now_timestamp_ms: int | None = None,
         existing_positions: dict[str, dict[str, Any]] | None = None,
@@ -308,6 +308,10 @@ def create_router(settings: Settings, state: UiState, bus: UiEventBus) -> APIRou
         leader deltas, applies costs, requires measurable edge, and never creates
         an order or a recommendation.
         """
+        sim_settings = settings.paper_simulation
+        starting_equity_usdt = sim_settings.starting_equity
+        max_position_notional_usdt = sim_settings.max_position_notional
+        max_open_positions = sim_settings.max_open_trades
 
         def encode_position_key(wallet: str, coin: str, direction: str) -> str:
             return f"{wallet.lower()}|{coin.upper()}|{direction.upper()}"
@@ -357,7 +361,7 @@ def create_router(settings: Settings, state: UiState, bus: UiEventBus) -> APIRou
             max_signal_age_ms=max_signal_age_ms,
             starting_equity_usdt=starting_equity_usdt,
             max_position_notional_usdt=max_position_notional_usdt,
-            max_total_exposure_usdt=max_position_notional_usdt * 4.0,
+            max_total_exposure_usdt=sim_settings.max_total_exposure,
         )
 
         chronological = sorted(deltas, key=delta_event_time_ms)
@@ -473,11 +477,20 @@ def create_router(settings: Settings, state: UiState, bus: UiEventBus) -> APIRou
             leader_size = abs(float(row.delta_size or row.fill_size or 0.0))
             if action in {"OPEN_LONG", "OPEN_SHORT", "ADD", "INCREASE"} and metrics["decision_reason"] != "EDGE_OK_FOR_LOCAL_SIMULATION":
                 event["reason"] = str(metrics["decision_reason"])
+                event["status"] = "REFUSED"
+                event["bot_replay_action"] = "NO_TRADE"
                 ledger_events.append(event)
                 continue
 
             if action in {"OPEN_LONG", "OPEN_SHORT", "ADD", "INCREASE"}:
                 desired_notional = float(metrics.get("simulated_notional_usdt") or 0.0)
+                if current_open_exposure_usdt() + desired_notional > sim_settings.max_total_exposure:
+                    event["reason"] = "MAX_TOTAL_EXPOSURE_REACHED"
+                    event["status"] = "REFUSED"
+                    event["bot_replay_action"] = "NO_TRADE"
+                    ledger_events.append(event)
+                    continue
+
                 if desired_notional <= 0:
                     event["reason"] = "MAX_EXPOSURE_REACHED"
                     ledger_events.append(event)
@@ -612,6 +625,13 @@ def create_router(settings: Settings, state: UiState, bus: UiEventBus) -> APIRou
             for row in ledger_events
             if row.get("status") == "LOCAL_REPLAY"
         )
+        # Pessimistic Cost Tracking
+        total_slippage_bps = sum(
+            float(row.get("slippage_bps") or 0.0)
+            for row in ledger_events
+            if row.get("status") == "LOCAL_REPLAY"
+        )
+        avg_slippage_bps = total_slippage_bps / max(1, reproduced_entries + reproduced_exits)
         entry_costs_paid = sum(
             float(row.get("fee_cost_usdc") or 0.0)
             for row in ledger_events
@@ -634,6 +654,19 @@ def create_router(settings: Settings, state: UiState, bus: UiEventBus) -> APIRou
         )
         refused = sum(1 for row in ledger_events if row.get("status") == "REFUSED")
         total_pnl = realized_net_pnl + unrealized_pnl
+        current_equity = starting_equity_usdt + total_pnl
+
+        # Drawdown calculation
+        high_equity = starting_equity_usdt
+        running_equity = starting_equity_usdt
+        max_drawdown_usdt = 0.0
+        for row in sorted(ledger_events, key=lambda x: x.get("observed_at_ms") or 0):
+            if row.get("status") == "LOCAL_REPLAY":
+                running_equity += float(row.get("estimated_net_pnl_usdc") or 0.0)
+                high_equity = max(high_equity, running_equity)
+                max_drawdown_usdt = max(max_drawdown_usdt, high_equity - running_equity)
+
+        max_drawdown_pct = (max_drawdown_usdt / high_equity * 100.0) if high_equity > 0 else 0.0
 
         return {
             "events": list(reversed(ledger_events[-240:])),
@@ -651,6 +684,10 @@ def create_router(settings: Settings, state: UiState, bus: UiEventBus) -> APIRou
             "entry_costs_paid_usdc": round(entry_costs_paid, 6),
             "exit_costs_paid_usdc": round(exit_costs_paid, 6),
             "total_costs_paid_usdc": round(entry_costs_paid + exit_costs_paid, 6),
+            "avg_slippage_bps": round(avg_slippage_bps, 2),
+            "max_drawdown_pct": round(max_drawdown_pct, 2),
+            "ending_equity_usdt": round(current_equity, 2),
+            "return_pct": round((total_pnl / starting_equity_usdt) * 100.0, 2),
             "cost_model_bps": cost_bps,
             "magic_profile": {
                 "mode": "fresh_leader_following_simulation",

@@ -16,6 +16,7 @@ from hl_observer.config.settings import (
     MarketUniverseSettings,
     RiskSettings,
     Settings,
+    PaperSimulationSettings,
     WalletBootstrapSettings,
     WalletAnalysisSettings,
     WalletDiscoverySettings,
@@ -54,6 +55,7 @@ def load_settings(config_path: str | Path | None = None) -> Settings:
     adaptive_risk_raw = raw.get("adaptive_risk_filter", {}) if isinstance(raw.get("adaptive_risk_filter", {}), dict) else {}
     copy_raw = raw.get("copy_trading", {}) if isinstance(raw.get("copy_trading", {}), dict) else {}
     exec_raw = raw.get("execution", {}) if isinstance(raw.get("execution", {}), dict) else {}
+    paper_sim_raw = raw.get("paper_simulation", {}) if isinstance(raw.get("paper_simulation", {}), dict) else {}
 
     environment = os.getenv("HL_ENV", app_raw.get("environment", "paper"))
     database_url = os.getenv("HL_DATABASE_URL", app_raw.get("database_url", Settings().database_url))
@@ -77,6 +79,15 @@ def load_settings(config_path: str | Path | None = None) -> Settings:
         require_reduce_only_exits=bool(exec_raw.get("require_reduce_only_exits", True)),
     )
 
+    paper_simulation = PaperSimulationSettings(
+        starting_equity=float(os.getenv("HYPERSMART_PAPER_STARTING_EQUITY", paper_sim_raw.get("starting_equity", 1000.0))),
+        max_position_notional=float(os.getenv("HYPERSMART_PAPER_MAX_POSITION_NOTIONAL", paper_sim_raw.get("max_position_notional", 50.0))),
+        max_total_exposure=float(os.getenv("HYPERSMART_PAPER_MAX_TOTAL_EXPOSURE", paper_sim_raw.get("max_total_exposure", 200.0))),
+        max_open_trades=int(os.getenv("HYPERSMART_PAPER_MAX_OPEN_TRADES", paper_sim_raw.get("max_open_trades", 3))),
+        max_risk_per_trade_pct=float(os.getenv("HYPERSMART_PAPER_MAX_RISK_PER_TRADE_PCT", paper_sim_raw.get("max_risk_per_trade_pct", 1.0))),
+        max_drawdown_stop_pct=float(os.getenv("HYPERSMART_PAPER_MAX_DRAWDOWN_STOP_PCT", paper_sim_raw.get("max_drawdown_stop_pct", 10.0))),
+    )
+
     return Settings(
         environment=ExecutionEnvironment(str(environment)),
         database_url=str(database_url),
@@ -93,4 +104,5 @@ def load_settings(config_path: str | Path | None = None) -> Settings:
         execution=execution,
         risk=RiskSettings(),
         copy_trading=CopyTradingSettings(**copy_raw),
+        paper_simulation=paper_simulation,
     )

@@ -37,14 +37,16 @@
           <h2>P&L bot en simulation</h2>
         </div>
         <p class="section-help">
-          Vue principale volontairement reduite au resultat du bot simule. Le P&L demarre a 0, ignore les anciens evenements,
-          et bouge seulement sur ouvertures/fermetures fraiches detectees apres le lancement. Aucun ordre, aucun mainnet.
+          Simulation locale — capital fictif initial : 1 000 $ / mock USDC.
+          Le P&L part de 0 et bouge seulement sur ouvertures/fermetures fraiches detectees apres le lancement. Aucun ordre, aucun mainnet.
         </p>
         <div class="simulation-summary" id="simulationSummary">
           <div class="simulation-metric"><span>P&L bot</span><strong>$0.00</strong></div>
           <div class="simulation-metric"><span>Capital</span><strong>+$1000.00 USDT</strong></div>
-          <div class="simulation-metric"><span>Latent</span><strong>$0.00</strong></div>
-          <div class="simulation-metric"><span>Realise</span><strong>$0.00</strong></div>
+          <div class="simulation-metric"><span>Drawdown</span><strong>0%</strong></div>
+          <div class="simulation-metric"><span>Fees</span><strong>$0.00</strong></div>
+          <div class="simulation-metric"><span>Slippage</span><strong>0 bps</strong></div>
+          <div class="simulation-metric"><span>Refus</span><strong>0</strong></div>
         </div>
         <div class="simulation-live-strip" id="simulationLiveStrip">
           <div class="simulation-live-pill orange"><span>Etat</span><strong>Connexion a la simulation locale...</strong></div>
