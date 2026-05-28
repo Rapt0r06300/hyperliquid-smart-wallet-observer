@@ -6,13 +6,27 @@ from hl_observer.execution.decision_engine import UnifiedDecisionEngine, Simulat
 
 def replay_events(
     deltas: list[Any],
-    mid_prices: dict[str, float],
+    mid_prices: dict[str, float] | list[dict[str, Any]],
     config: SimulationConfig,
 ) -> SimulationState:
-    """Replays historical delta events with realistic latency modeling."""
+    """Replays historical delta events with realistic latency and dynamic price discovery."""
     engine = UnifiedDecisionEngine(config)
     state = SimulationState(starting_equity_usdt=config.starting_equity_usdt)
     state.equity_usdt = config.starting_equity_usdt
+
+    # Pre-sort historical snapshots if provided as a list
+    snapshots = []
+    if isinstance(mid_prices, list):
+        snapshots = sorted(mid_prices, key=lambda x: int(x.get("timestamp_ms") or 0))
+
+    def get_mids_at(ts: int) -> dict[str, float]:
+        if not snapshots: return mid_prices if isinstance(mid_prices, dict) else {}
+        # Find the latest snapshot before or at ts
+        best = snapshots[0].get("mids", {})
+        for s in snapshots:
+            if int(s.get("timestamp_ms") or 0) > ts: break
+            best = s.get("mids", {})
+        return best
 
     # Enforce chronological processing
     sorted_deltas = sorted(deltas, key=lambda x: int(getattr(x, 'exchange_ts', 0) or getattr(x, 'detected_at_ms', 0) or 0))
@@ -31,17 +45,17 @@ def replay_events(
                 last_poll = curr_ms
             else: curr_ms = last_poll
         else:
-            # WS-like: 50ms realistic network + processing latency
             curr_ms = event_ms + 50
 
-        engine.process_delta(row, curr_ms, mid_prices, state, sorted_deltas)
+        mids = get_mids_at(curr_ms)
+        engine.process_delta(row, curr_ms, mids, state, sorted_deltas)
 
     return state
 
 
 def run_scenario_comparison(
     deltas: list[Any],
-    mid_prices: dict[str, float],
+    mid_prices: dict[str, float] | list[dict[str, Any]],
     base_config: SimulationConfig
 ) -> dict[str, SimulationState]:
     """Compares multiple simulation scenarios to identify optimal strategies."""
@@ -59,13 +73,9 @@ def run_scenario_comparison(
 
 
 def _mod(config: SimulationConfig, **kwargs) -> SimulationConfig:
-    import copy
     new_cfg = config.model_copy(deep=True)
     for k, v in kwargs.items():
         if hasattr(new_cfg, k): setattr(new_cfg, k, v)
-
-    # Sync internal risk config for edge/latency consistency
     if "min_edge_required_bps" in kwargs:
         new_cfg.risk_config.min_edge_required_bps = kwargs["min_edge_required_bps"]
-
     return new_cfg

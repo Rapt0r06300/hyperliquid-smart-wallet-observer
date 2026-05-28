@@ -369,6 +369,8 @@ def create_router(settings: Settings, state: UiState, bus: UiEventBus) -> APIRou
             "reproduced_entries": state_obj.executed_entries,
             "reproduced_exits": state_obj.executed_exits,
             "refused": state_obj.refused_signals,
+            "partial_fills": state_obj.partial_fills_count,
+            "missed_fills": state_obj.missed_fills_count,
             "open_local_positions": len(state_obj.virtual_positions),
             "open_positions": open_pos[:25],
             "realized_net_pnl_usdc": round(real_pnl, 6),
@@ -1106,6 +1108,8 @@ def create_router(settings: Settings, state: UiState, bus: UiEventBus) -> APIRou
                 "magic_entries": bot_simulation["reproduced_entries"],
                 "magic_exits": bot_simulation["reproduced_exits"],
                 "magic_refusals": bot_simulation["refused"],
+                "partial_fills": bot_simulation.get("partial_fills", 0),
+                "missed_fills": bot_simulation.get("missed_fills", 0),
             },
             "equity": {
                 "current_pnl_usdc": bot_simulation["estimated_net_pnl_usdc"] if bot_candles else round(float(equity_close), 6),

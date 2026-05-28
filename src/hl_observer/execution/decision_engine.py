@@ -229,21 +229,26 @@ class UnifiedDecisionEngine:
         ld_sz = abs(float(getattr(row, 'delta_size', 0.0) or getattr(row, 'fill_size', 0.0) or 0.0))
         cls_sz = prev["size"] if "CLOSE" in action or ld_sz <= 0 else min(prev["size"], ld_sz)
 
-        pnl = (px - prev["avg_price"]) * cls_sz if direction == "LONG" else (prev["avg_price"] - px) * cls_sz
+        gross_pnl = (px - prev["avg_price"]) * cls_sz if direction == "LONG" else (prev["avg_price"] - px) * cls_sz
         cost = cls_sz * px * self.config.cost_bps / 10000.0
+        net_pnl = gross_pnl - cost
+
         state.total_fees_usdc += cost
         state.executed_exits += 1
+        state.equity_usdt += net_pnl  # Realize PnL and update equity
 
         rem_sz = max(0.0, prev["size"] - cls_sz)
         if rem_sz <= 1e-12: state.virtual_positions.pop(key, None)
         else:
-            state.virtual_positions[key] = {"size": rem_sz, "avg_price": prev["avg_price"], "entry_costs": prev["entry_costs"] * (rem_sz / (rem_sz + cls_sz))}
+            # Correct cost scaling for partial reductions
+            new_entry_costs = prev["entry_costs"] * (rem_sz / prev["size"])
+            state.virtual_positions[key] = {"size": rem_sz, "avg_price": prev["avg_price"], "entry_costs": new_entry_costs}
 
         event = {
             "delta_key": self._delta_key(row), "wallet_address": row.wallet_address, "coin": row.coin, "leader_action": action, "leader_side": direction,
             "observed_at_ms": int(getattr(row, 'exchange_ts', 0) or getattr(row, 'detected_at_ms', 0) or 0), "leader_price": row.price, "fill_price": px,
             "bot_replay_action": "PAPER_CLOSE_REPLAYED" if "CLOSE" in action else "PAPER_REDUCE_REPLAYED", "status": "LOCAL_REPLAY",
-            "estimated_net_pnl_usdc": round(pnl - cost, 6), "gross_pnl_usdc": round(pnl, 6), "fee_cost_usdc": round(cost, 6),
+            "estimated_net_pnl_usdc": round(net_pnl, 6), "gross_pnl_usdc": round(gross_pnl, 6), "fee_cost_usdc": round(cost, 6),
             "bot_position_size_after": round(rem_sz, 10), "copied_notional_usdt": round(cls_sz * px, 6), "reason": "LOCAL_REPLAY_ONLY_NOT_AN_ORDER", "research_only": True,
         }
         event.update(metrics)
