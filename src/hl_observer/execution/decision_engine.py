@@ -134,8 +134,8 @@ class UnifiedDecisionEngine:
 
         return {"spread_bps": 3.0, "depth_usdc": 100_000.0}
 
-    def _calculate_dynamic_costs(self, coin: str, notional: float) -> float:
-        """Calculate dynamic costs in BPS based on market liquidity."""
+    def _calculate_dynamic_costs(self, coin: str, notional: float, age_ms: int = 0) -> float:
+        """Calculate dynamic costs in BPS based on market liquidity and latency."""
         metrics = self._get_market_metric(coin)
         spread_bps = metrics["spread_bps"]
         depth = metrics["depth_usdc"]
@@ -144,13 +144,19 @@ class UnifiedDecisionEngine:
         depth_consumption = notional / depth if depth > 0 else 1.0
         slippage_bps = max(5.0, depth_consumption * 1000.0)
 
-        total_bps = self.base_fee_bps + (spread_bps / 2.0) + slippage_bps
+        # Latency penalty: +1bps per second of delay after 2 seconds
+        latency_penalty = 0.0
+        if age_ms > 2000:
+            latency_penalty = (age_ms - 2000) / 1000.0 * 1.0
+
+        total_bps = self.base_fee_bps + (spread_bps / 2.0) + slippage_bps + latency_penalty
         return total_bps
 
     def _execute_simulation_step(self, delta: PositionDeltaModel, mid_prices: dict[str, float], now_ms: int):
         action = copy_delta_action(delta)
         direction = copy_delta_direction(delta, action)
         ts = delta_event_time_ms(delta)
+        age_ms = max(0, now_ms - ts)
 
         event: dict[str, Any] = {
             "delta_key": self._delta_key(delta),
@@ -159,6 +165,7 @@ class UnifiedDecisionEngine:
             "leader_action": action,
             "leader_side": direction,
             "observed_at_ms": ts,
+            "signal_age_ms": age_ms,
             "leader_price": delta.price,
             "bot_replay_action": "NO_TRADE",
             "status": "REFUSED",
@@ -195,7 +202,7 @@ class UnifiedDecisionEngine:
                 return
 
             # Execute virtual entry
-            current_cost_bps = self._calculate_dynamic_costs(delta.coin, desired_notional)
+            current_cost_bps = self._calculate_dynamic_costs(delta.coin, desired_notional, age_ms=age_ms)
             cost = desired_notional * current_cost_bps / 10_000.0
             size = desired_notional / float(delta.price)
 
@@ -245,15 +252,24 @@ class UnifiedDecisionEngine:
                 self.ledger_events.append(event)
                 return
 
-            delta_size = abs(float(delta.delta_size or delta.fill_size or pos.size))
-            close_size = pos.size if action.startswith("CLOSE") else min(pos.size, delta_size)
+            # Proportional Exit Sizing
+            # If leader closes 50% of his size, we close 50% of our scaled size.
+            prev_leader_size = abs(float(delta.previous_size or 0))
+            if prev_leader_size > 0:
+                reduction_ratio = abs(float(delta.delta_size or 0)) / prev_leader_size
+                close_size = pos.size * reduction_ratio
+            else:
+                close_size = pos.size # Fallback to full close if no leader context
+
+            if action.startswith("CLOSE") or close_size >= pos.size:
+                close_size = pos.size
 
             if direction == "LONG":
                 gross_pnl = (float(delta.price) - pos.avg_price) * close_size
             else:
                 gross_pnl = (pos.avg_price - float(delta.price)) * close_size
 
-            current_cost_bps = self._calculate_dynamic_costs(delta.coin, close_size * float(delta.price))
+            current_cost_bps = self._calculate_dynamic_costs(delta.coin, close_size * float(delta.price), age_ms=age_ms)
             exit_cost = close_size * float(delta.price) * current_cost_bps / 10_000.0
             net_pnl = gross_pnl - exit_cost
 
@@ -348,15 +364,18 @@ class UnifiedDecisionEngine:
             })
 
         net_pnl = (self.running_equity - self.starting_equity) + unrealized
+        current_equity = self.running_equity + unrealized
+        leverage = self._current_exposure() / current_equity if current_equity > 0 else 0.0
 
         return {
             "starting_equity": self.starting_equity,
-            "current_equity": self.running_equity + unrealized,
+            "current_equity": current_equity,
             "realized_pnl": self.running_equity - self.starting_equity,
             "unrealized_pnl": unrealized,
             "net_pnl": net_pnl,
             "total_costs": self.total_costs,
-            "drawdown_pct": (self.high_water_mark - (self.running_equity + unrealized)) / self.high_water_mark * 100.0 if self.high_water_mark > 0 else 0,
+            "leverage": leverage,
+            "drawdown_pct": (self.high_water_mark - current_equity) / self.high_water_mark * 100.0 if self.high_water_mark > 0 else 0,
             "drawdown_stop_triggered": self.drawdown_stop_triggered,
             "open_positions": open_pos_list,
             "ledger_events": self.ledger_events[-1000:],

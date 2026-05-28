@@ -438,10 +438,10 @@ function renderSimulationOverview(payload) {
 
   const metrics = [
     ["P&L bot", formatUsd(equity.current_pnl_usdc ?? 0)],
-    ["Capital", `${formatUsd(equity.current_equity_usdt ?? 1000)} USDT`],
+    ["Capital", `${formatUsd(equity.current_equity_usdt ?? 1000)} USDC`],
+    ["Levier", `${payload.leverage ?? 0.0}x`],
     ["Drawdown", `${payload.max_drawdown_pct ?? 0}%`],
     ["Fees", formatUsd(payload.total_costs_paid_usdc ?? 0)],
-    ["Slippage", `${payload.avg_slippage_bps ?? 0} bps`],
     ["Refus", payload.refused ?? 0]
   ];
   summary.innerHTML = metrics.map(([label, value]) => `
@@ -645,7 +645,7 @@ function renderSimulationOverview(payload) {
     <div class="feed-line"><span class="green">[FRESH]</span> mode frais uniquement depuis ${escapeHtml(formatClockMs(payload.fresh_cutoff_ms || payload.simulation_started_at_ms))} :: anciens deltas ignores ${escapeHtml(counts.old_deltas_ignored_fresh_only ?? 0)} :: dernier frais ${escapeHtml(formatClockMs(payload.last_live_event_ms))}</div>
     <div class="feed-line"><span class="cyan">[SCAN]</span> surveillance ${scanner.active ? "active" : "inactive"} :: actifs ${escapeHtml(scanner.target_wallets || counts.target_leaders || 50)} wallets :: flux public ${escapeHtml(counts.public_trade_wallets_seen || scanner.public_trade_wallets_seen || 0)} wallets vus / ${escapeHtml(counts.public_trade_promoted_wallets || scanner.public_trade_promoted_wallets || 0)} promus :: refresh UI ${escapeHtml(scanner.ui_refresh_seconds || 5)}s :: poll ${escapeHtml(scanner.polling_interval_seconds || 300)}s</div>
     <div class="feed-line"><span class="cyan">[AUTO]</span> ${escapeHtml(autopilot.job_a || "leaderboard")} -> ${escapeHtml(autopilot.job_b || "copy_loop")} -> ${escapeHtml(autopilot.job_c || "reports")} :: reproduction ${escapeHtml(autopilot.position_reproduction || "paper research only")}</div>
-    <div class="feed-line"><span class="cyan">[CAPITAL]</span> depart ${escapeHtml(formatUsd(equity.starting_equity_usdt || 1000))} USDT :: actuel ${escapeHtml(formatUsd(payload.ending_equity_usdt || 1000))} USDT</div>
+    <div class="feed-line"><span class="cyan">[CAPITAL]</span> depart ${escapeHtml(formatUsd(equity.starting_equity_usdt || 1000))} USDC :: actuel ${escapeHtml(formatUsd(payload.ending_equity_usdt || 1000))} USDC</div>
     <div class="feed-line"><span class="cyan">[PNL]</span> source ${escapeHtml(equity.source || "local")} :: realise ${escapeHtml(formatUsd(equity.realized_pnl_usdc || 0))} :: latent ${escapeHtml(formatUsd(equity.unrealized_pnl_usdc || 0))} :: couts ${escapeHtml(formatUsd(payload.total_costs_paid_usdc || 0))}</div>
     <div class="feed-line"><span class="green">[HOLD]</span> une position virtuelle reste ouverte jusqu'a REDUCE/CLOSE leader correspondant; elle n'est jamais fermee uniquement parce que le latent est rouge.</div>
     <div class="feed-line"><span class="cyan">[ETAT]</span> ${escapeHtml(payload.readiness || "UNKNOWN")} :: ${escapeHtml(payload.message || "Simulation locale seulement.")}</div>
@@ -817,7 +817,8 @@ function drawSimulationMetaGraph(candles, equity) {
       <strong>${escapeHtml(row.coin)} ${escapeHtml(shortAddress(row.wallet_address))}</strong><br>
       PnL: ${escapeHtml(formatUsd(row.pnl_usdc))}<br>
       Equity: ${escapeHtml(formatUsd(row.equity_close))}<br>
-      Source: ${escapeHtml(row.source)}
+      Action: ${escapeHtml(row.source)}<br>
+      ${row.reason ? `Reason: ${escapeHtml(row.reason)}` : ""}
     `;
   };
   canvas.onmouseleave = () => tooltip.classList.add("hidden");

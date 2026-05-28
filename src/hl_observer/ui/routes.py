@@ -299,6 +299,7 @@ def create_router(settings: Settings, state: UiState, bus: UiEventBus) -> APIRou
             "realized_net_pnl_usdc": round(summary["realized_pnl"], 6),
             "unrealized_pnl_usdc": round(summary["unrealized_pnl"], 6),
             "estimated_net_pnl_usdc": round(summary["net_pnl"], 6),
+            "leverage": round(summary.get("leverage", 0.0), 2),
             "avg_slippage_bps": 5.0, # Engine mock constant
             "max_drawdown_pct": round(summary["drawdown_pct"], 2),
             "drawdown_stop_triggered": summary["drawdown_stop_triggered"],
@@ -352,6 +353,7 @@ def create_router(settings: Settings, state: UiState, bus: UiEventBus) -> APIRou
                     "wallet_address": row.get("wallet_address"),
                     "coin": row.get("coin"),
                     "timestamp_ms": row.get("observed_at_ms"),
+                    "reason": row.get("reason"),
                     "pnl_usdc": round(pnl, 6),
                     "equity_open": round(open_value, 6),
                     "equity_close": round(close_value, 6),
@@ -1041,6 +1043,7 @@ def create_router(settings: Settings, state: UiState, bus: UiEventBus) -> APIRou
             },
             "equity": {
                 "current_pnl_usdc": bot_simulation["estimated_net_pnl_usdc"] if bot_candles else round(float(equity_close), 6),
+                "leverage": bot_simulation.get("leverage", 0.0),
                 "starting_equity_usdt": state.simulation_starting_equity_usdt,
                 "current_equity_usdt": round(state.simulation_starting_equity_usdt + float(bot_simulation["estimated_net_pnl_usdc"] if bot_candles else 0.0), 6),
                 "realized_pnl_usdc": bot_simulation["realized_net_pnl_usdc"],
