@@ -312,13 +312,18 @@ function renderPositionsFeed(rows) {
   const target = $("#positionsFeed");
   if (!target) return;
   target.innerHTML = rows.length
-    ? rows.slice(0, 12).map((row) => `
-      <div class="feed-line">
-        <span class="cyan">${escapeHtml(row.coin)}</span>
-        ${escapeHtml(shortAddress(row.wallet_address))} :: ${escapeHtml(row.side || "?")} ${escapeHtml(row.size ?? 0)} ::
-        notional ${escapeHtml(Math.round(row.notional_usdc ?? 0))} :: conf ${escapeHtml(Math.round((row.confidence_score ?? 0) * 100))}%
-      </div>
-    `).join("")
+    ? rows.slice(0, 12).map((row) => {
+      const pnl = Number(row.unrealized_pnl_usdc || 0);
+      const icon = pnl >= 0 ? "📈" : "📉";
+      return `
+        <div class="feed-line">
+          <span>${icon}</span>
+          <span class="cyan">${escapeHtml(row.coin)}</span>
+          ${escapeHtml(shortAddress(row.wallet_address))} :: ${escapeHtml(row.side || "?")} ${escapeHtml(row.size ?? 0)} ::
+          <span class="${pnl >= 0 ? "green" : "red"}">${formatUsd(pnl)}</span>
+        </div>
+      `;
+    }).join("")
     : `<div class="feed-line"><span class="orange">[VIDE]</span> Aucune position reconstruite. Il faut des fills complets via backfill read-only.</div>`;
 }
 
@@ -428,6 +433,7 @@ function renderNoTradeReport(payload) {
 }
 
 function renderSimulationOverview(payload) {
+  const now = Date.now();
   const summary = $("#simulationSummary");
   if (!summary) return;
   const counts = payload.counts || {};
@@ -441,22 +447,21 @@ function renderSimulationOverview(payload) {
 
   // 1. Bot Intent Message logic
   const dashIntentMessage = $("#dashIntentMessage");
-  if (dashIntentMessage) {
+  const intentBar = $("#dashIntentSummary");
+  if (dashIntentMessage && intentBar) {
+    intentBar.classList.remove("warning", "active");
     if (payload.connection_warning) {
       dashIntentMessage.textContent = `ATTENTION: ${payload.connection_warning}`;
-      dashIntentMessage.parentElement.classList.add("warning");
+      intentBar.classList.add("warning");
     } else if (virtualPositions.length > 0) {
       dashIntentMessage.textContent = `COPIAGE ACTIF : ${virtualPositions.length} position(s) en cours sur ${virtualPositions.map(p => p.coin).join(", ")}.`;
-      dashIntentMessage.parentElement.classList.remove("warning");
+      intentBar.classList.add("active");
     } else if (reasons.length > 0 && (payload.seconds_since_last_live_event || 999) < 60) {
       dashIntentMessage.textContent = `FILTRAGE : Signal ignore car "${reasons[0].reason}".`;
-      dashIntentMessage.parentElement.classList.remove("warning");
     } else if (scanner.active) {
       dashIntentMessage.textContent = `SCAN EN COURS : Surveillance de ${scanner.target_wallets || 50} wallets leaders.`;
-      dashIntentMessage.parentElement.classList.remove("warning");
     } else {
       dashIntentMessage.textContent = "PRET : En attente d'un signal leader eligible.";
-      dashIntentMessage.parentElement.classList.remove("warning");
     }
   }
 
@@ -484,7 +489,14 @@ function renderSimulationOverview(payload) {
   const dashScanner = $("#dashScanner");
   if (dashScanner) dashScanner.textContent = scanner.active ? "ACTIF" : "IDLE";
   const dashFreshness = $("#dashFreshness");
-  if (dashFreshness) dashFreshness.textContent = payload.last_live_event_ms ? formatClockMs(payload.last_live_event_ms) : "--";
+  if (dashFreshness) {
+    if (payload.last_live_event_ms) {
+      const diffSec = Math.floor((now - payload.last_live_event_ms) / 1000);
+      dashFreshness.textContent = diffSec < 60 ? `${diffSec}s` : formatClockMs(payload.last_live_event_ms);
+    } else {
+      dashFreshness.textContent = "--";
+    }
+  }
 
   // 3. Stats Bar
   const statWinRate = $("#statWinRate");
@@ -622,8 +634,10 @@ function renderSimulationOverview(payload) {
       const pnlClass = pnl === null || pnl === undefined ? "cyan" : Number(pnl) >= 0 ? "green" : "red";
       const action = row.bot_replay_action || "NO_TRADE";
       const actionClass = action.includes("BUY") || action.includes("OPEN") ? "badge green" : action.includes("SELL") || action.includes("CLOSE") ? "badge red" : "badge orange";
+      const icon = action.includes("BUY") || action.includes("OPEN") ? "🚀" : action.includes("SELL") || action.includes("CLOSE") ? "🏁" : "⚖️";
       return `
         <div class="feed-line">
+          <span>${icon}</span>
           <span class="${actionClass}">${escapeHtml(action)}</span>
           <strong>${escapeHtml(row.coin)}</strong>
           <span class="dim">${escapeHtml(shortAddress(row.wallet_address))}</span>
@@ -652,8 +666,10 @@ function renderSimulationOverview(payload) {
 
   noTradeTarget.innerHTML = reasons.length
     ? reasons.slice(0, 10).map((row) => {
+      const categoryIcon = row.reason.includes("EDGE") ? "📉" : row.reason.includes("FRESH") ? "⏰" : row.reason.includes("RISK") ? "🛡️" : "🚫";
       return `
       <div class="feed-line">
+        <span>${categoryIcon}</span>
         <span class="badge orange">REFUS</span>
         <strong style="min-width: 140px; display: inline-block;">${escapeHtml(row.reason)}</strong>
         <span class="dim">${escapeHtml(row.count)} occurrences</span>
@@ -762,9 +778,11 @@ function drawSimulationMetaGraph(candles, equity) {
 
   const hitboxes = [];
 
-  // Draw Equity Line
-  ctx.strokeStyle = "rgba(0, 217, 255, 0.4)";
-  ctx.lineWidth = 2;
+  // Draw Equity Line (Smoother Cyan glow)
+  ctx.shadowBlur = 10;
+  ctx.shadowColor = "rgba(0, 229, 255, 0.5)";
+  ctx.strokeStyle = "rgba(0, 229, 255, 0.8)";
+  ctx.lineWidth = 3;
   ctx.beginPath();
   candles.forEach((row, index) => {
     const x = plotLeft + index * xStep + xStep / 2;
@@ -773,6 +791,7 @@ function drawSimulationMetaGraph(candles, equity) {
     else ctx.lineTo(x, y);
   });
   ctx.stroke();
+  ctx.shadowBlur = 0;
 
   // Draw Candles and Markers
   candles.forEach((row, index) => {
@@ -819,9 +838,13 @@ function drawSimulationMetaGraph(candles, equity) {
   });
 
   ctx.fillStyle = "#8aa0b6";
-  ctx.font = "12px Cascadia Code, Consolas, monospace";
-  ctx.fillText(formatUsd(maxValue), 8, plotTop + 10);
-  ctx.fillText(formatUsd(minValue), 8, plotBottom);
+  ctx.font = "10px Cascadia Code, Consolas, monospace";
+  const numLabels = 5;
+  for (let i = 0; i <= numLabels; i++) {
+    const val = maxValue - (i * (maxValue - minValue)) / numLabels;
+    const y = yFor(val);
+    ctx.fillText(formatUsd(val), 4, y + 3);
+  }
   const current = Number(equity.current_pnl_usdc || candles[candles.length - 1].equity_close || 0);
   state.textContent = `PNL ${formatUsd(current)}`;
   state.className = `badge ${current >= 0 ? "green" : "red"}`;
@@ -839,10 +862,15 @@ function drawSimulationMetaGraph(candles, equity) {
     tooltip.style.left = `${Math.min(width - 250, Math.max(8, mouseX + 14))}px`;
     tooltip.style.top = `${Math.max(8, event.clientY - bounds.top - 18)}px`;
     tooltip.innerHTML = `
-      <strong>${escapeHtml(row.coin)} ${escapeHtml(shortAddress(row.wallet_address))}</strong><br>
-      PnL: ${escapeHtml(formatUsd(row.pnl_usdc))}<br>
-      Equity: ${escapeHtml(formatUsd(row.equity_close))}<br>
-      Source: ${escapeHtml(row.source)}
+      <div style="border-bottom: 1px solid var(--border); padding-bottom: 4px; margin-bottom: 4px;">
+        <strong style="color: var(--cyan)">${escapeHtml(row.coin)}</strong>
+        <small style="color: var(--muted)">${escapeHtml(shortAddress(row.wallet_address))}</small>
+      </div>
+      <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px;">
+        <span>PnL:</span> <strong style="color: ${row.pnl_usdc >= 0 ? "var(--green)" : "var(--red)"}">${escapeHtml(formatUsd(row.pnl_usdc))}</strong>
+        <span>Equity:</span> <strong>${escapeHtml(formatUsd(row.equity_close))}</strong>
+        <span>Source:</span> <span style="font-size: 0.85em; opacity: 0.8;">${escapeHtml(row.source)}</span>
+      </div>
     `;
   };
   canvas.onmouseleave = () => tooltip.classList.add("hidden");

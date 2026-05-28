@@ -33,6 +33,7 @@
 
         <!-- Bot Intent Summary Bar -->
         <div id="dashIntentSummary" class="intent-summary-bar">
+          <span class="live-pulse"></span>
           <span class="intent-label">ETAT DU BOT :</span>
           <strong id="dashIntentMessage">Analyse des flux Hyperliquid en cours...</strong>
         </div>
@@ -108,19 +109,19 @@
         <!-- Bloc Bas : Feeds de decision -->
         <div class="bottom-block dashboard-grid-v2">
           <article class="feed-container">
-            <h3>Consensus Actif</h3>
+            <h3><span class="card-icon-small">🤝</span> Consensus Actif</h3>
             <div id="simulationConsensusFeedSimple" class="feed"></div>
           </article>
           <article class="feed-container">
-            <h3>Positions Virtuelles</h3>
+            <h3><span class="card-icon-small">📍</span> Positions Virtuelles</h3>
             <div id="simulationPositionsFeed" class="feed"></div>
           </article>
           <article class="feed-container">
-            <h3>Décisions</h3>
+            <h3><span class="card-icon-small">⚡</span> Décisions</h3>
             <div id="simulationReplayFeed" class="feed"></div>
           </article>
           <article class="feed-container">
-            <h3>Refus de Risque</h3>
+            <h3><span class="card-icon-small">🛡️</span> Refus de Risque</h3>
             <div id="simulationNoTradeFeed" class="feed"></div>
           </article>
         </div>
