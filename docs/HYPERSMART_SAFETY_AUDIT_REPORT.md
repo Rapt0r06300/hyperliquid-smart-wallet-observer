@@ -1,13 +1,13 @@
 # HyperSmart Safety Audit Report
 
-Generated: 2026-05-28T07:01:36.158995+00:00
+Generated: 2026-05-28T07:44:47.346147+00:00
 
 - OK `no_exchange_path`: matches=0
 - OK `no_signature_calls`: matches=0
 - OK `no_operational_order`: unexpected_matches=0, locked_refusal_stubs=1
 - OK `no_private_key_config`: No private key material is loaded in HyperSmart config.
 - OK `database_hygiene`: No HyperSmart DB configured under logs; runtime DB files excluded from archives.
-- OK `archive_hygiene`: Runtime files excluded by clean archive: 198
+- OK `archive_hygiene`: Runtime files excluded by clean archive: 220
 - OK `secret_scan`: suspicious secret markers: 0
 - OK `dashboard_readonly`: Dashboard not exported yet.
 - OK `explorer_disabled_by_default`: Explorer observer disabled by default.

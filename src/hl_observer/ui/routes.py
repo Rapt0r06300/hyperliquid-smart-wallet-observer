@@ -2169,8 +2169,10 @@ def create_router(settings: Settings, state: UiState, bus: UiEventBus) -> APIRou
             "leaderboard": "Source publique prioritaire; seules les adresses completes sont exploitables.",
             "adresse tronquee": "Adresse contenant ...; elle est toujours rejetee.",
             "paper": "Simulation locale sans ordre reel.",
-            "edge": "Estimation prudente du potentiel restant apres couts.",
+            "edge": "Estimation prudente du potentiel restant apres couts. Un edge negatif ou nul interdit toute simulation.",
             "playbook": "Resume observe-only d'une methodologie wallet, jamais une promesse.",
+            "one-big-win": "Risque ou l'essentiel du profit vient d'un seul trade; score plafonne a 65.",
+            "capital fictif": "Demarrage obligatoire a 1 000 $ pour toute simulation paper.",
         }
 
     @router.post("/api/actions")

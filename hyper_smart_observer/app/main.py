@@ -431,9 +431,19 @@ def main(argv: list[str] | None = None) -> int:
             for wallet_address in wallets_to_backtest:
                 fills = fills_repo.list_all_fills_for_wallet(conn, wallet_address)
                 pnl_values = [float(row["closed_pnl"]) for row in fills if row["closed_pnl"] is not None]
-                report = ReplayEngine().replay_closed_pnl(wallet_address, pnl_values)
+
+                # Check for deltas first for a more accurate replay
+                from hyper_smart_observer.copy_mode.repository import list_latest_leader_deltas
+                deltas = list_latest_leader_deltas(conn, wallet_address=wallet_address, limit=10_000)
+
+                if deltas:
+                    print(f"Backtest replay (deltas) for {wallet_address}")
+                    report = ReplayEngine().replay_deltas(wallet_address, deltas)
+                else:
+                    print(f"Backtest replay (closed_pnl) for {wallet_address}")
+                    report = ReplayEngine().replay_closed_pnl(wallet_address, pnl_values)
+
                 report_path = write_backtest_report(report, config.reports_dir)
-                print(f"Backtest replay for {wallet_address}")
                 print(report.disclaimer)
                 print(
                     f"simulated_trades={report.simulated_trades} skipped={report.skipped_actions} "

@@ -95,7 +95,19 @@ class PaperTradingSimulator:
 
     def evaluate_intent(self, intent: PaperIntent) -> RiskDecision:
         wallet_score = self._load_latest_score(intent.wallet_address)
-        return evaluate_paper_intent(intent, wallet_score, self.config, self._portfolio_state())
+        portfolio = self._portfolio_state()
+
+        # Multi-asset exposure check
+        total_exposure = portfolio.get("total_notional", 0.0)
+        if total_exposure + intent.requested_notional > self.config.paper_max_total_exposure:
+            return RiskDecision(
+                allowed=False,
+                reason_code="MAX_TOTAL_EXPOSURE_REACHED",
+                message=f"Requested notional would exceed total exposure cap of {self.config.paper_max_total_exposure}.",
+                gates={"total_exposure_limit": False}
+            )
+
+        return evaluate_paper_intent(intent, wallet_score, self.config, portfolio)
 
     def open_paper_trade(self, intent: PaperIntent) -> PaperSimulationResult:
         initialize_database(self.config)
@@ -236,10 +248,15 @@ class PaperTradingSimulator:
             refusal_reason=row["refusal_reason"],
         )
 
-    def _portfolio_state(self) -> dict[str, int]:
+    def _portfolio_state(self) -> dict[str, float | int]:
         initialize_database(self.config)
         with get_connection(self.config) as conn:
-            return {"open_trades": len(paper_trades_repo.list_open_paper_trades(conn))}
+            open_trades = paper_trades_repo.list_open_paper_trades(conn)
+            total_notional = sum(float(row["notional"] or 0.0) for row in open_trades)
+            return {
+                "open_trades": len(open_trades),
+                "total_notional": total_notional
+            }
 
     def _store_intent_and_refusal(self, intent: PaperIntent, decision: RiskDecision) -> None:
         if not self.config.paper_store_refusals:

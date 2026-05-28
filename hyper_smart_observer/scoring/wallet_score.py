@@ -39,6 +39,7 @@ from hyper_smart_observer.scoring.winrate import (
     calculate_average_win,
     calculate_winrate,
 )
+from hl_observer.wallets.skill_vs_luck import wilson_lower_bound, one_big_win_dependency
 from hyper_smart_observer.storage.database import get_connection, initialize_database
 from hyper_smart_observer.storage.repositories import fills_repo, scores_repo, wallet_repo
 
@@ -225,6 +226,19 @@ class WalletScoreEngine:
         gross_loss = sum(value for value in pnl_values if value < 0)
         gross_pnl = calculate_gross_pnl(pnl_values)
         net_pnl = calculate_net_pnl_after_fees(pnl_values, fees)
+
+        # Advanced Skill vs Luck
+        wins = sum(1 for p in pnl_values if p > 0)
+        winrate_confidence = wilson_lower_bound(wins, len(pnl_values))
+
+        largest_win = max(pnl_values) if pnl_values else 0
+        total_abs_pnl = sum(abs(p) for p in pnl_values)
+        pnl_concentration = largest_win / total_abs_pnl if total_abs_pnl > 0 else 1.0
+        is_one_big_win = one_big_win_dependency(pnl_concentration)
+
+        if is_one_big_win:
+            warnings.append("FLAG_SINGLE_BIG_WIN: significant PnL concentration detected.")
+
         equity_curve = build_equity_curve_from_pnl(pnl_values)
         returns = pnl_returns_from_curve(equity_curve)
         max_drawdown = calculate_max_drawdown(equity_curve)
@@ -242,6 +256,8 @@ class WalletScoreEngine:
             recency_score=recency_score,
             profit_factor=profit_factor,
             net_pnl=net_pnl,
+            winrate_confidence=winrate_confidence,
+            pnl_concentration=pnl_concentration,
         )
         if final_score is None:
             return ScoreBreakdown(
@@ -362,6 +378,8 @@ class WalletScoreEngine:
         recency_score: float,
         profit_factor: float | None,
         net_pnl: float | None,
+        winrate_confidence: float = 0.5,
+        pnl_concentration: float = 0.0,
     ) -> float | None:
         if confidence_score < self.config.score_min_confidence * 100.0:
             return None
@@ -369,13 +387,25 @@ class WalletScoreEngine:
             return None
         if profit_factor is None:
             return None
+
+        # Penalties
+        concentration_penalty = pnl_concentration * 40.0
+        confidence_boost = (winrate_confidence - 0.5) * 20.0
+
         score = (
             (0.30 * sample_quality_score)
-            + (0.25 * confidence_score)
+            + (0.20 * confidence_score)
             + (0.20 * risk_score)
             + (0.15 * consistency_score)
             + (0.10 * recency_score)
+            + confidence_boost
+            - concentration_penalty
         )
+
+        # Caps from V6 rules
+        if pnl_concentration > 0.30:
+            score = min(score, 65.0)
+
         return max(0.0, min(100.0, score))
 
     def _risk_score(self, max_drawdown: float | None, pnl_values: list[float]) -> float:
