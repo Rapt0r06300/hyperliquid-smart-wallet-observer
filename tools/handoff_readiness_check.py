@@ -67,16 +67,33 @@ def run_contract_tests():
         return False
     return True
 
+def run_showcase():
+    print("\n--- Running Showcase Script ---")
+    env = os.environ.copy()
+    env["PYTHONPATH"] = os.getcwd()
+    result = subprocess.run(
+        [sys.executable, "tools/showcase_copy_pipeline.py"],
+        env=env,
+        capture_output=True,
+        text=True
+    )
+    print(result.stdout)
+    if result.returncode != 0:
+        print(result.stderr)
+        return False
+    return True
+
 def main():
     print("=== HYPERSMART HANDOFF READINESS CHECK ===\n")
     fixtures_ok = check_fixtures()
     tests_ok = run_contract_tests()
+    showcase_ok = run_showcase()
 
-    if fixtures_ok and tests_ok:
-        print("\nSUCCESS: All fixtures and contract tests are ready for handoff.")
+    if fixtures_ok and tests_ok and showcase_ok:
+        print("\nSUCCESS: All fixtures, contract tests, and showcase are ready for handoff.")
         sys.exit(0)
     else:
-        print("\nFAILURE: Handoff pack is incomplete or failing tests.")
+        print("\nFAILURE: Handoff pack is incomplete or failing checks.")
         sys.exit(1)
 
 if __name__ == "__main__":
