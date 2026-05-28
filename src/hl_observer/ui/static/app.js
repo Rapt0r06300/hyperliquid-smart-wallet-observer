@@ -488,13 +488,16 @@ function renderSimulationOverview(payload) {
   const replayTarget = $("#simulationReplayFeed");
   const positionsTarget = $("#simulationPositionsFeed");
   const noTradeTarget = $("#simulationNoTradeFeed");
+  const closedTarget = $("#simulationClosedPositionsFeed");
   const decisionTape = $("#simulationDecisionTape");
+  const auditTarget = $("#simulationAuditLedger");
   const leaders = payload.leaders || [];
   const consensus = payload.consensus || [];
   const entryDeltas = payload.entry_deltas || [];
   const botSimulation = payload.bot_simulation || payload.reproduction || {};
   const replay = botSimulation.events || [];
   const virtualPositions = botSimulation.open_positions || [];
+  const closedPositions = botSimulation.closed_positions || [];
   const reasons = payload.no_trade_reasons || [];
   equity.public_trade_wallets_seen = counts.public_trade_wallets_seen || scanner.public_trade_wallets_seen || 0;
   equity.live_simulation_deltas = counts.live_simulation_deltas || 0;
@@ -578,14 +581,51 @@ function renderSimulationOverview(payload) {
       return `
         <div class="feed-line">
           <span class="${pnl >= 0 ? "green" : "red"}">[${escapeHtml(row.direction)}]</span>
+          <span class="cyan">[${escapeHtml(row.leader_source || "unknown")}]</span>
           ${escapeHtml(shortAddress(row.wallet_address))} :: ${escapeHtml(row.coin)} ::
           size ${escapeHtml(row.size)} :: entry ${escapeHtml(row.avg_entry_price)} :: mark ${escapeHtml(row.mark_price)} ::
           real ${escapeHtml(formatUsd(row.realized_pnl_usdc || 0))} ::
-          lat ${escapeHtml(formatUsd(pnl))}
+          lat ${escapeHtml(formatUsd(pnl))} ::
+          mfe ${escapeHtml(formatUsd(row.mfe_usdc || 0))} ::
+          mae ${escapeHtml(formatUsd(row.mae_usdc || 0))}
+          ${row.partial_tp_hit ? ':: <span class="badge green">PARTIAL_TP</span>' : ""}
         </div>
       `;
     }).join("")
     : `<div class="feed-line"><span class="cyan">[FLAT]</span> Le portefeuille virtuel du bot n'a aucune position ouverte.</div>`;
+
+  if (auditTarget) {
+    auditTarget.innerHTML = replay.length
+      ? replay.slice(0, 50).map((row) => {
+        const pnl = row.estimated_net_pnl_usdc;
+        const pnlClass = pnl === null || pnl === undefined ? "cyan" : Number(pnl) >= 0 ? "green" : "red";
+        return `
+          <div class="feed-line">
+            <span class="${row.status === "LOCAL_REPLAY" ? "green" : "orange"}">[${escapeHtml(row.bot_replay_action || "NO_TRADE")}]</span>
+            ${escapeHtml(formatClockMs(row.observed_at_ms))} :: ${escapeHtml(row.coin)} ::
+            <span class="${pnlClass}">${pnl === null || pnl === undefined ? "PnL -" : formatUsd(pnl)}</span> ::
+            ${escapeHtml(row.reason || "-")}
+          </div>
+        `;
+      }).join("")
+      : `<div class="feed-line"><span class="cyan">[INFO]</span> Aucun audit disponible.</div>`;
+  }
+
+  if (closedTarget) {
+    closedTarget.innerHTML = closedPositions.length
+      ? closedPositions.slice(-12).reverse().map((row) => {
+        const pnl = Number(row.realized_pnl_usdc || 0);
+        return `
+          <div class="feed-line">
+            <span class="${pnl >= 0 ? "green" : "red"}">[CLOSED]</span>
+            ${escapeHtml(row.coin)} :: ${escapeHtml(formatUsd(pnl))} ::
+            ${escapeHtml(row.close_reason || "unknown")} ::
+            hold ${row.entry_at_ms ? Math.round((row.closed_at_ms - row.entry_at_ms) / 60000) : "-"} min
+          </div>
+        `;
+      }).join("")
+      : `<div class="feed-line"><span class="cyan">[INFO]</span> Aucune position fermee dans cette session.</div>`;
+  }
 
   noTradeTarget.innerHTML = reasons.length
     ? reasons.slice(0, 10).map((row) => `
@@ -740,7 +780,7 @@ function drawSimulationMetaGraph(candles, equity) {
       <strong>${escapeHtml(row.coin)} ${escapeHtml(shortAddress(row.wallet_address))}</strong><br>
       PnL: ${escapeHtml(formatUsd(row.pnl_usdc))}<br>
       Equity: ${escapeHtml(formatUsd(row.equity_close))}<br>
-      Source: ${escapeHtml(row.source)}
+      Action: <span class="cyan">${escapeHtml(row.source)}</span>
     `;
   };
   canvas.onmouseleave = () => tooltip.classList.add("hidden");

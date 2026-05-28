@@ -26,6 +26,7 @@ class UiState:
     simulation_starting_equity_usdt: float = 1000.0
     simulation_processed_delta_keys: set[str] = field(default_factory=set)
     simulation_virtual_positions: dict[str, VirtualPosition | dict[str, Any]] = field(default_factory=dict)
+    simulation_closed_positions: list[VirtualPosition | dict[str, Any]] = field(default_factory=list)
     simulation_ledger_events: list[dict[str, Any]] = field(default_factory=list)
 
     def add_event(
@@ -68,3 +69,6 @@ class UiState:
     def clear_logs(self) -> None:
         self.logs.clear()
         self.events.clear()
+        self.simulation_virtual_positions.clear()
+        self.simulation_closed_positions.clear()
+        self.simulation_ledger_events.clear()

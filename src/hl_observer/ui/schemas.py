@@ -94,6 +94,7 @@ class ActionCatalogItem(BaseModel):
 class VirtualPosition(BaseModel):
     position_id: str
     wallet_address: str
+    leader_source: str | None = None
     coin: str
     direction: Literal["LONG", "SHORT"]
     entry_at_ms: int
@@ -104,8 +105,14 @@ class VirtualPosition(BaseModel):
     fees_usdc: float
     realized_pnl_usdc: float = 0.0
     unrealized_pnl_usdc: float = 0.0
+    mfe_usdc: float = 0.0
+    mae_usdc: float = 0.0
+    high_price: float = 0.0
+    low_price: float = 0.0
     status: str = "OPEN"
     close_reason: str | None = None
+    exit_plan: dict | None = None
+    partial_tp_hit: bool = False
     source_delta_ids: list[str] = Field(default_factory=list)
 
 

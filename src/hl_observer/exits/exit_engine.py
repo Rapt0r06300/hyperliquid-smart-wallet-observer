@@ -8,6 +8,7 @@ class ExitPlan(BaseModel):
     hard_stop_bps: float
     partial_take_profit_bps: float
     trailing_stop_bps: float
+    edge_decay_bps_limit: float = 5.0
     max_hold_ms: int
     leader_reduce_exit: bool = True
     kill_switch_exit: bool = True

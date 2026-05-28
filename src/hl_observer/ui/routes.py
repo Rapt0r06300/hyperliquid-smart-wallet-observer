@@ -83,6 +83,7 @@ from hl_observer.ui.schemas import (
     UiStatus,
     UiWalletRow,
 )
+from hl_observer.exits.exit_engine import build_default_exit_plan
 from hl_observer.ui.state import UiState
 from hl_observer.utils.time import now_ms
 
@@ -301,6 +302,8 @@ def create_router(settings: Settings, state: UiState, bus: UiEventBus) -> APIRou
         existing_positions: dict[str, dict[str, Any]] | None = None,
         existing_events: list[dict[str, Any]] | None = None,
         processed_delta_keys: set[str] | None = None,
+        leader_source_map: dict[str, str] | None = None,
+        existing_closed_positions: list[dict[str, Any]] | None = None,
     ) -> dict[str, Any]:
         """Simulate the bot's local no-money decisions from the incoming leader delta stream.
 
@@ -336,6 +339,7 @@ def create_router(settings: Settings, state: UiState, bus: UiEventBus) -> APIRou
             positions[decoded] = {
                 "position_id": str(raw_position.get("position_id") or f"pos:{raw_key}"),
                 "wallet_address": str(raw_position.get("wallet_address") or decoded[0]),
+                "leader_source": str(raw_position.get("leader_source") or (leader_source_map or {}).get(decoded[0].lower()) or "unknown"),
                 "coin": str(raw_position.get("coin") or decoded[1]),
                 "direction": str(raw_position.get("direction") or decoded[2]),
                 "entry_at_ms": int(raw_position.get("entry_at_ms") or current_ms),
@@ -345,10 +349,21 @@ def create_router(settings: Settings, state: UiState, bus: UiEventBus) -> APIRou
                 "notional_usdc": float(raw_position.get("notional_usdc") or 0.0),
                 "fees_usdc": float(raw_position.get("fees_usdc") or raw_position.get("entry_costs") or 0.0),
                 "realized_pnl_usdc": float(raw_position.get("realized_pnl_usdc") or 0.0),
+                "mfe_usdc": float(raw_position.get("mfe_usdc") or 0.0),
+                "mae_usdc": float(raw_position.get("mae_usdc") or 0.0),
+                "high_price": float(raw_position.get("high_price") or raw_position.get("avg_price") or 0.0),
+                "low_price": float(raw_position.get("low_price") or raw_position.get("avg_price") or 0.0),
                 "status": str(raw_position.get("status") or "OPEN"),
                 "close_reason": raw_position.get("close_reason"),
+                "exit_plan": raw_position.get("exit_plan"),
+                "partial_tp_hit": bool(raw_position.get("partial_tp_hit", False)),
                 "source_delta_ids": list(raw_position.get("source_delta_ids") or []),
             }
+        closed_positions: list[dict[str, Any]] = [
+            dict(row)
+            for row in (existing_closed_positions or [])[-500:]
+            if isinstance(row, dict)
+        ]
         ledger_events: list[dict[str, Any]] = [
             dict(row)
             for row in (existing_events or [])[-max_events:]
@@ -449,6 +464,153 @@ def create_router(settings: Settings, state: UiState, bus: UiEventBus) -> APIRou
             if current_delta_key in processed_keys:
                 continue
             processed_keys.add(current_delta_key)
+
+            # Check for simulation exit rules (Time Stop, Hard Stop, TP) before processing new delta
+            event_time = delta_event_time_ms(row)
+            event_price = float(row.price or 0.0)
+
+            to_exit = []
+            to_reduce = []
+            for pos_key, pos in positions.items():
+                # Time Stop
+                if pos.get("exit_plan") and pos["exit_plan"].get("max_hold_ms"):
+                    age = event_time - pos["entry_at_ms"]
+                    if age >= pos["exit_plan"]["max_hold_ms"]:
+                        to_exit.append((pos_key, "TIME_STOP"))
+                        continue
+
+                # Coin-specific rules (Hard Stop, Trailing Stop, MFE/MAE update)
+                if pos_key[1] == row.coin.upper() and event_price > 0:
+                    # Update MFE/MAE with this event's price
+                    if pos["direction"] == "LONG":
+                        current_pnl = (event_price - pos["avg_price"]) * pos["size"]
+                    else:
+                        current_pnl = (pos["avg_price"] - event_price) * pos["size"]
+
+                    pos["high_price"] = max(pos.get("high_price", event_price), event_price)
+                    pos["low_price"] = min(pos.get("low_price", event_price), event_price)
+                    pos["mfe_usdc"] = max(pos.get("mfe_usdc", 0.0), current_pnl)
+                    pos["mae_usdc"] = min(pos.get("mae_usdc", 0.0), current_pnl)
+
+                    # Hard Stop
+                    if pos.get("exit_plan") and pos["exit_plan"].get("hard_stop_bps"):
+                        limit_bps = pos["exit_plan"]["hard_stop_bps"]
+                        if pos["direction"] == "LONG":
+                            if (pos["avg_price"] - event_price) / pos["avg_price"] * 10_000.0 >= limit_bps:
+                                to_exit.append((pos_key, "HARD_STOP"))
+                                continue
+                        else:
+                            if (event_price - pos["avg_price"]) / pos["avg_price"] * 10_000.0 >= limit_bps:
+                                to_exit.append((pos_key, "HARD_STOP"))
+                                continue
+
+                    # Partial Take Profit (50% reduction)
+                    if pos.get("exit_plan") and pos["exit_plan"].get("partial_take_profit_bps") and not pos.get("partial_tp_hit"):
+                        tp_bps = pos["exit_plan"]["partial_take_profit_bps"]
+                        if pos["direction"] == "LONG":
+                            if (event_price - pos["avg_price"]) / pos["avg_price"] * 10_000.0 >= tp_bps:
+                                to_reduce.append((pos_key, "PARTIAL_TP"))
+                                continue
+                        else:
+                            if (pos["avg_price"] - event_price) / pos["avg_price"] * 10_000.0 >= tp_bps:
+                                to_reduce.append((pos_key, "PARTIAL_TP"))
+                                continue
+
+                    # Decay Stop (Edge too low) - ONLY evaluate if the delta is from the SAME wallet as the position
+                    if pos.get("exit_plan") and pos["exit_plan"].get("edge_decay_bps_limit"):
+                        if pos_key[0].lower() == row.wallet_address.lower():
+                            m = opportunity_metrics(row, pos["direction"])
+                            edge = float(m.get("edge_remaining_bps") or -999.0)
+                            if edge < pos["exit_plan"]["edge_decay_bps_limit"]:
+                                to_exit.append((pos_key, "EDGE_DECAY"))
+                                continue
+
+                    # Trailing Stop
+                    if pos.get("exit_plan") and pos["exit_plan"].get("trailing_stop_bps"):
+                        trailing_bps = pos["exit_plan"]["trailing_stop_bps"]
+                        if pos["direction"] == "LONG":
+                            # Exit if price drops by X bps from the high seen
+                            if (pos["high_price"] - event_price) / pos["high_price"] * 10_000.0 >= trailing_bps:
+                                to_exit.append((pos_key, "TRAILING_STOP"))
+                                continue
+                        else:
+                            # Exit if price rises by X bps from the low seen
+                            if (event_price - pos["low_price"]) / pos["low_price"] * 10_000.0 >= trailing_bps:
+                                to_exit.append((pos_key, "TRAILING_STOP"))
+                                continue
+
+            for pos_key, reason in to_reduce:
+                pos = positions[pos_key]
+                reduce_size = pos["size"] * 0.5
+                if pos["direction"] == "LONG":
+                    gross_pnl = (event_price - pos["avg_price"]) * reduce_size
+                else:
+                    gross_pnl = (pos["avg_price"] - event_price) * reduce_size
+
+                fee = reduce_size * event_price * cost_bps / 10_000.0
+                net_pnl = gross_pnl - fee
+
+                pos["size"] -= reduce_size
+                pos["realized_pnl_usdc"] += net_pnl
+                pos["fees_usdc"] += fee
+                pos["partial_tp_hit"] = True
+
+                ledger_events.append({
+                    "delta_key": f"reduce:{reason}:{pos['position_id']}:{event_time}",
+                    "wallet_address": pos["wallet_address"],
+                    "coin": pos["coin"],
+                    "leader_action": "SIM_REDUCE",
+                    "leader_side": pos["direction"],
+                    "observed_at_ms": event_time,
+                    "leader_price": event_price,
+                    "bot_replay_action": f"PAPER_{reason}_REPLAYED",
+                    "status": "LOCAL_REPLAY",
+                    "estimated_net_pnl_usdc": round(net_pnl, 6),
+                    "gross_pnl_usdc": round(gross_pnl, 6),
+                    "fee_cost_usdc": round(fee, 6),
+                    "bot_position_size_after": round(pos["size"], 10),
+                    "reason": f"Simulation rule: {reason} (50% reduction)",
+                    "research_only": True,
+                    "paper_mode": "PAPER_LOCAL_USDT_ONLY",
+                })
+
+            for pos_key, reason in to_exit:
+                pos = positions.pop(pos_key)
+                pos["status"] = "CLOSED"
+                pos["close_reason"] = reason
+                pos["closed_at_ms"] = event_time
+                closed_positions.append(pos)
+
+                # Calculate final realized P&L at exit price
+                exit_price = event_price if pos_key[1] == row.coin.upper() else pos["avg_price"]
+                if pos["direction"] == "LONG":
+                    gross_pnl = (exit_price - pos["avg_price"]) * pos["size"]
+                else:
+                    gross_pnl = (pos["avg_price"] - exit_price) * pos["size"]
+
+                exit_fee = pos["size"] * exit_price * cost_bps / 10_000.0
+                net_pnl = gross_pnl - exit_fee
+
+                exit_event = {
+                    "delta_key": f"exit:{reason}:{pos['position_id']}:{event_time}",
+                    "wallet_address": pos["wallet_address"],
+                    "coin": pos["coin"],
+                    "leader_action": "SIM_EXIT",
+                    "leader_side": pos["direction"],
+                    "observed_at_ms": event_time,
+                    "leader_price": exit_price,
+                    "bot_replay_action": f"PAPER_{reason}_REPLAYED",
+                    "status": "LOCAL_REPLAY",
+                    "estimated_net_pnl_usdc": round(net_pnl, 6),
+                    "gross_pnl_usdc": round(gross_pnl, 6),
+                    "fee_cost_usdc": round(exit_fee, 6),
+                    "bot_position_size_after": 0.0,
+                    "reason": f"Simulation rule: {reason}",
+                    "research_only": True,
+                    "paper_mode": "PAPER_LOCAL_USDT_ONLY",
+                }
+                ledger_events.append(exit_event)
+
             action = copy_delta_action(row)
             direction = copy_delta_direction(row, action)
             event: dict[str, Any] = {
@@ -488,6 +650,15 @@ def create_router(settings: Settings, state: UiState, bus: UiEventBus) -> APIRou
                 continue
 
             if action in {"OPEN_LONG", "OPEN_SHORT", "ADD", "INCREASE"}:
+                # Prevention: If position was JUST closed by a simulation stop in THIS same event loop,
+                # do not allow re-entry from the same leader delta that might have triggered it.
+                if key not in positions:
+                    just_closed = [p for p in closed_positions if p["wallet_address"].lower() == key[0].lower() and p["coin"].upper() == key[1].upper() and p["closed_at_ms"] == event_time]
+                    if just_closed:
+                        event["reason"] = f"PREVENT_REENTRY_AFTER_{just_closed[0].get('close_reason')}_IN_SAME_DELTA"
+                        ledger_events.append(event)
+                        continue
+
                 desired_notional = float(metrics.get("simulated_notional_usdt") or 0.0)
                 if desired_notional <= 0:
                     event["reason"] = "MAX_EXPOSURE_REACHED"
@@ -515,6 +686,7 @@ def create_router(settings: Settings, state: UiState, bus: UiEventBus) -> APIRou
                     positions[key] = {
                         "position_id": pos_id,
                         "wallet_address": row.wallet_address,
+                        "leader_source": (leader_source_map or {}).get(row.wallet_address.lower(), "unknown"),
                         "coin": row.coin,
                         "direction": direction,
                         "entry_at_ms": delta_event_time_ms(row),
@@ -524,8 +696,13 @@ def create_router(settings: Settings, state: UiState, bus: UiEventBus) -> APIRou
                         "notional_usdc": notional,
                         "fees_usdc": cost,
                         "realized_pnl_usdc": 0.0,
+                        "mfe_usdc": 0.0,
+                        "mae_usdc": 0.0,
+                        "high_price": float(row.price),
+                        "low_price": float(row.price),
                         "status": "OPEN",
                         "close_reason": None,
+                        "exit_plan": build_default_exit_plan(current_delta_key).model_dump(),
                         "source_delta_ids": [current_delta_key],
                     }
                 else:
@@ -535,6 +712,8 @@ def create_router(settings: Settings, state: UiState, bus: UiEventBus) -> APIRou
                     previous["avg_price"] = avg_price
                     previous["notional_usdc"] += notional
                     previous["fees_usdc"] += cost
+                    previous["high_price"] = max(previous["high_price"], float(row.price))
+                    previous["low_price"] = min(previous["low_price"], float(row.price))
                     if current_delta_key not in previous["source_delta_ids"]:
                         previous["source_delta_ids"].append(current_delta_key)
 
@@ -612,8 +791,25 @@ def create_router(settings: Settings, state: UiState, bus: UiEventBus) -> APIRou
                 mark_price = position["avg_price"]
             if direction == "LONG":
                 gross_unrealized = (mark_price - position["avg_price"]) * position["size"]
+                pos_high_pnl = (max(mark_price, position["high_price"]) - position["avg_price"]) * position["size"]
+                pos_low_pnl = (min(mark_price, position["low_price"]) - position["avg_price"]) * position["size"]
             else:
                 gross_unrealized = (position["avg_price"] - mark_price) * position["size"]
+                pos_high_pnl = (position["avg_price"] - min(mark_price, position["low_price"])) * position["size"]
+                pos_low_pnl = (position["avg_price"] - max(mark_price, position["high_price"])) * position["size"]
+
+            # Peak prices and MFE/MAE are already updated during the event loop.
+            # Here we just finalize the values with the mark price if it's the very latest.
+            if mark_price > 0:
+                if direction == "LONG":
+                    latest_pnl = (mark_price - position["avg_price"]) * position["size"]
+                else:
+                    latest_pnl = (position["avg_price"] - mark_price) * position["size"]
+                position["high_price"] = max(position.get("high_price", mark_price), mark_price)
+                position["low_price"] = min(position.get("low_price", mark_price), mark_price)
+                position["mfe_usdc"] = max(position.get("mfe_usdc", 0.0), latest_pnl)
+                position["mae_usdc"] = min(position.get("mae_usdc", 0.0), latest_pnl)
+
             exit_cost_estimate = abs(position["size"] * mark_price) * cost_bps / 10_000.0
             net_unrealized = gross_unrealized - exit_cost_estimate
             unrealized_pnl += net_unrealized
@@ -621,6 +817,7 @@ def create_router(settings: Settings, state: UiState, bus: UiEventBus) -> APIRou
                 {
                     "position_id": position["position_id"],
                     "wallet_address": wallet,
+                    "leader_source": position.get("leader_source", "unknown"),
                     "coin": coin,
                     "direction": direction,
                     "size": round(position["size"], 10),
@@ -629,12 +826,15 @@ def create_router(settings: Settings, state: UiState, bus: UiEventBus) -> APIRou
                     "fees_usdc": round(position["fees_usdc"], 6),
                     "realized_pnl_usdc": round(position["realized_pnl_usdc"], 6),
                     "unrealized_pnl_usdc": round(net_unrealized, 6),
+                    "mfe_usdc": round(position["mfe_usdc"], 6),
+                    "mae_usdc": round(position["mae_usdc"], 6),
                     "research_only": True,
                 }
             )
             persisted_positions[encode_position_key(wallet, coin, direction)] = {
                 "position_id": position["position_id"],
                 "wallet_address": wallet,
+                "leader_source": position.get("leader_source", "unknown"),
                 "coin": coin,
                 "direction": direction,
                 "entry_at_ms": position["entry_at_ms"],
@@ -645,8 +845,14 @@ def create_router(settings: Settings, state: UiState, bus: UiEventBus) -> APIRou
                 "fees_usdc": round(float(position["fees_usdc"]), 12),
                 "realized_pnl_usdc": round(float(position["realized_pnl_usdc"]), 12),
                 "unrealized_pnl_usdc": round(float(net_unrealized), 12),
+                "mfe_usdc": round(float(position["mfe_usdc"]), 12),
+                "mae_usdc": round(float(position["mae_usdc"]), 12),
+                "high_price": round(float(position["high_price"]), 12),
+                "low_price": round(float(position["low_price"]), 12),
                 "status": position["status"],
                 "close_reason": position["close_reason"],
+                "exit_plan": position["exit_plan"],
+                "partial_tp_hit": position.get("partial_tp_hit", False),
                 "source_delta_ids": position["source_delta_ids"],
             }
         open_positions.sort(key=lambda item: abs(float(item["unrealized_pnl_usdc"])), reverse=True)
@@ -689,6 +895,7 @@ def create_router(settings: Settings, state: UiState, bus: UiEventBus) -> APIRou
             "refused": refused,
             "open_local_positions": len(positions),
             "open_positions": open_positions[:25],
+            "closed_positions": closed_positions[-50:],
             "realized_net_pnl_usdc": round(realized_net_pnl, 6),
             "unrealized_pnl_usdc": round(unrealized_pnl, 6),
             "estimated_net_pnl_usdc": round(total_pnl, 6),
@@ -1294,6 +1501,7 @@ def create_router(settings: Settings, state: UiState, bus: UiEventBus) -> APIRou
             reasons["NO_ENTRY_DELTA_SIMULABLE"] += 1
 
         consensus = build_position_consensus(live_simulation_deltas, window_ms=300_000, min_wallets=2)
+        leader_source_map = {row["wallet_address"].lower(): row["source"] for row in leader_cards}
         bot_simulation = build_bot_simulation(
             live_simulation_deltas,
             mid_prices=mid_prices,
@@ -1302,8 +1510,11 @@ def create_router(settings: Settings, state: UiState, bus: UiEventBus) -> APIRou
             existing_positions=state.simulation_virtual_positions,
             existing_events=state.simulation_ledger_events,
             processed_delta_keys=state.simulation_processed_delta_keys,
+            leader_source_map=leader_source_map,
+            existing_closed_positions=state.simulation_closed_positions,
         )
         state.simulation_virtual_positions = bot_simulation["virtual_positions_state"]
+        state.simulation_closed_positions = bot_simulation["closed_positions"]
         state.simulation_ledger_events = bot_simulation["ledger_events"]
         state.simulation_processed_delta_keys = set(bot_simulation["processed_delta_keys"])
         persist_simulation_state(settings, state)

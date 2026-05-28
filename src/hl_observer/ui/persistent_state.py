@@ -43,6 +43,7 @@ def persist_simulation_state(settings: Settings, state: UiState) -> Path:
         "simulation_starting_equity_usdt": float(state.simulation_starting_equity_usdt),
         "simulation_processed_delta_keys": sorted(state.simulation_processed_delta_keys)[-MAX_PERSISTED_DELTA_KEYS:],
         "simulation_virtual_positions": _safe_position_payload(state.simulation_virtual_positions),
+        "simulation_closed_positions": _safe_closed_positions_payload(state.simulation_closed_positions),
         "simulation_ledger_events": _safe_ledger_payload(state.simulation_ledger_events),
         "updated_at_ms": now_ms(),
         "runtime_only": True,
@@ -75,6 +76,13 @@ def _load_state_file(path: Path) -> UiState | None:
             for key, value in positions.items()
             if isinstance(value, dict)
         }
+    closed = payload.get("simulation_closed_positions")
+    if isinstance(closed, list):
+        state.simulation_closed_positions = [
+            item
+            for item in closed[-500:]
+            if isinstance(item, dict)
+        ]
     ledger = payload.get("simulation_ledger_events")
     if isinstance(ledger, list):
         state.simulation_ledger_events = [
@@ -114,17 +122,42 @@ def _safe_float(value: object) -> float | None:
         return None
 
 
+def _safe_closed_positions_payload(positions: list[dict]) -> list[dict]:
+    safe_list: list[dict] = []
+    for pos in positions[-500:]:
+        if not isinstance(pos, dict):
+            continue
+        safe_list.append(_recursively_sanitize(pos))
+    return safe_list
+
+
 def _safe_position_payload(positions: dict[str, dict]) -> dict[str, dict]:
     safe: dict[str, dict] = {}
     for key, value in positions.items():
         if not isinstance(value, dict):
             continue
-        safe[str(key)] = {
-            item_key: item_value
-            for item_key, item_value in value.items()
-            if isinstance(item_value, (str, int, float, bool, list)) or item_value is None
-        }
+        safe[str(key)] = _recursively_sanitize(value)
     return safe
+
+
+def _recursively_sanitize(data: dict) -> dict:
+    """Safely sanitizes a dictionary for JSON persistence, ensuring nested dicts/lists are kept."""
+    result = {}
+    for k, v in data.items():
+        if isinstance(v, (str, int, float, bool)) or v is None:
+            result[k] = v
+        elif isinstance(v, list):
+            result[k] = [
+                item if isinstance(item, (str, int, float, bool)) or item is None
+                else _recursively_sanitize(item) if isinstance(item, dict)
+                else str(item)
+                for item in v
+            ]
+        elif isinstance(v, dict):
+            result[k] = _recursively_sanitize(v)
+        else:
+            result[k] = str(v)
+    return result
 
 
 def _safe_ledger_payload(events: list[dict]) -> list[dict]:
