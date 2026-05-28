@@ -16,6 +16,7 @@ from hl_observer.copying.realtime_magic_score import (
     RealtimeCopyScoreInput,
     score_realtime_copy_candidate,
 )
+from hl_observer.execution.decision_engine import DecisionContext, UnifiedDecisionEngine
 from hl_observer.security.safety_audit import run_safety_audit
 from hl_observer.storage.database import create_session_factory, create_sqlite_engine
 from hl_observer.storage.models import (
@@ -301,6 +302,7 @@ def create_router(settings: Settings, state: UiState, bus: UiEventBus) -> APIRou
         existing_positions: dict[str, dict[str, Any]] | None = None,
         existing_events: list[dict[str, Any]] | None = None,
         processed_delta_keys: set[str] | None = None,
+        decision_engine: UnifiedDecisionEngine | None = None,
     ) -> dict[str, Any]:
         """Simulate the bot's local no-money decisions from the incoming leader delta stream.
 
@@ -470,6 +472,55 @@ def create_router(settings: Settings, state: UiState, bus: UiEventBus) -> APIRou
             key = (row.wallet_address.lower(), row.coin.upper(), direction)
             metrics = opportunity_metrics(row, direction)
             event.update(metrics)
+
+            # Unified decision integration
+            if decision_engine and action in {"OPEN_LONG", "OPEN_SHORT", "ADD", "INCREASE"}:
+                # Note: We simulate a SignalCandidate here for the engine
+                # In a real run, this would already be a SignalCandidate from storage
+                # But for the UI simulation on the fly, we map the delta.
+                from hyper_smart_observer.copy_mode.copy_models import SignalCandidate, SignalDecision
+                from hyper_smart_observer.copy_mode.copy_models import DeltaAction as RootDeltaAction
+                from datetime import datetime, UTC
+
+                sig = SignalCandidate(
+                    candidate_id=current_delta_key,
+                    leader_wallet=row.wallet_address,
+                    coin=row.coin,
+                    action_type=RootDeltaAction(action),
+                    observed_at=datetime.fromtimestamp((delta_event_time_ms(row)) / 1000, UTC),
+                    leader_fill_time=None,
+                    leader_reference_price=row.price,
+                    current_mid=mid_prices.get(row.coin.upper()) if mid_prices else None,
+                    spread_bps=3.0,
+                    slippage_bps=5.0,
+                    fee_bps=4.0,
+                    latency_ms=500,
+                    liquidity_score=1.0,
+                    leader_score=float(row.confidence_score or 0.5) * 100,
+                    signal_freshness_score=1.0,
+                    copy_degradation_bps=12.0,
+                    edge_remaining_bps=float(metrics.get("edge_remaining_bps", 0.0)),
+                    paper_mode="PAPER_MOCK_USDC",
+                    decision=SignalDecision.ACCEPT_PAPER if metrics["decision_reason"] == "EDGE_OK_FOR_LOCAL_SIMULATION" else SignalDecision.REJECT_NO_TRADE,
+                    refusal_reasons=[],
+                    raw_event_hash=row.delta_hash or current_delta_key
+                )
+
+                # Check current exposure
+                current_exposure = sum(abs(p["size"] * p["avg_price"]) for p in positions.values())
+
+                unified = decision_engine.evaluate(DecisionContext(
+                    signal=sig,
+                    wallet_score=sig.leader_score,
+                    equity_usdt=starting_equity_usdt,
+                    open_positions_count=len(positions),
+                    total_exposure_usdt=current_exposure
+                ))
+
+                if not unified.allowed:
+                    event["reason"] = "|".join(unified.reasons)
+                    ledger_events.append(event)
+                    continue
             leader_size = abs(float(row.delta_size or row.fill_size or 0.0))
             if action in {"OPEN_LONG", "OPEN_SHORT", "ADD", "INCREASE"} and metrics["decision_reason"] != "EDGE_OK_FOR_LOCAL_SIMULATION":
                 event["reason"] = str(metrics["decision_reason"])
@@ -1249,6 +1300,9 @@ def create_router(settings: Settings, state: UiState, bus: UiEventBus) -> APIRou
         elif not entry_deltas and deltas:
             reasons["NO_ENTRY_DELTA_SIMULABLE"] += 1
 
+        # Unified Decision Engine simulation
+        decision_engine = UnifiedDecisionEngine(settings)
+
         consensus = build_position_consensus(live_simulation_deltas, window_ms=300_000, min_wallets=2)
         bot_simulation = build_bot_simulation(
             live_simulation_deltas,
@@ -1258,6 +1312,7 @@ def create_router(settings: Settings, state: UiState, bus: UiEventBus) -> APIRou
             existing_positions=state.simulation_virtual_positions,
             existing_events=state.simulation_ledger_events,
             processed_delta_keys=state.simulation_processed_delta_keys,
+            decision_engine=decision_engine,
         )
         state.simulation_virtual_positions = bot_simulation["virtual_positions_state"]
         state.simulation_ledger_events = bot_simulation["ledger_events"]

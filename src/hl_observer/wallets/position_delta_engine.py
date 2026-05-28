@@ -154,6 +154,94 @@ def confidence_for_fill(fill: dict[str, Any], *, direction_unclear: bool, has_st
     return max(0.1, min(1.0, score)), notes
 
 
+class IntelligentDeltaDetector:
+    """Nine-proof scorecard for delta detection confidence.
+
+    Supports confidence levels: HIGH (1.0), MEDIUM (0.65), or UNKNOWN (0.0).
+    """
+
+    def evaluate_delta(
+        self,
+        fill: dict[str, Any],
+        previous_size: float | None,
+        current_size: float | None,
+    ) -> tuple[float, str, list[str]]:
+        scorecard = {
+            "delta_vs_fill": False,
+            "direction_vs_side": False,
+            "start_position_match": False,
+            "closed_pnl_logic": False,
+            "side_match": False,
+            "size_match": False,
+            "price_valid": False,
+            "temporal_order": False,
+            "state_alignment": False,
+        }
+        reasons = []
+
+        # 1. Delta vs Fill
+        f_sz = fill_size(fill)
+        if f_sz is not None and previous_size is not None and current_size is not None:
+            observed_delta = abs(current_size - previous_size)
+            if abs(observed_delta - f_sz) < 1e-8:
+                scorecard["delta_vs_fill"] = True
+
+        # 2. Direction vs Side
+        f_dir = str(fill.get("dir", "")).lower()
+        f_side = str(fill.get("side", "")).lower()
+        if ("long" in f_dir and f_side in {"b", "buy"}) or ("short" in f_dir and f_side in {"s", "sell"}):
+            scorecard["direction_vs_side"] = True
+
+        # 3. startPosition match
+        f_start = start_position(fill)
+        if f_start is not None and previous_size is not None:
+            if abs(f_start - previous_size) < 1e-8:
+                scorecard["start_position_match"] = True
+
+        # 4. closedPnl logic
+        f_pnl = safe_float(fill.get("closedPnl"))
+        if f_pnl is not None:
+            if f_pnl != 0 or "open" in f_dir:
+                scorecard["closed_pnl_logic"] = True
+
+        # 5. Side match
+        if f_side in {"b", "buy", "s", "sell"}:
+            scorecard["side_match"] = True
+
+        # 6. Size match
+        if f_sz is not None and f_sz > 0:
+            scorecard["size_match"] = True
+
+        # 7. Price valid
+        f_px = fill_price(fill)
+        if f_px is not None and f_px > 0:
+            scorecard["price_valid"] = True
+
+        # 8. Temporal order
+        f_time = fill_timestamp(fill)
+        if f_time > 0:
+            scorecard["temporal_order"] = True
+
+        # 9. State alignment
+        if scorecard["delta_vs_fill"] and scorecard["start_position_match"]:
+            scorecard["state_alignment"] = True
+
+        passed = sum(1 for v in scorecard.values() if v)
+
+        # Stricter alignment requirements for HIGH/MEDIUM
+        if not scorecard["delta_vs_fill"] or not scorecard["direction_vs_side"]:
+            reasons.append("CONTRADICTORY: fill data does not match position delta")
+            return 0.0, "UNKNOWN", reasons
+
+        if passed >= 8:
+            return 1.0, "HIGH", reasons
+        if passed >= 5:
+            return 0.65, "MEDIUM", reasons
+
+        reasons.append(f"FAILED_PROOFS: only {passed}/9 proofs passed")
+        return 0.0, "UNKNOWN", reasons
+
+
 def build_position_delta_from_fill(
     wallet_address: str,
     fill: dict[str, Any],
