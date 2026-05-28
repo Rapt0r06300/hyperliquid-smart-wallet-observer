@@ -31,6 +31,7 @@ from hl_observer.storage.models import (
     WalletCoinScoreModel,
     WalletDiscoveryRun,
     WalletDiscoverySourceModel,
+    WalletScoreModel,
     WalletSnapshot,
 )
 from hl_observer.signals.position_delta_detector import PositionDelta
@@ -43,6 +44,7 @@ from hl_observer.markets.coin_metrics import CoinOpportunityRecord, MarketMetric
 from hl_observer.markets.universe import MarketUniverseItem
 from hl_observer.wallets.per_coin_scoring import WalletCoinScore
 from hl_observer.wallets.wallet_coin_profile import WalletCoinProfile
+from hl_observer.hyperliquid.schemas import WalletScore
 from hl_observer.wallets.position_delta_engine import PositionDeltaRecord
 from hl_observer.wallets.position_rebuilder import RebuiltPosition, rebuild_positions_from_fills
 

@@ -60,10 +60,11 @@ def detect_copy_signals_from_deltas(
     now_timestamp_ms: int | None = None,
 ) -> CopySignalDetectionReport:
     current_ms = now_timestamp_ms or now_ms()
+    # Improved filtering: only follow wallets that are ACTIVE_LEADER or SHORTLISTED
     followed_scores = {
         wallet.wallet_address.lower(): float(wallet.score or 0.0)
         for wallet in (followed_wallets or [])
-        if wallet.status != "rejected"
+        if wallet.status in {"ACTIVE_LEADER", "SHORTLISTED", "selected"}
     }
     allowed_wallets = set(followed_scores)
     signals: list[SignalCandidate] = []

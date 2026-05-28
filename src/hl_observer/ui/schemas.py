@@ -35,6 +35,14 @@ class UiWalletRow(BaseModel):
     status: str = "unknown"
     toxicity_flags: list[str] = Field(default_factory=list)
     degradation_status: str = "unknown"
+    fills_count: int = 0
+    pnl_total: float = 0.0
+    win_rate: float = 0.0
+    profit_factor: float = 0.0
+    history_days: float = 0.0
+    pnl_concentration: float = 0.0
+    regularity_score: float = 0.0
+    copyability_score: float = 0.0
 
 
 class UiSignalRow(BaseModel):

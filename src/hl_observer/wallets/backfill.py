@@ -25,6 +25,8 @@ from hl_observer.wallets.activity_summary import summarize_wallet_activity
 from hl_observer.wallets.per_coin_scoring import score_wallet_coin
 from hl_observer.wallets.wallet_coin_profile import build_wallet_coin_profiles
 from hl_observer.wallets.position_rebuilder import rebuild_positions_from_fills
+from hl_observer.wallets.profiler import profile_from_metrics
+from hl_observer.wallets.scoring import score_wallet
 
 DEFAULT_BACKFILL_WINDOW_MS = 7 * 24 * 60 * 60 * 1000
 
@@ -365,6 +367,31 @@ async def _backfill_wallets(
         )
         repo.store_wallet_activity_summary(summary)
         result.activity_summaries_stored += 1
+
+        # Global wallet scoring
+        metrics = {
+            "trades_count": summary.closed_pnl_count,
+            "fills_count": summary.fills_count,
+            "closed_pnl_count": summary.closed_pnl_count,
+            "active_days": int(summary.history_days),
+            "history_days": summary.history_days,
+            "pnl_total_usdc": summary.pnl_total_usdc,
+            "pnl_net_after_fees_usdc": summary.pnl_net_after_fees_usdc,
+            "win_rate": summary.win_rate,
+            "profit_factor": summary.profit_factor,
+            "max_drawdown_pct": summary.max_drawdown_pct,
+            "top_trade_pnl_share": summary.top_trade_pnl_share,
+            "coins_traded_count": summary.coins_count,
+            "main_coin": summary.main_coin,
+            "recent_activity_score": summary.recent_activity_score,
+            "regularity_score": summary.regularity_score,
+            "copyability_score": summary.copyability_score,
+        }
+        profile = profile_from_metrics(wallet, metrics)
+        score = score_wallet(profile)
+        repo.store_wallet_score(score)
+        repo.ensure_wallet(wallet, status=score.status.value)
+
         profiles = build_wallet_coin_profiles(
             wallet,
             unique_fills,

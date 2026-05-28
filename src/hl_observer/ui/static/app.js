@@ -282,30 +282,36 @@ function renderSelected(rows) {
 function renderWalletsFeed(candidates, selected, knownWallets) {
   const target = $("#walletsFeed");
   if (!target) return;
-  const rows = candidates.length ? candidates : selected.map((row) => ({
+  const rows = knownWallets.length ? knownWallets : candidates.length ? candidates : selected.map((row) => ({
     address: row.wallet_address,
     coin: row.coin,
     source: row.source,
-    discovery_score: row.discovery_score,
-    decision: row.status
+    score: row.discovery_score,
+    status: row.status
   }));
-  const fallback = knownWallets.map((row) => ({
-    address: row.address,
-    coin: "GLOBAL",
-    source: row.source,
-    discovery_score: row.score,
-    decision: row.status
-  }));
-  const finalRows = rows.length ? rows : fallback;
-  target.innerHTML = finalRows.length
-    ? finalRows.slice(0, 12).map((row) => `
-      <div class="feed-line">
-        <span class="green">[WALLET]</span>
-        ${escapeHtml(shortAddress(row.address))} :: ${escapeHtml(row.coin || "GLOBAL")} ::
-        score ${escapeHtml(Math.round(row.discovery_score ?? 0))} :: ${escapeHtml(row.decision || row.source || "observe")}
+
+  target.innerHTML = rows.length
+    ? rows.slice(0, 20).map((row) => `
+      <div class="feed-line wallet-fiche">
+        <div class="wallet-header">
+          <span class="green">[WALLET]</span>
+          <strong>${escapeHtml(shortAddress(row.address))}</strong> ::
+          <span class="badge cyan">${escapeHtml(row.status || "OBSERVE")}</span> ::
+          score <strong>${escapeHtml(Math.round(row.score ?? 0))}</strong>
+        </div>
+        <div class="wallet-metrics-grid">
+          <span>Fills: ${escapeHtml(row.fills_count ?? 0)}</span>
+          <span>PnL: ${formatUsd(row.pnl_total ?? 0)}</span>
+          <span>Winrate: ${escapeHtml(Math.round((row.win_rate ?? 0) * 100))}%</span>
+          <span>PF: ${escapeHtml((row.profit_factor ?? 0).toFixed(2))}</span>
+          <span>Hist: ${escapeHtml((row.history_days ?? 0).toFixed(1))}d</span>
+          <span>Conc: ${escapeHtml(Math.round((row.pnl_concentration ?? 0) * 100))}%</span>
+          <span>Reg: ${escapeHtml(Math.round(row.regularity_score ?? 0))}</span>
+          <span>Copy: ${escapeHtml(Math.round(row.copyability_score ?? 0))}</span>
+        </div>
       </div>
     `).join("")
-    : `<div class="feed-line"><span class="orange">[VIDE]</span> Aucun wallet complet stocke pour le moment. Le leaderboard va etre re-tente avant tout import manuel.</div>`;
+    : `<div class="feed-line"><span class="orange">[VIDE]</span> Aucun wallet complet stocke pour le moment.</div>`;
 }
 
 function renderPositionsFeed(rows) {

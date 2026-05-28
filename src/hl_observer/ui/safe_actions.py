@@ -304,8 +304,60 @@ async def _collect_l2_book_btc(action: str, settings: Settings, _state: UiState)
     )
 
 
-async def _score_wallets(action: str, _settings: Settings, _state: UiState) -> UiActionResult:
-    return _result(action, allowed=True, success=True, message="Wallet scoring is ready")
+async def _score_wallets(action: str, settings: Settings, _state: UiState) -> UiActionResult:
+    from hl_observer.storage.database import create_session_factory, create_sqlite_engine
+    from hl_observer.storage.repositories import CollectionRepository
+    from hl_observer.wallets.scoring import score_wallet
+    from hl_observer.wallets.profiler import profile_from_metrics
+    from sqlalchemy import select
+    from hl_observer.storage.models import Wallet, WalletActivitySummary
+
+    engine = create_sqlite_engine(settings.database_url)
+    session_factory = create_session_factory(engine)
+    scored_count = 0
+    with session_factory() as session:
+        repo = CollectionRepository(session)
+        wallets = session.scalars(select(Wallet)).all()
+        for wallet in wallets:
+            summary = session.scalar(
+                select(WalletActivitySummary)
+                .where(WalletActivitySummary.wallet_address == wallet.address)
+                .order_by(WalletActivitySummary.id.desc())
+                .limit(1)
+            )
+            if summary:
+                metrics = {
+                    "trades_count": summary.closed_pnl_count,
+                    "fills_count": summary.fills_count,
+                    "closed_pnl_count": summary.closed_pnl_count,
+                    "active_days": int(summary.history_days),
+                    "history_days": summary.history_days,
+                    "pnl_total_usdc": summary.pnl_total_usdc,
+                    "pnl_net_after_fees_usdc": summary.pnl_net_after_fees_usdc,
+                    "win_rate": summary.win_rate,
+                    "profit_factor": summary.profit_factor,
+                    "max_drawdown_pct": summary.max_drawdown_pct,
+                    "top_trade_pnl_share": summary.top_trade_pnl_share,
+                    "coins_traded_count": summary.coins_count,
+                    "main_coin": summary.main_coin,
+                    "recent_activity_score": summary.recent_activity_score,
+                    "regularity_score": summary.regularity_score,
+                    "copyability_score": summary.copyability_score,
+                }
+                profile = profile_from_metrics(wallet.address, metrics)
+                score = score_wallet(profile)
+                repo.store_wallet_score(score)
+                wallet.status = score.status.value
+                scored_count += 1
+        session.commit()
+
+    return _result(
+        action,
+        allowed=True,
+        success=True,
+        message=f"Wallet scoring complete: {scored_count} wallets scored.",
+        details={"scored_count": scored_count}
+    )
 
 
 async def _detect_signals(action: str, _settings: Settings, _state: UiState) -> UiActionResult:

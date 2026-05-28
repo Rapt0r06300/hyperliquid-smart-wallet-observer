@@ -571,6 +571,24 @@ input {
   color: var(--muted);
 }
 
+.wallet-fiche {
+  padding: 8px 12px;
+  background: rgba(0, 217, 255, 0.02);
+  margin-bottom: 4px;
+}
+
+.wallet-header {
+  margin-bottom: 6px;
+}
+
+.wallet-metrics-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 4px 12px;
+  font-size: 11px;
+  color: var(--cyan);
+}
+
 .manual {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;

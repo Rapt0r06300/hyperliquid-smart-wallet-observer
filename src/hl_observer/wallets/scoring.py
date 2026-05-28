@@ -16,6 +16,9 @@ def score_wallet(profile: WalletProfile) -> WalletScore:
         reasons.append("pnl_concentration_too_high")
     if profile.copyability_score < 40:
         reasons.append("low_copyability")
+    # Illiquid coins penalty
+    if profile.copyability_score < 30:
+        reasons.append("trades_illiquid_assets")
     if profile.toxicity_score > 0.7:
         reasons.append("wallet_toxicity_high")
 

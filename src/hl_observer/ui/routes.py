@@ -782,10 +782,16 @@ def create_router(settings: Settings, state: UiState, bus: UiEventBus) -> APIRou
                     .order_by(WalletSource.created_at.desc())
                     .limit(1)
                 )
-                score = session.scalar(
-                    select(WalletScoreModel.score)
+                score_model = session.scalar(
+                    select(WalletScoreModel)
                     .where(WalletScoreModel.wallet_address == wallet.address)
                     .order_by(WalletScoreModel.created_at.desc())
+                    .limit(1)
+                )
+                summary = session.scalar(
+                    select(WalletActivitySummary)
+                    .where(WalletActivitySummary.wallet_address == wallet.address)
+                    .order_by(WalletActivitySummary.id.desc())
                     .limit(1)
                 )
                 rows.append(
@@ -793,8 +799,16 @@ def create_router(settings: Settings, state: UiState, bus: UiEventBus) -> APIRou
                         address=wallet.address,
                         label=wallet.label,
                         source=source,
-                        score=score,
-                        status=wallet.status,
+                        score=score_model.score if score_model else None,
+                        status=score_model.status if score_model else wallet.status,
+                        fills_count=summary.fills_count if summary else 0,
+                        pnl_total=summary.pnl_total_usdc if summary else 0.0,
+                        win_rate=summary.win_rate if summary else 0.0,
+                        profit_factor=summary.profit_factor if summary else 0.0,
+                        history_days=summary.history_days if summary else 0.0,
+                        pnl_concentration=summary.top_trade_pnl_share if summary else 0.0,
+                        regularity_score=summary.regularity_score if summary else 0.0,
+                        copyability_score=summary.copyability_score if summary else 0.0,
                     )
                 )
         return rows
