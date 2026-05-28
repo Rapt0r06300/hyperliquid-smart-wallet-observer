@@ -627,11 +627,22 @@ def create_router(settings: Settings, state: UiState, bus: UiEventBus) -> APIRou
             for row in ledger_events
             if row.get("bot_replay_action") in {"PAPER_ENTRY_REPLAYED", "PAPER_ADD_REPLAYED", "PAPER_JOIN_ADD_AS_ENTRY"}
         )
-        reproduced_exits = sum(
-            1
+        reproduced_exits_list = [
+            row
             for row in ledger_events
             if row.get("bot_replay_action") in {"PAPER_CLOSE_REPLAYED", "PAPER_REDUCE_REPLAYED"}
-        )
+        ]
+        reproduced_exits = len(reproduced_exits_list)
+
+        wins = [r for row in reproduced_exits_list if (r := float(row.get("estimated_net_pnl_usdc") or 0)) > 0]
+        losses = [r for row in reproduced_exits_list if (r := float(row.get("estimated_net_pnl_usdc") or 0)) < 0]
+        win_rate = (len(wins) / reproduced_exits * 100) if reproduced_exits > 0 else 0.0
+
+        gross_profit = sum(wins)
+        gross_loss = abs(sum(losses))
+        profit_factor = (gross_profit / gross_loss) if gross_loss > 0 else (9.99 if gross_profit > 0 else 1.0)
+        avg_trade = (realized_net_pnl / reproduced_exits) if reproduced_exits > 0 else 0.0
+
         refused = sum(1 for row in ledger_events if row.get("status") == "REFUSED")
         total_pnl = realized_net_pnl + unrealized_pnl
 
@@ -648,6 +659,9 @@ def create_router(settings: Settings, state: UiState, bus: UiEventBus) -> APIRou
             "realized_net_pnl_usdc": round(realized_net_pnl, 6),
             "unrealized_pnl_usdc": round(unrealized_pnl, 6),
             "estimated_net_pnl_usdc": round(total_pnl, 6),
+            "win_rate_pct": round(win_rate, 2),
+            "profit_factor": round(profit_factor, 2),
+            "avg_trade_usdc": round(avg_trade, 4),
             "entry_costs_paid_usdc": round(entry_costs_paid, 6),
             "exit_costs_paid_usdc": round(exit_costs_paid, 6),
             "total_costs_paid_usdc": round(entry_costs_paid + exit_costs_paid, 6),

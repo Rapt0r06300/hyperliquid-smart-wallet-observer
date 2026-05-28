@@ -96,20 +96,31 @@
             <canvas id="simulationMetaGraph" width="1180" height="320" aria-label="Metagraphe de simulation"></canvas>
             <div id="simulationGraphTooltip" class="chart-tooltip hidden"></div>
           </div>
+          <!-- Stats Bar -->
+          <div class="simulation-stats-bar">
+            <div class="stat-item"><span>WIN RATE</span><strong id="statWinRate">0%</strong></div>
+            <div class="stat-item"><span>PROFIT FACTOR</span><strong id="statProfitFactor">1.00</strong></div>
+            <div class="stat-item"><span>AVG TRADE</span><strong id="statAvgTrade">$0.00</strong></div>
+            <div class="stat-item"><span>TOTAL COSTS</span><strong id="statTotalCosts">$0.00</strong></div>
+          </div>
         </div>
 
         <!-- Bloc Bas : Feeds de decision -->
-        <div class="bottom-block">
+        <div class="bottom-block dashboard-grid-v2">
+          <article class="feed-container">
+            <h3>Consensus Actif</h3>
+            <div id="simulationConsensusFeedSimple" class="feed"></div>
+          </article>
           <article class="feed-container">
             <h3>Positions Virtuelles</h3>
             <div id="simulationPositionsFeed" class="feed"></div>
           </article>
           <article class="feed-container">
-            <h3>Decisions du Bot</h3>
+            <h3>Décisions</h3>
             <div id="simulationReplayFeed" class="feed"></div>
           </article>
           <article class="feed-container">
-            <h3>Refus No-Trade</h3>
+            <h3>Refus de Risque</h3>
             <div id="simulationNoTradeFeed" class="feed"></div>
           </article>
         </div>
@@ -118,14 +129,15 @@
       <!-- MODE EXPERT : CACHE PAR DEFAUT -->
       <div id="expertView" class="hidden">
         <nav class="quick-tabs" aria-label="Navigation des vues principales">
-          <a href="#simulationPanel">Simulation Detail</a>
-          <a href="#copyPanel">Copy dry-run</a>
-          <a href="#dataWatchPanel">Donnees analysees</a>
-          <a href="#activityPanel">Activite</a>
-          <a href="#expertPanel">Config Expert</a>
+          <button data-tab="simulationPanel" class="active">Simulation Detail</button>
+          <button data-tab="copyPanel">Auto-Pilot</button>
+          <button data-tab="scanPanel">Scan Overview</button>
+          <button data-tab="dataWatchPanel">Donnees analysees</button>
+          <button data-tab="activityPanel">Activite</button>
+          <button data-tab="expertPanel">Config Expert</button>
         </nav>
 
-        <section class="panel data-watch hero-simulation" id="simulationPanel">
+        <section class="panel data-watch hero-simulation tab-content" id="simulationPanel">
           <div class="panel-title">
             <span class="dot green pulse"></span>
             <h2>Details de simulation</h2>
@@ -151,7 +163,7 @@
           </div>
         </section>
 
-        <section class="hero panel" id="copyPanel">
+        <section class="hero panel tab-content hidden" id="copyPanel">
           <div class="hero-copy">
             <p class="eyebrow">Auto-Pilot Discovery</p>
             <h2 id="autopilotTitle">Recherche automatique en cours</h2>
@@ -165,7 +177,7 @@
           </div>
         </section>
 
-        <section class="panel scan-overview" id="scanPanel">
+        <section class="panel scan-overview tab-content hidden" id="scanPanel">
           <div class="scan-status">
             <p class="eyebrow">Scan automatique</p>
             <h2 id="scanStepTitle">En attente</h2>
@@ -181,7 +193,7 @@
           </div>
         </section>
 
-        <section class="panel activity" id="activityPanel">
+        <section class="panel activity tab-content hidden" id="activityPanel">
           <div class="panel-title">
             <span class="dot green pulse"></span>
             <h2>Activite recente</h2>
@@ -189,7 +201,7 @@
           <div class="feed" id="eventFeed"></div>
         </section>
 
-        <section class="panel data-watch" id="dataWatchPanel">
+        <section class="panel data-watch tab-content hidden" id="dataWatchPanel">
           <div class="panel-title">
             <span class="dot green pulse"></span>
             <h2>Vue live des donnees analysees</h2>
@@ -201,7 +213,7 @@
           </div>
         </section>
 
-        <section class="panel expert" id="expertPanel">
+        <section class="panel expert tab-content hidden" id="expertPanel">
           <div class="panel-title">
             <span class="dot cyan"></span>
             <h2>Configuration Expert</h2>
@@ -213,7 +225,7 @@
           </div>
         </section>
 
-        <section class="panel terminal" id="terminalPanel">
+        <section class="panel terminal tab-content hidden" id="terminalPanel">
           <div class="panel-title">
             <span class="dot green pulse"></span>
             <h2>Logs techniques</h2>

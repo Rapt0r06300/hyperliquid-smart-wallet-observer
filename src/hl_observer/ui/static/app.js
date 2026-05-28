@@ -486,6 +486,16 @@ function renderSimulationOverview(payload) {
   const dashFreshness = $("#dashFreshness");
   if (dashFreshness) dashFreshness.textContent = payload.last_live_event_ms ? formatClockMs(payload.last_live_event_ms) : "--";
 
+  // 3. Stats Bar
+  const statWinRate = $("#statWinRate");
+  if (statWinRate) statWinRate.textContent = `${payload.bot_simulation?.win_rate_pct ?? 0}%`;
+  const statProfitFactor = $("#statProfitFactor");
+  if (statProfitFactor) statProfitFactor.textContent = (payload.bot_simulation?.profit_factor ?? 1.0).toFixed(2);
+  const statAvgTrade = $("#statAvgTrade");
+  if (statAvgTrade) statAvgTrade.textContent = formatUsd(payload.bot_simulation?.avg_trade_usdc ?? 0);
+  const statTotalCosts = $("#statTotalCosts");
+  if (statTotalCosts) statTotalCosts.textContent = formatUsd(payload.bot_simulation?.total_costs_paid_usdc ?? 0);
+
   const metrics = [
     ["P&L bot", formatUsd(equity.current_pnl_usdc ?? 0)],
     ["Capital", `${formatUsd(equity.current_equity_usdt ?? 1000)} USDT`],
@@ -536,6 +546,7 @@ function renderSimulationOverview(payload) {
 
   const walletsTarget = $("#simulationWalletsFeed");
   const consensusTarget = $("#simulationConsensusFeed");
+  const consensusTargetSimple = $("#simulationConsensusFeedSimple");
   const deltasTarget = $("#simulationDeltasFeed");
   const replayTarget = $("#simulationReplayFeed");
   const positionsTarget = $("#simulationPositionsFeed");
@@ -581,15 +592,19 @@ function renderSimulationOverview(payload) {
     `).join("")
     : `<div class="feed-line"><span class="orange">[VIDE]</span> Aucun wallet leader charge. Importer des adresses completes ou relancer la discovery read-only.</div>`;
 
-  consensusTarget.innerHTML = consensus.length
+  const consensusHtml = consensus.length
     ? consensus.slice(0, 8).map((row) => `
       <div class="feed-line">
-        <span class="${row.crowding_risk === "HIGH" ? "orange" : "green"}">[${escapeHtml(row.direction)}]</span>
-        ${escapeHtml(row.coin)} :: ${escapeHtml(row.wallet_count)} wallets :: score ${escapeHtml(row.consensus_score)} ::
-        crowding ${escapeHtml(row.crowding_risk)}
+        <span class="badge ${row.direction === "LONG" ? "green" : "red"}">${escapeHtml(row.direction)}</span>
+        <strong>${escapeHtml(row.coin)}</strong>
+        <span>${escapeHtml(row.wallet_count)} wallets</span>
+        <span class="reason-pill">${escapeHtml(row.crowding_risk)} risk</span>
       </div>
     `).join("")
-    : `<div class="feed-line"><span class="cyan">[INFO]</span> Aucun consensus multi-wallet detecte sur la fenetre 5 minutes.</div>`;
+    : `<div class="feed-line"><span class="cyan">[INFO]</span> Aucun consensus multi-wallet détecté.</div>`;
+
+  if (consensusTarget) consensusTarget.innerHTML = consensusHtml;
+  if (consensusTargetSimple) consensusTargetSimple.innerHTML = consensusHtml;
 
   deltasTarget.innerHTML = entryDeltas.length
     ? entryDeltas.slice(0, 10).map((row) => `
@@ -746,6 +761,20 @@ function drawSimulationMetaGraph(candles, equity) {
   ctx.stroke();
 
   const hitboxes = [];
+
+  // Draw Equity Line
+  ctx.strokeStyle = "rgba(0, 217, 255, 0.4)";
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  candles.forEach((row, index) => {
+    const x = plotLeft + index * xStep + xStep / 2;
+    const y = yFor(row.equity_close);
+    if (index === 0) ctx.moveTo(x, y);
+    else ctx.lineTo(x, y);
+  });
+  ctx.stroke();
+
+  // Draw Candles and Markers
   candles.forEach((row, index) => {
     const x = plotLeft + index * xStep + xStep / 2;
     const openY = yFor(row.ha_open);
@@ -755,6 +784,7 @@ function drawSimulationMetaGraph(candles, equity) {
     const top = Math.min(openY, closeY);
     const bodyHeight = Math.max(3, Math.abs(closeY - openY));
     const color = row.color === "green" ? "#00ff88" : "#ff3b5f";
+
     ctx.strokeStyle = color;
     ctx.fillStyle = color;
     ctx.beginPath();
@@ -764,6 +794,27 @@ function drawSimulationMetaGraph(candles, equity) {
     ctx.globalAlpha = 0.86;
     ctx.fillRect(x - candleWidth / 2, top, candleWidth, bodyHeight);
     ctx.globalAlpha = 1;
+
+    // Visual Markers for Entry/Exit
+    const src = row.source || "";
+    if (src.includes("ENTRY") || src.includes("ADD")) {
+      ctx.fillStyle = "#00ff88";
+      ctx.beginPath();
+      ctx.moveTo(x, plotBottom + 8);
+      ctx.lineTo(x - 4, plotBottom + 16);
+      ctx.lineTo(x + 4, plotBottom + 16);
+      ctx.fill();
+    } else if (src.includes("CLOSE") || src.includes("REDUCE")) {
+      ctx.strokeStyle = "#ffffff";
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(x - 4, plotBottom + 8);
+      ctx.lineTo(x + 4, plotBottom + 16);
+      ctx.moveTo(x + 4, plotBottom + 8);
+      ctx.lineTo(x - 4, plotBottom + 16);
+      ctx.stroke();
+    }
+
     hitboxes.push({ x, row });
   });
 
@@ -966,6 +1017,15 @@ function wireUi() {
   $("#expertToggle").addEventListener("click", () => {
     const hidden = $("#expertView").classList.toggle("hidden");
     $("#expertToggle").textContent = hidden ? "Mode Expert" : "Masquer les details techniques";
+  });
+  $$("[data-tab]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const target = btn.dataset.tab;
+      $$("[data-tab]").forEach((b) => b.classList.remove("active"));
+      $$(".tab-content").forEach((c) => c.classList.add("hidden"));
+      btn.classList.add("active");
+      $(`#${target}`).classList.remove("hidden");
+    });
   });
   $$("[data-filter]").forEach((button) => {
     button.addEventListener("click", () => {
