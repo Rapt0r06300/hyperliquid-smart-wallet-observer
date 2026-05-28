@@ -5,12 +5,13 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from hl_observer.config.settings import Settings
+from sqlalchemy import select, desc
 from hl_observer.copying.realtime_magic_score import (
     RealtimeCopyRiskConfig,
     RealtimeCopyScoreInput,
     score_realtime_copy_candidate,
 )
-from hl_observer.storage.models import PositionDeltaModel
+from hl_observer.storage.models import PositionDeltaModel, MarketMetric
 from hl_observer.wallets.delta_utils import copy_delta_action, copy_delta_direction, delta_event_time_ms
 
 logger = logging.getLogger(__name__)
@@ -33,11 +34,12 @@ class UnifiedDecisionEngine:
     identical trading rules and cost modeling.
     """
 
-    def __init__(self, settings: Settings):
+    def __init__(self, settings: Settings, session_factory=None):
         self.settings = settings
+        self.session_factory = session_factory
         self.sim_cfg = settings.paper_simulation
         self.starting_equity = self.sim_cfg.starting_equity
-        self.cost_bps = 12.0  # Pessimistic: 4bps fee + 3bps spread + 5bps slippage
+        self.base_fee_bps = 4.0
 
         # Internal state
         self.positions: dict[str, VirtualPosition] = {}
@@ -110,6 +112,41 @@ class UnifiedDecisionEngine:
         ts = int(row.exchange_ts or row.detected_at_ms or 0)
         return f"raw:{row.wallet_address.lower()}:{row.coin.upper()}:{ts}:{row.delta_type}:{row.delta_size}"
 
+    def _get_market_metric(self, coin: str) -> dict[str, float]:
+        if not self.session_factory:
+            return {"spread_bps": 3.0, "depth_usdc": 100_000.0}
+
+        try:
+            with self.session_factory() as session:
+                metric = session.scalar(
+                    select(MarketMetric)
+                    .where(MarketMetric.coin == coin.upper())
+                    .order_by(desc(MarketMetric.computed_at_ms))
+                    .limit(1)
+                )
+                if metric:
+                    return {
+                        "spread_bps": float(metric.spread_bps or 3.0),
+                        "depth_usdc": float(metric.depth_usdc or 100_000.0)
+                    }
+        except Exception as e:
+            logger.warning(f"Failed to fetch market metrics for {coin}: {e}")
+
+        return {"spread_bps": 3.0, "depth_usdc": 100_000.0}
+
+    def _calculate_dynamic_costs(self, coin: str, notional: float) -> float:
+        """Calculate dynamic costs in BPS based on market liquidity."""
+        metrics = self._get_market_metric(coin)
+        spread_bps = metrics["spread_bps"]
+        depth = metrics["depth_usdc"]
+
+        # Slippage model: 0.1bps per 1% of depth consumed, or 5bps minimum for small trades
+        depth_consumption = notional / depth if depth > 0 else 1.0
+        slippage_bps = max(5.0, depth_consumption * 1000.0)
+
+        total_bps = self.base_fee_bps + (spread_bps / 2.0) + slippage_bps
+        return total_bps
+
     def _execute_simulation_step(self, delta: PositionDeltaModel, mid_prices: dict[str, float], now_ms: int):
         action = copy_delta_action(delta)
         direction = copy_delta_direction(delta, action)
@@ -158,7 +195,8 @@ class UnifiedDecisionEngine:
                 return
 
             # Execute virtual entry
-            cost = desired_notional * self.cost_bps / 10_000.0
+            current_cost_bps = self._calculate_dynamic_costs(delta.coin, desired_notional)
+            cost = desired_notional * current_cost_bps / 10_000.0
             size = desired_notional / float(delta.price)
 
             prev = self.positions.get(key)
@@ -215,7 +253,8 @@ class UnifiedDecisionEngine:
             else:
                 gross_pnl = (pos.avg_price - float(delta.price)) * close_size
 
-            exit_cost = close_size * float(delta.price) * self.cost_bps / 10_000.0
+            current_cost_bps = self._calculate_dynamic_costs(delta.coin, close_size * float(delta.price))
+            exit_cost = close_size * float(delta.price) * current_cost_bps / 10_000.0
             net_pnl = gross_pnl - exit_cost
 
             pos.size -= close_size

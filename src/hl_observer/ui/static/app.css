@@ -514,6 +514,20 @@ input {
   margin-bottom: 8px;
 }
 
+.metagraph-stats {
+  display: flex;
+  gap: 14px;
+  font: 12px "Cascadia Code", Consolas, monospace;
+}
+
+.metagraph-stats span {
+  color: var(--muted);
+}
+
+.metagraph-stats strong {
+  color: var(--cyan);
+}
+
 #simulationMetaGraph {
   width: 100%;
   height: 320px;
@@ -622,6 +636,10 @@ input {
 }
 
 .hidden { display: none; }
+
+.full-width {
+  grid-column: 1 / -1;
+}
 
 .expert-grid {
   display: grid;

@@ -249,7 +249,7 @@ def create_router(settings: Settings, state: UiState, bus: UiEventBus) -> APIRou
         processed_delta_keys: set[str] | None = None,
     ) -> dict[str, Any]:
         """Simulate the bot's local no-money decisions using the professional UnifiedDecisionEngine."""
-        engine = UnifiedDecisionEngine(settings)
+        engine = UnifiedDecisionEngine(settings, session_factory=session_factory)
         engine.load_state(
             positions_raw=existing_positions or {},
             ledger_events=existing_events or [],
@@ -314,6 +314,7 @@ def create_router(settings: Settings, state: UiState, bus: UiEventBus) -> APIRou
                 "max_drawdown_stop_pct": sim_settings.max_drawdown_stop_pct,
                 "execution": "forbidden",
             },
+            "analytics": build_paper_report({"bot_simulation": summary, "equity": {"starting_equity_usdt": summary["starting_equity"]}}).get("analytics", {}),
             "message": summary.get("message", "Simulation professionnelle via UnifiedDecisionEngine."),
         }
 
@@ -1828,6 +1829,41 @@ def create_router(settings: Settings, state: UiState, bus: UiEventBus) -> APIRou
             "paper": "Simulation locale sans ordre reel.",
             "edge": "Estimation prudente du potentiel restant apres couts.",
             "playbook": "Resume observe-only d'une methodologie wallet, jamais une promesse.",
+        }
+
+    @router.post("/api/simulation/backfill")
+    async def simulation_backfill(hours: int = 24) -> dict[str, Any]:
+        hours = max(1, min(hours, 72))
+        cutoff_ms = now_ms() - (hours * 3600 * 1000)
+
+        with session_factory() as session:
+            deltas = session.scalars(
+                select(PositionDeltaModel)
+                .where(
+                    or_(
+                        PositionDeltaModel.exchange_ts >= cutoff_ms,
+                        PositionDeltaModel.detected_at_ms >= cutoff_ms,
+                    )
+                )
+                .order_by(PositionDeltaModel.detected_at_ms.asc())
+            ).all()
+
+        if not deltas:
+            return {"success": False, "message": f"Aucun delta trouve pour les dernieres {hours} heures."}
+
+        # Clear current state and replay from cutoff
+        state.simulation_started_at_ms = cutoff_ms
+        state.simulation_processed_delta_keys.clear()
+        state.simulation_virtual_positions.clear()
+        state.simulation_ledger_events.clear()
+
+        overview = await simulation_overview(limit=5000)
+
+        return {
+            "success": True,
+            "message": f"Replay de {len(deltas)} deltas sur {hours} heures termine.",
+            "deltas_count": len(deltas),
+            "starting_at_ms": cutoff_ms
         }
 
     @router.post("/api/actions")

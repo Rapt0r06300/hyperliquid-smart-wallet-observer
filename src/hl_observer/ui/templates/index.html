@@ -69,6 +69,11 @@
               <p class="eyebrow">Metagraphe local</p>
               <h3>P&L du bot simule</h3>
             </div>
+            <div id="metagraphStats" class="metagraph-stats">
+              <span>Win-rate: <strong id="statWinRate">0%</strong></span>
+              <span>Sharpe: <strong id="statSharpe">0</strong></span>
+              <span>PF: <strong id="statProfitFactor">0</strong></span>
+            </div>
             <span id="simulationGraphState" class="badge cyan">En attente de donnees</span>
           </div>
           <canvas id="simulationMetaGraph" width="1180" height="320" aria-label="Metagraphe de simulation"></canvas>
@@ -337,6 +342,35 @@
           <div>
             <h3>Wallets selectionnes</h3>
             <div id="selectedWallets"></div>
+          </div>
+          <div class="full-width">
+            <h3>Trade Ledger (Derniers 100)</h3>
+            <div class="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Observed</th>
+                    <th>Wallet</th>
+                    <th>Coin</th>
+                    <th>Action</th>
+                    <th>Price</th>
+                    <th>PnL</th>
+                    <th>Edge</th>
+                    <th>Reason</th>
+                  </tr>
+                </thead>
+                <tbody id="tradeLedgerBody"></tbody>
+              </table>
+            </div>
+          </div>
+          <div>
+            <h3>Security & Health Heartbeat</h3>
+            <div id="healthHeartbeat" class="feed">
+              <div class="feed-line">Global Health: <strong id="healthScore" class="green">100%</strong></div>
+              <div class="feed-line">Latence observee: <strong id="observedLatency">-- ms</strong></div>
+              <div class="feed-line">Signaux vus: <strong id="expertSignalsVus">0</strong></div>
+              <div class="feed-line">Deltas analyses: <strong id="expertDeltasAnalyses">0</strong></div>
+            </div>
           </div>
           <div>
             <h3>Risk gates</h3>

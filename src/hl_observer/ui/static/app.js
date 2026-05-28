@@ -434,6 +434,8 @@ function renderSimulationOverview(payload) {
   const equity = payload.equity || {};
   const scanner = payload.scanner || {};
   const autopilot = payload.autopilot || {};
+  const analytics = payload.analytics || {};
+
   const metrics = [
     ["P&L bot", formatUsd(equity.current_pnl_usdc ?? 0)],
     ["Capital", `${formatUsd(equity.current_equity_usdt ?? 1000)} USDT`],
@@ -449,6 +451,11 @@ function renderSimulationOverview(payload) {
     </div>
   `).join("");
 
+  // Metagraph Stats
+  if ($("#statWinRate")) $("#statWinRate").textContent = `${analytics.win_rate_pct ?? 0}%`;
+  if ($("#statSharpe")) $("#statSharpe").textContent = analytics.sharpe_ratio ?? 0;
+  if ($("#statProfitFactor")) $("#statProfitFactor").textContent = analytics.profit_factor ?? 0;
+
   const liveStrip = $("#simulationLiveStrip");
 
   const warning = $("#drawdownStopWarning");
@@ -463,6 +470,9 @@ function renderSimulationOverview(payload) {
   if ($("#ruleMaxTrades")) $("#ruleMaxTrades").textContent = profile.max_open_positions || 3;
   if ($("#ruleRiskPerTrade")) $("#ruleRiskPerTrade").textContent = `${profile.max_risk_per_trade_pct || 1.0}%`;
   if ($("#ruleDrawdownStop")) $("#ruleDrawdownStop").textContent = `${profile.max_drawdown_stop_pct || 10.0}%`;
+
+  if ($("#expertSignalsVus")) $("#expertSignalsVus").textContent = counts.signals || 0;
+  if ($("#expertDeltasAnalyses")) $("#expertDeltasAnalyses").textContent = counts.deltas || 0;
 
   if (liveStrip) {
     const secondsSince = payload.seconds_since_last_live_event;
@@ -601,6 +611,26 @@ function renderSimulationOverview(payload) {
       `;
     }).join("")
     : `<div class="feed-line"><span class="cyan">[FLAT]</span> Le portefeuille virtuel du bot n'a aucune position ouverte.</div>`;
+
+  if ($("#tradeLedgerBody")) {
+    const ledger = botSimulation.ledger_events || [];
+    $("#tradeLedgerBody").innerHTML = ledger.slice(-100).reverse().map(row => {
+        const pnl = row.estimated_net_pnl_usdc;
+        const pnlClass = pnl === null || pnl === undefined ? "" : Number(pnl) >= 0 ? "green" : "red";
+        return `
+            <tr>
+                <td>${escapeHtml(formatClockMs(row.observed_at_ms))}</td>
+                <td title="${escapeHtml(row.wallet_address)}">${escapeHtml(shortAddress(row.wallet_address))}</td>
+                <td>${escapeHtml(row.coin)}</td>
+                <td class="${row.status === "LOCAL_REPLAY" ? "green" : "orange"}">${escapeHtml(row.bot_replay_action || "REFUSED")}</td>
+                <td>${escapeHtml(row.leader_price ?? "-")}</td>
+                <td class="${pnlClass}">${pnl === null || pnl === undefined ? "-" : formatUsd(pnl)}</td>
+                <td>${escapeHtml(row.edge_remaining_bps ?? "-")}</td>
+                <td title="${escapeHtml(row.reason)}">${escapeHtml(row.reason || "local sim")}</td>
+            </tr>
+        `;
+    }).join("");
+  }
 
   noTradeTarget.innerHTML = reasons.length
     ? reasons.slice(0, 10).map((row) => `
