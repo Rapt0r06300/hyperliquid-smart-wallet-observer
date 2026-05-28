@@ -279,6 +279,21 @@ function renderSelected(rows) {
     : `<div class="feed-line"><span class="orange">[INFO]</span> Aucun wallet selectionne pour le moment.</div>`;
 }
 
+function renderSnapshotsFeed(rows) {
+  const target = $("#snapshotsFeed");
+  if (!target) return;
+  target.innerHTML = rows.length
+    ? rows.slice(0, 15).map((row) => `
+      <div class="feed-line">
+        <span class="cyan">[SNAP]</span>
+        #${row.id} :: ${escapeHtml(shortAddress(row.wallet_address))} ::
+        pos ${row.positions_count} orders ${row.orders_count} fills ${row.fills_count} ::
+        ${escapeHtml(row.source || "manual")}
+      </div>
+    `).join("")
+    : `<div class="feed-line"><span class="orange">[INFO]</span> Aucun snapshot stocke.</div>`;
+}
+
 function renderWalletsFeed(candidates, selected, knownWallets) {
   const target = $("#walletsFeed");
   if (!target) return;
@@ -815,7 +830,7 @@ async function loadSimpleHome() {
     autoscan: { analyzes: [] },
     discovery_empty_state: "Chargement du scan automatique..."
   });
-  const [status, discovery, candidates, selected, metrics, events, logs, actions, autoscan, explorerStatus, explorerTape, rejectedCandidates, knownWallets, positions, fills, deltas, openOrders, topByCoin, copyStatus, leaderActivity, noTradeReport, simulationOverview] = await Promise.all([
+  const [status, discovery, candidates, selected, metrics, events, logs, actions, autoscan, explorerStatus, explorerTape, rejectedCandidates, knownWallets, positions, fills, deltas, openOrders, snapshots, topByCoin, copyStatus, leaderActivity, noTradeReport, simulationOverview] = await Promise.all([
     safeGetJson("/api/status", { mode: "PAPER", safety_status: "SAFE", risk_gates: [] }),
     safeGetJson("/api/discovery/status", emptyDiscovery),
     safeGetJson("/api/discovery/candidates", []),
@@ -833,6 +848,7 @@ async function loadSimpleHome() {
     safeGetJson("/api/fills/recent", []),
     safeGetJson("/api/position-deltas/recent", []),
     safeGetJson("/api/open-orders", []),
+    safeGetJson("/api/snapshots", []),
     safeGetJson("/api/wallets/top-by-coin", []),
     safeGetJson("/api/copy/status", {}),
     safeGetJson("/api/copy/leader-activity", []),
@@ -853,6 +869,7 @@ async function loadSimpleHome() {
   renderFillsFeed(fills);
   renderDeltasFeed(deltas);
   renderOpenOrdersFeed(openOrders);
+  renderSnapshotsFeed(snapshots);
   renderTopByCoinFeed(topByCoin);
   renderCopyStatus(copyStatus);
   renderLeaderActivity(leaderActivity);

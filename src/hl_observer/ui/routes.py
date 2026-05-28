@@ -860,6 +860,29 @@ def create_router(settings: Settings, state: UiState, bus: UiEventBus) -> APIRou
             for row in rows
         ]
 
+    @router.get("/api/snapshots")
+    async def snapshots(wallet_address: str | None = None, limit: int = 50) -> list[dict[str, Any]]:
+        with session_factory() as session:
+            query = select(WalletSnapshot).order_by(WalletSnapshot.id.desc())
+            if wallet_address:
+                query = query.where(WalletSnapshot.wallet_address == wallet_address)
+            rows = session.scalars(query.limit(limit)).all()
+        return [
+            {
+                "id": row.id,
+                "wallet_address": row.wallet_address,
+                "collection_run_id": row.collection_run_id,
+                "local_received_ts": row.local_received_ts,
+                "exchange_ts": row.exchange_ts,
+                "positions_count": len(row.positions_json or []),
+                "orders_count": len(row.open_orders_json or []),
+                "fills_count": len(row.fills_json or []),
+                "source": row.source,
+                "stopped_reason": row.stopped_reason,
+            }
+            for row in rows
+        ]
+
     @router.get("/api/open-orders")
     async def open_orders(limit: int = 100) -> list[dict[str, Any]]:
         with session_factory() as session:

@@ -39,7 +39,10 @@ class PositionDeltaRecord(BaseModel):
     price: float | None = None
     fill_size: float | None = None
     confidence_score: float = 0.0
+    is_paper_eligible: bool = False
     source: str = "user_fills"
+    snapshot_id: int | None = None
+    proofs: dict[str, bool] = Field(default_factory=dict)
     notes: list[str] = Field(default_factory=list)
     raw: dict[str, Any] = Field(default_factory=dict)
 

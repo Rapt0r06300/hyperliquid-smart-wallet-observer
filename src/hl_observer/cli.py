@@ -335,6 +335,18 @@ def collect_once(
         f"run_id={result.run_id} fetched={result.fetched_items} "
         f"raw_events={result.raw_events_stored} errors={result.errors_count}"
     )
+    if not result.dry_run and plan.wallets:
+        session_factory = _session_factory(settings)
+        with session_factory() as session:
+            for addr in plan.wallets:
+                record_robust_snapshot(
+                    session,
+                    addr,
+                    run_id=result.run_id,
+                    source="collect-once",
+                    echo_func=typer.echo
+                )
+            session.commit()
 
 
 @app.command("discover-markets")

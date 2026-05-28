@@ -146,3 +146,48 @@ def test_snapshot_engine_timestamp_aware_fills():
     # If it ignored the old fill, delta is 0.5, total 1.0+0.5=1.5 -> matches position -> SUCCESS
     assert result.deltas[0].action == PositionAction.ADD
     assert not any("Contradiction" in w for w in result.warnings)
+
+def test_snapshot_engine_intelligent_scorecard():
+    engine = SnapshotEngine()
+    previous = SnapshotData(
+        wallet_address="0x123",
+        local_received_ts=1000,
+        exchange_ts=1000,
+        positions=[{"coin": "BTC", "szi": "1.0"}]
+    )
+
+    # 1. Size match, side alignment -> HIGH confidence
+    current = SnapshotData(
+        wallet_address="0x123",
+        local_received_ts=2000,
+        exchange_ts=2000,
+        positions=[{"coin": "BTC", "szi": "2.0"}],
+        fills=[{"coin": "BTC", "sz": "1.0", "side": "B", "time": 1500, "px": "50000"}]
+    )
+    result = engine.compare_snapshots(current, previous=previous)
+    delta = result.deltas[0]
+    assert delta.proofs["size_match"] is True
+    assert delta.proofs["side_alignment"] is True
+    assert delta.confidence_score == 1.0
+    assert delta.is_paper_eligible is True
+
+    # 2. Side contradiction -> UNKNOWN
+    current.positions = [{"coin": "BTC", "szi": "0.5"}] # Decrease
+    current.fills = [{"coin": "BTC", "sz": "0.5", "side": "B", "time": 1500, "px": "50000"}] # But fill is BUY
+    result = engine.compare_snapshots(current, previous=previous)
+    delta = result.deltas[0]
+    assert delta.proofs["side_alignment"] is False
+    assert delta.action == PositionAction.UNKNOWN
+    assert delta.confidence_score == 0.0
+    assert delta.is_paper_eligible is False
+
+    # 3. Position change without fills -> MEDIUM confidence
+    current.positions = [{"coin": "BTC", "szi": "2.0"}]
+    current.fills = []
+    result = engine.compare_snapshots(current, previous=previous)
+    delta = result.deltas[0]
+    assert delta.proofs["has_fills"] is False
+    assert delta.action == PositionAction.UNKNOWN # Since it's a size mismatch (expected 1.0, got 2.0)
+
+    # Let's test a case where it's NOT UNKNOWN but has no fills?
+    # Actually, any size mismatch with NO FILLS is UNKNOWN in our logic.

@@ -231,8 +231,10 @@ class PositionDeltaModel(Base, TimestampMixin):
     delta_type: Mapped[str] = mapped_column(String(64), default="unknown")
     confidence: Mapped[str] = mapped_column(String(32), default="medium")
     confidence_score: Mapped[float] = mapped_column(Float, default=0.0)
+    is_paper_eligible: Mapped[bool] = mapped_column(Boolean, default=False)
     detected_at_ms: Mapped[int | None] = mapped_column(Integer)
     source: Mapped[str] = mapped_column(String(64), default="fills")
+    snapshot_id: Mapped[int | None] = mapped_column(Integer, index=True)
     delta_hash: Mapped[str | None] = mapped_column(String(64), index=True)
     raw_json: Mapped[dict] = mapped_column(JSON, default=dict)
 

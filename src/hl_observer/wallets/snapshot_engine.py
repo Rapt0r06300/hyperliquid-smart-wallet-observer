@@ -67,6 +67,12 @@ class SnapshotEngine:
     ) -> SnapshotComparisonResult:
         result = SnapshotComparisonResult(wallet_address=current.wallet_address)
 
+        # Capture errors and stopped reasons from source
+        if current.errors:
+            result.errors.extend(current.errors)
+        if current.stopped_reason:
+            result.warnings.append(f"Source stopped: {current.stopped_reason}")
+
         if not previous:
             result.is_baseline = True
             logger.info(f"Baseline snapshot for {current.wallet_address}")
@@ -109,16 +115,37 @@ class SnapshotEngine:
                 coin_fills = [f for f in coin_fills if int(f.get("time") or f.get("timestamp") or 0) > previous.exchange_ts]
 
             fill_delta = sum(self._signed_fill_size(f) for f in coin_fills)
-
             expected_new_size = prev_size + fill_delta
-            # Allow for some floating point tolerance
-            if abs(curr_size - expected_new_size) > 1e-8:
+
+            # Intelligent Scorecard
+            proofs = {
+                "size_match": abs(curr_size - expected_new_size) < 1e-8,
+                "has_fills": len(coin_fills) > 0,
+                "price_available": all(f.get("px") is not None for f in coin_fills) if coin_fills else True,
+                "side_alignment": True
+            }
+
+            if coin_fills:
+                fill_side = "long" if fill_delta > 0 else "short"
+                delta_side = "long" if curr_size > prev_size else "short"
+                proofs["side_alignment"] = (fill_side == delta_side)
+
+            if not proofs["size_match"]:
                 if not coin_fills:
                     result.warnings.append(f"Position change for {coin} without fills since last snapshot")
                     action = PositionAction.UNKNOWN
                 else:
                     result.warnings.append(f"Contradiction fills/position for {coin}: expected {expected_new_size}, got {curr_size}")
                     action = PositionAction.UNKNOWN
+            elif coin_fills and not proofs["side_alignment"]:
+                result.warnings.append(f"Side contradiction for {coin}: fills suggest {fill_side}, position delta suggests {delta_side}")
+                action = PositionAction.UNKNOWN
+
+            confidence = 1.0
+            if action == PositionAction.UNKNOWN:
+                confidence = 0.0
+            elif not coin_fills:
+                confidence = 0.5 # Position changed but we have no fills (maybe they were just outside the window)
 
             delta_record = PositionDeltaRecord(
                 wallet_address=current.wallet_address,
@@ -130,8 +157,11 @@ class SnapshotEngine:
                 delta_size=curr_size - prev_size,
                 action=action,
                 exchange_ts=current.exchange_ts,
-                confidence_score=1.0 if action != PositionAction.UNKNOWN else 0.2,
+                confidence_score=confidence,
+                is_paper_eligible=(action != PositionAction.UNKNOWN and confidence >= 0.5),
                 source="snapshot",
+                snapshot_id=result.current_snapshot_id,
+                proofs=proofs,
                 raw={"current": curr_p, "previous": prev_p, "fills_used": coin_fills}
             )
             result.deltas.append(delta_record)

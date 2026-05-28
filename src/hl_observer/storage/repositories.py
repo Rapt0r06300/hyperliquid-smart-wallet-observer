@@ -482,6 +482,7 @@ class CollectionRepository:
             confidence = (
                 "high" if confidence_score >= 0.85 else "medium" if confidence_score >= 0.5 else "low"
             )
+            snapshot_id = getattr(delta, "snapshot_id", None)
         else:
             wallet_address = delta.wallet
             coin = delta.coin.upper()
@@ -508,6 +509,7 @@ class CollectionRepository:
             detected_at_ms = now_ms()
             delta_type = delta.delta_type
             confidence = delta.confidence
+            snapshot_id = None
 
         if delta_hash in self._seen_delta_hashes:
             return None
@@ -537,8 +539,10 @@ class CollectionRepository:
             delta_type=delta_type,
             confidence=confidence,
             confidence_score=confidence_score,
+            is_paper_eligible=getattr(delta, "is_paper_eligible", False),
             detected_at_ms=detected_at_ms,
             source=getattr(delta, "source", "fills"),
+            snapshot_id=snapshot_id,
             delta_hash=delta_hash,
             raw_json=raw,
         )
