@@ -1,39 +1,57 @@
-# HyperSmart Magic Bot Coverage Audit
+# HyperSmart Magic Bot Coverage Audit (Updated by Jules)
 
-Status date: 2026-05-25.
+Status date: 2026-05-28.
 
-This audit maps the product Markdown to the actual local implementation. Any
-accepted copy action remains research/paper only. A score is not a signal, a
-paper trade is not an order, and historical PnL is not future profit.
+Ce rapport fait la correspondance entre les exigences du Markdown et l'implémentation réelle.
 
-| Exigence du Markdown | Statut reel | Fichier(s) | Test(s) | Ce qui manque | Priorite | Prochaine correction |
+| Exigence Markdown | Statut réel | Fichier(s) | Test(s) | Ce qui manque | Priorité | Action Codex recommandée |
 |---|---|---|---|---|---|---|
-| Smart Leaderboard + Auto-Select | Delivered | `hyper_smart_observer/copy_mode/leaderboard_selector.py` | `tests/test_hypersmart_copy_mode.py` | Larger real data imports can be added | High | Add more import fixtures |
-| Validation adresse complete 0x + 40 hex | Delivered | `leaderboard_selector.py`, `validation.py` | `test_hypersmart_copy_mode.py` | None | High | Keep strict |
-| Refus adresse tronquee avec `...` | Delivered | `leaderboard_selector.py` | `test_hypersmart_copy_mode.py` | None | High | Keep strict |
-| Consistency score | Delivered | `leaderboard_selector.py`, scoring modules | `test_hypersmart_copy_mode.py` | More per-coin history | Medium | Add richer fixtures |
-| Max drawdown | Delivered | `leaderboard_selector.py`, scoring modules | scoring tests | None | High | Keep conservative |
-| PnL concentration / one_big_win | Delivered | `leaderboard_selector.py`, patterns | `test_hypersmart_copy_mode.py`, pattern tests | None | High | Tune thresholds only with data |
-| Per-coin ROI stability | Partial | `leaderboard_selector.py`, `patterns/coin_patterns.py` | pattern tests | Needs more real per-coin samples | Medium | Add import reports |
-| Execution quality | Partial | `leaderboard_selector.py` | copy mode tests | Maker/taker quality needs more fill samples | Medium | Expand fills metrics |
-| Sample confidence | Delivered | scoring and leaderboard modules | scoring tests | None | High | Keep minimums |
-| Copyability | Delivered | `leaderboard_selector.py` | copy mode tests | More calibration | Medium | Backtest calibration |
-| Delta detector | Delivered | `copy_mode/delta_detector.py` | copy mode tests | Flip remains UNKNOWN by design | High | Add future flip model only if safe |
-| SignalCandidate | Delivered | `copy_mode/signal_candidate.py` | copy mode and network read tests | None | High | Add more market context |
-| `edge_remaining_bps` obligatoire | Delivered | `copy_mode/edge.py`, `signal_candidate.py` | copy mode tests | None | Critical | Keep fail-closed |
-| no_trade_report | Delivered | `copy_mode/no_trade_report.py` | copy mode tests | More French templates possible | High | Add per-component details |
-| leaderboard_shortlist.json | Delivered | `copy_loop.py`, `leaderboard_selector.py` | copy mode tests | Runtime file is not archived | High | Keep in data/ |
-| Position/fill/openOrders snapshots | Delivered | `copy_mode/snapshot_engine.py`, `schema.sql` | network read tests | More order fields can be normalized | High | Add historicalOrders snapshot |
-| Resume cursor userFillsByTime | Delivered | `snapshot_engine.py`, `info_client.py` | API limit tests | Cursor persistence is simple | Medium | Add resume table per wallet |
-| Dedupe hash/tid/oid/time | Delivered | `snapshot_engine.py`, `fill_dedupe` | network read tests | None | High | Keep deterministic |
-| Source health / collection_runs / api_health | Delivered | `snapshot_engine.py`, `schema.sql` | network read tests | api_health is basic | Medium | Add CLI status view |
-| WebSocket shortlist read-only | Delivered as bounded planner/mockable manager | `realtime_monitor/` | WS tests | Real connection remains explicit only | High | Add transport integration tests |
-| Max 10 users uniques | Delivered | `subscriptions.py`, `websocket_manager.py` | WS limit tests | None | Critical | Keep strict |
-| Duration limitee / no infinite monitor | Delivered | `websocket_manager.py`, CLI | WS tests | None | Critical | Keep strict |
-| Replay/backtest depuis deltas historiques | Partial delivered | `backtesting/`, `copy_mode/repository.py` | backtest tests | More direct delta-to-trade scenarios needed | High | Expand replay engine |
-| 5m / 60s / WS delay scenarios | Partial | `backtesting/execution_delay_model.py` | backtest tests | CLI scenario selector can be richer | Medium | Add scenario flags |
-| Missed/partial fills | Partial | `backtesting/`, paper models | backtest tests | Needs more fixtures | Medium | Add L2/slippage fixtures |
-| Paper mock USDC portfolio | Delivered | `paper_trading/`, dashboard | paper tests | None | High | Keep local only |
-| Dashboard copy status / activity / no-trade / edge | Delivered | `dashboard/exporter.py` | dashboard tests | More CSV exports possible | High | Add richer CSV |
-| Safety audit | Delivered | `audit/`, CLI | audit tests | Deep report generated as doc | Critical | Keep scanning |
-| Batch 6 testnet locked only | Delivered locked | `testnet_exchange_client.py`, docs | safety tests | No executor active | Critical | Future sprint only |
+| **Batch 1** | | | | | | |
+| Smart Leaderboard + Auto-Select | Delivered | `hyper_smart_observer/copy_mode/leaderboard_selector.py` | `test_hypersmart_copy_mode.py` | Imports plus larges | Haute | Intégrer plus de sources de données |
+| Validation adresse complète | Delivered | `hyper_smart_observer/copy_mode/leaderboard_selector.py` | `test_hypersmart_copy_mode.py` | Aucun | Haute | Maintenir la règle stricte |
+| Refus adresse tronquée | Delivered | `hyper_smart_observer/copy_mode/leaderboard_selector.py` | `test_hypersmart_copy_mode.py` | Aucun | Haute | Maintenir la règle stricte |
+| Consistency score | Delivered | `hyper_smart_observer/copy_mode/leaderboard_selector.py` | `test_hypersmart_copy_mode.py` | Historique par coin plus riche | Moyenne | Ajouter des fixtures riches |
+| Max drawdown | Delivered | `hyper_smart_observer/copy_mode/leaderboard_selector.py` | `test_hypersmart_copy_mode.py` | Aucun | Haute | Rester conservateur |
+| PnL concentration | Delivered | `hyper_smart_observer/copy_mode/leaderboard_selector.py` | `test_hypersmart_copy_mode.py` | Aucun | Haute | Ajuster via data réelle |
+| One_big_win | Delivered | `hyper_smart_observer/copy_mode/leaderboard_selector.py` | `test_hypersmart_copy_mode.py` | Aucun | Haute | Ajuster via data réelle |
+| Copyability | Delivered | `hyper_smart_observer/copy_mode/leaderboard_selector.py` | `test_hypersmart_copy_mode.py` | Calibration fine | Moyenne | Calibration via backtest |
+| Delta detector | Delivered | `hyper_smart_observer/copy_mode/delta_detector.py` | `test_hypersmart_copy_mode.py` | Flip UNKNOWN (by design) | Haute | Modèle Flip si sécurisé |
+| SignalCandidate | Delivered | `hyper_smart_observer/copy_mode/signal_candidate.py` | `test_hypersmart_copy_mode.py` | Contexte marché étendu | Haute | Ajouter plus de contexte |
+| Edge_remaining_bps obligatoire | Delivered | `hyper_smart_observer/copy_mode/edge.py` | `test_hypersmart_copy_mode.py` | Aucun | Critique | Fail-closed impératif |
+| No_trade_report | Delivered | `hyper_smart_observer/copy_mode/no_trade_report.py` | `test_hypersmart_copy_mode.py` | Plus de templates FR | Haute | Détails par composant |
+| **Batch 2** | | | | | | |
+| Leaderboard_shortlist.json | Delivered | `hyper_smart_observer/copy_mode/copy_loop.py` | `test_hypersmart_copy_mode.py` | Pas archivé par défaut | Haute | Garder dans data/ |
+| Snapshots positions | Delivered | `hyper_smart_observer/copy_mode/snapshot_engine.py` | `test_hypersmart_copy_mode.py` | Aucun | Haute | Maintenir |
+| Snapshots fills | Delivered | `hyper_smart_observer/copy_mode/snapshot_engine.py` | `test_hypersmart_copy_mode.py` | Aucun | Haute | Maintenir |
+| Snapshots openOrders | Delivered | `hyper_smart_observer/copy_mode/snapshot_engine.py` | `test_hypersmart_copy_mode.py` | Aucun | Haute | Maintenir |
+| Resume cursors userFillsByTime | Delivered | `hyper_smart_observer/copy_mode/snapshot_engine.py` | `test_hypersmart_copy_mode.py` | Persistance simpliste | Moyenne | Table de reprise par wallet |
+| Dedupe hash/tid/oid/time | Delivered | `hyper_smart_observer/copy_mode/snapshot_engine.py` | `test_hypersmart_copy_mode.py` | Aucun | Haute | Garder déterministe |
+| Source health | Delivered | `hyper_smart_observer/copy_mode/snapshot_engine.py` | `test_hypersmart_copy_mode.py` | Aucun | Moyenne | Vue CLI du statut |
+| Collection_runs | Delivered | `hyper_smart_observer/copy_mode/snapshot_engine.py` | `test_hypersmart_copy_mode.py` | Aucun | Moyenne | Maintenir |
+| Api_health | Delivered | `hyper_smart_observer/copy_mode/snapshot_engine.py` | `test_hypersmart_copy_mode.py` | Basique | Moyenne | Alerte latence |
+| Stopped_reason | Delivered | `hyper_smart_observer/copy_mode/copy_loop.py` | `test_hypersmart_copy_mode.py` | Aucun | Haute | Maintenir |
+| **Batch 3** | | | | | | |
+| WebSocket shortlist réel | Delivered | `hyper_smart_observer/realtime_monitor/` | `test_hypersmart_ws_monitor.py` | Intégration transport | Haute | Tests de bout en bout |
+| Max 10 users uniques | Delivered | `hyper_smart_observer/realtime_monitor/` | `test_hypersmart_ws_limits.py` | Aucun | Critique | Maintenir strict |
+| Duration limitée | Delivered | `hyper_smart_observer/realtime_monitor/` | `test_hypersmart_ws_monitor.py` | Aucun | Critique | Maintenir strict |
+| Fallback polling | Delivered | `hyper_smart_observer/copy_mode/copy_loop.py` | `test_hypersmart_copy_mode.py` | Transition fluide WS/Poll | Moyenne | Améliorer le switch |
+| Heartbeat | Delivered | `hyper_smart_observer/realtime_monitor/` | `test_hypersmart_ws_monitor.py` | Aucun | Haute | Maintenir |
+| Reconnect / Backoff | Delivered | `hyper_smart_observer/realtime_monitor/` | `test_hypersmart_ws_monitor.py` | Aucun | Haute | Maintenir |
+| No infinite monitor | Delivered | `hyper_smart_observer/realtime_monitor/` | `test_hypersmart_ws_monitor.py` | Aucun | Critique | Maintenir strict |
+| Déduplication snapshot isSnapshot | Delivered | `hyper_smart_observer/copy_mode/snapshot_engine.py` | `test_hypersmart_ws_dedupe.py` | Aucun | Haute | Maintenir |
+| **Batch 4** | | | | | | |
+| Replay/backtest deltas | Partial | `hyper_smart_observer/backtesting/` | `test_hypersmart_backtesting.py` | Scénarios directs | Haute | Étendre le moteur de replay |
+| Délai 5m / 60s / WS | Partial | `hyper_smart_observer/backtesting/` | `test_hypersmart_backtesting.py` | Sélecteur de scénario CLI | Moyenne | Ajouter des flags CLI |
+| Missed/partial fills | Partial | `hyper_smart_observer/backtesting/` | `test_hypersmart_backtesting.py` | Manque de fixtures L2 | Moyenne | Ajouter fixtures L2/Slippage |
+| Fees / Spread / Slippage | Delivered | `hyper_smart_observer/paper_trading/` | `test_hypersmart_paper_fees.py` | Aucun | Haute | Maintenir |
+| Latency | Delivered | `hyper_smart_observer/paper_trading/` | `test_hypersmart_paper_latency.py` | Aucun | Haute | Maintenir |
+| Equity curve | Partial | `hyper_smart_observer/dashboard/` | `test_hypersmart_dashboard_renderer.py` | Rendu temps réel stable | Haute | Améliorer Metagraphe |
+| No_trade_report rétrospectif | Partial | `hyper_smart_observer/copy_mode/no_trade_report.py` | `test_no_trade_analytics.py` | Intégration backtest | Moyenne | Relier au replay |
+| **Batch 5** | | | | | | |
+| Dashboard copy status | Delivered | `hyper_smart_observer/dashboard/` | `test_hypersmart_dashboard_readonly.py` | Exports CSV riches | Haute | Enrichir les exports |
+| Paper mock USDC portfolio | Delivered | `hyper_smart_observer/paper_trading/` | `test_hypersmart_paper_portfolio.py` | Aucun | Haute | Rester local only |
+| Export CSV/HTML | Delivered | `hyper_smart_observer/dashboard/` | `test_hypersmart_dashboard_renderer.py` | Plus de colonnes | Haute | Ajouter colonnes techniques |
+| **Batch 6** | | | | | | |
+| Seulement verrouillé | Delivered | `hyper_smart_observer/execution/` | `test_no_mainnet_execution.py` | Aucun | Critique | Ne jamais déverrouiller |
+| Aucun executor actif | Delivered | `hyper_smart_observer/execution/` | `test_no_mainnet_execution.py` | Aucun | Critique | Vérifier via audit |
+| Aucune signature / exchange | Delivered | `hyper_smart_observer/audit/` | `test_hypersmart_audit_safety.py` | Aucun | Critique | Vérifier via audit |

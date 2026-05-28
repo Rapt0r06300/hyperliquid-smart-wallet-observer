@@ -1,55 +1,33 @@
-# HyperSmart API Limits
+# Hyperliquid API Limits for HyperSmart
 
-Status: conservative read-only implementation notes.
+## REST Info Client Limits
 
-HyperSmart uses Hyperliquid `/info` only for REST reads. No `/exchange`,
-signature, private key, order placement or mainnet execution is implemented.
+| Endpoint | Weight | Description |
+| :--- | :--- | :--- |
+| `allMids` | 2 | Current mid prices for all coins. |
+| `clearinghouseState` | 2 | Position and margin summary for a wallet. |
+| `userFills` | 20 | Recent fills for a wallet (last 2000). |
+| `userFillsByTime` | 20 | Fills in a time range (max 2000 per page). |
+| `openOrders` | 2 | Currently open orders. |
+| `frontendOpenOrders`| 2 | Orders opened via frontend. |
 
-## REST `/info`
+## HyperSmart Configuration Limits
 
-Configured defaults:
+Défini dans `hyper_smart_observer.app.config.AppConfig`:
 
-- `HYPERSMART_INFO_TIME_RANGE_PAGE_LIMIT=500`
-- `HYPERSMART_USER_FILLS_RECENT_LIMIT=2000`
-- `HYPERSMART_USER_FILLS_BY_TIME_MAX_RECENT=10000`
-- `HYPERSMART_REST_WEIGHT_LIMIT_PER_MINUTE=1200`
-- `HYPERSMART_INFO_WEIGHT_EXTRA_ITEM_BUCKET_SIZE=20`
-- `HYPERSMART_MAX_PAGES_PER_WALLET=5`
-- `HYPERSMART_MAX_FILLS_PER_RUN=10000`
+- `copy_max_leaders_per_run = 3`: Maximum de leaders traités par cycle de polling.
+- `copy_min_edge_required_bps = 8.0`: Edge minimal après dégradation pour accepter une simulation paper.
+- `HYPERSMART_INFO_TIME_RANGE_PAGE_LIMIT = 500`: Limite recommandée pour Codex pour la pagination.
 
-The official Hyperliquid rate-limit documentation describes a shared REST
-weight limit of 1200 per minute per IP. It also documents extra weight buckets
-for response-heavy `/info` methods, including `userFills` and
-`userFillsByTime`, per 20 returned items. HyperSmart uses those values as
-guardrails but still applies stricter local page and fill caps.
+## WebSocket Limits
 
-Pagination policy for time ranged fills:
+- Maximum 10 connexions WebSocket simultanées.
+- Maximum 1000 subscriptions par connexion.
+- Maximum 10 utilisateurs uniques pour les subscriptions `userFills` / `userEvents`.
+- Maximum 30 nouvelles connexions par minute.
 
-- `startTime` is treated as inclusive.
-- next cursor is `last_timestamp + 1`.
-- stop on empty response.
-- stop if timestamp does not progress.
-- stop when max pages is reached.
-- stop when max fills per run is reached.
-- every stop records a `stopped_reason`.
+## Sécurité API
 
-## WebSocket
-
-Configured defaults:
-
-- `HYPERSMART_WS_MAX_CONNECTIONS=10`
-- `HYPERSMART_WS_MAX_NEW_CONNECTIONS_PER_MIN=30`
-- `HYPERSMART_WS_MAX_SUBSCRIPTIONS=1000`
-- `HYPERSMART_WS_MAX_UNIQUE_USERS=10`
-
-WebSocket monitoring is disabled by default and must stay read-only. User
-specific streams are restricted to shortlist/watchlist users only.
-
-## Explorer
-
-Configured default:
-
-- `HYPERSMART_EXPLORER_WEIGHT=40`
-
-Explorer observation remains experimental and disabled by default. HyperSmart
-does not bypass protections and does not depend on undocumented private routes.
+- **Interdiction Formelle** : N'utilisez JAMAIS `/exchange`.
+- Les requêtes sont en lecture seule (`read-only`).
+- Le polling par défaut est de 300 secondes.

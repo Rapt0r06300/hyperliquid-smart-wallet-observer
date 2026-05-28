@@ -1,0 +1,12 @@
+[
+  {
+    "reason": "STALE_SIGNAL",
+    "explanation": "Le signal a été détecté trop tard (retard > 300s).",
+    "action": "Attendre le prochain cycle ou passer en WebSocket."
+  },
+  {
+    "reason": "EDGE_REMAINING_TOO_LOW",
+    "explanation": "L'avantage estimé après frais et slippage est négatif.",
+    "action": "Ne pas copier ce trade car il n'est pas rentable après coûts."
+  }
+]
