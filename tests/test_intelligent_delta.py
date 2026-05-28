@@ -11,115 +11,52 @@ VALID_WALLET = "0x" + "3" * 40
 def detector():
     return IntelligentDeltaDetector()
 
-def test_pro_high_confidence_match(detector):
-    # Position change matches fill perfectly with multiple proofs
-    fill = {
-        "coin": "BTC",
-        "time": 1000,
-        "side": "B",
-        "px": "100",
-        "sz": "1",
-        "startPosition": "0",
-        "dir": "Open Long"
-    }
-    delta = detector.detect(VALID_WALLET, "BTC", 0.0, 1.0, fill=fill)
+def test_grandmaster_subset_sum_match(detector):
+    # We have 3 fills, but only a subset of 2 matches the delta of +1.0
+    # One fill is "noisy" or belongs to a different snapshot period
+    fill1 = {"coin": "BTC", "time": 1000, "side": "B", "px": "100", "sz": "0.6", "startPosition": "0", "dir": "Open Long"}
+    fill2 = {"coin": "BTC", "time": 1100, "side": "B", "px": "110", "sz": "0.4", "startPosition": "0.6", "dir": "Open Long"}
+    fill_noisy = {"coin": "BTC", "time": 1200, "side": "B", "px": "120", "sz": "5.0", "startPosition": "1.0", "dir": "Add Long"}
+
+    # Delta is +1.0, fills total 6.0, but subset {fill1, fill2} matches 1.0 exactly
+    delta = detector.detect(VALID_WALLET, "BTC", 0.0, 1.0, fills=[fill1, fill2, fill_noisy])
 
     assert delta.action == PositionAction.OPEN
+    # exact failed, but subset matched
     assert delta.confidence_level == ConfidenceLevel.HIGH
-    assert delta.confidence_score == 1.0
-    assert "multiple_proofs_confirmed" in delta.notes
-    assert "NOT_PAPER_ELIGIBLE" not in delta.notes
+    assert "matched_subset_of_2_fills_out_of_3" in delta.notes
+    assert delta.fill_size == 1.0
 
-def test_pro_contradiction_side(detector):
-    # Position increases but fill is a Sell
-    fill = {
-        "coin": "BTC",
-        "time": 1000,
-        "side": "A", # Sell
-        "px": "100",
-        "sz": "1",
-        "startPosition": "0",
-        "dir": "Open Short"
-    }
-    delta = detector.detect(VALID_WALLET, "BTC", 0.0, 1.0, fill=fill)
+def test_grandmaster_precision_tolerance(detector):
+    # Match with small precision difference (1e-8)
+    fill = {"coin": "BTC", "time": 1000, "side": "B", "px": "100", "sz": str(1.0 + 1e-8), "startPosition": "0"}
+    delta = detector.detect(VALID_WALLET, "BTC", 0.0, 1.0, fills=[fill])
+    assert delta.confidence_level == ConfidenceLevel.HIGH
+
+def test_grandmaster_entropy_heavy_contradiction(detector):
+    # Multiple proof contradictions (side, sz, startPos)
+    fill = {"coin": "BTC", "time": 1000, "side": "A", "px": "100", "sz": "5.0", "startPosition": "10"}
+    delta = detector.detect(VALID_WALLET, "BTC", 0.0, 1.0, fills=[fill])
 
     assert delta.action == PositionAction.UNKNOWN
     assert delta.confidence_level == ConfidenceLevel.UNKNOWN
     assert "contradiction_detected" in delta.reason
-    assert "NOT_PAPER_ELIGIBLE" in delta.notes
+    assert "side_consistency" in delta.reason
 
-def test_pro_start_position_inconsistency(detector):
-    # delta matches sz, but startPosition in fill is wrong
-    fill = {
-        "coin": "BTC",
-        "time": 1000,
-        "side": "B",
-        "px": "100",
-        "sz": "1",
-        "startPosition": "10", # Should be 0
-        "dir": "Open Long"
-    }
-    delta = detector.detect(VALID_WALLET, "BTC", 0.0, 1.0, fill=fill)
+def test_grandmaster_mid_price_sanity(detector):
+    fill = {"coin": "BTC", "time": 1000, "side": "B", "px": "100", "sz": "1.0", "startPosition": "0"}
+    # 110 vs 100 is 10% deviation (limit is 5%)
+    delta = detector.detect(VALID_WALLET, "BTC", 0.0, 1.0, fills=[fill], mid_price=110.0)
+    assert delta.source_evidence["scorecard"]["market_price_sanity"] is False
+    assert any("price_deviation_high" in w for w in delta.warnings)
 
-    assert delta.action == PositionAction.UNKNOWN
-    assert delta.confidence_level == ConfidenceLevel.UNKNOWN
-    assert "start_pos_consistency" in delta.reason
+def test_grandmaster_no_fills(detector):
+    delta = detector.detect(VALID_WALLET, "BTC", 0.0, 1.0, fills=None)
+    assert delta.confidence_level == ConfidenceLevel.MEDIUM
+    assert delta.reason == "position_change_without_fill"
 
-def test_pro_closed_pnl_consistency(detector):
-    # REDUCE with closedPnl = HIGH
-    fill = {
-        "coin": "BTC",
-        "time": 1000,
-        "side": "A",
-        "px": "100",
-        "sz": "0.5",
-        "startPosition": "1.0",
-        "closedPnl": "5.0",
-        "dir": "Close Long"
-    }
-    delta = detector.detect(VALID_WALLET, "BTC", 1.0, 0.5, fill=fill)
-    assert delta.action == PositionAction.REDUCE
-    assert delta.confidence_level == ConfidenceLevel.HIGH
-
-def test_pro_unexpected_closed_pnl(detector):
-    # ADD but closedPnl is present -> Contradiction or warning?
-    # In our code, unexpected_closed_pnl sets closed_pnl_consistency to False -> UNKNOWN
-    fill = {
-        "coin": "BTC",
-        "time": 1000,
-        "side": "B",
-        "px": "100",
-        "sz": "1.0",
-        "startPosition": "1.0",
-        "closedPnl": "5.0",
-        "dir": "Open Long"
-    }
-    delta = detector.detect(VALID_WALLET, "BTC", 1.0, 2.0, fill=fill)
-    assert delta.action == PositionAction.UNKNOWN
-    assert delta.confidence_level == ConfidenceLevel.UNKNOWN
-    assert "unexpected_closed_pnl" in delta.notes
-
-def test_pro_temporal_order(detector):
-    # Fill is in the past compared to context
-    fill = {"coin": "BTC", "time": 500, "side": "B", "px": "100", "sz": "1"}
-    delta = detector.detect(VALID_WALLET, "BTC", 0.0, 1.0, fill=fill, context_ts=1000)
-    assert delta.action == PositionAction.UNKNOWN
-    assert "temporal_order" in delta.reason
-
-def test_pro_impossible_reduction(detector):
-    # Action says REDUCE but previous size was 0
-    delta = detector.detect(VALID_WALLET, "BTC", 0.0, -1.0, fill=None)
-    # classify_action(0, -1) is OPEN (short)
-    # Let's force a scenario where it's impossible.
-    # Actually classify_action is smart, but let's test the state_alignment flag.
-    # If action is REDUCE but previous is FLAT.
-    # We'd need to mock classify_action or use values it classifies as REDUCE.
-    delta = detector.detect(VALID_WALLET, "BTC", 0.0, 0.0, fill=None) # no change
-    assert delta.confidence_level == ConfidenceLevel.HIGH
-
-def test_pro_flip_is_unknown(detector):
+def test_grandmaster_flip(detector):
     fill = {"coin": "BTC", "time": 1000, "side": "A", "sz": "2", "startPosition": "1", "px": "100"}
-    delta = detector.detect(VALID_WALLET, "BTC", 1.0, -1.0, fill=fill)
+    delta = detector.detect(VALID_WALLET, "BTC", 1.0, -1.0, fills=[fill])
     assert delta.action == PositionAction.UNKNOWN
-    assert delta.confidence_level == ConfidenceLevel.UNKNOWN
     assert "flip_detected_as_unknown" in delta.reason

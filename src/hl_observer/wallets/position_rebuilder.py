@@ -83,7 +83,7 @@ def rebuild_positions_from_fills(wallet_address: str, fills: list[dict[str, Any]
         else:
             new_size = previous_size
 
-        delta = detector.detect(wallet_address, coin, previous_size, new_size, fill=fill)
+        delta = detector.detect(wallet_address, coin, previous_size, new_size, fills=[fill])
         deltas.append(delta)
         state.confidence_scores.append(delta.confidence_score)
         state.notes.extend(delta.notes)
