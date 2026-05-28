@@ -27,8 +27,8 @@ class RealtimeCopyRiskConfig:
     max_position_notional_usdt: float = 50.0
     min_position_notional_usdt: float = 5.0
     max_total_exposure_usdt: float = 200.0
-    base_risk_fraction: float = 0.03
-    max_risk_fraction: float = 0.05
+    base_risk_fraction: float = 0.01
+    max_risk_fraction: float = 0.02
 
 
 @dataclass(slots=True)

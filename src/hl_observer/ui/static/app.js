@@ -450,6 +450,20 @@ function renderSimulationOverview(payload) {
   `).join("");
 
   const liveStrip = $("#simulationLiveStrip");
+
+  const warning = $("#drawdownStopWarning");
+  if (warning) {
+    warning.classList.toggle("hidden", !payload.drawdown_stop_triggered);
+  }
+
+  const profile = payload.magic_profile || {};
+  if ($("#ruleStartingEquity")) $("#ruleStartingEquity").textContent = formatUsd(profile.starting_equity_usdt || 1000);
+  if ($("#ruleMaxNotional")) $("#ruleMaxNotional").textContent = formatUsd(profile.max_position_notional_usdt || 50);
+  if ($("#ruleMaxExposure")) $("#ruleMaxExposure").textContent = formatUsd(profile.max_total_exposure_usdt || 200);
+  if ($("#ruleMaxTrades")) $("#ruleMaxTrades").textContent = profile.max_open_positions || 3;
+  if ($("#ruleRiskPerTrade")) $("#ruleRiskPerTrade").textContent = `${profile.max_risk_per_trade_pct || 1.0}%`;
+  if ($("#ruleDrawdownStop")) $("#ruleDrawdownStop").textContent = `${profile.max_drawdown_stop_pct || 10.0}%`;
+
   if (liveStrip) {
     const secondsSince = payload.seconds_since_last_live_event;
     const lastEventText = secondsSince === null || secondsSince === undefined
@@ -909,7 +923,28 @@ function connectWebSocket() {
   socket.onclose = () => setTimeout(connectWebSocket, 2000);
 }
 
+async function downloadSimulationReport() {
+  try {
+    const report = await getJson("/api/simulation/report");
+    const blob = new Blob([JSON.stringify(report, null, 2)], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `hypersmart-simulation-report-${new Date().toISOString().slice(0, 10)}.json`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  } catch (error) {
+    console.error("failed to download report", error);
+  }
+}
+
 function wireUi() {
+  const downloadBtn = $("#downloadReportBtn");
+  if (downloadBtn) {
+    downloadBtn.addEventListener("click", downloadSimulationReport);
+  }
   $$("[data-action]").forEach((button) => {
     button.addEventListener("click", () => runAction(button.dataset.action));
   });

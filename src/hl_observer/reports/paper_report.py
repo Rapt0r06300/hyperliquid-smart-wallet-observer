@@ -22,5 +22,14 @@ def build_paper_report(data: dict[str, Any]) -> dict[str, Any]:
         "fees": float(bot_sim.get("total_costs_paid_usdc") or 0.0),
         "slippage": float(bot_sim.get("avg_slippage_bps") or 0.0),
         "spread": 3.0,  # Fixed mock spread used in simulation
-        "latency_ms": float(bot_sim.get("magic_profile", {}).get("max_signal_age_seconds", 0) * 1000)
+        "latency_ms": float(bot_sim.get("magic_profile", {}).get("max_signal_age_seconds", 0) * 1000),
+        "security_confirmation": {
+            "capital_fictif_initial": "1 000 $",
+            "paper_mock_usdc_only": True,
+            "aucune_exposition_reelle": True,
+            "aucun_ordre": True,
+            "aucun_mainnet": True,
+            "aucun_testnet_executor_actif": True,
+            "aucun_exchange_call": True
+        }
     }
