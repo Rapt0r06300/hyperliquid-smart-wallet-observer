@@ -646,6 +646,39 @@ def create_router(settings: Settings, state: UiState, bus: UiEventBus) -> APIRou
         refused = sum(1 for row in ledger_events if row.get("status") == "REFUSED")
         total_pnl = realized_net_pnl + unrealized_pnl
 
+        # Calculate Advanced Metrics
+        win_count = 0
+        loss_count = 0
+        gross_profit = 0.0
+        gross_loss = 0.0
+        peak_equity = starting_equity_usdt
+        max_drawdown = 0.0
+
+        current_eq = starting_equity_usdt
+        for event in ledger_events:
+            pnl = float(event.get("estimated_net_pnl_usdc") or 0.0)
+            if pnl == 0:
+                continue
+
+            if pnl > 0:
+                win_count += 1
+                gross_profit += pnl
+            else:
+                loss_count += 1
+                gross_loss += abs(pnl)
+
+            current_eq += pnl
+            if current_eq > peak_equity:
+                peak_equity = current_eq
+
+            dd = (peak_equity - current_eq) / peak_equity if peak_equity > 0 else 0
+            if dd > max_drawdown:
+                max_drawdown = dd
+
+        total_trades = win_count + loss_count
+        win_rate = (win_count / total_trades) if total_trades > 0 else 0.0
+        profit_factor = (gross_profit / gross_loss) if gross_loss > 0 else (99.9 if gross_profit > 0 else 1.0)
+
         return {
             "events": list(reversed(ledger_events[-240:])),
             "ledger_events": ledger_events,
@@ -654,6 +687,9 @@ def create_router(settings: Settings, state: UiState, bus: UiEventBus) -> APIRou
             "reproduced_entries": reproduced_entries,
             "reproduced_exits": reproduced_exits,
             "refused": refused,
+            "win_rate": round(win_rate, 4),
+            "profit_factor": round(profit_factor, 2),
+            "max_drawdown_pct": round(max_drawdown * 100, 2),
             "open_local_positions": len(positions),
             "open_positions": open_positions[:25],
             "realized_net_pnl_usdc": round(realized_net_pnl, 6),
@@ -689,11 +725,16 @@ def create_router(settings: Settings, state: UiState, bus: UiEventBus) -> APIRou
             pnl_events = pnl_events[-max_points:]
         candles: list[dict[str, Any]] = []
         equity = 0.0
+        cumulative_costs = 0.0
         previous_ha_open: float | None = None
         previous_ha_close: float | None = None
         for index, row in enumerate(pnl_events):
             raw_pnl = row.get("estimated_net_pnl_usdc")
             pnl = float(raw_pnl if raw_pnl is not None else 0.0)
+            raw_costs = row.get("fee_cost_usdc")
+            costs = float(raw_costs if raw_costs is not None else 0.0)
+            cumulative_costs += costs
+
             open_value = equity
             close_value = equity + pnl
             high_value = max(open_value, close_value)
@@ -737,7 +778,9 @@ def create_router(settings: Settings, state: UiState, bus: UiEventBus) -> APIRou
                     "action_type": row.get("bot_replay_action"),
                     "reason": row.get("reason"),
                     "position_id": row.get("position_id"),
-                    "costs": round(float(row.get("fee_cost_usdc") or 0.0), 6),
+                    "costs": round(costs, 6),
+                    "cumulative_costs": round(cumulative_costs, 6),
+                    "cumulative_net_pnl": round(close_value, 6),
                     "is_unrealized": row.get("bot_replay_action") == "MARK_TO_MARKET",
                 }
             )
@@ -1420,6 +1463,9 @@ def create_router(settings: Settings, state: UiState, bus: UiEventBus) -> APIRou
                 "unrealized_pnl_usdc": bot_simulation["unrealized_pnl_usdc"],
                 "high_pnl_usdc": round(float(equity_high), 6),
                 "low_pnl_usdc": round(float(equity_low), 6),
+                "win_rate": bot_simulation["win_rate"],
+                "profit_factor": bot_simulation["profit_factor"],
+                "max_drawdown_pct": bot_simulation["max_drawdown_pct"],
                 "candles_count": len(equity_candles),
                 "source": "fresh bot virtual portfolio simulation from deltas detected after simulation start",
                 "bot_net_pnl_usdc": bot_simulation["estimated_net_pnl_usdc"],

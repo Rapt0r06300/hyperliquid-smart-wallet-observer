@@ -432,6 +432,20 @@ function renderSimulationOverview(payload) {
   if (!summary) return;
   const counts = payload.counts || {};
   const equity = payload.equity || {};
+
+  // Update Metagraph Stats Bar
+  const mRoi = $("#mStatRoi");
+  const mWinRate = $("#mStatWinRate");
+  const mPf = $("#mStatPf");
+  const mDrawdown = $("#mStatDrawdown");
+  if (mRoi) {
+    const roi = ((equity.current_equity_usdt - equity.starting_equity_usdt) / equity.starting_equity_usdt) * 100;
+    mRoi.textContent = `${roi.toFixed(2)}%`;
+    mRoi.className = roi >= 0 ? "green" : "red";
+  }
+  if (mWinRate) mWinRate.textContent = `${((equity.win_rate || 0) * 100).toFixed(1)}%`;
+  if (mPf) mPf.textContent = (equity.profit_factor || 0).toFixed(2);
+  if (mDrawdown) mDrawdown.textContent = `${(equity.max_drawdown_pct || 0).toFixed(2)}%`;
   const scanner = payload.scanner || {};
   const autopilot = payload.autopilot || {};
   const metrics = [
@@ -610,7 +624,37 @@ function drawSimulationMetaGraph(candles, equity) {
   const canvas = $("#simulationMetaGraph");
   const state = $("#simulationGraphState");
   const tooltip = $("#simulationGraphTooltip");
+  const btnExport = $("#btnExportLedger");
   if (!canvas || !state || !tooltip) return;
+
+  if (btnExport && !btnExport.dataset.wired) {
+      btnExport.dataset.wired = "true";
+      btnExport.onclick = () => {
+          if (!candles.length) return;
+          const headers = ["Timestamp", "Wallet", "Coin", "Action", "P&L", "Equity", "Costs", "Reason", "ID"];
+          const rows = candles.map(c => [
+              new Date(c.timestamp_ms).toISOString(),
+              c.wallet_address || "",
+              c.coin || "",
+              c.action_type || "",
+              c.pnl_usdc,
+              c.equity_close,
+              c.costs,
+              `"${(c.reason || "").replace(/"/g, '""')}"`,
+              c.position_id || ""
+          ]);
+          const csvContent = [headers, ...rows].map(e => e.join(",")).join("\n");
+          const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+          const url = URL.createObjectURL(blob);
+          const link = document.createElement("a");
+          link.setAttribute("href", url);
+          link.setAttribute("download", `simulation_ledger_${Date.now()}.csv`);
+          document.body.appendChild(link);
+          link.click();
+          document.body.removeChild(link);
+      };
+  }
+
   const rect = canvas.getBoundingClientRect();
   const ratio = window.devicePixelRatio || 1;
   const width = Math.max(640, Math.floor(rect.width || canvas.width));
@@ -697,8 +741,26 @@ function drawSimulationMetaGraph(candles, equity) {
   ctx.stroke();
   ctx.setLineDash([]);
 
+  // Equity Area Gradient
+  const gradient = ctx.createLinearGradient(0, plotTop, 0, plotBottom);
+  gradient.addColorStop(0, "rgba(0, 217, 255, 0.15)");
+  gradient.addColorStop(1, "rgba(0, 217, 255, 0)");
+  ctx.fillStyle = gradient;
+  ctx.beginPath();
+  ctx.moveTo(plotLeft + xStep / 2, plotBottom);
+  candles.forEach((row, index) => {
+    const x = plotLeft + index * xStep + xStep / 2;
+    const y = yFor(row.equity_close);
+    ctx.lineTo(x, y);
+  });
+  ctx.lineTo(plotLeft + (candles.length - 1) * xStep + xStep / 2, plotBottom);
+  ctx.closePath();
+  ctx.fill();
+
   // Equity Line
-  ctx.strokeStyle = "rgba(0,217,255,0.6)";
+  ctx.strokeStyle = "rgba(0,217,255,0.8)";
+  ctx.shadowBlur = 8;
+  ctx.shadowColor = "rgba(0, 217, 255, 0.5)";
   ctx.lineWidth = 2;
   ctx.beginPath();
   candles.forEach((row, index) => {
@@ -709,6 +771,7 @@ function drawSimulationMetaGraph(candles, equity) {
   });
   ctx.stroke();
   ctx.lineWidth = 1;
+  ctx.shadowBlur = 0;
 
   const hitboxes = [];
   candles.forEach((row, index) => {
@@ -787,13 +850,35 @@ function drawSimulationMetaGraph(candles, equity) {
       </div>
       Action: <span class="cyan">${escapeHtml(row.action_type || "MARK_TO_MARKET")}</span><br>
       Delta P&L: <span class="${row.pnl_usdc >= 0 ? "green" : "red"}">${escapeHtml(formatUsd(row.pnl_usdc))}</span><br>
-      Equity Before: ${escapeHtml(formatUsd(row.equity_open))}<br>
       Equity After: <strong>${escapeHtml(formatUsd(row.equity_close))}</strong>
       <span style="opacity:0.6;font-size:0.9em">(${row.is_unrealized ? "latent" : "réalisé"})</span><br>
-      Coûts: ${escapeHtml(formatUsd(row.costs || 0))}<br>
+      Cumulative Costs: ${escapeHtml(formatUsd(row.cumulative_costs || 0))}<br>
       ID: <span style="font-family:monospace;font-size:0.85em;opacity:0.7">${escapeHtml(row.position_id || "-")}</span><br>
-      <em>${escapeHtml(row.reason || "")}</em>
+      <div style="margin-top:4px;font-size:0.9em;opacity:0.8;color:var(--orange);border-top:1px solid rgba(255,255,255,0.05);padding-top:4px;">
+        Click to sync decision tape
+      </div>
     `;
+  };
+  canvas.onclick = (event) => {
+      const bounds = canvas.getBoundingClientRect();
+      const mouseX = (event.clientX - bounds.left) * (width / bounds.width);
+      let nearest = hitboxes[0];
+      for (const item of hitboxes) {
+          if (Math.abs(item.x - mouseX) < Math.abs(nearest.x - mouseX)) nearest = item;
+      }
+      if (!nearest) return;
+      const row = nearest.row;
+      const tape = $("#simulationDecisionTape");
+      if (!tape) return;
+
+      const entries = Array.from(tape.querySelectorAll(".feed-line"));
+      const target = entries.find(el => el.textContent.includes(row.position_id) || el.textContent.includes(new Date(row.timestamp_ms).toLocaleTimeString()));
+
+      if (target) {
+          entries.forEach(el => el.classList.remove("highlight"));
+          target.classList.add("highlight");
+          target.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+      }
   };
   canvas.onmouseleave = () => tooltip.classList.add("hidden");
 }

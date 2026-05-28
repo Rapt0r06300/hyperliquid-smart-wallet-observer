@@ -402,6 +402,12 @@ input {
   padding: 10px 12px;
   max-height: 138px;
   overflow: auto;
+  scroll-behavior: smooth;
+}
+
+.feed-line.highlight {
+  background: rgba(0, 217, 255, 0.15);
+  box-shadow: inset 2px 0 0 var(--cyan);
 }
 
 .simulation-live-pill {
@@ -451,6 +457,51 @@ input {
   background-size: 48px 48px;
   padding: 12px;
   margin-bottom: 14px;
+}
+
+.metagraph-stats-bar {
+  display: flex;
+  gap: 16px;
+  margin-left: 20px;
+}
+
+.m-stat {
+  display: flex;
+  flex-direction: column;
+}
+
+.m-stat span {
+  font-size: 10px;
+  color: var(--muted);
+  text-transform: uppercase;
+}
+
+.m-stat strong {
+  font-size: 15px;
+  color: var(--green);
+  font-family: "Cascadia Code", monospace;
+}
+
+.metagraph-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.btn-ghost {
+  background: transparent;
+  border: 1px solid rgba(0, 217, 255, 0.2);
+  color: var(--muted);
+  font-size: 11px;
+  padding: 4px 8px;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.btn-ghost:hover {
+  border-color: var(--cyan);
+  color: var(--cyan);
+  background: rgba(0, 217, 255, 0.05);
 }
 
 .simulation-details {

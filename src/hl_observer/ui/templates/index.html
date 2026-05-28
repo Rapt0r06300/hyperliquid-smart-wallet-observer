@@ -55,7 +55,16 @@
               <p class="eyebrow">Metagraphe local</p>
               <h3>P&L du bot simule</h3>
             </div>
-            <span id="simulationGraphState" class="badge cyan">En attente de donnees</span>
+            <div class="metagraph-stats-bar" id="metagraphStatsBar">
+               <div class="m-stat"><span>ROI</span><strong id="mStatRoi">0%</strong></div>
+               <div class="m-stat"><span>Win Rate</span><strong id="mStatWinRate">0%</strong></div>
+               <div class="m-stat"><span>Profit Factor</span><strong id="mStatPf">0.0</strong></div>
+               <div class="m-stat"><span>Drawdown</span><strong id="mStatDrawdown">0%</strong></div>
+            </div>
+            <div class="metagraph-actions">
+               <button class="btn-ghost" id="btnExportLedger">Export Ledger (CSV)</button>
+               <span id="simulationGraphState" class="badge cyan">En attente de donnees</span>
+            </div>
           </div>
           <canvas id="simulationMetaGraph" width="1180" height="320" aria-label="Metagraphe de simulation"></canvas>
           <div id="simulationGraphTooltip" class="chart-tooltip hidden"></div>
