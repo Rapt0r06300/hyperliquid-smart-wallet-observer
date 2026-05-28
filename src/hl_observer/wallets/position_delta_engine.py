@@ -38,6 +38,8 @@ class PositionDeltaRecord(BaseModel):
     delta_size: float
     delta_notional_usdc: float | None = None
     action: PositionAction
+    sub_actions: list[dict[str, Any]] = Field(default_factory=list)
+    intent: str = "UNKNOWN"  # AGGRESSIVE, PASSIVE, UNKNOWN
     exchange_ts: int | None = None
     fill_id: int | None = None
     source_event_id: int | None = None

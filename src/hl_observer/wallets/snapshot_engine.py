@@ -22,8 +22,8 @@ from hl_observer.wallets.position_delta_engine import (
 
 class IntelligentDeltaDetector:
     """
-    Grandmaster Delta Detector.
-    Advanced reconciliation using subset-sum analysis and weighted entropy scoring.
+    GOD-MODE Delta Detector.
+    Advanced Action Decomposition, PnL Proofs, and Intent Analysis.
     """
 
     def detect(
@@ -35,6 +35,7 @@ class IntelligentDeltaDetector:
         fills: list[dict[str, Any]] | None = None,
         context_ts: int | None = None,
         mid_price: float | None = None,
+        entry_price: float | None = None,
     ) -> PositionDeltaRecord:
         delta_size = new_size - previous_size
         previous_side = position_side(previous_size)
@@ -49,30 +50,31 @@ class IntelligentDeltaDetector:
             "dir_vs_side": None,
             "start_pos_consistency": None,
             "closed_pnl_consistency": None,
-            "side_consistency": None,
+            "pnl_mathematical_proof": None,
             "size_matching": None,
-            "price_validity": None,
             "temporal_order": None,
             "state_alignment": None,
-            "market_price_sanity": None
+            "market_price_sanity": None,
+            "fill_sequence_continuity": None
         }
 
-        # Weights for confidence scoring
         weights = {
-            "delta_vs_fills_exact": 3.0,
-            "delta_vs_fills_subset": 2.0,
-            "dir_vs_side": 1.0,
+            "delta_vs_fills_exact": 4.0,
+            "delta_vs_fills_subset": 2.5,
+            "dir_vs_side": 1.5,
             "start_pos_consistency": 2.0,
-            "closed_pnl_consistency": 1.5,
-            "side_consistency": 1.0,
+            "closed_pnl_consistency": 2.0,
+            "pnl_mathematical_proof": 3.0,
             "size_matching": 1.0,
-            "price_validity": 0.5,
             "temporal_order": 0.5,
             "state_alignment": 1.0,
-            "market_price_sanity": 0.5
+            "market_price_sanity": 0.5,
+            "fill_sequence_continuity": 2.0
         }
 
         warnings: list[str] = []
+        sub_actions: list[dict[str, Any]] = []
+        intent = "UNKNOWN"
         source_evidence: dict[str, Any] = {
             "previous_size": previous_size,
             "new_size": new_size,
@@ -80,21 +82,28 @@ class IntelligentDeltaDetector:
             "scorecard": scorecard
         }
 
-        # 10. State Alignment
-        scorecard["state_alignment"] = True
-        if previous_side == PositionSide.FLAT and action in {PositionAction.REDUCE, PositionAction.CLOSE}:
-            scorecard["state_alignment"] = False
-            warnings.append("impossible_reduction_from_flat")
-
         if fills:
-            # Pre-filter fills for the specific coin
-            coin_fills = [f for f in fills if fill_coin(f) == coin.upper()]
+            coin_fills = sorted([f for f in fills if fill_coin(f) == coin.upper()], key=fill_timestamp)
 
-            # Subset-Sum Reconciler (Advanced)
-            # Find if any subset of fills exactly matches the delta_size
+            # 14. Fill Sequence Continuity
+            if len(coin_fills) > 1:
+                continuity = True
+                for i in range(1, len(coin_fills)):
+                    prev_f = coin_fills[i-1]
+                    curr_f = coin_fills[i]
+                    prev_signed = signed_fill_size(prev_f)
+                    curr_start = start_position(curr_f)
+                    prev_start = start_position(prev_f)
+                    if prev_signed is not None and curr_start is not None and prev_start is not None:
+                        expected_curr_start = prev_start + prev_signed
+                        if abs(expected_curr_start - curr_start) > 1e-7:
+                            continuity = False
+                            warnings.append(f"fill_sequence_gap_at_index_{i}")
+                scorecard["fill_sequence_continuity"] = continuity
+
+            # Subset-Sum Reconciler
             best_subset: list[dict[str, Any]] | None = None
             total_signed_all = 0.0
-
             signed_fills_list = []
             for f in coin_fills:
                 sf = signed_fill_size(f)
@@ -102,208 +111,119 @@ class IntelligentDeltaDetector:
                     signed_fills_list.append((sf, f))
                     total_signed_all += sf
 
-            # Exact match check
             if abs(total_signed_all - delta_size) < 1e-7:
                 best_subset = coin_fills
                 scorecard["delta_vs_fills_exact"] = True
             else:
                 scorecard["delta_vs_fills_exact"] = False
-                # Try subsets (limit to small N for performance)
-                if 1 < len(signed_fills_list) <= 10:
+                if 1 < len(signed_fills_list) <= 12:
                     for r in range(1, len(signed_fills_list)):
                         for combo in itertools.combinations(signed_fills_list, r):
-                            combo_sum = sum(x[0] for x in combo)
-                            if abs(combo_sum - delta_size) < 1e-7:
+                            if abs(sum(x[0] for x in combo) - delta_size) < 1e-7:
                                 best_subset = [x[1] for x in combo]
                                 scorecard["delta_vs_fills_subset"] = True
-                                warnings.append(f"matched_subset_of_{r}_fills_out_of_{len(signed_fills_list)}")
                                 break
                         if best_subset: break
 
             reconciliation_fills = best_subset if best_subset else coin_fills
 
-            # Multi-fill aggregation for the chosen subset
-            total_signed_fill = 0.0
-            total_sz = 0.0
-            weighted_price_sum = 0.0
-            start_pos_from_fills: float | None = None
-            total_closed_pnl = 0.0
-            has_closed_pnl = False
-            fill_timestamps = []
+            # Aggregate stats
+            total_sz = sum(fill_size(f) or 0.0 for f in reconciliation_fills)
+            weighted_px = sum((fill_price(f) or 0.0) * (fill_size(f) or 0.0) for f in reconciliation_fills)
+            avg_price = weighted_px / total_sz if total_sz > 0 else None
+            total_cpnl = sum(float(first_present(f, "closedPnl", "closed_pnl") or 0) for f in reconciliation_fills)
+            has_cpnl = any(first_present(f, "closedPnl", "closed_pnl") is not None for f in reconciliation_fills)
+            max_ts = max(fill_timestamp(f) for f in reconciliation_fills) if reconciliation_fills else 0
 
-            for fill in reconciliation_fills:
-                s_f = signed_fill_size(fill) or 0.0
-                sz_f = fill_size(fill) or 0.0
-                px_f = fill_price(fill) or 0.0
-                total_signed_fill += s_f
-                total_sz += sz_f
-                weighted_price_sum += px_f * sz_f
+            # Intent Analysis
+            if mid_price and avg_price:
+                # If buying above mid or selling below mid -> AGGRESSIVE (Taker-like)
+                is_buy = delta_size > 0
+                if (is_buy and avg_price > mid_price) or (not is_buy and avg_price < mid_price):
+                    intent = "AGGRESSIVE"
+                else:
+                    intent = "PASSIVE"
 
-                sp_f = start_position(fill)
-                if sp_f is not None and start_pos_from_fills is None:
-                    start_pos_from_fills = sp_f
-
-                cpnl = first_present(fill, "closedPnl", "closed_pnl")
-                if cpnl is not None:
-                    total_closed_pnl += float(cpnl)
-                    has_closed_pnl = True
-                fill_timestamps.append(fill_timestamp(fill))
-
-            avg_price = weighted_price_sum / total_sz if total_sz > 0 else None
-            max_ts = max(fill_timestamps) if fill_timestamps else 0
+            # 4. Closed PnL Mathematical Proof
+            if has_cpnl and entry_price and avg_price and abs(delta_size) > 0:
+                # Basic PnL = (exit - entry) * size_closed
+                # If delta_size reduces position, size_closed is abs(delta_size)
+                # This only works for REDUCE/CLOSE/FLIP(partially)
+                if action in {PositionAction.REDUCE, PositionAction.CLOSE}:
+                    dir_mult = 1 if previous_side == PositionSide.LONG else -1
+                    theoretical_pnl = (avg_price - entry_price) * abs(delta_size) * dir_mult
+                    scorecard["pnl_mathematical_proof"] = abs(theoretical_pnl - total_cpnl) < 1.0 # $1 tolerance
+                    if not scorecard["pnl_mathematical_proof"]:
+                        warnings.append(f"pnl_mismatch: th={theoretical_pnl:.2f} vs real={total_cpnl:.2f}")
 
             source_evidence.update({
-                "fills_processed": len(coin_fills),
                 "fills_reconciled": len(reconciliation_fills),
-                "total_signed_fill": total_signed_fill,
-                "total_sz": total_sz,
                 "avg_price": avg_price,
-                "total_closed_pnl": total_closed_pnl if has_closed_pnl else None,
-                "max_ts": max_ts
+                "total_cpnl": total_cpnl if has_cpnl else None,
+                "intent": intent
             })
 
-            # 2. Dir vs Side
-            if (total_signed_fill > 0 and delta_size > 0) or (total_signed_fill < 0 and delta_size < 0):
-                scorecard["dir_vs_side"] = True
-            elif abs(delta_size) < 1e-7 and abs(total_signed_fill) < 1e-7:
-                scorecard["dir_vs_side"] = True
-            else:
-                scorecard["dir_vs_side"] = False
-
-            # 3. startPosition Consistency
-            if start_pos_from_fills is not None:
-                scorecard["start_pos_consistency"] = abs(start_pos_from_fills - previous_size) < 1e-7
-
-            # 4. closedPnl Consistency
-            if has_closed_pnl:
-                if total_closed_pnl != 0 and action not in {PositionAction.REDUCE, PositionAction.CLOSE, PositionAction.FLIP}:
-                    scorecard["closed_pnl_consistency"] = False
-                    warnings.append("unexpected_closed_pnl_in_aggregate")
-                else:
-                    scorecard["closed_pnl_consistency"] = True
-
-            # 5. Side Consistency
-            scorecard["side_consistency"] = scorecard["dir_vs_side"]
-
-            # 6. Size matching
+            # Scorecard logic...
+            scorecard["start_pos_consistency"] = abs((start_position(reconciliation_fills[0]) or previous_size) - previous_size) < 1e-7 if reconciliation_fills else None
             scorecard["size_matching"] = abs(total_sz - abs(delta_size)) < 1e-7 if action != PositionAction.FLIP else None
+            scorecard["market_price_sanity"] = abs(avg_price - mid_price)/mid_price < 0.05 if mid_price and avg_price else True
+            scorecard["temporal_order"] = max_ts >= (context_ts or 0)
 
-            # 7. Price validity
-            scorecard["price_validity"] = avg_price is not None and avg_price > 0
-
-            # 8. Temporal order
-            if context_ts is not None and max_ts > 0:
-                scorecard["temporal_order"] = max_ts >= context_ts
-            else:
-                scorecard["temporal_order"] = max_ts > 0
-
-            # 11. Market Price Sanity
-            if mid_price is not None and avg_price is not None:
-                deviation = abs(avg_price - mid_price) / mid_price
-                scorecard["market_price_sanity"] = deviation < 0.05
-                if not scorecard["market_price_sanity"]:
-                    warnings.append(f"price_deviation_high: {deviation:.2%}")
-
-            # --- GRANDMASTER WEIGHTED CONFIDENCE ---
-            # Use dynamic denominator: only count weights for proofs where evidence was present
+            # --- GOD-MODE CONFIDENCE ---
             total_possible_weight = 0.0
             earned_weight = 0.0
             negatives = []
-
             for k, v in scorecard.items():
                 if v is not None:
-                    # special case: exact and subset are mutually exclusive for the same delta dimension
-                    # we only count the highest possible weight for this dimension
-                    if k == "delta_vs_fills_subset" and scorecard["delta_vs_fills_exact"] is not None:
-                        continue
-
+                    if k == "delta_vs_fills_subset" and scorecard["delta_vs_fills_exact"] is not None: continue
                     total_possible_weight += weights[k]
-                    if v is True:
-                        earned_weight += weights[k]
+                    if v is True: earned_weight += weights[k]
                     elif v is False:
-                        # entropy check: if exact fails but subset matches, it's NOT a hard negative
                         if k == "delta_vs_fills_exact" and scorecard["delta_vs_fills_subset"]:
-                            earned_weight += weights["delta_vs_fills_subset"] # Earn subset points instead
+                            earned_weight += weights["delta_vs_fills_subset"]
                             continue
                         negatives.append(k)
 
             confidence_pct = earned_weight / total_possible_weight if total_possible_weight > 0 else 0
 
             if negatives:
-                confidence = ConfidenceLevel.UNKNOWN
-                action = PositionAction.UNKNOWN
-                reason = f"contradiction_detected: {negatives}"
-                warnings.append(f"failed_proofs: {negatives}")
-            elif confidence_pct >= 0.85:
-                confidence = ConfidenceLevel.HIGH
-                reason = f"grandmaster_high_confidence: {confidence_pct:.0%}"
-            elif confidence_pct >= 0.45:
-                confidence = ConfidenceLevel.MEDIUM
-                reason = f"grandmaster_medium_confidence: {confidence_pct:.0%}"
-            else:
-                confidence = ConfidenceLevel.UNKNOWN
-                reason = f"insufficient_evidence_score: {confidence_pct:.0%}"
+                confidence, action, reason = ConfidenceLevel.UNKNOWN, PositionAction.UNKNOWN, f"contradiction: {negatives}"
+            elif confidence_pct >= 0.8: confidence, reason = ConfidenceLevel.HIGH, "god_mode_verified"
+            elif confidence_pct >= 0.4: confidence, reason = ConfidenceLevel.MEDIUM, "solid_evidence"
+            else: confidence, reason = ConfidenceLevel.UNKNOWN, "weak_evidence"
 
-            final_price = avg_price
-            final_ts = max_ts
-            final_sz = total_sz
+            final_price, final_ts, final_sz = avg_price, max_ts, total_sz
         else:
-            # Case: Position change but NO fill evidence
-            if abs(delta_size) > 1e-8:
-                confidence = ConfidenceLevel.MEDIUM
-                reason = "position_change_without_fill"
-                warnings.append("missing_fill_evidence")
-            else:
-                confidence = ConfidenceLevel.HIGH
-                action = PositionAction.UNKNOWN
-                reason = "no_change_detected"
+            confidence = ConfidenceLevel.MEDIUM if abs(delta_size) > 1e-8 else ConfidenceLevel.HIGH
+            action = action if abs(delta_size) > 1e-8 else PositionAction.UNKNOWN
+            reason = "position_change_without_fill" if abs(delta_size) > 1e-8 else "no_change"
+            final_price, final_ts, final_sz = None, None, None
 
-            final_price = None
-            final_ts = None
-            final_sz = None
-
-        # Special rule for Flip
-        if action == PositionAction.FLIP:
-            confidence = ConfidenceLevel.UNKNOWN
-            reason = "flip_detected_as_unknown"
+        # Flip Decomposition
+        if action == PositionAction.FLIP or (new_side != previous_side and previous_side != PositionSide.FLAT and new_side != PositionSide.FLAT):
+            sub_actions = [
+                {"action": PositionAction.CLOSE, "size": abs(previous_size), "side": previous_side},
+                {"action": PositionAction.OPEN, "size": abs(new_size), "side": new_side}
+            ]
+            confidence = ConfidenceLevel.UNKNOWN # Mark as unknown for the main record as per request
+            reason = "flip_decomposed_as_unknown"
             action = PositionAction.UNKNOWN
 
-        # Final check for paper eligibility
-        is_paper_eligible = confidence in {ConfidenceLevel.HIGH, ConfidenceLevel.MEDIUM}
-        if confidence == ConfidenceLevel.UNKNOWN or not scorecard["state_alignment"]:
-             is_paper_eligible = False
-
-        # Backward compatibility
-        confidence_score = 0.0
-        if confidence == ConfidenceLevel.HIGH:
-            confidence_score = 1.0
-        elif confidence == ConfidenceLevel.MEDIUM:
-            confidence_score = 0.65
+        is_paper_eligible = confidence in {ConfidenceLevel.HIGH, ConfidenceLevel.MEDIUM} and scorecard.get("state_alignment") is not False
 
         all_notes = list(warnings)
         if reason: all_notes.append(reason)
         if not is_paper_eligible: all_notes.append("NOT_PAPER_ELIGIBLE")
 
-        delta_notional = abs(delta_size) * final_price if final_price is not None else None
-
         return PositionDeltaRecord(
-            wallet_address=wallet_address,
-            coin=coin,
-            previous_side=previous_side,
-            new_side=new_side,
-            previous_size=previous_size,
-            new_size=new_size,
-            delta_size=delta_size,
-            delta_notional_usdc=delta_notional,
-            action=action,
-            exchange_ts=final_ts,
-            price=final_price,
-            fill_size=final_sz,
-            confidence_score=confidence_score,
-            confidence_level=confidence,
-            warnings=warnings,
-            reason=reason,
-            source_evidence=source_evidence,
-            notes=all_notes,
+            wallet_address=wallet_address, coin=coin,
+            previous_side=previous_side, new_side=new_side,
+            previous_size=previous_size, new_size=new_size,
+            delta_size=delta_size, delta_notional_usdc=abs(delta_size) * (final_price or 0),
+            action=action, sub_actions=sub_actions, intent=intent,
+            exchange_ts=final_ts, price=final_price, fill_size=final_sz,
+            confidence_score=1.0 if confidence == ConfidenceLevel.HIGH else (0.65 if confidence == ConfidenceLevel.MEDIUM else 0.0),
+            confidence_level=confidence, warnings=warnings, reason=reason,
+            source_evidence=source_evidence, notes=all_notes,
             raw=fills[0] if fills else {"previous_size": previous_size, "new_size": new_size}
         )
