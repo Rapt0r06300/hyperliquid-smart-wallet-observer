@@ -206,7 +206,7 @@ class CopyTradingSettings(BaseModel):
 
 class Settings(BaseModel):
     environment: ExecutionEnvironment = ExecutionEnvironment.PAPER
-    database_url: str = "sqlite:///./data/hl_observer.sqlite3"
+    database_url: str = "sqlite:///./data/hypersmart_observer.sqlite3"
     logs_dir: Path = Path("./logs")
     log_level: str = "INFO"
     hyperliquid: HyperliquidSettings = Field(default_factory=HyperliquidSettings)

@@ -60,9 +60,12 @@ class AppConfig:
     score_min_confidence: float = 0.60
     score_store_rejected: bool = True
     enable_paper_trading: bool = True
-    paper_starting_equity: float = 10_000.0
-    paper_max_position_notional: float = 100.0
+    paper_starting_equity: float = 1000.0
+    paper_max_position_notional: float = 50.0
+    paper_max_total_exposure: float = 200.0
     paper_max_open_trades: int = 3
+    paper_max_risk_per_trade_pct: float = 1.0
+    paper_max_drawdown_stop_pct: float = 10.0
     paper_fee_rate_bps: float = 5.0
     paper_spread_bps: float = 2.0
     paper_slippage_bps: float = 5.0
@@ -172,12 +175,21 @@ def load_config(env_file: str | Path = ".env") -> AppConfig:
         score_store_rejected=_as_bool(merged.get("HYPERSMART_SCORE_STORE_REJECTED", "true")),
         enable_paper_trading=_as_bool(merged.get("HYPERSMART_ENABLE_PAPER_TRADING", "true")),
         paper_starting_equity=_as_float(
-            merged.get("HYPERSMART_PAPER_STARTING_EQUITY", "10000.0")
+            merged.get("HYPERSMART_PAPER_STARTING_EQUITY", "1000.0")
         ),
         paper_max_position_notional=_as_float(
-            merged.get("HYPERSMART_PAPER_MAX_POSITION_NOTIONAL", "100.0")
+            merged.get("HYPERSMART_PAPER_MAX_POSITION_NOTIONAL", "50.0")
+        ),
+        paper_max_total_exposure=_as_float(
+            merged.get("HYPERSMART_PAPER_MAX_TOTAL_EXPOSURE", "200.0")
         ),
         paper_max_open_trades=_as_int(merged.get("HYPERSMART_PAPER_MAX_OPEN_TRADES", "3")),
+        paper_max_risk_per_trade_pct=_as_float(
+            merged.get("HYPERSMART_PAPER_MAX_RISK_PER_TRADE_PCT", "1.0")
+        ),
+        paper_max_drawdown_stop_pct=_as_float(
+            merged.get("HYPERSMART_PAPER_MAX_DRAWDOWN_STOP_PCT", "10.0")
+        ),
         paper_fee_rate_bps=_as_float(merged.get("HYPERSMART_PAPER_FEE_RATE_BPS", "5")),
         paper_spread_bps=_as_float(merged.get("HYPERSMART_PAPER_SPREAD_BPS", "2")),
         paper_slippage_bps=_as_float(merged.get("HYPERSMART_PAPER_SLIPPAGE_BPS", "5")),

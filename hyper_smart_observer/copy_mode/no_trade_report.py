@@ -273,9 +273,14 @@ def write_no_trade_reports(decisions: list[NoTradeDecision], output_dir: Path) -
     return json_path, md_path
 
 
+def generate_markdown_report(decisions: list[NoTradeDecision]) -> str:
+    """Alias for format_no_trade_markdown."""
+    return format_no_trade_markdown(decisions)
+
+
 def format_no_trade_markdown(decisions: list[NoTradeDecision]) -> str:
     lines = [
-        "# HyperSmart no_trade_report",
+        "# Rapport No-Trade",
         "",
         "Mode: observation / paper mock USDC uniquement. Aucun ordre reel.",
         "",
@@ -293,6 +298,8 @@ def format_no_trade_markdown(decisions: list[NoTradeDecision]) -> str:
         lines.extend(
             [
                 f"### {decision.reason.value}",
+                f"- Wallet: `{decision.leader_wallet}`",
+                f"- Coin: {decision.coin}",
                 f"- Observe: {decision.observed}",
                 f"- Pourquoi: {decision.why_not_simulable}",
                 f"- Donnee manquante: {decision.missing_data}",
