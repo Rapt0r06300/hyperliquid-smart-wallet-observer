@@ -1196,11 +1196,17 @@ def copy_run_command(
         if followed_addresses:
             delta_query = delta_query.filter(PositionDeltaModel.wallet_address.in_(followed_addresses))
         deltas = delta_query.limit(max_deltas).all()
+
+        # Load recent market metrics for accurate edge calculation
+        metric_rows = session.query(MarketMetric).order_by(MarketMetric.computed_at_ms.desc()).limit(100).all()
+        market_metrics = {m.coin.upper(): m for m in metric_rows}
+
         mode = CopySourceMode.WEBSOCKET_DRY_RUN if source_mode.lower() in {"ws", "websocket", "ws-dry-run"} else CopySourceMode.POLLING
         signals = detect_copy_signals_from_deltas(
             deltas,
             settings=settings,
             followed_wallets=followed,
+            market_metrics=market_metrics,
             interval_seconds=interval,
             source_mode=mode,
         )

@@ -887,12 +887,14 @@ def create_router(settings: Settings, state: UiState, bus: UiEventBus) -> APIRou
                     .order_by(SignalScoreModel.created_at.desc())
                     .limit(1)
                 )
-                edge = session.scalar(
-                    select(EdgeMetric.edge_remaining_bps)
+                edge_row = session.scalars(
+                    select(EdgeMetric)
                     .where(EdgeMetric.signal_id == signal.id)
                     .order_by(EdgeMetric.created_at.desc())
                     .limit(1)
-                )
+                ).first()
+                edge = edge_row.edge_remaining_bps if edge_row else None
+                ga_score = edge_row.gain_assurance_score if edge_row else None
                 rejected = session.scalar(
                     select(RejectedSignal.reason)
                     .where(RejectedSignal.signal_id == signal.id)
@@ -908,6 +910,7 @@ def create_router(settings: Settings, state: UiState, bus: UiEventBus) -> APIRou
                         signal_type=signal.signal_type,
                         signal_score=score,
                         edge_remaining_bps=edge,
+                        gain_assurance_score=ga_score,
                         decision=signal.decision,
                         reject_reason=rejected,
                         created_at=str(signal.created_at),

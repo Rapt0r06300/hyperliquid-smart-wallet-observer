@@ -33,28 +33,28 @@ def compute_edge_remaining(
     # Rejection logic
     if inputs.edge_leader_bps <= 0:
         decision = SignalDecision.REJECT_EDGE_NEGATIVE
-        reasons.append("missing_leader_edge")
+        reasons.append(f"missing_leader_edge: {inputs.edge_leader_bps:.1f} bps")
     elif inputs.freshness_factor <= 0:
         decision = SignalDecision.REJECT_TOO_LATE
-        reasons.append("signal_stale")
+        reasons.append(f"signal_stale: freshness {inputs.freshness_factor:.2f}")
     elif inputs.observed_price <= 0:
         decision = SignalDecision.REJECT_INVALID_PRICE
-        reasons.append("invalid_price")
+        reasons.append(f"invalid_price: {inputs.observed_price:.4f}")
     elif inputs.liquidity_penalty_bps > max_liquidity_penalty_bps:
         decision = SignalDecision.REJECT_TOO_ILLIQUID
-        reasons.append("low_liquidity")
+        reasons.append(f"low_liquidity: penalty {inputs.liquidity_penalty_bps:.1f} > threshold {max_liquidity_penalty_bps:.1f}")
     elif edge_remaining_bps <= 0:
         decision = SignalDecision.REJECT_EDGE_NEGATIVE
-        reasons.append("edge_remaining_bps <= 0")
+        reasons.append(f"edge_remaining_bps non-positive: {edge_remaining_bps:.1f} bps")
     elif edge_remaining_bps < min_edge_required_bps:
         decision = SignalDecision.REJECT_EDGE_TOO_SMALL
-        reasons.append("edge_remaining_bps below minimum")
+        reasons.append(f"edge_remaining_bps {edge_remaining_bps:.1f} below minimum {min_edge_required_bps:.1f}")
     elif costs_bps > max_total_costs_bps:
         decision = SignalDecision.REJECT_COSTS_TOO_HIGH
-        reasons.append("costs_too_high")
+        reasons.append(f"costs_too_high: {costs_bps:.1f} > threshold {max_total_costs_bps:.1f}")
 
     if decision == SignalDecision.PAPER_CANDIDATE:
-        reasons.append("edge_remaining_bps meets minimum")
+        reasons.append(f"edge_remaining_bps {edge_remaining_bps:.1f} meets minimum {min_edge_required_bps:.1f}")
 
     return EdgeRemaining(
         expected_edge_bps=expected_edge_bps,

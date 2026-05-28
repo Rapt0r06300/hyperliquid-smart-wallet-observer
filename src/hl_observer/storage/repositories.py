@@ -32,6 +32,7 @@ from hl_observer.storage.models import (
     WalletDiscoveryRun,
     WalletDiscoverySourceModel,
     WalletSnapshot,
+    EdgeMetric,
 )
 from hl_observer.signals.position_delta_detector import PositionDelta
 from hl_observer.utils.time import now_ms
@@ -834,3 +835,29 @@ class RejectedSignalRepository:
         )
         self.session.add(rejected)
         return rejected
+
+
+class EdgeMetricRepository:
+    def __init__(self, session: Session) -> None:
+        self.session = session
+
+    def store_edge_metric(
+        self,
+        *,
+        signal_id: str,
+        expected_edge_bps: float,
+        costs_bps: float,
+        edge_remaining_bps: float,
+        gain_assurance_score: float | None = None,
+        decision: str,
+    ) -> EdgeMetric:
+        model = EdgeMetric(
+            signal_id=signal_id,
+            expected_edge_bps=expected_edge_bps,
+            costs_bps=costs_bps,
+            edge_remaining_bps=edge_remaining_bps,
+            gain_assurance_score=gain_assurance_score,
+            decision=decision,
+        )
+        self.session.add(model)
+        return model

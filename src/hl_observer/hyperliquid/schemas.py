@@ -47,6 +47,7 @@ class SignalDecision(StrEnum):
     REJECT_ORDERBOOK_STALE = "REJECT_ORDERBOOK_STALE"
     REJECT_INVALID_PRICE = "REJECT_INVALID_PRICE"
     REJECT_COSTS_TOO_HIGH = "REJECT_COSTS_TOO_HIGH"
+    REJECT_STALE_SIGNAL = "REJECT_STALE_SIGNAL"
 
 
 class WalletStyle(StrEnum):
@@ -138,6 +139,7 @@ class SignalCandidate(BaseModel):
     funding_penalty_bps: float = 0.0
     orderbook_depth_usdc: float = 0.0
     crowding_score: float = 0.0
+    gain_assurance_score: float = 0.0
     exit_plan_id: str | None = None
     decision: SignalDecision = SignalDecision.OBSERVE_ONLY
     reject_reason: str | None = None

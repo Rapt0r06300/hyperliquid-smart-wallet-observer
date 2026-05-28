@@ -7,7 +7,17 @@ from pydantic import BaseModel, Field
 
 from hl_observer.config.settings import Settings
 from hl_observer.edge.edge_remaining import compute_edge_remaining
+from hl_observer.edge.factors import (
+    compute_adverse_selection_penalty,
+    compute_crowding_penalty,
+    compute_delay_cost,
+    compute_freshness_factor,
+    compute_funding_penalty,
+    compute_gain_assurance_score,
+    compute_liquidity_penalty,
+)
 from hl_observer.hyperliquid.schemas import EdgeRemainingInputs, SignalCandidate, SignalDecision, SignalScore
+from hl_observer.utils.math import clamp
 from hl_observer.risk.gates import RiskContext
 from hl_observer.risk.risk_engine import RiskEngine
 from hl_observer.signals.signal_scoring import score_signal
@@ -55,6 +65,7 @@ def detect_copy_signals_from_deltas(
     *,
     settings: Settings,
     followed_wallets: list[TopWallet] | None = None,
+    market_metrics: dict[str, Any] | None = None,
     interval_seconds: int = 300,
     source_mode: CopySourceMode = CopySourceMode.POLLING,
     tuning: CopySignalTuning | None = None,
@@ -71,6 +82,12 @@ def detect_copy_signals_from_deltas(
     scores: list[SignalScore] = []
     no_trade: dict[str, int] = {}
     cfg = tuning or CopySignalTuning()
+
+    # Track coin crowding
+    coin_counts: dict[str, int] = {}
+    for delta in deltas:
+        if delta.coin:
+            coin_counts[delta.coin] = coin_counts.get(delta.coin, 0) + 1
 
     for delta in deltas:
         wallet_address = str(delta.wallet_address).lower()
@@ -89,19 +106,50 @@ def detect_copy_signals_from_deltas(
         if delta.price is None or delta.price <= 0:
             _count(no_trade, "price_missing")
             continue
+
+        timestamp_ms = delta.exchange_ts or delta.detected_at_ms or current_ms
+        age_ms = max(0, current_ms - timestamp_ms)
+
+        # Dynamic factor calculations
+        freshness = compute_freshness_factor(age_ms, half_life_ms=settings.risk.edge_freshness_half_life_ms)
+        delay_cost = compute_delay_cost(age_ms, volatility_bps_per_sec=settings.risk.edge_volatility_bps_per_sec)
+
+        # Funding and liquidity from live metrics if available
+        coin_metric = (market_metrics or {}).get(delta.coin.upper()) if delta.coin else None
+        funding_rate = coin_metric.funding_hint if coin_metric and hasattr(coin_metric, "funding_hint") else 0.0
+        funding_penalty = compute_funding_penalty(side, funding_rate)
+
+        depth = coin_metric.depth_usdc if coin_metric and hasattr(coin_metric, "depth_usdc") and coin_metric.depth_usdc else cfg.orderbook_depth_usdc
+
+        # Use actual trade notional from the delta
+        trade_notional = abs(float(delta.delta_notional_usdc or 5000.0))
+        liq_penalty = compute_liquidity_penalty(trade_notional, depth)
+
+        # Crowd penalty based on how many deltas for this coin in this batch
+        num_on_coin = coin_counts.get(delta.coin, 1)
+        crowd_penalty = compute_crowding_penalty(
+            num_on_coin,
+            threshold=settings.risk.edge_crowding_threshold,
+            penalty_per_leader=settings.risk.edge_crowding_penalty_per_leader_bps
+        )
+
+        wallet_score = followed_scores.get(wallet_address, 75.0)
+        # Use wallet score as consistency proxy: 100 = 1.0, 50 = 0.5
+        dynamic_consistency = clamp(wallet_score / 100.0, 0.5, 1.2)
+
         edge = compute_edge_remaining(
             EdgeRemainingInputs(
                 edge_leader_bps=cfg.edge_leader_bps,
-                consistency_factor=cfg.consistency_factor,
-                freshness_factor=cfg.freshness_factor,
-                delay_cost_bps=cfg.delay_cost_bps,
+                consistency_factor=dynamic_consistency,
+                freshness_factor=freshness,
+                delay_cost_bps=delay_cost,
                 spread_bps=cfg.spread_bps,
                 slippage_bps=cfg.slippage_bps,
                 fees_bps=cfg.fees_bps,
-                liquidity_penalty_bps=cfg.liquidity_penalty_bps,
-                crowding_penalty_bps=cfg.crowding_penalty_bps,
+                liquidity_penalty_bps=liq_penalty,
+                crowding_penalty_bps=crowd_penalty,
                 adverse_selection_bps=cfg.adverse_selection_bps,
-                funding_penalty_bps=cfg.funding_penalty_bps,
+                funding_penalty_bps=funding_penalty,
                 observed_price=float(delta.price),
             ),
             min_edge_required_bps=settings.risk.min_edge_required_bps,
@@ -110,7 +158,16 @@ def detect_copy_signals_from_deltas(
         )
         if edge.edge_remaining_bps <= 0:
             _count(no_trade, "edge_remaining_bps_non_positive")
-        timestamp_ms = delta.exchange_ts or delta.detected_at_ms or current_ms
+        # Liquidity score (0-100) used for gain assurance
+        liq_score = clamp(100.0 - liq_penalty * 2.0, 0.0, 100.0)
+        gain_assurance = compute_gain_assurance_score(
+            edge_remaining_bps=edge.edge_remaining_bps,
+            min_edge_required_bps=settings.risk.min_edge_required_bps,
+            freshness_factor=freshness,
+            consistency_factor=dynamic_consistency,
+            liquidity_score=liq_score,
+        )
+
         signal = SignalCandidate(
             id=_copy_signal_id(delta),
             source_wallet=wallet_address,
@@ -119,22 +176,23 @@ def detect_copy_signals_from_deltas(
             signal_type=signal_type,
             observed_price=float(delta.price),
             timestamp_ms=timestamp_ms,
-            signal_age_ms=max(0, current_ms - timestamp_ms),
-            wallet_score=followed_scores.get(wallet_address, 75.0),
+            signal_age_ms=age_ms,
+            wallet_score=wallet_score,
             edge_leader_bps=cfg.edge_leader_bps,
-            consistency_factor=cfg.consistency_factor,
-            freshness_factor=cfg.freshness_factor,
+            consistency_factor=dynamic_consistency,
+            freshness_factor=freshness,
             edge_remaining_bps=edge.edge_remaining_bps,
-            delay_cost_bps=cfg.delay_cost_bps,
+            delay_cost_bps=delay_cost,
             spread_bps=cfg.spread_bps,
             slippage_bps=cfg.slippage_bps,
             fees_bps=cfg.fees_bps,
-            liquidity_penalty_bps=cfg.liquidity_penalty_bps,
-            crowding_penalty_bps=cfg.crowding_penalty_bps,
+            liquidity_penalty_bps=liq_penalty,
+            crowding_penalty_bps=crowd_penalty,
             adverse_selection_bps=cfg.adverse_selection_bps,
-            funding_penalty_bps=cfg.funding_penalty_bps,
-            orderbook_depth_usdc=cfg.orderbook_depth_usdc,
-            crowding_score=0.0,
+            funding_penalty_bps=funding_penalty,
+            orderbook_depth_usdc=depth,
+            crowding_score=crowd_penalty / 30.0, # normalized 0-1
+            gain_assurance_score=gain_assurance,
             exit_plan_id=f"exit:{wallet_address}:{delta.coin}",
             decision=edge.decision,
             reject_reason="; ".join(edge.reasons) if edge.decision != SignalDecision.PAPER_CANDIDATE else None,

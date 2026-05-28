@@ -861,6 +861,7 @@ class EdgeMetric(Base, TimestampMixin):
     expected_edge_bps: Mapped[float] = mapped_column(Float)
     costs_bps: Mapped[float] = mapped_column(Float)
     edge_remaining_bps: Mapped[float] = mapped_column(Float)
+    gain_assurance_score: Mapped[float | None] = mapped_column(Float)
     decision: Mapped[str] = mapped_column(String(64))
 
 

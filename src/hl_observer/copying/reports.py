@@ -39,7 +39,7 @@ def format_copy_run_report(
     for signal in signals.signals[:10]:
         lines.append(
             f"- {signal.id} {signal.source_wallet} {signal.coin} {signal.signal_type}/{signal.side} "
-            f"edge={signal.edge_remaining_bps:.1f} decision={signal.decision.value}"
+            f"edge={signal.edge_remaining_bps:.1f} gain_assurance={signal.gain_assurance_score:.1f} decision={signal.decision.value}"
         )
     return "\n".join(lines)
 

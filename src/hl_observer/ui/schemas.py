@@ -46,6 +46,7 @@ class UiSignalRow(BaseModel):
     wallet_score: float | None = None
     signal_score: float | None = None
     edge_remaining_bps: float | None = None
+    gain_assurance_score: float | None = None
     decision: str
     reject_reason: str | None = None
     created_at: str | None = None
