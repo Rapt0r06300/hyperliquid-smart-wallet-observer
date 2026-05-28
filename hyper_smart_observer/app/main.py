@@ -17,7 +17,12 @@ from hyper_smart_observer.backtesting.multi_wallet_simulator import (
 from hyper_smart_observer.backtesting.replay_engine import ReplayEngine
 from hyper_smart_observer.copy_mode.candidate_importer import load_leader_candidates_from_file, write_candidate_template
 from hyper_smart_observer.copy_mode.copy_loop import run_copy_dry_run, shortlist_path
-from hyper_smart_observer.copy_mode.leaderboard_selector import LeaderboardSelectionConfig, select_leaderboard_shortlist, write_shortlist_report
+from hyper_smart_observer.copy_mode.leaderboard_selector import (
+    LeaderboardSelectionConfig,
+    load_shortlist_entries,
+    select_leaderboard_shortlist,
+    write_shortlist_report,
+)
 from hyper_smart_observer.copy_mode.preflight import format_copy_preflight_report, run_copy_preflight, write_copy_preflight_report
 from hyper_smart_observer.copy_mode.reports import format_copy_period_report, format_copy_run_report, write_copy_run_report
 from hyper_smart_observer.copy_mode.repository import insert_shortlist_entries, list_latest_signal_candidates, list_no_trade_decisions
@@ -56,6 +61,7 @@ def build_parser() -> argparse.ArgumentParser:
         help="Optional product command. All copy commands are dry-run/research only.",
     )
     parser.add_argument("--status", action="store_true", help="Show safe runtime status.")
+    parser.add_argument("--health-summary", action="store_true", help="Show French health summary.")
     parser.add_argument("--init-db", action="store_true", help="Initialize local SQLite database.")
     parser.add_argument("--safety-check", action="store_true", help="Run safety validation.")
     parser.add_argument("--mode", default=None, help="Override runtime mode for this invocation.")
@@ -568,6 +574,20 @@ def main(argv: list[str] | None = None) -> int:
                 f"status={row['status'] or row['state']} | entry={row['entry_price']} | "
                 f"exit={row['exit_price']} | net_pnl={row['net_pnl'] or row['pnl']}"
             )
+
+    if args.health_summary:
+        initialize_database(config)
+        from hyper_smart_observer.reports.french_formatter import format_french_summary
+        with get_connection(config) as conn:
+            stats = {
+                "ok": True,
+                "leaders_count": len(load_shortlist_entries(shortlist_path(config))),
+                "signals_count": len(list_latest_signal_candidates(conn, limit=1000)),
+                "refusals_count": len(list_no_trade_decisions(conn, limit=1000)),
+                "pnl": PaperTradingSimulator(config).generate_report()["realized_pnl"]
+            }
+        print(format_french_summary(stats))
+        return 0
 
     if args.status or not (
         args.init_db

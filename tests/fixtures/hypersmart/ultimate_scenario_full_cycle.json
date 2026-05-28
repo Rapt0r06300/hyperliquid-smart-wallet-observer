@@ -1,0 +1,46 @@
+{
+  "scenario_name": "Ultimate Cycle - BTC Volatility & Funding",
+  "wallet": "0x9999999999999999999999999999999999999999",
+  "coin": "BTC",
+  "initial_equity": 1000.0,
+  "events": [
+    {
+      "step": 1,
+      "type": "OPEN_LONG",
+      "price": 60000.0,
+      "size": 0.05,
+      "funding_payment": 0.0,
+      "expected_unrealized_pnl": 0.0,
+      "note": "Initial entry during low volatility."
+    },
+    {
+      "step": 2,
+      "type": "MARKET_MOVE",
+      "price": 63000.0,
+      "funding_payment": -0.5,
+      "expected_unrealized_pnl": 150.0,
+      "note": "Price up 5%, funding paid by longs."
+    },
+    {
+      "step": 3,
+      "type": "INCREASE",
+      "price": 63000.0,
+      "size": 0.05,
+      "note": "Adding to winning position (scaling in)."
+    },
+    {
+      "step": 4,
+      "type": "FLASH_CRASH",
+      "price": 55000.0,
+      "expected_unrealized_pnl": -600.0,
+      "note": "Extreme volatility test. Close to liquidation threshold."
+    },
+    {
+      "step": 5,
+      "type": "CLOSE_LONG",
+      "price": 58000.0,
+      "note": "Exit after partial recovery."
+    }
+  ],
+  "final_realized_pnl_target": -200.5
+}

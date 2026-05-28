@@ -1,0 +1,35 @@
+{
+  "wallet": "0x1111111111111111111111111111111111111111",
+  "coin": "BTC",
+  "steps": [
+    {
+      "timestamp_ms": 1716543000000,
+      "action": "OPEN_LONG",
+      "size": 0.1,
+      "price": 50000.0,
+      "expected_state": "LONG_0.1"
+    },
+    {
+      "timestamp_ms": 1716543300000,
+      "action": "INCREASE",
+      "size": 0.2,
+      "price": 50500.0,
+      "expected_state": "LONG_0.2"
+    },
+    {
+      "timestamp_ms": 1716543600000,
+      "action": "REDUCE",
+      "size": 0.1,
+      "price": 51000.0,
+      "expected_state": "LONG_0.1"
+    },
+    {
+      "timestamp_ms": 1716543900000,
+      "action": "CLOSE_LONG",
+      "size": 0,
+      "price": 52000.0,
+      "expected_state": "FLAT"
+    }
+  ],
+  "expected_pnl": 300.0
+}

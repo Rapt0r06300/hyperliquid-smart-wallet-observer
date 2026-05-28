@@ -22,7 +22,9 @@ def check_fixtures():
         "ws_user_fills_update.json",
         "ws_user_events_update.json",
         "no_trade_examples.json",
-        "backtest_delta_sequence.json"
+        "backtest_delta_sequence.json",
+        "scenario_complex_btc.json",
+        "ultimate_scenario_full_cycle.json"
     ]
 
     missing = []
