@@ -7,6 +7,7 @@ from pathlib import Path
 import typer
 
 from hl_observer.autoscan import format_autoscan_report, run_autoscan
+from hl_observer.backtest.cli import app as backtest_app
 from hl_observer.collection.collector import (
     InvalidWalletAddress,
     build_default_collection_plan,
@@ -115,6 +116,7 @@ app = typer.Typer(
     help="Hyperliquid Smart-Wallet Observer. Read-only, paper-first, testnet locked.",
     no_args_is_help=True,
 )
+app.add_typer(backtest_app, name="backtest")
 
 
 def _settings() -> Settings:
