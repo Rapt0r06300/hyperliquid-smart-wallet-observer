@@ -434,19 +434,52 @@ function renderSimulationOverview(payload) {
   const equity = payload.equity || {};
   const scanner = payload.scanner || {};
   const autopilot = payload.autopilot || {};
+  const botSimulation = payload.bot_simulation || payload.reproduction || {};
+  const virtualPositions = botSimulation.open_positions || [];
+  const reasons = payload.no_trade_reasons || [];
+  const replay = botSimulation.events || [];
 
-  // Simple Dashboard Metrics
+  // 1. Bot Intent Message logic
+  const dashIntentMessage = $("#dashIntentMessage");
+  if (dashIntentMessage) {
+    if (payload.connection_warning) {
+      dashIntentMessage.textContent = `ATTENTION: ${payload.connection_warning}`;
+      dashIntentMessage.parentElement.classList.add("warning");
+    } else if (virtualPositions.length > 0) {
+      dashIntentMessage.textContent = `COPIAGE ACTIF : ${virtualPositions.length} position(s) en cours sur ${virtualPositions.map(p => p.coin).join(", ")}.`;
+      dashIntentMessage.parentElement.classList.remove("warning");
+    } else if (reasons.length > 0 && (payload.seconds_since_last_live_event || 999) < 60) {
+      dashIntentMessage.textContent = `FILTRAGE : Signal ignore car "${reasons[0].reason}".`;
+      dashIntentMessage.parentElement.classList.remove("warning");
+    } else if (scanner.active) {
+      dashIntentMessage.textContent = `SCAN EN COURS : Surveillance de ${scanner.target_wallets || 50} wallets leaders.`;
+      dashIntentMessage.parentElement.classList.remove("warning");
+    } else {
+      dashIntentMessage.textContent = "PRET : En attente d'un signal leader eligible.";
+      dashIntentMessage.parentElement.classList.remove("warning");
+    }
+  }
+
+  // 2. Simple Dashboard Metrics
   const dashPnl = $("#dashPnl");
-  if (dashPnl) dashPnl.textContent = formatUsd(equity.current_pnl_usdc ?? 0);
+  if (dashPnl) {
+    const val = equity.current_pnl_usdc ?? 0;
+    dashPnl.textContent = formatUsd(val);
+    dashPnl.className = val >= 0 ? "green" : "red";
+  }
   const dashEquity = $("#dashEquity");
   if (dashEquity) dashEquity.textContent = formatUsd(equity.current_equity_usdt ?? 1000);
   const dashOpenPos = $("#dashOpenPos");
-  const virtualPositions = (payload.bot_simulation || payload.reproduction || {}).open_positions || [];
   if (dashOpenPos) dashOpenPos.textContent = virtualPositions.length;
   const dashLastEvent = $("#dashLastEvent");
   if (dashLastEvent) {
-    const sec = payload.seconds_since_last_live_event;
-    dashLastEvent.textContent = (sec !== null && sec !== undefined) ? `${sec}s` : "--";
+    const latestTrade = (payload.public_trade_activity || [])[0];
+    if (latestTrade) {
+      dashLastEvent.textContent = `${latestTrade.coin} ${latestTrade.side}`;
+    } else {
+      const sec = payload.seconds_since_last_live_event;
+      dashLastEvent.textContent = (sec !== null && sec !== undefined) ? `${sec}s` : "--";
+    }
   }
   const dashScanner = $("#dashScanner");
   if (dashScanner) dashScanner.textContent = scanner.active ? "ACTIF" : "IDLE";
@@ -511,10 +544,6 @@ function renderSimulationOverview(payload) {
   const leaders = payload.leaders || [];
   const consensus = payload.consensus || [];
   const entryDeltas = payload.entry_deltas || [];
-  const botSimulation = payload.bot_simulation || payload.reproduction || {};
-  const replay = botSimulation.events || [];
-  const virtualPositions = botSimulation.open_positions || [];
-  const reasons = payload.no_trade_reasons || [];
   equity.public_trade_wallets_seen = counts.public_trade_wallets_seen || scanner.public_trade_wallets_seen || 0;
   equity.live_simulation_deltas = counts.live_simulation_deltas || 0;
   equity.bot_refused = counts.bot_refused || 0;
@@ -576,43 +605,47 @@ function renderSimulationOverview(payload) {
     ? replay.slice(0, 14).map((row) => {
       const pnl = row.estimated_net_pnl_usdc;
       const pnlClass = pnl === null || pnl === undefined ? "cyan" : Number(pnl) >= 0 ? "green" : "red";
-      const statusClass = row.status === "LOCAL_REPLAY" ? "green" : "orange";
+      const action = row.bot_replay_action || "NO_TRADE";
+      const actionClass = action.includes("BUY") || action.includes("OPEN") ? "badge green" : action.includes("SELL") || action.includes("CLOSE") ? "badge red" : "badge orange";
       return `
         <div class="feed-line">
-          <span class="${statusClass}">[${escapeHtml(row.bot_replay_action || "NO_TRADE")}]</span>
-          ${escapeHtml(shortAddress(row.wallet_address))} :: ${escapeHtml(row.coin)} :: leader ${escapeHtml(row.leader_action)} ::
-          <span class="${pnlClass}">${pnl === null || pnl === undefined ? "PnL -" : formatUsd(pnl)}</span> ::
-          edge ${escapeHtml(row.edge_remaining_bps ?? "-")} bps :: score ${escapeHtml(Math.round(row.opportunity_score ?? 0))} ::
-          risque ${escapeHtml(Math.round(row.risk_score ?? 0))} ::
-          taille ${escapeHtml(row.copied_notional_usdt == null ? "-" : formatUsd(row.copied_notional_usdt))} ::
-          ${escapeHtml(row.reason || "local replay")}
+          <span class="${actionClass}">${escapeHtml(action)}</span>
+          <strong>${escapeHtml(row.coin)}</strong>
+          <span class="dim">${escapeHtml(shortAddress(row.wallet_address))}</span>
+          <span class="${pnlClass}">${pnl === null || pnl === undefined ? "" : formatUsd(pnl)}</span>
+          <span class="reason-pill">${escapeHtml(row.reason || "simulation")}</span>
         </div>
       `;
     }).join("")
-    : `<div class="feed-line"><span class="orange">[VIDE]</span> Le bot simule n'a encore aucune decision. Lance une collecte read-only bornee pour remplir les deltas.</div>`;
+    : `<div class="feed-line"><span class="orange">[VIDE]</span> Aucune décision prise par le bot pour le moment.</div>`;
 
   positionsTarget.innerHTML = virtualPositions.length
     ? virtualPositions.slice(0, 12).map((row) => {
       const pnl = Number(row.unrealized_pnl_usdc || 0);
+      const sideClass = row.direction === "LONG" ? "badge green" : "badge red";
       return `
         <div class="feed-line">
-          <span class="${pnl >= 0 ? "green" : "red"}">[${escapeHtml(row.direction)}]</span>
-          ${escapeHtml(shortAddress(row.wallet_address))} :: ${escapeHtml(row.coin)} ::
-          size ${escapeHtml(row.size)} :: entry ${escapeHtml(row.avg_entry_price)} :: mark ${escapeHtml(row.mark_price)} ::
-          ${escapeHtml(formatUsd(pnl))}
+          <span class="${sideClass}">${escapeHtml(row.direction)}</span>
+          <strong>${escapeHtml(row.coin)}</strong>
+          <span>${escapeHtml(row.size)}</span>
+          <span class="${pnl >= 0 ? "green" : "red"}">${formatUsd(pnl)}</span>
+          <span class="dim">Entry: ${escapeHtml(row.avg_entry_price)}</span>
         </div>
       `;
     }).join("")
-    : `<div class="feed-line"><span class="cyan">[FLAT]</span> Le portefeuille virtuel du bot n'a aucune position ouverte.</div>`;
+    : `<div class="feed-line"><span class="cyan">[FLAT]</span> Aucune position virtuelle ouverte.</div>`;
 
   noTradeTarget.innerHTML = reasons.length
-    ? reasons.slice(0, 10).map((row) => `
+    ? reasons.slice(0, 10).map((row) => {
+      return `
       <div class="feed-line">
-        <span class="orange">[REFUS]</span>
-        ${escapeHtml(row.reason)} :: ${escapeHtml(row.count)}
+        <span class="badge orange">REFUS</span>
+        <strong style="min-width: 140px; display: inline-block;">${escapeHtml(row.reason)}</strong>
+        <span class="dim">${escapeHtml(row.count)} occurrences</span>
       </div>
-    `).join("")
-    : `<div class="feed-line"><span class="cyan">[INFO]</span> Aucun refus stocke. Tout signal incertain sera refuse avant simulation locale.</div>`;
+    `;
+    }).join("")
+    : `<div class="feed-line"><span class="cyan">[INFO]</span> Aucun signal rejeté par les filtres de risque.</div>`;
 
   noTradeTarget.innerHTML += `
     <div class="feed-line"><span class="green">[FRESH]</span> mode frais uniquement depuis ${escapeHtml(formatClockMs(payload.fresh_cutoff_ms || payload.simulation_started_at_ms))} :: anciens deltas ignores ${escapeHtml(counts.old_deltas_ignored_fresh_only ?? 0)} :: dernier frais ${escapeHtml(formatClockMs(payload.last_live_event_ms))}</div>

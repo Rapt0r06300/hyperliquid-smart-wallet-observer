@@ -325,34 +325,88 @@ input {
   background: rgba(0,255,136,0.06);
 }
 
+/* Dashboard Simulation Layout */
+.intent-summary-bar {
+  background: rgba(0, 217, 255, 0.05);
+  border-left: 4px solid #00d9ff;
+  padding: 0.85rem 1.25rem;
+  margin-bottom: 1.5rem;
+  border-radius: 4px;
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.2);
+}
+
+.intent-summary-bar.warning {
+  border-left-color: #ff3b5f;
+  background: rgba(255, 59, 95, 0.05);
+}
+
+.intent-label {
+  color: #00d9ff;
+  font-weight: bold;
+  font-size: 0.85rem;
+  letter-spacing: 0.05rem;
+}
+
+#dashIntentMessage {
+  color: #e8faff;
+  font-size: 1rem;
+}
+
 .top-block {
   display: grid;
-  grid-template-columns: repeat(6, 1fr);
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
   gap: 12px;
   margin-bottom: 20px;
 }
 
 .dashboard-card {
-  background: rgba(255, 255, 255, 0.03);
+  background: linear-gradient(135deg, rgba(23, 32, 54, 0.8) 0%, rgba(14, 21, 37, 0.8) 100%);
   border: 1px solid var(--border);
+  padding: 1rem;
   border-radius: 8px;
-  padding: 12px;
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  transition: transform 0.2s, border-color 0.2s;
+  cursor: help;
+}
+
+.dashboard-card:hover {
+  transform: translateY(-2px);
+  border-color: rgba(0, 217, 255, 0.6);
+}
+
+.card-icon {
+  font-size: 1.5rem;
+  opacity: 0.8;
+  background: rgba(0, 217, 255, 0.1);
+  width: 44px;
+  height: 44px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+}
+
+.card-body {
   display: flex;
   flex-direction: column;
-  gap: 4px;
 }
 
-.dashboard-card span {
-  font-size: 11px;
-  color: var(--muted);
-  text-transform: uppercase;
-  letter-spacing: 0.5px;
+.card-body span {
+  font-size: 0.7rem;
+  color: #8aa0b6;
+  font-weight: 600;
+  letter-spacing: 0.05rem;
 }
 
-.dashboard-card strong {
-  font-size: 18px;
-  color: var(--cyan);
+.card-body strong {
+  font-size: 1.1rem;
   font-family: "Cascadia Code", Consolas, monospace;
+  color: #e8faff;
 }
 
 .central-block {
@@ -361,8 +415,27 @@ input {
 
 .bottom-block {
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
+  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
   gap: 16px;
+}
+
+.feed-line strong {
+  color: #00d9ff;
+  margin-right: 0.5rem;
+}
+
+.reason-pill {
+  font-size: 0.75rem;
+  background: rgba(255,255,255,0.05);
+  padding: 0.1rem 0.4rem;
+  border-radius: 4px;
+  color: #8aa0b6;
+  margin-left: auto;
+}
+
+.dim {
+  opacity: 0.6;
+  font-size: 0.85em;
 }
 
 .feed-container {

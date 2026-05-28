@@ -31,31 +31,55 @@
           <h2>Dashboard Simulation</h2>
         </div>
 
+        <!-- Bot Intent Summary Bar -->
+        <div id="dashIntentSummary" class="intent-summary-bar">
+          <span class="intent-label">ETAT DU BOT :</span>
+          <strong id="dashIntentMessage">Analyse des flux Hyperliquid en cours...</strong>
+        </div>
+
         <!-- Bloc Haut : Metriques Cles -->
         <div class="top-block" id="topBlock">
-          <div class="dashboard-card">
-            <span>P&L Bot</span>
-            <strong id="dashPnl">$0.00</strong>
+          <div class="dashboard-card" title="Profit & Perte net (frais inclus)">
+            <div class="card-icon">💰</div>
+            <div class="card-body">
+              <span>P&L BOT</span>
+              <strong id="dashPnl">$0.00</strong>
+            </div>
           </div>
-          <div class="dashboard-card">
-            <span>Equity</span>
-            <strong id="dashEquity">$1000.00</strong>
+          <div class="dashboard-card" title="Capital total actuel">
+            <div class="card-icon">🏦</div>
+            <div class="card-body">
+              <span>EQUITY</span>
+              <strong id="dashEquity">$1000.00</strong>
+            </div>
           </div>
-          <div class="dashboard-card">
-            <span>Positions Ouvertes</span>
-            <strong id="dashOpenPos">0</strong>
+          <div class="dashboard-card" title="Nombre de positions virtuelles actives">
+            <div class="card-icon">📊</div>
+            <div class="card-body">
+              <span>POSITIONS</span>
+              <strong id="dashOpenPos">0</strong>
+            </div>
           </div>
-          <div class="dashboard-card">
-            <span>Dernier Event</span>
-            <strong id="dashLastEvent">--</strong>
+          <div class="dashboard-card" title="Temps écoulé depuis le dernier delta leader détecté">
+            <div class="card-icon">⚡</div>
+            <div class="card-body">
+              <span>DERNIER EVENT</span>
+              <strong id="dashLastEvent">--</strong>
+            </div>
           </div>
-          <div class="dashboard-card">
-            <span>Statut Scanner</span>
-            <strong id="dashScanner">--</strong>
+          <div class="dashboard-card" title="État du scanner de flux public">
+            <div class="card-icon">🔍</div>
+            <div class="card-body">
+              <span>SCANNER</span>
+              <strong id="dashScanner">--</strong>
+            </div>
           </div>
-          <div class="dashboard-card">
-            <span>Fraîcheur</span>
-            <strong id="dashFreshness">--</strong>
+          <div class="dashboard-card" title="Heure du dernier événement leader reçu">
+            <div class="card-icon">🕒</div>
+            <div class="card-body">
+              <span>FRAÎCHEUR</span>
+              <strong id="dashFreshness">--</strong>
+            </div>
           </div>
         </div>
 
@@ -127,7 +151,7 @@
           </div>
         </section>
 
-        <section class="hero panel">
+        <section class="hero panel" id="copyPanel">
           <div class="hero-copy">
             <p class="eyebrow">Auto-Pilot Discovery</p>
             <h2 id="autopilotTitle">Recherche automatique en cours</h2>
@@ -141,7 +165,7 @@
           </div>
         </section>
 
-        <section class="panel scan-overview">
+        <section class="panel scan-overview" id="scanPanel">
           <div class="scan-status">
             <p class="eyebrow">Scan automatique</p>
             <h2 id="scanStepTitle">En attente</h2>
