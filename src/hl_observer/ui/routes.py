@@ -304,7 +304,7 @@ def create_router(settings: Settings, state: UiState, bus: UiEventBus) -> APIRou
         existing_positions: dict[str, dict[str, Any]] | None = None,
         existing_events: list[dict[str, Any]] | None = None,
         processed_delta_keys: set[str] | None = None,
-            health_map: dict[str, SourceHealth] | None = None,
+        health_map: dict[str, SourceHealth] | None = None,
     ) -> dict[str, Any]:
         """Simulate the bot's local no-money decisions from the incoming leader delta stream.
 

@@ -77,7 +77,7 @@ class WalletBackfillRun(Base):
     __tablename__ = "wallet_backfill_runs"
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     wallet_address: Mapped[str] = mapped_column(String(64), index=True)
-    started_at_ms: Mapped[int] = mapped_column(Integer, index=True)
+    started_at_ms: Mapped[int] = mapped_column(BigInteger, index=True)
     finished_at_ms: Mapped[int | None] = mapped_column(BigInteger)
     start_ms: Mapped[int | None] = mapped_column(BigInteger)
     end_ms: Mapped[int | None] = mapped_column(BigInteger)
@@ -93,7 +93,7 @@ class WalletBackfillRun(Base):
 class WalletDiscoveryRun(Base):
     __tablename__ = "wallet_discovery_runs"
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    started_at_ms: Mapped[int] = mapped_column(Integer, index=True)
+    started_at_ms: Mapped[int] = mapped_column(BigInteger, index=True)
     finished_at_ms: Mapped[int | None] = mapped_column(BigInteger)
     status: Mapped[str] = mapped_column(String(32), default="RUNNING")
     sources_attempted: Mapped[int] = mapped_column(Integer, default=0)
@@ -380,7 +380,7 @@ class MarketRegime(Base):
 class LeaderboardRun(Base):
     __tablename__ = "leaderboard_runs"
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    started_at_ms: Mapped[int] = mapped_column(Integer, index=True)
+    started_at_ms: Mapped[int] = mapped_column(BigInteger, index=True)
     finished_at_ms: Mapped[int | None] = mapped_column(BigInteger)
     status: Mapped[str] = mapped_column(String(64))
     source_method: Mapped[str] = mapped_column(String(64))
@@ -396,7 +396,7 @@ class LeaderboardRun(Base):
 class LeaderboardExtractionAttempt(Base):
     __tablename__ = "leaderboard_extraction_attempts"
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    started_at_ms: Mapped[int] = mapped_column(Integer, index=True)
+    started_at_ms: Mapped[int] = mapped_column(BigInteger, index=True)
     finished_at_ms: Mapped[int | None] = mapped_column(BigInteger)
     method: Mapped[str] = mapped_column(String(64))
     url: Mapped[str | None] = mapped_column(Text)
@@ -467,7 +467,7 @@ class LeaderboardWalletCandidate(Base):
 class ExplorerRun(Base):
     __tablename__ = "explorer_runs"
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    started_at_ms: Mapped[int] = mapped_column(Integer, index=True)
+    started_at_ms: Mapped[int] = mapped_column(BigInteger, index=True)
     finished_at_ms: Mapped[int | None] = mapped_column(BigInteger)
     status: Mapped[str] = mapped_column(String(64))
     method: Mapped[str] = mapped_column(String(64))
@@ -584,7 +584,7 @@ class ExplorerTransactionTape(Base):
 class WalletBootstrapRun(Base):
     __tablename__ = "wallet_bootstrap_runs"
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    started_at_ms: Mapped[int] = mapped_column(Integer, index=True)
+    started_at_ms: Mapped[int] = mapped_column(BigInteger, index=True)
     finished_at_ms: Mapped[int | None] = mapped_column(BigInteger)
     target_wallets: Mapped[int] = mapped_column(Integer, default=500)
     source: Mapped[str] = mapped_column(String(64))
@@ -653,7 +653,7 @@ class WalletScanQueue(Base):
 class WalletScanJob(Base):
     __tablename__ = "wallet_scan_jobs"
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    started_at_ms: Mapped[int] = mapped_column(Integer, index=True)
+    started_at_ms: Mapped[int] = mapped_column(BigInteger, index=True)
     finished_at_ms: Mapped[int | None] = mapped_column(BigInteger)
     status: Mapped[str] = mapped_column(String(64))
     wallets_requested: Mapped[int] = mapped_column(Integer, default=0)
@@ -937,7 +937,7 @@ class ApiHealth(Base, TimestampMixin):
 class CollectionRun(Base):
     __tablename__ = "collection_runs"
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    started_at_ms: Mapped[int] = mapped_column(Integer, index=True)
+    started_at_ms: Mapped[int] = mapped_column(BigInteger, index=True)
     finished_at_ms: Mapped[int | None] = mapped_column(BigInteger)
     mode: Mapped[str] = mapped_column(String(32))
     success: Mapped[bool] = mapped_column(Boolean, default=False)
