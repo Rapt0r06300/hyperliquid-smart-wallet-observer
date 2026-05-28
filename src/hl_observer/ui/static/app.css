@@ -39,13 +39,28 @@ body {
   justify-content: space-between;
   align-items: center;
   gap: 18px;
-  padding: 22px 28px 16px;
+  padding: 16px 28px;
   border-bottom: 1px solid var(--border);
   background: rgba(5, 7, 13, 0.9);
   backdrop-filter: blur(16px);
   position: sticky;
   top: 0;
   z-index: 5;
+}
+
+.intent-summary {
+  display: flex;
+  gap: 10px;
+  flex: 1;
+  justify-content: center;
+}
+
+.intent-pill {
+  padding: 6px 12px;
+  border-radius: 4px;
+  font: bold 11px "Cascadia Code", monospace;
+  background: rgba(0,0,0,0.3);
+  border: 1px solid currentColor;
 }
 
 .eyebrow {

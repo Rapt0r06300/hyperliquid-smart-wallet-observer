@@ -710,6 +710,20 @@ function drawSimulationMetaGraph(candles, equity) {
   ctx.stroke();
 
   const hitboxes = [];
+
+  // Equity trend line
+  ctx.strokeStyle = "#00d9ff";
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  candles.forEach((row, index) => {
+    const x = plotLeft + index * xStep + xStep / 2;
+    const y = yFor(row.equity_close);
+    if (index === 0) ctx.moveTo(x, y);
+    else ctx.lineTo(x, y);
+  });
+  ctx.stroke();
+  ctx.lineWidth = 1;
+
   candles.forEach((row, index) => {
     const x = plotLeft + index * xStep + xStep / 2;
     const openY = yFor(row.ha_open);
@@ -728,6 +742,24 @@ function drawSimulationMetaGraph(candles, equity) {
     ctx.globalAlpha = 0.86;
     ctx.fillRect(x - candleWidth / 2, top, candleWidth, bodyHeight);
     ctx.globalAlpha = 1;
+
+    // Visual Markers
+    const source = row.source || "";
+    if (source.includes("ENTRY")) {
+      ctx.fillStyle = "#00ff88";
+      ctx.beginPath();
+      ctx.moveTo(x, lowY + 12);
+      ctx.lineTo(x - 5, lowY + 22);
+      ctx.lineTo(x + 5, lowY + 22);
+      ctx.fill();
+    } else if (source.includes("EXIT")) {
+      ctx.strokeStyle = "#ffffff";
+      ctx.beginPath();
+      ctx.moveTo(x - 4, highY - 14); ctx.lineTo(x + 4, highY - 6);
+      ctx.moveTo(x + 4, highY - 14); ctx.lineTo(x - 4, highY - 6);
+      ctx.stroke();
+    }
+
     hitboxes.push({ x, row });
   });
 

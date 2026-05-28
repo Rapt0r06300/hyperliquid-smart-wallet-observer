@@ -1,7 +1,4 @@
 from __future__ import annotations
-
-
-from __future__ import annotations
 from typing import Any
 
 def build_paper_report(data: dict[str, Any]) -> dict[str, Any]:
