@@ -39,6 +39,22 @@ class SnapshotComparisonResult(BaseModel):
     errors: list[str] = Field(default_factory=list)
     refused: bool = False
     refusal_reason: Optional[str] = None
+    previous_snapshot_id: Optional[int] = None
+    current_snapshot_id: Optional[int] = None
+    time_gap_ms: Optional[int] = None
+
+    def summary(self) -> str:
+        if self.refused:
+            return f"REFUSED: {self.refusal_reason}"
+        if self.is_baseline:
+            return "BASELINE: First observation recorded"
+
+        parts = [f"Deltas: {len(self.deltas)}"]
+        if self.warnings:
+            parts.append(f"Warnings: {len(self.warnings)}")
+        if self.time_gap_ms:
+            parts.append(f"Gap: {self.time_gap_ms}ms")
+        return "; ".join(parts)
 
 class SnapshotEngine:
     def __init__(self, max_staleness_ms: int = 3600_000): # 1 hour default
@@ -59,6 +75,7 @@ class SnapshotEngine:
         # Check staleness
         if current.exchange_ts and previous.exchange_ts:
             age_ms = current.exchange_ts - previous.exchange_ts
+            result.time_gap_ms = age_ms
             if age_ms > self.max_staleness_ms:
                 result.refused = True
                 result.refusal_reason = f"Snapshot too old: {age_ms}ms > {self.max_staleness_ms}ms"
@@ -68,8 +85,8 @@ class SnapshotEngine:
             result.warnings.append("Missing allMids in current snapshot")
 
         # Extract positions for easier comparison
-        curr_pos_map = {p["coin"].upper(): p for p in current.positions if "coin" in p}
-        prev_pos_map = {p["coin"].upper(): p for p in previous.positions if "coin" in p}
+        curr_pos_map = self._map_positions(current.positions)
+        prev_pos_map = self._map_positions(previous.positions)
 
         all_coins = set(curr_pos_map.keys()) | set(prev_pos_map.keys())
 
@@ -86,19 +103,18 @@ class SnapshotEngine:
             # Delta detected
             action = classify_action(prev_size, curr_size)
 
-            # Check for contradiction with fills
-            # In a real engine, we'd check if any fill for this coin exists between snapshots
-            # and if their sum matches the delta.
+            # Check for contradiction with fills (only those between snapshots)
             coin_fills = [f for f in current.fills if (f.get("coin") or f.get("coinName", "")).upper() == coin]
+            if previous.exchange_ts:
+                coin_fills = [f for f in coin_fills if int(f.get("time") or f.get("timestamp") or 0) > previous.exchange_ts]
+
             fill_delta = sum(self._signed_fill_size(f) for f in coin_fills)
 
             expected_new_size = prev_size + fill_delta
             # Allow for some floating point tolerance
             if abs(curr_size - expected_new_size) > 1e-8:
-                if not coin_fills and abs(curr_size - prev_size) > 1e-8:
-                    result.warnings.append(f"Position change for {coin} without fills")
-                    # We still report it, but maybe with lower confidence or UNKNOWN if strictly requested
-                    # Problem said: "contradiction fills/position = UNKNOWN"
+                if not coin_fills:
+                    result.warnings.append(f"Position change for {coin} without fills since last snapshot")
                     action = PositionAction.UNKNOWN
                 else:
                     result.warnings.append(f"Contradiction fills/position for {coin}: expected {expected_new_size}, got {curr_size}")
@@ -116,11 +132,29 @@ class SnapshotEngine:
                 exchange_ts=current.exchange_ts,
                 confidence_score=1.0 if action != PositionAction.UNKNOWN else 0.2,
                 source="snapshot",
-                raw={"current": curr_p, "previous": prev_p, "fills_in_snapshot": coin_fills}
+                raw={"current": curr_p, "previous": prev_p, "fills_used": coin_fills}
             )
             result.deltas.append(delta_record)
 
         return result
+
+    def _map_positions(self, positions: list[dict]) -> dict[str, dict]:
+        """Maps position list to coin-indexed dict, handling different formats."""
+        mapping = {}
+        for p in positions:
+            # Handle clearinghouseState format: {"position": {"coin": "BTC", "szi": "1.0", ...}}
+            if "position" in p and isinstance(p["position"], dict):
+                inner = p["position"]
+                coin = inner.get("coin")
+                if coin:
+                    mapping[coin.upper()] = inner
+                continue
+
+            # Handle direct position format: {"coin": "BTC", "szi": "1.0", ...}
+            coin = p.get("coin")
+            if coin:
+                mapping[coin.upper()] = p
+        return mapping
 
     def _signed_fill_size(self, fill: dict) -> float:
         from hl_observer.wallets.position_delta_engine import signed_fill_size

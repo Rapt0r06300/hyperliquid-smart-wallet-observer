@@ -90,3 +90,59 @@ def test_snapshot_engine_missing_data():
     )
     result = engine.compare_snapshots(current, previous=previous)
     assert any("Missing allMids" in w for w in result.warnings)
+
+def test_snapshot_engine_clearinghouse_format():
+    engine = SnapshotEngine()
+    previous = SnapshotData(
+        wallet_address="0x123",
+        local_received_ts=1000,
+        exchange_ts=1000,
+        positions=[]
+    )
+    # Using the nested "position" key format from clearinghouseState
+    current = SnapshotData(
+        wallet_address="0x123",
+        local_received_ts=2000,
+        exchange_ts=2000,
+        positions=[
+            {
+                "position": {
+                    "coin": "ETH",
+                    "szi": "2.0",
+                    "entryPx": "2500"
+                }
+            }
+        ],
+        fills=[{"coin": "ETH", "sz": "2.0", "side": "B", "time": 1500, "px": "2500"}]
+    )
+    result = engine.compare_snapshots(current, previous=previous)
+    assert len(result.deltas) == 1
+    assert result.deltas[0].coin == "ETH"
+    assert result.deltas[0].new_size == 2.0
+    assert result.deltas[0].action == PositionAction.OPEN
+
+def test_snapshot_engine_timestamp_aware_fills():
+    engine = SnapshotEngine()
+    previous = SnapshotData(
+        wallet_address="0x123",
+        local_received_ts=1000,
+        exchange_ts=1000,
+        positions=[{"coin": "BTC", "szi": "1.0"}]
+    )
+
+    current = SnapshotData(
+        wallet_address="0x123",
+        local_received_ts=2000,
+        exchange_ts=2000,
+        positions=[{"coin": "BTC", "szi": "1.5"}],
+        fills=[
+            # This fill is OLD (time 500 < prev exchange_ts 1000), should be ignored
+            {"coin": "BTC", "sz": "1.0", "side": "B", "time": 500, "px": "40000"},
+            # This fill is NEW, should be counted
+            {"coin": "BTC", "sz": "0.5", "side": "B", "time": 1500, "px": "50000"}
+        ]
+    )
+    result = engine.compare_snapshots(current, previous=previous)
+    # If it ignored the old fill, delta is 0.5, total 1.0+0.5=1.5 -> matches position -> SUCCESS
+    assert result.deltas[0].action == PositionAction.ADD
+    assert not any("Contradiction" in w for w in result.warnings)

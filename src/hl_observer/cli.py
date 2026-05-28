@@ -78,6 +78,7 @@ from hl_observer.wallets.backfill import (
     run_wallet_backfill,
 )
 from hl_observer.wallets.snapshot_engine import SnapshotEngine, SnapshotData
+from hl_observer.wallets.snapshot_service import record_robust_snapshot
 from hl_observer.wallets.discovery import (
     build_wallet_discovery_plan,
     discovery_result_json,
@@ -441,6 +442,11 @@ def wallet_backfill(
         "--compute-deltas/--no-compute-deltas",
         help="Compute and store position_deltas from reconstructed positions.",
     ),
+    clearinghouse_state: bool = typer.Option(
+        False,
+        "--clearinghouse-state",
+        help="Fetch and store clearinghouseState for robust snapshots.",
+    ),
     report: bool = typer.Option(False, "--report", help="Print a wallet-backfill summary report."),
 ) -> None:
     """Backfill one or more public wallets through read-only Hyperliquid /info endpoints."""
@@ -465,6 +471,7 @@ def wallet_backfill(
             market_snapshots=include_market_snapshots,
             rebuild_positions=rebuild_positions,
             position_deltas=compute_deltas,
+            clearinghouse_state=clearinghouse_state,
             report=report,
         )
     except InvalidWalletAddress as exc:
@@ -475,6 +482,21 @@ def wallet_backfill(
         raise typer.Exit(1) from exc
 
     result = asyncio.run(run_wallet_backfill(plan, settings))
+
+    # Store initial baseline snapshots after backfill if requested
+    if not result.dry_run:
+        session_factory = _session_factory(settings)
+        with session_factory() as session:
+            for addr in plan.wallets:
+                record_robust_snapshot(
+                    session,
+                    addr,
+                    run_id=result.run_id,
+                    source="wallet-backfill-baseline",
+                    echo_func=typer.echo if report else None
+                )
+            session.commit()
+
     if result.dry_run:
         typer.echo("dry-run: no network and no database writes")
         typer.echo("planned_items:")
@@ -1189,61 +1211,20 @@ def copy_run_command(
             position_deltas=True,
             report=report,
         )
+        # Enable clearinghouseState for robust snapshots
+        backfill_plan.clearinghouse_state = True
         backfill_result = asyncio.run(run_wallet_backfill(backfill_plan, settings))
 
         # Enriched snapshot storage after backfill
-        from hl_observer.storage.repositories import CollectionRepository
-        from hl_observer.storage.models import RawEvent, MarketSnapshot, Position, OpenOrder, Fill
         with session_factory() as session:
-            repo = CollectionRepository(session)
-            engine = SnapshotEngine()
             for wallet in followed:
-                addr = wallet.wallet_address
-                # Get latest raw events for this wallet to build snapshot data
-                latest_raw = session.query(RawEvent).filter(RawEvent.wallet_address == addr).order_by(RawEvent.id.desc()).first()
-                latest_mids = session.query(MarketSnapshot).order_by(MarketSnapshot.id.desc()).first()
-
-                # Build a robust snapshot from the latest state in DB
-                db_positions = session.query(Position).filter(Position.wallet_address == addr).all()
-                db_orders = session.query(OpenOrder).filter(OpenOrder.wallet_address == addr).all()
-                db_fills = session.query(Fill).filter(Fill.wallet_address == addr).order_by(Fill.exchange_ts.desc()).limit(100).all()
-
-                snapshot_data = SnapshotData(
-                    wallet_address=addr,
-                    collection_run_id=backfill_result.run_id,
-                    local_received_ts=now_ms(),
-                    exchange_ts=latest_raw.exchange_ts if latest_raw else now_ms(),
-                    positions=[p.raw_json for p in db_positions if p.raw_json],
-                    open_orders=[o.raw_json for o in db_orders if o.raw_json],
-                    fills=[f.raw_json for f in db_fills if f.raw_json],
-                    all_mids=latest_mids.raw_json if latest_mids else {},
-                    source="copy-run-network-read"
+                record_robust_snapshot(
+                    session,
+                    wallet.wallet_address,
+                    run_id=backfill_result.run_id,
+                    source="copy-run-network-read",
+                    echo_func=typer.echo if report else None
                 )
-
-                previous_model = repo.get_latest_wallet_snapshot(addr)
-                previous_data = engine.from_model(previous_model) if previous_model else None
-
-                comparison = engine.compare_snapshots(snapshot_data, previous_data)
-
-                # Store the new snapshot
-                repo.store_wallet_snapshot(
-                    wallet_address=addr,
-                    raw_json=snapshot_data.model_dump(),
-                    collection_run_id=snapshot_data.collection_run_id,
-                    local_received_ts=snapshot_data.local_received_ts,
-                    exchange_ts=snapshot_data.exchange_ts,
-                    positions=snapshot_data.positions,
-                    open_orders=snapshot_data.open_orders,
-                    fills=snapshot_data.fills,
-                    all_mids=snapshot_data.all_mids,
-                    source=snapshot_data.source
-                )
-
-                # If there are deltas from snapshot engine, they are stored and will be picked up
-                # by the following signal detection logic.
-                if comparison.deltas:
-                    repo.store_position_deltas(comparison.deltas)
-
             session.commit()
 
     with session_factory() as session:

@@ -44,6 +44,7 @@ class WalletBackfillPlan(BaseModel):
     include_open_orders: bool = True
     include_frontend_open_orders: bool = True
     include_market_snapshots: bool = False
+    clearinghouse_state: bool = False
     rebuild_positions: bool = True
     compute_position_deltas: bool = True
     report: bool = False
@@ -85,6 +86,9 @@ class WalletBackfillPlan(BaseModel):
         if self.include_market_snapshots:
             items.append("allMids")
             items.extend(f"l2Book:{coin}" for coin in self.coins)
+        if self.clearinghouse_state:
+            for wallet in wallets:
+                items.append(f"clearinghouseState:{wallet}")
         return items
 
 
@@ -132,6 +136,7 @@ def build_wallet_backfill_plan(
     open_orders: bool = True,
     frontend_open_orders: bool = True,
     market_snapshots: bool = False,
+    clearinghouse_state: bool = False,
     rebuild_positions: bool = True,
     position_deltas: bool = True,
     report: bool = False,
@@ -154,6 +159,7 @@ def build_wallet_backfill_plan(
         include_open_orders=open_orders,
         include_frontend_open_orders=frontend_open_orders,
         include_market_snapshots=market_snapshots,
+        clearinghouse_state=clearinghouse_state,
         rebuild_positions=rebuild_positions,
         compute_position_deltas=position_deltas,
         report=report,
@@ -413,6 +419,19 @@ async def _backfill_wallets(
                 stored = repo.store_open_orders(wallet, frontend_orders)
                 wallet_open_orders += len(stored)
                 result.open_orders_stored += len(stored)
+
+        if plan.clearinghouse_state:
+            from hl_observer.hyperliquid.rest_info_client import build_clearinghouse_state_payload
+            await _record_backfill_call(
+                repo,
+                run_id,
+                plan,
+                result,
+                item_type="clearinghouseState",
+                request_payload=build_clearinghouse_state_payload(wallet),
+                wallet_address=wallet,
+                call=lambda wallet=wallet: client.clearinghouse_state(wallet),
+            )
 
         status = "SUCCESS" if result.errors_count == wallet_errors_before else "PARTIAL"
         if not unique_fills:
