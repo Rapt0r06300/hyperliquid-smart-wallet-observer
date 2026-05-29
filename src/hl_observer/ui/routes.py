@@ -885,6 +885,28 @@ def create_router(settings: Settings, state: UiState, bus: UiEventBus) -> APIRou
         refused = sum(1 for row in ledger_events if row.get("status") == "REFUSED")
         total_pnl = realized_net_pnl + unrealized_pnl
 
+        # Detailed stats for portfolio credibility
+        wins = [p for p in closed_positions if float(p.get("realized_pnl_usdc") or 0) > 0]
+        losses = [p for p in closed_positions if float(p.get("realized_pnl_usdc") or 0) <= 0]
+        win_rate = len(wins) / len(closed_positions) if closed_positions else 0.0
+        gross_profits = sum(float(p.get("realized_pnl_usdc") or 0) for p in wins)
+        gross_losses = abs(sum(float(p.get("realized_pnl_usdc") or 0) for p in losses))
+        profit_factor = gross_profits / gross_losses if gross_losses > 0 else (99.9 if gross_profits > 0 else 0.0)
+        avg_trade = realized_net_pnl / len(closed_positions) if closed_positions else 0.0
+
+        # Max drawdown calculation from ledger
+        max_equity = starting_equity_usdt
+        running_equity = starting_equity_usdt
+        max_dd_usdc = 0.0
+        for ev in ledger_events:
+            if ev.get("status") == "LOCAL_REPLAY":
+                running_equity += float(ev.get("estimated_net_pnl_usdc") or 0.0)
+                max_equity = max(max_equity, running_equity)
+                dd = max_equity - running_equity
+                max_dd_usdc = max(max_dd_usdc, dd)
+
+        max_dd_pct = (max_dd_usdc / max_equity * 100.0) if max_equity > 0 else 0.0
+
         return {
             "events": list(reversed(ledger_events[-240:])),
             "ledger_events": ledger_events,
@@ -899,6 +921,11 @@ def create_router(settings: Settings, state: UiState, bus: UiEventBus) -> APIRou
             "realized_net_pnl_usdc": round(realized_net_pnl, 6),
             "unrealized_pnl_usdc": round(unrealized_pnl, 6),
             "estimated_net_pnl_usdc": round(total_pnl, 6),
+            "win_rate": round(win_rate * 100, 2),
+            "profit_factor": round(profit_factor, 2),
+            "avg_trade_usdc": round(avg_trade, 2),
+            "max_drawdown_usdc": round(max_dd_usdc, 2),
+            "max_drawdown_pct": round(max_dd_pct, 2),
             "entry_costs_paid_usdc": round(entry_costs_paid, 6),
             "exit_costs_paid_usdc": round(exit_costs_paid, 6),
             "total_costs_paid_usdc": round(entry_costs_paid + exit_costs_paid, 6),
@@ -2435,6 +2462,7 @@ def create_router(settings: Settings, state: UiState, bus: UiEventBus) -> APIRou
             state.simulation_starting_equity_usdt = 1000.0
             state.simulation_processed_delta_keys.clear()
             state.simulation_virtual_positions.clear()
+            state.simulation_closed_positions.clear()
             state.simulation_ledger_events.clear()
             persist_simulation_state(settings, state)
             result_payload = {
