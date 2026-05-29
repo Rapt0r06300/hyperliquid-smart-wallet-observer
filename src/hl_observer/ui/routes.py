@@ -809,6 +809,8 @@ def create_router(settings: Settings, state: UiState, bus: UiEventBus) -> APIRou
                         pnl_concentration=summary.top_trade_pnl_share if summary else 0.0,
                         regularity_score=summary.regularity_score if summary else 0.0,
                         copyability_score=summary.copyability_score if summary else 0.0,
+                        sharpe_ratio=summary.sharpe_ratio if summary else None,
+                        style=summary.style if summary and summary.style else "UNKNOWN",
                     )
                 )
         return rows
@@ -1057,15 +1059,38 @@ def create_router(settings: Settings, state: UiState, bus: UiEventBus) -> APIRou
         limit = max(1, min(limit, 250))
         reasons: Counter[str] = Counter()
         samples: list[dict[str, Any]] = []
+        avoided_loss_usdc = 0.0
+        missed_gain_usdc = 0.0
         with session_factory() as session:
             rejected = session.scalars(select(RejectedSignal).order_by(RejectedSignal.created_at.desc()).limit(limit)).all()
             decisions = session.scalars(select(FollowDecision).order_by(FollowDecision.computed_at_ms.desc()).limit(limit)).all()
             deltas = session.scalars(select(PositionDeltaModel).order_by(PositionDeltaModel.detected_at_ms.desc()).limit(limit)).all()
+            latest_mids = session.scalars(select(MarketSnapshot).order_by(desc(MarketSnapshot.id)).limit(1)).first()
+            mids = latest_mid_prices_from_snapshot(latest_mids.raw_json if latest_mids else None)
 
         for row in rejected:
             reason = row.reason or row.decision or "rejected_signal"
             reasons[reason] += 1
+
+            # Simple "Avoided Loss" heuristic: if we rejected an entry,
+            # estimate PnL from rejection price to current mid.
+            # Assuming raw_json contains 'observed_price' and 'side'
+            payload = row.raw_json or {}
+            obs_px = float(payload.get("observed_price") or 0)
+            side = str(payload.get("side") or "").upper()
+            coin = str(payload.get("coin") or "").upper()
+            if obs_px > 0 and coin in mids:
+                curr_px = mids[coin]
+                # If we would have bought (LONG) and price went DOWN, we avoided a loss.
+                # If we would have sold (SHORT) and price went UP, we avoided a loss.
+                pnl_est = (curr_px - obs_px) / obs_px if side == "LONG" else (obs_px - curr_px) / obs_px
+                if pnl_est < 0:
+                    avoided_loss_usdc += abs(pnl_est) * 50.0 # Using nominal 50 USDC size
+                else:
+                    missed_gain_usdc += pnl_est * 50.0
+
             samples.append({"source": "rejected_signal", "reason": reason, "signal_id": row.signal_id})
+
         for row in decisions:
             if row.allowed:
                 continue
@@ -1092,6 +1117,9 @@ def create_router(settings: Settings, state: UiState, bus: UiEventBus) -> APIRou
             "dry_run_only": True,
             "edge_remaining_bps_required": True,
             "reasons": [{"reason": reason, "count": count} for reason, count in reasons.most_common()],
+            "avoided_loss_usdc": round(avoided_loss_usdc, 2),
+            "missed_gain_usdc": round(missed_gain_usdc, 2),
+            "value_of_refusal": round(avoided_loss_usdc - missed_gain_usdc, 2),
             "samples": samples[:limit],
             "message": "Chaque refus est conserve comme information de recherche. Aucun refus ne devient un ordre.",
         }

@@ -43,6 +43,8 @@ class UiWalletRow(BaseModel):
     pnl_concentration: float = 0.0
     regularity_score: float = 0.0
     copyability_score: float = 0.0
+    sharpe_ratio: float | None = None
+    style: str = "UNKNOWN"
 
 
 class UiSignalRow(BaseModel):

@@ -243,6 +243,9 @@ class WalletActivitySummary(Base):
     win_rate: Mapped[float] = mapped_column(Float, default=0.0)
     profit_factor: Mapped[float] = mapped_column(Float, default=0.0)
     max_drawdown_pct: Mapped[float] = mapped_column(Float, default=0.0)
+    sharpe_ratio: Mapped[float | None] = mapped_column(Float)
+    sortino_ratio: Mapped[float | None] = mapped_column(Float)
+    avg_hold_time_minutes: Mapped[float] = mapped_column(Float, default=0.0)
     long_actions_count: Mapped[int] = mapped_column(Integer, default=0)
     short_actions_count: Mapped[int] = mapped_column(Integer, default=0)
     open_count: Mapped[int] = mapped_column(Integer, default=0)
@@ -256,6 +259,7 @@ class WalletActivitySummary(Base):
     copyability_score: Mapped[float] = mapped_column(Float, default=0.0)
     top_trade_pnl_share: Mapped[float] = mapped_column(Float, default=0.0)
     main_coin: Mapped[str | None] = mapped_column(String(32))
+    style: Mapped[str | None] = mapped_column(String(64))
     created_at_ms: Mapped[int] = mapped_column(Integer)
 
 

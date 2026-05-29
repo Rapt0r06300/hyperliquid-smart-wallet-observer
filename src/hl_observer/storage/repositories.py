@@ -564,6 +564,9 @@ class CollectionRepository:
             win_rate=summary.win_rate,
             profit_factor=summary.profit_factor,
             max_drawdown_pct=summary.max_drawdown_pct,
+            sharpe_ratio=summary.sharpe_ratio,
+            sortino_ratio=summary.sortino_ratio,
+            avg_hold_time_minutes=summary.avg_hold_time_minutes,
             long_actions_count=summary.long_actions_count,
             short_actions_count=summary.short_actions_count,
             open_count=summary.open_count,
@@ -577,6 +580,7 @@ class CollectionRepository:
             copyability_score=summary.copyability_score,
             top_trade_pnl_share=summary.top_trade_pnl_share,
             main_coin=summary.main_coin,
+            style=summary.style.value if summary.style else None,
             created_at_ms=summary.created_at_ms,
         )
         self.session.add(model)

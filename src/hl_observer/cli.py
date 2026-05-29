@@ -431,6 +431,9 @@ def score_wallets() -> None:
                     "recent_activity_score": summary.recent_activity_score,
                     "regularity_score": summary.regularity_score,
                     "copyability_score": summary.copyability_score,
+                    "sharpe_ratio": summary.sharpe_ratio,
+                    "sortino_ratio": summary.sortino_ratio,
+                    "avg_hold_time_minutes": summary.avg_hold_time_minutes,
                 }
                 profile = profile_from_metrics(wallet.address, metrics)
                 score = score_wallet(profile)

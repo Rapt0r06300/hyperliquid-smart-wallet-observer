@@ -1,4 +1,4 @@
-from hl_observer.hyperliquid.schemas import SignalDecision, WalletProfile, WalletStatus
+from hl_observer.hyperliquid.schemas import SignalDecision, WalletProfile, WalletStatus, WalletStyle
 from hl_observer.wallets.scoring import score_wallet
 
 
@@ -43,3 +43,16 @@ def test_wallet_scoring_active_leader():
     assert score.status == WalletStatus.ACTIVE_LEADER
     assert score.decision == SignalDecision.TESTNET_CANDIDATE
     assert score.score >= 80
+
+def test_wallet_scoring_rejects_martingale():
+    profile = WalletProfile(
+        address="0xmart",
+        style=WalletStyle.MARTINGALE_AVERAGER,
+        closed_pnl_count=100,
+        history_days=60.0,
+        regularity_score=90.0,
+        copyability_score=80.0
+    )
+    score = score_wallet(profile)
+    assert score.status == WalletStatus.REJECTED
+    assert score.decision == SignalDecision.REJECT_MARTINGALE_PATTERN

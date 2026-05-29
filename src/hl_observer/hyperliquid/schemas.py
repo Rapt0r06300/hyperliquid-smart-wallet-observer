@@ -57,14 +57,20 @@ class SignalDecision(StrEnum):
 
 
 class WalletStyle(StrEnum):
-    SCALPER_FAST = "SCALPER_FAST"
-    MOMENTUM_BREAKOUT = "MOMENTUM_BREAKOUT"
-    MEAN_REVERSION = "MEAN_REVERSION"
-    SWING_TREND = "SWING_TREND"
-    FUNDING_CARRY = "FUNDING_CARRY"
-    HEDGER = "HEDGER"
-    MARTINGALE_RISK = "MARTINGALE_RISK"
+    SCALPER = "SCALPER"
+    MOMENTUM_TRADER = "MOMENTUM_TRADER"
+    BREAKOUT_TRADER = "BREAKOUT_TRADER"
+    MEAN_REVERSION_TRADER = "MEAN_REVERSION_TRADER"
+    SWING_TRADER = "SWING_TRADER"
+    DCA_TRADER = "DCA_TRADER"
+    MARTINGALE_AVERAGER = "MARTINGALE_AVERAGER"
+    HIGH_LEVERAGE_RISKY = "HIGH_LEVERAGE_RISKY"
     ONE_BIG_WIN = "ONE_BIG_WIN"
+    HEDGER_OR_COMPLEX = "HEDGER_OR_COMPLEX"
+    ALTCOIN_SPECIALIST = "ALTCOIN_SPECIALIST"
+    BTC_ETH_MAJOR_ONLY = "BTC_ETH_MAJOR_ONLY"
+    HYPE_SPECIALIST = "HYPE_SPECIALIST"
+    WHALE_POSITIONAL = "WHALE_POSITIONAL"
     ILLIQUIDITY_HUNTER = "ILLIQUIDITY_HUNTER"
     NEWS_REACTIVE = "NEWS_REACTIVE"
     UNKNOWN = "UNKNOWN"
@@ -111,12 +117,15 @@ class WalletProfile(BaseModel):
     pnl_net_after_fees_usdc: float = 0.0
     win_rate: float = 0.0
     profit_factor: float = 0.0
+    sharpe_ratio: float | None = None
+    sortino_ratio: float | None = None
     max_drawdown_bps: float = 0.0
     max_drawdown_pct: float = 0.0
     pnl_concentration: float = 0.0
     top_trade_pnl_share: float = 0.0
     coins_traded_count: int = 0
     main_coin: str | None = None
+    avg_hold_time_minutes: float = 0.0
     recent_activity_score: float = 0.0
     regularity_score: float = 0.0
     copyability_score: float = 0.0

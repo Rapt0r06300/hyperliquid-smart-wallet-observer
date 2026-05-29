@@ -297,6 +297,7 @@ function renderWalletsFeed(candidates, selected, knownWallets) {
           <span class="green">[WALLET]</span>
           <strong>${escapeHtml(shortAddress(row.address))}</strong> ::
           <span class="badge cyan">${escapeHtml(row.status || "OBSERVE")}</span> ::
+          <span class="badge orange">${escapeHtml(row.style || "UNKNOWN")}</span> ::
           score <strong>${escapeHtml(Math.round(row.score ?? 0))}</strong>
         </div>
         <div class="wallet-metrics-grid">
@@ -307,6 +308,7 @@ function renderWalletsFeed(candidates, selected, knownWallets) {
           <span>Hist: ${escapeHtml((row.history_days ?? 0).toFixed(1))}d</span>
           <span>Conc: ${escapeHtml(Math.round((row.pnl_concentration ?? 0) * 100))}%</span>
           <span>Reg: ${escapeHtml(Math.round(row.regularity_score ?? 0))}</span>
+          <span>SR: ${row.sharpe_ratio != null ? escapeHtml(row.sharpe_ratio.toFixed(2)) : "-"}</span>
           <span>Copy: ${escapeHtml(Math.round(row.copyability_score ?? 0))}</span>
         </div>
       </div>
@@ -515,13 +517,15 @@ function renderSimulationOverview(payload) {
         const pnl = row.estimated_net_pnl_usdc;
         const pnlClass = pnl === null || pnl === undefined ? "cyan" : Number(pnl) >= 0 ? "green" : "red";
         const statusClass = row.status === "LOCAL_REPLAY" ? "green" : "orange";
+        const styleEmoji = row.wallet_style === "MARTINGALE_AVERAGER" ? "⚠️" : row.wallet_style === "SCALPER" ? "⚡" : "👤";
         return `
           <div class="feed-line">
             <span class="${statusClass}">[${escapeHtml(row.bot_replay_action || "NO_TRADE")}]</span>
-            ${escapeHtml(formatClockMs(row.observed_at_ms))} :: ${escapeHtml(shortAddress(row.wallet_address))} ::
-            ${escapeHtml(row.coin)} ${escapeHtml(row.leader_side || "")} ::
+            ${styleEmoji} ${escapeHtml(formatClockMs(row.observed_at_ms))} :: ${escapeHtml(shortAddress(row.wallet_address))} ::
+            <strong>${escapeHtml(row.coin)}</strong> ${escapeHtml(row.leader_side || "")} ::
             <span class="${pnlClass}">${pnl === null || pnl === undefined ? "PnL -" : formatUsd(pnl)}</span> ::
-            edge ${escapeHtml(row.edge_remaining_bps ?? "-")} bps :: risque ${escapeHtml(Math.round(row.risk_score ?? 0))} ::
+            edge <strong>${escapeHtml(row.edge_remaining_bps ?? "-")}</strong> bps ::
+            <span class="badge ${row.risk_score > 70 ? "green" : "red"}">RISK ${escapeHtml(Math.round(row.risk_score ?? 0))}</span> ::
             ${escapeHtml(row.reason || "simulation locale")}
           </div>
         `;
@@ -802,6 +806,23 @@ function renderLogs(logs) {
   $("#logConsole").scrollTop = $("#logConsole").scrollHeight;
 }
 
+async function renderNoTradeAnalytics() {
+  try {
+    const data = await getJson("/api/copy/no-trade-report");
+    const avoided = $("#avoidedLoss");
+    const missed = $("#missedGain");
+    const net = $("#netRefusalValue");
+    if (avoided && missed && net) {
+      avoided.textContent = formatUsd(data.avoided_loss_usdc);
+      missed.textContent = formatUsd(data.missed_gain_usdc);
+      net.textContent = formatUsd(data.value_of_refusal);
+      net.className = data.value_of_refusal >= 0 ? "green" : "red";
+    }
+  } catch (error) {
+    console.warn("no-trade analytics refresh failed", error);
+  }
+}
+
 async function loadSimpleHome() {
   if (fullRefreshInFlight) return;
   fullRefreshInFlight = true;
@@ -863,6 +884,7 @@ async function loadSimpleHome() {
   renderCopyStatus(copyStatus);
   renderLeaderActivity(leaderActivity);
   renderNoTradeReport(noTradeReport);
+  renderNoTradeAnalytics();
   renderSimulationOverview(simulationOverview);
   renderCoinMetrics(metrics);
   renderEvents(events);

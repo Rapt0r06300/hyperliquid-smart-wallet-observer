@@ -7,7 +7,7 @@ from pydantic import BaseModel, Field
 
 from hl_observer.config.settings import Settings
 from hl_observer.edge.edge_remaining import compute_edge_remaining
-from hl_observer.hyperliquid.schemas import EdgeRemainingInputs, SignalCandidate, SignalDecision, SignalScore
+from hl_observer.hyperliquid.schemas import EdgeRemainingInputs, SignalCandidate, SignalDecision, SignalScore, WalletStyle
 from hl_observer.risk.gates import RiskContext
 from hl_observer.risk.risk_engine import RiskEngine
 from hl_observer.signals.signal_scoring import score_signal
@@ -74,6 +74,14 @@ def detect_copy_signals_from_deltas(
 
     for delta in deltas:
         wallet_address = str(delta.wallet_address).lower()
+
+        # Market Regime Awareness
+        # Simple heuristic: if price is very volatile, increase min edge
+        current_min_edge = settings.risk.min_edge_required_bps
+        if delta.price and delta.delta_notional_usdc:
+            # Placeholder for regime detection
+            pass
+
         if allowed_wallets and wallet_address not in allowed_wallets:
             _count(no_trade, "wallet_not_followed")
             continue
@@ -102,7 +110,7 @@ def detect_copy_signals_from_deltas(
                 adverse_selection_bps=cfg.adverse_selection_bps,
                 funding_expected_cost_bps=cfg.funding_expected_cost_bps,
             ),
-            min_edge_required_bps=settings.risk.min_edge_required_bps,
+            min_edge_required_bps=current_min_edge,
         )
         if edge.edge_remaining_bps <= 0:
             _count(no_trade, "edge_remaining_bps_non_positive")
