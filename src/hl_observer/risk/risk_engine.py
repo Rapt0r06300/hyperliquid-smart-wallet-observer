@@ -22,6 +22,7 @@ class RiskEngine:
             "slippage": context.slippage_bps <= self.settings.risk.max_slippage_bps,
             "liquidity": context.orderbook_depth_usdc >= self.settings.risk.min_orderbook_depth_usdc,
             "edge_remaining": context.edge_remaining_bps >= self.settings.risk.min_edge_required_bps,
+            "gain_assurance": context.gain_assurance_score >= self.settings.risk.min_gain_assurance_score,
             "wallet_score": context.wallet_score >= self.settings.risk.min_wallet_score,
             "signal_score": context.signal_score >= self.settings.risk.min_signal_score,
             "kill_switch": not context.kill_switch_active and not self.settings.risk.kill_switch_active,
@@ -47,6 +48,9 @@ class RiskEngine:
         elif not gates["edge_remaining"]:
             decision = SignalDecision.REJECT_EDGE_TOO_SMALL
             reasons.append("edge remaining below minimum")
+        elif not gates["gain_assurance"]:
+            decision = SignalDecision.REJECT_EDGE_TOO_WEAK
+            reasons.append(f"gain assurance {context.gain_assurance_score:.1f} too low")
         elif not gates["spread"]:
             decision = SignalDecision.REJECT_SPREAD_TOO_WIDE
             reasons.append("spread too wide")

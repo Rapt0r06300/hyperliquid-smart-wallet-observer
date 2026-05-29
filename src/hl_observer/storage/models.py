@@ -862,6 +862,16 @@ class EdgeMetric(Base, TimestampMixin):
     costs_bps: Mapped[float] = mapped_column(Float)
     edge_remaining_bps: Mapped[float] = mapped_column(Float)
     gain_assurance_score: Mapped[float | None] = mapped_column(Float)
+
+    # Detailed breakdown for quant analysis
+    freshness_factor: Mapped[float | None] = mapped_column(Float)
+    consistency_factor: Mapped[float | None] = mapped_column(Float)
+    liquidity_penalty_bps: Mapped[float | None] = mapped_column(Float)
+    crowding_penalty_bps: Mapped[float | None] = mapped_column(Float)
+    adverse_selection_bps: Mapped[float | None] = mapped_column(Float)
+    funding_penalty_bps: Mapped[float | None] = mapped_column(Float)
+    delay_cost_bps: Mapped[float | None] = mapped_column(Float)
+
     decision: Mapped[str] = mapped_column(String(64))
 
 

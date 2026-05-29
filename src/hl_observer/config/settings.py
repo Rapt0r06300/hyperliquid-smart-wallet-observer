@@ -187,6 +187,7 @@ class RiskSettings(BaseModel):
     min_edge_required_bps: float = 8.0
     min_wallet_score: float = 75.0
     min_signal_score: float = 80.0
+    min_gain_assurance_score: float = 50.0
     edge_freshness_half_life_ms: float = 3500.0
     edge_volatility_bps_per_sec: float = 0.2
     edge_crowding_threshold: int = 3

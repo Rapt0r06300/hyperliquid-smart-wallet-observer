@@ -849,6 +849,13 @@ class EdgeMetricRepository:
         costs_bps: float,
         edge_remaining_bps: float,
         gain_assurance_score: float | None = None,
+        freshness_factor: float | None = None,
+        consistency_factor: float | None = None,
+        liquidity_penalty_bps: float | None = None,
+        crowding_penalty_bps: float | None = None,
+        adverse_selection_bps: float | None = None,
+        funding_penalty_bps: float | None = None,
+        delay_cost_bps: float | None = None,
         decision: str,
     ) -> EdgeMetric:
         model = EdgeMetric(
@@ -857,6 +864,13 @@ class EdgeMetricRepository:
             costs_bps=costs_bps,
             edge_remaining_bps=edge_remaining_bps,
             gain_assurance_score=gain_assurance_score,
+            freshness_factor=freshness_factor,
+            consistency_factor=consistency_factor,
+            liquidity_penalty_bps=liquidity_penalty_bps,
+            crowding_penalty_bps=crowding_penalty_bps,
+            adverse_selection_bps=adverse_selection_bps,
+            funding_penalty_bps=funding_penalty_bps,
+            delay_cost_bps=delay_cost_bps,
             decision=decision,
         )
         self.session.add(model)

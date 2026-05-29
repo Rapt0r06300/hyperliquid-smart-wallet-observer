@@ -137,6 +137,7 @@ class SignalCandidate(BaseModel):
     crowding_penalty_bps: float = 0.0
     adverse_selection_bps: float = 0.0
     funding_penalty_bps: float = 0.0
+    price_drift_bps: float = 0.0
     orderbook_depth_usdc: float = 0.0
     crowding_score: float = 0.0
     gain_assurance_score: float = 0.0
@@ -171,6 +172,7 @@ class EdgeRemainingInputs(BaseModel):
     crowding_penalty_bps: float = 0.0
     adverse_selection_bps: float = 0.0
     funding_penalty_bps: float = 0.0
+    price_drift_bps: float = 0.0
     observed_price: float = 0.0
 
 
