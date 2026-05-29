@@ -20,7 +20,9 @@ from hyper_smart_observer.copy_mode.snapshot_engine import (
 )
 from hyper_smart_observer.hyperliquid_client.info_client import HyperliquidInfoClient
 from hyper_smart_observer.paper_trading.simulator import PaperTradingSimulator
+from hyper_smart_observer.reports.french_formatter import format_french_summary
 from hyper_smart_observer.storage.database import get_connection, initialize_database
+from hyper_smart_observer.storage.research_ledger import ResearchHistoryLedger
 
 
 def shortlist_path(config: AppConfig) -> Path:
@@ -39,6 +41,8 @@ def run_copy_dry_run(
 ) -> CopyRunReport:
     started = utc_now()
     initialize_database(config)
+    ledger = ResearchHistoryLedger(config.runtime_root)
+    ledger.record_event("COPY_RUN_STARTED", {"interval_seconds": interval_seconds, "network_read": network_read})
     path = shortlist_path(config)
     if not path.exists():
         write_shortlist_report(
@@ -202,6 +206,12 @@ def run_copy_dry_run(
         no_trade_decisions=no_trade,
         source_failures=source_failures,
     )
+    ledger.record_event("COPY_RUN_FINISHED", {
+        "leaders_seen": len(leaders),
+        "deltas_seen": len(all_deltas),
+        "signals_count": len(all_signals),
+        "refusals_count": len(no_trade)
+    })
     with get_connection(config) as conn:
         insert_shortlist_entries(conn, entries)
         for signal in all_signals:
