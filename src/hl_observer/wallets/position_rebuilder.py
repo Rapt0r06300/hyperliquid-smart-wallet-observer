@@ -83,41 +83,67 @@ def rebuild_positions_from_fills(wallet_address: str, fills: list[dict[str, Any]
         else:
             new_size = previous_size
 
-        delta = detector.detect(wallet_address, coin, previous_size, new_size, fills=[fill])
-        deltas.append(delta)
-        state.confidence_scores.append(delta.confidence_score)
-        state.notes.extend(delta.notes)
-        state.last_raw = fill
+        delta = detector.detect(
+            wallet_address, coin, previous_size, new_size,
+            fills=[fill], entry_price=state.entry_px_estimated
+        )
 
-        if delta.action == PositionAction.UNKNOWN or delta.confidence_level == ConfidenceLevel.UNKNOWN:
-            global_notes.extend(delta.notes)
-            state.last_px = fill_price(fill) or state.last_px
-            state.updated_at_ms = delta.exchange_ts or state.updated_at_ms
-            continue
+        # OMNIPOTENT sub-action expansion
+        if delta.sub_actions:
+            current_loop_deltas = []
+            cumulative_size = previous_size
+            for sub in delta.sub_actions:
+                sub_new_size = cumulative_size + (sub["size"] if sub["side"] == PositionSide.LONG else -sub["size"])
+                if sub["action"] == PositionAction.CLOSE: sub_new_size = 0.0
 
-        old_size = state.size
-        state.size = delta.new_size
-        price = fill_price(fill)
-        size = fill_size(fill) or 0.0
-        if price is not None:
-            state.last_px = price
-        state.updated_at_ms = delta.exchange_ts or state.updated_at_ms
+                sub_record = delta.model_copy(update={
+                    "action": sub["action"],
+                    "previous_size": cumulative_size,
+                    "new_size": sub_new_size,
+                    "delta_size": sub_new_size - cumulative_size,
+                    "previous_side": position_side(cumulative_size),
+                    "new_side": position_side(sub_new_size)
+                })
+                current_loop_deltas.append(sub_record)
+                cumulative_size = sub_new_size
+        else:
+            current_loop_deltas = [delta]
 
-        if delta.action in {PositionAction.OPEN, PositionAction.FLIP}:
-            state.opened_at_ms = delta.exchange_ts
-            state.entry_px_estimated = price
-        elif delta.action == PositionAction.ADD and price is not None and state.entry_px_estimated is not None:
-            previous_abs = abs(old_size)
-            added_abs = abs(size)
-            denominator = previous_abs + added_abs
-            if denominator > 0:
-                state.entry_px_estimated = (
-                    state.entry_px_estimated * previous_abs + price * added_abs
-                ) / denominator
-        elif delta.action == PositionAction.ADD and state.entry_px_estimated is None:
-            state.entry_px_estimated = price
-        elif delta.action == PositionAction.CLOSE:
-            state.entry_px_estimated = None
+        for d in current_loop_deltas:
+            deltas.append(d)
+            state.confidence_scores.append(d.confidence_score)
+            state.notes.extend(d.notes)
+            state.last_raw = fill
+
+            if d.action == PositionAction.UNKNOWN or d.confidence_level == ConfidenceLevel.UNKNOWN:
+                state.last_px = fill_price(fill) or state.last_px
+                state.updated_at_ms = d.exchange_ts or state.updated_at_ms
+                continue
+
+            old_size = state.size
+            state.size = d.new_size
+            price = fill_price(fill)
+            size = fill_size(fill) or 0.0
+            if price is not None:
+                state.last_px = price
+            state.updated_at_ms = d.exchange_ts or state.updated_at_ms
+
+            if d.action in {PositionAction.OPEN, PositionAction.FLIP}:
+                state.opened_at_ms = d.exchange_ts
+                state.entry_px_estimated = price
+            elif d.action == PositionAction.ADD and price is not None and state.entry_px_estimated is not None:
+                previous_abs = abs(old_size)
+                added_abs = abs(size)
+                denominator = previous_abs + added_abs
+                if denominator > 0:
+                    state.entry_px_estimated = (
+                        state.entry_px_estimated * previous_abs + price * added_abs
+                    ) / denominator
+            elif d.action == PositionAction.ADD and state.entry_px_estimated is None:
+                state.entry_px_estimated = price
+            elif d.action == PositionAction.CLOSE:
+                state.entry_px_estimated = None
+
 
     positions = [_position_from_state(wallet_address, coin, state) for coin, state in states.items()]
     confidence_values = [score for state in states.values() for score in state.confidence_scores]

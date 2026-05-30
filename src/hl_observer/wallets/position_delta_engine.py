@@ -40,6 +40,8 @@ class PositionDeltaRecord(BaseModel):
     action: PositionAction
     sub_actions: list[dict[str, Any]] = Field(default_factory=list)
     intent: str = "UNKNOWN"  # AGGRESSIVE, PASSIVE, UNKNOWN
+    trade_narrative: str | None = None
+    reconciliation_metadata: dict[str, Any] = Field(default_factory=dict)
     exchange_ts: int | None = None
     fill_id: int | None = None
     source_event_id: int | None = None
