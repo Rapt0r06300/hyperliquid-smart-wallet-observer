@@ -16,6 +16,8 @@ def record_robust_snapshot(
     wallet_address: str,
     run_id: Optional[int] = None,
     source: str = "manual",
+    stopped_reason: Optional[str] = None,
+    errors: Optional[list[str]] = None,
     echo_func: Optional[callable] = None
 ) -> None:
     """
@@ -64,7 +66,9 @@ def record_robust_snapshot(
             open_orders=[o[0] for o in db_orders if o[0]],
             fills=[f[0] for f in db_fills if f[0]],
             all_mids=latest_mids.raw_json if latest_mids else {},
-            source=source
+            source=source,
+            stopped_reason=stopped_reason,
+            errors=errors or []
         )
 
         # 4. Compare with previous
@@ -84,8 +88,11 @@ def record_robust_snapshot(
             open_orders=snapshot_data.open_orders,
             fills=snapshot_data.fills,
             all_mids=snapshot_data.all_mids,
-            source=snapshot_data.source
+            source=snapshot_data.source,
+            stopped_reason=snapshot_data.stopped_reason,
+            errors=snapshot_data.errors + comparison.errors
         )
+        current_snapshot_model.summary = comparison.summary()
         session.flush() # Ensure ID is generated for reporting
         comparison.current_snapshot_id = current_snapshot_model.id
         if previous_model:

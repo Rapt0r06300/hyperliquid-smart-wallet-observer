@@ -878,6 +878,7 @@ def create_router(settings: Settings, state: UiState, bus: UiEventBus) -> APIRou
                 "orders_count": len(row.open_orders_json or []),
                 "fills_count": len(row.fills_json or []),
                 "source": row.source,
+                "summary": row.summary,
                 "stopped_reason": row.stopped_reason,
             }
             for row in rows

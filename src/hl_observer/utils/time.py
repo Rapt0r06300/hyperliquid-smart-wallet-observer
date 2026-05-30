@@ -10,3 +10,7 @@ def now_ms() -> int:
 
 def utc_now() -> datetime:
     return datetime.now(tz=UTC)
+
+
+def format_ms_as_clock(ms: int) -> str:
+    return datetime.fromtimestamp(ms / 1000, tz=UTC).strftime("%H:%M:%S")

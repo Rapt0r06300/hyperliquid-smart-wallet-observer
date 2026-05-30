@@ -45,6 +45,7 @@ class WalletSnapshot(Base, TimestampMixin):
     all_mids_json: Mapped[dict | None] = mapped_column(JSON)
     raw_json: Mapped[dict] = mapped_column(JSON, default=dict)
     source: Mapped[str | None] = mapped_column(String(64))
+    summary: Mapped[str | None] = mapped_column(String(255))
     stopped_reason: Mapped[str | None] = mapped_column(String(255))
     errors_json: Mapped[list | None] = mapped_column(JSON)
 

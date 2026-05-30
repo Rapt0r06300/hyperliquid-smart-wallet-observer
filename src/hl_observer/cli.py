@@ -5,6 +5,7 @@ import sys
 from pathlib import Path
 
 import typer
+from sqlalchemy import select
 
 from hl_observer.autoscan import format_autoscan_report, run_autoscan
 from hl_observer.collection.collector import (
@@ -1401,6 +1402,49 @@ def testnet_check(
         return
     typer.echo(f"testnet gates validated: {result['cloid']}")
 
+
+@app.command("inspect-snapshot")
+def inspect_snapshot(
+    wallet: str = typer.Option(..., "--wallet", help="Wallet address to inspect."),
+    limit: int = typer.Option(5, "--limit", help="Number of recent snapshots to show."),
+) -> None:
+    """Inspect the intelligent scorecard proofs for recent wallet snapshots."""
+    settings = _settings()
+    session_factory = _session_factory(settings)
+    with session_factory() as session:
+        from hl_observer.storage.models import WalletSnapshot, PositionDeltaModel
+        snapshots = session.scalars(
+            select(WalletSnapshot)
+            .where(WalletSnapshot.wallet_address == wallet)
+            .order_by(WalletSnapshot.id.desc())
+            .limit(limit)
+        ).all()
+
+        if not snapshots:
+            typer.echo(f"No snapshots found for wallet {wallet}")
+            return
+
+        from hl_observer.utils.time import format_ms_as_clock
+        for snap in snapshots:
+            ts_str = format_ms_as_clock(snap.local_received_ts) if snap.local_received_ts else "N/A"
+            typer.echo(f"--- Snapshot #{snap.id} ({snap.source}) at {ts_str} ---")
+            typer.echo(f"Summary: {snap.summary or 'N/A'}")
+
+            deltas = session.scalars(
+                select(PositionDeltaModel)
+                .where(PositionDeltaModel.snapshot_id == snap.id)
+            ).all()
+
+            if not deltas:
+                typer.echo("  No deltas recorded.")
+            else:
+                for d in deltas:
+                    eligible = " [PAPER ELIGIBLE]" if d.is_paper_eligible else ""
+                    typer.echo(f"  Delta: {d.coin} {d.action} (conf: {d.confidence_score:.2f}){eligible}")
+                    if d.raw_json and "proofs" in d.raw_json:
+                        proofs = d.raw_json["proofs"]
+                        for p, val in proofs.items():
+                            typer.echo(f"    - proof {p}: {'PASS' if val else 'FAIL'}")
 
 @app.command("ui")
 def ui(

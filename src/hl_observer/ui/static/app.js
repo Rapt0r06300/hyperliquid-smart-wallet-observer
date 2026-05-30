@@ -287,7 +287,7 @@ function renderSnapshotsFeed(rows) {
       <div class="feed-line">
         <span class="cyan">[SNAP]</span>
         #${row.id} :: ${escapeHtml(shortAddress(row.wallet_address))} ::
-        pos ${row.positions_count} orders ${row.orders_count} fills ${row.fills_count} ::
+        ${escapeHtml(row.summary || "No summary")} ::
         ${escapeHtml(row.source || "manual")}
       </div>
     `).join("")
