@@ -17,7 +17,7 @@ def test_edge_remaining_negative_rejected():
 
     assert edge.edge_remaining_bps <= 0
     assert edge.decision == SignalDecision.REJECT_EDGE_NEGATIVE
-    assert any("edge_remaining_bps non-positive" in r for r in edge.reasons)
+    assert any("edge_exhausted_by_costs" in r for r in edge.reasons)
 
 
 def test_edge_remaining_too_small_rejected():
@@ -35,7 +35,7 @@ def test_edge_remaining_too_small_rejected():
 
     assert 0 < edge.edge_remaining_bps < 10
     assert edge.decision == SignalDecision.REJECT_EDGE_TOO_SMALL
-    assert any("below minimum" in r for r in edge.reasons)
+    assert any("edge_insufficient" in r for r in edge.reasons)
 
 
 def test_edge_remaining_multiplicative_factors():
@@ -63,16 +63,16 @@ def test_reject_missing_leader_edge():
         min_edge_required_bps=5,
     )
     assert edge.decision == SignalDecision.REJECT_EDGE_NEGATIVE
-    assert any("missing_leader_edge" in r for r in edge.reasons)
+    assert any("leader_edge_non_positive" in r for r in edge.reasons)
 
 
 def test_reject_stale_signal():
     edge = compute_edge_remaining(
-        EdgeRemainingInputs(edge_leader_bps=20, freshness_factor=0, observed_price=100.0),
+        EdgeRemainingInputs(edge_leader_bps=20, freshness_factor=0.05, observed_price=100.0),
         min_edge_required_bps=5,
     )
-    assert edge.decision == SignalDecision.REJECT_TOO_LATE
-    assert any("signal_stale" in r for r in edge.reasons)
+    assert edge.decision == SignalDecision.REJECT_STALE_SIGNAL
+    assert any("alpha_evaporated" in r for r in edge.reasons)
 
 
 def test_reject_invalid_price():
@@ -81,7 +81,7 @@ def test_reject_invalid_price():
         min_edge_required_bps=5,
     )
     assert edge.decision == SignalDecision.REJECT_INVALID_PRICE
-    assert any("invalid_price" in r for r in edge.reasons)
+    assert any("invalid_execution_price" in r for r in edge.reasons)
 
 
 def test_reject_low_liquidity():
@@ -90,7 +90,7 @@ def test_reject_low_liquidity():
         min_edge_required_bps=5,
     )
     assert edge.decision == SignalDecision.REJECT_TOO_ILLIQUID
-    assert any("low_liquidity" in r for r in edge.reasons)
+    assert any("liquidity_risk" in r for r in edge.reasons)
 
 
 def test_reject_high_costs():
@@ -102,4 +102,4 @@ def test_reject_high_costs():
         min_edge_required_bps=5,
     )
     assert edge.decision == SignalDecision.REJECT_COSTS_TOO_HIGH
-    assert any("costs_too_high" in r for r in edge.reasons)
+    assert any("prohibitive_costs" in r for r in edge.reasons)

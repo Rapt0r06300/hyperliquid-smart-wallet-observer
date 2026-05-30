@@ -141,6 +141,10 @@ class SignalCandidate(BaseModel):
     orderbook_depth_usdc: float = 0.0
     crowding_score: float = 0.0
     gain_assurance_score: float = 0.0
+    expected_move_bps: float = 0.0
+    confirmation_bonus_bps: float = 0.0
+    kelly_suggested_size: float = 0.0
+    market_impact_bps: float = 0.0
     exit_plan_id: str | None = None
     decision: SignalDecision = SignalDecision.OBSERVE_ONLY
     reject_reason: str | None = None
@@ -190,6 +194,7 @@ class RiskDecision(BaseModel):
     decision: SignalDecision
     reasons: list[str] = Field(default_factory=list)
     gates: dict[str, bool] = Field(default_factory=dict)
+    suggested_size_multiplier: float = 1.0
 
 
 class PaperOrder(BaseModel):

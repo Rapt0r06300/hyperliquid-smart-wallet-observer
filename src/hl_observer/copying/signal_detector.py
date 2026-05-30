@@ -9,11 +9,13 @@ from hl_observer.config.settings import Settings
 from hl_observer.edge.edge_remaining import compute_edge_remaining
 from hl_observer.edge.factors import (
     compute_adverse_selection_penalty,
+    compute_confirmation_bonus,
     compute_crowding_penalty,
     compute_delay_cost,
     compute_freshness_factor,
     compute_funding_penalty,
     compute_gain_assurance_score,
+    compute_kelly_sizing,
     compute_liquidity_penalty,
 )
 from hl_observer.hyperliquid.schemas import EdgeRemainingInputs, SignalCandidate, SignalDecision, SignalScore, WalletStyle
@@ -116,9 +118,14 @@ def detect_copy_signals_from_deltas(
         timestamp_ms = delta.exchange_ts or delta.detected_at_ms or current_ms
         age_ms = max(0, current_ms - timestamp_ms)
 
+        # Funding and liquidity from live metrics if available
+        coin_metric = (market_metrics or {}).get(delta.coin.upper()) if delta.coin else None
+
         # Dynamic factor calculations
-        # Majors have slower decay, altcoins decay faster
-        vol_index = 1.0 if delta.coin.upper() in {"BTC", "ETH"} else 1.4
+        # Use live volatility if available, otherwise fallback to asset class proxy
+        live_vol = coin_metric.volatility_bps if coin_metric and hasattr(coin_metric, "volatility_bps") else (20.0 if delta.coin.upper() in {"BTC", "ETH"} else 28.0)
+        vol_index = live_vol / 20.0
+
         freshness = compute_freshness_factor(
             age_ms,
             half_life_ms=settings.risk.edge_freshness_half_life_ms,
@@ -126,8 +133,6 @@ def detect_copy_signals_from_deltas(
         )
         delay_cost = compute_delay_cost(age_ms, volatility_bps_per_sec=settings.risk.edge_volatility_bps_per_sec * vol_index)
 
-        # Funding and liquidity from live metrics if available
-        coin_metric = (market_metrics or {}).get(delta.coin.upper()) if delta.coin else None
         funding_rate = coin_metric.funding_hint if coin_metric and hasattr(coin_metric, "funding_hint") else 0.0
         funding_penalty = compute_funding_penalty(side, funding_rate)
 
@@ -162,9 +167,12 @@ def detect_copy_signals_from_deltas(
 
         dynamic_consistency = clamp(wallet_score / 100.0, 0.5, 1.2)
 
+        # Advanced Edge Logic
+        confirmation_bonus = compute_confirmation_bonus(num_on_coin)
+
         edge = compute_edge_remaining(
             EdgeRemainingInputs(
-                edge_leader_bps=cfg.edge_leader_bps,
+                edge_leader_bps=cfg.edge_leader_bps + confirmation_bonus,
                 consistency_factor=dynamic_consistency,
                 freshness_factor=freshness,
                 delay_cost_bps=delay_cost,
@@ -194,6 +202,12 @@ def detect_copy_signals_from_deltas(
             liquidity_score=liq_score,
         )
 
+        # Sugggested Kelly Size
+        kelly_size = compute_kelly_sizing(
+            edge.edge_remaining_bps,
+            win_rate=clamp(wallet_score / 100.0, 0.4, 0.8)
+        )
+
         signal = SignalCandidate(
             id=_copy_signal_id(delta),
             source_wallet=wallet_address,
@@ -218,8 +232,12 @@ def detect_copy_signals_from_deltas(
             funding_penalty_bps=funding_penalty,
             price_drift_bps=delay_cost,
             orderbook_depth_usdc=depth,
-            crowding_score=crowd_penalty / 30.0, # normalized 0-1
+            crowding_score=crowd_penalty / 50.0, # normalized 0-1
             gain_assurance_score=gain_assurance,
+            expected_move_bps=edge.expected_edge_bps,
+            confirmation_bonus_bps=confirmation_bonus,
+            kelly_suggested_size=kelly_size,
+            market_impact_bps=liq_penalty,
             exit_plan_id=f"exit:{wallet_address}:{delta.coin}",
             decision=edge.decision,
             reject_reason="; ".join(edge.reasons) if edge.decision != SignalDecision.PAPER_CANDIDATE else None,
@@ -234,6 +252,7 @@ def detect_copy_signals_from_deltas(
                 signal_score=scored.score,
                 edge_remaining_bps=edge.edge_remaining_bps,
                 gain_assurance_score=gain_assurance,
+                kelly_fraction=kelly_size,
                 signal_age_ms=signal.signal_age_ms,
             )
         )

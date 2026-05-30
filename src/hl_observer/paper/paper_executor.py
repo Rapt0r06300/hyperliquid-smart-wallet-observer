@@ -42,12 +42,15 @@ class PaperExecutor:
             signal.spread_bps,
             signal.slippage_bps,
         )
+        # Adaptive sizing: scale notional by risk decision multiplier
+        final_notional = notional_usdc * risk_decision.suggested_size_multiplier
+
         order = PaperOrder(
             order_id=order_id,
             signal_id=signal.id,
             coin=signal.coin,
             side="buy" if signal.side == "long" else "sell",
-            notional_usdc=notional_usdc,
+            notional_usdc=final_notional,
             requested_price=signal.observed_price,
             simulated_fill_price=fill_price,
             fee_bps=self.fee_bps,

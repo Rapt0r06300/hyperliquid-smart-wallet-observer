@@ -17,6 +17,7 @@ class MarketMetricRecord(BaseModel):
     volume_hint_usdc: float | None = None
     open_interest_hint_usdc: float | None = None
     funding_hint: float | None = None
+    volatility_bps: float = 0.0
     liquidity_score: float = 0.0
     is_scannable: bool = False
     rejection_reason: str | None = None
@@ -52,6 +53,12 @@ def build_market_metric(
     volume_hint = _float_from(active_ctx, "dayNtlVlm", "volume", "volumeUsd")
     open_interest_hint = _float_from(active_ctx, "openInterest", "openInterestUsd")
     funding_hint = _float_from(active_ctx, "funding", "fundingRate")
+
+    # Simple volatility proxy from day price change if available
+    day_ntl_vlm = _float_from(active_ctx, "dayNtlVlm")
+    # For now, default to 20bps if no ctx
+    volatility = 20.0
+
     rejection_reason = None
     if depth is not None and not is_liquid(depth, settings.market_universe.min_orderbook_depth_usdc):
         rejection_reason = "liquidity_too_low"
@@ -66,6 +73,7 @@ def build_market_metric(
         volume_hint_usdc=volume_hint,
         open_interest_hint_usdc=open_interest_hint,
         funding_hint=funding_hint,
+        volatility_bps=volatility,
         liquidity_score=score,
         is_scannable=rejection_reason is None,
         rejection_reason=rejection_reason,
@@ -81,4 +89,3 @@ def _float_from(payload: dict, *keys: str) -> float | None:
         except (TypeError, ValueError):
             continue
     return None
-

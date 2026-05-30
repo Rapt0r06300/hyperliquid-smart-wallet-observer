@@ -309,6 +309,7 @@ class CollectionRepository:
             volume_hint_usdc=metric.volume_hint_usdc,
             open_interest_hint_usdc=metric.open_interest_hint_usdc,
             funding_hint=metric.funding_hint,
+            volatility_bps=metric.volatility_bps,
             liquidity_score=metric.liquidity_score,
             is_scannable=metric.is_scannable,
             rejection_reason=metric.rejection_reason,
@@ -856,6 +857,10 @@ class EdgeMetricRepository:
         adverse_selection_bps: float | None = None,
         funding_penalty_bps: float | None = None,
         delay_cost_bps: float | None = None,
+        expected_move_bps: float | None = None,
+        confirmation_bonus_bps: float | None = None,
+        kelly_suggested_size: float | None = None,
+        market_impact_bps: float | None = None,
         decision: str,
     ) -> EdgeMetric:
         model = EdgeMetric(
@@ -871,6 +876,10 @@ class EdgeMetricRepository:
             adverse_selection_bps=adverse_selection_bps,
             funding_penalty_bps=funding_penalty_bps,
             delay_cost_bps=delay_cost_bps,
+            expected_move_bps=expected_move_bps,
+            confirmation_bonus_bps=confirmation_bonus_bps,
+            kelly_suggested_size=kelly_suggested_size,
+            market_impact_bps=market_impact_bps,
             decision=decision,
         )
         self.session.add(model)

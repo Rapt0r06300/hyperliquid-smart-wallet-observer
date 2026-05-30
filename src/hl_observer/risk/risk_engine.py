@@ -4,6 +4,7 @@ from dataclasses import dataclass
 
 from hl_observer.config.settings import ExecutionEnvironment, Settings
 from hl_observer.hyperliquid.schemas import RiskDecision, SignalDecision
+from hl_observer.utils.math import clamp
 from hl_observer.risk.gates import RiskContext
 
 
@@ -87,9 +88,14 @@ class RiskEngine:
         else:
             reasons.append("all paper gates passed")
 
+        # Dynamic sizing based on Gain Assurance
+        # 100% size at GA=80+, scales down linearly to 20% at GA=50
+        multiplier = clamp((context.gain_assurance_score - 40.0) / 40.0, 0.2, 1.0)
+
         return RiskDecision(
             allowed=decision == SignalDecision.PAPER_TRADE,
             decision=decision,
             reasons=reasons,
             gates=gates,
+            suggested_size_multiplier=multiplier if decision == SignalDecision.PAPER_TRADE else 0.0,
         )

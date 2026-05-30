@@ -278,6 +278,7 @@ class MarketMetric(Base):
     volume_hint_usdc: Mapped[float | None] = mapped_column(Float)
     open_interest_hint_usdc: Mapped[float | None] = mapped_column(Float)
     funding_hint: Mapped[float | None] = mapped_column(Float)
+    volatility_bps: Mapped[float] = mapped_column(Float, default=0.0)
     liquidity_score: Mapped[float] = mapped_column(Float, default=0.0)
     is_scannable: Mapped[bool] = mapped_column(Boolean, default=False)
     rejection_reason: Mapped[str | None] = mapped_column(Text)
@@ -871,6 +872,12 @@ class EdgeMetric(Base, TimestampMixin):
     adverse_selection_bps: Mapped[float | None] = mapped_column(Float)
     funding_penalty_bps: Mapped[float | None] = mapped_column(Float)
     delay_cost_bps: Mapped[float | None] = mapped_column(Float)
+
+    # Pro extras
+    expected_move_bps: Mapped[float | None] = mapped_column(Float)
+    confirmation_bonus_bps: Mapped[float | None] = mapped_column(Float)
+    kelly_suggested_size: Mapped[float | None] = mapped_column(Float)
+    market_impact_bps: Mapped[float | None] = mapped_column(Float)
 
     decision: Mapped[str] = mapped_column(String(64))
 

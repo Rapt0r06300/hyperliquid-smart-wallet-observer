@@ -11,6 +11,7 @@ class RiskContext(BaseModel):
     signal_score: float
     edge_remaining_bps: float
     gain_assurance_score: float = 0.0
+    kelly_fraction: float = 0.0
     signal_age_ms: int
     duplicate_order_risk: bool = False
     data_gap: bool = False
