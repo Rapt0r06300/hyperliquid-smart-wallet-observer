@@ -54,6 +54,7 @@ ACTION_GROUPS: dict[str, list[tuple[str, str, str]]] = {
     "Simuler": [
         ("paper_run", "Simulation paper", "Smoke path paper uniquement."),
         ("paper_report", "Rapport paper", "Rapport paper local."),
+        ("reset_simulation_session", "Remise a zero simulation", "Efface positions virtuelles et historique P&L local."),
         ("testnet_check", "Verifier testnet", "Testnet reste verrouille par defaut."),
     ],
     "Donnees": [

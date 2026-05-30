@@ -388,6 +388,22 @@ def create_router(settings: Settings, state: UiState, bus: UiEventBus) -> APIRou
 
         chronological = sorted(deltas, key=delta_event_time_ms)
 
+        # Initialize drawdown state from existing history
+        def calculate_drawdown_stop(events: list[dict[str, Any]]) -> tuple[bool, float, float]:
+            max_eq = starting_equity_usdt
+            run_eq = starting_equity_usdt
+            m_dd_usdc = 0.0
+            for ev in events:
+                if ev.get("status") == "LOCAL_REPLAY":
+                    run_eq += float(ev.get("estimated_net_pnl_usdc") or 0.0)
+                    max_eq = max(max_eq, run_eq)
+                    dd = max_eq - run_eq
+                    m_dd_usdc = max(m_dd_usdc, dd)
+            m_dd_pct = (m_dd_usdc / max_eq * 100.0) if max_eq > 0 else 0.0
+            return (m_dd_pct >= 10.0), m_dd_usdc, m_dd_pct
+
+        drawdown_stop_triggered, max_dd_usdc, max_dd_pct = calculate_drawdown_stop(ledger_events)
+
         def current_open_exposure_usdt() -> float:
             return sum(abs(position["size"] * position["avg_price"]) for position in positions.values())
 
@@ -492,16 +508,29 @@ def create_router(settings: Settings, state: UiState, bus: UiEventBus) -> APIRou
                     pos["mfe_usdc"] = max(pos.get("mfe_usdc", 0.0), current_pnl)
                     pos["mae_usdc"] = min(pos.get("mae_usdc", 0.0), current_pnl)
 
-                    # Hard Stop
+                    # Hard Stop (respecting Breakeven move)
                     if pos.get("exit_plan") and pos["exit_plan"].get("hard_stop_bps"):
                         limit_bps = pos["exit_plan"]["hard_stop_bps"]
+
+                        # Move stop to breakeven if trigger hit
+                        be_trigger = pos["exit_plan"].get("breakeven_trigger_bps")
+                        if be_trigger:
+                            if pos["direction"] == "LONG":
+                                if (pos["high_price"] - pos["avg_price"]) / pos["avg_price"] * 10_000.0 >= be_trigger:
+                                    limit_bps = 0.0 # Stop at entry
+                            else:
+                                if (pos["avg_price"] - pos["low_price"]) / pos["avg_price"] * 10_000.0 >= be_trigger:
+                                    limit_bps = 0.0 # Stop at entry
+
                         if pos["direction"] == "LONG":
                             if (pos["avg_price"] - event_price) / pos["avg_price"] * 10_000.0 >= limit_bps:
-                                to_exit.append((pos_key, "HARD_STOP"))
+                                reason = "HARD_STOP" if limit_bps > 0 else "BREAKEVEN_STOP"
+                                to_exit.append((pos_key, reason))
                                 continue
                         else:
                             if (event_price - pos["avg_price"]) / pos["avg_price"] * 10_000.0 >= limit_bps:
-                                to_exit.append((pos_key, "HARD_STOP"))
+                                reason = "HARD_STOP" if limit_bps > 0 else "BREAKEVEN_STOP"
+                                to_exit.append((pos_key, reason))
                                 continue
 
                     # Partial Take Profit (50% reduction)
@@ -650,6 +679,12 @@ def create_router(settings: Settings, state: UiState, bus: UiEventBus) -> APIRou
                 continue
 
             if action in {"OPEN_LONG", "OPEN_SHORT", "ADD", "INCREASE"}:
+                # Bot-level drawdown stop check
+                if drawdown_stop_triggered and key not in positions:
+                    event["reason"] = "MAX_DRAWDOWN_STOP_REACHED"
+                    ledger_events.append(event)
+                    continue
+
                 # Prevention: If position was JUST closed by a simulation stop in THIS same event loop,
                 # do not allow re-entry from the same leader delta that might have triggered it.
                 if key not in positions:
@@ -893,19 +928,11 @@ def create_router(settings: Settings, state: UiState, bus: UiEventBus) -> APIRou
         gross_losses = abs(sum(float(p.get("realized_pnl_usdc") or 0) for p in losses))
         profit_factor = gross_profits / gross_losses if gross_losses > 0 else (99.9 if gross_profits > 0 else 0.0)
         avg_trade = realized_net_pnl / len(closed_positions) if closed_positions else 0.0
+        avg_win = sum(float(p.get("realized_pnl_usdc") or 0) for p in wins) / len(wins) if wins else 0.0
+        avg_loss = sum(float(p.get("realized_pnl_usdc") or 0) for p in losses) / len(losses) if losses else 0.0
 
-        # Max drawdown calculation from ledger
-        max_equity = starting_equity_usdt
-        running_equity = starting_equity_usdt
-        max_dd_usdc = 0.0
-        for ev in ledger_events:
-            if ev.get("status") == "LOCAL_REPLAY":
-                running_equity += float(ev.get("estimated_net_pnl_usdc") or 0.0)
-                max_equity = max(max_equity, running_equity)
-                dd = max_equity - running_equity
-                max_dd_usdc = max(max_dd_usdc, dd)
-
-        max_dd_pct = (max_dd_usdc / max_equity * 100.0) if max_equity > 0 else 0.0
+        # Final drawdown calculation for reporting
+        drawdown_stop_triggered, max_dd_usdc, max_dd_pct = calculate_drawdown_stop(ledger_events)
 
         return {
             "events": list(reversed(ledger_events[-240:])),
@@ -924,8 +951,11 @@ def create_router(settings: Settings, state: UiState, bus: UiEventBus) -> APIRou
             "win_rate": round(win_rate * 100, 2),
             "profit_factor": round(profit_factor, 2),
             "avg_trade_usdc": round(avg_trade, 2),
+            "avg_win_usdc": round(avg_win, 2),
+            "avg_loss_usdc": round(avg_loss, 2),
             "max_drawdown_usdc": round(max_dd_usdc, 2),
             "max_drawdown_pct": round(max_dd_pct, 2),
+            "drawdown_stop_active": drawdown_stop_triggered,
             "entry_costs_paid_usdc": round(entry_costs_paid, 6),
             "exit_costs_paid_usdc": round(exit_costs_paid, 6),
             "total_costs_paid_usdc": round(entry_costs_paid + exit_costs_paid, 6),

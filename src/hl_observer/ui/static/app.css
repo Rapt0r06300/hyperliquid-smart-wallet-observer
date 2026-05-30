@@ -353,7 +353,7 @@ input {
 
 .simulation-summary {
   display: grid;
-  grid-template-columns: minmax(260px, 1.6fr) repeat(3, minmax(160px, 0.8fr));
+  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
   gap: 10px;
   margin: 14px 0;
 }
@@ -379,12 +379,19 @@ input {
 }
 
 .simulation-metric:first-child {
+  grid-column: span 2;
   border-color: rgba(0,255,136,0.45);
   background: linear-gradient(180deg, rgba(0,255,136,0.12), rgba(0,217,255,0.05));
 }
 
 .simulation-metric:first-child strong {
   font-size: clamp(32px, 4vw, 56px);
+}
+
+@media (max-width: 800px) {
+  .simulation-metric:first-child {
+    grid-column: span 1;
+  }
 }
 
 .simulation-live-strip {

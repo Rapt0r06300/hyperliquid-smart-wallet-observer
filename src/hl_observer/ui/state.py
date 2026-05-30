@@ -28,6 +28,7 @@ class UiState:
     simulation_virtual_positions: dict[str, VirtualPosition | dict[str, Any]] = field(default_factory=dict)
     simulation_closed_positions: list[VirtualPosition | dict[str, Any]] = field(default_factory=list)
     simulation_ledger_events: list[dict[str, Any]] = field(default_factory=list)
+    simulation_drawdown_stop_active: bool = False
 
     def add_event(
         self,

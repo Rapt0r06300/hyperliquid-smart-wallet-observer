@@ -41,6 +41,7 @@ def persist_simulation_state(settings: Settings, state: UiState) -> Path:
         "version": STATE_VERSION,
         "simulation_started_at_ms": int(state.simulation_started_at_ms),
         "simulation_starting_equity_usdt": float(state.simulation_starting_equity_usdt),
+        "simulation_drawdown_stop_active": bool(state.simulation_drawdown_stop_active),
         "simulation_processed_delta_keys": sorted(state.simulation_processed_delta_keys)[-MAX_PERSISTED_DELTA_KEYS:],
         "simulation_virtual_positions": _safe_position_payload(state.simulation_virtual_positions),
         "simulation_closed_positions": _safe_closed_positions_payload(state.simulation_closed_positions),
@@ -66,6 +67,7 @@ def _load_state_file(path: Path) -> UiState | None:
     state.simulation_started_at_ms = started
     if equity is not None and equity > 0:
         state.simulation_starting_equity_usdt = equity
+    state.simulation_drawdown_stop_active = bool(payload.get("simulation_drawdown_stop_active", False))
     keys = payload.get("simulation_processed_delta_keys")
     if isinstance(keys, list):
         state.simulation_processed_delta_keys = {str(item) for item in keys if item}

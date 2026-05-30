@@ -438,7 +438,10 @@ function renderSimulationOverview(payload) {
     ["P&L bot", formatUsd(equity.current_pnl_usdc ?? 0)],
     ["Capital", `${formatUsd(equity.current_equity_usdt ?? 1000)} USDT`],
     ["Latent", formatUsd(equity.unrealized_pnl_usdc ?? 0)],
-    ["Realise", formatUsd(equity.realized_pnl_usdc ?? 0)]
+    ["Realise", formatUsd(equity.realized_pnl_usdc ?? 0)],
+    ["Win Rate", `${payload.win_rate ?? 0}%`],
+    ["Profit Factor", payload.profit_factor ?? 0],
+    ["Max DD", `${payload.max_drawdown_pct ?? 0}%`]
   ];
   summary.innerHTML = metrics.map(([label, value]) => `
     <div class="simulation-metric">
@@ -461,6 +464,9 @@ function renderSimulationOverview(payload) {
     const connectionWarning = payload.connection_warning
       ? `<div class="simulation-live-pill red"><span>Connexion</span><strong>${escapeHtml(payload.connection_warning)}</strong></div>`
       : "";
+    const ddStop = payload.drawdown_stop_active
+      ? `<div class="simulation-live-pill red pulse"><span>Protection DD</span><strong>ACTIF (>10%)</strong></div>`
+      : "";
     liveStrip.innerHTML = `
       <div class="simulation-live-pill green">
         <span>Scan public read-only</span>
@@ -478,6 +484,7 @@ function renderSimulationOverview(payload) {
         <span>Dernier etat</span>
         <strong>${latestTrade ? `${escapeHtml(latestTrade.coin)} ${escapeHtml(formatUsd(latestTrade.notional_usdc || 0))}` : escapeHtml(lastReason)}</strong>
       </div>
+      ${ddStop}
       ${connectionWarning}
     `;
   }
