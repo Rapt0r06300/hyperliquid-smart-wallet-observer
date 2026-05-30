@@ -235,10 +235,18 @@ def store_public_trade_scan(
     promote_top: int = 50,
 ) -> PublicTradeScanResult:
     repo = CollectionRepository(session)
+
+    # Calculate latest event time from result.wallet_stats
+    last_event_ms = 0
+    for stats in result.wallet_stats.values():
+        if stats.last_seen_ms:
+            last_event_ms = max(last_event_ms, stats.last_seen_ms)
+
     repo.update_source_health(
         result.source,
         is_success=result.stopped_reason != "SOURCE_UNAVAILABLE",
         is_heartbeat=True,
+        event_timestamp_ms=last_event_ms if last_event_ms > 0 else None,
         error_message="; ".join(result.warnings) if result.warnings else None,
     )
 

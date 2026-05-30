@@ -40,11 +40,21 @@
           Vue principale volontairement reduite au resultat du bot simule. Le P&L demarre a 0, ignore les anciens evenements,
           et bouge seulement sur ouvertures/fermetures fraiches detectees apres le lancement. Aucun ordre, aucun mainnet.
         </p>
+        <div class="global-health-gauge" id="globalHealthGauge">
+          <div class="gauge-track">
+            <div class="gauge-fill" id="globalHealthFill" style="width: 0%"></div>
+          </div>
+          <div class="gauge-label">Sante Systemique: <span id="globalHealthScore">0</span>%</div>
+        </div>
         <div class="simulation-summary" id="simulationSummary">
           <div class="simulation-metric"><span>P&L bot</span><strong>$0.00</strong></div>
           <div class="simulation-metric"><span>Capital</span><strong>+$1000.00 USDT</strong></div>
           <div class="simulation-metric"><span>Latent</span><strong>$0.00</strong></div>
           <div class="simulation-metric"><span>Realise</span><strong>$0.00</strong></div>
+          <div class="simulation-metric blue"><span>Profit Factor</span><strong id="botProfitFactor">--</strong></div>
+          <div class="simulation-metric red"><span>Max DD</span><strong id="botMaxDD">$0.00</strong></div>
+          <div class="simulation-metric green"><span>Win Rate</span><strong id="botWinRate">0%</strong></div>
+          <div class="simulation-metric gray"><span>Avg Trade</span><strong id="botAvgTrade">$0.00</strong></div>
         </div>
         <div class="simulation-health-grid" id="simulationHealthGrid"></div>
         <div class="simulation-live-strip" id="simulationLiveStrip">

@@ -390,13 +390,20 @@ async def _record_call(
     on_success: Callable[[Any], Any] | None = None,
 ) -> None:
     started = now_ms()
+    # Standardize source names for health tracking
+    source_name = f"hyperliquid_info:{item_type}"
+    if item_type == "allMids":
+        source_name = "allMids"
+    elif item_type == "l2Book":
+        source_name = "l2Book"
+
     try:
         payload = await call()
     except Exception as exc:  # noqa: BLE001 - stored for audit instead of hidden.
         error_message = str(exc)
         result.errors_count += 1
         repo.update_source_health(
-            f"hyperliquid_info:{item_type}",
+            source_name,
             is_success=False,
             error_message=error_message,
             observed_latency_ms=now_ms() - started,
@@ -439,7 +446,7 @@ async def _record_call(
         status="ok",
     )
     repo.update_source_health(
-        f"hyperliquid_info:{item_type}",
+        source_name,
         is_success=True,
         observed_latency_ms=now_ms() - started,
         is_heartbeat=item_type in {"allMids", "l2Book"},

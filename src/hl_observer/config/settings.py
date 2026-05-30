@@ -160,6 +160,8 @@ class AdaptiveRiskFilterSettings(BaseModel):
     block_if_dca_toxic: bool = True
     block_if_data_stale: bool = True
     stale_threshold_seconds: int = 10
+    heartbeat_stale_threshold_seconds: int = 5
+    heartbeat_dead_threshold_seconds: int = 30
     dead_threshold_seconds: int = 60
     delayed_threshold_ms: int = 2000
     paper_max_size_usdc: float = 10.0

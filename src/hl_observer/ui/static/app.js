@@ -434,14 +434,19 @@ function renderSimulationOverview(payload) {
   const equity = payload.equity || {};
   const scanner = payload.scanner || {};
   const autopilot = payload.autopilot || {};
+  const botSimulation = payload.bot_simulation || payload.reproduction || {};
   const metrics = [
-    ["P&L bot", formatUsd(equity.current_pnl_usdc ?? 0)],
-    ["Capital", `${formatUsd(equity.current_equity_usdt ?? 1000)} USDT`],
-    ["Latent", formatUsd(equity.unrealized_pnl_usdc ?? 0)],
-    ["Realise", formatUsd(equity.realized_pnl_usdc ?? 0)]
+    ["P&L bot", formatUsd(equity.current_pnl_usdc ?? 0), ""],
+    ["Capital", `${formatUsd(equity.current_equity_usdt ?? 1000)} USDT`, ""],
+    ["Latent", formatUsd(equity.unrealized_pnl_usdc ?? 0), ""],
+    ["Realise", formatUsd(equity.realized_pnl_usdc ?? 0), ""],
+    ["Profit Factor", botSimulation.profit_factor ?? "--", "blue"],
+    ["Max DD", formatUsd(botSimulation.max_drawdown_usdc ?? 0), "red"],
+    ["Win Rate", `${botSimulation.win_rate ?? 0}%`, "green"],
+    ["Avg Trade", formatUsd(botSimulation.avg_trade_net_usdc ?? 0), "gray"]
   ];
-  summary.innerHTML = metrics.map(([label, value]) => `
-    <div class="simulation-metric">
+  summary.innerHTML = metrics.map(([label, value, extraClass]) => `
+    <div class="simulation-metric ${extraClass}">
       <span>${escapeHtml(label)}</span>
       <strong>${escapeHtml(value)}</strong>
     </div>
@@ -482,6 +487,14 @@ function renderSimulationOverview(payload) {
     `;
   }
 
+  const healthScore = $("#globalHealthScore");
+  const healthFill = $("#globalHealthFill");
+  if (healthScore && healthFill) {
+    const score = payload.bot_simulation?.global_health_score ?? 0;
+    healthScore.innerText = score;
+    healthFill.style.width = `${score}%`;
+    healthFill.style.backgroundColor = score > 80 ? "var(--cyan)" : score > 50 ? "var(--orange)" : "var(--red)";
+  }
   const healthGrid = $("#simulationHealthGrid");
   if (healthGrid && payload.source_health) {
     healthGrid.innerHTML = payload.source_health.map((h) => {
@@ -625,6 +638,7 @@ function renderSimulationOverview(payload) {
     <div class="feed-line"><span class="cyan">[AUTO]</span> ${escapeHtml(autopilot.job_a || "leaderboard")} -> ${escapeHtml(autopilot.job_b || "copy_loop")} -> ${escapeHtml(autopilot.job_c || "reports")} :: reproduction ${escapeHtml(autopilot.position_reproduction || "paper research only")}</div>
     <div class="feed-line"><span class="cyan">[CAPITAL]</span> depart ${escapeHtml(formatUsd(equity.starting_equity_usdt || 1000))} USDT :: actuel ${escapeHtml(formatUsd(equity.current_equity_usdt || 1000))} USDT</div>
     <div class="feed-line"><span class="cyan">[PNL]</span> source ${escapeHtml(equity.source || "local")} :: realise ${escapeHtml(formatUsd(equity.realized_pnl_usdc || 0))} :: latent ${escapeHtml(formatUsd(equity.unrealized_pnl_usdc || 0))} :: couts ${escapeHtml(formatUsd(equity.bot_costs_paid_usdc || 0))}</div>
+    <div class="feed-line"><span class="orange">[SHADOW]</span> perdu par refus (est. edge): ${escapeHtml(payload.bot_simulation?.shadow_lost_bps ?? 0)} bps :: shadow lost permet de verifier si le no-trade bloque trop d oportunites profitables.</div>
     <div class="feed-line"><span class="green">[HOLD]</span> une position virtuelle reste ouverte jusqu'a REDUCE/CLOSE leader correspondant; elle n'est jamais fermee uniquement parce que le latent est rouge.</div>
     <div class="feed-line"><span class="cyan">[ETAT]</span> ${escapeHtml(payload.readiness || "UNKNOWN")} :: ${escapeHtml(payload.message || "Simulation locale seulement.")}</div>
   `;
