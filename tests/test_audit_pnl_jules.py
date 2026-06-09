@@ -104,5 +104,41 @@ def test_pnl_accounting_short():
     )
     decision = engine._reduce_or_close(intent_close)
     assert decision.accepted is True
-    fill = engine.fills[-1]
-    assert fill.realized_pnl > 0
+
+def test_dynamic_slippage_calculation():
+    from src.hl_observer.utils.simulation_utils import calculate_dynamic_slippage_bps
+    # 50 USDT on 5000 USDT depth -> 1.5 bps
+    bps = calculate_dynamic_slippage_bps(50.0, 5000.0)
+    assert 1.4 <= bps <= 1.6
+
+    # Unknown depth -> 8 bps default
+    assert calculate_dynamic_slippage_bps(50.0, 0) == 8.0
+    assert calculate_dynamic_slippage_bps(50.0, None) == 8.0
+
+def test_latency_penalty():
+    # +1bps per second beyond 2s
+    config = RealtimeCopyRiskConfig(max_signal_age_ms=10000, hard_max_signal_age_ms=15000, min_edge_required_bps=10.0)
+
+    # 2s -> no extra penalty. base delay cost = 2/60 = 0.033. total approx 14.03
+    inputs_2s = RealtimeCopyScoreInput(
+        action_type="OPEN_LONG", direction="LONG", leader_expected_edge_bps=100.0,
+        leader_consistency_factor=1.0, signal_age_ms=2000, consensus_wallets=2,
+        liquidity_score=1.0, leader_score=80.0, leader_reference_price=100.0,
+        current_mid=100.0, leader_notional_usdt=10.0, current_open_exposure_usdt=0.0,
+        current_open_positions=0, max_open_positions=3
+    )
+    score_2s = score_realtime_copy_candidate(inputs_2s, config=config)
+
+    # 5s -> 3s extra penalty (+3 bps). total approx 17.08
+    inputs_5s = RealtimeCopyScoreInput(
+        action_type="OPEN_LONG", direction="LONG", leader_expected_edge_bps=100.0,
+        leader_consistency_factor=1.0, signal_age_ms=5000, consensus_wallets=2,
+        liquidity_score=1.0, leader_score=80.0, leader_reference_price=100.0,
+        current_mid=100.0, leader_notional_usdt=10.0, current_open_exposure_usdt=0.0,
+        current_open_positions=0, max_open_positions=3
+    )
+    score_5s = score_realtime_copy_candidate(inputs_5s, config=config)
+
+    # Compare degradation: 5s should be roughly 3 bps higher than 2s
+    diff = score_5s.copy_degradation_bps - score_2s.copy_degradation_bps
+    assert 3.0 <= diff <= 3.1

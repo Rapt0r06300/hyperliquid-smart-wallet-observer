@@ -33,20 +33,45 @@ class HyperliquidIndexerService:
         self._ws_task: asyncio.Task | None = None
 
     async def start(self, wallets: list[str]):
-        self.active_wallets = {w.lower() for w in wallets[:10]} # Limit 10 users as per HL rules
+        self._all_wallets = [w.lower() for w in wallets]
+        self.active_wallets = set(self._all_wallets[:10]) # Initial hot queue
         self._running = True
         self._ws_task = asyncio.create_task(self._ws_loop())
-        logger.info(f"Indexer started for {len(self.active_wallets)} wallets.")
+        self._rotation_task = asyncio.create_task(self._rotation_loop())
+        logger.info(f"Indexer started with {len(self._all_wallets)} total wallets, hot queue: {len(self.active_wallets)}.")
 
     async def stop(self):
         self._running = False
-        if self._ws_task:
-            self._ws_task.cancel()
-            try:
-                await self._ws_task
-            except asyncio.CancelledError:
-                pass
+        for task in (self._ws_task, self._rotation_task):
+            if task:
+                task.cancel()
+                try:
+                    await task
+                except asyncio.CancelledError:
+                    pass
         logger.info("Indexer stopped.")
+
+    async def _rotation_loop(self):
+        """Rotate the 10 hot wallets based on recent activity or score."""
+        while self._running:
+            await asyncio.sleep(300) # Rotate every 5 minutes
+            if len(self._all_wallets) <= 10:
+                continue
+
+            # Simple rotation for now: move current hot to back, pick next 10
+            # In a real perfect scan, we'd query WalletScoreModel for the top 10.
+            current_start = self._all_wallets.index(list(self.active_wallets)[0])
+            next_start = (current_start + 10) % len(self._all_wallets)
+            new_hot = set()
+            for i in range(10):
+                new_hot.add(self._all_wallets[(next_start + i) % len(self._all_wallets)])
+
+            if new_hot != self.active_wallets:
+                logger.info(f"Rotating hot queue. New wallets: {new_hot}")
+                self.active_wallets = new_hot
+                # Force WS reconnect to update subscriptions
+                if self._ws_task:
+                    self._ws_task.cancel()
 
     async def _ws_loop(self):
         while self._running:

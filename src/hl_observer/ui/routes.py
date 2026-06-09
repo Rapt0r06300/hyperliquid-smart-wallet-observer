@@ -383,6 +383,7 @@ def create_router(settings: Settings, state: UiState, bus: UiEventBus) -> APIRou
         deltas: list[PositionDeltaModel],
         *,
         mid_prices: dict[str, float] | None = None,
+        book_depths: dict[str, float] | None = None,
         starting_equity_usdt: float = 1000.0,
         max_position_notional_usdt: float = 50.0,
         max_open_positions: int = 6,
@@ -800,6 +801,29 @@ def create_router(settings: Settings, state: UiState, bus: UiEventBus) -> APIRou
                     )
                 )
 
+            def is_noisy_signal(row: PositionDeltaModel) -> bool:
+                leader_notional = abs(float(row.delta_notional_usdc or 0.0))
+                if leader_notional > 0 and leader_notional < 10.0:
+                    return True
+                return False
+
+            if is_noisy_signal(row):
+                event = {
+                    "delta_key": current_delta_key,
+                    "wallet_address": row.wallet_address,
+                    "coin": row.coin,
+                    "leader_action": copy_delta_action(row),
+                    "leader_side": copy_delta_direction(row, copy_delta_action(row)),
+                    "observed_at_ms": delta_event_time_ms(row),
+                    "bot_replay_action": "NO_TRADE",
+                    "status": "REFUSED",
+                    "reason": "MICRO_SIGNAL_NOISE_REJECTED",
+                    "research_only": True,
+                    "paper_mode": "PAPER_LOCAL_USDT_ONLY",
+                }
+                ledger_events.append(event)
+                continue
+
             if is_blacklisted_coin(row.coin):
                 event = {
                     "delta_key": current_delta_key,
@@ -863,6 +887,15 @@ def create_router(settings: Settings, state: UiState, bus: UiEventBus) -> APIRou
             leader_size = abs(float(row.delta_size or row.fill_size or 0.0))
             if action in {"OPEN_LONG", "OPEN_SHORT", "ADD", "INCREASE"} and metrics["decision_reason"] != "EDGE_OK_FOR_LOCAL_SIMULATION":
                 event["reason"] = str(metrics["decision_reason"])
+                # Shadow outcome tracking for rejected signals
+                current_mid = mid_prices.get(row.coin.upper())
+                if current_mid:
+                    # How much did we "save" or "miss" by not taking this?
+                    # Positive shadow_bps means the rejection was good (price moved against the direction)
+                    if direction == "LONG":
+                        event["shadow_outcome_bps"] = (row.price - current_mid) / row.price * 10000.0
+                    else:
+                        event["shadow_outcome_bps"] = (current_mid - row.price) / row.price * 10000.0
                 ledger_events.append(event)
                 continue
 
@@ -886,9 +919,20 @@ def create_router(settings: Settings, state: UiState, bus: UiEventBus) -> APIRou
                     event["requested_notional_usdt"] = round(desired_notional, 6)
                     ledger_events.append(event)
                     continue
-                size = desired_notional / float(row.price)
+                # Standardized entry price and PnL calculation with dynamic slippage
+                coin_depth = (book_depths or {}).get(row.coin.upper())
+                entry_price = get_entry_price(
+                    float(row.price), direction,
+                    spread_bps=3.0,
+                    slippage_bps=5.0,
+                    notional_usdt=desired_notional,
+                    book_depth_usdt=coin_depth
+                )
+
+                size = desired_notional / entry_price
                 notional = desired_notional
-                cost = notional * cost_bps / 10_000.0
+                # Fees: 4.0 bps entry + spread/slippage already in entry_price
+                cost = notional * 4.0 / 10_000.0
                 expected_net_edge_usdt = notional * safe_float(metrics.get("edge_remaining_bps"), 0.0) / 10_000.0
                 roundtrip_cost_estimate_usdt = cost * 2.0
                 # edge_remaining_bps is already net of fee/spread/slippage in
@@ -955,9 +999,9 @@ def create_router(settings: Settings, state: UiState, bus: UiEventBus) -> APIRou
                     continue
                 new_size = previous["size"] + size
                 avg_price = (
-                    ((previous["avg_price"] * previous["size"]) + (float(row.price) * size)) / new_size
+                    ((previous["avg_price"] * previous["size"]) + (entry_price * size)) / new_size
                     if new_size > 0
-                    else float(row.price)
+                    else entry_price
                 )
                 leader_wallets = csv_to_set(previous.get("leader_wallets_csv"))
                 leader_wallets.update(csv_to_set(metrics.get("consensus_wallets_csv")))
@@ -1072,13 +1116,21 @@ def create_router(settings: Settings, state: UiState, bus: UiEventBus) -> APIRou
                         close_size = min(previous["size"], (previous["size"] / remaining_count) * leader_reduce_fraction)
                 else:
                     close_size = previous["size"] if action.startswith("CLOSE") or size <= 0 else min(previous["size"], size)
-                # Standardized exit price and PnL calculation
-                exit_price = float(row.price)
+
+                # Standardized exit price and PnL calculation with dynamic slippage
+                coin_depth = (book_depths or {}).get(row.coin.upper())
+                close_notional = close_size * float(row.price)
+                exit_price = get_exit_price(
+                    float(row.price), direction,
+                    spread_bps=3.0,
+                    slippage_bps=5.0,
+                    notional_usdt=close_notional,
+                    book_depth_usdt=coin_depth
+                )
                 gross_pnl = calculate_gross_pnl(direction, previous["avg_price"], exit_price, close_size)
 
-                # Fees: 4.0 bps entry (already paid), 4.0 bps exit, 3.0 bps spread, 5.0 bps slippage
-                # Total cost model: 12.0 bps for the replayed event side.
-                exit_cost = close_size * exit_price * cost_bps / 10_000.0
+                # Fees: 4.0 bps exit + spread/slippage already in exit_price
+                exit_cost = close_size * exit_price * 4.0 / 10_000.0
 
                 # Total realized net PnL for this event:
                 # Entry fees were already subtracted at OPEN/ADD.
@@ -2142,6 +2194,16 @@ def create_router(settings: Settings, state: UiState, bus: UiEventBus) -> APIRou
             fills_count = fast_table_count(session, Fill)
             positions_count = fast_table_count(session, Position)
             open_orders_count = fast_table_count(session, OpenOrder)
+
+            recent_metrics = session.scalars(
+                select(MarketMetric)
+                .where(MarketMetric.computed_at_ms >= current_time_ms - 300_000)
+                .order_by(MarketMetric.computed_at_ms.desc())
+            ).all()
+            book_depths: dict[str, float] = {}
+            for m in recent_metrics:
+                if m.coin.upper() not in book_depths and m.depth_usdc:
+                    book_depths[m.coin.upper()] = float(m.depth_usdc)
         leaders = unique_top_wallets(leader_rows, limit=settings.copy_trading.top_leaders)
         leader_cards = [
             {
@@ -2337,6 +2399,7 @@ def create_router(settings: Settings, state: UiState, bus: UiEventBus) -> APIRou
         bot_simulation = build_bot_simulation(
             simulation_replay_deltas,
             mid_prices=mid_prices,
+            book_depths=book_depths,
             max_events=limit,
             now_timestamp_ms=current_time_ms,
             starting_equity_usdt=state.simulation_starting_equity_usdt,

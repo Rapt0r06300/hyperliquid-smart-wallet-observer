@@ -62,7 +62,14 @@ Les wallets de test (`0x111`, `0xaaaa`, etc.) polluent les statistiques "Live". 
 *   **Unification de la Logique** : Centralisation des calculs de PnL et de prix dans `src/hl_observer/utils/simulation_utils.py` pour garantir une cohérence parfaite entre le moteur, l'UI et les replays.
 *   **Comptabilité Stricte** : Révision des formules pour inclure systématiquement les coûts d'entrée alloués et les frais de sortie réels, éliminant les biais de "profit virtuel".
 
-## 6. ENGAGEMENT SÉCURITÉ
+## 6. AMÉLIORATIONS "ULTRA PERFECT SCAN"
+*   **Analyse de Profondeur L2** : Le slippage n'est plus fixe mais dynamique, basé sur la profondeur réelle du carnet (MarketMetric) et le notional simulé.
+*   **Pénalité de Latence Linéaire** : Ajout de +1 bps de coût par seconde d'âge du signal au-delà de 2 secondes, reflétant la dégradation réelle de l'edge.
+*   **Rotation de Hot Queue** : L'indexer surveille désormais 10 leaders en temps-réel via WebSocket avec une rotation automatique tous les 5 minutes pour couvrir tout l'univers des wallets actifs.
+*   **Shadow Signal Tracking** : Enregistrement systématique du `shadow_outcome_bps` pour les trades refusés afin de mesurer scientifiquement la qualité du filtrage "No-Trade".
+*   **Filtrage du Bruit** : Rejet automatique des micro-signaux (< 10 USDT) qui polluent les statistiques et génèrent des frais inutiles.
+
+## 7. ENGAGEMENT SÉCURITÉ
 *   **0 ORDRE RÉEL.**
 *   **0 SIGNATURE / CLÉ PRIVÉE.**
 *   **SIMULATION PAPER UNIQUEMENT.**

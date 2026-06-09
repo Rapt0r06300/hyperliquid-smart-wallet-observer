@@ -131,7 +131,13 @@ def score_realtime_copy_candidate(
     if liquidity_penalty_bps > 0:
         reasons.append("LIQUIDITY_TOO_LOW")
     single_wallet_penalty_bps = cfg.single_wallet_penalty_bps if inputs.consensus_wallets < 2 else 0.0
-    delay_cost_bps = min(cfg.max_latency_cost_bps, max(0, inputs.signal_age_ms) / 60_000.0 * cfg.latency_cost_bps_per_minute)
+
+    # Latency penalty: +1bps for every second beyond 2 seconds
+    extra_latency_penalty = 0.0
+    if inputs.signal_age_ms > 2000:
+        extra_latency_penalty = (inputs.signal_age_ms - 2000) / 1000.0
+
+    delay_cost_bps = min(cfg.max_latency_cost_bps, (max(0, inputs.signal_age_ms) / 60_000.0 * cfg.latency_cost_bps_per_minute) + extra_latency_penalty)
     copy_degradation_bps = (
         delay_cost_bps
         + cfg.spread_bps
