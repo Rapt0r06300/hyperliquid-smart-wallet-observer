@@ -15,6 +15,21 @@ class SimulationAction(StrEnum):
     CLOSE = "CLOSE"
 
 
+class SimulationRunMode(StrEnum):
+    LIVE = "LIVE"
+    BACKTEST = "BACKTEST"
+    REPLAY = "REPLAY"
+    TEST_FIXTURE = "TEST_FIXTURE"
+
+
+class SimulationSourceQuality(StrEnum):
+    FRESH = "FRESH"
+    STALE = "STALE"
+    REPLAY = "REPLAY"
+    FIXTURE = "FIXTURE"
+    UNKNOWN = "UNKNOWN"
+
+
 @dataclass(frozen=True, slots=True)
 class SimulationConfig:
     starting_equity: float = 1000.0
@@ -38,6 +53,8 @@ class SimulationIntent:
     requested_notional: float
     observed_at_ms: int
     signal_id: str
+    run_mode: SimulationRunMode = SimulationRunMode.LIVE
+    source_quality: SimulationSourceQuality = SimulationSourceQuality.UNKNOWN
 
 
 @dataclass(slots=True)

@@ -3,21 +3,26 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 
 from hyper_smart_observer.simulation.simulation_costs import apply_spread_and_slippage, fee_for_notional
+from hl_observer.utils.simulation_utils import calculate_gross_pnl, get_exit_price
 from hyper_smart_observer.simulation.simulation_models import (
     SimulationAction,
     SimulationConfig,
     SimulationDecision,
     SimulationFill,
     SimulationIntent,
+    SimulationRunMode,
     SimulationSide,
+    SimulationSourceQuality,
 )
 from hyper_smart_observer.simulation.virtual_portfolio import VirtualPortfolio
 from hyper_smart_observer.simulation.virtual_position import VirtualPosition
+from hl_observer.utils.time import now_ms
 
 
 @dataclass(slots=True)
 class SimulationEngine:
     config: SimulationConfig = field(default_factory=SimulationConfig)
+    hard_max_signal_age_ms: int = 8000
     portfolio: VirtualPortfolio = field(init=False)
     fills: list[SimulationFill] = field(default_factory=list)
     decisions: list[SimulationDecision] = field(default_factory=list)
@@ -29,6 +34,14 @@ class SimulationEngine:
         )
 
     def apply(self, intent: SimulationIntent) -> SimulationDecision:
+        if intent.coin and any(t in intent.coin.upper() for t in ("CASH:", "XYZ:", "@", "HYNA:", "FLX:", "KM:", "VNTL:")):
+             return self._reject("COIN_BLACKLISTED", f"Coin {intent.coin} is blacklisted or exotic.")
+
+        if intent.run_mode == SimulationRunMode.LIVE:
+            age_ms = now_ms() - intent.observed_at_ms
+            if age_ms > self.hard_max_signal_age_ms:
+                 return self._reject("HARD_STALE_SIGNAL", f"Signal age {age_ms}ms exceeds limit {self.hard_max_signal_age_ms}ms.")
+
         if intent.reference_price <= 0:
             return self._reject("PRICE_INVALID", "Reference price must be positive.")
         if intent.requested_notional <= 0:
@@ -88,13 +101,18 @@ class SimulationEngine:
         position = self.portfolio.positions.get(position_id)
         if position is None:
             return self._reject("NO_MATCHING_VIRTUAL_POSITION", "No matching local virtual position exists for this close/reduce.")
-        exit_price = apply_spread_and_slippage(intent.reference_price, SimulationSide.SHORT if position.side == SimulationSide.LONG else SimulationSide.LONG, self.config.spread_bps, self.config.slippage_bps)
+
+        exit_price = get_exit_price(intent.reference_price, position.side.value, self.config.spread_bps, self.config.slippage_bps)
+
         close_notional = position.notional if intent.action == SimulationAction.CLOSE else min(position.notional, intent.requested_notional)
         close_ratio = min(1.0, close_notional / position.notional) if position.notional > 0 else 1.0
         closing_size = position.size * close_ratio
-        gross_pnl = (exit_price - position.entry_price) * closing_size if position.side == SimulationSide.LONG else (position.entry_price - exit_price) * closing_size
+        gross_pnl = calculate_gross_pnl(position.side.value, position.entry_price, exit_price, closing_size)
         fee = fee_for_notional(close_notional, self.config.fee_bps)
         net_pnl = gross_pnl - fee
+        # realized_pnl in VirtualPortfolio should ideally track gross realized,
+        # while current_equity handles the total fees.
+        # This matches the existing test expectation.
         self.portfolio.realized_pnl += gross_pnl
         self.portfolio.total_fees += fee
         position.notional -= close_notional

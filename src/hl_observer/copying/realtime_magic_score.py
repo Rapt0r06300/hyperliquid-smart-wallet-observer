@@ -7,8 +7,9 @@ from dataclasses import dataclass, field
 class RealtimeCopyRiskConfig:
     """Pessimistic local scoring config for realtime copy simulation only."""
 
-    min_edge_required_bps: float = 25.0
+    min_edge_required_bps: float = 30.0
     max_signal_age_ms: int = 4_000
+    hard_max_signal_age_ms: int = 8_000
     fee_bps: float = 4.0
     spread_bps: float = 3.0
     slippage_bps: float = 5.0
@@ -106,7 +107,9 @@ def score_realtime_copy_candidate(
         reasons.append("MAX_OPEN_PAPER_TRADES_REACHED")
 
     freshness = freshness_factor(inputs.signal_age_ms, cfg.max_signal_age_ms)
-    if inputs.signal_age_ms > cfg.max_signal_age_ms:
+    if inputs.signal_age_ms > cfg.hard_max_signal_age_ms:
+        reasons.append("HARD_STALE_SIGNAL")
+    elif inputs.signal_age_ms > cfg.max_signal_age_ms:
         reasons.append("STALE_SIGNAL")
 
     current_mid = inputs.current_mid if inputs.current_mid and inputs.current_mid > 0 else inputs.leader_reference_price
@@ -155,9 +158,12 @@ def score_realtime_copy_candidate(
         * consensus_factor
         - copy_degradation_bps
     )
-    if edge_remaining_bps < cfg.min_edge_required_bps:
-        reasons.append("EDGE_REMAINING_TOO_LOW")
-    if inputs.consensus_wallets < 2 and edge_remaining_bps < cfg.single_wallet_min_edge_required_bps:
+    # Requirement: edge_remaining_bps >= max(30 bps, 3x total_cost_bps)
+    min_required_bps = max(cfg.min_edge_required_bps, 3.0 * copy_degradation_bps)
+
+    if edge_remaining_bps < min_required_bps:
+        reasons.append("EDGE_REMAINING_TOO_LOW_VS_COSTS")
+    if inputs.consensus_wallets < 2 and edge_remaining_bps < max(min_required_bps, cfg.single_wallet_min_edge_required_bps):
         reasons.append("SINGLE_WALLET_EDGE_TOO_LOW")
     if edge_remaining_bps <= 0:
         warnings.append("EDGE_NON_POSITIVE_AFTER_COSTS")

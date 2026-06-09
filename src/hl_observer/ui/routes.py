@@ -106,6 +106,7 @@ from hl_observer.wallets.delta_utils import (
     copy_delta_direction,
     delta_event_time_ms,
 )
+from hl_observer.utils.simulation_utils import calculate_gross_pnl, get_exit_price
 
 
 def create_router(settings: Settings, state: UiState, bus: UiEventBus) -> APIRouter:
@@ -159,12 +160,10 @@ def create_router(settings: Settings, state: UiState, bus: UiEventBus) -> APIRou
         return value if value > 0 else None
 
     def simulation_max_signal_age_ms() -> int:
+        # For LIVE mode, we now use strict 4000ms.
+        # For BACKTEST/REPLAY, we can be more flexible.
         configured = safe_int_env("HYPERSMART_SIMULATION_MAX_SIGNAL_AGE_MS")
-        # The consensus window remains capped at 4s, but the local simulator has
-        # to survive a bounded read-only loop (WS -> SQLite -> UI). A 5s global
-        # threshold made most legitimate local observations look stale before the
-        # simulator could inspect them. Delay still reduces edge_remaining_bps.
-        return max(1_000, min(300_000, configured or 120_000))
+        return max(1_000, min(300_000, configured or 4_000))
 
     def is_live_detected_delta_source(source: str | None) -> bool:
         normalized = str(source or "").lower()
@@ -405,19 +404,28 @@ def create_router(settings: Settings, state: UiState, bus: UiEventBus) -> APIRou
         an order or a recommendation.
         """
 
-        def encode_position_key(wallet: str, coin: str, direction: str) -> str:
-            return f"{wallet.lower()}|{coin.upper()}|{direction.upper()}"
+        def encode_position_key(wallet: str, coin: str, direction: str, mode: str = "LIVE") -> str:
+            return f"{mode.upper()}|{wallet.lower()}|{coin.upper()}|{direction.upper()}"
 
-        def decode_position_key(value: str) -> tuple[str, str, str] | None:
+        def decode_position_key(value: str) -> tuple[str, str, str, str] | None:
             parts = value.split("|")
-            if len(parts) != 3:
+            if len(parts) == 3: # Backward compatibility
+                 return "LIVE", parts[0].lower(), parts[1].upper(), parts[2].upper()
+            if len(parts) != 4:
                 return None
-            return parts[0].lower(), parts[1].upper(), parts[2].upper()
+            return parts[0].upper(), parts[1].lower(), parts[2].upper(), parts[3].upper()
 
         def csv_to_set(value: Any) -> set[str]:
             if not isinstance(value, str) or not value:
                 return set()
             return {item.strip().lower() for item in value.split(",") if item.strip()}
+
+        def is_fake_wallet(address: str) -> bool:
+            addr = address.lower()
+            return any(
+                token in addr
+                for token in ("0x111", "0xaaa", "0xbbb", "0xccc", "0xddd", "0xeee", "0xfff")
+            )
 
         def set_to_csv(values: set[str]) -> str:
             return ",".join(sorted(value.lower() for value in values if value))
@@ -452,6 +460,7 @@ def create_router(settings: Settings, state: UiState, bus: UiEventBus) -> APIRou
             decoded = decode_position_key(str(raw_key))
             if decoded is None or not isinstance(raw_position, dict):
                 continue
+            run_mode, wallet_addr, coin, direction = decoded
             source_delta_key = str(raw_position.get("source_delta_key") or "")
             opened_at_ms = raw_position.get("opened_at_ms")
             if (
@@ -462,10 +471,10 @@ def create_router(settings: Settings, state: UiState, bus: UiEventBus) -> APIRou
                 maintenance_events.append(
                     {
                         "delta_key": f"maintenance:drop_orphan:{raw_key}",
-                        "wallet_address": raw_position.get("wallet_address") or decoded[0],
-                        "coin": raw_position.get("coin") or decoded[1],
+                        "wallet_address": raw_position.get("wallet_address") or wallet_addr,
+                        "coin": raw_position.get("coin") or coin,
                         "leader_action": "MAINTENANCE",
-                        "leader_side": raw_position.get("direction") or decoded[2],
+                        "leader_side": raw_position.get("direction") or direction,
                         "observed_at_ms": current_ms,
                         "bot_replay_action": "STATE_CLEANUP",
                         "status": "REFUSED",
@@ -477,7 +486,7 @@ def create_router(settings: Settings, state: UiState, bus: UiEventBus) -> APIRou
                     }
                 )
                 continue
-            positions[decoded] = {
+            positions[(run_mode, wallet_addr, coin, direction)] = {
                 "size": float(raw_position.get("size") or 0.0),
                 "avg_price": float(raw_position.get("avg_price") or 0.0),
                 "entry_costs": float(raw_position.get("entry_costs") or 0.0),
@@ -513,7 +522,8 @@ def create_router(settings: Settings, state: UiState, bus: UiEventBus) -> APIRou
             fee_bps=4.0,
             spread_bps=3.0,
             slippage_bps=5.0,
-            max_signal_age_ms=max_signal_age_ms,
+            max_signal_age_ms=4_000,
+            hard_max_signal_age_ms=8_000,
             min_liquidity_score=float(os.environ.get("HYPERSMART_SIMULATION_MIN_LIQUIDITY_SCORE", "0.35")),
             max_copy_degradation_bps=float(os.environ.get("HYPERSMART_SIMULATION_MAX_COPY_DEGRADATION_BPS", "18.0")),
             max_price_deviation_bps=float(os.environ.get("HYPERSMART_SIMULATION_MAX_PRICE_DEVIATION_BPS", "8.0")),
@@ -539,20 +549,26 @@ def create_router(settings: Settings, state: UiState, bus: UiEventBus) -> APIRou
             return exchange_at or detected_at
 
         def current_open_exposure_usdt() -> float:
-            return sum(abs(position["size"] * position["avg_price"]) for position in positions.values())
+            return sum(
+                abs(pos["size"] * pos["avg_price"])
+                for (mode, _, _, _), pos in positions.items()
+                if mode == "LIVE"
+            )
 
         def new_realized_net_pnl_so_far() -> float:
             return sum(
                 float(row.get("estimated_net_pnl_usdc") or 0.0)
                 for row in ledger_events[initial_ledger_length:]
                 if row.get("status") == "LOCAL_REPLAY"
+                and row.get("run_mode") == "LIVE"
+                and row.get("source_quality") == "FRESH"
             )
 
         def simulated_equity_so_far() -> float:
             return starting_equity_usdt + float(existing_realized_pnl_usdc or 0.0) + new_realized_net_pnl_so_far()
 
-        coin_loss_cooldown_usdc = max(0.35, starting_equity_usdt * 0.0005)
-        leader_loss_cooldown_usdc = max(0.25, starting_equity_usdt * 0.00035)
+        coin_loss_cooldown_usdc = max(0.20, starting_equity_usdt * 0.0002)
+        leader_loss_cooldown_usdc = max(0.15, starting_equity_usdt * 0.00015)
 
         def session_pnl_for(*, coin: str | None = None, wallet: str | None = None) -> float:
             pnl = 0.0
@@ -572,14 +588,26 @@ def create_router(settings: Settings, state: UiState, bus: UiEventBus) -> APIRou
             return pnl
 
         def adaptive_session_risk_reason(row: PositionDeltaModel, metrics: dict[str, float | int | str]) -> str | None:
-            if int(metrics.get("consensus_wallets") or 0) >= 3:
-                return None
+            consensus_count = int(metrics.get("consensus_wallets") or 0)
+            # Consensus entries bypass small loss cooldowns, but not heavy ones
+            if consensus_count >= 3:
+                 heavy_multiplier = 3.0
+            else:
+                 heavy_multiplier = 1.0
+
             coin_pnl = session_pnl_for(coin=row.coin)
             wallet_pnl = session_pnl_for(wallet=row.wallet_address)
-            if coin_pnl <= -coin_loss_cooldown_usdc:
+
+            if coin_pnl <= -(coin_loss_cooldown_usdc * heavy_multiplier):
                 return "COIN_SESSION_LOSS_COOLDOWN"
-            if wallet_pnl <= -leader_loss_cooldown_usdc:
+            if wallet_pnl <= -(leader_loss_cooldown_usdc * heavy_multiplier):
                 return "LEADER_SESSION_LOSS_COOLDOWN"
+
+            # Whitelist major assets for solo entries
+            major_coins = {"BTC", "ETH", "SOL", "HYPE"}
+            if consensus_count < 2 and str(row.coin).upper() not in major_coins:
+                return "NON_MAJOR_COIN_SOLO_FORBIDDEN"
+
             return None
 
         def consensus_snapshot(row: PositionDeltaModel, direction: str) -> dict[str, Any]:
@@ -635,16 +663,17 @@ def create_router(settings: Settings, state: UiState, bus: UiEventBus) -> APIRou
             direction: str,
             action: str,
             metrics: dict[str, float | int | str] | None = None,
-        ) -> tuple[str, str, str]:
-            wallet_key = (row.wallet_address.lower(), row.coin.upper(), direction)
+        ) -> tuple[str, str, str, str]:
+            mode = getattr(row, "run_mode", "LIVE")
+            wallet_key = (mode, row.wallet_address.lower(), row.coin.upper(), direction)
             if action in {"OPEN_LONG", "OPEN_SHORT", "ADD", "INCREASE"}:
                 if int((metrics or {}).get("consensus_wallets") or 0) >= 2:
-                    return ("__consensus__", row.coin.upper(), direction)
+                    return (mode, "__consensus__", row.coin.upper(), direction)
                 return wallet_key
             if action in {"REDUCE", "CLOSE_LONG", "CLOSE_SHORT"}:
                 if wallet_key in positions:
                     return wallet_key
-                consensus_key = ("__consensus__", row.coin.upper(), direction)
+                consensus_key = (mode, "__consensus__", row.coin.upper(), direction)
                 previous = positions.get(consensus_key)
                 if previous is not None:
                     leader_wallets = csv_to_set(previous.get("leader_wallets_csv"))
@@ -740,7 +769,7 @@ def create_router(settings: Settings, state: UiState, bus: UiEventBus) -> APIRou
                 continue
             processed_keys.add(current_delta_key)
 
-            if row.coin and row.coin.upper() in (settings.market_universe.excluded_coins or []):
+            if is_fake_wallet(row.wallet_address):
                 event = {
                     "delta_key": current_delta_key,
                     "wallet_address": row.wallet_address,
@@ -750,7 +779,38 @@ def create_router(settings: Settings, state: UiState, bus: UiEventBus) -> APIRou
                     "observed_at_ms": delta_event_time_ms(row),
                     "bot_replay_action": "NO_TRADE",
                     "status": "REFUSED",
-                    "reason": "COIN_BLACKLISTED",
+                    "reason": "FAKE_WALLET_BLACKLISTED",
+                    "research_only": True,
+                    "paper_mode": "PAPER_LOCAL_USDT_ONLY",
+                }
+                ledger_events.append(event)
+                continue
+
+            def is_blacklisted_coin(coin: str | None) -> bool:
+                if not coin:
+                    return True
+                c = coin.upper()
+                if c in (settings.market_universe.excluded_coins or []):
+                    return True
+                return any(
+                    token in c
+                    for token in (
+                        "CASH:", "XYZ:", "@", "HYNA:", "FLX:", "KM:", "VNTL:",
+                        "WTI", "OIL", "CL", "MU", "PURRDAT", "VVV"
+                    )
+                )
+
+            if is_blacklisted_coin(row.coin):
+                event = {
+                    "delta_key": current_delta_key,
+                    "wallet_address": row.wallet_address,
+                    "coin": row.coin,
+                    "leader_action": copy_delta_action(row),
+                    "leader_side": copy_delta_direction(row, copy_delta_action(row)),
+                    "observed_at_ms": delta_event_time_ms(row),
+                    "bot_replay_action": "NO_TRADE",
+                    "status": "REFUSED",
+                    "reason": "COIN_BLACKLISTED_OR_EXOTIC",
                     "research_only": True,
                     "paper_mode": "PAPER_LOCAL_USDT_ONLY",
                 }
@@ -776,6 +836,8 @@ def create_router(settings: Settings, state: UiState, bus: UiEventBus) -> APIRou
                 "reason": None,
                 "research_only": True,
                 "paper_mode": "PAPER_LOCAL_USDT_ONLY",
+                "run_mode": getattr(row, "run_mode", "LIVE"),
+                "source_quality": getattr(row, "source_quality", "UNKNOWN"),
             }
             if action == "UNKNOWN" or direction is None:
                 event["reason"] = "UNKNOWN_DELTA"
@@ -787,6 +849,13 @@ def create_router(settings: Settings, state: UiState, bus: UiEventBus) -> APIRou
                 continue
 
             metrics = opportunity_metrics(row, direction)
+            # Re-check age for LIVE mode specifically
+            if event.get("run_mode") == "LIVE":
+                if (metrics.get("signal_age_ms") or 0) > 8000:
+                     event["reason"] = "HARD_STALE_SIGNAL_REJECTED"
+                     ledger_events.append(event)
+                     continue
+
             key = position_key_for_row(row, direction, action, metrics)
             event.update(metrics)
             event["matched_position_key"] = encode_position_key(*key)
@@ -864,7 +933,7 @@ def create_router(settings: Settings, state: UiState, bus: UiEventBus) -> APIRou
                     ledger_events.append(event)
                     continue
                 signal_age_for_join = (
-                    max_signal_age_ms + 1
+                    999_999
                     if signal_age_value is None
                     else int(signal_age_value)
                 )
@@ -873,7 +942,7 @@ def create_router(settings: Settings, state: UiState, bus: UiEventBus) -> APIRou
                     and action in {"ADD", "INCREASE"}
                     and previous["size"] <= 0
                     and int(metrics.get("consensus_wallets") or 0) >= 3
-                    and signal_age_for_join <= max_signal_age_ms
+                    and signal_age_for_join <= 4000  # Strict 4s for ADD as Entry
                     and metrics.get("decision_reason") == "EDGE_OK_FOR_LOCAL_SIMULATION"
                 )
                 if action in {"ADD", "INCREASE"} and previous["size"] <= 0 and not join_add_as_entry:
@@ -961,6 +1030,9 @@ def create_router(settings: Settings, state: UiState, bus: UiEventBus) -> APIRou
                 previous = positions.get(key)
                 if previous is None or previous["size"] <= 0:
                     event["reason"] = "NO_MATCHING_PAPER_POSITION_FOR_CLOSE"
+                    # Store as orphan close if it was a close action
+                    if action.startswith("CLOSE"):
+                         event["bot_replay_action"] = "ORPHAN_CLOSE_RECORDED"
                     ledger_events.append(event)
                     continue
                 signal_age_for_exit = (
@@ -1000,14 +1072,17 @@ def create_router(settings: Settings, state: UiState, bus: UiEventBus) -> APIRou
                         close_size = min(previous["size"], (previous["size"] / remaining_count) * leader_reduce_fraction)
                 else:
                     close_size = previous["size"] if action.startswith("CLOSE") or size <= 0 else min(previous["size"], size)
-                if direction == "LONG":
-                    gross_pnl = (float(row.price) - previous["avg_price"]) * close_size
-                else:
-                    gross_pnl = (previous["avg_price"] - float(row.price)) * close_size
-                exit_cost = close_size * float(row.price) * cost_bps / 10_000.0
-                allocated_entry_cost = previous["entry_costs"] * (close_size / previous["size"])
-                # Entry costs are recorded when a virtual entry is opened; close events
-                # only subtract exit costs to avoid double-counting fees in the graph.
+                # Standardized exit price and PnL calculation
+                exit_price = float(row.price)
+                gross_pnl = calculate_gross_pnl(direction, previous["avg_price"], exit_price, close_size)
+
+                # Fees: 4.0 bps entry (already paid), 4.0 bps exit, 3.0 bps spread, 5.0 bps slippage
+                # Total cost model: 12.0 bps for the replayed event side.
+                exit_cost = close_size * exit_price * cost_bps / 10_000.0
+
+                # Total realized net PnL for this event:
+                # Entry fees were already subtracted at OPEN/ADD.
+                # Here we only subtract the exit portion costs.
                 net_pnl = gross_pnl - exit_cost
                 remaining_size = max(0.0, previous["size"] - close_size)
                 if remaining_size <= 1e-12:
@@ -1062,21 +1137,24 @@ def create_router(settings: Settings, state: UiState, bus: UiEventBus) -> APIRou
         unrealized_pnl = 0.0
         open_exposure_usdt = 0.0
         persisted_positions: dict[str, dict[str, Any]] = {}
-        for (wallet, coin, direction), position in positions.items():
+        for (run_mode, wallet, coin, direction), position in positions.items():
             mark_price = mid_prices.get(coin)
             if mark_price is None:
                 mark_price = position["avg_price"]
             position_notional = abs(position["size"] * mark_price)
-            open_exposure_usdt += position_notional
+            if run_mode == "LIVE":
+                open_exposure_usdt += position_notional
             if direction == "LONG":
                 gross_unrealized = (mark_price - position["avg_price"]) * position["size"]
             else:
                 gross_unrealized = (position["avg_price"] - mark_price) * position["size"]
             exit_cost_estimate = abs(position["size"] * mark_price) * cost_bps / 10_000.0
             net_unrealized = gross_unrealized - exit_cost_estimate
-            unrealized_pnl += net_unrealized
+            if run_mode == "LIVE":
+                unrealized_pnl += net_unrealized
             open_positions.append(
                 {
+                    "run_mode": run_mode,
                     "wallet_address": wallet,
                     "coin": coin,
                     "direction": direction,
@@ -1094,7 +1172,8 @@ def create_router(settings: Settings, state: UiState, bus: UiEventBus) -> APIRou
                     "research_only": True,
                 }
             )
-            persisted_positions[encode_position_key(wallet, coin, direction)] = {
+            persisted_positions[encode_position_key(wallet, coin, direction, mode=run_mode)] = {
+                "run_mode": run_mode,
                 "wallet_address": wallet,
                 "coin": coin,
                 "direction": direction,
@@ -1125,7 +1204,17 @@ def create_router(settings: Settings, state: UiState, bus: UiEventBus) -> APIRou
             for row in new_ledger_events
             if row.get("status") == "LOCAL_REPLAY"
         )
-        realized_net_pnl = float(existing_realized_pnl_usdc or 0.0) + new_realized_delta
+        def live_realized_net_pnl_so_far() -> float:
+            return sum(
+                float(row.get("estimated_net_pnl_usdc") or 0.0)
+                for row in ledger_events
+                if row.get("status") == "LOCAL_REPLAY"
+                and row.get("run_mode") == "LIVE"
+                and row.get("source_quality") == "FRESH"
+                and not is_fake_wallet(str(row.get("wallet_address") or ""))
+            )
+
+        realized_net_pnl = live_realized_net_pnl_so_far()
         new_entry_costs_paid = sum(
             float(row.get("fee_cost_usdc") or 0.0)
             for row in new_ledger_events
@@ -1151,6 +1240,7 @@ def create_router(settings: Settings, state: UiState, bus: UiEventBus) -> APIRou
         reproduced_entries = int(existing_reproduced_entries_total or 0) + new_reproduced_entries
         reproduced_exits = int(existing_reproduced_exits_total or 0) + new_reproduced_exits
         refused = sum(1 for row in ledger_events if row.get("status") == "REFUSED")
+        # For overall dashboard, we show the live filtered PnL
         total_pnl = realized_net_pnl + unrealized_pnl
         current_equity_usdt = starting_equity_usdt + total_pnl
         free_equity_usdt = current_equity_usdt - open_exposure_usdt

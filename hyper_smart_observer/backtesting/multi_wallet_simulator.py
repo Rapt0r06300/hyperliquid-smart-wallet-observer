@@ -129,8 +129,11 @@ def simulate_wallet_following_from_fills(
         if leader_notional <= 0:
             skipped += 1
             continue
+        # Use bps-based replay to maintain leader edge proportions
         pnl_bps = closed_pnl / leader_notional * 10_000.0
         gross = notional_per_trade * pnl_bps / 10_000.0
+
+        # Standardized accounting: subtract all replayed trip costs
         net = gross - per_trade_cost
         gross_values.append(gross)
         net_values.append(net)
