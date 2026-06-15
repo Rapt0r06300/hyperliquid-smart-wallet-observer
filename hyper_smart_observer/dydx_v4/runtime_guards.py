@@ -4,6 +4,11 @@ import random
 import time
 from typing import Any
 
+try:
+    import hyper_smart_observer.dydx_v4.fast_scan_whale_patch  # noqa: F401
+except Exception:
+    pass
+
 
 def correlated_count_reason(observer: Any, market: str, side: str) -> str | None:
     if not getattr(observer.config, "correlation_gate_enabled", True):
