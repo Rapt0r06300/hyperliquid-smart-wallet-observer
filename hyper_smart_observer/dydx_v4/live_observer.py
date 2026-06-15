@@ -1244,12 +1244,23 @@ class DydxLiveObserver:
             return
 
         pos = self._open_positions[pos_key]
-        # Anti-churn: hold minimum avant de fermer sur sortie leader (évite le
-        # flip-flop 1-2 s). Défaut 5 s ; si risk_policy actif → min_hold_seconds.
+
+        # Mode DEMO: la rotation synthétique (tick-12) est artificielle.
+        # Ne pas déclencher LEADER_EXIT — laisser SL/TP/TIME_STOP gérer les exits.
+        # Sans ce guard, chaque rotation ferme la position avant qu'elle
+        # ait eu le temps de compenser les coûts d'entrée (spread + slippage).
+        if pos.data_source == DATA_SOURCE_DEMO:
+            logger.debug(
+                "LEADER_EXIT skip (demo synthetic position %s): laissé aux SL/TP", pos_key
+            )
+            return
+
+        # Anti-churn: hold minimum avant de fermer sur sortie leader.
+        # 60 s par défaut (couvrir les frais d'entrée spread+slippage ≈ 0.5%).
+        # Configurable via min_hold_seconds. Avant ce délai, on ignore la
+        # sortie leader et laisse SL/TP/TIME_STOP gérer l'exit.
         age_ms = int(time.time() * 1000) - pos.opened_at_ms
-        min_hold_ms = 5_000
-        if self._risk_breaker is not None:
-            min_hold_ms = int(getattr(self.config, "min_hold_seconds", 5.0) * 1000)
+        min_hold_ms = int(getattr(self.config, "min_hold_seconds", 60.0) * 1000)
         if age_ms < min_hold_ms:
             logger.debug("LEADER_EXIT skip (hold %dms < %dms): %s", age_ms, min_hold_ms, pos_key)
             return
@@ -2037,22 +2048,4 @@ class DydxLiveObserver:
 
     def _close_paper_position(self, pos_key: str, exit_price: float, reason: str) -> None:
         """Clôturer une position paper et mettre à jour les stats."""
-        pos = self._open_positions.pop(pos_key, None)
-        if not pos:
-            return
-
-        gross_pnl = pos.calculate_pnl(exit_price)
-        exit_fee = pos.size * (TAKER_FEE_BPS / 10_000)
-        net_pnl = gross_pnl - exit_fee
-
-        self.stats.total_net_pnl_usdc += net_pnl
-        self.stats.total_fees_paid += exit_fee
-        self.stats.positions_closed += 1
-
-        if net_pnl > 0:
-            self.stats.winning_trades += 1
-        else:
-            self.stats.losing_trades += 1
-
-        # Politique de risque (opt-in): alimenter le coupe-circuit + cooldown
-        if self._risk_br
+        pos = self._open_position
