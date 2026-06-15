@@ -37,4 +37,20 @@ def neutral_demo_price(existing: float, base: float, seed_seconds: int | None = 
     return round(price, 4)
 
 
-__all__ = ["correlated_count_reason", "neutral_demo_price"]
+def next_pyramid_index(open_positions: dict, market: str, side: str) -> int:
+    prefix = f"{market}:{side}:add"
+    used: set[int] = set()
+    for key in open_positions:
+        text = str(key)
+        if text.startswith(prefix):
+            try:
+                used.add(int(text[len(prefix):]))
+            except ValueError:
+                continue
+    idx = 1
+    while idx in used:
+        idx += 1
+    return idx
+
+
+__all__ = ["correlated_count_reason", "neutral_demo_price", "next_pyramid_index"]
