@@ -6,6 +6,7 @@ au live observer, derrière le flag `DYDX_FAST_SCANNER`.
 
 Apport quand activé :
 - abonne en WebSocket les wallets shortlistés ;
+- désabonne les wallets évincés si le client WS le supporte ;
 - détecte en < 1 s quels wallets viennent de trader ;
 - expose `wallets_that_just_moved()` ;
 - expose les diagnostics WS pour savoir si le flux est réellement vivant.
@@ -17,6 +18,7 @@ agrégation. Un fill n'est jamais un ordre.
 from __future__ import annotations
 
 import logging
+from types import MethodType
 from typing import Optional
 
 from hyper_smart_observer.dydx_v4.fast_scanner import DEFAULT_MAX_AGE_MS, FastScanner
@@ -41,11 +43,26 @@ class FastScanIntegration:
         self.harvester = harvester or WalletHarvester(max_track=hot_capacity)
         self._ws = ws_client
         self._cosmos_enabled = False
+        self._wire_unsubscribe()
         if ws_client is not None:
             try:
                 ws_client._on_message_cb = self.note_ws_message
             except Exception as e:  # pragma: no cover - dépend de l'impl WS
                 logger.debug("hook WS échec (ignoré): %s", e)
+
+    def _wire_unsubscribe(self) -> None:
+        """Brancher l'unsubscribe réel si le client WS le supporte."""
+        ws = self._ws
+        if ws is None or not hasattr(ws, "unsubscribe_subaccount"):
+            return
+
+        def _unsubscribe(scanner_self, address: str) -> None:
+            try:
+                ws.unsubscribe_subaccount(address, 0)
+            except Exception as e:  # pragma: no cover - dépend réseau
+                logger.debug("unsubscribe %s échec: %s", address[:12], e)
+
+        self.scanner._unsubscribe = MethodType(_unsubscribe, self.scanner)
 
     def note_ws_message(self, msg) -> None:
         """Pousser un message WS dans le scanner."""
@@ -113,6 +130,9 @@ class FastScanIntegration:
         s = self.scanner.stats()
         s["harvested_addresses"] = len(self.harvester.index)
         s["ws_attached"] = self._ws is not None
+        s["ws_unsubscribe_wired"] = bool(
+            self._ws is not None and hasattr(self._ws, "unsubscribe_subaccount")
+        )
         if self._ws is not None:
             try:
                 diag = self._ws.diagnostics()
