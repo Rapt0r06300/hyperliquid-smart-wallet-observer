@@ -144,6 +144,8 @@ class DydxEngine:
         self._observer: Optional[DydxLiveObserver] = None
         self._thread: Optional[threading.Thread] = None
         self._lock = threading.Lock()
+        self._realtime_lock = threading.Lock()
+        self._last_realtime_price_refresh_ms = 0
         self._status = EngineStatus(
             network=str(self._config.network.value)
             if hasattr(self._config.network, "value")
@@ -263,10 +265,103 @@ class DydxEngine:
             return []
         return list(self._observer._closed_trades[-limit:])
 
+    def get_recent_decisions(self, limit: int = 100, event_type: str | None = None) -> list[dict]:
+        if not self._observer:
+            return []
+        try:
+            return self._observer.get_recent_decisions(limit=limit, event_type=event_type)
+        except Exception:
+            return []
+
+    def get_refused_decisions(self, limit: int = 100) -> list[dict]:
+        return self.get_recent_decisions(limit=limit, event_type="NO_TRADE")
+
     def get_mark_prices(self) -> dict:
         if not self._observer:
             return {}
         return dict(self._observer._mark_prices)
+
+    def get_realtime_tick(self) -> dict:
+        """
+        Snapshot leger pour l'UI simulation.
+
+        Cette methode reste READ-ONLY / PAPER-ONLY: elle rafraichit au plus une
+        fois par seconde les marks publics puis recalcule le PnL latent local.
+        Aucun ordre, aucune signature, aucun endpoint prive.
+        """
+        now_ms = int(time.time() * 1000)
+        refreshed_prices = self._maybe_refresh_realtime_prices(now_ms)
+
+        status = self.get_status()
+        if self._observer is not None:
+            try:
+                live_status = self._observer.get_status()
+                status.update(live_status)
+                if "net_pnl_usdc" in live_status:
+                    status["net_pnl_usdt"] = float(live_status.get("net_pnl_usdc") or 0.0)
+                if "realized_pnl_usdc" in live_status:
+                    status["realized_pnl_usdt"] = float(live_status.get("realized_pnl_usdc") or 0.0)
+                if "unrealized_pnl_usdc" in live_status:
+                    status["unrealized_pnl_usdt"] = float(live_status.get("unrealized_pnl_usdc") or 0.0)
+                if "equity" in live_status:
+                    status["equity_usdt"] = float(
+                        live_status.get("equity") or self._config.starting_balance_usdc
+                    )
+            except Exception as e:
+                logger.debug("live realtime status skipped: %s", e)
+        positions = self.get_open_positions()
+        prices = self.get_mark_prices()
+        net_pnl = float(status.get("net_pnl_usdt") or 0.0)
+        equity = float(status.get("equity_usdt") or self._config.starting_balance_usdc)
+        realized = float(status.get("realized_pnl_usdt") or 0.0)
+        unrealized = float(status.get("unrealized_pnl_usdt") or (net_pnl - realized))
+
+        return {
+            "timestamp_ms": now_ms,
+            "session_id": status.get("session_id", ""),
+            "running": bool(status.get("running", False)),
+            "paper_only": True,
+            "read_only": True,
+            "mode": status.get("mode", "PAPER"),
+            "refreshed_prices": refreshed_prices,
+            "net_pnl_usdt": round(net_pnl, 6),
+            "realized_pnl_usdt": round(realized, 6),
+            "unrealized_pnl_usdt": round(unrealized, 6),
+            "equity_usdt": round(equity, 6),
+            "open_positions": len(positions),
+            "positions": positions,
+            "prices": prices,
+            "total_trades": status.get("total_trades", 0),
+            "winning_trades": status.get("winning_trades", 0),
+            "winrate": status.get("winrate", "0%"),
+            "wallets_in_shortlist": status.get("wallets_in_shortlist", 0),
+            "signals_refused": status.get("signals_refused", 0),
+            "stale_refused": status.get("stale_refused", 0),
+            "market_flow": status.get("market_flow", {}),
+            "stream": status.get("stream", {}),
+            "scan": status.get("scan", {}),
+            "disclaimer": DISCLAIMER,
+        }
+
+    def _maybe_refresh_realtime_prices(self, now_ms: int) -> bool:
+        observer = self._observer
+        if observer is None:
+            return False
+        if now_ms - self._last_realtime_price_refresh_ms < 900:
+            return False
+        with self._realtime_lock:
+            if now_ms - self._last_realtime_price_refresh_ms < 900:
+                return False
+            self._last_realtime_price_refresh_ms = now_ms
+            refresh = getattr(observer, "_refresh_market_prices", None)
+            if not callable(refresh):
+                return False
+            try:
+                refresh()
+                return True
+            except Exception as e:
+                logger.debug("realtime mark refresh skipped: %s", e)
+                return False
 
     # -- internal --
 

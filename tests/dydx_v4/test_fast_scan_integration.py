@@ -10,11 +10,14 @@ factice, stats, et absence de toute capacite d'ordre.
 
 from __future__ import annotations
 
+import asyncio
+import time
 from datetime import datetime, timezone
 from types import SimpleNamespace
 
 from hyper_smart_observer.dydx_v4.config import DydxV4Config, load_config_from_env
 from hyper_smart_observer.dydx_v4.fast_scan_integration import FastScanIntegration
+from hyper_smart_observer.dydx_v4.wallet_discovery import DydxWalletDiscovery
 
 A = "dydx1" + "a" * 39
 B = "dydx1" + "b" * 39
@@ -26,7 +29,7 @@ B = "dydx1" + "b" * 39
 def test_config_flag_default_on():
     cfg = DydxV4Config()
     assert cfg.fast_scanner_enabled is True
-    assert cfg.fast_scanner_hot_capacity == 500
+    assert cfg.fast_scanner_hot_capacity == 1000
 
 
 def test_config_flag_enabled_via_env(monkeypatch):
@@ -126,3 +129,41 @@ def test_integration_cosmos_discovery_end_to_end():
     assert new == 2
     assert A in integ.scanner.hot.active()
     assert integ.stats()["harvested_addresses"] == 2
+
+
+def test_wallet_discovery_async_scores_500_wallets_under_3s_without_network():
+    fake_cosmos = SimpleNamespace()
+
+    def _scan_subaccounts(**_kw):
+        return [
+            SimpleNamespace(
+                address=f"dydx1{i:039d}",
+                subaccount_number=0,
+                usdc_balance=10_000.0 + i,
+                positions=[
+                    SimpleNamespace(market_id="ETH-USD", side="LONG", size=1.0)
+                ],
+                total_position_count=1,
+            )
+            for i in range(500)
+        ]
+
+    fake_cosmos.scan_subaccounts = _scan_subaccounts
+    fake_rest = SimpleNamespace(paginate_fills=lambda **_kw: [])
+    discovery = DydxWalletDiscovery(
+        cosmos_client=fake_cosmos,
+        rest_client=fake_rest,
+        demo_mode=False,
+    )
+
+    started = time.perf_counter()
+    result = asyncio.run(
+        discovery.fast_discover_async(n=50, max_candidates=500, concurrency=10)
+    )
+    elapsed = time.perf_counter() - started
+
+    assert result.discovery_method == "fast_cosmos_lcd_async"
+    assert result.candidates_scanned == 500
+    assert len(result.shortlisted) == 50
+    assert elapsed < 3.0
+    assert all(w.total_score > 0 for w in result.shortlisted)

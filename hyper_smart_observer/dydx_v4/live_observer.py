@@ -54,6 +54,17 @@ from hyper_smart_observer.dydx_v4.fill_simulator import (
     simulate_market_fill,
     synthetic_orderbook,
 )
+from hyper_smart_observer.dydx_v4.decision_log import DecisionLogger
+from hyper_smart_observer.dydx_v4.market_regime import (
+    REGIME_CHOPPY,
+    REGIME_UNKNOWN,
+    VOLUME_SPIKE,
+    MarketContext,
+    analyze_market_context,
+    correlation_group,
+    is_volume_spike,
+    side_opposes_trend,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -61,39 +72,41 @@ logger = logging.getLogger(__name__)
 # Réglages calibrés sur l'analyse empirique HL
 # ─────────────────────────────────────────────
 
-# Stop-loss: -1.5% → évite les -$20 HYPE SHORT sans stop
-STOP_LOSS_PCT = 1.5
+# Stop-loss: -1.0% (resserré) → coupe les pertes plus tôt
+STOP_LOSS_PCT = 0.8
 
-# Take-profit: +2.5% → ratio risk/reward 1.67:1
+# Take-profit: +3.5% → R:R = 3.5:1
 TAKE_PROFIT_PCT = 2.5
 
-# Fenêtre de fraîcheur: signal vieux > 15s = NO_TRADE (REST polling réaliste)
+# Fenêtre de fraîcheur: signal vieux > 30s = NO_TRADE (REST polling réaliste)
 # ETH avg signal age = 3s en WS, mais REST polling = 10-15s de latence
-MAX_SIGNAL_AGE_MS = 15_000
+MAX_SIGNAL_AGE_MS = 30_000
 
 # Intervalle de poll REST (fallback si WebSocket unavailable)
 # 5s au lieu de 47s → résout 47% NO_MATCHING refusals
-POLL_INTERVAL_S = 5.0
+POLL_INTERVAL_S = 3.0
 
 # Découverte shortlist: refresh toutes les 6 heures
 DISCOVERY_REFRESH_S = 6 * 3600
 
 # Timeout force-close: position perdante sans signal frais > N secondes → clôture préventive
 # Empêche les pertes non surveillées quand le flux de signaux tarit
-STALE_POSITION_TIMEOUT_S = 180.0
+STALE_POSITION_TIMEOUT_S = 300.0
 
 # Marchés prioritaires (ETH en premier d'après l'analyse)
 FOCUS_MARKETS = [
     "BTC-USD", "ETH-USD", "SOL-USD", "DOGE-USD", "AVAX-USD", "LINK-USD",
     "SUI-USD", "XRP-USD", "LTC-USD", "BNB-USD", "NEAR-USD", "APT-USD",
-    "ARB-USD", "OP-USD", "TIA-USD", "WLD-USD",
+    "ARB-USD", "OP-USD", "TIA-USD", "WLD-USD", "HYPE-USD",
+    "TAO-USD", "SEI-USD", "HBAR-USD", "MORPHO-USD",
+    "ZEC-USD", "VVV-USD", "MEGA-USD", "LIT-USD",
 ]
 
 # Taille max paper par trade (USDT fictifs)
-PAPER_NOTIONAL_USDT = 50.0
+PAPER_NOTIONAL_USDT = 75.0
 
-# Max positions paper ouvertes simultanément (évite sur-exposition)
-MAX_OPEN_PAPER_POSITIONS = 3
+# Max positions paper ouvertes (edge-gated, peut ouvrir tant que PnL positif probable)
+MAX_OPEN_PAPER_POSITIONS = 25
 
 # Frais taker dYdX v4: 5 bps (0.05%)
 TAKER_FEE_BPS = 5.0
@@ -120,6 +133,12 @@ class PaperPositionState:
     max_holding_ms: int = 0                  # time-stop (0 = désactivé)
     exit_method: str = "FIXED_PCT_FALLBACK"  # ATR | FIXED_PCT_FALLBACK
     trailing: Optional[TrailingState] = None
+    entry_edge_bps: float = 0.0
+    market_regime: str = REGIME_UNKNOWN
+    sizing_reason: str = ""
+    initial_size: float = 0.0
+    partial_tp_taken: bool = False
+    first_take_profit_price: float = 0.0
 
     @property
     def unrealized_pnl(self) -> float:
@@ -181,6 +200,7 @@ class ObserverStats:
     no_matching_refused: int = 0
     stop_loss_exits: int = 0
     take_profit_exits: int = 0
+    partial_take_profit_exits: int = 0
     trailing_stop_exits: int = 0
     time_stop_exits: int = 0
     demo_data: bool = False                  # True si AU MOINS un trade vient de données démo
@@ -213,6 +233,7 @@ class ObserverStats:
             "losses": self.losing_trades,
             "stop_loss_exits": self.stop_loss_exits,
             "take_profit_exits": self.take_profit_exits,
+            "partial_take_profit_exits": self.partial_take_profit_exits,
             "fees_paid": round(self.total_fees_paid, 4),
             "signals_refused": self.signals_refused,
             "stale_refused": self.stale_signals_refused,
@@ -316,6 +337,12 @@ class DydxLiveObserver:
         self._demo_mode: bool = getattr(config, 'demo_mode', False)
         # Compteur de ticks pour la simulation démo (cycles de rotation positions)
         self._demo_tick: int = 0
+        self._market_context_cache: dict[str, tuple[int, MarketContext]] = {}
+        self._recent_signal_sources: dict[tuple[str, str, str], int] = {}
+        self._decision_log = DecisionLogger(
+            getattr(config, "decision_log_path", "logs/structured/decisions.jsonl"),
+            enabled=bool(getattr(config, "decision_log_enabled", True)),
+        )
 
         # ── Scan rapide multi-wallets (opt-in, défaut OFF) ──────────────────
         # Si DYDX_FAST_SCANNER est activé: abonne les wallets chauds en WS et
@@ -533,7 +560,7 @@ class DydxLiveObserver:
                         self.stats.equity,
                         self.stats.total_net_pnl_usdc,
                         len(self._open_positions),
-                        MAX_OPEN_PAPER_POSITIONS,
+                        int(getattr(self.config, "max_open_paper_trades", MAX_OPEN_PAPER_POSITIONS)),
                         len(self._shortlist),
                         self.stats.signals_refused,
                         "running" if self._discovery_running else "idle",
@@ -872,7 +899,9 @@ class DydxLiveObserver:
             "unrealized_pnl_usdc": round(unrealized, 4),
             "equity": round(self.stats.starting_balance_usdc + total_pnl, 4),
             "total_trades": self.stats.positions_closed,
-            "winrate": self.stats.winrate,
+            "winrate": f"{self.stats.winrate * 100:.2f}%",
+            "winning_trades": self.stats.winning_trades,
+            "losing_trades": self.stats.losing_trades,
             "signals_refused": self.stats.signals_refused,
             "stale_refused": self.stats.stale_signals_refused,
             "fees_paid": round(self.stats.total_fees_paid, 4),
@@ -1196,6 +1225,191 @@ class DydxLiveObserver:
     # Évaluation cluster → signal paper
     # ─────────────────────────────────────────────
 
+    def _market_context(self, market: str) -> MarketContext:
+        """Contexte candles 5m/1h public, cache court, jamais bloquant."""
+        if not getattr(self.config, "trend_filter_enabled", True) and not getattr(
+            self.config, "regime_detector_enabled", True
+        ):
+            return MarketContext(market_id=market)
+        now_ms = int(time.time() * 1000)
+        cached = self._market_context_cache.get(market)
+        ttl_ms = int(float(getattr(self.config, "market_context_ttl_s", 60.0)) * 1000)
+        if cached and now_ms - cached[0] <= ttl_ms:
+            return cached[1]
+        try:
+            candles_5m = self.rest.get_candles(market, resolution="5MINS", limit=80)
+        except Exception as e:
+            logger.debug("market_context 5m unavailable %s: %s", market, e)
+            candles_5m = None
+        try:
+            candles_1h = self.rest.get_candles(market, resolution="1HOUR", limit=80)
+        except Exception as e:
+            logger.debug("market_context 1h unavailable %s: %s", market, e)
+            candles_1h = None
+        ctx = analyze_market_context(
+            market,
+            candles_5m,
+            candles_1h,
+            atr_period=int(getattr(self.config, "atr_period", 14)),
+            trend_min_move_pct=float(getattr(self.config, "trend_min_move_pct", 0.0015)),
+            choppy_efficiency_max=float(getattr(self.config, "choppy_efficiency_max", 0.18)),
+            choppy_atr_pct_min=float(getattr(self.config, "choppy_atr_pct_min", 0.001)),
+        )
+        self._market_context_cache[market] = (now_ms, ctx)
+        return ctx
+
+    def _cluster_imbalance(self, cluster: ClusterSignal) -> float:
+        """Approximation conservative du desequilibre de flux pour volume spike."""
+        strength = float(getattr(cluster, "signal_strength", 0.0) or 0.0)
+        if strength <= 1.0:
+            return max(-1.0, min(1.0, strength))
+        return max(-1.0, min(1.0, strength / 100.0))
+
+    def _leader_metrics_for_cluster(self, cluster: ClusterSignal) -> tuple[float, float, float, int, float, float]:
+        """Retourne winrate, PF, expectancy, trades, recent_score, confidence du marche."""
+        by_addr = {w.address: w for w in self._shortlist}
+        rows: list[tuple[float, float, float, int, float, float]] = []
+        for addr in getattr(cluster, "participating_wallets", []) or []:
+            ws = by_addr.get(addr)
+            if not ws:
+                continue
+            stats = getattr(ws, "market_stats", {}) or {}
+            market_stats = stats.get(cluster.market_id)
+            if market_stats:
+                rows.append((
+                    float(market_stats.get("winrate", 0.0) or 0.0),
+                    float(market_stats.get("profit_factor", 1.0) or 1.0),
+                    float(market_stats.get("expectancy_usdc", 0.0) or 0.0),
+                    int(market_stats.get("trade_count", 0) or 0),
+                    float(market_stats.get("recent_score", 1.0) or 1.0),
+                    float(market_stats.get("confidence", 0.0) or 0.0),
+                ))
+                continue
+            if getattr(ws, "trade_count", 0) > 0:
+                rows.append((
+                    float(getattr(ws, "winrate", 0.0) or 0.0),
+                    float(getattr(ws, "profit_factor", 1.0) or 1.0),
+                    float(getattr(ws, "net_pnl_usdc", 0.0) or 0.0)
+                    / max(1, int(getattr(ws, "trade_count", 1) or 1)),
+                    int(getattr(ws, "trade_count", 0) or 0),
+                    float(getattr(ws, "recent_score", 1.0) or 1.0),
+                    min(1.0, float(getattr(ws, "trade_count", 0) or 0) / 20.0),
+                ))
+        if not rows:
+            return 0.0, 0.0, 0.0, -1, 1.0, 0.0
+        n = len(rows)
+        return (
+            sum(r[0] for r in rows) / n,
+            sum(r[1] for r in rows) / n,
+            sum(r[2] for r in rows) / n,
+            int(sum(r[3] for r in rows) / n),
+            sum(r[4] for r in rows) / n,
+            sum(r[5] for r in rows) / n,
+        )
+
+    def _consensus_recency_multiplier(self, cluster: ClusterSignal) -> tuple[float, str]:
+        now_ms = int(time.time() * 1000)
+        window = int(getattr(self.config, "consensus_recency_bonus_window_ms", 30_000))
+        first_age = max(0, now_ms - int(getattr(cluster, "first_wallet_opened_ms", now_ms)))
+        last_age = max(0, now_ms - int(getattr(cluster, "last_wallet_opened_ms", now_ms)))
+        spread = max(0, int(getattr(cluster, "last_wallet_opened_ms", now_ms)) - int(getattr(cluster, "first_wallet_opened_ms", now_ms)))
+        if last_age <= window and spread <= window:
+            mult = float(getattr(self.config, "consensus_recency_edge_multiplier", 1.06))
+            return mult, f"RECENT_CONSENSUS spread={spread}ms last_age={last_age}ms"
+        return 1.0, ""
+
+    def _funding_penalty_bps(self, market: str, side: str) -> float:
+        if not getattr(self.config, "funding_edge_enabled", True):
+            return 0.0
+        try:
+            raw = self.rest.get_market(market)
+            data = raw.get("markets", {}).get(market, raw.get("market", {})) or {}
+            rate = float(data.get("nextFundingRate", 0) or 0)
+        except Exception:
+            return 0.0
+        adverse = rate if side.upper() == "LONG" else -rate
+        if adverse <= 0:
+            return 0.0
+        hours = float(getattr(self.config, "funding_edge_horizon_hours", 1.0))
+        return adverse * hours * 10_000.0
+
+    def _confluence_multiplier(self, cluster: ClusterSignal) -> tuple[float, str]:
+        if not getattr(self.config, "confluence_enabled", True):
+            return 1.0, ""
+        now_ms = int(time.time() * 1000)
+        origin = str(getattr(cluster, "origin", "rest") or "rest").lower()
+        side = cluster.side.upper()
+        window = int(getattr(self.config, "confluence_window_ms", 30_000))
+        other_origins = ("flow", "stream") if origin == "rest" else ("rest",)
+        for other in other_origins:
+            ts = self._recent_signal_sources.get((cluster.market_id, side, other))
+            if ts is not None and 0 <= now_ms - ts <= window:
+                mult = float(getattr(self.config, "confluence_edge_multiplier", 1.10))
+                return mult, "REST_FLOW_CONFLUENCE"
+        self._recent_signal_sources[(cluster.market_id, side, origin)] = now_ms
+        return 1.0, ""
+
+    def _correlated_exposure_reason(self, market: str, side: str) -> Optional[str]:
+        if not getattr(self.config, "correlation_gate_enabled", True):
+            return None
+        group = correlation_group(market)
+        exposure = 0.0
+        count = 0
+        for pos in self._open_positions.values():
+            if pos.side.upper() != side.upper():
+                continue
+            if correlation_group(pos.market_id) != group:
+                continue
+            exposure += abs(float(pos.size or 0.0))
+            count += 1
+        limit = float(getattr(self.config, "max_correlated_same_side", 5) or 5)
+        if exposure > limit:
+            return f"CORRELATED_EXPOSURE group={group} side={side} exposure={exposure:.2f}>{limit:.2f} count={count}"
+        return None
+
+    def _dynamic_notional(self, edge_bps: float, ctx: MarketContext, cluster: ClusterSignal) -> tuple[float, str]:
+        base = float(getattr(self.config, "paper_notional_base_usdc", PAPER_NOTIONAL_USDT))
+        if not getattr(self.config, "dynamic_sizing_enabled", True):
+            return base, "fixed sizing"
+        mn = float(getattr(self.config, "paper_notional_min_usdc", 20.0))
+        mx = min(100.0, float(getattr(self.config, "paper_notional_max_usdc", 100.0)))
+        edge_full = max(1.0, float(getattr(self.config, "dynamic_sizing_edge_full_bps", 25.0)))
+        edge_factor = 0.55 + 0.70 * max(0.0, min(1.0, edge_bps / edge_full))
+        atr_high = max(0.0001, float(getattr(self.config, "dynamic_sizing_atr_high_pct", 0.03)))
+        vol_factor = 1.0
+        if ctx.atr_pct > 0:
+            vol_factor = max(0.45, min(1.10, 1.0 - (ctx.atr_pct / atr_high) * 0.35))
+        conviction = 0.80 + 0.08 * max(0, min(5, int(cluster.wallet_count)))
+        if ctx.regime == "TRENDING":
+            conviction += 0.08
+        if self.stats.losing_trades > self.stats.winning_trades:
+            conviction *= max(0.5, 1.0 - float(getattr(self.config, "dynamic_sizing_loss_penalty", 0.25)))
+        notional = max(mn, min(mx, base * edge_factor * vol_factor * conviction))
+        return notional, (
+            f"dynamic edge={edge_bps:.1f}bps edge_factor={edge_factor:.2f} "
+            f"vol_factor={vol_factor:.2f} conviction={conviction:.2f}"
+        )
+
+    def _record_decision(self, event_type: str, payload: dict) -> None:
+        try:
+            payload = {
+                "session_id": self.stats.session_id,
+                "net_pnl_usdc": round(self.stats.total_net_pnl_usdc, 6),
+                "equity_usdc": round(self.stats.equity, 6),
+                "paper_only": True,
+                "read_only": True,
+                **payload,
+            }
+            self._decision_log.record(event_type, payload)
+        except Exception as e:
+            logger.debug("decision_log write skipped: %s", e)
+
+    def get_recent_decisions(self, limit: int = 100, event_type: Optional[str] = None) -> list[dict]:
+        return self._decision_log.tail(limit=limit, event_type=event_type)
+
+    def get_refused_decisions(self, limit: int = 100) -> list[dict]:
+        return self.get_recent_decisions(limit=limit, event_type="NO_TRADE")
+
     def _evaluate_cluster(self, cluster: ClusterSignal) -> None:
         """
         Évaluer un cluster et potentiellement ouvrir une position paper.
@@ -1280,21 +1494,59 @@ class DydxLiveObserver:
                     self._refuse(f"LEADERS_NOT_PROVEN proven={proven}")
                     return
 
-        # Gate 4: Pas déjà en position sur ce marché
+        # Gate 4: Position existante — pyramide autorisée si edge frais et fort
         pos_key = f"{market}:{cluster.side}"
         if pos_key in self._open_positions:
-            self._refuse(f"ALREADY_IN_POSITION {pos_key}")
-            return
+            existing = self._open_positions[pos_key]
+            age_s = (int(time.time() * 1000) - existing.opened_at_ms) / 1000
+            # Pyramid: autorisé si signal frais (<10s) ET position <5min ET pas plus de 2 adds
+            _pyramid_count = getattr(existing, "_pyramid_count", 0)
+            if cluster.signal_age_ms > 10_000 or age_s > 300 or _pyramid_count >= 2:
+                self._refuse(f"ALREADY_IN_POSITION {pos_key}")
+                return
+            # On laisse passer: la position sera renforcée (on ouvre une 2e entrée indépendante)
+            pos_key = f"{market}:{cluster.side}:add{_pyramid_count + 1}"
+            logger.info("PYRAMID ADD %s %s (add #%d) | PAPER-ONLY", cluster.side, market, _pyramid_count + 1)
 
         # Gate 5: Max positions
-        if len(self._open_positions) >= MAX_OPEN_PAPER_POSITIONS:
-            self._refuse(f"MAX_OPEN_REACHED {len(self._open_positions)}/{MAX_OPEN_PAPER_POSITIONS}")
+        max_open_positions = int(getattr(self.config, "max_open_paper_trades", MAX_OPEN_PAPER_POSITIONS))
+        if len(self._open_positions) >= max_open_positions:
+            self._refuse(f"MAX_OPEN_REACHED {len(self._open_positions)}/{max_open_positions}")
             return
 
         # Gate 6: Prix disponible
         mark_price = self._mark_prices.get(market)
         if not mark_price or mark_price <= 0:
             self._refuse(f"NO_ORACLE_PRICE {market}")
+            return
+
+        market_ctx = self._market_context(market)
+        sizing_notes: list[str] = []
+        market_edge_multiplier = 1.0
+        if market_ctx.has_data:
+            market_edge_multiplier *= max(0.0, market_ctx.edge_multiplier)
+            sizing_notes.append(f"regime={market_ctx.regime}")
+            if getattr(self.config, "regime_detector_enabled", True) and market_ctx.regime == REGIME_CHOPPY:
+                self._refuse(f"CHOPPY_MARKET {market} atr_pct={market_ctx.atr_pct:.4f}")
+                return
+            if getattr(self.config, "trend_filter_enabled", True) and side_opposes_trend(cluster.side, market_ctx):
+                self._refuse(
+                    f"TREND_OPPOSITION {market} side={cluster.side} "
+                    f"5m={market_ctx.trend_5m} 1h={market_ctx.trend_1h}"
+                )
+                return
+            if getattr(self.config, "volume_spike_enabled", True) and is_volume_spike(
+                market_ctx,
+                self._cluster_imbalance(cluster),
+                min_zscore=float(getattr(self.config, "volume_spike_zscore_min", 2.0)),
+                min_imbalance=float(getattr(self.config, "volume_spike_imbalance_min", 0.62)),
+            ):
+                market_edge_multiplier *= float(getattr(self.config, "volume_spike_edge_multiplier", 1.08))
+                sizing_notes.append(VOLUME_SPIKE)
+
+        corr_reason = self._correlated_exposure_reason(market, cluster.side)
+        if corr_reason:
+            self._refuse(corr_reason)
             return
 
         # Flow trade count safety net — detect_flow_signals() already filters,
@@ -1314,6 +1566,7 @@ class DydxLiveObserver:
 
         # Gate 7: Edge net positif après coûts (viral bot edge formula)
         # leader_winrate/pf depuis wallet scores si disponibles
+        edge_remaining_bps = float(getattr(self.config, "min_edge_bps", MIN_EDGE_BPS)) + 1.0
         avg_wr = 0.0
         avg_pf = 0.0
         avg_exp = 0.0
@@ -1331,6 +1584,27 @@ class DydxLiveObserver:
         else:
             n_sc = -1  # sentinel: skip edge gate
 
+        market_wr, market_pf, market_exp, market_trades, recent_score, leader_conf = self._leader_metrics_for_cluster(cluster)
+        recency_mult, recency_note = self._consensus_recency_multiplier(cluster)
+        confluence_mult, confluence_note = self._confluence_multiplier(cluster)
+        funding_penalty_bps = self._funding_penalty_bps(market, cluster.side)
+        market_edge_multiplier *= recency_mult * confluence_mult
+        if recent_score > 0 and market_trades > 0:
+            market_edge_multiplier *= max(0.92, min(1.08, recent_score))
+        if leader_conf > 0:
+            market_edge_multiplier *= 0.90 + 0.10 * min(1.0, leader_conf)
+        if market_trades >= 0:
+            avg_wr, avg_pf, avg_exp, n_sc = market_wr, market_pf, market_exp, 1
+            sizing_notes.append(
+                f"leader_market trades={market_trades} wr={avg_wr:.2f} pf={avg_pf:.2f} exp={avg_exp:.2f}"
+            )
+        if recency_note:
+            sizing_notes.append(recency_note)
+        if confluence_note:
+            sizing_notes.append(confluence_note)
+        if funding_penalty_bps > 0:
+            sizing_notes.append(f"funding_penalty={funding_penalty_bps:.1f}bps")
+
         # Le chemin STREAM saute cette gate: le consensus de K wallets EST le
         # signal d'edge (on n'a pas de winrate par leader sur des fills temps réel).
         if n_sc >= 0 and getattr(cluster, "origin", "rest") != "stream":
@@ -1340,22 +1614,36 @@ class DydxLiveObserver:
                 wallet_count=cluster.wallet_count,
                 leader_winrate=avg_wr,
                 leader_profit_factor=avg_pf,
+                leader_trade_count=market_trades if market_trades >= 0 else 0,
                 leader_expectancy_usdc=avg_exp,
-                paper_notional_usdc=PAPER_NOTIONAL_USDT,
+                paper_notional_usdc=float(getattr(self.config, "paper_notional_base_usdc", PAPER_NOTIONAL_USDT)),
                 spread_bps=3.0,
                 slippage_bps=1.0,
                 fee_bps=10.0,
                 delay_ms=delay_ms,
+                funding_penalty_bps=funding_penalty_bps,
+                market_edge_multiplier=market_edge_multiplier,
                 min_edge_bps=float(getattr(self.config, "min_edge_bps", MIN_EDGE_BPS)),
             )
             if not edge.accepted:
                 self._refuse(f"EDGE_INSUFFICIENT ({edge.reject_reason})")
                 return
+            edge_remaining_bps = edge.edge_remaining_bps
+
+        if getattr(cluster, "origin", "rest") == "stream" and n_sc < 0:
+            edge_remaining_bps = max(
+                edge_remaining_bps,
+                float(getattr(self.config, "min_edge_bps", MIN_EDGE_BPS))
+                + 10.0 * max(0.0, min(1.0, self._cluster_imbalance(cluster))),
+            )
+
+        paper_notional, sizing_note = self._dynamic_notional(edge_remaining_bps, market_ctx, cluster)
+        sizing_notes.append(sizing_note)
 
         # Gate 8: Fill HONNÊTE depuis le carnet — jamais au mid
         # (un paper qui fill au mid surestime le PnL de 30-100%)
         entry_price, entry_slippage_bps, fill_source = self._honest_entry_price(
-            market, cluster.side, PAPER_NOTIONAL_USDT, mark_price
+            market, cluster.side, paper_notional, mark_price
         )
         if fill_source in {"SPREAD_TOO_WIDE", "BOOK_TOO_THIN"}:
             self._refuse(f"{fill_source} {market}")
@@ -1378,19 +1666,35 @@ class DydxLiveObserver:
         stop_price, tp_price = plan.stop_price, plan.take_profit_price
 
         # Calcul frais
-        fee = PAPER_NOTIONAL_USDT * (TAKER_FEE_BPS / 10_000)
-        size_notional = PAPER_NOTIONAL_USDT  # en USDT fictifs
+        _notional = float(paper_notional)
+        fee = _notional * (TAKER_FEE_BPS / 10_000)
+        size_notional = _notional  # en USDT fictifs
 
         # Ouvrir position paper
         position_id = hashlib.sha256(
             f"paper:{market}:{cluster.side}:{cluster.cluster_id}".encode()
         ).hexdigest()[:16]
 
+        # Breakeven stop: calcul des prix trigger/stop
+        be_trigger_price = 0.0
+        be_stop_price = 0.0
+        if getattr(self.config, "breakeven_stop_enabled", True) and plan.atr > 0:
+            be_trigger_mult = float(getattr(self.config, "breakeven_trigger_atr_mult", 1.5))
+            be_offset_mult = float(getattr(self.config, "breakeven_offset_atr_mult", 0.1))
+            if cluster.side.upper() == "LONG":
+                be_trigger_price = entry_price + be_trigger_mult * plan.atr
+                be_stop_price = entry_price + be_offset_mult * plan.atr
+            else:
+                be_trigger_price = entry_price - be_trigger_mult * plan.atr
+                be_stop_price = entry_price - be_offset_mult * plan.atr
+
         trailing = (
             TrailingState(
                 side=cluster.side,
                 trail_distance=plan.trail_distance,
                 trail_arm_price=plan.trail_arm_price,
+                breakeven_trigger_price=be_trigger_price,
+                breakeven_stop_price=be_stop_price,
             )
             if plan.trail_distance > 0 else None
         )
@@ -1413,6 +1717,11 @@ class DydxLiveObserver:
             max_holding_ms=plan.max_holding_ms,
             exit_method=plan.method,
             trailing=trailing,
+            entry_edge_bps=edge_remaining_bps,
+            market_regime=market_ctx.regime,
+            sizing_reason=" | ".join(sizing_notes),
+            initial_size=size_notional,
+            first_take_profit_price=tp_price,
         )
 
         # Comptabilité honnête des sources de données
@@ -1440,6 +1749,23 @@ class DydxLiveObserver:
             cluster.side, market, mark_price, stop_price, tp_price,
             cluster.wallet_count, cluster.cluster_id[:8],
         )
+        self._record_decision("PAPER_OPEN", {
+            "position_id": position_id,
+            "market_id": market,
+            "side": cluster.side,
+            "entry_price": entry_price,
+            "mark_price": mark_price,
+            "size": size_notional,
+            "fee_paid": fee,
+            "wallet_count": cluster.wallet_count,
+            "cluster_id": cluster.cluster_id,
+            "edge_remaining_bps": edge_remaining_bps,
+            "market_regime": market_ctx.regime,
+            "sizing_reason": pos.sizing_reason,
+            "data_source": fill_source,
+            "entry_slippage_bps": entry_slippage_bps,
+            "paper_only": True,
+        })
 
     # ─────────────────────────────────────────────
     # Vérification exits (stop-loss / take-profit)
@@ -1458,10 +1784,22 @@ class DydxLiveObserver:
             mark_price = self._mark_prices.get(pos.market_id)
             if not mark_price:
                 continue
+            # Breakeven stop: upgrade SL to entry+micro-profit once armed
+            if (pos.trailing is not None
+                    and pos.trailing.breakeven_armed
+                    and not pos.trailing.armed):
+                if pos.stop_loss_price != pos.trailing.breakeven_stop_price:
+                    pos.stop_loss_price = pos.trailing.breakeven_stop_price
+                    logger.info(
+                        "BREAKEVEN UPGRADE %s %s SL=%.6f | PAPER-ONLY",
+                        pos.side, pos.market_id, pos.stop_loss_price,
+                    )
             if pos.is_stop_loss_hit(mark_price):
                 to_close.append((pos_key, mark_price, "STOP_LOSS"))
                 continue
             if pos.is_take_profit_hit(mark_price):
+                if self._partial_take_profit_position(pos_key, mark_price):
+                    continue
                 to_close.append((pos_key, mark_price, "TAKE_PROFIT"))
                 continue
             if pos.trailing is not None:
@@ -1579,6 +1917,60 @@ class DydxLiveObserver:
             fallback_tp_pct=self.take_profit_pct,
         )
 
+    def _partial_take_profit_position(self, pos_key: str, exit_price: float) -> bool:
+        """Encaisser TP1 partiel et laisser courir TP2 pour les exits ATR."""
+        pos = self._open_positions.get(pos_key)
+        if pos is None:
+            return False
+        if not getattr(self.config, "partial_tp_enabled", True):
+            return False
+        if pos.partial_tp_taken or pos.exit_method != "ATR":
+            return False
+        frac = max(0.05, min(0.95, float(getattr(self.config, "partial_tp_fraction", 0.50))))
+        close_size = pos.size * frac
+        if close_size <= 0 or pos.entry_price <= 0:
+            return False
+        if pos.side == "LONG":
+            gross = (exit_price - pos.entry_price) / pos.entry_price * close_size
+        else:
+            gross = (pos.entry_price - exit_price) / pos.entry_price * close_size
+        exit_fee = close_size * (TAKER_FEE_BPS / 10_000)
+        net = gross - exit_fee
+        self.stats.total_net_pnl_usdc += net
+        self.stats.total_fees_paid += exit_fee
+        self.stats.partial_take_profit_exits += 1
+
+        remaining = pos.size - close_size
+        entry_fee_remaining = pos.fee_paid * (remaining / pos.size) if pos.size else 0.0
+        pos.size = remaining
+        pos.fee_paid = entry_fee_remaining
+        pos.partial_tp_taken = True
+        if pos.stop_loss_price:
+            pos.stop_loss_price = pos.entry_price
+        distance = abs((pos.first_take_profit_price or pos.take_profit_price) - pos.entry_price)
+        mult = max(1.0, float(getattr(self.config, "partial_tp2_multiplier", 2.0)))
+        if distance > 0:
+            if pos.side == "LONG":
+                pos.take_profit_price = pos.entry_price + distance * mult
+            else:
+                pos.take_profit_price = pos.entry_price - distance * mult
+        if pos.trailing is not None:
+            pos.trailing.breakeven_armed = True
+            pos.trailing.breakeven_stop_price = pos.entry_price
+        self._record_decision("PAPER_PARTIAL_TP", {
+            "reason": "TAKE_PROFIT_PARTIAL",
+            "position_id": pos.position_id,
+            "market_id": pos.market_id,
+            "side": pos.side,
+            "entry_price": pos.entry_price,
+            "exit_price": exit_price,
+            "closed_size": close_size,
+            "remaining_size": pos.size,
+            "net_pnl": net,
+            "paper_only": True,
+        })
+        return True
+
     def _close_paper_position(self, pos_key: str, exit_price: float, reason: str) -> None:
         """Clôturer une position paper et mettre à jour les stats."""
         pos = self._open_positions.pop(pos_key, None)
@@ -1586,7 +1978,7 @@ class DydxLiveObserver:
             return
 
         gross_pnl = pos.calculate_pnl(exit_price)
-        exit_fee = PAPER_NOTIONAL_USDT * (TAKER_FEE_BPS / 10_000)
+        exit_fee = pos.size * (TAKER_FEE_BPS / 10_000)
         net_pnl = gross_pnl - exit_fee
 
         self.stats.total_net_pnl_usdc += net_pnl
@@ -1634,6 +2026,7 @@ class DydxLiveObserver:
             "disclaimer": "PAPER TRADE ONLY",
         }
         self._closed_trades.append(trade_record)
+        self._record_decision("PAPER_CLOSE", trade_record)
 
         logger.info(
             "PAPER CLOSE %s %s entry=%.4f exit=%.4f net_pnl=%+.4f reason=%s | PAPER-ONLY",
@@ -1645,6 +2038,13 @@ class DydxLiveObserver:
         self.stats.signals_refused += 1
         reason_key = reason.split(" ")[0].rstrip("(").split("(")[0]
         self._no_trade_reasons[reason_key] = self._no_trade_reasons.get(reason_key, 0) + 1
+        self._record_decision("NO_TRADE", {
+            "reason": reason_key,
+            "detail": reason,
+            "open_positions": len(self._open_positions),
+            "shortlist_size": len(self._shortlist),
+            "paper_only": True,
+        })
         logger.debug("NO_TRADE: %s", reason)
 
     def stop(self) -> None:

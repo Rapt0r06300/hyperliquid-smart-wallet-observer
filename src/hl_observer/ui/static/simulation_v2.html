@@ -97,9 +97,17 @@
 
 <script>
 const $=s=>document.querySelector(s);
-const REFRESH_MS=4000;
+const REFRESH_MS=4000;       // refresh complet: scan, wallets, details
+const TICK_MS=750;           // tick leger: PnL + mark-to-market
 let equityHist=[];           // {t, equity}
 let lastGood=null;
+let lastTick=null;
+let tickInFlight=false;
+let targetEquity=1000;
+let targetPnl=0;
+let displayEquity=1000;
+let displayPnl=0;
+let lastEquityPointAt=0;
 
 function fmtUsd(v){const n=Number(v||0);const s=n>0?"+":"";return s+n.toFixed(2)+" $";}
 function fmtBal(v){return Number(v||0).toFixed(2)+" $";}
@@ -130,7 +138,95 @@ function sideLabel(s){const v=String(s||"").toUpperCase();
   if(v.includes("SHORT")||v==="SELL") return ['Vente (short)','sell'];
   return [v||'?','buy'];}
 
-async function getJson(u){const r=await fetch(u,{cache:"no-store"});if(!r.ok)throw 0;return r.json();}
+function updateLiveCards(equity,pnl){
+  $("#mSolde").textContent=fmtBal(equity);
+  const mp=$("#mPnl");
+  mp.textContent=fmtUsd(pnl);
+  mp.className="val "+(pnl>=0?"green":"red");
+}
+
+function pushLiveEquityPoint(eq,now){
+  if(!equityHist.length){
+    equityHist.push({t:now-1,equity:1000});
+    equityHist.push({t:now,equity:eq});
+    lastEquityPointAt=now;
+    return;
+  }
+  if(now-lastEquityPointAt>=1000){
+    equityHist.push({t:now,equity:eq});
+    lastEquityPointAt=now;
+    if(equityHist.length>900)equityHist.shift();
+  }else{
+    equityHist[equityHist.length-1]={t:now,equity:eq};
+  }
+}
+
+function renderPositions(positions){
+  const pc=$("#positions");
+  if(positions&&positions.length){
+    pc.innerHTML=positions.slice(0,12).map(p=>{
+      const [lab,cls]=sideLabel(p.side);
+      const up=Number(p.unrealized_pnl_usdc!=null?p.unrealized_pnl_usdc:0);
+      const upTxt=p.unrealized_pnl_usdc!=null?`<div class="${up>=0?'green':'red'}" style="font-weight:600">${fmtUsd(up)}</div>`:'';
+      const entry=p.entry_price!=null?Number(p.entry_price).toFixed(2):'--';
+      const mark=p.mark_price!=null?Number(p.mark_price).toFixed(2):(p.take_profit!=null?'':'');
+      return `<div class="row"><div><span class="mkt">${p.market_id||p.market||'?'}</span>
+        <span class="pill ${cls}">${lab}</span>
+        <div class="meta">entree ${entry}${mark?(' · actuel '+mark):''} · ${p.wallet_count||0} wallets</div></div>${upTxt}</div>`;
+    }).join("");
+  }else{
+    pc.innerHTML='<div class="empty">Aucune position ouverte -- le bot attend un signal net.</div>';
+  }
+}
+
+function applyRealtimeTick(tick){
+  if(!tick||tick.error)return;
+  lastTick=tick;
+  const equity=Number(tick.equity_usdt!=null?tick.equity_usdt:1000);
+  const pnl=Number(tick.net_pnl_usdt!=null?tick.net_pnl_usdt:(equity-1000));
+  targetEquity=equity;
+  targetPnl=pnl;
+  if(!equityHist.length){
+    displayEquity=equity;
+    displayPnl=pnl;
+    pushLiveEquityPoint(displayEquity,Date.now());
+  }
+  renderPositions(tick.positions||[]);
+  $("#gState").textContent=(tick.open_positions||0)>0
+    ? "mark-to-market temps reel"
+    : "en attente d'un signal frais";
+}
+
+async function refreshTick(){
+  if(tickInFlight)return;
+  tickInFlight=true;
+  try{
+    const tick=await getJson("/api/dydx/realtime-tick?t="+Date.now());
+    applyRealtimeTick(tick);
+  }catch(e){
+    $("#gState").textContent=lastTick?"dernier tick conserve":"tick temps reel indisponible";
+  }finally{
+    tickInFlight=false;
+  }
+}
+
+function animateEquity(){
+  displayEquity += (targetEquity-displayEquity)*0.22;
+  displayPnl += (targetPnl-displayPnl)*0.22;
+  if(Math.abs(targetEquity-displayEquity)<0.002)displayEquity=targetEquity;
+  if(Math.abs(targetPnl-displayPnl)<0.002)displayPnl=targetPnl;
+  updateLiveCards(displayEquity,displayPnl);
+  pushLiveEquityPoint(displayEquity,Date.now());
+  drawEquity();
+  requestAnimationFrame(animateEquity);
+}
+
+async function getJson(u){
+  const ctrl=new AbortController();
+  const tid=setTimeout(()=>ctrl.abort(),6000);
+  try{const r=await fetch(u,{cache:"no-store",signal:ctrl.signal});clearTimeout(tid);if(!r.ok)throw 0;return r.json();}
+  catch(e){clearTimeout(tid);throw e;}
+}
 
 async function refresh(){
   let status,positions,wallets;
@@ -141,10 +237,19 @@ async function refresh(){
       getJson("/api/dydx/wallets").catch(()=>[])
     ]);
     lastGood={status,positions,wallets};
-    $("#bStatus").textContent="Lecture seule · connecté";
+    if(status.demo_mode) $("#bStatus").textContent="Mode démo · lecture seule";
+    else if(!status.running) $("#bStatus").textContent="Démarrage en cours…";
+    else $("#bStatus").textContent="Lecture seule · connecté";
   }catch(e){
-    if(!lastGood){$("#bStatus").textContent="Connexion en cours…";return;}
-    ({status,positions,wallets}=lastGood);
+    if(!lastGood){
+      $("#bStatus").textContent="Démarrage du moteur…";
+      // Show empty state instead of blocking
+      status={net_pnl_usdt:0,equity_usdt:1000,total_trades:0,winning_trades:0,
+        winrate:"—",wallets_in_shortlist:0,no_trade_reasons:{},leader_exits:0};
+      positions=[];wallets=[];
+    }else{
+      ({status,positions,wallets}=lastGood);
+    }
   }
 
   const pnl=Number(status.net_pnl_usdt||0);
@@ -154,18 +259,18 @@ async function refresh(){
   const wr=status.winrate||(trades>0?Math.round((wins/trades)*100)+"%":"—");
   const wcount=(wallets&&wallets.length)||status.wallets_in_shortlist||0;
 
-  $("#mSolde").textContent=fmtBal(eq);
-  const mp=$("#mPnl");mp.textContent=fmtUsd(pnl);mp.className="val "+(pnl>=0?"green":"red");
+  const now=Date.now();
+  targetEquity=eq;
+  targetPnl=pnl;
+  if(!equityHist.length){
+    displayEquity=eq;
+    displayPnl=pnl;
+    pushLiveEquityPoint(eq,now);
+    updateLiveCards(eq,pnl);
+  }
   $("#mWins").textContent=trades>0?(wins+" / "+trades):"0 / 0";
   $("#mWr").textContent=(typeof wr==="string")?wr:(wr+"%");
   $("#bWallets").textContent=wcount+" wallets suivis";
-
-  const now=Date.now();
-  if(!equityHist.length||now-equityHist[equityHist.length-1].t>=REFRESH_MS-500){
-    equityHist.push({t:now,equity:eq});
-    if(equityHist.length>400)equityHist.shift();
-  }
-  drawEquity();
 
   // Positions
   const pc=$("#positions");
@@ -272,7 +377,10 @@ function drawEquity(){
 }
 
 setInterval(clock,1000);clock();
+refreshTick();
+animateEquity();
 refresh();
+setInterval(()=>{refreshTick().catch(()=>{});},TICK_MS);
 setInterval(()=>{refresh().catch(()=>{});},REFRESH_MS);
 window.addEventListener("resize",drawEquity);
 </script>

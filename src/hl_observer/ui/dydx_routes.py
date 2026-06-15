@@ -9,7 +9,7 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Response
 
 logger = logging.getLogger(__name__)
 
@@ -65,6 +65,15 @@ def create_dydx_router() -> APIRouter:
             logger.error("dydx /trades error: %s", e)
             return []
 
+    @router.get("/refused")
+    async def dydx_refused(limit: int = 100) -> list[dict]:
+        """Derniers refus NO_TRADE dYdX v4 (diagnostic read-only)."""
+        try:
+            return get_engine().get_refused_decisions(limit=min(limit, 500))
+        except Exception as e:
+            logger.error("dydx /refused error: %s", e)
+            return []
+
     @router.get("/prices")
     async def dydx_prices() -> dict[str, float]:
         """Prix oracle dYdX v4 (ETH-USD, BTC-USD, SOL-USD…)."""
@@ -92,6 +101,28 @@ def create_dydx_router() -> APIRouter:
         except Exception as e:
             logger.error("dydx /pnl error: %s", e)
             return {"error": str(e), "disclaimer": DISCLAIMER}
+
+    @router.get("/realtime-tick")
+    async def dydx_realtime_tick(response: Response) -> dict[str, Any]:
+        """Tick leger pour animer la simulation paper en mark-to-market."""
+        response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
+        response.headers["Pragma"] = "no-cache"
+        response.headers["X-Hypersmart-Mode"] = "paper-read-only"
+        try:
+            return get_engine().get_realtime_tick()
+        except Exception as e:
+            logger.error("dydx /realtime-tick error: %s", e)
+            return {
+                "timestamp_ms": 0,
+                "running": False,
+                "paper_only": True,
+                "read_only": True,
+                "net_pnl_usdt": 0.0,
+                "equity_usdt": 1000.0,
+                "positions": [],
+                "error": str(e),
+                "disclaimer": DISCLAIMER,
+            }
 
     @router.get("/health")
     async def dydx_health() -> dict[str, Any]:

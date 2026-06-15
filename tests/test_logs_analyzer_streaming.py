@@ -80,6 +80,55 @@ def test_logs_analyzer_cli_outputs_streaming_report(tmp_path: Path):
     assert "STALE_SIGNAL" in result.output
 
 
+def test_logs_analyzer_prefers_structured_dydx_log_and_event_level_pnl(tmp_path: Path):
+    log_dir = tmp_path / "logs" / "logs à envoyer"
+    structured_dir = tmp_path / "logs" / "structured"
+    log_dir.mkdir(parents=True)
+    structured_dir.mkdir(parents=True)
+    (log_dir / "simulation_decisions_latest.jsonl").write_text("", encoding="utf-8")
+    rows = [
+        {
+            "event_type": "PAPER_OPEN",
+            "recorded_at_ms": 1,
+            "market_id": "SOL-USD",
+            "side": "LONG",
+            "fee_paid": 0.04,
+            "net_pnl_usdc": -0.04,
+            "wallet_count": 4,
+        },
+        {
+            "event_type": "NO_TRADE",
+            "recorded_at_ms": 2,
+            "reason": "STALE_SIGNAL",
+            "net_pnl_usdc": -0.04,
+        },
+        {
+            "event_type": "PAPER_PARTIAL_TP",
+            "recorded_at_ms": 3,
+            "market_id": "SOL-USD",
+            "gross_pnl": 0.50,
+            "net_pnl": 0.46,
+            "net_pnl_usdc": 0.42,
+            "reason": "TAKE_PROFIT_PARTIAL",
+        },
+    ]
+    (structured_dir / "decisions.jsonl").write_text(
+        "".join(json.dumps(row) + "\n" for row in rows),
+        encoding="utf-8",
+    )
+
+    report = analyze_logs_streaming(log_dir)
+
+    assert [path.name for path in report.source_files] == ["decisions.jsonl"]
+    assert report.total_decisions == 3
+    assert report.accepted == 2
+    assert report.refused == 1
+    assert report.net_pnl_usdc == 0.42
+    assert report.fees_usdc == 0.08
+    assert report.reasons["STALE_SIGNAL"] == 1
+    assert report.reasons["TAKE_PROFIT_PARTIAL"] == 0
+
+
 def test_root_cause_and_refusal_cli_are_actionable(tmp_path: Path):
     log_dir = tmp_path / "logs"
     _write_rows(

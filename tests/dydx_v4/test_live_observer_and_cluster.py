@@ -306,6 +306,8 @@ class TestLiveObserver:
     def test_max_open_positions_respected(self):
         """Max 3 positions paper simultanées."""
         obs = _make_observer()
+        obs.config.correlation_gate_enabled = False  # test dédié au plafond, pas à la corrélation
+        obs.config.max_open_paper_trades = 3
         from hyper_smart_observer.dydx_v4.cluster_detector import ClusterSignal
 
         markets = ["ETH-USD", "BTC-USD", "SOL-USD"]
@@ -335,7 +337,7 @@ class TestLiveObserver:
 
         assert obs.stats.positions_opened == 3
 
-        # 4ème signal → refusé
+        # 4ème signal → refusé par le plafond configure
         obs._mark_prices["SOL-USD"] = 66.0
         extra_cluster = ClusterSignal(
             market_id="SOL-USD",
@@ -353,17 +355,18 @@ class TestLiveObserver:
             cluster_id="test_4th",
         )
         obs._evaluate_cluster(extra_cluster)
-        assert obs.stats.positions_opened == 3  # pas de 4ème
+        assert obs.stats.positions_opened == 3
+        assert "MAX_OPEN_REACHED" in obs._no_trade_reasons
 
     def test_blocked_market_refused(self):
-        """HYPE ne doit jamais ouvrir de position paper."""
+        """XYZ:CL ne doit jamais ouvrir de position paper (blacklisted)."""
         obs = _make_observer()
-        obs._mark_prices["HYPE"] = 58.0
+        obs._mark_prices["XYZ:CL"] = 58.0
 
         from hyper_smart_observer.dydx_v4.cluster_detector import ClusterSignal
         now_ms = int(time.time() * 1000)
         cluster = ClusterSignal(
-            market_id="HYPE",
+            market_id="XYZ:CL",
             side="SHORT",
             wallet_count=5,
             participating_wallets=["dydx1aaa", "dydx1bbb", "dydx1ccc", "dydx1ddd", "dydx1eee"],
@@ -379,7 +382,7 @@ class TestLiveObserver:
         )
         obs._evaluate_cluster(cluster)
         assert obs.stats.positions_opened == 0
-        assert "HYPE:SHORT" not in obs._open_positions
+        assert "XYZ:CL:SHORT" not in obs._open_positions
 
     def test_no_real_orders_in_any_method(self):
         """Aucune méthode ne doit émettre d'ordre réel (vérification sécurité)."""

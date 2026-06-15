@@ -9,10 +9,11 @@ from typing import Any
 
 LOGS_TO_SEND_DIRNAME = "logs \u00e0 envoyer"
 DECISION_LOG_FILES = (
-    "simulation_decisions_append_only.jsonl",
     "simulation_decisions_latest.jsonl",
     "cli_simulation_decisions_latest.jsonl",
+    "simulation_decisions_append_only.jsonl",
 )
+STRUCTURED_DECISION_LOG = ("structured", "decisions.jsonl")
 SUMMARY_CACHE_FILE = "simulation_log_summary_cache.json"
 SUMMARY_CACHE_VERSION = 1
 
@@ -62,8 +63,7 @@ def default_logs_to_send_dir(root: Path = Path(".")) -> Path:
 
 
 def load_decision_events(log_dir: Path) -> tuple[DecisionEvent, ...]:
-    candidates = [log_dir / name for name in DECISION_LOG_FILES]
-    for path in candidates:
+    for path in _decision_file_candidates(log_dir):
         if path.exists() and path.stat().st_size > 0:
             return tuple(_row_to_event(row) for row in _read_jsonl(path))
     return ()
@@ -300,11 +300,29 @@ def _count_nonempty_lines(path: Path) -> int:
 
 
 def _primary_decision_file(log_dir: Path) -> Path | None:
-    for name in DECISION_LOG_FILES:
-        path = log_dir / name
+    for path in _decision_file_candidates(log_dir):
         if path.exists() and path.stat().st_size > 0:
             return path
     return None
+
+
+def _decision_file_candidates(log_dir: Path) -> tuple[Path, ...]:
+    """Return decision logs in UI-friendly priority order.
+
+    The old HyperSmart exporter writes under ``logs/logs à envoyer`` while the
+    dYdX simulation engine writes append-only structured decisions under
+    ``logs/structured/decisions.jsonl``. Prefer the small/latest files first,
+    then the dYdX structured log, and keep the huge append-only export last so a
+    dashboard refresh cannot freeze on a multi-GB historical file.
+    """
+
+    structured = log_dir.parent.joinpath(*STRUCTURED_DECISION_LOG)
+    return (
+        log_dir / "simulation_decisions_latest.jsonl",
+        structured,
+        log_dir / "cli_simulation_decisions_latest.jsonl",
+        log_dir / "simulation_decisions_append_only.jsonl",
+    )
 
 
 def _file_signature(path: Path) -> dict[str, Any]:
@@ -379,27 +397,73 @@ def _write_summary_cache(log_dir: Path, path: Path, signature: dict[str, Any], a
 
 
 def _row_to_event(row: dict[str, Any]) -> DecisionEvent:
+    event_type = _to_str(row.get("event_type"))
     return DecisionEvent(
-        timestamp_ms=_to_int(row.get("timestamp_ms")),
-        wallet_address=_to_str(row.get("wallet_address")),
-        coin=_to_str(row.get("coin")),
-        leader_action=_to_str(row.get("leader_action") or row.get("action")),
+        timestamp_ms=_to_int(row.get("timestamp_ms") or row.get("recorded_at_ms") or row.get("closed_at_ms")),
+        wallet_address=_to_str(row.get("wallet_address") or row.get("leader_wallet")),
+        coin=_to_str(row.get("coin") or row.get("market_id")),
+        leader_action=_to_str(row.get("leader_action") or row.get("action") or event_type),
         leader_side=_to_str(row.get("leader_side") or row.get("side")),
-        bot_decision=_to_str(row.get("bot_decision") or row.get("action") or "UNKNOWN") or "UNKNOWN",
-        status=_to_str(row.get("status") or "LOCAL_REPLAY") or "LOCAL_REPLAY",
+        bot_decision=_to_str(row.get("bot_decision") or row.get("action") or event_type or "UNKNOWN") or "UNKNOWN",
+        status=_event_status(row),
         reason=_to_str(row.get("reason") or "") or "",
-        plain_english=_to_str(row.get("plain_english") or "") or "",
+        plain_english=_to_str(row.get("plain_english") or row.get("detail") or "") or "",
         edge_remaining_bps=_to_float(row.get("edge_remaining_bps")),
         copy_degradation_bps=_to_float(row.get("copy_degradation_bps")),
         signal_age_ms=_to_int(row.get("signal_age_ms")),
-        consensus_wallets=_to_int(row.get("consensus_wallets")),
-        copied_notional_usdt=_to_float(row.get("copied_notional_usdt") or row.get("notional")),
-        estimated_net_pnl_usdc=_to_float(row.get("estimated_net_pnl_usdc") or row.get("realized_pnl")),
-        gross_pnl_usdc=_to_float(row.get("gross_pnl_usdc")),
-        fee_cost_usdc=_to_float(row.get("fee_cost_usdc") or row.get("fee")),
+        consensus_wallets=_to_int(row.get("consensus_wallets") or row.get("wallet_count")),
+        copied_notional_usdt=_to_float(row.get("copied_notional_usdt") or row.get("notional") or row.get("size")),
+        estimated_net_pnl_usdc=_event_net_pnl(row),
+        gross_pnl_usdc=_to_float(row.get("gross_pnl_usdc") or row.get("gross_pnl")),
+        fee_cost_usdc=_event_fee(row),
         execution=_to_str(row.get("execution") or "forbidden") or "forbidden",
         research_only=bool(row.get("research_only", True)),
     )
+
+
+def _event_status(row: dict[str, Any]) -> str:
+    status = _to_str(row.get("status"))
+    if status:
+        return status
+    event_type = (_to_str(row.get("event_type")) or "").upper()
+    if event_type == "NO_TRADE":
+        return "REFUSED"
+    if event_type.startswith("PAPER_"):
+        return "LOCAL_REPLAY"
+    return "LOCAL_REPLAY"
+
+
+def _event_net_pnl(row: dict[str, Any]) -> float | None:
+    """Return event-level PnL, not a cumulative session balance.
+
+    dYdX structured rows carry ``net_pnl_usdc`` as the current cumulative
+    session PnL. Summing that field across rows is wrong and explains confusing
+    dashboard totals. For structured rows, use per-event fields instead:
+    entry fee on open, realized net on close/partial TP, zero on no-trade.
+    """
+
+    event_type = (_to_str(row.get("event_type")) or "").upper()
+    if event_type == "NO_TRADE":
+        return 0.0
+    if event_type == "PAPER_OPEN":
+        fee = _to_float(row.get("fee_paid") or row.get("fee_cost_usdc") or row.get("fee"))
+        return -fee if fee is not None else 0.0
+    if event_type in {"PAPER_CLOSE", "PAPER_PARTIAL_TP"}:
+        pnl = _to_float(row.get("net_pnl") or row.get("event_net_pnl_usdc"))
+        return pnl if pnl is not None else 0.0
+    return _to_float(row.get("estimated_net_pnl_usdc") or row.get("realized_pnl"))
+
+
+def _event_fee(row: dict[str, Any]) -> float | None:
+    event_type = (_to_str(row.get("event_type")) or "").upper()
+    if event_type == "PAPER_OPEN":
+        return _to_float(row.get("fee_paid") or row.get("fee_cost_usdc") or row.get("fee"))
+    if event_type in {"PAPER_CLOSE", "PAPER_PARTIAL_TP"}:
+        gross = _to_float(row.get("gross_pnl") or row.get("gross_pnl_usdc"))
+        net = _to_float(row.get("net_pnl") or row.get("event_net_pnl_usdc"))
+        if gross is not None and net is not None:
+            return abs(gross - net)
+    return _to_float(row.get("fee_cost_usdc") or row.get("fee"))
 
 
 def _to_str(value: Any) -> str | None:

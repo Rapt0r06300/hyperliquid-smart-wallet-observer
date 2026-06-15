@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import logging
 import time
+import asyncio
 from dataclasses import dataclass, field
 from typing import Optional
 
@@ -22,6 +23,7 @@ from hyper_smart_observer.dydx_v4.cosmos_client import (
     LIQUID_MARKETS,
 )
 from hyper_smart_observer.dydx_v4.rest_client import DydxIndexerRestClient, RestError
+from hyper_smart_observer.dydx_v4.leader_quality import score_trades_by_market
 from hyper_smart_observer.dydx_v4.scoring import compute_account_score, TradeRecord
 
 logger = logging.getLogger(__name__)
@@ -50,6 +52,8 @@ class WalletScore:
     winrate: float = 0.0
     profit_factor: float = 1.0
     trade_count: int = 0
+    recent_score: float = 0.0
+    market_stats: dict[str, dict] = field(default_factory=dict)
     market_priority_score: float = 0.0
     balance_score: float = 0.0
     position_count_score: float = 0.0
@@ -245,6 +249,109 @@ class DydxWalletDiscovery:
             discovery_method=discovery_method,
         )
 
+    async def fast_discover_async(
+        self,
+        n: int = 20,
+        *,
+        max_candidates: int = 500,
+        concurrency: int = 10,
+    ) -> DiscoveryResult:
+        """
+        Variante async bornée du scan rapide.
+
+        READ-ONLY/PAPER-ONLY. Le scan Cosmos reste appelé via thread pour garder
+        la compatibilité avec le client existant; le scoring/enrichment est
+        parallélisé avec un sémaphore strict afin d'éviter les rafales réseau.
+        """
+        import hashlib
+
+        started = int(time.time() * 1000)
+        run_id = hashlib.sha256(f"fast-async:{started}".encode()).hexdigest()[:16]
+        if self._demo_mode:
+            shortlist = _build_demo_wallets()[:n]
+            finished = int(time.time() * 1000)
+            return DiscoveryResult(
+                run_id=run_id,
+                started_at_ms=started,
+                finished_at_ms=finished,
+                candidates_scanned=0,
+                shortlisted=shortlist,
+                discovery_method="demo_synthetic_async",
+            )
+
+        try:
+            candidates = await asyncio.to_thread(
+                self.cosmos.scan_subaccounts,
+                max_pages=60,
+                page_size=100,
+                min_usdc=250.0,
+                only_with_positions=True,
+            )
+        except Exception as e:
+            logger.warning("Cosmos LCD unavailable async: %s — activating demo mode", e)
+            self._demo_mode = True
+            shortlist = _build_demo_wallets()[:n]
+            finished = int(time.time() * 1000)
+            return DiscoveryResult(
+                run_id=run_id,
+                started_at_ms=started,
+                finished_at_ms=finished,
+                candidates_scanned=0,
+                shortlisted=shortlist,
+                discovery_method="demo_synthetic_async_fallback",
+            )
+
+        candidates = list(candidates or [])[:max(1, max_candidates)]
+        shortlist = await self._score_candidates_async(candidates, n=n, concurrency=concurrency)
+        finished = int(time.time() * 1000)
+        return DiscoveryResult(
+            run_id=run_id,
+            started_at_ms=started,
+            finished_at_ms=finished,
+            candidates_scanned=len(candidates),
+            shortlisted=shortlist,
+            discovery_method="fast_cosmos_lcd_async",
+        )
+
+    async def _score_candidates_async(
+        self,
+        candidates: list[OnChainSubaccount],
+        *,
+        n: int,
+        concurrency: int = 10,
+    ) -> list[WalletScore]:
+        """Scorer jusqu'à N candidats avec concurrence bornée."""
+        sem = asyncio.Semaphore(max(1, int(concurrency)))
+
+        async def _score_one(sub: OnChainSubaccount) -> Optional[WalletScore]:
+            async with sem:
+                try:
+                    ws = await asyncio.to_thread(self._score_wallet, sub)
+                    return ws if ws.total_score > 0 else None
+                except Exception as e:
+                    logger.debug("async score wallet skipped: %s", e)
+                    return None
+
+        scored_raw = await asyncio.gather(*(_score_one(sub) for sub in candidates))
+        scored = [w for w in scored_raw if w is not None]
+        scored.sort(key=lambda x: x.total_score, reverse=True)
+
+        enrich_sem = asyncio.Semaphore(max(1, min(int(concurrency), 10)))
+
+        async def _enrich(ws: WalletScore) -> WalletScore:
+            async with enrich_sem:
+                try:
+                    await asyncio.to_thread(self._enrich_with_indexer, ws)
+                except Exception as e:
+                    logger.debug("async enrich wallet skipped: %s", e)
+                return ws
+
+        top_for_enrich = scored[: min(50, len(scored))]
+        if top_for_enrich:
+            await asyncio.gather(*(_enrich(ws) for ws in top_for_enrich))
+        scored.sort(key=lambda x: x.total_score, reverse=True)
+        return scored[:n]
+
     def discover_top_wallets(self, n: int = 20) -> DiscoveryResult:
         """Découverte complète (lente). Paper-only. Aucun ordre."""
         import hashlib
@@ -438,6 +545,23 @@ class DydxWalletDiscovery:
                 ws.trade_count = account_score.total_trades
                 ws.winrate = account_score.winrate
                 ws.profit_factor = account_score.profit_factor
+                ws.recent_score = account_score.recency_score
+                market_scores = score_trades_by_market(
+                    _closed_records,
+                    current_ts_ms=int(time.time() * 1000),
+                )
+                ws.market_stats = {
+                    market: {
+                        "trade_count": ms.trade_count,
+                        "winrate": ms.winrate,
+                        "profit_factor": ms.profit_factor,
+                        "expectancy_usdc": ms.expectancy_usdc,
+                        "net_pnl_usdc": ms.net_pnl_usdc,
+                        "recent_score": ms.recent_score,
+                        "confidence": ms.confidence,
+                    }
+                    for market, ms in market_scores.items()
+                }
                 data_conf = account_score.data_confidence
                 pnl_bonus = min(0.3, max(-0.1,
                     account_score.expectancy / max(abs(account_score.expectancy) + 1, 1.0)

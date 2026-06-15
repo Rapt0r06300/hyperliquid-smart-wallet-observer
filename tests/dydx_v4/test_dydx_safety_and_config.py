@@ -53,12 +53,12 @@ class TestDefaultConfig:
 
     def test_max_signal_age_ms(self):
         cfg = DydxV4Config()
-        assert cfg.max_signal_age_ms == 15000
+        assert cfg.max_signal_age_ms == 30000  # aligné avec edge_calculator half-life
         assert cfg.hard_max_signal_age_ms == 30000
 
     def test_min_edge_bps(self):
         cfg = DydxV4Config()
-        assert cfg.min_edge_bps >= 5.0
+        assert cfg.min_edge_bps >= 3.0  # recalibré: filtre le bruit, pas les modestes
 
     def test_starting_balance(self):
         cfg = DydxV4Config()
@@ -66,7 +66,28 @@ class TestDefaultConfig:
 
     def test_max_open_paper_trades(self):
         cfg = DydxV4Config()
-        assert cfg.max_open_paper_trades == 3
+        assert cfg.max_open_paper_trades == 25  # env override ignored (safety)
+
+    def test_trend_regime_and_dynamic_sizing_defaults(self):
+        cfg = DydxV4Config()
+        assert cfg.trend_filter_enabled is True
+        assert cfg.regime_detector_enabled is True
+        assert cfg.dynamic_sizing_enabled is True
+        assert cfg.paper_notional_min_usdc == 20.0
+        assert cfg.paper_notional_base_usdc == 75.0
+        assert cfg.paper_notional_max_usdc == 100.0
+        assert cfg.volume_spike_enabled is True
+        assert cfg.correlation_gate_enabled is True
+        assert cfg.confluence_enabled is True
+        assert cfg.consensus_window_ms == 3 * 60 * 1000
+        assert cfg.consensus_recency_bonus_window_ms == 30_000
+        assert cfg.funding_edge_enabled is True
+        assert cfg.funding_edge_horizon_hours == 1.0
+        assert cfg.decision_log_enabled is True
+        assert cfg.decision_log_path.endswith("decisions.jsonl")
+        assert cfg.partial_tp_enabled is True
+        assert cfg.partial_tp_fraction == 0.50
+        assert cfg.partial_tp2_multiplier == 2.0
 
 
 class TestSafetyViolations:
@@ -188,7 +209,7 @@ class TestSignalGate:
             config=cfg,
             signal_age_ms=1000,
             account_address="0xabc123",
-            market="DOGE-USD",  # pas dans la whitelist
+            market="FAKECOIN-USD",  # pas dans la whitelist
             edge_remaining_bps=100.0,
             total_cost_bps=20.0,
         )
@@ -215,21 +236,21 @@ class TestSignalGate:
             signal_age_ms=1000,
             account_address="0xabc123",
             market="BTC-USD",
-            edge_remaining_bps=3.0,  # < 5 bps min
+            edge_remaining_bps=1.5,  # < 3 bps min (recalibré)
             total_cost_bps=1.0,
         )
         assert result.allowed is False
         assert "EDGE" in result.reason
 
     def test_cost_multiplier_blocked(self):
-        """Edge doit être > 1.5x total_cost_bps."""
+        """Edge doit être > 1.2x total_cost_bps (recalibré)."""
         cfg = DydxV4Config()
         result = gate_signal_for_live(
             config=cfg,
             signal_age_ms=1000,
             account_address="0xabc123",
             market="BTC-USD",
-            edge_remaining_bps=25.0,   # > 5 mais < 1.5x*20=30
+            edge_remaining_bps=18.0,   # > 3 mais < 1.0x*20=20
             total_cost_bps=20.0,
         )
         assert result.allowed is False
@@ -248,3 +269,48 @@ class TestAuditConfig:
         cfg = load_config_from_env()
         assert cfg.allow_trading is False
         assert cfg.paper_only is True
+
+    def test_env_config_loads_trend_regime_and_sizing(self, monkeypatch):
+        monkeypatch.setenv("DYDX_TREND_FILTER", "0")
+        monkeypatch.setenv("DYDX_REGIME_DETECTOR", "0")
+        monkeypatch.setenv("DYDX_DYNAMIC_SIZING", "1")
+        monkeypatch.setenv("DYDX_PAPER_NOTIONAL_MIN_USDC", "25")
+        monkeypatch.setenv("DYDX_PAPER_NOTIONAL_BASE_USDC", "55")
+        monkeypatch.setenv("DYDX_PAPER_NOTIONAL_MAX_USDC", "95")
+        monkeypatch.setenv("DYDX_CHOPPY_EFFICIENCY_MAX", "0.22")
+        monkeypatch.setenv("DYDX_VOLUME_SPIKE_ZSCORE_MIN", "2.5")
+        monkeypatch.setenv("DYDX_CORRELATION_GATE", "0")
+        monkeypatch.setenv("DYDX_MAX_CORRELATED_SAME_SIDE", "2")
+        monkeypatch.setenv("DYDX_CONFLUENCE_WINDOW_MS", "15000")
+        monkeypatch.setenv("DYDX_CONSENSUS_RECENCY_BONUS_WINDOW_MS", "12000")
+        monkeypatch.setenv("DYDX_CONSENSUS_RECENCY_EDGE_MULTIPLIER", "1.09")
+        monkeypatch.setenv("DYDX_FUNDING_EDGE", "0")
+        monkeypatch.setenv("DYDX_FUNDING_EDGE_HORIZON_HOURS", "2.5")
+        monkeypatch.setenv("DYDX_DECISION_LOG", "0")
+        monkeypatch.setenv("DYDX_DECISION_LOG_PATH", "logs/custom_decisions.jsonl")
+        monkeypatch.setenv("DYDX_PARTIAL_TP", "0")
+        monkeypatch.setenv("DYDX_PARTIAL_TP_FRACTION", "0.4")
+        monkeypatch.setenv("DYDX_PARTIAL_TP2_MULTIPLIER", "2.5")
+        cfg = load_config_from_env()
+        assert cfg.trend_filter_enabled is False
+        assert cfg.regime_detector_enabled is False
+        assert cfg.dynamic_sizing_enabled is True
+        assert cfg.paper_notional_min_usdc == 25.0
+        assert cfg.paper_notional_base_usdc == 55.0
+        assert cfg.paper_notional_max_usdc == 95.0
+        assert cfg.choppy_efficiency_max == 0.22
+        assert cfg.volume_spike_zscore_min == 2.5
+        assert cfg.correlation_gate_enabled is False
+        assert cfg.consensus_recency_bonus_window_ms == 12000
+        assert cfg.consensus_recency_edge_multiplier == 1.09
+        assert cfg.funding_edge_enabled is False
+        assert cfg.funding_edge_horizon_hours == 2.5
+        assert cfg.decision_log_enabled is False
+        assert cfg.decision_log_path == "logs/custom_decisions.jsonl"
+        assert cfg.partial_tp_enabled is False
+        assert cfg.partial_tp_fraction == 0.4
+        assert cfg.partial_tp2_multiplier == 2.5
+        assert cfg.max_correlated_same_side == 2  # env override
+        assert cfg.confluence_window_ms == 15000
+        assert cfg.allow_trading is False
+        assert cfg.allow_private_key is False

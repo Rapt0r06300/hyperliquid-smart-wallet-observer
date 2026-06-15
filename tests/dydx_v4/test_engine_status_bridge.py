@@ -51,3 +51,41 @@ def test_engine_status_exposes_observer_scan_flow_and_unrealized_pnl() -> None:
     assert status["scan"]["discovery_wallets"] == 2
     assert status["winning_trades"] == 1
 
+
+def test_engine_realtime_tick_is_paper_only_and_live_marked() -> None:
+    cfg = DydxV4Config(network=DydxNetwork.TESTNET, market_flow_enabled=False)
+    engine = DydxEngine(config=cfg)
+    refreshed = {"count": 0}
+
+    def _refresh_marks() -> None:
+        refreshed["count"] += 1
+
+    engine._observer = SimpleNamespace(
+        _mark_prices={"ETH-USD": 101.0},
+        _open_positions={},
+        _refresh_market_prices=_refresh_marks,
+        get_status=lambda: {
+            "running": True,
+            "session_id": "paper-session",
+            "mode": "PAPER",
+            "net_pnl_usdc": 1.75,
+            "realized_pnl_usdc": 0.25,
+            "unrealized_pnl_usdc": 1.50,
+            "equity": 1001.75,
+            "total_trades": 2,
+            "winning_trades": 1,
+            "winrate": "50.00%",
+            "shortlist_size": 3,
+        },
+    )
+
+    tick = engine.get_realtime_tick()
+
+    assert tick["paper_only"] is True
+    assert tick["read_only"] is True
+    assert tick["session_id"] == "paper-session"
+    assert tick["net_pnl_usdt"] == 1.75
+    assert tick["equity_usdt"] == 1001.75
+    assert tick["open_positions"] == 0
+    assert tick["prices"]["ETH-USD"] == 101.0
+    assert refreshed["count"] == 1

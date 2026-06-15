@@ -71,7 +71,7 @@ def parse_trades(contents: dict) -> list[tuple[str, float, float]]:
 class MarketFlowWindow:
     """Fenêtre glissante des trades (ts, market, side, usdc)."""
 
-    def __init__(self, window_ms: int = 8000, maxlen: int = 500_000) -> None:
+    def __init__(self, window_ms: int = 12000, maxlen: int = 500_000) -> None:
         self.window_ms = window_ms
         self.maxlen = maxlen
         self._items: deque = deque()

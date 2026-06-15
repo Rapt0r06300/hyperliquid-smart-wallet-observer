@@ -9,10 +9,11 @@ from typing import Any, Iterable
 
 
 DECISION_LOG_FILES = (
-    "simulation_decisions_append_only.jsonl",
     "simulation_decisions_latest.jsonl",
     "cli_simulation_decisions_latest.jsonl",
+    "simulation_decisions_append_only.jsonl",
 )
+STRUCTURED_DECISION_LOG = ("structured", "decisions.jsonl")
 
 
 @dataclass(slots=True)
@@ -112,11 +113,12 @@ def analyze_logs_streaming(log_dir: Path) -> LogMetricsReport:
         report.total_decisions += 1
         report.actions[row.action] += 1
         report.status_counts[row.status] += 1
-        if row.status == "REFUSED" or row.action in {"NO_TRADE", "REFUSED"}:
+        is_refused = row.status == "REFUSED" or row.action in {"NO_TRADE", "REFUSED"}
+        if is_refused:
             report.refused += 1
         else:
             report.accepted += 1
-        if row.reason:
+        if row.reason and is_refused:
             for reason in split_reasons(row.reason):
                 report.reasons[reason] += 1
                 report.pnl_by_reason[reason] += row.estimated_net_pnl_usdc
@@ -124,6 +126,9 @@ def analyze_logs_streaming(log_dir: Path) -> LogMetricsReport:
                     report.orphan_close_count += 1
                 if reason == "ADD_WITHOUT_ORIGINAL_OPEN_REFUSED":
                     report.add_without_open_count += 1
+        elif row.reason:
+            for reason in split_reasons(row.reason):
+                report.pnl_by_reason[reason] += row.estimated_net_pnl_usdc
         if row.estimated_net_pnl_usdc > 0:
             report.positive_events += 1
         if row.estimated_net_pnl_usdc < 0:
@@ -154,23 +159,24 @@ def analyze_logs_streaming(log_dir: Path) -> LogMetricsReport:
 
 
 def row_from_payload(row: dict[str, Any]) -> LogDecisionRow:
-    action = _to_str(row.get("bot_decision") or row.get("action") or row.get("leader_action") or "UNKNOWN") or "UNKNOWN"
-    status = (_to_str(row.get("status")) or "LOCAL_REPLAY").upper()
+    event_type = _to_str(row.get("event_type"))
+    action = _to_str(row.get("bot_decision") or row.get("action") or row.get("leader_action") or event_type or "UNKNOWN") or "UNKNOWN"
+    status = _row_status(row).upper()
     return LogDecisionRow(
-        timestamp_ms=_to_int(row.get("timestamp_ms")),
-        wallet_address=_to_str(row.get("wallet_address")),
-        coin=_to_str(row.get("coin")),
+        timestamp_ms=_to_int(row.get("timestamp_ms") or row.get("recorded_at_ms") or row.get("closed_at_ms")),
+        wallet_address=_to_str(row.get("wallet_address") or row.get("leader_wallet")),
+        coin=_to_str(row.get("coin") or row.get("market_id")),
         action=action.upper(),
         status=status,
         reason=_to_str(row.get("reason")) or "",
         edge_remaining_bps=_to_float(row.get("edge_remaining_bps")),
         copy_degradation_bps=_to_float(row.get("copy_degradation_bps")),
         signal_age_ms=_to_int(row.get("signal_age_ms")),
-        consensus_wallets=_to_int(row.get("consensus_wallets")),
-        notional_usdc=_to_float(row.get("copied_notional_usdt") or row.get("notional") or row.get("notional_usdc")),
-        estimated_net_pnl_usdc=_to_float(row.get("estimated_net_pnl_usdc") or row.get("realized_pnl")) or 0.0,
-        gross_pnl_usdc=_to_float(row.get("gross_pnl_usdc")) or 0.0,
-        fee_cost_usdc=_to_float(row.get("fee_cost_usdc") or row.get("fee")) or 0.0,
+        consensus_wallets=_to_int(row.get("consensus_wallets") or row.get("wallet_count")),
+        notional_usdc=_to_float(row.get("copied_notional_usdt") or row.get("notional") or row.get("notional_usdc") or row.get("size")),
+        estimated_net_pnl_usdc=_row_event_net_pnl(row) or 0.0,
+        gross_pnl_usdc=_to_float(row.get("gross_pnl_usdc") or row.get("gross_pnl")) or 0.0,
+        fee_cost_usdc=_row_event_fee(row) or 0.0,
     )
 
 
@@ -247,7 +253,61 @@ def build_recommendations(report: LogMetricsReport) -> tuple[str, ...]:
 
 
 def _existing_decision_files(log_dir: Path) -> list[Path]:
-    return [log_dir / name for name in DECISION_LOG_FILES if (log_dir / name).exists()]
+    """Return one active decision source, preferring fresh/small logs.
+
+    The dYdX paper engine writes ``logs/structured/decisions.jsonl`` while the
+    historical HyperSmart exporter writes under ``logs/logs à envoyer``. Using a
+    single prioritized source avoids double-counting the same simulated
+    decisions and avoids streaming multi-GB append-only archives during UI QA.
+    """
+
+    structured = log_dir.parent.joinpath(*STRUCTURED_DECISION_LOG)
+    for path in (
+        log_dir / "simulation_decisions_latest.jsonl",
+        structured,
+        log_dir / "cli_simulation_decisions_latest.jsonl",
+        log_dir / "simulation_decisions_append_only.jsonl",
+    ):
+        if path.exists() and path.stat().st_size > 0:
+            return [path]
+    return []
+
+
+def _row_status(row: dict[str, Any]) -> str:
+    status = _to_str(row.get("status"))
+    if status:
+        return status
+    event_type = (_to_str(row.get("event_type")) or "").upper()
+    if event_type == "NO_TRADE":
+        return "REFUSED"
+    if event_type.startswith("PAPER_"):
+        return "LOCAL_REPLAY"
+    return "LOCAL_REPLAY"
+
+
+def _row_event_net_pnl(row: dict[str, Any]) -> float | None:
+    event_type = (_to_str(row.get("event_type")) or "").upper()
+    if event_type == "NO_TRADE":
+        return 0.0
+    if event_type == "PAPER_OPEN":
+        fee = _to_float(row.get("fee_paid") or row.get("fee_cost_usdc") or row.get("fee"))
+        return -fee if fee is not None else 0.0
+    if event_type in {"PAPER_CLOSE", "PAPER_PARTIAL_TP"}:
+        pnl = _to_float(row.get("net_pnl") or row.get("event_net_pnl_usdc"))
+        return pnl if pnl is not None else 0.0
+    return _to_float(row.get("estimated_net_pnl_usdc") or row.get("realized_pnl"))
+
+
+def _row_event_fee(row: dict[str, Any]) -> float | None:
+    event_type = (_to_str(row.get("event_type")) or "").upper()
+    if event_type == "PAPER_OPEN":
+        return _to_float(row.get("fee_paid") or row.get("fee_cost_usdc") or row.get("fee"))
+    if event_type in {"PAPER_CLOSE", "PAPER_PARTIAL_TP"}:
+        gross = _to_float(row.get("gross_pnl") or row.get("gross_pnl_usdc"))
+        net = _to_float(row.get("net_pnl") or row.get("event_net_pnl_usdc"))
+        if gross is not None and net is not None:
+            return abs(gross - net)
+    return _to_float(row.get("fee_cost_usdc") or row.get("fee"))
 
 
 def _numeric_summary(values: list[int] | list[float]) -> dict[str, float | int | None]:

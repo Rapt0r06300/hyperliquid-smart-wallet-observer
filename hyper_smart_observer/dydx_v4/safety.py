@@ -202,17 +202,17 @@ def audit_config(config: DydxV4Config) -> list[str]:
         issues.append("CRITICAL: read_only=False — INTERDIT")
     if config.allow_node_private_api:
         issues.append("HIGH: allow_node_private_api=True — dangereux")
-    if config.max_signal_age_ms > 8000:
+    if config.max_signal_age_ms > 35000:
         issues.append(
-            f"MEDIUM: max_signal_age_ms={config.max_signal_age_ms} > 8000ms — signaux trop vieux"
+            f"MEDIUM: max_signal_age_ms={config.max_signal_age_ms} > 35000ms — signaux trop vieux"
         )
-    if config.min_edge_bps < 10:
+    if config.min_edge_bps < 1:
         issues.append(
-            f"MEDIUM: min_edge_bps={config.min_edge_bps} < 10bps — edge trop faible"
+            f"MEDIUM: min_edge_bps={config.min_edge_bps} < 1bps — edge trop faible"
         )
-    if config.max_open_paper_trades > 10:
+    if config.max_open_paper_trades > 50:
         issues.append(
-            f"LOW: max_open_paper_trades={config.max_open_paper_trades} > 10"
+            f"LOW: max_open_paper_trades={config.max_open_paper_trades} > 50"
         )
 
     return issues

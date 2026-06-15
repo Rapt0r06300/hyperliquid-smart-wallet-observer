@@ -148,6 +148,10 @@ class TrailingState:
     armed: bool = False
     best_price: float = 0.0
     trail_stop_price: float = 0.0
+    # Breakeven stop — protège les gains acquis
+    breakeven_armed: bool = False
+    breakeven_trigger_price: float = 0.0  # prix au-delà duquel on arme le breakeven
+    breakeven_stop_price: float = 0.0     # nouveau SL = entry + micro-profit
 
     def update(self, mark_price: float) -> float | None:
         """
@@ -157,6 +161,17 @@ class TrailingState:
         if self.trail_distance <= 0 or mark_price <= 0:
             return None
         is_long = self.side.upper() == "LONG"
+
+        # Breakeven check — armer quand le prix dépasse le trigger
+        if not self.breakeven_armed and self.breakeven_trigger_price > 0:
+            if (is_long and mark_price >= self.breakeven_trigger_price) or (
+                not is_long and mark_price <= self.breakeven_trigger_price
+            ):
+                self.breakeven_armed = True
+                logger.info(
+                    "BREAKEVEN ARMED %s at %.6f → SL moved to %.6f",
+                    self.side, mark_price, self.breakeven_stop_price,
+                )
 
         if not self.armed:
             if (is_long and mark_price >= self.trail_arm_price) or (

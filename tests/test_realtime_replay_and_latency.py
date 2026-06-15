@@ -123,6 +123,64 @@ def test_summary_cache_is_reused_only_for_same_source_signature(tmp_path):
     assert refreshed.event_count == 3
 
 
+def test_summary_uses_structured_dydx_log_when_latest_export_is_empty(tmp_path):
+    log_dir = tmp_path / "logs" / "logs à envoyer"
+    structured_dir = tmp_path / "logs" / "structured"
+    log_dir.mkdir(parents=True)
+    structured_dir.mkdir(parents=True)
+    (log_dir / "simulation_decisions_latest.jsonl").write_text("", encoding="utf-8")
+    rows = [
+        {
+            "event_type": "NO_TRADE",
+            "recorded_at_ms": 10,
+            "reason": "EDGE_INSUFFICIENT",
+            "net_pnl_usdc": 0.0,
+            "equity_usdc": 1000.0,
+        },
+        {
+            "event_type": "PAPER_OPEN",
+            "recorded_at_ms": 20,
+            "market_id": "BTC-USD",
+            "side": "LONG",
+            "fee_paid": 0.05,
+            "net_pnl_usdc": -0.05,
+            "equity_usdc": 999.95,
+            "wallet_count": 3,
+        },
+        {
+            "event_type": "NO_TRADE",
+            "recorded_at_ms": 30,
+            "reason": "STALE_SIGNAL",
+            "net_pnl_usdc": -0.05,
+            "equity_usdc": 999.95,
+        },
+        {
+            "event_type": "PAPER_CLOSE",
+            "recorded_at_ms": 40,
+            "market_id": "BTC-USD",
+            "side": "LONG",
+            "gross_pnl": 0.23,
+            "net_pnl": 0.20,
+            "net_pnl_usdc": 0.15,
+            "equity_usdc": 1000.15,
+            "reason": "TAKE_PROFIT",
+        },
+    ]
+    (structured_dir / "decisions.jsonl").write_text(
+        "".join(json.dumps(row) + "\n" for row in rows),
+        encoding="utf-8",
+    )
+
+    analysis = analyze_decision_logs_summary(log_dir)
+
+    assert analysis.event_count == 4
+    assert analysis.accepted_count == 2
+    assert analysis.refused_count == 2
+    assert analysis.total_estimated_pnl_usdc == 0.15
+    assert analysis.total_fees_usdc == 0.08
+    assert analysis.top_refusal_reasons[:2] == (("EDGE_INSUFFICIENT", 1), ("STALE_SIGNAL", 1))
+
+
 def test_realtime_replay_cli_updates_health(tmp_path):
     log_dir = tmp_path / "logs a envoyer"
     _write_events(log_dir)
