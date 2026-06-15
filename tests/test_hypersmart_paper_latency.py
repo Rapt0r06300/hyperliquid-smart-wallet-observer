@@ -1,4 +1,8 @@
-from datetime import UTC, datetime, timedelta
+from datetime import datetime, timedelta
+try:
+    from datetime import UTC
+except ImportError:
+    from datetime import timezone as _tz; UTC = _tz.utc
 
 import pytest
 

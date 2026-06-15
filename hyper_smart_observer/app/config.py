@@ -2,7 +2,11 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass
-from enum import StrEnum
+try:
+    from enum import StrEnum
+except ImportError:
+    from enum import Enum
+    class StrEnum(str, Enum): pass
 from pathlib import Path
 
 

@@ -1,7 +1,11 @@
 from __future__ import annotations
 
 import math
-from datetime import UTC, datetime
+from datetime import datetime
+try:
+    from datetime import UTC
+except ImportError:
+    from datetime import timezone as _tz; UTC = _tz.utc
 
 
 def calculate_history_days(first_seen: datetime | None, last_seen: datetime | None) -> float | None:

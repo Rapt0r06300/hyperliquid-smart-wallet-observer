@@ -116,11 +116,26 @@ _DEMO_WALLET_SPECS = [
         "markets": [
             {"market": "BTC-USD", "side": "LONG", "notional": 20000},
             {"market": "ETH-USD", "side": "LONG", "notional": 10000},
+            {"market": "SOL-USD", "side": "LONG", "notional": 5000},
         ],
         "balance": 80000,
         "winrate": 0.63,
         "profit_factor": 1.95,
         "score": 0.85,
+    },
+    {
+        "address": "dydx1tjfsuqfpjqfsuqfpjqfsuqfpjqfsuqfpjfdd",
+        "label": "DEMO-DELTA",
+        # Wallet 4: SOL + AVAX → clusters SOL (w/ GAMMA) et AVAX diversifiés
+        "markets": [
+            {"market": "SOL-USD", "side": "LONG", "notional": 8000},
+            {"market": "AVAX-USD", "side": "LONG", "notional": 6000},
+            {"market": "BNB-USD", "side": "LONG", "notional": 5000},
+        ],
+        "balance": 60000,
+        "winrate": 0.59,
+        "profit_factor": 1.70,
+        "score": 0.78,
     },
 ]
 
@@ -572,20 +587,4 @@ class DydxWalletDiscovery:
                     0.20 * ws.position_count_score +
                     0.15 * (ws.winrate - 0.3) / 0.4 +
                     0.10 * data_conf +
-                    pnl_bonus
-                ))
-                ws.note += (
-                    f" | scored: trades={total} wr={ws.winrate:.0%}"
-                    f" pf={ws.profit_factor:.2f} pnl={ws.net_pnl_usdc:+.2f}"
-                    f" dd={account_score.max_drawdown:.2f}"
-                )
-
-        except RestError as e:
-            logger.debug("Indexer enrichment error %s: %s", ws.address, e)
-        except Exception as e:
-            logger.debug("Enrichment error %s: %s", ws.address, e)
-
-
-def build_seed_shortlist() -> list[WalletScore]:
-    """Shortlist initiale vide."""
-    return []
+       

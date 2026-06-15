@@ -157,4 +157,26 @@ def create_dydx_router() -> APIRouter:
         except Exception as e:
             return {"running": False, "error": str(e), "disclaimer": DISCLAIMER}
 
+    @router.get("/whales")
+    async def dydx_whales(limit: int = 20) -> dict[str, Any]:
+        """Top performers dYdX (whale watchlist) — READ-ONLY, PAPER-ONLY."""
+        try:
+            eng = get_engine()
+            stats = eng.get_whale_stats()
+            top = eng.get_whale_top(n=min(limit, 100))
+            return {
+                "enabled": stats.get("enabled", False),
+                "tracked": stats.get("total_tracked", 0),
+                "hot_set_size": stats.get("hot_set_size", 0),
+                "candidates_known": stats.get("candidates_known", 0),
+                "last_refresh_ms": stats.get("last_refresh_ms", 0),
+                "refresh_count": stats.get("refresh_count", 0),
+                "avg_win_rate": round(float(stats.get("avg_win_rate") or 0), 3),
+                "avg_pnl_usdc": round(float(stats.get("avg_pnl_usdc") or 0), 2),
+                "top": top[:limit],
+                "disclaimer": DISCLAIMER,
+            }
+        except Exception as e:
+            return {"enabled": False, "error": str(e), "disclaimer": DISCLAIMER}
+
     return router

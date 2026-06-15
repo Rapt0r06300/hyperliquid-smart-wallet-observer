@@ -317,6 +317,17 @@ class DydxClusterDetector:
             signal_age_ms=signal_age,
         )
 
+    def reset_wallet(self, address: str) -> None:
+        """Réinitialiser l'état d'un wallet dans le cluster detector.
+
+        Efface la snapshot précédente: le prochain update_positions() traitera
+        toutes les positions comme NEW → événements OPEN frais générés.
+        Utilisé par le mode DEMO pour forcer un cycle OPEN/CLOSE périodique.
+        PAPER SIMULATION ONLY.
+        """
+        self._positions.pop(address, None)
+        self._prev_positions.pop(address, None)
+
     def detect_clusters(
         self,
         min_wallets: Optional[int] = None,

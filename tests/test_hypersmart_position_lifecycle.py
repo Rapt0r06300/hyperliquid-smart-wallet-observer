@@ -1,4 +1,8 @@
-from datetime import UTC, datetime
+from datetime import datetime
+try:
+    from datetime import UTC
+except ImportError:
+    from datetime import timezone as _tz; UTC = _tz.utc
 
 from hyper_smart_observer.hyperliquid_client.models import PositionActionType
 from hyper_smart_observer.position_lifecycle.action_classifier import classify_position_action

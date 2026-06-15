@@ -1,4 +1,8 @@
-from datetime import UTC, datetime, timedelta
+from datetime import datetime, timedelta
+try:
+    from datetime import UTC
+except ImportError:
+    from datetime import timezone as _tz; UTC = _tz.utc
 
 from hyper_smart_observer.copy_mode.copy_models import NoTradeReason
 from hyper_smart_observer.realtime_monitor.freshness_guard import LivePositionFreshnessGuard

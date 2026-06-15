@@ -1,4 +1,8 @@
-from datetime import UTC, datetime, timedelta
+from datetime import datetime, timedelta
+try:
+    from datetime import UTC
+except ImportError:
+    from datetime import timezone as _tz; UTC = _tz.utc
 
 from hyper_smart_observer.app.config import AppConfig
 from hyper_smart_observer.hyperliquid_client.models import Fill, Wallet, WalletScoreStatus, WalletStatus

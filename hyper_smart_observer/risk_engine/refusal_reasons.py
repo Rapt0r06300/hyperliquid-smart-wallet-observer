@@ -1,8 +1,10 @@
 from __future__ import annotations
 
-from enum import StrEnum
-
-
+try:
+    from enum import StrEnum
+except ImportError:
+    from enum import Enum
+    class StrEnum(str, Enum): pass
 class RiskRefusalReason(StrEnum):
     DENY_BY_DEFAULT = "DENY_BY_DEFAULT"
     INSUFFICIENT_DATA = "INSUFFICIENT_DATA"

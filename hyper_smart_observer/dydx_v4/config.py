@@ -37,6 +37,19 @@ INDEXER_REST_ENDPOINTS = {
     DydxNetwork.MAINNET: "https://indexer.dydx.trade",
 }
 
+# Endpoints alternatifs (community nodes) utilisés en fallback si le primaire
+# est bloqué par un proxy Windows (ProxyError 403 Forbidden).
+# READ-ONLY GET uniquement — aucune clé privée.
+INDEXER_REST_FALLBACKS = {
+    DydxNetwork.TESTNET: [],
+    DydxNetwork.MAINNET: [
+        "https://dydx-indexer.polkachu.com",
+        "https://dydx-rest.publicnode.com",
+        "https://dydx-dao.api.kjnodes.com",
+        "https://api.dydx.cros-nest.com",
+    ],
+}
+
 INDEXER_WS_ENDPOINTS = {
     DydxNetwork.TESTNET: "wss://indexer.v4testnet.dydx.exchange/v4/ws",
     DydxNetwork.MAINNET: "wss://indexer.dydx.trade/v4/ws",
@@ -198,6 +211,10 @@ class DydxV4Config:
         return INDEXER_REST_ENDPOINTS[self.network]
 
     @property
+    def indexer_rest_fallback_urls(self) -> list[str]:
+        return INDEXER_REST_FALLBACKS.get(self.network, [])
+
+    @property
     def indexer_ws_url(self) -> str:
         return INDEXER_WS_ENDPOINTS[self.network]
 
@@ -319,15 +336,4 @@ def load_config_from_env(base: DydxV4Config | None = None) -> DydxV4Config:
         rest_poll_cap=_int("DYDX_REST_POLL_CAP", cfg.rest_poll_cap),
         max_spread_bps=_float("DYDX_MAX_SPREAD_BPS", cfg.max_spread_bps),
         flow_min_trades=_int("DYDX_FLOW_MIN_TRADES", cfg.flow_min_trades),
-        flow_consensus_min_wallets=_int("DYDX_FLOW_CONSENSUS_MIN_WALLETS", cfg.flow_consensus_min_wallets),
-        breakeven_stop_enabled=_bool("DYDX_BREAKEVEN_STOP", cfg.breakeven_stop_enabled),
-        breakeven_trigger_atr_mult=_float("DYDX_BREAKEVEN_TRIGGER_ATR_MULT", cfg.breakeven_trigger_atr_mult),
-        breakeven_offset_atr_mult=_float("DYDX_BREAKEVEN_OFFSET_ATR_MULT", cfg.breakeven_offset_atr_mult),
-    )
-    if _bool("DYDX_OPPORTUNITY_CALIBRATION", False):
-        from hyper_smart_observer.dydx_v4.opportunity_calibration import apply_opportunity_calibration
-        loaded = apply_opportunity_calibration(loaded)
-    return loaded
-
-
-DEFAULT_CONFIG = DydxV4Config()
+        flow_consensus_min_wallets=_int("DYDX_FLOW_CONSENSUS_MIN_WALLETS", c

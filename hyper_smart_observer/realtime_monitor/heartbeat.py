@@ -1,6 +1,10 @@
 from __future__ import annotations
 
-from datetime import UTC, datetime, timedelta
+from datetime import datetime, timedelta
+try:
+    from datetime import UTC
+except ImportError:
+    from datetime import timezone as _tz; UTC = _tz.utc
 
 
 def heartbeat_stale(last_seen: datetime | None, *, max_age_seconds: int) -> bool:
