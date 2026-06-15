@@ -102,6 +102,18 @@ def create_dydx_router() -> APIRouter:
             logger.error("dydx /pnl error: %s", e)
             return {"error": str(e), "disclaimer": DISCLAIMER}
 
+    @router.get("/simulation-truth")
+    async def dydx_simulation_truth() -> dict[str, Any]:
+        """Rapport vérité simulation paper: sources, PnL, V2, refus."""
+        try:
+            from hyper_smart_observer.dydx_v4.simulation_truth import truth_report
+            report = truth_report()
+            report["disclaimer"] = DISCLAIMER
+            return report
+        except Exception as e:
+            logger.error("dydx /simulation-truth error: %s", e)
+            return {"error": str(e), "read_only": True, "paper_only": True, "disclaimer": DISCLAIMER}
+
     @router.get("/realtime-tick")
     async def dydx_realtime_tick(response: Response) -> dict[str, Any]:
         """Tick leger pour animer la simulation paper en mark-to-market."""
