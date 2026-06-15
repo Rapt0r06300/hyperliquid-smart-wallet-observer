@@ -335,6 +335,16 @@ class DydxLiveObserver:
         self._no_trade_reasons: dict[str, int] = {}
         # Mode démo: prix synthétiques + wallets fictifs quand REST inaccessible
         self._demo_mode: bool = getattr(config, 'demo_mode', False)
+        # Adresses des wallets démo synthétiques — détection par-cluster
+        # pour que les clusters démo restent en mode synthétique même quand
+        # de vrais wallets sont aussi présents dans la shortlist.
+        try:
+            from hyper_smart_observer.dydx_v4.wallet_discovery import _DEMO_WALLET_SPECS
+            self._demo_wallet_addresses: frozenset[str] = frozenset(
+                s["address"] for s in _DEMO_WALLET_SPECS
+            )
+        except Exception:
+            self._demo_wallet_addresses = frozenset()
         # Compteur de ticks pour la simulation démo (cycles de rotation positions)
         self._demo_tick: int = 0
         self._market_context_cache: dict[str, tuple[int, MarketContext]] = {}
@@ -733,6 +743,16 @@ class DydxLiveObserver:
         "SOL-USD": 155.0,
         "TIA-USD": 6.50,
         "AVAX-USD": 38.0,
+        "BNB-USD": 580.0,
+        "LINK-USD": 14.5,
+        "SUI-USD": 2.8,
+        "XRP-USD": 0.52,
+        "DOGE-USD": 0.16,
+        "ARB-USD": 1.05,
+        "OP-USD": 2.30,
+        "LTC-USD": 82.0,
+        "APT-USD": 9.50,
+        "NEAR-USD": 6.80,
     }
 
     def _inject_demo_prices(self) -> None:
@@ -785,12 +805,16 @@ class DydxLiveObserver:
         # FIX: Reset périodique (ticks 1, 11, 21...) pour générer des OPENs frais.
         # Sans ce reset, les signaux vieillissent > 8s et aucun trade ne s'ouvre
         # après le premier cycle SL/TP.
-        if self._demo_tick % 10 == 1:
+        # FIX 2 (bug majeur): il faut aussi réinitialiser cluster._positions pour ces
+        # wallets — sinon update_positions() voit "aucun changement" et ne génère
+        # AUCUN événement OPEN → _recent_opens vide → detect_clusters() retourne [] → 0 trades.
+        if self._demo_tick % 5 == 1:
             for w in self._shortlist:
                 k = f"{w.address}/{w.subaccount_number}"
                 self._position_snapshots.pop(k, None)
+                self.cluster.reset_wallet(w.address)  # ← FIX: réinitialise le cluster detector aussi
             logger.debug(
-                "DEMO tick=%d: snapshots réinitialisés → OPENs frais pour tous les wallets",
+                "DEMO tick=%d: snapshots + cluster_detector réinitialisés → OPENs frais pour tous les wallets",
                 self._demo_tick,
             )
 
@@ -1440,6 +1464,16 @@ class DydxLiveObserver:
         self.stats.total_signals_seen += 1
         market = cluster.market_id
 
+        # Détection démo par-cluster: un cluster est "demo" si TOUS ses wallets
+        # sont des wallets synthétiques. Cela permet de coexister avec de vrais
+        # wallets dans la shortlist sans que _demo_mode global ne soit faussé.
+        _is_demo = bool(
+            self._demo_wallet_addresses
+            and cluster.participating_wallets
+            and all(w in self._demo_wallet_addresses for w in cluster.participating_wallets)
+        )
+        _effective_demo = self._demo_mode or _is_demo
+
         # Gate 0: Politique de risque (opt-in) — coupe-circuit, cooldown, anti-scalper
         if self._risk_breaker is not None:
             now_ms = int(time.time() * 1000)
@@ -1473,9 +1507,14 @@ class DydxLiveObserver:
             self._refuse(f"MARKET_BLACKLISTED ({market})")
             return
 
-        if cluster.signal_age_ms > self.max_signal_age_ms:
+        # En mode DEMO (global ou cluster démo), recalculer l'âge depuis detected_at_ms.
+        # cluster.signal_age_ms est figé à la création → vieillit à chaque re-détection.
+        _effective_age_ms = cluster.signal_age_ms
+        if _effective_demo:
+            _effective_age_ms = max(0, int(time.time() * 1000) - cluster.detected_at_ms)
+        if _effective_age_ms > self.max_signal_age_ms:
             self.stats.stale_signals_refused += 1
-            self._refuse(f"STALE_SIGNAL age={cluster.signal_age_ms}ms")
+            self._refuse(f"STALE_SIGNAL age={_effective_age_ms}ms")
             return
 
         # Gate 3: Wallets minimum. Flow signals (momentum) utilisent un seuil
@@ -1541,15 +1580,18 @@ class DydxLiveObserver:
         if market_ctx.has_data:
             market_edge_multiplier *= max(0.0, market_ctx.edge_multiplier)
             sizing_notes.append(f"regime={market_ctx.regime}")
-            if getattr(self.config, "regime_detector_enabled", True) and market_ctx.regime == REGIME_CHOPPY:
-                self._refuse(f"CHOPPY_MARKET {market} atr_pct={market_ctx.atr_pct:.4f}")
-                return
-            if getattr(self.config, "trend_filter_enabled", True) and side_opposes_trend(cluster.side, market_ctx):
-                self._refuse(
-                    f"TREND_OPPOSITION {market} side={cluster.side} "
-                    f"5m={market_ctx.trend_5m} 1h={market_ctx.trend_1h}"
-                )
-                return
+            # En mode DEMO (global ou cluster démo), les données de marché sont
+            # synthétiques ou absentes → CHOPPY et TREND bloquent à tort.
+            if not _effective_demo:
+                if getattr(self.config, "regime_detector_enabled", True) and market_ctx.regime == REGIME_CHOPPY:
+                    self._refuse(f"CHOPPY_MARKET {market} atr_pct={market_ctx.atr_pct:.4f}")
+                    return
+                if getattr(self.config, "trend_filter_enabled", True) and side_opposes_trend(cluster.side, market_ctx):
+                    self._refuse(
+                        f"TREND_OPPOSITION {market} side={cluster.side} "
+                        f"5m={market_ctx.trend_5m} 1h={market_ctx.trend_1h}"
+                    )
+                    return
             if getattr(self.config, "volume_spike_enabled", True) and is_volume_spike(
                 market_ctx,
                 self._cluster_imbalance(cluster),
@@ -1559,10 +1601,13 @@ class DydxLiveObserver:
                 market_edge_multiplier *= float(getattr(self.config, "volume_spike_edge_multiplier", 1.08))
                 sizing_notes.append(VOLUME_SPIKE)
 
-        corr_reason = self._correlated_exposure_reason(market, cluster.side)
-        if corr_reason:
-            self._refuse(corr_reason)
-            return
+        # En mode DEMO (global ou cluster démo) les wallets synthétiques sont tous
+        # dans la même direction → correlated_exposure bloque à tort.
+        if not _effective_demo:
+            corr_reason = self._correlated_exposure_reason(market, cluster.side)
+            if corr_reason:
+                self._refuse(corr_reason)
+                return
 
         # Flow trade count safety net — detect_flow_signals() already filters,
         # but clusters injected directly (e.g. tests) must also be validated.
@@ -1624,8 +1669,11 @@ class DydxLiveObserver:
         # signal d'edge (on n'a pas de winrate par leader sur des fills temps réel).
         if n_sc >= 0 and getattr(cluster, "origin", "rest") != "stream":
             delay_ms = max(0, int(time.time() * 1000) - cluster.last_wallet_opened_ms)
+            # En mode DEMO (global ou cluster démo), utiliser l'âge recalculé
+            # (toujours frais si signal créé ce tick) pour éviter EDGE_INSUFFICIENT.
+            _edge_age_ms = _effective_age_ms if _effective_demo else cluster.signal_age_ms
             edge = calculate_edge(
-                signal_age_ms=cluster.signal_age_ms,
+                signal_age_ms=_edge_age_ms,
                 wallet_count=cluster.wallet_count,
                 leader_winrate=avg_wr,
                 leader_profit_factor=avg_pf,
@@ -1658,7 +1706,7 @@ class DydxLiveObserver:
         # Gate 8: Fill HONNÊTE depuis le carnet — jamais au mid
         # (un paper qui fill au mid surestime le PnL de 30-100%)
         entry_price, entry_slippage_bps, fill_source = self._honest_entry_price(
-            market, cluster.side, paper_notional, mark_price
+            market, cluster.side, paper_notional, mark_price, is_demo=_is_demo
         )
         if fill_source in {"SPREAD_TOO_WIDE", "BOOK_TOO_THIN"}:
             self._refuse(f"{fill_source} {market}")
@@ -1834,20 +1882,21 @@ class DydxLiveObserver:
         side: str,
         notional_usdc: float,
         mark_price: float,
+        is_demo: bool = False,
     ) -> tuple[Optional[float], float, str]:
         """
         Prix d'entrée HONNÊTE: (prix, slippage_bps, data_source).
 
         1. Carnet réel (Indexer) → VWAP en traversant le spread.
            Profondeur réelle insuffisante → refus dur (None).
-        2. Mode démo → carnet synthétique, étiqueté DEMO_SYNTHETIC
-           (jamais compté comme du PnL réel).
+        2. Mode démo (global ou cluster démo) → carnet synthétique, étiqueté
+           DEMO_SYNTHETIC (jamais compté comme du PnL réel).
         3. Carnet inaccessible (réseau) → fallback estimé: mid PÉNALISÉ
            de spread/2 + slippage + latence, étiqueté FALLBACK_ESTIMATED.
         """
         order_side = "BUY" if side.upper() == "LONG" else "SELL"
 
-        if self._demo_mode:
+        if self._demo_mode or is_demo:
             book = synthetic_orderbook(mark_price)
             res = simulate_market_fill(
                 book, order_side, notional_usdc, data_source=DATA_SOURCE_DEMO
@@ -2006,73 +2055,4 @@ class DydxLiveObserver:
             self.stats.losing_trades += 1
 
         # Politique de risque (opt-in): alimenter le coupe-circuit + cooldown
-        if self._risk_breaker is not None:
-            risk_now_ms = int(time.time() * 1000)
-            self._risk_breaker.record(net_pnl, risk_now_ms)
-            self._risk_last_close_ms[pos.market_id] = risk_now_ms
-
-        if reason == "STOP_LOSS":
-            self.stats.stop_loss_exits += 1
-        elif reason == "TAKE_PROFIT":
-            self.stats.take_profit_exits += 1
-        elif reason == "TRAILING_STOP":
-            self.stats.trailing_stop_exits += 1
-        elif reason == "TIME_STOP":
-            self.stats.time_stop_exits += 1
-
-        trade_record = {
-            "position_id": pos.position_id,
-            "market_id": pos.market_id,
-            "side": pos.side,
-            "entry_price": round(pos.entry_price, 6),
-            "exit_price": round(exit_price, 6),
-            "size": round(pos.size, 6),
-            "gross_pnl": round(gross_pnl, 4),
-            "fees": round(pos.fee_paid + exit_fee, 4),
-            "net_pnl": round(net_pnl, 4),
-            "reason": reason,
-            "opened_at_ms": pos.opened_at_ms,
-            "closed_at_ms": int(time.time() * 1000),
-            "wallet_count": pos.wallet_count,
-            "cluster_id": pos.cluster_id,
-            "data_source": pos.data_source,
-            "entry_slippage_bps": round(pos.entry_slippage_bps, 2),
-            "exit_method": pos.exit_method,
-            "disclaimer": "PAPER TRADE ONLY",
-        }
-        self._closed_trades.append(trade_record)
-        self._record_decision("PAPER_CLOSE", trade_record)
-
-        logger.info(
-            "PAPER CLOSE %s %s entry=%.4f exit=%.4f net_pnl=%+.4f reason=%s | PAPER-ONLY",
-            pos.side, pos.market_id, pos.entry_price, exit_price, net_pnl, reason,
-        )
-
-    def _refuse(self, reason: str) -> None:
-        """Enregistrer un refus de signal (viral bot: log autant les refus que les entrées)."""
-        self.stats.signals_refused += 1
-        reason_key = reason.split(" ")[0].rstrip("(").split("(")[0]
-        self._no_trade_reasons[reason_key] = self._no_trade_reasons.get(reason_key, 0) + 1
-        self._record_decision("NO_TRADE", {
-            "reason": reason_key,
-            "detail": reason,
-            "open_positions": len(self._open_positions),
-            "shortlist_size": len(self._shortlist),
-            "paper_only": True,
-        })
-        logger.debug("NO_TRADE: %s", reason)
-
-    def stop(self) -> None:
-        """Arrêter l'observateur proprement."""
-        self._running = False
-        if self._stream_client is not None:
-            try:
-                self._stream_client.stop()
-            except Exception:
-                pass
-        if self._flow_monitor is not None:
-            try:
-                self._flow_monitor.stop()
-            except Exception:
-                pass
-        logger.info("DydxLiveObserver stop requested | %s", self.DISCLAIMER)
+        if self._risk_br

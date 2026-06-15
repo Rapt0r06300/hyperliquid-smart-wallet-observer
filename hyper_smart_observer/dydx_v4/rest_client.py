@@ -81,6 +81,8 @@ class DydxIndexerRestClient:
         max_retries: int = 3,
         backoff_base_s: float = 1.0,
         rate_limit_rps: float = 5.0,
+        fallback_base_urls: Optional[list[str]] = None,
+        bypass_proxy: bool = True,
     ) -> None:
         self.base_url = base_url.rstrip("/")
         self.timeout_s = timeout_s
@@ -88,6 +90,14 @@ class DydxIndexerRestClient:
         self.backoff_base_s = backoff_base_s
         self._rate_limiter = RateLimiter(rps=rate_limit_rps)
         self._session: Optional[Any] = None  # aiohttp.ClientSession
+        # Chaîne de fallback: essayer base_url en premier, puis les alternatives
+        self._all_base_urls: list[str] = [base_url.rstrip("/")]
+        for fb in (fallback_base_urls or []):
+            fb = fb.rstrip("/")
+            if fb not in self._all_base_urls:
+                self._all_base_urls.append(fb)
+        # Bypass proxy Windows (403 Forbidden tunnel): passer proxies=None explicitement
+        self._proxies: Optional[dict] = {"http": None, "https": None} if bypass_proxy else None
 
     def _url(self, path: str) -> str:
         return urljoin(self.base_url + "/", path.lstrip("/"))
@@ -286,58 +296,42 @@ class DydxIndexerRestClient:
     # HTTP GET interne — sync avec retry/backoff
     # ----------------------------------------------------------------------- #
 
+    def _url_for(self, base: str, path: str) -> str:
+        return urljoin(base + "/", path.lstrip("/"))
+
     def _get_sync(self, path: str, params: Optional[dict] = None) -> dict:
-        """GET HTTP synchrone avec retry et backoff exponentiel."""
+        """GET HTTP synchrone avec proxy bypass, retry et fallback sur endpoints alternatifs.
+
+        Essaie chaque base_url dans self._all_base_urls jusqu'à succès.
+        Proxy Windows bypassé via proxies={http: None, https: None}.
+        """
         if not _REQUESTS_AVAILABLE:
             raise RuntimeError(
                 "requests non disponible — installer avec: pip install requests"
             )
 
-        url = self._url(path)
         last_error: Optional[Exception] = None
 
-        for attempt in range(self.max_retries + 1):
-            try:
-                self._rate_limiter.wait_sync()
-                resp = requests.get(url, params=params, timeout=self.timeout_s)
+        for base_url in self._all_base_urls:
+            url = self._url_for(base_url, path)
 
-                if resp.status_code == 200:
-                    return resp.json()
-                elif resp.status_code == 429:
-                    wait = self.backoff_base_s * (2 ** attempt)
-                    logger.warning("Rate limited (429), wait=%.1fs attempt=%d", wait, attempt)
-                    time.sleep(wait)
-                    continue
-                elif resp.status_code in (500, 502, 503, 504):
-                    wait = self.backoff_base_s * (2 ** attempt)
-                    logger.warning("Server error %d, wait=%.1fs", resp.status_code, wait)
-                    time.sleep(wait)
-                    continue
-                else:
-                    try:
-                        body = resp.json()
-                    except Exception:
-                        body = {}
-                    raise RestError(
-                        status_code=resp.status_code,
-                        message=body.get("errors", [{"msg": resp.text}])[0].get("msg", resp.text)
-                        if isinstance(body.get("errors"), list) and body.get("errors")
-                        else str(body),
-                        url=url,
-                        raw=body,
+            for attempt in range(self.max_retries + 1):
+                try:
+                    self._rate_limiter.wait_sync()
+                    resp = requests.get(
+                        url,
+                        params=params,
+                        timeout=self.timeout_s,
+                        proxies=self._proxies,  # None→bypass proxy sys. Windows
                     )
 
-            except RestError:
-                raise
-            except Exception as e:
-                last_error = e
-                wait = self.backoff_base_s * (2 ** attempt)
-                logger.warning("Request error attempt=%d wait=%.1fs: %s", attempt, wait, e)
-                if attempt < self.max_retries:
-                    time.sleep(wait)
-
-        raise RestError(
-            status_code=0,
-            message=f"Max retries ({self.max_retries}) exceeded: {last_error}",
-            url=url,
-        )
+                    if resp.status_code == 200:
+                        # Mettre à jour base_url actif si on a utilisé un fallback
+                        if base_url != self.base_url:
+                            logger.info("Fallback endpoint actif: %s", base_url)
+                            self.base_url = base_url
+                        return resp.json()
+                    elif resp.status_code == 429:
+                        wait = self.backoff_base_s * (2 ** attempt)
+                        logger.warning("Rate limited (429) %s, wait=%.1fs", base_url, wait)
+        
