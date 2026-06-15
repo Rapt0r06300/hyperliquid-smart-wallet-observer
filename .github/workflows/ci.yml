@@ -36,9 +36,16 @@ jobs:
           import hyper_smart_observer.dydx_v4.notional_bridge
           import hyper_smart_observer.dydx_v4.whale_ranker
           import hyper_smart_observer.dydx_v4.leaderboard_import
+          import hyper_smart_observer.dydx_v4.opportunity_calibration
+          import hyper_smart_observer.dydx_v4.intelligence_director
+          import hyper_smart_observer.dydx_v4.paper_profile_memory
+          import hyper_smart_observer.dydx_v4.integration_sanity
           import hyper_smart_observer.dydx_v4.build_whale_file
           print('critical imports ok')
           PY
+
+      - name: Run integration sanity
+        run: python -m hyper_smart_observer.dydx_v4.integration_sanity
 
       - name: Run tests
         run: pytest -q
