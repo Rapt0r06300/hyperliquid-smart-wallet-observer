@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 WIDE_TRACK_TARGET = 15000
+HOT_WALLET_TARGET = 2500
 
 
 def install_leaderboard_import_patch() -> None:
@@ -17,6 +18,7 @@ def install_leaderboard_import_patch() -> None:
         original_init(self, *args, **kwargs)
         try:
             self.harvester.max_track = max(int(getattr(self.harvester, "max_track", 0) or 0), WIDE_TRACK_TARGET)
+            self.scanner.hot.capacity = max(int(getattr(self.scanner.hot, "capacity", 0) or 0), HOT_WALLET_TARGET)
             names = {getattr(src, "name", "") for src in getattr(self.harvester, "_sources", [])}
             if "local_leaderboard_import" not in names:
                 self.harvester.add_source(leaderboard_file_source())
@@ -30,4 +32,4 @@ def install_leaderboard_import_patch() -> None:
 install_leaderboard_import_patch()
 
 
-__all__ = ["WIDE_TRACK_TARGET", "install_leaderboard_import_patch"]
+__all__ = ["HOT_WALLET_TARGET", "WIDE_TRACK_TARGET", "install_leaderboard_import_patch"]
