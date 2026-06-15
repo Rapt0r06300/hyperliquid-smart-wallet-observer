@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import argparse
 import json
-from dataclasses import asdict
 from typing import Any
 
 
@@ -31,7 +30,7 @@ def run_integration_sanity() -> dict[str, Any]:
         from hyper_smart_observer.dydx_v4.config import DydxV4Config, load_config_from_env
         from hyper_smart_observer.dydx_v4.opportunity_calibration import calibration_summary
         from hyper_smart_observer.dydx_v4.intelligence_director import DirectorAssessment
-        from hyper_smart_observer.dydx_v4.paper_profile_memory import PaperProfileBias, profile_bias_for
+        from hyper_smart_observer.dydx_v4.paper_profile_memory import profile_bias_for
         from hyper_smart_observer.dydx_v4.wallet_pool_ranker import MAX_LIVE_BATCH, pool_stats
         from hyper_smart_observer.dydx_v4.opportunity_recall import RecallDecision
     except Exception as exc:
