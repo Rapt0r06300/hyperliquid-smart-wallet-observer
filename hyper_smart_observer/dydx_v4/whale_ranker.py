@@ -18,6 +18,12 @@ try:
 except Exception:
     pass
 
+try:
+    from hyper_smart_observer.dydx_v4.wallet_pool_ranker import pool_stats, wallet_pool_batch
+except Exception:
+    pool_stats = None
+    wallet_pool_batch = None
+
 
 def _num(v: Any, default: float = 0.0) -> float:
     try:
@@ -48,6 +54,8 @@ def blended_whale_top(index: Any, limit: int, whale_share: float = 0.65) -> list
                 w.score = max(float(getattr(w, "score", 0.0) or 0.0), 0.0)
         except Exception:
             pass
+    if wallet_pool_batch is not None:
+        return wallet_pool_batch(wallets, limit=limit, scorer=whale_score, anchor_share=0.55)
     whale_n = max(0, min(limit, int(limit * whale_share)))
     general_n = max(0, limit - whale_n)
     whales = sorted(wallets, key=lambda w: (whale_score(w), _num(getattr(w, "score", 0.0))), reverse=True)[:whale_n]
@@ -67,13 +75,16 @@ def blended_whale_top(index: Any, limit: int, whale_share: float = 0.65) -> list
 def whale_stats(index: Any) -> dict:
     wallets = list(index.all()) if hasattr(index, "all") else []
     scores = [whale_score(w) for w in wallets]
-    return {
+    out = {
         "whale_candidates": sum(1 for s in scores if s >= 45.0),
         "max_whale_score": round(max(scores, default=0.0), 4),
         "top_pnl_usdc": round(max((_num(getattr(w, "net_pnl_usdc", 0.0)) for w in wallets), default=0.0), 2),
         "read_only": True,
         "paper_only": True,
     }
+    if pool_stats is not None:
+        out["wallet_pool"] = pool_stats()
+    return out
 
 
 __all__ = ["blended_whale_top", "whale_score", "whale_stats"]
