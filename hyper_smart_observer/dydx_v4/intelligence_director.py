@@ -57,21 +57,39 @@ def assess_decision_intelligence(tuned: Any, health: Any, state: Any, ctx: Any) 
     phase = str(getattr(tremor, "timeline_phase", "") or "")
     source = str(getattr(tremor, "source", "") or "")
 
+    closed_trades = _num(getattr(health, "closed_trades", 0.0))
+    winrate = _num(getattr(health, "winrate", 0.0))
+    profit_factor = _num(getattr(health, "profit_factor", 0.0))
+    consecutive_losses = _num(getattr(health, "consecutive_losses", 0.0))
+    daily_pnl = _num(getattr(health, "daily_pnl_usdc", 0.0))
+
     opportunity = 0.0
-    opportunity += _clamp(tremor_score / 10.0, 0.0, 1.0) * 28.0
-    opportunity += _clamp(quality_score / 100.0, 0.0, 1.0) * 26.0
-    opportunity += _clamp(edge_bps / 18.0, 0.0, 1.0) * 18.0
-    opportunity += _clamp(max(leading_wallets, consensus_wallets) / 5.0, 0.0, 1.0) * 12.0
+    opportunity += _clamp(tremor_score / 10.0, 0.0, 1.0) * 24.0
+    opportunity += _clamp(quality_score / 100.0, 0.0, 1.0) * 24.0
+    opportunity += _clamp(edge_bps / 18.0, 0.0, 1.0) * 16.0
+    opportunity += _clamp(max(leading_wallets, consensus_wallets) / 5.0, 0.0, 1.0) * 10.0
     opportunity += _clamp(market_confidence, 0.0, 1.0) * 8.0
     opportunity += _clamp(1.0 - age_ms / 90_000.0, 0.0, 1.0) * 8.0
+    if closed_trades >= 30 and winrate >= 0.56:
+        opportunity += 5.0
+        notes.append("director_winrate_lift")
+    if closed_trades >= 30 and profit_factor >= 1.35:
+        opportunity += 5.0
+        notes.append("director_profit_factor_lift")
 
     risk = 0.0
-    risk += _clamp(_num(getattr(health, "fallback_share", 0.0)) / 0.50, 0.0, 1.0) * 16.0
-    risk += _clamp(_num(getattr(health, "consecutive_losses", 0.0)) / 6.0, 0.0, 1.0) * 18.0
-    risk += _clamp(abs(min(0.0, _num(getattr(health, "daily_pnl_usdc", 0.0)))) / 45.0, 0.0, 1.0) * 18.0
-    risk += _clamp(_num(getattr(ctx, "spread_bps", 0.0)) / 35.0, 0.0, 1.0) * 10.0
-    risk += _clamp(_num(getattr(ctx, "slippage_bps", 0.0)) / 16.0, 0.0, 1.0) * 10.0
-    risk += _clamp(_num(getattr(state, "same_market_open_positions", 0.0)) / 3.0, 0.0, 1.0) * 10.0
+    risk += _clamp(_num(getattr(health, "fallback_share", 0.0)) / 0.50, 0.0, 1.0) * 14.0
+    risk += _clamp(consecutive_losses / 6.0, 0.0, 1.0) * 20.0
+    risk += _clamp(abs(min(0.0, daily_pnl)) / 45.0, 0.0, 1.0) * 20.0
+    risk += _clamp(_num(getattr(ctx, "spread_bps", 0.0)) / 35.0, 0.0, 1.0) * 9.0
+    risk += _clamp(_num(getattr(ctx, "slippage_bps", 0.0)) / 16.0, 0.0, 1.0) * 9.0
+    risk += _clamp(_num(getattr(state, "same_market_open_positions", 0.0)) / 3.0, 0.0, 1.0) * 8.0
+    if closed_trades >= 30 and winrate < 0.50:
+        risk += 14.0
+        reasons.append("DIRECTOR_LOW_SESSION_WINRATE")
+    if closed_trades >= 30 and profit_factor < 1.05:
+        risk += 14.0
+        reasons.append("DIRECTOR_LOW_SESSION_PROFIT_FACTOR")
     if phase == "AFTER_MOVE":
         risk += 20.0
         reasons.append("DIRECTOR_AFTER_MOVE_RISK")
@@ -83,15 +101,15 @@ def assess_decision_intelligence(tuned: Any, health: Any, state: Any, ctx: Any) 
         reasons.append("DIRECTOR_LATE_SIGNAL")
 
     net = _clamp(opportunity - risk, 0.0, 100.0)
-    if opportunity >= 78 and risk <= 28:
+    if opportunity >= 82 and risk <= 24 and (closed_trades < 30 or winrate >= 0.54):
         multiplier = 1.15
-        notes.append("director_high_quality_boost")
-    elif opportunity >= 62 and risk <= 45:
+        notes.append("director_high_quality_winrate_boost")
+    elif opportunity >= 66 and risk <= 40 and (closed_trades < 30 or winrate >= 0.50):
         multiplier = 1.00
-        notes.append("director_normal_quality")
-    elif opportunity >= 48 and risk <= 55:
-        multiplier = 0.60
-        notes.append("director_reduced_quality")
+        notes.append("director_normal_quality_winrate_ok")
+    elif opportunity >= 52 and risk <= 52:
+        multiplier = 0.45
+        notes.append("director_reduced_quality_winrate_guard")
     else:
         multiplier = 0.0
         reasons.append("DIRECTOR_LOW_NET_SCORE")
@@ -103,6 +121,9 @@ def assess_decision_intelligence(tuned: Any, health: Any, state: Any, ctx: Any) 
     if quality_score < 45:
         hard_block = True
         reasons.append("DIRECTOR_QUALITY_TOO_LOW")
+    if closed_trades >= 50 and winrate < 0.45 and profit_factor < 1.0:
+        hard_block = True
+        reasons.append("DIRECTOR_SESSION_NOT_WINNING")
     if risk >= 75 and opportunity < 82:
         hard_block = True
         reasons.append("DIRECTOR_RISK_TOO_HIGH")
