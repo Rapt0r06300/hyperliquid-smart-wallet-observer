@@ -13,6 +13,7 @@ import threading
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
+from types import MethodType
 from typing import Optional
 
 from hyper_smart_observer.dydx_v4.cluster_detector import DydxClusterDetector
@@ -22,6 +23,7 @@ from hyper_smart_observer.dydx_v4.live_observer import DydxLiveObserver
 from hyper_smart_observer.dydx_v4.rest_client import DydxIndexerRestClient, RestError
 from hyper_smart_observer.dydx_v4.wallet_discovery import DydxWalletDiscovery
 from hyper_smart_observer.dydx_v4.safety import assert_paper_only
+from hyper_smart_observer.dydx_v4.runtime_guards import correlated_count_reason, neutral_demo_price
 
 logger = logging.getLogger(__name__)
 
@@ -257,6 +259,9 @@ class DydxEngine:
                     "wallet_count": pos.wallet_count,
                     "fee_paid": round(pos.fee_paid, 4),
                     "cluster_id": pos.cluster_id,
+                    "data_source": getattr(pos, "data_source", ""),
+                    "entry_edge_bps": round(float(getattr(pos, "entry_edge_bps", 0.0) or 0.0), 4),
+                    "market_regime": getattr(pos, "market_regime", ""),
                 })
             return out
 
@@ -365,6 +370,25 @@ class DydxEngine:
 
     # -- internal --
 
+    def _install_observer_integrity_hooks(self) -> None:
+        """Installe les corrections d'intégration non destructives sur l'observer."""
+        observer = self._observer
+        if observer is None or getattr(observer, "_engine_integrity_hooks", False):
+            return
+
+        def _corr(self_observer, market: str, side: str):
+            return correlated_count_reason(self_observer, market, side)
+
+        def _demo(self_observer) -> None:
+            for market, base in self_observer._DEMO_BASE_PRICES.items():
+                current = self_observer._mark_prices.get(market, base)
+                self_observer._mark_prices[market] = neutral_demo_price(current, base)
+
+        observer._correlated_exposure_reason = MethodType(_corr, observer)
+        observer._inject_demo_prices = MethodType(_demo, observer)
+        observer._engine_integrity_hooks = True
+        logger.info("DydxEngine integrity hooks active: correlation=count, demo=neutral")
+
     def _run_loop(self) -> None:
         """Boucle principale dans le thread daemon."""
         assert_paper_only(self._config)
@@ -395,6 +419,7 @@ class DydxEngine:
             max_signal_age_ms=self._config.max_signal_age_ms,
             cosmos_client=self._cosmos,
         )
+        self._install_observer_integrity_hooks()
 
         with self._lock:
             self._status.running = True
@@ -406,6 +431,12 @@ class DydxEngine:
 
         def _patched_poll(*args, **kwargs):
             result = original_poll(*args, **kwargs)
+            priority = getattr(self._observer, "_poll_priority_wallets", None)
+            if callable(priority):
+                try:
+                    priority()
+                except Exception as e:
+                    logger.debug("priority WS poll skipped: %s", e)
             self._sync_stats()
             return result
 
