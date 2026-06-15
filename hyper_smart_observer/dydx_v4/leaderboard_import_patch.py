@@ -3,6 +3,8 @@ from __future__ import annotations
 WIDE_TRACK_TARGET = 15000
 HOT_WALLET_TARGET = 2500
 SUBACCOUNT_DEPTH = 4
+DECISION_WALLET_TARGET = 3000
+REST_POLL_TARGET = 250
 
 
 def install_leaderboard_import_patch() -> None:
@@ -71,14 +73,40 @@ def install_leaderboard_import_patch() -> None:
             seen.add(key)
             self._poll_one_wallet(WalletScore(address=addr, subaccount_number=sub, source="fast_scan_subaccount"))
 
+    old_merge = getattr(DydxLiveObserver, "_merge_harvester_into_shortlist", None)
+
+    def merge_more_wallets(self) -> None:
+        if self.fast_scan is None:
+            if callable(old_merge):
+                return old_merge(self)
+            return None
+        try:
+            self.config.max_decision_wallets = max(int(getattr(self.config, "max_decision_wallets", 0) or 0), DECISION_WALLET_TARGET)
+            self.config.rest_poll_cap = max(int(getattr(self.config, "rest_poll_cap", 0) or 0), REST_POLL_TARGET)
+        except Exception:
+            pass
+        if callable(old_merge):
+            return old_merge(self)
+        return None
+
     FastScanIntegration.__init__ = patched_init
     FastScanIntegration._leaderboard_import_patch_installed = True
     if not getattr(DydxLiveObserver, "_exact_subaccount_scan_installed", False):
         DydxLiveObserver._poll_priority_wallets = fast_scan_exact_subaccounts
         DydxLiveObserver._exact_subaccount_scan_installed = True
+    if not getattr(DydxLiveObserver, "_wide_decision_merge_installed", False):
+        DydxLiveObserver._merge_harvester_into_shortlist = merge_more_wallets
+        DydxLiveObserver._wide_decision_merge_installed = True
 
 
 install_leaderboard_import_patch()
 
 
-__all__ = ["HOT_WALLET_TARGET", "SUBACCOUNT_DEPTH", "WIDE_TRACK_TARGET", "install_leaderboard_import_patch"]
+__all__ = [
+    "DECISION_WALLET_TARGET",
+    "HOT_WALLET_TARGET",
+    "REST_POLL_TARGET",
+    "SUBACCOUNT_DEPTH",
+    "WIDE_TRACK_TARGET",
+    "install_leaderboard_import_patch",
+]
