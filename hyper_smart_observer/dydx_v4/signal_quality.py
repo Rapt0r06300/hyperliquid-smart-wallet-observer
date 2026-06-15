@@ -27,15 +27,21 @@ class QualityDecision(StrEnum):
 @dataclass(frozen=True)
 class QualityProfile:
     min_score: float = 72.0
+    watch_score: float = 58.0
     min_tremor_score: float = 6.5
+    watch_tremor_score: float = 5.8
     min_edge_bps: float = 3.0
+    watch_edge_bps: float = 1.5
     max_signal_age_ms: int = 30_000
+    soft_age_ms: int = 18_000
     min_wallets: int = 2
     min_flow_imbalance: float = 0.62
     min_flow_volume_usdc: float = 10_000.0
+    max_spread_bps: float = 35.0
+    max_slippage_bps: float = 14.0
     block_after_move: bool = True
     block_choppy: bool = True
-    real_sources: set[str] = field(default_factory=lambda: {"REAL_INDEXER", "orderbook_real", "stream", "rest", "wallet_cluster"})
+    real_sources: set[str] = field(default_factory=lambda: {"REAL_INDEXER", "orderbook_real", "stream", "rest", "wallet_cluster", "market_flow"})
 
 
 @dataclass(frozen=True)
@@ -92,37 +98,70 @@ def quality_score(inp: SignalQualityInput, profile: QualityProfile | None = None
     score += _clamp((abs(inp.flow_imbalance) - 0.5) / 0.5, 0.0, 1.0) * 12.0
     score += _clamp(inp.flow_volume_usdc / max(1.0, p.min_flow_volume_usdc * 3.0), 0.0, 1.0) * 8.0
     score += _clamp(1.0 - inp.signal_age_ms / max(1, p.max_signal_age_ms), 0.0, 1.0) * 10.0
+    if inp.spread_bps > 0:
+        score -= _clamp(inp.spread_bps / max(1.0, p.max_spread_bps), 0.0, 1.0) * 4.0
+    if inp.slippage_bps > 0:
+        score -= _clamp(inp.slippage_bps / max(1.0, p.max_slippage_bps), 0.0, 1.0) * 4.0
+    if inp.data_source not in p.real_sources:
+        score -= 4.0
     if inp.tremor_phase == "BEFORE_MOVE":
         score += 5.0
     elif inp.tremor_phase == "DURING_MOVE":
         score += 2.5
+    elif inp.tremor_phase == "AFTER_MOVE":
+        score -= 8.0
     if inp.market_regime.upper() == "TRENDING":
         score += 2.0
+    elif inp.market_regime.upper() == "CHOPPY":
+        score -= 8.0
     return round(_clamp(score, 0.0, 100.0), 4)
+
+
+def _has_strong_flow(inp: SignalQualityInput, p: QualityProfile) -> bool:
+    return (
+        abs(inp.flow_imbalance) >= p.min_flow_imbalance
+        and inp.flow_volume_usdc >= p.min_flow_volume_usdc
+        and inp.tremor_score >= p.watch_tremor_score
+        and inp.edge_remaining_bps >= p.watch_edge_bps
+    )
 
 
 def evaluate_signal_quality(inp: SignalQualityInput, profile: QualityProfile | None = None) -> SignalQualityDecision:
     p = profile or QualityProfile()
     score = quality_score(inp, p)
-    reasons: list[str] = []
+    hard: list[str] = []
+    soft: list[str] = []
     notes: list[str] = []
 
-    if inp.tremor_score < p.min_tremor_score:
-        reasons.append("TREMOR_SCORE_TOO_LOW")
-    if inp.edge_remaining_bps < p.min_edge_bps:
-        reasons.append("EDGE_TOO_LOW")
+    if inp.tremor_score < p.watch_tremor_score:
+        hard.append("TREMOR_SCORE_TOO_LOW")
+    elif inp.tremor_score < p.min_tremor_score:
+        soft.append("TREMOR_SCORE_WATCH_ZONE")
+    if inp.edge_remaining_bps < p.watch_edge_bps:
+        hard.append("EDGE_TOO_LOW")
+    elif inp.edge_remaining_bps < p.min_edge_bps:
+        soft.append("EDGE_WATCH_ZONE")
     if inp.signal_age_ms > p.max_signal_age_ms:
-        reasons.append("SIGNAL_TOO_OLD")
+        hard.append("SIGNAL_TOO_OLD")
+    elif inp.signal_age_ms > p.soft_age_ms:
+        soft.append("SIGNAL_AGE_WATCH_ZONE")
     if inp.wallet_count < p.min_wallets:
-        reasons.append("WALLET_CONFLUENCE_TOO_WEAK")
+        if _has_strong_flow(inp, p):
+            soft.append("WALLET_CONFLUENCE_WEAK_BUT_FLOW_STRONG")
+        else:
+            hard.append("WALLET_CONFLUENCE_TOO_WEAK")
     if abs(inp.flow_imbalance) < p.min_flow_imbalance:
         notes.append("FLOW_IMBALANCE_WEAK")
     if inp.flow_volume_usdc < p.min_flow_volume_usdc:
         notes.append("FLOW_VOLUME_LOW")
     if p.block_after_move and inp.tremor_phase == "AFTER_MOVE":
-        reasons.append("AFTER_MOVE_BLOCKED")
+        hard.append("AFTER_MOVE_BLOCKED")
     if p.block_choppy and inp.market_regime.upper() == "CHOPPY":
-        reasons.append("CHOPPY_BLOCKED")
+        hard.append("CHOPPY_BLOCKED")
+    if inp.spread_bps > p.max_spread_bps:
+        hard.append("SPREAD_TOO_WIDE")
+    if inp.slippage_bps > p.max_slippage_bps:
+        hard.append("SLIPPAGE_TOO_HIGH")
     if inp.data_source not in p.real_sources:
         notes.append(f"NON_PRIMARY_SOURCE:{inp.data_source}")
     if inp.spread_bps > 0:
@@ -130,11 +169,13 @@ def evaluate_signal_quality(inp: SignalQualityInput, profile: QualityProfile | N
     if inp.slippage_bps > 0:
         notes.append(f"slippage_bps={inp.slippage_bps:.2f}")
 
-    if reasons:
-        return SignalQualityDecision(QualityDecision.REJECT, score, reasons, notes)
-    if score >= p.min_score:
-        return SignalQualityDecision(QualityDecision.PAPER_ELIGIBLE, score, reasons, notes)
-    return SignalQualityDecision(QualityDecision.WATCH, score, ["QUALITY_SCORE_BELOW_PAPER_THRESHOLD"], notes)
+    if hard:
+        return SignalQualityDecision(QualityDecision.REJECT, score, hard, notes + soft)
+    if score >= p.min_score and not soft:
+        return SignalQualityDecision(QualityDecision.PAPER_ELIGIBLE, score, [], notes)
+    if score >= p.watch_score or soft:
+        return SignalQualityDecision(QualityDecision.WATCH, score, soft or ["QUALITY_SCORE_WATCH_ZONE"], notes)
+    return SignalQualityDecision(QualityDecision.REJECT, score, ["QUALITY_SCORE_TOO_LOW"], notes + soft)
 
 
 __all__ = [
