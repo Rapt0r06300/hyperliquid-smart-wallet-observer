@@ -28,6 +28,7 @@ from hyper_smart_observer.dydx_v4.decision_tuning import (
     choose_mode_from_health,
     get_tuning_profile,
 )
+from hyper_smart_observer.dydx_v4.intelligence_director import assess_decision_intelligence
 from hyper_smart_observer.dydx_v4.tremor_engine import TremorObservation
 from hyper_smart_observer.dydx_v4.tuned_decision import (
     TunedDecisionContext,
@@ -92,6 +93,7 @@ class DecisionIntelligenceConfig:
     cold_start_size_cap: float = 0.55
     weak_data_fallback_share: float = 0.35
     weak_data_size_cap: float = 0.50
+    director_enabled: bool = True
     budget: OpportunityBudget = field(default_factory=OpportunityBudget)
 
 
@@ -103,6 +105,7 @@ class DecisionIntelligenceResult:
     tuned: TunedPaperDecision
     reasons: list[str]
     notes: list[str]
+    director: dict = field(default_factory=dict)
     paper_only: bool = True
     read_only: bool = True
 
@@ -122,6 +125,7 @@ class DecisionIntelligenceResult:
             "can_open": self.can_open,
             "notional_usdc": round(self.notional_usdc, 6),
             "tuned": self.tuned.to_dict(),
+            "director": dict(self.director or {}),
             "reasons": list(self.reasons),
             "notes": list(self.notes),
             "paper_only": self.paper_only,
@@ -217,13 +221,14 @@ def _capped_open_result(
     notes: list[str],
     cap: float,
     cap_notes: list[str],
+    director: dict | None = None,
 ) -> DecisionIntelligenceResult:
     if cap < 1.0:
         notional = max(0.0, notional * cap)
         notes = notes + cap_notes
         if action in {IntelligenceAction.OPEN_NORMAL, IntelligenceAction.OPEN_BOOSTED}:
             action = IntelligenceAction.OPEN_REDUCED
-    return DecisionIntelligenceResult(action, mode, notional, tuned, reasons, notes)
+    return DecisionIntelligenceResult(action, mode, notional, tuned, reasons, notes, director or {})
 
 
 def decision_intelligence_v2(
@@ -244,36 +249,69 @@ def decision_intelligence_v2(
     reasons = list(tuned.reasons)
     notes = list(tuned.notes)
     cap, cap_notes = _quality_cap(h, cfg)
+    director_dict: dict = {}
+
+    if cfg.director_enabled:
+        director = assess_decision_intelligence(tuned, h, state, context)
+        director_dict = director.to_dict()
+        reasons += director.reasons
+        notes += director.notes
+        notes.append(f"director_net={director.net_score:.2f}")
+        notes.append(f"director_risk={director.risk_score:.2f}")
+        cap = min(cap, director.size_multiplier)
+        if director.hard_block and tuned.can_open:
+            return DecisionIntelligenceResult(
+                IntelligenceAction.NO_TRADE,
+                mode,
+                0.0,
+                tuned,
+                reasons + ["DIRECTOR_HARD_BLOCK"],
+                notes,
+                director_dict,
+            )
+        if tuned.can_open and director.size_multiplier <= 0.0:
+            return DecisionIntelligenceResult(
+                IntelligenceAction.WATCH,
+                mode,
+                0.0,
+                tuned,
+                reasons + ["DIRECTOR_SIZE_ZERO"],
+                notes,
+                director_dict,
+            )
 
     if h.daily_pnl_usdc <= cfg.hard_daily_loss_usdc:
-        return DecisionIntelligenceResult(IntelligenceAction.NO_TRADE, mode, 0.0, tuned, reasons + ["HARD_DAILY_LOSS_GUARD"], notes)
+        return DecisionIntelligenceResult(IntelligenceAction.NO_TRADE, mode, 0.0, tuned, reasons + ["HARD_DAILY_LOSS_GUARD"], notes, director_dict)
     if h.consecutive_losses >= cfg.hard_consecutive_losses:
-        return DecisionIntelligenceResult(IntelligenceAction.NO_TRADE, mode, 0.0, tuned, reasons + ["HARD_CONSECUTIVE_LOSS_GUARD"], notes)
+        return DecisionIntelligenceResult(IntelligenceAction.NO_TRADE, mode, 0.0, tuned, reasons + ["HARD_CONSECUTIVE_LOSS_GUARD"], notes, director_dict)
 
     budget_reasons = _budget_blocks(cfg.budget, state, context)
     if budget_reasons and tuned.can_open:
-        return DecisionIntelligenceResult(IntelligenceAction.WATCH, mode, 0.0, tuned, reasons + budget_reasons, notes + ["budget_throttle_watch"])
+        return DecisionIntelligenceResult(IntelligenceAction.WATCH, mode, 0.0, tuned, reasons + budget_reasons, notes + ["budget_throttle_watch"], director_dict)
 
     if tuned.can_open:
         if tuned.action == TunedPaperAction.OPEN_BOOSTED:
-            return _capped_open_result(IntelligenceAction.OPEN_BOOSTED, mode, tuned.final_notional_usdc, tuned, reasons, notes, cap, cap_notes)
+            return _capped_open_result(IntelligenceAction.OPEN_BOOSTED, mode, tuned.final_notional_usdc, tuned, reasons, notes, cap, cap_notes, director_dict)
         if tuned.action == TunedPaperAction.OPEN_NORMAL:
-            return _capped_open_result(IntelligenceAction.OPEN_NORMAL, mode, tuned.final_notional_usdc, tuned, reasons, notes, cap, cap_notes)
-        return _capped_open_result(IntelligenceAction.OPEN_REDUCED, mode, tuned.final_notional_usdc, tuned, reasons, notes, cap, cap_notes)
+            return _capped_open_result(IntelligenceAction.OPEN_NORMAL, mode, tuned.final_notional_usdc, tuned, reasons, notes, cap, cap_notes, director_dict)
+        return _capped_open_result(IntelligenceAction.OPEN_REDUCED, mode, tuned.final_notional_usdc, tuned, reasons, notes, cap, cap_notes, director_dict)
 
     if _micro_explore_allowed(tuned, cfg, state, h):
-        return DecisionIntelligenceResult(
-            IntelligenceAction.MICRO_EXPLORE,
-            mode,
-            min(cfg.micro_explore_notional_usdc, cfg.max_notional_usdc),
-            tuned,
-            reasons + ["MICRO_EXPLORE_PROMISING_WATCH"],
-            notes,
-        )
+        micro_notional = min(cfg.micro_explore_notional_usdc * max(cap, 0.0), cfg.max_notional_usdc)
+        if micro_notional > 0:
+            return DecisionIntelligenceResult(
+                IntelligenceAction.MICRO_EXPLORE,
+                mode,
+                micro_notional,
+                tuned,
+                reasons + ["MICRO_EXPLORE_PROMISING_WATCH"],
+                notes,
+                director_dict,
+            )
 
     if tuned.action == TunedPaperAction.WATCH:
-        return DecisionIntelligenceResult(IntelligenceAction.WATCH, mode, 0.0, tuned, reasons, notes)
-    return DecisionIntelligenceResult(IntelligenceAction.NO_TRADE, mode, 0.0, tuned, reasons, notes)
+        return DecisionIntelligenceResult(IntelligenceAction.WATCH, mode, 0.0, tuned, reasons, notes, director_dict)
+    return DecisionIntelligenceResult(IntelligenceAction.NO_TRADE, mode, 0.0, tuned, reasons, notes, director_dict)
 
 
 __all__ = [
