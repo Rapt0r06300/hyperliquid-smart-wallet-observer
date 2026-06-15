@@ -3,6 +3,11 @@ from __future__ import annotations
 import math
 from typing import Any
 
+try:
+    import hyper_smart_observer.dydx_v4.fresh_signal_patch  # noqa: F401
+except Exception:
+    pass
+
 
 def _num(v: Any, default: float = 0.0) -> float:
     try:
