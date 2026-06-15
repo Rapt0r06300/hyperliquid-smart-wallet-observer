@@ -1,0 +1,30 @@
+from __future__ import annotations
+
+
+def install_leaderboard_import_patch() -> None:
+    try:
+        from hyper_smart_observer.dydx_v4.fast_scan_integration import FastScanIntegration
+        from hyper_smart_observer.dydx_v4.leaderboard_import import leaderboard_file_source
+    except Exception:
+        return
+    if getattr(FastScanIntegration, "_leaderboard_import_patch_installed", False):
+        return
+    original_init = FastScanIntegration.__init__
+
+    def patched_init(self, *args, **kwargs):
+        original_init(self, *args, **kwargs)
+        try:
+            names = {getattr(src, "name", "") for src in getattr(self.harvester, "_sources", [])}
+            if "local_leaderboard_import" not in names:
+                self.harvester.add_source(leaderboard_file_source())
+        except Exception:
+            pass
+
+    FastScanIntegration.__init__ = patched_init
+    FastScanIntegration._leaderboard_import_patch_installed = True
+
+
+install_leaderboard_import_patch()
+
+
+__all__ = ["install_leaderboard_import_patch"]
