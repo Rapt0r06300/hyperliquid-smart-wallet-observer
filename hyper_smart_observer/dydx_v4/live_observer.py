@@ -604,7 +604,22 @@ class DydxLiveObserver:
                 result = self.discovery.fast_discover(
                     n=getattr(self.config, "max_decision_wallets", 250)
                 )
-                self._shortlist = result.shortlisted
+                real_wallets = [
+                    w for w in result.shortlisted
+                    if getattr(w, 'source', '') != 'demo_synthetic'
+                ]
+                if real_wallets:
+                    logger.info(
+                        "Background discovery: %d wallets RÉELS trouvés → remplacement shortlist",
+                        len(real_wallets),
+                    )
+                    self._shortlist = result.shortlisted
+                    self._demo_mode = False
+                else:
+                    logger.info(
+                        "Background discovery: 0 wallets réels → shortlist seed conservée (%d wallets)",
+                        len(self._shortlist),
+                    )
                 self._last_discovery_ms = int(time.time() * 1000)
                 if self.fast_scan is not None:
                     try:

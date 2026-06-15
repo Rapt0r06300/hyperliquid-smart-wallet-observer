@@ -443,15 +443,26 @@ class DydxEngine:
                 self._discovery._demo_mode = True
                 logger.info("REST inaccessible -> mode DEMO active automatiquement")
 
+        from hyper_smart_observer.dydx_v4.wallet_discovery import _build_demo_wallets
+        _seed_shortlist = _build_demo_wallets()
+        logger.info(
+            "Engine seed: %d wallets demo synthetiques injectes au demarrage "
+            "(remplaces des que la decouverte Cosmos reussit) | PAPER ONLY",
+            len(_seed_shortlist),
+        )
         self._observer = DydxLiveObserver(
             config=self._config,
             rest_client=self._rest,
             cluster_detector=self._cluster,
             discovery=self._discovery,
+            initial_shortlist=_seed_shortlist,
             poll_interval_s=5.0,
             max_signal_age_ms=self._config.max_signal_age_ms,
             cosmos_client=self._cosmos,
         )
+        if all(getattr(w, 'source', '') == 'demo_synthetic' for w in _seed_shortlist):
+            self._observer._demo_mode = True
+            logger.info("Observer en mode DEMO (wallets synthetiques) | PAPER ONLY")
         self._install_observer_integrity_hooks()
 
         with self._lock:

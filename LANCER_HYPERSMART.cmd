@@ -24,6 +24,13 @@ REM   Pour DESACTIVER: remettre 0 ci-dessous (ou supprimer ces 2 lignes).
 set "DYDX_FAST_SCANNER=1"
 set "DYDX_FAST_SCANNER_HOT_CAPACITY=1000"
 
+REM ── Simulation demo immediate (OBLIGATOIRE pour voir des trades des le 1er tick) ─
+REM   Active 3 wallets synthetiques (ETH-USD LONG + BTC-USD LONG) comme seed.
+REM   Des que la decouverte Cosmos trouve de vrais wallets, ils remplacent les demo.
+REM   Sans ce flag, la simulation reste vide pendant 30-90s le temps de la decouverte.
+REM   PAPER SIMULATION ONLY — aucun ordre reel, aucun argent reel, aucune cle privee.
+set "DYDX_DEMO_MODE=1"
+
 REM Politique de risque (anti-churn, exits ATR, coupe-circuit, anti-scalper).
 REM Pour DESACTIVER: mettre 0. Defaut moteur = OFF.
 set "DYDX_RISK_POLICY=1"
@@ -36,11 +43,4 @@ set "DYDX_CONSENSUS_MIN_WALLETS=1"
 set "DYDX_EDGE_SAFETY_MULTIPLIER=1.5"
 
 REM Firehose full node (tous les fills + adresses en temps reel). Mettre 1 QUAND
-REM ton node dYdX (--grpc-streaming-enabled) tourne: il s'active alors tout seul
-REM au demarrage. Sans node, laisser 0 (sinon reconnexions inutiles en boucle).
-if not defined DYDX_FULL_NODE_STREAM set "DYDX_FULL_NODE_STREAM=0"
-if not defined DYDX_FULL_NODE_STREAM_ENDPOINT set "DYDX_FULL_NODE_STREAM_ENDPOINT=127.0.0.1:9090"
-
-powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0tools\start_hypersmart_simulation.ps1" -Port 8794 -IntervalSeconds 15 -MaxLeaders 50 -Interactive
-
-exit /b 0
+REM ton node dYdX (--grpc-streaming-enab
