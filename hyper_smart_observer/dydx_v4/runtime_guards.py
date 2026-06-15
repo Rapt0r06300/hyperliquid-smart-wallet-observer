@@ -53,6 +53,67 @@ def next_pyramid_index(open_positions: dict, market: str, side: str) -> int:
     return idx
 
 
+def _decision_v2(observer: Any, cluster: Any):
+    from hyper_smart_observer.dydx_v4.decision_intelligence_v2 import (
+        BudgetState,
+        DecisionIntelligenceConfig,
+        SessionHealth,
+        decision_intelligence_v2,
+    )
+    from hyper_smart_observer.dydx_v4.tremor_engine import TremorObservation
+    from hyper_smart_observer.dydx_v4.tuned_decision import TunedDecisionContext
+
+    market = str(getattr(cluster, "market_id", "") or "")
+    side = str(getattr(cluster, "side", "LONG") or "LONG").upper()
+    wallet_count = int(getattr(cluster, "wallet_count", 0) or 0)
+    strength = float(getattr(cluster, "signal_strength", 0.0) or 0.0)
+    same_market = [p for p in observer._open_positions.values() if getattr(p, "market_id", "") == market]
+    try:
+        market_ctx = observer._market_context(market)
+        regime = str(getattr(market_ctx, "regime", "UNKNOWN") or "UNKNOWN")
+        confidence = float(getattr(market_ctx, "confidence", 0.0) or 0.0)
+        volume_z = float(getattr(market_ctx, "volume_zscore", 0.0) or 0.0)
+    except Exception:
+        regime = "UNKNOWN"
+        confidence = 0.0
+        volume_z = 0.0
+    obs = TremorObservation(
+        market_id=market,
+        direction=side,
+        volume_zscore=volume_z,
+        flow_imbalance=strength,
+        flow_volume_usdc=float(getattr(cluster, "total_notional_usdc", 0.0) or 0.0),
+        flow_trade_count=int(getattr(cluster, "flow_trade_count", 0) or 0),
+        leading_wallets=wallet_count,
+        consensus_wallets=wallet_count,
+        signal_age_ms=int(getattr(cluster, "signal_age_ms", 0) or 0),
+        edge_remaining_bps=float(getattr(observer.config, "min_edge_bps", 3.0) or 3.0) + strength * 10.0,
+        market_regime=regime,
+        market_confidence=confidence,
+        flow_direction=side,
+        source=str(getattr(cluster, "origin", "rest") or "rest"),
+    )
+    ctx = TunedDecisionContext(
+        spread_bps=float(getattr(observer.config, "estimated_spread_bps", 3.0) or 3.0),
+        slippage_bps=float(getattr(observer.config, "estimated_slippage_bps", 5.0) or 5.0),
+        open_positions=len(observer._open_positions),
+        market_exposure_usdc=sum(abs(float(getattr(p, "size", 0.0) or 0.0)) for p in same_market),
+        base_notional_usdc=float(getattr(observer.config, "paper_notional_base_usdc", 75.0) or 75.0),
+        max_notional_usdc=float(getattr(observer.config, "paper_notional_max_usdc", 100.0) or 100.0),
+    )
+    return decision_intelligence_v2(
+        obs,
+        health=SessionHealth(
+            closed_trades=int(getattr(observer.stats, "positions_closed", 0) or 0),
+            winrate=float(getattr(observer.stats, "winrate", 0.0) or 0.0),
+            open_positions=len(observer._open_positions),
+        ),
+        budget_state=BudgetState(same_market_open_positions=len(same_market)),
+        ctx=ctx,
+        config=DecisionIntelligenceConfig(),
+    )
+
+
 def _install_class_pyramid_guard() -> None:
     try:
         from hyper_smart_observer.dydx_v4.live_observer import DydxLiveObserver
@@ -69,6 +130,18 @@ def _install_class_pyramid_guard() -> None:
         existing = getattr(self, "_open_positions", {}).get(base_key)
         if existing is not None:
             setattr(existing, "_pyramid_count", next_pyramid_index(self._open_positions, market, side) - 1)
+        try:
+            result = _decision_v2(self, cluster)
+            record = getattr(self, "_record_decision", None)
+            if callable(record):
+                record("DECISION_V2", result.to_dict())
+            if not result.can_open:
+                refuse = getattr(self, "_refuse", None)
+                if callable(refuse):
+                    refuse(f"DECISION_V2_{result.action.value}")
+                return None
+        except Exception:
+            pass
         return original(self, cluster)
 
     DydxLiveObserver._evaluate_cluster = guarded
