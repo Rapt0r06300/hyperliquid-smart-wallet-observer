@@ -197,7 +197,7 @@
     ctx.fillText(formatUsd(maxValue), 8, plotTop + 10);
     ctx.fillText(formatUsd(minValue), 8, plotBottom);
     const ageMs = Math.max(0, Date.now() - state.lastTickAt);
-    badge.textContent = `Temps reel fluide ${formatUsd(state.displayPnl)}${ageMs > 5000 ? " · tick ancien" : ""}`;
+    badge.textContent = `Temps reel fluide ${formatUsd(state.displayPnl)}${ageMs > 7000 ? " · tick ancien" : ""}`;
     badge.className = `badge ${positive ? "green" : "red"}`;
 
     canvas.onmousemove = (event) => {
@@ -219,6 +219,7 @@
   }
 
   async function pollRealtimeTick() {
+    if (document.hidden) return;
     try {
       const res = await fetch("/api/dydx/realtime-tick", { cache: "no-store" });
       if (!res.ok) throw new Error(`tick ${res.status}`);
@@ -241,6 +242,6 @@
     draw();
   };
   window.__hypersmartSmoothMetagraph = { state, addSample, pollRealtimeTick, originalDraw };
-  window.setInterval(pollRealtimeTick, 900);
+  window.setInterval(pollRealtimeTick, 2500);
   pollRealtimeTick();
 })();
