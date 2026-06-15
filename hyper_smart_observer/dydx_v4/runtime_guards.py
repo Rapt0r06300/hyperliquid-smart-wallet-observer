@@ -53,4 +53,29 @@ def next_pyramid_index(open_positions: dict, market: str, side: str) -> int:
     return idx
 
 
+def _install_class_pyramid_guard() -> None:
+    try:
+        from hyper_smart_observer.dydx_v4.live_observer import DydxLiveObserver
+    except Exception:
+        return
+    if getattr(DydxLiveObserver, "_pyramid_guard_installed", False):
+        return
+    original = DydxLiveObserver._evaluate_cluster
+
+    def guarded(self, cluster):
+        market = str(getattr(cluster, "market_id", "") or "")
+        side = str(getattr(cluster, "side", "") or "")
+        base_key = f"{market}:{side}"
+        existing = getattr(self, "_open_positions", {}).get(base_key)
+        if existing is not None:
+            setattr(existing, "_pyramid_count", next_pyramid_index(self._open_positions, market, side) - 1)
+        return original(self, cluster)
+
+    DydxLiveObserver._evaluate_cluster = guarded
+    DydxLiveObserver._pyramid_guard_installed = True
+
+
+_install_class_pyramid_guard()
+
+
 __all__ = ["correlated_count_reason", "neutral_demo_price", "next_pyramid_index"]
