@@ -4,14 +4,11 @@ Intégration du scan rapide pour DydxLiveObserver — opt-in, READ-ONLY / PAPER.
 Relie `WalletHarvester` (découverte multi-sources) + `FastScanner` (WS temps réel)
 au live observer, derrière le flag `DYDX_FAST_SCANNER`.
 
-DÉFAUT OFF : si le flag n'est pas activé, l'observer n'instancie même pas cette
-classe et garde EXACTEMENT son comportement REST historique. Aucune régression.
-
 Apport quand activé :
-- abonne en WebSocket les wallets shortlistés (et ceux découverts par le harvester) ;
-- détecte en < 1 s quels wallets viennent de trader (fills frais) ;
-- expose `wallets_that_just_moved()` → l'observer poll ces wallets immédiatement
-  au lieu d'attendre l'intervalle (latence 8–58 s → ~1 s).
+- abonne en WebSocket les wallets shortlistés ;
+- détecte en < 1 s quels wallets viennent de trader ;
+- expose `wallets_that_just_moved()` ;
+- expose les diagnostics WS pour savoir si le flux est réellement vivant.
 
 SÉCURITÉ : aucune méthode d'ordre/signature/dépôt. Lecture, abonnement,
 agrégation. Un fill n'est jamais un ordre.
@@ -44,27 +41,23 @@ class FastScanIntegration:
         self.harvester = harvester or WalletHarvester(max_track=hot_capacity)
         self._ws = ws_client
         self._cosmos_enabled = False
-        # Brancher la réception WS sur le scanner (READ-ONLY). Le client WS appelle
-        # son `_on_message_cb` à chaque message reçu ; on le pointe vers le scanner.
         if ws_client is not None:
             try:
                 ws_client._on_message_cb = self.note_ws_message
             except Exception as e:  # pragma: no cover - dépend de l'impl WS
                 logger.debug("hook WS échec (ignoré): %s", e)
 
-    # -- Entrée WS ----------------------------------------------------------- #
     def note_ws_message(self, msg) -> None:
-        """Pousser un message WS dans le scanner (utilisé par le client WS et les tests)."""
+        """Pousser un message WS dans le scanner."""
         try:
             self.scanner.handle_ws_message(msg)
         except Exception as e:  # pragma: no cover
             logger.debug("note_ws_message: %s", e)
 
-    # -- Suivi des wallets --------------------------------------------------- #
     def track_shortlist(self, shortlist) -> int:
         """
-        Abonner en WS les wallets shortlistés. Accepte des objets de type
-        WalletScore (attribut `.address` + `.total_score`). Retourne le nb suivi.
+        Abonner en WS les wallets shortlistés. Accepte des objets type WalletScore.
+        Retourne le nombre de wallets soumis au hot-set.
         """
         pairs: list[tuple[str, float]] = []
         for w in shortlist or []:
@@ -82,18 +75,14 @@ class FastScanIntegration:
         return len(pairs)
 
     def track_harvester_top(self, n: Optional[int] = None) -> int:
-        """Abonner en WS le top du harvester (découverte multi-sources)."""
+        """Abonner en WS le top du harvester."""
         pairs = self.harvester.top_for_scanner(n=n)
         if pairs:
             self.scanner.track_wallets(pairs)
         return len(pairs)
 
-    # -- Découverte on-chain Cosmos (maximum d'adresses) --------------------- #
     def enable_cosmos_discovery(self, cosmos_client, **scan_kwargs) -> None:
-        """
-        Brancher la source on-chain Cosmos sur le harvester (énumère tous les
-        subaccounts dYdX v4 → maximum d'adresses). Idempotent. READ-ONLY.
-        """
+        """Brancher la source on-chain Cosmos sur le harvester. READ-ONLY."""
         if self._cosmos_enabled:
             return
         try:
@@ -104,10 +93,7 @@ class FastScanIntegration:
             logger.warning("enable_cosmos_discovery échec (ignoré): %s", e)
 
     def refresh_discovery(self, n: Optional[int] = None) -> int:
-        """
-        Passage de découverte (toutes sources, dont Cosmos) puis abonnement du top
-        en WS. Renvoie le nb de NOUVELLES adresses. Ne lève jamais (NO_TRADE safe).
-        """
+        """Découverte toutes sources puis abonnement du top en WS."""
         try:
             new = self.harvester.harvest_once()
             self.track_harvester_top(n=n)
@@ -116,24 +102,23 @@ class FastScanIntegration:
             logger.debug("refresh_discovery: %s", e)
             return 0
 
-    # -- Signal événementiel ------------------------------------------------- #
     def wallets_that_just_moved(self, limit: int = 1000) -> set[str]:
-        """
-        Adresses uniques ayant produit un fill FRAIS depuis le dernier appel.
-
-        L'observer utilise ce set pour poller immédiatement ces wallets, au lieu
-        d'attendre le prochain tick d'intervalle. C'est le gain de latence.
-        """
+        """Adresses uniques ayant produit un fill frais depuis le dernier appel."""
         moved: set[str] = set()
         for fill in self.scanner.drain_fresh(limit=limit):
             moved.add(fill.address)
         return moved
 
-    # -- État ---------------------------------------------------------------- #
     def stats(self) -> dict:
         s = self.scanner.stats()
         s["harvested_addresses"] = len(self.harvester.index)
         s["ws_attached"] = self._ws is not None
+        if self._ws is not None:
+            try:
+                diag = self._ws.diagnostics()
+                s["ws"] = diag.to_dict() if hasattr(diag, "to_dict") else diag
+            except Exception as e:
+                s["ws"] = {"diagnostics_error": str(e), "read_only": True, "paper_only": True}
         return s
 
 
