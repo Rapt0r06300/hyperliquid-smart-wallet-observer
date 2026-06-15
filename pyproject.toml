@@ -3,9 +3,9 @@ requires = ["setuptools>=68", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "hyperliquid-smart-wallet-observer"
-version = "0.1.0"
-description = "Read-only Hyperliquid smart-wallet observer with paper trading and locked testnet scaffolding."
+name = "dydx-smart-wallet-observer"
+version = "0.2.0"
+description = "Read-only dYdX v4 smart-wallet observer with local paper simulation."
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
@@ -26,14 +26,17 @@ dev = [
 ]
 
 [project.scripts]
+dydx-observer = "hyper_smart_observer.dydx_v4.cli:app"
 hl-observer = "hl_observer.cli:app"
 
 [tool.setuptools.packages.find]
-where = ["src"]
+where = ["src", "."]
+include = ["hl_observer*", "hyper_smart_observer*"]
+exclude = ["tests*", "data*", "logs*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-pythonpath = ["src"]
+pythonpath = ["src", "."]
 
 [tool.ruff]
 line-length = 100
