@@ -14,6 +14,11 @@ try:
 except Exception:
     pass
 
+try:
+    import hyper_smart_observer.dydx_v4.cluster_whale_weight_patch  # noqa: F401
+except Exception:
+    pass
+
 
 def correlated_count_reason(observer: Any, market: str, side: str) -> str | None:
     if not getattr(observer.config, "correlation_gate_enabled", True):
