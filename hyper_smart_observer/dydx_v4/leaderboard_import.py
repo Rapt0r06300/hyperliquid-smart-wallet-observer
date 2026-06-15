@@ -24,6 +24,8 @@ WINRATE_KEYS = ("winrate", "winRate", "win_rate")
 PF_KEYS = ("profit_factor", "profitFactor", "pf")
 TRADES_KEYS = ("trade_count", "trades", "numTrades", "tradeCount")
 BALANCE_KEYS = ("usdc_balance", "balance", "equity", "accountEquity", "margin")
+OPEN_POSITIONS_KEYS = ("open_positions", "openPositions", "positions", "position_count")
+MARKET_KEYS = ("markets", "market", "coins", "symbols", "assets")
 
 
 def _first(row: dict, keys: tuple[str, ...]):
@@ -34,14 +36,17 @@ def _first(row: dict, keys: tuple[str, ...]):
 
 
 def _metrics(row: dict) -> dict:
-    return {
+    metrics = {
         "net_pnl_usdc": _first(row, PNL_KEYS),
         "roi_pct": _first(row, ROI_KEYS),
         "winrate": _first(row, WINRATE_KEYS),
         "profit_factor": _first(row, PF_KEYS),
         "trade_count": _first(row, TRADES_KEYS),
         "usdc_balance": _first(row, BALANCE_KEYS),
+        "open_positions": _first(row, OPEN_POSITIONS_KEYS),
+        "markets": _first(row, MARKET_KEYS),
     }
+    return {key: value for key, value in metrics.items() if value not in (None, "")}
 
 
 def _rows_from_json(data) -> list[dict]:

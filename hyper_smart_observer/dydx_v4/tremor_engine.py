@@ -75,7 +75,7 @@ class TremorConfig:
     allow_flow_only_watch: bool = True
 
 
-@dataclass(frozen=True)
+@dataclass
 class TremorObservation:
     """
     Donnees normalisees observees au moment du tremor.

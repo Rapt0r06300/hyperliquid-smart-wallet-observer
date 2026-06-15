@@ -168,6 +168,7 @@ class MarketFlowMonitor:
         self.window = MarketFlowWindow(window_ms=window_ms)
         self._lock = threading.Lock()
         self._pending: list = []
+        self._latest_prices: dict[str, tuple[float, int]] = {}
         self._ws = None
         self.stats = {
             "trades_seen": 0,
@@ -175,6 +176,7 @@ class MarketFlowMonitor:
             "ws_status": "DISCONNECTED",
             "ws_healthy": False,
             "subscriptions_requested": 0,
+            "latest_price_markets": 0,
         }
 
     def _on_message(self, msg) -> None:
@@ -186,9 +188,14 @@ class MarketFlowMonitor:
         with self._lock:
             for side, size, price in parse_trades(data):
                 self._pending.append((now, market, side, size * price))
+                self._latest_prices[market] = (price, now)
                 self.stats["trades_seen"] += 1
+                self.stats["last_trade_market"] = market
+                self.stats["last_trade_price"] = price
+                self.stats["last_trade_at_ms"] = now
             if len(self._pending) > 200_000:
                 self._pending = self._pending[-100_000:]
+            self.stats["latest_price_markets"] = len(self._latest_prices)
 
     def start(self) -> None:  # pragma: no cover - réseau
         try:
@@ -226,9 +233,37 @@ class MarketFlowMonitor:
             self.stats["seconds_since_last_message"] = round(
                 float(getattr(self._ws, "seconds_since_last_message", float("inf"))), 3
             )
+            last_trade_at = int(self.stats.get("last_trade_at_ms") or 0)
+            if last_trade_at:
+                self.stats["seconds_since_last_trade"] = round(
+                    max(0.0, (time.time() * 1000 - last_trade_at) / 1000.0), 3
+                )
         except Exception:
             self.stats["ws_status"] = "UNKNOWN"
             self.stats["ws_healthy"] = False
+
+    def latest_prices(self, max_age_ms: int = 5_000) -> dict[str, float]:
+        """
+        Derniers prix réellement vus sur le flux public `v4_trades`.
+
+        Ces marks sont destinés au mark-to-market de la simulation: ils ne
+        déclenchent aucun ordre et ne remplacent pas un vrai signal de wallet.
+        """
+        now = int(time.time() * 1000)
+        cutoff = now - max(0, int(max_age_ms))
+        with self._lock:
+            out = {
+                market: price
+                for market, (price, ts_ms) in self._latest_prices.items()
+                if ts_ms >= cutoff and price > 0
+            }
+            self.stats["latest_price_markets"] = len(out)
+            last_trade_at = int(self.stats.get("last_trade_at_ms") or 0)
+            if last_trade_at:
+                self.stats["seconds_since_last_trade"] = round(
+                    max(0.0, (now - last_trade_at) / 1000.0), 3
+                )
+            return out
 
     def drain_and_detect(
         self,

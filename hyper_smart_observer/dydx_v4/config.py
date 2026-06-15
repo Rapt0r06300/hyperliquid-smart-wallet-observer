@@ -64,13 +64,13 @@ class DydxV4Config:
     allow_private_key: bool = False
     allow_node_private_api: bool = False
 
-    max_signal_age_ms: int = 90_000
-    hard_max_signal_age_ms: int = 90_000
-    min_edge_bps: float = 2.2
+    max_signal_age_ms: int = 30_000
+    hard_max_signal_age_ms: int = 30_000
+    min_edge_bps: float = 3.0
     edge_safety_multiplier: float = 1.0
 
     starting_balance_usdc: float = 1000.0
-    max_open_paper_trades: int = 30
+    max_open_paper_trades: int = 25
     max_position_pct: float = 0.12
     max_total_exposure_pct: float = 0.95
     dynamic_sizing_enabled: bool = True
@@ -109,8 +109,8 @@ class DydxV4Config:
 
     consensus_required: bool = True
     consensus_min_wallets: int = 2
-    consensus_window_ms: int = 5 * 60 * 1000
-    consensus_recency_bonus_window_ms: int = 45_000
+    consensus_window_ms: int = 3 * 60 * 1000
+    consensus_recency_bonus_window_ms: int = 30_000
     consensus_recency_edge_multiplier: float = 1.08
 
     atr_period: int = 14
@@ -149,7 +149,7 @@ class DydxV4Config:
     funding_edge_horizon_hours: float = 1.0
 
     fast_scanner_enabled: bool = True
-    fast_scanner_hot_capacity: int = 2500
+    fast_scanner_hot_capacity: int = 1000
     risk_policy_enabled: bool = True
     min_hold_seconds: float = 20.0
     reopen_cooldown_seconds: float = 8.0
@@ -324,7 +324,7 @@ def load_config_from_env(base: DydxV4Config | None = None) -> DydxV4Config:
         breakeven_trigger_atr_mult=_float("DYDX_BREAKEVEN_TRIGGER_ATR_MULT", cfg.breakeven_trigger_atr_mult),
         breakeven_offset_atr_mult=_float("DYDX_BREAKEVEN_OFFSET_ATR_MULT", cfg.breakeven_offset_atr_mult),
     )
-    if _bool("DYDX_OPPORTUNITY_CALIBRATION", True):
+    if _bool("DYDX_OPPORTUNITY_CALIBRATION", False):
         from hyper_smart_observer.dydx_v4.opportunity_calibration import apply_opportunity_calibration
         loaded = apply_opportunity_calibration(loaded)
     return loaded

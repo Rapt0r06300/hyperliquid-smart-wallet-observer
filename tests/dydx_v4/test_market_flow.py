@@ -114,3 +114,20 @@ def test_market_flow_monitor_refreshes_ws_status() -> None:
     assert monitor.stats["ws_status"] == "SUBSCRIBED"
     assert monitor.stats["ws_healthy"] is True
     assert monitor.stats["seconds_since_last_message"] == 0.25
+
+
+def test_market_flow_monitor_exposes_recent_trade_prices_for_mark_to_market() -> None:
+    monitor = MarketFlowMonitor("wss://example.invalid", ["ETH-USD"])
+    monitor._on_message(
+        SimpleNamespace(
+            channel="v4_trades",
+            id="ETH-USD",
+            data={"trades": [{"side": "BUY", "size": "1.5", "price": "2012.25"}]},
+        )
+    )
+
+    prices = monitor.latest_prices(max_age_ms=5_000)
+
+    assert prices == {"ETH-USD": 2012.25}
+    assert monitor.stats["latest_price_markets"] == 1
+    assert monitor.stats["last_trade_market"] == "ETH-USD"

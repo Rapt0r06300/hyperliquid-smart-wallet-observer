@@ -81,7 +81,6 @@ def install_leaderboard_import_patch() -> None:
                 return old_merge(self)
             return None
         try:
-            self.config.max_decision_wallets = max(int(getattr(self.config, "max_decision_wallets", 0) or 0), DECISION_WALLET_TARGET)
             self.config.rest_poll_cap = max(int(getattr(self.config, "rest_poll_cap", 0) or 0), REST_POLL_TARGET)
         except Exception:
             pass

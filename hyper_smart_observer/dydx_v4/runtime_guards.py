@@ -140,9 +140,35 @@ def _install_class_pyramid_guard() -> None:
     install_notional_bridge(DydxLiveObserver)
     original = DydxLiveObserver._evaluate_cluster
 
+    def _hard_decision_v2_reasons(result: Any) -> list[str]:
+        reasons = [str(r) for r in getattr(result, "reasons", []) or []]
+        hard_markers = (
+            "HARD_",
+            "DAILY_LOSS",
+            "CONSECUTIVE_LOSS",
+            "CIRCUIT",
+            "KILL",
+            "MAX_OPEN",
+            "DRAWDOWN",
+            "PRIVATE",
+            "ORDER",
+        )
+        return [r for r in reasons if any(marker in r.upper() for marker in hard_markers)]
+
     def guarded(self, cluster):
         market = str(getattr(cluster, "market_id", "") or "")
         side = str(getattr(cluster, "side", "") or "")
+        signal_age_ms = int(getattr(cluster, "signal_age_ms", 0) or 0)
+        max_signal_age_ms = int(getattr(self, "max_signal_age_ms", 0) or 0)
+        is_fresh = bool(getattr(cluster, "is_fresh", True))
+        if max_signal_age_ms > 0 and (signal_age_ms > max_signal_age_ms or not is_fresh):
+            stats = getattr(self, "stats", None)
+            if stats is not None:
+                stats.stale_signals_refused = getattr(stats, "stale_signals_refused", 0) + 1
+            refuse = getattr(self, "_refuse", None)
+            if callable(refuse):
+                refuse(f"STALE_SIGNAL age={signal_age_ms}ms fresh={is_fresh}")
+            return None
         base_key = f"{market}:{side}"
         existing = getattr(self, "_open_positions", {}).get(base_key)
         if existing is not None:
@@ -153,10 +179,16 @@ def _install_class_pyramid_guard() -> None:
             if callable(record):
                 record("DECISION_V2", result.to_dict())
             if not result.can_open:
-                refuse = getattr(self, "_refuse", None)
-                if callable(refuse):
-                    refuse(f"DECISION_V2_{result.action.value}")
-                return None
+                hard_reasons = _hard_decision_v2_reasons(result)
+                if hard_reasons:
+                    refuse = getattr(self, "_refuse", None)
+                    if callable(refuse):
+                        refuse(f"DECISION_V2_{result.action.value} hard={','.join(hard_reasons)}")
+                    return None
+                # Decision V2 is advisory when it has insufficient sample/profile
+                # data. The original deterministic gates still validate freshness,
+                # liquidity, spread, edge, exposure and paper-only safety.
+                return original(self, cluster)
             set_next_notional(self, getattr(result, "notional_usdc", 0.0))
         except Exception:
             pass

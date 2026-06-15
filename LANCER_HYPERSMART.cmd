@@ -22,7 +22,7 @@ REM   Indexer temps reel pour suivre les wallets et reproduire leurs moves en
 REM   moins d'1s (simulation paper uniquement, aucun ordre reel).
 REM   Pour DESACTIVER: remettre 0 ci-dessous (ou supprimer ces 2 lignes).
 set "DYDX_FAST_SCANNER=1"
-set "DYDX_FAST_SCANNER_HOT_CAPACITY=500"
+set "DYDX_FAST_SCANNER_HOT_CAPACITY=1000"
 
 REM Politique de risque (anti-churn, exits ATR, coupe-circuit, anti-scalper).
 REM Pour DESACTIVER: mettre 0. Defaut moteur = OFF.

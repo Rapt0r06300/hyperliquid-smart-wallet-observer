@@ -89,3 +89,37 @@ def test_engine_realtime_tick_is_paper_only_and_live_marked() -> None:
     assert tick["open_positions"] == 0
     assert tick["prices"]["ETH-USD"] == 101.0
     assert refreshed["count"] == 1
+
+
+def test_engine_realtime_tick_uses_recent_public_trade_mark_before_rest() -> None:
+    cfg = DydxV4Config(network=DydxNetwork.TESTNET, market_flow_enabled=True)
+    engine = DydxEngine(config=cfg)
+    refreshed = {"count": 0}
+
+    def _refresh_marks() -> None:
+        refreshed["count"] += 1
+
+    engine._observer = SimpleNamespace(
+        _mark_prices={"ETH-USD": 101.0},
+        _open_positions={},
+        _flow_monitor=SimpleNamespace(latest_prices=lambda max_age_ms=5000: {"ETH-USD": 102.5}),
+        _refresh_market_prices=_refresh_marks,
+        get_status=lambda: {
+            "running": True,
+            "session_id": "paper-session",
+            "mode": "PAPER",
+            "net_pnl_usdc": 0.0,
+            "realized_pnl_usdc": 0.0,
+            "unrealized_pnl_usdc": 0.0,
+            "equity": 1000.0,
+            "shortlist_size": 1,
+        },
+    )
+
+    tick = engine.get_realtime_tick()
+
+    assert tick["paper_only"] is True
+    assert tick["read_only"] is True
+    assert tick["prices"]["ETH-USD"] == 102.5
+    assert tick["refreshed_prices"] is True
+    assert refreshed["count"] == 1

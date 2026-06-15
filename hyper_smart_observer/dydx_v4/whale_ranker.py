@@ -55,7 +55,17 @@ def blended_whale_top(index: Any, limit: int, whale_share: float = 0.65) -> list
         except Exception:
             pass
     if wallet_pool_batch is not None:
-        return wallet_pool_batch(wallets, limit=limit, scorer=whale_score, anchor_share=0.55)
+        def _blend_score(wallet: Any) -> float:
+            whale = whale_score(wallet)
+            has_whale_evidence = (
+                _num(getattr(wallet, "net_pnl_usdc", 0.0)) > 0.0
+                or _num(getattr(wallet, "usdc_balance", 0.0)) > 0.0
+            )
+            if has_whale_evidence:
+                return 10_000.0 + whale
+            return _num(getattr(wallet, "score", 0.0))
+
+        return wallet_pool_batch(wallets, limit=limit, scorer=_blend_score, anchor_share=0.55)
     whale_n = max(0, min(limit, int(limit * whale_share)))
     general_n = max(0, limit - whale_n)
     whales = sorted(wallets, key=lambda w: (whale_score(w), _num(getattr(w, "score", 0.0))), reverse=True)[:whale_n]

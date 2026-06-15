@@ -98,16 +98,25 @@
 <script>
 const $=s=>document.querySelector(s);
 const REFRESH_MS=4000;       // refresh complet: scan, wallets, details
-const TICK_MS=750;           // tick leger: PnL + mark-to-market
+const TICK_MIN_MS=180;       // cadence cible du tick leger, sans empiler les requetes
+const TICK_MAX_MS=1400;      // backoff court si le serveur est occupe
+const GRAPH_VISIBLE_MS=120000; // fenetre live visible, l'historique reste conserve
 let equityHist=[];           // {t, equity}
 let lastGood=null;
 let lastTick=null;
 let tickInFlight=false;
+let tickBackoffMs=TICK_MIN_MS;
+let lastServerTickAt=0;
+let lastServerEquity=1000;
 let targetEquity=1000;
 let targetPnl=0;
 let displayEquity=1000;
 let displayPnl=0;
 let lastEquityPointAt=0;
+let lastAnimAt=0;
+let mousePoint=null;
+let viewLo=998;
+let viewHi=1002;
 
 function fmtUsd(v){const n=Number(v||0);const s=n>0?"+":"";return s+n.toFixed(2)+" $";}
 function fmtBal(v){return Number(v||0).toFixed(2)+" $";}
@@ -145,19 +154,23 @@ function updateLiveCards(equity,pnl){
   mp.className="val "+(pnl>=0?"green":"red");
 }
 
-function pushLiveEquityPoint(eq,now){
+function recordServerEquityPoint(eq,now){
+  const value=Number(eq);
+  if(!Number.isFinite(value))return;
   if(!equityHist.length){
-    equityHist.push({t:now-1,equity:1000});
-    equityHist.push({t:now,equity:eq});
+    equityHist.push({t:now-1000,equity:1000,source:"session_start"});
+    equityHist.push({t:now,equity:value,source:"server_tick"});
     lastEquityPointAt=now;
     return;
   }
-  if(now-lastEquityPointAt>=1000){
-    equityHist.push({t:now,equity:eq});
+  const last=equityHist[equityHist.length-1];
+  if(Math.abs(last.equity-value)<0.000001 && now-last.t<1200)return;
+  if(now-lastEquityPointAt>=180){
+    equityHist.push({t:now,equity:value,source:"server_tick"});
     lastEquityPointAt=now;
     if(equityHist.length>900)equityHist.shift();
   }else{
-    equityHist[equityHist.length-1]={t:now,equity:eq};
+    equityHist[equityHist.length-1]={t:now,equity:value,source:"server_tick"};
   }
 }
 
@@ -184,13 +197,15 @@ function applyRealtimeTick(tick){
   lastTick=tick;
   const equity=Number(tick.equity_usdt!=null?tick.equity_usdt:1000);
   const pnl=Number(tick.net_pnl_usdt!=null?tick.net_pnl_usdt:(equity-1000));
+  lastServerTickAt=Date.now();
+  lastServerEquity=equity;
   targetEquity=equity;
   targetPnl=pnl;
   if(!equityHist.length){
     displayEquity=equity;
     displayPnl=pnl;
-    pushLiveEquityPoint(displayEquity,Date.now());
   }
+  recordServerEquityPoint(equity,Date.now());
   renderPositions(tick.positions||[]);
   $("#gState").textContent=(tick.open_positions||0)>0
     ? "mark-to-market temps reel"
@@ -203,27 +218,40 @@ async function refreshTick(){
   try{
     const tick=await getJson("/api/dydx/realtime-tick?t="+Date.now());
     applyRealtimeTick(tick);
+    tickBackoffMs=TICK_MIN_MS;
   }catch(e){
     $("#gState").textContent=lastTick?"dernier tick conserve":"tick temps reel indisponible";
+    tickBackoffMs=Math.min(TICK_MAX_MS, Math.max(TICK_MIN_MS, tickBackoffMs*1.35));
   }finally{
     tickInFlight=false;
   }
 }
 
+function scheduleNextTick(){
+  const delay=tickInFlight?TICK_MIN_MS:tickBackoffMs;
+  setTimeout(async()=>{await refreshTick();scheduleNextTick();},delay);
+}
+
 function animateEquity(){
-  displayEquity += (targetEquity-displayEquity)*0.22;
-  displayPnl += (targetPnl-displayPnl)*0.22;
+  // Rendu fluide uniquement vers la derniere valeur serveur. Rien n'est invente:
+  // si le tick serveur ne change pas, l'affichage converge puis reste stable.
+  const now=performance.now();
+  const dt=lastAnimAt?Math.min(90,Math.max(8,now-lastAnimAt)):16;
+  lastAnimAt=now;
+  const alpha=1-Math.exp(-dt/170);
+  displayEquity += (targetEquity-displayEquity)*alpha;
+  displayPnl += (targetPnl-displayPnl)*alpha;
   if(Math.abs(targetEquity-displayEquity)<0.002)displayEquity=targetEquity;
   if(Math.abs(targetPnl-displayPnl)<0.002)displayPnl=targetPnl;
   updateLiveCards(displayEquity,displayPnl);
-  pushLiveEquityPoint(displayEquity,Date.now());
   drawEquity();
   requestAnimationFrame(animateEquity);
 }
 
 async function getJson(u){
   const ctrl=new AbortController();
-  const tid=setTimeout(()=>ctrl.abort(),6000);
+  const isTick=String(u).includes("/api/dydx/realtime-tick");
+  const tid=setTimeout(()=>ctrl.abort(),isTick?2200:6000);
   try{const r=await fetch(u,{cache:"no-store",signal:ctrl.signal});clearTimeout(tid);if(!r.ok)throw 0;return r.json();}
   catch(e){clearTimeout(tid);throw e;}
 }
@@ -265,7 +293,7 @@ async function refresh(){
   if(!equityHist.length){
     displayEquity=eq;
     displayPnl=pnl;
-    pushLiveEquityPoint(eq,now);
+    recordServerEquityPoint(eq,now);
     updateLiveCards(eq,pnl);
   }
   $("#mWins").textContent=trades>0?(wins+" / "+trades):"0 / 0";
@@ -349,40 +377,95 @@ function drawEquity(){
   ctx.setTransform(ratio,0,0,ratio,0,0);
   ctx.clearRect(0,0,W,H);
   const pad={l:54,r:16,t:14,b:24};
-  const pts=equityHist.length?equityHist:[{t:Date.now(),equity:1000}];
+  const now=Date.now();
+  let basePts=equityHist.length?equityHist:[{t:now-1000,equity:1000,source:"empty"}];
+  if(equityHist.length){
+    const cutoff=now-GRAPH_VISIBLE_MS;
+    const recent=equityHist.filter(p=>p.t>=cutoff);
+    const anchor=[...equityHist].reverse().find(p=>p.t<cutoff);
+    basePts=anchor?[anchor,...recent]:recent;
+    if(!basePts.length)basePts=[equityHist[equityHist.length-1]];
+  }
+  const lastBase=basePts[basePts.length-1];
+  const pts=[...basePts];
+  if(!lastBase || Math.abs(lastBase.equity-displayEquity)>0.0005 || now-lastBase.t>180){
+    pts.push({t:now,equity:displayEquity,source:"visual_interpolation"});
+  }
   const vals=pts.map(p=>p.equity);
   let lo=Math.min(1000,...vals),hi=Math.max(1000,...vals);
-  if(lo===hi){lo-=1;hi+=1;}
-  const padV=(hi-lo)*0.12;lo-=padV;hi+=padV;
-  const x=i=>pad.l+(W-pad.l-pad.r)*(pts.length<=1?0.5:i/(pts.length-1));
+  const rawSpan=Math.max(hi-lo,2.0);
+  const mid=(hi+lo)/2;
+  lo=mid-rawSpan*0.62;
+  hi=mid+rawSpan*0.62;
+  if(!Number.isFinite(viewLo)||!Number.isFinite(viewHi)){viewLo=lo;viewHi=hi;}
+  viewLo += (lo-viewLo)*0.08;
+  viewHi += (hi-viewHi)*0.08;
+  lo=viewLo;hi=viewHi;
+  const minT=Math.min(...pts.map(p=>p.t));
+  const maxT=Math.max(now,minT+30000,...pts.map(p=>p.t));
+  const timeSpan=Math.max(1000,maxT-minT);
+  const xForTime=t=>pad.l+(W-pad.l-pad.r)*Math.max(0,Math.min(1,(t-minT)/timeSpan));
   const y=v=>pad.t+(H-pad.t-pad.b)*(1-(v-lo)/(hi-lo));
   // grille + axes
   ctx.strokeStyle="rgba(255,255,255,.06)";ctx.lineWidth=1;ctx.fillStyle="#8aa0b6";ctx.font="11px Segoe UI,sans-serif";
   for(let g=0;g<=4;g++){const yy=pad.t+(H-pad.t-pad.b)*g/4;const vv=hi-(hi-lo)*g/4;
     ctx.beginPath();ctx.moveTo(pad.l,yy);ctx.lineTo(W-pad.r,yy);ctx.stroke();
-    ctx.fillText(vv.toFixed(0)+" $",6,yy+4);}
+    ctx.fillText(vv.toFixed(Math.abs(hi-lo)<10?2:0)+" $",6,yy+4);}
   // ligne de référence 1000
   const y0=y(1000);
   ctx.strokeStyle="rgba(255,255,255,.22)";ctx.setLineDash([5,5]);
   ctx.beginPath();ctx.moveTo(pad.l,y0);ctx.lineTo(W-pad.r,y0);ctx.stroke();ctx.setLineDash([]);
   // courbe + aire
   const last=vals[vals.length-1];const col=last>=1000?"#1fd18b":"#ff5a6a";
-  ctx.beginPath();pts.forEach((p,i)=>{const xx=x(i),yy=y(p.equity);i?ctx.lineTo(xx,yy):ctx.moveTo(xx,yy);});
-  ctx.lineTo(x(pts.length-1),H-pad.b);ctx.lineTo(x(0),H-pad.b);ctx.closePath();
+  function smoothPath(){
+    ctx.beginPath();
+    pts.forEach((p,i)=>{
+      const xx=xForTime(p.t),yy=y(p.equity);
+      if(i===0){ctx.moveTo(xx,yy);return;}
+      const px=xForTime(pts[i-1].t),py=y(pts[i-1].equity);
+      ctx.quadraticCurveTo((px+xx)/2,py,xx,yy);
+    });
+  }
+  smoothPath();
+  ctx.lineTo(xForTime(pts[pts.length-1].t),H-pad.b);ctx.lineTo(xForTime(pts[0].t),H-pad.b);ctx.closePath();
   ctx.fillStyle=last>=1000?"rgba(31,209,139,.12)":"rgba(255,90,106,.12)";ctx.fill();
-  ctx.beginPath();pts.forEach((p,i)=>{const xx=x(i),yy=y(p.equity);i?ctx.lineTo(xx,yy):ctx.moveTo(xx,yy);});
-  ctx.strokeStyle=col;ctx.lineWidth=2;ctx.stroke();
+  smoothPath();
+  ctx.strokeStyle=col;ctx.lineWidth=2.4;ctx.shadowColor=col;ctx.shadowBlur=10;ctx.stroke();ctx.shadowBlur=0;
   // point final
-  ctx.fillStyle=col;ctx.beginPath();ctx.arc(x(pts.length-1),y(last),3.5,0,7);ctx.fill();
+  ctx.fillStyle=col;ctx.beginPath();ctx.arc(xForTime(pts[pts.length-1].t),y(last),3.5,0,7);ctx.fill();
+  // Indicateur honnete de fraicheur: le graphe est fluide, mais les valeurs
+  // viennent du dernier tick serveur.
+  const age=Date.now()-lastServerTickAt;
+  ctx.fillStyle=age<1800?"#1fd18b":(age<5000?"#f5a623":"#ff5a6a");
+  ctx.font="11px Segoe UI,sans-serif";
+  ctx.fillText(age<1800?"tick reel":(age<5000?"tick recent":"tick ancien"),W-92,18);
+  if(mousePoint){
+    const hoverT=minT+((mousePoint.x-pad.l)/Math.max(1,W-pad.l-pad.r))*timeSpan;
+    let idx=0,best=Infinity;
+    pts.forEach((p,i)=>{const d=Math.abs(p.t-hoverT);if(d<best){best=d;idx=i;}});
+    const p=pts[idx];
+    const xx=xForTime(p.t),yy=y(p.equity);
+    ctx.strokeStyle="rgba(255,255,255,.22)";ctx.beginPath();ctx.moveTo(xx,pad.t);ctx.lineTo(xx,H-pad.b);ctx.stroke();
+    ctx.fillStyle="#e8eef5";ctx.beginPath();ctx.arc(xx,yy,4,0,7);ctx.fill();
+    ctx.fillStyle="rgba(18,24,33,.92)";ctx.fillRect(Math.min(W-170,xx+10),Math.max(24,yy-34),156,44);
+    ctx.strokeStyle="rgba(57,192,237,.35)";ctx.strokeRect(Math.min(W-170,xx+10),Math.max(24,yy-34),156,44);
+    ctx.fillStyle="#e8eef5";ctx.fillText("Solde "+fmtBal(p.equity),Math.min(W-160,xx+18),Math.max(42,yy-16));
+    ctx.fillStyle=p.equity>=1000?"#1fd18b":"#ff5a6a";ctx.fillText("P&L "+fmtUsd(p.equity-1000),Math.min(W-160,xx+18),Math.max(60,yy+2));
+  }
 }
 
 setInterval(clock,1000);clock();
 refreshTick();
 animateEquity();
 refresh();
-setInterval(()=>{refreshTick().catch(()=>{});},TICK_MS);
+scheduleNextTick();
 setInterval(()=>{refresh().catch(()=>{});},REFRESH_MS);
 window.addEventListener("resize",drawEquity);
+$("#equity").addEventListener("mousemove",(ev)=>{
+  const r=$("#equity").getBoundingClientRect();
+  mousePoint={x:ev.clientX-r.left,y:ev.clientY-r.top};
+});
+$("#equity").addEventListener("mouseleave",()=>{mousePoint=null;});
 </script>
 </body>
 </html>
