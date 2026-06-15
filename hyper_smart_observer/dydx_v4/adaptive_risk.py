@@ -46,6 +46,11 @@ class AdaptiveRiskProfile:
     max_size_multiplier: float = 1.25
     block_choppy: bool = True
     block_after_move: bool = True
+    soft_daily_loss_usdc: float = -18.0
+    hard_daily_loss_usdc: float = -45.0
+    soft_consecutive_losses: int = 3
+    hard_consecutive_losses: int = 6
+    min_quality_after_losses: float = 70.0
 
 
 @dataclass(frozen=True)
@@ -114,7 +119,9 @@ def adaptive_risk_score(inp: AdaptiveRiskInput, profile: AdaptiveRiskProfile | N
     score -= _clamp((inp.slippage_bps - p.max_slippage_bps * 0.5) / max(1.0, p.max_slippage_bps), 0.0, 1.0) * 10.0
     score -= _clamp(inp.current_market_exposure_usdc / max(1.0, p.max_market_exposure_usdc), 0.0, 1.0) * 8.0
     score -= _clamp(inp.correlated_same_side_count / max(1, p.max_same_side_correlated), 0.0, 1.0) * 8.0
-    score -= _clamp(inp.consecutive_losses / 5.0, 0.0, 1.0) * 6.0
+    score -= _clamp(inp.consecutive_losses / max(1.0, float(p.hard_consecutive_losses)), 0.0, 1.0) * 12.0
+    if inp.daily_pnl_usdc < 0:
+        score -= _clamp(abs(inp.daily_pnl_usdc) / max(1.0, abs(p.hard_daily_loss_usdc)), 0.0, 1.0) * 12.0
     if inp.market_regime.upper() == "CHOPPY":
         score -= 18.0
     if inp.tremor_phase == "AFTER_MOVE":
@@ -160,25 +167,42 @@ def evaluate_adaptive_risk(inp: AdaptiveRiskInput, profile: AdaptiveRiskProfile 
     if inp.correlated_same_side_count > p.max_same_side_correlated:
         hard_block = True
         reasons.append("CORRELATION_LIMIT")
+    if inp.daily_pnl_usdc <= p.hard_daily_loss_usdc:
+        hard_block = True
+        reasons.append("DAILY_LOSS_GUARD")
+    if inp.consecutive_losses >= p.hard_consecutive_losses:
+        hard_block = True
+        reasons.append("LOSS_STREAK_GUARD")
+    if inp.consecutive_losses >= p.soft_consecutive_losses and inp.quality_score < p.min_quality_after_losses:
+        hard_block = True
+        reasons.append("QUALITY_TOO_LOW_AFTER_LOSSES")
 
     if inp.data_source not in {"REAL_INDEXER", "orderbook_real", "stream", "rest", "wallet_cluster"}:
         notes.append(f"non_primary_source={inp.data_source}")
     if inp.daily_pnl_usdc < 0:
         notes.append(f"daily_pnl={inp.daily_pnl_usdc:.4f}")
+    if inp.consecutive_losses > 0:
+        notes.append(f"loss_streak={inp.consecutive_losses}")
 
     if hard_block:
         return AdaptiveRiskDecision(RiskAction.BLOCK, 0.0, score, reasons, notes)
 
-    if score >= p.boost_quality_score and inp.edge_remaining_bps >= p.strong_edge_bps:
+    if score >= p.boost_quality_score and inp.edge_remaining_bps >= p.strong_edge_bps and inp.daily_pnl_usdc >= 0:
         mult = min(p.max_size_multiplier, 1.0 + min(0.25, (score - p.boost_quality_score) / 80.0))
         return AdaptiveRiskDecision(RiskAction.BOOST, mult, score, reasons, notes + ["strong_setup_capped_boost"])
 
     if score >= p.normal_quality_score:
-        return AdaptiveRiskDecision(RiskAction.ALLOW, 1.0, score, reasons, notes)
+        mult = 1.0
+        if inp.daily_pnl_usdc <= p.soft_daily_loss_usdc or inp.consecutive_losses >= p.soft_consecutive_losses:
+            mult = 0.65
+            notes.append("session_pressure_reduced_size")
+        return AdaptiveRiskDecision(RiskAction.ALLOW, mult, score, reasons, notes)
 
-    # Middle zone: do not block promising but imperfect setups; reduce size.
     soft = _clamp((score - p.min_quality_score) / max(1.0, p.normal_quality_score - p.min_quality_score), 0.0, 1.0)
     mult = p.min_size_multiplier + (0.75 - p.min_size_multiplier) * soft
+    if inp.daily_pnl_usdc <= p.soft_daily_loss_usdc or inp.consecutive_losses >= p.soft_consecutive_losses:
+        mult *= 0.6
+        notes.append("session_pressure_reduced_size")
     return AdaptiveRiskDecision(RiskAction.REDUCE, round(mult, 4), score, ["SOFT_RISK_REDUCED_SIZE"], notes)
 
 
