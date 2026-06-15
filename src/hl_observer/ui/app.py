@@ -16,7 +16,7 @@ from hl_observer.ui.dydx_routes import create_dydx_router
 from hl_observer.ui.state import UiState
 
 
-SMOOTH_METAGRAPH_SCRIPT = '<script src="/static/metagraph_smooth_v2.js?v=simulation-ui-20260615-smooth-metagraph-v2"></script>'
+SMOOTH_METAGRAPH_SCRIPT = '<script src="/static/metagraph_smooth_v2.js?v=simulation-ui-20260615-smooth-metagraph-v3"></script>'
 
 
 def _inject_smooth_metagraph_script(html: str) -> str:
