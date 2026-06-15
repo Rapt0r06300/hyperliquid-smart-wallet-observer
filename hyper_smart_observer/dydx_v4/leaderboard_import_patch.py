@@ -9,6 +9,8 @@ def install_leaderboard_import_patch() -> None:
     try:
         from hyper_smart_observer.dydx_v4.fast_scan_integration import FastScanIntegration
         from hyper_smart_observer.dydx_v4.leaderboard_import import leaderboard_file_source
+        from hyper_smart_observer.dydx_v4.live_observer import DydxLiveObserver
+        from hyper_smart_observer.dydx_v4.wallet_discovery import WalletScore
     except Exception:
         return
     if getattr(FastScanIntegration, "_leaderboard_import_patch_installed", False):
@@ -50,8 +52,30 @@ def install_leaderboard_import_patch() -> None:
         except Exception:
             pass
 
+    def fast_scan_exact_subaccounts(self) -> None:
+        if self.fast_scan is None:
+            return
+        try:
+            fills = self.fast_scan.scanner.drain_fresh(limit=2000)
+        except Exception:
+            return
+        seen = set()
+        for fill in fills:
+            addr = getattr(fill, "address", None)
+            if not isinstance(addr, str) or not addr:
+                continue
+            sub = int(getattr(fill, "subaccount_number", 0) or 0)
+            key = (addr, sub)
+            if key in seen:
+                continue
+            seen.add(key)
+            self._poll_one_wallet(WalletScore(address=addr, subaccount_number=sub, source="fast_scan_subaccount"))
+
     FastScanIntegration.__init__ = patched_init
     FastScanIntegration._leaderboard_import_patch_installed = True
+    if not getattr(DydxLiveObserver, "_exact_subaccount_scan_installed", False):
+        DydxLiveObserver._poll_priority_wallets = fast_scan_exact_subaccounts
+        DydxLiveObserver._exact_subaccount_scan_installed = True
 
 
 install_leaderboard_import_patch()
