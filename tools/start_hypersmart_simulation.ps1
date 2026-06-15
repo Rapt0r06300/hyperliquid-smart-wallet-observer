@@ -8,7 +8,7 @@ param(
 
 $ErrorActionPreference = "Continue"
 $Root = Split-Path -Parent $PSScriptRoot
-$Url = "http://127.0.0.1:$Port/static/simulation_v2.html?v=scan3"
+$Url = "http://127.0.0.1:$Port/static/simulation_v2.html?v=scan5"
 $ApiUrl = "http://127.0.0.1:$Port/api/simulation/overview"
 $logDir = Join-Path $Root "logs"
 New-Item -ItemType Directory -Force -Path $logDir | Out-Null
