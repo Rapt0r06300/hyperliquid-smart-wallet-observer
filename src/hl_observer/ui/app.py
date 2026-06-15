@@ -2,7 +2,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
+from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 
 from hl_observer.config.loader import load_settings
@@ -13,6 +14,19 @@ from hl_observer.ui.persistent_state import load_or_create_ui_state
 from hl_observer.ui.routes import create_router
 from hl_observer.ui.dydx_routes import create_dydx_router
 from hl_observer.ui.state import UiState
+
+
+SMOOTH_METAGRAPH_SCRIPT = '<script src="/static/metagraph_smooth.js?v=simulation-ui-20260615-smooth-metagraph-v1"></script>'
+
+
+def _inject_smooth_metagraph_script(html: str) -> str:
+    if "metagraph_smooth.js" in html:
+        return html
+    marker = '<script src="/static/app.js?v=simulation-ui-20260612-antijump-v5"></script>'
+    replacement = marker + "\n    " + SMOOTH_METAGRAPH_SCRIPT
+    if marker in html:
+        return html.replace(marker, replacement, 1)
+    return html.replace("</body>", f"    {SMOOTH_METAGRAPH_SCRIPT}\n  </body>", 1)
 
 
 def create_ui_app(settings: Settings | None = None, state: UiState | None = None) -> FastAPI:
@@ -28,6 +42,17 @@ def create_ui_app(settings: Settings | None = None, state: UiState | None = None
     app.mount("/static", StaticFiles(directory=static_dir), name="static")
     app.include_router(create_router(settings, state, bus))
     app.include_router(create_dydx_router())
+
+    @app.middleware("http")
+    async def inject_smooth_metagraph(request: Request, call_next):
+        if request.url.path == "/":
+            template_path = Path(__file__).with_name("templates") / "index.html"
+            try:
+                html = template_path.read_text(encoding="utf-8")
+                return HTMLResponse(_inject_smooth_metagraph_script(html))
+            except OSError:
+                pass
+        return await call_next(request)
 
     # Démarrer le moteur dYdX v4 en arrière-plan (paper-only)
     try:
