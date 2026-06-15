@@ -16,11 +16,11 @@ from hl_observer.ui.dydx_routes import create_dydx_router
 from hl_observer.ui.state import UiState
 
 
-SMOOTH_METAGRAPH_SCRIPT = '<script src="/static/metagraph_smooth.js?v=simulation-ui-20260615-smooth-metagraph-v1"></script>'
+SMOOTH_METAGRAPH_SCRIPT = '<script src="/static/metagraph_smooth_v2.js?v=simulation-ui-20260615-smooth-metagraph-v2"></script>'
 
 
 def _inject_smooth_metagraph_script(html: str) -> str:
-    if "metagraph_smooth.js" in html:
+    if "metagraph_smooth" in html:
         return html
     marker = '<script src="/static/app.js?v=simulation-ui-20260612-antijump-v5"></script>'
     replacement = marker + "\n    " + SMOOTH_METAGRAPH_SCRIPT
