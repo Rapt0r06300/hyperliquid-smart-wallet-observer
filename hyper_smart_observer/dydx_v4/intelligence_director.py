@@ -24,6 +24,7 @@ class DirectorAssessment:
     hard_block: bool
     reasons: list[str]
     notes: list[str]
+    profile: dict | None = None
     read_only: bool = True
     paper_only: bool = True
 
@@ -36,6 +37,7 @@ class DirectorAssessment:
             "hard_block": self.hard_block,
             "reasons": list(self.reasons),
             "notes": list(self.notes),
+            "profile": dict(self.profile or {}),
             "read_only": self.read_only,
             "paper_only": self.paper_only,
         }
@@ -56,6 +58,8 @@ def assess_decision_intelligence(tuned: Any, health: Any, state: Any, ctx: Any) 
     market_confidence = _num(getattr(tremor, "market_confidence", 0.0))
     phase = str(getattr(tremor, "timeline_phase", "") or "")
     source = str(getattr(tremor, "source", "") or "")
+    market_id = str(getattr(tremor, "market_id", "") or "")
+    direction = str(getattr(tremor, "direction", "") or "")
 
     closed_trades = _num(getattr(health, "closed_trades", 0.0))
     winrate = _num(getattr(health, "winrate", 0.0))
@@ -84,6 +88,23 @@ def assess_decision_intelligence(tuned: Any, health: Any, state: Any, ctx: Any) 
     risk += _clamp(_num(getattr(ctx, "spread_bps", 0.0)) / 35.0, 0.0, 1.0) * 9.0
     risk += _clamp(_num(getattr(ctx, "slippage_bps", 0.0)) / 16.0, 0.0, 1.0) * 9.0
     risk += _clamp(_num(getattr(state, "same_market_open_positions", 0.0)) / 3.0, 0.0, 1.0) * 8.0
+
+    profile_dict: dict | None = None
+    profile_size = 1.0
+    profile_block = False
+    try:
+        from hyper_smart_observer.dydx_v4.paper_profile_memory import profile_bias_for
+        profile = profile_bias_for(market_id, direction, source)
+        profile_dict = profile.to_dict()
+        opportunity += profile.opportunity_delta
+        risk += profile.risk_delta
+        profile_size = profile.size_multiplier
+        profile_block = profile.hard_block
+        reasons += profile.reasons
+        notes += profile.notes
+    except Exception:
+        notes.append("profile_memory_unavailable")
+
     if closed_trades >= 30 and winrate < 0.50:
         risk += 14.0
         reasons.append("DIRECTOR_LOW_SESSION_WINRATE")
@@ -100,6 +121,8 @@ def assess_decision_intelligence(tuned: Any, health: Any, state: Any, ctx: Any) 
         risk += 10.0
         reasons.append("DIRECTOR_LATE_SIGNAL")
 
+    opportunity = _clamp(opportunity, 0.0, 100.0)
+    risk = _clamp(risk, 0.0, 100.0)
     net = _clamp(opportunity - risk, 0.0, 100.0)
     if opportunity >= 82 and risk <= 24 and (closed_trades < 30 or winrate >= 0.54):
         multiplier = 1.15
@@ -113,6 +136,7 @@ def assess_decision_intelligence(tuned: Any, health: Any, state: Any, ctx: Any) 
     else:
         multiplier = 0.0
         reasons.append("DIRECTOR_LOW_NET_SCORE")
+    multiplier *= profile_size
 
     hard_block = False
     if edge_bps <= 0:
@@ -124,6 +148,9 @@ def assess_decision_intelligence(tuned: Any, health: Any, state: Any, ctx: Any) 
     if closed_trades >= 50 and winrate < 0.45 and profit_factor < 1.0:
         hard_block = True
         reasons.append("DIRECTOR_SESSION_NOT_WINNING")
+    if profile_block:
+        hard_block = True
+        reasons.append("DIRECTOR_PROFILE_MEMORY_BLOCK")
     if risk >= 75 and opportunity < 82:
         hard_block = True
         reasons.append("DIRECTOR_RISK_TOO_HIGH")
@@ -138,6 +165,7 @@ def assess_decision_intelligence(tuned: Any, health: Any, state: Any, ctx: Any) 
         hard_block=hard_block,
         reasons=reasons,
         notes=notes,
+        profile=profile_dict,
     )
 
 
