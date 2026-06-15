@@ -13,6 +13,11 @@ try:
 except Exception:
     pass
 
+try:
+    import hyper_smart_observer.dydx_v4.signal_enhancer  # noqa: F401
+except Exception:
+    pass
+
 
 def _num(v: Any, default: float = 0.0) -> float:
     try:
