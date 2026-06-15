@@ -5,6 +5,7 @@ This is the pro layer above tuned_decision:
 - uses fractional confidence sizing rather than all-in thresholds;
 - keeps a small exploration lane for promising but unproven setups;
 - protects after weak diagnostics without killing the scanner;
+- degrades size when data quality is weak instead of pretending confidence is high;
 - returns explicit reasons for every throttle.
 
 Pure/read-only. No network, no orders, no private keys.
@@ -87,6 +88,10 @@ class DecisionIntelligenceConfig:
     allow_micro_explore: bool = True
     hard_daily_loss_usdc: float = -45.0
     hard_consecutive_losses: int = 6
+    cold_start_trades: int = 8
+    cold_start_size_cap: float = 0.55
+    weak_data_fallback_share: float = 0.35
+    weak_data_size_cap: float = 0.50
     budget: OpportunityBudget = field(default_factory=OpportunityBudget)
 
 
@@ -191,6 +196,36 @@ def _micro_explore_allowed(
     )
 
 
+def _quality_cap(h: SessionHealth, cfg: DecisionIntelligenceConfig) -> tuple[float, list[str]]:
+    cap = 1.0
+    notes: list[str] = []
+    if h.closed_trades < cfg.cold_start_trades:
+        cap = min(cap, cfg.cold_start_size_cap)
+        notes.append("cold_start_size_cap")
+    if h.fallback_share >= cfg.weak_data_fallback_share:
+        cap = min(cap, cfg.weak_data_size_cap)
+        notes.append("weak_data_size_cap")
+    return cap, notes
+
+
+def _capped_open_result(
+    action: IntelligenceAction,
+    mode: TuningMode,
+    notional: float,
+    tuned: TunedPaperDecision,
+    reasons: list[str],
+    notes: list[str],
+    cap: float,
+    cap_notes: list[str],
+) -> DecisionIntelligenceResult:
+    if cap < 1.0:
+        notional = max(0.0, notional * cap)
+        notes = notes + cap_notes
+        if action in {IntelligenceAction.OPEN_NORMAL, IntelligenceAction.OPEN_BOOSTED}:
+            action = IntelligenceAction.OPEN_REDUCED
+    return DecisionIntelligenceResult(action, mode, notional, tuned, reasons, notes)
+
+
 def decision_intelligence_v2(
     obs: TremorObservation,
     *,
@@ -208,6 +243,7 @@ def decision_intelligence_v2(
 
     reasons = list(tuned.reasons)
     notes = list(tuned.notes)
+    cap, cap_notes = _quality_cap(h, cfg)
 
     if h.daily_pnl_usdc <= cfg.hard_daily_loss_usdc:
         return DecisionIntelligenceResult(IntelligenceAction.NO_TRADE, mode, 0.0, tuned, reasons + ["HARD_DAILY_LOSS_GUARD"], notes)
@@ -216,15 +252,14 @@ def decision_intelligence_v2(
 
     budget_reasons = _budget_blocks(cfg.budget, state, context)
     if budget_reasons and tuned.can_open:
-        # Do not kill the scanner: downgrade to WATCH instead of pretending the signal is bad.
         return DecisionIntelligenceResult(IntelligenceAction.WATCH, mode, 0.0, tuned, reasons + budget_reasons, notes + ["budget_throttle_watch"])
 
     if tuned.can_open:
         if tuned.action == TunedPaperAction.OPEN_BOOSTED:
-            return DecisionIntelligenceResult(IntelligenceAction.OPEN_BOOSTED, mode, tuned.final_notional_usdc, tuned, reasons, notes)
+            return _capped_open_result(IntelligenceAction.OPEN_BOOSTED, mode, tuned.final_notional_usdc, tuned, reasons, notes, cap, cap_notes)
         if tuned.action == TunedPaperAction.OPEN_NORMAL:
-            return DecisionIntelligenceResult(IntelligenceAction.OPEN_NORMAL, mode, tuned.final_notional_usdc, tuned, reasons, notes)
-        return DecisionIntelligenceResult(IntelligenceAction.OPEN_REDUCED, mode, tuned.final_notional_usdc, tuned, reasons, notes)
+            return _capped_open_result(IntelligenceAction.OPEN_NORMAL, mode, tuned.final_notional_usdc, tuned, reasons, notes, cap, cap_notes)
+        return _capped_open_result(IntelligenceAction.OPEN_REDUCED, mode, tuned.final_notional_usdc, tuned, reasons, notes, cap, cap_notes)
 
     if _micro_explore_allowed(tuned, cfg, state, h):
         return DecisionIntelligenceResult(
