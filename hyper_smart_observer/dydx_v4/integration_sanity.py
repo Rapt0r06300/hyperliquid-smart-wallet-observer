@@ -22,6 +22,52 @@ REQUIRED_CONFIG_FIELDS = (
 )
 
 
+def _decision_pipeline_smoke() -> dict[str, Any]:
+    from hyper_smart_observer.dydx_v4.decision_intelligence_v2 import (
+        BudgetState,
+        SessionHealth,
+        decision_intelligence_v2,
+    )
+    from hyper_smart_observer.dydx_v4.tremor_engine import TremorObservation
+    from hyper_smart_observer.dydx_v4.tuned_decision import TunedDecisionContext
+
+    obs = TremorObservation(
+        market_id="ETH-USD",
+        direction="LONG",
+        price_move_bps=18.0,
+        volume_zscore=2.4,
+        flow_imbalance=0.68,
+        flow_volume_usdc=25_000.0,
+        flow_trade_count=7,
+        leading_wallets=3,
+        consensus_wallets=3,
+        signal_age_ms=2_500,
+        edge_remaining_bps=8.0,
+        market_regime="TRENDING",
+        market_confidence=0.74,
+        source="stream",
+    )
+    result = decision_intelligence_v2(
+        obs,
+        health=SessionHealth(closed_trades=12, winrate=0.54, profit_factor=1.22),
+        budget_state=BudgetState(),
+        ctx=TunedDecisionContext(spread_bps=3.0, slippage_bps=4.0, open_positions=0),
+    )
+    data = result.to_dict()
+    required = {"action", "mode", "can_open", "notional_usdc", "tuned", "director", "reasons", "notes", "read_only", "paper_only"}
+    missing = sorted(required - set(data))
+    return {
+        "ok": not missing and data.get("read_only") is True and data.get("paper_only") is True,
+        "missing_keys": missing,
+        "action": data.get("action"),
+        "can_open": data.get("can_open"),
+        "notional_usdc": data.get("notional_usdc"),
+        "director_present": isinstance(data.get("director"), dict),
+        "read_only": data.get("read_only"),
+        "paper_only": data.get("paper_only"),
+    }
+
+
 def run_integration_sanity() -> dict[str, Any]:
     errors: list[str] = []
     warnings: list[str] = []
@@ -82,6 +128,13 @@ def run_integration_sanity() -> dict[str, Any]:
     if MAX_LIVE_BATCH < 500:
         warnings.append("MAX_LIVE_BATCH_LOW")
 
+    try:
+        decision_smoke = _decision_pipeline_smoke()
+    except Exception as exc:
+        decision_smoke = {"ok": False, "error": f"{type(exc).__name__}:{exc}"}
+    if decision_smoke.get("ok") is not True:
+        errors.append("DECISION_PIPELINE_SMOKE_FAILED")
+
     return {
         "ok": not errors,
         "errors": errors,
@@ -89,6 +142,7 @@ def run_integration_sanity() -> dict[str, Any]:
         "config_summary": calibration_summary(cfg),
         "pool_stats": pool_stats(),
         "profile_bias_sample": bias_dict,
+        "decision_pipeline_smoke": decision_smoke,
         "read_only": True,
         "paper_only": True,
     }
