@@ -117,10 +117,12 @@ def _decision_v2(observer: Any, cluster: Any):
 def _install_class_pyramid_guard() -> None:
     try:
         from hyper_smart_observer.dydx_v4.live_observer import DydxLiveObserver
+        from hyper_smart_observer.dydx_v4.notional_bridge import install_notional_bridge, set_next_notional
     except Exception:
         return
     if getattr(DydxLiveObserver, "_pyramid_guard_installed", False):
         return
+    install_notional_bridge(DydxLiveObserver)
     original = DydxLiveObserver._evaluate_cluster
 
     def guarded(self, cluster):
@@ -140,6 +142,7 @@ def _install_class_pyramid_guard() -> None:
                 if callable(refuse):
                     refuse(f"DECISION_V2_{result.action.value}")
                 return None
+            set_next_notional(self, getattr(result, "notional_usdc", 0.0))
         except Exception:
             pass
         return original(self, cluster)
