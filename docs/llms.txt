@@ -1,0 +1,20 @@
+# HyperSmart Observer — llms.txt
+
+> Paper-trading **simulation** that observes Hyperliquid smart-money wallets and
+> reproduces copy-trading decisions WITHOUT ever placing a real order. Read-only,
+> paper-only, testnet-first, deny-by-default. A signal is never an order; a paper
+> trade is never an order. No private key, no seed, no signature, no deposit/withdraw.
+
+## What it does
+- Observes public on-chain / Indexer data (Hyperliquid runtime default; dYdX v4 dormant).
+- Scores wallets, builds a bounded shortlist of leaders, emits paper signals.
+- Routes every strategy intent through a risk engine before it becomes a (paper) trade.
+- Refuses stale signals, illiquid/mismapped markets, orphan closes, UNKNOWN deltas.
+- Computes net edge after fees, spread, slippage, latency and copy degradation.
+
+## What it never does
+- Place a real order, sign, deposit, withdraw, connect a wallet, or call a private trading API.
+
+## Agent surface (read-only)
+- Tools expose decisions, NO_TRADE reasons, source health — for READING, never acting.
+- Output contracts: see `src/hl_observer/agent_tools/schemas/`.

@@ -1,0 +1,29 @@
+[
+  {
+    "decision": "dedupe snapshot",
+    "module": "realtime_monitor",
+    "reason": "Documentation officielle Hyperliquid.",
+    "reliability": "OFFICIAL_HYPERLIQUID",
+    "status": "ACTIONABLE_AFTER_TEST",
+    "title": "Hyperliquid WS docs",
+    "url": "https://hyperliquid.gitbook.io/hyperliquid-docs/for-developers/api/websocket/subscriptions"
+  },
+  {
+    "decision": "ne pas croire le claim",
+    "module": "research",
+    "reason": "Claim public non suffisant pour modifier le risque.",
+    "reliability": "OSINT_CLAIM",
+    "status": "RESEARCH_ONLY",
+    "title": "Claude bot claim",
+    "url": "https://reddit.com/r/example"
+  },
+  {
+    "decision": "refuser",
+    "module": "execution",
+    "reason": "La source mentionne une execution ou un secret; refus pour ce sprint.",
+    "reliability": "OPEN_SOURCE_CODE",
+    "status": "REFUSED_DANGEROUS",
+    "title": "Executor prive",
+    "url": "https://github.com/example/private-executor"
+  }
+]

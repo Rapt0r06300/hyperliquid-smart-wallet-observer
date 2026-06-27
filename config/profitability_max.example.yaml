@@ -1,0 +1,19 @@
+profitability_max:
+  min_wallet_score: 75
+  min_signal_score: 80
+  min_edge_required_bps: 8
+  elite_edge_remaining_bps: 25
+  min_gain_assurance_score: 85
+  max_copy_degradation_bps: 7
+  min_exit_quality_score: 65
+  max_signal_age_ms: 2500
+  min_copy_half_life_ms: 1200
+  min_replication_ratio: 0.35
+  require_lead_lag_positive: true
+  require_exit_plan: true
+  require_market_regime_alignment: true
+
+strategy_tournament_v10:
+  enabled_in_paper: true
+  enabled_in_testnet: false
+  rank_by_stability_adjusted_pnl: true

@@ -1,0 +1,16 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "source_health.read",
+  "description": "Read local source freshness and consistency state.",
+  "x-read-only": true,
+  "x-data-sources": [
+    "source_health"
+  ],
+  "input": {
+    "type": "object",
+    "additionalProperties": false
+  },
+  "output": {
+    "type": "object"
+  }
+}

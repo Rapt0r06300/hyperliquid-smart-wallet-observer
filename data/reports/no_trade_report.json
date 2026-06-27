@@ -1,0 +1,20 @@
+[
+  {
+    "candidate_id": null,
+    "coin": null,
+    "component": "copy_mode",
+    "context": {
+      "interval_seconds": 300,
+      "required_flag": "--network-read"
+    },
+    "created_at": "2026-06-07T17:04:19.699183+00:00",
+    "decision_id": "nt:1c0231632bd8421839190916",
+    "leader_wallet": null,
+    "missing_data": "autorisation explicite --network-read",
+    "next_action": "Relancer avec --network-read pour une collecte read-only bornee.",
+    "observed": "copy-run lance sans lecture reseau explicite.",
+    "reason": "NETWORK_READ_DISABLED",
+    "risk_level": "INFO",
+    "why_not_simulable": "Aucun appel /info ou WS n'est lance sans accord explicite."
+  }
+]

@@ -1,0 +1,183 @@
+app:
+  name: hyperliquid-smart-wallet-observer
+  environment: paper
+  database_url: sqlite:///./data/hl_observer.sqlite3
+  logs_dir: ./logs
+
+hyperliquid:
+  info_base_url: https://api.hyperliquid.xyz/info
+  testnet_info_base_url: https://api.hyperliquid-testnet.xyz/info
+  ws_base_url: wss://api.hyperliquid.xyz/ws
+  testnet_ws_base_url: wss://api.hyperliquid-testnet.xyz/ws
+  timeout_seconds: 10
+  max_retries: 3
+  backoff_base_seconds: 0.25
+
+collection:
+  default_coins:
+    - BTC
+    - ETH
+  request_timeout_seconds: 10
+  retry_count: 2
+  retry_backoff_seconds: 1
+  store_raw_events: true
+  store_response_hash: true
+  max_user_fills_pages: 5
+  user_fills_page_window_ms: 86400000
+
+wallet_discovery:
+  enabled: true
+  auto_discover_on_startup: true
+  sources:
+    - hyperliquid_leaderboard
+    - hyperliquid_explorer
+    - local_db
+    - local_config
+    - coinglass_whale_tracker
+    - hyperdash
+    - hypertracker
+  max_sources_per_run: 5
+  max_candidates_per_source: 50
+  max_total_candidates: 200
+  max_wallets_to_backfill: 10
+  min_discovery_score: 55
+  require_positive_pnl: true
+  require_positive_roi: false
+  allow_incomplete_external_metrics: true
+  revalidate_with_hyperliquid_info: true
+  backfill_selected_after_discovery: true
+  backfill_days: 7
+  cooldown_seconds: 300
+  source_timeout_seconds: 15
+  external_sources_enabled: true
+  store_raw_discovery_payloads: true
+
+wallet_bootstrap:
+  enabled: true
+  run_on_startup: true
+  target_wallets: 500
+  primary_source: all
+  min_wallets_to_start: 25
+  max_candidates_total: 3000
+  max_candidates_per_source: 1000
+  max_sources_per_run: 6
+  min_bootstrap_score: 50
+  require_positive_pnl: true
+  require_positive_roi: false
+  allow_missing_roi: true
+  allow_missing_pnl_if_revalidates: true
+  reject_truncated_addresses: true
+  revalidate_with_hyperliquid_info: true
+  revalidate_limit: 500
+  backfill_selected: true
+  backfill_limit_per_run: 50
+  backfill_days: 7
+  cooldown_seconds: 3600
+  store_raw_source_payloads: true
+  export_top500_json: true
+  export_top500_csv: true
+  refresh_existing_wallets: true
+  include_altcoins: true
+  group_by_coin: true
+  source_timeout_seconds: 15
+  source_retry_count: 2
+
+wallet_scanner:
+  enabled: true
+  scan_max_wallets_per_run: 500
+  scan_batch_size: 25
+  scan_max_parallelism: 1
+  scan_retry_count: 2
+  scan_retry_backoff_seconds: 30
+  scan_cooldown_seconds: 900
+  scan_resume_unfinished: true
+  scan_prioritize_leaderboard: true
+  scan_prioritize_positive_pnl: true
+  scan_prioritize_positive_roi: true
+  scan_prioritize_multi_source_wallets: true
+  scan_store_progress: true
+  scan_stop_on_kill_switch: true
+
+copy_trading:
+  enabled: true
+  default_interval_seconds: 300
+  top_leaders: 50
+  min_history_days: 7
+  min_copy_leader_score: 60
+  max_drawdown_pct: 35
+  min_consistency_score: 55
+  max_pnl_concentration: 0.65
+  require_positive_pnl: true
+  require_positive_roi: false
+  mode_default: PAPER_MOCK_USDC
+  dry_run_default: true
+
+market_universe:
+  enabled: true
+  discover_from_meta: true
+  discover_from_all_mids: true
+  include_spot: false
+  default_fallback_coins:
+    - BTC
+    - ETH
+    - SOL
+    - HYPE
+  excluded_coins: []
+  max_coins_per_scan: 50
+  max_l2book_coins_per_scan: 15
+  max_candle_coins_per_scan: 20
+  min_mid_price_usdc: 0
+  min_orderbook_depth_usdc: 5000
+  max_spread_bps: 25
+  prefer_wallet_active_coins: true
+  prefer_positive_pnl_coins: true
+  prefer_high_volume_coins: true
+  prefer_major_coins: true
+  altcoins_enabled: true
+
+adaptive_risk_filter:
+  enabled: true
+  default_decision: observe_only
+  # Simulation/live copy mode: stale signals were the top loss source.
+  # Keep entries inside the ultra-fresh 3s window unless explicitly experimenting.
+  max_signal_age_ms: 3000
+  max_price_moved_bps: 10
+  max_spread_bps: 10
+  max_estimated_slippage_bps: 12
+  min_orderbook_depth_usdc: 5000
+  min_wallet_score: 70
+  min_wallet_coin_score: 70
+  min_opening_pattern_score: 65
+  min_pattern_sample_size: 10
+  reduce_size_if_altcoin: true
+  reduce_size_if_high_volatility: true
+  block_if_wallet_reducing: true
+  block_if_wallet_closing: true
+  block_if_dca_toxic: true
+  block_if_data_stale: true
+  paper_max_size_usdc: 10
+  paper_tiny_size_usdc: 1
+  paper_small_size_usdc: 3
+  paper_normal_size_usdc: 5
+  max_daily_paper_loss_usdc: 10
+  max_coin_exposure_usdc: 20
+  max_wallet_exposure_usdc: 20
+
+risk:
+  # Honest simulation default: do not copy stale/weak signals.
+  max_signal_age_ms: 3000
+  max_spread_bps: 10.0
+  max_slippage_bps: 12.0
+  min_orderbook_depth_usdc: 5000.0
+  min_edge_required_bps: 25.0
+  min_wallet_score: 70.0
+  min_signal_score: 60.0
+  kill_switch_active: false
+
+execution:
+  enable_mainnet_execution: false
+  enable_testnet_execution: false
+  require_confirm_testnet_only: true
+  require_cloid: true
+  require_schedule_cancel: true
+  require_reduce_only_exits: true

@@ -1,0 +1,168 @@
+Metadata-Version: 2.4
+Name: dydx-smart-wallet-observer
+Version: 0.2.0
+Summary: Read-only dYdX v4 smart-wallet observer with local paper simulation.
+Requires-Python: >=3.11
+Description-Content-Type: text/markdown
+Requires-Dist: fastapi<1,>=0.115
+Requires-Dist: httpx<1,>=0.27
+Requires-Dist: pydantic<3,>=2.5
+Requires-Dist: PyYAML<7,>=6
+Requires-Dist: SQLAlchemy<3,>=2.0
+Requires-Dist: typer<1,>=0.12
+Requires-Dist: uvicorn<1,>=0.30
+Requires-Dist: websocket-client<2,>=1.8
+Requires-Dist: websockets<11,>=10
+Provides-Extra: dev
+Requires-Dist: pytest<9,>=8; extra == "dev"
+Requires-Dist: ruff<1,>=0.5; extra == "dev"
+
+# dYdX Smart-Wallet Observer
+
+Projet local de surveillance, d'analyse et de simulation paper autour de dYdX v4.
+
+Le projet est désormais centré sur dYdX uniquement. L'objectif est de découvrir des wallets/subaccounts observables, suivre leurs fills publics, détecter des changements de position, puis simuler localement des décisions avec frais, spread, slippage, latence, consensus et règles de risque.
+
+Ce dépôt doit rester propre : pas d'ancien périmètre, pas de plateforme obsolète, pas de promesse de gain, pas d'exécution réelle.
+
+---
+
+## Sécurité
+
+Règles permanentes :
+
+- READ ONLY
+- PAPER ONLY
+- SIMULATION ONLY
+- DENY BY DEFAULT
+- NO REAL ORDER
+- NO PRIVATE KEY
+- NO SIGNATURE
+- NO WALLET CONNECT
+- NO GUARANTEED PROFIT
+- SCORE IS NOT SIGNAL
+- PAPER TRADE IS NOT ORDER
+
+Le logiciel observe, classe, refuse ou simule localement. Il ne doit jamais devenir une interface d'exécution réelle.
+
+---
+
+## Architecture cible
+
+### Job A — Discovery / Leaderboard
+
+- importer des wallets/subaccounts ;
+- collecter des données publiques read-only quand l'option réseau est explicitement activée ;
+- scorer la régularité, l'historique, le drawdown, la concentration du PnL et la copiabilité ;
+- construire une shortlist de leaders ;
+- refuser les comptes insuffisants, suspects ou non mesurables.
+
+### Job B — Scanner / Détection
+
+- WebSocket `v4_subaccounts` pour les comptes chauds ;
+- fallback REST borné ;
+- déduplication des fills ;
+- mesure de fraîcheur ;
+- détection OPEN / ADD / REDUCE / CLOSE ;
+- consensus multi-wallets ;
+- refus si signal trop vieux, incomplet ou non mesurable.
+
+### Job C — Simulation / Rapports
+
+- portfolio paper local ;
+- frais, spread, slippage et latence ;
+- sizing prudent ;
+- exits adaptatifs ;
+- journaux `NO_TRADE` ;
+- dashboard local ;
+- backtests locaux.
+
+---
+
+## Code principal
+
+```text
+hyper_smart_observer/dydx_v4/
+```
+
+Modules importants :
+
+```text
+config.py
+live_observer.py
+fast_scanner.py
+fast_scan_integration.py
+wallet_discovery.py
+wallet_harvester.py
+leaderboard.py
+selection.py
+signals.py
+edge_calculator.py
+consensus.py
+cluster_detector.py
+market_flow.py
+adaptive_exits.py
+risk_policy.py
+backtest.py
+no_trade.py
+storage.py
+cli.py
+```
+
+---
+
+## Moteur logique
+
+Le moteur ne copie pas aveuglément un wallet. Il applique une logique prudente :
+
+- un seul wallet ne suffit pas toujours ;
+- un gros gain isolé est pénalisé ;
+- un drawdown élevé est pénalisé ;
+- un signal trop vieux est refusé ;
+- un edge non mesurable est refusé ;
+- une liquidité trop faible est refusée ;
+- un coût de copie trop élevé est refusé ;
+- une fermeture sans position paper correspondante est refusée ;
+- les données démo ou synthétiques ne rendent jamais un compte copiable.
+
+Tout refus doit être explicite, traçable et visible dans les rapports.
+
+---
+
+## Commandes utiles
+
+Tests ciblés dYdX :
+
+```powershell
+python -m pytest -q tests/dydx_v4
+```
+
+Tests complets :
+
+```powershell
+python -m pytest -q
+```
+
+Aide CLI dYdX :
+
+```powershell
+python -m hyper_smart_observer.dydx_v4.cli --help
+```
+
+---
+
+## Nettoyage du dépôt
+
+Le dépôt doit rester centré sur dYdX. Les anciens fichiers, docs et modules explicitement liés à l'ancienne plateforme sont à retirer. Les modules génériques peuvent rester seulement s'ils sont utiles au moteur dYdX et ne gardent pas de dépendance obsolète.
+
+---
+
+## Limite importante
+
+Ce projet n'est pas un bot réel. Les résultats paper ou backtest ne prédisent pas les performances futures.
+
+Comportement par défaut :
+
+```text
+NO_TRADE si la donnée est incomplète, trop vieille, incohérente ou non mesurable.
+```

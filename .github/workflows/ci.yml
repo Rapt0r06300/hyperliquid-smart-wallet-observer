@@ -1,0 +1,55 @@
+name: dYdX Observer CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test:
+    name: Compile and test
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install package
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e .[dev]
+
+      - name: Compile package
+        run: python -m compileall hyper_smart_observer
+
+      - name: Import critical modules
+        run: |
+          python - <<'PY'
+          import hyper_smart_observer.dydx_v4.engine
+          import hyper_smart_observer.dydx_v4.runtime_guards
+          import hyper_smart_observer.dydx_v4.notional_bridge
+          import hyper_smart_observer.dydx_v4.whale_ranker
+          import hyper_smart_observer.dydx_v4.leaderboard_import
+          import hyper_smart_observer.dydx_v4.opportunity_calibration
+          import hyper_smart_observer.dydx_v4.intelligence_director
+          import hyper_smart_observer.dydx_v4.paper_profile_memory
+          import hyper_smart_observer.dydx_v4.integration_sanity
+          import hyper_smart_observer.dydx_v4.mega_audit
+          import hyper_smart_observer.dydx_v4.build_whale_file
+          print('critical imports ok')
+          PY
+
+      - name: Run integration sanity
+        run: python -m hyper_smart_observer.dydx_v4.integration_sanity
+
+      - name: Run pipeline audit
+        run: python -m hyper_smart_observer.dydx_v4.mega_audit
+
+      - name: Run tests
+        run: pytest -q

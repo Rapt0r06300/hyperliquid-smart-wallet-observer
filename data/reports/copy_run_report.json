@@ -1,0 +1,52 @@
+{
+  "deltas_seen": 0,
+  "dry_run": true,
+  "finished_at": "2026-06-02T06:45:53.527218+00:00",
+  "interval_seconds": 300,
+  "leaders_seen": 0,
+  "message": "Observation/paper only. No order, no signature, no mainnet.",
+  "network_read": false,
+  "no_trade_decisions": [
+    {
+      "candidate_id": null,
+      "coin": null,
+      "component": "copy_mode",
+      "context": {
+        "shortlist_path": "data\\leaderboard_shortlist.json"
+      },
+      "created_at": "2026-06-02T06:45:53.527161+00:00",
+      "decision_id": "nt:3bad4eeb9fa3bc17da73dd59",
+      "leader_wallet": null,
+      "missing_data": "source locale/import exploitable",
+      "next_action": "Importer un CSV ou collecter en lecture seule.",
+      "observed": "Aucune shortlist leaderboard locale disponible.",
+      "reason": "SOURCE_UNAVAILABLE",
+      "risk_level": "INFO",
+      "why_not_simulable": "Aucune donnee locale exploitable n'a ete trouvee."
+    },
+    {
+      "candidate_id": null,
+      "coin": null,
+      "component": "copy_mode",
+      "context": {
+        "interval_seconds": 300,
+        "required_flag": "--network-read"
+      },
+      "created_at": "2026-06-02T06:45:53.527199+00:00",
+      "decision_id": "nt:1c0231632bd8421839190916",
+      "leader_wallet": null,
+      "missing_data": "autorisation explicite --network-read",
+      "next_action": "Relancer avec --network-read pour une collecte read-only bornee.",
+      "observed": "copy-run lance sans lecture reseau explicite.",
+      "reason": "NETWORK_READ_DISABLED",
+      "risk_level": "INFO",
+      "why_not_simulable": "Aucun appel /info ou WS n'est lance sans accord explicite."
+    }
+  ],
+  "signal_candidates": [],
+  "source_failures": [
+    "leaderboard_shortlist_empty"
+  ],
+  "started_at": "2026-06-02T06:45:53.495762+00:00",
+  "ws": false
+}

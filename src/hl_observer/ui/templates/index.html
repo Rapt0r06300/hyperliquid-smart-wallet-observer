@@ -1,0 +1,523 @@
+<!doctype html>
+<html lang="fr">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>HyperSmart Observer - Hyperliquid Command Center</title>
+    <link rel="stylesheet" href="/static/app.css?v=simulation-ui-20260612-antijump-v5" />
+  </head>
+  <body>
+    <div class="scanline"></div>
+    <header class="topbar">
+      <div>
+        <p class="eyebrow">HyperSmart Observer - Hyperliquid</p>
+        <h1>Hyperliquid Smart-Wallet Observer - Simulation Paper</h1>
+      </div>
+      <div class="status-strip">
+        <span id="modeBadge" class="badge cyan">PAPER</span>
+        <span id="testnetBadge" class="badge orange">TESTNET LOCKED</span>
+        <span id="safetyBadge" class="badge green pulse">SAFE</span>
+        <span id="clock" class="clock">--:--:--</span>
+        <button class="danger" data-action="activate_kill_switch">Emergency Stop</button>
+      </div>
+    </header>
+
+    <main class="shell">
+      <!-- Compatibilite tests legacy: Recherche automatique des meilleurs wallets | Simulation du bot - gain/perte -->
+      <nav class="quick-tabs" aria-label="Navigation des vues principales">
+        <a href="#simulationPanel">Simulation</a>
+        <a href="#copyPanel">Copy dry-run</a>
+        <a href="#dataWatchPanel">Donnees analysees</a>
+        <a href="#activityPanel">Activite</a>
+        <a href="#expertPanel">Mode expert</a>
+      </nav>
+
+      <section class="panel data-watch hero-simulation" id="simulationPanel">
+        <div class="panel-title">
+          <span class="dot green pulse"></span>
+          <h2>Hyperliquid - Simulation paper copy-trading</h2>
+          <span id="hlEngineBadge" class="badge orange" style="margin-left:auto">DEMARRAGE...</span>
+        </div>
+        <!-- Panneau Hyperliquid live -->
+        <div id="hlLivePanel" style="background:rgba(0,255,180,.04);border:1px solid rgba(0,255,180,.18);border-radius:8px;padding:12px 16px;margin-bottom:12px;font-size:13px">
+          <div style="display:flex;flex-wrap:wrap;gap:10px" id="hlMetrics">
+            <div class="simulation-metric"><span>PnL Hyperliquid paper</span><strong id="hlPnl">$0.00</strong></div>
+            <div class="simulation-metric"><span>Solde fictif</span><strong id="hlEquity">$1000.00</strong></div>
+            <div class="simulation-metric"><span>Positions virtuelles jouees</span><strong id="hlTrades">0</strong></div>
+            <div class="simulation-metric"><span>Mode</span><strong id="hlWinrate">research-only</strong></div>
+            <div class="simulation-metric"><span>Positions ouvertes</span><strong id="hlOpenPos">0</strong></div>
+            <div class="simulation-metric"><span>Leaders suivis</span><strong id="hlWallets">0</strong></div>
+          </div>
+          <div id="hlPositionsList" style="margin-top:8px;font-size:12px;opacity:.85"></div>
+          <div id="hlNoTradePanel" style="margin-top:6px;font-size:11px;opacity:.7"></div>
+          <div style="margin-top:6px;font-size:11px;opacity:.5">Hyperliquid /info + WS read-only - PAPER ONLY - 0 ordre reel</div>
+        </div>
+        <p class="section-help">
+          Vue principale volontairement reduite au resultat du bot simule. Le P&L demarre a 0, ignore les anciens evenements,
+          et bouge seulement sur positions virtuelles ouvertes/fermees apres le lancement. Aucune execution reelle, aucun mainnet.
+        </p>
+        <div class="simulation-summary" id="simulationSummary">
+          <div class="simulation-metric"><span>Gain/perte session</span><strong>$0.00</strong></div>
+          <div class="simulation-metric"><span>Solde fictif actuel</span><strong>$1000.00 USDT</strong></div>
+          <div class="simulation-metric"><span>Gain/perte encaisse</span><strong>$0.00</strong></div>
+          <div class="simulation-metric"><span>Gain/perte en cours</span><strong>$0.00</strong></div>
+          <div class="simulation-metric"><span>Capital utilise</span><strong>$0.00 / libre $1000.00</strong></div>
+          <div class="simulation-metric"><span>Journal decisions</span><strong>$0.00 / 0 evts</strong></div>
+        </div>
+        <div class="simulation-live-strip" id="simulationLiveStrip">
+          <div class="simulation-live-pill orange"><span>Etat</span><strong>Connexion a la simulation locale...</strong></div>
+        </div>
+        <div class="metagraph-wrap">
+          <div class="metagraph-header">
+            <div>
+              <p class="eyebrow">Metagraphe local</p>
+              <h3>Gain/perte du bot simule</h3>
+            </div>
+            <span id="simulationGraphState" class="badge cyan">En attente de donnees</span>
+          </div>
+          <canvas id="simulationMetaGraph" width="1180" height="320" aria-label="Metagraphe de simulation"></canvas>
+          <div id="simulationGraphTooltip" class="chart-tooltip hidden"></div>
+        </div>
+        <div class="simulation-decision-tape" id="simulationDecisionTape">
+          <div class="feed-line"><span class="cyan">[INIT]</span> Connexion a la simulation locale...</div>
+        </div>
+        <details class="simulation-details">
+          <summary>Voir les details d'observation</summary>
+          <div class="data-grid">
+            <article>
+              <h3>Wallets suivis</h3>
+              <div id="simulationWalletsFeed" class="feed"></div>
+            </article>
+            <article>
+              <h3>Donnees fraiches</h3>
+              <div id="simulationFreshFeed" class="feed"></div>
+            </article>
+            <article>
+              <h3>Consensus positions</h3>
+              <div id="simulationConsensusFeed" class="feed"></div>
+            </article>
+            <article>
+              <h3>Ouvertures detectees</h3>
+              <div id="simulationDeltasFeed" class="feed"></div>
+            </article>
+            <article>
+              <h3>Decisions du bot</h3>
+              <div id="simulationReplayFeed" class="feed"></div>
+            </article>
+            <article>
+              <h3>Positions virtuelles</h3>
+              <div id="simulationPositionsFeed" class="feed"></div>
+            </article>
+            <article>
+              <h3>Refus no-trade</h3>
+              <div id="simulationNoTradeFeed" class="feed"></div>
+            </article>
+          </div>
+        </details>
+      </section>
+
+      <section class="hero panel">
+        <div class="hero-copy">
+          <p class="eyebrow">Auto-Pilot Discovery</p>
+          <h2 id="autopilotTitle">Recherche automatique en cours</h2>
+          <p id="autopilotSubtitle">
+            Le logiciel cherche automatiquement les meilleurs wallets Hyperliquid (`/info` + WebSocket read-only),
+            puis analyse positions, ouvertures, fermetures, profits, altcoins, methodologies et signaux paper.
+          </p>
+          <div class="hero-actions">
+            <a class="hero-link" href="#simulationPanel">Voir la simulation active</a>
+            <button id="expertToggle" type="button">Afficher les details techniques</button>
+          </div>
+        </div>
+        <div class="autopilot-orbit">
+          <div class="orbit-ring"></div>
+          <div class="orbit-core">SCAN</div>
+        </div>
+      </section>
+
+      <section class="panel scan-overview">
+        <div class="scan-status">
+          <p class="eyebrow">Scan automatique</p>
+          <h2 id="scanStepTitle">En attente</h2>
+          <div class="progress-track" aria-label="Progression du scan">
+            <div id="scanProgressBar" class="progress-bar"></div>
+          </div>
+          <p id="scanProgressText">Le scan se lance automatiquement au chargement.</p>
+        </div>
+        <div>
+          <p class="eyebrow">Vue globale</p>
+          <h2>Tout ce que le logiciel analyse</h2>
+          <div id="analysisMap" class="analysis-map"></div>
+        </div>
+      </section>
+
+      <details class="panel analysis-details" id="fullTimeline">
+        <summary>Voir le parcours complet du scan</summary>
+        <section class="timeline" aria-label="Progression auto-pilot">
+          <div data-step="startup">Demarrage</div>
+          <div data-step="security">Securite</div>
+          <div data-step="markets">Marches</div>
+          <div data-step="prices">Prix coins</div>
+          <div data-step="liquidity">Liquidite</div>
+          <div data-step="leaderboard">Leaderboard</div>
+          <div data-step="validation">Adresses</div>
+          <div data-step="sources">Wallets</div>
+          <div data-step="filters">PnL/ROI</div>
+          <div data-step="top500">Top 500</div>
+          <div data-step="queue">Queue</div>
+          <div data-step="backfill">Backfill</div>
+          <div data-step="deltas">Deltas</div>
+          <div data-step="openings">Ouvertures</div>
+          <div data-step="closings">Fermetures</div>
+          <div data-step="profits">Profits</div>
+          <div data-step="playbooks">Playbooks</div>
+          <div data-step="follow">Paper</div>
+          <div data-step="risk">Risque</div>
+          <div data-step="summary">Resume</div>
+        </section>
+      </details>
+
+      <section class="simple-cards" id="simpleCards">
+        <article class="panel result-card">
+          <span>Sources</span>
+          <strong id="cardMarket">Initialisation</strong>
+          <p id="cardMarketDetail">Leaderboard, Explorer, imports et DB locale.</p>
+        </article>
+        <article class="panel result-card">
+          <span>Wallets</span>
+          <strong id="cardDiscovery">0 source</strong>
+          <p id="cardDiscoveryDetail">Candidats, selectionnes, rejetes et file de scan.</p>
+        </article>
+        <article class="panel result-card">
+          <span>Intelligence trading</span>
+          <strong id="cardBestWallets">0 selection</strong>
+          <p id="cardBestWalletsDetail">Ouvertures, fermetures, playbooks et signaux paper.</p>
+        </article>
+        <article class="panel result-card">
+          <span>Securite</span>
+          <strong id="cardSecurity">Lecture seule</strong>
+          <p id="cardSecurityDetail">Testnet verrouille, aucune execution reelle.</p>
+        </article>
+      </section>
+
+      <section class="panel empty-state" id="discoveryMessage">
+        Aucun wallet exploitable trouve automatiquement pour le moment.
+      </section>
+
+      <section class="simple-sections">
+        <article class="panel">
+          <div class="panel-title">
+            <span class="dot cyan"></span>
+            <h2>Sources essayees</h2>
+          </div>
+          <div id="sourceBreakdown" class="feed"></div>
+        </article>
+        <article class="panel">
+          <div class="panel-title">
+            <span class="dot green"></span>
+            <h2>Explorer / Transactions</h2>
+          </div>
+          <div id="explorerTape" class="feed"></div>
+        </article>
+        <article class="panel">
+          <div class="panel-title">
+            <span class="dot orange"></span>
+            <h2>Wallets rejetes</h2>
+          </div>
+          <div id="rejectedWallets" class="feed"></div>
+        </article>
+      </section>
+
+      <section class="panel data-watch" id="dataWatchPanel">
+        <div class="panel-title">
+          <span class="dot green pulse"></span>
+          <h2>Vue live des donnees analysees</h2>
+        </div>
+        <p class="section-help">
+          Ici tu vois les donnees reelles stockees par le scanner : wallets, positions, fills, deltas et ordres ouverts publics.
+          Si c'est vide, le logiciel l'affiche clairement au lieu d'inventer.
+        </p>
+        <div class="data-grid">
+          <article>
+            <h3>Wallets candidats</h3>
+            <div id="walletsFeed" class="feed"></div>
+          </article>
+          <article>
+            <h3>Positions reconstruites</h3>
+            <div id="positionsFeed" class="feed"></div>
+          </article>
+          <article>
+            <h3>Fills recuperes</h3>
+            <div id="fillsFeed" class="feed"></div>
+          </article>
+          <article>
+            <h3>Deltas de position</h3>
+            <div id="deltasFeed" class="feed"></div>
+          </article>
+          <article>
+            <h3>Ordres ouverts publics</h3>
+            <div id="openOrdersFeed" class="feed"></div>
+          </article>
+          <article>
+            <h3>Top wallets par marche</h3>
+            <div id="topByCoinFeed" class="feed"></div>
+          </article>
+        </div>
+      </section>
+
+      <section class="panel data-watch" id="copyPanel">
+        <div class="panel-title">
+          <span class="dot cyan pulse"></span>
+          <h2>Copy dry-run / mock USDC</h2>
+        </div>
+        <p class="section-help">
+          Cette zone observe les leaders, detecte open/add/reduce/close, calcule l'edge restant et explique les refus.
+          Tout reste en recherche paper locale : aucun ordre, aucune signature, aucun mainnet.
+        </p>
+        <div class="data-grid">
+          <article>
+            <h3>Copy status</h3>
+            <div id="copyStatusFeed" class="feed"></div>
+          </article>
+          <article>
+            <h3>Leader activity</h3>
+            <div id="leaderActivityFeed" class="feed"></div>
+          </article>
+          <article>
+            <h3>No-trade report</h3>
+            <div id="noTradeFeed" class="feed"></div>
+          </article>
+        </div>
+      </section>
+
+      <section class="panel multi-assets-note">
+        Le logiciel ne regarde pas seulement BTC. Il analyse aussi les altcoins disponibles avec assez de liquidite.
+      </section>
+
+      <section class="panel multi-assets-note">
+        Certaines adresses du leaderboard sont tronquees. Elles sont ignorees tant que le logiciel ne recupere pas l'adresse complete. Aucun wallet n'est invente.
+      </section>
+
+      <section class="panel activity">
+        <div class="panel-title">
+          <span class="dot green pulse"></span>
+          <h2>Activite recente</h2>
+        </div>
+        <div class="feed" id="eventFeed"></div>
+      </section>
+
+      <section class="panel manual">
+        <div>
+          <p class="eyebrow">Option secondaire</p>
+          <h2>Analyser une adresse précise</h2>
+          <p>La recherche automatique reste prioritaire. Utilise ce champ seulement pour inspecter une adresse publique specifique.</p>
+        </div>
+        <div class="manual-form">
+          <input id="manualWallet" placeholder="0x..." autocomplete="off" />
+          <button data-action="discovery_dry_run">Preparer l'analyse</button>
+        </div>
+      </section>
+
+      <section class="panel expert hidden" id="expertPanel">
+        <div class="panel-title">
+          <span class="dot cyan"></span>
+          <h2>Mode expert</h2>
+        </div>
+        <div class="expert-actions" id="actionCatalog"></div>
+        <div class="expert-grid">
+          <div>
+            <h3>Metriques coins</h3>
+            <div id="coinMetrics"></div>
+          </div>
+          <div>
+            <h3>Sources discovery</h3>
+            <pre id="discoveryStatus">{}</pre>
+          </div>
+          <div>
+            <h3>Candidats</h3>
+            <div class="table-wrap">
+              <table>
+                <thead><tr><th>Wallet</th><th>Coin</th><th>Source</th><th>PnL</th><th>ROI</th><th>Score</th><th>Decision</th></tr></thead>
+                <tbody id="candidateTable"></tbody>
+              </table>
+            </div>
+          </div>
+          <div>
+            <h3>Wallets selectionnes</h3>
+            <div id="selectedWallets"></div>
+          </div>
+          <div>
+            <h3>Risk gates</h3>
+            <div id="riskGates" class="gates"></div>
+          </div>
+        </div>
+      </section>
+
+      <section class="panel terminal hidden" id="terminalPanel">
+        <div class="panel-title">
+          <span class="dot green pulse"></span>
+          <h2>Logs techniques</h2>
+          <div class="filters">
+            <button data-filter="ALL" class="active">ALL</button>
+            <button data-filter="INFO">INFO</button>
+            <button data-filter="WARN">WARN</button>
+            <button data-filter="RISK">RISK</button>
+            <button data-filter="ERROR">ERROR</button>
+            <button data-filter="SECURITY">SECURITY</button>
+          </div>
+        </div>
+        <pre id="logConsole"></pre>
+      </section>
+    </main>
+    <script src="/static/app.js?v=simulation-ui-20260612-antijump-v5"></script>
+    <script>
+    // Hyperliquid live panel: source unique /api/simulation/overview.
+    (function() {
+      var fmt = function(v) { return (v >= 0 ? "+" : "") + "$" + Math.abs(v).toFixed(2); };
+      var fmtUsd = function(v) { return "$" + Number(v).toFixed(2); };
+      var badge = document.getElementById("hlEngineBadge");
+      var pnlEl = document.getElementById("hlPnl");
+      var eqEl = document.getElementById("hlEquity");
+      var trEl = document.getElementById("hlTrades");
+      var wrEl = document.getElementById("hlWinrate");
+      var opEl = document.getElementById("hlOpenPos");
+      var wlEl = document.getElementById("hlWallets");
+      var posList = document.getElementById("hlPositionsList");
+
+      function colorClass(v) { return Number(v) >= 0 ? "color:#00ffb4" : "color:#ff4444"; }
+
+      function reasonsToObject(reasons) {
+        var out = {};
+        if (Array.isArray(reasons)) {
+          reasons.forEach(function(row) {
+            if (row && row.reason) out[String(row.reason)] = Number(row.count || 0);
+          });
+        }
+        return out;
+      }
+
+      async function refreshHyperliquid() {
+        try {
+          var overview = await fetch("/api/simulation/overview?limit=120&t=" + Date.now(), {cache: "no-store"}).then(function(r){return r.json();});
+          var equity = overview.equity || {};
+          var bot = overview.bot_simulation || {};
+          var counts = overview.counts || {};
+          var signal = overview.signal_pipeline || {};
+          var positions = Array.isArray(bot.open_positions) ? bot.open_positions : [];
+          var wallets = Array.isArray(overview.leaders) ? overview.leaders : [];
+          var status = {
+            running: true,
+            wallets_in_shortlist: Number(counts.leaders || wallets.length || 0),
+            net_pnl_usdt: Number(equity.current_pnl_usdc != null ? equity.current_pnl_usdc : (bot.estimated_net_pnl_usdc || 0)),
+            equity_usdt: Number(equity.current_equity_usdt != null ? equity.current_equity_usdt : (bot.current_equity_usdt || 1000)),
+            total_trades: Number((bot.reproduced_entries || counts.reproduced_entries || 0) + (bot.reproduced_exits || counts.reproduced_exits || 0)),
+            winrate: "research-only",
+            leader_exits: Number(bot.reproduced_exits || counts.reproduced_exits || 0),
+            signals_refused: Number(bot.refused || counts.bot_refused || 0),
+            no_trade_reasons: reasonsToObject(overview.no_trade_reasons),
+            last_error: overview.readiness || "",
+            signal_entries: Number(signal.local_entries_accepted || 0)
+          };
+
+          // Anti-saut d'ecran: ce panneau reecrit #simulationSummary et des
+          // listes a hauteur variable. On garde la position de scroll pendant
+          // la mise a jour DOM pour ne pas faire sauter la vue.
+          var _sx = window.scrollX, _sy = window.scrollY;
+
+          // Badge engine
+          if (badge) {
+            var isDiscovering = (status.last_error === "IMPORT_OR_DISCOVERY_REQUIRED");
+            var noWallets = false;
+            if (isDiscovering) {
+              badge.textContent = "SCAN WALLETS...";
+              badge.style.background = "#f5a623";
+              badge.style.color = "#000";
+            } else if (status.running && status.wallets_in_shortlist > 0) {
+              badge.textContent = "LIVE - " + status.wallets_in_shortlist + " leaders";
+              badge.style.background = "#00ffb4";
+              badge.style.color = "#000";
+            } else if (status.running) {
+              badge.textContent = "DEMARRAGE...";
+              badge.style.background = "#f5a623";
+              badge.style.color = "#000";
+            } else {
+              badge.textContent = "ARRETE";
+              badge.style.background = "#ff4444";
+              badge.style.color = "#fff";
+            }
+          }
+
+          // Métriques PnL
+          var pnl = Number(status.net_pnl_usdt || 0);
+          var eq = Number(status.equity_usdt || 1000);
+          if (pnlEl) { pnlEl.textContent = fmt(pnl); pnlEl.style.cssText = colorClass(pnl); }
+          if (eqEl) { eqEl.textContent = fmtUsd(eq); }
+          if (trEl) { trEl.textContent = status.total_trades || 0; }
+          if (wrEl) { wrEl.textContent = status.winrate || "0%"; }
+          if (opEl) { opEl.textContent = (positions||[]).length; }
+          if (wlEl) { wlEl.textContent = (wallets||[]).length; }
+
+          // Positions ouvertes
+          if (posList) {
+            if (!positions || positions.length === 0) {
+              posList.innerHTML = "<em style=\"opacity:.4\">Aucune position ouverte — en attente de cluster signal</em>";
+            } else {
+              posList.innerHTML = positions.map(function(p) {
+                return "<span style=\"background:rgba(255,255,255,.06);border-radius:4px;padding:2px 8px;margin:2px;display:inline-block\">"
+                  + "<b>" + (p.coin||p.market_id||"") + "</b> "
+                  + "<span style=\"color:" + ((p.direction||p.side)==="LONG"?"#00ffb4":"#ff8844") + "\">" + (p.direction||p.side||"") + "</span> "
+                  + "entry=" + Number(p.avg_entry_price||p.entry_price||0).toFixed(4)
+                  + " mark=" + Number(p.mark_price||0).toFixed(4)
+                  + " PnL=" + fmt(Number(p.unrealized_pnl_usdc||0))
+                  + " leaders=" + (p.leader_wallets_count||p.wallet_count||0)
+                  + "</span>";
+              }).join("");
+            }
+          }
+
+          // Mettre à jour aussi le summary principal
+          var summary = document.getElementById("simulationSummary");
+          if (summary && status.running) {
+            var metrics = [
+              ["Gain/perte Hyperliquid paper", fmt(pnl)],
+              ["Solde fictif", fmtUsd(eq) + " USDT"],
+              ["Positions virtuelles jouees", String(status.total_trades || 0)],
+              ["Mode", status.winrate || "research-only"],
+              ["Leader exits", String(status.leader_exits || 0)],
+              ["Refus signaux", String(status.signals_refused || 0)],
+              ["Leaders scores", String((wallets||[]).length)]
+            ];
+            summary.innerHTML = metrics.map(function(m) {
+              return "<div class=\"simulation-metric\"><span>" + m[0] + "</span><strong>" + m[1] + "</strong></div>";
+            }).join("");
+          }
+
+          // No-trade reasons breakdown (viral bot: log refus autant que entrées)
+          var ntPanel = document.getElementById("hlNoTradePanel");
+          if (ntPanel && status.no_trade_reasons) {
+            var entries = Object.entries(status.no_trade_reasons || {});
+            if (entries.length > 0) {
+              entries.sort(function(a,b){return b[1]-a[1];});
+              ntPanel.innerHTML = "<span style=\"opacity:.5\">NO_TRADE: </span>" +
+                entries.slice(0,5).map(function(r){
+                  return "<span style=\"margin-right:8px\">" + r[0] + ":<b>" + r[1] + "</b></span>";
+                }).join("");
+            } else {
+              ntPanel.innerHTML = "";
+            }
+          }
+
+          window.scrollTo(_sx, _sy);
+        } catch(e) {
+          if (badge) { badge.textContent = "ERREUR"; badge.style.background = "#ff4444"; }
+          console.warn("Hyperliquid panel refresh error:", e);
+        }
+      }
+
+      // Poll toutes les 3 secondes.
+      refreshHyperliquid();
+      setInterval(refreshHyperliquid, 3000);
+    })();
+    </script>
+  </body>
+</html>

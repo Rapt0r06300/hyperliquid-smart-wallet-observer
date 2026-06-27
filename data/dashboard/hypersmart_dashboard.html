@@ -1,0 +1,85 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>HyperSmart Observer - Read Only Dashboard</title>
+  <style>
+    body { background:#05070d; color:#e8faff; font-family:Consolas, monospace; margin:0; padding:24px; }
+    h1,h2 { color:#00d9ff; }
+    .badge { border:1px solid #00ff88; color:#00ff88; padding:6px 10px; display:inline-block; margin:4px; }
+    .panel { border:1px solid #0b6f82; background:#0b1020; padding:16px; margin:16px 0; border-radius:8px; }
+    .tabs { margin:18px 0; display:flex; flex-wrap:wrap; gap:8px; }
+    .tabs a { color:#e8faff; border:1px solid #0b6f82; padding:8px 10px; text-decoration:none; background:#081326; }
+    table { width:100%; border-collapse:collapse; }
+    th,td { border-bottom:1px solid #123; padding:8px; text-align:left; }
+    .warn { color:#ffb020; }
+  </style>
+</head>
+<body>
+  <h1>HyperSmart Observer</h1>
+  <p>Hyperliquid Explorer / Wallet Observer - Local Read-Only Dashboard</p>
+  <div>
+    <span class="badge">READ ONLY</span><span class="badge">NO EXCHANGE</span><span class="badge">NO ORDERS</span>
+    <span class="badge">NO SIGNATURES</span><span class="badge">NO MAINNET</span><span class="badge">NO TESTNET EXECUTOR</span>
+    <span class="badge">PAPER LOCAL ONLY</span><span class="badge">RESEARCH ONLY</span>
+  </div>
+  <nav class="tabs" aria-label="Dashboard tabs">
+    <a href="#simulation">Simulation</a>
+    <a href="#copy-status">Copy Status</a>
+    <a href="#consensus">Consensus</a>
+    <a href="#leaderboard">Leaderboard</a>
+    <a href="#signals">Signals</a>
+    <a href="#ledger">Decision Ledger</a>
+    <a href="#paper">Paper Local</a>
+    <a href="#safety">Safety</a>
+  </nav>
+  <section id="runtime" class="panel"><h2>Runtime / Archive Readiness</h2><pre>HyperSmart runtime check
+root: C:\Users\flo\Desktop\Projet invest
+database_path: data\hypersmart_observer.sqlite3
+databases: 2
+databases_in_logs: 1
+wal_shm_files: 0
+log_files: 22
+root_archives_zip_7z_rar: 0
+cache_dirs: 76
+data_dir_exists: True
+logs_dir_exists: True
+archive_button_exists: True
+archive_script_exists: True
+gitignore_runtime_excludes: True
+dashboard_output_path: data/dashboard/hypersmart_dashboard.html
+archive_ready: True
+runtime_has_legacy_files: True
+scan_stopped_reason: none
+WARNING db_in_logs: C:\Users\flo\Desktop\Projet invest\logs\hl_observer.sqlite3
+WARNING: SQLite database(s) found under logs/. Logs should contain text logs only.
+Action: stop dashboards/processes using the DB, then move future DB defaults to data/.
+Recommendation: use CREER_ARCHIVE_PROPRE.cmd for a Desktop archive.
+Archive rule: exclude logs/, data/, DB/WAL/SHM, caches, archives, .env and virtualenvs.</pre></section>
+  <section id="collection" class="panel"><h2>Data Collection Status</h2><p>REST /info: configured read-only. Explorer observer: disabled by default. WebSocket monitor: disabled by default.</p></section>
+  <section id="simulation" class="panel"><h2>Simulation</h2><p>Local historical follow replay. No mock USDC wallet, no faucet, no order, no execution. Results are notional estimates after costs.</p><table><tr><th>Generated</th><th>Scenario</th><th>Wallets</th><th>Usable</th><th>Gross</th><th>Costs</th><th>Net</th><th>Max DD</th><th>Report</th></tr><tr><td>2026-05-26T10:01:25.841710+00:00</td><td>multi_wallet_follow_closed_pnl</td><td>0/2</td><td>0</td><td>0</td><td>0.0</td><td>0</td><td>0.0</td><td>data\reports\multi_wallet_follow_simulation_20260526_100125.json</td></tr></table></section>
+  <section id="consensus" class="panel"><h2>Consensus Positions</h2><p>Checks whether several watched wallets opened or increased the same coin and direction inside a bounded window. Research-only: consensus can also mean crowding or late-entry risk, never guaranteed profit.</p><p>No multi-wallet position consensus detected from stored leader deltas.</p></section>
+  <section id="copy-status" class="panel"><h2>Copy Status</h2><p>Architecture 3 jobs: leaderboard shortlist, copy loop dry-run, reports/no-trade. Polling default: 300 seconds. Paper mock USDC only when using paper portfolio modules.</p></section>
+  <section class="panel"><h2>Top Wallets Followed</h2><p>No leaderboard shortlist stored. Run copy-run dry-run or import local candidates.</p></section>
+  <section id="leaderboard" class="panel"><h2>Leaderboard Shortlist</h2><p>No leaderboard shortlist stored. Run copy-run dry-run or import local candidates.</p></section>
+  <section class="panel"><h2>Leader Activity</h2><p>Leader deltas are shown from local snapshots and stored copy signal candidates. Ambiguous deltas stay UNKNOWN.</p></section>
+  <section class="panel"><h2>Latest Deltas</h2><p>No leader deltas stored.</p></section>
+  <section id="signals" class="panel"><h2>Signal Candidates</h2><p>No copy signal candidates stored.</p></section>
+  <section class="panel"><h2>No-Trade Report</h2><table><tr><th>Reason</th><th>Observed</th><th>Why</th><th>Next</th></tr><tr><td>NETWORK_READ_DISABLED</td><td>copy-run lance sans lecture reseau explicite.</td><td>Aucun appel /info ou WS n&#x27;est lance sans accord explicite.</td><td>Relancer avec --network-read pour une collecte read-only bornee.</td></tr><tr><td>SOURCE_UNAVAILABLE</td><td>Aucune shortlist leaderboard locale disponible.</td><td>Aucune donnee locale exploitable n&#x27;a ete trouvee.</td><td>Importer un CSV ou collecter en lecture seule.</td></tr></table></section>
+  <section class="panel"><h2>Edge Remaining</h2><p>No edge_remaining_bps values stored. Signals without measurable edge are refused.</p></section>
+  <section class="panel"><h2>Copy Degradation</h2><p>No copy degradation values stored.</p></section>
+  <section class="panel"><h2>Market Signal Features</h2><p>No scan_features export stored yet. No market movement is drawn without real rows.</p></section>
+  <section id="ledger" class="panel"><h2>Decision Ledger</h2><p>No decision ledger stored yet. Run copy-run dry-run to create evidence.</p></section>
+  <section class="panel"><h2>Source Failures</h2><p>No source health rows stored.</p></section>
+  <section class="panel"><h2>Wallet Discovery</h2><p>Discovery candidates appear after imports, explorer fixtures, WS observations or local fills. No wallet is invented.</p></section>
+  <section class="panel"><h2>Smart Wallet Rankings</h2><p>No scores stored.</p></section>
+  <section class="panel"><h2>Position Lifecycle</h2><p>Openings, closings, reductions, increases and UNKNOWN actions are reconstructed from local data only.</p></section>
+  <section class="panel"><h2>Pattern Detector</h2><p>Patterns require enough evidence. Historical patterns are research-only.</p></section>
+  <section class="panel"><h2>Backtests / Replays</h2><p>Backtests are local simulations with fees, spread, slippage and latency assumptions.</p></section>
+  <section id="paper" class="panel"><h2>Paper Trading</h2><p>Open paper simulations: 0. Closed paper simulations: 0.</p><table><tr><th>Starting equity</th><th>Realized PnL</th><th>Current equity</th><th>Max drawdown</th></tr><tr><td>10000.00</td><td>0.00</td><td>10000.00</td><td>0.00</td></tr></table><p>Latent PnL is shown only when live read-only mids are available. Paper/mock USDC only; no real order.</p></section>
+  <section class="panel"><h2>Risk Events</h2><p>No risk events stored.</p></section>
+  <section id="safety" class="panel"><h2>Safety Audit</h2><p>Read-only dashboard. No wallet connection, no secret form, no execution controls, no mainnet controls.</p></section>
+  <section class="panel"><h2>Archive Audit</h2><p>Desktop clean archive only. Root ZIP/7Z/RAR files are warnings and excluded from clean archives.</p></section>
+  <section class="panel"><h2>API Limits Status</h2><p>No API health rows stored. Network reads are explicit and disabled by default.</p></section>
+  <section class="panel"><h2>Limitations</h2><p>No guaranteed profit. Historical PnL is not future PnL. Paper trading is approximate. No order execution exists.</p></section>
+</body></html>
