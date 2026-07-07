@@ -35,7 +35,6 @@ set "HYPERSMART_FUSION_COPY_COST_BUFFER_BPS=24"
 set "HYPERSMART_DIRECT_ARBITRAGE_MIN_SPREAD_BPS=30"
 set "HYPERSMART_V9_PIPELINE_AUTHORITATIVE=1"
 set "HYPERSMART_SIMULATION_ALLOW_ADD_AS_ENTRY=0"
-set "HYPERSMART_ALLOW_MARKET_FLOW_SOLO=0"
 REM PREUVE D'ENTREE PAR PALIERS (demande user: positions 1-2 wallets "pas assez prouvees",
 REM mais NE PAS bloquer): 2+ wallets d'accord = preuve par le CONSENSUS -> edge net >=10 suffit.
 REM 1 seul wallet = il faut une preuve par la FORCE du signal -> edge net >=22 exige (15->22).
