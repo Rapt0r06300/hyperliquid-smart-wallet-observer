@@ -232,7 +232,7 @@ def build_fusion_runtime_input_from_session(
         "leader_votes": votes,
         "distilled_signal_candidates": distilled_signal_candidates,
         "price_events": price_events,
-        "funding_rows": [],
+        "funding_rows": _build_funding_rows(usable_coins),
         "triangular_edges": [],
         "latencies_ms": [],
         "starting_equity": round(max(1.0, float(starting_equity_usdt or 1000.0)), 6),
@@ -559,3 +559,25 @@ __all__ = [
     "format_fusion_heartbeat_report",
     "write_fusion_runtime_input_to_engine_status",
 ]
+
+
+def _build_funding_rows(coins) -> list:
+    """Alimente le detecteur funding-arb depuis le cache de taux (funding_runtime_cache).
+
+    Un coin n'apparait que s'il a de l'historique reel. Vide = etat honnete
+    (le poller HYPERSMART_V26_FUNDING_POLLER doit tourner pour remplir le cache).
+    Le detecteur applique lui-meme son seuil d'historique (anti-spike).
+    """
+    try:
+        from hl_observer.funding.funding_runtime_cache import recent_rates
+    except Exception:
+        return []
+    rows = []
+    for coin in coins or ():
+        try:
+            rates = recent_rates(str(coin))
+        except Exception:
+            rates = []
+        if rates:
+            rows.append({"coin": str(coin).upper(), "rates": list(rates)})
+    return rows

@@ -42,7 +42,9 @@ REM Un wallet solo fort passe quand meme (pas de blocage); le consensus reste la
 REM CORRECTIF 2026-06-24: edge net releve (10->15, solo 22->28) pour exiger une marge claire APRES
 REM les couts (cost_model ~12 bps). "Moins de trades, plus propres": on ne prend que les signaux a
 REM edge net franchement positif. Aucun fake, aucun edge negatif jamais accepte.
-set "HYPERSMART_SIMULATION_MIN_EDGE_BPS=28"
+REM 2026-07-08: plancher edge copy releve 28->40 (replay causal: la selectivite passe le PnL net positif,
+REM les 2 gros perdants venaient des trades a edge marginal). Reversible.
+set "HYPERSMART_SIMULATION_MIN_EDGE_BPS=40"
 set "HYPERSMART_SIMULATION_MIN_LIQUIDITY_SCORE=0.38"
 set "HYPERSMART_SIMULATION_MAX_COPY_DEGRADATION_BPS=28"
 set "HYPERSMART_SINGLE_WALLET_MIN_EDGE_BPS=55"
@@ -181,6 +183,10 @@ REM ===== MODE GRINDER (session P1 2026-07-07, flags ON pour collecte de donnees
 set "HYPERSMART_EXECUTION_STYLE=maker"
 set "HYPERSMART_MAKER_ADVERSE_SELECTION_BPS=2"
 set "HYPERSMART_FUNDING_ARB_PAPER=1"
+REM 2026-07-08: poller funding ACTIVE — sans lui, funding_rows restait vide et le funding-arb
+REM ne pouvait jamais ouvrir de paire (cause racine du "grinder qui ne trade pas").
+set "HYPERSMART_V26_FUNDING_POLLER=1"
+set "HYPERSMART_V26_FUNDING_POLL_INTERVAL_S=120"
 set "HYPERSMART_FUNDING_ARB_MAX_PAIRS=5"
 set "HYPERSMART_FUNDING_ARB_LEG_NOTIONAL_USDT=25"
 set "HYPERSMART_DISTILLED_MAX_PAPER_ENTRIES=3"
