@@ -55,6 +55,57 @@ def test_snapshot_ignored_and_reconnect_bounded(monkeypatch):
     assert calls == []                              # snapshots never stored (we want FRESH only)
 
 
+def test_hanging_connect_never_freezes_stream():
+    """Regression 2026-07-07: websockets.connect qui pend (DNS/TCP) gelait le stream pour
+    toujours — le stop_event n'est jamais consulté pendant un connect bloquant. Le timeout
+    dur doit transformer le gel en reconnexion bornée."""
+    class _HangingCM:
+        async def __aenter__(self):
+            await asyncio.sleep(3600)              # simule un connect qui ne rend jamais la main
+        async def __aexit__(self, *a):
+            return False
+    res = asyncio.run(stream_user_fills_ws(
+        Settings(), wallets=[W], session_factory=lambda: None, network_read=True,
+        websocket_connect=lambda url: _HangingCM(), max_reconnects=1,
+        connect_timeout_s=1.0, sleep=lambda s: asyncio.sleep(0),
+    ))
+    assert res.stopped_reason == "max_reconnects"   # sorti proprement, pas gelé
+    assert res.connects == 0                        # jamais connecté
+    assert any("ws error" in w for w in res.warnings)
+
+
+def test_idle_recv_timeout_keeps_socket_alive_py310(monkeypatch):
+    """Regression compat 3.10: asyncio.TimeoutError n'est pas TimeoutError avant 3.11.
+    Une période calme (recv timeout) doit rester un idle, PAS une reconnexion."""
+    stop = asyncio.Event()
+
+    class _QuietWS:
+        def __init__(self):
+            self.recv_calls = 0
+        async def __aenter__(self):
+            return self
+        async def __aexit__(self, *a):
+            return False
+        async def send(self, m):
+            return None
+        async def recv(self):
+            self.recv_calls += 1
+            if self.recv_calls >= 3:
+                stop.set()                          # après 3 cycles idle on demande l'arrêt
+            await asyncio.sleep(3600)               # jamais de message -> wait_for timeout
+
+    quiet = _QuietWS()
+    res = asyncio.run(stream_user_fills_ws(
+        Settings(), wallets=[W], session_factory=lambda: None, network_read=True,
+        websocket_connect=lambda url: quiet, max_reconnects=0,
+        recv_timeout_s=0.01, sleep=lambda s: asyncio.sleep(0), stop_event=stop,
+    ))
+    assert quiet.recv_calls >= 3                    # plusieurs cycles idle sur LA MEME connexion
+    assert res.connects == 1                        # zéro reconnexion pendant l'idle
+    assert res.reconnects == 0
+    assert res.stopped_reason == "stopped"
+
+
 def test_fresh_fill_is_stored(monkeypatch):
     stored = []
     def fake_store(session_factory, wallet, fills, *, max_live_fill_age_ms, stats):

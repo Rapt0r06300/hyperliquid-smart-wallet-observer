@@ -287,6 +287,8 @@ async def stream_user_fills_ws(
     max_reconnects: int | None = None,
     backoff_schedule_s: tuple[int, ...] = (1, 2, 5, 10, 30),
     sleep: Any | None = None,
+    connect_timeout_s: float = 15.0,
+    recv_timeout_s: float = 30.0,
 ) -> StreamStats:
     """Persistent userFills consumer. Stays connected and stores fresh deltas as they
     arrive (sub-second). Reconnects with bounded backoff. Stops on stop_event or after
@@ -313,7 +315,12 @@ async def stream_user_fills_ws(
     attempt = 0
     while not _stopped():
         try:
-            async with websocket_connect(settings.hyperliquid.ws_base_url) as ws:
+            # Timeout DUR sur l'ouverture: un DNS/TCP qui pend ne doit JAMAIS geler le stream
+            # (le stop_event est inconsultable pendant un connect bloquant). Vu en session
+            # 2026-07-07: stream figé dès 21:03, jamais sorti de son segment de 300s.
+            cm = websocket_connect(settings.hyperliquid.ws_base_url)
+            ws = await asyncio.wait_for(cm.__aenter__(), timeout=max(1.0, float(connect_timeout_s)))
+            try:
                 stats.connects += 1
                 attempt = 0  # reset backoff on a clean connect
                 for wallet in selected:
@@ -323,9 +330,12 @@ async def stream_user_fills_ws(
                     }))
                 while not _stopped():
                     try:
-                        message = await asyncio.wait_for(ws.recv(), timeout=30.0)
-                    except TimeoutError:
-                        continue                       # idle; keep the socket alive
+                        message = await asyncio.wait_for(ws.recv(), timeout=max(0.001, float(recv_timeout_s)))
+                    except (TimeoutError, asyncio.TimeoutError):
+                        # idle; keep the socket alive. Compat 3.10: asyncio.TimeoutError
+                        # n'est PAS TimeoutError avant 3.11 -> sans ce double except, chaque
+                        # période calme de 30s forçait une reconnexion complète.
+                        continue
                     stats.messages_seen += 1
                     wallet, is_snapshot, fills = user_fills_from_message(message)
                     if is_snapshot:
@@ -349,6 +359,12 @@ async def stream_user_fills_ws(
                                            max_live_fill_age_ms=max_live_fill_age_ms, stats=stats)
                     except Exception as exc:  # noqa: BLE001
                         stats.warnings.append(f"store failed: {exc}")
+            finally:
+                try:
+                    # Une fermeture qui pend ne doit pas geler non plus.
+                    await asyncio.wait_for(cm.__aexit__(None, None, None), timeout=5.0)
+                except Exception:  # noqa: BLE001
+                    pass
         except Exception as exc:  # noqa: BLE001 - reconnect on any transport error
             stats.warnings.append(f"ws error: {exc}")
         if _stopped():

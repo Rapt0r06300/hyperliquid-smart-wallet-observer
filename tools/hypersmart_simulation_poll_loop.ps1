@@ -12,7 +12,12 @@ param(
     [int]$PublicTradeMaxWallets = 10000,
     [int]$PublicTradeScanEveryPolls = 1,
     [int]$UserFillsMaxLiveAgeMs = 120000,
-    [int]$MaxRuns = 5760
+    [int]$MaxRuns = 5760,
+    # Cadence 2026-07-07: le poll prenait ~200s au lieu de 15s parce que CHAQUE poll
+    # payait ~14 demarrages python dont des etapes de diagnostic lourdes. Les plans et
+    # diagnostics restent executes, mais tous les N polls (poll 1 inclus).
+    [int]$PlansEveryPolls = 5,
+    [int]$DiagnosticsEveryPolls = 5
 )
 
 $ErrorActionPreference = "Continue"
@@ -247,6 +252,23 @@ function Write-CommandOutput {
     }
 }
 
+# --- Mini-T43 (Annexe B roadmap): duree mesuree par etape, exposee dans le log poller
+# ("poll N durations") ET dans l'engine status (metrics step_ms_*). MESURER d'abord,
+# optimiser ensuite: c'est ce qui a revele les etapes lentes du poll de 200s. ---
+$script:StepDurations = [ordered]@{}
+function Get-NowMs {
+    return [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()
+}
+function Add-StepDuration {
+    param([string]$Step, [long]$StartMs)
+    try {
+        $elapsedMs = (Get-NowMs) - $StartMs
+        $key = ($Step -replace '[^A-Za-z0-9_]', '_')
+        $script:StepDurations[$key] = $elapsedMs
+        $script:EngineMetrics[("step_ms_" + $key)] = "$elapsedMs"
+    } catch { }
+}
+
 try {
     $script:PollerLockStream = [System.IO.File]::Open($lockPath, [System.IO.FileMode]::OpenOrCreate, [System.IO.FileAccess]::ReadWrite, [System.IO.FileShare]::None)
 } catch {
@@ -265,21 +287,33 @@ for ($i = 1; $i -le $MaxRuns; $i++) {
     Write-EngineStatus "poll_start" "Poll $i/${MaxRuns}: offset=$leaderOffset batch=$safeLeadersPerPoll pool=$MaxLeaders."
     try {
         Push-Location $Root
-        Write-EngineStatus "throughput_plan" "Verification des budgets de scan read-only."
-        $planOutput = & python -m hl_observer throughput-plan --network-read --ws --requested-wallets $MaxLeaders --max-leaders-per-run $safeLeadersPerPoll --public-trade-wallets $PublicTradeMaxWallets 2>&1
-        Write-CommandOutput -Lines $planOutput -Label "throughput-plan"
-        Write-EngineStatus "fresh_scan_plan" "Planification de la rotation des wallets frais."
-        $freshPlanOutput = & python -m hl_observer fresh-scan-plan --network-read --requested-wallets 50000 --cycle-seconds $IntervalSeconds --leaders-per-stream $safeLeadersPerPoll --public-trade-wallets $PublicTradeMaxWallets 2>&1
-        Write-CommandOutput -Lines $freshPlanOutput -Label "fresh-scan-plan"
-        Write-EngineStatus "fresh_data_plan" "Selection des coins et sources temps reel."
-        $freshDataOutput = & python -m hl_observer fresh-data-plan --network-read --requested-wallets 50000 --coins $PublicTradeCoins --max-coins $PublicTradeMaxCoins --max-hot-wallets $safeLeadersPerPoll --gap-recovery 2>&1
-        Write-CommandOutput -Lines $freshDataOutput -Label "fresh-data-plan"
+        $pollStartMs = Get-NowMs
+        $safePlansEvery = [Math]::Max(1, $PlansEveryPolls)
+        if ($i -eq 1 -or ($i % $safePlansEvery) -eq 0) {
+            $t0 = Get-NowMs
+            Write-EngineStatus "throughput_plan" "Verification des budgets de scan read-only."
+            $planOutput = & python -m hl_observer throughput-plan --network-read --ws --requested-wallets $MaxLeaders --max-leaders-per-run $safeLeadersPerPoll --public-trade-wallets $PublicTradeMaxWallets 2>&1
+            Write-CommandOutput -Lines $planOutput -Label "throughput-plan"
+            Write-EngineStatus "fresh_scan_plan" "Planification de la rotation des wallets frais."
+            $freshPlanOutput = & python -m hl_observer fresh-scan-plan --network-read --requested-wallets 50000 --cycle-seconds $IntervalSeconds --leaders-per-stream $safeLeadersPerPoll --public-trade-wallets $PublicTradeMaxWallets 2>&1
+            Write-CommandOutput -Lines $freshPlanOutput -Label "fresh-scan-plan"
+            Write-EngineStatus "fresh_data_plan" "Selection des coins et sources temps reel (gap-recovery inclus)."
+            $freshDataOutput = & python -m hl_observer fresh-data-plan --network-read --requested-wallets 50000 --coins $PublicTradeCoins --max-coins $PublicTradeMaxCoins --max-hot-wallets $safeLeadersPerPoll --gap-recovery 2>&1
+            Write-CommandOutput -Lines $freshDataOutput -Label "fresh-data-plan"
+            Add-StepDuration "plans" $t0
+        } else {
+            Write-LoopLog "Plans (throughput/fresh-scan/fresh-data) sautes ce poll (1 poll sur $safePlansEvery) pour la cadence."
+        }
         Write-LoopLog "Refreshing Hyperliquid allMids market marks for paper mark-to-market..."
         Write-EngineStatus "market_marks_refresh" "Rafraichissement allMids Hyperliquid read-only pour le PnL latent paper."
+        $t0 = Get-NowMs
         $marketMarksOutput = & python -m hl_observer discover-markets --store --max-coins $PublicTradeMaxCoins 2>&1
         Write-CommandOutput -Lines $marketMarksOutput -Label "discover-markets"
+        Add-StepDuration "discover_markets" $t0
+        $t0 = Get-NowMs
         $marketScanOutput = & python -m hl_observer scan-markets --all --store --max-coins $PublicTradeMaxCoins --l2book --candles 2>&1
         Write-CommandOutput -Lines $marketScanOutput -Label "scan-markets"
+        Add-StepDuration "scan_markets" $t0
         if ($i -eq 1 -or ($i % 20) -eq 0) {
             Write-LoopLog "Refreshing collect-all shortlist supply for active wallets..."
             Write-EngineStatus "periodic_collect_all" "Refresh collect-all borne: marches, wallets, shortlist, queue."
@@ -296,18 +330,23 @@ for ($i = 1; $i -le $MaxRuns; $i++) {
         if ($i -eq 1 -or ($i % $safeScanEvery) -eq 0) {
             Write-LoopLog "Running live-public-scan for candidate discovery..."
             Write-EngineStatus "live_public_scan" "Lecture WebSocket publique Hyperliquid pour decouvrir des wallets."
+            $t0 = Get-NowMs
             $wsOutput = & python -m hl_observer live-public-scan --network-read --store --duration-seconds $PublicTradeScanSeconds --coins $PublicTradeCoins --max-coins $PublicTradeMaxCoins --max-wallets $PublicTradeMaxWallets --promote-top $MaxLeaders --no-report 2>&1
             Write-CommandOutput -Lines $wsOutput -Label "live-public-scan"
+            Add-StepDuration "live_public_scan" $t0
         } else {
             Write-LoopLog "Skipping live-public-scan to maximize copying frequency..."
             Write-EngineStatus "live_public_scan_skipped" "Scan public saute pour privilegier la frequence de copie paper."
         }
         Write-LoopLog "Running shortlist userFills WebSocket monitor for fresh bounded deltas..."
         Write-EngineStatus "live_user_fills_scan" "Lecture WebSocket userFills read-only sur shortlist bornee."
+        $t0 = Get-NowMs
         $userFillsOutput = & python -m hl_observer live-user-fills-scan --network-read --store --duration-seconds 10 --max-users $safeLeadersPerPoll --leader-offset $leaderOffset --max-live-fill-age-ms $UserFillsMaxLiveAgeMs 2>&1
         Write-CommandOutput -Lines $userFillsOutput -Label "live-user-fills-scan"
+        Add-StepDuration "live_user_fills_scan" $t0
         $syncInterval = 20
         $forceNetworkRead = ($i -eq 1) -or (($i % $syncInterval) -eq 0)
+        $t0 = Get-NowMs
         if ($forceNetworkRead) {
             Write-LoopLog "Running copy-run with network-read for gap recovery and sync..."
             Write-EngineStatus "copy_run_network_read" "Reconciliation REST /info read-only et simulation paper locale."
@@ -318,18 +357,39 @@ for ($i = 1; $i -le $MaxRuns; $i++) {
             $output = & python -m hl_observer copy-run --interval $IntervalSeconds --dry-run --copy-max-leaders $safeLeadersPerPoll --leader-offset $leaderOffset --backfill-days $BackfillDays --fresh-window-minutes $FreshWindowMinutes --max-pages $MaxPages --no-report 2>&1
         }
         Write-CommandOutput -Lines $output -Label "copy-run"
+        Add-StepDuration "copy_run" $t0
         Write-EngineStatus "opportunity_report" "Analyse des opportunites et consensus recents."
+        $t0 = Get-NowMs
         $opportunityOutput = & python -m hl_observer opportunity-report --active-window-seconds 120 --consensus-window-seconds 4 --min-wallets 2 --max-deltas 5000 --max-opportunities 10 2>&1
         Write-CommandOutput -Lines $opportunityOutput -Label "opportunity-report"
+        Add-StepDuration "opportunity_report" $t0
         Write-EngineStatus "fusion_runtime_input" "Construction input fusion paper depuis deltas locaux et prix Hyperliquid locaux."
+        $t0 = Get-NowMs
         $fusionInputOutput = & python -m hl_observer fusion-heartbeat-input --fresh-window-seconds 120 --max-votes 24 --write-engine-status --no-report 2>&1
         Write-CommandOutput -Lines $fusionInputOutput -Label "fusion-heartbeat-input"
-        Write-EngineStatus "simulation_readiness" "Diagnostic de fraicheur et raisons de refus."
-        $readinessOutput = & python -m hl_observer simulation-readiness --from-logs "$logsToSendDir" --fresh-window-seconds 120 2>&1
-        Write-CommandOutput -Lines $readinessOutput -Label "simulation-readiness"
-        Write-EngineStatus "warehouse_report" "Synthese warehouse local: wallets, deltas, decisions paper."
-        $warehouseOutput = & python -m hl_observer warehouse-report --fresh-window-seconds 120 2>&1
-        Write-CommandOutput -Lines $warehouseOutput -Label "warehouse-report"
+        Add-StepDuration "fusion_heartbeat_input" $t0
+        $safeDiagEvery = [Math]::Max(1, $DiagnosticsEveryPolls)
+        if ($i -eq 1 -or ($i % $safeDiagEvery) -eq 0) {
+            Write-EngineStatus "simulation_readiness" "Diagnostic de fraicheur et raisons de refus."
+            $t0 = Get-NowMs
+            $readinessOutput = & python -m hl_observer simulation-readiness --from-logs "$logsToSendDir" --fresh-window-seconds 120 2>&1
+            Write-CommandOutput -Lines $readinessOutput -Label "simulation-readiness"
+            Add-StepDuration "simulation_readiness" $t0
+            Write-EngineStatus "warehouse_report" "Synthese warehouse local: wallets, deltas, decisions paper."
+            $t0 = Get-NowMs
+            $warehouseOutput = & python -m hl_observer warehouse-report --fresh-window-seconds 120 2>&1
+            Write-CommandOutput -Lines $warehouseOutput -Label "warehouse-report"
+            Add-StepDuration "warehouse_report" $t0
+        } else {
+            Write-LoopLog "Diagnostics (readiness/warehouse) sautes ce poll (1 poll sur $safeDiagEvery) pour la cadence."
+        }
+        try {
+            $pollTotalMs = (Get-NowMs) - $pollStartMs
+            $script:EngineMetrics["poll_total_ms"] = "$pollTotalMs"
+            $slowest = ($script:StepDurations.GetEnumerator() | Sort-Object -Property Value -Descending | Select-Object -First 8 | ForEach-Object { "$($_.Key)=$($_.Value)ms" }) -join " "
+            Write-LoopLog "poll $i durations: total=${pollTotalMs}ms $slowest"
+        } catch { }
+        $script:StepDurations = [ordered]@{}
         Write-EngineStatus "sleeping" "Cycle termine, attente avant prochain scan."
         Pop-Location
     } catch {
