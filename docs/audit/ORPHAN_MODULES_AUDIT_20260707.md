@@ -139,3 +139,117 @@ Flags: 261 lus dans le code, 61 définis au launcher, 1 flag mort
 - Tests: tests/test_orphan_wiring_wave1.py (4).
 - Reste vague 1: funding_poller (T30), latency_benchmark_report (T43),
   l2_snapshot_cache (T58), kill_switch/graded_halt (risk).
+
+## Triage AUDIT-A — mise à jour 2026-07-07 (fin de session)
+
+Orphelins restants: **103** (était 111 ; 8 sortis de la liste car câblés/testés cette session : refusal_live, ab_flag_replay, graded_halt, kill_switch, l2_snapshot_cache walk-the-book, funding_poller, latency_benchmark_report, exits partial/leader).
+
+Classification: WIRE_NOW=1 · TEST_THEN_WIRE=97 · ARCHIVE=5
+
+Règle: aucun module supprimé. WIRE_NOW = brancher maintenant ; TEST_THEN_WIRE = test de contrat d'abord (beaucoup ont reçu leur test cette session via les modules purs) ; ARCHIVE = déplacer hors hot-path sans suppression.
+
+| Module | Classe | Note |
+|---|---|---|
+| `hl_observer.__main__` | ARCHIVE | outillage/legacy hors hot-path; archiver ou garder en CLI |
+| `hl_observer.cli_pkg_DISABLED.tui_status` | ARCHIVE | outillage/legacy hors hot-path; archiver ou garder en CLI |
+| `hl_observer.core.main` | ARCHIVE | outillage/legacy hors hot-path; archiver ou garder en CLI |
+| `hl_observer.research.explain_cli` | ARCHIVE | outillage/legacy hors hot-path; archiver ou garder en CLI |
+| `hl_observer.research.research_toolkit` | ARCHIVE | outillage/legacy hors hot-path; archiver ou garder en CLI |
+| `hl_observer.analysis.entry_edge` | TEST_THEN_WIRE | à couvrir par test avant décision finale |
+| `hl_observer.analysis.exit_edge` | TEST_THEN_WIRE | à couvrir par test avant décision finale |
+| `hl_observer.analysis.followability` | TEST_THEN_WIRE | à couvrir par test avant décision finale |
+| `hl_observer.analysis.opening_outcome` | TEST_THEN_WIRE | à couvrir par test avant décision finale |
+| `hl_observer.analysis.opening_profitability` | TEST_THEN_WIRE | à couvrir par test avant décision finale |
+| `hl_observer.analysis.profit_patterns` | TEST_THEN_WIRE | à couvrir par test avant décision finale |
+| `hl_observer.analysis.trade_lifecycle` | TEST_THEN_WIRE | à couvrir par test avant décision finale |
+| `hl_observer.backtest.monte_carlo` | TEST_THEN_WIRE | brique d'optimisation/replay; couvrir par test avant orchestration |
+| `hl_observer.backtest.replay_engine` | TEST_THEN_WIRE | brique d'optimisation/replay; couvrir par test avant orchestration |
+| `hl_observer.backtest.runtime_parity` | TEST_THEN_WIRE | brique d'optimisation/replay; couvrir par test avant orchestration |
+| `hl_observer.backtest.walk_forward` | TEST_THEN_WIRE | brique d'optimisation/replay; couvrir par test avant orchestration |
+| `hl_observer.backtesting.hyperopt_local` | TEST_THEN_WIRE | brique d'optimisation/replay; couvrir par test avant orchestration |
+| `hl_observer.backtesting.lookahead_analysis` | TEST_THEN_WIRE | brique d'optimisation/replay; couvrir par test avant orchestration |
+| `hl_observer.backtesting.recursive_analysis` | TEST_THEN_WIRE | brique d'optimisation/replay; couvrir par test avant orchestration |
+| `hl_observer.clusters.cluster_signal_score` | TEST_THEN_WIRE | brique copy/scan; à câbler dans le scanner à étages (livré cette session) |
+| `hl_observer.clusters.crowding_detector` | TEST_THEN_WIRE | brique copy/scan; à câbler dans le scanner à étages (livré cette session) |
+| `hl_observer.clusters.wallet_clusterer` | TEST_THEN_WIRE | brique copy/scan; à câbler dans le scanner à étages (livré cette session) |
+| `hl_observer.collection.run_collect_all` | TEST_THEN_WIRE | à couvrir par test avant décision finale |
+| `hl_observer.connectors.connector_base` | TEST_THEN_WIRE | connecteur read-only; à brancher derrière budget API + multi-venues |
+| `hl_observer.connectors.market_data_connector` | TEST_THEN_WIRE | connecteur read-only; à brancher derrière budget API + multi-venues |
+| `hl_observer.connectors.read_only_market_connector` | TEST_THEN_WIRE | connecteur read-only; à brancher derrière budget API + multi-venues |
+| `hl_observer.copy_mode.copy_session_controller` | TEST_THEN_WIRE | brique copy/scan; à câbler dans le scanner à étages (livré cette session) |
+| `hl_observer.copy_mode.multi_wallet_copy_session` | TEST_THEN_WIRE | brique copy/scan; à câbler dans le scanner à étages (livré cette session) |
+| `hl_observer.copy_mode.wallet_subscription_planner` | TEST_THEN_WIRE | brique copy/scan; à câbler dans le scanner à étages (livré cette session) |
+| `hl_observer.copy_wallet.multi_trader_runtime` | TEST_THEN_WIRE | à couvrir par test avant décision finale |
+| `hl_observer.copying.pipeline_integrator` | TEST_THEN_WIRE | à couvrir par test avant décision finale |
+| `hl_observer.core.logging_config` | TEST_THEN_WIRE | à couvrir par test avant décision finale |
+| `hl_observer.dashboard.risk_flags_panel` | TEST_THEN_WIRE | à couvrir par test avant décision finale |
+| `hl_observer.edge.copy_degradation` | TEST_THEN_WIRE | brique risque/exécution paper; test de contrat puis câblage gated |
+| `hl_observer.edge.cost_validation` | TEST_THEN_WIRE | brique risque/exécution paper; test de contrat puis câblage gated |
+| `hl_observer.edge.tier_cost_budget` | TEST_THEN_WIRE | brique risque/exécution paper; test de contrat puis câblage gated |
+| `hl_observer.explorer.explorer_dom_extractor` | TEST_THEN_WIRE | à couvrir par test avant décision finale |
+| `hl_observer.explorer.explorer_rate_budget` | TEST_THEN_WIRE | à couvrir par test avant décision finale |
+| `hl_observer.following.copy_delay` | TEST_THEN_WIRE | brique copy/scan; à câbler dans le scanner à étages (livré cette session) |
+| `hl_observer.following.follow_reconciliation` | TEST_THEN_WIRE | brique copy/scan; à câbler dans le scanner à étages (livré cette session) |
+| `hl_observer.following.follow_state` | TEST_THEN_WIRE | brique copy/scan; à câbler dans le scanner à étages (livré cette session) |
+| `hl_observer.following.leaderboard_follow_shortlist` | TEST_THEN_WIRE | brique copy/scan; à câbler dans le scanner à étages (livré cette session) |
+| `hl_observer.following.position_follower` | TEST_THEN_WIRE | brique copy/scan; à câbler dans le scanner à étages (livré cette session) |
+| `hl_observer.gateway.local_source_gateway` | TEST_THEN_WIRE | connecteur read-only; à brancher derrière budget API + multi-venues |
+| `hl_observer.hyperliquid.ws_client` | TEST_THEN_WIRE | connecteur read-only; à brancher derrière budget API + multi-venues |
+| `hl_observer.ledger.evidence` | TEST_THEN_WIRE | à couvrir par test avant décision finale |
+| `hl_observer.ml.model_panel` | TEST_THEN_WIRE | à couvrir par test avant décision finale |
+| `hl_observer.optimization.grid_search` | TEST_THEN_WIRE | brique d'optimisation/replay; couvrir par test avant orchestration |
+| `hl_observer.optimization.hypothesis_engine` | TEST_THEN_WIRE | brique d'optimisation/replay; couvrir par test avant orchestration |
+| `hl_observer.optimization.profit_report` | TEST_THEN_WIRE | brique d'optimisation/replay; couvrir par test avant orchestration |
+| `hl_observer.optimization.random_search` | TEST_THEN_WIRE | brique d'optimisation/replay; couvrir par test avant orchestration |
+| `hl_observer.optimization.strategy_tournament` | TEST_THEN_WIRE | brique d'optimisation/replay; couvrir par test avant orchestration |
+| `hl_observer.optimization.walk_forward_validator` | TEST_THEN_WIRE | brique d'optimisation/replay; couvrir par test avant orchestration |
+| `hl_observer.paper.latency_model` | TEST_THEN_WIRE | à couvrir par test avant décision finale |
+| `hl_observer.paper.partial_fill_model` | TEST_THEN_WIRE | à couvrir par test avant décision finale |
+| `hl_observer.paper.rejection_model` | TEST_THEN_WIRE | à couvrir par test avant décision finale |
+| `hl_observer.paper_trading.auto_unstuck` | TEST_THEN_WIRE | brique risque/exécution paper; test de contrat puis câblage gated |
+| `hl_observer.paper_trading.can_buy_amount_simulator` | TEST_THEN_WIRE | brique risque/exécution paper; test de contrat puis câblage gated |
+| `hl_observer.paper_trading.hedge_reconciliation` | TEST_THEN_WIRE | brique risque/exécution paper; test de contrat puis câblage gated |
+| `hl_observer.paper_trading.liquidity_route_simulator` | TEST_THEN_WIRE | brique risque/exécution paper; test de contrat puis câblage gated |
+| `hl_observer.paper_trading.v26_exit_pipeline` | TEST_THEN_WIRE | brique risque/exécution paper; test de contrat puis câblage gated |
+| `hl_observer.reports.daily_report` | TEST_THEN_WIRE | à couvrir par test avant décision finale |
+| `hl_observer.reports.paper_report` | TEST_THEN_WIRE | à couvrir par test avant décision finale |
+| `hl_observer.risk.duplicate_order_guard` | TEST_THEN_WIRE | brique risque/exécution paper; test de contrat puis câblage gated |
+| `hl_observer.risk.kelly_leader_book` | TEST_THEN_WIRE | brique risque/exécution paper; test de contrat puis câblage gated |
+| `hl_observer.risk.latency_model` | TEST_THEN_WIRE | brique risque/exécution paper; test de contrat puis câblage gated |
+| `hl_observer.risk.position_sizing` | TEST_THEN_WIRE | brique risque/exécution paper; test de contrat puis câblage gated |
+| `hl_observer.risk.protections_v26` | TEST_THEN_WIRE | brique risque/exécution paper; test de contrat puis câblage gated |
+| `hl_observer.risk.reconciliation_guard` | TEST_THEN_WIRE | brique risque/exécution paper; test de contrat puis câblage gated |
+| `hl_observer.risk.slippage_model` | TEST_THEN_WIRE | brique risque/exécution paper; test de contrat puis câblage gated |
+| `hl_observer.runtime.graceful_shutdown` | TEST_THEN_WIRE | à couvrir par test avant décision finale |
+| `hl_observer.runtime.research_path` | TEST_THEN_WIRE | à couvrir par test avant décision finale |
+| `hl_observer.runtime.safe_mode` | TEST_THEN_WIRE | à couvrir par test avant décision finale |
+| `hl_observer.scoring.live_wallet_scoring_loop` | TEST_THEN_WIRE | à couvrir par test avant décision finale |
+| `hl_observer.signals.decisions` | TEST_THEN_WIRE | à couvrir par test avant décision finale |
+| `hl_observer.signals.market_quality_score` | TEST_THEN_WIRE | à couvrir par test avant décision finale |
+| `hl_observer.signals.signal_builder` | TEST_THEN_WIRE | à couvrir par test avant décision finale |
+| `hl_observer.simulation.action_loss_diagnostics` | TEST_THEN_WIRE | diagnostic atteignable via CLI; test de contrat puis exposer au dashboard |
+| `hl_observer.simulation.coin_loss_diagnostics` | TEST_THEN_WIRE | diagnostic atteignable via CLI; test de contrat puis exposer au dashboard |
+| `hl_observer.simulation.cost_drag_diagnostics` | TEST_THEN_WIRE | diagnostic atteignable via CLI; test de contrat puis exposer au dashboard |
+| `hl_observer.simulation.edge_distribution_diagnostics` | TEST_THEN_WIRE | diagnostic atteignable via CLI; test de contrat puis exposer au dashboard |
+| `hl_observer.simulation.freshness_gates` | TEST_THEN_WIRE | à couvrir par test avant décision finale |
+| `hl_observer.simulation.logs_analyzer` | TEST_THEN_WIRE | à couvrir par test avant décision finale |
+| `hl_observer.simulation.position_matching_diagnostics` | TEST_THEN_WIRE | diagnostic atteignable via CLI; test de contrat puis exposer au dashboard |
+| `hl_observer.simulation.profitability_diagnostics` | TEST_THEN_WIRE | diagnostic atteignable via CLI; test de contrat puis exposer au dashboard |
+| `hl_observer.simulation.root_cause_from_logs` | TEST_THEN_WIRE | à couvrir par test avant décision finale |
+| `hl_observer.simulation.stale_signal_diagnostics` | TEST_THEN_WIRE | diagnostic atteignable via CLI; test de contrat puis exposer au dashboard |
+| `hl_observer.simulation.timing_distribution_diagnostics` | TEST_THEN_WIRE | diagnostic atteignable via CLI; test de contrat puis exposer au dashboard |
+| `hl_observer.simulation.wallet_loss_diagnostics` | TEST_THEN_WIRE | diagnostic atteignable via CLI; test de contrat puis exposer au dashboard |
+| `hl_observer.testnet.testnet_reconciliation` | TEST_THEN_WIRE | à couvrir par test avant décision finale |
+| `hl_observer.ui.wallet_mirror_panel` | TEST_THEN_WIRE | à couvrir par test avant décision finale |
+| `hl_observer.validation.bootstrap` | TEST_THEN_WIRE | à couvrir par test avant décision finale |
+| `hl_observer.validation.testnet_tournament` | TEST_THEN_WIRE | à couvrir par test avant décision finale |
+| `hl_observer.wallets.degradation` | TEST_THEN_WIRE | brique copy/scan; à câbler dans le scanner à étages (livré cette session) |
+| `hl_observer.wallets.leaderboard_dom_extractor` | TEST_THEN_WIRE | brique copy/scan; à câbler dans le scanner à étages (livré cette session) |
+| `hl_observer.wallets.leaderboard_importer` | TEST_THEN_WIRE | brique copy/scan; à câbler dans le scanner à étages (livré cette session) |
+| `hl_observer.wallets.profiler` | TEST_THEN_WIRE | brique copy/scan; à câbler dans le scanner à étages (livré cette session) |
+| `hl_observer.wallets.scan_limits` | TEST_THEN_WIRE | brique copy/scan; à câbler dans le scanner à étages (livré cette session) |
+| `hl_observer.wallets.scan_progress` | TEST_THEN_WIRE | brique copy/scan; à câbler dans le scanner à étages (livré cette session) |
+| `hl_observer.wallets.scan_scheduler` | TEST_THEN_WIRE | brique copy/scan; à câbler dans le scanner à étages (livré cette session) |
+| `hl_observer.wallets.top_wallet_export` | TEST_THEN_WIRE | brique copy/scan; à câbler dans le scanner à étages (livré cette session) |
+| `hl_observer.wallets.toxicity` | TEST_THEN_WIRE | brique copy/scan; à câbler dans le scanner à étages (livré cette session) |
+| `hl_observer.simulation.refusal_breakdown` | WIRE_NOW | outil prêt, à brancher au runtime/dashboard |
