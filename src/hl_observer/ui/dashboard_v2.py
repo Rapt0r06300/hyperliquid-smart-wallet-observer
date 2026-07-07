@@ -1,15 +1,24 @@
-"""Dashboard v2 — thème "hacker" (UI-1 validée, spec docs/design/DASHBOARD_V2_MOCKUP.html).
+"""Dashboard v2 — thème hacker (UI-1..6, spec docs/design/DASHBOARD_V2_MOCKUP.html).
 
-Router FastAPI SÉPARÉ, monté à /v2. Ne touche jamais le très gros routes.py.
-Read-only strict: la page n'expose AUCUNE action, elle interroge seulement
-/api/simulation/status (source = ledger canonique, règle UI-4 vérité). L'ancienne
-UI reste disponible à / (aucune suppression). Chiffres bruts arrondis côté client.
+Router FastAPI SÉPARÉ monté à /v2. Ne touche jamais le gros routes.py. Read-only
+strict: interroge /api/simulation/status (ledger canonique, règle UI-4 vérité).
+Panneaux: métriques, metagraphe, positions, santé, modes SNIPER/GRINDER/funding
+(UI-5), wiring map source→ledger (UI-6), fraîcheur par source (UI-3). L'ancienne
+UI reste à / (rien supprimé).
 """
 
 from __future__ import annotations
 
 from fastapi import APIRouter
 from fastapi.responses import HTMLResponse
+
+# Champs du payload /api/simulation/status effectivement consommés (contrat UI-4).
+CANONICAL_STATUS_FIELDS = (
+    "net_pnl_usdt", "equity_usdt", "winrate_pct", "open_positions", "open_exposure_usdt",
+    "closed_trades", "realized_pnl_usdt", "unrealized_pnl_usdt", "positions",
+    "paper_ledger", "fusion_runtime", "scanner", "engine_running", "server_running",
+    "read_only", "equity",
+)
 
 _PAGE = r"""<!doctype html><html lang="fr"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
@@ -31,9 +40,11 @@ body{background:#050805;margin:0;padding:16px;font-family:ui-monospace,Consolas,
 .panel{background:#0c140c;padding:10px;margin-bottom:10px}.lbl{font-size:10px;color:var(--dim);letter-spacing:1px;margin-bottom:6px}
 table{width:100%;font-size:11px;border-collapse:collapse;table-layout:fixed}th{font-weight:400;color:var(--dim);text-align:left}
 .two{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:8px;margin-bottom:10px}
+.three{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:8px;margin-bottom:10px}
 svg{width:100%;height:84px;display:block}
 .ev{animation:fadein .5s ease-out;line-height:1.8}
 .fresh-ok{color:var(--pnl)}.fresh-warn{color:var(--amber)}.fresh-bad{color:var(--red)}
+.chip{display:inline-block;padding:1px 6px;border-radius:0;font-size:10px}
 </style></head><body><div class="wrap">
 <div class="hd"><div class="t">┌─[ <span style="color:#a7f3d0">HYPERSMART</span><span style="color:var(--dim)">::observer_v2</span> ]<span style="animation:blink 1.1s infinite">▮</span></div>
 <div class="s num"><span id="mode">…</span> │ <span id="ro">read_only</span> │ marks <span class="dot" id="freshdot">●</span> <span id="fresh">…</span> │ <span id="clk">…</span></div></div>
@@ -47,32 +58,37 @@ svg{width:100%;height:84px;display:block}
 </div>
 <div class="panel"><div class="lbl">┌ METAGRAPHE <span style="color:var(--dim)">equity·session live</span></div>
 <svg id="mg" viewBox="0 0 620 84" preserveAspectRatio="none"><polyline id="mgline" fill="none" stroke="#4ade80" stroke-width="2" points=""/></svg></div>
+<div class="three">
+<div class="cell" style="border-left:2px solid var(--amber)"><div class="l">SNIPER</div><div class="v num" id="m_sniper">—</div></div>
+<div class="cell" style="border-left:2px solid var(--cyan)"><div class="l">GRINDER</div><div class="v num" id="m_grinder">—</div></div>
+<div class="cell" style="border-left:2px solid var(--pnl)"><div class="l">FUNDING·paires</div><div class="v num" id="m_funding">—</div></div>
+</div>
 <div class="two">
 <div class="panel"><div class="lbl">┌ POSITIONS <span class="num" id="poslbl" style="color:var(--dim)"></span></div>
-<table><thead><tr><th style="width:30%">coin</th><th style="width:22%">side</th><th style="width:24%">notional</th><th style="width:24%;text-align:right">pnl</th></tr></thead><tbody id="postb"></tbody></table></div>
+<table><thead><tr><th style="width:26%">coin</th><th style="width:26%">mode</th><th style="width:22%">notl</th><th style="width:26%;text-align:right">pnl</th></tr></thead><tbody id="postb"></tbody></table></div>
 <div class="panel"><div class="lbl">┌ SANTÉ <span style="color:var(--dim)">ledger·réconciliation</span></div>
 <div class="num" id="health" style="font-size:11px;color:#8fa58f;line-height:2"></div></div>
 </div>
-<div class="panel"><div class="lbl">┌ ÉTAT <span style="color:var(--dim)">moteur / sources</span></div>
+<div class="panel"><div class="lbl">┌ WIRING <span style="color:var(--dim)">source→ledger (compteurs live)</span></div>
+<div id="wiring" class="num" style="font-size:11px;color:var(--txt);display:flex;gap:6px;flex-wrap:wrap;align-items:center"></div></div>
+<div class="panel"><div class="lbl">┌ ÉTAT <span style="color:var(--dim)">moteur / fusion</span></div>
 <div id="state" class="num" style="font-size:11px;color:#8fa58f;line-height:2"></div></div>
 </div>
 <script>
 var hist=[];
 function n(x,d){x=Number(x);return isNaN(x)?'—':x.toFixed(d==null?2:d)}
 function col(v){return v>=0?'var(--pnl)':'var(--red)'}
-function pad(x){return (x<10?'0':'')+x}
-function draw(){
-  if(hist.length<2){return}
-  var lo=Math.min.apply(null,hist),hi=Math.max.apply(null,hist),rng=(hi-lo)||1;
-  var pts=hist.map(function(v,i){var x=620*i/(hist.length-1);var y=78-72*(v-lo)/rng;return x.toFixed(1)+','+y.toFixed(1)}).join(' ');
-  document.getElementById('mgline').setAttribute('points',pts);
-}
+function draw(){if(hist.length<2)return;var lo=Math.min.apply(null,hist),hi=Math.max.apply(null,hist),r=(hi-lo)||1;
+  document.getElementById('mgline').setAttribute('points',hist.map(function(v,i){return (620*i/(hist.length-1)).toFixed(1)+','+(78-72*(v-lo)/r).toFixed(1)}).join(' '));}
+function modeOf(p){var m=(p.position_mode||'').toUpperCase();
+  if(m.indexOf('FUNDING')>=0||m.indexOf('ARBITRAGE')>=0||m.indexOf('TRIANGULAR')>=0)return 'GRINDER';
+  if(m.indexOf('EXTERNAL_GITHUB')>=0||m.indexOf('DELTA')>=0)return 'GRINDER';
+  return 'SNIPER';}
 function tick(){
   fetch('/api/simulation/status').then(function(r){return r.json()}).then(function(d){
-    document.getElementById('mode').textContent=(d.mode||'').slice(0,34);
+    document.getElementById('mode').textContent=(d.mode||'').slice(0,30);
     document.getElementById('ro').textContent=d.read_only?'read_only':'??';
-    var pnl=Number(d.net_pnl_usdt||0);
-    var e=document.getElementById('pnl');e.textContent=(pnl>=0?'+':'')+n(pnl);e.style.color=col(pnl);
+    var pnl=Number(d.net_pnl_usdt||0);var e=document.getElementById('pnl');e.textContent=(pnl>=0?'+':'')+n(pnl);e.style.color=col(pnl);
     document.getElementById('eq').textContent=n(d.equity_usdt);
     document.getElementById('wr').textContent=n(d.winrate_pct,0)+'%';
     document.getElementById('pos').textContent=(d.open_positions||0);
@@ -84,30 +100,38 @@ function tick(){
     if(mi>0&&av===0){fd.className='dot fresh-bad';fr.textContent='marks manquants';fr.className='num fresh-bad';}
     else if(mi>0){fd.className='dot fresh-warn';fr.textContent=av+'ok/'+mi+'miss';fr.className='num fresh-warn';}
     else{fd.className='dot fresh-ok';fr.textContent=av+' ok';fr.className='num fresh-ok';}
+    // UI-5: agrégation par mode
+    var ps=(d.positions||[]);var sniper={n:0,p:0},grinder={n:0,p:0};
+    ps.forEach(function(p){var g=modeOf(p);var pp=Number(p.unrealized_pnl_usdc||p.pnl_usdc||0);
+      if(g==='SNIPER'){sniper.n++;sniper.p+=pp;}else{grinder.n++;grinder.p+=pp;}});
+    document.getElementById('m_sniper').innerHTML=sniper.n+' <span style="font-size:11px;color:'+col(sniper.p)+'">'+(sniper.p>=0?'+':'')+n(sniper.p)+'</span>';
+    document.getElementById('m_grinder').innerHTML=grinder.n+' <span style="font-size:11px;color:'+col(grinder.p)+'">'+(grinder.p>=0?'+':'')+n(grinder.p)+'</span>';
+    var fus=d.fusion_runtime||{};var fa=fus.funding_arb||{};
+    document.getElementById('m_funding').textContent=(fa.open_pairs!=null?fa.open_pairs:0)+(fa.enabled?'':' (off)');
+    // positions table
     var tb=document.getElementById('postb');tb.innerHTML='';
-    var ps=(d.positions||[]).slice(0,12);
     document.getElementById('poslbl').textContent=ps.length+' ouvertes';
-    ps.forEach(function(p){
-      var side=(p.side||p.direction||'').toUpperCase();
-      var pp=Number(p.unrealized_pnl_usdc||p.pnl_usdc||0);
-      var notl=Number(p.notional_usdt||p.copied_notional_usdt||0);
-      var tr=document.createElement('tr');
-      tr.innerHTML='<td>'+(p.coin||'?')+'</td><td style="color:'+(side==='LONG'?'var(--cyan)':'var(--amber)')+'">'+side+'</td><td class="num">'+n(notl)+'</td><td class="num" style="text-align:right;color:'+col(pp)+'">'+(pp>=0?'+':'')+n(pp)+'</td>';
-      tb.appendChild(tr);
-    });
-    if(!ps.length){tb.innerHTML='<tr><td colspan="4" style="color:var(--dim)">aucune position ouverte</td></tr>';}
-    var pl=d.paper_ledger||{};var rec=(pl.reconciliation)||{};
-    var exp=Number(rec.expected_equity_usdc||0),act=Number(rec.actual_equity_usdc||0),gap=Math.abs(exp-act);
+    ps.slice(0,12).forEach(function(p){var g=modeOf(p);var pp=Number(p.unrealized_pnl_usdc||p.pnl_usdc||0);
+      var notl=Number(p.notional_usdt||p.copied_notional_usdt||0);var tr=document.createElement('tr');
+      tr.innerHTML='<td>'+(p.coin||'?')+'</td><td style="color:'+(g==='SNIPER'?'var(--amber)':'var(--cyan)')+'">'+g+'</td><td class="num">'+n(notl)+'</td><td class="num" style="text-align:right;color:'+col(pp)+'">'+(pp>=0?'+':'')+n(pp)+'</td>';
+      tb.appendChild(tr);});
+    if(!ps.length)tb.innerHTML='<tr><td colspan="4" style="color:var(--dim)">aucune position ouverte</td></tr>';
+    // santé
+    var pl=d.paper_ledger||{};var rec=pl.reconciliation||{};var exp=Number(rec.expected_equity_usdc||0),act=Number(rec.actual_equity_usdc||0),gap=Math.abs(exp-act);
     document.getElementById('health').innerHTML=
-      'realized <span style="color:'+col(Number(d.realized_pnl_usdt||0))+'">'+n(d.realized_pnl_usdt)+'</span><br>'+
-      'unrealized <span style="color:'+col(Number(d.unrealized_pnl_usdt||0))+'">'+n(d.unrealized_pnl_usdt)+'</span><br>'+
-      'réconciliation <span style="color:'+(gap<0.01?'var(--pnl)':'var(--red)')+'">écart '+n(gap,6)+'</span><br>'+
-      'winrate '+n(d.winrate_pct,0)+'% ('+(d.winning_trades||0)+'W/'+(d.losing_trades||0)+'L)';
-    var sc=d.scanner||{};
-    document.getElementById('state').innerHTML=
-      'moteur <span class="dot" style="color:'+(d.engine_running?'var(--pnl)':'var(--red)')+'">●</span> '+(d.engine_running?'actif':'arrêté')+
-      ' │ serveur '+(d.server_running?'●':'○')+
-      ' │ fusion '+((d.fusion_runtime||{}).status||'—');
+      'realized <span style="color:'+col(Number(d.realized_pnl_usdt||0))+'">'+n(d.realized_pnl_usdt)+'</span> · unrealized <span style="color:'+col(Number(d.unrealized_pnl_usdt||0))+'">'+n(d.unrealized_pnl_usdt)+'</span><br>'+
+      'réconciliation <span style="color:'+(gap<0.01?'var(--pnl)':'var(--red)')+'">écart '+n(gap,6)+'</span> · '+(d.winning_trades||0)+'W/'+(d.losing_trades||0)+'L';
+    // UI-6: wiring map
+    var sc=d.scanner||{};var pe=(fus.paper_engine)||{};var summ=fus.external_profile_execution_summary||{};
+    function node(ok,label,val){return '<span class="dot" style="color:'+(ok?'var(--pnl)':'var(--red)')+'">●</span>'+label+' <span style="color:var(--dim)">'+val+'</span>';}
+    document.getElementById('wiring').innerHTML=[
+      node(d.engine_running,'ws_scan',(sc.engine_running?'live':'off')),
+      node((fus.status||'').indexOf('OK')>=0,'fusion',(fus.status||'—').slice(0,14)),
+      node(true,'profils',(summ.profiles_executed!=null?summ.profiles_executed:'—')),
+      node(true,'paper_engine',(pe.accepted_count!=null?pe.accepted_count:'—')),
+      node(gap<0.01,'ledger',(pl.open_positions_count!=null?pl.open_positions_count+' pos':'—'))
+    ].join(' <span style="color:var(--dim)">━▶</span> ');
+    document.getElementById('state').innerHTML='moteur <span class="dot" style="color:'+(d.engine_running?'var(--pnl)':'var(--red)')+'">●</span> '+(d.engine_running?'actif':'arrêté')+' │ serveur '+(d.server_running?'●':'○')+' │ fusion '+((fus.status)||'—');
     document.getElementById('clk').textContent=new Date().toLocaleTimeString();
   }).catch(function(){document.getElementById('state').textContent='serveur injoignable — /api/simulation/status';});
 }
@@ -125,4 +149,4 @@ def create_dashboard_v2_router() -> APIRouter:
     return router
 
 
-__all__ = ["create_dashboard_v2_router"]
+__all__ = ["create_dashboard_v2_router", "CANONICAL_STATUS_FIELDS"]
