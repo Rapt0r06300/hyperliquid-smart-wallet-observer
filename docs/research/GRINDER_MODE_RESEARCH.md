@@ -162,3 +162,25 @@ X confirmé:
 - Reverse funding arb en funding négatif (long perp / short spot) — déjà géré par le signe dans notre moteur.
 
 Statut: apr_rotation.py + quality_score.py livrés, testés, flag-gated. À câbler au funding-arb après le run 48h (replay A/B).
+
+## Vague 4 — microstructure HFT + trackers pro (2026-07-08)
+
+Distillé de hftbacktest + market-making pro (widening spread sur vol/toxicité):
+- **microprice/VAMP**: fair value pondérée profondeur (penche vers le côté fin) →
+  meilleure entrée que le mid → src/hl_observer/signals/microprice_toxicity.py.
+- **markout / toxicité EWMA**: mesure QUANTITATIVE de l'adverse selection (le prix
+  bouge-t-il contre nous juste après le fill ?). Coin qui picke → edge requis relevé.
+  C'est le tueur n°1 du grinder, enfin mesuré.
+- **δ = base + c_vol·σ + c_tox·toxicité**: edge minimum adaptatif.
+
+Trackers pro (HyperTracker/whaleportal/Dexly) — ce qu'ils calculent par wallet
+(CONFIRME notre approche discovery+quality+behavior):
+  account value, PnL realized/unrealized, WIN RATE, **average trade duration**
+  (= notre signal swing vs scalper), 30d volume, ROI, classification "behavior & conviction".
+  → Ces plateformes sont propriétaires (pas de code ouvert); leur MÉTHODE = exactement
+  ce qu'on a bâti (leader_behavior + quality_score + discovery). Rien à copier de plus.
+
+Conclusion honnête: les idées publiques distillables sont désormais captées
+(4 vagues). Les prochains gains viennent du RUN 48h + câblage + replay A/B,
+pas de plus de recherche. Reste à câbler: microprice_toxicity, apr_rotation
+(fait), quality_score (fait) → activer sur preuve.
