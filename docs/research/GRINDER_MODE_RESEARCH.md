@@ -87,3 +87,54 @@ deux jambes); filtre "leaders swing" (holding > 15 min) pas encore implémenté.
 Prochaine étape d'activation: lancer une session avec le bloc GRINDER
 décommenté, laisser tourner ≥ 48h, puis `closed-ledger-replay` + comparaison
 PF net vs baseline avant de passer un flag en défaut.
+
+
+## 5. Vague 2 de recherche (2026-07-07, X + GitHub, ratissage large)
+
+### ⚠️ DÉCOUVERTE SÉCURITÉ CRITIQUE
+Le repo le plus étoilé du topic hyperliquid-bot (xlev-v, 79★) contient un
+installeur `powershell -ep bypass ... | iex` téléchargé depuis une release —
+pattern MALWARE classique (repo 4 commits, 0 fork, badge d'étoiles falsifié).
+Beaucoup de "bots HL" GitHub sont des pièges à voleurs de clés. Règle absolue
+confirmée: on LIT ces repos pour les idées, on n'EXÉCUTE jamais leur code ni
+leurs installeurs. Un audit des 39 repos clonés s'impose (recherche de
+patterns iwr|iex|curl|sh, exfiltration de clés).
+
+### Idées neuves extraites (avec source)
+1. **Classification des leaders à NE PAS copier** (README xlev-v, malgré le
+   repo douteux, la doc est du savoir standard): HFT (impossible à suivre),
+   market makers (2 sens simultanés = copie perdante garantie), scalpeurs
+   (<minutes), manipulateurs de levier (faussent le sizing proportionnel).
+   → classifieur de comportement leader depuis les fills publics.
+2. **Anti "exit liquidity"** (cryptoapis/quantvps): sur coins illiquides, le
+   copieur devient la liquidité de sortie du leader → détecter les leaders
+   qui réduisent juste après nos entrées répliquées (leader toxique).
+3. **73% des bots auto perdent en 6 mois — cause n°1 = exécution, pas le
+   signal** (fortraders): valide notre priorité coûts/latence/maker.
+4. **Vaults HL comme leaders copiables** (docs HL): adresses de vault =
+   stratégies étiquetées, high-water mark, 5% skin-in-the-game du leader,
+   holdings plus stables que les wallets individuels.
+5. **Clusters de liquidation** (coinmarketman heatmap): prix où les cascades
+   se déclenchent → gate de proximité à l'entrée + signal post-cascade.
+6. **Delta-neutre spot+perp INTRA-HL** (compte unifié): les 2 jambes sur la
+   même venue (pas de venue fantôme), inversion au flip du funding,
+   rebalance si drift >5%, taille réduite en haute vol. Seuils du terrain:
+   entrée 0.005%/h, sortie 0.001%/h, hold max 48h, hedge spot 30% optionnel.
+7. **Long-tail funding extrême** (Sharpe AI, publications quotidiennes):
+   155%→1125% APR sur petits coins — mais liquidité/emprunt = le vrai gate;
+   notre scanner doit ranker TOUS les coins HL chaque heure avec gate
+   liquidité stricte.
+8. **Découverte de wallets méthode Dune** (OdinBot): filtres win-ratio min,
+   activité récente, présence cross-bots; leaderboards Kolscan/Lookonchain.
+9. **Garde-fous session standard**: daily-loss halt + unrealized force-close
+   + health-check de drift équité (déjà partiellement présents chez nous).
+10. **Copie sub-200ms via WS** (zkOSAI): benchmark de latence de la
+    concurrence; notre budget latence copy doit être mesuré contre ça.
+
+### Sources principales
+X: @SharpeLabs (funding APR quotidiens), @Copin_io, @Apexliquid_bot,
+@lookonchain, @OdinBotio (méthode Dune), @TradeNeutral (4 piliers d'arb),
+@HyperliquidEco (MM). Web: chainstack, cryptoapis, coinmarketman (heatmap),
+fortraders (73%), eco.com (vaults/HLP), hummingbot (funding+vaults).
+GitHub: topics hyperliquid-bot/hyperliquid-dex, MaxIsOntoSomething (copy),
+zkOSAI (copy WS), Jackhuang166 (arb Rust), chainstacklabs (grid + HIP-4).
