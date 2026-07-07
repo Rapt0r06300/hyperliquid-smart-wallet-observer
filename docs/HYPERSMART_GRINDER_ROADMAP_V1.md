@@ -143,3 +143,46 @@ contenu, audit sécurité vert.
 - Marteler des micro-trades taker (frais > brut, mesuré).
 - Activer un flag sans replay (règle produit).
 - Marketing de PnL: aucun chiffre promis, jamais.
+
+
+---
+
+## Annexe A — Couverture des idées GitHub (audit 2026-07-07, rien d'oublié)
+
+| Source | Meilleure idée | Où / tâche | Statut |
+|---|---|---|---|
+| 17 whale-mirror | consensus + sizing proportionnel | `whale_consensus_sizing` (livré) + T16 | PORTÉ (flag) |
+| 17 whale-mirror | scoring wallet récence/winrate | T20 + T33 | PLANIFIÉ |
+| 15/16 solana copy | budget latence, session logs | T19 | PLANIFIÉ |
+| terauss copy | hot path multi-traders, dedupe, conflits | conflict_resolver (existant) | FAIT |
+| 21 tony v4 | exits SL/TP/trailing/max-hold + risk flags | T32 | PLANIFIÉ (replay-gated) |
+| 22 freqtrade | dry-run, walk-forward, hyperopt, anti-lookahead | T29 | PLANIFIÉ |
+| 22 freqtrade | trailing_stop_positive 0.5% | T32 | PLANIFIÉ |
+| 23 octobot / 35 passivbot | optimiseur évolutionnaire de configs | T29 | PLANIFIÉ |
+| 35 passivbot | grid contrarian cappé (sans martingale) | T23 | PLANIFIÉ |
+| 28/29 jackhuang | scanner spread cross-venue + alertes | T21 | PLANIFIÉ |
+| 30 rustjesty | basis/funding dual-leg, atomicité, min_profit_usd | T35 (+ moteur livré) | PARTIEL |
+| 32 gajesh funding | seuils entrée/sortie, anti-spike 2σ | `funding_arb_paper` (livré) + T15 | PORTÉ (flag) |
+| 32 gajesh funding | payment tracking réel + drift detection | T30 | PLANIFIÉ |
+| 32 gajesh funding | crash recovery (persistance état) | T24 | PLANIFIÉ |
+| 33 hummingbot | abstraction connecteurs, caps inventaire | connectors/risk (existant) | FAIT |
+| 33 hummingbot | PMM/XEMM market making | T23 | PLANIFIÉ |
+| 34 drakkar | cycles triangulaires + coût de chemin | T22 | PLANIFIÉ |
+| 31 arbibot | event queue faible latence, arrêt propre | realtime V16 (existant) + T35 | PARTIEL |
+| 36/37 interexchange | discrepancy cross-source | T21 | PLANIFIÉ |
+| 38 chainstacklabs | grid presets, --validate, testnet-first | doctor/T23/T28 | PARTIEL |
+| 09 mlmodelpoly | order-book imbalance 0.10 + cooldown 2s | T34 | PLANIFIÉ |
+| 11 prediction backtesting | replay sans lookahead, rapports reproductibles | closed-ledger-replay (existant) | FAIT |
+| 13 polymarket agents | IA analyste shadow-only | ml/ V13 (existant, non-autoritaire) | FAIT |
+| 14 lightweight-charts | charts ledger-first | UI (existant) | FAIT |
+| 01-10, 12, 18-19, 24-27 | runtimes Polymarket/Kalshi/Solana | hors venue | SKIP_WITH_REASON |
+| CODEX_GOAL item 2-3 | régime marché + volume z-score dans edge | T31 | PLANIFIÉ |
+| CODEX_GOAL item 4 | winrate leader par coin | T33 | PLANIFIÉ |
+| CODEX_GOAL item 5 | sizing par paliers de confiance | whale sizing (livré) | PORTÉ (flag) |
+| CODEX_GOAL item 6 | gros trades WS >$50k comme boost | T34 | PLANIFIÉ |
+| Web/X 2026 | HIP-4 binaires (hedge même marge) | T37 | EXPLORATION |
+| Souci Flo anti-blocage | coût des refus chiffré | T36 | PLANIFIÉ |
+
+Toute idée non listée ici = SKIP volontaire (venue incompatible ou doublon),
+consigné dans `docs/research/GITHUB_IDEAS_TO_MODULES.md` et
+`GITHUB_PORTAGE_DECISIONS.md`.
