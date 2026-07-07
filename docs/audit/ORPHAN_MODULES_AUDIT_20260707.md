@@ -257,3 +257,7 @@ Règle: aucun module supprimé. WIRE_NOW = brancher maintenant ; TEST_THEN_WIRE 
 ## Vague A8 couverte 2026-07-07 (contrats figés)
 
 5 orphelins risque/copy couverts par test de contrat (prêts à câbler): risk.duplicate_order_guard, risk.reconciliation_guard, risk.position_sizing, clusters.crowding_detector, edge.copy_degradation. Test: tests/test_orphan_wave_a8.py. Reste ~98 en TEST_THEN_WIRE, à traiter par vagues.
+
+## Vague B2 couverte 2026-07-07
+
+5 orphelins modeles cout/execution paper couverts (prets a cabler dans le simulateur): risk.slippage_model, risk.latency_model, paper.partial_fill_model, paper.rejection_model, edge.cost_validation. Test: tests/test_orphan_wave_b2.py.
