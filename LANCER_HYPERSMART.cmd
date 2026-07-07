@@ -178,6 +178,15 @@ REM   position a 100$ (10 positions = 1000$ de marge deployable) et un levier de
 REM   L'exposition/cash restent comptes en MARGE -> les 1000$ sont toujours proteges. Aucun faux PnL:
 REM   tout est calcule au VRAI prix marche, juste dimensionne comme un vrai compte perp.
 set "HYPERSMART_MAX_POSITION_USDT=40"
+REM ===== MODE GRINDER (session P1 2026-07-07, flags ON pour collecte de donnees A/B) =====
+set "HYPERSMART_EXECUTION_STYLE=maker"
+set "HYPERSMART_MAKER_ADVERSE_SELECTION_BPS=2"
+set "HYPERSMART_FUNDING_ARB_PAPER=1"
+set "HYPERSMART_FUNDING_ARB_MAX_PAIRS=5"
+set "HYPERSMART_FUNDING_ARB_LEG_NOTIONAL_USDT=25"
+set "HYPERSMART_DISTILLED_MAX_PAPER_ENTRIES=3"
+set "HYPERSMART_WHALE_CONSENSUS_SIZING=1"
+REM ============================================================
 REM PLANCHER NOTIONAL (replay A/B 2026-07-07 sur logs frais): les micro-trades ont un net
 REM negatif (frais ~59%% du brut). Filtre causal notional>=40: train ET validation positifs
 REM (+0.11 vs -1.77 tous trades). Echantillon encore petit (13 trades) - a re-verifier.
