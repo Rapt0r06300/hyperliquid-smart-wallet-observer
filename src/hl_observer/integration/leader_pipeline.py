@@ -82,3 +82,32 @@ def decide_position_exit(**kw) -> dict:
 
 
 __all__ = ["build_copy_shortlist", "consensus_and_coin_score", "decide_position_exit"]
+
+
+def refine_shortlist_with_quality(
+    *,
+    candidate_wallets: list[str],
+    quality_inputs: dict[str, dict],   # wallet -> {pnl_7d, pnl_30d, pnl_90d, max_drawdown_pct, profit_factor, largest_trade_pnl, total_gross_profit, behavior_kind, trade_switch_rate_per_day}
+    base_scores: dict[str, float],     # wallet -> score de découverte de base
+) -> dict:
+    """Applique la couche qualité (anti-lucky/consistance/churn) aux scores.
+
+    Flag HYPERSMART_WALLET_QUALITY_SCORING. OFF -> scores inchangés (neutre).
+    Trie les wallets par score raffiné décroissant.
+    """
+    from hl_observer.wallets.quality_score import (
+        compute_wallet_quality, quality_scoring_enabled, refine_discovery_score,
+    )
+
+    if not quality_scoring_enabled():
+        ordered = sorted(candidate_wallets, key=lambda w: -float(base_scores.get(w, 0.0)))
+        return {"applied": False, "ranked": ordered, "refined_scores": dict(base_scores)}
+
+    refined: dict[str, float] = {}
+    reasons: dict[str, list] = {}
+    for w in candidate_wallets:
+        q = compute_wallet_quality(**(quality_inputs.get(w) or {}))
+        refined[w] = refine_discovery_score(float(base_scores.get(w, 0.0)), q)
+        reasons[w] = list(q.reasons)
+    ranked = sorted(candidate_wallets, key=lambda w: -refined.get(w, 0.0))
+    return {"applied": True, "ranked": ranked, "refined_scores": refined, "reasons": reasons}
