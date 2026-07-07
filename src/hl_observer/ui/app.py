@@ -12,8 +12,9 @@ from hl_observer.storage.database import init_db
 from hl_observer.ui.event_bus import UiEventBus
 from hl_observer.ui.persistent_state import load_or_create_ui_state
 from hl_observer.ui.routes import create_router
-from hl_observer.ui.dydx_routes import create_dydx_router
 from hl_observer.ui.state import UiState
+from hl_observer.ui.status_routes import create_status_router
+from hl_observer.ui.dashboard_v2 import create_dashboard_v2_router
 
 
 SMOOTH_METAGRAPH_SCRIPT = '<script src="/static/metagraph_smooth_v2.js?v=simulation-ui-20260615-smooth-metagraph-v3"></script>'
@@ -37,11 +38,14 @@ def create_ui_app(settings: Settings | None = None, state: UiState | None = None
     init_db(settings.database_url)
     state = state or load_or_create_ui_state(settings)
     bus = UiEventBus()
-    app = FastAPI(title="HyperSmart Observer — dYdX v4 Command Center")
+    app = FastAPI(title="HyperSmart Observer - Hyperliquid Command Center")
     static_dir = Path(__file__).with_name("static")
     app.mount("/static", StaticFiles(directory=static_dir), name="static")
     app.include_router(create_router(settings, state, bus))
-    app.include_router(create_dydx_router())
+    # Fast read-only tick endpoint kept out of the huge routes.py (see status_routes).
+    app.include_router(create_status_router(state, settings=settings))
+    # Dashboard v2 (thème hacker) servi à /v2, read-only, module séparé.
+    app.include_router(create_dashboard_v2_router())
 
     @app.middleware("http")
     async def inject_smooth_metagraph(request: Request, call_next):
@@ -54,15 +58,6 @@ def create_ui_app(settings: Settings | None = None, state: UiState | None = None
                 pass
         return await call_next(request)
 
-    # Démarrer le moteur dYdX v4 en arrière-plan (paper-only)
-    try:
-        from hyper_smart_observer.dydx_v4.engine import start_engine
-        start_engine()
-    except Exception as _dydx_err:
-        import logging
-        logging.getLogger(__name__).warning(
-            'dYdX engine startup failed (non-fatal): %s', _dydx_err
-        )
     app.state.ui_settings = settings
     app.state.ui_state = state
     app.state.ui_bus = bus
