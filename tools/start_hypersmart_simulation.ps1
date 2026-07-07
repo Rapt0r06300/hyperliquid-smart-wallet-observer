@@ -8,7 +8,7 @@ param(
 
 $ErrorActionPreference = "Continue"
 $Root = Split-Path -Parent $PSScriptRoot
-$Url = "http://127.0.0.1:$Port/static/simulation_v2.html?v=ui-ledger-live-20260706a"
+$Url = "http://127.0.0.1:$Port/v2"   # 2026-07-08: nouvelle UI hacker v2 (metagraphe reel) au lieu de l ancienne
 $ApiUrl = "http://127.0.0.1:$Port/api/simulation/overview"
 $HealthUrl = "http://127.0.0.1:$Port/api/simulation/status"
 $logDir = Join-Path $Root "logs"
