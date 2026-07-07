@@ -39,3 +39,9 @@ def test_unknown_metrics_stay_neutral():
     q = compute_wallet_quality()                        # rien de connu
     assert 0.5 <= q.multiplier <= 1.0                   # neutre, jamais inventé
     assert "WINDOWS_UNKNOWN" in q.reasons
+
+
+def test_high_churn_penalized():
+    q = compute_wallet_quality(pnl_7d=100, pnl_30d=300, pnl_90d=900, max_drawdown_pct=10,
+                               profit_factor=2.0, behavior_kind="SWING", trade_switch_rate_per_day=80)
+    assert "HIGH_TRADE_CHURN" in q.reasons

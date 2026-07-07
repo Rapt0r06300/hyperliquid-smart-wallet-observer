@@ -53,6 +53,7 @@ def compute_wallet_quality(
     largest_trade_pnl: float | None = None,
     total_gross_profit: float | None = None,
     behavior_kind: str | None = None,
+    trade_switch_rate_per_day: float | None = None,
 ) -> WalletQuality:
     reasons: list[str] = []
 
@@ -110,8 +111,15 @@ def compute_wallet_quality(
     else:
         behavior_factor = 1.0
 
+    # 6) Churn (X/ApexLiquid): un wallet qui change TROP souvent de trade = haut risque,
+    #    non copiable proprement (latence). > ~40 switches/jour = scalping/bruit.
+    churn_factor = 1.0
+    if trade_switch_rate_per_day is not None and trade_switch_rate_per_day > 40:
+        churn_factor = 0.6
+        reasons.append("HIGH_TRADE_CHURN")
+
     base = 0.42 * consistency_score + 0.28 * pf_score + 0.30 * drawdown_score  # 0..1
-    multiplier = _clamp((0.6 + 0.65 * base) * concentration_penalty * behavior_factor, 0.2, 1.25)
+    multiplier = _clamp((0.6 + 0.65 * base) * concentration_penalty * behavior_factor * churn_factor, 0.2, 1.25)
     return WalletQuality(
         multiplier=round(multiplier, 4),
         consistency_score=round(consistency_score, 4),

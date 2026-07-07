@@ -138,3 +138,27 @@ X: @SharpeLabs (funding APR quotidiens), @Copin_io, @Apexliquid_bot,
 fortraders (73%), eco.com (vaults/HLP), hummingbot (funding+vaults).
 GitHub: topics hyperliquid-bot/hyperliquid-dex, MaxIsOntoSomething (copy),
 zkOSAI (copy WS), Jackhuang166 (arb Rust), chainstacklabs (grid + HIP-4).
+
+## Vague 3 — recherche X + GitHub (2026-07-08, nouveaux repos)
+
+Nouveaux repos trouvés (hors des 39 déjà clonés):
+- **cgaspart/HL-Delta** (40★, MIT): delta-neutre spot+perp le mieux conçu.
+  Idées DISTILLÉES → src/hl_observer/funding/apr_rotation.py (testé):
+  1. gate en RENDEMENT ANNUALISÉ (≥5% APR) au lieu du bps/h brut;
+  2. ROTATION d'opportunité (position switching): tourne vers la meilleure paire
+     si la courante décroît sous le seuil, avec marge anti-ping-pong;
+  3. REBALANCE sur drift delta >5% (jambes divergent) au lieu de fermer;
+  4. timing: funding HL réglé à l'heure → agir à min 50-59.
+- **jestersimpps/hyperliquid-copytrader**: WS fill detection + dashboard temps réel + multi-compte (idée UI déjà couverte).
+- **zkOSAI/hyperliquid-copy-trading-bot**: miroir sub-200ms (benchmark latence).
+- **Brobicho/HLCopy**: surveille des adresses de VAULT (→ notre T40 vaults comme leaders, confirmé).
+- **50shadesofgwei/funding-rate-arbitrage**: template delta-neutre DEX-DEX (le bot GMX de l'X thread).
+
+X confirmé:
+- ApexLiquid: copie sub-1s (benchmark), sizing proportionnel, "éviter les wallets
+  à fort drawdown ou qui CHANGENT SOUVENT de trade (churn = haut risque)" →
+  distillé en pénalité churn dans wallets/quality_score.
+- HeyAnon: funding-arb CEX↔HL vault, market-neutral sur le spread.
+- Reverse funding arb en funding négatif (long perp / short spot) — déjà géré par le signe dans notre moteur.
+
+Statut: apr_rotation.py + quality_score.py livrés, testés, flag-gated. À câbler au funding-arb après le run 48h (replay A/B).
