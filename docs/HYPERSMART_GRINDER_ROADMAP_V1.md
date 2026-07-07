@@ -237,3 +237,24 @@ en fallback pendant la transition (rien de supprimé brutalement).
 Interactions avec les autres pistes: T50 dépend de la fraîcheur réelle des
 données (PERF T44) — une UI rapide sur des données lentes = mensonge visuel;
 T53 rend le "simulation parfaitement branchée" vérifiable d'un coup d'œil.
+
+
+---
+
+## Annexe D — Échelle & données (ajoutée 2026-07-07, demande Flo)
+
+Contraintes officielles HL mesurées (docs API): **10 wallets max en WS
+user-specific par IP**, 1000 subscriptions, 10 connexions, budget REST pondéré
+(userFills = poids extra/20 items), endpoint `userRateLimit` pour lire son
+budget, bucket S3 officiel pour l'historique en masse.
+
+| # | Tâche | Idée clé |
+|---|---|---|
+| T54 | Scanner wallets à étages | 10 chauds WS + rotation REST adaptative (centaines) + découverte quotidienne; promotion par score |
+| T55 | Budget API global | token bucket + userRateLimit + backoff; zéro 429 |
+| T56 | S3 HL historique | stats PF leaders + classifieur comportement + replays longs sans marteler l'API |
+| T57 | Multi-venues publics | prix ET funding Binance/Bybit/OKX → discrepancy + différentiel funding cross-venue (vrai modèle gajesh) |
+| T58 | L2 réel + OI | top_depth mesuré par coin (fini le défaut 75k) → gates liquidité honnêtes + carte liquidations |
+| T59 | Hyperfluidité UI | deltas incrémentaux, re-render ciblé, virtualisation, 16ms/frame |
+
+Sécurité inchangée: uniquement des flux publics read-only, aucune clé.
