@@ -86,6 +86,13 @@ def apply_fusion_paper_orders_to_state(
         result=result,
     )
 
+    _record_funding_arb_events(
+        state,
+        runtime=runtime,
+        current_ms=current_ms,
+        result=result,
+    )
+
     paper_engine = fusion_status.get("paper_engine")
     if not isinstance(paper_engine, dict):
         paper_engine = runtime.get("paper_engine")
@@ -567,6 +574,87 @@ def _record_external_profile_executions(
     result["external_profiles_executed"] = executed_count
     result["external_profile_events_recorded"] = recorded_count
     result["external_profile_events_skipped"] = skipped_count
+
+
+def _record_funding_arb_events(
+    state: UiState,
+    *,
+    runtime: dict[str, Any],
+    current_ms: int,
+    result: dict[str, Any],
+) -> None:
+    """Crédite le funding-arb paper au ledger (mode grinder, brique 2).
+
+    Comptabilité sans double compte: OPEN débite les coûts d'entrée, ACCRUAL
+    crédite le funding encaissé, CLOSE débite les coûts de sortie. Le net des
+    paires = somme de ces événements, par construction.
+    """
+
+    payload = runtime.get("funding_arb")
+    if not isinstance(payload, dict) or payload.get("enabled") is not True:
+        return
+    events = payload.get("events")
+    if not isinstance(events, list):
+        return
+    recorded = 0
+    for item in events:
+        if not isinstance(item, dict):
+            continue
+        action = str(item.get("action") or "")
+        if action not in {"OPEN", "ACCRUAL", "CLOSE"}:
+            continue
+        pair_id = str(item.get("pair_id") or "")
+        coin = str(item.get("coin") or "").upper()
+        if not pair_id or not coin:
+            continue
+        delta_key = f"funding-arb:{pair_id}:{action}:{current_ms}"
+        if delta_key in state.simulation_processed_delta_keys:
+            continue
+        amount = float(item.get("amount_usdc") or 0.0)
+        if action == "ACCRUAL":
+            pnl_delta = amount
+        else:
+            pnl_delta = -abs(amount)
+        state.simulation_realized_pnl_usdc += pnl_delta
+        if action != "ACCRUAL":
+            state.simulation_exit_costs_paid_usdc += abs(amount) if action == "CLOSE" else 0.0
+            state.simulation_entry_costs_paid_usdc += abs(amount) if action == "OPEN" else 0.0
+        state.simulation_ledger_events.append(
+            {
+                "delta_key": delta_key,
+                "wallet_address": "funding_arb_paper",
+                "coin": coin,
+                "leader_action": f"FUNDING_ARB_{action}",
+                "leader_side": "NEUTRAL",
+                "leader_price": None,
+                "leader_notional_usdc": float(item.get("amount_usdc") or 0.0),
+                "observed_at_ms": current_ms,
+                "bot_replay_action": f"FUNDING_ARB_PAPER_{action}",
+                "paper_action_type": "FUNDING_ARB_" + action,
+                "status": "LOCAL_REPLAY",
+                "estimated_net_pnl_usdc": round(pnl_delta, 8),
+                "gross_pnl_usdc": round(pnl_delta, 8) if action == "ACCRUAL" else None,
+                "fee_cost_usdc": abs(amount) if action in {"OPEN", "CLOSE"} else 0.0,
+                "copied_notional_usdt": 0.0,
+                "bot_position_size_after": None,
+                "reason": str(item.get("reason") or action),
+                "rate_bps_per_hour": item.get("rate_bps_per_hour"),
+                "pair_id": pair_id,
+                "position_mode": "FUNDING_ARB_DELTA_NEUTRAL_PAPER",
+                "paper_mode": "PAPER_LOCAL_USDT_ONLY",
+                "research_only": True,
+                "simulation_only": True,
+                "read_only": True,
+                "external_action": False,
+                "real_execution": False,
+                "execution": "forbidden",
+                "venue_endpoint": None,
+                "secret_material_used": False,
+            }
+        )
+        state.simulation_processed_delta_keys.add(delta_key)
+        recorded += 1
+    result["funding_arb_events_recorded"] = recorded
 
 
 def _record_direct_order_refusal(

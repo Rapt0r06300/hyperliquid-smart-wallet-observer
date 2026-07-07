@@ -180,7 +180,7 @@ class PaperEngine:
             notional_usdc=notional,
             mid_price=market_price,
             top_depth_usdc=top_depth_usdt or self.config.default_top_depth_usdt,
-            is_maker=False,
+            is_maker=_maker_execution_style_enabled(),
             config=self.config.exec_model,
         )
         quantity = notional / exec_result.fill_price
@@ -468,3 +468,16 @@ __all__ = [
     "PaperPosition",
     "PaperTrade",
 ]
+
+def _maker_execution_style_enabled() -> bool:
+    """Mode grinder: fills passifs maker (recherche X/web 2026-07-07).
+
+    Les bots multi-mini-positions ne survivent aux frais que parce qu'ils
+    paient maker (~1.5 bps, rebates possibles) au lieu de taker (4.5 bps +
+    spread + slippage). Défaut OFF: activation via replay A/B uniquement.
+    """
+
+    import os
+
+    return str(os.environ.get("HYPERSMART_EXECUTION_STYLE", "taker")).strip().lower() == "maker"
+
