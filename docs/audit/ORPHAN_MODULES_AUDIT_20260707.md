@@ -253,3 +253,7 @@ Règle: aucun module supprimé. WIRE_NOW = brancher maintenant ; TEST_THEN_WIRE 
 | `hl_observer.wallets.top_wallet_export` | TEST_THEN_WIRE | brique copy/scan; à câbler dans le scanner à étages (livré cette session) |
 | `hl_observer.wallets.toxicity` | TEST_THEN_WIRE | brique copy/scan; à câbler dans le scanner à étages (livré cette session) |
 | `hl_observer.simulation.refusal_breakdown` | WIRE_NOW | outil prêt, à brancher au runtime/dashboard |
+
+## Vague A8 couverte 2026-07-07 (contrats figés)
+
+5 orphelins risque/copy couverts par test de contrat (prêts à câbler): risk.duplicate_order_guard, risk.reconciliation_guard, risk.position_sizing, clusters.crowding_detector, edge.copy_degradation. Test: tests/test_orphan_wave_a8.py. Reste ~98 en TEST_THEN_WIRE, à traiter par vagues.
