@@ -186,3 +186,25 @@ contenu, audit sécurité vert.
 Toute idée non listée ici = SKIP volontaire (venue incompatible ou doublon),
 consigné dans `docs/research/GITHUB_IDEAS_TO_MODULES.md` et
 `GITHUB_PORTAGE_DECISIONS.md`.
+
+
+---
+
+## Annexe B — Piste PERFORMANCE (ajoutée 2026-07-07, demande Flo)
+
+Lien direct avec le PnL: la cause n°1 documentée des bots perdants est
+l'exécution (latence/slippage), pas le signal. Chez nous, un signal trop vieux
+est REFUSÉ (SIGNAL_TOO_OLD) — donc chaque ms gagnée convertit des refus en
+trades frais acceptés. La concurrence copie en <200 ms (WS).
+
+| # | Tâche | Règle |
+|---|---|---|
+| T43 | Instrumentation latence bout-en-bout (p50/p95/p99, par étage) | MESURER d'abord — aucune optimisation à l'aveugle |
+| T44 | Chemin chaud 100% WS, REST=backfill; fenêtre 4s post-relance à resserrer | zéro appel bloquant dans le tick |
+| T45 | Profilage py-spy + hotspots (orjson/msgspec, caches incrémentaux) | optimiser uniquement ce que T43 prouve lent |
+| T46 | I/O disque hors du tick (queue), SQLite WAL + batch | le disque n'a rien à faire dans une décision |
+| T47 | Budget latence par étage + alertes, couplé aux gates d'âge signal | l'effet PnL se vérifie au replay, pas au chrono seul |
+
+Objectifs chiffrés initiaux (paper): détection fill leader < 1 s,
+décision < 100 ms, écriture ledger hors chemin critique. Hors périmètre:
+colocation/node dédié (utile seulement au stade testnet/réel).
