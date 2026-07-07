@@ -208,3 +208,32 @@ trades frais acceptés. La concurrence copie en <200 ms (WS).
 Objectifs chiffrés initiaux (paper): détection fill leader < 1 s,
 décision < 100 ms, écriture ledger hors chemin critique. Hors périmètre:
 colocation/node dédié (utile seulement au stade testnet/réel).
+
+
+---
+
+## Annexe C — Refonte UI "hacker dashboard" (ajoutée 2026-07-07, demande Flo)
+
+Objectif: une UI magnifique, simple, compréhensible — thème hacker (dark
+terminal, monospace, néon) — SANS jamais sacrifier la vérité des données.
+Règle d'or: chaque pixel vient du ledger canonique; un chiffre UI qui diverge
+de l'audit est un bug bloquant.
+
+| # | Tâche | Point clé |
+|---|---|---|
+| T48 | Maquette design system hacker | validation Flo AVANT de coder |
+| T49 | Dashboard v2 en module séparé | interdit de toucher routes.py (gros fichier) |
+| T50 | Temps réel fluide + badges fraîcheur/source | vert <5s / orange <30s / rouge; anti-saut |
+| T51 | Câblage vérité UI = ledger = audit | tests de convergence + read-only strict |
+| T52 | Panneaux SNIPER / GRINDER / funding-arb | metagraphe global en tête (absorbe T26) |
+| T53 | Vue "branchements" (wiring map live) | chaque maillon source→ledger visible vert/rouge |
+
+Contenu de l'écran principal: metagraphe (equity curve anti-saut), PnL net
+session + realized/unrealized, positions ouvertes (mode, coin, âge, PnL),
+20 derniers événements ledger, refus par raison (top 5), santé/fraîcheur des
+sources, latences par étage (lien PERF T43). L'ancienne UI reste accessible
+en fallback pendant la transition (rien de supprimé brutalement).
+
+Interactions avec les autres pistes: T50 dépend de la fraîcheur réelle des
+données (PERF T44) — une UI rapide sur des données lentes = mensonge visuel;
+T53 rend le "simulation parfaitement branchée" vérifiable d'un coup d'œil.
