@@ -77,3 +77,52 @@ def build_grid_plan(*, mid_price: float, side: str = "LONG") -> dict:
 
 
 __all__ = ["detect_grinder_opportunities", "confirm_entry", "build_grid_plan"]
+
+
+# --- Anti adverse-selection (microprice + toxicité) : tracker process-local ---
+_TOX = None
+
+
+def _toxicity_tracker():
+    global _TOX
+    if _TOX is None:
+        from hl_observer.signals.microprice_toxicity import ToxicityTracker
+        _TOX = ToxicityTracker(alpha=0.2)
+    return _TOX
+
+
+def record_fill_markout(coin: str, side: str, entry_price: float, mark_after: float) -> float:
+    """Après un fill: mesure le markout et met à jour la toxicité du coin. Retourne la toxicité."""
+    from hl_observer.signals.microprice_toxicity import markout_bps
+    mo = markout_bps(side, entry_price, mark_after)
+    return _toxicity_tracker().record_markout(coin, mo)
+
+
+def microstructure_entry_gate(
+    *, coin: str, side: str, intended_price: float,
+    bid: float, ask: float, bid_size: float, ask_size: float,
+    base_min_edge_bps: float, volatility_bps: float = 0.0,
+    max_micro_gap_bps: float = 8.0,
+) -> dict:
+    """Gate anti adverse-selection avant une entrée (flag HYPERSMART_MICROSTRUCTURE_GATE).
+
+    OFF → passe tout (neutre). ON → refuse si le microprice est déjà défavorable, et
+    relève l'edge minimum requis selon vol + toxicité mesurée du coin.
+    """
+    if not _on("HYPERSMART_MICROSTRUCTURE_GATE"):
+        return {"allowed": True, "applied": False, "min_edge_required_bps": base_min_edge_bps, "reason": "GATE_OFF"}
+    from hl_observer.signals.microprice_toxicity import (
+        entry_price_refusal, microprice, toxicity_adjusted_min_edge_bps,
+    )
+    mp = microprice(bid, ask, bid_size, ask_size)
+    refusal = entry_price_refusal(side=side, intended_price=intended_price, micro_price=mp, max_micro_gap_bps=max_micro_gap_bps)
+    tox = _toxicity_tracker().toxicity(coin)
+    min_edge = toxicity_adjusted_min_edge_bps(base_min_edge_bps, volatility_bps=volatility_bps, toxicity_bps=tox)
+    return {
+        "allowed": refusal == "",
+        "applied": True,
+        "microprice": mp,
+        "toxicity_bps": tox,
+        "min_edge_required_bps": min_edge,
+        "reason": refusal or "MICROSTRUCTURE_OK",
+    }
