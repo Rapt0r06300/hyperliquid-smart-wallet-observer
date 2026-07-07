@@ -18,6 +18,11 @@ from hl_observer.collection.collector import (
     run_collection_once,
     validate_wallet_address,
 )
+from hl_observer.collection.weight_budgeter import (
+    ReadOnlyBudgetRequest,
+    format_budget_plan,
+    plan_readonly_collection_budget,
+)
 from hl_observer.config.loader import load_settings
 from hl_observer.config.settings import ExecutionEnvironment, Settings
 from hl_observer.copying.leaderboard_autoselect import (
@@ -35,6 +40,7 @@ from hl_observer.copying.reports import (
 )
 from hl_observer.copying.realtime_magic_score import RealtimeCopyRiskConfig
 from hl_observer.copying.signal_detector import CopySourceMode, detect_copy_signals_from_deltas
+from hl_observer.simulation.live_filters import DEFAULT_SIMULATION_MIN_EDGE_BPS, calibrated_float_env
 from hl_observer.dashboard_truth.dashboard_truth_audit import (
     format_dashboard_truth_audit,
     run_dashboard_truth_audit,
@@ -76,7 +82,7 @@ from hl_observer.data_sources.warehouse_coverage import (
 )
 from hl_observer.local_index.index_benchmark import format_benchmark_report, run_local_scan_benchmark
 from hl_observer.local_index.query_engine import scan_wallet_index
-from hl_observer.local_index.wallet_index import WalletLocalIndex, fake_wallet
+from hl_observer.local_index.wallet_index import WalletLocalIndex, fake_wallet  # fake-data-scan: allow benchmark-only import (scan-local research command)
 from hl_observer.markets.scanner import (
     MarketDiscoveryPlan,
     MarketScanPlan,
@@ -96,6 +102,12 @@ from hl_observer.runtime.hygiene import format_runtime_hygiene_report, scan_runt
 from hl_observer.runtime.write_diagnostics import (
     check_runtime_write_readiness,
     format_runtime_write_readiness,
+)
+from hl_observer.runtime.session_logs import (
+    format_prepared_session_logs,
+    format_purged_logs,
+    prepare_fresh_simulation_logs,
+    purge_stale_top_level_logs,
 )
 from hl_observer.scanner.missed_opportunity_logger import write_missed_opportunity_reports
 from hl_observer.scanner.priority_queue import select_wallets_for_warm_scan
@@ -148,6 +160,15 @@ from hl_observer.release.prompt_coverage import (
 from hl_observer.release.quality_gates import format_quality_gates, run_quality_gates
 from hl_observer.security.mainnet_guard import assert_mainnet_execution_disabled
 from hl_observer.security.safety_audit import run_safety_audit
+from hl_observer.loops.candidate_factory import (
+    build_signal_candidates_from_observation,
+    build_signal_candidates_from_position_deltas,
+)
+from hl_observer.loops.dashboard_payload import build_loop_dashboard_payload
+from hl_observer.loops.engine import LoopEngineeringRunner, load_signal_candidates
+from hl_observer.loops.input_diagnostics import build_loop_input_diagnostics, write_loop_input_diagnostics
+from hl_observer.loops.memory import LoopMemoryStore, default_loop_memory_dir
+from hl_observer.mainnet_readonly_observer.observer import MainnetObservation, MainnetReadOnlyObserver
 from hl_observer.simulation.decision_replay_analyzer import (
     analyze_decision_logs,
     analyze_decision_logs_summary,
@@ -174,6 +195,12 @@ from hl_observer.simulation.loss_attribution import (
     build_loss_attribution_report,
     format_loss_attribution_report,
 )
+from hl_observer.analysis.negative_pnl_auditor import (
+    build_negative_pnl_audit,
+    format_negative_pnl_audit,
+    write_negative_pnl_audit,
+)
+from hl_observer.analysis.v19_repo_matrix import format_repo_fusion_matrix
 from hl_observer.simulation.readiness import (
     build_simulation_readiness_report,
     format_simulation_readiness,
@@ -182,10 +209,19 @@ from hl_observer.simulation.tuning_report import (
     build_simulation_tuning_report,
     format_simulation_tuning_report,
 )
+from hl_observer.calibration.ledger_pnl_calibration import (
+    build_ledger_pnl_calibration_report,
+    format_ledger_pnl_calibration_report,
+)
 from hl_observer.optimization.profit_optimizer import (
     format_optimization_report,
     run_strategy_tournament,
     write_optimization_reports,
+)
+from hl_observer.optimization.closed_ledger_replay import (
+    format_closed_ledger_replay_report,
+    run_closed_ledger_replay,
+    write_closed_ledger_replay_reports,
 )
 from hl_observer.storage.database import init_db as initialize_database
 from hl_observer.storage.database import create_session_factory, create_sqlite_engine
@@ -208,6 +244,8 @@ from hl_observer.storage.models import (
 from hl_observer.testnet.testnet_order_builder import build_testnet_order_intent
 from hl_observer.testnet.testnet_executor_locked import LockedTestnetExecutor
 from hl_observer.testnet.testnet_safety_gates import TestnetLocked
+from hl_observer.testnet.commands import build_testnet_status, run_testnet_command
+from hl_observer.testnet.adapters import FakeTestnetExchangeAdapter
 from hl_observer.ui.app import create_ui_app
 from hl_observer.ui.persistent_state import reset_simulation_state, simulation_state_path
 from hl_observer.utils.logging import configure_logging
@@ -242,6 +280,7 @@ from hl_observer.wallets.user_fills_live import (
     format_user_fills_live_report,
     scan_user_fills_ws,
     store_user_fills_live_result,
+    stream_user_fills_ws,
 )
 from hl_observer.wallets.snapshot_service import record_robust_snapshot
 from hl_observer.wallets.top500_bootstrap import bootstrap_top_wallets, format_top500_report
@@ -372,6 +411,24 @@ def _unique_top_wallet_rows(rows: list[TopWallet], *, limit: int, offset: int = 
     return rotated[: max(0, limit)]
 
 
+def _top_wallet_sample_limit(*, target: int, offset: int = 0, minimum: int = 8_000) -> int:
+    """Bounded over-sampling before de-duping TopWallet rows.
+
+    A real runtime DB can contain many refreshed rows for the same hot wallet.
+    Sampling only `limit * 20` rows before unique-ifying made the live
+    userFills scanner rotate through too few distinct wallets.
+    """
+
+    try:
+        configured = int(os.environ.get("HYPERSMART_TOP_WALLET_SAMPLE_LIMIT", "") or "0")
+    except (TypeError, ValueError):
+        configured = 0
+    target = max(1, int(target or 1))
+    offset = max(0, int(offset or 0))
+    raw_limit = configured if configured > 0 else max(minimum, target * 800 + offset)
+    return max(target + offset, min(raw_limit, 50_000))
+
+
 def _resolve_public_trade_scan_coins(settings: Settings, raw_coins: str, *, max_coins: int) -> list[str]:
     requested = str(raw_coins or "").strip()
     max_coins = max(1, min(int(max_coins), 200))
@@ -397,6 +454,25 @@ def _resolve_public_trade_scan_coins(settings: Settings, raw_coins: str, *, max_
     return normalize_coin_list(merged)[:max_coins]
 
 
+def _apply_leader_quality_gate(session, rows, *, limit):
+    """V9 — ne copie QUE les leaders dont la qualite REALISEE est prouvee.
+    Warmup-safe: tant qu'aucun leader n'est qualifie, ne gele pas la shortlist.
+    Pilotable par HYPERSMART_LEADER_QUALITY_GATE (defaut actif). Jamais d'exception bloquante."""
+    if not rows:
+        return rows
+    if os.environ.get("HYPERSMART_LEADER_QUALITY_GATE", "1") != "1":
+        return rows
+    try:
+        from hl_observer.scoring.leader_realized_history import wallet_round_trip_moves_from_session
+        from hl_observer.scoring.shortlist_quality_filter import filter_to_qualified
+        wallets = [w for w in (getattr(r, "wallet_address", None) for r in rows) if w]
+        moves = wallet_round_trip_moves_from_session(session, wallets)
+        kept, _qualified = filter_to_qualified(rows, moves)
+        return kept[: int(limit)] if kept else rows
+    except Exception:
+        return rows
+
+
 def _selected_top_wallet_rows(
     session,
     *,
@@ -414,25 +490,26 @@ def _selected_top_wallet_rows(
     limit = max(1, int(limit))
     offset = max(0, int(offset))
     active_cutoff = now_ms() - max(30_000, active_window_ms)
+    sample_limit = _top_wallet_sample_limit(target=limit, offset=offset)
     active_rows = (
         session.query(TopWallet)
         .filter(TopWallet.status == "selected")
         .filter(TopWallet.selected_at_ms >= active_cutoff)
         .order_by(TopWallet.selected_at_ms.desc(), TopWallet.score.desc())
-        .limit(max(100, limit * 20 + offset))
+        .limit(sample_limit)
         .all()
     )
     selected = _unique_top_wallet_rows(active_rows, limit=limit, offset=offset)
     if selected:
-        return selected
+        return _apply_leader_quality_gate(session, selected, limit=limit)
     fallback_rows = (
         session.query(TopWallet)
         .filter(TopWallet.status == "selected")
         .order_by(TopWallet.selected_at_ms.desc(), TopWallet.score.desc())
-        .limit(max(100, limit * 20 + offset))
+        .limit(sample_limit)
         .all()
     )
-    return _unique_top_wallet_rows(fallback_rows, limit=limit, offset=offset)
+    return _apply_leader_quality_gate(session, _unique_top_wallet_rows(fallback_rows, limit=limit, offset=offset), limit=limit)
 
 
 def _latest_market_mids(session) -> dict[str, float]:
@@ -600,6 +677,90 @@ def runtime_write_check(
     _settings()
     report = check_runtime_write_readiness(from_logs, stale_after_seconds=stale_after_seconds)
     typer.echo(format_runtime_write_readiness(report))
+
+
+@app.command("prepare-simulation-logs")
+def prepare_simulation_logs(
+    dry_run: bool = typer.Option(False, "--dry-run", help="Show what would be archived without moving files."),
+    purge_top_level: bool = typer.Option(
+        True,
+        "--purge-top-level/--no-purge-top-level",
+        help="Reset bloated top-level logs/ (truncate *.log, delete heavy archives). "
+        "AI intelligence (runtime/ model + training samples) is never touched.",
+    ),
+) -> None:
+    """Prepare a fresh logs/logs a envoyer evidence bundle for the current session.
+
+    Also resets the bloated top-level logs/ directory at each launch (user request),
+    while strictly preserving the AI's learned intelligence under runtime/.
+    """
+    _settings()
+    report = prepare_fresh_simulation_logs(Path(".").resolve(), dry_run=dry_run)
+    typer.echo(format_prepared_session_logs(report))
+    if purge_top_level:
+        purged = purge_stale_top_level_logs(Path(".").resolve(), dry_run=dry_run)
+        typer.echo(format_purged_logs(purged))
+
+
+@app.command("live-user-fills-stream")
+def live_user_fills_stream(
+    duration_seconds: int = typer.Option(0, "--duration-seconds", help="0 = run forever (always-on real-time engine)."),
+    max_leaders: int = typer.Option(10, "--max-leaders", min=1, max=10, help="HL userFills caps at 10 wallets; we stream the BEST 10."),
+    network_read: bool = typer.Option(False, "--network-read/--no-network-read", help="Open the public HL WebSocket (read-only)."),
+    max_reconnects: int = typer.Option(-1, "--max-reconnects", help="-1 = unlimited reconnects (always-on)."),
+) -> None:
+    """V16 — PERSISTENT real-time userFills stream on the top quality-gated leaders.
+
+    Stays connected to the FREE public Hyperliquid WebSocket and stores each FRESH fill the
+    instant it arrives (sub-second) so copy-run sees it immediately — instead of the ~10s
+    polled snapshot. Read-only / paper-only: never an order, signature, deposit or key.
+    """
+    import asyncio as _asyncio
+    import threading as _threading
+    import time as _time
+    from sqlalchemy import select as _select
+    from hl_observer.storage.models import TopWallet as _TopWallet
+
+    settings = _settings()
+    session_factory = _session_factory(settings)
+    with session_factory() as session:
+        rows = session.scalars(_select(_TopWallet).order_by(_TopWallet.score.desc()).limit(50)).all()
+        try:
+            rows = _apply_leader_quality_gate(session, rows, limit=max_leaders)
+        except Exception:
+            pass
+        wallets = [r.wallet_address for r in rows[: max_leaders] if getattr(r, "wallet_address", None)]
+    if not wallets:
+        typer.echo("live_user_fills_stream=no_leaders_available")
+        return
+    stop = _threading.Event()
+    deadline = None if duration_seconds <= 0 else (_time.time() + float(duration_seconds))
+
+    async def _runner():
+        async def _watch():
+            while not stop.is_set():
+                if deadline is not None and _time.time() >= deadline:
+                    stop.set()
+                    return
+                await _asyncio.sleep(1.0)
+        watcher = _asyncio.ensure_future(_watch())
+        try:
+            return await stream_user_fills_ws(
+                settings, wallets=wallets, session_factory=session_factory,
+                max_users=max_leaders, network_read=network_read, stop_event=stop,
+                max_reconnects=None if max_reconnects < 0 else max_reconnects,
+            )
+        finally:
+            watcher.cancel()
+
+    stats = _asyncio.run(_runner())
+    typer.echo(
+        f"live_user_fills_stream wallets={len(wallets)} connects={stats.connects} "
+        f"reconnects={stats.reconnects} fresh_fills_stored={stats.fresh_fills_stored} "
+        f"deltas_stored={stats.deltas_stored} last_fill_age_ms={stats.last_fill_age_ms} "
+        f"stopped={stats.stopped_reason}"
+    )
+    typer.echo("mode: read-only persistent userFills stream; no exchange, no signature, no order")
 
 
 @app.command("simulation-readiness")
@@ -810,7 +971,7 @@ def scan_local(
     """Run a local-only scan over a generated wallet index."""
     index = WalletLocalIndex()
     for i in range(max(0, limit)):
-        index.upsert(fake_wallet(i + 1))
+        index.upsert(fake_wallet(i + 1))  # fake-data-scan: allow benchmark fixture (research_only_no_network)
     summary = scan_wallet_index(index, limit=limit)
     typer.echo("scan_local=research_only_no_network")
     typer.echo(f"wallets_scanned={summary.wallets_scanned}")
@@ -847,7 +1008,51 @@ def throughput_plan_command(
         )
     )
     typer.echo(format_throughput_plan(plan))
-    if bypass_requested or aggressive_scraping_requested:
+    if plan.refusal_reasons:
+        raise typer.Exit(2)
+
+
+@app.command("collection-budget-plan")
+def collection_budget_plan_command(
+    network_read: bool = typer.Option(False, "--network-read", help="Authorize official read-only Hyperliquid data planning."),
+    all_mids_calls: int = typer.Option(1, "--all-mids-calls", min=0),
+    light_info_calls: int = typer.Option(0, "--light-info-calls", min=0),
+    default_info_calls: int = typer.Option(0, "--default-info-calls", min=0),
+    explorer_calls: int = typer.Option(0, "--explorer-calls", min=0),
+    time_range_items: int = typer.Option(0, "--time-range-items", min=0, help="Expected userFillsByTime / time-range returned items."),
+    ws_connections: int = typer.Option(1, "--ws-connections", min=0),
+    ws_new_connections_per_minute: int = typer.Option(1, "--ws-new-connections-per-minute", min=0),
+    ws_subscriptions: int = typer.Option(0, "--ws-subscriptions", min=0),
+    ws_unique_users: int = typer.Option(0, "--ws-unique-users", min=0),
+    ws_messages_per_minute: int = typer.Option(0, "--ws-messages-per-minute", min=0),
+    egress_count: int = typer.Option(1, "--egress-count", min=1, help="Controlled egress shards; never a bypass/proxy evasion switch."),
+    target_utilization: float = typer.Option(0.70, "--target-utilization", min=0.10, max=0.90),
+    bypass_requested: bool = typer.Option(False, "--bypass-requested", help="Test guard: refused."),
+    aggressive_scraping_requested: bool = typer.Option(False, "--aggressive-scraping-requested", help="Test guard: refused."),
+) -> None:
+    """Audit one Hyperliquid read-only collection budget before scanning."""
+    _settings()
+    plan = plan_readonly_collection_budget(
+        ReadOnlyBudgetRequest(
+            network_read_enabled=network_read,
+            all_mids_calls=all_mids_calls,
+            light_info_calls=light_info_calls,
+            default_info_calls=default_info_calls,
+            explorer_calls=explorer_calls,
+            time_range_items_expected=time_range_items,
+            ws_connections=ws_connections,
+            ws_new_connections_per_minute=ws_new_connections_per_minute,
+            ws_subscriptions=ws_subscriptions,
+            ws_unique_users=ws_unique_users,
+            ws_messages_per_minute=ws_messages_per_minute,
+            egress_count=egress_count,
+            target_utilization=target_utilization,
+            bypass_requested=bypass_requested,
+            aggressive_scraping_requested=aggressive_scraping_requested,
+        )
+    )
+    typer.echo(format_budget_plan(plan))
+    if plan.refusal_reasons:
         raise typer.Exit(2)
 
 
@@ -896,7 +1101,7 @@ def fresh_scan_plan(
         )
     )
     typer.echo(format_fresh_scan_strategy(plan))
-    if bypass_requested or aggressive_scraping_requested:
+    if plan.refusal_reasons:
         raise typer.Exit(2)
 
 
@@ -936,6 +1141,29 @@ def fresh_data_plan_command(
         )
     )
     typer.echo(format_fresh_data_plan(plan))
+    budget_plan = plan_readonly_collection_budget(
+        ReadOnlyBudgetRequest(
+            network_read_enabled=network_read,
+            all_mids_calls=sum(1 for item in plan.selected_requests if item.request_type == "allMids"),
+            light_info_calls=sum(
+                1
+                for item in plan.selected_requests
+                if item.endpoint == "/info" and item.request_type != "allMids" and item.weight <= 2
+            ),
+            default_info_calls=sum(
+                1
+                for item in plan.selected_requests
+                if item.endpoint == "/info" and item.weight > 2
+            ),
+            ws_connections=1 if plan.public_streams or plan.hot_user_streams else 0,
+            ws_new_connections_per_minute=1 if plan.public_streams or plan.hot_user_streams else 0,
+            ws_subscriptions=plan.public_streams + plan.hot_user_streams,
+            ws_unique_users=plan.hot_user_streams,
+            ws_messages_per_minute=0,
+        )
+    )
+    typer.echo("")
+    typer.echo(format_budget_plan(budget_plan))
 
 
 @app.command("consensus-leader-report")
@@ -1071,7 +1299,19 @@ def opportunity_report(
             .all()
         )
         mids = _latest_market_mids(session)
-    simulation_min_edge_bps = float(os.environ.get("HYPERSMART_SIMULATION_MIN_EDGE_BPS", settings.risk.min_edge_required_bps))
+    simulation_min_edge_bps = calibrated_float_env(
+        "HYPERSMART_SIMULATION_MIN_EDGE_BPS",
+        DEFAULT_SIMULATION_MIN_EDGE_BPS,
+    )
+    max_signal_age_ms = int(
+        max(
+            1_000,
+            min(
+                60_000,
+                calibrated_float_env("HYPERSMART_SIMULATION_MAX_SIGNAL_AGE_MS", 15_000.0),
+            ),
+        )
+    )
     report = find_fresh_opportunities(
         deltas,
         leaders,
@@ -1083,7 +1323,7 @@ def opportunity_report(
         max_opportunities=max_opportunities,
         risk_config=RealtimeCopyRiskConfig(
             min_edge_required_bps=max(1.0, simulation_min_edge_bps),
-            max_signal_age_ms=active_window_seconds * 1_000,
+            max_signal_age_ms=max_signal_age_ms,
             starting_equity_usdt=1000.0,
         ),
     )
@@ -1173,6 +1413,15 @@ def logs_analyze(
     """Stream all simulation decision logs and report PnL/root metrics."""
     _settings()
     typer.echo(format_logs_analysis(analyze_logs_streaming(from_logs)))
+
+
+@app.command("ledger-pnl-calibration")
+def ledger_pnl_calibration(
+    from_logs: Path = typer.Option(default_logs_to_send_dir(), "--from-logs", help="Folder containing logs to send."),
+) -> None:
+    """Propose replay-only calibration flags from canonical paper PnL logs."""
+    _settings()
+    typer.echo(format_ledger_pnl_calibration_report(build_ledger_pnl_calibration_report(from_logs)))
 
 
 @app.command("root-cause-from-logs")
@@ -1274,6 +1523,239 @@ def timing_distribution_diagnostics(
     typer.echo(format_diagnostic_report(build_timing_distribution_diagnostics(from_logs)))
 
 
+@app.command("v19-pnl-audit")
+def v19_pnl_audit(
+    from_logs: Path = typer.Option(default_logs_to_send_dir(), "--from-logs", help="Folder containing logs to send."),
+    output_dir: Path = typer.Option(Path("data/reports"), "--output-dir", help="Runtime report output directory."),
+) -> None:
+    """Consolidate V19 negative-PnL diagnostics and anti-loss gates."""
+    _settings()
+    audit = build_negative_pnl_audit(from_logs)
+    try:
+        json_path, md_path = write_negative_pnl_audit(audit, output_dir)
+        typer.echo(f"v19_pnl_audit_json={json_path}")
+        typer.echo(f"v19_pnl_audit_md={md_path}")
+    except OSError as exc:
+        typer.echo(
+            f"v19_pnl_audit_write=unavailable path={output_dir} reason={exc.__class__.__name__}: {exc}",
+            err=True,
+        )
+    typer.echo(format_negative_pnl_audit(audit))
+
+
+@app.command("pnl-audit")
+def pnl_audit_alias(
+    from_logs: Path = typer.Option(default_logs_to_send_dir(), "--from-logs", help="Folder containing logs to send."),
+    output_dir: Path = typer.Option(Path("data/reports"), "--output-dir", help="Runtime report output directory."),
+) -> None:
+    """Alias stable: audit PnL complet decisions + snapshot + export state."""
+    _settings()
+    audit = build_negative_pnl_audit(from_logs)
+    json_path, md_path = write_negative_pnl_audit(audit, output_dir)
+    typer.echo(f"pnl_audit_json={json_path}")
+    typer.echo(f"pnl_audit_md={md_path}")
+    typer.echo(format_negative_pnl_audit(audit))
+
+
+@app.command("loss-attribution")
+def loss_attribution_command(
+    from_logs: Path = typer.Option(default_logs_to_send_dir(), "--from-logs", help="Folder containing logs to send."),
+) -> None:
+    """Attribue les pertes paper par couts, PnL, raisons et causes racines."""
+    _settings()
+    typer.echo(format_loss_attribution_report(build_loss_attribution_report(from_logs)))
+
+
+@app.command("wallet-breakdown")
+def wallet_breakdown_command(
+    from_logs: Path = typer.Option(default_logs_to_send_dir(), "--from-logs", help="Folder containing logs to send."),
+) -> None:
+    """Classe les wallets par contribution PnL dans les logs de simulation."""
+    _settings()
+    typer.echo(format_diagnostic_report(build_wallet_loss_diagnostics(from_logs)))
+
+
+@app.command("coin-breakdown")
+def coin_breakdown_command(
+    from_logs: Path = typer.Option(default_logs_to_send_dir(), "--from-logs", help="Folder containing logs to send."),
+) -> None:
+    """Classe les coins par contribution PnL dans les logs de simulation."""
+    _settings()
+    typer.echo(format_diagnostic_report(build_coin_loss_diagnostics(from_logs)))
+
+
+@app.command("strategy-breakdown")
+def strategy_breakdown_command(
+    from_logs: Path = typer.Option(default_logs_to_send_dir(), "--from-logs", help="Folder containing logs to send."),
+) -> None:
+    """Analyse les familles d'actions/strategies paper qui gagnent ou perdent."""
+    _settings()
+    typer.echo(format_diagnostic_report(build_action_loss_diagnostics(from_logs)))
+    typer.echo("")
+    typer.echo(format_optimization_report(run_strategy_tournament(from_logs)))
+
+
+@app.command("strategy-quarantine-report")
+def strategy_quarantine_report_command(
+    from_logs: Path = typer.Option(default_logs_to_send_dir(), "--from-logs", help="Folder containing logs to send."),
+) -> None:
+    """Liste les coins/wallets/actions a mettre en quarantaine paper stricte."""
+    _settings()
+    audit = build_negative_pnl_audit(from_logs)
+    payload = {
+        "paper_only": True,
+        "real_execution": False,
+        "pnl_truth_mode": audit.pnl_truth_mode,
+        "net_pnl_usdc": audit.net_pnl_usdc,
+        "risk_blocking_codes": list(audit.risk_decision.blocking_codes),
+        "losing_coins": [{"key": item.key, "pnl_usdc": item.pnl_usdc} for item in audit.losing_coins[:10]],
+        "losing_wallets": [{"key": item.key, "pnl_usdc": item.pnl_usdc} for item in audit.losing_wallets[:10]],
+        "losing_actions": [{"key": item.key, "pnl_usdc": item.pnl_usdc} for item in audit.losing_actions[:10]],
+        "recommendations": list(audit.recommendations),
+    }
+    typer.echo(json.dumps(payload, indent=2, ensure_ascii=False))
+
+
+@app.command("arbitrage-scan")
+def arbitrage_scan_command(
+    dry_run: bool = typer.Option(True, "--dry-run/--no-dry-run", help="Required: paper-only dry-run."),
+) -> None:
+    """Construit une opportunite arbitrage paper locale depuis fixtures explicitement marquees."""
+    _settings()
+    if not dry_run:
+        typer.echo("arbitrage-scan refused: only --dry-run paper simulation is supported.")
+        raise typer.Exit(1)
+    from hl_observer.arbitrage import OrderBookSnapshot, scan_hyperliquid_cex_spread
+
+    result = scan_hyperliquid_cex_spread(
+        hyperliquid_book=OrderBookSnapshot("fixture:hyperliquid", "HYPE-PERP", 99.9, 100.0, 200_000, 200_000),
+        cex_book=OrderBookSnapshot("fixture:cex", "HYPE-USDT", 101.4, 101.6, 200_000, 200_000),
+        fee_bps=6,
+        slippage_bps=4,
+        latency_penalty_bps=2,
+        funding_rate=0,
+    )
+    typer.echo(json.dumps(result.as_dict(), indent=2, ensure_ascii=False))
+
+
+@app.command("funding-scan")
+def funding_scan_command(
+    dry_run: bool = typer.Option(True, "--dry-run/--no-dry-run", help="Required: paper-only dry-run."),
+) -> None:
+    """Analyse un signal funding paper local; aucune action externe."""
+    _settings()
+    if not dry_run:
+        typer.echo("funding-scan refused: only --dry-run paper simulation is supported.")
+        raise typer.Exit(1)
+    from hl_observer.funding.funding_rate_scanner import scan_funding_rates
+
+    rows = scan_funding_rates([{"coin": "HYPE", "rates": [0.0, 0.0, 0.0, 0.0, 0.001]}], sigma=2.0)
+    typer.echo(
+        json.dumps(
+            [{"coin": row.coin, "decision": row.decision, "z_score": row.z_score, "reason": row.reason} for row in rows],
+            indent=2,
+            ensure_ascii=False,
+        )
+    )
+
+
+@app.command("backtest-wallet-copy")
+def backtest_wallet_copy_command(
+    delay: int = typer.Option(60, "--delay", help="Simulated copy delay in seconds."),
+) -> None:
+    """Backtest minimal paper d'un suivi wallet sans lookahead ni ordre reel."""
+    _settings()
+    from hl_observer.backtesting.wallet_following_simulator import simulate_wallet_following
+
+    result = simulate_wallet_following(
+        [
+            {
+                "event_id": f"fixture:wallet_copy:delay:{delay}",
+                "coin": "HYPE",
+                "side": "LONG",
+                "entry_price": 100.0,
+                "exit_price": 101.2,
+                "notional_usdt": 75.0,
+                "source": "fixture:backtest-wallet-copy",
+                "delay_seconds": delay,
+            }
+        ],
+        fee_bps=4.0,
+        slippage_bps=2.0,
+    )
+    typer.echo(
+        json.dumps(
+            {
+                "paper_only": True,
+                "real_execution": False,
+                "source": "fixture:backtest-wallet-copy",
+                "delay_seconds": delay,
+                "net_pnl_usdt": result.net_pnl_usdt,
+                "equity_curve": list(result.equity_curve),
+                "trades": [
+                    {
+                        "event_id": trade.event_id,
+                        "coin": trade.coin,
+                        "side": trade.side,
+                        "entry_price": trade.entry_price,
+                        "exit_price": trade.exit_price,
+                        "notional_usdt": trade.notional_usdt,
+                        "fee_usdt": trade.fee_usdt,
+                        "net_pnl_usdt": trade.net_pnl_usdt,
+                    }
+                    for trade in result.trades
+                ],
+                "future_profit_guarantee": False,
+            },
+            indent=2,
+            ensure_ascii=False,
+        )
+    )
+
+
+@app.command("v19-repo-matrix")
+def v19_repo_matrix(
+    output_path: Path = typer.Option(
+        Path("docs/research/HYPERSMART_V19_GITHUB_FUSION_MATRIX.md"),
+        "--output-path",
+        help="Markdown matrix output path.",
+    ),
+) -> None:
+    """Write the V19 GitHub fusion matrix without executing external actions."""
+    _settings()
+    content = format_repo_fusion_matrix()
+    try:
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        output_path.write_text(content, encoding="utf-8")
+        typer.echo(f"v19_repo_matrix={output_path}")
+    except OSError as exc:
+        typer.echo(f"v19_repo_matrix_write=unavailable reason={exc.__class__.__name__}: {exc}", err=True)
+    typer.echo(content)
+
+
+@app.command("refactor-fusion-run")
+def refactor_fusion_run_command(
+    dry_run: bool = typer.Option(True, "--dry-run/--no-dry-run", help="Required: run paper-only fusion pipeline."),
+    from_logs: Path = typer.Option(default_logs_to_send_dir(), "--from-logs", help="Folder containing logs to send."),
+    output_data_dir: Path = typer.Option(Path("data/reports"), "--output-data-dir", help="Runtime JSON payload directory."),
+    output_docs_dir: Path = typer.Option(Path("docs/reports"), "--output-docs-dir", help="Markdown report directory."),
+) -> None:
+    """Run wallet-copy + arbitrage fusion E2E in local paper mode only."""
+    _settings()
+    if not dry_run:
+        typer.echo("refactor-fusion-run refused: only --dry-run paper simulation is supported.")
+        raise typer.Exit(1)
+    from hl_observer.refactor_fusion.runner import format_refactor_fusion_run, run_refactor_fusion
+
+    result = run_refactor_fusion(
+        log_dir=from_logs,
+        dry_run=True,
+        output_data_dir=output_data_dir,
+        output_docs_dir=output_docs_dir,
+    )
+    typer.echo(format_refactor_fusion_run(result))
+
+
 def _try_write_optimization_reports(report, output_dir: Path) -> None:
     try:
         write_optimization_reports(report, output_dir)
@@ -1307,6 +1789,25 @@ def optimize_profit_config(
     report = run_strategy_tournament(from_logs)
     _try_write_optimization_reports(report, output_dir)
     typer.echo(format_optimization_report(report))
+
+
+@app.command("closed-ledger-replay")
+def closed_ledger_replay(
+    from_logs: Path = typer.Option(default_logs_to_send_dir(), "--from-logs", help="Folder containing logs to send."),
+    output_dir: Path = typer.Option(Path("data/reports"), "--output-dir", help="Runtime report output directory."),
+) -> None:
+    """Replay causal filters on closed paper trades without fake positive PnL."""
+    _settings()
+    report = run_closed_ledger_replay(from_logs)
+    try:
+        write_closed_ledger_replay_reports(report, output_dir)
+    except Exception as exc:
+        typer.echo(
+            f"closed_ledger_replay_write_warning={type(exc).__name__}: {exc}",
+            err=True,
+        )
+        typer.echo("closed_ledger_replay_write_policy=analysis_printed_without_runtime_file_mutation", err=True)
+    typer.echo(format_closed_ledger_replay_report(report))
 
 
 @app.command("walk-forward-profit-validation")
@@ -2804,6 +3305,48 @@ def live_user_fills_scan_command(
         )
 
 
+@app.command("fusion-heartbeat-input")
+def fusion_heartbeat_input_command(
+    fresh_window_seconds: int = typer.Option(60, "--fresh-window-seconds", min=1, max=600),
+    max_votes: int = typer.Option(24, "--max-votes", min=1, max=100),
+    write_engine_status: bool = typer.Option(False, "--write-engine-status/--no-write-engine-status"),
+    report: bool = typer.Option(True, "--report/--no-report"),
+) -> None:
+    """Build paper-only fusion input from local deltas and marks; no network."""
+    settings = _settings()
+    from hl_observer.runtime.fusion_heartbeat_input import (
+        build_fusion_runtime_input_from_session,
+        format_fusion_heartbeat_report,
+        write_fusion_runtime_input_to_engine_status,
+    )
+    from hl_observer.ui.persistent_state import simulation_state_path
+
+    session_factory = _session_factory(settings)
+    with session_factory() as session:
+        if write_engine_status:
+            heartbeat_path = simulation_state_path(settings).parent / "hypersmart_engine_status.json"
+            result = write_fusion_runtime_input_to_engine_status(
+                session=session,
+                engine_status_path=heartbeat_path,
+                fresh_window_ms=int(fresh_window_seconds) * 1000,
+                max_votes=max_votes,
+            )
+        else:
+            result = build_fusion_runtime_input_from_session(
+                session,
+                fresh_window_ms=int(fresh_window_seconds) * 1000,
+                max_votes=max_votes,
+            )
+    if report:
+        typer.echo(format_fusion_heartbeat_report(result))
+    else:
+        typer.echo(
+            "fusion-heartbeat-input complete: "
+            f"status={result.status} votes={result.votes_count} "
+            f"price_events={result.price_events_count} reasons={','.join(result.reasons) or '-'}"
+        )
+
+
 @app.command("copy-report")
 def copy_report_command(
     period: str = typer.Option("7d", "--period", help="Report period label, e.g. 7d."),
@@ -2902,6 +3445,246 @@ def testnet_check(
     typer.echo(f"testnet gates validated: {result['cloid']}")
 
 
+@app.command("testnet-run")
+def testnet_run(
+    exchange: str = typer.Option("fake", "--exchange", help="fake or hyperliquid. Hyperliquid is ready but locked until signer transport is configured."),
+    action: str = typer.Option("open", "--action", help="open, reduce or close."),
+    coin: str = typer.Option("BTC", "--coin"),
+    side: str = typer.Option("long", "--side", help="long or short."),
+    notional_usdc: float = typer.Option(1.0, "--notional"),
+    limit_price: float = typer.Option(60000.0, "--limit-price"),
+    confirm_testnet: bool = typer.Option(False, "--confirm-testnet", help="Required for every testnet action."),
+    dry_confirmed: bool = typer.Option(False, "--dry-confirmed", help="Use local fake testnet adapter for a no-network dry proof."),
+) -> None:
+    """Run one controlled testnet action through guard -> adapter -> journal -> payload."""
+    settings = _settings()
+    try:
+        result = run_testnet_command(
+            settings,
+            adapter_name=exchange,
+            action=action,
+            coin=coin,
+            side=side,
+            notional_usdc=notional_usdc,
+            limit_price=limit_price,
+            confirm_testnet=confirm_testnet,
+            dry_confirmed=dry_confirmed,
+        )
+    except ValueError as exc:
+        typer.echo(f"testnet-run invalid input: {exc}")
+        raise typer.Exit(1) from exc
+    typer.echo(result.to_json())
+
+
+@app.command("testnet-status")
+def testnet_status(
+    exchange: str = typer.Option("fake", "--exchange"),
+    coin: str = typer.Option("BTC", "--coin"),
+    price: float = typer.Option(60000.0, "--price"),
+) -> None:
+    """Show testnet configuration and latest fake/locked adapter dashboard payload."""
+    payload = build_testnet_status(_settings(), adapter_name=exchange, coin=coin, price=price)
+    typer.echo(json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True))
+
+
+@app.command("loop-learning-report")
+def loop_learning_report(
+    memory_dir: Path | None = typer.Option(None, "--memory-dir", help="Runtime learning directory. Defaults to ./runtime/learning."),
+) -> None:
+    """Print the latest local loop-engineering report."""
+    store = LoopMemoryStore(memory_dir or default_loop_memory_dir(Path.cwd()))
+    typer.echo(store.latest_report_text())
+
+
+@app.command("loop-dashboard-payload")
+def loop_dashboard_payload(
+    memory_dir: Path | None = typer.Option(None, "--memory-dir", help="Runtime learning directory. Defaults to ./runtime/learning."),
+) -> None:
+    """Print the dashboard-ready payload for the latest loop-engineering result."""
+    payload = build_loop_dashboard_payload(memory_dir or default_loop_memory_dir(Path.cwd()))
+    typer.echo(json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True, default=str))
+
+
+@app.command("testnet-loop-dry-run")
+def testnet_loop_dry_run(
+    candidate_json: Path = typer.Option(..., "--candidate-json", exists=True, dir_okay=False, help="JSON list of SignalCandidate objects from the scanner."),
+    execute_fake_testnet: bool = typer.Option(False, "--execute-fake-testnet", help="Route accepted decisions through the fake testnet adapter only."),
+    dry_confirmed: bool = typer.Option(False, "--dry-confirmed", help="Enable local fake testnet runtime flags for this dry proof."),
+    confirm_testnet: bool = typer.Option(False, "--confirm-testnet", help="Required if --execute-fake-testnet is used."),
+    notional_usdc: float = typer.Option(1.0, "--notional", min=0.0),
+    live_observe: bool = typer.Option(False, "--live-observe", help="Also query Hyperliquid /info read-only for candidate coins."),
+) -> None:
+    """Run observer -> decision -> optional fake-testnet -> learning report for explicit candidates only."""
+    settings = _settings()
+    candidates = load_signal_candidates(candidate_json)
+    if not candidates:
+        observation = MainnetObservation(
+            source="candidate_json_empty",
+            all_mids={},
+            errors=["no candidates supplied"],
+        )
+        runner = LoopEngineeringRunner(settings=settings)
+        result = runner.run_with_observation(observation=observation, candidates=[])
+        typer.echo(json.dumps(result.to_dict(), ensure_ascii=False, indent=2, sort_keys=True, default=str))
+        return
+
+    prices = {candidate.coin: candidate.observed_price for candidate in candidates}
+    if execute_fake_testnet:
+        if not dry_confirmed:
+            typer.echo("Refusing fake-testnet execution proof without --dry-confirmed.")
+            raise typer.Exit(1)
+        runner = LoopEngineeringRunner.with_fake_testnet_executor(
+            settings,
+            adapter=FakeTestnetExchangeAdapter(prices=prices),
+            project_root=Path.cwd(),
+            confirmed=confirm_testnet,
+        )
+    else:
+        runner = LoopEngineeringRunner(settings=settings, memory=LoopMemoryStore(default_loop_memory_dir(Path.cwd())))
+
+    if live_observe:
+        result = runner.run_once_sync(
+            coins=sorted(prices.keys()),
+            candidates=candidates,
+            execute_testnet=execute_fake_testnet,
+            confirmed=confirm_testnet,
+            notional_usdc=notional_usdc,
+        )
+    else:
+        observation = MainnetObservation(
+            source="candidate_json_explicit",
+            all_mids=prices,
+            errors=["live observation not requested"],
+        )
+        result = runner.run_with_observation(
+            observation=observation,
+            candidates=candidates,
+            execute_testnet=execute_fake_testnet,
+            confirmed=confirm_testnet,
+            notional_usdc=notional_usdc,
+        )
+    typer.echo(json.dumps(result.to_dict(), ensure_ascii=False, indent=2, sort_keys=True, default=str))
+
+
+@app.command("testnet-loop-observe")
+def testnet_loop_observe(
+    network_read: bool = typer.Option(False, "--network-read", help="Required: read Hyperliquid /info public data only."),
+    wallets: str = typer.Option("AUTO", "--wallets", help="Comma-separated full wallet addresses, AUTO for local selected leaders, or empty for no wallet fills."),
+    max_wallets: int = typer.Option(3, "--max-wallets", min=0, max=10, help="Bounded selected-leader wallet count when --wallets AUTO."),
+    coins: str = typer.Option("BTC,ETH,SOL,HYPE", "--coins", help="Comma-separated coins for allMids/l2Book context."),
+    max_candidates: int = typer.Option(10, "--max-candidates", min=0, max=100),
+    include_recent_deltas: bool = typer.Option(True, "--include-recent-deltas/--no-recent-deltas", help="Also build candidates from recent local position_deltas."),
+    recent_delta_window_seconds: int = typer.Option(300, "--recent-delta-window-seconds", min=1, max=86_400, help="Freshness window for local position_deltas."),
+    execute_fake_testnet: bool = typer.Option(False, "--execute-fake-testnet", help="Route accepted decisions through fake testnet adapter only."),
+    dry_confirmed: bool = typer.Option(False, "--dry-confirmed", help="Enable local fake testnet runtime flags for this dry proof."),
+    confirm_testnet: bool = typer.Option(False, "--confirm-testnet", help="Required if --execute-fake-testnet is used."),
+    notional_usdc: float = typer.Option(1.0, "--notional", min=0.0),
+) -> None:
+    """Observe Hyperliquid read-only data, build SignalCandidate objects, then run the local loop."""
+    if not network_read:
+        typer.echo("Refusing network observation without --network-read. No data was invented.")
+        raise typer.Exit(2)
+    settings = _settings()
+    wallet_list: list[str]
+    if wallets.strip().upper() == "AUTO":
+        wallet_list = []
+        if max_wallets > 0:
+            session_factory = _session_factory(settings)
+            with session_factory() as session:
+                wallet_list = [row.wallet_address for row in _selected_top_wallet_rows(session, limit=max_wallets)]
+    else:
+        wallet_list = [item.strip() for item in wallets.split(",") if item.strip()]
+    coin_list = [item.strip().upper() for item in coins.split(",") if item.strip()]
+    observation = asyncio.run(
+        MainnetReadOnlyObserver().observe(
+            coins=coin_list or None,
+            wallets=wallet_list,
+            include_l2=True,
+            include_wallet_fills=bool(wallet_list),
+        )
+    )
+    factory_report = build_signal_candidates_from_observation(
+        observation,
+        max_candidates=max_candidates,
+    )
+    candidates = list(factory_report.candidates)
+    delta_report = None
+    delta_source_error = None
+    remaining_candidates = max(0, max_candidates - len(candidates))
+    if include_recent_deltas and remaining_candidates > 0:
+        try:
+            session_factory = _session_factory(settings)
+            delta_cutoff_ms = now_ms() - recent_delta_window_seconds * 1_000
+            with session_factory() as session:
+                delta_query = (
+                    session.query(PositionDeltaModel)
+                    .filter(PositionDeltaModel.detected_at_ms >= delta_cutoff_ms)
+                    .order_by(PositionDeltaModel.detected_at_ms.desc())
+                )
+                if wallet_list:
+                    delta_query = delta_query.filter(PositionDeltaModel.wallet_address.in_(wallet_list))
+                if coin_list:
+                    delta_query = delta_query.filter(PositionDeltaModel.coin.in_(coin_list))
+                recent_deltas = delta_query.limit(max(remaining_candidates * 4, 20)).all()
+            delta_report = build_signal_candidates_from_position_deltas(
+                recent_deltas,
+                all_mids=observation.all_mids,
+                l2_books=observation.l2_books,
+                source="local_position_deltas_recent",
+                observed_at_ms=observation.observed_at_ms,
+                max_candidates=remaining_candidates,
+            )
+            candidates.extend(delta_report.candidates)
+        except Exception as exc:  # noqa: BLE001 - CLI must degrade honestly; no invented candidates.
+            delta_source_error = f"position_delta_candidate_source_failed:{exc}"
+    input_diagnostics = build_loop_input_diagnostics(
+        observation=observation,
+        fill_report=factory_report,
+        delta_report=delta_report,
+        delta_source_error=delta_source_error,
+        requested_wallets=wallet_list,
+        requested_coins=coin_list,
+        recent_delta_window_seconds=recent_delta_window_seconds if include_recent_deltas else None,
+    )
+    write_loop_input_diagnostics(input_diagnostics, project_root=Path.cwd())
+    prices = {candidate.coin: candidate.observed_price for candidate in candidates}
+    if execute_fake_testnet:
+        if not dry_confirmed:
+            typer.echo("Refusing fake-testnet execution proof without --dry-confirmed.")
+            raise typer.Exit(1)
+        runner = LoopEngineeringRunner.with_fake_testnet_executor(
+            settings,
+            adapter=FakeTestnetExchangeAdapter(prices=prices),
+            project_root=Path.cwd(),
+            confirmed=confirm_testnet,
+        )
+    else:
+        runner = LoopEngineeringRunner(settings=settings, memory=LoopMemoryStore(default_loop_memory_dir(Path.cwd())))
+    result = runner.run_with_observation(
+        observation=observation,
+        candidates=candidates,
+        execute_testnet=execute_fake_testnet,
+        confirmed=confirm_testnet,
+        notional_usdc=notional_usdc,
+    )
+    typer.echo(
+        json.dumps(
+            {
+                "candidate_factory": factory_report.to_dict(),
+                "position_delta_candidate_factory": delta_report.to_dict() if delta_report else None,
+                "position_delta_candidate_error": delta_source_error,
+                "position_delta_candidate_window_seconds": recent_delta_window_seconds,
+                "input_diagnostics": input_diagnostics,
+                "loop_result": result.to_dict(),
+            },
+            ensure_ascii=False,
+            indent=2,
+            sort_keys=True,
+            default=str,
+        )
+    )
+
+
 @app.command("reset-simulation-state")
 def reset_simulation_state_command(
     starting_equity: float = typer.Option(1000.0, "--starting-equity", help="Fresh local simulated USDT balance for the next UI session."),
@@ -2932,3 +3715,7 @@ def ui(
     import uvicorn
 
     uvicorn.run(create_ui_app(settings), host=host, port=port, reload=reload, log_level=settings.log_level.lower())
+
+
+if __name__ == "__main__":
+    app()

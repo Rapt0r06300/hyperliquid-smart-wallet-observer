@@ -33,6 +33,7 @@ class FlowSignal:
     buy_usdc: float
     sell_usdc: float
     trades: int
+    large_trade_usdc: float = 0.0
 
     @property
     def total_usdc(self) -> float:
@@ -110,14 +111,16 @@ def detect_flow_signals(
     """
     agg: dict[str, list] = {}
     for _ts, market, side, usdc in items:
-        a = agg.setdefault(market, [0.0, 0.0, 0])
+        a = agg.setdefault(market, [0.0, 0.0, 0, 0.0, 0.0])
         if side == "BUY":
             a[0] += usdc
+            a[3] = max(a[3], float(usdc or 0.0))
         else:
             a[1] += usdc
+            a[4] = max(a[4], float(usdc or 0.0))
         a[2] += 1
     out: list[FlowSignal] = []
-    for market, (buy, sell, cnt) in agg.items():
+    for market, (buy, sell, cnt, max_buy, max_sell) in agg.items():
         total = buy + sell
         if total < min_volume_usdc:
             continue
@@ -126,9 +129,11 @@ def detect_flow_signals(
         imb = abs(buy - sell) / total if total > 0 else 0.0
         if imb < min_imbalance:
             continue
+        is_long = buy >= sell
         out.append(FlowSignal(
-            market=market, direction="LONG" if buy >= sell else "SHORT",
+            market=market, direction="LONG" if is_long else "SHORT",
             buy_usdc=buy, sell_usdc=sell, trades=cnt,
+            large_trade_usdc=max_buy if is_long else max_sell,
         ))
     out.sort(key=lambda s: s.total_usdc, reverse=True)
     return out
@@ -153,6 +158,7 @@ def build_cluster_from_flow(signal: FlowSignal, mark_price: float, now_ms: int):
         cluster_id=f"flow:{signal.market}:{signal.direction}:{now_ms}",
         origin="stream",
         flow_trade_count=signal.trades,
+        flow_large_trade_usdc=signal.large_trade_usdc,
     )
 
 
@@ -162,10 +168,17 @@ class MarketFlowMonitor:
     flux, et expose `drain_and_detect()`. READ-ONLY. Aucune adresse, aucun ordre.
     """
 
-    def __init__(self, ws_url: str, markets: list[str], window_ms: int = 8000) -> None:
+    def __init__(
+        self,
+        ws_url: str,
+        markets: list[str],
+        window_ms: int = 8000,
+        large_trade_threshold_usdc: float = 50_000.0,
+    ) -> None:
         self.ws_url = ws_url
         self.markets = list(markets)
         self.window = MarketFlowWindow(window_ms=window_ms)
+        self.large_trade_threshold_usdc = float(large_trade_threshold_usdc or 50_000.0)
         self._lock = threading.Lock()
         self._pending: list = []
         self._latest_prices: dict[str, tuple[float, int]] = {}
@@ -187,9 +200,16 @@ class MarketFlowMonitor:
         now = int(time.time() * 1000)
         with self._lock:
             for side, size, price in parse_trades(data):
-                self._pending.append((now, market, side, size * price))
+                usdc = size * price
+                self._pending.append((now, market, side, usdc))
                 self._latest_prices[market] = (price, now)
                 self.stats["trades_seen"] += 1
+                if usdc >= self.large_trade_threshold_usdc:
+                    self.stats["large_trades_seen"] = int(self.stats.get("large_trades_seen", 0) or 0) + 1
+                    self.stats["last_large_trade_market"] = market
+                    self.stats["last_large_trade_side"] = side
+                    self.stats["last_large_trade_usdc"] = round(usdc, 2)
+                    self.stats["last_large_trade_at_ms"] = now
                 self.stats["last_trade_market"] = market
                 self.stats["last_trade_price"] = price
                 self.stats["last_trade_at_ms"] = now

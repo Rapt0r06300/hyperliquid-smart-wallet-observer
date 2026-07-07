@@ -1,6 +1,6 @@
 /* HyperSmart smooth metagraph renderer V2
  * READ-ONLY UI layer: the graph display is smoothed, but values come only from
- * server samples: simulation overview, session candles, or /api/dydx/realtime-tick.
+ * server samples: Hyperliquid simulation overview and session candles.
  */
 (function () {
   const state = {
@@ -24,6 +24,19 @@
   function formatUsd(v) {
     const n = num(v, 0);
     return `${n > 0 ? "+" : ""}$${n.toFixed(2)}`;
+  }
+
+  function sampleFromOverview(overview) {
+    const equity = overview && overview.equity ? overview.equity : {};
+    const bot = overview && overview.bot_simulation ? overview.bot_simulation : {};
+    const pnl = num(equity.current_pnl_usdc ?? bot.estimated_net_pnl_usdc, state.targetPnl);
+    const eq = num(equity.current_equity_usdt ?? bot.current_equity_usdt, 1000 + pnl);
+    return {
+      pnl,
+      equity: eq,
+      timestamp: num(overview && overview.current_time_ms, Date.now()),
+      source: equity.source || "hyperliquid_simulation_overview",
+    };
   }
 
   function addSample(pnl, ts, source, equity) {
@@ -221,15 +234,10 @@
   async function pollRealtimeTick() {
     if (document.hidden) return;
     try {
-      const res = await fetch("/api/dydx/realtime-tick", { cache: "no-store" });
+      const res = await fetch("/api/simulation/overview?limit=120", { cache: "no-store" });
       if (!res.ok) throw new Error(`tick ${res.status}`);
-      const tick = await res.json();
-      addSample(
-        num(tick.net_pnl_usdt ?? tick.net_pnl_usdc, state.targetPnl),
-        tick.timestamp_ms || Date.now(),
-        "dydx_realtime_tick",
-        tick.equity_usdt ?? tick.equity_usdc
-      );
+      const tick = sampleFromOverview(await res.json());
+      addSample(tick.pnl, tick.timestamp, tick.source, tick.equity);
     } catch (_e) {
       // Never invent a value. Keep animating toward the last real target only.
     }

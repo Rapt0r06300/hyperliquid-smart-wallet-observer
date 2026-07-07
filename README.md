@@ -1,149 +1,233 @@
-# dYdX Smart-Wallet Observer
+# HyperSmart Observer
 
-Projet local de surveillance, d'analyse et de simulation paper autour de dYdX v4.
+HyperSmart Observer est un logiciel local de surveillance, d'analyse et de
+simulation paper autour de Hyperliquid.
 
-Le projet est désormais centré sur dYdX uniquement. L'objectif est de découvrir des wallets/subaccounts observables, suivre leurs fills publics, détecter des changements de position, puis simuler localement des décisions avec frais, spread, slippage, latence, consensus et règles de risque.
+Objectif actuel: reproduire la partie mesurable du "smart wallet observer" en
+mode safe:
 
-Ce dépôt doit rester propre : pas d'ancien périmètre, pas de plateforme obsolète, pas de promesse de gain, pas d'exécution réelle.
+- observer les donnees publiques Hyperliquid;
+- decouvrir des wallets et clusters interessants;
+- detecter ouvertures, additions, reductions et fermetures;
+- calculer edge, fraicheur, couts et risque;
+- refuser ce qui est vieux, incomplet ou non mesurable;
+- simuler localement un portefeuille fictif de 1000 USDT;
+- expliquer chaque decision dans des logs exportables;
+- ne jamais executer d'ordre reel.
 
----
-
-## Sécurité
-
-Règles permanentes :
-
-- READ ONLY
-- PAPER ONLY
-- SIMULATION ONLY
-- DENY BY DEFAULT
-- NO REAL ORDER
-- NO PRIVATE KEY
-- NO SIGNATURE
-- NO WALLET CONNECT
-- NO GUARANTEED PROFIT
-- SCORE IS NOT SIGNAL
-- PAPER TRADE IS NOT ORDER
-
-Le logiciel observe, classe, refuse ou simule localement. Il ne doit jamais devenir une interface d'exécution réelle.
+Le runtime officiel est **Hyperliquid-first**. Les modules dYdX historiques sont
+conserves comme legacy/mockable, mais ils ne doivent pas etre lances par le
+launcher principal ni montes dans l'UI Hyperliquid.
 
 ---
 
-## Architecture cible
+## Doctrine
 
-### Job A — Discovery / Leaderboard
+```text
+OBSERVE FIRST
+SCORE SECOND
+SIMULATE LOCALLY THIRD
+READ ONLY
+PAPER ONLY
+SIMULATION ONLY
+DENY BY DEFAULT
+SCORE IS NOT SIGNAL
+PAPER TRADE IS NOT ORDER
+HISTORICAL PNL IS NOT FUTURE PROFIT
+NO GUARANTEED PROFIT
+```
 
-- importer des wallets/subaccounts ;
-- collecter des données publiques read-only quand l'option réseau est explicitement activée ;
-- scorer la régularité, l'historique, le drawdown, la concentration du PnL et la copiabilité ;
-- construire une shortlist de leaders ;
-- refuser les comptes insuffisants, suspects ou non mesurables.
-
-### Job B — Scanner / Détection
-
-- WebSocket `v4_subaccounts` pour les comptes chauds ;
-- fallback REST borné ;
-- déduplication des fills ;
-- mesure de fraîcheur ;
-- détection OPEN / ADD / REDUCE / CLOSE ;
-- consensus multi-wallets ;
-- refus si signal trop vieux, incomplet ou non mesurable.
-
-### Job C — Simulation / Rapports
-
-- portfolio paper local ;
-- frais, spread, slippage et latence ;
-- sizing prudent ;
-- exits adaptatifs ;
-- journaux `NO_TRADE` ;
-- dashboard local ;
-- backtests locaux.
+HyperSmart peut ouvrir et fermer des **positions virtuelles** en simulation, mais
+il ne place jamais d'ordre reel, ne signe rien et ne demande aucune cle.
 
 ---
 
-## Code principal
+## Regles de securite
+
+Interdit:
+
+- mainnet execution;
+- `/exchange` operationnel;
+- signature;
+- private key, seed phrase, wallet connect;
+- bouton buy/sell/trade/execute/copy trade;
+- testnet executor actif;
+- LLM dans le hot path decisionnel;
+- faux PnL ou graphe synthetique presente comme reel;
+- promesse de gain.
+
+Autorise:
+
+- scraping public + pool de proxies/rotation (datacenter/residentiel/mobile) pour la collecte a grande echelle (cf. AGENTS.md et V9 §8);
+- REST Hyperliquid `/info` read-only;
+- WebSocket Hyperliquid read-only;
+- imports CSV/JSON/TXT;
+- SQLite local runtime;
+- paper simulation;
+- backtesting/replay;
+- dashboard local read-only;
+- logs detailles dans `logs/logs a envoyer`.
+
+---
+
+## Architecture 3 jobs
+
+### Job A - Discovery / Leaderboard
+
+- importer ou decouvrir des wallets publics;
+- valider uniquement les adresses completes;
+- refuser les adresses tronquees;
+- scorer historique, consistency, drawdown, one-big-win, pnl concentration,
+  copyability, activite recente et qualite d'execution;
+- produire une shortlist locale.
+
+### Job B - Copy loop read-only / simulation
+
+- lire la shortlist;
+- collecter `allMids`, `l2Book`, `clearinghouseState`, `userFills`,
+  `userFillsByTime`, `openOrders`, `frontendOpenOrders`;
+- dedupliquer les fills;
+- comparer les snapshots precedents et courants;
+- produire `LeaderDelta` et `SignalCandidate`;
+- calculer `edge_remaining_bps`;
+- creer une decision `NO_TRADE` ou une intention paper locale;
+- ne jamais appeler `/exchange`.
+
+### Job C - Reports / Dashboard
+
+- afficher le solde fictif, positions virtuelles, decisions recentes, etat scan,
+  logs et raisons de refus;
+- exporter JSON/CSV/Markdown/HTML quand disponible;
+- montrer uniquement des donnees reelles collectees ou un etat vide explicite.
+
+---
+
+## Lanceur principal
+
+Le point d'entree utilisateur est:
+
+```text
+LANCER_HYPERSMART.cmd
+```
+
+Il lance le serveur local et le poller de simulation en mode visible. Fermer
+proprement avec la commande affichee dans la fenetre du lanceur.
+
+URL locale par defaut:
+
+```text
+http://127.0.0.1:8794/static/simulation_v2.html
+```
+
+La session repart a 1000 USDT fictifs au lancement. Pendant la session, le solde
+doit suivre les gains/pertes paper realises et latents issus des positions
+virtuelles.
+
+---
+
+## Modules principaux
+
+```text
+src/hl_observer/                      # CLI/UI runtime local
+hyper_smart_observer/hyperliquid_client/
+hyper_smart_observer/copy_mode/
+hyper_smart_observer/realtime_monitor/
+hyper_smart_observer/market_signals/
+hyper_smart_observer/paper_trading/
+hyper_smart_observer/backtesting/
+hyper_smart_observer/dashboard/
+hyper_smart_observer/audit/
+```
+
+Legacy preserve:
 
 ```text
 hyper_smart_observer/dydx_v4/
 ```
 
-Modules importants :
+Le legacy dYdX ne doit pas etre importe par le runtime Hyperliquid par defaut.
+
+---
+
+## Fusion des idees GitHub
+
+Les repos externes sont utilises comme sources d'idees, pas comme code a copier.
+
+Classification:
+
+- KEEP: dashboard, logs, health, backtest, scoring, microstructure, exports.
+- ADAPT_TO_HYPERLIQUID: WS-first, REST reconcile, adapter/risk layer, wallet
+  scoring, source health, feature rows.
+- DEFER: microservices lourds, RAG, orchestration multi-venue.
+- BAN: ordre reel, CLOB runtime, private key, signature, wallet connect, live
+  toggle, executor service, faux PnL, promesse de profit.
+
+Voir:
 
 ```text
-config.py
-live_observer.py
-fast_scanner.py
-fast_scan_integration.py
-wallet_discovery.py
-wallet_harvester.py
-leaderboard.py
-selection.py
-signals.py
-edge_calculator.py
-consensus.py
-cluster_detector.py
-market_flow.py
-adaptive_exits.py
-risk_policy.py
-backtest.py
-no_trade.py
-storage.py
-cli.py
+docs/research/HYPERSMART_GITHUB_FUSION_MASTER.md
+docs/research/HYPERSMART_REPO_IDEA_MATRIX_FUSION.md
+docs/research/HYPERSMART_GITHUB_RESCAN_CODEX.md
 ```
 
 ---
 
-## Moteur logique
+## Logs a envoyer
 
-Le moteur ne copie pas aveuglément un wallet. Il applique une logique prudente :
+Les logs de diagnostic partageables doivent aller ici:
 
-- un seul wallet ne suffit pas toujours ;
-- un gros gain isolé est pénalisé ;
-- un drawdown élevé est pénalisé ;
-- un signal trop vieux est refusé ;
-- un edge non mesurable est refusé ;
-- une liquidité trop faible est refusée ;
-- un coût de copie trop élevé est refusé ;
-- une fermeture sans position paper correspondante est refusée ;
-- les données démo ou synthétiques ne rendent jamais un compte copiable.
+```text
+logs/logs a envoyer/
+```
 
-Tout refus doit être explicite, traçable et visible dans les rapports.
+Ils doivent expliquer:
+
+- quelle opportunite a ete observee;
+- pourquoi le bot a refuse ou accepte en paper;
+- quelle donnee etait absente ou trop vieille;
+- quel edge et quels couts ont ete calcules;
+- comment le PnL paper a evolue.
+
+Ces logs servent a ameliorer le moteur sans inventer de gains.
 
 ---
 
 ## Commandes utiles
 
-Tests ciblés dYdX :
+Tests runtime Hyperliquid-only:
 
 ```powershell
-python -m pytest -q tests/dydx_v4
+python -m pytest -q tests/test_hyperliquid_runtime_does_not_import_dydx_by_default.py
+python -m pytest -q tests/test_dydx_is_secondary_mockable_not_runtime.py
 ```
 
-Tests complets :
+Tests ciblés HyperSmart:
+
+```powershell
+python -m pytest -q tests/test_hypersmart_*.py
+```
+
+Suite complete:
 
 ```powershell
 python -m pytest -q
 ```
 
-Aide CLI dYdX :
+CLI locale:
 
 ```powershell
-python -m hyper_smart_observer.dydx_v4.cli --help
+python -m hl_observer --help
+python -m hl_observer ui
 ```
-
----
-
-## Nettoyage du dépôt
-
-Le dépôt doit rester centré sur dYdX. Les anciens fichiers, docs et modules explicitement liés à l'ancienne plateforme sont à retirer. Les modules génériques peuvent rester seulement s'ils sont utiles au moteur dYdX et ne gardent pas de dépendance obsolète.
 
 ---
 
 ## Limite importante
 
-Ce projet n'est pas un bot réel. Les résultats paper ou backtest ne prédisent pas les performances futures.
+Un PnL positif ne peut pas etre garanti. HyperSmart doit chercher a reduire les
+mauvaises decisions, mieux filtrer les signaux et expliquer les pertes, mais ne
+doit jamais tricher sur le graphe, le solde ou les logs.
 
-Comportement par défaut :
-
-```text
-NO_TRADE si la donnée est incomplète, trop vieille, incohérente ou non mesurable.
-```
+Si une donnee manque, le logiciel doit l'afficher comme absente.
+Si une action est ambigue, elle doit rester `UNKNOWN`.
+Si l'edge est absent ou negatif, la decision doit etre `NO_TRADE`.

@@ -125,11 +125,22 @@ def create_clean_archive(root: Path, output_dir: Path | None = None, *, name: st
 
 
 def archive_readiness(root: Path) -> dict[str, object]:
+    # Parcours BORNE : data/, runtime/, logs/, .git/ et caches elagues A LA
+    # DESCENTE (jamais enumeres) + deadline defensive. On ne parcourt JAMAIS les
+    # 23 Go de data/ ni les 3 Go de logs/.
+    from hyper_smart_observer.audit.bounded_walk import bounded_walk
+
+    root = Path(root)
+    walk = bounded_walk(root, extra_excluded_dirs={"logs"}, max_seconds=6.0, stat_sizes=False)
     unsafe: list[str] = []
+    for path in walk.files:
+        try:
+            relative = path.relative_to(root)
+        except ValueError:
+            continue
+        if not is_archive_safe_path(relative):
+            unsafe.append(relative.as_posix())
     root_archives: list[str] = []
-    for path in root.rglob("*"):
-        if path.is_file() and not is_archive_safe_path(path.relative_to(root)):
-            unsafe.append(path.relative_to(root).as_posix())
     for path in root.glob("*"):
         if path.is_file() and path.suffix.lower() in {".zip", ".7z", ".rar"}:
             root_archives.append(path.name)
@@ -138,6 +149,9 @@ def archive_readiness(root: Path) -> dict[str, object]:
         "unsafe_runtime_files_excluded": unsafe,
         "root_archives_forbidden": root_archives,
         "include_paths": INCLUDE_PATHS,
+        "scan_stopped_reason": walk.stopped_reason,
+        "scan_files_seen": walk.files_seen,
+        "scan_pruned_dirs": len(walk.pruned_dirs),
     }
 
 

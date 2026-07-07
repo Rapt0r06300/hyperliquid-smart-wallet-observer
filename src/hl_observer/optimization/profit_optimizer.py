@@ -5,7 +5,13 @@ import json
 from pathlib import Path
 from typing import Callable
 
-from hl_observer.simulation.log_metrics import LogDecisionRow, iter_decision_rows, row_from_payload, split_reasons
+from hl_observer.simulation.log_metrics import (
+    LogDecisionRow,
+    iter_decision_rows,
+    iter_supplemental_ledger_rows,
+    row_from_payload,
+    split_reasons,
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -82,7 +88,7 @@ def run_strategy_tournament(log_dir: Path, configs: tuple[StrategyConfig, ...] |
     results = [StrategyResult(config=config) for config in configs]
     total_rows = _count_valid_rows(log_dir)
     valid_index = 0
-    for _path, _line_number, payload in iter_decision_rows(log_dir):
+    for payload in _iter_optimizer_payloads(log_dir):
         if payload.get("_json_error"):
             continue
         row = row_from_payload(payload)
@@ -264,10 +270,71 @@ def _bucket_for_index(index: int, total_rows: int | None = None) -> str:
 
 def _count_valid_rows(log_dir: Path) -> int:
     total = 0
-    for _path, _line_number, payload in iter_decision_rows(log_dir):
+    for payload in _iter_optimizer_payloads(log_dir):
         if not payload.get("_json_error"):
             total += 1
     return total
+
+
+def _iter_optimizer_payloads(log_dir: Path):
+    """Yield the same accounting truth as logs-analyze for replay research.
+
+    The latest decision JSONL can be intentionally compact and dominated by
+    shadow GitHub evaluations. Supplemental snapshot rows carry the real closed
+    paper PnL in long sessions, so optimization must include them or A/B
+    results become misleading.
+    """
+
+    seen: set[str] = set()
+    for _path, _line_number, payload in iter_decision_rows(log_dir):
+        key = _optimizer_event_key(payload)
+        seen.add(key)
+        yield payload
+    for _path, _line_number, payload in iter_supplemental_ledger_rows(log_dir):
+        key = _optimizer_event_key(payload)
+        if key in seen:
+            continue
+        seen.add(key)
+        yield payload
+
+
+def _optimizer_event_key(payload: dict) -> str:
+    explicit = (
+        payload.get("dedupe_identity")
+        or payload.get("paper_position_instance_id")
+        or payload.get("v9_paper_order_id")
+        or payload.get("delta_key")
+        or payload.get("source_delta_key")
+    )
+    action = payload.get("bot_decision") or payload.get("bot_replay_action") or payload.get("paper_action_type") or payload.get("event_type")
+    if explicit:
+        return "|".join(
+            str(part or "")
+            for part in (
+                action,
+                payload.get("paper_action_type"),
+                explicit,
+                payload.get("estimated_net_pnl_usdc") or payload.get("event_net_pnl_usdc") or payload.get("net_pnl"),
+            )
+        )
+    return "|".join(
+        str(payload.get(key) or "")
+        for key in (
+            "timestamp_ms",
+            "observed_at_ms",
+            "recorded_at_ms",
+            "closed_at_ms",
+            "wallet_address",
+            "leader_wallet",
+            "coin",
+            "market_id",
+            "paper_action_type",
+            "reason",
+            "estimated_net_pnl_usdc",
+            "event_net_pnl_usdc",
+            "net_pnl",
+        )
+    )
 
 
 def _report_to_json(report: OptimizationReport) -> dict:

@@ -31,6 +31,24 @@ def _as_bool(value: str | bool | None, default: bool = False) -> bool:
     return value.strip().lower() in {"1", "true", "yes", "on"}
 
 
+def _as_float(value: str | float | int | None, default: float) -> float:
+    if value is None:
+        return float(default)
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return float(default)
+
+
+def _as_int(value: str | int | None, default: int) -> int:
+    if value is None:
+        return int(default)
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return int(default)
+
+
 def _load_yaml(path: Path | None) -> dict[str, Any]:
     if path is None or not path.exists():
         return {}
@@ -70,9 +88,47 @@ def load_settings(config_path: str | Path | None = None) -> Settings:
             bool(exec_raw.get("enable_mainnet_execution", False)),
         ),
         enable_testnet_execution=_as_bool(
-            os.getenv("HL_ENABLE_TESTNET_EXECUTION"),
+            os.getenv("HL_ENABLE_TESTNET_EXECUTION", os.getenv("TESTNET_EXECUTION_ENABLED")),
             bool(exec_raw.get("enable_testnet_execution", False)),
         ),
+        real_mainnet_trading=_as_bool(
+            os.getenv("REAL_MAINNET_TRADING"),
+            bool(exec_raw.get("real_mainnet_trading", False)),
+        ),
+        testnet_only=_as_bool(
+            os.getenv("TESTNET_ONLY"),
+            bool(exec_raw.get("testnet_only", True)),
+        ),
+        testnet_mode=_as_bool(
+            os.getenv("TESTNET_MODE"),
+            bool(exec_raw.get("testnet_mode", False)),
+        ),
+        testnet_execution_enabled=_as_bool(
+            os.getenv("TESTNET_EXECUTION_ENABLED"),
+            bool(exec_raw.get("testnet_execution_enabled", False)),
+        ),
+        confirm_testnet_execution=_as_bool(
+            os.getenv("CONFIRM_TESTNET_EXECUTION"),
+            bool(exec_raw.get("confirm_testnet_execution", False)),
+        ),
+        require_explicit_testnet_confirmation=_as_bool(
+            os.getenv("REQUIRE_EXPLICIT_TESTNET_CONFIRMATION"),
+            bool(exec_raw.get("require_explicit_testnet_confirmation", True)),
+        ),
+        testnet_exchange=os.getenv("TESTNET_EXCHANGE", str(exec_raw.get("testnet_exchange", "hyperliquid"))),
+        max_testnet_notional=_as_float(
+            os.getenv("MAX_TESTNET_NOTIONAL"),
+            float(exec_raw.get("max_testnet_notional", 5.0)),
+        ),
+        max_open_testnet_positions=_as_int(
+            os.getenv("MAX_OPEN_TESTNET_POSITIONS"),
+            int(exec_raw.get("max_open_testnet_positions", 1)),
+        ),
+        allow_mainnet_order_submission=_as_bool(
+            os.getenv("ALLOW_MAINNET_ORDER_SUBMISSION"),
+            bool(exec_raw.get("allow_mainnet_order_submission", False)),
+        ),
+        testnet_adapter=os.getenv("TESTNET_ADAPTER", str(exec_raw.get("testnet_adapter", "fake"))),
         require_confirm_testnet_only=bool(exec_raw.get("require_confirm_testnet_only", True)),
         require_cloid=bool(exec_raw.get("require_cloid", True)),
         require_schedule_cancel=_as_bool(

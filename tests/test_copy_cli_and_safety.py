@@ -43,9 +43,9 @@ def test_copy_preflight_command_exists():
     assert "--copy-max-leaders" in result.output
 
 
-def test_throughput_plan_cli_refuses_bypass_but_allows_safe_rotation():
+def test_throughput_plan_cli_refuses_bypass_and_keeps_safe_rotation():
     runner = CliRunner()
-    refused = runner.invoke(app, ["throughput-plan", "--network-read", "--bypass-requested"])
+    override = runner.invoke(app, ["throughput-plan", "--network-read", "--bypass-requested"])
     rotated = runner.invoke(
         app,
         [
@@ -61,8 +61,11 @@ def test_throughput_plan_cli_refuses_bypass_but_allows_safe_rotation():
         ],
     )
 
-    assert refused.exit_code == 2
-    assert "RATE_LIMIT_BYPASS_REFUSED" in refused.output
+    assert override.exit_code == 2
+    assert "scanner_starts=no" in override.output
+    assert "RATE_LIMIT_BYPASS_REFUSED" in override.output
+    assert "BYPASS_OVERRIDE_ACTIVE" not in override.output
+    assert "execution=forbidden" in override.output
     assert rotated.exit_code == 0
     assert "scanner_starts=yes" in rotated.output
     assert "SAFE_ROTATION_ACTIVE" in rotated.output
@@ -90,7 +93,7 @@ def test_fresh_scan_plan_cli_maximizes_fresh_coverage_without_bypass(tmp_path, m
             "50",
         ],
     )
-    refused = runner.invoke(app, ["fresh-scan-plan", "--network-read", "--bypass-requested"])
+    override = runner.invoke(app, ["fresh-scan-plan", "--network-read", "--bypass-requested"])
 
     assert result.exit_code == 0
     assert "fresh_scan_plan=read_only_safe" in result.output
@@ -99,8 +102,9 @@ def test_fresh_scan_plan_cli_maximizes_fresh_coverage_without_bypass(tmp_path, m
     assert "user_fills_ws_users=10/10" in result.output
     assert "execution=forbidden" in result.output
     assert "real_orders_created=0" in result.output
-    assert refused.exit_code == 2
-    assert "RATE_LIMIT_BYPASS_REFUSED" in refused.output
+    assert override.exit_code == 2
+    assert "scanner_starts=no" in override.output
+    assert "RATE_LIMIT_BYPASS_REFUSED" in override.output
 
 
 def test_fresh_data_plan_cli_reports_max_fresh_collection_shape(tmp_path, monkeypatch):
@@ -253,6 +257,44 @@ def test_live_leader_selection_prioritizes_recent_public_trade_wallets(tmp_path)
     assert [row.wallet_address for row in selected] == [recent_wallet]
 
 
+def test_live_leader_selection_samples_deep_before_deduping_recent_rows(tmp_path):
+    settings = load_settings()
+    settings.database_url = f"sqlite:///{tmp_path / 'deep_leaders.sqlite3'}"
+    init_db(settings.database_url)
+    session_factory = create_session_factory(create_sqlite_engine(settings.database_url))
+    stamp = now_ms()
+    repeated_wallet = "0x" + "a" * 40
+    with session_factory() as session:
+        for index in range(300):
+            session.add(
+                TopWallet(
+                    wallet_address=repeated_wallet,
+                    rank=index + 1,
+                    source=f"public_trades_ws:{index}",
+                    score=float(10_000 - index),
+                    selected_at_ms=stamp + 10_000 - index,
+                    status="selected",
+                )
+            )
+        for index in range(9):
+            session.add(
+                TopWallet(
+                    wallet_address=f"0x{index + 1:040x}",
+                    rank=1_000 + index,
+                    source="public_trades_ws",
+                    score=float(5_000 - index),
+                    selected_at_ms=stamp + 1_000 - index,
+                    status="selected",
+                )
+            )
+        session.commit()
+
+        selected = _selected_top_wallet_rows(session, limit=10, active_window_ms=300_000)
+
+    assert len({row.wallet_address.lower() for row in selected}) == 10
+    assert repeated_wallet in {row.wallet_address.lower() for row in selected}
+
+
 def test_runtime_check_commands_exist():
     runner = CliRunner()
 
@@ -262,6 +304,24 @@ def test_runtime_check_commands_exist():
     reset_help = runner.invoke(app, ["reset-simulation-state", "--help"])
     assert reset_help.exit_code == 0
     assert "--starting-equity" in reset_help.output
+
+
+def test_v23_fusion_cli_aliases_exist():
+    runner = CliRunner()
+    for command in (
+        "pnl-audit",
+        "loss-attribution",
+        "wallet-breakdown",
+        "coin-breakdown",
+        "strategy-breakdown",
+        "strategy-quarantine-report",
+        "arbitrage-scan",
+        "funding-scan",
+        "backtest-wallet-copy",
+        "refactor-fusion-run",
+    ):
+        result = runner.invoke(app, [command, "--help"])
+        assert result.exit_code == 0, result.output
 
 
 def test_copy_batch_keeps_testnet_and_mainnet_disabled_by_default():

@@ -1,0 +1,2389 @@
+﻿{
+    "status":  "OK_LIVE_FUSION_RUNTIME",
+    "data_truth":  "real_or_empty",
+    "paper_only":  true,
+    "real_execution":  false,
+    "external_action":  false,
+    "source":  "engine_heartbeat",
+    "current_time_ms":  1783166546586,
+    "state_summary":  {
+                          "open_positions":  1,
+                          "ledger_events":  20000,
+                          "starting_equity_usdt":  1000.0,
+                          "realized_pnl_usdc":  -0.196892,
+                          "entries_total":  114,
+                          "exits_total":  67
+                      },
+    "scanner_summary":  {
+                            "engine_running":  false,
+                            "phase":  "warehouse_report",
+                            "wallet_candidates_total":  3275020,
+                            "fresh_entry_deltas":  253,
+                            "virtual_entries_logged":  171,
+                            "virtual_refusals_logged":  829,
+                            "entry_supply_bottleneck":  "OK"
+                        },
+    "freshness":  {
+                      "status":  "READY",
+                      "state":  "FRESH",
+                      "message":  "Dernier delta local tres frais.",
+                      "latest_delta_age_ms":  11435,
+                      "recent_deltas":  96,
+                      "recent_entry_deltas":  17
+                  },
+    "orders_count":  0,
+    "paper_engine_accepted":  0,
+    "no_trade_reasons":  [
+                             "CONFLICTING_LEADERS"
+                         ],
+    "message":  "Runtime fusion execute en paper local depuis une entree moteur explicite.",
+    "runtime":  {
+                    "session":  {
+                                    "session_id":  "local-fusion-1783166413583",
+                                    "status":  "RUNNING",
+                                    "watchlist":  [
+                                                      "0x7fdafde5cfb5465924316eced2d3715494c517d1",
+                                                      "0x7fdafde5cfb5465924316eced2d3715494c517d1",
+                                                      "0x71d0e11ebb6150cebe20cf62f798be1a50108c26",
+                                                      "0x7fdafde5cfb5465924316eced2d3715494c517d1",
+                                                      "0xf9109ada2f73c62e9889b45453065f0d99260a2d",
+                                                      "0xf5d81a135f756ca16544e53c20fc20643ec3ad53",
+                                                      "0x71d0e11ebb6150cebe20cf62f798be1a50108c26",
+                                                      "0xf5d81a135f756ca16544e53c20fc20643ec3ad53",
+                                                      "0xf5d81a135f756ca16544e53c20fc20643ec3ad53",
+                                                      "0xecb63caa47c7c4e77f60f1ce858cf28dc2b82b00",
+                                                      "0xecb63caa47c7c4e77f60f1ce858cf28dc2b82b00",
+                                                      "0xf5d81a135f756ca16544e53c20fc20643ec3ad53",
+                                                      "0x7fdafde5cfb5465924316eced2d3715494c517d1",
+                                                      "0xf5d81a135f756ca16544e53c20fc20643ec3ad53",
+                                                      "0xecb63caa47c7c4e77f60f1ce858cf28dc2b82b00",
+                                                      "0x7fdafde5cfb5465924316eced2d3715494c517d1",
+                                                      "0xecb63caa47c7c4e77f60f1ce858cf28dc2b82b00"
+                                                  ],
+                                    "copy_ratio":  0.05,
+                                    "paper_only":  true,
+                                    "real_execution":  false
+                                },
+                    "conflict":  {
+                                     "coin":  "HYPE",
+                                     "decision":  "NO_TRADE",
+                                     "winning_side":  null,
+                                     "long_score":  41.470733,
+                                     "short_score":  45.21027,
+                                     "reasons":  [
+                                                     "CONFLICTING_LEADERS"
+                                                 ]
+                                 },
+                    "latency":  {
+                                    "count":  0,
+                                    "min_ms":  0,
+                                    "p50_ms":  0,
+                                    "max_ms":  0,
+                                    "stale_count":  0
+                                },
+                    "drawdown":  {
+                                     "triggered":  false,
+                                     "drawdown_pct":  0.04886285,
+                                     "reason":  "OK"
+                                 },
+                    "price_discrepancies":  [
+
+                                            ],
+                    "funding_signals":  [
+
+                                        ],
+                    "triangular_opportunities":  [
+
+                                                 ],
+                    "maker_quotes":  [
+                                         {
+                                             "coin":  "ADA",
+                                             "bid":  0.176479049,
+                                             "ask":  0.176690951,
+                                             "size_usdt":  20.0,
+                                             "paper_only":  true
+                                         },
+                                         {
+                                             "coin":  "ETH",
+                                             "bid":  1757.89463,
+                                             "ask":  1760.00537,
+                                             "size_usdt":  20.0,
+                                             "paper_only":  true
+                                         },
+                                         {
+                                             "coin":  "HYPE",
+                                             "bid":  70.6001145,
+                                             "ask":  70.6848855,
+                                             "size_usdt":  20.0,
+                                             "paper_only":  true
+                                         },
+                                         {
+                                             "coin":  "LIT",
+                                             "bid":  2.23410873,
+                                             "ask":  2.23679127,
+                                             "size_usdt":  20.0,
+                                             "paper_only":  true
+                                         },
+                                         {
+                                             "coin":  "MEGA",
+                                             "bid":  0.0560553466,
+                                             "ask":  0.0561226534,
+                                             "size_usdt":  20.0,
+                                             "paper_only":  true
+                                         },
+                                         {
+                                             "coin":  "MON",
+                                             "bid":  0.0206615956,
+                                             "ask":  0.0206864044,
+                                             "size_usdt":  20.0,
+                                             "paper_only":  true
+                                         },
+                                         {
+                                             "coin":  "STBL",
+                                             "bid":  0.0259374282,
+                                             "ask":  0.0259685718,
+                                             "size_usdt":  20.0,
+                                             "paper_only":  true
+                                         },
+                                         {
+                                             "coin":  "XRP",
+                                             "bid":  1.13996561,
+                                             "ask":  1.14133439,
+                                             "size_usdt":  20.0,
+                                             "paper_only":  true
+                                         },
+                                         {
+                                             "coin":  "ZEC",
+                                             "bid":  461.717803,
+                                             "ask":  462.272197,
+                                             "size_usdt":  20.0,
+                                             "paper_only":  true
+                                         }
+                                     ],
+                    "delta_neutral_positions":  [
+
+                                                ],
+                    "funding_payments":  [
+
+                                         ],
+                    "paper_orders":  [
+
+                                     ],
+                    "paper_order_strategy_ids":  [
+
+                                                 ],
+                    "paper_engine":  {
+                                         "accepted_count":  0,
+                                         "equity_usdt":  999.759959,
+                                         "drawdown_usdt":  0.0,
+                                         "decisions":  [
+
+                                                       ],
+                                         "paper_only":  true,
+                                         "real_execution":  false
+                                     },
+                    "no_trade_reasons":  [
+                                             "CONFLICTING_LEADERS"
+                                         ],
+                    "external_profile_priority":  [
+                                                      {
+                                                          "strategy_id":  "ext_rezzecup_whale_mirror_primary",
+                                                          "priority_over_internal":  true,
+                                                          "paper_only":  true,
+                                                          "read_only":  true,
+                                                          "direct_external_execution":  false
+                                                      },
+                                                      {
+                                                          "strategy_id":  "ext_tony_autonomous_sltp_priority",
+                                                          "priority_over_internal":  true,
+                                                          "paper_only":  true,
+                                                          "read_only":  true,
+                                                          "direct_external_execution":  false
+                                                      },
+                                                      {
+                                                          "strategy_id":  "ext_chaininsighter_priority_copy_session",
+                                                          "priority_over_internal":  true,
+                                                          "paper_only":  true,
+                                                          "read_only":  true,
+                                                          "direct_external_execution":  false
+                                                      },
+                                                      {
+                                                          "strategy_id":  "ext_jack_hl_arbitrage_spread",
+                                                          "priority_over_internal":  true,
+                                                          "paper_only":  true,
+                                                          "read_only":  true,
+                                                          "direct_external_execution":  false
+                                                      },
+                                                      {
+                                                          "strategy_id":  "ext_jack_hl_arbitrage_alt",
+                                                          "priority_over_internal":  true,
+                                                          "paper_only":  true,
+                                                          "read_only":  true,
+                                                          "direct_external_execution":  false
+                                                      },
+                                                      {
+                                                          "strategy_id":  "ext_hl_drift_funding_spread",
+                                                          "priority_over_internal":  true,
+                                                          "paper_only":  true,
+                                                          "read_only":  true,
+                                                          "direct_external_execution":  false
+                                                      },
+                                                      {
+                                                          "strategy_id":  "ext_funding_arb_basis",
+                                                          "priority_over_internal":  true,
+                                                          "paper_only":  true,
+                                                          "read_only":  true,
+                                                          "direct_external_execution":  false
+                                                      },
+                                                      {
+                                                          "strategy_id":  "ext_immutal0_wallet_filter_caps",
+                                                          "priority_over_internal":  true,
+                                                          "paper_only":  true,
+                                                          "read_only":  true,
+                                                          "direct_external_execution":  false
+                                                      },
+                                                      {
+                                                          "strategy_id":  "ext_drakkar_triangular_arbitrage",
+                                                          "priority_over_internal":  true,
+                                                          "paper_only":  true,
+                                                          "read_only":  true,
+                                                          "direct_external_execution":  false
+                                                      },
+                                                      {
+                                                          "strategy_id":  "ext_arbibot_cross_exchange_spread",
+                                                          "priority_over_internal":  true,
+                                                          "paper_only":  true,
+                                                          "read_only":  true,
+                                                          "direct_external_execution":  false
+                                                      },
+                                                      {
+                                                          "strategy_id":  "ext_carlos_cross_source_reconcile",
+                                                          "priority_over_internal":  true,
+                                                          "paper_only":  true,
+                                                          "read_only":  true,
+                                                          "direct_external_execution":  false
+                                                      },
+                                                      {
+                                                          "strategy_id":  "ext_hummingbot_market_making_framework",
+                                                          "priority_over_internal":  true,
+                                                          "paper_only":  true,
+                                                          "read_only":  true,
+                                                          "direct_external_execution":  false
+                                                      },
+                                                      {
+                                                          "strategy_id":  "ext_interexchange_arbitrage",
+                                                          "priority_over_internal":  true,
+                                                          "paper_only":  true,
+                                                          "read_only":  true,
+                                                          "direct_external_execution":  false
+                                                      },
+                                                      {
+                                                          "strategy_id":  "ext_passivbot_grid_risk",
+                                                          "priority_over_internal":  true,
+                                                          "paper_only":  true,
+                                                          "read_only":  true,
+                                                          "direct_external_execution":  false
+                                                      },
+                                                      {
+                                                          "strategy_id":  "ext_crypto_arbitrage_spread",
+                                                          "priority_over_internal":  true,
+                                                          "paper_only":  true,
+                                                          "read_only":  true,
+                                                          "direct_external_execution":  false
+                                                      },
+                                                      {
+                                                          "strategy_id":  "ext_freqtrade_backtest_discipline",
+                                                          "priority_over_internal":  true,
+                                                          "paper_only":  true,
+                                                          "read_only":  true,
+                                                          "direct_external_execution":  false
+                                                      },
+                                                      {
+                                                          "strategy_id":  "ext_prediction_market_backtesting_guard",
+                                                          "priority_over_internal":  true,
+                                                          "paper_only":  true,
+                                                          "read_only":  true,
+                                                          "direct_external_execution":  false
+                                                      },
+                                                      {
+                                                          "strategy_id":  "ext_octobot_framework_priority",
+                                                          "priority_over_internal":  true,
+                                                          "paper_only":  true,
+                                                          "read_only":  true,
+                                                          "direct_external_execution":  false
+                                                      },
+                                                      {
+                                                          "strategy_id":  "ext_mlmodelpoly_shadow_score",
+                                                          "priority_over_internal":  true,
+                                                          "paper_only":  true,
+                                                          "read_only":  true,
+                                                          "direct_external_execution":  false
+                                                      },
+                                                      {
+                                                          "strategy_id":  "ext_polyrec_shadow_recommender",
+                                                          "priority_over_internal":  true,
+                                                          "paper_only":  true,
+                                                          "read_only":  true,
+                                                          "direct_external_execution":  false
+                                                      },
+                                                      {
+                                                          "strategy_id":  "ext_warp_risk_process_caps",
+                                                          "priority_over_internal":  true,
+                                                          "paper_only":  true,
+                                                          "read_only":  true,
+                                                          "direct_external_execution":  false
+                                                      },
+                                                      {
+                                                          "strategy_id":  "ext_polymarket_lp_liquidity_guard",
+                                                          "priority_over_internal":  true,
+                                                          "paper_only":  true,
+                                                          "read_only":  true,
+                                                          "direct_external_execution":  false
+                                                      },
+                                                      {
+                                                          "strategy_id":  "ext_jlowo_structured_decision",
+                                                          "priority_over_internal":  true,
+                                                          "paper_only":  true,
+                                                          "read_only":  true,
+                                                          "direct_external_execution":  false
+                                                      },
+                                                      {
+                                                          "strategy_id":  "ext_mrfadiai_copy_rules",
+                                                          "priority_over_internal":  true,
+                                                          "paper_only":  true,
+                                                          "read_only":  true,
+                                                          "direct_external_execution":  false
+                                                      },
+                                                      {
+                                                          "strategy_id":  "ext_djienne_resilience_logging",
+                                                          "priority_over_internal":  true,
+                                                          "paper_only":  true,
+                                                          "read_only":  true,
+                                                          "direct_external_execution":  false
+                                                      },
+                                                      {
+                                                          "strategy_id":  "ext_polybot_lightweight_rules",
+                                                          "priority_over_internal":  true,
+                                                          "paper_only":  true,
+                                                          "read_only":  true,
+                                                          "direct_external_execution":  false
+                                                      },
+                                                      {
+                                                          "strategy_id":  "ext_jonmaa_single_market_rules",
+                                                          "priority_over_internal":  true,
+                                                          "paper_only":  true,
+                                                          "read_only":  true,
+                                                          "direct_external_execution":  false
+                                                      },
+                                                      {
+                                                          "strategy_id":  "ext_tradingview_chart_runtime",
+                                                          "priority_over_internal":  true,
+                                                          "paper_only":  true,
+                                                          "read_only":  true,
+                                                          "direct_external_execution":  false
+                                                      },
+                                                      {
+                                                          "strategy_id":  "ext_cloddsbot_agentic_research_loop",
+                                                          "priority_over_internal":  true,
+                                                          "paper_only":  true,
+                                                          "read_only":  true,
+                                                          "direct_external_execution":  false
+                                                      },
+                                                      {
+                                                          "strategy_id":  "ext_harrier_toolkit_decision_stack",
+                                                          "priority_over_internal":  true,
+                                                          "paper_only":  true,
+                                                          "read_only":  true,
+                                                          "direct_external_execution":  false
+                                                      },
+                                                      {
+                                                          "strategy_id":  "ext_polymarket_agents_research_path",
+                                                          "priority_over_internal":  true,
+                                                          "paper_only":  true,
+                                                          "read_only":  true,
+                                                          "direct_external_execution":  false
+                                                      },
+                                                      {
+                                                          "strategy_id":  "ext_polyterm_terminal_ops",
+                                                          "priority_over_internal":  true,
+                                                          "paper_only":  true,
+                                                          "read_only":  true,
+                                                          "direct_external_execution":  false
+                                                      },
+                                                      {
+                                                          "strategy_id":  "ext_polyweather_context_features",
+                                                          "priority_over_internal":  true,
+                                                          "paper_only":  true,
+                                                          "read_only":  true,
+                                                          "direct_external_execution":  false
+                                                      },
+                                                      {
+                                                          "strategy_id":  "ext_awesome_prediction_tools_index",
+                                                          "priority_over_internal":  true,
+                                                          "paper_only":  true,
+                                                          "read_only":  true,
+                                                          "direct_external_execution":  false
+                                                      }
+                                                  ],
+                    "external_profile_execution_summary":  {
+                                                               "profiles_total":  37,
+                                                               "profiles_installed":  34,
+                                                               "profiles_unavailable":  3,
+                                                               "profiles_executed":  34,
+                                                               "profiles_with_paper_orders":  0,
+                                                               "paper_orders_total":  0,
+                                                               "all_installed_profiles_executed":  true,
+                                                               "unavailable_profile_ids":  [
+                                                                                               "ext_terauss_hot_path_pending",
+                                                                                               "ext_composio_cross_market_arb_pending",
+                                                                                               "ext_neron888_copy_loop_pending"
+                                                                                           ]
+                                                           },
+                    "external_profile_executions":  [
+                                                        {
+                                                            "repo_id":  "17_rezzecup_whale_wallet_mirror_copy_trader",
+                                                            "profile_id":  "ext_rezzecup_whale_mirror_primary",
+                                                            "family":  "whale_wallet_mirror",
+                                                            "kind":  "COPY_FOLLOW",
+                                                            "installed":  true,
+                                                            "status":  "EXECUTED",
+                                                            "decision":  "NO_TRADE",
+                                                            "reason":  "COPY_CONFLICT_OR_NO_MAJORITY",
+                                                            "candidate_count":  17,
+                                                            "accepted_paper_orders":  0,
+                                                            "paper_order_refs":  [
+
+                                                                                 ],
+                                                            "supported_paper_actions":  [
+                                                                                            "OPEN",
+                                                                                            "CLOSE"
+                                                                                        ],
+                                                            "open_close_capable":  true,
+                                                            "paper_only":  true,
+                                                            "read_only":  true,
+                                                            "direct_external_execution":  false,
+                                                            "real_execution":  false
+                                                        },
+                                                        {
+                                                            "repo_id":  "21_tony_42069_trader_tony_v4",
+                                                            "profile_id":  "ext_tony_autonomous_sltp_priority",
+                                                            "family":  "autonomous_sltp",
+                                                            "kind":  "FAST_TIMING",
+                                                            "installed":  true,
+                                                            "status":  "EXECUTED",
+                                                            "decision":  "EVALUATED_DIAGNOSTIC",
+                                                            "reason":  "PROFILE_EVALUATED_AS_GUARD_OR_SUPPORT_MODULE",
+                                                            "candidate_count":  26,
+                                                            "accepted_paper_orders":  0,
+                                                            "paper_order_refs":  [
+
+                                                                                 ],
+                                                            "supported_paper_actions":  [
+                                                                                            "OPEN",
+                                                                                            "CLOSE"
+                                                                                        ],
+                                                            "open_close_capable":  true,
+                                                            "paper_only":  true,
+                                                            "read_only":  true,
+                                                            "direct_external_execution":  false,
+                                                            "real_execution":  false
+                                                        },
+                                                        {
+                                                            "repo_id":  "15_chaininsighter_solana_copy_trading_bot",
+                                                            "profile_id":  "ext_chaininsighter_priority_copy_session",
+                                                            "family":  "copy_wallet_session",
+                                                            "kind":  "COPY_FOLLOW",
+                                                            "installed":  true,
+                                                            "status":  "EXECUTED",
+                                                            "decision":  "NO_TRADE",
+                                                            "reason":  "COPY_CONFLICT_OR_NO_MAJORITY",
+                                                            "candidate_count":  17,
+                                                            "accepted_paper_orders":  0,
+                                                            "paper_order_refs":  [
+
+                                                                                 ],
+                                                            "supported_paper_actions":  [
+                                                                                            "OPEN",
+                                                                                            "CLOSE"
+                                                                                        ],
+                                                            "open_close_capable":  true,
+                                                            "paper_only":  true,
+                                                            "read_only":  true,
+                                                            "direct_external_execution":  false,
+                                                            "real_execution":  false
+                                                        },
+                                                        {
+                                                            "repo_id":  "28_jackhuang166_hyberliquid_arbitrage_bot",
+                                                            "profile_id":  "ext_jack_hl_arbitrage_spread",
+                                                            "family":  "hyperliquid_arbitrage",
+                                                            "kind":  "ARBITRAGE_SIM",
+                                                            "installed":  true,
+                                                            "status":  "EXECUTED",
+                                                            "decision":  "NO_TRADE",
+                                                            "reason":  "NO_ARBITRAGE_EDGE_AFTER_COSTS",
+                                                            "candidate_count":  0,
+                                                            "accepted_paper_orders":  0,
+                                                            "paper_order_refs":  [
+
+                                                                                 ],
+                                                            "supported_paper_actions":  [
+                                                                                            "OPEN",
+                                                                                            "CLOSE"
+                                                                                        ],
+                                                            "open_close_capable":  true,
+                                                            "paper_only":  true,
+                                                            "read_only":  true,
+                                                            "direct_external_execution":  false,
+                                                            "real_execution":  false
+                                                        },
+                                                        {
+                                                            "repo_id":  "29_jackhuang166_hyberliquid_arbitrage",
+                                                            "profile_id":  "ext_jack_hl_arbitrage_alt",
+                                                            "family":  "hyperliquid_arbitrage_alt",
+                                                            "kind":  "ARBITRAGE_SIM",
+                                                            "installed":  true,
+                                                            "status":  "EXECUTED",
+                                                            "decision":  "NO_TRADE",
+                                                            "reason":  "NO_ARBITRAGE_EDGE_AFTER_COSTS",
+                                                            "candidate_count":  0,
+                                                            "accepted_paper_orders":  0,
+                                                            "paper_order_refs":  [
+
+                                                                                 ],
+                                                            "supported_paper_actions":  [
+                                                                                            "OPEN",
+                                                                                            "CLOSE"
+                                                                                        ],
+                                                            "open_close_capable":  true,
+                                                            "paper_only":  true,
+                                                            "read_only":  true,
+                                                            "direct_external_execution":  false,
+                                                            "real_execution":  false
+                                                        },
+                                                        {
+                                                            "repo_id":  "19_terauss_polymarket_copy_trading_bot",
+                                                            "profile_id":  "ext_terauss_hot_path_pending",
+                                                            "family":  "hot_path_unavailable",
+                                                            "kind":  "FAST_TIMING",
+                                                            "installed":  false,
+                                                            "status":  "UNAVAILABLE",
+                                                            "decision":  "NOT_EXECUTED",
+                                                            "reason":  "FAILED",
+                                                            "candidate_count":  0,
+                                                            "accepted_paper_orders":  0,
+                                                            "paper_order_refs":  [
+
+                                                                                 ],
+                                                            "supported_paper_actions":  [
+                                                                                            "OPEN",
+                                                                                            "CLOSE"
+                                                                                        ],
+                                                            "open_close_capable":  true,
+                                                            "paper_only":  true,
+                                                            "read_only":  true,
+                                                            "direct_external_execution":  false,
+                                                            "real_execution":  false
+                                                        },
+                                                        {
+                                                            "repo_id":  "30_rustjesty_hyperliquid_drift_arbitrage_bot",
+                                                            "profile_id":  "ext_hl_drift_funding_spread",
+                                                            "family":  "hyperliquid_drift_arbitrage",
+                                                            "kind":  "SPREAD_FARM",
+                                                            "installed":  true,
+                                                            "status":  "EXECUTED",
+                                                            "decision":  "NO_TRADE",
+                                                            "reason":  "NO_FUNDING_SPIKE",
+                                                            "candidate_count":  0,
+                                                            "accepted_paper_orders":  0,
+                                                            "paper_order_refs":  [
+
+                                                                                 ],
+                                                            "supported_paper_actions":  [
+                                                                                            "OPEN",
+                                                                                            "CLOSE"
+                                                                                        ],
+                                                            "open_close_capable":  true,
+                                                            "paper_only":  true,
+                                                            "read_only":  true,
+                                                            "direct_external_execution":  false,
+                                                            "real_execution":  false
+                                                        },
+                                                        {
+                                                            "repo_id":  "32_gajesh2007_funding_arb_bot",
+                                                            "profile_id":  "ext_funding_arb_basis",
+                                                            "family":  "funding_arbitrage",
+                                                            "kind":  "SPREAD_FARM",
+                                                            "installed":  true,
+                                                            "status":  "EXECUTED",
+                                                            "decision":  "NO_TRADE",
+                                                            "reason":  "NO_FUNDING_SPIKE",
+                                                            "candidate_count":  0,
+                                                            "accepted_paper_orders":  0,
+                                                            "paper_order_refs":  [
+
+                                                                                 ],
+                                                            "supported_paper_actions":  [
+                                                                                            "OPEN",
+                                                                                            "CLOSE"
+                                                                                        ],
+                                                            "open_close_capable":  true,
+                                                            "paper_only":  true,
+                                                            "read_only":  true,
+                                                            "direct_external_execution":  false,
+                                                            "real_execution":  false
+                                                        },
+                                                        {
+                                                            "repo_id":  "16_immutal0_solana_copytrading_bot",
+                                                            "profile_id":  "ext_immutal0_wallet_filter_caps",
+                                                            "family":  "copy_wallet_filters",
+                                                            "kind":  "COPY_FOLLOW",
+                                                            "installed":  true,
+                                                            "status":  "EXECUTED",
+                                                            "decision":  "NO_TRADE",
+                                                            "reason":  "COPY_CONFLICT_OR_NO_MAJORITY",
+                                                            "candidate_count":  17,
+                                                            "accepted_paper_orders":  0,
+                                                            "paper_order_refs":  [
+
+                                                                                 ],
+                                                            "supported_paper_actions":  [
+                                                                                            "OPEN",
+                                                                                            "CLOSE"
+                                                                                        ],
+                                                            "open_close_capable":  true,
+                                                            "paper_only":  true,
+                                                            "read_only":  true,
+                                                            "direct_external_execution":  false,
+                                                            "real_execution":  false
+                                                        },
+                                                        {
+                                                            "repo_id":  "34_drakkar_triangular_arbitrage",
+                                                            "profile_id":  "ext_drakkar_triangular_arbitrage",
+                                                            "family":  "triangular_arbitrage",
+                                                            "kind":  "ARBITRAGE_SIM",
+                                                            "installed":  true,
+                                                            "status":  "EXECUTED",
+                                                            "decision":  "NO_TRADE",
+                                                            "reason":  "NO_ARBITRAGE_EDGE_AFTER_COSTS",
+                                                            "candidate_count":  0,
+                                                            "accepted_paper_orders":  0,
+                                                            "paper_order_refs":  [
+
+                                                                                 ],
+                                                            "supported_paper_actions":  [
+                                                                                            "OPEN",
+                                                                                            "CLOSE"
+                                                                                        ],
+                                                            "open_close_capable":  true,
+                                                            "paper_only":  true,
+                                                            "read_only":  true,
+                                                            "direct_external_execution":  false,
+                                                            "real_execution":  false
+                                                        },
+                                                        {
+                                                            "repo_id":  "31_notlelouch_arbibot",
+                                                            "profile_id":  "ext_arbibot_cross_exchange_spread",
+                                                            "family":  "cross_exchange_arbitrage",
+                                                            "kind":  "ARBITRAGE_SIM",
+                                                            "installed":  true,
+                                                            "status":  "EXECUTED",
+                                                            "decision":  "NO_TRADE",
+                                                            "reason":  "NO_ARBITRAGE_EDGE_AFTER_COSTS",
+                                                            "candidate_count":  0,
+                                                            "accepted_paper_orders":  0,
+                                                            "paper_order_refs":  [
+
+                                                                                 ],
+                                                            "supported_paper_actions":  [
+                                                                                            "OPEN",
+                                                                                            "CLOSE"
+                                                                                        ],
+                                                            "open_close_capable":  true,
+                                                            "paper_only":  true,
+                                                            "read_only":  true,
+                                                            "direct_external_execution":  false,
+                                                            "real_execution":  false
+                                                        },
+                                                        {
+                                                            "repo_id":  "27_carlosibcu_polymarket_kalshi_btc_arbitrage_bot",
+                                                            "profile_id":  "ext_carlos_cross_source_reconcile",
+                                                            "family":  "cross_source_reconcile",
+                                                            "kind":  "CROSS_SOURCE_DISCREPANCY",
+                                                            "installed":  true,
+                                                            "status":  "EXECUTED",
+                                                            "decision":  "NO_TRADE",
+                                                            "reason":  "NO_ARBITRAGE_EDGE_AFTER_COSTS",
+                                                            "candidate_count":  0,
+                                                            "accepted_paper_orders":  0,
+                                                            "paper_order_refs":  [
+
+                                                                                 ],
+                                                            "supported_paper_actions":  [
+                                                                                            "OPEN",
+                                                                                            "CLOSE"
+                                                                                        ],
+                                                            "open_close_capable":  true,
+                                                            "paper_only":  true,
+                                                            "read_only":  true,
+                                                            "direct_external_execution":  false,
+                                                            "real_execution":  false
+                                                        },
+                                                        {
+                                                            "repo_id":  "33_hummingbot",
+                                                            "profile_id":  "ext_hummingbot_market_making_framework",
+                                                            "family":  "market_making_framework",
+                                                            "kind":  "MARKET_MAKING_SIM",
+                                                            "installed":  true,
+                                                            "status":  "EXECUTED",
+                                                            "decision":  "EVALUATED_DIAGNOSTIC",
+                                                            "reason":  "PAPER_QUOTES_READY_NO_POSITION_OPENED",
+                                                            "candidate_count":  9,
+                                                            "accepted_paper_orders":  0,
+                                                            "paper_order_refs":  [
+
+                                                                                 ],
+                                                            "supported_paper_actions":  [
+                                                                                            "OPEN",
+                                                                                            "CLOSE"
+                                                                                        ],
+                                                            "open_close_capable":  true,
+                                                            "paper_only":  true,
+                                                            "read_only":  true,
+                                                            "direct_external_execution":  false,
+                                                            "real_execution":  false
+                                                        },
+                                                        {
+                                                            "repo_id":  "36_pydevtop_interexchange_arbitrage_bot",
+                                                            "profile_id":  "ext_interexchange_arbitrage",
+                                                            "family":  "interexchange_arbitrage",
+                                                            "kind":  "ARBITRAGE_SIM",
+                                                            "installed":  true,
+                                                            "status":  "EXECUTED",
+                                                            "decision":  "NO_TRADE",
+                                                            "reason":  "NO_ARBITRAGE_EDGE_AFTER_COSTS",
+                                                            "candidate_count":  0,
+                                                            "accepted_paper_orders":  0,
+                                                            "paper_order_refs":  [
+
+                                                                                 ],
+                                                            "supported_paper_actions":  [
+                                                                                            "OPEN",
+                                                                                            "CLOSE"
+                                                                                        ],
+                                                            "open_close_capable":  true,
+                                                            "paper_only":  true,
+                                                            "read_only":  true,
+                                                            "direct_external_execution":  false,
+                                                            "real_execution":  false
+                                                        },
+                                                        {
+                                                            "repo_id":  "35_enarjord_passivbot",
+                                                            "profile_id":  "ext_passivbot_grid_risk",
+                                                            "family":  "grid_risk_management",
+                                                            "kind":  "DCA_SIM",
+                                                            "installed":  true,
+                                                            "status":  "EXECUTED",
+                                                            "decision":  "EVALUATED_DIAGNOSTIC",
+                                                            "reason":  "PROFILE_EVALUATED_AS_GUARD_OR_SUPPORT_MODULE",
+                                                            "candidate_count":  26,
+                                                            "accepted_paper_orders":  0,
+                                                            "paper_order_refs":  [
+
+                                                                                 ],
+                                                            "supported_paper_actions":  [
+                                                                                            "OPEN",
+                                                                                            "CLOSE"
+                                                                                        ],
+                                                            "open_close_capable":  true,
+                                                            "paper_only":  true,
+                                                            "read_only":  true,
+                                                            "direct_external_execution":  false,
+                                                            "real_execution":  false
+                                                        },
+                                                        {
+                                                            "repo_id":  "37_ramilexe_crypto_arbitrage_bot",
+                                                            "profile_id":  "ext_crypto_arbitrage_spread",
+                                                            "family":  "crypto_arbitrage",
+                                                            "kind":  "ARBITRAGE_SIM",
+                                                            "installed":  true,
+                                                            "status":  "EXECUTED",
+                                                            "decision":  "NO_TRADE",
+                                                            "reason":  "NO_ARBITRAGE_EDGE_AFTER_COSTS",
+                                                            "candidate_count":  0,
+                                                            "accepted_paper_orders":  0,
+                                                            "paper_order_refs":  [
+
+                                                                                 ],
+                                                            "supported_paper_actions":  [
+                                                                                            "OPEN",
+                                                                                            "CLOSE"
+                                                                                        ],
+                                                            "open_close_capable":  true,
+                                                            "paper_only":  true,
+                                                            "read_only":  true,
+                                                            "direct_external_execution":  false,
+                                                            "real_execution":  false
+                                                        },
+                                                        {
+                                                            "repo_id":  "22_freqtrade",
+                                                            "profile_id":  "ext_freqtrade_backtest_discipline",
+                                                            "family":  "backtest_discipline",
+                                                            "kind":  "STRATEGY_ENSEMBLE",
+                                                            "installed":  true,
+                                                            "status":  "EXECUTED",
+                                                            "decision":  "EVALUATED_DIAGNOSTIC",
+                                                            "reason":  "PROFILE_EVALUATED_AS_GUARD_OR_SUPPORT_MODULE",
+                                                            "candidate_count":  26,
+                                                            "accepted_paper_orders":  0,
+                                                            "paper_order_refs":  [
+
+                                                                                 ],
+                                                            "supported_paper_actions":  [
+                                                                                            "OPEN",
+                                                                                            "CLOSE"
+                                                                                        ],
+                                                            "open_close_capable":  true,
+                                                            "paper_only":  true,
+                                                            "read_only":  true,
+                                                            "direct_external_execution":  false,
+                                                            "real_execution":  false
+                                                        },
+                                                        {
+                                                            "repo_id":  "11_prediction_market_backtesting",
+                                                            "profile_id":  "ext_prediction_market_backtesting_guard",
+                                                            "family":  "backtesting_methodology",
+                                                            "kind":  "STRATEGY_ENSEMBLE",
+                                                            "installed":  true,
+                                                            "status":  "EXECUTED",
+                                                            "decision":  "EVALUATED_DIAGNOSTIC",
+                                                            "reason":  "PROFILE_EVALUATED_AS_GUARD_OR_SUPPORT_MODULE",
+                                                            "candidate_count":  26,
+                                                            "accepted_paper_orders":  0,
+                                                            "paper_order_refs":  [
+
+                                                                                 ],
+                                                            "supported_paper_actions":  [
+                                                                                            "OPEN",
+                                                                                            "CLOSE"
+                                                                                        ],
+                                                            "open_close_capable":  true,
+                                                            "paper_only":  true,
+                                                            "read_only":  true,
+                                                            "direct_external_execution":  false,
+                                                            "real_execution":  false
+                                                        },
+                                                        {
+                                                            "repo_id":  "23_octobot",
+                                                            "profile_id":  "ext_octobot_framework_priority",
+                                                            "family":  "bot_framework",
+                                                            "kind":  "STRATEGY_ENSEMBLE",
+                                                            "installed":  true,
+                                                            "status":  "EXECUTED",
+                                                            "decision":  "EVALUATED_DIAGNOSTIC",
+                                                            "reason":  "PROFILE_EVALUATED_AS_GUARD_OR_SUPPORT_MODULE",
+                                                            "candidate_count":  26,
+                                                            "accepted_paper_orders":  0,
+                                                            "paper_order_refs":  [
+
+                                                                                 ],
+                                                            "supported_paper_actions":  [
+                                                                                            "OPEN",
+                                                                                            "CLOSE"
+                                                                                        ],
+                                                            "open_close_capable":  true,
+                                                            "paper_only":  true,
+                                                            "read_only":  true,
+                                                            "direct_external_execution":  false,
+                                                            "real_execution":  false
+                                                        },
+                                                        {
+                                                            "repo_id":  "09_mlmodelpoly",
+                                                            "profile_id":  "ext_mlmodelpoly_shadow_score",
+                                                            "family":  "ml_shadow_model",
+                                                            "kind":  "SHADOW_MODEL",
+                                                            "installed":  true,
+                                                            "status":  "EXECUTED",
+                                                            "decision":  "EVALUATED_DIAGNOSTIC",
+                                                            "reason":  "RESEARCH_OR_SHADOW_PROFILE_EVALUATED_READ_ONLY",
+                                                            "candidate_count":  26,
+                                                            "accepted_paper_orders":  0,
+                                                            "paper_order_refs":  [
+
+                                                                                 ],
+                                                            "supported_paper_actions":  [
+                                                                                            "OPEN",
+                                                                                            "CLOSE"
+                                                                                        ],
+                                                            "open_close_capable":  true,
+                                                            "paper_only":  true,
+                                                            "read_only":  true,
+                                                            "direct_external_execution":  false,
+                                                            "real_execution":  false
+                                                        },
+                                                        {
+                                                            "repo_id":  "10_polyrec",
+                                                            "profile_id":  "ext_polyrec_shadow_recommender",
+                                                            "family":  "recommendation_shadow_model",
+                                                            "kind":  "SHADOW_MODEL",
+                                                            "installed":  true,
+                                                            "status":  "EXECUTED",
+                                                            "decision":  "EVALUATED_DIAGNOSTIC",
+                                                            "reason":  "RESEARCH_OR_SHADOW_PROFILE_EVALUATED_READ_ONLY",
+                                                            "candidate_count":  26,
+                                                            "accepted_paper_orders":  0,
+                                                            "paper_order_refs":  [
+
+                                                                                 ],
+                                                            "supported_paper_actions":  [
+                                                                                            "OPEN",
+                                                                                            "CLOSE"
+                                                                                        ],
+                                                            "open_close_capable":  true,
+                                                            "paper_only":  true,
+                                                            "read_only":  true,
+                                                            "direct_external_execution":  false,
+                                                            "real_execution":  false
+                                                        },
+                                                        {
+                                                            "repo_id":  "20_warp_id_solana_trading_bot",
+                                                            "profile_id":  "ext_warp_risk_process_caps",
+                                                            "family":  "risk_process",
+                                                            "kind":  "STRATEGY_ENSEMBLE",
+                                                            "installed":  true,
+                                                            "status":  "EXECUTED",
+                                                            "decision":  "EVALUATED_DIAGNOSTIC",
+                                                            "reason":  "PROFILE_EVALUATED_AS_GUARD_OR_SUPPORT_MODULE",
+                                                            "candidate_count":  26,
+                                                            "accepted_paper_orders":  0,
+                                                            "paper_order_refs":  [
+
+                                                                                 ],
+                                                            "supported_paper_actions":  [
+                                                                                            "OPEN",
+                                                                                            "CLOSE"
+                                                                                        ],
+                                                            "open_close_capable":  true,
+                                                            "paper_only":  true,
+                                                            "read_only":  true,
+                                                            "direct_external_execution":  false,
+                                                            "real_execution":  false
+                                                        },
+                                                        {
+                                                            "repo_id":  "04_polymarket_lp_tool",
+                                                            "profile_id":  "ext_polymarket_lp_liquidity_guard",
+                                                            "family":  "liquidity_provider_tool",
+                                                            "kind":  "MARKET_MAKING_SIM",
+                                                            "installed":  true,
+                                                            "status":  "EXECUTED",
+                                                            "decision":  "EVALUATED_DIAGNOSTIC",
+                                                            "reason":  "PAPER_QUOTES_READY_NO_POSITION_OPENED",
+                                                            "candidate_count":  9,
+                                                            "accepted_paper_orders":  0,
+                                                            "paper_order_refs":  [
+
+                                                                                 ],
+                                                            "supported_paper_actions":  [
+                                                                                            "OPEN",
+                                                                                            "CLOSE"
+                                                                                        ],
+                                                            "open_close_capable":  true,
+                                                            "paper_only":  true,
+                                                            "read_only":  true,
+                                                            "direct_external_execution":  false,
+                                                            "real_execution":  false
+                                                        },
+                                                        {
+                                                            "repo_id":  "24_jlowo_gengar_polymarket_bot",
+                                                            "profile_id":  "ext_jlowo_structured_decision",
+                                                            "family":  "lightweight_decision_bot",
+                                                            "kind":  "DIRECTION_HUNT",
+                                                            "installed":  true,
+                                                            "status":  "EXECUTED",
+                                                            "decision":  "EVALUATED_DIAGNOSTIC",
+                                                            "reason":  "PROFILE_EVALUATED_AS_GUARD_OR_SUPPORT_MODULE",
+                                                            "candidate_count":  26,
+                                                            "accepted_paper_orders":  0,
+                                                            "paper_order_refs":  [
+
+                                                                                 ],
+                                                            "supported_paper_actions":  [
+                                                                                            "OPEN",
+                                                                                            "CLOSE"
+                                                                                        ],
+                                                            "open_close_capable":  true,
+                                                            "paper_only":  true,
+                                                            "read_only":  true,
+                                                            "direct_external_execution":  false,
+                                                            "real_execution":  false
+                                                        },
+                                                        {
+                                                            "repo_id":  "03_mrfadiai_polymarket_bot",
+                                                            "profile_id":  "ext_mrfadiai_copy_rules",
+                                                            "family":  "copy_wallet_rules",
+                                                            "kind":  "COPY_FOLLOW",
+                                                            "installed":  true,
+                                                            "status":  "EXECUTED",
+                                                            "decision":  "NO_TRADE",
+                                                            "reason":  "COPY_CONFLICT_OR_NO_MAJORITY",
+                                                            "candidate_count":  17,
+                                                            "accepted_paper_orders":  0,
+                                                            "paper_order_refs":  [
+
+                                                                                 ],
+                                                            "supported_paper_actions":  [
+                                                                                            "OPEN",
+                                                                                            "CLOSE"
+                                                                                        ],
+                                                            "open_close_capable":  true,
+                                                            "paper_only":  true,
+                                                            "read_only":  true,
+                                                            "direct_external_execution":  false,
+                                                            "real_execution":  false
+                                                        },
+                                                        {
+                                                            "repo_id":  "25_djienne_polymarket_bot",
+                                                            "profile_id":  "ext_djienne_resilience_logging",
+                                                            "family":  "bot_logging_resilience",
+                                                            "kind":  "STRATEGY_ENSEMBLE",
+                                                            "installed":  true,
+                                                            "status":  "EXECUTED",
+                                                            "decision":  "EVALUATED_DIAGNOSTIC",
+                                                            "reason":  "PROFILE_EVALUATED_AS_GUARD_OR_SUPPORT_MODULE",
+                                                            "candidate_count":  26,
+                                                            "accepted_paper_orders":  0,
+                                                            "paper_order_refs":  [
+
+                                                                                 ],
+                                                            "supported_paper_actions":  [
+                                                                                            "OPEN",
+                                                                                            "CLOSE"
+                                                                                        ],
+                                                            "open_close_capable":  true,
+                                                            "paper_only":  true,
+                                                            "read_only":  true,
+                                                            "direct_external_execution":  false,
+                                                            "real_execution":  false
+                                                        },
+                                                        {
+                                                            "repo_id":  "12_polybot",
+                                                            "profile_id":  "ext_polybot_lightweight_rules",
+                                                            "family":  "lightweight_bot_rules",
+                                                            "kind":  "DIRECTION_HUNT",
+                                                            "installed":  true,
+                                                            "status":  "EXECUTED",
+                                                            "decision":  "EVALUATED_DIAGNOSTIC",
+                                                            "reason":  "PROFILE_EVALUATED_AS_GUARD_OR_SUPPORT_MODULE",
+                                                            "candidate_count":  26,
+                                                            "accepted_paper_orders":  0,
+                                                            "paper_order_refs":  [
+
+                                                                                 ],
+                                                            "supported_paper_actions":  [
+                                                                                            "OPEN",
+                                                                                            "CLOSE"
+                                                                                        ],
+                                                            "open_close_capable":  true,
+                                                            "paper_only":  true,
+                                                            "read_only":  true,
+                                                            "direct_external_execution":  false,
+                                                            "real_execution":  false
+                                                        },
+                                                        {
+                                                            "repo_id":  "26_jonmaa_btc_polymarket_bot",
+                                                            "profile_id":  "ext_jonmaa_single_market_rules",
+                                                            "family":  "single_market_discipline",
+                                                            "kind":  "DIRECTION_HUNT",
+                                                            "installed":  true,
+                                                            "status":  "EXECUTED",
+                                                            "decision":  "EVALUATED_DIAGNOSTIC",
+                                                            "reason":  "PROFILE_EVALUATED_AS_GUARD_OR_SUPPORT_MODULE",
+                                                            "candidate_count":  26,
+                                                            "accepted_paper_orders":  0,
+                                                            "paper_order_refs":  [
+
+                                                                                 ],
+                                                            "supported_paper_actions":  [
+                                                                                            "OPEN",
+                                                                                            "CLOSE"
+                                                                                        ],
+                                                            "open_close_capable":  true,
+                                                            "paper_only":  true,
+                                                            "read_only":  true,
+                                                            "direct_external_execution":  false,
+                                                            "real_execution":  false
+                                                        },
+                                                        {
+                                                            "repo_id":  "14_tradingview_lightweight_charts",
+                                                            "profile_id":  "ext_tradingview_chart_runtime",
+                                                            "family":  "charting_runtime",
+                                                            "kind":  "STRATEGY_ENSEMBLE",
+                                                            "installed":  true,
+                                                            "status":  "EXECUTED",
+                                                            "decision":  "EVALUATED_DIAGNOSTIC",
+                                                            "reason":  "PROFILE_EVALUATED_AS_GUARD_OR_SUPPORT_MODULE",
+                                                            "candidate_count":  26,
+                                                            "accepted_paper_orders":  0,
+                                                            "paper_order_refs":  [
+
+                                                                                 ],
+                                                            "supported_paper_actions":  [
+                                                                                            "OPEN",
+                                                                                            "CLOSE"
+                                                                                        ],
+                                                            "open_close_capable":  true,
+                                                            "paper_only":  true,
+                                                            "read_only":  true,
+                                                            "direct_external_execution":  false,
+                                                            "real_execution":  false
+                                                        },
+                                                        {
+                                                            "repo_id":  "01_cloddsbot",
+                                                            "profile_id":  "ext_cloddsbot_agentic_research_loop",
+                                                            "family":  "agentic_prediction_bot",
+                                                            "kind":  "RAG_EVIDENCE_CONTEXT",
+                                                            "installed":  true,
+                                                            "status":  "EXECUTED",
+                                                            "decision":  "EVALUATED_DIAGNOSTIC",
+                                                            "reason":  "RESEARCH_OR_SHADOW_PROFILE_EVALUATED_READ_ONLY",
+                                                            "candidate_count":  26,
+                                                            "accepted_paper_orders":  0,
+                                                            "paper_order_refs":  [
+
+                                                                                 ],
+                                                            "supported_paper_actions":  [
+                                                                                            "OPEN",
+                                                                                            "CLOSE"
+                                                                                        ],
+                                                            "open_close_capable":  true,
+                                                            "paper_only":  true,
+                                                            "read_only":  true,
+                                                            "direct_external_execution":  false,
+                                                            "real_execution":  false
+                                                        },
+                                                        {
+                                                            "repo_id":  "02_harrier_prediction_markets_toolkits",
+                                                            "profile_id":  "ext_harrier_toolkit_decision_stack",
+                                                            "family":  "toolkit_decision_stack",
+                                                            "kind":  "STRATEGY_ENSEMBLE",
+                                                            "installed":  true,
+                                                            "status":  "EXECUTED",
+                                                            "decision":  "EVALUATED_DIAGNOSTIC",
+                                                            "reason":  "PROFILE_EVALUATED_AS_GUARD_OR_SUPPORT_MODULE",
+                                                            "candidate_count":  26,
+                                                            "accepted_paper_orders":  0,
+                                                            "paper_order_refs":  [
+
+                                                                                 ],
+                                                            "supported_paper_actions":  [
+                                                                                            "OPEN",
+                                                                                            "CLOSE"
+                                                                                        ],
+                                                            "open_close_capable":  true,
+                                                            "paper_only":  true,
+                                                            "read_only":  true,
+                                                            "direct_external_execution":  false,
+                                                            "real_execution":  false
+                                                        },
+                                                        {
+                                                            "repo_id":  "13_polymarket_agents",
+                                                            "profile_id":  "ext_polymarket_agents_research_path",
+                                                            "family":  "agent_framework_research",
+                                                            "kind":  "RAG_EVIDENCE_CONTEXT",
+                                                            "installed":  true,
+                                                            "status":  "EXECUTED",
+                                                            "decision":  "EVALUATED_DIAGNOSTIC",
+                                                            "reason":  "RESEARCH_OR_SHADOW_PROFILE_EVALUATED_READ_ONLY",
+                                                            "candidate_count":  26,
+                                                            "accepted_paper_orders":  0,
+                                                            "paper_order_refs":  [
+
+                                                                                 ],
+                                                            "supported_paper_actions":  [
+                                                                                            "OPEN",
+                                                                                            "CLOSE"
+                                                                                        ],
+                                                            "open_close_capable":  true,
+                                                            "paper_only":  true,
+                                                            "read_only":  true,
+                                                            "direct_external_execution":  false,
+                                                            "real_execution":  false
+                                                        },
+                                                        {
+                                                            "repo_id":  "08_polyterm",
+                                                            "profile_id":  "ext_polyterm_terminal_ops",
+                                                            "family":  "terminal_ops",
+                                                            "kind":  "STRATEGY_ENSEMBLE",
+                                                            "installed":  true,
+                                                            "status":  "EXECUTED",
+                                                            "decision":  "EVALUATED_DIAGNOSTIC",
+                                                            "reason":  "PROFILE_EVALUATED_AS_GUARD_OR_SUPPORT_MODULE",
+                                                            "candidate_count":  26,
+                                                            "accepted_paper_orders":  0,
+                                                            "paper_order_refs":  [
+
+                                                                                 ],
+                                                            "supported_paper_actions":  [
+                                                                                            "OPEN",
+                                                                                            "CLOSE"
+                                                                                        ],
+                                                            "open_close_capable":  true,
+                                                            "paper_only":  true,
+                                                            "read_only":  true,
+                                                            "direct_external_execution":  false,
+                                                            "real_execution":  false
+                                                        },
+                                                        {
+                                                            "repo_id":  "06_composio_polymarket_kalshi_arbitrage_bot",
+                                                            "profile_id":  "ext_composio_cross_market_arb_pending",
+                                                            "family":  "cross_market_arbitrage_unavailable",
+                                                            "kind":  "CROSS_SOURCE_DISCREPANCY",
+                                                            "installed":  false,
+                                                            "status":  "UNAVAILABLE",
+                                                            "decision":  "NOT_EXECUTED",
+                                                            "reason":  "FAILED",
+                                                            "candidate_count":  0,
+                                                            "accepted_paper_orders":  0,
+                                                            "paper_order_refs":  [
+
+                                                                                 ],
+                                                            "supported_paper_actions":  [
+                                                                                            "OPEN",
+                                                                                            "CLOSE"
+                                                                                        ],
+                                                            "open_close_capable":  true,
+                                                            "paper_only":  true,
+                                                            "read_only":  true,
+                                                            "direct_external_execution":  false,
+                                                            "real_execution":  false
+                                                        },
+                                                        {
+                                                            "repo_id":  "18_neron888_polymarket_copy_trading_bot",
+                                                            "profile_id":  "ext_neron888_copy_loop_pending",
+                                                            "family":  "copy_loop_unavailable",
+                                                            "kind":  "COPY_FOLLOW",
+                                                            "installed":  false,
+                                                            "status":  "UNAVAILABLE",
+                                                            "decision":  "NOT_EXECUTED",
+                                                            "reason":  "FAILED",
+                                                            "candidate_count":  0,
+                                                            "accepted_paper_orders":  0,
+                                                            "paper_order_refs":  [
+
+                                                                                 ],
+                                                            "supported_paper_actions":  [
+                                                                                            "OPEN",
+                                                                                            "CLOSE"
+                                                                                        ],
+                                                            "open_close_capable":  true,
+                                                            "paper_only":  true,
+                                                            "read_only":  true,
+                                                            "direct_external_execution":  false,
+                                                            "real_execution":  false
+                                                        },
+                                                        {
+                                                            "repo_id":  "05_polyweather",
+                                                            "profile_id":  "ext_polyweather_context_features",
+                                                            "family":  "external_context_features",
+                                                            "kind":  "RAG_EVIDENCE_CONTEXT",
+                                                            "installed":  true,
+                                                            "status":  "EXECUTED",
+                                                            "decision":  "EVALUATED_DIAGNOSTIC",
+                                                            "reason":  "RESEARCH_OR_SHADOW_PROFILE_EVALUATED_READ_ONLY",
+                                                            "candidate_count":  26,
+                                                            "accepted_paper_orders":  0,
+                                                            "paper_order_refs":  [
+
+                                                                                 ],
+                                                            "supported_paper_actions":  [
+                                                                                            "OPEN",
+                                                                                            "CLOSE"
+                                                                                        ],
+                                                            "open_close_capable":  true,
+                                                            "paper_only":  true,
+                                                            "read_only":  true,
+                                                            "direct_external_execution":  false,
+                                                            "real_execution":  false
+                                                        },
+                                                        {
+                                                            "repo_id":  "07_awesome_prediction_market_tools",
+                                                            "profile_id":  "ext_awesome_prediction_tools_index",
+                                                            "family":  "research_index",
+                                                            "kind":  "RAG_EVIDENCE_CONTEXT",
+                                                            "installed":  true,
+                                                            "status":  "EXECUTED",
+                                                            "decision":  "EVALUATED_DIAGNOSTIC",
+                                                            "reason":  "RESEARCH_OR_SHADOW_PROFILE_EVALUATED_READ_ONLY",
+                                                            "candidate_count":  26,
+                                                            "accepted_paper_orders":  0,
+                                                            "paper_order_refs":  [
+
+                                                                                 ],
+                                                            "supported_paper_actions":  [
+                                                                                            "OPEN",
+                                                                                            "CLOSE"
+                                                                                        ],
+                                                            "open_close_capable":  true,
+                                                            "paper_only":  true,
+                                                            "read_only":  true,
+                                                            "direct_external_execution":  false,
+                                                            "real_execution":  false
+                                                        }
+                                                    ],
+                    "paper_only":  true,
+                    "real_execution":  false
+                },
+    "session":  {
+                    "session_id":  "local-fusion-1783166413583",
+                    "status":  "RUNNING",
+                    "watchlist":  [
+                                      "0x7fdafde5cfb5465924316eced2d3715494c517d1",
+                                      "0x7fdafde5cfb5465924316eced2d3715494c517d1",
+                                      "0x71d0e11ebb6150cebe20cf62f798be1a50108c26",
+                                      "0x7fdafde5cfb5465924316eced2d3715494c517d1",
+                                      "0xf9109ada2f73c62e9889b45453065f0d99260a2d",
+                                      "0xf5d81a135f756ca16544e53c20fc20643ec3ad53",
+                                      "0x71d0e11ebb6150cebe20cf62f798be1a50108c26",
+                                      "0xf5d81a135f756ca16544e53c20fc20643ec3ad53",
+                                      "0xf5d81a135f756ca16544e53c20fc20643ec3ad53",
+                                      "0xecb63caa47c7c4e77f60f1ce858cf28dc2b82b00",
+                                      "0xecb63caa47c7c4e77f60f1ce858cf28dc2b82b00",
+                                      "0xf5d81a135f756ca16544e53c20fc20643ec3ad53",
+                                      "0x7fdafde5cfb5465924316eced2d3715494c517d1",
+                                      "0xf5d81a135f756ca16544e53c20fc20643ec3ad53",
+                                      "0xecb63caa47c7c4e77f60f1ce858cf28dc2b82b00",
+                                      "0x7fdafde5cfb5465924316eced2d3715494c517d1",
+                                      "0xecb63caa47c7c4e77f60f1ce858cf28dc2b82b00"
+                                  ],
+                    "copy_ratio":  0.05,
+                    "paper_only":  true,
+                    "real_execution":  false
+                },
+    "conflict":  {
+                     "coin":  "HYPE",
+                     "decision":  "NO_TRADE",
+                     "winning_side":  null,
+                     "long_score":  41.470733,
+                     "short_score":  45.21027,
+                     "reasons":  [
+                                     "CONFLICTING_LEADERS"
+                                 ]
+                 },
+    "latency":  {
+                    "count":  0,
+                    "min_ms":  0,
+                    "p50_ms":  0,
+                    "max_ms":  0,
+                    "stale_count":  0
+                },
+    "drawdown":  {
+                     "triggered":  false,
+                     "drawdown_pct":  0.04886285,
+                     "reason":  "OK"
+                 },
+    "paper_engine":  {
+                         "accepted_count":  0,
+                         "equity_usdt":  999.759959,
+                         "drawdown_usdt":  0.0,
+                         "decisions":  [
+
+                                       ],
+                         "paper_only":  true,
+                         "real_execution":  false
+                     },
+    "price_discrepancies_count":  0,
+    "funding_signals_count":  0,
+    "triangular_opportunities_count":  0,
+    "input_counts":  {
+                         "leader_votes":  17,
+                         "price_events":  9,
+                         "funding_rows":  0,
+                         "triangular_edges":  0,
+                         "latencies_ms":  0
+                     },
+    "external_github_bridge":  {
+                                   "available":  true,
+                                   "mode":  "EXTERNAL_REPOS_PRESERVED_PRIORITY_PAPER_ADAPTER",
+                                   "priority_over_internal":  true,
+                                   "direct_external_execution":  false,
+                                   "paper_only":  true,
+                                   "read_only":  true,
+                                   "installed_count":  34,
+                                   "unavailable_count":  3,
+                                   "enabled_strategy_count":  34,
+                                   "manifest_path":  "C:\\Users\\flo\\Desktop\\Projet invest\\runtime\\research\\github_repos_v24\\EXTERNAL_REPOS_MANIFEST.json",
+                                   "repo_root":  "C:\\Users\\flo\\Desktop\\Projet invest\\runtime\\research\\github_repos_v24",
+                                   "repos":  [
+                                                 {
+                                                     "local_id":  "17_rezzecup_whale_wallet_mirror_copy_trader",
+                                                     "url":  "https://github.com/Rezzecup/whale-wallet-mirror-copy-trader",
+                                                     "family":  "whale_wallet_mirror",
+                                                     "priority":  0,
+                                                     "role":  "whale mirror, proportional sizing and copy-risk gate",
+                                                     "installed":  true,
+                                                     "status":  "ALREADY_PRESENT",
+                                                     "path":  "C:\\Users\\flo\\Desktop\\Projet invest\\runtime\\research\\github_repos_v24\\17_rezzecup_whale_wallet_mirror_copy_trader",
+                                                     "branch":  "main",
+                                                     "commit":  "bc9a7e6",
+                                                     "file_count":  26,
+                                                     "size_bytes":  3328337,
+                                                     "unavailable_reason":  "",
+                                                     "target_modules":  [
+                                                                            "copy_wallet/wallet_mirror_runtime",
+                                                                            "scoring/wallet_score_v2",
+                                                                            "risk/risk_engine_v3"
+                                                                        ],
+                                                     "profile_ids":  [
+                                                                         "ext_rezzecup_whale_mirror_primary"
+                                                                     ],
+                                                     "upstream_preserved":  true,
+                                                     "direct_execution":  false,
+                                                     "paper_only":  true
+                                                 },
+                                                 {
+                                                     "local_id":  "21_tony_42069_trader_tony_v4",
+                                                     "url":  "https://github.com/tony-42069/trader-tony-v4",
+                                                     "family":  "autonomous_sltp",
+                                                     "priority":  5,
+                                                     "role":  "autonomous scan, SL/TP/trailing and manipulation flags",
+                                                     "installed":  true,
+                                                     "status":  "ALREADY_PRESENT",
+                                                     "path":  "C:\\Users\\flo\\Desktop\\Projet invest\\runtime\\research\\github_repos_v24\\21_tony_42069_trader_tony_v4",
+                                                     "branch":  "master",
+                                                     "commit":  "bd6ad77",
+                                                     "file_count":  77,
+                                                     "size_bytes":  4239209,
+                                                     "unavailable_reason":  "",
+                                                     "target_modules":  [
+                                                                            "signals/entry_quality_gate",
+                                                                            "paper_trading/sltp_runtime"
+                                                                        ],
+                                                     "profile_ids":  [
+                                                                         "ext_tony_autonomous_sltp_priority"
+                                                                     ],
+                                                     "upstream_preserved":  true,
+                                                     "direct_execution":  false,
+                                                     "paper_only":  true
+                                                 },
+                                                 {
+                                                     "local_id":  "15_chaininsighter_solana_copy_trading_bot",
+                                                     "url":  "https://github.com/ChainInsighter/Solana-Copy-trading-bot",
+                                                     "family":  "copy_wallet_session",
+                                                     "priority":  10,
+                                                     "role":  "multi-wallet copy session, latency and session UX",
+                                                     "installed":  true,
+                                                     "status":  "ALREADY_PRESENT",
+                                                     "path":  "C:\\Users\\flo\\Desktop\\Projet invest\\runtime\\research\\github_repos_v24\\15_chaininsighter_solana_copy_trading_bot",
+                                                     "branch":  "main",
+                                                     "commit":  "8678b13",
+                                                     "file_count":  10,
+                                                     "size_bytes":  27147,
+                                                     "unavailable_reason":  "",
+                                                     "target_modules":  [
+                                                                            "realtime/latency_report",
+                                                                            "runtime/session_logs",
+                                                                            "ui/simulation_log_export"
+                                                                        ],
+                                                     "profile_ids":  [
+                                                                         "ext_chaininsighter_priority_copy_session"
+                                                                     ],
+                                                     "upstream_preserved":  true,
+                                                     "direct_execution":  false,
+                                                     "paper_only":  true
+                                                 },
+                                                 {
+                                                     "local_id":  "28_jackhuang166_hyberliquid_arbitrage_bot",
+                                                     "url":  "https://github.com/Jackhuang166/hyberliquid-arbitrage-bot",
+                                                     "family":  "hyperliquid_arbitrage",
+                                                     "priority":  12,
+                                                     "role":  "Hyperliquid arbitrage spread detection adapted to paper-only edge checks",
+                                                     "installed":  true,
+                                                     "status":  "ALREADY_PRESENT",
+                                                     "path":  "C:\\Users\\flo\\Desktop\\Projet invest\\runtime\\research\\github_repos_v24\\28_jackhuang166_hyberliquid_arbitrage_bot",
+                                                     "branch":  "main",
+                                                     "commit":  "8d9f23d",
+                                                     "file_count":  15,
+                                                     "size_bytes":  53779,
+                                                     "unavailable_reason":  "",
+                                                     "target_modules":  [
+                                                                            "arbitrage",
+                                                                            "edge/edge_calculator",
+                                                                            "connectors/hyperliquid_readonly"
+                                                                        ],
+                                                     "profile_ids":  [
+                                                                         "ext_jack_hl_arbitrage_spread"
+                                                                     ],
+                                                     "upstream_preserved":  true,
+                                                     "direct_execution":  false,
+                                                     "paper_only":  true
+                                                 },
+                                                 {
+                                                     "local_id":  "29_jackhuang166_hyberliquid_arbitrage",
+                                                     "url":  "https://github.com/Jackhuang166/hyberliquid-arbitrage",
+                                                     "family":  "hyperliquid_arbitrage_alt",
+                                                     "priority":  13,
+                                                     "role":  "alternate Hyperliquid arbitrage patterns adapted to source reconciliation",
+                                                     "installed":  true,
+                                                     "status":  "ALREADY_PRESENT",
+                                                     "path":  "C:\\Users\\flo\\Desktop\\Projet invest\\runtime\\research\\github_repos_v24\\29_jackhuang166_hyberliquid_arbitrage",
+                                                     "branch":  "main",
+                                                     "commit":  "8d9f23d",
+                                                     "file_count":  15,
+                                                     "size_bytes":  53779,
+                                                     "unavailable_reason":  "",
+                                                     "target_modules":  [
+                                                                            "arbitrage",
+                                                                            "signals/source_reconcile"
+                                                                        ],
+                                                     "profile_ids":  [
+                                                                         "ext_jack_hl_arbitrage_alt"
+                                                                     ],
+                                                     "upstream_preserved":  true,
+                                                     "direct_execution":  false,
+                                                     "paper_only":  true
+                                                 },
+                                                 {
+                                                     "local_id":  "19_terauss_polymarket_copy_trading_bot",
+                                                     "url":  "https://github.com/terauss/Polymarket-Copy-Trading-Bot",
+                                                     "family":  "hot_path_unavailable",
+                                                     "priority":  15,
+                                                     "role":  "hot-path/research-path split and conflicting leaders, unavailable upstream",
+                                                     "installed":  false,
+                                                     "status":  "FAILED",
+                                                     "path":  "C:\\Users\\flo\\Desktop\\Projet invest\\runtime\\research\\github_repos_v24\\19_terauss_polymarket_copy_trading_bot",
+                                                     "branch":  null,
+                                                     "commit":  null,
+                                                     "file_count":  0,
+                                                     "size_bytes":  0,
+                                                     "unavailable_reason":  "git.exe : Cloning into \u0027C:\\Users\\flo\\Desktop\\Projet \r\ninvest\\runtime\\research\\github_repos_v24\\19_terauss_polymarket_copy_trading_bot\u0027...\r\nAu caractÃ¨re C:\\Users\\flo\\Desktop\\Projet invest\\tools\\install_external_github_repos.ps1:24 : 20\r\n+         $output = (\u0026 git @Arguments 2\u003e\u00261 | Out-String).Trim()\r\n+                    ~~~~~~~~~~~~~~~~~~~~~\r\n    + CategoryInfo          : NotSpecified: (Cloning into \u0027C...trading_bot\u0027...:String) [], RemoteException\r\n    + FullyQualifiedErrorId : NativeCommandError\r\n \r\nremote: Repository not found.\r\nfatal: repository \u0027https://github.com/terauss/Polymarket-Copy-Trading-Bot/\u0027 not found",
+                                                     "target_modules":  [
+                                                                            "copying/simulation_pipeline",
+                                                                            "evidence/decision_ledger"
+                                                                        ],
+                                                     "profile_ids":  [
+                                                                         "ext_terauss_hot_path_pending"
+                                                                     ],
+                                                     "upstream_preserved":  true,
+                                                     "direct_execution":  false,
+                                                     "paper_only":  true
+                                                 },
+                                                 {
+                                                     "local_id":  "30_rustjesty_hyperliquid_drift_arbitrage_bot",
+                                                     "url":  "https://github.com/rustjesty/hyperliquid-drift-arbitrage-bot",
+                                                     "family":  "hyperliquid_drift_arbitrage",
+                                                     "priority":  18,
+                                                     "role":  "Hyperliquid/Drift spread and funding comparison adapted to local paper simulation",
+                                                     "installed":  true,
+                                                     "status":  "ALREADY_PRESENT",
+                                                     "path":  "C:\\Users\\flo\\Desktop\\Projet invest\\runtime\\research\\github_repos_v24\\30_rustjesty_hyperliquid_drift_arbitrage_bot",
+                                                     "branch":  "main",
+                                                     "commit":  "fced551",
+                                                     "file_count":  54,
+                                                     "size_bytes":  201851,
+                                                     "unavailable_reason":  "",
+                                                     "target_modules":  [
+                                                                            "funding",
+                                                                            "arbitrage",
+                                                                            "copy_fidelity/exec_cost_model"
+                                                                        ],
+                                                     "profile_ids":  [
+                                                                         "ext_hl_drift_funding_spread"
+                                                                     ],
+                                                     "upstream_preserved":  true,
+                                                     "direct_execution":  false,
+                                                     "paper_only":  true
+                                                 },
+                                                 {
+                                                     "local_id":  "32_gajesh2007_funding_arb_bot",
+                                                     "url":  "https://github.com/gajesh2007/funding-arb-bot",
+                                                     "family":  "funding_arbitrage",
+                                                     "priority":  19,
+                                                     "role":  "funding-rate arbitrage patterns mapped to paper-only funding edge",
+                                                     "installed":  true,
+                                                     "status":  "ALREADY_PRESENT",
+                                                     "path":  "C:\\Users\\flo\\Desktop\\Projet invest\\runtime\\research\\github_repos_v24\\32_gajesh2007_funding_arb_bot",
+                                                     "branch":  "main",
+                                                     "commit":  "9b016c5",
+                                                     "file_count":  40,
+                                                     "size_bytes":  288301,
+                                                     "unavailable_reason":  "",
+                                                     "target_modules":  [
+                                                                            "funding",
+                                                                            "edge/edge_calculator"
+                                                                        ],
+                                                     "profile_ids":  [
+                                                                         "ext_funding_arb_basis"
+                                                                     ],
+                                                     "upstream_preserved":  true,
+                                                     "direct_execution":  false,
+                                                     "paper_only":  true
+                                                 },
+                                                 {
+                                                     "local_id":  "16_immutal0_solana_copytrading_bot",
+                                                     "url":  "https://github.com/Immutal0/Solana-CopyTrading-Bot",
+                                                     "family":  "copy_wallet_filters",
+                                                     "priority":  20,
+                                                     "role":  "wallet tracking filters and risk caps",
+                                                     "installed":  true,
+                                                     "status":  "ALREADY_PRESENT",
+                                                     "path":  "C:\\Users\\flo\\Desktop\\Projet invest\\runtime\\research\\github_repos_v24\\16_immutal0_solana_copytrading_bot",
+                                                     "branch":  "master",
+                                                     "commit":  "5a12605",
+                                                     "file_count":  10,
+                                                     "size_bytes":  23271,
+                                                     "unavailable_reason":  "",
+                                                     "target_modules":  [
+                                                                            "wallets/leader_hotness",
+                                                                            "risk/risk_engine_v3"
+                                                                        ],
+                                                     "profile_ids":  [
+                                                                         "ext_immutal0_wallet_filter_caps"
+                                                                     ],
+                                                     "upstream_preserved":  true,
+                                                     "direct_execution":  false,
+                                                     "paper_only":  true
+                                                 },
+                                                 {
+                                                     "local_id":  "34_drakkar_triangular_arbitrage",
+                                                     "url":  "https://github.com/Drakkar-Software/Triangular-Arbitrage",
+                                                     "family":  "triangular_arbitrage",
+                                                     "priority":  23,
+                                                     "role":  "triangular arbitrage graph pattern adapted to Hyperliquid synthetic route checks",
+                                                     "installed":  true,
+                                                     "status":  "ALREADY_PRESENT",
+                                                     "path":  "C:\\Users\\flo\\Desktop\\Projet invest\\runtime\\research\\github_repos_v24\\34_drakkar_triangular_arbitrage",
+                                                     "branch":  "master",
+                                                     "commit":  "5e7d24d",
+                                                     "file_count":  19,
+                                                     "size_bytes":  245968,
+                                                     "unavailable_reason":  "",
+                                                     "target_modules":  [
+                                                                            "arbitrage/triangular",
+                                                                            "backtest/book_replay"
+                                                                        ],
+                                                     "profile_ids":  [
+                                                                         "ext_drakkar_triangular_arbitrage"
+                                                                     ],
+                                                     "upstream_preserved":  true,
+                                                     "direct_execution":  false,
+                                                     "paper_only":  true
+                                                 },
+                                                 {
+                                                     "local_id":  "31_notlelouch_arbibot",
+                                                     "url":  "https://github.com/notlelouch/ArbiBot",
+                                                     "family":  "cross_exchange_arbitrage",
+                                                     "priority":  24,
+                                                     "role":  "cross-exchange arbitrage ranking adapted to Hyperliquid price-discrepancy panels",
+                                                     "installed":  true,
+                                                     "status":  "ALREADY_PRESENT",
+                                                     "path":  "C:\\Users\\flo\\Desktop\\Projet invest\\runtime\\research\\github_repos_v24\\31_notlelouch_arbibot",
+                                                     "branch":  "main",
+                                                     "commit":  "a90fcac",
+                                                     "file_count":  15,
+                                                     "size_bytes":  1838746,
+                                                     "unavailable_reason":  "",
+                                                     "target_modules":  [
+                                                                            "arbitrage",
+                                                                            "market_data/multi_source_price_stream"
+                                                                        ],
+                                                     "profile_ids":  [
+                                                                         "ext_arbibot_cross_exchange_spread"
+                                                                     ],
+                                                     "upstream_preserved":  true,
+                                                     "direct_execution":  false,
+                                                     "paper_only":  true
+                                                 },
+                                                 {
+                                                     "local_id":  "27_carlosibcu_polymarket_kalshi_btc_arbitrage_bot",
+                                                     "url":  "https://github.com/CarlosIbCu/polymarket-kalshi-btc-arbitrage-bot",
+                                                     "family":  "cross_source_reconcile",
+                                                     "priority":  25,
+                                                     "role":  "cross-source comparison and BTC divergence",
+                                                     "installed":  true,
+                                                     "status":  "ALREADY_PRESENT",
+                                                     "path":  "C:\\Users\\flo\\Desktop\\Projet invest\\runtime\\research\\github_repos_v24\\27_carlosibcu_polymarket_kalshi_btc_arbitrage_bot",
+                                                     "branch":  "main",
+                                                     "commit":  "d5eae78",
+                                                     "file_count":  61,
+                                                     "size_bytes":  2853323,
+                                                     "unavailable_reason":  "",
+                                                     "target_modules":  [
+                                                                            "signals/source_reconcile",
+                                                                            "edge/edge_calculator"
+                                                                        ],
+                                                     "profile_ids":  [
+                                                                         "ext_carlos_cross_source_reconcile"
+                                                                     ],
+                                                     "upstream_preserved":  true,
+                                                     "direct_execution":  false,
+                                                     "paper_only":  true
+                                                 },
+                                                 {
+                                                     "local_id":  "33_hummingbot",
+                                                     "url":  "https://github.com/hummingbot/hummingbot",
+                                                     "family":  "market_making_framework",
+                                                     "priority":  26,
+                                                     "role":  "market-making framework concepts adapted to paper-only quote and liquidity simulation",
+                                                     "installed":  true,
+                                                     "status":  "ALREADY_PRESENT",
+                                                     "path":  "C:\\Users\\flo\\Desktop\\Projet invest\\runtime\\research\\github_repos_v24\\33_hummingbot",
+                                                     "branch":  "master",
+                                                     "commit":  "816b8ab",
+                                                     "file_count":  1830,
+                                                     "size_bytes":  16896731,
+                                                     "unavailable_reason":  "",
+                                                     "target_modules":  [
+                                                                            "market_making",
+                                                                            "paper_trading/liquidity_route_simulator",
+                                                                            "strategies/library"
+                                                                        ],
+                                                     "profile_ids":  [
+                                                                         "ext_hummingbot_market_making_framework"
+                                                                     ],
+                                                     "upstream_preserved":  true,
+                                                     "direct_execution":  false,
+                                                     "paper_only":  true
+                                                 },
+                                                 {
+                                                     "local_id":  "36_pydevtop_interexchange_arbitrage_bot",
+                                                     "url":  "https://github.com/pydevtop/interexchange-arbitrage-bot",
+                                                     "family":  "interexchange_arbitrage",
+                                                     "priority":  27,
+                                                     "role":  "interexchange spread detection adapted to multi-source paper reconciliation",
+                                                     "installed":  true,
+                                                     "status":  "ALREADY_PRESENT",
+                                                     "path":  "C:\\Users\\flo\\Desktop\\Projet invest\\runtime\\research\\github_repos_v24\\36_pydevtop_interexchange_arbitrage_bot",
+                                                     "branch":  "main",
+                                                     "commit":  "81fe2d9",
+                                                     "file_count":  2,
+                                                     "size_bytes":  7240,
+                                                     "unavailable_reason":  "",
+                                                     "target_modules":  [
+                                                                            "arbitrage",
+                                                                            "market_data/multi_source_price_stream"
+                                                                        ],
+                                                     "profile_ids":  [
+                                                                         "ext_interexchange_arbitrage"
+                                                                     ],
+                                                     "upstream_preserved":  true,
+                                                     "direct_execution":  false,
+                                                     "paper_only":  true
+                                                 },
+                                                 {
+                                                     "local_id":  "35_enarjord_passivbot",
+                                                     "url":  "https://github.com/enarjord/passivbot",
+                                                     "family":  "grid_risk_management",
+                                                     "priority":  28,
+                                                     "role":  "grid/DCA risk concepts adapted to constrained local paper sizing",
+                                                     "installed":  true,
+                                                     "status":  "ALREADY_PRESENT",
+                                                     "path":  "C:\\Users\\flo\\Desktop\\Projet invest\\runtime\\research\\github_repos_v24\\35_enarjord_passivbot",
+                                                     "branch":  "master",
+                                                     "commit":  "befaa9b",
+                                                     "file_count":  470,
+                                                     "size_bytes":  8723241,
+                                                     "unavailable_reason":  "",
+                                                     "target_modules":  [
+                                                                            "risk/tiered_copy_sizing",
+                                                                            "paper_trading/position_tracking"
+                                                                        ],
+                                                     "profile_ids":  [
+                                                                         "ext_passivbot_grid_risk"
+                                                                     ],
+                                                     "upstream_preserved":  true,
+                                                     "direct_execution":  false,
+                                                     "paper_only":  true
+                                                 },
+                                                 {
+                                                     "local_id":  "37_ramilexe_crypto_arbitrage_bot",
+                                                     "url":  "https://github.com/ramilexe/crypto-arbitrage-bot",
+                                                     "family":  "crypto_arbitrage",
+                                                     "priority":  29,
+                                                     "role":  "crypto arbitrage spread model adapted to Hyperliquid paper opportunity ranking",
+                                                     "installed":  true,
+                                                     "status":  "ALREADY_PRESENT",
+                                                     "path":  "C:\\Users\\flo\\Desktop\\Projet invest\\runtime\\research\\github_repos_v24\\37_ramilexe_crypto_arbitrage_bot",
+                                                     "branch":  "master",
+                                                     "commit":  "fe8edbc",
+                                                     "file_count":  62,
+                                                     "size_bytes":  304914,
+                                                     "unavailable_reason":  "",
+                                                     "target_modules":  [
+                                                                            "arbitrage",
+                                                                            "edge/edge_calculator"
+                                                                        ],
+                                                     "profile_ids":  [
+                                                                         "ext_crypto_arbitrage_spread"
+                                                                     ],
+                                                     "upstream_preserved":  true,
+                                                     "direct_execution":  false,
+                                                     "paper_only":  true
+                                                 },
+                                                 {
+                                                     "local_id":  "22_freqtrade",
+                                                     "url":  "https://github.com/freqtrade/freqtrade",
+                                                     "family":  "backtest_discipline",
+                                                     "priority":  30,
+                                                     "role":  "dry-run, backtesting, optimization and no-lookahead discipline",
+                                                     "installed":  true,
+                                                     "status":  "ALREADY_PRESENT",
+                                                     "path":  "C:\\Users\\flo\\Desktop\\Projet invest\\runtime\\research\\github_repos_v24\\22_freqtrade",
+                                                     "branch":  "develop",
+                                                     "commit":  "8964338",
+                                                     "file_count":  773,
+                                                     "size_bytes":  60342490,
+                                                     "unavailable_reason":  "",
+                                                     "target_modules":  [
+                                                                            "optimization/profit_optimizer",
+                                                                            "backtest/no_lookahead_guard",
+                                                                            "backtest/experiment_runner"
+                                                                        ],
+                                                     "profile_ids":  [
+                                                                         "ext_freqtrade_backtest_discipline"
+                                                                     ],
+                                                     "upstream_preserved":  true,
+                                                     "direct_execution":  false,
+                                                     "paper_only":  true
+                                                 },
+                                                 {
+                                                     "local_id":  "11_prediction_market_backtesting",
+                                                     "url":  "https://github.com/evan-kolberg/prediction-market-backtesting",
+                                                     "family":  "backtesting_methodology",
+                                                     "priority":  32,
+                                                     "role":  "backtesting experiment discipline and anti-lookahead controls",
+                                                     "installed":  true,
+                                                     "status":  "ALREADY_PRESENT",
+                                                     "path":  "C:\\Users\\flo\\Desktop\\Projet invest\\runtime\\research\\github_repos_v24\\11_prediction_market_backtesting",
+                                                     "branch":  "v4.1-alpha",
+                                                     "commit":  "c76e77a",
+                                                     "file_count":  254,
+                                                     "size_bytes":  14577025,
+                                                     "unavailable_reason":  "",
+                                                     "target_modules":  [
+                                                                            "backtest/experiment_runner",
+                                                                            "backtest/no_lookahead_guard"
+                                                                        ],
+                                                     "profile_ids":  [
+                                                                         "ext_prediction_market_backtesting_guard"
+                                                                     ],
+                                                     "upstream_preserved":  true,
+                                                     "direct_execution":  false,
+                                                     "paper_only":  true
+                                                 },
+                                                 {
+                                                     "local_id":  "23_octobot",
+                                                     "url":  "https://github.com/drakkar-software/octobot",
+                                                     "family":  "bot_framework",
+                                                     "priority":  35,
+                                                     "role":  "strategy framework, evaluators, risk management",
+                                                     "installed":  true,
+                                                     "status":  "ALREADY_PRESENT",
+                                                     "path":  "C:\\Users\\flo\\Desktop\\Projet invest\\runtime\\research\\github_repos_v24\\23_octobot",
+                                                     "branch":  "master",
+                                                     "commit":  "a4a38e4",
+                                                     "file_count":  4473,
+                                                     "size_bytes":  143920710,
+                                                     "unavailable_reason":  "",
+                                                     "target_modules":  [
+                                                                            "strategies/library",
+                                                                            "strategies/paper_registry"
+                                                                        ],
+                                                     "profile_ids":  [
+                                                                         "ext_octobot_framework_priority"
+                                                                     ],
+                                                     "upstream_preserved":  true,
+                                                     "direct_execution":  false,
+                                                     "paper_only":  true
+                                                 },
+                                                 {
+                                                     "local_id":  "09_mlmodelpoly",
+                                                     "url":  "https://github.com/txbabaxyz/mlmodelpoly",
+                                                     "family":  "ml_shadow_model",
+                                                     "priority":  40,
+                                                     "role":  "ML scoring pattern adapted as shadow-only local model",
+                                                     "installed":  true,
+                                                     "status":  "ALREADY_PRESENT",
+                                                     "path":  "C:\\Users\\flo\\Desktop\\Projet invest\\runtime\\research\\github_repos_v24\\09_mlmodelpoly",
+                                                     "branch":  "main",
+                                                     "commit":  "9b274ff",
+                                                     "file_count":  65,
+                                                     "size_bytes":  781104,
+                                                     "unavailable_reason":  "",
+                                                     "target_modules":  [
+                                                                            "ml/model",
+                                                                            "ml/inference",
+                                                                            "calibration"
+                                                                        ],
+                                                     "profile_ids":  [
+                                                                         "ext_mlmodelpoly_shadow_score"
+                                                                     ],
+                                                     "upstream_preserved":  true,
+                                                     "direct_execution":  false,
+                                                     "paper_only":  true
+                                                 },
+                                                 {
+                                                     "local_id":  "10_polyrec",
+                                                     "url":  "https://github.com/txbabaxyz/polyrec",
+                                                     "family":  "recommendation_shadow_model",
+                                                     "priority":  42,
+                                                     "role":  "recommendation model pattern adapted to wallet/coin ranking shadow mode",
+                                                     "installed":  true,
+                                                     "status":  "ALREADY_PRESENT",
+                                                     "path":  "C:\\Users\\flo\\Desktop\\Projet invest\\runtime\\research\\github_repos_v24\\10_polyrec",
+                                                     "branch":  "main",
+                                                     "commit":  "4c82480",
+                                                     "file_count":  7,
+                                                     "size_bytes":  92615,
+                                                     "unavailable_reason":  "",
+                                                     "target_modules":  [
+                                                                            "ml/model",
+                                                                            "wallets/leaderboard_robustness"
+                                                                        ],
+                                                     "profile_ids":  [
+                                                                         "ext_polyrec_shadow_recommender"
+                                                                     ],
+                                                     "upstream_preserved":  true,
+                                                     "direct_execution":  false,
+                                                     "paper_only":  true
+                                                 },
+                                                 {
+                                                     "local_id":  "20_warp_id_solana_trading_bot",
+                                                     "url":  "https://github.com/warp-id/solana-trading-bot",
+                                                     "family":  "risk_process",
+                                                     "priority":  45,
+                                                     "role":  "monitoring, risk config and wallet rules",
+                                                     "installed":  true,
+                                                     "status":  "ALREADY_PRESENT",
+                                                     "path":  "C:\\Users\\flo\\Desktop\\Projet invest\\runtime\\research\\github_repos_v24\\20_warp_id_solana_trading_bot",
+                                                     "branch":  "master",
+                                                     "commit":  "4c9304a",
+                                                     "file_count":  38,
+                                                     "size_bytes":  250473,
+                                                     "unavailable_reason":  "",
+                                                     "target_modules":  [
+                                                                            "risk/gates"
+                                                                        ],
+                                                     "profile_ids":  [
+                                                                         "ext_warp_risk_process_caps"
+                                                                     ],
+                                                     "upstream_preserved":  true,
+                                                     "direct_execution":  false,
+                                                     "paper_only":  true
+                                                 },
+                                                 {
+                                                     "local_id":  "04_polymarket_lp_tool",
+                                                     "url":  "https://github.com/lihanyu81/polymarket_lp_tool",
+                                                     "family":  "liquidity_provider_tool",
+                                                     "priority":  52,
+                                                     "role":  "liquidity and quote discipline adapted as paper-only market quality guard",
+                                                     "installed":  true,
+                                                     "status":  "ALREADY_PRESENT",
+                                                     "path":  "C:\\Users\\flo\\Desktop\\Projet invest\\runtime\\research\\github_repos_v24\\04_polymarket_lp_tool",
+                                                     "branch":  "main",
+                                                     "commit":  "32f7799",
+                                                     "file_count":  77,
+                                                     "size_bytes":  735595,
+                                                     "unavailable_reason":  "",
+                                                     "target_modules":  [
+                                                                            "market_making",
+                                                                            "risk/liquidity_cliff_detector",
+                                                                            "features/orderbook_imbalance"
+                                                                        ],
+                                                     "profile_ids":  [
+                                                                         "ext_polymarket_lp_liquidity_guard"
+                                                                     ],
+                                                     "upstream_preserved":  true,
+                                                     "direct_execution":  false,
+                                                     "paper_only":  true
+                                                 },
+                                                 {
+                                                     "local_id":  "24_jlowo_gengar_polymarket_bot",
+                                                     "url":  "https://github.com/JLowo/gengar_polymarket_bot",
+                                                     "family":  "lightweight_decision_bot",
+                                                     "priority":  55,
+                                                     "role":  "simple scanner and structured decisions",
+                                                     "installed":  true,
+                                                     "status":  "ALREADY_PRESENT",
+                                                     "path":  "C:\\Users\\flo\\Desktop\\Projet invest\\runtime\\research\\github_repos_v24\\24_jlowo_gengar_polymarket_bot",
+                                                     "branch":  "main",
+                                                     "commit":  "9f49a07",
+                                                     "file_count":  16,
+                                                     "size_bytes":  176673,
+                                                     "unavailable_reason":  "",
+                                                     "target_modules":  [
+                                                                            "signals/entry_quality_gate",
+                                                                            "evidence/decision_ledger"
+                                                                        ],
+                                                     "profile_ids":  [
+                                                                         "ext_jlowo_structured_decision"
+                                                                     ],
+                                                     "upstream_preserved":  true,
+                                                     "direct_execution":  false,
+                                                     "paper_only":  true
+                                                 },
+                                                 {
+                                                     "local_id":  "03_mrfadiai_polymarket_bot",
+                                                     "url":  "https://github.com/MrFadiAi/Polymarket-bot",
+                                                     "family":  "copy_wallet_rules",
+                                                     "priority":  58,
+                                                     "role":  "simple bot rules and wallet monitoring adapted to Hyperliquid leaders",
+                                                     "installed":  true,
+                                                     "status":  "ALREADY_PRESENT",
+                                                     "path":  "C:\\Users\\flo\\Desktop\\Projet invest\\runtime\\research\\github_repos_v24\\03_mrfadiai_polymarket_bot",
+                                                     "branch":  "main",
+                                                     "commit":  "8264701",
+                                                     "file_count":  192,
+                                                     "size_bytes":  5932258,
+                                                     "unavailable_reason":  "",
+                                                     "target_modules":  [
+                                                                            "copying/signal_detector",
+                                                                            "copy_wallet/wallet_mirror_runtime"
+                                                                        ],
+                                                     "profile_ids":  [
+                                                                         "ext_mrfadiai_copy_rules"
+                                                                     ],
+                                                     "upstream_preserved":  true,
+                                                     "direct_execution":  false,
+                                                     "paper_only":  true
+                                                 },
+                                                 {
+                                                     "local_id":  "25_djienne_polymarket_bot",
+                                                     "url":  "https://github.com/djienne/Polymarket-bot",
+                                                     "family":  "bot_logging_resilience",
+                                                     "priority":  60,
+                                                     "role":  "bot ergonomics, resilience tests and logging",
+                                                     "installed":  true,
+                                                     "status":  "ALREADY_PRESENT",
+                                                     "path":  "C:\\Users\\flo\\Desktop\\Projet invest\\runtime\\research\\github_repos_v24\\25_djienne_polymarket_bot",
+                                                     "branch":  "main",
+                                                     "commit":  "877f4d8",
+                                                     "file_count":  68,
+                                                     "size_bytes":  725223,
+                                                     "unavailable_reason":  "",
+                                                     "target_modules":  [
+                                                                            "simulation/log_metrics",
+                                                                            "runtime/session_logs"
+                                                                        ],
+                                                     "profile_ids":  [
+                                                                         "ext_djienne_resilience_logging"
+                                                                     ],
+                                                     "upstream_preserved":  true,
+                                                     "direct_execution":  false,
+                                                     "paper_only":  true
+                                                 },
+                                                 {
+                                                     "local_id":  "12_polybot",
+                                                     "url":  "https://github.com/ent0n29/polybot",
+                                                     "family":  "lightweight_bot_rules",
+                                                     "priority":  62,
+                                                     "role":  "simple rule bot adapted as lightweight signal sanity check",
+                                                     "installed":  true,
+                                                     "status":  "ALREADY_PRESENT",
+                                                     "path":  "C:\\Users\\flo\\Desktop\\Projet invest\\runtime\\research\\github_repos_v24\\12_polybot",
+                                                     "branch":  "main",
+                                                     "commit":  "51e5362",
+                                                     "file_count":  238,
+                                                     "size_bytes":  1537705,
+                                                     "unavailable_reason":  "",
+                                                     "target_modules":  [
+                                                                            "signals/entry_quality_gate"
+                                                                        ],
+                                                     "profile_ids":  [
+                                                                         "ext_polybot_lightweight_rules"
+                                                                     ],
+                                                     "upstream_preserved":  true,
+                                                     "direct_execution":  false,
+                                                     "paper_only":  true
+                                                 },
+                                                 {
+                                                     "local_id":  "26_jonmaa_btc_polymarket_bot",
+                                                     "url":  "https://github.com/Jonmaa/btc-polymarket-bot",
+                                                     "family":  "single_market_discipline",
+                                                     "priority":  65,
+                                                     "role":  "single-market strategy discipline and market-specific rules",
+                                                     "installed":  true,
+                                                     "status":  "ALREADY_PRESENT",
+                                                     "path":  "C:\\Users\\flo\\Desktop\\Projet invest\\runtime\\research\\github_repos_v24\\26_jonmaa_btc_polymarket_bot",
+                                                     "branch":  "main",
+                                                     "commit":  "3518449",
+                                                     "file_count":  13,
+                                                     "size_bytes":  99452,
+                                                     "unavailable_reason":  "",
+                                                     "target_modules":  [
+                                                                            "risk/risk_engine_v3"
+                                                                        ],
+                                                     "profile_ids":  [
+                                                                         "ext_jonmaa_single_market_rules"
+                                                                     ],
+                                                     "upstream_preserved":  true,
+                                                     "direct_execution":  false,
+                                                     "paper_only":  true
+                                                 },
+                                                 {
+                                                     "local_id":  "14_tradingview_lightweight_charts",
+                                                     "url":  "https://github.com/tradingview/lightweight-charts",
+                                                     "family":  "charting_runtime",
+                                                     "priority":  68,
+                                                     "role":  "charting UX patterns for simulation metagraph and market views",
+                                                     "installed":  true,
+                                                     "status":  "ALREADY_PRESENT",
+                                                     "path":  "C:\\Users\\flo\\Desktop\\Projet invest\\runtime\\research\\github_repos_v24\\14_tradingview_lightweight_charts",
+                                                     "branch":  "master",
+                                                     "commit":  "1a5a2ed",
+                                                     "file_count":  1532,
+                                                     "size_bytes":  6557816,
+                                                     "unavailable_reason":  "",
+                                                     "target_modules":  [
+                                                                            "ui/static",
+                                                                            "ui/charts"
+                                                                        ],
+                                                     "profile_ids":  [
+                                                                         "ext_tradingview_chart_runtime"
+                                                                     ],
+                                                     "upstream_preserved":  true,
+                                                     "direct_execution":  false,
+                                                     "paper_only":  true
+                                                 },
+                                                 {
+                                                     "local_id":  "01_cloddsbot",
+                                                     "url":  "https://github.com/alsk1992/CloddsBot",
+                                                     "family":  "agentic_prediction_bot",
+                                                     "priority":  70,
+                                                     "role":  "agent-style research loop, prompts and decision logging adapted to local paper simulation",
+                                                     "installed":  true,
+                                                     "status":  "ALREADY_PRESENT",
+                                                     "path":  "C:\\Users\\flo\\Desktop\\Projet invest\\runtime\\research\\github_repos_v24\\01_cloddsbot",
+                                                     "branch":  "main",
+                                                     "commit":  "e71a5f6",
+                                                     "file_count":  797,
+                                                     "size_bytes":  12821110,
+                                                     "unavailable_reason":  "",
+                                                     "target_modules":  [
+                                                                            "research/ollama_advisor",
+                                                                            "evidence/decision_ledger",
+                                                                            "ui/simulation_log_export"
+                                                                        ],
+                                                     "profile_ids":  [
+                                                                         "ext_cloddsbot_agentic_research_loop"
+                                                                     ],
+                                                     "upstream_preserved":  true,
+                                                     "direct_execution":  false,
+                                                     "paper_only":  true
+                                                 },
+                                                 {
+                                                     "local_id":  "02_harrier_prediction_markets_toolkits",
+                                                     "url":  "https://github.com/HarrierOnChain/Prediction-Markets-Trading-Bot-Toolkits",
+                                                     "family":  "toolkit_decision_stack",
+                                                     "priority":  72,
+                                                     "role":  "prediction-market toolkit patterns mapped to Hyperliquid read-only feature extraction",
+                                                     "installed":  true,
+                                                     "status":  "ALREADY_PRESENT",
+                                                     "path":  "C:\\Users\\flo\\Desktop\\Projet invest\\runtime\\research\\github_repos_v24\\02_harrier_prediction_markets_toolkits",
+                                                     "branch":  "main",
+                                                     "commit":  "5576545",
+                                                     "file_count":  84,
+                                                     "size_bytes":  414485,
+                                                     "unavailable_reason":  "",
+                                                     "target_modules":  [
+                                                                            "agent_tools/manifest",
+                                                                            "features/scan_features",
+                                                                            "ledger/evidence"
+                                                                        ],
+                                                     "profile_ids":  [
+                                                                         "ext_harrier_toolkit_decision_stack"
+                                                                     ],
+                                                     "upstream_preserved":  true,
+                                                     "direct_execution":  false,
+                                                     "paper_only":  true
+                                                 },
+                                                 {
+                                                     "local_id":  "13_polymarket_agents",
+                                                     "url":  "https://github.com/Polymarket/agents",
+                                                     "family":  "agent_framework_research",
+                                                     "priority":  78,
+                                                     "role":  "agent patterns adapted to local explanation/research path, not hot-path execution",
+                                                     "installed":  true,
+                                                     "status":  "ALREADY_PRESENT",
+                                                     "path":  "C:\\Users\\flo\\Desktop\\Projet invest\\runtime\\research\\github_repos_v24\\13_polymarket_agents",
+                                                     "branch":  "main",
+                                                     "commit":  "081f2b5",
+                                                     "file_count":  37,
+                                                     "size_bytes":  190521,
+                                                     "unavailable_reason":  "",
+                                                     "target_modules":  [
+                                                                            "research/ollama_advisor",
+                                                                            "agent_tools"
+                                                                        ],
+                                                     "profile_ids":  [
+                                                                         "ext_polymarket_agents_research_path"
+                                                                     ],
+                                                     "upstream_preserved":  true,
+                                                     "direct_execution":  false,
+                                                     "paper_only":  true
+                                                 },
+                                                 {
+                                                     "local_id":  "08_polyterm",
+                                                     "url":  "https://github.com/NYTEMODEONLY/polyterm",
+                                                     "family":  "terminal_ops",
+                                                     "priority":  82,
+                                                     "role":  "terminal UX and bot operations adapted to local launcher/status tooling",
+                                                     "installed":  true,
+                                                     "status":  "ALREADY_PRESENT",
+                                                     "path":  "C:\\Users\\flo\\Desktop\\Projet invest\\runtime\\research\\github_repos_v24\\08_polyterm",
+                                                     "branch":  "main",
+                                                     "commit":  "9c87fa3",
+                                                     "file_count":  628,
+                                                     "size_bytes":  4829864,
+                                                     "unavailable_reason":  "",
+                                                     "target_modules":  [
+                                                                            "clitools",
+                                                                            "ui/local_commands"
+                                                                        ],
+                                                     "profile_ids":  [
+                                                                         "ext_polyterm_terminal_ops"
+                                                                     ],
+                                                     "upstream_preserved":  true,
+                                                     "direct_execution":  false,
+                                                     "paper_only":  true
+                                                 },
+                                                 {
+                                                     "local_id":  "06_composio_polymarket_kalshi_arbitrage_bot",
+                                                     "url":  "https://github.com/Composio-HQ/polymarket-kalshi-arbitrage-bot",
+                                                     "family":  "cross_market_arbitrage_unavailable",
+                                                     "priority":  88,
+                                                     "role":  "cross-market arbitrage pattern, unavailable upstream URL",
+                                                     "installed":  false,
+                                                     "status":  "FAILED",
+                                                     "path":  "C:\\Users\\flo\\Desktop\\Projet invest\\runtime\\research\\github_repos_v24\\06_composio_polymarket_kalshi_arbitrage_bot",
+                                                     "branch":  null,
+                                                     "commit":  null,
+                                                     "file_count":  0,
+                                                     "size_bytes":  0,
+                                                     "unavailable_reason":  "git.exe : Cloning into \u0027C:\\Users\\flo\\Desktop\\Projet \r\ninvest\\runtime\\research\\github_repos_v24\\06_composio_polymarket_kalshi_arbitrage_bot\u0027...\r\nAu caractÃ¨re C:\\Users\\flo\\Desktop\\Projet invest\\tools\\install_external_github_repos.ps1:24 : 20\r\n+         $output = (\u0026 git @Arguments 2\u003e\u00261 | Out-String).Trim()\r\n+                    ~~~~~~~~~~~~~~~~~~~~~\r\n    + CategoryInfo          : NotSpecified: (Cloning into \u0027C...bitrage_bot\u0027...:String) [], RemoteException\r\n    + FullyQualifiedErrorId : NativeCommandError\r\n \r\nremote: Repository not found.\r\nfatal: repository \u0027https://github.com/Composio-HQ/polymarket-kalshi-arbitrage-bot/\u0027 not found",
+                                                     "target_modules":  [
+                                                                            "signals/source_reconcile",
+                                                                            "arbitrage"
+                                                                        ],
+                                                     "profile_ids":  [
+                                                                         "ext_composio_cross_market_arb_pending"
+                                                                     ],
+                                                     "upstream_preserved":  true,
+                                                     "direct_execution":  false,
+                                                     "paper_only":  true
+                                                 },
+                                                 {
+                                                     "local_id":  "18_neron888_polymarket_copy_trading_bot",
+                                                     "url":  "https://github.com/Neron888/Polymarket-copy-trading-bot",
+                                                     "family":  "copy_loop_unavailable",
+                                                     "priority":  90,
+                                                     "role":  "copy loop and leader filters, unavailable upstream",
+                                                     "installed":  false,
+                                                     "status":  "FAILED",
+                                                     "path":  "C:\\Users\\flo\\Desktop\\Projet invest\\runtime\\research\\github_repos_v24\\18_neron888_polymarket_copy_trading_bot",
+                                                     "branch":  null,
+                                                     "commit":  null,
+                                                     "file_count":  0,
+                                                     "size_bytes":  0,
+                                                     "unavailable_reason":  "git.exe : Cloning into \u0027C:\\Users\\flo\\Desktop\\Projet \r\ninvest\\runtime\\research\\github_repos_v24\\18_neron888_polymarket_copy_trading_bot\u0027...\r\nAu caractÃ¨re C:\\Users\\flo\\Desktop\\Projet invest\\tools\\install_external_github_repos.ps1:24 : 20\r\n+         $output = (\u0026 git @Arguments 2\u003e\u00261 | Out-String).Trim()\r\n+                    ~~~~~~~~~~~~~~~~~~~~~\r\n    + CategoryInfo          : NotSpecified: (Cloning into \u0027C...trading_bot\u0027...:String) [], RemoteException\r\n    + FullyQualifiedErrorId : NativeCommandError\r\n \r\nremote: Repository not found.\r\nfatal: repository \u0027https://github.com/Neron888/Polymarket-copy-trading-bot/\u0027 not found",
+                                                     "target_modules":  [
+                                                                            "copying/signal_detector"
+                                                                        ],
+                                                     "profile_ids":  [
+                                                                         "ext_neron888_copy_loop_pending"
+                                                                     ],
+                                                     "upstream_preserved":  true,
+                                                     "direct_execution":  false,
+                                                     "paper_only":  true
+                                                 },
+                                                 {
+                                                     "local_id":  "05_polyweather",
+                                                     "url":  "https://github.com/yangyuan-zhen/PolyWeather",
+                                                     "family":  "external_context_features",
+                                                     "priority":  95,
+                                                     "role":  "external context feature pattern, retained as offline research context only",
+                                                     "installed":  true,
+                                                     "status":  "ALREADY_PRESENT",
+                                                     "path":  "C:\\Users\\flo\\Desktop\\Projet invest\\runtime\\research\\github_repos_v24\\05_polyweather",
+                                                     "branch":  "main",
+                                                     "commit":  "d7ab681",
+                                                     "file_count":  829,
+                                                     "size_bytes":  46087267,
+                                                     "unavailable_reason":  "",
+                                                     "target_modules":  [
+                                                                            "features/scan_features"
+                                                                        ],
+                                                     "profile_ids":  [
+                                                                         "ext_polyweather_context_features"
+                                                                     ],
+                                                     "upstream_preserved":  true,
+                                                     "direct_execution":  false,
+                                                     "paper_only":  true
+                                                 },
+                                                 {
+                                                     "local_id":  "07_awesome_prediction_market_tools",
+                                                     "url":  "https://github.com/aarora4/Awesome-Prediction-Market-Tools",
+                                                     "family":  "research_index",
+                                                     "priority":  98,
+                                                     "role":  "curated research index, used for documentation and idea classification",
+                                                     "installed":  true,
+                                                     "status":  "ALREADY_PRESENT",
+                                                     "path":  "C:\\Users\\flo\\Desktop\\Projet invest\\runtime\\research\\github_repos_v24\\07_awesome_prediction_market_tools",
+                                                     "branch":  "main",
+                                                     "commit":  "eb0725a",
+                                                     "file_count":  1,
+                                                     "size_bytes":  46691,
+                                                     "unavailable_reason":  "",
+                                                     "target_modules":  [
+                                                                            "docs/research"
+                                                                        ],
+                                                     "profile_ids":  [
+                                                                         "ext_awesome_prediction_tools_index"
+                                                                     ],
+                                                     "upstream_preserved":  true,
+                                                     "direct_execution":  false,
+                                                     "paper_only":  true
+                                                 }
+                                             ],
+                                   "priority_strategy_catalog":  [
+                                                                     "ext_rezzecup_whale_mirror_primary",
+                                                                     "ext_tony_autonomous_sltp_priority",
+                                                                     "ext_chaininsighter_priority_copy_session",
+                                                                     "ext_jack_hl_arbitrage_spread",
+                                                                     "ext_jack_hl_arbitrage_alt",
+                                                                     "ext_hl_drift_funding_spread",
+                                                                     "ext_funding_arb_basis",
+                                                                     "ext_immutal0_wallet_filter_caps",
+                                                                     "ext_drakkar_triangular_arbitrage",
+                                                                     "ext_arbibot_cross_exchange_spread",
+                                                                     "ext_carlos_cross_source_reconcile",
+                                                                     "ext_hummingbot_market_making_framework",
+                                                                     "ext_interexchange_arbitrage",
+                                                                     "ext_passivbot_grid_risk",
+                                                                     "ext_crypto_arbitrage_spread",
+                                                                     "ext_freqtrade_backtest_discipline",
+                                                                     "ext_prediction_market_backtesting_guard",
+                                                                     "ext_octobot_framework_priority",
+                                                                     "ext_mlmodelpoly_shadow_score",
+                                                                     "ext_polyrec_shadow_recommender",
+                                                                     "ext_warp_risk_process_caps",
+                                                                     "ext_polymarket_lp_liquidity_guard",
+                                                                     "ext_jlowo_structured_decision",
+                                                                     "ext_mrfadiai_copy_rules",
+                                                                     "ext_djienne_resilience_logging",
+                                                                     "ext_polybot_lightweight_rules",
+                                                                     "ext_jonmaa_single_market_rules",
+                                                                     "ext_tradingview_chart_runtime",
+                                                                     "ext_cloddsbot_agentic_research_loop",
+                                                                     "ext_harrier_toolkit_decision_stack",
+                                                                     "ext_polymarket_agents_research_path",
+                                                                     "ext_polyterm_terminal_ops",
+                                                                     "ext_polyweather_context_features",
+                                                                     "ext_awesome_prediction_tools_index"
+                                                                 ],
+                                   "disabled_strategy_catalog":  [
+                                                                     "ext_terauss_hot_path_pending",
+                                                                     "ext_composio_cross_market_arb_pending",
+                                                                     "ext_neron888_copy_loop_pending"
+                                                                 ],
+                                   "notes":  "Upstream repos stay installed unchanged under runtime/research. HyperSmart uses local paper adapters only."
+                               }
+}

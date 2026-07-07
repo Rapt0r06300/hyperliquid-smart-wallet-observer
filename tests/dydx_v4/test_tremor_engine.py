@@ -97,3 +97,38 @@ def test_flow_only_is_watch_not_candidate() -> None:
     event = evaluate_tremor(obs)
     assert event.decision == TremorDecision.WATCH
     assert not event.is_actionable_paper_candidate
+
+
+
+def test_large_trade_public_flow_boosts_tremor_and_is_logged() -> None:
+    base = observation_from_flow(
+        market_id="ETH-USD",
+        direction="LONG",
+        flow_imbalance=0.62,
+        flow_volume_usdc=70_000.0,
+        flow_trade_count=10,
+        price_move_bps=18.0,
+        volume_zscore=1.2,
+        signal_age_ms=250,
+        market_regime="TRENDING",
+        market_confidence=0.7,
+    )
+    boosted = observation_from_flow(
+        market_id="ETH-USD",
+        direction="LONG",
+        flow_imbalance=0.62,
+        flow_volume_usdc=70_000.0,
+        flow_trade_count=10,
+        large_trade_usdc=65_000.0,
+        price_move_bps=18.0,
+        volume_zscore=1.2,
+        signal_age_ms=250,
+        market_regime="TRENDING",
+        market_confidence=0.7,
+    )
+
+    assert tremor_intensity(boosted) > tremor_intensity(base)
+    event = evaluate_tremor(boosted)
+    assert TremorReason.LARGE_TRADE_BOOST.value in event.reasons
+    assert event.to_log_dict()["large_trade_usdc"] == 65_000.0
+    assert "large_trade=65000USDC" in event.explanation

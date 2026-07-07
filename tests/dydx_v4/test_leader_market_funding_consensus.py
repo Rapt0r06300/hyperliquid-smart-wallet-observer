@@ -1,6 +1,7 @@
 from __future__ import annotations
 import pytest
 
+import json
 import time
 from unittest.mock import MagicMock
 
@@ -217,3 +218,76 @@ def test_atr_take_profit_takes_partial_and_keeps_runner(tmp_path) -> None:
     assert obs._open_positions["ETH-USD:LONG"].take_profit_price == 112.0
     rows = obs.get_recent_decisions(limit=5, event_type="PAPER_PARTIAL_TP")
     assert rows and rows[-1]["reason"] == "TAKE_PROFIT_PARTIAL"
+
+
+def test_weak_two_wallet_precision_cluster_is_refused() -> None:
+    rest = MagicMock()
+    wallets = [
+        _wallet("dydx1gooda", eth_expectancy=8.0),
+        _wallet("dydx1goodb", eth_expectancy=8.0),
+    ]
+    obs = _observer(rest, wallets)
+
+    obs._evaluate_cluster(_cluster(wallets=["dydx1gooda", "dydx1goodb"], first_age_ms=900, last_age_ms=450))
+
+    assert obs.stats.positions_opened == 0
+    assert any(reason.startswith("PRECISION_CLUSTER_TOO_WEAK") for reason in obs._no_trade_reasons)
+
+
+def test_tight_two_wallet_precision_cluster_is_accepted() -> None:
+    rest = MagicMock()
+    wallets = [
+        _wallet("dydx1gooda", eth_expectancy=8.0),
+        _wallet("dydx1goodb", eth_expectancy=8.0),
+    ]
+    obs = _observer(rest, wallets)
+
+    obs._evaluate_cluster(_cluster(wallets=["dydx1gooda", "dydx1goodb"], first_age_ms=300, last_age_ms=100))
+
+    assert obs.stats.positions_opened == 1
+    pos = next(iter(obs._open_positions.values()))
+    assert "RECENT_CONSENSUS" in pos.sizing_reason
+
+
+def test_market_side_performance_bootstraps_from_decision_log(tmp_path) -> None:
+    decision_log = tmp_path / "decisions.jsonl"
+    now_ms = int(time.time() * 1000) - 60_000
+    rows = [
+        {
+            "event_type": "PAPER_CLOSE",
+            "market_id": "ETH-USD",
+            "side": "LONG",
+            "net_pnl": -0.30,
+            "closed_at_ms": now_ms,
+            "paper_only": True,
+            "read_only": True,
+        },
+        {
+            "event_type": "PAPER_CLOSE",
+            "market_id": "ETH-USD",
+            "side": "LONG",
+            "net_pnl": -0.20,
+            "closed_at_ms": now_ms + 1_000,
+            "paper_only": True,
+            "read_only": True,
+        },
+    ]
+    decision_log.write_text("\n".join(json.dumps(r) for r in rows) + "\n", encoding="utf-8")
+
+    rest = MagicMock()
+    obs = _observer(
+        rest,
+        [_wallet("dydx1goodeth", eth_expectancy=8.0)],
+        decision_log_path=str(decision_log),
+        market_side_history_bootstrap_trades=20,
+        market_side_loss_cooldown_seconds=0,
+        market_side_min_edge_after_loss_bps=30.0,
+    )
+
+    row = obs._market_side_perf[("ETH-USD", "LONG")]
+    assert row["losses"] == 2
+    assert row["consecutive_losses"] == 2
+    reason = obs._market_side_performance_block_reason("ETH-USD", "LONG", 4.0)
+    assert reason is not None
+    assert reason.startswith("MARKET_SIDE_EDGE_AFTER_LOSS")
+

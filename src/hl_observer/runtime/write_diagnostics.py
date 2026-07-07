@@ -13,6 +13,7 @@ RUNTIME_WRITE_BLOCKED = "BLOCKED_WITH_PROOF"
 DEFAULT_RUNTIME_TARGETS = (
     "simulation_decisions_append_only.jsonl",
     "simulation_decisions_latest.jsonl",
+    "simulation_pnl_ledger_latest.jsonl",
     "simulation_snapshot_latest.json",
     "simulation_export_state.json",
     "simulation_resume_pour_chatgpt.md",

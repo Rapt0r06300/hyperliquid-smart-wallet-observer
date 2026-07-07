@@ -60,7 +60,7 @@ def test_realtime_magic_score_rejects_edge_after_costs_too_low():
 
 
 def test_realtime_magic_score_requires_stronger_edge_for_single_wallet_entries():
-    score = score_realtime_copy_candidate(_input(leader_expected_edge_bps=50.0, consensus_wallets=1))
+    score = score_realtime_copy_candidate(_input(leader_expected_edge_bps=25.0, consensus_wallets=1))
 
     assert not score.accepted
     assert "SINGLE_WALLET_EDGE_TOO_LOW" in score.refusal_reasons
@@ -95,7 +95,7 @@ def test_realtime_magic_score_caps_position_size_against_small_leader_trade():
 
 
 def test_realtime_magic_score_rejects_excessive_crowding_as_risk_not_guarantee():
-    score = score_realtime_copy_candidate(_input(consensus_wallets=9))
+    score = score_realtime_copy_candidate(_input(consensus_wallets=22))
 
     assert not score.accepted
     assert "COPY_DEGRADATION_TOO_HIGH" in score.refusal_reasons

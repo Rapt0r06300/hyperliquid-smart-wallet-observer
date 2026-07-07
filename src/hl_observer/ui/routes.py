@@ -19,13 +19,39 @@ from hl_observer.copying.realtime_magic_score import (
     RealtimeCopyScoreInput,
     score_realtime_copy_candidate,
 )
+from hl_observer.copying.runtime_v9_adapter import attach_v9_runtime_diagnostics
 from hl_observer.data_sources.warehouse_coverage import build_warehouse_coverage_report
+from hl_observer.loops.dashboard_payload import build_loop_dashboard_payload
+from hl_observer.markets.realtime_liquidity import resolve_realtime_liquidity_score
 from hl_observer.opportunities.fresh_opportunity import FreshOpportunity, find_fresh_opportunities
+from hl_observer.risk.risk_engine_v3 import (
+    EntryCostGuardConfig,
+    SessionEntryRiskContext,
+    evaluate_entry_cost_guard,
+)
+from hl_observer.risk.session_pnl_guard import evaluate_session_pnl_guard
 from hl_observer.security.safety_audit import run_safety_audit
+from hl_observer.signals.fill_admission import KIND_ENTRY, KIND_EXIT, FillAdmissionConfig, admit_live_fill, fill_identity
 from hl_observer.simulation.decision_replay_analyzer import (
     LOGS_TO_SEND_DIRNAME,
     SUMMARY_CACHE_FILE,
     analyze_decision_logs_summary,
+)
+from hl_observer.simulation.live_filters import (
+    DEFAULT_SIMULATION_ALLOW_ADD_AS_ENTRY,
+    DEFAULT_SIMULATION_MAX_COPY_DEGRADATION_BPS,
+    DEFAULT_SIMULATION_MAX_SIGNAL_AGE_MS,
+    DEFAULT_SIMULATION_MIN_EDGE_BPS,
+    DEFAULT_SIMULATION_MIN_LIQUIDITY_SCORE,
+    DEFAULT_SIMULATION_SINGLE_WALLET_MIN_EDGE_BPS,
+    calibrated_bool_env,
+    calibrated_float_env,
+    copy_candidate_signal_time_ms,
+    delta_identity,
+    hard_stale_signal_limit_ms,
+    is_hard_stale_signal,
+    should_skip_exotic_for_copy,
+    should_skip_orphan_exit_or_unknown,
 )
 from hl_observer.storage.database import create_session_factory, create_sqlite_engine
 from hl_observer.storage.models import (
@@ -51,6 +77,7 @@ from hl_observer.storage.models import (
     MarketSnapshot,
     MarketUniverseModel,
     OpenOrder,
+    OrderbookSnapshot,
     PaperFill,
     PaperFollowOrder,
     PaperOrderModel,
@@ -99,6 +126,7 @@ from hl_observer.ui.schemas import (
 )
 from hl_observer.ui.simulation_log_export import export_simulation_diagnostics
 from hl_observer.ui.state import UiState
+from hl_observer.ui.status_routes import _paper_ledger_projection_from_status_state
 from hl_observer.utils.time import now_ms
 from hl_observer.wallets.delta_utils import (
     build_position_consensus,
@@ -158,13 +186,264 @@ def create_router(settings: Settings, state: UiState, bus: UiEventBus) -> APIRou
             return None
         return value if value > 0 else None
 
+    def safe_file_size_mb(path: Path) -> float | None:
+        try:
+            return round(path.stat().st_size / 1024 / 1024, 3)
+        except OSError:
+            return None
+
+    def sqlite_path_from_database_url(database_url: str) -> Path | None:
+        prefix = "sqlite:///"
+        if not str(database_url).startswith(prefix):
+            return None
+        raw_path = str(database_url)[len(prefix) :]
+        if raw_path.startswith("/") and len(raw_path) > 3 and raw_path[2] == ":":
+            raw_path = raw_path[1:]
+        return Path(raw_path)
+
+    def build_runtime_diagnostics_payload() -> dict[str, Any]:
+        equity_sources = Counter(
+            str(row.get("source") or "UNKNOWN")
+            for row in state.simulation_equity_history
+            if isinstance(row, dict)
+        )
+        db_path = sqlite_path_from_database_url(settings.database_url)
+        logs_to_send = Path(settings.logs_dir) / LOGS_TO_SEND_DIRNAME
+        active_log_sizes: dict[str, float | None] = {}
+        for name in (
+            "simulation_snapshot_latest.json",
+            "simulation_decisions_latest.jsonl",
+            "simulation_decisions_append_only.jsonl",
+            "simulation_export_state.json",
+            "simulation_resume_pour_chatgpt.md",
+        ):
+            active_log_sizes[name] = safe_file_size_mb(logs_to_send / name)
+        db_size_mb = safe_file_size_mb(db_path) if db_path is not None else None
+        wal_size_mb = safe_file_size_mb(Path(str(db_path) + "-wal")) if db_path is not None else None
+        legacy_points = int(equity_sources.get("MARK_TO_MARKET", 0))
+        fast_points = int(equity_sources.get("FAST_STATUS_MARK_TO_MARKET_HYPERLIQUID", 0))
+        return {
+            "database_path": str(db_path) if db_path is not None else "",
+            "database_size_mb": db_size_mb,
+            "database_wal_size_mb": wal_size_mb,
+            "database_size_warning": bool(db_size_mb is not None and db_size_mb >= 5_000),
+            "logs_to_send_dir": str(logs_to_send),
+            "active_log_sizes_mb": active_log_sizes,
+            "equity_history_sources": dict(equity_sources.most_common()),
+            "legacy_mark_to_market_points": legacy_points,
+            "fast_status_points": fast_points,
+            "graph_single_writer_ok": legacy_points == 0 or fast_points == 0,
+            "graph_authoritative_source": (
+                "FAST_STATUS_MARK_TO_MARKET_HYPERLIQUID"
+                if fast_points > 0
+                else "OVERVIEW_MARK_TO_MARKET_FALLBACK"
+            ),
+            "notes": (
+                "Le graphe live doit etre pilote par /api/simulation/status des que FAST_STATUS existe; "
+                "les points MARK_TO_MARKET legacy sont purges au tick rapide suivant."
+            ),
+        }
+
+    def database_size_bytes() -> int:
+        db_path = sqlite_path_from_database_url(settings.database_url)
+        if db_path is None:
+            return 0
+        try:
+            return int(db_path.stat().st_size)
+        except OSError:
+            return 0
+
+    def logs_to_send_dir() -> Path:
+        return Path(settings.logs_dir) / LOGS_TO_SEND_DIRNAME
+
+    def _compact_sequence(value: Any, limit: int) -> list[Any]:
+        if not isinstance(value, list):
+            return []
+        return value[: max(0, int(limit))]
+
+    def _compact_mapping_lists(mapping: dict[str, Any], *, limit: int) -> dict[str, Any]:
+        compact = dict(mapping)
+        for key in (
+            "leaders",
+            "leaderboard",
+            "wallets",
+            "entry_deltas",
+            "consensus",
+            "fresh_opportunities",
+            "public_trade_activity",
+            "paper_simulations",
+            "equity_candles",
+            "session_equity_history",
+            "latest_deltas",
+            "latest_decisions",
+        ):
+            if isinstance(compact.get(key), list):
+                compact[key] = _compact_sequence(compact[key], limit)
+        bot = compact.get("bot_simulation")
+        if isinstance(bot, dict):
+            bot_compact = dict(bot)
+            for key in (
+                "events",
+                "ledger_events",
+                "important_events",
+                "prefilter_skips",
+                "open_positions",
+                "closed_positions",
+                "accepted_signals",
+                "refused_signals",
+            ):
+                if isinstance(bot_compact.get(key), list):
+                    bot_compact[key] = _compact_sequence(bot_compact[key], limit)
+            compact["bot_simulation"] = bot_compact
+        return compact
+
+    def latest_snapshot_overview_payload(*, limit: int, current_time_ms: int, reason: str) -> dict[str, Any] | None:
+        """Serve a bounded read-only snapshot when the runtime DB is too large.
+
+        The dashboard's graph is already driven by the lightweight status route.
+        When the SQLite session grows into many GB, rebuilding the full overview
+        can block the browser long enough to look like a broken bot. This
+        fallback keeps the UI stable and honest by returning the last exported
+        simulation snapshot, never fabricated data.
+        """
+
+        snapshot_path = logs_to_send_dir() / "simulation_snapshot_latest.json"
+        try:
+            max_age_ms = max(
+                1_000,
+                int(calibrated_float_env("HYPERSMART_OVERVIEW_FAST_SNAPSHOT_MAX_AGE_MS", 60_000.0)),
+            )
+            age_ms = current_time_ms - int(snapshot_path.stat().st_mtime * 1000)
+            if age_ms > max_age_ms:
+                return None
+            raw = json.loads(snapshot_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            return None
+        if not isinstance(raw, dict):
+            return None
+        if not isinstance(raw.get("bot_simulation"), dict) and not isinstance(raw.get("paper_ledger"), dict):
+            return None
+        compact = _compact_mapping_lists(raw, limit=limit)
+        compact["current_time_ms"] = current_time_ms
+        compact["overview_fast_snapshot"] = True
+        compact["overview_fast_snapshot_reason"] = reason
+        compact["overview_snapshot_path"] = str(snapshot_path)
+        compact["overview_cache_hit"] = False
+        compact.setdefault("mode", "LOCAL_PAPER_SIMULATION_REAL_HYPERLIQUID_DATA")
+        compact.setdefault("paper_mock_usdc_only", True)
+        compact.setdefault("read_only", True)
+        compact.setdefault("message", "Snapshot runtime compact: donnees reelles deja exportees, aucun PnL invente.")
+        return compact
+
+    def current_state_fast_overview_payload(*, limit: int, current_time_ms: int, reason: str) -> dict[str, Any]:
+        """Build a bounded overview from the live UiState when the DB is huge.
+
+        The browser must not fall back to an old logs snapshot while the live
+        status endpoint has fresher paper positions and ledger events. This
+        payload intentionally uses only the current in-memory/persisted paper
+        state; it performs no DB scan and invents no positions or PnL.
+        """
+
+        starting = safe_float(getattr(state, "simulation_starting_equity_usdt", 1000.0), 1000.0)
+        realized = safe_float(getattr(state, "simulation_realized_pnl_usdc", 0.0), 0.0)
+        history = getattr(state, "simulation_equity_history", None)
+        if not isinstance(history, list):
+            history = []
+        latest_point = history[-1] if history and isinstance(history[-1], dict) else {}
+        equity = safe_float(latest_point.get("current_equity_usdt"), starting + realized)
+        pnl = safe_float(latest_point.get("current_pnl_usdc"), equity - starting)
+        unrealized = safe_float(latest_point.get("unrealized_pnl_usdc"), pnl - realized)
+        open_exposure = safe_float(latest_point.get("open_exposure_usdt"), 0.0)
+        raw_positions = list((getattr(state, "simulation_virtual_positions", {}) or {}).values())
+        positions: list[dict[str, Any]] = []
+        if isinstance(raw_positions, list):
+            for row in raw_positions[:limit]:
+                if isinstance(row, dict):
+                    positions.append(dict(row))
+        if open_exposure <= 0.0:
+            for row in positions:
+                size = abs(safe_float(row.get("size"), 0.0))
+                price = safe_float(row.get("mark_price"), 0.0) or safe_float(row.get("entry_price"), 0.0) or safe_float(row.get("avg_price"), 0.0)
+                open_exposure += size * price
+        marked = {
+            "positions": positions,
+            "current_equity_usdt": round(equity, 6),
+            "estimated_net_pnl_usdc": round(pnl, 6),
+            "realized_pnl_usdc": round(realized, 6),
+            "unrealized_pnl_usdc": round(unrealized, 6),
+            "open_exposure_usdt": round(open_exposure, 6),
+        }
+        paper_ledger = _paper_ledger_projection_from_status_state(
+            state=state,
+            starting_equity_usdt=starting,
+            marked=marked,
+            current_ms=current_time_ms,
+        )
+        closed_trade_stats = paper_ledger.get("closed_trade_stats") if isinstance(paper_ledger, dict) else {}
+        if not isinstance(closed_trade_stats, dict):
+            closed_trade_stats = {}
+        ledger_events = getattr(state, "simulation_ledger_events", None)
+        if not isinstance(ledger_events, list):
+            ledger_events = []
+        bot_simulation = {
+            "source": "LIVE_UI_STATE_FAST_OVERVIEW",
+            "current_equity_usdt": round(equity, 6),
+            "estimated_net_pnl_usdc": round(pnl, 6),
+            "realized_net_pnl_usdc": round(realized, 6),
+            "unrealized_pnl_usdc": round(unrealized, 6),
+            "open_exposure_usdt": round(open_exposure, 6),
+            "open_local_positions": len(positions),
+            "open_positions": positions,
+            "ledger_events": ledger_events[-max(1, min(limit, 1_000)) :],
+            "events": ledger_events[-max(1, min(limit, 1_000)) :],
+            "closed_trade_stats": closed_trade_stats,
+            "closed_trades": int(closed_trade_stats.get("closed_trades") or 0),
+            "winning_trades": int(closed_trade_stats.get("winning_trades") or 0),
+            "losing_trades": int(closed_trade_stats.get("losing_trades") or 0),
+            "flat_trades": int(closed_trade_stats.get("flat_trades") or 0),
+            "winrate_pct": float(closed_trade_stats.get("winrate_pct") or 0.0),
+            "paper_ledger": paper_ledger,
+            "no_fake_pnl": True,
+        }
+        payload = {
+            "mode": "LOCAL_PAPER_SIMULATION_REAL_HYPERLIQUID_DATA",
+            "current_time_ms": current_time_ms,
+            "overview_fast_state": True,
+            "overview_fast_snapshot": False,
+            "overview_fast_snapshot_reason": reason,
+            "overview_cache_hit": False,
+            "read_only": True,
+            "paper_mock_usdc_only": True,
+            "paper_ledger": paper_ledger,
+            "bot_simulation": bot_simulation,
+            "reproduction": bot_simulation,
+            "equity": {
+                "starting_equity_usdt": round(starting, 6),
+                "current_equity_usdt": round(equity, 6),
+                "current_pnl_usdc": round(pnl, 6),
+                "realized_pnl_usdc": round(realized, 6),
+                "unrealized_pnl_usdc": round(unrealized, 6),
+                "open_exposure_usdt": round(open_exposure, 6),
+            },
+            "counts": {
+                "open_virtual_positions": len(positions),
+                "reproduced_entries": int(getattr(state, "simulation_reproduced_entries_total", 0) or 0),
+                "reproduced_exits": int(getattr(state, "simulation_reproduced_exits_total", 0) or 0),
+                "bot_decision_events": len(ledger_events),
+            },
+            "message": "Vue compacte issue de l'etat runtime vivant; aucun PnL invente.",
+        }
+        try:
+            payload["diagnostic_logs"] = export_simulation_diagnostics(settings, payload)
+        except (OSError, RuntimeError, ValueError) as exc:
+            payload["diagnostic_logs"] = {"write_warnings": str(exc), "directory_status": "WRITE_FAILED"}
+        return payload
+
     def simulation_max_signal_age_ms() -> int:
         configured = safe_int_env("HYPERSMART_SIMULATION_MAX_SIGNAL_AGE_MS")
-        # The consensus window remains capped at 4s, but the local simulator has
-        # to survive a bounded read-only loop (WS -> SQLite -> UI). A 5s global
-        # threshold made most legitimate local observations look stale before the
-        # simulator could inspect them. Delay still reduces edge_remaining_bps.
-        return max(1_000, min(300_000, configured or 120_000))
+        # Keep the simulator selective without starving normal read-only latency.
+        # Anything older than 2x this value is hard-skipped before scoring.
+        return max(1_000, min(300_000, configured or DEFAULT_SIMULATION_MAX_SIGNAL_AGE_MS))
 
     def is_live_detected_delta_source(source: str | None) -> bool:
         normalized = str(source or "").lower()
@@ -192,6 +471,21 @@ def create_router(settings: Settings, state: UiState, bus: UiEventBus) -> APIRou
             if len(unique) >= limit:
                 break
         return unique
+
+    def top_wallet_sample_limit(*, multiplier: int = 200, minimum: int = 8_000) -> int:
+        """Read enough TopWallet rows before de-duplicating addresses.
+
+        Public-trade discovery can refresh the same high-activity wallet many
+        times. If the UI samples only the top 200 rows before de-duping, the
+        visible follow pool can collapse to a few dozen unique wallets even
+        though thousands were discovered. This keeps the query bounded while
+        making the sample proportional to the configured leader target.
+        """
+
+        configured = safe_int_env("HYPERSMART_TOP_WALLET_SAMPLE_LIMIT")
+        target = max(1, int(settings.copy_trading.top_leaders or 1))
+        raw_limit = configured or max(minimum, target * max(1, multiplier))
+        return max(target, min(raw_limit, 50_000))
 
     def build_heikin_ashi_equity_candles(fills: list[Fill], *, max_points: int = 120) -> list[dict[str, Any]]:
         closed_pnl_rows = [
@@ -276,15 +570,57 @@ def create_router(settings: Settings, state: UiState, bus: UiEventBus) -> APIRou
                 sources[coin] = snapshot.source or "market_snapshot"
         return prices, sources
 
-    def simulation_delta_identity(row: PositionDeltaModel) -> str:
-        if row.delta_hash:
-            return f"hash:{row.delta_hash}"
-        if row.id is not None:
-            return f"id:{row.id}"
-        return (
-            f"raw:{row.wallet_address.lower()}:{row.coin.upper()}:{delta_event_time_ms(row)}:"
-            f"{row.delta_type}:{row.previous_size}:{row.new_size}:{row.delta_size}:{row.price}"
+    def _book_level_tuple(level: Any) -> tuple[float, float] | None:
+        if isinstance(level, dict):
+            price = safe_float(level.get("px", level.get("price")))
+            size = safe_float(level.get("sz", level.get("size")))
+        elif isinstance(level, (list, tuple)) and len(level) >= 2:
+            price = safe_float(level[0])
+            size = safe_float(level[1])
+        else:
+            return None
+        if price <= 0 or size <= 0:
+            return None
+        return (price, size)
+
+    def orderbook_levels_from_raw(raw_json: dict[str, Any] | None) -> tuple[tuple[tuple[float, float], ...], tuple[tuple[float, float], ...]]:
+        if not isinstance(raw_json, dict):
+            return (), ()
+        levels = raw_json.get("levels")
+        if not isinstance(levels, list) or len(levels) < 2:
+            return (), ()
+        raw_bids = levels[0] if isinstance(levels[0], list) else []
+        raw_asks = levels[1] if isinstance(levels[1], list) else []
+        bids = tuple(item for item in (_book_level_tuple(level) for level in raw_bids) if item is not None)
+        asks = tuple(item for item in (_book_level_tuple(level) for level in raw_asks) if item is not None)
+        return asks, bids
+
+    def latest_orderbook_levels_from_snapshots(snapshots: list[OrderbookSnapshot]) -> dict[str, dict[str, Any]]:
+        books: dict[str, dict[str, Any]] = {}
+        ordered = sorted(
+            snapshots,
+            key=lambda row: (row.exchange_ts or 0, row.id or 0),
+            reverse=True,
         )
+        for snapshot in ordered:
+            coin = str(snapshot.coin or "").upper()
+            if not coin or coin in books:
+                continue
+            asks, bids = orderbook_levels_from_raw(snapshot.raw_json)
+            if not asks and not bids:
+                continue
+            books[coin] = {
+                "asks": asks,
+                "bids": bids,
+                "snapshot_id": snapshot.id,
+                "exchange_ts": snapshot.exchange_ts,
+                "depth_usdc": snapshot.depth_usdc,
+                "spread_bps": snapshot.spread_bps,
+            }
+        return books
+
+    def simulation_delta_identity(row: PositionDeltaModel) -> str:
+        return delta_identity(row)
 
     def build_consensus_replay_deltas(
         opportunities: list[FreshOpportunity],
@@ -384,6 +720,7 @@ def create_router(settings: Settings, state: UiState, bus: UiEventBus) -> APIRou
         deltas: list[PositionDeltaModel],
         *,
         mid_prices: dict[str, float] | None = None,
+        orderbooks_by_coin: dict[str, dict[str, Any]] | None = None,
         starting_equity_usdt: float = 1000.0,
         max_position_notional_usdt: float = 50.0,
         max_open_positions: int = 6,
@@ -405,6 +742,8 @@ def create_router(settings: Settings, state: UiState, bus: UiEventBus) -> APIRou
         an order or a recommendation.
         """
 
+        orderbooks_by_coin = orderbooks_by_coin or {}
+
         def encode_position_key(wallet: str, coin: str, direction: str) -> str:
             return f"{wallet.lower()}|{coin.upper()}|{direction.upper()}"
 
@@ -421,6 +760,52 @@ def create_router(settings: Settings, state: UiState, bus: UiEventBus) -> APIRou
 
         def set_to_csv(values: set[str]) -> str:
             return ",".join(sorted(value.lower() for value in values if value))
+
+        def evidence_hash_for(event: dict[str, Any], *, position_key: tuple[str, str, str], replay_action: str) -> str:
+            payload = {
+                "delta_key": event.get("delta_key"),
+                "wallet_address": event.get("wallet_address"),
+                "coin": event.get("coin"),
+                "leader_action": event.get("leader_action"),
+                "leader_side": event.get("leader_side"),
+                "observed_at_ms": event.get("observed_at_ms"),
+                "matched_position_key": encode_position_key(*position_key),
+                "bot_replay_action": replay_action,
+                "leader_price": event.get("leader_price"),
+                "edge_remaining_bps": event.get("edge_remaining_bps"),
+                "copy_degradation_bps": event.get("copy_degradation_bps"),
+                "copied_notional_usdt": event.get("copied_notional_usdt"),
+                "paper_action_type": event.get("paper_action_type"),
+            }
+            raw = json.dumps(payload, sort_keys=True, default=str, separators=(",", ":"))
+            return "ev:" + sha256(raw.encode("utf-8")).hexdigest()[:24]
+
+        def paper_ref_for(*, replay_action: str, delta_key: str, position_key: tuple[str, str, str]) -> str:
+            raw = f"{replay_action}|{delta_key}|{encode_position_key(*position_key)}"
+            return "paper:" + sha256(raw.encode("utf-8")).hexdigest()[:20]
+
+        def enrich_replay_evidence(event: dict[str, Any], *, position_key: tuple[str, str, str], replay_action: str) -> None:
+            event["simulation_only"] = True
+            event["read_only"] = True
+            event["external_action"] = False
+            event["execution"] = "forbidden"
+            event["venue_endpoint"] = None
+            event["secret_material_used"] = False
+            event["raw_event_hash"] = str(event.get("delta_key") or "")
+            event["paper_ref"] = paper_ref_for(
+                replay_action=replay_action,
+                delta_key=str(event.get("delta_key") or ""),
+                position_key=position_key,
+            )
+            event["evidence_hash"] = evidence_hash_for(event, position_key=position_key, replay_action=replay_action)
+            coin_key_for_v9 = str(event.get("coin") or "").upper()
+            attach_v9_runtime_diagnostics(
+                event,
+                current_ms=current_ms,
+                all_mids=mid_prices,
+                l2_book=(orderbooks_by_coin or {}).get(coin_key_for_v9),
+                run_id=f"ui-simulation:{current_ms}",
+            )
 
         current_ms = now_timestamp_ms or now_ms()
         positions: dict[tuple[str, str, str], dict[str, Any]] = {}
@@ -474,6 +859,12 @@ def create_router(settings: Settings, state: UiState, bus: UiEventBus) -> APIRou
                         "reason": "ORPHAN_VIRTUAL_POSITION_DROPPED_NO_ENTRY_LEDGER",
                         "research_only": True,
                         "paper_mode": "PAPER_LOCAL_USDT_ONLY",
+                        "simulation_only": True,
+                        "read_only": True,
+                        "external_action": False,
+                        "execution": "forbidden",
+                        "venue_endpoint": None,
+                        "secret_material_used": False,
                     }
                 )
                 continue
@@ -491,6 +882,17 @@ def create_router(settings: Settings, state: UiState, bus: UiEventBus) -> APIRou
                 "closed_wallets_csv": str(raw_position.get("closed_wallets_csv") or ""),
                 "seen_cluster_ids_csv": str(raw_position.get("seen_cluster_ids_csv") or ""),
                 "last_cluster_id": str(raw_position.get("last_cluster_id") or ""),
+                "last_replay_action": str(raw_position.get("last_replay_action") or ""),
+                "last_evidence_hash": str(raw_position.get("last_evidence_hash") or ""),
+                "last_paper_ref": str(raw_position.get("last_paper_ref") or ""),
+                "last_v9_decision": str(raw_position.get("last_v9_decision") or ""),
+                "last_v9_evidence_hash": str(raw_position.get("last_v9_evidence_hash") or ""),
+                "last_v9_reasons": raw_position.get("last_v9_reasons") or [],
+                "last_reduce_fraction": float(raw_position.get("last_reduce_fraction") or 0.0),
+                "last_notional_closed_usdt": float(raw_position.get("last_notional_closed_usdt") or 0.0),
+                "entry_count": int(raw_position.get("entry_count") or 0),
+                "increase_count": int(raw_position.get("increase_count") or 0),
+                "reduce_count": int(raw_position.get("reduce_count") or 0),
             }
         ledger_events: list[dict[str, Any]] = [
             dict(row)
@@ -501,10 +903,23 @@ def create_router(settings: Settings, state: UiState, bus: UiEventBus) -> APIRou
             ledger_events.extend(maintenance_events)
         initial_ledger_length = len(ledger_events)
         processed_keys = set(existing_processed_keys)
-        cost_bps = 12.0
+        filter_diagnostics: Counter[str] = Counter()
+        fresh_entry_diagnostics: Counter[str] = Counter()
+        prefilter_skips: list[dict[str, Any]] = []
+        # Coût round-trip réaliste Hyperliquid: ~4.5 bps taker + petit spread/slippage par côté.
+        # 12 bps/côté (=24 round-trip) saignait artificiellement le PnL sur beaucoup de trades.
+        # 6 bps/côté (=12 round-trip) est réaliste et honnête (pas de triche, juste pas exagéré).
+        cost_bps = 6.0
+        # LEVIER perp (réalisme Hyperliquid): la "mise" desired_notional est la MARGE bloquée,
+        # et la position contrôle margin*leverage de notionnel. Le PnL = taille*Δprix porte donc
+        # sur le notionnel LEVERAGÉ (un mouvement de 1% sur 100$ de marge à 5x = ~5$, pas 1$),
+        # les frais aussi (sur le notionnel réel), et l'exposition/cash reste comptée en MARGE
+        # (les plafonds protègent toujours les 1000$). Defaut 1x pour éviter qu'une
+        # session sans variable d'environnement amplifie artificiellement le PnL.
+        simulation_leverage = max(1.0, calibrated_float_env("HYPERSMART_SIMULATION_LEVERAGE", 1.0))
         min_edge_required_bps = max(
             1.0,
-            safe_float(os.environ.get("HYPERSMART_SIMULATION_MIN_EDGE_BPS"), 25.0),
+            calibrated_float_env("HYPERSMART_SIMULATION_MIN_EDGE_BPS", DEFAULT_SIMULATION_MIN_EDGE_BPS),
         )
         max_signal_age_ms = simulation_max_signal_age_ms()
         consensus_window_ms = min(4_000, max_signal_age_ms)
@@ -514,15 +929,37 @@ def create_router(settings: Settings, state: UiState, bus: UiEventBus) -> APIRou
             spread_bps=3.0,
             slippage_bps=5.0,
             max_signal_age_ms=max_signal_age_ms,
-            min_liquidity_score=float(os.environ.get("HYPERSMART_SIMULATION_MIN_LIQUIDITY_SCORE", "0.35")),
-            max_copy_degradation_bps=float(os.environ.get("HYPERSMART_SIMULATION_MAX_COPY_DEGRADATION_BPS", "18.0")),
-            max_price_deviation_bps=float(os.environ.get("HYPERSMART_SIMULATION_MAX_PRICE_DEVIATION_BPS", "8.0")),
+            min_liquidity_score=calibrated_float_env(
+                "HYPERSMART_SIMULATION_MIN_LIQUIDITY_SCORE",
+                DEFAULT_SIMULATION_MIN_LIQUIDITY_SCORE,
+            ),
+            max_copy_degradation_bps=calibrated_float_env(
+                "HYPERSMART_SIMULATION_MAX_COPY_DEGRADATION_BPS",
+                DEFAULT_SIMULATION_MAX_COPY_DEGRADATION_BPS,
+            ),
+            max_price_deviation_bps=calibrated_float_env("HYPERSMART_SIMULATION_MAX_PRICE_DEVIATION_BPS", 8.0),
             starting_equity_usdt=starting_equity_usdt,
             max_position_notional_usdt=max_position_notional_usdt,
             max_total_exposure_usdt=max_position_notional_usdt * 8.0,
-            single_wallet_min_edge_required_bps=float(os.environ.get("HYPERSMART_SINGLE_WALLET_MIN_EDGE_BPS", "30.0")),
+            single_wallet_min_edge_required_bps=calibrated_float_env(
+                "HYPERSMART_SINGLE_WALLET_MIN_EDGE_BPS",
+                DEFAULT_SIMULATION_SINGLE_WALLET_MIN_EDGE_BPS,
+            ),
         )
-
+        v9_pipeline_authoritative = str(os.environ.get("HYPERSMART_V9_PIPELINE_AUTHORITATIVE", "0")).lower() in {"1", "true", "yes"}
+        min_reduce_notional_usdt = max(
+            0.0,
+            calibrated_float_env("HYPERSMART_MIN_REDUCE_NOTIONAL_USDT", 0.0),
+        )
+        reduce_max_signal_age_ms = int(
+            max(
+                1_000,
+                min(
+                    max_signal_age_ms * 10,
+                    calibrated_float_env("HYPERSMART_REDUCE_MAX_SIGNAL_AGE_MS", float(max_signal_age_ms)),
+                ),
+            )
+        )
         chronological = sorted(deltas, key=delta_event_time_ms)
         entry_rows_by_coin_direction: dict[tuple[str, str], list[PositionDeltaModel]] = defaultdict(list)
         for indexed_row in chronological:
@@ -532,14 +969,49 @@ def create_router(settings: Settings, state: UiState, bus: UiEventBus) -> APIRou
                 entry_rows_by_coin_direction[(indexed_row.coin.upper(), indexed_direction)].append(indexed_row)
 
         def copy_signal_time_ms(row: PositionDeltaModel) -> int:
-            detected_at = int(row.detected_at_ms or 0)
-            exchange_at = int(row.exchange_ts or 0)
-            if is_live_detected_delta_source(row.source) and detected_at > 0:
-                return detected_at
-            return exchange_at or detected_at
+            return copy_candidate_signal_time_ms(row)
+
+        def record_prefilter_skip(
+            row: PositionDeltaModel,
+            *,
+            reason: str,
+            action: str | None = None,
+            direction: str | None = None,
+            signal_time_ms: int | None = None,
+            detail: str | None = None,
+        ) -> None:
+            if len(prefilter_skips) >= 200:
+                return
+            signal_time = int(signal_time_ms or copy_signal_time_ms(row) or 0)
+            exchange_time = int(row.exchange_ts or 0)
+            detected_time = int(row.detected_at_ms or 0)
+            prefilter_skips.append(
+                {
+                    "delta_key": simulation_delta_identity(row),
+                    "wallet_address": row.wallet_address,
+                    "coin": row.coin,
+                    "leader_action": action or copy_delta_action(row),
+                    "leader_side": direction or copy_delta_direction(row, action or copy_delta_action(row)),
+                    "reason": reason,
+                    "detail": detail or "",
+                    "source": row.source,
+                    "exchange_ts": exchange_time or None,
+                    "detected_at_ms": detected_time or None,
+                    "signal_time_ms": signal_time or None,
+                    "signal_age_ms": max(0, current_ms - signal_time) if signal_time > 0 else None,
+                    "max_signal_age_ms": max_signal_age_ms,
+                    "hard_stale_limit_ms": hard_stale_signal_limit_ms(max_signal_age_ms),
+                    "price": row.price,
+                    "delta_notional_usdc": row.delta_notional_usdc,
+                    "research_only": True,
+                    "execution": "forbidden",
+                }
+            )
 
         def current_open_exposure_usdt() -> float:
-            return sum(abs(position["size"] * position["avg_price"]) for position in positions.values())
+            # Exposure measured in MARGIN (capital deployed): position["size"] is the LEVERAGED
+            # coin quantity, so divide the leveraged notional back by the leverage to get margin.
+            return sum(abs(position["size"] * position["avg_price"]) for position in positions.values()) / simulation_leverage
 
         def new_realized_net_pnl_so_far() -> float:
             return sum(
@@ -550,6 +1022,39 @@ def create_router(settings: Settings, state: UiState, bus: UiEventBus) -> APIRou
 
         def simulated_equity_so_far() -> float:
             return starting_equity_usdt + float(existing_realized_pnl_usdc or 0.0) + new_realized_net_pnl_so_far()
+
+        def recent_paper_return_fractions(*, limit: int = 80) -> list[float]:
+            returns: list[float] = []
+            denominator = max(1.0, float(starting_equity_usdt or 1000.0))
+            for item in ledger_events[-limit:]:
+                if not isinstance(item, dict) or item.get("status") != "LOCAL_REPLAY":
+                    continue
+                pnl_value = item.get("estimated_net_pnl_usdc")
+                if pnl_value is None:
+                    continue
+                try:
+                    returns.append(float(pnl_value) / denominator)
+                except (TypeError, ValueError):
+                    continue
+            return returns
+
+        def recent_confidence_samples(*, limit: int = 120) -> list[tuple[float, bool]]:
+            samples: list[tuple[float, bool]] = []
+            for item in ledger_events[-limit:]:
+                if not isinstance(item, dict) or item.get("status") != "LOCAL_REPLAY":
+                    continue
+                pnl_value = item.get("estimated_net_pnl_usdc")
+                if pnl_value is None:
+                    continue
+                edge_bps = safe_float(item.get("edge_remaining_bps"), 0.0)
+                leader_score = safe_float(item.get("leader_score"), 50.0) / 100.0
+                edge_confidence = 0.5 + max(-0.2, min(0.35, edge_bps / 100.0))
+                confidence = max(0.01, min(0.99, (leader_score * 0.45) + (edge_confidence * 0.55)))
+                try:
+                    samples.append((confidence, float(pnl_value) > 0.0))
+                except (TypeError, ValueError):
+                    continue
+            return samples
 
         coin_loss_cooldown_usdc = max(0.35, starting_equity_usdt * 0.0005)
         leader_loss_cooldown_usdc = max(0.25, starting_equity_usdt * 0.00035)
@@ -571,15 +1076,116 @@ def create_router(settings: Settings, state: UiState, bus: UiEventBus) -> APIRou
                     continue
             return pnl
 
+        def _top_negative_buckets(field_name: str) -> tuple[tuple[str, float], ...]:
+            buckets: dict[str, float] = defaultdict(float)
+            for item in ledger_events:
+                if item.get("status") != "LOCAL_REPLAY":
+                    continue
+                key_value = item.get(field_name)
+                if not key_value:
+                    continue
+                try:
+                    buckets[str(key_value).upper() if field_name == "coin" else str(key_value).lower()] += float(
+                        item.get("estimated_net_pnl_usdc") or 0.0
+                    )
+                except (TypeError, ValueError):
+                    continue
+            return tuple(
+                sorted(
+                    ((key, round(value, 6)) for key, value in buckets.items() if value < 0.0),
+                    key=lambda row: row[1],
+                )[:5]
+            )
+
+        def session_entry_risk_context() -> SessionEntryRiskContext:
+            local_events = [
+                item
+                for item in ledger_events
+                if isinstance(item, dict) and item.get("status") == "LOCAL_REPLAY"
+            ]
+            pnl_values: list[float] = []
+            fees_paid = float(existing_entry_costs_paid_usdc or 0.0) + float(existing_exit_costs_paid_usdc or 0.0)
+            stale_count = 0
+            edge_bad_count = 0
+            edge_sentinel_count = 0
+            orphan_count = 0
+            for item in local_events:
+                try:
+                    pnl = float(item.get("estimated_net_pnl_usdc") or 0.0)
+                except (TypeError, ValueError):
+                    pnl = 0.0
+                pnl_values.append(pnl)
+                reason_text = str(item.get("reason") or "").upper()
+                if "STALE" in reason_text or "TOO_OLD" in reason_text:
+                    stale_count += 1
+                if "EDGE" in reason_text and ("LOW" in reason_text or "SMALL" in reason_text):
+                    edge_bad_count += 1
+                if safe_float(item.get("edge_remaining_bps"), 0.0) <= -9_000:
+                    edge_sentinel_count += 1
+                if "NO_MATCHING_PAPER_POSITION_FOR_CLOSE" in reason_text:
+                    orphan_count += 1
+            for item in ledger_events[initial_ledger_length:]:
+                if not isinstance(item, dict) or item.get("status") != "LOCAL_REPLAY":
+                    continue
+                try:
+                    fees_paid += float(item.get("fee_cost_usdc") or 0.0)
+                except (TypeError, ValueError):
+                    pass
+            net_pnl = simulated_equity_so_far() - float(starting_equity_usdt or 0.0)
+            positive = sum(1 for value in pnl_values if value > 0.0)
+            negative = sum(1 for value in pnl_values if value < 0.0)
+            gross_profit = sum(value for value in pnl_values if value > 0.0)
+            gross_loss = abs(sum(value for value in pnl_values if value < 0.0))
+            gross_before_cost = max(0.0, net_pnl + fees_paid)
+            if gross_before_cost > 0.0:
+                fee_drag_ratio = fees_paid / gross_before_cost
+            elif fees_paid > 0.0:
+                fee_drag_ratio = 999.0
+            else:
+                fee_drag_ratio = 0.0
+            min_fee_drag_events = int(calibrated_float_env("HYPERSMART_ENTRY_GUARD_MIN_ACCEPTED_EVENTS", 3.0))
+            if len(local_events) < max(1, min_fee_drag_events):
+                fee_drag_ratio = 0.0
+            consecutive_losses = 0
+            for value in reversed(pnl_values):
+                if value < 0.0:
+                    consecutive_losses += 1
+                elif value > 0.0:
+                    break
+            return SessionEntryRiskContext(
+                net_pnl_usdc=round(net_pnl, 6),
+                total_decisions=len(ledger_events),
+                accepted=len(local_events),
+                negative_events=negative,
+                positive_events=positive,
+                fee_drag_ratio=round(fee_drag_ratio, 8),
+                stale_reason_count=stale_count,
+                edge_negative_count=edge_bad_count,
+                edge_sentinel_count=edge_sentinel_count,
+                orphan_close_count=orphan_count,
+                profit_factor_net=(gross_profit / gross_loss) if gross_loss > 0.0 else (1.0 if gross_profit == 0.0 else 999.0),
+                consecutive_losses=consecutive_losses,
+                top_losing_coins=_top_negative_buckets("coin"),
+                top_losing_wallets=_top_negative_buckets("wallet_address"),
+            )
+
         def adaptive_session_risk_reason(row: PositionDeltaModel, metrics: dict[str, float | int | str]) -> str | None:
-            if int(metrics.get("consensus_wallets") or 0) >= 3:
-                return None
             coin_pnl = session_pnl_for(coin=row.coin)
             wallet_pnl = session_pnl_for(wallet=row.wallet_address)
-            if coin_pnl <= -coin_loss_cooldown_usdc:
+            consensus_wallets = int(metrics.get("consensus_wallets") or 0)
+            edge_remaining_bps = safe_float(metrics.get("edge_remaining_bps"), -9999.0)
+            min_edge = safe_float(getattr(realtime_score_config, "min_edge_required_bps", min_edge_required_bps), min_edge_required_bps)
+            strong_recovery_edge_bps = min_edge + (10.0 if consensus_wallets >= 3 else 18.0)
+            severe_coin_loss = coin_pnl <= -(coin_loss_cooldown_usdc * 4.0)
+            severe_leader_loss = wallet_pnl <= -(leader_loss_cooldown_usdc * 4.0)
+            if severe_coin_loss:
                 return "COIN_SESSION_LOSS_COOLDOWN"
-            if wallet_pnl <= -leader_loss_cooldown_usdc:
+            if severe_leader_loss:
                 return "LEADER_SESSION_LOSS_COOLDOWN"
+            if coin_pnl <= -coin_loss_cooldown_usdc and edge_remaining_bps < strong_recovery_edge_bps:
+                return "COIN_SESSION_LOSS_REQUIRES_STRONGER_EDGE"
+            if wallet_pnl <= -leader_loss_cooldown_usdc and edge_remaining_bps < strong_recovery_edge_bps:
+                return "LEADER_SESSION_LOSS_REQUIRES_STRONGER_EDGE"
             return None
 
         def consensus_snapshot(row: PositionDeltaModel, direction: str) -> dict[str, Any]:
@@ -670,13 +1276,18 @@ def create_router(settings: Settings, state: UiState, bus: UiEventBus) -> APIRou
             leader_size = abs(float(row.delta_size or row.fill_size or 0.0))
             leader_notional = abs(float(row.delta_notional_usdc or (leader_size * float(row.price or 0.0))))
             cluster_notional = max(leader_notional, safe_float(consensus.get("total_notional_usdc"), 0.0))
-            # For consensus entries, the useful liquidity evidence is the whole
-            # same-coin/same-side burst, not only the tiny fill currently being
-            # iterated. Without this, a valid 3-wallet cluster made of small
-            # fills was rejected as low liquidity even when the cluster notional
-            # was large enough for a 1000 USDT virtual portfolio.
-            liquidity_basis = cluster_notional if consensus_count >= 2 else leader_notional
-            liquidity_score = max(0.2, min(1.0, liquidity_basis / 2_500.0))
+            # Market-based liquidity (fix 2026-07-03): the old proxy
+            # max(0.2, min(1.0, fill_notional / 2500)) scored the *size of the
+            # copied fill*, not the market. Small whale clips on BTC/ETH/SOL
+            # were mass-refused as LIQUIDITY_TOO_LOW while big fills on thin
+            # coins passed. resolve_realtime_liquidity_score() scores the
+            # market tier first and only lets notional evidence raise it.
+            liquidity_score = resolve_realtime_liquidity_score(
+                coin=str(row.coin or ""),
+                leader_notional_usdc=leader_notional,
+                cluster_notional_usdc=cluster_notional,
+                consensus_wallets=consensus_count,
+            )
             current_mid = (mid_prices or {}).get(str(row.coin).upper())
             leader_reference_price = safe_float(consensus.get("median_reference_price"), float(row.price or 0.0))
             score = score_realtime_copy_candidate(
@@ -695,6 +1306,8 @@ def create_router(settings: Settings, state: UiState, bus: UiEventBus) -> APIRou
                     current_open_exposure_usdt=current_open_exposure_usdt(),
                     current_open_positions=len(positions),
                     max_open_positions=max_open_positions,
+                    coin=str(row.coin),   # V26 L1 : active les vetos funding/tendance par marché
+                    leader_wallet=str(getattr(row, 'wallet_address', '') or ''),  # V26 L6 : Kelly par leader
                 ),
                 config=realtime_score_config,
             )
@@ -703,8 +1316,172 @@ def create_router(settings: Settings, state: UiState, bus: UiEventBus) -> APIRou
                 if score.accepted
                 else "|".join(score.refusal_reasons or ["REJECT_NO_TRADE"])
             )
+            # V12 unified gate (SHADOW only — never changes the real decision above).
+            try:
+                from hl_observer.signals.copy_decision import (
+                    CopyInputs as _V12In,
+                    evaluate_copy_candidate as _v12_eval,
+                )
+                _v12 = _v12_eval(_V12In(
+                    source_usable=True,
+                    quotes_agree=True,
+                    mid_available=current_mid is not None,
+                    signal_age_ms=int(age_ms) if age_ms is not None else None,
+                    max_signal_age_ms=int(getattr(realtime_score_config, "max_signal_age_ms", 30000) or 30000),
+                    liquidity_score=float(liquidity_score) if liquidity_score is not None else None,
+                    min_liquidity_score=float(getattr(realtime_score_config, "min_liquidity_score", 0.0) or 0.0),
+                    spread_bps=float(getattr(realtime_score_config, "spread_bps", 0.0) or 0.0),
+                    max_spread_bps=20.0,
+                    net_edge_bps=float(score.edge_remaining_bps) if score.edge_remaining_bps is not None else None,
+                    min_edge_bps=float(getattr(realtime_score_config, "min_edge_required_bps", 0.0) or 0.0),
+                ))
+                _v12_accepted, _v12_reason = _v12.accepted, _v12.reason_code
+            except Exception:
+                _v12_accepted, _v12_reason = None, None
+            # V12 promotion (opt-in): when HYPERSMART_V12_GATE_AUTHORITATIVE=1, the unified
+            # gate becomes BINDING as a stricter intersection — a candidate survives only if
+            # BOTH the realtime score AND the unified gate accept. This can only *reduce*
+            # trades (cleaner), never open new ones. Default OFF => pure shadow (unchanged
+            # behavior), so the engine can never be broken by flipping this on.
+            try:
+                from hl_observer.signals.gate_promotion import merge_authoritative_decision as _v12_promote
+                decision_reason = _v12_promote(
+                    score_reason=decision_reason,
+                    v12_accepted=_v12_accepted,
+                    v12_reason=_v12_reason,
+                    authoritative=calibrated_bool_env("HYPERSMART_V12_GATE_AUTHORITATIVE", False),
+                )
+            except Exception:
+                pass
+            # V13 shadow wiring: dormant quant modules (whale-fill / vol-regime / ranker /
+            # streak-sizing / multi-TF bias) computed in SHADOW — exposed for the dashboard
+            # and ledger, NEVER decides alone (context_only). Guarded: any failure -> {} so
+            # the engine is never broken. Promotion to authoritative is a later explicit step.
+            try:
+                from hl_observer.signals.shadow_wiring import compute_shadow_signals as _v13_shadow
+                _v13 = _v13_shadow(
+                    action_type=copy_delta_action(row),
+                    coin=str(row.coin),
+                    side=direction,
+                    age_ms=int(age_ms) if age_ms is not None else 0,
+                    consensus_wallets=consensus_count,
+                    leader_score=confidence * 100.0,
+                    leader_notional_usdc=cluster_notional,
+                    net_edge_bps=float(getattr(score, "edge_remaining_bps", 0.0) or 0.0),
+                    liquidity_score=float(getattr(score, "liquidity_score", liquidity_score) or 0.0),
+                    adverse_move_bps=float(getattr(score, "adverse_price_move_bps", 0.0) or 0.0),
+                    price_deviation_bps=float(getattr(score, "price_deviation_bps", 0.0) or 0.0),
+                    confidence=confidence,
+                )
+            except Exception:
+                _v13 = {}
+            # V13 model promotion (opt-in): when HYPERSMART_V13_MODEL_AUTHORITATIVE=1 the local
+            # model becomes binding as a stricter intersection — it can only turn an accepting
+            # score into REJECT_MODEL_LOW_P, never create a trade. Default OFF => pure shadow.
+            try:
+                from hl_observer.ml.inference import apply_model_promotion as _v13_model_promote
+                decision_reason = _v13_model_promote(
+                    score_reason=decision_reason,
+                    model_accept=_v13.get("shadow_model_accept"),
+                    authoritative=calibrated_bool_env("HYPERSMART_V13_MODEL_AUTHORITATIVE", False),
+                )
+            except Exception:
+                pass
+            # V14 #168 — promote the whale-fill to a PRIMARY entry source (opt-in). When
+            # HYPERSMART_V14_WHALE_PRIMARY_AUTHORITATIVE=1 a candidate the score accepts is
+            # REJECTED unless a primary whale fill backs it (shadow_whale_primary). Stricter
+            # intersection: can only reduce trades. None (signal unknown) never blocks. OFF default.
+            try:
+                from hl_observer.signals.whale_primary_gate import apply_whale_primary_promotion as _v14_whale_promote
+                decision_reason = _v14_whale_promote(
+                    score_reason=decision_reason,
+                    whale_primary=_v13.get("shadow_whale_primary"),
+                    authoritative=calibrated_bool_env("HYPERSMART_V14_WHALE_PRIMARY_AUTHORITATIVE", False),
+                )
+            except Exception:
+                pass
+            # V14 #170 — warmup guard (opt-in): block entries until HTF bars/features are ready.
+            # warmup_ready is unknown in this scope (bars context not plumbed into the hot path
+            # yet) -> None -> no-op (safe). When wired, set HYPERSMART_V14_WARMUP_AUTHORITATIVE=1
+            # to make it binding. Stricter intersection: only reduces trades.
+            try:
+                from hl_observer.signals.warmup_guard import apply_warmup_promotion as _v14_warmup_promote
+                decision_reason = _v14_warmup_promote(
+                    score_reason=decision_reason,
+                    warmup_ready=None,
+                    authoritative=calibrated_bool_env("HYPERSMART_V14_WARMUP_AUTHORITATIVE", False),
+                )
+            except Exception:
+                pass
+            # V14 #175 — hot consensus window (≈4 s hot / 15 s max): veto entries whose signal
+            # is already outside the fresh window. Functional from the measured signal age.
+            # Stricter intersection: can only reduce trades. None age never blocks. OFF default.
+            try:
+                from hl_observer.signals.consensus_window import (
+                    consensus_window_status as _v14_cw_status,
+                    apply_consensus_window_promotion as _v14_cw_promote,
+                )
+                _cw_in_window = None
+                if age_ms is not None:
+                    _cw_in_window = _v14_cw_status(first_seen_ms=0, now_ms=int(age_ms)).in_window
+                decision_reason = _v14_cw_promote(
+                    score_reason=decision_reason,
+                    in_window=_cw_in_window,
+                    authoritative=calibrated_bool_env("HYPERSMART_V14_CONSENSUS_WINDOW_AUTHORITATIVE", False),
+                )
+            except Exception:
+                pass
+            # V14 #182/#183/#167 — exec-cost net-edge + entry-quality (smart-money + depth) +
+            # liquidation shadow, computed from REAL in-scope signals (edge_remaining, liquidity,
+            # notional, leader score). All flags OFF by default => shadow. Gates only reduce trades.
+            _v14b: dict = {}
+            try:
+                from hl_observer.copy_fidelity.exec_cost_model import model_exec_costs, net_edge_after_costs
+                from hl_observer.copy_fidelity.slippage_model import slippage_bps as _v14_slip
+                from hl_observer.copy_fidelity.exec_cost_promotion import apply_exec_cost_promotion as _v14_exec_promote
+                _gross_edge = float(getattr(score, "edge_remaining_bps", 0.0) or 0.0)
+                _notional = float(getattr(score, "simulated_notional_usdt", 0.0) or 0.0)
+                # slippage from REAL notional + REAL liquidity; fee = HL taker base; half-spread =
+                # conservative constant (per-coin L2 spread not in this closure yet).
+                _slip = _v14_slip(notional_usd=_notional, liquidity_score=float(liquidity_score))
+                _costs = model_exec_costs(fee_bps=4.5, half_spread_bps=1.5, slippage_bps=_slip, latency_bps=0.0, is_maker=False)
+                _net_after_exec = net_edge_after_costs(gross_edge_bps=_gross_edge, costs=_costs)
+                _v14b["shadow_exec_cost_bps"] = _costs.total_cost_bps
+                _v14b["shadow_net_edge_after_exec_bps"] = _net_after_exec
+                decision_reason = _v14_exec_promote(
+                    score_reason=decision_reason,
+                    net_edge_bps=_net_after_exec,
+                    min_net_edge_bps=calibrated_float_env("HYPERSMART_V14_EXEC_MIN_NET_EDGE_BPS", 0.0),
+                    authoritative=calibrated_bool_env("HYPERSMART_V14_EXEC_COST_AUTHORITATIVE", False),
+                )
+            except Exception:
+                pass
+            try:
+                from hl_observer.signals.entry_quality_gate import apply_entry_quality_promotion as _v14_eq_promote
+                _min_liq = float(getattr(realtime_score_config, "min_liquidity_score", 0.0) or 0.0)
+                _depth_ok = (float(liquidity_score) >= _min_liq) if _min_liq > 0 else None
+                _sm_ok = (float(confidence) * 100.0) >= calibrated_float_env("HYPERSMART_V14_SMART_MONEY_MIN_SCORE", 60.0)
+                _v14b["shadow_entry_quality_depth_ok"] = _depth_ok
+                _v14b["shadow_entry_quality_smart_money_ok"] = bool(_sm_ok)
+                decision_reason = _v14_eq_promote(
+                    score_reason=decision_reason,
+                    smart_money_ok=_sm_ok,
+                    depth_ok=_depth_ok,
+                    authoritative=calibrated_bool_env("HYPERSMART_V14_ENTRY_QUALITY_AUTHORITATIVE", False),
+                )
+            except Exception:
+                pass
+            try:
+                _liq = (raw_json.get("liquidation") or raw_json.get("liq")) if isinstance(raw_json, dict) else None
+                _v14b["shadow_liquidation_present"] = (bool(_liq) if _liq is not None else None)
+            except Exception:
+                _v14b["shadow_liquidation_present"] = None
             return {
+                **_v13,
+                **_v14b,
                 "signal_age_ms": age_ms,
+                "v12_gate_accepted": _v12_accepted,
+                "v12_gate_reason": _v12_reason,
                 "leader_exchange_ts": exchange_at or None,
                 "leader_detected_ts": detected_at or None,
                 "leader_signal_ts": leader_event_at or None,
@@ -723,7 +1500,7 @@ def create_router(settings: Settings, state: UiState, bus: UiEventBus) -> APIRou
                 "liquidity_score": score.liquidity_score,
                 "leader_score": score.leader_score,
                 "copy_degradation_bps": score.copy_degradation_bps,
-                "edge_remaining_bps": score.edge_remaining_bps if score.edge_remaining_bps is not None else -9999.0,
+                "edge_remaining_bps": score.edge_remaining_bps,
                 "opportunity_score": score.opportunity_score,
                 "risk_score": score.risk_score,
                 "price_deviation_bps": score.price_deviation_bps,
@@ -732,33 +1509,146 @@ def create_router(settings: Settings, state: UiState, bus: UiEventBus) -> APIRou
                 "decision_reason": decision_reason,
             }
 
-        allow_add_as_entry = os.environ.get("HYPERSMART_SIMULATION_ALLOW_ADD_AS_ENTRY", "0") == "1"
+        allow_add_as_entry = calibrated_bool_env(
+            "HYPERSMART_SIMULATION_ALLOW_ADD_AS_ENTRY",
+            DEFAULT_SIMULATION_ALLOW_ADD_AS_ENTRY,
+        )
+        fill_admission_config = FillAdmissionConfig(
+            max_signal_age_ms=max_signal_age_ms,
+            hard_backfill_age_ms=max_signal_age_ms * 2,
+            allow_add_as_entry=allow_add_as_entry,
+            allow_exotic_markets=bool(settings.market_universe.include_builder_and_rwa_perps),
+            future_tolerance_ms=max(15_000, max_signal_age_ms),
+        )
 
         for row in chronological:
             current_delta_key = simulation_delta_identity(row)
             if current_delta_key in processed_keys:
+                filter_diagnostics["duplicate_delta_skipped"] += 1
                 continue
-            processed_keys.add(current_delta_key)
 
-            if row.coin and row.coin.upper() in (settings.market_universe.excluded_coins or []):
-                event = {
-                    "delta_key": current_delta_key,
-                    "wallet_address": row.wallet_address,
-                    "coin": row.coin,
-                    "leader_action": copy_delta_action(row),
-                    "leader_side": copy_delta_direction(row, copy_delta_action(row)),
-                    "observed_at_ms": delta_event_time_ms(row),
-                    "bot_replay_action": "NO_TRADE",
-                    "status": "REFUSED",
-                    "reason": "COIN_BLACKLISTED",
-                    "research_only": True,
-                    "paper_mode": "PAPER_LOCAL_USDT_ONLY",
-                }
-                ledger_events.append(event)
+            if should_skip_exotic_for_copy(
+                row.coin,
+                include_builder_and_rwa_perps=bool(settings.market_universe.include_builder_and_rwa_perps),
+            ):
+                filter_diagnostics["exotic_market_skipped"] += 1
+                record_prefilter_skip(row, reason="EXOTIC_MARKET_SKIPPED", detail="coin excluded from copy simulation universe")
                 continue
 
             action = copy_delta_action(row)
             direction = copy_delta_direction(row, action)
+            signal_time_ms = copy_signal_time_ms(row)
+            admission_position_key = (
+                position_key_for_row(row, direction, action, None)
+                if direction is not None and action != "UNKNOWN"
+                else None
+            )
+            admission_has_position = (
+                admission_position_key is not None
+                and admission_position_key in positions
+                and float(positions[admission_position_key].get("size") or 0.0) > 0
+            )
+            admission_key = fill_identity(
+                wallet_address=str(row.wallet_address or ""),
+                coin=str(row.coin or ""),
+                side=str(direction or ""),
+                action_type=action,
+                price=safe_float(row.price, 0.0),
+                size=abs(safe_float(row.delta_size, 0.0) or safe_float(row.fill_size, 0.0)),
+                ts_ms=signal_time_ms,
+            )
+            admission = admit_live_fill(
+                action_type=action,
+                coin=str(row.coin or ""),
+                fill_ts_ms=signal_time_ms,
+                now_ms=current_ms,
+                already_seen=admission_key in processed_keys,
+                has_matching_paper_position=admission_has_position,
+                leader_price=safe_float(row.price, 0.0),
+                config=fill_admission_config,
+            )
+            fresh_entry_diagnostics["admission_candidates_seen"] += 1
+            if admission.kind == KIND_ENTRY:
+                fresh_entry_diagnostics["admission_entries_seen"] += 1
+                if admission.is_fresh:
+                    fresh_entry_diagnostics["admission_fresh_entries_seen"] += 1
+            elif admission.kind == KIND_EXIT:
+                fresh_entry_diagnostics["admission_exits_seen"] += 1
+            if not admission.admit:
+                filter_diagnostics[f"admission_{admission.reason.lower()}"] += 1
+                if admission.reason == "STALE_BACKFILL":
+                    filter_diagnostics["hard_stale_entry_skipped"] += 1
+                    fresh_entry_diagnostics["entry_candidates_hard_stale"] += 1
+                elif admission.reason == "NO_PAPER_POSITION_FOR_EXIT":
+                    filter_diagnostics["orphan_exit_skipped"] += 1
+                elif admission.reason == "DUPLICATE_FILL":
+                    filter_diagnostics["duplicate_delta_skipped"] += 1
+                elif admission.reason == "EXOTIC_MARKET":
+                    filter_diagnostics["exotic_market_skipped"] += 1
+                elif admission.reason == "UNKNOWN_DELTA":
+                    filter_diagnostics["unknown_delta_skipped"] += 1
+                record_prefilter_skip(
+                    row,
+                    reason=(
+                        "NO_MATCHING_PAPER_POSITION_FOR_CLOSE"
+                        if admission.reason == "NO_PAPER_POSITION_FOR_EXIT"
+                        else admission.reason
+                    ),
+                    action=action,
+                    direction=direction,
+                    signal_time_ms=signal_time_ms,
+                    detail=f"fill admission rejected before ledger; kind={admission.kind}",
+                )
+                processed_keys.add(current_delta_key)
+                continue
+            processed_keys.add(admission_key)
+            processed_keys.add(current_delta_key)
+            if action in {"OPEN_LONG", "OPEN_SHORT", "ADD", "INCREASE"}:
+                fresh_entry_diagnostics["entry_candidates_seen"] += 1
+                if is_hard_stale_signal(
+                    signal_time_ms=signal_time_ms,
+                    now_ms=current_ms,
+                    max_signal_age_ms=max_signal_age_ms,
+                ):
+                    filter_diagnostics["hard_stale_entry_skipped"] += 1
+                    fresh_entry_diagnostics["entry_candidates_hard_stale"] += 1
+                    record_prefilter_skip(
+                        row,
+                        reason="HARD_STALE_ENTRY",
+                        action=action,
+                        direction=direction,
+                        signal_time_ms=signal_time_ms,
+                        detail="entry was detected but older than the hard stale copy window",
+                    )
+                    processed_keys.add(current_delta_key)
+                    continue
+                fresh_entry_diagnostics["entry_candidates_scored"] += 1
+
+            _coin_up = row.coin.upper() if row.coin else ""
+            if _coin_up and (_coin_up in (settings.market_universe.excluded_coins or [])
+                             or any(_mk in _coin_up for _mk in (":", "@", "#"))):
+                event = {
+                    "delta_key": current_delta_key,
+                    "wallet_address": row.wallet_address,
+                    "coin": row.coin,
+                    "leader_action": action,
+                    "leader_side": direction,
+                    "observed_at_ms": delta_event_time_ms(row),
+                    "bot_replay_action": "NO_TRADE",
+                    "status": "REFUSED",
+                    "reason": ("EXOTIC_MARKET_SKIPPED" if any(_mk in _coin_up for _mk in (":", "@", "#")) else "COIN_BLACKLISTED"),
+                    "research_only": True,
+                    "paper_mode": "PAPER_LOCAL_USDT_ONLY",
+                    "simulation_only": True,
+                    "read_only": True,
+                    "external_action": False,
+                    "execution": "forbidden",
+                    "venue_endpoint": None,
+                    "secret_material_used": False,
+                }
+                ledger_events.append(event)
+                continue
+
             event: dict[str, Any] = {
                 "delta_key": current_delta_key,
                 "wallet_address": row.wallet_address,
@@ -776,11 +1666,38 @@ def create_router(settings: Settings, state: UiState, bus: UiEventBus) -> APIRou
                 "reason": None,
                 "research_only": True,
                 "paper_mode": "PAPER_LOCAL_USDT_ONLY",
+                "simulation_only": True,
+                "read_only": True,
+                "external_action": False,
+                "execution": "forbidden",
+                "venue_endpoint": None,
+                "secret_material_used": False,
             }
             if action == "UNKNOWN" or direction is None:
-                event["reason"] = "UNKNOWN_DELTA"
-                ledger_events.append(event)
+                filter_diagnostics["unknown_delta_skipped"] += 1
+                record_prefilter_skip(
+                    row,
+                    reason="UNKNOWN_DELTA",
+                    action=action,
+                    direction=direction,
+                    signal_time_ms=signal_time_ms,
+                    detail="delta direction/action could not be classified safely",
+                )
                 continue
+            if action in {"REDUCE", "CLOSE_LONG", "CLOSE_SHORT"}:
+                preliminary_key = position_key_for_row(row, direction, action, None)
+                previous_position = positions.get(preliminary_key)
+                if should_skip_orphan_exit_or_unknown(action, previous_position is not None and previous_position["size"] > 0):
+                    filter_diagnostics["orphan_exit_skipped"] += 1
+                    record_prefilter_skip(
+                        row,
+                        reason="NO_MATCHING_PAPER_POSITION_FOR_CLOSE",
+                        action=action,
+                        direction=direction,
+                        signal_time_ms=signal_time_ms,
+                        detail="leader exit/reduce seen but no matching local virtual position exists",
+                    )
+                    continue
             if row.price is None or row.price <= 0:
                 event["reason"] = "PRICE_MISSING"
                 ledger_events.append(event)
@@ -789,6 +1706,9 @@ def create_router(settings: Settings, state: UiState, bus: UiEventBus) -> APIRou
             metrics = opportunity_metrics(row, direction)
             key = position_key_for_row(row, direction, action, metrics)
             event.update(metrics)
+            if event.get("edge_remaining_bps") is None and action in {"REDUCE", "CLOSE_LONG", "CLOSE_SHORT"}:
+                event["edge_remaining_bps"] = 0.0
+                event["edge_context"] = "EXIT_SIGNAL_FOLLOWS_LEADER_POSITION_NOT_ENTRY_EDGE_GATE"
             event["matched_position_key"] = encode_position_key(*key)
             signal_age_value = metrics.get("signal_age_ms")
             leader_size = abs(float(row.delta_size or row.fill_size or 0.0))
@@ -798,6 +1718,30 @@ def create_router(settings: Settings, state: UiState, bus: UiEventBus) -> APIRou
                 continue
 
             if action in {"OPEN_LONG", "OPEN_SHORT", "ADD", "INCREASE"}:
+                # Consensus clusters are represented by one shared paper
+                # position. After the first member opens that cluster, the
+                # remaining member deltas should enrich the leader list, not go
+                # through entry gates again as noisy NO_TRADE refusals. Those
+                # duplicate refusals were polluting the UI and making the
+                # decision stream look broken even when the cluster had already
+                # been handled.
+                early_key = position_key_for_row(row, direction, action, metrics)
+                early_previous = positions.get(early_key)
+                early_position_mode = str(metrics.get("position_mode") or "SINGLE_LEADER")
+                early_cluster_id = str(metrics.get("consensus_cluster_id") or "").lower()
+                if (
+                    early_position_mode == "CONSENSUS_CLUSTER"
+                    and early_previous is not None
+                    and float(early_previous.get("size") or 0.0) > 0
+                    and early_cluster_id
+                    and early_cluster_id in csv_to_set(early_previous.get("seen_cluster_ids_csv"))
+                ):
+                    leader_wallets = csv_to_set(early_previous.get("leader_wallets_csv"))
+                    leader_wallets.update(csv_to_set(metrics.get("consensus_wallets_csv")))
+                    leader_wallets.add(row.wallet_address.lower())
+                    early_previous["leader_wallets_csv"] = set_to_csv(leader_wallets)
+                    processed_keys.add(current_delta_key)
+                    continue
                 adaptive_risk_reason = adaptive_session_risk_reason(row, metrics)
                 if adaptive_risk_reason:
                     event["reason"] = adaptive_risk_reason
@@ -805,9 +1749,131 @@ def create_router(settings: Settings, state: UiState, bus: UiEventBus) -> APIRou
                     event["leader_session_pnl_usdc"] = round(session_pnl_for(wallet=row.wallet_address), 6)
                     ledger_events.append(event)
                     continue
+                try:
+                    from hl_observer.simulation.session_memory import evaluate_coin_side_session_memory
+
+                    session_memory = evaluate_coin_side_session_memory(
+                        events=ledger_events,
+                        coin=str(row.coin or ""),
+                        side=str(direction or ""),
+                        edge_remaining_bps=safe_float(metrics.get("edge_remaining_bps"), 0.0),
+                        min_edge_required_bps=min_edge_required_bps,
+                        consensus_wallets=int(metrics.get("consensus_wallets") or 0),
+                        liquidity_score=safe_float(metrics.get("liquidity_score"), 0.0),
+                        starting_equity_usdt=starting_equity_usdt,
+                        cooldown_usdc=calibrated_float_env(
+                            "HYPERSMART_COIN_SIDE_LOSS_COOLDOWN_USDC",
+                            max(0.20, starting_equity_usdt * 0.00025),
+                        ),
+                        extra_edge_after_loss_bps=calibrated_float_env(
+                            "HYPERSMART_COIN_SIDE_LOSS_RECOVERY_EXTRA_EDGE_BPS",
+                            35.0,
+                        ),
+                        min_consensus_after_loss=int(
+                            calibrated_float_env("HYPERSMART_COIN_SIDE_LOSS_MIN_CONSENSUS", 3.0)
+                        ),
+                        min_liquidity_after_loss=calibrated_float_env(
+                            "HYPERSMART_COIN_SIDE_LOSS_MIN_LIQUIDITY",
+                            0.55,
+                        ),
+                    )
+                    event.update(session_memory.to_log_fields())
+                    if not session_memory.allow_entry:
+                        event["reason"] = session_memory.reason
+                        ledger_events.append(event)
+                        continue
+                except Exception as exc:
+                    event["session_memory_error"] = f"{exc.__class__.__name__}: {exc}"
+                session_guard = evaluate_session_pnl_guard(
+                    session_pnl_usdc=simulated_equity_so_far() - starting_equity_usdt,
+                    starting_equity_usdt=starting_equity_usdt,
+                    edge_remaining_bps=safe_float(metrics.get("edge_remaining_bps"), 0.0),
+                    min_edge_required_bps=min_edge_required_bps,
+                    consensus_wallets=int(metrics.get("consensus_wallets") or 0),
+                    liquidity_score=safe_float(metrics.get("liquidity_score"), 0.0),
+                    soft_loss_usdc=calibrated_float_env(
+                        "HYPERSMART_SESSION_GUARD_SOFT_LOSS_USDC",
+                        max(0.50, starting_equity_usdt * 0.0005),
+                    ),
+                    hard_loss_usdc=calibrated_float_env(
+                        "HYPERSMART_SESSION_GUARD_HARD_LOSS_USDC",
+                        max(2.50, starting_equity_usdt * 0.0025),
+                    ),
+                    extra_edge_after_loss_bps=calibrated_float_env(
+                        "HYPERSMART_SESSION_GUARD_EXTRA_EDGE_BPS",
+                        25.0,
+                    ),
+                    min_consensus_after_loss=int(
+                        calibrated_float_env("HYPERSMART_SESSION_GUARD_MIN_CONSENSUS", 3.0)
+                    ),
+                    min_liquidity_after_loss=calibrated_float_env(
+                        "HYPERSMART_SESSION_GUARD_MIN_LIQUIDITY",
+                        0.55,
+                    ),
+                )
+                event.update(session_guard.to_log_fields())
+                if not session_guard.allow_entry:
+                    event["reason"] = session_guard.reason
+                    ledger_events.append(event)
+                    continue
                 desired_notional = float(metrics.get("simulated_notional_usdt") or 0.0)
                 if desired_notional <= 0:
                     event["reason"] = "MAX_EXPOSURE_REACHED"
+                    ledger_events.append(event)
+                    continue
+                try:
+                    from hl_observer.simulation.adaptive_paper_sizing import adaptive_paper_margin
+
+                    adaptive_size = adaptive_paper_margin(
+                        requested_margin_usdt=desired_notional,
+                        equity_usdt=simulated_equity_so_far(),
+                        recent_events=ledger_events,
+                        edge_remaining_bps=safe_float(metrics.get("edge_remaining_bps"), 0.0),
+                        liquidity_score=safe_float(metrics.get("liquidity_score"), 0.0),
+                        consensus_wallets=int(metrics.get("consensus_wallets") or 0),
+                        min_margin_usdt=realtime_score_config.min_position_notional_usdt,
+                        max_margin_usdt=realtime_score_config.max_position_notional_usdt,
+                        enabled=calibrated_bool_env("HYPERSMART_ADAPTIVE_PAPER_SIZING", True),
+                    )
+                    event.update(adaptive_size.to_log_fields())
+                    if adaptive_size.final_margin_usdt <= 0:
+                        event["reason"] = adaptive_size.reason
+                        ledger_events.append(event)
+                        continue
+                    desired_notional = adaptive_size.final_margin_usdt
+                except Exception as exc:
+                    event["adaptive_sizing_error"] = f"{exc.__class__.__name__}: {exc}"
+                entry_cost_guard = evaluate_entry_cost_guard(
+                    coin=str(row.coin or ""),
+                    wallet=str(row.wallet_address or ""),
+                    notional_usdt=desired_notional,
+                    edge_net_bps=safe_float(metrics.get("edge_remaining_bps"), None),
+                    context=session_entry_risk_context(),
+                    config=EntryCostGuardConfig(
+                        # The live simulator already has expected-dollar-edge and
+                        # adaptive-size guards. Keep this baseline permissive so
+                        # fresh first entries are not starved; raise the minimum
+                        # only when fee drag/loss buckets prove the session is
+                        # cost-dominated.
+                        min_notional_usdt=calibrated_float_env("HYPERSMART_ENTRY_GUARD_MIN_NOTIONAL_USDT", 0.0),
+                        fee_drag_ratio_threshold=calibrated_float_env("HYPERSMART_ENTRY_GUARD_FEE_DRAG_RATIO", 0.35),
+                        fee_drag_min_notional_usdt=calibrated_float_env("HYPERSMART_ENTRY_GUARD_FEE_DRAG_MIN_NOTIONAL_USDT", 40.0),
+                        fee_drag_min_edge_bps=calibrated_float_env("HYPERSMART_ENTRY_GUARD_FEE_DRAG_MIN_EDGE_BPS", 35.0),
+                        loss_streak_threshold=int(calibrated_float_env("HYPERSMART_ENTRY_GUARD_LOSS_STREAK", 3.0)),
+                        loss_streak_min_edge_bps=calibrated_float_env("HYPERSMART_ENTRY_GUARD_LOSS_STREAK_MIN_EDGE_BPS", 45.0),
+                        losing_bucket_threshold_usdc=calibrated_float_env("HYPERSMART_ENTRY_GUARD_LOSING_BUCKET_USDC", -0.05),
+                        coin_quarantine_min_edge_bps=calibrated_float_env("HYPERSMART_ENTRY_GUARD_COIN_MIN_EDGE_BPS", 50.0),
+                        wallet_quarantine_min_edge_bps=calibrated_float_env("HYPERSMART_ENTRY_GUARD_WALLET_MIN_EDGE_BPS", 50.0),
+                    ),
+                )
+                entry_cost_guard_payload = entry_cost_guard.as_dict()
+                event["entry_cost_guard"] = entry_cost_guard_payload
+                event["entry_cost_guard_reasons"] = "|".join(entry_cost_guard.reason_codes)
+                event["entry_cost_guard_required_min_notional_usdt"] = entry_cost_guard.required_min_notional_usdt
+                event["entry_cost_guard_required_min_edge_bps"] = entry_cost_guard.required_min_edge_bps
+                event["entry_cost_guard_fee_drag_ratio"] = entry_cost_guard_payload["evidence"].get("fee_drag_ratio")
+                if not entry_cost_guard.accepted:
+                    event["reason"] = "ENTRY_COST_GUARD:" + "|".join(entry_cost_guard.reason_codes)
                     ledger_events.append(event)
                     continue
                 free_cash_before_entry = max(0.0, simulated_equity_so_far() - current_open_exposure_usdt())
@@ -817,8 +1883,98 @@ def create_router(settings: Settings, state: UiState, bus: UiEventBus) -> APIRou
                     event["requested_notional_usdt"] = round(desired_notional, 6)
                     ledger_events.append(event)
                     continue
-                size = desired_notional / float(row.price)
-                notional = desired_notional
+                # PERP LEVERAGE: desired_notional is the MARGIN (stake); the position controls
+                # margin*leverage of notional. size is the leveraged coin qty so PnL = size*Δprice
+                # scales with leverage (real Hyperliquid behaviour). Fees are charged on the FULL
+                # leveraged notional. Exposure/cash stay in margin terms (caps still protect 1000$).
+                margin_usdt = desired_notional
+                notional = desired_notional * simulation_leverage
+                if calibrated_bool_env("HYPERSMART_RUNTIME_DEPTH_FILL_GUARD", True):
+                    coin_key_for_book = str(row.coin or "").upper()
+                    book = orderbooks_by_coin.get(coin_key_for_book)
+                    if book is not None:
+                        try:
+                            from hl_observer.signals.depth_guard import depth_fill_guard
+
+                            depth_mid = safe_float(
+                                (mid_prices or {}).get(coin_key_for_book),
+                                safe_float(row.price),
+                            )
+                            depth_ok, depth_reason, depth_result = depth_fill_guard(
+                                side=direction,
+                                needed_usd=notional,
+                                mid_price=depth_mid,
+                                asks=book.get("asks") or (),
+                                bids=book.get("bids") or (),
+                                min_fill_ratio=calibrated_float_env("HYPERSMART_RUNTIME_DEPTH_MIN_FILL_RATIO", 0.85),
+                                max_slippage_bps=calibrated_float_env("HYPERSMART_RUNTIME_DEPTH_MAX_SLIPPAGE_BPS", 20.0),
+                            )
+                            event.update(
+                                {
+                                    "depth_fill_guard_checked": True,
+                                    "depth_snapshot_id": book.get("snapshot_id"),
+                                    "depth_snapshot_exchange_ts": book.get("exchange_ts"),
+                                    "depth_requested_notional_usdc": round(notional, 6),
+                                    "depth_filled_notional_usdc": round(depth_result.filled_notional_usdc, 6),
+                                    "depth_fill_ratio": round(depth_result.fill_ratio, 6),
+                                    "depth_slippage_bps": round(depth_result.slippage_bps, 6),
+                                    "depth_levels_consumed": depth_result.levels_consumed,
+                                    "depth_guard_reason": depth_reason or depth_result.reason,
+                                }
+                            )
+                            if not depth_ok:
+                                event["reason"] = depth_reason or depth_result.reason
+                                ledger_events.append(event)
+                                continue
+                        except Exception as exc:
+                            event["depth_fill_guard_error"] = f"{exc.__class__.__name__}: {exc}"
+                    else:
+                        event["depth_fill_guard_checked"] = False
+                        event["depth_guard_reason"] = "NO_RECENT_L2BOOK_FOR_COIN"
+                if calibrated_bool_env("HYPERSMART_RUNTIME_MICROSTRUCTURE_GUARD", True):
+                    coin_key_for_book = str(row.coin or "").upper()
+                    book = orderbooks_by_coin.get(coin_key_for_book)
+                    try:
+                        from hl_observer.risk.microstructure_guard import (
+                            MicrostructureGuardConfig,
+                            evaluate_microstructure_guard,
+                        )
+
+                        guard_config = MicrostructureGuardConfig(
+                            min_top1_usd=calibrated_float_env("HYPERSMART_MICRO_MIN_TOP1_USD", 20.0),
+                            min_top3_usd=calibrated_float_env("HYPERSMART_MICRO_MIN_TOP3_USD", 60.0),
+                            min_book_depth_usd=calibrated_float_env("HYPERSMART_MICRO_MIN_BOOK_DEPTH_USD", 200.0),
+                            max_consume_fraction=calibrated_float_env("HYPERSMART_MICRO_MAX_CONSUME_FRACTION", 0.25),
+                            max_spread_bps=calibrated_float_env("HYPERSMART_MICRO_MAX_SPREAD_BPS", 80.0),
+                            obi_conflict_strength=calibrated_float_env("HYPERSMART_MICRO_OBI_CONFLICT_STRENGTH", 0.35),
+                            min_calibration_samples=int(calibrated_float_env("HYPERSMART_MICRO_MIN_CALIBRATION_SAMPLES", 20.0)),
+                            max_calibration_error=calibrated_float_env("HYPERSMART_MICRO_MAX_CALIBRATION_ERROR", 0.30),
+                            max_var_fraction=calibrated_float_env("HYPERSMART_MICRO_MAX_VAR_FRACTION", 0.015),
+                            max_cvar_fraction=calibrated_float_env("HYPERSMART_MICRO_MAX_CVAR_FRACTION", 0.025),
+                        )
+                        micro_decision = evaluate_microstructure_guard(
+                            side=direction,
+                            needed_usd=notional,
+                            asks=(book or {}).get("asks") or (),
+                            bids=(book or {}).get("bids") or (),
+                            spread_bps=(book or {}).get("spread_bps") if book is not None else None,
+                            recent_returns=recent_paper_return_fractions(),
+                            confidence_samples=recent_confidence_samples(),
+                            config=guard_config,
+                        )
+                        event.update(micro_decision.to_log_fields())
+                        event["microstructure_snapshot_id"] = (book or {}).get("snapshot_id")
+                        event["microstructure_snapshot_exchange_ts"] = (book or {}).get("exchange_ts")
+                        if (
+                            calibrated_bool_env("HYPERSMART_RUNTIME_MICROSTRUCTURE_AUTHORITATIVE", True)
+                            and not micro_decision.authoritative_ok
+                        ):
+                            event["reason"] = "MICROSTRUCTURE_GUARD:" + "|".join(micro_decision.authoritative_reasons)
+                            ledger_events.append(event)
+                            continue
+                    except Exception as exc:
+                        event["microstructure_guard_error"] = f"{exc.__class__.__name__}: {exc}"
+                size = notional / float(row.price)
                 cost = notional * cost_bps / 10_000.0
                 expected_net_edge_usdt = notional * safe_float(metrics.get("edge_remaining_bps"), 0.0) / 10_000.0
                 roundtrip_cost_estimate_usdt = cost * 2.0
@@ -827,9 +1983,12 @@ def create_router(settings: Settings, state: UiState, bus: UiEventBus) -> APIRou
                 # a second time here, otherwise valid small-notional 1000 USDT
                 # simulation entries are rejected even after the edge gate has
                 # accepted them.
-                minimum_edge_usdt = max(
-                    0.05,
-                    starting_equity_usdt * 0.00005,
+                # V9: edge_remaining_bps is the primary gate. Keep a dust guard,
+                # but make it small enough for a 1000 USDT paper account to
+                # take bounded consensus opportunities instead of starving.
+                minimum_edge_usdt = calibrated_float_env(
+                    "HYPERSMART_SIMULATION_MIN_EXPECTED_EDGE_USDT",
+                    max(0.005, starting_equity_usdt * 0.000005),
                 )
                 if expected_net_edge_usdt < minimum_edge_usdt:
                     event.update(
@@ -844,6 +2003,9 @@ def create_router(settings: Settings, state: UiState, bus: UiEventBus) -> APIRou
                     ledger_events.append(event)
                     continue
                 previous = positions.get(key, {"size": 0.0, "avg_price": 0.0, "entry_costs": 0.0})
+                previous_key_existed = key in positions
+                previous_snapshot = dict(previous)
+                was_existing_position = float(previous.get("size") or 0.0) > 0
                 position_mode = str(metrics.get("position_mode") or "SINGLE_LEADER")
                 cluster_id = str(metrics.get("consensus_cluster_id") or "").lower()
                 previous_clusters = csv_to_set(previous.get("seen_cluster_ids_csv"))
@@ -910,6 +2072,11 @@ def create_router(settings: Settings, state: UiState, bus: UiEventBus) -> APIRou
                     "closed_wallets_csv": str(previous.get("closed_wallets_csv") or ""),
                     "seen_cluster_ids_csv": set_to_csv(seen_cluster_ids),
                     "last_cluster_id": cluster_id,
+                    "last_reduce_fraction": float(previous.get("last_reduce_fraction") or 0.0),
+                    "last_notional_closed_usdt": float(previous.get("last_notional_closed_usdt") or 0.0),
+                    "entry_count": int(previous.get("entry_count") or 0) + (0 if was_existing_position else 1),
+                    "increase_count": int(previous.get("increase_count") or 0) + (1 if was_existing_position else 0),
+                    "reduce_count": int(previous.get("reduce_count") or 0),
                 }
                 if row.source == "fresh_opportunity_cluster_local_simulation":
                     raw_json = row.raw_json if isinstance(row.raw_json, dict) else {}
@@ -950,8 +2117,63 @@ def create_router(settings: Settings, state: UiState, bus: UiEventBus) -> APIRou
                         "reason": event.get("reason") or replay_reason,
                         "position_mode": position_mode,
                         "leader_wallets_csv": set_to_csv(leader_wallets),
+                        "paper_action_type": "INCREASE" if was_existing_position else "OPEN",
+                        "entry_price": round(float(row.price), 8),
+                        "average_entry_price": round(avg_price, 8),
+                        "avg_entry_price_after": round(avg_price, 8),
+                        "position_notional_usdt": round(new_size * avg_price, 6),
+                        "size_before": round(float(previous.get("size") or 0.0), 10),
+                        "size_added": round(size, 10),
+                        "size_after": round(new_size, 10),
                     }
                 )
+                enrich_replay_evidence(event, position_key=key, replay_action=replay_action)
+                is_fresh_opportunity_replay = row.source == "fresh_opportunity_cluster_local_simulation"
+                v9_decision_text = str(event.get("v9_decision") or "").upper()
+                explicit_expected_edge_guard = "HYPERSMART_SIMULATION_MIN_EXPECTED_EDGE_USDT" in os.environ
+                if (
+                    v9_pipeline_authoritative
+                    and event.get("v9_accepted") is False
+                    and is_fresh_opportunity_replay
+                    and not (explicit_expected_edge_guard and v9_decision_text == "REJECT_EDGE_TOO_SMALL")
+                ):
+                    # The fresh-opportunity engine already applied the real-time
+                    # edge/degradation/liquidity gate before creating this local
+                    # replay row. V9 remains attached as evidence, but it must not
+                    # erase the paper position solely because its secondary market
+                    # feature vector is incomplete in the UI endpoint.
+                    event["v9_authoritative"] = False
+                    event["v9_override_reason"] = "FRESH_OPPORTUNITY_CLUSTER_ALREADY_ACCEPTED_FOR_LOCAL_SIMULATION"
+                elif v9_pipeline_authoritative and event.get("v9_accepted") is False:
+                    if previous_key_existed:
+                        positions[key] = previous_snapshot
+                    else:
+                        positions.pop(key, None)
+                    v9_reason = (
+                        "EXPECTED_NET_EDGE_TOO_SMALL_AFTER_COSTS"
+                        if v9_decision_text == "REJECT_EDGE_TOO_SMALL"
+                        else "V9_PIPELINE_REFUSED_ENTRY"
+                    )
+                    event.update(
+                        {
+                            "bot_replay_action": "NO_TRADE",
+                            "status": "REFUSED",
+                            "estimated_net_pnl_usdc": None,
+                            "fee_cost_usdc": 0.0,
+                            "bot_position_size_after": round(float(previous_snapshot.get("size") or 0.0), 10),
+                            "reason": v9_reason,
+                            "v9_authoritative": True,
+                            "paper_action_type": "NO_TRADE",
+                        }
+                    )
+                    ledger_events.append(event)
+                    continue
+                positions[key]["last_replay_action"] = replay_action
+                positions[key]["last_evidence_hash"] = str(event.get("evidence_hash") or "")
+                positions[key]["last_paper_ref"] = str(event.get("paper_ref") or "")
+                positions[key]["last_v9_decision"] = str(event.get("v9_decision") or "")
+                positions[key]["last_v9_evidence_hash"] = str(event.get("v9_evidence_hash") or "")
+                positions[key]["last_v9_reasons"] = list(event.get("v9_reasons") or [])
                 ledger_events.append(event)
                 continue
 
@@ -999,7 +2221,14 @@ def create_router(settings: Settings, state: UiState, bus: UiEventBus) -> APIRou
                         )
                         close_size = min(previous["size"], (previous["size"] / remaining_count) * leader_reduce_fraction)
                 else:
-                    close_size = previous["size"] if action.startswith("CLOSE") or size <= 0 else min(previous["size"], size)
+                    if action == "REDUCE" and row.previous_size:
+                        leader_reduce_fraction = min(
+                            1.0,
+                            max(0.0, size / abs(float(row.previous_size or 0.0))),
+                        )
+                        close_size = min(previous["size"], previous["size"] * leader_reduce_fraction)
+                    else:
+                        close_size = previous["size"] if action.startswith("CLOSE") or size <= 0 else min(previous["size"], size)
                 if direction == "LONG":
                     gross_pnl = (float(row.price) - previous["avg_price"]) * close_size
                 else:
@@ -1009,7 +2238,43 @@ def create_router(settings: Settings, state: UiState, bus: UiEventBus) -> APIRou
                 # Entry costs are recorded when a virtual entry is opened; close events
                 # only subtract exit costs to avoid double-counting fees in the graph.
                 net_pnl = gross_pnl - exit_cost
+                notional_to_close = close_size * float(row.price)
+                if action == "REDUCE":
+                    refusal_reason = ""
+                    if signal_age_for_exit > reduce_max_signal_age_ms:
+                        refusal_reason = "STALE_REDUCE_REFUSED"
+                    elif notional_to_close < min_reduce_notional_usdt:
+                        refusal_reason = "MICRO_REDUCE_FEE_BLEED_REFUSED"
+                    if refusal_reason:
+                        event.update(
+                            {
+                                "bot_replay_action": "NO_TRADE",
+                                "status": "REFUSED",
+                                "estimated_net_pnl_usdc": None,
+                                "gross_pnl_usdc": round(gross_pnl, 6),
+                                "fee_cost_usdc": 0.0,
+                                "bot_position_size_after": round(float(previous["size"]), 10),
+                                "copied_notional_usdt": round(notional_to_close, 6),
+                                "reason": refusal_reason,
+                                "position_mode": position_mode,
+                                "leader_wallets_csv": set_to_csv(leader_wallets),
+                                "closed_wallets_csv": set_to_csv(closed_wallets),
+                                "paper_action_type": "NO_TRADE",
+                                "average_entry_price": round(float(previous["avg_price"]), 8),
+                                "exit_price": round(float(row.price), 8),
+                                "notional_closed_usdt": 0.0,
+                                "remaining_notional_usdt": round(float(previous["size"]) * float(row.price), 6),
+                                "reduce_fraction": 0.0,
+                                "size_before": round(float(previous["size"]), 10),
+                                "size_closed": 0.0,
+                                "size_after": round(float(previous["size"]), 10),
+                            }
+                        )
+                        enrich_replay_evidence(event, position_key=key, replay_action="NO_TRADE")
+                        ledger_events.append(event)
+                        continue
                 remaining_size = max(0.0, previous["size"] - close_size)
+                close_fraction = (close_size / previous["size"]) if previous["size"] > 0 else 0.0
                 if remaining_size <= 1e-12:
                     positions.pop(key, None)
                 else:
@@ -1027,18 +2292,24 @@ def create_router(settings: Settings, state: UiState, bus: UiEventBus) -> APIRou
                         "closed_wallets_csv": set_to_csv(closed_wallets),
                         "seen_cluster_ids_csv": str(previous.get("seen_cluster_ids_csv") or ""),
                         "last_cluster_id": str(previous.get("last_cluster_id") or ""),
+                        "last_reduce_fraction": close_fraction,
+                        "last_notional_closed_usdt": close_size * float(row.price),
+                        "entry_count": int(previous.get("entry_count") or 0),
+                        "increase_count": int(previous.get("increase_count") or 0),
+                        "reduce_count": int(previous.get("reduce_count") or 0) + 1,
                     }
+                replay_action = (
+                    "PAPER_CONSENSUS_CLOSE_REPLAYED"
+                    if action.startswith("CLOSE") and position_mode == "CONSENSUS_CLUSTER"
+                    else "PAPER_CLOSE_REPLAYED"
+                    if action.startswith("CLOSE")
+                    else "PAPER_CONSENSUS_REDUCE_REPLAYED"
+                    if position_mode == "CONSENSUS_CLUSTER"
+                    else "PAPER_REDUCE_REPLAYED"
+                )
                 event.update(
                     {
-                        "bot_replay_action": (
-                            "PAPER_CONSENSUS_CLOSE_REPLAYED"
-                            if action.startswith("CLOSE") and position_mode == "CONSENSUS_CLUSTER"
-                            else "PAPER_CLOSE_REPLAYED"
-                            if action.startswith("CLOSE")
-                            else "PAPER_CONSENSUS_REDUCE_REPLAYED"
-                            if position_mode == "CONSENSUS_CLUSTER"
-                            else "PAPER_REDUCE_REPLAYED"
-                        ),
+                        "bot_replay_action": replay_action,
                         "status": "LOCAL_REPLAY",
                         "estimated_net_pnl_usdc": round(net_pnl, 6),
                         "gross_pnl_usdc": round(gross_pnl, 6),
@@ -1049,8 +2320,25 @@ def create_router(settings: Settings, state: UiState, bus: UiEventBus) -> APIRou
                         "position_mode": position_mode,
                         "leader_wallets_csv": set_to_csv(leader_wallets),
                         "closed_wallets_csv": set_to_csv(closed_wallets),
+                        "paper_action_type": "CLOSE" if action.startswith("CLOSE") else "REDUCE",
+                        "average_entry_price": round(float(previous["avg_price"]), 8),
+                        "exit_price": round(float(row.price), 8),
+                        "notional_closed_usdt": round(close_size * float(row.price), 6),
+                        "remaining_notional_usdt": round(remaining_size * float(row.price), 6),
+                        "reduce_fraction": round(close_fraction, 6),
+                        "size_before": round(float(previous["size"]), 10),
+                        "size_closed": round(close_size, 10),
+                        "size_after": round(remaining_size, 10),
                     }
                 )
+                enrich_replay_evidence(event, position_key=key, replay_action=replay_action)
+                if key in positions:
+                    positions[key]["last_replay_action"] = replay_action
+                    positions[key]["last_evidence_hash"] = str(event.get("evidence_hash") or "")
+                    positions[key]["last_paper_ref"] = str(event.get("paper_ref") or "")
+                    positions[key]["last_v9_decision"] = str(event.get("v9_decision") or "")
+                    positions[key]["last_v9_evidence_hash"] = str(event.get("v9_evidence_hash") or "")
+                    positions[key]["last_v9_reasons"] = list(event.get("v9_reasons") or [])
                 ledger_events.append(event)
                 continue
 
@@ -1058,16 +2346,34 @@ def create_router(settings: Settings, state: UiState, bus: UiEventBus) -> APIRou
             ledger_events.append(event)
 
         mid_prices = mid_prices or {}
+        # V9 — sortie disciplinee SL/TP (scalping) au PRIX REEL, independante du leader: encaisse
+        # vite un petit gain (take-profit) et coupe vite une perte (stop-loss), pour la distribution
+        # "beaucoup de petits gains". Le PnL est realise au vrai mid courant (= ce qu'un ordre TP/SL
+        # aurait capture), donc honnete. Non bloquant. Pilotable par env HYPERSMART_SLTP_*.
+        # Desactive par defaut en V12: la simulation baseline suit les reduce/close leaders.
+        sltp_runtime_cfg = None
+        try:
+            from hl_observer.paper_trading.sltp_runtime import sltp_config_from_env
+            # V26 L2 : wrapper barrieres ajustees a la volatilite (flag OFF = passthrough exact)
+            from hl_observer.paper_trading.vol_adjusted_barriers import apply_sltp_exits_vol_adjusted as apply_sltp_exits
+            sltp_runtime_cfg = sltp_config_from_env()
+            apply_sltp_exits(positions, ledger_events, mid_prices, cost_bps=cost_bps, now_ms=current_ms, config=sltp_runtime_cfg)
+        except Exception:
+            sltp_runtime_cfg = None
+            pass
         open_positions: list[dict[str, Any]] = []
         unrealized_pnl = 0.0
         open_exposure_usdt = 0.0
+        open_notional_usdt = 0.0
         persisted_positions: dict[str, dict[str, Any]] = {}
         for (wallet, coin, direction), position in positions.items():
             mark_price = mid_prices.get(coin)
             if mark_price is None:
                 mark_price = position["avg_price"]
-            position_notional = abs(position["size"] * mark_price)
-            open_exposure_usdt += position_notional
+            position_notional = abs(position["size"] * mark_price)      # leveraged notional (true HL size)
+            position_margin = position_notional / simulation_leverage    # capital deployed (margin at risk)
+            open_exposure_usdt += position_margin
+            open_notional_usdt += position_notional
             if direction == "LONG":
                 gross_unrealized = (mark_price - position["avg_price"]) * position["size"]
             else:
@@ -1087,10 +2393,24 @@ def create_router(settings: Settings, state: UiState, bus: UiEventBus) -> APIRou
                     "avg_entry_price": round(position["avg_price"], 8),
                     "mark_price": round(mark_price, 8),
                     "notional_usdt": round(position_notional, 6),
+                    "margin_usdt": round(position_margin, 6),
+                    "leverage": round(simulation_leverage, 2),
                     "entry_costs_remaining": round(position["entry_costs"], 6),
                     "unrealized_pnl_usdc": round(net_unrealized, 6),
                     "opened_at_ms": int(position.get("opened_at_ms") or 0),
                     "last_update_at_ms": int(position.get("last_update_at_ms") or 0),
+                    "source_delta_key": str(position.get("source_delta_key") or ""),
+                    "last_replay_action": str(position.get("last_replay_action") or ""),
+                    "last_evidence_hash": str(position.get("last_evidence_hash") or ""),
+                    "last_paper_ref": str(position.get("last_paper_ref") or ""),
+                    "last_v9_decision": str(position.get("last_v9_decision") or ""),
+                    "last_v9_evidence_hash": str(position.get("last_v9_evidence_hash") or ""),
+                    "last_v9_reasons": list(position.get("last_v9_reasons") or []),
+                    "last_reduce_fraction": round(float(position.get("last_reduce_fraction") or 0.0), 6),
+                    "last_notional_closed_usdt": round(float(position.get("last_notional_closed_usdt") or 0.0), 6),
+                    "entry_count": int(position.get("entry_count") or 0),
+                    "increase_count": int(position.get("increase_count") or 0),
+                    "reduce_count": int(position.get("reduce_count") or 0),
                     "research_only": True,
                 }
             )
@@ -1111,6 +2431,17 @@ def create_router(settings: Settings, state: UiState, bus: UiEventBus) -> APIRou
                 "closed_wallets_csv": str(position.get("closed_wallets_csv") or ""),
                 "seen_cluster_ids_csv": str(position.get("seen_cluster_ids_csv") or ""),
                 "last_cluster_id": str(position.get("last_cluster_id") or ""),
+                "last_replay_action": str(position.get("last_replay_action") or ""),
+                "last_evidence_hash": str(position.get("last_evidence_hash") or ""),
+                "last_paper_ref": str(position.get("last_paper_ref") or ""),
+                "last_v9_decision": str(position.get("last_v9_decision") or ""),
+                "last_v9_evidence_hash": str(position.get("last_v9_evidence_hash") or ""),
+                "last_v9_reasons": list(position.get("last_v9_reasons") or []),
+                "last_reduce_fraction": round(float(position.get("last_reduce_fraction") or 0.0), 12),
+                "last_notional_closed_usdt": round(float(position.get("last_notional_closed_usdt") or 0.0), 12),
+                "entry_count": int(position.get("entry_count") or 0),
+                "increase_count": int(position.get("increase_count") or 0),
+                "reduce_count": int(position.get("reduce_count") or 0),
             }
         open_positions.sort(key=lambda item: abs(float(item["unrealized_pnl_usdc"])), reverse=True)
         display_ledger_events = ledger_events[-max_events:]
@@ -1155,6 +2486,45 @@ def create_router(settings: Settings, state: UiState, bus: UiEventBus) -> APIRou
         current_equity_usdt = starting_equity_usdt + total_pnl
         free_equity_usdt = current_equity_usdt - open_exposure_usdt
         exposure_pct = (open_exposure_usdt / current_equity_usdt * 100.0) if current_equity_usdt > 0 else 0.0
+        # Winrate par POSITION (round-trip), PAS par event. BUG 2026-06-26: on comptait chaque
+        # REDUCE partiel comme un "trade" -> une position reduite 9x = 9 trades (souvent comptes
+        # perdants) -> winrate FAUSSEMENT bas. Correct: on somme le PnL realise par
+        # matched_position_key et on classe gagnant/perdant sur le TOTAL de la position.
+        _pos_pnls: dict[str, float] = {}
+        for row in ledger_events:
+            if row.get("status") != "LOCAL_REPLAY" or row.get("bot_replay_action") not in exit_replay_actions:
+                continue
+            _k = str(row.get("matched_position_key") or row.get("coin") or "")
+            _pos_pnls[_k] = _pos_pnls.get(_k, 0.0) + float(row.get("estimated_net_pnl_usdc") or 0.0)
+        _round_trip = list(_pos_pnls.values())
+        winning_trades = sum(1 for _p in _round_trip if _p > 0)
+        losing_trades = sum(1 for _p in _round_trip if _p < 0)
+        closed_trades = sum(1 for _p in _round_trip if _p != 0)
+        winrate_pct = round(winning_trades / closed_trades * 100.0, 1) if closed_trades else 0.0
+        # Profit factor = gains totaux / pertes totales. C'est LA metrique qui compte pour une
+        # strategie "coupe les perdants / laisse courir les gagnants": un winrate <50% est NORMAL
+        # et RENTABLE tant que profit_factor > 1 (les gagnants pesent plus que les perdants).
+        _gross_win = sum(_p for _p in _round_trip if _p > 0)
+        _gross_loss = -sum(_p for _p in _round_trip if _p < 0)
+        profit_factor = round(_gross_win / _gross_loss, 3) if _gross_loss > 0 else None
+        avg_win_usdc = round(_gross_win / winning_trades, 6) if winning_trades else 0.0
+        avg_loss_usdc = round(-_gross_loss / losing_trades, 6) if losing_trades else 0.0
+        entry_cost_guard_reasons: Counter[str] = Counter()
+        entry_cost_guard_blocks = 0
+        for row in ledger_events:
+            reason_text = str(row.get("reason") or "")
+            has_guard = reason_text.startswith("ENTRY_COST_GUARD:") or bool(row.get("entry_cost_guard"))
+            if not has_guard:
+                continue
+            if row.get("status") == "REFUSED":
+                entry_cost_guard_blocks += 1
+            guard_reason_text = str(row.get("entry_cost_guard_reasons") or "")
+            if not guard_reason_text and reason_text.startswith("ENTRY_COST_GUARD:"):
+                guard_reason_text = reason_text.split(":", 1)[1]
+            for reason in guard_reason_text.replace(",", "|").split("|"):
+                clean_reason = reason.strip()
+                if clean_reason:
+                    entry_cost_guard_reasons[clean_reason] += 1
 
         return {
             "events": list(reversed(display_ledger_events[-240:])),
@@ -1166,6 +2536,23 @@ def create_router(settings: Settings, state: UiState, bus: UiEventBus) -> APIRou
             "reproduced_entries": reproduced_entries,
             "reproduced_exits": reproduced_exits,
             "refused": refused,
+            "winning_trades": winning_trades,
+            "losing_trades": losing_trades,
+            "closed_trades": closed_trades,
+            "winrate_pct": winrate_pct,
+            "profit_factor": profit_factor,
+            "avg_win_usdc": avg_win_usdc,
+            "avg_loss_usdc": avg_loss_usdc,
+            "entry_cost_guard_summary": {
+                "active": entry_cost_guard_blocks > 0,
+                "blocked_events": entry_cost_guard_blocks,
+                "top_reasons": [
+                    {"reason": reason, "count": count}
+                    for reason, count in entry_cost_guard_reasons.most_common(12)
+                ],
+                "paper_only": True,
+                "real_execution": False,
+            },
             "open_local_positions": len(positions),
             "open_positions": open_positions[:25],
             "realized_net_pnl_usdc": round(realized_net_pnl, 6),
@@ -1175,6 +2562,8 @@ def create_router(settings: Settings, state: UiState, bus: UiEventBus) -> APIRou
             "current_equity_usdt": round(current_equity_usdt, 6),
             "free_equity_usdt": round(free_equity_usdt, 6),
             "open_exposure_usdt": round(open_exposure_usdt, 6),
+            "open_notional_usdt": round(open_notional_usdt, 6),
+            "leverage": round(simulation_leverage, 2),
             "open_exposure_pct": round(exposure_pct, 6),
             "entry_costs_paid_usdc": round(entry_costs_paid, 6),
             "exit_costs_paid_usdc": round(exit_costs_paid, 6),
@@ -1183,6 +2572,10 @@ def create_router(settings: Settings, state: UiState, bus: UiEventBus) -> APIRou
             "new_reproduced_entries": new_reproduced_entries,
             "new_reproduced_exits": new_reproduced_exits,
             "cost_model_bps": cost_bps,
+            "filter_diagnostics": dict(filter_diagnostics),
+            "fresh_entry_diagnostics": dict(fresh_entry_diagnostics),
+            "prefilter_skips": prefilter_skips[-120:],
+            "prefilter_skip_count": len(prefilter_skips),
             "magic_profile": {
                 "mode": "fresh_leader_following_simulation",
                 "starting_equity_usdt": starting_equity_usdt,
@@ -1204,10 +2597,22 @@ def create_router(settings: Settings, state: UiState, bus: UiEventBus) -> APIRou
                     if allow_add_as_entry
                     else "ADD/INCREASE allowed only when the bot already has the matching virtual position; it cannot create an initial entry because the original open was missed"
                 ),
-                "holding_policy": "hold_until_matching_leader_reduce_or_close; consensus clusters close/reduce only from their contributing leaders",
-                "stop_loss_policy": "disabled_in_this_view; no synthetic close without matching leader action",
-                "take_profit_policy": "disabled_in_this_view; no synthetic close without matching leader action",
-                "trailing_stop_policy": "disabled_in_this_view; no synthetic close without matching leader action",
+                "holding_policy": "hold_until_matching_leader_reduce_or_close; calibrated local SL/TP can close paper positions at real marks when enabled",
+                "stop_loss_policy": (
+                    f"enabled_at_{sltp_runtime_cfg.stop_loss_bps}_bps_real_mark_local_paper"
+                    if sltp_runtime_cfg
+                    else "disabled; no local stop-loss without env opt-in"
+                ),
+                "take_profit_policy": (
+                    f"enabled_at_{sltp_runtime_cfg.take_profit_bps}_bps_real_mark_local_paper"
+                    if sltp_runtime_cfg
+                    else "disabled; no local take-profit without env opt-in"
+                ),
+                "trailing_stop_policy": (
+                    f"enabled_at_{sltp_runtime_cfg.trailing_stop_bps}_bps_real_mark_local_paper"
+                    if sltp_runtime_cfg and sltp_runtime_cfg.trailing_stop_bps is not None
+                    else "disabled; no local trailing stop without env opt-in"
+                ),
                 "red_pnl_exit_policy": "never_exit_only_because_unrealized_pnl_is_negative",
                 "execution": "forbidden",
             },
@@ -1308,6 +2713,21 @@ def create_router(settings: Settings, state: UiState, bus: UiEventBus) -> APIRou
     def append_simulation_equity_history(bot_simulation: dict[str, Any], timestamp_ms: int) -> None:
         if not state.simulation_equity_history:
             state.simulation_equity_history.append(initial_simulation_equity_point(state.simulation_started_at_ms))
+
+        # The lightweight /api/simulation/status endpoint is the authoritative
+        # live mark-to-market source for simulation_v2.html. The heavier
+        # /api/simulation/overview endpoint still computes useful diagnostics,
+        # but it uses a different legacy exposure convention. Mixing its
+        # MARK_TO_MARKET points with FAST_STATUS_MARK_TO_MARKET_HYPERLIQUID
+        # points makes the metagraph jump up/down with fake-looking spikes.
+        # Once the fast source is active, overview must stop writing graph
+        # points; the positions/ledger are still updated above.
+        if any(
+            isinstance(row, dict)
+            and str(row.get("source") or "") == "FAST_STATUS_MARK_TO_MARKET_HYPERLIQUID"
+            for row in state.simulation_equity_history[-20:]
+        ):
+            return
 
         def append_point(point: dict[str, Any], *, force: bool = False) -> None:
             last = state.simulation_equity_history[-1]
@@ -1430,6 +2850,145 @@ def create_router(settings: Settings, state: UiState, bus: UiEventBus) -> APIRou
             ),
         }
 
+    def build_ledger_spike_links(
+        history: list[dict[str, Any]],
+        ledger_events: list[dict[str, Any]],
+        *,
+        threshold_usdc: float = 0.75,
+        window_ms: int = 2_000,
+    ) -> dict[str, Any]:
+        points = [
+            row
+            for row in sorted(history, key=lambda item: int(item.get("timestamp_ms") or 0))
+            if isinstance(row, dict) and row.get("current_equity_usdt") is not None
+        ]
+        typed_events = [
+            row
+            for row in ledger_events
+            if isinstance(row, dict) and row.get("observed_at_ms") is not None
+        ]
+        spikes: list[dict[str, Any]] = []
+        largest = 0.0
+        for previous, current in zip(points, points[1:]):
+            previous_equity = safe_float(previous.get("current_equity_usdt"), 0.0)
+            current_equity = safe_float(current.get("current_equity_usdt"), previous_equity)
+            jump = current_equity - previous_equity
+            largest = max(largest, abs(jump))
+            if abs(jump) < threshold_usdc:
+                continue
+            current_ts = int(current.get("timestamp_ms") or 0)
+            nearby_context_events = [
+                {
+                    "delta_key": event.get("delta_key"),
+                    "observed_at_ms": event.get("observed_at_ms"),
+                    "coin": event.get("coin"),
+                    "wallet_address": event.get("wallet_address"),
+                    "bot_replay_action": event.get("bot_replay_action"),
+                    "paper_action_type": event.get("paper_action_type"),
+                    "status": event.get("status"),
+                    "estimated_net_pnl_usdc": event.get("estimated_net_pnl_usdc"),
+                    "fee_cost_usdc": event.get("fee_cost_usdc"),
+                    "reason": event.get("reason"),
+                    "evidence_hash": event.get("evidence_hash"),
+                }
+                for event in typed_events
+                if abs(int(event.get("observed_at_ms") or 0) - current_ts) <= window_ms
+            ][:8]
+            nearby_pnl_events = [
+                event for event in nearby_context_events if ledger_event_can_move_pnl(event)
+            ]
+            explained_by_market_mark = graph_spike_is_mark_to_market(previous, current)
+            spikes.append(
+                {
+                    "timestamp_ms": current_ts,
+                    "jump_usdc": round(jump, 6),
+                    "from_equity_usdc": round(previous_equity, 6),
+                    "to_equity_usdc": round(current_equity, 6),
+                    "from_source": previous.get("source"),
+                    "to_source": current.get("source"),
+                    "nearby_ledger_events_count": len(nearby_pnl_events),
+                    "nearby_ledger_events": nearby_pnl_events,
+                    "nearby_context_events_count": len(nearby_context_events),
+                    "nearby_context_events": nearby_context_events,
+                    "explained_by_nearby_ledger_event": bool(nearby_pnl_events),
+                    "explained_by_mark_to_market": explained_by_market_mark,
+                    "explanation": (
+                        "MARK_TO_MARKET_PRICE_MOVE_ON_OPEN_PAPER_POSITIONS"
+                        if explained_by_market_mark
+                        else ("LEDGER_EVENT_NEARBY" if nearby_pnl_events else "UNEXPLAINED")
+                    ),
+                    "explained": bool(nearby_pnl_events) or explained_by_market_mark,
+                }
+            )
+        unexplained = [row for row in spikes if not row.get("explained")]
+        return {
+            "threshold_usdc": threshold_usdc,
+            "window_ms": window_ms,
+            "history_points": len(points),
+            "ledger_events_checked": len(typed_events),
+            "largest_abs_jump_usdc": round(largest, 6),
+            "spike_count": len(spikes),
+            "unexplained_spike_count": len(unexplained),
+            "recent_spikes": spikes[-20:],
+            "status": "OK" if not unexplained else "UNEXPLAINED_SPIKES_NEED_LEDGER_REVIEW",
+            "read_only": True,
+            "execution": "forbidden",
+        }
+
+    def graph_spike_is_mark_to_market(previous: dict[str, Any], current: dict[str, Any]) -> bool:
+        previous_source = str(previous.get("source") or "")
+        current_source = str(current.get("source") or "")
+        if previous_source != "FAST_STATUS_MARK_TO_MARKET_HYPERLIQUID":
+            return False
+        if current_source != "FAST_STATUS_MARK_TO_MARKET_HYPERLIQUID":
+            return False
+        try:
+            previous_open = int(previous.get("open_positions") or 0)
+        except (TypeError, ValueError):
+            previous_open = 0
+        try:
+            current_open = int(current.get("open_positions") or 0)
+        except (TypeError, ValueError):
+            current_open = 0
+        return max(previous_open, current_open) > 0
+
+    def ledger_event_can_move_pnl(event: dict[str, Any]) -> bool:
+        """Only PnL-affecting paper events may explain graph jumps."""
+
+        replay_action = str(event.get("bot_replay_action") or "").upper()
+        paper_action = str(event.get("paper_action_type") or "").upper()
+        status = str(event.get("status") or "").upper()
+        reason = str(event.get("reason") or "").upper()
+        refusal_tokens = ("NO_TRADE", "REJECT", "REFUSED", "IGNORED", "SKIP")
+        if any(token in replay_action for token in refusal_tokens):
+            return False
+        if any(token in paper_action for token in refusal_tokens):
+            return False
+        if any(token in status for token in refusal_tokens):
+            return False
+        if reason and any(token in reason for token in refusal_tokens):
+            return False
+        for numeric_key in ("estimated_net_pnl_usdc", "fee_cost_usdc", "funding_cost_usdc"):
+            value = safe_float(event.get(numeric_key), 0.0)
+            if abs(value) > 0.0:
+                return True
+        pnl_actions = (
+            "OPEN",
+            "ENTRY",
+            "ADD",
+            "INCREASE",
+            "REDUCE",
+            "CLOSE",
+            "EXIT",
+            "PARTIAL",
+            "FEE",
+            "FUNDING",
+            "MARK",
+            "PAPER",
+        )
+        combined = f"{paper_action} {replay_action}"
+        return any(token in combined for token in pnl_actions)
+
     def build_decision_log_pnl_summary() -> dict[str, Any]:
         log_dir = Path(settings.logs_dir) / LOGS_TO_SEND_DIRNAME
         cache_path = log_dir / SUMMARY_CACHE_FILE
@@ -1487,7 +3046,9 @@ def create_router(settings: Settings, state: UiState, bus: UiEventBus) -> APIRou
         reasons: Counter[str],
     ) -> dict[str, Any]:
         loss_by_coin: dict[str, float] = defaultdict(float)
+        loss_by_coin_side: dict[tuple[str, str], float] = defaultdict(float)
         gain_by_coin: dict[str, float] = defaultdict(float)
+        gain_by_coin_side: dict[tuple[str, str], float] = defaultdict(float)
         loss_by_wallet: dict[str, float] = defaultdict(float)
         reason_counts: Counter[str] = Counter()
         stale_events = 0
@@ -1512,14 +3073,17 @@ def create_router(settings: Settings, state: UiState, bus: UiEventBus) -> APIRou
             pnl_value = safe_float(pnl, 0.0)
             total_event_pnl += pnl_value
             coin = str(row.get("coin") or "UNKNOWN")
+            side = str(row.get("leader_side") or row.get("side") or "UNKNOWN")
             wallet = str(row.get("wallet_address") or "UNKNOWN")
             if pnl_value < 0:
                 negative_events += 1
                 loss_by_coin[coin] += pnl_value
+                loss_by_coin_side[(coin, side)] += pnl_value
                 loss_by_wallet[wallet] += pnl_value
             elif pnl_value > 0:
                 positive_events += 1
                 gain_by_coin[coin] += pnl_value
+                gain_by_coin_side[(coin, side)] += pnl_value
         stale_ratio = (stale_events / max(1, priced_events)) if priced_events else 0.0
         current_pnl = safe_float(equity.get("current_pnl_usdc"), 0.0)
         costs = safe_float(equity.get("bot_costs_paid_usdc"), 0.0)
@@ -1538,10 +3102,37 @@ def create_router(settings: Settings, state: UiState, bus: UiEventBus) -> APIRou
         if loss_by_coin:
             worst_coin = min(loss_by_coin.items(), key=lambda item: item[1])
             recommendations.append(f"Mettre {worst_coin[0]} en pause locale si la perte session continue ({worst_coin[1]:.4f} USDC).")
+        if loss_by_coin_side:
+            worst_coin_side = min(loss_by_coin_side.items(), key=lambda item: item[1])
+            recommendations.append(
+                f"Exiger un signal plus fort sur {worst_coin_side[0][0]} {worst_coin_side[0][1]} "
+                f"apres perte session ({worst_coin_side[1]:.4f} USDC)."
+            )
         if open_exposure > safe_float(equity.get("current_equity_usdt"), 1000.0) * 0.5:
             recommendations.append("Exposition elevee: reduire le nombre de positions simultanees ou le notional par entree.")
         if not recommendations:
             recommendations.append("Aucune cause dominante: continuer a collecter des deltas frais et verifier le consensus multi-wallet.")
+        try:
+            from hl_observer.ui.v12_panels import build_no_trade_panel as _build_nt_panel
+            _no_trade_explorer = _build_nt_panel(reasons)
+        except Exception:
+            _no_trade_explorer = None
+        try:
+            from hl_observer.sources.shared_recorder import get_shared_recorder as _gsr
+            from hl_observer.ui.v12_panels import build_source_health_panel as _bshp
+            _source_health = _bshp(_gsr())
+        except Exception:
+            _source_health = None
+        try:
+            from hl_observer.evidence.no_trade_evidence import no_trade_evidence_row as _ntev
+            _no_trade_evidence = []
+            for _code, _cnt in reasons.most_common(12):
+                try:
+                    _no_trade_evidence.append({**_ntev(_code), "count": _cnt})
+                except Exception:
+                    pass
+        except Exception:
+            _no_trade_evidence = None
         return {
             "current_session_pnl_usdc": round(current_pnl, 6),
             "total_event_pnl_usdc": round(total_event_pnl, 6),
@@ -1551,13 +3142,24 @@ def create_router(settings: Settings, state: UiState, bus: UiEventBus) -> APIRou
             "costs_paid_usdc": round(costs, 6),
             "top_loss_reasons": [{"reason": key, "count": value} for key, value in reason_counts.most_common(12)],
             "top_no_trade_reasons": [{"reason": key, "count": value} for key, value in reasons.most_common(12)],
+            "no_trade_explorer": _no_trade_explorer,
+            "source_health": _source_health,
+            "no_trade_evidence": _no_trade_evidence,
             "losing_coins": [
                 {"coin": coin, "pnl_usdc": round(value, 6)}
                 for coin, value in sorted(loss_by_coin.items(), key=lambda item: item[1])[:12]
             ],
+            "losing_coin_sides": [
+                {"coin": key[0], "side": key[1], "pnl_usdc": round(value, 6)}
+                for key, value in sorted(loss_by_coin_side.items(), key=lambda item: item[1])[:12]
+            ],
             "winning_coins": [
                 {"coin": coin, "pnl_usdc": round(value, 6)}
                 for coin, value in sorted(gain_by_coin.items(), key=lambda item: item[1], reverse=True)[:12]
+            ],
+            "winning_coin_sides": [
+                {"coin": key[0], "side": key[1], "pnl_usdc": round(value, 6)}
+                for key, value in sorted(gain_by_coin_side.items(), key=lambda item: item[1], reverse=True)[:12]
             ],
             "losing_wallets": [
                 {"wallet_address": wallet, "pnl_usdc": round(value, 6)}
@@ -1828,7 +3430,8 @@ def create_router(settings: Settings, state: UiState, bus: UiEventBus) -> APIRou
     @router.get("/api/copy/status")
     async def copy_status() -> dict[str, Any]:
         with session_factory() as session:
-            leader_rows = session.scalars(select(TopWallet).order_by(TopWallet.score.desc()).limit(200)).all()
+            leader_sample_limit = top_wallet_sample_limit()
+            leader_rows = session.scalars(select(TopWallet).order_by(TopWallet.score.desc()).limit(leader_sample_limit)).all()
             decisions = session.scalars(select(FollowDecision).order_by(FollowDecision.computed_at_ms.desc()).limit(50)).all()
             paper_orders = session.scalars(
                 select(PaperFollowOrder).order_by(PaperFollowOrder.created_at_ms.desc()).limit(50)
@@ -1853,6 +3456,8 @@ def create_router(settings: Settings, state: UiState, bus: UiEventBus) -> APIRou
                 for row in leaders
             ],
             "leaders_count": len(leaders),
+            "leader_rows_sampled_before_dedupe": len(leader_rows),
+            "leader_sample_limit": leader_sample_limit,
             "position_deltas_observed": deltas_count,
             "follow_decisions": len(decisions),
             "paper_follow_orders": len(paper_orders),
@@ -1866,11 +3471,12 @@ def create_router(settings: Settings, state: UiState, bus: UiEventBus) -> APIRou
     async def copy_leader_activity(limit: int = 50) -> list[dict[str, Any]]:
         limit = max(1, min(limit, 200))
         with session_factory() as session:
+            leader_sample_limit = top_wallet_sample_limit()
             leader_rows = session.scalars(
                 select(TopWallet)
                 .where(or_(TopWallet.status.is_(None), TopWallet.status != "rejected"))
                 .order_by(TopWallet.score.desc(), TopWallet.selected_at_ms.desc())
-                .limit(max(settings.copy_trading.top_leaders * 4, 200))
+                .limit(leader_sample_limit)
             ).all()
             leaders = [row.wallet_address for row in unique_top_wallets(leader_rows, limit=settings.copy_trading.top_leaders)]
             query = select(PositionDeltaModel).order_by(PositionDeltaModel.detected_at_ms.desc()).limit(limit)
@@ -1945,9 +3551,226 @@ def create_router(settings: Settings, state: UiState, bus: UiEventBus) -> APIRou
             "message": "Chaque refus est conserve comme information de recherche. Aucun refus ne devient un ordre.",
         }
 
+    @router.get("/api/v12/panels")
+    async def v12_panels(limit: int = 200) -> dict[str, Any]:
+        """Read-only V12 panels: Source Health + NO_TRADE Explorer + Decision Funnel.
+
+        Aggregates ONLY real recorded values (recorder health, rejected/follow decisions).
+        Pure read-only: never an order, never fabricates, honest empty state.
+        """
+        from collections import namedtuple
+
+        limit = max(1, min(limit, 500))
+        reasons: Counter[str] = Counter()
+        _Dec = namedtuple("_Dec", ["accepted", "reason_code"])
+        decisions: list[Any] = []
+        try:
+            with session_factory() as session:
+                rejected = session.scalars(
+                    select(RejectedSignal).order_by(RejectedSignal.created_at.desc()).limit(limit)
+                ).all()
+                follow = session.scalars(
+                    select(FollowDecision).order_by(FollowDecision.computed_at_ms.desc()).limit(limit)
+                ).all()
+            for row in rejected:
+                reasons[str(row.reason or row.decision or "rejected_signal")] += 1
+            for row in follow:
+                allowed = bool(getattr(row, "allowed", False))
+                row_reasons = list(row.reasons_json or []) if not allowed else []
+                code = (
+                    str(row_reasons[0]) if row_reasons
+                    else (None if allowed else str(row.decision or "follow_decision_rejected"))
+                )
+                decisions.append(_Dec(accepted=allowed, reason_code=code))
+                for reason in row_reasons:
+                    reasons[str(reason)] += 1
+        except Exception:
+            pass
+        recorder = None
+        try:
+            from hl_observer.sources.shared_recorder import get_shared_recorder
+            recorder = get_shared_recorder()
+        except Exception:
+            recorder = None
+        now_ms = int(__import__("time").time() * 1000)
+        try:
+            from hl_observer.ui.v12_panels import build_v12_panels
+            panels = build_v12_panels(
+                recorder=recorder, reason_counts=reasons, decisions=decisions, now_ms=now_ms
+            )
+        except Exception as exc:  # pragma: no cover - defensive
+            panels = {
+                "error": str(exc),
+                "source_health": None,
+                "no_trade_explorer": None,
+                "decision_funnel": None,
+                "generated_at_ms": now_ms,
+            }
+        try:
+            from hl_observer.ui.v12_extended_panels import build_extended_panels
+            panels["extended"] = build_extended_panels()  # honest empty until live feeds attach
+        except Exception:
+            panels["extended"] = None
+        try:
+            from hl_observer.ml.inference import get_model
+            from hl_observer.ml.model_panel import build_model_panel
+            import os as _os
+            _model_path = _os.environ.get("HYPERSMART_V13_MODEL_PATH") or "runtime/models/trade_model_v13.json"
+            _report_path = _os.environ.get("HYPERSMART_V13_MODEL_REPORT") or (_model_path + ".report.json")
+            panels["model"] = build_model_panel(
+                get_model(),
+                report_path=_report_path,
+            )   # #149 read-only AI model status
+        except Exception:
+            panels["model"] = None
+        try:
+            from hl_observer.calibration.ledger_calibration_report import build_ledger_calibration_report
+            _preds = []
+            try:
+                import os as _os
+                from hl_observer.ml.inference import get_model as _gm
+                from hl_observer.ml.ledger_extract import rows_outcomes_from_samples as _ros
+                _m = _gm()
+                if _m is not None:
+                    _rows, _outs = _ros(_os.environ.get("HYPERSMART_V13_SAMPLES_PATH")
+                                        or "runtime/ml/training_samples.jsonl")
+                    _by = {o.decision_id: o for o in _outs}
+                    for _r in _rows:
+                        _o = _by.get(_r.decision_id)
+                        if _o is not None:
+                            _preds.append((_m.predict_proba_one(_r.features),
+                                           1 if float(_o.realized_net_pnl_usdc) > 0 else 0))
+            except Exception:
+                _preds = []
+            panels["calibration"] = build_ledger_calibration_report(predictions=_preds, block_reasons=reasons)  # #157
+        except Exception:
+            panels["calibration"] = None
+        # #156 explanations: read the cache written by the background explain loop (Ollama when
+        # enabled), instant. Fallback: rule-based per NO_TRADE reason. NEVER calls Ollama here
+        # (no UI blocking).
+        try:
+            import json as _json
+            import os as _os
+            _cache = _os.environ.get("HYPERSMART_V13_EXPL_PATH") or "runtime/ml/explanations_latest.json"
+            if _os.path.exists(_cache):
+                panels["explanations"] = _json.loads(open(_cache, encoding="utf-8").read())
+            else:
+                from hl_observer.research.local_llm_explainer import explain as _ex
+                _nt = panels.get("no_trade_explorer") or {}
+                _items = [{"coin": "", "side": "", "reason": _c.get("reason_code"),
+                           "text": _ex({"reason": _c.get("reason_code")}, use_llm=False)["text"],
+                           "source": "regles"}
+                          for _c in (_nt.get("by_code") or [])[:6]]
+                panels["explanations"] = {"items": _items, "ollama_narrative": None, "ollama_enabled": False}
+        except Exception:
+            panels["explanations"] = None
+        # #158 risk panel: real recent trade PnLs (training_samples) + open positions/equity
+        # (live snapshot). Read-only, guarded, instant.
+        try:
+            import glob as _glob
+            import json as _rj
+            import os as _ro
+            from hl_observer.risk.risk_panel import build_risk_panel
+            _pnls = []
+            _sp = _ro.environ.get("HYPERSMART_V13_SAMPLES_PATH") or "runtime/ml/training_samples.jsonl"
+            if _ro.path.exists(_sp):
+                for _ln in open(_sp, encoding="utf-8"):
+                    _ln = _ln.strip()
+                    if _ln:
+                        try:
+                            _pnls.append(float(_rj.loads(_ln).get("net_pnl_usdc", 0.0)))
+                        except Exception:
+                            pass
+            _pos, _eq = [], None
+            _snaps = _glob.glob("logs/**/simulation_snapshot_latest.json", recursive=True)
+            if _snaps:
+                try:
+                    _snap = _rj.loads(open(max(_snaps, key=_ro.path.getmtime), encoding="utf-8").read())
+                    _bs = _snap.get("bot_simulation") or {}
+                    _eq = _bs.get("current_equity_usdt")
+                    for _p in (_bs.get("open_positions") or []):
+                        _pos.append({"side": _p.get("direction") or _p.get("side"),
+                                     "notional_usdt": _p.get("open_exposure_usdt") or _p.get("notional_usdt") or 0.0})
+                except Exception:
+                    pass
+            panels["risk"] = build_risk_panel(recent_trade_pnls=_pnls[-200:], open_positions=_pos, equity=_eq)
+        except Exception:
+            panels["risk"] = None
+        # #166 freshness panel: per-stage latency + age histogram from the local decision logs.
+        try:
+            from hl_observer.realtime.freshness_audit import build_freshness_audit_from_logs
+            from hl_observer.runtime.session_logs import default_logs_to_send_dir as _ld
+            _fa = build_freshness_audit_from_logs(_ld(), stale_threshold_ms=15_000)
+            panels["freshness"] = {
+                "status": _fa.status,
+                "samples": _fa.samples,
+                "fresh_ratio": _fa.histogram.fresh_ratio,
+                "stale_ratio": _fa.histogram.stale_ratio,
+                "histogram": [{"label": b.label, "count": b.count} for b in _fa.histogram.buckets],
+                "stages": [
+                    {"name": s.name, "samples": s.samples, "p50_ms": s.p50_ms, "p95_ms": s.p95_ms, "max_ms": s.max_ms}
+                    for s in _fa.stages
+                ],
+            }
+        except Exception:
+            panels["freshness"] = None
+        panels["research_only"] = True
+        panels["execution"] = "forbidden"
+        return panels
+
+    @router.get("/api/loop/dashboard")
+    def loop_dashboard() -> dict[str, Any]:
+        """Read-only loop-engineering status for dashboard/agent consumption."""
+        return build_loop_dashboard_payload()
+
+    @router.get("/metrics")
+    def observability_metrics() -> Any:
+        """#208 — read-only observability (Prometheus text): open positions + lag/throughput.
+        No action, no order; counters default to 0 until wired to the live loop."""
+        from fastapi.responses import PlainTextResponse
+        from hl_observer.realtime.metrics_endpoint import build_metrics, format_metrics_prometheus
+        import glob as _g, json as _j, os as _o
+        _pos = 0
+        try:
+            _snaps = _g.glob("logs/**/simulation_snapshot_latest.json", recursive=True)
+            if _snaps:
+                _snap = _j.loads(open(max(_snaps, key=_o.path.getmtime), encoding="utf-8").read())
+                _bs = _snap.get("bot_simulation") or {}
+                _pos = len(_bs.get("open_positions") or [])
+        except Exception:
+            _pos = 0
+        m = build_metrics(open_positions=_pos)
+        return PlainTextResponse(format_metrics_prometheus(m))
+
     @router.get("/api/simulation/overview")
-    async def simulation_overview(limit: int = 500) -> dict[str, Any]:
+    def simulation_overview(limit: int = 500) -> dict[str, Any]:
         limit = max(1, min(limit, 2_000))
+        current_time_ms = now_ms()
+        fast_db_threshold_mb = calibrated_float_env("HYPERSMART_OVERVIEW_FAST_DB_THRESHOLD_MB", 1024.0)
+        db_size = database_size_bytes()
+        if (
+            calibrated_bool_env("HYPERSMART_OVERVIEW_FAST_SNAPSHOT", True)
+            and db_size >= int(max(1.0, fast_db_threshold_mb) * 1024 * 1024)
+        ):
+            fast_payload = latest_snapshot_overview_payload(
+                limit=limit,
+                current_time_ms=current_time_ms,
+                reason=f"runtime_db_size_bytes={db_size}",
+            )
+            if fast_payload is not None:
+                simulation_overview_cache["payload"] = fast_payload
+                simulation_overview_cache["computed_at_ms"] = current_time_ms
+                simulation_overview_cache["limit"] = limit
+                return fast_payload
+            fast_payload = current_state_fast_overview_payload(
+                limit=limit,
+                current_time_ms=current_time_ms,
+                reason=f"runtime_db_size_bytes={db_size};snapshot_missing_or_stale",
+            )
+            simulation_overview_cache["payload"] = fast_payload
+            simulation_overview_cache["computed_at_ms"] = current_time_ms
+            simulation_overview_cache["limit"] = limit
+            return fast_payload
         # Keep display bounded by `limit`, but always analyze a much wider
         # fresh slice. In live runs the latest rows can be reduce/close noise,
         # while the exploitable same-coin/same-side entry cluster sits a few
@@ -1955,7 +3778,6 @@ def create_router(settings: Settings, state: UiState, bus: UiEventBus) -> APIRou
         # made the dashboard miss opportunities that the CLI scanner found.
         analysis_delta_limit = max(5_000, min(20_000, limit * 25))
         simulation_started_at_ms = state.simulation_started_at_ms
-        current_time_ms = now_ms()
         cached_payload = simulation_overview_cache.get("payload")
         cached_at_ms = int(simulation_overview_cache.get("computed_at_ms") or 0)
         cached_limit = simulation_overview_cache.get("limit")
@@ -1963,7 +3785,7 @@ def create_router(settings: Settings, state: UiState, bus: UiEventBus) -> APIRou
             limit >= 50
             and cached_limit == limit
             and isinstance(cached_payload, dict)
-            and current_time_ms - cached_at_ms < 10_000
+            and current_time_ms - cached_at_ms < 3_000
         ):
             payload_copy = dict(cached_payload)
             payload_copy["overview_cache_hit"] = True
@@ -1971,7 +3793,8 @@ def create_router(settings: Settings, state: UiState, bus: UiEventBus) -> APIRou
             payload_copy["current_time_ms"] = current_time_ms
             return payload_copy
         with session_factory() as session:
-            leader_rows = session.scalars(select(TopWallet).order_by(TopWallet.score.desc()).limit(250)).all()
+            leader_sample_limit = top_wallet_sample_limit()
+            leader_rows = session.scalars(select(TopWallet).order_by(TopWallet.score.desc()).limit(leader_sample_limit)).all()
             leaderboard_candidate_rows = session.scalars(
                 select(LeaderboardWalletCandidate).order_by(LeaderboardWalletCandidate.leaderboard_score.desc()).limit(500)
             ).all()
@@ -2017,6 +3840,9 @@ def create_router(settings: Settings, state: UiState, bus: UiEventBus) -> APIRou
             pnl_fills = session.scalars(select(Fill).where(Fill.closed_pnl.is_not(None)).order_by(Fill.exchange_ts.asc()).limit(500)).all()
             latest_market_snapshots = session.scalars(
                 select(MarketSnapshot).order_by(desc(MarketSnapshot.id)).limit(50)
+            ).all()
+            latest_orderbook_snapshots = session.scalars(
+                select(OrderbookSnapshot).order_by(desc(OrderbookSnapshot.id)).limit(250)
             ).all()
             latest_public_trade_event = session.scalars(
                 select(RawEvent)
@@ -2066,6 +3892,8 @@ def create_router(settings: Settings, state: UiState, bus: UiEventBus) -> APIRou
         ]
         seen_leader_addresses = {row["wallet_address"].lower() for row in leader_cards}
         for row in leaderboard_candidate_rows:
+            if len(leader_cards) >= settings.copy_trading.top_leaders:
+                break
             wallet_address = row.wallet_address.lower()
             if wallet_address in seen_leader_addresses:
                 continue
@@ -2083,6 +3911,7 @@ def create_router(settings: Settings, state: UiState, bus: UiEventBus) -> APIRou
             if len(leader_cards) >= settings.copy_trading.top_leaders:
                 break
         mid_prices, mid_price_sources = latest_mark_prices_from_snapshots(list(latest_market_snapshots))
+        latest_orderbooks_by_coin = latest_orderbook_levels_from_snapshots(list(latest_orderbook_snapshots))
         public_trade_activity: list[dict[str, Any]] = []
         if latest_public_trade_event is not None:
             raw_public_payload = latest_public_trade_event.response_payload_json
@@ -2113,11 +3942,7 @@ def create_router(settings: Settings, state: UiState, bus: UiEventBus) -> APIRou
                 public_trade_activity.reverse()
 
         def row_copy_signal_time_ms(row: PositionDeltaModel) -> int:
-            detected_at = int(row.detected_at_ms or 0)
-            exchange_at = int(row.exchange_ts or 0)
-            if is_live_detected_delta_source(row.source) and detected_at > 0:
-                return detected_at
-            return exchange_at or detected_at
+            return copy_candidate_signal_time_ms(row)
 
         live_simulation_deltas = [
             row
@@ -2200,27 +4025,36 @@ def create_router(settings: Settings, state: UiState, bus: UiEventBus) -> APIRou
         fresh_opportunity_risk_config = RealtimeCopyRiskConfig(
             min_edge_required_bps=max(
                 1.0,
-                safe_float(os.environ.get("HYPERSMART_SIMULATION_MIN_EDGE_BPS"), 25.0),
+                calibrated_float_env("HYPERSMART_SIMULATION_MIN_EDGE_BPS", DEFAULT_SIMULATION_MIN_EDGE_BPS),
             ),
             fee_bps=4.0,
             spread_bps=3.0,
             slippage_bps=5.0,
             max_signal_age_ms=simulation_max_signal_age_ms(),
-            min_liquidity_score=safe_float(os.environ.get("HYPERSMART_SIMULATION_MIN_LIQUIDITY_SCORE"), 0.35),
+            min_liquidity_score=calibrated_float_env(
+                "HYPERSMART_SIMULATION_MIN_LIQUIDITY_SCORE",
+                DEFAULT_SIMULATION_MIN_LIQUIDITY_SCORE,
+            ),
             max_copy_degradation_bps=safe_float(
                 os.environ.get("HYPERSMART_SIMULATION_MAX_COPY_DEGRADATION_BPS"),
-                18.0,
+                DEFAULT_SIMULATION_MAX_COPY_DEGRADATION_BPS,
             ),
             max_price_deviation_bps=safe_float(
                 os.environ.get("HYPERSMART_SIMULATION_MAX_PRICE_DEVIATION_BPS"),
                 8.0,
             ),
             starting_equity_usdt=state.simulation_starting_equity_usdt,
-            max_position_notional_usdt=50.0,
-            max_total_exposure_usdt=400.0,
+            max_position_notional_usdt=safe_float(
+                os.environ.get("HYPERSMART_MAX_POSITION_USDT"),
+                max(50.0, state.simulation_starting_equity_usdt * 0.10),  # 10%% du capital, min 50
+            ),
+            max_total_exposure_usdt=safe_float(
+                os.environ.get("HYPERSMART_MAX_TOTAL_EXPOSURE_USDT"),
+                max(400.0, state.simulation_starting_equity_usdt * 0.80),  # 80%% du capital deployable
+            ),
             single_wallet_min_edge_required_bps=safe_float(
                 os.environ.get("HYPERSMART_SINGLE_WALLET_MIN_EDGE_BPS"),
-                30.0,
+                DEFAULT_SIMULATION_SINGLE_WALLET_MIN_EDGE_BPS,
             ),
         )
         fresh_opportunity_report = find_fresh_opportunities(
@@ -2230,26 +4064,36 @@ def create_router(settings: Settings, state: UiState, bus: UiEventBus) -> APIRou
             current_mids=mid_prices,
             active_window_ms=simulation_max_signal_age_ms(),
             consensus_window_ms=consensus_window_ms,
-            min_wallets=2,
+            min_wallets=max(2, int(safe_float(os.environ.get("HYPERSMART_FRESH_OPPORTUNITY_MIN_WALLETS"), 3))),
             max_opportunities=25,
+            max_per_coin=max(1, int(safe_float(os.environ.get("HYPERSMART_FRESH_OPPORTUNITY_MAX_PER_COIN"), 3))),
             current_open_exposure_usdt=existing_open_exposure_usdt,
             current_open_positions=len(existing_virtual_positions),
-            max_open_positions=6,
+            max_open_positions=int(safe_float(os.environ.get("HYPERSMART_MAX_OPEN_POSITIONS"), 6)),
             risk_config=fresh_opportunity_risk_config,
         )
         accepted_opportunity_deltas = build_consensus_replay_deltas(
             list(fresh_opportunity_report.opportunities),
             live_simulation_deltas,
-            allow_add_as_entry=os.environ.get("HYPERSMART_SIMULATION_ALLOW_ADD_AS_ENTRY", "0") == "1",
+            allow_add_as_entry=calibrated_bool_env(
+                "HYPERSMART_SIMULATION_ALLOW_ADD_AS_ENTRY",
+                DEFAULT_SIMULATION_ALLOW_ADD_AS_ENTRY,
+            ),
             processed_delta_keys=state.simulation_processed_delta_keys,
         )
         simulation_replay_deltas = [*accepted_opportunity_deltas, *live_simulation_deltas]
         bot_simulation = build_bot_simulation(
             simulation_replay_deltas,
             mid_prices=mid_prices,
+            orderbooks_by_coin=latest_orderbooks_by_coin,
             max_events=limit,
             now_timestamp_ms=current_time_ms,
             starting_equity_usdt=state.simulation_starting_equity_usdt,
+            max_position_notional_usdt=safe_float(
+                os.environ.get("HYPERSMART_MAX_POSITION_USDT"),
+                max(25.0, state.simulation_starting_equity_usdt * 0.025),
+            ),
+            max_open_positions=int(safe_float(os.environ.get("HYPERSMART_MAX_OPEN_POSITIONS"), 6)),
             existing_positions=state.simulation_virtual_positions,
             existing_events=state.simulation_ledger_events,
             processed_delta_keys=state.simulation_processed_delta_keys,
@@ -2332,6 +4176,49 @@ def create_router(settings: Settings, state: UiState, bus: UiEventBus) -> APIRou
             readiness = "RESEARCH_SIMULATION_READY"
             next_step = "Comparer edge_remaining_bps, couts, delai et consensus avant toute simulation locale."
 
+        fresh_diag = bot_simulation.get("fresh_entry_diagnostics") or {}
+        filter_diag = bot_simulation.get("filter_diagnostics") or {}
+        admission_candidates = int(fresh_diag.get("admission_candidates_seen") or 0)
+        fresh_entries_seen = int(fresh_diag.get("admission_fresh_entries_seen") or 0)
+        accepted_entries_this_cycle = int(bot_simulation.get("new_reproduced_entries") or 0)
+        refused_entries_this_cycle = sum(
+            1
+            for row in bot_simulation.get("new_ledger_events") or []
+            if row.get("status") == "REFUSED"
+            and str(row.get("leader_action") or "").upper() in {"OPEN_LONG", "OPEN_SHORT", "ADD", "INCREASE"}
+        )
+        if admission_candidates <= 0:
+            entry_supply_bottleneck = "NO_DATA"
+            entry_supply_summary = "Aucun candidat frais dans ce cycle: collecte/WS/shortlist a verifier."
+        elif accepted_entries_this_cycle > 0:
+            entry_supply_bottleneck = "OK"
+            entry_supply_summary = "Au moins une entree paper locale a ete acceptee sur donnees fraiches."
+        elif fresh_entries_seen <= 0:
+            entry_supply_bottleneck = "SUPPLY"
+            entry_supply_summary = "Offre insuffisante: les deltas vus sont anciens, orphelins ou non simulables."
+        else:
+            entry_supply_bottleneck = "GATES"
+            entry_supply_summary = "Des entrees fraiches existent, mais edge/liquidite/couts/risque les refusent."
+        entry_supply_payload = {
+            "bottleneck": entry_supply_bottleneck,
+            "summary": entry_supply_summary,
+            "candidates": admission_candidates,
+            "fresh_entries": fresh_entries_seen,
+            "accepted_entries": accepted_entries_this_cycle,
+            "refused_entries": refused_entries_this_cycle,
+            "prefilter_skips": int(bot_simulation.get("prefilter_skip_count") or 0),
+            "skip_reasons": dict(sorted(filter_diag.items(), key=lambda item: int(item[1]), reverse=True)[:12]),
+            "next_action": (
+                "Augmenter la collecte read-only de donnees fraiches et verifier les timestamps."
+                if entry_supply_bottleneck in {"NO_DATA", "SUPPLY"}
+                else "Analyser edge_remaining_bps, spread, slippage, liquidite et consensus avant de modifier les seuils."
+                if entry_supply_bottleneck == "GATES"
+                else "Continuer a mesurer PnL/equity/drawdown en paper local."
+            ),
+            "read_only": True,
+            "execution": "forbidden",
+        }
+
         equity_payload = {
             "current_pnl_usdc": bot_simulation["estimated_net_pnl_usdc"] if bot_candles else round(float(equity_close), 6),
             "starting_equity_usdt": state.simulation_starting_equity_usdt,
@@ -2365,6 +4252,35 @@ def create_router(settings: Settings, state: UiState, bus: UiEventBus) -> APIRou
             equity=equity_payload,
             reasons=reasons,
         )
+        runtime_diagnostics = build_runtime_diagnostics_payload()
+        graph_diagnostics = {
+            "authoritative_source": runtime_diagnostics["graph_authoritative_source"],
+            "single_writer_ok": runtime_diagnostics["graph_single_writer_ok"],
+            "equity_history_sources": runtime_diagnostics["equity_history_sources"],
+            "legacy_mark_to_market_points": runtime_diagnostics["legacy_mark_to_market_points"],
+            "fast_status_points": runtime_diagnostics["fast_status_points"],
+        }
+        paper_ledger = _paper_ledger_projection_from_status_state(
+            state=state,
+            starting_equity_usdt=state.simulation_starting_equity_usdt,
+            marked={
+                "positions": bot_simulation.get("open_positions") or [],
+                "realized_pnl_usdc": bot_simulation["realized_net_pnl_usdc"],
+                "unrealized_pnl_usdc": bot_simulation["unrealized_pnl_usdc"],
+                "current_equity_usdt": bot_simulation["current_equity_usdt"],
+            },
+            current_ms=current_time_ms,
+        )
+        spike_links = build_ledger_spike_links(
+            state.simulation_equity_history,
+            bot_simulation["ledger_events"],
+        )
+        paper_ledger["overview_scope"] = "api_simulation_overview"
+        paper_ledger["spike_links"] = spike_links
+        graph_diagnostics["ledger_spike_links"] = spike_links
+        graph_diagnostics["unexplained_spike_count"] = spike_links["unexplained_spike_count"]
+        graph_diagnostics["paper_ledger_reconciliation_ok"] = bool((paper_ledger.get("reconciliation") or {}).get("ok"))
+        bot_simulation["paper_ledger"] = paper_ledger
         fresh_data_coverage = {
             "readiness": warehouse_report.readiness,
             "fresh_window_seconds": int(warehouse_report.fresh_window_ms / 1000),
@@ -2456,6 +4372,8 @@ def create_router(settings: Settings, state: UiState, bus: UiEventBus) -> APIRou
                 "fresh_only": True,
                 "old_history_ignored_for_pnl": True,
                 "fresh_consensus_window_seconds": int(consensus_window_ms / 1000),
+                "entry_supply": entry_supply_payload,
+                "entry_supply_summary": entry_supply_summary,
             },
             "autopilot": {
                 "job_a": "leaderboard_discovery_shortlist",
@@ -2470,6 +4388,8 @@ def create_router(settings: Settings, state: UiState, bus: UiEventBus) -> APIRou
             "counts": {
                 "leaders": len(leader_cards),
                 "target_leaders": settings.copy_trading.top_leaders,
+                "leader_rows_sampled_before_dedupe": len(leader_rows),
+                "leader_sample_limit": leader_sample_limit,
                 "public_trade_wallets_seen": public_trade_wallets_seen,
                 "public_trade_promoted_wallets": public_trade_promoted,
                 "positions": positions_count,
@@ -2500,6 +4420,8 @@ def create_router(settings: Settings, state: UiState, bus: UiEventBus) -> APIRou
                 "wallets_seen_from_public_ws": public_trade_wallets_seen,
                 "wallets_promoted_for_info_followup": public_trade_promoted,
                 "leaders_loaded_unique": len(leader_cards),
+                "leader_rows_sampled_before_dedupe": len(leader_rows),
+                "leader_sample_limit": leader_sample_limit,
                 "leader_deltas_analyzed": len(live_simulation_deltas),
                 "entry_deltas_analyzed": len(entry_deltas),
                 "fresh_consensus_groups_4s": len(consensus),
@@ -2519,6 +4441,9 @@ def create_router(settings: Settings, state: UiState, bus: UiEventBus) -> APIRou
             "equity": equity_payload,
             "decision_log_pnl": decision_log_pnl,
             "pnl_consistency": pnl_consistency,
+            "paper_ledger": paper_ledger,
+            "runtime_diagnostics": runtime_diagnostics,
+            "graph_diagnostics": graph_diagnostics,
             "loss_diagnostics": loss_diagnostics,
             "fresh_data_coverage": fresh_data_coverage,
             "warehouse_coverage": fresh_data_coverage,

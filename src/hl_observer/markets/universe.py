@@ -110,11 +110,13 @@ def build_market_universe(
                 source="fallback",
                 notes="config_default_fallback_coin",
             )
+    allow_exotic = settings.market_universe.include_builder_and_rwa_perps
     items = [
         item
         for item in merged.values()
         if item.coin not in excluded
         and item.is_active
+        and (allow_exotic or not is_exotic_market(item.coin))
         and (settings.market_universe.altcoins_enabled or item.coin in {"BTC", "ETH"})
         and (item.mid_price is None or item.mid_price >= settings.market_universe.min_mid_price_usdc)
     ]
@@ -170,4 +172,17 @@ def _coin_priority(coin: str) -> tuple[int, str]:
     if coin in majors:
         return (majors.index(coin), coin)
     return (len(majors), coin)
+
+
+def is_exotic_market(coin: str) -> bool:
+    """True for non-standard / non-crypto-perp markets we do NOT copy by default.
+
+    HIP-3 builder/RWA perps (equities/commodities) and spot indices use markers
+    absent from standard crypto perps: "XYZ:TSLA"/"CASH:WTI" contain ":",
+    "@107" starts with "@", "#2160" starts with "#". BTC/ETH/SOL/HYPE/kPEPE match none.
+    """
+    c = str(coin or "").strip().upper()
+    if not c:
+        return True
+    return (":" in c) or c.startswith("@") or c.startswith("#")
 

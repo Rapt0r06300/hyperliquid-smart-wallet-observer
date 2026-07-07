@@ -2,28 +2,36 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
+from hl_observer.simulation.live_filters import (
+    DEFAULT_SIMULATION_MAX_COPY_DEGRADATION_BPS,
+    DEFAULT_SIMULATION_MAX_SIGNAL_AGE_MS,
+    DEFAULT_SIMULATION_MIN_EDGE_BPS,
+    DEFAULT_SIMULATION_MIN_LIQUIDITY_SCORE,
+    DEFAULT_SIMULATION_SINGLE_WALLET_MIN_EDGE_BPS,
+)
+
 
 @dataclass(slots=True)
 class RealtimeCopyRiskConfig:
     """Pessimistic local scoring config for realtime copy simulation only."""
 
-    min_edge_required_bps: float = 25.0
-    max_signal_age_ms: int = 4_000
+    min_edge_required_bps: float = DEFAULT_SIMULATION_MIN_EDGE_BPS
+    max_signal_age_ms: int = DEFAULT_SIMULATION_MAX_SIGNAL_AGE_MS
     fee_bps: float = 4.0
     spread_bps: float = 3.0
-    slippage_bps: float = 5.0
+    slippage_bps: float = 2.5
     latency_cost_bps_per_minute: float = 1.0
     max_latency_cost_bps: float = 12.0
     adverse_selection_penalty_bps: float = 2.0
     funding_penalty_bps: float = 0.0
-    min_liquidity_score: float = 0.35
+    min_liquidity_score: float = DEFAULT_SIMULATION_MIN_LIQUIDITY_SCORE
     low_liquidity_penalty_bps: float = 4.0
     single_wallet_penalty_bps: float = 3.0
-    single_wallet_min_edge_required_bps: float = 30.0
+    single_wallet_min_edge_required_bps: float = DEFAULT_SIMULATION_SINGLE_WALLET_MIN_EDGE_BPS
     crowding_penalty_start_wallets: int = 5
     crowding_penalty_bps_per_wallet: float = 2.0
-    max_copy_degradation_bps: float = 18.0
-    max_price_deviation_bps: float = 8.0
+    max_copy_degradation_bps: float = DEFAULT_SIMULATION_MAX_COPY_DEGRADATION_BPS
+    max_price_deviation_bps: float = 18.0
     starting_equity_usdt: float = 1000.0
     max_position_notional_usdt: float = 50.0
     min_position_notional_usdt: float = 5.0
@@ -48,6 +56,9 @@ class RealtimeCopyScoreInput:
     current_open_exposure_usdt: float
     current_open_positions: int
     max_open_positions: int
+    directional_bias_bps: float = 0.0  # V9 multi-TF bias (bias_model), bounded; 0 = neutral
+    coin: str = ""  # V26 L1: marché (optionnel). "" = inconnu -> vetos V26 inertes (jamais bloquants).
+    leader_wallet: str = ""  # V26 L6: wallet leader (optionnel). "" = Kelly neutre x1.0.
 
 
 @dataclass(slots=True)
@@ -128,11 +139,23 @@ def score_realtime_copy_candidate(
     if liquidity_penalty_bps > 0:
         reasons.append("LIQUIDITY_TOO_LOW")
     single_wallet_penalty_bps = cfg.single_wallet_penalty_bps if inputs.consensus_wallets < 2 else 0.0
+    # V26 reliquat — coûts carnet LIVE (walk-the-book, opt-in) : remplacent les constantes
+    # quand un snapshot l2 frais existe pour ce coin. Sinon constantes V25 inchangées.
+    spread_bps_used, slippage_bps_used = cfg.spread_bps, cfg.slippage_bps
+    try:
+        from hl_observer.collection.l2_snapshot_cache import live_costs_for as _live_costs
+
+        _lc = _live_costs(getattr(inputs, "coin", "") or "")
+        if _lc is not None:
+            spread_bps_used, slippage_bps_used = _lc
+            warnings.append("LIVE_BOOK_COSTS_USED")
+    except Exception:
+        pass
     delay_cost_bps = min(cfg.max_latency_cost_bps, max(0, inputs.signal_age_ms) / 60_000.0 * cfg.latency_cost_bps_per_minute)
     copy_degradation_bps = (
         delay_cost_bps
-        + cfg.spread_bps
-        + cfg.slippage_bps
+        + spread_bps_used
+        + slippage_bps_used
         + cfg.fee_bps
         + liquidity_penalty_bps
         + single_wallet_penalty_bps
@@ -141,9 +164,9 @@ def score_realtime_copy_candidate(
         + crowding_penalty_bps
         + cfg.funding_penalty_bps
     )
-    if cfg.spread_bps > 20:
+    if spread_bps_used > 20:
         reasons.append("SPREAD_TOO_WIDE")
-    if cfg.slippage_bps > 25:
+    if slippage_bps_used > 25:
         reasons.append("SLIPPAGE_TOO_HIGH")
     if copy_degradation_bps > cfg.max_copy_degradation_bps:
         reasons.append("COPY_DEGRADATION_TOO_HIGH")
@@ -153,6 +176,7 @@ def score_realtime_copy_candidate(
         * clamp(inputs.leader_consistency_factor, 0.0, 1.5)
         * freshness
         * consensus_factor
+        + clamp(inputs.directional_bias_bps, -10.0, 10.0)  # V9 trend-alignment, bounded
         - copy_degradation_bps
     )
     if edge_remaining_bps < cfg.min_edge_required_bps:
@@ -164,6 +188,16 @@ def score_realtime_copy_candidate(
 
     simulated_notional, sizing_warnings = capped_simulated_notional(inputs, cfg, edge_remaining_bps)
     warnings.extend(sizing_warnings)
+    # V26 L6 — multiplicateur Kelly par leader (opt-in ; x1.0 si flag OFF ou wallet inconnu)
+    try:
+        from hl_observer.risk.kelly_leader_book import DEFAULT_KELLY_LEADER_BOOK as _klb
+
+        _km = _klb.multiplier(getattr(inputs, "leader_wallet", "") or "")
+        if _km != 1.0 and simulated_notional > 0:
+            simulated_notional = min(cfg.max_position_notional_usdt, max(0.0, simulated_notional * _km))
+            warnings.append("KELLY_LEADER_MULT_%.2f" % _km)
+    except Exception:
+        pass
     if simulated_notional <= 0:
         reasons.append("MAX_EXPOSURE_REACHED")
 
@@ -182,6 +216,46 @@ def score_realtime_copy_candidate(
         0.0,
         100.0,
     )
+
+    # V26 L1 — vetos funding sain + edge stable (repo 32). Opt-in env, défaut OFF => inchangé.
+    # Intersection stricte : ne peut qu'AJOUTER des raisons de refus, jamais créer un trade.
+    # Enregistre aussi l'historique d'edge (observabilité) même flag OFF. Fail-safe total.
+    try:
+        from hl_observer.signals.v26_entry_vetos import apply_v26_entry_vetos
+
+        import os as _os
+
+        _snapshot = None
+        if str(_os.environ.get("HYPERSMART_V26_RECORD_CANDIDATES", "0")).lower() in ("1", "true", "yes", "on"):
+            _snapshot = {
+                "action_type": action_type, "direction": direction,
+                "coin": getattr(inputs, "coin", "") or "",
+                "leader_wallet": getattr(inputs, "leader_wallet", "") or "",
+                "leader_expected_edge_bps": inputs.leader_expected_edge_bps,
+                "leader_consistency_factor": inputs.leader_consistency_factor,
+                "signal_age_ms": inputs.signal_age_ms,
+                "consensus_wallets": inputs.consensus_wallets,
+                "liquidity_score": liquidity_score,
+                "leader_score": inputs.leader_score,
+                "leader_reference_price": inputs.leader_reference_price,
+                "current_mid": current_mid,
+                "leader_notional_usdt": inputs.leader_notional_usdt,
+                "edge_remaining_bps": edge_remaining_bps,
+                "copy_degradation_bps": copy_degradation_bps,
+            }
+        reasons.extend(
+            apply_v26_entry_vetos(
+                coin=getattr(inputs, "coin", "") or "",
+                side=direction,
+                edge_remaining_bps=edge_remaining_bps,
+                leader_score=inputs.leader_score,
+                copy_degradation_bps=copy_degradation_bps,
+                liquidity_score=liquidity_score,
+                candidate_snapshot=_snapshot,
+            )
+        )
+    except Exception:  # pragma: no cover — le moteur ne doit jamais casser sur un veto
+        pass
 
     deduped_reasons = sorted(set(reasons))
     decision = "REJECT_NO_TRADE" if deduped_reasons else "ACCEPT_LOCAL_SIMULATION"
@@ -232,9 +306,23 @@ def capped_simulated_notional(
 
 
 def freshness_factor(signal_age_ms: int, max_signal_age_ms: int) -> float:
+    """Edge-preserving freshness multiplier (V9, calibrated decay).
+
+    Replaces the old brutal *linear* curve (``1 - age/max``) that crushed the
+    edge of fresh-but-not-instant signals (only 17% left at 25s with a 30s
+    window) -- the deepest measured cause of "0 ouverture". Keeps full edge
+    during a short grace period, decays with a half-life, still reaches 0 at
+    ``max_signal_age_ms`` (stale). Only ever *raises* the multiplier for fresh
+    signals; never lowers the net-edge bar. Falls back to linear on any error.
+    """
     if max_signal_age_ms <= 0:
         return 0.0
-    return clamp(1.0 - max(0, signal_age_ms) / max_signal_age_ms, 0.0, 1.0)
+    try:
+        from hl_observer.freshness.signal_decay import freshness_factor_calibrated
+
+        return freshness_factor_calibrated(int(signal_age_ms), int(max_signal_age_ms))
+    except Exception:  # pragma: no cover - graceful degradation
+        return clamp(1.0 - max(0, signal_age_ms) / max_signal_age_ms, 0.0, 1.0)
 
 
 def risk_score_from_costs(*, copy_degradation_bps: float, price_deviation_bps: float, liquidity_score: float) -> float:

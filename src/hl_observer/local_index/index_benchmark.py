@@ -5,7 +5,7 @@ from time import perf_counter
 
 from hl_observer.local_index.index_config import LocalIndexConfig
 from hl_observer.local_index.query_engine import scan_wallet_index
-from hl_observer.local_index.wallet_index import WalletLocalIndex, fake_wallet
+from hl_observer.local_index.wallet_index import WalletLocalIndex, fake_wallet  # fake-data-scan: allow benchmark-only import
 
 
 @dataclass(slots=True)
@@ -27,7 +27,7 @@ def run_local_scan_benchmark(wallets: int = 2_000, *, config: LocalIndexConfig |
     index = WalletLocalIndex()
     start = perf_counter()
     for i in range(count):
-        index.upsert(fake_wallet(i + 1))
+        index.upsert(fake_wallet(i + 1))  # fake-data-scan: allow benchmark fixture (no market/PnL data)
     summary = scan_wallet_index(index, limit=count)
     elapsed = max(0.000001, perf_counter() - start)
     rate = summary.wallets_scanned / elapsed

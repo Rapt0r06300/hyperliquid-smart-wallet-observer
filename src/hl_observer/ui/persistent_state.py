@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 from urllib.parse import unquote
 
@@ -17,6 +18,9 @@ MAX_PERSISTED_EQUITY_POINTS = 5_000
 
 
 def simulation_state_path(settings: Settings) -> Path:
+    explicit_dir = os.getenv("HYPERSMART_UI_STATE_DIR")
+    if explicit_dir:
+        return Path(explicit_dir).expanduser().resolve() / STATE_FILENAME
     db_path = _sqlite_path_from_url(settings.database_url)
     if db_path is not None:
         db_parent = db_path.parent

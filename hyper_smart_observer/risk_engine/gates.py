@@ -30,8 +30,7 @@ def evaluate_signal(
         "signal_present": signal is not None,
         "mainnet_forbidden": not config.allow_mainnet,
         "mode_allowed": config.mode in {mode.value for mode in RuntimeMode},
-        "execution_disabled_or_paper": not config.execution_enabled
-        or config.mode == RuntimeMode.PAPER_TRADING.value,
+        "real_execution_disabled": not config.execution_enabled,
     }
     if signal is None:
         return refuse(RiskRefusalReason.DENY_BY_DEFAULT, "No signal provided.", gates)
@@ -40,6 +39,12 @@ def evaluate_signal(
         return refuse(RiskRefusalReason.MAINNET_FORBIDDEN, "Mainnet is forbidden.", gates)
     if not gates["mode_allowed"]:
         return refuse(RiskRefusalReason.MODE_FORBIDDEN, "Mode is not allowed.", gates)
+    if not gates["real_execution_disabled"]:
+        return refuse(
+            RiskRefusalReason.EXECUTION_DISABLED,
+            "Real execution flag is enabled; signal remains no-trade.",
+            gates,
+        )
     if context.get("wallet_status") == WalletStatus.BLOCKED.value:
         gates["wallet_not_blocked"] = False
         return refuse(RiskRefusalReason.WALLET_BLOCKED, "Wallet is blocked.", gates)

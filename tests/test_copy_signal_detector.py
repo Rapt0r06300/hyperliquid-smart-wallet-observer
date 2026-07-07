@@ -13,28 +13,36 @@ def _settings():
     return settings
 
 
-def _delta(delta_type: str, *, wallet: str = "0x" + "1" * 40, detected_at_ms: int = 1_000) -> PositionDeltaModel:
+def _delta(
+    delta_type: str,
+    *,
+    wallet: str = "0x" + "1" * 40,
+    detected_at_ms: int = 1_000,
+    **overrides,
+) -> PositionDeltaModel:
     is_short = "short" in delta_type.lower()
-    return PositionDeltaModel(
-        wallet_address=wallet,
-        coin="BTC",
-        previous_side=None if "open" in delta_type.lower() else ("short" if is_short else "long"),
-        new_side="short" if is_short else "long",
-        previous_size=0.0 if "open" in delta_type.lower() else 1.0,
-        current_size=-1.0 if is_short else 1.0,
-        new_size=-1.0 if is_short else 1.0,
-        delta_size=1.0,
-        delta_notional_usdc=50_000.0,
-        action=delta_type.upper(),
-        exchange_ts=detected_at_ms,
-        side="short" if is_short else "long",
-        price=50_000.0,
-        fill_size=1.0,
-        delta_type=delta_type,
-        confidence_score=0.95,
-        detected_at_ms=detected_at_ms,
-        delta_hash=delta_type,
-    )
+    data = {
+        "wallet_address": wallet,
+        "coin": "BTC",
+        "previous_side": None if "open" in delta_type.lower() else ("short" if is_short else "long"),
+        "new_side": "short" if is_short else "long",
+        "previous_size": 0.0 if "open" in delta_type.lower() else 1.0,
+        "current_size": -1.0 if is_short else 1.0,
+        "new_size": -1.0 if is_short else 1.0,
+        "delta_size": 1.0,
+        "delta_notional_usdc": 50_000.0,
+        "action": delta_type.upper(),
+        "exchange_ts": detected_at_ms,
+        "side": "short" if is_short else "long",
+        "price": 50_000.0,
+        "fill_size": 1.0,
+        "delta_type": delta_type,
+        "confidence_score": 0.95,
+        "detected_at_ms": detected_at_ms,
+        "delta_hash": delta_type,
+    }
+    data.update(overrides)
+    return PositionDeltaModel(**data)
 
 
 def _leader(address: str = "0x" + "1" * 40) -> TopWallet:
@@ -93,16 +101,31 @@ def test_copy_signal_detector_requires_positive_edge_remaining():
     assert report.no_trade_reasons["edge_remaining_bps_non_positive"] == 1
 
 
-def test_copy_signal_detector_uses_live_simulation_age_window(monkeypatch):
+def test_copy_signal_detector_uses_v9_simulation_defaults_without_env(monkeypatch):
     settings = _settings()
     settings.risk.max_signal_age_ms = 3_000
-    stale_without_override = detect_copy_signals_from_deltas(
+    settings.risk.min_edge_required_bps = 25
+    monkeypatch.delenv("HYPERSMART_SIMULATION_MAX_SIGNAL_AGE_MS", raising=False)
+    monkeypatch.delenv("HYPERSMART_SIMULATION_MIN_EDGE_BPS", raising=False)
+
+    accepted_with_v9_defaults = detect_copy_signals_from_deltas(
         [_delta("open_long", detected_at_ms=1_000)],
         settings=settings,
         followed_wallets=[_leader()],
         now_timestamp_ms=11_000,
-        tuning=CopySignalTuning(leader_expected_move_bps=70.0),
+        tuning=CopySignalTuning(leader_expected_move_bps=31.0),
     )
+
+    assert round(accepted_with_v9_defaults.signals[0].edge_remaining_bps, 6) == 15.0
+    assert accepted_with_v9_defaults.signals[0].decision in {
+        SignalDecision.PAPER_TRADE,
+        SignalDecision.PAPER_CANDIDATE,
+    }
+
+
+def test_copy_signal_detector_uses_live_simulation_age_window_override(monkeypatch):
+    settings = _settings()
+    settings.risk.max_signal_age_ms = 3_000
     monkeypatch.setenv("HYPERSMART_SIMULATION_MAX_SIGNAL_AGE_MS", "20000")
     accepted_with_override = detect_copy_signals_from_deltas(
         [_delta("open_long", detected_at_ms=1_000)],
@@ -112,11 +135,42 @@ def test_copy_signal_detector_uses_live_simulation_age_window(monkeypatch):
         tuning=CopySignalTuning(leader_expected_move_bps=70.0),
     )
 
-    assert stale_without_override.signals[0].decision == SignalDecision.REJECT_TOO_LATE
     assert accepted_with_override.signals[0].decision in {
         SignalDecision.PAPER_TRADE,
         SignalDecision.PAPER_CANDIDATE,
     }
+
+
+def test_copy_signal_detector_uses_live_ws_detection_time_for_freshness(monkeypatch):
+    settings = _settings()
+    settings.risk.max_signal_age_ms = 3_000
+    monkeypatch.setenv("HYPERSMART_SIMULATION_MAX_SIGNAL_AGE_MS", "15000")
+
+    report = detect_copy_signals_from_deltas(
+        [
+            _delta(
+                "open_short",
+                detected_at_ms=20_000,
+                # The exchange fill timestamp can be older than the live receipt.
+                # WebSocket userFills source must be judged by local detection time.
+                exchange_ts=1_000,
+                source="hyperliquid_ws:userFills:stream",
+                raw_json={"time": 1_000, "hash": "0xlive"},
+            )
+        ],
+        settings=settings,
+        followed_wallets=[_leader()],
+        now_timestamp_ms=21_000,
+        tuning=CopySignalTuning(leader_expected_move_bps=70.0),
+    )
+
+    assert report.signals[0].timestamp_ms == 20_000
+    assert report.signals[0].signal_age_ms == 1_000
+    assert report.signals[0].decision in {
+        SignalDecision.PAPER_TRADE,
+        SignalDecision.PAPER_CANDIDATE,
+    }
+    assert "REJECT_TOO_LATE" not in report.no_trade_reasons
 
 
 def test_copy_signal_detector_ignores_unfollowed_wallet():

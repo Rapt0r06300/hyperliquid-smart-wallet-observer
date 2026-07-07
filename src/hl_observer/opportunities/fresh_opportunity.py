@@ -11,7 +11,8 @@ from hl_observer.copying.realtime_magic_score import (
     score_realtime_copy_candidate,
 )
 from hl_observer.storage.models import PositionDeltaModel, TopWallet
-from hl_observer.wallets.delta_utils import copy_delta_action, copy_delta_direction, delta_event_time_ms
+from hl_observer.simulation.live_filters import copy_candidate_signal_time_ms
+from hl_observer.wallets.delta_utils import copy_delta_action, copy_delta_direction
 
 
 ENTRY_ACTIONS = {"OPEN_LONG", "OPEN_SHORT", "ADD", "INCREASE"}
@@ -67,6 +68,7 @@ def find_fresh_opportunities(
     consensus_window_ms: int = 4_000,
     min_wallets: int = 2,
     max_opportunities: int = 20,
+    max_per_coin: int = 3,
     current_open_exposure_usdt: float = 0.0,
     current_open_positions: int = 0,
     max_open_positions: int = 6,
@@ -79,6 +81,8 @@ def find_fresh_opportunities(
     """
 
     active_window_ms = max(1_000, int(active_window_ms))
+    risk_config = risk_config or RealtimeCopyRiskConfig()
+    max_signal_age_for_trade_ms = max(1_000, min(active_window_ms, int(risk_config.max_signal_age_ms)))
     consensus_window_ms = max(1_000, min(active_window_ms, int(consensus_window_ms)))
     min_wallets = max(1, int(min_wallets))
     current_mids = {str(k).upper(): float(v) for k, v in (current_mids or {}).items() if _safe_float(v) is not None}
@@ -92,7 +96,7 @@ def find_fresh_opportunities(
     rejection_counts: dict[str, int] = {}
 
     for row in deltas:
-        event_ms = delta_event_time_ms(row)
+        event_ms = copy_candidate_signal_time_ms(row)
         if event_ms <= 0:
             _count(rejection_counts, "MISSING_TIMESTAMP")
             continue
@@ -118,23 +122,23 @@ def find_fresh_opportunities(
                 if str(row.coin or "").upper() == coin
                 and copy_delta_direction(row, copy_delta_action(row)) == direction
             ],
-            key=delta_event_time_ms,
+            key=copy_candidate_signal_time_ms,
         )
         for index, seed in enumerate(rows):
-            start_ms = delta_event_time_ms(seed)
-            cluster_rows = [row for row in rows[index:] if delta_event_time_ms(row) <= start_ms + consensus_window_ms]
+            start_ms = copy_candidate_signal_time_ms(seed)
+            cluster_rows = [row for row in rows[index:] if copy_candidate_signal_time_ms(row) <= start_ms + consensus_window_ms]
             wallets = tuple(sorted({str(row.wallet_address or "").lower() for row in cluster_rows if row.wallet_address}))
             if len(wallets) < min_wallets:
                 _count(rejection_counts, "CLUSTER_BELOW_MIN_WALLETS")
                 continue
-            first_seen = min(delta_event_time_ms(row) for row in cluster_rows)
-            last_seen = max(delta_event_time_ms(row) for row in cluster_rows)
+            first_seen = min(copy_candidate_signal_time_ms(row) for row in cluster_rows)
+            last_seen = max(copy_candidate_signal_time_ms(row) for row in cluster_rows)
+            cluster_age_ms = max(0, now_timestamp_ms - last_seen)
             prices = [_leader_price(row) for row in cluster_rows if _leader_price(row) > 0]
             reference_price = float(median(prices)) if prices else 0.0
             mid = current_mids.get(coin)
             mid_source = "allMids" if mid is not None else "leader_reference_fallback"
-            if mid is None:
-                mid = reference_price
+            score_mid = mid if mid is not None else reference_price
             leader_scores = [score_by_wallet.get(wallet, 50.0) for wallet in wallets]
             average_score = sum(leader_scores) / max(1, len(leader_scores))
             total_notional = sum(abs(float(row.delta_notional_usdc or 0.0)) for row in cluster_rows)
@@ -151,12 +155,12 @@ def find_fresh_opportunities(
                     direction=direction,
                     leader_expected_edge_bps=expected_edge,
                     leader_consistency_factor=_leader_consistency_factor(average_score),
-                    signal_age_ms=max(0, now_timestamp_ms - last_seen),
+                    signal_age_ms=cluster_age_ms,
                     consensus_wallets=len(wallets),
                     liquidity_score=_liquidity_score_from_notional(total_notional, len(wallets)),
                     leader_score=average_score,
                     leader_reference_price=reference_price,
-                    current_mid=mid,
+                    current_mid=score_mid,
                     leader_notional_usdt=total_notional / max(1, len(wallets)),
                     current_open_exposure_usdt=current_open_exposure_usdt,
                     current_open_positions=current_open_positions,
@@ -165,18 +169,28 @@ def find_fresh_opportunities(
                 config=risk_config,
             )
             warnings = list(score.warnings)
+            extra_refusals: list[str] = []
+            final_decision = score.decision
+            simulated_notional_usdt = score.simulated_notional_usdt
             if mid_source != "allMids":
                 warnings.append("CURRENT_MID_FALLBACK_FROM_LEADER_PRICE")
+                extra_refusals.append("CURRENT_MID_REQUIRED_FOR_LOCAL_SIMULATION")
+            if cluster_age_ms > max_signal_age_for_trade_ms:
+                extra_refusals.append("STALE_SIGNAL")
+            refusal_reasons = tuple(dict.fromkeys([*score.refusal_reasons, *extra_refusals]))
+            if refusal_reasons:
+                final_decision = "REJECT_NO_TRADE"
+                simulated_notional_usdt = 0.0
             opportunities.append(
                 FreshOpportunity(
                     coin=coin,
                     direction=direction,
-                    decision=score.decision,
+                    decision=final_decision,
                     wallet_count=len(wallets),
                     wallets=wallets,
                     first_seen_ms=first_seen,
                     last_seen_ms=last_seen,
-                    age_ms=max(0, now_timestamp_ms - last_seen),
+                    age_ms=cluster_age_ms,
                     total_notional_usdc=round(total_notional, 6),
                     leader_reference_price=round(reference_price, 8),
                     current_mid=round(mid, 8) if mid is not None else None,
@@ -187,13 +201,13 @@ def find_fresh_opportunities(
                     copy_degradation_bps=score.copy_degradation_bps,
                     opportunity_score=score.opportunity_score,
                     risk_score=score.risk_score,
-                    simulated_notional_usdt=score.simulated_notional_usdt,
-                    refusal_reasons=tuple(score.refusal_reasons),
+                    simulated_notional_usdt=simulated_notional_usdt,
+                    refusal_reasons=refusal_reasons,
                     warnings=tuple(warnings),
                 )
             )
 
-    opportunities = _dedupe_and_rank(opportunities)[: max(1, int(max_opportunities))]
+    opportunities = _dedupe_and_rank(opportunities, max_per_coin=max_per_coin)[: max(1, int(max_opportunities))]
     for opportunity in opportunities:
         for reason in opportunity.refusal_reasons:
             _count(rejection_counts, reason)
@@ -244,7 +258,7 @@ def format_fresh_opportunity_report(report: FreshOpportunityReport) -> str:
     return "\n".join(lines)
 
 
-def _dedupe_and_rank(opportunities: list[FreshOpportunity]) -> list[FreshOpportunity]:
+def _dedupe_and_rank(opportunities: list[FreshOpportunity], *, max_per_coin: int = 3) -> list[FreshOpportunity]:
     ordered = sorted(
         opportunities,
         key=lambda item: (
@@ -256,14 +270,34 @@ def _dedupe_and_rank(opportunities: list[FreshOpportunity]) -> list[FreshOpportu
         reverse=True,
     )
     seen: set[tuple[str, str, tuple[str, ...]]] = set()
+    per_coin: dict[str, int] = {}
     kept: list[FreshOpportunity] = []
     for item in ordered:
         key = (item.coin, item.direction, item.wallets)
         if key in seen:
             continue
+        if _is_redundant_overlap(item, kept):
+            continue
+        coin_count = per_coin.get(item.coin, 0)
+        if coin_count >= max(1, int(max_per_coin)):
+            continue
         seen.add(key)
+        per_coin[item.coin] = coin_count + 1
         kept.append(item)
     return kept
+
+
+def _is_redundant_overlap(item: FreshOpportunity, kept: list[FreshOpportunity]) -> bool:
+    item_wallets = set(item.wallets)
+    for existing in kept:
+        if existing.coin != item.coin or existing.direction != item.direction:
+            continue
+        if item.last_seen_ms < existing.first_seen_ms or existing.last_seen_ms < item.first_seen_ms:
+            continue
+        existing_wallets = set(existing.wallets)
+        if item_wallets and item_wallets.issubset(existing_wallets):
+            return True
+    return False
 
 
 def _expected_edge_bps(

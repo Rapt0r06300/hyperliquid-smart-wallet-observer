@@ -15,7 +15,7 @@ DECISION_LOG_FILES = (
 )
 STRUCTURED_DECISION_LOG = ("structured", "decisions.jsonl")
 SUMMARY_CACHE_FILE = "simulation_log_summary_cache.json"
-SUMMARY_CACHE_VERSION = 1
+SUMMARY_CACHE_VERSION = 2
 
 
 @dataclass(frozen=True, slots=True)
@@ -129,11 +129,11 @@ def _analysis_from_events(log_dir: Path, events: tuple[DecisionEvent, ...]) -> R
     accepted = refused = positive = negative = 0
     for event in events:
         actions[event.bot_decision] += 1
-        if event.status.upper() == "REFUSED":
+        if _is_refused_event(event):
             refused += 1
             if event.reason:
                 reasons[event.reason] += 1
-        else:
+        elif _is_accepted_event(event):
             accepted += 1
         pnl = event.estimated_net_pnl_usdc or 0.0
         fee = event.fee_cost_usdc or 0.0
@@ -176,11 +176,11 @@ def _stream_summary_from_file(log_dir: Path, path: Path) -> ReplayAnalysis:
         event = _row_to_event(raw)
         event_count += 1
         actions[event.bot_decision] += 1
-        if event.status.upper() == "REFUSED":
+        if _is_refused_event(event):
             refused += 1
             if event.reason:
                 reasons[event.reason] += 1
-        else:
+        elif _is_accepted_event(event):
             accepted += 1
         pnl = event.estimated_net_pnl_usdc or 0.0
         fee = event.fee_cost_usdc or 0.0
@@ -419,6 +419,46 @@ def _row_to_event(row: dict[str, Any]) -> DecisionEvent:
         execution=_to_str(row.get("execution") or "forbidden") or "forbidden",
         research_only=bool(row.get("research_only", True)),
     )
+
+
+def _is_refused_event(event: DecisionEvent) -> bool:
+    status = (event.status or "").upper()
+    decision = (event.bot_decision or "").upper()
+    if status in {"REFUSED", "REJECT_NO_TRADE", "NO_TRADE", "BLOCKED"}:
+        return True
+    if decision in {"NO_TRADE", "REJECT_NO_TRADE"} or decision.startswith("REJECT"):
+        return True
+    return False
+
+
+def _is_accepted_event(event: DecisionEvent) -> bool:
+    """Return true only for a portfolio-impacting paper event.
+
+    Shadow/evidence rows from the external GitHub catalogue are intentionally
+    not accepted trades. Counting them as accepted made the dashboard report
+    dozens of "accepted" events while PnL stayed flat, which hid the real
+    refusals and confused PnL audits.
+    """
+
+    if _is_refused_event(event):
+        return False
+    status = (event.status or "").upper()
+    decision = (event.bot_decision or "").upper()
+    if decision in {"EXTERNAL_GITHUB_PROFILE_EVALUATED", "EVALUATED_DIAGNOSTIC"}:
+        return False
+    if "ENGINE_EVALUATION" in decision or "PROFILE_EVALUATED" in decision:
+        return False
+    if event.copied_notional_usdt and event.copied_notional_usdt > 0:
+        return True
+    if event.estimated_net_pnl_usdc is not None and event.estimated_net_pnl_usdc != 0:
+        return True
+    if decision.startswith("PAPER_") or "PAPER_ENTRY" in decision or "PAPER_CLOSE" in decision:
+        return True
+    if "FUSION" in decision and ("ENTRY" in decision or "CLOSE" in decision or "EXIT" in decision):
+        return True
+    if status == "LOCAL_REPLAY" and decision not in {"UNKNOWN", ""}:
+        return True
+    return False
 
 
 def _event_status(row: dict[str, Any]) -> str:

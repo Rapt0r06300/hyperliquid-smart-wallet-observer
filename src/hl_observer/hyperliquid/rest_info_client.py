@@ -4,9 +4,12 @@ import asyncio
 import hashlib
 import json
 from collections.abc import AsyncIterator
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import httpx
+
+if TYPE_CHECKING:
+    from hl_observer.sources.collection_recorder import CollectionRecorder
 
 from hl_observer.hyperliquid.rate_limits import AsyncRateLimiter
 from hl_observer.hyperliquid.schemas import (
@@ -175,6 +178,7 @@ class HyperliquidInfoClient:
         backoff_base_seconds: float = 0.25,
         client: httpx.AsyncClient | None = None,
         rate_limiter: AsyncRateLimiter | None = None,
+        recorder: "CollectionRecorder | None" = None,
     ) -> None:
         if not base_url.endswith("/info"):
             raise HyperliquidInfoError("HyperliquidInfoClient must target the /info endpoint only")
@@ -185,6 +189,8 @@ class HyperliquidInfoClient:
         self._client = client
         self._owns_client = client is None
         self._rate_limiter = rate_limiter or AsyncRateLimiter()
+        # Optional, opt-in provenance recorder (V12 A+E). Best-effort: never breaks fetches.
+        self._recorder = recorder
 
     async def __aenter__(self) -> HyperliquidInfoClient:
         if self._client is None:
@@ -209,13 +215,26 @@ class HyperliquidInfoClient:
             try:
                 response = await self._client.post(self.base_url, json=payload)
                 response.raise_for_status()
-                return response.json()
+                data = response.json()
+                self._record_fetch(request_type, data, ok=True, error=None)
+                return data
             except (httpx.HTTPError, ValueError) as exc:
                 last_error = exc
                 if attempt >= self.max_retries:
                     break
                 await asyncio.sleep(self.backoff_base_seconds * (2**attempt))
+        self._record_fetch(request_type, None, ok=False, error=str(last_error))
         raise HyperliquidInfoError(f"Hyperliquid /info call failed: {last_error}") from last_error
+
+    def _record_fetch(self, request_type: str, response: object, *, ok: bool, error: str | None) -> None:
+        """Forward one fetch to the optional provenance recorder. Never raises."""
+        recorder = getattr(self, "_recorder", None)
+        if recorder is None:
+            return
+        try:
+            recorder.record_rest(request_type=request_type, response=response, ok=ok, error=error)
+        except Exception:
+            pass
 
     async def all_mids(self) -> dict[str, str]:
         data = await self._post_info("allMids")

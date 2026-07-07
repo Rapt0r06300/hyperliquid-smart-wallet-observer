@@ -133,6 +133,9 @@ def assess_decision_intelligence(tuned: Any, health: Any, state: Any, ctx: Any) 
     elif opportunity >= 52 and risk <= 52:
         multiplier = 0.45
         notes.append("director_reduced_quality_winrate_guard")
+    elif opportunity >= 35 and risk <= 65:
+        multiplier = 0.25
+        notes.append("director_minimal_quality_exploration")
     else:
         multiplier = 0.0
         reasons.append("DIRECTOR_LOW_NET_SCORE")
@@ -142,7 +145,7 @@ def assess_decision_intelligence(tuned: Any, health: Any, state: Any, ctx: Any) 
     if edge_bps <= 0:
         hard_block = True
         reasons.append("DIRECTOR_NO_EDGE")
-    if quality_score < 45:
+    if quality_score < 25:
         hard_block = True
         reasons.append("DIRECTOR_QUALITY_TOO_LOW")
     if closed_trades >= 50 and winrate < 0.45 and profit_factor < 1.0:
@@ -151,7 +154,7 @@ def assess_decision_intelligence(tuned: Any, health: Any, state: Any, ctx: Any) 
     if profile_block:
         hard_block = True
         reasons.append("DIRECTOR_PROFILE_MEMORY_BLOCK")
-    if risk >= 75 and opportunity < 82:
+    if risk >= 85 and opportunity < 82:
         hard_block = True
         reasons.append("DIRECTOR_RISK_TOO_HIGH")
     if hard_block:

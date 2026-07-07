@@ -31,6 +31,8 @@ from typing import Any, Callable, Optional
 
 logger = logging.getLogger(__name__)
 
+DEFAULT_TOP_TRADE_MARKETS = ["BTC-USD", "ETH-USD", "SOL-USD", "HYPE-USD", "XRP-USD"]
+
 try:
     import websocket as _ws_lib
     _WEBSOCKET_AVAILABLE = True
@@ -121,7 +123,7 @@ class DydxIndexerWsClient:
         on_gap_detected: Optional[Callable[[str, str], None]] = None,
         ping_interval_s: float = 30.0,
         reconnect_delay_s: float = 5.0,
-        max_reconnect_attempts: int = 10,
+        max_reconnect_attempts: int = 50,
         subscription_min_interval_s: float = 0.02,
     ) -> None:
         self.ws_url = ws_url
@@ -206,6 +208,17 @@ class DydxIndexerWsClient:
             "batched": True,
         }
         self._send_subscription(key)
+
+    def subscribe_top_trade_markets(self, markets: Optional[list[str]] = None, limit: int = 5) -> list[str]:
+        """Subscribe read-only trade streams for the most important markets first."""
+        selected = list(markets or DEFAULT_TOP_TRADE_MARKETS)[: max(0, int(limit or 0))]
+        subscribed: list[str] = []
+        for market_id in selected:
+            if not market_id:
+                continue
+            self.subscribe_trades(str(market_id))
+            subscribed.append(str(market_id))
+        return subscribed
 
     def subscribe_orderbook(self, market_id: str) -> None:
         key = f"{self.CHANNEL_ORDERBOOK}:{market_id}"
@@ -417,4 +430,4 @@ class DydxIndexerWsClient:
         return True
 
 
-__all__ = ["DydxIndexerWsClient", "WsDiagnostics", "WsMessage", "WsStatus"]
+__all__ = ["DEFAULT_TOP_TRADE_MARKETS", "DydxIndexerWsClient", "WsDiagnostics", "WsMessage", "WsStatus"]

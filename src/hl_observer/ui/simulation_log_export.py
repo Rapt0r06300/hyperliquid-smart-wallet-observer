@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 from collections import Counter
 from pathlib import Path
 from tempfile import gettempdir
@@ -14,6 +15,7 @@ MAX_EVENTS_IN_LATEST = 1_000
 MAX_EXPORTED_KEYS = 50_000
 MAX_SNAPSHOT_EVENTS = 500
 MAX_SNAPSHOT_POSITIONS = 80
+DEFAULT_APPEND_ONLY_ROTATE_MB = 200.0
 
 
 def logs_to_send_dir(settings: Settings) -> Path:
@@ -31,21 +33,27 @@ def export_simulation_diagnostics(settings: Settings, payload: dict[str, Any]) -
 
     ledger_events = list((payload.get("bot_simulation") or {}).get("ledger_events") or [])
     latest_events = ledger_events[-MAX_EVENTS_IN_LATEST:]
-    primary_log_dir = Path(settings.logs_dir) / LOGS_TO_SEND_DIRNAME
+    primary_log_dir = _runtime_safe_primary_log_dir(settings)
     log_dir, directory_warnings = _resolve_writable_log_dir(primary_log_dir)
     snapshot_path = log_dir / "simulation_snapshot_latest.json"
     decisions_path = log_dir / "simulation_decisions_latest.jsonl"
+    pnl_ledger_path = log_dir / "simulation_pnl_ledger_latest.jsonl"
     incremental_path = log_dir / "simulation_decisions_append_only.jsonl"
     summary_path = log_dir / "simulation_resume_pour_chatgpt.md"
     export_state_path = log_dir / "simulation_export_state.json"
 
     snapshot = _sanitize_snapshot(payload)
+    pnl_ledger_events = _pnl_ledger_events(payload, latest_events)
     write_warnings: list[str] = list(directory_warnings)
     for warning in (
         _safe_write_text(snapshot_path, json.dumps(snapshot, indent=2, sort_keys=True, ensure_ascii=False)),
         _safe_write_text(
             decisions_path,
             "".join(json.dumps(_diagnostic_event(row), sort_keys=True, ensure_ascii=False) + "\n" for row in latest_events),
+        ),
+        _safe_write_text(
+            pnl_ledger_path,
+            "".join(json.dumps(_diagnostic_event(row), sort_keys=True, ensure_ascii=False) + "\n" for row in pnl_ledger_events),
         ),
         _append_new_events(incremental_path, export_state_path, latest_events),
         _safe_write_text(summary_path, _render_markdown_summary(payload, latest_events)),
@@ -64,6 +72,7 @@ def export_simulation_diagnostics(settings: Settings, payload: dict[str, Any]) -
         "directory_status": status,
         "snapshot_json": str(snapshot_path),
         "decisions_jsonl": str(decisions_path),
+        "pnl_ledger_jsonl": str(pnl_ledger_path),
         "append_only_jsonl": str(incremental_path),
         "chatgpt_markdown": str(summary_path),
         "write_warnings": " || ".join(write_warnings),
@@ -83,12 +92,14 @@ def _sanitize_snapshot(payload: dict[str, Any]) -> dict[str, Any]:
         "fresh_only",
         "readiness",
         "next_step",
+        "scanner",
         "counts",
         "signal_pipeline",
         "equity",
         "decision_log_pnl",
         "pnl_consistency",
         "loss_diagnostics",
+        "paper_ledger",
         "fresh_data_coverage",
         "warehouse_coverage",
         "bot_simulation",
@@ -97,6 +108,8 @@ def _sanitize_snapshot(payload: dict[str, Any]) -> dict[str, Any]:
         "consensus",
         "no_trade_reasons",
         "diagnostic_logs",
+        "runtime_diagnostics",
+        "graph_diagnostics",
     }
     snapshot = {key: payload.get(key) for key in allowed if key in payload}
     if isinstance(snapshot.get("bot_simulation"), dict):
@@ -120,6 +133,68 @@ def _compact_bot_simulation(bot: dict[str, Any]) -> dict[str, Any]:
     return compact
 
 
+def _pnl_ledger_events(payload: dict[str, Any], latest_events: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Return a compact, PnL-relevant ledger extract for human debugging.
+
+    The normal latest decision file is useful for full context, but long runs can
+    be dominated by shadow engine evaluations. This extract keeps only entries
+    that affect or explain the paper wallet balance: opens with fees, closes,
+    reductions, partial exits, and any row carrying non-zero PnL or costs.
+    """
+
+    candidates: list[dict[str, Any]] = []
+    bot = payload.get("bot_simulation")
+    if isinstance(bot, dict):
+        ledger_events = bot.get("ledger_events")
+        if isinstance(ledger_events, list):
+            candidates.extend(row for row in ledger_events if isinstance(row, dict))
+        paper_ledger = bot.get("paper_ledger")
+        if isinstance(paper_ledger, dict):
+            candidates.extend(_closed_trade_rows_from_paper_ledger(paper_ledger))
+    paper_ledger = payload.get("paper_ledger")
+    if isinstance(paper_ledger, dict):
+        candidates.extend(_closed_trade_rows_from_paper_ledger(paper_ledger))
+    candidates.extend(row for row in latest_events if isinstance(row, dict))
+
+    seen: set[str] = set()
+    selected: list[dict[str, Any]] = []
+    for row in candidates:
+        if not _is_pnl_relevant_ledger_event(row):
+            continue
+        key = _event_key(row)
+        if key in seen:
+            continue
+        seen.add(key)
+        selected.append(row)
+    return selected[-MAX_EVENTS_IN_LATEST:]
+
+
+def _closed_trade_rows_from_paper_ledger(paper_ledger: dict[str, Any]) -> list[dict[str, Any]]:
+    stats = paper_ledger.get("closed_trade_stats")
+    if not isinstance(stats, dict):
+        return []
+    recent = stats.get("recent_closed_trades")
+    if not isinstance(recent, list):
+        return []
+    return [row for row in recent if isinstance(row, dict)]
+
+
+def _is_pnl_relevant_ledger_event(row: dict[str, Any]) -> bool:
+    action = str(row.get("bot_replay_action") or row.get("paper_action_type") or row.get("event_type") or "").upper()
+    paper_action = str(row.get("paper_action_type") or "").upper()
+    if action in {"EXTERNAL_GITHUB_PROFILE_EVALUATED", "EVALUATED_DIAGNOSTIC"}:
+        return False
+    if "ENGINE_EVALUATION" in action or "PROFILE_EVALUATED" in action or paper_action == "ENGINE_EVALUATION":
+        return False
+    if paper_action in {"OPEN", "ADD", "INCREASE", "REDUCE", "CLOSE", "PARTIAL_TP"}:
+        return True
+    if action.startswith("PAPER_") or "PAPER_ENTRY" in action or "PAPER_CLOSE" in action:
+        return True
+    pnl = _as_float(row.get("estimated_net_pnl_usdc") or row.get("event_net_pnl_usdc") or row.get("net_pnl"))
+    fee = _as_float(row.get("fee_cost_usdc") or row.get("fee") or row.get("fee_paid"))
+    return bool((pnl is not None and pnl != 0) or (fee is not None and fee != 0))
+
+
 def _append_new_events(incremental_path: Path, export_state_path: Path, events: list[dict[str, Any]]) -> str | None:
     exported_keys = _load_exported_keys(export_state_path)
     new_rows: list[dict[str, Any]] = []
@@ -130,6 +205,9 @@ def _append_new_events(incremental_path: Path, export_state_path: Path, events: 
         exported_keys.add(key)
         new_rows.append(_diagnostic_event(row))
     warnings: list[str] = []
+    rotation_warning = _rotate_oversized_append_only(incremental_path)
+    if rotation_warning:
+        warnings.append(rotation_warning)
     if new_rows:
         try:
             incremental_path.parent.mkdir(parents=True, exist_ok=True)
@@ -146,6 +224,30 @@ def _append_new_events(incremental_path: Path, export_state_path: Path, events: 
     if state_warning:
         warnings.append(state_warning)
     return " || ".join(warnings) if warnings else None
+
+
+def _rotate_oversized_append_only(path: Path) -> str | None:
+    try:
+        max_mb = float(os.environ.get("HYPERSMART_APPEND_ONLY_ROTATE_MB", DEFAULT_APPEND_ONLY_ROTATE_MB))
+    except (TypeError, ValueError):
+        max_mb = DEFAULT_APPEND_ONLY_ROTATE_MB
+    if max_mb <= 0:
+        return None
+    try:
+        size_bytes = path.stat().st_size
+    except OSError:
+        return None
+    max_bytes = int(max_mb * 1024 * 1024)
+    if size_bytes <= max_bytes:
+        return None
+    archive_dir = path.parent / "_archives" / f"oversized_append_only_{now_ms()}"
+    try:
+        archive_dir.mkdir(parents=True, exist_ok=True)
+        destination = archive_dir / path.name
+        path.replace(destination)
+        return f"append_only_rotated={destination}"
+    except OSError as exc:
+        return f"append_only_rotation_failed={path}: {exc.__class__.__name__}: {exc}"
 
 
 def _load_exported_keys(path: Path) -> set[str]:
@@ -173,6 +275,31 @@ def _resolve_writable_log_dir(primary: Path) -> tuple[Path, list[str]]:
         return fallback, warnings
     warnings.append(f"fallback_log_dir_unavailable={fallback}: {fallback_warning}")
     return primary, warnings
+
+
+def _runtime_safe_primary_log_dir(settings: Settings) -> Path:
+    """Return the primary diagnostics directory without letting tests pollute runtime logs.
+
+    Several UI tests exercise ``/api/simulation/overview``. When those tests use
+    default settings, the normal runtime logs directory points at the user's
+    real ``logs/logs à envoyer`` folder. Test fixtures then look like live bot
+    decisions in the dashboard/export bundle. If pytest is active and the logs
+    directory is not already under the OS temp directory, redirect diagnostics to
+    a temp sandbox. Production/runtime launches are unchanged.
+    """
+
+    logs_dir = Path(settings.logs_dir)
+    if os.environ.get("PYTEST_CURRENT_TEST") and not _path_is_under(logs_dir, Path(gettempdir())):
+        return Path(gettempdir()) / "hypersmart_pytest_logs_a_envoyer" / LOGS_TO_SEND_DIRNAME
+    return logs_dir / LOGS_TO_SEND_DIRNAME
+
+
+def _path_is_under(path: Path, parent: Path) -> bool:
+    try:
+        path.resolve().relative_to(parent.resolve())
+        return True
+    except (OSError, ValueError):
+        return False
 
 
 def _probe_log_dir(path: Path) -> str | None:
@@ -211,10 +338,14 @@ def _diagnostic_event(row: dict[str, Any]) -> dict[str, Any]:
     pnl = _as_float(row.get("estimated_net_pnl_usdc"))
     gross = _as_float(row.get("gross_pnl_usdc"))
     fee = _as_float(row.get("fee_cost_usdc"))
+    v9_pipeline = row.get("v9_pipeline") if isinstance(row.get("v9_pipeline"), dict) else {}
+    v9_reasons = _as_string_list(row.get("v9_reasons") or v9_pipeline.get("reasons"))
+    v9_market_reasons = _as_string_list(v9_pipeline.get("market_quality_reasons"))
     pnl_impact = "NO_PNL"
     if pnl is not None:
         pnl_impact = "GAIN" if pnl > 0 else "LOSS" if pnl < 0 else "NEUTRAL"
     return {
+        "delta_key": row.get("delta_key"),
         "timestamp_ms": row.get("observed_at_ms"),
         "wallet_address": row.get("wallet_address"),
         "coin": row.get("coin"),
@@ -224,9 +355,13 @@ def _diagnostic_event(row: dict[str, Any]) -> dict[str, Any]:
         "leader_delta_size": row.get("leader_delta_size"),
         "leader_notional_usdc": row.get("leader_notional_usdc"),
         "bot_decision": action,
+        "bot_replay_action": action,
+        "paper_action_type": row.get("paper_action_type"),
         "status": status,
+        "evidence_hash": row.get("evidence_hash"),
         "plain_english": _explain_action(action, status, reason, pnl),
         "reason": reason,
+        "exit_method": row.get("exit_method"),
         "edge_remaining_bps": row.get("edge_remaining_bps"),
         "copy_degradation_bps": row.get("copy_degradation_bps"),
         "signal_age_ms": row.get("signal_age_ms"),
@@ -235,11 +370,50 @@ def _diagnostic_event(row: dict[str, Any]) -> dict[str, Any]:
         "matched_position_key": row.get("matched_position_key"),
         "copied_notional_usdt": row.get("copied_notional_usdt"),
         "bot_position_size_after": row.get("bot_position_size_after"),
+        "entry_price": row.get("entry_price"),
+        "average_entry_price": row.get("average_entry_price"),
+        "exit_price": row.get("exit_price"),
+        "sltp_pnl_bps": row.get("sltp_pnl_bps"),
+        "sltp_favorable_excursion_bps": row.get("sltp_favorable_excursion_bps"),
+        "sltp_take_profit_bps": row.get("sltp_take_profit_bps"),
+        "sltp_stop_loss_bps": row.get("sltp_stop_loss_bps"),
+        "sltp_trailing_stop_bps": row.get("sltp_trailing_stop_bps"),
+        "sltp_trailing_activation_bps": row.get("sltp_trailing_activation_bps"),
+        "sltp_breakeven_buffer_bps": row.get("sltp_breakeven_buffer_bps"),
+        "adaptive_sizing": row.get("adaptive_sizing"),
+        "adaptive_size_reason": row.get("adaptive_size_reason"),
+        "adaptive_requested_margin_usdt": row.get("requested_margin_usdt"),
+        "adaptive_final_margin_usdt": row.get("final_margin_usdt"),
+        "adaptive_cap_margin_usdt": row.get("cap_margin_usdt"),
+        "session_memory_reason": row.get("session_memory_reason"),
+        "session_memory_coin_side_pnl_usdc": row.get("session_memory_session_pnl_usdc"),
+        "session_memory_recent_loss_streak": row.get("session_memory_recent_loss_streak"),
+        "session_memory_required_edge_bps": row.get("session_memory_required_edge_bps"),
+        "adaptive_consecutive_losses": row.get("consecutive_losses"),
+        "adaptive_consecutive_wins": row.get("consecutive_wins"),
+        "adaptive_confidence": row.get("confidence"),
+        "adaptive_size_pct": row.get("size_pct"),
+        "adaptive_session_pnl_usdt": row.get("session_pnl_usdt"),
         "estimated_net_pnl_usdc": pnl,
         "pnl_impact": pnl_impact,
         "gross_pnl_usdc": gross,
         "fee_cost_usdc": fee,
         "loss_bucket": _loss_bucket(reason=reason, pnl=pnl, signal_age_ms=row.get("signal_age_ms"), fee=fee),
+        "v9_decision": row.get("v9_decision") or v9_pipeline.get("decision"),
+        "v9_accepted": row.get("v9_accepted") if "v9_accepted" in row else v9_pipeline.get("accepted"),
+        "v9_evidence_hash": row.get("v9_evidence_hash") or v9_pipeline.get("evidence_hash"),
+        "v9_reasons": v9_reasons,
+        "v9_feature_hash": v9_pipeline.get("feature_hash"),
+        "v9_market_quality_mode": v9_pipeline.get("market_quality_mode"),
+        "v9_market_quality_reasons": v9_market_reasons,
+        "v9_edge_remaining_bps_after_market": v9_pipeline.get("edge_remaining_bps"),
+        "v9_spread_bps": v9_pipeline.get("spread_bps"),
+        "v9_liquidity_score": v9_pipeline.get("liquidity_score"),
+        "v9_paper_order_id": v9_pipeline.get("paper_order_id"),
+        "v9_paper_notional_usdc": v9_pipeline.get("paper_notional_usdc"),
+        "v9_paper_fill_price": v9_pipeline.get("paper_fill_price"),
+        "v9_paper_rejected_reason": v9_pipeline.get("paper_rejected_reason"),
+        "v9_data_gap": _contains_data_gap(v9_reasons, v9_market_reasons),
         "paper_mode": row.get("paper_mode") or "PAPER_LOCAL_USDT_ONLY",
         "research_only": True,
         "execution": "forbidden",
@@ -283,8 +457,10 @@ def _render_markdown_summary(payload: dict[str, Any], events: list[dict[str, Any
     pnl_consistency = payload.get("pnl_consistency") or {}
     decision_log_pnl = payload.get("decision_log_pnl") or {}
     loss_diagnostics = payload.get("loss_diagnostics") or {}
+    paper_ledger = payload.get("paper_ledger") or ((payload.get("bot_simulation") or {}).get("paper_ledger") if isinstance(payload.get("bot_simulation"), dict) else {})
     counts = payload.get("counts") or {}
     pipeline = payload.get("signal_pipeline") or {}
+    scanner = payload.get("scanner") or {}
     bot = payload.get("bot_simulation") or {}
     reasons = Counter()
     action_counts = Counter()
@@ -324,6 +500,20 @@ def _render_markdown_summary(payload: dict[str, Any], events: list[dict[str, Any
         f"- Ecart solde: {pnl_consistency.get('equity_delta_usdt')} USDT",
         f"- Lecture: {pnl_consistency.get('display_note', 'Controle non disponible')}",
         "",
+        "## Audit ledger paper",
+        f"- Source: {paper_ledger.get('source', 'non disponible') if isinstance(paper_ledger, dict) else 'non disponible'}",
+        f"- Formule: {paper_ledger.get('formula', 'equity = start + realized + unrealized') if isinstance(paper_ledger, dict) else 'equity = start + realized + unrealized'}",
+        f"- Evenements ledger: {paper_ledger.get('event_count') if isinstance(paper_ledger, dict) else 'N/A'}",
+        f"- Positions ouvertes: {paper_ledger.get('open_positions_count') if isinstance(paper_ledger, dict) else 'N/A'}",
+        f"- Reconciliation: {((paper_ledger.get('reconciliation') or {}).get('ok') if isinstance(paper_ledger, dict) and isinstance(paper_ledger.get('reconciliation'), dict) else 'N/A')}",
+        f"- Ecart reconciliation: {((paper_ledger.get('reconciliation') or {}).get('diff_usdc') if isinstance(paper_ledger, dict) and isinstance(paper_ledger.get('reconciliation'), dict) else 'N/A')} USDC",
+        f"- Gros sauts detectes: {((paper_ledger.get('spike_diagnostics') or {}).get('spike_count') if isinstance(paper_ledger, dict) and isinstance(paper_ledger.get('spike_diagnostics'), dict) else 'N/A')}",
+        f"- Lecture pics: {((paper_ledger.get('spike_diagnostics') or {}).get('interpretation') if isinstance(paper_ledger, dict) and isinstance(paper_ledger.get('spike_diagnostics'), dict) else 'N/A')}",
+        f"- Pics lies au ledger: {((paper_ledger.get('spike_links') or {}).get('spike_count') if isinstance(paper_ledger, dict) and isinstance(paper_ledger.get('spike_links'), dict) else 'N/A')}",
+        f"- Pics sans evenement ledger proche: {((paper_ledger.get('spike_links') or {}).get('unexplained_spike_count') if isinstance(paper_ledger, dict) and isinstance(paper_ledger.get('spike_links'), dict) else 'N/A')}",
+        f"- Statut liaison graphe/ledger: {((paper_ledger.get('spike_links') or {}).get('status') if isinstance(paper_ledger, dict) and isinstance(paper_ledger.get('spike_links'), dict) else 'N/A')}",
+        f"- Note couts: {paper_ledger.get('cost_accounting') if isinstance(paper_ledger, dict) else 'N/A'}",
+        "",
         "## Resume decisions",
         f"- Leaders charges: {counts.get('leaders')}/{counts.get('target_leaders')}",
         f"- Deltas live analyses: {counts.get('live_simulation_deltas')}",
@@ -333,8 +523,22 @@ def _render_markdown_summary(payload: dict[str, Any], events: list[dict[str, Any
         f"- Positions virtuelles ouvertes: {counts.get('open_virtual_positions')}",
         f"- Consensus frais 4s: {pipeline.get('fresh_consensus_groups_4s')}",
         "",
-        "## Actions observees",
+        "## Attribution PnL des derniers evenements",
     ]
+    lines.extend(_event_pnl_diagnostic_lines(events))
+    lines.extend([
+        "",
+        "## Diagnostic OFFRE vs GATES",
+        f"- Bottleneck: {(scanner.get('entry_supply') or {}).get('bottleneck', 'UNKNOWN')}",
+        f"- Resume: {(scanner.get('entry_supply') or {}).get('summary', scanner.get('entry_supply_summary', 'non disponible'))}",
+        f"- Candidats: {(scanner.get('entry_supply') or {}).get('candidates')}",
+        f"- Entrees fraiches: {(scanner.get('entry_supply') or {}).get('fresh_entries')}",
+        f"- Entrees paper acceptees cycle: {(scanner.get('entry_supply') or {}).get('accepted_entries')}",
+        f"- Entrees refusees cycle: {(scanner.get('entry_supply') or {}).get('refused_entries')}",
+        f"- Action suivante: {(scanner.get('entry_supply') or {}).get('next_action', 'Analyser logs et source health.')}",
+        "",
+        "## Actions observees",
+    ])
     if action_counts:
         lines.extend(f"- {action}: {count}" for action, count in action_counts.most_common())
     else:
@@ -344,6 +548,10 @@ def _render_markdown_summary(payload: dict[str, Any], events: list[dict[str, Any
         lines.extend(f"- {reason}: {count}" for reason, count in reasons.most_common(20))
     else:
         lines.append("- Aucun refus local dans les derniers evenements exportes.")
+    lines.extend(["", "## Signaux ignores avant ledger"])
+    lines.extend(_prefilter_skip_lines(bot))
+    lines.extend(["", "## Diagnostic V9 evidence/risk"])
+    lines.extend(_v9_diagnostic_lines(events))
     lines.extend(["", "## Pourquoi on peut perdre de l'argent en simulation"])
     lines.extend(_loss_explanations(equity, negative_events, reasons))
     lines.extend(["", "## Diagnostic pertes / reglages"])
@@ -356,6 +564,7 @@ def _render_markdown_summary(payload: dict[str, Any], events: list[dict[str, Any
             f"{diag['timestamp_ms']} | {diag['coin']} | leader={diag['leader_action']} {diag['leader_side']} | "
             f"bot={diag['bot_decision']} | status={diag['status']} | pnl={diag['estimated_net_pnl_usdc']} | "
             f"reason={diag['reason']} | edge={diag['edge_remaining_bps']} | age_ms={diag['signal_age_ms']} | "
+            f"v9={diag['v9_decision']} | v9_reasons={','.join(diag['v9_reasons'][:3])} | "
             f"wallet={diag['wallet_address']}"
         )
     open_positions = bot.get("open_positions") or []
@@ -378,6 +587,111 @@ def _render_markdown_summary(payload: dict[str, Any], events: list[dict[str, Any
         ]
     )
     return "\n".join(lines) + "\n"
+
+
+def _event_pnl_diagnostic_lines(events: list[dict[str, Any]]) -> list[str]:
+    rows = [_diagnostic_event(row) for row in events if _as_float(row.get("estimated_net_pnl_usdc")) is not None]
+    gains = [row for row in rows if (_as_float(row.get("estimated_net_pnl_usdc")) or 0.0) > 0]
+    losses = [row for row in rows if (_as_float(row.get("estimated_net_pnl_usdc")) or 0.0) < 0]
+    gain_total = sum((_as_float(row.get("estimated_net_pnl_usdc")) or 0.0) for row in gains)
+    loss_total = sum((_as_float(row.get("estimated_net_pnl_usdc")) or 0.0) for row in losses)
+    fee_total = sum((_as_float(row.get("fee_cost_usdc")) or 0.0) for row in rows)
+    lines = [
+        f"- Gains positifs recents: {round(gain_total, 6)} USDC sur {len(gains)} evenement(s)",
+        f"- Pertes negatives recentes: {round(loss_total, 6)} USDC sur {len(losses)} evenement(s)",
+        f"- Frais/couts recents traces: {round(fee_total, 6)} USDC",
+    ]
+    if gain_total > 0 and loss_total < 0:
+        lines.append(f"- Ratio gains/pertes: {round(gain_total / abs(loss_total), 6)}")
+    elif loss_total < 0:
+        lines.append("- Ratio gains/pertes: 0.0 (aucun gain recent pour compenser les pertes)")
+    if losses:
+        lines.append("- Plus grosses pertes recentes:")
+        for row in sorted(losses, key=lambda item: _as_float(item.get("estimated_net_pnl_usdc")) or 0.0)[:8]:
+            lines.append(
+                "  - "
+                f"{row.get('coin')} {row.get('leader_side')} | pnl={row.get('estimated_net_pnl_usdc')} | "
+                f"bot={row.get('bot_decision')} | reason={row.get('reason')} | "
+                f"edge={row.get('edge_remaining_bps')} | age_ms={row.get('signal_age_ms')}"
+            )
+    sltp_rows = [row for row in rows if row.get("sltp_stop_loss_bps") or row.get("sltp_take_profit_bps")]
+    if sltp_rows:
+        latest = sltp_rows[-1]
+        lines.append(
+            "- Derniers seuils SL/TP observes: "
+            f"TP={latest.get('sltp_take_profit_bps')} bps, "
+            f"SL={latest.get('sltp_stop_loss_bps')} bps, "
+            f"trail={latest.get('sltp_trailing_stop_bps')} bps, "
+            f"min_hold={latest.get('sltp_stop_min_hold_ms')} ms, "
+            f"catastrophic={latest.get('sltp_catastrophic_stop_bps')} bps"
+        )
+    else:
+        lines.append("- Aucun evenement SL/TP recent dans le snapshot exporte.")
+    return lines
+
+
+def _v9_diagnostic_lines(events: list[dict[str, Any]]) -> list[str]:
+    v9_rows = [_diagnostic_event(row) for row in events if row.get("v9_decision") or row.get("v9_pipeline")]
+    if not v9_rows:
+        return [
+            "- Aucun diagnostic V9 attache aux derniers evenements.",
+            "- Action: verifier que le runtime passe par `attach_v9_runtime_diagnostics` avant export.",
+        ]
+    decision_counts = Counter(str(row.get("v9_decision") or "UNKNOWN") for row in v9_rows)
+    reason_counts: Counter[str] = Counter()
+    market_counts: Counter[str] = Counter()
+    data_gap_count = 0
+    accepted_count = 0
+    for row in v9_rows:
+        if row.get("v9_accepted"):
+            accepted_count += 1
+        if row.get("v9_data_gap"):
+            data_gap_count += 1
+        for reason in row.get("v9_reasons") or []:
+            reason_counts[str(reason)] += 1
+        for reason in row.get("v9_market_quality_reasons") or []:
+            market_counts[str(reason)] += 1
+    lines = [
+        f"- Evenements avec diagnostic V9: {len(v9_rows)}",
+        f"- Acceptes par V9 paper/risk: {accepted_count}",
+        f"- Refuses pour donnees marche incompletes/stales: {data_gap_count}",
+        "- Decisions V9:",
+    ]
+    lines.extend(f"  - {decision}: {count}" for decision, count in decision_counts.most_common(10))
+    if reason_counts:
+        lines.append("- Raisons V9 principales:")
+        lines.extend(f"  - {reason}: {count}" for reason, count in reason_counts.most_common(12))
+    if market_counts:
+        lines.append("- Raisons market-features principales:")
+        lines.extend(f"  - {reason}: {count}" for reason, count in market_counts.most_common(12))
+    lines.append("- Lecture: V9 ne force pas un trade; il explique si les donnees marche/risque suffisent pour une simulation locale.")
+    return lines
+
+
+def _prefilter_skip_lines(bot: dict[str, Any]) -> list[str]:
+    skips = bot.get("prefilter_skips") or []
+    if not skips:
+        return [
+            "- Aucun signal bloque avant ledger dans le snapshot exporte.",
+            "- Si le bot reste silencieux, verifier `fresh_entry_diagnostics` et la collecte WS/REST.",
+        ]
+    reason_counts = Counter(str(row.get("reason") or "UNKNOWN") for row in skips if isinstance(row, dict))
+    lines = [
+        f"- Echantillons pre-ledger exportes: {len(skips)} / total connu {bot.get('prefilter_skip_count', len(skips))}",
+        "- Causes pre-ledger:",
+    ]
+    lines.extend(f"  - {reason}: {count}" for reason, count in reason_counts.most_common(12))
+    lines.append("- Derniers echantillons:")
+    for row in skips[-20:]:
+        if not isinstance(row, dict):
+            continue
+        lines.append(
+            "  - "
+            f"{row.get('coin')} {row.get('leader_action')} {row.get('leader_side')} | "
+            f"reason={row.get('reason')} | age_ms={row.get('signal_age_ms')} | "
+            f"source={row.get('source')} | wallet={row.get('wallet_address')}"
+        )
+    return lines
 
 
 def _loss_diagnostic_lines(loss_diagnostics: dict[str, Any]) -> list[str]:
@@ -424,6 +738,30 @@ def _loss_explanations(equity: dict[str, Any], negative_events: list[dict[str, A
     if not lines:
         lines.append("- Pas de cause dominante detectee dans les derniers evenements; regarder edge_remaining_bps, age_ms, couts et consensus.")
     return lines
+
+
+def _as_string_list(value: Any) -> list[str]:
+    if value is None:
+        return []
+    if isinstance(value, (list, tuple, set)):
+        return [str(item) for item in value if item is not None and str(item)]
+    if isinstance(value, str):
+        if not value:
+            return []
+        if "|" in value:
+            return [part.strip() for part in value.split("|") if part.strip()]
+        return [value]
+    return [str(value)]
+
+
+def _contains_data_gap(*reason_groups: list[str]) -> bool:
+    needles = ("data gap", "missing", "stale", "incomplete", "no_trade")
+    for reasons in reason_groups:
+        for reason in reasons:
+            lowered = str(reason).lower()
+            if any(needle in lowered for needle in needles):
+                return True
+    return False
 
 
 def _as_float(value: Any) -> float | None:

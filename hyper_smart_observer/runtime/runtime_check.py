@@ -26,6 +26,7 @@ class RuntimeFileReport:
     archive_script_exists: bool = False
     gitignore_has_runtime_excludes: bool = False
     warnings: list[str] = field(default_factory=list)
+    stopped_reason: str = ""
 
     @property
     def archive_ready(self) -> bool:
@@ -51,27 +52,51 @@ def scan_runtime_files(config: AppConfig) -> RuntimeFileReport:
     for archive in root.glob("*"):
         if archive.is_file() and archive.suffix.lower() in {".zip", ".7z", ".rar"}:
             archive_files_at_root.append(archive)
-    for cache_name in ("__pycache__", ".pytest_cache", ".mypy_cache"):
-        cache_dirs.extend(path for path in root.rglob(cache_name) if path.is_dir())
-    for path in root.rglob("*"):
-        if not path.is_file():
-            continue
+    # BOUNDED walk: data/, runtime/, logs/, .git/ and caches are pruned AT
+    # DESCENT. We never traverse the 23 GB of data/ nor the 3 GB of logs/.
+    from hyper_smart_observer.audit.bounded_walk import bounded_walk
+
+    walk = bounded_walk(root, extra_excluded_dirs={"logs"}, max_seconds=6.0, stat_sizes=False)
+    cache_dirs = [
+        root / rel
+        for rel in walk.pruned_dirs
+        if Path(rel).name.lower() in {"__pycache__", ".pytest_cache", ".mypy_cache"}
+    ]
+    for path in walk.files:
         lower_name = path.name.lower()
-        relative = _safe_relative(path, root).as_posix().lower()
         if lower_name.endswith(DB_SUFFIXES):
             databases.append(path)
-            if relative.startswith("logs/"):
-                logs_databases.append(path)
         if lower_name.endswith(("-wal", "-shm")):
             wal_shm_files.append(path)
         if lower_name.endswith(".log"):
             log_files.append(path)
+    # Detect "DB under logs/" WITHOUT traversing the logs tree (3 GB): only the
+    # top level of logs/ is listed (session DBs live at the surface there).
+    logs_root = root / "logs"
+    if logs_root.exists():
+        try:
+            for path in logs_root.glob("*"):
+                if not path.is_file():
+                    continue
+                lower_name = path.name.lower()
+                if lower_name.endswith(DB_SUFFIXES):
+                    databases.append(path)
+                    logs_databases.append(path)
+                if lower_name.endswith(("-wal", "-shm")):
+                    wal_shm_files.append(path)
+                if lower_name.endswith(".log"):
+                    log_files.append(path)
+        except OSError:
+            pass
+    stopped_reason = walk.stopped_reason
     if logs_databases:
         warnings.append("SQLite database(s) found under logs/. Logs should contain text logs only.")
     if wal_shm_files:
         warnings.append("WAL/SHM files detected. Do not archive active SQLite runtime files.")
     if archive_files_at_root:
         warnings.append("Archive file(s) found at project root. Create clean archives on Desktop only.")
+    if stopped_reason:
+        warnings.append(f"Runtime scan stopped early (bounded): {stopped_reason}.")
     db_path = Path(config.database_path)
     if "logs" in [part.lower() for part in db_path.parts]:
         warnings.append("HyperSmart database_path points inside logs/. Move it to data/.")
@@ -91,6 +116,7 @@ def scan_runtime_files(config: AppConfig) -> RuntimeFileReport:
         (root / "tools" / "create_clean_archive.ps1").exists(),
         all(token in gitignore_text for token in ("data/", "logs/", "*.sqlite3", "*.zip", ".env")),
         warnings,
+        stopped_reason=stopped_reason,
     )
 
 
@@ -110,9 +136,10 @@ def format_runtime_report(report: RuntimeFileReport) -> str:
         f"archive_button_exists: {report.archive_button_exists}",
         f"archive_script_exists: {report.archive_script_exists}",
         f"gitignore_runtime_excludes: {report.gitignore_has_runtime_excludes}",
-        f"dashboard_output_path: data/dashboard/hypersmart_dashboard.html",
+        "dashboard_output_path: data/dashboard/hypersmart_dashboard.html",
         f"archive_ready: {report.archive_ready}",
         f"runtime_has_legacy_files: {report.runtime_has_legacy_files}",
+        f"scan_stopped_reason: {report.stopped_reason or 'none'}",
     ]
     for path in report.logs_databases:
         lines.append(f"WARNING db_in_logs: {path}")

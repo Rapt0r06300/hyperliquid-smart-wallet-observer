@@ -116,7 +116,7 @@ class AccountMetrics:
     max_drawdown_pct: float = 100.0
     history_days: float = 0.0
     data_confidence: float = 0.0
-    data_source: str = "REAL_INDEXER"    # REAL_INDEXER | DEMO_SYNTHETIC | FIXTURE
+    data_source: str = "REAL_INDEXER"    # REAL_INDEXER | LEGACY_ARTIFICIAL | FIXTURE
 
 
 @dataclass

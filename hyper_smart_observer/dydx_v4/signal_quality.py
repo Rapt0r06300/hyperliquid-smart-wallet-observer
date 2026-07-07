@@ -8,6 +8,7 @@ It never opens orders and never mutates logs.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from collections import defaultdict
 try:
     from enum import StrEnum
 except ImportError:  # pragma: no cover
@@ -24,19 +25,55 @@ class QualityDecision(StrEnum):
     PAPER_ELIGIBLE = "PAPER_ELIGIBLE"
 
 
+leader_market_stats: dict[str, dict[str, dict[str, int]]] = defaultdict(dict)
+
+
+def update_leader_stats(wallet: str, market: str, *, won: bool) -> None:
+    """Update in-memory leader/market outcome stats for paper scoring.
+
+    The function stores only aggregate win/total counts. It is intentionally
+    local and read-only with respect to exchanges; it never places orders.
+    """
+    wallet_key = str(wallet or "").strip().lower()
+    market_key = str(market or "").strip().upper()
+    if not wallet_key or not market_key:
+        return
+    row = leader_market_stats.setdefault(wallet_key, {}).setdefault(market_key, {"wins": 0, "total": 0})
+    row["total"] = int(row.get("total", 0)) + 1
+    if won:
+        row["wins"] = int(row.get("wins", 0)) + 1
+
+
+def reset_leader_stats() -> None:
+    leader_market_stats.clear()
+
+
+def _leader_market_winrate(wallet: str, market: str) -> tuple[float, int] | None:
+    wallet_key = str(wallet or "").strip().lower()
+    market_key = str(market or "").strip().upper()
+    row = leader_market_stats.get(wallet_key, {}).get(market_key)
+    if not row:
+        return None
+    total = int(row.get("total", 0) or 0)
+    if total <= 0:
+        return None
+    wins = int(row.get("wins", 0) or 0)
+    return wins / total, total
+
+
 @dataclass(frozen=True)
 class QualityProfile:
-    min_score: float = 72.0
-    watch_score: float = 58.0
-    min_tremor_score: float = 6.5
-    watch_tremor_score: float = 5.8
+    min_score: float = 50.0
+    watch_score: float = 35.0
+    min_tremor_score: float = 3.0
+    watch_tremor_score: float = 2.0
     min_edge_bps: float = 3.0
     watch_edge_bps: float = 1.5
     max_signal_age_ms: int = 30_000
     soft_age_ms: int = 18_000
-    min_wallets: int = 2
-    min_flow_imbalance: float = 0.62
-    min_flow_volume_usdc: float = 10_000.0
+    min_wallets: int = 1
+    min_flow_imbalance: float = 0.40
+    min_flow_volume_usdc: float = 1_000.0
     max_spread_bps: float = 35.0
     max_slippage_bps: float = 14.0
     block_after_move: bool = True
@@ -59,6 +96,7 @@ class SignalQualityInput:
     data_source: str = "UNKNOWN"
     spread_bps: float = 0.0
     slippage_bps: float = 0.0
+    leader_wallet: str = ""
 
 
 @dataclass(frozen=True)
@@ -114,6 +152,11 @@ def quality_score(inp: SignalQualityInput, profile: QualityProfile | None = None
         score += 2.0
     elif inp.market_regime.upper() == "CHOPPY":
         score -= 8.0
+    leader_market = _leader_market_winrate(inp.leader_wallet, inp.market_id)
+    if leader_market is not None:
+        winrate, _total = leader_market
+        if winrate < 0.40:
+            score *= 0.50
     return round(_clamp(score, 0.0, 100.0), 4)
 
 
@@ -162,6 +205,12 @@ def evaluate_signal_quality(inp: SignalQualityInput, profile: QualityProfile | N
         hard.append("SPREAD_TOO_WIDE")
     if inp.slippage_bps > p.max_slippage_bps:
         hard.append("SLIPPAGE_TOO_HIGH")
+    leader_market = _leader_market_winrate(inp.leader_wallet, inp.market_id)
+    if leader_market is not None:
+        winrate, total = leader_market
+        notes.append(f"leader_market_winrate={winrate:.2f} total={total}")
+        if winrate < 0.40:
+            soft.append("LEADER_MARKET_WINRATE_LOW")
     if inp.data_source not in p.real_sources:
         notes.append(f"NON_PRIMARY_SOURCE:{inp.data_source}")
     if inp.spread_bps > 0:
@@ -184,5 +233,8 @@ __all__ = [
     "SignalQualityDecision",
     "SignalQualityInput",
     "evaluate_signal_quality",
+    "leader_market_stats",
     "quality_score",
+    "reset_leader_stats",
+    "update_leader_stats",
 ]

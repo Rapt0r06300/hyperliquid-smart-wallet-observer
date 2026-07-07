@@ -58,4 +58,4 @@ Aucun statut TODO/PARTIAL n'est accepte dans ce controle.
 | Dashboard truth/provenance | DONE | src/hl_observer/dashboard_truth | dashboard-truth-audit | - | Maintenir les tests et la provenance; ne pas transformer en execution. |
 | Quality gates | DONE | src/hl_observer/release/prompt_coverage.py | prompt-coverage-audit<br>non-deletion-check | - | Maintenir les tests et la provenance; ne pas transformer en execution. |
 | Rapport final | DONE | docs/release | - | - | Maintenir les tests et la provenance; ne pas transformer en execution. |
-| Resume ChatGPT | DONE | logs/logs à envoyer<br>docs/release/CODEX_CODE_FIRST_DELIVERY_REPORT.md | - | - | Maintenir les tests et la provenance; ne pas transformer en execution. |
+| Resume ChatGPT | DONE | logs/logs à envoyer | - | - | Maintenir les tests et la provenance; ne pas transformer en execution. |

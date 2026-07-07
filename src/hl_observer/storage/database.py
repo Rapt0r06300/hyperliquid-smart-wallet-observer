@@ -16,12 +16,24 @@ class Base(DeclarativeBase):
 def create_sqlite_engine(database_url: str = "sqlite:///./data/hl_observer.sqlite3") -> Engine:
     database_url = _normalize_sqlite_database_url(database_url)
     connect_args = {}
+    engine_kwargs = {}
     if database_url.startswith("sqlite:///"):
         db_path = Path(database_url.removeprefix("sqlite:///"))
         if str(db_path) != ":memory:":
             db_path.parent.mkdir(parents=True, exist_ok=True)
             connect_args = {"timeout": 60, "check_same_thread": False}
-    engine = create_engine(database_url, future=True, connect_args=connect_args)
+            # The local dashboard polls several read-heavy endpoints while the
+            # simulation poller writes snapshots. SQLAlchemy's default SQLite
+            # pool can starve under that workload, making the UI look dead even
+            # though the scanner is alive. Keep the pool bounded but large
+            # enough for local concurrent read-only panels.
+            engine_kwargs = {
+                "pool_size": 20,
+                "max_overflow": 40,
+                "pool_timeout": 60,
+                "pool_pre_ping": True,
+            }
+    engine = create_engine(database_url, future=True, connect_args=connect_args, **engine_kwargs)
     if database_url.startswith("sqlite:///") and ":memory:" not in database_url:
         _configure_sqlite_runtime(engine)
     return engine

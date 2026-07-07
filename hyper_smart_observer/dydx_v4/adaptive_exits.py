@@ -1,18 +1,10 @@
 """
-Exits adaptatifs — ATR, trailing stop, time-stop funding-aware.
+Adaptive paper exits: ATR stop, partial take-profit, tightened trailing stop,
+momentum pullback, and funding-aware time-stop.
 
-La recherche copy-trading montre que le timing de SORTIE explique 60-80%
-de l'écart de PnL entre le copieur et le wallet source. Des SL/TP fixes
-en % traitent BTC et un alt 5× plus volatil pareil → faux stops ou
-stops trop larges. Ici: distances en multiples d'ATR par marché.
-
-Priorité des exits (ordre):
-1. LEADER_EXIT (le leader ferme → on ferme)   — géré par live_observer
-2. STOP_LOSS / TRAILING_STOP (ATR)
-3. TAKE_PROFIT (ATR)
-4. TIME_STOP (durée max, raccourcie si funding adverse)
-
-PAPER-ONLY. Aucun ordre réel.
+The module is deliberately simulation-only. It never places, signs, cancels, or
+routes a real order. It only tells the local paper engine when a virtual position
+would be reduced or closed.
 """
 
 from __future__ import annotations
@@ -25,23 +17,29 @@ logger = logging.getLogger(__name__)
 DEFAULT_ATR_PERIOD = 14
 DEFAULT_STOP_MULT = 1.5
 DEFAULT_TP_MULT = 3.0
+DEFAULT_PARTIAL_TP_MULT = 1.5
 DEFAULT_TRAIL_MULT = 1.0
+DEFAULT_TRAIL_TIGHTEN_PROFIT_MULT = 2.0
+DEFAULT_TRAIL_TIGHTEN_MULT = 1.0
+DEFAULT_MOMENTUM_PULLBACK_MULT = 0.5
 DEFAULT_MAX_HOLDING_HOURS = 48.0
-# Funding horaire adverse au-delà duquel on raccourcit la durée max (0.01%/h)
+# Adverse hourly funding threshold above which max holding time is halved.
 DEFAULT_FUNDING_ADVERSE_HOURLY = 0.0001
 
 
 def compute_atr(candles: list[dict], period: int = DEFAULT_ATR_PERIOD) -> float:
     """
-    ATR simple depuis les candles Indexer (champs 'high','low','close',
-    'startedAt'). Retourne 0.0 si données insuffisantes (→ fallback % fixe).
+    Compute a simple ATR from Indexer candle rows. Returns 0.0 when the sample
+    is insufficient so the caller can keep the fixed-percent fallback.
     """
     rows: list[tuple[str, float, float, float]] = []
     for c in candles or []:
         try:
             rows.append((
                 str(c.get("startedAt", "")),
-                float(c["high"]), float(c["low"]), float(c["close"]),
+                float(c["high"]),
+                float(c["low"]),
+                float(c["close"]),
             ))
         except (KeyError, TypeError, ValueError):
             continue
@@ -61,15 +59,18 @@ def compute_atr(candles: list[dict], period: int = DEFAULT_ATR_PERIOD) -> float:
 
 @dataclass
 class ExitPlan:
-    """Plan de sortie figé à l'ouverture d'une position paper."""
+    """Immutable exit plan created when a paper position opens."""
 
     stop_price: float
     take_profit_price: float
-    trail_distance: float        # distance trailing en prix (0 = désactivé)
-    trail_arm_price: float       # le trailing s'arme quand le prix atteint ce niveau
+    trail_distance: float
+    trail_arm_price: float
     max_holding_ms: int
     atr: float
     method: str  # "ATR" | "FIXED_PCT_FALLBACK"
+    trail_tighten_distance: float = 0.0
+    momentum_pullback_distance: float = 0.0
+    partial_take_profit_fraction: float = 0.50
 
 
 def build_exit_plan(
@@ -79,7 +80,10 @@ def build_exit_plan(
     *,
     stop_mult: float = DEFAULT_STOP_MULT,
     tp_mult: float = DEFAULT_TP_MULT,
+    partial_tp_mult: float = DEFAULT_PARTIAL_TP_MULT,
     trail_mult: float = DEFAULT_TRAIL_MULT,
+    trail_tighten_mult: float = DEFAULT_TRAIL_TIGHTEN_MULT,
+    momentum_pullback_mult: float = DEFAULT_MOMENTUM_PULLBACK_MULT,
     max_holding_hours: float = DEFAULT_MAX_HOLDING_HOURS,
     funding_rate_hourly: float = 0.0,
     funding_adverse_threshold: float = DEFAULT_FUNDING_ADVERSE_HOURLY,
@@ -87,27 +91,30 @@ def build_exit_plan(
     fallback_tp_pct: float = 2.5,
 ) -> ExitPlan:
     """
-    Construit le plan de sortie. Si atr<=0 → fallback % fixes (comportement
-    existant préservé, rien n'est dégradé).
+    Build a conservative paper exit plan.
 
-    funding_rate_hourly: taux funding horaire SIGNÉ du point de vue de NOTRE
-    position (positif = on paie). S'il dépasse le seuil, la durée max est
-    divisée par 2 (le carry ronge l'edge).
+    With ATR available, the first take-profit is at 1.5 ATR. The live observer
+    already closes 50% there, then extends the remaining runner toward the old
+    3 ATR target. Without ATR, the legacy fixed-percent fallback is preserved.
     """
     side_u = side.upper()
     is_long = side_u == "LONG"
 
+    trail_tighten_distance = 0.0
+    momentum_pullback_distance = 0.0
     if atr > 0 and entry_price > 0:
         stop_d = stop_mult * atr
-        tp_d = tp_mult * atr
+        partial_tp_d = partial_tp_mult * atr
         trail_d = trail_mult * atr
+        trail_tighten_distance = trail_tighten_mult * atr
+        momentum_pullback_distance = momentum_pullback_mult * atr
         if is_long:
             stop = entry_price - stop_d
-            tp = entry_price + tp_d
+            tp = entry_price + partial_tp_d
             arm = entry_price + trail_d
         else:
             stop = entry_price + stop_d
-            tp = entry_price - tp_d
+            tp = entry_price - partial_tp_d
             arm = entry_price - trail_d
         method = "ATR"
     else:
@@ -120,7 +127,7 @@ def build_exit_plan(
             stop = entry_price * (1 + sl_f)
             tp = entry_price * (1 - tp_f)
         trail_d = 0.0
-        arm = tp  # jamais armé avant TP → trailing inactif en fallback
+        arm = tp
         method = "FIXED_PCT_FALLBACK"
 
     holding_h = max_holding_hours
@@ -135,12 +142,14 @@ def build_exit_plan(
         max_holding_ms=int(holding_h * 3600 * 1000),
         atr=atr,
         method=method,
+        trail_tighten_distance=trail_tighten_distance,
+        momentum_pullback_distance=momentum_pullback_distance,
     )
 
 
 @dataclass
 class TrailingState:
-    """État mutable du trailing stop d'une position paper."""
+    """Mutable trailing-stop state for a local paper position."""
 
     side: str
     trail_distance: float
@@ -148,29 +157,39 @@ class TrailingState:
     armed: bool = False
     best_price: float = 0.0
     trail_stop_price: float = 0.0
-    # Breakeven stop — protège les gains acquis
     breakeven_armed: bool = False
-    breakeven_trigger_price: float = 0.0  # prix au-delà duquel on arme le breakeven
-    breakeven_stop_price: float = 0.0     # nouveau SL = entry + micro-profit
+    breakeven_trigger_price: float = 0.0
+    breakeven_stop_price: float = 0.0
+    entry_price: float = 0.0
+    atr: float = 0.0
+    trail_tighten_distance: float = 0.0
+    trail_tighten_profit_mult: float = DEFAULT_TRAIL_TIGHTEN_PROFIT_MULT
+    momentum_pullback_distance: float = 0.0
 
     def update(self, mark_price: float) -> float | None:
         """
-        Mettre à jour avec le dernier prix. Retourne le prix de déclenchement
-        si le trailing stop est touché, sinon None.
+        Update with the latest mark. Return the simulated trigger price when the
+        virtual trailing/momentum exit is hit; otherwise return None.
         """
         if self.trail_distance <= 0 or mark_price <= 0:
             return None
         is_long = self.side.upper() == "LONG"
 
-        # Breakeven check — armer quand le prix dépasse le trigger
+        if self.best_price <= 0:
+            self.best_price = mark_price
+
+        # Breakeven check: once armed, a separate stop-loss check in the paper
+        # engine protects the entry plus a tiny profit buffer.
         if not self.breakeven_armed and self.breakeven_trigger_price > 0:
             if (is_long and mark_price >= self.breakeven_trigger_price) or (
                 not is_long and mark_price <= self.breakeven_trigger_price
             ):
                 self.breakeven_armed = True
                 logger.info(
-                    "BREAKEVEN ARMED %s at %.6f → SL moved to %.6f",
-                    self.side, mark_price, self.breakeven_stop_price,
+                    "BREAKEVEN ARMED %s at %.6f -> SL moved to %.6f",
+                    self.side,
+                    mark_price,
+                    self.breakeven_stop_price,
                 )
 
         if not self.armed:
@@ -178,29 +197,64 @@ class TrailingState:
                 not is_long and mark_price <= self.trail_arm_price
             ):
                 self.armed = True
-                self.best_price = mark_price
+                self.best_price = max(self.best_price, mark_price) if is_long else min(self.best_price, mark_price)
                 self.trail_stop_price = (
-                    mark_price - self.trail_distance if is_long
-                    else mark_price + self.trail_distance
+                    self.best_price - self.trail_distance if is_long
+                    else self.best_price + self.trail_distance
                 )
+                self._tighten_after_profit(mark_price, is_long)
             return None
 
-        # Armé: suivre le meilleur prix, remonter le stop
         if is_long:
             if mark_price > self.best_price:
                 self.best_price = mark_price
-                self.trail_stop_price = mark_price - self.trail_distance
-            if mark_price <= self.trail_stop_price:
-                return self.trail_stop_price
         else:
             if mark_price < self.best_price:
                 self.best_price = mark_price
-                self.trail_stop_price = mark_price + self.trail_distance
+
+        self._tighten_after_profit(mark_price, is_long)
+
+        if self.momentum_pullback_distance > 0 and self.entry_price > 0:
+            momentum_trigger = (
+                self.best_price - self.momentum_pullback_distance if is_long
+                else self.best_price + self.momentum_pullback_distance
+            )
+            profitable_peak = self.best_price > self.entry_price if is_long else self.best_price < self.entry_price
+            if profitable_peak:
+                if is_long and mark_price <= momentum_trigger:
+                    return momentum_trigger
+                if not is_long and mark_price >= momentum_trigger:
+                    return momentum_trigger
+
+        if is_long:
+            candidate_stop = self.best_price - self.trail_distance
+            self.trail_stop_price = max(self.trail_stop_price, candidate_stop)
+            if mark_price <= self.trail_stop_price:
+                return self.trail_stop_price
+        else:
+            candidate_stop = self.best_price + self.trail_distance
+            self.trail_stop_price = min(self.trail_stop_price or candidate_stop, candidate_stop)
             if mark_price >= self.trail_stop_price:
                 return self.trail_stop_price
         return None
 
+    def _tighten_after_profit(self, mark_price: float, is_long: bool) -> None:
+        if self.entry_price <= 0 or self.atr <= 0:
+            return
+        profit = mark_price - self.entry_price if is_long else self.entry_price - mark_price
+        if profit < self.trail_tighten_profit_mult * self.atr:
+            return
+        target_distance = self.trail_tighten_distance or self.atr
+        if target_distance <= 0 or target_distance >= self.trail_distance:
+            return
+        self.trail_distance = target_distance
+        if is_long:
+            self.trail_stop_price = max(self.trail_stop_price, self.best_price - self.trail_distance)
+        else:
+            tightened_stop = self.best_price + self.trail_distance
+            self.trail_stop_price = min(self.trail_stop_price or tightened_stop, tightened_stop)
+
 
 def is_time_stop_hit(opened_at_ms: int, now_ms: int, max_holding_ms: int) -> bool:
-    """Time-stop: la position a dépassé sa durée de vie maximale."""
+    """Time-stop: the position has exceeded its maximum simulated lifetime."""
     return max_holding_ms > 0 and (now_ms - opened_at_ms) >= max_holding_ms

@@ -106,6 +106,43 @@ def test_ui_copy_status_endpoint_is_read_only(tmp_path):
     assert payload["leaders_count"] == 1
 
 
+def test_ui_copy_status_samples_enough_rows_before_wallet_dedupe(tmp_path):
+    client, factory = _client_and_db(tmp_path)
+    repeated_wallet = "0x" + "a" * 40
+    with factory() as session:
+        for index in range(300):
+            session.add(
+                TopWallet(
+                    wallet_address=repeated_wallet,
+                    rank=index + 1,
+                    source=f"public_trades_ws:{index}",
+                    score=float(10_000 - index),
+                    selected_at_ms=1_000 + index,
+                    status="selected",
+                    notes="same hot wallet refreshed many times",
+                )
+            )
+        for index in range(49):
+            session.add(
+                TopWallet(
+                    wallet_address=f"0x{index + 1:040x}",
+                    rank=1_000 + index,
+                    source="public_trades_ws",
+                    score=float(8_000 - index),
+                    selected_at_ms=2_000 + index,
+                    status="selected",
+                    notes="unique wallet that used to be hidden below the first 200 rows",
+                )
+            )
+        session.commit()
+
+    payload = client.get("/api/copy/status").json()
+
+    assert payload["leaders_count"] == 50
+    assert payload["leader_rows_sampled_before_dedupe"] >= 349
+    assert payload["leader_sample_limit"] >= 2_500
+
+
 def test_ui_copy_leader_activity_shows_delta_classes(tmp_path):
     client, factory = _client_and_db(tmp_path)
     _seed_copy_rows(factory)
@@ -413,8 +450,8 @@ def test_ui_simulation_overview_detects_multi_wallet_consensus(tmp_path):
     assert payload["bot_simulation"]["realized_net_pnl_usdc"] != 0
     assert "open_positions" in payload["bot_simulation"]
     assert payload["bot_simulation"]["magic_profile"]["execution"] == "forbidden"
-    assert payload["bot_simulation"]["magic_profile"]["min_edge_required_bps"] == 25.0
-    assert payload["bot_simulation"]["magic_profile"]["max_signal_age_seconds"] == 120
+    assert payload["bot_simulation"]["magic_profile"]["min_edge_required_bps"] == 15.0
+    assert payload["bot_simulation"]["magic_profile"]["max_signal_age_seconds"] == 15
     assert payload["bot_simulation"]["magic_profile"]["holding_policy"].startswith("hold_until_matching_leader_reduce_or_close")
     assert payload["bot_simulation"]["magic_profile"]["red_pnl_exit_policy"] == "never_exit_only_because_unrealized_pnl_is_negative"
     assert all(row["edge_remaining_bps"] is not None for row in payload["bot_simulation"]["events"])

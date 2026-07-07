@@ -45,6 +45,9 @@ class PaperCloseResult:
     trade_id: str
     message: str
     net_pnl: float | None = None
+    closed_size: float | None = None
+    remaining_size: float | None = None
+    realized_trade_id: str | None = None
 
 
 def simulate_entry(signal: Signal, *, price: float, size: float, fee_bps: float = 4.0) -> PaperTrade:
@@ -189,14 +192,146 @@ class PaperTradingSimulator:
                 close_reason=close_reason,
             )
             conn.commit()
-        return PaperCloseResult(True, trade_id, "Local paper simulation closed.", net_pnl)
+        return PaperCloseResult(
+            True,
+            trade_id,
+            "Local paper simulation closed.",
+            net_pnl,
+            closed_size=size,
+            remaining_size=0.0,
+            realized_trade_id=trade_id,
+        )
+
+    def partial_close_paper_trade(
+        self,
+        trade_id: str,
+        exit_reference_price: float,
+        close_reason: str,
+        *,
+        fraction: float,
+    ) -> PaperCloseResult:
+        if exit_reference_price <= 0:
+            return PaperCloseResult(False, trade_id, "Exit reference price must be positive.")
+        if fraction <= 0:
+            return PaperCloseResult(False, trade_id, "Partial close fraction must be positive.")
+        if fraction >= 0.999:
+            return self.close_paper_trade(trade_id, exit_reference_price, close_reason)
+
+        initialize_database(self.config)
+        with get_connection(self.config) as conn:
+            row = paper_trades_repo.get_paper_trade(conn, trade_id)
+            if row is None:
+                return PaperCloseResult(False, trade_id, "Paper trade not found.")
+            if (row["status"] or row["state"]) != PaperTradeStatus.OPEN.value:
+                return PaperCloseResult(False, trade_id, "Paper trade is not open.")
+
+            close_ratio = min(0.998, max(0.001, float(fraction)))
+            original_size = float(row["size"])
+            if original_size <= 0:
+                return PaperCloseResult(False, trade_id, "Paper trade size is not positive.")
+            closed_size = original_size * close_ratio
+            remaining_size = original_size - closed_size
+            if remaining_size <= max(original_size * 0.001, 1e-12):
+                return self.close_paper_trade(trade_id, exit_reference_price, close_reason)
+
+            close_side = "SELL" if row["side"].upper() == "BUY" else "BUY"
+            spread_price = apply_spread(exit_reference_price, close_side, self.config.paper_spread_bps)
+            exit_price = apply_slippage(spread_price, close_side, self.config.paper_slippage_bps)
+            notional_exit = exit_price * closed_size
+            fee_exit = calculate_fee(notional_exit, self.config.paper_fee_rate_bps)
+            slippage_exit = abs(exit_price - spread_price) * closed_size
+            exit_spread_cost = abs(spread_price - exit_reference_price) * closed_size
+
+            entry_price = float(row["entry_price"])
+            if row["side"].upper() == "BUY":
+                gross_pnl = (exit_price - entry_price) * closed_size
+            else:
+                gross_pnl = (entry_price - exit_price) * closed_size
+
+            fee_entry_total = float(row["fee_entry"] or row["simulated_fee"] or 0.0)
+            slippage_entry_total = float(row["slippage_entry"] or row["simulated_slippage"] or 0.0)
+            spread_cost_total = float(row["spread_cost"] or 0.0)
+            simulated_fee_total = float(row["simulated_fee"] or fee_entry_total)
+            simulated_slippage_total = float(row["simulated_slippage"] or slippage_entry_total)
+            original_notional = float(row["notional"] or (entry_price * original_size))
+
+            allocated_fee_entry = fee_entry_total * close_ratio
+            allocated_slippage_entry = slippage_entry_total * close_ratio
+            allocated_spread_entry = spread_cost_total * close_ratio
+            allocated_simulated_fee = simulated_fee_total * close_ratio
+            allocated_simulated_slippage = simulated_slippage_total * close_ratio
+            allocated_notional = original_notional * close_ratio
+
+            remaining_fee_entry = max(0.0, fee_entry_total - allocated_fee_entry)
+            remaining_slippage_entry = max(0.0, slippage_entry_total - allocated_slippage_entry)
+            remaining_spread_cost = max(0.0, spread_cost_total - allocated_spread_entry)
+            remaining_simulated_fee = max(0.0, simulated_fee_total - allocated_simulated_fee)
+            remaining_simulated_slippage = max(0.0, simulated_slippage_total - allocated_simulated_slippage)
+            remaining_notional = max(0.0, original_notional - allocated_notional)
+
+            net_pnl = gross_pnl - allocated_fee_entry - fee_exit
+            closed_at = simulate_latency_timestamp(datetime.now(UTC), self.config.paper_latency_ms)
+            partial_trade_id = f"{trade_id}:partial:{uuid4().hex[:8]}"
+            partial_trade = PaperTrade(
+                trade_id=partial_trade_id,
+                signal_id=row["signal_id"],
+                intent_id=row["intent_id"],
+                wallet_address=row["wallet_address"],
+                coin=row["coin"],
+                side=row["side"],
+                entry_price=entry_price,
+                exit_price=exit_price,
+                size=closed_size,
+                notional=allocated_notional,
+                simulated_fee=allocated_simulated_fee,
+                simulated_slippage=allocated_simulated_slippage,
+                fee_entry=allocated_fee_entry,
+                fee_exit=fee_exit,
+                slippage_entry=allocated_slippage_entry,
+                slippage_exit=slippage_exit,
+                spread_cost=allocated_spread_entry + exit_spread_cost,
+                opened_at=datetime.fromisoformat(row["opened_at"]),
+                closed_at=closed_at,
+                pnl=net_pnl,
+                gross_pnl=gross_pnl,
+                net_pnl=net_pnl,
+                state=PaperTradeStatus.CLOSED.value,
+                status=PaperTradeStatus.CLOSED,
+                close_reason=close_reason,
+                warnings=[
+                    "LOCAL PAPER SIMULATION ONLY",
+                    "Partial close mirrors a leader reduce; not an order.",
+                ],
+            )
+            paper_trades_repo.insert_paper_trade(conn, partial_trade)
+            paper_trades_repo.update_paper_trade_after_partial(
+                conn,
+                trade_id=trade_id,
+                remaining_size=remaining_size,
+                remaining_notional=remaining_notional,
+                remaining_simulated_fee=remaining_simulated_fee,
+                remaining_simulated_slippage=remaining_simulated_slippage,
+                remaining_fee_entry=remaining_fee_entry,
+                remaining_slippage_entry=remaining_slippage_entry,
+                remaining_spread_cost=remaining_spread_cost,
+            )
+            conn.commit()
+        return PaperCloseResult(
+            True,
+            trade_id,
+            "Local paper simulation partially reduced.",
+            net_pnl,
+            closed_size=closed_size,
+            remaining_size=remaining_size,
+            realized_trade_id=partial_trade_id,
+        )
 
     def list_open_trades(self) -> list:
         initialize_database(self.config)
         with get_connection(self.config) as conn:
             return paper_trades_repo.list_open_paper_trades(conn)
 
-    def generate_report(self) -> dict[str, float | int]:
+    def generate_report(self, current_mids: dict[str, float] | None = None) -> dict[str, float | int]:
         initialize_database(self.config)
         with get_connection(self.config) as conn:
             open_trades = paper_trades_repo.list_open_paper_trades(conn)
@@ -206,12 +341,18 @@ class PaperTradingSimulator:
             float(row["fee_entry"] or row["simulated_fee"] or 0.0) + float(row["fee_exit"] or 0.0)
             for row in [*open_trades, *closed_trades]
         )
+        start = float(self.config.paper_starting_equity)
+        max_drawdown = _realized_max_drawdown(closed_trades, start)
+        unrealized_pnl = _unrealized_pnl(open_trades, current_mids)
         return {
-            "starting_equity": self.config.paper_starting_equity,
-            "current_equity": self.config.paper_starting_equity + realized_pnl,
+            "starting_equity": start,
+            "current_equity": start + realized_pnl,
             "open_trades": len(open_trades),
             "closed_trades": len(closed_trades),
             "realized_pnl": realized_pnl,
+            "unrealized_pnl": unrealized_pnl,
+            "equity": start + realized_pnl + unrealized_pnl,
+            "max_drawdown": max_drawdown,
             "total_fees": total_fees,
         }
 
@@ -288,3 +429,37 @@ def _intent_with_status(
         refusal_reason=refusal_reason,
         warnings=intent.warnings,
     )
+
+
+def _realized_max_drawdown(closed_rows, starting_equity: float) -> float:
+    """Max peak-to-trough drawdown of the REALIZED equity curve (closed trades)."""
+    equity = float(starting_equity)
+    peak = equity
+    max_dd = 0.0
+    for row in sorted(closed_rows, key=lambda r: (r["closed_at"] or "")):
+        equity += float(row["net_pnl"] or row["pnl"] or 0.0)
+        peak = max(peak, equity)
+        max_dd = max(max_dd, peak - equity)
+    return max_dd
+
+
+def _unrealized_pnl(open_rows, current_mids: dict | None) -> float:
+    """Mark-to-market latent PnL of OPEN paper trades. 0.0 when no mids provided
+    (no fabrication: latent is only computed against real read-only mids)."""
+    if not current_mids:
+        return 0.0
+    mids = {str(k).upper(): float(v) for k, v in current_mids.items()}
+    total = 0.0
+    for row in open_rows:
+        try:
+            coin = str(row["coin"]).upper()
+        except (IndexError, KeyError):
+            continue
+        mid = mids.get(coin)
+        if mid is None:
+            continue
+        size = float(row["size"])
+        entry = float(row["entry_price"])
+        sign = 1.0 if str(row["side"]).upper() == "BUY" else -1.0
+        total += (mid - entry) * size * sign
+    return total

@@ -23,7 +23,7 @@ from hyper_smart_observer.dydx_v4.live_observer import DydxLiveObserver
 from hyper_smart_observer.dydx_v4.rest_client import DydxIndexerRestClient, RestError
 from hyper_smart_observer.dydx_v4.wallet_discovery import DydxWalletDiscovery
 from hyper_smart_observer.dydx_v4.safety import assert_paper_only
-from hyper_smart_observer.dydx_v4.runtime_guards import correlated_count_reason, neutral_demo_price
+from hyper_smart_observer.dydx_v4.runtime_guards import correlated_count_reason
 
 logger = logging.getLogger(__name__)
 
@@ -141,7 +141,7 @@ class DydxEngine:
         self._discovery = DydxWalletDiscovery(
             rest_client=self._rest,
             cosmos_client=self._cosmos,
-            demo_mode=getattr(self._config, 'demo_mode', False),
+            demo_mode=False,
         )
         self._observer: Optional[DydxLiveObserver] = None
         self._thread: Optional[threading.Thread] = None
@@ -412,15 +412,9 @@ class DydxEngine:
         def _corr(self_observer, market: str, side: str):
             return correlated_count_reason(self_observer, market, side)
 
-        def _demo(self_observer) -> None:
-            for market, base in self_observer._DEMO_BASE_PRICES.items():
-                current = self_observer._mark_prices.get(market, base)
-                self_observer._mark_prices[market] = neutral_demo_price(current, base)
-
         observer._correlated_exposure_reason = MethodType(_corr, observer)
-        observer._inject_demo_prices = MethodType(_demo, observer)
         observer._engine_integrity_hooks = True
-        logger.info("DydxEngine integrity hooks active: correlation=count, demo=neutral")
+        logger.info("DydxEngine integrity hooks active: correlation=count, artificial_prices=disabled")
 
     def _run_loop(self) -> None:
         """Boucle principale dans le thread daemon."""
@@ -437,19 +431,10 @@ class DydxEngine:
                 self._status.rest_healthy = False
                 self._status.last_error = "REST_UNREACHABLE"
             logger.warning("dYdX Indexer health FAILED (non-bloquant): %s", e)
-            if not self._config.demo_mode:
-                import dataclasses
-                self._config = dataclasses.replace(self._config, demo_mode=True)
-                self._discovery._demo_mode = True
-                logger.info("REST inaccessible -> mode DEMO active automatiquement")
+            logger.info("REST inaccessible -> no artificial fallback; waiting for real read-only data")
 
-        from hyper_smart_observer.dydx_v4.wallet_discovery import _build_demo_wallets
-        _seed_shortlist = _build_demo_wallets()
-        logger.info(
-            "Engine seed: %d wallets demo synthetiques injectes au demarrage "
-            "(remplaces des que la decouverte Cosmos reussit) | PAPER ONLY",
-            len(_seed_shortlist),
-        )
+        _seed_shortlist = []
+        logger.info("Engine seed: empty; real read-only data only")
         self._observer = DydxLiveObserver(
             config=self._config,
             rest_client=self._rest,
@@ -460,16 +445,13 @@ class DydxEngine:
             max_signal_age_ms=self._config.max_signal_age_ms,
             cosmos_client=self._cosmos,
         )
-        if all(getattr(w, 'source', '') == 'demo_synthetic' for w in _seed_shortlist):
-            self._observer._demo_mode = True
-            logger.info("Observer en mode DEMO (wallets synthetiques) | PAPER ONLY")
         self._install_observer_integrity_hooks()
 
         with self._lock:
             self._status.running = True
             self._status.started_at_ms = int(time.time() * 1000)
             self._status.session_id = self._observer.stats.session_id
-            self._status.demo_mode = getattr(self._config, 'demo_mode', False)
+            self._status.demo_mode = False
 
         original_poll = self._observer._poll_shortlist
 

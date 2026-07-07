@@ -264,13 +264,13 @@ class TestAdaptiveExits:
         plan = build_exit_plan(100.0, "LONG", atr=2.0)
         assert plan.method == "ATR"
         assert plan.stop_price == pytest.approx(97.0)    # -1.5×ATR
-        assert plan.take_profit_price == pytest.approx(106.0)  # +3×ATR
+        assert plan.take_profit_price == pytest.approx(103.0)  # first partial TP: +1.5x ATR
         assert plan.trail_distance == pytest.approx(2.0)
 
     def test_plan_short_atr(self):
         plan = build_exit_plan(100.0, "SHORT", atr=2.0)
         assert plan.stop_price == pytest.approx(103.0)
-        assert plan.take_profit_price == pytest.approx(94.0)
+        assert plan.take_profit_price == pytest.approx(97.0)
 
     def test_fallback_fixed_pct_preserved(self):
         plan = build_exit_plan(100.0, "LONG", atr=0.0,
@@ -294,6 +294,49 @@ class TestAdaptiveExits:
         assert ts.update(104.0) is None      # best=104, stop=102
         trigger = ts.update(101.9)           # retrace sous le stop
         assert trigger is not None and trigger == pytest.approx(102.0)
+
+    def test_trailing_tightens_after_two_atr_profit(self):
+        ts = TrailingState(
+            side="LONG",
+            trail_distance=4.0,
+            trail_arm_price=102.0,
+            entry_price=100.0,
+            atr=2.0,
+            trail_tighten_distance=2.0,
+        )
+        assert ts.update(105.0) is None
+        assert ts.armed
+        assert ts.trail_distance == pytest.approx(2.0)
+        assert ts.trail_stop_price == pytest.approx(103.0)
+
+    def test_momentum_pullback_from_peak_triggers_exit(self):
+        ts = TrailingState(
+            side="LONG",
+            trail_distance=4.0,
+            trail_arm_price=102.0,
+            entry_price=100.0,
+            atr=2.0,
+            trail_tighten_distance=2.0,
+            momentum_pullback_distance=1.0,
+        )
+        assert ts.update(105.0) is None
+        trigger = ts.update(103.9)
+        assert trigger == pytest.approx(104.0)
+
+    def test_short_momentum_pullback_from_peak_triggers_exit(self):
+        ts = TrailingState(
+            side="SHORT",
+            trail_distance=4.0,
+            trail_arm_price=98.0,
+            entry_price=100.0,
+            atr=2.0,
+            trail_tighten_distance=2.0,
+            momentum_pullback_distance=1.0,
+        )
+        assert ts.update(95.0) is None
+        assert ts.trail_distance == pytest.approx(2.0)
+        trigger = ts.update(96.1)
+        assert trigger == pytest.approx(96.0)
 
     def test_time_stop(self):
         assert is_time_stop_hit(NOW_MS - 10_000, NOW_MS, 5_000)

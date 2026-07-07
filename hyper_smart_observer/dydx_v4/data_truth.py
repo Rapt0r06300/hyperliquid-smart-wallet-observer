@@ -4,9 +4,9 @@ from dataclasses import dataclass
 from typing import Any
 
 REAL_ENTRY_SOURCES = {"REAL_INDEXER", "orderbook_real"}
-NON_REAL_ENTRY_SOURCES = {"DEMO_SYNTHETIC", "FALLBACK_ESTIMATED", "mark_simple_fallback", "demo_synthetic"}
+NON_REAL_ENTRY_SOURCES = {"LEGACY_ARTIFICIAL", "FALLBACK_ESTIMATED", "mark_simple_fallback"}
 REAL_SIGNAL_ORIGINS = {"rest", "stream", "flow", "wallet_cluster", "indexer"}
-NON_REAL_SIGNAL_ORIGINS = {"demo", "synthetic", "fallback", "demo_synthetic"}
+NON_REAL_SIGNAL_ORIGINS = {"legacy_artificial", "synthetic", "fallback"}
 
 
 @dataclass(frozen=True)

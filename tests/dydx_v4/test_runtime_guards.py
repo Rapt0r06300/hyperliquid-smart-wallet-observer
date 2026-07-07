@@ -26,11 +26,10 @@ def test_next_pyramid_index_skips_existing_add_slots() -> None:
     assert next_pyramid_index(open_positions, "BTC-USD", "LONG") == 3
 
 
-def test_neutral_demo_price_can_move_both_sides_of_base() -> None:
+def test_neutral_demo_price_does_not_fabricate_movement() -> None:
     values = [neutral_demo_price(100.0, 100.0, seed_seconds=i) for i in range(30)]
 
-    assert min(values) < 100.0
-    assert max(values) > 100.0
+    assert values == [100.0] * 30
 
 
 def test_correlated_count_reason_uses_count_limit() -> None:

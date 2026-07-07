@@ -1,7 +1,7 @@
 # HyperSmart Archive Audit
 
 - status: OK
-- message: Runtime files excluded by clean archive: 2727
+- message: Runtime files excluded by clean archive: 2
 - latest_desktop_archive: none
 - latest_desktop_archive_clean: not_checked
 - forbidden_entries_in_latest_archive: 0

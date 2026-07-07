@@ -26,6 +26,18 @@
     const sign = n > 0 ? "+" : "";
     return `${sign}$${n.toFixed(2)}`;
   }
+  function sampleFromOverview(overview) {
+    const equity = overview && overview.equity ? overview.equity : {};
+    const bot = overview && overview.bot_simulation ? overview.bot_simulation : {};
+    const pnl = num(equity.current_pnl_usdc ?? bot.estimated_net_pnl_usdc, state.targetPnl);
+    const eq = num(equity.current_equity_usdt ?? bot.current_equity_usdt, 1000 + pnl);
+    return {
+      pnl,
+      equity: eq,
+      timestamp: num(overview && overview.current_time_ms, Date.now()),
+      source: equity.source || "hyperliquid_simulation_overview",
+    };
+  }
   function addSample(pnl, ts, source, equity) {
     const value = num(pnl, 0);
     const at = Math.max(1, Math.floor(num(ts, Date.now())));
@@ -216,11 +228,10 @@
   }
   async function pollRealtimeTick() {
     try {
-      const res = await fetch("/api/dydx/realtime-tick", { cache: "no-store" });
+      const res = await fetch("/api/simulation/overview?limit=120", { cache: "no-store" });
       if (!res.ok) throw new Error(`tick ${res.status}`);
-      const tick = await res.json();
-      const pnl = num(tick.net_pnl_usdt ?? tick.net_pnl_usdc, state.targetPnl);
-      addSample(pnl, tick.timestamp_ms || Date.now(), "dydx_realtime_tick", tick.equity_usdt ?? tick.equity_usdc);
+      const tick = sampleFromOverview(await res.json());
+      addSample(tick.pnl, tick.timestamp, tick.source, tick.equity);
     } catch (_e) {
       // Keep animating toward last real target; never invent a new value.
     }

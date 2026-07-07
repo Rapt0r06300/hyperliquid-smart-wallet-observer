@@ -20,6 +20,12 @@ from hl_observer.markets.universe import MarketUniverse, build_market_universe, 
 from hl_observer.storage.database import create_session_factory, create_sqlite_engine, init_db
 from hl_observer.storage.repositories import CollectionRepository
 
+try:  # httpx present dans les deps ; on reste robuste si absent
+    import httpx as _httpx
+    _NETWORK_ERRORS: tuple = (OSError, _httpx.HTTPError)
+except Exception:  # noqa: BLE001
+    _NETWORK_ERRORS = (OSError,)
+
 
 class MarketDiscoveryPlan(BaseModel):
     sources: list[str] = Field(default_factory=lambda: ["meta", "all-mids"])
@@ -90,7 +96,15 @@ async def run_discover_markets(
             notes=["dry_run_no_network", "fallback_universe_only"],
         )
 
-    universe, meta_payload, all_mids_payload = await fetch_market_universe(settings, client=client)
+    try:
+        universe, meta_payload, all_mids_payload = await fetch_market_universe(settings, client=client)
+    except _NETWORK_ERRORS as exc:  # DNS/reseau injoignable -> etat vide honnete, jamais un crash
+        return MarketDiscoveryResult(
+            coins_discovered=0,
+            dry_run=False,
+            stored=False,
+            notes=["NETWORK_UNREACHABLE", "INSUFFICIENT_DATA", str(exc)[:200]],
+        )
     if session_factory is None:
         engine = create_sqlite_engine(settings.database_url)
         session_factory = create_session_factory(engine)
@@ -119,6 +133,7 @@ async def run_discover_markets(
                     request_payload=build_all_mids_payload(),
                     response_payload=all_mids_payload,
                 )
+                repo.store_market_snapshot_from_all_mids(all_mids_payload)
             for item in universe.items:
                 repo.store_market_universe_item(item)
             repo.finish_collection_run(run, success=True, errors_count=0)
@@ -169,7 +184,12 @@ async def run_scan_markets(
         session_factory = create_session_factory(engine)
     context = client if owns_client else _null_async_context(client)
     async with context as active_client:
-        universe, meta_payload, all_mids_payload = await fetch_market_universe(settings, client=active_client)
+        try:
+            universe, meta_payload, all_mids_payload = await fetch_market_universe(settings, client=active_client)
+        except _NETWORK_ERRORS as exc:  # DNS/reseau injoignable -> etat vide honnete
+            result.errors_count += 1
+            result.notes.extend(["NETWORK_UNREACHABLE", "INSUFFICIENT_DATA", str(exc)[:200]])
+            return result
         result.coins_discovered = len(universe.items)
         explicit = plan.normalized_coins()
         if explicit and not plan.all_coins:
@@ -309,4 +329,3 @@ def _mid_for_coin(all_mids_payload: dict[str, Any], coin: str) -> float | None:
             except (TypeError, ValueError):
                 return None
     return None
-

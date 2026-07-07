@@ -9,6 +9,7 @@ from hyper_smart_observer.dydx_v4.cluster_detector import ClusterSignal, DydxClu
 from hyper_smart_observer.dydx_v4.config import DydxNetwork, DydxV4Config
 from hyper_smart_observer.dydx_v4.live_observer import DydxLiveObserver
 from hyper_smart_observer.dydx_v4.market_regime import (
+    MarketContext,
     REGIME_CHOPPY,
     REGIME_TRENDING,
     analyze_market_context,
@@ -135,3 +136,18 @@ def test_dynamic_sizing_replaces_fixed_50_usdt_when_edge_is_strong() -> None:
     assert pos.entry_edge_bps > 0
     assert pos.market_regime == REGIME_TRENDING
     assert "dynamic edge=" in pos.sizing_reason
+
+
+def test_confidence_sizing_scales_notional_by_signal_quality() -> None:
+    obs = _observer()
+    trending = MarketContext(market_id="ETH-USD", regime=REGIME_TRENDING, confidence=1.0)
+    unknown = MarketContext(market_id="ETH-USD", confidence=0.0)
+
+    high, high_note = obs._dynamic_notional(25.0, trending, _cluster(wallets=2, age_ms=1_000))
+    medium, medium_note = obs._dynamic_notional(25.0, trending, _cluster(wallets=1, age_ms=1_000))
+    low, low_note = obs._dynamic_notional(25.0, unknown, _cluster(wallets=1, age_ms=20_000))
+
+    assert high > medium > low
+    assert "confidence=HIGH:1.00" in high_note
+    assert "confidence=MEDIUM:0.60" in medium_note
+    assert "confidence=LOW:0.30" in low_note

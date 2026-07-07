@@ -68,6 +68,14 @@ def test_get_user_fills_builds_expected_payload():
     assert fake.calls[0]["json"] == {"type": "userFills", "user": VALID}
 
 
+def test_get_l2_book_builds_expected_payload():
+    client, fake = _client([{"coin": "BTC", "levels": [[], []]}])
+
+    assert client.get_l2_book("btc") == {"coin": "BTC", "levels": [[], []]}
+
+    assert fake.calls[0]["json"] == {"type": "l2Book", "coin": "BTC"}
+
+
 def test_get_user_fills_by_time_builds_expected_payload():
     client, fake = _client([[{"time": 1700000000000}]])
 
@@ -110,3 +118,49 @@ def test_pagination_stops_if_timestamp_does_not_progress():
 
     assert result.pages_fetched == 1
     assert result.stopped_reason == "timestamp_not_progressing"
+
+
+def test_hyperliquid_user_fills_by_time_aggregate_and_complete_window():
+    client, fake = _client([
+        [{"time": 1001}, {"time": 1002}],
+        [],
+    ])
+
+    result = client.collect_user_fills_by_time_paginated(
+        VALID,
+        1000,
+        3000,
+        max_pages=5,
+        aggregate_by_time=True,
+    )
+
+    assert fake.calls[0]["json"]["aggregateByTime"] is True
+    assert result.aggregate_by_time_used is True
+    assert result.window_complete is True
+    assert result.truncated is False
+    assert result.oldest_available_ts == 1001
+    assert result.stopped_reason == "empty_response"
+
+
+def test_hyperliquid_user_fills_by_time_truncated_window_metadata():
+    cfg = AppConfig(
+        enable_network_reads=True,
+        info_min_request_interval_ms=0,
+        max_fills_per_run=2,
+    )
+    client, _ = _client([[{"time": 1001}, {"time": 1002}, {"time": 1003}]], cfg)
+
+    result = client.collect_user_fills_by_time_paginated(
+        VALID,
+        1000,
+        3000,
+        max_pages=5,
+        aggregate_by_time=True,
+    )
+
+    assert len(result.fills) == 2
+    assert result.aggregate_by_time_used is True
+    assert result.window_complete is False
+    assert result.truncated is True
+    assert result.oldest_available_ts == 1001
+    assert result.stopped_reason == "max_fills_reached"

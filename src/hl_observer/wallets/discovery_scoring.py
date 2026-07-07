@@ -81,12 +81,16 @@ def score_discovery_candidate(
     if external_win_rate is not None:
         activity_score = clamp(external_win_rate * 100.0, 0.0, 100.0)
     source_score = clamp(source_reliability_score * 100.0, 0.0, 100.0)
+    # LEVIER A (2026-06-22, demande user "0 position / 0 fill frais"): on privilegie les leaders
+    # RECEMMENT ACTIFS (ceux qui tradent maintenant -> fills frais en WS, donc des entrees fraiches
+    # a copier) SANS sacrifier la qualite. activity+recency 30%->42% ; pnl+roi 45%->35% ;
+    # source (fiabilite) et copyability inchanges. Aucune gate touchee, aucun trade force, aucun fake.
     final_score = clamp(
-        0.25 * pnl_score
-        + 0.20 * roi_score
-        + 0.15 * activity_score
-        + 0.15 * recency_score
-        + 0.10 * size_score
+        0.20 * pnl_score
+        + 0.15 * roi_score
+        + 0.22 * activity_score
+        + 0.20 * recency_score
+        + 0.08 * size_score
         + 0.10 * source_score
         + 0.05 * copyability_score,
         0.0,

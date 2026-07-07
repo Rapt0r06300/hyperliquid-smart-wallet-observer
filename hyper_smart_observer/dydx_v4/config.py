@@ -29,25 +29,11 @@ class DydxMode(StrEnum):
     BACKTEST = "backtest"
     REPLAY = "replay"
     TEST_FIXTURE = "test_fixture"
-    DEMO = "demo"
 
 
 INDEXER_REST_ENDPOINTS = {
     DydxNetwork.TESTNET: "https://indexer.v4testnet.dydx.exchange",
     DydxNetwork.MAINNET: "https://indexer.dydx.trade",
-}
-
-# Endpoints alternatifs (community nodes) utilisés en fallback si le primaire
-# est bloqué par un proxy Windows (ProxyError 403 Forbidden).
-# READ-ONLY GET uniquement — aucune clé privée.
-INDEXER_REST_FALLBACKS = {
-    DydxNetwork.TESTNET: [],
-    DydxNetwork.MAINNET: [
-        "https://dydx-indexer.polkachu.com",
-        "https://dydx-rest.publicnode.com",
-        "https://dydx-dao.api.kjnodes.com",
-        "https://api.dydx.cros-nest.com",
-    ],
 }
 
 INDEXER_WS_ENDPOINTS = {
@@ -80,6 +66,7 @@ class DydxV4Config:
     max_signal_age_ms: int = 30_000
     hard_max_signal_age_ms: int = 30_000
     min_edge_bps: float = 3.0
+    min_expected_edge_usdt: float = 0.0  # plancher profit absolu USD (port rustjesty); 0=off
     edge_safety_multiplier: float = 1.0
 
     starting_balance_usdc: float = 1000.0
@@ -94,10 +81,19 @@ class DydxV4Config:
     dynamic_sizing_atr_high_pct: float = 0.03
     dynamic_sizing_loss_penalty: float = 0.25
 
+    # Session performance guard: PAPER-only memory of markets/sides that just lost.
+    # It avoids repeatedly re-entering the same bad context unless the edge improves.
+    market_side_performance_guard_enabled: bool = True
+    market_side_loss_cooldown_seconds: float = 180.0
+    market_side_max_consecutive_losses: int = 2
+    market_side_min_edge_after_loss_bps: float = 12.0
+    market_side_size_penalty_after_loss: float = 0.50
+    market_side_history_bootstrap_trades: int = 300
+
     taker_fee_bps: float = 5.0
     maker_fee_bps: float = 2.0
     estimated_spread_bps: float = 3.0
-    estimated_slippage_bps: float = 5.0
+    estimated_slippage_bps: float = 1.5
     estimated_latency_bps: float = 2.0
     copy_degradation_bps: float = 5.0
 
@@ -119,12 +115,18 @@ class DydxV4Config:
 
     mode: DydxMode = DydxMode.LIVE
     demo_mode: bool = False
+    allow_demo_fallback: bool = False
 
     consensus_required: bool = True
     consensus_min_wallets: int = 2
     consensus_window_ms: int = 3 * 60 * 1000
     consensus_recency_bonus_window_ms: int = 30_000
     consensus_recency_edge_multiplier: float = 1.08
+    precision_cluster_gate_enabled: bool = True
+    precision_cluster_wallet_threshold: int = 2
+    precision_cluster_max_spread_ms: int = 350
+    precision_cluster_max_last_age_ms: int = 350
+    precision_cluster_min_strength: float = 0.88
 
     atr_period: int = 14
     atr_stop_mult: float = 1.0
@@ -184,6 +186,16 @@ class DydxV4Config:
     stream_consensus_min_wallets: int = 3
     stream_window_ms: int = 12_000
     market_flow_enabled: bool = True
+    allow_market_flow_solo_entries: bool = False
+    # Public market-flow alone is normally context only. This separate switch
+    # permits tiny PAPER-ONLY opportunities when the public flow is very fresh,
+    # high-volume, and strongly imbalanced. It never enables real execution.
+    allow_strong_public_flow_paper_entries: bool = True
+    strong_public_flow_min_volume_usdc: float = 40_000.0
+    strong_public_flow_min_trades: int = 8
+    strong_public_flow_min_imbalance: float = 0.72
+    strong_public_flow_max_age_ms: int = 4_000
+    strong_public_flow_notional_factor: float = 0.35
     market_flow_min_volume_usdc: float = 7_500.0
     market_flow_min_imbalance: float = 0.60
     rest_poll_cap: int = 250
@@ -209,10 +221,6 @@ class DydxV4Config:
     @property
     def indexer_rest_url(self) -> str:
         return INDEXER_REST_ENDPOINTS[self.network]
-
-    @property
-    def indexer_rest_fallback_urls(self) -> list[str]:
-        return INDEXER_REST_FALLBACKS.get(self.network, [])
 
     @property
     def indexer_ws_url(self) -> str:
@@ -254,8 +262,7 @@ def load_config_from_env(base: DydxV4Config | None = None) -> DydxV4Config:
 
     net_str = os.environ.get("DYDX_NETWORK", cfg.network.value).lower()
     network = DydxNetwork.TESTNET if net_str == "testnet" else DydxNetwork.MAINNET
-    demo_env = os.environ.get("DYDX_DEMO_MODE", "").lower()
-    demo_mode = demo_env in ("1", "true", "yes") or cfg.demo_mode
+    demo_mode = False
 
     loaded = DydxV4Config(
         enabled=_bool("DYDX_ENABLED", cfg.enabled),
@@ -269,6 +276,7 @@ def load_config_from_env(base: DydxV4Config | None = None) -> DydxV4Config:
         max_signal_age_ms=_int("DYDX_MAX_SIGNAL_AGE_MS", cfg.max_signal_age_ms),
         hard_max_signal_age_ms=_int("DYDX_HARD_MAX_SIGNAL_AGE_MS", cfg.hard_max_signal_age_ms),
         min_edge_bps=_float("DYDX_MIN_EDGE_BPS", cfg.min_edge_bps),
+        min_expected_edge_usdt=_float("DYDX_MIN_EXPECTED_EDGE_USDT", cfg.min_expected_edge_usdt),
         edge_safety_multiplier=_float("DYDX_EDGE_SAFETY_MULTIPLIER", cfg.edge_safety_multiplier),
         starting_balance_usdc=_float("DYDX_STARTING_BALANCE_USDC", cfg.starting_balance_usdc),
         max_open_paper_trades=_int("DYDX_MAX_OPEN_PAPER_TRADES", cfg.max_open_paper_trades),
@@ -281,6 +289,12 @@ def load_config_from_env(base: DydxV4Config | None = None) -> DydxV4Config:
         dynamic_sizing_edge_full_bps=_float("DYDX_DYNAMIC_SIZING_EDGE_FULL_BPS", cfg.dynamic_sizing_edge_full_bps),
         dynamic_sizing_atr_high_pct=_float("DYDX_DYNAMIC_SIZING_ATR_HIGH_PCT", cfg.dynamic_sizing_atr_high_pct),
         dynamic_sizing_loss_penalty=_float("DYDX_DYNAMIC_SIZING_LOSS_PENALTY", cfg.dynamic_sizing_loss_penalty),
+        market_side_performance_guard_enabled=_bool("DYDX_MARKET_SIDE_PERF_GUARD", cfg.market_side_performance_guard_enabled),
+        market_side_loss_cooldown_seconds=_float("DYDX_MARKET_SIDE_LOSS_COOLDOWN_SECONDS", cfg.market_side_loss_cooldown_seconds),
+        market_side_max_consecutive_losses=_int("DYDX_MARKET_SIDE_MAX_CONSECUTIVE_LOSSES", cfg.market_side_max_consecutive_losses),
+        market_side_min_edge_after_loss_bps=_float("DYDX_MARKET_SIDE_MIN_EDGE_AFTER_LOSS_BPS", cfg.market_side_min_edge_after_loss_bps),
+        market_side_size_penalty_after_loss=_float("DYDX_MARKET_SIDE_SIZE_PENALTY_AFTER_LOSS", cfg.market_side_size_penalty_after_loss),
+        market_side_history_bootstrap_trades=_int("DYDX_MARKET_SIDE_HISTORY_BOOTSTRAP_TRADES", cfg.market_side_history_bootstrap_trades),
         db_path=os.environ.get("DYDX_DB_PATH", cfg.db_path),
         decision_log_enabled=_bool("DYDX_DECISION_LOG", cfg.decision_log_enabled),
         decision_log_path=os.environ.get("DYDX_DECISION_LOG_PATH", cfg.decision_log_path),
@@ -288,11 +302,17 @@ def load_config_from_env(base: DydxV4Config | None = None) -> DydxV4Config:
         partial_tp_fraction=_float("DYDX_PARTIAL_TP_FRACTION", cfg.partial_tp_fraction),
         partial_tp2_multiplier=_float("DYDX_PARTIAL_TP2_MULTIPLIER", cfg.partial_tp2_multiplier),
         demo_mode=demo_mode,
+        allow_demo_fallback=False,
         consensus_required=_bool("DYDX_CONSENSUS_REQUIRED", cfg.consensus_required),
         consensus_min_wallets=_int("DYDX_CONSENSUS_MIN_WALLETS", cfg.consensus_min_wallets),
         consensus_window_ms=_int("DYDX_CONSENSUS_WINDOW_MS", cfg.consensus_window_ms),
         consensus_recency_bonus_window_ms=_int("DYDX_CONSENSUS_RECENCY_BONUS_WINDOW_MS", cfg.consensus_recency_bonus_window_ms),
         consensus_recency_edge_multiplier=_float("DYDX_CONSENSUS_RECENCY_EDGE_MULTIPLIER", cfg.consensus_recency_edge_multiplier),
+        precision_cluster_gate_enabled=_bool("DYDX_PRECISION_CLUSTER_GATE", cfg.precision_cluster_gate_enabled),
+        precision_cluster_wallet_threshold=_int("DYDX_PRECISION_CLUSTER_WALLET_THRESHOLD", cfg.precision_cluster_wallet_threshold),
+        precision_cluster_max_spread_ms=_int("DYDX_PRECISION_CLUSTER_MAX_SPREAD_MS", cfg.precision_cluster_max_spread_ms),
+        precision_cluster_max_last_age_ms=_int("DYDX_PRECISION_CLUSTER_MAX_LAST_AGE_MS", cfg.precision_cluster_max_last_age_ms),
+        precision_cluster_min_strength=_float("DYDX_PRECISION_CLUSTER_MIN_STRENGTH", cfg.precision_cluster_min_strength),
         fast_scanner_enabled=_bool("DYDX_FAST_SCANNER", cfg.fast_scanner_enabled),
         fast_scanner_hot_capacity=_int("DYDX_FAST_SCANNER_HOT_CAPACITY", cfg.fast_scanner_hot_capacity),
         risk_policy_enabled=_bool("DYDX_RISK_POLICY", cfg.risk_policy_enabled),
@@ -331,9 +351,27 @@ def load_config_from_env(base: DydxV4Config | None = None) -> DydxV4Config:
         stream_consensus_min_wallets=_int("DYDX_STREAM_CONSENSUS_MIN_WALLETS", cfg.stream_consensus_min_wallets),
         stream_window_ms=_int("DYDX_STREAM_WINDOW_MS", cfg.stream_window_ms),
         market_flow_enabled=_bool("DYDX_MARKET_FLOW", cfg.market_flow_enabled),
+        allow_market_flow_solo_entries=_bool("DYDX_ALLOW_MARKET_FLOW_SOLO", cfg.allow_market_flow_solo_entries),
+        allow_strong_public_flow_paper_entries=_bool("DYDX_ALLOW_STRONG_PUBLIC_FLOW_PAPER", cfg.allow_strong_public_flow_paper_entries),
+        strong_public_flow_min_volume_usdc=_float("DYDX_STRONG_PUBLIC_FLOW_MIN_VOLUME", cfg.strong_public_flow_min_volume_usdc),
+        strong_public_flow_min_trades=_int("DYDX_STRONG_PUBLIC_FLOW_MIN_TRADES", cfg.strong_public_flow_min_trades),
+        strong_public_flow_min_imbalance=_float("DYDX_STRONG_PUBLIC_FLOW_MIN_IMBALANCE", cfg.strong_public_flow_min_imbalance),
+        strong_public_flow_max_age_ms=_int("DYDX_STRONG_PUBLIC_FLOW_MAX_AGE_MS", cfg.strong_public_flow_max_age_ms),
+        strong_public_flow_notional_factor=_float("DYDX_STRONG_PUBLIC_FLOW_NOTIONAL_FACTOR", cfg.strong_public_flow_notional_factor),
         market_flow_min_volume_usdc=_float("DYDX_MARKET_FLOW_MIN_VOLUME", cfg.market_flow_min_volume_usdc),
         market_flow_min_imbalance=_float("DYDX_MARKET_FLOW_MIN_IMBALANCE", cfg.market_flow_min_imbalance),
         rest_poll_cap=_int("DYDX_REST_POLL_CAP", cfg.rest_poll_cap),
         max_spread_bps=_float("DYDX_MAX_SPREAD_BPS", cfg.max_spread_bps),
         flow_min_trades=_int("DYDX_FLOW_MIN_TRADES", cfg.flow_min_trades),
-        flow_consensus_min_wallets=_int("DYDX_FLOW_CONSENSUS_MIN_WALLETS", c
+        flow_consensus_min_wallets=_int("DYDX_FLOW_CONSENSUS_MIN_WALLETS", cfg.flow_consensus_min_wallets),
+        breakeven_stop_enabled=_bool("DYDX_BREAKEVEN_STOP", cfg.breakeven_stop_enabled),
+        breakeven_trigger_atr_mult=_float("DYDX_BREAKEVEN_TRIGGER_ATR_MULT", cfg.breakeven_trigger_atr_mult),
+        breakeven_offset_atr_mult=_float("DYDX_BREAKEVEN_OFFSET_ATR_MULT", cfg.breakeven_offset_atr_mult),
+    )
+    if _bool("DYDX_OPPORTUNITY_CALIBRATION", False):
+        from hyper_smart_observer.dydx_v4.opportunity_calibration import apply_opportunity_calibration
+        loaded = apply_opportunity_calibration(loaded)
+    return loaded
+
+
+DEFAULT_CONFIG = DydxV4Config()

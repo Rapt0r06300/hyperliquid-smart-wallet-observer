@@ -131,3 +131,36 @@ def test_market_flow_monitor_exposes_recent_trade_prices_for_mark_to_market() ->
     assert prices == {"ETH-USD": 2012.25}
     assert monitor.stats["latest_price_markets"] == 1
     assert monitor.stats["last_trade_market"] == "ETH-USD"
+
+
+
+def test_detect_flow_signals_preserves_largest_trade_on_dominant_side() -> None:
+    items = [
+        (1, "ETH-USD", "BUY", 65_000.0),
+        (2, "ETH-USD", "BUY", 12_000.0),
+        (3, "ETH-USD", "SELL", 5_000.0),
+    ]
+
+    signals = detect_flow_signals(items, min_volume_usdc=25_000.0, min_imbalance=0.6)
+
+    assert len(signals) == 1
+    assert signals[0].direction == "LONG"
+    assert signals[0].large_trade_usdc == 65_000.0
+    cluster = build_cluster_from_flow(signals[0], mark_price=3100.0, now_ms=456)
+    assert cluster.flow_large_trade_usdc == 65_000.0
+
+
+def test_market_flow_monitor_tracks_large_trade_stats() -> None:
+    monitor = MarketFlowMonitor("wss://example.invalid", ["ETH-USD"], large_trade_threshold_usdc=50_000.0)
+    monitor._on_message(
+        SimpleNamespace(
+            channel="v4_trades",
+            id="ETH-USD",
+            data={"trades": [{"side": "BUY", "size": "20", "price": "3100"}]},
+        )
+    )
+
+    assert monitor.stats["large_trades_seen"] == 1
+    assert monitor.stats["last_large_trade_market"] == "ETH-USD"
+    assert monitor.stats["last_large_trade_side"] == "BUY"
+    assert monitor.stats["last_large_trade_usdc"] == 62_000.0

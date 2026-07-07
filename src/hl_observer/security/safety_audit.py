@@ -17,6 +17,18 @@ class SafetyAuditResult:
 
 TEXT_SUFFIXES = {".py", ".toml", ".yaml", ".yml", ".env", ".example", ".txt"}
 EXCLUDED_DIRS = {".git", ".venv", "__pycache__", ".pytest_cache", ".ruff_cache", "logs", "tmp_pytest"}
+EXCLUDED_RELATIVE_PREFIXES = {
+    ("runtime", "research", "github_repos_v24"),
+}
+
+
+def _is_excluded_project_path(root: Path, path: Path) -> bool:
+    try:
+        rel = path.resolve().relative_to(root.resolve())
+    except ValueError:
+        return False
+    rel_parts = tuple(rel.parts)
+    return any(rel_parts[: len(prefix)] == prefix for prefix in EXCLUDED_RELATIVE_PREFIXES)
 
 
 def _iter_scannable_files(root: Path) -> list[Path]:
@@ -25,6 +37,8 @@ def _iter_scannable_files(root: Path) -> list[Path]:
         if not path.is_file():
             continue
         if any(part in EXCLUDED_DIRS for part in path.parts):
+            continue
+        if _is_excluded_project_path(root, path):
             continue
         if path.suffix in TEXT_SUFFIXES or path.name == ".env.example":
             files.append(path)

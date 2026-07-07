@@ -53,6 +53,7 @@ class TremorReason(StrEnum):
     CONSENSUS_TOO_WEAK = "CONSENSUS_TOO_WEAK"
     CHOPPY_MARKET = "CHOPPY_MARKET"
     LOW_CONFIDENCE_CONTEXT = "LOW_CONFIDENCE_CONTEXT"
+    LARGE_TRADE_BOOST = "LARGE_TRADE_BOOST"
     PAPER_ONLY = "PAPER_ONLY"
 
 
@@ -61,18 +62,20 @@ class TremorConfig:
     """Seuils prudents, non destructifs, adaptes a une simulation paper."""
 
     min_watch_score: float = 3.0
-    min_paper_candidate_score: float = 6.5
+    min_paper_candidate_score: float = 3.5
     max_signal_age_ms: int = 30_000
     already_moved_bps: float = 90.0
     min_leading_wallets: int = 1
-    min_consensus_wallets: int = 2
+    min_consensus_wallets: int = 1
     min_edge_bps: float = 3.0
-    min_flow_volume_usdc: float = 10_000.0
-    min_flow_imbalance: float = 0.65
-    min_flow_trades: int = 5
+    min_flow_volume_usdc: float = 500.0
+    min_flow_imbalance: float = 0.35
+    min_flow_trades: int = 1
     min_market_confidence: float = 0.15
     block_choppy_market: bool = True
     allow_flow_only_watch: bool = True
+    large_trade_boost_usdc: float = 50_000.0
+    large_trade_boost_score: float = 1.0
 
 
 @dataclass
@@ -92,6 +95,7 @@ class TremorObservation:
     flow_imbalance: float = 0.0
     flow_volume_usdc: float = 0.0
     flow_trade_count: int = 0
+    large_trade_usdc: float = 0.0
     leading_wallets: int = 0
     consensus_wallets: int = 0
     signal_age_ms: int = 0
@@ -126,6 +130,7 @@ class TremorEvent:
     flow_imbalance: float = 0.0
     flow_volume_usdc: float = 0.0
     flow_trade_count: int = 0
+    large_trade_usdc: float = 0.0
     leading_wallets: int = 0
     consensus_wallets: int = 0
     signal_age_ms: int = 0
@@ -157,6 +162,7 @@ class TremorEvent:
             "flow_imbalance": self.flow_imbalance,
             "flow_volume_usdc": self.flow_volume_usdc,
             "flow_trade_count": self.flow_trade_count,
+            "large_trade_usdc": self.large_trade_usdc,
             "leading_wallets": self.leading_wallets,
             "consensus_wallets": self.consensus_wallets,
             "signal_age_ms": self.signal_age_ms,
@@ -192,6 +198,15 @@ def _score_flow(imbalance: float, volume_usdc: float, trades: int, cfg: TremorCo
     return imbalance_score + volume_score + trades_score
 
 
+def _score_large_trade(large_trade_usdc: float, cfg: TremorConfig) -> float:
+    # 0-N points: un gros trade public frais peut renforcer le tremor sans creer un ordre.
+    threshold = max(1.0, cfg.large_trade_boost_usdc)
+    if large_trade_usdc < threshold:
+        return 0.0
+    scale = _clamp((large_trade_usdc - threshold) / threshold, 0.0, 1.0)
+    return cfg.large_trade_boost_score * (0.5 + 0.5 * scale)
+
+
 def _score_wallets(leading: int, consensus: int, cfg: TremorConfig) -> float:
     # 0-2 points: wallets qui precedent + consensus distinct.
     leading_score = _clamp(leading / max(1, cfg.min_leading_wallets * 2), 0.0, 1.0) * 0.8
@@ -216,6 +231,7 @@ def tremor_intensity(obs: TremorObservation, cfg: TremorConfig | None = None) ->
         _score_price_move(abs(obs.price_move_bps))
         + _score_volume(obs.volume_zscore)
         + _score_flow(obs.flow_imbalance, obs.flow_volume_usdc, obs.flow_trade_count, c)
+        + _score_large_trade(obs.large_trade_usdc, c)
         + _score_wallets(obs.leading_wallets, obs.consensus_wallets, c)
         + _score_freshness(obs.signal_age_ms, c)
     )
@@ -263,6 +279,8 @@ def evaluate_tremor(obs: TremorObservation, cfg: TremorConfig | None = None) -> 
     score = tremor_intensity(obs, c)
     phase = timeline_phase(obs, c)
     reasons: list[str] = [TremorReason.PAPER_ONLY.value]
+    if obs.large_trade_usdc >= c.large_trade_boost_usdc:
+        reasons.append(TremorReason.LARGE_TRADE_BOOST.value)
 
     if obs.signal_age_ms > c.max_signal_age_ms:
         reasons.append(TremorReason.SIGNAL_TOO_LATE.value)
@@ -329,6 +347,7 @@ def evaluate_tremor(obs: TremorObservation, cfg: TremorConfig | None = None) -> 
         flow_imbalance=obs.flow_imbalance,
         flow_volume_usdc=obs.flow_volume_usdc,
         flow_trade_count=obs.flow_trade_count,
+        large_trade_usdc=obs.large_trade_usdc,
         leading_wallets=obs.leading_wallets,
         consensus_wallets=obs.consensus_wallets,
         signal_age_ms=obs.signal_age_ms,
@@ -354,6 +373,7 @@ def build_explanation(
         f"move={obs.price_move_bps:.1f}bps",
         f"vol_z={obs.volume_zscore:.2f}",
         f"flow={obs.flow_imbalance:.2f}/{obs.flow_volume_usdc:.0f}USDC/{obs.flow_trade_count}trades",
+        f"large_trade={obs.large_trade_usdc:.0f}USDC",
         f"wallets={obs.leading_wallets}/{obs.consensus_wallets}",
         f"age={obs.signal_age_ms}ms",
         f"decision={decision.value}",
@@ -372,6 +392,7 @@ def observation_from_flow(
     flow_imbalance: float,
     flow_volume_usdc: float,
     flow_trade_count: int,
+    large_trade_usdc: float = 0.0,
     price_move_bps: float = 0.0,
     volume_zscore: float = 0.0,
     signal_age_ms: int = 0,
@@ -389,6 +410,7 @@ def observation_from_flow(
         flow_imbalance=flow_imbalance,
         flow_volume_usdc=flow_volume_usdc,
         flow_trade_count=flow_trade_count,
+        large_trade_usdc=large_trade_usdc,
         leading_wallets=0,
         consensus_wallets=0,
         signal_age_ms=signal_age_ms,
@@ -412,6 +434,7 @@ def observation_from_cluster(
     volume_zscore: float = 0.0,
     flow_imbalance: float = 0.0,
     flow_trade_count: int = 0,
+    large_trade_usdc: float = 0.0,
     edge_remaining_bps: float | None = None,
     market_regime: str = "UNKNOWN",
     market_confidence: float = 0.0,
@@ -427,6 +450,7 @@ def observation_from_cluster(
         flow_imbalance=flow_imbalance,
         flow_volume_usdc=total_notional_usdc,
         flow_trade_count=flow_trade_count,
+        large_trade_usdc=large_trade_usdc,
         leading_wallets=max(0, wallet_count),
         consensus_wallets=max(0, wallet_count),
         signal_age_ms=max(0, signal_age_ms),

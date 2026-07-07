@@ -9,11 +9,16 @@ from typing import Any, Iterable
 
 
 DECISION_LOG_FILES = (
+    "simulation_pnl_ledger_latest.jsonl",
     "simulation_decisions_latest.jsonl",
     "cli_simulation_decisions_latest.jsonl",
     "simulation_decisions_append_only.jsonl",
 )
 STRUCTURED_DECISION_LOG = ("structured", "decisions.jsonl")
+SUPPLEMENTAL_LEDGER_JSON_FILES = (
+    "simulation_snapshot_latest.json",
+    "simulation_export_state.json",
+)
 
 
 @dataclass(slots=True)
@@ -47,6 +52,8 @@ class LogMetricsReport:
     negative_events: int = 0
     gross_pnl_usdc: float = 0.0
     net_pnl_usdc: float = 0.0
+    net_gains_usdc: float = 0.0
+    net_losses_usdc: float = 0.0
     fees_usdc: float = 0.0
     reasons: Counter[str] = field(default_factory=Counter)
     actions: Counter[str] = field(default_factory=Counter)
@@ -63,6 +70,8 @@ class LogMetricsReport:
     edge_positive_count: int = 0
     orphan_close_count: int = 0
     add_without_open_count: int = 0
+    consecutive_losses: int = 0
+    max_consecutive_losses: int = 0
 
     @property
     def fee_drag_ratio(self) -> float:
@@ -79,15 +88,19 @@ class LogMetricsReport:
 
     @property
     def profit_factor_net(self) -> float:
-        gains = sum(value for value in self.pnl_by_action.values() if value > 0)
-        losses = abs(sum(value for value in self.pnl_by_action.values() if value < 0))
+        gains = max(0.0, float(self.net_gains_usdc or 0.0))
+        losses = abs(min(0.0, float(self.net_losses_usdc or 0.0)))
         if losses <= 0:
             return 0.0 if gains <= 0 else 999.0
         return round(gains / losses, 8)
 
 
-def iter_decision_rows(log_dir: Path) -> Iterable[tuple[Path, int, dict[str, Any]]]:
-    for path in _existing_decision_files(log_dir):
+def iter_decision_rows(
+    log_dir: Path,
+    *,
+    prefer_append_only: bool = False,
+) -> Iterable[tuple[Path, int, dict[str, Any]]]:
+    for path in _existing_decision_files(log_dir, prefer_append_only=prefer_append_only):
         with path.open("r", encoding="utf-8-sig") as handle:
             for line_number, line in enumerate(handle, start=1):
                 line = line.strip()
@@ -102,37 +115,127 @@ def iter_decision_rows(log_dir: Path) -> Iterable[tuple[Path, int, dict[str, Any
                     yield path, line_number, payload
 
 
-def analyze_logs_streaming(log_dir: Path) -> LogMetricsReport:
-    report = LogMetricsReport(source_dir=log_dir, source_files=tuple(_existing_decision_files(log_dir)))
-    for _path, _line_number, raw in iter_decision_rows(log_dir):
-        report.total_lines += 1
-        if raw.get("_json_error"):
-            report.total_json_errors += 1
+def analyze_logs_streaming(log_dir: Path, *, prefer_append_only: bool = False) -> LogMetricsReport:
+    report = LogMetricsReport(
+        source_dir=log_dir,
+        source_files=tuple(_existing_decision_files(log_dir, prefer_append_only=prefer_append_only)),
+    )
+    seen_event_keys: set[str] = set()
+    for _path, _line_number, raw in iter_decision_rows(log_dir, prefer_append_only=prefer_append_only):
+        _apply_raw_row(report, raw, seen_event_keys=seen_event_keys, dedupe=False)
+    supplemental_files: list[Path] = []
+    for path, _line_number, raw in iter_supplemental_ledger_rows(log_dir):
+        before = report.total_decisions
+        _apply_raw_row(report, raw, seen_event_keys=seen_event_keys, dedupe=True)
+        if report.total_decisions > before and path not in supplemental_files:
+            supplemental_files.append(path)
+    if supplemental_files:
+        report.source_files = tuple(dict.fromkeys([*report.source_files, *supplemental_files]))
+    report.gross_pnl_usdc = round(report.gross_pnl_usdc, 8)
+    report.net_pnl_usdc = round(report.net_pnl_usdc, 8)
+    report.net_gains_usdc = round(report.net_gains_usdc, 8)
+    report.net_losses_usdc = round(report.net_losses_usdc, 8)
+    report.fees_usdc = round(report.fees_usdc, 8)
+    return report
+
+
+def iter_supplemental_ledger_rows(log_dir: Path) -> Iterable[tuple[Path, int, dict[str, Any]]]:
+    """Yield canonical ledger rows saved in JSON snapshots.
+
+    ``simulation_decisions_latest.jsonl`` is intentionally short so it stays
+    easy to send to another model. In long sessions it can contain only shadow
+    GitHub evaluations while the real PnL-affecting closes live in the
+    canonical paper ledger exposed through ``simulation_snapshot_latest.json``.
+    This supplemental reader makes diagnostics use the same accounting truth as
+    the dashboard without requiring a huge append-only file.
+    """
+
+    for filename in SUPPLEMENTAL_LEDGER_JSON_FILES:
+        path = log_dir / filename
+        if not path.exists() or path.stat().st_size <= 0:
             continue
-        row = row_from_payload(raw)
-        report.total_decisions += 1
-        report.actions[row.action] += 1
-        report.status_counts[row.status] += 1
-        is_refused = row.status == "REFUSED" or row.action in {"NO_TRADE", "REFUSED"}
-        if is_refused:
-            report.refused += 1
-        else:
-            report.accepted += 1
-        if row.reason and is_refused:
-            for reason in split_reasons(row.reason):
-                report.reasons[reason] += 1
-                report.pnl_by_reason[reason] += row.estimated_net_pnl_usdc
-                if reason == "NO_MATCHING_PAPER_POSITION_FOR_CLOSE":
-                    report.orphan_close_count += 1
-                if reason == "ADD_WITHOUT_ORIGINAL_OPEN_REFUSED":
-                    report.add_without_open_count += 1
-        elif row.reason:
-            for reason in split_reasons(row.reason):
-                report.pnl_by_reason[reason] += row.estimated_net_pnl_usdc
-        if row.estimated_net_pnl_usdc > 0:
-            report.positive_events += 1
-        if row.estimated_net_pnl_usdc < 0:
-            report.negative_events += 1
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8-sig"))
+        except (OSError, json.JSONDecodeError):
+            yield path, 1, {"_json_error": True}
+            continue
+        for index, row in enumerate(_extract_supplemental_ledger_rows(payload), start=1):
+            yield path, index, row
+
+
+def _extract_supplemental_ledger_rows(payload: dict[str, Any]) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    bot = payload.get("bot_simulation")
+    if isinstance(bot, dict):
+        ledger_events = bot.get("ledger_events")
+        if isinstance(ledger_events, list):
+            rows.extend(row for row in ledger_events if isinstance(row, dict))
+        bot_paper_ledger = bot.get("paper_ledger")
+        if isinstance(bot_paper_ledger, dict):
+            rows.extend(_closed_trade_rows_from_paper_ledger(bot_paper_ledger))
+    paper_ledger = payload.get("paper_ledger")
+    if isinstance(paper_ledger, dict):
+        rows.extend(_closed_trade_rows_from_paper_ledger(paper_ledger))
+    return rows
+
+
+def _closed_trade_rows_from_paper_ledger(paper_ledger: dict[str, Any]) -> list[dict[str, Any]]:
+    stats = paper_ledger.get("closed_trade_stats")
+    if not isinstance(stats, dict):
+        return []
+    recent = stats.get("recent_closed_trades")
+    if not isinstance(recent, list):
+        return []
+    return [row for row in recent if isinstance(row, dict)]
+
+
+def _apply_raw_row(
+    report: LogMetricsReport,
+    raw: dict[str, Any],
+    *,
+    seen_event_keys: set[str],
+    dedupe: bool,
+) -> None:
+    report.total_lines += 1
+    if raw.get("_json_error"):
+        report.total_json_errors += 1
+        return
+    key = _analysis_event_key(raw)
+    if dedupe and key in seen_event_keys:
+        return
+    seen_event_keys.add(key)
+    row = row_from_payload(raw)
+    report.total_decisions += 1
+    report.actions[row.action] += 1
+    report.status_counts[row.status] += 1
+    is_refused = _is_refused_row(row)
+    is_accepted = _is_accepted_row(row)
+    is_actionable_decision = is_refused or is_accepted
+    if is_refused:
+        report.refused += 1
+    elif is_accepted:
+        report.accepted += 1
+    if row.reason and is_refused:
+        for reason in split_reasons(row.reason):
+            report.reasons[reason] += 1
+            report.pnl_by_reason[reason] += row.estimated_net_pnl_usdc
+            if reason == "NO_MATCHING_PAPER_POSITION_FOR_CLOSE":
+                report.orphan_close_count += 1
+            if reason == "ADD_WITHOUT_ORIGINAL_OPEN_REFUSED":
+                report.add_without_open_count += 1
+    elif row.reason:
+        for reason in split_reasons(row.reason):
+            report.pnl_by_reason[reason] += row.estimated_net_pnl_usdc
+    if row.estimated_net_pnl_usdc > 0:
+        report.positive_events += 1
+        report.net_gains_usdc += row.estimated_net_pnl_usdc
+        report.consecutive_losses = 0
+    if row.estimated_net_pnl_usdc < 0:
+        report.negative_events += 1
+        report.net_losses_usdc += row.estimated_net_pnl_usdc
+        report.consecutive_losses += 1
+        report.max_consecutive_losses = max(report.max_consecutive_losses, report.consecutive_losses)
+    if is_actionable_decision or row.estimated_net_pnl_usdc != 0 or row.fee_cost_usdc != 0:
         report.gross_pnl_usdc += row.gross_pnl_usdc
         report.net_pnl_usdc += row.estimated_net_pnl_usdc
         report.fees_usdc += row.fee_cost_usdc
@@ -142,28 +245,32 @@ def analyze_logs_streaming(log_dir: Path) -> LogMetricsReport:
             report.pnl_by_coin[row.coin] += row.estimated_net_pnl_usdc
         if row.wallet_address:
             report.pnl_by_wallet[row.wallet_address] += row.estimated_net_pnl_usdc
-        if row.edge_remaining_bps is not None:
-            report.edge_values.append(row.edge_remaining_bps)
-            if row.edge_remaining_bps <= -9_000:
-                report.edge_sentinel_count += 1
-            elif row.edge_remaining_bps < 0:
-                report.edge_negative_count += 1
-            elif row.edge_remaining_bps > 0:
-                report.edge_positive_count += 1
-        if row.signal_age_ms is not None:
-            report.signal_age_values.append(row.signal_age_ms)
-    report.gross_pnl_usdc = round(report.gross_pnl_usdc, 8)
-    report.net_pnl_usdc = round(report.net_pnl_usdc, 8)
-    report.fees_usdc = round(report.fees_usdc, 8)
-    return report
+    if is_actionable_decision and row.edge_remaining_bps is not None:
+        report.edge_values.append(row.edge_remaining_bps)
+        if row.edge_remaining_bps <= -9_000:
+            report.edge_sentinel_count += 1
+        elif row.edge_remaining_bps < 0:
+            report.edge_negative_count += 1
+        elif row.edge_remaining_bps > 0:
+            report.edge_positive_count += 1
+    if is_actionable_decision and row.signal_age_ms is not None:
+        report.signal_age_values.append(row.signal_age_ms)
 
 
 def row_from_payload(row: dict[str, Any]) -> LogDecisionRow:
     event_type = _to_str(row.get("event_type"))
-    action = _to_str(row.get("bot_decision") or row.get("action") or row.get("leader_action") or event_type or "UNKNOWN") or "UNKNOWN"
+    action = _to_str(
+        row.get("bot_decision")
+        or row.get("bot_replay_action")
+        or row.get("paper_action_type")
+        or row.get("action")
+        or row.get("leader_action")
+        or event_type
+        or "UNKNOWN"
+    ) or "UNKNOWN"
     status = _row_status(row).upper()
     return LogDecisionRow(
-        timestamp_ms=_to_int(row.get("timestamp_ms") or row.get("recorded_at_ms") or row.get("closed_at_ms")),
+        timestamp_ms=_to_int(row.get("timestamp_ms") or row.get("observed_at_ms") or row.get("recorded_at_ms") or row.get("closed_at_ms")),
         wallet_address=_to_str(row.get("wallet_address") or row.get("leader_wallet")),
         coin=_to_str(row.get("coin") or row.get("market_id")),
         action=action.upper(),
@@ -200,10 +307,14 @@ def format_logs_analysis(report: LogMetricsReport) -> str:
         f"negative_events={report.negative_events}",
         f"gross_pnl_usdc={report.gross_pnl_usdc:.6f}",
         f"net_pnl_usdc={report.net_pnl_usdc:.6f}",
+        f"net_gains_usdc={report.net_gains_usdc:.6f}",
+        f"net_losses_usdc={report.net_losses_usdc:.6f}",
         f"fees_usdc={report.fees_usdc:.6f}",
         f"fee_drag_ratio={report.fee_drag_ratio:.6f}",
         f"net_winrate={report.net_winrate:.6f}",
         f"profit_factor_net={report.profit_factor_net:.6f}",
+        f"consecutive_losses={report.consecutive_losses}",
+        f"max_consecutive_losses={report.max_consecutive_losses}",
         f"edge_sentinel_count={report.edge_sentinel_count}",
         f"edge_negative_count={report.edge_negative_count}",
         f"edge_positive_count={report.edge_positive_count}",
@@ -252,7 +363,7 @@ def build_recommendations(report: LogMetricsReport) -> tuple[str, ...]:
     return tuple(recommendations)
 
 
-def _existing_decision_files(log_dir: Path) -> list[Path]:
+def _existing_decision_files(log_dir: Path, *, prefer_append_only: bool = False) -> list[Path]:
     """Return one active decision source, preferring fresh/small logs.
 
     The dYdX paper engine writes ``logs/structured/decisions.jsonl`` while the
@@ -262,12 +373,23 @@ def _existing_decision_files(log_dir: Path) -> list[Path]:
     """
 
     structured = log_dir.parent.joinpath(*STRUCTURED_DECISION_LOG)
-    for path in (
-        log_dir / "simulation_decisions_latest.jsonl",
-        structured,
-        log_dir / "cli_simulation_decisions_latest.jsonl",
-        log_dir / "simulation_decisions_append_only.jsonl",
-    ):
+    if prefer_append_only:
+        candidates = (
+            log_dir / "simulation_decisions_append_only.jsonl",
+            log_dir / "simulation_pnl_ledger_latest.jsonl",
+            log_dir / "simulation_decisions_latest.jsonl",
+            structured,
+            log_dir / "cli_simulation_decisions_latest.jsonl",
+        )
+    else:
+        candidates = (
+            log_dir / "simulation_pnl_ledger_latest.jsonl",
+            log_dir / "simulation_decisions_latest.jsonl",
+            structured,
+            log_dir / "cli_simulation_decisions_latest.jsonl",
+            log_dir / "simulation_decisions_append_only.jsonl",
+        )
+    for path in candidates:
         if path.exists() and path.stat().st_size > 0:
             return [path]
     return []
@@ -285,6 +407,45 @@ def _row_status(row: dict[str, Any]) -> str:
     return "LOCAL_REPLAY"
 
 
+def _is_refused_row(row: LogDecisionRow) -> bool:
+    status = (row.status or "").upper()
+    action = (row.action or "").upper()
+    if status in {"REFUSED", "REJECT_NO_TRADE", "NO_TRADE", "BLOCKED"}:
+        return True
+    if action in {"NO_TRADE", "REFUSED", "REJECT_NO_TRADE"} or action.startswith("REJECT"):
+        return True
+    return False
+
+
+def _is_accepted_row(row: LogDecisionRow) -> bool:
+    """Count only rows that can change the paper portfolio.
+
+    External GitHub profile rows are shadow/evidence rows. Treating every
+    non-refusal as an accepted trade hid the real issue in live QA: the UI could
+    show many accepted decisions while the portfolio and PnL did not move.
+    """
+
+    if _is_refused_row(row):
+        return False
+    action = (row.action or "").upper()
+    status = (row.status or "").upper()
+    if action in {"EXTERNAL_GITHUB_PROFILE_EVALUATED", "EVALUATED_DIAGNOSTIC"}:
+        return False
+    if "ENGINE_EVALUATION" in action or "PROFILE_EVALUATED" in action:
+        return False
+    if row.notional_usdc and row.notional_usdc > 0:
+        return True
+    if row.estimated_net_pnl_usdc != 0:
+        return True
+    if action.startswith("PAPER_") or "PAPER_ENTRY" in action or "PAPER_CLOSE" in action:
+        return True
+    if "FUSION" in action and ("ENTRY" in action or "CLOSE" in action or "EXIT" in action):
+        return True
+    if status in {"ACCEPTED", "ACCEPT_PAPER", "PAPER_ACCEPTED"}:
+        return True
+    return False
+
+
 def _row_event_net_pnl(row: dict[str, Any]) -> float | None:
     event_type = (_to_str(row.get("event_type")) or "").upper()
     if event_type == "NO_TRADE":
@@ -295,7 +456,7 @@ def _row_event_net_pnl(row: dict[str, Any]) -> float | None:
     if event_type in {"PAPER_CLOSE", "PAPER_PARTIAL_TP"}:
         pnl = _to_float(row.get("net_pnl") or row.get("event_net_pnl_usdc"))
         return pnl if pnl is not None else 0.0
-    return _to_float(row.get("estimated_net_pnl_usdc") or row.get("realized_pnl"))
+    return _to_float(row.get("estimated_net_pnl_usdc") or row.get("event_net_pnl_usdc") or row.get("net_pnl") or row.get("realized_pnl"))
 
 
 def _row_event_fee(row: dict[str, Any]) -> float | None:
@@ -308,6 +469,53 @@ def _row_event_fee(row: dict[str, Any]) -> float | None:
         if gross is not None and net is not None:
             return abs(gross - net)
     return _to_float(row.get("fee_cost_usdc") or row.get("fee"))
+
+
+def _analysis_event_key(row: dict[str, Any]) -> str:
+    action = _to_str(
+        row.get("bot_decision")
+        or row.get("bot_replay_action")
+        or row.get("paper_action_type")
+        or row.get("action")
+        or row.get("event_type")
+        or "UNKNOWN"
+    ) or "UNKNOWN"
+    explicit = (
+        row.get("dedupe_identity")
+        or row.get("paper_position_instance_id")
+        or row.get("v9_paper_order_id")
+        or row.get("delta_key")
+        or row.get("evidence_hash")
+        or row.get("source_delta_key")
+    )
+    if explicit:
+        return "|".join(
+            str(part or "")
+            for part in (
+                action,
+                row.get("paper_action_type"),
+                explicit,
+                row.get("estimated_net_pnl_usdc") or row.get("event_net_pnl_usdc") or row.get("net_pnl"),
+            )
+        )
+    return "|".join(
+        str(row.get(key) or "")
+        for key in (
+            "timestamp_ms",
+            "observed_at_ms",
+            "recorded_at_ms",
+            "closed_at_ms",
+            "wallet_address",
+            "leader_wallet",
+            "coin",
+            "market_id",
+            "paper_action_type",
+            "reason",
+            "estimated_net_pnl_usdc",
+            "event_net_pnl_usdc",
+            "net_pnl",
+        )
+    )
 
 
 def _numeric_summary(values: list[int] | list[float]) -> dict[str, float | int | None]:

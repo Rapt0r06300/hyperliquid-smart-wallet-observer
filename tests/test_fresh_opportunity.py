@@ -7,8 +7,9 @@ from hl_observer.opportunities.fresh_opportunity import (
     find_fresh_opportunities,
     format_fresh_opportunity_report,
 )
+from hl_observer.copying.realtime_magic_score import RealtimeCopyRiskConfig
 from hl_observer.storage.database import create_session_factory, create_sqlite_engine, init_db
-from hl_observer.storage.models import PositionDeltaModel, TopWallet
+from hl_observer.storage.models import MarketSnapshot, PositionDeltaModel, TopWallet
 from hl_observer.utils.time import now_ms
 
 
@@ -108,6 +109,54 @@ def test_fresh_opportunity_rejects_stale_and_single_wallet_clusters() -> None:
     assert dict(report.rejection_reasons)["STALE_SIGNAL"] == 2
 
 
+def test_fresh_opportunity_uses_trade_age_not_audit_window_for_acceptance() -> None:
+    wallet_a = "0x" + "a" * 40
+    wallet_b = "0x" + "b" * 40
+
+    report = find_fresh_opportunities(
+        [
+            _delta(wallet_a, ms=10_000),
+            _delta(wallet_b, ms=11_000),
+        ],
+        [_leader(wallet_a, 96), _leader(wallet_b, 94)],
+        now_timestamp_ms=50_000,
+        current_mids={"HYPE": 25.0},
+        active_window_ms=120_000,
+        consensus_window_ms=4_000,
+        min_wallets=2,
+        risk_config=RealtimeCopyRiskConfig(max_signal_age_ms=15_000),
+    )
+
+    assert report.groups_seen == 1
+    assert report.accepted_for_simulation == 0
+    assert report.opportunities[0].decision == "REJECT_NO_TRADE"
+    assert "STALE_SIGNAL" in report.opportunities[0].refusal_reasons
+
+
+def test_fresh_opportunity_requires_realtime_mid_for_portfolio_simulation() -> None:
+    wallet_a = "0x" + "a" * 40
+    wallet_b = "0x" + "b" * 40
+
+    report = find_fresh_opportunities(
+        [
+            _delta(wallet_a, ms=10_000),
+            _delta(wallet_b, ms=11_000),
+        ],
+        [_leader(wallet_a, 96), _leader(wallet_b, 94)],
+        now_timestamp_ms=12_000,
+        current_mids={},
+        active_window_ms=20_000,
+        consensus_window_ms=4_000,
+        min_wallets=2,
+    )
+
+    assert report.groups_seen == 1
+    assert report.accepted_for_simulation == 0
+    assert report.opportunities[0].current_mid is None
+    assert report.opportunities[0].current_mid_source == "leader_reference_fallback"
+    assert "CURRENT_MID_REQUIRED_FOR_LOCAL_SIMULATION" in report.opportunities[0].refusal_reasons
+
+
 def test_opportunity_report_cli_reads_recent_deltas_from_db(tmp_path, monkeypatch) -> None:
     db_path = tmp_path / "opportunities.sqlite3"
     monkeypatch.setenv("HL_DATABASE_URL", f"sqlite:///{db_path}")
@@ -123,6 +172,7 @@ def test_opportunity_report_cli_reads_recent_deltas_from_db(tmp_path, monkeypatc
             _delta(wallet_a, ms=current_ms - 2_000),
             _delta(wallet_b, ms=current_ms - 500),
         ])
+        session.add(MarketSnapshot(source="allMids", exchange_ts=current_ms, raw_json={"HYPE": "25.0"}))
         session.commit()
 
     result = CliRunner().invoke(

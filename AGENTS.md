@@ -1,180 +1,47 @@
-# AGENTS.md — dYdX Smart-Wallet Observer
+# AGENTS.md — consignes pour tout agent/IA travaillant sur HyperSmart Observer
 
-Ce fichier définit les règles obligatoires pour tout agent IA ou outil automatisé travaillant sur ce dépôt.
+**Règle n°1 (absolue, non négociable) : mainnet lecture seule, testnet verrouillé.**
+Aucun ordre mainnet, aucun argent réel, aucune clé privée exposée, aucun seed/mnemonic,
+aucun dépôt/retrait, aucun wallet-connect mainnet, aucun appel d'API privée mainnet.
+READ-ONLY-MAINNET, LOCAL-DECISION, TESTNET-ONLY, DENY-BY-DEFAULT. Un signal n'est jamais
+un ordre mainnet ; un paper-trade n'est jamais un ordre. Si une donnée est incertaine/trop
+vieille/incomplète : NO_TRADE.
 
-Le projet est désormais centré sur **dYdX v4 uniquement**.
+## Mise à jour testnet contrôlé (2026-07-04)
+- La simulation paper complète reste disponible seulement comme garde-fou/legacy minimal.
+- La cible produit devient : observer Hyperliquid mainnet en lecture seule, décider localement,
+  puis exécuter uniquement sur un environnement testnet à fausse monnaie via une couche
+  `testnet_executor` verrouillée.
+- Toute exécution externe doit refuser si l'environnement n'est pas explicitement testnet, si
+  `REAL_MAINNET_TRADING=false`, `TESTNET_ONLY=true` et `CONFIRM_TESTNET_EXECUTION=true` ne sont
+  pas satisfaits, ou si les plafonds `MAX_TESTNET_NOTIONAL` / `MAX_OPEN_TESTNET_POSITIONS` sont
+  dépassés.
+- Les adaptateurs testnet doivent passer par une interface `TestnetExchangeAdapter`, être
+  testables avec un fake adapter, journaliser chaque décision, et ne jamais contourner
+  DecisionEngine/RiskEngine.
+- Les clés/signatures testnet ne doivent jamais être écrites dans le repo, les logs, le
+  dashboard ou la documentation. Toute vraie signature testnet est une phase future explicite,
+  isolée et auditée ; le code par défaut reste fake-adapter/refusant.
 
----
+## Périmètre
+- Runtime par défaut : Hyperliquid mainnet en lecture seule (`/info` + WebSocket public). dYdX v4
+  reste dormant/comparatif. Les décisions viennent de prix réels du marché ; le PnL complet est
+  lu côté testnet quand l'exécuteur testnet est explicitement activé, sinon la simulation locale
+  reste minimale et honnête.
+- Pas de faux PnL, pas de faux wallet, pas de fausse simulation. Honnêteté avant tout :
+  ne jamais maquiller les chiffres, ne jamais promettre un PnL positif.
 
-## 1. Mission du projet
+## Surface IA (lecture seule)
+- Le modèle local (`ml/`) NOTE les trades (P(rentable)) et peut FILTRER, jamais ouvrir.
+- L'explainer (`research/local_llm_explainer.py`, Ollama optionnel) explique offline ; jamais
+  dans le chemin de décision. Aucune API LLM payante.
 
-Construire un logiciel local qui :
+## Avant toute modif
+1. inspecter Git ; 2. comprendre l'archi ; 3. protéger le local ; 4. documenter ; 5. coder
+proprement ; 6. tester ; 7. vérifier que mainnet reste 100 % lecture seule et que testnet reste
+verrouillé par configuration, fake adapter et tests de refus.
 
-- observe des wallets/subaccounts dYdX v4 ;
-- collecte des fills publics et données de marché en lecture seule ;
-- reconstruit les événements OPEN / ADD / REDUCE / CLOSE ;
-- score les comptes, signaux et contextes de marché ;
-- refuse par défaut les signaux risqués ou non mesurables ;
-- simule localement en paper ;
-- produit des rapports clairs ;
-- interdit toute exécution réelle.
-
-Le projet est un outil R&D local de simulation, pas un service financier et pas un bot réel.
-
----
-
-## 2. Règles absolues
-
-Un agent ne doit jamais :
-
-```text
-- demander une seed phrase ;
-- demander une clé privée ;
-- écrire une clé privée dans un fichier ;
-- stocker un secret en base ;
-- logger un secret ;
-- coder une fonctionnalité de retrait ;
-- activer une exécution réelle ;
-- contourner le risk engine ;
-- désactiver les garde-fous ;
-- supprimer les tests de sécurité ;
-- placer un ordre réel ;
-- promettre un gain ;
-- présenter un wallet comme magique ;
-- mettre un LLM dans le hot path décisionnel.
-```
-
-Doctrine :
-
-```text
-READ ONLY
-PAPER ONLY
-SIMULATION ONLY
-DENY BY DEFAULT
-SCORE IS NOT SIGNAL
-PAPER TRADE IS NOT ORDER
-HISTORICAL PNL IS NOT FUTURE PROFIT
-```
-
----
-
-## 3. Architecture prioritaire
-
-Le code dYdX doit rester dans :
-
-```text
-hyper_smart_observer/dydx_v4/
-```
-
-Modules importants :
-
-```text
-config.py
-live_observer.py
-fast_scanner.py
-fast_scan_integration.py
-wallet_discovery.py
-wallet_harvester.py
-leaderboard.py
-selection.py
-signals.py
-edge_calculator.py
-consensus.py
-cluster_detector.py
-market_flow.py
-adaptive_exits.py
-risk_policy.py
-backtest.py
-no_trade.py
-storage.py
-cli.py
-```
-
-Ne pas ajouter de nouvelle plateforme sans demande explicite.
-Ne pas réintroduire l'ancien périmètre.
-
----
-
-## 4. Scanners et moteur
-
-Les scanners doivent :
-
-- respecter les limites publiques ;
-- rester read-only ;
-- utiliser des fenêtres bornées ;
-- dédupliquer les fills ;
-- mesurer l'âge réel du signal ;
-- refuser les données incomplètes ;
-- journaliser les `NO_TRADE` ;
-- éviter les boucles infinies non bornées ;
-- être testables sans réseau.
-
-Le moteur doit :
-
-- pénaliser one-big-win ;
-- pénaliser drawdown élevé ;
-- vérifier la fraîcheur ;
-- vérifier la liquidité ;
-- vérifier les coûts de copie ;
-- vérifier le consensus ;
-- refuser les signaux non mesurables ;
-- ne jamais transformer un score en ordre.
-
----
-
-## 5. Stockage et rapports
-
-Stocker raw JSON + données normalisées quand utile.
-
-Éléments importants :
-
-```text
-wallets
-subaccounts
-fills
-position_events
-signals
-rejected_signals
-paper_trades
-risk_events
-no_trade_decisions
-api_health
-websocket_events
-backtest_runs
-reports
-```
-
-Chaque refus doit expliquer :
-
-- ce qui a été observé ;
-- pourquoi ce n'est pas simulable ;
-- quelle donnée manque ;
-- quelle action suivante est recommandée.
-
----
-
-## 6. Tests
-
-Avant de considérer une modification terminée :
-
-```powershell
-python -m pytest -q tests/dydx_v4
-python -m pytest -q
-```
-
-Si la suite complète échoue à cause d'un ancien module non encore migré, documenter précisément l'échec et ne pas prétendre que tout est vert.
-
----
-
-## 7. Nettoyage du dépôt
-
-Le dépôt doit rester propre :
-
-- supprimer les docs obsolètes ;
-- supprimer les modules spécifiques à l'ancien périmètre ;
-- conserver seulement les modules génériques utiles ;
-- éviter les noms publics incohérents ;
-- ne pas casser volontairement la couche dYdX ;
-- ne pas supprimer les garde-fous.
-
-Priorité actuelle : dYdX-only, simulation-only, GitHub propre.
+## Flags clés (tous OFF/sûrs par défaut)
+- `HYPERSMART_V12_GATE_AUTHORITATIVE`, `HYPERSMART_V13_MODEL_AUTHORITATIVE` : gates contraignants
+  (ne peuvent que RÉDUIRE/filtrer les trades, jamais en créer).
+- `HYPERSMART_V13_OLLAMA_ENABLED` : explainer local (repli règles si absent).

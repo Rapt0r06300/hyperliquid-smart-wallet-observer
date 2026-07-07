@@ -114,7 +114,7 @@ def _recommend(
                 "CLOSE_WITHOUT_POSITION_DOMINATES",
                 "MEDIUM",
                 "Beaucoup de fermetures arrivent sans position papier correspondante.",
-                "Ne pas ouvrir retroactivement; conserver le refus et ameliorer la capture des ouvertures fraiches.",
+                "Ne pas ouvrir retroactivement; ignorer ce bruit cote ledger et ameliorer la capture des ouvertures fraiches.",
             )
         )
     if analysis.accepted_count == 0 and analysis.refused_count > 0:

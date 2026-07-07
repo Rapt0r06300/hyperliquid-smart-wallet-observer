@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import importlib.util
 import json
 import sys
 from dataclasses import replace
@@ -19,8 +20,14 @@ from hyper_smart_observer.copy_mode.candidate_importer import load_leader_candid
 from hyper_smart_observer.copy_mode.copy_loop import run_copy_dry_run, shortlist_path
 from hyper_smart_observer.copy_mode.leaderboard_selector import LeaderboardSelectionConfig, select_leaderboard_shortlist, write_shortlist_report
 from hyper_smart_observer.copy_mode.preflight import format_copy_preflight_report, run_copy_preflight, write_copy_preflight_report
-from hyper_smart_observer.copy_mode.reports import format_copy_period_report, format_copy_run_report, write_copy_run_report
-from hyper_smart_observer.copy_mode.repository import insert_shortlist_entries, list_latest_signal_candidates, list_no_trade_decisions
+from hyper_smart_observer.copy_mode.reports import (
+    build_copy_period_pnl_report,
+    format_copy_period_report_from_object,
+    format_copy_run_report,
+    write_copy_period_pnl_report,
+    write_copy_run_report,
+)
+from hyper_smart_observer.copy_mode.repository import insert_shortlist_entries
 from hyper_smart_observer.dashboard.exporter import export_dashboard
 from hyper_smart_observer.consensus.position_consensus import build_position_consensus
 from hyper_smart_observer.data_sources.provider_registry import provider_registry_report
@@ -61,6 +68,13 @@ from hyper_smart_observer.wallet_discovery.wallet_importer import import_wallets
 from hyper_smart_observer.wallet_universe.wallet_universe import import_wallet_universe_file, import_wallet_universe_lines
 
 
+def _ensure_hl_observer_src_on_path() -> None:
+    project_root = Path(__file__).resolve().parents[2]
+    src_path = project_root / "src"
+    if src_path.exists() and str(src_path) not in sys.path:
+        sys.path.insert(0, str(src_path))
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="HyperSmart Observer")
     parser.add_argument(
@@ -83,6 +97,9 @@ def build_parser() -> argparse.ArgumentParser:
             "copy-preflight",
             "copy-run",
             "copy-report",
+            "v19-pnl-audit",
+            "v19-repo-matrix",
+            "v19-github-intake",
             "promote-testnet-candidates",
         ],
         help="Optional product command. All commands are read-only or local simulation only.",
@@ -142,6 +159,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--capital", type=float, default=1000.0, help="Virtual no-money simulation capital.")
     parser.add_argument("--scenario", default="conservative", help="Local no-money simulation scenario.")
     parser.add_argument("--path", default=None, help="Local dataset file or directory path.")
+    parser.add_argument("--output-dir", default=None, help="Optional local report output directory.")
+    parser.add_argument("--output-path", default=None, help="Optional local report output path.")
     parser.add_argument("--chunk-size", type=int, default=50_000, help="Local ingestion chunk size.")
     parser.add_argument("--events", type=int, default=1_000_000, help="Synthetic local events for scale benchmark.")
     parser.add_argument("--enrich-wallet", action="append", default=[], help="Enrich one wallet from local data.")
@@ -193,6 +212,54 @@ def main(argv: list[str] | None = None) -> int:
     except SafetyViolation as exc:
         print(f"Safety refused: {exc.reason_code} - {exc}")
         return 2
+
+    if args.command == "v19-pnl-audit":
+        _ensure_hl_observer_src_on_path()
+        from hl_observer.analysis.negative_pnl_auditor import (
+            build_negative_pnl_audit,
+            format_negative_pnl_audit,
+            write_negative_pnl_audit,
+        )
+        from hl_observer.simulation.decision_replay_analyzer import default_logs_to_send_dir
+
+        output_dir = Path(args.output_dir or "data/reports")
+        audit = build_negative_pnl_audit(default_logs_to_send_dir())
+        json_path, md_path = write_negative_pnl_audit(audit, output_dir)
+        print(f"v19_pnl_audit_json={json_path}")
+        print(f"v19_pnl_audit_md={md_path}")
+        print(format_negative_pnl_audit(audit))
+        return 0
+
+    if args.command == "v19-repo-matrix":
+        _ensure_hl_observer_src_on_path()
+        from hl_observer.analysis.v19_repo_matrix import format_repo_fusion_matrix
+
+        output_path = Path(args.output_path or "docs/research/HYPERSMART_V19_GITHUB_FUSION_MATRIX.md")
+        content = format_repo_fusion_matrix()
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        output_path.write_text(content, encoding="utf-8")
+        print(f"v19_repo_matrix={output_path}")
+        print(content)
+        return 0
+
+    if args.command == "v19-github-intake":
+        project_root = Path(__file__).resolve().parents[2]
+        tool_path = project_root / "tools" / "github_fusion_intake.py"
+        spec = importlib.util.spec_from_file_location("github_fusion_intake", tool_path)
+        if spec is None or spec.loader is None:
+            print(f"Unable to load GitHub fusion intake tool: {tool_path}")
+            return 2
+        module = importlib.util.module_from_spec(spec)
+        sys.modules[spec.name] = module
+        spec.loader.exec_module(module)
+        rows = module.build_intake(network_read=bool(args.network_read))
+        output_dir = Path(args.output_dir or "docs/research")
+        json_path, md_path, queue_path = module.write_intake_reports(rows, output_dir)
+        print(f"github_fusion_intake_json={json_path}")
+        print(f"github_fusion_intake_md={md_path}")
+        print(f"github_fusion_queue_md={queue_path}")
+        print(module.format_fusion_queue_markdown(module.build_fusion_queue(rows)))
+        return 0
 
     if args.command == "benchmark-local-scan":
         result = run_local_scan_benchmark(args.wallets)
@@ -376,6 +443,11 @@ def main(argv: list[str] | None = None) -> int:
         report_path = write_copy_run_report(report, config.reports_dir)
         print(format_copy_run_report(report))
         print(f"copy_run_report: {report_path}")
+        from hyper_smart_observer.copy_mode.copy_run_evidence import source_health_from_failures
+
+        if report.decision_ledger_json_path:
+            print(f"decision_ledger: {report.decision_ledger_json_path}")
+        print(f"source_health_entries: {len(source_health_from_failures(report.source_failures))}")
         print(f"no_trade_report: {config.reports_dir / 'no_trade_report.md'}")
         print(f"leaderboard_shortlist: {shortlist_path(config)}")
         return 0
@@ -393,11 +465,12 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     if args.command == "copy-report":
-        initialize_database(config)
-        with get_connection(config) as conn:
-            signal_count = len(list_latest_signal_candidates(conn, limit=10_000))
-            no_trade_count = len(list_no_trade_decisions(conn, limit=10_000))
-        print(format_copy_period_report(args.period, no_trade_count=no_trade_count, signal_count=signal_count))
+        report = build_copy_period_pnl_report(config, args.period)
+        json_path, csv_path, md_path = write_copy_period_pnl_report(report, config.reports_dir)
+        print(format_copy_period_report_from_object(report))
+        print(f"copy_period_json: {json_path}")
+        print(f"copy_period_csv: {csv_path}")
+        print(f"copy_period_markdown: {md_path}")
         return 0
 
     if args.command == "promote-testnet-candidates":

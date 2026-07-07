@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from hl_observer.config.settings import Settings
 from hl_observer.hyperliquid.endpoints import info_url_for_settings
+from hl_observer.sources.collection_recorder import CollectionRecorder
 from hl_observer.hyperliquid.rest_info_client import (
     HyperliquidInfoClient,
     build_all_mids_payload,
@@ -178,6 +179,7 @@ async def run_collection_once(
     *,
     client: HyperliquidInfoClient | None = None,
     session_factory: sessionmaker | Callable[[], Session] | None = None,
+    recorder: CollectionRecorder | None = None,
 ) -> CollectionResult:
     if plan.all_coins or plan.coins_from_meta or plan.coins_from_all_mids:
         plan = await _resolve_multi_asset_plan(plan, settings, client=client)
@@ -186,12 +188,19 @@ async def run_collection_once(
         return result
 
     owns_client = client is None
+    if recorder is None:
+        try:
+            from hl_observer.sources.shared_recorder import get_shared_recorder
+            recorder = get_shared_recorder()
+        except Exception:
+            recorder = None
     if client is None:
         client = HyperliquidInfoClient(
             info_url_for_settings(settings),
             timeout_seconds=settings.collection.request_timeout_seconds,
             max_retries=settings.collection.retry_count,
             backoff_base_seconds=settings.collection.retry_backoff_seconds,
+            recorder=recorder,
         )
     if session_factory is None:
         engine = create_sqlite_engine(settings.database_url)

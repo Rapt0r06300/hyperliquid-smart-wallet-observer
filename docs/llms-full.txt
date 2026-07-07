@@ -1,0 +1,31 @@
+# HyperSmart Observer — llms-full.txt (agent-safe, read-only, detailed)
+
+## What this is
+A LOCAL paper-trading simulator that observes the REAL Hyperliquid market (read-only /info REST + public
+WebSocket) and reproduces, in paper/mock USDC, what a copy-wallet strategy WOULD have done — with real
+prices, fees, spread, slippage, latency. It never places real orders. Goal: measure whether the strategy
+would be profitable on the real market, with auditable evidence. No guaranteed profit.
+
+## Absolute boundary (BAN_REAL_ACTION)
+No real order / cancel / modify, no /exchange, no signature, no private key/seed, no wallet connect,
+no deposit/withdraw, no executor, no mainnet/testnet execution, no fabricated/demo/synthetic data.
+
+## Allowed (READ_ONLY / SIMULATION / LOCAL_WRITE / RESEARCH_ONLY)
+Public Hyperliquid read (allMids, l2Book, clearinghouseState, userFills, userFillsByTime, openOrders,
+candleSnapshot, trades, public WS), local SQLite, JSON/CSV exports, local dashboard, paper trades,
+backtests/replays, reasonable public scraping (never bypassing rate limits / bans), GitHub/docs research.
+
+## Read-only data endpoints
+- /api/simulation/status   — equity_usdt, realized/unrealized PnL, open paper positions (mark-to-market on
+  real MarketSnapshot prices). If nothing traded: honest 1000.00 / 0.00 / no positions (never invented).
+- /api/simulation/overview — scanner_running, source_health, leaders/shortlist, latest deltas, signal
+  candidates, no_trade reasons + distribution, edge_remaining, copy_degradation, volatility, paper portfolio.
+
+## Pipeline (read-only)
+REST broad scan/backfill -> WalletScoreV2/shortlist -> WS (<=10 user streams) -> REST reconcile ->
+MarketSignalFeatures -> EdgeCalculator -> deny-by-default RiskEngine -> PaperIntent -> PaperEngine ->
+PaperTrade -> realized/unrealized PnL -> DecisionLedger (evidence) -> dashboard/exports -> backtest parity.
+
+## Decision evidence
+Every accepted signal and every no-trade is traceable: decision_id -> feature_hash -> source refs,
+reproducible SHA-256 evidence. No decision without minimal evidence.

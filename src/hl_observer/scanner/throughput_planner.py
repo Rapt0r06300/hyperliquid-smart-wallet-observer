@@ -79,26 +79,6 @@ def plan_safe_high_throughput_scan(request: ThroughputRequest) -> ThroughputPlan
     refusal_reasons: list[str] = []
     warnings: list[str] = []
 
-    if request.bypass_requested:
-        refusal_reasons.append(RATE_LIMIT_BYPASS_REFUSED)
-    if request.aggressive_scraping_requested:
-        refusal_reasons.append(AGGRESSIVE_SCRAPING_REFUSED)
-    if refusal_reasons:
-        return ThroughputPlan(
-            status="REFUSED",
-            requested_wallets=requested_wallets,
-            selected_wallets=0,
-            deferred_wallets=requested_wallets,
-            estimated_rest_weight=0,
-            rest_weight_remaining=rest_weight_remaining,
-            rest_weight_remaining_after=rest_weight_remaining,
-            user_specific_ws_users=0,
-            public_trade_wallet_cap=0,
-            ws_subscriptions_cap=0,
-            refusal_reasons=refusal_reasons,
-            next_action="Utiliser la rotation read-only officielle, le cache local et les WebSockets publics sans contourner les limites.",
-        )
-
     if not request.network_read_enabled:
         return ThroughputPlan(
             status="REFUSED",
@@ -112,7 +92,31 @@ def plan_safe_high_throughput_scan(request: ThroughputRequest) -> ThroughputPlan
             public_trade_wallet_cap=0,
             ws_subscriptions_cap=0,
             refusal_reasons=[NETWORK_READ_DISABLED],
-            next_action="Relancer avec --network-read pour autoriser uniquement les lectures publiques/read-only.",
+            next_action="Relancer avec --network-read pour autoriser les lectures.",
+        )
+
+    if request.bypass_requested or request.aggressive_scraping_requested:
+        if request.bypass_requested:
+            refusal_reasons.append(RATE_LIMIT_BYPASS_REFUSED)
+        if request.aggressive_scraping_requested:
+            refusal_reasons.append(AGGRESSIVE_SCRAPING_REFUSED)
+        return ThroughputPlan(
+            status="REFUSED",
+            requested_wallets=requested_wallets,
+            selected_wallets=0,
+            deferred_wallets=requested_wallets,
+            estimated_rest_weight=0,
+            rest_weight_remaining=rest_weight_remaining,
+            rest_weight_remaining_after=rest_weight_remaining,
+            user_specific_ws_users=0,
+            public_trade_wallet_cap=0,
+            ws_subscriptions_cap=0,
+            refusal_reasons=refusal_reasons,
+            warnings=["USE_SAFE_ROTATION_AND_PUBLIC_STREAMS"],
+            next_action=(
+                "Utiliser la rotation read-only, le WebSocket public, le cache local et le sticky sharding sain; "
+                "ne pas ignorer les budgets car cela degrade la fraicheur et le PnL simule."
+            ),
         )
 
     if base_cap <= 0:

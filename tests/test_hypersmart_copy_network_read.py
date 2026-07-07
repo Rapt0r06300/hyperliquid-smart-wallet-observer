@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+from pathlib import Path
 from time import time
 
 from hyper_smart_observer.app.config import AppConfig
@@ -23,6 +25,16 @@ class FakeInfoClient:
     def get_all_mids(self):
         self.calls.append("allMids")
         return {"BTC": "100.2"}
+
+    def get_l2_book(self, coin: str):
+        self.calls.append(f"l2Book:{coin.upper()}")
+        return {
+            "coin": coin.upper(),
+            "levels": [
+                [{"px": "100.18", "sz": "20"}, {"px": "100.16", "sz": "12"}],
+                [{"px": "100.20", "sz": "18"}, {"px": "100.22", "sz": "10"}],
+            ],
+        }
 
     def get_clearinghouse_state(self, address: str):
         self.calls.append("clearinghouseState")
@@ -130,7 +142,7 @@ def _seed_scored_wallet(config: AppConfig) -> None:
             conn,
             ScoreBreakdown(
                 wallet_address=GOOD_ADDRESS,
-                calculated_at=__import__("datetime").datetime.now(__import__("datetime").UTC),
+                calculated_at=__import__("datetime").datetime.now(__import__("datetime").timezone.utc),
                 status=WalletScoreStatus.SCORED,
                 total_fills=60,
                 usable_fills=60,
@@ -167,6 +179,19 @@ def test_copy_run_network_read_collects_snapshots_deltas_signals_and_paper(tmp_p
         "userFees",
         "userRateLimit",
     }.issubset(set(fake.calls))
+    assert "l2Book:BTC" in fake.calls
+    assert report.scan_features_rows >= 1
+    assert report.scan_features_json_path is not None
+    assert report.scan_features_csv_path is not None
+    assert report.decision_ledger_entries >= 1
+    assert report.decision_ledger_json_path is not None
+    scan_rows = json.loads(Path(report.scan_features_json_path).read_text(encoding="utf-8"))
+    ledger_rows = json.loads(Path(report.decision_ledger_json_path).read_text(encoding="utf-8"))
+    assert scan_rows
+    assert scan_rows[0]["symbol"] == "BTC"
+    assert scan_rows[0]["l2_levels_per_side"] == 2
+    assert Path(report.scan_features_csv_path).exists()
+    assert any(row.get("paper_intent_id") and row.get("paper_trade_id") for row in ledger_rows)
     assert report.deltas_seen >= 1
     assert report.signal_candidates
     assert all(signal.edge_remaining_bps is not None for signal in report.signal_candidates)
@@ -186,6 +211,16 @@ def test_copy_run_without_network_read_records_no_trade(tmp_path):
     report = run_copy_dry_run(config, interval_seconds=300, network_read=False)
 
     assert any(decision.reason == NoTradeReason.NETWORK_READ_DISABLED for decision in report.no_trade_decisions)
+
+
+def test_copy_run_ws_without_duration_records_fallback_no_trade(tmp_path):
+    config = _config(tmp_path)
+    _write_shortlist(config)
+
+    report = run_copy_dry_run(config, interval_seconds=300, network_read=False, ws=True, duration_seconds=None)
+
+    assert any(decision.reason == NoTradeReason.WEBSOCKET_LIMIT_GUARD for decision in report.no_trade_decisions)
+    assert any(str(item).startswith("ws_fallback:") for item in report.source_failures)
 
 
 def test_copy_run_refuses_paper_sizing_when_leader_equity_missing(tmp_path):

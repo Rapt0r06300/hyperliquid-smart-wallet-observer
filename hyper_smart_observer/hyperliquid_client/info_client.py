@@ -43,6 +43,10 @@ class PaginationResult:
     pages_fetched: int = 0
     stopped_reason: str = "not_started"
     warnings: list[str] = field(default_factory=list)
+    window_complete: bool = False
+    truncated: bool = False
+    oldest_available_ts: int | None = None
+    aggregate_by_time_used: bool = False
 
 
 class HyperliquidInfoClient:
@@ -115,6 +119,26 @@ class HyperliquidInfoClient:
         response = self.post_info(info_payload("allMids"))
         return _expect_dict(response, "allMids")
 
+    def get_l2_book(self, coin: str) -> dict[str, Any]:
+        response = self.post_info(info_payload("l2Book", coin=str(coin).upper()))
+        return _expect_dict(response, "l2Book")
+
+    def get_candle_snapshot(
+        self,
+        coin: str,
+        *,
+        interval: str = "1m",
+        start_time_ms: int | None = None,
+        end_time_ms: int | None = None,
+    ) -> list[dict[str, Any]]:
+        req: dict[str, Any] = {"coin": str(coin).upper(), "interval": interval}
+        if start_time_ms is not None:
+            req["startTime"] = int(start_time_ms)
+        if end_time_ms is not None:
+            req["endTime"] = int(end_time_ms)
+        response = self.post_info(info_payload("candleSnapshot", req=req))
+        return _expect_list(response, "candleSnapshot")
+
     def get_clearinghouse_state(self, address: str) -> dict[str, Any]:
         response = self.post_info(user_payload("clearinghouseState", address))
         return _expect_dict(response, "clearinghouseState")
@@ -149,10 +173,15 @@ class HyperliquidInfoClient:
         end_time_ms: int,
         *,
         max_pages: int | None = None,
+        aggregate_by_time: bool = False,
     ) -> PaginationResult:
         max_pages = max_pages if max_pages is not None else self.config.max_pages_per_wallet
         if max_pages <= 0:
-            return PaginationResult(stopped_reason="max_pages_zero")
+            return PaginationResult(
+                stopped_reason="max_pages_zero",
+                truncated=True,
+                aggregate_by_time_used=aggregate_by_time,
+            )
 
         user = normalize_wallet_address(address)
         current_start = int(start_time_ms)
@@ -160,27 +189,61 @@ class HyperliquidInfoClient:
         warnings: list[str] = []
         pages = 0
         while pages < max_pages and current_start <= end_time_ms:
-            page = self.get_user_fills_by_time(user, current_start, end_time_ms)
+            page = self.get_user_fills_by_time(
+                user,
+                current_start,
+                end_time_ms,
+                aggregate_by_time=aggregate_by_time,
+            )
             pages += 1
             if not page:
-                return PaginationResult(all_fills, pages, "empty_response", warnings)
+                return _pagination_result(
+                    all_fills,
+                    pages,
+                    "empty_response",
+                    warnings,
+                    window_complete=True,
+                    aggregate_by_time_used=aggregate_by_time,
+                )
             all_fills.extend(page)
             if len(all_fills) >= self.config.max_fills_per_run:
-                return PaginationResult(
+                return _pagination_result(
                     all_fills[: self.config.max_fills_per_run],
                     pages,
                     "max_fills_reached",
                     warnings,
+                    truncated=True,
+                    aggregate_by_time_used=aggregate_by_time,
                 )
             last_timestamp = _max_fill_timestamp(page)
             if last_timestamp is None:
                 warnings.append("no_timestamp_in_page")
-                return PaginationResult(all_fills, pages, "timestamp_missing", warnings)
+                return _pagination_result(
+                    all_fills,
+                    pages,
+                    "timestamp_missing",
+                    warnings,
+                    aggregate_by_time_used=aggregate_by_time,
+                )
             if last_timestamp <= current_start:
                 warnings.append("timestamp_not_progressing")
-                return PaginationResult(all_fills, pages, "timestamp_not_progressing", warnings)
+                return _pagination_result(
+                    all_fills,
+                    pages,
+                    "timestamp_not_progressing",
+                    warnings,
+                    truncated=True,
+                    aggregate_by_time_used=aggregate_by_time,
+                )
             current_start = last_timestamp + 1
-        return PaginationResult(all_fills, pages, "max_pages_reached", warnings)
+        return _pagination_result(
+            all_fills,
+            pages,
+            "max_pages_reached",
+            warnings,
+            truncated=True,
+            aggregate_by_time_used=aggregate_by_time,
+        )
 
     def get_open_orders(self, address: str) -> list[dict[str, Any]]:
         response = self.post_info(user_payload("openOrders", address))
@@ -240,3 +303,36 @@ def _max_fill_timestamp(page: list[dict[str, Any]]) -> int | None:
         except (TypeError, ValueError):
             continue
     return max(timestamps) if timestamps else None
+
+
+def _oldest_fill_timestamp(fills: list[dict[str, Any]]) -> int | None:
+    timestamps: list[int] = []
+    for item in fills:
+        value = item.get("time") if "time" in item else item.get("timestamp")
+        try:
+            timestamps.append(int(value))
+        except (TypeError, ValueError):
+            continue
+    return min(timestamps) if timestamps else None
+
+
+def _pagination_result(
+    fills: list[dict[str, Any]],
+    pages: int,
+    stopped_reason: str,
+    warnings: list[str],
+    *,
+    window_complete: bool = False,
+    truncated: bool = False,
+    aggregate_by_time_used: bool = False,
+) -> PaginationResult:
+    return PaginationResult(
+        fills=fills,
+        pages_fetched=pages,
+        stopped_reason=stopped_reason,
+        warnings=warnings,
+        window_complete=window_complete,
+        truncated=truncated,
+        oldest_available_ts=_oldest_fill_timestamp(fills),
+        aggregate_by_time_used=aggregate_by_time_used,
+    )

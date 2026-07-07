@@ -168,6 +168,8 @@ def test_throughput_plan_refuses_bypass_and_aggressive_scraping() -> None:
 
     assert plan.starts is False
     assert plan.execution == "forbidden"
+    assert plan.selected_wallets == 0
+    assert "BYPASS_OVERRIDE_ACTIVE" not in plan.warnings
     assert "RATE_LIMIT_BYPASS_REFUSED" in plan.refusal_reasons
     assert "AGGRESSIVE_SCRAPING_REFUSED" in plan.refusal_reasons
 

@@ -79,93 +79,12 @@ class DiscoveryResult:
 
 
 # ---------------------------------------------------------------------------
-# Wallets synthétiques pour le mode démo (aucun réseau requis)
+# Legacy artificial discovery guard. It never returns wallets.
 # ---------------------------------------------------------------------------
-_DEMO_WALLET_SPECS = [
-    # ALPHA, BETA, GAMMA partagent tous ETH-USD LONG + BTC-USD LONG
-    # → detect_clusters(min_wallets=2) détecte 2 clusters dès le tick 1
-    {
-        "address": "dydx1qjfsuqfpjqfsuqfpjqfsuqfpjqfsuqfpjfaa",
-        "label": "DEMO-ALPHA",
-        "markets": [
-            {"market": "ETH-USD", "side": "LONG", "notional": 15000},
-            {"market": "BTC-USD", "side": "LONG", "notional": 8000},
-        ],
-        "balance": 50000,
-        "winrate": 0.61,
-        "profit_factor": 1.85,
-        "score": 0.82,
-    },
-    {
-        "address": "dydx1rjfsuqfpjqfsuqfpjqfsuqfpjqfsuqfpjfbb",
-        "label": "DEMO-BETA",
-        # BUG FIX: était ETH SHORT + SOL LONG → aucun overlap possible
-        "markets": [
-            {"market": "ETH-USD", "side": "LONG", "notional": 12000},
-            {"market": "BTC-USD", "side": "LONG", "notional": 10000},
-        ],
-        "balance": 40000,
-        "winrate": 0.58,
-        "profit_factor": 1.65,
-        "score": 0.75,
-    },
-    {
-        "address": "dydx1sjfsuqfpjqfsuqfpjqfsuqfpjqfsuqfpjfcc",
-        "label": "DEMO-GAMMA",
-        # BUG FIX: était BTC SHORT → aucun overlap avec ALPHA
-        "markets": [
-            {"market": "BTC-USD", "side": "LONG", "notional": 20000},
-            {"market": "ETH-USD", "side": "LONG", "notional": 10000},
-            {"market": "SOL-USD", "side": "LONG", "notional": 5000},
-        ],
-        "balance": 80000,
-        "winrate": 0.63,
-        "profit_factor": 1.95,
-        "score": 0.85,
-    },
-    {
-        "address": "dydx1tjfsuqfpjqfsuqfpjqfsuqfpjqfsuqfpjfdd",
-        "label": "DEMO-DELTA",
-        # Wallet 4: SOL + AVAX → clusters SOL (w/ GAMMA) et AVAX diversifiés
-        "markets": [
-            {"market": "SOL-USD", "side": "LONG", "notional": 8000},
-            {"market": "AVAX-USD", "side": "LONG", "notional": 6000},
-            {"market": "BNB-USD", "side": "LONG", "notional": 5000},
-        ],
-        "balance": 60000,
-        "winrate": 0.59,
-        "profit_factor": 1.70,
-        "score": 0.78,
-    },
-]
-
-
-def _build_demo_wallets() -> list[WalletScore]:
-    """Construit des WalletScore synthétiques pour la simulation démo."""
-    result = []
-    for spec in _DEMO_WALLET_SPECS:
-        ws = WalletScore(
-            address=spec["address"],
-            subaccount_number=0,
-            usdc_balance=float(spec["balance"]),
-            open_positions=[
-                {"market": m["market"], "side": m["side"], "notional": m["notional"]}
-                for m in spec["markets"]
-            ],
-            balance_score=min(1.0, spec["balance"] / 100_000),
-            market_priority_score=0.8,
-            position_count_score=min(1.0, len(spec["markets"]) / 3),
-            total_score=spec["score"],
-            winrate=spec["winrate"],
-            profit_factor=spec["profit_factor"],
-            net_pnl_usdc=spec["balance"] * 0.12,  # ~12% PnL démo
-            trade_count=30,
-            note=f"[{spec['label']}] demo_synthetic",
-            source="demo_synthetic",
-        )
-        result.append(ws)
-    return result
-
+def _disabled_artificial_wallets() -> list[WalletScore]:
+    """Legacy guard: artificial wallet generation is permanently disabled."""
+    logger.warning("Legacy artificial wallet generation requested; returning empty shortlist.")
+    return []
 
 class DydxWalletDiscovery:
     """
@@ -189,28 +108,33 @@ class DydxWalletDiscovery:
         self.rest = rest_client
         self.min_usdc = min_usdc_balance
         self.max_scan_pages = max_scan_pages
-        self._demo_mode = demo_mode
+        self._artificial_mode_requested = bool(demo_mode)
+        if demo_mode:
+            logger.warning("Legacy artificial discovery requested but disabled; real data only.")
 
     def fast_discover(self, n: int = 20) -> DiscoveryResult:
         """Découverte rapide < 10s. Paper-only. Aucun ordre.
 
-        Si demo_mode=True ou si Cosmos LCD renvoie 0 candidats,
-        injecte des wallets synthétiques pour que la simulation reste active.
+        Si l'ancien mode artificiel est demande ou si Cosmos LCD renvoie 0
+        candidats, la shortlist reste vide. Aucun wallet n'est invente.
         """
         import hashlib
         started = int(time.time() * 1000)
         run_id = hashlib.sha256(f"fast:{started}".encode()).hexdigest()[:16]
-        logger.info("fast_discover START run_id=%s n=%d demo=%s", run_id, n, self._demo_mode)
+        logger.info(
+            "fast_discover START run_id=%s n=%d artificial_requested=%s",
+            run_id,
+            n,
+            self._artificial_mode_requested,
+        )
 
-        if self._demo_mode:
-            # Mode démo: retourner des wallets synthétiques immédiatement
-            shortlist = _build_demo_wallets()
+        if self._artificial_mode_requested:
+            shortlist = _disabled_artificial_wallets()
             finished = int(time.time() * 1000)
-            logger.info("fast_discover DEMO: %d wallets synthétiques", len(shortlist))
             return DiscoveryResult(
                 run_id=run_id, started_at_ms=started, finished_at_ms=finished,
                 candidates_scanned=0, shortlisted=shortlist,
-                discovery_method="demo_synthetic",
+                discovery_method="artificial_generation_disabled",
             )
 
         candidates = []
@@ -219,15 +143,12 @@ class DydxWalletDiscovery:
                 max_pages=60, page_size=100, min_usdc=250.0, only_with_positions=True,
             )
         except Exception as e:
-            logger.warning("Cosmos LCD unavailable: %s — activating demo mode", e)
-            self._demo_mode = True
-            shortlist = _build_demo_wallets()
+            logger.warning("Cosmos LCD unavailable: %s -- no demo fallback", e)
             finished = int(time.time() * 1000)
-            logger.info("fast_discover DEMO (fallback): %d wallets synthétiques", len(shortlist))
             return DiscoveryResult(
                 run_id=run_id, started_at_ms=started, finished_at_ms=finished,
-                candidates_scanned=0, shortlisted=shortlist,
-                discovery_method="demo_synthetic_fallback",
+                candidates_scanned=0, shortlisted=[],
+                discovery_method="cosmos_lcd_unavailable",
             )
 
         logger.info("fast_discover scan: %d candidats", len(candidates))
@@ -244,14 +165,12 @@ class DydxWalletDiscovery:
         scored.sort(key=lambda x: x.total_score, reverse=True)
         shortlist = scored[:n]
 
-        # Fallback démo si aucun wallet réel trouvé
         if not shortlist:
-            logger.warning("fast_discover: 0 wallets réels — injection démo synthétique")
-            shortlist = _build_demo_wallets()
-            self._demo_mode = True
-            discovery_method = "demo_synthetic_fallback"
+            logger.warning("fast_discover: 0 wallets reels -- no demo fallback")
+            discovery_method = "fast_cosmos_lcd_empty"
         else:
             discovery_method = "fast_cosmos_lcd"
+
 
         finished = int(time.time() * 1000)
         logger.info(
@@ -282,8 +201,8 @@ class DydxWalletDiscovery:
 
         started = int(time.time() * 1000)
         run_id = hashlib.sha256(f"fast-async:{started}".encode()).hexdigest()[:16]
-        if self._demo_mode:
-            shortlist = _build_demo_wallets()[:n]
+        if self._artificial_mode_requested:
+            shortlist = _disabled_artificial_wallets()
             finished = int(time.time() * 1000)
             return DiscoveryResult(
                 run_id=run_id,
@@ -291,7 +210,7 @@ class DydxWalletDiscovery:
                 finished_at_ms=finished,
                 candidates_scanned=0,
                 shortlisted=shortlist,
-                discovery_method="demo_synthetic_async",
+                discovery_method="artificial_generation_disabled_async",
             )
 
         try:
@@ -303,17 +222,15 @@ class DydxWalletDiscovery:
                 only_with_positions=True,
             )
         except Exception as e:
-            logger.warning("Cosmos LCD unavailable async: %s — activating demo mode", e)
-            self._demo_mode = True
-            shortlist = _build_demo_wallets()[:n]
+            logger.warning("Cosmos LCD unavailable async: %s -- no demo fallback", e)
             finished = int(time.time() * 1000)
             return DiscoveryResult(
                 run_id=run_id,
                 started_at_ms=started,
                 finished_at_ms=finished,
                 candidates_scanned=0,
-                shortlisted=shortlist,
-                discovery_method="demo_synthetic_async_fallback",
+                shortlisted=[],
+                discovery_method="cosmos_lcd_async_unavailable",
             )
 
         candidates = list(candidates or [])[:max(1, max_candidates)]
@@ -587,4 +504,21 @@ class DydxWalletDiscovery:
                     0.20 * ws.position_count_score +
                     0.15 * (ws.winrate - 0.3) / 0.4 +
                     0.10 * data_conf +
-       
+                    pnl_bonus
+                ))
+                ws.note += (
+                    f" | scored: trades={total} wr={ws.winrate:.0%}"
+                    f" pf={ws.profit_factor:.2f} pnl={ws.net_pnl_usdc:+.2f}"
+                    f" dd={account_score.max_drawdown:.2f}"
+                )
+
+        except RestError as e:
+            logger.debug("Indexer enrichment error %s: %s", ws.address, e)
+        except Exception as e:
+            logger.debug("Enrichment error %s: %s", ws.address, e)
+
+
+def build_seed_shortlist() -> list[WalletScore]:
+    """Shortlist initiale vide."""
+    return []
+

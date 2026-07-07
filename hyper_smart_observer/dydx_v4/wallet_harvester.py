@@ -1,4 +1,4 @@
-"""
+r"""
 Moteur de découverte multi-sources de wallets — READ-ONLY / PAPER-ONLY.
 
 But: avoir le MAXIMUM de wallets candidats, vite, en imitant — et en dépassant —

@@ -45,11 +45,14 @@ def correlated_count_reason(observer: Any, market: str, side: str) -> str | None
 
 
 def neutral_demo_price(existing: float, base: float, seed_seconds: int | None = None) -> float:
-    rng = random.Random(seed_seconds if seed_seconds is not None else int(time.time()) // 5)
-    price = float(existing or base) * (1.0 + rng.uniform(-0.0015, 0.0015))
-    if abs(price - base) / base > 0.05:
-        price = base * (1.0 + rng.uniform(-0.02, 0.02))
-    return round(price, 4)
+    """DÉMO RETIRÉE (2026-06-21, demande utilisateur): plus aucun prix fabriqué.
+
+    Cette fonction générait auparavant un prix factice (bruit aléatoire) pour le
+    mode démo. Conformément à la règle "aucune donnée fabriquée / aucun faux PnL",
+    elle ne synthétise plus rien et renvoie simplement le prix RÉEL fourni
+    (`existing`, sinon `base`). Signature conservée pour ne casser aucun appelant.
+    """
+    return round(float(existing or base or 0.0), 4)
 
 
 def next_pyramid_index(open_positions: dict, market: str, side: str) -> int:
@@ -99,6 +102,7 @@ def _decision_v2(observer: Any, cluster: Any):
         flow_imbalance=strength,
         flow_volume_usdc=float(getattr(cluster, "total_notional_usdc", 0.0) or 0.0),
         flow_trade_count=int(getattr(cluster, "flow_trade_count", 0) or 0),
+        large_trade_usdc=float(getattr(cluster, "flow_large_trade_usdc", 0.0) or 0.0),
         leading_wallets=wallet_count,
         consensus_wallets=wallet_count,
         signal_age_ms=int(getattr(cluster, "signal_age_ms", 0) or 0),
@@ -110,7 +114,7 @@ def _decision_v2(observer: Any, cluster: Any):
     )
     ctx = TunedDecisionContext(
         spread_bps=float(getattr(observer.config, "estimated_spread_bps", 3.0) or 3.0),
-        slippage_bps=float(getattr(observer.config, "estimated_slippage_bps", 5.0) or 5.0),
+        slippage_bps=float(getattr(observer.config, "estimated_slippage_bps", 1.5) or 1.5),
         open_positions=len(observer._open_positions),
         market_exposure_usdc=sum(abs(float(getattr(p, "size", 0.0) or 0.0)) for p in same_market),
         base_notional_usdc=float(getattr(observer.config, "paper_notional_base_usdc", 75.0) or 75.0),

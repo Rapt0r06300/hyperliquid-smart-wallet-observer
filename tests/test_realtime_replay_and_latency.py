@@ -123,6 +123,54 @@ def test_summary_cache_is_reused_only_for_same_source_signature(tmp_path):
     assert refreshed.event_count == 3
 
 
+def test_summary_does_not_count_shadow_github_evaluations_as_accepted(tmp_path):
+    log_dir = tmp_path / "logs a envoyer"
+    log_dir.mkdir(parents=True)
+    rows = [
+        {
+            "timestamp_ms": 100,
+            "bot_decision": "EXTERNAL_GITHUB_PROFILE_EVALUATED",
+            "status": "SIMULATION_ENGINE_EVENT",
+            "paper_action_type": "ENGINE_EVALUATION",
+            "coin": "WHALE_WALLET_MIRROR",
+            "copied_notional_usdt": 0.0,
+            "execution": "forbidden",
+            "research_only": True,
+        },
+        {
+            "timestamp_ms": 200,
+            "bot_decision": "REJECT_NO_TRADE",
+            "status": "REJECT_NO_TRADE",
+            "reason": "EDGE_REMAINING_TOO_LOW",
+            "coin": "HYPE",
+            "execution": "forbidden",
+            "research_only": True,
+        },
+        {
+            "timestamp_ms": 300,
+            "bot_decision": "FUSION_PAPER_ENTRY",
+            "status": "LOCAL_REPLAY",
+            "coin": "BTC",
+            "copied_notional_usdt": 40.0,
+            "fee_cost_usdc": 0.02,
+            "execution": "forbidden",
+            "research_only": True,
+        },
+    ]
+    (log_dir / "simulation_decisions_latest.jsonl").write_text(
+        "".join(json.dumps(row) + "\n" for row in rows),
+        encoding="utf-8",
+    )
+
+    analysis = analyze_decision_logs_summary(log_dir)
+
+    assert analysis.event_count == 3
+    assert analysis.accepted_count == 1
+    assert analysis.refused_count == 1
+    assert analysis.action_counts["EXTERNAL_GITHUB_PROFILE_EVALUATED"] == 1
+    assert analysis.top_refusal_reasons == (("EDGE_REMAINING_TOO_LOW", 1),)
+
+
 def test_summary_uses_structured_dydx_log_when_latest_export_is_empty(tmp_path):
     log_dir = tmp_path / "logs" / "logs à envoyer"
     structured_dir = tmp_path / "logs" / "structured"

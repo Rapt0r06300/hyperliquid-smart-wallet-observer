@@ -142,6 +142,65 @@ def test_optimizer_never_counts_no_trade_rows_as_selected_trades(tmp_path: Path)
     assert candidate.total_net_pnl_usdc == 0.0
 
 
+def test_optimizer_uses_snapshot_ledger_when_latest_is_shadow_only(tmp_path: Path):
+    log_dir = tmp_path / "logs"
+    log_dir.mkdir()
+    (log_dir / "simulation_decisions_latest.jsonl").write_text(
+        json.dumps(
+            {
+                "bot_decision": "EXTERNAL_GITHUB_PROFILE_EVALUATED",
+                "paper_action_type": "ENGINE_EVALUATION",
+                "status": "SIMULATION_ENGINE_EVENT",
+                "coin": "SHADOW_PROFILE",
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    (log_dir / "simulation_snapshot_latest.json").write_text(
+        json.dumps(
+            {
+                "paper_ledger": {
+                    "closed_trade_stats": {
+                        "recent_closed_trades": [
+                            {
+                                "observed_at_ms": 1,
+                                "coin": "BTC",
+                                "bot_replay_action": "PAPER_CLOSE_REPLAYED",
+                                "paper_action_type": "CLOSE",
+                                "status": "LOCAL_REPLAY",
+                                "estimated_net_pnl_usdc": -0.6,
+                                "gross_pnl_usdc": -0.5,
+                                "fee_cost_usdc": 0.1,
+                                "edge_remaining_bps": 100,
+                                "signal_age_ms": 1_000,
+                                "copy_degradation_bps": 5,
+                                "consensus_wallets": 3,
+                                "copied_notional_usdt": 50,
+                                "dedupe_identity": "btc-close",
+                            }
+                        ]
+                    }
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    report = run_strategy_tournament(
+        log_dir,
+        configs=(
+            StrategyConfig(name="no_trade_baseline", min_edge_remaining_bps=999_999),
+            StrategyConfig(name="candidate", min_edge_remaining_bps=50),
+        ),
+    )
+    candidate = next(result for result in report.strategies if result.config.name == "candidate")
+
+    assert candidate.selected_events == 1
+    assert candidate.total_net_pnl_usdc == -0.6
+    assert report.protection_mode_recommended is True
+
+
 def test_optimizer_cli_writes_reports(tmp_path: Path):
     log_dir = tmp_path / "logs"
     output_dir = tmp_path / "reports"

@@ -128,6 +128,40 @@ def update_paper_trade_close(
     )
 
 
+def update_paper_trade_after_partial(
+    conn: sqlite3.Connection,
+    *,
+    trade_id: str,
+    remaining_size: float,
+    remaining_notional: float,
+    remaining_simulated_fee: float,
+    remaining_simulated_slippage: float,
+    remaining_fee_entry: float,
+    remaining_slippage_entry: float,
+    remaining_spread_cost: float,
+) -> None:
+    conn.execute(
+        """
+        UPDATE paper_trades
+        SET size = ?, notional = ?, simulated_fee = ?, simulated_slippage = ?,
+            fee_entry = ?, slippage_entry = ?, spread_cost = ?,
+            state = 'OPEN', status = ?
+        WHERE trade_id = ?
+        """,
+        (
+            remaining_size,
+            remaining_notional,
+            remaining_simulated_fee,
+            remaining_simulated_slippage,
+            remaining_fee_entry,
+            remaining_slippage_entry,
+            remaining_spread_cost,
+            PaperTradeStatus.OPEN.value,
+            trade_id,
+        ),
+    )
+
+
 def get_paper_trade(conn: sqlite3.Connection, trade_id: str) -> sqlite3.Row | None:
     return conn.execute("SELECT * FROM paper_trades WHERE trade_id = ?", (trade_id,)).fetchone()
 

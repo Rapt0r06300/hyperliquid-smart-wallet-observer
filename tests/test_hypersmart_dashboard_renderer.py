@@ -1,3 +1,4 @@
+import json
 from datetime import datetime, timedelta
 try:
     from datetime import UTC
@@ -23,6 +24,7 @@ def test_dashboard_export_creates_readonly_html(tmp_path):
     assert "Simulation" in text
     assert "No mock USDC wallet" in text
     assert "Consensus Positions" in text
+    assert "No scan_features export stored yet" in text
 
 
 def test_dashboard_simulation_tab_reads_latest_report(tmp_path):
@@ -97,3 +99,40 @@ def test_dashboard_consensus_section_reads_leader_deltas(tmp_path):
     assert "LONG" in text
     assert "2: 0x0000000000000000000000000000000000000001" in text
     assert "never guaranteed profit" in text
+
+
+def test_dashboard_reads_latest_scan_features_export(tmp_path):
+    reports_dir = tmp_path / "reports"
+    scan_dir = reports_dir / "scan_features"
+    scan_dir.mkdir(parents=True)
+    (scan_dir / "scan_features_run1.json").write_text(
+        json.dumps(
+            [
+                {
+                    "timestamp_ms": 1_800_000_000_000,
+                    "wallet": "0x" + "a" * 40,
+                    "symbol": "BTC",
+                    "current_mid": 100.2,
+                    "spread_bps": 4.0,
+                    "liquidity_score": 88.0,
+                    "edge_remaining_bps": 42.0,
+                    "data_quality": "OK",
+                    "source_health": "OK",
+                }
+            ]
+        ),
+        encoding="utf-8",
+    )
+    config = AppConfig(
+        database_path=tmp_path / "db.sqlite3",
+        dashboard_dir=tmp_path / "dashboard",
+        reports_dir=reports_dir,
+        runtime_root=tmp_path,
+    )
+
+    text = export_dashboard(config).read_text(encoding="utf-8")
+
+    assert "Market Signal Features" in text
+    assert "scan_features_run1.json" in text
+    assert "BTC" in text
+    assert "42.0" in text

@@ -80,6 +80,159 @@ def test_logs_analyzer_cli_outputs_streaming_report(tmp_path: Path):
     assert "STALE_SIGNAL" in result.output
 
 
+def test_logs_analyzer_does_not_count_shadow_github_evaluations_as_accepted(tmp_path: Path):
+    log_dir = tmp_path / "logs"
+    rows = [
+        {
+            "bot_decision": "EXTERNAL_GITHUB_PROFILE_EVALUATED",
+            "status": "SIMULATION_ENGINE_EVENT",
+            "paper_action_type": "ENGINE_EVALUATION",
+            "coin": "WHALE_WALLET_MIRROR",
+            "copied_notional_usdt": 0.0,
+            "estimated_net_pnl_usdc": 0.0,
+        },
+        {
+            "bot_decision": "REJECT_NO_TRADE",
+            "status": "REJECT_NO_TRADE",
+            "reason": "EDGE_REMAINING_TOO_LOW",
+            "coin": "HYPE",
+        },
+        {
+            "bot_decision": "FUSION_PAPER_ENTRY",
+            "status": "LOCAL_REPLAY",
+            "coin": "BTC",
+            "copied_notional_usdt": 40.0,
+            "fee_cost_usdc": 0.02,
+        },
+    ]
+    _write_rows(log_dir, rows)
+
+    report = analyze_logs_streaming(log_dir)
+
+    assert report.total_decisions == 3
+    assert report.accepted == 1
+    assert report.refused == 1
+    assert report.actions["EXTERNAL_GITHUB_PROFILE_EVALUATED"] == 1
+    assert report.reasons["EDGE_REMAINING_TOO_LOW"] == 1
+
+
+def test_logs_analyzer_uses_snapshot_paper_ledger_when_latest_is_shadow_only(tmp_path: Path):
+    log_dir = tmp_path / "logs"
+    log_dir.mkdir()
+    shadow_rows = [
+        {
+            "bot_decision": "EXTERNAL_GITHUB_PROFILE_EVALUATED",
+            "bot_replay_action": "EXTERNAL_GITHUB_PROFILE_EVALUATED",
+            "paper_action_type": "ENGINE_EVALUATION",
+            "status": "SIMULATION_ENGINE_EVENT",
+            "coin": "RESEARCH_PROFILE",
+            "estimated_net_pnl_usdc": None,
+            "fee_cost_usdc": 0.0,
+            "delta_key": "shadow-profile-1",
+        }
+    ]
+    (log_dir / "simulation_decisions_latest.jsonl").write_text(
+        "".join(json.dumps(row) + "\n" for row in shadow_rows),
+        encoding="utf-8",
+    )
+    close_rows = [
+        {
+            "observed_at_ms": 10,
+            "wallet_address": "0x" + "1" * 40,
+            "coin": "BTC",
+            "bot_replay_action": "PAPER_CLOSE_REPLAYED",
+            "paper_action_type": "CLOSE",
+            "status": "LOCAL_REPLAY",
+            "reason": "SLTP_TAKE_PROFIT_LOCAL_REPLAY_NOT_AN_ORDER",
+            "estimated_net_pnl_usdc": 1.25,
+            "gross_pnl_usdc": 1.32,
+            "fee_cost_usdc": 0.07,
+            "dedupe_identity": "btc-close-1",
+        },
+        {
+            "observed_at_ms": 20,
+            "wallet_address": "0x" + "2" * 40,
+            "coin": "ETH",
+            "bot_replay_action": "PAPER_CLOSE_REPLAYED",
+            "paper_action_type": "CLOSE",
+            "status": "LOCAL_REPLAY",
+            "reason": "SLTP_STOP_LOSS_LOCAL_REPLAY_NOT_AN_ORDER",
+            "estimated_net_pnl_usdc": -0.5,
+            "gross_pnl_usdc": -0.44,
+            "fee_cost_usdc": 0.06,
+            "dedupe_identity": "eth-close-1",
+        },
+    ]
+    (log_dir / "simulation_snapshot_latest.json").write_text(
+        json.dumps(
+            {
+                "bot_simulation": {"ledger_events": shadow_rows},
+                "paper_ledger": {"closed_trade_stats": {"recent_closed_trades": close_rows}},
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    report = analyze_logs_streaming(log_dir)
+
+    assert {path.name for path in report.source_files} == {
+        "simulation_decisions_latest.jsonl",
+        "simulation_snapshot_latest.json",
+    }
+    assert report.total_decisions == 3
+    assert report.accepted == 2
+    assert report.positive_events == 1
+    assert report.negative_events == 1
+    assert report.net_pnl_usdc == 0.75
+    assert report.fees_usdc == 0.13
+    assert report.pnl_by_action["PAPER_CLOSE_REPLAYED"] == 0.75
+    assert report.actions["EXTERNAL_GITHUB_PROFILE_EVALUATED"] == 1
+
+
+def test_logs_analyzer_prefers_explicit_pnl_ledger_over_shadow_latest(tmp_path: Path):
+    log_dir = tmp_path / "logs"
+    log_dir.mkdir()
+    (log_dir / "simulation_decisions_latest.jsonl").write_text(
+        json.dumps(
+            {
+                "bot_decision": "EXTERNAL_GITHUB_PROFILE_EVALUATED",
+                "paper_action_type": "ENGINE_EVALUATION",
+                "status": "SIMULATION_ENGINE_EVENT",
+                "coin": "SHADOW_PROFILE",
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    (log_dir / "simulation_pnl_ledger_latest.jsonl").write_text(
+        json.dumps(
+            {
+                "observed_at_ms": 42,
+                "wallet_address": "0x" + "3" * 40,
+                "coin": "HYPE",
+                "bot_replay_action": "PAPER_CLOSE_REPLAYED",
+                "paper_action_type": "CLOSE",
+                "status": "LOCAL_REPLAY",
+                "reason": "SLTP_TAKE_PROFIT_LOCAL_REPLAY_NOT_AN_ORDER",
+                "estimated_net_pnl_usdc": 0.8,
+                "gross_pnl_usdc": 0.85,
+                "fee_cost_usdc": 0.05,
+                "dedupe_identity": "hype-close-1",
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    report = analyze_logs_streaming(log_dir)
+
+    assert [path.name for path in report.source_files] == ["simulation_pnl_ledger_latest.jsonl"]
+    assert report.total_decisions == 1
+    assert report.accepted == 1
+    assert report.net_pnl_usdc == 0.8
+    assert report.actions["EXTERNAL_GITHUB_PROFILE_EVALUATED"] == 0
+
+
 def test_logs_analyzer_prefers_structured_dydx_log_and_event_level_pnl(tmp_path: Path):
     log_dir = tmp_path / "logs" / "logs à envoyer"
     structured_dir = tmp_path / "logs" / "structured"

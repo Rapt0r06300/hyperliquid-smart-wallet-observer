@@ -65,7 +65,7 @@ class WalletLocalIndex:
         return len(self._wallets)
 
 
-def fake_wallet(index: int) -> IndexedWallet:
+def fake_wallet(index: int) -> IndexedWallet:  # fake-data-scan: allow deterministic local-index benchmark fixture (no market/PnL data, never in trading path)
     hex_part = f"{index:040x}"[-40:]
     return IndexedWallet(
         wallet_address=f"0x{hex_part}",

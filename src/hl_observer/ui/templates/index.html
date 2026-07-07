@@ -3,15 +3,15 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>HyperSmart Observer — dYdX v4 Command Center</title>
+    <title>HyperSmart Observer - Hyperliquid Command Center</title>
     <link rel="stylesheet" href="/static/app.css?v=simulation-ui-20260612-antijump-v5" />
   </head>
   <body>
     <div class="scanline"></div>
     <header class="topbar">
       <div>
-        <p class="eyebrow">HyperSmart Observer — dYdX v4</p>
-        <h1>dYdX v4 Smart-Wallet Observer — Copy Trading Paper</h1>
+        <p class="eyebrow">HyperSmart Observer - Hyperliquid</p>
+        <h1>Hyperliquid Smart-Wallet Observer - Simulation Paper</h1>
       </div>
       <div class="status-strip">
         <span id="modeBadge" class="badge cyan">PAPER</span>
@@ -35,22 +35,22 @@
       <section class="panel data-watch hero-simulation" id="simulationPanel">
         <div class="panel-title">
           <span class="dot green pulse"></span>
-          <h2>dYdX v4 — Simulation paper copy-trading</h2>
-          <span id="dydxEngineBadge" class="badge orange" style="margin-left:auto">DEMARRAGE...</span>
+          <h2>Hyperliquid - Simulation paper copy-trading</h2>
+          <span id="hlEngineBadge" class="badge orange" style="margin-left:auto">DEMARRAGE...</span>
         </div>
-        <!-- Panneau dYdX live -->
-        <div id="dydxLivePanel" style="background:rgba(0,255,180,.04);border:1px solid rgba(0,255,180,.18);border-radius:8px;padding:12px 16px;margin-bottom:12px;font-size:13px">
-          <div style="display:flex;flex-wrap:wrap;gap:10px" id="dydxMetrics">
-            <div class="simulation-metric"><span>PnL dYdX paper</span><strong id="dydxPnl">$0.00</strong></div>
-            <div class="simulation-metric"><span>Equity</span><strong id="dydxEquity">$1000.00</strong></div>
-            <div class="simulation-metric"><span>Trades</span><strong id="dydxTrades">0</strong></div>
-            <div class="simulation-metric"><span>Winrate</span><strong id="dydxWinrate">—</strong></div>
-            <div class="simulation-metric"><span>Positions ouvertes</span><strong id="dydxOpenPos">0</strong></div>
-            <div class="simulation-metric"><span>Wallets suivis</span><strong id="dydxWallets">0</strong></div>
+        <!-- Panneau Hyperliquid live -->
+        <div id="hlLivePanel" style="background:rgba(0,255,180,.04);border:1px solid rgba(0,255,180,.18);border-radius:8px;padding:12px 16px;margin-bottom:12px;font-size:13px">
+          <div style="display:flex;flex-wrap:wrap;gap:10px" id="hlMetrics">
+            <div class="simulation-metric"><span>PnL Hyperliquid paper</span><strong id="hlPnl">$0.00</strong></div>
+            <div class="simulation-metric"><span>Solde fictif</span><strong id="hlEquity">$1000.00</strong></div>
+            <div class="simulation-metric"><span>Positions virtuelles jouees</span><strong id="hlTrades">0</strong></div>
+            <div class="simulation-metric"><span>Mode</span><strong id="hlWinrate">research-only</strong></div>
+            <div class="simulation-metric"><span>Positions ouvertes</span><strong id="hlOpenPos">0</strong></div>
+            <div class="simulation-metric"><span>Leaders suivis</span><strong id="hlWallets">0</strong></div>
           </div>
-          <div id="dydxPositionsList" style="margin-top:8px;font-size:12px;opacity:.85"></div>
-          <div id="dydxNoTradePanel" style="margin-top:6px;font-size:11px;opacity:.7"></div>
-          <div style="margin-top:6px;font-size:11px;opacity:.5">dYdX v4 Indexer REST — READ-ONLY — PAPER ONLY — 0 ordre reel</div>
+          <div id="hlPositionsList" style="margin-top:8px;font-size:12px;opacity:.85"></div>
+          <div id="hlNoTradePanel" style="margin-top:6px;font-size:11px;opacity:.7"></div>
+          <div style="margin-top:6px;font-size:11px;opacity:.5">Hyperliquid /info + WS read-only - PAPER ONLY - 0 ordre reel</div>
         </div>
         <p class="section-help">
           Vue principale volontairement reduite au resultat du bot simule. Le P&L demarre a 0, ignore les anciens evenements,
@@ -121,7 +121,7 @@
           <p class="eyebrow">Auto-Pilot Discovery</p>
           <h2 id="autopilotTitle">Recherche automatique en cours</h2>
           <p id="autopilotSubtitle">
-            Le logiciel cherche automatiquement les meilleurs wallets dYdX v4 (Cosmos LCD + Indexer REST/WS),
+            Le logiciel cherche automatiquement les meilleurs wallets Hyperliquid (`/info` + WebSocket read-only),
             puis analyse positions, ouvertures, fermetures, profits, altcoins, methodologies et signaux paper.
           </p>
           <div class="hero-actions">
@@ -371,28 +371,53 @@
     </main>
     <script src="/static/app.js?v=simulation-ui-20260612-antijump-v5"></script>
     <script>
-    // ── dYdX v4 live panel ───────────────────────────────────────────────────
+    // Hyperliquid live panel: source unique /api/simulation/overview.
     (function() {
       var fmt = function(v) { return (v >= 0 ? "+" : "") + "$" + Math.abs(v).toFixed(2); };
       var fmtUsd = function(v) { return "$" + Number(v).toFixed(2); };
-      var badge = document.getElementById("dydxEngineBadge");
-      var pnlEl = document.getElementById("dydxPnl");
-      var eqEl = document.getElementById("dydxEquity");
-      var trEl = document.getElementById("dydxTrades");
-      var wrEl = document.getElementById("dydxWinrate");
-      var opEl = document.getElementById("dydxOpenPos");
-      var wlEl = document.getElementById("dydxWallets");
-      var posList = document.getElementById("dydxPositionsList");
+      var badge = document.getElementById("hlEngineBadge");
+      var pnlEl = document.getElementById("hlPnl");
+      var eqEl = document.getElementById("hlEquity");
+      var trEl = document.getElementById("hlTrades");
+      var wrEl = document.getElementById("hlWinrate");
+      var opEl = document.getElementById("hlOpenPos");
+      var wlEl = document.getElementById("hlWallets");
+      var posList = document.getElementById("hlPositionsList");
 
       function colorClass(v) { return Number(v) >= 0 ? "color:#00ffb4" : "color:#ff4444"; }
 
-      async function refreshDydx() {
+      function reasonsToObject(reasons) {
+        var out = {};
+        if (Array.isArray(reasons)) {
+          reasons.forEach(function(row) {
+            if (row && row.reason) out[String(row.reason)] = Number(row.count || 0);
+          });
+        }
+        return out;
+      }
+
+      async function refreshHyperliquid() {
         try {
-          var [status, positions, wallets] = await Promise.all([
-            fetch("/api/dydx/status").then(function(r){return r.json();}),
-            fetch("/api/dydx/positions").then(function(r){return r.json();}),
-            fetch("/api/dydx/wallets").then(function(r){return r.json();})
-          ]);
+          var overview = await fetch("/api/simulation/overview?limit=120&t=" + Date.now(), {cache: "no-store"}).then(function(r){return r.json();});
+          var equity = overview.equity || {};
+          var bot = overview.bot_simulation || {};
+          var counts = overview.counts || {};
+          var signal = overview.signal_pipeline || {};
+          var positions = Array.isArray(bot.open_positions) ? bot.open_positions : [];
+          var wallets = Array.isArray(overview.leaders) ? overview.leaders : [];
+          var status = {
+            running: true,
+            wallets_in_shortlist: Number(counts.leaders || wallets.length || 0),
+            net_pnl_usdt: Number(equity.current_pnl_usdc != null ? equity.current_pnl_usdc : (bot.estimated_net_pnl_usdc || 0)),
+            equity_usdt: Number(equity.current_equity_usdt != null ? equity.current_equity_usdt : (bot.current_equity_usdt || 1000)),
+            total_trades: Number((bot.reproduced_entries || counts.reproduced_entries || 0) + (bot.reproduced_exits || counts.reproduced_exits || 0)),
+            winrate: "research-only",
+            leader_exits: Number(bot.reproduced_exits || counts.reproduced_exits || 0),
+            signals_refused: Number(bot.refused || counts.bot_refused || 0),
+            no_trade_reasons: reasonsToObject(overview.no_trade_reasons),
+            last_error: overview.readiness || "",
+            signal_entries: Number(signal.local_entries_accepted || 0)
+          };
 
           // Anti-saut d'ecran: ce panneau reecrit #simulationSummary et des
           // listes a hauteur variable. On garde la position de scroll pendant
@@ -401,14 +426,14 @@
 
           // Badge engine
           if (badge) {
-            var isDiscovering = (status.last_error === "DISCOVERY_RUNNING");
-            var noWallets = status.running && (status.wallets_in_shortlist === 0) && !isDiscovering;
+            var isDiscovering = (status.last_error === "IMPORT_OR_DISCOVERY_REQUIRED");
+            var noWallets = false;
             if (isDiscovering) {
               badge.textContent = "SCAN WALLETS...";
               badge.style.background = "#f5a623";
               badge.style.color = "#000";
             } else if (status.running && status.wallets_in_shortlist > 0) {
-              badge.textContent = "LIVE • " + status.wallets_in_shortlist + " wallets";
+              badge.textContent = "LIVE - " + status.wallets_in_shortlist + " leaders";
               badge.style.background = "#00ffb4";
               badge.style.color = "#000";
             } else if (status.running) {
@@ -439,12 +464,12 @@
             } else {
               posList.innerHTML = positions.map(function(p) {
                 return "<span style=\"background:rgba(255,255,255,.06);border-radius:4px;padding:2px 8px;margin:2px;display:inline-block\">"
-                  + "<b>" + (p.market_id||"") + "</b> "
-                  + "<span style=\"color:" + (p.side==="LONG"?"#00ffb4":"#ff8844") + "\">" + (p.side||"") + "</span> "
-                  + "entry=" + (p.entry_price||0).toFixed(2)
-                  + " SL=" + (p.stop_loss||0).toFixed(2)
-                  + " TP=" + (p.take_profit||0).toFixed(2)
-                  + " wallets=" + (p.wallet_count||0)
+                  + "<b>" + (p.coin||p.market_id||"") + "</b> "
+                  + "<span style=\"color:" + ((p.direction||p.side)==="LONG"?"#00ffb4":"#ff8844") + "\">" + (p.direction||p.side||"") + "</span> "
+                  + "entry=" + Number(p.avg_entry_price||p.entry_price||0).toFixed(4)
+                  + " mark=" + Number(p.mark_price||0).toFixed(4)
+                  + " PnL=" + fmt(Number(p.unrealized_pnl_usdc||0))
+                  + " leaders=" + (p.leader_wallets_count||p.wallet_count||0)
                   + "</span>";
               }).join("");
             }
@@ -454,13 +479,13 @@
           var summary = document.getElementById("simulationSummary");
           if (summary && status.running) {
             var metrics = [
-              ["Gain/perte dYdX paper", fmt(pnl)],
-              ["Equity dYdX", fmtUsd(eq) + " USDT"],
-              ["Trades fermes", String(status.total_trades || 0)],
-              ["Winrate", status.winrate || "0%"],
+              ["Gain/perte Hyperliquid paper", fmt(pnl)],
+              ["Solde fictif", fmtUsd(eq) + " USDT"],
+              ["Positions virtuelles jouees", String(status.total_trades || 0)],
+              ["Mode", status.winrate || "research-only"],
               ["Leader exits", String(status.leader_exits || 0)],
               ["Refus signaux", String(status.signals_refused || 0)],
-              ["Wallets scores", String((wallets||[]).length)]
+              ["Leaders scores", String((wallets||[]).length)]
             ];
             summary.innerHTML = metrics.map(function(m) {
               return "<div class=\"simulation-metric\"><span>" + m[0] + "</span><strong>" + m[1] + "</strong></div>";
@@ -468,7 +493,7 @@
           }
 
           // No-trade reasons breakdown (viral bot: log refus autant que entrées)
-          var ntPanel = document.getElementById("dydxNoTradePanel");
+          var ntPanel = document.getElementById("hlNoTradePanel");
           if (ntPanel && status.no_trade_reasons) {
             var entries = Object.entries(status.no_trade_reasons || {});
             if (entries.length > 0) {
@@ -485,13 +510,13 @@
           window.scrollTo(_sx, _sy);
         } catch(e) {
           if (badge) { badge.textContent = "ERREUR"; badge.style.background = "#ff4444"; }
-          console.warn("dYdX panel refresh error:", e);
+          console.warn("Hyperliquid panel refresh error:", e);
         }
       }
 
-      // Poll toutes les 3 secondes
-      refreshDydx();
-      setInterval(refreshDydx, 3000);
+      // Poll toutes les 3 secondes.
+      refreshHyperliquid();
+      setInterval(refreshHyperliquid, 3000);
     })();
     </script>
   </body>

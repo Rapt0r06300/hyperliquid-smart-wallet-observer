@@ -269,8 +269,8 @@ class TestWhaleWatchlistSafety:
         assert len(top2) == len(top1_copy)
 
 
-class TestDemoModeClusterFix:
-    """Test de la correction bug: cluster detector reset en mode DEMO."""
+class TestClusterReset:
+    """Test du reset de cluster sans generation de wallets artificiels."""
 
     def test_cluster_reset_called_on_demo_snapshot_reset(self):
         """Quand _position_snapshots est réinitialisé, cluster.reset_wallet() doit être appelé."""
@@ -286,9 +286,13 @@ class TestDemoModeClusterFix:
 
         cluster.reset_wallet = _track_reset
 
-        # Simuler ce que _poll_shortlist_demo fait au tick % 10 == 1
-        from hyper_smart_observer.dydx_v4.wallet_discovery import _build_demo_wallets
-        shortlist = _build_demo_wallets()
+        from hyper_smart_observer.dydx_v4.wallet_discovery import WalletScore
+
+        shortlist = [
+            WalletScore(address="dydx1alpha", subaccount_number=0),
+            WalletScore(address="dydx1beta", subaccount_number=0),
+            WalletScore(address="dydx1gamma", subaccount_number=0),
+        ]
 
         # Simuler le reset
         for w in shortlist:

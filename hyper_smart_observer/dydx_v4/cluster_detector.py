@@ -75,6 +75,7 @@ class ClusterSignal:
     # Les clusters "stream" sautent la gate proven (qualité = consensus K wallets).
     origin: str = "rest"
     flow_trade_count: Optional[int] = None
+    flow_large_trade_usdc: Optional[float] = None
 
     @property
     def is_actionable(self) -> bool:

@@ -4,7 +4,7 @@ from fastapi.testclient import TestClient
 
 from hl_observer.config.loader import load_settings
 from hl_observer.storage.database import init_db
-from hl_observer.storage.models import MarketSnapshot, PositionDeltaModel, TopWallet
+from hl_observer.storage.models import MarketSnapshot, OrderbookSnapshot, PositionDeltaModel, TopWallet
 from hl_observer.ui.app import create_ui_app
 from hl_observer.ui.persistent_state import (
     load_or_create_ui_state,
@@ -32,6 +32,20 @@ def test_ui_simulation_state_persists_outside_logs(tmp_path: Path):
     assert state_path.name == "ui_simulation_state.json"
     assert "runtime" in state_path.parts
     assert "logs" not in {part.lower() for part in state_path.parts}
+
+
+def test_ui_simulation_state_path_honors_launcher_runtime_dir(tmp_path: Path, monkeypatch):
+    settings = load_settings()
+    settings.database_url = f"sqlite:///{tmp_path / 'data' / 'ui.sqlite3'}"
+    runtime_dir = tmp_path / "runtime" / "data"
+    monkeypatch.setenv("HYPERSMART_UI_STATE_DIR", str(runtime_dir))
+
+    assert simulation_state_path(settings) == runtime_dir / "ui_simulation_state.json"
+
+    fresh = reset_simulation_state(settings, starting_equity_usdt=1000.0)
+
+    assert fresh.simulation_equity_history[0]["source"] == "SESSION_START"
+    assert (runtime_dir / "ui_simulation_state.json").exists()
 
 
 def test_ui_app_restores_simulation_state_when_no_state_is_injected(tmp_path: Path):
@@ -238,7 +252,453 @@ def test_ui_simulation_groups_same_coin_side_leaders_into_one_consensus_position
     assert "CONSENSUS_DUPLICATE_IGNORED" not in actions
 
 
-def test_ui_simulation_refuses_entries_when_expected_dollar_edge_is_too_small(tmp_path: Path):
+def test_ui_simulation_depth_guard_blocks_unfillable_consensus_entry(tmp_path: Path):
+    settings = load_settings()
+    settings.database_url = f"sqlite:///{tmp_path / 'data' / 'ui_depth_guard.sqlite3'}"
+    init_db(settings.database_url)
+    state = UiState()
+    base_ms = now_ms()
+    state.simulation_started_at_ms = base_ms - 1_000
+    client = TestClient(create_ui_app(settings, state))
+
+    from hl_observer.storage.database import create_session_factory, create_sqlite_engine
+
+    engine = create_sqlite_engine(settings.database_url)
+    factory = create_session_factory(engine)
+    wallets = ["0x" + "7" * 40, "0x" + "8" * 40]
+    with factory() as session:
+        session.add(MarketSnapshot(source="allMids", exchange_ts=base_ms, raw_json={"ETH": "3000"}))
+        session.add(
+            OrderbookSnapshot(
+                coin="ETH",
+                exchange_ts=base_ms,
+                depth_usdc=6.0,
+                spread_bps=2.0,
+                raw_json={
+                    "coin": "ETH",
+                    "levels": [
+                        [{"px": "2999.5", "sz": "0.001"}],
+                        [{"px": "3000.5", "sz": "0.001"}],
+                    ],
+                },
+            )
+        )
+        for index, wallet in enumerate(wallets, start=1):
+            session.add(
+                TopWallet(
+                    wallet_address=wallet,
+                    rank=index,
+                    source="public_trades_ws",
+                    score=95,
+                    selected_at_ms=base_ms,
+                    status="selected",
+                )
+            )
+            session.add(
+                PositionDeltaModel(
+                    wallet_address=wallet,
+                    coin="ETH",
+                    previous_side="FLAT",
+                    new_side="LONG",
+                    previous_size=0.0,
+                    current_size=2.0,
+                    new_size=2.0,
+                    delta_size=2.0,
+                    delta_notional_usdc=6_000.0,
+                    action="OPEN",
+                    exchange_ts=base_ms + index * 1_000,
+                    detected_at_ms=base_ms + index * 1_000,
+                    source="hyperliquid_ws:userFills",
+                    side="B",
+                    price=3000.0,
+                    fill_size=2.0,
+                    delta_type="open_long",
+                    confidence_score=0.95,
+                    is_paper_eligible=True,
+                    delta_hash=f"depth-guard-open-{index}",
+                    raw_json={"coin": "ETH", "dir": "Open Long"},
+                )
+            )
+        session.commit()
+
+    payload = client.get("/api/simulation/overview?limit=20").json()
+    refused = [
+        row
+        for row in payload["bot_simulation"]["events"]
+        if row.get("reason") in {"MISSED_FILL", "PARTIAL_FILL_BELOW_FULL_COPY_STANDARD", "DEPTH_SLIPPAGE_TOO_HIGH"}
+    ]
+
+    assert payload["counts"]["reproduced_entries"] == 0
+    assert payload["counts"]["open_virtual_positions"] == 0
+    assert refused
+    assert refused[0]["depth_fill_guard_checked"] is True
+    assert refused[0]["depth_fill_ratio"] < 0.85
+
+
+def test_ui_simulation_microstructure_guard_blocks_obi_conflict(tmp_path: Path):
+    settings = load_settings()
+    settings.database_url = f"sqlite:///{tmp_path / 'data' / 'ui_micro_guard.sqlite3'}"
+    init_db(settings.database_url)
+    state = UiState()
+    base_ms = now_ms()
+    state.simulation_started_at_ms = base_ms - 1_000
+    client = TestClient(create_ui_app(settings, state))
+
+    from hl_observer.storage.database import create_session_factory, create_sqlite_engine
+
+    engine = create_sqlite_engine(settings.database_url)
+    factory = create_session_factory(engine)
+    wallets = ["0x" + "a" * 40, "0x" + "b" * 40]
+    with factory() as session:
+        session.add(MarketSnapshot(source="allMids", exchange_ts=base_ms, raw_json={"HYPE": "100"}))
+        session.add(
+            OrderbookSnapshot(
+                coin="HYPE",
+                exchange_ts=base_ms,
+                depth_usdc=30_000.0,
+                spread_bps=2.0,
+                raw_json={
+                    "coin": "HYPE",
+                    "levels": [
+                        [{"px": "99.99", "sz": "1"}, {"px": "99.98", "sz": "1"}, {"px": "99.97", "sz": "1"}],
+                        [{"px": "100.01", "sz": "100"}, {"px": "100.02", "sz": "100"}, {"px": "100.03", "sz": "100"}],
+                    ],
+                },
+            )
+        )
+        for index, wallet in enumerate(wallets, start=1):
+            session.add(
+                TopWallet(
+                    wallet_address=wallet,
+                    rank=index,
+                    source="public_trades_ws",
+                    score=98,
+                    selected_at_ms=base_ms,
+                    status="selected",
+                )
+            )
+            session.add(
+                PositionDeltaModel(
+                    wallet_address=wallet,
+                    coin="HYPE",
+                    previous_side="FLAT",
+                    new_side="LONG",
+                    previous_size=0.0,
+                    current_size=20.0,
+                    new_size=20.0,
+                    delta_size=20.0,
+                    delta_notional_usdc=2_000.0,
+                    action="OPEN",
+                    exchange_ts=base_ms + index * 1_000,
+                    detected_at_ms=base_ms + index * 1_000,
+                    source="hyperliquid_ws:userFills",
+                    side="B",
+                    price=100.0,
+                    fill_size=20.0,
+                    delta_type="open_long",
+                    confidence_score=0.98,
+                    is_paper_eligible=True,
+                    delta_hash=f"micro-guard-open-{index}",
+                    raw_json={"coin": "HYPE", "dir": "Open Long"},
+                )
+            )
+        session.commit()
+
+    payload = client.get("/api/simulation/overview?limit=20").json()
+    refused = [
+        row
+        for row in payload["bot_simulation"]["events"]
+        if str(row.get("reason") or "").startswith("MICROSTRUCTURE_GUARD")
+    ]
+
+    assert payload["counts"]["reproduced_entries"] == 0
+    assert refused
+    assert refused[0]["microstructure_checked"] is True
+    assert refused[0]["microstructure_obi_signal"] == "SHORT_BIAS"
+    assert "OBI_CONFLICTS_WITH_SIDE" in refused[0]["microstructure_authoritative_reason"]
+
+
+def test_ui_simulation_can_hold_multiple_consensus_positions_on_different_markets(tmp_path: Path):
+    settings = load_settings()
+    settings.database_url = f"sqlite:///{tmp_path / 'data' / 'ui_multi_positions.sqlite3'}"
+    init_db(settings.database_url)
+    state = UiState()
+    base_ms = now_ms()
+    state.simulation_started_at_ms = base_ms - 1_000
+    client = TestClient(create_ui_app(settings, state))
+
+    from hl_observer.storage.database import create_session_factory, create_sqlite_engine
+
+    engine = create_sqlite_engine(settings.database_url)
+    factory = create_session_factory(engine)
+    groups = [
+        ("ETH", "LONG", "B", 3000.0, 1.0, ["0x" + "3" * 40, "0x" + "4" * 40]),
+        ("HYPE", "SHORT", "A", 25.0, 120.0, ["0x" + "5" * 40, "0x" + "6" * 40]),
+    ]
+    with factory() as session:
+        session.add(MarketSnapshot(source="allMids", exchange_ts=base_ms, raw_json={"ETH": "3000", "HYPE": "25"}))
+        rank = 1
+        for coin, direction, side, price, size, wallets in groups:
+            for index, wallet in enumerate(wallets, start=1):
+                session.add(
+                    TopWallet(
+                        wallet_address=wallet,
+                        rank=rank,
+                        source="public_trades_ws",
+                        score=96,
+                        selected_at_ms=base_ms,
+                        status="selected",
+                    )
+                )
+                rank += 1
+                session.add(
+                    PositionDeltaModel(
+                        wallet_address=wallet,
+                        coin=coin,
+                        previous_side="FLAT",
+                        new_side=direction,
+                        previous_size=0.0,
+                        current_size=size,
+                        new_size=size,
+                        delta_size=size,
+                        delta_notional_usdc=size * price,
+                        action="OPEN",
+                        exchange_ts=base_ms + index * 500,
+                        detected_at_ms=base_ms + index * 500,
+                        source="hyperliquid_ws:userFills",
+                        side=side,
+                        price=price,
+                        fill_size=size,
+                        delta_type="open_long" if direction == "LONG" else "open_short",
+                        confidence_score=0.96,
+                        is_paper_eligible=True,
+                        delta_hash=f"multi-{coin}-{index}",
+                        raw_json={"coin": coin, "dir": f"Open {direction.title()}"},
+                    )
+                )
+        session.commit()
+
+    payload = client.get("/api/simulation/overview?limit=40").json()
+    open_positions = payload["bot_simulation"]["open_positions"]
+    markets = {row.get("market_id") or row.get("market") or row.get("coin") for row in open_positions}
+
+    assert payload["signal_pipeline"]["fresh_consensus_groups_4s"] >= 2
+    assert payload["counts"]["reproduced_entries"] >= 2
+    assert payload["counts"]["open_virtual_positions"] >= 2
+    assert {"ETH", "HYPE"}.issubset(markets)
+
+
+def test_ui_simulation_add_keeps_average_entry_and_evidence_in_status(tmp_path: Path):
+    settings = load_settings()
+    settings.database_url = f"sqlite:///{tmp_path / 'data' / 'ui_add_evidence.sqlite3'}"
+    init_db(settings.database_url)
+    state = UiState()
+    base_ms = now_ms()
+    state.simulation_started_at_ms = base_ms - 1_000
+    client = TestClient(create_ui_app(settings, state))
+
+    from hl_observer.storage.database import create_session_factory, create_sqlite_engine
+
+    wallet = "0x" + "e" * 40
+    engine = create_sqlite_engine(settings.database_url)
+    factory = create_session_factory(engine)
+    with factory() as session:
+        session.add(MarketSnapshot(source="allMids", exchange_ts=base_ms + 1_000, raw_json={"HYPE": "110"}))
+        session.add(
+            TopWallet(
+                wallet_address=wallet,
+                rank=1,
+                source="public_trades_ws",
+                score=98,
+                selected_at_ms=base_ms,
+                status="selected",
+            )
+        )
+        session.add(
+            PositionDeltaModel(
+                wallet_address=wallet,
+                coin="HYPE",
+                previous_side="FLAT",
+                new_side="LONG",
+                previous_size=0.0,
+                current_size=1.0,
+                new_size=1.0,
+                delta_size=1.0,
+                delta_notional_usdc=5_000.0,
+                action="OPEN",
+                exchange_ts=base_ms,
+                detected_at_ms=base_ms,
+                source="hyperliquid_ws:userFills",
+                side="B",
+                price=100.0,
+                fill_size=1.0,
+                delta_type="open_long",
+                confidence_score=0.98,
+                is_paper_eligible=True,
+                delta_hash="paper-open-for-add",
+                raw_json={"coin": "HYPE", "dir": "Open Long"},
+            )
+        )
+        session.add(
+            PositionDeltaModel(
+                wallet_address=wallet,
+                coin="HYPE",
+                previous_side="LONG",
+                new_side="LONG",
+                previous_size=1.0,
+                current_size=1.5,
+                new_size=1.5,
+                delta_size=0.5,
+                delta_notional_usdc=2_500.0,
+                action="ADD",
+                exchange_ts=base_ms + 1_000,
+                detected_at_ms=base_ms + 1_000,
+                source="hyperliquid_ws:userFills",
+                side="B",
+                price=110.0,
+                fill_size=0.5,
+                delta_type="increase_long",
+                confidence_score=0.98,
+                is_paper_eligible=True,
+                delta_hash="paper-add-evidence",
+                raw_json={"coin": "HYPE", "dir": "Open Long"},
+            )
+        )
+        session.commit()
+
+    payload = client.get("/api/simulation/overview?limit=20").json()
+    add_event = next(
+        row
+        for row in payload["bot_simulation"]["events"]
+        if row.get("paper_action_type") == "INCREASE"
+    )
+    open_position = payload["bot_simulation"]["open_positions"][0]
+    status = client.get("/api/simulation/status").json()
+    fast_position = status["positions"][0]
+
+    assert add_event["bot_replay_action"] == "PAPER_ADD_REPLAYED"
+    assert add_event["read_only"] is True
+    assert add_event["external_action"] is False
+    assert add_event["execution"] == "forbidden"
+    assert add_event["paper_ref"].startswith("paper:")
+    assert add_event["evidence_hash"].startswith("ev:")
+    assert add_event["v9_evidence_hash"].startswith("ev:")
+    assert add_event["v9_accepted"] is False
+    assert "data gap: market features incomplete" in add_event["v9_reasons"]
+    assert add_event["size_before"] > 0
+    assert 100.0 < add_event["average_entry_price"] < 110.1
+    assert open_position["increase_count"] == 1
+    assert open_position["last_replay_action"] == "PAPER_ADD_REPLAYED"
+    assert open_position["last_evidence_hash"] == add_event["evidence_hash"]
+    assert open_position["last_v9_evidence_hash"] == add_event["v9_evidence_hash"]
+    assert fast_position["last_replay_action"] == "PAPER_ADD_REPLAYED"
+    assert fast_position["last_evidence_hash"] == add_event["evidence_hash"]
+    assert fast_position["last_v9_evidence_hash"] == add_event["v9_evidence_hash"]
+
+
+def test_ui_simulation_reduce_is_partial_and_visible_in_fast_status(tmp_path: Path):
+    settings = load_settings()
+    settings.database_url = f"sqlite:///{tmp_path / 'data' / 'ui_reduce_evidence.sqlite3'}"
+    init_db(settings.database_url)
+    state = UiState()
+    base_ms = now_ms()
+    state.simulation_started_at_ms = base_ms - 1_000
+    client = TestClient(create_ui_app(settings, state))
+
+    from hl_observer.storage.database import create_session_factory, create_sqlite_engine
+
+    wallet = "0x" + "f" * 40
+    engine = create_sqlite_engine(settings.database_url)
+    factory = create_session_factory(engine)
+    with factory() as session:
+        session.add(MarketSnapshot(source="allMids", exchange_ts=base_ms + 1_000, raw_json={"ETH": "100"}))
+        session.add(TopWallet(wallet_address=wallet, rank=1, source="public_trades_ws", score=98, selected_at_ms=base_ms, status="selected"))
+        session.add(
+            PositionDeltaModel(
+                wallet_address=wallet,
+                coin="ETH",
+                previous_side="FLAT",
+                new_side="LONG",
+                previous_size=0.0,
+                current_size=1.0,
+                new_size=1.0,
+                delta_size=1.0,
+                delta_notional_usdc=5_000.0,
+                action="OPEN",
+                exchange_ts=base_ms,
+                detected_at_ms=base_ms,
+                source="hyperliquid_ws:userFills",
+                side="B",
+                price=100.0,
+                fill_size=1.0,
+                delta_type="open_long",
+                confidence_score=0.98,
+                is_paper_eligible=True,
+                delta_hash="paper-open-for-reduce",
+                raw_json={"coin": "ETH", "dir": "Open Long"},
+            )
+        )
+        session.add(
+            PositionDeltaModel(
+                wallet_address=wallet,
+                coin="ETH",
+                previous_side="LONG",
+                new_side="LONG",
+                previous_size=1.0,
+                current_size=0.75,
+                new_size=0.75,
+                delta_size=-0.25,
+                delta_notional_usdc=25.0,
+                action="REDUCE",
+                exchange_ts=base_ms + 1_000,
+                detected_at_ms=base_ms + 1_000,
+                source="hyperliquid_ws:userFills",
+                side="A",
+                price=100.0,
+                fill_size=0.25,
+                delta_type="reduce_long",
+                confidence_score=0.98,
+                is_paper_eligible=True,
+                delta_hash="paper-reduce-evidence",
+                raw_json={"coin": "ETH", "dir": "Close Long"},
+            )
+        )
+        session.commit()
+
+    payload = client.get("/api/simulation/overview?limit=20").json()
+    reduce_event = next(
+        row
+        for row in payload["bot_simulation"]["events"]
+        if row.get("paper_action_type") == "REDUCE"
+    )
+    open_position = payload["bot_simulation"]["open_positions"][0]
+    status = client.get("/api/simulation/status").json()
+    fast_position = status["positions"][0]
+
+    assert reduce_event["bot_replay_action"] == "PAPER_REDUCE_REPLAYED"
+    assert reduce_event["read_only"] is True
+    assert reduce_event["external_action"] is False
+    assert reduce_event["execution"] == "forbidden"
+    assert reduce_event["paper_ref"].startswith("paper:")
+    assert reduce_event["evidence_hash"].startswith("ev:")
+    assert reduce_event["v9_evidence_hash"].startswith("ev:")
+    assert reduce_event["v9_accepted"] is False
+    assert "data gap: market features incomplete" in reduce_event["v9_reasons"]
+    assert 0.0 < reduce_event["reduce_fraction"] < 1.0
+    assert reduce_event["remaining_notional_usdt"] > 0
+    assert payload["counts"]["open_virtual_positions"] == 1
+    assert open_position["reduce_count"] == 1
+    assert open_position["last_replay_action"] == "PAPER_REDUCE_REPLAYED"
+    assert open_position["last_evidence_hash"] == reduce_event["evidence_hash"]
+    assert open_position["last_v9_evidence_hash"] == reduce_event["v9_evidence_hash"]
+    assert fast_position["last_reduce_fraction"] == reduce_event["reduce_fraction"]
+    assert fast_position["last_evidence_hash"] == reduce_event["evidence_hash"]
+    assert fast_position["last_v9_evidence_hash"] == reduce_event["v9_evidence_hash"]
+
+
+def test_ui_simulation_refuses_entries_when_expected_dollar_edge_is_too_small(tmp_path: Path, monkeypatch):
+    monkeypatch.setenv("HYPERSMART_SIMULATION_MIN_EXPECTED_EDGE_USDT", "0.50")
+    monkeypatch.setenv("HYPERSMART_V9_PIPELINE_AUTHORITATIVE", "1")
     settings = load_settings()
     settings.database_url = f"sqlite:///{tmp_path / 'data' / 'ui_fee_drag.sqlite3'}"
     settings.logs_dir = tmp_path / "logs"
@@ -303,6 +763,104 @@ def test_ui_simulation_refuses_entries_when_expected_dollar_edge_is_too_small(tm
     )
 
 
+def test_ui_simulation_entry_cost_guard_blocks_fee_dominated_session(tmp_path: Path, monkeypatch):
+    monkeypatch.setenv("HYPERSMART_SIMULATION_MIN_EXPECTED_EDGE_USDT", "0.01")
+    monkeypatch.setenv("HYPERSMART_ENTRY_GUARD_FEE_DRAG_RATIO", "0.35")
+    monkeypatch.setenv("HYPERSMART_ENTRY_GUARD_FEE_DRAG_MIN_NOTIONAL_USDT", "40")
+    monkeypatch.setenv("HYPERSMART_ENTRY_GUARD_FEE_DRAG_MIN_EDGE_BPS", "35")
+    monkeypatch.setenv("HYPERSMART_ENTRY_GUARD_MIN_ACCEPTED_EVENTS", "1")
+
+    settings = load_settings()
+    settings.database_url = f"sqlite:///{tmp_path / 'data' / 'ui_entry_cost_guard.sqlite3'}"
+    settings.logs_dir = tmp_path / "logs"
+    init_db(settings.database_url)
+    state = UiState()
+    base_ms = now_ms()
+    state.simulation_started_at_ms = base_ms - 1_000
+    state.simulation_starting_equity_usdt = 1_000.0
+    state.simulation_realized_pnl_usdc = -0.10
+    state.simulation_entry_costs_paid_usdc = 1.00
+    state.simulation_ledger_events = [
+        {
+            "delta_key": "existing-cost-drag",
+            "wallet_address": "0x" + "9" * 40,
+            "coin": "SUI",
+            "leader_side": "LONG",
+            "bot_replay_action": "PAPER_CLOSE_REPLAYED",
+            "status": "LOCAL_REPLAY",
+            "estimated_net_pnl_usdc": -0.10,
+            "fee_cost_usdc": 1.00,
+            "reason": "LOCAL_REPLAY_ONLY_NOT_AN_ORDER",
+            "research_only": True,
+        }
+    ]
+    client = TestClient(create_ui_app(settings, state))
+
+    from hl_observer.storage.database import create_session_factory, create_sqlite_engine
+
+    engine = create_sqlite_engine(settings.database_url)
+    factory = create_session_factory(engine)
+    wallets = ["0x" + "1" * 40, "0x" + "2" * 40]
+    with factory() as session:
+        session.add(MarketSnapshot(source="allMids", exchange_ts=base_ms, raw_json={"HYPE": "25"}))
+        for index, wallet in enumerate(wallets, start=1):
+            session.add(
+                TopWallet(
+                    wallet_address=wallet,
+                    rank=index,
+                    source="public_trades_ws",
+                    score=96,
+                    selected_at_ms=base_ms,
+                    status="selected",
+                )
+            )
+            session.add(
+                PositionDeltaModel(
+                    wallet_address=wallet,
+                    coin="HYPE",
+                    previous_side="FLAT",
+                    new_side="LONG",
+                    previous_size=0.0,
+                    current_size=200.0,
+                    new_size=200.0,
+                    delta_size=200.0,
+                    delta_notional_usdc=5_000.0,
+                    action="OPEN",
+                    exchange_ts=base_ms + index * 500,
+                    detected_at_ms=base_ms + index * 500,
+                    source="hyperliquid_ws:userFills",
+                    side="B",
+                    price=25.0,
+                    fill_size=200.0,
+                    delta_type="open_long",
+                    confidence="high",
+                    confidence_score=0.96,
+                    is_paper_eligible=True,
+                    delta_hash=f"fee-drag-fresh-open-{index}",
+                    raw_json={"coin": "HYPE", "dir": "Open Long"},
+                )
+            )
+        session.commit()
+
+    payload = client.get("/api/simulation/overview?limit=20").json()
+
+    assert payload["counts"]["reproduced_entries"] == 0
+    guard_events = [
+        row
+        for row in payload["bot_simulation"]["events"]
+        if str(row.get("reason") or "").startswith("ENTRY_COST_GUARD:")
+    ]
+    assert guard_events
+    assert "FEE_DRAG_GUARD_ACTIVE" in guard_events[0]["entry_cost_guard_reasons"]
+    assert guard_events[0]["entry_cost_guard_fee_drag_ratio"] > 0.35
+    guard_summary = payload["bot_simulation"]["entry_cost_guard_summary"]
+    assert guard_summary["active"] is True
+    assert guard_summary["blocked_events"] >= 1
+    assert guard_summary["top_reasons"][0]["reason"] == "FEE_DRAG_GUARD_ACTIVE"
+    assert guard_events[0]["read_only"] is True
+    assert guard_events[0]["external_action"] is False
+
+
 def test_ui_simulation_keeps_fresh_entries_visible_when_recent_feed_is_reduce_heavy(tmp_path: Path):
     settings = load_settings()
     settings.database_url = f"sqlite:///{tmp_path / 'data' / 'ui_reduce_heavy.sqlite3'}"
@@ -342,8 +900,8 @@ def test_ui_simulation_keeps_fresh_entries_visible_when_recent_feed_is_reduce_he
                     delta_size=200.0,
                     delta_notional_usdc=5_000.0,
                     action="OPEN",
-                    exchange_ts=current_ms - 20_000 + index * 500,
-                    detected_at_ms=current_ms - 20_000 + index * 500,
+                    exchange_ts=current_ms - 8_000 + index * 500,
+                    detected_at_ms=current_ms - 8_000 + index * 500,
                     source="hyperliquid_ws:userFills",
                     side="B",
                     price=25.0,
@@ -919,9 +1477,9 @@ def test_ui_simulation_shows_freshly_detected_old_exchange_delta_as_no_trade(tmp
     assert payload["counts"]["live_simulation_deltas"] == 1
     assert payload["counts"]["old_deltas_ignored_fresh_only"] == 0
     assert payload["counts"]["reproduced_entries"] == 0
-    assert payload["counts"]["bot_refused"] == 1
-    assert payload["bot_simulation"]["events"][0]["observed_at_ms"] == base_ms
-    assert "STALE_SIGNAL" in payload["bot_simulation"]["events"][0]["reason"]
+    assert payload["counts"]["bot_refused"] == 0
+    assert payload["bot_simulation"]["filter_diagnostics"]["hard_stale_entry_skipped"] == 1
+    assert payload["bot_simulation"]["fresh_entry_diagnostics"]["entry_candidates_hard_stale"] == 1
     assert payload["readiness"] == "LIVE_DATA_STALE_WAITING_FOR_NEW_EVENTS"
     assert payload["live_data_stale"] is True
     assert payload["stale_entry_deltas_count"] == 1
@@ -992,7 +1550,7 @@ def test_ui_simulation_pauses_new_entries_on_losing_coin_without_strong_consensu
             "observed_at_ms": base_ms - 500,
             "bot_replay_action": "PAPER_CLOSE_REPLAYED",
             "status": "LOCAL_REPLAY",
-            "estimated_net_pnl_usdc": -1.0,
+            "estimated_net_pnl_usdc": -3.0,
             "fee_cost_usdc": 0.02,
             "bot_position_size_after": 0,
             "reason": "LOCAL_REPLAY_ONLY_NOT_AN_ORDER",
@@ -1038,7 +1596,7 @@ def test_ui_simulation_pauses_new_entries_on_losing_coin_without_strong_consensu
 
     assert payload["counts"]["reproduced_entries"] == 0
     assert payload["bot_simulation"]["events"][0]["reason"] == "COIN_SESSION_LOSS_COOLDOWN"
-    assert payload["bot_simulation"]["events"][0]["coin_session_pnl_usdc"] == -1.0
+    assert payload["bot_simulation"]["events"][0]["coin_session_pnl_usdc"] == -3.0
 
 
 def test_ui_simulation_allows_strong_three_wallet_consensus_despite_coin_cooldown(tmp_path: Path):

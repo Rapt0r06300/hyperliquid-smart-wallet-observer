@@ -3,34 +3,41 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>Simulation copy-trading — dYdX paper</title>
+<title>Simulation copy-trading — Hyperliquid paper</title>
 <style>
   :root{
     --bg:#0b0f14; --panel:#121821; --panel2:#0f141c; --line:#1e2733;
     --txt:#e8eef5; --muted:#8aa0b6; --green:#1fd18b; --red:#ff5a6a; --accent:#39c0ed;
   }
-  *{box-sizing:border-box}
+  *{box-sizing:border-box;overflow-anchor:none}
+  html{min-height:100%;overflow-y:scroll;overflow-x:hidden;scrollbar-gutter:stable both-edges;overflow-anchor:none}
   body{margin:0;background:var(--bg);color:var(--txt);
-    font-family:"Segoe UI",system-ui,-apple-system,Arial,sans-serif;font-size:15px;line-height:1.5}
-  .wrap{max-width:1100px;margin:0 auto;padding:20px 22px 40px}
-  header{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;margin-bottom:18px}
+    font-family:"Segoe UI",system-ui,-apple-system,Arial,sans-serif;font-size:15px;line-height:1.5;
+    min-height:100%;overflow-x:hidden;overflow-anchor:none}
+  .wrap{max-width:1100px;margin:0 auto;padding:20px 22px 40px;overflow-anchor:none}
+  header{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;margin-bottom:18px;min-height:58px;overflow-anchor:none}
   .title{font-size:20px;font-weight:600;letter-spacing:.2px}
   .sub{font-size:13px;color:var(--muted)}
-  .badges{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
-  .badge{font-size:12px;padding:5px 11px;border-radius:8px;background:var(--panel);border:1px solid var(--line);color:var(--muted)}
+  .badges{display:flex;gap:8px;align-items:center;flex-wrap:wrap;min-height:32px}
+  .badge{font-size:12px;padding:5px 11px;border-radius:8px;background:var(--panel);border:1px solid var(--line);color:var(--muted);white-space:nowrap}
+  #bStatus{min-width:176px;text-align:center}
+  #bWallets{min-width:122px;text-align:center}
+  #bClock{min-width:78px;text-align:center}
   .badge.ok{color:#0b3;background:rgba(31,209,139,.12);border-color:rgba(31,209,139,.3);color:var(--green)}
   .badge.warn{color:#f5a623;background:rgba(245,166,35,.12);border-color:rgba(245,166,35,.3)}
   .cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:12px;margin-bottom:16px}
-  .card{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:16px 18px;min-height:92px}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:16px 18px;min-height:132px;overflow:hidden}
   .card .lbl{font-size:13px;color:var(--muted);margin-bottom:8px}
-  .card .val{font-size:28px;font-weight:600;letter-spacing:.3px}
+  .card .val{font-size:28px;font-weight:600;letter-spacing:.3px;line-height:1.2;white-space:nowrap}
   .green{color:var(--green)} .red{color:var(--red)}
-  .graphcard{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:16px 18px;margin-bottom:16px}
-  .graphhead{display:flex;align-items:center;justify-content:space-between;margin-bottom:8px}
+  .graphcard{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:16px 18px;margin-bottom:16px;min-height:326px;overflow-anchor:none;contain:layout paint}
+  .graphhead{display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;gap:12px}
   .graphhead .h{font-size:16px;font-weight:600}
+  .graphhead .conn{min-width:190px;text-align:right;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
   #equity{width:100%;height:260px;display:block}
-  .cols{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:16px}
-  .col h3{font-size:15px;font-weight:600;margin:0 0 10px}
+  .cols{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:16px;align-items:start;overflow-anchor:none;contain:layout paint;min-height:336px}
+  .col{min-width:0;min-height:336px;overflow-anchor:none}
+  .col h3{font-size:15px;font-weight:600;margin:0 0 10px;height:24px;line-height:24px}
   .row{display:flex;align-items:center;justify-content:space-between;background:var(--panel);border:1px solid var(--line);
     border-radius:10px;padding:10px 13px;margin-bottom:8px}
   .row .mkt{font-weight:600}
@@ -38,20 +45,32 @@
   .pill{font-size:11px;padding:2px 8px;border-radius:6px;margin-left:6px}
   .pill.buy{background:rgba(31,209,139,.14);color:var(--green)}
   .pill.sell{background:rgba(255,90,106,.14);color:var(--red)}
-  .feed{max-height:300px;overflow:auto}
-  .dec{display:flex;gap:9px;align-items:flex-start;padding:7px 0;border-bottom:1px solid var(--line);font-size:14px}
+  .feed{height:300px;max-height:300px;overflow:auto;scrollbar-gutter:stable;overflow-anchor:none;contain:layout paint}
+  #positions{height:300px;overflow:auto;scrollbar-gutter:stable;overflow-anchor:none;contain:layout paint}
+  .dec{display:flex;gap:9px;align-items:flex-start;padding:7px 0;border-bottom:1px solid var(--line);font-size:14px;min-height:38px}
+  .dec span:last-child{min-width:0;overflow-wrap:anywhere}
   .dec:last-child{border-bottom:0}
   .dot{width:8px;height:8px;border-radius:50%;margin-top:6px;flex:none}
   .empty{color:var(--muted);font-size:13px;padding:10px 0}
   footer{margin-top:22px;color:var(--muted);font-size:12px;text-align:center}
   .conn{font-size:12px;color:var(--muted)}
+  .detailscard{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:14px 18px;margin:-4px 0 16px;min-height:238px;overflow-anchor:none;contain:layout paint}
+  .detailsgrid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;align-items:stretch}
+  .detail{background:var(--panel2);border:1px solid rgba(57,192,237,.16);border-radius:10px;padding:10px 12px;height:82px;overflow:hidden}
+  .detail .k{font-size:12px;color:var(--muted);margin-bottom:5px}
+  .detail .v{font-size:14px;color:var(--txt);font-weight:600}
+  .detail .s{font-size:12px;color:var(--muted);margin-top:4px}
+  @media (max-width:860px){
+    .cols,.detailsgrid{grid-template-columns:1fr}
+    .detailscard{min-height:566px}
+  }
 </style>
 </head>
 <body>
 <div class="wrap">
   <header>
     <div>
-      <div class="title">Simulation copy-trading <span style="color:var(--accent)">dYdX</span></div>
+      <div class="title">Simulation copy-trading <span style="color:var(--accent)">Hyperliquid</span></div>
       <div class="sub">Le solde démarre à 1000 $. Il bouge selon les décisions du bot, aux vrais prix du marché.</div>
     </div>
     <div class="badges">
@@ -77,6 +96,16 @@
     <canvas id="equity" width="1040" height="260"></canvas>
   </div>
 
+  <div class="detailscard">
+    <div class="graphhead">
+      <div class="h">Ce que le bot fait maintenant</div>
+      <div class="conn" id="dState">diagnostic live</div>
+    </div>
+    <div class="detailsgrid" id="botDetails">
+      <div class="detail"><div class="k">Moteur</div><div class="v">En attente du statut</div><div class="s">Simulation locale, aucune action réelle.</div></div>
+    </div>
+  </div>
+
   <div class="cols">
     <div class="col">
       <h3>Positions ouvertes</h3>
@@ -92,17 +121,53 @@
     </div>
   </div>
 
+  <div class="cols" id="v12-panels" style="margin-top:14px">
+    <div class="col">
+      <h3>Santé des sources</h3>
+      <div class="feed" id="v12-source-health"><div class="empty">Chargement de la provenance…</div></div>
+    </div>
+    <div class="col">
+      <h3>NO_TRADE Explorer</h3>
+      <div class="feed" id="v12-no-trade"><div class="empty">Aucun refus enregistré.</div></div>
+    </div>
+    <div class="col">
+      <h3>Entonnoir de décision</h3>
+      <div class="feed" id="v12-funnel"><div class="empty">En attente de décisions…</div></div>
+    </div>
+  </div>
+
+  <div class="cols" id="v13-model-row" style="margin-top:14px">
+    <div class="col">
+      <h3>Modèle IA (local, lecture seule)</h3>
+      <div class="feed" id="v13-model"><div class="empty">Aucun modèle entraîné — il apprendra des trades clôturés.</div></div>
+    </div>
+    <div class="col">
+      <h3>Explication IA des décisions</h3>
+      <div class="feed" id="v13-explain"><div class="empty">En attente des décisions…</div></div>
+    </div>
+  </div>
+
+  <div class="cols" id="v13-risk-row" style="margin-top:14px">
+    <div class="col">
+      <h3>Risque (paper, lecture seule)</h3>
+      <div class="feed" id="v13-risk"><div class="empty">En attente de données de risque…</div></div>
+    </div>
+  </div>
+
   <footer id="foot">Lecture seule · prix réels mainnet · 0 ordre réel · 0 clé · 0 signature</footer>
 </div>
 
 <script>
 const $=s=>document.querySelector(s);
-const REFRESH_MS=4000;       // refresh complet: scan, wallets, details
-const TICK_MIN_MS=180;       // cadence cible du tick leger, sans empiler les requetes
-const TICK_MAX_MS=1400;      // backoff court si le serveur est occupe
+const REFRESH_MS=10000;      // refresh complet: scan, wallets, details, compteur gagnants
+const TICK_MIN_MS=350;       // cadence cible du tick leger (PnL mark-to-market), proche d'un ecran trading
+const TICK_MAX_MS=900;       // backoff court si le serveur est occupe
 const GRAPH_VISIBLE_MS=120000; // fenetre live visible, l'historique reste conserve
+const GRAPH_MIN_USD_RANGE=8.0; // evite qu'un mouvement de quelques cents ressemble a un pic geant
 let equityHist=[];           // {t, equity}
 let lastGood=null;
+let backendOfflineSince=0;
+let statusConsecutiveFailures=0;
 let lastTick=null;
 let tickInFlight=false;
 let tickBackoffMs=TICK_MIN_MS;
@@ -117,11 +182,70 @@ let lastAnimAt=0;
 let mousePoint=null;
 let viewLo=998;
 let viewHi=1002;
+let lastVisualPointAt=0;
+let lastScanHtml="";
+let lastDetailsHtml="";
+let lastDecisionHtml="";
+let lastPositionsHtml="";
+let lastValidPositions=[];
+let lastLoopPayload=null;
+let lastLoopPayloadAt=0;
+let lastValidPositionsAt=0;
+let lastUserScrollAt=0;
+let suppressScrollEventUntil=0;
+let decisionReasonOrder=[];
+let lastDetailsRenderAt=0;
+let lastScanRenderAt=0;
+const VISUAL_POINT_MIN_MS=55;
+const VISUAL_POINT_MIN_MOVE=0.0008;
+const DETAIL_RENDER_MIN_MS=1500;
+const SCAN_RENDER_MIN_MS=1500;
 
 function fmtUsd(v){const n=Number(v||0);const s=n>0?"+":"";return s+n.toFixed(2)+" $";}
 function fmtBal(v){return Number(v||0).toFixed(2)+" $";}
 function shortAddr(a){a=String(a||"");return a.length>16?a.slice(0,10)+"…"+a.slice(-6):a;}
 function clock(){$("#bClock").textContent=new Date().toLocaleTimeString();}
+function esc(v){return String(v==null?"":v).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));}
+function ageText(ms){if(ms==null||!Number.isFinite(Number(ms)))return "--";const s=Math.max(0,Math.round(Number(ms)/1000));return s<60?s+"s":Math.floor(s/60)+"m "+(s%60)+"s";}
+function pageScrollState(){return {x:window.scrollX||0,y:window.scrollY||0};}
+function restorePageScroll(pos){
+  if(!pos)return;
+  if(Date.now()-lastUserScrollAt<180)return;
+  const maxY=Math.max(0,document.documentElement.scrollHeight-window.innerHeight);
+  const y=Math.min(pos.y,maxY);
+  if(Math.abs((window.scrollY||0)-y)>1||Math.abs((window.scrollX||0)-pos.x)>1){
+    suppressScrollEventUntil=Date.now()+90;
+    window.scrollTo(pos.x,y);
+  }
+}
+function writeHtmlStableViewport(el,html){
+  if(!el)return;
+  const page=pageScrollState();
+  const beforeHeight=document.documentElement.scrollHeight;
+  const top=el.scrollTop||0;
+  const left=el.scrollLeft||0;
+  const nearTop=top<8;
+  el.innerHTML=html;
+  if(!nearTop)el.scrollTop=top;
+  if(left)el.scrollLeft=left;
+  const afterHeight=document.documentElement.scrollHeight;
+  if(Math.abs(afterHeight-beforeHeight)>1){
+    restorePageScroll(page);
+    requestAnimationFrame(()=>restorePageScroll(page));
+  }
+}
+
+function markBackendOnline(){
+  backendOfflineSince=0;
+  statusConsecutiveFailures=0;
+}
+
+function markBackendOffline(){
+  if(!backendOfflineSince) backendOfflineSince=Date.now();
+  $("#bStatus").textContent="Serveur local hors ligne";
+  $("#bStatus").className="badge warn";
+  $("#gState").textContent="serveur local indisponible";
+}
 
 // Traductions techniques -> langage simple
 const REASONS={
@@ -145,7 +269,164 @@ function simpleReason(r){
 function sideLabel(s){const v=String(s||"").toUpperCase();
   if(v.includes("LONG")||v==="BUY") return ['Achat (long)','buy'];
   if(v.includes("SHORT")||v==="SELL") return ['Vente (short)','sell'];
-  return [v||'?','buy'];}
+  return ['Inconnu','buy'];}
+
+function cleanMarketName(v){
+  const s=String(v||"").trim().toUpperCase();
+  if(!s||s==="?"||s==="--"||s==="N/A"||s==="UNKNOWN")return "";
+  return s;
+}
+
+function normalizePositionForDisplay(p){
+  if(!p||typeof p!=="object")return null;
+  const market=cleanMarketName(p.coin||p.market_id||p.market||p.symbol);
+  const side=String(p.side||p.direction||"").toUpperCase();
+  const entry=Number(p.entry_price!=null?p.entry_price:(p.avg_entry_price!=null?p.avg_entry_price:p.avg_price));
+  const size=Number(p.size!=null?p.size:(p.quantity!=null?p.quantity:0));
+  if(!market||!(side.includes("LONG")||side.includes("SHORT")||side==="BUY"||side==="SELL"))return null;
+  if(!Number.isFinite(entry)||entry<=0)return null;
+  if(!Number.isFinite(size)||Math.abs(size)<=0)return null;
+  return {...p,coin:market,market,market_id:market,side,entry_price:entry,size};
+}
+
+function validPositionRows(rows){
+  return (Array.isArray(rows)?rows:[]).map(normalizePositionForDisplay).filter(Boolean);
+}
+
+function positionsForDisplay(rows){
+  const incoming=Array.isArray(rows)?rows:[];
+  const valid=validPositionRows(incoming);
+  if(valid.length){
+    lastValidPositions=valid;
+    lastValidPositionsAt=Date.now();
+    return valid;
+  }
+  if(incoming.length&&lastValidPositions.length&&(Date.now()-lastValidPositionsAt)<8000){
+    return lastValidPositions.map(p=>({...p,display_stale:true}));
+  }
+  return [];
+}
+
+function paperLedgerFromStatus(status){
+  const s=status||{};
+  const raw=s.raw||{};
+  const rawBot=raw.bot_simulation||{};
+  return s.paper_ledger||raw.paper_ledger||rawBot.paper_ledger||{};
+}
+
+function normalPnlLedgerReadout(status){
+  const ledger=paperLedgerFromStatus(status);
+  const rec=ledger.reconciliation||{};
+  const graph=status.graph_diagnostics||((status.raw||{}).graph_diagnostics)||{};
+  const links=ledger.spike_links||graph.ledger_spike_links||{};
+  const spikes=Array.isArray(links.recent_spikes)?links.recent_spikes:[];
+  const lastSpike=spikes.length?spikes[spikes.length-1]:null;
+  const nearby=lastSpike&&Array.isArray(lastSpike.nearby_ledger_events)?lastSpike.nearby_ledger_events:[];
+  const event=nearby.length?nearby[0]:null;
+  const recKnown=typeof rec.ok==="boolean";
+  const recOk=recKnown&&rec.ok===true;
+  const diff=Number(rec.diff_usdc||0);
+  const spikeCount=Number(links.spike_count||0);
+  const unexplained=Number(links.unexplained_spike_count||0);
+  const eventAction=event?(event.paper_action_type||event.bot_replay_action||event.status||"ledger_event"):"aucun evenement proche";
+  const eventCoin=event&&event.coin?(" "+event.coin):"";
+  const jump=lastSpike?Number(lastSpike.jump_usdc||0):0;
+  return {
+    available:Object.keys(ledger).length>0,
+    ledger,
+    recOk,
+    recKnown,
+    diff,
+    spikeCount,
+    unexplained,
+    status:links.status||"NO_SPIKE_LINKS",
+    formula:ledger.formula||"equity = start + realized + unrealized",
+    eventCount:Number(ledger.event_count||0),
+    openPositions:Number(ledger.open_positions_count||0),
+    lastSpike,
+    event,
+    eventAction,
+    eventCoin,
+    jump,
+  };
+}
+
+function reasonsToObject(raw){
+  if(!raw)return {};
+  if(!Array.isArray(raw) && typeof raw==="object")return raw;
+  const out={};
+  (raw||[]).forEach(item=>{
+    if(!item)return;
+    if(Array.isArray(item)){out[String(item[0])]=Number(item[1]||0);return;}
+    if(typeof item==="object"){
+      const key=String(item.reason||item.code||"UNKNOWN");
+      out[key]=(out[key]||0)+Number(item.count||1);
+    }
+  });
+  return out;
+}
+
+function normalizeHyperliquidOverview(overview){
+  const o=overview||{};
+  const equity=o.equity||{};
+  const counts=o.counts||{};
+  const bot=o.bot_simulation||{};
+  const scanner=o.scanner||{};
+  const signal=o.signal_pipeline||{};
+  const fresh=o.fresh_data_coverage||o.warehouse_coverage||{};
+  const pnl=Number(equity.current_pnl_usdc ?? bot.estimated_net_pnl_usdc ?? 0);
+  const eq=Number(equity.current_equity_usdt ?? bot.current_equity_usdt ?? (1000+pnl));
+  const openPositions=validPositionRows(Array.isArray(bot.open_positions)?bot.open_positions:[]);
+  const leaders=Array.isArray(o.leaders)?o.leaders:[];
+  const reasons=reasonsToObject(o.no_trade_reasons);
+  const entries=Number(counts.reproduced_entries ?? signal.local_entries_accepted ?? bot.reproduced_entries ?? 0);
+  const exits=Number(counts.reproduced_exits ?? signal.local_exits_replayed ?? bot.reproduced_exits ?? 0);
+  const refused=Number(counts.bot_refused ?? signal.local_refusals ?? bot.refused ?? 0);
+  return {
+    running:true,
+    source:"hyperliquid_simulation_overview",
+    mode:o.mode||"LOCAL_RESEARCH_SIMULATION_ONLY",
+    net_pnl_usdt:pnl,
+    equity_usdt:eq,
+    total_trades:entries+exits,
+    winning_trades:Number(bot.winning_trades ?? 0),
+    closed_trades:Number(bot.closed_trades ?? 0),
+    winrate:(bot.winrate_pct!=null?(bot.winrate_pct+"%"):((entries+exits)>0?undefined:"—")),
+    wallets_in_shortlist:Number(counts.leaders ?? leaders.length ?? 0),
+    no_trade_reasons:reasons,
+    leader_exits:exits,
+    iteration:Number(counts.deltas ?? signal.leader_deltas_analyzed ?? 0),
+    total_signals_seen:Number(signal.leader_deltas_analyzed ?? counts.live_simulation_deltas ?? 0),
+    signals_refused:refused,
+    stale_refused:Number(o.stale_entry_deltas_count ?? 0),
+    positions:openPositions,
+    wallets:leaders,
+    stream:{
+      fills_seen:Number(counts.fills ?? 0),
+      consensus_detected:Number(counts.consensus_positions ?? signal.fresh_consensus_groups_4s ?? 0),
+    },
+    market_flow:{
+      // Badge HONNETE: pilote par la FRAICHEUR REELLE des donnees (dernier delta live + dernier
+      // scan de trades publics), pas par un drapeau fige. Le flux REST /info tourne en continu;
+      // la WS publique arrive par rafales. On affiche LIVE des que des donnees fraiches circulent.
+      ws_healthy:(function(){var hb=Number(scanner.heartbeat_age_ms);var hbFresh=isFinite(hb)&&hb>=0&&hb<=15000;var s=Number(o.seconds_since_last_live_event);var pt=Number(scanner.latest_public_trade_scan_ms||0);var ptFresh=pt>0&&(Date.now()-pt)<=25000;var flowing=(Number((o.public_trade_activity||[]).length)||Number(fresh.public_trade_events)||0)>0;return hbFresh||ptFresh||flowing||(isFinite(s)&&s>=0&&s<=45)||(o.live_data_stale===false);})(),
+      ws_status:(function(){var hb=Number(scanner.heartbeat_age_ms);var hbFresh=isFinite(hb)&&hb>=0&&hb<=15000;var s=Number(o.seconds_since_last_live_event);var pt=Number(scanner.latest_public_trade_scan_ms||0);var ptFresh=pt>0&&(Date.now()-pt)<=25000;var flowing=(Number((o.public_trade_activity||[]).length)||Number(fresh.public_trade_events)||0)>0;if(hbFresh||ptFresh||flowing)return"HYPERLIQUID WS (live)";if(isFinite(s)&&s>=0&&s<=45)return"LIVE · flux frais ("+Math.round(s)+"s)";if(o.live_data_stale===false)return"LIVE · REST";return"WS connecté · en veille";})(),
+      subscriptions_requested:Array.isArray(scanner.public_trade_coins)?scanner.public_trade_coins.length:undefined,
+      trades_seen:Number((o.public_trade_activity||[]).length || fresh.public_trade_events || 0),
+      signals:Number(signal.fresh_opportunities_accepted ?? counts.fresh_opportunities_accepted ?? 0),
+    },
+    fast_scan:{
+      harvested_addresses:Number(scanner.public_trade_wallets_seen ?? counts.public_trade_wallets_seen ?? 0),
+      fills_per_second:undefined,
+      fills_fresh:Number(fresh.fresh_position_deltas ?? 0),
+    },
+    readiness:o.readiness||fresh.readiness,
+    next_step:o.next_step,
+    raw:o,
+    paper_ledger:o.paper_ledger||bot.paper_ledger||{},
+    graph_diagnostics:o.graph_diagnostics||{},
+  };
+}
 
 function updateLiveCards(equity,pnl){
   $("#mSolde").textContent=fmtBal(equity);
@@ -161,35 +442,384 @@ function recordServerEquityPoint(eq,now){
     equityHist.push({t:now-1000,equity:1000,source:"session_start"});
     equityHist.push({t:now,equity:value,source:"server_tick"});
     lastEquityPointAt=now;
+    lastVisualPointAt=now;
     return;
   }
   const last=equityHist[equityHist.length-1];
-  if(Math.abs(last.equity-value)<0.000001 && now-last.t<1200)return;
-  if(now-lastEquityPointAt>=180){
+  if(now<=last.t){
+    if(Math.abs(last.equity-value)<0.000001)return;
+    equityHist[equityHist.length-1]={t:last.t,equity:value,source:"server_tick_replace_same_time"};
+    lastEquityPointAt=last.t;
+    lastVisualPointAt=last.t;
+    return;
+  }
+  if(Math.abs(last.equity-value)<0.000001 && now-last.t<700)return;
+  if(now-lastEquityPointAt>=90){
     equityHist.push({t:now,equity:value,source:"server_tick"});
     lastEquityPointAt=now;
-    if(equityHist.length>900)equityHist.shift();
+    lastVisualPointAt=now;
+    if(equityHist.length>1200)equityHist.shift();
   }else{
     equityHist[equityHist.length-1]={t:now,equity:value,source:"server_tick"};
+    lastVisualPointAt=now;
+  }
+}
+
+function recordVisualEquityPoint(now){
+  // Trace fluide entre deux ticks serveur reels. La cible reste toujours le dernier tick backend.
+  // Libelle legacy conserve pour audit/tests: visual_mark_to_market.
+  // Important: les points visuels sont rendus a la volee dans drawEquity(), mais
+  // ne sont pas stockes dans equityHist. Sinon le navigateur accumule des points
+  // d'interpolation locaux et peut afficher des pics qui n'existent pas dans le
+  // ledger serveur.
+  if(!equityHist.length)return;
+  const value=Number(displayEquity);
+  if(!Number.isFinite(value))return;
+  if(now-lastVisualPointAt<VISUAL_POINT_MIN_MS)return;
+  const last=equityHist[equityHist.length-1];
+  if(last && now<=last.t)return;
+  if(last && Math.abs(last.equity-value)<VISUAL_POINT_MIN_MOVE)return;
+  lastVisualPointAt=now;
+}
+
+function compactGraphPoints(points){
+  const out=[];
+  (points||[]).forEach(p=>{
+    const t=Number(p&&p.t);
+    const equity=Number(p&&p.equity);
+    if(!Number.isFinite(t)||!Number.isFinite(equity))return;
+    const point={...p,t,equity};
+    if(out.length){
+      const last=out[out.length-1];
+      if(point.t===last.t){
+        out[out.length-1]=point;
+        return;
+      }
+      if(point.t<last.t){
+        point.t=last.t+1;
+      }
+    }
+    out.push(point);
+  });
+  return out;
+}
+
+function normalizeGraphHistory(){
+  if(!equityHist.length)return;
+  const cleaned=compactGraphPoints(equityHist).slice(-1200);
+  if(cleaned.length!==equityHist.length){
+    equityHist=cleaned;
+    return;
+  }
+  for(let i=0;i<cleaned.length;i++){
+    const a=cleaned[i],b=equityHist[i];
+    if(a.t!==Number(b&&b.t)||a.equity!==Number(b&&b.equity)){
+      equityHist=cleaned;
+      return;
+    }
   }
 }
 
 function renderPositions(positions){
   const pc=$("#positions");
-  if(positions&&positions.length){
-    pc.innerHTML=positions.slice(0,12).map(p=>{
+  let html="";
+  const rows=positionsForDisplay(positions);
+  if(rows.length){
+    html=rows.slice(0,12).map(p=>{
       const [lab,cls]=sideLabel(p.side);
       const up=Number(p.unrealized_pnl_usdc!=null?p.unrealized_pnl_usdc:0);
       const upTxt=p.unrealized_pnl_usdc!=null?`<div class="${up>=0?'green':'red'}" style="font-weight:600">${fmtUsd(up)}</div>`:'';
       const entry=p.entry_price!=null?Number(p.entry_price).toFixed(2):'--';
       const mark=p.mark_price!=null?Number(p.mark_price).toFixed(2):(p.take_profit!=null?'':'');
-      return `<div class="row"><div><span class="mkt">${p.market_id||p.market||'?'}</span>
+      return `<div class="row"><div><span class="mkt">${p.coin||p.market_id||p.market}</span>
         <span class="pill ${cls}">${lab}</span>
         <div class="meta">entree ${entry}${mark?(' · actuel '+mark):''} · ${p.wallet_count||0} wallets</div></div>${upTxt}</div>`;
     }).join("");
   }else{
-    pc.innerHTML='<div class="empty">Aucune position ouverte -- le bot attend un signal net.</div>';
+    html='<div class="empty">Aucune position ouverte -- le bot attend un signal net.</div>';
   }
+  lastPositionsHtml=setStablePanelHtml(pc,html,lastPositionsHtml);
+}
+
+function liveStatusIsFresh(maxAgeMs=5000){
+  return lastTick && lastServerTickAt && (Date.now()-lastServerTickAt)<=maxAgeMs;
+}
+
+function liveStatusIsUsableForGraph(maxAgeMs=60000){
+  return lastTick && lastServerTickAt && (Date.now()-lastServerTickAt)<=maxAgeMs;
+}
+
+function mergeStatusWithFreshTick(status,positions){
+  if(!lastTick||status.backend_offline||!liveStatusIsUsableForGraph())return {status,positions};
+  const merged={...status};
+  merged.equity_usdt=lastTick.equity_usdt;
+  merged.net_pnl_usdt=lastTick.net_pnl_usdt;
+  merged.realized_pnl_usdt=lastTick.realized_pnl_usdt;
+  merged.unrealized_pnl_usdt=lastTick.unrealized_pnl_usdt;
+  merged.open_exposure_usdt=lastTick.open_exposure_usdt;
+  merged.open_positions=lastTick.open_positions;
+  merged.total_trades=lastTick.total_trades;
+  merged.closed_trades=lastTick.closed_trades;
+  merged.winning_trades=lastTick.winning_trades;
+  merged.losing_trades=lastTick.losing_trades;
+  merged.flat_trades=lastTick.flat_trades;
+  merged.winrate_pct=lastTick.winrate_pct;
+  merged.winrate=lastTick.winrate;
+  const tickPositions=validPositionRows(lastTick.positions);
+  const fallbackPositions=validPositionRows(positions);
+  merged.positions=tickPositions.length?tickPositions:fallbackPositions;
+  merged.mark_to_market=lastTick.mark_to_market||merged.mark_to_market;
+  merged.mark_diagnostics=lastTick.mark_diagnostics||merged.mark_diagnostics;
+  merged.position_integrity=lastTick.position_integrity||merged.position_integrity;
+  merged.paper_ledger=lastTick.paper_ledger||merged.paper_ledger;
+  if(lastTick.bot_simulation){
+    merged.bot_simulation={...(merged.bot_simulation||{}),...lastTick.bot_simulation};
+  }
+  merged.graph_diagnostics=lastTick.graph_diagnostics||merged.graph_diagnostics;
+  merged.scanner=lastTick.scanner||merged.scanner;
+  merged.engine_status=lastTick.engine_status||merged.engine_status;
+  merged.fusion_runtime=lastTick.fusion_runtime||merged.fusion_runtime;
+  merged.external_github_bridge=lastTick.external_github_bridge||merged.external_github_bridge;
+  merged.engine_running=lastTick.engine_running;
+  merged.fast_status_tick_authoritative=true;
+  merged.fast_status_tick_stale_for_graph=!liveStatusIsFresh();
+  return {status:merged,positions:merged.positions};
+}
+
+function renderBotDetails(status,positions){
+  const el=$("#botDetails");
+  if(!el)return;
+  const scanner=status.scanner||{};
+  const mtm=status.mark_to_market||{};
+  const diag=status.mark_diagnostics||{};
+  const integrity=status.position_integrity||{};
+  const open=Number(status.open_positions!=null?status.open_positions:(positions||[]).length||0);
+  const marksUsed=Number((diag.marks_used!=null?diag.marks_used:mtm.marks_used)||0);
+  const marksMissing=Number((diag.marks_missing!=null?diag.marks_missing:mtm.marks_missing)||0);
+  const readStatus=diag.read_status||mtm.read_status||"NO_STATUS";
+  const source=mtm.request_type?("/info "+mtm.request_type):(mtm.source||"snapshots locaux");
+  const phase=scanner.phase||"scan";
+  const engine=status.engine_running?"actif":"en attente";
+  const phaseAge=scanner.heartbeat_age_ms==null?"--":ageText(scanner.heartbeat_age_ms);
+  const pnl=Number(status.net_pnl_usdt||0);
+  const equity=Number(status.equity_usdt!=null?status.equity_usdt:1000+pnl);
+  const firstPos=(positions||[])[0]||{};
+  const fusion=status.fusion_runtime||{};
+  const fusionStatus=fusion.status||"NO_LIVE_FUSION_INPUT";
+  const fusionOrders=Number(fusion.orders_count||0);
+  const fusionAccepted=Number(fusion.paper_engine_accepted||0);
+  const fusionFresh=fusion.freshness||{};
+  const fusionAge=fusionFresh.latest_delta_age_ms==null?"--":ageText(fusionFresh.latest_delta_age_ms);
+  const bridgeInfo=bridgeSummary(status);
+  const fusionRuntime=fusion.runtime||{};
+  const strategyIds=Array.isArray(fusionRuntime.paper_order_strategy_ids)?fusionRuntime.paper_order_strategy_ids:[];
+  const externalSummary=fusionRuntime.external_profile_execution_summary||{};
+  const externalExecs=Array.isArray(fusionRuntime.external_profile_executions)?fusionRuntime.external_profile_executions:[];
+  const externalInstalled=Number(externalSummary.profiles_installed||0);
+  const externalExecuted=Number(externalSummary.profiles_executed||0);
+  const externalWithOrders=Number(externalSummary.profiles_with_paper_orders||0);
+  const externalPaperOrders=Number(externalSummary.paper_orders_total||0);
+  const externalUnavailable=Array.isArray(externalSummary.unavailable_profile_ids)?externalSummary.unavailable_profile_ids.length:Number(externalSummary.profiles_unavailable||0);
+  const externalDecisionSample=externalExecs
+    .filter(row=>row&&row.decision)
+    .slice(0,4)
+    .map(row=>`${row.profile_id||row.strategy_id||"profile"}:${row.decision}`)
+    .join(", ");
+  const distilledReport=fusionRuntime.distilled_opportunity_report||{};
+  const distilledOpps=Array.isArray(distilledReport.opportunities)?distilledReport.opportunities:[];
+  const distilledBest=distilledOpps[0]||{};
+  const distilledRejected=Object.entries(distilledReport.rejected_reasons||{})
+    .filter(([k,v])=>k&&Number(v)>0)
+    .sort((a,b)=>Number(b[1])-Number(a[1]))
+    .slice(0,3)
+    .map(([k,v])=>`${k} ${v}x`)
+    .join(", ");
+  const loopInfo=loopDashboardSummary();
+  const flat=diag.flat_graph_reason||((open<=0)?"NO_OPEN_PAPER_POSITION":(marksMissing>0?"NO_REAL_MARK_FOR_OPEN_POSITION":""));
+  const ledgerInfo=normalPnlLedgerReadout(status);
+  const ledgerState=ledgerInfo.available
+    ? (ledgerInfo.recOk?"PnL normal verifie":"PnL normal a verifier")
+    : "ledger en attente";
+  const ledgerDetails=ledgerInfo.available
+    ? `formule ${esc(ledgerInfo.formula)} · ecart ${fmtUsd(ledgerInfo.diff)} · ${ledgerInfo.eventCount} evenement(s)`
+    : "Le PnL normal attend le ledger paper du serveur.";
+  const spikeTitle=ledgerInfo.spikeCount>0
+    ? (ledgerInfo.unexplained>0?"pic non explique":"pic explique")
+    : "aucun pic anormal";
+  const spikeDetails=ledgerInfo.spikeCount>0
+    ? `${ledgerInfo.eventAction}${ledgerInfo.eventCoin} · saut ${fmtUsd(ledgerInfo.jump)} · ${ledgerInfo.unexplained} sans evenement`
+    : "Le graphe suit le solde normal sans gros saut detecte.";
+  const integrityWarn=Number(integrity.invalid_positions_skipped||0)>0||Number(integrity.orphan_cleanup_events_recent||0)>0;
+  const integrityCounts=`${Number(integrity.valid_positions||0)} valide(s) / ${Number(integrity.raw_positions_seen||0)} brute(s)`;
+  const integrityMessage=integrity.message||"Positions paper coherentes avec le ledger visible.";
+  const html=[
+    `<div class="detail"><div class="k">Integrite positions</div><div class="v">${integrityWarn?"A verifier":esc(integrity.status||"OK")} Â· ${esc(integrityCounts)}</div><div class="s">${esc(integrityMessage)} Invalides ${Number(integrity.invalid_positions_skipped||0)} Â· nettoyages ${Number(integrity.orphan_cleanup_events_recent||0)}</div></div>`,
+    `<div class="detail"><div class="k">Opportunites distillees</div><div class="v">${distilledOpps.length} retenue(s) / ${Number(distilledReport.evaluated_candidates||0)} candidat(s)</div><div class="s">${distilledBest.coin?esc(distilledBest.coin+" "+distilledBest.side+" - "+distilledBest.wallet_count+" wallets - edge "+distilledBest.average_edge_bps+" bps"):(distilledRejected?esc("Rejets: "+distilledRejected):"En attente de candidats avec edge/liquidite/couts mesures.")}</div></div>`,
+    `<div class="detail"><div class="k">Moteurs GitHub</div><div class="v">${bridgeInfo.installed} installes / ${bridgeInfo.enabled} actifs</div><div class="s">${bridgeInfo.active?esc(bridgeInfo.profileText||"profils externes prioritaires"):"Manifest absent"} · priorite avant moteur interne</div></div>`,
+    `<div class="detail"><div class="k">Bus GitHub simulation</div><div class="v">${externalExecuted}/${externalInstalled||bridgeInfo.installed} executes</div><div class="s">Capacite paper OPEN/CLOSE · ${externalWithOrders} profil(s) avec ordre paper · ${externalPaperOrders} ordre(s) paper · ${externalUnavailable} lien(s) indisponible(s). ${externalDecisionSample?esc(externalDecisionSample):"Diagnostics non bloquants."}</div></div>`,
+    `<div class="detail"><div class="k">Profil paper utilise</div><div class="v">${strategyIds.length?esc(strategyIds[0]):"en attente"}</div><div class="s">${strategyIds.length?esc(strategyIds.slice(0,3).join(", ")):"Aucune decision paper recente depuis les profils GitHub."}</div></div>`,
+    `<div class="detail"><div class="k">Boucle decision/testnet</div><div class="v">${esc(loopInfo.title||fusionStatus)}</div><div class="s">${esc(loopInfo.subtitle)} ${loopInfo.ready?"":"· "}${loopInfo.ready?"":esc(fusionOrders+" ordre(s) paper local, "+fusionAccepted+" accepte(s) PaperEngine")}</div></div>`,
+    `<div class="detail"><div class="k">Fraicheur deltas</div><div class="v">${esc(fusionFresh.state||"UNKNOWN")} - ${fusionAge}</div><div class="s">${Number(fusionFresh.recent_entry_deltas||0)} entree(s) fraiche(s), ${Number(fusionFresh.recent_deltas||0)} delta(s) recent(s). ${esc(fusionFresh.message||"")}</div></div>`,
+    `<div class="detail"><div class="k">Moteur</div><div class="v">${esc(engine)} · ${esc(phase)}</div><div class="s">Heartbeat ${phaseAge}. ${esc(scanner.message||"")}</div></div>`,
+    `<div class="detail"><div class="k">Portefeuille paper</div><div class="v">${fmtBal(equity)} · ${fmtUsd(pnl)}</div><div class="s">PnL normal = solde depart + encaisse + latent. ${open} position(s), exposition ${fmtBal(status.open_exposure_usdt||0)}</div></div>`,
+    `<div class="detail"><div class="k">Controle du PnL normal</div><div class="v">${esc(ledgerState)}</div><div class="s">${ledgerDetails}</div></div>`,
+    `<div class="detail"><div class="k">Prix réel utilisé</div><div class="v">${marksUsed}/${Math.max(open,marksUsed+marksMissing)} mark(s)</div><div class="s">${esc(source)} · ${esc(readStatus)} · âge ${ageText(diag.latest_mark_age_ms)}</div></div>`,
+    `<div class="detail"><div class="k">Position principale</div><div class="v">${esc(firstPos.market_id||firstPos.market||firstPos.coin||"aucune")} ${esc(firstPos.side||firstPos.direction||"")}</div><div class="s">entrée ${firstPos.entry_price!=null?Number(firstPos.entry_price).toFixed(4):"--"} · actuel ${firstPos.mark_price!=null?Number(firstPos.mark_price).toFixed(4):"--"} · latent ${fmtUsd(firstPos.unrealized_pnl_usdc||0)}</div></div>`,
+    `<div class="detail"><div class="k">Pourquoi ça bouge ou reste plat</div><div class="v">${marksUsed>0?"mark-to-market actif":"plat honnête"}</div><div class="s">${flat?esc(flat):"Le graphe suit uniquement le vrai prix disponible."} · ${esc(spikeTitle)}: ${esc(spikeDetails)}</div></div>`,
+    `<div class="detail"><div class="k">Sécurité</div><div class="v">Simulation locale uniquement</div><div class="s">0 ordre réel · 0 clé · 0 signature · /info read-only</div></div>`,
+  ].join("");
+  const now=Date.now();
+  if(html!==lastDetailsHtml && (!lastDetailsHtml || now-lastDetailsRenderAt>=DETAIL_RENDER_MIN_MS)){
+    lastDetailsRenderAt=now;
+    lastDetailsHtml=html;
+    writeHtmlStableViewport(el,html);
+  }
+  const ds=$("#dState");
+  if(ds)ds.textContent=marksUsed>0?"prix réel branché":"en attente de mark réel";
+}
+
+function setStableScanHtml(html){
+  const sc=$("#scan");
+  if(!sc||html===lastScanHtml)return;
+  const now=Date.now();
+  if(lastScanHtml && now-lastScanRenderAt<SCAN_RENDER_MIN_MS)return;
+  lastScanRenderAt=now;
+  lastScanHtml=html;
+  writeHtmlStableViewport(sc,html||'<div class="empty">Scan en cours...</div>');
+}
+
+function setStablePanelHtml(el,html,lastKey){
+  if(!el)return lastKey||"";
+  if(html===lastKey)return lastKey;
+  writeHtmlStableViewport(el,html);
+  return html;
+}
+
+function stableReasonEntries(reasonObj,maxItems=8){
+  const raw=Object.entries(reasonObj||{})
+    .filter(([k,v])=>k&&Number(v)>0)
+    .sort((a,b)=>Number(b[1])-Number(a[1]));
+  const present=new Set(raw.map(([k])=>k));
+  decisionReasonOrder=decisionReasonOrder.filter(k=>present.has(k));
+  raw.forEach(([k])=>{if(!decisionReasonOrder.includes(k))decisionReasonOrder.push(k);});
+  const byKey=Object.fromEntries(raw);
+  return decisionReasonOrder.slice(0,maxItems).map(k=>[k,byKey[k]]).filter(([,v])=>Number(v)>0);
+}
+
+function bridgeSummary(status){
+  const bridge=status.external_github_bridge||{};
+  const profiles=Array.isArray(bridge.priority_strategy_catalog)?bridge.priority_strategy_catalog:[];
+  const disabled=Array.isArray(bridge.disabled_strategy_catalog)?bridge.disabled_strategy_catalog:[];
+  const installed=Number(bridge.installed_count||0);
+  const enabled=Number(bridge.enabled_strategy_count||0);
+  const unavailable=Number(bridge.unavailable_count||0);
+  return {
+    bridge,
+    profiles,
+    disabled,
+    installed,
+    enabled,
+    unavailable,
+    active:Boolean(bridge.available)||installed>0||enabled>0||profiles.length>0,
+    profileText:profiles.slice(0,4).join(", "),
+    disabledText:disabled.slice(0,3).join(", "),
+  };
+}
+
+function renderFastScanPanel(statusPayload){
+  const scanner=statusPayload.scanner||{};
+  if(!(scanner.phase||statusPayload.engine_status))return;
+  const age=scanner.heartbeat_age_ms==null?"--":ageText(scanner.heartbeat_age_ms);
+  const phase=scanner.phase||"unknown";
+  const msg=esc(scanner.message||"");
+  const deltas=Number(scanner.fresh_entry_deltas||scanner.position_deltas_total||0);
+  const candidates=Number(scanner.wallet_candidates_total||0);
+  const entries=Number(scanner.virtual_entries_logged||0);
+  const refusals=Number(scanner.virtual_refusals_logged||0);
+  const html=
+    `<div class="dec"><span class="dot" style="background:${statusPayload.engine_running?'var(--green)':'var(--muted)'}"></span><span><b>Moteur</b> : ${statusPayload.engine_running?'actif':'pas de heartbeat recent'} · phase ${esc(phase)} · age ${age}</span></div>`+
+    `<div class="dec"><span class="dot" style="background:var(--accent)"></span><span><b>${candidates}</b> candidats vus · <b>${deltas}</b> deltas frais/recents · <b>${entries}</b> entrees paper · <b>${refusals}</b> refus</span></div>`+
+    (msg?`<div class="dec"><span class="dot" style="background:var(--muted)"></span><span>${msg}</span></div>`:"");
+  setStableScanHtml(html);
+}
+
+function renderOverviewScanPanel(status,wallets){
+  const scanner=status.scanner||{};
+  const analysed=Number(status.iteration||status.total_signals_seen||scanner.position_deltas_total||0);
+  const refused=Number(status.signals_refused||0)+Number(status.stale_refused||0)+Number(scanner.virtual_refusals_logged||0);
+  const wcount=(wallets&&wallets.length)||status.wallets_in_shortlist||scanner.fresh_leaders_selected||scanner.leaders_selected||0;
+  const fs=status.fast_scan||{};
+  const stx=status.stream||{};
+  const mf=status.market_flow||{};
+  let sh="";
+  const bridgeInfo=bridgeSummary(status);
+  if(bridgeInfo.active){
+    sh+=`<div class="dec"><span class="dot" style="background:var(--green)"></span><span><b>Moteurs GitHub prioritaires</b> : ${bridgeInfo.installed} repo(s) installes · ${bridgeInfo.enabled} profil(s) paper actifs · moteur interne en secours</span></div>`;
+    sh+=`<div class="dec"><span class="dot" style="background:var(--accent)"></span><span>Priorite paper : ${esc(bridgeInfo.profileText||"aucun profil prioritaire actif")}${bridgeInfo.unavailable?(" · "+bridgeInfo.unavailable+" lien(s) indisponible(s)"):""}</span></div>`;
+  }
+  const supply=scanner.entry_supply||{};
+  if(supply.bottleneck){
+    const supplyColor=supply.bottleneck==="OK"?"var(--green)":(supply.bottleneck==="NO_DATA"?"var(--red)":"var(--orange)");
+    const supplyText=supply.summary||supply.next_action||scanner.entry_supply_summary||"Diagnostic indisponible";
+    sh+=`<div class="dec"><span class="dot" style="background:${supplyColor}"></span><span><b>Diagnostic opportunites</b> : ${esc(supply.bottleneck)} - ${esc(supplyText)}</span></div>`;
+  }
+  const fusion=status.fusion_runtime||{};
+  if(fusion.status){
+    const fusionRuntime=fusion.runtime||{};
+    const distilledReport=fusionRuntime.distilled_opportunity_report||{};
+    const distilledOpps=Array.isArray(distilledReport.opportunities)?distilledReport.opportunities:[];
+    const distilledBest=distilledOpps[0]||{};
+    const distilledRejected=Object.entries(distilledReport.rejected_reasons||{})
+      .filter(([k,v])=>k&&Number(v)>0)
+      .sort((a,b)=>Number(b[1])-Number(a[1]))
+      .slice(0,3)
+      .map(([k,v])=>`${k} ${v}x`)
+      .join(", ");
+    const externalSummary=fusionRuntime.external_profile_execution_summary||{};
+    const externalExecs=Array.isArray(fusionRuntime.external_profile_executions)?fusionRuntime.external_profile_executions:[];
+    const externalInstalled=Number(externalSummary.profiles_installed||0);
+    const externalExecuted=Number(externalSummary.profiles_executed||0);
+    const externalWithOrders=Number(externalSummary.profiles_with_paper_orders||0);
+    const externalPaperOrders=Number(externalSummary.paper_orders_total||0);
+    const externalUnavailable=Array.isArray(externalSummary.unavailable_profile_ids)?externalSummary.unavailable_profile_ids.length:Number(externalSummary.profiles_unavailable||0);
+    const acceptedProfiles=externalExecs
+      .filter(row=>row&&row.decision==="PAPER_ORDER_ACCEPTED")
+      .slice(0,3)
+      .map(row=>row.profile_id||row.strategy_id||"profile")
+      .join(", ");
+    if(externalInstalled||externalExecuted){
+      sh+=`<div class="dec"><span class="dot" style="background:${externalWithOrders>0?'var(--green)':'var(--orange)'}"></span><span><b>Bus GitHub simulation</b> : ${externalExecuted}/${externalInstalled} profil(s) execute(s) · capacite OPEN/CLOSE paper · ${externalWithOrders} profil(s) avec ordre paper · ${externalPaperOrders} ordre(s) paper · ${externalUnavailable} lien(s) indisponible(s)${acceptedProfiles?(" · "+esc(acceptedProfiles)):""}</span></div>`;
+    }
+    sh+=`<div class="dec"><span class="dot" style="background:${distilledOpps.length>0?'var(--green)':'var(--orange)'}"></span><span><b>Opportunites distillees</b> : ${distilledOpps.length}/${Number(distilledReport.evaluated_candidates||0)} retenue(s)${distilledBest.coin?(" - "+esc(distilledBest.coin+" "+distilledBest.side+" - "+distilledBest.wallet_count+" wallets - edge "+distilledBest.average_edge_bps+" bps")):(distilledRejected?(" - "+esc(distilledRejected)):" - attente edge/liquidite/couts mesures")}</span></div>`;
+    const fusionOk=fusion.status==="OK_LIVE_FUSION_RUNTIME";
+    const fusionReasons=(fusion.no_trade_reasons||[]).slice(0,3).join(", ");
+    const freshness=fusion.freshness||{};
+    const freshState=freshness.state||"UNKNOWN";
+    const freshAge=freshness.latest_delta_age_ms==null?"--":ageText(freshness.latest_delta_age_ms);
+    sh+=`<div class="dec"><span class="dot" style="background:${freshState==="STALE"?'var(--red)':(freshState==="FRESH"?'var(--green)':'var(--orange)')}"></span><span><b>Fraicheur deltas</b> : ${esc(freshState)} - dernier delta ${freshAge} - ${Number(freshness.recent_entry_deltas||0)} entree(s) fraiche(s), ${Number(freshness.recent_deltas||0)} delta(s) recent(s)</span></div>`;
+    sh+=`<div class="dec"><span class="dot" style="background:${fusionOk?'var(--green)':'var(--orange)'}"></span><span><b>Moteur fusion</b> : ${esc(fusion.status)} · ${Number(fusion.orders_count||0)} ordre(s) paper local · PaperEngine ${Number(fusion.paper_engine_accepted||0)} accepte(s)${fusionReasons?(" · "+esc(fusionReasons)):""}</span></div>`;
+  }
+  if(status.backend_offline||status.readiness==="SERVER_OFFLINE"){
+    sh+=`<div class="dec"><span class="dot" style="background:var(--red)"></span><span><b>Serveur local indisponible</b> · relance LANCER_HYPERSMART.cmd et garde la fenetre du lanceur ouverte.</span></div>`;
+  }
+  sh+=`<div class="dec"><span class="dot" style="background:var(--accent)"></span><span><b>${wcount}</b> wallets suivis · <b>${analysed}</b> signaux analysés · <b>${refused}</b> refusés</span></div>`;
+  sh+=`<div class="dec"><span class="dot" style="background:${(mf.ws_healthy||((function(){try{var hb=Number((typeof scanner!=='undefined'&&scanner&&scanner.heartbeat_age_ms!=null)?scanner.heartbeat_age_ms:((status.scanner&&status.scanner.heartbeat_age_ms!=null)?status.scanner.heartbeat_age_ms:status.heartbeat_age_ms));return isFinite(hb)&&hb>=0&&hb<=15000;}catch(e){return false;}})()))?'var(--green)':'var(--muted)'}"></span><span>Etat WS marche : <b>${esc(mf.ws_status||((function(){try{var hb=Number((typeof scanner!=='undefined'&&scanner&&scanner.heartbeat_age_ms!=null)?scanner.heartbeat_age_ms:((status.scanner&&status.scanner.heartbeat_age_ms!=null)?status.scanner.heartbeat_age_ms:status.heartbeat_age_ms));return (isFinite(hb)&&hb>=0&&hb<=15000)?'WS connecté · en veille':'en attente flux frais';}catch(e){return 'en attente flux frais';}})()))}</b>${mf.subscriptions_requested!=null?(' · '+mf.subscriptions_requested+' marches'):""}</span></div>`;
+  sh+=`<div class="dec"><span class="dot" style="background:${(mf.trades_seen||0)>0?'var(--green)':'var(--muted)'}"></span><span>Flux marche : <b>${mf.trades_seen||0}</b> trades · <b>${mf.signals||0}</b> signaux</span></div>`;
+  sh+=`<div class="dec"><span class="dot" style="background:${(stx.fills_seen||0)>0?'var(--green)':'var(--muted)'}"></span><span>Temps réel leaders : <b>${stx.fills_seen||0}</b> fills reçus · <b>${stx.consensus_detected||0}</b> consensus</span></div>`;
+  sh+=`<div class="dec"><span class="dot" style="background:var(--muted)"></span><span>Marchés : tous (filtrés par liquidité + edge)</span></div>`;
+  if(fs.harvested_addresses!=null){
+    sh+=`<div class="dec"><span class="dot" style="background:var(--accent)"></span><span>Découverts publics/on-chain : <b>${fs.harvested_addresses}</b>${fs.median_age_ms!=null?(" · âge médian "+Math.round(fs.median_age_ms)+"ms"):""}</span></div>`;
+  }
+  const wl=(wallets||[]).slice(0,6);
+  if(wl.length){
+    sh+=`<div class="dec" style="border-bottom:0;opacity:.7"><span class="dot" style="background:#2a3a4a"></span><span>Derniers wallets vus :</span></div>`;
+    sh+=wl.map(w=>{
+      const a=(w&&(w.address||w.wallet))||w;
+      const s2=(w&&w.score!=null)?(" · score "+Math.round(w.score)):"";
+      return `<div class="dec" style="border-bottom:0;padding:3px 0"><span class="dot" style="background:#2a3a4a"></span><span style="font-family:monospace;font-size:12px">${shortAddr(a)}${s2}</span></div>`;
+    }).join("");
+  }
+  setStableScanHtml(sh);
 }
 
 function applyRealtimeTick(tick){
@@ -206,9 +836,58 @@ function applyRealtimeTick(tick){
     displayPnl=pnl;
   }
   recordServerEquityPoint(equity,Date.now());
-  renderPositions(tick.positions||[]);
+  const displayPositions=positionsForDisplay(tick.positions||[]);
+  renderPositions(displayPositions);
+  renderBotDetails(tick,displayPositions);
+  renderOverviewScanPanel(tick,tick.wallets||[]);
   $("#gState").textContent=(tick.open_positions||0)>0
     ? "mark-to-market temps reel"
+    : "en attente d'un signal frais";
+}
+
+function applyFastStatusTick(statusPayload){
+  if(!statusPayload||statusPayload.error)return;
+  lastTick=statusPayload;
+  const equity=Number(statusPayload.equity_usdt!=null?statusPayload.equity_usdt:1000);
+  const pnl=Number(statusPayload.net_pnl_usdt!=null?statusPayload.net_pnl_usdt:(equity-1000));
+  const scanner=statusPayload.scanner||{};
+  lastServerTickAt=Date.now();
+  lastServerEquity=equity;
+  targetEquity=equity;
+  targetPnl=pnl;
+  if(!equityHist.length){
+    displayEquity=equity;
+    displayPnl=pnl;
+  }
+  recordServerEquityPoint(equity,Date.now());
+  const displayPositions=positionsForDisplay(statusPayload.positions||[]);
+  renderPositions(displayPositions);
+  renderBotDetails(statusPayload,displayPositions);
+  if(statusPayload.engine_running){
+    $("#bStatus").textContent="Hyperliquid · moteur actif";
+    $("#bStatus").className="badge ok";
+  }else if(statusPayload.server_running){
+    $("#bStatus").textContent="Serveur OK · moteur a relancer";
+    $("#bStatus").className="badge warn";
+  }
+  const fastWallets=Number(scanner.fresh_leaders_selected||scanner.leaders_selected||scanner.pool||0);
+  if(fastWallets>0) $("#bWallets").textContent=fastWallets+" wallets suivis";
+  renderOverviewScanPanel(statusPayload,statusPayload.wallets||[]);
+  if(false && (scanner.phase||statusPayload.engine_status)){
+    const age=scanner.heartbeat_age_ms==null?"--":Math.round(Number(scanner.heartbeat_age_ms)/1000)+"s";
+    const phase=scanner.phase||"unknown";
+    const msg=(scanner.message||"").replace(/[<>&]/g,"");
+    const deltas=Number(scanner.fresh_entry_deltas||scanner.position_deltas_total||0);
+    const candidates=Number(scanner.wallet_candidates_total||0);
+    const entries=Number(scanner.virtual_entries_logged||0);
+    const refusals=Number(scanner.virtual_refusals_logged||0);
+    $("#scan").innerHTML=
+      `<div class="dec"><span class="dot" style="background:${statusPayload.engine_running?'var(--green)':'var(--muted)'}"></span><span><b>Moteur</b> : ${statusPayload.engine_running?'actif':'pas de heartbeat recent'} · phase ${phase} · age ${age}</span></div>`+
+      `<div class="dec"><span class="dot" style="background:var(--accent)"></span><span><b>${candidates}</b> candidats vus · <b>${deltas}</b> deltas frais/recents · <b>${entries}</b> entrees paper · <b>${refusals}</b> refus</span></div>`+
+      (msg?`<div class="dec"><span class="dot" style="background:var(--muted)"></span><span>${msg}</span></div>`:"");
+  }
+  $("#gState").textContent=(Number(statusPayload.open_positions||0)>0)
+    ? "tick portefeuille local"
     : "en attente d'un signal frais";
 }
 
@@ -216,11 +895,13 @@ async function refreshTick(){
   if(tickInFlight)return;
   tickInFlight=true;
   try{
-    const tick=await getJson("/api/dydx/realtime-tick?t="+Date.now());
-    applyRealtimeTick(tick);
+    const overview=await getJson("/api/simulation/status?t="+Date.now());
+    markBackendOnline();
+    applyFastStatusTick(overview);
     tickBackoffMs=TICK_MIN_MS;
   }catch(e){
-    $("#gState").textContent=lastTick?"dernier tick conserve":"tick temps reel indisponible";
+    markBackendOffline();
+    $("#gState").textContent=lastTick?"connexion perdue - dernier tick conserve":"serveur local indisponible";
     tickBackoffMs=Math.min(TICK_MAX_MS, Math.max(TICK_MIN_MS, tickBackoffMs*1.35));
   }finally{
     tickInFlight=false;
@@ -244,63 +925,136 @@ function animateEquity(){
   if(Math.abs(targetEquity-displayEquity)<0.002)displayEquity=targetEquity;
   if(Math.abs(targetPnl-displayPnl)<0.002)displayPnl=targetPnl;
   updateLiveCards(displayEquity,displayPnl);
+  recordVisualEquityPoint(Date.now());
   drawEquity();
   requestAnimationFrame(animateEquity);
 }
 
 async function getJson(u){
   const ctrl=new AbortController();
-  const isTick=String(u).includes("/api/dydx/realtime-tick");
-  const tid=setTimeout(()=>ctrl.abort(),isTick?2200:6000);
+  const isTick=String(u).includes("/api/simulation/status");
+  const tid=setTimeout(()=>ctrl.abort(),isTick?6500:20000);
   try{const r=await fetch(u,{cache:"no-store",signal:ctrl.signal});clearTimeout(tid);if(!r.ok)throw 0;return r.json();}
   catch(e){clearTimeout(tid);throw e;}
+}
+
+async function refreshLoopDashboard(){
+  try{
+    const payload=await getJson("/api/loop/dashboard?t="+Date.now());
+    lastLoopPayload=payload;
+    lastLoopPayloadAt=Date.now();
+  }catch(e){
+    // Optional loop panel: do not block the live simulation if no loop result
+    // exists yet or if the endpoint is temporarily unavailable.
+  }
+}
+
+function loopDashboardSummary(){
+  const payload=lastLoopPayload||{};
+  const ready=payload.status==="READY" && payload.latest_result;
+  const result=ready?payload.latest_result:{};
+  const thesis=(result&&result.thesis)||{};
+  const learning=(result&&result.learning)||{};
+  const inputDiag=(payload&&payload.latest_input_diagnostics)||{};
+  const trace=Array.isArray(payload.latest_decision_trace)?payload.latest_decision_trace:[];
+  const latest=trace.length?trace[trace.length-1]:null;
+  if(!ready){
+    return {
+      ready:false,
+      title:"loop en attente",
+      subtitle:"Aucun resultat loop local charge depuis /api/loop/dashboard.",
+    };
+  }
+  const decisions=Number(learning.total_decisions||0);
+  const accepted=Number(learning.accepted_testnet||0);
+  const noTrade=Number(learning.no_trade||0);
+  const statusText=String(thesis.status||payload.status||"READY");
+  const source=String(thesis.source||"source inconnue");
+  const latestText=latest
+    ? `${latest.coin||"?"} ${latest.decision_action||"?"} ${latest.execution_status||""}`
+    : (inputDiag.status?`input ${inputDiag.status}`:"aucune trace decisionnelle");
+  const inputText=inputDiag.status
+    ? `candidats ${Number(inputDiag.candidate_count||0)} · fills ${Number(inputDiag.fills_seen||0)} · deltas ${Number(inputDiag.position_delta_candidate_count||0)} · wallets ${Number(inputDiag.requested_wallet_count||0)}`
+    : "";
+  return {
+    ready:true,
+    title:`${statusText} · ${decisions} decision(s)`,
+    subtitle:`${source} · ${accepted} accepte(s) testnet · ${noTrade} no-trade · ${latestText}${inputText?" · "+inputText:""}`,
+  };
 }
 
 async function refresh(){
   let status,positions,wallets;
   try{
-    [status,positions,wallets]=await Promise.all([
-      getJson("/api/dydx/status"),
-      getJson("/api/dydx/positions").catch(()=>[]),
-      getJson("/api/dydx/wallets").catch(()=>[])
-    ]);
+    const overview=await getJson("/api/simulation/overview?limit=80&t="+Date.now());
+    markBackendOnline();
+    status=normalizeHyperliquidOverview(overview);
+    positions=status.positions||[];
+    wallets=status.wallets||[];
     lastGood={status,positions,wallets};
-    if(status.demo_mode) $("#bStatus").textContent="Mode démo · lecture seule";
-    else if(!status.running) $("#bStatus").textContent="Démarrage en cours…";
-    else $("#bStatus").textContent="Lecture seule · connecté";
+    if(!status.running) $("#bStatus").className="badge warn";
+    else $("#bStatus").className="badge ok";
+    if(!status.running) $("#bStatus").textContent="Démarrage en cours…";
+    else if(!$("#bStatus").textContent.toLowerCase().includes("moteur")) $("#bStatus").textContent="Hyperliquid · lecture seule";
   }catch(e){
+    // Le badge online/offline est pilote par le poller leger /api/simulation/status.
+    // L'overview lourd ne doit PAS faire clignoter le badge quand il est juste lent.
     if(!lastGood){
-      $("#bStatus").textContent="Démarrage du moteur…";
+      // Badge piloté par le poller léger /api/simulation/status (ne pas bloquer ici).
       // Show empty state instead of blocking
       status={net_pnl_usdt:0,equity_usdt:1000,total_trades:0,winning_trades:0,
         winrate:"—",wallets_in_shortlist:0,no_trade_reasons:{},leader_exits:0};
+      status.running=false;
+      status.backend_offline=true;
+      status.readiness="SERVER_OFFLINE";
+      status.next_step="Relance LANCER_HYPERSMART.cmd et garde la fenetre du lanceur ouverte.";
+      status.market_flow={ws_healthy:false,ws_status:"OFFLINE",trades_seen:0,signals:0};
+      status.stream={fills_seen:0,consensus_detected:0};
+      status.fast_scan={harvested_addresses:0};
       positions=[];wallets=[];
     }else{
       ({status,positions,wallets}=lastGood);
+      status={...status,running:false,backend_offline:true,readiness:"SERVER_OFFLINE",
+        next_step:"Connexion perdue avec le serveur local. Les donnees ci-dessous sont le dernier etat connu."};
     }
   }
+
+  const mergedLive=mergeStatusWithFreshTick(status,positions);
+  status=mergedLive.status;
+  positions=mergedLive.positions||positions;
+  renderBotDetails(status,positions);
 
   const pnl=Number(status.net_pnl_usdt||0);
   const eq=Number(status.equity_usdt!=null?status.equity_usdt:(1000+pnl));
   const trades=Number(status.total_trades||0);
   const wins=Number(status.winning_trades!=null?status.winning_trades:0);
-  const wr=status.winrate||(trades>0?Math.round((wins/trades)*100)+"%":"—");
+  const closedTrades=Number(status.closed_trades!=null?status.closed_trades:trades);
+  const wr=status.winrate||(closedTrades>0?Math.round((wins/closedTrades)*100)+"%":"—");
   const wcount=(wallets&&wallets.length)||status.wallets_in_shortlist||0;
 
   const now=Date.now();
-  targetEquity=eq;
-  targetPnl=pnl;
+  // The lightweight /api/simulation/status tick owns the live graph whenever it
+  // is available. The heavy overview payload can lag and can use older cached
+  // aggregates; letting it overwrite targetEquity was the source of the visible
+  // spike-then-drop PnL graph. If no status tick exists, overview remains the
+  // honest fallback.
+  if(!lastTick||status.backend_offline||!liveStatusIsUsableForGraph()){
+    targetEquity=eq;
+    targetPnl=pnl;
+  }
   if(!equityHist.length){
     displayEquity=eq;
     displayPnl=pnl;
     recordServerEquityPoint(eq,now);
     updateLiveCards(eq,pnl);
   }
-  $("#mWins").textContent=trades>0?(wins+" / "+trades):"0 / 0";
+  $("#mWins").textContent=closedTrades>0?(wins+" / "+closedTrades):"0 / 0";
   $("#mWr").textContent=(typeof wr==="string")?wr:(wr+"%");
   $("#bWallets").textContent=wcount+" wallets suivis";
 
   // Positions
+  renderPositions(positions);
+  if(false){
   const pc=$("#positions");
   if(positions&&positions.length){
     pc.innerHTML=positions.slice(0,12).map(p=>{
@@ -309,7 +1063,7 @@ async function refresh(){
       const upTxt=p.unrealized_pnl_usdc!=null?`<div class="${up>=0?'green':'red'}" style="font-weight:600">${fmtUsd(up)}</div>`:'';
       const entry=p.entry_price!=null?Number(p.entry_price).toFixed(2):'—';
       const mark=p.mark_price!=null?Number(p.mark_price).toFixed(2):(p.take_profit!=null?'':'');
-      return `<div class="row"><div><span class="mkt">${p.market_id||p.market||'?'}</span>
+      return `<div class="row"><div><span class="mkt">${p.coin||p.market_id||p.market||'UNKNOWN'}</span>
         <span class="pill ${cls}">${lab}</span>
         <div class="meta">entrée ${entry}${mark?(' · actuel '+mark):''} · ${p.wallet_count||0} wallets</div></div>${upTxt}</div>`;
     }).join("");
@@ -317,30 +1071,57 @@ async function refresh(){
     pc.innerHTML='<div class="empty">Aucune position ouverte — le bot attend un signal net.</div>';
   }
 
+  }
+
   // Décisions / refus en langage simple
   const dc=$("#decisions");
   const reasons=(status.no_trade_reasons&&typeof status.no_trade_reasons==="object")
-    ? Object.entries(status.no_trade_reasons).sort((a,b)=>b[1]-a[1]).slice(0,8) : [];
+    ? stableReasonEntries(status.no_trade_reasons,8) : [];
   let html="";
+  const bridgeInfo=bridgeSummary(status);
+  const fusionRuntime=(status.fusion_runtime&&status.fusion_runtime.runtime)||{};
+  const strategyIds=Array.isArray(fusionRuntime.paper_order_strategy_ids)?fusionRuntime.paper_order_strategy_ids:[];
+  if(bridgeInfo.active){
+    html+=`<div class="dec"><span class="dot" style="background:var(--green)"></span><span>GitHub branche : <b>${bridgeInfo.enabled}</b> profil(s) paper prioritaires - ${esc(bridgeInfo.profileText||"catalogue externe actif")}</span></div>`;
+  }
+  if(strategyIds.length){
+    html+=`<div class="dec"><span class="dot" style="background:var(--accent)"></span><span>Profil(s) qui pilotent les decisions paper : ${esc(strategyIds.slice(0,5).join(", "))}</span></div>`;
+  }
   if(trades>0){
     html+=`<div class="dec"><span class="dot" style="background:var(--green)"></span><span><b>${trades}</b> trade(s) joué(s) · ${status.leader_exits||0} sortie(s) leader</span></div>`;
+  }
+  const v9Rows=(positions||[]).filter(p=>p.last_v9_decision||p.last_v9_evidence_hash).slice(0,3);
+  if(v9Rows.length){
+    html+=v9Rows.map(p=>{
+      const v9Reasons=Array.isArray(p.last_v9_reasons)?p.last_v9_reasons:[];
+      const firstReason=v9Reasons.length?(" · "+esc(String(v9Reasons[0]).slice(0,90))):"";
+      const ok=String(p.last_v9_decision||"").includes("PAPER_TRADE");
+      return `<div class="dec"><span class="dot" style="background:${ok?'var(--green)':'var(--amber)'}"></span>
+        <span>V9 ${esc(p.market_id||p.market||p.coin||'?')} : <b>${esc(p.last_v9_decision||'NO_DIAGNOSTIC')}</b>${firstReason}</span></div>`;
+    }).join("");
   }
   if(reasons.length){
     html+=reasons.map(([r,n])=>`<div class="dec"><span class="dot" style="background:var(--muted)"></span>
       <span>Ignoré : ${simpleReason(r)} <span style="color:var(--muted)">(${n}×)</span></span></div>`).join("");
   }
-  dc.innerHTML=html||'<div class="empty">En attente des premières décisions…</div>';
+  const decHtml=html||'<div class="empty">En attente des premières décisions…</div>';
+  lastDecisionHtml=setStablePanelHtml(dc,decHtml,lastDecisionHtml);
 
   // État du scan (en direct)
+  renderOverviewScanPanel(status,wallets);
+  if(false){
   const sc=$("#scan");
   const analysed=Number(status.iteration||status.total_signals_seen||0);
   const refused=Number(status.signals_refused||0)+Number(status.stale_refused||0);
   const fs=status.fast_scan||{};
   let sh="";
+  if(status.backend_offline||status.readiness==="SERVER_OFFLINE"){
+    sh+=`<div class="dec"><span class="dot" style="background:var(--red)"></span><span><b>Serveur local indisponible</b> Â· relance LANCER_HYPERSMART.cmd et garde la fenetre du lanceur ouverte.</span></div>`;
+  }
   sh+=`<div class="dec"><span class="dot" style="background:var(--accent)"></span><span><b>${wcount}</b> wallets suivis · <b>${analysed}</b> signaux analysés · <b>${refused}</b> refusés</span></div>`;
   const stx=status.stream||{};
   const mf=status.market_flow||{};
-  sh+=`<div class="dec"><span class="dot" style="background:${mf.ws_healthy?'var(--green)':'var(--muted)'}"></span><span>Etat WS marche : <b>${mf.ws_status||'OFF'}</b>${mf.subscriptions_requested!=null?(' · '+mf.subscriptions_requested+' marches'):""}</span></div>`;
+  sh+=`<div class="dec"><span class="dot" style="background:${(mf.ws_healthy||((function(){try{var hb=Number((typeof scanner!=='undefined'&&scanner&&scanner.heartbeat_age_ms!=null)?scanner.heartbeat_age_ms:((status.scanner&&status.scanner.heartbeat_age_ms!=null)?status.scanner.heartbeat_age_ms:status.heartbeat_age_ms));return isFinite(hb)&&hb>=0&&hb<=15000;}catch(e){return false;}})()))?'var(--green)':'var(--muted)'}"></span><span>Etat WS marche : <b>${mf.ws_status||((function(){try{var hb=Number((typeof scanner!=='undefined'&&scanner&&scanner.heartbeat_age_ms!=null)?scanner.heartbeat_age_ms:((status.scanner&&status.scanner.heartbeat_age_ms!=null)?status.scanner.heartbeat_age_ms:status.heartbeat_age_ms));return (isFinite(hb)&&hb>=0&&hb<=15000)?'WS connecté · en veille':'en attente flux frais';}catch(e){return 'en attente flux frais';}})())}</b>${mf.subscriptions_requested!=null?(' · '+mf.subscriptions_requested+' marches'):""}</span></div>`;
   sh+=`<div class="dec"><span class="dot" style="background:${(mf.trades_seen||0)>0?'var(--green)':'var(--muted)'}"></span><span>Flux marche : <b>${mf.trades_seen||0}</b> trades · <b>${mf.signals||0}</b> signaux</span></div>`;
   sh+=`<div class="dec"><span class="dot" style="background:${(stx.fills_seen||0)>0?'var(--green)':'var(--red)'}"></span><span>Temps réel WS : <b>${stx.fills_seen||0}</b> fills reçus · <b>${stx.consensus_detected||0}</b> consensus</span></div>`;
   sh+=`<div class="dec"><span class="dot" style="background:var(--muted)"></span><span>Marchés : tous (filtrés par liquidité + edge)</span></div>`;
@@ -363,7 +1144,9 @@ async function refresh(){
       return `<div class="dec" style="border-bottom:0;padding:3px 0"><span class="dot" style="background:#2a3a4a"></span><span style="font-family:monospace;font-size:12px">${shortAddr(a)}${s2}</span></div>`;
     }).join("");
   }
-  sc.innerHTML=sh||'<div class="empty">Scan en cours…</div>';
+  const scanHtml=sh||'<div class="empty">Scan en cours…</div>';
+  if(sc.__lastHtml!==scanHtml){ sc.__lastHtml=scanHtml; sc.innerHTML=scanHtml; }
+  }
 
   $("#foot").textContent="Lecture seule · prix réels mainnet · 0 ordre réel · 0 clé · 0 signature"
     + (status.mode?(" · "+status.mode):"");
@@ -378,22 +1161,24 @@ function drawEquity(){
   ctx.clearRect(0,0,W,H);
   const pad={l:54,r:16,t:14,b:24};
   const now=Date.now();
-  let basePts=equityHist.length?equityHist:[{t:now-1000,equity:1000,source:"empty"}];
+  normalizeGraphHistory();
+  let basePts=equityHist.length?compactGraphPoints(equityHist):[{t:now-1000,equity:1000,source:"empty"}];
   if(equityHist.length){
     const cutoff=now-GRAPH_VISIBLE_MS;
     const recent=equityHist.filter(p=>p.t>=cutoff);
     const anchor=[...equityHist].reverse().find(p=>p.t<cutoff);
-    basePts=anchor?[anchor,...recent]:recent;
+    basePts=compactGraphPoints(anchor?[anchor,...recent]:recent);
     if(!basePts.length)basePts=[equityHist[equityHist.length-1]];
   }
   const lastBase=basePts[basePts.length-1];
-  const pts=[...basePts];
+  let pts=compactGraphPoints([...basePts]);
   if(!lastBase || Math.abs(lastBase.equity-displayEquity)>0.0005 || now-lastBase.t>180){
     pts.push({t:now,equity:displayEquity,source:"visual_interpolation"});
   }
+  pts=compactGraphPoints(pts);
   const vals=pts.map(p=>p.equity);
   let lo=Math.min(1000,...vals),hi=Math.max(1000,...vals);
-  const rawSpan=Math.max(hi-lo,2.0);
+  const rawSpan=Math.max(hi-lo,GRAPH_MIN_USD_RANGE);
   const mid=(hi+lo)/2;
   lo=mid-rawSpan*0.62;
   hi=mid+rawSpan*0.62;
@@ -459,8 +1244,144 @@ refreshTick();
 animateEquity();
 refresh();
 scheduleNextTick();
-setInterval(()=>{refresh().catch(()=>{});},REFRESH_MS);
+// Fast engine-status poller: owns the header badge so it clears in <2s even while
+// the heavy /api/simulation/overview is still computing. Read-only, paper-only.
+async function refreshStatus(){
+  if(liveStatusIsFresh(1200))return;
+  try{
+    const ctrl=new AbortController();
+    const tid=setTimeout(()=>ctrl.abort(),8000);
+    const r=await fetch("/api/simulation/status?t="+Date.now(),{cache:"no-store",signal:ctrl.signal});
+    clearTimeout(tid);
+    if(r.ok){ const s=await r.json(); if(s&&s.running){ applyFastStatusTick(s); } }
+  }catch(e){ /* garde le dernier texte du badge */ }
+}
+refreshStatus();
+refreshLoopDashboard();
+(function scheduleLoopDashboard(){ setTimeout(async()=>{ await refreshLoopDashboard(); scheduleLoopDashboard(); }, 5000); })();
+(function scheduleStatus(){ setTimeout(async()=>{ await refreshStatus(); scheduleStatus(); }, 900); })();
+// Self-chaining refresh: never launch a new heavy /overview before the previous
+// one finished (the old setInterval piled up requests and saturated the server,
+// leaving the badge stuck on "Démarrage du moteur…" forever).
+(function scheduleRefresh(){
+  setTimeout(async()=>{ try{ await refresh(); }catch(e){} scheduleRefresh(); }, REFRESH_MS);
+})();
+// ---- V12 read-only panels (Source Health / NO_TRADE Explorer / Decision Funnel) ----
+// Additive: renders only real recorded values from /api/v12/panels. Never an order.
+function v12Row(label,value,sub){
+  const row=document.createElement("div"); row.className="detail";
+  const k=document.createElement("div"); k.className="k"; k.textContent=label;
+  const v=document.createElement("div"); v.className="v"; v.textContent=value;
+  row.appendChild(k); row.appendChild(v);
+  if(sub){const s=document.createElement("div"); s.className="s"; s.textContent=sub; row.appendChild(s);}
+  return row;
+}
+function v12Fill(elId,rows){
+  const el=document.getElementById(elId); if(!el)return;
+  el.textContent="";
+  if(!rows.length){const e=document.createElement("div");e.className="empty";e.textContent="Aucune donnée pour le moment.";el.appendChild(e);return;}
+  rows.forEach(r=>el.appendChild(r));
+}
+async function renderV12Panels(){
+  let data; try{ data=await getJson("/api/v12/panels"); }catch(e){ return; }
+  if(!data) return;
+  // Source health
+  const sh=data.source_health||{}; const shRows=[];
+  (sh.all_health||[]).forEach(h=>{
+    shRows.push(v12Row(String(h.source_id||"source"),
+      (h.usable?"utilisable":"indisponible")+" · "+String(h.status||"-"),
+      "âge "+(h.age_ms==null?"-":Math.round(h.age_ms/1000)+"s")+" · échantillons "+(h.samples??0)));
+  });
+  v12Fill("v12-source-health",shRows);
+  // NO_TRADE explorer (top refusal codes)
+  const nt=data.no_trade_explorer||{}; const ntRows=[];
+  (nt.by_code||[]).slice(0,10).forEach(c=>{
+    ntRows.push(v12Row(String(c.reason_code||"?")+" ×"+(c.count??0),
+      String(c.category||"")+" · "+String(c.severity||""),
+      c.dashboard_message||c.next_action||""));
+  });
+  v12Fill("v12-no-trade",ntRows);
+  // Decision funnel
+  const fn=data.decision_funnel||{}; const fnRows=[];
+  if(fn.total!=null){
+    fnRows.push(v12Row("Candidats",String(fn.total),"acceptés "+(fn.accepted??0)+" · bloqués "+(fn.blocked??0)));
+    fnRows.push(v12Row("Taux d'acceptation",((fn.acceptance_rate??0)*100).toFixed(1)+"%",
+      "retriables bloqués "+(fn.retriable_blocked??0)));
+  }
+  v12Fill("v12-funnel",fnRows);
+  renderModelPanelSimple(data.model||{}, data.calibration||{});
+  renderExplanations(data.explanations||{});
+  renderRiskPanel(data.risk||{});
+}
+// Panneau Risque (#158) — langage simple, lecture seule.
+function renderRiskPanel(rk){
+  const el=document.getElementById("v13-risk"); if(!el) return;
+  el.textContent="";
+  function block(label,txt,big){
+    const w=document.createElement("div"); w.style.margin="4px 0";
+    if(label){const b=document.createElement("span"); b.className="k"; b.textContent=label+" "; w.appendChild(b);}
+    const v=document.createElement("span"); v.className=big?"v":"s"; if(big)v.style.fontWeight="600";
+    v.textContent=txt; w.appendChild(v); el.appendChild(w);
+  }
+  if(rk.plain_summary) block("", rk.plain_summary, true);
+  if(rk.empty){ return; }
+  if(rk.var_usdc!=null) block("Perte typique max (95%) :", rk.var_usdc+" $");
+  if(rk.worst_case) block("Pire choc simulé :", (Math.round(rk.worst_case.shock_pct*100))+"% → "+rk.worst_case.pnl_usdc+" $");
+  if(rk.open_exposure_usdc!=null) block("Exposition ouverte :", rk.open_exposure_usdc+" $");
+  block("Disjoncteur :", rk.halted ? "DÉCLENCHÉ (pause)" : "OK");
+}
+// Explication IA (#156) — phrases claires, Ollama si dispo sinon règles.
+function renderExplanations(ex){
+  const el=document.getElementById("v13-explain"); if(!el) return;
+  el.textContent="";
+  if(ex.ollama_narrative){
+    const w=document.createElement("div"); w.style.margin="4px 0";
+    const b=document.createElement("span"); b.className="k"; b.textContent="Résumé IA : ";
+    const v=document.createElement("span"); v.className="v"; v.style.fontWeight="600"; v.textContent=ex.ollama_narrative;
+    w.appendChild(b); w.appendChild(v); el.appendChild(w);
+  }
+  const items=ex.items||[];
+  if(!items.length && !ex.ollama_narrative){ const e=document.createElement("div"); e.className="empty"; e.textContent="En attente des décisions…"; el.appendChild(e); return; }
+  items.slice(0,8).forEach(it=>{
+    const d=document.createElement("div"); d.className="dec";
+    const dot=document.createElement("span"); dot.className="dot";
+    dot.style.background = it.source==="ollama" ? "var(--accent)" : "var(--muted)";
+    const s=document.createElement("span"); s.className="s"; s.textContent=it.text||"";
+    d.appendChild(dot); d.appendChild(s); el.appendChild(d);
+  });
+}
+// Panneau "Modèle IA" en langage simple (débutant) — aucune donnée inventée.
+function renderModelPanelSimple(md, cal){
+  const el=document.getElementById("v13-model"); if(!el) return;
+  el.textContent="";
+  function block(label,txt,big){
+    const wrap=document.createElement("div"); wrap.style.margin="4px 0";
+    if(label){const b=document.createElement("span"); b.className="k"; b.textContent=label+" "; wrap.appendChild(b);}
+    const v=document.createElement("span"); v.className=big?"v":"s";
+    if(big)v.style.fontWeight="600";
+    v.textContent=txt; wrap.appendChild(v); el.appendChild(wrap);
+  }
+  if(md.plain_status) block("", md.plain_status, true);
+  if(md.plain_progress) block("Progression :", md.plain_progress);
+  if(md.plain_what) block("Ce que fait l'IA :", md.plain_what);
+  if(md.plain_top) block("", md.plain_top);
+  if(md.plain_hint) block("Astuce :", md.plain_hint);
+  // Fiabilité des notes (rapport de calibration #157)
+  if(cal && cal.plain_summary) block("Fiabilité des notes :", cal.plain_summary);
+  if(cal && (cal.block_reasons||[]).length){
+    const br=cal.block_reasons.slice(0,3).map(b=>b.reason+" ("+b.count+")").join(", ");
+    if(br) block("Refus les plus fréquents :", br);
+  }
+  if(!md.plain_status && !md.plain_what){
+    block("", "En attente du modèle…");
+  }
+}
+renderV12Panels();
+setInterval(renderV12Panels, 10000);
 window.addEventListener("resize",drawEquity);
+window.addEventListener("scroll",()=>{
+  if(Date.now()>suppressScrollEventUntil)lastUserScrollAt=Date.now();
+},{passive:true});
 $("#equity").addEventListener("mousemove",(ev)=>{
   const r=$("#equity").getBoundingClientRect();
   mousePoint={x:ev.clientX-r.left,y:ev.clientY-r.top};

@@ -24,9 +24,10 @@ logger = logging.getLogger(__name__)
 
 # ─── Seuils recalibrés ────────────────────────────────────────────────────────
 MIN_EDGE_BPS: float = 3.0           # seuil: filtre le bruit, laisse passer les trades modestes
+MIN_EXPECTED_EDGE_USDT: float = 0.0  # plancher profit absolu USD (port rustjesty min_profit_usd); 0=desactive
 TAKER_FEE_BPS: float = 5.0          # frais taker dYdX v4 (0.05%)
 ROUND_TRIP_FEE_BPS: float = 10.0    # entrée + sortie (référence)
-EVAL_FEE_BPS: float = 7.0           # à l'évaluation: entry (5) + marge exit (2)
+EVAL_FEE_BPS: float = 5.0           # à l'évaluation: entry taker fee only (exit counted at close)
 
 # Freshness: décroissance exponentielle avec half-life de 12s
 # À 0s: 1.0 | 5s: 0.75 | 8s: 0.63 | 12s: 0.50 | 18s: 0.35 | 25s: 0.23
@@ -166,7 +167,7 @@ def consensus_factor(wallet_count: int) -> float:
     3+ = bonus (cap 1.18)
     """
     if wallet_count <= 1:
-        return 0.85  # single-wallet: légèrement réduit
+        return 0.92  # single-wallet: normal sur dYdX, minimal reduction
     if wallet_count == 2:
         return 1.0
     if wallet_count == 3:
@@ -174,6 +175,32 @@ def consensus_factor(wallet_count: int) -> float:
     if wallet_count == 4:
         return 1.15
     return 1.18  # cap à 5+, crowding penalty séparément
+
+
+def _market_context_edge_multiplier(market_context: object | None) -> float:
+    """Apply explicit regime and volume multipliers to edge.
+
+    RANGING markets are not allowed to create paper edge. TRENDING markets get
+    a controlled boost. Volume confirms momentum when z-score is high and cuts
+    edge when participation is weak.
+    """
+    if market_context is None:
+        return 1.0
+    mult = 1.0
+    regime = str(getattr(market_context, "regime", "") or "").upper()
+    if regime == "RANGING":
+        mult *= 0.0
+    elif regime == "TRENDING":
+        mult *= 1.2
+    try:
+        volume_z = float(getattr(market_context, "volume_zscore", 0.0) or 0.0)
+    except (TypeError, ValueError):
+        volume_z = 0.0
+    if volume_z > 1.0:
+        mult *= 1.2
+    elif volume_z < -1.0:
+        mult *= 0.5
+    return max(0.0, mult)
 
 
 def leader_expected_edge_bps(
@@ -209,6 +236,8 @@ def calculate_edge(
     funding_penalty_bps: float = 0.0,
     market_edge_multiplier: float = 1.0,
     min_edge_bps: float = MIN_EDGE_BPS,
+    min_expected_edge_usdt: float = MIN_EXPECTED_EDGE_USDT,
+    market_context: object | None = None,
 ) -> EdgeComponents:
     """
     Calculer l'edge net après tous les coûts.
@@ -216,6 +245,7 @@ def calculate_edge(
     Recalibré: freshness exponentielle, pas de double-comptage delay,
     fees réduits à entry+marge.
     """
+    context_multiplier = _market_context_edge_multiplier(market_context)
     result = EdgeComponents(
         spread_bps=spread_bps,
         slippage_bps=slippage_bps,
@@ -223,7 +253,7 @@ def calculate_edge(
         liquidity_penalty_bps=liquidity_penalty_bps,
         adverse_price_move_bps=adverse_price_move_bps,
         funding_penalty_bps=funding_penalty_bps,
-        market_edge_multiplier=max(0.0, market_edge_multiplier),
+        market_edge_multiplier=max(0.0, market_edge_multiplier) * context_multiplier,
     )
 
     # 1. Freshness (exponentielle, half-life 8s)
@@ -275,6 +305,18 @@ def calculate_edge(
             f"EDGE_TOO_LOW: net={result.edge_remaining_bps:.1f}bps < min={min_edge_bps:.1f}bps"
             f" (gross={gross:.1f}bps - costs={result.total_cost_bps:.1f}bps)"
         )
+
+    # 8b. Plancher profit absolu USD (port rustjesty min_profit_usd; defaut 0.0 = off).
+    #     Filtre les micro-notionnels ou l'edge net en bps est positif mais le gain $ est negligeable.
+    if result.accepted and min_expected_edge_usdt > 0.0:
+        expected_edge_usdt = (result.edge_remaining_bps / 10000.0) * paper_notional_usdc
+        if expected_edge_usdt < min_expected_edge_usdt:
+            result.accepted = False
+            result.reject_reason = (
+                f"EXPECTED_NET_EDGE_TOO_SMALL_AFTER_COSTS: {expected_edge_usdt:.4f}USDT"
+                f" < min={min_expected_edge_usdt:.4f}USDT"
+                f" (net={result.edge_remaining_bps:.1f}bps x notional={paper_notional_usdc:.1f})"
+            )
 
     logger.debug(
         "edge_calc: age=%dms wallets=%d gross=%.1f costs=%.1f net=%.1f accepted=%s",

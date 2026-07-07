@@ -125,6 +125,9 @@ class MarketUniverseSettings(BaseModel):
     include_spot: bool = False
     default_fallback_coins: list[str] = Field(default_factory=lambda: ["BTC", "ETH", "SOL", "HYPE"])
     excluded_coins: list[str] = Field(default_factory=list)
+    # Objectif = copy-trade de perps CRYPTO liquides. Par defaut on exclut les marches
+    # exotiques HIP-3 / RWA / builder / spot (actions, matieres: XYZ:TSLA, CASH:WTI, @107, #2160).
+    include_builder_and_rwa_perps: bool = False
     max_coins_per_scan: int = 50
     max_l2book_coins_per_scan: int = 15
     max_candle_coins_per_scan: int = 20
@@ -176,6 +179,17 @@ class AdaptiveRiskFilterSettings(BaseModel):
 class ExecutionSettings(BaseModel):
     enable_mainnet_execution: bool = False
     enable_testnet_execution: bool = False
+    real_mainnet_trading: bool = False
+    testnet_only: bool = True
+    testnet_mode: bool = False
+    testnet_execution_enabled: bool = False
+    confirm_testnet_execution: bool = False
+    require_explicit_testnet_confirmation: bool = True
+    testnet_exchange: str = "hyperliquid"
+    max_testnet_notional: float = 5.0
+    max_open_testnet_positions: int = 1
+    allow_mainnet_order_submission: bool = False
+    testnet_adapter: str = "fake"
     require_confirm_testnet_only: bool = True
     require_cloid: bool = True
     require_schedule_cancel: bool = True
@@ -209,12 +223,14 @@ class CopyTradingSettings(BaseModel):
     default_interval_seconds: int = 300
     top_leaders: int = 50
     min_history_days: int = 7
-    min_copy_leader_score: float = 60.0
-    max_drawdown_pct: float = 35.0
-    min_consistency_score: float = 55.0
-    max_pnl_concentration: float = 0.65
+    # Seuils SMART-MONEY (MrFadiAi A2, V9): ne copier QUE des leaders prouves gagnants.
+    # Resserres 2026-06-21 pour viser un winrate de copie plus eleve (moins de trades, plus propres).
+    min_copy_leader_score: float = 64.0      # 60 -> 64
+    max_drawdown_pct: float = 30.0           # 35 -> 30 (rejette les leaders a gros drawdown)
+    min_consistency_score: float = 70.0      # 55 -> 70 (perf recente reguliere)
+    max_pnl_concentration: float = 0.35      # 0.65 -> 0.35 (anti one-big-win: PnL pas du a 1 coup)
     require_positive_pnl: bool = True
-    require_positive_roi: bool = False
+    require_positive_roi: bool = True         # False -> True (ROI positif exige)
     mode_default: str = "PAPER_MOCK_USDC"
     dry_run_default: bool = True
 

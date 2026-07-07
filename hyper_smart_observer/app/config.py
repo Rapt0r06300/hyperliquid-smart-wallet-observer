@@ -88,9 +88,10 @@ class AppConfig:
     ws_max_subscriptions: int = 1000
     explorer_weight: int = 40
     copy_poll_interval_seconds: int = 300
-    copy_min_edge_required_bps: float = 8.0
-    copy_max_signal_age_ms: int = 300_000
-    copy_max_degradation_bps: float = 40.0
+    copy_min_edge_required_bps: float = 10.0
+    copy_max_signal_age_ms: int = 30_000
+    copy_max_degradation_bps: float = 22.0
+    copy_min_liquidity_score: float = 0.30
     copy_leaderboard_target_count: int = 5
     copy_max_leaders_per_run: int = 3
     copy_min_history_days: float = 7.0
@@ -193,9 +194,21 @@ def load_config(env_file: str | Path = ".env") -> AppConfig:
             merged.get("HYPERSMART_PAPER_STARTING_EQUITY", "10000.0")
         ),
         paper_max_position_notional=_as_float(
-            merged.get("HYPERSMART_PAPER_MAX_POSITION_NOTIONAL", "100.0")
+            _first_env(
+                merged,
+                "HYPERSMART_PAPER_MAX_POSITION_NOTIONAL",
+                "HYPERSMART_SIMULATION_MAX_POSITION_NOTIONAL",
+                default="100.0",
+            )
         ),
-        paper_max_open_trades=_as_int(merged.get("HYPERSMART_PAPER_MAX_OPEN_TRADES", "3")),
+        paper_max_open_trades=_as_int(
+            _first_env(
+                merged,
+                "HYPERSMART_PAPER_MAX_OPEN_TRADES",
+                "HYPERSMART_SIMULATION_MAX_OPEN_POSITIONS",
+                default="3",
+            )
+        ),
         paper_fee_rate_bps=_as_float(merged.get("HYPERSMART_PAPER_FEE_RATE_BPS", "5")),
         paper_spread_bps=_as_float(merged.get("HYPERSMART_PAPER_SPREAD_BPS", "2")),
         paper_slippage_bps=_as_float(merged.get("HYPERSMART_PAPER_SLIPPAGE_BPS", "5")),
@@ -236,11 +249,36 @@ def load_config(env_file: str | Path = ".env") -> AppConfig:
             merged.get("HYPERSMART_COPY_POLL_INTERVAL_SECONDS", "300")
         ),
         copy_min_edge_required_bps=_as_float(
-            merged.get("HYPERSMART_COPY_MIN_EDGE_REQUIRED_BPS", "8")
+            _first_env(
+                merged,
+                "HYPERSMART_COPY_MIN_EDGE_REQUIRED_BPS",
+                "HYPERSMART_SIMULATION_MIN_EDGE_BPS",
+                default="10",
+            )
         ),
-        copy_max_signal_age_ms=_as_int(merged.get("HYPERSMART_COPY_MAX_SIGNAL_AGE_MS", "300000")),
+        copy_max_signal_age_ms=_as_int(
+            _first_env(
+                merged,
+                "HYPERSMART_COPY_MAX_SIGNAL_AGE_MS",
+                "HYPERSMART_SIMULATION_MAX_SIGNAL_AGE_MS",
+                default="30000",
+            )
+        ),
         copy_max_degradation_bps=_as_float(
-            merged.get("HYPERSMART_COPY_MAX_DEGRADATION_BPS", "40")
+            _first_env(
+                merged,
+                "HYPERSMART_COPY_MAX_DEGRADATION_BPS",
+                "HYPERSMART_SIMULATION_MAX_COPY_DEGRADATION_BPS",
+                default="22",
+            )
+        ),
+        copy_min_liquidity_score=_as_float(
+            _first_env(
+                merged,
+                "HYPERSMART_COPY_MIN_LIQUIDITY_SCORE",
+                "HYPERSMART_SIMULATION_MIN_LIQUIDITY_SCORE",
+                default="0.30",
+            )
         ),
         copy_leaderboard_target_count=_as_int(
             merged.get("HYPERSMART_COPY_LEADERBOARD_TARGET_COUNT", "5")
@@ -280,6 +318,24 @@ def _blank_to_none(value: str | None) -> str | None:
     if value is None or value.strip() == "":
         return None
     return value
+
+
+def _first_env(values: dict[str, str], primary: str, fallback: str, *, default: str) -> str:
+    """Return the first configured env value.
+
+    `HYPERSMART_COPY_*` remains the canonical API, while
+    `HYPERSMART_SIMULATION_*` keeps the Windows launcher aligned with the
+    copy-mode runtime. This makes the active paper thresholds explainable and
+    avoids hidden defaults when the launcher is used.
+    """
+
+    primary_value = values.get(primary)
+    if primary_value is not None and str(primary_value).strip() != "":
+        return primary_value
+    fallback_value = values.get(fallback)
+    if fallback_value is not None and str(fallback_value).strip() != "":
+        return fallback_value
+    return default
 
 
 def _as_int(value: str | int | None) -> int:

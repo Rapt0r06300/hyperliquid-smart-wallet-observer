@@ -7,8 +7,8 @@ Ici, chaque fill paper:
 - marche le carnet niveau par niveau → prix VWAP réel,
 - refuse si la profondeur est insuffisante (max 10% du book),
 - ajoute une pénalité de latence configurable,
-- est étiqueté data_source (REAL_INDEXER / DEMO_SYNTHETIC / FIXTURE):
-  un fill DEMO ne doit JAMAIS être compté dans un PnL live.
+- est etiquete data_source (REAL_INDEXER / LEGACY_ARTIFICIAL / FIXTURE):
+  un fill non reel ne doit JAMAIS etre compte dans un PnL live.
 
 PAPER-ONLY. Aucun ordre réel n'est envoyé — on simule seulement
 ce qu'un ordre AURAIT payé.
@@ -22,7 +22,7 @@ from dataclasses import dataclass, field
 logger = logging.getLogger(__name__)
 
 DATA_SOURCE_REAL = "REAL_INDEXER"
-DATA_SOURCE_DEMO = "DEMO_SYNTHETIC"
+DATA_SOURCE_DEMO = "LEGACY_ARTIFICIAL"
 DATA_SOURCE_FIXTURE = "FIXTURE"
 DATA_SOURCE_FALLBACK = "FALLBACK_ESTIMATED"
 

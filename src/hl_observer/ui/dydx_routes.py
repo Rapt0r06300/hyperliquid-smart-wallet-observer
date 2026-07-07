@@ -180,3 +180,6 @@ def create_dydx_router() -> APIRouter:
             return {"enabled": False, "error": str(e), "disclaimer": DISCLAIMER}
 
     return router
+
+
+    return router

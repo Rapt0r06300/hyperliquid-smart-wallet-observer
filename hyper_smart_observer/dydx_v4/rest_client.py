@@ -334,4 +334,53 @@ class DydxIndexerRestClient:
                     elif resp.status_code == 429:
                         wait = self.backoff_base_s * (2 ** attempt)
                         logger.warning("Rate limited (429) %s, wait=%.1fs", base_url, wait)
-        
+                        time.sleep(wait)
+                        continue
+                    elif resp.status_code in (500, 502, 503, 504):
+                        wait = self.backoff_base_s * (2 ** attempt)
+                        logger.warning("Server error %d %s, wait=%.1fs", resp.status_code, base_url, wait)
+                        time.sleep(wait)
+                        continue
+                    else:
+                        try:
+                            body = resp.json()
+                        except Exception:
+                            body = {}
+                        # 403/401 probablement proxy → essayer le prochain endpoint
+                        if resp.status_code in (403, 401, 407):
+                            logger.warning(
+                                "Proxy/auth error %d sur %s, essai fallback…",
+                                resp.status_code, base_url,
+                            )
+                            last_error = RestError(
+                                status_code=resp.status_code,
+                                message=f"Proxy/auth error sur {base_url}",
+                                url=url,
+                                raw=body,
+                            )
+                            break  # Sortir de la boucle attempt → essayer le prochain base_url
+                        raise RestError(
+                            status_code=resp.status_code,
+                            message=body.get("errors", [{"msg": resp.text}])[0].get("msg", resp.text)
+                            if isinstance(body.get("errors"), list) and body.get("errors")
+                            else str(body),
+                            url=url,
+                            raw=body,
+                        )
+
+                except RestError:
+                    raise
+                except Exception as e:
+                    last_error = e
+                    wait = self.backoff_base_s * (2 ** attempt)
+                    logger.warning("Request error %s attempt=%d wait=%.1fs: %s", base_url, attempt, wait, e)
+                    if attempt < self.max_retries:
+                        time.sleep(wait)
+                    else:
+                        break  # Prochain endpoint
+
+        raise RestError(
+            status_code=0,
+            message=f"Tous les endpoints ont échoué (max_retries={self.max_retries}): {last_error}",
+            url=path,
+        )

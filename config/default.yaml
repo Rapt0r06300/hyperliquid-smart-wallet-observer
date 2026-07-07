@@ -1,0 +1,23 @@
+runtime:
+  active_package: src/hl_observer
+  market: hyperliquid
+  mode: paper_simulation
+  starting_balance_usdc: 1000.0
+  real_orders_enabled: false
+  exchange_endpoint_enabled: false
+  signatures_enabled: false
+  wallet_connect_enabled: false
+
+paper_ledger:
+  fee_bps_default: 4.5
+  min_fill_ratio: 0.85
+  require_reconciliation: true
+  include_funding: true
+  include_slippage: true
+  include_partial_and_missed_fills: true
+
+core:
+  max_retry_attempts: 3
+  retry_base_delay_seconds: 0.25
+  circuit_failure_threshold: 3
+  circuit_recovery_timeout_seconds: 30

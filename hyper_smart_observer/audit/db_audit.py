@@ -9,9 +9,10 @@ def audit_databases(config: AppConfig) -> tuple[bool, str]:
     configured_db = str(config.database_path).replace("\\", "/").lower()
     if "/logs/" in configured_db or configured_db.startswith("logs/"):
         return False, f"Configured HyperSmart DB is under logs: {config.database_path}"
+    suffix = f" (scan bounded: {report.stopped_reason})" if report.stopped_reason else ""
     if report.logs_databases:
         return (
             True,
-            f"Legacy DB(s) in logs detected and excluded from clean archives: {len(report.logs_databases)}",
+            f"Legacy DB(s) in logs detected and excluded from clean archives: {len(report.logs_databases)}{suffix}",
         )
-    return True, "No HyperSmart DB configured under logs; runtime DB files excluded from archives."
+    return True, f"No HyperSmart DB configured under logs; runtime DB files excluded from archives.{suffix}"

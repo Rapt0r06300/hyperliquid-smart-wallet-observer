@@ -253,6 +253,12 @@ class CopyRunReport:
     signal_candidates: list[SignalCandidate]
     no_trade_decisions: list[NoTradeDecision]
     source_failures: list[str] = field(default_factory=list)
+    scan_features_rows: int = 0
+    scan_features_json_path: str | None = None
+    scan_features_csv_path: str | None = None
+    decision_ledger_entries: int = 0
+    decision_ledger_json_path: str | None = None
+    decision_ledger_csv_path: str | None = None
     message: str = "Observation/paper only. No order, no signature, no mainnet."
 
 
@@ -297,3 +303,16 @@ def to_jsonable(value: Any) -> Any:
     if isinstance(value, dict):
         return {str(key): to_jsonable(item) for key, item in value.items()}
     return value
+
+
+# --- Reason-code alias (migration/brief compatibility) ----------------------
+# The migration brief names the "openOrders alone are NOT execution evidence"
+# guard OPEN_ORDERS_ONLY_NOT_EVIDENCE. In this codebase the SAME guard already
+# exists as NoTradeReason.OPEN_ORDERS_CONTEXT_ONLY. We keep the existing code
+# (Option A) and expose an explicit alias + mapping so both names resolve to a
+# single canonical value. An openOrder alone NEVER produces a PaperIntent.
+OPEN_ORDERS_ONLY_NOT_EVIDENCE = NoTradeReason.OPEN_ORDERS_CONTEXT_ONLY
+
+REASON_CODE_ALIASES = {
+    "OPEN_ORDERS_ONLY_NOT_EVIDENCE": NoTradeReason.OPEN_ORDERS_CONTEXT_ONLY,
+}

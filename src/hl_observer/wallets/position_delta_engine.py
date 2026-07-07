@@ -23,6 +23,7 @@ class PositionAction(StrEnum):
     REDUCE = "REDUCE"
     CLOSE = "CLOSE"
     FLIP = "FLIP"
+    LIQUIDATION = "LIQUIDATION"
     UNKNOWN = "UNKNOWN"
 
 
@@ -144,6 +145,38 @@ def classify_action(previous_size: float, new_size: float, *, direction_unclear:
     return PositionAction.UNKNOWN
 
 
+def detect_liquidation(fill: dict[str, Any] | None) -> bool:
+    """True if a real Hyperliquid fill indicates a liquidation (never inferred from size).
+
+    Uses only fields the venue actually provides: a truthy ``liquidation`` field, or a
+    direction/side/type string containing 'liquidat'. No fabrication.
+    """
+    if not isinstance(fill, dict):
+        return False
+    if fill.get("liquidation"):
+        return True
+    blob = " ".join(
+        str(first_present(fill, key) or "")
+        for key in ("dir", "direction", "side", "type")
+    ).lower()
+    return "liquidat" in blob
+
+
+def classify_lifecycle(
+    previous_size: float,
+    new_size: float,
+    *,
+    fill: dict[str, Any] | None = None,
+    direction_unclear: bool = False,
+) -> PositionAction:
+    """Full V12 lifecycle classification: the base OPEN/ADD/REDUCE/CLOSE/FLIP/UNKNOWN
+    states, plus LIQUIDATION when a real fill flags it on a size reduction/close."""
+    base = classify_action(previous_size, new_size, direction_unclear=direction_unclear)
+    if fill is not None and base in {PositionAction.REDUCE, PositionAction.CLOSE} and detect_liquidation(fill):
+        return PositionAction.LIQUIDATION
+    return base
+
+
 def confidence_for_fill(fill: dict[str, Any], *, direction_unclear: bool, has_start_position: bool) -> tuple[float, list[str]]:
     notes: list[str] = []
     if direction_unclear:
@@ -207,7 +240,7 @@ def build_position_delta_from_fill(
         new_size=effective_new,
         delta_size=effective_new - effective_previous,
         delta_notional_usdc=delta_notional,
-        action=classify_action(effective_previous, effective_new, direction_unclear=direction_unclear),
+        action=classify_lifecycle(effective_previous, effective_new, fill=fill, direction_unclear=direction_unclear),
         exchange_ts=fill_timestamp(fill) or None,
         side=str(first_present(fill, "side")) if first_present(fill, "side") is not None else None,
         price=price,
