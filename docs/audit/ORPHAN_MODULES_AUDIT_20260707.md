@@ -124,3 +124,18 @@ Flags: 261 lus dans le code, 61 définis au launcher, 1 flag mort
 | `hl_observer.wallets.scan_scheduler` | T33/T54 (9 modules wallets) |
 | `hl_observer.wallets.top_wallet_export` | T33/T54 (9 modules wallets) |
 | `hl_observer.wallets.toxicity` | T33/T54 (9 modules wallets) |
+
+
+## Câblage vague 1 — réalisé 2026-07-07
+
+- `ui/refusal_live.py` (nouveau, testé): breakdown LIVE des refus depuis les
+  événements ledger en mémoire (raison, part, coins touchés, notional refusé).
+  Consommateur prévu: dashboard v2 (T49) — plan de câblage documenté.
+- `backtesting.ab_flag_replay`: validé exécutable et déterministe —
+  `set PYTHONPATH=src && python -m hl_observer.backtesting.ab_flag_replay --candidates X.jsonl --marks Y.jsonl`
+  (bras A vs B sur données enregistrées, prêt pour T14-T17).
+- `simulation.refusal_breakdown` (logs): déjà branché au CLI (cli.py:1451) —
+  faux orphelin (shim de ré-export), reclassé OK.
+- Tests: tests/test_orphan_wiring_wave1.py (4).
+- Reste vague 1: funding_poller (T30), latency_benchmark_report (T43),
+  l2_snapshot_cache (T58), kill_switch/graded_halt (risk).
