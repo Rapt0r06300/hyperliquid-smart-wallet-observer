@@ -58,3 +58,13 @@ def test_payload_is_serializable_for_dashboard():
 def test_empty_result_empty_board():
     assert board_from_fusion_result(_result(), now_ms=1000) == []
     assert board_payload_from_fusion_result(_result(), now_ms=1000)["summary"]["total"] == 0
+
+
+def test_funding_enters_board_with_rates():
+    # signal funding spike + taux élevé (10 bps/h) -> edge net 74 bps -> entre dans le board
+    r = _result(funding=[NS(coin="SOL", decision="FUNDING_SPIKE", z_score=3.0)])
+    without = board_from_fusion_result(r, now_ms=1000)                       # sans taux -> ignoré (honnête)
+    withr = board_from_fusion_result(r, now_ms=1000, funding_rates_bps_by_coin={"SOL": 10.0})
+    assert without == []
+    assert len(withr) == 1 and withr[0].strategy == "FUNDING_ARB" and withr[0].coin == "SOL"
+    assert withr[0].net_edge_bps == 74.0                                     # 10*8-6

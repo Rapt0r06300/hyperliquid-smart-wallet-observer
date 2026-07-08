@@ -78,6 +78,7 @@ def _oi_from_funding(f: Any, now_ms: int) -> OpportunityInput | None:
 def board_from_fusion_result(
     result: Any, *, now_ms: int = 0, config: RankerConfig | None = None,
     limit: int = 8, max_per_strategy: int | None = 3,
+    funding_rates_bps_by_coin: dict | None = None, funding_holding_hours: float = 8.0,
 ) -> list[BoardEntry]:
     """Construit le tableau unifié depuis un FusionRuntimeResult (ou objet compatible)."""
     tagged: list[tuple[str, OpportunityInput]] = []
@@ -90,16 +91,22 @@ def board_from_fusion_result(
         oi = _oi_from_triangular(t)
         if oi:
             tagged.append(("ARBITRAGE", oi))
-    for fs in (_g(result, "funding_signals", default=None) or []):
-        oi = _oi_from_funding(fs, now_ms)
-        if oi:
-            tagged.append(("FUNDING_ARB", oi))
+    funding_sigs = _g(result, "funding_signals", default=None) or []
+    if funding_rates_bps_by_coin:
+        from hl_observer.funding.funding_opportunity import enrich_funding_with_edge
+        for fo in enrich_funding_with_edge(funding_sigs, funding_rates_bps_by_coin, holding_hours=funding_holding_hours):
+            tagged.append(("FUNDING_ARB", OpportunityInput(coin=fo.coin, side=fo.side, net_edge_bps=fo.net_edge_bps, signal_age_ms=0, consensus_wallets=1, liquidity_score=0.6)))
+    else:
+        for fs in funding_sigs:
+            oi = _oi_from_funding(fs, now_ms)
+            if oi:
+                tagged.append(("FUNDING_ARB", oi))
     return build_opportunity_board(tagged, config, limit=limit, max_per_strategy=max_per_strategy)
 
 
-def board_payload_from_fusion_result(result: Any, *, now_ms: int = 0, limit: int = 8) -> dict:
+def board_payload_from_fusion_result(result: Any, *, now_ms: int = 0, limit: int = 8, funding_rates_bps_by_coin: dict | None = None) -> dict:
     """Version sérialisable pour le dashboard: liste d'entrées + résumé."""
-    board = board_from_fusion_result(result, now_ms=now_ms, limit=limit)
+    board = board_from_fusion_result(result, now_ms=now_ms, limit=limit, funding_rates_bps_by_coin=funding_rates_bps_by_coin)
     return {
         "entries": [
             {"coin": e.coin, "side": e.side, "strategy": e.strategy,
