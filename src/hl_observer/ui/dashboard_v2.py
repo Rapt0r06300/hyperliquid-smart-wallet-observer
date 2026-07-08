@@ -341,6 +341,14 @@ def create_dashboard_v2_router() -> APIRouter:
 
     @router.get("/v2/equity_history")
     def equity_history(request: Request, max: int = 600) -> JSONResponse:
+        # Priorite: historique persiste par le MOTEUR (survit a la fermeture de Chrome).
+        try:
+            from hl_observer.runtime.equity_history_store import read_equity_points
+            persisted = read_equity_points(max=max)
+        except Exception:
+            persisted = []
+        if persisted:
+            return JSONResponse({"points": persisted})
         state = getattr(request.app.state, "ui_state", None)
         raw = list(getattr(state, "simulation_equity_history", None) or [])
         if max and len(raw) > max:

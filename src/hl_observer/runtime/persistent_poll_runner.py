@@ -243,6 +243,17 @@ class PersistentPollRunner:
             tmp = self.config.engine_status_path.with_suffix(f".{os.getpid()}.tmp")
             tmp.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
             os.replace(tmp, self.config.engine_status_path)
+            if phase == "sleeping":
+                # Historique d'equity persiste par le MOTEUR (survit a Chrome ferme).
+                try:
+                    from hl_observer.runtime.equity_history_store import append_equity_point
+                    _eq = float(self.metrics.get("fusion_runtime_current_equity_usdt") or 0.0)
+                    if _eq > 0:
+                        append_equity_point(timestamp_ms=self._now_ms(), equity_usdt=_eq,
+                                             pnl_usdc=_eq - 1000.0,
+                                             runtime_data_dir=self.config.runtime_data_dir)
+                except Exception:
+                    pass
         except Exception as exc:  # noqa: BLE001
             self.log(f"engine status write failed: {exc}")
 
