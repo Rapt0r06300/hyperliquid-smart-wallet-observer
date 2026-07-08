@@ -115,8 +115,47 @@ tr:last-child td{border-bottom:0}
 .rail .n .d{width:6px;height:6px;border-radius:50%}
 .foot{text-align:center;font-family:var(--mono);font-size:9.5px;color:var(--mut2);margin-top:16px;letter-spacing:1px}
 @media(max-width:820px){.strip{grid-template-columns:repeat(2,1fr)}.g2,.g3{grid-template-columns:1fr}.pnl-big{font-size:52px}}
+
+/* ═══════════ FINITION HACKER PRO (surcouche, mêmes classes) ═══════════ */
+#matrix{position:fixed;inset:0;z-index:0;opacity:.055;pointer-events:none}
+@keyframes reveal{from{opacity:0;transform:translateY(15px)}to{opacity:1;transform:none}}
+.wrap>*{animation:reveal .6s cubic-bezier(.2,.7,.2,1) both}
+.wrap>*:nth-child(2){animation-delay:.05s}.wrap>*:nth-child(3){animation-delay:.1s}
+.wrap>*:nth-child(4){animation-delay:.15s}.wrap>*:nth-child(5){animation-delay:.2s}
+.wrap>*:nth-child(6){animation-delay:.25s}.wrap>*:nth-child(7){animation-delay:.3s}
+.wrap>*:nth-child(n+8){animation-delay:.35s}
+/* cartes: coins de terminal + hover lumineux + léger lift */
+.card{transition:border-color .35s ease,box-shadow .35s ease,transform .25s cubic-bezier(.2,.7,.2,1)}
+.card::before,.card::after{content:"";position:absolute;width:13px;height:13px;pointer-events:none;opacity:.4;transition:opacity .35s,width .35s,height .35s}
+.card::before{top:-1px;left:-1px;border-top:1.5px solid var(--green);border-left:1.5px solid var(--green);border-top-left-radius:12px}
+.card::after{bottom:-1px;right:-1px;border-bottom:1.5px solid var(--green);border-right:1.5px solid var(--green);border-bottom-right-radius:12px}
+.card:hover{border-color:var(--line2);box-shadow:0 0 0 1px rgba(44,230,155,.16),0 16px 44px -20px rgba(44,230,155,.4);transform:translateY(-3px)}
+.card:hover::before,.card:hover::after{opacity:1;width:19px;height:19px}
+/* KPI: hover + valeur verte lumineuse */
+.st{transition:border-color .3s,box-shadow .3s,transform .25s cubic-bezier(.2,.7,.2,1)}
+.st:hover{border-color:var(--line2);box-shadow:0 12px 34px -18px rgba(44,230,155,.45);transform:translateY(-3px)}
+.st .v{color:var(--green2);text-shadow:0 0 18px rgba(44,230,155,.28)}
+/* lignes de table: hover vert avec barre latérale */
+tbody tr{transition:background .2s,box-shadow .2s}
+tbody tr:hover{background:rgba(44,230,155,.06);box-shadow:inset 2px 0 0 var(--green)}
+/* flash quand une valeur change (feeling live) */
+@keyframes flashv{0%{color:var(--green);text-shadow:0 0 18px var(--green)}100%{}}
+.flash{animation:flashv .75s ease}
+/* le graphe respire */
+@keyframes breathe{0%,100%{box-shadow:inset 0 0 0 1px var(--line)}50%{box-shadow:inset 0 0 36px -12px rgba(44,230,155,.3),inset 0 0 0 1px rgba(44,230,155,.24)}}
+.chart{animation:breathe 4.5s ease-in-out infinite}
+/* accent scan sous le logo */
+.logo{position:relative}
+.logo::after{content:"";position:absolute;left:0;bottom:-7px;height:1px;width:100%;background:linear-gradient(90deg,var(--green),transparent);opacity:.45}
+/* LED plus nettes, hero plus riche */
+.led .d{box-shadow:0 0 11px var(--green),0 0 4px var(--green)}
+.pnl-pos{text-shadow:0 0 32px rgba(44,230,155,.48),0 0 9px rgba(44,230,155,.32)}
+/* titres verts un peu plus vifs + scrollbars discrètes */
+.card h3{color:var(--green)}
+::-webkit-scrollbar{width:6px;height:6px}::-webkit-scrollbar-thumb{background:rgba(44,230,155,.22);border-radius:3px}
+::-webkit-scrollbar-track{background:transparent}
 </style></head>
-<body><div class="wrap">
+<body><canvas id="matrix"></canvas><div class="wrap">
  <div class="top">
    <div class="logo"><b>HYPER</b>SMART<span class="s">//</span>OBSERVER<span class="c">_</span>
      <span class="sub" id="boot">BOOT · HYPERLIQUID READ-ONLY · PAPER SIMULATION</span></div>
@@ -329,6 +368,20 @@ function deriveEvents(d,ps,npos){
 }
 renderFeed();tick();setInterval(tick,2000);loadMeta();setInterval(loadMeta,10000);
 setInterval(function(){var s=document.getElementById('scanpulse');s.style.opacity=s.style.opacity==='0.3'?'1':'0.3';},900);
+
+// ── Matrix rain (subtil, atmosphérique) ──
+(function(){var c=document.getElementById('matrix');if(!c)return;var x=c.getContext('2d');
+function R(){c.width=window.innerWidth;c.height=window.innerHeight;}R();window.addEventListener('resize',R);
+var G='01≡⌐¬△▽◇+×·HYPRSMT${}[]<>/#'.split(''),fs=15,cols=Math.ceil(c.width/fs),y=[];
+for(var i=0;i<cols;i++)y[i]=Math.floor(Math.random()*-50);
+setInterval(function(){x.fillStyle='rgba(4,7,10,.10)';x.fillRect(0,0,c.width,c.height);x.font=fs+'px JetBrains Mono, monospace';
+for(var i=0;i<cols;i++){var g=G[Math.floor(Math.random()*G.length)],yy=y[i]*fs;
+x.fillStyle=Math.random()>.945?'rgba(150,255,210,.9)':'rgba(44,230,155,.5)';x.fillText(g,i*fs,yy);
+if(yy>c.height&&Math.random()>.975)y[i]=0;y[i]++;}},68);})();
+// ── Flash-on-change sur les valeurs clés (effet live) ──
+function _flash(el){if(!el)return;el.classList.remove('flash');void el.offsetWidth;el.classList.add('flash');}
+try{document.querySelectorAll('#pnl,#eq,.st .v').forEach(function(el){
+  new MutationObserver(function(){_flash(el);}).observe(el,{childList:true,characterData:true,subtree:true});});}catch(e){}
 </script></body></html>"""
 
 
