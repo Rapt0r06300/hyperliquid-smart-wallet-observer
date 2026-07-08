@@ -45,7 +45,7 @@ body::before{content:"";position:fixed;inset:0;pointer-events:none;z-index:0;
 body::after{content:"";position:fixed;inset:0;pointer-events:none;z-index:1;opacity:.28;
  background:repeating-linear-gradient(0deg,rgba(0,0,0,0) 0,rgba(0,0,0,0) 2px,rgba(0,0,0,.10) 3px);mix-blend-mode:multiply;animation:scan 8s linear infinite}
 .num{font-family:var(--mono);font-variant-numeric:tabular-nums}
-.wrap{width:min(95vw,1520px);margin:auto;position:relative;z-index:2}
+.wrap{width:min(93vw,1360px);margin:auto;position:relative;z-index:2}
 @keyframes blink{0%,46%{opacity:1}50%,96%{opacity:.12}}
 @keyframes pulse{0%,100%{opacity:1}50%{opacity:.28}}
 @keyframes ring{0%{r:3.2;opacity:.7}100%{r:16;opacity:0}}
@@ -66,7 +66,7 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;z-index:1;opac
 .led.warn .d{background:var(--amber);box-shadow:0 0 9px var(--amber)}
 .clk{color:var(--mut2)}
 /* hero */
-.hero{position:relative;margin-bottom:18px}
+.hero{position:relative;margin-bottom:14px}
 .hero-head{display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:4px}
 .pnl-big{font-family:var(--mono);font-weight:700;font-size:clamp(40px,6vw,72px);line-height:.98;letter-spacing:-1.5px;transition:color .5s}
 .pnl-pos{color:var(--green);text-shadow:0 0 26px rgba(44,230,155,.4)}
@@ -74,23 +74,23 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;z-index:1;opac
 .pnl-sub{font-family:var(--mono);font-size:12.5px;color:var(--mut);margin-top:8px;letter-spacing:.3px}
 .hero-hl{text-align:right;font-family:var(--mono);font-size:10.5px;color:var(--mut2);letter-spacing:1px;line-height:1.7}
 .hero-hl b{color:var(--green2)}
-.chart{position:relative;height:clamp(168px,24vh,230px);margin-top:6px;border:1px solid var(--line);border-radius:12px;background:linear-gradient(180deg,rgba(44,230,155,.02),transparent);overflow:hidden}
+.chart{position:relative;height:clamp(150px,20vh,196px);margin-top:6px;border:1px solid var(--line);border-radius:12px;background:linear-gradient(180deg,rgba(44,230,155,.02),transparent);overflow:hidden}
 .chart svg{width:100%;height:100%;display:block}
 .axis{position:absolute;left:12px;right:12px;bottom:6px;display:flex;justify-content:space-between;font-family:var(--mono);font-size:9.5px;color:var(--mut2)}
 /* strip KPI */
-.strip{display:grid;grid-template-columns:repeat(5,1fr);gap:10px;margin:16px 0}
-.st{border:1px solid var(--line);border-radius:11px;padding:12px 14px;background:var(--surface);position:relative;overflow:hidden}
+.strip{display:grid;grid-template-columns:repeat(5,1fr);gap:10px;margin:12px 0}
+.st{border:1px solid var(--line);border-radius:11px;padding:11px 14px 12px;background:linear-gradient(180deg,rgba(44,230,155,.05),transparent 55%),var(--surface);position:relative;overflow:hidden;border-top:1px solid var(--line2)}
 .st::after{content:"";position:absolute;top:0;left:-30%;width:26%;height:100%;background:linear-gradient(90deg,transparent,rgba(44,230,155,.06),transparent);animation:sweep 7s linear infinite}
 .st .k{font-family:var(--mono);font-size:9.5px;letter-spacing:1.5px;color:var(--mut);text-transform:uppercase}
 .st .v{font-family:var(--mono);font-size:22px;font-weight:700;margin-top:6px;color:var(--txt)}
 /* grilles */
-.g2{display:grid;grid-template-columns:1.15fr .85fr;gap:12px;margin-bottom:12px}
-.g3{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-bottom:12px}
-.card{border:1px solid var(--line);border-radius:12px;padding:14px 16px;background:var(--surface);position:relative}
+.g2{display:grid;grid-template-columns:1.15fr .85fr;gap:11px;margin-bottom:10px}
+.g3{display:grid;grid-template-columns:repeat(3,1fr);gap:11px;margin-bottom:10px}
+.card{border:1px solid var(--line);border-radius:13px;padding:13px 16px;background:linear-gradient(180deg,rgba(255,255,255,.022),transparent 60%),var(--surface);position:relative}
 .card h3{margin:0 0 12px;font-family:var(--mono);font-size:10.5px;font-weight:600;letter-spacing:2px;color:var(--green2);text-transform:uppercase;display:flex;justify-content:space-between;align-items:center}
 .card h3 .hint{color:var(--mut2);letter-spacing:0;font-weight:400}
 /* flux d'activité */
-.feed{height:clamp(240px,32vh,320px);overflow:hidden;font-family:var(--mono);font-size:11px;line-height:1.75;display:flex;flex-direction:column-reverse}
+.feed{height:clamp(198px,25vh,244px);overflow:hidden;font-family:var(--mono);font-size:11px;line-height:1.75;display:flex;flex-direction:column-reverse}
 .feed .ev{animation:fade .25s ease;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .feed .t{color:var(--mut2)}
 .feed .tag{display:inline-block;min-width:64px;color:var(--mut)}
@@ -115,7 +115,7 @@ tr:last-child td{border-bottom:0}
 .rail .n{display:inline-flex;align-items:center;gap:6px;padding:2px 9px;border-radius:20px;background:rgba(255,255,255,.03)}
 .rail .n .d{width:6px;height:6px;border-radius:50%}
 .foot{text-align:center;font-family:var(--mono);font-size:9.5px;color:var(--mut2);margin-top:16px;letter-spacing:1px}
-@media(min-width:1700px){.wrap{width:min(92vw,1660px)}}
+@media(min-width:1700px){.wrap{width:min(88vw,1440px)}}
 @media(max-width:1150px){.g2{grid-template-columns:1fr}}
 @media(max-width:1000px){.strip{grid-template-columns:repeat(3,1fr)}.g3{grid-template-columns:1fr 1fr}}
 @media(max-width:760px){.strip{grid-template-columns:repeat(2,1fr)}.g3{grid-template-columns:1fr}.top{flex-wrap:wrap}.leds{flex-wrap:wrap;gap:10px 14px}.hero-head{flex-direction:column;gap:10px}.hero-hl{text-align:left}}
@@ -163,7 +163,7 @@ tbody tr:hover{background:rgba(44,230,155,.06);box-shadow:inset 2px 0 0 var(--gr
 /* ═══ CRÉATIF v2 ═══ */
 #spot{position:fixed;inset:0;z-index:1;pointer-events:none;background:radial-gradient(380px circle at var(--mx,50%) var(--my,-300px),rgba(44,230,155,.075),transparent 66%)}
 .hero{position:relative;z-index:1}
-.hero::before{content:"";position:absolute;top:-80px;left:-90px;width:300px;height:300px;border-radius:50%;background:conic-gradient(from 0deg,transparent,rgba(44,230,155,.17),transparent 44%);filter:blur(30px);animation:spin 11s linear infinite;z-index:-1;pointer-events:none}
+.hero::before{content:"";position:absolute;top:-70px;left:-80px;width:260px;height:260px;border-radius:50%;background:conic-gradient(from 0deg,transparent,rgba(44,230,155,.17),transparent 44%);filter:blur(30px);animation:spin 11s linear infinite;z-index:-1;pointer-events:none}
 @keyframes spin{to{transform:rotate(360deg)}}
 @keyframes glitch{0%,90%,100%{transform:none;text-shadow:none}91%{transform:translate(1px,-1px);text-shadow:-1px 0 var(--cyan),1px 0 var(--red)}93%{transform:translate(-1px,1px)}95%{transform:none}}
 .logo b{animation:glitch 7s infinite}
@@ -176,6 +176,45 @@ tbody tr:hover{background:rgba(44,230,155,.06);box-shadow:inset 2px 0 0 var(--gr
 .ticker:hover .ticker-in{animation-play-state:paused}
 @keyframes marq{from{transform:translateX(0)}to{transform:translateX(-50%)}}
 #mg-live{filter:drop-shadow(0 0 11px #2ce69b) drop-shadow(0 0 3px #eafff5)}
+
+/* ═══════════ CSS PREMIUM — très haute qualité ═══════════ */
+:root{--shadow:0 2px 6px rgba(0,0,0,.30),0 24px 48px -26px rgba(0,0,0,.72);--hl:inset 0 1px 0 rgba(255,255,255,.07)}
+/* Cartes: BORDURE EN DÉGRADÉ (padding-box/border-box) + highlight interne + ombre douce */
+.card{border:1px solid transparent;border-radius:14px;
+ background:
+  linear-gradient(180deg,rgba(255,255,255,.034),rgba(255,255,255,.006) 55%),var(--surface) padding-box,
+  linear-gradient(135deg,rgba(44,230,155,.32),rgba(255,255,255,.06) 38%,rgba(44,230,155,.05)) border-box;
+ box-shadow:var(--hl),var(--shadow)}
+.card:hover{box-shadow:var(--hl),0 0 0 1px rgba(44,230,155,.18),0 28px 56px -26px rgba(44,230,155,.34);transform:translateY(-3px)}
+.card::before,.card::after{opacity:.22}
+.card:hover::before,.card:hover::after{opacity:.9}
+/* KPI: même finition premium + accent vert net en haut */
+.st{border:1px solid transparent;border-radius:12px;
+ background:
+  linear-gradient(180deg,rgba(44,230,155,.07),rgba(255,255,255,.006) 60%),var(--surface) padding-box,
+  linear-gradient(180deg,rgba(44,230,155,.45),rgba(255,255,255,.05)) border-box;
+ box-shadow:var(--hl),var(--shadow)}
+.st .v{font-size:23px;letter-spacing:-.4px}
+/* Graphe: fond riche + bordure dégradée */
+.chart{border:1px solid transparent;
+ background:
+  linear-gradient(180deg,rgba(44,230,155,.05),rgba(0,0,0,0) 72%),var(--surface) padding-box,
+  linear-gradient(180deg,rgba(44,230,155,.24),rgba(255,255,255,.05)) border-box;
+ box-shadow:var(--hl)}
+/* Ticker: finition verre */
+.ticker{border:1px solid transparent;
+ background:linear-gradient(180deg,rgba(255,255,255,.03),transparent),var(--surface) padding-box,
+  linear-gradient(90deg,rgba(44,230,155,.28),rgba(255,255,255,.04)) border-box;box-shadow:var(--hl)}
+/* Dividers dégradés + typo numérique tabulaire partout */
+.kv{border-bottom:1px solid transparent;border-image:linear-gradient(90deg,rgba(255,255,255,.06),transparent) 1}
+.num,.pnl-big,.st .v,td,.feed,.ticker-in{font-variant-numeric:tabular-nums}
+.pnl-big{letter-spacing:-2px}
+.card h3{letter-spacing:2.4px}
+th{letter-spacing:1.2px}
+/* tags + puces plus nets */
+.tag2{box-shadow:inset 0 0 0 1px rgba(255,255,255,.06)}
+/* scrollbar premium */
+::-webkit-scrollbar-thumb{background:linear-gradient(180deg,rgba(44,230,155,.38),rgba(44,230,155,.16));border-radius:4px}
 </style></head>
 <body><canvas id="matrix"></canvas><div id="spot"></div><div class="wrap">
  <div class="top">
