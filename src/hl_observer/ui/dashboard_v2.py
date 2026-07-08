@@ -91,7 +91,7 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;z-index:1;opac
 .card h3 .hint{color:var(--mut2);letter-spacing:0;font-weight:400}
 /* flux d'activité */
 .feed{height:clamp(198px,25vh,244px);overflow:hidden;font-family:var(--mono);font-size:11px;line-height:1.75;display:flex;flex-direction:column-reverse}
-.feed .ev{animation:fade .25s ease;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.feed .ev{flex:0 0 auto;animation:fade .25s ease;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .feed .t{color:var(--mut2)}
 .feed .tag{display:inline-block;min-width:64px;color:var(--mut)}
 .ev-open .tag{color:var(--green)}.ev-close .tag{color:var(--cyan)}.ev-no .tag{color:var(--amber)}

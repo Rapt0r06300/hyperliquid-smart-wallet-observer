@@ -207,8 +207,15 @@ REM (+0.11 vs -1.77 tous trades). Echantillon encore petit (13 trades) - a re-ve
 set "HYPERSMART_MIN_PAPER_NOTIONAL_USDT=40"
 set "HYPERSMART_MAX_TOTAL_EXPOSURE_USDT=400"
 set "HYPERSMART_MAX_OPEN_POSITIONS=12"
-REM LEVIER de simulation: 1 par defaut pour auditer le moteur sans amplifier artificiellement les pertes.
-set "HYPERSMART_SIMULATION_LEVERAGE=1"
+REM LEVIER de simulation: 5x = realisme perp Hyperliquid (demande Flo 2026-07-08: "pas que des
+REM centimes, comme le marche reel"). notional = marge x levier -> $40 de marge = $200 d'expo.
+REM PnL = notional x variation. HONNETE: le stop catastrophe (180 bps) plafonne la perte a ~9%%
+REM de la marge a 5x (loin de la liquidation ~55x), donc jamais de perte > marge. Dialable (3/10).
+set "HYPERSMART_SIMULATION_LEVERAGE=5"
+REM LAISSER COURIR (demande Flo): on coupe le quality-guard qui fermait les positions a ~0.15%%
+REM (elles n'atteignaient jamais leur SL/TP 1.2-1.6%%). Desormais SL/TP + sortie du leader gouvernent
+REM -> on capture le VRAI mouvement du marche, pas du bruit. Reversible (=1 pour re-activer).
+set "HYPERSMART_LEGACY_POSITION_QUALITY_GUARD_ENABLED=0"
 REM RESET PROPRE A CHAQUE LANCEMENT (demande utilisateur): equity remise a 1000, compteurs
 REM trades gagnants/perdants et taux de reussite remis a 0, logs de session repartis a neuf
 REM (les anciens sont archives dans _archives). Mettre 0 pour au contraire CONSERVER l'equity.
@@ -222,13 +229,4 @@ REM Les auxiliaires HyperSmart utiles (IA shadow + stream read-only) sont demarr
 REM principal, rattaches a la meme session, et stoppes avec Q.
 
 REM ENTRAINEMENT IA AUTO (V13): demarre en arriere-plan des le lancement, apprend des trades
-REM clotures et met a jour le panneau "Modele IA" (progression: n_trades, Brier, accuracy).
-REM Paper-only / lecture seule. Fenetre minimisee "HyperSmart IA" - ferme-la pour stopper l'apprentissage.
-REM IA rattachee au lanceur principal; pas de fenetre separee.
-set "HYPERSMART_ENABLE_AUX_IA=1"
-
-REM MOTEUR TEMPS REEL (V16, 2026-06-26): flux WebSocket Hyperliquid PERSISTANT sur les 10 MEILLEURS
-REM leaders (cap HL = 10 wallets). Stocke chaque fill FRAIS a la seconde ou il arrive (sub-seconde)
-REM au lieu du snapshot REST laggé (~10s) -> entrees vraiment fraiches. Lecture seule, 0 ordre.
-REM Fenetre minimisee "HyperSmart Stream" - ferme-la pour stopper le flux temps reel.
-REM Stream rattache au lanceur princip
+REM clotures et met a jour le panneau "Modele IA" (progression: n_trades, Brier, accuracy
