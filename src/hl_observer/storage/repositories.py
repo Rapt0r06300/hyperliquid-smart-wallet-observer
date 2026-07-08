@@ -286,7 +286,13 @@ class CollectionRepository:
         coin: str | None = None,
         success: bool = True,
         error_message: str | None = None,
-    ) -> RawEvent:
+    ) -> "RawEvent | None":
+        # ANTI-BLOAT (sink unique): HYPERSMART_DISABLE_RAW_STORAGE coupe TOUT
+        # stockage brut, y compris le scanner de marche qui bypassait le flag
+        # settings (cause du gonflement DB a 29 Go). No-op => aucun event ecrit.
+        import os as _os
+        if _os.getenv("HYPERSMART_DISABLE_RAW_STORAGE", "0").strip().lower() in {"1", "true", "yes", "on"}:
+            return None
         fetched_at_ms = now_ms()
         response_hash = stable_payload_hash(response_payload)
         event = RawEvent(
