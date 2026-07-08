@@ -272,6 +272,7 @@ function Get-HyperSmartRuntimeProcesses {
         return Get-CimInstance Win32_Process | Where-Object {
             $_.ProcessId -ne $ownPid -and (
                 ($_.CommandLine -like "*python* -m hl_observer ui*") -or
+                ($_.CommandLine -like "*hl_observer.runtime.persistent_poll_runner*") -or
                 ($_.CommandLine -like "*hypersmart_simulation_poll_loop.ps1*") -or
                 ($_.CommandLine -like "*tools\ia_train_loop.ps1*") -or
                 ($_.CommandLine -like "*tools/ia_train_loop.ps1*") -or
