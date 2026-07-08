@@ -218,6 +218,7 @@ class ViralBotEngine:
         score_input = RealtimeCopyScoreInput(
             action_type=action_type,
             direction=side,
+            coin=coin,  # FIDELITE REPLAY: sans le coin, le candidat enregistre est inutilisable (pas de match aux marks)
             leader_expected_edge_bps=leader_expected_edge_bps,
             leader_consistency_factor=leader_consistency_factor,
             signal_age_ms=signal_age_ms,

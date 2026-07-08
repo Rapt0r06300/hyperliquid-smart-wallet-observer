@@ -153,6 +153,7 @@ def find_fresh_opportunities(
                 RealtimeCopyScoreInput(
                     action_type="OPEN_LONG" if direction == "LONG" else "OPEN_SHORT",
                     direction=direction,
+                    coin=coin,  # FIDELITE REPLAY: le coin est requis pour matcher le candidat a ses marks
                     leader_expected_edge_bps=expected_edge,
                     leader_consistency_factor=_leader_consistency_factor(average_score),
                     signal_age_ms=cluster_age_ms,
