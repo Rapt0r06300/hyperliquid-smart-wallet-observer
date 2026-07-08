@@ -49,6 +49,7 @@ def run_copy_votes_through_paper_engine(
     market_price: float,
     observed_at_ms: int,
     starting_cash_usdt: float = 1000.0,
+    admission_floor_power: float | None = None,
 ) -> FusionPaperEngineSummary:
     max_position_usdt = _env_float("HYPERSMART_MAX_POSITION_USDT", 40.0)
     max_total_exposure_usdt = _env_float("HYPERSMART_MAX_TOTAL_EXPOSURE_USDT", 400.0)
@@ -81,6 +82,17 @@ def run_copy_votes_through_paper_engine(
                 drawdown_usdt=drawdown,
             )
         edge_remaining_bps = _consensus_edge_remaining_bps(conflict, distinct_wallets=distinct_wallets)
+        if admission_floor_power is not None:
+            # Refonte sélection: le trade copy doit clearer la barre du board unifié
+            # (compétition avec toutes les stratégies). Refus AVANT ouverture ->
+            # equity inchangée -> réconciliation préservée (comme le refus consensus).
+            from hl_observer.integration.board_admission import candidate_power, is_admitted
+            _cp = candidate_power(coin=conflict.coin, side=conflict.winning_side,
+                                  net_edge_bps=edge_remaining_bps, signal_age_ms=signal_age_ms,
+                                  consensus_wallets=distinct_wallets)
+            if not is_admitted(_cp, admission_floor_power):
+                equity, _, drawdown = engine.mark_to_market({conflict.coin or "UNKNOWN": float(market_price)})
+                return FusionPaperEngineSummary(decisions=(), accepted_count=0, equity_usdt=equity, drawdown_usdt=drawdown)
         delta = LeaderDelta(
             delta_id=f"fusion-paper-engine:{conflict.coin}:{conflict.winning_side}:{observed_at_ms}",
             wallet=votes[0].wallet if votes else "unknown",

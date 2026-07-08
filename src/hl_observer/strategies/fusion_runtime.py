@@ -13,6 +13,8 @@ from typing import Iterable
 
 from hl_observer.arbitrage.triangular_graph import TriangularEdge, build_triangular_cycles
 from hl_observer.arbitrage.triangular_opportunity_detector import TriangularOpportunity, detect_triangular_opportunities
+from hl_observer.integration.board_admission import compute_admission_floor_for_fusion
+from hl_observer.funding.funding_opportunity import funding_rates_bps_for_coins
 from hl_observer.arbitrage.ws_price_discrepancy_detector import PriceDiscrepancy, detect_ws_price_discrepancies
 from hl_observer.connectors.paper_execution_connector import LocalPaperExecutionConnector
 from hl_observer.connectors.standard import PaperOrderRequest, PaperOrderResult
@@ -186,11 +188,18 @@ def run_fusion_strategy_runtime(payload: FusionRuntimeInput) -> FusionRuntimeRes
             drawdown_usdt=max(0.0, float(payload.peak_equity) - float(payload.current_equity)),
         )
     else:
+        _adm_floor = compute_admission_floor_for_fusion(
+            funding_signals=funding, triangular=triangular,
+            distilled_opportunities=distilled_report.opportunities,
+            funding_rates_bps_by_coin=funding_rates_bps_for_coins([getattr(s, "coin", "") for s in funding]),
+            now_ms=max((event.event_time_ms for event in ordered_events), default=0),
+        )
         paper_engine = run_copy_votes_through_paper_engine(
             payload.leader_votes,
             market_price=float(market_price_for_engine),
             observed_at_ms=max((event.event_time_ms for event in ordered_events), default=0),
             starting_cash_usdt=float(payload.current_equity),
+            admission_floor_power=_adm_floor,
         )
         if conflict.decision == "FOLLOW" and conflict.winning_side:
             strategy_id = _first_available_profile(
