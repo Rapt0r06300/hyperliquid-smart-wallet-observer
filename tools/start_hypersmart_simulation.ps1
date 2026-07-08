@@ -181,6 +181,11 @@ Set-HyperSmartDefaultEnv "HYPERSMART_MAX_TOTAL_EXPOSURE_USDT" "400"
 # faisait que Set-HyperSmartDefaultEnv sautait -> levier 1 au runtime -> notional 40 = centimes.
 # On ECRASE explicitement pour garantir le levier. C'etait LA cause finale du PnL en centimes.
 [Environment]::SetEnvironmentVariable("HYPERSMART_SIMULATION_LEVERAGE", "10", "Process")
+# V27: firehose userFills MULTIPLEXE always-on -> jusqu'a 4x10=40 leaders suivis en
+# temps reel (sub-seconde) au lieu du seul top-10 -> un MAXIMUM de signaux frais.
+# Read-only / paper-only ; borne dure a 8 connexions (anti-ban) cote code.
+[Environment]::SetEnvironmentVariable("HYPERSMART_FILLS_MULTIPLEX", "1", "Process")
+[Environment]::SetEnvironmentVariable("HYPERSMART_FILLS_MULTIPLEX_CONNECTIONS", "4", "Process")
 Set-HyperSmartDefaultEnv "HYPERSMART_SINGLE_WALLET_MIN_EDGE_BPS" "55"
 Set-HyperSmartDefaultEnv "HYPERSMART_TOP_WALLET_SAMPLE_LIMIT" "8000"
 # V25 (2026-07-03): hard halt a 2.50 USDC (=0.25% de 1000) gelait la session

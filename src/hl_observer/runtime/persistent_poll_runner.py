@@ -74,6 +74,13 @@ def now_ms() -> int:
     return int(time.time() * 1000)
 
 
+def _env_int(name: str, default: int) -> int:
+    try:
+        return int(str(os.environ.get(name, "")).strip())
+    except (TypeError, ValueError):
+        return default
+
+
 @dataclass
 class RunnerConfig:
     root: Path
@@ -95,6 +102,8 @@ class RunnerConfig:
     restart_every_polls: int = 400
     overlap_ws_scans: bool = True
     start_poll_index: int = 1
+    fills_multiplex: bool = False
+    fills_multiplex_connections: int = 4
 
     @property
     def logs_dir(self) -> Path:
@@ -515,6 +524,45 @@ class PersistentPollRunner:
         self.step_durations = {}
         self.write_engine_status("sleeping", "Cycle termine, attente avant prochain scan.")
 
+    # ------------------------------------------------------------ fills firehose
+
+    def _spawn_fills_multiplex(self) -> Any | None:
+        """Firehose userFills MULTIPLEXE always-on (V27) : plusieurs connexions WS
+        persistantes (<=10 leaders chacune) pour couvrir N*10 leaders en sub-seconde
+        -> un MAXIMUM de signaux frais, pas seulement le top-10. Sous-processus long,
+        read-only. Tue par le shutdown large *hl_observer* du launcher + proprement ici.
+        No-op si HYPERSMART_FILLS_MULTIPLEX n'est pas explicitement actif."""
+        if not self.config.fills_multiplex:
+            return None
+        conns = max(1, int(self.config.fills_multiplex_connections))
+        try:
+            argv = [
+                sys.executable, "-u", "-m", "hl_observer.wallets.user_fills_multiplex",
+                "--network-read", "--max-connections", str(conns),
+                "--max-live-fill-age-ms", str(self.config.user_fills_max_live_age_ms),
+            ]
+            proc = subprocess.Popen(  # noqa: S603 - argv local, read-only, jamais d'ordre
+                argv, stdout=subprocess.DEVNULL, stderr=subprocess.STDOUT, cwd=str(self.config.root)
+            )
+            self.log(f"fills-multiplex firehose demarre (always-on) connections={conns} pid={proc.pid} read_only=true")
+            self.metrics["fills_multiplex_connections"] = str(conns)
+            return proc
+        except Exception as exc:  # noqa: BLE001 - un firehose qui ne demarre pas n'arrete pas la boucle
+            self.log(f"fills-multiplex spawn failed (absorbe): {exc}")
+            return None
+
+    def _terminate_fills_multiplex(self, proc: Any | None) -> None:
+        if proc is None:
+            return
+        try:
+            proc.terminate()
+            try:
+                proc.wait(timeout=10)
+            except Exception:  # noqa: BLE001
+                proc.kill()
+        except Exception:  # noqa: BLE001
+            pass
+
     # -------------------------------------------------------------------- run
 
     def run(self) -> int:
@@ -530,10 +578,12 @@ class PersistentPollRunner:
             f"overlap={cfg.overlap_ws_scans} restartEvery={cfg.restart_every_polls} read_only=true execution=forbidden"
         )
         self.write_engine_status("starting", "Poller simulation Hyperliquid en demarrage (runner persistant T44).")
+        fills_mux = self._spawn_fills_multiplex()
         for i in range(max(1, cfg.start_poll_index), cfg.max_runs + 1):
             if self.stop_requested():
                 self.log("Stop demande (stop-file): arret propre du runner persistant.")
                 self.write_engine_status("finished", "Poller simulation termine (stop demande).")
+                self._terminate_fills_multiplex(fills_mux)
                 return EXIT_STOP
             try:
                 self.run_poll(i)
@@ -543,12 +593,14 @@ class PersistentPollRunner:
             if cfg.restart_every_polls > 0 and i % cfg.restart_every_polls == 0 and i < cfg.max_runs:
                 self.log(f"Self-restart apres {i} polls (garde-fou memoire du process chaud); le lanceur relance.")
                 self.write_engine_status("self_restart", "Runner persistant: rotation planifiee du process.")
+                self._terminate_fills_multiplex(fills_mux)
                 return EXIT_SELF_RESTART
             if i < cfg.max_runs:
                 cooldown = max(2, min(5, int(cfg.interval_seconds / 3)))
                 self._sleep(cooldown)
         self.log("Persistent poll runner finished (max runs).")
         self.write_engine_status("finished", "Poller simulation termine.")
+        self._terminate_fills_multiplex(fills_mux)
         return EXIT_STOP
 
 
@@ -587,6 +639,9 @@ def build_config(argv: list[str] | None = None) -> RunnerConfig:
         plans_every_polls=args.plans_every_polls, diagnostics_every_polls=args.diagnostics_every_polls,
         restart_every_polls=args.restart_every_polls, overlap_ws_scans=args.overlap_ws_scans,
         start_poll_index=args.start_poll_index,
+        fills_multiplex=str(os.environ.get("HYPERSMART_FILLS_MULTIPLEX", "")).strip().lower()
+        in {"1", "true", "yes", "on"},
+        fills_multiplex_connections=max(1, min(8, _env_int("HYPERSMART_FILLS_MULTIPLEX_CONNECTIONS", 4))),
     )
 
 

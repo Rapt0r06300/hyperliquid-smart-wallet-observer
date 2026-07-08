@@ -173,6 +173,20 @@ def build_default_collection_plan(
     )
 
 
+def _maybe_apply_ws_first(plan: CollectionPlan) -> CollectionPlan:
+    """WS-first (opt-in): coupe les items REST deja couverts par un canal WS frais
+    (allMids/userFills/l2Book/candle) pour liberer le budget de rate -> plus de wallets
+    couverts par cycle -> plus de signaux frais. Pilote par HYPERSMART_WS_FIRST_COLLECT ;
+    no-op complet si le flag n'est pas explicitement active (zero trou de donnee par
+    defaut). Lecture seule, pur, jamais d'ordre."""
+    try:
+        from hl_observer.collection.ws_first_plan import reduce_plan_from_env
+
+        return reduce_plan_from_env(plan)
+    except Exception:
+        return plan
+
+
 async def run_collection_once(
     plan: CollectionPlan,
     settings: Settings,
@@ -183,6 +197,7 @@ async def run_collection_once(
 ) -> CollectionResult:
     if plan.all_coins or plan.coins_from_meta or plan.coins_from_all_mids:
         plan = await _resolve_multi_asset_plan(plan, settings, client=client)
+    plan = _maybe_apply_ws_first(plan)
     result = CollectionResult(planned_items=plan.requested_items(), dry_run=plan.dry_run)
     if plan.dry_run:
         return result
