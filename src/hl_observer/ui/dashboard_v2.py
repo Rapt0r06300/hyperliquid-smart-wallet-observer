@@ -26,23 +26,24 @@ _PAGE = r"""<!doctype html><html lang="fr"><head><meta charset="utf-8">
 <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
 <style>
 :root{
- --bg:#04070a;--surface:rgba(255,255,255,.022);--surface2:rgba(255,255,255,.045);
+ --bg:#0d161b;--surface:rgba(255,255,255,.045);--surface2:rgba(255,255,255,.07);
  --green:#2ce69b;--green2:#39d99a;--red:#ff5c6a;--amber:#ffce5b;--cyan:#4fd8ff;
- --txt:#eaf2ed;--mut:#6b7d74;--mut2:#3a4842;
- --line:rgba(255,255,255,.06);--line2:rgba(44,230,155,.20);
+ --txt:#eef6f1;--mut:#93a89d;--mut2:#5c6f66;
+ --line:rgba(255,255,255,.10);--line2:rgba(44,230,155,.30);
  --sans:'Space Grotesk',system-ui,sans-serif;--mono:'JetBrains Mono',ui-monospace,monospace;
 }
 *{box-sizing:border-box}html,body{margin:0}
 body{background:
- radial-gradient(1200px 640px at 82% -18%,rgba(44,230,155,.07),transparent 62%),
- radial-gradient(820px 560px at 4% 120%,rgba(79,216,255,.04),transparent 60%),var(--bg);
+ radial-gradient(1250px 680px at 80% -20%,rgba(44,230,155,.11),transparent 60%),
+ radial-gradient(900px 600px at 3% 118%,rgba(79,216,255,.06),transparent 58%),
+ linear-gradient(180deg,#101c22,var(--bg) 40%);
  color:var(--txt);font-family:var(--sans);min-height:100vh;padding:22px 20px 34px;-webkit-font-smoothing:antialiased;overflow-x:hidden}
 /* grille de fond + scanlines */
 body::before{content:"";position:fixed;inset:0;pointer-events:none;z-index:0;
- background-image:linear-gradient(rgba(44,230,155,.028) 1px,transparent 1px),linear-gradient(90deg,rgba(44,230,155,.028) 1px,transparent 1px);
+ background-image:linear-gradient(rgba(44,230,155,.04) 1px,transparent 1px),linear-gradient(90deg,rgba(44,230,155,.04) 1px,transparent 1px);
  background-size:44px 44px;mask:radial-gradient(1200px 700px at 50% 8%,#000,transparent 78%)}
-body::after{content:"";position:fixed;inset:0;pointer-events:none;z-index:1;opacity:.5;
- background:repeating-linear-gradient(0deg,rgba(0,0,0,0) 0,rgba(0,0,0,0) 2px,rgba(0,0,0,.16) 3px);mix-blend-mode:multiply;animation:scan 8s linear infinite}
+body::after{content:"";position:fixed;inset:0;pointer-events:none;z-index:1;opacity:.28;
+ background:repeating-linear-gradient(0deg,rgba(0,0,0,0) 0,rgba(0,0,0,0) 2px,rgba(0,0,0,.10) 3px);mix-blend-mode:multiply;animation:scan 8s linear infinite}
 .num{font-family:var(--mono);font-variant-numeric:tabular-nums}
 .wrap{max-width:1180px;margin:auto;position:relative;z-index:2}
 @keyframes blink{0%,46%{opacity:1}50%,96%{opacity:.12}}
@@ -117,7 +118,7 @@ tr:last-child td{border-bottom:0}
 @media(max-width:820px){.strip{grid-template-columns:repeat(2,1fr)}.g2,.g3{grid-template-columns:1fr}.pnl-big{font-size:52px}}
 
 /* ═══════════ FINITION HACKER PRO (surcouche, mêmes classes) ═══════════ */
-#matrix{position:fixed;inset:0;z-index:0;opacity:.055;pointer-events:none}
+#matrix{position:fixed;inset:0;z-index:0;opacity:.045;pointer-events:none}
 @keyframes reveal{from{opacity:0;transform:translateY(15px)}to{opacity:1;transform:none}}
 .wrap>*{animation:reveal .6s cubic-bezier(.2,.7,.2,1) both}
 .wrap>*:nth-child(2){animation-delay:.05s}.wrap>*:nth-child(3){animation-delay:.1s}
@@ -392,7 +393,7 @@ setInterval(function(){var s=document.getElementById('scanpulse');s.style.opacit
 function R(){c.width=window.innerWidth;c.height=window.innerHeight;}R();window.addEventListener('resize',R);
 var G='01≡⌐¬△▽◇+×·HYPRSMT${}[]<>/#'.split(''),fs=15,cols=Math.ceil(c.width/fs),y=[];
 for(var i=0;i<cols;i++)y[i]=Math.floor(Math.random()*-50);
-setInterval(function(){x.fillStyle='rgba(4,7,10,.10)';x.fillRect(0,0,c.width,c.height);x.font=fs+'px JetBrains Mono, monospace';
+setInterval(function(){x.fillStyle='rgba(13,22,27,.11)';x.fillRect(0,0,c.width,c.height);x.font=fs+'px JetBrains Mono, monospace';
 for(var i=0;i<cols;i++){var g=G[Math.floor(Math.random()*G.length)],yy=y[i]*fs;
 x.fillStyle=Math.random()>.945?'rgba(150,255,210,.9)':'rgba(44,230,155,.5)';x.fillText(g,i*fs,yy);
 if(yy>c.height&&Math.random()>.975)y[i]=0;y[i]++;}},68);})();
