@@ -1,15 +1,14 @@
 # Registre des flags de configuration (auto-généré)
 
-Flags lus dans le code: 339 · définis au launcher: 68 · flags morts: 1
+Flags lus dans le code: 370 · définis au launcher: 77 · flags morts: 0
 
 Un flag 'mort' est défini au launcher mais consommé nulle part dans le code.
 
 | Flag | Consommateurs (code) | Au launcher | Statut |
 |---|---:|:---:|---|
 | `HYPERSMART_AB_RESEARCH_ACK` | 1 |  | code-only |
-| `HYPERSMART_ADAPTIVE_PAPER_SIZING` | 3 | ✓ | OK |
+| `HYPERSMART_ADAPTIVE_PAPER_SIZING` | 4 | ✓ | OK |
 | `HYPERSMART_ALLOW_MAINNET` | 1 |  | code-only |
-| `HYPERSMART_ALLOW_MARKET_FLOW_SOLO` | 0 | ✓ | MORT |
 | `HYPERSMART_API_LIMITS` | 1 |  | code-only |
 | `HYPERSMART_APPEND_ONLY_ROTATE_MB` | 1 |  | code-only |
 | `HYPERSMART_ARCHIVE_AUDIT` | 2 |  | code-only |
@@ -19,8 +18,10 @@ Un flag 'mort' est défini au launcher mais consommé nulle part dans le code.
 | `HYPERSMART_COIN_SIDE_LOSS_MIN_CONSENSUS` | 2 |  | code-only |
 | `HYPERSMART_COIN_SIDE_LOSS_MIN_LIQUIDITY` | 2 |  | code-only |
 | `HYPERSMART_COIN_SIDE_LOSS_RECOVERY_EXTRA_EDGE_BPS` | 2 |  | code-only |
+| `HYPERSMART_CONFIRM_MICROSTRUCTURE` | 1 |  | code-only |
 | `HYPERSMART_CONFIRM_TESTNET_ONLY` | 1 |  | code-only |
 | `HYPERSMART_COPY_` | 1 |  | code-only |
+| `HYPERSMART_COPY_COIN_SCORING` | 1 |  | code-only |
 | `HYPERSMART_COPY_LEADERBOARD_TARGET_COUNT` | 1 |  | code-only |
 | `HYPERSMART_COPY_MAX_DEGRADATION_BPS` | 2 |  | code-only |
 | `HYPERSMART_COPY_MAX_LEADERS_PER_RUN` | 1 |  | code-only |
@@ -29,10 +30,13 @@ Un flag 'mort' est défini au launcher mais consommé nulle part dans le code.
 | `HYPERSMART_COPY_MIN_EDGE_REQUIRED_BPS` | 2 |  | code-only |
 | `HYPERSMART_COPY_MIN_HISTORY_DAYS` | 1 |  | code-only |
 | `HYPERSMART_COPY_MIN_LIQUIDITY_SCORE` | 2 |  | code-only |
+| `HYPERSMART_COPY_PF_SHORTLIST` | 1 |  | code-only |
 | `HYPERSMART_COPY_POLL_INTERVAL_SECONDS` | 1 |  | code-only |
+| `HYPERSMART_COPY_SWING_ONLY` | 1 |  | code-only |
 | `HYPERSMART_DASHBOARD_DIR` | 1 |  | code-only |
 | `HYPERSMART_DATABASE_PATH` | 1 |  | code-only |
 | `HYPERSMART_DATA_SOURCES` | 1 |  | code-only |
+| `HYPERSMART_DETECT_CROSS_VENUE_FUNDING` | 1 |  | code-only |
 | `HYPERSMART_DIRECT_ARBITRAGE_MIN_SPREAD_BPS` | 2 | ✓ | OK |
 | `HYPERSMART_DIRECT_COPY_MAX_DEGRADATION_BPS` | 2 |  | code-only |
 | `HYPERSMART_DIRECT_COPY_MAX_OPEN_POSITIONS` | 2 |  | code-only |
@@ -44,6 +48,7 @@ Un flag 'mort' est défini au launcher mais consommé nulle part dans le code.
 | `HYPERSMART_DIRECT_COPY_RECOVERY_MIN_CONSENSUS` | 2 |  | code-only |
 | `HYPERSMART_DIRECT_COPY_RECOVERY_MIN_LIQUIDITY` | 2 |  | code-only |
 | `HYPERSMART_DIRECT_COPY_SINGLE_WALLET_EDGE_BONUS_BPS` | 2 |  | code-only |
+| `HYPERSMART_DISABLE_RAW_STORAGE` | 2 | ✓ | OK |
 | `HYPERSMART_DISTILLED_MAX_PAPER_ENTRIES` | 1 | ✓ | OK |
 | `HYPERSMART_DISTILLED_SLIPPAGE_BPS` | 1 |  | code-only |
 | `HYPERSMART_DISTILLED_SPREAD_BPS` | 1 |  | code-only |
@@ -71,6 +76,7 @@ Un flag 'mort' est défini au launcher mais consommé nulle part dans le code.
 | `HYPERSMART_EXIT_ATR_TP_MULT` | 1 |  | code-only |
 | `HYPERSMART_EXIT_BREAKEVEN_ENABLED` | 1 |  | code-only |
 | `HYPERSMART_EXIT_BREAKEVEN_TRIGGER_BPS` | 1 |  | code-only |
+| `HYPERSMART_EXIT_ENGINE` | 1 |  | code-only |
 | `HYPERSMART_EXIT_MAX_HOLD_MS` | 1 |  | code-only |
 | `HYPERSMART_EXIT_POLICY_ENABLED` | 2 |  | code-only |
 | `HYPERSMART_EXIT_SL_BPS` | 1 |  | code-only |
@@ -86,8 +92,11 @@ Un flag 'mort' est défini au launcher mais consommé nulle part dans le code.
 | `HYPERSMART_EXTERNAL_GITHUB_DIRECT_MATERIALIZATION` | 1 |  | code-only |
 | `HYPERSMART_EXTERNAL_PROFILES_SCOPE` | 1 |  | code-only |
 | `HYPERSMART_EXTERNAL_REPOS_INSTALL` | 1 |  | code-only |
+| `HYPERSMART_FILLS_MULTIPLEX` | 2 |  | code-only |
+| `HYPERSMART_FILLS_MULTIPLEX_CONNECTIONS` | 2 |  | code-only |
 | `HYPERSMART_FRESH_OPPORTUNITY_MAX_PER_COIN` | 1 |  | code-only |
 | `HYPERSMART_FRESH_OPPORTUNITY_MIN_WALLETS` | 2 | ✓ | OK |
+| `HYPERSMART_FUNDING_ARB_APR_ROTATION` | 1 |  | code-only |
 | `HYPERSMART_FUNDING_ARB_EXIT_EDGE_BPS_H` | 1 |  | code-only |
 | `HYPERSMART_FUNDING_ARB_LEG_NOTIONAL_USDT` | 1 | ✓ | OK |
 | `HYPERSMART_FUNDING_ARB_MAX_HOLD_HOURS` | 1 |  | code-only |
@@ -100,12 +109,24 @@ Un flag 'mort' est défini au launcher mais consommé nulle part dans le code.
 | `HYPERSMART_FUSION_COPY_SLIPPAGE_BPS` | 1 |  | code-only |
 | `HYPERSMART_FUSION_COPY_SPREAD_BPS` | 1 |  | code-only |
 | `HYPERSMART_FUSION_COPY_TOP_DEPTH_USDT` | 1 |  | code-only |
+| `HYPERSMART_GATE_CALENDAR` | 1 |  | code-only |
+| `HYPERSMART_GATE_CORRELATION` | 1 |  | code-only |
+| `HYPERSMART_GATE_DATA_QUALITY` | 1 |  | code-only |
+| `HYPERSMART_GATE_LIQUIDATION_PROXIMITY` | 1 |  | code-only |
+| `HYPERSMART_GATE_MARKET_CLASS` | 1 |  | code-only |
+| `HYPERSMART_GATE_REGIME_VOLUME` | 1 |  | code-only |
 | `HYPERSMART_GATE_STRICT_PROFILE` | 1 |  | code-only |
+| `HYPERSMART_GRID_PAPER` | 2 |  | code-only |
+| `HYPERSMART_GRINDER_MAX_NEW_ENTRIES` | 2 |  | code-only |
+| `HYPERSMART_GRINDER_REQUIRE_BOARD_MATCH` | 1 |  | code-only |
+| `HYPERSMART_GRINDER_UNIFIED_SELECTION` | 2 |  | code-only |
 | `HYPERSMART_HTTP_MAX_RETRIES` | 1 |  | code-only |
+| `HYPERSMART_HTTP_PROXIES` | 1 |  | code-only |
 | `HYPERSMART_HTTP_TIMEOUT_SECONDS` | 1 |  | code-only |
 | `HYPERSMART_HYPERLIQUID_INFO_BASE_URL` | 1 |  | code-only |
 | `HYPERSMART_HYPERLIQUID_WS_BASE_URL` | 1 |  | code-only |
 | `HYPERSMART_IA_MAX_SNAPSHOT_AGE_SEC` | 1 |  | code-only |
+| `HYPERSMART_IA_MEMORY` | 1 |  | code-only |
 | `HYPERSMART_INFO_MAX_PAGES_PER_WALLET` | 1 |  | code-only |
 | `HYPERSMART_INFO_MIN_REQUEST_INTERVAL_MS` | 1 |  | code-only |
 | `HYPERSMART_INFO_PAGE_LIMIT` | 1 |  | code-only |
@@ -113,7 +134,7 @@ Un flag 'mort' est défini au launcher mais consommé nulle part dans le code.
 | `HYPERSMART_INFO_WEIGHT_EXTRA_ITEM_BUCKET_SIZE` | 1 |  | code-only |
 | `HYPERSMART_LEADER_QUALITY_GATE` | 1 |  | code-only |
 | `HYPERSMART_LEGACY_POSITION_MIN_AGE_MS` | 2 |  | code-only |
-| `HYPERSMART_LEGACY_POSITION_QUALITY_GUARD_ENABLED` | 2 |  | code-only |
+| `HYPERSMART_LEGACY_POSITION_QUALITY_GUARD_ENABLED` | 2 | ✓ | OK |
 | `HYPERSMART_LEGACY_POSITION_QUALITY_GUARD_MIN_NET_PNL_USDC` | 2 |  | code-only |
 | `HYPERSMART_LEGACY_POSITION_QUALITY_GUARD_REALIZE_NEGATIVE` | 2 |  | code-only |
 | `HYPERSMART_LOG_LEVEL` | 1 |  | code-only |
@@ -126,6 +147,7 @@ Un flag 'mort' est défini au launcher mais consommé nulle part dans le code.
 | `HYPERSMART_MAX_POSITION_USDT` | 4 | ✓ | OK |
 | `HYPERSMART_MAX_SIGNAL_AGE_MS` | 1 |  | code-only |
 | `HYPERSMART_MAX_TOTAL_EXPOSURE_USDT` | 4 | ✓ | OK |
+| `HYPERSMART_MICROSTRUCTURE_GATE` | 1 |  | code-only |
 | `HYPERSMART_MICRO_MAX_CALIBRATION_ERROR` | 1 |  | code-only |
 | `HYPERSMART_MICRO_MAX_CONSUME_FRACTION` | 1 |  | code-only |
 | `HYPERSMART_MICRO_MAX_CVAR_FRACTION` | 1 |  | code-only |
@@ -142,8 +164,9 @@ Un flag 'mort' est défini au launcher mais consommé nulle part dans le code.
 | `HYPERSMART_MIN_FILLS_TO_SCORE` | 1 |  | code-only |
 | `HYPERSMART_MIN_HISTORY_DAYS_TO_SCORE` | 1 |  | code-only |
 | `HYPERSMART_MIN_PAPER_NOTIONAL_USDT` | 2 | ✓ | OK |
-| `HYPERSMART_MIN_REDUCE_NOTIONAL_USDT` | 3 | ✓ | OK |
+| `HYPERSMART_MIN_REDUCE_NOTIONAL_USDT` | 4 | ✓ | OK |
 | `HYPERSMART_MODE` | 3 | ✓ | OK |
+| `HYPERSMART_OPS_BACKUP` | 1 |  | code-only |
 | `HYPERSMART_OVERVIEW_FAST_DB_THRESHOLD_MB` | 1 |  | code-only |
 | `HYPERSMART_OVERVIEW_FAST_SNAPSHOT` | 1 |  | code-only |
 | `HYPERSMART_OVERVIEW_FAST_SNAPSHOT_MAX_AGE_MS` | 1 |  | code-only |
@@ -160,6 +183,8 @@ Un flag 'mort' est défini au launcher mais consommé nulle part dans le code.
 | `HYPERSMART_PAPER_STARTING_EQUITY` | 2 |  | code-only |
 | `HYPERSMART_PAPER_STORE_REFUSALS` | 1 |  | code-only |
 | `HYPERSMART_PATTERN_DETECTION` | 1 |  | code-only |
+| `HYPERSMART_PERSISTENT_LOOP` | 1 |  | code-only |
+| `HYPERSMART_PERSISTENT_WATCHDOG_STALE_SECONDS` | 1 |  | code-only |
 | `HYPERSMART_PNL_AUDIT_HISTORY_BYTES_AUX_THRESHOLD` | 1 |  | code-only |
 | `HYPERSMART_PNL_AUDIT_HISTORY_DECISIONS_AUX_THRESHOLD` | 1 |  | code-only |
 | `HYPERSMART_PNL_AUDIT_PREFER_APPEND_ONLY` | 1 |  | code-only |
@@ -184,7 +209,7 @@ Un flag 'mort' est défini au launcher mais consommé nulle part dans le code.
 | `HYPERSMART_RUNTIME_MICROSTRUCTURE_AUTHORITATIVE` | 1 |  | code-only |
 | `HYPERSMART_RUNTIME_MICROSTRUCTURE_GUARD` | 1 |  | code-only |
 | `HYPERSMART_RUNTIME_ROOT` | 1 |  | code-only |
-| `HYPERSMART_RUNTIME_STOP_FILE` | 3 |  | code-only |
+| `HYPERSMART_RUNTIME_STOP_FILE` | 5 |  | code-only |
 | `HYPERSMART_SAFETY_AUDIT_REPORT` | 1 |  | code-only |
 | `HYPERSMART_SCORE_MAX_LOOKBACK_DAYS` | 1 |  | code-only |
 | `HYPERSMART_SCORE_MIN_CONFIDENCE` | 1 |  | code-only |
@@ -203,7 +228,7 @@ Un flag 'mort' est défini au launcher mais consommé nulle part dans le code.
 | `HYPERSMART_SIMULATION_ALLOW_ADD_AS_ENTRY` | 2 | ✓ | OK |
 | `HYPERSMART_SIMULATION_ENGINE` | 1 |  | code-only |
 | `HYPERSMART_SIMULATION_INTERVAL_SECONDS` | 2 |  | code-only |
-| `HYPERSMART_SIMULATION_LEVERAGE` | 3 | ✓ | OK |
+| `HYPERSMART_SIMULATION_LEVERAGE` | 6 | ✓ | OK |
 | `HYPERSMART_SIMULATION_MAX_COPY_DEGRADATION_BPS` | 4 | ✓ | OK |
 | `HYPERSMART_SIMULATION_MAX_OPEN_POSITIONS` | 2 |  | code-only |
 | `HYPERSMART_SIMULATION_MAX_POSITION_NOTIONAL` | 2 |  | code-only |
@@ -214,14 +239,14 @@ Un flag 'mort' est défini au launcher mais consommé nulle part dans le code.
 | `HYPERSMART_SIMULATION_MIN_LIQUIDITY_SCORE` | 4 | ✓ | OK |
 | `HYPERSMART_SINGLE_WALLET_MIN_EDGE_BPS` | 2 | ✓ | OK |
 | `HYPERSMART_SLTP_` | 1 |  | code-only |
-| `HYPERSMART_SLTP_BREAKEVEN_BUFFER_BPS` | 3 | ✓ | OK |
-| `HYPERSMART_SLTP_CATASTROPHIC_STOP_BPS` | 3 | ✓ | OK |
-| `HYPERSMART_SLTP_ENABLED` | 3 | ✓ | OK |
-| `HYPERSMART_SLTP_STOP_LOSS_BPS` | 3 | ✓ | OK |
-| `HYPERSMART_SLTP_STOP_MIN_HOLD_MS` | 3 | ✓ | OK |
-| `HYPERSMART_SLTP_TAKE_PROFIT_BPS` | 3 | ✓ | OK |
-| `HYPERSMART_SLTP_TRAILING_ACTIVATION_BPS` | 3 | ✓ | OK |
-| `HYPERSMART_SLTP_TRAILING_BPS` | 3 | ✓ | OK |
+| `HYPERSMART_SLTP_BREAKEVEN_BUFFER_BPS` | 4 | ✓ | OK |
+| `HYPERSMART_SLTP_CATASTROPHIC_STOP_BPS` | 4 | ✓ | OK |
+| `HYPERSMART_SLTP_ENABLED` | 4 | ✓ | OK |
+| `HYPERSMART_SLTP_STOP_LOSS_BPS` | 5 | ✓ | OK |
+| `HYPERSMART_SLTP_STOP_MIN_HOLD_MS` | 4 | ✓ | OK |
+| `HYPERSMART_SLTP_TAKE_PROFIT_BPS` | 5 | ✓ | OK |
+| `HYPERSMART_SLTP_TRAILING_ACTIVATION_BPS` | 5 | ✓ | OK |
+| `HYPERSMART_SLTP_TRAILING_BPS` | 5 | ✓ | OK |
 | `HYPERSMART_STATUS_EXPORT_DIAGNOSTICS` | 1 |  | code-only |
 | `HYPERSMART_STATUS_EXPORT_MIN_MS` | 1 |  | code-only |
 | `HYPERSMART_STATUS_LIVE_MARKS_ENABLED` | 2 |  | code-only |
@@ -229,15 +254,17 @@ Un flag 'mort' est défini au launcher mais consommé nulle part dans le code.
 | `HYPERSMART_STATUS_LIVE_MARKS_TIMEOUT_SECONDS` | 1 |  | code-only |
 | `HYPERSMART_STREAM_MAX_LEADERS` | 1 |  | code-only |
 | `HYPERSMART_STREAM_SEGMENT_SECONDS` | 1 |  | code-only |
+| `HYPERSMART_STREAM_WATCHDOG_GRACE_SECONDS` | 1 |  | code-only |
 | `HYPERSMART_TOP_WALLET_SAMPLE_LIMIT` | 3 |  | code-only |
-| `HYPERSMART_UI_STATE_DIR` | 2 | ✓ | OK |
+| `HYPERSMART_TRIANGULAR_PAPER` | 1 |  | code-only |
+| `HYPERSMART_UI_STATE_DIR` | 5 | ✓ | OK |
 | `HYPERSMART_UNREALIZED_DRAWDOWN_GUARD_USDT` | 1 |  | code-only |
 | `HYPERSMART_USER_FILLS_BY_TIME_MAX_RECENT` | 2 |  | code-only |
 | `HYPERSMART_USER_FILLS_RECENT_LIMIT` | 2 |  | code-only |
 | `HYPERSMART_V12_GATE_AUTHORITATIVE` | 2 | ✓ | OK |
 | `HYPERSMART_V12_IMPLEMENTATION_STATUS` | 1 |  | code-only |
 | `HYPERSMART_V12_REMAINING_ROADMAP` | 1 |  | code-only |
-| `HYPERSMART_V12_SQLITE_PATH` | 2 | ✓ | OK |
+| `HYPERSMART_V12_SQLITE_PATH` | 3 | ✓ | OK |
 | `HYPERSMART_V13_EXPL_PATH` | 1 | ✓ | OK |
 | `HYPERSMART_V13_MODEL_AUTHORITATIVE` | 2 | ✓ | OK |
 | `HYPERSMART_V13_MODEL_MIN_P` | 2 | ✓ | OK |
@@ -281,8 +308,8 @@ Un flag 'mort' est défini au launcher mais consommé nulle part dans le code.
 | `HYPERSMART_V26_EDGE_TREND_VETO` | 1 |  | code-only |
 | `HYPERSMART_V26_ENTRY_VETOS_AUTHORITATIVE` | 2 |  | code-only |
 | `HYPERSMART_V26_FUNDING_INFO_URL` | 2 |  | code-only |
-| `HYPERSMART_V26_FUNDING_POLLER` | 1 |  | code-only |
-| `HYPERSMART_V26_FUNDING_POLL_INTERVAL_S` | 1 |  | code-only |
+| `HYPERSMART_V26_FUNDING_POLLER` | 2 | ✓ | OK |
+| `HYPERSMART_V26_FUNDING_POLL_INTERVAL_S` | 1 | ✓ | OK |
 | `HYPERSMART_V26_FUNDING_VETO` | 1 |  | code-only |
 | `HYPERSMART_V26_GRADED_HALT` | 3 |  | code-only |
 | `HYPERSMART_V26_HALT_AMBER_LOSS_USD` | 1 |  | code-only |
@@ -310,8 +337,8 @@ Un flag 'mort' est défini au launcher mais consommé nulle part dans le code.
 | `HYPERSMART_V26_MQ_STALE_S` | 1 |  | code-only |
 | `HYPERSMART_V26_MQ_TOP_K` | 1 |  | code-only |
 | `HYPERSMART_V26_PROTECTIONS` | 3 |  | code-only |
-| `HYPERSMART_V26_RECORD_CANDIDATES` | 4 |  | code-only |
-| `HYPERSMART_V26_RECORD_PATH` | 2 |  | code-only |
+| `HYPERSMART_V26_RECORD_CANDIDATES` | 5 | ✓ | OK |
+| `HYPERSMART_V26_RECORD_PATH` | 3 | ✓ | OK |
 | `HYPERSMART_V26_SG_HALT_MIN` | 1 |  | code-only |
 | `HYPERSMART_V26_SG_PER_MARKET` | 1 |  | code-only |
 | `HYPERSMART_V26_SG_TRADE_LIMIT` | 1 |  | code-only |
@@ -331,22 +358,21 @@ Un flag 'mort' est défini au launcher mais consommé nulle part dans le code.
 | `HYPERSMART_V26_UNSTUCK_MAX_PER_PASS` | 1 |  | code-only |
 | `HYPERSMART_V26_UNSTUCK_MIN_AGE_MIN` | 1 |  | code-only |
 | `HYPERSMART_V26_UNSTUCK_UNDERWATER_BPS` | 1 |  | code-only |
-| `HYPERSMART_V26_VOL_BARRIERS` | 2 |  | code-only |
-| `HYPERSMART_V26_VOL_FACTOR_MAX` | 1 |  | code-only |
-| `HYPERSMART_V26_VOL_FACTOR_MIN` | 1 |  | code-only |
+| `HYPERSMART_V26_VOL_BARRIERS` | 4 | ✓ | OK |
+| `HYPERSMART_V26_VOL_FACTOR_MAX` | 3 | ✓ | OK |
+| `HYPERSMART_V26_VOL_FACTOR_MIN` | 3 | ✓ | OK |
 | `HYPERSMART_V26_VOL_MIN_OBS` | 1 |  | code-only |
-| `HYPERSMART_V26_VOL_REF_RANGE_BPS` | 1 |  | code-only |
+| `HYPERSMART_V26_VOL_REF_RANGE_BPS` | 3 | ✓ | OK |
 | `HYPERSMART_V26_VOL_WINDOW_S` | 1 |  | code-only |
 | `HYPERSMART_V9_PIPELINE_AUTHORITATIVE` | 2 | ✓ | OK |
 | `HYPERSMART_WALLET_INTELLIGENCE` | 1 |  | code-only |
+| `HYPERSMART_WALLET_QUALITY_SCORING` | 2 |  | code-only |
 | `HYPERSMART_WHALE_CONSENSUS_SIZING` | 2 | ✓ | OK |
+| `HYPERSMART_WS_FIRST_CHANNELS` | 1 |  | code-only |
+| `HYPERSMART_WS_FIRST_COLLECT` | 2 |  | code-only |
 | `HYPERSMART_WS_MAX_CONNECTIONS` | 2 |  | code-only |
 | `HYPERSMART_WS_MAX_NEW_CONNECTIONS_PER_MIN` | 2 |  | code-only |
 | `HYPERSMART_WS_MAX_SUBSCRIPTIONS` | 2 |  | code-only |
 | `HYPERSMART_WS_MAX_UNIQUE_USERS` | 4 |  | code-only |
 | `HYPERSMART_WS_MAX_USER_SUBSCRIPTIONS` | 2 |  | code-only |
 | `HYPERSMART_WS_MONITOR_ENABLED` | 1 |  | code-only |
-
-## Flags morts à retirer
-
-- `HYPERSMART_ALLOW_MARKET_FLOW_SOLO`

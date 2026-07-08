@@ -19,6 +19,10 @@ Le runtime officiel est **Hyperliquid-first**. Les modules dYdX historiques sont
 conserves comme legacy/mockable, mais ils ne doivent pas etre lances par le
 launcher principal ni montes dans l'UI Hyperliquid.
 
+> **Doc maître** (état, méthode, architecture, config, roadmap) : `docs/ETAT_ET_FEUILLE_DE_ROUTE.md`.
+> Règles agent : `CLAUDE.md` et `AGENTS.md`. Objectif condensé : `OBJECTIF.md`.
+> Sizing actuel : marge **$50** × levier **10** = notional **$500** par position ; 20 positions = 1000 USDT.
+
 ---
 
 ## Doctrine
@@ -116,7 +120,7 @@ proprement avec la commande affichee dans la fenetre du lanceur.
 URL locale par defaut:
 
 ```text
-http://127.0.0.1:8794/static/simulation_v2.html
+http://127.0.0.1:8794/v2
 ```
 
 La session repart a 1000 USDT fictifs au lancement. Pendant la session, le solde
@@ -128,21 +132,16 @@ virtuelles.
 ## Modules principaux
 
 ```text
-src/hl_observer/                      # CLI/UI runtime local
-hyper_smart_observer/hyperliquid_client/
-hyper_smart_observer/copy_mode/
-hyper_smart_observer/realtime_monitor/
-hyper_smart_observer/market_signals/
-hyper_smart_observer/paper_trading/
-hyper_smart_observer/backtesting/
-hyper_smart_observer/dashboard/
-hyper_smart_observer/audit/
+src/hl_observer/            # RUNTIME ACTIF : CLI/UI, collecte, edge, paper, risk, backtest
 ```
 
-Legacy preserve:
+Détail de l'architecture active : `docs/ETAT_ET_FEUILLE_DE_ROUTE.md` (§5).
+
+Legacy conserve (non lance par le runtime Hyperliquid, ne pas etendre) :
 
 ```text
-hyper_smart_observer/dydx_v4/
+hyper_smart_observer/            # legacy/compat isole
+hyper_smart_observer/dydx_v4/    # dYdX v4 dormant/comparatif
 ```
 
 Le legacy dYdX ne doit pas etre importe par le runtime Hyperliquid par defaut.
@@ -162,13 +161,10 @@ Classification:
 - BAN: ordre reel, CLOB runtime, private key, signature, wallet connect, live
   toggle, executor service, faux PnL, promesse de profit.
 
-Voir:
-
-```text
-docs/research/HYPERSMART_GITHUB_FUSION_MASTER.md
-docs/research/HYPERSMART_REPO_IDEA_MATRIX_FUSION.md
-docs/research/HYPERSMART_GITHUB_RESCAN_CODEX.md
-```
+Les repos externes vivent dans `runtime/research/github_repos_v24/`. La methode de
+portage (`COPY_DIRECT` / `COPY_ADAPTED` / `PORT_BEHAVIOR` / `INSPIRE_ONLY` /
+`SKIP_WITH_REASON` / `DEFERRED_WITH_PLAN`) est decrite dans `CLAUDE.md` et
+`docs/ETAT_ET_FEUILLE_DE_ROUTE.md`.
 
 ---
 
