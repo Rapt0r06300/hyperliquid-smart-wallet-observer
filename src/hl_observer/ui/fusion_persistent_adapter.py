@@ -792,7 +792,15 @@ def _portfolio_open_refusal(state: UiState, *, new_notional_usdt: float) -> str:
     max_positions = _env_int("HYPERSMART_MAX_OPEN_POSITIONS", 12)
     if max_positions > 0 and len(positions) >= max_positions:
         return "PORTFOLIO_MAX_OPEN_POSITIONS"
-    max_exposure = abs(_env_float("HYPERSMART_MAX_TOTAL_EXPOSURE_USDT", 400.0))
+    # exposition en NOTIONAL leverage: scale le budget par le levier pour garder plusieurs
+    # positions (sinon 1 seule position a 400 saturerait le budget 400). Marge a risque = /levier.
+    _lev_ex = _env_float("HYPERSMART_SIMULATION_LEVERAGE", 10.0)
+    if _lev_ex < 10.0:
+        _lev_ex = 10.0
+    _base_ex = abs(_env_float("HYPERSMART_MAX_TOTAL_EXPOSURE_USDT", 1000.0))
+    if _base_ex < 1000.0:  # planche robuste -> ~10 positions de 1000 (10x sur 1000 de compte)
+        _base_ex = 1000.0
+    max_exposure = _base_ex * _lev_ex
     current_exposure = _current_open_exposure_usdt(positions)
     if max_exposure > 0 and current_exposure + abs(float(new_notional_usdt or 0.0)) > max_exposure:
         return "PORTFOLIO_MAX_TOTAL_EXPOSURE"
@@ -930,13 +938,30 @@ def _ledger_reason_for_direct_order(value: dict[str, Any]) -> str:
 
 
 def _cap_paper_notional_and_quantity(notional: float, quantity: float, entry_price: float) -> dict[str, Any]:
-    cap = abs(_env_float("HYPERSMART_MAX_POSITION_USDT", 40.0))
+    # C'ETAIT LE VRAI PLAFOND (cause finale prouvee live): tout notional etait clampe a
+    # MAX_POSITION_USDT=40 ICI, au point de materialisation -> quel que soit le levier calcule
+    # en amont, la position affichee restait a 40 = centimes. On traite desormais l'entrant
+    # comme la MARGE (plafonnee a 40) et on applique le LEVIER: notional position = marge x levier.
+    # SIZING REEL (demande Flo "comme si on tradait en vrai"): on ne matche PAS la taille $
+    # derisoire du leader (~40); on alloue NOTRE marge par trade x levier, comme un compte perp
+    # reel. Autoritaire (dernier gate). Robuste aux valeurs "collees" dans l'env Windows: on
+    # PLANCHE la marge a 100 et le levier a 10 -> notional position >= 100 x 10 = 1000.
+    # GRINDER (correction Flo: $1000/position empechait le grinder). Beaucoup de PETITES
+    # positions gagnantes: marge PETITE (<=40) x levier -> ex 40 x 10 = 400. Le PnL vient du
+    # VOLUME (plein de positions) + funding, PAS de positions geantes. Le levier evite les centimes.
+    lev = _env_float("HYPERSMART_SIMULATION_LEVERAGE", 10.0)
+    if lev < 5.0:
+        lev = 10.0
+    # GRINDER: marge TRES PETITE (~12) pour ouvrir BEAUCOUP de mini-positions (Flo: "400 trop gros").
+    margin_cap = min(abs(_env_float("HYPERSMART_MAX_POSITION_USDT", 40.0)), 12.0)
     clean_notional = max(0.0, float(notional or 0.0))
     clean_quantity = abs(float(quantity or 0.0))
-    if cap <= 0 or entry_price <= 0 or clean_notional <= cap:
+    if margin_cap <= 0 or entry_price <= 0 or clean_notional <= 0:
         return {"notional": clean_notional, "quantity": clean_quantity, "cap_applied": False}
-    capped_quantity = cap / float(entry_price)
-    return {"notional": round(cap, 8), "quantity": round(capped_quantity, 12), "cap_applied": True}
+    margin = min(clean_notional, margin_cap)       # <= 12 -> mini-positions (grinder)
+    lev_notional = min(margin * lev, 50.0)         # PLAFOND DUR $50/position (demande Flo) -> plein de mini-positions
+    lev_quantity = lev_notional / float(entry_price)
+    return {"notional": round(lev_notional, 8), "quantity": round(lev_quantity, 12), "cap_applied": True}
 
 
 def _paper_order_action(value: object) -> str:

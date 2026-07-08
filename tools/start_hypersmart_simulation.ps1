@@ -1,6 +1,6 @@
 param(
     [int]$Port = 8794,
-    [int]$IntervalSeconds = 15,
+    [int]$IntervalSeconds = 5,
     [int]$MaxLeaders = 50,
     [bool]$RestartExisting = $true,
     [switch]$Interactive
@@ -101,35 +101,44 @@ Set-HyperSmartDefaultEnv "HYPERSMART_SLTP_ENABLED" "1"
 # NB: ces defauts ps1 sont AUTORITAIRES (le python est lance ici); ils ECRASAIENT les
 # valeurs du .cmd (Set...DefaultEnv ne pose que si non-defini) -> c'etait la cause du
 # "PnL en centimes / SL trop serre". Alignes desormais sur la calibration.
-Set-HyperSmartDefaultEnv "HYPERSMART_V26_VOL_BARRIERS" "1"
-Set-HyperSmartDefaultEnv "HYPERSMART_V26_VOL_REF_RANGE_BPS" "30"
-Set-HyperSmartDefaultEnv "HYPERSMART_V26_VOL_FACTOR_MIN" "0.5"
-Set-HyperSmartDefaultEnv "HYPERSMART_V26_VOL_FACTOR_MAX" "2.5"
-Set-HyperSmartDefaultEnv "HYPERSMART_SLTP_TAKE_PROFIT_BPS" "120"
-Set-HyperSmartDefaultEnv "HYPERSMART_SLTP_STOP_LOSS_BPS" "60"
-Set-HyperSmartDefaultEnv "HYPERSMART_SLTP_TRAILING_BPS" "30"
-Set-HyperSmartDefaultEnv "HYPERSMART_SLTP_TRAILING_ACTIVATION_BPS" "45"
-Set-HyperSmartDefaultEnv "HYPERSMART_SLTP_BREAKEVEN_BUFFER_BPS" "0"
-Set-HyperSmartDefaultEnv "HYPERSMART_SLTP_STOP_MIN_HOLD_MS" "120000"
-Set-HyperSmartDefaultEnv "HYPERSMART_SLTP_CATASTROPHIC_STOP_BPS" "250"
+# FORCE (comme le levier, ces defauts se "collaient" -> pas garantis actifs). Reponse a la
+# question de Flo: le SL/TP est en bps de PRIX -> INDEPENDANT du notional (fire au meme % de
+# prix que la position fasse 40 ou 1000). Mais a 10x l'impact MARGE est x10, donc on calibre:
+# SL 60 base x vol(0.5-2.5)=30-150 bps prix = 3-15% de marge; TP 120 (laisse courir + trailing);
+# catastrophe 180 bps (=18% de marge a 10x, backstop au-dessus du SL max 150); min-hold 45s
+# (le SL protege plus vite a 10x). Liquidation ~10% de move -> la catastrophe (1.8%) coupe avant.
+[Environment]::SetEnvironmentVariable("HYPERSMART_SLTP_ENABLED", "1", "Process")
+[Environment]::SetEnvironmentVariable("HYPERSMART_V26_VOL_BARRIERS", "1", "Process")
+[Environment]::SetEnvironmentVariable("HYPERSMART_V26_VOL_REF_RANGE_BPS", "30", "Process")
+[Environment]::SetEnvironmentVariable("HYPERSMART_V26_VOL_FACTOR_MIN", "0.5", "Process")
+[Environment]::SetEnvironmentVariable("HYPERSMART_V26_VOL_FACTOR_MAX", "2.5", "Process")
+[Environment]::SetEnvironmentVariable("HYPERSMART_SLTP_TAKE_PROFIT_BPS", "120", "Process")
+[Environment]::SetEnvironmentVariable("HYPERSMART_SLTP_STOP_LOSS_BPS", "60", "Process")
+[Environment]::SetEnvironmentVariable("HYPERSMART_SLTP_TRAILING_BPS", "30", "Process")
+[Environment]::SetEnvironmentVariable("HYPERSMART_SLTP_TRAILING_ACTIVATION_BPS", "45", "Process")
+[Environment]::SetEnvironmentVariable("HYPERSMART_SLTP_BREAKEVEN_BUFFER_BPS", "0", "Process")
+[Environment]::SetEnvironmentVariable("HYPERSMART_SLTP_STOP_MIN_HOLD_MS", "45000", "Process")
+[Environment]::SetEnvironmentVariable("HYPERSMART_SLTP_CATASTROPHIC_STOP_BPS", "180", "Process")
 Set-HyperSmartDefaultEnv "HYPERSMART_ADAPTIVE_PAPER_SIZING" "1"
 Set-HyperSmartDefaultEnv "HYPERSMART_POSITIVE_PNL_REQUIRED_FOR_FUTURE_REVIEW" "1"
 Set-HyperSmartDefaultEnv "HYPERSMART_SIMULATION_INTERVAL_SECONDS" "$IntervalSeconds"
 # Reglages SELECTIFS calibres sur les logs reels: Hyperliquid paper local,
 # signaux frais uniquement, mais sans affamer le moteur avec un seuil impossible.
-Set-HyperSmartDefaultEnv "HYPERSMART_SIMULATION_MAX_SIGNAL_AGE_MS" "15000"
+[Environment]::SetEnvironmentVariable("HYPERSMART_SIMULATION_MAX_SIGNAL_AGE_MS", "30000", "Process")
 Set-HyperSmartDefaultEnv "HYPERSMART_REDUCE_MAX_SIGNAL_AGE_MS" "15000"
 Set-HyperSmartDefaultEnv "HYPERSMART_MIN_REDUCE_NOTIONAL_USDT" "0"
-Set-HyperSmartDefaultEnv "HYPERSMART_FUSION_COPY_MIN_WALLETS" "3"
-Set-HyperSmartDefaultEnv "HYPERSMART_FRESH_OPPORTUNITY_MIN_WALLETS" "3"
+# FORCE (demande Flo: ouvrir beaucoup plus, mode grinder). Consensus 3->2 wallets.
+[Environment]::SetEnvironmentVariable("HYPERSMART_FUSION_COPY_MIN_WALLETS", "2", "Process")
+[Environment]::SetEnvironmentVariable("HYPERSMART_FRESH_OPPORTUNITY_MIN_WALLETS", "2", "Process")
 Set-HyperSmartDefaultEnv "HYPERSMART_FUSION_COPY_COST_BUFFER_BPS" "24"
 Set-HyperSmartDefaultEnv "HYPERSMART_DIRECT_ARBITRAGE_MIN_SPREAD_BPS" "30"
-Set-HyperSmartDefaultEnv "HYPERSMART_DIRECT_COPY_MIN_CONSENSUS_WALLETS" "3"
+[Environment]::SetEnvironmentVariable("HYPERSMART_DIRECT_COPY_MIN_CONSENSUS_WALLETS", "1", "Process")
 # V25: aligne sur le canal consensus (28 bps single-wallet). A 18 bps le canal
 # fusion direct alimentait le book en entrees faibles (70 entrees vs 2 consensus).
 Set-HyperSmartDefaultEnv "HYPERSMART_DIRECT_COPY_MIN_EDGE_BPS" "32"
 Set-HyperSmartDefaultEnv "HYPERSMART_DIRECT_COPY_SINGLE_WALLET_EDGE_BONUS_BPS" "45"
-Set-HyperSmartDefaultEnv "HYPERSMART_DIRECT_COPY_MAX_SIGNAL_AGE_MS" "8000"
+# FORCE (bug sniper trouvé: 8s < latence WS réelle ~11s -> le sniper n'ouvrait JAMAIS).
+[Environment]::SetEnvironmentVariable("HYPERSMART_DIRECT_COPY_MAX_SIGNAL_AGE_MS", "20000", "Process")
 Set-HyperSmartDefaultEnv "HYPERSMART_DIRECT_COPY_MIN_LIQUIDITY" "0.45"
 Set-HyperSmartDefaultEnv "HYPERSMART_DIRECT_COPY_MAX_DEGRADATION_BPS" "24"
 Set-HyperSmartDefaultEnv "HYPERSMART_DIRECT_COPY_MAX_OPEN_POSITIONS" "3"
@@ -153,8 +162,10 @@ Set-HyperSmartDefaultEnv "HYPERSMART_V9_PIPELINE_AUTHORITATIVE" "1"
 Set-HyperSmartDefaultEnv "HYPERSMART_SIMULATION_ALLOW_ADD_AS_ENTRY" "0"
 # Historical calibration marker retained for audit tests:
 # Set-HyperSmartDefaultEnv "HYPERSMART_SIMULATION_MIN_EDGE_BPS" "22"
-Set-HyperSmartDefaultEnv "HYPERSMART_SIMULATION_MIN_EDGE_BPS" "40"
-Set-HyperSmartDefaultEnv "HYPERSMART_SIMULATION_MIN_LIQUIDITY_SCORE" "0.38"
+# FORCE (demande Flo: le bot ouvrait trop peu). Plancher edge 40->22: atteignable mais
+# toujours POSITIF apres couts. ~7%% des candidats passent (vs 0.4%% a 40) -> bien plus de trades.
+[Environment]::SetEnvironmentVariable("HYPERSMART_SIMULATION_MIN_EDGE_BPS", "22", "Process")
+[Environment]::SetEnvironmentVariable("HYPERSMART_SIMULATION_MIN_LIQUIDITY_SCORE", "0.28", "Process")
 Set-HyperSmartDefaultEnv "HYPERSMART_SIMULATION_MAX_COPY_DEGRADATION_BPS" "28"
 # Historical conservative marker retained for launcher regression tests:
 # Set-HyperSmartDefaultEnv "HYPERSMART_MAX_OPEN_POSITIONS" "12"
@@ -166,7 +177,10 @@ Set-HyperSmartDefaultEnv "HYPERSMART_MAX_TOTAL_EXPOSURE_USDT" "400"
 # 2026-07-08 (demande Flo "pas que des centimes"): levier perp realiste 5x. C'etait la
 # CAUSE du PnL en centimes -> ce defaut ps1 (1) ecrasait le 5 du .cmd (Set...DefaultEnv
 # ne pose que si non-defini, et le python etait lance par la ps1). notional = marge x 5.
-Set-HyperSmartDefaultEnv "HYPERSMART_SIMULATION_LEVERAGE" "5"
+# FORCE (pas "default"): une valeur "1" restee collee dans l'environnement (run precedent)
+# faisait que Set-HyperSmartDefaultEnv sautait -> levier 1 au runtime -> notional 40 = centimes.
+# On ECRASE explicitement pour garantir le levier. C'etait LA cause finale du PnL en centimes.
+[Environment]::SetEnvironmentVariable("HYPERSMART_SIMULATION_LEVERAGE", "10", "Process")
 Set-HyperSmartDefaultEnv "HYPERSMART_SINGLE_WALLET_MIN_EDGE_BPS" "55"
 Set-HyperSmartDefaultEnv "HYPERSMART_TOP_WALLET_SAMPLE_LIMIT" "8000"
 # V25 (2026-07-03): hard halt a 2.50 USDC (=0.25% de 1000) gelait la session
@@ -300,7 +314,9 @@ function Get-HyperSmartRuntimeProcesses {
                 ($_.CommandLine -like "*hl_observer live-user-fills-scan*--network-read*") -or
                 ($_.CommandLine -like "*hl_observer live-user-fills-stream*--network-read*") -or
                 ($_.CommandLine -like "*hl_observer live-public-scan*--network-read*") -or
-                ($_.CommandLine -like "*hl_observer.research.explain_cli*")
+                ($_.CommandLine -like "*hl_observer.research.explain_cli*") -or
+                ($_.CommandLine -like "*python*hl_observer*") -or
+                ($_.CommandLine -like "*-m hl_observer*")
             )
         }
     } catch {
@@ -326,6 +342,23 @@ function Stop-HyperSmartRuntime {
         } catch {
             Write-LauncherLog "Stop skipped for pid=$($process.ProcessId): $($_.Exception.Message)"
         }
+    }
+    # Tuer aussi ce qui SQUATTE le port UI 8794 -> sinon la relance recharge l'ancien
+    # serveur (ancien code, positions a 40) et le neuf ne peut pas se lancer (demande Flo:
+    # "c'est a toi de gerer que Q ferme tout").
+    try {
+        $portPids = @(Get-NetTCPConnection -LocalPort 8794 -State Listen -ErrorAction SilentlyContinue | Select-Object -ExpandProperty OwningProcess -Unique)
+        foreach ($pp in $portPids) {
+            if ($pp -and $pp -ne $PID) {
+                Write-LauncherLog "Freeing UI port 8794 pid=$pp"
+                Stop-Process -Id $pp -Force -ErrorAction SilentlyContinue
+            }
+        }
+    } catch { Write-LauncherLog "port 8794 free skipped: $($_.Exception.Message)" }
+    # 2e passe de securite: re-tuer tout ce qui reste apres 600 ms.
+    Start-Sleep -Milliseconds 600
+    foreach ($process in @(Get-HyperSmartRuntimeProcesses)) {
+        try { Stop-Process -Id $process.ProcessId -Force -ErrorAction SilentlyContinue } catch {}
     }
 }
 

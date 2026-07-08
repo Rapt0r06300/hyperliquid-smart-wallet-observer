@@ -428,7 +428,7 @@ function deriveEvents(d,ps,npos){
   }
   PREV=cur;
 }
-renderFeed();tick();setInterval(tick,2000);loadMeta();setInterval(loadMeta,10000);
+renderFeed();tick();setInterval(tick,700);loadMeta();setInterval(loadMeta,2500);
 setInterval(function(){var s=document.getElementById('scanpulse');s.style.opacity=s.style.opacity==='0.3'?'1':'0.3';},900);
 
 // ── Matrix rain (subtil, atmosphérique) ──
