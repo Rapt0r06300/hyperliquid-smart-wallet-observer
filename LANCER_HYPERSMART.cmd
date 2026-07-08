@@ -145,13 +145,29 @@ set "HYPERSMART_SLTP_ENABLED=1"
 REM V24: profil paper plus reactif et plus stable pour une session 1000 USDT.
 REM Les logs montraient que levier 5x + sorties tardives amplifiaient les frais
 REM et les pics. On reste en simulation locale, au vrai prix marche, sans ordre.
-set "HYPERSMART_SLTP_TAKE_PROFIT_BPS=160"
-set "HYPERSMART_SLTP_STOP_LOSS_BPS=120"
-set "HYPERSMART_SLTP_TRAILING_BPS=0"
-set "HYPERSMART_SLTP_TRAILING_ACTIVATION_BPS=0"
+REM ==========================================================================
+REM BARRIERES CALIBREES A LA VOLATILITE (2026-07-08, demande Flo: "reproduire les
+REM methodes gagnantes + maths complexes"). Au lieu de bps FIXES (incoherents: la
+REM range 15min va de 4 bps sur ETH a 135 sur KAITO = facteur 34x), les barrieres
+REM sont en UNITES DE VOLATILITE du coin (triple-barrier hummingbot + ATR-stop):
+REM le moteur multiplie ces bps de BASE par clamp(range_coin/ref, 0.5, 2.5) -> ETH
+REM calme = SL ~30 bps, KAITO volatil = SL ~150 bps. ref=30 bps = MEDIANE EMPIRIQUE
+REM des ranges (calibree sur marks.jsonl reels via barrier_calibration.py).
+REM ESPERANCE nette EXIGEE positive: E = p(TP-c) - (1-p)(SL+c). SL 60 / TP 120 = R:R
+REM 2:1, cout 12 bps -> breakeven ~40%% WR (bas, atteignable en copiant du smart-money).
+REM Follow-leader reste la sortie PRIMAIRE; ces barrieres = filet + trailing (laisse
+REM courir le gagnant). Recalibrable sur les donnees 48h. Reversible (VOL_BARRIERS=0).
+set "HYPERSMART_V26_VOL_BARRIERS=1"
+set "HYPERSMART_V26_VOL_REF_RANGE_BPS=30"
+set "HYPERSMART_V26_VOL_FACTOR_MIN=0.5"
+set "HYPERSMART_V26_VOL_FACTOR_MAX=2.5"
+set "HYPERSMART_SLTP_TAKE_PROFIT_BPS=120"
+set "HYPERSMART_SLTP_STOP_LOSS_BPS=60"
+set "HYPERSMART_SLTP_TRAILING_BPS=30"
+set "HYPERSMART_SLTP_TRAILING_ACTIVATION_BPS=45"
 set "HYPERSMART_SLTP_BREAKEVEN_BUFFER_BPS=0"
 set "HYPERSMART_SLTP_STOP_MIN_HOLD_MS=120000"
-set "HYPERSMART_SLTP_CATASTROPHIC_STOP_BPS=180"
+set "HYPERSMART_SLTP_CATASTROPHIC_STOP_BPS=250"
 set "HYPERSMART_ADAPTIVE_PAPER_SIZING=1"
 REM LIQUIDITE (analyse 2026-06-21: 199/256 refus = LIQUIDITY_TOO_LOW alors que signaux FRAIS
 REM 5s + edge POSITIF 21 bps). Pour des positions de ~40 USDT, la recherche (mlmodelpoly: MIN_DEPTH=200
@@ -215,18 +231,4 @@ set "HYPERSMART_SIMULATION_LEVERAGE=5"
 REM LAISSER COURIR (demande Flo): on coupe le quality-guard qui fermait les positions a ~0.15%%
 REM (elles n'atteignaient jamais leur SL/TP 1.2-1.6%%). Desormais SL/TP + sortie du leader gouvernent
 REM -> on capture le VRAI mouvement du marche, pas du bruit. Reversible (=1 pour re-activer).
-set "HYPERSMART_LEGACY_POSITION_QUALITY_GUARD_ENABLED=0"
-REM RESET PROPRE A CHAQUE LANCEMENT (demande utilisateur): equity remise a 1000, compteurs
-REM trades gagnants/perdants et taux de reussite remis a 0, logs de session repartis a neuf
-REM (les anciens sont archives dans _archives). Mettre 0 pour au contraire CONSERVER l'equity.
-REM RESET DES LOGS 2026-06-25: en plus, le dossier logs\ encombre est REMIS A ZERO a chaque
-REM lancement (prepare-simulation-logs --purge-top-level): les gros *.log sont vides (tronques a 0),
-REM les archives lourdes *.zip supprimees, l'ancien dossier mojibake retire. L'INTELLIGENCE DE
-REM L'IA n'est JAMAIS touchee (modele + echantillons d'apprentissage vivent dans runtime\, hors logs\).
-set "HYPERSMART_RESET_ON_LAUNCH=1"
-REM Les anciens modules d'analyse multi-plateforme restent sur disque, non lances.
-REM Les auxiliaires HyperSmart utiles (IA shadow + stream read-only) sont demarres par le script
-REM principal, rattaches a la meme session, et stoppes avec Q.
-
-REM ENTRAINEMENT IA AUTO (V13): demarre en arriere-plan des le lancement, apprend des trades
-REM clotures et met a jour le panneau "Modele IA" (progression: n_trades, Brier, accuracy
+set "HYPERSMART_LEGACY_POSITION_QU
