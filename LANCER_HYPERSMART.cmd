@@ -8,6 +8,10 @@ set "HL_ENABLE_MAINNET_EXECUTION=0"
 set "HL_ENABLE_TESTNET_EXECUTION=0"
 set "HYPERSMART_MODE=SIMULATION_ONLY_UNTIL_MANUAL_REVIEW"
 set "HYPERSMART_V12_SQLITE_PATH=%~dp0runtime\data\hypersmart_v12_artifacts.sqlite3"
+rem ANTI-BLOAT: coupe le stockage brut (payloads L2/leaderboard/fills) qui a fait
+rem gonfler la DB a 29 Go puis crasher. Le PnL/ledger n en depend pas. Mettre a 0
+rem seulement si tu veux le replay brut (avec cap manuel).
+set "HYPERSMART_DISABLE_RAW_STORAGE=1"
 set "HYPERSMART_UI_STATE_DIR=%~dp0runtime\data"
 set "HYPERSMART_POSITIVE_PNL_REQUIRED_FOR_FUTURE_REVIEW=1"
 REM Reglages SELECTIFS Hyperliquid: runtime principal = Hyperliquid read-only + paper local.

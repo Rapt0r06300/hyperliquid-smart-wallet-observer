@@ -138,6 +138,14 @@ def load_settings(config_path: str | Path | None = None) -> Settings:
         require_reduce_only_exits=bool(exec_raw.get("require_reduce_only_exits", True)),
     )
 
+    # ANTI-BLOAT (crash observe: DB 29 Go -> corrompue). Un run long dumpait les
+    # payloads bruts (L2 books, leaderboards, fills) sans cap. HYPERSMART_DISABLE_RAW_STORAGE=1
+    # coupe les 3 stockages bruts d'un coup (le ledger canonique n'en depend pas).
+    if _as_bool(os.getenv("HYPERSMART_DISABLE_RAW_STORAGE"), False):
+        collection_raw["store_raw_events"] = False
+        discovery_raw["store_raw_discovery_payloads"] = False
+        bootstrap_raw["store_raw_source_payloads"] = False
+
     return Settings(
         environment=ExecutionEnvironment(str(environment)),
         database_url=str(database_url),
