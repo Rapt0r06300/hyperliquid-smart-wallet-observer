@@ -186,6 +186,12 @@ Set-HyperSmartDefaultEnv "HYPERSMART_MAX_TOTAL_EXPOSURE_USDT" "400"
 # Read-only / paper-only ; borne dure a 8 connexions (anti-ban) cote code.
 [Environment]::SetEnvironmentVariable("HYPERSMART_FILLS_MULTIPLEX", "1", "Process")
 [Environment]::SetEnvironmentVariable("HYPERSMART_FILLS_MULTIPLEX_CONNECTIONS", "4", "Process")
+# SIZING REEL (Flo, prouve a l'ecran: notional $50 -> PnL -0.12 centimes). Le $50 est la MARGE
+# par position ; x levier 10 = notional $500 -> PnL = 500 x Dprix = DES DOLLARS. Solde 1000 /
+# marge 50 = 20 positions. FORCE (ecrase le 12/40/400 set-if-unset + l'env colle Windows).
+[Environment]::SetEnvironmentVariable("HYPERSMART_MAX_POSITION_USDT", "50", "Process")
+[Environment]::SetEnvironmentVariable("HYPERSMART_MAX_OPEN_POSITIONS", "20", "Process")
+[Environment]::SetEnvironmentVariable("HYPERSMART_MAX_TOTAL_EXPOSURE_USDT", "1000", "Process")
 Set-HyperSmartDefaultEnv "HYPERSMART_SINGLE_WALLET_MIN_EDGE_BPS" "55"
 Set-HyperSmartDefaultEnv "HYPERSMART_TOP_WALLET_SAMPLE_LIMIT" "8000"
 # V25 (2026-07-03): hard halt a 2.50 USDC (=0.25% de 1000) gelait la session

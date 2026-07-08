@@ -952,16 +952,21 @@ def _cap_paper_notional_and_quantity(notional: float, quantity: float, entry_pri
     lev = _env_float("HYPERSMART_SIMULATION_LEVERAGE", 10.0)
     if lev < 5.0:
         lev = 10.0
-    # GRINDER: marge TRES PETITE (~12) pour ouvrir BEAUCOUP de mini-positions (Flo: "400 trop gros").
-    margin_cap = min(abs(_env_float("HYPERSMART_MAX_POSITION_USDT", 40.0)), 12.0)
+    # MODELE REEL (Flo prouve a l'ecran: notional $50 -> PnL -0.12 = centimes). Le $50 est la
+    # MARGE (capital a risque par position), PAS le notional. A 10x: notional = 50 x 10 = 500
+    # -> PnL = 500 x Dprix -> DES DOLLARS, comme un perp reel. Solde 1000 / marge 50 = 20 positions.
+    # (Avant: margin clampe a 12 PUIS notional clampe a 50 -> double bride = centimes garantis.)
+    margin_cap = abs(_env_float("HYPERSMART_MAX_POSITION_USDT", 50.0))
+    if margin_cap < 1.0:
+        margin_cap = 50.0
     clean_notional = max(0.0, float(notional or 0.0))
     clean_quantity = abs(float(quantity or 0.0))
     if margin_cap <= 0 or entry_price <= 0 or clean_notional <= 0:
         return {"notional": clean_notional, "quantity": clean_quantity, "cap_applied": False}
-    margin = min(clean_notional, margin_cap)       # <= 12 -> mini-positions (grinder)
-    lev_notional = min(margin * lev, 50.0)         # PLAFOND DUR $50/position (demande Flo) -> plein de mini-positions
+    margin = margin_cap                            # marge FIXE = notre capital par position ($50), pas la taille derisoire du leader
+    lev_notional = margin * lev                    # notional position = marge x levier (= $500 a 10x) -> PnL en DOLLARS
     lev_quantity = lev_notional / float(entry_price)
-    return {"notional": round(lev_notional, 8), "quantity": round(lev_quantity, 12), "cap_applied": True}
+    return {"notional": round(lev_notional, 8), "quantity": round(lev_quantity, 12), "margin": round(margin, 8), "cap_applied": True}
 
 
 def _paper_order_action(value: object) -> str:
