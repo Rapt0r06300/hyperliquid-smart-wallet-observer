@@ -258,7 +258,7 @@ th{letter-spacing:1.2px}
    <div class="st"><div class="k">Winrate</div><div class="v" id="wr">…</div></div>
    <div class="st"><div class="k">Positions</div><div class="v" id="pos">…</div></div>
    <div class="st"><div class="k">Trades clos</div><div class="v" id="trd">…</div></div>
-   <div class="st"><div class="k">Exposition</div><div class="v" id="expo">…</div></div>
+   <div class="st"><div class="k">Marge · levier x10</div><div class="v" id="expo">…</div></div>
    <div class="st"><div class="k">Profit factor</div><div class="v" id="pf">…</div></div>
  </div>
 
@@ -269,7 +269,7 @@ th{letter-spacing:1.2px}
    <div class="card"><h3>FLUX D'ACTIVITÉ <span class="hint" id="feedhint">live · dérivé du ledger</span></h3>
      <div class="feed" id="feed"></div></div>
    <div class="card"><h3>POSITIONS <span class="hint" id="poslbl"></span></h3>
-     <table><thead><tr><th style="width:26%">coin</th><th style="width:26%">mode</th><th style="width:22%">notl</th><th style="width:26%;text-align:right">pnl</th></tr></thead><tbody id="postb"></tbody></table></div>
+     <table><thead><tr><th style="width:26%">coin</th><th style="width:26%">mode</th><th style="width:22%">marge</th><th style="width:26%;text-align:right">pnl</th></tr></thead><tbody id="postb"></tbody></table></div>
  </div>
 
  <div class="g3">
@@ -356,7 +356,7 @@ function tick(){
     document.getElementById('wr').textContent=n(d.winrate_pct,0)+'%';
     document.getElementById('pos').textContent=(d.open_positions||0);
     document.getElementById('trd').textContent=(d.closed_trades||0);
-    document.getElementById('expo').textContent=n(d.open_exposure_usdt);
+    document.getElementById('expo').textContent=n((d.open_exposure_usdt||0)/10);
     var rp=Number(d.realized_pnl_usdt||0),ps=(d.positions||[]);
     // profit factor approx = gains/pertes réalisés si dispo, sinon —
     var pf=d.paper_ledger&&d.paper_ledger.profit_factor;document.getElementById('pf').textContent=(pf!=null?n(pf,2):(rp>=0?'≥1':'<1'));
@@ -405,7 +405,7 @@ function tick(){
     // positions table
     var tb=document.getElementById('postb');tb.innerHTML='';document.getElementById('poslbl').textContent=ps.length+' ouvertes';
     ps.slice(0,16).forEach(function(p){var g=modeOf(p),pp=Number(p.unrealized_pnl_usdc||p.pnl_usdc||0),notl=Number(p.notional_usdt||p.copied_notional_usdt||0),tr=document.createElement('tr');
-      tr.innerHTML='<td>'+(p.coin||'?')+'</td><td><span class="tag2 '+(g==='SNIPER'?'tg-s':'tg-g')+'">'+g+'</span></td><td>'+n(notl)+'</td><td style="text-align:right;color:'+col(pp)+'">'+(pp>=0?'+':'')+n(pp)+'</td>';tb.appendChild(tr);});
+      tr.innerHTML='<td>'+(p.coin||'?')+'</td><td><span class="tag2 '+(g==='SNIPER'?'tg-s':'tg-g')+'">'+g+'</span></td><td>'+n(notl/10)+'</td><td style="text-align:right;color:'+col(pp)+'">'+(pp>=0?'+':'')+n(pp)+'</td>';tb.appendChild(tr);});
     if(!ps.length)tb.innerHTML='<tr><td colspan="4" style="color:var(--mut2);border:0;padding-top:10px">— aucune position ouverte —</td></tr>';
     // wiring
     var pe=(fus.paper_engine)||{},summ=fus.external_profile_execution_summary||{};
@@ -421,7 +421,7 @@ function deriveEvents(d,ps,npos){
     sel:(d.scanner||{}).leaders_selected,coins:ps.map(function(p){return p.coin}).join(',')};
   if(PREV){
     if(cur.op>PREV.op){var nw=ps.filter(function(p){return PREV.coins.indexOf(p.coin)<0});nw.slice(0,3).forEach(function(p){
-      push('ev-open','OPEN',(p.coin||'?')+' '+modeOf(p)+' · notl '+n(Number(p.notional_usdt||p.copied_notional_usdt||0)));});}
+      push('ev-open','OPEN',(p.coin||'?')+' '+modeOf(p)+' · marge '+n(Number(p.notional_usdt||p.copied_notional_usdt||0)/10));});}
     if(cur.ct>PREV.ct){push('ev-close','CLOSE',(cur.ct-PREV.ct)+' trade(s) clos · PnL net '+(cur.pnl>=0?'+':'')+n(cur.pnl));}
     if((cur.pnl>=0)!==(PREV.pnl>=0)){push('ev-warn','PNL',(cur.pnl>=0?'repasse POSITIF ':'bascule NÉGATIF ')+n(cur.pnl));}
     if(cur.sel!=null&&cur.sel!==PREV.sel){push('ev-scan','SCAN',cur.sel+' leaders retenus · '+npos+' pos actives');}
@@ -452,7 +452,7 @@ try{document.querySelectorAll('#pnl,#eq,.st .v').forEach(function(el){
 // ── Ticker défilant alimenté par les KPIs + opportunités ──
 function buildTicker(){var t=document.getElementById('tick');if(!t)return;
  function g(id){var e=document.getElementById(id);return e?e.textContent.trim():'';}
- var seg='<b>HYPERSMART</b><span class="s">//</span>PnL '+g('pnl')+'<span class="s">·</span>equity '+g('eq')+'<span class="s">·</span>WR '+g('wr')+'<span class="s">·</span>pos '+g('pos')+'<span class="s">·</span>expo '+g('expo')+'<span class="s">·</span>';
+ var seg='<b>HYPERSMART</b><span class="s">//</span>PnL '+g('pnl')+'<span class="s">·</span>equity '+g('eq')+'<span class="s">·</span>WR '+g('wr')+'<span class="s">·</span>pos '+g('pos')+'<span class="s">·</span>marge '+g('expo')+'<span class="s">·</span>';
  var rows=document.querySelectorAll('#opptb tr');if(rows.length){seg+='TOP<span class="s">»</span>';rows.forEach(function(r){var td=r.querySelectorAll('td');if(td.length>=5){seg+='<b>'+(td[1].textContent||'').trim().split(' ')[0]+'</b> '+(td[3].textContent||'').trim()+'<span class="s">·</span>';}});}
  seg+='READ-ONLY PAPER<span class="s">·</span>0 ORDRE REEL<span class="s">·</span>';
  t.innerHTML=seg+seg;}
