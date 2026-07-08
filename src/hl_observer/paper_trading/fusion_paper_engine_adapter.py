@@ -54,7 +54,9 @@ def run_copy_votes_through_paper_engine(
     max_position_usdt = _env_float("HYPERSMART_MAX_POSITION_USDT", 40.0)
     max_total_exposure_usdt = _env_float("HYPERSMART_MAX_TOTAL_EXPOSURE_USDT", 400.0)
     max_open_positions = _env_int("HYPERSMART_MAX_OPEN_POSITIONS", 12)
-    leverage = _env_float("HYPERSMART_SIMULATION_LEVERAGE", 5.0)  # defaut 5x (perp realiste; demande Flo)
+    leverage = _env_float("HYPERSMART_SIMULATION_LEVERAGE", 10.0)
+    if leverage <= 1.0:  # un "1" colle dans l'env Windows sabotait le levier -> on l'IGNORE
+        leverage = 10.0  # defaut 10x force (demande Flo "pas des centimes"); notional = marge x 10
     engine = PaperEngine(
         config=PaperEngineConfig(
             starting_cash_usdt=float(starting_cash_usdt),
@@ -150,7 +152,9 @@ def run_distilled_opportunities_through_paper_engine(
     max_position_usdt = _env_float("HYPERSMART_MAX_POSITION_USDT", 40.0)
     max_total_exposure_usdt = _env_float("HYPERSMART_MAX_TOTAL_EXPOSURE_USDT", 400.0)
     max_open_positions = _env_int("HYPERSMART_MAX_OPEN_POSITIONS", 12)
-    leverage = _env_float("HYPERSMART_SIMULATION_LEVERAGE", 5.0)  # defaut 5x (perp realiste; demande Flo)
+    leverage = _env_float("HYPERSMART_SIMULATION_LEVERAGE", 10.0)
+    if leverage <= 1.0:  # un "1" colle dans l'env Windows sabotait le levier -> on l'IGNORE
+        leverage = 10.0  # defaut 10x force (demande Flo "pas des centimes"); notional = marge x 10
     max_entries = max(1, min(_env_int("HYPERSMART_DISTILLED_MAX_PAPER_ENTRIES", 1), 5))
     engine = PaperEngine(
         config=PaperEngineConfig(
