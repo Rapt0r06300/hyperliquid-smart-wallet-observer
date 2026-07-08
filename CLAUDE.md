@@ -3,6 +3,15 @@
 ## Mission
 HyperSmart Observer observe **Hyperliquid** en lecture seule, score les wallets smart-money et le marché, et **simule des décisions paper en local**. Il ne doit **jamais** envoyer d'ordre réel. But : produire un PnL paper réaliste, proche de ce qu'on aurait eu en vrai sur Hyperliquid — sans jamais le maquiller ni le promettre.
 
+## 📍 État & feuille de route (2026-07-08)
+Document **maître** (état actuel, méthode de travail, architecture, config, commandes, roadmap) :
+**`docs/ETAT_ET_FEUILLE_DE_ROUTE.md`**. Objectif condensé : `OBJECTIF.md`. Recherche de scénarios
+replay (après les 48h) : `docs/REPLAY_SCENARIO_SEARCH.md`. Config détaillée : `docs/CONFIG_FLAGS.md`.
+Résumé express : sizing = **marge $50 × levier 10 = notional $500** (PnL en dollars, plus de centimes) ;
+**firehose userFills multiplexé (V27)** pour un max de signaux frais ; **run 48h en cours** qui
+enregistre le replay (candidats+marks, avec coin) ; testnet verrouillé, mainnet lecture seule.
+Doc **consolidée** le 2026-07-08 : les anciens .md obsolètes ont été supprimés (récupérables via git).
+
 ## Venue & Runtime (IMPORTANT — ne pas confondre)
 - **Venue = Hyperliquid uniquement.** Simulation paper locale, read-only.
 - **Runtime ACTIF de la simulation = `src/hl_observer`.** Lancé par `LANCER_HYPERSMART.cmd` → `tools/start_hypersmart_simulation.ps1` → `python -m hl_observer ui` (port 8794, `PYTHONPATH=src`).

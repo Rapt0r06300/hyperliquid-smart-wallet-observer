@@ -45,3 +45,11 @@ verrouillé par configuration, fake adapter et tests de refus.
 - `HYPERSMART_V12_GATE_AUTHORITATIVE`, `HYPERSMART_V13_MODEL_AUTHORITATIVE` : gates contraignants
   (ne peuvent que RÉDUIRE/filtrer les trades, jamais en créer).
 - `HYPERSMART_V13_OLLAMA_ENABLED` : explainer local (repli règles si absent).
+
+## Où trouver le reste (2026-07-08)
+- **État actuel, méthode de travail, architecture, config, commandes, feuille de route :**
+  **`docs/ETAT_ET_FEUILLE_DE_ROUTE.md`** (document maître, à jour).
+- **Objectif condensé :** `OBJECTIF.md` (racine).
+- **Règles complètes de l'agent :** `CLAUDE.md` (racine, source de vérité).
+- **Replay / recherche de scénarios (après les 48h) :** `docs/REPLAY_SCENARIO_SEARCH.md`.
+- **Config détaillée :** `docs/CONFIG_FLAGS.md`.
