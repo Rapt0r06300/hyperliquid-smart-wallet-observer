@@ -279,6 +279,65 @@ try {
 Write-LoopLog "Simulation poll loop started. root=$Root interval=$IntervalSeconds pool=$MaxLeaders leadersPerPoll=$LeadersPerPoll maxRuns=$MaxRuns maxLiveFillAgeMs=$UserFillsMaxLiveAgeMs"
 Write-EngineStatus "starting" "Poller simulation Hyperliquid en demarrage."
 
+# ===== T44: MODE PERSISTANT (defaut) =====
+# Un SEUL process python chaud execute tout le cycle (imports chauds, ecoutes WS en
+# parallele) au lieu de ~14 demarrages a froid par poll. Mesure avant/apres au log
+# "poll N durations". Mettre HYPERSMART_PERSISTENT_LOOP=0 pour revenir a la boucle
+# legacy ci-dessous (conservee integralement, rien de supprime).
+$persistentLoop = "1"
+if ($env:HYPERSMART_PERSISTENT_LOOP) { $persistentLoop = "$env:HYPERSMART_PERSISTENT_LOOP" }
+if ($persistentLoop -ne "0") {
+    $watchdogStaleSeconds = 600
+    if ($env:HYPERSMART_PERSISTENT_WATCHDOG_STALE_SECONDS) { try { $watchdogStaleSeconds = [Math]::Max(120, [int]$env:HYPERSMART_PERSISTENT_WATCHDOG_STALE_SECONDS) } catch { } }
+    $stopFilePath = Join-Path $runtimeDataDir "hypersmart_runtime.stop"
+    if ($env:HYPERSMART_RUNTIME_STOP_FILE) { $stopFilePath = $env:HYPERSMART_RUNTIME_STOP_FILE }
+    $persistentOut = Join-Path $logDir "hypersmart_poller_persistent.out.log"
+    $persistentErr = Join-Path $logDir "hypersmart_poller_persistent.err.log"
+    Write-LoopLog "Mode PERSISTANT T44 actif: un process python chaud pour tout le poll. Watchdog heartbeat=${watchdogStaleSeconds}s. (HYPERSMART_PERSISTENT_LOOP=0 => ancienne boucle)"
+    while (-not (Test-Path -LiteralPath $stopFilePath)) {
+        $runnerArgs = "-u -m hl_observer.runtime.persistent_poll_runner --root `"$Root`" --interval-seconds $IntervalSeconds --max-leaders $MaxLeaders --leaders-per-poll $LeadersPerPoll --backfill-days $BackfillDays --fresh-window-minutes $FreshWindowMinutes --max-pages $MaxPages --public-trade-coins $PublicTradeCoins --public-trade-max-coins $PublicTradeMaxCoins --public-trade-scan-seconds $PublicTradeScanSeconds --public-trade-max-wallets $PublicTradeMaxWallets --public-trade-scan-every-polls $PublicTradeScanEveryPolls --user-fills-max-live-age-ms $UserFillsMaxLiveAgeMs --max-runs $MaxRuns --plans-every-polls $PlansEveryPolls --diagnostics-every-polls $DiagnosticsEveryPolls"
+        $rp = $null
+        try {
+            $rp = Start-Process -NoNewWindow -PassThru -FilePath "python" -ArgumentList $runnerArgs -WorkingDirectory $Root -RedirectStandardOutput $persistentOut -RedirectStandardError $persistentErr
+        } catch {
+            Write-LoopLog "ERREUR: demarrage runner persistant impossible ($($_.Exception.Message)); nouvelle tentative dans 10s."
+            Start-Sleep -Seconds 10
+            continue
+        }
+        while ($rp -and -not $rp.HasExited) {
+            Start-Sleep -Seconds 15
+            if (Test-Path -LiteralPath $stopFilePath) { break }
+            try {
+                $st = Get-Content -LiteralPath $engineStatusPath -Raw -Encoding UTF8 | ConvertFrom-Json
+                $ageMs = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds() - [long]$st.updated_at_ms
+                if ($ageMs -gt ($watchdogStaleSeconds * 1000)) {
+                    Write-LoopLog "WATCHDOG: heartbeat engine status vieux de $([int]($ageMs / 1000))s (> ${watchdogStaleSeconds}s) -> kill du runner persistant + relance."
+                    try { $rp.Kill() } catch { }
+                    break
+                }
+            } catch { }
+        }
+        if ($rp -and -not $rp.HasExited) {
+            try { $rp.Kill() } catch { }
+        }
+        try { $rp.WaitForExit(10000) | Out-Null } catch { }
+        $rc = $null
+        try { $rc = $rp.ExitCode } catch { $rc = $null }
+        if (Test-Path -LiteralPath $stopFilePath) { break }
+        if ($rc -eq 3) {
+            Write-LoopLog "Runner persistant: rotation planifiee (exit 3), relance immediate."
+        } else {
+            Write-LoopLog "Runner persistant sorti (code $rc), relance dans 5s."
+            Start-Sleep -Seconds 5
+        }
+    }
+    Write-LoopLog "Simulation poll loop finished (mode persistant)."
+    Write-EngineStatus "finished" "Poller simulation termine."
+    exit 0
+}
+# ===== MODE LEGACY (HYPERSMART_PERSISTENT_LOOP=0): boucle historique inchangee =====
+
+
 for ($i = 1; $i -le $MaxRuns; $i++) {
     $script:CurrentPoll = $i
     $safeLeadersPerPoll = [Math]::Max(1, [Math]::Min($LeadersPerPoll, [Math]::Min($MaxLeaders, 10)))
