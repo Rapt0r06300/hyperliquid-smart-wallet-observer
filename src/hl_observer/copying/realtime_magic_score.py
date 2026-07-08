@@ -194,7 +194,10 @@ def score_realtime_copy_candidate(
 
         _km = _klb.multiplier(getattr(inputs, "leader_wallet", "") or "")
         if _km != 1.0 and simulated_notional > 0:
-            simulated_notional = min(cfg.max_position_notional_usdt, max(0.0, simulated_notional * _km))
+            # cap au max de position LEVERAGE (sinon Kelly annulait le levier -> retour aux centimes)
+            import os as _os_k
+            _lev_k = max(1.0, float(_os_k.environ.get("HYPERSMART_SIMULATION_LEVERAGE", "1") or 1.0))
+            simulated_notional = min(cfg.max_position_notional_usdt * _lev_k, max(0.0, simulated_notional * _km))
             warnings.append("KELLY_LEADER_MULT_%.2f" % _km)
     except Exception:
         pass

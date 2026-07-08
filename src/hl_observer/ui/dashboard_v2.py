@@ -404,7 +404,7 @@ function tick(){
     else{R.innerHTML='<span style="color:var(--mut2)">— aucun refus enregistré ce tick —</span>';}
     // positions table
     var tb=document.getElementById('postb');tb.innerHTML='';document.getElementById('poslbl').textContent=ps.length+' ouvertes';
-    ps.slice(0,8).forEach(function(p){var g=modeOf(p),pp=Number(p.unrealized_pnl_usdc||p.pnl_usdc||0),notl=Number(p.notional_usdt||p.copied_notional_usdt||0),tr=document.createElement('tr');
+    ps.slice(0,16).forEach(function(p){var g=modeOf(p),pp=Number(p.unrealized_pnl_usdc||p.pnl_usdc||0),notl=Number(p.notional_usdt||p.copied_notional_usdt||0),tr=document.createElement('tr');
       tr.innerHTML='<td>'+(p.coin||'?')+'</td><td><span class="tag2 '+(g==='SNIPER'?'tg-s':'tg-g')+'">'+g+'</span></td><td>'+n(notl)+'</td><td style="text-align:right;color:'+col(pp)+'">'+(pp>=0?'+':'')+n(pp)+'</td>';tb.appendChild(tr);});
     if(!ps.length)tb.innerHTML='<tr><td colspan="4" style="color:var(--mut2);border:0;padding-top:10px">— aucune position ouverte —</td></tr>';
     // wiring
