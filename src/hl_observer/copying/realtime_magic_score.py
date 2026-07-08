@@ -289,10 +289,18 @@ def capped_simulated_notional(
     edge_fraction_boost = min(0.02, max(0.0, edge_remaining_bps) / 2_000.0)
     consensus_boost = 0.01 if inputs.consensus_wallets >= 2 else 0.0
     risk_fraction = min(cfg.max_risk_fraction, cfg.base_risk_fraction + edge_fraction_boost + consensus_boost)
-    target = cfg.starting_equity_usdt * risk_fraction
-    leader_cap = inputs.leader_notional_usdt if inputs.leader_notional_usdt > 0 else cfg.max_position_notional_usdt
-    notional = min(cfg.max_position_notional_usdt, max(cfg.min_position_notional_usdt, target), leader_cap)
-    remaining_exposure = max(0.0, cfg.max_total_exposure_usdt - max(0.0, inputs.current_open_exposure_usdt))
+    # LEVIER (demande Flo "pas des centimes"): la copie sizait le NOTIONAL = marge (~$40) sans
+    # jamais appliquer le levier -> PnL en centimes. Un vrai copy-trader leverage copie la
+    # DIRECTION du leader mais dimensionne sur SON compte a SON levier: notional = marge x levier.
+    # On met TOUT a l'echelle du levier (position, leader, exposition) -> meme nb de positions,
+    # meme marge a risque, mais notional x levier => PnL x levier (honnete: notional x variation).
+    import os as _os
+    lev = max(1.0, float(_os.environ.get("HYPERSMART_SIMULATION_LEVERAGE", "1") or 1.0))
+    target = cfg.starting_equity_usdt * risk_fraction * lev
+    max_pos = cfg.max_position_notional_usdt * lev
+    leader_cap = (inputs.leader_notional_usdt * lev) if inputs.leader_notional_usdt > 0 else max_pos
+    notional = min(max_pos, max(cfg.min_position_notional_usdt, target), leader_cap)
+    remaining_exposure = max(0.0, cfg.max_total_exposure_usdt * lev - max(0.0, inputs.current_open_exposure_usdt))
     if remaining_exposure <= 0:
         return 0.0, ["MAX_TOTAL_EXPOSURE_CAP_ACTIVE"]
     if notional > remaining_exposure:
@@ -300,7 +308,7 @@ def capped_simulated_notional(
         warnings.append("POSITION_SIZE_CAPPED_BY_TOTAL_EXPOSURE")
     if notional < cfg.min_position_notional_usdt:
         return 0.0, [*warnings, "POSITION_SIZE_BELOW_MINIMUM"]
-    if inputs.leader_notional_usdt > cfg.max_position_notional_usdt:
+    if inputs.leader_notional_usdt * lev > max_pos:
         warnings.append("POSITION_SIZE_CAPPED_VS_LEADER")
     return notional, warnings
 
