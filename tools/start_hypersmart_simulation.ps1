@@ -138,7 +138,7 @@ Set-HyperSmartDefaultEnv "HYPERSMART_V9_PIPELINE_AUTHORITATIVE" "1"
 Set-HyperSmartDefaultEnv "HYPERSMART_SIMULATION_ALLOW_ADD_AS_ENTRY" "0"
 # Historical calibration marker retained for audit tests:
 # Set-HyperSmartDefaultEnv "HYPERSMART_SIMULATION_MIN_EDGE_BPS" "22"
-Set-HyperSmartDefaultEnv "HYPERSMART_SIMULATION_MIN_EDGE_BPS" "28"
+Set-HyperSmartDefaultEnv "HYPERSMART_SIMULATION_MIN_EDGE_BPS" "40"
 Set-HyperSmartDefaultEnv "HYPERSMART_SIMULATION_MIN_LIQUIDITY_SCORE" "0.38"
 Set-HyperSmartDefaultEnv "HYPERSMART_SIMULATION_MAX_COPY_DEGRADATION_BPS" "28"
 # Historical conservative marker retained for launcher regression tests:

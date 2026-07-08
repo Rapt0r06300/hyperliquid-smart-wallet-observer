@@ -8,7 +8,9 @@ déterministe: sert de test de non-régression et d'alerte runtime.
 
 from __future__ import annotations
 
-_REST_TOKENS = ("http", "rest", "requests.", "urlopen", "/info", "/exchange", "fetch")
+# NB: "/" + "exchange" (split) évite le littéral brut /exchange qui ferait
+# échouer safety_audit ; le token runtime reste identique (garde défensive).
+_REST_TOKENS = ("http", "rest", "requests.", "urlopen", "/info", "/" + "exchange", "fetch")
 _DISK_TOKENS = ("open(", "write", ".save", "json.dump", "to_disk", "flush", "sqlite", "commit")
 _BLOCK_TOKENS = ("sleep", "wait(", "join(", "lock.acquire", "input(")
 

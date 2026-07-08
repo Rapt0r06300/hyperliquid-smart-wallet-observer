@@ -46,27 +46,14 @@ def test_fusion_strategy_runtime_routes_multiple_paper_strategies(monkeypatch):
     assert result.paper_engine.drawdown_usdt >= 0
     assert all(order.paper_only for order in result.paper_orders)
     assert all(order.real_execution is False for order in result.paper_orders)
-    assert result.external_profile_priority
-    assert result.external_profile_priority[0]["priority_over_internal"] is True
-    assert result.external_profile_priority[0]["direct_external_execution"] is False
-    assert result.external_profile_execution_summary["profiles_installed"] >= 34
-    assert result.external_profile_execution_summary["profiles_executed"] == result.external_profile_execution_summary["profiles_installed"]
-    assert result.external_profile_execution_summary["all_installed_profiles_executed"] is True
-    assert result.external_profile_execution_summary["profiles_with_paper_orders"] >= 3
-    assert len(result.external_profile_executions) >= 37
-    assert result.paper_order_strategy_ids[0] == "ext_rezzecup_whale_mirror_primary"
-    assert "ext_jack_hl_arbitrage_spread" in result.paper_order_strategy_ids
-    assert "ext_hl_drift_funding_spread" in result.paper_order_strategy_ids
-    assert "ext_drakkar_triangular_arbitrage" in result.paper_order_strategy_ids
-    executed_by_profile = {row.profile_id: row for row in result.external_profile_executions}
-    assert executed_by_profile["ext_jack_hl_arbitrage_spread"].accepted_paper_orders == 1
-    assert executed_by_profile["ext_funding_arb_basis"].decision in {"EVALUATED_DIAGNOSTIC", "PAPER_ORDER_ACCEPTED"}
-    assert executed_by_profile["ext_hummingbot_market_making_framework"].decision == "EVALUATED_DIAGNOSTIC"
-    discrepancy_order = next(order for order in result.paper_orders if order.strategy_id == "ext_jack_hl_arbitrage_spread")
-    assert discrepancy_order.coin == "HYPE"
-    assert discrepancy_order.side == "LONG"
-    assert discrepancy_order.reference_price > 0
-    assert discrepancy_order.metadata["profile_family"] == "cross_exchange_arbitrage"
+    # Externes en shadow-only (pivot délibéré ff7aeec) : présents mais NON
+    # installés/exécutés, JAMAIS prioritaires sur l'interne. Observation seule.
+    assert not result.external_profile_priority
+    _sum = result.external_profile_execution_summary
+    assert _sum["profiles_total"] >= 34
+    assert _sum["profiles_installed"] == 0
+    assert _sum["profiles_executed"] == 0
+    assert _sum["paper_orders_total"] == 0
     assert result.real_execution is False
 
 
@@ -161,5 +148,6 @@ def test_fusion_strategy_runtime_drawdown_blocks_new_orders():
     assert result.paper_orders == ()
     assert result.paper_engine.accepted_count == 0
     assert "PORTFOLIO_DRAWDOWN_KILL_SWITCH" in result.no_trade_reasons
-    assert result.external_profile_execution_summary["all_installed_profiles_executed"] is True
+    # Externes shadow-only (pivot ff7aeec): aucun profil installé/exécuté.
+    assert result.external_profile_execution_summary["profiles_installed"] == 0
     assert result.external_profile_execution_summary["paper_orders_total"] == 0

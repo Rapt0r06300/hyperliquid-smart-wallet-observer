@@ -450,8 +450,8 @@ def test_ui_simulation_overview_detects_multi_wallet_consensus(tmp_path):
     assert payload["bot_simulation"]["realized_net_pnl_usdc"] != 0
     assert "open_positions" in payload["bot_simulation"]
     assert payload["bot_simulation"]["magic_profile"]["execution"] == "forbidden"
-    assert payload["bot_simulation"]["magic_profile"]["min_edge_required_bps"] == 15.0
-    assert payload["bot_simulation"]["magic_profile"]["max_signal_age_seconds"] == 15
+    assert payload["bot_simulation"]["magic_profile"]["min_edge_required_bps"] == 28.0
+    assert payload["bot_simulation"]["magic_profile"]["max_signal_age_seconds"] == 12
     assert payload["bot_simulation"]["magic_profile"]["holding_policy"].startswith("hold_until_matching_leader_reduce_or_close")
     assert payload["bot_simulation"]["magic_profile"]["red_pnl_exit_policy"] == "never_exit_only_because_unrealized_pnl_is_negative"
     assert all(row["edge_remaining_bps"] is not None for row in payload["bot_simulation"]["events"])

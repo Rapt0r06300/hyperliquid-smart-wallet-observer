@@ -98,9 +98,9 @@ def test_start_script_min_edge_bps_guard():
     ps1 = Path("tools/start_hypersmart_simulation.ps1").read_text(encoding="utf-8")
     cmd = Path("LANCER_HYPERSMART.cmd").read_text(encoding="utf-8")
 
-    assert 'Set-HyperSmartDefaultEnv "HYPERSMART_SIMULATION_MIN_EDGE_BPS" "28"' in ps1
+    assert 'Set-HyperSmartDefaultEnv "HYPERSMART_SIMULATION_MIN_EDGE_BPS" "40"' in ps1
     assert 'Set-HyperSmartDefaultEnv "HYPERSMART_SINGLE_WALLET_MIN_EDGE_BPS" "55"' in ps1
-    assert "HYPERSMART_SIMULATION_MIN_EDGE_BPS=28" in cmd
+    assert "HYPERSMART_SIMULATION_MIN_EDGE_BPS=40" in cmd
 
 
 def test_agent_safe_manifest_readonly_only():

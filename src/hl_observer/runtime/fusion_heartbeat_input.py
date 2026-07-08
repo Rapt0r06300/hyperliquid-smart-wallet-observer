@@ -568,6 +568,16 @@ def _build_funding_rows(coins) -> list:
     (le poller HYPERSMART_V26_FUNDING_POLLER doit tourner pour remplir le cache).
     Le detecteur applique lui-meme son seuil d'historique (anti-spike).
     """
+    # AUDIT 2026-07-08 — TROU CRITIQUE corrigé: le poller n'avait AUCUN point de
+    # démarrage sur le chemin live (son seul appel était derrière un autre flag
+    # non activé). Sans ça: cache vide -> funding_rows=[] -> funding-arb ne trade
+    # JAMAIS. On le démarre ici (idempotent, no-op si HYPERSMART_V26_FUNDING_POLLER
+    # n'est pas actif). Le thread daemon remplit le cache pour les heartbeats suivants.
+    try:
+        from hl_observer.funding.funding_poller import ensure_started as _ensure_funding_poller
+        _ensure_funding_poller(None)
+    except Exception:
+        pass
     try:
         from hl_observer.funding.funding_runtime_cache import recent_rates
     except Exception:

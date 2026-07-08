@@ -26,3 +26,20 @@ def test_build_funding_rows_reads_cache():
 def test_empty_cache_returns_empty_honestly():
     cache._store.clear()
     assert _build_funding_rows({"HYPE"}) == []                # vide = état honnête, jamais inventé
+
+
+def test_heartbeat_starts_funding_poller(monkeypatch):
+    # AUDIT 2026-07-08 — régression du trou critique: le heartbeat DOIT démarrer
+    # le poller à chaque passage (sinon le cache reste vide et funding-arb muet).
+    import hl_observer.funding.funding_poller as poller
+
+    calls = {"n": 0}
+
+    def _spy(env=None):
+        calls["n"] += 1
+        return True
+
+    monkeypatch.setattr(poller, "ensure_started", _spy)
+    cache._store.clear()
+    _build_funding_rows({"HYPE"})
+    assert calls["n"] == 1                                     # poller démarré par le heartbeat

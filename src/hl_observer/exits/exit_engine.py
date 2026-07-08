@@ -79,4 +79,109 @@ def decide_exit(
     return ExitDecision("HOLD", 0.0, "HOLD")
 
 
-__all__ = ["ExitDecision", "decide_exit"]
+# ─────────────────────────────────────────────────────────────────────────────
+# Compat rétro pour les modules legacy `copying/` (viral_bot_engine,
+# pipeline_integrator). Le scaffold initial exposait `ExitPlan` +
+# `build_default_exit_plan` ici ; ces orphelins importaient EN PLUS
+# `ExitReason`, `select_exit_plan`, `evaluate_exit` (jamais définis → import
+# cassé dès l'origine). On restaure les deux premiers (régression de réécriture)
+# et on complète la surface minimale pour que le paquet importe à 100 %.
+# NOTE: `copying/` n'est PAS câblé au runtime actif (src/hl_observer/edge,
+# paper_trading, signals). Aucune activation en dur ; logique déterministe.
+# ─────────────────────────────────────────────────────────────────────────────
+from enum import Enum
+
+from pydantic import BaseModel
+
+
+class ExitReason(str, Enum):
+    HARD_STOP = "HARD_STOP"
+    PARTIAL_TP = "PARTIAL_TP"
+    TRAILING_STOP = "TRAILING_STOP"
+    MAX_HOLD = "MAX_HOLD"
+    LEADER_REDUCE = "LEADER_REDUCE"
+    KILL_SWITCH = "KILL_SWITCH"
+    HOLD = "HOLD"
+
+
+class ExitPlan(BaseModel):
+    id: str
+    hard_stop_bps: float
+    partial_take_profit_bps: float
+    trailing_stop_bps: float
+    max_hold_ms: int
+    leader_reduce_exit: bool = True
+    kill_switch_exit: bool = True
+
+
+def build_default_exit_plan(signal_id: str) -> ExitPlan:
+    return ExitPlan(
+        id=f"exit-{signal_id}",
+        hard_stop_bps=25,
+        partial_take_profit_bps=35,
+        trailing_stop_bps=18,
+        max_hold_ms=3_600_000,
+    )
+
+
+def select_exit_plan(
+    signal_id: str,
+    *,
+    edge_remaining_bps: float = 0.0,
+    consensus_wallets: int = 0,
+    leader_score: float = 0.0,
+) -> ExitPlan:
+    """Plan d'exit adaptatif (legacy copying/): plus d'edge restant et de
+    consensus → stop plus large et hold plus long ; sinon plan par défaut serré.
+    Déterministe, borné, aucune I/O."""
+    plan = build_default_exit_plan(signal_id)
+    edge = max(0.0, float(edge_remaining_bps))
+    conf = max(0.0, float(consensus_wallets)) + max(0.0, float(leader_score))
+    hard = min(60.0, plan.hard_stop_bps + edge * 0.25)
+    tp = min(90.0, plan.partial_take_profit_bps + edge * 0.5)
+    trail = min(45.0, plan.trailing_stop_bps + edge * 0.15)
+    hold = plan.max_hold_ms + int(min(4, conf) * 600_000)
+    return ExitPlan(
+        id=plan.id,
+        hard_stop_bps=hard,
+        partial_take_profit_bps=tp,
+        trailing_stop_bps=trail,
+        max_hold_ms=hold,
+    )
+
+
+def evaluate_exit(
+    plan: ExitPlan,
+    *,
+    pnl_bps: float,
+    peak_pnl_bps: float = 0.0,
+    age_ms: int = 0,
+    leader_reduced: bool = False,
+    kill_switch: bool = False,
+) -> "ExitReason | None":
+    """Évalue un ExitPlan contre l'état courant → ExitReason ou None (hold).
+    Legacy copying/ ; logique pure et bornée."""
+    if kill_switch and plan.kill_switch_exit:
+        return ExitReason.KILL_SWITCH
+    if leader_reduced and plan.leader_reduce_exit:
+        return ExitReason.LEADER_REDUCE
+    if pnl_bps <= -abs(plan.hard_stop_bps):
+        return ExitReason.HARD_STOP
+    if age_ms >= plan.max_hold_ms:
+        return ExitReason.MAX_HOLD
+    if peak_pnl_bps >= plan.partial_take_profit_bps and (peak_pnl_bps - pnl_bps) >= plan.trailing_stop_bps:
+        return ExitReason.TRAILING_STOP
+    if pnl_bps >= plan.partial_take_profit_bps:
+        return ExitReason.PARTIAL_TP
+    return None
+
+
+__all__ = [
+    "ExitDecision",
+    "decide_exit",
+    "ExitPlan",
+    "ExitReason",
+    "build_default_exit_plan",
+    "select_exit_plan",
+    "evaluate_exit",
+]

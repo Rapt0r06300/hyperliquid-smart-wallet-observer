@@ -117,10 +117,13 @@ def test_copy_signal_detector_uses_v9_simulation_defaults_without_env(monkeypatc
     )
 
     assert round(accepted_with_v9_defaults.signals[0].edge_remaining_bps, 6) == 15.0
-    assert accepted_with_v9_defaults.signals[0].decision in {
-        SignalDecision.PAPER_TRADE,
-        SignalDecision.PAPER_CANDIDATE,
-    }
+    # Durcissement délibéré (snapshot 5e49646): DEFAULT_SIMULATION_MIN_EDGE_BPS
+    # relevé à 28 (plancher effectif = min(settings=25, 28) = 25 bps sans env).
+    # Un edge net de 15 bps est donc désormais CORRECTEMENT refusé.
+    assert (
+        accepted_with_v9_defaults.signals[0].decision
+        == SignalDecision.REJECT_EDGE_TOO_SMALL
+    )
 
 
 def test_copy_signal_detector_uses_live_simulation_age_window_override(monkeypatch):
