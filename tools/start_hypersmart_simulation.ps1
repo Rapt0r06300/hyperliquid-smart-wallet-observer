@@ -93,13 +93,25 @@ Set-HyperSmartDefaultEnv "HYPERSMART_SLTP_ENABLED" "1"
 # trailing 35 bps coupait les gains (gain moyen 0.02 vs perte moyenne 0.05).
 # Retour au profil prouve: sorties par replay du leader + quality guard;
 # SL/TP purement catastrophiques, jamais scalping. Toujours au vrai mark.
-Set-HyperSmartDefaultEnv "HYPERSMART_SLTP_TAKE_PROFIT_BPS" "160"
-Set-HyperSmartDefaultEnv "HYPERSMART_SLTP_STOP_LOSS_BPS" "120"
-Set-HyperSmartDefaultEnv "HYPERSMART_SLTP_TRAILING_BPS" "0"
-Set-HyperSmartDefaultEnv "HYPERSMART_SLTP_TRAILING_ACTIVATION_BPS" "0"
+# 2026-07-08 (demande Flo "reproduire les methodes gagnantes + maths"): barrieres
+# CALIBREES A LA VOLATILITE (triple-barrier hummingbot). Le moteur multiplie ces bps de
+# BASE par clamp(range_coin/ref, 0.5, 2.5) -> ETH SL~30bps, KAITO~150bps. ref=30 = mediane
+# empirique (barrier_calibration.py sur marks reels). SL 60/TP 120 = R:R 2:1, breakeven
+# ~40% WR. Follow-leader reste la sortie PRIMAIRE; ces barrieres = filet + trailing.
+# NB: ces defauts ps1 sont AUTORITAIRES (le python est lance ici); ils ECRASAIENT les
+# valeurs du .cmd (Set...DefaultEnv ne pose que si non-defini) -> c'etait la cause du
+# "PnL en centimes / SL trop serre". Alignes desormais sur la calibration.
+Set-HyperSmartDefaultEnv "HYPERSMART_V26_VOL_BARRIERS" "1"
+Set-HyperSmartDefaultEnv "HYPERSMART_V26_VOL_REF_RANGE_BPS" "30"
+Set-HyperSmartDefaultEnv "HYPERSMART_V26_VOL_FACTOR_MIN" "0.5"
+Set-HyperSmartDefaultEnv "HYPERSMART_V26_VOL_FACTOR_MAX" "2.5"
+Set-HyperSmartDefaultEnv "HYPERSMART_SLTP_TAKE_PROFIT_BPS" "120"
+Set-HyperSmartDefaultEnv "HYPERSMART_SLTP_STOP_LOSS_BPS" "60"
+Set-HyperSmartDefaultEnv "HYPERSMART_SLTP_TRAILING_BPS" "30"
+Set-HyperSmartDefaultEnv "HYPERSMART_SLTP_TRAILING_ACTIVATION_BPS" "45"
 Set-HyperSmartDefaultEnv "HYPERSMART_SLTP_BREAKEVEN_BUFFER_BPS" "0"
 Set-HyperSmartDefaultEnv "HYPERSMART_SLTP_STOP_MIN_HOLD_MS" "120000"
-Set-HyperSmartDefaultEnv "HYPERSMART_SLTP_CATASTROPHIC_STOP_BPS" "180"
+Set-HyperSmartDefaultEnv "HYPERSMART_SLTP_CATASTROPHIC_STOP_BPS" "250"
 Set-HyperSmartDefaultEnv "HYPERSMART_ADAPTIVE_PAPER_SIZING" "1"
 Set-HyperSmartDefaultEnv "HYPERSMART_POSITIVE_PNL_REQUIRED_FOR_FUTURE_REVIEW" "1"
 Set-HyperSmartDefaultEnv "HYPERSMART_SIMULATION_INTERVAL_SECONDS" "$IntervalSeconds"
@@ -127,7 +139,10 @@ Set-HyperSmartDefaultEnv "HYPERSMART_SESSION_LOSS_EDGE_BONUS_BPS" "20"
 Set-HyperSmartDefaultEnv "HYPERSMART_DIRECT_COPY_RECOVERY_EDGE_BONUS_BPS" "24"
 Set-HyperSmartDefaultEnv "HYPERSMART_DIRECT_COPY_RECOVERY_MIN_CONSENSUS" "4"
 Set-HyperSmartDefaultEnv "HYPERSMART_DIRECT_COPY_RECOVERY_MIN_LIQUIDITY" "0.60"
-Set-HyperSmartDefaultEnv "HYPERSMART_LEGACY_POSITION_QUALITY_GUARD_ENABLED" "1"
+# 2026-07-08 (demande Flo "laisser courir"): quality-guard OFF. Il fermait les positions
+# a ~0.15% (non-evidencees) avant qu'elles atteignent leur SL/TP -> on capturait du bruit.
+# Desormais SL/TP vol-ajustes + sortie du leader gouvernent (capture le vrai mouvement).
+Set-HyperSmartDefaultEnv "HYPERSMART_LEGACY_POSITION_QUALITY_GUARD_ENABLED" "0"
 Set-HyperSmartDefaultEnv "HYPERSMART_LEGACY_POSITION_MIN_AGE_MS" "60000"
 # The legacy quality guard must not crystallize fee-drag losses just because a
 # copied position lacks fresh external evidence. It can still close when the
@@ -148,7 +163,10 @@ Set-HyperSmartDefaultEnv "HYPERSMART_MAX_OPEN_POSITIONS" "12"
 # Set-HyperSmartDefaultEnv "HYPERSMART_MAX_POSITION_USDT" "25"
 Set-HyperSmartDefaultEnv "HYPERSMART_MAX_POSITION_USDT" "40"
 Set-HyperSmartDefaultEnv "HYPERSMART_MAX_TOTAL_EXPOSURE_USDT" "400"
-Set-HyperSmartDefaultEnv "HYPERSMART_SIMULATION_LEVERAGE" "1"
+# 2026-07-08 (demande Flo "pas que des centimes"): levier perp realiste 5x. C'etait la
+# CAUSE du PnL en centimes -> ce defaut ps1 (1) ecrasait le 5 du .cmd (Set...DefaultEnv
+# ne pose que si non-defini, et le python etait lance par la ps1). notional = marge x 5.
+Set-HyperSmartDefaultEnv "HYPERSMART_SIMULATION_LEVERAGE" "5"
 Set-HyperSmartDefaultEnv "HYPERSMART_SINGLE_WALLET_MIN_EDGE_BPS" "55"
 Set-HyperSmartDefaultEnv "HYPERSMART_TOP_WALLET_SAMPLE_LIMIT" "8000"
 # V25 (2026-07-03): hard halt a 2.50 USDC (=0.25% de 1000) gelait la session
