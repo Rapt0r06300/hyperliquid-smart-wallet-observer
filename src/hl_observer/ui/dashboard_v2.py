@@ -161,6 +161,9 @@ tr:last-child td{border-bottom:0}
    <div class="st"><div class="k">Profit factor</div><div class="v" id="pf">…</div></div>
  </div>
 
+ <div class="card" style="margin-bottom:12px"><h3>TOP OPPORTUNITÉS <span class="hint" id="oppsum">— toutes stratégies · edge net après coûts —</span></h3>
+   <table><thead><tr><th style="width:7%">#</th><th style="width:23%">coin</th><th style="width:28%">stratégie</th><th style="width:20%">edge net</th><th style="width:22%;text-align:right">power</th></tr></thead><tbody id="opptb"></tbody></table></div>
+
  <div class="g2">
    <div class="card"><h3>FLUX D'ACTIVITÉ <span class="hint" id="feedhint">live · dérivé du ledger</span></h3>
      <div class="feed" id="feed"></div></div>
@@ -278,6 +281,13 @@ function tick(){
     document.getElementById('sc-trades').textContent=(sc.fresh_public_trade_events!=null?sc.fresh_public_trade_events:(sc.public_trade_events!=null?sc.public_trade_events:'—'));
     document.getElementById('sc-deltas').textContent=(sc.fresh_entry_deltas!=null?sc.fresh_entry_deltas:'—');
     document.getElementById('l-ws').className='led'+(sc.engine_running||d.engine_running?'':' off');
+    // TOP OPPORTUNITÉS (tableau unifié cross-stratégie, edge net)
+    var ob=(fus.opportunity_board)||{},obe=(ob.entries)||[],otb=document.getElementById('opptb');otb.innerHTML='';
+    var SC={COPY:'var(--amber)',DISTILLED:'var(--green)',FUNDING_ARB:'var(--cyan)',ARBITRAGE:'#c9a6ff'};
+    obe.slice(0,8).forEach(function(e,i){var tr=document.createElement('tr');
+      tr.innerHTML='<td style="color:var(--mut2)">'+(i+1)+'</td><td>'+e.coin+' <span style="color:var(--mut2)">'+(e.side||'')+'</span></td><td><span style="color:'+(SC[e.strategy]||'var(--mut)')+'">'+e.strategy+'</span></td><td class="num">'+n(e.net_edge_bps,1)+' bps</td><td style="text-align:right;color:var(--green)">'+n(e.power_score,1)+'</td>';otb.appendChild(tr);});
+    if(!obe.length)otb.innerHTML='<tr><td colspan="5" style="color:var(--mut2);border:0;padding-top:10px">— aucune opportunité au-dessus des planchers ce tick —</td></tr>';
+    var os=ob.summary||{};document.getElementById('oppsum').textContent=os.total?(os.total+' retenues · meilleur edge '+n(os.best_net_edge_bps,1)+' bps'):'— toutes stratégies · edge net —';
     // coûts (somme positions + closed si dispo)
     var fees=0,fund=0;ps.forEach(function(p){fees+=Number(p.fee_cost_usdc||0);fund+=Number(p.funding_cost_usdc||0);});
     if(pl.total_fees_usdc!=null)fees=Number(pl.total_fees_usdc);if(pl.total_funding_usdc!=null)fund=Number(pl.total_funding_usdc);

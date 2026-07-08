@@ -20,6 +20,7 @@ from hl_observer.strategies.fusion_runtime import FusionRuntimeInput, run_fusion
 from hl_observer.ui.simulation_log_export import logs_to_send_dir
 from hl_observer.ui.state import UiState
 from hl_observer.utils.time import now_ms
+from hl_observer.integration.opportunity_board_adapter import board_payload_from_fusion_result
 
 
 FUSION_STATUS_LOG_FILENAME = "simulation_fusion_runtime_latest.json"
@@ -97,6 +98,7 @@ def build_fusion_status_payload(
         "funding_signals_count": len(result.funding_signals),
         "triangular_opportunities_count": len(result.triangular_opportunities),
         "no_trade_reasons": list(result.no_trade_reasons),
+        "opportunity_board": board_payload_from_fusion_result(result, now_ms=current_ms),  # DISCO: tableau unifie cross-strategie
         "input_counts": {
             "leader_votes": len(parsed.leader_votes),
             "price_events": len(parsed.price_events),
