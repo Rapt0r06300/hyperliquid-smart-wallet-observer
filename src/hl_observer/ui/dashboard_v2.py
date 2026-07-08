@@ -154,8 +154,25 @@ tbody tr:hover{background:rgba(44,230,155,.06);box-shadow:inset 2px 0 0 var(--gr
 .card h3{color:var(--green)}
 ::-webkit-scrollbar{width:6px;height:6px}::-webkit-scrollbar-thumb{background:rgba(44,230,155,.22);border-radius:3px}
 ::-webkit-scrollbar-track{background:transparent}
+
+/* ═══ CRÉATIF v2 ═══ */
+#spot{position:fixed;inset:0;z-index:1;pointer-events:none;background:radial-gradient(380px circle at var(--mx,50%) var(--my,-300px),rgba(44,230,155,.075),transparent 66%)}
+.hero{position:relative;z-index:1}
+.hero::before{content:"";position:absolute;top:-80px;left:-90px;width:300px;height:300px;border-radius:50%;background:conic-gradient(from 0deg,transparent,rgba(44,230,155,.17),transparent 44%);filter:blur(30px);animation:spin 11s linear infinite;z-index:-1;pointer-events:none}
+@keyframes spin{to{transform:rotate(360deg)}}
+@keyframes glitch{0%,90%,100%{transform:none;text-shadow:none}91%{transform:translate(1px,-1px);text-shadow:-1px 0 var(--cyan),1px 0 var(--red)}93%{transform:translate(-1px,1px)}95%{transform:none}}
+.logo b{animation:glitch 7s infinite}
+.ticker{overflow:hidden;border:1px solid var(--line);border-radius:9px;background:var(--surface);margin-bottom:14px;padding:7px 0;position:relative;white-space:nowrap}
+.ticker::before,.ticker::after{content:"";position:absolute;top:0;width:64px;height:100%;z-index:2;pointer-events:none}
+.ticker::before{left:0;background:linear-gradient(90deg,var(--bg),transparent)}
+.ticker::after{right:0;background:linear-gradient(270deg,var(--bg),transparent)}
+.ticker-in{display:inline-block;animation:marq 30s linear infinite;font-family:var(--mono);font-size:11px;color:var(--mut);letter-spacing:.4px;will-change:transform}
+.ticker-in b{color:var(--green)}.ticker-in .s{color:var(--mut2);margin:0 13px}
+.ticker:hover .ticker-in{animation-play-state:paused}
+@keyframes marq{from{transform:translateX(0)}to{transform:translateX(-50%)}}
+#mg-live{filter:drop-shadow(0 0 11px #2ce69b) drop-shadow(0 0 3px #eafff5)}
 </style></head>
-<body><canvas id="matrix"></canvas><div class="wrap">
+<body><canvas id="matrix"></canvas><div id="spot"></div><div class="wrap">
  <div class="top">
    <div class="logo"><b>HYPER</b>SMART<span class="s">//</span>OBSERVER<span class="c">_</span>
      <span class="sub" id="boot">BOOT · HYPERLIQUID READ-ONLY · PAPER SIMULATION</span></div>
@@ -168,6 +185,7 @@ tbody tr:hover{background:rgba(44,230,155,.06);box-shadow:inset 2px 0 0 var(--gr
    </div>
  </div>
 
+ <div class="ticker"><div class="ticker-in" id="tick"></div></div>
  <div class="hero">
    <div class="hero-head">
      <div>
@@ -382,6 +400,19 @@ if(yy>c.height&&Math.random()>.975)y[i]=0;y[i]++;}},68);})();
 function _flash(el){if(!el)return;el.classList.remove('flash');void el.offsetWidth;el.classList.add('flash');}
 try{document.querySelectorAll('#pnl,#eq,.st .v').forEach(function(el){
   new MutationObserver(function(){_flash(el);}).observe(el,{childList:true,characterData:true,subtree:true});});}catch(e){}
+
+// ── Projecteur qui suit la souris ──
+(function(){var sp=document.getElementById('spot');if(!sp)return;window.addEventListener('mousemove',function(e){sp.style.setProperty('--mx',e.clientX+'px');sp.style.setProperty('--my',e.clientY+'px');},{passive:true});})();
+// ── Machine à écrire au démarrage ──
+(function(){var el=document.getElementById('boot');if(!el)return;var full=el.textContent||'';el.textContent='';var i=0;var t=setInterval(function(){el.textContent=full.slice(0,i++);if(i>full.length)clearInterval(t);},26);})();
+// ── Ticker défilant alimenté par les KPIs + opportunités ──
+function buildTicker(){var t=document.getElementById('tick');if(!t)return;
+ function g(id){var e=document.getElementById(id);return e?e.textContent.trim():'';}
+ var seg='<b>HYPERSMART</b><span class="s">//</span>PnL '+g('pnl')+'<span class="s">·</span>equity '+g('eq')+'<span class="s">·</span>WR '+g('wr')+'<span class="s">·</span>pos '+g('pos')+'<span class="s">·</span>expo '+g('expo')+'<span class="s">·</span>';
+ var rows=document.querySelectorAll('#opptb tr');if(rows.length){seg+='TOP<span class="s">»</span>';rows.forEach(function(r){var td=r.querySelectorAll('td');if(td.length>=5){seg+='<b>'+(td[1].textContent||'').trim().split(' ')[0]+'</b> '+(td[3].textContent||'').trim()+'<span class="s">·</span>';}});}
+ seg+='READ-ONLY PAPER<span class="s">·</span>0 ORDRE REEL<span class="s">·</span>';
+ t.innerHTML=seg+seg;}
+setInterval(buildTicker,3000);setTimeout(buildTicker,400);
 </script></body></html>"""
 
 
