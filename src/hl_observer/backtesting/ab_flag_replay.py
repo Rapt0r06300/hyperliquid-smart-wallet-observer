@@ -222,12 +222,22 @@ def run_ab_replay(
     b = _evaluate_arm("B_v26_on", env_b, candidates, marks,
                       base_config=cfg, horizon_min=horizon_min, cost_bps=cost_bps)
     ra, rb = a.report(), b.report()
+    # VALID-GATES: chaque bras passe par les gates de validation unifiees ; on ne
+    # recommande d'activer B que s'il passe TOUS les gates ET ameliore le net vs A.
+    from hl_observer.backtesting.validation_gates import run_validation_gates
+    va, vb = run_validation_gates(a.trades), run_validation_gates(b.trades)
+    b_improves = (rb["net_total_usd"] or 0) > (ra["net_total_usd"] or 0)
+    recommend = "ACTIVATE_B" if (vb["verdict"] == "DEPLOY_CANDIDATE" and b_improves) else "KEEP_A"
     return {
         "context": CONTEXT,
         "honesty": "metriques descriptives sur donnees enregistrees ; aucune promesse de PnL",
         "arm_a": ra,
         "arm_b": rb,
         "delta_net_usd": round((rb["net_total_usd"] or 0) - (ra["net_total_usd"] or 0), 4),
+        "arm_a_validation": va,
+        "arm_b_validation": vb,
+        "recommendation": recommend,
+        "recommendation_rule": "ACTIVATE_B seulement si B passe tous les gates ET ameliore le net vs A (paper-only)",
         "arm_b_env": env_b,
     }
 
