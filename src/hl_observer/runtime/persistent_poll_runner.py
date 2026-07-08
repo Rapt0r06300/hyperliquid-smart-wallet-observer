@@ -252,6 +252,13 @@ class PersistentPollRunner:
                         append_equity_point(timestamp_ms=self._now_ms(), equity_usdt=_eq,
                                              pnl_usdc=_eq - 1000.0,
                                              runtime_data_dir=self.config.runtime_data_dir)
+                    # LOGS-MAX: une ligne SYSTEM par poll (equity/pnl/positions) pour tout revoir.
+                    from hl_observer.runtime import detailed_logger as _dl
+                    _dl.log("SYSTEM", f"poll {self.current_poll} done", sev="INFO",
+                            poll_index=self.current_poll, equity_usdt=round(_eq, 4),
+                            pnl_usdc=round(_eq - 1000.0, 4),
+                            open_positions=self.metrics.get("fusion_runtime_open_positions"),
+                            runtime_data_dir=str(self.config.runtime_data_dir))
                 except Exception:
                     pass
         except Exception as exc:  # noqa: BLE001
@@ -299,6 +306,20 @@ class PersistentPollRunner:
         if failed:
             self.log(f"step {label} exit_code={exit_code} (absorbe, la boucle continue)")
             self.metrics[f"step_failed_{re.sub(r'[^A-Za-z0-9_]', '_', label)}"] = str(exit_code)
+        # LOGS-MAX: trace détaillée bornée de CHAQUE étape (erreur même minuscule visible).
+        try:
+            from hl_observer.runtime import detailed_logger as _dl
+            _rt = str(self.config.runtime_data_dir)
+            if failed:
+                _tail = "\n".join(str(output or "").splitlines()[-6:])[-700:]
+                _dl.log_error(f"step:{label}", f"exit_code={exit_code}", sev="WARN",
+                              phase=phase, exit_code=exit_code, duration_ms=duration,
+                              output_tail=_tail, poll_index=self.current_poll, runtime_data_dir=_rt)
+            _dl.log("SCAN", f"{label} exit={exit_code} {duration}ms", sev="DEBUG",
+                    label=label, phase=phase, exit_code=exit_code, duration_ms=duration,
+                    poll_index=self.current_poll, runtime_data_dir=_rt)
+        except Exception:
+            pass
         return StepResult(label=label, exit_code=exit_code, output=output, duration_ms=duration, failed=failed)
 
     def _spawn_ws_scan(self, label: str, argv: list[str]) -> dict[str, Any] | None:

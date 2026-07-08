@@ -171,17 +171,15 @@ def _record_candidate(snapshot: dict, env: dict | None) -> None:
     if not _flag(RECORD_FLAG, False, env):
         return
     try:
-        import json
-        import pathlib
-
         e = env if env is not None else os.environ
         base = str(e.get(RECORD_PATH_ENV, "") or "runtime/replay")
-        path = pathlib.Path(base)
-        path.mkdir(parents=True, exist_ok=True)
-        line = json.dumps({"recorded_at": time.time(), **snapshot}, ensure_ascii=False)
+        row = {"recorded_at": time.time(), **snapshot}
+        # ANTI-BLOAT: append CAPÉ (le run 48h a crashé sur du stockage non borné).
+        from hl_observer.runtime.replay_recorder import (
+            CANDIDATES_MAX_BYTES, CANDIDATES_MAX_LINES, append_replay_lines)
         with _record_lock:
-            with open(path / "candidates.jsonl", "a", encoding="utf-8") as fh:
-                fh.write(line + "\n")
+            append_replay_lines(base, "candidates.jsonl", [row],
+                                max_bytes=CANDIDATES_MAX_BYTES, max_lines=CANDIDATES_MAX_LINES)
     except Exception:
         pass  # l'observation ne casse jamais le moteur
 
@@ -342,3 +340,4 @@ __all__ = [
     "funding_sanity",
     "apply_v26_entry_vetos",
 ]
+# LOGS-MAX/replay: enregistrement candidats capé via runtime.replay_recorder (anti-bloat).

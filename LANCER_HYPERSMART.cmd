@@ -12,6 +12,11 @@ rem ANTI-BLOAT: coupe le stockage brut (payloads L2/leaderboard/fills) qui a fai
 rem gonfler la DB a 29 Go puis crasher. Le PnL/ledger n en depend pas. Mettre a 0
 rem seulement si tu veux le replay brut (avec cap manuel).
 set "HYPERSMART_DISABLE_RAW_STORAGE=1"
+REM REPLAY: enregistre candidates.jsonl + marks.jsonl pour l'A/B replay apres le run.
+REM Ecriture CAPEE (60 Mo marks / 20 Mo candidates, rotation last-N) -> jamais de
+REM re-bloat comme les 29 Go. Sans ce flag, le run 48h ne produit AUCUNE donnee replay.
+set "HYPERSMART_V26_RECORD_CANDIDATES=1"
+set "HYPERSMART_V26_RECORD_PATH=%~dp0runtime\replay"
 set "HYPERSMART_UI_STATE_DIR=%~dp0runtime\data"
 set "HYPERSMART_POSITIVE_PNL_REQUIRED_FOR_FUTURE_REVIEW=1"
 REM Reglages SELECTIFS Hyperliquid: runtime principal = Hyperliquid read-only + paper local.
@@ -226,10 +231,4 @@ REM MOTEUR TEMPS REEL (V16, 2026-06-26): flux WebSocket Hyperliquid PERSISTANT s
 REM leaders (cap HL = 10 wallets). Stocke chaque fill FRAIS a la seconde ou il arrive (sub-seconde)
 REM au lieu du snapshot REST laggé (~10s) -> entrees vraiment fraiches. Lecture seule, 0 ordre.
 REM Fenetre minimisee "HyperSmart Stream" - ferme-la pour stopper le flux temps reel.
-REM Stream rattache au lanceur principal; pas de fenetre separee.
-set "HYPERSMART_ENABLE_AUX_STREAM=1"
-
-REM -MaxLeaders eleve = scan TRES large (pool de leaders) ; le gate de qualite (smart money) garde la copie etroite.
-powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0tools\start_hypersmart_simulation.ps1" -Port 8794 -IntervalSeconds 15 -MaxLeaders 50 -Interactive
-
-exit /b 0
+REM Stream rattache au lanceur princip

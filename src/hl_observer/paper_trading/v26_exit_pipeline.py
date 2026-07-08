@@ -42,12 +42,17 @@ def run_v26_exit_pipeline(
             base = _pl.Path(str(_os.environ.get("HYPERSMART_V26_RECORD_PATH", "") or "runtime/replay"))
             base.mkdir(parents=True, exist_ok=True)
             ts = (float(now_ms) / 1000.0) if now_ms else None
-            with open(base / "marks.jsonl", "a", encoding="utf-8") as fh:
-                for _coin, _mid in (mid_prices or {}).items():
-                    try:
-                        fh.write(_json.dumps({"ts": ts, "coin": str(_coin).upper(), "mid": float(_mid)}) + "\n")
-                    except (TypeError, ValueError):
-                        continue
+            _rows = []
+            for _coin, _mid in (mid_prices or {}).items():
+                try:
+                    _rows.append({"ts": ts, "coin": str(_coin).upper(), "mid": float(_mid)})
+                except (TypeError, ValueError):
+                    continue
+            # ANTI-BLOAT: append CAPÉ (le run 48h a crashé sur du stockage non borné).
+            from hl_observer.runtime.replay_recorder import (
+                MARKS_MAX_BYTES, MARKS_MAX_LINES, append_replay_lines)
+            append_replay_lines(base, "marks.jsonl", _rows,
+                                max_bytes=MARKS_MAX_BYTES, max_lines=MARKS_MAX_LINES)
     except Exception:
         pass
 
