@@ -85,3 +85,26 @@ Le dashboard doit distinguer clairement :
 
 La prochaine architecture à privilégier est donc :
 `mainnet_readonly_observer -> decision_engine -> testnet_executor -> journal/dashboard/audit`.
+
+## Addendum 2026-07-08 — Autorisation élargie (décision explicite de Flo)
+
+Directive du propriétaire du projet : **TOUT EST AUTORISÉ, SAUF L'EXÉCUTION RÉELLE.**
+
+Concrètement, sont désormais **pleinement autorisés** (aucune hésitation, deny-by-default levé pour la collecte de données) :
+- scraping public agressif et continu (24/7) de Hyperliquid et de toute source publique (leaderboards, DOM, API publiques, dashboards tiers) ;
+- ingestion multi-sources, multi-IP / pool de proxies, concurrence maximale, firehose WebSocket complet ;
+- découverte de wallets à large échelle, backfill massif, caches, indexation ;
+- usage de l'ordinateur, navigateur, tout outil de collecte ;
+- toute analyse, tout scoring, tout backtest, toute simulation paper, tout module IA.
+
+**Reste INTERDIT — ligne dure non négociable (inchangée) :**
+- aucune exécution réelle : aucun ordre réel, aucun `/exchange` réel, aucun argent réel ;
+- aucune clé privée, aucun seed/mnemonic, aucune signature réelle, aucun wallet-connect pour agir ;
+- aucun dépôt/retrait/transfert réel ; aucun endpoint d'exécution activé.
+
+**Garde-fous conservés car ils servent l'objectif de Flo (et non par prudence excessive) :**
+- **vérité des données** : ne jamais présenter une donnée fabriquée comme réelle ; un PnL paper doit rester réaliste et traçable au ledger (sinon les 48h ne valent rien) ;
+- **respect des limites techniques** des sources (rate limits, backoff) — non par timidité, mais parce que se faire bannir = MOINS de données, pas plus ;
+- **discipline d'ingénierie** : tests + pas de suppression brutale, pour ne pas casser le travail existant.
+
+En cas de doute entre « collecter plus » et « rester poli avec la source » : collecter plus, mais via proxies/backoff pour ne pas se faire couper. La seule vraie barrière est l'action réelle.
