@@ -224,7 +224,12 @@ def run_v9_paper_session(
                 reason = "EDGE_REMAINING_TOO_LOW"
             else:
                 exposure = sum(p.notional_usdt for p in book.values())
-                notional = min(cfg.max_position_notional_usdt, max(0.0, cfg.max_total_exposure_usdt - exposure))
+                # LEVIER (demande Flo "pas des centimes"): notional = marge x levier. Ce chemin
+                # (V9 authoritative) sizait sans levier -> positions a 40 = centimes. Mis a
+                # l'echelle du levier de facon coherente (cap position + cap exposition).
+                import os as _os_v9
+                _lev_v9 = max(1.0, float(_os_v9.environ.get("HYPERSMART_SIMULATION_LEVERAGE", "1") or 1.0))
+                notional = min(cfg.max_position_notional_usdt * _lev_v9, max(0.0, cfg.max_total_exposure_usdt * _lev_v9 - exposure))
                 if notional <= 0:
                     reason = "MAX_EXPOSURE_REACHED"
             if reason:
