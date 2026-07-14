@@ -1,0 +1,38 @@
+DEBUT 
+=== 1. la porte unique + le double-comptage + le bug de signe === 
+........                                                                 [100%]
+8 passed in 1.16s
+ 
+=== 2. tous les appelants du scoreur === 
+....F............................................                        [100%]
+================================== FAILURES ===================================
+_ test_realtime_magic_score_requires_stronger_edge_for_single_wallet_entries __
+tests\test_realtime_magic_score.py:98: in test_realtime_magic_score_requires_stronger_edge_for_single_wallet_entries
+    assert not score.accepted
+E   AssertionError: assert not True
+E    +  where True = RealtimeCopyScore(decision='ACCEPT_LOCAL_SIMULATION', refusal_reasons=[], signal_freshness_score=1.0, leader_expected_...ce_move_bps=0.0, simulated_notional_usdt=50.0, warnings=['EDGE_FROM_MEASURED_TABLE', 'POSITION_SIZE_CAPPED_VS_LEADER']).accepted
+=========================== short test summary info ===========================
+FAILED tests/test_realtime_magic_score.py::test_realtime_magic_score_requires_stronger_edge_for_single_wallet_entries
+1 failed, 48 passed in 2.87s
+ 
+=== 3. l'UI (chemin LIVE) + l'invariant AST anti-formule === 
+........................................................................ [100%]
+============================== warnings summary ===============================
+tests/test_ui_simulation_v9_filters.py: 1408 warnings
+tests/test_ui_simulation_persistence.py: 5456 warnings
+  C:\Users\flo\AppData\Roaming\Python\Python314\site-packages\fastapi\routing.py:233: DeprecationWarning: 'asyncio.iscoroutinefunction' is deprecated and slated for removal in Python 3.16; use inspect.iscoroutinefunction() instead
+    is_coroutine = asyncio.iscoroutinefunction(dependant.call)
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+72 passed, 6864 warnings in 12.13s
+ 
+=== 4. safety-audit === 
+no_secret_patterns: ok
+env_not_committed: ok
+no_forbidden_mainnet_order_method: ok
+no_exchange_endpoint_in_runtime_source: ok
+live_executor_disabled_exists: ok
+mainnet_disabled_in_env_example: ok
+security_tests_present: ok
+no_real_execution_capable_package: ok
+FIN 

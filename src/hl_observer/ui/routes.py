@@ -23,6 +23,7 @@ from hl_observer.copying.runtime_v9_adapter import attach_v9_runtime_diagnostics
 from hl_observer.data_sources.warehouse_coverage import build_warehouse_coverage_report
 from hl_observer.loops.dashboard_payload import build_loop_dashboard_payload
 from hl_observer.markets.realtime_liquidity import resolve_realtime_liquidity_score
+from hl_observer.edge.edge_source import edge_brut
 from hl_observer.opportunities.fresh_opportunity import FreshOpportunity, find_fresh_opportunities
 from hl_observer.risk.risk_engine_v3 import (
     EntryCostGuardConfig,
@@ -31,6 +32,10 @@ from hl_observer.risk.risk_engine_v3 import (
 )
 from hl_observer.risk.session_pnl_guard import evaluate_session_pnl_guard
 from hl_observer.security.safety_audit import run_safety_audit
+from hl_observer.strategies.strategy_mode import (
+    classify as classify_strategy_mode,
+    mode_of_position,
+)
 from hl_observer.signals.fill_admission import KIND_ENTRY, KIND_EXIT, FillAdmissionConfig, admit_live_fill, fill_identity
 from hl_observer.simulation.decision_replay_analyzer import (
     LOGS_TO_SEND_DIRNAME,
@@ -1056,8 +1061,30 @@ def create_router(settings: Settings, state: UiState, bus: UiEventBus) -> APIRou
                     continue
             return samples
 
-        coin_loss_cooldown_usdc = max(0.35, starting_equity_usdt * 0.0005)
-        leader_loss_cooldown_usdc = max(0.25, starting_equity_usdt * 0.00035)
+        # BUG CORRIGE (audit calibrage 2026-07-11) -- CLIQUET IRREVERSIBLE, EN DUR, NON CONFIGURABLE.
+        # Anciennes valeurs : coin = max(0.35, equity*0.0005) = 0.50 $ ; leader = 0.35 $.
+        # Or `adaptive_session_risk_reason` BANNIT DEFINITIVEMENT un coin des que son PnL de session
+        # atteint -4x ce seuil (soit -2.00 $) et un leader a -1.40 $ -- pour TOUTE la session, sans
+        # aucun retour en arriere possible. Avec un notional de 500 $ (marge 50 x levier 10), UNE
+        # SEULE perte normale (2 a 6 $) suffisait a bannir a la fois le coin ET le leader.
+        # Sur un run de 48 h : apres quelques pertes, plus aucun coin ni aucun leader n'est eligible
+        # -> "le serveur n'ouvre plus rien". Le cliquet ne se rouvre jamais.
+        # On garde le garde-fou (re-perdre sur un coin/leader toxique est une vraie erreur), mais
+        # calibre a l'echelle REELLE des positions, et rendu configurable.
+        coin_loss_cooldown_usdc = max(
+            0.0,
+            calibrated_float_env(
+                "HYPERSMART_COIN_SESSION_LOSS_COOLDOWN_USDC",
+                max(15.0, starting_equity_usdt * 0.015),  # 1.5 % du capital ~ 3 vraies pertes
+            ),
+        )
+        leader_loss_cooldown_usdc = max(
+            0.0,
+            calibrated_float_env(
+                "HYPERSMART_LEADER_SESSION_LOSS_COOLDOWN_USDC",
+                max(12.0, starting_equity_usdt * 0.012),  # 1.2 % du capital
+            ),
+        )
 
         def session_pnl_for(*, coin: str | None = None, wallet: str | None = None) -> float:
             pnl = 0.0
@@ -1175,6 +1202,10 @@ def create_router(settings: Settings, state: UiState, bus: UiEventBus) -> APIRou
             consensus_wallets = int(metrics.get("consensus_wallets") or 0)
             edge_remaining_bps = safe_float(metrics.get("edge_remaining_bps"), -9999.0)
             min_edge = safe_float(getattr(realtime_score_config, "min_edge_required_bps", min_edge_required_bps), min_edge_required_bps)
+            # EDGE_NON_FABRIQUE: c'est un SEUIL, pas une valeur d'edge. On ne PREDIT rien ici : on
+            # exige une barre PLUS HAUTE que le plancher pour re-rentrer apres des pertes. Une
+            # barre se choisit (politique de risque) ; une valeur d'edge se MESURE. Les deux
+            # portent le suffixe _edge_bps, mais ce ne sont pas la meme chose.
             strong_recovery_edge_bps = min_edge + (10.0 if consensus_wallets >= 3 else 18.0)
             severe_coin_loss = coin_pnl <= -(coin_loss_cooldown_usdc * 4.0)
             severe_leader_loss = wallet_pnl <= -(leader_loss_cooldown_usdc * 4.0)
@@ -1272,7 +1303,33 @@ def create_router(settings: Settings, state: UiState, bus: UiEventBus) -> APIRou
             consensus = consensus_snapshot(row, direction)
             consensus_count = int(consensus["wallet_count"])
             confidence = max(0.0, min(1.0, float(row.confidence_score or 0.5)))
-            leader_expected_edge_bps = 18.0 + confidence * 34.0 + min(24.0, (consensus_count - 1) * 8.0)
+            # 🔴 4e EDGE FABRIQUE, trouve le 13/07 par l'invariant de G2.
+            #
+            # Ici vivait : `18.0 + confidence * 34.0 + min(24.0, (consensus_count - 1) * 8.0)`.
+            # Trois constantes magiques. Aucune mesure. Q1 avait remplace TROIS formules de ce
+            # genre (fresh_opportunity, wallet_mirror_runtime, ws_price_discrepancy) -- et celle-ci
+            # a survecu, sur le chemin d'entree du simulateur LIVE. C'est P2-3 (#310) prouve : les
+            # deux chemins d'edge coexistaient bien.
+            #
+            # Desormais l'edge VIENT DE LA TABLE MESUREE (hl_observer.edge.edge_source, Q1), sans
+            # aucun repli sur une formule. Non mesure => 0.0 => le gate d'edge minimum refuse.
+            # Deny-by-default : l'absence de mesure n'autorise rien.
+            _edge_mesure = edge_brut(
+                coin=str(row.coin or ""),
+                direction=str(direction or ""),
+                signal_age_ms=float(age_ms),
+                leader_score=confidence * 100.0,
+                consensus_wallets=float(consensus_count),
+                signal_ms=float(leader_event_at or 0),
+                strategie="COPY",
+                formule_de_secours=None,
+            )
+            leader_expected_edge_bps = (
+                float(_edge_mesure.valeur_bps)
+                if (_edge_mesure.utilisable and _edge_mesure.valeur_bps is not None)
+                else 0.0
+            )
+            leader_edge_source = "TABLE_MESUREE" if _edge_mesure.utilisable else str(_edge_mesure.raison)
             leader_size = abs(float(row.delta_size or row.fill_size or 0.0))
             leader_notional = abs(float(row.delta_notional_usdc or (leader_size * float(row.price or 0.0))))
             cluster_notional = max(leader_notional, safe_float(consensus.get("total_notional_usdc"), 0.0))
@@ -1308,6 +1365,9 @@ def create_router(settings: Settings, state: UiState, bus: UiEventBus) -> APIRou
                     max_open_positions=max_open_positions,
                     coin=str(row.coin),   # V26 L1 : active les vetos funding/tendance par marché
                     leader_wallet=str(getattr(row, 'wallet_address', '') or ''),  # V26 L6 : Kelly par leader
+                    # #594 : le scoreur interroge lui-même la porte Q1. Sans cet horodatage, il ne
+                    # peut pas vérifier que la table a été construite AVANT ce signal (anti-lookahead).
+                    signal_ms=float(leader_event_at or 0) or None,
                 ),
                 config=realtime_score_config,
             )
@@ -1507,6 +1567,10 @@ def create_router(settings: Settings, state: UiState, bus: UiEventBus) -> APIRou
                 "adverse_price_move_bps": score.adverse_price_move_bps,
                 "simulated_notional_usdt": score.simulated_notional_usdt,
                 "decision_reason": decision_reason,
+                # D'OU vient l'edge d'entree. "TABLE_MESUREE" = mesure ; sinon la raison du refus
+                # (bucket vide, table absente, signal trop recent pour la table...). Un refus qui
+                # ne dit pas POURQUOI est un refus qu'on finira par contourner.
+                "leader_edge_source": leader_edge_source,
             }
 
         allow_add_as_entry = calibrated_bool_env(
@@ -2058,7 +2122,16 @@ def create_router(settings: Settings, state: UiState, bus: UiEventBus) -> APIRou
                 seen_cluster_ids = csv_to_set(previous.get("seen_cluster_ids_csv"))
                 if cluster_id:
                     seen_cluster_ids.add(cluster_id)
+                # PISTE 11 -- le moteur est POSE A LA SOURCE, une fois, a l'ouverture.
+                # Une position qu'on renforce GARDE le moteur de sa premiere entree.
+                _mode = str(previous.get("strategy_mode") or "") or classify_strategy_mode(
+                    strategy_id=str(row.source or ""),
+                    source=str(row.source or ""),
+                    position_mode=position_mode,
+                    leader_wallet=str(row.wallet_address or ""),
+                )
                 positions[key] = {
+                    "strategy_mode": _mode,
                     "size": new_size,
                     "avg_price": avg_price,
                     "entry_costs": previous["entry_costs"] + cost,
@@ -2117,6 +2190,7 @@ def create_router(settings: Settings, state: UiState, bus: UiEventBus) -> APIRou
                         "reason": event.get("reason") or replay_reason,
                         "position_mode": position_mode,
                         "leader_wallets_csv": set_to_csv(leader_wallets),
+                        "strategy_mode": _mode,
                         "paper_action_type": "INCREASE" if was_existing_position else "OPEN",
                         "entry_price": round(float(row.price), 8),
                         "average_entry_price": round(avg_price, 8),
@@ -2279,6 +2353,7 @@ def create_router(settings: Settings, state: UiState, bus: UiEventBus) -> APIRou
                     positions.pop(key, None)
                 else:
                     positions[key] = {
+                        "strategy_mode": mode_of_position(previous),
                         "size": remaining_size,
                         "avg_price": previous["avg_price"],
                         "entry_costs": previous["entry_costs"] - allocated_entry_cost,
@@ -2320,6 +2395,7 @@ def create_router(settings: Settings, state: UiState, bus: UiEventBus) -> APIRou
                         "position_mode": position_mode,
                         "leader_wallets_csv": set_to_csv(leader_wallets),
                         "closed_wallets_csv": set_to_csv(closed_wallets),
+                        "strategy_mode": mode_of_position(previous),
                         "paper_action_type": "CLOSE" if action.startswith("CLOSE") else "REDUCE",
                         "average_entry_price": round(float(previous["avg_price"]), 8),
                         "exit_price": round(float(row.price), 8),
@@ -3202,17 +3278,44 @@ def create_router(settings: Settings, state: UiState, bus: UiEventBus) -> APIRou
         except SQLAlchemyError:
             last_run = None
 
-        gates = [
-            UiRiskGate(
-                name="mainnet forbidden",
-                passed=not settings.execution.enable_mainnet_execution
-                and settings.environment != ExecutionEnvironment.MAINNET,
+        # 🔴 #292 / P6b -- ICI ETAIT LE MENSONGE (corrige le 2026-07-13) :
+        #
+        #     UiRiskGate(name="api stable", passed=True),      # <-- EN DUR. TOUJOURS VERT.
+        #
+        # Le panneau SECURITE annoncait « api stable ✓ » **que l'API soit stable ou non**. Ce
+        # n'etait pas un controle : c'etait un voyant vert **soude en position verte**. Une donnee
+        # FABRIQUEE presentee comme REELLE -- la seule chose que ce projet interdit absolument.
+        #
+        # 🚩 Et le module qui sait la verite existait depuis P12 (`realtime/source_health.py`,
+        # « interdire le faux OK », marque completed) : **l'interface ne l'a jamais lu.**
+        #
+        # Desormais : un gate dont l'etat n'est pas MESURE est ROUGE, et il dit « NON_MESURE ».
+        # Un « je ne sais pas » honnete fait chercher ; un « tout va bien » fabrique endort.
+        from hl_observer.ui.safety_gates_truth import gates_de_securite as _gates_verite
+
+        # La sante REELLE des sources -- le meme panneau que le dashboard calcule deja ailleurs.
+        # Si on n'arrive pas a la lire : `None` -> le gate devient ROUGE « NON_MESURE ».
+        # ⚠️ On ne « rattrape » PAS l'echec par un vert : c'est precisement le bug qu'on corrige.
+        try:
+            from hl_observer.sources.shared_recorder import get_shared_recorder as _gsr2
+            from hl_observer.ui.v12_panels import build_source_health_panel as _bshp2
+            _sante = _bshp2(_gsr2())
+        except Exception:                                       # noqa: BLE001
+            _sante = None
+
+        _gates_vrais = _gates_verite(
+            mainnet_execution_active=(
+                settings.execution.enable_mainnet_execution
+                or settings.environment == ExecutionEnvironment.MAINNET
             ),
-            UiRiskGate(name="testnet locked", passed=not settings.execution.enable_testnet_execution),
-            UiRiskGate(name="paper enabled", passed=settings.environment == ExecutionEnvironment.PAPER),
-            UiRiskGate(name="kill switch", passed=not state.kill_switch_active),
-            UiRiskGate(name="api stable", passed=True),
-            UiRiskGate(name="db status", passed=True if counts is not None else False),
+            testnet_execution_active=settings.execution.enable_testnet_execution,
+            est_en_mode_paper=settings.environment == ExecutionEnvironment.PAPER,
+            kill_switch_actif=bool(state.kill_switch_active),
+            base_lisible=(None if counts is None else True),
+            sante_des_sources=_sante if isinstance(_sante, dict) else None,
+        )
+        gates = [
+            UiRiskGate(name=g.name, passed=g.passed, detail=g.detail) for g in _gates_vrais
         ]
         safety_status = "STOPPED" if state.kill_switch_active else ("SAFE" if audit.ok else "WARNING")
         return UiStatus(

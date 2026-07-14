@@ -68,4 +68,15 @@ def clear(coin: str | None = None) -> None:
             _store.pop((coin or "").strip().upper(), None)
 
 
-__all__ = ["push", "recent_rates", "sample_count", "clear"]
+def known_coins() -> list[str]:
+    """Tous les marches vus par le poller funding (~230 chez Hyperliquid).
+
+    Publie pour le BALAYAGE du carnet L2 : pour repondre a « existe-t-il un marche dont le spread
+    depasse les 3 bps de frais maker ? », il faut voir TOUS les marches, pas les 8 majors.
+    Cette liste est deja en memoire -- elle n'etait simplement pas exposee. Zero requete en plus.
+    """
+    with _lock:
+        return sorted(_store.keys())
+
+
+__all__ = ["push", "recent_rates", "sample_count", "clear", "known_coins"]

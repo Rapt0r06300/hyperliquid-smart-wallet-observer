@@ -52,7 +52,12 @@ def _fusion_status(notional: float) -> dict:
 
 
 def test_paper_engine_entry_below_minimum_notional_is_refused(monkeypatch):
+    # Depuis le fix "centimes", la taille est FIXE : marge (MAX_POSITION_USDT) x levier.
+    # Pour que le plancher notional soit reellement teste, on force une taille sous le plancher :
+    # marge 12 x levier 1 = notional 12 < 40 -> doit etre REFUSE.
     monkeypatch.setenv("HYPERSMART_MIN_PAPER_NOTIONAL_USDT", "40")
+    monkeypatch.setenv("HYPERSMART_MAX_POSITION_USDT", "12")
+    monkeypatch.setenv("HYPERSMART_SIMULATION_LEVERAGE", "1")
     state = UiState()
     report = apply_fusion_paper_orders_to_state(state, _fusion_status(12.0), current_ms=126_000)
     assert report["applied_count"] == 0

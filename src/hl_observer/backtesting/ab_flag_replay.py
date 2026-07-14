@@ -96,6 +96,9 @@ def load_jsonl(path: str) -> list[dict]:
 def marks_by_coin(mark_rows: list[dict]) -> dict[str, list[tuple[float, float]]]:
     out: dict[str, list[tuple[float, float]]] = {}
     for r in mark_rows:
+        if not isinstance(r, dict):
+            continue          # ROBUSTESSE (fuzzing 2026-07-11) : ligne corrompue -> on l'ignore,
+                              # on ne fait pas tomber tout le replay pour une ligne pourrie.
         coin = str(r.get("coin") or "").upper()
         try:
             ts, mid = float(r.get("ts")), float(r.get("mid"))

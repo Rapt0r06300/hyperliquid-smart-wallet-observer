@@ -37,15 +37,30 @@ def test_taker_sell_fills_below_mid():
     assert r.fill_price < 100.0
 
 
-def test_maker_earns_rebate_negative_fee():
-    cfg = ExecModelConfig(maker_rebate_bps=1.0)
-    r = simulate_execution(side="LONG", notional_usdc=50, mid_price=100.0,
-                           top_depth_usdc=50_000, is_maker=True, queue_ahead_usdc=5000, config=cfg)
-    assert r.is_maker
-    assert r.fee_bps == -1.0
-    assert r.slippage_bps == 0.0
-    assert r.queue_ratio == pytest.approx(5000 / 50000)
+def test_maker_pays_a_fee_it_does_not_earn_a_rebate():
+    """TARIF REEL HYPERLIQUID (corrige 2026-07-11) : le maker COUTE 0,015 % (1,5 bps).
 
+    Ce test affirmait l'inverse (`maker_rebate_bps=1.0` -> fee NEGATIVE), ce qui revenait a dire
+    que le bot est PAYE pour entrer et rempli a un prix MEILLEUR que le marche. Le rebate n'existe
+    qu'aux paliers de volume les plus eleves. Une strategie "maker-first" validee sur cette
+    hypothese aurait perdu en reel : c'etait un test qui MENTAIT.
+    """
+    cfg = ExecModelConfig(taker_fee_bps=4.5, maker_fee_bps=1.5, maker_rebate_bps=0.0)
+    r = simulate_execution(side="LONG", notional_usdc=50, mid_price=100.0,
+                           top_depth_usdc=50_000, is_maker=True, config=cfg)
+    assert r.is_maker
+    assert r.fee_bps == pytest.approx(1.5)          # on PAIE 1,5 bps
+    assert r.slippage_bps == 0.0                    # mais on ne traverse pas le spread
+    assert r.net_cost_bps > 0, "un fill passif n'est pas gratuit"
+    assert r.fill_price > 100.0                     # achat rempli AU-DESSUS du mid
+
+
+def test_a_configured_rebate_can_make_the_maker_cost_negative():
+    """Un vrai rebate (palier de volume) reste modelisable -- mais il doit etre EXPLICITE."""
+    cfg = ExecModelConfig(maker_fee_bps=1.5, maker_rebate_bps=2.0)
+    r = simulate_execution(side="LONG", notional_usdc=50, mid_price=100.0,
+                           top_depth_usdc=50_000, is_maker=True, config=cfg)
+    assert r.fee_bps == pytest.approx(-0.5)         # 1,5 de frais - 2,0 de rebate
 
 def test_unknown_depth_is_conservative():
     cfg = ExecModelConfig(unknown_depth_impact_bps=25.0, half_spread_bps=1.0)

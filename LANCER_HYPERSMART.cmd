@@ -32,14 +32,14 @@ REM session SAINE 21/06: 79 trades / 53.2%% WR / +0.80$). Cause: fenetre 45 s = 
 REM (on chasse un move deja parti), le prix revient et le SL synthetique coupe -> pertes en serie.
 REM Le snapshot le dit: "les entrees arrivent trop tard; consensus tres chaud vise 4 s". On resserre
 REM a 15000 ms (fresh): admet la latence WS mediane ~11 s, rejette le chasing. Reversible.
-set "HYPERSMART_SIMULATION_MAX_SIGNAL_AGE_MS=15000"
+set "HYPERSMART_SIMULATION_MAX_SIGNAL_AGE_MS=10000"
 set "HYPERSMART_REDUCE_MAX_SIGNAL_AGE_MS=15000"
 REM Les reductions leader sont proportionnelles a NOTRE position paper. Sur un compte
 REM de simulation 1000 USDT, une vraie sortie partielle peut valoir moins de 10 USDT:
 REM elle doit rester visible dans le ledger et le PnL au lieu d'etre ignoree.
 set "HYPERSMART_MIN_REDUCE_NOTIONAL_USDT=0"
-set "HYPERSMART_FUSION_COPY_MIN_WALLETS=3"
-set "HYPERSMART_FRESH_OPPORTUNITY_MIN_WALLETS=3"
+set "HYPERSMART_FUSION_COPY_MIN_WALLETS=2"
+set "HYPERSMART_FRESH_OPPORTUNITY_MIN_WALLETS=2"
 set "HYPERSMART_FUSION_COPY_COST_BUFFER_BPS=24"
 set "HYPERSMART_DIRECT_ARBITRAGE_MIN_SPREAD_BPS=30"
 set "HYPERSMART_V9_PIPELINE_AUTHORITATIVE=1"
@@ -53,9 +53,9 @@ REM les couts (cost_model ~12 bps). "Moins de trades, plus propres": on ne prend
 REM edge net franchement positif. Aucun fake, aucun edge negatif jamais accepte.
 REM 2026-07-08: plancher edge copy releve 28->40 (replay causal: la selectivite passe le PnL net positif,
 REM les 2 gros perdants venaient des trades a edge marginal). Reversible.
-set "HYPERSMART_SIMULATION_MIN_EDGE_BPS=40"
-set "HYPERSMART_SIMULATION_MIN_LIQUIDITY_SCORE=0.38"
-set "HYPERSMART_SIMULATION_MAX_COPY_DEGRADATION_BPS=28"
+set "HYPERSMART_SIMULATION_MIN_EDGE_BPS=16"
+set "HYPERSMART_SIMULATION_MIN_LIQUIDITY_SCORE=0.55"
+set "HYPERSMART_SIMULATION_MAX_COPY_DEGRADATION_BPS=24"
 set "HYPERSMART_SINGLE_WALLET_MIN_EDGE_BPS=55"
 REM GATE V12 AUTORITATIF (2026-06-24): le gate unifie (source/quotes/fraicheur/liquidite/edge net)
 REM devient CONTRAIGNANT en intersection plus stricte: un candidat ne passe que si le score ET le
@@ -159,28 +159,31 @@ REM Follow-leader reste la sortie PRIMAIRE; ces barrieres = filet + trailing (la
 REM courir le gagnant). Recalibrable sur les donnees 48h. Reversible (VOL_BARRIERS=0).
 set "HYPERSMART_V26_VOL_BARRIERS=1"
 set "HYPERSMART_V26_VOL_REF_RANGE_BPS=30"
-set "HYPERSMART_V26_VOL_FACTOR_MIN=0.5"
-set "HYPERSMART_V26_VOL_FACTOR_MAX=2.5"
-set "HYPERSMART_SLTP_TAKE_PROFIT_BPS=120"
+set "HYPERSMART_V26_VOL_FACTOR_MIN=0.8"
+set "HYPERSMART_V26_VOL_FACTOR_MAX=1.5"
+set "HYPERSMART_SLTP_TAKE_PROFIT_BPS=110"
 set "HYPERSMART_SLTP_STOP_LOSS_BPS=60"
-set "HYPERSMART_SLTP_TRAILING_BPS=30"
-set "HYPERSMART_SLTP_TRAILING_ACTIVATION_BPS=45"
-set "HYPERSMART_SLTP_BREAKEVEN_BUFFER_BPS=0"
-set "HYPERSMART_SLTP_STOP_MIN_HOLD_MS=120000"
-set "HYPERSMART_SLTP_CATASTROPHIC_STOP_BPS=250"
+set "HYPERSMART_SLTP_TRAILING_BPS=45"
+set "HYPERSMART_SLTP_TRAILING_ACTIVATION_BPS=65"
+set "HYPERSMART_SLTP_BREAKEVEN_BUFFER_BPS=10"
+set "HYPERSMART_SLTP_STOP_MIN_HOLD_MS=45000"
+set "HYPERSMART_SLTP_CATASTROPHIC_STOP_BPS=110"
+set "HYPERSMART_SLTP_POSITION_TIMEOUT_MS=1800000"
+set "HYPERSMART_MAX_NET_DIRECTIONAL_PCT=100"
+set "HYPERSMART_MAX_COIN_NOTIONAL_PCT=60"
 set "HYPERSMART_ADAPTIVE_PAPER_SIZING=1"
 REM LIQUIDITE (analyse 2026-06-21: 199/256 refus = LIQUIDITY_TOO_LOW alors que signaux FRAIS
 REM 5s + edge POSITIF 21 bps). Pour des positions de ~40 USDT, la recherche (mlmodelpoly: MIN_DEPTH=200
 REM USDC) montre qu'une liquidite moyenne suffit. On relache 0.30 -> 0.22 pour debloquer ces bonnes
 REM entrees fraiches sur alts copiables, tout en rejetant les marches VRAIMENT morts (<0.22).
-set "HYPERSMART_SIMULATION_MIN_LIQUIDITY_SCORE=0.38"
+set "HYPERSMART_SIMULATION_MIN_LIQUIDITY_SCORE=0.55"
 REM CALIBRATION 2026-06-21 (analyse de 9154 decisions reelles: 100%% NO_TRADE, 0 ouverture).
 REM   Cause racine: le cap dur de degradation (22) etait REDONDANT avec le gate d'edge net
 REM   (edge_remaining soustrait DEJA toute la degradation). Resultat: 100%% des refus portaient
 REM   COPY_DEGRADATION_TOO_HIGH, meme ~250 signaux a edge net positif (BTC/HYPE/ZEC/SOL, consensus).
 REM   Fix HONNETE: on passe le cap a 40 (simple garde-fou anti-signal-casse) et on laisse le gate
 REM   d'edge net (>=10 bps APRES tous les couts) decider. On n'accepte JAMAIS un edge net negatif.
-set "HYPERSMART_SIMULATION_MAX_COPY_DEGRADATION_BPS=28"
+set "HYPERSMART_SIMULATION_MAX_COPY_DEGRADATION_BPS=24"
 REM Deviation de prix: 8 bps etait inatteignable a ~11s de latence (bruit normal). 18 rejette
 REM toujours les vraies courses-poursuites (prix deja parti) sans tuer les entrees fraiches.
 set "HYPERSMART_SIMULATION_MAX_PRICE_DEVIATION_BPS=18"
@@ -203,7 +206,7 @@ REM   mouvement de 1% sur 100$ de marge a 5x = ~5$, plus des centimes). On passe
 REM   position a 100$ (10 positions = 1000$ de marge deployable) et un levier de 5x (realiste/modere).
 REM   L'exposition/cash restent comptes en MARGE -> les 1000$ sont toujours proteges. Aucun faux PnL:
 REM   tout est calcule au VRAI prix marche, juste dimensionne comme un vrai compte perp.
-set "HYPERSMART_MAX_POSITION_USDT=40"
+set "HYPERSMART_MAX_POSITION_USDT=50"
 REM ===== MODE GRINDER (session P1 2026-07-07, flags ON pour collecte de donnees A/B) =====
 set "HYPERSMART_EXECUTION_STYLE=maker"
 set "HYPERSMART_MAKER_ADVERSE_SELECTION_BPS=2"
@@ -221,14 +224,49 @@ REM PLANCHER NOTIONAL (replay A/B 2026-07-07 sur logs frais): les micro-trades o
 REM negatif (frais ~59%% du brut). Filtre causal notional>=40: train ET validation positifs
 REM (+0.11 vs -1.77 tous trades). Echantillon encore petit (13 trades) - a re-verifier.
 set "HYPERSMART_MIN_PAPER_NOTIONAL_USDT=40"
-set "HYPERSMART_MAX_TOTAL_EXPOSURE_USDT=400"
-set "HYPERSMART_MAX_OPEN_POSITIONS=12"
+set "HYPERSMART_MAX_TOTAL_EXPOSURE_USDT=1000"
+set "HYPERSMART_MAX_OPEN_POSITIONS=20"
 REM LEVIER de simulation: 5x = realisme perp Hyperliquid (demande Flo 2026-07-08: "pas que des
 REM centimes, comme le marche reel"). notional = marge x levier -> $40 de marge = $200 d'expo.
 REM PnL = notional x variation. HONNETE: le stop catastrophe (180 bps) plafonne la perte a ~9%%
 REM de la marge a 5x (loin de la liquidation ~55x), donc jamais de perte > marge. Dialable (3/10).
-set "HYPERSMART_SIMULATION_LEVERAGE=5"
+set "HYPERSMART_SIMULATION_LEVERAGE=10"
 REM LAISSER COURIR (demande Flo): on coupe le quality-guard qui fermait les positions a ~0.15%%
 REM (elles n'atteignaient jamais leur SL/TP 1.2-1.6%%). Desormais SL/TP + sortie du leader gouvernent
 REM -> on capture le VRAI mouvement du marche, pas du bruit. Reversible (=1 pour re-activer).
-set "HYPERSMART_LEGACY_POSITION_QU
+set "HYPERSMART_LEGACY_POSITION_QUALITY_GUARD_ENABLED=0"
+REM RESET PROPRE A CHAQUE LANCEMENT (demande utilisateur): equity remise a 1000, compteurs
+REM trades gagnants/perdants et taux de reussite remis a 0, logs de session repartis a neuf
+REM (les anciens sont archives dans _archives). Mettre 0 pour au contraire CONSERVER l'equity.
+REM RESET DES LOGS 2026-06-25: en plus, le dossier logs\ encombre est REMIS A ZERO a chaque
+REM lancement (prepare-simulation-logs --purge-top-level): les gros *.log sont vides (tronques a 0),
+REM les archives lourdes *.zip supprimees, l'ancien dossier mojibake retire. L'INTELLIGENCE DE
+REM L'IA n'est JAMAIS touchee (modele + echantillons d'apprentissage vivent dans runtime\, hors logs\).
+set "HYPERSMART_RESET_ON_LAUNCH=1"
+REM Les anciens modules d'analyse multi-plateforme restent sur disque, non lances.
+REM Les auxiliaires HyperSmart utiles (IA shadow + stream read-only) sont demarres par le script
+REM principal, rattaches a la meme session, et stoppes avec Q.
+
+REM ENTRAINEMENT IA AUTO (V13): demarre en arriere-plan des le lancement, apprend des trades
+REM clotures et met a jour le panneau "Modele IA" (progression: n_trades, Brier, accuracy).
+REM Paper-only / lecture seule. Fenetre minimisee "HyperSmart IA" - ferme-la pour stopper l'apprentissage.
+REM IA rattachee au lanceur principal; pas de fenetre separee.
+set "HYPERSMART_ENABLE_AUX_IA=1"
+
+REM MOTEUR TEMPS REEL (V16, 2026-06-26): flux WebSocket Hyperliquid PERSISTANT sur les 10 MEILLEURS
+REM leaders (cap HL = 10 wallets). Stocke chaque fill FRAIS a la seconde ou il arrive (sub-seconde)
+REM au lieu du snapshot REST laggé (~10s) -> entrees vraiment fraiches. Lecture seule, 0 ordre.
+REM Fenetre minimisee "HyperSmart Stream" - ferme-la pour stopper le flux temps reel.
+REM Stream rattache au lanceur principal; pas de fenetre separee.
+set "HYPERSMART_ENABLE_AUX_STREAM=1"
+
+REM ARCHIVE REPLAY (2026-07-09, demande Flo): au lieu de perdre les donnees du run precedent,
+REM on les DEPLACE dans runtime\replay\_archive\run_<ts>\ (serveur eteint, avant tout writer).
+REM => le dataset replay s'accumule entre rallumages ; runtime\replay\ reste propre pour le run.
+REM Le replay (merge_replay/include_archive) lit TOUT l'historique. Best-effort, jamais destructif.
+python -m hl_observer.runtime.replay_recorder --archive-run --base "%~dp0runtime\replay" 1>nul 2>nul
+
+REM -MaxLeaders eleve = scan TRES large (pool de leaders) ; le gate de qualite (smart money) garde la copie etroite.
+powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0tools\start_hypersmart_simulation.ps1" -Port 8794 -IntervalSeconds 15 -MaxLeaders 50 -Interactive
+
+exit /b 0

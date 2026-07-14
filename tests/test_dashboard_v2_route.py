@@ -21,4 +21,4 @@ def test_v2_page_is_html_and_read_only_and_wired_to_canonical_status():
     assert "/api/simulation/status" in html          # source = ledger canonique (UI-4)
     assert "read_only" in html
     # pas de contenu de démo en dur: le PnL vient du fetch, pas d'une valeur figée
-    assert "métagraphe".upper() in html.upper() or "METAGRAPHE" in html
+    assert "EQUITY //" in html   # panneau courbe (ex-"METAGRAPHE", renomme a la refonte /v2)

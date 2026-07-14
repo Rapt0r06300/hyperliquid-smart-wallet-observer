@@ -20,6 +20,7 @@ from hl_observer.copy_wallet.wallet_journal import WalletJournalRecord, append_w
 from hl_observer.copy_wallet.wallet_rank_decay import RankDecayResult, apply_wallet_rank_decay
 from hl_observer.copy_wallet.wallet_tier import WalletTier, tier_for_wallet_score
 from hl_observer.edge.edge_net_v12 import EdgeNetV12Estimate, EdgeNetV12Inputs, estimate_edge_net_v12
+from hl_observer.edge.edge_source import edge_brut          # Q1 : la porte unique de l'edge brut
 from hl_observer.risk.risk_engine_v3 import (
     EntryCostGuardConfig,
     EntryCostGuardDecision,
@@ -49,6 +50,11 @@ class MirrorPipelineResult:
     journal_record: WalletJournalRecord | None = None
     paper_only: bool = True
     real_execution: bool = False
+    # Q1 : D'OU VIENT L'EDGE BRUT ? La question ne doit JAMAIS rester sans reponse.
+    # `edge_fabrique=True` => le chiffre sort d'une formule inventee, pas d'une mesure.
+    # Ca remonte dans as_dict(), donc dans les logs, le dashboard et l'audit.
+    edge_fabrique: bool = False
+    edge_source_raison: str = ""
 
     @property
     def accepted(self) -> bool:
@@ -71,6 +77,11 @@ class MirrorPipelineResult:
                 "threshold_bps": self.edge_estimate.threshold_bps,
                 "reason_codes": list(self.edge_estimate.reason_codes),
                 "cost_breakdown_bps": dict(self.edge_estimate.cost_breakdown_bps),
+                # Q1 : la provenance du BRUT. Sans elle, un net calcule sur une formule inventee
+                # est indiscernable d'un net calcule sur une mesure. C'etait exactement le
+                # probleme.
+                "edge_fabrique": self.edge_fabrique,
+                "edge_source_raison": self.edge_source_raison,
             },
             "entry_cost_guard": self.entry_cost_guard.as_dict(),
             "risk_decision": decision_to_dict(self.risk_decision),
@@ -138,11 +149,39 @@ def run_wallet_mirror_pipeline(
         estimated_slippage_bps=slippage_bps,
         latency_penalty_bps=latency_penalty_bps,
     )
-    expected_edge = (
-        leader_expected_edge_bps
-        if leader_expected_edge_bps is not None
-        else 24.0 + max(0.0, rank_decay.decayed_score) * 24.0 + max(0.0, copyability_score) * 18.0
-    )
+    # Q1 (2026-07-13) -- LE 2e EDGE FABRIQUE, TUE A LA SOURCE.
+    #
+    # Cette ligne disait :
+    #     expected_edge = 24.0 + score * 24.0 + copyability * 18.0
+    # Trois constantes inventees. Ce nombre est l'edge BRUT de tout le pipeline miroir ; tout ce
+    # qui suit (edge net, gates, RiskEngine) n'etait qu'une arithmetique propre sur un mensonge.
+    #
+    # Desormais la porte unique decide : table MESUREE par defaut, formule seulement si on la
+    # demande explicitement -- et alors la decision est ESTAMPILLEE `fabrique`.
+    if leader_expected_edge_bps is not None:
+        expected_edge: float | None = float(leader_expected_edge_bps)
+        edge_fabrique = False
+        edge_raison = "EDGE_FOURNI_PAR_L_APPELANT"
+    else:
+        # `candidate` est deja calcule ci-dessus : il porte le coin et le SENS normalises.
+        # On ne re-derive rien -- deux derivations du meme sens, c'est deux verites possibles.
+        _e = edge_brut(
+            coin=str(candidate.coin or ""),
+            direction=str(candidate.side or ""),
+            signal_age_ms=float(wallet_rank_age_ms or 0.0),
+            leader_score=float(rank_decay.decayed_score),
+            consensus_wallets=1.0,
+            signal_ms=float(observed_time_ms or 0.0),
+            strategie="COPY",
+            formule_de_secours=lambda: 24.0
+            + max(0.0, rank_decay.decayed_score) * 24.0
+            + max(0.0, copyability_score) * 18.0,
+        )
+        expected_edge = _e.valeur_bps
+        edge_fabrique = _e.fabrique
+        edge_raison = _e.raison
+    # `expected_edge is None` -> `estimate_edge_net_v12` rend EDGE_UNMEASURABLE -> NO_TRADE.
+    # Le refus est donc porte par le contrat V12 existant, sans nouveau chemin de decision.
     copy_degradation = max(0.0, float(spread_bps or 0.0)) + max(0.0, float(slippage_bps or 0.0)) + max(
         0.0, float(latency_penalty_bps or 0.0)
     )
@@ -220,6 +259,12 @@ def run_wallet_mirror_pipeline(
             "rank_decay": asdict(rank_decay),
             "sizing": asdict(sizing),
             "edge_net_bps": edge.net_edge_bps,
+            # Q1 : le journal DOIT dire d'ou vient le brut. Sinon, en relisant le ledger dans
+            # six mois, personne ne pourra distinguer un PnL bati sur une mesure d'un PnL bati
+            # sur `24 + score*24 + copyability*18`.
+            "edge_brut_bps": edge.gross_edge_bps,
+            "edge_fabrique": edge_fabrique,
+            "edge_source_raison": edge_raison,
             "entry_cost_guard": entry_guard.as_dict(),
             "risk": decision_to_dict(risk),
         },
@@ -239,6 +284,8 @@ def run_wallet_mirror_pipeline(
         paper_intent=paper_intent,
         no_trade_reasons=unique_reasons,
         journal_record=journal,
+        edge_fabrique=edge_fabrique,
+        edge_source_raison=edge_raison,
     )
 
 

@@ -15,9 +15,15 @@ from pathlib import Path
 from hl_observer.security.fake_data_scanner import scan_for_fake_data
 from hl_observer.security.safety_audit import run_safety_audit
 
+# CORRIGE (audit 2026-07-11) : les docs V12 ont ete SUPPRIMES volontairement lors de la
+# consolidation documentaire (640 fichiers -> 7, commit 35703aa). Exiger des fichiers morts
+# rendait le repo eternellement "non pret". On exige desormais les docs qui existent VRAIMENT
+# et qui portent la doctrine.
 _REQUIRED_DOCS = (
-    "docs/research/HYPERSMART_V12_IMPLEMENTATION_STATUS.md",
-    "docs/research/HYPERSMART_V12_REMAINING_ROADMAP.md",
+    "CLAUDE.md",                          # les regles (no-real-trade, verite des donnees)
+    "OBJECTIF.md",                        # l'objectif
+    "docs/ETAT_ET_FEUILLE_DE_ROUTE.md",   # le document maitre
+    "docs/ARCHITECTURE.md",               # l'architecture + installation
 )
 
 

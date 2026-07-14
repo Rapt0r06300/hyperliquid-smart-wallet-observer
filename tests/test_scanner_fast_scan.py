@@ -258,15 +258,14 @@ def test_fresh_scan_strategy_refuses_bypass_and_aggressive_scraping() -> None:
     assert "AGGRESSIVE_SCRAPING_REFUSED" in plan.refusal_reasons
 
 
-def test_magic_bot_research_docs_exist() -> None:
+def test_magic_bot_research_docs_exist():
+    """REECRIT (audit 2026-07-11) : les docs de recherche `docs/research/MAGIC_BOT_*` ont ete
+    SUPPRIMES a la consolidation (640 -> 7 fichiers, commit 35703aa). Les ressusciter serait faux.
+    Ce qui compte -- et qui est teste ici -- c'est que la DOCTRINE reste ecrite : jamais de
+    promesse de PnL, jamais de donnee fabriquee.
+    """
     root = Path(__file__).resolve().parents[1]
-    for relative in [
-        "docs/research/MAGIC_BOT_OSINT_RESEARCH.md",
-        "docs/research/MAGIC_BOT_CLAIMS_MATRIX.md",
-        "docs/research/HYPERLIQUID_DATA_SOURCES_MAP.md",
-        "docs/research/HYPERSMART_FAST_SCAN_DESIGN.md",
-    ]:
-        path = root / relative
-        assert path.exists()
-        text = path.read_text(encoding="utf-8")
-        assert "guaranteed profit" in text or "profit" in text.lower()
+    regles = (root / "CLAUDE.md").read_text(encoding="utf-8", errors="replace")
+    assert "Jamais de promesse de PnL" in regles
+    assert "Aucune donn" in regles and "fabriqu" in regles       # "Aucune donnee fabriquee"
+    assert "NO_TRADE" in regles                                   # dans le doute, on ne trade pas

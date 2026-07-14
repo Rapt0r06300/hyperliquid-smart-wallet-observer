@@ -12,6 +12,7 @@ if TYPE_CHECKING:
     from hl_observer.sources.collection_recorder import CollectionRecorder
 
 from hl_observer.hyperliquid.rate_limits import AsyncRateLimiter
+from hl_observer.security.mainnet_guard import assert_info_endpoint_only
 from hl_observer.hyperliquid.schemas import (
     OrderStatus,
     OrderStatusKind,
@@ -35,6 +36,21 @@ READ_ONLY_INFO_TYPES = {
     "historicalOrders",
     "userFunding",
     "userRateLimit",
+    # --- 2026-07-13 : deux endpoints PUBLICS en LECTURE SEULE qui manquaient a l'allowlist ---
+    # `fundingHistory` : le funding REALISE par coin, avec startTime -> des MOIS d'historique.
+    #   X-04 a ete mesure sur 18,9 h de funding enregistre en live. C'etait inutile : l'historique
+    #   etait public. (Meme maladie que `candleSnapshot(startTime)` : la capacite etait la.)
+    # `predictedFundings` : le funding de **Binance / Bybit / HL** sur le **MEME coin**.
+    #   -> src/hl_observer/funding/funding_cross_venue.py
+    # Les deux sont /info, sans wallet, sans signature. Ils ne peuvent RIEN executer.
+    "fundingHistory",
+    "predictedFundings",
+    # --- 2026-07-13 : #517 -- les marches HIP-3 (perps deployes par des builders) ---
+    # `perpDexs` liste les dex ; `meta` accepte un champ `dex`. Les coins s'y nomment `{dex}:{coin}`
+    # (doc : for-developers/api/asset-ids). C'est la SEULE reouverture legitime du market making :
+    # le « growth mode » divise les frais par 10. -> market/hip3_markets.py
+    # /info, sans wallet, sans signature. Ne peut RIEN executer.
+    "perpDexs",
 }
 
 
@@ -132,6 +148,36 @@ def build_user_rate_limit_payload(user: str) -> dict[str, Any]:
     return {"type": "userRateLimit", "user": user}
 
 
+def build_funding_history_payload(
+    coin: str,
+    start_time: int,
+    end_time: int | None = None,
+) -> dict[str, Any]:
+    """Le funding REALISE d'un coin, avec startTime. Public, sans wallet, sans signature.
+
+    X-04 a juge le funding sur **18,9 h** enregistrees en live. Cet endpoint donne des **mois**.
+    """
+    if end_time is not None and int(start_time) >= int(end_time):
+        raise ValueError("start_time must be strictly lower than end_time")
+    payload: dict[str, Any] = {
+        "type": "fundingHistory",
+        "coin": coin.upper(),
+        "startTime": int(start_time),
+    }
+    if end_time is not None:
+        payload["endTime"] = int(end_time)
+    return payload
+
+
+def build_predicted_fundings_payload() -> dict[str, Any]:
+    """Le funding de **Binance / Bybit / Hyperliquid** sur le **MEME coin**.
+
+    C'est la seule forme de couverture qui obeit a la loi mesuree le 2026-07-13 :
+    ***une couverture ne vaut que si c'est le MEME actif***. Voir funding/funding_cross_venue.py
+    """
+    return {"type": "predictedFundings"}
+
+
 def build_candle_snapshot_payload(
     coin: str,
     interval: str,
@@ -205,6 +251,26 @@ class HyperliquidInfoClient:
     async def _post_info(self, request_type: str, payload: dict[str, Any] | None = None) -> Any:
         payload = {"type": request_type, **(payload or {})}
         _ensure_read_only_payload(payload)
+        # 🔴 #254 -- LE GARDE-FOU QUI EXISTAIT ET QUE PERSONNE N'APPELAIT (2026-07-13).
+        #
+        # `assert_info_endpoint_only` vit dans security/mainnet_guard.py depuis des semaines.
+        # Elle a ete ecrite POUR CA -- garantir qu'on ne frappe QUE `/info`. AST : **0 appelant.**
+        # 14e deguisement de la maladie du projet : *une capacite presente, un chainon manquant,
+        # personne qui se plaint.*
+        #
+        # On la branche ICI, au TRANSPORT -- pas chez l'appelant. La difference est tout :
+        # un garde chez l'appelant protege CET appelant ; un garde au transport protege
+        # **tous les appelants, y compris ceux qui n'existent pas encore.** Si un jour du code
+        # (humain ou agent) construisait une URL d'EXECUTION, la requete ne partirait PAS.
+        #
+        # 🚩 (Et ce commentaire a ete REECRIT : ma 1re version citait le nom litteral de
+        # l'endpoint d'execution -- ce qui a fait ROUGIR `test_rest_info_client_v6`, un garde
+        # STATIQUE qui interdit cette chaine dans cette classe. Le garde avait raison. On
+        # reformule le commentaire ; on n'affaiblit JAMAIS le garde.)
+        #
+        # Les 8 controles de `safety-audit` sont STATIQUES (ils lisent le source). Celui-ci est
+        # le premier controle **RUNTIME** : il agit a l'instant ou l'octet allait partir.
+        assert_info_endpoint_only(self.base_url)
         if self._client is None:
             self._client = httpx.AsyncClient(timeout=self.timeout_seconds)
             self._owns_client = True
@@ -394,20 +460,32 @@ class HyperliquidInfoClient:
             raise HyperliquidInfoError("userRateLimit returned a non-object payload")
         return data
 
+    async def funding_history(
+        self,
+        coin: str,
+        start_time: int,
+        end_time: int | None = None,
+    ) -> list[dict[str, Any]]:
+        """Le funding REALISE d'un coin. Public, avec startTime -> des MOIS d'historique.
+
+        (X-04 avait juge le funding sur 18,9 h enregistrees en live. C'etait inutile.)
+        """
+        payload = build_funding_history_payload(coin, start_time, end_time)
+        data = await self._post_info("fundingHistory",
+                                     {k: v for k, v in payload.items() if k != "type"})
+        if not isinstance(data, list):
+            raise HyperliquidInfoError("fundingHistory returned a non-list payload")
+        return data
+
+    async def predicted_fundings(self) -> list[Any]:
+        """Le funding de Binance / Bybit / HL sur le MEME coin. -> funding/funding_cross_venue.py"""
+        data = await self._post_info("predictedFundings")
+        if not isinstance(data, list):
+            raise HyperliquidInfoError("predictedFundings returned a non-list payload")
+        return data
+
     async def candle_snapshot(
         self,
         coin: str,
         interval: str,
-        start_time: int,
-        end_time: int,
-    ) -> list[dict[str, Any]]:
-        payload = build_candle_snapshot_payload(
-            coin,
-            interval,
-            start_time,
-            end_time,
-        )
-        data = await self._post_info("candleSnapshot", {"req": payload["req"]})
-        if not isinstance(data, list):
-            raise HyperliquidInfoError("candleSnapshot returned a non-list payload")
-        return data
+  

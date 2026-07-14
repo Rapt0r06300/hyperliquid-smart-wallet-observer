@@ -8,17 +8,38 @@ It does not connect wallets, sign payloads, or submit real orders.
 
 from __future__ import annotations
 
+import os
+import time
 from dataclasses import dataclass, asdict, field
 from typing import Iterable
 
+
+def _env_flag(nom: str, defaut: bool = False) -> bool:
+    """Lecture d'un flag d'environnement, deny-by-default.
+
+    Une valeur absente ou illisible ne DOIT jamais elargir une porte : on retombe sur `defaut`
+    (qui vaut False pour tous les flags d'echappement). Cf. la lecon des « planchers FAIL-OPEN ».
+    """
+    brut = os.environ.get(nom)
+    if brut is None:
+        return defaut
+    return str(brut).strip().lower() in {"1", "true", "yes", "on"}
+
 from hl_observer.arbitrage.triangular_graph import TriangularEdge, build_triangular_cycles
+from hl_observer.edge.edge_source import edge_brut as _edge_brut_mesure
+from hl_observer.freshness.horloges import age_du_signal
 from hl_observer.arbitrage.triangular_opportunity_detector import TriangularOpportunity, detect_triangular_opportunities
 from hl_observer.integration.board_admission import compute_admission_floor_for_fusion
 from hl_observer.funding.funding_opportunity import funding_rates_bps_for_coins
 from hl_observer.arbitrage.ws_price_discrepancy_detector import PriceDiscrepancy, detect_ws_price_discrepancies
 from hl_observer.connectors.paper_execution_connector import LocalPaperExecutionConnector
 from hl_observer.connectors.standard import PaperOrderRequest, PaperOrderResult
-from hl_observer.copy_wallet.copy_conflict_resolver import CopyConflictDecision, LeaderVote, resolve_copy_conflict
+from hl_observer.copy_wallet.copy_conflict_resolver import (
+    CopyConflictDecision,
+    LeaderVote,
+    resolve_copy_conflict,
+    resolve_copy_conflicts_by_coin,
+)
 from hl_observer.copy_wallet.copy_latency_profiler import LatencyProfile, profile_copy_latency
 from hl_observer.copy_wallet.copy_session_controller import CopySessionState, start_copy_session
 from hl_observer.funding.funding_rate_scanner import FundingSignal, scan_funding_rates
@@ -141,7 +162,7 @@ def run_fusion_strategy_runtime(payload: FusionRuntimeInput) -> FusionRuntimeRes
         watchlist=tuple(vote.wallet for vote in payload.leader_votes),
         copy_ratio=payload.copy_ratio,
     )
-    conflict = resolve_copy_conflict(payload.leader_votes)
+    conflict, conflict_votes = _select_copy_conflict(payload.leader_votes)
     latency = profile_copy_latency(payload.latencies_ms)
     drawdown = evaluate_drawdown_kill_switch(peak_equity=payload.peak_equity, current_equity=payload.current_equity)
 
@@ -170,12 +191,25 @@ def run_fusion_strategy_runtime(payload: FusionRuntimeInput) -> FusionRuntimeRes
     )
 
     no_trade: list[str] = []
+    # REVUE 2026-07-12 : `paper_engine` est REASSIGNE plus bas (`paper_engine = distilled_engine`).
+    # Si on ne lisait ses refus qu'a la fin, on perdrait ceux du moteur COPY -- justement ceux
+    # qu'on veut rendre visibles. On les capture donc a la source.
+    _refus_moteur_copy: tuple[str, ...] = ()
     paper_orders: list[PaperOrderResult] = []
     paper_order_strategy_ids: list[str] = []
     delta_neutral: list[DeltaNeutralPosition] = []
     funding_payments: list[FundingPayment] = []
-    market_price_for_engine = next((event.mid for event in ordered_events if event.coin.upper() == (conflict.coin or "").upper()), 100.0)
+    market_price_for_engine = _latest_mid_for_coin(ordered_events, conflict.coin or "")
     market_prices_by_coin = {event.coin.upper(): float(event.mid) for event in ordered_events}
+    conflict_context_ms = max(
+        [0]
+        + [int(vote.observed_at_ms or 0) for vote in conflict_votes]
+        + [
+            int(event.event_time_ms)
+            for event in ordered_events
+            if event.coin.upper() == str(conflict.coin or "").upper()
+        ]
+    )
 
     connector = LocalPaperExecutionConnector()
     controller = StrategyController(connector)
@@ -195,13 +229,46 @@ def run_fusion_strategy_runtime(payload: FusionRuntimeInput) -> FusionRuntimeRes
             now_ms=max((event.event_time_ms for event in ordered_events), default=0),
         )
         paper_engine = run_copy_votes_through_paper_engine(
-            payload.leader_votes,
+            conflict_votes,
             market_price=float(market_price_for_engine),
-            observed_at_ms=max((event.event_time_ms for event in ordered_events), default=0),
+            observed_at_ms=conflict_context_ms,
             starting_cash_usdt=float(payload.current_equity),
             admission_floor_power=_adm_floor,
         )
-        if conflict.decision == "FOLLOW" and conflict.winning_side:
+        # Capture AVANT toute reassignation par le chemin distille (cf. plus bas).
+        _refus_moteur_copy = tuple(paper_engine.refusal_reasons)
+        # ---------------------------------------------------------------------------------
+        # BUG 2026-07-12 -- LE VERROU D'EDGE NE GARDAIT PAS CE CHEMIN.
+        #
+        # Ce bloc n'interrogeait QUE le consensus (`conflict.decision == "FOLLOW"`). Il emettait
+        # donc un ordre paper OPEN meme quand `paper_engine` venait de REFUSER (verrou d'edge
+        # empirique : accepted_count == 0, motif EDGE_NOT_EMPIRICAL_NO_TRADE / edge < couts).
+        #
+        # Deux chemins, deux verdicts opposes, sur le meme signal, au meme instant.
+        # Ce qui empechait ces ordres de se materialiser n'etait PAS le verrou, mais un filtre
+        # de PREFIXE DE NOM en aval (MATERIALIZABLE_STRATEGY_PREFIXES dans
+        # ui/fusion_persistent_adapter) : une propriete de securite tenue par un accident de
+        # nommage. Prouve par test : moteur accepted_count=0 ET PaperOrderResult(accepted=True).
+        #
+        # DOCTRINE (P2-3) : celui qui dit la VERITE doit avoir le POUVOIR. L'edge mesure gagne.
+        # L'edge mesure est negatif a TOUS les horizons (cf. runtime/calibration/empirical_edge.json)
+        # -> un OPEN non garde est un trade a esperance NEGATIVE, ouvert en connaissance de cause.
+        #
+        # Flag d'echappement pour un A/B explicite, JAMAIS pour la prod :
+        #   HYPERSMART_ALLOW_UNGATED_COPY_FOLLOW=1  (defaut 0 = deny-by-default)
+        _copy_follow_gate_off = _env_flag("HYPERSMART_ALLOW_UNGATED_COPY_FOLLOW", False)
+        _moteur_a_refuse = paper_engine.accepted_count == 0
+
+        if (
+            conflict.decision == "FOLLOW"
+            and conflict.winning_side
+            and _moteur_a_refuse
+            and not _copy_follow_gate_off
+        ):
+            # Le consensus dit OUI, le verrou d'edge dit NON. Le verrou gagne.
+            # Le motif precis vient de paper_engine.refusal_reasons, merge dans no_trade plus bas.
+            no_trade.append("COPY_FOLLOW_BLOCKED_BY_EMPIRICAL_EDGE_GATE")
+        elif conflict.decision == "FOLLOW" and conflict.winning_side:
             strategy_id = _first_available_profile(
                 external_ids,
                 (
@@ -214,6 +281,7 @@ def run_fusion_strategy_runtime(payload: FusionRuntimeInput) -> FusionRuntimeRes
             copy_metadata = _copy_follow_order_metadata(
                 payload=payload,
                 conflict=conflict,
+                leader_votes=conflict_votes,
                 ordered_events=ordered_events,
                 latency=latency,
             )
@@ -293,6 +361,7 @@ def run_fusion_strategy_runtime(payload: FusionRuntimeInput) -> FusionRuntimeRes
         close_order = _build_consensus_close_order(
             payload.open_positions,
             conflict=conflict,
+            leader_votes=conflict_votes,
             ordered_events=ordered_events,
             available_ids=external_ids,
         )
@@ -434,6 +503,10 @@ def run_fusion_strategy_runtime(payload: FusionRuntimeInput) -> FusionRuntimeRes
                     "rate_bps_per_hour": e.rate_bps_per_hour,
                     "amount_usdc": e.amount_usdc,
                     "net_pnl_usdc": e.net_pnl_usdc,
+                    # la jambe est NUE : sans ce terme, le ledger enregistrerait un revenu de
+                    # funding SANS RISQUE DE MARCHE -- une fiction.
+                    "price_pnl_usdc": e.price_pnl_usdc,
+                    "price_pnl_unknown": e.price_pnl_unknown,
                     "paper_only": True,
                     "real_execution": False,
                 }
@@ -464,6 +537,26 @@ def run_fusion_strategy_runtime(payload: FusionRuntimeInput) -> FusionRuntimeRes
         maker_quotes=maker_quotes,
         paper_orders=tuple(paper_orders),
     )
+
+    # ---------------------------------------------------------------------------------
+    # BUG 2026-07-12 -- LE REFUS LE PLUS IMPORTANT DU BOT ETAIT INVISIBLE.
+    #
+    # `no_trade` etait alimente par le consensus (NO_COPY_CONSENSUS), le distille
+    # (DISTILLED_PAPER_ENGINE_REJECTED) et le triangulaire -- mais JAMAIS par
+    # `paper_engine.refusal_reasons`. Or c'est exactement la qu'atterrit le verrou d'edge
+    # empirique (EDGE_NOT_EMPIRICAL_NO_TRADE / edge < couts), c.-a-d. LA raison qui explique
+    # 100 % des zero-position depuis le 11/07.
+    #
+    # Symptome vu au dashboard : « 18 deltas d'entree frais · 0 position · aucun refus
+    # enregistre ce tick ». Les signaux mouraient EN SILENCE.
+    #
+    # Le deny-by-default protege les ORDRES. Il ne doit JAMAIS museler la TRACE.
+    # Un refus non journalise est un bug, pas une discipline.
+    # On merge les refus des DEUX moteurs : celui du copy (capture avant reassignation) ET
+    # celui qui reste en place a la fin (copy s'il n'a pas ete remplace, sinon distille).
+    for _motif in (*_refus_moteur_copy, *paper_engine.refusal_reasons):
+        if _motif and _motif not in no_trade:
+            no_trade.append(_motif)
 
     return FusionRuntimeResult(
         session=session,
@@ -508,6 +601,7 @@ def _build_consensus_close_order(
     open_positions: Iterable[dict[str, object]],
     *,
     conflict: CopyConflictDecision,
+    leader_votes: tuple[LeaderVote, ...],
     ordered_events: tuple[PriceEvent, ...],
     available_ids: set[str],
 ) -> PaperOrderRequest | None:
@@ -555,7 +649,7 @@ def _build_consensus_close_order(
                 "position_key": str(position.get("position_key") or ""),
                 "previous_side": pos_side,
                 "new_consensus_side": winning_side,
-                "leader_wallets_count": 1,
+                "leader_wallets_count": _winning_wallet_count(conflict, leader_votes),
                 "signal_age_ms": 0,
                 "edge_remaining_bps": 0.0,
                 "liquidity_score": 1.0,
@@ -576,6 +670,7 @@ def _copy_follow_order_metadata(
     *,
     payload: FusionRuntimeInput,
     conflict: CopyConflictDecision,
+    leader_votes: tuple[LeaderVote, ...],
     ordered_events: tuple[PriceEvent, ...],
     latency: LatencyProfile,
 ) -> dict[str, object]:
@@ -590,29 +685,78 @@ def _copy_follow_order_metadata(
     winning_side = str(conflict.winning_side or "").upper()
     winning_votes = tuple(
         vote
-        for vote in payload.leader_votes
+        for vote in leader_votes
         if str(vote.coin or "").upper() == str(conflict.coin or "").upper()
         and _side_bucket_for_runtime(vote.side) == winning_side
     )
     opposing_votes = tuple(
         vote
-        for vote in payload.leader_votes
+        for vote in leader_votes
         if str(vote.coin or "").upper() == str(conflict.coin or "").upper()
         and _side_bucket_for_runtime(vote.side) in {"LONG", "SHORT"}
         and _side_bucket_for_runtime(vote.side) != winning_side
     )
-    context_now_ms = max(
-        [0]
-        + [int(event.event_time_ms) for event in ordered_events]
-        + [int(vote.observed_at_ms or 0) for vote in payload.leader_votes]
-    )
+    # 🔴 #318 / P2-6 -- ICI, LA FRAICHEUR ETAIT FABRIQUEE (corrige le 2026-07-13).
+    #
+    # AVANT :
+    #     context_now_ms = max([0] + [e.event_time_ms ...] + [v.observed_at_ms ...])
+    #     signal_age_ms  = max(0, context_now_ms - last_vote_ms)
+    #
+    # Le « maintenant » etait calcule **A PARTIR DES DONNEES**, y compris du signal qu'on datait.
+    #   * si le vote GAGNANT etait le plus recent (cas frequent : un signal frais gagne), alors
+    #     `context_now == last_vote` -> **age = 0 par construction**. Une TAUTOLOGIE, pas une
+    #     mesure ;
+    #   * si le flux de prix CALAIT (c'est arrive DEUX fois : 02:32 et 04:08), le « maintenant »
+    #     **GELAIT** avec lui -- et un signal vieux de dix minutes restait eternellement
+    #     « frais ». **Le bot entrait.**
+    #   * et le `max(0, ...)` transformait toute INCOHERENCE d'horloge en « parfaitement frais ».
+    #     *Un `max(0, ...)` sur un temps n'est pas une protection : c'est un tapis sous lequel on
+    #     balaie une contradiction.*
+    #
+    # DESORMAIS : une VRAIE montre (`time.time()`), et un refus explicite si on ne peut pas dater.
+    # `age_du_signal` refuse un « maintenant » derive des donnees -- l'invariant est TESTE.
     last_vote_ms = max([0] + [int(vote.observed_at_ms or 0) for vote in winning_votes])
-    signal_age_ms = max(0, context_now_ms - last_vote_ms) if last_vote_ms > 0 else 999_999
+    _horodatages_du_lot = (
+        [int(event.event_time_ms) for event in ordered_events]
+        + [int(vote.observed_at_ms or 0) for vote in leader_votes]
+    )
+    context_now_ms = int(time.time() * 1000)          # la montre, pas les donnees
+    _age = age_du_signal(
+        observe_a_ms=last_vote_ms,
+        maintenant_local_ms=context_now_ms,
+        horodatages_du_lot=_horodatages_du_lot,
+    )
+    # DENY-BY-DEFAULT : un age qu'on ne sait pas mesurer n'est PAS « frais ». Il est
+    # arbitrairement vieux -> le gate de fraicheur refusera. Jamais un zero rassurant.
+    signal_age_ms = int(_age.ms) if _age.connu else 999_999
     consensus_wallets = len({str(vote.wallet).lower() for vote in winning_votes if vote.wallet})
     winning_score = float(conflict.long_score if winning_side == "LONG" else conflict.short_score)
     opposing_score = sum(max(0.0, float(vote.score)) for vote in opposing_votes)
     score_margin = max(0.0, winning_score - opposing_score)
-    gross_vote_edge_bps = min(120.0, score_margin * 8.0 + max(0, consensus_wallets - 1) * 6.0)
+    # 🔴 5e EDGE FABRIQUE, trouve le 13/07 par l'invariant AST de G2.
+    #
+    # Ici vivait : `min(120.0, score_margin * 8.0 + max(0, consensus_wallets - 1) * 6.0)`.
+    # Autrement dit : « chaque point de marge de vote vaut 8 bps, chaque wallet supplementaire en
+    # vaut 6, et on plafonne a 120 ». Personne n'a jamais mesure ces trois nombres. Un vote de
+    # leaders n'est pas une unite de bps.
+    #
+    # L'edge vient maintenant de la TABLE MESUREE (Q1), sans repli sur une formule.
+    # Non mesure => 0.0 => `edge_remaining_bps` devient negatif apres couts => refus.
+    _e_vote = _edge_brut_mesure(
+        coin=str(conflict.coin or ""),
+        direction=str(winning_side or ""),
+        signal_age_ms=float(signal_age_ms),
+        leader_score=float(winning_score),
+        consensus_wallets=float(consensus_wallets),
+        signal_ms=float(last_vote_ms or 0),
+        strategie="COPY",
+        formule_de_secours=None,
+    )
+    gross_vote_edge_bps = (
+        float(_e_vote.valeur_bps)
+        if (_e_vote.utilisable and _e_vote.valeur_bps is not None)
+        else 0.0
+    )
     latency_penalty_bps = min(25.0, max(0.0, float(latency.p50_ms or 0)) / 1_000.0 * 2.0)
     freshness_penalty_bps = min(40.0, signal_age_ms / 1_000.0 * 1.5)
     base_cost_bps = 10.0
@@ -644,7 +788,80 @@ def _side_bucket_for_runtime(side: str) -> str:
     return "UNKNOWN"
 
 
+def _select_copy_conflict(
+    votes: tuple[LeaderVote, ...],
+) -> tuple[CopyConflictDecision, tuple[LeaderVote, ...]]:
+    """Choose one real per-coin conflict without cross-market vote leakage."""
+
+    grouped = resolve_copy_conflicts_by_coin(votes)
+    if not grouped:
+        return resolve_copy_conflict(()), ()
+
+    def rank(item: tuple[CopyConflictDecision, tuple[LeaderVote, ...]]) -> tuple[float, ...]:
+        decision, coin_votes = item
+        winning_wallets = _winning_wallet_count(decision, coin_votes)
+        winning_score = (
+            float(decision.long_score)
+            if decision.winning_side == "LONG"
+            else float(decision.short_score)
+            if decision.winning_side == "SHORT"
+            else 0.0
+        )
+        opposing_score = (
+            float(decision.short_score)
+            if decision.winning_side == "LONG"
+            else float(decision.long_score)
+            if decision.winning_side == "SHORT"
+            else max(float(decision.long_score), float(decision.short_score))
+        )
+        latest_ms = max((int(vote.observed_at_ms or 0) for vote in coin_votes), default=0)
+        return (
+            1.0 if decision.decision == "FOLLOW" else 0.0,
+            float(winning_wallets),
+            winning_score - opposing_score,
+            winning_score,
+            float(latest_ms),
+        )
+
+    return max(grouped, key=rank)
+
+
+def _winning_wallet_count(
+    conflict: CopyConflictDecision,
+    votes: Iterable[LeaderVote],
+) -> int:
+    if conflict.winning_side not in {"LONG", "SHORT"}:
+        return 0
+    coin = str(conflict.coin or "").upper()
+    return len(
+        {
+            str(vote.wallet).lower()
+            for vote in votes
+            if vote.wallet
+            and str(vote.coin or "").upper() == coin
+            and _side_bucket_for_runtime(vote.side) == conflict.winning_side
+        }
+    )
+
+
 def _external_profile_priority_snapshot() -> tuple[dict[str, object], ...]:
+    """Catalogue des profils externes GitHub -- SHADOW-ONLY (pivot ff7aeec).
+
+    BUG CORRIGE (audit 2026-07-11) : ce snapshot declarait en dur `priority_over_internal: True`
+    pour CHAQUE profil externe. C'etait FAUX et contraire a la doctrine ("aucun repo externe ne
+    bypasse le RiskEngine, le ledger, ou le no-real-trade"). Le champ partait tel quel dans le
+    statut, le dashboard et l'audit -> une affirmation fausse dans les donnees.
+
+    REGRESSION CORRIGEE (meme audit) : la premiere correction renvoyait `()`. C'etait trop brutal.
+    Ce catalogue ne sert PAS qu'a ce champ : `run_fusion_strategy_runtime` en derive `external_ids`,
+    qui NOMME les ordres paper (`_first_available_profile`). A vide, l'arbitrage / le funding / le
+    triangulaire retombaient sur un nom sans prefixe `ext_` -> rejetes par le filtre de
+    materialisation de `ui/fusion_persistent_adapter` (MATERIALIZABLE_STRATEGY_PREFIXES) -> l'ordre
+    paper disparaissait silencieusement (0 position, 0 evenement au ledger, 0 PnL).
+
+    On garde donc le catalogue (le nommage marche), et on dit la VERITE : `priority_over_internal`
+    est FALSE. Observation, jamais priorite. Aucun ordre reel, jamais.
+    """
     payload = build_external_github_bridge_payload()
     profiles = payload.get("priority_strategy_catalog")
     if not isinstance(profiles, list):
@@ -652,7 +869,8 @@ def _external_profile_priority_snapshot() -> tuple[dict[str, object], ...]:
     return tuple(
         {
             "strategy_id": str(strategy_id),
-            "priority_over_internal": True,
+            # Doctrine shadow-only : un profil externe n'a JAMAIS priorite sur l'interne.
+            "priority_over_internal": False,
             "paper_only": True,
             "read_only": True,
             "direct_external_execution": False,

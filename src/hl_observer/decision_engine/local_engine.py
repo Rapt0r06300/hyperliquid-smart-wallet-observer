@@ -1,14 +1,46 @@
 from __future__ import annotations
 
+import os
 from dataclasses import asdict, dataclass, field
 from enum import Enum
 from typing import Any
 
 from hl_observer.config.settings import Settings
+from hl_observer.decision_engine import noyau_unique as noyau
 from hl_observer.hyperliquid.schemas import SignalCandidate
 from hl_observer.risk.gates import RiskContext
 from hl_observer.risk.risk_engine import RiskEngine
 from hl_observer.testnet.models import TestnetAction, TestnetOrderRequest, TestnetSide, unix_ms
+
+# G2 -- LE NOYAU EST BRANCHE ICI.
+#
+# Avant : `decide_from_candidate` construisait un RiskContext avec
+# `edge_remaining_bps=candidate.edge_remaining_bps` -- l'edge TEL QUE L'APPELANT LE DONNE.
+# Le RiskEngine notait ensuite ce nombre avec une arithmetique impeccable... sans jamais
+# questionner sa PROVENANCE. C'est exactement comme ca que trois edges FABRIQUES ont vecu
+# des mois dans le code.
+#
+# Maintenant : toute ENTREE passe d'abord par `noyau_unique.decider()`, qui va CHERCHER
+# l'edge dans la table mesuree (Q1), refuse les zones mortes prouvees (Q3) et exige des prix
+# executables (Q2). L'edge de l'appelant n'est plus utilise -- il est CONFRONTE.
+#
+# 🔴 LE NOYAU NE GARDE QUE LES ENTREES. Jamais les sorties : bloquer une sortie, ce serait
+# PIEGER une position ouverte. Un garde-fou qui empeche de sortir n'est pas un garde-fou.
+#
+# Le nom `MASTER_FLAG` n'est pas decoratif : c'est la CONVENTION que le registre des
+# interrupteurs (`risk/interrupteurs.py`, GH-01) decouvre par regex. Un interrupteur nomme
+# autrement echapperait a l'invariant -- et on aurait recree, pour la huitieme fois, une
+# capacite qu'aucun test ne surveille.
+MASTER_FLAG = "HYPERSMART_NOYAU_AUTORITAIRE"
+NOYAU_FLAG = MASTER_FLAG
+NOYAU_CONSULTATIF = "NOYAU_CONSULTATIF_VERDICT_IGNORE"
+NOYAU_NON_APPLICABLE_SORTIE = "NOYAU_NON_APPLICABLE_CE_N_EST_PAS_UNE_ENTREE"
+
+
+def noyau_autoritaire(env: dict | None = None) -> bool:
+    """Defaut ALLUME. Un interrupteur qui ne fait que REFUSER doit etre allume (cf. GH-01)."""
+    e = env if env is not None else os.environ
+    return str(e.get(NOYAU_FLAG, "1") or "").strip().lower() in ("1", "true", "yes", "on")
 
 
 class DecisionAction(str, Enum):
@@ -46,6 +78,26 @@ class LocalDecisionEngine:
         notional_usdc: float,
         cloid: str,
     ) -> LocalDecision:
+        action = self._action_from_signal(candidate.signal_type)
+
+        # -------------------------------------------------------------- 1. LE NOYAU (G2)
+        # Il ne juge QUE les entrees. Une sortie doit toujours pouvoir sortir.
+        noyau_dict: dict[str, Any]
+        noyau_refuse = False
+        if action is DecisionAction.ENTER:
+            verdict = noyau.decider(self._contexte_noyau(candidate, notional_usdc))
+            noyau_dict = verdict.as_dict()
+            noyau_dict["autoritaire"] = noyau_autoritaire()
+            if not verdict.autorise:
+                if noyau_autoritaire():
+                    noyau_refuse = True
+                else:
+                    # Mode ombre : on garde la trace, mais on n'empeche pas. Le fait que le
+                    # verdict soit IGNORE doit rester ECRIT, sinon personne ne le saura.
+                    noyau_dict.setdefault("signalements", []).append(NOYAU_CONSULTATIF)
+        else:
+            noyau_dict = {"verdict": NOYAU_NON_APPLICABLE_SORTIE, "autoritaire": noyau_autoritaire()}
+
         risk_context = RiskContext(
             spread_bps=candidate.estimated_spread_bps,
             estimated_slippage_bps=candidate.estimated_slippage_bps,
@@ -59,8 +111,21 @@ class LocalDecisionEngine:
         evidence = {
             "candidate": candidate.model_dump(mode="json"),
             "risk_decision": risk_decision.model_dump(mode="json"),
+            "noyau": noyau_dict,
             "decision_layer": "local_decision_engine",
         }
+
+        # Le noyau passe AVANT le RiskEngine : il questionne la PROVENANCE de l'edge, le
+        # RiskEngine ne fait qu'en noter la VALEUR. Une valeur fabriquee bien notee reste
+        # une valeur fabriquee.
+        if noyau_refuse:
+            return LocalDecision(
+                action=DecisionAction.NO_TRADE,
+                reasons=[str(noyau_dict.get("raison", "NOYAU_REFUS"))],
+                candidate_id=candidate.id,
+                evidence=evidence,
+            )
+
         if not risk_decision.allowed:
             return LocalDecision(
                 action=DecisionAction.NO_TRADE,
@@ -69,7 +134,6 @@ class LocalDecisionEngine:
                 evidence=evidence,
             )
 
-        action = self._action_from_signal(candidate.signal_type)
         if action is DecisionAction.NO_TRADE:
             return LocalDecision(
                 action=DecisionAction.NO_TRADE,
@@ -115,6 +179,41 @@ class LocalDecisionEngine:
             candidate_id=candidate.id,
             order_request=request,
             evidence=evidence,
+        )
+
+    @staticmethod
+    def _contexte_noyau(candidate: SignalCandidate, notional_usdc: float) -> noyau.Contexte:
+        """Traduit un candidat en question posee au noyau.
+
+        🔴 `edge_fourni_bps=candidate.edge_remaining_bps` : on le donne au noyau *pour qu'il le
+        CONFRONTE*, pas pour qu'il s'en serve. Le noyau ira chercher l'edge lui-meme dans la
+        table mesuree. Si l'appelant s'etait fabrique un chiffre, la contradiction sera ECRITE
+        dans la preuve (`EDGE_FOURNI_PAR_L_APPELANT_CONTREDIT_LA_MESURE`).
+
+        Un `SignalCandidate` est, par construction, le fill PUBLIC d'un leader (`source_wallet`,
+        `signal_type` open/add/...). Sa famille est donc DISCRETIONNAIRE_PUBLIC -- la zone morte
+        que Q1 et Q3 ont mesuree. On ne la deguise pas en autre chose pour la faire passer.
+
+        Aucun carnet n'est disponible ici (`SignalCandidate` n'en porte pas) : les niveaux sont
+        donc `None`. Ce n'est PAS un laissez-passer -- le noyau refusera sur
+        `NOYAU_PRIX_NON_EXECUTABLE` si jamais la famille redevenait vivante. On n'invente jamais
+        un prix pour combler un trou.
+        """
+        return noyau.Contexte(
+            strategie="COPY",
+            coin=candidate.coin,
+            direction="LONG" if candidate.side == "long" else "SHORT",
+            notional_usd=float(notional_usdc),
+            signal_ms=float(candidate.timestamp_ms),
+            signal_age_ms=float(candidate.signal_age_ms),
+            leader_score=float(candidate.wallet_score),
+            consensus_wallets=None,
+            niveaux_achat=None,
+            niveaux_vente=None,
+            frais_bps=float(candidate.estimated_fee_bps),
+            degradation_copie_bps=float(candidate.estimated_latency_decay_bps),
+            plancher_edge_net_bps=0.0,
+            edge_fourni_bps=float(candidate.edge_remaining_bps),
         )
 
     @staticmethod

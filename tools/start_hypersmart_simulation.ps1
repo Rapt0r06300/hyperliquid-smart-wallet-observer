@@ -110,24 +110,189 @@ Set-HyperSmartDefaultEnv "HYPERSMART_SLTP_ENABLED" "1"
 [Environment]::SetEnvironmentVariable("HYPERSMART_SLTP_ENABLED", "1", "Process")
 [Environment]::SetEnvironmentVariable("HYPERSMART_V26_VOL_BARRIERS", "1", "Process")
 [Environment]::SetEnvironmentVariable("HYPERSMART_V26_VOL_REF_RANGE_BPS", "30", "Process")
-[Environment]::SetEnvironmentVariable("HYPERSMART_V26_VOL_FACTOR_MIN", "0.5", "Process")
-[Environment]::SetEnvironmentVariable("HYPERSMART_V26_VOL_FACTOR_MAX", "2.5", "Process")
-[Environment]::SetEnvironmentVariable("HYPERSMART_SLTP_TAKE_PROFIT_BPS", "120", "Process")
+[Environment]::SetEnvironmentVariable("HYPERSMART_V26_VOL_FACTOR_MIN", "0.8", "Process")
+[Environment]::SetEnvironmentVariable("HYPERSMART_V26_VOL_FACTOR_MAX", "1.5", "Process")
+[Environment]::SetEnvironmentVariable("HYPERSMART_V26_TP_FLOOR_BPS", "45", "Process")
+# TIMEOUT DE POSITION (autopsie PnL 2026-07-11) : le bot DECIDE sur quelques minutes mais TENAIT
+# ses positions 1,3 h en mediane (jusqu'a 8,4 h). L'edge du signal est mesure NUL des 5 minutes :
+# au-dela, ce n'est plus une position de copie, c'est une exposition nue au marche.
+[Environment]::SetEnvironmentVariable("HYPERSMART_SLTP_POSITION_TIMEOUT_MS", "1800000", "Process")
+
+# ---------------------------------------------------------------------------------------------
+# LE GRINDER (funding-arb delta-neutre) -- 2026-07-11.
+# INCOHERENCE CORRIGEE : ces flags n'existaient QUE dans LANCER_HYPERSMART.cmd. Or ce .ps1 est
+# l'AUTORITE de configuration. Lance directement (sans passer par le .cmd), le Grinder etait
+# purement et simplement ETEINT -- et personne ne le voyait. Meme famille de bug que la double
+# source de verite deja corrigee : le .cmd propose, le .ps1 dispose.
+# Le funding-arb est la SEULE strategie dont l'esperance ne repose sur AUCUNE prediction.
+[Environment]::SetEnvironmentVariable("HYPERSMART_FUNDING_ARB_PAPER", "1", "Process")
+[Environment]::SetEnvironmentVariable("HYPERSMART_V26_FUNDING_POLLER", "1", "Process")
+[Environment]::SetEnvironmentVariable("HYPERSMART_V26_FUNDING_POLL_INTERVAL_S", "120", "Process")
+# ATTENTION -- SEUIL NON MESURE. `min_entry_edge_bps_per_hour = 2.5` exige un funding horaire
+# tres au-dessus du taux de base Hyperliquid. C'est peut-etre un VERROU MORT (0 trade garanti),
+# exactement comme le plafond de degradation a 12 bps sous un cout plancher de 14,2.
+# NE PAS le baisser a l'aveugle : d'abord MESURER -> `python tools\measure_funding_gate.py`.
+# On laisse donc la valeur du code telle quelle, et on enregistre le funding pour trancher.
+[Environment]::SetEnvironmentVariable("HYPERSMART_RECORD_MICROSTRUCTURE", "1", "Process")
+
+# ---------------------------------------------------------------------------------------------
+# LE CARNET REEL -- 2026-07-11. LE MEME BUG QUE LE GRINDER : LA CAPACITE EXISTE, L'INTERRUPTEUR
+# EST ETEINT.
+#
+# `l2_snapshot_cache` sait interroger le carnet L2 et en tirer le VRAI spread et le VRAI slippage.
+# Mais AUCUN des deux flags n'etait pose :
+#   * HYPERSMART_V26_BOOK_POLLER      -> le carnet n'etait JAMAIS collecte ;
+#   * HYPERSMART_V26_LIVE_BOOK_COSTS  -> et jamais consomme.
+#
+# Resultat : TOUS les gates de liquidite et de cout tournaient sur des CONSTANTES
+# (spread 6 bps, slippage 6 bps, profondeur 50 000 $) -- les memes pour BTC que pour un meme coin
+# illiquide. Un gate de liquidite qui valide contre un carnet imaginaire ne protege de rien.
+[Environment]::SetEnvironmentVariable("HYPERSMART_V26_BOOK_POLLER", "1", "Process")
+[Environment]::SetEnvironmentVariable("HYPERSMART_V26_LIVE_BOOK_COSTS", "1", "Process")
+[Environment]::SetEnvironmentVariable("HYPERSMART_V26_BOOK_POLL_INTERVAL_S", "10", "Process")
+[Environment]::SetEnvironmentVariable("HYPERSMART_V26_BOOK_POLL_MAX_COINS", "30", "Process")
+# Fraicheur : au-dela, le carnet est PERIME et on retombe sur les constantes (marquees comme telles).
+[Environment]::SetEnvironmentVariable("HYPERSMART_V26_BOOK_FRESH_S", "90", "Process")
+
+# ---------------------------------------------------------------------------------------------
+# GH-01 -- 2026-07-13. LA PILE V26 ENTIERE ETAIT ETEINTE. LA 7e FOIS.
+#
+# Le carnet L2 (ci-dessus, repare le 11/07) etait le MEME bug. Puis la jambe de funding (08/07).
+# Puis le garde-fou lookahead. Puis le verrou du copy-follow. Puis `delta_neutral_carry`. Puis le
+# bus GitHub (allume par defaut, jamais eteint). Et maintenant : **CINQ interrupteurs V26, codes,
+# testes, BRANCHES -- et aucun n'etait pose dans un lanceur.**
+#
+# Pire : TROIS pierres tombales de `risk/tombstones.py` justifient l'enterrement d'anciens modules
+# (kill_switch, circuit_breaker, loss_halts) par « remplace par protections_v26 / graded_halt
+# (VIVANTS) ». Un remplacant ETEINT n'est pas un remplacant : on avait donc enterre les anciens
+# garde-fous au profit de garde-fous qui ne s'executaient jamais.
+#
+# LA REGLE QU'ON S'APPLIQUE (et qui est de l'arithmetique, pas de la prudence) :
+#   * un interrupteur qui ne fait que REFUSER -> ON L'ALLUME. Le pire qu'il puisse faire est de
+#     refuser un trade ; or Q1 et Q3 ont MESURE qu'il n'y a pas d'edge a capturer. Le cout d'un
+#     refus de trop est nul, le cout d'une perte evitee est reel. L'asymetrie est ecrasante.
+#   * un interrupteur qui change la TAILLE ou le SENS -> il change le PnL, on le MESURE d'abord.
+#     (C'est pourquoi HYPERSMART_V26_KELLY_LEADER reste ETEINT : voir risk/interrupteurs.py.)
+#
+# L'invariant est desormais TESTE : `tests/test_interrupteurs.py` echoue si un MASTER_FLAG du
+# code n'est ni allume ici, ni declare eteint AVEC SON MOTIF. Un inventaire se fait une fois et
+# se trompe ; un invariant se verifie a chaque execution.
+[Environment]::SetEnvironmentVariable("HYPERSMART_V26_PROTECTIONS", "1", "Process")
+[Environment]::SetEnvironmentVariable("HYPERSMART_V26_GRADED_HALT", "1", "Process")
+[Environment]::SetEnvironmentVariable("HYPERSMART_V26_MARKET_QUALITY", "1", "Process")
+[Environment]::SetEnvironmentVariable("HYPERSMART_V26_ENTRY_VETOS_AUTHORITATIVE", "1", "Process")
+# HYPERSMART_V26_KELLY_LEADER : VOLONTAIREMENT ABSENT (il change la TAILLE -> voir interrupteurs.py)
+
+# GH-01 : `stop_per_pair` (freqtrade). Le StoplossGuard peut halter GLOBALEMENT ou PAR MARCHE.
+# Par marche = 1 : un marche qui enchaine les stops est mis au coin, les autres continuent.
+# C'est exactement `global_stop` + `stop_per_pair` -- reimplemente, pas copie (freqtrade est GPL).
+[Environment]::SetEnvironmentVariable("HYPERSMART_V26_SG_PER_MARKET", "1", "Process")
+
+# --------------------------------------------------------------------------------------------
+# G2 -- LE NOYAU UNIQUE (2026-07-13). Un seul endroit decide, et il POSSEDE l'edge.
+#
+# Avant : `LocalDecisionEngine` construisait son RiskContext avec l'edge TEL QUE L'APPELANT LE
+# DONNAIT. Le RiskEngine notait ce nombre avec une arithmetique impeccable... sans jamais
+# questionner sa PROVENANCE. C'est exactement ainsi que TROIS edges FABRIQUES (fresh_opportunity,
+# wallet_mirror_runtime, ws_price_discrepancy) ont pu vivre des mois dans le code.
+#
+# Allume, `noyau_unique.decider()` garde toute ENTREE : famille du signal (Q3, zones mortes
+# PROUVEES), edge issu de la table MESUREE (Q1, jamais d'une formule), prix EXECUTABLES (Q2,
+# jamais le mid), edge net apres couts reels. Il ne garde JAMAIS les sorties.
+[Environment]::SetEnvironmentVariable("HYPERSMART_NOYAU_AUTORITAIRE", "1", "Process")
+
+# --------------------------------------------------------------------------------------------
+# COLLECTE DU CARNET -- 2026-07-11. LE POLLER SONDAIT UNE LISTE VIDE, EN SILENCE.
+#
+# Aucun `l2_book.jsonl` n'a JAMAIS ete ecrit : le poller ne sondait qu'une seule liste de coins,
+# et un `if coins:` eteignait la collecte des qu'elle etait vide -- sans un log, sans une alerte.
+# Ce socle garantit qu'il y a TOUJOURS quelque chose a sonder. Collecter des octets n'est pas
+# ouvrir une position : le deny-by-default protege les ORDRES, pas les DONNEES.
+#
+# C'est la seule piste restante qui ne parie sur AUCUNE prediction : encaisser le spread au lieu
+# de le payer. Le copy-trading, lui, est mesure sans edge (courbe edge/horizon plate).
+# --------------------------------------------------------------------------------------------
+[Environment]::SetEnvironmentVariable("HYPERSMART_V26_BOOK_DEFAULT_COINS", "BTC,ETH,SOL,HYPE,DOGE,XRP,SUI,AVAX,LINK,LTC", "Process")
+
+# BALAYAGE COMPLET DU CARNET (2026-07-12).
+# Premiere mesure reelle : spread median 0,30 bps (BTC 0,16 - SOL 0,13) contre 3,0 bps de frais
+# maker aller-retour. Sur les majors, le market making est arithmetiquement mort.
+# Les seuls spreads > frais vus sont sur des marches FINS. Pour savoir s'il EXISTE un marche
+# assez large, il faut voir les ~230, pas les 8 majors. Rotation : 30 coins / cycle -> couverture
+# complete en ~1,5 min, sans une seule requete de plus.
+[Environment]::SetEnvironmentVariable("HYPERSMART_V26_BOOK_SWEEP_ALL", "1", "Process")
+
+# ---------------------------------------------------------------------------------------------
+# BUS GITHUB : ETEINT (decision de Flo, 2026-07-12).
+# Il avait deja ete juge et ecarte (PF net 0,61), mais le DEFAUT DU CODE etait "priority" -- donc
+# il tournait toujours, sans etre nulle part dans le launcher. Personne ne l'avait rallume : il
+# n'avait jamais ete eteint.
+# Ce qu'il faisait, verifie : ~810 evaluations de profils externes pour 21 entrees reelles, et des
+# evenements "PAPER_ORDER_ACCEPTED" qui ne sont PAS des ordres (notionnel 0, sens NONE, PnL None).
+# Ils ne corrompent PAS la comptabilite (prouve : 171 evaluations + 1 close -> closed_trades = 1),
+# mais ils polluent le vocabulaire, l'ecran, et surtout le hot path.
+# Les clones sous runtime/research/github_repos_v24/ restent intacts : bibliotheque, pas moteur.
+# ---------------------------------------------------------------------------------------------
+[Environment]::SetEnvironmentVariable("HYPERSMART_EXTERNAL_PROFILES_SCOPE", "off", "Process")
+
+# --------------------------------------------------------------------------------------------
+# EDGE EMPIRIQUE -- le bot n'ouvre plus sur un chiffre invente (2026-07-11).
+#
+# L'ancienne formule etait `dominance * 45 + bonus` : un "edge" en bps qui n'avait JAMAIS touche
+# un prix. Le bot exige desormais une table MESUREE (runtime/calibration/empirical_edge.json,
+# construite par tools/construire_calibration_edge.py sur 15 571 signaux reels).
+#
+# Cette table dit, aujourd'hui : edge median NEGATIF a toutes les fraicheurs mesurees
+# (-2,17 / -0,56 / -0,23 bps) pour un cout de 13 bps.
+# => Le bot va REFUSER d'ouvrir en copy. **Ce n'est pas une panne : c'est le bon comportement.**
+#    Chaque position qu'il n'ouvre pas est de l'argent qu'il ne perd pas.
+# --------------------------------------------------------------------------------------------
+[Environment]::SetEnvironmentVariable("HYPERSMART_REQUIRE_EMPIRICAL_EDGE", "1", "Process")
+[Environment]::SetEnvironmentVariable("HYPERSMART_EDGE_CALIBRATION_PATH", "runtime/calibration/empirical_edge.json", "Process")
+
+# ---------------------------------------------------------------------------------------------
+# BUDGET DE RISQUE **PAR MOTEUR** -- 2026-07-11.
+# Le garde-fou de session ne connaissait qu'UN SEUL PnL : si le Sniper perdait 40 $, le Grinder
+# etait puni aussi (alors que le funding delta-neutre n'a rien a voir avec la cause). Et un
+# Grinder gagnant MASQUAIT un Sniper qui saigne. Chaque moteur repond desormais de SES pertes.
+# En % du capital : un budget en dur ne suit pas la taille du compte.
+[Environment]::SetEnvironmentVariable("HYPERSMART_ENGINE_SOFT_LOSS_PCT", "4", "Process")    # 40 $ sur 1000
+[Environment]::SetEnvironmentVariable("HYPERSMART_ENGINE_HARD_LOSS_PCT", "15", "Process")   # 150 $ sur 1000
+
+# EXPOSITION DIRECTIONNELLE (2026-07-11) — LE GARDE-FOU QUI MANQUAIT.
+# Observe en LIVE : 9 positions ouvertes, presque toutes SHORT, ~4 500 $ de notionnel sur 1 000 $
+# de capital = 250 % du capital dans UN SEUL sens. Le gate de portefeuille ne regardait que
+# l'exposition BRUTE (une somme d'abs()) : pour lui, 6 shorts et 1 long etaient "diversifies".
+# Sur le run precedent, 97 % de la perte venait des shorts. Ce n'est pas un portefeuille :
+# c'est le meme pari repete 9 fois.
+[Environment]::SetEnvironmentVariable("HYPERSMART_MAX_NET_DIRECTIONAL_PCT", "100", "Process")
+[Environment]::SetEnvironmentVariable("HYPERSMART_MAX_COIN_NOTIONAL_PCT", "60", "Process")
+# === CALIBRAGE #1 (candidat OOS-positif du replay 1.4M, 2026-07-09) : TP serre / SL large / trailing large ===
+[Environment]::SetEnvironmentVariable("HYPERSMART_SLTP_TAKE_PROFIT_BPS", "110", "Process")
 [Environment]::SetEnvironmentVariable("HYPERSMART_SLTP_STOP_LOSS_BPS", "60", "Process")
-[Environment]::SetEnvironmentVariable("HYPERSMART_SLTP_TRAILING_BPS", "30", "Process")
-[Environment]::SetEnvironmentVariable("HYPERSMART_SLTP_TRAILING_ACTIVATION_BPS", "45", "Process")
-[Environment]::SetEnvironmentVariable("HYPERSMART_SLTP_BREAKEVEN_BUFFER_BPS", "0", "Process")
+[Environment]::SetEnvironmentVariable("HYPERSMART_SLTP_TRAILING_BPS", "45", "Process")
+[Environment]::SetEnvironmentVariable("HYPERSMART_SLTP_TRAILING_ACTIVATION_BPS", "65", "Process")
+[Environment]::SetEnvironmentVariable("HYPERSMART_SLTP_BREAKEVEN_BUFFER_BPS", "10", "Process")
 [Environment]::SetEnvironmentVariable("HYPERSMART_SLTP_STOP_MIN_HOLD_MS", "45000", "Process")
-[Environment]::SetEnvironmentVariable("HYPERSMART_SLTP_CATASTROPHIC_STOP_BPS", "180", "Process")
+[Environment]::SetEnvironmentVariable("HYPERSMART_SLTP_CATASTROPHIC_STOP_BPS", "110", "Process")
 Set-HyperSmartDefaultEnv "HYPERSMART_ADAPTIVE_PAPER_SIZING" "1"
 Set-HyperSmartDefaultEnv "HYPERSMART_POSITIVE_PNL_REQUIRED_FOR_FUTURE_REVIEW" "1"
 Set-HyperSmartDefaultEnv "HYPERSMART_SIMULATION_INTERVAL_SECONDS" "$IntervalSeconds"
 # Reglages SELECTIFS calibres sur les logs reels: Hyperliquid paper local,
 # signaux frais uniquement, mais sans affamer le moteur avec un seuil impossible.
-[Environment]::SetEnvironmentVariable("HYPERSMART_SIMULATION_MAX_SIGNAL_AGE_MS", "30000", "Process")
-Set-HyperSmartDefaultEnv "HYPERSMART_REDUCE_MAX_SIGNAL_AGE_MS" "15000"
+# 2026-07-10 (analyse replay): 30s -> 10s. La fraicheur est LE levier (degradation de copie plus
+# faible => edge net qui survit aux couts). NB: on garde min_edge a 16 (pas 40) pour NE PAS rejeter
+# les bons signaux frais type LIT +30bps / XYZ:META +36bps qu'on vient justement de debloquer.
+[Environment]::SetEnvironmentVariable("HYPERSMART_SIMULATION_MAX_SIGNAL_AGE_MS", "10000", "Process")
+Set-HyperSmartDefaultEnv "HYPERSMART_REDUCE_MAX_SIGNAL_AGE_MS" "10000"
+# 2026-07-10 (Flo) FIX-MID-COVERAGE : de bons signaux TRES frais a edge positif (ex LIT +30bps@0.8s)
+# etaient rejetes CURRENT_MID_REQUIRED faute de mid allMids sur coins exotiques. On autorise le prix
+# de reference du leader comme mid d'entree UNIQUEMENT si le signal est <= cette limite (la degradation
+# de copie reste facturee en cout, le gate liquidite filtre encore l'illiquide). 0 = OFF (historique).
+[Environment]::SetEnvironmentVariable("HYPERSMART_LEADER_MID_FALLBACK_MAX_AGE_MS", "5000", "Process")
 Set-HyperSmartDefaultEnv "HYPERSMART_MIN_REDUCE_NOTIONAL_USDT" "0"
 # FORCE (demande Flo: ouvrir beaucoup plus, mode grinder). Consensus 3->2 wallets.
+# CALIBRAGE #1 : consensus >= 3 wallets (qualite du signal)
 [Environment]::SetEnvironmentVariable("HYPERSMART_FUSION_COPY_MIN_WALLETS", "2", "Process")
 [Environment]::SetEnvironmentVariable("HYPERSMART_FRESH_OPPORTUNITY_MIN_WALLETS", "2", "Process")
 Set-HyperSmartDefaultEnv "HYPERSMART_FUSION_COPY_COST_BUFFER_BPS" "24"
@@ -138,16 +303,17 @@ Set-HyperSmartDefaultEnv "HYPERSMART_DIRECT_ARBITRAGE_MIN_SPREAD_BPS" "30"
 Set-HyperSmartDefaultEnv "HYPERSMART_DIRECT_COPY_MIN_EDGE_BPS" "32"
 Set-HyperSmartDefaultEnv "HYPERSMART_DIRECT_COPY_SINGLE_WALLET_EDGE_BONUS_BPS" "45"
 # FORCE (bug sniper trouvé: 8s < latence WS réelle ~11s -> le sniper n'ouvrait JAMAIS).
-[Environment]::SetEnvironmentVariable("HYPERSMART_DIRECT_COPY_MAX_SIGNAL_AGE_MS", "20000", "Process")
-Set-HyperSmartDefaultEnv "HYPERSMART_DIRECT_COPY_MIN_LIQUIDITY" "0.45"
+# 2026-07-10 (analyse replay): 20s -> 10s (fraicheur sur le canal direct-copy aussi)
+[Environment]::SetEnvironmentVariable("HYPERSMART_DIRECT_COPY_MAX_SIGNAL_AGE_MS", "10000", "Process")
+Set-HyperSmartDefaultEnv "HYPERSMART_DIRECT_COPY_MIN_LIQUIDITY" "0.55"
 Set-HyperSmartDefaultEnv "HYPERSMART_DIRECT_COPY_MAX_DEGRADATION_BPS" "24"
-Set-HyperSmartDefaultEnv "HYPERSMART_DIRECT_COPY_MAX_OPEN_POSITIONS" "3"
+Set-HyperSmartDefaultEnv "HYPERSMART_DIRECT_COPY_MAX_OPEN_POSITIONS" "8"
 # V25: 0.75 declenchait le mode protection quasi en permanence sur 1000 USDT.
-Set-HyperSmartDefaultEnv "HYPERSMART_SESSION_LOSS_GUARD_USDC" "2.50"
-Set-HyperSmartDefaultEnv "HYPERSMART_SESSION_LOSS_EDGE_BONUS_BPS" "20"
-Set-HyperSmartDefaultEnv "HYPERSMART_DIRECT_COPY_RECOVERY_EDGE_BONUS_BPS" "24"
-Set-HyperSmartDefaultEnv "HYPERSMART_DIRECT_COPY_RECOVERY_MIN_CONSENSUS" "4"
-Set-HyperSmartDefaultEnv "HYPERSMART_DIRECT_COPY_RECOVERY_MIN_LIQUIDITY" "0.60"
+Set-HyperSmartDefaultEnv "HYPERSMART_SESSION_LOSS_GUARD_USDC" "40.00"
+Set-HyperSmartDefaultEnv "HYPERSMART_SESSION_LOSS_EDGE_BONUS_BPS" "10"
+Set-HyperSmartDefaultEnv "HYPERSMART_DIRECT_COPY_RECOVERY_EDGE_BONUS_BPS" "12"
+Set-HyperSmartDefaultEnv "HYPERSMART_DIRECT_COPY_RECOVERY_MIN_CONSENSUS" "2"
+Set-HyperSmartDefaultEnv "HYPERSMART_DIRECT_COPY_RECOVERY_MIN_LIQUIDITY" "0.55"
 # 2026-07-08 (demande Flo "laisser courir"): quality-guard OFF. Il fermait les positions
 # a ~0.15% (non-evidencees) avant qu'elles atteignent leur SL/TP -> on capturait du bruit.
 # Desormais SL/TP vol-ajustes + sortie du leader gouvernent (capture le vrai mouvement).
@@ -164,9 +330,10 @@ Set-HyperSmartDefaultEnv "HYPERSMART_SIMULATION_ALLOW_ADD_AS_ENTRY" "0"
 # Set-HyperSmartDefaultEnv "HYPERSMART_SIMULATION_MIN_EDGE_BPS" "22"
 # FORCE (demande Flo: le bot ouvrait trop peu). Plancher edge 40->22: atteignable mais
 # toujours POSITIF apres couts. ~7%% des candidats passent (vs 0.4%% a 40) -> bien plus de trades.
-[Environment]::SetEnvironmentVariable("HYPERSMART_SIMULATION_MIN_EDGE_BPS", "22", "Process")
-[Environment]::SetEnvironmentVariable("HYPERSMART_SIMULATION_MIN_LIQUIDITY_SCORE", "0.28", "Process")
-Set-HyperSmartDefaultEnv "HYPERSMART_SIMULATION_MAX_COPY_DEGRADATION_BPS" "28"
+# CALIBRAGE #1 : edge net >=16 bps, liquidite >=0.80, degradation copie <=12 bps (filtres qualite stricts)
+[Environment]::SetEnvironmentVariable("HYPERSMART_SIMULATION_MIN_EDGE_BPS", "16", "Process")
+[Environment]::SetEnvironmentVariable("HYPERSMART_SIMULATION_MIN_LIQUIDITY_SCORE", "0.55", "Process")
+[Environment]::SetEnvironmentVariable("HYPERSMART_SIMULATION_MAX_COPY_DEGRADATION_BPS", "24", "Process")
 # Historical conservative marker retained for launcher regression tests:
 # Set-HyperSmartDefaultEnv "HYPERSMART_MAX_OPEN_POSITIONS" "12"
 Set-HyperSmartDefaultEnv "HYPERSMART_MAX_OPEN_POSITIONS" "12"
@@ -186,26 +353,36 @@ Set-HyperSmartDefaultEnv "HYPERSMART_MAX_TOTAL_EXPOSURE_USDT" "400"
 # Read-only / paper-only ; borne dure a 8 connexions (anti-ban) cote code.
 [Environment]::SetEnvironmentVariable("HYPERSMART_FILLS_MULTIPLEX", "1", "Process")
 [Environment]::SetEnvironmentVariable("HYPERSMART_FILLS_MULTIPLEX_CONNECTIONS", "4", "Process")
+# 2026-07-10 (levier A fraicheur) WS-FIRST: les canaux pousses en WS (allMids, userFills) ne
+# consomment plus le budget REST -> plus de coins frais couverts par cycle ET des mids allMids
+# plus frais (renforce le fix mid-coverage). Opt-in, no-op si OFF, lecture seule, teste.
+[Environment]::SetEnvironmentVariable("HYPERSMART_WS_FIRST_COLLECT", "1", "Process")
 # SIZING REEL (Flo, prouve a l'ecran: notional $50 -> PnL -0.12 centimes). Le $50 est la MARGE
 # par position ; x levier 10 = notional $500 -> PnL = 500 x Dprix = DES DOLLARS. Solde 1000 /
 # marge 50 = 20 positions. FORCE (ecrase le 12/40/400 set-if-unset + l'env colle Windows).
 [Environment]::SetEnvironmentVariable("HYPERSMART_MAX_POSITION_USDT", "50", "Process")
 [Environment]::SetEnvironmentVariable("HYPERSMART_MAX_OPEN_POSITIONS", "20", "Process")
 [Environment]::SetEnvironmentVariable("HYPERSMART_MAX_TOTAL_EXPOSURE_USDT", "1000", "Process")
-Set-HyperSmartDefaultEnv "HYPERSMART_SINGLE_WALLET_MIN_EDGE_BPS" "55"
+Set-HyperSmartDefaultEnv "HYPERSMART_SINGLE_WALLET_MIN_EDGE_BPS" "30"
 Set-HyperSmartDefaultEnv "HYPERSMART_TOP_WALLET_SAMPLE_LIMIT" "8000"
 # V25 (2026-07-03): hard halt a 2.50 USDC (=0.25% de 1000) gelait la session
 # entiere apres une poignee de stops; 644 refus SESSION_HARD_LOSS_HALT observes,
 # y compris des edges 64-68 bps. Soft 0.25%, hard 1% du capital de depart.
-Set-HyperSmartDefaultEnv "HYPERSMART_SESSION_GUARD_SOFT_LOSS_USDC" "2.50"
-Set-HyperSmartDefaultEnv "HYPERSMART_SESSION_GUARD_HARD_LOSS_USDC" "10.00"
-Set-HyperSmartDefaultEnv "HYPERSMART_SESSION_GUARD_EXTRA_EDGE_BPS" "25"
-Set-HyperSmartDefaultEnv "HYPERSMART_SESSION_GUARD_MIN_CONSENSUS" "3"
-Set-HyperSmartDefaultEnv "HYPERSMART_SESSION_GUARD_MIN_LIQUIDITY" "0.45"
-Set-HyperSmartDefaultEnv "HYPERSMART_COIN_SIDE_LOSS_COOLDOWN_USDC" "0.20"
-Set-HyperSmartDefaultEnv "HYPERSMART_COIN_SIDE_LOSS_RECOVERY_EXTRA_EDGE_BPS" "35"
-Set-HyperSmartDefaultEnv "HYPERSMART_COIN_SIDE_LOSS_MIN_CONSENSUS" "3"
-Set-HyperSmartDefaultEnv "HYPERSMART_COIN_SIDE_LOSS_MIN_LIQUIDITY" "0.45"
+Set-HyperSmartDefaultEnv "HYPERSMART_SESSION_GUARD_SOFT_LOSS_USDC" "40.00"
+Set-HyperSmartDefaultEnv "HYPERSMART_SESSION_GUARD_HARD_LOSS_USDC" "150.00"
+Set-HyperSmartDefaultEnv "HYPERSMART_SESSION_GUARD_EXTRA_EDGE_BPS" "10"
+Set-HyperSmartDefaultEnv "HYPERSMART_SESSION_GUARD_MIN_CONSENSUS" "2"
+Set-HyperSmartDefaultEnv "HYPERSMART_SESSION_GUARD_MIN_LIQUIDITY" "0.50"
+Set-HyperSmartDefaultEnv "HYPERSMART_COIN_SIDE_LOSS_COOLDOWN_USDC" "12.00"
+# Cliquets coin / leader (audit calibrage 2026-07-11) : etaient EN DUR a 0.50 $ / 0.35 $ dans
+# routes.py -> un coin etait BANNI pour toute la session des -2.00 $ et un leader des -1.40 $,
+# soit UNE seule perte normale (notional 500 $). Desormais configurables et a l'echelle reelle.
+# Bannissement definitif = 4x ces valeurs (coin -60 $, leader -48 $) = un vrai probleme, pas du bruit.
+Set-HyperSmartDefaultEnv "HYPERSMART_COIN_SESSION_LOSS_COOLDOWN_USDC" "15.00"
+Set-HyperSmartDefaultEnv "HYPERSMART_LEADER_SESSION_LOSS_COOLDOWN_USDC" "12.00"
+Set-HyperSmartDefaultEnv "HYPERSMART_COIN_SIDE_LOSS_RECOVERY_EXTRA_EDGE_BPS" "12"
+Set-HyperSmartDefaultEnv "HYPERSMART_COIN_SIDE_LOSS_MIN_CONSENSUS" "2"
+Set-HyperSmartDefaultEnv "HYPERSMART_COIN_SIDE_LOSS_MIN_LIQUIDITY" "0.50"
 Set-HyperSmartDefaultEnv "HYPERSMART_V12_GATE_AUTHORITATIVE" "1"
 Set-HyperSmartDefaultEnv "HYPERSMART_V14_CONSENSUS_WINDOW_AUTHORITATIVE" "1"
 Set-HyperSmartDefaultEnv "HYPERSMART_V14_EXEC_COST_AUTHORITATIVE" "1"
@@ -336,6 +513,16 @@ function Get-HyperSmartRuntimeProcesses {
     }
 }
 
+function Stop-HyperSmartProcessTree {
+    param([int]$ProcId)
+    if (-not $ProcId -or $ProcId -eq $PID) { return }
+    # /T tue TOUT l'arbre (enfants: workers multiprocessing du poller, connexions firehose,
+    # interface.py de l'IA lancee par ia_train_loop.ps1). Sans /T, Stop-Process ne tuait que
+    # le parent -> les enfants survivaient en orphelins (bug "Q ne ferme pas tout", Flo 2026-07-10).
+    try { & taskkill.exe /PID $ProcId /T /F *> $null }
+    catch { try { Stop-Process -Id $ProcId -Force -ErrorAction SilentlyContinue } catch {} }
+}
+
 function Stop-HyperSmartRuntime {
     param([string]$Reason = "manual_stop")
     Write-LauncherLine "Arret local demande ($Reason). Fermeture du serveur UI et du poller read-only..."
@@ -348,8 +535,8 @@ function Stop-HyperSmartRuntime {
     $runtimeProcesses = @(Get-HyperSmartRuntimeProcesses)
     foreach ($process in $runtimeProcesses) {
         try {
-            Write-LauncherLog "Stopping HyperSmart runtime pid=$($process.ProcessId)"
-            Stop-Process -Id $process.ProcessId -Force -ErrorAction SilentlyContinue
+            Write-LauncherLog "Stopping HyperSmart runtime tree pid=$($process.ProcessId)"
+            Stop-HyperSmartProcessTree -ProcId $process.ProcessId
         } catch {
             Write-LauncherLog "Stop skipped for pid=$($process.ProcessId): $($_.Exception.Message)"
         }
@@ -362,14 +549,27 @@ function Stop-HyperSmartRuntime {
         foreach ($pp in $portPids) {
             if ($pp -and $pp -ne $PID) {
                 Write-LauncherLog "Freeing UI port 8794 pid=$pp"
-                Stop-Process -Id $pp -Force -ErrorAction SilentlyContinue
+                Stop-HyperSmartProcessTree -ProcId $pp
             }
         }
     } catch { Write-LauncherLog "port 8794 free skipped: $($_.Exception.Message)" }
+    # FILET DE SECURITE (audit 2026-07-11) : tuer AUSSI les PID que CE lanceur a demarres
+    # (UI, poller, IA shadow, stream). Avant, $startedProcesses etait rempli mais JAMAIS utilise :
+    # l'arret reposait uniquement sur la correspondance de ligne de commande. Un processus dont la
+    # ligne de commande ne matchait aucun motif survivait a "Q". Ici on tue par PID connu, en arbre.
+    foreach ($startedPid in @($script:startedProcesses)) {
+        try {
+            Write-LauncherLog "Stopping launcher-started tree pid=$startedPid"
+            Stop-HyperSmartProcessTree -ProcId $startedPid
+        } catch {}
+    }
     # 2e passe de securite: re-tuer tout ce qui reste apres 600 ms.
     Start-Sleep -Milliseconds 600
     foreach ($process in @(Get-HyperSmartRuntimeProcesses)) {
-        try { Stop-Process -Id $process.ProcessId -Force -ErrorAction SilentlyContinue } catch {}
+        try { Stop-HyperSmartProcessTree -ProcId $process.ProcessId } catch {}
+    }
+    foreach ($startedPid in @($script:startedProcesses)) {
+        try { Stop-HyperSmartProcessTree -ProcId $startedPid } catch {}
     }
 }
 
@@ -409,8 +609,8 @@ if ($RestartExisting) {
     try {
         $stale = @(Get-HyperSmartRuntimeProcesses)
         foreach ($process in $stale) {
-            Write-LauncherLine "Arret ancien processus HyperSmart pid=$($process.ProcessId)"
-            Stop-Process -Id $process.ProcessId -Force -ErrorAction SilentlyContinue
+            Write-LauncherLine "Arret ancien processus HyperSmart (arbre) pid=$($process.ProcessId)"
+            Stop-HyperSmartProcessTree -ProcId $process.ProcessId
         }
         for ($wait = 0; $wait -lt 30; $wait++) {
             $remaining = @(Get-HyperSmartRuntimeProcesses)

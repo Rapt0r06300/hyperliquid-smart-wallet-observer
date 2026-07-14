@@ -28,15 +28,21 @@ def test_maker_fill_is_much_cheaper_than_taker(monkeypatch):
     maker = _cost(maker=True)
     assert maker < taker
     assert taker >= 4.5  # taker fee + demi-spread au minimum
-    assert maker <= 0.0  # rebate par défaut (comportement historique)
+    # TARIF REEL HYPERLIQUID (corrige 2026-07-11) : le maker COUTE 0,015 % (1,5 bps).
+    # Ce test affirmait `maker <= 0.0`, c'est-a-dire que le bot etait PAYE pour entrer. Faux :
+    # le rebate n'existe qu'aux paliers de volume eleves. Un test qui encode un bug le protege.
+    assert 0.0 < maker <= 2.0, "un fill maker est MOINS CHER qu'un taker, mais jamais gratuit"
 
 
 def test_adverse_selection_penalty_applies_in_grinder_mode(monkeypatch):
     monkeypatch.setenv("HYPERSMART_MAKER_ADVERSE_SELECTION_BPS", "2.0")
     maker = _cost(maker=True)
-    assert abs(maker - (-1.0 + 2.0)) < 1e-9  # rebate -1.0 + adverse 2.0
+    # cout maker = frais reels (1,5) + selection adverse (2,0) -- et non plus un rebate de -1,0
+    assert abs(maker - (1.5 + 2.0)) < 1e-9
     monkeypatch.setenv("HYPERSMART_MAKER_ADVERSE_SELECTION_BPS", "0")
-    assert _cost(maker=True) <= 0.0
+    # sans penalite de selection adverse, le cout maker se reduit aux FRAIS reels (1,5 bps).
+    # Il reste POSITIF : un fill passif n'est pas gratuit (tarif Hyperliquid 0,015 %).
+    assert abs(_cost(maker=True) - 1.5) < 1e-9
 
 
 def test_paper_engine_execution_style_env(monkeypatch):

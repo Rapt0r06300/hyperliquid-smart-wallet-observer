@@ -1,0 +1,99 @@
+
+==============================================================================
+ T2 -- FALSIFICATION DU CARRY DELTA-NEUTRE
+==============================================================================
+
+  232 perps - 296 spots - 8 coins portent LE MEME NOM
+
+==============================================================================
+ A1 -- MEME NOM = MEME ACTIF ? (HIP-1 laisse deployer n'importe quel ticker)
+==============================================================================
+  AZTEC    perp       0.014930   spot       0.014944   ecart           -9.4 bps   MEME ACTIF
+  BERA     perp       0.189910   spot       0.000800   ecart     +2363875.0 bps   *** COLLISION DE TICKER -- PAS LE MEME ACTIF ***
+  HYPE     perp      67.322000   spot      67.297000   ecart           +3.7 bps   MEME ACTIF
+  MON      perp       0.022746   spot       0.004755   ecart       +37836.0 bps   *** COLLISION DE TICKER -- PAS LE MEME ACTIF ***
+  PUMP     perp       0.001451   spot       0.000092   ecart      +147187.7 bps   *** COLLISION DE TICKER -- PAS LE MEME ACTIF ***
+  PURR     perp       0.091995   spot       0.091612   ecart          +41.8 bps   MEME ACTIF
+  STABLE   perp       0.036741   spot       0.036849   ecart          -29.3 bps   MEME ACTIF
+  TRUMP    perp       1.551400   spot       0.000185   ecart    +83849459.5 bps   *** COLLISION DE TICKER -- PAS LE MEME ACTIF ***
+
+  >>> 4 coin(s) sur 8 sont VRAIMENT couvrables. Les autres sont des HOMONYMES :
+      un perp couvert par un token qui porte le meme nom mais cote 800x moins
+      n'est pas couvert. Ce sont DEUX paris nus qui s'ignorent.
+
+==============================================================================
+ A2 -- LE FUNDING REELLEMENT ENCAISSE (90 jours d'historique, pas un modele)
+ A3 -- LA BASE : un RISQUE d'esperance nulle, pas un cadeau
+==============================================================================
+
+  AZTEC
+    funding encaisse par un SHORT sur 2160 h (90 j) : +290.4 bps
+    moyenne +0.1344 bps/h   |   heures ou le short A PAYE : 6.2 %
+    PIRE fenetre de 30 jours : +78.8 bps   <- c'est ELLE qui decide
+    base (premium) : moyenne +0.1 bps, ecart-type 5.1 bps, min -21.6 / max +105.2
+
+  HYPE
+    funding encaisse par un SHORT sur 2160 h (90 j) : +229.3 bps
+    moyenne +0.1062 bps/h   |   heures ou le short A PAYE : 11.9 %
+    PIRE fenetre de 30 jours : +52.1 bps   <- c'est ELLE qui decide
+    base (premium) : moyenne -0.8 bps, ecart-type 3.9 bps, min -12.6 / max +17.8
+
+  PURR
+    funding encaisse par un SHORT sur 2160 h (90 j) : +533.4 bps
+    moyenne +0.2469 bps/h   |   heures ou le short A PAYE : 3.4 %
+    PIRE fenetre de 30 jours : +58.6 bps   <- c'est ELLE qui decide
+    base (premium) : moyenne +2.0 bps, ecart-type 9.3 bps, min -101.1 / max +60.1
+
+  STABLE
+    funding encaisse par un SHORT sur 2160 h (90 j) : -2219.1 bps
+    moyenne -1.0273 bps/h   |   heures ou le short A PAYE : 71.3 %
+    PIRE fenetre de 30 jours : -964.2 bps   <- c'est ELLE qui decide
+    base (premium) : moyenne -12.6 bps, ecart-type 14.9 bps, min -240.3 / max +12.3
+
+==============================================================================
+ A4 -- LE CARNET SPOT REEL (plus de 'liquidite' inventee depuis le volume 24 h)
+==============================================================================
+  AZTEC    SPOT (@285) : spread  10.7 bps   profondeur bid       20 $ / ask      220 $
+           volume spot 24 h : 0 k$       <<< SOUS LE PLANCHER : ce carnet ne se regarnit pas
+           PERP        : spread  10.0 bps   profondeur bid      500 $ / ask      500 $
+  HYPE     SPOT (@107) : spread   0.3 bps   profondeur bid     6607 $ / ask     7884 $
+           volume spot 24 h : 29.2 M$    
+           PERP        : spread   0.1 bps   profondeur bid      256 $ / ask    20527 $
+  PURR     SPOT (PURR/USDC) : spread  43.9 bps   profondeur bid      112 $ / ask       68 $
+           volume spot 24 h : 216 k$     <<< SOUS LE PLANCHER : ce carnet ne se regarnit pas
+           PERP        : spread  43.9 bps   profondeur bid      260 $ / ask      100 $
+  STABLE   SPOT (@258) : spread  67.0 bps   profondeur bid       20 $ / ask      109 $
+           volume spot 24 h : 0 k$       <<< SOUS LE PLANCHER : ce carnet ne se regarnit pas
+           PERP        : spread   7.1 bps   profondeur bid      648 $ / ask      334 $
+
+==============================================================================
+ VERDICT -- funding REEL  -  (frais + SPREAD des 2 carnets), et le risque nomme
+==============================================================================
+  LE SPREAD ETAIT ABSENT DU MODELE. C'est le poste DOMINANT sur ces carnets :
+  sur PURR, 80 bps de spread contre 18 bps de frais. On paie 13x ce qu'on comptait.
+  La base n'est PAS creditee : on ne la capture que si elle CONVERGE.
+
+  coin      spr.spot  spr.perp   cout A/R   30j MOYEN    30j PIRE  verdict
+  -------- --------- --------- ---------- ----------- -----------  ------------------------
+  AZTEC        10.7b     10.0b        --          --          --  SPOT MORT : 235 $ de volume / 24 h
+  HYPE          0.3b      0.1b      19.0b      +57.4b      +33.1b  TIENT MEME AU PIRE
+  PURR         43.9b     43.9b        --          --          --  SPOT MORT : 216414 $ de volume / 24 h
+  STABLE       67.0b      7.1b        --          --          --  SPOT MORT : 378 $ de volume / 24 h
+
+  >>> HYPE : +33.1 bps / 30 j dans le PIRE mois observe, +57.4 bps en moyenne.
+      Sur 500 $ : 1.66 $ dans le pire mois, 2.87 $ en moyenne.
+      Slippage REEL mesure en traversant les carnets pour 500 $ :
+        spot achat 0.15 bps | spot vente 0.15 bps | perp vente 0.64 bps | perp achat 0.07 bps
+        -> cout total aller-retour : 19.0 bps (frais 18 + slippage 1.0)
+
+  !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+  A5 -- LE RISQUE QUI RESTE, ET IL N'EST PAS MODELISE :
+      Le spot ne sert PAS de marge au perp sur Hyperliquid. Un delta-neutre
+      N'EST PAS sans risque : si le prix monte fort, la jambe SHORT perp peut
+      etre LIQUIDEE pendant que la jambe spot, elle, va bien. On se reveille
+      LONG SPOT A NU -- exactement le pari qu'on voulait supprimer.
+      Un carry sans plan de marge est un pari directionnel a retardement.
+  !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+
+  rapport : data\reports\t2_falsification_carry.json
+

@@ -1,3 +1,15 @@
+"""ADAPTATEUR FUSION -- mis a jour apres la decouverte de l'EDGE FABRIQUE (2026-07-11).
+
+Ces tests exigeaient que le bot OUVRE une position. Or l'"edge" qui autorisait cette ouverture
+valait `dominance x 45 + bonus - 18` : un score de VOTE, jamais un prix. Le code l'avouait
+(`edge_source = "CONSENSUS_VOTE_PROXY_NOT_EMPIRICAL"`).
+
+Regle desormais : un edge est MESURE, ou il n'existe pas -> NO_TRADE. **Deny-by-default.**
+Ces tests verifient donc les DEUX comportements :
+  * par defaut, sans table d'edge mesuree -> le bot REFUSE (c'est le correctif) ;
+  * en mode A/B explicite (HYPERSMART_REQUIRE_EMPIRICAL_EDGE=0) -> l'ancien chemin fonctionne
+    encore, pour pouvoir COMPARER. Il ne doit jamais redevenir le defaut.
+"""
 from hl_observer.copy_wallet.copy_conflict_resolver import LeaderVote
 from hl_observer.paper_trading.fusion_paper_engine_adapter import (
     run_copy_votes_through_paper_engine,
@@ -6,7 +18,9 @@ from hl_observer.paper_trading.fusion_paper_engine_adapter import (
 from hl_observer.signals.distilled_opportunity_detector import DistilledOpportunity
 
 
-def test_fusion_paper_engine_adapter_uses_existing_paper_engine():
+def test_fusion_paper_engine_adapter_uses_existing_paper_engine(monkeypatch):
+    # mode A/B explicite : on exerce l'ANCIEN chemin (edge proxy), pas le defaut.
+    monkeypatch.setenv("HYPERSMART_REQUIRE_EMPIRICAL_EDGE", "0")
     result = run_copy_votes_through_paper_engine(
         (
             LeaderVote(wallet="0x1", coin="HYPE", side="LONG", score=2.0),
@@ -20,9 +34,47 @@ def test_fusion_paper_engine_adapter_uses_existing_paper_engine():
     assert result.decisions[0].trade is not None
     assert result.paper_only is True
     assert result.real_execution is False
+    context = result.decisions[0].decision_context
+    assert context["consensus_wallets"] == 2
+    assert context["leader_wallets"] == ["0x1", "0x2"]
+    # 2026-07-12 -- CE TEST DISAIT `is False`, ET C'ETAIT LE SYMPTOME DU CABLAGE MORT.
+    #
+    # `edge_is_empirical` etait TOUJOURS faux, parce que rien ne le calculait : la table
+    # mesuree n'etait lue nulle part sur ce chemin. Le test entérinait donc la panne.
+    # Depuis Q1, le champ est DERIVE de `edge_from_calibration()`. Il est vrai quand une bande
+    # mesuree couvre la fraicheur du signal (ici : la TEST_FIXTURE posee par conftest).
+    #
+    # Ce qui compte n'est pas sa valeur, c'est qu'il DISE LA VERITE sur la provenance de l'edge.
+    assert context["edge_is_empirical"] is True, (
+        "l'edge devrait etre marque empirique : conftest fournit une table mesuree. "
+        "S'il est faux, `edge_from_calibration()` n'est plus consultee -- le cablage est remort."
+    )
+    # `edge_source` porte la provenance de la TABLE (ici "TEST_FIXTURE"), pas l'etiquette posee
+    # par l'appelant : le moteur l'ECRASE avec ce que dit `edge_from_calibration()`. C'est le
+    # bon comportement -- l'appelant ne raconte plus l'origine de l'edge, la mesure la raconte.
+    # (J'avais d'abord assert le contraire : c'etait moi qui me trompais, pas le code.)
+    assert str(context.get("edge_source", "")), "la provenance de l'edge ne doit jamais etre vide"
 
 
-def test_distilled_opportunities_use_existing_paper_engine_with_real_mark():
+def test_fusion_paper_engine_does_not_count_wallets_from_other_coins_as_consensus(monkeypatch):
+    # mode A/B explicite : on exerce l'ANCIEN chemin (edge proxy), pas le defaut.
+    monkeypatch.setenv("HYPERSMART_REQUIRE_EMPIRICAL_EDGE", "0")
+    result = run_copy_votes_through_paper_engine(
+        (
+            LeaderVote(wallet="0x1", coin="HYPE", side="LONG", score=3.0, observed_at_ms=900),
+            LeaderVote(wallet="0x2", coin="BTC", side="LONG", score=3.0, observed_at_ms=900),
+        ),
+        market_price=100.0,
+        observed_at_ms=1_000,
+    )
+
+    assert result.accepted_count == 0
+    assert result.decisions == ()
+
+
+def test_distilled_opportunities_use_existing_paper_engine_with_real_mark(monkeypatch):
+    # mode A/B explicite : on exerce l'ANCIEN chemin (edge proxy), pas le defaut.
+    monkeypatch.setenv("HYPERSMART_REQUIRE_EMPIRICAL_EDGE", "0")
     result = run_distilled_opportunities_through_paper_engine(
         (
             DistilledOpportunity(
@@ -51,7 +103,9 @@ def test_distilled_opportunities_use_existing_paper_engine_with_real_mark():
     assert result.real_execution is False
 
 
-def test_distilled_opportunities_refuse_when_real_mark_is_missing():
+def test_distilled_opportunities_refuse_when_real_mark_is_missing(monkeypatch):
+    # mode A/B explicite : on exerce l'ANCIEN chemin (edge proxy), pas le defaut.
+    monkeypatch.setenv("HYPERSMART_REQUIRE_EMPIRICAL_EDGE", "0")
     result = run_distilled_opportunities_through_paper_engine(
         (
             DistilledOpportunity(

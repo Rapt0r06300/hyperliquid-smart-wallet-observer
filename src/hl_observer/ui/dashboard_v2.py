@@ -476,7 +476,7 @@ def create_dashboard_v2_router() -> APIRouter:
         except Exception:
             persisted = []
         if persisted:
-            return JSONResponse({"points": persisted})
+            return JSONResponse({"count": len(persisted), "points": persisted, "read_only": True})
         state = getattr(request.app.state, "ui_state", None)
         raw = list(getattr(state, "simulation_equity_history", None) or [])
         if max and len(raw) > max:
@@ -491,7 +491,7 @@ def create_dashboard_v2_router() -> APIRouter:
                 })
             except Exception:
                 continue
-        return JSONResponse({"points": points})
+        return JSONResponse({"count": len(points), "points": points, "read_only": True})
 
     return router
 

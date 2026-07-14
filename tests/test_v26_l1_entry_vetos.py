@@ -103,7 +103,10 @@ def test_trend_ignores_nan_inf_and_keys_by_coin_side():
 # ---------------------------------------------------------------- apply_v26_entry_vetos
 
 def _feed_decreasing(coin="BTC", side="LONG"):
-    for v in (30, 28, 26, 18, 15, 12):
+    # SERIE CORRIGEE (audit 2026-07-11) : elle etait SOUS le plancher d'edge (28 bps), donc le
+    # scorer refusait pour EDGE_REMAINING_TOO_LOW et les tests ne mesuraient plus le VETO DE
+    # TENDANCE qu'ils pretendent mesurer. Serie desormais HAUTE mais bien DECROISSANTE.
+    for v in (90, 86, 82, 78, 74, 71):
         DEFAULT_EDGE_TREND_RECORDER.record(coin, side, v)
 
 
@@ -207,7 +210,12 @@ def _accepting_inputs(coin=""):
     return RealtimeCopyScoreInput(
         action_type="OPEN_LONG",
         direction="LONG",
-        leader_expected_edge_bps=25.0,  # edge_remaining ~17 bps : cohérent avec la série décroissante des tests
+        # FIXTURE CORRIGEE (audit 2026-07-11) : 25 bps -> edge_remaining ~17 bps, SOUS le plancher
+        # de 28 bps -> le scorer refusait avec EDGE_REMAINING_TOO_LOW. Le code avait RAISON ; la
+        # fixture etait perimee (le plancher d'edge a ete durci depuis). On donne un edge
+        # franchement acceptable pour que le test verifie ce qu'il pretend verifier : le VETO,
+        # pas le plancher d'edge.
+        leader_expected_edge_bps=70.0,
         leader_consistency_factor=1.0,
         signal_age_ms=500,
         consensus_wallets=3,
@@ -295,3 +303,22 @@ def test_poller_bad_payload_pushes_nothing():
     assert fp.parse_meta_and_asset_ctxs({"weird": 1}) == []
     assert fp.poll_once(opener=lambda u, b, t: b"not json") == 0
     assert frc.sample_count("BTC") == 0
+
+
+# ---------------------------------------------------------------------------------------------
+# VERROU EDGE EMPIRIQUE (2026-07-11) -- POURQUOI CES TESTS FORCENT UN FLAG.
+#
+# Ces tests verifient la MECANIQUE (scorer, CLI, persistance UI). Pour cela, il faut qu'une
+# position s'ouvre. Or depuis le 2026-07-11, le moteur REFUSE par defaut un edge qui n'a jamais
+# touche un prix : l'ancienne formule (`dominance * 45 + bonus`) fabriquait un nombre en bps sans
+# regarder le marche une seule fois.
+#
+# On active donc `HYPERSMART_REQUIRE_EMPIRICAL_EDGE=0` : mode A/B ASSUME, PAS la production.
+# Le defaut reste le REFUS -- garde par `tests/test_empirical_edge.py`.
+# ---------------------------------------------------------------------------------------------
+import pytest as _pytest_ab
+
+
+@_pytest_ab.fixture(autouse=True)
+def _mode_ab_edge_non_empirique(monkeypatch):
+    monkeypatch.setenv("HYPERSMART_REQUIRE_EMPIRICAL_EDGE", "0")

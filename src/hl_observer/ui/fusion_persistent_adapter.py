@@ -17,9 +17,34 @@ import os
 from typing import Any
 
 from hl_observer.simulation.session_memory import evaluate_coin_side_session_memory
+from hl_observer.strategies.strategy_mode import (
+    GRINDER,
+    classify as classify_strategy_mode,
+    mode_of_position,
+)
 from hl_observer.ui.state import UiState
 
-MATERIALIZABLE_STRATEGY_PREFIXES = ("ext_", "copy_")
+# BUG CORRIGE (audit 2026-07-11) -- CHEMIN A/B MORT.
+# La liste ne contenait que ("ext_", "copy_"). Elle datait d'une epoque ou TOUTES les strategies
+# etaient nommees d'apres un profil GitHub externe. Depuis le pivot shadow-only (ff7aeec), le
+# catalogue externe prioritaire est VIDE : `fusion_runtime._first_available_profile()` retombe
+# donc sur ses noms internes (`ws_price_discrepancy_paper`, `funding_delta_neutral_paper`,
+# `triangular_paper_detection`, `distilled_whale_consensus_paper`). Aucun de ces noms ne commence
+# par "ext_" ou "copy_" -> meme avec HYPERSMART_EXTERNAL_GITHUB_DIRECT_MATERIALIZATION=1, l'ordre
+# paper d'arbitrage / funding / triangulaire etait SILENCIEUSEMENT JETE : 0 position, 0 evenement
+# au ledger, 0 PnL. Le chemin de recherche A/B ne pouvait rien materialiser.
+# Les moteurs INTERNES distilles sont maintenant reconnus. Le garde-fou reste entier :
+#   - rien n'est materialise sans le flag A/B explicite (OFF par defaut, absent des launchers) ;
+#   - le PaperEngine canonique reste le writer normal ;
+#   - aucun ordre reel, jamais (paper_only=True / real_execution=False verifies plus bas).
+MATERIALIZABLE_STRATEGY_PREFIXES = (
+    "ext_",                  # profils GitHub externes (shadow-only par defaut)
+    "copy_",                 # copy-follow / resolveur de conflit
+    "ws_",                   # arbitrage de discrepance de prix (moteur interne)
+    "funding_",              # funding delta-neutre (moteur interne)
+    "triangular_",           # arbitrage triangulaire (moteur interne)
+    "distilled_",            # consensus whale distille (moteur interne)
+)
 COPY_LIKE_FAMILY_TOKENS = ("copy", "whale", "mirror", "autonomous_sltp", "direction_hunt")
 EXTERNAL_DIRECT_MATERIALIZATION_ENV = "HYPERSMART_EXTERNAL_GITHUB_DIRECT_MATERIALIZATION"
 AB_RESEARCH_ACK_ENV = "HYPERSMART_AB_RESEARCH_ACK"
@@ -198,7 +223,17 @@ def apply_fusion_paper_orders_to_state(
             result["reasons"].append("POSITION_ALREADY_OPEN")
             state.simulation_processed_delta_keys.add(delta_key)
             continue
-        portfolio_refusal = _portfolio_open_refusal(state, new_notional_usdt=notional)
+        # le moteur est connu AVANT le gate : un budget de risque par moteur n'a de sens que si
+        # l'on sait QUEL moteur demande a ouvrir.
+        _mode_entrant = classify_strategy_mode(
+            strategy_id=str(trade.get("strategy_id") or ""),
+            source=str(decision.get("source") or "fusion_runtime_copy"),
+            leader_wallet=wallet,
+        )
+        portfolio_refusal = _portfolio_open_refusal(
+            state, new_notional_usdt=notional, coin=coin, side=side,
+            strategy_mode=_mode_entrant,
+        )
         if portfolio_refusal:
             result["skipped_count"] += 1
             result["reasons"].append(portfolio_refusal)
@@ -220,7 +255,16 @@ def apply_fusion_paper_orders_to_state(
 
         opened_at_ms = int(_safe_float(position.get("opened_at_ms")) or current_ms)
         entry_costs = notional * (_safe_float(trade.get("fees_and_cost_bps")) or 0.0) / 10_000.0
+        decision_context = decision.get("decision_context") if isinstance(decision.get("decision_context"), dict) else {}
+        evidence_fields = _paper_engine_evidence_fields(decision_context)
+        leader_wallets_csv = str(evidence_fields.get("leader_wallets_csv") or wallet)
+        _mode = classify_strategy_mode(
+            strategy_id=str(trade.get("strategy_id") or ""),
+            source=str(decision.get("source") or "fusion_runtime_copy"),
+            leader_wallet=wallet,
+        )
         state.simulation_virtual_positions[position_key] = {
+            "strategy_mode": _mode,
             "wallet_address": wallet,
             "leader_wallet": wallet,
             "coin": coin,
@@ -234,7 +278,7 @@ def apply_fusion_paper_orders_to_state(
             "last_update_at_ms": current_ms,
             "source_delta_key": delta_key,
             "position_mode": "EXTERNAL_GITHUB_FUSION_PAPER",
-            "leader_wallets_csv": wallet,
+            "leader_wallets_csv": leader_wallets_csv,
             "last_replay_action": "FUSION_PAPER_ENTRY",
             "last_evidence_hash": str(decision.get("evidence_hash") or ""),
             "last_paper_ref": trade_id,
@@ -247,6 +291,7 @@ def apply_fusion_paper_orders_to_state(
             "read_only": True,
             "external_action": False,
             "notional_cap_applied": capped["cap_applied"],
+            **evidence_fields,
         }
         state.simulation_ledger_events.append(
             {
@@ -259,11 +304,19 @@ def apply_fusion_paper_orders_to_state(
                 "leader_notional_usdc": notional,
                 "observed_at_ms": opened_at_ms,
                 "bot_replay_action": "FUSION_PAPER_ENTRY",
+                "strategy_mode": _mode,
                 "paper_action_type": "OPEN",
                 "status": "LOCAL_REPLAY",
                 "estimated_net_pnl_usdc": None,
                 "gross_pnl_usdc": None,
                 "fee_cost_usdc": round(entry_costs, 8),
+                # PIEGE A DOUBLE COMPTAGE (2026-07-11). Ce cout est DEJA dans `entry_price` :
+                # le PaperEngine pose entry_price = fill_price, cout d'execution inclus
+                # (embedded_cost_model = fill_price_includes_spread_slippage_fee_latency).
+                # `fee_cost_usdc` ci-dessus n'est qu'un REPORT, pas une seconde ponction.
+                # Le soustraire du gross NOIRCIT le PnL. Un outil d'audit s'y est deja fait
+                # prendre. Ce drapeau existe pour que plus personne ne s'y trompe.
+                "fee_already_embedded_in_entry_price": True,
                 "copied_notional_usdt": notional,
                 "bot_position_size_after": quantity if side == "LONG" else -quantity,
                 "entry_price": entry_price,
@@ -280,6 +333,7 @@ def apply_fusion_paper_orders_to_state(
                 "venue_endpoint": None,
                 "secret_material_used": False,
                 "notional_cap_applied": capped["cap_applied"],
+                **evidence_fields,
             }
         )
         state.simulation_processed_delta_keys.add(delta_key)
@@ -361,7 +415,15 @@ def apply_fusion_paper_orders_to_state(
             result["reasons"].append("DIRECT_POSITION_ALREADY_OPEN")
             state.simulation_processed_delta_keys.add(delta_key)
             continue
-        portfolio_refusal = _portfolio_open_refusal(state, new_notional_usdt=notional)
+        _mode_entrant = classify_strategy_mode(
+            strategy_id=strategy_id,
+            source=str((order.get("metadata") or {}).get("profile_family")
+                       if isinstance(order.get("metadata"), dict) else "external_direct_order"),
+        )
+        portfolio_refusal = _portfolio_open_refusal(
+            state, new_notional_usdt=notional, coin=coin, side=side,
+            strategy_mode=_mode_entrant,
+        )
         if portfolio_refusal:
             result["skipped_count"] += 1
             result["reasons"].append(portfolio_refusal)
@@ -387,7 +449,12 @@ def apply_fusion_paper_orders_to_state(
         entry_costs = notional * (fees_bps if fees_bps is not None else 8.0) / 10_000.0
         metadata = order.get("metadata") if isinstance(order.get("metadata"), dict) else {}
         evidence_fields = _copy_direct_evidence_fields(metadata)
+        _mode = classify_strategy_mode(
+            strategy_id=strategy_id,
+            source=str(metadata.get("profile_family") or "external_direct_order"),
+        )
         state.simulation_virtual_positions[position_key] = {
+            "strategy_mode": _mode,
             "wallet_address": strategy_id,
             "leader_wallet": strategy_id,
             "coin": coin,
@@ -432,11 +499,19 @@ def apply_fusion_paper_orders_to_state(
                 "leader_notional_usdc": notional,
                 "observed_at_ms": current_ms,
                 "bot_replay_action": "FUSION_DIRECT_PAPER_ENTRY",
+                "strategy_mode": _mode,
                 "paper_action_type": "OPEN",
                 "status": "LOCAL_REPLAY",
                 "estimated_net_pnl_usdc": None,
                 "gross_pnl_usdc": None,
                 "fee_cost_usdc": round(entry_costs, 8),
+                # PIEGE A DOUBLE COMPTAGE (2026-07-11). Ce cout est DEJA dans `entry_price` :
+                # le PaperEngine pose entry_price = fill_price, cout d'execution inclus
+                # (embedded_cost_model = fill_price_includes_spread_slippage_fee_latency).
+                # `fee_cost_usdc` ci-dessus n'est qu'un REPORT, pas une seconde ponction.
+                # Le soustraire du gross NOIRCIT le PnL. Un outil d'audit s'y est deja fait
+                # prendre. Ce drapeau existe pour que plus personne ne s'y trompe.
+                "fee_already_embedded_in_entry_price": True,
                 "copied_notional_usdt": notional,
                 "bot_position_size_after": quantity if side == "LONG" else -quantity,
                 "entry_price": entry_price,
@@ -611,10 +686,21 @@ def _record_funding_arb_events(
         if delta_key in state.simulation_processed_delta_keys:
             continue
         amount = float(item.get("amount_usdc") or 0.0)
+        # LE TERME QUI MANQUAIT (2026-07-11). Le funding-arb n'a QU'UNE JAMBE : c'est une position
+        # NUE. Son PnL comptait le funding encaisse et les couts, mais JAMAIS le mouvement du prix.
+        # Un revenu de funding sans risque de marche, ca n'existe pas -- c'etait un PnL fabrique.
+        _price_pnl = item.get("price_pnl_usdc")
+        _price_inconnu = bool(item.get("price_pnl_unknown"))
+        try:
+            _price_pnl = float(_price_pnl) if _price_pnl is not None else None
+        except (TypeError, ValueError):
+            _price_pnl = None
         if action == "ACCRUAL":
             pnl_delta = amount
         else:
             pnl_delta = -abs(amount)
+            if action == "CLOSE" and _price_pnl is not None:
+                pnl_delta += _price_pnl
         state.simulation_realized_pnl_usdc += pnl_delta
         if action != "ACCRUAL":
             state.simulation_exit_costs_paid_usdc += abs(amount) if action == "CLOSE" else 0.0
@@ -630,6 +716,9 @@ def _record_funding_arb_events(
                 "leader_notional_usdc": float(item.get("amount_usdc") or 0.0),
                 "observed_at_ms": current_ms,
                 "bot_replay_action": f"FUNDING_ARB_PAPER_{action}",
+                # PISTE 11 -- le funding-arb EST le Grinder. Sans ce champ il restait invisible
+                # a l'attribution : son PnL se serait fondu dans "UNKNOWN".
+                "strategy_mode": GRINDER,
                 "paper_action_type": "FUNDING_ARB_" + action,
                 "status": "LOCAL_REPLAY",
                 "estimated_net_pnl_usdc": round(pnl_delta, 8),
@@ -637,7 +726,14 @@ def _record_funding_arb_events(
                 "fee_cost_usdc": abs(amount) if action in {"OPEN", "CLOSE"} else 0.0,
                 "copied_notional_usdt": 0.0,
                 "bot_position_size_after": None,
-                "reason": str(item.get("reason") or action),
+                "reason": (
+                    "INSUFFICIENT_DATA_PRICE_UNKNOWN_" + str(item.get("reason") or action)
+                    if (action == "CLOSE" and _price_inconnu)
+                    else str(item.get("reason") or action)
+                ),
+                # tracable : on voit d'ou vient chaque dollar (funding vs prix vs couts)
+                "price_pnl_usdc": _price_pnl,
+                "price_pnl_unknown": _price_inconnu,
                 "rate_bps_per_hour": item.get("rate_bps_per_hour"),
                 "pair_id": pair_id,
                 "position_mode": "FUNDING_ARB_DELTA_NEUTRAL_PAPER",
@@ -778,7 +874,10 @@ def _min_paper_notional_refusal(notional_usdt: float) -> str:
     return ""
 
 
-def _portfolio_open_refusal(state: UiState, *, new_notional_usdt: float) -> str:
+def _portfolio_open_refusal(
+    state: UiState, *, new_notional_usdt: float, coin: str = "", side: str = "",
+    strategy_mode: str = "",
+) -> str:
     """Global portfolio guard applied after strategy-level gates.
 
     Individual engines can each be reasonable and still collectively overfill the
@@ -789,22 +888,277 @@ def _portfolio_open_refusal(state: UiState, *, new_notional_usdt: float) -> str:
     positions = getattr(state, "simulation_virtual_positions", {}) or {}
     if not isinstance(positions, dict):
         return ""
+
+    # GH-01 (2026-07-13) -- LES GARDE-FOUS QU'ON CROIT AVOIR.
+    #
+    # Sept fois : la capacite existe, l'interrupteur est eteint, et RIEN ne se plaint. Le pire
+    # cas trouve : les CINQ flags de la pile V26, codes, testes, branches -- et aucun pose par
+    # un lanceur. Trois pierres tombales justifiaient meme l'enterrement d'anciens garde-fous
+    # par « remplace par protections_v26 (VIVANT) »... alors qu'il ne s'executait jamais.
+    #
+    # Le test (`tests/test_interrupteurs.py`) verifie que le LANCEUR les pose. Mais un lanceur
+    # se contourne : un `python -m hl_observer ui` a la main, une variable Windows collante...
+    # Ici, on verifie a l'EXECUTION, et on le CRIE dans le contexte de decision.
+    #
+    # Ce n'est pas l'absence de garde-fou qui fait mal. C'est le garde-fou qu'on CROIT avoir.
+    try:
+        from hl_observer.risk.interrupteurs import sante as _sante_interrupteurs
+        _si = _sante_interrupteurs()
+        if _si.get("REELLEMENT_ETEINTS"):
+            # On n'INTERDIT pas le trade (ce serait affamer le moteur pour un probleme de
+            # config), mais la raison remonte au journal, au dashboard et a l'audit.
+            state.derniere_alerte_interrupteurs = _si.get("alerte", "")  # type: ignore[attr-defined]
+    except Exception:                                        # noqa: BLE001
+        pass
+
     max_positions = _env_int("HYPERSMART_MAX_OPEN_POSITIONS", 12)
     if max_positions > 0 and len(positions) >= max_positions:
         return "PORTFOLIO_MAX_OPEN_POSITIONS"
     # exposition en NOTIONAL leverage: scale le budget par le levier pour garder plusieurs
     # positions (sinon 1 seule position a 400 saturerait le budget 400). Marge a risque = /levier.
+    # BUG CORRIGE (audit 2026-07-11) — FAIL-OPEN : ces deux valeurs etaient PLANCHEES
+    # (`if base < 1000: base = 1000` / `if lev < 10: lev = 10`). Resultat : toute tentative de
+    # RESSERRER le plafond etait silencieusement REMONTEE (ex: cap 75 -> cap effectif 10 000).
+    # Un garde-fou de risque ne doit JAMAIS se desserrer tout seul (deny-by-default).
+    # On respecte desormais la config ; on ne remplace que les valeurs INVALIDES (<= 0) par le defaut.
+    # Semantique (fix "centimes") : MAX_TOTAL_EXPOSURE_USDT = budget de MARGE ; le plafond compare
+    # est en NOTIONAL, donc budget_marge x levier. Config actuelle du launcher (1000 x 10 = 10 000)
+    # -> comportement live INCHANGE.
     _lev_ex = _env_float("HYPERSMART_SIMULATION_LEVERAGE", 10.0)
-    if _lev_ex < 10.0:
+    if _lev_ex <= 0.0:
         _lev_ex = 10.0
     _base_ex = abs(_env_float("HYPERSMART_MAX_TOTAL_EXPOSURE_USDT", 1000.0))
-    if _base_ex < 1000.0:  # planche robuste -> ~10 positions de 1000 (10x sur 1000 de compte)
+    if _base_ex <= 0.0:
         _base_ex = 1000.0
     max_exposure = _base_ex * _lev_ex
     current_exposure = _current_open_exposure_usdt(positions)
     if max_exposure > 0 and current_exposure + abs(float(new_notional_usdt or 0.0)) > max_exposure:
         return "PORTFOLIO_MAX_TOTAL_EXPOSURE"
+
+    # GARDE-FOU MANQUANT (2026-07-11) — EXPOSITION DIRECTIONNELLE **NETTE** ET CONCENTRATION.
+    # Tout ce qui precede ne regarde que l'exposition BRUTE (une somme d'`abs()`). Pour ce gate,
+    # 6 shorts et 1 long sont aussi "diversifies" que 7 paris opposes. Une session live a donc pu
+    # accumuler 9 positions presque toutes SHORT, soit ~250 % du capital dans UN SEUL sens : ce
+    # n'est pas un portefeuille, c'est le meme pari repete 9 fois. Sur le run precedent, 97 % de
+    # la perte venait des shorts. On plafonne desormais le pari NET et la concentration par marche.
+    try:
+        from hl_observer.risk.directional_exposure import directional_refusal
+
+        _equity = abs(_safe_float(getattr(state, "simulation_starting_equity_usdt", 1000.0)) or 1000.0)
+        _dir = directional_refusal(
+            positions,
+            coin=str(coin or ""),
+            side=str(side or ""),
+            new_notional_usdt=abs(float(new_notional_usdt or 0.0)),
+            equity_usdt=_equity,
+        )
+        if _dir:
+            return _dir
+    except Exception:
+        pass
+
+    # BUDGET DE RISQUE **PAR MOTEUR** (2026-07-11). Le garde-fou de session existant raisonne sur
+    # UN SEUL PnL : si le Sniper perd 40 $, le Grinder est puni aussi -- alors que son mecanisme
+    # (funding delta-neutre) n'a rien a voir avec la cause de la perte. Et un Grinder qui gagne
+    # MASQUERAIT un Sniper qui saigne. Chaque moteur repond desormais de SES pertes.
+    try:
+        from hl_observer.risk.engine_risk_budget import engine_budget_refusal
+
+        _mode = str(strategy_mode or "").upper()
+        if _mode:
+            _equity_b = abs(_safe_float(getattr(state, "simulation_starting_equity_usdt", 1000.0)) or 1000.0)
+            _budget = engine_budget_refusal(
+                getattr(state, "simulation_ledger_events", None) or [],
+                moteur=_mode,
+                equity_usdt=_equity_b,
+            )
+            if _budget:
+                return _budget
+    except Exception:
+        pass                                  # jamais bloquant : un garde-fou ne casse pas la boucle
+
+    # T3b (2026-07-12) — CORRELATION DE GROUPE. Le garde-fou directionnel ci-dessus plafonne le
+    # NET total et la concentration PAR COIN. Il traite donc BTC-long et ETH-long comme DEUX paris
+    # independants. Ils ne le sont pas : ce sont ~0,9 du meme pari. `portfolio_correlation` le dit
+    # dans sa 1re ligne — « 7 positions LONG sur des alts correles != 7 paris » — et il etait
+    # MORT (importe seulement par integration/risk_quality_gate, mort lui aussi).
+    # Nos 19 ouvertures SHORT sur 21 sont la version realisee de cette panne.
+    #
+    # ⚠️ DEUX PIEGES MORTELS, EVITES DE JUSTESSE — a lire avant de toucher a ce bloc.
+    #
+    # 1) `correlation_open_refusal` a un defaut `max_group_net_exposure_usdt = 120.0`. Notre
+    #    notionnel est de **500 $ par trade** (marge 50 x levier 10). Branche tel quel, le
+    #    garde-fou aurait refuse **100 % des entrees** : UNE seule position depasse deja 120.
+    #    C'est mot pour mot le bug « 0 trade GARANTI par arithmetique » du 11/07. On exprime
+    #    donc le plafond en **% de l'equity**, comme les autres caps (NET 100 %, coin 60 %).
+    #    Un groupe correle doit etre plafonne PLUS HAUT qu'un coin seul (60 %) et PLUS BAS que
+    #    le net total (100 %) -> 80 % par defaut.
+    #
+    # 2) Le module exige `side` en MAJUSCULES ("LONG"/"SHORT") et rend `CORR_INVALID_SIDE`
+    #    sinon. Un runtime qui dit "buy"/"long" aurait fait refuser TOUT. On normalise ici ;
+    #    et si le sens reste indechiffrable, on **passe** ce garde-fou (les autres s'appliquent
+    #    toujours) : bloquer 100 % des entrees sur un desaccord de vocabulaire serait pire que
+    #    le risque qu'on cherche a couvrir.
+    try:
+        from hl_observer.risk.portfolio_correlation import correlation_open_refusal
+
+        _cote = _normaliser_sens(side)
+        if _cote:
+            _equity_c = abs(_safe_float(getattr(state, "simulation_starting_equity_usdt", 1000.0)) or 1000.0)
+            _pct_grp = _env_float("HYPERSMART_MAX_GROUP_NET_EXPOSURE_PCT", 80.0)
+            _cap_grp = _equity_c * max(0.0, _pct_grp) / 100.0
+            if _cap_grp > 0.0:
+                _corr = correlation_open_refusal(
+                    _positions_as_rows(positions),
+                    coin=str(coin or ""),
+                    side=_cote,
+                    new_notional_usdt=abs(float(new_notional_usdt or 0.0)),
+                    max_group_net_exposure_usdt=_cap_grp,
+                )
+                if _corr:
+                    return _corr
+    except Exception:
+        pass
+
+    # T3b (2026-07-12) — ANTI-SURTRADING. `max_positions` (plus haut) plafonne les positions
+    # SIMULTANEES ; rien ne plafonnait le nombre de trades PAR JOUR. Le firehose V27 est concu
+    # pour maximiser les signaux : le surtrading est structurellement possible.
+    # HONNETETE : a nos volumes (21 trades sur tout un run), ce plafond NE MORD PAS aujourd'hui.
+    # C'est un disjoncteur : inutile jusqu'au jour ou il est indispensable.
+    #
+    # ⚠️ 3e PIEGE MORTEL, attrape par le test `..._LAISSE_PASSER_un_pari_non_correle`.
+    # `can_open` fait `if trades_today >= budget.max_trades_per_day: REFUSE`. Avec un plafond
+    # a **0** (ce que j'entendais comme « pas de plafond »), ca donne `0 >= 0` -> VRAI ->
+    # **refus de 100 % des entrees**. Encore le bug « 0 trade GARANTI par arithmetique ».
+    # Un plafond <= 0 signifie donc explicitement AUCUN PLAFOND : on saute le garde-fou.
+    try:
+        from hl_observer.risk.trade_budget import TradeBudget, can_open
+
+        _max_jour = _env_int("HYPERSMART_MAX_TRADES_PER_DAY", 40)
+        if _max_jour > 0:
+            _budget_trades = TradeBudget(
+                max_concurrent=_env_int("HYPERSMART_MAX_OPEN_POSITIONS", 12),
+                max_trades_per_day=_max_jour,
+                daily_profit_target_pct=_env_float("HYPERSMART_DAILY_PROFIT_TARGET_PCT", 0.0),
+            )
+            _ok, _why = can_open(
+                _budget_trades,
+                open_positions=len(positions),
+                trades_today=_opens_today(getattr(state, "simulation_ledger_events", None) or []),
+                day_pnl_pct=_day_pnl_pct(state),
+            )
+            if not _ok:
+                return f"TRADE_BUDGET_{_why}"
+    except Exception:
+        pass
+
+    # T3c (2026-07-12) — LE GARDE-FOU QUI AURAIT EMPECHE LE BUG DES -64 $.
+    #
+    # L'autopsie du 11/07 : « TP rabote a 28 bps pour 13 bps de frais -> breakeven 87 % ->
+    # perte GARANTIE ». La correction avait ete de changer la CONFIG. **Rien n'empechait la
+    # rechute.** Et il y a pire, mesure aujourd'hui :
+    #
+    #     config du LANCEUR : TP=110, SL=60, cout=12  ->  breakeven = 72/170 = 42 %  ... OK
+    #     DEFAUT DU CODE    : TP=30,  SL=40, cout=12  ->  breakeven = 52/70  = 74 %  ... PERTE GARANTIE
+    #
+    # Si le flag du lanceur disparait -- ce qui est DEJA arrive deux fois (poller L2, funding) --
+    # le code retombe SILENCIEUSEMENT sur une configuration perdante. Ce garde-fou transforme
+    # la perte silencieuse en REFUS BRUYANT : on ne trade pas une structure de sortie dont le
+    # winrate d'equilibre est hors d'atteinte.
+    #
+    # Avec la config live (42 %), il NE MORD PAS -- c'est teste dans les deux sens.
+    try:
+        from hl_observer.paper_trading.barrier_calibration import breakeven_winrate
+        from hl_observer.paper_trading.sltp_runtime import sltp_config_from_env
+
+        _cfg = sltp_config_from_env()
+        if _cfg is not None:
+            _tp = abs(float(getattr(_cfg, "take_profit_bps", 0.0) or 0.0))
+            _sl = abs(float(getattr(_cfg, "stop_loss_bps", 0.0) or 0.0))
+            _cout = abs(_env_float("HYPERSMART_SIMULATION_COST_BPS", 12.0))
+            _plafond = _env_float("HYPERSMART_MAX_BREAKEVEN_WINRATE_PCT", 60.0)
+            if _tp > 0.0 and _sl > 0.0 and _plafond > 0.0:
+                _be = breakeven_winrate(_tp, _sl, _cout) * 100.0
+                if _be > _plafond:
+                    return (
+                        "BARRIERS_BREAKEVEN_WINRATE_IMPOSSIBLE"
+                        f"({_be:.0f}pct_needed_max_{_plafond:.0f}pct"
+                        f"_tp{_tp:.0f}_sl{_sl:.0f}_cost{_cout:.0f})"
+                    )
+    except Exception:
+        pass
+
     return ""
+
+
+def _normaliser_sens(side: Any) -> str:
+    """-> "LONG" | "SHORT" | "" (indechiffrable).
+
+    Le runtime ecrit le sens de plusieurs facons selon le moteur (long/LONG/buy/B/+1...).
+    `portfolio_correlation` n'accepte que LONG/SHORT et rend CORR_INVALID_SIDE sinon : sans
+    cette normalisation, un simple desaccord de vocabulaire aurait refuse TOUTES les entrees.
+    """
+    s = str(side or "").strip().lower()
+    if s in ("long", "buy", "b", "l", "+1", "1", "bid"):
+        return "LONG"
+    if s in ("short", "sell", "s", "-1", "ask"):
+        return "SHORT"
+    return ""
+
+
+def _positions_as_rows(positions: dict[Any, Any]) -> list[dict]:
+    """`portfolio_correlation` attend une liste de dicts {coin, side, notional_usdt}.
+
+    Le runtime garde ses positions dans un dict indexe par cle. On adapte ICI, au point de
+    branchement, plutot que de tordre le garde-fou : un garde-fou pur reste pur.
+    """
+    rows: list[dict] = []
+    for key, pos in (positions or {}).items():
+        if not isinstance(pos, dict):
+            continue
+        coin = str(pos.get("coin") or "").upper()
+        if not coin and isinstance(key, str) and "|" in key:
+            parts = key.split("|")
+            coin = parts[1].upper() if len(parts) > 1 else ""
+        notional = _safe_float(pos.get("notional_usdt") or pos.get("copied_notional_usdt")) or 0.0
+        rows.append({
+            "coin": coin,
+            "side": _normaliser_sens(pos.get("side") or pos.get("direction")),
+            "notional_usdt": abs(float(notional)),
+        })
+    return rows
+
+
+def _opens_today(ledger_events: list) -> int:
+    """Nombre d'OUVERTURES depuis minuit UTC, lu au LEDGER (jamais un compteur en memoire).
+
+    Le ledger est la source de verite du PnL (CLAUDE.md) ; il l'est aussi du compte de trades.
+    Un compteur separe divergerait au premier redemarrage.
+    """
+    import time as _t
+
+    minuit_ms = int(_t.time() // 86_400) * 86_400 * 1000
+    n = 0
+    for ev in ledger_events or []:
+        if not isinstance(ev, dict):
+            continue
+        kind = str(ev.get("event") or ev.get("type") or "").upper()
+        if "OPEN" not in kind:
+            continue
+        ts = _safe_float(ev.get("ts_ms") or ev.get("timestamp_ms") or ev.get("ts")) or 0.0
+        if ts >= minuit_ms:
+            n += 1
+    return n
+
+
+def _day_pnl_pct(state: UiState) -> float:
+    """PnL du jour en % de l'equity de depart. 0.0 si inconnu -> le verrou de gain ne mord pas
+    (il est de toute facon DESACTIVE par defaut : HYPERSMART_DAILY_PROFIT_TARGET_PCT=0)."""
+    equity0 = abs(_safe_float(getattr(state, "simulation_starting_equity_usdt", 1000.0)) or 1000.0)
+    if equity0 <= 0:
+        return 0.0
+    realized = _safe_float(getattr(state, "simulation_realized_pnl_usdt", 0.0)) or 0.0
+    return float(realized) / equity0 * 100.0
 
 
 def _current_open_exposure_usdt(positions: dict[Any, Any]) -> float:
@@ -949,15 +1303,17 @@ def _cap_paper_notional_and_quantity(notional: float, quantity: float, entry_pri
     # GRINDER (correction Flo: $1000/position empechait le grinder). Beaucoup de PETITES
     # positions gagnantes: marge PETITE (<=40) x levier -> ex 40 x 10 = 400. Le PnL vient du
     # VOLUME (plein de positions) + funding, PAS de positions geantes. Le levier evite les centimes.
+    # BUG CORRIGE (audit 2026-07-11) : `if lev < 5: lev = 10` FORCAIT le levier -> impossible de
+    # simuler a levier 1 ou 2 (la config etait ignoree). On ne corrige plus que l'INVALIDE (<= 0).
     lev = _env_float("HYPERSMART_SIMULATION_LEVERAGE", 10.0)
-    if lev < 5.0:
+    if lev <= 0.0:
         lev = 10.0
     # MODELE REEL (Flo prouve a l'ecran: notional $50 -> PnL -0.12 = centimes). Le $50 est la
     # MARGE (capital a risque par position), PAS le notional. A 10x: notional = 50 x 10 = 500
     # -> PnL = 500 x Dprix -> DES DOLLARS, comme un perp reel. Solde 1000 / marge 50 = 20 positions.
     # (Avant: margin clampe a 12 PUIS notional clampe a 50 -> double bride = centimes garantis.)
     margin_cap = abs(_env_float("HYPERSMART_MAX_POSITION_USDT", 50.0))
-    if margin_cap < 1.0:
+    if margin_cap <= 0.0:      # idem : seule une valeur INVALIDE retombe sur le defaut
         margin_cap = 50.0
     clean_notional = max(0.0, float(notional or 0.0))
     clean_quantity = abs(float(quantity or 0.0))
@@ -995,6 +1351,39 @@ def _copy_direct_evidence_fields(metadata: dict[str, Any]) -> dict[str, Any]:
         "opposing_vote_score": metadata.get("opposing_vote_score"),
         "gross_vote_edge_bps": metadata.get("gross_vote_edge_bps"),
         "evidence_source": metadata.get("evidence_source") or metadata.get("source"),
+    }
+
+
+def _paper_engine_evidence_fields(context: dict[str, Any]) -> dict[str, Any]:
+    wallets_raw = context.get("leader_wallets")
+    if isinstance(wallets_raw, (list, tuple, set)):
+        wallets = tuple(dict.fromkeys(str(value).lower() for value in wallets_raw if str(value).strip()))
+    else:
+        wallets = tuple(
+            dict.fromkeys(
+                value.strip().lower()
+                for value in str(wallets_raw or context.get("leader_wallet") or "").split(",")
+                if value.strip()
+            )
+        )
+    consensus = _safe_float(context.get("consensus_wallets"))
+    if consensus is None:
+        consensus = float(len(wallets))
+    return {
+        "edge_remaining_bps": context.get("edge_remaining_bps"),
+        "signal_age_ms": context.get("signal_age_ms"),
+        "leader_wallets_count": int(max(0.0, consensus)),
+        "leader_wallets_csv": ",".join(wallets),
+        "liquidity_score": context.get("liquidity_score"),
+        "copy_degradation_bps": context.get("copy_degradation_bps"),
+        "spread_bps": context.get("spread_bps"),
+        "estimated_slippage_bps": context.get("estimated_slippage_bps"),
+        "top_depth_usdt": context.get("top_depth_usdt"),
+        "wallet_score": context.get("wallet_score"),
+        "signal_score": context.get("signal_score"),
+        "leader_event_time_ms": context.get("leader_event_time_ms"),
+        "edge_source": context.get("edge_source"),
+        "edge_is_empirical": context.get("edge_is_empirical"),
     }
 
 
@@ -1107,6 +1496,7 @@ def _apply_direct_paper_close_order(
             "leader_notional_usdc": closed_notional,
             "observed_at_ms": current_ms,
             "bot_replay_action": "FUSION_DIRECT_PAPER_CLOSE",
+            "strategy_mode": mode_of_position(position),
             "paper_action_type": "CLOSE",
             "status": "LOCAL_REPLAY",
             "estimated_net_pnl_usdc": round(net_pnl, 8),

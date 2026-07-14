@@ -1,0 +1,27 @@
+DEBUT 
+=== safety-audit === 
+no_secret_patterns: ok
+env_not_committed: ok
+no_forbidden_mainnet_order_method: ok
+no_exchange_endpoint_in_runtime_source: ok
+live_executor_disabled_exists: ok
+mainnet_disabled_in_env_example: ok
+security_tests_present: ok
+no_real_execution_capable_package: ok
+ 
+=== doctor === 
+python_3_11_plus: ok
+readme_present: ok
+agents_present: ok
+env_example_present: ok
+mainnet_execution_disabled: ok
+testnet_execution_disabled_by_default: ok
+database_url_configured: ok
+logs_dir_configured: ok
+info_endpoint_read_only: ok
+safety_audit_ok: ok
+ 
+=== le cliquet de cablage + l'invariant Ctrl-C etendu aux tests === 
+...........................                                              [100%]
+27 passed in 11.09s
+FIN 

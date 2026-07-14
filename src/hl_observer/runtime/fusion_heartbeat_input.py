@@ -578,6 +578,21 @@ def _build_funding_rows(coins) -> list:
         _ensure_funding_poller(None)
     except Exception:
         pass
+
+    # AUDIT 2026-07-12 -- LE MEME TROU, SUR L'AUTRE POLLER.
+    # Le 2026-07-08 on a corrige ce bug pour le funding (commentaire ci-dessus) et on a laisse le
+    # poller de CARNET L2 dans l'etat qu'on venait de denoncer : son SEUL point de demarrage etait
+    # v26_entry_vetos.apply_v26_entry_vetos, derriere le flag maitre
+    # HYPERSMART_V26_ENTRY_VETOS_AUTHORITATIVE, absent du launcher => False => thread jamais lance.
+    # Verifie sur 12 h de run : funding.jsonl grossit (7 Mo), l2_book.jsonl n'existait meme pas.
+    # Sans carnet : live_costs_for() ne rend rien, les couts retombent sur des CONSTANTES, et le
+    # market making est INTESTABLE. Idempotent ; no-op si HYPERSMART_V26_BOOK_POLLER est off.
+    try:
+        from hl_observer.collection.l2_snapshot_cache import ensure_started as _ensure_book_poller
+        _ensure_book_poller(None)
+    except Exception:
+        pass
+
     try:
         from hl_observer.funding.funding_runtime_cache import recent_rates
     except Exception:

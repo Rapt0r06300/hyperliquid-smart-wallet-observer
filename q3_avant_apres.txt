@@ -1,0 +1,50 @@
+================================================================================
+ Q3 -- LE PRIX AVAIT-IL DEJA BOUGE AVANT QUE LE FILL SOIT PUBLIC ?
+================================================================================
+
+  signaux lus              :   273459
+  ecartes (panel incomplet):   200515
+  >>> PANEL STRICT         :    38388  (LES MEMES signaux aux 12 horizons)
+      tolerance uniforme   :       30 s
+
+  AVANT le signal : mouvement du prix DE T+h VERS T, dans le sens du trade.
+                    Positif = le prix avait DEJA couru. L'info etait consommee.
+  APRES le signal : ce qu'on aurait encaisse en entrant a T.
+
+--------------------------------------------------------------------------------
+     horizon       n   markout moy   borne basse   net -12bps
+--------------------------------------------------------------------------------
+       -300s   38388        -7.75         -8.03               <-- AVANT
+       -120s   38388        -3.54         -3.77               <-- AVANT
+        -60s   38388        -1.12         -1.26               <-- AVANT
+        -30s   38388        +0.14         +0.08               <-- AVANT
+        -10s   38388        +0.06         -0.00               <-- AVANT
+         -5s   38388        +0.00         -0.07               <-- AVANT
+         +5s   38388        -0.13         -0.20       -12.13
+        +10s   38388        +0.07         -0.01       -11.93
+        +30s   38388        +0.22         +0.12       -11.78
+        +60s   38388        +0.08         -0.04       -11.92
+       +120s   38388        +0.10         -0.03       -11.90
+       +300s   38388        +0.62         +0.45       -11.38
+--------------------------------------------------------------------------------
+
+  ============================================================================
+   VERDICT
+  ============================================================================
+
+   Dans les 60 s AVANT le fill  : le prix a deja fait -1.12 bps
+                                   dans le sens du trade.
+   Dans les 60 s APRES le fill  : il fait +0.08 bps.
+
+   >>> LE FILL DU LEADER NE PORTE AUCUNE INFORMATION -- NI AVANT, NI APRES.
+       Le prix ne bouge pas autour de ses trades. Ce n'est pas qu'on arrive
+       trop tard : c'est qu'il n'y avait rien a attraper.
+
+       CONSEQUENCE : ces wallets ne sont pas 'informes'. Les suivre PLUS VITE
+       ne changerait rien -- on copierait plus vite quelque chose de vide.
+
+       La seule porte : un flux qui bouge le prix MECANIQUEMENT (liquidations
+       forcees, prelevement de funding, oracle qui suit les CEX), pas un flux
+       qu'on espere 'malin'.
+
+  rapport : C:\Users\flo\Desktop\Projet invest\data\reports\q3_avant_apres.json

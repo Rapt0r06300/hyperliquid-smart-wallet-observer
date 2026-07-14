@@ -1,0 +1,17 @@
+{
+  "measured_at": "1970-01-01T00:00:00+00:00",
+  "source": "TEST_FIXTURE",
+  "horizon_ms": 30000,
+  "min_sample_size": 200,
+  "bands": [
+    {
+      "age_min_ms": 0,
+      "age_max_ms": 300000,
+      "edge_bps": 60.0,
+      "sample_size": 1000,
+      "horizon_ms": 30000
+    }
+  ],
+  "note": "TEST_FIXTURE -- CE N'EST PAS UNE MESURE. C'est un edge INVENTE (60 bps), volontairement large, dont le SEUL role est de laisser passer un signal pour que les tests puissent verifier la MECANIQUE en aval : la position s'ouvre-t-elle, le PnL est-il juste, le ledger persiste-t-il. Le VERDICT ECONOMIQUE, lui, se teste contre la VRAIE table (runtime/calibration/empirical_edge.json) dans tests/test_edge_reel_est_negatif.py -- et il dit NON. Ne JAMAIS pointer le runtime vers ce fichier : source=TEST_FIXTURE existe pour que ce soit impossible a confondre avec une mesure.",
+  "real_execution": false
+}

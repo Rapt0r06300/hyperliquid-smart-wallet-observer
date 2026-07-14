@@ -16,6 +16,7 @@ Paper-only : un « force exit » est un événement ledger simulé, jamais un or
 """
 
 from __future__ import annotations
+from hl_observer.strategies.strategy_mode import mode_of_position
 
 import os
 import threading
@@ -176,6 +177,7 @@ def force_exit_all_positions(
             "coin": coin,
             "leader_side": side,
             "matched_position_key": f"{wallet}|{coin}|{side}",
+            "strategy_mode": mode_of_position(pos),
             "paper_action_type": "CLOSE",
             "exit_method": "GRADED_HALT_RED_FORCE_EXIT",
             "reason": "GRADED_HALT_RED_FORCE_EXIT_LOCAL_REPLAY_NOT_AN_ORDER",

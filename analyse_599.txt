@@ -1,0 +1,151 @@
+DEBUT 
+=== 1. #591 -- le garde-fou affame === 
+ERROR: file or directory not found: tests\test_vol_adjusted_barriers.py
+
+
+no tests ran in 0.00s
+ 
+=== 2. #599 -- ou vivent les lignes jamais executees === 
+======================================================================================
+  #599 -- OU VIVENT LES 7836 LIGNES JAMAIS EXECUTEES (sur 48470) ?
+  couverture globale : 83.83 %
+======================================================================================
+
+### 1. JAMAIS EXECUTES DU TOUT (0,00 %) -- 97 modules, 1626 lignes
+    Un module a 0 %% n'est pas « peu teste ». Il n'a JAMAIS tourne, pas meme a l'import.
+      214 lignes  src/hl_observer/risk/advanced_risk_manager.py
+      158 lignes  src/hl_observer/copying/circuit_breaker.py
+      120 lignes  src/hl_observer/copying/leader_pnl_tracker.py
+      116 lignes  src/hl_observer/copying/viral_bot_engine.py
+       88 lignes  src/hl_observer/copying/pipeline_integrator.py
+       66 lignes  src/hl_observer/copying/kelly_sizing.py
+       50 lignes  src/hl_observer/copy_mode/multi_wallet_copy_session.py
+       43 lignes  src/hl_observer/simulation/modes.py
+       43 lignes  src/hl_observer/simulation/freshness_gates.py
+       41 lignes  src/hl_observer/collection/run_collect_all.py
+       33 lignes  src/hl_observer/universe/coin_universe.py
+       29 lignes  src/hl_observer/copy_mode/wallet_subscription_planner.py
+       28 lignes  src/hl_observer/copy_mode/copy_session_controller.py
+       27 lignes  src/hl_observer/scoring/live_wallet_scoring_loop.py
+       26 lignes  src/hl_observer/ui/wallet_mirror_panel.py
+       25 lignes  src/hl_observer/research/research_toolkit.py
+       24 lignes  src/hl_observer/core/logging_config.py
+       21 lignes  src/hl_observer/wallets/top_wallet_export.py
+       19 lignes  src/hl_observer/core/main.py
+       18 lignes  src/hl_observer/market_data/exchange_fee_normalizer.py
+       18 lignes  src/hl_observer/backtesting/recursive_analysis.py
+       17 lignes  src/hl_observer/runtime/research_path.py
+       17 lignes  src/hl_observer/connectors/market_data_connector.py
+       16 lignes  src/hl_observer/paper_trading/liquidity_route_simulator.py
+       16 lignes  src/hl_observer/dashboard/risk_flags_panel.py
+       16 lignes  src/hl_observer/copy_wallet/multi_trader_runtime.py
+       16 lignes  src/hl_observer/connectors/read_only_market_connector.py
+       16 lignes  src/hl_observer/backtesting/hyperopt_local.py
+       12 lignes  src/hl_observer/market_data/market_matcher.py
+       12 lignes  src/hl_observer/hyperliquid/ws_client.py
+       12 lignes  src/hl_observer/gateway/local_source_gateway.py
+       12 lignes  src/hl_observer/connectors/connector_base.py
+       12 lignes  src/hl_observer/analysis/opening_outcome.py
+       11 lignes  src/hl_observer/wallets/leaderboard_dom_extractor.py
+       10 lignes  src/hl_observer/runtime/graceful_shutdown.py
+        9 lignes  src/hl_observer/universe/dynamic_whitelist.py
+        9 lignes  src/hl_observer/explorer/explorer_dom_extractor.py
+        9 lignes  src/hl_observer/analysis/trade_lifecycle.py
+        7 lignes  src/hl_observer/clusters/wallet_clusterer.py
+        7 lignes  src/hl_observer/backtesting/lookahead_analysis.py
+        6 lignes  src/hl_observer/universe/blacklist.py
+        6 lignes  src/hl_observer/analysis/copy_delay_model.py
+        5 lignes  src/hl_observer/wallets/scan_progress.py
+        5 lignes  src/hl_observer/signals/signal_builder.py
+        5 lignes  src/hl_observer/following/position_follower.py
+        5 lignes  src/hl_observer/following/leaderboard_follow_shortlist.py
+        5 lignes  src/hl_observer/following/follow_state.py
+        5 lignes  src/hl_observer/explorer/explorer_rate_budget.py
+        5 lignes  src/hl_observer/cli_pkg_DISABLED/tui_status.py
+        5 lignes  src/hl_observer/backtest/monte_carlo.py
+        5 lignes  src/hl_observer/analysis/profit_patterns.py
+        5 lignes  src/hl_observer/analysis/exit_edge.py
+        5 lignes  src/hl_observer/analysis/entry_edge.py
+        4 lignes  src/hl_observer/wallets/toxicity.py
+        4 lignes  src/hl_observer/wallets/profiler.py
+        4 lignes  src/hl_observer/runtime/safe_mode.py
+        4 lignes  src/hl_observer/paper/latency_model.py
+        4 lignes  src/hl_observer/monitoring/monitor_output.py
+        4 lignes  src/hl_observer/following/follow_reconciliation.py
+        3 lignes  src/hl_observer/wallets/scan_scheduler.py
+        3 lignes  src/hl_observer/wallets/scan_limits.py
+        3 lignes  src/hl_observer/wallets/leaderboard_importer.py
+        3 lignes  src/hl_observer/wallets/degradation.py
+        3 lignes  src/hl_observer/validation/testnet_tournament.py
+        3 lignes  src/hl_observer/validation/bootstrap.py
+        3 lignes  src/hl_observer/testnet/testnet_reconciliation.py
+        3 lignes  src/hl_observer/reports/paper_report.py
+        3 lignes  src/hl_observer/reports/daily_report.py
+        3 lignes  src/hl_observer/market_data/__init__.py
+        3 lignes  src/hl_observer/following/copy_delay.py
+        3 lignes  src/hl_observer/clusters/cluster_signal_score.py
+        3 lignes  src/hl_observer/backtest/replay_engine.py
+        3 lignes  src/hl_observer/analysis/opening_profitability.py
+        3 lignes  src/hl_observer/analysis/followability.py
+        3 lignes  src/hl_observer/__main__.py
+        2 lignes  src/hl_observer/universe/__init__.py
+        2 lignes  src/hl_observer/simulation/wallet_loss_diagnostics.py
+        2 lignes  src/hl_observer/simulation/timing_distribution_diagnostics.py
+        2 lignes  src/hl_observer/simulation/stale_signal_diagnostics.py
+        2 lignes  src/hl_observer/simulation/root_cause_from_logs.py
+        2 lignes  src/hl_observer/simulation/refusal_breakdown.py
+        2 lignes  src/hl_observer/simulation/profitability_diagnostics.py
+        2 lignes  src/hl_observer/simulation/position_matching_diagnostics.py
+        2 lignes  src/hl_observer/simulation/logs_analyzer.py
+        2 lignes  src/hl_observer/simulation/edge_distribution_diagnostics.py
+        2 lignes  src/hl_observer/simulation/cost_drag_diagnostics.py
+        2 lignes  src/hl_observer/simulation/coin_loss_diagnostics.py
+        2 lignes  src/hl_observer/simulation/action_loss_diagnostics.py
+        2 lignes  src/hl_observer/signals/decisions.py
+        2 lignes  src/hl_observer/optimization/walk_forward_validator.py
+        2 lignes  src/hl_observer/optimization/strategy_tournament.py
+        2 lignes  src/hl_observer/optimization/random_search.py
+        2 lignes  src/hl_observer/optimization/profit_report.py
+        2 lignes  src/hl_observer/optimization/hypothesis_engine.py
+        2 lignes  src/hl_observer/optimization/grid_search.py
+        2 lignes  src/hl_observer/monitoring/__init__.py
+        2 lignes  src/hl_observer/gateway/__init__.py
+
+### 2. CHEMIN DE DECISION -- 117 modules, 848 lignes manquantes
+    C'est ICI que 16 %% non executes fait mal : une branche de refus jamais parcourue
+    est un refus dont on ne sait pas s'il fonctionne.
+       36 lignes  ( 80.9 % couvert)  src/hl_observer/signals/v26_entry_vetos.py
+       35 lignes  ( 82.1 % couvert)  src/hl_observer/edge/measured_edge_table.py
+       35 lignes  ( 78.8 % couvert)  src/hl_observer/paper_trading/sltp_runtime.py
+       30 lignes  ( 53.1 % couvert)  src/hl_observer/paper_trading/v26_exit_pipeline.py
+       29 lignes  ( 86.4 % couvert)  src/hl_observer/paper_trading/paper_engine.py
+       27 lignes  ( 71.9 % couvert)  src/hl_observer/signals/position_delta_detector.py
+       25 lignes  ( 79.5 % couvert)  src/hl_observer/copying/consensus_leader_selector.py
+       25 lignes  ( 78.4 % couvert)  src/hl_observer/paper_trading/vol_adjusted_barriers.py
+       24 lignes  ( 71.8 % couvert)  src/hl_observer/signals/shadow_wiring.py
+       24 lignes  ( 52.9 % couvert)  src/hl_observer/edge/cost_validation.py
+       22 lignes  ( 80.5 % couvert)  src/hl_observer/paper_trading/auto_unstuck.py
+       21 lignes  ( 85.8 % couvert)  src/hl_observer/copying/signal_detector.py
+       20 lignes  ( 73.0 % couvert)  src/hl_observer/funding/funding_poller.py
+       20 lignes  ( 66.7 % couvert)  src/hl_observer/risk/risk_engine.py
+       17 lignes  ( 92.3 % couvert)  src/hl_observer/copying/realtime_magic_score.py
+       17 lignes  ( 86.6 % couvert)  src/hl_observer/copying/runtime_v9_adapter.py
+       16 lignes  ( 80.7 % couvert)  src/hl_observer/paper_trading/barrier_calibration.py
+       16 lignes  ( 27.3 % couvert)  src/hl_observer/copying/reports.py
+       15 lignes  ( 91.1 % couvert)  src/hl_observer/paper_trading/fusion_paper_engine_adapter.py
+       13 lignes  ( 92.9 % couvert)  src/hl_observer/copying/v9_paper_pipeline.py
+
+### 3. LE RESTE (ui, cli, outils) -- 396 modules, 5362 lignes manquantes
+      800 lignes  ( 47.6 % couvert)  src/hl_observer/cli.py
+      622 lignes  ( 72.9 % couvert)  src/hl_observer/ui/routes.py
+      146 lignes  ( 84.0 % couvert)  src/hl_observer/ui/status_routes.py
+      135 lignes  ( 80.4 % couvert)  src/hl_observer/ui/fusion_persistent_adapter.py
+       93 lignes  ( 65.9 % couvert)  src/hl_observer/loops/candidate_factory.py
+       82 lignes  ( 17.2 % couvert)  src/hl_observer/explorer/explorer_network_probe.py
+       79 lignes  ( 66.9 % couvert)  src/hl_observer/hyperliquid/rest_info_client.py
+       77 lignes  ( 80.1 % couvert)  src/hl_observer/runtime/persistent_poll_runner.py
+       70 lignes  ( 69.7 % couvert)  src/hl_observer/wallets/public_trades_live.py
+       68 lignes  ( 81.2 % couvert)  src/hl_observer/storage/repositories.py
+
+-> C:\Users\flo\Desktop\Projet invest\data\reports\couverture_599.json
+FIN 

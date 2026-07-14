@@ -1,0 +1,17 @@
+horizon adverse : 30000 ms | espacement des trades : 60 s
+trades 1600 | mids estimes 1598
+pertes mesurees : 1597
+  dont gros (5000$) : 399 | petits (200$) : 1198
+
+--- les 3 bornes ---
+DEVANT    q=0.00 seuil=   200.0$  n=1597  adverse_median=+0.1501 bps  valeurs distinctes=35
+            5 plus frequentes : [(0, 2.4024), (0, 2.3976), (0, 1.8018), (0, 1.7982), (0, 1.6483)]
+MILIEU    q=0.50 seuil=   200.0$  n=1597  adverse_median=+0.1501 bps  valeurs distinctes=35
+            5 plus frequentes : [(0, 2.4024), (0, 2.3976), (0, 1.8018), (0, 1.7982), (0, 1.6483)]
+DERRIERE  q=0.75 seuil=   200.0$  n=1597  adverse_median=+0.1501 bps  valeurs distinctes=35
+            5 plus frequentes : [(0, 2.4024), (0, 2.3976), (0, 1.8018), (0, 1.7982), (0, 1.6483)]
+
+--- ce qu'on INJECTE ---
+  impact d'un PETIT trade : 0.30 bps   -> un maker devrait perdre 0.30
+  impact d'un GROS trade  : 0.90 bps   -> un maker devrait perdre 0.90
+  si la mesure rend la MOITIE, l'estimateur de mid dilue l'impact.

@@ -57,8 +57,28 @@ def compute_book_costs(
 ) -> tuple[float, float] | None:
     """(spread_bps, slippage_bps au notionnel) depuis des niveaux [(px, sz), ...].
 
-    Walk-the-book côté ask (achat) — repo 30 : avg_price vs best, en bps.
+    Walk-the-book côté ask (achat) : avg_price vs best, en bps.
     Carnet vide/invalide ⇒ None (jamais de coût inventé).
+
+    🔴 Q2 (2026-07-13) — LA LIGNE QUI INVENTAIT DE LA LIQUIDITÉ :
+
+        if remain_usd2 > 0:
+            qty += remain_usd2 / float(levels_ask[-1][0])   # <-- SUPPRIMÉE
+
+    Quand le notionnel demandé dépassait ce que le carnet VISIBLE contient, cette ligne
+    prolongeait le dernier niveau **à l'infini**, au même prix. Elle rendait donc un slippage
+    faible pile dans le cas où le slippage explose : celui du carnet trop mince. Un coût
+    sous-estimé exactement quand il compte n'est pas une approximation — c'est un mensonge
+    orienté, et il penche toujours du côté qui fait trader.
+
+    Désormais : profondeur insuffisante ⇒ ``None``. Le carnet ne peut pas absorber le trade,
+    donc on ne sait pas ce qu'il coûterait. L'appelant (``fusion_paper_engine_adapter``) traite
+    ce ``None`` comme un repli EXPLICITEMENT MARQUÉ (``book_costs_used=False``), jamais comme
+    une validation silencieuse.
+
+    Le walk-the-book complet (VWAP, refus, les deux sens) vit dans
+    ``hl_observer/arbitrage/executable_legs.py``. Cette fonction-ci reste le raccourci
+    « spread + slippage à l'achat » du chemin de coûts.
     """
     try:
         if not levels_bid or not levels_ask:
@@ -68,19 +88,31 @@ def compute_book_costs(
             return None
         mid = (best_bid + best_ask) / 2.0
         spread_bps = (best_ask - best_bid) / mid * 10_000.0
+
+        cible = float(notional_usd)
+        if not (cible > 0.0):
+            return None
+
         # walk-the-book : quantité acquise niveau par niveau pour le notionnel visé
         qty = 0.0
-        remain_usd2 = max(1e-9, float(notional_usd))
+        remain_usd2 = cible
         for px, sz in levels_ask:
             px, sz = float(px), float(sz)
+            if px <= 0.0 or sz <= 0.0:
+                continue
             take_usd = min(remain_usd2, px * sz)
             qty += take_usd / px
             remain_usd2 -= take_usd
-            if remain_usd2 <= 0:
+            if remain_usd2 <= 1e-12:
                 break
-        if remain_usd2 > 0:
-            qty += remain_usd2 / float(levels_ask[-1][0])
-        avg_px = float(notional_usd) / qty if qty > 0 else best_ask
+
+        if remain_usd2 > 1e-9:
+            # Le carnet VISIBLE ne peut pas absorber ce notionnel. On ne l'invente pas.
+            return None
+        if qty <= 0.0:
+            return None
+
+        avg_px = cible / qty
         slip_bps = max(0.0, (avg_px - best_ask) / best_ask * 10_000.0)
         return round(spread_bps, 4), round(slip_bps, 4)
     except Exception:
@@ -150,18 +182,122 @@ def poll_once(coins: list[str], *, opener=None, env: dict | None = None) -> int:
             if costs is None:
                 continue
             push_costs(coin, costs[0], costs[1])
+            # ENREGISTREMENT (audit PnL 2026-07-11, opt-in HYPERSMART_RECORD_MICROSTRUCTURE=1).
+            # Ce poller recuperait DEJA le carnet complet et le JETAIT apres en avoir tire deux
+            # chiffres. Or le carnet est la seule donnee qui permette de tester les strategies
+            # dont l'esperance ne depend PAS d'une prediction (market making : on ENCAISSE le
+            # spread au lieu de le payer). Le copy-trading, lui, est mesure sans edge : meme a
+            # cout zero son esperance est negative. On garde donc la donnee, sans un seul appel
+            # reseau supplementaire. Best-effort : jamais bloquant pour la boucle.
+            try:
+                from hl_observer.collection import microstructure_recorder as _mr
+
+                if _mr.enabled():
+                    _base = str(e.get("HYPERSMART_V26_RECORD_PATH", "") or "runtime/replay")
+                    _mr.record_l2(_base, coin, json.loads(raw.decode("utf-8")))
+            except Exception:
+                pass
             n += 1
         except Exception:
             continue
     return n
 
 
+DEFAUT_COINS_ENV = "HYPERSMART_V26_BOOK_DEFAULT_COINS"
+DEFAUT_COINS = ("BTC", "ETH", "SOL")
+
+
+BALAYAGE_FLAG = "HYPERSMART_V26_BOOK_SWEEP_ALL"      # balayer TOUS les marches, par rotation
+_curseur = [0]                                        # position dans le balayage (mutable, borne)
+
+
+def _tous_les_marches() -> list[str]:
+    """Tous les marches connus, via le cache funding (deja alimente, zero requete en plus)."""
+    try:
+        from hl_observer.funding import funding_runtime_cache as _frc
+
+        coins = getattr(_frc, "known_coins", None)
+        if callable(coins):
+            return sorted({str(c).upper() for c in (coins() or []) if c})
+    except Exception:
+        pass
+    return []
+
+
+def _tranche_rotative(univers: list[str], taille: int) -> list[str]:
+    """La tranche suivante du balayage. Le curseur avance a chaque cycle et boucle."""
+    if not univers or taille <= 0:
+        return []
+    n = len(univers)
+    debut = _curseur[0] % n
+    tranche = [univers[(debut + i) % n] for i in range(min(taille, n))]
+    _curseur[0] = (debut + len(tranche)) % n
+    return tranche
+
+
+def coins_a_sonder(*, limit: int, universe=None, recorder=None, env: dict | None = None) -> list[str]:
+    """Quels marches sonder ? PURE, testable, et surtout : **jamais vide sans raison**.
+
+    LE BUG DE FOND (2026-07-11) : le poller prenait ses coins d'une seule source. Cette source
+    etait vide -> il sondait RIEN -> aucun carnet n'etait recuperé -> tous les couts retombaient
+    sur des constantes -> et aucune donnee de carnet n'existait pour tester le market making.
+    Pendant ce temps le flag etait allume et personne ne s'en plaignait.
+
+    Une liste vide ne doit JAMAIS pouvoir eteindre silencieusement la collecte. Collecter des
+    donnees n'est pas ouvrir une position : le deny-by-default protege les ORDRES, pas les
+    OCTETS. Ici, en cas de doute, on collecte.
+
+    Ordre : coins reellement observes -> recorder d'edge -> socle par defaut (jamais vide).
+    """
+    e = env if env is not None else os.environ
+    lim = max(1, int(limit))
+    vus: list[str] = []
+    try:
+        if universe is not None:
+            vus = list(universe.coins(limit=lim))
+    except Exception:
+        vus = []
+    if not vus and recorder is not None:
+        try:
+            vus = list(recorder.coins())[:lim]
+        except Exception:
+            vus = []
+    # BALAYAGE COMPLET (2026-07-12) -- pour repondre a "existe-t-il un marche assez large ?", il
+    # faut voir TOUS les marches, pas les 8 majors. On tourne : `lim` coins par cycle, et on
+    # avance dans la liste. En ~4 min a 30 coins / 10 s, les ~230 marches Hyperliquid sont
+    # couverts, sans une seule requete de plus par cycle.
+    if _on(BALAYAGE_FLAG, e):
+        univers = _tous_les_marches()
+        if univers:
+            vus = list(vus) + _tranche_rotative(univers, lim)
+
+    if not vus:
+        brut = str(e.get(DEFAUT_COINS_ENV, "") or "").strip()
+        socle = [c.strip().upper() for c in brut.split(",") if c.strip()] or list(DEFAUT_COINS)
+        vus = socle[:lim]
+    # dedoublonne en gardant l'ordre
+    vu, sortie = set(), []
+    for c in vus:
+        cc = str(c or "").strip().upper()
+        if cc and cc not in vu:
+            vu.add(cc)
+            sortie.append(cc)
+    return sortie[:lim]
+
+
 def _loop(interval_s: float) -> None:  # pragma: no cover — boucle démon runtime
     while True:
         try:
+            # BUG CORRIGE 2026-07-11 -- CETTE LISTE ETAIT TOUJOURS VIDE.
+            # Le poller demandait ses coins a DEFAULT_EDGE_TREND_RECORDER, dont la seule fonction
+            # de remplissage (`record_edge_observation`) n'etait appelee NULLE PART. Resultat : il
+            # sondait une liste vide, le carnet n'etait jamais recupere, et tous les couts
+            # retombaient sur des constantes -- malgre le flag allume.
+            from hl_observer.collection import coin_universe as _cu
             from hl_observer.signals.v26_entry_vetos import DEFAULT_EDGE_TREND_RECORDER
 
-            coins = DEFAULT_EDGE_TREND_RECORDER.coins()[: int(_f(MAX_COINS_ENV))]
+            _limite = int(_f(MAX_COINS_ENV))
+            coins = coins_a_sonder(limit=_limite, universe=_cu, recorder=DEFAULT_EDGE_TREND_RECORDER)
             if coins:
                 poll_once(coins)
         except Exception:
@@ -191,4 +327,5 @@ def clear() -> None:
 __all__ = [
     "CONSUME_FLAG", "POLLER_FLAG", "compute_book_costs", "push_costs",
     "live_costs_for", "parse_l2book", "poll_once", "ensure_started", "clear",
+    "coins_a_sonder", "DEFAUT_COINS", "DEFAUT_COINS_ENV", "BALAYAGE_FLAG",
 ]

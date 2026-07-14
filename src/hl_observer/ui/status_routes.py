@@ -33,6 +33,7 @@ from hl_observer.signals.entry_supply_diagnostics import (
     BOTTLENECK_SUPPLY,
 )
 from hl_observer.simulation.pnl_reconciliation import reconcile_pnl
+from hl_observer.strategies.engine_pnl import rapport_par_moteur as _rapport_par_moteur
 from hl_observer.storage.database import create_session_factory, create_sqlite_engine
 from hl_observer.storage.models import MarketSnapshot
 from hl_observer.strategies.external_github_bridge import build_external_github_bridge_payload
@@ -970,6 +971,11 @@ def _paper_ledger_projection_from_status_state(
         "legacy_costs_reported_usdc": round(entry_costs + exit_costs, 6),
         "cost_accounting": "legacy UI costs are already embedded in realized/mark values; not subtracted again here",
         "reconciliation": asdict(reconciliation),
+        # PISTE 12 -- DEUX MOTEURS, DEUX PnL. Un chiffre unique melange deux maladies
+        # (le Grinder meurt des frais, le Sniper de la fraicheur) et laisse un moteur qui gagne
+        # masquer un moteur qui saigne. `moteurs_inactifs` dit tout haut qu'un moteur ne trade
+        # pas -- c'est ainsi que le Grinder est reste eteint sans que personne le voie.
+        "pnl_par_moteur": _rapport_par_moteur(ledger_events),
         "spike_diagnostics": _equity_spike_diagnostics(history),
         "spike_links": spike_links,
         "formula": "equity = starting_balance + realized_pnl + unrealized_pnl",

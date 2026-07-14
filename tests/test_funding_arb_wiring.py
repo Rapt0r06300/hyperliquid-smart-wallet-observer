@@ -9,6 +9,7 @@ from hl_observer.strategies.fusion_runtime import FusionRuntimeInput, run_fusion
 from hl_observer.ui.fusion_persistent_adapter import apply_fusion_paper_orders_to_state
 from hl_observer.ui.state import UiState
 
+
 STABLE_HIGH = [0.00049, 0.00051, 0.0005, 0.00052, 0.00048, 0.0005, 0.00051, 0.00049, 0.0005, 0.00052, 0.00048, 0.0005]
 
 
@@ -83,3 +84,26 @@ def test_adapter_credits_funding_events_to_ledger_without_double_count():
     report2 = apply_fusion_paper_orders_to_state(state, _fusion_status_with_funding_events(), current_ms=5_000)
     assert report2["funding_arb_events_recorded"] == 0
     assert abs(state.simulation_realized_pnl_usdc - 0.01) < 1e-9
+
+
+# ---------------------------------------------------------------------------------------------
+# VERROU CARRY (2026-07-11) -- POURQUOI CES TESTS FORCENT UN FLAG.
+#
+# Ces tests verifient la MECANIQUE du moteur funding (accrual, caps, sortie, PnL). Pour cela, il
+# faut qu'une position s'ouvre. Or depuis la mesure du 2026-07-11, le moteur REFUSE par defaut
+# d'ouvrir une jambe NUE :
+#
+#     232 marches, 9 512 releves : funding median 0,125 bps/h contre ~35 bps/h de mouvement de
+#     prix. Pour 1 bps de funding encaisse, une jambe nue subit ~281 bps de mouvement de prix.
+#
+# On active donc explicitement `HYPERSMART_FUNDING_ALLOW_UNHEDGED_LEG=1` : c'est un mode A/B
+# ASSUME, PAS le comportement de production. Le defaut, lui, reste le REFUS -- et c'est
+# `tests/test_funding_carry_economics.py` qui garde cette regle.
+# ---------------------------------------------------------------------------------------------
+import pytest as _pytest
+
+
+@_pytest.fixture(autouse=True)
+def _autoriser_jambe_nue_pour_tester_la_mecanique(monkeypatch):
+    """Mode A/B : on ouvre la vanne pour pouvoir tester l'interieur du moteur."""
+    monkeypatch.setenv("HYPERSMART_FUNDING_ALLOW_UNHEDGED_LEG", "1")

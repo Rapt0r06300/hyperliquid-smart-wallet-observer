@@ -41,8 +41,29 @@ _VALID_SCOPES = frozenset({"priority", "all", "off"})
 
 
 def external_profile_scope() -> str:
-    value = str(os.getenv(PROFILE_SCOPE_ENV, "priority")).strip().lower()
-    return value if value in _VALID_SCOPES else "priority"
+    """Portee du bus GitHub -- **OFF par defaut depuis le 2026-07-12**.
+
+    DECISION PRODUIT (Flo) : le bus GitHub est termine. Il avait deja ete juge (PF net 0,61) et
+    ecarte, mais son defaut de code restait `priority` -- donc il TOURNAIT, absent du launcher,
+    sans que personne l'ait rallume.
+
+    Ce qu'il faisait reellement, verifie sur le code :
+      * il ecrivait des evenements `ENGINE_EVALUATION` / `PAPER_ORDER_ACCEPTED` dans
+        `state.simulation_ledger_events` -- avec `copied_notional_usdt=0`, `leader_side=NONE`
+        et `estimated_net_pnl_usdc=None` ;
+      * ces evenements ne CORROMPENT PAS la comptabilite : `_ledger_closed_trade_stats` exige
+        (a) une action CLOSE/REDUCE/EXIT/STOP/TP ET (b) un PnL numerique -- ils echouent aux deux
+        (prouve par execution : 171 evaluations + 1 vrai close -> closed_trades = 1) ;
+      * mais ils POLLUENT le vocabulaire (un "PAPER_ORDER_ACCEPTED" qui n'est pas un ordre),
+        l'affichage, et surtout ils consomment le hot path : ~810 evaluations de profils externes
+        pour 21 entrees reelles.
+
+    Les clones sous `runtime/research/github_repos_v24/` restent intacts comme bibliotheque de
+    recherche. Une idee utile se distille a la main dans un module HyperSmart teste -- jamais en
+    lancant du code upstream comme moteur autonome.
+    """
+    value = str(os.getenv(PROFILE_SCOPE_ENV, "off")).strip().lower()
+    return value if value in _VALID_SCOPES else "off"
 
 
 def _priority_repo_ids() -> frozenset[str]:

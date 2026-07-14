@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from collections import defaultdict
 from typing import Iterable
 
 
@@ -39,20 +40,17 @@ def _side_bucket(side: str) -> str:
 
 
 def resolve_copy_conflict(votes: Iterable[LeaderVote | dict[str, object]], *, min_majority_ratio: float = 1.35) -> CopyConflictDecision:
-    rows: list[LeaderVote] = []
-    for vote in votes:
-        if isinstance(vote, LeaderVote):
-            rows.append(vote)
-        else:
-            rows.append(
-                LeaderVote(
-                    wallet=str(vote.get("wallet") or ""),
-                    coin=str(vote.get("coin") or "").upper(),
-                    side=str(vote.get("side") or vote.get("action") or ""),
-                    score=float(vote.get("score") or 1.0),
-                    observed_at_ms=int(vote.get("observed_at_ms") or 0),
-                )
-            )
+    rows = _normalise_votes(votes)
+    coins = {vote.coin for vote in rows if vote.coin}
+    if len(coins) > 1:
+        return CopyConflictDecision(
+            coin="",
+            decision="NO_TRADE",
+            winning_side=None,
+            long_score=0.0,
+            short_score=0.0,
+            reasons=("MIXED_COIN_VOTES_REQUIRE_GROUPING",),
+        )
     coin = rows[0].coin if rows else ""
     long_score = sum(max(v.score, 0.0) for v in rows if _side_bucket(v.side) == "LONG")
     short_score = sum(max(v.score, 0.0) for v in rows if _side_bucket(v.side) == "SHORT")
@@ -80,4 +78,60 @@ def resolve_copy_conflict(votes: Iterable[LeaderVote | dict[str, object]], *, mi
     )
 
 
-__all__ = ["CopyConflictDecision", "LeaderVote", "resolve_copy_conflict"]
+def resolve_copy_conflicts_by_coin(
+    votes: Iterable[LeaderVote | dict[str, object]],
+    *,
+    min_majority_ratio: float = 1.35,
+) -> tuple[tuple[CopyConflictDecision, tuple[LeaderVote, ...]], ...]:
+    """Resolve independent conflicts without mixing unrelated markets.
+
+    A fusion heartbeat contains several coins. Aggregating all LONG/SHORT scores
+    and then attaching the result to the first coin can manufacture a consensus
+    that never existed. Each returned decision is therefore scoped to one coin.
+    """
+
+    grouped: dict[str, list[LeaderVote]] = defaultdict(list)
+    for vote in _normalise_votes(votes):
+        if vote.coin:
+            grouped[vote.coin].append(vote)
+    return tuple(
+        (
+            resolve_copy_conflict(rows, min_majority_ratio=min_majority_ratio),
+            tuple(rows),
+        )
+        for _, rows in sorted(grouped.items())
+    )
+
+
+def _normalise_votes(votes: Iterable[LeaderVote | dict[str, object]]) -> list[LeaderVote]:
+    rows: list[LeaderVote] = []
+    for vote in votes:
+        if isinstance(vote, LeaderVote):
+            rows.append(
+                LeaderVote(
+                    wallet=str(vote.wallet or ""),
+                    coin=str(vote.coin or "").upper(),
+                    side=str(vote.side or ""),
+                    score=float(vote.score or 0.0),
+                    observed_at_ms=int(vote.observed_at_ms or 0),
+                )
+            )
+            continue
+        rows.append(
+            LeaderVote(
+                wallet=str(vote.get("wallet") or ""),
+                coin=str(vote.get("coin") or "").upper(),
+                side=str(vote.get("side") or vote.get("action") or ""),
+                score=float(vote.get("score") or 1.0),
+                observed_at_ms=int(vote.get("observed_at_ms") or 0),
+            )
+        )
+    return rows
+
+
+__all__ = [
+    "CopyConflictDecision",
+    "LeaderVote",
+    "resolve_copy_conflict",
+    "resolve_copy_conflicts_by_coin",
+]

@@ -110,6 +110,7 @@ class V19NegativePnlAudit:
     pnl_reliability_status: str = "UNKNOWN"
     pnl_reliability_findings: tuple[str, ...] = ()
     strategy_summary: dict[str, Any] = field(default_factory=dict)
+    open_portfolio: dict[str, Any] = field(default_factory=dict)
 
 
 def build_negative_pnl_audit(log_dir: Path | None = None) -> V19NegativePnlAudit:
@@ -123,6 +124,10 @@ def build_negative_pnl_audit(log_dir: Path | None = None) -> V19NegativePnlAudit
     metrics = analyze_logs_streaming(effective_log_dir, prefer_append_only=prefer_append_only)
     tournament = run_strategy_tournament(effective_log_dir)
     snapshot = _load_snapshot_pnl(effective_log_dir)
+    open_portfolio = _load_open_portfolio_audit(
+        effective_log_dir,
+        starting_equity_usdt=snapshot.starting_equity_usdt,
+    )
     export_state = _load_export_state(effective_log_dir)
     effective_net_pnl_usdc, pnl_truth_mode = _effective_net_pnl_and_mode(metrics, snapshot)
     effective_fees_usdc = _effective_fees(metrics, snapshot)
@@ -210,7 +215,14 @@ def build_negative_pnl_audit(log_dir: Path | None = None) -> V19NegativePnlAudit
         losing_wallets=losing_wallets,
         losing_actions=losing_actions,
         losing_reasons=losing_reasons,
-        recommendations=tuple(_build_v19_recommendations(metrics, snapshot, effective_net_pnl_usdc)),
+        recommendations=tuple(
+            _build_v19_recommendations(
+                metrics,
+                snapshot,
+                effective_net_pnl_usdc,
+                open_portfolio=open_portfolio,
+            )
+        ),
         risk_decision=decision,
         strategy_best_name=tournament.best.config.name,
         strategy_protection_recommended=tournament.protection_mode_recommended,
@@ -221,6 +233,7 @@ def build_negative_pnl_audit(log_dir: Path | None = None) -> V19NegativePnlAudit
         pnl_reliability_status=reliability_status,
         pnl_reliability_findings=tuple(reliability_findings),
         strategy_summary=_strategy_summary(tournament),
+        open_portfolio=open_portfolio,
     )
 
 
@@ -283,6 +296,7 @@ def audit_to_dict(audit: V19NegativePnlAudit) -> dict[str, Any]:
         "pnl_reliability_status": audit.pnl_reliability_status,
         "pnl_reliability_findings": list(audit.pnl_reliability_findings),
         "strategy_summary": audit.strategy_summary,
+        "open_portfolio": audit.open_portfolio,
         "paper_only": True,
         "real_execution": False,
         "future_profit_guarantee": False,
@@ -342,6 +356,29 @@ def format_negative_pnl_audit(audit: V19NegativePnlAudit) -> str:
         lines.extend(f"- {item}" for item in audit.pnl_reliability_findings)
     else:
         lines.append("- OK: snapshot, logs et fraicheur ne montrent pas de divergence bloquante.")
+    portfolio = audit.open_portfolio
+    lines.extend(
+        [
+            "",
+            "## Portefeuille ouvert et concentration",
+            "",
+            f"- Positions ouvertes analysees: {portfolio.get('position_count', 0)}",
+            f"- Exposition brute: {float(portfolio.get('gross_notional_usdt') or 0.0):.6f} USDT",
+            f"- Exposition LONG: {float(portfolio.get('long_notional_usdt') or 0.0):.6f} USDT",
+            f"- Exposition SHORT: {float(portfolio.get('short_notional_usdt') or 0.0):.6f} USDT",
+            f"- Exposition nette signee: {float(portfolio.get('net_notional_usdt') or 0.0):.6f} USDT",
+            f"- Sens dominant: {portfolio.get('dominant_side', 'FLAT')}",
+            f"- Part du sens dominant: {float(portfolio.get('dominant_side_ratio') or 0.0):.4f}",
+            f"- Levier brut implicite: {float(portfolio.get('gross_to_equity_ratio') or 0.0):.4f}x",
+            f"- Levier net directionnel: {float(portfolio.get('net_to_equity_ratio') or 0.0):.4f}x",
+            f"- Coins avec positions dupliquees: {portfolio.get('duplicate_coin_position_count', 0)}",
+            f"- Positions sans evidence d'entree complete: {portfolio.get('missing_entry_evidence_count', 0)}",
+        ]
+    )
+    findings = portfolio.get("findings") if isinstance(portfolio.get("findings"), list) else []
+    if findings:
+        lines.extend(["", "### Alertes portefeuille", ""])
+        lines.extend(f"- {item}" for item in findings)
     lines.extend([
         "",
         "## Perte par coin",
@@ -485,6 +522,126 @@ def _load_snapshot_pnl(log_dir: Path) -> SnapshotPnL:
         decision_log_events=_first_int(_dict(payload.get("decision_log_pnl")).get("events"), equity.get("decision_log_events")),
         status="ok",
     )
+
+
+def _load_open_portfolio_audit(log_dir: Path, *, starting_equity_usdt: float | None) -> dict[str, Any]:
+    """Describe current paper exposure without inventing missing evidence.
+
+    The snapshot is the same source consumed by the dashboard.  This audit does
+    not infer a position from historical decisions: if the current snapshot has
+    no open rows, the result is an honest empty portfolio.
+    """
+
+    path = log_dir / "simulation_snapshot_latest.json"
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8-sig"))
+    except (OSError, json.JSONDecodeError):
+        return _empty_open_portfolio("SNAPSHOT_UNAVAILABLE")
+    bot = _dict(payload.get("bot_simulation"))
+    raw_positions = bot.get("open_positions")
+    if not raw_positions:
+        raw_positions = bot.get("virtual_positions_state")
+    if isinstance(raw_positions, Mapping):
+        rows = [row for row in raw_positions.values() if isinstance(row, Mapping)]
+    elif isinstance(raw_positions, list):
+        rows = [row for row in raw_positions if isinstance(row, Mapping)]
+    else:
+        rows = []
+
+    gross = 0.0
+    long_notional = 0.0
+    short_notional = 0.0
+    by_coin: dict[str, float] = {}
+    coin_positions: dict[str, int] = {}
+    missing_evidence = 0
+    for row in rows:
+        size = abs(_first_number(row.get("size"), row.get("position_size")) or 0.0)
+        mark = _first_number(row.get("mark_price"), row.get("current_price"), row.get("avg_price"), row.get("entry_price")) or 0.0
+        notional = abs(
+            _first_number(row.get("notional_usdt"), row.get("copied_notional_usdt"), row.get("notional_usdc"))
+            or (size * mark)
+        )
+        if notional <= 0:
+            continue
+        side = str(row.get("direction") or row.get("side") or "").upper()
+        if side not in {"LONG", "SHORT"}:
+            signed_size = _first_number(row.get("signed_size"), row.get("raw_size"), row.get("size")) or 0.0
+            side = "SHORT" if signed_size < 0 else "LONG"
+        if side == "SHORT":
+            short_notional += notional
+        else:
+            long_notional += notional
+        gross += notional
+        coin = str(row.get("coin") or "UNKNOWN").upper()
+        by_coin[coin] = by_coin.get(coin, 0.0) + notional
+        coin_positions[coin] = coin_positions.get(coin, 0) + 1
+        leader_count = _first_int(row.get("leader_wallets_count"), row.get("wallet_count"))
+        if leader_count is None:
+            csv_wallets = [item for item in str(row.get("leader_wallets_csv") or "").split(",") if item.strip()]
+            leader_count = len(csv_wallets)
+        required = (
+            row.get("edge_remaining_bps"),
+            row.get("signal_age_ms"),
+            row.get("liquidity_score"),
+        )
+        if any(value is None for value in required) or leader_count <= 0:
+            missing_evidence += 1
+
+    net = long_notional - short_notional
+    equity = abs(float(starting_equity_usdt or 0.0))
+    dominant_notional = max(long_notional, short_notional)
+    dominant_side = "FLAT" if gross <= 0 else "LONG" if long_notional >= short_notional else "SHORT"
+    dominant_ratio = dominant_notional / gross if gross > 0 else 0.0
+    duplicate_coins = {coin: count for coin, count in coin_positions.items() if count > 1}
+    findings: list[str] = []
+    if gross > 0 and dominant_ratio >= 0.75:
+        findings.append("OPEN_PORTFOLIO_DIRECTIONAL_CONCENTRATION")
+    if equity > 0 and gross / equity > 3.0:
+        findings.append("OPEN_PORTFOLIO_GROSS_LEVERAGE_HIGH")
+    if equity > 0 and abs(net) / equity > 1.0:
+        findings.append("OPEN_PORTFOLIO_NET_DIRECTIONAL_LEVERAGE_HIGH")
+    if duplicate_coins:
+        findings.append("OPEN_PORTFOLIO_DUPLICATE_COIN_EXPOSURE")
+    if missing_evidence:
+        findings.append("OPEN_POSITION_ENTRY_EVIDENCE_MISSING")
+    return {
+        "status": "OK" if not findings else "RISK_FINDINGS",
+        "source_path": str(path),
+        "position_count": len(rows),
+        "gross_notional_usdt": round(gross, 8),
+        "long_notional_usdt": round(long_notional, 8),
+        "short_notional_usdt": round(short_notional, 8),
+        "net_notional_usdt": round(net, 8),
+        "dominant_side": dominant_side,
+        "dominant_side_ratio": round(dominant_ratio, 8),
+        "gross_to_equity_ratio": round(gross / equity, 8) if equity > 0 else None,
+        "net_to_equity_ratio": round(abs(net) / equity, 8) if equity > 0 else None,
+        "by_coin_notional_usdt": {coin: round(value, 8) for coin, value in sorted(by_coin.items())},
+        "duplicate_coins": duplicate_coins,
+        "duplicate_coin_position_count": sum(count - 1 for count in duplicate_coins.values()),
+        "missing_entry_evidence_count": missing_evidence,
+        "findings": findings,
+    }
+
+
+def _empty_open_portfolio(status: str) -> dict[str, Any]:
+    return {
+        "status": status,
+        "position_count": 0,
+        "gross_notional_usdt": 0.0,
+        "long_notional_usdt": 0.0,
+        "short_notional_usdt": 0.0,
+        "net_notional_usdt": 0.0,
+        "dominant_side": "FLAT",
+        "dominant_side_ratio": 0.0,
+        "gross_to_equity_ratio": 0.0,
+        "net_to_equity_ratio": 0.0,
+        "by_coin_notional_usdt": {},
+        "duplicate_coins": {},
+        "duplicate_coin_position_count": 0,
+        "missing_entry_evidence_count": 0,
+        "findings": [],
+    }
 
 
 def _empty_snapshot(status: str) -> SnapshotPnL:
@@ -660,6 +817,8 @@ def _build_v19_recommendations(
     metrics: LogMetricsReport,
     snapshot: SnapshotPnL,
     effective_net_pnl_usdc: float,
+    *,
+    open_portfolio: Mapping[str, Any] | None = None,
 ) -> list[str]:
     recommendations = list(build_recommendations(metrics))
     pnl_divergence = _pnl_divergence(snapshot, metrics)
@@ -676,7 +835,7 @@ def _build_v19_recommendations(
             recommendations.append(
                 "Reconciliation obligatoire: le snapshot portefeuille diverge des logs de decisions meme apres prise en compte du latent ouvert. Utiliser le snapshot comme source PnL session et corriger l'export des trades fermes."
             )
-    if metrics.accepted == 0 and metrics.total_decisions > 0:
+    if metrics.accepted == 0 and metrics.refused > 0:
         recommendations.append(
             "Le moteur ne demarre pas car toutes les entrees sont refusees: ameliorer fraicheur/source/liquidite avant de desserrer le risque."
         )
@@ -706,6 +865,20 @@ def _build_v19_recommendations(
     if effective_net_pnl_usdc < 0 and snapshot.total_costs_paid_usdc and snapshot.total_costs_paid_usdc > abs(effective_net_pnl_usdc) * 0.20:
         recommendations.append(
             "Les couts sont significatifs face au PnL: appliquer min edge net plus strict, TP/SL paper apres couts et cooldown apres trade perdant."
+        )
+    portfolio = open_portfolio or {}
+    portfolio_findings = set(portfolio.get("findings") or [])
+    if "OPEN_PORTFOLIO_DIRECTIONAL_CONCENTRATION" in portfolio_findings:
+        recommendations.append(
+            "Le portefeuille ouvert est concentre dans un seul sens: plafonner l'exposition nette LONG/SHORT et verifier le biais avant toute nouvelle entree paper."
+        )
+    if "OPEN_PORTFOLIO_DUPLICATE_COIN_EXPOSURE" in portfolio_findings:
+        recommendations.append(
+            "Plusieurs positions portent le meme risque coin: appliquer un plafond notionnel agrege par coin, independamment du wallet ou du moteur source."
+        )
+    if "OPEN_POSITION_ENTRY_EVIDENCE_MISSING" in portfolio_findings:
+        recommendations.append(
+            "Des positions ouvertes n'ont pas toute leur evidence d'entree: edge, age, liquidite et consensus doivent etre persistes avant d'evaluer leur performance."
         )
     deduped = _dedupe(recommendations)
     if len(deduped) > 1:

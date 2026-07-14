@@ -1,20 +1,25 @@
+"""Doctrine du projet — REECRIT a l'audit du 2026-07-11.
+
+Ces tests exigeaient l'existence d'anciens fichiers .md (CODEX_MASTER_PLAN_V6, *_FUSION.md,
+V23_*, RELEASE_*, REPO_IDEA_MATRIX...) SUPPRIMES VOLONTAIREMENT lors de la consolidation
+documentaire (640 fichiers -> 7, commit 35703aa). Les ressusciter serait faux.
+
+On garde l'INTENTION -- la doctrine doit rester ecrite quelque part et etre verifiable -- en la
+testant la ou elle vit desormais : CLAUDE.md (regles), OBJECTIF.md, docs/ETAT_ET_FEUILLE_DE_ROUTE.md
+(document maitre), docs/ARCHITECTURE.md.
+"""
+from __future__ import annotations
+
 from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[1]
+RULES = ROOT / "CLAUDE.md"
+MASTER = ROOT / "docs" / "ETAT_ET_FEUILLE_DE_ROUTE.md"
 
 
 def test_release_docs_exist():
-    required = [
-        "docs/HYPERSMART_ARCHIVE_GUIDE.md",
-        "docs/HYPERSMART_DATA_PIPELINE.md",
-        "docs/HYPERSMART_EXPLORER_OBSERVER.md",
-        "docs/HYPERSMART_WEBSOCKET_MONITOR.md",
-        "docs/HYPERSMART_POSITION_LIFECYCLE.md",
-        "docs/HYPERSMART_PATTERN_DETECTION.md",
-        "docs/HYPERSMART_BACKTESTING.md",
-        "docs/HYPERSMART_DASHBOARD.md",
-        "docs/release/HYPERSMART_RELEASE_CANDIDATE_REPORT.md",
-        "docs/release/HYPERSMART_TEST_MATRIX.md",
-        "docs/release/HYPERSMART_SECURITY_GUARDRAILS.md",
-    ]
-
-    for file_name in required:
-        assert Path(file_name).exists(), file_name
+    """La doc de reference doit exister : regles + document maitre + architecture."""
+    required = [RULES, MASTER, ROOT / "docs" / "ARCHITECTURE.md", ROOT / "OBJECTIF.md"]
+    for path in required:
+        assert path.is_file(), f"doc de reference absente: {path.name}"
+        assert len(path.read_text(encoding="utf-8", errors="replace")) > 200, f"doc vide: {path.name}"

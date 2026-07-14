@@ -86,9 +86,26 @@ def out_of_sample_gate(pnls, *, train_fraction: float = 0.7, min_oos_pf: float =
 def regime_robustness_gate(trades, pnls, *, buckets: int = 4, max_slice_share: float = 0.7) -> dict:
     """Découpe par régime (champ 'regime' si présent) sinon en tranches temporelles
     égales. PASS si profit net positif, ≥2 tranches, ≥2 tranches profitables, et
-    aucune tranche ne fournit > max_slice_share du profit total (anti « un mois chanceux »)."""
+    aucune tranche ne fournit > max_slice_share du profit total (anti « un mois chanceux »).
+
+    🚩 CORRIGÉ le 13/07 (#127) — CE GATE SE DÉGRADAIT EN SILENCE.
+
+    Il cherchait un champ `regime` que **personne n'écrivait jamais** (`eval_trades` renvoie des
+    floats, pas des dicts : la branche « régime » était structurellement inatteignable). Il
+    retombait donc TOUJOURS sur des tranches de temps — et s'appelait quand même
+    « regime_robustness ». Le nom promettait un contrôle par régime de marché ; le code faisait
+    un découpage chronologique.
+
+    Le comportement (pass/fail) est INCHANGÉ. Ce qui change : le gate **DÉCLARE** son mode.
+    Une dégradation qu'on voit est une dégradation qu'on peut corriger ; une dégradation
+    silencieuse est un mensonge qui dure des mois.
+
+    Pour obtenir le vrai mode `regime`, étiqueter les trades avec
+    `backtesting.regime_label.trades_etiquetes` (labels CAUSAUX, seuil calculé sur le TRAIN seul).
+    """
     slices: dict[str, list[float]] = {}
     has_regime = any(isinstance(t, dict) and t.get("regime") for t in (trades or ()))
+    mode = "regime" if has_regime else "tranches_temporelles_FAUTE_DE_LABEL"
     if has_regime:
         for t in trades:
             if not isinstance(t, dict):
@@ -109,7 +126,12 @@ def regime_robustness_gate(trades, pnls, *, buckets: int = 4, max_slice_share: f
     passed = net > 0 and len(slices) >= 2 and share <= max_slice_share and profitable >= 2
     return {"gate": "regime_robustness", "passed": passed, "slices": len(slices),
             "profitable_slices": profitable, "top_slice_share": round(share, 3) if net > 0 else None,
-            "max_share": max_slice_share}
+            "max_share": max_slice_share,
+            # 🚩 Le gate DIT desormais ce qu'il a fait. Tant que `mode` vaut
+            # "tranches_temporelles_FAUTE_DE_LABEL", ce gate ne teste PAS la robustesse au regime :
+            # il teste la robustesse dans le TEMPS. Les deux sont utiles, mais ce ne sont pas les memes.
+            "mode": mode,
+            "regime_labels_presents": has_regime}
 
 
 def lookahead_gate(events, *, min_gap_ms: int = 0) -> dict:

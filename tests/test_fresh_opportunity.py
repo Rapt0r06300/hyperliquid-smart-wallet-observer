@@ -56,7 +56,18 @@ def _delta(
     )
 
 
-def test_fresh_opportunity_accepts_multi_wallet_same_coin_direction_cluster() -> None:
+def test_fresh_opportunity_accepts_multi_wallet_same_coin_direction_cluster(monkeypatch) -> None:
+    # EDGE FABRIQUE (2026-07-11) : `_expected_edge_bps` = score x 0,55 + wallets x 9
+    # + notional/25000 + tightness x 10. Aucune constante mesuree : ce nombre n'a JAMAIS
+    # touche un prix. Par DEFAUT le bot le refuse desormais (deny-by-default).
+    # Ces tests exercent l'ANCIEN chemin -> mode A/B EXPLICITE, jamais le defaut.
+    monkeypatch.setenv("HYPERSMART_REQUIRE_EMPIRICAL_EDGE", "0")
+    # 🚩 CORRIGE LE 13/07 (G2) : le commentaire ci-dessus disait « mode A/B EXPLICITE », mais il
+    # posait l'ANCIEN flag. Le verrou de Q1 s'appelle `HYPERSMART_EDGE_SOURCE` -- et il vaut
+    # `table` par defaut. Ces tests refusaient donc TOUS depuis Q1, et personne ne l'a vu : je
+    # n'avais lance que des tests cibles, jamais la suite complete. La suite complete, elle,
+    # ne ment pas. Ces tests exercent le CLUSTERING, pas l'edge : on assume le mode formule ici.
+    monkeypatch.setenv("HYPERSMART_EDGE_SOURCE", "formule")
     wallet_a = "0x" + "a" * 40
     wallet_b = "0x" + "b" * 40
     wallet_c = "0x" + "c" * 40
@@ -87,7 +98,18 @@ def test_fresh_opportunity_accepts_multi_wallet_same_coin_direction_cluster() ->
     assert "simulation_positions_are_virtual=true" in text
 
 
-def test_fresh_opportunity_rejects_stale_and_single_wallet_clusters() -> None:
+def test_fresh_opportunity_rejects_stale_and_single_wallet_clusters(monkeypatch) -> None:
+    # EDGE FABRIQUE (2026-07-11) : `_expected_edge_bps` = score x 0,55 + wallets x 9
+    # + notional/25000 + tightness x 10. Aucune constante mesuree : ce nombre n'a JAMAIS
+    # touche un prix. Par DEFAUT le bot le refuse desormais (deny-by-default).
+    # Ces tests exercent l'ANCIEN chemin -> mode A/B EXPLICITE, jamais le defaut.
+    monkeypatch.setenv("HYPERSMART_REQUIRE_EMPIRICAL_EDGE", "0")
+    # 🚩 CORRIGE LE 13/07 (G2) : le commentaire ci-dessus disait « mode A/B EXPLICITE », mais il
+    # posait l'ANCIEN flag. Le verrou de Q1 s'appelle `HYPERSMART_EDGE_SOURCE` -- et il vaut
+    # `table` par defaut. Ces tests refusaient donc TOUS depuis Q1, et personne ne l'a vu : je
+    # n'avais lance que des tests cibles, jamais la suite complete. La suite complete, elle,
+    # ne ment pas. Ces tests exercent le CLUSTERING, pas l'edge : on assume le mode formule ici.
+    monkeypatch.setenv("HYPERSMART_EDGE_SOURCE", "formule")
     wallet_a = "0x" + "a" * 40
     wallet_b = "0x" + "b" * 40
 
@@ -109,7 +131,18 @@ def test_fresh_opportunity_rejects_stale_and_single_wallet_clusters() -> None:
     assert dict(report.rejection_reasons)["STALE_SIGNAL"] == 2
 
 
-def test_fresh_opportunity_uses_trade_age_not_audit_window_for_acceptance() -> None:
+def test_fresh_opportunity_uses_trade_age_not_audit_window_for_acceptance(monkeypatch) -> None:
+    # EDGE FABRIQUE (2026-07-11) : `_expected_edge_bps` = score x 0,55 + wallets x 9
+    # + notional/25000 + tightness x 10. Aucune constante mesuree : ce nombre n'a JAMAIS
+    # touche un prix. Par DEFAUT le bot le refuse desormais (deny-by-default).
+    # Ces tests exercent l'ANCIEN chemin -> mode A/B EXPLICITE, jamais le defaut.
+    monkeypatch.setenv("HYPERSMART_REQUIRE_EMPIRICAL_EDGE", "0")
+    # 🚩 CORRIGE LE 13/07 (G2) : le commentaire ci-dessus disait « mode A/B EXPLICITE », mais il
+    # posait l'ANCIEN flag. Le verrou de Q1 s'appelle `HYPERSMART_EDGE_SOURCE` -- et il vaut
+    # `table` par defaut. Ces tests refusaient donc TOUS depuis Q1, et personne ne l'a vu : je
+    # n'avais lance que des tests cibles, jamais la suite complete. La suite complete, elle,
+    # ne ment pas. Ces tests exercent le CLUSTERING, pas l'edge : on assume le mode formule ici.
+    monkeypatch.setenv("HYPERSMART_EDGE_SOURCE", "formule")
     wallet_a = "0x" + "a" * 40
     wallet_b = "0x" + "b" * 40
 
@@ -133,7 +166,18 @@ def test_fresh_opportunity_uses_trade_age_not_audit_window_for_acceptance() -> N
     assert "STALE_SIGNAL" in report.opportunities[0].refusal_reasons
 
 
-def test_fresh_opportunity_requires_realtime_mid_for_portfolio_simulation() -> None:
+def test_fresh_opportunity_requires_realtime_mid_for_portfolio_simulation(monkeypatch) -> None:
+    # EDGE FABRIQUE (2026-07-11) : `_expected_edge_bps` = score x 0,55 + wallets x 9
+    # + notional/25000 + tightness x 10. Aucune constante mesuree : ce nombre n'a JAMAIS
+    # touche un prix. Par DEFAUT le bot le refuse desormais (deny-by-default).
+    # Ces tests exercent l'ANCIEN chemin -> mode A/B EXPLICITE, jamais le defaut.
+    monkeypatch.setenv("HYPERSMART_REQUIRE_EMPIRICAL_EDGE", "0")
+    # 🚩 CORRIGE LE 13/07 (G2) : le commentaire ci-dessus disait « mode A/B EXPLICITE », mais il
+    # posait l'ANCIEN flag. Le verrou de Q1 s'appelle `HYPERSMART_EDGE_SOURCE` -- et il vaut
+    # `table` par defaut. Ces tests refusaient donc TOUS depuis Q1, et personne ne l'a vu : je
+    # n'avais lance que des tests cibles, jamais la suite complete. La suite complete, elle,
+    # ne ment pas. Ces tests exercent le CLUSTERING, pas l'edge : on assume le mode formule ici.
+    monkeypatch.setenv("HYPERSMART_EDGE_SOURCE", "formule")
     wallet_a = "0x" + "a" * 40
     wallet_b = "0x" + "b" * 40
 
@@ -157,7 +201,86 @@ def test_fresh_opportunity_requires_realtime_mid_for_portfolio_simulation() -> N
     assert "CURRENT_MID_REQUIRED_FOR_LOCAL_SIMULATION" in report.opportunities[0].refusal_reasons
 
 
+def test_fresh_opportunity_allows_leader_mid_fallback_for_fresh_signal_when_flag_set(monkeypatch) -> None:
+    # EDGE FABRIQUE (2026-07-11) : `_expected_edge_bps` = score x 0,55 + wallets x 9
+    # + notional/25000 + tightness x 10. Aucune constante mesuree : ce nombre n'a JAMAIS
+    # touche un prix. Par DEFAUT le bot le refuse desormais (deny-by-default).
+    # Ces tests exercent l'ANCIEN chemin -> mode A/B EXPLICITE, jamais le defaut.
+    monkeypatch.setenv("HYPERSMART_REQUIRE_EMPIRICAL_EDGE", "0")
+    # 🚩 CORRIGE LE 13/07 (G2) : le commentaire ci-dessus disait « mode A/B EXPLICITE », mais il
+    # posait l'ANCIEN flag. Le verrou de Q1 s'appelle `HYPERSMART_EDGE_SOURCE` -- et il vaut
+    # `table` par defaut. Ces tests refusaient donc TOUS depuis Q1, et personne ne l'a vu : je
+    # n'avais lance que des tests cibles, jamais la suite complete. La suite complete, elle,
+    # ne ment pas. Ces tests exercent le CLUSTERING, pas l'edge : on assume le mode formule ici.
+    monkeypatch.setenv("HYPERSMART_EDGE_SOURCE", "formule")
+    # Flo 2026-07-10: un signal TRES frais sans mid allMids doit pouvoir entrer via le prix leader
+    # quand le flag est actif (la degradation de copie reste facturee, le gate liquidite filtre).
+    monkeypatch.setenv("HYPERSMART_LEADER_MID_FALLBACK_MAX_AGE_MS", "5000")
+    wallet_a = "0x" + "a" * 40
+    wallet_b = "0x" + "b" * 40
+    report = find_fresh_opportunities(
+        [_delta(wallet_a, ms=10_000), _delta(wallet_b, ms=11_500)],
+        [_leader(wallet_a, 96), _leader(wallet_b, 94)],
+        now_timestamp_ms=12_000,
+        current_mids={},
+        active_window_ms=20_000,
+        consensus_window_ms=4_000,
+        min_wallets=2,
+    )
+    assert report.groups_seen == 1
+    opp = report.opportunities[0]
+    assert "CURRENT_MID_REQUIRED_FOR_LOCAL_SIMULATION" not in opp.refusal_reasons
+    assert opp.current_mid is not None
+    assert opp.current_mid_source == "leader_reference_fallback"
+    assert "CURRENT_MID_FALLBACK_FROM_LEADER_PRICE" in opp.warnings
+    assert opp.decision == "ACCEPT_LOCAL_SIMULATION"
+    assert report.accepted_for_simulation == 1
+
+
+def test_fresh_opportunity_leader_mid_fallback_still_refuses_when_stale(monkeypatch) -> None:
+    # EDGE FABRIQUE (2026-07-11) : `_expected_edge_bps` = score x 0,55 + wallets x 9
+    # + notional/25000 + tightness x 10. Aucune constante mesuree : ce nombre n'a JAMAIS
+    # touche un prix. Par DEFAUT le bot le refuse desormais (deny-by-default).
+    # Ces tests exercent l'ANCIEN chemin -> mode A/B EXPLICITE, jamais le defaut.
+    monkeypatch.setenv("HYPERSMART_REQUIRE_EMPIRICAL_EDGE", "0")
+    # 🚩 CORRIGE LE 13/07 (G2) : le commentaire ci-dessus disait « mode A/B EXPLICITE », mais il
+    # posait l'ANCIEN flag. Le verrou de Q1 s'appelle `HYPERSMART_EDGE_SOURCE` -- et il vaut
+    # `table` par defaut. Ces tests refusaient donc TOUS depuis Q1, et personne ne l'a vu : je
+    # n'avais lance que des tests cibles, jamais la suite complete. La suite complete, elle,
+    # ne ment pas. Ces tests exercent le CLUSTERING, pas l'edge : on assume le mode formule ici.
+    monkeypatch.setenv("HYPERSMART_EDGE_SOURCE", "formule")
+    # Meme flag actif : un signal VIEUX reste refuse (le prix leader n'est plus ~= mid courant).
+    monkeypatch.setenv("HYPERSMART_LEADER_MID_FALLBACK_MAX_AGE_MS", "5000")
+    wallet_a = "0x" + "a" * 40
+    wallet_b = "0x" + "b" * 40
+    report = find_fresh_opportunities(
+        [_delta(wallet_a, ms=10_000), _delta(wallet_b, ms=11_000)],
+        [_leader(wallet_a, 96), _leader(wallet_b, 94)],
+        now_timestamp_ms=50_000,
+        current_mids={},
+        active_window_ms=120_000,
+        consensus_window_ms=4_000,
+        min_wallets=2,
+        risk_config=RealtimeCopyRiskConfig(max_signal_age_ms=15_000),
+    )
+    assert report.groups_seen == 1
+    opp = report.opportunities[0]
+    assert "CURRENT_MID_REQUIRED_FOR_LOCAL_SIMULATION" in opp.refusal_reasons
+    assert opp.decision == "REJECT_NO_TRADE"
+
+
 def test_opportunity_report_cli_reads_recent_deltas_from_db(tmp_path, monkeypatch) -> None:
+    # EDGE FABRIQUE (2026-07-11) : `_expected_edge_bps` = score x 0,55 + wallets x 9
+    # + notional/25000 + tightness x 10. Aucune constante mesuree : ce nombre n'a JAMAIS
+    # touche un prix. Par DEFAUT le bot le refuse desormais (deny-by-default).
+    # Ces tests exercent l'ANCIEN chemin -> mode A/B EXPLICITE, jamais le defaut.
+    monkeypatch.setenv("HYPERSMART_REQUIRE_EMPIRICAL_EDGE", "0")
+    # 🚩 CORRIGE LE 13/07 (G2) : le commentaire ci-dessus disait « mode A/B EXPLICITE », mais il
+    # posait l'ANCIEN flag. Le verrou de Q1 s'appelle `HYPERSMART_EDGE_SOURCE` -- et il vaut
+    # `table` par defaut. Ces tests refusaient donc TOUS depuis Q1, et personne ne l'a vu : je
+    # n'avais lance que des tests cibles, jamais la suite complete. La suite complete, elle,
+    # ne ment pas. Ces tests exercent le CLUSTERING, pas l'edge : on assume le mode formule ici.
+    monkeypatch.setenv("HYPERSMART_EDGE_SOURCE", "formule")
     db_path = tmp_path / "opportunities.sqlite3"
     monkeypatch.setenv("HL_DATABASE_URL", f"sqlite:///{db_path}")
     monkeypatch.setenv("HL_LOGS_DIR", str(tmp_path / "logs"))

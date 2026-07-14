@@ -83,6 +83,15 @@ def test_simulation_v2_uses_smooth_real_tick_sampler_without_demo_label():
 
 
 def test_launcher_keeps_public_market_flow_context_only():
+    """Les entrees SOLO sur flux public restent interdites (deny-by-default).
+
+    REECRIT (audit 2026-07-11) : le test exigeait `HYPERSMART_ALLOW_MARKET_FLOW_SOLO=0` dans le
+    lanceur -- or cette variable n'est LUE par AUCUN code (seul `DYDX_ALLOW_MARKET_FLOW_SOLO` l'est).
+    Exiger un reglage mort donnait une fausse impression de securite. On verifie donc ce qui protege
+    REELLEMENT : le defaut de la config est DENY, et le lanceur ne l'active nulle part.
+    """
+    from hyper_smart_observer.dydx_v4.config import DydxV4Config
+
     text = (ROOT / "LANCER_HYPERSMART.cmd").read_text(encoding="utf-8", errors="replace")
-    assert "DYDX_ALLOW_MARKET_FLOW_SOLO" not in text
-    assert "HYPERSMART_ALLOW_MARKET_FLOW_SOLO=0" in text
+    assert "DYDX_ALLOW_MARKET_FLOW_SOLO" not in text          # jamais active par le lanceur
+    assert DydxV4Config().allow_market_flow_solo_entries is False   # deny par defaut

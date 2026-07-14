@@ -380,6 +380,43 @@ def _diagnostic_event(row: dict[str, Any]) -> dict[str, Any]:
         "sltp_trailing_stop_bps": row.get("sltp_trailing_stop_bps"),
         "sltp_trailing_activation_bps": row.get("sltp_trailing_activation_bps"),
         "sltp_breakeven_buffer_bps": row.get("sltp_breakeven_buffer_bps"),
+        # ---------------------------------------------------------------------------------
+        # PREUVES FORENSIQUES -- REAPPLIQUEES LE 2026-07-12
+        #
+        # Ces champs manquaient a l'export. Sans eux, une perte affichee au dashboard n'etait
+        # PAS explicable dans l'audit : on voyait le PnL, jamais le POURQUOI (combien de temps
+        # la position a tenu, ce que le funding a coute, quel spread on a subi, quelle strategie
+        # a decide, quel edge l'a autorisee et d'ou il venait).
+        #
+        # La regle du projet est explicite : "Dashboard, audit, logs, exports convergent sur le
+        # meme ledger. Si le dashboard montre une perte, l'audit doit l'expliquer (trade, signal,
+        # wallet, coin, prix, couts, funding, latence, exit, cause)." Un export qui jette la
+        # moitie des preuves rend cette regle intenable.
+        #
+        # Cf. docs/audit/CODEX_LOG_EXPORT_A_REAPPLIQUER.md -- correctif perdu, jamais reapplique.
+        # ---------------------------------------------------------------------------------
+        "sltp_position_age_ms": row.get("sltp_position_age_ms"),
+        "sltp_stop_min_hold_ms": row.get("sltp_stop_min_hold_ms"),
+        "sltp_catastrophic_stop_bps": row.get("sltp_catastrophic_stop_bps"),
+        "notional_closed_usdt": row.get("notional_closed_usdt"),
+        "size_before": row.get("size_before"),
+        "size_closed": row.get("size_closed"),
+        "size_after": row.get("size_after"),
+        "funding_cost_usdc": row.get("funding_cost_usdc"),
+        "funding_hours": row.get("funding_hours"),
+        # D'ou vient l'edge ? La question la plus importante du projet : un edge MESURE et un
+        # edge FABRIQUE se ressemblent une fois reduits a un nombre. Seule sa provenance les
+        # distingue -- et elle doit survivre jusqu'a l'audit.
+        "edge_source": row.get("edge_source"),
+        "edge_is_empirical": row.get("edge_is_empirical"),
+        "leader_wallets_count": row.get("leader_wallets_count"),
+        "leader_wallets_csv": row.get("leader_wallets_csv"),
+        "liquidity_score": row.get("liquidity_score"),
+        "spread_bps": row.get("spread_bps"),
+        "slippage_bps": row.get("slippage_bps"),
+        "orderbook_depth_usdc": row.get("orderbook_depth_usdc"),
+        "strategy_id": row.get("strategy_id"),
+        "strategy_family": row.get("strategy_family"),
         "adaptive_sizing": row.get("adaptive_sizing"),
         "adaptive_size_reason": row.get("adaptive_size_reason"),
         "adaptive_requested_margin_usdt": row.get("requested_margin_usdt"),

@@ -1,0 +1,84 @@
+DEBUT 
+modules testes-mais-NON-branches : 310 (plafond 303)
+
+--- suspects : les modules AJOUTES depuis que le plafond a ete pose (12/07) ---
+  >>> hl_observer.audit.couverture
+  >>> hl_observer.backtesting.regime_label
+  >>> hl_observer.backtesting.regime_wiring
+
+--- tous les morts contenant 'audit', 'runtime' ou 'backtesting' ---
+  hl_observer.audit.cablage
+  hl_observer.audit.couverture
+  hl_observer.audit.mini_run_check
+  hl_observer.audit.pnl_convergence
+  hl_observer.audit.simulation_realism_audit
+  hl_observer.backtesting.cost_model
+  hl_observer.backtesting.cross_validation
+  hl_observer.backtesting.edge_predictor
+  hl_observer.backtesting.execution_delay_model
+  hl_observer.backtesting.execution_extras
+  hl_observer.backtesting.execution_models
+  hl_observer.backtesting.execution_sim
+  hl_observer.backtesting.experiment_harness
+  hl_observer.backtesting.features
+  hl_observer.backtesting.grid_market_maker
+  hl_observer.backtesting.infra_primitives
+  hl_observer.backtesting.integrity_tools
+  hl_observer.backtesting.labeling
+  hl_observer.backtesting.lookahead_differential
+  hl_observer.backtesting.lookahead_guard
+  hl_observer.backtesting.maker_fill
+  hl_observer.backtesting.market_making_flow
+  hl_observer.backtesting.market_metrics
+  hl_observer.backtesting.market_signals
+  hl_observer.backtesting.mean_reversion
+  hl_observer.backtesting.mechanism_zoo
+  hl_observer.backtesting.microstructure
+  hl_observer.backtesting.microstructure_extras
+  hl_observer.backtesting.missed_fill_model
+  hl_observer.backtesting.ml_diagnostics
+  hl_observer.backtesting.ml_extras
+  hl_observer.backtesting.mlops_tools
+  hl_observer.backtesting.overfit_selection
+  hl_observer.backtesting.partial_fill_model
+  hl_observer.backtesting.perf_tools
+  hl_observer.backtesting.portfolio_risk
+  hl_observer.backtesting.quality_tools
+  hl_observer.backtesting.quant_methods
+  hl_observer.backtesting.regime_detection
+  hl_observer.backtesting.regime_label
+  hl_observer.backtesting.regime_models
+  hl_observer.backtesting.regime_wiring
+  hl_observer.backtesting.replay_engine
+  hl_observer.backtesting.reporting
+  hl_observer.backtesting.reporting_extras
+  hl_observer.backtesting.risk_sizing
+  hl_observer.backtesting.robust_selection
+  hl_observer.backtesting.robustness
+  hl_observer.backtesting.runtime_guards
+  hl_observer.backtesting.safety_defaults
+  hl_observer.backtesting.safety_tools
+  hl_observer.backtesting.scenario_db
+  hl_observer.backtesting.scenario_grid
+  hl_observer.backtesting.scenario_search
+  hl_observer.backtesting.signal_processing
+  hl_observer.backtesting.sniper_horizon_curve
+  hl_observer.backtesting.strategies_extra
+  hl_observer.backtesting.stress_testing
+  hl_observer.backtesting.validation_extras
+  hl_observer.backtesting.validation_methods
+  hl_observer.backtesting.vectorized
+  hl_observer.exits.exit_policy_runtime
+  hl_observer.integration.ia_runtime
+  hl_observer.integration.ops_runtime
+  hl_observer.integration.scale_perf_runtime
+  hl_observer.realtime.ws_subscription_audit
+  hl_observer.runtime.bounded_event_queue
+  hl_observer.runtime.detailed_logger
+  hl_observer.runtime.detailed_report
+  hl_observer.runtime.event_driven_decider
+  hl_observer.runtime.hot_path
+  hl_observer.runtime.persistent_poll_runner
+  hl_observer.runtime_mode
+  hl_observer.storage.runtime_state
+FIN 

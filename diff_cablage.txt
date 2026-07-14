@@ -1,0 +1,29 @@
+==============================================================================
+ MORTS   :  300  ->   305   (+5)
+ ORPHELINS:   98  ->   104   (+6)
+==============================================================================
+
+>>> ENTRES dans les MORTS (8) -- c'est CA qu'il faut expliquer :
+    + hl_observer.release.clean_archive
+    + hl_observer.risk.tombstones
+    + hl_observer.runtime.bounded_event_queue
+    + hl_observer.runtime.detailed_logger
+    + hl_observer.runtime.detailed_report
+    + hl_observer.runtime.event_driven_decider
+    + hl_observer.runtime.hot_path
+    + hl_observer.runtime.persistent_poll_runner
+
+>>> SORTIS des MORTS (3) -- branches avec succes :
+    - hl_observer.paper_trading.barrier_calibration
+    - hl_observer.risk.portfolio_correlation
+    - hl_observer.risk.trade_budget
+
+>>> ENTRES dans les ORPHELINS (6) :
+    + hl_observer.cli_pkg_DISABLED.tui_status
+    + hl_observer.market_data.exchange_fee_normalizer
+    + hl_observer.market_data.market_matcher
+    + hl_observer.runtime.graceful_shutdown
+    + hl_observer.runtime.research_path
+    + hl_observer.runtime.safe_mode
+
+>>> SORTIS des ORPHELINS (0) :

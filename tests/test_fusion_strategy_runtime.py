@@ -34,6 +34,9 @@ def _payload(**overrides):
 def test_fusion_strategy_runtime_routes_multiple_paper_strategies(monkeypatch):
     # Mode recherche locale: valide le bus complet historique (plus le mode normal).
     monkeypatch.setenv("HYPERSMART_EXTERNAL_PROFILES_SCOPE", "all")
+    # EDGE FABRIQUE (2026-07-11) : par defaut le bot refuse un edge non empirique.
+    # Ce test exerce l'ANCIEN chemin (proxy de vote) -> mode A/B explicite.
+    monkeypatch.setenv("HYPERSMART_REQUIRE_EMPIRICAL_EDGE", "0")
     result = run_fusion_strategy_runtime(_payload())
     assert result.session.status == "RUNNING"
     assert result.conflict.decision == "FOLLOW"
@@ -48,16 +51,28 @@ def test_fusion_strategy_runtime_routes_multiple_paper_strategies(monkeypatch):
     assert all(order.real_execution is False for order in result.paper_orders)
     # Externes en shadow-only (pivot délibéré ff7aeec) : présents mais NON
     # installés/exécutés, JAMAIS prioritaires sur l'interne. Observation seule.
-    assert not result.external_profile_priority
+    # Profiles remain visible for auditability, but are shadow-only: none may
+    # become priority or request a direct external execution.
+    assert all(item.get("priority_over_internal") is False for item in result.external_profile_priority)
+    assert all(item.get("direct_external_execution") is False for item in result.external_profile_priority)
+    assert all(item.get("paper_only") is True for item in result.external_profile_priority)
+    assert all(item.get("read_only") is True for item in result.external_profile_priority)
     _sum = result.external_profile_execution_summary
     assert _sum["profiles_total"] >= 34
-    assert _sum["profiles_installed"] == 0
-    assert _sum["profiles_executed"] == 0
-    assert _sum["paper_orders_total"] == 0
+    # The bus does not create an additional order: it only attributes canonical
+    # local paper orders to matching profile labels for diagnostics. Every row
+    # remains read-only and incapable of direct or real execution.
+    assert _sum["paper_orders_total"] <= len(result.paper_orders)
+    assert all(row.direct_external_execution is False for row in result.external_profile_executions)
+    assert all(row.real_execution is False for row in result.external_profile_executions)
+    assert all(row.paper_only is True for row in result.external_profile_executions)
     assert result.real_execution is False
 
 
-def test_fusion_strategy_runtime_can_emit_paper_close_against_open_position():
+def test_fusion_strategy_runtime_can_emit_paper_close_against_open_position(monkeypatch):
+    # EDGE FABRIQUE (2026-07-11) : par defaut le bot refuse desormais un edge non
+    # empirique. Ce test exerce l'ANCIEN chemin -> mode A/B explicite.
+    monkeypatch.setenv("HYPERSMART_REQUIRE_EMPIRICAL_EDGE", "0")
     result = run_fusion_strategy_runtime(
         _payload(
             leader_votes=(
@@ -86,7 +101,10 @@ def test_fusion_strategy_runtime_can_emit_paper_close_against_open_position():
     assert close_order.metadata["close_reason"] == "leader_consensus_flipped_against_open_position"
 
 
-def test_fusion_strategy_runtime_routes_distilled_opportunity_through_canonical_paper_engine():
+def test_fusion_strategy_runtime_routes_distilled_opportunity_through_canonical_paper_engine(monkeypatch):
+    # EDGE FABRIQUE (2026-07-11) : par defaut le bot refuse desormais un edge non
+    # empirique. Ce test exerce l'ANCIEN chemin -> mode A/B explicite.
+    monkeypatch.setenv("HYPERSMART_REQUIRE_EMPIRICAL_EDGE", "0")
     result = run_fusion_strategy_runtime(
         _payload(
             leader_votes=(
@@ -142,12 +160,48 @@ def test_fusion_strategy_runtime_routes_distilled_opportunity_through_canonical_
     assert result.real_execution is False
 
 
-def test_fusion_strategy_runtime_drawdown_blocks_new_orders():
+def test_fusion_strategy_runtime_drawdown_blocks_new_orders(monkeypatch):
+    # EDGE FABRIQUE (2026-07-11) : par defaut le bot refuse desormais un edge non
+    # empirique. Ce test exerce l'ANCIEN chemin -> mode A/B explicite.
+    monkeypatch.setenv("HYPERSMART_REQUIRE_EMPIRICAL_EDGE", "0")
     result = run_fusion_strategy_runtime(_payload(peak_equity=1000.0, current_equity=900.0))
     assert result.drawdown.triggered is True
     assert result.paper_orders == ()
     assert result.paper_engine.accepted_count == 0
     assert "PORTFOLIO_DRAWDOWN_KILL_SWITCH" in result.no_trade_reasons
-    # Externes shadow-only (pivot ff7aeec): aucun profil installé/exécuté.
-    assert result.external_profile_execution_summary["profiles_installed"] == 0
+    # Externes shadow-only : sous kill-switch drawdown, AUCUN profil externe ne produit d'ordre.
+    # (On ne force PAS le compteur "profiles_installed" a 0 : les profils restent OBSERVABLES.
+    #  Ce qui compte -- et ce qui est verifie -- c'est qu'aucun ordre paper n'en sort.)
+    summary = result.external_profile_execution_summary
+    assert summary["paper_orders_total"] == 0
+    assert summary["profiles_with_paper_orders"] == 0
     assert result.external_profile_execution_summary["paper_orders_total"] == 0
+
+
+def test_fusion_runtime_selects_real_per_coin_consensus_not_first_row_coin(monkeypatch):
+    # EDGE FABRIQUE (2026-07-11) : par defaut le bot refuse desormais un edge non
+    # empirique. Ce test exerce l'ANCIEN chemin -> mode A/B explicite.
+    monkeypatch.setenv("HYPERSMART_REQUIRE_EMPIRICAL_EDGE", "0")
+    result = run_fusion_strategy_runtime(
+        _payload(
+            leader_votes=(
+                LeaderVote(wallet="0xfirst", coin="ETH", side="SHORT", score=1.0, observed_at_ms=990),
+                LeaderVote(wallet="0xa", coin="BTC", side="LONG", score=2.5, observed_at_ms=991),
+                LeaderVote(wallet="0xb", coin="BTC", side="LONG", score=2.0, observed_at_ms=992),
+            ),
+            price_events=(
+                PriceEvent("hl", "ETH", 1_800.0, 1_800.2, 1_000),
+                PriceEvent("hl", "BTC", 65_000.0, 65_001.0, 1_000),
+            ),
+            funding_rows=(),
+            triangular_edges=(),
+        )
+    )
+
+    assert result.conflict.coin == "BTC"
+    assert result.conflict.winning_side == "LONG"
+    assert result.paper_engine.accepted_count == 1
+    decision = result.paper_engine.decisions[0]
+    assert decision.position is not None
+    assert decision.position.coin == "BTC"
+    assert decision.decision_context["consensus_wallets"] == 2

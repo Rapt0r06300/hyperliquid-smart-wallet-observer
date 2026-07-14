@@ -1,0 +1,58 @@
+===BUILD 150M (scale append-only)=== 
+{
+  "generator_version": "scenario_db/v3-scale",
+  "seed": 7,
+  "count_requested": 150000000,
+  "count_rows": 150000000,
+  "schema": "compact_append_only_no_hash",
+  "dimensions": [
+    "sl_bps",
+    "tp_bps",
+    "trailing_stop_bps",
+    "trailing_activation_bps",
+    "breakeven_bps",
+    "horizon_min",
+    "cost_bps",
+    "min_edge_bps",
+    "max_signal_age_ms",
+    "min_liquidity_score",
+    "min_consensus_wallets",
+    "max_copy_degradation_bps",
+    "min_leader_score",
+    "side_mode",
+    "catastrophic_stop_bps"
+  ],
+  "by_source": {
+    "archetype": 10,
+    "grid": 3000,
+    "sampled_full": 149996990
+  },
+  "note": "REPLAY-only. Doublons negligeables (pas d'index unique). Aucun ordre reel.",
+  "created_at_ms": 1783594968630,
+  "bytes": 11824340992,
+  "path": "runtime\\scenarios\\scenarios.db"
+}
+elapsed_min 18.0
+===VERIF DB=== 
+rows 150000000
+by_source [(0, 10), (1, 3000), (2, 149996990)]
+sl_distinct 1221
+tp_distinct 4001
+===FICHIER DB=== 
+
+   GB LastWriteTime      
+   -- -------------      
+11,01 09/07/2026 13:02:48
+
+
+
+===DRY-RUN REPLAY (30 scenarios x vraies donnees ; PAS le replay complet)=== 
+python: can't open file 'C:\\Users\\flo\\Desktop\\Projet invest\\_verify_replay.py': [Errno 2] No such file or directory
+DONE_SCENDB150 
+===COMPTE FINAL (query fraiche)=== 
+rows 150000000
+by_source [(0, 10), (1, 3000), (2, 149996990)]
+sl_distinct 1221
+tp_distinct 4001
+side [('both', 50000375), ('long_only', 49998809), ('short_only', 50000816)]
+meta_rows 9

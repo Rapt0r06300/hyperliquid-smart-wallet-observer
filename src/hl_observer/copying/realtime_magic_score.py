@@ -44,6 +44,12 @@ class RealtimeCopyRiskConfig:
 class RealtimeCopyScoreInput:
     action_type: str
     direction: str
+    # 2e EDGE FABRIQUE (2026-07-11). `leader_expected_edge_bps` arrive de
+    # `fresh_opportunity._expected_edge_bps` = score x 0,55 + wallets x 9 + notional/25000
+    # + tightness x 10. Aucune de ces constantes ne vient d'une mesure : ce nombre n'a JAMAIS
+    # touche un prix. Le multiplier ensuite par la fraicheur ne le rend pas vrai -- une fiction
+    # qui decroit reste une fiction.
+    # Desormais l'appelant DOIT declarer si son edge est empirique. Par defaut : NON -> refus.
     leader_expected_edge_bps: float | None
     leader_consistency_factor: float
     signal_age_ms: int
@@ -58,7 +64,15 @@ class RealtimeCopyScoreInput:
     max_open_positions: int
     directional_bias_bps: float = 0.0  # V9 multi-TF bias (bias_model), bounded; 0 = neutral
     coin: str = ""  # V26 L1: marché (optionnel). "" = inconnu -> vetos V26 inertes (jamais bloquants).
+    # DENY-BY-DEFAULT : tant qu'un appelant ne PROUVE pas que son edge est mesure sur des prix
+    # reels, on considere qu'il ne l'est pas -- et le gate refuse. C'est ainsi qu'un edge
+    # fabrique ne peut plus autoriser une entree en silence.
+    edge_is_empirical: bool = False
     leader_wallet: str = ""  # V26 L6: wallet leader (optionnel). "" = Kelly neutre x1.0.
+    # #594 : l'horodatage du signal, pour le verrou ANTI-LOOKAHEAD de la table mesuree (Q1).
+    # `None` = on ne peut pas verifier que la table a ete construite AVANT ce signal. La table
+    # laisse alors passer -- c'est le seul endroit ou l'appelant doit faire son travail.
+    signal_ms: float | None = None
 
 
 @dataclass(slots=True)
@@ -138,6 +152,79 @@ def score_realtime_copy_candidate(
     liquidity_penalty_bps = cfg.low_liquidity_penalty_bps if liquidity_score < cfg.min_liquidity_score else 0.0
     if liquidity_penalty_bps > 0:
         reasons.append("LIQUIDITY_TOO_LOW")
+
+    # ------------------------------------------------------------------ L'EDGE EST-IL REEL ?
+    # LE GATE QUI MANQUAIT. `leader_expected_edge_bps` etait une formule inventee ; on la
+    # multipliait par la fraicheur, on lui soustrayait des couts, on la comparait a un seuil...
+    # et on ouvrait. Tout cet appareil de rigueur s'appliquait a un nombre qui ne decrit rien.
+    # Un edge est MESURE, ou il n'existe pas. Deny-by-default.
+    #
+    # CABLAGE MORT CORRIGE LE 2026-07-12
+    # ----------------------------------
+    # Ce gate ne LISAIT PAS la table mesuree. Il testait `inputs.edge_is_empirical` -- un drapeau
+    # a `False` par defaut que PERSONNE ne calculait. Il refusait donc TOUJOURS, en test comme en
+    # production, et `edge_from_calibration()` -- la fonction ecrite pour lire la mesure -- n'etait
+    # appelee nulle part sur ce chemin. Pire : le seul endroit du code qui posait `True` l'ecrivait
+    # EN DUR, sous une etiquette "..._MEASURED_..." -- une revendication de mesure sur un nombre
+    # qui n'en etait pas une. Le champ cense empecher les edges fabriques etait lui-meme fabrique.
+    #
+    # Desormais : LA TABLE EST LA SOURCE. Un appelant ne peut plus se declarer empirique ; il doit
+    # y avoir une bande MESUREE couvrant la fraicheur de ce signal, avec un echantillon suffisant.
+    #
+    # NOTE IMPORTANTE : "empirique" parle de la PROVENANCE, pas du SIGNE. Sur la vraie table du
+    # 11/07, toutes les bandes sont NEGATIVES (-2,17 / -0,56 / -0,23 bps). Le signal devient donc
+    # empirique... et se fait refuser plus bas par le seuil d'edge, apres couts. C'est le refus
+    # POUR LA BONNE RAISON -- "l'edge mesure est negatif" -- et non plus par accident de cablage.
+    #
+    # 🔴 #594 / #310 -- 2026-07-13 : IL Y AVAIT **DEUX TABLES**, ET LA SECONDE ECRASAIT LA PREMIERE.
+    # -----------------------------------------------------------------------------------------
+    # `ui/routes.py` (chemin LIVE) mesurait l'edge par la porte Q1 (`edge.edge_source.edge_brut`,
+    # table conditionnee sur coin x direction x age x score du leader x consensus, BORNE BASSE,
+    # verrou anti-lookahead) et le passait ici dans `leader_expected_edge_bps`.
+    #
+    # Et ici, ce chiffre etait **JETE** : ce bloc appelait `edge.empirical_edge`, une AUTRE table
+    # (`runtime/calibration/empirical_edge.json`), indexee sur le SEUL age, sans coin, sans
+    # direction, sans consensus, sans anti-lookahead. Tout le travail de Q1 mourait ici, en
+    # silence -- 6e deguisement de la maladie : « la capacite est la, le fil est coupe ».
+    #
+    # Et ce n'est pas tout. La valeur ainsi obtenue etait ensuite RE-MULTIPLIEE par `freshness`
+    # et `consensus_factor` -- exactement les features sur lesquelles la table CONDITIONNE DEJA.
+    # Sur un edge NEGATIF (et la mesure reelle EST negative : -2,17 / -0,56 / -0,23 bps),
+    # multiplier par une fraicheur qui DECROIT rend l'edge MOINS negatif :
+    #
+    #     age  6 s : -2,17 x 0,92 = -1,99 bps          <- signal FRAIS,  edge "pire"
+    #     age 25 s : -0,56 x 0,31 = -0,17 bps          <- signal VIEUX,  edge "meilleur"
+    #
+    # Le multiplicateur de fraicheur, cense PENALISER les vieux signaux, les RECOMPENSAIT.
+    # Il n'inverse pas seulement une intention : il inverse un SIGNE.
+    #
+    # Desormais : UNE porte (Q1), et sur un edge MESURE on ne fait plus qu'une chose --
+    # soustraire les couts. Pas de ponderation, pas de bonus, pas de biais ajoute.
+    edge_base_bps = 0.0
+    edge_est_mesure = False
+    try:
+        from hl_observer.edge.edge_source import edge_brut as _porte_de_l_edge
+
+        _e = _porte_de_l_edge(
+            coin=getattr(inputs, "coin", "") or "",
+            direction=direction,
+            signal_age_ms=float(inputs.signal_age_ms),
+            leader_score=float(inputs.leader_score),
+            consensus_wallets=float(inputs.consensus_wallets),
+            signal_ms=getattr(inputs, "signal_ms", None),
+            strategie="COPY",
+            # Le mode `formule` (A/B explicite, HYPERSMART_EDGE_SOURCE=formule) est le SEUL qui
+            # rende la main a l'ancien chiffre -- et `edge_brut` l'estampille alors `fabrique=True`.
+            formule_de_secours=(lambda: float(inputs.leader_expected_edge_bps or 0.0)),
+        )
+        if not _e.utilisable:
+            reasons.append(_e.raison or "EDGE_NON_MESURE_NO_TRADE")
+        else:
+            edge_base_bps = float(_e.valeur_bps)
+            edge_est_mesure = not _e.fabrique
+            warnings.append("EDGE_FROM_MEASURED_TABLE" if edge_est_mesure else _e.raison)
+    except Exception:                      # un gate qui plante ne doit jamais OUVRIR une position
+        reasons.append("EDGE_EMPIRICITY_CHECK_FAILED")
     single_wallet_penalty_bps = cfg.single_wallet_penalty_bps if inputs.consensus_wallets < 2 else 0.0
     # V26 reliquat — coûts carnet LIVE (walk-the-book, opt-in) : remplacent les constantes
     # quand un snapshot l2 frais existe pour ce coin. Sinon constantes V25 inchangées.
@@ -171,14 +258,28 @@ def score_realtime_copy_candidate(
     if copy_degradation_bps > cfg.max_copy_degradation_bps:
         reasons.append("COPY_DEGRADATION_TOO_HIGH")
 
-    edge_remaining_bps = (
-        inputs.leader_expected_edge_bps
-        * clamp(inputs.leader_consistency_factor, 0.0, 1.5)
-        * freshness
-        * consensus_factor
-        + clamp(inputs.directional_bias_bps, -10.0, 10.0)  # V9 trend-alignment, bounded
-        - copy_degradation_bps
-    )
+    if edge_est_mesure:
+        # LE CHEMIN NORMAL. La table Q1 conditionne DEJA sur l'age, le score du leader et le
+        # consensus. Les re-multiplier ici compterait ces memes features DEUX FOIS (#594) -- et
+        # sur un edge negatif, la fraicheur INVERSAIT la penalite (cf. le bloc plus haut).
+        # Un edge mesure moins ses couts. Rien d'autre. Aucune ponderation, aucun bonus.
+        edge_remaining_bps = edge_base_bps - copy_degradation_bps
+    else:
+        # MODE A/B EXPLICITE (`HYPERSMART_EDGE_SOURCE=formule`). La valeur est FABRIQUEE et deja
+        # estampillee `fabrique=True` par la porte. On conserve l'ancienne ponderation A L'IDENTIQUE
+        # pour que la comparaison A/B reste valable -- une fiction ponderee reste une fiction, mais
+        # au moins c'est la MEME fiction qu'avant, et elle est declaree.
+        # EDGE_NON_FABRIQUE: aucune valeur d'edge n'est CREEE ici. Les nombres visibles sont les
+        # BORNES de clamp de l'ancien chemin A/B (0..1.5, -10..+10) ; la base vient de la porte, qui
+        # l'a deja marquee comme fabriquee et l'a fait remonter dans les logs et le dashboard.
+        edge_remaining_bps = (
+            edge_base_bps
+            * clamp(inputs.leader_consistency_factor, 0.0, 1.5)
+            * freshness
+            * consensus_factor
+            + clamp(inputs.directional_bias_bps, -10.0, 10.0)  # V9 trend-alignment, bounded
+            - copy_degradation_bps
+        )
     if edge_remaining_bps < cfg.min_edge_required_bps:
         reasons.append("EDGE_REMAINING_TOO_LOW")
     if inputs.consensus_wallets < 2 and edge_remaining_bps < cfg.single_wallet_min_edge_required_bps:

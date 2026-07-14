@@ -4,6 +4,7 @@ from dataclasses import asdict, dataclass, field
 from typing import Any
 
 from hl_observer.hyperliquid.rest_info_client import HyperliquidInfoClient
+from hl_observer.market.liquidation_map import construire_carte, parser_positions, resume
 from hl_observer.testnet.models import unix_ms
 
 
@@ -15,6 +16,9 @@ class MainnetObservation:
     wallet_states: dict[str, dict[str, Any]] = field(default_factory=dict)
     wallet_fills: dict[str, list[dict[str, Any]]] = field(default_factory=dict)
     errors: list[str] = field(default_factory=list)
+    # #372 / X-11 : OU le flux FORCE tombera. (Il DIT ou, pas si c'est rentable -- voir le
+    # champ `avertissement` du resume.)
+    carte_liquidations: dict[str, Any] = field(default_factory=dict)
     observed_at_ms: int = field(default_factory=unix_ms)
 
     def to_dict(self) -> dict[str, Any]:
@@ -55,9 +59,25 @@ class MainnetReadOnlyObserver:
                 except Exception as exc:  # noqa: BLE001
                     errors.append(f"l2_book_failed:{coin}:{exc}")
 
+        # 🔴 #372 / X-11 -- LA DONNEE QU'ON RECEVAIT ET QU'ON EFFACAIT (branche le 2026-07-13).
+        #
+        # J'ai ecrit TROIS FOIS que la carte des liquidations etait « bloquee sur une donnee qu'on
+        # ne collecte pas ». **FAUX.** `clearinghouseState` -- l'appel juste au-dessus -- rend
+        # `liquidationPx` pour chaque position. Et ce mot n'apparaissait NULLE PART dans le code :
+        # `snapshot_service` ne gardait que `coin / szi / entryPx`.
+        #
+        # *Ce n'etait pas une donnee manquante. C'etait une donnee RECUE ET EFFACEE.*
+        #
+        # Un liquide ne SAIT rien : il SUBIT. Son flux est donc **NON INFORME** -- l'exact inverse
+        # du fill d'un leader (contrarien, mesure a -7,97 bps). C'est la seule autre famille de
+        # signal hors zone morte.
+        positions_forcees: list = []
+
         for wallet in wallets or []:
             try:
-                wallet_states[wallet] = await self.client.clearinghouse_state(wallet)
+                etat = await self.client.clearinghouse_state(wallet)
+                wallet_states[wallet] = etat
+                positions_forcees.extend(parser_positions(wallet, etat))
             except Exception as exc:  # noqa: BLE001
                 errors.append(f"clearinghouse_state_failed:{wallet}:{exc}")
             if include_wallet_fills:
@@ -66,6 +86,17 @@ class MainnetReadOnlyObserver:
                 except Exception as exc:  # noqa: BLE001
                     errors.append(f"user_fills_failed:{wallet}:{exc}")
 
+        # La carte : OU le flux force tombera, et pour combien.
+        # ⚠️ Elle dit OU -- **pas** si c'est rentable de le prendre. Ce test-la (le depassement
+        # domine-t-il l'inventaire ?) est EXACTEMENT celui qui a tue le market making (T1b), et
+        # **il n'est pas fait** : on n'a aucun historique de liquidationPx. Il commence
+        # maintenant.
+        try:
+            prix = {c.upper(): float(v) for c, v in mids.items()}
+        except (TypeError, ValueError):
+            prix = {}
+        grappes = construire_carte(positions_forcees, prix) if positions_forcees else []
+
         return MainnetObservation(
             source="hyperliquid_mainnet_readonly",
             all_mids=mids,
@@ -73,4 +104,5 @@ class MainnetReadOnlyObserver:
             wallet_states=wallet_states,
             wallet_fills=wallet_fills,
             errors=errors,
+            carte_liquidations=resume(grappes),
         )

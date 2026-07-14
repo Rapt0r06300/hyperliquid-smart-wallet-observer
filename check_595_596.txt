@@ -1,0 +1,57 @@
+DEBUT 
+=== 1 sur 4 : le regime, branche et causal === 
+...F..F                                                                  [100%]
+================================== FAILURES ===================================
+_____________ test_le_regime_separe_vraiment_le_CALME_de_l_AGITE ______________
+tests\test_regime_wiring.py:83: in test_le_regime_separe_vraiment_le_CALME_de_l_AGITE
+    assert regime_du_trade(prep, "BTC", 55.0) == BASSE_VOL     # phase calme
+    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E   AssertionError: assert 'HAUTE_VOL' == 'BASSE_VOL'
+E     
+E     - BASSE_VOL
+E     + HAUTE_VOL
+____________________ test_la_repartition_AVOUE_les_INCONNU ____________________
+tests\test_regime_wiring.py:131: in test_la_repartition_AVOUE_les_INCONNU
+    assert rep == {BASSE_VOL: 1, HAUTE_VOL: 1, INCONNU: 1}
+E   AssertionError: assert {'HAUTE_VOL': 2, 'INCONNU': 1} == {'BASSE_VOL':... 'INCONNU': 1}
+E     
+E     Omitting 1 identical items, use -vv to show
+E     Differing items:
+E     {'HAUTE_VOL': 2} != {'HAUTE_VOL': 1}
+E     Right contains 1 more item:
+E     {'BASSE_VOL': 1}
+E     Use -v to get more diff
+=========================== short test summary info ===========================
+FAILED tests/test_regime_wiring.py::test_le_regime_separe_vraiment_le_CALME_de_l_AGITE
+FAILED tests/test_regime_wiring.py::test_la_repartition_AVOUE_les_INCONNU - A...
+2 failed, 5 passed in 0.55s
+ 
+=== 2 sur 4 : NON-REGRESSION du moteur de recherche (le plus important) === 
+ERROR: file or directory not found: tests\test_ab_flag_replay.py
+
+
+no tests ran in 0.00s
+ 
+=== 3 sur 4 : couverture de LIGNES (peut prendre plusieurs minutes) === 
+Traceback (most recent call last):
+  File "C:\Users\flo\Desktop\Projet invest\tools\couverture_de_lignes.py", line 136, in <module>
+    raise SystemExit(main())
+                     ~~~~^^
+  File "C:\Users\flo\Desktop\Projet invest\tools\couverture_de_lignes.py", line 109, in main
+    pct = _pct_depuis_coverage()
+  File "C:\Users\flo\Desktop\Projet invest\tools\couverture_de_lignes.py", line 89, in _pct_depuis_coverage
+    r = subprocess.run(cmd, cwd=RACINE, capture_output=True, text=True)
+  File "C:\Python314\Lib\subprocess.py", line 556, in run
+    stdout, stderr = process.communicate(input, timeout=timeout)
+                     ~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Python314\Lib\subprocess.py", line 1220, in communicate
+    stdout, stderr = self._communicate(input, endtime, timeout)
+                     ~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Python314\Lib\subprocess.py", line 1661, in _communicate
+    self.stdout_thread.join(self._remaining_time(endtime))
+    ~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Python314\Lib\threading.py", line 1133, in join
+    self._os_thread_handle.join(timeout)
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^
+KeyboardInterrupt
+^C

@@ -19,11 +19,25 @@ from dataclasses import dataclass
 
 @dataclass(frozen=True, slots=True)
 class ExecModelConfig:
+    # TARIF REEL HYPERLIQUID (tarif de base, verifie 2026-07-11) :
+    #   taker = 0,045 % = 4,5 bps  |  maker = 0,015 % = 1,5 bps -- LE MAKER **COUTE**.
+    # BUG CORRIGE : `maker_rebate_bps = 1.0` traitait le maker comme un REBATE (fee = -1 bps),
+    # donc un cout d'execution NEGATIF : le bot etait *paye* pour entrer, et rempli a un prix
+    # MEILLEUR que le marche. Sur Hyperliquid le rebate n'existe qu'aux paliers de volume les plus
+    # eleves ; au tarif de base un maker PAIE. Erreur de 2,5 bps par execution, dans le sens
+    # FAVORABLE -- exactement ce qui aurait fait "valider" une strategie maker-first qui perd en reel.
     taker_fee_bps: float = 4.5
-    maker_rebate_bps: float = 1.0          # credited (negative cost) on a passive fill
+    maker_fee_bps: float = 1.5             # cout d'un fill passif (0,015 %)
+    maker_rebate_bps: float = 0.0          # rebate reel : 0 au tarif de base (opt-in par palier)
     half_spread_bps: float = 1.0
     impact_coef_bps: float = 10.0          # impact when the order consumes the whole top depth
-    latency_cost_bps_per_sec: float = 0.0
+    # BUG CORRIGE (2026-07-11) — LA LATENCE NE COUTAIT RIEN (0.0).
+    # On copie un leader avec un retard median MESURE de 57 secondes. Pendant ce temps le prix
+    # bouge : c'est le cout de copie le plus reel qui soit, et il etait facture ZERO.
+    # 0,20 bps par seconde, plafonne plus bas : ~11 bps pour 57 s, coherent avec la degradation
+    # de copie mesuree par le scorer (~14 bps).
+    latency_cost_bps_per_sec: float = 0.20
+    max_latency_cost_bps: float = 15.0
     # if depth is unknown we cannot trust the fill -> charge a conservative impact
     unknown_depth_impact_bps: float = 25.0
 
@@ -95,7 +109,10 @@ def simulate_execution(
 ) -> ExecResult:
     """Simulate filling ``notional_usdc`` at ``mid_price`` on the given book."""
     cfg = config or ExecModelConfig()
-    latency_bps = max(0.0, latency_sec) * cfg.latency_cost_bps_per_sec
+    latency_bps = min(
+        float(getattr(cfg, "max_latency_cost_bps", 15.0)),
+        max(0.0, latency_sec) * cfg.latency_cost_bps_per_sec,
+    )
 
     if is_maker:
         # Passive fill: no spread paid, earn the rebate; model queue position.
@@ -104,7 +121,9 @@ def simulate_execution(
         if depth is not None:
             queue_ratio = max(0.0, queue_ahead_usdc) / depth
         slippage_bps = 0.0
-        fee_bps = -cfg.maker_rebate_bps
+        # cout maker NET : les frais payes, moins un eventuel rebate de palier (0 par defaut).
+        # Il n'est negatif QUE si un vrai rebate est configure -- jamais par accident.
+        fee_bps = float(cfg.maker_fee_bps) - float(cfg.maker_rebate_bps)
         # Honnêteté du fill passif: adverse selection configurable (mode grinder).
         # 0.0 par défaut = comportement historique inchangé.
         adverse_bps = _env_adverse_selection_bps()
@@ -122,7 +141,12 @@ def simulate_execution(
         )
 
     # Taker path: pay fee + half-spread + impact.
-    slippage_bps = estimate_slippage_bps(notional_usdc, top_depth_usdc, config=cfg)
+    # NOTE (chasse aux bugs 2026-07-11) : j'ai d'abord cru que le demi-spread n'etait jamais paye,
+    # parce qu'il n'apparait pas explicitement ici. C'etait FAUX : `estimate_slippage_bps` retourne
+    # DEJA `half_spread_bps + impact`. L'ajouter une seconde fois l'aurait compte DOUBLE -- et c'est
+    # `test_v9_exec_model_direction_bias::test_taker_costs_fee_plus_slippage` qui a attrape l'erreur.
+    # Le vrai bug etait ailleurs : la LATENCE (voir `latency_cost_bps_per_sec`).
+    slippage_bps = estimate_slippage_bps(notional_usdc, top_depth_usdc, config=cfg)   # spread INCLUS
     fee_bps = cfg.taker_fee_bps
     net_cost_bps = slippage_bps + fee_bps + latency_bps
     fill_price = _apply_price(mid_price, side, net_cost_bps)

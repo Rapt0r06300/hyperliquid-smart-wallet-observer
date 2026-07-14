@@ -67,6 +67,7 @@ class PaperDecisionResult:
     reason_codes: tuple[str, ...]
     evidence_hash: str
     ledger_snapshot: dict[str, object] | None = None
+    decision_context: dict[str, object] = field(default_factory=dict)
 
 
 class PaperEngine:
@@ -110,8 +111,28 @@ class PaperEngine:
         signal_score: float,
         marks: dict[str, float] | None = None,
         margin_scale: float = 1.0,
+        decision_context: dict[str, object] | None = None,
     ) -> PaperDecisionResult:
         reasons: list[str] = list(delta.reason_codes)
+        signal_age_ms = max(0, observed_at_ms - (delta.leader_event_time_ms or observed_at_ms))
+        context = dict(decision_context or {})
+        context.update(
+            {
+                "leader_delta_id": delta.delta_id,
+                "leader_wallet": delta.wallet,
+                "leader_action": getattr(delta.action, "value", str(delta.action)),
+                "leader_event_time_ms": delta.leader_event_time_ms,
+                "source": delta.source,
+                "evidence_ref": delta.evidence_ref,
+                "signal_age_ms": signal_age_ms,
+                "edge_remaining_bps": edge_remaining_bps,
+                "spread_bps": spread_bps,
+                "estimated_slippage_bps": estimated_slippage_bps,
+                "top_depth_usdt": top_depth_usdt,
+                "wallet_score": wallet_score,
+                "signal_score": signal_score,
+            }
+        )
         if market_price <= 0:
             reasons.append("MARKET_PRICE_INVALID")
         if not delta.safe_for_paper_candidate and not delta.is_exit_or_reduce:
@@ -124,7 +145,7 @@ class PaperEngine:
             wallet_score=wallet_score,
             signal_score=signal_score,
             edge_remaining_bps=edge_remaining_bps,
-            signal_age_ms=max(0, observed_at_ms - (delta.leader_event_time_ms or observed_at_ms)),
+            signal_age_ms=signal_age_ms,
             data_gap=market_price <= 0,
         )
         risk_decision = self._risk_engine.evaluate(risk_context)
@@ -135,14 +156,22 @@ class PaperEngine:
             return self._result(
                 accepted=False,
                 risk_decision=risk_decision,
-                trade=self._no_trade(delta, reasons),
+                trade=self._no_trade(delta, reasons, decision_context=context),
                 position=None,
                 marks=marks or {delta.coin: market_price},
                 reasons=reasons,
+                decision_context=context,
             )
 
         if delta.is_exit_or_reduce:
-            return self._apply_exit_delta(delta, market_price=market_price, observed_at_ms=observed_at_ms, risk_decision=risk_decision, marks=marks)
+            return self._apply_exit_delta(
+                delta,
+                market_price=market_price,
+                observed_at_ms=observed_at_ms,
+                risk_decision=risk_decision,
+                marks=marks,
+                decision_context=context,
+            )
 
         side = _side_for_entry(delta)
         if side is None:
@@ -150,10 +179,11 @@ class PaperEngine:
             return self._result(
                 accepted=False,
                 risk_decision=risk_decision,
-                trade=self._no_trade(delta, reasons),
+                trade=self._no_trade(delta, reasons, decision_context=context),
                 position=None,
                 marks=marks or {delta.coin: market_price},
                 reasons=reasons,
+                decision_context=context,
             )
         if len(self._positions) >= self.config.max_open_positions:
             reasons.append("MAX_OPEN_POSITIONS_REACHED")
@@ -163,10 +193,11 @@ class PaperEngine:
             return self._result(
                 accepted=False,
                 risk_decision=risk_decision,
-                trade=self._no_trade(delta, reasons),
+                trade=self._no_trade(delta, reasons, decision_context=context),
                 position=None,
                 marks=marks or {delta.coin: market_price},
                 reasons=reasons,
+                decision_context=context,
             )
 
         # margin (capital deployed) is capped; the position controls margin*leverage of notional.
@@ -175,12 +206,21 @@ class PaperEngine:
         safe_scale = min(1.0, max(0.1, float(margin_scale or 1.0)))
         margin = min(self.config.max_position_usdt * safe_scale, max(0.0, self.config.max_total_exposure_usdt - self._gross_exposure_usdt()))
         notional = margin * max(1.0, float(self.config.leverage))
+        # BUG CORRIGE (chasse aux bugs PnL 2026-07-11) — LA LATENCE N'ETAIT PAS TRANSMISE.
+        # `spread_bps` et `estimated_slippage_bps` sont recus en parametres, servent au RiskContext
+        # (donc a DECIDER)... et n'arrivaient JAMAIS jusqu'au prix de fill. Quant a `latency_sec`,
+        # il n'etait pas passe du tout : il valait 0, alors qu'on copie un leader avec un retard
+        # MEDIAN MESURE de 57 secondes. Resultat : le prix d'entree paper etait celui du leader,
+        # sans le moindre cout de copie -- et dans 8 cas sur 20 le bot entrait a un prix MEILLEUR
+        # que le marche, ce qui est physiquement impossible.
+        _signal_age_ms = max(0, observed_at_ms - (delta.leader_event_time_ms or observed_at_ms))
         exec_result = simulate_execution(
             side=side,
             notional_usdc=notional,
             mid_price=market_price,
             top_depth_usdc=top_depth_usdt or self.config.default_top_depth_usdt,
             is_maker=_maker_execution_style_enabled(),
+            latency_sec=_signal_age_ms / 1000.0,
             config=self.config.exec_model,
         )
         quantity = notional / exec_result.fill_price
@@ -225,6 +265,7 @@ class PaperEngine:
             position=position,
             marks=marks or {delta.coin: market_price},
             reasons=(),
+            decision_context=context,
         )
 
     def mark_to_market(self, marks: dict[str, float]) -> tuple[float, float, float]:
@@ -243,12 +284,21 @@ class PaperEngine:
         observed_at_ms: int,
         risk_decision: RiskDecision,
         marks: dict[str, float] | None,
+        decision_context: dict[str, object],
     ) -> PaperDecisionResult:
         position = self._find_position_for_exit(delta)
         reasons: list[str] = []
         if position is None:
             reasons.append("NO_MATCHING_PAPER_POSITION_FOR_CLOSE")
-            return self._result(False, risk_decision, self._no_trade(delta, reasons), None, marks or {delta.coin: market_price}, reasons)
+            return self._result(
+                False,
+                risk_decision,
+                self._no_trade(delta, reasons, decision_context=decision_context),
+                None,
+                marks or {delta.coin: market_price},
+                reasons,
+                decision_context=decision_context,
+            )
 
         close_fraction = 1.0 if delta.action in {LifecycleAction.CLOSE_LONG, LifecycleAction.CLOSE_SHORT} else _reduce_fraction(position, delta)
         close_quantity = position.quantity * close_fraction
@@ -300,7 +350,15 @@ class PaperEngine:
             fees_and_cost_bps=exit_exec.net_cost_bps,
             source_delta_id=delta.delta_id,
         )
-        return self._result(True, risk_decision, trade, self._positions.get(position.position_id), marks or {delta.coin: market_price}, ())
+        return self._result(
+            True,
+            risk_decision,
+            trade,
+            self._positions.get(position.position_id),
+            marks or {delta.coin: market_price},
+            (),
+            decision_context=decision_context,
+        )
 
     def _find_position_for_exit(self, delta: LeaderDelta) -> PaperPosition | None:
         target_side = _side_for_exit(delta)
@@ -315,20 +373,28 @@ class PaperEngine:
         # MARGIN terms (capital at risk): notional_usdt is leveraged, divide back by leverage.
         return sum(position.notional_usdt for position in self._positions.values()) / max(1.0, float(self.config.leverage))
 
-    def _no_trade(self, delta: LeaderDelta, reasons: list[str] | tuple[str, ...]) -> PaperTrade:
+    def _no_trade(
+        self,
+        delta: LeaderDelta,
+        reasons: list[str] | tuple[str, ...],
+        *,
+        decision_context: dict[str, object] | None = None,
+    ) -> PaperTrade:
         deduped_reasons = tuple(dict.fromkeys(reasons))
+        refs = {
+            "leader_delta_id": delta.delta_id,
+            "leader_wallet": delta.wallet,
+            "leader_action": getattr(delta.action, "value", str(delta.action)),
+            "source": delta.source,
+            "evidence_ref": delta.evidence_ref,
+            "paper_engine": "NO_REAL_ORDER_LOCAL_ONLY",
+        }
+        refs.update(decision_context or {})
         self.ledger.no_trade(
             coin=delta.coin,
             reason="|".join(deduped_reasons) if deduped_reasons else "NO_TRADE",
             timestamp_ms=int(delta.observed_at_ms or time.time() * 1000),
-            refs={
-                "leader_delta_id": delta.delta_id,
-                "leader_wallet": delta.wallet,
-                "leader_action": getattr(delta.action, "value", str(delta.action)),
-                "source": delta.source,
-                "evidence_ref": delta.evidence_ref,
-                "paper_engine": "NO_REAL_ORDER_LOCAL_ONLY",
-            },
+            refs=refs,
         )
         return PaperTrade(
             trade_id=_id("notrade", delta.delta_id),
@@ -352,6 +418,8 @@ class PaperEngine:
         position: PaperPosition | None,
         marks: dict[str, float],
         reasons: list[str] | tuple[str, ...],
+        *,
+        decision_context: dict[str, object] | None = None,
     ) -> PaperDecisionResult:
         equity, unrealized, drawdown = self.mark_to_market(marks)
         payload = (
@@ -377,6 +445,7 @@ class PaperEngine:
             reason_codes=tuple(dict.fromkeys(reasons)),
             evidence_hash=_id("pevidence", *payload),
             ledger_snapshot=self.ledger.snapshot(),
+            decision_context=dict(decision_context or {}),
         )
 
 
@@ -480,4 +549,3 @@ def _maker_execution_style_enabled() -> bool:
     import os
 
     return str(os.environ.get("HYPERSMART_EXECUTION_STYLE", "taker")).strip().lower() == "maker"
-

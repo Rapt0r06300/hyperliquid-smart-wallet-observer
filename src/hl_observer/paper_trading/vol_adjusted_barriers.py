@@ -32,6 +32,7 @@ WINDOW_ENV = "HYPERSMART_V26_VOL_WINDOW_S"
 FACTOR_MIN_ENV = "HYPERSMART_V26_VOL_FACTOR_MIN"
 FACTOR_MAX_ENV = "HYPERSMART_V26_VOL_FACTOR_MAX"
 SL_FLOOR_ENV = "HYPERSMART_V26_SL_FLOOR_BPS"
+TP_FLOOR_ENV = "HYPERSMART_V26_TP_FLOOR_BPS"
 MIN_OBS_ENV = "HYPERSMART_V26_VOL_MIN_OBS"
 
 _DEFAULTS = {
@@ -40,6 +41,13 @@ _DEFAULTS = {
     FACTOR_MIN_ENV: 0.5,
     FACTOR_MAX_ENV: 2.5,
     SL_FLOOR_ENV: 12.0,    # jamais de SL sous 12 bps (bruit)
+    # PLANCHER DE TP (autopsie PnL 2026-07-11) — LA REGLE QUI MANQUAIT.
+    # Le facteur de volatilite median mesure valait 0.71, et descendait jusqu'a 0.5. Un TP de base
+    # de 40 bps tombait donc a 20 bps... pour 13 bps de frais aller-retour. Il ne restait que
+    # 7 bps de gain reel, pendant que le SL, lui, s'elargissait a 90 bps. Ratio net : 1 pour 6.65
+    # -> il fallait 87 % de winrate pour seulement rentrer dans ses frais. La perte etait CERTAINE,
+    # quel que soit le signal. Un TP ne doit JAMAIS etre rabote sous ce plancher.
+    TP_FLOOR_ENV: 45.0,
     MIN_OBS_ENV: 5.0,
 }
 
@@ -124,14 +132,22 @@ def vol_factor_for_coin(
     return max(lo, min(hi, rng / ref))
 
 
-def adjust_config(base: SLTPConfig, factor: float, *, sl_floor_bps: float) -> SLTPConfig:
-    """Barrières × facteur (hummingbot), SL jamais sous le plancher. Pure."""
+def adjust_config(
+    base: SLTPConfig, factor: float, *, sl_floor_bps: float, tp_floor_bps: float = 0.0
+) -> SLTPConfig:
+    """Barrières × facteur (hummingbot), avec DEUX planchers. Pure.
+
+    ``sl_floor_bps`` : un SL trop serré se fait toucher par le bruit.
+    ``tp_floor_bps`` : un TP trop serré se fait manger par les FRAIS -- c'est la cause mesuree
+    du PnL negatif du run du 09-10 juillet (TP rabote a 20 bps pour 13 bps de frais).
+    """
     f = float(factor)
     scaled_sl = max(float(base.stop_loss_bps) * f, float(sl_floor_bps))
+    scaled_tp = max(float(base.take_profit_bps) * f, float(tp_floor_bps))
     return replace(
         base,
         stop_loss_bps=round(scaled_sl, 6),
-        take_profit_bps=round(float(base.take_profit_bps) * f, 6),
+        take_profit_bps=round(scaled_tp, 6),
         trailing_stop_bps=(
             round(float(base.trailing_stop_bps) * f, 6) if base.trailing_stop_bps is not None else None
         ),
@@ -161,19 +177,37 @@ def _apply_sltp_exits_vol_adjusted_impl(
     Flag ON : enregistre les marks réels, puis applique les exits PAR COIN avec un
     config dont les barrières sont ajustées au régime de volatilité du coin.
     """
+    # ==============================================================================================
+    # 🔴 #591 — LE GARDE-FOU AFFAME (trouve le 2026-07-13).
+    # ==============================================================================================
+    # Ces trois lignes etaient SOUS le `return` anticipe ci-dessous. Consequence : l'estimateur de
+    # volatilite n'etait nourri **QUE lorsqu'une position etait deja ouverte**.
+    #
+    # Or son consommateur est `signals/v26_entry_vetos.py:228`, qui demande
+    # `range_bps(window_s=900, min_obs=5)` **au moment de decider une ENTREE** -- c'est-a-dire,
+    # justement, quand il n'y a le plus souvent AUCUNE position. Il recevait donc `None`.
+    #
+    # Et `None` ne fait pas d'erreur : `quality_score()` se contente de **sauter** le terme de
+    # volatilite (+-30/35/+15 points -- le plus lourd des trois). Le veto `REASON_MQ`
+    # (`MarketQualityBook.allowed()`) continuait de classer l'univers top-K... sur la liquidite
+    # SEULE. Un veto qui tranche sur un score ampute, sans jamais le dire.
+    #
+    # C'est la maladie du projet sous un 11e deguisement : *la capacite est la, le fil est coupe,
+    # personne ne rale.* Et c'est la meme lecon que le carnet L2 (#330) :
+    # **le deny-by-default protege les ORDRES, pas les OCTETS.** Enregistrer un mark n'est pas
+    # passer un ordre. On observe TOUJOURS ; on decide ensuite.
+    # ==============================================================================================
+    est = estimator or DEFAULT_MID_VOL_ESTIMATOR
+    marks = mid_prices or {}
+    now_s = (float(now_ms) / 1000.0) if now_ms else None
+    for coin, mid in marks.items():
+        est.record(str(coin), mid, ts=now_s)
+
     if config is None or not positions:
         return apply_sltp_exits(
             positions, ledger_events, mid_prices, cost_bps=cost_bps, now_ms=now_ms,
             config=config, paper_mode=paper_mode,
         )
-
-    est = estimator or DEFAULT_MID_VOL_ESTIMATOR
-    marks = mid_prices or {}
-
-    # Toujours enrichir l'estimateur avec les marks réels (observabilité, même flag OFF).
-    now_s = (float(now_ms) / 1000.0) if now_ms else None
-    for coin, mid in marks.items():
-        est.record(str(coin), mid, ts=now_s)
 
     if not _flag_on(env):
         return apply_sltp_exits(
@@ -182,6 +216,7 @@ def _apply_sltp_exits_vol_adjusted_impl(
         )
 
     sl_floor = _fenv(SL_FLOOR_ENV, env)
+    tp_floor = _fenv(TP_FLOOR_ENV, env)
     closed_all = []
     # Grouper les positions par coin pour appliquer le config ajusté du coin.
     by_coin: dict[str, dict] = {}
@@ -194,7 +229,7 @@ def _apply_sltp_exits_vol_adjusted_impl(
     for coin, group in by_coin.items():
         original_keys = set(group.keys())
         factor = vol_factor_for_coin(coin, estimator=est, env=env, now=now_s)
-        cfg = adjust_config(config, factor, sl_floor_bps=sl_floor)
+        cfg = adjust_config(config, factor, sl_floor_bps=sl_floor, tp_floor_bps=tp_floor)
         closed = apply_sltp_exits(
             group, ledger_events, marks, cost_bps=cost_bps, now_ms=now_ms,
             config=cfg, paper_mode=paper_mode,

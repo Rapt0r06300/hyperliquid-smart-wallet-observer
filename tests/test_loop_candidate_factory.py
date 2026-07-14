@@ -170,7 +170,12 @@ def test_loop_dashboard_payload_reads_latest_result(tmp_path: Path) -> None:
     assert payload["latest_decision_trace"] == []
 
 
-def test_loop_dashboard_payload_reads_decision_trace(tmp_path: Path) -> None:
+def test_loop_dashboard_payload_reads_decision_trace(tmp_path: Path, monkeypatch) -> None:
+    # Ce test verifie que la TRACE remonte au dashboard -- pas que le trade soit bon.
+    # Le noyau (G2) refuse desormais toute entree de famille DISCRETIONNAIRE_PUBLIC (zone morte
+    # mesuree). On l'eteint EXPLICITEMENT ici pour tester la plomberie de la trace ; le verdict
+    # du noyau, lui, est epingle par tests/test_noyau_unique.py et test_testnet_pipeline_slice.py.
+    monkeypatch.setenv("HYPERSMART_NOYAU_AUTORITAIRE", "0")
     now = unix_ms()
     memory = LoopMemoryStore(tmp_path / "learning")
     runner = LoopEngineeringRunner(settings=Settings(), memory=memory)

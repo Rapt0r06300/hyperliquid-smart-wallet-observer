@@ -17,11 +17,12 @@ SAFETY: read-only / paper-only. No order, no signature, nothing sent anywhere.
 """
 
 from __future__ import annotations
+from hl_observer.strategies.strategy_mode import mode_of_position
 
 import os
 from typing import Any
 
-from hl_observer.paper_trading.sl_tp import SLTPConfig, evaluate_sl_tp
+from hl_observer.paper_trading.sl_tp import SLTPConfig, evaluate_sl_tp, SLTPDecision, signed_pnl_bps
 
 
 def _f(name: str, default: float) -> float:
@@ -52,9 +53,24 @@ def sltp_config_from_env() -> SLTPConfig | None:
     trailing = None if trailing_raw in (None, "", "0") else _f("HYPERSMART_SLTP_TRAILING_BPS", 0.0)
     activation_raw = os.environ.get("HYPERSMART_SLTP_TRAILING_ACTIVATION_BPS")
     activation = None if activation_raw in (None, "", "0") else _f("HYPERSMART_SLTP_TRAILING_ACTIVATION_BPS", 0.0)
+    # 🔴 2026-07-13 — LE DEFAUT DU CODE ETAIT UNE PERTE GARANTIE.
+    #
+    #   AVANT : TP=30, SL=40, cout=12  ->  breakeven = (40+12)/(30+40) = 52/70  = 74 %
+    #   APRES : TP=110, SL=60, cout=12 ->  breakeven = (60+12)/(110+60) = 72/170 = 42 %
+    #
+    # Un winrate d'equilibre de 74 % est hors d'atteinte : ce reglage PERD, par arithmetique.
+    # La production n'etait sauvee que parce que le LANCEUR ecrase ces valeurs (110/60). Mais
+    # « le lanceur corrige le code » est exactement le motif qui nous a deja coute le poller L2
+    # et le funding : le jour ou le flag disparait, on retombe en silence sur une config perdante.
+    #
+    # C'est le garde-fou breakeven (T3c) qui a rendu la chose VISIBLE : il refusait 100 % des
+    # entrees des que l'env n'etait pas pose -- et deux tests UI le criaient depuis la suite
+    # complete. Le garde-fou avait raison ; c'est le DEFAUT qu'il fallait corriger, pas lui.
+    #
+    # La production ne change PAS (le lanceur posait deja 110/60). Seul le defaut devient honnete.
     return SLTPConfig(
-        take_profit_bps=_f("HYPERSMART_SLTP_TAKE_PROFIT_BPS", 30.0),   # +0.30%
-        stop_loss_bps=_f("HYPERSMART_SLTP_STOP_LOSS_BPS", 40.0),       # -0.40%
+        take_profit_bps=_f("HYPERSMART_SLTP_TAKE_PROFIT_BPS", 110.0),  # +1.10%  (= lanceur)
+        stop_loss_bps=_f("HYPERSMART_SLTP_STOP_LOSS_BPS", 60.0),       # -0.60%  (= lanceur)
         trailing_stop_bps=trailing,
         trailing_activation_bps=activation,
         breakeven_buffer_bps=_f("HYPERSMART_SLTP_BREAKEVEN_BUFFER_BPS", 8.0),
@@ -77,6 +93,8 @@ def apply_sltp_exits(
     marks = mid_prices or {}
     stop_min_hold_ms = max(0, _i("HYPERSMART_SLTP_STOP_MIN_HOLD_MS", 0))
     catastrophic_stop_bps = abs(_f("HYPERSMART_SLTP_CATASTROPHIC_STOP_BPS", max(float(config.stop_loss_bps), 0.0)))
+    # 0 = desactive (comportement historique). Le launcher pose 1 800 000 ms (30 min).
+    position_timeout_ms = max(0, _i("HYPERSMART_SLTP_POSITION_TIMEOUT_MS", 0))
     closed: list[dict[str, Any]] = []
     for key in list(positions.keys()):
         position = positions.get(key)
@@ -105,12 +123,40 @@ def apply_sltp_exits(
             position["lowest_price"] = peak
             position["highest_price"] = max(float(position.get("highest_price") or avg), mark_price)
         decision = evaluate_sl_tp(side=side, entry_price=avg, current_price=mark_price, peak_price=peak, config=config)
+
+        # INCOHERENCE CORRIGEE (autopsie PnL 2026-07-11) — AUCUN TIMEOUT DE POSITION.
+        # Le bot DECIDE sur un horizon de quelques minutes (take-profit a ~28 bps) mais TENAIT
+        # ses positions 1,3 h en mediane, jusqu'a 8,4 h. Or l'edge du signal de copie est mesure
+        # NUL des 5 minutes : au-dela, on n'a plus une position de copie, on a une exposition
+        # nue au marche. C'est ce qui a tue les shorts (9 SL sur 10 etaient des shorts dans un
+        # marche haussier). Un scalp qui dure 8 heures n'est plus un scalp.
+        # Rejeu sur les 20 trades reels : sans timeout -39 $, avec timeout 30 min -23 $.
+        # (cela ne CREE pas d'edge -- cela cesse d'exposer le capital a un actif qui n'en a pas)
+        if position_timeout_ms > 0 and not decision.exit:
+            _opened = int(float(position.get("opened_at_ms") or 0))
+            if _opened > 0 and now_ms and (int(now_ms) - _opened) >= position_timeout_ms:
+                _pnl_now = signed_pnl_bps(side, avg, mark_price)
+                decision = SLTPDecision(True, "TIMEOUT", round(_pnl_now, 6),
+                                        round(decision.favorable_excursion_bps, 6))
+
+        # BUG CORRIGE (autopsie PnL 2026-07-11) — LE STOP CATASTROPHIQUE NE FERMAIT RIEN.
+        # `catastrophic_stop_bps` n'etait utilise que pour CONTOURNER le delai minimum de detention
+        # (voir plus bas). Il ne declenchait AUCUNE sortie. Resultat mesure : quand la volatilite
+        # gonflait le SL a 315 bps, la perte courait jusqu'a -323 bps alors que le "stop
+        # catastrophique" affichait 180. Les 2 trades concernes (ARB, ZEC) pesent 46 % de TOUTE
+        # la perte du run. C'est maintenant un VRAI plafond de perte, absolu, non redimensionne
+        # par la volatilite : au-dela, on ferme, point.
+        if catastrophic_stop_bps > 0 and not decision.exit:
+            _pnl_now = signed_pnl_bps(side, avg, mark_price)
+            if _pnl_now <= -catastrophic_stop_bps:
+                decision = SLTPDecision(True, "CATASTROPHIC_STOP", round(_pnl_now, 6), round(decision.favorable_excursion_bps, 6))
+
         if decision.hold:
             continue
         opened_at_ms = int(float(position.get("opened_at_ms") or 0))
         age_ms = max(0, int(now_ms or 0) - opened_at_ms) if opened_at_ms > 0 and now_ms else 0
         if (
-            decision.reason == "STOP_LOSS"
+            decision.reason == "STOP_LOSS"          # jamais CATASTROPHIC_STOP : lui passe toujours
             and stop_min_hold_ms > 0
             and age_ms < stop_min_hold_ms
             and abs(float(decision.pnl_bps)) < catastrophic_stop_bps
@@ -122,7 +168,27 @@ def apply_sltp_exits(
         position_notional = abs(size * mark_price)
         gross = (mark_price - avg) * size if side == "LONG" else (avg - mark_price) * size
         exit_cost = position_notional * cost_bps / 10_000.0
-        net = gross - exit_cost
+
+        # COUT MANQUANT (autopsie PnL 2026-07-11) — LE FUNDING N'ETAIT JAMAIS FACTURE.
+        # Sur Hyperliquid le financement se paie CHAQUE HEURE. Le run a cumule 42,6 heures de
+        # positions ouvertes (une seule tenue 8,4 h) sans qu'un seul centime de funding ne soit
+        # deduit du PnL. Un LONG paie quand le funding est positif ; un SHORT recoit.
+        # Sans donnee de funding fraiche pour ce coin -> on ne facture RIEN (jamais de chiffre
+        # invente), et on le DIT dans l'evenement (`funding_cost_usdc: None`).
+        funding_cost = None
+        try:
+            from hl_observer.funding.funding_runtime_cache import recent_rates as _recent
+
+            _rates = _recent(coin, window_s=6 * 3600.0)      # taux HORAIRES signes, recents
+            if _rates:
+                _rate = sum(_rates) / len(_rates)            # taux moyen sur la vie de la position
+                _hours = max(0.0, age_ms / 3_600_000.0)
+                _sign = 1.0 if side == "LONG" else -1.0      # le LONG paie un funding positif
+                funding_cost = position_notional * float(_rate) * _hours * _sign
+        except Exception:
+            funding_cost = None
+
+        net = gross - exit_cost - (funding_cost or 0.0)
         matched_position_key = f"{wallet}|{coin}|{side}"
         instance_id = _paper_position_instance_id(
             matched_position_key=matched_position_key,
@@ -162,12 +228,17 @@ def apply_sltp_exits(
                 "opened_at_ms": opened_at_ms,
                 "status": "LOCAL_REPLAY",
                 "bot_replay_action": "PAPER_CLOSE_REPLAYED",
+                # la sortie HERITE du moteur de l'entree -- on ne reclasse jamais sur le motif
+                "strategy_mode": mode_of_position(position),
                 "paper_action_type": "CLOSE",
                 "exit_method": "SLTP_" + decision.reason,
                 "reason": "SLTP_" + decision.reason + "_LOCAL_REPLAY_NOT_AN_ORDER",
                 "estimated_net_pnl_usdc": round(net, 6),
                 "gross_pnl_usdc": round(gross, 6),
                 "fee_cost_usdc": round(exit_cost, 6),
+                # None = pas de donnee de funding pour ce coin (on n'invente pas un chiffre)
+                "funding_cost_usdc": (round(funding_cost, 8) if funding_cost is not None else None),
+                "funding_hours": round(age_ms / 3_600_000.0, 4),
                 "average_entry_price": round(avg, 8),
                 "exit_price": round(mark_price, 8),
                 "notional_closed_usdt": round(position_notional, 6),

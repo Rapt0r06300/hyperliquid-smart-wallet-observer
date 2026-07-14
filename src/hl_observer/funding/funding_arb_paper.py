@@ -22,9 +22,21 @@ from __future__ import annotations
 import os
 from dataclasses import dataclass, field, replace
 
+from hl_observer.funding.funding_carry_economics import REFUS_NON_COUVERT
 from hl_observer.funding.spike_detector import detect_funding_spike
 
 ENV_ENABLED = "HYPERSMART_FUNDING_ARB_PAPER"
+
+# VERROU CARRY (2026-07-11) -- adosse a une MESURE, pas a une intuition.
+# 232 marches, 9 512 releves : funding median 0,125 bps/h, mouvement de prix ~35 bps/h.
+# Pour 1 bps de funding encaisse, une jambe NUE subit ~281 bps de mouvement de prix.
+# Cette "paire delta-neutre" n'a QU'UNE jambe. Ouvrir dessus, c'est parier sur le prix en
+# pretendant encaisser du portage. DEFAUT = refus. Le flag n'existe que pour l'A/B et le legacy.
+ENV_ALLOW_UNHEDGED_LEG = "HYPERSMART_FUNDING_ALLOW_UNHEDGED_LEG"
+
+
+def unhedged_leg_allowed() -> bool:
+    return str(os.environ.get(ENV_ALLOW_UNHEDGED_LEG, "0")).strip().lower() in _ENABLED_VALUES
 _ENABLED_VALUES = {"1", "true", "yes", "on"}
 
 
@@ -79,6 +91,11 @@ class FundingArbPosition:
     leg_notional_usdt: float
     entry_rate_bps_per_hour: float
     opened_at_ms: int
+    # SANS LUI, LE PnL EST UNE FICTION (bug corrige le 2026-07-11).
+    # La position n'a qu'UNE jambe : c'est donc une position NUE sur un perp. Son PnL valait
+    #     net = funding encaisse - couts
+    # sans AUCUN terme de prix -- un revenu sans risque de marche, ce qui n'existe pas.
+    entry_price: float = 0.0
     accrued_funding_usdc: float = 0.0
     entry_costs_usdc: float = 0.0
     last_accrual_at_ms: int = 0
@@ -96,6 +113,9 @@ class FundingArbEvent:
     rate_bps_per_hour: float | None = None
     amount_usdc: float = 0.0
     net_pnl_usdc: float | None = None
+    # None = prix inconnu -> on NE SAIT PAS ce qu'a fait la position. On ne l'invente pas.
+    price_pnl_usdc: float | None = None
+    price_pnl_unknown: bool = False
     paper_only: bool = True
     real_execution: bool = False
 
@@ -108,6 +128,23 @@ class FundingArbReport:
     total_notional_usdt: float
     realized_pnl_usdc: float
     message: str = "delta-neutral funding farming; paper-only; no price PnL modeled"
+
+
+def _price_pnl_usdc(pos: "FundingArbPosition", prix_sortie: float) -> float | None:
+    """PnL de PRIX de la jambe NUE. None = prix inconnu -> on n'invente RIEN.
+
+    `receiving_side` est le sens de la jambe detenue sur Hyperliquid :
+      * SHORT -> on gagne quand le prix BAISSE ;
+      * LONG  -> on gagne quand le prix MONTE.
+    Ignorer ce terme revenait a encaisser du funding sans jamais porter le risque du marche.
+    """
+    entree = float(pos.entry_price or 0.0)
+    sortie = float(prix_sortie or 0.0)
+    if entree <= 0.0 or sortie <= 0.0:
+        return None                       # etat vide honnete : pas de prix, pas de chiffre
+    variation = (sortie - entree) / entree
+    sens = 1.0 if str(pos.receiving_side).upper() == "LONG" else -1.0
+    return pos.leg_notional_usdt * variation * sens
 
 
 def _hourly_rate_bps(rates: list[float]) -> float | None:
@@ -144,9 +181,13 @@ def evaluate_funding_arb(
         if rate_bps is None:
             # Donnée manquante: on n'invente rien, on ferme proprement au coût.
             close_costs = 2 * pos.leg_notional_usdt * (cfg.exit_cost_bps_per_leg + cfg.hedge_venue_extra_bps / 2) / 10_000.0
-            net = pos.accrued_funding_usdc - pos.entry_costs_usdc - close_costs
+            _px = _price_pnl_usdc(pos, float(prices.get(coin, 0.0) or 0.0))
+            net = pos.accrued_funding_usdc + (_px or 0.0) - pos.entry_costs_usdc - close_costs
             realized += net
-            events.append(FundingArbEvent("CLOSE", coin, pos.pair_id, "FUNDING_DATA_MISSING", None, round(close_costs, 8), round(net, 8)))
+            _reason = "FUNDING_DATA_MISSING" if _px is not None else "INSUFFICIENT_DATA_PRICE_UNKNOWN_FUNDING_DATA_MISSING"
+            events.append(FundingArbEvent("CLOSE", coin, pos.pair_id, _reason, None, round(close_costs, 8), round(net, 8),
+                                          price_pnl_usdc=(round(_px, 8) if _px is not None else None),
+                                          price_pnl_unknown=(_px is None)))
             continue
         receiving_rate = rate_bps if pos.receiving_side == "SHORT" else -rate_bps
         hours_open = max(0.0, (now_ms - (pos.last_accrual_at_ms or pos.opened_at_ms)) / 3_600_000.0)
@@ -165,10 +206,15 @@ def evaluate_funding_arb(
         edge_alive = abs(receiving_rate) >= cfg.exit_edge_bps_per_hour and receiving_rate > 0
         if not edge_alive or age_hours >= cfg.max_hold_hours:
             close_costs = 2 * pos.leg_notional_usdt * (cfg.exit_cost_bps_per_leg + cfg.hedge_venue_extra_bps / 2) / 10_000.0
-            net = pos.accrued_funding_usdc - pos.entry_costs_usdc - close_costs
+            _px = _price_pnl_usdc(pos, float(prices.get(coin, 0.0) or 0.0))
+            net = pos.accrued_funding_usdc + (_px or 0.0) - pos.entry_costs_usdc - close_costs
             realized += net
             reason = "MAX_HOLD_REACHED" if age_hours >= cfg.max_hold_hours else "FUNDING_EDGE_COLLAPSED"
-            events.append(FundingArbEvent("CLOSE", coin, pos.pair_id, reason, round(receiving_rate, 4), round(close_costs, 8), round(net, 8)))
+            if _px is None:
+                reason = "INSUFFICIENT_DATA_PRICE_UNKNOWN_" + reason
+            events.append(FundingArbEvent("CLOSE", coin, pos.pair_id, reason, round(receiving_rate, 4), round(close_costs, 8), round(net, 8),
+                                          price_pnl_usdc=(round(_px, 8) if _px is not None else None),
+                                          price_pnl_unknown=(_px is None)))
             continue
         survivors[coin] = pos
 
@@ -203,6 +249,12 @@ def evaluate_funding_arb(
         if total_notional + pair_notional > cfg.max_total_notional_usdt:
             events.append(FundingArbEvent("NO_TRADE", coin, "", "MAX_TOTAL_NOTIONAL_REACHED", round(rate_bps, 4)))
             continue
+        # VERROU CARRY : la jambe est NUE (une seule jambe). La mesure dit que le prix
+        # noie le funding d'un facteur ~281. On refuse par defaut.
+        if not unhedged_leg_allowed():
+            events.append(FundingArbEvent("NO_TRADE", coin, "", REFUS_NON_COUVERT, round(rate_bps, 4)))
+            continue
+
         receiving_side = "SHORT" if rate_bps > 0 else "LONG"
         entry_costs = 2 * cfg.leg_notional_usdt * (cfg.entry_cost_bps_per_leg + cfg.hedge_venue_extra_bps / 2) / 10_000.0
         pair_id = f"fundingarb:{coin}:{now_ms}"
@@ -213,6 +265,7 @@ def evaluate_funding_arb(
             leg_notional_usdt=cfg.leg_notional_usdt,
             entry_rate_bps_per_hour=round(rate_bps, 4),
             opened_at_ms=now_ms,
+            entry_price=float(prices.get(coin, 0.0) or 0.0),   # sans lui, le PnL serait une fiction
             entry_costs_usdc=round(entry_costs, 8),
             last_accrual_at_ms=now_ms,
         )

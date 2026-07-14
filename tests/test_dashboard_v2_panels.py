@@ -13,7 +13,7 @@ def _page() -> str:
 
 def test_page_has_all_panels():
     html = _page()
-    assert "METAGRAPHE" in html          # metagraphe
+    assert "EQUITY //" in html   # panneau courbe (ex-"METAGRAPHE", renomme a la refonte /v2)          # metagraphe
     assert "SNIPER" in html and "GRINDER" in html and "FUNDING" in html  # UI-5 modes
     assert "WIRING" in html              # UI-6 wiring map
     assert "réconciliation" in html      # santé ledger

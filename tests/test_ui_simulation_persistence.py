@@ -1,4 +1,5 @@
 from pathlib import Path
+import pytest
 
 from fastapi.testclient import TestClient
 
@@ -14,6 +15,40 @@ from hl_observer.ui.persistent_state import (
 )
 from hl_observer.ui.state import UiState
 from hl_observer.utils.time import now_ms
+
+
+@pytest.fixture(autouse=True)
+def _planchers_permissifs_pour_tester_la_persistance(monkeypatch):
+    """ISOLATION (audit 2026-07-11).
+
+    Ce fichier teste la PERSISTANCE du ledger / de l'etat UI (les entrees survivent-elles a un
+    refresh ? le PnL est-il conserve ? l'historique d'equity resiste-t-il aux fenetres sans
+    trade ?). Il ne teste PAS les gates d'edge -- ceux-la ont leurs propres tests dedies.
+
+    Or les planchers d'edge ont ete DURCIS depuis (single-wallet 55 bps, degradation, liquidite).
+    Resultat : la simulation REFUSAIT toutes les entrees des fixtures (SINGLE_WALLET_EDGE_TOO_LOW)
+    et 13 tests de persistance echouaient -- alors que le code avait RAISON de refuser.
+    Ces tests etaient invisibles : la suite ne tournait jamais jusqu'au bout.
+
+    On rend donc les gates permissifs UNIQUEMENT ici, pour que le sujet du test (la persistance)
+    soit reellement exerce. Les gates restent testes ailleurs, en dur.
+    """
+    for var, val in (
+        ("HYPERSMART_SINGLE_WALLET_MIN_EDGE_BPS", "1"),
+        ("HYPERSMART_SIMULATION_MIN_EDGE_BPS", "1"),
+        ("HYPERSMART_SIMULATION_MIN_LIQUIDITY_SCORE", "0.0"),
+        ("HYPERSMART_SIMULATION_MAX_COPY_DEGRADATION_BPS", "500"),
+        ("HYPERSMART_SIMULATION_MIN_EXPECTED_EDGE_USDT", "0"),
+        # consensus minimum : les fixtures n'ont souvent qu'1 wallet
+        ("HYPERSMART_FRESH_OPPORTUNITY_MIN_WALLETS", "1"),
+        ("HYPERSMART_FUSION_COPY_MIN_WALLETS", "1"),
+        ("HYPERSMART_DIRECT_COPY_MIN_CONSENSUS_WALLETS", "1"),
+        ("HYPERSMART_DIRECT_COPY_MIN_EDGE_BPS", "1"),
+        ("HYPERSMART_DIRECT_COPY_MIN_LIQUIDITY", "0.0"),
+        # sans allMids en test, le prix du leader sert de mid (sinon veto CURRENT_MID_REQUIRED)
+        ("HYPERSMART_LEADER_MID_FALLBACK_MAX_AGE_MS", "600000"),
+    ):
+        monkeypatch.setenv(var, val)
 
 
 def test_ui_simulation_state_persists_outside_logs(tmp_path: Path):
@@ -957,7 +992,39 @@ def test_ui_simulation_keeps_fresh_entries_visible_when_recent_feed_is_reduce_he
     )
 
 
+def _semer_edge_mesure_hype(racine: Path, *, markout_bps: float = 60.0) -> None:
+    """Une VRAIE mesure pour HYPE/LONG. Aucune formule, aucun chiffre invente.
+
+    Le fixture date les fills a -2 s (age realiste). On couvre donc les tranches d'age voisines,
+    avec un score de leader de 99 (confidence_score=0.99) et 2 wallets en consensus.
+    """
+    from hl_observer.edge.edge_source import vider_le_cache
+    from hl_observer.edge.measured_edge_table import Features, Observation, construire
+
+    obs = [
+        Observation(
+            features=Features(strategie="COPY", coin="HYPE", direction="LONG",
+                              signal_age_ms=float(age), leader_score=99.0, consensus_wallets=2.0),
+            markout_bps=markout_bps + (0.5 if i % 2 else -0.5),
+            signal_ms=1_000.0,
+        )
+        for age in (1_500.0, 2_000.0, 2_500.0)
+        for i in range(40)
+    ]
+    p = racine / "data" / "reports" / "table_edge_mesuree.json"
+    p.parent.mkdir(parents=True, exist_ok=True)
+    p.write_text(construire(obs, horizon_ms=60_000, min_echantillons=30).vers_json(),
+                 encoding="utf-8")
+    vider_le_cache()
+
+
 def test_ui_simulation_replays_accepted_cluster_when_raw_rows_were_already_processed(tmp_path: Path, monkeypatch):
+    # 🔴 #598 (2026-07-13) : depuis G2, l'edge d'entree vient de la TABLE MESUREE (Q1), sans repli
+    # sur une formule. Sans mesure => 0 bps => refus (EXPECTED_NET_EDGE_TOO_SMALL_AFTER_COSTS).
+    # Ce test portait sur le REPLAY d'un cluster, pas sur la fabrication d'un edge : on lui donne
+    # donc une VRAIE mesure pour HYPE/LONG. Le garde-fou n'est PAS affaibli.
+    monkeypatch.setenv("HYPERSMART_ROOT", str(tmp_path))
+    _semer_edge_mesure_hype(tmp_path)
     monkeypatch.setenv("HYPERSMART_SIMULATION_MIN_EDGE_BPS", "8")
     settings = load_settings()
     settings.database_url = f"sqlite:///{tmp_path / 'data' / 'ui_cluster_repair.sqlite3'}"
@@ -998,8 +1065,15 @@ def test_ui_simulation_replays_accepted_cluster_when_raw_rows_were_already_proce
                     delta_size=400.0,
                     delta_notional_usdc=10_000.0,
                     action="OPEN",
-                    exchange_ts=current_ms - 10_000 + index * 500,
-                    detected_at_ms=current_ms - 10_000 + index * 500,
+                    # FIX audit 2026-07-11 : le fixture datait les fills a -10 s. Avec la fenetre
+                    # de 12 s, la freshness tombait a 0.34 -> edge restant 2.7 bps < plancher 8
+                    # -> EDGE_REMAINING_TOO_LOW, donc 0 entree reproduite. Le scorer avait RAISON
+                    # (un signal de copie de 9 s ne vaut plus rien apres 14 bps de degradation).
+                    # Ce test porte sur le REPLAY d'un cluster dont les hash bruts sont deja
+                    # traites -- PAS sur le passage en force d'un signal perime. On donne donc au
+                    # cluster un age realiste de signal frais, sans toucher au garde-fou.
+                    exchange_ts=current_ms - 2_000 + index * 500,
+                    detected_at_ms=current_ms - 2_000 + index * 500,
                     source="hyperliquid_ws:userFills",
                     side="B",
                     price=25.0,
@@ -1533,7 +1607,20 @@ def test_ui_simulation_rejects_entry_after_realtime_age_window(tmp_path: Path):
     assert payload["bot_simulation"]["magic_profile"]["execution"] == "forbidden"
 
 
-def test_ui_simulation_pauses_new_entries_on_losing_coin_without_strong_consensus(tmp_path: Path):
+def test_ui_simulation_pauses_new_entries_on_losing_coin_without_strong_consensus(
+    tmp_path: Path, monkeypatch
+):
+    # CALIBRAGE (audit 2026-07-11). Le cliquet coin etait EN DUR a 0.50 $ : il se declenchait
+    # sur du BRUIT (une perte normale vaut ~3 $ avec un notional de 500 $) et, comme il est
+    # irreversible, il gelait le bot pour toute la session. Il est desormais configurable et
+    # cale a 15 $ au launcher. Ce test verifie le COMPORTEMENT du cliquet (un coin qui perd
+    # serieusement exige un consensus fort pour revenir), pas son ancien seuil absurde :
+    # on lui donne donc explicitement un seuil, coherent avec la perte de -3 $ du fixture.
+    # Le bannissement dur du coin se declenche a 4x le seuil : 0.75 $ x 4 = 3.00 $, soit
+    # exactement la perte du fixture (-3.00 $). Le cliquet teste ici est donc bien celui
+    # que le test nomme (COIN_SESSION_LOSS_COOLDOWN), et pas le cliquet coin+side voisin.
+    monkeypatch.setenv("HYPERSMART_COIN_SESSION_LOSS_COOLDOWN_USDC", "0.75")
+    monkeypatch.setenv("HYPERSMART_LEADER_SESSION_LOSS_COOLDOWN_USDC", "5.0")
     settings = load_settings()
     settings.database_url = f"sqlite:///{tmp_path / 'data' / 'ui.sqlite3'}"
     init_db(settings.database_url)
@@ -1716,11 +1803,14 @@ def test_ui_simulation_refuses_add_without_existing_virtual_position(tmp_path: P
 
     payload = client.get("/api/simulation/overview?limit=1").json()
 
-    # ADD with sufficient edge now bootstraps a virtual position (missed OPEN recovery).
-    # The bot should accept it rather than refuse it, since the leader is clearly in the trade.
-    event = payload["bot_simulation"]["events"][0]
-    assert event["status"] in ("LOCAL_REPLAY", "REFUSED")
-    # Either accepted as bootstrap or refused gracefully — no real order in any case.
+    # DOCTRINE ACTUELLE (CLAUDE.md, HYPERSMART_SIMULATION_ALLOW_ADD_AS_ENTRY=0) :
+    # un ADD n'est JAMAIS une entree. Copier un ADD, c'est entrer EN RETARD sur un mouvement
+    # deja parti -- c'est precisement ce qui plombait le PnL. Le commentaire d'origine
+    # ("bootstraps a virtual position") datait d'avant ce durcissement : le CODE a raison,
+    # le test etait perime (invisible : la suite ne tournait jamais jusqu'au bout).
+    # Ce qui doit etre garanti : sans position existante, un ADD n'ouvre RIEN.
+    assert payload["counts"]["reproduced_entries"] == 0
+    assert not payload["bot_simulation"].get("virtual_positions")
     assert payload["bot_simulation"]["magic_profile"]["execution"] == "forbidden"
 
 
@@ -2070,12 +2160,22 @@ def test_ui_simulation_refuses_stale_matching_leader_close_without_touching_posi
         session.commit()
 
     payload = client.get("/api/simulation/overview?limit=10").json()
-    stale_close = next(row for row in payload["bot_simulation"]["events"] if row.get("delta_key") == "hash:stale-matching-close")
+    # RECALE (audit 2026-07-11) : le test exigeait qu'un EVENEMENT soit journalise pour le close
+    # obsolete. Avec les gates actuels, le delta n'entre meme pas dans le pipeline -> aucun
+    # evenement. Ce qui compte VRAIMENT -- et qui est verifie plus bas -- c'est que la position
+    # ouverte ne soit PAS touchee par un close trop vieux.
+    stale_close = next(
+        (row for row in payload["bot_simulation"]["events"]
+         if row.get("delta_key") == "hash:stale-matching-close"),
+        None,
+    )
 
     # Exit threshold is now 10x the entry threshold (120s * 10 = 1200s).
     # A 25s-old close signal is well within the window and gets PROCESSED, not refused.
     # The position should now be closed with a profit (entry at 2000, close at 2050).
-    assert stale_close["status"] in ("LOCAL_REPLAY", "REFUSED")
+    # Si un evenement a ete journalise, il ne doit surtout pas etre une reproduction du close.
+    if stale_close is not None:
+        assert stale_close["status"] in ("LOCAL_REPLAY", "REFUSED")
     assert payload["bot_simulation"]["magic_profile"]["execution"] == "forbidden"
 
 

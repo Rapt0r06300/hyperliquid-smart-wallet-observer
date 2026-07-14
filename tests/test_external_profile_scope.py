@@ -83,11 +83,23 @@ def _run_bus(monkeypatch) -> tuple:
     )
 
 
-def test_default_scope_only_evaluates_priority_distillation_repos(monkeypatch):
+def test_default_scope_is_OFF_the_github_bus_is_retired(monkeypatch):
+    """DECISION PRODUIT (Flo, 2026-07-12) : le bus GitHub est termine.
+
+    Ce test disait l'inverse : il EXIGEAIT que le defaut soit "priority" -- autrement dit que le
+    bus tourne. C'est exactement pour ca qu'il tournait encore, des mois apres avoir ete juge et
+    ecarte (PF net 0,61). Un moteur abandonne doit etre eteint DANS LE CODE, pas dans les tetes.
+
+    Les clones de recherche restent intacts ; c'est le CABLAGE runtime qui disparait."""
     monkeypatch.delenv(bus.PROFILE_SCOPE_ENV, raising=False)
+    assert bus.external_profile_scope() == "off"
+
+
+def test_scope_priority_still_works_when_asked_EXPLICITLY(monkeypatch):
+    """On n'a rien supprime : la recherche reste possible. Mais elle se DEMANDE."""
+    monkeypatch.setenv(bus.PROFILE_SCOPE_ENV, "priority")
     executions = _run_bus(monkeypatch)
-    repo_ids = {row.repo_id for row in executions}
-    assert repo_ids == {PRIORITY_REPO}
+    assert {row.repo_id for row in executions} == {PRIORITY_REPO}
     assert bus.external_profile_scope() == "priority"
 
 
@@ -103,9 +115,10 @@ def test_scope_off_evaluates_nothing(monkeypatch):
     assert _run_bus(monkeypatch) == ()
 
 
-def test_invalid_scope_falls_back_to_priority(monkeypatch):
+def test_invalid_scope_falls_back_to_OFF_never_re_enables_the_bus(monkeypatch):
+    """Une faute de frappe dans une variable d'env ne doit pas RALLUMER un moteur retire."""
     monkeypatch.setenv(bus.PROFILE_SCOPE_ENV, "everything")
-    assert bus.external_profile_scope() == "priority"
+    assert bus.external_profile_scope() == "off"
 
 
 def test_priority_matrix_repo_ids_exist_in_bridge_specs():

@@ -448,6 +448,25 @@ def _is_accepted_event(event: DecisionEvent) -> bool:
         return False
     if "ENGINE_EVALUATION" in decision or "PROFILE_EVALUATED" in decision:
         return False
+    # ---------------------------------------------------------------------------------
+    # INCOHERENCE CORRIGEE LE 2026-07-12 -- deux modules, un meme log, deux verdicts.
+    #
+    # `log_metrics.py` comptait deja `status in {"ACCEPTED", "ACCEPT_PAPER", "PAPER_ACCEPTED"}`
+    # comme une acceptation. Ici, non. La MEME ligne de log etait donc "acceptee" pour un
+    # module et invisible pour l'autre -- et le dashboard pouvait afficher une position
+    # ouverte pendant que le rapport de readiness annonçait OBSERVING_NO_VIRTUAL_ENTRY.
+    #
+    # La regle du projet est claire : "Dashboard, audit, logs, exports convergent sur le meme
+    # ledger." Deux compteurs qui se contredisent, c'est deja un mensonge -- meme si aucun
+    # des deux n'est malveillant.
+    #
+    # Les exclusions ci-dessus (profils GitHub, evaluations fantomes) restent AVANT ce bloc :
+    # une ligne d'ombre ne redevient pas un trade parce qu'elle porte un statut flatteur.
+    # ---------------------------------------------------------------------------------
+    if status in {"ACCEPTED", "ACCEPT_PAPER", "PAPER_ACCEPTED", "ACCEPT_LOCAL_SIMULATION"}:
+        return True
+    if "VIRTUAL_POSITION" in decision and ("OPEN" in decision or "CLOSE" in decision):
+        return True
     if event.copied_notional_usdt and event.copied_notional_usdt > 0:
         return True
     if event.estimated_net_pnl_usdc is not None and event.estimated_net_pnl_usdc != 0:

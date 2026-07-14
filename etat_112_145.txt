@@ -1,0 +1,80 @@
+==============================================================================
+ETAT REEL DES TACHES #112 -> #145   (prouve par execution, pas par lecture)
+==============================================================================
+modules src/ scannes : 916   |  points d'entree : 39  |  joignables : 483
+
+------------------------------------------------------------------------------
+#112 IMPROVE-05 latence bout-en-bout
+   JOIGNABLE  teste      importe par  3  hl_observer.runtime.latency_trace
+   🔴 MORT     teste      importe par  2  hl_observer.perf.latency_tracker
+   🔴 MORT     teste      importe par  1  hl_observer.perf.latency_budget
+   JOIGNABLE  teste      importe par  3  hl_observer.realtime.latency_report
+   JOIGNABLE  teste      importe par  3  hl_observer.copy_wallet.copy_latency_profiler
+   🔴 MORT     teste      importe par  2  hl_observer.copy_mode.copy_latency_profiler
+   🔴 MORT     teste      importe par  1  hl_observer.risk.latency_model
+   🔴 MORT     PAS teste  importe par  0  hl_observer.paper.latency_model
+
+------------------------------------------------------------------------------
+#127 IMPROVE-20 detecteur de regime EN DIRECT
+   🔴 MORT     teste      importe par  1  hl_observer.backtesting.regime_detection
+
+------------------------------------------------------------------------------
+#130 IMPROVE-23 kill-switch
+   🔴 MORT     teste      importe par  1  hl_observer.risk.kill_switch
+   🔴 MORT     teste      importe par  2  hl_observer.risk.circuit_breaker
+   🔴 MORT     teste      importe par  1  hl_observer.risk.loss_halts
+   JOIGNABLE  teste      importe par  3  hl_observer.risk.protections_v26
+   JOIGNABLE  teste      importe par  5  hl_observer.risk.graded_halt
+
+------------------------------------------------------------------------------
+#143 IMPROVE-36 cascades de liquidations
+   ⚪ AUCUN MODULE : la capacite n'existe pas du tout.
+
+------------------------------------------------------------------------------
+#145 IMPROVE-38 basis Hyperliquid vs CEX
+   ⚪ AUCUN MODULE : la capacite n'existe pas du tout.
+
+------------------------------------------------------------------------------
+#121 IMPROVE-14 couverture de tests
+   modules JOIGNABLES et POURTANT sans test : 113
+      - hl_observer
+      - hl_observer.__main__
+      - hl_observer.analysis
+      - hl_observer.analysis.closing_classifier
+      - hl_observer.analysis.opening_classifier
+      - hl_observer.analysis.wallet_style
+      - hl_observer.arbitrage.symbol_normalizer
+      - hl_observer.autoscan
+      - hl_observer.backtest.runtime_parity
+      - hl_observer.backtest.walk_forward
+      - hl_observer.backtesting.lookahead_analysis
+      - hl_observer.calibration
+      - hl_observer.collection.run_collect_all
+      - hl_observer.config
+      - hl_observer.connectors
+      - hl_observer.copy_fidelity
+      - hl_observer.copy_mode
+      - hl_observer.copy_wallet
+      - hl_observer.copy_wallet.mirror_candidate
+      - hl_observer.copy_wallet.wallet_journal
+      - hl_observer.copying.reports
+      - hl_observer.copying.simulation_pipeline
+      - hl_observer.dashboard
+      - hl_observer.dashboard.arbitrage_panel
+      - hl_observer.dashboard.copy_wallet_panel
+      ... (+88)
+
+------------------------------------------------------------------------------
+#131 IMPROVE-24 dependances
+   paquets installes : 167
+   dex-exec                 absent
+   dexec                    absent
+   hyperliquid-python-sdk   absent
+   ccxt                     absent
+   web3                     absent
+   eth-account              absent
+
+------------------------------------------------------------------------------
+#115 IMPROVE-08 (run de collecte long) et #143/#145 (mesures)
+   Ces taches demandent des DONNEES, pas du code. Voir le rapport.
+==============================================================================

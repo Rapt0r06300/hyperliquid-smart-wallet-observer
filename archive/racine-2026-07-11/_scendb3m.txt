@@ -1,0 +1,57 @@
+===PY_COMPILE=== 
+COMPILE_OK 
+===TEST (regression, doit rester vert)=== 
+....                                                                     [100%]
+4 passed in 0.76s
+===BUILD 3 000 000 (streaming)=== 
+{
+  "generator_version": "scenario_db/v2-stream",
+  "seed": 7,
+  "count_requested": 3000000,
+  "count_rows": 3000000,
+  "dimensions": [
+    "name",
+    "source",
+    "sl_bps",
+    "tp_bps",
+    "trailing_stop_bps",
+    "trailing_activation_bps",
+    "breakeven_bps",
+    "horizon_min",
+    "cost_bps",
+    "min_edge_bps",
+    "max_signal_age_ms",
+    "min_liquidity_score",
+    "min_consensus_wallets",
+    "max_copy_degradation_bps",
+    "min_leader_score",
+    "side_mode",
+    "catastrophic_stop_bps"
+  ],
+  "by_source": {
+    "archetype": 10,
+    "grid": 2999,
+    "sampled_full": 2996991
+  },
+  "created_at_ms": 1783592805829,
+  "note": "REPLAY-only. Metriques descriptives. Aucun ordre reel.",
+  "bytes": 647790592,
+  "path": "runtime\\scenarios\\scenarios.db"
+}
+elapsed_s 109.0
+===VERIF INDEPENDANTE=== 
+rows 3000000
+distinct_hash 3000000
+by_source [('archetype', 10), ('grid', 2999), ('sampled_full', 2996991)]
+side [('both', 1001089), ('long_only', 999098), ('short_only', 999813)]
+sl_distinct 1221
+tp_distinct 4001
+===FICHIER DB=== 
+
+   MB LastWriteTime      
+   -- -------------      
+617,8 09/07/2026 12:26:48
+
+
+
+DONE_SCENDB3M 

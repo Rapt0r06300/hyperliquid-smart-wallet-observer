@@ -47,3 +47,14 @@ runtime/research/github_repos_v24/
 .DS_Store
 Thumbs.db
 .coverage
+# Artefacts generes (audit, couverture, caches)
+resultat-audit.md
+.coverage.*
+htmlcov/
+.pytest_tmp_*/
+tools/audit_timings.json
+tools/.fuzz_progress.tmp
+runtime/scenarios/
+runtime/replay/
+runtime/history/
+coverage.json

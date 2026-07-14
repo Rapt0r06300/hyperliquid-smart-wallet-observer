@@ -117,3 +117,19 @@ Concrètement, sont désormais **pleinement autorisés** (aucune hésitation, de
 - **discipline d'ingénierie** : tests + pas de suppression brutale, pour ne pas casser le travail existant.
 
 En cas de doute entre « collecter plus » et « rester poli avec la source » : collecter plus, mais via proxies/backoff pour ne pas se faire couper. La seule vraie barrière est l'action réelle.
+
+## Règle « rien n'échappe aux tests » (décision de Flo, 2026-07-11)
+
+**Tout nouveau fichier / module / brique doit être pris en compte par les tests.** Concrètement :
+
+- L'audit `TEST-AUDIT-complet.cmd` (racine) **auto-découvre** le code : tout dossier de 1er niveau
+  contenant du `.py` est scanné. Créer un nouveau paquet ne nécessite AUCUNE modification de l'audit.
+- L'audit garde une **empreinte** (`tools/audit_manifest.json`) et signale à chaque passage les
+  fichiers **ajoutés** et **supprimés** depuis la fois précédente.
+- Un **nouveau module dans `src/` ou `hyper_smart_observer/` sans test associé = ÉCHEC BLOQUANT.**
+  Le module et son test se créent dans le même mouvement, jamais l'un sans l'autre.
+- Le rapport `resultat-audit.md` liste **chaque fichier du bot** (lignes, importé par combien,
+  testé oui/non, % de couverture réelle) : aucun fichier ne peut se cacher.
+
+Rappel : `resultat-audit.md` est réécrit **après chaque contrôle** — il existe même si l'audit est
+interrompu (Ctrl-C, fermeture, crash).

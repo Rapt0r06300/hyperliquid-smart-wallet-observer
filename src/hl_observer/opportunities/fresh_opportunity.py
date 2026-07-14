@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass, field
 from statistics import median
 from typing import Any
@@ -10,12 +11,26 @@ from hl_observer.copying.realtime_magic_score import (
     RealtimeCopyScoreInput,
     score_realtime_copy_candidate,
 )
+from hl_observer.edge.edge_source import edge_brut          # Q1 : la porte unique de l'edge brut
 from hl_observer.storage.models import PositionDeltaModel, TopWallet
 from hl_observer.simulation.live_filters import copy_candidate_signal_time_ms
 from hl_observer.wallets.delta_utils import copy_delta_action, copy_delta_direction
 
 
 ENTRY_ACTIONS = {"OPEN_LONG", "OPEN_SHORT", "ADD", "INCREASE"}
+
+
+def _leader_mid_fallback_max_age_ms() -> float:
+    """Age max (ms) sous lequel le PRIX DE REFERENCE DU LEADER est accepte comme mid d'entree
+    quand allMids ne couvre pas le coin. 0 = desactive (comportement historique = refus dur
+    CURRENT_MID_REQUIRED). Verite-des-donnees : pour un signal tres frais, le prix du leader est
+    un vrai prix de transaction recent (~= mid courant) et le cout de degradation de copie
+    modelise deja l'ecart leader->nous ; le gate de liquidite filtre encore l'illiquide.
+    (Flo 2026-07-10 : debloque les bons signaux frais type LIT +30bps@0.8s rejetes a tort.)"""
+    try:
+        return max(0.0, float(os.environ.get("HYPERSMART_LEADER_MID_FALLBACK_MAX_AGE_MS", "0") or "0"))
+    except (TypeError, ValueError):
+        return 0.0
 
 
 @dataclass(frozen=True, slots=True)
@@ -142,13 +157,38 @@ def find_fresh_opportunities(
             leader_scores = [score_by_wallet.get(wallet, 50.0) for wallet in wallets]
             average_score = sum(leader_scores) / max(1, len(leader_scores))
             total_notional = sum(abs(float(row.delta_notional_usdc or 0.0)) for row in cluster_rows)
-            expected_edge = _expected_edge_bps(
-                average_leader_score=average_score,
-                wallet_count=len(wallets),
-                total_notional_usdc=total_notional,
-                span_ms=max(0, last_seen - first_seen),
-                consensus_window_ms=consensus_window_ms,
+            # Q1 (2026-07-13) -- L'EDGE BRUT NE VIENT PLUS D'UNE FORMULE.
+            #
+            # Avant, cette ligne appelait `_expected_edge_bps` : `14 + score*0,55 + wallets*9 +
+            # notional/25000 + tightness*10`. Huit constantes inventees, jamais mesurees, qui
+            # produisaient l'edge BRUT de toute la chaine. Un net calcule sur un brut invente est
+            # invente lui aussi -- et le refus « edge insuffisant » ne refusait rien de reel.
+            #
+            # Desormais : `edge_source.edge_brut` (porte unique). Par defaut il lit la TABLE
+            # MESUREE (markouts REELS observes) et REFUSE quand il n'y a pas de donnee.
+            # Le mode `formule` reste possible, mais chaque decision est alors ESTAMPILLEE.
+            _edge = edge_brut(
+                coin=coin,
+                direction=direction,
+                signal_age_ms=float(cluster_age_ms),
+                leader_score=float(average_score),
+                consensus_wallets=float(len(wallets)),
+                signal_ms=float(now_timestamp_ms),
+                strategie="COPY",
+                formule_de_secours=lambda: _expected_edge_bps(
+                    average_leader_score=average_score,
+                    wallet_count=len(wallets),
+                    total_notional_usdc=total_notional,
+                    span_ms=max(0, last_seen - first_seen),
+                    consensus_window_ms=consensus_window_ms,
+                ),
             )
+            if not _edge.utilisable:
+                # PAS DE DONNEE -> PAS DE TRADE. C'est le INSUFFICIENT_DATA de CLAUDE.md, applique
+                # a la seule chose qui autorise une entree : l'edge.
+                _count(rejection_counts, _edge.raison)
+                continue
+            expected_edge = float(_edge.valeur_bps or 0.0)
             score = score_realtime_copy_candidate(
                 RealtimeCopyScoreInput(
                     action_type="OPEN_LONG" if direction == "LONG" else "OPEN_SHORT",
@@ -166,6 +206,9 @@ def find_fresh_opportunities(
                     current_open_exposure_usdt=current_open_exposure_usdt,
                     current_open_positions=current_open_positions,
                     max_open_positions=max_open_positions,
+                    # #594 : le scoreur interroge lui-meme la porte Q1 (une seule table). Sans cet
+                    # horodatage, il ne peut pas verifier l'anti-lookahead. Meme valeur qu'ici.
+                    signal_ms=float(now_timestamp_ms),
                 ),
                 config=risk_config,
             )
@@ -175,7 +218,18 @@ def find_fresh_opportunities(
             simulated_notional_usdt = score.simulated_notional_usdt
             if mid_source != "allMids":
                 warnings.append("CURRENT_MID_FALLBACK_FROM_LEADER_PRICE")
-                extra_refusals.append("CURRENT_MID_REQUIRED_FOR_LOCAL_SIMULATION")
+                _fallback_max_age = _leader_mid_fallback_max_age_ms()
+                _allow_leader_mid = (
+                    _fallback_max_age > 0.0
+                    and reference_price > 0
+                    and cluster_age_ms <= _fallback_max_age
+                )
+                if not _allow_leader_mid:
+                    extra_refusals.append("CURRENT_MID_REQUIRED_FOR_LOCAL_SIMULATION")
+                elif mid is None:
+                    # Signal tres frais + prix leader valide : on rend le mid actionnable
+                    # (entree au prix leader ; la degradation de copie reste facturee en cout).
+                    mid = reference_price
             if cluster_age_ms > max_signal_age_for_trade_ms:
                 extra_refusals.append("STALE_SIGNAL")
             refusal_reasons = tuple(dict.fromkeys([*score.refusal_reasons, *extra_refusals]))

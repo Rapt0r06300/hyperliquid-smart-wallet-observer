@@ -14,6 +14,7 @@ Paper-only : un close partiel simulé n'est jamais un ordre.
 """
 
 from __future__ import annotations
+from hl_observer.strategies.strategy_mode import mode_of_position
 
 import os
 from typing import Any
@@ -164,6 +165,7 @@ def apply_auto_unstuck(
             "coin": coin,
             "leader_side": side,
             "matched_position_key": matched_key,
+            "strategy_mode": mode_of_position(pos),
             "paper_action_type": "CLOSE",
             "exit_method": EXIT_METHOD,
             "reason": "UNSTUCK_PARTIAL_CLOSE_LOCAL_REPLAY_NOT_AN_ORDER",

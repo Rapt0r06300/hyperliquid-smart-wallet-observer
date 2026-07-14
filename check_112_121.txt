@@ -1,0 +1,35 @@
+DEBUT 
+=== 1 sur 4 : poser la baseline de couverture === 
+joignables (production) : 484
+couverts par un test    : 481
+NON TESTES              : 3   (99.4 % de couverture)
+baseline actuelle       : 484
+-> baseline posee a 3
+
+Les 15 derniers non testes (par ordre alphabetique) :
+  hl_observer.__main__
+  hl_observer.collection.run_collect_all
+  hl_observer.ui.wallet_mirror_panel
+ 
+=== 2 sur 4 : le cliquet tient === 
+
+[COUVERTURE] joignables=484  couverts=481  NON TESTES=3  (99.4 %)  baseline=3
+...
+3 passed in 2.66s
+ 
+=== 3 sur 4 : la latence des REFUS est journalisee === 
+.................                                                        [100%]
+17 passed in 0.44s
+ 
+=== 4 sur 4 : non-regression du chemin vivant + safety === 
+......                                                                   [100%]
+6 passed in 1.29s
+no_secret_patterns: ok
+env_not_committed: ok
+no_forbidden_mainnet_order_method: ok
+no_exchange_endpoint_in_runtime_source: ok
+live_executor_disabled_exists: ok
+mainnet_disabled_in_env_example: ok
+security_tests_present: ok
+no_real_execution_capable_package: ok
+FIN 

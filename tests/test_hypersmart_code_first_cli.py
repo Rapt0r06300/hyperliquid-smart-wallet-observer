@@ -64,3 +64,22 @@ def test_consensus_opportunity_and_missed_reports_cli() -> None:
     assert "edge_remaining_bps" in opportunity.stdout
     assert missed.returncode == 0, missed.stderr
     assert "missed_opportunities_period=24h" in missed.stdout
+
+
+# ---------------------------------------------------------------------------------------------
+# VERROU EDGE EMPIRIQUE (2026-07-11) -- POURQUOI CES TESTS FORCENT UN FLAG.
+#
+# Ces tests verifient la MECANIQUE (scorer, CLI, persistance UI). Pour cela, il faut qu'une
+# position s'ouvre. Or depuis le 2026-07-11, le moteur REFUSE par defaut un edge qui n'a jamais
+# touche un prix : l'ancienne formule (`dominance * 45 + bonus`) fabriquait un nombre en bps sans
+# regarder le marche une seule fois.
+#
+# On active donc `HYPERSMART_REQUIRE_EMPIRICAL_EDGE=0` : mode A/B ASSUME, PAS la production.
+# Le defaut reste le REFUS -- garde par `tests/test_empirical_edge.py`.
+# ---------------------------------------------------------------------------------------------
+import pytest as _pytest_ab
+
+
+@_pytest_ab.fixture(autouse=True)
+def _mode_ab_edge_non_empirique(monkeypatch):
+    monkeypatch.setenv("HYPERSMART_REQUIRE_EMPIRICAL_EDGE", "0")

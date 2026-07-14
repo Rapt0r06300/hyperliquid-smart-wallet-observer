@@ -65,7 +65,14 @@ def test_loop_engineering_prepares_decision_without_execution(tmp_path: Path) ->
     assert "loop-sig-1" in (logs_to_send / "latest_decision_trace.json").read_text(encoding="utf-8")
 
 
-def test_loop_engineering_fake_testnet_executes_only_when_explicitly_confirmed(tmp_path: Path) -> None:
+def test_loop_engineering_fake_testnet_executes_only_when_explicitly_confirmed(
+    tmp_path: Path, monkeypatch
+) -> None:
+    # Ce test porte sur la CONFIRMATION EXPLICITE (le fake adapter n'agit que si `confirmed`),
+    # pas sur la qualite du signal. Le noyau (G2) refuserait ce candidat de copy-trading avant
+    # meme d'arriver a l'executeur, et on ne saurait plus si la confirmation marche. On l'eteint
+    # donc EXPLICITEMENT pour isoler ce qu'on teste vraiment.
+    monkeypatch.setenv("HYPERSMART_NOYAU_AUTORITAIRE", "0")
     adapter = FakeTestnetExchangeAdapter(prices={"BTC": 60_000.0})
     runner = LoopEngineeringRunner.with_fake_testnet_executor(
         Settings(),

@@ -422,3 +422,100 @@ def test_v19_negative_pnl_audit_blocks_when_current_loss_streak_is_exactly_activ
     assert audit.consecutive_losses == 3
     assert audit.max_consecutive_losses == 3
     assert "LOSS_STREAK_HALT" in payload["risk_decision"]["blocking_codes"]
+
+
+def test_v19_negative_pnl_audit_exposes_directional_and_coin_concentration(tmp_path):
+    log_dir = tmp_path / "logs a envoyer"
+    log_dir.mkdir()
+    (log_dir / "simulation_snapshot_latest.json").write_text(
+        json.dumps(
+            {
+                "bot_simulation": {
+                    "starting_equity_usdt": 1_000.0,
+                    "current_equity_usdt": 995.0,
+                    "estimated_net_pnl_usdc": -5.0,
+                    "realized_net_pnl_usdc": 0.5,
+                    "unrealized_pnl_usdc": -5.5,
+                    "open_positions": [
+                        {
+                            "coin": "ETH",
+                            "direction": "SHORT",
+                            "size": 0.25,
+                            "mark_price": 2_000.0,
+                            "edge_remaining_bps": 30.0,
+                            "signal_age_ms": 800,
+                            "liquidity_score": 0.9,
+                            "leader_wallets_count": 3,
+                        },
+                        {
+                            "coin": "ETH",
+                            "direction": "SHORT",
+                            "size": 0.25,
+                            "mark_price": 2_000.0,
+                        },
+                        {
+                            "coin": "BTC",
+                            "direction": "SHORT",
+                            "size": 0.025,
+                            "mark_price": 60_000.0,
+                            "edge_remaining_bps": 35.0,
+                            "signal_age_ms": 900,
+                            "liquidity_score": 0.95,
+                            "leader_wallets_count": 4,
+                        },
+                        {
+                            "coin": "SOL",
+                            "direction": "LONG",
+                            "size": 5.0,
+                            "mark_price": 100.0,
+                            "edge_remaining_bps": 40.0,
+                            "signal_age_ms": 700,
+                            "liquidity_score": 0.8,
+                            "leader_wallets_count": 2,
+                        },
+                    ],
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    audit = build_negative_pnl_audit(log_dir)
+    portfolio = audit.open_portfolio
+
+    assert portfolio["position_count"] == 4
+    assert portfolio["gross_notional_usdt"] == 3_000.0
+    assert portfolio["short_notional_usdt"] == 2_500.0
+    assert portfolio["long_notional_usdt"] == 500.0
+    assert portfolio["net_notional_usdt"] == -2_000.0
+    assert portfolio["dominant_side"] == "SHORT"
+    assert portfolio["duplicate_coins"] == {"ETH": 2}
+    assert portfolio["missing_entry_evidence_count"] == 1
+    assert "OPEN_PORTFOLIO_DIRECTIONAL_CONCENTRATION" in portfolio["findings"]
+    assert "OPEN_PORTFOLIO_NET_DIRECTIONAL_LEVERAGE_HIGH" in portfolio["findings"]
+    assert "OPEN_PORTFOLIO_DUPLICATE_COIN_EXPOSURE" in portfolio["findings"]
+    assert any("concentre dans un seul sens" in item for item in audit.recommendations)
+
+
+def test_v19_negative_pnl_audit_does_not_call_diagnostics_refused_entries(tmp_path):
+    log_dir = tmp_path / "logs a envoyer"
+    log_dir.mkdir()
+    _write_jsonl(
+        log_dir / "simulation_decisions_latest.jsonl",
+        [
+            {
+                "bot_replay_action": "EXTERNAL_GITHUB_PROFILE_EVALUATED",
+                "paper_action_type": "ENGINE_EVALUATION",
+                "status": "SIMULATION_ENGINE_EVENT",
+                "coin": "RESEARCH_PROFILE",
+            }
+            for _ in range(5)
+        ],
+    )
+
+    audit = build_negative_pnl_audit(log_dir)
+
+    assert audit.total_decisions == 5
+    assert audit.accepted == 0
+    assert audit.refused == 0
+    assert not any("toutes les entrees sont refusees" in item for item in audit.recommendations)

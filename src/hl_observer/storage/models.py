@@ -252,7 +252,7 @@ class PositionDeltaModel(Base, TimestampMixin):
     delta_size: Mapped[float] = mapped_column(Float)
     delta_notional_usdc: Mapped[float | None] = mapped_column(Float)
     action: Mapped[str] = mapped_column(String(32), default="UNKNOWN")
-    exchange_ts: Mapped[int | None] = mapped_column(Integer)
+    exchange_ts: Mapped[int | None] = mapped_column(Integer, index=True)
     fill_id: Mapped[int | None] = mapped_column(Integer, index=True)
     source_event_id: Mapped[int | None] = mapped_column(Integer, index=True)
     side: Mapped[str | None] = mapped_column(String(16))
@@ -261,7 +261,7 @@ class PositionDeltaModel(Base, TimestampMixin):
     delta_type: Mapped[str] = mapped_column(String(64), default="unknown")
     confidence: Mapped[str] = mapped_column(String(32), default="medium")
     confidence_score: Mapped[float] = mapped_column(Float, default=0.0)
-    detected_at_ms: Mapped[int | None] = mapped_column(Integer)
+    detected_at_ms: Mapped[int | None] = mapped_column(Integer, index=True)
     source: Mapped[str] = mapped_column(String(64), default="fills")
     snapshot_id: Mapped[int | None] = mapped_column(Integer, index=True)
     is_paper_eligible: Mapped[bool] = mapped_column(Boolean, default=False)
@@ -293,7 +293,7 @@ class MarketSnapshot(Base, TimestampMixin):
     __tablename__ = "market_snapshots"
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     source: Mapped[str] = mapped_column(String(32), default="allMids")
-    exchange_ts: Mapped[int | None] = mapped_column(Integer)
+    exchange_ts: Mapped[int | None] = mapped_column(Integer, index=True)
     raw_json: Mapped[dict] = mapped_column(JSON, default=dict)
 
 

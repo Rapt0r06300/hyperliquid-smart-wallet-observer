@@ -328,6 +328,69 @@ def test_adapter_does_not_double_open_copy_profile_when_paper_engine_already_acc
     assert position["last_paper_ref"] == "papertrade:accepted-copy"
 
 
+def test_adapter_persists_paper_engine_entry_evidence_for_auditable_pnl():
+    state = UiState()
+    wallets = ["0x" + "a" * 40, "0x" + "b" * 40]
+    fusion_status = _fusion_status_with_runtime(
+        {
+            "session": {"session_id": "evidence-persistence"},
+            "external_profile_executions": [],
+            "paper_orders": [],
+            "paper_engine": {
+                "accepted_count": 1,
+                "decisions": [
+                    {
+                        "accepted": True,
+                        "trade": {
+                            "trade_id": "papertrade:evidence",
+                            "source_delta_id": "fusion-paper-engine:BTC:LONG:evidence",
+                            "fill_price": 65_010.0,
+                            "notional_usdt": 40.0,
+                            "fees_and_cost_bps": 8.0,
+                            "coin": "BTC",
+                            "side": "LONG",
+                        },
+                        "position": {
+                            "source_delta_id": "fusion-paper-engine:BTC:LONG:evidence",
+                            "coin": "BTC",
+                            "side": "LONG",
+                            "quantity": 40.0 / 65_010.0,
+                            "entry_price": 65_010.0,
+                            "notional_usdt": 40.0,
+                            "opened_at_ms": 130_000,
+                            "leader_wallet": ",".join(wallets),
+                        },
+                        "evidence_hash": "pevidence:auditable",
+                        "decision_context": {
+                            "consensus_wallets": 2,
+                            "leader_wallets": wallets,
+                            "signal_age_ms": 750,
+                            "edge_remaining_bps": 31.5,
+                            "liquidity_score": 0.91,
+                            "copy_degradation_bps": 9.5,
+                            "edge_source": "DISTILLED_MEASURED_CANDIDATE_EDGE",
+                            "edge_is_empirical": True,
+                        },
+                    }
+                ],
+            },
+        }
+    )
+
+    report = apply_fusion_paper_orders_to_state(state, fusion_status, current_ms=130_000)
+
+    assert report["applied_count"] == 1
+    position = next(iter(state.simulation_virtual_positions.values()))
+    assert position["leader_wallets_count"] == 2
+    assert position["signal_age_ms"] == 750
+    assert position["edge_remaining_bps"] == 31.5
+    assert position["copy_degradation_bps"] == 9.5
+    assert position["edge_is_empirical"] is True
+    opened = next(row for row in state.simulation_ledger_events if row.get("paper_action_type") == "OPEN")
+    assert opened["leader_wallets_count"] == 2
+    assert opened["edge_source"] == "DISTILLED_MEASURED_CANDIDATE_EDGE"
+
+
 def test_adapter_refuses_paper_engine_entry_when_global_position_cap_reached(monkeypatch):
     monkeypatch.setenv("HYPERSMART_MAX_OPEN_POSITIONS", "1")
     monkeypatch.setenv("HYPERSMART_MAX_TOTAL_EXPOSURE_USDT", "400")
@@ -393,8 +456,13 @@ def test_adapter_refuses_paper_engine_entry_when_global_position_cap_reached(mon
 
 
 def test_adapter_refuses_paper_engine_entry_when_global_exposure_cap_reached(monkeypatch):
+    # MAX_TOTAL_EXPOSURE_USDT = budget de MARGE ; le plafond compare est en NOTIONAL
+    # (= budget x levier). A levier 1, le budget 75 est donc un plafond notional de 75 :
+    # position existante 60 + nouvelle 40 = 100 > 75 -> doit etre REFUSE.
     monkeypatch.setenv("HYPERSMART_MAX_OPEN_POSITIONS", "10")
     monkeypatch.setenv("HYPERSMART_MAX_TOTAL_EXPOSURE_USDT", "75")
+    monkeypatch.setenv("HYPERSMART_SIMULATION_LEVERAGE", "1")
+    monkeypatch.setenv("HYPERSMART_MAX_POSITION_USDT", "40")
     state = UiState()
     state.simulation_virtual_positions = {
         "existing|BTC|LONG": {

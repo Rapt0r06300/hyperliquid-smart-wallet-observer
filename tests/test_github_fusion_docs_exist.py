@@ -1,25 +1,26 @@
-"""Verify the GitHub-fusion documentation set exists and is non-trivial."""
+"""Doctrine du projet — REECRIT a l'audit du 2026-07-11.
+
+Ces tests exigeaient l'existence d'anciens fichiers .md (CODEX_MASTER_PLAN_V6, *_FUSION.md,
+V23_*, RELEASE_*, REPO_IDEA_MATRIX...) SUPPRIMES VOLONTAIREMENT lors de la consolidation
+documentaire (640 fichiers -> 7, commit 35703aa). Les ressusciter serait faux.
+
+On garde l'INTENTION -- la doctrine doit rester ecrite quelque part et etre verifiable -- en la
+testant la ou elle vit desormais : CLAUDE.md (regles), OBJECTIF.md, docs/ETAT_ET_FEUILLE_DE_ROUTE.md
+(document maitre), docs/ARCHITECTURE.md.
+"""
+from __future__ import annotations
 
 from pathlib import Path
 
-FUSION_DOCS = [
-    "docs/research/HYPERSMART_GITHUB_FUSION_MASTER.md",
-    "docs/research/HYPERSMART_REPO_IDEA_MATRIX_FUSION.md",
-    "docs/HYPERSMART_HYPERLIQUID_SCAN_STRATEGY_FUSION.md",
-    "docs/HYPERSMART_COMMON_DATA_MODEL_FUSION.md",
-    "docs/HYPERSMART_MARKET_SIGNAL_FEATURES_FUSION.md",
-    "docs/HYPERSMART_WALLET_INTELLIGENCE_FUSION.md",
-    "docs/HYPERSMART_RISK_ENGINE_FUSION.md",
-    "docs/HYPERSMART_DASHBOARD_FUSION.md",
-    "docs/HYPERSMART_BACKTEST_RUNTIME_PARITY_FUSION.md",
-    "docs/HYPERSMART_AGENT_SAFE_READONLY_TOOLS_FUSION.md",
-    "docs/HYPERSMART_NO_FAKE_DATA_NO_HYPE_NO_EXECUTION_POLICY.md",
-    "docs/HYPERSMART_LICENSE_SAFETY_POLICY.md",
-]
+ROOT = Path(__file__).resolve().parents[1]
+RULES = ROOT / "CLAUDE.md"
+MASTER = ROOT / "docs" / "ETAT_ET_FEUILLE_DE_ROUTE.md"
 
 
 def test_all_fusion_docs_exist_and_nontrivial():
-    missing = [d for d in FUSION_DOCS if not Path(d).is_file()]
-    assert not missing, f"missing fusion docs: {missing}"
-    for d in FUSION_DOCS:
-        assert len(Path(d).read_text(encoding="utf-8").strip()) > 200, f"doc too small: {d}"
+    """Le portage GitHub doit rester encadre par une regle ecrite (classification obligatoire)."""
+    text = RULES.read_text(encoding="utf-8", errors="replace")
+    for status in ("COPY_DIRECT", "COPY_ADAPTED", "PORT_BEHAVIOR",
+                   "INSPIRE_ONLY", "SKIP_WITH_REASON", "DEFERRED_WITH_PLAN"):
+        assert status in text, f"classification de portage absente des regles: {status}"
+    assert "Aucun repo externe ne bypasse" in text  # garde-fou: pas de bypass du RiskEngine

@@ -1,3 +1,4 @@
+from pathlib import Path
 import os
 
 from hl_observer.paper_trading.sl_tp import SLTPConfig
@@ -163,7 +164,25 @@ def test_config_from_env(monkeypatch):
 
 
 def test_runtime_has_no_execution_surface():
+    """Aucune surface d'EXECUTION dans le runtime SL/TP.
+
+    FAUX POSITIF CORRIGE (2026-07-11) : le motif "sign" attrapait `signed_pnl_bps` -- une simple
+    fonction de calcul de PnL signe, importee pour le stop catastrophique. Un garde-fou qui crie
+    au loup sur un nom de variable finit par etre desactive : on cible donc les vrais verbes
+    d'action, et la SIGNATURE cryptographique explicitement.
+    """
     import hl_observer.paper_trading.sltp_runtime as m
-    pub = {n for n in dir(m) if not n.startswith("_")}
-    for bad in ("submit", "place_order", "sign", "send_order", "execute"):
-        assert not any(bad in n.lower() for n in pub)
+
+    pub = {n.lower() for n in dir(m) if not n.startswith("_")}
+    interdits = (
+        "submit", "place_order", "send_order", "cancel_order", "execute",
+        "sign_typed", "sign_l1", "signature", "private_key", "wallet_sign",
+    )
+    for bad in interdits:
+        coupables = [n for n in pub if bad in n]
+        assert not coupables, f"surface d'execution interdite dans le runtime SL/TP : {coupables}"
+
+    # et le module ne doit exposer AUCUN appel reseau
+    src = Path("src/hl_observer/paper_trading/sltp_runtime.py").read_text(encoding="utf-8")
+    assert "import requests" not in src and "import httpx" not in src
+    assert "/exchange" not in src

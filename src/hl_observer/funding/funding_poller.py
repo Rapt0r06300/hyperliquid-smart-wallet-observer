@@ -78,7 +78,22 @@ def poll_once(*, url: str | None = None, timeout_s: float = 10.0, opener=None) -
             )
             with urllib.request.urlopen(req, timeout=timeout_s) as resp:
                 raw = resp.read()
-        pairs = parse_meta_and_asset_ctxs(json.loads(raw.decode("utf-8")))
+        payload = json.loads(raw.decode("utf-8"))
+        # ENREGISTREMENT (audit PnL 2026-07-11, opt-in HYPERSMART_RECORD_MICROSTRUCTURE=1).
+        # Ce poller recuperait DEJA le funding de TOUS les marches et n'en gardait que le taux
+        # courant, en memoire, sans historique. Or l'historique de funding est la seule donnee
+        # qui permette de tester la strategie delta-neutre -- une des rares dont l'esperance ne
+        # repose sur AUCUNE prediction (le copy-trading, lui, est mesure sans edge : meme a cout
+        # zero il perd). On persiste donc ce qu'on tient deja, sans appel reseau supplementaire.
+        try:
+            from hl_observer.collection import microstructure_recorder as _mr
+
+            if _mr.enabled():
+                _base = str(os.environ.get("HYPERSMART_V26_RECORD_PATH", "") or "runtime/replay")
+                _mr.record_funding_snapshot(_base, payload)
+        except Exception:
+            pass
+        pairs = parse_meta_and_asset_ctxs(payload)
         if not pairs:
             return 0
         from hl_observer.funding.funding_runtime_cache import push

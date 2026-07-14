@@ -8,6 +8,7 @@ PnL net = funding - coûts des deux jambes, caps de paires, flags paper.
 from __future__ import annotations
 
 from hl_observer.funding.funding_arb_paper import (
+
     FundingArbConfig,
     evaluate_funding_arb,
     funding_arb_paper_enabled,
@@ -105,3 +106,26 @@ def test_max_pairs_cap_enforced():
     )
     assert report.open_pairs == 2  # cap max_pairs=2
     assert any(e.reason == "MAX_PAIRS_REACHED" for e in report.events)
+
+
+# ---------------------------------------------------------------------------------------------
+# VERROU CARRY (2026-07-11) -- POURQUOI CES TESTS FORCENT UN FLAG.
+#
+# Ces tests verifient la MECANIQUE du moteur funding (accrual, caps, sortie, PnL). Pour cela, il
+# faut qu'une position s'ouvre. Or depuis la mesure du 2026-07-11, le moteur REFUSE par defaut
+# d'ouvrir une jambe NUE :
+#
+#     232 marches, 9 512 releves : funding median 0,125 bps/h contre ~35 bps/h de mouvement de
+#     prix. Pour 1 bps de funding encaisse, une jambe nue subit ~281 bps de mouvement de prix.
+#
+# On active donc explicitement `HYPERSMART_FUNDING_ALLOW_UNHEDGED_LEG=1` : c'est un mode A/B
+# ASSUME, PAS le comportement de production. Le defaut, lui, reste le REFUS -- et c'est
+# `tests/test_funding_carry_economics.py` qui garde cette regle.
+# ---------------------------------------------------------------------------------------------
+import pytest as _pytest
+
+
+@_pytest.fixture(autouse=True)
+def _autoriser_jambe_nue_pour_tester_la_mecanique(monkeypatch):
+    """Mode A/B : on ouvre la vanne pour pouvoir tester l'interieur du moteur."""
+    monkeypatch.setenv("HYPERSMART_FUNDING_ALLOW_UNHEDGED_LEG", "1")

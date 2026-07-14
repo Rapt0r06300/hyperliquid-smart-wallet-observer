@@ -45,7 +45,11 @@ def test_default_stays_single_entry(monkeypatch):
 def test_grinder_env_enables_multiple_small_entries(monkeypatch):
     monkeypatch.setenv("HYPERSMART_DISTILLED_MAX_PAPER_ENTRIES", "3")
     monkeypatch.setenv("HYPERSMART_WHALE_CONSENSUS_SIZING", "1")
+    # MAX_POSITION_USDT = MARGE par position (fix "centimes"), pas le notional.
+    # Notional max = marge x levier = 40 x 10 = 400. Le sizing proportionnel doit rester SOUS ce max.
     monkeypatch.setenv("HYPERSMART_MAX_POSITION_USDT", "40")
+    monkeypatch.setenv("HYPERSMART_SIMULATION_LEVERAGE", "10")
+    max_notional = 40.0 * 10.0
     summary = run_distilled_opportunities_through_paper_engine(
         tuple(_opportunity(c) for c in PRICES),
         market_prices=PRICES,
@@ -53,8 +57,8 @@ def test_grinder_env_enables_multiple_small_entries(monkeypatch):
     )
     assert summary.accepted_count == 3
     for decision in summary.decisions:
-        assert decision.trade.notional_usdt < 40.0  # sizing proportionnel réduit
-        assert decision.trade.notional_usdt >= 10.0  # plancher HL $10 respecté
+        assert decision.trade.notional_usdt < max_notional   # sizing proportionnel réduit
+        assert decision.trade.notional_usdt >= 10.0          # plancher HL $10 respecté
 
 
 def test_grinder_entries_capped_at_five(monkeypatch):

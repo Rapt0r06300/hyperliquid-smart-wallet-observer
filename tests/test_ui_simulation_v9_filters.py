@@ -213,6 +213,9 @@ def test_simulation_skips_old_rest_backfill_before_scoring(tmp_path: Path):
 
 
 def test_simulation_dedupes_same_fill_between_poll_rows(tmp_path: Path, monkeypatch):
+    # EDGE FABRIQUE (2026-07-11) : par DEFAUT le bot refuse un edge non empirique.
+    # Ce test exerce l'ANCIEN chemin (edge invente) -> mode A/B EXPLICITE.
+    monkeypatch.setenv("HYPERSMART_REQUIRE_EMPIRICAL_EDGE", "0")
     monkeypatch.setenv("HYPERSMART_FRESH_OPPORTUNITY_MIN_WALLETS", "1")
     monkeypatch.setenv("HYPERSMART_SINGLE_WALLET_MIN_EDGE_BPS", "5")
     client, factory, _state = _client(tmp_path)
@@ -279,10 +282,93 @@ def test_simulation_skips_orphan_reduce_without_ledger_noise(tmp_path: Path):
     }
 
 
-def test_accepted_fresh_opportunity_cluster_opens_virtual_position_with_v9_authoritative(
-    tmp_path: Path,
-    monkeypatch,
-):
+def _semer_la_table_d_edge_mesuree(racine: Path, *, markout_bps: float = 60.0) -> None:
+    """🔴 #598 -- CE TEST EXIGEAIT AUTREFOIS UN EDGE **INVENTE**.
+
+    Jusqu'au 2026-07-13, `routes.py` fabriquait l'edge d'entree avec trois constantes magiques
+    (`18.0 + confidence*34 + min(24, (consensus-1)*8)`). G2 l'a tue : l'edge vient DESORMAIS de
+    la **table mesuree** (Q1), **sans aucun repli**. Pas de mesure => 0 bps => refus.
+
+    Ce test rougissait donc pour la MEILLEURE des raisons : il attendait que le bot invente un
+    chiffre. On ne l'a pas « repare » en affaiblissant le garde-fou -- on lui DONNE une vraie
+    mesure, et on verifie qu'il ouvre alors la position.
+
+    (L'autre moitie de la verite est verrouillee juste en dessous : SANS mesure, il doit REFUSER.)
+    """
+    from hl_observer.edge.edge_source import vider_le_cache
+    from hl_observer.edge.measured_edge_table import Features, Observation, construire
+
+    obs = [
+        Observation(
+            features=Features(strategie="COPY", coin="ETH", direction="LONG",
+                              signal_age_ms=float(age), leader_score=95.0, consensus_wallets=2.0),
+            markout_bps=markout_bps + (0.5 if i % 2 else -0.5),
+            signal_ms=1_000.0,
+        )
+        for age in (1_000.0, 2_000.0)
+        for i in range(40)
+    ]
+    table = construire(obs, horizon_ms=60_000, min_echantillons=30)
+    p = racine / "data" / "reports" / "table_edge_mesuree.json"
+    p.parent.mkdir(parents=True, exist_ok=True)
+    p.write_text(table.vers_json(), encoding="utf-8")
+    vider_le_cache()
+
+
+def test_SANS_mesure_le_bot_REFUSE_au_lieu_d_inventer_un_edge(tmp_path: Path, monkeypatch):
+    """🔴 L'INVARIANT QUI COMPTE (#598, 2026-07-13).
+
+    Table d'edge ABSENTE => l'edge vaut 0 bps => le bot doit refuser, bruyamment, avec un motif
+    lisible. Deny-by-default : *l'absence de mesure n'autorise rien.*
+
+    Sans ce test, quelqu'un pourrait « reparer » le test du dessous en remettant une formule --
+    et le 5e edge fabrique renaitrait.
+    """
+    monkeypatch.setenv("HYPERSMART_ROOT", str(tmp_path))     # aucune table ici
+    # #594 : conftest pose une TEST_FIXTURE sur la porte unique pour toute la suite. Ici on veut
+    # justement l'ABSENCE de mesure -- on la retire donc explicitement.
+    monkeypatch.delenv("HYPERSMART_EDGE_TABLE_PATH", raising=False)
+    monkeypatch.setenv("HYPERSMART_V9_PIPELINE_AUTHORITATIVE", "1")
+    monkeypatch.setenv("HYPERSMART_SIMULATION_MIN_EDGE_BPS", "5")
+    monkeypatch.setenv("HYPERSMART_SIMULATION_MAX_SIGNAL_AGE_MS", "30000")
+    monkeypatch.setenv("HYPERSMART_FRESH_OPPORTUNITY_MIN_WALLETS", "2")
+    from hl_observer.edge.edge_source import vider_le_cache
+    vider_le_cache()
+
+    client, factory, _state = _client(tmp_path)
+    ts = now_ms()
+    wa, wb = "0x" + "a" * 40, "0x" + "b" * 40
+    with factory() as session:
+        session.add(_leader(wa, rank=1, ts=ts))
+        session.add(_leader(wb, rank=2, ts=ts))
+        session.add(MarketSnapshot(source="allMids", exchange_ts=ts, raw_json={"ETH": "3000"}))
+        session.add(_open_delta(wa, ts=ts - 2_000, raw={"coin": "ETH", "dir": "Open Long",
+                                                        "hash": "no-edge-a", "time": ts - 2_000}))
+        session.add(_open_delta(wb, ts=ts - 1_000, raw={"coin": "ETH", "dir": "Open Long",
+                                                        "hash": "no-edge-b", "time": ts - 1_000}))
+        session.commit()
+
+    payload = client.get("/api/simulation/overview?limit=40").json()
+    bot = payload["bot_simulation"]
+
+    assert not bot["open_positions"], "sans edge MESURE, aucune position ne doit s'ouvrir"
+    motifs = "|".join(sorted(str(r.get("reason") or "") for r in bot["events"]))
+    # Le motif exact a change avec #594 (la porte unique NOMME desormais la table absente, ce qui
+    # est STRICTEMENT plus informatif que l'ancien « edge trop petit »). Ce qui compte -- et ce que
+    # ce test verrouille -- c'est que le refus soit EXPLICITE et parle de l'EDGE.
+    assert any(m in motifs for m in (
+        "EDGE_TABLE_ABSENTE",                       # #594 : la porte dit QUOI manque
+        "EDGE_NON_MESURE_POUR_CE_BUCKET",
+        "EXPECTED_NET_EDGE_TOO_SMALL_AFTER_COSTS",  # l'ancien motif, toujours acceptable
+    )), ("le refus doit etre EXPLICITE et lisible, pas un silence. Motifs vus : %s" % motifs)
+
+
+def test_accepted_fresh_opportunity_cluster_opens_virtual_position_with_v9_authoritative(tmp_path: Path,
+    monkeypatch,):
+    # 🔴 #598 (2026-07-13) : l'edge d'entree vient maintenant de la TABLE MESUREE (G2), sans repli.
+    # Ce test lui donne donc une VRAIE mesure. Il ne peut plus passer sur un edge invente.
+    monkeypatch.setenv("HYPERSMART_ROOT", str(tmp_path))
+    _semer_la_table_d_edge_mesuree(tmp_path, markout_bps=60.0)
     monkeypatch.setenv("HYPERSMART_V9_PIPELINE_AUTHORITATIVE", "1")
     monkeypatch.setenv("HYPERSMART_SIMULATION_MIN_EDGE_BPS", "5")
     monkeypatch.setenv("HYPERSMART_SIMULATION_MAX_SIGNAL_AGE_MS", "30000")

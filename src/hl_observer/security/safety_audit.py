@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+import os
 import subprocess
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from hl_observer.security.dependances import auditer_l_environnement
 from hl_observer.security.secrets import SecretFinding, scan_file_for_secret
 
 
@@ -32,16 +34,28 @@ def _is_excluded_project_path(root: Path, path: Path) -> bool:
 
 
 def _iter_scannable_files(root: Path) -> list[Path]:
+    """Parcours ELAGUE : on ne DESCEND jamais dans un dossier exclu.
+
+    BUG CORRIGE : l'ancienne version faisait `root.rglob("*")`, donc elle traversait TOUT le projet
+    (runtime/ ~54 Go, logs/ ~5,6 Go, .git) et faisait deux `.resolve()` par fichier, AVANT de filtrer.
+    Resultat : ~20 s juste pour lister 1826 fichiers -> `safety-audit` et `autoscan` figeaient.
+    Le jeu de fichiers retourne est IDENTIQUE ; seul le parcours est elague.
+    """
+    root = Path(root)
+    root_resolved = root.resolve()
     files: list[Path] = []
-    for path in root.rglob("*"):
-        if not path.is_file():
-            continue
-        if any(part in EXCLUDED_DIRS for part in path.parts):
-            continue
-        if _is_excluded_project_path(root, path):
-            continue
-        if path.suffix in TEXT_SUFFIXES or path.name == ".env.example":
-            files.append(path)
+    for dirpath, dirnames, filenames in os.walk(root, topdown=True):
+        current = Path(dirpath)
+        # ELAGAGE : on retire les sous-dossiers exclus AVANT d'y descendre.
+        dirnames[:] = [
+            d
+            for d in dirnames
+            if d not in EXCLUDED_DIRS and not _is_excluded_project_path(root_resolved, current / d)
+        ]
+        for name in filenames:
+            path = current / name
+            if path.suffix in TEXT_SUFFIXES or path.name == ".env.example":
+                files.append(path)
     return files
 
 
@@ -110,6 +124,20 @@ def run_safety_audit(root: str | Path = ".") -> SafetyAuditResult:
         "test_testnet_locked.py",
     }
     checks["security_tests_present"] = required_tests.issubset(test_names)
+
+    # IMPROVE-24 (#131) -- LA CAPACITE, pas seulement le code.
+    #
+    # Les six controles ci-dessus verifient que notre CODE ne trade pas. Celui-ci verifie que la
+    # MACHINE n'en a pas les MOYENS : aucun client d'execution, aucune bibliotheque de signature,
+    # aucun portefeuille installe. Sans eux, un ordre reel est physiquement impossible -- meme si
+    # quelqu'un ecrivait le code pour, meme par accident.
+    #
+    # Et parce que ce controle tourne dans la CI, un futur `pip install ccxt` ferait rougir la
+    # suite. C'est un CLIQUET : la capacite ne peut pas revenir en douce.
+    dep = auditer_l_environnement()
+    checks["no_real_execution_capable_package"] = dep.ok
+    if not dep.ok:
+        findings.append(dep.alerte)
 
     for finding in secret_findings:
         findings.append(f"secret-like pattern in {finding.path}")

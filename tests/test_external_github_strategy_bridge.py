@@ -87,7 +87,10 @@ def test_external_bridge_status_payload_is_paper_only(tmp_path):
 
     payload = build_external_github_bridge_payload(tmp_path)
 
-    assert payload["priority_over_internal"] is True
+    # DOCTRINE SHADOW-ONLY (pivot ff7aeec, re-imposee a l'audit du 2026-07-11) : ce champ etait
+    # "True" en dur -- une affirmation FAUSSE envoyee au statut, au dashboard et a l'audit.
+    # Aucun repo externe ne bypasse le RiskEngine, le ledger, ni l'interne. Observation, pas priorite.
+    assert payload["priority_over_internal"] is False
     assert payload["direct_external_execution"] is False
     assert payload["paper_only"] is True
     assert payload["read_only"] is True

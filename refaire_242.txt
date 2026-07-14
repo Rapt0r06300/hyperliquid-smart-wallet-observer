@@ -1,0 +1,36 @@
+=== #242 sur 208 JOURS (bougies 1h) === 
+============================================================================================
+  #242 / IDEA-85 -- COINTEGRATION, MESUREE SUR DONNEES REELLES
+  (ce n'est PAS Johansen : c'est Engle-Granger. Et le code etait MORT.)
+  source : bougies:1h
+============================================================================================
+  BOUGIES 1h : 12 coins, 60037 points
+  12 coins ont >= 200 buckets de 3600s
+  coins retenus (12) : BTC, ETH, SOL, BNB, AVAX, ARB, DOGE, LTC, SUI, OP, HYPE, NEAR
+
+--------------------------------------------------------------------------------------------
+  paires evaluees          : 66
+  assez de points communs  : 66
+  COINTEGREES (ADF 5 %)    : 14
+  ... qui ont trade en OOS : 13
+  ... VIABLES apres couts  : 0
+--------------------------------------------------------------------------------------------
+
+  Les paires cointegrees qui ont trade (edge NET apres 4 executions) :
+   AVAX  /ARB     n=5003   ADF=-2.97   trades=1    brut=+1886.31  NET=+1874.31 bps  
+   BTC   /ARB     n=5003   ADF=-3.11   trades=3    brut=+1879.56  NET=+1867.56 bps  
+   SOL   /SUI     n=5003   ADF=-3.06   trades=2    brut=+1409.22  NET=+1397.22 bps  
+   DOGE  /SUI     n=5003   ADF=-3.62   trades=4    brut=+1374.60  NET=+1362.60 bps  
+   AVAX  /SUI     n=5003   ADF=-3.88   trades=2    brut=+1005.34  NET= +993.34 bps  
+   AVAX  /LTC     n=5003   ADF=-3.10   trades=1    brut= +873.50  NET= +861.50 bps  
+   ARB   /DOGE    n=5003   ADF=-3.41   trades=4    brut= +821.10  NET= +809.10 bps  
+   AVAX  /DOGE    n=5003   ADF=-3.50   trades=1    brut= +738.92  NET= +726.92 bps  
+   SOL   /BNB     n=5004   ADF=-3.48   trades=3    brut= +528.52  NET= +516.52 bps  
+   BTC   /SOL     n=5004   ADF=-4.87   trades=2    brut= +525.49  NET= +513.49 bps  
+   ETH   /SOL     n=5004   ADF=-3.91   trades=3    brut= +510.56  NET= +498.56 bps  
+   BTC   /ETH     n=5004   ADF=-4.19   trades=3    brut= +450.25  NET= +438.25 bps  
+
+  VERDICT : des paires SONT cointegrees, mais AUCUNE ne survit aux couts.
+            C'est le meme mur que partout : le mecanisme existe, l'edge NET non.
+
+  -> C:\Users\flo\Desktop\Projet invest\data\reports\cointegration_242.json

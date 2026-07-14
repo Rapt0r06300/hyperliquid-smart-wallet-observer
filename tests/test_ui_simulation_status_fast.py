@@ -12,6 +12,8 @@ for _k in list(os.environ):
     if "proxy" in _k.lower():
         os.environ.pop(_k, None)
 
+import pytest
+
 from starlette.testclient import TestClient
 from hl_observer.cli import _settings
 from hl_observer.ui.persistent_state import simulation_state_path
@@ -26,6 +28,41 @@ from hl_observer.ui.state import UiState
 from hl_observer.ui.v12_status_provider import build_v12_status_payload
 from hl_observer.storage.v12_sqlite_store import V12SQLiteStore
 from hl_observer.utils.time import now_ms
+
+
+
+@pytest.fixture(autouse=True)
+def _planchers_permissifs_pour_tester_la_persistance(monkeypatch):
+    """ISOLATION (audit 2026-07-11).
+
+    Ce fichier teste la PERSISTANCE du ledger / de l'etat UI (les entrees survivent-elles a un
+    refresh ? le PnL est-il conserve ?). Il ne teste PAS les gates d'edge -- ceux-la ont leurs
+    propres tests dedies, avec leurs vraies valeurs.
+
+    Or les planchers d'edge ont ete DURCIS depuis (single-wallet 55 bps, degradation, liquidite).
+    Resultat : la simulation REFUSAIT toutes les entrees des fixtures (SINGLE_WALLET_EDGE_TOO_LOW)
+    et des tests de persistance echouaient -- alors que le code avait RAISON de refuser.
+    Ces tests etaient invisibles : la suite ne tournait jamais jusqu'au bout.
+
+    On rend donc les gates permissifs UNIQUEMENT ici, pour que le sujet du test (la persistance)
+    soit reellement exerce.
+    """
+    for var, val in (
+        ("HYPERSMART_SINGLE_WALLET_MIN_EDGE_BPS", "1"),
+        ("HYPERSMART_SIMULATION_MIN_EDGE_BPS", "1"),
+        ("HYPERSMART_SIMULATION_MIN_LIQUIDITY_SCORE", "0.0"),
+        ("HYPERSMART_SIMULATION_MAX_COPY_DEGRADATION_BPS", "500"),
+        ("HYPERSMART_SIMULATION_MIN_EXPECTED_EDGE_USDT", "0"),
+        # consensus minimum : les fixtures n'ont souvent qu'1 wallet
+        ("HYPERSMART_FRESH_OPPORTUNITY_MIN_WALLETS", "1"),
+        ("HYPERSMART_FUSION_COPY_MIN_WALLETS", "1"),
+        ("HYPERSMART_DIRECT_COPY_MIN_CONSENSUS_WALLETS", "1"),
+        ("HYPERSMART_DIRECT_COPY_MIN_EDGE_BPS", "1"),
+        ("HYPERSMART_DIRECT_COPY_MIN_LIQUIDITY", "0.0"),
+        # sans allMids en test, le prix du leader sert de mid (sinon veto CURRENT_MID_REQUIRED)
+        ("HYPERSMART_LEADER_MID_FALLBACK_MAX_AGE_MS", "600000"),
+    ):
+        monkeypatch.setenv(var, val)
 
 
 def test_status_is_fast_and_readonly():
@@ -578,9 +615,17 @@ def test_status_persists_external_arbitrage_paper_order_when_copy_conflicts(tmp_
     assert position["direction"] == "LONG"
     assert position["position_mode"] == "EXTERNAL_GITHUB_ARBITRAGE_PAPER"
     assert payload["mark_to_market"]["marks_used"] == 1
-    assert any(
-        row.get("strategy_id") == "ext_jack_hl_arbitrage_spread"
-        for row in state.simulation_ledger_events
+    # Le nom de la strategie depend du CATALOGUE EXTERNE : `fusion_runtime._first_available_profile()`
+    # prefere un profil GitHub (`ext_jack_hl_arbitrage_spread`) s'il est actif, sinon il retombe sur
+    # le moteur interne (`ws_price_discrepancy_paper`). Depuis le pivot shadow-only (ff7aeec), les
+    # profils externes sont desactives par defaut -> c'est le nom INTERNE qui sort. Le test exigeait
+    # uniquement le nom externe : il testait une config qui n'existe plus. Ce qui doit etre garanti,
+    # c'est que l'ordre d'arbitrage ARRIVE AU LEDGER -- pas le repo dont il porte le nom.
+    arbitrage_strategy_ids = {
+        str(row.get("strategy_id") or "") for row in state.simulation_ledger_events
+    }
+    assert arbitrage_strategy_ids & {"ext_jack_hl_arbitrage_spread", "ws_price_discrepancy_paper"}, (
+        f"aucun evenement d'arbitrage au ledger : {sorted(arbitrage_strategy_ids)}"
     )
     assert duplicate_payload["fusion_persistent_adapter"]["applied_count"] == 0
     assert len(state.simulation_virtual_positions) == 1
@@ -1521,3 +1566,22 @@ def test_simulation_page_surfaces_fusion_runtime_without_fake_orders():
     assert "orders_count" in page
     assert "paper_engine_accepted" in page
     assert "OK_LIVE_FUSION_RUNTIME" in page
+
+
+# ---------------------------------------------------------------------------------------------
+# VERROU EDGE EMPIRIQUE (2026-07-11) -- POURQUOI CES TESTS FORCENT UN FLAG.
+#
+# Ces tests verifient la MECANIQUE (scorer, CLI, persistance UI). Pour cela, il faut qu'une
+# position s'ouvre. Or depuis le 2026-07-11, le moteur REFUSE par defaut un edge qui n'a jamais
+# touche un prix : l'ancienne formule (`dominance * 45 + bonus`) fabriquait un nombre en bps sans
+# regarder le marche une seule fois.
+#
+# On active donc `HYPERSMART_REQUIRE_EMPIRICAL_EDGE=0` : mode A/B ASSUME, PAS la production.
+# Le defaut reste le REFUS -- garde par `tests/test_empirical_edge.py`.
+# ---------------------------------------------------------------------------------------------
+import pytest as _pytest_ab
+
+
+@_pytest_ab.fixture(autouse=True)
+def _mode_ab_edge_non_empirique(monkeypatch):
+    monkeypatch.setenv("HYPERSMART_REQUIRE_EMPIRICAL_EDGE", "0")

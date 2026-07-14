@@ -1,0 +1,141 @@
+DEBUT 
+=== 1. l'invariant + le comportement de parent_alive === 
+F..............                                                          [100%]
+================================== FAILURES ===================================
+_ test_INVARIANT_aucun_module_de_production_n_appelle_os_kill_avec_le_signal_ZERO _
+tests\test_aucun_ctrl_c_deguise_en_test_d_existence.py:100: in test_INVARIANT_aucun_module_de_production_n_appelle_os_kill_avec_le_signal_ZERO
+    assert not coupables, (
+E   AssertionError: `os.kill(pid, 0)` trouve dans du code de PRODUCTION : src/hl_observer/backtesting/runtime_guards.py:92
+E     
+E     Sous Windows, signal 0 == CTRL_C_EVENT -> GenerateConsoleCtrlEvent -> un VRAI Ctrl-C envoye a TOUTE la console. Ce n'est pas un test d'existence : c'est une arme.
+E       -> passer par `runtime_guards.parent_alive()`, qui INTERROGE le systeme (OpenProcess) au lieu de lui ENVOYER un signal.
+E   assert not ['src/hl_observer/backtesting/runtime_guards.py:92']
+=========================== short test summary info ===========================
+FAILED tests/test_aucun_ctrl_c_deguise_en_test_d_existence.py::test_INVARIANT_aucun_module_de_production_n_appelle_os_kill_avec_le_signal_ZERO
+1 failed, 14 passed in 2.96s
+ 
+=== 2. LA SUITE COMPLETE (doit aller au bout SANS Ctrl-C) === 
+........................................................................ [  2%]
+........................................................................ [  4%]
+........................................................................ [  6%]
+........................................................................ [  8%]
+........................................................................ [ 10%]
+..........F............................................................. [ 12%]
+........................................................................ [ 14%]
+........................................................................ [ 16%]
+..........................................
+[COUVERTURE] joignables=484  couverts=481  NON TESTES=3  (99.4 %)  baseline=3
+.............................. [ 18%]
+........................................................................ [ 20%]
+........................................................................ [ 22%]
+........................................................................ [ 24%]
+........................................................................ [ 26%]
+........................................................................ [ 28%]
+........................................................................ [ 30%]
+........................................................................ [ 32%]
+........................................................................ [ 34%]
+........................................................................ [ 36%]
+........................................................................ [ 38%]
+........................................................................ [ 40%]
+........................................................................ [ 42%]
+........................................................................ [ 45%]
+........................................................................ [ 47%]
+........................................................................ [ 49%]
+........................................................................ [ 51%]
+........................................................................ [ 53%]
+........................................................................ [ 55%]
+........................................................................ [ 57%]
+........................................................................ [ 59%]
+........................................................................ [ 61%]
+........................................................................ [ 63%]
+........................................................................ [ 65%]
+........................................................................ [ 67%]
+........................................................................ [ 69%]
+..FF.................................................................... [ 71%]
+........................................................................ [ 73%]
+........................................................................ [ 75%]
+........................................................................ [ 77%]
+........................................................................ [ 79%]
+........................................................................ [ 81%]
+........................................................................ [ 83%]
+........................................................................ [ 85%]
+........................................................................ [ 88%]
+........................................................................ [ 90%]
+........................................................................ [ 92%]
+........................................................................ [ 94%]
+................F.F..................................................... [ 96%]
+........................................................................ [ 98%]
+.............................................................            [100%]
+================================== FAILURES ===================================
+C:\Users\flo\Desktop\Projet invest\tests\test_aucun_ctrl_c_deguise_en_test_d_existence.py:100: AssertionError: `os.kill(pid, 0)` trouve dans du code de PRODUCTION : src/hl_observer/backtesting/runtime_guards.py:92
+C:\Users\flo\Desktop\Projet invest\tests\test_strict_md_accept_path.py:75: AssertionError: un edge MESURE de 10 bps ne couvre pas un seuil de 35 bps : le refus est obligatoire
+C:\Users\flo\Desktop\Projet invest\tests\test_strict_md_accept_path.py:99: AssertionError: un signal s'est declare 5 000 bps d'edge et a ete cru. La table dit 10 bps. C'est exactement le mecanisme des 3 edges fabriques qu'on a passe des semaines a tuer.
+C:\Users\flo\Desktop\Projet invest\tests\test_v9_scorer_bias_wiring.py:47: AssertionError: assert 63.301017 < 63.301017
+C:\Users\flo\Desktop\Projet invest\tests\test_v9_scorer_bias_wiring.py:66: AssertionError: assert 63.301017 > 63.301017
+============================== warnings summary ===============================
+src\hl_observer\testnet\models.py:13
+  C:\Users\flo\Desktop\Projet invest\src\hl_observer\testnet\models.py:13: PytestCollectionWarning: cannot collect test class 'TestnetAction' because it has a __new__ constructor (from: tests/test_loop_candidate_factory.py)
+    class TestnetAction(str, Enum):
+
+tests/dydx_v4/test_dydx_refused_route.py: 22 warnings
+tests/dydx_v4/test_dydx_routes_truth_endpoint.py: 11 warnings
+tests/test_dashboard_v2_metagraph.py: 6 warnings
+tests/test_dashboard_v2_panels.py: 6 warnings
+tests/test_dashboard_v2_route.py: 4 warnings
+tests/test_diag_598_qui_refuse.py: 176 warnings
+tests/test_hypersmart_simulation_diagnostic_logs.py: 176 warnings
+tests/test_loop_dashboard_route.py: 176 warnings
+tests/test_no_btc_only_hardcoded_scanner.py: 176 warnings
+tests/test_ui_action_catalog.py: 528 warnings
+tests/test_ui_app.py: 1056 warnings
+tests/test_ui_copy_dashboard.py: 1584 warnings
+tests/test_ui_discovery_autoscan.py: 1584 warnings
+tests/test_ui_discovery_simple_home.py: 1056 warnings
+tests/test_ui_explorer.py: 1056 warnings
+tests/test_ui_leaderboard.py: 528 warnings
+tests/test_ui_multi_assets.py: 880 warnings
+tests/test_ui_no_dead_buttons.py: 352 warnings
+tests/test_ui_overview_paper_ledger.py: 528 warnings
+tests/test_ui_routes.py: 352 warnings
+tests/test_ui_simulation_persistence.py: 5456 warnings
+tests/test_ui_simulation_status_fast.py: 5104 warnings
+tests/test_ui_simulation_v9_filters.py: 1408 warnings
+tests/test_ui_websocket.py: 176 warnings
+  C:\Users\flo\AppData\Roaming\Python\Python314\site-packages\fastapi\routing.py:233: DeprecationWarning: 'asyncio.iscoroutinefunction' is deprecated and slated for removal in Python 3.16; use inspect.iscoroutinefunction() instead
+    is_coroutine = asyncio.iscoroutinefunction(dependant.call)
+
+tests/test_whale_watchlist.py::TestWhaleScoreCandidate::test_score_recent_trades_get_higher_recency
+  C:\Users\flo\Desktop\Projet invest\tests\test_whale_watchlist.py:126: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    now = datetime.datetime.utcnow()
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ===========================
+FAILED tests/test_aucun_ctrl_c_deguise_en_test_d_existence.py::test_INVARIANT_aucun_module_de_production_n_appelle_os_kill_avec_le_signal_ZERO
+FAILED tests/test_strict_md_accept_path.py::test_low_edge_rejected_like_dashboard
+FAILED tests/test_strict_md_accept_path.py::test_l_edge_porte_par_le_SIGNAL_n_a_plus_aucun_pouvoir
+FAILED tests/test_v9_scorer_bias_wiring.py::test_positive_bias_raises_edge_negative_lowers
+FAILED tests/test_v9_scorer_bias_wiring.py::test_end_to_end_trend_aligned_bias_helps
+5 failed, 3512 passed, 22403 warnings in 238.20s (0:03:58)
+ 
+=== 3. safety-audit (ne s'executait PLUS depuis 2 jours : le Ctrl-C tuait le .cmd ici) === 
+no_secret_patterns: ok
+env_not_committed: ok
+no_forbidden_mainnet_order_method: ok
+no_exchange_endpoint_in_runtime_source: ok
+live_executor_disabled_exists: ok
+mainnet_disabled_in_env_example: ok
+security_tests_present: ok
+no_real_execution_capable_package: ok
+ 
+=== 4. doctor === 
+python_3_11_plus: ok
+readme_present: ok
+agents_present: ok
+env_example_present: ok
+mainnet_execution_disabled: ok
+testnet_execution_disabled_by_default: ok
+database_url_configured: ok
+logs_dir_configured: ok
+info_endpoint_read_only: ok
+safety_audit_ok: ok
+FIN 

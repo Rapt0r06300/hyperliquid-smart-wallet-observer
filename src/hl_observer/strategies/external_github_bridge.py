@@ -843,8 +843,10 @@ def build_external_github_bridge_payload(project_root: Path | None = None) -> di
     unavailable = [cap for cap in caps if not cap.installed]
     return {
         "available": bool(caps),
-        "mode": "EXTERNAL_REPOS_PRESERVED_PRIORITY_PAPER_ADAPTER",
-        "priority_over_internal": True,
+        "mode": "EXTERNAL_REPOS_PRESERVED_SHADOW_PAPER_ADAPTER",
+        # VERITE DES DONNEES (audit 2026-07-11) : etait "True" en dur. FAUX -- doctrine
+        # shadow-only : aucun repo externe ne bypasse le RiskEngine, le ledger, ou l'interne.
+        "priority_over_internal": False,
         "direct_external_execution": False,
         "paper_only": True,
         "read_only": True,

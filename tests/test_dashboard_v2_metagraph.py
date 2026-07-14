@@ -17,10 +17,21 @@ def test_page_uses_real_history_endpoint_and_smoothing():
     assert "/v2/equity_history" in html          # metagraphe branché sur la vraie courbe
     assert "smoothPath" in html                   # courbe lissée (Catmull-Rom -> Bézier)
     assert "base = equity départ" in html         # ligne de base profit/perte
-    assert "METAGRAPHE" in html
+    assert "EQUITY //" in html   # panneau courbe (ex-"METAGRAPHE", renomme a la refonte /v2)
 
 
-def test_equity_history_endpoint_reads_state():
+def _isolate_persisted_store(monkeypatch):
+    """L'endpoint privilegie l'historique PERSISTE (survit a la fermeture du navigateur).
+    En test, ce store lisait les VRAIES donnees runtime -> le test n'etait pas isole (600 points
+    au lieu de 0). On neutralise le store pour tester la lecture de l'etat en memoire."""
+    monkeypatch.setattr(
+        "hl_observer.runtime.equity_history_store.read_equity_points",
+        lambda max=600: [],
+    )
+
+
+def test_equity_history_endpoint_reads_state(monkeypatch):
+    _isolate_persisted_store(monkeypatch)
     router = create_dashboard_v2_router()
     ep = next(r.endpoint for r in router.routes if r.path == "/v2/equity_history")
     state = SimpleNamespace(simulation_equity_history=[
@@ -35,7 +46,8 @@ def test_equity_history_endpoint_reads_state():
     assert payload["read_only"] is True
 
 
-def test_equity_history_empty_state_is_honest():
+def test_equity_history_empty_state_is_honest(monkeypatch):
+    _isolate_persisted_store(monkeypatch)
     router = create_dashboard_v2_router()
     ep = next(r.endpoint for r in router.routes if r.path == "/v2/equity_history")
     req = SimpleNamespace(app=SimpleNamespace(state=SimpleNamespace(ui_state=None)))

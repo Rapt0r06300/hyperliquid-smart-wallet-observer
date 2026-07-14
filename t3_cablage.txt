@@ -1,0 +1,381 @@
+
+==============================================================================
+ T3 -- AUDIT DE CABLAGE   (1894 fichiers .py, 55 outils, 76 lanceurs)
+==============================================================================
+
+------------------------------------------------------------------------------
+ 3. INTERRUPTEURS MORTS -- lus par le code, poses par PERSONNE, defaut ETEINT
+------------------------------------------------------------------------------
+    C'est le bug du poller L2, mot pour mot : la capacite existe, elle est cablee,
+    elle est testee... et elle ne s'allumera JAMAIS. Sans un log. Sans une erreur.
+
+    AUCUN. (52 interrupteurs a nous, tous poses ou allumes par defaut)
+
+    A LIRE A LA MAIN (defaut VIDE : 'aucune limite' ou 'eteint' ? on ne tranche pas) :
+      HYPERSMART_PNL_AUDIT_PREFER_APPEND_ONLY    lu par src/hl_observer/analysis/negative_pnl_auditor.py
+      HYPERSMART_TOP_WALLET_SAMPLE_LIMIT         lu par src/hl_observer/cli.py
+
+------------------------------------------------------------------------------
+ 2. TESTES MAIS NON BRANCHES -- seuls les tests les importent
+------------------------------------------------------------------------------
+    Le pire des deux mondes : la suite est VERTE, la capacite existe, elle a des
+    tests... et aucun chemin de production ne l'appelle. C'est `delta_neutral_carry`,
+    trouve pendant T2 -- par accident, apres des semaines.
+
+    hl_observer.agent.fitness
+    hl_observer.agent.improvement_loop
+    hl_observer.agent.sealed_verifier
+    hl_observer.agent_tools.jsonl_adapter
+    hl_observer.agent_tools.mcp_readonly
+    hl_observer.alerts.local_alerts
+    hl_observer.arbitrage.basis_funding_model
+    hl_observer.arbitrage.cross_venue_funding
+    hl_observer.arbitrage.orderbook_depth_pricer
+    hl_observer.arbitrage.path_fee_model
+    hl_observer.artifacts.extractor
+    hl_observer.audit.mini_run_check
+    hl_observer.audit.pnl_convergence
+    hl_observer.backtest.ab_report
+    hl_observer.backtest.book_replay
+    hl_observer.backtest.cost_model
+    hl_observer.backtest.data_bus
+    hl_observer.backtest.entry_event_recorder
+    hl_observer.backtest.execution_realism
+    hl_observer.backtest.experiment_runner
+    hl_observer.backtest.ledger_replay_v9
+    hl_observer.backtest.materialized_cache
+    hl_observer.backtest.multi_wallet_replay
+    hl_observer.backtest.optimize
+    hl_observer.backtest.pnl_from_logs
+    hl_observer.backtest.pnl_metrics_ext
+    hl_observer.backtest.report_charts
+    hl_observer.backtest.runner_contract
+    hl_observer.backtest.selectivity_report
+    hl_observer.backtest.trade_tick_replay
+    hl_observer.backtesting.execution_delay_model
+    hl_observer.backtesting.execution_extras
+    hl_observer.backtesting.execution_sim
+    hl_observer.backtesting.features
+    hl_observer.backtesting.grid_market_maker
+    hl_observer.backtesting.infra_primitives
+    hl_observer.backtesting.integrity_tools
+    hl_observer.backtesting.labeling
+    hl_observer.backtesting.maker_fill
+    hl_observer.backtesting.market_metrics
+    hl_observer.backtesting.market_signals
+    hl_observer.backtesting.microstructure
+    hl_observer.backtesting.microstructure_extras
+    hl_observer.backtesting.missed_fill_model
+    hl_observer.backtesting.ml_diagnostics
+    hl_observer.backtesting.ml_extras
+    hl_observer.backtesting.mlops_tools
+    hl_observer.backtesting.partial_fill_model
+    hl_observer.backtesting.perf_tools
+    hl_observer.backtesting.portfolio_risk
+    hl_observer.backtesting.quality_tools
+    hl_observer.backtesting.regime_models
+    hl_observer.backtesting.replay_engine
+    hl_observer.backtesting.reporting
+    hl_observer.backtesting.reporting_extras
+    hl_observer.backtesting.robust_selection
+    hl_observer.backtesting.runtime_guards
+    hl_observer.backtesting.safety_defaults
+    hl_observer.backtesting.safety_tools
+    hl_observer.backtesting.signal_processing
+    hl_observer.backtesting.sniper_horizon_curve
+    hl_observer.backtesting.strategies_extra
+    hl_observer.backtesting.validation_extras
+    hl_observer.calibration.emos
+    hl_observer.calibration.model_market
+    hl_observer.calibration.promotion
+    hl_observer.calibration.shadow_promote
+    hl_observer.calibration.shadow_runner
+    hl_observer.clitools.tui_status
+    hl_observer.clusters.crowding_detector
+    hl_observer.collection.concurrent_fetch
+    hl_observer.collection.proxy_config
+    hl_observer.collection.proxy_health
+    hl_observer.collection.source_liveness
+    hl_observer.config.local_rule_store
+    hl_observer.connectors.base
+    hl_observer.connectors.hyperliquid_readonly
+    hl_observer.connectors.public_research
+    hl_observer.copy_fidelity.balance_replication
+    hl_observer.copy_fidelity.exec_quality
+    hl_observer.copy_fidelity.fee_tiers
+    hl_observer.copy_mode.cooldown
+    hl_observer.copy_mode.copy_latency_profiler
+    hl_observer.copy_mode.reentry_cooldown
+    hl_observer.copying.v9_paper_pipeline
+    hl_observer.core.circuit_breaker
+    hl_observer.core.config
+    hl_observer.core.error_handler
+    hl_observer.core.retry
+    hl_observer.core.state_manager
+    hl_observer.dashboard.copy_control_panel
+    hl_observer.data_quality.guards
+    hl_observer.edge.advanced_costs
+    hl_observer.edge.copy_degradation
+    hl_observer.edge.cost_validation
+    hl_observer.edge.exit_quality
+    hl_observer.edge.fair_value
+    hl_observer.edge.fee_drag
+    hl_observer.edge.maker_fee_model
+    hl_observer.edge.regime_volume
+    hl_observer.evidence.context_compaction
+    hl_observer.evidence.exit_evidence
+    hl_observer.execution.live_executor_disabled
+    hl_observer.exits.exit_engine
+    hl_observer.exits.exit_policy
+    hl_observer.exits.exit_policy_runtime
+    hl_observer.exports.decision_csv_logger
+    hl_observer.features.absorption
+    hl_observer.features.accumulate
+    hl_observer.features.avwap
+    hl_observer.features.basis
+    hl_observer.features.eat_flow
+    hl_observer.features.ema_median_smoother
+    hl_observer.features.feature_vector_promotion
+    hl_observer.features.funding_aware
+    hl_observer.features.microstructure
+    hl_observer.features.mid_stability
+    hl_observer.features.midpoint_jump_filter
+    hl_observer.features.obi_delta
+    hl_observer.features.quality_mode
+    hl_observer.features.rsi_overheat
+    hl_observer.features.scan_features
+    hl_observer.features.vol_sigma
+    hl_observer.features.volatility
+    hl_observer.following.leader_behavior
+    hl_observer.following.leader_scoring
+    hl_observer.freshness.freshness_policy
+    hl_observer.funding.funding_reconciliation
+    hl_observer.funding.funding_times
+    hl_observer.hyperliquid.info_readonly
+    hl_observer.integration.deferred_features
+    hl_observer.integration.funding_arb_optimizer
+    hl_observer.integration.grinder_board_selector
+    hl_observer.integration.grinder_detectors
+    hl_observer.integration.ia_runtime
+    hl_observer.integration.leader_pipeline
+    hl_observer.integration.ops_runtime
+    hl_observer.integration.risk_quality_gate
+    hl_observer.integration.scale_perf_runtime
+    hl_observer.market.calendar_gate
+    hl_observer.market.classification
+    hl_observer.market_signals.market_cache
+    hl_observer.markets.market_discovery_ranking
+    hl_observer.markets.scan_breadth
+    hl_observer.ml.memory_store
+    hl_observer.ml.promotion_gate
+    hl_observer.ml.sample_recorder
+    hl_observer.ml.shadow_analyst
+    hl_observer.ml.training_readiness
+    hl_observer.net.doh_resolver
+    hl_observer.normalization.fill_aggregation
+    hl_observer.normalization.fills
+    hl_observer.normalization.positions
+    hl_observer.ops.operator_alerts
+    hl_observer.ops.session_verify
+    hl_observer.ops.state_backup
+    hl_observer.optimization.anti_overfit_guard
+    hl_observer.optimization.best_config_selector
+    hl_observer.optimization.config_optimizer
+    hl_observer.optimization.out_of_sample_guard
+    hl_observer.optimization.pnl_sweep
+    hl_observer.optimization.threshold_optimizer
+    hl_observer.paper.partial_fill_model
+    hl_observer.paper.rejection_model
+    hl_observer.paper_trading.fill_outcomes
+    hl_observer.paper_trading.journal
+    hl_observer.paper_trading.max_chase_guard
+    hl_observer.paper_trading.order_types
+    hl_observer.paper_trading.position_tracking
+    hl_observer.paper_trading.take_profit_stop_loss_local
+    hl_observer.paper_trading.trailing_stop_local
+    hl_observer.patterns.pattern_detector
+    hl_observer.perf.hot_path_guard
+    hl_observer.perf.latency_budget
+    hl_observer.perf.latency_tracker
+    hl_observer.pipeline.v12_decision_pipeline
+    hl_observer.product_benchmark.feature_matrix
+    hl_observer.realtime.clock_offset
+    hl_observer.realtime.data_quality_gap
+    hl_observer.realtime.fresh_window_recommender
+    hl_observer.realtime.source_health
+    hl_observer.realtime.ws_subscription_audit
+    hl_observer.release.clean_archive
+    hl_observer.reports.latency_benchmark_report
+    hl_observer.research.decision_explainer
+    hl_observer.research.ledger_search
+    hl_observer.research.wallet_thesis
+    hl_observer.risk.atr_trailing_stop
+    hl_observer.risk.circuit_breaker
+    hl_observer.risk.correlated_exposure
+    hl_observer.risk.duplicate_order_guard
+    hl_observer.risk.entry_guard
+    hl_observer.risk.exec_gates
+    hl_observer.risk.kill_switch
+    hl_observer.risk.latency_model
+    hl_observer.risk.loss_halts
+    hl_observer.risk.market_manipulation_flags
+    hl_observer.risk.partial_fill_pair_guard
+    hl_observer.risk.portfolio_risk
+    hl_observer.risk.position_sizing
+    hl_observer.risk.reconciliation_guard
+    hl_observer.risk.scale_out
+    hl_observer.risk.sizing_v2
+    hl_observer.risk.slippage_model
+    hl_observer.risk.tombstones
+    hl_observer.risk.trade_circuit_breaker
+    hl_observer.risk.trade_floor
+    hl_observer.runtime.bounded_event_queue
+    hl_observer.runtime.detailed_report
+    hl_observer.runtime.event_driven_decider
+    hl_observer.runtime.hot_path
+    hl_observer.runtime_mode
+    hl_observer.scanner.decision_cadence
+    hl_observer.scanner.opportunity_detector
+    hl_observer.scanner.rate_limit_semaphore
+    hl_observer.scanner.scheduler
+    hl_observer.scoring.scoring_calibration_promotion
+    hl_observer.scoring.shortlist_rank
+    hl_observer.scoring.smart_money_filter
+    hl_observer.scoring.smart_money_gate
+    hl_observer.scoring.wallet_labels
+    hl_observer.screeners.presets
+    hl_observer.security.secure_report
+    hl_observer.signals.advanced_entry
+    hl_observer.signals.deb_ensemble
+    hl_observer.signals.decision_contract
+    hl_observer.signals.edge_score
+    hl_observer.signals.eligibility
+    hl_observer.signals.entry_microstructure_shadow
+    hl_observer.signals.funding_window
+    hl_observer.signals.gate_profile
+    hl_observer.signals.liquidation_map
+    hl_observer.signals.liquidation_signal
+    hl_observer.signals.maker_band
+    hl_observer.signals.microprice_toxicity
+    hl_observer.signals.microstructure
+    hl_observer.signals.multi_confirmation
+    hl_observer.signals.obi_signal
+    hl_observer.signals.oi_delta
+    hl_observer.signals.oracle_mark_premium
+    hl_observer.signals.pyramiding
+    hl_observer.signals.regime_confidence
+    hl_observer.signals.regime_router
+    hl_observer.signals.second_source_guard
+    hl_observer.signals.session_filter
+    hl_observer.signals.source_reconcile
+    hl_observer.signals.spike_detector
+    hl_observer.signals.twap_detector
+    hl_observer.simulation.funding_payment_tracker
+    hl_observer.simulation.orderbook_execution_simulator
+    hl_observer.skills.optional_registry
+    hl_observer.sources.bulk_history
+    hl_observer.storage.raw_store_sqlite
+    hl_observer.storage.runtime_state
+    hl_observer.strategies.dip_hedge
+    hl_observer.strategies.grid_paper
+    hl_observer.strategies.library
+    hl_observer.strategies.strategy_catalog
+    hl_observer.testnet.readiness_gate
+    hl_observer.validation.baselines
+    hl_observer.validation.refusal_cost
+    hl_observer.validation.shadow_arms
+    hl_observer.wallet_universe.wallet_universe
+    hl_observer.wallets.api_budget
+    hl_observer.wallets.leader_hotness
+    hl_observer.wallets.leaderboard_robustness
+    hl_observer.wallets.multi_source_merge
+    hl_observer.wallets.quality_score
+    hl_observer.wallets.scoring
+    hl_observer.wallets.skill_vs_luck
+    hl_observer.wallets.tiered_scanner
+    hl_observer.wallets.user_fills_multiplex
+    hl_observer.watchlists.smart_money_watchlist
+
+    >>> 273 module(s) teste(s) mais JAMAIS appele(s) en production.
+
+------------------------------------------------------------------------------
+ 1. ORPHELINS -- personne ne les importe, pas meme un test
+------------------------------------------------------------------------------
+    102 module(s). Les 30 premiers :
+
+    hl_observer.analysis.copy_delay_model
+    hl_observer.analysis.entry_edge
+    hl_observer.analysis.exit_edge
+    hl_observer.analysis.followability
+    hl_observer.analysis.opening_outcome
+    hl_observer.analysis.opening_profitability
+    hl_observer.analysis.profit_patterns
+    hl_observer.analysis.trade_lifecycle
+    hl_observer.backtest.monte_carlo
+    hl_observer.backtest.replay_engine
+    hl_observer.backtesting.hyperopt_local
+    hl_observer.backtesting.recursive_analysis
+    hl_observer.clusters.cluster_signal_score
+    hl_observer.clusters.wallet_clusterer
+    hl_observer.connectors.connector_base
+    hl_observer.connectors.market_data_connector
+    hl_observer.connectors.read_only_market_connector
+    hl_observer.copy_mode.copy_session_controller
+    hl_observer.copy_mode.multi_wallet_copy_session
+    hl_observer.copy_mode.wallet_subscription_planner
+    hl_observer.copy_wallet.multi_trader_runtime
+    hl_observer.copying.circuit_breaker
+    hl_observer.copying.kelly_sizing
+    hl_observer.copying.leader_pnl_tracker
+    hl_observer.copying.pipeline_integrator
+    hl_observer.copying.viral_bot_engine
+    hl_observer.core.logging_config
+    hl_observer.core.main
+    hl_observer.dashboard.risk_flags_panel
+    hl_observer.exits.leader_exit_monitor
+    ... et 72 autre(s)
+
+------------------------------------------------------------------------------
+ 0. OUTILLES -- inatteignables depuis le BOT, mais lances par un OUTIL de recherche
+------------------------------------------------------------------------------
+    Ce ne sont PAS des morts : `python tools\x.py` dans un .cmd est une PORTE.
+    Ce ne sont PAS des vivants non plus : le bot ne les execute jamais.
+    (Un garde-fou de risk/ qui tomberait ici serait un MORT : voir le test
+     test_aucun_garde_fou_de_PRODUCTION_ne_survit_par_un_simple_OUTIL.)
+
+    hl_observer.agent.dead_zones
+    hl_observer.agent.dead_zones_hypersmart
+    hl_observer.audit.cablage
+    hl_observer.audit.couverture
+    hl_observer.audit.simulation_realism_audit
+    hl_observer.backtesting.cost_model
+    hl_observer.backtesting.cross_validation
+    hl_observer.backtesting.edge_predictor
+    hl_observer.backtesting.execution_models
+    hl_observer.backtesting.experiment_harness
+    hl_observer.backtesting.lookahead_differential
+    hl_observer.backtesting.lookahead_guard
+    hl_observer.backtesting.market_making_flow
+    hl_observer.backtesting.mean_reversion
+    hl_observer.backtesting.mechanism_zoo
+    hl_observer.backtesting.overfit_selection
+    hl_observer.backtesting.quant_methods
+    hl_observer.backtesting.regime_detection
+    hl_observer.backtesting.regime_label
+    hl_observer.backtesting.regime_wiring
+    hl_observer.backtesting.risk_sizing
+    hl_observer.backtesting.robustness
+    hl_observer.backtesting.scenario_db
+    hl_observer.backtesting.scenario_grid
+    hl_observer.backtesting.scenario_search
+    hl_observer.backtesting.stress_testing
+    hl_observer.backtesting.validation_methods
+    hl_observer.backtesting.vectorized
+    hl_observer.collection.trades_recorder
+    hl_observer.funding.delta_neutral_carry
+    hl_observer.strategies.engine_economics
+
+    >>> 31 module(s) de RECHERCHE, joignables seulement par un outil.
+
+  rapport complet : data\reports\audit_cablage.json
+

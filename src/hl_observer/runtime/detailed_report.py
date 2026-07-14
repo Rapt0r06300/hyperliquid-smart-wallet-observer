@@ -59,10 +59,15 @@ def _replay_status() -> dict:
     out: dict[str, Any] = {"dir": str(base), "enabled": os.getenv(
         "HYPERSMART_V26_RECORD_CANDIDATES", "0").strip().lower() in {"1", "true", "yes", "on"}}
     for name in ("candidates.jsonl", "marks.jsonl"):
-        p = base / name
+        n, sz = 0, 0
         try:
-            n = sum(1 for _ in p.open(encoding="utf-8")) if p.exists() else 0
-            sz = p.stat().st_size if p.exists() else 0
+            from hl_observer.runtime.replay_recorder import iter_replay_files
+            for p in iter_replay_files(base, name):  # agrege les fichiers par-process
+                try:
+                    n += sum(1 for _ in p.open(encoding="utf-8"))
+                    sz += p.stat().st_size
+                except Exception:
+                    continue
         except Exception:
             n, sz = 0, 0
         out[name] = {"lines": n, "bytes": sz, "mb": round(sz / 1e6, 2)}

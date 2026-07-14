@@ -67,8 +67,12 @@ def _opportunity(wallet_count: int = 2, age_ms: int = 2_500, notional: float = 6
 
 
 def test_adapter_scales_margin_when_flag_enabled(monkeypatch):
+    # SEMANTIQUE CORRIGEE (audit 2026-07-11) : depuis le fix des "centimes",
+    # MAX_POSITION_USDT = la MARGE, et le notional = marge x levier. On fixe le levier a 1
+    # pour que ce test mesure ce qu'il pretend mesurer : le MULTIPLICATEUR de consensus.
     monkeypatch.setenv("HYPERSMART_WHALE_CONSENSUS_SIZING", "1")
     monkeypatch.setenv("HYPERSMART_MAX_POSITION_USDT", "40")
+    monkeypatch.setenv("HYPERSMART_SIMULATION_LEVERAGE", "1")
     summary = run_distilled_opportunities_through_paper_engine(
         (_opportunity(),),
         market_prices={"HYPE": 70.0},
@@ -86,6 +90,7 @@ def test_adapter_scales_margin_when_flag_enabled(monkeypatch):
 def test_adapter_keeps_full_size_when_flag_disabled(monkeypatch):
     monkeypatch.delenv("HYPERSMART_WHALE_CONSENSUS_SIZING", raising=False)
     monkeypatch.setenv("HYPERSMART_MAX_POSITION_USDT", "40")
+    monkeypatch.setenv("HYPERSMART_SIMULATION_LEVERAGE", "1")   # marge x levier = notional
     summary = run_distilled_opportunities_through_paper_engine(
         (_opportunity(),),
         market_prices={"HYPE": 70.0},

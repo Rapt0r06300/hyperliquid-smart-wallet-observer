@@ -1,0 +1,47 @@
+[
+  {
+    "decision": "dedupe snapshot",
+    "does_not_prove": "Profit futur.",
+    "module": "realtime_monitor",
+    "proposed_status": "actionable",
+    "proves": "WS userFills a un snapshot.",
+    "realtime": "oui",
+    "security_risk": "aucun",
+    "source_type": "docs",
+    "summary": "Snapshot userFills puis updates.",
+    "title": "Hyperliquid WS docs",
+    "ui": "live feed",
+    "url": "https://hyperliquid.gitbook.io/hyperliquid-docs/for-developers/api/websocket/subscriptions",
+    "usefulness": "Dedupe des snapshots."
+  },
+  {
+    "decision": "ne pas croire le claim",
+    "does_not_prove": "Rentabilite future.",
+    "module": "research",
+    "proposed_status": "research only",
+    "proves": "Rien sans donnees.",
+    "realtime": "non",
+    "security_risk": "aucun",
+    "source_type": "claim",
+    "summary": "Bot annonce 70% winrate.",
+    "title": "Claude bot claim",
+    "ui": "warnings",
+    "url": "https://reddit.com/r/example",
+    "usefulness": "Inspiration."
+  },
+  {
+    "decision": "refuser",
+    "does_not_prove": "safe",
+    "module": "execution",
+    "proposed_status": "refuse",
+    "proves": "rien",
+    "realtime": "none",
+    "security_risk": "private key signature execute",
+    "source_type": "code",
+    "summary": "Place des ordres avec private key et signature.",
+    "title": "Executor prive",
+    "ui": "none",
+    "url": "https://github.com/example/private-executor",
+    "usefulness": "A refuser."
+  }
+]

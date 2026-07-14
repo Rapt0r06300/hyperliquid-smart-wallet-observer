@@ -1,0 +1,42 @@
+DEBUT 
+y: 176 warnings
+tests/test_ui_action_catalog.py: 528 warnings
+tests/test_ui_app.py: 1056 warnings
+tests/test_ui_copy_dashboard.py: 1584 warnings
+tests/test_ui_discovery_autoscan.py: 1584 warnings
+tests/test_ui_discovery_simple_home.py: 1056 warnings
+tests/test_ui_explorer.py: 1056 warnings
+tests/test_ui_leaderboard.py: 528 warnings
+tests/test_ui_multi_assets.py: 880 warnings
+tests/test_ui_no_dead_buttons.py: 352 warnings
+tests/test_ui_overview_paper_ledger.py: 528 warnings
+tests/test_ui_routes.py: 352 warnings
+tests/test_ui_simulation_persistence.py: 5456 warnings
+tests/test_ui_simulation_status_fast.py: 5104 warnings
+tests/test_ui_simulation_v9_filters.py: 1232 warnings
+tests/test_ui_websocket.py: 176 warnings
+  C:\Users\flo\AppData\Roaming\Python\Python314\site-packages\fastapi\routing.py:233: DeprecationWarning: 'asyncio.iscoroutinefunction' is deprecated and slated for removal in Python 3.16; use inspect.iscoroutinefunction() instead
+    is_coroutine = asyncio.iscoroutinefunction(dependant.call)
+
+tests/test_whale_watchlist.py::TestWhaleScoreCandidate::test_score_recent_trades_get_higher_recency
+  C:\Users\flo\Desktop\Projet invest\tests\test_whale_watchlist.py:126: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    now = datetime.datetime.utcnow()
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ===========================
+FAILED tests/test_risk_guards_no_limbo.py::test_le_nombre_de_modules_MORTS_ne_doit_JAMAIS_remonter
+FAILED tests/test_ui_simulation_persistence.py::test_ui_simulation_replays_accepted_cluster_when_raw_rows_were_already_processed
+FAILED tests/test_ui_simulation_v9_filters.py::test_accepted_fresh_opportunity_cluster_opens_virtual_position_with_v9_authoritative
+3 failed, 3491 passed, 22051 warnings in 245.15s (0:04:05)
+
+
+
+========================================================================
+  LES DEUX CHIFFRES, COTE A COTE (aucun ne dit la meme chose)
+========================================================================
+  #121  modules IMPORTES par un test ......... borne OPTIMISTE (voir baseline)
+  #596  LIGNES reellement EXECUTEES .......... 83.83 %
+========================================================================
+
+-> baseline de lignes posee a 83.83 %
+FIN 
