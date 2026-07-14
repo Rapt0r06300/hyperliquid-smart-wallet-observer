@@ -40,7 +40,7 @@ copy-trading ». On fait deux choses :
 | **Copy-trading** | ❌ **MORT** — prouve sans edge, meme a cout zero | ferme |
 | **Market making retail** | ❌ **MORT** — on ne franchit pas la file d'attente (0,33 % des trades balayent les 2 577 $ poses devant nous) | ferme |
 | **Funding nu (jambe non couverte)** | ❌ **MORT** — 281 bps de risque de prix pour 1 bps de funding encaisse | ferme |
-| **Carry delta-neutre sur HYPE** | ✅ **SURVIT a la falsification** — **+33,6 bps nets dans son PIRE mois** (~7 % APR sur 500 $) | 🟢 **la seule piste vivante** — mais ⚠️ risque de **liquidation de la jambe perp** non modelise (**T2b / #588**) |
+| **Carry delta-neutre sur HYPE** | ✅ **SURVIT a la falsification** — mais T2b (#588, FAIT 13/07) a chiffre le risque de liquidation : marge 105,4 % du notionnel → **~2,0 % APR sur capital total** (et non 4 %) ; verrou `RISQUE_LIQUIDATION_NON_MESURE_NO_TRADE` cable | 🟢 **piste vivante, mesuree de bout en bout** — decision d'exploitation a prendre |
 | **Liquidations mecaniques** | ❓ prometteur (flux FORCE, non informe) | 🔒 **bloque** : on ne collecte pas la donnee (**X-11**) |
 | **Lead-lag oracle / CEX→HL** | ❓ mecanique, pas statistique | 🔒 non commence (**H-151**) |
 
@@ -66,16 +66,19 @@ Il restait **3 ROUGES** en debut de 3e passe. **2 sont tombes** :
 
 - ✅ **#586 (H-181)** — RESOLU **et REFUTE**. Voir §7.
 - ✅ **#598** — RESOLU : les 2 tests UI **exigeaient un edge INVENTE**. Voir §7.
-- 🔴 **#597** — le cliquet de cablage (304 > 303). **Toujours ouvert. Plafond NON releve.**
+- ✅ **#597** — fermee en 4e passe : 5e porte reconnue (`tools\*.py` lances par un `.cmd`),
+  **plafond BAISSE 304 → 273** — jamais releve. *(Reconcilie 2026-07-14.)*
 
 ## 6. 🎯 QUOI FAIRE ENSUITE — dans l'ordre
 
-1. **#597** — 🔴 *Le cliquet de cablage compte toute la recherche comme « morte »* (61 modules, dont
-   le moteur de recherche lui-meme). → Trancher : le CLI est-il un point d'entree ?
-   **Ne PAS relever le plafond.**
-2. **#588 (T2b)** — 🔴 *La jambe perp du carry HYPE peut etre LIQUIDEE.* C'est **la seule piste PnL
-   vivante** : son unique risque non modelise doit etre chiffre.
-3. **#599** — Que valent les ~16 % de lignes jamais executees ? (`coverage.json` est ecrit.)
+> ⚠️ **Reconcilie le 2026-07-14** : les 3 taches historiques de ce paragraphe (#597, #588, #599)
+> sont **FAITES** (4e, 8e et 6e passes). Le vrai reste-a-faire, sur pieces, est dans
+> `docs/audit/TASKLIST_RECONCILIATION_20260714.md`. En tete :
+1. **#372 (X-11) + #412 (H-07) — LIQUIDATIONS** : trancher X-13 (possible sur HL ?) puis
+   brancher la collecte read-only. La meilleure piste PnL (flux FORCE, non informe).
+2. **Carry HYPE (T2b ✅ ~2,0 % APR)** : decision d'EXPLOITATION a prendre (paper ON ou reserve).
+3. **#286 (P1) — identifiant de session commun** aux 3 processus (la plus importante des
+   taches de verite) ; puis #292b, #325/#304, #302, #303, #320, #314.
 
 ---
 
@@ -129,6 +132,12 @@ rouges**. Le correctif reste juste ; il ne diagnostiquait simplement pas ce bug-
 ---
 
 ## 📊 LES CHIFFRES
+
+> ⚠️ **Reconcilie le 2026-07-14** (`docs/audit/TASKLIST_RECONCILIATION_20260714.md`) :
+> les « en attente » ne sont PAS 284 choses a faire — la majorite ont deja leur verdict
+> dans un bloc de reconciliation (domines T1b, fermes par mesure, moisson epuisee,
+> doublons, notes de lecture). **Le reste-a-faire reel : ~16 taches d'ingenierie de
+> verite + 4 pistes PnL** (voir §6).
 
 | | nombre |
 |---|---:|
@@ -438,9 +447,10 @@ Toutes de la meme famille : **une capacite presente, un chainon manquant, et per
 
 ---
 
-## EN COURS (1)
+## EN COURS (0)
 
-- [ ] **#586** — H-181 — 🔴🔴🔴 TROUVÉ DANS LE CODE : on teste les 40 configs qui SUR-AJUSTENT LE PLUS, puis on s'étonne que 0 survive
+*(vide — #586 est RÉSOLUE et RÉFUTÉE, voir §7 : le meilleur scénario perd EN TRAIN, il n'y a
+aucun vainqueur à maudire. Réconcilié le 2026-07-14.)*
 
 ---
 
@@ -942,7 +952,7 @@ Le remede n'est jamais un inventaire. C'est un **invariant** :
       + `docs/audit/T2b_CARRY_LIQUIDATION.md`.
       **Limite nommée :** le pire est mesuré sur 200 jours. Un tampon calibré sur le pire *passé*
       n'est pas un tampon calibré sur le pire *possible*.
-- [ ] **#591** — 🔴 GARDE-FOU AFFAMÉ — data_anomaly + MidVolEstimator nourri seulement quand des positions sont ouvertes
+- [x] **#591** — ✅ FAITE (6e passe, voir plus haut) — les marks sont enregistres AVANT le retour anticipe, 5 tests. *(Doublon reconcilie 2026-07-14.)*
 - [x] **#593** — ✅ T3e — P4/P5 ENTERRÉS + 3 coquilles ; et **mon invariant a reproduit le bug de #597**
       *Fait 2026-07-13.* **Prouvé par exécution :** `hot_path`, `event_driven_decider`,
       `bounded_event_queue` n'ont **AUCUN import de production** — leurs seuls appelants sont leurs
@@ -969,7 +979,7 @@ Le remede n'est jamais un inventaire. C'est un **invariant** :
       Livré : `src/hl_observer/runtime/tombstones_runtime.py` (6 tombes) +
       `tests/test_runtime_no_limbo.py` (8 tests, dont 2 qui prouvent que la porte **mord**) +
       `CHECK-593.cmd` / `CHECK-593-FULL.cmd`.
-- [ ] **#594** — 🚩 DOUBLE-COMPTAGE — realtime_magic_score remultiplie la table par freshness + consensus
+- [x] **#594** — ✅ FAITE (4e passe, voir plus haut) — les deux tables d'edge reconciliees, bug de signe corrige, 8 tests. *(Doublon reconcilie 2026-07-14.)*
 
 ### CHANTIER Q/R/Z/G (edge mesure, invariants) — 3
 
@@ -979,12 +989,12 @@ Le remede n'est jamais un inventaire. C'est un **invariant** :
 
 ### PORTAGE GITHUB cible (GH-*) — 7
 
-- [ ] **#355** — GH-02 — 🔴 RECURSIVE BIAS : nos features changent-elles selon la quantité d'historique fournie ?
+- [x] **#355** — GH-02 — ✅ FAITE (7e passe) : biais recursif MESURE et REFUTE (ecart 26 M× sous le seuil). *(Doublon reconcilie 2026-07-14.)*
 - [ ] **#356** — GH-03 — PIPELINE DE SÉLECTION D'UNIVERS : filtres chaînés (freqtrade pairlist, GPL → idée)
-- [ ] **#357** — GH-04 — AVELLANEDA-STOIKOV : le prix de réservation (hummingbot, Apache-2.0 → adaptable)
+- [x] **#357** — GH-04 — ⚰️ DOMINEE par T1b (#587) : le MM est ferme a 100 % de fill ; un prix de reservation ne rouvre pas la porte. *(Reconcilie 2026-07-14.)*
 - [ ] **#358** — GH-05 — TOTAL WALLET EXPOSURE + « UNSTUCKING » (passivbot) : sortir d'une position coincée
 - [ ] **#359** — GH-06 — TRIANGULAIRE : graphe orienté + cycles (drakkar) — et son piège de performance
-- [ ] **#360** — GH-07 — CROSS-EXCHANGE MARKET MAKING (hummingbot) : le MM COUVERT, pas nu
+- [x] **#360** — GH-07 — ⚰️ DOMINEE par T1b (#587) + X-04 (couvrir ne change rien : 0/120). *(Reconcilie 2026-07-14.)*
 - [ ] **#361** — GH-08 — Lire ligne par ligne les 8 repos pertinents et écrire la matrice de distillation
 
 ### PISTES EXPLORATOIRES (X-*) et MOISSON (M-*) — RÉCONCILIÉES le 2026-07-13
@@ -1069,7 +1079,7 @@ Le remede n'est jamais un inventaire. C'est un **invariant** :
 - [ ] **#366** — X-05 — ⚖️ AUDIT JURIDIQUE : quels repos peut-on RÉELLEMENT utiliser ?
 - [ ] **#367** — X-06 — 🚩 LE PIÈGE DU REPO IMPRESSIONNANT : vérifier les AFFIRMATIONS avant le code
 - [ ] **#368** — X-07 — VAGUE 6 : cloner et trier les nouveaux repos trouvés (arbitrage + MM Hyperliquid)
-- [ ] **#369** — X-08 — 🔴 RISQUE NON MODÉLISÉ : la jambe perp d'un carry peut être LIQUIDÉE
+- [x] **#369** — X-08 — ✅ = #588 (T2b), FAITE le 13/07 : marge 105,4 %, ~2,0 % APR, verrou cable. *(Doublon reconcilie 2026-07-14.)*
 - [ ] **#370** — X-09 — 🔴🔴🔴 LE MEMPOOL HYPERLIQUID : le flux d'ordres AVANT exécution (LA voie de réouverture)
 - [ ] **#371** — X-10 — NŒUD LOCAL HYPERLIQUID : données L1 brutes (fills, ordres, statuts) sans passer par l'Indexer
 - [ ] **#372** — X-11 — 🔴 CARTE DES LIQUIDATIONS : un flux FORCÉ, prédictible depuis l'état public
