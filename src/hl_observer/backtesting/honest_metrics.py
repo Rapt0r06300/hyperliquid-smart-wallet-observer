@@ -224,4 +224,41 @@ def esperance(pnls: Sequence[float], *, min_trades: int = MIN_TRADES) -> Esperan
     n = len(xs)
     if n < min_trades:
         return Esperance(n_trades=n, winrate=0.0, gain_moyen=0.0, perte_moyenne=0.0,
-                         esperance=0.0, profit_factor=None, suffisant=Fal
+                         esperance=0.0, profit_factor=None, suffisant=False,
+                         motif="%s : %d < %d. *Un seul essai chanceux ne prouve rien.*"
+                               % (MOTIF_PAS_ASSEZ_DE_TRADES, n, min_trades))
+    gains = [x for x in xs if x > 0]
+    pertes = [-x for x in xs if x < 0]
+    wr = len(gains) / n
+    g = (sum(gains) / len(gains)) if gains else 0.0
+    p = (sum(pertes) / len(pertes)) if pertes else 0.0
+    pf = (sum(gains) / sum(pertes)) if pertes and sum(pertes) > 0 else None
+    return Esperance(n_trades=n, winrate=wr, gain_moyen=g, perte_moyenne=p,
+                     esperance=wr * g - (1.0 - wr) * p, profit_factor=pf, suffisant=True)
+
+
+def pire_periode(pnls_par_periode: dict[str, float]) -> tuple[str, float] | None:
+    """#579 — **la moyenne cache le desastre.** On juge sur le PIRE, comme T2b l'a fait."""
+    if not pnls_par_periode:
+        return None
+    k = min(pnls_par_periode, key=lambda x: pnls_par_periode[x])
+    return k, pnls_par_periode[k]
+
+
+def sharpe(pnls: Sequence[float]) -> float:
+    xs = [float(p) for p in pnls]
+    n = len(xs)
+    if n < 2:
+        return 0.0
+    m = sum(xs) / n
+    v = sum((x - m) ** 2 for x in xs) / (n - 1)
+    s = math.sqrt(v)
+    return (m / s) if s > 0 else 0.0
+
+
+__all__ = [
+    "MIN_TRADES", "MOTIF_PAS_ASSEZ_DE_TRADES",
+    "ComparaisonBuyAndHold", "DoubleDrawdown", "Esperance",
+    "buy_and_hold", "comparer_au_buy_and_hold", "double_drawdown", "esperance",
+    "pire_periode", "sharpe",
+]

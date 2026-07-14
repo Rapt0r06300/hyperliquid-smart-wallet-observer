@@ -279,3 +279,35 @@ def evaluer_carry_neutre(
         )
         if not liq.viable:
             return CarryNeutre(
+                coin=coin, funding_bps_h=round(funding_bps_h, 4), base_bps=round(base_bps, 2),
+                liquidite_spot_usd=round(liquidite_spot_usd, 0),
+                cout_entree_bps=round(cout_entree, 2), heures_pour_rentabiliser=heures,
+                funding_restant_a_ce_moment=round(restant, 4) if restant else None,
+                # le rendement AFFICHE devient celui du capital REELLEMENT immobilise (N + M)
+                gain_net_24h_bps=round(liq.rendement_sur_capital_bps, 3),
+                viable=False, motif=liq.motif, note=liq.note,
+            )
+        # la jambe perp survit : on publie le rendement sur le CAPITAL TOTAL, pas sur le notionnel
+        gain_24h = liq.rendement_sur_capital_bps
+    return CarryNeutre(
+        coin=coin, funding_bps_h=round(funding_bps_h, 4), base_bps=round(base_bps, 2),
+        liquidite_spot_usd=round(liquidite_spot_usd, 0),
+        cout_entree_bps=round(cout_entree, 2),
+        heures_pour_rentabiliser=heures,
+        funding_restant_a_ce_moment=round(restant, 4) if restant else None,
+        gain_net_24h_bps=round(gain_24h, 3),
+        viable=viable,
+        motif="CARRY_NEUTRE_VIABLE" if viable else MOTIF_BASE_TROP_CHERE,
+        note=("rembourse en %.0f h (%.1f j), puis portage pur -- %.1f bps nets sur %.0f jours"
+              % (heures, heures / 24.0, gain_24h, horizon_h / 24.0)) if viable
+             else ("rembourse en %.0f h mais le carry reste negatif sur l'horizon"
+                   % (heures or 0)),
+    )
+
+
+__all__ = [
+    "COUT_MAKER_2_JAMBES_BPS", "COUT_TAKER_2_JAMBES_BPS", "LIQUIDITE_SPOT_MIN_USD",
+    "MAKER_BPS", "MOTIF_BASE_TROP_CHERE", "MOTIF_FUNDING_TROP_FAIBLE", "MOTIF_INCONNU",
+    "MOTIF_PAS_DE_SPOT", "MOTIF_SPOT_ILLIQUIDE", "PERSISTANCE_1H", "TAKER_BPS",
+    "CarryNeutre", "evaluer_carry_neutre", "funding_cumule_bps",
+]

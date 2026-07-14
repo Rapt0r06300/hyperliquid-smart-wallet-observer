@@ -167,6 +167,7 @@ class PersistentPollRunner:
         self.step_durations: dict[str, int] = {}
         self.current_poll = 0
         self._cli_runner = None
+        self._session_id = ""
 
     # ------------------------------------------------------------------ infra
 
@@ -236,6 +237,7 @@ class PersistentPollRunner:
                     self.metrics[metric_key] = value
             payload: dict[str, Any] = {
                 "updated_at_ms": self._now_ms(),
+                "session_id": self._session_id,
                 "phase": phase,
                 "message": message,
                 "poll_index": self.current_poll,
@@ -503,6 +505,21 @@ class PersistentPollRunner:
                           "fusion-heartbeat-input", "--fresh-window-seconds", "120",
                           "--max-votes", "24", "--write-engine-status", "--no-report"])
 
+        # --- Carry HYPE paper (decision Flo 2026-07-14): journalise, gated, jamais bloquant
+        try:
+            from hl_observer.funding import carry_paper_runtime as _carry
+            if _carry.enabled():
+                self.write_engine_status("carry_hype_paper",
+                                         "Evaluation carry HYPE paper (journalisee, v1 sans position).")
+                t0 = self._now_ms()
+                ligne = _carry.evaluer_et_journaliser(cfg.root)
+                d = ligne.get("decision") or {}
+                self.metrics["carry_hype_viable"] = str(d.get("viable"))
+                self.metrics["carry_hype_motif"] = str(d.get("motif") or "")
+                self._add_step_duration("carry_hype_paper", t0)
+        except Exception as exc:  # noqa: BLE001
+            self.log(f"carry paper step failed (absorbe): {exc!r}")
+
         # --- Diagnostics (1 poll sur N)
         if i == 1 or (i % max(1, cfg.diagnostics_every_polls)) == 0:
             self.run_step(phase="simulation_readiness", message="Diagnostic de fraicheur et raisons de refus.",
@@ -511,6 +528,15 @@ class PersistentPollRunner:
                               "--fresh-window-seconds", "120"])
             self.run_step(phase="warehouse_report", message="Synthese warehouse local: wallets, deltas, decisions paper.",
                           label="warehouse-report", argv=["warehouse-report", "--fresh-window-seconds", "120"])
+            try:
+                # #286 LE LECTEUR: un identifiant sans verificateur serait la maladie du projet.
+                from hl_observer.runtime.session_identity import verifier_coherence
+                ok, motifs = verifier_coherence(cfg.root)
+                self.metrics["session_check"] = "OK" if ok else "FAIL"
+                if not ok:
+                    self.log("SESSION_CHECK FAIL: " + " | ".join(motifs))
+            except Exception:  # noqa: BLE001
+                pass
         else:
             self.log(f"Diagnostics sautes ce poll (1 poll sur {max(1, cfg.diagnostics_every_polls)}) pour la cadence.")
 
@@ -572,6 +598,17 @@ class PersistentPollRunner:
             cfg.runtime_data_dir.mkdir(parents=True, exist_ok=True)
         except Exception:  # noqa: BLE001
             pass
+        try:
+            # #286: LA session. Le lanceur la pose (env); le filet runner la cree sinon.
+            from hl_observer.runtime.session_identity import demarrer_session, session_courante
+            sid = session_courante(cfg.root)
+            if not sid:
+                sid = demarrer_session(cfg.root)
+                self.log(f"session demarree (filet runner): {sid}")
+            self._session_id = sid
+            self.metrics["session_id"] = sid
+        except Exception:  # noqa: BLE001
+            self._session_id = ""
         self.log(
             f"Persistent poll runner started (T44). root={cfg.root} interval={cfg.interval_seconds} "
             f"pool={cfg.max_leaders} leadersPerPoll={cfg.leaders_per_poll} maxRuns={cfg.max_runs} "

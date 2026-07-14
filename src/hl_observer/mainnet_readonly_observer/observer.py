@@ -97,6 +97,17 @@ class MainnetReadOnlyObserver:
             prix = {}
         grappes = construire_carte(positions_forcees, prix) if positions_forcees else []
 
+        # X-11: PERSISTER le snapshot. Sans historique, la mesure (liquidation_cascade)
+        # est impossible pour toujours. L'enregistrement n'a JAMAIS le droit de casser
+        # l'observation -- et n'enregistre que ce qu'on VOIT (carte borgne, borne basse).
+        if grappes:
+            try:
+                from hl_observer.market.liquidation_recorder import enregistrer_grappes
+                from hl_observer.runtime.session_identity import session_courante
+                enregistrer_grappes(grappes, ts_ms=unix_ms(), session_id=session_courante())
+            except Exception:  # noqa: BLE001
+                pass
+
         return MainnetObservation(
             source="hyperliquid_mainnet_readonly",
             all_mids=mids,

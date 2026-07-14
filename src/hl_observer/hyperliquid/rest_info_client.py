@@ -488,4 +488,16 @@ class HyperliquidInfoClient:
         self,
         coin: str,
         interval: str,
-  
+        start_time: int,
+        end_time: int,
+    ) -> list[dict[str, Any]]:
+        payload = build_candle_snapshot_payload(
+            coin,
+            interval,
+            start_time,
+            end_time,
+        )
+        data = await self._post_info("candleSnapshot", {"req": payload["req"]})
+        if not isinstance(data, list):
+            raise HyperliquidInfoError("candleSnapshot returned a non-list payload")
+        return data

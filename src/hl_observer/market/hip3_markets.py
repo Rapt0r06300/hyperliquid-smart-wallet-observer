@@ -173,4 +173,15 @@ def resume(dexs: Iterable[DexHip3], marches: Iterable[MarcheHip3]) -> dict[str, 
             "avant d'annoncer quoi que ce soit.**"
         ),
         "risques_specifiques_HIP3": [
-            "l'ORACLE est fixe par
+            "l'ORACLE est fixe par le DEPLOYEUR (doc HIP-3), pas par une mediane de CEX",
+            "le deployeur peut MULTIPLIER les frais (deployerFeeScale 0-300 % -> jusqu'a x2)",
+            "carnet mince : 500 $ de notionnel peut etre une fraction enorme du livre",
+        ],
+        "real_execution": False,
+    }
+
+
+__all__ = [
+    "MOTIF_DEX_INCONNU", "MOTIF_PAS_HIP3", "SEPARATEUR_HIP3",
+    "DexHip3", "MarcheHip3", "est_hip3", "parser_meta_dex", "parser_perp_dexs", "resume",
+]

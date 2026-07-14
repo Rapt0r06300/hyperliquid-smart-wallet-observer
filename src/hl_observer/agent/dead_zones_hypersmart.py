@@ -253,4 +253,99 @@ ZONES = [
         entree_mesuree="reglage_sltp",
         date="2026-07-09",
         lecon=(
-            "La boucle generer
+            "La boucle generer/tester/selectionner a PARFAITEMENT fonctionne : elle a correctement "
+            "rapporte que rien ne survit hors echantillon. Une boucle de recherche ne PEUT PAS "
+            "creer un edge qui n'existe pas. Il ne manquait pas la recherche, il manquait quelque "
+            "chose qui vaille la peine d'etre cherche."
+        ),
+        condition_de_reouverture=(
+            "un SIGNAL d'entree different (pas un reglage de sortie) dont l'edge est mesure positif"
+        ),
+        mots_cles=("sltp", "calibrage", "calibration", "stop", "takeprofit", "trailing",
+                   "replay", "grid", "seuil", "threshold", "tuning"),
+        source="docs/ANALYSE_REPLAY_LEVIER_REEL.md",
+    ),
+    # ═════════════════════════════════════════════════════════════════════════════════════════
+    # 2026-07-13 — L'ARGUMENT DE DOMINATION. Il enterre 15 taches d'un coup (H-46..H-89).
+    # ═════════════════════════════════════════════════════════════════════════════════════════
+    creer_zone_morte(
+        id="MODELE_DE_FILE_ET_DE_FILL",
+        hypothese=(
+            "Un meilleur modele de file / de remplissage (ProbQueueModel, L3FIFO, position par "
+            "ordre depuis le noeud, hftbacktest...) rendrait le market making viable."
+        ),
+        verdict=(
+            "IMPOSSIBLE PAR ARITHMETIQUE. T1b a mesure le MM a **100 % de remplissage** -- la "
+            "borne la PLUS GENEREUSE possible -- et a trouve 0/29 coins viables. Tout modele de "
+            "file plus realiste ne peut qu'ABAISSER le fill, donc qu'AGGRAVER le verdict."
+        ),
+        mesure="coins viables en cotant DANS le spread, a 100 % de remplissage",
+        valeur=0.0, unite="coins viables sur 29",
+        echantillon=9_543,
+        entree_mesuree="modele_de_file",
+        date="2026-07-13",
+        lecon=(
+            "Ce n'est pas un prejuge, c'est une DOMINATION. Quand une mesure est faite a la borne "
+            "la plus favorable et qu'elle est NEGATIVE, toute amelioration du realisme ne peut que "
+            "l'empirer. **Il n'y a rien a esperer d'un meilleur modele de file.** "
+            "Le spread n'est jamais un cadeau : c'est le PRIX DU RISQUE -- le prix bouge 5 a 30x "
+            "plus que le spread capture pendant qu'on porte l'inventaire."
+        ),
+        condition_de_reouverture=(
+            "une mesure montrant que le RISQUE D'INVENTAIRE (mouvement du prix pendant la "
+            "detention) est INFERIEUR au spread capture sur au moins un marche -- ce qui "
+            "n'a RIEN a voir avec le modele de file"
+        ),
+        # 🚩 UN SEUL MOT, sans espace ni tiret : la regex est `[a-z_]{3,}`. Un mot-cle avec un
+        # espace ("market making") ne pourrait JAMAIS matcher -- c'est le bug des mots-cles MORTS
+        # ("rl", "mm") documente ce matin meme, et je viens de le refaire ce soir. Mon propre
+        # invariant m'a rattrape.
+        # ⚠️ "l3fifo" serait MORT aussi : le tokeniseur est [a-z_]{3,}, le CHIFFRE le coupe
+        # ("l3fifo" -> "fifo"). 3e forme du meme piege, et mes tests ne la voyaient pas.
+        mots_cles=("file", "queue", "fill", "remplissage", "probqueue", "fifo", "hftbacktest",
+                   "making", "quoting", "coter", "xemm", "glft", "grinder"),
+        mots_cles_reouverture=("inventaire", "inventory", "detention"),
+        source="src/hl_observer/backtesting/quoting_inside_spread.py",
+    ),
+    creer_zone_morte(
+        id="LATENCE_COMME_CAUSE",
+        hypothese=(
+            "Reduire la latence (ou mieux la modeliser : latence de flux vs latence d'ordre) "
+            "ameliorerait l'edge."
+        ),
+        verdict=(
+            "NON. La courbe edge/horizon est PLATE : a 500 ms l'edge est de -3,74 bps ; a 8 h il "
+            "est du meme ordre. **L'edge est negatif AVANT toute latence.** On ne repare pas avec "
+            "de la vitesse un signal qui n'a aucune information."
+        ),
+        mesure="edge net a 500 ms d'horizon",
+        valeur=-3.74, unite="bps",
+        echantillon=24_133,
+        entree_mesuree="latence",
+        date="2026-07-11",
+        lecon=(
+            "La latence est le premier reflexe de tout le monde, et c'etait le notre. La courbe "
+            "plate l'a tue : **la latence n'a JAMAIS ete le probleme.** Le probleme est le "
+            "CONTENU du signal (le leader est contrarien), pas sa VITESSE."
+        ),
+        condition_de_reouverture=(
+            "un signal dont l'edge est mesure POSITIF a horizon court -- alors, et seulement "
+            "alors, la vitesse devient un enjeu"
+        ),
+        # Idem : un seul mot, sans espace. ("hft rapide" / "edge positif" seraient MORTS.)
+        mots_cles=("latence", "latency", "vitesse", "speed", "colocation", "hft"),
+        mots_cles_reouverture=("positif", "informatif"),
+        source="src/hl_observer/backtesting/horizon_curve.py",
+    ),
+]
+
+
+def registre_officiel() -> RegistreZonesMortes:
+    """Le cimetiere de HyperSmart. A consulter AVANT toute nouvelle piste."""
+    r = RegistreZonesMortes()
+    for z in ZONES:
+        r.enterrer(z)
+    return r
+
+
+__all__ = ["ZONES", "registre_officiel"]

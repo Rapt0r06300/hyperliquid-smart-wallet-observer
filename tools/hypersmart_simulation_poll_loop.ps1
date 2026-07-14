@@ -67,6 +67,13 @@ if ([string]::IsNullOrWhiteSpace($env:HYPERSMART_ADAPTIVE_PAPER_SIZING)) {
 if ([string]::IsNullOrWhiteSpace($env:HYPERSMART_MIN_REDUCE_NOTIONAL_USDT)) {
     $env:HYPERSMART_MIN_REDUCE_NOTIONAL_USDT = "0"
 }
+if ([string]::IsNullOrWhiteSpace($env:HYPERSMART_CARRY_HYPE_PAPER)) {
+    # Decision de Flo (2026-07-14, « les 3 ») : le carry HYPE tourne en PAPER.
+    # v1 = decisions JOURNALISEES (runtime/data/carry_hype_paper_decisions.jsonl), 0 position.
+    # Sans inputs MESURES (runtime/data/carry_spot_inputs.json), chaque poll journalise un
+    # REFUS motive -- c'est le deny-by-default voulu, pas un bug.
+    $env:HYPERSMART_CARRY_HYPE_PAPER = "1"
+}
 $script:EngineMetrics = @{
     runtime_venue = "Hyperliquid"
     paper_engine = "local_only"
@@ -277,6 +284,23 @@ try {
 }
 
 Write-LoopLog "Simulation poll loop started. root=$Root interval=$IntervalSeconds pool=$MaxLeaders leadersPerPoll=$LeadersPerPoll maxRuns=$MaxRuns maxLiveFillAgeMs=$UserFillsMaxLiveAgeMs"
+# ===== #286: LA SESSION NAIT ICI (une par lancement du poller). Tous les enfants heritent
+# de l'env; les processus freres (UI) lisent le manifeste runtime/data. =====
+if ([string]::IsNullOrWhiteSpace($env:HYPERSMART_SESSION_ID)) {
+    try {
+        $sid = (& python -m hl_observer.runtime.session_identity --start --root "$Root" 2>$null | Select-Object -Last 1)
+        if (-not [string]::IsNullOrWhiteSpace($sid)) {
+            $env:HYPERSMART_SESSION_ID = "$sid".Trim()
+            Write-LoopLog "Session demarree: $($env:HYPERSMART_SESSION_ID)"
+        } else {
+            Write-LoopLog "AVERTISSEMENT: session non demarree (sortie vide); le runner posera un filet."
+        }
+    } catch {
+        Write-LoopLog "AVERTISSEMENT: demarrage session impossible ($($_.Exception.Message)); le runner posera un filet."
+    }
+} else {
+    Write-LoopLog "Session heritee de l'environnement: $($env:HYPERSMART_SESSION_ID)"
+}
 Write-EngineStatus "starting" "Poller simulation Hyperliquid en demarrage."
 
 # ===== T44: MODE PERSISTANT (defaut) =====
