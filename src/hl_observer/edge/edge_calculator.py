@@ -28,6 +28,10 @@ class EdgeNetInputs:
     latency_decay_bps: float = 0.0
     copy_degradation_bps: float = 0.0
     funding_cost_bps: float = 0.0
+    # 🔴 L'IMPACT DE MARCHE (idee `impact` de moisson-fini.md) : notre propre ordre bouge le prix
+    #    contre nous. C'est un COUT -> il se SOUSTRAIT, exactement comme les frais. Calcule par
+    #    hl_observer.market.market_impact.impact_bps(taille, profondeur). Defaut 0.0 = retro-compat.
+    impact_cost_bps: float = 0.0
 
 
 @dataclass(frozen=True, slots=True)
@@ -53,6 +57,7 @@ def compute_net_edge(inputs: EdgeNetInputs, *, min_edge_bps: float = 30.0) -> Ed
         + max(0.0, inputs.latency_decay_bps)
         + max(0.0, inputs.copy_degradation_bps)
         + max(0.0, inputs.funding_cost_bps)
+        + max(0.0, inputs.impact_cost_bps)   # 🔴 l'impact est un COUT, il s'ADDITIONNE aux coûts
         - max(0.0, inputs.maker_rebate_bps)
     )
     net = inputs.gross_edge_bps - total_cost
@@ -69,15 +74,4 @@ def compute_net_edge(inputs: EdgeNetInputs, *, min_edge_bps: float = 30.0) -> Ed
         reasons.append(f"net_edge_bps={net:.2f}>=min={min_edge_bps:.2f}")
 
     return EdgeNetResult(
-        gross_edge_bps=inputs.gross_edge_bps,
-        total_cost_bps=total_cost,
-        net_edge_bps=net,
-        min_edge_bps=min_edge_bps,
-        decision=decision,
-        reasons=tuple(reasons),
-    )
-
-
-def apply_time_decay(gross_edge_bps: float, *, signal_age_ms: int, half_life_ms: int) -> float:
-    """Decay the gross edge by signal age before cost subtraction."""
-    return decay_edge(gross_edge_bps, signal_age_ms, half_life_ms)
+        gross_edge

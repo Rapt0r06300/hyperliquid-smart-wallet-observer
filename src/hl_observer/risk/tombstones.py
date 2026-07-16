@@ -288,6 +288,24 @@ TOMBES: tuple[Tombe, ...] = (
           "Une ligne : abs(current) < abs(previous). La detection REDUCE/CLOSE du leader est "
           "deja faite, avec l'etat et la deduplication, sur le chemin de copie vivant.",
           paquet="exits"),
+
+    # ======================================================================================
+    # 2026-07-16 — DEUX MODULES DE LA SESSION « moisson-fini », testes mais PAS ENCORE branches.
+    # Enterres honnetement (PARTIAL_NOT_WIRED, CLAUDE.md) : ils restent sur le disque, testes,
+    # prets a brancher. Ni l'un ni l'autre n'est un garde-fou -- un garde-fou REFUSE une entree ;
+    # l'allocation dimensionne, le modele de rejet change le PnL. Meme grille que scale_out /
+    # fill_outcomes. Le test `test_aucun_garde_fou_ne_reste_dans_l_entre_deux[risk]` les a trouves.
+    # ======================================================================================
+    Tombe("order_rejection", "REALISME_PAS_GARDE_FOU",
+          "personne aujourd'hui -- meme famille que paper/rejection_model et fill_outcomes "
+          "(H-91 : le rejet d'ordre). Le brancher rendrait le PnL plus PESSIMISTE (plus honnete).",
+          "proba_rejet(volatilite) modelise le refus de l'exchange quand ca bouge. Modele de "
+          "REALISME (il change le PnL), pas un refus d'entree : ca se MESURE avant de se brancher."),
+    Tombe("capital_allocation", "STRATEGIE_PAS_GARDE_FOU",
+          "personne -- l'allocation multi-strategie (carry + liquidations) est une decision de "
+          "CONSTRUCTION de portefeuille (tache #15) ; un garde-fou refuse, il n'alloue pas.",
+          "allouer() repartit le capital par edge/risque plafonne. Ca optimise la taille, ca ne "
+          "refuse rien -- meme verdict que risk/scale_out et exits/partial_take_profit."),
 )
 
 
@@ -314,51 +332,4 @@ BRANCHES: tuple[str, ...] = (
     #
     #    `barrier_calibration.breakeven_winrate(tp, sl, cout)` calcule le winrate d'EQUILIBRE
     #    implique par une configuration de barrieres. L'autopsie du 11/07 avait trouve :
-    #    « TP rabote a 28 bps pour 13 bps de frais -> breakeven 87 % -> perte GARANTIE ».
-    #    La correction avait ete de changer la CONFIG. Aucun garde-fou n'empechait la rechute.
-    #
-    #    Et il y a pire, mesure aujourd'hui :
-    #      * config du lanceur : TP=110, SL=60, cout=12  ->  breakeven = 72/170 = **42 %**  OK
-    #      * DEFAUT DU CODE   : TP=30,  SL=40, cout=12  ->  breakeven = 52/70  = **74 %**  PERTE GARANTIE
-    #
-    #    Si le flag du lanceur disparait un jour -- ce qui est arrive DEUX FOIS dans ce projet
-    #    (poller L2, funding) -- le code retombe SILENCIEUSEMENT sur une config perdante.
-    #    Ce garde-fou transforme cette perte silencieuse en REFUS BRUYANT.
-    "barrier_calibration",
-)
-
-
-#: Les paquets soumis a l'invariant « brancher ou enterrer ». En ajouter un ici suffit :
-#: le test se met a le juger, et tout module qui y traine dans l'entre-deux casse la suite.
-PAQUETS_JUGES: tuple[str, ...] = ("risk", "paper_trading", "exits")
-
-
-def est_enterre(module: str) -> bool:
-    return any(t.module == module for t in TOMBES)
-
-
-def tombe_de(module: str) -> Tombe | None:
-    for t in TOMBES:
-        if t.module == module:
-            return t
-    return None
-
-
-def modules_enterres(paquet: str | None = None) -> frozenset[str]:
-    return frozenset(t.module for t in TOMBES if paquet is None or t.paquet == paquet)
-
-
-def modules_branches() -> frozenset[str]:
-    return frozenset(BRANCHES)
-
-
-__all__ = [
-    "BRANCHES",
-    "PAQUETS_JUGES",
-    "TOMBES",
-    "Tombe",
-    "est_enterre",
-    "modules_branches",
-    "modules_enterres",
-    "tombe_de",
-]
+    #    « TP rabote a 28 bps pour 13 bps de fr
