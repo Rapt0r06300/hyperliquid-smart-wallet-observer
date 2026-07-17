@@ -140,8 +140,18 @@ il a attrapé **une régression que j'avais introduite**, et je l'ai corrigée +
   gardant **exactement** l'exercice G2 (le noyau ignore l'edge fourni 999, mesure 40 depuis la table,
   signale la contradiction ; coûts 25, net 15). **Robuste** : ARBITRAGE utilise la table que la
   carry-edge existe ou non → commité seul (`test_noyau_unique.py`) sans dépendre du WIP.
-- `test_runtime_no_limbo` (replay_shadow, session_and_bus) + cliquet global (318 > 273) : dette de
-  câblage **pré-existante** (limbe runtime + ~309 modules testés-non-branchés avant moi).
+- ✅ `test_runtime_no_limbo` (replay_shadow, session_and_bus) : **CORRIGÉ + vérifié (8/8 hors mount).**
+  Tombes runtime **honnêtes et contredisables** : `session_and_bus` = DOUBLON (sa moitié identité-session
+  double `session_identity.py`, VIVANT × 3 imports prod) ; `replay_shadow` = PAS_DE_CONSOMMATEUR
+  (replay/shadow offline, **zéro import de production** — `differentiel.py` ne cite que son nom dans
+  une chaîne). Réversibles (retirer la tombe pour rebrancher).
+- ⛔ **cliquet global (318 > 273) — SEUL RESTANT, et volontairement PAS « corrigé ».** Le fichier dit
+  lui-même : *« ces nombres ne doivent JAMAIS remonter ; quand on branche ou qu'on enterre, on les
+  BAISSE »*. **Monter le plafond violerait cette doctrine** — c'est le « plancher qui se desserre »
+  que le contrôle #76 traque. Le compte (318 = ~309 dette pré-existante + 10 modules mesure de cette
+  session) doit **baisser par câblage**, pas être masqué. C'est le ratchet qui **fonctionne** : il
+  réclame une campagne de câblage, pas un mensonge. **Décision volontaire : on le laisse rouge et
+  honnête.**
 
 *Chacun vérifié via `git status` : aucun de ces fichiers n'a été touché par cette session.*
 

@@ -118,6 +118,32 @@ TOMBES_RUNTIME: tuple[TombeRuntime, ...] = (
         ),
         preuve="grep `is_safe_mode_enabled` : 0 appelant ; safety-audit reste a 8/8 sans lui",
     ),
+
+    # ---- #302 / #286 : L'INFRA DE REPLAY DETERMINISTE -- batie, testee, JAMAIS appelee ----
+    #
+    # Trouvees dans le LIMBE par test_runtime_no_limbo (2026-07-16). Verifie a l'AST : AUCUN module
+    # de production ne les importe. `research/differentiel.py` ne fait que CITER le nom
+    # "replay_shadow" dans une chaine de mapping -- ce n'est pas un import. *Un nom dans une chaine
+    # ne cable rien.* (Reversibles : pour rebrancher le replay, on retire la tombe et on l'APPELLE.)
+    TombeRuntime(
+        module="session_and_bus",
+        motif="DOUBLON",
+        pourquoi=(
+            "sa moitie IDENTITE-DE-SESSION double `runtime/session_identity.py`, lui VIVANT (importe "
+            "par mainnet_readonly_observer/observer, runtime/persistent_poll_runner et "
+            "funding/carry_paper_runtime) ; sa moitie BUS ne sert qu'a replay_shadow, lui sans appelant"
+        ),
+        preuve="grep `session_identity` -> 3 imports de prod ; `session_and_bus` -> seul replay_shadow (mort) + tests",
+    ),
+    TombeRuntime(
+        module="replay_shadow",
+        motif="PAS_DE_CONSOMMATEUR",
+        pourquoi=(
+            "outil de REPLAY DETERMINISTE / shadow A-B, bati et teste, mais AUCUN chemin de production "
+            "ne l'invoque : c'est une validation OFFLINE, pas un module du chemin de decision live"
+        ),
+        preuve="AST : zero import de production ; differentiel.py ne cite que son NOM dans une chaine",
+    ),
 )
 
 MODULES_ENTERRES_RUNTIME: frozenset[str] = frozenset(t.module for t in TOMBES_RUNTIME)
