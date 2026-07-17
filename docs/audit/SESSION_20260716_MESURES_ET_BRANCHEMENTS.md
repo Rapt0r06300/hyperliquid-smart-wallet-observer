@@ -132,19 +132,14 @@ il a attrapé **une régression que j'avais introduite**, et je l'ai corrigée +
   `datetime.now(timezone.utc)` **dans le test** (pas le legacy). Fix mécanique standard.
 
 **RESTENT (sensibles / dette d'archi — pas de fix aveugle) :**
-- `test_noyau_unique` (4) : APRÈS analyse, c'est **le même motif propre** que delta_neutral — le
-  noyau lit **délibérément** le funding réel du carry (`edge_de_carry_bps`, noyau l.343-357 : « un
-  carry n'est pas de même nature, son edge est OBSERVÉ »), donc 57,9 (BTC) au lieu de la table (40).
-  Les tests G2 utilisent « BTC », qui a maintenant du funding réel.
-  **FIX EXACT trouvé (test-only, sûr) :** `edge_de_carry_bps` renvoie `None` si le coin est **absent
-  de `funding.jsonl`** (contient : ARB AVAX AZTEC BERA BNB BTC DOGE ETH HYPE LTC MON NEAR OP PUMP PURR
-  SOL STABLE SUI TRUMP). Remplacer « BTC » par un coin **synthétique absent** (ex. `"NOFUND"`) dans
-  `_table_avec_edge(...)` ET `_ctx(coin=...)` des 4 tests → carry-edge None → repli sur la table (40)
-  → les tests passent **en gardant exactement** l'exercice G2 (le noyau ignore l'edge fourni 999,
-  mesure 40, signale la contradiction).
-  ⚠️ **NON APPLIQUÉ par moi** : ce sont les tests **G2 — le garde anti-edge-fabriqué** (cœur de la
-  sécurité), et je ne peux pas les vérifier hors mount (le noyau 33 Ko se corrompt). À appliquer +
-  **vérifier sur Windows** (`TEST-AUDIT-complet.cmd`). Après ce fix : il ne resterait que le limbe/cliquet.
+- ✅ `test_noyau_unique` (4) : **CORRIGÉ + VÉRIFIÉ (17/17 hors mount).** Le noyau lit **délibérément**
+  le funding réel du carry pour FUNDING (`edge_de_carry_bps`, l.343-357), donc 57,9 (BTC) au lieu de
+  la table. **1er essai raté & instructif** : mettre un coin absent du funding **ne** marche pas — le
+  noyau ne se rabat PAS sur la table pour FUNDING, il **refuse** (`FUNDING_NON_MESURE`). **Vrai fix :**
+  tester G2 sur une famille **non-carry qui utilise la table** — `ARBITRAGE`. Les 4 tests passent en
+  gardant **exactement** l'exercice G2 (le noyau ignore l'edge fourni 999, mesure 40 depuis la table,
+  signale la contradiction ; coûts 25, net 15). **Robuste** : ARBITRAGE utilise la table que la
+  carry-edge existe ou non → commité seul (`test_noyau_unique.py`) sans dépendre du WIP.
 - `test_runtime_no_limbo` (replay_shadow, session_and_bus) + cliquet global (318 > 273) : dette de
   câblage **pré-existante** (limbe runtime + ~309 modules testés-non-branchés avant moi).
 

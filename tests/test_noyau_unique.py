@@ -89,10 +89,13 @@ def test_le_noyau_IGNORE_l_edge_fourni_par_l_appelant(monkeypatch):
     Le noyau, lui, VA CHERCHER l'edge. Il ne le RECOIT pas.
     """
     monkeypatch.setenv("HYPERSMART_EDGE_SOURCE", SOURCE_TABLE)
-    t = _table_avec_edge("FUNDING", "BTC", 40.0)
+    # 🔴 FUNDING lit maintenant le funding REEL (carry-edge, 365 j) : on ne peut plus lui injecter
+    #    un edge de table. La propriete G2 (« le noyau IGNORE l'edge fourni ») se teste donc sur une
+    #    famille qui utilise la TABLE -- ARBITRAGE. L'exercice testE est IDENTIQUE.
+    t = _table_avec_edge("ARBITRAGE", "BTC", 40.0)
 
     # L'appelant pretend avoir 999 bps d'edge. Le noyau mesure 40.
-    d = decider(_ctx(edge_fourni_bps=999.0), table=t)
+    d = decider(_ctx(edge_fourni_bps=999.0, strategie="ARBITRAGE"), table=t)
 
     assert d.edge_brut_bps == pytest.approx(40.0, abs=1.0), (
         "le noyau a utilise l'edge FOURNI (999) au lieu de l'edge MESURE (40)"
@@ -105,8 +108,8 @@ def test_le_noyau_IGNORE_l_edge_fourni_par_l_appelant(monkeypatch):
 
 def test_un_edge_fourni_COHERENT_ne_declenche_pas_de_contradiction(monkeypatch):
     monkeypatch.setenv("HYPERSMART_EDGE_SOURCE", SOURCE_TABLE)
-    t = _table_avec_edge("FUNDING", "BTC", 40.0)
-    d = decider(_ctx(edge_fourni_bps=39.8), table=t)
+    t = _table_avec_edge("ARBITRAGE", "BTC", 40.0)   # famille table (FUNDING lit le carry reel)
+    d = decider(_ctx(edge_fourni_bps=39.8, strategie="ARBITRAGE"), table=t)
     assert EDGE_FOURNI_IGNORE in d.signalements
     assert EDGE_FOURNI_CONTREDIT_LA_MESURE not in d.signalements
 
@@ -159,8 +162,8 @@ def test_1b_une_strategie_INCONNUE_est_refusee(monkeypatch):
 def test_3_un_PRIX_INEXECUTABLE_est_refuse(monkeypatch):
     """Carnet trop mince : on ne peut pas acheter 500 $. On n'invente pas le prix."""
     monkeypatch.setenv("HYPERSMART_EDGE_SOURCE", SOURCE_TABLE)
-    t = _table_avec_edge("FUNDING", "BTC", 100.0)
-    d = decider(_ctx(niveaux_achat=[(100.0, 0.5)]), table=t)     # ~50 $ dispo
+    t = _table_avec_edge("ARBITRAGE", "BTC", 100.0)   # famille table (FUNDING lit le carry reel)
+    d = decider(_ctx(niveaux_achat=[(100.0, 0.5)], strategie="ARBITRAGE"), table=t)     # ~50 $ dispo
     assert d.verdict == NO_TRADE
     assert d.raison == REFUS_PRIX_NON_EXECUTABLE
     assert d.edge_brut_bps == pytest.approx(100.0, abs=1.0), (
@@ -177,9 +180,10 @@ def test_3b_sans_carnet_du_tout_on_REFUSE(monkeypatch):
 def test_4_l_EDGE_NET_est_calcule_APRES_les_vrais_couts(monkeypatch):
     """40 bps d'edge, 12 bps de frais, 13 bps de degradation -> 15 bps nets. Plancher a 20 -> NON."""
     monkeypatch.setenv("HYPERSMART_EDGE_SOURCE", SOURCE_TABLE)
-    t = _table_avec_edge("FUNDING", "BTC", 40.0)
+    t = _table_avec_edge("ARBITRAGE", "BTC", 40.0)   # famille table (FUNDING lit le carry reel)
 
-    d = decider(_ctx(frais_bps=12.0, degradation_copie_bps=13.0, plancher_edge_net_bps=20.0),
+    d = decider(_ctx(frais_bps=12.0, degradation_copie_bps=13.0, plancher_edge_net_bps=20.0,
+                     strategie="ARBITRAGE"),
                 table=t)
     assert d.verdict == NO_TRADE
     assert d.raison == REFUS_EDGE_NET_INSUFFISANT
@@ -187,7 +191,8 @@ def test_4_l_EDGE_NET_est_calcule_APRES_les_vrais_couts(monkeypatch):
     assert d.edge_net_bps == pytest.approx(15.0, abs=1.0)
 
     # Meme edge, plancher a 10 -> OUI.
-    d2 = decider(_ctx(frais_bps=12.0, degradation_copie_bps=13.0, plancher_edge_net_bps=10.0),
+    d2 = decider(_ctx(frais_bps=12.0, degradation_copie_bps=13.0, plancher_edge_net_bps=10.0,
+                      strategie="ARBITRAGE"),
                  table=t)
     assert d2.verdict == ENTREE
     assert d2.autorise
