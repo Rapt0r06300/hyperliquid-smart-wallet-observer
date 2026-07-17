@@ -119,15 +119,25 @@ il a attrapé **une régression que j'avais introduite**, et je l'ai corrigée +
   campagne de **câblage** (ou un bump conscient du plafond) — décision de fond, pas un geste isolé.
 - `test_noyau_unique` (4) : le noyau lit un edge de carry (57,9 bps depuis `funding.jsonl`) au lieu du
   40 attendu par le test — intégration carry **pré-existante** (`carry_edge_source.py`, non commité).
-- `test_delta_neutral_carry` (5) : `COUT_MAKER_2_JAMBES_BPS` = **11.0** dans le code mais le test
-  attend **6.0** (`# 4 × 1,5 bps`). Le modèle de coût a été changé (spot maker ≠ perp maker) sans
-  mettre à jour le test. → **décision de modèle de coût (Flo)**, pas un fix aveugle.
-- `test_hypersmart_archive_hygiene` (1) : le test lit `CREER_ARCHIVE_PROPRE.cmd` **à la racine**, mais
-  il a été **déménagé** dans `outils de test/` (réorg 14/07). → décider où il doit vivre (**Flo**).
-- `test_whale_watchlist` (1) : code **legacy dYdX** (`hyper_smart_observer/dydx_v4/`) + `datetime.utcnow()`
-  déprécié. CLAUDE.md : ne pas étendre ce legacy. → à laisser / traiter à part.
-- `test_runtime_no_limbo` (replay_shadow, session_and_bus) + cliquet global : dette de câblage
-  **pré-existante** (limbe runtime + 309 modules testés-non-branchés avant moi).
+**CORRIGÉS le 16/07 (fixes sûrs, alignés sur du code délibérément corrigé) — 7 échecs :**
+- ✅ `test_delta_neutral_carry` (5) : le code a **délibérément** corrigé le coût (spot maker 4,0 ≠ perp
+  1,5) → `COUT_MAKER_2_JAMBES_BPS` 6,0 → **11,0**, aller-retour 88 h (pas 48). Le **test gardait les
+  vieux chiffres**. J'ai aligné les 5 tests sur le modèle corrigé (11,0/23,0, entrée 41 bps, 88 h,
+  maker ÷2,0). **Vérifié hors mount : 6/6 verts.** ⚠️ Le fix dépend de `delta_neutral_carry.py`
+  (ton WIP non commité, la constante 11,0) → laissé sur le disque, pas commité seul.
+- ✅ `test_hypersmart_archive_hygiene` (1) : `CREER_ARCHIVE_PROPRE.cmd` avait été déménagé dans
+  `outils de test/`, mais c'est un **launcher racine** (attendu par `archive.py`, comme
+  `LANCER_HYPERSMART.cmd`). **Restauré à la racine** (les 2 chaînes requises présentes).
+- ✅ `test_whale_watchlist` (1) : `datetime.utcnow()` déprécié (erreur sous Python 3.14). Corrigé en
+  `datetime.now(timezone.utc)` **dans le test** (pas le legacy). Fix mécanique standard.
+
+**RESTENT (sensibles / dette d'archi — pas de fix aveugle) :**
+- `test_noyau_unique` (4) : PAS le motif « test périmé ». Ton **intégration carry-edge** fait que le
+  noyau lit le funding réel (57,9 bps depuis `funding.jsonl`) **au lieu de respecter**
+  `HYPERSMART_EDGE_SOURCE=TABLE` (40). C'est un **conflit de précédence** dans ton WIP carry, qui
+  touche le **noyau sensible** → **ta décision de design**, je n'y touche pas en aveugle.
+- `test_runtime_no_limbo` (replay_shadow, session_and_bus) + cliquet global (318 > 273) : dette de
+  câblage **pré-existante** (limbe runtime + ~309 modules testés-non-branchés avant moi).
 
 *Chacun vérifié via `git status` : aucun de ces fichiers n'a été touché par cette session.*
 

@@ -1,7 +1,7 @@
 @echo off
 setlocal
 title HyperSmart - Creer archive propre
-cd /d "%~dp0"
+cd /d "%~dp0.."
 echo HyperSmart Observer - archive propre
 echo Projet: %CD%
 echo.

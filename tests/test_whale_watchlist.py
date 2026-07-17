@@ -123,7 +123,7 @@ class TestWhaleScoreCandidate:
         """Trades récents → score de récence plus élevé."""
         from hyper_smart_observer.dydx_v4.whale_watchlist import WhaleWatchlist
         import datetime
-        now = datetime.datetime.utcnow()
+        now = datetime.datetime.now(datetime.timezone.utc)
         recent_ts = (now - datetime.timedelta(days=2)).strftime("%Y-%m-%dT%H:%M:%S.000Z")
         old_ts = (now - datetime.timedelta(days=25)).strftime("%Y-%m-%dT%H:%M:%S.000Z")
 
