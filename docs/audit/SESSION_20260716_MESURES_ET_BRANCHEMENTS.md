@@ -119,9 +119,17 @@ il a attrapé **une régression que j'avais introduite**, et je l'ai corrigée +
   campagne de **câblage** (ou un bump conscient du plafond) — décision de fond, pas un geste isolé.
 - `test_noyau_unique` (4) : le noyau lit un edge de carry (57,9 bps depuis `funding.jsonl`) au lieu du
   40 attendu par le test — intégration carry **pré-existante** (`carry_edge_source.py`, non commité).
-- `test_delta_neutral_carry` (5), `test_runtime_no_limbo` (replay_shadow, session_and_bus),
-  `test_hypersmart_archive_hygiene` (1), `test_whale_watchlist` (1) : tous **pré-existants**, aucun
-  fichier touché par cette session (vérifié via `git status`).
+- `test_delta_neutral_carry` (5) : `COUT_MAKER_2_JAMBES_BPS` = **11.0** dans le code mais le test
+  attend **6.0** (`# 4 × 1,5 bps`). Le modèle de coût a été changé (spot maker ≠ perp maker) sans
+  mettre à jour le test. → **décision de modèle de coût (Flo)**, pas un fix aveugle.
+- `test_hypersmart_archive_hygiene` (1) : le test lit `CREER_ARCHIVE_PROPRE.cmd` **à la racine**, mais
+  il a été **déménagé** dans `outils de test/` (réorg 14/07). → décider où il doit vivre (**Flo**).
+- `test_whale_watchlist` (1) : code **legacy dYdX** (`hyper_smart_observer/dydx_v4/`) + `datetime.utcnow()`
+  déprécié. CLAUDE.md : ne pas étendre ce legacy. → à laisser / traiter à part.
+- `test_runtime_no_limbo` (replay_shadow, session_and_bus) + cliquet global : dette de câblage
+  **pré-existante** (limbe runtime + 309 modules testés-non-branchés avant moi).
+
+*Chacun vérifié via `git status` : aucun de ces fichiers n'a été touché par cette session.*
 
 ## 7. Sécurité
 
