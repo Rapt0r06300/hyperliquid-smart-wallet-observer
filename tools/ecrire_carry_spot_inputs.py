@@ -35,6 +35,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 from hl_observer.funding.delta_neutral_carry import evaluer_carry_neutre  # noqa: E402
+from hl_observer.funding.funding_persistence import estimer_persistance  # noqa: E402
 
 API = "https://api.hyperliquid.xyz/info"
 INPUTS_PATH = ROOT / "runtime" / "data" / "carry_spot_inputs.json"
@@ -171,6 +172,24 @@ def _pires_locales() -> dict[str, float]:
     return {co: v for co in lo if (v := _pire_hausse(hi[co], lo[co])) is not None}
 
 
+def _funding_history(coin: str, *, heures: int = 48) -> list[float]:
+    """A1 : historique du funding (bps/h) sur `heures` via l'endpoint public fundingHistory.
+    Le funding HL est HORAIRE (fundingRate = fraction/heure). On ne devine rien : liste vide si absent."""
+    fin = int(time.time() * 1000)
+    deb = fin - int(heures) * 3600 * 1000
+    try:
+        arr = _post({"type": "fundingHistory", "coin": coin, "startTime": deb, "endTime": fin})
+    except Exception:  # noqa: BLE001
+        return []
+    out: list[float] = []
+    for r in arr if isinstance(arr, list) else []:
+        try:
+            out.append(float(r["fundingRate"]) * 10_000.0)   # fraction/h -> bps/h
+        except (KeyError, TypeError, ValueError):
+            continue
+    return out
+
+
 def _pire_via_api(coin: str) -> float | None:
     """Bougies 1h fetchees pour un coin SANS bougie locale -> plus de coins evaluables."""
     fin = int(time.time() * 1000)
@@ -232,13 +251,19 @@ def scanner(diagnostic: bool):
         elif pire is None:
             raison = "pas de bougies -> pire-hausse non mesurable"
         else:
-            best = _meilleur_levier(c, p["funding_bps_h"], base, liq, p["levier_max"], pire)
+            # A1 : decider sur le funding PERSISTANT (resistant aux spikes), pas le snapshot chanceux.
+            fp = estimer_persistance(c, _funding_history(c))
+            funding_decision = fp.funding_persistant_bps_h if fp.fiable else p["funding_bps_h"]
+            best = _meilleur_levier(c, funding_decision, base, liq, p["levier_max"], pire)
             if best is None:
-                raison = "jambe perp liquidee meme a 2x (trop volatil / funding<=cout)"
+                raison = "jambe perp liquidee meme a 2x (funding persistant<=cout / trop volatil)"
             else:
                 lev, mr, v = best
                 inp = {"ts_ms": int(time.time() * 1000), "coin": c,
-                       "funding_bps_h": round(p["funding_bps_h"], 6), "base_bps": round(base, 4),
+                       "funding_bps_h": round(funding_decision, 6),
+                       "funding_snapshot_bps_h": round(p["funding_bps_h"], 6),
+                       "funding_persistant_bps_h": round(fp.funding_persistant_bps_h, 6),
+                       "funding_fiable": fp.fiable, "base_bps": round(base, 4),
                        "liquidite_spot_usd": round(liq, 2), "maker": True,
                        "levier_max": p["levier_max"], "marge_ratio": mr,
                        "pire_hausse_observee": pire, "levier_utilise": lev,
