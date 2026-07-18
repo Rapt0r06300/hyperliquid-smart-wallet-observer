@@ -27,6 +27,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 import time
 import urllib.request
@@ -58,6 +59,19 @@ LIQUIDITE_MIN_USD = NOTIONNEL_MAX_USD * SECURITE_PROFONDEUR   # 2500$ (au lieu d
 # (prouve). Baisser le levier = MOINS de risque, pas plus ; le carry reste funding-positif, juste
 # sur plus de capital immobilise. Un carry sur DES coins a 1x bat un carry sur AUCUN coin a 2x.
 LEVIERS_A_ESSAYER = (1.0, 1.5, 2.0, 3.0, 4.0, 5.0, 7.0, 10.0)
+# PLANCHER DE BREAK-EVEN — calibre sur une MESURE, pas sur une intuition (18/07).
+# MESURE : le break-even d'un carry HL est ~76-88 h QUEL QUE SOIT le funding courant, parce que la
+# PRIME decroit vers le plancher protocolaire (0,125 bps/h) : seul le plancher persiste. Un pic de
+# funding 4x ne donne que 76 h au lieu de 88 h. Donc un plancher a 24 h aurait tue TOUS les carrys.
+# On calibre a 120 h : ca laisse passer les carrys normaux (~88 h) et ecarte les ABSURDES (base tres
+# negative -> cout d'entree enorme -> jamais rembourse). Reglable :
+# HYPERSMART_CARRY_MAX_BREAK_EVEN_H. *** CONSEQUENCE HONNETE : un carry est NEGATIF ~3-4 jours
+# (le temps de rembourser l'entree), PUIS il monte. Il faut le TENIR, pas le churner. ***
+try:
+    MAX_BREAK_EVEN_H = float(os.environ.get("HYPERSMART_CARRY_MAX_BREAK_EVEN_H", "120") or 120.0)
+except (TypeError, ValueError):
+    MAX_BREAK_EVEN_H = 120.0
+
 PLAFOND_SHORTLIST = 12   # top-K carrys viables : on ouvre TOUS les viables (plus d'ouvertures =
 #                        # plus de funding capté + plus de données pour le replay). Toujours filtré
 #                        # sur l'edge NET positif : on élargit le panier, on ne baisse pas la barre.
@@ -290,23 +304,35 @@ def scanner(diagnostic: bool):
                 raison = "jambe perp liquidee meme a 2x (funding persistant<=cout / trop volatil)"
             else:
                 lev, mr, v = best
-                inp = {"ts_ms": int(time.time() * 1000), "coin": c,
-                       "funding_bps_h": round(funding_decision, 6),
-                       "funding_snapshot_bps_h": round(p["funding_bps_h"], 6),
-                       "funding_persistant_bps_h": round(fp.funding_persistant_bps_h, 6),
-                       "funding_fiable": fp.fiable,
-                       "funding_zscore": zf.zscore, "funding_regime": zf.regime,
-                       "facteur_taille": round(_fzs(zf.zscore), 4),   # Y4 : + gros si funding spike
-                       "base_bps": round(base, 4),
-                       "liquidite_spot_usd": round(liq, 2), "maker": True,
-                       "levier_max": p["levier_max"], "marge_ratio": mr,
-                       "pire_hausse_observee": pire, "securite_liquidation": SECURITE_LIQUIDATION,
-                       "levier_utilise": lev,
-                       "perp_px": round(p["mark"], 8),   # prix perp COURANT -> suivi liquidation live
-                       "gain_net_24h_bps": (round(v.gain_net_24h_bps, 4)
-                                            if v.gain_net_24h_bps is not None else None),
-                       "source": "hyperliquid public API (perp+spot) + bougies 1h", "real_execution": False}
-                viables.append((c, inp, v.heures_pour_rentabiliser, v.gain_net_24h_bps, zf.zscore))
+                # PLANCHER DE BREAK-EVEN (18/07) : un carry qui met des JOURS a rembourser son cout
+                # d'entree fait SAIGNER le PnL. On paie ~11 bps a l'ouverture ; au funding plancher
+                # (0,125 bps/h) il faut ~88 h pour les recuperer -> on reste dans le rouge des jours.
+                # On n'ouvre QUE si ca rembourse vite. Ne PAS ouvrir coute 0 ; ouvrir pour rien
+                # coute 11 bps. Moins d'ouvertures, mais chacune rentable pour de vrai.
+                be = v.heures_pour_rentabiliser
+                if be is None or float(be) > MAX_BREAK_EVEN_H:
+                    raison = ("break-even trop lent (%s h > %.0f h) : le funding ne rembourse pas le "
+                              "cout d'entree assez vite -> on ATTEND (aucune saignee de couts)"
+                              % (("?" if be is None else "%.0f" % float(be)), MAX_BREAK_EVEN_H))
+                else:
+                    inp = {"ts_ms": int(time.time() * 1000), "coin": c,
+                           "funding_bps_h": round(funding_decision, 6),
+                           "funding_snapshot_bps_h": round(p["funding_bps_h"], 6),
+                           "funding_persistant_bps_h": round(fp.funding_persistant_bps_h, 6),
+                           "funding_fiable": fp.fiable,
+                           "funding_zscore": zf.zscore, "funding_regime": zf.regime,
+                           "facteur_taille": round(_fzs(zf.zscore), 4),   # Y4 : + gros si funding spike
+                           "base_bps": round(base, 4),
+                           "break_even_h": round(float(be), 2),
+                           "liquidite_spot_usd": round(liq, 2), "maker": True,
+                           "levier_max": p["levier_max"], "marge_ratio": mr,
+                           "pire_hausse_observee": pire, "securite_liquidation": SECURITE_LIQUIDATION,
+                           "levier_utilise": lev,
+                           "perp_px": round(p["mark"], 8),   # prix perp COURANT -> suivi liquidation live
+                           "gain_net_24h_bps": (round(v.gain_net_24h_bps, 4)
+                                                if v.gain_net_24h_bps is not None else None),
+                           "source": "hyperliquid public API (perp+spot) + bougies 1h", "real_execution": False}
+                    viables.append((c, inp, v.heures_pour_rentabiliser, v.gain_net_24h_bps, zf.zscore))
         rapport.append((c, p["funding_bps_h"], liq, pire, "VIABLE" if inp else raison))
     viables = classer_viables(viables)          # A2 : classe par carry NET, coupe au top-K
     return rapport, viables
