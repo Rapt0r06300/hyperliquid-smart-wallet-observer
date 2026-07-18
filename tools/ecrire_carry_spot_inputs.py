@@ -42,7 +42,13 @@ CANDLES_1H = ROOT / "runtime" / "history" / "candles_1h.jsonl"
 
 BASE_ABERRANTE_BPS = 100_000.0
 FENETRE_H = 720
-LIQUIDITE_MIN_USD = 5_000.0
+# PLANCHER DE LIQUIDITE, principiel (plus de nombre arbitraire) : notre notionnel MAX est
+# marge $50 x levier 10 = $500. On exige 5x ce notionnel en profondeur REELLE (l2Book, sous 2%
+# d'impact) pour construire les 2 jambes sans se pousser soi-meme. -> 2500$ = le plancher du
+# MODELE lui-meme (delta_neutral_carry.LIQUIDITE_SPOT_MIN_USD), donc AUCUN double standard.
+NOTIONNEL_MAX_USD = 500.0
+SECURITE_PROFONDEUR = 5.0
+LIQUIDITE_MIN_USD = NOTIONNEL_MAX_USD * SECURITE_PROFONDEUR   # 2500$ (au lieu d'un 5000 arbitraire)
 LEVIERS_A_ESSAYER = (2.0, 3.0, 4.0, 5.0, 7.0, 10.0)   # on garde le plus HAUT qui reste viable
 
 
@@ -68,8 +74,10 @@ def _perps() -> dict[str, dict]:
     return out
 
 
-def _spots() -> dict[str, dict]:
-    """base -> {mark(du ctx), vol24, pair(nom de paire pour le l2Book)}. Join par NOM."""
+def _spots() -> dict[str, list[dict]]:
+    """base -> [{mark(du ctx), vol24, pair(nom de paire pour le l2Book)}, ...]. Join par NOM.
+    On garde TOUTES les paires candidates du meme ticker (le scanner choisira ensuite celle dont
+    le prix colle au perp -> tue les 'base aberrante' dues a une collision de nom / paire stale)."""
     spot = _post({"type": "spotMetaAndAssetCtxs"})
     sm, sc = (spot[0], spot[1]) if isinstance(spot, list) and len(spot) == 2 else ({}, [])
     tok = {int(t["index"]): str(t.get("name") or "").upper() for t in (sm.get("tokens") or []) if "index" in t}
@@ -79,7 +87,7 @@ def _spots() -> dict[str, dict]:
         b = tok.get(idx[0]) if idx else None
         if pr.get("name") and b:
             p2b[str(pr["name"])] = b
-    out: dict[str, dict] = {}
+    out: dict[str, list[dict]] = {}
     for c in sc or []:
         if not isinstance(c, dict):
             continue
@@ -91,8 +99,8 @@ def _spots() -> dict[str, dict]:
             px, vol = float(c.get("markPx") or c.get("midPx") or 0.0), float(c.get("dayNtlVlm") or 0.0)
         except (TypeError, ValueError):
             continue
-        if px > 0 and (b not in out or vol > out[b]["vol24"]):
-            out[b] = {"mark": px, "vol24": vol, "pair": pair}
+        if px > 0:
+            out.setdefault(b, []).append({"mark": px, "vol24": vol, "pair": pair})
     return out
 
 
@@ -186,9 +194,13 @@ def scanner(diagnostic: bool):
     communs = sorted(set(perps) & set(spots))
     rapport, viables = [], []
     for c in communs:
-        p, s = perps[c], spots[c]
-        if p["mark"] <= 0 or s["mark"] <= 0:
+        p = perps[c]
+        cands = [x for x in spots.get(c, []) if x["mark"] > 0]
+        if p["mark"] <= 0 or not cands:
             continue
+        # MAPPING PAR PRIX : parmi les paires spot du meme ticker, prendre celle dont le prix
+        # colle au perp (tue les "base aberrante" dues a une collision de nom / paire stale).
+        s = min(cands, key=lambda x: abs(x["mark"] - p["mark"]) / p["mark"])
         carnet = _carnet_spot(s["pair"])              # LE VRAI CARNET spot (mid + profondeur reelle)
         if carnet is None:
             spot_px, liq = s["mark"], 0.0             # carnet illisible -> profondeur 0 -> exclu
