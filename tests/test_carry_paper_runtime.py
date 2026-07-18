@@ -56,3 +56,47 @@ def test_inputs_mesures_verdict_complet_avec_verrou(tmp_path, monkeypatch):
     assert d["coin"] == "HYPE" and d["real_execution"] is False
     assert d["funding_bps_h"] == 1.2                       # transmis TEL QUEL (piege d'unite)
     assert isinstance(d["viable"], bool) and d["motif"]    # verdict rendu, jamais silencieux
+
+
+# ---------- ETAPE 2 (cablage opt-in) : ouvrir REELLEMENT la position paper ----------
+
+_INPUTS_VIABLES = {"ts_ms": 100_000_000, "coin": "HYPE", "funding_bps_h": 0.125, "base_bps": -0.68,
+                   "liquidite_spot_usd": 200_000.0, "maker": True, "levier_max": 10.0,
+                   "marge_ratio": 0.5, "pire_hausse_observee": 0.29, "levier_utilise": 2.0}
+
+
+def _ecrire_inputs(root, inputs):
+    p = root / INPUTS_RELPATH
+    p.parent.mkdir(parents=True, exist_ok=True)
+    p.write_text(json.dumps(inputs), encoding="utf-8")
+
+
+def test_etape2_off_par_defaut_aucune_ouverture(tmp_path, monkeypatch):
+    monkeypatch.delenv("HYPERSMART_CARRY_ETAPE2", raising=False)
+    _ecrire_inputs(tmp_path, _INPUTS_VIABLES)
+    ligne = evaluer_et_journaliser(tmp_path, now_ms=100_060_000)
+    assert ligne["etape2"] is None                                  # flag OFF -> on n'ouvre rien
+    assert not (tmp_path / "runtime" / "data" / "carry_paper_positions.json").exists()
+
+
+def test_etape2_on_ouvre_la_position_et_ecrit_le_ledger(tmp_path, monkeypatch):
+    monkeypatch.setenv("HYPERSMART_CARRY_ETAPE2", "1")
+    _ecrire_inputs(tmp_path, _INPUTS_VIABLES)
+    ligne = evaluer_et_journaliser(tmp_path, now_ms=100_060_000)
+    assert ligne["decision"]["viable"] is True                      # HYPE viable a 2x
+    assert ligne["etape2"]["ouvert"] is True                        # etape 2 a OUVERT
+    assert ligne["real_execution"] is False                         # ... mais JAMAIS d'ordre reel
+    assert (tmp_path / "runtime" / "data" / "carry_paper_positions.json").exists()
+    assert (tmp_path / "runtime" / "data" / "carry_paper_ledger.jsonl").exists()
+
+
+def test_etape2_erreur_ne_casse_pas_la_decision(tmp_path, monkeypatch):
+    # inputs viables mais on force une erreur interne -> la decision reste journalisee, etape2 = erreur
+    monkeypatch.setenv("HYPERSMART_CARRY_ETAPE2", "1")
+    _ecrire_inputs(tmp_path, _INPUTS_VIABLES)
+    import hl_observer.funding.carry_positions_store as store
+    monkeypatch.setattr(store, "tick_sur_disque",
+                        lambda *a, **k: (_ for _ in ()).throw(RuntimeError("boom")))
+    ligne = evaluer_et_journaliser(tmp_path, now_ms=100_060_000)
+    assert ligne["decision"]["viable"] is True                      # la decision survit
+    assert ligne["etape2"]["erreur"] == "etape2_indisponible"       # l'erreur est capturee, pas propagee

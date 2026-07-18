@@ -32,6 +32,7 @@ from hl_observer.funding.delta_neutral_carry import evaluer_carry_neutre
 from hl_observer.runtime.session_identity import session_courante
 
 ENV_ENABLED = "HYPERSMART_CARRY_HYPE_PAPER"
+ENV_ETAPE2 = "HYPERSMART_CARRY_ETAPE2"   # opt-in : ouvrir REELLEMENT la position paper (etape 2)
 INPUTS_RELPATH = Path("runtime") / "data" / "carry_spot_inputs.json"
 JOURNAL_RELPATH = Path("runtime") / "data" / "carry_hype_paper_decisions.jsonl"
 
@@ -42,6 +43,11 @@ MAX_AGE_S_DEFAUT = 900.0
 
 def enabled() -> bool:
     return os.environ.get(ENV_ENABLED, "0").strip() == "1"
+
+
+def etape2_active() -> bool:
+    """Ouvrir REELLEMENT les positions paper (etape 2). Opt-in : off par defaut."""
+    return os.environ.get(ENV_ETAPE2, "0").strip() == "1"
 
 
 def charger_inputs(root: str | Path = ".", *, now_ms: int | None = None,
@@ -95,11 +101,23 @@ def evaluer_et_journaliser(root: str | Path = ".", *, now_ms: int | None = None,
         decision = verdict.as_dict()
         inputs_age_s = round((now - float(inputs["ts_ms"])) / 1000.0, 1)
 
+    # ETAPE 2 (opt-in) : ouvrir/tenir/fermer REELLEMENT la position paper. Ne casse JAMAIS la
+    # decision/journal (une erreur ici est capturee). PAPER only : aucun ordre, aucune signature.
+    etape2 = None
+    if inputs is not None and etape2_active():
+        try:
+            from hl_observer.funding.carry_positions_store import tick_sur_disque
+            etape2 = tick_sur_disque(root, decision, inputs, now_ms=now,
+                                     funding_bps_h_courant=decision.get("funding_bps_h"))
+        except Exception as exc:  # noqa: BLE001
+            etape2 = {"erreur": "etape2_indisponible", "detail": str(exc)}
+
     ligne = {
         "ts_ms": now,
         "session_id": session_courante(root),
         "inputs_age_s": inputs_age_s,
         "decision": decision,
+        "etape2": etape2,
         "paper_only": True,
         "real_execution": False,
     }
