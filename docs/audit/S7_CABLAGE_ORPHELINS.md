@@ -126,3 +126,36 @@ légitimes (même rôle, paquets distincts) — à confirmer au cas par cas, hor
 
 *Rappel doctrine : une capacité testée n'est pas un PnL ; un import n'est pas un appel ; « mention
 ≠ porte ». On ne se ment pas sur ce qui tourne.*
+
+---
+
+## MàJ 2026-07-18 (soir) — 1re vague de câblage (X1) : la maladie recule, mesurée
+
+Suite à « tout brancher / 100 % câblé » : création du **pipeline de filtres composable**
+`src/hl_observer/gating/filter_pipeline.py`, branché à UN point de la porte LIVE
+`pipeline/v12_decision_pipeline.py` (helper `_appliquer_gardes`, appelé sur chaque entrée).
+
+**7 gardes P1 passés TESTÉ-SEULEMENT → CÂBLÉ-ET-CONSOMMÉS** (leur refus dégrade l'edge sous le
+plancher → NO_TRADE par le même chemin que l'edge) : `universe_guard` (S2), `session_conditioning`
+(G3), `freshness_cut` (L5), `structural_wallet_filter` (G5), `tick_quality_guard` (G4),
+`margin_reserve` (S6), `crowding` (S4) — plus `filter_pipeline` lui-même.
+
+**Compteur global : TESTÉ-SEULEMENT 273 (28,6 %) → 266 (27,9 %) ; CÂBLÉ 604 → 612.** Briques de
+session câblées : 9 → 16. Mesure rejouée par `tools/audit_cablage_modules.py`.
+
+**Honnêteté sur l'ACTIF vs l'ARMÉ** (un garde câblé n'est actif que si son entrée arrive) :
+- **ACTIF maintenant** au seam v12 : `freshness_cut` (âge = observed_at − source_ts venue) et
+  `session_conditioning` (permissif par défaut). Un signal > 120 s → NO_TRADE `SIGNAL_TROP_VIEUX`,
+  prouvé par test.
+- **ARMÉ** (abstient jusqu'à ce que son entrée soit plombée — X2) : `structural_wallet_filter`
+  (wallet_stats), `tick_quality_guard` (prix de référence), `margin_reserve` (marge/capital),
+  `crowding` (historique d'edge). `universe_guard` est présent mais redondant à ce seam (un coin
+  sans mid est déjà NO_TRADE) — il mordra sur d'autres seams.
+
+Anti-régression : **invariant AST** (`tests/test_v12_pipeline_gardes_cablees.py`) — la porte DOIT
+importer et appeler `appliquer_filtres`/`_appliquer_gardes`, sinon le test casse.
+
+**Cap honnête vers 100 %** : X2 (plomber les entrées → activer les 4 armés), X3 (brancher le
+sizing drawdown/vol DANS apply_delta — sortie consommée, pas jetée), puis signaux (validés OOS
+d'abord) et modélisation (après le feature-store). On fait BAISSER le 27,9 % vague après vague,
+sans jamais gonfler le compte par un import non appelé.

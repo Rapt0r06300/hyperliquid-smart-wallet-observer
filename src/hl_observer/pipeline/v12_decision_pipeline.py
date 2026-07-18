@@ -19,6 +19,7 @@ from typing import Any
 
 from hl_observer.edge.edge_net_v12 import EdgeNetV12Estimate, EdgeNetV12Inputs, estimate_edge_net_v12
 from hl_observer.evidence.decision_ledger import PaperDecisionEvidence, evidence_from_paper_result
+from hl_observer.gating.filter_pipeline import ContexteDecision, appliquer_filtres
 from hl_observer.models import DataQuality, Fill, SourceMeta
 from hl_observer.normalization.fills import NormalizedFillResult, normalize_hyperliquid_fill
 from hl_observer.paper_trading.paper_engine import PaperDecisionResult, PaperEngine, PaperEngineConfig
@@ -159,6 +160,7 @@ def run_v12_decision_pipeline(
         mid = _mid_for(delta.coin, pipeline_input.market_mids)
         leader_expected_edge = pipeline_input.leader_expected_edge_bps_by_coin.get(delta.coin.upper())
         edge = _estimate_edge(delta, event, mid, leader_expected_edge, cfg)
+        edge = _appliquer_gardes(edge, delta, mid, pipeline_input, cfg)
         edge_estimates[delta.delta_id] = edge
         if store is not None:
             store.upsert_edge_estimate(_edge_id(delta), edge, created_at_ms=pipeline_input.observed_at_ms)
@@ -253,6 +255,42 @@ def _estimate_edge(
             max_copy_degradation_bps=cfg.max_copy_degradation_bps,
         )
     )
+
+
+def _appliquer_gardes(
+    edge: EdgeNetV12Estimate,
+    delta: LeaderDelta,
+    current_mid: float | None,
+    pipeline_input: "V12DecisionPipelineInput",
+    cfg: V12DecisionPipelineConfig,
+) -> EdgeNetV12Estimate:
+    """Applique le pipeline de FILTRES P1 à l'ENTRÉE. Un refus applicable dégrade l'edge SOUS le
+    plancher → NO_TRADE par le MÊME chemin que l'edge (deny-by-default), et le motif remonte dans
+    reason_codes (→ evidence + no_trade_reasons). Les SORTIES ne sont jamais filtrées. On ne
+    fabrique rien : une entrée absente laisse le garde correspondant en abstention."""
+    if delta.is_exit_or_reduce:
+        return edge
+    univers = tuple(str(k).upper() for k in pipeline_input.market_mids.keys())
+    age_s: float | None = None
+    if pipeline_input.source_ts_ms is not None:
+        # âge = horodatage local d'observation − horodatage venue de la donnée (fraîcheur réelle).
+        age_s = max(0.0, (float(pipeline_input.observed_at_ms) - float(pipeline_input.source_ts_ms)) / 1000.0)
+    ctx = ContexteDecision(
+        coin=str(delta.coin).upper(),
+        est_sortie=False,
+        univers=univers,
+        ts_ms=pipeline_input.observed_at_ms,
+        wallet=str(pipeline_input.wallet),
+        mid=current_mid,
+        age_signal_s=age_s,
+    )
+    res = appliquer_filtres(ctx)
+    if res.accepte:
+        return edge
+    plancher = float(getattr(edge, "threshold_bps", cfg.min_edge_bps) or cfg.min_edge_bps)
+    net_degrade = min(float(edge.net_edge_bps or 0.0), -abs(plancher) - 1.0)
+    reasons = tuple(dict.fromkeys((*edge.reason_codes, *res.refus)))
+    return replace(edge, accepted=False, net_edge_bps=net_degrade, reason_codes=reasons)
 
 
 def _mid_for(coin: str, mids: dict[str, float]) -> float | None:
