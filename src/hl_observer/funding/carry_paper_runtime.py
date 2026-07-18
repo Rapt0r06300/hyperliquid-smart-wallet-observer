@@ -128,6 +128,15 @@ def evaluer_et_journaliser(root: str | Path = ".", *, now_ms: int | None = None,
     # ETAPE 2 (opt-in) : ouvrir/tenir/fermer REELLEMENT les positions paper -- MULTI-COINS via la
     # shortlist (repli sur le meilleur seul). Ne casse JAMAIS la decision/journal (erreur capturee).
     # PAPER only : aucun ordre, aucune signature.
+    # FIREHOSE (#1) : chaque décision carry (ACCEPT ou REFUS) devient un candidat replay, dans le
+    # MÊME flux que lit le docteur replay -> on rejoue MÊME sans ouverture réelle. Best-effort.
+    try:
+        from hl_observer.ops.decision_firehose import enregistrer_decision as _fh
+        _fh(str(root), decision, strategie="carry", ts_s=now / 1000.0,
+            mid=(inputs or {}).get("perp_px") if inputs else None)
+    except Exception:  # noqa: BLE001 — un firehose qui échoue ne casse jamais la décision
+        pass
+
     etape2 = None
     if etape2_active():
         try:
