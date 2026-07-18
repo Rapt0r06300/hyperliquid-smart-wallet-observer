@@ -56,7 +56,13 @@ REM les 2 gros perdants venaient des trades a edge marginal). Reversible.
 set "HYPERSMART_SIMULATION_MIN_EDGE_BPS=16"
 set "HYPERSMART_SIMULATION_MIN_LIQUIDITY_SCORE=0.55"
 set "HYPERSMART_SIMULATION_MAX_COPY_DEGRADATION_BPS=24"
-set "HYPERSMART_SINGLE_WALLET_MIN_EDGE_BPS=55"
+REM 2026-07-18 — MODE SNIPER MONO-WALLET DECLARE FERME (sentinelle >= 1000), pas desactive en
+REM douce : un plancher de 55 (ou 30) laissait croire que le mode vivait, alors que RIEN ne
+REM pouvait le franchir. Nos mesures : edge de copie -7,97 bps sur 24 133 signaux hors
+REM echantillon, leader CONTRARIEN. Copier un seul wallet, c'est payer pour perdre.
+REM ⚠️ Ca ne retire AUCUNE ouverture aujourd'hui (le mode etait deja infranchissable de fait).
+REM REVERSIBLE : le jour ou on mesure un edge de copie POSITIF, on remet un vrai plancher.
+set "HYPERSMART_SINGLE_WALLET_MIN_EDGE_BPS=9999"
 REM GATE V12 AUTORITATIF (2026-06-24): le gate unifie (source/quotes/fraicheur/liquidite/edge net)
 REM devient CONTRAIGNANT en intersection plus stricte: un candidat ne passe que si le score ET le
 REM gate V12 acceptent. Ne peut QUE reduire les trades (plus propres), jamais en creer. Mettre 0

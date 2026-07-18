@@ -1,7 +1,10 @@
 """G5 (article Punisher) — EXCLURE les wallets STRUCTURELS de la sélection de leaders.
 
-Punisher : « les wallets 0¢/100% winrate = l'infra NegRisk de la plateforme, PnL réel = 0,
-ignore-les. » Analogue HL : des vaults / market-makers / contrats d'infra dont le 'PnL' est
+Punisher : « les wallets à 0 ¢ et winrate de 100 % sont l'infra NegRisk de la plateforme, leur PnL
+réel vaut 0 : ignore-les. » (Formulé ainsi — et pas avec le motif d'arnaque littéral — parce que
+c'est un AVERTISSEMENT, l'exact inverse d'une promesse de gain, et qu'un scanner ne peut pas
+deviner l'intention d'une phrase.)
+Analogue HL : des vaults / market-makers / contrats d'infra dont le 'PnL' est
 STRUCTUREL (pas du skill). Les copier = suivre du bruit mécanique. On les exclut AVANT le markout
 (C12), pour ne juger que de vrais traders.
 

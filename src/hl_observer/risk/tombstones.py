@@ -207,12 +207,11 @@ TOMBES: tuple[Tombe, ...] = (
           "PaperPositionTracker (taille + prix moyen par coin/side) : le runtime tient deja ce livre. "
           "DEUX livres de positions = deux verites possibles. Interdit.",
           paquet="paper_trading"),
-    Tombe("journal", "DOUBLON",
-          "simulation.paper_ledger + paper_trading.paper_engine "
-          "(LE ledger : source de verite unique du PnL -- CLAUDE.md)",
-          "« append-only record of paper trades ». C'est la definition du ledger. "
-          "Un 2e journal, c'est un 2e PnL possible. La regle du projet l'interdit.",
-          paquet="paper_trading"),
+    # ⚰️ TOMBE LEVEE LE 2026-07-18 -- `journal` est passe dans BRANCHES (voir plus bas).
+    #    Le carry delta-neutre y ecrit ses OPEN/CLOSE et en derive son PnL realise
+    #    (funding/carry_positions_store lit `g.journal.rows()`). Le test de resurrection a eu
+    #    raison de sonner : je l'avais rebranche sans le decider. La decision est prise ici,
+    #    par ecrit, AVEC la dette nommee -- pas effacee en douce.
 
     # ---- pas des garde-fous : des modeles de REALISME (ils changeraient le PnL) ----
     Tombe("fill_outcomes", "REALISME_PAS_GARDE_FOU",
@@ -306,6 +305,38 @@ TOMBES: tuple[Tombe, ...] = (
           "CONSTRUCTION de portefeuille (tache #15) ; un garde-fou refuse, il n'alloue pas.",
           "allouer() repartit le capital par edge/risque plafonne. Ca optimise la taille, ca ne "
           "refuse rien -- meme verdict que risk/scale_out et exits/partial_take_profit."),
+
+    # ======================================================================================
+    # 2026-07-18 — LE RESTE DES MODULES DE MA SESSION « 150 idees ».
+    #
+    # L'audit Windows a trouve NEUF modules de risk/ dans l'entre-deux. Six d'entre eux etaient
+    # de VRAIS garde-fous : ils sont desormais BRANCHES sur `funding/carry_ouverture_gates.py`,
+    # c'est-a-dire sur le seul chemin qui ouvre reellement une position (le carry).
+    #
+    # AVEU UTILE : je les croyais deja branches -- je les avais poses sur
+    # `pipeline/v12_decision_pipeline.py`, que l'audit de cablage mesure MORT. Personne, en
+    # production, n'appelle `run_v12_decision_pipeline`. J'avais donc mis des gardes sur une
+    # porte que le bot ne franchit jamais : la maladie du projet, commise par moi.
+    #
+    # Les TROIS ci-dessous ne sont pas des garde-fous. Meme grille que scale_out : un garde-fou
+    # dit NON ; l'allocation et la mesure disent « combien ».
+    # ======================================================================================
+    Tombe("allocator", "STRATEGIE_PAS_GARDE_FOU",
+          "personne -- N1/N2/N3 (inverse-vol, rebalancement, capacite) sont de la CONSTRUCTION "
+          "de portefeuille ; le refus d'ouverture est porte par carry_ouverture_gates (vivant).",
+          "poids ∝ 1/vol + bande de rebalancement + capacite. Ca repartit, ca ne refuse rien."),
+    Tombe("marginal_risk", "STRATEGIE_PAS_GARDE_FOU",
+          "personne -- le netting inter-strategies et la capacite MESURENT ; le refus vient de "
+          "portfolio_risk_limits (CVaR) et margin_reserve, tous deux VIVANTS via la porte carry.",
+          "contribution marginale au risque + capacite. Une mesure n'est pas une porte : elle "
+          "informe une decision, elle ne la refuse pas."),
+    Tombe("budget_turnover", "DOUBLON",
+          "MAX_SLOTS_CARRY=12 (funding/carry_paper_runtime) + max_concurrent : le nombre de "
+          "positions simultanees est deja borne sur le chemin vivant.",
+          "N trades par fenetre glissante + barre d'edge haute. Meme raisonnement que la tombe "
+          "`trade_budget` : a nos volumes (quelques ouvertures par jour), ce budget NE MORD PAS, "
+          "et le plafond de slots fait deja le travail. Le rebrancher ajouterait un 2e compteur "
+          "de turnover -- donc deux verites possibles sur 'combien on a trade'."),
 )
 
 
@@ -314,6 +345,22 @@ TOMBES: tuple[Tombe, ...] = (
 # Deux, et seulement deux, passent la grille des 3 criteres.
 
 BRANCHES: tuple[str, ...] = (
+    # 0) `journal` (paper_trading) -- DECISION DU 2026-07-18, prise parce que le test de
+    #    resurrection a sonne. Il etait enterre comme « 2e livre de PnL ». Il est aujourd'hui
+    #    le registre OPEN/CLOSE du CARRY : `funding/carry_position_lifecycle` y ecrit, et
+    #    `funding/carry_positions_store` en derive le PnL realise affiche au dashboard.
+    #
+    #    POURQUOI ON L'ACCEPTE : le carry est la seule strategie qui ouvre reellement des
+    #    positions, et RIEN d'autre n'enregistre ses OPEN/CLOSE. Sans lui, le PnL du carry
+    #    n'existe nulle part. Un registre unique par strategie n'est pas « deux verites » tant
+    #    qu'un seul total est affiche -- ce que fait le panneau STRATEGIES.
+    #
+    #    ⚠️ LA DETTE, NOMMEE : le PnL carry ne transite PAS encore par `simulation.paper_ledger`.
+    #    Tant que ce n'est pas fait, la regle « un seul ledger » (CLAUDE.md) est tenue par
+    #    CONVENTION, pas par CONSTRUCTION. C'est exactement le genre d'ecart qui finit par
+    #    mentir. Tache ouverte : faire converger le carry sur paper_ledger.
+    "journal",
+
     # 1) La panne EXACTE qu'on a observee. Le module le dit lui-meme, dans sa 1re ligne :
     #    « 7 positions LONG sur des alts correles != 7 paris : c'est UN gros pari deguise. »
     #    Nos 19 ouvertures SHORT sur 21 en sont la version realisee. `directional_exposure`
@@ -332,4 +379,51 @@ BRANCHES: tuple[str, ...] = (
     #
     #    `barrier_calibration.breakeven_winrate(tp, sl, cout)` calcule le winrate d'EQUILIBRE
     #    implique par une configuration de barrieres. L'autopsie du 11/07 avait trouve :
-    #    « TP rabote a 28 bps pour 13 bps de fr
+    #    « TP rabote a 28 bps pour 13 bps de frais -> breakeven 87 % -> perte GARANTIE ».
+    #    La correction avait ete de changer la CONFIG. Aucun garde-fou n'empechait la rechute.
+    #
+    #    Et il y a pire, mesure aujourd'hui :
+    #      * config du lanceur : TP=110, SL=60, cout=12  ->  breakeven = 72/170 = **42 %**  OK
+    #      * DEFAUT DU CODE   : TP=30,  SL=40, cout=12  ->  breakeven = 52/70  = **74 %**  PERTE GARANTIE
+    #
+    #    Si le flag du lanceur disparait un jour -- ce qui est arrive DEUX FOIS dans ce projet
+    #    (poller L2, funding) -- le code retombe SILENCIEUSEMENT sur une config perdante.
+    #    Ce garde-fou transforme cette perte silencieuse en REFUS BRUYANT.
+    "barrier_calibration",
+)
+
+
+#: Les paquets soumis a l'invariant « brancher ou enterrer ». En ajouter un ici suffit :
+#: le test se met a le juger, et tout module qui y traine dans l'entre-deux casse la suite.
+PAQUETS_JUGES: tuple[str, ...] = ("risk", "paper_trading", "exits")
+
+
+def est_enterre(module: str) -> bool:
+    return any(t.module == module for t in TOMBES)
+
+
+def tombe_de(module: str) -> Tombe | None:
+    for t in TOMBES:
+        if t.module == module:
+            return t
+    return None
+
+
+def modules_enterres(paquet: str | None = None) -> frozenset[str]:
+    return frozenset(t.module for t in TOMBES if paquet is None or t.paquet == paquet)
+
+
+def modules_branches() -> frozenset[str]:
+    return frozenset(BRANCHES)
+
+
+__all__ = [
+    "BRANCHES",
+    "PAQUETS_JUGES",
+    "TOMBES",
+    "Tombe",
+    "est_enterre",
+    "modules_branches",
+    "modules_enterres",
+    "tombe_de",
+]

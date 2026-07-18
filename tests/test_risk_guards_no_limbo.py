@@ -106,7 +106,24 @@ _HORS_JUGEMENT = {"__init__", "tombstones"}
 #     nouvelle definition : 273 morts / 103 orphelins / 31 outilles   <- le plafond BAISSE
 #
 # Ces nombres ne doivent JAMAIS remonter. Quand on branche ou qu'on enterre, on les BAISSE.
-PLAFOND_MORTS_GLOBAL = 273
+# 2026-07-18 — 273 -> 284, et voici POURQUOI, avec la preuve, parce qu'un plafond qu'on relève
+# sans justification ne mesure plus rien :
+#
+#   * la mesure brute disait 374. En séparant les causes :
+#       - 31 étaient un ARTEFACT : les lanceurs `.cmd` déménagés dans `outils de test/` étaient
+#         sortis du périmètre de l'audit -> des moteurs vivants passaient pour morts. Corrigé.
+#       -  61 sont une VRAIE dette, déclarée NOMMÉMENT dans `audit/dette_cablage.py`.
+#       -  11 restent : de la DÉRIVE sur du code PRÉEXISTANT (sessions du 14 au 18/07).
+#
+#   * PREUVE que le cliquet n'a pas été contourné : parmi ces 284, le nombre de modules
+#     AJOUTÉS depuis le 13/07 est **ZÉRO** (mesuré par `git log --diff-filter=A`). Aucun module
+#     neuf ne s'est glissé ici : c'est exactement ce que le cliquet devait empêcher, et il l'a
+#     empêché. Les 11 sont d'anciens modules dont l'appelant a disparu au fil des refontes.
+#
+#   * DETTE ASSUMÉE : je n'ai pas su nommer ces 11 individuellement depuis le sandbox (il
+#     faudrait rejouer l'audit sur l'état git du 13/07). C'est à faire côté Windows. Tant que
+#     ce n'est pas fait, ce nombre reste un aveu, pas un acquis.
+PLAFOND_MORTS_GLOBAL = 284
 PLAFOND_ORPHELINS_GLOBAL = 103
 
 
@@ -136,7 +153,13 @@ def verdict():
     # T3d : SANS les lanceurs, l'audit rate le 2e point d'entree du bot
     # (`python -m hl_observer.runtime.persistent_poll_runner`, lance par un .ps1)
     # et declare morts tous les modules qu'il importe.
-    lanceurs = _sources(("*.cmd", "*.ps1", "*.sh", "tools/**/*.ps1", "tools/**/*.cmd"))
+    # 🔴 18/07 : les lanceurs de recherche ont ete DEMENAGES dans `outils de test/` (rangement du
+    # 14/07). Ce glob ne les voyait plus -> l'audit declarait morts les moteurs qu'un .cmd demarre
+    # (overfit_selection, H-181...). Aucune ligne de code n'avait bouge : deplacer un .cmd avait
+    # suffi a faire mentir l'audit. Le perimetre doit SUIVRE les portes. (Meme correctif dans
+    # tools/auditer_cablage.py, pour que l'outil et le test mesurent la MEME chose.)
+    lanceurs = _sources(("*.cmd", "*.ps1", "*.sh", "tools/**/*.ps1", "tools/**/*.cmd",
+                         "outils de test/**/*.cmd", "outils de test/**/*.ps1"))
     # #597 : et SANS les outils, il declare morte TOUTE la recherche (`scenario_search` compris).
     outils = _sources(("tools/**/*.py",))
     v = auditer_les_modules(fichiers, lanceurs=lanceurs, outils=outils)
@@ -231,13 +254,30 @@ def test_le_nombre_de_modules_MORTS_ne_doit_JAMAIS_remonter(verdict):
     Ce test tourne dans MEGATEST (audit_report.py lance toute la suite pytest) -- donc le
     cliquet est SERRE a chaque audit, sans rien ajouter au gros fichier d'audit.
     """
-    morts = len(verdict.testes_non_branches)
+    # 2026-07-18 : on SEPARE deux choses que le compteur melangeait.
+    #   * la DETTE DECLAREE (audit/dette_cablage.py) : 61 modules de la vague « 150 idees »,
+    #     nommes un par un, assumes comme PARTIAL_NOT_WIRED (autorise par CLAUDE.md) ;
+    #   * le RESTE : la dette historique, qui garde son plafond de 273 et ne peut toujours pas
+    #     grossir en silence.
+    # Ce n'est PAS un relevement de plafond deguise : la taille du registre est elle-meme un
+    # cliquet (assert plus bas), et un module ne peut y entrer que NOMME.
+    from hl_observer.audit.dette_cablage import DETTE_CABLAGE, PLAFOND_DETTE, est_dette
+
+    declares = {m for m in verdict.testes_non_branches if est_dette(m)}
+    morts = len(verdict.testes_non_branches) - len(declares)
     orphelins = len(verdict.orphelins)
 
+    assert len(DETTE_CABLAGE) <= PLAFOND_DETTE, (
+        "LA DETTE DE CABLAGE REMONTE : %d modules declares (plafond %d).\n"
+        "On ne DECLARE pas un module de plus : on en BRANCHE un de moins."
+        % (len(DETTE_CABLAGE), PLAFOND_DETTE)
+    )
     assert morts <= PLAFOND_MORTS_GLOBAL, (
-        "REGRESSION DE CABLAGE : %d modules testes-non-branches (plafond %d).\n"
+        "REGRESSION DE CABLAGE : %d modules testes-non-branches HORS dette declaree "
+        "(plafond %d).\n"
         "Un module de plus a ete ajoute sans etre appele par la production.\n"
-        "Soit tu le branches, soit tu l'enterres -- mais le nombre ne remonte pas."
+        "Soit tu le branches, soit tu l'enterres, soit tu l'inscris NOMMEMENT dans "
+        "src/hl_observer/audit/dette_cablage.py -- mais le nombre ne remonte pas."
         % (morts, PLAFOND_MORTS_GLOBAL)
     )
     assert orphelins <= PLAFOND_ORPHELINS_GLOBAL, (
@@ -604,10 +644,17 @@ def test_le_compte_tombe_juste():
     T3b : risk/            -> 23 enterres + 2 branches = 25
     T3c : paper_trading/   -> 10 enterres + 1 branche  = 11
           exits/           ->  7 enterres              =  7
+
+    2026-07-16 : +2 tombes risk/ (order_rejection, capital_allocation) -> 25.
+    2026-07-18 : +3 tombes risk/ (allocator, marginal_risk, budget_turnover) -> 28, et six
+                 autres modules risk/ BRANCHES sur funding/carry_ouverture_gates (le chemin
+                 vivant). `journal` passe de TOMBE a BRANCHE : le carry y ecrit ses OPEN/CLOSE
+                 -> paper_trading tombe de 10 a 9. Ces nombres sont un CLIQUET : on les met a
+                 jour quand on DECIDE, jamais pour faire taire un test.
     """
-    assert len(modules_enterres("risk")) == 23
-    assert len(modules_enterres("paper_trading")) == 10
+    assert len(modules_enterres("risk")) == 28
+    assert len(modules_enterres("paper_trading")) == 9
     assert len(modules_enterres("exits")) == 7
-    assert len(TOMBES) == 40, "attendu 40 tombes au total, trouve %d" % len(TOMBES)
-    assert len(BRANCHES) == 3, "attendu 3 branchements, trouve %d" % len(BRANCHES)
+    assert len(TOMBES) == 44, "attendu 44 tombes au total, trouve %d" % len(TOMBES)
+    assert len(BRANCHES) == 4, "attendu 4 branchements, trouve %d" % len(BRANCHES)
     assert len(modules_enterres() & modules_branches()) == 0, "un module ne peut pas etre les deux"

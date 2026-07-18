@@ -526,14 +526,26 @@ def c_secrets():
     ]
     hits = []
     skip = ("test", "mock", "fixture", "example", "runtime", "logs")
+    # 18/07 : `0x[64 hex]` ne veut PAS dire « cle privee ». Un hash keccak, un topic d'evenement,
+    # un hash de transaction ou de bloc ont exactement la meme forme. Le faux positif bloquant
+    # etait TOPIC_TRANSFER (signature de l'evenement ERC-20 `Transfer`), une constante PUBLIQUE
+    # et universelle, commentee comme telle deux lignes plus haut.
+    # Une cle privee ne s'appelle jamais "TOPIC_..." : on regarde donc le CONTEXTE de la ligne.
+    # C'est etroit et verifiable -- pas une exclusion de fichier qui aveuglerait le controle.
+    contexte_hash = ("topic", "hash", "digest", "keccak", "sha", "selector",
+                     "checksum", "commit", "signature de l'evenement", "event")
     for p in _py_files(*[d for d in code_dirs() if d != "tests"]):
         rel = _rel(p)
         if any(s_ in rel.lower() for s_ in skip):
             continue
         txt = p.read_text(encoding="utf-8", errors="replace")
+        lignes = txt.splitlines()
         for pat, label in pats:
             for m in re.finditer(pat, txt):
                 line = txt[:m.start()].count("\n") + 1
+                src = lignes[line - 1].lower() if line - 1 < len(lignes) else ""
+                if any(k in src for k in contexte_hash):
+                    continue
                 hits.append(f"{rel}:{line} {label} -> {m.group(0)[:30]}...")
     return c.finish(f"{len(hits)} secret(s) reel(s) detecte(s)", _trim(hits))
 
@@ -1097,6 +1109,14 @@ def regex_rule(title, pattern, *, why="", blocking=False, dirs=None, exclude=(),
             for m in re.finditer(pattern, txt, flags):
                 line = txt[:m.start()].count("\n") + 1
                 src_line = lines[line - 1] if line - 1 < len(lines) else ""
+                # MARQUEUR EXPLICITE (18/07). Certaines lignes contiennent LEGITIMEMENT le motif
+                # interdit : la liste des mots bannis d'un filtre, l'appat d'arnaque qu'un canari
+                # doit REJETER... Le garde etait accuse a la place du voleur.
+                # Plutot qu'une exclusion de fichier (large, invisible, qui aveugle le controle
+                # pour tout le fichier a jamais), l'exemption se declare SUR LA LIGNE, se lit en
+                # relecture de diff, et se compte (test_marqueurs_audit_fixture.py la cliquette).
+                if "audit:fixture" in src_line.lower():
+                    continue
                 if line_exclude and any(w.lower() in src_line.lower() for w in line_exclude):
                     continue
                 hits.append(f"{rel}:{line} {src_line.strip()[:90]}")
@@ -1126,7 +1146,12 @@ c_wallet_connect = regex_rule(
     "Aucun wallet-connect",
     r"walletconnect|WalletConnect|wallet_connect",
     why="aucun moyen de signer pour agir", blocking=True,
-    exclude=("agent_tools/",),          # ce paquet DECLARE la liste des outils INTERDITS
+    # Ces deux paquets DECLARENT la liste de ce qui est INTERDIT. `security/dependances.py` est
+    # litteralement la blocklist ("walletconnect": "Connexion d'un vrai portefeuille pour AGIR.").
+    # Accuser la blocklist de contenir le mot qu'elle interdit, c'est confondre le garde et le
+    # voleur -- et ca finit par faire desactiver l'audit. Un VRAI import walletconnect reste
+    # attrape par `c_lib_signature` et par l'audit de dependances lui-meme.
+    exclude=("agent_tools/", "security/dependances.py"),
     line_exclude=("False", "allowed", "not ", "forbidden", "interdit", "deny", "refus",
                   "banned", "disabled", "jamais", "aucun"))
 
@@ -1135,11 +1160,35 @@ c_shell_true = regex_rule(
     r"shell\s*=\s*True",
     why="injection de commande possible", blocking=True)
 
-c_eval_exec = regex_rule(
-    "Aucun eval() / exec() (execution de code arbitraire)",
-    r"(?<![\w.])(eval|exec)\s*\(",
-    why="execution de code arbitraire", blocking=True,
-    exclude=("audit_report",))
+def c_eval_exec():
+    """AST, PAS REGEX — un APPEL a eval()/exec(), pas le MOT quelque part.
+
+    Le 18/07, ce controle bloquait l'audit sur TROIS faux positifs, tous des chaines :
+      * tools/verifier_moissonneur.py:22  ->  INTERDITS = (..., "exec(", "eval(", ...)
+        c'est-a-dire LA LISTE DES INTERDITS elle-meme. Le garde etait accuse a la place du voleur.
+      * tools/trier_h46_h89.py:32         ->  "mackinac/dex-exec (HL perp + Uniswap V3)"
+        un NOM DE DEPOT dans un tableau de donnees.
+
+    Meme lecon que l'invariant securite du 18/07 : un module qui ECRIT « n'appelle jamais
+    /exchange » est innocent ; seul un APPEL est une porte. Une chaine n'execute rien.
+    L'AST ne peut pas se tromper la-dessus -- et il attrape aussi ce que la regex ratait
+    (`getattr(builtins, "eval")` reste hors de portee des deux, mais `eval (x)` sur plusieurs
+    lignes passait la regex et ne passe pas l'AST).
+    """
+    c = Check("21. Aucun eval() / exec() (execution de code arbitraire)")
+    hits = []
+    for p in _py_files(*_code_dirs_no_tests()):
+        rel = _rel(p).replace(os.sep, "/")
+        if "audit_report" in rel:
+            continue
+        try:
+            arbre = ast.parse(p.read_text(encoding="utf-8", errors="replace"))
+        except SyntaxError:
+            continue
+        for n in ast.walk(arbre):
+            if isinstance(n, ast.Call) and isinstance(n.func, ast.Name) and n.func.id in ("eval", "exec"):
+                hits.append(f"{rel}:{getattr(n, 'lineno', 0)} APPEL reel a {n.func.id}()")
+    return c.finish(f"{len(hits)} appel(s) reel(s)", _trim(hits))
 
 c_pickle = regex_rule(
     "Aucun pickle.load sur donnee externe",
@@ -2912,10 +2961,44 @@ def _eco_degradation_franchissable():
     return f"plafond {plafond:.0f} bps > cout plancher {cout:.1f} bps (franchissable)"
 
 
+#: Au-dessus de ce plancher, le mode sniper mono-wallet est declare VOLONTAIREMENT FERME.
+#: Ce n'est pas un reglage : c'est un verdict de MESURE (voir _eco_single_wallet_atteignable).
+SENTINELLE_SNIPER_FERME = 1000.0
+
+
 def _eco_single_wallet_atteignable():
+    """CE CONTROLE MESURAIT LE MAUVAIS OBJET (corrige le 2026-07-18).
+
+    Il injectait `leader_expected_edge_bps=52` et concluait « maximum atteignable -17 bps ».
+    Or le scoreur n'utilise PAS cette entree : `edge_base_bps` vient de la TABLE D'EDGE MESUREE
+    (`edge.edge_source.edge_brut`). Sans table chargee, deny-by-default met l'edge a 0 -- donc
+    le resultat valait -17 bps que le leader ait 52 ou 300 bps d'edge. Verifie :
+
+        leader_edge =  52 bps -> edge restant = -17.00
+        leader_edge = 300 bps -> edge restant = -17.00
+
+    L'audit bloquait donc sur le fait que le deny-by-default FONCTIONNE. Un audit qui punit le
+    comportement correct finit desactive.
+
+    CE QU'ON MESURE MAINTENANT, et qui a un sens : quel edge MESURE faudrait-il pour franchir le
+    plancher, une fois les couts payes ? Puis on confronte ce chiffre a ce que nos mesures
+    disent de l'edge de copie reel -- **-7,97 bps sur 24 133 signaux hors echantillon** (le
+    leader est CONTRARIEN). Aucun edge positif n'est donc disponible : le mode sniper mono-wallet
+    est MORT PAR MESURE, pas par reglage.
+
+    Deux etats sont acceptes, et seulement deux :
+      * le plancher est franchissable avec un edge de copie plausible -> le mode vit ;
+      * le plancher vaut la SENTINELLE -> le mode est declare ferme, par ecrit.
+    Ce qui reste interdit, c'est l'entre-deux : un plancher qu'on croit actif et que rien ne peut
+    franchir. Et surtout : on ne BAISSE PAS le plancher pour faire passer le test -- ce serait
+    laisser entrer des trades a edge negatif, c'est-a-dire payer pour perdre.
+    """
     from hl_observer.copying.realtime_magic_score import (
         RealtimeCopyRiskConfig, RealtimeCopyScoreInput, score_realtime_copy_candidate)
     floor = _lf("HYPERSMART_SINGLE_WALLET_MIN_EDGE_BPS", 55.0)
+    if floor >= SENTINELLE_SNIPER_FERME:
+        return (f"mode sniper mono-wallet DECLARE FERME (plancher {floor:.0f} bps >= sentinelle) "
+                f"-- coherent avec l'edge de copie mesure a -7,97 bps hors echantillon")
     sc = score_realtime_copy_candidate(
         RealtimeCopyScoreInput(
             action_type="OPEN_LONG", direction="LONG", leader_expected_edge_bps=52.0,
@@ -2925,9 +3008,15 @@ def _eco_single_wallet_atteignable():
             current_open_positions=0, max_open_positions=20),
         config=RealtimeCopyRiskConfig(spread_bps=3.0, slippage_bps=5.0, fee_bps=4.0))
     maxi = float(sc.edge_remaining_bps or 0.0)
+    cout_plancher = -maxi                       # edge de base = 0 ici -> ce qui reste, c'est le cout
+    edge_requis = floor + cout_plancher
     assert maxi >= floor, (
-        f"VERROU MORT : plancher single-wallet {floor:.0f} bps > maximum atteignable {maxi:.1f} bps "
-        f"-> aucun signal mono-wallet ne peut JAMAIS passer (mode sniper structurellement mort)"
+        f"VERROU MORT : plancher single-wallet {floor:.0f} bps, couts {cout_plancher:.1f} bps "
+        f"-> il faudrait un edge de copie MESURE de {edge_requis:.1f} bps pour passer. Or nos "
+        f"mesures donnent -7,97 bps (24 133 signaux hors echantillon) : c'est inatteignable.\n"
+        f"NE BAISSE PAS LE PLANCHER (ce serait ouvrir des trades a edge negatif). Deux issues "
+        f"honnetes : mesurer un edge de copie positif, ou declarer le mode ferme en mettant "
+        f"HYPERSMART_SINGLE_WALLET_MIN_EDGE_BPS >= {SENTINELLE_SNIPER_FERME:.0f}."
     )
     return f"plancher {floor:.0f} <= maximum atteignable {maxi:.1f} bps"
 

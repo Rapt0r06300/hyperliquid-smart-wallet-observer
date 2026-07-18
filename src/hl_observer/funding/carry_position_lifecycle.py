@@ -22,10 +22,21 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from hl_observer.funding.base_convergence import base_convergee, correction_sortie_bps
+from hl_observer.funding.carry_ouverture_gates import porte_risque_ouverture
 from hl_observer.funding.delta_neutral_carry import evaluer_carry_neutre
 from hl_observer.paper_trading.delta_neutral_position import build_delta_neutral_position
 from hl_observer.paper_trading.funding_payment_tracker import compute_funding_payment
 from hl_observer.paper_trading.journal import PaperTradeJournal
+
+def _nombre_ou_none(d: dict[str, Any] | None, cle: str) -> float | None:
+    """Un nombre exploitable dans `d[cle]`, sinon None. `None` = ABSENT -> le garde s'abstient
+    (il ne refuse pas). Un garde nourri de `None` ne protège de rien : il rassure."""
+    v = (d or {}).get(cle)
+    if isinstance(v, bool) or not isinstance(v, (int, float)):
+        return None
+    f = float(v)
+    return None if f != f else f
+
 
 MARGE_USD = 50.0                       # notre marge fixe par position (perp). notional = marge × levier.
 COUT_SORTIE_2_JAMBES_BPS = 11.0        # sortie maker 2 jambes (miroir exact de l'entrée maker)
@@ -160,7 +171,8 @@ class GestionnaireCarry:
     def tick(self, decision: dict[str, Any], inputs: dict[str, Any], *, now_ms: int,
              funding_bps_h_courant: float | None = None, hausse_depuis_entree: float = 0.0,
              prix_courant: float | None = None, base_bps_courant: float | None = None,
-             age_max_h: float = AGE_MAX_H_DEFAUT) -> dict[str, Any]:
+             age_max_h: float = AGE_MAX_H_DEFAUT,
+             risque_contexte: dict[str, Any] | None = None) -> dict[str, Any]:
         """Une passe : accrue+sort les positions ouvertes, puis ouvre si viable et coin libre.
         `prix_courant` (perp) permet la sortie liquidation TEMPS REEL : hausse = (cours-entree)/entree.
         Retourne un petit résumé de ce qui s'est passé (pour le journal d'exécution)."""
@@ -197,7 +209,31 @@ class GestionnaireCarry:
             self.ouvertes[coin] = pos
             return evt
 
-        # 2) pas de position ouverte pour ce coin -> ouvrir si viable
+        # 2) pas de position ouverte pour ce coin -> PORTE DE RISQUE, puis ouvrir si viable.
+        #    Les gardes de `risk/` étaient en LIMBE (testés, appelés par personne) parce que je
+        #    les avais posés sur `v12_decision_pipeline`, que l'audit de câblage a mesuré MORT.
+        #    Ils sont ici, sur le seul chemin qui ouvre vraiment une position. Une entrée absente
+        #    fait ABSTENIR le garde concerné (jamais refuser) : un garde affamé ne protège de rien.
+        porte = porte_risque_ouverture(
+            marge_demandee_usd=MARGE_USD,
+            marge_utilisee_usd=len(self.ouvertes) * MARGE_USD,
+            capital_usd=_nombre_ou_none(risque_contexte, "capital_usd"),
+            distance_tampon_frac=_nombre_ou_none(risque_contexte, "distance_tampon_frac"),
+            funding_paye_cumule_bps=_nombre_ou_none(risque_contexte, "funding_paye_cumule_bps"),
+            budget_funding_bps=_nombre_ou_none(risque_contexte, "budget_funding_bps"),
+            marks_multi_sources=(risque_contexte or {}).get("marks_multi_sources"),
+            pnls_realises_recents=(risque_contexte or {}).get("pnls_realises_recents"),
+            drawdown_frac=_nombre_ou_none(risque_contexte, "drawdown_frac"),
+            levier_demande=_f(decision, "levier") or _nombre_ou_none(inputs, "levier_max"),
+            regime=(risque_contexte or {}).get("regime"),
+            edge_attendu=_nombre_ou_none(risque_contexte, "edge_attendu"),
+            variance_attendue=_nombre_ou_none(risque_contexte, "variance_attendue"))
+        evt["porte_risque"] = {"autorise": porte["autorise"], "motif": porte["motif"],
+                               "facteur_taille": porte["facteur_taille"], "gardes": porte["gardes"]}
+        if not porte["autorise"]:
+            evt["refus_risque"] = porte["motif"]
+            return evt
+
         pos = ouvrir_position(decision, inputs, now_ms=now_ms, mode=self.mode)
         if pos is not None:
             self.ouvertes[coin] = pos

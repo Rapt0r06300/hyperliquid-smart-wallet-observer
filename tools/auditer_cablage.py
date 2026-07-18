@@ -83,7 +83,14 @@ def main() -> int:
     # PORTES (`python tools\\x.py` dans un .cmd). Les melanger au code faussait le verdict.
     py = _collecter(("src/**/*.py", "hyper_smart_observer/**/*.py", "tests/**/*.py"))
     outils = _collecter(("tools/**/*.py",))
+    # 🔴 REGRESSION TROUVEE LE 18/07 : les lanceurs de recherche ont ete DEMENAGES dans
+    # `outils de test/` (rangement du 14/07). Ce glob ne regardait que la racine et `tools/`
+    # -> du jour au lendemain, l'audit a cesse de VOIR les portes `python tools\x.py`, et a
+    # declare MORTS les moteurs qu'on lance le plus souvent (overfit_selection, H-181...).
+    # Personne n'avait bouge une ligne de code : deplacer un .cmd avait suffi.
+    # Lecon : la liste des portes doit suivre les portes, sinon l'audit ment sans le savoir.
     lanceurs = _collecter(("*.cmd", "tools/**/*.cmd", "tools/**/*.ps1",
+                           "outils de test/**/*.cmd", "outils de test/**/*.ps1",
                            "*.ps1", "*.sh", "config/**/*.yaml", "config/**/*.yml"))
 
     print("\n" + "=" * 78)

@@ -363,7 +363,11 @@ Set-HyperSmartDefaultEnv "HYPERSMART_MAX_TOTAL_EXPOSURE_USDT" "400"
 [Environment]::SetEnvironmentVariable("HYPERSMART_MAX_POSITION_USDT", "50", "Process")
 [Environment]::SetEnvironmentVariable("HYPERSMART_MAX_OPEN_POSITIONS", "20", "Process")
 [Environment]::SetEnvironmentVariable("HYPERSMART_MAX_TOTAL_EXPOSURE_USDT", "1000", "Process")
-Set-HyperSmartDefaultEnv "HYPERSMART_SINGLE_WALLET_MIN_EDGE_BPS" "30"
+# 2026-07-18 - mode sniper mono-wallet DECLARE FERME (sentinelle >= 1000). Voir le meme
+# commentaire dans LANCER_HYPERSMART.cmd : edge de copie mesure a -7,97 bps hors echantillon,
+# leader CONTRARIEN. Le plancher de 30 laissait croire que le mode vivait alors que rien ne
+# pouvait le franchir. Aucune ouverture perdue : il etait deja infranchissable. Reversible.
+Set-HyperSmartDefaultEnv "HYPERSMART_SINGLE_WALLET_MIN_EDGE_BPS" "9999"
 Set-HyperSmartDefaultEnv "HYPERSMART_TOP_WALLET_SAMPLE_LIMIT" "8000"
 # V25 (2026-07-03): hard halt a 2.50 USDC (=0.25% de 1000) gelait la session
 # entiere apres une poignee de stops; 644 refus SESSION_HARD_LOSS_HALT observes,
