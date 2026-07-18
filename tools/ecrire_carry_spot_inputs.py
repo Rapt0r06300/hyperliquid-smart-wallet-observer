@@ -52,6 +52,7 @@ NOTIONNEL_MAX_USD = 500.0
 SECURITE_PROFONDEUR = 5.0
 LIQUIDITE_MIN_USD = NOTIONNEL_MAX_USD * SECURITE_PROFONDEUR   # 2500$ (au lieu d'un 5000 arbitraire)
 LEVIERS_A_ESSAYER = (2.0, 3.0, 4.0, 5.0, 7.0, 10.0)   # on garde le plus HAUT qui reste viable
+PLAFOND_SHORTLIST = 5   # A2 : top-K carrys (moins de trades, plus propres ; pas de sur-diversification)
 
 
 def _post(payload: dict, *, timeout: float = 15.0):
@@ -219,6 +220,17 @@ def _meilleur_levier(coin, funding, base, liq, levier_max, pire):
     return best
 
 
+def classer_viables(viables, *, top_k: int = PLAFOND_SHORTLIST):
+    """A2 : classe les viables par carry NET (gain_net_24h_bps) DECROISSANT, coupe au top-K.
+    Tie-break : break-even le plus court. viables = [(coin, inp, heures, gain_net_24h_bps), ...].
+    Moins de trades, plus propres : on n'ouvre que le HAUT du panier, pas tout ce qui est eligible."""
+    def _cle(x):
+        gain = x[3] if len(x) > 3 and x[3] is not None else -9e9
+        heures = x[2] if x[2] is not None else 9e9
+        return (-gain, heures)
+    return sorted(viables, key=_cle)[:max(1, int(top_k))]
+
+
 def scanner(diagnostic: bool):
     perps, spots, pires = _perps(), _spots(), _pires_locales()
     communs = sorted(set(perps) & set(spots))
@@ -268,10 +280,12 @@ def scanner(diagnostic: bool):
                        "levier_max": p["levier_max"], "marge_ratio": mr,
                        "pire_hausse_observee": pire, "levier_utilise": lev,
                        "perp_px": round(p["mark"], 8),   # prix perp COURANT -> suivi liquidation live
+                       "gain_net_24h_bps": (round(v.gain_net_24h_bps, 4)
+                                            if v.gain_net_24h_bps is not None else None),
                        "source": "hyperliquid public API (perp+spot) + bougies 1h", "real_execution": False}
-                viables.append((c, inp, v.heures_pour_rentabiliser))
+                viables.append((c, inp, v.heures_pour_rentabiliser, v.gain_net_24h_bps))
         rapport.append((c, p["funding_bps_h"], liq, pire, "VIABLE" if inp else raison))
-    viables.sort(key=lambda x: (x[2] if x[2] is not None else 9e9))
+    viables = classer_viables(viables)          # A2 : classe par carry NET, coupe au top-K
     return rapport, viables
 
 
@@ -290,15 +304,17 @@ def main() -> int:
     for c, f, liq, pire, st in sorted(rapport, key=lambda x: -x[1]):
         ph = "--" if pire is None else "%.0f%%" % (pire * 100)
         print("    %-8s %+9.3fb %12s %9s  %s" % (c, f, "%.0fk" % (liq / 1e3), ph, st))
-    print("  %d coin(s) perp∩spot, %d VIABLE(S)." % (len(rapport), len(viables)))
+    n_viables = sum(1 for r in rapport if r[4] == "VIABLE")
+    print("  %d coin(s) perp∩spot, %d VIABLE(S) (top-%d retenus par carry net)."
+          % (len(rapport), n_viables, len(viables)))
 
     if not viables:
         print("\n  >>> Aucun carry viable maintenant (funding bas / spot mince / trop volatil). "
               "Reponse HONNETE -- le carry attend un meilleur funding.")
         return 0
-    c, inp, h = viables[0]
-    print("\n  >>> MEILLEUR : %s (break-even ~%.0f h, funding %+.3f bps/h, levier %gx)"
-          % (c, h or 0.0, inp["funding_bps_h"], inp["levier_utilise"]))
+    c, inp, h, gain = viables[0]
+    print("\n  >>> MEILLEUR : %s (net ~%+.2f bps/24h, break-even ~%.0f h, funding %+.3f bps/h, levier %gx)"
+          % (c, (gain or 0.0), h or 0.0, inp["funding_bps_h"], inp["levier_utilise"]))
     if a.diagnostic:
         print("  (--diagnostic : rien ecrit)")
         return 0

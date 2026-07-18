@@ -49,3 +49,34 @@ def test_plancher_liquidite_est_principiel():
     assert m.NOTIONNEL_MAX_USD == 500.0
     assert m.SECURITE_PROFONDEUR == 5.0
     assert m.LIQUIDITE_MIN_USD == m.NOTIONNEL_MAX_USD * m.SECURITE_PROFONDEUR == 2500.0
+
+
+# ---------- A2 : classement transversal net (top-K) ----------
+
+def test_classer_viables_par_carry_net_et_top_k():
+    m = _load()
+    viables = [
+        ("A", {"coin": "A"}, 10.0, 2.0),   # net 2
+        ("B", {"coin": "B"}, 5.0, 9.0),    # net 9 (meilleur)
+        ("C", {"coin": "C"}, 1.0, 5.0),    # net 5
+        ("D", {"coin": "D"}, 50.0, 1.0),   # net 1
+    ]
+    r = m.classer_viables(viables, top_k=2)
+    assert [x[0] for x in r] == ["B", "C"]           # top-2 par carry NET
+
+
+def test_classer_viables_tie_break_break_even_court():
+    m = _load()
+    viables = [("A", {}, 20.0, 3.0), ("B", {}, 8.0, 3.0)]   # meme net -> break-even court d'abord
+    assert [x[0] for x in m.classer_viables(viables, top_k=2)] == ["B", "A"]
+
+
+def test_classer_viables_gain_none_est_relegue():
+    m = _load()
+    viables = [("A", {}, 10.0, None), ("B", {}, 10.0, 0.1)]
+    assert m.classer_viables(viables, top_k=2)[0][0] == "B"   # net inconnu -> en dernier
+
+
+def test_plafond_shortlist_est_defini():
+    m = _load()
+    assert isinstance(m.PLAFOND_SHORTLIST, int) and m.PLAFOND_SHORTLIST >= 1
