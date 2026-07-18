@@ -76,3 +76,33 @@ carry), soit **non** (et on l'enterre honnêtement). Dans les deux cas, on aura 
 pas une promesse. C'est ça qui protège l'argent de tes parents.
 
 *Sécurité : 0 ordre réel · 0 argent réel · 0 clé privée · 0 signature · 0 dépôt/retrait.*
+
+---
+
+## MàJ — Firehose replay + 2e venue (18/07)
+
+**Le firehose change tout pour le replay.** Chaque décision carry (accept OU refus) est maintenant
+écrite comme candidat replay dans `runtime/replay/candidates.jsonl` — donc **le bot génère du
+dataset de replay en continu, même sans ouverture réelle**. Après quelques heures :
+
+```
+REM  Santé des données replay (candidats accumulés par le firehose)
+VERIFIER-DONNEES-REPLAY.cmd
+```
+
+**Science du replay** (juger honnêtement, pas à l'œil) une fois assez de candidats :
+```
+python -c "from hl_observer.backtesting.replay_science import bootstrap_ic_pnl; print('IC bootstrap sur tes PnL de replay')"
+```
+
+**2e venue (Binance, LECTURE SEULE — 0 clé, 0 ordre)** : comparer le funding et lister l'arb
+cross-venue. Tourne sous Windows (réseau) :
+```
+python tools\comparer_funding_venues.py --coins HYPE,PURR,BTC,ETH,SOL
+```
+Ça affiche, par coin : funding HL vs Binance (déjà convertis en bps/h — attention, Binance est
+par 8h), les sources écartées si divergence aberrante, et les carries cross-venue candidats
+(long où funding bas / short où haut). **Plus de venues = plus d'ouvertures**, sans baisser la barre.
+
+*Rappel sécurité : la 2e venue ne sert QU'À LIRE le funding. Aucune décision, aucun ordre n'y est
+envoyé. Hyperliquid reste la seule venue des décisions paper.*
