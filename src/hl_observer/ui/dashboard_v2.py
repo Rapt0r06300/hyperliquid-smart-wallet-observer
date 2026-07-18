@@ -367,7 +367,8 @@ function tick(){
     var base=window._base||(eq-pnl)||1000;var chg=base>0?(pnl/base*100):0;
     var C=document.getElementById('chg');C.textContent=(chg>=0?'+':'')+n(chg,2)+'%';C.style.color=col(chg);
     document.getElementById('wr').textContent=n(d.winrate_pct,0)+'%';
-    window._copyPos=(d.open_positions||0);window._copyReal=Number(d.realized_pnl_usdt||0);if(window.syncTop)syncTop();
+    window._copyPos=(d.open_positions||0);window._copyReal=Number(d.realized_pnl_usdt||0);
+    window._copyNet=Number(d.net_pnl_usdt||0);window._copyEq=Number(d.equity_usdt||0);if(window.syncTop)syncTop();
     document.getElementById('trd').textContent=(d.closed_trades||0);
     document.getElementById('expo').textContent=n((d.open_exposure_usdt||0)/10);
     var rp=Number(d.realized_pnl_usdt||0),ps=(d.positions||[]);
@@ -474,25 +475,31 @@ setInterval(buildTicker,3000);setTimeout(buildTicker,400);
 // Les deux loaders (statut copy / carry) stockent leur compte et appellent syncTop -> pas de clignotement.
 function syncTop(){
   var cp=window._copyPos||0, cy=window._carryPos||0, totPos=cp+cy;
-  var pr=Number(window._copyReal||0), cr=Number(window._carryReal||0), totReal=pr+cr;
+  var pr=Number(window._copyReal||0), cr=Number(window._carryReal||0);
+  var copyNet=Number(window._copyNet||0), carryNet=Number(window._carryNet||0), totNet=copyNet+carryNet;
   var el=document.getElementById('pos'); if(el){el.textContent=totPos; el.title=cp+' copy + '+cy+' carry';}
   var bd=document.getElementById('pos-bd'); if(bd){bd.textContent = cy>0 ? '('+cp+'c · '+cy+'y)' : '';}
+  // PnL AFFICHÉ = TOTAL toutes stratégies (copy + carry) — demande de Flo. Equity = equity copy + net carry.
+  var P=document.getElementById('pnl'); if(P){P.textContent=(totNet>=0?'+':'')+n(totNet); P.className='pnl-big '+(totNet>=0?'pnl-pos':'pnl-neg');}
+  var eqCopy=Number(window._copyEq||0)||1000; var E=document.getElementById('eq'); if(E){E.textContent=n(eqCopy+carryNet);}
+  var base=window._base||1000; var chg=base>0?(totNet/base*100):0; var C=document.getElementById('chg'); if(C){C.textContent=(chg>=0?'+':'')+n(chg,2)+'%';C.style.color=col(chg);}
   var cs=document.getElementById('carry-sub'); if(cs){
-    cs.textContent = cy>0 ? ('  ·  carry '+cy+' pos · réalisé '+(cr>=0?'+':'')+n(cr,2)+'$') : '';}
+    cs.textContent = '  ·  total '+(cp+cy)+' pos · copy '+(copyNet>=0?'+':'')+n(copyNet,2)+'$ · carry '+(carryNet>=0?'+':'')+n(carryNet,2)+'$';}
   var st=document.getElementById('strattb');
   if(st){var mk=function(v){return (v>=0?'+':'')+n(v,2)+'$';};
     st.innerHTML=
-       '<tr><td>Copy-trading</td><td>'+cp+'</td><td style="color:'+col(pr)+'">'+mk(pr)+'</td><td style="text-align:right;color:var(--mut)">'+(cp>0?'actif':'attend un edge prouvé (protège le capital)')+'</td></tr>'
-      +'<tr><td>Carry delta-neutre</td><td>'+cy+'</td><td style="color:'+col(cr)+'">'+mk(cr)+'</td><td style="text-align:right;color:var(--mut)">'+(cy>0?'actif · funding encaissé':'attend un meilleur funding')+'</td></tr>'
+       '<tr><td>Copy-trading</td><td>'+cp+'</td><td style="color:'+col(copyNet)+'">'+mk(copyNet)+'</td><td style="text-align:right;color:var(--mut)">'+(cp>0?'actif':'attend un edge prouvé (protège le capital)')+'</td></tr>'
+      +'<tr><td>Carry delta-neutre</td><td>'+cy+'</td><td style="color:'+col(carryNet)+'">'+mk(carryNet)+'</td><td style="text-align:right;color:var(--mut)">'+(cy>0?'actif · funding encaissé':'attend un meilleur funding')+'</td></tr>'
       +'<tr><td>Liquidations</td><td>—</td><td style="color:var(--mut2)">—</td><td style="text-align:right;color:var(--mut)">mesure · données en accumulation</td></tr>'
-      +'<tr style="border-top:1px solid var(--mut2)"><td><b>TOTAL paper</b></td><td><b>'+totPos+'</b></td><td style="color:'+col(totReal)+'"><b>'+mk(totReal)+'</b></td><td></td></tr>';
+      +'<tr style="border-top:1px solid var(--mut2)"><td><b>TOTAL paper</b></td><td><b>'+totPos+'</b></td><td style="color:'+col(totNet)+'"><b>'+mk(totNet)+'</b></td><td></td></tr>';
   }
 }
 // ── Panneau CARRY (poll independant du ledger carry dedie) ──
 function loadCarry(){fetch('/v2/carry').then(function(r){return r.json()}).then(function(d){
   var tb=document.getElementById('carrytb');if(!tb)return;
   document.getElementById('carry-pos').textContent=(d.positions_ouvertes||0);
-  window._carryPos=(d.positions_ouvertes||0);window._carryReal=Number(d.realized_net_pnl_usdc||0);if(window.syncTop)syncTop();
+  window._carryPos=(d.positions_ouvertes||0);window._carryReal=Number(d.realized_net_pnl_usdc||0);
+  window._carryNet=Number(d.realized_net_pnl_usdc||0)+Number(d.funding_accru_usdt||0);if(window.syncTop)syncTop();
   var real=Number(d.realized_net_pnl_usdc||0),er=document.getElementById('carry-real');
   er.textContent=n(real);er.style.color=col(real);
   document.getElementById('carry-accru').textContent='$'+n(d.funding_accru_usdt,4);

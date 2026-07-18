@@ -37,6 +37,7 @@ sys.path.insert(0, str(ROOT / "src"))
 from hl_observer.funding.delta_neutral_carry import evaluer_carry_neutre  # noqa: E402
 from hl_observer.funding.funding_persistence import estimer_persistance  # noqa: E402
 from hl_observer.funding.funding_zscore import zscore_funding  # noqa: E402
+from hl_observer.funding.carry_optimizer import facteur_zscore as _fzs  # noqa: E402  Y4 sizing
 
 API = "https://api.hyperliquid.xyz/info"
 INPUTS_PATH = ROOT / "runtime" / "data" / "carry_spot_inputs.json"
@@ -293,6 +294,7 @@ def scanner(diagnostic: bool):
                        "funding_persistant_bps_h": round(fp.funding_persistant_bps_h, 6),
                        "funding_fiable": fp.fiable,
                        "funding_zscore": zf.zscore, "funding_regime": zf.regime,
+                       "facteur_taille": round(_fzs(zf.zscore), 4),   # Y4 : + gros si funding spike
                        "base_bps": round(base, 4),
                        "liquidite_spot_usd": round(liq, 2), "maker": True,
                        "levier_max": p["levier_max"], "marge_ratio": mr,

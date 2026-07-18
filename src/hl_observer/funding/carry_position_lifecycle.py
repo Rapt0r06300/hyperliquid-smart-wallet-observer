@@ -59,6 +59,12 @@ def ouvrir_position(decision: dict[str, Any], inputs: dict[str, Any], *,
         levier = 1.0 / marge_ratio
     if levier <= 0:
         return None
+    # Y4/Y15/Y16 — SIZING INTELLIGENT : la marge est scalée par le facteur de taille (z-score de
+    # funding / Kelly / vol-target), borné [0.25, 2.0]. Absent -> 1.0 (rétro-compatible). On grossit
+    # les carrys à funding fort/sûr, on réduit les incertains. Aucune amplification fabriquée.
+    facteur = _f(inputs, "facteur_taille")
+    facteur = 1.0 if facteur <= 0 else max(0.25, min(2.0, float(facteur)))
+    marge_usd = float(marge_usd) * facteur
     notional = round(float(marge_usd) * levier, 6)
     dn = build_delta_neutral_position(coin=str(decision.get("coin") or ""),
                                       long_notional_usdt=notional, short_notional_usdt=notional)
