@@ -69,10 +69,15 @@ if ([string]::IsNullOrWhiteSpace($env:HYPERSMART_MIN_REDUCE_NOTIONAL_USDT)) {
 }
 if ([string]::IsNullOrWhiteSpace($env:HYPERSMART_CARRY_HYPE_PAPER)) {
     # Decision de Flo (2026-07-14, « les 3 ») : le carry HYPE tourne en PAPER.
-    # v1 = decisions JOURNALISEES (runtime/data/carry_hype_paper_decisions.jsonl), 0 position.
     # Sans inputs MESURES (runtime/data/carry_spot_inputs.json), chaque poll journalise un
     # REFUS motive -- c'est le deny-by-default voulu, pas un bug.
     $env:HYPERSMART_CARRY_HYPE_PAPER = "1"
+}
+if ([string]::IsNullOrWhiteSpace($env:HYPERSMART_CARRY_ETAPE2)) {
+    # ETAPE 2 (18/07) : ouvrir REELLEMENT la position paper delta-neutre quand la decision est
+    # viable (long spot + short perp), accruer le funding MESURE, sortir/PnL realise dans
+    # runtime/data/carry_paper_ledger.jsonl. 100%% PAPER : aucun ordre reel, aucune signature.
+    $env:HYPERSMART_CARRY_ETAPE2 = "1"
 }
 $script:EngineMetrics = @{
     runtime_venue = "Hyperliquid"

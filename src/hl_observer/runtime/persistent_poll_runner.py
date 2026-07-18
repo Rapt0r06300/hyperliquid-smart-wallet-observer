@@ -509,13 +509,21 @@ class PersistentPollRunner:
         try:
             from hl_observer.funding import carry_paper_runtime as _carry
             if _carry.enabled():
-                self.write_engine_status("carry_hype_paper",
-                                         "Evaluation carry HYPE paper (journalisee, v1 sans position).")
+                _msg = ("Carry paper : decision + ETAPE 2 (ouverture/tenue de position paper, ledger)."
+                        if _carry.etape2_active()
+                        else "Evaluation carry HYPE paper (journalisee, sans position).")
+                self.write_engine_status("carry_hype_paper", _msg)
                 t0 = self._now_ms()
                 ligne = _carry.evaluer_et_journaliser(cfg.root)
                 d = ligne.get("decision") or {}
                 self.metrics["carry_hype_viable"] = str(d.get("viable"))
                 self.metrics["carry_hype_motif"] = str(d.get("motif") or "")
+                e2 = ligne.get("etape2") or {}
+                if isinstance(e2, dict):
+                    self.metrics["carry_etape2_ouvert"] = str(e2.get("ouvert"))
+                    if e2.get("ferme"):
+                        self.metrics["carry_etape2_ferme"] = str(e2.get("ferme"))
+                        self.metrics["carry_etape2_pnl_realise_usdt"] = str(e2.get("pnl_realise_usdt"))
                 self._add_step_duration("carry_hype_paper", t0)
         except Exception as exc:  # noqa: BLE001
             self.log(f"carry paper step failed (absorbe): {exc!r}")
