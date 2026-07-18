@@ -52,7 +52,11 @@ FENETRE_H = 720
 NOTIONNEL_MAX_USD = 500.0
 SECURITE_PROFONDEUR = 5.0
 LIQUIDITE_MIN_USD = NOTIONNEL_MAX_USD * SECURITE_PROFONDEUR   # 2500$ (au lieu d'un 5000 arbitraire)
-LEVIERS_A_ESSAYER = (2.0, 3.0, 4.0, 5.0, 7.0, 10.0)   # on garde le plus HAUT qui reste viable
+# On garde le plus HAUT levier qui reste VIABLE (survit a securite x pire-hausse). Le plancher a
+# 1x/1.5x DEBLOQUE les coins volatils : HYPE (pire-h 29%) est liquide a >=2x mais VIABLE a 1x/1.5x
+# (prouve). Baisser le levier = MOINS de risque, pas plus ; le carry reste funding-positif, juste
+# sur plus de capital immobilise. Un carry sur DES coins a 1x bat un carry sur AUCUN coin a 2x.
+LEVIERS_A_ESSAYER = (1.0, 1.5, 2.0, 3.0, 4.0, 5.0, 7.0, 10.0)
 PLAFOND_SHORTLIST = 5   # A2 : top-K carrys (moins de trades, plus propres ; pas de sur-diversification)
 SECURITE_LIQUIDATION = 1.5   # A3 : tampon = 1.5x la pire hausse -> risque de liquidation UNIFORME entre coins
 

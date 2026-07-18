@@ -267,6 +267,13 @@ REM Le replay (merge_replay/include_archive) lit TOUT l'historique. Best-effort,
 python -m hl_observer.runtime.replay_recorder --archive-run --base "%~dp0runtime\replay" 1>nul 2>nul
 
 REM -MaxLeaders eleve = scan TRES large (pool de leaders) ; le gate de qualite (smart money) garde la copie etroite.
+REM === CARRY : ACTIVER l'ouverture REELLE des positions paper (etape 2, decision Flo 2026-07-18) ===
+REM Sans ces flags, la boucle EVALUE le carry mais n'OUVRE RIEN -> 0 position (cause du "n'ouvre
+REM aucune position"). Avec, il ouvre / tient / ferme en PAPER (aucun ordre reel, aucune signature,
+REM PnL au vrai prix marche). Combine au plancher de levier 1x/1.5x (coins volatils VIABLES a bas
+REM levier), le carry ouvre enfin des positions quand un carry est viable.
+set "HYPERSMART_CARRY_HYPE_PAPER=1"
+set "HYPERSMART_CARRY_ETAPE2=1"
 REM === CARRY : alimentation AUTO des inputs spot (best coin, toutes les 10 min, en arriere-plan) ===
 REM Sans ca, carry_spot_inputs.json n'est jamais ecrit -> le carry refuse tout (INPUTS_SPOT_ABSENTS).
 start "carry-feeder" /min "%~dp0ALIMENTER-CARRY-AUTO.cmd"
