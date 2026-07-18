@@ -53,6 +53,7 @@ SECURITE_PROFONDEUR = 5.0
 LIQUIDITE_MIN_USD = NOTIONNEL_MAX_USD * SECURITE_PROFONDEUR   # 2500$ (au lieu d'un 5000 arbitraire)
 LEVIERS_A_ESSAYER = (2.0, 3.0, 4.0, 5.0, 7.0, 10.0)   # on garde le plus HAUT qui reste viable
 PLAFOND_SHORTLIST = 5   # A2 : top-K carrys (moins de trades, plus propres ; pas de sur-diversification)
+SECURITE_LIQUIDATION = 1.5   # A3 : tampon = 1.5x la pire hausse -> risque de liquidation UNIFORME entre coins
 
 
 def _post(payload: dict, *, timeout: float = 15.0):
@@ -205,16 +206,19 @@ def _pire_via_api(coin: str) -> float | None:
     return _pire_hausse(hi, lo)
 
 
-def _meilleur_levier(coin, funding, base, liq, levier_max, pire):
-    """Le LEVIER MAX SUR : le plus haut ou la jambe perp survit encore a la pire hausse.
-    Plus gros notionnel = plus de $ de funding, sans ajouter de risque de liquidation."""
+def _meilleur_levier(coin, funding, base, liq, levier_max, pire, *, securite=SECURITE_LIQUIDATION):
+    """A3 — LEVIER en RISK-PARITY : le plus haut levier qui survit a `securite` x la pire hausse
+    observee. Exiger le MEME multiple de securite pour tous les coins egalise le risque de
+    liquidation (un coin volatil recoit MOINS de levier). On ne maximise plus le levier a nu."""
+    pire_stresse = max(0.0, float(pire)) * float(securite)
     best = None
     for lev in LEVIERS_A_ESSAYER:
         if levier_max and lev > levier_max:
             continue
         mr = round(1.0 / lev, 6)
         v = evaluer_carry_neutre(coin=coin, funding_bps_h=funding, base_bps=base, liquidite_spot_usd=liq,
-                                 maker=True, levier_max=levier_max, marge_ratio=mr, pire_hausse_observee=pire)
+                                 maker=True, levier_max=levier_max, marge_ratio=mr,
+                                 pire_hausse_observee=pire_stresse)
         if v.viable:
             best = (lev, mr, v)
     return best
@@ -278,7 +282,8 @@ def scanner(diagnostic: bool):
                        "funding_fiable": fp.fiable, "base_bps": round(base, 4),
                        "liquidite_spot_usd": round(liq, 2), "maker": True,
                        "levier_max": p["levier_max"], "marge_ratio": mr,
-                       "pire_hausse_observee": pire, "levier_utilise": lev,
+                       "pire_hausse_observee": pire, "securite_liquidation": SECURITE_LIQUIDATION,
+                       "levier_utilise": lev,
                        "perp_px": round(p["mark"], 8),   # prix perp COURANT -> suivi liquidation live
                        "gain_net_24h_bps": (round(v.gain_net_24h_bps, 4)
                                             if v.gain_net_24h_bps is not None else None),

@@ -80,3 +80,27 @@ def test_classer_viables_gain_none_est_relegue():
 def test_plafond_shortlist_est_defini():
     m = _load()
     assert isinstance(m.PLAFOND_SHORTLIST, int) and m.PLAFOND_SHORTLIST >= 1
+
+
+# ---------- A3 : levier en risk-parity (tampon liq uniforme) ----------
+
+def test_a3_plus_de_securite_baisse_ou_egale_le_levier():
+    m = _load()
+    b1 = m._meilleur_levier("X", 1.0, 0.0, 200_000.0, 10.0, 0.15, securite=1.0)
+    b15 = m._meilleur_levier("X", 1.0, 0.0, 200_000.0, 10.0, 0.15, securite=1.5)
+    assert b1 is not None and b15 is not None
+    assert b15[0] <= b1[0]                    # plus de securite -> levier <= (plus conservateur)
+
+
+def test_a3_coin_volatil_recoit_moins_de_levier_risk_parity():
+    m = _load()
+    calme = m._meilleur_levier("CALM", 1.0, 0.0, 200_000.0, 10.0, 0.06)    # pire 6%
+    volatil = m._meilleur_levier("VOL", 1.0, 0.0, 200_000.0, 10.0, 0.35)   # pire 35%
+    assert calme is not None
+    lev_vol = volatil[0] if volatil else 0.0
+    assert lev_vol <= calme[0]                # risk-parity : le volatil a MOINS de levier (ou refuse)
+
+
+def test_securite_liquidation_est_definie_et_conservative():
+    m = _load()
+    assert m.SECURITE_LIQUIDATION >= 1.0
