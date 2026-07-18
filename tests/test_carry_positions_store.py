@@ -113,3 +113,27 @@ def test_multi_ferme_un_coin_qui_sort_de_la_shortlist(tmp_path):
     fermes = {e["coin"]: e["ferme"] for e in evts if e.get("ferme")}
     assert fermes.get("PURR") == SORTIE_HORS_SHORTLIST
     assert set(charger_gestionnaire(tmp_path).ouvertes) == {"HYPE"}   # HYPE reste
+
+
+# ---------- A7 : rotation vers le meilleur net (plafond de slots) ----------
+
+def test_a7_max_slots_ferme_les_plus_faibles_nets(tmp_path):
+    from hl_observer.funding.carry_positions_store import (
+        tick_multi_sur_disque, charger_gestionnaire, SORTIE_ROTATION)
+    mesures = {
+        "A": {"decision": _decision(coin="A", gain_net_24h_bps=10.0), "inputs": _inputs(coin="A"), "funding": 0.125},
+        "B": {"decision": _decision(coin="B", gain_net_24h_bps=50.0), "inputs": _inputs(coin="B"), "funding": 0.125},
+        "C": {"decision": _decision(coin="C", gain_net_24h_bps=5.0),  "inputs": _inputs(coin="C"), "funding": 0.125},
+    }
+    evts = tick_multi_sur_disque(tmp_path, mesures, now_ms=0, max_slots=2)
+    assert set(charger_gestionnaire(tmp_path).ouvertes) == {"A", "B"}   # 2 meilleurs nets ; C(5) ferme
+    fermes = {e["coin"]: e["ferme"] for e in evts if e.get("ferme")}
+    assert fermes.get("C") == SORTIE_ROTATION
+
+
+def test_a7_sans_max_slots_comportement_inchange(tmp_path):
+    from hl_observer.funding.carry_positions_store import tick_multi_sur_disque, charger_gestionnaire
+    mesures = {c: {"decision": _decision(coin=c, gain_net_24h_bps=g), "inputs": _inputs(coin=c),
+                   "funding": 0.125} for c, g in [("A", 10.0), ("B", 50.0), ("C", 5.0)]}
+    tick_multi_sur_disque(tmp_path, mesures, now_ms=0)                  # pas de max_slots
+    assert set(charger_gestionnaire(tmp_path).ouvertes) == {"A", "B", "C"}   # les 3 restent

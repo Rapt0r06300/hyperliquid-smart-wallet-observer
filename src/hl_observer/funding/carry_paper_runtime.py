@@ -33,6 +33,7 @@ from hl_observer.runtime.session_identity import session_courante
 
 ENV_ENABLED = "HYPERSMART_CARRY_HYPE_PAPER"
 ENV_ETAPE2 = "HYPERSMART_CARRY_ETAPE2"   # opt-in : ouvrir REELLEMENT la position paper (etape 2)
+MAX_SLOTS_CARRY = 5   # A7 : plafond de positions carry -> on garde les meilleurs nets (rotation)
 INPUTS_RELPATH = Path("runtime") / "data" / "carry_spot_inputs.json"
 SHORTLIST_RELPATH = Path("runtime") / "data" / "carry_spot_shortlist.json"   # TOUS les viables (parallele)
 JOURNAL_RELPATH = Path("runtime") / "data" / "carry_hype_paper_decisions.jsonl"
@@ -140,7 +141,7 @@ def evaluer_et_journaliser(root: str | Path = ".", *, now_ms: int | None = None,
                     mesures[str(dec.get("coin") or "").upper()] = {
                         "decision": dec, "inputs": inp, "funding": dec.get("funding_bps_h"),
                         "prix": inp.get("perp_px"), "base": dec.get("base_bps")}
-            evts = tick_multi_sur_disque(root, mesures, now_ms=now)
+            evts = tick_multi_sur_disque(root, mesures, now_ms=now, max_slots=MAX_SLOTS_CARRY)
             etat = etat_carry(root)
             etape2 = {"evts": evts, "n_mesures": len(mesures),
                       "positions_ouvertes": etat["positions_ouvertes"],

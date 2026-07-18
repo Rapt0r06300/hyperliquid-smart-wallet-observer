@@ -19,6 +19,7 @@ from hl_observer.funding.carry_position_lifecycle import (
 )
 
 SORTIE_HORS_SHORTLIST = "COIN_PLUS_DANS_SHORTLIST"
+SORTIE_ROTATION = "ROTATION_HORS_TOP_SLOTS"   # A7 : plafond de slots -> on garde les meilleurs nets
 
 POSITIONS_RELPATH = Path("runtime") / "data" / "carry_paper_positions.json"
 LEDGER_RELPATH = Path("runtime") / "data" / "carry_paper_ledger.jsonl"
@@ -77,11 +78,13 @@ def tick_sur_disque(root: str | Path, decision: dict[str, Any], inputs: dict[str
 
 
 def tick_multi_sur_disque(root: str | Path, mesures: dict[str, dict[str, Any]], *,
-                          now_ms: int, mode: str = MODE_LIVE) -> list[dict[str, Any]]:
+                          now_ms: int, mode: str = MODE_LIVE,
+                          max_slots: int | None = None) -> list[dict[str, Any]]:
     """Une passe MULTI-COINS persistee. `mesures` = {coin: {"decision","inputs","funding"}}.
     Ouvre/tient une position par coin mesuré ; FERME tout coin ouvert qui n'est PLUS mesuré ce
     poll (deny-by-default : on ne tient jamais une position sur une donnée disparue). Un coin =
-    une position (le store est déjà multi-coins)."""
+    une position. A7 : `max_slots` plafonne le nombre de positions -> on garde les meilleurs nets
+    (rotation vers le meilleur carry ; l'hysteresis de carry_rotation evite le churn marginal)."""
     g = charger_gestionnaire(root, mode=mode)
     evts: list[dict[str, Any]] = []
     for coin, m in mesures.items():
@@ -97,6 +100,16 @@ def tick_multi_sur_disque(root: str | Path, mesures: dict[str, dict[str, Any]], 
                              realized_net_pnl_usdc=realized, reason=SORTIE_HORS_SHORTLIST, now_ms=int(now_ms))
             g.ouvertes.pop(coin, None)
             evts.append({"coin": coin, "mode": mode, "ouvert": False, "ferme": SORTIE_HORS_SHORTLIST,
+                         "pnl_realise_usdt": realized, "funding_add_usdt": 0.0})
+    if max_slots is not None and len(g.ouvertes) > int(max_slots):   # A7 : rotation vers les meilleurs nets
+        par_net = sorted(g.ouvertes.items(),
+                         key=lambda kv: float(kv[1].get("gain_net_24h_bps") or 0.0))   # pire net d'abord
+        for coin, pos in par_net[: len(g.ouvertes) - int(max_slots)]:
+            realized = pnl_realise(pos, base_bps_courant=float(pos.get("base_bps_entree") or 0.0))
+            g.journal.record(kind="CLOSE", coin=coin, side="CARRY", notional_usdt=pos["notional_usdt"],
+                             realized_net_pnl_usdc=realized, reason=SORTIE_ROTATION, now_ms=int(now_ms))
+            g.ouvertes.pop(coin, None)
+            evts.append({"coin": coin, "mode": mode, "ouvert": False, "ferme": SORTIE_ROTATION,
                          "pnl_realise_usdt": realized, "funding_add_usdt": 0.0})
     sauver_gestionnaire(root, g)
     for r in g.journal.rows():
@@ -140,6 +153,6 @@ def etat_carry(root: str | Path = ".", *, mode: str = MODE_LIVE) -> dict[str, An
     return r
 
 
-__all__ = ["POSITIONS_RELPATH", "LEDGER_RELPATH", "SORTIE_HORS_SHORTLIST", "charger_gestionnaire",
-           "sauver_gestionnaire", "tick_sur_disque", "tick_multi_sur_disque", "resume_depuis_ledger",
-           "etat_carry"]
+__all__ = ["POSITIONS_RELPATH", "LEDGER_RELPATH", "SORTIE_HORS_SHORTLIST", "SORTIE_ROTATION",
+           "charger_gestionnaire", "sauver_gestionnaire", "tick_sur_disque", "tick_multi_sur_disque",
+           "resume_depuis_ledger", "etat_carry"]
