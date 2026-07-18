@@ -86,11 +86,13 @@ def tick_multi_sur_disque(root: str | Path, mesures: dict[str, dict[str, Any]], 
     evts: list[dict[str, Any]] = []
     for coin, m in mesures.items():
         evts.append(g.tick(m["decision"], m["inputs"], now_ms=now_ms,
-                           funding_bps_h_courant=m.get("funding"), prix_courant=m.get("prix")))
+                           funding_bps_h_courant=m.get("funding"), prix_courant=m.get("prix"),
+                           base_bps_courant=m.get("base")))
     for coin in list(g.ouvertes):                      # coins ouverts mais absents des mesures -> fermer
         if coin not in mesures:
             pos = g.ouvertes[coin]
-            realized = pnl_realise(pos)                # on réalise l'accru, sans inventer de funding en +
+            # base courante inconnue (coin plus mesure) -> conservateur : base d'entree (aucun premium capture)
+            realized = pnl_realise(pos, base_bps_courant=float(pos.get("base_bps_entree") or 0.0))
             g.journal.record(kind="CLOSE", coin=coin, side="CARRY", notional_usdt=pos["notional_usdt"],
                              realized_net_pnl_usdc=realized, reason=SORTIE_HORS_SHORTLIST, now_ms=int(now_ms))
             g.ouvertes.pop(coin, None)

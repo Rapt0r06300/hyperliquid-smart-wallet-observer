@@ -21,6 +21,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any
 
+from hl_observer.funding.base_convergence import base_convergee, correction_sortie_bps
 from hl_observer.funding.delta_neutral_carry import evaluer_carry_neutre
 from hl_observer.paper_trading.delta_neutral_position import build_delta_neutral_position
 from hl_observer.paper_trading.funding_payment_tracker import compute_funding_payment
@@ -36,6 +37,7 @@ MODES_VALIDES = {"LIVE", "BACKTEST", "REPLAY", "TEST_FIXTURE"}
 SORTIE_FUNDING = "FUNDING_NON_RENTABLE"
 SORTIE_LIQUIDATION = "LA_JAMBE_PERP_AURAIT_ETE_LIQUIDEE"
 SORTIE_AGE = "AGE_MAX_ATTEINT_REVALIDATION"
+SORTIE_BASE_CONVERGEE = "BASE_CONVERGEE_PREMIUM_CAPTURE"   # A5 : le 2e PnL est capture, on verrouille
 
 
 def _f(d: dict, k: str, defaut: float = 0.0) -> float:
@@ -100,9 +102,11 @@ def accruer(position: dict[str, Any], *, now_ms: int, funding_bps_h_courant: flo
 
 
 def raison_de_sortie(position: dict[str, Any], *, now_ms: int, funding_bps_h_courant: float,
-                     hausse_depuis_entree: float = 0.0, age_max_h: float = AGE_MAX_H_DEFAUT) -> str | None:
+                     hausse_depuis_entree: float = 0.0, base_bps_courant: float | None = None,
+                     age_max_h: float = AGE_MAX_H_DEFAUT) -> str | None:
     """None = on garde. Sinon le motif de fermeture. La liquidation ré-utilise le MÊME modèle de
-    risque (`evaluer_carry_neutre`) avec la hausse RÉELLE observée -> aucune constante re-dérivée."""
+    risque (`evaluer_carry_neutre`) avec la hausse RÉELLE observée -> aucune constante re-dérivée.
+    A5 : si la base d'entree etait un premium et qu'il a converge, on verrouille (SORTIE_BASE_CONVERGEE)."""
     if float(funding_bps_h_courant) <= 0.0:
         return SORTIE_FUNDING
     hausse = max(float(position.get("pire_hausse_entree") or 0.0), float(hausse_depuis_entree or 0.0))
@@ -114,17 +118,24 @@ def raison_de_sortie(position: dict[str, Any], *, now_ms: int, funding_bps_h_cou
         marge_ratio=float(position["marge_ratio"]), pire_hausse_observee=hausse)
     if not v.viable and "LIQUID" in (v.motif or "").upper():
         return SORTIE_LIQUIDATION
+    if base_bps_courant is not None and base_convergee(
+            float(position.get("base_bps_entree") or 0.0), float(base_bps_courant)):
+        return SORTIE_BASE_CONVERGEE                       # A5 : 2e PnL capture -> on verrouille
     if (int(now_ms) - int(position["entry_ts_ms"])) / 3.6e6 >= float(age_max_h):
         return SORTIE_AGE
     return None
 
 
-def pnl_realise(position: dict[str, Any]) -> float:
-    """PnL réalisé à la fermeture = funding accru − coût d'entrée − coût de sortie. Frais NON doublés."""
+def pnl_realise(position: dict[str, Any], *, base_bps_courant: float = 0.0) -> float:
+    """PnL réalisé = funding accru − coût d'entrée − coût de sortie + correction de base (A5).
+    Le modèle crédite toute la base à l'entrée ; on RETIRE la base résiduelle non capturée
+    (`base_bps_courant`) -> net base = vrai P&L de convergence. Frais NON doublés."""
     notional = float(position["notional_usdt"])
     cout_entree = notional * float(position["cout_entree_bps"]) / 1e4
     cout_sortie = notional * COUT_SORTIE_2_JAMBES_BPS / 1e4
-    return round(float(position["funding_accrued_usdt"]) - cout_entree - cout_sortie, 6)
+    correction_base = correction_sortie_bps(base_bps_courant) * notional / 1e4   # A5
+    return round(float(position["funding_accrued_usdt"]) - cout_entree - cout_sortie
+                 + correction_base, 6)
 
 
 @dataclass(slots=True)
@@ -141,7 +152,8 @@ class GestionnaireCarry:
 
     def tick(self, decision: dict[str, Any], inputs: dict[str, Any], *, now_ms: int,
              funding_bps_h_courant: float | None = None, hausse_depuis_entree: float = 0.0,
-             prix_courant: float | None = None, age_max_h: float = AGE_MAX_H_DEFAUT) -> dict[str, Any]:
+             prix_courant: float | None = None, base_bps_courant: float | None = None,
+             age_max_h: float = AGE_MAX_H_DEFAUT) -> dict[str, Any]:
         """Une passe : accrue+sort les positions ouvertes, puis ouvre si viable et coin libre.
         `prix_courant` (perp) permet la sortie liquidation TEMPS REEL : hausse = (cours-entree)/entree.
         Retourne un petit résumé de ce qui s'est passé (pour le journal d'exécution)."""
@@ -162,9 +174,12 @@ class GestionnaireCarry:
             if prix_courant and entree > 0:
                 hausse = max(hausse, (float(prix_courant) - entree) / entree)
             motif = raison_de_sortie(pos, now_ms=now_ms, funding_bps_h_courant=fnow,
-                                     hausse_depuis_entree=hausse, age_max_h=age_max_h)
+                                     hausse_depuis_entree=hausse, base_bps_courant=base_bps_courant,
+                                     age_max_h=age_max_h)
             if motif is not None:
-                realized = pnl_realise(pos)
+                base_sortie = (base_bps_courant if base_bps_courant is not None
+                               else float(pos.get("base_bps_entree") or 0.0))   # inconnu -> conservateur
+                realized = pnl_realise(pos, base_bps_courant=base_sortie)
                 self.journal.record(kind="CLOSE", coin=coin, side="CARRY",
                                     notional_usdt=pos["notional_usdt"], realized_net_pnl_usdc=realized,
                                     reason=motif, now_ms=int(now_ms))

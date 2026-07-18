@@ -9,7 +9,7 @@ import pytest
 
 from hl_observer.funding.carry_position_lifecycle import (
     MARGE_USD, COUT_SORTIE_2_JAMBES_BPS, MODE_LIVE, MODES_VALIDES,
-    SORTIE_FUNDING, SORTIE_LIQUIDATION, SORTIE_AGE,
+    SORTIE_FUNDING, SORTIE_LIQUIDATION, SORTIE_AGE, SORTIE_BASE_CONVERGEE,
     ouvrir_position, accruer, raison_de_sortie, pnl_realise, GestionnaireCarry,
 )
 
@@ -192,3 +192,45 @@ def test_live_et_test_ne_se_melangent_pas():
         assert p["mode"] == "LIVE"
     for p in fixture.ouvertes.values():
         assert p["mode"] == "TEST_FIXTURE"
+
+
+# ---------- A5 : convergence de base (2e PnL) ----------
+
+def test_a5_defaut_base_zero_ne_change_pas_le_pnl():
+    pos = ouvrir_position(_decision(), _inputs(), now_ms=0)
+    pos, _ = accruer(pos, now_ms=100 * H, funding_bps_h_courant=0.125)
+    assert pnl_realise(pos) == pnl_realise(pos, base_bps_courant=0.0)   # defaut = 0 -> inchange (compat)
+
+
+def test_a5_pnl_retire_la_base_residuelle_non_capturee():
+    pos = ouvrir_position(_decision(base_bps=10.0), _inputs(), now_ms=0)
+    pos, _ = accruer(pos, now_ms=100 * H, funding_bps_h_courant=0.125)
+    n = pos["notional_usdt"]
+    p_convergee = pnl_realise(pos, base_bps_courant=0.0)     # base capturee -> pas de correction
+    p_residuelle = pnl_realise(pos, base_bps_courant=10.0)   # base pas capturee -> retire 10 bps
+    assert p_residuelle == pytest.approx(p_convergee - 10.0 * n / 1e4)
+
+
+def test_a5_sortie_quand_la_base_a_converge():
+    pos = ouvrir_position(_decision(base_bps=10.0), _inputs(), now_ms=0)
+    # funding>0, pas de liquidation, base convergee (reste 1 sur 10) -> on verrouille
+    assert raison_de_sortie(pos, now_ms=H, funding_bps_h_courant=0.125,
+                            base_bps_courant=1.0) == SORTIE_BASE_CONVERGEE
+
+
+def test_a5_base_pas_encore_convergee_on_garde():
+    pos = ouvrir_position(_decision(base_bps=10.0), _inputs(), now_ms=0)
+    assert raison_de_sortie(pos, now_ms=H, funding_bps_h_courant=0.125, base_bps_courant=9.0) is None
+
+
+def test_a5_base_negligeable_pas_de_sortie_convergence():
+    pos = ouvrir_position(_decision(base_bps=-0.68), _inputs(), now_ms=0)   # base < min -> rien a verrouiller
+    assert raison_de_sortie(pos, now_ms=H, funding_bps_h_courant=0.125, base_bps_courant=0.0) is None
+
+
+def test_a5_gestionnaire_ferme_et_realise_sur_convergence():
+    g = GestionnaireCarry()
+    g.tick(_decision(base_bps=10.0), _inputs(), now_ms=0, funding_bps_h_courant=0.125)
+    e = g.tick(_decision(base_bps=10.0), _inputs(), now_ms=H, funding_bps_h_courant=0.125,
+               base_bps_courant=0.5)
+    assert e["ferme"] == SORTIE_BASE_CONVERGEE and e["pnl_realise_usdt"] is not None
