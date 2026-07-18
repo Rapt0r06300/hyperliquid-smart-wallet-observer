@@ -234,7 +234,7 @@ th{letter-spacing:1.2px}
    <div class="hero-head">
      <div>
        <div class="pnl-big pnl-pos" id="pnl">+0.00</div>
-       <div class="pnl-sub">PnL net <span id="pnl-unit">USDC</span> · equity <span id="eq" class="num">…</span> · <span id="chg" class="num">+0.00%</span> · <span id="mode">live</span></div>
+       <div class="pnl-sub">PnL net <span id="pnl-unit">USDC</span> · equity <span id="eq" class="num">…</span> · <span id="chg" class="num">+0.00%</span> · <span id="mode">live</span><span id="carry-sub" style="color:var(--cyan)"></span></div>
      </div>
      <div class="hero-hl">EQUITY // <span id="mg-span">…</span><br><b id="mg-hi"></b><br><span id="mg-lo"></span></div>
    </div>
@@ -256,7 +256,7 @@ th{letter-spacing:1.2px}
 
  <div class="strip">
    <div class="st"><div class="k">Winrate</div><div class="v" id="wr">…</div></div>
-   <div class="st"><div class="k">Positions</div><div class="v" id="pos">…</div></div>
+   <div class="st"><div class="k">Positions <span class="hint" id="pos-bd"></span></div><div class="v" id="pos">…</div></div>
    <div class="st"><div class="k">Trades clos</div><div class="v" id="trd">…</div></div>
    <div class="st"><div class="k">Marge · levier x10</div><div class="v" id="expo">…</div></div>
    <div class="st"><div class="k">Profit factor</div><div class="v" id="pf">…</div></div>
@@ -364,7 +364,7 @@ function tick(){
     var base=window._base||(eq-pnl)||1000;var chg=base>0?(pnl/base*100):0;
     var C=document.getElementById('chg');C.textContent=(chg>=0?'+':'')+n(chg,2)+'%';C.style.color=col(chg);
     document.getElementById('wr').textContent=n(d.winrate_pct,0)+'%';
-    document.getElementById('pos').textContent=(d.open_positions||0);
+    window._copyPos=(d.open_positions||0);window._copyReal=Number(d.realized_pnl_usdt||0);if(window.syncTop)syncTop();
     document.getElementById('trd').textContent=(d.closed_trades||0);
     document.getElementById('expo').textContent=n((d.open_exposure_usdt||0)/10);
     var rp=Number(d.realized_pnl_usdt||0),ps=(d.positions||[]);
@@ -467,10 +467,20 @@ function buildTicker(){var t=document.getElementById('tick');if(!t)return;
  seg+='READ-ONLY PAPER<span class="s">·</span>0 ORDRE REEL<span class="s">·</span>';
  t.innerHTML=seg+seg;}
 setInterval(buildTicker,3000);setTimeout(buildTicker,400);
+// ── UNE SEULE VERITE en haut : POSITIONS = copy + carry (avec le detail), sans melanger l'equity.
+// Les deux loaders (statut copy / carry) stockent leur compte et appellent syncTop -> pas de clignotement.
+function syncTop(){
+  var cp=window._copyPos||0, cy=window._carryPos||0, tot=cp+cy;
+  var el=document.getElementById('pos'); if(el){el.textContent=tot; el.title=cp+' copy + '+cy+' carry';}
+  var bd=document.getElementById('pos-bd'); if(bd){bd.textContent = cy>0 ? '('+cp+'c · '+cy+'y)' : '';}
+  var cs=document.getElementById('carry-sub'); if(cs){var cr=window._carryReal||0;
+    cs.textContent = cy>0 ? ('  ·  carry '+cy+' pos · réalisé '+(cr>=0?'+':'')+n(cr,2)+'$') : '';}
+}
 // ── Panneau CARRY (poll independant du ledger carry dedie) ──
 function loadCarry(){fetch('/v2/carry').then(function(r){return r.json()}).then(function(d){
   var tb=document.getElementById('carrytb');if(!tb)return;
   document.getElementById('carry-pos').textContent=(d.positions_ouvertes||0);
+  window._carryPos=(d.positions_ouvertes||0);window._carryReal=Number(d.realized_net_pnl_usdc||0);if(window.syncTop)syncTop();
   var real=Number(d.realized_net_pnl_usdc||0),er=document.getElementById('carry-real');
   er.textContent=n(real);er.style.color=col(real);
   document.getElementById('carry-accru').textContent='$'+n(d.funding_accru_usdt,4);
