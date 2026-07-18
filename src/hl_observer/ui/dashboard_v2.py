@@ -272,6 +272,16 @@ th{letter-spacing:1.2px}
      <table><thead><tr><th style="width:26%">coin</th><th style="width:26%">mode</th><th style="width:22%">marge</th><th style="width:26%;text-align:right">pnl</th></tr></thead><tbody id="postb"></tbody></table></div>
  </div>
 
+ <div class="card" style="margin-bottom:12px"><h3>CARRY DELTA-NEUTRE <span class="hint">paper · long spot + short perp · funding encaissé</span></h3>
+   <div class="g3" style="margin:0 0 8px">
+     <div class="kv"><span>positions ouvertes</span><b id="carry-pos">…</b></div>
+     <div class="kv"><span>PnL réalisé cumulé</span><b id="carry-real">…</b></div>
+     <div class="kv"><span>funding accru (ouvert)</span><b id="carry-accru">…</b></div>
+   </div>
+   <table><thead><tr><th style="width:20%">coin</th><th style="width:20%">notional</th><th style="width:18%">levier</th><th style="width:22%">funding accru</th><th style="width:20%;text-align:right">âge</th></tr></thead><tbody id="carrytb"></tbody></table>
+   <div class="hint" id="carryviab" style="margin-top:8px"></div>
+ </div>
+
  <div class="g3">
    <div class="card"><div class="scanline" id="scanpulse">▮ SCAN</div><h3>SCANNER</h3>
      <div class="kv"><span>leaders retenus</span><b id="sc-sel">…</b></div>
@@ -457,6 +467,19 @@ function buildTicker(){var t=document.getElementById('tick');if(!t)return;
  seg+='READ-ONLY PAPER<span class="s">·</span>0 ORDRE REEL<span class="s">·</span>';
  t.innerHTML=seg+seg;}
 setInterval(buildTicker,3000);setTimeout(buildTicker,400);
+// ── Panneau CARRY (poll independant du ledger carry dedie) ──
+function loadCarry(){fetch('/v2/carry').then(function(r){return r.json()}).then(function(d){
+  var tb=document.getElementById('carrytb');if(!tb)return;
+  document.getElementById('carry-pos').textContent=(d.positions_ouvertes||0);
+  var real=Number(d.realized_net_pnl_usdc||0),er=document.getElementById('carry-real');
+  er.textContent=n(real);er.style.color=col(real);
+  document.getElementById('carry-accru').textContent='$'+n(d.funding_accru_usdt,4);
+  var ps=d.positions||[];
+  tb.innerHTML=ps.map(function(p){return '<tr><td><b>'+p.coin+'</b></td><td>$'+n(p.notional_usdt,0)+'</td><td>'+n(p.levier,0)+'x</td><td style="color:var(--cyan)">$'+n(p.funding_accrued_usdt,4)+'</td><td style="text-align:right">'+n(p.age_h,1)+'h</td></tr>';}).join('')||'<tr><td colspan="5" style="color:var(--mut2)">— aucune position carry ouverte —</td></tr>';
+  var v=d.viables||[];
+  document.getElementById('carryviab').textContent=v.length?('viables mesurés : '+v.map(function(x){return x.coin+' ('+n(x.funding_bps_h,3)+'b/h)';}).join('  ·  ')):'aucun coin viable ce tick';
+}).catch(function(){});}
+setInterval(loadCarry,4000);setTimeout(loadCarry,600);
 </script></body></html>"""
 
 
@@ -492,6 +515,54 @@ def create_dashboard_v2_router() -> APIRouter:
             except Exception:
                 continue
         return JSONResponse({"count": len(points), "points": points, "read_only": True})
+
+    @router.get("/v2/carry")
+    def carry_state() -> JSONResponse:
+        """Etat du carry delta-neutre, lu depuis son ledger DEDIE (jamais melange au PnL canonique).
+        100% lecture seule. Reutilise les fonctions testees du store carry."""
+        try:
+            import json as _json
+            import time as _time
+            from pathlib import Path as _Path
+            from hl_observer.funding.carry_positions_store import etat_carry, charger_gestionnaire
+            root = _Path(__file__).resolve().parents[3]
+            etat = etat_carry(root)
+            g = charger_gestionnaire(root)
+            now = _time.time() * 1000.0
+            positions = []
+            accru = 0.0
+            for coin, p in g.ouvertes.items():
+                accru += float(p.get("funding_accrued_usdt") or 0.0)
+                positions.append({
+                    "coin": coin,
+                    "notional_usdt": float(p.get("notional_usdt") or 0.0),
+                    "levier": float(p.get("levier") or 0.0),
+                    "funding_accrued_usdt": float(p.get("funding_accrued_usdt") or 0.0),
+                    "age_h": round((now - float(p.get("entry_ts_ms") or now)) / 3.6e6, 2),
+                })
+            viables = []
+            try:
+                sl = _json.loads((root / "runtime" / "data" / "carry_spot_shortlist.json")
+                                 .read_text(encoding="utf-8-sig"))
+                for x in (sl if isinstance(sl, list) else []):
+                    if isinstance(x, dict):
+                        viables.append({"coin": x.get("coin"), "funding_bps_h": x.get("funding_bps_h"),
+                                        "base_bps": x.get("base_bps"),
+                                        "liquidite_spot_usd": x.get("liquidite_spot_usd")})
+            except (OSError, ValueError):
+                pass
+            return JSONResponse({
+                "positions_ouvertes": etat["positions_ouvertes"],
+                "realized_net_pnl_usdc": etat["realized_net_pnl_usdc"],
+                "funding_accru_usdt": round(accru, 6),
+                "opens": etat["opens"], "closes": etat["closes"],
+                "positions": positions, "viables": viables,
+                "read_only": True, "paper_only": True, "real_execution": False,
+            })
+        except Exception as exc:  # noqa: BLE001 -- un panneau qui echoue ne casse pas le dashboard
+            return JSONResponse({"error": str(exc), "positions": [], "viables": [],
+                                 "positions_ouvertes": 0, "realized_net_pnl_usdc": 0.0,
+                                 "funding_accru_usdt": 0.0})
 
     return router
 
