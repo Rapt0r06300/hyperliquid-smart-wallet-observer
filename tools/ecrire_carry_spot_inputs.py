@@ -261,7 +261,11 @@ def scanner(diagnostic: bool):
             pire = _pire_via_api(c)
         raison, inp = "", None
         if abs(base) > BASE_ABERRANTE_BPS:
-            raison = "base aberrante (mapping casse)"
+            # AUDITABLE : on montre CE qui a été matché et POURQUOI c'est absurde (pas un bug caché,
+            # mais l'absence d'un vrai spot jumelable : le plus proche reste à des ordres de grandeur).
+            ratio = (max(p["mark"], spot_px) / min(p["mark"], spot_px)) if (spot_px > 0 and p["mark"] > 0) else 9e9
+            raison = ("base aberrante: perp %.4g$ vs spot %s %.4g$ (x%.0f -> pas de vrai spot jumelable)"
+                      % (p["mark"], s["pair"], spot_px, ratio))
         elif liq < LIQUIDITE_MIN_USD:
             raison = "spot HL trop mince (< 5k$)"
         elif p["levier_max"] <= 0:
