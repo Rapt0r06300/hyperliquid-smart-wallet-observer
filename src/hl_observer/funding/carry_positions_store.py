@@ -86,7 +86,7 @@ def tick_multi_sur_disque(root: str | Path, mesures: dict[str, dict[str, Any]], 
     evts: list[dict[str, Any]] = []
     for coin, m in mesures.items():
         evts.append(g.tick(m["decision"], m["inputs"], now_ms=now_ms,
-                           funding_bps_h_courant=m.get("funding")))
+                           funding_bps_h_courant=m.get("funding"), prix_courant=m.get("prix")))
     for coin in list(g.ouvertes):                      # coins ouverts mais absents des mesures -> fermer
         if coin not in mesures:
             pos = g.ouvertes[coin]

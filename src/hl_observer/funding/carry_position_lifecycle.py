@@ -75,6 +75,7 @@ def ouvrir_position(decision: dict[str, Any], inputs: dict[str, Any], *,
         "funding_bps_h_entree": _f(decision, "funding_bps_h"),
         "cout_entree_bps": _f(decision, "cout_entree_bps"),
         "base_bps_entree": _f(decision, "base_bps"),
+        "entry_perp_px": _f(inputs, "perp_px"),          # prix perp a l'entree -> hausse live = (cours-entree)/entree
         "liquidite_spot_usd": _f(decision, "liquidite_spot_usd") or _f(inputs, "liquidite_spot_usd"),
         "pire_hausse_entree": _f(inputs, "pire_hausse_observee"),
         "funding_accrued_usdt": 0.0,
@@ -140,8 +141,9 @@ class GestionnaireCarry:
 
     def tick(self, decision: dict[str, Any], inputs: dict[str, Any], *, now_ms: int,
              funding_bps_h_courant: float | None = None, hausse_depuis_entree: float = 0.0,
-             age_max_h: float = AGE_MAX_H_DEFAUT) -> dict[str, Any]:
+             prix_courant: float | None = None, age_max_h: float = AGE_MAX_H_DEFAUT) -> dict[str, Any]:
         """Une passe : accrue+sort les positions ouvertes, puis ouvre si viable et coin libre.
+        `prix_courant` (perp) permet la sortie liquidation TEMPS REEL : hausse = (cours-entree)/entree.
         Retourne un petit résumé de ce qui s'est passé (pour le journal d'exécution)."""
         coin = str(decision.get("coin") or "").upper()
         fnow = float(funding_bps_h_courant if funding_bps_h_courant is not None
@@ -154,8 +156,13 @@ class GestionnaireCarry:
         if pos is not None:
             pos, add = accruer(pos, now_ms=now_ms, funding_bps_h_courant=fnow)
             evt["funding_add_usdt"] = round(add, 6)
+            # hausse REELLE depuis l'entree (prix live) -> attrape un pic avant funding<=0/age
+            hausse = float(hausse_depuis_entree or 0.0)
+            entree = float(pos.get("entry_perp_px") or 0.0)
+            if prix_courant and entree > 0:
+                hausse = max(hausse, (float(prix_courant) - entree) / entree)
             motif = raison_de_sortie(pos, now_ms=now_ms, funding_bps_h_courant=fnow,
-                                     hausse_depuis_entree=hausse_depuis_entree, age_max_h=age_max_h)
+                                     hausse_depuis_entree=hausse, age_max_h=age_max_h)
             if motif is not None:
                 realized = pnl_realise(pos)
                 self.journal.record(kind="CLOSE", coin=coin, side="CARRY",

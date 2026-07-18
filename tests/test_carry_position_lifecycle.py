@@ -28,7 +28,7 @@ def _decision(viable=True, **kw):
 def _inputs(**kw):
     d = {"ts_ms": 1_000_000, "coin": "HYPE", "funding_bps_h": 0.125, "base_bps": -0.68,
          "liquidite_spot_usd": 200_000.0, "maker": True, "levier_max": 10.0,
-         "marge_ratio": 0.5, "pire_hausse_observee": 0.29, "levier_utilise": 2.0}
+         "marge_ratio": 0.5, "pire_hausse_observee": 0.29, "levier_utilise": 2.0, "perp_px": 40.0}
     d.update(kw)
     return d
 
@@ -118,6 +118,22 @@ def test_sortie_liquidation_via_reeval():
 def test_on_garde_quand_tout_va_bien():
     pos = ouvrir_position(_decision(), _inputs(), now_ms=0)
     assert raison_de_sortie(pos, now_ms=H, funding_bps_h_courant=0.125, hausse_depuis_entree=0.0) is None
+
+
+def test_tick_prix_live_declenche_la_liquidation():
+    # entree a 40 ; funding>0 et dans la fenetre d'age, MAIS le perp bondit de +80% -> le short
+    # aurait saute. Le suivi prix LIVE doit fermer sans attendre funding<=0/age.
+    g = GestionnaireCarry()
+    g.tick(_decision(), _inputs(), now_ms=0, funding_bps_h_courant=0.125)         # entry_perp_px = 40
+    e = g.tick(_decision(), _inputs(), now_ms=H, funding_bps_h_courant=0.125, prix_courant=40.0 * 1.8)
+    assert e["ferme"] == SORTIE_LIQUIDATION
+
+
+def test_tick_prix_live_stable_on_garde():
+    g = GestionnaireCarry()
+    g.tick(_decision(), _inputs(), now_ms=0, funding_bps_h_courant=0.125)
+    e = g.tick(_decision(), _inputs(), now_ms=H, funding_bps_h_courant=0.125, prix_courant=40.2)  # +0.5%
+    assert e["ferme"] is None                                                     # rien d'anormal -> on garde
 
 
 def test_sortie_age_max():

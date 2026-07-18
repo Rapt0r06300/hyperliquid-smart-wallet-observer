@@ -138,7 +138,8 @@ def evaluer_et_journaliser(root: str | Path = ".", *, now_ms: int | None = None,
                 dec = evaluer_inputs(inp)
                 if dec.get("viable"):
                     mesures[str(dec.get("coin") or "").upper()] = {
-                        "decision": dec, "inputs": inp, "funding": dec.get("funding_bps_h")}
+                        "decision": dec, "inputs": inp, "funding": dec.get("funding_bps_h"),
+                        "prix": inp.get("perp_px")}
             evts = tick_multi_sur_disque(root, mesures, now_ms=now)
             etat = etat_carry(root)
             etape2 = {"evts": evts, "n_mesures": len(mesures),

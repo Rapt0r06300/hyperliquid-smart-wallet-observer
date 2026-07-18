@@ -231,6 +231,7 @@ def scanner(diagnostic: bool):
                        "liquidite_spot_usd": round(liq, 2), "maker": True,
                        "levier_max": p["levier_max"], "marge_ratio": mr,
                        "pire_hausse_observee": pire, "levier_utilise": lev,
+                       "perp_px": round(p["mark"], 8),   # prix perp COURANT -> suivi liquidation live
                        "source": "hyperliquid public API (perp+spot) + bougies 1h", "real_execution": False}
                 viables.append((c, inp, v.heures_pour_rentabiliser))
         rapport.append((c, p["funding_bps_h"], liq, pire, "VIABLE" if inp else raison))
