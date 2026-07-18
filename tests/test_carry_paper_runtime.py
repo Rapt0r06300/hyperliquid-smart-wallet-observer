@@ -81,13 +81,27 @@ def test_etape2_off_par_defaut_aucune_ouverture(tmp_path, monkeypatch):
 
 def test_etape2_on_ouvre_la_position_et_ecrit_le_ledger(tmp_path, monkeypatch):
     monkeypatch.setenv("HYPERSMART_CARRY_ETAPE2", "1")
-    _ecrire_inputs(tmp_path, _INPUTS_VIABLES)
+    _ecrire_inputs(tmp_path, _INPUTS_VIABLES)                        # pas de shortlist -> repli sur le best
     ligne = evaluer_et_journaliser(tmp_path, now_ms=100_060_000)
     assert ligne["decision"]["viable"] is True                      # HYPE viable a 2x
-    assert ligne["etape2"]["ouvert"] is True                        # etape 2 a OUVERT
+    assert ligne["etape2"]["positions_ouvertes"] == 1               # etape 2 a OUVERT 1 position
+    assert ligne["etape2"]["coins_ouverts"] == ["HYPE"]
     assert ligne["real_execution"] is False                         # ... mais JAMAIS d'ordre reel
     assert (tmp_path / "runtime" / "data" / "carry_paper_positions.json").exists()
     assert (tmp_path / "runtime" / "data" / "carry_paper_ledger.jsonl").exists()
+
+
+def test_etape2_multi_coins_via_shortlist(tmp_path, monkeypatch):
+    monkeypatch.setenv("HYPERSMART_CARRY_ETAPE2", "1")
+    _ecrire_inputs(tmp_path, _INPUTS_VIABLES)
+    # une shortlist de 2 coins viables -> 2 positions en parallele
+    sl = tmp_path / "runtime" / "data" / "carry_spot_shortlist.json"
+    a = dict(_INPUTS_VIABLES)
+    b = dict(_INPUTS_VIABLES); b["coin"] = "PURR"
+    sl.write_text(json.dumps([a, b]), encoding="utf-8")
+    ligne = evaluer_et_journaliser(tmp_path, now_ms=100_060_000)
+    assert ligne["etape2"]["positions_ouvertes"] == 2
+    assert set(ligne["etape2"]["coins_ouverts"]) == {"HYPE", "PURR"}
 
 
 def test_etape2_erreur_ne_casse_pas_la_decision(tmp_path, monkeypatch):
@@ -95,8 +109,36 @@ def test_etape2_erreur_ne_casse_pas_la_decision(tmp_path, monkeypatch):
     monkeypatch.setenv("HYPERSMART_CARRY_ETAPE2", "1")
     _ecrire_inputs(tmp_path, _INPUTS_VIABLES)
     import hl_observer.funding.carry_positions_store as store
-    monkeypatch.setattr(store, "tick_sur_disque",
+    monkeypatch.setattr(store, "tick_multi_sur_disque",
                         lambda *a, **k: (_ for _ in ()).throw(RuntimeError("boom")))
     ligne = evaluer_et_journaliser(tmp_path, now_ms=100_060_000)
     assert ligne["decision"]["viable"] is True                      # la decision survit
     assert ligne["etape2"]["erreur"] == "etape2_indisponible"       # l'erreur est capturee, pas propagee
+
+
+def test_etape2_shortlist_ferme_seulement_le_coin_qui_sort(tmp_path, monkeypatch):
+    """Avec des donnees FRAICHES : quand un coin quitte la shortlist, LUI SEUL se ferme ; les
+    autres restent ouverts. (Sur donnees perimees, tout se ferme = deny-by-default, teste ailleurs.)"""
+    monkeypatch.setenv("HYPERSMART_CARRY_ETAPE2", "1")
+    H = 3_600_000
+
+    def _inp(coin, ts):
+        d = dict(_INPUTS_VIABLES); d["coin"] = coin; d["ts_ms"] = ts
+        return d
+
+    def _ecrire(ts, coins):
+        _ecrire_inputs(tmp_path, _inp(coins[0], ts))
+        (tmp_path / "runtime" / "data" / "carry_spot_shortlist.json").write_text(
+            json.dumps([_inp(c, ts) for c in coins]), encoding="utf-8")
+
+    t0 = 100_000_000
+    _ecrire(t0, ["HYPE", "PURR"])
+    e1 = evaluer_et_journaliser(tmp_path, now_ms=t0 + 30_000)["etape2"]
+    assert set(e1["coins_ouverts"]) == {"HYPE", "PURR"}
+
+    t1 = t0 + 2 * H
+    _ecrire(t1, ["HYPE"])                                    # PURR sort (donnees fraiches)
+    e2 = evaluer_et_journaliser(tmp_path, now_ms=t1 + 30_000)["etape2"]
+    fermes = [(x["coin"], x["ferme"]) for x in e2["evts"] if x.get("ferme")]
+    assert e2["coins_ouverts"] == ["HYPE"]                   # HYPE reste
+    assert fermes == [("PURR", "COIN_PLUS_DANS_SHORTLIST")]  # seul PURR se ferme

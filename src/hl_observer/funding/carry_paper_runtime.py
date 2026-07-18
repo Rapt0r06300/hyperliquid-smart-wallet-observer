@@ -34,6 +34,7 @@ from hl_observer.runtime.session_identity import session_courante
 ENV_ENABLED = "HYPERSMART_CARRY_HYPE_PAPER"
 ENV_ETAPE2 = "HYPERSMART_CARRY_ETAPE2"   # opt-in : ouvrir REELLEMENT la position paper (etape 2)
 INPUTS_RELPATH = Path("runtime") / "data" / "carry_spot_inputs.json"
+SHORTLIST_RELPATH = Path("runtime") / "data" / "carry_spot_shortlist.json"   # TOUS les viables (parallele)
 JOURNAL_RELPATH = Path("runtime") / "data" / "carry_hype_paper_decisions.jsonl"
 
 MOTIF_INPUTS_ABSENTS = "INPUTS_SPOT_ABSENTS_NO_TRADE"
@@ -67,6 +68,40 @@ def charger_inputs(root: str | Path = ".", *, now_ms: int | None = None,
     return data, ""
 
 
+def evaluer_inputs(inputs: dict[str, Any]) -> dict[str, Any]:
+    """inputs MESURES -> decision dict (verdict.as_dict()). AUCUNE conversion d'unite (piege 38%)."""
+    def _g(key: str) -> float | None:
+        v = inputs.get(key)
+        return float(v) if isinstance(v, (int, float)) else None
+    verdict = evaluer_carry_neutre(
+        coin=str(inputs.get("coin") or "HYPE"),
+        funding_bps_h=_g("funding_bps_h"), base_bps=_g("base_bps"),
+        liquidite_spot_usd=_g("liquidite_spot_usd"), maker=bool(inputs.get("maker", True)),
+        levier_max=_g("levier_max"), marge_ratio=_g("marge_ratio"),
+        pire_hausse_observee=_g("pire_hausse_observee"))
+    return verdict.as_dict()
+
+
+def charger_shortlist(root: str | Path = ".", *, now_ms: int | None = None,
+                      max_age_s: float = MAX_AGE_S_DEFAUT) -> list[dict[str, Any]]:
+    """La liste des carrys viables, chacun frais (< max_age). Un vieux/absent -> [] (deny-by-default)."""
+    try:
+        data = json.loads((Path(root) / SHORTLIST_RELPATH).read_text(encoding="utf-8-sig"))
+    except (OSError, ValueError):
+        return []
+    if not isinstance(data, list):
+        return []
+    now = float(now_ms or time.time() * 1000)
+    out: list[dict[str, Any]] = []
+    for e in data:
+        if not isinstance(e, dict):
+            continue
+        ts = e.get("ts_ms")
+        if isinstance(ts, (int, float)) and ts > 0 and (now - float(ts)) <= max_age_s * 1000.0:
+            out.append(e)
+    return out
+
+
 def _journal_path(root: str | Path) -> Path:
     return Path(root) / JOURNAL_RELPATH
 
@@ -85,30 +120,31 @@ def evaluer_et_journaliser(root: str | Path = ".", *, now_ms: int | None = None,
         }
         inputs_age_s = None
     else:
-        def _f(key: str) -> float | None:
-            v = inputs.get(key)
-            return float(v) if isinstance(v, (int, float)) else None
-        verdict = evaluer_carry_neutre(
-            coin=str(inputs.get("coin") or "HYPE"),
-            funding_bps_h=_f("funding_bps_h"),
-            base_bps=_f("base_bps"),
-            liquidite_spot_usd=_f("liquidite_spot_usd"),
-            maker=bool(inputs.get("maker", True)),
-            levier_max=_f("levier_max"),
-            marge_ratio=_f("marge_ratio"),
-            pire_hausse_observee=_f("pire_hausse_observee"),
-        )
-        decision = verdict.as_dict()
+        decision = evaluer_inputs(inputs)
         inputs_age_s = round((now - float(inputs["ts_ms"])) / 1000.0, 1)
 
-    # ETAPE 2 (opt-in) : ouvrir/tenir/fermer REELLEMENT la position paper. Ne casse JAMAIS la
-    # decision/journal (une erreur ici est capturee). PAPER only : aucun ordre, aucune signature.
+    # ETAPE 2 (opt-in) : ouvrir/tenir/fermer REELLEMENT les positions paper -- MULTI-COINS via la
+    # shortlist (repli sur le meilleur seul). Ne casse JAMAIS la decision/journal (erreur capturee).
+    # PAPER only : aucun ordre, aucune signature.
     etape2 = None
-    if inputs is not None and etape2_active():
+    if etape2_active():
         try:
-            from hl_observer.funding.carry_positions_store import tick_sur_disque
-            etape2 = tick_sur_disque(root, decision, inputs, now_ms=now,
-                                     funding_bps_h_courant=decision.get("funding_bps_h"))
+            from hl_observer.funding.carry_positions_store import tick_multi_sur_disque, etat_carry
+            liste = charger_shortlist(root, now_ms=now, max_age_s=max_age_s)
+            if not liste and inputs is not None:
+                liste = [inputs]
+            mesures: dict[str, dict[str, Any]] = {}
+            for inp in liste:
+                dec = evaluer_inputs(inp)
+                if dec.get("viable"):
+                    mesures[str(dec.get("coin") or "").upper()] = {
+                        "decision": dec, "inputs": inp, "funding": dec.get("funding_bps_h")}
+            evts = tick_multi_sur_disque(root, mesures, now_ms=now)
+            etat = etat_carry(root)
+            etape2 = {"evts": evts, "n_mesures": len(mesures),
+                      "positions_ouvertes": etat["positions_ouvertes"],
+                      "coins_ouverts": etat["coins_ouverts"],
+                      "realise_total_usdt": etat["realized_net_pnl_usdc"]}
         except Exception as exc:  # noqa: BLE001
             etape2 = {"erreur": "etape2_indisponible", "detail": str(exc)}
 

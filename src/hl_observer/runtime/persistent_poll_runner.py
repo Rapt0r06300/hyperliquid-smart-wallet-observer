@@ -519,11 +519,13 @@ class PersistentPollRunner:
                 self.metrics["carry_hype_viable"] = str(d.get("viable"))
                 self.metrics["carry_hype_motif"] = str(d.get("motif") or "")
                 e2 = ligne.get("etape2") or {}
-                if isinstance(e2, dict):
-                    self.metrics["carry_etape2_ouvert"] = str(e2.get("ouvert"))
-                    if e2.get("ferme"):
-                        self.metrics["carry_etape2_ferme"] = str(e2.get("ferme"))
-                        self.metrics["carry_etape2_pnl_realise_usdt"] = str(e2.get("pnl_realise_usdt"))
+                if isinstance(e2, dict) and "positions_ouvertes" in e2:
+                    self.metrics["carry_positions_ouvertes"] = str(e2.get("positions_ouvertes"))
+                    self.metrics["carry_coins_ouverts"] = ",".join(e2.get("coins_ouverts") or [])
+                    self.metrics["carry_realise_total_usdt"] = str(e2.get("realise_total_usdt"))
+                    _fermes = [x.get("ferme") for x in (e2.get("evts") or []) if x.get("ferme")]
+                    if _fermes:
+                        self.metrics["carry_derniere_sortie"] = str(_fermes[-1])
                 self._add_step_duration("carry_hype_paper", t0)
         except Exception as exc:  # noqa: BLE001
             self.log(f"carry paper step failed (absorbe): {exc!r}")

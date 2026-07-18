@@ -38,6 +38,7 @@ from hl_observer.funding.delta_neutral_carry import evaluer_carry_neutre  # noqa
 
 API = "https://api.hyperliquid.xyz/info"
 INPUTS_PATH = ROOT / "runtime" / "data" / "carry_spot_inputs.json"
+SHORTLIST_PATH = ROOT / "runtime" / "data" / "carry_spot_shortlist.json"   # TOUS les viables (parallele)
 CANDLES_1H = ROOT / "runtime" / "history" / "candles_1h.jsonl"
 
 BASE_ABERRANTE_BPS = 100_000.0
@@ -267,6 +268,11 @@ def main() -> int:
     INPUTS_PATH.parent.mkdir(parents=True, exist_ok=True)
     INPUTS_PATH.write_text(json.dumps(inp, indent=2, ensure_ascii=False), encoding="utf-8")
     print(f"  ECRIT : {INPUTS_PATH.relative_to(ROOT)} -> le carry decide sur du mesure.")
+    # SHORTLIST : TOUS les viables (pas juste le #1) -> le carry en ouvre plusieurs EN PARALLELE
+    # (plus de funding capture + risque diversifie). Le runtime ouvre une position par coin viable.
+    shortlist = [v[1] for v in viables]
+    SHORTLIST_PATH.write_text(json.dumps(shortlist, indent=2, ensure_ascii=False), encoding="utf-8")
+    print(f"  ECRIT : {SHORTLIST_PATH.relative_to(ROOT)} -> {len(shortlist)} carry(s) viable(s) en parallele.")
     return 0
 
 

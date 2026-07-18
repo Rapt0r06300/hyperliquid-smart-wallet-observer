@@ -74,3 +74,42 @@ def test_mode_different_repart_vide_jamais_de_melange(tmp_path):
     # et le resume par mode ne melange pas
     assert resume_depuis_ledger(tmp_path, mode="TEST_FIXTURE")["opens"] == 0
     assert resume_depuis_ledger(tmp_path, mode="LIVE")["opens"] == 1
+
+
+# ---------- etat_carry (visibilite dashboard) ----------
+
+def test_etat_carry_expose_pnl_et_positions(tmp_path):
+    tick_sur_disque(tmp_path, _decision(), _inputs(), now_ms=0, funding_bps_h_courant=0.125)
+    e = __import__("hl_observer.funding.carry_positions_store", fromlist=["etat_carry"]).etat_carry(tmp_path)
+    assert e["positions_ouvertes"] == 1
+    assert e["coins_ouverts"] == ["HYPE"]
+    assert e["opens"] == 1 and e["closes"] == 0
+    assert e["realized_net_pnl_usdc"] == 0.0            # rien de ferme encore
+
+
+# ---------- tick_multi_sur_disque (shortlist multi-coins) ----------
+
+def _mesure(coin, funding=0.125, levier=2.0):
+    dec = _decision(coin=coin, funding_bps_h=funding)
+    inp = _inputs(coin=coin, funding_bps_h=funding, levier_utilise=levier)
+    return {"decision": dec, "inputs": inp, "funding": funding}
+
+
+def test_multi_ouvre_plusieurs_coins_en_parallele(tmp_path):
+    from hl_observer.funding.carry_positions_store import tick_multi_sur_disque, charger_gestionnaire
+    mesures = {"HYPE": _mesure("HYPE"), "PURR": _mesure("PURR"), "AZTEC": _mesure("AZTEC")}
+    evts = tick_multi_sur_disque(tmp_path, mesures, now_ms=0)
+    assert sum(1 for e in evts if e.get("ouvert")) == 3
+    assert set(charger_gestionnaire(tmp_path).ouvertes) == {"HYPE", "PURR", "AZTEC"}
+
+
+def test_multi_ferme_un_coin_qui_sort_de_la_shortlist(tmp_path):
+    from hl_observer.funding.carry_positions_store import tick_multi_sur_disque, charger_gestionnaire, SORTIE_HORS_SHORTLIST
+    # poll 1 : HYPE + PURR ouverts
+    tick_multi_sur_disque(tmp_path, {"HYPE": _mesure("HYPE"), "PURR": _mesure("PURR")}, now_ms=0)
+    # poll 2 : PURR disparait de la shortlist -> doit etre ferme (pas de position aveugle)
+    H = 3_600_000
+    evts = tick_multi_sur_disque(tmp_path, {"HYPE": _mesure("HYPE")}, now_ms=200 * H)
+    fermes = {e["coin"]: e["ferme"] for e in evts if e.get("ferme")}
+    assert fermes.get("PURR") == SORTIE_HORS_SHORTLIST
+    assert set(charger_gestionnaire(tmp_path).ouvertes) == {"HYPE"}   # HYPE reste
