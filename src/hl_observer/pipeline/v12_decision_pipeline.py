@@ -20,6 +20,7 @@ from typing import Any
 from hl_observer.edge.edge_net_v12 import EdgeNetV12Estimate, EdgeNetV12Inputs, estimate_edge_net_v12
 from hl_observer.evidence.decision_ledger import PaperDecisionEvidence, evidence_from_paper_result
 from hl_observer.gating.filter_pipeline import ContexteDecision, appliquer_filtres
+from hl_observer.risk.drawdown_scaling import facteur_capital
 from hl_observer.models import DataQuality, Fill, SourceMeta
 from hl_observer.normalization.fills import NormalizedFillResult, normalize_hyperliquid_fill
 from hl_observer.paper_trading.paper_engine import PaperDecisionResult, PaperEngine, PaperEngineConfig
@@ -64,6 +65,10 @@ class V12DecisionPipelineInput:
     run_context: RunContext = RunContext.LIVE
     request_id: str | None = None
     source_ts_ms: int | None = None
+    # --- Entrées OPTIONNELLES pour ACTIVER les gardes armés (X2). Absentes → garde en abstention. ---
+    wallet_stats: dict[str, Any] | None = None            # G5 : winrate/pnl/n_trades → structurel ?
+    reference_mids: dict[str, float] = field(default_factory=dict)   # G4 : prix de référence stale-tick
+    edge_history_by_coin: dict[str, dict[str, float]] = field(default_factory=dict)  # S4 : {coin:{hist,recent}}
 
 
 @dataclass(frozen=True, slots=True)
@@ -160,7 +165,9 @@ def run_v12_decision_pipeline(
         mid = _mid_for(delta.coin, pipeline_input.market_mids)
         leader_expected_edge = pipeline_input.leader_expected_edge_bps_by_coin.get(delta.coin.upper())
         edge = _estimate_edge(delta, event, mid, leader_expected_edge, cfg)
-        edge = _appliquer_gardes(edge, delta, mid, pipeline_input, cfg)
+        etat_moteur = _etat_moteur(engine)                       # capital/marge/drawdown RÉELS (X2/X3)
+        edge, gardes_ctx = _appliquer_gardes(edge, delta, mid, pipeline_input, cfg, etat_moteur)
+        margin_scale = _facteur_sizing(etat_moteur)              # X3 : réduit la taille en drawdown
         edge_estimates[delta.delta_id] = edge
         if store is not None:
             store.upsert_edge_estimate(_edge_id(delta), edge, created_at_ms=pipeline_input.observed_at_ms)
@@ -180,6 +187,8 @@ def run_v12_decision_pipeline(
             wallet_score=cfg.wallet_score,
             signal_score=cfg.signal_score,
             marks={delta.coin: market_price} if market_price > 0 else {},
+            margin_scale=margin_scale,
+            decision_context=gardes_ctx,
         )
         paper_results.append(paper_result)
         evidence = evidence_from_paper_result(
@@ -257,40 +266,84 @@ def _estimate_edge(
     )
 
 
+def _etat_moteur(engine: PaperEngine) -> dict[str, float | None]:
+    """Capital, marge utilisée et drawdown DÉRIVÉS de l'état RÉEL du moteur paper (jamais devinés).
+    Évolue au fil des ouvertures/fermetures dans la même passe → dé-risquage dynamique honnête."""
+    cash = float(getattr(engine, "cash_usdt", 0.0) or 0.0)
+    realized = float(getattr(engine, "realized_pnl_usdt", 0.0) or 0.0)
+    equity = cash + realized                                  # approx. : unrealized capté à la clôture
+    hw = float(getattr(engine, "_high_water_equity", equity) or equity)
+    drawdown = 0.0 if hw <= 0 else max(0.0, (hw - equity) / hw)
+    ecfg = getattr(engine, "config", None)
+    levier = max(1.0, float(getattr(ecfg, "leverage", 1.0) or 1.0))
+    cap = getattr(ecfg, "max_total_exposure_usdt", None)
+    capital = float(cap) if isinstance(cap, (int, float)) and cap > 0 else None
+    try:
+        marge = sum(float(getattr(p, "notional_usdt", 0.0) or 0.0) for p in engine.positions) / levier
+    except Exception:  # noqa: BLE001 — l'absence d'état positions ne casse jamais la décision
+        marge = None
+    return {"capital": capital, "marge_utilisee": marge, "drawdown_frac": drawdown}
+
+
+def _facteur_sizing(etat: dict[str, float | None]) -> float:
+    """X3 — facteur de taille CONSOMMÉ via margin_scale (pas mesuré puis jeté). En drawdown, la
+    taille rétrécit continûment (drawdown_scaling.facteur_capital). drawdown 0 → 1.0 (neutre)."""
+    dd = etat.get("drawdown_frac")
+    if dd is None:
+        return 1.0
+    return float(facteur_capital(float(dd)))
+
+
 def _appliquer_gardes(
     edge: EdgeNetV12Estimate,
     delta: LeaderDelta,
     current_mid: float | None,
     pipeline_input: "V12DecisionPipelineInput",
     cfg: V12DecisionPipelineConfig,
-) -> EdgeNetV12Estimate:
+    etat: dict[str, float | None],
+) -> tuple[EdgeNetV12Estimate, dict[str, object]]:
     """Applique le pipeline de FILTRES P1 à l'ENTRÉE. Un refus applicable dégrade l'edge SOUS le
-    plancher → NO_TRADE par le MÊME chemin que l'edge (deny-by-default), et le motif remonte dans
-    reason_codes (→ evidence + no_trade_reasons). Les SORTIES ne sont jamais filtrées. On ne
-    fabrique rien : une entrée absente laisse le garde correspondant en abstention."""
+    plancher → NO_TRADE par le MÊME chemin que l'edge (deny-by-default), motif dans reason_codes
+    (→ evidence + no_trade_reasons). Les SORTIES ne sont jamais filtrées. On ne fabrique rien :
+    une entrée absente laisse le garde correspondant en abstention. Retourne (edge, contexte_gardes)."""
     if delta.is_exit_or_reduce:
-        return edge
+        return edge, {"gardes_sortie": True}
+    coin = str(delta.coin).upper()
     univers = tuple(str(k).upper() for k in pipeline_input.market_mids.keys())
     age_s: float | None = None
     if pipeline_input.source_ts_ms is not None:
         # âge = horodatage local d'observation − horodatage venue de la donnée (fraîcheur réelle).
         age_s = max(0.0, (float(pipeline_input.observed_at_ms) - float(pipeline_input.source_ts_ms)) / 1000.0)
+    ref = (pipeline_input.reference_mids or {}).get(coin, (pipeline_input.reference_mids or {}).get(str(delta.coin)))
+    hist = (pipeline_input.edge_history_by_coin or {}).get(coin, {}) or {}
     ctx = ContexteDecision(
-        coin=str(delta.coin).upper(),
+        coin=coin,
         est_sortie=False,
         univers=univers,
         ts_ms=pipeline_input.observed_at_ms,
         wallet=str(pipeline_input.wallet),
         mid=current_mid,
         age_signal_s=age_s,
+        wallet_stats=pipeline_input.wallet_stats,                # G5 (actif si le caller le fournit)
+        prix_reference=float(ref) if isinstance(ref, (int, float)) else None,  # G4
+        marge_utilisee=etat.get("marge_utilisee"),               # S6 (actif depuis l'état moteur)
+        capital=etat.get("capital"),
+        edge_hist_bps=float(hist["hist"]) if isinstance(hist.get("hist"), (int, float)) else None,  # S4
+        edge_recent_bps=float(hist["recent"]) if isinstance(hist.get("recent"), (int, float)) else None,
     )
     res = appliquer_filtres(ctx)
+    contexte: dict[str, object] = {
+        "gardes_refus": list(res.refus),
+        "gardes_abstentions": list(res.abstentions),
+    }
+    if res.notes:
+        contexte["gardes_notes"] = res.notes
     if res.accepte:
-        return edge
+        return edge, contexte
     plancher = float(getattr(edge, "threshold_bps", cfg.min_edge_bps) or cfg.min_edge_bps)
     net_degrade = min(float(edge.net_edge_bps or 0.0), -abs(plancher) - 1.0)
     reasons = tuple(dict.fromkeys((*edge.reason_codes, *res.refus)))
-    return replace(edge, accepted=False, net_edge_bps=net_degrade, reason_codes=reasons)
+    return replace(edge, accepted=False, net_edge_bps=net_degrade, reason_codes=reasons), contexte
 
 
 def _mid_for(coin: str, mids: dict[str, float]) -> float | None:

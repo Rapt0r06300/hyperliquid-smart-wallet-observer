@@ -159,3 +159,22 @@ importer et appeler `appliquer_filtres`/`_appliquer_gardes`, sinon le test casse
 sizing drawdown/vol DANS apply_delta — sortie consommée, pas jetée), puis signaux (validés OOS
 d'abord) et modélisation (après le feature-store). On fait BAISSER le 27,9 % vague après vague,
 sans jamais gonfler le compte par un import non appelé.
+
+---
+
+## MàJ 2026-07-18 (soir, 2) — X2 (activer les armés) + X3 (sizing consommé)
+
+- **X2** : la porte alimente désormais le `ContexteDecision` avec des entrées RÉELLES —
+  `wallet_stats`, `reference_mids`, `edge_history_by_coin` (nouveaux champs optionnels de
+  `V12DecisionPipelineInput`) + **capital / marge utilisée / drawdown dérivés de l'état RÉEL du
+  moteur** (`_etat_moteur` : `cash_usdt`, `realized_pnl_usdt`, `_high_water_equity`,
+  `config.leverage`, `config.max_total_exposure_usdt`, `positions[].notional_usdt`). `margin_reserve`
+  (S6) est maintenant ACTIF depuis l'état moteur ; `structural_wallet`, `stale-tick`, `crowding`
+  s'activent dès que le caller fournit leur entrée. Absente → abstention (jamais fabriqué).
+- **X3** : `_facteur_sizing` = `drawdown_scaling.facteur_capital(drawdown)` passé en **`margin_scale`**
+  à `apply_delta` (hook existant, clampé [0,1]) → en drawdown la taille rétrécit continûment. Sortie
+  CONSOMMÉE (anti « mesuré puis jeté », V5). drawdown 0 → 1.0 (rétro-compatible).
+
+Compteur : TESTÉ-SEULEMENT **266 → 265 (27,7 %)** ; CÂBLÉ **612 → 613** (`drawdown_scaling`).
+Invariant AST étendu : la porte doit appeler `_etat_moteur` ET `_facteur_sizing`. Tests : 30 verts
+(gardes+sizing+non-régression v12) ; paper_ledger/reconciliation verts. PAPER only, 0 ordre.
