@@ -105,10 +105,12 @@ def _spots() -> dict[str, list[dict]]:
     return out
 
 
-def _carnet_spot(pair: str, *, impact_max: float = 0.02) -> tuple[float, float] | None:
-    """LE VRAI CARNET (l2Book) -> (mid, profondeur ACHETABLE en $ sous `impact_max`).
-    On mesure ce qu'on peut REELLEMENT acheter, pas un proxy de volume 24h. Memoire : « lire le
-    CARNET, pas le volume »."""
+def _carnet_spot(pair: str, *, impact_max: float = 0.02,
+                 notional_cible: float = 0.0) -> tuple[float, float, float | None] | None:
+    """LE VRAI CARNET (l2Book) -> (mid, profondeur ACHETABLE en $ sous `impact_max`, VWAP d'achat
+    de `notional_cible`). Le VWAP est le VRAI prix de fill de la jambe longue pour NOTRE taille
+    (slippage inclus) -> base honnete, pas le mid optimiste. Memoire : « lire le CARNET, pas le
+    volume »."""
     try:
         book = _post({"type": "l2Book", "coin": pair})
     except Exception:  # noqa: BLE001
@@ -124,6 +126,7 @@ def _carnet_spot(pair: str, *, impact_max: float = 0.02) -> tuple[float, float] 
         return None
     mid = (best_bid + best_ask) / 2.0
     profondeur = 0.0
+    reste, cout, qty = float(notional_cible), 0.0, 0.0     # pour le VWAP d'achat de notional_cible
     for niveau in lv[1]:                     # cote ASK : ce qu'on doit ACHETER pour la jambe longue
         try:
             px, sz = float(niveau["px"]), float(niveau["sz"])
@@ -131,8 +134,15 @@ def _carnet_spot(pair: str, *, impact_max: float = 0.02) -> tuple[float, float] 
             continue
         if px > best_ask * (1.0 + impact_max):
             break
-        profondeur += px * sz
-    return mid, round(profondeur, 2)
+        val = px * sz
+        profondeur += val
+        if reste > 0.0:                      # on remplit notre taille niveau par niveau -> VWAP reel
+            prendre = min(val, reste)
+            qty += prendre / px
+            cout += prendre
+            reste -= prendre
+    vwap = (cout / qty) if qty > 0.0 else None
+    return mid, round(profondeur, 2), vwap
 
 
 def _pire_hausse(highs: list[float], lows: list[float]) -> float | None:
@@ -202,11 +212,12 @@ def scanner(diagnostic: bool):
         # MAPPING PAR PRIX : parmi les paires spot du meme ticker, prendre celle dont le prix
         # colle au perp (tue les "base aberrante" dues a une collision de nom / paire stale).
         s = min(cands, key=lambda x: abs(x["mark"] - p["mark"]) / p["mark"])
-        carnet = _carnet_spot(s["pair"])              # LE VRAI CARNET spot (mid + profondeur reelle)
+        carnet = _carnet_spot(s["pair"], notional_cible=NOTIONNEL_MAX_USD)   # mid + profondeur + VWAP d'achat
         if carnet is None:
             spot_px, liq = s["mark"], 0.0             # carnet illisible -> profondeur 0 -> exclu
         else:
-            spot_px, liq = carnet
+            mid, liq, vwap = carnet
+            spot_px = vwap if (vwap and vwap > 0) else mid   # base au VRAI prix de fill (VWAP), sinon mid
         base = (p["mark"] - spot_px) / spot_px * 10_000.0 if spot_px > 0 else 9e9
         pire = pires.get(c)
         if pire is None:                       # pas de bougie locale -> on FETCH (plus de coins)
