@@ -131,9 +131,23 @@ def evaluer_et_journaliser(root: str | Path = ".", *, now_ms: int | None = None,
     # FIREHOSE (#1) : chaque décision carry (ACCEPT ou REFUS) devient un candidat replay, dans le
     # MÊME flux que lit le docteur replay -> on rejoue MÊME sans ouverture réelle. Best-effort.
     try:
-        from hl_observer.ops.decision_firehose import enregistrer_decision as _fh
+        from hl_observer.ops.decision_firehose import (
+            enregistrer_decision as _fh, enregistrer_marks as _mk)
         _fh(str(root), decision, strategie="carry", ts_s=now / 1000.0,
             mid=(inputs or {}).get("perp_px") if inputs else None)
+        # 🔴 MARKS — CONSTAT 18/07 : marks.jsonl contenait 0 ligne pour 1610 candidats, donc le
+        # replay A/B ne mesurait RIEN (prefilter jette tout sans marks = cause du « 1 sur 1M »).
+        # L'écrivain d'origine (v26_exit_pipeline) n'est pas atteint par la boucle -> on écrit les
+        # marks ICI, depuis le runtime qui TOURNE, avec le prix perp réel de chaque coin suivi.
+        _mids: dict[str, float] = {}
+        _liste = charger_shortlist(root, now_ms=now, max_age_s=max_age_s) or ([inputs] if inputs else [])
+        for _inp in _liste:
+            _c = str((_inp or {}).get("coin") or "").upper()
+            _p = (_inp or {}).get("perp_px")
+            if _c and isinstance(_p, (int, float)) and float(_p) > 0:
+                _mids[_c] = float(_p)
+        if _mids:
+            _mk(str(root), _mids, ts_s=now / 1000.0)
     except Exception:  # noqa: BLE001 — un firehose qui échoue ne casse jamais la décision
         pass
 

@@ -12,7 +12,8 @@ from __future__ import annotations
 from typing import Any
 
 from hl_observer.runtime.replay_recorder import (
-    CANDIDATES_MAX_BYTES, CANDIDATES_MAX_LINES, append_replay_lines)
+    CANDIDATES_MAX_BYTES, CANDIDATES_MAX_LINES, MARKS_MAX_BYTES, MARKS_MAX_LINES,
+    append_replay_lines)
 
 BASE_REPLAY = "runtime/replay"
 
@@ -47,6 +48,31 @@ def enregistrer_decision(root: str, decision: dict[str, Any], *, strategie: str,
     base = str(root).rstrip("/\\") + "/" + BASE_REPLAY
     return append_replay_lines(base, "candidates.jsonl", [row],
                                max_bytes=CANDIDATES_MAX_BYTES, max_lines=CANDIDATES_MAX_LINES)
+
+
+def enregistrer_marks(root: str, mids: dict[str, float], *, ts_s: float) -> int:
+    """🔴 CRITIQUE — écrit les MARKS de prix (coin, ts, mid) dans le flux replay.
+
+    CONSTAT du 18/07 : `marks.jsonl` contenait **0 ligne** alors que 1 610 candidats étaient
+    enregistrés -> le replay A/B ne pouvait RIEN mesurer (c'est la cause racine du « 1 sur 1M » :
+    sans marks, `prefilter_candidates` jette TOUS les candidats). L'écrivain existant
+    (`v26_exit_pipeline`) n'était pas atteint par la boucle. On écrit donc les marks depuis le
+    runtime qui, lui, TOURNE. Prix invalide -> ligne ignorée (rien d'inventé). Best-effort.
+    """
+    rows = []
+    for coin, mid in (mids or {}).items():
+        try:
+            m = float(mid)
+        except (TypeError, ValueError):
+            continue
+        c = str(coin).upper()
+        if c and m > 0:
+            rows.append({"coin": c, "ts": float(ts_s), "mid": m})
+    if not rows:
+        return 0
+    base = str(root).rstrip("/\\") + "/" + BASE_REPLAY
+    return append_replay_lines(base, "marks.jsonl", rows,
+                               max_bytes=MARKS_MAX_BYTES, max_lines=MARKS_MAX_LINES)
 
 
 def enregistrer_shadow(root: str, strategie: str, decisions: list[dict[str, Any]], *,
