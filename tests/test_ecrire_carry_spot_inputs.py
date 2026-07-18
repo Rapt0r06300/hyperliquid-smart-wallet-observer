@@ -104,3 +104,18 @@ def test_a3_coin_volatil_recoit_moins_de_levier_risk_parity():
 def test_securite_liquidation_est_definie_et_conservative():
     m = _load()
     assert m.SECURITE_LIQUIDATION >= 1.0
+
+
+# ---------- A4 : z-score comme departage (le net prime) ----------
+
+def test_a4_a_net_egal_le_spike_passe_devant():
+    m = _load()
+    # (coin, inp, heures, gain_net, zscore) — meme net, B spike
+    viables = [("A", {}, 10.0, 5.0, 0.2), ("B", {}, 10.0, 5.0, 3.0)]
+    assert [x[0] for x in m.classer_viables(viables, top_k=2)] == ["B", "A"]
+
+
+def test_a4_le_net_prime_sur_le_zscore():
+    m = _load()
+    viables = [("A", {}, 10.0, 9.0, 0.0), ("B", {}, 10.0, 2.0, 5.0)]   # A meilleur net, B spike
+    assert m.classer_viables(viables, top_k=2)[0][0] == "A"            # le NET prime, z = departage

@@ -36,6 +36,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 from hl_observer.funding.delta_neutral_carry import evaluer_carry_neutre  # noqa: E402
 from hl_observer.funding.funding_persistence import estimer_persistance  # noqa: E402
+from hl_observer.funding.funding_zscore import zscore_funding  # noqa: E402
 
 API = "https://api.hyperliquid.xyz/info"
 INPUTS_PATH = ROOT / "runtime" / "data" / "carry_spot_inputs.json"
@@ -230,8 +231,9 @@ def classer_viables(viables, *, top_k: int = PLAFOND_SHORTLIST):
     Moins de trades, plus propres : on n'ouvre que le HAUT du panier, pas tout ce qui est eligible."""
     def _cle(x):
         gain = x[3] if len(x) > 3 and x[3] is not None else -9e9
+        z = x[4] if len(x) > 4 and x[4] is not None else 0.0     # A4 : a net ~egal, preferer le SPIKE
         heures = x[2] if x[2] is not None else 9e9
-        return (-gain, heures)
+        return (-gain, -z, heures)
     return sorted(viables, key=_cle)[:max(1, int(top_k))]
 
 
@@ -267,8 +269,10 @@ def scanner(diagnostic: bool):
         elif pire is None:
             raison = "pas de bougies -> pire-hausse non mesurable"
         else:
-            # A1 : decider sur le funding PERSISTANT (resistant aux spikes), pas le snapshot chanceux.
-            fp = estimer_persistance(c, _funding_history(c))
+            # A1 : decider sur le funding PERSISTANT (resistant aux spikes) ; A4 : z-score de timing.
+            hist = _funding_history(c)
+            fp = estimer_persistance(c, hist)
+            zf = zscore_funding(c, hist, p["funding_bps_h"])   # courant = snapshot
             funding_decision = fp.funding_persistant_bps_h if fp.fiable else p["funding_bps_h"]
             best = _meilleur_levier(c, funding_decision, base, liq, p["levier_max"], pire)
             if best is None:
@@ -279,7 +283,9 @@ def scanner(diagnostic: bool):
                        "funding_bps_h": round(funding_decision, 6),
                        "funding_snapshot_bps_h": round(p["funding_bps_h"], 6),
                        "funding_persistant_bps_h": round(fp.funding_persistant_bps_h, 6),
-                       "funding_fiable": fp.fiable, "base_bps": round(base, 4),
+                       "funding_fiable": fp.fiable,
+                       "funding_zscore": zf.zscore, "funding_regime": zf.regime,
+                       "base_bps": round(base, 4),
                        "liquidite_spot_usd": round(liq, 2), "maker": True,
                        "levier_max": p["levier_max"], "marge_ratio": mr,
                        "pire_hausse_observee": pire, "securite_liquidation": SECURITE_LIQUIDATION,
@@ -288,7 +294,7 @@ def scanner(diagnostic: bool):
                        "gain_net_24h_bps": (round(v.gain_net_24h_bps, 4)
                                             if v.gain_net_24h_bps is not None else None),
                        "source": "hyperliquid public API (perp+spot) + bougies 1h", "real_execution": False}
-                viables.append((c, inp, v.heures_pour_rentabiliser, v.gain_net_24h_bps))
+                viables.append((c, inp, v.heures_pour_rentabiliser, v.gain_net_24h_bps, zf.zscore))
         rapport.append((c, p["funding_bps_h"], liq, pire, "VIABLE" if inp else raison))
     viables = classer_viables(viables)          # A2 : classe par carry NET, coupe au top-K
     return rapport, viables
@@ -317,9 +323,9 @@ def main() -> int:
         print("\n  >>> Aucun carry viable maintenant (funding bas / spot mince / trop volatil). "
               "Reponse HONNETE -- le carry attend un meilleur funding.")
         return 0
-    c, inp, h, gain = viables[0]
-    print("\n  >>> MEILLEUR : %s (net ~%+.2f bps/24h, break-even ~%.0f h, funding %+.3f bps/h, levier %gx)"
-          % (c, (gain or 0.0), h or 0.0, inp["funding_bps_h"], inp["levier_utilise"]))
+    c, inp, h, gain, _z = viables[0]
+    print("\n  >>> MEILLEUR : %s (net ~%+.2f bps/24h, funding %s, break-even ~%.0f h, levier %gx)"
+          % (c, (gain or 0.0), inp.get("funding_regime", "?"), h or 0.0, inp["levier_utilise"]))
     if a.diagnostic:
         print("  (--diagnostic : rien ecrit)")
         return 0
