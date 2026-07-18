@@ -33,7 +33,8 @@ from hl_observer.runtime.session_identity import session_courante
 
 ENV_ENABLED = "HYPERSMART_CARRY_HYPE_PAPER"
 ENV_ETAPE2 = "HYPERSMART_CARRY_ETAPE2"   # opt-in : ouvrir REELLEMENT la position paper (etape 2)
-MAX_SLOTS_CARRY = 5   # A7 : plafond de positions carry -> on garde les meilleurs nets (rotation)
+MAX_SLOTS_CARRY = 12   # plafond de positions carry : on OUVRE tous les viables (plus d'ouvertures =
+#                      # plus de funding + plus de donnees replay). Rotation garde les meilleurs nets.
 INPUTS_RELPATH = Path("runtime") / "data" / "carry_spot_inputs.json"
 SHORTLIST_RELPATH = Path("runtime") / "data" / "carry_spot_shortlist.json"   # TOUS les viables (parallele)
 JOURNAL_RELPATH = Path("runtime") / "data" / "carry_hype_paper_decisions.jsonl"

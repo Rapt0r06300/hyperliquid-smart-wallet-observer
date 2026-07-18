@@ -58,7 +58,9 @@ LIQUIDITE_MIN_USD = NOTIONNEL_MAX_USD * SECURITE_PROFONDEUR   # 2500$ (au lieu d
 # (prouve). Baisser le levier = MOINS de risque, pas plus ; le carry reste funding-positif, juste
 # sur plus de capital immobilise. Un carry sur DES coins a 1x bat un carry sur AUCUN coin a 2x.
 LEVIERS_A_ESSAYER = (1.0, 1.5, 2.0, 3.0, 4.0, 5.0, 7.0, 10.0)
-PLAFOND_SHORTLIST = 5   # A2 : top-K carrys (moins de trades, plus propres ; pas de sur-diversification)
+PLAFOND_SHORTLIST = 12   # top-K carrys viables : on ouvre TOUS les viables (plus d'ouvertures =
+#                        # plus de funding capté + plus de données pour le replay). Toujours filtré
+#                        # sur l'edge NET positif : on élargit le panier, on ne baisse pas la barre.
 SECURITE_LIQUIDATION = 1.5   # A3 : tampon = 1.5x la pire hausse -> risque de liquidation UNIFORME entre coins
 
 
