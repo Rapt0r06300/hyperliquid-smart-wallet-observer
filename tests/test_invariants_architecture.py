@@ -1,0 +1,63 @@
+"""INVARIANTS D'ARCHITECTURE (#7/#8/#13) — CLIQUETS : la dette technique ne peut plus AUGMENTER.
+Mesures du 18/07 : 31 stems en collision, 78 orphelins, plus gros fichier 5687 l.
+Chaque seuil est un PLAFOND : si un ajout le dépasse, le test casse. On peut le BAISSER quand on
+nettoie (c'est le but), jamais le monter sans décision explicite. 100 % lecture."""
+from __future__ import annotations
+
+import importlib.util
+from collections import defaultdict
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[1]
+SRC = ROOT / "src" / "hl_observer"
+
+# --- Plafonds mesurés le 18/07 (à faire BAISSER, jamais monter) ---
+MAX_STEMS_EN_COLLISION = 31
+MAX_ORPHELINS = 78
+MAX_LIGNES_NOUVEAU_FICHIER = 800     # s'applique aux fichiers RÉCENTS (les gros legacy sont connus)
+LEGACY_GROS_FICHIERS = {             # dette connue et assumée (à découper, cf. optimisation #9-11)
+    "ui/routes.py", "cli.py", "ui/status_routes.py", "ui/fusion_persistent_adapter.py",
+    "ui/safe_actions.py", "storage/models.py", "analysis/negative_pnl_auditor.py",
+    "storage/repositories.py", "strategies/external_github_bridge.py", "strategies/fusion_runtime.py",
+    "research/domaines.py", "research/github_dossier.py", "ui/simulation_log_export.py",
+}
+
+_spec = importlib.util.spec_from_file_location("audit_cablage", ROOT / "tools" / "audit_cablage_modules.py")
+_audit = importlib.util.module_from_spec(_spec)
+_spec.loader.exec_module(_audit)
+
+
+def test_pas_de_nouveau_doublon_de_nom():
+    """#7 : deux modules du même nom = confusion (quel slippage_model fait foi ?)."""
+    by = defaultdict(list)
+    for p in SRC.rglob("*.py"):
+        if "__pycache__" in str(p) or p.name == "__init__.py":
+            continue
+        by[p.stem].append(str(p.relative_to(SRC)))
+    collisions = {k: v for k, v in by.items() if len(v) > 1}
+    assert len(collisions) <= MAX_STEMS_EN_COLLISION, (
+        "nouveau doublon de nom introduit (%d > %d) : %s"
+        % (len(collisions), MAX_STEMS_EN_COLLISION, sorted(collisions)[:5]))
+
+
+def test_pas_de_nouvel_orphelin():
+    """#8 : un module que personne n'atteint est du code mort — on n'en ajoute plus."""
+    r = _audit.classer()
+    n = len(r["cat"]["ORPHELIN"])
+    assert n <= MAX_ORPHELINS, "nouveaux orphelins (%d > %d)" % (n, MAX_ORPHELINS)
+
+
+def test_pas_de_nouveau_fichier_geant():
+    """#13 : un fichier > 800 lignes devient intouchable (le mount le tronque = on ne peut plus
+    l'éditer en sécurité). Les gros legacy connus sont exemptés le temps de les découper."""
+    trop_gros = []
+    for p in SRC.rglob("*.py"):
+        if "__pycache__" in str(p):
+            continue
+        rel = str(p.relative_to(SRC)).replace("\\", "/")
+        if rel in LEGACY_GROS_FICHIERS:
+            continue
+        n = len(p.read_text(encoding="utf-8", errors="ignore").splitlines())
+        if n > MAX_LIGNES_NOUVEAU_FICHIER:
+            trop_gros.append((rel, n))
+    assert not trop_gros, "fichier(s) > %d lignes hors legacy : %s" % (MAX_LIGNES_NOUVEAU_FICHIER, trop_gros)
