@@ -262,6 +262,9 @@ th{letter-spacing:1.2px}
    <div class="st"><div class="k">Profit factor</div><div class="v" id="pf">…</div></div>
  </div>
 
+ <div class="card" style="margin-bottom:12px"><h3>STRATÉGIES <span class="hint">— toutes actives EN PARALLÈLE · une position ne s'ouvre QUE si l'edge est prouvé (refuser = protéger le capital) —</span></h3>
+   <table><thead><tr><th style="width:34%">stratégie</th><th style="width:16%">positions</th><th style="width:26%">réalisé paper</th><th style="width:24%;text-align:right">état</th></tr></thead><tbody id="strattb"></tbody></table></div>
+
  <div class="card" style="margin-bottom:12px"><h3>TOP OPPORTUNITÉS <span class="hint" id="oppsum">— toutes stratégies · edge net après coûts —</span></h3>
    <table><thead><tr><th style="width:7%">#</th><th style="width:23%">coin</th><th style="width:28%">stratégie</th><th style="width:20%">edge net</th><th style="width:22%;text-align:right">power</th></tr></thead><tbody id="opptb"></tbody></table></div>
 
@@ -470,11 +473,20 @@ setInterval(buildTicker,3000);setTimeout(buildTicker,400);
 // ── UNE SEULE VERITE en haut : POSITIONS = copy + carry (avec le detail), sans melanger l'equity.
 // Les deux loaders (statut copy / carry) stockent leur compte et appellent syncTop -> pas de clignotement.
 function syncTop(){
-  var cp=window._copyPos||0, cy=window._carryPos||0, tot=cp+cy;
-  var el=document.getElementById('pos'); if(el){el.textContent=tot; el.title=cp+' copy + '+cy+' carry';}
+  var cp=window._copyPos||0, cy=window._carryPos||0, totPos=cp+cy;
+  var pr=Number(window._copyReal||0), cr=Number(window._carryReal||0), totReal=pr+cr;
+  var el=document.getElementById('pos'); if(el){el.textContent=totPos; el.title=cp+' copy + '+cy+' carry';}
   var bd=document.getElementById('pos-bd'); if(bd){bd.textContent = cy>0 ? '('+cp+'c · '+cy+'y)' : '';}
-  var cs=document.getElementById('carry-sub'); if(cs){var cr=window._carryReal||0;
+  var cs=document.getElementById('carry-sub'); if(cs){
     cs.textContent = cy>0 ? ('  ·  carry '+cy+' pos · réalisé '+(cr>=0?'+':'')+n(cr,2)+'$') : '';}
+  var st=document.getElementById('strattb');
+  if(st){var mk=function(v){return (v>=0?'+':'')+n(v,2)+'$';};
+    st.innerHTML=
+       '<tr><td>Copy-trading</td><td>'+cp+'</td><td style="color:'+col(pr)+'">'+mk(pr)+'</td><td style="text-align:right;color:var(--mut)">'+(cp>0?'actif':'attend un edge prouvé (protège le capital)')+'</td></tr>'
+      +'<tr><td>Carry delta-neutre</td><td>'+cy+'</td><td style="color:'+col(cr)+'">'+mk(cr)+'</td><td style="text-align:right;color:var(--mut)">'+(cy>0?'actif · funding encaissé':'attend un meilleur funding')+'</td></tr>'
+      +'<tr><td>Liquidations</td><td>—</td><td style="color:var(--mut2)">—</td><td style="text-align:right;color:var(--mut)">mesure · données en accumulation</td></tr>'
+      +'<tr style="border-top:1px solid var(--mut2)"><td><b>TOTAL paper</b></td><td><b>'+totPos+'</b></td><td style="color:'+col(totReal)+'"><b>'+mk(totReal)+'</b></td><td></td></tr>';
+  }
 }
 // ── Panneau CARRY (poll independant du ledger carry dedie) ──
 function loadCarry(){fetch('/v2/carry').then(function(r){return r.json()}).then(function(d){
