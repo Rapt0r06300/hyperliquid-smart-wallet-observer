@@ -3140,6 +3140,45 @@ c_eco_cata         = exec_rule("ECONOMIE : le stop catastrophique ferme REELLEME
 c_eco_coherence    = exec_rule("ECONOMIE : les couts du GATE et ceux du PnL sont coherents", _eco_gate_et_pnl_coherents)
 
 
+# ====================== LECONS DES 18-19/07 (tools/audit_controles_sup.py) ======================
+# Chaque controle = un bug REEL qui a coute de l'argent ou de la verite, generalise.
+
+def _sup():
+    import audit_controles_sup as m
+    return m
+
+
+def c_unites_24h():
+    c = Check("Unites : aucun cumul multi-jours deguise en taux _24h_ (bug x30 du 19/07)")
+    resume, erreurs = _sup().controle_unites_24h()
+    return c.finish(resume, erreurs)
+
+
+def c_interrupteurs_lanceur():
+    c = Check("Interrupteurs : valeurs SURES dans LANCER + coherence superviseur")
+    resume, erreurs = _sup().controle_interrupteurs_lanceur()
+    return c.finish(resume, erreurs)
+
+
+def c_provenance_dydx():
+    c = Check("Provenance : le panneau HL ne peut pas lire le moteur dYdX legacy")
+    resume, erreurs = _sup().controle_provenance_dydx()
+    return c.finish(resume, erreurs)
+
+
+def c_ui_sans_chiffre_rassurant():
+    c = Check("UI honnete : pas de repli optimiste ('>=1') quand la mesure manque")
+    resume, erreurs = _sup().controle_ui_sans_chiffre_rassurant()
+    return c.finish(resume, erreurs)
+
+
+def c_sante_runtime():
+    c = Check("Sante runtime (photo, jamais bloquant) : collecteurs, inputs, ledger",
+              blocking=False)
+    resume, warns = _sup().controle_sante_runtime()
+    return c.finish(resume, None, warns)
+
+
 def main():
     import atexit
     import signal
@@ -3217,6 +3256,10 @@ def main():
         c_fuzz_no_crash, c_fuzz_no_nan, c_fuzz_deterministic, c_fuzz_empty_input,
         c_fuzz_monotonic_costs, c_fuzz_pnl_signs, c_fuzz_costs_never_help,
         c_all_modules_have_public_api,
+        # --- LECONS DES 18-19/07 (unite x30, interrupteurs, provenance, chiffre rassurant,
+        #     sante runtime) : chaque controle = un bug REEL generalise. tools/audit_controles_sup.py
+        c_unites_24h, c_interrupteurs_lanceur, c_provenance_dydx, c_ui_sans_chiffre_rassurant,
+        c_sante_runtime,
         # --- LA SUITE DE TESTS (partie longue) ---
         c_tests, c_coverage, c_critical_coverage, c_slow_tests, c_flaky, c_doctor,
     ]

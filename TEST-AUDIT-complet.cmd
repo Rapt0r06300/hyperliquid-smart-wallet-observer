@@ -2,14 +2,21 @@
 REM ==================================================================
 REM   AUDIT COMPLET HYPERSMART  --  double-clique ou lance-le d'ici
 REM
-REM   33 controles : syntaxe, imports, imports circulaires, signatures,
-REM   code mort, exceptions avalees, aleatoire non seede, coherence de
-REM   la config, reglages morts, planchers fail-open, secrets, execution
-REM   reelle, securite, tests non isoles, tests sans assertion, tests
-REM   desactives, reseau dans les tests, doublons, modules orphelins,
-REM   dettes, multiprocessing, codes de refus, modules sans test, docs,
-REM   ressources, lint, typage, reconciliation PnL, SUITE DE TESTS,
-REM   couverture fichier par fichier, tests flaky, doctor.
+REM   ~180 controles : syntaxe, imports, circulaires, signatures, code
+REM   mort, exceptions avalees, aleatoire non seede, coherence config,
+REM   reglages morts, planchers fail-open, secrets, execution reelle,
+REM   securite, tests non isoles/sans assertion/desactives, reseau dans
+REM   les tests, doublons, orphelins, dettes, multiprocessing, codes de
+REM   refus, modules sans test, docs, ressources, lint, typage,
+REM   reconciliation PnL, sante economique, verite des donnees, fuzzing,
+REM   SUITE DE TESTS, couverture, flaky, doctor.
+REM
+REM   + LECONS DES 18-19/07 (nouveaux, tools\audit_controles_sup.py) :
+REM     - unites : cumul multi-jours deguise en taux _24h_ (le bug x30)
+REM     - interrupteurs du lanceur : valeurs sures + coherence superviseur
+REM     - provenance : le panneau HL ne peut pas lire le moteur dYdX
+REM     - UI honnete : pas de '>=1' rassurant quand la mesure manque
+REM     - sante runtime (photo NON bloquante) : collecteurs, inputs, ledger
 REM
 REM   -> Ecrit "resultat-audit.md" a la racine : envoie-le a Claude.
 REM

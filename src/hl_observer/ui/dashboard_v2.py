@@ -381,7 +381,12 @@ function tick(){
     // clôturé un seul trade. Un profit factor n'existe pas tant qu'il n'y a pas de trades.
     var pf=d.paper_ledger&&d.paper_ledger.profit_factor;
     var closTot=(d.closed_trades||0)+(window._carryCloses||0);
-    document.getElementById('pf').textContent=(pf!=null?n(pf,2):(closTot>0?(rp>=0?'≥1':'<1'):'—'));
+    // 🔴 19/07 (screenshot de Flo) : cette ligne affichait « ≥1 » avec 35 trades clos a −5,44$,
+    // parce que `rp` (PnL de SESSION, 0 apres redemarrage) et `closTot` (ledger CUMULE, 35)
+    // venaient de DEUX perimetres differents -> `rp>=0` etait vrai -> « rentable » sorti de rien.
+    // Regle : si le PF mesure n'est pas disponible, on affiche un tiret. JAMAIS un chiffre
+    // rassurant fabrique d'un signe. (Controle d'audit : c_ui_sans_chiffre_rassurant.)
+    document.getElementById('pf').textContent=(pf!=null?n(pf,2):'—');
     if(window.syncTop)syncTop();
     // marks
     var eqo=d.equity||{},av=Number(eqo.market_marks_available||0),mi=Number(eqo.market_marks_missing||0),fr=document.getElementById('fresh');
