@@ -116,9 +116,20 @@ def test_etape2_erreur_ne_casse_pas_la_decision(tmp_path, monkeypatch):
     assert ligne["etape2"]["erreur"] == "etape2_indisponible"       # l'erreur est capturee, pas propagee
 
 
-def test_etape2_shortlist_ferme_seulement_le_coin_qui_sort(tmp_path, monkeypatch):
-    """Avec des donnees FRAICHES : quand un coin quitte la shortlist, LUI SEUL se ferme ; les
-    autres restent ouverts. (Sur donnees perimees, tout se ferme = deny-by-default, teste ailleurs.)"""
+def test_etape2_shortlist_sortie_selective_APRES_amortissement(tmp_path, monkeypatch):
+    """🔴 RÉÉCRIT LE 19/07 — l'ancienne version de ce test PRESCRIVAIT le churn.
+
+    Elle exigeait : « PURR sort de la shortlist a +2 h => PURR se ferme ». C'est exactement le
+    comportement qui a coute -5,07 $ (29 fermetures COIN_PLUS_DANS_SHORTLIST a ~17,5 cts le
+    tour, sans jamais laisser le funding rembourser l'entree). L'anti-churn (A3) exige
+    desormais d'avoir AMORTI l'entree avant toute sortie non urgente.
+
+    Fixture : 0,125 bps/h de funding, ~11,7 bps d'entree -> amortissement ~93 h.
+    Trois actes :
+      1. deux coins viables -> deux positions ;
+      2. PURR quitte la shortlist a +2 h  -> il RESTE (fermer acterait la perte pour rien) ;
+      3. PURR toujours exclu a +100 h (amorti) -> il se ferme, et SEULEMENT lui.
+    """
     monkeypatch.setenv("HYPERSMART_CARRY_ETAPE2", "1")
     H = 3_600_000
 
@@ -136,9 +147,25 @@ def test_etape2_shortlist_ferme_seulement_le_coin_qui_sort(tmp_path, monkeypatch
     e1 = evaluer_et_journaliser(tmp_path, now_ms=t0 + 30_000)["etape2"]
     assert set(e1["coins_ouverts"]) == {"HYPE", "PURR"}
 
+    # ACTE 2 -- PURR sort a +2 h : NON amorti -> l'anti-churn annule la sortie, PURR reste.
     t1 = t0 + 2 * H
-    _ecrire(t1, ["HYPE"])                                    # PURR sort (donnees fraiches)
+    _ecrire(t1, ["HYPE"])
     e2 = evaluer_et_journaliser(tmp_path, now_ms=t1 + 30_000)["etape2"]
-    fermes = [(x["coin"], x["ferme"]) for x in e2["evts"] if x.get("ferme")]
-    assert e2["coins_ouverts"] == ["HYPE"]                   # HYPE reste
-    assert fermes == [("PURR", "COIN_PLUS_DANS_SHORTLIST")]  # seul PURR se ferme
+    assert set(e2["coins_ouverts"]) == {"HYPE", "PURR"}, (
+        "fermer un carry non amorti parce que la shortlist a cligne = le churn a -5$ du 18-19/07")
+    assert [x for x in e2["evts"] if x.get("ferme")] == []
+
+    # ACTE 3 -- PURR toujours exclu : l'absence doit etre PROLONGEE (A1 : >3 passes ET >45 min)
+    # avant de fermer. On fait 4 passes etalees sur ~1 h -> la 4e ferme PURR, et SEULEMENT lui.
+    # (Motif = SORTIE_ABSENCE_PROLONGEE : "hors shortlist" est une absence de donnee, pas un
+    # ordre de fuite. COIN_PLUS_DANS_SHORTLIST ne subsiste que dans les vieilles lignes de ledger.)
+    t2 = t0 + 100 * H
+    e3, fermes = None, []
+    for minutes in (0, 20, 40, 55):
+        tk = t2 + minutes * 60_000
+        _ecrire(tk - 30_000, ["HYPE"])                       # donnees fraiches, PURR absent
+        e3 = evaluer_et_journaliser(tmp_path, now_ms=tk)["etape2"]
+        fermes += [(x["coin"], x["ferme"]) for x in e3["evts"] if x.get("ferme")]
+    assert e3["coins_ouverts"] == ["HYPE"], "HYPE (dans la shortlist) ne doit JAMAIS se fermer ici"
+    assert fermes == [("PURR", "DONNEE_ABSENTE_PROLONGEE")], (
+        "PURR doit fermer UNE fois, pour absence PROLONGEE -- pas a chaque clignotement: %r" % fermes)

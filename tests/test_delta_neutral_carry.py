@@ -124,8 +124,8 @@ RISQUE_SURVIVABLE = {
 
 def test_covering_costs_TWO_round_trips_not_one():
     """LE POINT QU'ON OUBLIE. Couvrir, c'est deux marches. Donc QUATRE allers-retours de frais."""
-    assert COUT_MAKER_2_JAMBES_BPS == 6.0        # 4 x 1,5 bps
-    assert COUT_TAKER_2_JAMBES_BPS == 18.0       # 4 x 4,5 bps
+    assert COUT_MAKER_2_JAMBES_BPS == 11.0       # 2x1,5 (perp) + 2x4,0 (spot) -- spot maker 2,7x plus cher
+    assert COUT_TAKER_2_JAMBES_BPS == 23.0       # 2x4,5 (perp) + 2x7,0 (spot)
 
 
 def test_the_PROTOCOL_FLOOR_never_decays_and_that_changes_EVERYTHING():
@@ -181,18 +181,19 @@ def test_the_BASIS_is_paid_at_entry_and_can_eat_the_whole_carry():
     Un funding de 0,125 bps/h met une eternite a rembourser ca."""
     v = evaluer_carry_neutre(coin="X", funding_bps_h=0.125, base_bps=-30.0,
                              liquidite_spot_usd=100_000.0)
-    assert v.cout_entree_bps == pytest.approx(6.0 + 30.0)
-    # 36 bps a rembourser a 0,125 bps/h -> 288 heures = 12 JOURS avant le premier centime.
+    assert v.cout_entree_bps == pytest.approx(COUT_MAKER_2_JAMBES_BPS + 30.0)   # 11 + 30 = 41
+    # 41 bps a rembourser a 0,125 bps/h -> 328 heures = ~14 JOURS avant le premier centime.
     # Le carry n'est pas impossible : il est LENT. Et sur 24 h, il est NEGATIF.
-    # 36 bps a rembourser a 0,125 bps/h -> 288 heures = 12 JOURS avant le premier centime.
+    # (Le cout REEL de couverture -- spot maker 4,0 -- alourdit encore l'entree : 11 bps, pas 6.)
     assert v.heures_pour_rentabiliser is not None and v.heures_pour_rentabiliser > 240
 
 
 def test_a_FAVOURABLE_basis_pays_us_at_entry():
-    """Base POSITIVE = le perp est plus cher = on le short HAUT. La base joue POUR nous."""
-    v = evaluer_carry_neutre(coin="X", funding_bps_h=1.0, base_bps=+10.0,
+    """Base POSITIVE = le perp est plus cher = on le short HAUT. La base joue POUR nous.
+    Mais elle doit DEPASSER le cout de couverture reel (11 bps) pour vraiment nous payer a l'entree."""
+    v = evaluer_carry_neutre(coin="X", funding_bps_h=1.0, base_bps=+15.0,
                              liquidite_spot_usd=100_000.0)
-    assert v.cout_entree_bps == pytest.approx(6.0 - 10.0)   # negatif : on est PAYE pour entrer
+    assert v.cout_entree_bps == pytest.approx(COUT_MAKER_2_JAMBES_BPS - 15.0)  # 11-15 = -4 : on est PAYE
 
 
 def test_a_NEGATIVE_funding_means_shorting_the_perp_PAYS_instead_of_earning():
@@ -202,20 +203,26 @@ def test_a_NEGATIVE_funding_means_shorting_the_perp_PAYS_instead_of_earning():
     assert v.motif == MOTIF_FUNDING_TROP_FAIBLE
 
 
-def test_the_MEDIAN_funding_DOES_repay_the_two_legs_in_48_hours():
+def test_the_MEDIAN_funding_DOES_repay_the_two_legs_in_88_hours():
     """LE RENVERSEMENT. Avec le plancher permanent, le funding MEDIAN (0,125 bps/h) rembourse
-    les 6 bps des deux jambes en 48 heures -- puis c'est du portage pur.
+    les 11 bps des deux jambes en 88 heures -- puis c'est du portage pur.
 
+    (88 h et non 48 : le cout REEL de couverture est 11 bps, pas 6 -- spot maker 4,0 != perp 1,5.)
     Il n'y a plus de SEUIL de funding. Il y a un DELAI. Ce n'est pas la meme chose du tout."""
-    assert funding_cumule_bps(48, 0.125) == pytest.approx(COUT_MAKER_2_JAMBES_BPS)
+    assert funding_cumule_bps(88, 0.125) == pytest.approx(COUT_MAKER_2_JAMBES_BPS)
     v = evaluer_carry_neutre(coin="MEDIAN", funding_bps_h=0.125, base_bps=0.0,
                              liquidite_spot_usd=100_000.0, **RISQUE_SURVIVABLE)
     assert v.viable is True
-    assert v.heures_pour_rentabiliser == 48.0
+    assert v.heures_pour_rentabiliser == 88.0
     # 🔴 T2b : le gain PUBLIE est desormais celui du CAPITAL TOTAL (spot cash + marge du perp).
     # Sur le notionnel seul on lisait ~84 bps ; avec m = 1,05 le capital double, et le vrai
-    # rendement tombe a ~41 bps. Le carry ne disparait pas -- il est DEUX FOIS plus petit.
-    assert v.gain_net_24h_bps is not None and 35 < v.gain_net_24h_bps < 50
+    # rendement tombe a ~41 bps SUR L'HORIZON (30 j). C'est `gain_net_horizon_bps`.
+    assert v.gain_net_horizon_bps is not None and 35 < v.gain_net_horizon_bps < 50
+    # 🔴 UNITE (19/07) : le champ "24h" doit etre un VRAI taux journalier = cumul / 30 jours.
+    # PURR affichait « +49,7 bps/24h » avec un funding plancher qui rend ~3 bps/24h BRUTS :
+    # c'etait le cumul 30 j deguise en taux. La rotation A7 croyait a des surplus x30.
+    assert v.gain_net_24h_bps == pytest.approx(v.gain_net_horizon_bps / 30.0, abs=0.01)
+    assert v.gain_net_24h_bps < 2.0, "un funding au plancher ne peut PAS rendre >2 bps/24h net"
     # 10,95 % d'APR delta-neutre : ce que la doc Hyperliquid annonce ("11,6 % to short")
     apr = 0.125 * 24 * 365 / 100
     assert 10.0 < apr < 12.0
@@ -260,12 +267,12 @@ def test_UNE_MARGE_TROP_FINE_FAIT_TOMBER_UN_CARRY_PAR_AILLEURS_PARFAIT():
 
 
 def test_maker_execution_more_than_halves_the_cost_of_covering():
-    """18 bps en taker contre 6 en maker. Sur un carry, l'execution N'EST PAS un detail."""
+    """23 bps en taker contre 11 en maker. Sur un carry, l'execution N'EST PAS un detail."""
     taker = evaluer_carry_neutre(coin="X", funding_bps_h=3.0, base_bps=0.0,
                                  liquidite_spot_usd=100_000.0, maker=False)
     maker = evaluer_carry_neutre(coin="X", funding_bps_h=3.0, base_bps=0.0,
                                  liquidite_spot_usd=100_000.0, maker=True)
-    assert maker.cout_entree_bps < taker.cout_entree_bps / 2.5
+    assert maker.cout_entree_bps < taker.cout_entree_bps / 2.0
 
 
 # ------------------------------------------------------------------ deny-by-default

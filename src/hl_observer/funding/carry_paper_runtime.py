@@ -197,6 +197,18 @@ def evaluer_et_journaliser(root: str | Path = ".", *, now_ms: int | None = None,
     except Exception:  # noqa: BLE001 — un firehose qui échoue ne casse jamais la décision
         _noter_echec("hl_observer/funding/carry_paper_runtime.py:166")
 
+    # SUPERVISEUR (19/07) : les 4 collecteurs sont morts ensemble a 15:27 -> inputs perimes en
+    # 15 min -> INPUTS_SPOT_PERIMES_NO_TRADE en boucle -> bot affame. L'alarme existait
+    # (VERIFIER-TOUT section 5) mais personne ne la regardait pendant que le bot tournait.
+    # Ce moteur-ci SURVIT (prouve : il journalisait encore a 15:55) -> c'est donc LUI qui
+    # constate le silence d'un collecteur et le relance. Best-effort, cooldown 10 min,
+    # journalise dans runtime/data/superviseur_collecteurs.json. Ne casse JAMAIS la decision.
+    try:
+        from hl_observer.ops.superviseur_collecteurs import verifier_et_relancer
+        verifier_et_relancer(root)
+    except Exception:  # noqa: BLE001 — un superviseur qui tue le moteur serait pire que la panne
+        _noter_echec("hl_observer/funding/carry_paper_runtime.py:superviseur")
+
     etape2 = None
     if etape2_active():
         try:

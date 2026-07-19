@@ -145,10 +145,18 @@ class CarryNeutre:
     cout_entree_bps: float          # frais des 2 jambes + la base subie
     heures_pour_rentabiliser: float | None
     funding_restant_a_ce_moment: float | None
+    #: 🔴 UNITE REPAREE LE 19/07. Ce champ publiait le gain cumule sur TOUT l'horizon (30 j)
+    #: sous un nom de taux journalier : PURR affichait « +49,7 bps/24h » avec un funding au
+    #: plancher qui ne rend que ~3 bps/24h BRUTS. Un x30 de complaisance. La rotation A7, qui
+    #: compare des taux JOURNALIERS a un cout one-shot, voyait des surplus fantomes x30 --
+    #: c'est un des moteurs des 29 rotations du churn (-5,07 $). Desormais : VRAI net moyen
+    #: par 24 h sur l'horizon. Le cumul, lui, vit dans `gain_net_horizon_bps`.
     gain_net_24h_bps: float | None
     viable: bool
     motif: str
     note: str = ""
+    #: gain net CUMULE sur l'horizon de detention (l'ancienne valeur, sous son vrai nom).
+    gain_net_horizon_bps: float | None = None
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -160,6 +168,7 @@ class CarryNeutre:
             "heures_pour_rentabiliser": self.heures_pour_rentabiliser,
             "funding_restant_a_ce_moment": self.funding_restant_a_ce_moment,
             "gain_net_24h_bps": self.gain_net_24h_bps,
+            "gain_net_horizon_bps": self.gain_net_horizon_bps,
             "viable": self.viable,
             "motif": self.motif,
             "note": self.note,
@@ -256,16 +265,23 @@ def evaluer_carry_neutre(
             break
 
     restant = (funding_encaisse_h * (PERSISTANCE_1H ** heures)) if heures else None
-    gain_24h = funding_cumule_bps(horizon_h, funding_encaisse_h) - cout_entree
+    # `gain_horizon` = net CUMULE sur l'horizon (30 j par defaut). Le publier tel quel dans un
+    # champ nomme "24h" etait le bug d'unite du 19/07 (x30 de complaisance). On garde le cumul
+    # pour le verdict `viable` (rembourse ET gagne sur l'horizon), et on publie a cote le VRAI
+    # net moyen par 24 h -- c'est LUI que la rotation et le dashboard doivent voir.
+    jours_horizon = max(1.0, float(horizon_h) / 24.0)
+    gain_horizon = funding_cumule_bps(horizon_h, funding_encaisse_h) - cout_entree
 
     if heures is None:
         return CarryNeutre(coin, funding_bps_h, base_bps, liquidite_spot_usd, cout_entree,
-                           None, None, round(gain_24h, 3), False, MOTIF_BASE_TROP_CHERE,
+                           None, None, round(gain_horizon / jours_horizon, 3), False,
+                           MOTIF_BASE_TROP_CHERE,
                            "le funding s'evapore (persistance %.2f/h) avant d'avoir rembourse "
-                           "%.1f bps de cout d'entree" % (PERSISTANCE_1H, cout_entree))
+                           "%.1f bps de cout d'entree" % (PERSISTANCE_1H, cout_entree),
+                           gain_net_horizon_bps=round(gain_horizon, 3))
 
     # VIABLE = il rembourse ET il gagne sur l'horizon de detention. Pas "il gagne en 24 h".
-    viable = (heures is not None) and (gain_24h > 0)
+    viable = (heures is not None) and (gain_horizon > 0)
 
     # 🔴 T2b / #588 -- LE VERROU QUI MANQUAIT, ET QUI MORD MAINTENANT.
     # « Le prix s'annule » est vrai pour le PORTEFEUILLE, FAUX pour le COMPTE PERP : le gain de la
@@ -275,7 +291,7 @@ def evaluer_carry_neutre(
     if viable:
         liq = evaluer_risque_liquidation(
             coin=coin, levier_max=levier_max, marge_ratio=marge_ratio,
-            pire_mouvement_observe=pire_hausse_observee, rendement_brut_bps=gain_24h,
+            pire_mouvement_observe=pire_hausse_observee, rendement_brut_bps=gain_horizon,
         )
         if not liq.viable:
             return CarryNeutre(
@@ -284,24 +300,28 @@ def evaluer_carry_neutre(
                 cout_entree_bps=round(cout_entree, 2), heures_pour_rentabiliser=heures,
                 funding_restant_a_ce_moment=round(restant, 4) if restant else None,
                 # le rendement AFFICHE devient celui du capital REELLEMENT immobilise (N + M)
-                gain_net_24h_bps=round(liq.rendement_sur_capital_bps, 3),
+                gain_net_24h_bps=round(liq.rendement_sur_capital_bps / jours_horizon, 3),
                 viable=False, motif=liq.motif, note=liq.note,
+                gain_net_horizon_bps=round(liq.rendement_sur_capital_bps, 3),
             )
         # la jambe perp survit : on publie le rendement sur le CAPITAL TOTAL, pas sur le notionnel
-        gain_24h = liq.rendement_sur_capital_bps
+        gain_horizon = liq.rendement_sur_capital_bps
     return CarryNeutre(
         coin=coin, funding_bps_h=round(funding_bps_h, 4), base_bps=round(base_bps, 2),
         liquidite_spot_usd=round(liquidite_spot_usd, 0),
         cout_entree_bps=round(cout_entree, 2),
         heures_pour_rentabiliser=heures,
         funding_restant_a_ce_moment=round(restant, 4) if restant else None,
-        gain_net_24h_bps=round(gain_24h, 3),
+        gain_net_24h_bps=round(gain_horizon / jours_horizon, 3),
         viable=viable,
         motif="CARRY_NEUTRE_VIABLE" if viable else MOTIF_BASE_TROP_CHERE,
-        note=("rembourse en %.0f h (%.1f j), puis portage pur -- %.1f bps nets sur %.0f jours"
-              % (heures, heures / 24.0, gain_24h, horizon_h / 24.0)) if viable
+        note=("rembourse en %.0f h (%.1f j), puis portage pur -- %.1f bps nets sur %.0f jours "
+              "(soit %.2f bps par 24 h en moyenne)"
+              % (heures, heures / 24.0, gain_horizon, horizon_h / 24.0,
+                 gain_horizon / jours_horizon)) if viable
              else ("rembourse en %.0f h mais le carry reste negatif sur l'horizon"
                    % (heures or 0)),
+        gain_net_horizon_bps=round(gain_horizon, 3),
     )
 
 
