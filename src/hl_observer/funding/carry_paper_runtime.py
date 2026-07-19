@@ -84,8 +84,9 @@ def _capital_disponible(root: str | Path) -> float | None:
             v = etat.get(cle) if isinstance(etat, dict) else None
             if isinstance(v, (int, float)) and float(v) > 0:
                 return float(v)
-    except (OSError, ValueError, TypeError):
-        pass
+    except (OSError, ValueError, TypeError) as exc:
+        # cliquet 105->0 : on avale, mais on COMPTE (une panne muette n'a jamais de piste)
+        _noter_echec("hl_observer/funding/carry_paper_runtime.py:capital_etat", exc)
     # 2) le capital déclaré en environnement
     return _capital_depuis_env()
 

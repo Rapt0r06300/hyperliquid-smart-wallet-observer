@@ -270,7 +270,14 @@ def test_logs_analyzer_prefers_structured_dydx_log_and_event_level_pnl(tmp_path:
         encoding="utf-8",
     )
 
-    report = analyze_logs_streaming(log_dir)
+    # 🔴 19/07 — PROVENANCE : `logs/structured/decisions.jsonl` est le log du moteur dYdX
+    # legacy. Depuis 7bd5b43, le panneau Hyperliquid ne peut PLUS le lire par accident (il
+    # affichait 3 773 refus d'un moteur arrete). Le panneau dYdX, LUI, doit le demander
+    # EXPLICITEMENT : c'est ce que fait ce test desormais — et on verifie les DEUX sens.
+    assert analyze_logs_streaming(log_dir).source_files == (), (
+        "sans opt-in, le log dYdX ne doit JAMAIS etre choisi (bug de provenance du 19/07)")
+
+    report = analyze_logs_streaming(log_dir, autoriser_dydx_legacy=True)
 
     assert [path.name for path in report.source_files] == ["decisions.jsonl"]
     assert report.total_decisions == 3

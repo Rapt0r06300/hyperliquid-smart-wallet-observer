@@ -46,6 +46,15 @@ COOLDOWN_S = 600.0
 
 JOURNAL_RELPATH = Path("runtime") / "data" / "superviseur_collecteurs.json"
 
+#: Compteur des pannes INTERNES du superviseur (journal inecrivable, noter indisponible).
+#: Cliquet « 105 -> 0 except:pass » : on peut avaler une erreur, JAMAIS sans laisser de piste.
+#: Un dict module-level suffit : il se lit au debugger et dans les tests, et ne leve jamais.
+PANNES_INTERNES: dict[str, int] = {}
+
+
+def _compter_panne_interne(site: str) -> None:
+    PANNES_INTERNES[site] = PANNES_INTERNES.get(site, 0) + 1
+
 #: 🔴 SOURCE UNIQUE — doit refléter les lignes `start ... boucle_collecteur.cmd` de
 #: LANCER_HYPERSMART.cmd. Le test `test_le_REGISTRE_correspond_au_LANCEUR` compare les deux :
 #: si quelqu'un ajoute un collecteur au lanceur sans l'ajouter ici, le test rougit — sinon le
@@ -138,7 +147,8 @@ def _ecrire_journal(root: Path, journal: dict[str, Any]) -> None:
         chemin.parent.mkdir(parents=True, exist_ok=True)
         chemin.write_text(json.dumps(journal, ensure_ascii=False, indent=1), encoding="utf-8")
     except OSError:
-        pass  # un journal qu'on ne peut pas écrire ne doit pas empêcher la relance elle-même
+        # un journal inecrivable n'empeche pas la relance -- mais il est COMPTE (cliquet 105->0)
+        _compter_panne_interne("journal_inecrivable")
 
 
 def verifier_et_relancer(
@@ -194,6 +204,7 @@ def verifier_et_relancer(
             from hl_observer.ops.echec_silencieux import noter
             noter("superviseur_collecteurs", exc)
         except Exception:  # noqa: BLE001
-            pass
+            # meme le compteur officiel est en panne : on compte LOCALEMENT (jamais muet)
+            _compter_panne_interne("noter_indisponible")
         return {"actif": True, "morts": [], "relances": [], "en_cooldown": [],
                 "erreur": str(exc)[:200]}

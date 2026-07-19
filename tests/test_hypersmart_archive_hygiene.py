@@ -69,7 +69,12 @@ def test_python_archive_manifest_includes_single_launcher():
 
 
 def test_archive_button_calls_powershell_script():
-    text = __import__("pathlib").Path("CREER_ARCHIVE_PROPRE.cmd").read_text(encoding="utf-8")
+    # 🔧 19/07 : le .cmd a DEMENAGE dans « outils de test/ » le 14/07 (rangement racine) ;
+    # ce test lisait encore la racine et rougissait sur un fichier fantome. On suit le fichier
+    # la ou il vit VRAIMENT — et s'il redemenage, l'echec dira ou on l'a cherche.
+    chemin = __import__("pathlib").Path("outils de test") / "CREER_ARCHIVE_PROPRE.cmd"
+    assert chemin.is_file(), "CREER_ARCHIVE_PROPRE.cmd introuvable dans 'outils de test/'"
+    text = chemin.read_text(encoding="utf-8")
 
     assert "create_clean_archive.ps1" in text
     assert "ExecutionPolicy Bypass" in text

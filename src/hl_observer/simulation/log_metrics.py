@@ -100,8 +100,12 @@ def iter_decision_rows(
     log_dir: Path,
     *,
     prefer_append_only: bool = False,
+    autoriser_dydx_legacy: bool | None = None,   # None -> AUTORISER_DYDX_LEGACY (defini plus bas)
 ) -> Iterable[tuple[Path, int, dict[str, Any]]]:
-    for path in _existing_decision_files(log_dir, prefer_append_only=prefer_append_only):
+    if autoriser_dydx_legacy is None:
+        autoriser_dydx_legacy = AUTORISER_DYDX_LEGACY
+    for path in _existing_decision_files(log_dir, prefer_append_only=prefer_append_only,
+                                         autoriser_dydx_legacy=autoriser_dydx_legacy):
         with path.open("r", encoding="utf-8-sig") as handle:
             for line_number, line in enumerate(handle, start=1):
                 line = line.strip()
@@ -116,13 +120,20 @@ def iter_decision_rows(
                     yield path, line_number, payload
 
 
-def analyze_logs_streaming(log_dir: Path, *, prefer_append_only: bool = False) -> LogMetricsReport:
+def analyze_logs_streaming(log_dir: Path, *, prefer_append_only: bool = False,
+                           autoriser_dydx_legacy: bool | None = None) -> LogMetricsReport:
+    """Par defaut : sources du runtime HYPERLIQUID uniquement (voir AUTORISER_DYDX_LEGACY).
+    Le panneau dYdX passe explicitement autoriser_dydx_legacy=True : SES chiffres, SON moteur."""
+    if autoriser_dydx_legacy is None:
+        autoriser_dydx_legacy = AUTORISER_DYDX_LEGACY
     report = LogMetricsReport(
         source_dir=log_dir,
-        source_files=tuple(_existing_decision_files(log_dir, prefer_append_only=prefer_append_only)),
+        source_files=tuple(_existing_decision_files(log_dir, prefer_append_only=prefer_append_only,
+                                                    autoriser_dydx_legacy=autoriser_dydx_legacy)),
     )
     seen_event_keys: set[str] = set()
-    for _path, _line_number, raw in iter_decision_rows(log_dir, prefer_append_only=prefer_append_only):
+    for _path, _line_number, raw in iter_decision_rows(log_dir, prefer_append_only=prefer_append_only,
+                                                       autoriser_dydx_legacy=autoriser_dydx_legacy):
         _apply_raw_row(report, raw, seen_event_keys=seen_event_keys, dedupe=False)
     supplemental_files: list[Path] = []
     for path, _line_number, raw in iter_supplemental_ledger_rows(log_dir):
