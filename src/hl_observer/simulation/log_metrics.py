@@ -5,6 +5,7 @@ from dataclasses import dataclass, field
 import json
 from pathlib import Path
 from statistics import median
+import time
 from typing import Any, Iterable
 
 
@@ -363,16 +364,55 @@ def build_recommendations(report: LogMetricsReport) -> tuple[str, ...]:
     return tuple(recommendations)
 
 
-def _existing_decision_files(log_dir: Path, *, prefer_append_only: bool = False) -> list[Path]:
+#: 🔴 PROVENANCE — `logs/structured/decisions.jsonl` est ecrit par le moteur **dYdX legacy**,
+#: pas par la simulation Hyperliquid active (`src/hl_observer`). CLAUDE.md est explicite :
+#: « Ce n'est PAS la simulation Hyperliquid. » Le laisser dans la liste de repli faisait
+#: afficher au panneau Hyperliquid les chiffres d'un AUTRE moteur, sur une AUTRE venue.
+#:
+#: Constate le 19/07 : `virtual_refusals_logged=3773` fige pendant toute la session. Les
+#: fichiers Hyperliquid sont remis a vide au demarrage (`runtime/session_logs.py`), le
+#: selecteur les sautait donc tous et atterrissait sur le log dYdX — arrete a 13:14, alors
+#: que la session avait redemarre a 14:28. Des chiffres vrais, d'un moteur qui ne tournait
+#: plus, presentes comme l'etat live. Ce n'etait pas une erreur de grandeur : une erreur de
+#: PROVENANCE, la plus difficile a voir et la plus toxique.
+AUTORISER_DYDX_LEGACY = False
+
+#: Une source de decisions plus vieille que ca n'est plus l'etat courant. Mieux vaut un zero
+#: honnete (« aucune decision journalisee ») qu'un compteur d'une session precedente.
+MAX_AGE_SOURCE_S = 1800.0
+
+
+def _source_perimee(path: Path, *, maintenant: float | None = None) -> bool:
+    """Vrai si la source n'a pas ete ecrite depuis `MAX_AGE_SOURCE_S`.
+
+    Un panneau qui affiche des compteurs d'une session morte ment sans jamais rougir : la
+    valeur est *reelle*, seulement plus *actuelle*. On prefere l'absence assumee.
+    """
+    try:
+        age = (maintenant if maintenant is not None else time.time()) - path.stat().st_mtime
+    except OSError:
+        return True
+    return age > MAX_AGE_SOURCE_S
+
+
+def _existing_decision_files(
+    log_dir: Path,
+    *,
+    prefer_append_only: bool = False,
+    autoriser_dydx_legacy: bool = AUTORISER_DYDX_LEGACY,
+) -> list[Path]:
     """Return one active decision source, preferring fresh/small logs.
 
-    The dYdX paper engine writes ``logs/structured/decisions.jsonl`` while the
-    historical HyperSmart exporter writes under ``logs/logs à envoyer``. Using a
-    single prioritized source avoids double-counting the same simulated
+    Only sources produced by the **active Hyperliquid runtime** are eligible: the dYdX
+    legacy log is a different engine on a different venue (see ``AUTORISER_DYDX_LEGACY``)
+    and is included only when a caller explicitly opts in — the dYdX panel does.
+    Using a single prioritized source avoids double-counting the same simulated
     decisions and avoids streaming multi-GB append-only archives during UI QA.
     """
 
     structured = log_dir.parent.joinpath(*STRUCTURED_DECISION_LOG)
+    if not autoriser_dydx_legacy:
+        structured = log_dir / "__source_dydx_ecartee_voir_AUTORISER_DYDX_LEGACY__"
     if prefer_append_only:
         candidates = (
             log_dir / "simulation_decisions_append_only.jsonl",
@@ -389,9 +429,13 @@ def _existing_decision_files(log_dir: Path, *, prefer_append_only: bool = False)
             log_dir / "cli_simulation_decisions_latest.jsonl",
             log_dir / "simulation_decisions_append_only.jsonl",
         )
+    # 1er passage : une source VIVANTE (ecrite recemment). C'est le cas normal.
     for path in candidates:
-        if path.exists() and path.stat().st_size > 0:
+        if path.exists() and path.stat().st_size > 0 and not _source_perimee(path):
             return [path]
+    # 2e passage : rien de frais. On retourne le vide plutot qu'une source perimee — un
+    # « aucune decision journalisee » se remarque et se corrige ; un compteur fige d'une
+    # session morte se contemple pendant des heures en croyant regarder le present.
     return []
 
 
