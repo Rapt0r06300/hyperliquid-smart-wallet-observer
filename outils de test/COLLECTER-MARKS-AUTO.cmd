@@ -12,10 +12,10 @@ REM  LANCER_HYPERSMART.cmd ; ce fichier sert a le relancer seul si besoin.
 REM
 REM  Securite : 0 ordre, 0 cle, 0 signature. Un prix observe n'est pas une position.
 REM ============================================================================
-cd /d "%~dp0"
+cd /d "%~dp0.."
 title Collecteur de marks (replay)
 set "PYTHONPATH=%~dp0src"
-python tools\ecrire_marks_tous_coins.py --root "%~dp0." --intervalle 60
+python tools\ecrire_marks_tous_coins.py --root "%~dp0..\." --intervalle 60
 echo.
 echo Le collecteur s'est arrete. Appuyez sur une touche pour fermer.
 pause >nul

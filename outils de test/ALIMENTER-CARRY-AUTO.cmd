@@ -12,7 +12,7 @@ REM  Levier 2x : c'est le seul niveau ou la jambe perp du carry HYPE survit a la
 REM  pire hausse REELLE mesuree (~+29 %). A 3x+, le short serait liquide.
 REM  100%% LECTURE SEULE cote marche. Aucun ordre reel, aucune signature.
 REM ============================================================================
-cd /d "%~dp0"
+cd /d "%~dp0.."
 set "PYTHONIOENCODING=utf-8"
 echo Alimentation auto du carry HYPE demarree (levier 2x, toutes les 600 s). Ctrl-C pour arreter.
 echo.

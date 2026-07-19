@@ -14,10 +14,10 @@ REM
 REM  Securite : lecture seule. 0 ordre, 0 cle, 0 signature. Observer ou d'autres
 REM  seront liquides n'est pas prendre une position.
 REM ============================================================================
-cd /d "%~dp0"
+cd /d "%~dp0.."
 title Collecteur de liquidations (mesure #3)
 set "PYTHONPATH=%~dp0src"
-python tools\collecter_liquidations.py --root "%~dp0." --intervalle 300
+python tools\collecter_liquidations.py --root "%~dp0..\." --intervalle 300
 echo.
 echo Le collecteur s'est arrete. Appuyez sur une touche pour fermer.
 pause >nul

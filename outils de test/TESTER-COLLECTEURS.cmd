@@ -14,7 +14,7 @@ REM
 REM  Securite : lecture seule cote marche. 0 ordre, 0 cle, 0 signature.
 REM ============================================================================
 setlocal
-cd /d "%~dp0"
+cd /d "%~dp0.."
 echo.
 echo ================================================================
 echo   TEST DES COLLECTEURS -- dossier : %CD%

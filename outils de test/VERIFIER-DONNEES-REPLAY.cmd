@@ -6,7 +6,7 @@ REM  Le replay A/B ne vaut RIEN sur des donnees insuffisantes (c'est ce qui avai
 REM  produit le faux "1 sur 1M"). Ce script dit, honnetement, si on a assez de
 REM  donnees pour conclure -- SANS rien lancer d'autre. 100%% lecture seule.
 REM ============================================================================
-cd /d "%~dp0"
+cd /d "%~dp0.."
 set "PYTHONPATH=%~dp0src;%PYTHONPATH%"
 set "PYTHONIOENCODING=utf-8"
 
