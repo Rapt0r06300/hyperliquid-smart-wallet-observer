@@ -59,6 +59,37 @@ def _capital_depuis_env() -> float | None:
     return v if v > 0 else None
 
 
+def _capital_disponible(root: str | Path) -> float | None:
+    """Le capital RÉEL de la simulation, ou None si on ne peut pas le lire.
+
+    🔴 CORRIGÉ LE 19/07 — MA MARGE DYNAMIQUE ÉTAIT INERTE. Je l'avais branchée sur
+    `simulation.paper_ledger.equity_courante(...)` : **cette fonction n'existe pas**. L'import
+    levait une ImportError, on retombait sur la variable d'env — que le lanceur ne pose nulle
+    part — donc `None`, donc la marge par défaut de 50 $. Le notional est resté à 75 $ toute la
+    journée pendant que je croyais l'avoir agrandi.
+
+    C'est exactement la maladie du projet, commise par moi, et attrapée seulement parce que j'ai
+    relu un notional au lieu de croire mon propre commit : **un module branché sur une fonction
+    fantôme est un module mort**. Le `except Exception` autour de l'import rendait la panne
+    silencieuse — la 106ᵉ occurrence du problème qu'on a passé la journée à traquer.
+
+    On lit maintenant l'équity là où elle est VRAIMENT écrite (l'état UI du moteur), avec deux
+    replis explicites et aucune invention : env déclarée, sinon None (marge par défaut).
+    """
+    # 1) l'état moteur, écrit par le runtime lui-même
+    try:
+        etat = json.loads((Path(root) / "runtime" / "data" / "ui_simulation_state.json")
+                          .read_text(encoding="utf-8-sig"))
+        for cle in ("equity_usdt", "current_equity_usdt", "equity"):
+            v = etat.get(cle) if isinstance(etat, dict) else None
+            if isinstance(v, (int, float)) and float(v) > 0:
+                return float(v)
+    except (OSError, ValueError, TypeError):
+        pass
+    # 2) le capital déclaré en environnement
+    return _capital_depuis_env()
+
+
 def enabled() -> bool:
     return os.environ.get(ENV_ENABLED, "0").strip() == "1"
 
@@ -184,12 +215,7 @@ def evaluer_et_journaliser(root: str | Path = ".", *, now_ms: int | None = None,
             # 1 000 $ d'equity = 2,25 centimes/jour, invisible au dashboard). Grossir la MARGE à
             # levier constant n'ajoute AUCUN risque de liquidation (la distance dépend du levier).
             # Capital illisible -> None -> marge par défaut : on n'invente jamais un capital.
-            capital = None
-            try:
-                from hl_observer.simulation.paper_ledger import equity_courante as _eq
-                capital = _eq(str(root))
-            except Exception:  # noqa: BLE001
-                capital = _capital_depuis_env()
+            capital = _capital_disponible(root)
             evts = tick_multi_sur_disque(root, mesures, now_ms=now, max_slots=MAX_SLOTS_CARRY,
                                          capital_usd=capital)
             etat = etat_carry(root)
