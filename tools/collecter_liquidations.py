@@ -134,6 +134,52 @@ def wallets_de_secours(root: Path) -> list[str]:
     return vus
 
 
+def _expliquer_zero(positions: list, mids: dict[str, float]) -> None:
+    """POURQUOI 0 GRAPPE ? — le chiffre, pas une hypothese.
+
+    Mesure du 19/07 : le leaderboard repondait (80 wallets, 690 positions avec `liquidationPx`)
+    et pourtant AUCUNE ligne n'etait ecrite. J'avais d'abord accuse « la population est trop
+    petite » -- FAUX, et c'est exactement le genre de diagnostic a l'intuition qui fait perdre
+    des jours. On decompose donc les trois filtres de `construire_carte`, un par un :
+        distance au prix courant <= 1000 bps · >= 2 wallets a 50 bps · notionnel >= 10 000 $
+    Celui qui elimine tout est celui qu'il faudra discuter -- avec un nombre en main.
+    """
+    from hl_observer.market.liquidation_map import (
+        MIN_NOTIONNEL_GRAPPE_USD, MIN_WALLETS_PAR_GRAPPE)
+
+    n = len(positions)
+    proches, par_coin_prix = 0, {}
+    for p in positions:
+        px = float(mids.get(str(p.coin).upper()) or 0.0)
+        if px <= 0:
+            continue
+        dist = abs(1e4 * (float(p.liq_px) - px) / px)
+        if dist <= 1000.0:
+            proches += 1
+            cle = (p.coin, round(float(p.liq_px) / (1.0 + 50 / 1e4)))
+            e = par_coin_prix.setdefault(cle, {"wallets": set(), "usd": 0.0})
+            e["wallets"].add(p.wallet)
+            e["usd"] += float(p.notionnel_usd)
+    assez_wallets = sum(1 for e in par_coin_prix.values()
+                        if len(e["wallets"]) >= MIN_WALLETS_PAR_GRAPPE)
+    complets = sum(1 for e in par_coin_prix.values()
+                   if len(e["wallets"]) >= MIN_WALLETS_PAR_GRAPPE
+                   and e["usd"] >= MIN_NOTIONNEL_GRAPPE_USD)
+    print("[liq] POURQUOI 0 GRAPPE — %d positions lues" % n, flush=True)
+    print("[liq]   1) a moins de 10%% du prix courant .... %d  (les autres sont trop loin "
+          "pour etre actionnables)" % proches, flush=True)
+    print("[liq]   2) amas formes a ce niveau ............ %d" % len(par_coin_prix), flush=True)
+    print("[liq]   3) dont >= %d wallets DISTINCTS ....... %d"
+          % (MIN_WALLETS_PAR_GRAPPE, assez_wallets), flush=True)
+    print("[liq]   4) dont >= %.0f $ de notionnel ......... %d  <- grappes retenues"
+          % (MIN_NOTIONNEL_GRAPPE_USD, complets), flush=True)
+    if proches == 0 and n > 0:
+        print("[liq]   => C'EST LE FILTRE DE DISTANCE qui elimine tout : les gros comptes du "
+              "leaderboard sont peu leverages, leur prix de liquidation est tres loin du "
+              "marche. Rien d'anormal -- mais on n'enregistrera aucun historique tant qu'on "
+              "ne gardera QUE le rayon de 10 %%.", flush=True)
+
+
 def une_passe(root: Path, wallets: list[str], *, pause_s: float = PAUSE_ENTRE_WALLETS_S
               ) -> tuple[int, int, int]:
     """(n_lignes_ecrites, n_positions_vues, n_wallets_lus). Une erreur réseau -> (0, 0, 0)."""
@@ -160,6 +206,8 @@ def une_passe(root: Path, wallets: list[str], *, pause_s: float = PAUSE_ENTRE_WA
     if not positions:
         return 0, 0, lus
     grappes = construire_carte(positions, mids)
+    if not grappes:
+        _expliquer_zero(positions, mids)
     try:
         from hl_observer.runtime.session_identity import session_courante
         session = session_courante(str(root))
