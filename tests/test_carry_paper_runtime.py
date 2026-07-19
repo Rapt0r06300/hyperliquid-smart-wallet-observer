@@ -169,3 +169,41 @@ def test_etape2_shortlist_sortie_selective_APRES_amortissement(tmp_path, monkeyp
     assert e3["coins_ouverts"] == ["HYPE"], "HYPE (dans la shortlist) ne doit JAMAIS se fermer ici"
     assert fermes == [("PURR", "DONNEE_ABSENTE_PROLONGEE")], (
         "PURR doit fermer UNE fois, pour absence PROLONGEE -- pas a chaque clignotement: %r" % fermes)
+
+
+def test_R1_un_SPIKE_de_funding_ouvre_PLUS_GROS_bout_en_bout(tmp_path, monkeypatch):
+    """LE CHASSEUR DE SPIKES, prouve de bout en bout (R1, 19/07 soir).
+
+    Toute la chaine existait deja (z-score A4 -> regime SPIKE -> facteur_zscore -> marge scalee)
+    mais seulement en tests UNITAIRES. Ici : des inputs de spike ecrits sur disque -> le runtime
+    complet -> une position ~1,5x plus grosse qu'en regime normal. Si quelqu'un debranche un
+    maillon (feeder qui n'ecrit plus le facteur, lifecycle qui ne le lit plus), ce test rougit.
+    """
+    monkeypatch.setenv("HYPERSMART_CARRY_ETAPE2", "1")
+
+    def _inp(coin, facteur):
+        d = dict(_INPUTS_VIABLES)
+        d["coin"] = coin
+        d["facteur_taille"] = facteur          # ce que le feeder ecrit via facteur_zscore(z)
+        d["funding_regime"] = "SPIKE" if facteur > 1.0 else "NORMAL"
+        return d
+
+    def _marge_ouverte(root, coin):
+        d = json.loads((root / "runtime" / "data" / "carry_paper_positions.json"
+                        ).read_text(encoding="utf-8"))
+        return d["ouvertes"][coin]["marge_usdt"]
+
+    # regime NORMAL (facteur 1.0) -> marge de base
+    _ecrire_inputs(tmp_path, _inp("HYPE", 1.0))
+    assert evaluer_et_journaliser(tmp_path, now_ms=100_060_000)["etape2"]["positions_ouvertes"] == 1
+    marge_normale = _marge_ouverte(tmp_path, "HYPE")
+
+    # regime SPIKE (facteur 1.5, ce que donne z >= 2) -> ~1,5x plus gros, borne respectee
+    _ecrire_inputs(tmp_path / "spike", _inp("PURR", 1.5))
+    assert evaluer_et_journaliser(tmp_path / "spike",
+                                  now_ms=100_060_000)["etape2"]["positions_ouvertes"] == 1
+    marge_spike = _marge_ouverte(tmp_path / "spike", "PURR")
+
+    assert marge_spike == round(marge_normale * 1.5, 6), (
+        "le SPIKE doit ouvrir 1,5x plus gros (marge %s vs %s) -- un maillon de la chaine "
+        "z-score->facteur->marge est debranche" % (marge_spike, marge_normale))
