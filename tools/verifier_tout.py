@@ -210,13 +210,46 @@ def section_liquidations() -> Section:
     return s
 
 
+# ------------------------------------------------------------------ 4bis. cross-venue
+
+def section_venues() -> Section:
+    """LA DERNIERE PISTE OUVERTE. Barres fixees AVANT la donnee :
+    docs/audit/PROTOCOLE_CROSS_VENUE.md. Si elle tombe, la conclusion honnete sera que ce bot
+    ne produit pas de PnL positif en paper sur les angles accessibles."""
+    s = Section("4bis. CROSS-VENUE — la derniere piste non refutee")
+    code, sortie = _py(["tools/mesurer_dispersion_venues.py", "--root", str(RACINE)], timeout=180)
+    try:
+        rap = json.loads(sortie[sortie.index("{"):sortie.rindex("}") + 1])
+    except (ValueError, IndexError):
+        s.insuffisant("verdict illisible (le collecteur n'a peut-etre jamais tourne)")
+        return s
+    v = rap.get("verdict")
+    if v == "INSUFFISANT":
+        s.insuffisant("INSUFFISANT — %s" % rap.get("motif", ""))
+        s.dire("-> ici, attendre a du SENS : les barres exigent >= 72 h et >= 5 coins.")
+        return s
+    s.dire("dispersion mediane %.5f bps/h (seuil utile %.5f) · %.1f h · %d coins"
+           % (rap.get("dispersion_mediane_bps_h", 0), rap.get("seuil_utile_bps_h", 0),
+              rap.get("heures_observees", 0), rap.get("coins", 0)))
+    s.dire("rendement NET %.2f %%/an  (carry mono-venue : 0,82 %%/an)"
+           % rap.get("rendement_net_annuel_pct", 0))
+    for b in rap.get("barres") or []:
+        s.dire("  [%s] %s — %s" % ("OK" if b["passee"] else "RATEE", b["barre"], b["mesure"]))
+    if v == "REJETE":
+        s.dire("REJETE : %s. On l'enterre comme les autres — les barres etaient ecrites AVANT."
+               % ", ".join(rap.get("barres_ratees") or []))
+    else:
+        s.dire("EXPLOITABLE : les trois barres passent. Prochaine etape = paper.")
+    return s
+
+
 # ------------------------------------------------------------------ 5. collecteurs
 
 def section_collecteurs() -> Section:
     s = Section("5. COLLECTEURS — tournent-ils ?")
     maintenant = time.time()
     for nom, limite_min in (("carry-feeder", 15.0), ("marks-collector", 5.0),
-                            ("liq-collector", 20.0)):
+                            ("liq-collector", 20.0), ("venues-collector", 20.0)):
         p = RACINE / "runtime" / "logs" / ("%s.log" % nom)
         if not p.exists():
             s.echouer("%-16s AUCUN log -> ne tourne pas" % nom)
@@ -266,7 +299,8 @@ def section_securite() -> Section:
 
 def executer(sections_demandees: list[str] | None = None) -> int:
     toutes = [("tests", section_tests), ("replay", section_replay), ("carry", section_carry),
-              ("liquidations", section_liquidations), ("collecteurs", section_collecteurs),
+              ("liquidations", section_liquidations), ("venues", section_venues),
+              ("collecteurs", section_collecteurs),
               ("cablage", section_cablage), ("securite", section_securite)]
     if sections_demandees:
         toutes = [(n, f) for n, f in toutes if n in sections_demandees]

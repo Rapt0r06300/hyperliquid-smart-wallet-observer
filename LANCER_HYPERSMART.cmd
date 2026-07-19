@@ -318,10 +318,18 @@ REM (enregistrer_grappes n'etait appele que par mainnet_readonly_observer, hors 
 REM 3 endpoints PUBLICS en lecture, modules existants, 0 ordre.
 start "" /b tools\boucle_collecteur.cmd liq-collector tools\collecter_liquidations.py 300 --une-fois
 
+REM === DISPERSION CROSS-VENUE : la DERNIERE piste ouverte du projet ===
+REM Toutes les autres sont mortes, tuees par nos propres mesures (copy -7,97 bps, MM 0/29,
+REM funding perp-perp MEME venue 0/120, lead-lag 0/66, liquidations inmesurables).
+REM Celle-ci n'a jamais ete testee : HL et Binance ne cotent pas le meme funding.
+REM Barres de rejet fixees AVANT la donnee : docs\audit\PROTOCOLE_CROSS_VENUE.md
+REM ⚠️ Binance = SOURCE DE PRIX uniquement. Lecture seule, 0 cle, 0 ordre.
+start "" /b tools\boucle_collecteur.cmd venues-collector tools\collecter_dispersion_venues.py 300 --une-fois
+
 REM AUTO-VERIFICATION : un collecteur cache qui ne demarre pas ne se voit PAS. On attend qu'il
 REM ecrive son log (il l'ecrit des la 1re ligne) et on DIT si l'un des trois manque a l'appel.
 ping -n 6 127.0.0.1 >nul 2>&1
-for %%C in (carry-feeder marks-collector liq-collector) do (
+for %%C in (carry-feeder marks-collector liq-collector venues-collector) do (
   if exist "%~dp0runtime\logs\%%C.log" (
     echo   [collecteurs] %%C ......... demarre
   ) else (
