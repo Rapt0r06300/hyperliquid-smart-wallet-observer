@@ -25,18 +25,20 @@ REM On repart d'une ardoise propre pour que le verdict porte sur CE test.
 if exist "runtime\logs\carry-feeder.log"    del /q "runtime\logs\carry-feeder.log"    >nul 2>&1
 if exist "runtime\logs\marks-collector.log" del /q "runtime\logs\marks-collector.log" >nul 2>&1
 if exist "runtime\logs\liq-collector.log"   del /q "runtime\logs\liq-collector.log"   >nul 2>&1
+if exist "runtime\logs\venues-collector.log" del /q "runtime\logs\venues-collector.log" >nul 2>&1
 
 echo   Lancement des 3 collecteurs (chemins RELATIFS, sans guillemets)...
 start "" /b tools\boucle_collecteur.cmd carry-feeder tools\ecrire_carry_spot_inputs.py 240
 start "" /b tools\boucle_collecteur.cmd marks-collector tools\ecrire_marks_tous_coins.py 60 --une-fois
 start "" /b tools\boucle_collecteur.cmd liq-collector tools\collecter_liquidations.py 300 --une-fois
+start "" /b tools\boucle_collecteur.cmd venues-collector tools\collecter_dispersion_venues.py 300 --une-fois
 
 echo   Attente de 12 secondes (ils ecrivent leur log des la 1re ligne)...
 ping -n 13 127.0.0.1 >nul 2>&1
 echo.
 echo ---------------------------- VERDICT ---------------------------
 set "ECHECS=0"
-for %%C in (carry-feeder marks-collector liq-collector) do (
+for %%C in (carry-feeder marks-collector liq-collector venues-collector) do (
   if exist "runtime\logs\%%C.log" (
     echo   [OK]     %%C  -- log ecrit
   ) else (
@@ -45,10 +47,10 @@ for %%C in (carry-feeder marks-collector liq-collector) do (
 )
 echo ----------------------------------------------------------------
 echo.
-echo   Extrait du log marks-collector :
+echo   Extrait du log venues-collector :
 echo.
 if exist "runtime\logs\marks-collector.log" (
-  more +1 "runtime\logs\marks-collector.log"
+  more +1 "runtime\logs\venues-collector.log"
 ) else (
   echo     ^(pas de log^)
 )
