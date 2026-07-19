@@ -44,6 +44,20 @@ MOTIF_INPUTS_PERIMES = "INPUTS_SPOT_PERIMES_NO_TRADE"
 MAX_AGE_S_DEFAUT = 900.0
 
 
+ENV_CAPITAL = "HYPERSMART_SIMULATION_INITIAL_EQUITY_USDT"
+
+
+def _capital_depuis_env() -> float | None:
+    """Le capital de simulation déclaré, ou None. On ne DEVINE jamais un capital : inventer un
+    capital, ce serait inventer une taille de position, donc un PnL."""
+    brut = os.environ.get(ENV_CAPITAL, "").strip()
+    try:
+        v = float(brut)
+    except (TypeError, ValueError):
+        return None
+    return v if v > 0 else None
+
+
 def enabled() -> bool:
     return os.environ.get(ENV_ENABLED, "0").strip() == "1"
 
@@ -165,7 +179,18 @@ def evaluer_et_journaliser(root: str | Path = ".", *, now_ms: int | None = None,
                     mesures[str(dec.get("coin") or "").upper()] = {
                         "decision": dec, "inputs": inp, "funding": dec.get("funding_bps_h"),
                         "prix": inp.get("perp_px"), "base": dec.get("base_bps")}
-            evts = tick_multi_sur_disque(root, mesures, now_ms=now, max_slots=MAX_SLOTS_CARRY)
+            # CAPITAL RÉEL -> marge dynamique. 92 % du capital dormait (75 $ de notional sur
+            # 1 000 $ d'equity = 2,25 centimes/jour, invisible au dashboard). Grossir la MARGE à
+            # levier constant n'ajoute AUCUN risque de liquidation (la distance dépend du levier).
+            # Capital illisible -> None -> marge par défaut : on n'invente jamais un capital.
+            capital = None
+            try:
+                from hl_observer.simulation.paper_ledger import equity_courante as _eq
+                capital = _eq(str(root))
+            except Exception:  # noqa: BLE001
+                capital = _capital_depuis_env()
+            evts = tick_multi_sur_disque(root, mesures, now_ms=now, max_slots=MAX_SLOTS_CARRY,
+                                         capital_usd=capital)
             etat = etat_carry(root)
             etape2 = {"evts": evts, "n_mesures": len(mesures),
                       "positions_ouvertes": etat["positions_ouvertes"],

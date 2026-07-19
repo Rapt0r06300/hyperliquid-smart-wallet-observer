@@ -103,15 +103,42 @@ def test_multi_ouvre_plusieurs_coins_en_parallele(tmp_path):
     assert set(charger_gestionnaire(tmp_path).ouvertes) == {"HYPE", "PURR", "AZTEC"}
 
 
-def test_multi_ferme_un_coin_qui_sort_de_la_shortlist(tmp_path):
-    from hl_observer.funding.carry_positions_store import tick_multi_sur_disque, charger_gestionnaire, SORTIE_HORS_SHORTLIST
+def test_multi_ferme_un_coin_qui_sort_DURABLEMENT_de_la_shortlist(tmp_path):
+    """🔴 DOCTRINE CORRIGÉE LE 2026-07-19, PAR LA MESURE.
+
+    Ce test exigeait autrefois une fermeture DÈS LA PREMIÈRE passe sans le coin, au nom du
+    deny-by-default. Le run réel a montré le prix de cette règle :
+
+        opens = 32   closes = 31   sur 22,3 h   toujours HYPE
+        motif : COIN_PLUS_DANS_SHORTLIST × 29        realized = -4,998 $
+
+    Le feeder tourne toutes les 10 min ; une passe qui ne listait pas le coin suffisait à
+    fermer (11 bps) puis rouvrir (12,5 bps). À 0,125 bps/h sur 75 $, un aller-retour détruit
+    ~188 HEURES de funding. Les 31 allers-retours SONT le PnL négatif, en entier.
+
+    La règle était une MAUVAISE application du deny-by-default : celui-ci dit « ne pas OUVRIR
+    sans donnée », pas « FERMER quand la donnée cligne ». Fermer est une ACTION qui coûte ;
+    l'abstention est le défaut.
+
+    On exige donc désormais une absence PROLONGÉE (plusieurs passes ET plusieurs minutes).
+    Le coin finit bien par être fermé — on ne tient pas une position aveugle indéfiniment.
+    """
+    from hl_observer.funding.carry_anti_churn import SORTIE_ABSENCE_PROLONGEE
+    from hl_observer.funding.carry_positions_store import tick_multi_sur_disque, charger_gestionnaire
+    H = 3_600_000
     # poll 1 : HYPE + PURR ouverts
     tick_multi_sur_disque(tmp_path, {"HYPE": _mesure("HYPE"), "PURR": _mesure("PURR")}, now_ms=0)
-    # poll 2 : PURR disparait de la shortlist -> doit etre ferme (pas de position aveugle)
-    H = 3_600_000
-    evts = tick_multi_sur_disque(tmp_path, {"HYPE": _mesure("HYPE")}, now_ms=200 * H)
+
+    # poll 2 : PURR manque UNE passe -> on GARDE (c'est exactement ce qui coûtait 17,6 centimes)
+    evts = tick_multi_sur_disque(tmp_path, {"HYPE": _mesure("HYPE")}, now_ms=1 * H)
+    assert not [e for e in evts if e.get("ferme")], "une absence d'une passe ne doit RIEN fermer"
+    assert set(charger_gestionnaire(tmp_path).ouvertes) == {"HYPE", "PURR"}
+
+    # polls 3 et 4 : PURR toujours absent -> absence PROLONGÉE, là on ferme
+    tick_multi_sur_disque(tmp_path, {"HYPE": _mesure("HYPE")}, now_ms=2 * H)
+    evts = tick_multi_sur_disque(tmp_path, {"HYPE": _mesure("HYPE")}, now_ms=3 * H)
     fermes = {e["coin"]: e["ferme"] for e in evts if e.get("ferme")}
-    assert fermes.get("PURR") == SORTIE_HORS_SHORTLIST
+    assert fermes.get("PURR") == SORTIE_ABSENCE_PROLONGEE
     assert set(charger_gestionnaire(tmp_path).ouvertes) == {"HYPE"}   # HYPE reste
 
 

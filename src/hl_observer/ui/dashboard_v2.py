@@ -506,7 +506,22 @@ function loadCarry(){fetch('/v2/carry').then(function(r){return r.json()}).then(
   var ps=d.positions||[];
   tb.innerHTML=ps.map(function(p){return '<tr><td><b>'+p.coin+'</b></td><td>$'+n(p.notional_usdt,0)+'</td><td>'+n(p.levier,0)+'x</td><td style="color:var(--cyan)">$'+n(p.funding_accrued_usdt,4)+'</td><td style="text-align:right">'+n(p.age_h,1)+'h</td></tr>';}).join('')||'<tr><td colspan="5" style="color:var(--mut2)">— aucune position carry ouverte —</td></tr>';
   var v=d.viables||[];
-  document.getElementById('carryviab').textContent=v.length?('viables mesurés : '+v.map(function(x){return x.coin+' ('+n(x.funding_bps_h,3)+'b/h)';}).join('  ·  ')):'aucun coin viable ce tick';
+  // ── #24-27 : LE CHURN DOIT ÊTRE VISIBLE. Le 19/07, le bot a fait 32 ouvertures et 31
+  // fermetures du MÊME coin en 22,3 h ; le dashboard n'affichait qu'un PnL « qui ne bouge pas ».
+  // Il a fallu lire le journal à la main pour le voir. Ces trois lignes rendent le symptôme
+  // LISIBLE : combien d'A/R, pour quel motif, et ce que la position rapporte par jour.
+  var ch=d.churn||{}, motifs=ch.motifs||{}, mk2=Object.keys(motifs);
+  var alerte = ch.churn_detecte ? ' ⚠️ CHURN' : '';
+  var ligneChurn = (ch.opens!==undefined)
+    ? ('cycles 24 h : '+(ch.opens||0)+' ouvertures / '+(ch.closes||0)+' fermetures'+alerte
+       +(mk2.length ? '  ·  dernier motif : '+mk2.map(function(k){return k+'×'+motifs[k];}).join(', ') : ''))
+    : '';
+  var revenu = (d.revenu_jour_usd!==undefined && d.revenu_jour_usd!==null)
+    ? ('revenu attendu : $'+n(d.revenu_jour_usd,4)+'/jour  ·  amorti dans '+n(d.heures_amorti,0)+' h') : '';
+  document.getElementById('carryviab').innerHTML=
+    (v.length?('viables mesurés : '+v.map(function(x){return x.coin+' ('+n(x.funding_bps_h,3)+'b/h)';}).join('  ·  ')):'aucun coin viable ce tick')
+    +(ligneChurn?('<br><span style="color:'+(ch.churn_detecte?'var(--red,#f88)':'var(--mut)')+'">'+ligneChurn+'</span>'):'')
+    +(revenu?('<br><span style="color:var(--mut)">'+revenu+'</span>'):'');
 }).catch(function(){});}
 setInterval(loadCarry,4000);setTimeout(loadCarry,600);
 </script></body></html>"""
@@ -580,7 +595,45 @@ def create_dashboard_v2_router() -> APIRouter:
                                         "liquidite_spot_usd": x.get("liquidite_spot_usd")})
             except (OSError, ValueError):
                 pass
+            # #24-27 — LE CHURN, RENDU LISIBLE. Il a fallu lire le ledger à la main pour voir
+            # 32 ouvertures / 31 fermetures sur 22,3 h. Plus jamais : le symptôme s'affiche.
+            churn = {}
+            try:
+                from hl_observer.funding.carry_positions_store import diagnostic_churn
+                d = diagnostic_churn(root, now_ms=int(now), fenetre_h=24.0)
+                agg = {"opens": 0, "closes": 0, "motifs": {}}
+                for _c, e in (d.get("par_coin") or {}).items():
+                    agg["opens"] += int(e.get("opens") or 0)
+                    agg["closes"] += int(e.get("closes") or 0)
+                    for k, v in (e.get("motifs") or {}).items():
+                        agg["motifs"][k] = agg["motifs"].get(k, 0) + int(v)
+                agg["churn_detecte"] = bool(d.get("churn_detecte"))
+                churn = agg
+            except Exception:  # noqa: BLE001 — un diagnostic qui échoue ne casse pas le panneau
+                churn = {}
+            # Le revenu par JOUR et l'heure d'amortissement : les deux chiffres qui manquaient
+            # pour comprendre qu'un PnL à 2 centimes/jour n'est pas « figé », il est minuscule.
+            revenu_jour = None
+            heures_amorti = None
+            try:
+                from hl_observer.funding.carry_anti_churn import heures_pour_amortir
+                from hl_observer.funding.carry_marge_dynamique import revenu_journalier_usd
+                f_courant = None
+                for x in viables:
+                    if isinstance(x.get("funding_bps_h"), (int, float)):
+                        f_courant = float(x["funding_bps_h"])
+                        break
+                if f_courant is not None and positions:
+                    notionnel = sum(float(p["notional_usdt"]) for p in positions)
+                    revenu_jour = round(revenu_journalier_usd(
+                        notional_usd=notionnel, funding_bps_h=f_courant), 6)
+                    cout = float(next(iter(g.ouvertes.values())).get("cout_entree_bps") or 0.0)
+                    h = heures_pour_amortir(cout_entree_bps=cout, funding_bps_h=f_courant)
+                    heures_amorti = None if h == float("inf") else round(h, 1)
+            except Exception:  # noqa: BLE001
+                pass
             return JSONResponse({
+                "churn": churn, "revenu_jour_usd": revenu_jour, "heures_amorti": heures_amorti,
                 "positions_ouvertes": etat["positions_ouvertes"],
                 "realized_net_pnl_usdc": etat["realized_net_pnl_usdc"],
                 "funding_accru_usdt": round(accru, 6),

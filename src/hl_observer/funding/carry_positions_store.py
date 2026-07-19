@@ -14,11 +14,15 @@ import json
 from pathlib import Path
 from typing import Any
 
+from hl_observer.funding.carry_anti_churn import (
+    SORTIE_ABSENCE_PROLONGEE, churn_excessif, doit_fermer_pour_absence,
+)
+from hl_observer.funding.carry_marge_dynamique import marge_par_position
 from hl_observer.funding.carry_position_lifecycle import (
     MODE_LIVE, MODES_VALIDES, GestionnaireCarry, pnl_realise,
 )
 
-SORTIE_HORS_SHORTLIST = "COIN_PLUS_DANS_SHORTLIST"
+SORTIE_HORS_SHORTLIST = "COIN_PLUS_DANS_SHORTLIST"   # conservé : d'anciennes lignes de ledger le portent
 SORTIE_ROTATION = "ROTATION_HORS_TOP_SLOTS"   # A7 : plafond de slots -> on garde les meilleurs nets
 
 POSITIONS_RELPATH = Path("runtime") / "data" / "carry_paper_positions.json"
@@ -79,7 +83,8 @@ def tick_sur_disque(root: str | Path, decision: dict[str, Any], inputs: dict[str
 
 def tick_multi_sur_disque(root: str | Path, mesures: dict[str, dict[str, Any]], *,
                           now_ms: int, mode: str = MODE_LIVE,
-                          max_slots: int | None = None) -> list[dict[str, Any]]:
+                          max_slots: int | None = None,
+                          capital_usd: float | None = None) -> list[dict[str, Any]]:
     """Une passe MULTI-COINS persistee. `mesures` = {coin: {"decision","inputs","funding"}}.
     Ouvre/tient une position par coin mesuré ; FERME tout coin ouvert qui n'est PLUS mesuré ce
     poll (deny-by-default : on ne tient jamais une position sur une donnée disparue). Un coin =
@@ -87,20 +92,54 @@ def tick_multi_sur_disque(root: str | Path, mesures: dict[str, dict[str, Any]], 
     (rotation vers le meilleur carry ; l'hysteresis de carry_rotation evite le churn marginal)."""
     g = charger_gestionnaire(root, mode=mode)
     evts: list[dict[str, Any]] = []
+    # MARGE DYNAMIQUE — 92 % du capital dormait pendant que le PnL « ne bougeait pas » (75 $ de
+    # notional sur 1 000 $ d'equity => 2,25 centimes/jour, invisible). On répartit le capital
+    # DÉPLOYABLE entre les positions visées. La distance à la liquidation dépend du LEVIER, pas
+    # de la taille : grossir la marge à levier constant n'ajoute AUCUN risque de liquidation.
+    # `capital_usd` absent -> marge par défaut (on n'invente jamais un capital).
+    n_visees = min(len(mesures) or 1, int(max_slots) if max_slots else (len(mesures) or 1))
+    marge = marge_par_position(capital_usd=capital_usd, n_positions_visees=n_visees)
     for coin, m in mesures.items():
         evts.append(g.tick(m["decision"], m["inputs"], now_ms=now_ms,
                            funding_bps_h_courant=m.get("funding"), prix_courant=m.get("prix"),
-                           base_bps_courant=m.get("base")))
-    for coin in list(g.ouvertes):                      # coins ouverts mais absents des mesures -> fermer
-        if coin not in mesures:
-            pos = g.ouvertes[coin]
-            # base courante inconnue (coin plus mesure) -> conservateur : base d'entree (aucun premium capture)
-            realized = pnl_realise(pos, base_bps_courant=float(pos.get("base_bps_entree") or 0.0))
-            g.journal.record(kind="CLOSE", coin=coin, side="CARRY", notional_usdt=pos["notional_usdt"],
-                             realized_net_pnl_usdc=realized, reason=SORTIE_HORS_SHORTLIST, now_ms=int(now_ms))
-            g.ouvertes.pop(coin, None)
-            evts.append({"coin": coin, "mode": mode, "ouvert": False, "ferme": SORTIE_HORS_SHORTLIST,
-                         "pnl_realise_usdt": realized, "funding_add_usdt": 0.0})
+                           base_bps_courant=m.get("base"), marge_usd=marge))
+    # 🔴 A1 — LE BUG QUI MANGEAIT TOUT LE PnL (mesuré le 19/07 : 29 fermetures sur 31 ici).
+    # L'ancienne version fermait DES QU'un coin manquait d'une passe, au nom du deny-by-default.
+    # C'etait une MAUVAISE application de la regle : deny-by-default veut dire « ne pas OUVRIR
+    # sans donnee », pas « FERMER quand la donnee cligne ». Le feeder saute une passe -> on
+    # fermait (11 bps) puis on rouvrait (12,5 bps) : 17,6 centimes, soit ~188 HEURES de funding,
+    # detruites parce qu'un fichier n'avait pas ete ecrit a temps.
+    # Desormais : une absence est TOLEREE quelques passes ET quelques minutes. Elle fige la
+    # decision, elle ne declenche plus d'aller-retour.
+    for coin in list(g.ouvertes):
+        pos = g.ouvertes[coin]
+        if coin in mesures:
+            pos.pop("absences_consecutives", None)         # la donnee est revenue : on oublie
+            pos.pop("premiere_absence_ts_ms", None)
+            continue
+        n_abs = int(pos.get("absences_consecutives") or 0) + 1
+        premiere = pos.get("premiere_absence_ts_ms")
+        if not isinstance(premiere, (int, float)) or float(premiere) <= 0:
+            premiere = int(now_ms)
+        pos["absences_consecutives"] = n_abs
+        pos["premiere_absence_ts_ms"] = int(premiere)
+        minutes = (int(now_ms) - int(premiere)) / 60_000.0
+        if not doit_fermer_pour_absence(absences_consecutives=n_abs,
+                                        minutes_depuis_1re_absence=minutes):
+            evts.append({"coin": coin, "mode": mode, "ouvert": False, "ferme": None,
+                         "attente_donnee": {"passes": n_abs, "minutes": round(minutes, 1)},
+                         "funding_add_usdt": 0.0})
+            continue                                       # on GARDE : l'absence n'est pas une sortie
+        # absence PROLONGEE : la donnee a vraiment disparu -> la, on ferme.
+        # base courante inconnue -> conservateur : base d'entree (aucun premium capture)
+        realized = pnl_realise(pos, base_bps_courant=float(pos.get("base_bps_entree") or 0.0))
+        g.journal.record(kind="CLOSE", coin=coin, side="CARRY", notional_usdt=pos["notional_usdt"],
+                         realized_net_pnl_usdc=realized, reason=SORTIE_ABSENCE_PROLONGEE,
+                         now_ms=int(now_ms))
+        g.ouvertes.pop(coin, None)
+        evts.append({"coin": coin, "mode": mode, "ouvert": False, "ferme": SORTIE_ABSENCE_PROLONGEE,
+                     "pnl_realise_usdt": realized, "funding_add_usdt": 0.0,
+                     "absence": {"passes": n_abs, "minutes": round(minutes, 1)}})
     if max_slots is not None and len(g.ouvertes) > int(max_slots):   # A7 : rotation vers les meilleurs nets
         par_net = sorted(g.ouvertes.items(),
                          key=lambda kv: float(kv[1].get("gain_net_24h_bps") or 0.0))   # pire net d'abord
@@ -115,6 +154,50 @@ def tick_multi_sur_disque(root: str | Path, mesures: dict[str, dict[str, Any]], 
     for r in g.journal.rows():
         _append_ledger(root, {**r, "ts_ms": int(now_ms), "mode": mode})
     return evts
+
+
+def diagnostic_churn(root: str | Path = ".", *, now_ms: int | None = None,
+                     fenetre_h: float = 24.0) -> dict[str, Any]:
+    """A5 — COMBIEN D'ALLERS-RETOURS par coin sur la fenêtre, et lesquels sont anormaux ?
+
+    Le 19/07, le bot a fait 32 ouvertures et 31 fermetures du MÊME coin en 22,3 h. Personne ne
+    l'a vu pendant une journée entière : le dashboard n'affichait qu'un PnL qui « ne bougeait
+    pas ». Ce diagnostic existe pour que ce symptôme soit LISIBLE, pas déductible.
+
+    Lecture seule sur le ledger append-only (la source de vérité), aucun effet de bord.
+    """
+    import time as _t
+    fin = int(now_ms or _t.time() * 1000)
+    debut = fin - int(float(fenetre_h) * 3.6e6)
+    par_coin: dict[str, dict[str, Any]] = {}
+    try:
+        lignes = _ledger_path(root).read_text(encoding="utf-8").splitlines()
+    except OSError:
+        lignes = []
+    for l in lignes:
+        try:
+            r = json.loads(l)
+        except ValueError:
+            continue
+        if not isinstance(r, dict):
+            continue
+        ts = r.get("ts_ms")
+        if not isinstance(ts, (int, float)) or int(ts) < debut:
+            continue
+        coin = str(r.get("coin") or "").upper()
+        if not coin:
+            continue
+        e = par_coin.setdefault(coin, {"opens": 0, "closes": 0, "motifs": {}})
+        if str(r.get("kind")) == "OPEN":
+            e["opens"] += 1
+        elif str(r.get("kind")) == "CLOSE":
+            e["closes"] += 1
+            motif = str(r.get("reason") or "?")
+            e["motifs"][motif] = e["motifs"].get(motif, 0) + 1
+    suspects = [c for c, e in par_coin.items()
+                if churn_excessif(allers_retours_24h=min(e["opens"], e["closes"]))]
+    return {"fenetre_h": float(fenetre_h), "par_coin": par_coin, "coins_en_churn": sorted(suspects),
+            "churn_detecte": bool(suspects)}
 
 
 def resume_depuis_ledger(root: str | Path = ".", *, mode: str = MODE_LIVE) -> dict[str, Any]:

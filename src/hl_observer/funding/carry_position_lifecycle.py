@@ -22,6 +22,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from hl_observer.funding.base_convergence import base_convergee, correction_sortie_bps
+from hl_observer.funding.carry_anti_churn import filtrer_sortie, heures_pour_amortir
 from hl_observer.funding.carry_ouverture_gates import porte_risque_ouverture
 from hl_observer.funding.delta_neutral_carry import evaluer_carry_neutre
 from hl_observer.paper_trading.delta_neutral_position import build_delta_neutral_position
@@ -172,7 +173,8 @@ class GestionnaireCarry:
              funding_bps_h_courant: float | None = None, hausse_depuis_entree: float = 0.0,
              prix_courant: float | None = None, base_bps_courant: float | None = None,
              age_max_h: float = AGE_MAX_H_DEFAUT,
-             risque_contexte: dict[str, Any] | None = None) -> dict[str, Any]:
+             risque_contexte: dict[str, Any] | None = None,
+             marge_usd: float = MARGE_USD) -> dict[str, Any]:
         """Une passe : accrue+sort les positions ouvertes, puis ouvre si viable et coin libre.
         `prix_courant` (perp) permet la sortie liquidation TEMPS REEL : hausse = (cours-entree)/entree.
         Retourne un petit résumé de ce qui s'est passé (pour le journal d'exécution)."""
@@ -195,6 +197,20 @@ class GestionnaireCarry:
             motif = raison_de_sortie(pos, now_ms=now_ms, funding_bps_h_courant=fnow,
                                      hausse_depuis_entree=hausse, base_bps_courant=base_bps_courant,
                                      age_max_h=age_max_h)
+            # A3/A4 — AMORTIR AVANT DE SORTIR. Fermer coûte ~11 bps ; à 0,125 bps/h de funding,
+            # une sortie prématurée acte la perte de l'entrée pour rien. `filtrer_sortie` annule
+            # donc les sorties non urgentes tant que l'entrée n'est pas amortie — MAIS laisse
+            # TOUJOURS passer un DANGER (liquidation) et un funding devenu nul. Le capital
+            # d'abord, l'économie de frais ensuite.
+            motif_brut = motif
+            motif = filtrer_sortie(motif, pos, now_ms=now_ms, funding_bps_h=fnow)
+            if motif is None and motif_brut is not None:
+                evt["sortie_differee"] = {
+                    "motif_brut": motif_brut,
+                    "heures_pour_amortir": round(heures_pour_amortir(
+                        cout_entree_bps=float(pos.get("cout_entree_bps") or 0.0),
+                        funding_bps_h=fnow), 1),
+                    "age_h": round((int(now_ms) - int(pos["entry_ts_ms"])) / 3.6e6, 2)}
             if motif is not None:
                 base_sortie = (base_bps_courant if base_bps_courant is not None
                                else float(pos.get("base_bps_entree") or 0.0))   # inconnu -> conservateur
@@ -215,8 +231,9 @@ class GestionnaireCarry:
         #    Ils sont ici, sur le seul chemin qui ouvre vraiment une position. Une entrée absente
         #    fait ABSTENIR le garde concerné (jamais refuser) : un garde affamé ne protège de rien.
         porte = porte_risque_ouverture(
-            marge_demandee_usd=MARGE_USD,
-            marge_utilisee_usd=len(self.ouvertes) * MARGE_USD,
+            marge_demandee_usd=marge_usd,
+            marge_utilisee_usd=sum(float(p.get("marge_usdt") or MARGE_USD)
+                                   for p in self.ouvertes.values()),
             capital_usd=_nombre_ou_none(risque_contexte, "capital_usd"),
             distance_tampon_frac=_nombre_ou_none(risque_contexte, "distance_tampon_frac"),
             funding_paye_cumule_bps=_nombre_ou_none(risque_contexte, "funding_paye_cumule_bps"),
@@ -234,7 +251,7 @@ class GestionnaireCarry:
             evt["refus_risque"] = porte["motif"]
             return evt
 
-        pos = ouvrir_position(decision, inputs, now_ms=now_ms, mode=self.mode)
+        pos = ouvrir_position(decision, inputs, now_ms=now_ms, mode=self.mode, marge_usd=marge_usd)
         if pos is not None:
             self.ouvertes[coin] = pos
             self.journal.record(kind="OPEN", coin=coin, side="CARRY",

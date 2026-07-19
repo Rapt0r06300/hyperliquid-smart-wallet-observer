@@ -20,5 +20,8 @@ echo.
 python tools\ecrire_carry_spot_inputs.py
 echo   [%date% %time%] inputs rafraichis -- prochaine mesure dans 10 min.
 echo.
-timeout /t 600 /nobreak >nul
+REM 19/07 : cadence 600 s -> 240 s. Chaque passe manquee creait un TROU dans la shortlist, et
+REM l'ancienne regle fermait la position sur ce trou (29 fermetures sur 31, ~5 $ de frais).
+REM L'anti-churn tolere desormais l'absence, mais moins de trous = moins de bruit tout court.
+timeout /t 240 /nobreak >nul
 goto boucle
