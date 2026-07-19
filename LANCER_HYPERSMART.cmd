@@ -291,6 +291,13 @@ REM futur : impossible de calculer leur PnL forward. Sans ce collecteur, le repl
 REM peut juger qu'une poignee de coins. Lecture seule (/info allMids), 0 ordre.
 start "marks-collector" /min "%~dp0COLLECTER-MARKS-AUTO.cmd"
 
+REM === LIQUIDATIONS : sans ce collecteur, la mesure #3 est impossible A JAMAIS ===
+REM Constat du 19/07 : "snapshots": 0 -> AUCUN_HISTORIQUE_LA_MESURE_EST_IMPOSSIBLE. Le message
+REM conseillait d'attendre plus longtemps -- mauvais conseil : RIEN n'ecrivait ces donnees
+REM (enregistrer_grappes n'etait appele que par mainnet_readonly_observer, hors boucle live).
+REM 3 endpoints PUBLICS en lecture, modules existants, 0 ordre.
+start "liq-collector" /min "%~dp0COLLECTER-LIQUIDATIONS-AUTO.cmd"
+
 powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0tools\start_hypersmart_simulation.ps1" -Port 8794 -IntervalSeconds 15 -MaxLeaders 50 -Interactive
 
 exit /b 0
