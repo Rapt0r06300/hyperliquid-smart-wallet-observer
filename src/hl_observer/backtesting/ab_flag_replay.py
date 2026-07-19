@@ -123,8 +123,17 @@ def simulate_exit_on_path(
     notional_usd: float = 50.0,
 ) -> float | None:
     """PnL net USD d'un trade simulé sur le chemin de marks réels. None = non mesurable."""
-    future = [(t, m) for (t, m) in path if t > entry_ts and t <= entry_ts + horizon_min * 60.0]
-    if not future or entry_price <= 0:
+    # ⚡ RECHERCHE BINAIRE au lieu d'un balayage complet. `path` est trié par ts (marks_by_coin
+    # le garantit). L'ancienne comprehension parcourait TOUS les marks du coin POUR CHAQUE
+    # candidat : sur 331 366 candidats et 109 192 marks, c'est ce qui faisait tourner le replay
+    # plus de 5 minutes sans jamais rendre un resultat.
+    if entry_price <= 0 or not path:
+        return None
+    import bisect as _bi
+    debut = _bi.bisect_right(path, (entry_ts, float("inf")))
+    fin = _bi.bisect_right(path, (entry_ts + horizon_min * 60.0, float("inf")))
+    future = path[debut:fin]
+    if not future:
         return None
     peak = entry_price
     exit_price = future[-1][1]  # défaut : timeout d'horizon au dernier mark réel
@@ -162,7 +171,29 @@ def _evaluate_arm(
     estimator = MidVolEstimator()
     vol_on = str(env.get("HYPERSMART_V26_VOL_BARRIERS", "0")).lower() in ("1", "true", "yes", "on")
 
-    for cand in candidates:
+    # 🔴 DEUX DEFAUTS CORRIGES ICI LE 2026-07-19 — l'un de VITESSE, l'autre de MESURE.
+    #
+    # L'ancienne version faisait, POUR CHAQUE candidat, une boucle sur TOUS les marks du coin
+    # pour nourrir l'estimateur de volatilite. Consequences :
+    #   1. VITESSE : O(candidats x marks). Sur 331 366 x 109 192, le replay tournait > 5 min
+    #      sans jamais rendre un resultat -- notre seule mesure neuve etait inutilisable.
+    #   2. MESURE (le plus grave) : le MEME mark etait re-enregistre a chaque candidat. Sur un
+    #      coin a 1 000 candidats, chaque prix entrait 1 000 fois dans l'estimateur. Une
+    #      volatilite calculee sur des doublons n'est pas une volatilite -- et c'est elle qui
+    #      pilotait les barrieres SL/TP du bras B. On comparait donc deux bras dont l'un etait
+    #      regle par un chiffre fausse.
+    #
+    # Correctif : on parcourt les candidats en ORDRE CHRONOLOGIQUE et on avance un CURSEUR par
+    # coin. Chaque mark n'entre qu'UNE fois, dans l'ordre. Cout total : O(marks + candidats).
+    # L'ordre chronologique est aussi ce que le replay doit faire par nature : on ne peut pas
+    # nourrir un estimateur avec des prix qui arrivent dans le desordre sans mentir sur ce que
+    # l'on savait a l'instant t.
+    candidats_tries = sorted(
+        (c for c in candidates if isinstance(c, dict)),
+        key=lambda c: (float(c.get("recorded_at") or 0.0), str(c.get("coin") or "")))
+    curseur: dict[str, int] = {}
+
+    for cand in candidats_tries:
         coin = str(cand.get("coin") or "").upper()
         side = str(cand.get("direction") or "").upper()
         edge = cand.get("edge_remaining_bps")
@@ -171,10 +202,13 @@ def _evaluate_arm(
         if not coin or side not in ("LONG", "SHORT") or entry <= 0 or ts <= 0:
             continue
         m.candidates_seen += 1
-        # nourrir l'estimateur de vol avec les marks réels antérieurs au candidat
-        for t_mk, mid in marks.get(coin, []):
-            if t_mk <= ts:
-                estimator.record(coin, mid, ts=t_mk)
+        # nourrir l'estimateur avec les marks NOUVEAUX (<= ts) depuis le dernier candidat
+        serie = marks.get(coin, ())
+        i = curseur.get(coin, 0)
+        while i < len(serie) and serie[i][0] <= ts:
+            estimator.record(coin, serie[i][1], ts=serie[i][0])
+            i += 1
+        curseur[coin] = i
         # baseline d'acceptation : le candidat enregistré était déjà passé par le score V25 ;
         # on rejoue UNIQUEMENT les vetos V26 (c'est leur effet qu'on mesure, toutes choses égales).
         vetoes = apply_v26_entry_vetos(
