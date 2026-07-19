@@ -1,0 +1,47 @@
+@echo off
+REM ============================================================================
+REM  BOUCLE DE COLLECTEUR — un seul script pour les 3 collecteurs, SANS FENETRE
+REM ============================================================================
+REM  Usage :  boucle_collecteur.cmd <nom> <script.py> <intervalle_s> [args...]
+REM
+REM  POURQUOI CE FICHIER (19/07) : les 3 collecteurs (carry-feeder, marks,
+REM  liquidations) ouvraient chacun une fenetre cmd au demarrage du bot. Flo :
+REM  « y'a plein de fenetres qui s'ouvrent et je veux pas ca ». C'est moi qui les
+REM  avais ajoutees ; elles sont supprimees.
+REM
+REM  MAIS un processus cache qui echoue en SILENCE serait exactement la maladie
+REM  qu'on vient de corriger (105 `except: pass` -> 0). Chaque passe est donc
+REM  horodatee dans runtime\logs\<nom>.log, avec le code de sortie.
+REM
+REM  Le log est TRONQUE au demarrage de chaque session : on veut la session en
+REM  cours, pas un fichier de 2 Go apres trois jours (le bot a deja crashe une
+REM  fois sur un disque plein).
+REM
+REM  Securite : lecture seule cote marche. 0 ordre, 0 cle, 0 signature.
+REM ============================================================================
+setlocal
+cd /d "%~dp0.."
+set "NOM=%~1"
+set "SCRIPT=%~2"
+set "INTERVALLE=%~3"
+if "%NOM%"=="" exit /b 2
+if "%SCRIPT%"=="" exit /b 2
+if "%INTERVALLE%"=="" set "INTERVALLE=300"
+
+set "PYTHONIOENCODING=utf-8"
+set "PYTHONPATH=%CD%\src"
+if not exist "runtime\logs" mkdir "runtime\logs" >nul 2>&1
+set "LOG=runtime\logs\%NOM%.log"
+
+echo ============================================================ > "%LOG%"
+echo  %NOM% — demarre le %date% a %time% (toutes les %INTERVALLE% s) >> "%LOG%"
+echo  script : %SCRIPT% >> "%LOG%"
+echo ============================================================ >> "%LOG%"
+
+:boucle
+echo. >> "%LOG%"
+echo --- passe du %date% %time% --- >> "%LOG%"
+python "%SCRIPT%" %4 %5 %6 %7 %8 %9 >> "%LOG%" 2>&1
+echo   [fin de passe, code de sortie = %errorlevel%] >> "%LOG%"
+timeout /t %INTERVALLE% /nobreak >nul
+goto boucle

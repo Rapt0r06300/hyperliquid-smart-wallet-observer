@@ -282,21 +282,30 @@ set "HYPERSMART_CARRY_HYPE_PAPER=1"
 set "HYPERSMART_CARRY_ETAPE2=1"
 REM === CARRY : alimentation AUTO des inputs spot (best coin, toutes les 10 min, en arriere-plan) ===
 REM Sans ca, carry_spot_inputs.json n'est jamais ecrit -> le carry refuse tout (INPUTS_SPOT_ABSENTS).
-start "carry-feeder" /min "%~dp0ALIMENTER-CARRY-AUTO.cmd"
+REM 19/07 — SANS FENETRE. Ces 3 collecteurs ouvraient 3 fenetres cmd a chaque demarrage :
+REM insupportable a l'usage, et c'est moi qui les avais ajoutees. Ils tournent desormais CACHES.
+REM ⚠️ Mais un processus cache qui echoue en SILENCE serait exactement la maladie qu'on vient de
+REM corriger (les 105 `except: pass`). Chacun ecrit donc son journal dans runtime\logs\ :
+REM   runtime\logs\carry-feeder.log · marks-collector.log · liq-collector.log
+REM En cas de doute : ouvre le .log, ou double-clique le .cmd correspondant pour le voir tourner.
+if not exist "%~dp0runtime\logs" mkdir "%~dp0runtime\logs" >nul 2>&1
+powershell -NoProfile -WindowStyle Hidden -Command "Start-Process -WindowStyle Hidden -FilePath 'cmd.exe' -ArgumentList '/c','\"%~dp0tools\boucle_collecteur.cmd\" carry-feeder \"%~dp0tools\ecrire_carry_spot_inputs.py\" 240'" >nul 2>&1
 
 REM === REPLAY : collecte des MARKS (prix futur) sur TOUS les coins des candidats ===
 REM Mesure du 19/07 : 30 148 candidats sur 106 coins, mais des marks sur 2 coins seulement
 REM -> 29 %% des candidats rejouables. BTC/ETH/SOL/ZEC avaient des candidats et AUCUN prix
 REM futur : impossible de calculer leur PnL forward. Sans ce collecteur, le replay A/B ne
 REM peut juger qu'une poignee de coins. Lecture seule (/info allMids), 0 ordre.
-start "marks-collector" /min "%~dp0COLLECTER-MARKS-AUTO.cmd"
+powershell -NoProfile -WindowStyle Hidden -Command "Start-Process -WindowStyle Hidden -FilePath 'cmd.exe' -ArgumentList '/c','\"%~dp0tools\boucle_collecteur.cmd\" marks-collector \"%~dp0tools\ecrire_marks_tous_coins.py\" 60 --une-fois'" >nul 2>&1
 
 REM === LIQUIDATIONS : sans ce collecteur, la mesure #3 est impossible A JAMAIS ===
 REM Constat du 19/07 : "snapshots": 0 -> AUCUN_HISTORIQUE_LA_MESURE_EST_IMPOSSIBLE. Le message
 REM conseillait d'attendre plus longtemps -- mauvais conseil : RIEN n'ecrivait ces donnees
 REM (enregistrer_grappes n'etait appele que par mainnet_readonly_observer, hors boucle live).
 REM 3 endpoints PUBLICS en lecture, modules existants, 0 ordre.
-start "liq-collector" /min "%~dp0COLLECTER-LIQUIDATIONS-AUTO.cmd"
+powershell -NoProfile -WindowStyle Hidden -Command "Start-Process -WindowStyle Hidden -FilePath 'cmd.exe' -ArgumentList '/c','\"%~dp0tools\boucle_collecteur.cmd\" liq-collector \"%~dp0tools\collecter_liquidations.py\" 300 --une-fois'" >nul 2>&1
+echo   [collecteurs] carry-feeder, marks et liquidations tournent en arriere-plan (sans fenetre).
+echo   [collecteurs] journaux : runtime\logs\carry-feeder.log ^| marks-collector.log ^| liq-collector.log
 
 powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0tools\start_hypersmart_simulation.ps1" -Port 8794 -IntervalSeconds 15 -MaxLeaders 50 -Interactive
 
