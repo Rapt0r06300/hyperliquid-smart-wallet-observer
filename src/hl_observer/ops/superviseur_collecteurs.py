@@ -103,9 +103,19 @@ def _commande_relance(c: dict[str, Any]) -> list[str]:
 
 
 def _lanceur_windows(commande: list[str], cwd: Path) -> bool:
-    """Relance réelle — Windows uniquement, là où vit le runtime. Ailleurs : refus poli."""
+    """Relance réelle — Windows uniquement, là où vit le runtime. Ailleurs : refus poli.
+
+    🔴 GARDE AJOUTÉE LE 19/07 (attrapée par l'AUDIT WINDOWS de Flo, popup à l'écran) :
+    un appel avec une racine qui n'est pas le vrai repo (test sans lanceur injecté, fuzzing)
+    faisait un VRAI `start tools\\boucle_collecteur.cmd` depuis un dossier où ce fichier
+    n'existe pas -> boîte de dialogue Windows « ne trouve pas » en plein audit. Sous Linux
+    le refus était silencieux, donc mes tests sandbox ne l'ont jamais vu. *La vérité, c'est
+    Windows.* On vérifie l'existence du script AVANT de lancer : racine sans boucle = refus.
+    """
     if os.name != "nt":
         return False
+    if not (Path(cwd) / "tools" / "boucle_collecteur.cmd").is_file():
+        return False                      # racine fantaisiste : on ne lance RIEN (et 0 popup)
     try:
         subprocess.Popen(commande, cwd=str(cwd),  # noqa: S603 — nos scripts, chemins fixes
                          stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)

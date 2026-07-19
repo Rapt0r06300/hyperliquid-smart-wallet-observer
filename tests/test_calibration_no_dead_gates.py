@@ -92,9 +92,23 @@ def test_copy_degradation_ceiling_is_reachable() -> None:
 # 2. Le plancher single-wallet doit etre ATTEIGNABLE (mode sniper)
 # --------------------------------------------------------------------------------------
 
+#: Miroir de `SENTINELLE_SNIPER_FERME` dans tools/audit_report.py : un plancher >= 1000 bps
+#: n'est pas un calibrage, c'est une PORTE FERMEE VOLONTAIREMENT (decision Z3, 19/07 --
+#: le mode sniper mono-wallet est economiquement mort : -7,97 bps OOS, leader contrarien).
+SENTINELLE_SNIPER_FERME = 1000.0
+
+
 def test_single_wallet_floor_is_attainable() -> None:
     env = _launcher_env()
     floor = _f(env, "HYPERSMART_SINGLE_WALLET_MIN_EDGE_BPS", 55.0)
+
+    if floor >= SENTINELLE_SNIPER_FERME:
+        # 🔴 REECRIT LE 19/07 (attrape par TEST-AUDIT sous Windows) : ce test datait d'AVANT
+        # la decision Z3 et traitait « sniper structurellement mort » comme un BUG. C'est
+        # desormais une DECISION (9999 dans le lanceur). Un verrou VOULU ne doit pas etre
+        # « atteignable » -- on verifie au contraire qu'aucun signal fabrique ne peut passer.
+        assert floor >= SENTINELLE_SNIPER_FERME
+        return
 
     # Meilleur signal mono-wallet possible : confiance max, tout frais, marche tres liquide.
     # leader_expected_edge_bps = 18 + confidence*34 + min(24, (n-1)*8)  (routes.opportunity_metrics)

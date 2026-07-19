@@ -102,6 +102,18 @@ def test_le_lanceur_par_defaut_REFUSE_hors_Windows(tmp_path):
         assert SC._lanceur_windows(["cmd", "/c", "echo"], tmp_path) is False
 
 
+def test_le_lanceur_reel_REFUSE_une_racine_sans_boucle(tmp_path):
+    """🔴 LE POPUP DE L'AUDIT WINDOWS (19/07 16:49) : un appel avec une racine fantaisiste
+    (test sans lanceur injecte) faisait un VRAI `start tools\\boucle_collecteur.cmd` depuis
+    un dossier ou ce fichier n'existe pas -> boite « Windows ne trouve pas » en plein audit.
+    Sous Linux le refus etait silencieux : mes tests sandbox ne pouvaient PAS le voir.
+    Regle : pas de tools/boucle_collecteur.cmd sous la racine -> refus, sur TOUTE plateforme."""
+    assert SC._lanceur_windows(["cmd", "/c", "start", "", "/b",
+                                "tools\\boucle_collecteur.cmd", "x", "y", "1"],
+                               tmp_path) is False
+    assert SC._lanceur_windows(["cmd"], tmp_path / "inexistante") is False
+
+
 # ------------------------------------------------------------------ 3. cooldown
 
 def test_pas_de_MITRAILLAGE_dans_le_cooldown(tmp_path):
