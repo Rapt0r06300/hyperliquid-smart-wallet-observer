@@ -63,9 +63,59 @@ def main(argv=None) -> int:
     rap = mesurer_edge_liquidation(evs, marks, horizon_s=a.horizon_s, cout_aller_retour_bps=a.cout_bps)
     print(json.dumps(rap.as_dict(), ensure_ascii=False, indent=2))
     if rap.verdict == "INSUFFISANT":
-        print("\n>>> INSUFFISANT : laisse le moteur tourner plus longtemps pour accumuler des "
-              "liquidations (voir docs/RUNBOOK_COLLECTE_DONNEES.md). On ne conclut pas sur du vide.")
+        _dire_quoi_faire(a.root, len(evs))
     return 0
+
+
+def _dire_quoi_faire(root: str, n_evenements: int) -> None:
+    """DIRE LE BON REMEDE — la version precedente conseillait TOUJOURS « laisse tourner plus
+    longtemps ». Ce conseil a ete faux deux fois de suite :
+
+      * le 19/07 au matin : RIEN n'ecrivait les liquidations (le recorder n'etait pas cable).
+        On pouvait attendre un mois pour zero ligne.
+      * le 19/07 l'apres-midi : le collecteur tournait ET lisait 692 positions reelles, mais les
+        filtres de `construire_carte` les rejetaient toutes (4 seulement a moins de 10 % du prix,
+        et jamais 2 wallets au meme niveau). Attendre n'y change RIEN : c'est la POPULATION
+        observee -- le haut du leaderboard, peu leverage -- qui ne convient pas a la question.
+
+    Un garde-fou qui indique le mauvais remede fait perdre des jours a quelqu'un qui croit bien
+    faire. On lit donc l'etat REEL avant de conseiller quoi que ce soit.
+    """
+    from pathlib import Path
+    log = Path(root) / "runtime" / "logs" / "liq-collector.log"
+    texte = ""
+    try:
+        texte = log.read_text(encoding="utf-8", errors="ignore")[-4000:]
+    except OSError:
+        pass
+
+    print("\n>>> INSUFFISANT — on ne conclut pas sur du vide. Mais AVANT d'attendre, "
+          "voici POURQUOI c'est vide :\n")
+    if not texte:
+        print("    Le collecteur de liquidations n'a jamais tourne (aucun "
+              "runtime/logs/liq-collector.log).")
+        print("    -> Lance le bot : il le demarre tout seul. Verifie avec TESTER-COLLECTEURS.cmd.")
+        return
+    if "POURQUOI 0 GRAPPE" in texte:
+        bloc = [l for l in texte.splitlines() if "[liq]" in l][-8:]
+        print("    Le collecteur TOURNE et lit des positions reelles, mais les filtres les")
+        print("    rejettent. Dernier diagnostic du collecteur :\n")
+        for l in bloc:
+            print("      " + l.strip())
+        print("\n    -> ATTENDRE NE SERVIRA A RIEN : ce n'est pas un manque de temps, c'est une")
+        print("       population inadaptee. Les gros comptes du leaderboard sont peu leverages ;")
+        print("       leur prix de liquidation est trop loin du marche pour entrer dans le rayon")
+        print("       de 10 %. Pour que cette piste vive, il faudrait viser des comptes a FORT")
+        print("       LEVIER, ou enregistrer LARGE et filtrer au moment de la mesure.")
+        print("       Aucune des deux n'est faite aujourd'hui -- c'est un choix a prendre, pas un bug.")
+        return
+    if n_evenements == 0:
+        print("    Le collecteur tourne mais n'a encore rien ecrit. Regarde "
+              "runtime/logs/liq-collector.log.")
+    else:
+        print("    %d evenement(s) enregistre(s) : c'est un vrai debut, mais sous le seuil de "
+              "credibilite." % n_evenements)
+        print("    -> LA, laisser tourner a du sens (voir docs/RUNBOOK_COLLECTE_DONNEES.md).")
 
 
 if __name__ == "__main__":
