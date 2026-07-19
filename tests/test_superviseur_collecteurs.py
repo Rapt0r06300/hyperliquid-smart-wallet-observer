@@ -154,18 +154,23 @@ def test_racine_inexistante_ne_leve_pas(tmp_path):
 
 # ------------------------------------------------------------------ 4. cohérence & câblage
 
-def test_le_REGISTRE_correspond_au_LANCEUR():
-    """CANARI ANTI-DÉRIVE. Un collecteur présent dans LANCER_HYPERSMART.cmd mais absent du
-    registre mourrait SANS supervision — la panne du 19/07, en silence, pour toujours."""
-    texte = (RACINE / "LANCER_HYPERSMART.cmd").read_text(encoding="utf-8", errors="ignore")
+import pytest
+
+
+@pytest.mark.parametrize("fichier", ["LANCER_HYPERSMART.cmd", "REANIMER-COLLECTEURS.cmd"])
+def test_le_REGISTRE_correspond_au_LANCEUR(fichier):
+    """CANARI ANTI-DÉRIVE. Un collecteur présent dans le lanceur (ou le bouton de réanimation)
+    mais absent du registre mourrait SANS supervision — la panne du 19/07, en silence, pour
+    toujours. Les TROIS listes (LANCER, REANIMER, registre) doivent évoluer ENSEMBLE."""
+    texte = (RACINE / fichier).read_text(encoding="utf-8", errors="ignore")
     lignes = [l for l in texte.splitlines()
               if "boucle_collecteur.cmd" in l and l.strip().lower().startswith("start")]
     assert len(lignes) == len(SC.REGISTRE), (
-        "le lanceur démarre %d collecteur(s), le registre en supervise %d — les deux doivent "
-        "évoluer ENSEMBLE" % (len(lignes), len(SC.REGISTRE)))
+        "%s démarre %d collecteur(s), le registre en supervise %d — les listes doivent "
+        "évoluer ENSEMBLE" % (fichier, len(lignes), len(SC.REGISTRE)))
     for c in SC.REGISTRE:
         ligne = next((l for l in lignes if " %s " % c["nom"] in l), None)
-        assert ligne is not None, "%r est au registre mais pas dans le lanceur" % c["nom"]
+        assert ligne is not None, "%r est au registre mais pas dans %s" % (c["nom"], fichier)
         assert c["script"].replace("/", "\\") in ligne.replace("/", "\\")
         assert (" %d" % c["intervalle_s"]) in ligne
 
