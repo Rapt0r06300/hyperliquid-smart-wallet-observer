@@ -295,21 +295,28 @@ REM ("Projet invest") -- du code qui casse en silence, et un collecteur qui ne d
 REM sans le dire, c'est exactement la maladie qu'on passe la journee a corriger.
 REM `/b` = pas de nouvelle fenetre (doc Windows), UN seul niveau de guillemets, et toute la
 REM sortie part deja dans le log depuis boucle_collecteur.cmd.
-start "" /b "%~dp0tools\boucle_collecteur.cmd" carry-feeder "%~dp0tools\ecrire_carry_spot_inputs.py" 240
+REM ⚠️ CHEMINS RELATIFS, ZERO GUILLEMET. Ma version precedente passait des chemins ABSOLUS
+REM entre guillemets ; le dossier s'appelle « Projet invest » (avec une ESPACE), et `start /b`
+REM lance un .cmd via `cmd /c` qui, des qu'il voit PLUSIEURS paires de guillemets, retire la
+REM premiere et la derniere. Resultat mesure chez Flo :
+REM     'C:\Users\flo\Desktop\Projet' n'est pas reconnu... (x3, un par collecteur)
+REM Le lanceur a deja fait `cd /d "%~dp0"` (ligne 3) : on est DANS le dossier projet. Des chemins
+REM relatifs n'ont donc ni espace ni guillemet -- le bug ne peut plus se produire.
+start "" /b tools\boucle_collecteur.cmd carry-feeder tools\ecrire_carry_spot_inputs.py 240
 
 REM === REPLAY : collecte des MARKS (prix futur) sur TOUS les coins des candidats ===
 REM Mesure du 19/07 : 30 148 candidats sur 106 coins, mais des marks sur 2 coins seulement
 REM -> 29 %% des candidats rejouables. BTC/ETH/SOL/ZEC avaient des candidats et AUCUN prix
 REM futur : impossible de calculer leur PnL forward. Sans ce collecteur, le replay A/B ne
 REM peut juger qu'une poignee de coins. Lecture seule (/info allMids), 0 ordre.
-start "" /b "%~dp0tools\boucle_collecteur.cmd" marks-collector "%~dp0tools\ecrire_marks_tous_coins.py" 60 --une-fois
+start "" /b tools\boucle_collecteur.cmd marks-collector tools\ecrire_marks_tous_coins.py 60 --une-fois
 
 REM === LIQUIDATIONS : sans ce collecteur, la mesure #3 est impossible A JAMAIS ===
 REM Constat du 19/07 : "snapshots": 0 -> AUCUN_HISTORIQUE_LA_MESURE_EST_IMPOSSIBLE. Le message
 REM conseillait d'attendre plus longtemps -- mauvais conseil : RIEN n'ecrivait ces donnees
 REM (enregistrer_grappes n'etait appele que par mainnet_readonly_observer, hors boucle live).
 REM 3 endpoints PUBLICS en lecture, modules existants, 0 ordre.
-start "" /b "%~dp0tools\boucle_collecteur.cmd" liq-collector "%~dp0tools\collecter_liquidations.py" 300 --une-fois
+start "" /b tools\boucle_collecteur.cmd liq-collector tools\collecter_liquidations.py 300 --une-fois
 
 REM AUTO-VERIFICATION : un collecteur cache qui ne demarre pas ne se voit PAS. On attend qu'il
 REM ecrive son log (il l'ecrit des la 1re ligne) et on DIT si l'un des trois manque a l'appel.
