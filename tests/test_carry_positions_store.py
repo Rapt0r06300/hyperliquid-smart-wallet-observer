@@ -40,7 +40,7 @@ def test_cycle_complet_ouvre_accrue_ferme_et_ledger(tmp_path):
     tick_sur_disque(tmp_path, _decision(), _inputs(), now_ms=0, funding_bps_h_courant=0.125)
     # accrue 200h (dans la fenetre d'age 336h, mais au-dela du break-even ~160h), puis funding->0
     tick_sur_disque(tmp_path, _decision(), _inputs(), now_ms=200 * H, funding_bps_h_courant=0.125)
-    e = tick_sur_disque(tmp_path, _decision(), _inputs(), now_ms=201 * H, funding_bps_h_courant=0.0)
+    e = tick_sur_disque(tmp_path, _decision(), _inputs(), now_ms=201 * H, funding_bps_h_courant=-1.0)  # hemorragie -> CLOSE immediat (A6)
     assert e["ferme"] == "FUNDING_NON_RENTABLE"
     assert e["pnl_realise_usdt"] > 0.0                     # 200h de funding > frais
     # plus aucune position ouverte, et le ledger contient OPEN + CLOSE
@@ -52,7 +52,7 @@ def test_cycle_complet_ouvre_accrue_ferme_et_ledger(tmp_path):
 
 def test_ledger_est_append_only(tmp_path):
     tick_sur_disque(tmp_path, _decision(), _inputs(), now_ms=0, funding_bps_h_courant=0.125)
-    tick_sur_disque(tmp_path, _decision(), _inputs(), now_ms=5001 * H, funding_bps_h_courant=0.0)
+    tick_sur_disque(tmp_path, _decision(), _inputs(), now_ms=5001 * H, funding_bps_h_courant=-1.0)
     lignes = (tmp_path / LEDGER_RELPATH).read_text(encoding="utf-8").strip().splitlines()
     kinds = [json.loads(l)["kind"] for l in lignes]
     assert kinds == ["OPEN", "CLOSE"]

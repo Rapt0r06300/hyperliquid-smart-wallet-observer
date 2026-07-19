@@ -155,8 +155,8 @@ def test_gestionnaire_ouvre_puis_ferme_et_ledger_converge():
     assert e1["ouvert"] is False
     assert e1["funding_add_usdt"] > 0.0
     assert len(g.ouvertes) == 1
-    # t2 : funding tombe a 0 -> CLOSE avec PnL realise
-    e2 = g.tick(_decision(), _inputs(), now_ms=201 * H, funding_bps_h_courant=0.0)
+    # t2 : funding en HEMORRAGIE (-1,0 <= seuil -0,5) -> CLOSE immediat (A6: un simple 0.0 est tolere)
+    e2 = g.tick(_decision(), _inputs(), now_ms=201 * H, funding_bps_h_courant=-1.0)
     assert e2["ferme"] == SORTIE_FUNDING
     assert e2["pnl_realise_usdt"] is not None
     assert len(g.ouvertes) == 0

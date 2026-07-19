@@ -68,11 +68,30 @@ def test_une_sortie_de_DANGER_passe_TOUJOURS():
     assert est_un_danger("SORTIE_AGE") is False
 
 
-def test_un_funding_devenu_NUL_laisse_sortir():
-    """Garder ne rapporte plus rien : on ne bloque pas la sortie au nom de l'amortissement."""
+def test_A6_un_tick_sous_zero_ne_sort_PAS_mais_l_hemorragie_OUI():
+    """🔴 RÉÉCRIT (19/07 soir, 2e chasse). L'ancienne version laissait sortir au PREMIER tick a
+    funding <= 0 : on payait ~11 bps pour eviter un cout quasi nul, puis on rouvrait a 7 bps
+    quand le taux remontait (HYPE a fait 0,047 -> 0,125 aujourd'hui). Nouvelle regle :
+    bruit tolere · persistance = sortie · hemorragie (<= -0,5 bps/h) = sortie IMMEDIATE."""
+    from hl_observer.funding.carry_anti_churn import (
+        MINUTES_FUNDING_NEG_TOLEREES, PASSES_FUNDING_NEG_TOLEREES)
+
     pos = {"entry_ts_ms": 1_000_000, "cout_entree_bps": 12.47}
-    assert filtrer_sortie("SORTIE_FUNDING", pos, now_ms=1_060_000,
-                          funding_bps_h=0.0) == "SORTIE_FUNDING"
+    # 1) un tick a 0.0 : TOLERE (garder coute ~rien, fermer coute 11 bps)
+    assert filtrer_sortie("SORTIE_FUNDING", pos, now_ms=1_060_000, funding_bps_h=0.0) is None
+    assert pos["funding_negatif_consecutifs"] == 1
+    # 2) persistance (> passes ET > minutes) : la, on sort — ce n'est plus du bruit
+    t = 1_060_000
+    for _ in range(PASSES_FUNDING_NEG_TOLEREES):
+        t += int(MINUTES_FUNDING_NEG_TOLEREES / PASSES_FUNDING_NEG_TOLEREES * 60_000) + 60_000
+        dernier = filtrer_sortie("SORTIE_FUNDING", pos, now_ms=t, funding_bps_h=-0.01)
+    assert dernier == "SORTIE_FUNDING", "un negatif PERSISTANT doit finir par sortir"
+    # 3) le retour en positif REMET le compteur a zero (pas de contamination d'episode)
+    filtrer_sortie(None, pos, now_ms=t + 60_000, funding_bps_h=0.125)
+    assert "funding_negatif_consecutifs" not in pos
+    # 4) hemorragie : -1 bps/h = -24 bps/jour, plus cher que la fermeture -> IMMEDIAT
+    assert filtrer_sortie("SORTIE_FUNDING", pos, now_ms=t + 120_000,
+                          funding_bps_h=-1.0) == "SORTIE_FUNDING"
 
 
 def test_apres_amortissement_la_sortie_passe():

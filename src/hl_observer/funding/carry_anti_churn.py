@@ -54,6 +54,32 @@ SORTIE_ABSENCE_PROLONGEE = "DONNEE_ABSENTE_PROLONGEE"
 MOTIFS_DE_DANGER = ("LIQUID", "DANGER", "KILL")     # jamais retardés, jamais amortis
 
 
+#: 🔴 A6 (19/07 soir, 2e chasse) — LE CHURN VERSION FUNDING. `funding <= 0` laissait passer la
+#: sortie IMMEDIATEMENT : un seul tick a -0,001 bps/h et on payait ~11 bps de fermeture pour
+#: eviter un cout quasi NUL, puis ~7 bps de reouverture quand le taux remontait au plancher.
+#: HYPE a fait exactement cet aller-retour aujourd'hui (0,047 -> 0,125). Regle desormais :
+#:   * negatif LEGER (> seuil d'hemorragie)  -> tolere quelques passes ET quelques minutes,
+#:     comme l'absence de donnees (A1) : le bruit autour de zero ne vaut pas 11 bps ;
+#:   * negatif PROFOND (<= -0,5 bps/h)       -> sortie immediate : la, on PAIE vraiment
+#:     (-0,5 bps/h = -12 bps/jour, plus cher que la fermeture) ;
+#:   * negatif PERSISTANT                    -> sortie : ce n'est plus du bruit, c'est un regime.
+SEUIL_FUNDING_HEMORRAGIE_BPS_H = -0.5
+PASSES_FUNDING_NEG_TOLEREES = 3
+MINUTES_FUNDING_NEG_TOLEREES = 45.0
+
+
+def doit_fermer_pour_funding_negatif(*, funding_bps_h: float, passes_negatives: int,
+                                     minutes_depuis_premier: float,
+                                     seuil_hemorragie: float = SEUIL_FUNDING_HEMORRAGIE_BPS_H,
+                                     passes_tolerees: int = PASSES_FUNDING_NEG_TOLEREES,
+                                     minutes_tolerees: float = MINUTES_FUNDING_NEG_TOLEREES) -> bool:
+    """Fermer pour funding negatif exige une HEMORRAGIE ou une PERSISTANCE — pas un tick."""
+    if float(funding_bps_h) <= float(seuil_hemorragie):
+        return True
+    return (int(passes_negatives) > int(passes_tolerees)
+            and float(minutes_depuis_premier) > float(minutes_tolerees))
+
+
 def est_un_danger(motif: str | None) -> bool:
     """Une sortie de DANGER ignore toutes les optimisations de frais. Le capital d'abord."""
     if not motif:
@@ -147,12 +173,28 @@ def filtrer_sortie(motif: str | None, position: dict[str, Any], *, now_ms: int,
       2. funding <= 0 -> garder ne rapporte plus rien, on laisse sortir ;
       3. sinon, on exige d'avoir AMORTI l'entrée (A3) -- sinon on annule la sortie.
     """
+    # compteur funding-negatif : REMIS A ZERO des que le taux repasse positif — AVANT le
+    # court-circuit `motif is None`, sinon un vieil episode contaminerait le suivant.
+    if float(funding_bps_h) > 0.0:
+        position.pop("funding_negatif_consecutifs", None)
+        position.pop("premier_funding_negatif_ts_ms", None)
     if motif is None:
         return None
     if est_un_danger(motif):
         return motif
     if float(funding_bps_h) <= 0.0:
-        return motif
+        # A6 — le tick sous zero ne sort plus tout seul : hemorragie ou persistance exigee.
+        n = int(position.get("funding_negatif_consecutifs") or 0) + 1
+        premier = position.get("premier_funding_negatif_ts_ms")
+        if not isinstance(premier, (int, float)) or float(premier) <= 0:
+            premier = int(now_ms)
+        position["funding_negatif_consecutifs"] = n
+        position["premier_funding_negatif_ts_ms"] = int(premier)
+        minutes = (int(now_ms) - int(premier)) / 60_000.0
+        if doit_fermer_pour_funding_negatif(funding_bps_h=funding_bps_h, passes_negatives=n,
+                                            minutes_depuis_premier=minutes):
+            return motif
+        return None                       # un cheveu sous zero ne vaut pas 11 bps de frais
     if not duree_min_tenue_respectee(position, now_ms=now_ms, funding_bps_h=funding_bps_h):
         return None                       # trop tôt : fermer maintenant acterait la perte pour rien
     return motif
@@ -163,4 +205,6 @@ __all__ = [
     "MAX_ALLERS_RETOURS_24H", "SORTIE_ABSENCE_PROLONGEE", "est_un_danger",
     "doit_fermer_pour_absence", "heures_pour_amortir", "duree_min_tenue_respectee",
     "funding_sous_seuil_de_sortie", "sortie_rentable", "churn_excessif", "filtrer_sortie",
+    "doit_fermer_pour_funding_negatif", "SEUIL_FUNDING_HEMORRAGIE_BPS_H",
+    "PASSES_FUNDING_NEG_TOLEREES", "MINUTES_FUNDING_NEG_TOLEREES",
 ]
