@@ -134,6 +134,15 @@ MOTIF_SPOT_ILLIQUIDE = "SPOT_TROP_MINCE_POUR_MONTER_LA_JAMBE"
 MOTIF_BASE_TROP_CHERE = "LA_BASE_COUTE_PLUS_QUE_LE_FUNDING_NE_RAPPORTE"
 MOTIF_FUNDING_TROP_FAIBLE = "FUNDING_NE_COUVRE_PAS_LES_FRAIS_DES_DEUX_JAMBES"
 MOTIF_INCONNU = "DONNEE_MANQUANTE_NO_TRADE"
+MOTIF_BASE_CONVERGENCE = "CARRY_BASE_CONVERGENCE_VIABLE"
+
+#: R3 — la base doit payer l'aller-retour AVEC une marge de securite : >= 130 % des frais des
+#: deux jambes. En-dessous, une base "presque suffisante" laisserait la position dependre d'un
+#: funding qu'elle n'a pas. Cliquet teste : ne pas adoucir apres avoir vu une opportunite ratee.
+SEUIL_BASE_SEULE_FRACTION = 1.3
+#: R3 — funding tolere pendant qu'on attend la convergence : strictement au-dessus du seuil
+#: d'hemorragie d'A6 (-0,5 bps/h = -12 bps/jour). En-dessous, le loyer mange la capture.
+FUNDING_MIN_TOLERE_BPS_H = -0.5
 
 
 @dataclass(frozen=True, slots=True)
@@ -250,10 +259,31 @@ def evaluer_carry_neutre(
 
     # on n'encaisse le funding que si on est du BON cote : short perp encaisse un funding POSITIF
     funding_encaisse_h = max(0.0, float(funding_bps_h))
-    if funding_encaisse_h <= 0:
+    base_paie_seule = (base_bps >= frais * SEUIL_BASE_SEULE_FRACTION
+                       and float(funding_bps_h) > FUNDING_MIN_TOLERE_BPS_H)
+    if funding_encaisse_h <= 0 and not base_paie_seule:
+        if base_bps >= frais * SEUIL_BASE_SEULE_FRACTION:
+            # la base payait, mais le funding est en HEMORRAGIE (<= -0,5 bps/h = -12 bps/jour) :
+            # le loyer mangerait la capture avant la convergence. La note doit dire LA VRAIE
+            # cause -- une note qui accuse le mauvais garde fabrique de faux diagnostics.
+            note = ("base %.1f bps suffisante, mais funding %.2f bps/h <= %.1f (hemorragie) : "
+                    "le loyer mange la capture" % (base_bps, funding_bps_h,
+                                                   FUNDING_MIN_TOLERE_BPS_H))
+        else:
+            note = ("funding negatif : short le perp PAIE au lieu d'encaisser (et la base "
+                    "%.1f bps < %.1f = %.0f%% des frais : elle ne paie pas l'aller-retour a "
+                    "elle seule)" % (base_bps, frais * SEUIL_BASE_SEULE_FRACTION,
+                                     SEUIL_BASE_SEULE_FRACTION * 100))
         return CarryNeutre(coin, funding_bps_h, base_bps, liquidite_spot_usd, cout_entree,
-                           None, None, None, False, MOTIF_FUNDING_TROP_FAIBLE,
-                           "funding negatif : short le perp PAIE au lieu d'encaisser")
+                           None, None, None, False, MOTIF_FUNDING_TROP_FAIBLE, note)
+    # R3 (19/07 soir) — LA PORTE BASE-CONVERGENCE. Le SEUL PnL realise positif du ledger vient
+    # des captures de base (+0,12 $ x3, motif BASE_CONVERGEE_PREMIUM_CAPTURE). Avant : un coin
+    # dont la base payait l'aller-retour A ELLE SEULE etait quand meme refuse si son funding
+    # etait <= 0 -- on jetait la strategie qui GAGNE au nom de celle qui attend. Desormais :
+    # base >= 130 % des frais ET funding > -0,5 bps/h (seuil d'hemorragie, coherent avec A6)
+    # -> on entre pour la CONVERGENCE, le funding legerement negatif n'est qu'un petit loyer.
+    # La sortie A5 (BASE_CONVERGEE_PREMIUM_CAPTURE) realise le gain ; le verrou de liquidation
+    # s'applique comme a tout le monde.
 
     # combien d'heures pour rembourser le cout d'entree ?
     # Le plancher protocolaire est PERMANENT : meme un carry lent finit par rembourser.
@@ -314,7 +344,10 @@ def evaluer_carry_neutre(
         funding_restant_a_ce_moment=round(restant, 4) if restant else None,
         gain_net_24h_bps=round(gain_horizon / jours_horizon, 3),
         viable=viable,
-        motif="CARRY_NEUTRE_VIABLE" if viable else MOTIF_BASE_TROP_CHERE,
+        # attribution honnete : une entree payee par la BASE (funding <= 0) porte son propre
+        # motif -> le PnL par strategie (P1 ops) distingue portage et convergence.
+        motif=(("CARRY_NEUTRE_VIABLE" if funding_encaisse_h > 0 else MOTIF_BASE_CONVERGENCE)
+               if viable else MOTIF_BASE_TROP_CHERE),
         note=("rembourse en %.0f h (%.1f j), puis portage pur -- %.1f bps nets sur %.0f jours "
               "(soit %.2f bps par 24 h en moyenne)"
               % (heures, heures / 24.0, gain_horizon, horizon_h / 24.0,

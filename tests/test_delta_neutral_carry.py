@@ -294,3 +294,46 @@ def test_the_verdict_never_claims_a_real_execution():
     d = v.as_dict()
     assert d["real_execution"] is False
     assert "le prix s'annule" in d["structure"]
+
+
+# ------------------------------------------------ R3 : LA PORTE BASE-CONVERGENCE (19/07 soir)
+
+def test_R3_une_base_riche_ouvre_MEME_a_funding_legerement_negatif():
+    """LE SEUL PnL realise positif du ledger vient des captures de base (+0,12 $ x3).
+    Avant : base 20 bps + funding -0,2 -> refuse (on jetait la strategie qui GAGNE).
+    Desormais : la base paie l'aller-retour a elle seule -> on entre pour la convergence."""
+    v = evaluer_carry_neutre(coin="BASE_RICHE", funding_bps_h=-0.2, base_bps=20.0,
+                             liquidite_spot_usd=100_000.0, **RISQUE_SURVIVABLE)
+    assert v.viable is True
+    assert v.motif == "CARRY_BASE_CONVERGENCE_VIABLE"      # attribution distincte (P1 ops)
+    assert v.cout_entree_bps < 0, "base > frais : l'entree est PAYEE par la base"
+    assert v.gain_net_horizon_bps is not None and v.gain_net_horizon_bps > 0
+
+
+def test_R3_l_hemorragie_de_funding_reste_un_refus():
+    """-1 bps/h = -24 bps/jour de loyer : la capture serait mangee avant de converger."""
+    v = evaluer_carry_neutre(coin="LOYER_TROP_CHER", funding_bps_h=-1.0, base_bps=20.0,
+                             liquidite_spot_usd=100_000.0, **RISQUE_SURVIVABLE)
+    assert v.viable is False and v.motif == MOTIF_FUNDING_TROP_FAIBLE
+
+
+def test_R3_une_base_presque_suffisante_ne_passe_PAS():
+    """CONTRE-EPREUVE : 10 bps < 130 % des frais (14,3) -> comportement d'avant, refus."""
+    v = evaluer_carry_neutre(coin="PRESQUE", funding_bps_h=-0.2, base_bps=10.0,
+                             liquidite_spot_usd=100_000.0, **RISQUE_SURVIVABLE)
+    assert v.viable is False and v.motif == MOTIF_FUNDING_TROP_FAIBLE
+
+
+def test_R3_funding_positif_garde_son_motif_classique():
+    """Base riche + funding positif = portage classique (la base reduit juste le cout)."""
+    v = evaluer_carry_neutre(coin="CLASSIQUE", funding_bps_h=0.125, base_bps=20.0,
+                             liquidite_spot_usd=100_000.0, **RISQUE_SURVIVABLE)
+    assert v.viable is True and v.motif == "CARRY_NEUTRE_VIABLE"
+
+
+def test_R3_les_SEUILS_ne_bougent_pas_en_douce():
+    """CLIQUET. Adoucir 1,3x ou -0,5 apres avoir vu passer une occasion ratee = overfit."""
+    from hl_observer.funding.delta_neutral_carry import (
+        FUNDING_MIN_TOLERE_BPS_H, SEUIL_BASE_SEULE_FRACTION)
+    assert SEUIL_BASE_SEULE_FRACTION == 1.3
+    assert FUNDING_MIN_TOLERE_BPS_H == -0.5     # = seuil d'hemorragie A6 (coherence des sorties)
