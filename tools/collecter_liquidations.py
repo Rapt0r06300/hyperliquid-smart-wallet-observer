@@ -57,6 +57,8 @@ URL_LEADERBOARD = "https://stats-data.hyperliquid.xyz/Mainnet/leaderboard"
 INTERVALLE_S_DEFAUT = 300.0      # 5 min : une carte de liquidation ne bouge pas à la seconde
 MAX_WALLETS_DEFAUT = 80          # borne le poids sur l'API publique (se faire couper = MOINS de données)
 PAUSE_ENTRE_WALLETS_S = 0.15     # politesse : on veut durer 3 jours, pas 3 minutes
+#: en dessous, une grappe (>= 2 wallets au MEME niveau de prix) ne se formera quasi jamais.
+MIN_WALLETS_UTILE = 20
 
 
 def _post_info(charge: dict[str, Any], *, timeout_s: float = 10.0) -> Any:
@@ -181,13 +183,26 @@ def main(argv: list[str] | None = None) -> int:
     origine = "leaderboard public"
     if not wallets:
         wallets = wallets_de_secours(root)[: args.max_wallets]
-        origine = "statut moteur (repli)"
+        origine = "statut moteur (REPLI — le leaderboard n'a pas repondu)"
     print("[liq] collecteur demarre — %d wallet(s) a observer (%s)" % (len(wallets), origine),
           flush=True)
     if not wallets:
         print("[liq] AUCUN wallet : rien a observer. On ne fabrique pas de carte -> arret.",
               flush=True)
         return 1
+    # 🔴 DIAGNOSTIC DU 19/07 : la base `liquidation_map.sqlite3` restait ABSENTE alors que le
+    # collecteur tournait « sans erreur ». Cause : `construire_carte` exige >= 2 wallets DISTINCTS
+    # sur le MEME niveau de prix (a 50 bps pres) et >= 10 000 $ — c'est le garde « un seul wallet
+    # ne fait pas un flux », et il a raison. Avec la poignee de wallets du REPLI, la probabilite
+    # que deux d'entre eux aient un prix de liquidation voisin est quasi nulle : on pouvait
+    # tourner des jours et n'ecrire JAMAIS une ligne, sans le moindre message.
+    # Un collecteur qui ne peut STRUCTURELLEMENT rien produire doit le DIRE, pas se taire.
+    if len(wallets) < MIN_WALLETS_UTILE:
+        print("[liq] ⚠️  POPULATION TROP PETITE (%d wallets). Une grappe exige >= 2 wallets "
+              "DISTINCTS au meme niveau de prix : avec si peu de comptes, on n'ecrira "
+              "probablement JAMAIS une ligne. Cause probable : le leaderboard public n'a pas "
+              "repondu (%s). Ce n'est pas une panne du collecteur, c'est un manque d'entree."
+              % (len(wallets), URL_LEADERBOARD), flush=True)
 
     total = 0
     while True:

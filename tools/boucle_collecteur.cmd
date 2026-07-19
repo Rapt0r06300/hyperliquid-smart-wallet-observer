@@ -43,5 +43,11 @@ echo. >> "%LOG%"
 echo --- passe du %date% %time% --- >> "%LOG%"
 python "%SCRIPT%" %4 %5 %6 %7 %8 %9 >> "%LOG%" 2>&1
 echo   [fin de passe, code de sortie = %errorlevel%] >> "%LOG%"
-timeout /t %INTERVALLE% /nobreak >nul
+REM PAUSE PAR `ping` ET PAS `timeout` : `timeout` exige une console interactive et echoue avec
+REM « Input redirection is not supported » des qu'on tourne en arriere-plan (start /b) ou avec
+REM stdin redirige. La boucle partirait alors en roue libre, a fond, sans pause -- un collecteur
+REM poli qui devient un marteau-pilon sur l'API publique. `ping -n N` attend N-1 secondes et
+REM ne depend d'aucune console.
+set /a "ATTENTE=%INTERVALLE%+1"
+ping -n %ATTENTE% 127.0.0.1 >nul 2>&1
 goto boucle

@@ -289,23 +289,39 @@ REM corriger (les 105 `except: pass`). Chacun ecrit donc son journal dans runtim
 REM   runtime\logs\carry-feeder.log · marks-collector.log · liq-collector.log
 REM En cas de doute : ouvre le .log, ou double-clique le .cmd correspondant pour le voir tourner.
 if not exist "%~dp0runtime\logs" mkdir "%~dp0runtime\logs" >nul 2>&1
-powershell -NoProfile -WindowStyle Hidden -Command "Start-Process -WindowStyle Hidden -FilePath 'cmd.exe' -ArgumentList '/c','\"%~dp0tools\boucle_collecteur.cmd\" carry-feeder \"%~dp0tools\ecrire_carry_spot_inputs.py\" 240'" >nul 2>&1
+REM ⚠️ `start "" /b` et PAS PowerShell/Start-Process. J'avais d'abord ecrit une ligne PowerShell
+REM avec trois niveaux de guillemets imbriques sur un chemin qui contient une ESPACE
+REM ("Projet invest") -- du code qui casse en silence, et un collecteur qui ne demarre jamais
+REM sans le dire, c'est exactement la maladie qu'on passe la journee a corriger.
+REM `/b` = pas de nouvelle fenetre (doc Windows), UN seul niveau de guillemets, et toute la
+REM sortie part deja dans le log depuis boucle_collecteur.cmd.
+start "" /b "%~dp0tools\boucle_collecteur.cmd" carry-feeder "%~dp0tools\ecrire_carry_spot_inputs.py" 240
 
 REM === REPLAY : collecte des MARKS (prix futur) sur TOUS les coins des candidats ===
 REM Mesure du 19/07 : 30 148 candidats sur 106 coins, mais des marks sur 2 coins seulement
 REM -> 29 %% des candidats rejouables. BTC/ETH/SOL/ZEC avaient des candidats et AUCUN prix
 REM futur : impossible de calculer leur PnL forward. Sans ce collecteur, le replay A/B ne
 REM peut juger qu'une poignee de coins. Lecture seule (/info allMids), 0 ordre.
-powershell -NoProfile -WindowStyle Hidden -Command "Start-Process -WindowStyle Hidden -FilePath 'cmd.exe' -ArgumentList '/c','\"%~dp0tools\boucle_collecteur.cmd\" marks-collector \"%~dp0tools\ecrire_marks_tous_coins.py\" 60 --une-fois'" >nul 2>&1
+start "" /b "%~dp0tools\boucle_collecteur.cmd" marks-collector "%~dp0tools\ecrire_marks_tous_coins.py" 60 --une-fois
 
 REM === LIQUIDATIONS : sans ce collecteur, la mesure #3 est impossible A JAMAIS ===
 REM Constat du 19/07 : "snapshots": 0 -> AUCUN_HISTORIQUE_LA_MESURE_EST_IMPOSSIBLE. Le message
 REM conseillait d'attendre plus longtemps -- mauvais conseil : RIEN n'ecrivait ces donnees
 REM (enregistrer_grappes n'etait appele que par mainnet_readonly_observer, hors boucle live).
 REM 3 endpoints PUBLICS en lecture, modules existants, 0 ordre.
-powershell -NoProfile -WindowStyle Hidden -Command "Start-Process -WindowStyle Hidden -FilePath 'cmd.exe' -ArgumentList '/c','\"%~dp0tools\boucle_collecteur.cmd\" liq-collector \"%~dp0tools\collecter_liquidations.py\" 300 --une-fois'" >nul 2>&1
-echo   [collecteurs] carry-feeder, marks et liquidations tournent en arriere-plan (sans fenetre).
-echo   [collecteurs] journaux : runtime\logs\carry-feeder.log ^| marks-collector.log ^| liq-collector.log
+start "" /b "%~dp0tools\boucle_collecteur.cmd" liq-collector "%~dp0tools\collecter_liquidations.py" 300 --une-fois
+
+REM AUTO-VERIFICATION : un collecteur cache qui ne demarre pas ne se voit PAS. On attend qu'il
+REM ecrive son log (il l'ecrit des la 1re ligne) et on DIT si l'un des trois manque a l'appel.
+ping -n 6 127.0.0.1 >nul 2>&1
+for %%C in (carry-feeder marks-collector liq-collector) do (
+  if exist "%~dp0runtime\logs\%%C.log" (
+    echo   [collecteurs] %%C ......... demarre
+  ) else (
+    echo   [collecteurs] %%C ......... !! N'A PAS DEMARRE -- voir runtime\logs\
+  )
+)
+echo   [collecteurs] sans fenetre. Journaux : runtime\logs\  ^|  arret : ARRETER-COLLECTEURS.cmd
 
 powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0tools\start_hypersmart_simulation.ps1" -Port 8794 -IntervalSeconds 15 -MaxLeaders 50 -Interactive
 
