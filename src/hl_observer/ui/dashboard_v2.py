@@ -259,7 +259,7 @@ th{letter-spacing:1.2px}
    <div class="st"><div class="k">Winrate</div><div class="v" id="wr">…</div></div>
    <div class="st"><div class="k">Positions <span class="hint" id="pos-bd"></span></div><div class="v" id="pos">…</div></div>
    <div class="st"><div class="k">Trades clos</div><div class="v" id="trd">…</div></div>
-   <div class="st"><div class="k">Marge · levier x10</div><div class="v" id="expo">…</div></div>
+   <div class="st"><div class="k">Marge engagée (toutes stratégies)</div><div class="v" id="expo">…</div></div>
    <div class="st"><div class="k">Profit factor</div><div class="v" id="pf">…</div></div>
  </div>
 
@@ -367,14 +367,21 @@ function tick(){
     document.getElementById('eq').textContent=n(eq);
     var base=window._base||(eq-pnl)||1000;var chg=base>0?(pnl/base*100):0;
     var C=document.getElementById('chg');C.textContent=(chg>=0?'+':'')+n(chg,2)+'%';C.style.color=col(chg);
-    document.getElementById('wr').textContent=n(d.winrate_pct,0)+'%';
+    // 🔴 19/07 — « 0 % » AVEC ZÉRO TRADE FERMÉ EST UN MENSONGE : ça se lit « on perd tout »,
+    // alors que la vérité est « on n'a rien mesuré ». Un tableau de bord honnête dit « — ».
+    window._copyCloses=(d.closed_trades||0);
+    document.getElementById('wr').textContent=(d.closed_trades||0)>0?(n(d.winrate_pct,0)+'%'):'—';
     window._copyPos=(d.open_positions||0);window._copyReal=Number(d.realized_pnl_usdt||0);
     window._copyNet=Number(d.net_pnl_usdt||0);window._copyEq=Number(d.equity_usdt||0);if(window.syncTop)syncTop();
-    document.getElementById('trd').textContent=(d.closed_trades||0);
-    document.getElementById('expo').textContent=n((d.open_exposure_usdt||0)/10);
+    window._copyExpo=Number(d.open_exposure_usdt||0);
     var rp=Number(d.realized_pnl_usdt||0),ps=(d.positions||[]);
-    // profit factor approx = gains/pertes réalisés si dispo, sinon —
-    var pf=d.paper_ledger&&d.paper_ledger.profit_factor;document.getElementById('pf').textContent=(pf!=null?n(pf,2):(rp>=0?'≥1':'<1'));
+    // 🔴 « PROFIT FACTOR ≥1 » avec ZÉRO trade fermé, c'est un chiffre RASSURANT SORTI DE RIEN.
+    // `rp>=0` est vrai quand rp vaut 0 -> on affichait « ≥1 » (donc « rentable ») sans avoir
+    // clôturé un seul trade. Un profit factor n'existe pas tant qu'il n'y a pas de trades.
+    var pf=d.paper_ledger&&d.paper_ledger.profit_factor;
+    var closTot=(d.closed_trades||0)+(window._carryCloses||0);
+    document.getElementById('pf').textContent=(pf!=null?n(pf,2):(closTot>0?(rp>=0?'≥1':'<1'):'—'));
+    if(window.syncTop)syncTop();
     // marks
     var eqo=d.equity||{},av=Number(eqo.market_marks_available||0),mi=Number(eqo.market_marks_missing||0),fr=document.getElementById('fresh');
     if(mi>0&&av===0){fr.textContent='⚠ '+mi+' manquants';fr.style.color='var(--red)';}else if(mi>0){fr.textContent=av+'/'+(av+mi);fr.style.color='var(--amber)';}else{fr.textContent='✓ '+av;fr.style.color='var(--green)';}
@@ -498,6 +505,16 @@ function syncTop(){
   var pr=Number(window._copyReal||0), cr=Number(window._carryReal||0);
   var copyNet=Number(window._copyNet||0), carryNet=Number(window._carryNet||0), totNet=copyNet+carryNet;
   var el=document.getElementById('pos'); if(el){el.textContent=totPos; el.title=cp+' copy + '+cy+' carry';}
+  // 🔴 19/07 (revue sur la page LIVE) — trois tuiles affichaient du COPY-ONLY sous une etiquette
+  // GLOBALE, et se contredisaient a l'ecran : « POSITIONS 1 » a cote de « 0 OUVERTES »,
+  // « MARGE 0.00 » avec une position ouverte, « TRADES CLOS 0 » alors que le carry en avait 31.
+  // Un chiffre juste sous une mauvaise etiquette reste un chiffre FAUX pour celui qui le lit.
+  var T=document.getElementById('trd');
+  if(T){var tc=(window._copyCloses||0)+(window._carryCloses||0);
+        T.textContent=tc; T.title=(window._copyCloses||0)+' copy + '+(window._carryCloses||0)+' carry';}
+  var X=document.getElementById('expo');
+  if(X){var mg=Number(window._copyExpo||0)/10+Number(window._carryMarge||0);
+        X.textContent=n(mg); X.title='marge copy + marge carry (le levier differe par strategie)';}
   var bd=document.getElementById('pos-bd'); if(bd){bd.textContent = cy>0 ? '('+cp+'c · '+cy+'y)' : '';}
   // PnL AFFICHÉ = TOTAL toutes stratégies (copy + carry) — demande de Flo. Equity = equity copy + net carry.
   var P=document.getElementById('pnl'); if(P){P.textContent=(totNet>=0?'+':'')+n(totNet); P.className='pnl-big '+(totNet>=0?'pnl-pos':'pnl-neg');}
@@ -519,12 +536,15 @@ function loadCarry(){fetch('/v2/carry').then(function(r){return r.json()}).then(
   var tb=document.getElementById('carrytb');if(!tb)return;
   document.getElementById('carry-pos').textContent=(d.positions_ouvertes||0);
   window._carryPos=(d.positions_ouvertes||0);window._carryReal=Number(d.realized_net_pnl_usdc||0);
-  window._carryNet=Number(d.realized_net_pnl_usdc||0)+Number(d.funding_accru_usdt||0);if(window.syncTop)syncTop();
+  window._carryNet=Number(d.realized_net_pnl_usdc||0)+Number(d.funding_accru_usdt||0);
+  window._carryCloses=Number((d.churn&&d.churn.closes)||0);
+  window._carryMarge=(d.positions||[]).reduce(function(s,p){return s+Number(p.marge_usdt||0);},0);
+  if(window.syncTop)syncTop();
   var real=Number(d.realized_net_pnl_usdc||0),er=document.getElementById('carry-real');
   er.textContent=n(real);er.style.color=col(real);
   document.getElementById('carry-accru').textContent='$'+n(d.funding_accru_usdt,4);
   var ps=d.positions||[];
-  tb.innerHTML=ps.map(function(p){return '<tr><td><b>'+p.coin+'</b></td><td>$'+n(p.notional_usdt,0)+'</td><td>'+n(p.levier,0)+'x</td><td style="color:var(--cyan)">$'+n(p.funding_accrued_usdt,4)+'</td><td style="text-align:right">'+n(p.age_h,1)+'h</td></tr>';}).join('')||'<tr><td colspan="5" style="color:var(--mut2)">— aucune position carry ouverte —</td></tr>';
+  tb.innerHTML=ps.map(function(p){return '<tr><td><b>'+p.coin+'</b></td><td>$'+n(p.notional_usdt,0)+'</td><td>'+n(p.levier,1)+'x</td><td style="color:var(--cyan)">$'+n(p.funding_accrued_usdt,4)+'</td><td style="text-align:right">'+n(p.age_h,1)+'h</td></tr>';}).join('')||'<tr><td colspan="5" style="color:var(--mut2)">— aucune position carry ouverte —</td></tr>';
   var v=d.viables||[];
   // ── #24-27 : LE CHURN DOIT ÊTRE VISIBLE. Le 19/07, le bot a fait 32 ouvertures et 31
   // fermetures du MÊME coin en 22,3 h ; le dashboard n'affichait qu'un PnL « qui ne bouge pas ».
@@ -657,6 +677,7 @@ def create_dashboard_v2_router() -> APIRouter:
                 positions.append({
                     "coin": coin,
                     "notional_usdt": float(p.get("notional_usdt") or 0.0),
+                    "marge_usdt": float(p.get("marge_usdt") or 0.0),
                     "levier": float(p.get("levier") or 0.0),
                     "funding_accrued_usdt": float(p.get("funding_accrued_usdt") or 0.0),
                     "age_h": round((now - float(p.get("entry_ts_ms") or now)) / 3.6e6, 2),
