@@ -28,6 +28,11 @@ def _isolate_persisted_store(monkeypatch):
         "hl_observer.runtime.equity_history_store.read_equity_points",
         lambda max=600: [],
     )
+    # 19/07 — MÊME PIÈGE, DEUXIÈME FOIS. La courbe d'equity inclut désormais le net CARRY (elle
+    # affichait 1 000,00 plat pendant que le bandeau disait -5,00 : deux vérités pour un seul
+    # PnL). Sans cette isolation, le vrai PnL carry du runtime entrait dans le test et le
+    # décalait. Un test qui lit l'état live ne teste pas, il constate.
+    monkeypatch.setattr("hl_observer.ui.dashboard_v2.net_carry_courant", lambda root=None: 0.0)
 
 
 def test_equity_history_endpoint_reads_state(monkeypatch):

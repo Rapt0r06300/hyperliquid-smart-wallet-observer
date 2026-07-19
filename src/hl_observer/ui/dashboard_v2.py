@@ -235,6 +235,7 @@ th{letter-spacing:1.2px}
      <div>
        <div class="pnl-big pnl-pos" id="pnl">+0.00</div>
        <div class="pnl-sub">PnL net <span id="pnl-unit">USDC</span> · equity <span id="eq" class="num">…</span> · <span id="chg" class="num">+0.00%</span> · <span id="mode">live</span><span id="carry-sub" style="color:var(--cyan)"></span></div>
+       <div id="pannes" style="display:none;margin-top:6px;color:#f88;font-size:12px"></div>
      </div>
      <div class="hero-hl">EQUITY // <span id="mg-span">…</span><br><b id="mg-hi"></b><br><span id="mg-lo"></span></div>
    </div>
@@ -353,7 +354,7 @@ function drawMeta(pts){var W=1000,H=210,PAD=14;if(!pts.length)return;
   window._base=base;}
 function loadMeta(){fetch('/v2/equity_history?max=600').then(function(r){return r.json()}).then(function(d){
   var pts=(d.points||[]).map(function(p){return {t:Number(p.t),equity:Number(p.equity),pnl:Number(p.pnl)}}).filter(function(p){return p.equity>0});
-  if(pts.length)drawMeta(pts);}).catch(function(){});}
+  if(pts.length)drawMeta(pts);}).catch(function(e){signalerPanne('equity',e);});}
 function modeOf(p){var m=(p.position_mode||'').toUpperCase();
   return (m.indexOf('FUNDING')>=0||m.indexOf('ARBITRAGE')>=0||m.indexOf('TRIANGULAR')>=0||m.indexOf('DELTA')>=0||m.indexOf('EXTERNAL_GITHUB')>=0)?'GRINDER':'SNIPER';}
 function led(id,st){var e=document.getElementById(id);e.className='led'+(st==='ok'?'':st==='warn'?' warn':' off');}
@@ -471,6 +472,25 @@ function buildTicker(){var t=document.getElementById('tick');if(!t)return;
  seg+='READ-ONLY PAPER<span class="s">·</span>0 ORDRE REEL<span class="s">·</span>';
  t.innerHTML=seg+seg;}
 setInterval(buildTicker,3000);setTimeout(buildTicker,400);
+// ── 🔴 PANNES VISIBLES (19/07). Chaque fetch finissait par un catch VIDE : une erreur serveur
+// etait AVALEE, le panneau restait fige sur « … » pour toujours, et de l'exterieur ca ressemblait
+// a « l'UI bugue ». Un dashboard qui ne sait pas dire qu'il est casse est pire qu'un dashboard
+// casse. Desormais toute panne s'affiche, avec l'heure et le motif.
+var _pannes={};
+function signalerPanne(nom,e){
+  _pannes[nom]={t:new Date().toLocaleTimeString(),msg:(e&&e.message)?e.message:String(e)};
+  rendrePannes();
+}
+function signalerOK(nom){ if(_pannes[nom]){delete _pannes[nom];rendrePannes();} }
+function rendrePannes(){
+  var z=document.getElementById('pannes'); if(!z)return;
+  var k=Object.keys(_pannes);
+  if(!k.length){z.style.display='none';z.textContent='';return;}
+  z.style.display='block';
+  z.textContent='⚠️ panneau(x) en panne : '+k.map(function(n){
+    return n+' ('+_pannes[n].t+' — '+_pannes[n].msg+')';}).join('  ·  ');
+}
+
 // ── UNE SEULE VERITE en haut : POSITIONS = copy + carry (avec le detail), sans melanger l'equity.
 // Les deux loaders (statut copy / carry) stockent leur compte et appellent syncTop -> pas de clignotement.
 function syncTop(){
@@ -522,9 +542,31 @@ function loadCarry(){fetch('/v2/carry').then(function(r){return r.json()}).then(
     (v.length?('viables mesurés : '+v.map(function(x){return x.coin+' ('+n(x.funding_bps_h,3)+'b/h)';}).join('  ·  ')):'aucun coin viable ce tick')
     +(ligneChurn?('<br><span style="color:'+(ch.churn_detecte?'var(--red,#f88)':'var(--mut)')+'">'+ligneChurn+'</span>'):'')
     +(revenu?('<br><span style="color:var(--mut)">'+revenu+'</span>'):'');
-}).catch(function(){});}
+  signalerOK('carry');
+}).catch(function(e){signalerPanne('carry',e);});}
 setInterval(loadCarry,4000);setTimeout(loadCarry,600);
 </script></body></html>"""
+
+
+def net_carry_courant(root: "Path | str | None" = None) -> float:
+    """Le net carry (réalisé + funding accru), ou 0.0 si illisible. Jamais une invention.
+
+    AU NIVEAU MODULE, et pas dans une closure : un endpoint qui lit une racine codée en dur est
+    INTESTABLE — l'état live fuite dans les tests (c'est exactement ce qu'un test a attrapé le
+    19/07 : la courbe de test se retrouvait décalée du vrai PnL carry). Ici, `root` est
+    injectable, et les tests peuvent remplacer cette fonction.
+    """
+    try:
+        from pathlib import Path as _P
+
+        from hl_observer.funding.carry_positions_store import charger_gestionnaire, etat_carry
+        racine = _P(root) if root is not None else _P(__file__).resolve().parents[3]
+        e = etat_carry(racine)
+        accru = sum(float(p.get("funding_accrued_usdt") or 0.0)
+                    for p in charger_gestionnaire(racine).ouvertes.values())
+        return float(e.get("realized_net_pnl_usdc") or 0.0) + accru
+    except Exception:  # noqa: BLE001 — un carry illisible ne casse jamais la courbe
+        return 0.0
 
 
 def create_dashboard_v2_router() -> APIRouter:
@@ -533,6 +575,31 @@ def create_dashboard_v2_router() -> APIRouter:
     @router.get("/v2", response_class=HTMLResponse)
     def dashboard_v2() -> HTMLResponse:
         return HTMLResponse(_PAGE)
+
+    def _avec_carry(points: list) -> list:
+        """Applique le net carry COURANT au dernier point. On ne rétro-projette PAS sur le passé :
+        le carry n'a pas d'historique horodaté, et réécrire l'histoire serait fabriquer une courbe."""
+        # DÉFENSE EN PROFONDEUR : `net_carry_courant` capture déjà ses erreurs, mais si un jour
+        # elle en laisse passer une, la COURBE ne doit pas disparaître pour autant. Un panneau
+        # secondaire ne fait jamais tomber le principal.
+        try:
+            net = net_carry_courant()
+        except Exception:  # noqa: BLE001
+            return points
+        if not points or not net:
+            return points
+        sortie = list(points)
+        dernier = dict(sortie[-1]) if isinstance(sortie[-1], dict) else None
+        if dernier is None:
+            return points
+        try:
+            dernier["equity"] = round(float(dernier.get("equity") or 0.0) + net, 6)
+            dernier["pnl"] = round(float(dernier.get("pnl") or 0.0) + net, 6)
+            dernier["carry_net_usdc"] = round(net, 6)
+        except (TypeError, ValueError):
+            return points
+        sortie[-1] = dernier
+        return sortie
 
     @router.get("/v2/equity_history")
     def equity_history(request: Request, max: int = 600) -> JSONResponse:
@@ -543,7 +610,16 @@ def create_dashboard_v2_router() -> APIRouter:
         except Exception:
             persisted = []
         if persisted:
-            return JSONResponse({"count": len(persisted), "points": persisted, "read_only": True})
+            # 🔴 INCOHERENCE CORRIGEE LE 2026-07-19 : la COURBE etait plate a 1 000,00 pendant que
+            # le bandeau affichait -5,00. Cause : l'historique d'equity ne connait QUE la pile
+            # copy ; le PnL du carry n'y entrait jamais. Deux nombres pour une seule verite ->
+            # exactement ce que CLAUDE.md interdit (« dashboard, audit, logs convergent sur le
+            # meme ledger »). On y ajoute donc le net carry, en le DECLARANT (`inclut_carry`).
+            # Le carry n'a pas d'historique horodate : on applique son net COURANT au dernier
+            # point, sans retro-projeter sur le passe (ce serait reecrire l'histoire).
+            return JSONResponse({"count": len(persisted),
+                                 "points": _avec_carry(persisted),
+                                 "inclut_carry": True, "read_only": True})
         state = getattr(request.app.state, "ui_state", None)
         raw = list(getattr(state, "simulation_equity_history", None) or [])
         if max and len(raw) > max:
@@ -558,7 +634,8 @@ def create_dashboard_v2_router() -> APIRouter:
                 })
             except Exception:
                 continue
-        return JSONResponse({"count": len(points), "points": points, "read_only": True})
+        return JSONResponse({"count": len(points), "points": _avec_carry(points),
+                             "inclut_carry": True, "read_only": True})
 
     @router.get("/v2/carry")
     def carry_state() -> JSONResponse:
