@@ -127,7 +127,16 @@ class SignalCandidate(BaseModel):
     wallet_score: float = 0.0
     signal_score: float = 0.0
     edge_remaining_bps: float = 0.0
-    estimated_fee_bps: float = 0.0
+    # 🔴 CORRIGE LE 2026-07-14 — un COUT absent n'est pas un cout NUL.
+    #
+    # AVANT : `estimated_fee_bps: float = 0.0`. Un candidat mal rempli arrivait au noyau avec
+    # **ZERO frais**. Combine au plancher de 0 du `local_engine`, un edge de +0,01 bps entrait.
+    #
+    # ***Le deny-by-default protege les ORDRES ; il ne protegeait pas les CHIFFRES.***
+    # (Meme famille que le garde-fou AFFAME et le voyant soude au vert.)
+    #
+    # Defaut = aller-retour taker reel (2 x 4,5 bps), source unique #543.
+    estimated_fee_bps: float = 9.0
     estimated_spread_bps: float = 0.0
     estimated_slippage_bps: float = 0.0
     estimated_latency_decay_bps: float = 0.0

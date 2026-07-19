@@ -11,6 +11,7 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Request
 from fastapi.responses import HTMLResponse, JSONResponse
+from hl_observer.ops.echec_silencieux import noter as _noter_echec
 
 CANONICAL_STATUS_FIELDS = (
     "net_pnl_usdt", "equity_usdt", "winrate_pct", "open_positions", "open_exposure_usdt",
@@ -692,7 +693,7 @@ def create_dashboard_v2_router() -> APIRouter:
                                         "base_bps": x.get("base_bps"),
                                         "liquidite_spot_usd": x.get("liquidite_spot_usd")})
             except (OSError, ValueError):
-                pass
+                _noter_echec("hl_observer/ui/dashboard_v2.py:695")
             # #24-27 — LE CHURN, RENDU LISIBLE. Il a fallu lire le ledger à la main pour voir
             # 32 ouvertures / 31 fermetures sur 22,3 h. Plus jamais : le symptôme s'affiche.
             churn = {}
@@ -729,7 +730,7 @@ def create_dashboard_v2_router() -> APIRouter:
                     h = heures_pour_amortir(cout_entree_bps=cout, funding_bps_h=f_courant)
                     heures_amorti = None if h == float("inf") else round(h, 1)
             except Exception:  # noqa: BLE001
-                pass
+                _noter_echec("hl_observer/ui/dashboard_v2.py:732")
             return JSONResponse({
                 "churn": churn, "revenu_jour_usd": revenu_jour, "heures_amorti": heures_amorti,
                 "positions_ouvertes": etat["positions_ouvertes"],

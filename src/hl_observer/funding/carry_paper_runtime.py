@@ -30,6 +30,7 @@ from typing import Any
 
 from hl_observer.funding.delta_neutral_carry import evaluer_carry_neutre
 from hl_observer.runtime.session_identity import session_courante
+from hl_observer.ops.echec_silencieux import noter as _noter_echec
 
 ENV_ENABLED = "HYPERSMART_CARRY_HYPE_PAPER"
 ENV_ETAPE2 = "HYPERSMART_CARRY_ETAPE2"   # opt-in : ouvrir REELLEMENT la position paper (etape 2)
@@ -163,7 +164,7 @@ def evaluer_et_journaliser(root: str | Path = ".", *, now_ms: int | None = None,
         if _mids:
             _mk(str(root), _mids, ts_s=now / 1000.0)
     except Exception:  # noqa: BLE001 — un firehose qui échoue ne casse jamais la décision
-        pass
+        _noter_echec("hl_observer/funding/carry_paper_runtime.py:166")
 
     etape2 = None
     if etape2_active():
@@ -214,7 +215,7 @@ def evaluer_et_journaliser(root: str | Path = ".", *, now_ms: int | None = None,
         with path.open("a", encoding="utf-8") as fh:
             fh.write(json.dumps(ligne, ensure_ascii=False) + "\n")
     except OSError:
-        pass  # un journal qui echoue ne casse pas la boucle; la decision est retournee quand meme
+        _noter_echec("hl_observer/funding/carry_paper_runtime.py:217")
     return ligne
 
 

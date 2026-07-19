@@ -10,6 +10,7 @@ from hl_observer.paper_trading.paper_engine import PaperDecisionResult, PaperEng
 from hl_observer.position_lifecycle.reconstructor import LifecycleAction
 from hl_observer.signals.distilled_opportunity_detector import DistilledOpportunity
 from hl_observer.signals.leader_delta import LeaderDelta
+from hl_observer.ops.echec_silencieux import noter as _noter_echec
 
 
 @dataclass(frozen=True, slots=True)
@@ -116,7 +117,7 @@ def run_copy_votes_through_paper_engine(
 
         _cu.note_coin(str(conflict.coin or ""))
     except Exception:
-        pass                          # jamais bloquant : un registre casse ne doit pas ouvrir
+        _noter_echec("hl_observer/paper_trading/fusion_paper_engine_adapter.py:119")
 
     max_signal_age_ms = _env_int("HYPERSMART_SIMULATION_MAX_SIGNAL_AGE_MS", 15_000)
     signal_age_ms = max(0, int(observed_at_ms) - int(latest_vote_ms))
@@ -141,7 +142,7 @@ def run_copy_votes_through_paper_engine(
 
                 _lj.enregistrer(_trace.stamp("gates"), _lj.ISSUE_REFUSE, ",".join(_motifs))
             except Exception:
-                pass                      # un journal casse ne doit JAMAIS bloquer un refus
+                _noter_echec("hl_observer/paper_trading/fusion_paper_engine_adapter.py:144")
             return FusionPaperEngineSummary(
                 decisions=(),
                 accepted_count=0,
@@ -268,7 +269,7 @@ def run_copy_votes_through_paper_engine(
             _motif if not _accepte else "",
         )
     except Exception:
-        pass                              # jamais bloquant
+        _noter_echec("hl_observer/paper_trading/fusion_paper_engine_adapter.py:271")
 
     equity, _, drawdown = engine.mark_to_market({conflict.coin or "UNKNOWN": float(market_price)})
     return FusionPaperEngineSummary(
@@ -426,7 +427,7 @@ def _live_book_costs(coin: str) -> tuple[float, float, bool]:
         if lc is not None:
             return float(lc[0]), float(lc[1]), True
     except Exception:
-        pass
+        _noter_echec("hl_observer/paper_trading/fusion_paper_engine_adapter.py:429")
     return (
         _env_float("HYPERSMART_FUSION_COPY_SPREAD_BPS", 6.0),
         _env_float("HYPERSMART_FUSION_COPY_SLIPPAGE_BPS", 6.0),

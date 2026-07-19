@@ -21,6 +21,7 @@ from hl_observer.backtesting.anti_overfit_gate import evaluer as _anti_overfit
 from hl_observer.backtesting.purged_split import purged_temporal_split
 from hl_observer.backtesting.scenario_grid import generate
 from hl_observer.paper_trading.sl_tp import SLTPConfig
+from hl_observer.ops.echec_silencieux import noter as _noter_echec
 
 CONTEXT = "REPLAY"
 DEFAULT_NOTIONAL_USD = 500.0  # notre position reelle = marge $50 x levier 10
@@ -244,7 +245,7 @@ def _score_all(scenarios, train, marks, min_trades, jobs, notional):
                 pairs = list(ex.map(_eval_worker, scenarios, chunksize=64))
             return [(sc, rep) for sc, rep in pairs if (rep["trades"] or 0) >= min_trades]
         except Exception:
-            pass
+            _noter_echec("hl_observer/backtesting/scenario_search.py:247")
     out = []
     for sc in scenarios:
         rep = report_from_trades(eval_trades(sc, train, marks, notional))
@@ -475,7 +476,7 @@ def search_over_db(candidates, mark_rows, db_path, *, sample=None, batch=50000,
                     if _os.path.exists(str(stop_file)):
                         return True
                 except Exception:
-                    pass
+                    _noter_echec("hl_observer/backtesting/scenario_search.py:478")
             return False
 
         if parallel:

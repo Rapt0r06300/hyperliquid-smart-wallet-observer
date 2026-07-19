@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from hl_observer.ops.echec_silencieux import noter as _noter_echec
 
 
 class RuntimeState:
@@ -29,7 +30,7 @@ class RuntimeState:
             try:
                 self._path.write_text(json.dumps(self._state, sort_keys=True), encoding="utf-8")
             except OSError:
-                pass
+                _noter_echec("hl_observer/storage/runtime_state.py:32")
 
     def snapshot(self) -> dict:
         return dict(self._state)

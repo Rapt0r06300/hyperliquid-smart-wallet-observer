@@ -44,6 +44,7 @@ from hl_observer.ui.simulation_log_export import export_simulation_diagnostics
 from hl_observer.ui.state import UiState
 from hl_observer.ui.v12_status_provider import build_v12_status_payload
 from hl_observer.utils.time import now_ms
+from hl_observer.ops.echec_silencieux import noter as _noter_echec
 
 
 ENGINE_STATUS_FILENAME = "hypersmart_engine_status.json"
@@ -187,13 +188,13 @@ def create_status_router(state: UiState, settings: Settings | None = None) -> AP
                 try:
                     persist_simulation_state(settings, state)
                 except OSError:
-                    pass
+                    _noter_echec("hl_observer/ui/status_routes.py:190")
         else:
             if (sltp_report["closed_count"] or quality_exit_report["closed_count"]) and settings is not None:
                 try:
                     persist_simulation_state(settings, state)
                 except OSError:
-                    pass
+                    _noter_echec("hl_observer/ui/status_routes.py:196")
         external_bridge = build_external_github_bridge_payload()
         paper_ledger = _paper_ledger_projection_from_status_state(
             state=state,
@@ -362,7 +363,7 @@ def _engine_status_path(settings: Settings | None) -> Path:
         try:
             return simulation_state_path(settings).parent / ENGINE_STATUS_FILENAME
         except Exception:  # noqa: BLE001 - status endpoint must never fail on path resolution.
-            pass
+            _noter_echec("hl_observer/ui/status_routes.py:365")
     return Path("runtime") / "data" / ENGINE_STATUS_FILENAME
 
 
@@ -1797,7 +1798,7 @@ def _append_fast_equity_point(
                 try:
                     persist_simulation_state(settings, state)
                 except OSError:
-                    pass
+                    _noter_echec("hl_observer/ui/status_routes.py:1800")
             return
         if 0 <= current_ms - last_ts < FAST_STATUS_PERSIST_MIN_MS and last_source != "SESSION_START":
             point["timestamp_ms"] = current_ms
@@ -1808,7 +1809,7 @@ def _append_fast_equity_point(
                 try:
                     persist_simulation_state(settings, state)
                 except OSError:
-                    pass
+                    _noter_echec("hl_observer/ui/status_routes.py:1811")
             return
     history.append(point)
     history[:] = history[-5_000:]

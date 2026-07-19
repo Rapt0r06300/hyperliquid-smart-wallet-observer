@@ -9,6 +9,7 @@ import glob
 import os
 import shutil
 import time
+from hl_observer.ops.echec_silencieux import noter as _noter_echec
 
 # ============================================================================================
 # 🔴🔴 LE CTRL-C QUE PERSONNE N'A TAPE : `os.kill(pid, 0)` (trouve le 2026-07-13, #600)
@@ -132,14 +133,14 @@ def rotate_logs(directory: str, *, max_bytes: int = 10_000_000, keep: int = 5) -
                 open(p, "w").close()          # on recrée un fichier vide
                 archived.append(dest)
         except OSError:
-            pass
+            _noter_echec("hl_observer/backtesting/runtime_guards.py:135")
     files = sorted(glob.glob(os.path.join(arch, "*")), key=os.path.getmtime)
     if len(files) > keep:
         for old in files[:-keep]:
             try:
                 os.remove(old)
             except OSError:
-                pass
+                _noter_echec("hl_observer/backtesting/runtime_guards.py:142")
     return archived
 
 

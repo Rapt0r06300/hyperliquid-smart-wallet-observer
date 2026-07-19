@@ -302,6 +302,7 @@ from hyper_smart_observer.copy_mode.preflight import (
 )
 from hyper_smart_observer.dashboard.exporter import export_dashboard as export_hypersmart_dashboard
 from hyper_smart_observer.runtime.archive import create_clean_archive
+from hl_observer.ops.echec_silencieux import noter as _noter_echec
 
 app = typer.Typer(
     name="hl_observer",
@@ -728,7 +729,7 @@ def live_user_fills_stream(
         try:
             rows = _apply_leader_quality_gate(session, rows, limit=max_leaders)
         except Exception:
-            pass
+            _noter_echec("hl_observer/cli.py:731")
         wallets = [r.wallet_address for r in rows[: max_leaders] if getattr(r, "wallet_address", None)]
     if not wallets:
         typer.echo("live_user_fills_stream=no_leaders_available")

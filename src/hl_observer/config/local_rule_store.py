@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from hl_observer.ops.echec_silencieux import noter as _noter_echec
 
 
 class LocalRuleStore:
@@ -35,7 +36,7 @@ class LocalRuleStore:
         try:
             self._path.write_text(json.dumps(self._rules, sort_keys=True, indent=2), encoding="utf-8")
         except OSError:
-            pass
+            _noter_echec("hl_observer/config/local_rule_store.py:38")
 
 
 __all__ = ["LocalRuleStore"]

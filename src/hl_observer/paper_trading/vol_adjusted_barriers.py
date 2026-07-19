@@ -25,6 +25,7 @@ from dataclasses import replace
 
 from hl_observer.paper_trading.sl_tp import SLTPConfig
 from hl_observer.paper_trading.sltp_runtime import apply_sltp_exits
+from hl_observer.ops.echec_silencieux import noter as _noter_echec
 
 MASTER_FLAG = "HYPERSMART_V26_VOL_BARRIERS"
 REF_RANGE_ENV = "HYPERSMART_V26_VOL_REF_RANGE_BPS"      # range "normal" de référence
@@ -278,7 +279,7 @@ def apply_sltp_exits_vol_adjusted(
             ledger_len_before=ledger_len_before, env=env, paper_mode=paper_mode,
         )
     except Exception:  # le pipeline ne casse jamais les exits
-        pass
+        _noter_echec("hl_observer/paper_trading/vol_adjusted_barriers.py:281")
     return closed
 
 

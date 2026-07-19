@@ -15,6 +15,7 @@ from __future__ import annotations
 import json
 import os
 from pathlib import Path
+from hl_observer.ops.echec_silencieux import noter as _noter_echec
 
 FILE_NAME = "equity_history.jsonl"
 DEFAULT_MAX_POINTS = 12_000          # ~48h à un point / 15 s ; fichier < 1 Mo
@@ -54,9 +55,9 @@ def append_equity_point(
                 lines = p.read_text(encoding="utf-8").splitlines()[-int(max_points):]
                 p.write_text("\n".join(lines) + "\n", encoding="utf-8")
         except Exception:
-            pass
+            _noter_echec("hl_observer/runtime/equity_history_store.py:57")
     except Exception:
-        pass
+        _noter_echec("hl_observer/runtime/equity_history_store.py:59")
 
 
 def read_equity_points(*, max: int = 600, runtime_data_dir: str | Path | None = None) -> list[dict]:

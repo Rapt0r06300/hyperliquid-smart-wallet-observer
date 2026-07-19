@@ -13,6 +13,7 @@ import glob
 import json
 import os
 import time
+from hl_observer.ops.echec_silencieux import noter as _noter_echec
 
 
 def _path(base: str, stream: str) -> str:
@@ -44,7 +45,7 @@ def record(base: str, stream: str, obj: dict, *, max_bytes: int = 50_000_000) ->
         if os.path.exists(path) and os.path.getsize(path) > max_bytes:
             _cap(path, max_bytes)
     except OSError:
-        pass
+        _noter_echec("hl_observer/collection/research_recorder.py:47")
     row = dict(obj)
     row.setdefault("_ts", time.time())
     with open(path, "a", encoding="utf-8") as f:
@@ -56,7 +57,7 @@ def record(base: str, stream: str, obj: dict, *, max_bytes: int = 50_000_000) ->
         if os.path.getsize(path) > max_bytes:
             _cap(path, max_bytes)
     except OSError:
-        pass
+        _noter_echec("hl_observer/collection/research_recorder.py:59")
     return path
 
 
@@ -72,7 +73,7 @@ def read_stream(base: str, stream: str) -> list:
                         try:
                             out.append(json.loads(line))
                         except json.JSONDecodeError:
-                            pass
+                            _noter_echec("hl_observer/collection/research_recorder.py:75")
         except OSError:
-            pass
+            _noter_echec("hl_observer/collection/research_recorder.py:77")
     return out

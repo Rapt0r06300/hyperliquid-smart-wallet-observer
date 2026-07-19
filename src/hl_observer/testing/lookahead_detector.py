@@ -221,4 +221,55 @@ def lit_le_futur(fonction, serie: Sequence[float], *, i: int | None = None) -> b
     # `list("abc")` -> ['a','b','c'] -> je comparais des CARACTERES.
     # Evidemment que le hash d'une serie tronquee differe : c'est le but d'un hash.
     #
-    # *Un outil qui accuse a tort est un outil qu'on cesse d'ecouter.* On
+    # *Un outil qui accuse a tort est un outil qu'on cesse d'ecouter.* On exige donc :
+    #   * une sortie qui est une SEQUENCE (pas une chaine, pas un scalaire) ;
+    #   * de MEME LONGUEUR que l'entree (une serie temporelle -> une serie temporelle) ;
+    #   * dont les elements sont NUMERIQUES.
+    # Tout le reste n'est **pas testable** par ce test -- et on le DIT, on ne l'accuse pas.
+    for sortie, entree in ((complet, serie), (tronque, serie[: i + 1])):
+        if isinstance(sortie, (str, bytes)) or not isinstance(sortie, (list, tuple)):
+            raise TypeError(
+                "sortie non testable : ce test ne vaut que pour `serie -> serie` "
+                "(recu %s). **Non teste != innocent.**" % type(sortie).__name__
+            )
+        if len(sortie) != len(entree):
+            raise TypeError(
+                "sortie non alignee sur l'entree (%d vs %d) : non testable par le differentiel"
+                % (len(sortie), len(entree))
+            )
+        if sortie and not all(isinstance(x, (int, float)) and not isinstance(x, bool)
+                              for x in sortie):
+            raise TypeError("sortie non numerique : non testable par le differentiel")
+
+    complet, tronque = list(complet), list(tronque)
+    a, b = complet[i], tronque[i]
+    if a == b:
+        return False
+    # tolerance numerique : un ecart infime n'est pas du lookahead, c'est du flottant
+    ecart = abs(float(a) - float(b))
+    echelle = max(abs(float(a)), abs(float(b)), 1e-12)
+    return (ecart / echelle) > 1e-9
+
+
+def resume(suspicions: Sequence[Suspicion]) -> dict[str, Any]:
+    par_fichier: dict[str, int] = {}
+    for s in suspicions:
+        par_fichier[s.fichier] = par_fichier.get(s.fichier, 0) + 1
+    return {
+        "n_suspicions": len(suspicions),
+        "n_fichiers": len(par_fichier),
+        "par_fichier": dict(sorted(par_fichier.items(), key=lambda kv: -kv[1])),
+        "avertissement": (
+            "⚠️ **SIGNALEMENTS, PAS PREUVES.** Un agregat global peut etre legitime (rapport "
+            "post-backtest). Seul le test DIFFERENTIEL (`lit_le_futur`) prouve. "
+            "*Un signalement AST dit « regarde ici » ; un test differentiel dit « c'est faux ».*"
+        ),
+        "real_execution": False,
+    }
+
+
+__all__ = [
+    "AGREGATS_GLOBAUX", "FENETRES_SAINES", "INDICES_DE_SERIE",
+    "MOTIF_AGREGAT_GLOBAL", "MOTIF_SLICE_FUTUR", "Suspicion",
+    "analyser_fichiers", "analyser_source", "lit_le_futur", "resume",
+]

@@ -23,6 +23,7 @@ from hl_observer.strategies.strategy_mode import (
     mode_of_position,
 )
 from hl_observer.ui.state import UiState
+from hl_observer.ops.echec_silencieux import noter as _noter_echec
 
 # BUG CORRIGE (audit 2026-07-11) -- CHEMIN A/B MORT.
 # La liste ne contenait que ("ext_", "copy_"). Elle datait d'une epoque ou TOUTES les strategies
@@ -909,7 +910,7 @@ def _portfolio_open_refusal(
             # config), mais la raison remonte au journal, au dashboard et a l'audit.
             state.derniere_alerte_interrupteurs = _si.get("alerte", "")  # type: ignore[attr-defined]
     except Exception:                                        # noqa: BLE001
-        pass
+        _noter_echec("hl_observer/ui/fusion_persistent_adapter.py:912")
 
     max_positions = _env_int("HYPERSMART_MAX_OPEN_POSITIONS", 12)
     if max_positions > 0 and len(positions) >= max_positions:
@@ -955,7 +956,7 @@ def _portfolio_open_refusal(
         if _dir:
             return _dir
     except Exception:
-        pass
+        _noter_echec("hl_observer/ui/fusion_persistent_adapter.py:958")
 
     # BUDGET DE RISQUE **PAR MOTEUR** (2026-07-11). Le garde-fou de session existant raisonne sur
     # UN SEUL PnL : si le Sniper perd 40 $, le Grinder est puni aussi -- alors que son mecanisme
@@ -975,7 +976,7 @@ def _portfolio_open_refusal(
             if _budget:
                 return _budget
     except Exception:
-        pass                                  # jamais bloquant : un garde-fou ne casse pas la boucle
+        _noter_echec("hl_observer/ui/fusion_persistent_adapter.py:978")
 
     # T3b (2026-07-12) — CORRELATION DE GROUPE. Le garde-fou directionnel ci-dessus plafonne le
     # NET total et la concentration PAR COIN. Il traite donc BTC-long et ETH-long comme DEUX paris
@@ -1018,7 +1019,7 @@ def _portfolio_open_refusal(
                 if _corr:
                     return _corr
     except Exception:
-        pass
+        _noter_echec("hl_observer/ui/fusion_persistent_adapter.py:1021")
 
     # T3b (2026-07-12) — ANTI-SURTRADING. `max_positions` (plus haut) plafonne les positions
     # SIMULTANEES ; rien ne plafonnait le nombre de trades PAR JOUR. Le firehose V27 est concu
@@ -1050,7 +1051,7 @@ def _portfolio_open_refusal(
             if not _ok:
                 return f"TRADE_BUDGET_{_why}"
     except Exception:
-        pass
+        _noter_echec("hl_observer/ui/fusion_persistent_adapter.py:1053")
 
     # T3c (2026-07-12) — LE GARDE-FOU QUI AURAIT EMPECHE LE BUG DES -64 $.
     #
@@ -1086,7 +1087,7 @@ def _portfolio_open_refusal(
                         f"_tp{_tp:.0f}_sl{_sl:.0f}_cost{_cout:.0f})"
                     )
     except Exception:
-        pass
+        _noter_echec("hl_observer/ui/fusion_persistent_adapter.py:1089")
 
     return ""
 

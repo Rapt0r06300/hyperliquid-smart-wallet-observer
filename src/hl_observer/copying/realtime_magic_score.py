@@ -9,6 +9,7 @@ from hl_observer.simulation.live_filters import (
     DEFAULT_SIMULATION_MIN_LIQUIDITY_SCORE,
     DEFAULT_SIMULATION_SINGLE_WALLET_MIN_EDGE_BPS,
 )
+from hl_observer.ops.echec_silencieux import noter as _noter_echec
 
 
 @dataclass(slots=True)
@@ -237,7 +238,7 @@ def score_realtime_copy_candidate(
             spread_bps_used, slippage_bps_used = _lc
             warnings.append("LIVE_BOOK_COSTS_USED")
     except Exception:
-        pass
+        _noter_echec("hl_observer/copying/realtime_magic_score.py:240")
     delay_cost_bps = min(cfg.max_latency_cost_bps, max(0, inputs.signal_age_ms) / 60_000.0 * cfg.latency_cost_bps_per_minute)
     copy_degradation_bps = (
         delay_cost_bps
@@ -301,7 +302,7 @@ def score_realtime_copy_candidate(
             simulated_notional = min(cfg.max_position_notional_usdt * _lev_k, max(0.0, simulated_notional * _km))
             warnings.append("KELLY_LEADER_MULT_%.2f" % _km)
     except Exception:
-        pass
+        _noter_echec("hl_observer/copying/realtime_magic_score.py:304")
     if simulated_notional <= 0:
         reasons.append("MAX_EXPOSURE_REACHED")
 
@@ -359,7 +360,7 @@ def score_realtime_copy_candidate(
             )
         )
     except Exception:  # pragma: no cover — le moteur ne doit jamais casser sur un veto
-        pass
+        _noter_echec("hl_observer/copying/realtime_magic_score.py:362")
 
     deduped_reasons = sorted(set(reasons))
     decision = "REJECT_NO_TRADE" if deduped_reasons else "ACCEPT_LOCAL_SIMULATION"

@@ -19,6 +19,7 @@ import json
 import os
 import threading
 import time
+from hl_observer.ops.echec_silencieux import noter as _noter_echec
 
 CONSUME_FLAG = "HYPERSMART_V26_LIVE_BOOK_COSTS"
 POLLER_FLAG = "HYPERSMART_V26_BOOK_POLLER"
@@ -196,7 +197,7 @@ def poll_once(coins: list[str], *, opener=None, env: dict | None = None) -> int:
                     _base = str(e.get("HYPERSMART_V26_RECORD_PATH", "") or "runtime/replay")
                     _mr.record_l2(_base, coin, json.loads(raw.decode("utf-8")))
             except Exception:
-                pass
+                _noter_echec("hl_observer/collection/l2_snapshot_cache.py:199")
             n += 1
         except Exception:
             continue
@@ -220,7 +221,7 @@ def _tous_les_marches() -> list[str]:
         if callable(coins):
             return sorted({str(c).upper() for c in (coins() or []) if c})
     except Exception:
-        pass
+        _noter_echec("hl_observer/collection/l2_snapshot_cache.py:223")
     return []
 
 
@@ -301,7 +302,7 @@ def _loop(interval_s: float) -> None:  # pragma: no cover — boucle démon runt
             if coins:
                 poll_once(coins)
         except Exception:
-            pass
+            _noter_echec("hl_observer/collection/l2_snapshot_cache.py:304")
         time.sleep(max(10.0, interval_s))
 
 

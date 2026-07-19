@@ -20,6 +20,7 @@ from sqlalchemy.orm import Session
 
 from hl_observer.storage.models import MarketSnapshot, PositionDeltaModel, TopWallet
 from hl_observer.utils.time import now_ms
+from hl_observer.ops.echec_silencieux import noter as _noter_echec
 
 
 ENTRY_ACTIONS = {"OPEN_LONG", "OPEN_SHORT", "ADD", "INCREASE", "ADD_LONG", "ADD_SHORT", "INCREASE_LONG", "INCREASE_SHORT"}
@@ -577,7 +578,7 @@ def _build_funding_rows(coins) -> list:
         from hl_observer.funding.funding_poller import ensure_started as _ensure_funding_poller
         _ensure_funding_poller(None)
     except Exception:
-        pass
+        _noter_echec("hl_observer/runtime/fusion_heartbeat_input.py:580")
 
     # AUDIT 2026-07-12 -- LE MEME TROU, SUR L'AUTRE POLLER.
     # Le 2026-07-08 on a corrige ce bug pour le funding (commentaire ci-dessus) et on a laisse le
@@ -591,7 +592,7 @@ def _build_funding_rows(coins) -> list:
         from hl_observer.collection.l2_snapshot_cache import ensure_started as _ensure_book_poller
         _ensure_book_poller(None)
     except Exception:
-        pass
+        _noter_echec("hl_observer/runtime/fusion_heartbeat_input.py:594")
 
     try:
         from hl_observer.funding.funding_runtime_cache import recent_rates

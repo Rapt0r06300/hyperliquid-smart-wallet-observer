@@ -28,6 +28,7 @@ from collections import deque
 from dataclasses import dataclass
 
 from hl_observer.funding.spike_detector import detect_funding_spike
+from hl_observer.ops.echec_silencieux import noter as _noter_echec
 
 MASTER_FLAG = "HYPERSMART_V26_ENTRY_VETOS_AUTHORITATIVE"
 FUNDING_SUBFLAG = "HYPERSMART_V26_FUNDING_VETO"
@@ -181,7 +182,7 @@ def _record_candidate(snapshot: dict, env: dict | None) -> None:
             append_replay_lines(base, "candidates.jsonl", [row],
                                 max_bytes=CANDIDATES_MAX_BYTES, max_lines=CANDIDATES_MAX_LINES)
     except Exception:
-        pass  # l'observation ne casse jamais le moteur
+        _noter_echec("hl_observer/signals/v26_entry_vetos.py:184")
 
 
 # ---------------------------------------------------------------------------
@@ -230,7 +231,7 @@ def apply_v26_entry_vetos(
                 coin, range_bps=rng, liquidity_score=liquidity_score, env=env
             )
         except Exception:
-            pass
+            _noter_echec("hl_observer/signals/v26_entry_vetos.py:233")
     if candidate_snapshot:
         _record_candidate(candidate_snapshot, env)
 
@@ -247,7 +248,7 @@ def apply_v26_entry_vetos(
                 # AMBER : bloque seulement les entrées (pattern « moins de risque »)
                 reasons.append(fx.reason_code)
     except Exception:
-        pass
+        _noter_echec("hl_observer/signals/v26_entry_vetos.py:250")
 
     # L5 — protections fenêtrées (ledger)
     if coin_known:
@@ -260,7 +261,7 @@ def apply_v26_entry_vetos(
                 if v.blocked and v.reason:
                     reasons.append(v.reason)
         except Exception:
-            pass
+            _noter_echec("hl_observer/signals/v26_entry_vetos.py:263")
 
     # L8 — univers top-K forager
     if coin_known:
@@ -274,7 +275,7 @@ def apply_v26_entry_vetos(
             if mq_flag_on(env) and DEFAULT_MARKET_QUALITY_BOOK.allowed(coin, env) is False:
                 reasons.append(REASON_MQ)
         except Exception:
-            pass
+            _noter_echec("hl_observer/signals/v26_entry_vetos.py:277")
 
     # L7 — budget de coûts par tier de leader
     try:
@@ -288,7 +289,7 @@ def apply_v26_entry_vetos(
             if code:
                 reasons.append(code)
     except Exception:
-        pass
+        _noter_echec("hl_observer/signals/v26_entry_vetos.py:291")
 
     # L1 — vetos funding sain + edge stable (flag maître historique)
     if _flag(MASTER_FLAG, False, env) and coin_known:
@@ -297,13 +298,13 @@ def apply_v26_entry_vetos(
 
             _poller_start(env)
         except Exception:
-            pass
+            _noter_echec("hl_observer/signals/v26_entry_vetos.py:300")
         try:
             from hl_observer.collection.l2_snapshot_cache import ensure_started as _book_start
 
             _book_start(env)
         except Exception:
-            pass
+            _noter_echec("hl_observer/signals/v26_entry_vetos.py:306")
         if _flag(TREND_SUBFLAG, True, env):
             t = rec.trend(coin, side, lookback=trend_lookback, threshold_bps=trend_threshold_bps)
             if t == "decreasing":

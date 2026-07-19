@@ -13,6 +13,7 @@ from hl_observer.config.settings import Settings
 from hl_observer.storage.repositories import CollectionRepository
 from hl_observer.utils.time import now_ms
 from hl_observer.wallets.position_delta_engine import build_position_delta_from_fill
+from hl_observer.ops.echec_silencieux import noter as _noter_echec
 
 
 @dataclass(slots=True)
@@ -364,7 +365,7 @@ async def stream_user_fills_ws(
                     # Une fermeture qui pend ne doit pas geler non plus.
                     await asyncio.wait_for(cm.__aexit__(None, None, None), timeout=5.0)
                 except Exception:  # noqa: BLE001
-                    pass
+                    _noter_echec("hl_observer/wallets/user_fills_live.py:367")
         except Exception as exc:  # noqa: BLE001 - reconnect on any transport error
             stats.warnings.append(f"ws error: {exc}")
         if _stopped():

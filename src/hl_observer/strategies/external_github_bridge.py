@@ -15,6 +15,7 @@ from typing import Any
 
 from hl_observer.strategies.models import StrategyDefinition, StrategyKind, make_strategy
 from hl_observer.strategies.paper_registry import PaperStrategyRegistry
+from hl_observer.ops.echec_silencieux import noter as _noter_echec
 
 REPO_ROOT_RELATIVE = Path("runtime") / "research" / "github_repos_v24"
 MANIFEST_NAME = "EXTERNAL_REPOS_MANIFEST.json"
@@ -713,7 +714,7 @@ def external_repo_manifest_candidates(project_root: Path | None = None) -> tuple
     try:
         candidates.extend(root.glob("EXTERNAL_REPOS_MANIFEST_*.json"))
     except OSError:
-        pass
+        _noter_echec("hl_observer/strategies/external_github_bridge.py:716")
     return tuple(
         sorted(
             {path for path in candidates if path.exists()},

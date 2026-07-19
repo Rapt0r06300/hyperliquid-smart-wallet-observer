@@ -7,6 +7,7 @@ from typing import Any
 
 from hl_observer.config.settings import Settings
 from hl_observer.decision_engine import noyau_unique as noyau
+from hl_observer.risk.session_gate import etat_session_courant   # #292b — les 11 gates V19
 from hl_observer.hyperliquid.schemas import SignalCandidate
 from hl_observer.risk.gates import RiskContext
 from hl_observer.risk.risk_engine import RiskEngine
@@ -210,10 +211,35 @@ class LocalDecisionEngine:
             consensus_wallets=None,
             niveaux_achat=None,
             niveaux_vente=None,
-            frais_bps=float(candidate.estimated_fee_bps),
+            # ═════════════════════════════════════════════════════════════════════════════════
+            # 🔴🔴 CORRIGE LE 2026-07-14 — LE CHEMIN D'ENTREE LIVE PASSAIT UN PLANCHER DE **ZERO**.
+            #
+            # AVANT : `plancher_edge_net_bps=0.0` -- **explicitement**, dans le chemin LIVE.
+            #         Un edge net de **+0,01 bps** franchissait la porte.
+            #         Et CLAUDE.md dit : « plancher net par defaut **30 bps** ».
+            #
+            # 🚩 Trois planchers coexistaient : **0,0** (ici, le LIVE) · 8,0 (margin_of_safety)
+            #    · 30,0 (edge_calculator, qui n'a AUCUN appelant).
+            #    ***La maladie des « 6 fichiers, 4 valeurs » -- mais sur le CHEMIN DE DECISION.***
+            #
+            # 🔴 Et les frais : si `estimated_fee_bps` n'est pas rempli, le schema le met a **0,0**.
+            #    On ne fait plus confiance : sous le cout d'un aller-retour taker, **on prend le
+            #    vrai cout**. *Un cout absent n'est pas un cout nul.*
+            # ═════════════════════════════════════════════════════════════════════════════════
+            frais_bps=max(float(candidate.estimated_fee_bps),
+                          noyau.FRAIS_ALLER_RETOUR_TAKER_BPS),
             degradation_copie_bps=float(candidate.estimated_latency_decay_bps),
-            plancher_edge_net_bps=0.0,
+            plancher_edge_net_bps=noyau.PLANCHER_NET_BPS,      # 30,0 -- PLUS JAMAIS zero
             edge_fourni_bps=float(candidate.edge_remaining_bps),
+            # 🔴 #292b — LE DISJONCTEUR DE SESSION (les 11 gates V19).
+            #
+            # ***Ils ne servaient qu'a EXPLIQUER la perte apres coup*** (seul appelant :
+            # `analysis/negative_pnl_auditor.py`). Ils passent desormais **AVANT** la porte.
+            #
+            # L'etat vient du LEDGER -- la source unique du PnL (regle du projet).
+            # Si le ledger n'est pas branche, `etat_session_courant()` rend `None`, et le noyau
+            # **SIGNALE** au lieu de faire semblant. *Un etat absent n'est pas un etat sain.*
+            etat_session=etat_session_courant(),
         )
 
     @staticmethod

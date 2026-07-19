@@ -337,6 +337,43 @@ ZONES = [
         mots_cles_reouverture=("positif", "informatif"),
         source="src/hl_observer/backtesting/horizon_curve.py",
     ),
+    # ═════════════════════════════════════════════════════════════════════════════════════════
+    # 2026-07-14 — #370 / X-09 : LE MEMPOOL. **Je l'avais appelee « la seule voie de
+    # reouverture du copy-trading ». Elle est morte, et par NOS PROPRES CHIFFRES.**
+    # ═════════════════════════════════════════════════════════════════════════════════════════
+    creer_zone_morte(
+        id="MEMPOOL_VOIR_L_ORDRE_AVANT_EXECUTION",
+        hypothese=(
+            "Voir l'ordre du leader dans le mempool (AVANT son execution) nous donnerait "
+            "l'avance qui manque au copy-trading."
+        ),
+        verdict=(
+            "NON. Q1->Q3 a mesure que **le prix court CONTRE le leader de -7,75 bps AVANT son "
+            "fill**, puis plus rien. Voir son ordre PLUS TOT nous placerait donc **plus "
+            "PROFONDEMENT dans le mouvement adverse**, pas devant lui. "
+            "Et la courbe edge/horizon est **PLATE** (-3,74 bps a 500 ms, idem a 8 h)."
+        ),
+        mesure="edge net du signal du leader, mesure AVANT son fill",
+        valeur=-7.75, unite="bps",
+        echantillon=24_133,
+        entree_mesuree="fill_public_leader",
+        date="2026-07-14",
+        lecon=(
+            "***Le leader est CONTRARIEN. C'est un probleme de CONTENU, pas de VITESSE.*** "
+            "Etre plus rapide sur un signal vide ne le remplit pas. Le mempool ne changerait "
+            "que le MOMENT ou on lit une information qui n'existe pas. "
+            "*J'ai appele cette piste « la seule voie de reouverture » sans faire le calcul : "
+            "il tenait dans les chiffres qu'on avait deja.*"
+        ),
+        condition_de_reouverture=(
+            "un signal PRE-EXECUTION dont l'entree est DIFFERENTE du fill du leader -- par "
+            "exemple les DEPOTS on-chain (X-01) ou les LIQUIDATIONS forcees (#530), qui ne "
+            "sont pas des choix d'un trader mais des contraintes mecaniques"
+        ),
+        mots_cles=("mempool", "frontrun", "front", "pending", "prealable", "anticiper"),
+        mots_cles_reouverture=("depot", "liquidation", "force", "contrainte"),
+        source="src/hl_observer/backtesting/horizon_curve.py",
+    ),
 ]
 
 

@@ -18,6 +18,7 @@ from hl_observer.hyperliquid.schemas import (
     OrderStatusKind,
     REJECTED_ORDER_STATUSES,
 )
+from hl_observer.ops.echec_silencieux import noter as _noter_echec
 
 MAX_USER_FILLS_PAGE_SIZE = 2000
 READ_ONLY_INFO_TYPES = {
@@ -45,12 +46,33 @@ READ_ONLY_INFO_TYPES = {
     # Les deux sont /info, sans wallet, sans signature. Ils ne peuvent RIEN executer.
     "fundingHistory",
     "predictedFundings",
+    # 🔴 2026-07-14 — LA VRAIE LISTE DES MARCHES SPOT. **Je la SUPPOSAIS ({HYPE, PURR}).**
+    # Le carry EXIGE une jambe spot : sans elle, on est short le perp A NU (pari directionnel).
+    # `spotMeta` est /info, public, sans wallet, sans signature. **On demande au lieu de deviner.**
+    "spotMeta",
+    "spotMetaAndAssetCtxs",
     # --- 2026-07-13 : #517 -- les marches HIP-3 (perps deployes par des builders) ---
     # `perpDexs` liste les dex ; `meta` accepte un champ `dex`. Les coins s'y nomment `{dex}:{coin}`
     # (doc : for-developers/api/asset-ids). C'est la SEULE reouverture legitime du market making :
     # le « growth mode » divise les frais par 10. -> market/hip3_markets.py
     # /info, sans wallet, sans signature. Ne peut RIEN executer.
     "perpDexs",
+    # ═══════════════════════════════════════════════════════════════════════════════════════════
+    # 🎯 2026-07-14 — `vaultDetails` : **LE BENCHMARK QUI JUGE TOUT.**
+    #
+    # J'ai ecrit dans `tools/tous_les_leviers.py` : « HLP rapporte 10 a 30 % APR ».
+    #     ***C'est un chiffre que j'ai SUPPOSE.*** C'est exactement le peche que ce projet
+    #     punit depuis deux jours : DEVINER au lieu de DEMANDER.
+    #     (3e fois : `candleSnapshot(startTime)`, `fundingHistory`, la liste des spot.)
+    #
+    # Or le benchmark decide de TOUT : si notre carry rend 5 % et que HLP rend 15 %, alors
+    # **toute notre complexite est dominee par un virement.** Un benchmark suppose peut donc
+    # faire passer un perdant pour un gagnant -- ou l'inverse.
+    #
+    # `vaultDetails` est /info, public, sans wallet, sans signature. Il ne peut RIEN executer.
+    # -> src/hl_observer/market/hlp_vault.py (qui etait PUR et sans donnee : encore un chainon)
+    # ═══════════════════════════════════════════════════════════════════════════════════════════
+    "vaultDetails",
 }
 
 
@@ -300,7 +322,7 @@ class HyperliquidInfoClient:
         try:
             recorder.record_rest(request_type=request_type, response=response, ok=ok, error=error)
         except Exception:
-            pass
+            _noter_echec("hl_observer/hyperliquid/rest_info_client.py:324")
 
     async def all_mids(self) -> dict[str, str]:
         data = await self._post_info("allMids")
@@ -482,6 +504,41 @@ class HyperliquidInfoClient:
         data = await self._post_info("predictedFundings")
         if not isinstance(data, list):
             raise HyperliquidInfoError("predictedFundings returned a non-list payload")
+        return data
+
+    async def spot_meta(self) -> dict[str, Any]:
+        """Les marches SPOT de HL : `tokens` (jetons) et `universe` (les PAIRES).
+
+        🔑 **La distinction qui compte** : `l2Book` ne prend pas un nom de jeton, il prend le
+        nom de la **PAIRE** (`PURR/USDC`, ou `@107`). Le mapping jeton -> paire se **CONSTRUIT**
+        depuis `universe[].tokens` -- *on ne le devine pas* (c'est deja ce qui m'a fait supposer
+        que seuls HYPE et PURR avaient du spot : il y en a **8**).
+
+        /info, public, lecture seule. **Aucun ordre. Aucune signature.**
+        """
+        data = await self._post_info("spotMeta")
+        if not isinstance(data, dict):
+            raise HyperliquidInfoError("spotMeta returned a non-object payload")
+        return data
+
+    async def vault_details(self, vault_address: str) -> dict[str, Any]:
+        """🎯 **LE BENCHMARK.** Le vault HLP -- *le market maker officiel de Hyperliquid.*
+
+        Son rendement est **le PnL du market making sur HL, en argent reel, mesure par le
+        protocole lui-meme.** C'est donc a la fois :
+
+          * un **test direct de T1b** (fait par quelqu'un d'autre, avec du vrai argent) ;
+          * et surtout **LE BENCHMARK QUI JUGE TOUT** : *si notre carry ne bat pas un depot
+            passif dans HLP, toute notre complexite est dominee par un virement.*
+
+        🚩 Un HLP gagnant ne REFUTE PAS T1b : HLP **encaisse une part des frais du protocole**
+        et **EST le liquidateur**. *Le MM marche -- pour celui qui est PAYE pour le faire.*
+
+        /info, public, lecture seule. **Aucun depot. Aucun ordre. Aucune signature.**
+        """
+        data = await self._post_info("vaultDetails", {"vaultAddress": str(vault_address)})
+        if not isinstance(data, dict):
+            raise HyperliquidInfoError("vaultDetails returned a non-object payload")
         return data
 
     async def candle_snapshot(

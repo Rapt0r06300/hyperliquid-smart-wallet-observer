@@ -14,6 +14,7 @@ import json
 from dataclasses import dataclass, field
 
 from hl_observer.markets.universe import is_exotic_market
+from hl_observer.ops.echec_silencieux import noter as _noter_echec
 
 
 ENTRY_ACTIONS = {"OPEN_LONG", "OPEN_SHORT", "ADD", "INCREASE"}
@@ -134,7 +135,7 @@ def load_ledger_rows(path: str) -> list[dict]:
                 try:
                     rows.append(json.loads(line))
                 except Exception:
-                    pass
+                    _noter_echec("hl_observer/backtest/ledger_replay_v9.py:137")
     return rows
 
 

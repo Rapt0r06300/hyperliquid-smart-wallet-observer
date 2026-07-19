@@ -17,6 +17,7 @@ import json
 import os
 import threading
 import time
+from hl_observer.ops.echec_silencieux import noter as _noter_echec
 
 DEFAULT_INFO_URL = "https://api.hyperliquid.xyz/info"
 POLLER_FLAG = "HYPERSMART_V26_FUNDING_POLLER"
@@ -92,7 +93,7 @@ def poll_once(*, url: str | None = None, timeout_s: float = 10.0, opener=None) -
                 _base = str(os.environ.get("HYPERSMART_V26_RECORD_PATH", "") or "runtime/replay")
                 _mr.record_funding_snapshot(_base, payload)
         except Exception:
-            pass
+            _noter_echec("hl_observer/funding/funding_poller.py:95")
         pairs = parse_meta_and_asset_ctxs(payload)
         if not pairs:
             return 0

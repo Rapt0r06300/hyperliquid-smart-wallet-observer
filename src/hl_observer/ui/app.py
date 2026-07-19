@@ -15,6 +15,7 @@ from hl_observer.ui.routes import create_router
 from hl_observer.ui.state import UiState
 from hl_observer.ui.status_routes import create_status_router
 from hl_observer.ui.dashboard_v2 import create_dashboard_v2_router
+from hl_observer.ops.echec_silencieux import noter as _noter_echec
 
 
 SMOOTH_METAGRAPH_SCRIPT = '<script src="/static/metagraph_smooth_v2.js?v=simulation-ui-20260615-smooth-metagraph-v3"></script>'
@@ -55,7 +56,7 @@ def create_ui_app(settings: Settings | None = None, state: UiState | None = None
                 html = template_path.read_text(encoding="utf-8")
                 return HTMLResponse(_inject_smooth_metagraph_script(html))
             except OSError:
-                pass
+                _noter_echec("hl_observer/ui/app.py:58")
         return await call_next(request)
 
     app.state.ui_settings = settings

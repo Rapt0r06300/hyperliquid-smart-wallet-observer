@@ -11,6 +11,7 @@ from __future__ import annotations
 
 from collections import Counter, defaultdict
 from typing import Any, Iterable
+from hl_observer.ops.echec_silencieux import noter as _noter_echec
 
 REFUSAL_STATUSES = {"REJECT_NO_TRADE"}
 REFUSAL_ACTION_TYPES = {"NO_TRADE"}
@@ -44,7 +45,7 @@ def build_live_refusal_breakdown(
         try:
             notional_refused[reason] += abs(float(event.get("leader_notional_usdc") or 0.0))
         except (TypeError, ValueError):
-            pass
+            _noter_echec("hl_observer/ui/refusal_live.py:47")
         total += 1
     rows = [
         {

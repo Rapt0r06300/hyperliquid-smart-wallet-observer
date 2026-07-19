@@ -16,6 +16,7 @@ import json
 import os
 from pathlib import Path
 from typing import Any, Iterable
+from hl_observer.ops.echec_silencieux import noter as _noter_echec
 
 # caps genereux (fenetres de replay larges) mais BORNES — loin des 29 Go du 1er crash.
 MARKS_MAX_BYTES = 60_000_000        # ~60 Mo par fichier process
@@ -58,7 +59,7 @@ def _cap_atomic(p: Path, max_bytes: int, max_lines: int) -> None:
         tmp.write_text("\n".join(lines) + "\n", encoding="utf-8")
         os.replace(str(tmp), str(p))  # atomique : un lecteur ne voit jamais un fichier partiel
     except Exception:
-        pass
+        _noter_echec("hl_observer/runtime/replay_recorder.py:61")
 
 
 def append_replay_lines(base: str | Path, filename: str, rows: Iterable[Any], *,
@@ -79,7 +80,7 @@ def append_replay_lines(base: str | Path, filename: str, rows: Iterable[Any], *,
         if written:
             _cap_atomic(p, max_bytes, max_lines)
     except Exception:
-        pass
+        _noter_echec("hl_observer/runtime/replay_recorder.py:82")
     return written
 
 
@@ -97,14 +98,14 @@ def iter_replay_files(base: str | Path, filename: str, *, include_archive: bool 
     try:
         out.extend(sorted(b.glob(f"{stem}.*.{ext}")))
     except Exception:
-        pass
+        _noter_echec("hl_observer/runtime/replay_recorder.py:100")
     if include_archive:
         try:
             arch = b / _ARCHIVE_DIRNAME
             out.extend(sorted(arch.glob(f"**/{stem}.*.{ext}")))
             out.extend(sorted(arch.glob(f"**/{filename}")))
         except Exception:
-            pass
+            _noter_echec("hl_observer/runtime/replay_recorder.py:107")
     return out
 
 
@@ -124,7 +125,7 @@ def archive_previous_run(base: str | Path) -> dict:
         try:
             tops.extend(b.glob(f"{stem}.*.jsonl"))       # fichiers par-process
         except Exception:
-            pass
+            _noter_echec("hl_observer/runtime/replay_recorder.py:127")
         legacy = b / f"{stem}.jsonl"
         if legacy.exists():
             tops.append(legacy)
@@ -142,7 +143,7 @@ def archive_previous_run(base: str | Path) -> dict:
             except Exception:
                 continue
     except Exception:
-        pass
+        _noter_echec("hl_observer/runtime/replay_recorder.py:145")
     return {"moved": moved, "dest": str(dest)}
 
 
@@ -183,7 +184,7 @@ def merge_replay(base: str | Path, out_dir: str | Path | None = None) -> dict:
                 for r in rows:
                     fh.write(json.dumps(r, ensure_ascii=False) + "\n")
         except Exception:
-            pass
+            _noter_echec("hl_observer/runtime/replay_recorder.py:186")
         counts[name] = len(rows)
     return {"out": str(out), "counts": counts}
 

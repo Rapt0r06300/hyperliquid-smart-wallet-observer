@@ -15,6 +15,7 @@ Paper-only : tout événement produit est un close simulé du ledger, jamais un 
 from __future__ import annotations
 
 from typing import Any
+from hl_observer.ops.echec_silencieux import noter as _noter_echec
 
 
 def run_v26_exit_pipeline(
@@ -54,7 +55,7 @@ def run_v26_exit_pipeline(
             append_replay_lines(base, "marks.jsonl", _rows,
                                 max_bytes=MARKS_MAX_BYTES, max_lines=MARKS_MAX_LINES)
     except Exception:
-        pass
+        _noter_echec("hl_observer/paper_trading/v26_exit_pipeline.py:57")
 
     # 1) Observation : ingérer les closes AJOUTÉS pendant cette passe (jamais deux fois).
     try:
@@ -78,9 +79,9 @@ def run_v26_exit_pipeline(
                 for coin, pnl in pnl_by_coin.items():
                     DEFAULT_MARKET_QUALITY_BOOK.observe(coin, market_pnl_usd=pnl, env=env)
             except Exception:
-                pass
+                _noter_echec("hl_observer/paper_trading/v26_exit_pipeline.py:81")
     except Exception:
-        pass
+        _noter_echec("hl_observer/paper_trading/v26_exit_pipeline.py:83")
 
     # 2) Halt gradué (L4) : update + RED => sorties forcées paper (une seule fois par épisode).
     try:
@@ -99,7 +100,7 @@ def run_v26_exit_pipeline(
                 DEFAULT_GRADED_HALT.mark_forced_exit_done()
                 summary["actions"].extend(forced)
     except Exception:
-        pass
+        _noter_echec("hl_observer/paper_trading/v26_exit_pipeline.py:102")
 
     # 3) Auto-unstuck (L3) sur les positions restantes.
     try:
@@ -111,7 +112,7 @@ def run_v26_exit_pipeline(
         )
         summary["actions"].extend(acts)
     except Exception:
-        pass
+        _noter_echec("hl_observer/paper_trading/v26_exit_pipeline.py:114")
 
     return summary
 

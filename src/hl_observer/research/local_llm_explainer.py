@@ -17,6 +17,7 @@ from hl_observer.research.ollama_client import (
     generate,
     ollama_available as ollama_client_available,
 )
+from hl_observer.ops.echec_silencieux import noter as _noter_echec
 
 _REASON_FR = {
     "STALE_SIGNAL": "le signal \u00e9tait trop vieux",
@@ -53,12 +54,12 @@ def rule_based_explanation(decision: dict) -> str:
         try:
             extra.append(f"marge {float(edge):.0f} bps")
         except (TypeError, ValueError):
-            pass
+            _noter_echec("hl_observer/research/local_llm_explainer.py:56")
     if age is not None:
         try:
             extra.append(f"signal {float(age) / 1000:.0f}s")
         except (TypeError, ValueError):
-            pass
+            _noter_echec("hl_observer/research/local_llm_explainer.py:61")
     if cons is not None:
         extra.append(f"{cons} trader(s) d'accord")
     tail = f" ({', '.join(extra)})" if extra else ""

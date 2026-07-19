@@ -23,6 +23,7 @@ from typing import Any
 from hl_observer.collection.collector import WALLET_RE
 from hl_observer.config.settings import Settings
 from hl_observer.wallets.user_fills_live import StreamStats, stream_user_fills_ws
+from hl_observer.ops.echec_silencieux import noter as _noter_echec
 
 HL_MAX_WALLETS_PER_CONNECTION = 10       # limite dure Hyperliquid (userFills)
 MAX_CONNECTIONS_HARD = 8                  # plafond anti-ban : 8*10 = 80 leaders temps reel
@@ -196,7 +197,7 @@ def _run_cli(argv: list[str] | None = None) -> int:
         try:
             rows = _apply_leader_quality_gate(session, rows, limit=pool)
         except Exception:
-            pass
+            _noter_echec("hl_observer/wallets/user_fills_multiplex.py:199")
         wallets = [r.wallet_address for r in rows[:pool] if getattr(r, "wallet_address", None)]
     if not wallets:
         print("live_user_fills_multiplex=no_leaders_available")

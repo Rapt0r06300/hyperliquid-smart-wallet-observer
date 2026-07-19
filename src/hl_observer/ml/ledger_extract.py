@@ -13,6 +13,7 @@ import json
 
 from hl_observer.ml.dataset import FeatureRow, Outcome
 from hl_observer.ml.features import canonical_features
+from hl_observer.ops.echec_silencieux import noter as _noter_echec
 
 _OPEN = ("OPEN", "ENTRY", "ADD", "INCREASE")
 _CLOSE = ("CLOSE", "REDUCE", "EXIT")
@@ -136,7 +137,7 @@ def ingest_snapshot_to_samples(snapshot_path: str, samples_path: str, *, context
             if line:
                 seen.add(str(json.loads(line).get("decision_id")))
     except FileNotFoundError:
-        pass
+        _noter_echec("hl_observer/ml/ledger_extract.py:139")
     from pathlib import Path
     Path(samples_path).parent.mkdir(parents=True, exist_ok=True)
     n_new = 0

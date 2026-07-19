@@ -6,6 +6,7 @@ from typing import Any
 from hl_observer.hyperliquid.rest_info_client import HyperliquidInfoClient
 from hl_observer.market.liquidation_map import construire_carte, parser_positions, resume
 from hl_observer.testnet.models import unix_ms
+from hl_observer.ops.echec_silencieux import noter as _noter_echec
 
 
 @dataclass(frozen=True, slots=True)
@@ -106,7 +107,7 @@ class MainnetReadOnlyObserver:
                 from hl_observer.runtime.session_identity import session_courante
                 enregistrer_grappes(grappes, ts_ms=unix_ms(), session_id=session_courante())
             except Exception:  # noqa: BLE001
-                pass
+                _noter_echec("hl_observer/mainnet_readonly_observer/observer.py:109")
 
         return MainnetObservation(
             source="hyperliquid_mainnet_readonly",

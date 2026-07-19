@@ -12,6 +12,7 @@ try:  # Python 3.11+
 except ImportError:  # Python 3.10 fallback
     UTC = timezone.utc
 from typing import Iterable
+from hl_observer.ops.echec_silencieux import noter as _noter_echec
 
 
 CANONICAL_LOGS_TO_SEND_DIRNAME = "logs \u00e0 envoyer"
@@ -270,7 +271,7 @@ def _destination_for(path: Path, *, log_dir: Path, alias_dir: Path, archive_dir:
             path.relative_to(alias_dir)
             return archive_dir / "legacy_mojibake_logs_dir" / path.name
         except ValueError:
-            pass
+            _noter_echec("hl_observer/runtime/session_logs.py:273")
     if path.name.startswith("archive_") and len(path.name) > 160:
         digest = sha256(path.name.encode("utf-8", errors="replace")).hexdigest()[:16]
         suffix = path.suffix or ".log"

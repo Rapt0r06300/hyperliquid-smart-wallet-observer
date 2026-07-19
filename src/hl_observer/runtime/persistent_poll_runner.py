@@ -35,6 +35,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Callable
+from hl_observer.ops.echec_silencieux import noter as _noter_echec
 
 EXIT_STOP = 0
 EXIT_SELF_RESTART = 3
@@ -204,7 +205,7 @@ class PersistentPollRunner:
             with self.config.live_log_path.open("a", encoding="utf-8") as fh:
                 fh.write(line + "\n")
         except Exception:  # noqa: BLE001 - un log qui echoue n'arrete pas le scan
-            pass
+            _noter_echec("hl_observer/runtime/persistent_poll_runner.py:207")
 
     def stop_requested(self) -> bool:
         try:
@@ -230,7 +231,7 @@ class PersistentPollRunner:
                     if key in old_metrics:
                         self.metrics[key] = str(old_metrics[key])
             except Exception:  # noqa: BLE001 - best-effort, comme le .ps1
-                pass
+                _noter_echec("hl_observer/runtime/persistent_poll_runner.py:233")
             for metric_key, env_key in _BASE_ENV_METRICS.items():
                 value = os.environ.get(env_key)
                 if value:
@@ -271,7 +272,7 @@ class PersistentPollRunner:
                             open_positions=self.metrics.get("fusion_runtime_open_positions"),
                             runtime_data_dir=str(self.config.runtime_data_dir))
                 except Exception:
-                    pass
+                    _noter_echec("hl_observer/runtime/persistent_poll_runner.py:274")
         except Exception as exc:  # noqa: BLE001
             self.log(f"engine status write failed: {exc}")
 
@@ -330,7 +331,7 @@ class PersistentPollRunner:
                     label=label, phase=phase, exit_code=exit_code, duration_ms=duration,
                     poll_index=self.current_poll, runtime_data_dir=_rt)
         except Exception:
-            pass
+            _noter_echec("hl_observer/runtime/persistent_poll_runner.py:333")
         return StepResult(label=label, exit_code=exit_code, output=output, duration_ms=duration, failed=failed)
 
     def _spawn_ws_scan(self, label: str, argv: list[str]) -> dict[str, Any] | None:
@@ -361,7 +362,7 @@ class PersistentPollRunner:
                     proc.kill()
                     proc.wait(timeout=10)
                 except Exception:  # noqa: BLE001
-                    pass
+                    _noter_echec("hl_observer/runtime/persistent_poll_runner.py:364")
             output = ""
             try:
                 handle["file"].flush()
@@ -372,7 +373,7 @@ class PersistentPollRunner:
                     handle["file"].close()
                     os.unlink(handle["file"].name)
                 except Exception:  # noqa: BLE001
-                    pass
+                    _noter_echec("hl_observer/runtime/persistent_poll_runner.py:375")
             self._record_output(label, output)
         finally:
             self._add_step_duration(label, handle["started_ms"])
@@ -546,7 +547,7 @@ class PersistentPollRunner:
                 if not ok:
                     self.log("SESSION_CHECK FAIL: " + " | ".join(motifs))
             except Exception:  # noqa: BLE001
-                pass
+                _noter_echec("hl_observer/runtime/persistent_poll_runner.py:549")
         else:
             self.log(f"Diagnostics sautes ce poll (1 poll sur {max(1, cfg.diagnostics_every_polls)}) pour la cadence.")
 
@@ -597,7 +598,7 @@ class PersistentPollRunner:
             except Exception:  # noqa: BLE001
                 proc.kill()
         except Exception:  # noqa: BLE001
-            pass
+            _noter_echec("hl_observer/runtime/persistent_poll_runner.py:600")
 
     # -------------------------------------------------------------------- run
 
@@ -607,7 +608,7 @@ class PersistentPollRunner:
             cfg.logs_dir.mkdir(parents=True, exist_ok=True)
             cfg.runtime_data_dir.mkdir(parents=True, exist_ok=True)
         except Exception:  # noqa: BLE001
-            pass
+            _noter_echec("hl_observer/runtime/persistent_poll_runner.py:610")
         try:
             # #286: LA session. Le lanceur la pose (env); le filet runner la cree sinon.
             from hl_observer.runtime.session_identity import demarrer_session, session_courante

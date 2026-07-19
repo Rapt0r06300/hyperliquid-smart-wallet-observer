@@ -18,6 +18,7 @@ import time
 import traceback
 from pathlib import Path
 from typing import Any
+from hl_observer.ops.echec_silencieux import noter as _noter_echec
 
 _DIRNAME = "logs/detailed"
 _MAX_LINES = 20_000            # par fichier ; ~quelques Mo max par catégorie
@@ -44,7 +45,7 @@ def _cap(p: Path, max_lines: int) -> None:
             lines = p.read_text(encoding="utf-8").splitlines()[-int(max_lines):]
             p.write_text("\n".join(lines) + "\n", encoding="utf-8")
     except Exception:
-        pass
+        _noter_echec("hl_observer/runtime/detailed_logger.py:47")
 
 
 def log(cat: str, msg: str, *, sev: str = "INFO", runtime_data_dir=None, **fields: Any) -> None:
@@ -65,7 +66,7 @@ def log(cat: str, msg: str, *, sev: str = "INFO", runtime_data_dir=None, **field
             fh.write(json.dumps(row, ensure_ascii=False) + "\n")
         _cap(p, _MAX_LINES)
     except Exception:
-        pass
+        _noter_echec("hl_observer/runtime/detailed_logger.py:68")
 
 
 def log_trade(action: str, coin: str, side: str, *, net_pnl_usdc: float | None = None,

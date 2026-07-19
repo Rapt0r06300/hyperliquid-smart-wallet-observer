@@ -10,6 +10,7 @@ import hashlib
 import json
 import os
 import time
+from hl_observer.ops.echec_silencieux import noter as _noter_echec
 
 
 class ExperimentTracker:
@@ -35,9 +36,9 @@ class ExperimentTracker:
                         try:
                             out.append(json.loads(line))
                         except json.JSONDecodeError:
-                            pass
+                            _noter_echec("hl_observer/backtesting/mlops_tools.py:38")
         except OSError:
-            pass
+            _noter_echec("hl_observer/backtesting/mlops_tools.py:40")
         return out
 
     def best_run(self, metric: str, *, maximize: bool = True):
@@ -75,7 +76,7 @@ class FeatureStore:
             try:
                 out.append(int(os.path.basename(p).split(".v")[1].split(".json")[0]))
             except (IndexError, ValueError):
-                pass
+                _noter_echec("hl_observer/backtesting/mlops_tools.py:78")
         return sorted(out)
 
 

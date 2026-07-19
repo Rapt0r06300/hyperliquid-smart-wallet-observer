@@ -139,6 +139,7 @@ from hl_observer.wallets.delta_utils import (
     copy_delta_direction,
     delta_event_time_ms,
 )
+from hl_observer.ops.echec_silencieux import noter as _noter_echec
 
 
 def create_router(settings: Settings, state: UiState, bus: UiEventBus) -> APIRouter:
@@ -1157,7 +1158,7 @@ def create_router(settings: Settings, state: UiState, bus: UiEventBus) -> APIRou
                 try:
                     fees_paid += float(item.get("fee_cost_usdc") or 0.0)
                 except (TypeError, ValueError):
-                    pass
+                    _noter_echec("hl_observer/ui/routes.py:1160")
             net_pnl = simulated_equity_so_far() - float(starting_equity_usdt or 0.0)
             positive = sum(1 for value in pnl_values if value > 0.0)
             negative = sum(1 for value in pnl_values if value < 0.0)
@@ -1412,7 +1413,7 @@ def create_router(settings: Settings, state: UiState, bus: UiEventBus) -> APIRou
                     authoritative=calibrated_bool_env("HYPERSMART_V12_GATE_AUTHORITATIVE", False),
                 )
             except Exception:
-                pass
+                _noter_echec("hl_observer/ui/routes.py:1415")
             # V13 shadow wiring: dormant quant modules (whale-fill / vol-regime / ranker /
             # streak-sizing / multi-TF bias) computed in SHADOW — exposed for the dashboard
             # and ledger, NEVER decides alone (context_only). Guarded: any failure -> {} so
@@ -1446,7 +1447,7 @@ def create_router(settings: Settings, state: UiState, bus: UiEventBus) -> APIRou
                     authoritative=calibrated_bool_env("HYPERSMART_V13_MODEL_AUTHORITATIVE", False),
                 )
             except Exception:
-                pass
+                _noter_echec("hl_observer/ui/routes.py:1449")
             # V14 #168 — promote the whale-fill to a PRIMARY entry source (opt-in). When
             # HYPERSMART_V14_WHALE_PRIMARY_AUTHORITATIVE=1 a candidate the score accepts is
             # REJECTED unless a primary whale fill backs it (shadow_whale_primary). Stricter
@@ -1459,7 +1460,7 @@ def create_router(settings: Settings, state: UiState, bus: UiEventBus) -> APIRou
                     authoritative=calibrated_bool_env("HYPERSMART_V14_WHALE_PRIMARY_AUTHORITATIVE", False),
                 )
             except Exception:
-                pass
+                _noter_echec("hl_observer/ui/routes.py:1462")
             # V14 #170 — warmup guard (opt-in): block entries until HTF bars/features are ready.
             # warmup_ready is unknown in this scope (bars context not plumbed into the hot path
             # yet) -> None -> no-op (safe). When wired, set HYPERSMART_V14_WARMUP_AUTHORITATIVE=1
@@ -1472,7 +1473,7 @@ def create_router(settings: Settings, state: UiState, bus: UiEventBus) -> APIRou
                     authoritative=calibrated_bool_env("HYPERSMART_V14_WARMUP_AUTHORITATIVE", False),
                 )
             except Exception:
-                pass
+                _noter_echec("hl_observer/ui/routes.py:1475")
             # V14 #175 — hot consensus window (≈4 s hot / 15 s max): veto entries whose signal
             # is already outside the fresh window. Functional from the measured signal age.
             # Stricter intersection: can only reduce trades. None age never blocks. OFF default.
@@ -1490,7 +1491,7 @@ def create_router(settings: Settings, state: UiState, bus: UiEventBus) -> APIRou
                     authoritative=calibrated_bool_env("HYPERSMART_V14_CONSENSUS_WINDOW_AUTHORITATIVE", False),
                 )
             except Exception:
-                pass
+                _noter_echec("hl_observer/ui/routes.py:1493")
             # V14 #182/#183/#167 — exec-cost net-edge + entry-quality (smart-money + depth) +
             # liquidation shadow, computed from REAL in-scope signals (edge_remaining, liquidity,
             # notional, leader score). All flags OFF by default => shadow. Gates only reduce trades.
@@ -1515,7 +1516,7 @@ def create_router(settings: Settings, state: UiState, bus: UiEventBus) -> APIRou
                     authoritative=calibrated_bool_env("HYPERSMART_V14_EXEC_COST_AUTHORITATIVE", False),
                 )
             except Exception:
-                pass
+                _noter_echec("hl_observer/ui/routes.py:1518")
             try:
                 from hl_observer.signals.entry_quality_gate import apply_entry_quality_promotion as _v14_eq_promote
                 _min_liq = float(getattr(realtime_score_config, "min_liquidity_score", 0.0) or 0.0)
@@ -1530,7 +1531,7 @@ def create_router(settings: Settings, state: UiState, bus: UiEventBus) -> APIRou
                     authoritative=calibrated_bool_env("HYPERSMART_V14_ENTRY_QUALITY_AUTHORITATIVE", False),
                 )
             except Exception:
-                pass
+                _noter_echec("hl_observer/ui/routes.py:1533")
             try:
                 _liq = (raw_json.get("liquidation") or raw_json.get("liq")) if isinstance(raw_json, dict) else None
                 _v14b["shadow_liquidation_present"] = (bool(_liq) if _liq is not None else None)
@@ -3094,7 +3095,7 @@ def create_router(settings: Settings, state: UiState, bus: UiEventBus) -> APIRou
                     "execution": "forbidden",
                 }
             except (OSError, json.JSONDecodeError, TypeError, ValueError, IndexError):
-                pass
+                _noter_echec("hl_observer/ui/routes.py:3097")
         analysis = analyze_decision_logs_summary(log_dir)
         return {
             "source_dir": str(log_dir),
@@ -3206,7 +3207,7 @@ def create_router(settings: Settings, state: UiState, bus: UiEventBus) -> APIRou
                 try:
                     _no_trade_evidence.append({**_ntev(_code), "count": _cnt})
                 except Exception:
-                    pass
+                    _noter_echec("hl_observer/ui/routes.py:3209")
         except Exception:
             _no_trade_evidence = None
         return {
@@ -3688,7 +3689,7 @@ def create_router(settings: Settings, state: UiState, bus: UiEventBus) -> APIRou
                 for reason in row_reasons:
                     reasons[str(reason)] += 1
         except Exception:
-            pass
+            _noter_echec("hl_observer/ui/routes.py:3691")
         recorder = None
         try:
             from hl_observer.sources.shared_recorder import get_shared_recorder
@@ -3783,7 +3784,7 @@ def create_router(settings: Settings, state: UiState, bus: UiEventBus) -> APIRou
                         try:
                             _pnls.append(float(_rj.loads(_ln).get("net_pnl_usdc", 0.0)))
                         except Exception:
-                            pass
+                            _noter_echec("hl_observer/ui/routes.py:3786")
             _pos, _eq = [], None
             _snaps = _glob.glob("logs/**/simulation_snapshot_latest.json", recursive=True)
             if _snaps:
@@ -3795,7 +3796,7 @@ def create_router(settings: Settings, state: UiState, bus: UiEventBus) -> APIRou
                         _pos.append({"side": _p.get("direction") or _p.get("side"),
                                      "notional_usdt": _p.get("open_exposure_usdt") or _p.get("notional_usdt") or 0.0})
                 except Exception:
-                    pass
+                    _noter_echec("hl_observer/ui/routes.py:3798")
             panels["risk"] = build_risk_panel(recent_trade_pnls=_pnls[-200:], open_positions=_pos, equity=_eq)
         except Exception:
             panels["risk"] = None
@@ -4641,7 +4642,7 @@ def create_router(settings: Settings, state: UiState, bus: UiEventBus) -> APIRou
                     for event in db_events
                 )
         except SQLAlchemyError:
-            pass
+            _noter_echec("hl_observer/ui/routes.py:4644")
         return raw_events
 
     @router.get("/api/simple-home")

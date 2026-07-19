@@ -7,8 +7,12 @@ from typing import Any
 from hl_observer.config.settings import Settings
 from hl_observer.copying.simulation_pipeline import run_paper_simulation_decision
 from hl_observer.features.market import build_market_feature_vector
+from hl_observer.fees.hyperliquid_fees import nos_frais
 from hl_observer.hyperliquid.schemas import SignalCandidate
 from hl_observer.paper.paper_executor import PaperExecutor
+
+# La SOURCE UNIQUE de verite des frais (#543). Aller-retour taker : entree + sortie.
+_FRAIS_ALLER_RETOUR_TAKER_BPS = 2 * nos_frais("perp").taker_bps      # 9,0 bps
 
 
 @dataclass(frozen=True, slots=True)
@@ -165,7 +169,12 @@ def build_signal_candidate_from_event(
         wallet_score=float(_float_or_none(event.get("leader_score")) or _float_or_none(event.get("wallet_score")) or 0.0),
         signal_score=float(_float_or_none(event.get("opportunity_score")) or _float_or_none(event.get("signal_score")) or 0.0),
         edge_remaining_bps=float(_float_or_none(event.get("edge_remaining_bps")) or 0.0),
-        estimated_fee_bps=float(_float_or_none(event.get("fee_bps")) or _float_or_none(event.get("estimated_fee_bps")) or 4.0),
+        # 🔴 CORRIGE 2026-07-14 : le repli etait **4.0** -- un chiffre qui ne figure NULLE PART
+        # dans la grille Hyperliquid (taker = 4,5 ; aller-retour = 9,0). *Un repli invente est
+        # un mensonge par defaut.* -> aller-retour taker reel, source unique (#543).
+        estimated_fee_bps=float(_float_or_none(event.get("fee_bps"))
+                                or _float_or_none(event.get("estimated_fee_bps"))
+                                or _FRAIS_ALLER_RETOUR_TAKER_BPS),
         estimated_spread_bps=float(_float_or_none(event.get("spread_bps")) or _float_or_none(event.get("estimated_spread_bps")) or 0.0),
         estimated_slippage_bps=float(_float_or_none(event.get("slippage_bps")) or _float_or_none(event.get("estimated_slippage_bps")) or 0.0),
         estimated_latency_decay_bps=float(_float_or_none(event.get("estimated_latency_decay_bps")) or 0.0),

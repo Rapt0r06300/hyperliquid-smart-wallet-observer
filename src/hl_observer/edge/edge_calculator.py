@@ -74,4 +74,15 @@ def compute_net_edge(inputs: EdgeNetInputs, *, min_edge_bps: float = 30.0) -> Ed
         reasons.append(f"net_edge_bps={net:.2f}>=min={min_edge_bps:.2f}")
 
     return EdgeNetResult(
-        gross_edge
+        gross_edge_bps=inputs.gross_edge_bps,
+        total_cost_bps=total_cost,
+        net_edge_bps=net,
+        min_edge_bps=min_edge_bps,
+        decision=decision,
+        reasons=tuple(reasons),
+    )
+
+
+def apply_time_decay(gross_edge_bps: float, *, signal_age_ms: int, half_life_ms: int) -> float:
+    """Decay the gross edge by signal age before cost subtraction."""
+    return decay_edge(gross_edge_bps, signal_age_ms, half_life_ms)
