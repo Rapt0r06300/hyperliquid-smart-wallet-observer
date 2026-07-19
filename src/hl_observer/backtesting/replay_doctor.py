@@ -60,6 +60,39 @@ def _coin(row: dict) -> str:
     return str(row.get("coin") or "").upper()
 
 
+def _index_marks_par_coin(marks: Iterable[dict]) -> dict[str, list[float]]:
+    """{coin: [ts triés]} — pour répondre vite à « existe-t-il un prix APRÈS ce candidat ? »."""
+    par_coin: dict[str, list[float]] = {}
+    for m in marks:
+        if not isinstance(m, dict):
+            continue
+        c = _coin(m)
+        ts = m.get("ts")
+        if c and isinstance(ts, (int, float)):
+            par_coin.setdefault(c, []).append(float(ts))
+    for serie in par_coin.values():
+        serie.sort()
+    return par_coin
+
+
+def _a_un_mark_posterieur(candidat: dict, marks: Iterable[dict] | dict[str, list[float]]) -> bool:
+    """Un candidat n'est REJOUABLE que si un prix existe APRÈS lui, sur SON coin.
+
+    Sans ça, aucun PnL forward n'est calculable : on ne sait pas ce que le prix a fait ENSUITE.
+    Compter un mark antérieur comme « couverture » revient à se déclarer prêt à mesurer ce
+    qu'on ne peut pas mesurer.
+    """
+    par_coin = marks if isinstance(marks, dict) else _index_marks_par_coin(marks)
+    serie = par_coin.get(_coin(candidat))
+    if not serie:
+        return False
+    t = candidat.get("recorded_at")
+    if not isinstance(t, (int, float)):
+        return False
+    import bisect
+    return bisect.bisect_right(serie, float(t)) < len(serie)
+
+
 def charger_replay_depuis_base(base: str) -> tuple[list[dict], list[dict]]:
     """(candidates, marks) AGRÉGÉS depuis TOUS les shards par-PID (+ legacy + archive). W1/W2 :
     c'est CE chargement — pas `load_jsonl` sur un fichier mono — qui rend les données visibles."""
@@ -78,7 +111,13 @@ def diagnostiquer(candidates: Iterable[dict], marks: Iterable[dict], *,
     coins_m = {_coin(m) for m in mks if _coin(m)}
     couverture = 0.0
     if cands:
-        avec_marks = sum(1 for c in cands if _coin(c) in coins_m)
+        # 🔴 DURCI LE 2026-07-19 — avant, il suffisait que le coin ait des marks N'IMPORTE QUAND.
+        # Or un mark ANTERIEUR au candidat ne sert a RIEN : le PnL forward se calcule sur le prix
+        # d'APRES. Un dataset ou tous les marks precedent les candidats aurait affiche « 100 % de
+        # couverture » et n'aurait pas permis de mesurer un seul trade.
+        # On exige donc, par candidat, AU MOINS UN MARK POSTERIEUR sur le meme coin.
+        index = _index_marks_par_coin(mks)
+        avec_marks = sum(1 for c in cands if _a_un_mark_posterieur(c, index))
         couverture = round(avec_marks / len(cands), 4)
     raisons: list[str] = []
     if len(cands) < int(min_candidats):
@@ -133,7 +172,8 @@ def format_rapport(rapport: RapportSante) -> str:
         f"DOCTEUR REPLAY — {etat}",
         f"  candidats : {rapport.n_candidats}  (coins {rapport.n_coins_candidats})",
         f"  marks     : {rapport.n_marks}  (coins {rapport.n_coins_marks})",
-        f"  couverture marks : {rapport.couverture_marks:.0%}",
+        f"  couverture marks : {rapport.couverture_marks:.0%}  "
+        f"(candidats ayant un prix APRÈS eux, sur leur coin)",
     ]
     if rapport.raisons:
         lignes.append("  raisons   : " + ", ".join(rapport.raisons))

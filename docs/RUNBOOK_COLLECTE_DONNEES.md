@@ -106,3 +106,35 @@ par 8h), les sources écartées si divergence aberrante, et les carries cross-ve
 
 *Rappel sécurité : la 2e venue ne sert QU'À LIRE le funding. Aucune décision, aucun ordre n'y est
 envoyé. Hyperliquid reste la seule venue des décisions paper.*
+
+---
+
+## MàJ — Le dataset de replay était BORGNE (19/07)
+
+**Mesure du 19/07, après ~16 h de collecte :**
+
+| | mesuré |
+|---|---|
+| candidats | **30 148** sur **106 coins** (HYPE 8392, BTC 5743, ZEC 3828, ETH 2923, SOL 1659…) |
+| marks | **661** sur **2 coins** (HYPE 601, PURR 60) |
+| candidats **rejouables** | **8 815 / 30 148 (29 %)** |
+
+Les marks venaient de la **shortlist carry** (une poignée de coins) alors que le firehose
+enregistre des candidats sur 106 coins. BTC, ETH, SOL, ZEC avaient des candidats et **aucun prix
+futur** : impossible de calculer leur PnL forward. Ils gonflaient le dataset sans rien prouver.
+
+**Deux corrections :**
+
+1. **`COLLECTER-MARKS-AUTO.cmd`** (lancé automatiquement par `LANCER_HYPERSMART.cmd`) lit
+   `allMids` toutes les 60 s — endpoint **public, lecture seule** — et écrit un mark pour chaque
+   coin vu dans les candidats récents. Un prix illisible est **ignoré**, jamais remplacé par 0.
+
+2. **Le docteur replay est durci** : il comptait un candidat comme couvert dès que son coin avait
+   des marks *n'importe quand*. Un mark **antérieur** au candidat ne sert pourtant à rien — le PnL
+   forward se calcule sur le prix d'**après**. Il exige désormais, par candidat, au moins un mark
+   **postérieur** sur le même coin. Un dataset dont tous les marks précèdent les candidats aurait
+   affiché « 100 % de couverture » sans permettre de mesurer un seul trade.
+
+**Où on en est, honnêtement :** de quoi faire tourner le pipeline et vérifier qu'il fonctionne —
+**pas** de quoi conclure sur un edge. 10 h de marks sur 1 coin, c'est une seule session, un seul
+régime de marché. Il faut laisser tourner **quelques jours** avec le collecteur actif.

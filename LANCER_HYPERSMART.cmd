@@ -284,6 +284,13 @@ REM === CARRY : alimentation AUTO des inputs spot (best coin, toutes les 10 min,
 REM Sans ca, carry_spot_inputs.json n'est jamais ecrit -> le carry refuse tout (INPUTS_SPOT_ABSENTS).
 start "carry-feeder" /min "%~dp0ALIMENTER-CARRY-AUTO.cmd"
 
+REM === REPLAY : collecte des MARKS (prix futur) sur TOUS les coins des candidats ===
+REM Mesure du 19/07 : 30 148 candidats sur 106 coins, mais des marks sur 2 coins seulement
+REM -> 29 %% des candidats rejouables. BTC/ETH/SOL/ZEC avaient des candidats et AUCUN prix
+REM futur : impossible de calculer leur PnL forward. Sans ce collecteur, le replay A/B ne
+REM peut juger qu'une poignee de coins. Lecture seule (/info allMids), 0 ordre.
+start "marks-collector" /min "%~dp0COLLECTER-MARKS-AUTO.cmd"
+
 powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0tools\start_hypersmart_simulation.ps1" -Port 8794 -IntervalSeconds 15 -MaxLeaders 50 -Interactive
 
 exit /b 0
