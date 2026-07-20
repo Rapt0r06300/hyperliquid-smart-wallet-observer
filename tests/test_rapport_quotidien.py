@@ -188,7 +188,7 @@ def test_l_ecriture_est_ATOMIQUE_jamais_un_rapport_tronque(tmp_path):
     texte = p.read_text(encoding="utf-8")
     assert texte.startswith("# Rapport quotidien") and "Sécurité : 0 ordre réel" in texte
     assert not list(p.parent.glob("*.tmp")), "aucun fichier temporaire ne doit trainer"
-    src = open(str(ROOT / "tools" / "rapport_quotidien.py"), encoding="utf-8").read()
+    src = open(str(RACINE / "tools" / "rapport_quotidien.py"), encoding="utf-8").read()
     assert "os.replace" in src.replace("_os.replace", "os.replace")
 
 
