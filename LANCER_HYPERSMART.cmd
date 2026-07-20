@@ -53,6 +53,12 @@ REM les couts (cost_model ~12 bps). "Moins de trades, plus propres": on ne prend
 REM edge net franchement positif. Aucun fake, aucun edge negatif jamais accepte.
 REM 2026-07-08: plancher edge copy releve 28->40 (replay causal: la selectivite passe le PnL net positif,
 REM les 2 gros perdants venaient des trades a edge marginal). Reversible.
+REM ── VOLUME DE DONNEES (decision de Flo, 20/07) : « un replay A/B se fait sur des
+REM    donnees ». Le plafond break-even passe de 120 h a 235 h pour ADMETTRE plus de
+REM    carrys (fenetre d'admission doublee) et produire plus d'outcomes de sorties.
+REM    ⚠️ COHERENCE VERROUILLEE PAR TEST : jamais au-dessus de 0,7 x AGE_MAX (336 h),
+REM    sinon on fabrique des positions expulsees AVANT d'avoir amorti = churn garanti.
+set "HYPERSMART_CARRY_MAX_BREAK_EVEN_H=235"
 set "HYPERSMART_SIMULATION_MIN_EDGE_BPS=16"
 set "HYPERSMART_SIMULATION_MIN_LIQUIDITY_SCORE=0.55"
 set "HYPERSMART_SIMULATION_MAX_COPY_DEGRADATION_BPS=24"

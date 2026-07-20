@@ -133,6 +133,24 @@ def _sec_mesures(root: Path) -> list[str]:
                    "pré-écrites, jamais avant." % (heures, len(ts)))
     else:
         out.append("- Cross-venue : aucune donnée encore.")
+    # L'USINE À DONNÉES (20/07, argument de Flo : « un replay A/B se fait sur des données »).
+    # Le replay mange candidats + marks : leur production doit être un chiffre QUOTIDIEN —
+    # une usine qui s'arrête en silence, c'est le faux « 1 sur 1M » qui revient.
+    try:
+        seuil = time.time() - FENETRE_H * 3600
+        cand = marks = 0
+        for f in (root / "runtime" / "replay").glob("*.jsonl"):
+            for r in _lignes_jsonl(f):
+                t = r.get("recorded_at") or r.get("ts") or r.get("_ts") or 0
+                if isinstance(t, (int, float)) and (t / 1000 if t > 1e12 else t) >= seuil:
+                    if "strategie" in r or "accepte" in r:
+                        cand += 1
+                    else:
+                        marks += 1
+        out.append("- Usine à données replay (24 h) : **%d candidats** · **%d marks** — "
+                   "c'est le carburant du replay A/B." % (cand, marks))
+    except OSError:
+        out.append("- Usine à données replay : illisible ce matin.")
     return out
 
 
