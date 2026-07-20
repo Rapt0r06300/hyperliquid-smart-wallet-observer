@@ -571,7 +571,8 @@ function syncTop(){
   // PnL AFFICHÉ = TOTAL toutes stratégies (copy + carry) — demande de Flo. Equity = equity copy + net carry.
   // 20/07 soir (Flo) : 6 DECIMALES sur le grand chiffre aussi — le PnL doit VIVRE a l'ecran,
   // au meme grain que les cellules par position (le ticker 1 s le fait avancer chaque seconde).
-  var P=document.getElementById('pnl'); if(P){P.textContent=(totNet>=0?'+':'')+n(totNet,6); P.className='pnl-big '+(totNet>=0?'pnl-pos':'pnl-neg');}
+  var P=document.getElementById('pnl'); if(P){P.textContent=(totNet>=0?'+':'')+n(totNet,6); P.className='pnl-big '+(totNet>=0?'pnl-pos':'pnl-neg');
+    P.title='= realise session + funding accru (mesure + taux depuis la derniere mesure) + base MtM (mesuree, deux sens) — hors couts de fermeture (rapport §8). Resnappe sur chaque vraie mesure.';}
   var eqCopy=Number(window._copyEq||0)||1000; var E=document.getElementById('eq'); if(E){E.textContent=n(eqCopy+carryNet,6);}
   window._eqLiveVal=eqCopy+carryNet;   // le point VIVANT du metagraphe (meme formule que l'equity affichee)
   var base=window._base||1000; var chg=base>0?(totNet/base*100):0; var C=document.getElementById('chg'); if(C){C.textContent=(chg>=0?'+':'')+n(chg,2)+'%';C.style.color=col(chg);}
@@ -626,6 +627,8 @@ function loadCarry(){fetch('/v2/carry').then(function(r){return r.json()}).then(
   var prevRows={};(window._carryRows||[]).forEach(function(r){prevRows[r.coin]=r;});
   window._carryRows=ps.map(function(p){var a=Number(p.funding_accrued_usdt||0),q=prevRows[p.coin];
     return {coin:p.coin,marge:Number(p.marge_usdt||0),accru:a,rate:Number(p.taux_accrual_usd_h||0),
+            // MtM de BASE (20/07 soir) : la composante qui respire dans les DEUX sens.
+            mtm:(p.base_mtm_usd!=null)?Number(p.base_mtm_usd):null,
             t0:(q&&q.accru===a&&q.t0)?q.t0:Date.now()};});
   window._carryRateUsdH=ps.reduce(function(s,p){return s+Number(p.taux_accrual_usd_h||0);},0);
   var apiAccru=Number(d.funding_accru_usdt||0);
@@ -669,12 +672,22 @@ function majAccruLive(){
   var el=document.getElementById('carry-accru');
   if(el){el.textContent='$'+n(live,6);el.title='+$'+n(rate,6)+'/h — le funding coule en continu (taux mesure)';}
   var c2=document.getElementById('c-fund-carry');if(c2)c2.textContent='$'+n(live,6);
-  var rows=window._carryRows||[];
+  var rows=window._carryRows||[],mtmTot=0;
   rows.forEach(function(p){var eH=(Date.now()-(p.t0||t0))/3.6e6;
     p.accruLive=Number(p.accru||0)+Number(p.rate||0)*eH;
+    // PnL de position = funding accru (MESURE + estimation du taux depuis la derniere mesure)
+    //                 + MtM de BASE (MESURE, peut etre NEGATIF — le PnL a le droit de baisser).
+    // « je ne veux pas que le pnl mente » : chaque cellule dit son decompte dans l'infobulle.
+    var m=(p.mtm!=null)?Number(p.mtm):0; mtmTot+=m;
+    var v=p.accruLive+m;
     document.querySelectorAll('[data-carrylive="'+p.coin+'"]').forEach(function(c){
-      c.textContent=(c.textContent.charAt(0)==='$'?'$':'+')+n(p.accruLive,6);});});
-  window._carryNet=Number(window._carryReal||0)+live;
+      c.textContent=(c.textContent.charAt(0)==='$'?'$':(v>=0?'+':''))+n(v,6);
+      c.style.color=col(v);
+      c.title='funding '+n(p.accruLive,6)+'$ (mesure+taux) '
+        +(p.mtm!=null?('+ base '+(m>=0?'+':'')+n(m,6)+'$ (mesure, realisable a la fermeture)')
+                      :'· base non mesuree ce tick')
+        +' — hors couts d\'entree/sortie (rapport §8)';});});
+  window._carryNet=Number(window._carryReal||0)+live+mtmTot;
   if(window.syncTop)syncTop();
   if(window.drawMetaLive)drawMetaLive();   // le metagraphe recoit son point vivant a chaque image
 }
@@ -685,6 +698,23 @@ function majAccruLive(){
 // honnetete : taux MESURE x temps ecoule, resnappee a chaque vraie mesure du moteur.
 (function boucleFraicheur(){ majAccruLive(); requestAnimationFrame(boucleFraicheur); })();
 </script></body></html>"""
+
+
+def base_mtm_usd(base_entree_bps, base_courante_bps, notional_usdt) -> float | None:
+    """Mark-to-market de la BASE depuis l'entrée (long spot + short perp) — la composante du
+    PnL qui BOUGE DANS LES DEUX SENS (20/07 soir, constat de Flo : « le PnL monte comme un
+    minuteur, c'est pas réaliste »). Le funding est un compteur d'intérêts (lineaire PAR
+    NATURE) ; la respiration réaliste d'un livre carry, c'est la base : le premium perp−spot
+    qui se resserre (on gagne) ou s'écarte (on perd), marqué au réel à chaque passe feeder.
+
+    Convention A5 : entré short perp au premium `base_entree` ; si la base COURANTE est plus
+    petite, la convergence nous a payés -> (entree − courante) × notional. Aucune promesse :
+    ce montant se réalise seulement à la fermeture (et le ledger y ajoutera les coûts)."""
+    try:
+        be, bc, nt = float(base_entree_bps), float(base_courante_bps), float(notional_usdt)
+    except (TypeError, ValueError):
+        return None
+    return round((be - bc) * nt / 1e4, 6)
 
 
 def net_carry_courant(root: "Path | str | None" = None) -> float:
@@ -793,11 +823,26 @@ def create_dashboard_v2_router() -> APIRouter:
             etat = etat_carry(root)
             g = charger_gestionnaire(root)
             now = _time.time() * 1000.0
+            # BASE COURANTE par coin (mesuree par le feeder) -> le MtM de base par position.
+            # Position hors shortlist ce tick -> base non mesuree -> None (jamais invente).
+            bases_courantes: dict[str, float] = {}
+            try:
+                for x in _json.loads((root / "runtime" / "data" / "carry_spot_shortlist.json")
+                                     .read_text(encoding="utf-8-sig")):
+                    if isinstance(x, dict) and x.get("coin") and x.get("base_bps") is not None:
+                        bases_courantes[str(x["coin"]).upper()] = float(x["base_bps"])
+            except (OSError, ValueError, TypeError):
+                pass
             positions = []
             accru = 0.0
             for coin, p in g.ouvertes.items():
                 accru += float(p.get("funding_accrued_usdt") or 0.0)
+                _bc = bases_courantes.get(str(coin).upper())
+                _mtm = base_mtm_usd(p.get("base_bps_entree"), _bc,
+                                    p.get("notional_usdt")) if _bc is not None else None
                 positions.append({
+                    "base_mtm_usd": _mtm,
+                    "base_bps_courant": _bc,
                     "coin": coin,
                     "notional_usdt": float(p.get("notional_usdt") or 0.0),
                     "marge_usdt": float(p.get("marge_usdt") or 0.0),

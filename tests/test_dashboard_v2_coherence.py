@@ -252,3 +252,34 @@ def test_la_base_du_pourcentage_vient_de_la_serie_COMPLETE_jamais_de_la_fenetre(
     src = _src()
     assert "window._base=pts[0].equity" in src
     assert "window._base=base" not in src, "l'ancienne base (fenetre courante) mentirait en zoom"
+
+
+# ---------------- 20/07 soir : « le PnL monte comme un minuteur » -> la BASE entre au PnL ----------------
+# Le funding est un compteur d'interets (lineaire PAR NATURE — c'est le metier du carry).
+# La respiration realiste d'un vrai livre, c'est la BASE (perp−spot), mesuree a chaque passe,
+# qui bouge dans les DEUX sens. « Je ne veux pas que le pnl mente » : l'afficher SANS la base,
+# c'etait cacher la composante qui peut BAISSER.
+
+from hl_observer.ui.dashboard_v2 import base_mtm_usd
+
+
+def test_base_mtm_le_signe_est_celui_d_A5_convergence_paye_le_short_perp():
+    # entre a +30 bps de premium, la base est retombee a +10 -> le short perp a capture 20 bps
+    assert base_mtm_usd(30.0, 10.0, 150.0) == 0.30   # 20 bps x 150$ / 1e4
+    # la base s'ECARTE (10 -> 40) : on PERD — le PnL a le droit de baisser, c'est la verite
+    assert base_mtm_usd(10.0, 40.0, 150.0) == -0.45
+    assert base_mtm_usd(None, 10.0, 150.0) is None, "entree inconnue -> None, jamais invente"
+
+
+def test_l_endpoint_transmet_le_mtm_et_la_base_courante_ou_None_honnete():
+    src = _src()
+    assert '"base_mtm_usd": _mtm' in src and '"base_bps_courant": _bc' in src
+    assert "if _bc is not None else None" in src, "hors shortlist ce tick -> None, pas un zero deguise"
+
+
+def test_le_pnl_affiche_inclut_le_mtm_et_chaque_cellule_dit_son_decompte():
+    src = _src()
+    assert "window._carryNet=Number(window._carryReal||0)+live+mtmTot" in src
+    assert "base non mesuree ce tick" in src, "l'absence de mesure se DIT"
+    assert "realisable a la fermeture" in src and "hors couts" in src, \
+        "l'infobulle separe le mesure, l'estime, et ce qui reste a payer"
