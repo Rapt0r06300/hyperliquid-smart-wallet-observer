@@ -64,6 +64,14 @@ def sauver_gestionnaire(root: str | Path, g: GestionnaireCarry) -> None:
 def _append_ledger(root: str | Path, row: dict[str, Any]) -> None:
     p = _ledger_path(root)
     p.parent.mkdir(parents=True, exist_ok=True)
+    # PnL par session (20/07) : chaque ligne porte l'identite de SA session -> le dashboard
+    # peut repartir a zero au redemarrage sans JAMAIS toucher aux lignes precedentes.
+    if "session_id" not in row:
+        try:
+            from hl_observer.runtime.session_identity import session_courante
+            row = {**row, "session_id": session_courante(root)}
+        except Exception:  # noqa: BLE001 — une identite illisible ne bloque pas le ledger
+            row = {**row, "session_id": ""}
     with p.open("a", encoding="utf-8") as fh:
         fh.write(json.dumps(row, ensure_ascii=False) + "\n")
 
@@ -220,9 +228,19 @@ def diagnostic_churn(root: str | Path = ".", *, now_ms: int | None = None,
             "churn_detecte": bool(suspects)}
 
 
-def resume_depuis_ledger(root: str | Path = ".", *, mode: str = MODE_LIVE) -> dict[str, Any]:
-    """Le PnL realise TOTAL, lu depuis le ledger append-only (source de verite, pas un compteur)."""
+def resume_depuis_ledger(root: str | Path = ".", *, mode: str = MODE_LIVE,
+                         session_id: str | None = None) -> dict[str, Any]:
+    """Le PnL realise TOTAL, lu depuis le ledger append-only (source de verite, pas un compteur).
+
+    PnL PAR SESSION (demande de Flo, 20/07) : chaque ligne du ledger porte desormais son
+    `session_id`. Si `session_id` est fourni, le resume contient AUSSI le realise de CETTE
+    session (`realized_net_pnl_usdc_session`, `closes_session`). Le compteur de session repart
+    donc a ZERO a chaque redemarrage — SANS rien supprimer : l'historique complet reste dans
+    `realized_net_pnl_usdc` et dans le fichier, ligne par ligne. Les vieilles lignes sans
+    etiquette n'appartiennent a AUCUNE session courante (elles datent d'avant).
+    """
     realized, opens, closes = 0.0, 0, 0
+    realized_sess, closes_sess = 0.0, 0
     try:
         lignes = _ledger_path(root).read_text(encoding="utf-8").splitlines()
     except OSError:
@@ -238,16 +256,32 @@ def resume_depuis_ledger(root: str | Path = ".", *, mode: str = MODE_LIVE) -> di
             opens += 1
         elif r.get("kind") == "CLOSE":
             closes += 1
-            realized += float(r.get("realized_net_pnl_usdc") or 0.0)
-    return {"mode": mode, "opens": opens, "closes": closes,
-            "realized_net_pnl_usdc": round(realized, 6)}
+            pnl = float(r.get("realized_net_pnl_usdc") or 0.0)
+            realized += pnl
+            if session_id and str(r.get("session_id") or "") == session_id:
+                closes_sess += 1
+                realized_sess += pnl
+    out = {"mode": mode, "opens": opens, "closes": closes,
+           "realized_net_pnl_usdc": round(realized, 6)}
+    if session_id is not None:
+        out["session_id"] = session_id
+        out["closes_session"] = closes_sess
+        out["realized_net_pnl_usdc_session"] = round(realized_sess, 6)
+    return out
 
 
 def etat_carry(root: str | Path = ".", *, mode: str = MODE_LIVE) -> dict[str, Any]:
     """Vue complete pour le dashboard/metrics : PnL realise CUMULE (du ledger) + positions
     ouvertes + funding deja accru (non encore realise). Source de verite = les fichiers, jamais
-    un compteur en memoire."""
-    r = resume_depuis_ledger(root, mode=mode)
+    un compteur en memoire. Contient AUSSI le realise de la SESSION COURANTE
+    (`realized_net_pnl_usdc_session`) : c'est LUI que le dashboard affiche en grand — il
+    repart a zero a chaque redemarrage, l'historique reste dans `realized_net_pnl_usdc`."""
+    try:
+        from hl_observer.runtime.session_identity import session_courante
+        sid = session_courante(root)
+    except Exception:  # noqa: BLE001
+        sid = ""
+    r = resume_depuis_ledger(root, mode=mode, session_id=sid)
     g = charger_gestionnaire(root, mode=mode)
     r["positions_ouvertes"] = len(g.ouvertes)
     r["coins_ouverts"] = sorted(g.ouvertes)

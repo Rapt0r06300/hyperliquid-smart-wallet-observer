@@ -541,13 +541,21 @@ function syncTop(){
 function loadCarry(){fetch('/v2/carry').then(function(r){return r.json()}).then(function(d){
   var tb=document.getElementById('carrytb');if(!tb)return;
   document.getElementById('carry-pos').textContent=(d.positions_ouvertes||0);
-  window._carryPos=(d.positions_ouvertes||0);window._carryReal=Number(d.realized_net_pnl_usdc||0);
-  window._carryNet=Number(d.realized_net_pnl_usdc||0)+Number(d.funding_accru_usdt||0);
+  // ── PnL PAR SESSION (demande de Flo, 20/07) : le GRAND chiffre repart a ZERO a chaque
+  // redemarrage (realized_net_pnl_usdc_session, calcule du ledger etiquete par session_id).
+  // L'HISTORIQUE complet n'est jamais supprime : il reste dans realized_net_pnl_usdc, dans
+  // le ledger ligne par ligne, et dans le rapport quotidien. Repli honnete : si le champ
+  // session n'existe pas encore (vieux moteur), on affiche le total comme avant.
+  var realSess=(d.realized_net_pnl_usdc_session!=null)?Number(d.realized_net_pnl_usdc_session):Number(d.realized_net_pnl_usdc||0);
+  window._carryPos=(d.positions_ouvertes||0);window._carryReal=realSess;
+  window._carryNet=realSess+Number(d.funding_accru_usdt||0);
   window._carryCloses=Number((d.churn&&d.churn.closes)||0);
   window._carryMarge=(d.positions||[]).reduce(function(s,p){return s+Number(p.marge_usdt||0);},0);
   if(window.syncTop)syncTop();
-  var real=Number(d.realized_net_pnl_usdc||0),er=document.getElementById('carry-real');
+  var real=realSess,er=document.getElementById('carry-real');
   er.textContent=n(real);er.style.color=col(real);
+  er.title='Session courante (repart a zero au redemarrage). Historique complet : '
+    +n(Number(d.realized_net_pnl_usdc||0))+'$ — jamais supprime (ledger + rapport quotidien).';
   document.getElementById('carry-accru').textContent='$'+n(d.funding_accru_usdt,4);
   var ps=d.positions||[];
   tb.innerHTML=ps.map(function(p){return '<tr><td><b>'+p.coin+'</b></td><td>$'+n(p.notional_usdt,0)+'</td><td>'+n(p.levier,1)+'x</td><td style="color:var(--cyan)">$'+n(p.funding_accrued_usdt,4)+'</td><td style="text-align:right">'+n(p.age_h,1)+'h</td></tr>';}).join('')||'<tr><td colspan="5" style="color:var(--mut2)">— aucune position carry ouverte —</td></tr>';
@@ -588,6 +596,10 @@ def net_carry_courant(root: "Path | str | None" = None) -> float:
         from hl_observer.funding.carry_positions_store import charger_gestionnaire, etat_carry
         racine = _P(root) if root is not None else _P(__file__).resolve().parents[3]
         e = etat_carry(racine)
+        # PnL par SESSION (20/07) : la courbe d'equity repart de la base a chaque redemarrage.
+        # L'historique n'est pas supprime — il est dans le ledger et le rapport quotidien.
+        if e.get("realized_net_pnl_usdc_session") is not None:
+            e = {**e, "realized_net_pnl_usdc": e["realized_net_pnl_usdc_session"]}
         accru = sum(float(p.get("funding_accrued_usdt") or 0.0)
                     for p in charger_gestionnaire(racine).ouvertes.values())
         return float(e.get("realized_net_pnl_usdc") or 0.0) + accru
