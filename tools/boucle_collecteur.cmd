@@ -33,6 +33,12 @@ set "PYTHONPATH=%CD%\src"
 if not exist "runtime\logs" mkdir "runtime\logs" >nul 2>&1
 set "LOG=runtime\logs\%NOM%.log"
 
+REM 🔴 20/07 : le superviseur relance un collecteur mort... et cette troncature DETRUISAIT la
+REM preuve de sa mort (venues-collector : mort dans la nuit, log ecrase a 4:12, autopsie
+REM impossible). On garde UNE generation : l'ancien log devient <nom>.prev.log avant d'etre
+REM tronque. La tache R5 (pourquoi meurent-ils ?) a besoin de ce cadavre pour parler.
+if exist "%LOG%" copy /y "%LOG%" "%LOG%.prev" >nul 2>&1
+
 echo ============================================================ > "%LOG%"
 echo  %NOM% — demarre le %date% a %time% (toutes les %INTERVALLE% s) >> "%LOG%"
 echo  script : %SCRIPT% >> "%LOG%"

@@ -228,6 +228,41 @@ def _pire_via_api(coin: str) -> float | None:
     return _pire_hausse(hi, lo)
 
 
+#: cache derniere-valeur-connue de la pire-hausse. 24 h : tres court devant les 200 jours de la
+#: statistique, tres long devant un hoquet reseau. Au-dela -> exclusion honnete (pas d'invention).
+PIRE_HAUSSE_CACHE = Path("runtime") / "data" / "pire_hausse_cache.json"
+PIRE_HAUSSE_CACHE_MAX_AGE_S = 24 * 3600.0
+
+
+def _pire_avec_cache(root: Path, coin: str, valeur_fraiche: float | None) -> float | None:
+    """Succes -> memorise et retourne. Echec -> reutilise le cache s'il a < 24 h (TRACE au log).
+    Echec + cache perime/absent -> None (l'exclusion honnete d'avant). Jamais d'exception."""
+    chemin = Path(root) / PIRE_HAUSSE_CACHE
+    try:
+        cache = json.loads(chemin.read_text(encoding="utf-8"))
+        if not isinstance(cache, dict):
+            cache = {}
+    except (OSError, ValueError):
+        cache = {}
+    now = time.time()
+    if valeur_fraiche is not None:
+        cache[coin] = {"pire": float(valeur_fraiche), "ts": now}
+        try:
+            chemin.parent.mkdir(parents=True, exist_ok=True)
+            chemin.write_text(json.dumps(cache, ensure_ascii=False), encoding="utf-8")
+        except OSError:
+            print("  (cache pire-hausse inecrivable — la mesure fraiche reste utilisee)")
+        return float(valeur_fraiche)
+    entree = cache.get(coin)
+    if isinstance(entree, dict) and isinstance(entree.get("pire"), (int, float)):
+        age = now - float(entree.get("ts") or 0.0)
+        if 0 <= age <= PIRE_HAUSSE_CACHE_MAX_AGE_S:
+            print("  %s : bougies ratees ce tick -> pire-hausse du CACHE (age %.1f h) — un "
+                  "hoquet reseau n'ampute plus une statistique de 200 jours" % (coin, age / 3600))
+            return float(entree["pire"])
+    return None
+
+
 def _meilleur_levier(coin, funding, base, liq, levier_max, pire, *, securite=SECURITE_LIQUIDATION):
     """A3 — LEVIER en RISK-PARITY : le plus haut levier qui survit a `securite` x la pire hausse
     observee. Exiger le MEME multiple de securite pour tous les coins egalise le risque de
@@ -280,6 +315,13 @@ def scanner(diagnostic: bool):
         pire = pires.get(c)
         if pire is None:                       # pas de bougie locale -> on FETCH (plus de coins)
             pire = _pire_via_api(c)
+        # 🔴 NUIT 19-20/07 (-0,49 $) : UN rate reseau sur candleSnapshot -> pire=None -> coin
+        # declare non viable -> hors shortlist -> 45 min plus tard le store fermait une position
+        # non amortie. Or la pire-hausse est une statistique sur 200 JOURS : elle ne bouge pas en
+        # une heure. Un rate de fetch n'a pas le droit d'amputer une mesure quasi statique ->
+        # cache derniere-valeur-connue (24 h max, trace). Echec + cache perime = exclusion
+        # honnete, comme avant.
+        pire = _pire_avec_cache(ROOT, c, pire)
         raison, inp = "", None
         if abs(base) > BASE_ABERRANTE_BPS:
             # AUDITABLE : on montre CE qui a été matché et POURQUOI c'est absurde (pas un bug caché,

@@ -119,3 +119,46 @@ def test_a4_le_net_prime_sur_le_zscore():
     m = _load()
     viables = [("A", {}, 10.0, 9.0, 0.0), ("B", {}, 10.0, 2.0, 5.0)]   # A meilleur net, B spike
     assert m.classer_viables(viables, top_k=2)[0][0] == "A"            # le NET prime, z = departage
+
+
+# ------------------------------------------ NUIT 19-20/07 : cache pire-hausse (anti-hoquet reseau)
+
+def test_un_rate_de_fetch_REUTILISE_le_cache_recent(tmp_path, capsys):
+    """UN echec de candleSnapshot -> pire=None -> coin ejecte de la shortlist -> 45 min plus
+    tard le store fermait une position non amortie (-0,49 $ cette nuit). La pire-hausse est une
+    statistique sur 200 JOURS : un hoquet reseau n'a pas le droit de l'amputer."""
+    m = _load()
+    # 1) une mesure fraiche remplit le cache
+    assert m._pire_avec_cache(tmp_path, "PURR", 0.26) == 0.26
+    # 2) le fetch rate (None) -> la valeur du cache revient, et c'est TRACE au log
+    assert m._pire_avec_cache(tmp_path, "PURR", None) == 0.26
+    assert "CACHE" in capsys.readouterr().out
+
+
+def test_un_cache_PERIME_ne_fabrique_pas_de_mesure(tmp_path, monkeypatch):
+    """> 24 h -> exclusion honnete, comme avant. Un cache eternel serait une donnee inventee."""
+    m = _load()
+    m._pire_avec_cache(tmp_path, "PURR", 0.26)
+    vraie = m.time.time
+    monkeypatch.setattr(m.time, "time", lambda: vraie() + m.PIRE_HAUSSE_CACHE_MAX_AGE_S + 60)
+    assert m._pire_avec_cache(tmp_path, "PURR", None) is None
+
+
+def test_le_cache_sans_entree_reste_None(tmp_path):
+    m = _load()
+    assert m._pire_avec_cache(tmp_path, "JAMAIS_VU", None) is None
+
+
+def test_une_mesure_fraiche_RAFRAICHIT_le_cache(tmp_path):
+    m = _load()
+    m._pire_avec_cache(tmp_path, "PURR", 0.26)
+    m._pire_avec_cache(tmp_path, "PURR", 0.31)          # nouvelle mesure
+    assert m._pire_avec_cache(tmp_path, "PURR", None) == 0.31
+
+
+def test_la_boucle_collecteur_PRESERVE_le_log_precedent():
+    """La relance du superviseur tronquait le log et DETRUISAIT la preuve de la mort
+    (venues-collector, nuit du 19-20/07). Une generation .prev.log doit etre gardee."""
+    texte = (ROOT / "tools" / "boucle_collecteur.cmd").read_text(encoding="utf-8", errors="ignore")
+    assert '.prev"' in texte and "copy /y" in texte.lower(), (
+        "boucle_collecteur.cmd doit copier le log en .prev avant de le tronquer (autopsie R5)")
