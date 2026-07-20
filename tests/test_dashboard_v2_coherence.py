@@ -283,3 +283,21 @@ def test_le_pnl_affiche_inclut_le_mtm_et_chaque_cellule_dit_son_decompte():
     assert "base non mesuree ce tick" in src, "l'absence de mesure se DIT"
     assert "realisable a la fermeture" in src and "hors couts" in src, \
         "l'infobulle separe le mesure, l'estime, et ce qui reste a payer"
+
+
+def test_UNE_SEULE_definition_du_net_carry_la_courbe_inclut_le_MtM(tmp_path):
+    """« ça ne va pas du tout » (20/07 soir) : la courbe (net sans MtM) et le grand chiffre
+    (net avec MtM) divergeaient de 0,19 $ -> falaise FABRIQUEE au raccord. Une definition."""
+    import json as _j
+    from hl_observer.ui.dashboard_v2 import net_carry_courant
+    d = tmp_path / "runtime" / "data"; d.mkdir(parents=True)
+    (d / "carry_paper_positions.json").write_text(_j.dumps({"mode": "LIVE", "ouvertes": {
+        "HYPE": {"coin": "HYPE", "mode": "LIVE", "notional_usdt": 150.0,
+                 "funding_accrued_usdt": 0.01, "base_bps_entree": 30.0,
+                 "cout_entree_bps": 2.0, "entry_ts_ms": 1,
+                 "marge_usdt": 100.0, "levier": 1.5}}}), encoding="utf-8")
+    (d / "carry_spot_shortlist.json").write_text(_j.dumps(
+        [{"coin": "HYPE", "base_bps": 10.0}]), encoding="utf-8")
+    net = net_carry_courant(tmp_path)
+    assert abs(net - (0.01 + 0.30)) < 1e-9, \
+        "net = accru 0.01 + MtM (30-10)bps x 150$ = 0.31 — la MEME somme que l'affichage"

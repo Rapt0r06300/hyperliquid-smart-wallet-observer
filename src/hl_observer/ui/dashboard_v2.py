@@ -735,9 +735,27 @@ def net_carry_courant(root: "Path | str | None" = None) -> float:
         # L'historique n'est pas supprime — il est dans le ledger et le rapport quotidien.
         if e.get("realized_net_pnl_usdc_session") is not None:
             e = {**e, "realized_net_pnl_usdc": e["realized_net_pnl_usdc_session"]}
-        accru = sum(float(p.get("funding_accrued_usdt") or 0.0)
-                    for p in charger_gestionnaire(racine).ouvertes.values())
-        return float(e.get("realized_net_pnl_usdc") or 0.0) + accru
+        g = charger_gestionnaire(racine)
+        accru = sum(float(p.get("funding_accrued_usdt") or 0.0) for p in g.ouvertes.values())
+        # 🔴 20/07 soir (« ça ne va pas du tout ») : la COURBE calculait le net SANS le MtM de
+        # base pendant que le grand chiffre l'incluait -> falaise FABRIQUEE au raccord des deux
+        # definitions. UNE seule definition partout : realise + accru + MtM de base mesure.
+        # Base non mesuree ce tick -> contribution 0 (jamais inventee), definition inchangee.
+        mtm = 0.0
+        try:
+            import json as _j
+            bases = {str(x.get("coin")).upper(): float(x["base_bps"])
+                     for x in _j.loads((racine / "runtime" / "data" / "carry_spot_shortlist.json")
+                                       .read_text(encoding="utf-8-sig"))
+                     if isinstance(x, dict) and x.get("coin") and x.get("base_bps") is not None}
+            for c, p in g.ouvertes.items():
+                bc = bases.get(str(c).upper())
+                m = base_mtm_usd(p.get("base_bps_entree"), bc,
+                                 p.get("notional_usdt")) if bc is not None else None
+                mtm += m or 0.0
+        except (OSError, ValueError, TypeError):
+            pass
+        return float(e.get("realized_net_pnl_usdc") or 0.0) + accru + mtm
     except Exception:  # noqa: BLE001 — un carry illisible ne casse jamais la courbe
         return 0.0
 
