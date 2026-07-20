@@ -282,6 +282,8 @@ th{letter-spacing:1.2px}
      <div class="kv"><span>positions ouvertes</span><b id="carry-pos">…</b></div>
      <div class="kv"><span>PnL réalisé cumulé</span><b id="carry-real">…</b></div>
      <div class="kv"><span>funding accru (ouvert)</span><b id="carry-accru">…</b></div>
+     <!-- v3 (20/07) : le latent de base est AFFICHE, etiquete reversible — jamais dans le net -->
+     <div class="kv"><span>latent de base (réversible)</span><b id="carry-latent">…</b></div>
    </div>
    <table><thead><tr><th style="width:20%">coin</th><th style="width:20%">notional</th><th style="width:18%">levier</th><th style="width:22%">funding accru</th><th style="width:20%;text-align:right">âge</th></tr></thead><tbody id="carrytb"></tbody></table>
    <div class="hint" id="carryviab" style="margin-top:8px"></div>
@@ -572,12 +574,13 @@ function syncTop(){
   // 20/07 soir (Flo) : 6 DECIMALES sur le grand chiffre aussi — le PnL doit VIVRE a l'ecran,
   // au meme grain que les cellules par position (le ticker 1 s le fait avancer chaque seconde).
   var P=document.getElementById('pnl'); if(P){P.textContent=(totNet>=0?'+':'')+n(totNet,6); P.className='pnl-big '+(totNet>=0?'pnl-pos':'pnl-neg');
-    P.title='= realise session + funding accru (mesure + taux depuis la derniere mesure) + base MtM (mesuree, deux sens) — hors couts de fermeture (rapport §8). Resnappe sur chaque vraie mesure.';}
+    P.title='= realise session + funding COURU (encaisse : mesure + taux depuis la derniere mesure). Le latent de base (reversible) est affiche A COTE, jamais dedans. Resnappe sur chaque vraie mesure.';}
   var eqCopy=Number(window._copyEq||0)||1000; var E=document.getElementById('eq'); if(E){E.textContent=n(eqCopy+carryNet,6);}
   window._eqLiveVal=eqCopy+carryNet;   // le point VIVANT du metagraphe (meme formule que l'equity affichee)
   var base=window._base||1000; var chg=base>0?(totNet/base*100):0; var C=document.getElementById('chg'); if(C){C.textContent=(chg>=0?'+':'')+n(chg,2)+'%';C.style.color=col(chg);}
   var cs=document.getElementById('carry-sub'); if(cs){
-    cs.textContent = '  ·  total '+(cp+cy)+' pos · copy '+(copyNet>=0?'+':'')+n(copyNet,2)+'$ · carry '+(carryNet>=0?'+':'')+n(carryNet,2)+'$';}
+    var lat=Number(window._carryLatent||0);
+    cs.textContent = '  ·  total '+(cp+cy)+' pos · copy '+(copyNet>=0?'+':'')+n(copyNet,2)+'$ · carry '+(carryNet>=0?'+':'')+n(carryNet,2)+'$ · latent base '+(lat>=0?'+':'')+n(lat,2)+'$ (réversible)';}
   var st=document.getElementById('strattb');
   if(st){var mk=function(v){return (v>=0?'+':'')+n(v,2)+'$';};
     st.innerHTML=
@@ -598,10 +601,10 @@ function loadCarry(){fetch('/v2/carry').then(function(r){return r.json()}).then(
   // session n'existe pas encore (vieux moteur), on affiche le total comme avant.
   var realSess=(d.realized_net_pnl_usdc_session!=null)?Number(d.realized_net_pnl_usdc_session):Number(d.realized_net_pnl_usdc||0);
   window._carryPos=(d.positions_ouvertes||0);window._carryReal=realSess;
-  // 20/07 soir : MEME definition ICI aussi (realise + accru + MtM) — plus jamais une valeur
-  // transitoire d'une autre definition, meme pour une frame.
-  var _mtmPoll=(d.positions||[]).reduce(function(s,p){return s+(Number(p.base_mtm_usd)||0);},0);
-  window._carryNet=realSess+Number(d.funding_accru_usdt||0)+_mtmPoll;
+  // v3 (20/07) : NET = realise + funding COURU (encaisse, stable). Le latent de base est
+  // SEPARE — calcule ici pour l'affichage dedie, jamais additionne au net.
+  window._carryLatent=(d.positions||[]).reduce(function(s,p){return s+(Number(p.base_mtm_usd)||0);},0);
+  window._carryNet=realSess+Number(d.funding_accru_usdt||0);
   // 🔴 20/07 : « TRADES CLOS 6 » melangeait TROIS perimetres sur la rangee SESSION (copy =
   // session moteur, carry = fenetre 24 h du churn). closes_session (ledger etiquete) aligne
   // la tuile sur la session, comme le grand PnL ; repli honnete : compteur 24 h si vieux moteur.
@@ -675,22 +678,26 @@ function majAccruLive(){
   var el=document.getElementById('carry-accru');
   if(el){el.textContent='$'+n(live,6);el.title='+$'+n(rate,6)+'/h — le funding coule en continu (taux mesure)';}
   var c2=document.getElementById('c-fund-carry');if(c2)c2.textContent='$'+n(live,6);
+  // v3 (20/07, 3 allers-retours avec Flo) : la cellule montre le GAGNE (funding, coule et ne
+  // recule jamais) ; le LATENT de base (reversible, MtM MID) vit dans l'infobulle et dans le
+  // panneau « latent de base » — jamais melange au gagne, jamais cache non plus.
   var rows=window._carryRows||[],mtmTot=0;
   rows.forEach(function(p){var eH=(Date.now()-(p.t0||t0))/3.6e6;
     p.accruLive=Number(p.accru||0)+Number(p.rate||0)*eH;
-    // PnL de position = funding accru (MESURE + estimation du taux depuis la derniere mesure)
-    //                 + MtM de BASE (MESURE, peut etre NEGATIF — le PnL a le droit de baisser).
-    // « je ne veux pas que le pnl mente » : chaque cellule dit son decompte dans l'infobulle.
     var m=(p.mtm!=null)?Number(p.mtm):0; mtmTot+=m;
-    var v=p.accruLive+m;
+    var v=p.accruLive;
     document.querySelectorAll('[data-carrylive="'+p.coin+'"]').forEach(function(c){
       c.textContent=(c.textContent.charAt(0)==='$'?'$':(v>=0?'+':''))+n(v,6);
       c.style.color=col(v);
-      c.title='funding '+n(p.accruLive,6)+'$ (mesure+taux) '
-        +(p.mtm!=null?('+ base '+(m>=0?'+':'')+n(m,6)+'$ (mesure, realisable a la fermeture)')
-                      :'· base non mesuree ce tick')
-        +' — hors couts d\'entree/sortie (rapport §8)';});});
-  window._carryNet=Number(window._carryReal||0)+live+mtmTot;
+      c.title='funding '+n(p.accruLive,6)+'$ (encaisse : mesure + taux depuis la derniere mesure)'
+        +(p.mtm!=null?(' · latent base '+(m>=0?'+':'')+n(m,6)+'$ (MtM MID, reversible, se realise a la FERMETURE)')
+                      :' · base non mesuree ce tick')
+        +' — hors couts (rapport §8)';});});
+  var lt=document.getElementById('carry-latent');
+  if(lt){lt.textContent=(mtmTot>=0?'+':'')+n(mtmTot,6)+'$';lt.style.color=col(mtmTot);
+    lt.title='MtM de base au MID, toutes positions — REVERSIBLE : ne se realise qu\'a la fermeture (A5). Volontairement HORS du net.';}
+  window._carryLatent=mtmTot;
+  window._carryNet=Number(window._carryReal||0)+live;
   if(window.syncTop)syncTop();
   if(window.drawMetaLive)drawMetaLive();   // le metagraphe recoit son point vivant a chaque image
 }
@@ -762,23 +769,35 @@ def net_carry_courant(root: "Path | str | None" = None) -> float:
             e = {**e, "realized_net_pnl_usdc": e["realized_net_pnl_usdc_session"]}
         g = charger_gestionnaire(racine)
         accru = sum(float(p.get("funding_accrued_usdt") or 0.0) for p in g.ouvertes.values())
-        # 🔴 20/07 soir (« ça ne va pas du tout ») : la COURBE calculait le net SANS le MtM de
-        # base pendant que le grand chiffre l'incluait -> falaise FABRIQUEE au raccord des deux
-        # definitions. UNE seule definition partout : realise + accru + MtM de base mesure.
-        # Base non mesuree ce tick -> contribution 0 (jamais inventee), definition inchangee.
-        mtm = 0.0
-        try:
-            bases = bases_courantes_mid(racine)
-            for c, p in g.ouvertes.items():
-                bc = bases.get(str(c).upper())
-                be = (p.get("base_mid_bps_entree") if p.get("base_mid_bps_entree") is not None
-                      else p.get("base_bps_entree"))
-                m = base_mtm_usd(be, bc, p.get("notional_usdt")) if bc is not None else None
-                mtm += m or 0.0
-        except (OSError, ValueError, TypeError):
-            pass
-        return float(e.get("realized_net_pnl_usdc") or 0.0) + accru + mtm
+        # ── DECISION D'AFFICHAGE (20/07, 3 allers-retours avec Flo) ──────────────────────
+        # v1 : funding seul -> « minuteur, pas realiste » (le latent de base etait CACHE).
+        # v2 : + MtM de base dans le chiffre principal -> « bouge trop bizarrement » (les mids
+        #      des carnets minces secouent le GAGNE avec du REVERSIBLE).
+        # v3 (celle-ci, le standard des desks) : le NET « courbe + grand chiffre » = REALISE +
+        # FUNDING COURU (de l'encaisse, stable) ; le LATENT DE BASE est calcule et AFFICHE A
+        # COTE, etiquete comme reversible (net_latent_base_usd) — ni cache, ni melange.
+        return float(e.get("realized_net_pnl_usdc") or 0.0) + accru
     except Exception:  # noqa: BLE001 — un carry illisible ne casse jamais la courbe
+        return 0.0
+
+
+def net_latent_base_usd(root: "Path | str | None" = None) -> float:
+    """Le LATENT de base total (MtM MID, réversible, réalisé seulement à la fermeture).
+    Affiché À CÔTÉ du net — jamais dedans (v3 ci-dessus). Illisible -> 0.0, jamais inventé."""
+    try:
+        from pathlib import Path as _P
+        from hl_observer.funding.carry_positions_store import charger_gestionnaire
+        racine = _P(root) if root is not None else _P(__file__).resolve().parents[3]
+        bases = bases_courantes_mid(racine)
+        total = 0.0
+        for c, p in charger_gestionnaire(racine).ouvertes.items():
+            bc = bases.get(str(c).upper())
+            be = (p.get("base_mid_bps_entree") if p.get("base_mid_bps_entree") is not None
+                  else p.get("base_bps_entree"))
+            m = base_mtm_usd(be, bc, p.get("notional_usdt")) if bc is not None else None
+            total += m or 0.0
+        return round(total, 6)
+    except Exception:  # noqa: BLE001
         return 0.0
 
 

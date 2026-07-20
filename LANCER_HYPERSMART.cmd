@@ -340,11 +340,13 @@ REM ---- COPY-WHITELIST (#185, 20/07) : nourrit la porte copy (leaders au markou
 REM La whitelist se PERIME a 24 h (porte deny-by-default) -> regeneree toutes les 6 h.
 REM Sans donnees de fills forward, elle ecrit une liste VIDE = copy verrouille (honnete).
 start "" /b tools\boucle_collecteur.cmd copy-whitelist tools\ecrire_copy_whitelist.py 21600
+REM ---- RAPPORT QUOTIDIEN AUTO (20/07) : rapports\RAPPORT_DU_JOUR.md toujours frais (6 h). ----
+start "" /b tools\boucle_collecteur.cmd rapport-quotidien tools\rapport_quotidien.py 21600
 
 REM AUTO-VERIFICATION : un collecteur cache qui ne demarre pas ne se voit PAS. On attend qu'il
 REM ecrive son log (il l'ecrit des la 1re ligne) et on DIT si l'un des trois manque a l'appel.
 ping -n 6 127.0.0.1 >nul 2>&1
-for %%C in (carry-feeder marks-collector liq-collector venues-collector copy-whitelist) do (
+for %%C in (carry-feeder marks-collector liq-collector venues-collector copy-whitelist rapport-quotidien) do (
   if exist "%~dp0runtime\logs\%%C.log" (
     echo   [collecteurs] %%C ......... demarre
   ) else (

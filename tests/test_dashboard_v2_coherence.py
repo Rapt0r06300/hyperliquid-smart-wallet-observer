@@ -277,12 +277,16 @@ def test_l_endpoint_transmet_le_mtm_et_la_base_courante_ou_None_honnete():
     assert "if _bc is not None else None" in src, "hors shortlist ce tick -> None, pas un zero deguise"
 
 
-def test_le_pnl_affiche_inclut_le_mtm_et_chaque_cellule_dit_son_decompte():
+def test_v3_le_GAGNE_et_le_LATENT_sont_separes_affiches_tous_les_deux():
+    """3 allers-retours avec Flo : v1 funding seul (« minuteur » — latent cache), v2 melange
+    (« bouge trop bizarrement » — le reversible secouait l'encaisse), v3 = le standard des
+    desks : net = realise + couru ; latent de base AFFICHE a cote, etiquete reversible."""
     src = _src()
-    assert "window._carryNet=Number(window._carryReal||0)+live+mtmTot" in src
+    assert "window._carryNet=Number(window._carryReal||0)+live" in src
+    assert "+live+mtmTot" not in src, "le latent ne doit JAMAIS etre additionne au net"
+    assert "window._carryLatent=mtmTot" in src and 'id="carry-latent"' in src
+    assert "latent base " in src and "réversible" in src
     assert "base non mesuree ce tick" in src, "l'absence de mesure se DIT"
-    assert "realisable a la fermeture" in src and "hors couts" in src, \
-        "l'infobulle separe le mesure, l'estime, et ce qui reste a payer"
 
 
 def test_UNE_SEULE_definition_du_net_carry_la_courbe_inclut_le_MtM(tmp_path):
@@ -300,9 +304,12 @@ def test_UNE_SEULE_definition_du_net_carry_la_courbe_inclut_le_MtM(tmp_path):
     (d / "carry_bases_courantes.json").write_text(_j.dumps(
         {"ts_ms": _t.time() * 1000, "bases": {"HYPE": {"base_mid_bps": 10.0, "liq": 50000}}}),
         encoding="utf-8")
+    from hl_observer.ui.dashboard_v2 import net_latent_base_usd
     net = net_carry_courant(tmp_path)
-    assert abs(net - (0.01 + 0.30)) < 1e-9, \
-        "net = accru 0.01 + MtM (30-10)bps x 150$ = 0.31 — la MEME somme que l'affichage"
+    latent = net_latent_base_usd(tmp_path)
+    assert abs(net - 0.01) < 1e-9, "v3 : le NET = realise + funding COURU (l'encaisse) seulement"
+    assert abs(latent - 0.30) < 1e-9, \
+        "le latent (30-10)bps x 150$ = 0.30 est CALCULE et affiche A COTE — jamais dans le net"
 
 
 def test_le_marquage_MID_perime_ou_absent_donne_ZERO_MtM_jamais_un_bruit(tmp_path):
@@ -332,4 +339,4 @@ def test_la_chaine_MID_est_cablee_feeder_entree_endpoint_et_poll():
     assert '"base_mid_bps"' in feed, "les inputs portent la base MID"
     assert '"base_mid_bps_entree": _f(inputs, "base_mid_bps")' in lifec
     assert "bases_courantes_mid(root)" in src
-    assert "window._carryNet=realSess+Number(d.funding_accru_usdt||0)+_mtmPoll" in src
+    assert "window._carryNet=realSess+Number(d.funding_accru_usdt||0)" in src   # v3 : sans latent

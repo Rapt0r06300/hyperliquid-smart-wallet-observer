@@ -74,6 +74,10 @@ REGISTRE: tuple[dict[str, Any], ...] = (
     # limite = 1,5x cadence + marge (regle du test des limites) : silence > 9,5 h = mort.
     {"nom": "copy-whitelist", "script": "tools/ecrire_copy_whitelist.py",
      "intervalle_s": 21600, "args": (), "limite_minutes": 570.0},
+    # 20/07 : rapport quotidien AUTO — rapports/RAPPORT_DU_JOUR.md toujours frais (6 h),
+    # surveille comme les autres (un rapport qui ne se genere plus = un matin aveugle).
+    {"nom": "rapport-quotidien", "script": "tools/rapport_quotidien.py",
+     "intervalle_s": 21600, "args": (), "limite_minutes": 570.0},
 )
 
 
