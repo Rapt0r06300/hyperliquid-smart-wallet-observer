@@ -220,3 +220,35 @@ def test_le_curseur_du_flux_se_redessine_chaque_seconde():
 def test_le_flux_scan_etiquette_les_positions_comme_COPY():
     assert "pos copy actives" in _src(), \
         "« 0 pos actives » a cote de 3 positions carry : le perimetre copy doit se dire"
+
+
+# ---------------- 20/07 soir : fraicheur MAXIMALE physique + metagraphe VIVANT ----------------
+
+def test_le_grand_pnl_et_l_equity_sont_en_6_decimales():
+    src = _src()
+    assert "P.textContent=(totNet>=0?'+':'')+n(totNet,6)" in src
+    assert "E.textContent=n(eqCopy+carryNet,6)" in src
+
+
+def test_la_boucle_de_fraicheur_est_calee_sur_l_ecran_requestAnimationFrame():
+    """« chaque milliseconde » : l'ecran affiche 60-144 img/s — plus vite est invisible.
+    rAF = le maximum physique, et il se met en pause onglet cache (0 gaspillage)."""
+    src = _src()
+    assert "requestAnimationFrame(boucleFraicheur)" in src
+    assert "setInterval(majAccruLive" not in src, "l'ancien tick 1 s doit avoir disparu"
+
+
+def test_le_metagraphe_recoit_le_point_vivant_et_a_une_fenetre_zoomable():
+    src = _src()
+    assert "window._eqLiveVal" in src and "pts.concat([{t:Date.now(),equity:lv}])" in src, \
+        "le point vivant prolonge la courbe (meme interpolation que le grand chiffre)"
+    assert "window._metaWin=3600000" in src, "fenetre par defaut 1 h (pente visible)"
+    assert "(w===3600000)?300000:(w===300000?0:3600000)" in src, "cycle 1h -> 5min -> tout au clic"
+    assert "mg-baselbl" in src, "l'etiquette de base dit si c'est l'equity depart ou la fenetre"
+
+
+def test_la_base_du_pourcentage_vient_de_la_serie_COMPLETE_jamais_de_la_fenetre():
+    """Zoomer ne doit JAMAIS changer le % affiche : base = premier point de la serie complete."""
+    src = _src()
+    assert "window._base=pts[0].equity" in src
+    assert "window._base=base" not in src, "l'ancienne base (fenetre courante) mentirait en zoom"

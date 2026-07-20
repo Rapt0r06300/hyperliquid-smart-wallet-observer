@@ -252,7 +252,7 @@ th{letter-spacing:1.2px}
      <circle id="mg-ring" r="3.2" fill="none" stroke="#2ce69b" stroke-width="1.4" style="animation:ring 2s ease-out infinite"/>
      <circle id="mg-live" r="3.3" fill="#2ce69b" style="filter:drop-shadow(0 0 7px #2ce69b)"/>
    </svg>
-   <div class="axis"><span id="mg-t0"></span><span style="color:var(--mut2)">╌ base = equity départ</span><span id="mg-t1"></span></div>
+   <div class="axis"><span id="mg-t0"></span><span id="mg-baselbl" style="color:var(--mut2)">╌ base = equity départ</span><span id="mg-t1"></span></div>
    </div>
  </div>
 
@@ -358,13 +358,38 @@ function drawMeta(pts){var W=1000,H=210,PAD=14;if(!pts.length)return;
   var by=Y(base),bl=document.getElementById('mg-base');bl.setAttribute('y1',by);bl.setAttribute('y2',by);bl.setAttribute('stroke',c);
   var lx=xy[xy.length-1][0],ly=xy[xy.length-1][1];
   ['mg-live','mg-ring'].forEach(function(id){var e=document.getElementById(id);e.setAttribute('cx',lx);e.setAttribute('cy',ly);e.setAttribute(id==='mg-live'?'fill':'stroke',c);});
-  document.getElementById('mg-hi').textContent='↑ '+n(hi-pd);document.getElementById('mg-lo').textContent='↓ '+n(lo+pd);
+  document.getElementById('mg-hi').textContent='↑ '+n(hi-pd,6);document.getElementById('mg-lo').textContent='↓ '+n(lo+pd,6);
   document.getElementById('mg-t0').textContent=hhmm(t0);document.getElementById('mg-t1').textContent=hhmm(t1)+' · '+pts.length+'pts';
-  var sp=(t1-t0)/3600000;document.getElementById('mg-span').textContent=sp>=1?(sp.toFixed(1)+'h'):(Math.round((t1-t0)/60000)+'min');
-  window._base=base;}
+  var sp=(t1-t0)/3600000;document.getElementById('mg-span').textContent=(sp>=1?(sp.toFixed(1)+'h'):(Math.round((t1-t0)/60000)+'min'))+' ⤢';}
+// ── METAGRAPHE VIVANT (20/07 soir, demande de Flo : « le voir monter et descendre ») ──
+// 1) un POINT VIVANT (equity interpolee du ticker 1 s) prolonge la courbe chaque seconde ;
+// 2) la FENETRE est zoomable au CLIC sur la duree (1 h -> 5 min -> tout) : en 1 h/5 min,
+//    l'echelle Y adaptative fait remplir l'ecran a la pente reelle — le graphe RESPIRE.
+// Rien d'invente : le point vivant = la meme interpolation resnappee que le grand chiffre.
+window._metaWin=3600000;   // fenetre par defaut : 1 h (motion visible, contexte garde)
+function ptsFenetre(){
+  var pts=window._metaPts||[],w=window._metaWin||0;
+  if(w>0&&pts.length){var cut=Date.now()-w,f=pts.filter(function(p){return p.t>=cut});
+    if(f.length>=2)pts=f;}
+  var lv=Number(window._eqLiveVal||0);
+  if(lv>0)pts=pts.concat([{t:Date.now(),equity:lv}]);
+  return pts;}
+function drawMetaLive(){var p=ptsFenetre();if(p.length)drawMeta(p);}
 function loadMeta(){fetch('/v2/equity_history?max=600').then(function(r){return r.json()}).then(function(d){
   var pts=(d.points||[]).map(function(p){return {t:Number(p.t),equity:Number(p.equity),pnl:Number(p.pnl)}}).filter(function(p){return p.equity>0});
-  if(pts.length)drawMeta(pts);}).catch(function(e){signalerPanne('equity',e);});}
+  if(pts.length){window._metaPts=pts;
+    // la BASE du % reste l'equity de DEPART de la serie complete — jamais le debut de la
+    // fenetre zoomee (sinon le % mentirait des qu'on zoome).
+    window._base=pts[0].equity;
+    drawMetaLive();}}).catch(function(e){signalerPanne('equity',e);});}
+document.addEventListener('DOMContentLoaded',function(){
+  var s=document.getElementById('mg-span');
+  if(s){s.style.cursor='pointer';s.title='cliquer : 1 h -> 5 min -> tout';
+    s.onclick=function(){var w=window._metaWin;
+      window._metaWin=(w===3600000)?300000:(w===300000?0:3600000);
+      var bl=document.getElementById('mg-baselbl');
+      if(bl)bl.textContent=(window._metaWin===0)?'╌ base = equity départ':'╌ base = début de fenêtre';
+      drawMetaLive();};}});
 function modeOf(p){var m=(p.position_mode||'').toUpperCase();
   return (m.indexOf('FUNDING')>=0||m.indexOf('ARBITRAGE')>=0||m.indexOf('TRIANGULAR')>=0||m.indexOf('DELTA')>=0||m.indexOf('EXTERNAL_GITHUB')>=0)?'GRINDER':'SNIPER';}
 function led(id,st){var e=document.getElementById(id);e.className='led'+(st==='ok'?'':st==='warn'?' warn':' off');}
@@ -544,8 +569,11 @@ function syncTop(){
         X.textContent=n(mg); X.title='marge copy + marge carry (le levier differe par strategie)';}
   var bd=document.getElementById('pos-bd'); if(bd){bd.textContent = cy>0 ? '('+cp+'c · '+cy+'y)' : '';}
   // PnL AFFICHÉ = TOTAL toutes stratégies (copy + carry) — demande de Flo. Equity = equity copy + net carry.
-  var P=document.getElementById('pnl'); if(P){P.textContent=(totNet>=0?'+':'')+n(totNet); P.className='pnl-big '+(totNet>=0?'pnl-pos':'pnl-neg');}
-  var eqCopy=Number(window._copyEq||0)||1000; var E=document.getElementById('eq'); if(E){E.textContent=n(eqCopy+carryNet);}
+  // 20/07 soir (Flo) : 6 DECIMALES sur le grand chiffre aussi — le PnL doit VIVRE a l'ecran,
+  // au meme grain que les cellules par position (le ticker 1 s le fait avancer chaque seconde).
+  var P=document.getElementById('pnl'); if(P){P.textContent=(totNet>=0?'+':'')+n(totNet,6); P.className='pnl-big '+(totNet>=0?'pnl-pos':'pnl-neg');}
+  var eqCopy=Number(window._copyEq||0)||1000; var E=document.getElementById('eq'); if(E){E.textContent=n(eqCopy+carryNet,6);}
+  window._eqLiveVal=eqCopy+carryNet;   // le point VIVANT du metagraphe (meme formule que l'equity affichee)
   var base=window._base||1000; var chg=base>0?(totNet/base*100):0; var C=document.getElementById('chg'); if(C){C.textContent=(chg>=0?'+':'')+n(chg,2)+'%';C.style.color=col(chg);}
   var cs=document.getElementById('carry-sub'); if(cs){
     cs.textContent = '  ·  total '+(cp+cy)+' pos · copy '+(copyNet>=0?'+':'')+n(copyNet,2)+'$ · carry '+(carryNet>=0?'+':'')+n(carryNet,2)+'$';}
@@ -648,8 +676,14 @@ function majAccruLive(){
       c.textContent=(c.textContent.charAt(0)==='$'?'$':'+')+n(p.accruLive,6);});});
   window._carryNet=Number(window._carryReal||0)+live;
   if(window.syncTop)syncTop();
+  if(window.drawMetaLive)drawMetaLive();   // le metagraphe recoit son point vivant a chaque image
 }
-setInterval(majAccruLive,1000);
+// ── FRAICHEUR MAXIMALE PHYSIQUE (20/07 soir, Flo : « chaque milliseconde ! ») ──
+// L'ecran affiche 60-144 images/s (7-16 ms) : plus vite qu'une image est INVISIBLE par
+// construction. requestAnimationFrame cale la mise a jour sur CHAQUE image de l'ecran —
+// c'est le maximum que la physique de l'affichage permet. L'interpolation reste la meme
+// honnetete : taux MESURE x temps ecoule, resnappee a chaque vraie mesure du moteur.
+(function boucleFraicheur(){ majAccruLive(); requestAnimationFrame(boucleFraicheur); })();
 </script></body></html>"""
 
 
