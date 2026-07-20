@@ -312,6 +312,11 @@ REM premiere et la derniere. Resultat mesure chez Flo :
 REM     'C:\Users\flo\Desktop\Projet' n'est pas reconnu... (x3, un par collecteur)
 REM Le lanceur a deja fait `cd /d "%~dp0"` (ligne 3) : on est DANS le dossier projet. Des chemins
 REM relatifs n'ont donc ni espace ni guillemet -- le bug ne peut plus se produire.
+REM 21/07 ANTI-ORPHELIN : marqueur UNIQUE de session, ecrit AVANT les boucles. Les boucles
+REM d'une session precedente voient le marqueur changer et s'arretent d'elles-memes ->
+REM plus jamais deux carry-feeders en parallele apres un Q, une croix ou un crash.
+if not exist "runtime\data" mkdir "runtime\data" >nul 2>&1
+echo %random%-%random%-%date%-%time% > "runtime\data\lanceur_session_marqueur.txt"
 start "" /b tools\boucle_collecteur.cmd carry-feeder tools\ecrire_carry_spot_inputs.py 240
 
 REM === REPLAY : collecte des MARKS (prix futur) sur TOUS les coins des candidats ===

@@ -44,7 +44,19 @@ echo  %NOM% — demarre le %date% a %time% (toutes les %INTERVALLE% s) >> "%LOG%
 echo  script : %SCRIPT% >> "%LOG%"
 echo ============================================================ >> "%LOG%"
 
+REM 21/07 ANTI-ORPHELIN (Flo : « Q — et meme la croix — doivent terminer la session ») :
+REM on capture le marqueur de session du lanceur AU DEMARRAGE. A chaque passe, le garde
+REM verifie (1) que le marqueur n'a pas change (sinon = vieille session -> stop, plus
+REM jamais de boucles DOUBLEES) et (2) que le moteur donne signe de vie (sinon -> stop).
+set "MARQUEUR="
+if exist "runtime\data\lanceur_session_marqueur.txt" set /p MARQUEUR=<"runtime\data\lanceur_session_marqueur.txt"
+
 :boucle
+python tools\collecteur_doit_vivre.py "%MARQUEUR%" >> "%LOG%" 2>&1
+if errorlevel 1 (
+  echo   [arret propre anti-orphelin — la session est terminee] >> "%LOG%"
+  exit /b 0
+)
 echo. >> "%LOG%"
 echo --- passe du %date% %time% --- >> "%LOG%"
 python "%SCRIPT%" %4 %5 %6 %7 %8 %9 >> "%LOG%" 2>&1

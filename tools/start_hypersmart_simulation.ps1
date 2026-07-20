@@ -545,6 +545,18 @@ function Stop-HyperSmartRuntime {
             Write-LauncherLog "Stop skipped for pid=$($process.ProcessId): $($_.Exception.Message)"
         }
     }
+    # 21/07 (Flo : « Q doit correctement terminer la session ») : les 6 BOUCLES DE
+    # COLLECTEURS (start /b depuis LANCER) n'etaient ni dans $startedProcesses ni matchees
+    # par les motifs runtime -> elles survivaient a Q en ORPHELINES puis se doublaient a la
+    # relance. On les tue par leur ligne de commande, en arbre (cmd + python enfant).
+    try {
+        $collectorLoops = @(Get-CimInstance Win32_Process -ErrorAction SilentlyContinue |
+            Where-Object { $_.CommandLine -match 'boucle_collecteur' })
+        foreach ($loopProc in $collectorLoops) {
+            Write-LauncherLog "Stopping collector loop tree pid=$($loopProc.ProcessId)"
+            try { Stop-HyperSmartProcessTree -ProcId $loopProc.ProcessId } catch {}
+        }
+    } catch { Write-LauncherLog "collector loops stop skipped: $($_.Exception.Message)" }
     # Tuer aussi ce qui SQUATTE le port UI 8794 -> sinon la relance recharge l'ancien
     # serveur (ancien code, positions a 40) et le neuf ne peut pas se lancer (demande Flo:
     # "c'est a toi de gerer que Q ferme tout").
