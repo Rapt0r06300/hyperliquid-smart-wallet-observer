@@ -189,3 +189,34 @@ def test_funding_arb_legacy_ne_se_confond_plus_avec_le_funding_du_carry():
     """« funding · paires 0 · off » se lisait « le funding est OFF » alors que le carry
     encaisse du funding : c'est le funding-ARB perp<->perp (loi X-04, ferme) — etiquete."""
     assert "funding-arb · paires" in _src()
+
+
+# ---------------- 20/07 « les chiffres stagnent » : l'ancre sur CHANGEMENT ----------------
+# Mesure en direct (17:43) : cellules IDENTIQUES a 7 s d'ecart pendant que l'API donnait un
+# taux de 0.0009375 $/h par coin. Cause : le poll 2 s resnappait base+horloge sans nouvelle
+# mesure -> l'interpolation ne depassait jamais ~5e-7 $ (invisible). En prime le poll ecrivait
+# 4 decimales contre 6 au ticker (clignotement), et le curseur du flux restait fige 5 min.
+
+def test_le_ticker_ancre_sur_CHANGEMENT_pas_sur_chaque_poll():
+    src = _src()
+    assert "window._carryAccruBase!==apiAccru||!window._carryPollTs" in src, \
+        "le total ne resnappe que quand la mesure change (sinon l'interpolation coule)"
+    assert "q.accru===a&&q.t0)?q.t0:Date.now()" in src.replace(" ", ""), \
+        "chaque ligne garde son ancre t0 tant que le moteur n'a pas rafraichi SA mesure"
+    assert "(Date.now()-(p.t0||t0))/3.6e6" in src, "le ticker utilise l'ancre par ligne"
+
+
+def test_l_accru_a_UN_SEUL_format_6_decimales_poll_et_ticker():
+    src = _src()
+    assert "n(d.funding_accru_usdt,6)" in src and "n(d.funding_accru_usdt,4)" not in src, \
+        "poll a 4 decimales + ticker a 6 = clignotement $0.0287 <-> $0.028677"
+
+
+def test_le_curseur_du_flux_se_redessine_chaque_seconde():
+    assert "setInterval(renderFeed,1000)" in _src(), \
+        "un curseur fige 5 min sous l'etiquette LIVE est un mensonge d'horloge"
+
+
+def test_le_flux_scan_etiquette_les_positions_comme_COPY():
+    assert "pos copy actives" in _src(), \
+        "« 0 pos actives » a cote de 3 positions carry : le perimetre copy doit se dire"

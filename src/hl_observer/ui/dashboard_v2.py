@@ -337,6 +337,9 @@ function push(cls,tag,msg){FEED.push({t:hms(),cls:cls,tag:tag,msg:msg});if(FEED.
 function renderFeed(){var f=document.getElementById('feed');f.innerHTML=FEED.slice().reverse().map(function(e){
   return '<div class="ev '+e.cls+'"><span class="t">'+e.t+'</span> <span class="tag">'+e.tag+'</span> '+e.msg+'</div>';}).join('')
   +'<div class="ev"><span class="t">'+hms()+'</span> <span class="cur">▮</span></div>';}
+// 20/07 : le curseur du flux affichait l'heure du DERNIER evenement (fige 5 min a l'ecran
+// sous l'etiquette « LIVE »). Redessine chaque seconde : l'horloge du curseur dit l'heure vraie.
+setInterval(renderFeed,1000);
 function smoothPath(pts){if(pts.length<2)return pts.length?('M'+pts[0][0]+' '+pts[0][1]):'';
   var d='M'+pts[0][0].toFixed(1)+' '+pts[0][1].toFixed(1);
   for(var i=0;i<pts.length-1;i++){var p0=pts[i>0?i-1:0],p1=pts[i],p2=pts[i+1],p3=pts[i+2<pts.length?i+2:i+1];
@@ -468,7 +471,7 @@ function deriveEvents(d,ps,npos){
       push('ev-open','OPEN',(p.coin||'?')+' '+modeOf(p)+' · marge '+n(Number(p.notional_usdt||p.copied_notional_usdt||0)/10));});}
     if(cur.ct>PREV.ct){push('ev-close','CLOSE',(cur.ct-PREV.ct)+' trade(s) clos · PnL net '+(cur.pnl>=0?'+':'')+n(cur.pnl));}
     if((cur.pnl>=0)!==(PREV.pnl>=0)){push('ev-warn','PNL',(cur.pnl>=0?'repasse POSITIF ':'bascule NÉGATIF ')+n(cur.pnl));}
-    if(cur.sel!=null&&cur.sel!==PREV.sel){push('ev-scan','SCAN',cur.sel+' leaders retenus · '+npos+' pos actives');}
+    if(cur.sel!=null&&cur.sel!==PREV.sel){push('ev-scan','SCAN',cur.sel+' leaders retenus · '+npos+' pos copy actives');}
   }
   PREV=cur;
 }
@@ -576,18 +579,29 @@ function loadCarry(){fetch('/v2/carry').then(function(r){return r.json()}).then(
   er.textContent=n(real);er.style.color=col(real);
   er.title='Session courante (repart a zero au redemarrage). Historique complet : '
     +n(Number(d.realized_net_pnl_usdc||0))+'$ — jamais supprime (ledger + rapport quotidien).';
-  document.getElementById('carry-accru').textContent='$'+n(d.funding_accru_usdt,4);
-  var cfc=document.getElementById('c-fund-carry');if(cfc)cfc.textContent='$'+n(d.funding_accru_usdt,4);
+  // 6 decimales ICI AUSSI (20/07 : le poll ecrivait 4, le ticker 6 -> l'accru CLIGNOTAIT
+  // $0.0287 <-> $0.028677 a chaque resnap. Un seul format, partout.)
+  document.getElementById('carry-accru').textContent='$'+n(d.funding_accru_usdt,6);
+  var cfc=document.getElementById('c-fund-carry');if(cfc)cfc.textContent='$'+n(d.funding_accru_usdt,6);
   var ps=d.positions||[];
   tb.innerHTML=ps.map(function(p){return '<tr><td><b>'+p.coin+'</b></td><td>$'+n(p.notional_usdt,0)+'</td><td>'+n(p.levier,1)+'x</td><td data-carrylive="'+p.coin+'" style="color:var(--cyan)">$'+n(p.funding_accrued_usdt,6)+'</td><td style="text-align:right">'+n(p.age_h,1)+'h</td></tr>';}).join('')||'<tr><td colspan="5" style="color:var(--mut2)">— aucune position carry ouverte —</td></tr>';
   // UNIFICATION + FRAICHEUR (20/07) : les positions carry partent AUSSI dans le panneau
   // POSITIONS unifie, et leur taux d'accrual (usd/h) alimente le ticker 1 s qui fait vivre
   // le PnL entre les releves moteur -- interpolation honnete, resnappee au reel a chaque poll.
-  window._carryRows=ps.map(function(p){return {coin:p.coin,marge:Number(p.marge_usdt||0),
-    accru:Number(p.funding_accrued_usdt||0),rate:Number(p.taux_accrual_usd_h||0)};});
+  // ── ANCRE SUR CHANGEMENT (20/07, « les chiffres stagnent ») : le poll 2 s resnappait
+  // base+horloge MEME quand le moteur n'avait pas rafraichi l'accrual -> l'interpolation
+  // repartait de zero toutes les 2 s (~5e-7 $, invisible en 6 decimales) : cellules FIGEES
+  // entre deux passes moteur. Regle : on ne resnappe que quand la MESURE change ; entre
+  // deux changements, le taux mesure coule depuis la derniere vraie mesure. Toujours une
+  // interpolation du reel, resnappee a chaque rafraichissement REEL du moteur.
+  var prevRows={};(window._carryRows||[]).forEach(function(r){prevRows[r.coin]=r;});
+  window._carryRows=ps.map(function(p){var a=Number(p.funding_accrued_usdt||0),q=prevRows[p.coin];
+    return {coin:p.coin,marge:Number(p.marge_usdt||0),accru:a,rate:Number(p.taux_accrual_usd_h||0),
+            t0:(q&&q.accru===a&&q.t0)?q.t0:Date.now()};});
   window._carryRateUsdH=ps.reduce(function(s,p){return s+Number(p.taux_accrual_usd_h||0);},0);
-  window._carryAccruBase=Number(d.funding_accru_usdt||0);
-  window._carryPollTs=Date.now();
+  var apiAccru=Number(d.funding_accru_usdt||0);
+  if(window._carryAccruBase!==apiAccru||!window._carryPollTs){
+    window._carryAccruBase=apiAccru;window._carryPollTs=Date.now();}
   var v=d.viables||[];
   // ── #24-27 : LE CHURN DOIT ÊTRE VISIBLE. Le 19/07, le bot a fait 32 ouvertures et 31
   // fermetures du MÊME coin en 22,3 h ; le dashboard n'affichait qu'un PnL « qui ne bouge pas ».
@@ -622,7 +636,8 @@ setInterval(function(){
   if(el){el.textContent='$'+n(live,6);el.title='+$'+n(rate,6)+'/h — le funding coule en continu (taux mesure)';}
   var c2=document.getElementById('c-fund-carry');if(c2)c2.textContent='$'+n(live,6);
   var rows=window._carryRows||[];
-  rows.forEach(function(p){p.accruLive=Number(p.accru||0)+Number(p.rate||0)*extraH;
+  rows.forEach(function(p){var eH=(Date.now()-(p.t0||t0))/3.6e6;
+    p.accruLive=Number(p.accru||0)+Number(p.rate||0)*eH;
     document.querySelectorAll('[data-carrylive="'+p.coin+'"]').forEach(function(c){
       c.textContent=(c.textContent.charAt(0)==='$'?'$':'+')+n(p.accruLive,6);});});
   window._carryNet=Number(window._carryReal||0)+live;
