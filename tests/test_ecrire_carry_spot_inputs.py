@@ -202,3 +202,11 @@ def test_apparier_prefixe_trop_court_refuse_et_nom_identique_conserve_sans_doubl
                           {"HYPE": [spot_hype], "UNO": [{"mark": 5.0, "vol24": 1.0, "pair": "@8"}]})
     assert a["HYPE"] == [spot_hype]          # le nom identique reste, une seule fois
     assert "NOT" not in a                     # UNO : prefixe 'NO' < 3 lettres -> refuse
+
+
+def test_le_marquage_MID_refuse_les_fausses_paires_au_dela_de_500_bps():
+    """Vu LIVE le 20/07 soir : ETHFI/MEGA/WLD a -5600..-9900 bps dans le dump (spot a ~2x le
+    prix perp — sous le seuil 'aberrante' mais absurde pour un MARQUAGE). Une vraie base carry
+    fait quelques dizaines de bps ; ±500 est deja genereux."""
+    src = open(str(ROOT / "tools" / "ecrire_carry_spot_inputs.py"), encoding="utf-8").read()
+    assert "abs(base_mid) <= 500.0" in src

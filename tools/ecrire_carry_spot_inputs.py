@@ -400,7 +400,9 @@ def scanner(diagnostic: bool):
         # du marquage : sur un carnet mince, le VWAP-500$ bouge de dizaines de bps par passe.
         spot_mid = (mid if carnet is not None else float(s["mark"])) or 0.0
         base_mid = ((p["mark"] - spot_mid) / spot_mid * 10_000.0) if spot_mid > 0 else None
-        if base_mid is not None and abs(base_mid) <= BASE_ABERRANTE_BPS:
+        # ±500 bps max pour le MARQUAGE : au-dela, c'est une fausse paire (prix x2 sous le seuil
+        # aberrante, vu live sur ETHFI/MEGA/WLD a -5600..-9900 bps) — jamais un marquage.
+        if base_mid is not None and abs(base_mid) <= 500.0:
             bases_mid_dump[c] = {"base_mid_bps": round(base_mid, 4), "liq": round(liq, 2)}
         pire = pires.get(c)
         if pire is None:                       # pas de bougie locale -> on FETCH (plus de coins)
