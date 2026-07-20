@@ -176,3 +176,35 @@ def test_le_rapport_complet_contient_les_sections_8_9_10_et_ne_plante_jamais(tmp
     for s in ("## 8.", "## 9.", "## 10."):
         assert s in t
     assert "Sécurité : 0 ordre réel" in t
+
+
+# ---------------- 21/07 : « le fichier devra etre entierement complet » ----------------
+
+def test_l_ecriture_est_ATOMIQUE_jamais_un_rapport_tronque(tmp_path):
+    """Regenere toutes les 6 h : si Flo ouvre le fichier PENDANT une ecriture directe, il
+    lirait un rapport a moitie. tmp + os.replace = le fichier visible est toujours complet."""
+    m = _mod()
+    p = m.ecrire(tmp_path, now_ms=1_000_000_000_000)
+    texte = p.read_text(encoding="utf-8")
+    assert texte.startswith("# Rapport quotidien") and "Sécurité : 0 ordre réel" in texte
+    assert not list(p.parent.glob("*.tmp")), "aucun fichier temporaire ne doit trainer"
+    src = open(str(ROOT / "tools" / "rapport_quotidien.py"), encoding="utf-8").read()
+    assert "os.replace" in src.replace("_os.replace", "os.replace")
+
+
+def test_regenerer_N_fois_ne_perd_RIEN_le_rapport_lit_les_sources_sans_les_toucher(tmp_path):
+    """Le rapport est une VUE : les sources (ledger append-only) ne bougent pas d'un octet
+    apres 3 regenerations, et chaque generation reste complete (en-tete -> ligne securite)."""
+    import json as _j
+    m = _mod()
+    d = tmp_path / "runtime" / "data"; d.mkdir(parents=True)
+    ledger = d / "carry_paper_ledger.jsonl"
+    ledger.write_text(_j.dumps({"type": "OPEN", "coin": "HYPE", "ts_ms": 1}) + "\n",
+                      encoding="utf-8")
+    avant = ledger.read_bytes()
+    for i in range(3):
+        p = m.ecrire(tmp_path, now_ms=1_000_000_000_000 + i)
+        t = p.read_text(encoding="utf-8")
+        assert t.startswith("# Rapport quotidien") and t.rstrip().endswith("retrait.**")
+    assert ledger.read_bytes() == avant, "le rapport ne doit JAMAIS ecrire dans une source"
+    assert (tmp_path / "rapports" / "archive_quotidienne").exists()

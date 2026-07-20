@@ -402,18 +402,30 @@ def generer(root: str | Path = RACINE, *, now_ms: int | None = None) -> str:
                 "Un rapport qui plante est un matin aveugle — signale-le.\n" % exc)
 
 
+def _ecrire_atomique(chemin: Path, texte: str) -> None:
+    """ÉCRITURE ATOMIQUE (21/07, exigence de Flo : « le fichier devra être entièrement
+    complet ») : on écrit dans un .tmp puis os.replace — le fichier visible est TOUJOURS
+    complet, même si on l'ouvre pile pendant une régénération. Jamais de rapport tronqué."""
+    import os as _os
+    tmp = chemin.with_suffix(chemin.suffix + ".tmp")
+    tmp.write_text(texte, encoding="utf-8")
+    _os.replace(tmp, chemin)
+
+
 def ecrire(root: str | Path = RACINE, *, now_ms: int | None = None) -> Path:
+    """Régénère le rapport. Le rapport est une VUE : il LIT les sources (ledger append-only,
+    positions, journaux) et n'écrit JAMAIS dedans — régénérer ne perd rien, par construction."""
     racine = Path(root)
     texte = generer(racine, now_ms=now_ms)
     dossier = racine / "rapports"
     dossier.mkdir(parents=True, exist_ok=True)
     principal = dossier / "RAPPORT_DU_JOUR.md"
-    principal.write_text(texte, encoding="utf-8")
+    _ecrire_atomique(principal, texte)
     archive = dossier / "archive_quotidienne"
     archive.mkdir(parents=True, exist_ok=True)
     jour = dt.datetime.fromtimestamp(
         (now_ms or time.time() * 1000) / 1000).strftime("%Y-%m-%d")
-    (archive / ("RAPPORT_%s.md" % jour)).write_text(texte, encoding="utf-8")
+    _ecrire_atomique(archive / ("RAPPORT_%s.md" % jour), texte)
     return principal
 
 
