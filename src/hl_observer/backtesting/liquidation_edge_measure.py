@@ -70,6 +70,57 @@ def rendement_net_bps(entry_px: float, path: Sequence[tuple[float, float]], entr
     return brut - float(cout_bps)                    # net APRÈS coût aller-retour
 
 
+def evenements_declenches(grappes: Iterable[dict], marks_par_coin: dict[str, list],
+                          *, tolerance_bps: float = 5.0,
+                          fenetre_s: float = 6 * 3600.0) -> list[dict]:
+    """Transforme des SNAPSHOTS de grappes (carte B9) en ÉVÉNEMENTS de liquidation déclenchés.
+
+    🔴 ARTEFACT DU 20/07 (attrapé avant publication) : mesurer directement sur les snapshots
+    donnait « +735 bps, hit 100 %, PF ∞ » — parce qu'on « entrait » au PRIX DE LA GRAPPE
+    (le niveau de liquidation, ~700 bps SOUS le marché) alors que personne n'a jamais tradé
+    là : l'edge mesuré ÉTAIT la distance_bps. Et la même grappe re-photographiée toutes les
+    minutes comptait pour 54 « événements ».
+
+    Règles honnêtes :
+      * un événement n'existe que si le MARK FRANCHIT le niveau de la grappe (± tolérance)
+        dans la fenêtre qui suit le snapshot — la liquidation a alors réellement pu se
+        produire ;
+      * l'entrée du trade simulé = le MARK au moment du franchissement (un prix réel),
+        jamais le niveau lui-même ;
+      * une grappe suivie dans le temps (même coin, même sens, niveau à ±20 bps) ne compte
+        qu'UNE fois — au premier franchissement.
+    """
+    marks = {c: sorted((float(t), float(m)) for (t, m) in pts)
+             for c, pts in (marks_par_coin or {}).items()}
+    vus: set[tuple] = set()
+    out: list[dict] = []
+    for g in sorted((g for g in grappes if isinstance(g, dict)),
+                    key=lambda g: float(g.get("ts_ms") or 0)):
+        coin = str(g.get("coin") or "").upper()
+        try:
+            niveau = float(g.get("prix") or 0.0)
+            ts = float(g.get("ts_ms") or 0.0) / 1000.0
+        except (TypeError, ValueError):
+            continue
+        if not coin or niveau <= 0 or coin not in marks:
+            continue
+        cle = (coin, str(g.get("sens") or ""), round(niveau / max(niveau * 20e-4, 1e-9)))
+        if cle in vus:
+            continue
+        sens = str(g.get("sens") or "").upper()
+        tol = niveau * tolerance_bps / 1e4
+        for (t, m) in marks[coin]:
+            if t < ts or t > ts + fenetre_s:
+                continue
+            franchi = (m <= niveau + tol) if sens == "SELL" else (m >= niveau - tol)
+            if franchi:
+                vus.add(cle)
+                out.append({**g, "prix": m, "ts_ms": t * 1000.0,
+                            "niveau_grappe": niveau, "declenchee": True})
+                break
+    return out
+
+
 def mesurer_edge_liquidation(evenements: Iterable[dict], marks_par_coin: dict[str, list],
                              *, horizon_s: float = 1800.0,
                              cout_aller_retour_bps: float = COUT_ALLER_RETOUR_BPS,

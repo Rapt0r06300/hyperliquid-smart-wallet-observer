@@ -55,3 +55,46 @@ def test_evenement_sans_futur_non_mesurable():
     marks = {"BTC": [(100.0, 100.0), (200.0, 100.0)]}
     rap = mesurer_edge_liquidation(_events(60), marks, horizon_s=1800.0)
     assert rap.n_mesurables == 0 and rap.verdict == "INSUFFISANT"
+
+
+# ---------------- 20/07 : l'ARTEFACT +735 bps attrape AVANT publication ----------------
+# Mesurer sur les snapshots de la carte B9 = « entrer » au niveau de liquidation (~700 bps
+# sous le marche, un prix ou PERSONNE n'a trade) et compter 54x la meme grappe. Hit 100 %.
+# La transformation `evenements_declenches` impose : franchissement REEL du niveau par le
+# mark, entree AU MARK, dedupe par grappe.
+
+from hl_observer.backtesting.liquidation_edge_measure import evenements_declenches
+
+
+def _grappe(ts_s, prix, coin="BTC", sens="SELL"):
+    return {"coin": coin, "prix": prix, "sens": sens, "ts_ms": ts_s * 1000.0,
+            "notionnel_usd": 30000.0}
+
+
+def test_une_grappe_JAMAIS_franchie_ne_produit_AUCUN_evenement():
+    """Le coeur de l'artefact : niveau a 59 500, marche a 63 800, prix ne descend jamais.
+    L'ancien code aurait 'gagne' ~700 bps ; le nouveau dit : rien ne s'est passe."""
+    marks = {"BTC": [(t, 63800.0) for t in range(0, 7200, 60)]}
+    evs = evenements_declenches([_grappe(0, 59500.0)], marks)
+    assert evs == []
+
+
+def test_le_franchissement_cree_l_evenement_avec_entree_AU_MARK_pas_au_niveau():
+    marks = {"BTC": [(0, 63800.0), (600, 60000.0), (1200, 59400.0), (1800, 60500.0)]}
+    evs = evenements_declenches([_grappe(0, 59500.0)], marks, tolerance_bps=5.0)
+    assert len(evs) == 1
+    assert evs[0]["prix"] == 59400.0, "l'entree est le MARK du franchissement (prix reel)"
+    assert evs[0]["niveau_grappe"] == 59500.0 and evs[0]["declenchee"] is True
+
+
+def test_la_meme_grappe_rephotographiee_54_fois_ne_compte_qu_UNE_fois():
+    marks = {"BTC": [(0, 63800.0), (600, 59400.0), (1200, 59300.0)]}
+    grappes = [_grappe(i * 10, 59500.0 + i) for i in range(54)]   # derive de quelques $
+    evs = evenements_declenches(grappes, marks)
+    assert len(evs) == 1, "54 snapshots de la meme grappe = 1 evenement, pas 54"
+
+
+def test_le_sens_BUY_franchit_vers_le_HAUT():
+    marks = {"ETH": [(0, 3000.0), (600, 3220.0)]}
+    evs = evenements_declenches([_grappe(0, 3200.0, coin="ETH", sens="BUY")], marks)
+    assert len(evs) == 1 and evs[0]["prix"] == 3220.0

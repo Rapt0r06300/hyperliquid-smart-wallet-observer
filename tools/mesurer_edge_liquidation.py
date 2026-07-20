@@ -17,7 +17,8 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
-from hl_observer.backtesting.liquidation_edge_measure import mesurer_edge_liquidation  # noqa: E402
+from hl_observer.backtesting.liquidation_edge_measure import (  # noqa: E402
+    evenements_declenches, mesurer_edge_liquidation)
 from hl_observer.market.liquidation_recorder import _db_path  # noqa: E402
 from hl_observer.runtime.replay_recorder import read_replay_lines  # noqa: E402
 
@@ -58,10 +59,17 @@ def main(argv=None) -> int:
     ap.add_argument("--horizon-s", type=float, default=1800.0)
     ap.add_argument("--cout-bps", type=float, default=12.0)
     a = ap.parse_args(argv)
-    evs = _lire_liquidations(a.root)
+    grappes = _lire_liquidations(a.root)
     marks = _lire_marks(a.root)
+    # 🔴 20/07 : mesurer sur les SNAPSHOTS donnait +735 bps / hit 100 % / PF ∞ — un artefact
+    # (entree au NIVEAU de la grappe, ~700 bps sous le marche, et la meme grappe comptee 54x).
+    # On ne mesure QUE les grappes dont le niveau a ete FRANCHI par le mark (entree au mark).
+    evs = evenements_declenches(grappes, marks)
     rap = mesurer_edge_liquidation(evs, marks, horizon_s=a.horizon_s, cout_aller_retour_bps=a.cout_bps)
-    print(json.dumps(rap.as_dict(), ensure_ascii=False, indent=2))
+    d = rap.as_dict()
+    d["grappes_snapshots"] = len(grappes)
+    d["evenements_declenches"] = len(evs)
+    print(json.dumps(d, ensure_ascii=False, indent=2))
     if rap.verdict == "INSUFFISANT":
         _dire_quoi_faire(a.root, len(evs))
     return 0
