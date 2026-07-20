@@ -454,6 +454,7 @@ function tick(){
     cRows.slice(0,16).forEach(function(p){var tr=document.createElement('tr');
       tr.innerHTML='<td>'+p.coin+'</td><td><span class="tag2 tg-g">CARRY</span></td><td>'+n(p.marge)+'</td><td data-carrylive="'+p.coin+'" style="text-align:right;color:'+col(p.accru)+'" title="funding accru — coule en continu (taux mesure)">+'+n(p.accru,6)+'</td>';tb.appendChild(tr);});
     if(!ps.length&&!cRows.length)tb.innerHTML='<tr><td colspan="4" style="color:var(--mut2);border:0;padding-top:10px">— aucune position ouverte —</td></tr>';
+    if(window.majAccruLive)majAccruLive();   // anti-saut : jamais une valeur brute a l'ecran
     // wiring
     var pe=(fus.paper_engine)||{},summ=fus.external_profile_execution_summary||{};
     function nd(ok,l,v){return '<span class="n"><span class="d" style="background:'+(ok?'var(--green)':'var(--red)')+';box-shadow:0 0 7px '+(ok?'var(--green)':'var(--red)')+'"></span>'+l+' <span style="color:var(--mut2)">'+v+'</span></span>';}
@@ -619,6 +620,7 @@ function loadCarry(){fetch('/v2/carry').then(function(r){return r.json()}).then(
     (v.length?('viables mesurés : '+v.map(function(x){return x.coin+' ('+n(x.funding_bps_h,3)+'b/h)';}).join('  ·  ')):'aucun coin viable ce tick')
     +(ligneChurn?('<br><span style="color:'+(ch.churn_detecte?'var(--red,#f88)':'var(--mut)')+'">'+ligneChurn+'</span>'):'')
     +(revenu?('<br><span style="color:var(--mut)">'+revenu+'</span>'):'');
+  if(window.majAccruLive)majAccruLive();     // anti-saut : le poll vient de reecrire du brut
   signalerOK('carry');
 }).catch(function(e){signalerPanne('carry',e);});}
 setInterval(loadCarry,2000);setTimeout(loadCarry,600);
@@ -627,7 +629,11 @@ setInterval(loadCarry,2000);setTimeout(loadCarry,600);
 // Ce ticker 1 s fait couler le temps entre deux releves : accru_affiche = dernier releve REEL
 // + taux_reel x secondes_ecoulees. Rien d'invente — c'est une interpolation du taux MESURE,
 // resnappee au chiffre du moteur a chaque poll (2 s). Le PnL vit, et il dit vrai.
-setInterval(function(){
+// 20/07 soir (« le pnl saute enormement ») : le poll 2 s reecrivait le tableau avec les
+// valeurs BRUTES du moteur, puis le ticker 1 s remettait la valeur vivante -> bascule
+// visible bas/haut chaque seconde. Le corps du ticker devient une fonction, appelee AUSSI
+// juste apres chaque reconstruction du tableau : plus jamais une valeur brute a l'ecran.
+function majAccruLive(){
   var rate=Number(window._carryRateUsdH||0),t0=window._carryPollTs;
   if(!t0)return;
   var extraH=(Date.now()-t0)/3.6e6, extra=rate*extraH;
@@ -642,7 +648,8 @@ setInterval(function(){
       c.textContent=(c.textContent.charAt(0)==='$'?'$':'+')+n(p.accruLive,6);});});
   window._carryNet=Number(window._carryReal||0)+live;
   if(window.syncTop)syncTop();
-},1000);
+}
+setInterval(majAccruLive,1000);
 </script></body></html>"""
 
 

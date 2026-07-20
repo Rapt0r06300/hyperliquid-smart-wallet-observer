@@ -216,6 +216,152 @@ def _sec_pnl_des_refus(root: Path, now_ms: int) -> list[str]:
     return out
 
 
+# ============================================================ 20/07 soir — LE RAPPORT QUI PILOTE
+# Demande de Flo : « le rapport doit être parfait afin d'améliorer le bot pour un PnL positif ».
+# Trois sections nouvelles, TOUTES en lecture seule (aucun effet sur la session qui tourne) :
+#   8. l'ÉCONOMIE par position ($/jour, amortie ou pas, heures restantes) ;
+#   9. l'UNIVERS du scan (lu dans le log du feeder) : viables + presque-viables AVEC leur verrou ;
+#  10. À FAIRE — des constats dérivés des données, jamais des promesses.
+
+def _sec_economie_positions(root: Path, now_ms: int) -> list[str]:
+    out = ["## 8. Carry — l'économie de chaque position ($/jour, amortissement)", ""]
+    try:
+        st = _json(root / "runtime" / "data" / "carry_paper_positions.json")
+        try:
+            sl = json.loads((root / "runtime" / "data" / "carry_spot_shortlist.json")
+                            .read_text(encoding="utf-8"))
+            shortlist = {str(r.get("coin") or "").upper(): r for r in sl if isinstance(r, dict)}
+        except (OSError, ValueError):
+            shortlist = {}
+        ouvertes = st.get("ouvertes") or {}
+        if not ouvertes:
+            out.append("Aucune position carry ouverte.")
+            return out
+        tot_rev, tot_marge = 0.0, 0.0
+        out.append("| coin | marge | notional | funding b/h | $/jour | accru | coût d'entrée | amortie ? |")
+        out.append("|---|---|---|---|---|---|---|---|")
+        for coin, p in sorted(ouvertes.items()):
+            notional = float(p.get("notional_usdt") or 0.0)
+            f_now = float((shortlist.get(coin) or {}).get("funding_bps_h")
+                          or p.get("funding_bps_h_entree") or 0.0)
+            rev_j = notional * f_now / 1e4 * 24.0
+            accru = float(p.get("funding_accrued_usdt") or 0.0)
+            cout = float(p.get("cout_entree_bps") or 0.0) * notional / 1e4
+            if cout <= 0:
+                statut = "OUI ✅ (entrée créditrice)"
+            elif accru >= cout:
+                statut = "OUI ✅"
+            elif rev_j > 0:
+                statut = "dans ~%.0f h" % ((cout - accru) / (rev_j / 24.0))
+            else:
+                statut = "jamais au taux courant ⚠️"
+            tot_rev += rev_j
+            tot_marge += float(p.get("marge_usdt") or 0.0)
+            out.append("| %s | %.0f$ | %.0f$ | %.3f | %.4f$ | %.4f$ | %.4f$ | %s |"
+                       % (coin, float(p.get("marge_usdt") or 0), notional, f_now, rev_j,
+                          accru, cout, statut))
+        out.append("")
+        out.append("**Total : %.4f $/jour au taux courant · marge engagée %.0f $** "
+                   "(déploiement à comparer au capital — la réserve de 20 %% est voulue)."
+                   % (tot_rev, tot_marge))
+    except Exception as exc:  # noqa: BLE001
+        out.append("section illisible : %s" % exc)
+    return out
+
+
+def _sec_univers_scan(root: Path) -> list[str]:
+    """Le dernier bloc « UNIVERS CARRY » du log feeder — lecture seule, format à nous.
+    Presque-viables listés AVEC leur verrou : c'est là que se cachent les déblocages mesurés."""
+    out = ["## 9. Scan carry — univers, viables, et presque-viables (avec leur verrou)", ""]
+    try:
+        txt = (root / "runtime" / "logs" / "carry-feeder.log").read_text(
+            encoding="utf-8", errors="replace")
+        blocs = txt.split("=== UNIVERS CARRY")
+        if len(blocs) < 2:
+            out.append("Univers introuvable dans le log feeder (collecteur pas encore passé ?).")
+            return out
+        lignes = blocs[-1].splitlines()[2:]
+        viables, bloques = [], []
+        for l in lignes:
+            l = l.strip()
+            if not l or l.startswith("coin") or "coin(s) perp∩spot" in l:
+                if "coin(s) perp∩spot" in l:
+                    out.append("_%s_" % l)
+                    out.append("")
+                break_after = "coin(s) perp∩spot" in l
+                if break_after:
+                    break
+                continue
+            morceaux = l.split(None, 4)
+            if len(morceaux) < 5:
+                continue
+            coin, funding, liq, pire, statut = morceaux[0], morceaux[1], morceaux[2], morceaux[3], morceaux[4]
+            (viables if statut.startswith("VIABLE") else bloques).append(
+                (coin, funding, liq, statut))
+        if viables:
+            out.append("**Viables (%d)** : %s" % (len(viables),
+                       " · ".join("%s (%s, liq %s)" % (c, f, q) for c, f, q, _ in viables)))
+            out.append("")
+        if bloques:
+            out.append("**Bloqués — et par QUOI (le verrou est une info, pas une fatalité) :**")
+            out.append("")
+            for c, f, q, s in bloques[:12]:
+                out.append("- `%s` (%s, liq %s) → %s" % (c, f, q, s))
+    except Exception as exc:  # noqa: BLE001
+        out.append("section illisible : %s" % exc)
+    return out
+
+
+def _sec_a_faire(root: Path, now_ms: int) -> list[str]:
+    """Des CONSTATS actionnables dérivés des fichiers — jamais une promesse, jamais un ordre."""
+    out = ["## 10. À FAIRE — ce que les données d'aujourd'hui désignent", ""]
+    actions: list[str] = []
+    try:  # cross-venue : verdict possible ?
+        lignes = (root / "runtime" / "data" / "dispersion_venues.jsonl").read_text(
+            encoding="utf-8").splitlines()
+        def _ts(l):
+            r = json.loads(l)
+            return float(r.get("ts_ms") or (r.get("ts") or 0) * 1000.0) / 1000.0
+        h = (_ts(lignes[-1]) - _ts(lignes[0])) / 3600.0 if len(lignes) > 1 else 0.0
+        if h >= 72.0:
+            actions.append("**Cross-venue : 72 h atteintes (%.0f h)** → lancer "
+                           "`python tools/mesurer_dispersion_venues.py` pour LE verdict (#178)." % h)
+        else:
+            actions.append("Cross-venue : %.1f h / 72 h — verdict dans ~%.0f h. Rien à faire." % (h, 72.0 - h))
+    except Exception:  # noqa: BLE001
+        actions.append("Cross-venue : collecte illisible → vérifier venues-collector (superviseur).")
+    try:  # superviseur : relances anormales ?
+        sup = _json(root / "runtime" / "data" / "superviseur_collecteurs.json")
+        rel = {k: v.get("relances_total") for k, v in sup.items()
+               if isinstance(v, dict) and v.get("relances_total")}
+        if rel:
+            actions.append("Relances de collecteurs au compteur : %s — si un compteur grimpe "
+                           "SEUL demain, c'est lui le malade (doc R5)." % rel)
+    except Exception:  # noqa: BLE001
+        pass
+    try:  # whitelist copy : nourrie ?
+        wl = _json(root / "runtime" / "data" / "copy_whitelist.json")
+        n = len(wl.get("gardes") or [])
+        actions.append("Copy-whitelist : %d leader(s) prouvé(s) → copy %s." %
+                       (n, "peut suivre CES leaders uniquement" if n else
+                        "verrouillé (aucun leader au markout prouvé — c'est la protection, pas une panne)"))
+    except Exception:  # noqa: BLE001
+        pass
+    try:  # replay : assez de données pour la recherche de scénario ?
+        base = root / "runtime" / "replay"
+        n_cand = sum(1 for _ in (base / "candidates.jsonl").open(encoding="utf-8")) \
+            if (base / "candidates.jsonl").exists() else 0
+        if n_cand >= 2000:
+            actions.append("Replay : %d candidats consolidés → `RECHERCHE-SCENARIO-REPLAY.cmd` "
+                           "a de quoi travailler (porte deux-moitiés + plateau)." % n_cand)
+        else:
+            actions.append("Replay : %d candidats consolidés (< 2000) — laisser l'usine tourner." % n_cand)
+    except Exception:  # noqa: BLE001
+        pass
+    out += ["- " + a for a in actions] if actions else ["Rien à signaler."]
+    return out
+
+
 def generer(root: str | Path = RACINE, *, now_ms: int | None = None) -> str:
     """Le rapport complet en Markdown. Ne lève JAMAIS (un rapport absent = un matin aveugle)."""
     try:
@@ -240,6 +386,10 @@ def generer(root: str | Path = RACINE, *, now_ms: int | None = None) -> str:
         except Exception as exc:  # noqa: BLE001
             secs.append(["## 6. Leçons du ledger", "", "section illisible : %s" % exc])
         secs.append(_sec_pnl_des_refus(racine, now))   # #186 : hebdo, cache date, jamais bloquant
+        # 20/07 : le rapport qui PILOTE — economie/position, univers du scan, actions du jour.
+        secs.append(_sec_economie_positions(racine, now))
+        secs.append(_sec_univers_scan(racine))
+        secs.append(_sec_a_faire(racine, now))
         for sec in secs:
             parts += sec + [""]
         parts.append("---")

@@ -124,3 +124,55 @@ def test_le_rapport_complet_contient_la_section_7(tmp_path):
     texte = m.generer(tmp_path, now_ms=1_000_000_000_000)
     assert "## 7. PnL des refus" in texte
     assert "Sécurité : 0 ordre réel" in texte
+
+
+# ---------------- 20/07 soir : LE RAPPORT QUI PILOTE (sections 8/9/10) ----------------
+
+def test_section8_economie_par_position_calcule_revenu_cout_et_amortissement(tmp_path):
+    m = _mod()
+    d = tmp_path / "runtime" / "data"; d.mkdir(parents=True)
+    (d / "carry_paper_positions.json").write_text(json.dumps({"ouvertes": {
+        "HYPE": {"coin": "HYPE", "marge_usdt": 100.0, "notional_usdt": 150.0, "levier": 1.5,
+                 "funding_accrued_usdt": 0.05, "cout_entree_bps": 2.0,
+                 "funding_bps_h_entree": 0.125}}}), encoding="utf-8")
+    (d / "carry_spot_shortlist.json").write_text(json.dumps(
+        [{"coin": "HYPE", "funding_bps_h": 0.250}]), encoding="utf-8")
+    t = "\n".join(m._sec_economie_positions(tmp_path, now_ms=0))
+    assert "## 8." in t and "HYPE" in t
+    assert "0.0900$" in t, "revenu/j = 150$ x 2.5e-5/h x 24 = 0.0900 $ (au funding COURANT, " \
+        "coherent avec le '75$ -> 2,25 c/j' du module marge_dynamique)"
+    assert "0.0300$" in t, "cout d'entree = 2 bps x 150$ = 0.0300 $"
+    assert "OUI ✅" in t, "accru 0.05 >= cout 0.03 -> amortie"
+
+
+def test_section9_univers_lit_le_log_feeder_et_montre_les_verrous(tmp_path):
+    m = _mod()
+    lg = tmp_path / "runtime" / "logs"; lg.mkdir(parents=True)
+    (lg / "carry-feeder.log").write_text(
+        "=== UNIVERS CARRY (tous les coins perp∩spot Hyperliquid) ===\n"
+        "    coin      funding/h   spot liq $    pire-h  statut\n"
+        "    BTC       +0.125b       351k       12%  VIABLE\n"
+        "    AVAX      +0.125b        23k       25%  break-even trop lent (455 h > 235 h)\n"
+        "  20 coin(s) perp∩spot, 7 VIABLE(S)\n", encoding="utf-8")
+    t = "\n".join(m._sec_univers_scan(tmp_path))
+    assert "BTC" in t and "Viables (1)" in t
+    assert "AVAX" in t and "break-even trop lent" in t, "le VERROU du presque-viable est montre"
+
+
+def test_section10_a_faire_derive_des_constats_des_fichiers(tmp_path):
+    m = _mod()
+    d = tmp_path / "runtime" / "data"; d.mkdir(parents=True)
+    (d / "dispersion_venues.jsonl").write_text(
+        json.dumps({"ts": 0}) + "\n" + json.dumps({"ts": 73 * 3600}) + "\n", encoding="utf-8")
+    (d / "copy_whitelist.json").write_text(json.dumps({"gardes": []}), encoding="utf-8")
+    t = "\n".join(m._sec_a_faire(tmp_path, now_ms=0))
+    assert "72 h atteintes" in t and "mesurer_dispersion_venues" in t, "verdict cross-venue designe"
+    assert "verrouillé" in t, "whitelist vide = protection dite, pas panne"
+
+
+def test_le_rapport_complet_contient_les_sections_8_9_10_et_ne_plante_jamais(tmp_path):
+    m = _mod()
+    t = m.generer(tmp_path, now_ms=1_000_000_000_000)
+    for s in ("## 8.", "## 9.", "## 10."):
+        assert s in t
+    assert "Sécurité : 0 ordre réel" in t
