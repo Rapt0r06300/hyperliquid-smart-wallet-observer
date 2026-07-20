@@ -115,3 +115,35 @@ def test_aucun_getElementById_sans_element():
     refs = set(re.findall(r"getElementById\(['\"]([A-Za-z0-9_-]+)['\"]\)", page))
     manquants = sorted(refs - ids)
     assert not manquants, "getElementById sans élément (crash JS garanti) : %r" % manquants
+
+
+# ---------------- 20/07 soir : UNIFICATION des positions + session jusqu'au navigateur ----------------
+
+def test_l_endpoint_carry_TRANSMET_le_pnl_de_session():
+    """Le bug vu par Flo dans Chrome : etat_carry CALCULAIT le PnL de session, mais le dict de
+    reponse /v2/carry filtrait les cles -> le grand chiffre affichait l'HISTORIQUE (-6.03).
+    Un filtre de cles est une porte : il doit laisser passer tout ce que l'ecran promet."""
+    src = open("src/hl_observer/ui/dashboard_v2.py", encoding="utf-8").read()
+    assert '"realized_net_pnl_usdc_session": etat.get("realized_net_pnl_usdc_session")' in src
+    assert '"taux_accrual_usd_h"' in src, "le taux usd/h alimente le ticker de fraicheur"
+
+
+def test_le_panneau_POSITIONS_est_UNIFIE_copy_plus_carry():
+    """« 3 positions ouvertes mais je ne les vois pas dans l'ecran des positions » : le panneau
+    ne montrait que le copy. Desormais les lignes carry y sont, etiquetees CARRY, et le
+    compteur additionne les deux. Une page, une verite."""
+    src = open("src/hl_observer/ui/dashboard_v2.py", encoding="utf-8").read()
+    assert "window._carryRows" in src
+    assert "(ps.length+cRows.length)+' ouvertes'" in src
+    assert "tag2 tg-g\">CARRY" in src.replace("'", '"')
+    assert "!ps.length&&!cRows.length" in src, "le message 'aucune position' exige les DEUX vides"
+
+
+def test_le_ticker_de_fraicheur_interpole_le_taux_MESURE_et_resnappe():
+    """« Je veux une fraicheur maximum » : le funding coule continument dans la realite. Le
+    ticker 1 s = dernier releve REEL + taux MESURE x temps ecoule, resnappe a chaque poll (2 s).
+    Interpolation d'une mesure, jamais une invention."""
+    src = open("src/hl_observer/ui/dashboard_v2.py", encoding="utf-8").read()
+    assert "setInterval(loadCarry,2000)" in src, "poll carry acceleree 4s -> 2s"
+    assert "_carryRateUsdH" in src and "_carryPollTs" in src
+    assert "resnappee" in src, "le contrat d'honnetete de l'interpolation est documente"

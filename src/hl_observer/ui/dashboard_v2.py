@@ -430,11 +430,18 @@ function tick(){
     if(nt&&typeof nt==='object'&&Object.keys(nt).length){R.innerHTML=Object.keys(nt).slice(0,6).map(function(k){
       return '<div><span style="color:var(--amber)">✕</span> '+k.toLowerCase()+' <span style="color:var(--mut2)">×'+nt[k]+'</span></div>';}).join('');}
     else{R.innerHTML='<span style="color:var(--mut2)">— aucun refus enregistré ce tick —</span>';}
-    // positions table
-    var tb=document.getElementById('postb');tb.innerHTML='';document.getElementById('poslbl').textContent=ps.length+' ouvertes';
+    // positions table — 🔴 UNIFIEE (20/07, constat de Flo : « 3 positions ouvertes mais je ne
+    // les vois pas dans l'ecran des positions »). Ce panneau ne montrait QUE les positions
+    // copy ; les carry vivaient ailleurs. Une page, une verite : TOUTES les positions paper
+    // ici, etiquetees par strategie. Les lignes carry viennent de loadCarry (window._carryRows).
+    var tb=document.getElementById('postb');tb.innerHTML='';
+    var cRows=window._carryRows||[];
+    document.getElementById('poslbl').textContent=(ps.length+cRows.length)+' ouvertes';
     ps.slice(0,16).forEach(function(p){var g=modeOf(p),pp=Number(p.unrealized_pnl_usdc||p.pnl_usdc||0),notl=Number(p.notional_usdt||p.copied_notional_usdt||0),tr=document.createElement('tr');
       tr.innerHTML='<td>'+(p.coin||'?')+'</td><td><span class="tag2 '+(g==='SNIPER'?'tg-s':'tg-g')+'">'+g+'</span></td><td>'+n(notl/10)+'</td><td style="text-align:right;color:'+col(pp)+'">'+(pp>=0?'+':'')+n(pp)+'</td>';tb.appendChild(tr);});
-    if(!ps.length)tb.innerHTML='<tr><td colspan="4" style="color:var(--mut2);border:0;padding-top:10px">— aucune position ouverte —</td></tr>';
+    cRows.slice(0,16).forEach(function(p){var tr=document.createElement('tr');
+      tr.innerHTML='<td>'+p.coin+'</td><td><span class="tag2 tg-g">CARRY</span></td><td>'+n(p.marge)+'</td><td style="text-align:right;color:'+col(p.accru)+'" title="funding accru (estime en continu entre les releves moteur)">+'+n(p.accru,4)+'</td>';tb.appendChild(tr);});
+    if(!ps.length&&!cRows.length)tb.innerHTML='<tr><td colspan="4" style="color:var(--mut2);border:0;padding-top:10px">— aucune position ouverte —</td></tr>';
     // wiring
     var pe=(fus.paper_engine)||{},summ=fus.external_profile_execution_summary||{};
     function nd(ok,l,v){return '<span class="n"><span class="d" style="background:'+(ok?'var(--green)':'var(--red)')+';box-shadow:0 0 7px '+(ok?'var(--green)':'var(--red)')+'"></span>'+l+' <span style="color:var(--mut2)">'+v+'</span></span>';}
@@ -559,6 +566,14 @@ function loadCarry(){fetch('/v2/carry').then(function(r){return r.json()}).then(
   document.getElementById('carry-accru').textContent='$'+n(d.funding_accru_usdt,4);
   var ps=d.positions||[];
   tb.innerHTML=ps.map(function(p){return '<tr><td><b>'+p.coin+'</b></td><td>$'+n(p.notional_usdt,0)+'</td><td>'+n(p.levier,1)+'x</td><td style="color:var(--cyan)">$'+n(p.funding_accrued_usdt,4)+'</td><td style="text-align:right">'+n(p.age_h,1)+'h</td></tr>';}).join('')||'<tr><td colspan="5" style="color:var(--mut2)">— aucune position carry ouverte —</td></tr>';
+  // UNIFICATION + FRAICHEUR (20/07) : les positions carry partent AUSSI dans le panneau
+  // POSITIONS unifie, et leur taux d'accrual (usd/h) alimente le ticker 1 s qui fait vivre
+  // le PnL entre les releves moteur -- interpolation honnete, resnappee au reel a chaque poll.
+  window._carryRows=ps.map(function(p){return {coin:p.coin,marge:Number(p.marge_usdt||0),
+    accru:Number(p.funding_accrued_usdt||0),rate:Number(p.taux_accrual_usd_h||0)};});
+  window._carryRateUsdH=ps.reduce(function(s,p){return s+Number(p.taux_accrual_usd_h||0);},0);
+  window._carryAccruBase=Number(d.funding_accru_usdt||0);
+  window._carryPollTs=Date.now();
   var v=d.viables||[];
   // ── #24-27 : LE CHURN DOIT ÊTRE VISIBLE. Le 19/07, le bot a fait 32 ouvertures et 31
   // fermetures du MÊME coin en 22,3 h ; le dashboard n'affichait qu'un PnL « qui ne bouge pas ».
@@ -578,7 +593,24 @@ function loadCarry(){fetch('/v2/carry').then(function(r){return r.json()}).then(
     +(revenu?('<br><span style="color:var(--mut)">'+revenu+'</span>'):'');
   signalerOK('carry');
 }).catch(function(e){signalerPanne('carry',e);});}
-setInterval(loadCarry,4000);setTimeout(loadCarry,600);
+setInterval(loadCarry,2000);setTimeout(loadCarry,600);
+// ── FRAICHEUR MAXIMALE (20/07, demande de Flo : « le PnL ne bouge pas en temps reel »).
+// Le funding s'accumule CONTINUMENT dans la realite ; le moteur ne le releve que par passes.
+// Ce ticker 1 s fait couler le temps entre deux releves : accru_affiche = dernier releve REEL
+// + taux_reel x secondes_ecoulees. Rien d'invente — c'est une interpolation du taux MESURE,
+// resnappee au chiffre du moteur a chaque poll (2 s). Le PnL vit, et il dit vrai.
+setInterval(function(){
+  var rate=Number(window._carryRateUsdH||0),t0=window._carryPollTs;
+  if(!t0)return;
+  var extraH=(Date.now()-t0)/3.6e6, extra=rate*extraH;
+  var base=Number(window._carryAccruBase||0), live=base+extra;
+  var el=document.getElementById('carry-accru');
+  if(el)el.textContent='$'+n(live,4);
+  var rows=window._carryRows||[];
+  rows.forEach(function(p){p.accruLive=Number(p.accru||0)+Number(p.rate||0)*extraH;});
+  window._carryNet=Number(window._carryReal||0)+live;
+  if(window.syncTop)syncTop();
+},1000);
 </script></body></html>"""
 
 
@@ -699,6 +731,12 @@ def create_dashboard_v2_router() -> APIRouter:
                     "levier": float(p.get("levier") or 0.0),
                     "funding_accrued_usdt": float(p.get("funding_accrued_usdt") or 0.0),
                     "age_h": round((now - float(p.get("entry_ts_ms") or now)) / 3.6e6, 2),
+                    # FRAICHEUR (20/07) : le taux d'accrual usd/h -> le navigateur anime le
+                    # PnL en continu ENTRE les releves moteur (interpolation honnete, resnappee
+                    # au reel a chaque poll -- rien d'invente, juste le temps qui coule).
+                    "taux_accrual_usd_h": round(
+                        float(p.get("notional_usdt") or 0.0)
+                        * float(p.get("funding_bps_h_entree") or 0.0) / 1e4, 8),
                 })
             viables = []
             try:
@@ -752,6 +790,14 @@ def create_dashboard_v2_router() -> APIRouter:
                 "churn": churn, "revenu_jour_usd": revenu_jour, "heures_amorti": heures_amorti,
                 "positions_ouvertes": etat["positions_ouvertes"],
                 "realized_net_pnl_usdc": etat["realized_net_pnl_usdc"],
+                # 🔴 UNIFICATION (20/07, constat de Flo dans Chrome) : ce dict FILTRAIT les
+                # cles -- le champ SESSION calcule par etat_carry mourait ICI, et le grand
+                # chiffre affichait l'historique (-6.03) au lieu de la session (~0). La lecon
+                # provenance/perimetre, version endpoint : un filtre de cles est une porte,
+                # il doit laisser passer TOUT ce que l'ecran promet.
+                "realized_net_pnl_usdc_session": etat.get("realized_net_pnl_usdc_session"),
+                "closes_session": etat.get("closes_session"),
+                "session_id": etat.get("session_id"),
                 "funding_accru_usdt": round(accru, 6),
                 "opens": etat["opens"], "closes": etat["closes"],
                 "positions": positions, "viables": viables,
