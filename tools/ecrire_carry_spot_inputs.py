@@ -39,6 +39,8 @@ from hl_observer.funding.delta_neutral_carry import evaluer_carry_neutre  # noqa
 from hl_observer.funding.funding_persistence import estimer_persistance  # noqa: E402
 from hl_observer.funding.funding_zscore import zscore_funding  # noqa: E402
 from hl_observer.funding.carry_optimizer import facteur_zscore as _fzs  # noqa: E402  Y4 sizing
+from hl_observer.funding.funding_previsionnel import (  # noqa: E402  timing (20/07)
+    prevoir_funding_bps_h, tendance as _tendance_prev, facteur_prevision)
 
 API = "https://api.hyperliquid.xyz/info"
 INPUTS_PATH = ROOT / "runtime" / "data" / "carry_spot_inputs.json"
@@ -92,9 +94,15 @@ def _perps() -> dict[str, dict]:
         nom = str(a.get("name") or "").upper()
         if nom and isinstance(c, dict):
             try:
+                mark = float(c.get("markPx") or 0.0)
+                oracle = float(c.get("oraclePx") or 0.0)
                 out[nom] = {"funding_bps_h": float(c.get("funding") or 0.0) * 10_000.0,
-                            "mark": float(c.get("markPx") or 0.0),
-                            "levier_max": float(a.get("maxLeverage") or 0.0)}
+                            "mark": mark,
+                            "levier_max": float(a.get("maxLeverage") or 0.0),
+                            # PREVISION (20/07) : premium mark-vs-ORACLE en bps -- l'entree de
+                            # la formule officielle de funding (F = premium + clamp(...)).
+                            "premium_bps": (round((mark - oracle) / oracle * 1e4, 4)
+                                            if oracle > 0 and mark > 0 else None)}
             except (TypeError, ValueError):
                 pass
     return out
@@ -363,7 +371,14 @@ def scanner(diagnostic: bool):
                            "funding_persistant_bps_h": round(fp.funding_persistant_bps_h, 6),
                            "funding_fiable": fp.fiable,
                            "funding_zscore": zf.zscore, "funding_regime": zf.regime,
-                           "facteur_taille": round(_fzs(zf.zscore), 4),   # Y4 : + gros si funding spike
+                           "funding_prevu_bps_h": prevoir_funding_bps_h(p.get("premium_bps")),
+                           "funding_tendance": _tendance_prev(
+                               prevoir_funding_bps_h(p.get("premium_bps")), p["funding_bps_h"]),
+                           # Y4 x PREVISION : le z-score peut GROSSIR (realise), la prevision ne
+                           # peut que REDUIRE (entrer dans une decrue annoncee = risque, pas edge)
+                           "facteur_taille": round(_fzs(zf.zscore) * facteur_prevision(
+                               prevoir_funding_bps_h(p.get("premium_bps")),
+                               p["funding_bps_h"]), 4),
                            "base_bps": round(base, 4),
                            "break_even_h": round(float(be), 2),
                            "liquidite_spot_usd": round(liq, 2), "maker": True,
