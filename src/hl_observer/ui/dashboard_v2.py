@@ -598,7 +598,10 @@ function loadCarry(){fetch('/v2/carry').then(function(r){return r.json()}).then(
   // session n'existe pas encore (vieux moteur), on affiche le total comme avant.
   var realSess=(d.realized_net_pnl_usdc_session!=null)?Number(d.realized_net_pnl_usdc_session):Number(d.realized_net_pnl_usdc||0);
   window._carryPos=(d.positions_ouvertes||0);window._carryReal=realSess;
-  window._carryNet=realSess+Number(d.funding_accru_usdt||0);
+  // 20/07 soir : MEME definition ICI aussi (realise + accru + MtM) — plus jamais une valeur
+  // transitoire d'une autre definition, meme pour une frame.
+  var _mtmPoll=(d.positions||[]).reduce(function(s,p){return s+(Number(p.base_mtm_usd)||0);},0);
+  window._carryNet=realSess+Number(d.funding_accru_usdt||0)+_mtmPoll;
   // 🔴 20/07 : « TRADES CLOS 6 » melangeait TROIS perimetres sur la rangee SESSION (copy =
   // session moteur, carry = fenetre 24 h du churn). closes_session (ledger etiquete) aligne
   // la tuile sur la session, comme le grand PnL ; repli honnete : compteur 24 h si vieux moteur.
@@ -700,6 +703,28 @@ function majAccruLive(){
 </script></body></html>"""
 
 
+def bases_courantes_mid(root, *, max_age_s: float = 900.0) -> dict:
+    """{COIN: base_mid_bps} depuis carry_bases_courantes.json (TOUS les coins scannés, marquage
+    MID). Fichier absent/périmé -> {} : un marquage périmé n'est pas un marquage.
+
+    20/07 soir : le yoyo −0,22 → +0,31 → −0,18 venait d'un marquage au VWAP-500$ (instrument
+    d'ENTRÉE, qui saute avec la profondeur) limité à la shortlist (les positions sorties de la
+    shortlist clignotaient 0↔gros montant). MID + tous-les-coins = marquage stable et complet."""
+    import json as _json
+    import time as _time
+    from pathlib import Path as _P
+    try:
+        d = _json.loads((_P(root) / "runtime" / "data" / "carry_bases_courantes.json")
+                        .read_text(encoding="utf-8-sig"))
+        if (_time.time() * 1000 - float(d.get("ts_ms") or 0)) > max_age_s * 1000:
+            return {}
+        return {str(k).upper(): float(v.get("base_mid_bps"))
+                for k, v in (d.get("bases") or {}).items()
+                if isinstance(v, dict) and v.get("base_mid_bps") is not None}
+    except (OSError, ValueError, TypeError):
+        return {}
+
+
 def base_mtm_usd(base_entree_bps, base_courante_bps, notional_usdt) -> float | None:
     """Mark-to-market de la BASE depuis l'entrée (long spot + short perp) — la composante du
     PnL qui BOUGE DANS LES DEUX SENS (20/07 soir, constat de Flo : « le PnL monte comme un
@@ -743,15 +768,12 @@ def net_carry_courant(root: "Path | str | None" = None) -> float:
         # Base non mesuree ce tick -> contribution 0 (jamais inventee), definition inchangee.
         mtm = 0.0
         try:
-            import json as _j
-            bases = {str(x.get("coin")).upper(): float(x["base_bps"])
-                     for x in _j.loads((racine / "runtime" / "data" / "carry_spot_shortlist.json")
-                                       .read_text(encoding="utf-8-sig"))
-                     if isinstance(x, dict) and x.get("coin") and x.get("base_bps") is not None}
+            bases = bases_courantes_mid(racine)
             for c, p in g.ouvertes.items():
                 bc = bases.get(str(c).upper())
-                m = base_mtm_usd(p.get("base_bps_entree"), bc,
-                                 p.get("notional_usdt")) if bc is not None else None
+                be = (p.get("base_mid_bps_entree") if p.get("base_mid_bps_entree") is not None
+                      else p.get("base_bps_entree"))
+                m = base_mtm_usd(be, bc, p.get("notional_usdt")) if bc is not None else None
                 mtm += m or 0.0
         except (OSError, ValueError, TypeError):
             pass
@@ -841,22 +863,19 @@ def create_dashboard_v2_router() -> APIRouter:
             etat = etat_carry(root)
             g = charger_gestionnaire(root)
             now = _time.time() * 1000.0
-            # BASE COURANTE par coin (mesuree par le feeder) -> le MtM de base par position.
-            # Position hors shortlist ce tick -> base non mesuree -> None (jamais invente).
-            bases_courantes: dict[str, float] = {}
-            try:
-                for x in _json.loads((root / "runtime" / "data" / "carry_spot_shortlist.json")
-                                     .read_text(encoding="utf-8-sig")):
-                    if isinstance(x, dict) and x.get("coin") and x.get("base_bps") is not None:
-                        bases_courantes[str(x["coin"]).upper()] = float(x["base_bps"])
-            except (OSError, ValueError, TypeError):
-                pass
+            # BASE COURANTE par coin — marquage MID, TOUS les coins scannes (20/07 soir : fin
+            # du yoyo VWAP + fin du clignotement hors-shortlist). Fichier absent/perime -> pas
+            # de MtM du tout (un marquage perime n'est pas un marquage), jamais un repli bruite.
+            bases_courantes = bases_courantes_mid(root)
             positions = []
             accru = 0.0
             for coin, p in g.ouvertes.items():
                 accru += float(p.get("funding_accrued_usdt") or 0.0)
                 _bc = bases_courantes.get(str(coin).upper())
-                _mtm = base_mtm_usd(p.get("base_bps_entree"), _bc,
+                _be = (p.get("base_mid_bps_entree")
+                       if p.get("base_mid_bps_entree") is not None
+                       else p.get("base_bps_entree"))   # positions d'avant : entree VWAP (note)
+                _mtm = base_mtm_usd(_be, _bc,
                                     p.get("notional_usdt")) if _bc is not None else None
                 positions.append({
                     "base_mtm_usd": _mtm,

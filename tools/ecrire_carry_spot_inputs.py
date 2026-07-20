@@ -375,6 +375,12 @@ def scanner(diagnostic: bool):
     apparies = _apparier_spots(perps, spots)
     communs = sorted(apparies)
     rapport, viables = [], []
+    # 🔴 20/07 soir (yoyo -0,22 -> +0,31 -> -0,18 en 20 min) : le MtM d'affichage etait marque
+    # au VWAP D'ACHAT 500 $ (l'instrument d'ENTREE, qui saute avec la profondeur du carnet) et
+    # seulement pour les coins de la shortlist (les autres clignotaient 0<->gros montant).
+    # Remede : publier a CHAQUE passe la base au MID (l'instrument de MARQUAGE standard) pour
+    # TOUS les coins scannes -> marquage stable, complet, et remontable a cette passe.
+    bases_mid_dump: dict[str, dict] = {}
     for c in communs:
         p = perps[c]
         cands = [x for x in apparies.get(c, []) if x["mark"] > 0]
@@ -390,6 +396,12 @@ def scanner(diagnostic: bool):
             mid, liq, vwap = carnet
             spot_px = vwap if (vwap and vwap > 0) else mid   # base au VRAI prix de fill (VWAP), sinon mid
         base = (p["mark"] - spot_px) / spot_px * 10_000.0 if spot_px > 0 else 9e9
+        # base au MID (marquage) — le VWAP reste l'instrument de DECISION d'entree, jamais celui
+        # du marquage : sur un carnet mince, le VWAP-500$ bouge de dizaines de bps par passe.
+        spot_mid = (mid if carnet is not None else float(s["mark"])) or 0.0
+        base_mid = ((p["mark"] - spot_mid) / spot_mid * 10_000.0) if spot_mid > 0 else None
+        if base_mid is not None and abs(base_mid) <= BASE_ABERRANTE_BPS:
+            bases_mid_dump[c] = {"base_mid_bps": round(base_mid, 4), "liq": round(liq, 2)}
         pire = pires.get(c)
         if pire is None:                       # pas de bougie locale -> on FETCH (plus de coins)
             pire = _pire_via_api(c)
@@ -452,6 +464,7 @@ def scanner(diagnostic: bool):
                                prevoir_funding_bps_h(p.get("premium_bps")),
                                p["funding_bps_h"]), 4),
                            "base_bps": round(base, 4),
+                           "base_mid_bps": (round(base_mid, 4) if base_mid is not None else None),
                            "break_even_h": round(float(be), 2),
                            "liquidite_spot_usd": round(liq, 2), "maker": True,
                            "levier_max": p["levier_max"], "marge_ratio": mr,
@@ -463,6 +476,15 @@ def scanner(diagnostic: bool):
                            "source": "hyperliquid public API (perp+spot) + bougies 1h", "real_execution": False}
                     viables.append((c, inp, v.heures_pour_rentabiliser, v.gain_net_24h_bps, zf.zscore))
         rapport.append((c, p["funding_bps_h"], liq, pire, "VIABLE" if inp else raison))
+    # marquage MID pour TOUS les coins scannes (voir commentaire en tete de boucle)
+    try:
+        chemin_bases = ROOT / "runtime" / "data" / "carry_bases_courantes.json"
+        chemin_bases.parent.mkdir(parents=True, exist_ok=True)
+        chemin_bases.write_text(json.dumps(
+            {"ts_ms": int(time.time() * 1000), "bases": bases_mid_dump},
+            ensure_ascii=False), encoding="utf-8")
+    except OSError:
+        print("  (carry_bases_courantes.json inecrivable — marquage MID indisponible ce tick)")
     viables = classer_viables(viables)          # A2 : classe par carry NET, coupe au top-K
     return rapport, viables
 

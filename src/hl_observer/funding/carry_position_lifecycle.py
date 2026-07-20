@@ -96,6 +96,9 @@ def ouvrir_position(decision: dict[str, Any], inputs: dict[str, Any], *,
         "gain_net_24h_bps": _f(decision, "gain_net_24h_bps"),   # A7 : pour la rotation vers le meilleur net
         "cout_entree_bps": _f(decision, "cout_entree_bps"),
         "base_bps_entree": _f(decision, "base_bps"),
+        # 20/07 soir : la base au MID a l'entree — le MtM d'affichage se marque MID contre MID
+        # (le VWAP reste l'instrument de decision/couts, jamais celui du marquage).
+        "base_mid_bps_entree": _f(inputs, "base_mid_bps"),
         "entry_perp_px": _f(inputs, "perp_px"),          # prix perp a l'entree -> hausse live = (cours-entree)/entree
         "liquidite_spot_usd": _f(decision, "liquidite_spot_usd") or _f(inputs, "liquidite_spot_usd"),
         "pire_hausse_entree": _f(inputs, "pire_hausse_observee"),

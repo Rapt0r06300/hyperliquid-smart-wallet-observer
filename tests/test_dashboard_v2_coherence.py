@@ -296,8 +296,40 @@ def test_UNE_SEULE_definition_du_net_carry_la_courbe_inclut_le_MtM(tmp_path):
                  "funding_accrued_usdt": 0.01, "base_bps_entree": 30.0,
                  "cout_entree_bps": 2.0, "entry_ts_ms": 1,
                  "marge_usdt": 100.0, "levier": 1.5}}}), encoding="utf-8")
-    (d / "carry_spot_shortlist.json").write_text(_j.dumps(
-        [{"coin": "HYPE", "base_bps": 10.0}]), encoding="utf-8")
+    import time as _t
+    (d / "carry_bases_courantes.json").write_text(_j.dumps(
+        {"ts_ms": _t.time() * 1000, "bases": {"HYPE": {"base_mid_bps": 10.0, "liq": 50000}}}),
+        encoding="utf-8")
     net = net_carry_courant(tmp_path)
     assert abs(net - (0.01 + 0.30)) < 1e-9, \
         "net = accru 0.01 + MtM (30-10)bps x 150$ = 0.31 — la MEME somme que l'affichage"
+
+
+def test_le_marquage_MID_perime_ou_absent_donne_ZERO_MtM_jamais_un_bruit(tmp_path):
+    """20/07 soir (yoyo -0,22 -> +0,31) : marquer au VWAP-500$ d'une shortlist partielle
+    fabriquait des sauts. Regle : marquage MID de TOUS les coins scannes ; fichier absent ou
+    perime -> {} -> MtM absent (un marquage perime n'est pas un marquage)."""
+    import json as _j, time as _t
+    from hl_observer.ui.dashboard_v2 import bases_courantes_mid
+    assert bases_courantes_mid(tmp_path) == {}
+    d = tmp_path / "runtime" / "data"; d.mkdir(parents=True)
+    (d / "carry_bases_courantes.json").write_text(_j.dumps(
+        {"ts_ms": (_t.time() - 3600) * 1000, "bases": {"HYPE": {"base_mid_bps": 5.0}}}),
+        encoding="utf-8")
+    assert bases_courantes_mid(tmp_path) == {}, "perime (1 h) -> vide, jamais un vieux marquage"
+    (d / "carry_bases_courantes.json").write_text(_j.dumps(
+        {"ts_ms": _t.time() * 1000, "bases": {"HYPE": {"base_mid_bps": 5.0}}}), encoding="utf-8")
+    assert bases_courantes_mid(tmp_path) == {"HYPE": 5.0}
+
+
+def test_la_chaine_MID_est_cablee_feeder_entree_endpoint_et_poll():
+    """Le feeder publie base_mid pour TOUS les coins ; l'entree stocke base_mid_bps_entree ;
+    l'endpoint marque MID contre MID ; le poll JS n'a plus de definition transitoire."""
+    src = _src()
+    feed = open("tools/ecrire_carry_spot_inputs.py", encoding="utf-8").read()
+    lifec = open("src/hl_observer/funding/carry_position_lifecycle.py", encoding="utf-8").read()
+    assert "carry_bases_courantes.json" in feed and "bases_mid_dump" in feed
+    assert '"base_mid_bps"' in feed, "les inputs portent la base MID"
+    assert '"base_mid_bps_entree": _f(inputs, "base_mid_bps")' in lifec
+    assert "bases_courantes_mid(root)" in src
+    assert "window._carryNet=realSess+Number(d.funding_accru_usdt||0)+_mtmPoll" in src
