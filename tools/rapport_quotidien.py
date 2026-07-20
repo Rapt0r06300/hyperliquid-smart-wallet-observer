@@ -182,8 +182,16 @@ def generer(root: str | Path = RACINE, *, now_ms: int | None = None) -> str:
             "Fenêtre : dernières %.0f h._" % FENETRE_H,
             "",
         ]
-        for sec in (_sec_pnl(racine, depuis), _sec_positions(racine, now),
-                    _sec_sante(racine), _sec_mesures(racine), _sec_refus(racine, depuis)):
+        secs = [_sec_pnl(racine, depuis), _sec_positions(racine, now),
+                _sec_sante(racine), _sec_mesures(racine), _sec_refus(racine, depuis)]
+        # Leçons du ledger (article Roan, 20/07) : aucune perte sans explication — les
+        # regressions et les pertes inexpliquees s'affichent en ROUGE, chaque matin.
+        try:
+            from hl_observer.ops.lecons_du_ledger import resume_markdown
+            secs.append(resume_markdown(racine, depuis_ms=depuis))
+        except Exception as exc:  # noqa: BLE001
+            secs.append(["## 6. Leçons du ledger", "", "section illisible : %s" % exc])
+        for sec in secs:
             parts += sec + [""]
         parts.append("---")
         parts.append("**Sécurité : 0 ordre réel · 0 argent réel · 0 clé privée · "
