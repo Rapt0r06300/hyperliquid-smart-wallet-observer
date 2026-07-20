@@ -15,7 +15,7 @@ from pathlib import Path
 from typing import Any
 
 from hl_observer.funding.carry_anti_churn import (
-    SORTIE_ABSENCE_PROLONGEE, churn_excessif, doit_fermer_pour_absence,
+    SORTIE_ABSENCE_PROLONGEE, churn_excessif, doit_fermer_pour_absence, filtrer_sortie,
 )
 from hl_observer.funding.carry_marge_dynamique import marge_par_position
 from hl_observer.funding.carry_position_lifecycle import (
@@ -130,6 +130,26 @@ def tick_multi_sur_disque(root: str | Path, mesures: dict[str, dict[str, Any]], 
                          "attente_donnee": {"passes": n_abs, "minutes": round(minutes, 1)},
                          "funding_add_usdt": 0.0})
             continue                                       # on GARDE : l'absence n'est pas une sortie
+        # 🔴 NUIT DU 19-20/07 : PURR ferme 3x (-0,49 $) par CETTE porte alors que le marche
+        # etait bien MESURE -- c'est le feeder qui ratait ses bougies ('pire-hausse non
+        # mesurable'), donc PURR sortait de la shortlist, donc 'absent'. Refuser d'OUVRIR sans
+        # bougies est juste ; fermer une position DEJA OUVERTE (risque mesure a l'entree, prix
+        # suivi par les marks) pour un rate de fetch est le churn qui revient par la fenetre.
+        # Distinction desormais :
+        #   * mesures VIDES (vrai blackout, feeder mort)   -> fermer (deny-by-default, inchange) ;
+        #   * d'autres coins MESURES (donnee vivante, CE coin non viable ce tick) -> la sortie
+        #     redevient un 'hors shortlist' NON URGENT : gate par l'amortissement (A3, meme
+        #     regle que COIN_PLUS_DANS_SHORTLIST). Funding d'entree en proxy pour l'amorti.
+        if mesures:
+            motif_apres_gate = filtrer_sortie(
+                SORTIE_HORS_SHORTLIST, pos, now_ms=int(now_ms),
+                funding_bps_h=float(pos.get("funding_bps_h_entree") or 0.0))
+            if motif_apres_gate is None:
+                evts.append({"coin": coin, "mode": mode, "ouvert": False, "ferme": None,
+                             "attente_donnee": {"passes": n_abs, "minutes": round(minutes, 1),
+                                                "non_amorti": True},
+                             "funding_add_usdt": 0.0})
+                continue                                   # non amorti : fermer acterait la perte
         # absence PROLONGEE : la donnee a vraiment disparu -> la, on ferme.
         # base courante inconnue -> conservateur : base d'entree (aucun premium capture)
         realized = pnl_realise(pos, base_bps_courant=float(pos.get("base_bps_entree") or 0.0))

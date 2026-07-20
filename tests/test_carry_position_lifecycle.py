@@ -212,8 +212,12 @@ def test_a5_pnl_retire_la_base_residuelle_non_capturee():
 
 
 def test_a5_sortie_quand_la_base_a_converge():
-    pos = ouvrir_position(_decision(base_bps=10.0), _inputs(), now_ms=0)
-    # funding>0, pas de liquidation, base convergee (reste 1 sur 10) -> on verrouille
+    # 🔴 MIS A JOUR (nuit 19-20/07) : base 10 -> capture 9 bps < ~11 bps de couts TOTAUX ->
+    # fermer REALISAIT une perte (-0,08 $ observe en vrai, puis reouverture 1 min apres).
+    # A5 x A4 : on ne verrouille que si le PnL realise est POSITIF. Base 30 -> capture 29 bps
+    # > couts -> la, on verrouille.
+    # cout COHERENT avec la base (le modele credite la base a l'entree) : 11 - 30 = -19
+    pos = ouvrir_position(_decision(base_bps=30.0, cout_entree_bps=-19.0), _inputs(), now_ms=0)
     assert raison_de_sortie(pos, now_ms=H, funding_bps_h_courant=0.125,
                             base_bps_courant=1.0) == SORTIE_BASE_CONVERGEE
 
@@ -230,7 +234,33 @@ def test_a5_base_negligeable_pas_de_sortie_convergence():
 
 def test_a5_gestionnaire_ferme_et_realise_sur_convergence():
     g = GestionnaireCarry()
-    g.tick(_decision(base_bps=10.0), _inputs(), now_ms=0, funding_bps_h_courant=0.125)
-    e = g.tick(_decision(base_bps=10.0), _inputs(), now_ms=H, funding_bps_h_courant=0.125,
+    g.tick(_decision(base_bps=30.0, cout_entree_bps=-19.0), _inputs(), now_ms=0, funding_bps_h_courant=0.125)
+    e = g.tick(_decision(base_bps=30.0, cout_entree_bps=-19.0), _inputs(), now_ms=H, funding_bps_h_courant=0.125,
                base_bps_courant=0.5)
     assert e["ferme"] == SORTIE_BASE_CONVERGEE and e["pnl_realise_usdt"] is not None
+    assert e["pnl_realise_usdt"] > 0, "une capture verrouillee doit etre GAGNANTE (A5 x A4)"
+
+
+def test_NUIT_1920_une_capture_de_base_PERDANTE_ne_ferme_pas():
+    """🔴 A5 x A4 : cette nuit, 2 'captures' ont REALISE -0,08 $ et -0,07 $ (motif 'CAPTURE' !)
+    puis rouvert 1 min apres. Une capture qui ne paie pas sa propre sortie est un churn deguise.
+    Desormais SORTIE_BASE_CONVERGEE n'est rendue que si le PnL realise serait POSITIF."""
+    from hl_observer.funding.carry_position_lifecycle import raison_de_sortie, pnl_realise
+
+    # position jeune : quasi aucun funding accru, base d'entree 2 bps -> capture < frais de sortie
+    pos = {"coin": "PURR", "mode": "LIVE", "notional_usdt": 75.0, "marge_usdt": 50.0,
+           "levier": 1.5, "marge_ratio": 0.667, "levier_max": 3.0,
+           "entry_ts_ms": 0, "last_accrual_ts_ms": 0, "funding_bps_h_entree": 0.125,
+           "cout_entree_bps": 9.0, "base_bps_entree": 2.0, "entry_perp_px": 0.07,
+           "liquidite_spot_usd": 15_000.0, "pire_hausse_entree": 0.26,
+           "funding_accrued_usdt": 0.0001, "gain_net_24h_bps": 1.6}
+    assert pnl_realise(pos, base_bps_courant=0.0) < 0, "fixture : la capture DOIT etre perdante ici"
+    motif = raison_de_sortie(pos, now_ms=3_600_000, funding_bps_h_courant=0.125,
+                             base_bps_courant=0.0)     # base convergee (2.0 -> 0.0)
+    assert motif is None, "capture perdante -> on GARDE (le funding continue de courir)"
+
+    # contre-epreuve : assez de funding accru pour que la capture PAIE -> on verrouille
+    pos_riche = dict(pos); pos_riche["funding_accrued_usdt"] = 0.20   # > frais de sortie
+    assert pnl_realise(pos_riche, base_bps_courant=0.0) > 0
+    assert raison_de_sortie(pos_riche, now_ms=3_600_000, funding_bps_h_courant=0.125,
+                            base_bps_courant=0.0) == "BASE_CONVERGEE_PREMIUM_CAPTURE"

@@ -207,3 +207,36 @@ def test_R1_un_SPIKE_de_funding_ouvre_PLUS_GROS_bout_en_bout(tmp_path, monkeypat
     assert marge_spike == round(marge_normale * 1.5, 6), (
         "le SPIKE doit ouvrir 1,5x plus gros (marge %s vs %s) -- un maillon de la chaine "
         "z-score->facteur->marge est debranche" % (marge_spike, marge_normale))
+
+
+def test_NUIT_1920_coin_hors_shortlist_NON_amorti_ne_ferme_PAS_meme_apres_45_min(tmp_path, monkeypatch):
+    """🔴 LA NUIT DU 19-20/07 : PURR ferme 3x (-0,49 $) par la porte 'DONNEE_ABSENTE_PROLONGEE'
+    alors que le marche etait MESURE — c'est le feeder qui ratait ses bougies, PURR sortait de
+    la shortlist, et 45 min plus tard on fermait une position NON AMORTIE. Desormais : tant que
+    d'AUTRES coins sont mesures (donnee vivante), un coin absent est un 'hors shortlist' non
+    urgent -> gate par l'amortissement (A3). Le vrai blackout (0 mesure) garde l'ancienne regle."""
+    monkeypatch.setenv("HYPERSMART_CARRY_ETAPE2", "1")
+
+    def _inp(coin, ts):
+        d = dict(_INPUTS_VIABLES); d["coin"] = coin; d["ts_ms"] = ts
+        return d
+
+    def _ecrire(ts, coins):
+        _ecrire_inputs(tmp_path, _inp(coins[0], ts))
+        (tmp_path / "runtime" / "data" / "carry_spot_shortlist.json").write_text(
+            json.dumps([_inp(c, ts) for c in coins]), encoding="utf-8")
+
+    t0 = 100_000_000
+    _ecrire(t0, ["HYPE", "PURR"])
+    e = evaluer_et_journaliser(tmp_path, now_ms=t0 + 30_000)["etape2"]
+    assert set(e["coins_ouverts"]) == {"HYPE", "PURR"}
+
+    # PURR disparait de la shortlist (rate de bougies) pendant ~1 h, 5 passes — HYPE reste mesure.
+    # Position agee de 2 h : NON amortie (amortissement ~93 h) -> PURR doit RESTER OUVERT.
+    H = 3_600_000
+    for minutes in (0, 15, 30, 46, 60):
+        tk = t0 + 2 * H + minutes * 60_000
+        _ecrire(tk - 30_000, ["HYPE"])                     # donnee VIVANTE, PURR absent
+        e = evaluer_et_journaliser(tmp_path, now_ms=tk)["etape2"]
+    assert set(e["coins_ouverts"]) == {"HYPE", "PURR"}, (
+        "fermer un carry NON amorti pour un rate de fetch = les -0,49 $ de la nuit du 19-20/07")

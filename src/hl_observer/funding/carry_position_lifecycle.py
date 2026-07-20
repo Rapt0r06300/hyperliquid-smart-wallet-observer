@@ -139,7 +139,16 @@ def raison_de_sortie(position: dict[str, Any], *, now_ms: int, funding_bps_h_cou
         return SORTIE_LIQUIDATION
     if base_bps_courant is not None and base_convergee(
             float(position.get("base_bps_entree") or 0.0), float(base_bps_courant)):
-        return SORTIE_BASE_CONVERGEE                       # A5 : 2e PnL capture -> on verrouille
+        # 🔴 A5 x A4 (nuit du 19-20/07) : la base avait converge mais la fermeture etait PERDANTE
+        # (-0,08 $ puis -0,07 $ realises, motif 'CAPTURE' !) parce qu'on 'verrouillait' un gain
+        # plus petit que les frais de sortie -- puis on ROUVRAIT une minute apres. Une capture
+        # qui ne paie pas sa propre sortie est un churn deguise sous un joli nom. A4 existait
+        # (`sortir doit rapporter`) mais n'etait pas consulte ICI : mention != porte, encore.
+        # Desormais on ne verrouille que si le PnL REALISE serait > 0 ; sinon on GARDE (le
+        # funding continue de courir, la base peut re-diverger, et une vraie urgence a ses
+        # propres sorties : liquidation, hemorragie de funding, age).
+        if pnl_realise(position, base_bps_courant=float(base_bps_courant)) > 0.0:
+            return SORTIE_BASE_CONVERGEE                   # A5 : 2e PnL capture -> on verrouille
     if (int(now_ms) - int(position["entry_ts_ms"])) / 3.6e6 >= float(age_max_h):
         return SORTIE_AGE
     return None
