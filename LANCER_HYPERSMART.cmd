@@ -332,10 +332,15 @@ REM Barres de rejet fixees AVANT la donnee : docs\audit\PROTOCOLE_CROSS_VENUE.md
 REM ⚠️ Binance = SOURCE DE PRIX uniquement. Lecture seule, 0 cle, 0 ordre.
 start "" /b tools\boucle_collecteur.cmd venues-collector tools\collecter_dispersion_venues.py 300 --une-fois
 
+REM ---- COPY-WHITELIST (#185, 20/07) : nourrit la porte copy (leaders au markout prouve). ----
+REM La whitelist se PERIME a 24 h (porte deny-by-default) -> regeneree toutes les 6 h.
+REM Sans donnees de fills forward, elle ecrit une liste VIDE = copy verrouille (honnete).
+start "" /b tools\boucle_collecteur.cmd copy-whitelist tools\ecrire_copy_whitelist.py 21600
+
 REM AUTO-VERIFICATION : un collecteur cache qui ne demarre pas ne se voit PAS. On attend qu'il
 REM ecrive son log (il l'ecrit des la 1re ligne) et on DIT si l'un des trois manque a l'appel.
 ping -n 6 127.0.0.1 >nul 2>&1
-for %%C in (carry-feeder marks-collector liq-collector venues-collector) do (
+for %%C in (carry-feeder marks-collector liq-collector venues-collector copy-whitelist) do (
   if exist "%~dp0runtime\logs\%%C.log" (
     echo   [collecteurs] %%C ......... demarre
   ) else (

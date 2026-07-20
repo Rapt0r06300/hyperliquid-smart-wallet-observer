@@ -168,6 +168,54 @@ def _sec_refus(root: Path, depuis_ms: int) -> list[str]:
     return out
 
 
+#: #186 — le PnL des refus se recalcule au plus une fois par SEMAINE (coûteux : il rejoue
+#: les candidats refusés sur les marks) ; entre deux calculs, le rapport montre le cache daté.
+CADENCE_PNL_REFUS_H = 7 * 24.0
+CACHE_PNL_REFUS = Path("runtime") / "data" / "pnl_des_refus_hebdo.json"
+
+
+def _sec_pnl_des_refus(root: Path, now_ms: int) -> list[str]:
+    """## 7 — ce que les REFUS nous ont coûté/épargné (simulation sur données enregistrées).
+
+    L'honnêteté de la section vit dans le module `pnl_des_refus` lui-même : un refus
+    « coûteux » = re-mesurer la porte au replay complet, JAMAIS l'ouvrir sur ce chiffre."""
+    out = ["## 7. PnL des refus (hebdo) — combien coûtent nos portes ?", ""]
+    cache = root / CACHE_PNL_REFUS
+    d = _json(cache)
+    age_h = (now_ms - int(d.get("calcule_ts_ms") or 0)) / 3.6e6
+    if not d or age_h > CADENCE_PNL_REFUS_H:
+        try:
+            import sys as _sys
+            _sys.path.insert(0, str(root / "tools"))
+            from pnl_des_refus import pnl_des_refus as _calc  # noqa: PLC0415
+            r = _calc(root)
+            d = {"calcule_ts_ms": now_ms, "resultat": r}
+            cache.parent.mkdir(parents=True, exist_ok=True)
+            cache.write_text(json.dumps(d, ensure_ascii=False, indent=1), encoding="utf-8")
+            age_h = 0.0
+        except Exception as exc:  # noqa: BLE001 — la section dit sa panne, le rapport survit
+            out.append("Section indisponible cette semaine : `%s`" % exc)
+            return out
+    r = d.get("resultat") or {}
+    pm = r.get("par_motif") or {}
+    out.append("_Calculé il y a %.1f j (cadence : hebdo). Simulation sur candidats refusés "
+               "enregistrés — pas une promesse._" % (age_h / 24.0))
+    out.append("")
+    if not pm:
+        out.append("Aucun refus mesurable sur les données replay (ou données insuffisantes).")
+    for motif, v in sorted(pm.items(), key=lambda kv: (kv[1] or {}).get("pnl_simule_usd", 0.0)):
+        out.append("- `%s` : ×%d refus, %d mesurés, PnL simulé si on avait ouvert : %+.2f $"
+                   % (motif, int(v.get("n") or 0), int(v.get("mesures") or 0),
+                      float(v.get("pnl_simule_usd") or 0.0)))
+    nm = int(r.get("non_mesurables") or 0)
+    if nm:
+        out.append("- non mesurables (pas de marks sur la fenêtre) : ×%d — comptés, jamais inventés" % nm)
+    if r.get("honnetete"):
+        out.append("")
+        out.append("> %s" % r["honnetete"])
+    return out
+
+
 def generer(root: str | Path = RACINE, *, now_ms: int | None = None) -> str:
     """Le rapport complet en Markdown. Ne lève JAMAIS (un rapport absent = un matin aveugle)."""
     try:
@@ -191,6 +239,7 @@ def generer(root: str | Path = RACINE, *, now_ms: int | None = None) -> str:
             secs.append(resume_markdown(racine, depuis_ms=depuis))
         except Exception as exc:  # noqa: BLE001
             secs.append(["## 6. Leçons du ledger", "", "section illisible : %s" % exc])
+        secs.append(_sec_pnl_des_refus(racine, now))   # #186 : hebdo, cache date, jamais bloquant
         for sec in secs:
             parts += sec + [""]
         parts.append("---")

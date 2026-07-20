@@ -88,3 +88,39 @@ def test_ecrire_produit_le_fichier_ET_l_archive_datee(tmp_path):
 
 def test_la_ligne_de_securite_est_TOUJOURS_presente(tmp_path):
     assert "0 ordre réel" in RQ.generer(tmp_path, now_ms=1_800_000_000_000)
+
+
+# ---------------- #186 (20/07) : PnL des refus — section HEBDO, cache date, jamais bloquante ----
+
+def test_section7_recalcule_quand_le_cache_est_absent_et_ECRIT_le_cache(tmp_path):
+    m = _mod()
+    lignes = m._sec_pnl_des_refus(tmp_path, now_ms=1_000_000_000_000)
+    texte = "\n".join(lignes)
+    assert "## 7. PnL des refus" in texte
+    # 0 donnee replay -> constat honnete, pas un chiffre
+    assert ("Aucun refus mesurable" in texte) or ("indisponible" in texte)
+    if "Aucun refus mesurable" in texte:
+        assert (tmp_path / m.CACHE_PNL_REFUS).exists(), "le cache hebdo doit etre ecrit"
+
+
+def test_section7_sert_le_CACHE_frais_sans_recalculer(tmp_path):
+    m = _mod()
+    now = 2_000_000_000_000
+    cache = tmp_path / m.CACHE_PNL_REFUS
+    cache.parent.mkdir(parents=True, exist_ok=True)
+    cache.write_text(json.dumps({"calcule_ts_ms": now - 3600_000, "resultat": {
+        "par_motif": {"EDGE_TROP_FAIBLE": {"n": 4, "mesures": 3, "pnl_simule_usd": -1.25}},
+        "non_mesurables": 1, "honnetete": "re-mesurer au replay complet, jamais ouvrir sur ce chiffre"}}),
+        encoding="utf-8")
+    texte = "\n".join(m._sec_pnl_des_refus(tmp_path, now_ms=now))
+    assert "EDGE_TROP_FAIBLE" in texte and "-1.25" in texte
+    assert "×1 — comptés, jamais inventés" in texte
+    assert "jamais ouvrir sur ce chiffre" in texte
+    assert "0.0 j" in texte or "0,0 j" in texte.replace(".", ",") or "il y a" in texte
+
+
+def test_le_rapport_complet_contient_la_section_7(tmp_path):
+    m = _mod()
+    texte = m.generer(tmp_path, now_ms=1_000_000_000_000)
+    assert "## 7. PnL des refus" in texte
+    assert "Sécurité : 0 ordre réel" in texte

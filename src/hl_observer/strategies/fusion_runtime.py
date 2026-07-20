@@ -28,6 +28,7 @@ def _env_flag(nom: str, defaut: bool = False) -> bool:
 from hl_observer.arbitrage.triangular_graph import TriangularEdge, build_triangular_cycles
 from hl_observer.edge.edge_source import edge_brut as _edge_brut_mesure
 from hl_observer.freshness.horloges import age_du_signal
+from hl_observer.signals.porte_copy_whitelist import signal_copy_autorise
 from hl_observer.arbitrage.triangular_opportunity_detector import TriangularOpportunity, detect_triangular_opportunities
 from hl_observer.integration.board_admission import compute_admission_floor_for_fusion
 from hl_observer.funding.funding_opportunity import funding_rates_bps_for_coins
@@ -268,6 +269,14 @@ def run_fusion_strategy_runtime(payload: FusionRuntimeInput) -> FusionRuntimeRes
             # Le consensus dit OUI, le verrou d'edge dit NON. Le verrou gagne.
             # Le motif precis vient de paper_engine.refusal_reasons, merge dans no_trade plus bas.
             no_trade.append("COPY_FOLLOW_BLOCKED_BY_EMPIRICAL_EDGE_GATE")
+        elif conflict.decision == "FOLLOW" and conflict.winning_side and not _copy_whitelist_ok(
+            conflict, conflict_votes, no_trade
+        ):
+            # #185 (20/07) -- DEUXIEME verrou, EN SERIE derriere le verrou d'edge : meme si
+            # celui-ci s'ouvrait, on ne suit QUE des leaders individuellement prouves par la
+            # whitelist C12 (markout forward reel, deny-by-default). Le motif precis
+            # (ABSENTE / VIDE / PERIMEE / HORS_WHITELIST / SANS_ADRESSE) est deja dans no_trade.
+            pass
         elif conflict.decision == "FOLLOW" and conflict.winning_side:
             strategy_id = _first_available_profile(
                 external_ids,
@@ -664,6 +673,25 @@ def _float(value: object) -> float:
         return float(value)  # type: ignore[arg-type]
     except (TypeError, ValueError):
         return 0.0
+
+
+def _copy_whitelist_ok(conflict, leader_votes, no_trade) -> bool:
+    """#185 — porte whitelist C12 sur le chemin d'ouverture copy (2e verrou, EN SERIE).
+
+    Extrait les wallets qui ont VOTE pour le cote gagnant et exige que TOUS soient dans
+    `runtime/data/copy_whitelist.json` (markout forward positif prouve, deny-by-default).
+    En cas de refus, le motif precis part dans `no_trade` — un refus invisible n'existe pas."""
+    winning = str(conflict.winning_side or "").upper()
+    adresses = [
+        v.wallet
+        for v in leader_votes
+        if str(v.coin or "").upper() == str(conflict.coin or "").upper()
+        and _side_bucket_for_runtime(v.side) == winning
+    ]
+    ok, motif = signal_copy_autorise(adresses)
+    if not ok:
+        no_trade.append(motif)
+    return ok
 
 
 def _copy_follow_order_metadata(

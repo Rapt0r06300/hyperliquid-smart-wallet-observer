@@ -70,6 +70,10 @@ REGISTRE: tuple[dict[str, Any], ...] = (
      "intervalle_s": 300, "args": ("--une-fois",), "limite_minutes": 20.0},
     {"nom": "venues-collector", "script": "tools/collecter_dispersion_venues.py",
      "intervalle_s": 300, "args": ("--une-fois",), "limite_minutes": 20.0},
+    # #185 : nourrit la porte copy (whitelist C12, se perime a 24 h) — cadence 6 h.
+    # limite = 1,5x cadence + marge (regle du test des limites) : silence > 9,5 h = mort.
+    {"nom": "copy-whitelist", "script": "tools/ecrire_copy_whitelist.py",
+     "intervalle_s": 21600, "args": (), "limite_minutes": 570.0},
 )
 
 
