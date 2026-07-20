@@ -139,6 +139,42 @@ def _spots() -> dict[str, list[dict]]:
     return out
 
 
+#: spot-stables d'Hyperliquid : JAMAIS apparies a un perp par prix. Un stable a ~1 $ peut
+#: coller par hasard au prix d'un perp a ~1 $ ; la « couverture » divergerait ensuite —
+#: exactement la loi X-04 (une couverture ne vaut que si c'est le MEME actif).
+STABLES_SPOT_EXCLUS = frozenset({"USDT0", "USDE", "USDHL", "FEUSD", "USDXL", "USH", "USR",
+                                 "USDC", "USD", "BUSD"})
+
+
+def _apparier_spots(perps: dict, spots: dict) -> dict[str, list[dict]]:
+    """perp -> candidats spot. Nom identique ∪ tokens UNIT (U+prefixe du nom perp).
+
+    20/07 (demande de Flo : « le maximum de coins disponible ») : la jointure par nom STRICT
+    ne voyait que 8 paires — dont 3 fausses (TRUMP spot HL ≠ TRUMP perp, ×3502). Elle RATAIT
+    les tokens Unit, qui sont les vrais spots liquides de la venue : le spot BTC s'appelle
+    UBTC, ETH → UETH, SOL → USOL, FARTCOIN → UFART, PUMP → UPUMP…
+
+    Règle d'extension : un spot « U»+X est candidat pour tout perp dont le nom COMMENCE par X
+    (X ≥ 3 lettres) : UBTC→BTC, UETH→ETH, USOL→SOL, UFART→FARTCOIN. Un candidat n'est jamais
+    CRU sur son nom : il passe ensuite le sélecteur par prix (ligne « MAPPING PAR PRIX »),
+    la base VWAP au vrai carnet, le plancher de liquidité, la pire-hausse 200 j et le
+    break-even — les mêmes portes qui tuent TRUMP/BERA/PUMP aujourd'hui. Les spot-stables
+    sont exclus par principe (X-04), pas par prix."""
+    out: dict[str, list[dict]] = {}
+    for p_nom in perps:
+        cands = list(spots.get(p_nom) or [])
+        for s_nom, s_cands in spots.items():
+            if (s_nom != p_nom and s_nom.startswith("U") and len(s_nom) >= 4
+                    and s_nom not in STABLES_SPOT_EXCLUS
+                    and p_nom.startswith(s_nom[1:]) and len(s_nom[1:]) >= 3):
+                for c in s_cands:
+                    if c not in cands:
+                        cands.append(c)
+        if cands:
+            out[p_nom] = cands
+    return out
+
+
 def _carnet_spot(pair: str, *, impact_max: float = 0.02,
                  notional_cible: float = 0.0) -> tuple[float, float, float | None] | None:
     """LE VRAI CARNET (l2Book) -> (mid, profondeur ACHETABLE en $ sous `impact_max`, VWAP d'achat
@@ -335,11 +371,13 @@ def scanner(diagnostic: bool):
         if _a:
             print("  ⚡ %s %s : premium %+0.2f bps — %s"
                   % (_a["niveau"], _c, _a["premium_bps"], _a["note"]))
-    communs = sorted(set(perps) & set(spots))
+    # 20/07 : jointure ETENDUE (nom identique + tokens Unit U*) — voir _apparier_spots.
+    apparies = _apparier_spots(perps, spots)
+    communs = sorted(apparies)
     rapport, viables = [], []
     for c in communs:
         p = perps[c]
-        cands = [x for x in spots.get(c, []) if x["mark"] > 0]
+        cands = [x for x in apparies.get(c, []) if x["mark"] > 0]
         if p["mark"] <= 0 or not cands:
             continue
         # MAPPING PAR PRIX : parmi les paires spot du meme ticker, prendre celle dont le prix

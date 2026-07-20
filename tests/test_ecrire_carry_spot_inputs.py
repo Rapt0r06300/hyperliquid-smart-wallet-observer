@@ -162,3 +162,43 @@ def test_la_boucle_collecteur_PRESERVE_le_log_precedent():
     texte = (ROOT / "tools" / "boucle_collecteur.cmd").read_text(encoding="utf-8", errors="ignore")
     assert '.prev"' in texte and "copy /y" in texte.lower(), (
         "boucle_collecteur.cmd doit copier le log en .prev avant de le tronquer (autopsie R5)")
+
+
+# ---------------- 20/07 : appariement ETENDU aux tokens Unit (« le maximum de coins ») ----------------
+# La jointure par nom strict voyait 8 paires (3 fausses). Elle ratait UBTC/UETH/USOL/UFART...
+# — les spots les PLUS liquides de la venue. Regle : U+X candidat du perp qui COMMENCE par X
+# (X>=3), stables exclus par principe (X-04), et JAMAIS de confiance au nom : les portes de
+# prix/base/carnet restent juges.
+
+def test_apparier_unit_UBTC_devient_candidat_de_BTC():
+    m = _load()
+    perps = {"BTC": {}, "ETH": {}}
+    spots = {"UBTC": [{"mark": 64000.0, "vol24": 1e6, "pair": "@142"}],
+             "UETH": [{"mark": 3200.0, "vol24": 5e5, "pair": "@151"}]}
+    a = m._apparier_spots(perps, spots)
+    assert a["BTC"][0]["pair"] == "@142" and a["ETH"][0]["pair"] == "@151"
+
+
+def test_apparier_prefixe_UFART_devient_candidat_de_FARTCOIN():
+    m = _load()
+    a = m._apparier_spots({"FARTCOIN": {}}, {"UFART": [{"mark": 1.1, "vol24": 1.0, "pair": "@9"}]})
+    assert [c["pair"] for c in a.get("FARTCOIN", [])] == ["@9"]
+
+
+def test_apparier_les_stables_ne_sont_JAMAIS_apparies_par_prix():
+    """Un stable a ~1$ collerait par hasard au prix d'un perp a ~1$ puis divergerait :
+    la loi X-04 (meme actif ou rien) l'exclut PAR PRINCIPE, pas par prix."""
+    m = _load()
+    a = m._apparier_spots({"SDE": {}, "SDT0": {}},
+                          {"USDE": [{"mark": 1.0, "vol24": 1.0, "pair": "@3"}],
+                           "USDT0": [{"mark": 1.0, "vol24": 1.0, "pair": "@4"}]})
+    assert a == {}
+
+
+def test_apparier_prefixe_trop_court_refuse_et_nom_identique_conserve_sans_doublon():
+    m = _load()
+    spot_hype = {"mark": 40.0, "vol24": 1.0, "pair": "@107"}
+    a = m._apparier_spots({"HYPE": {}, "NOT": {}},
+                          {"HYPE": [spot_hype], "UNO": [{"mark": 5.0, "vol24": 1.0, "pair": "@8"}]})
+    assert a["HYPE"] == [spot_hype]          # le nom identique reste, une seule fois
+    assert "NOT" not in a                     # UNO : prefixe 'NO' < 3 lettres -> refuse
