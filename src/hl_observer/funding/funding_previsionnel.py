@@ -77,6 +77,62 @@ def facteur_prevision(prevu_bps_h: float | None, actuel_bps_h: float | None) -> 
     return 1.0
 
 
+
+
+# ---------------- ALERTE DE RUPTURE DE BANDE MORTE (idees #1/#5/#9 de la vague 1, 20/07) ----
+#: le premium doit depasser TAUX+BORNE (5,125 bps) pour que F decolle ; on alerte a l'APPROCHE.
+SEUIL_APPROCHE_BPS = 4.0
+#: build-up d'OI qui CONFIRME l'approche (la litterature : l'OI long precede le funding positif)
+SEUIL_OI_CONFIRME_PCT = 2.0
+
+NIVEAU_RUPTURE_HAUTE = "RUPTURE_HAUTE"      # F decolle DEJA (F = P - 5) -> spike en cours
+NIVEAU_APPROCHE_HAUTE = "APPROCHE_HAUTE"    # 1 h d'avance : le premium approche la borne
+NIVEAU_RUPTURE_BASSE = "RUPTURE_BASSE"      # funding profondement negatif imminent.
+#                                           # ⚠️ HL ne permet PAS de shorter le spot (pas de
+#                                           # margin spot) -> PAS d'ouverture inverse ici :
+#                                           # c'est un signal pour le LIVRE CROSS-VENUE (Y2).
+NIVEAU_APPROCHE_BASSE = "APPROCHE_BASSE"
+
+
+def alerte_rupture(premium_bps: float | None,
+                   delta_oi_pct: float | None = None) -> dict | None:
+    """None = rien a signaler. Sinon {niveau, premium_bps, confirmee_par_oi, note}.
+
+    La DECOUVERTE du 20/07 rendue operationnelle : le clamp cree une bande morte ±~5 bps ;
+    le vrai signal avance d'un spike est 'le premium APPROCHE la borne'. L'OI en hausse
+    (build-up de longs) CONFIRME l'approche haute — jamais requis, jamais invente."""
+    if premium_bps is None:
+        return None
+    p = float(premium_bps)
+    borne_haute = TAUX_INTERET_BPS_H + BORNE_CLAMP_BPS_H          # 5.125
+    borne_basse = TAUX_INTERET_BPS_H - BORNE_CLAMP_BPS_H          # -4.875
+    if p >= borne_haute:
+        niveau = NIVEAU_RUPTURE_HAUTE
+    elif p >= SEUIL_APPROCHE_BPS:
+        niveau = NIVEAU_APPROCHE_HAUTE
+    elif p <= borne_basse:
+        niveau = NIVEAU_RUPTURE_BASSE
+    elif p <= -SEUIL_APPROCHE_BPS:
+        niveau = NIVEAU_APPROCHE_BASSE
+    else:
+        return None
+    confirmee = (niveau in (NIVEAU_RUPTURE_HAUTE, NIVEAU_APPROCHE_HAUTE)
+                 and isinstance(delta_oi_pct, (int, float))
+                 and float(delta_oi_pct) >= SEUIL_OI_CONFIRME_PCT)
+    notes = {
+        NIVEAU_RUPTURE_HAUTE: "F decolle DEJA (F = P - 5) : spike de funding en cours",
+        NIVEAU_APPROCHE_HAUTE: "premium approche la borne : spike possible d'ici ~1 h",
+        NIVEAU_RUPTURE_BASSE: "funding profondement negatif imminent -- signal CROSS-VENUE "
+                              "(HL ne short pas le spot : aucune ouverture inverse ici)",
+        NIVEAU_APPROCHE_BASSE: "premium tres negatif : surveiller la rupture basse",
+    }
+    return {"niveau": niveau, "premium_bps": round(p, 4), "confirmee_par_oi": bool(confirmee),
+            "note": notes[niveau] + (" — CONFIRMEE par build-up d'OI" if confirmee else "")}
+
+
 __all__ = ["TAUX_INTERET_BPS_H", "BORNE_CLAMP_BPS_H", "BANDE_TENDANCE", "FACTEUR_DECRUE",
            "TENDANCE_HAUSSE", "TENDANCE_BAISSE", "TENDANCE_STABLE",
-           "prevoir_funding_bps_h", "tendance", "facteur_prevision"]
+           "prevoir_funding_bps_h", "tendance", "facteur_prevision",
+           "SEUIL_APPROCHE_BPS", "SEUIL_OI_CONFIRME_PCT", "alerte_rupture",
+           "NIVEAU_RUPTURE_HAUTE", "NIVEAU_APPROCHE_HAUTE",
+           "NIVEAU_RUPTURE_BASSE", "NIVEAU_APPROCHE_BASSE"]

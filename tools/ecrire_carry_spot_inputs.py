@@ -40,7 +40,7 @@ from hl_observer.funding.funding_persistence import estimer_persistance  # noqa:
 from hl_observer.funding.funding_zscore import zscore_funding  # noqa: E402
 from hl_observer.funding.carry_optimizer import facteur_zscore as _fzs  # noqa: E402  Y4 sizing
 from hl_observer.funding.funding_previsionnel import (  # noqa: E402  timing (20/07)
-    prevoir_funding_bps_h, tendance as _tendance_prev, facteur_prevision)
+    prevoir_funding_bps_h, tendance as _tendance_prev, facteur_prevision, alerte_rupture)
 
 API = "https://api.hyperliquid.xyz/info"
 INPUTS_PATH = ROOT / "runtime" / "data" / "carry_spot_inputs.json"
@@ -102,7 +102,8 @@ def _perps() -> dict[str, dict]:
                             # PREVISION (20/07) : premium mark-vs-ORACLE en bps -- l'entree de
                             # la formule officielle de funding (F = premium + clamp(...)).
                             "premium_bps": (round((mark - oracle) / oracle * 1e4, 4)
-                                            if oracle > 0 and mark > 0 else None)}
+                                            if oracle > 0 and mark > 0 else None),
+                            "open_interest": float(c.get("openInterest") or 0.0)}
             except (TypeError, ValueError):
                 pass
     return out
@@ -303,6 +304,37 @@ def classer_viables(viables, *, top_k: int = PLAFOND_SHORTLIST):
 
 def scanner(diagnostic: bool):
     perps, spots, pires = _perps(), _spots(), _pires_locales()
+    # ---- VAGUE 1 (#1/#5/#9) : delta d'OI ~1 h + ALERTES DE RUPTURE, pour TOUS les coins
+    # scannes (meme non viables : un spike arrive souvent sur un coin qu'on n'a pas ouvert).
+    _oi_path = ROOT / "runtime" / "data" / "oi_precedent.json"
+    try:
+        _oi_prec = json.loads(_oi_path.read_text(encoding="utf-8"))
+        if not isinstance(_oi_prec, dict):
+            _oi_prec = {}
+    except (OSError, ValueError):
+        _oi_prec = {}
+    _now_oi = time.time()
+    for _c, _p in perps.items():
+        _e = _oi_prec.get(_c) or {}
+        _age = _now_oi - float(_e.get("ts") or 0.0)
+        _oi0, _oi1 = float(_e.get("oi") or 0.0), float(_p.get("open_interest") or 0.0)
+        if 1200.0 <= _age <= 7200.0 and _oi0 > 0 and _oi1 > 0:
+            _p["delta_oi_pct"] = round((_oi1 - _oi0) / _oi0 * 100.0, 3)
+        else:
+            _p["delta_oi_pct"] = None
+        if _age >= 1200.0 or not _e:                       # rafraichir toutes les >=20 min
+            _oi_prec[_c] = {"oi": _oi1, "ts": _now_oi}
+        _p["alerte_rupture"] = alerte_rupture(_p.get("premium_bps"), _p.get("delta_oi_pct"))
+    try:
+        _oi_path.parent.mkdir(parents=True, exist_ok=True)
+        _oi_path.write_text(json.dumps(_oi_prec, ensure_ascii=False), encoding="utf-8")
+    except OSError:
+        print("  (cache OI inecrivable — deltas indisponibles ce tick)")
+    for _c, _p in sorted(perps.items()):
+        _a = _p.get("alerte_rupture")
+        if _a:
+            print("  ⚡ %s %s : premium %+0.2f bps — %s"
+                  % (_a["niveau"], _c, _a["premium_bps"], _a["note"]))
     communs = sorted(set(perps) & set(spots))
     rapport, viables = [], []
     for c in communs:
@@ -372,6 +404,8 @@ def scanner(diagnostic: bool):
                            "funding_fiable": fp.fiable,
                            "funding_zscore": zf.zscore, "funding_regime": zf.regime,
                            "funding_prevu_bps_h": prevoir_funding_bps_h(p.get("premium_bps")),
+                           "delta_oi_pct": p.get("delta_oi_pct"),
+                           "alerte_rupture": (p.get("alerte_rupture") or {}).get("niveau"),
                            "funding_tendance": _tendance_prev(
                                prevoir_funding_bps_h(p.get("premium_bps")), p["funding_bps_h"]),
                            # Y4 x PREVISION : le z-score peut GROSSIR (realise), la prevision ne
