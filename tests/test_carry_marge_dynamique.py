@@ -100,3 +100,43 @@ def test_le_levier_NE_CHANGE_PAS_avec_la_marge(tmp_path):
                           capital_usd=5000.0)
     pos = charger_gestionnaire(tmp_path).ouvertes["HYPE"]
     assert float(pos["levier"]) == 1.5, "le LEVIER doit rester celui que le risque a validé"
+
+
+# ---------------- 20/07 : « notre pnl est ridicule » — le capital etait ENCORE fantome ----------------
+# 19/07 : marge dynamique branchee sur une FONCTION inexistante -> 50 $. 20/07 : rebranchee sur
+# des CLES inexistantes du bon fichier -> encore 50 $, 40 % du capital deploye. Ces tests lisent
+# le VRAI schema de ui_simulation_state.json (history[-1].current_equity_usdt, starting).
+
+import json as _json
+from pathlib import Path as _Path
+
+from hl_observer.funding.carry_paper_runtime import _capital_disponible
+
+
+def _ecrire_etat(tmp_path, contenu):
+    p = tmp_path / "runtime" / "data" / "ui_simulation_state.json"
+    p.parent.mkdir(parents=True, exist_ok=True)
+    p.write_text(_json.dumps(contenu), encoding="utf-8")
+
+
+def test_capital_lu_dans_l_historique_d_equity_LE_VRAI_SCHEMA(tmp_path):
+    _ecrire_etat(tmp_path, {"simulation_starting_equity_usdt": 1000.0,
+                            "simulation_equity_history": [
+                                {"current_equity_usdt": 1000.0},
+                                {"current_equity_usdt": 998.4}]})
+    assert _capital_disponible(tmp_path) == 998.4     # l'equity VIVANTE, pas le depart
+
+
+def test_capital_replie_sur_l_equity_de_depart_si_l_historique_manque(tmp_path):
+    _ecrire_etat(tmp_path, {"simulation_starting_equity_usdt": 1000.0})
+    assert _capital_disponible(tmp_path) == 1000.0
+
+
+def test_capital_absent_reste_None_jamais_invente(tmp_path, monkeypatch):
+    monkeypatch.delenv("HYPERSMART_SIMULATION_INITIAL_EQUITY_USDT", raising=False)
+    assert _capital_disponible(tmp_path) is None
+
+
+def test_le_lanceur_declare_le_capital_en_repli():
+    src = open("LANCER_HYPERSMART.cmd", encoding="utf-8", errors="replace").read()
+    assert 'HYPERSMART_SIMULATION_INITIAL_EQUITY_USDT=1000' in src

@@ -77,11 +77,25 @@ def _capital_disponible(root: str | Path) -> float | None:
     replis explicites et aucune invention : env déclarée, sinon None (marge par défaut).
     """
     # 1) l'état moteur, écrit par le runtime lui-même
+    # 🔴 20/07 — DEUXIÈME clé fantôme au même endroit (constat : `capital live = None` pendant
+    # que le fichier existait) : les clés testées (`equity_usdt`...) n'existent PAS dans ce
+    # fichier. Le vrai schéma : `simulation_equity_history[-1].current_equity_usdt` (équity
+    # vivante) puis `simulation_starting_equity_usdt` (départ). Lu au VRAI schéma, vérifié sur
+    # le fichier réel — plus jamais une clé supposée.
     try:
         etat = json.loads((Path(root) / "runtime" / "data" / "ui_simulation_state.json")
                           .read_text(encoding="utf-8-sig"))
-        for cle in ("equity_usdt", "current_equity_usdt", "equity"):
-            v = etat.get(cle) if isinstance(etat, dict) else None
+        if isinstance(etat, dict):
+            for cle in ("equity_usdt", "current_equity_usdt", "equity"):
+                v = etat.get(cle)
+                if isinstance(v, (int, float)) and float(v) > 0:
+                    return float(v)
+            hist = etat.get("simulation_equity_history")
+            if isinstance(hist, list) and hist and isinstance(hist[-1], dict):
+                v = hist[-1].get("current_equity_usdt")
+                if isinstance(v, (int, float)) and float(v) > 0:
+                    return float(v)
+            v = etat.get("simulation_starting_equity_usdt")
             if isinstance(v, (int, float)) and float(v) > 0:
                 return float(v)
     except (OSError, ValueError, TypeError) as exc:
