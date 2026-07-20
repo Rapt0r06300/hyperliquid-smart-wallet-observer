@@ -147,3 +147,45 @@ def test_le_ticker_de_fraicheur_interpole_le_taux_MESURE_et_resnappe():
     assert "setInterval(loadCarry,2000)" in src, "poll carry acceleree 4s -> 2s"
     assert "_carryRateUsdH" in src and "_carryPollTs" in src
     assert "resnappee" in src, "le contrat d'honnetete de l'interpolation est documente"
+
+
+# ---------------- 20/07 revue Chrome n°2 : les panneaux COPY deguises en panneaux GLOBAUX ----------------
+# La page fraiche montrait « funding +0.0000 » (panneau couts, copy-only) PENDANT que le carry
+# accroissait $0.027 trois lignes plus haut ; « ✓ 0 » (coche verte sur zero donnee) ; « ledger 0pos »
+# a cote de « 3 OUVERTES » ; « TRADES CLOS 6 » qui melangeait copy-session et carry-24h.
+# Meme famille que le bug des tuiles du 19/07 : un chiffre juste sous une mauvaise etiquette est faux.
+
+def _src():
+    return open("src/hl_observer/ui/dashboard_v2.py", encoding="utf-8").read()
+
+
+def test_le_panneau_couts_est_ETIQUETE_copy_et_montre_le_funding_carry():
+    src = _src()
+    assert "COÛTS NETS <span class=\"hint\">copy · session</span>" in src, \
+        "le panneau couts doit dire son perimetre (copy), pas se faire passer pour global"
+    assert src.count("c-fund-carry") >= 3, \
+        "la ligne funding carry doit exister (HTML) et etre alimentee (poll + ticker 1 s)"
+
+
+def test_marks_zero_affiche_un_tiret_JAMAIS_une_coche_verte():
+    """« ✓ 0 » = chiffre rassurant sorti de rien (meme regle que le PF « ≥1 » du 19/07)."""
+    src = _src()
+    assert "if(av===0&&mi===0){fr.textContent='— 0';fr.style.color='var(--mut2)';}" in src
+
+
+def test_le_wiring_etiquette_le_ledger_comme_COPY():
+    """« ledger 0pos » a cote de « 3 OUVERTES » : c'est le ledger du moteur copy, il le dit."""
+    assert "'ledger copy'" in _src()
+
+
+def test_trades_clos_prefere_le_compteur_de_SESSION_avec_repli_honnete():
+    """La rangee de tuiles est SESSION (comme le grand PnL) : le carry y entre par
+    closes_session (ledger etiquete), pas par la fenetre 24 h du churn ; repli si vieux moteur."""
+    src = _src()
+    assert "(d.closes_session!=null)?Number(d.closes_session):Number((d.churn&&d.churn.closes)||0)" in src
+
+
+def test_funding_arb_legacy_ne_se_confond_plus_avec_le_funding_du_carry():
+    """« funding · paires 0 · off » se lisait « le funding est OFF » alors que le carry
+    encaisse du funding : c'est le funding-ARB perp<->perp (loi X-04, ferme) — etiquete."""
+    assert "funding-arb · paires" in _src()

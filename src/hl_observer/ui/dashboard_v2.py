@@ -295,12 +295,16 @@ th{letter-spacing:1.2px}
      <div class="kv"><span>trades publics</span><b id="sc-trades">…</b></div>
      <div class="kv"><span>deltas d'entrée frais</span><b id="sc-deltas">…</b></div>
    </div>
-   <div class="card"><h3>COÛTS NETS <span class="hint">cumul</span></h3>
-     <div class="kv"><span>frais</span><b id="c-fees" style="color:var(--red)">…</b></div>
+   <!-- 🔴 20/07 (revue Chrome) : ce panneau montrait « funding +0.0000 » PENDANT que le carry
+        accroissait $0.027 juste au-dessus — panneau COPY-only sous une étiquette globale (même
+        famille que le bug des tuiles du 19/07). Étiquette corrigée + ligne carry ajoutée. -->
+   <div class="card"><h3>COÛTS NETS <span class="hint">copy · session</span></h3>
+     <div class="kv"><span>frais copy</span><b id="c-fees" style="color:var(--red)">…</b></div>
      <div class="bar"><i id="c-fees-b" style="background:var(--red);width:0"></i></div>
-     <div class="kv" style="margin-top:8px"><span>funding</span><b id="c-fund">…</b></div>
+     <div class="kv" style="margin-top:8px"><span>funding copy</span><b id="c-fund">…</b></div>
      <div class="bar"><i id="c-fund-b" style="background:var(--cyan);width:0"></i></div>
-     <div class="kv" style="margin-top:8px"><span>realized / unreal.</span><b id="ru">…</b></div>
+     <div class="kv" style="margin-top:8px"><span>realized / unreal. copy</span><b id="ru">…</b></div>
+     <div class="kv" style="margin-top:8px"><span>funding carry (accru)</span><b id="c-fund-carry" style="color:var(--cyan)">…</b></div>
    </div>
    <div class="card"><h3>REFUS · NO-TRADE <span class="hint">discipline</span></h3>
      <div id="refus" style="font-family:var(--mono);font-size:11px;line-height:1.9;color:var(--mut)">…</div>
@@ -310,7 +314,9 @@ th{letter-spacing:1.2px}
  <div class="card" style="margin-bottom:12px"><h3>ÉTAT MOTEUR</h3>
    <div class="g3" style="margin:0">
      <div class="kv"><span>moteur</span><b id="engine">…</b></div>
-     <div class="kv"><span>funding · paires</span><b id="m_funding">…</b></div>
+     <!-- 20/07 : « funding · paires » se confondait avec le funding du CARRY (qui tourne).
+          C'est le funding-ARB perp↔perp (loi X-04 : 0/120, ferme) — etiquete comme tel. -->
+     <div class="kv"><span>funding-arb · paires</span><b id="m_funding">…</b></div>
      <div class="kv"><span>modes</span><b id="modes">…</b></div>
      <div class="kv"><span>réconciliation</span><b id="recon">…</b></div>
      <div class="kv"><span>marks marché</span><b id="fresh">…</b></div>
@@ -390,7 +396,10 @@ function tick(){
     if(window.syncTop)syncTop();
     // marks
     var eqo=d.equity||{},av=Number(eqo.market_marks_available||0),mi=Number(eqo.market_marks_missing||0),fr=document.getElementById('fresh');
-    if(mi>0&&av===0){fr.textContent='⚠ '+mi+' manquants';fr.style.color='var(--red)';}else if(mi>0){fr.textContent=av+'/'+(av+mi);fr.style.color='var(--amber)';}else{fr.textContent='✓ '+av;fr.style.color='var(--green)';}
+    // 🔴 20/07 : « ✓ 0 » = coche VERTE sur zéro donnée — un chiffre rassurant sorti de rien
+    // (même règle que le PF « ≥1 »). Zéro partout -> tiret neutre, jamais une coche.
+    if(av===0&&mi===0){fr.textContent='— 0';fr.style.color='var(--mut2)';}
+    else if(mi>0&&av===0){fr.textContent='⚠ '+mi+' manquants';fr.style.color='var(--red)';}else if(mi>0){fr.textContent=av+'/'+(av+mi);fr.style.color='var(--amber)';}else{fr.textContent='✓ '+av;fr.style.color='var(--green)';}
     document.getElementById('startbal').textContent=n(eqo.starting_balance_usdc||base);
     // modes
     var sniper=0,grinder=0;ps.forEach(function(p){if(modeOf(p)==='SNIPER')sniper++;else grinder++;});
@@ -445,7 +454,7 @@ function tick(){
     // wiring
     var pe=(fus.paper_engine)||{},summ=fus.external_profile_execution_summary||{};
     function nd(ok,l,v){return '<span class="n"><span class="d" style="background:'+(ok?'var(--green)':'var(--red)')+';box-shadow:0 0 7px '+(ok?'var(--green)':'var(--red)')+'"></span>'+l+' <span style="color:var(--mut2)">'+v+'</span></span>';}
-    document.getElementById('wiring').innerHTML='<span style="color:var(--mut2);letter-spacing:1px">WIRING</span>'+nd(d.engine_running,'ws',(sc.engine_running?'live':'off'))+nd((fus.status||'').indexOf('OK')>=0,'fusion',(summ.profiles_executed!=null?summ.profiles_executed:'—'))+nd(true,'paper_engine',(pe.accepted_count!=null?pe.accepted_count:'—'))+nd(gap<0.01,'ledger',(pl.open_positions_count!=null?pl.open_positions_count+'pos':'—'));
+    document.getElementById('wiring').innerHTML='<span style="color:var(--mut2);letter-spacing:1px">WIRING</span>'+nd(d.engine_running,'ws',(sc.engine_running?'live':'off'))+nd((fus.status||'').indexOf('OK')>=0,'fusion',(summ.profiles_executed!=null?summ.profiles_executed:'—'))+nd(true,'paper_engine',(pe.accepted_count!=null?pe.accepted_count:'—'))+nd(gap<0.01,'ledger copy',(pl.open_positions_count!=null?pl.open_positions_count+'pos':'—'));
     // dérive les événements du flux depuis les deltas réels
     deriveEvents(d,ps,sniper+grinder);
     document.getElementById('clk').textContent=hms();
@@ -524,7 +533,8 @@ function syncTop(){
   // Un chiffre juste sous une mauvaise etiquette reste un chiffre FAUX pour celui qui le lit.
   var T=document.getElementById('trd');
   if(T){var tc=(window._copyCloses||0)+(window._carryCloses||0);
-        T.textContent=tc; T.title=(window._copyCloses||0)+' copy + '+(window._carryCloses||0)+' carry';}
+        T.textContent=tc; T.title=(window._copyCloses||0)+' copy + '+(window._carryCloses||0)
+          +' carry — session courante (l\'historique complet vit au ledger + rapport quotidien)';}
   var X=document.getElementById('expo');
   if(X){var mg=Number(window._copyExpo||0)/10+Number(window._carryMarge||0);
         X.textContent=n(mg); X.title='marge copy + marge carry (le levier differe par strategie)';}
@@ -556,7 +566,10 @@ function loadCarry(){fetch('/v2/carry').then(function(r){return r.json()}).then(
   var realSess=(d.realized_net_pnl_usdc_session!=null)?Number(d.realized_net_pnl_usdc_session):Number(d.realized_net_pnl_usdc||0);
   window._carryPos=(d.positions_ouvertes||0);window._carryReal=realSess;
   window._carryNet=realSess+Number(d.funding_accru_usdt||0);
-  window._carryCloses=Number((d.churn&&d.churn.closes)||0);
+  // 🔴 20/07 : « TRADES CLOS 6 » melangeait TROIS perimetres sur la rangee SESSION (copy =
+  // session moteur, carry = fenetre 24 h du churn). closes_session (ledger etiquete) aligne
+  // la tuile sur la session, comme le grand PnL ; repli honnete : compteur 24 h si vieux moteur.
+  window._carryCloses=(d.closes_session!=null)?Number(d.closes_session):Number((d.churn&&d.churn.closes)||0);
   window._carryMarge=(d.positions||[]).reduce(function(s,p){return s+Number(p.marge_usdt||0);},0);
   if(window.syncTop)syncTop();
   var real=realSess,er=document.getElementById('carry-real');
@@ -564,6 +577,7 @@ function loadCarry(){fetch('/v2/carry').then(function(r){return r.json()}).then(
   er.title='Session courante (repart a zero au redemarrage). Historique complet : '
     +n(Number(d.realized_net_pnl_usdc||0))+'$ — jamais supprime (ledger + rapport quotidien).';
   document.getElementById('carry-accru').textContent='$'+n(d.funding_accru_usdt,4);
+  var cfc=document.getElementById('c-fund-carry');if(cfc)cfc.textContent='$'+n(d.funding_accru_usdt,4);
   var ps=d.positions||[];
   tb.innerHTML=ps.map(function(p){return '<tr><td><b>'+p.coin+'</b></td><td>$'+n(p.notional_usdt,0)+'</td><td>'+n(p.levier,1)+'x</td><td data-carrylive="'+p.coin+'" style="color:var(--cyan)">$'+n(p.funding_accrued_usdt,6)+'</td><td style="text-align:right">'+n(p.age_h,1)+'h</td></tr>';}).join('')||'<tr><td colspan="5" style="color:var(--mut2)">— aucune position carry ouverte —</td></tr>';
   // UNIFICATION + FRAICHEUR (20/07) : les positions carry partent AUSSI dans le panneau
@@ -606,6 +620,7 @@ setInterval(function(){
   var base=Number(window._carryAccruBase||0), live=base+extra;
   var el=document.getElementById('carry-accru');
   if(el){el.textContent='$'+n(live,6);el.title='+$'+n(rate,6)+'/h — le funding coule en continu (taux mesure)';}
+  var c2=document.getElementById('c-fund-carry');if(c2)c2.textContent='$'+n(live,6);
   var rows=window._carryRows||[];
   rows.forEach(function(p){p.accruLive=Number(p.accru||0)+Number(p.rate||0)*extraH;
     document.querySelectorAll('[data-carrylive="'+p.coin+'"]').forEach(function(c){
