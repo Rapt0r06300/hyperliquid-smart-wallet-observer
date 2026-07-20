@@ -440,7 +440,7 @@ function tick(){
     ps.slice(0,16).forEach(function(p){var g=modeOf(p),pp=Number(p.unrealized_pnl_usdc||p.pnl_usdc||0),notl=Number(p.notional_usdt||p.copied_notional_usdt||0),tr=document.createElement('tr');
       tr.innerHTML='<td>'+(p.coin||'?')+'</td><td><span class="tag2 '+(g==='SNIPER'?'tg-s':'tg-g')+'">'+g+'</span></td><td>'+n(notl/10)+'</td><td style="text-align:right;color:'+col(pp)+'">'+(pp>=0?'+':'')+n(pp)+'</td>';tb.appendChild(tr);});
     cRows.slice(0,16).forEach(function(p){var tr=document.createElement('tr');
-      tr.innerHTML='<td>'+p.coin+'</td><td><span class="tag2 tg-g">CARRY</span></td><td>'+n(p.marge)+'</td><td style="text-align:right;color:'+col(p.accru)+'" title="funding accru (estime en continu entre les releves moteur)">+'+n(p.accru,4)+'</td>';tb.appendChild(tr);});
+      tr.innerHTML='<td>'+p.coin+'</td><td><span class="tag2 tg-g">CARRY</span></td><td>'+n(p.marge)+'</td><td data-carrylive="'+p.coin+'" style="text-align:right;color:'+col(p.accru)+'" title="funding accru — coule en continu (taux mesure)">+'+n(p.accru,6)+'</td>';tb.appendChild(tr);});
     if(!ps.length&&!cRows.length)tb.innerHTML='<tr><td colspan="4" style="color:var(--mut2);border:0;padding-top:10px">— aucune position ouverte —</td></tr>';
     // wiring
     var pe=(fus.paper_engine)||{},summ=fus.external_profile_execution_summary||{};
@@ -565,7 +565,7 @@ function loadCarry(){fetch('/v2/carry').then(function(r){return r.json()}).then(
     +n(Number(d.realized_net_pnl_usdc||0))+'$ — jamais supprime (ledger + rapport quotidien).';
   document.getElementById('carry-accru').textContent='$'+n(d.funding_accru_usdt,4);
   var ps=d.positions||[];
-  tb.innerHTML=ps.map(function(p){return '<tr><td><b>'+p.coin+'</b></td><td>$'+n(p.notional_usdt,0)+'</td><td>'+n(p.levier,1)+'x</td><td style="color:var(--cyan)">$'+n(p.funding_accrued_usdt,4)+'</td><td style="text-align:right">'+n(p.age_h,1)+'h</td></tr>';}).join('')||'<tr><td colspan="5" style="color:var(--mut2)">— aucune position carry ouverte —</td></tr>';
+  tb.innerHTML=ps.map(function(p){return '<tr><td><b>'+p.coin+'</b></td><td>$'+n(p.notional_usdt,0)+'</td><td>'+n(p.levier,1)+'x</td><td data-carrylive="'+p.coin+'" style="color:var(--cyan)">$'+n(p.funding_accrued_usdt,6)+'</td><td style="text-align:right">'+n(p.age_h,1)+'h</td></tr>';}).join('')||'<tr><td colspan="5" style="color:var(--mut2)">— aucune position carry ouverte —</td></tr>';
   // UNIFICATION + FRAICHEUR (20/07) : les positions carry partent AUSSI dans le panneau
   // POSITIONS unifie, et leur taux d'accrual (usd/h) alimente le ticker 1 s qui fait vivre
   // le PnL entre les releves moteur -- interpolation honnete, resnappee au reel a chaque poll.
@@ -605,9 +605,11 @@ setInterval(function(){
   var extraH=(Date.now()-t0)/3.6e6, extra=rate*extraH;
   var base=Number(window._carryAccruBase||0), live=base+extra;
   var el=document.getElementById('carry-accru');
-  if(el)el.textContent='$'+n(live,4);
+  if(el){el.textContent='$'+n(live,6);el.title='+$'+n(rate,6)+'/h — le funding coule en continu (taux mesure)';}
   var rows=window._carryRows||[];
-  rows.forEach(function(p){p.accruLive=Number(p.accru||0)+Number(p.rate||0)*extraH;});
+  rows.forEach(function(p){p.accruLive=Number(p.accru||0)+Number(p.rate||0)*extraH;
+    document.querySelectorAll('[data-carrylive="'+p.coin+'"]').forEach(function(c){
+      c.textContent=(c.textContent.charAt(0)==='$'?'$':'+')+n(p.accruLive,6);});});
   window._carryNet=Number(window._carryReal||0)+live;
   if(window.syncTop)syncTop();
 },1000);
