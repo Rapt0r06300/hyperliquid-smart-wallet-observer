@@ -536,15 +536,27 @@ def recommandation(strat: str, r: dict[str, Any]) -> str:
     la CONCLUSION en français, dérivée des résultats, jamais inventée. Quatre cas :
     pépite OR (à câbler en paper), pépite ARGENT (à surveiller), espace épuisé (le réglage
     n'existe pas dans ces données — le dire épargne des semaines), données insuffisantes."""
+    # 21/07 — LES LOIS MESUREES. Une pepite qui retombe sur un mecanisme deja REFUTE par nos
+    # propres chiffres doit le dire ICI, au moment ou elle est proposee. Sinon le rapport
+    # recommande d'implementer quelque chose qu'on a deja prouve perdant — et personne ne s'en
+    # souvient trois semaines plus tard. Ce n'est pas un interdit : c'est le chiffre a battre.
+    rappel = ""
+    try:
+        from hl_observer.research.lois_mesurees import avertissement as _avert
+        a = _avert(strat)
+        if a:
+            rappel = " ⚠️ RAPPEL — %s" % a
+    except Exception:  # noqa: BLE001 — un rappel absent ne casse jamais une recommandation
+        rappel = ""
     promus = sorted((r.get("promus") or []),
                     key=lambda p: (p.get("rang") != "OR",
                                    -float((p.get("nets") or {}).get("stress") or 0.0)))
     if promus:
         p = promus[0]
         return ("FAIS ÇA : câble `%s` en paper (rang %s, nets %s%s) et juge-le au profit "
-                "factor sur une semaine avant d'y croire."
+                "factor sur une semaine avant d'y croire.%s"
                 % (p["config"], p.get("rang", "?"), p.get("nets"),
-                   ", folds %s" % p["folds_vivants"] if p.get("folds_vivants") else ""))
+                   ", folds %s" % p["folds_vivants"] if p.get("folds_vivants") else "", rappel))
     if r.get("statut") == "ERREUR":
         return "PANNE À RÉPARER : ce module a explosé (%s) — envoie ça à Claude." \
             % (r.get("motif") or "?")

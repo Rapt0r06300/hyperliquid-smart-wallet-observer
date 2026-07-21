@@ -314,7 +314,7 @@ def _sec_univers_scan(root: Path) -> list[str]:
 
 def _sec_a_faire(root: Path, now_ms: int) -> list[str]:
     """Des CONSTATS actionnables dérivés des fichiers — jamais une promesse, jamais un ordre."""
-    out = ["## 11. À FAIRE — ce que les données d'aujourd'hui désignent", ""]
+    out = ["## 12. À FAIRE — ce que les données d'aujourd'hui désignent", ""]
     actions: list[str] = []
     try:  # cross-venue : verdict possible ?
         lignes = (root / "runtime" / "data" / "dispersion_venues.jsonl").read_text(
@@ -361,6 +361,37 @@ def _sec_a_faire(root: Path, now_ms: int) -> list[str]:
     except Exception:  # noqa: BLE001
         pass
     out += ["- " + a for a in actions] if actions else ["Rien à signaler."]
+    return out
+
+
+def _sec_lois(root: Path) -> list[str]:
+    """CE QUI EST DÉJÀ TRANCHÉ — pour ne pas rouvrir dix fois le même dossier.
+
+    Ces verdicts ne vivaient que dans la mémoire d'une session de travail : une autre session,
+    un autre outil, ou un redémarrage, et on pouvait ré-implémenter une stratégie qu'on avait
+    prouvée perdante. Ils sont maintenant dans le dépôt, datés, avec leur chiffre.
+    """
+    out = ["## 11. Ce qui est déjà tranché (lois mesurées)", ""]
+    try:
+        import sys as _s
+        _s.path.insert(0, str(root / "src"))
+        from hl_observer.research.lois_mesurees import (LOIS, VERDICT_CONFIRME, VERDICT_LIMITE,
+                                                        VERDICT_REFUTE, par_verdict)
+    except Exception as exc:  # noqa: BLE001
+        return out + ["_registre illisible : %s_" % exc]
+    out.append("_%d loi(s) : %d réfutée(s), %d limite(s), %d confirmée(s). Détail complet : "
+               "`docs/LOIS_MESUREES.md`. Une loi se rouvre avec une DONNÉE neuve, pas un "
+               "argument neuf._" % (len(LOIS), len(par_verdict(VERDICT_REFUTE)),
+                                    len(par_verdict(VERDICT_LIMITE)),
+                                    len(par_verdict(VERDICT_CONFIRME))))
+    out.append("")
+    for l in par_verdict(VERDICT_CONFIRME) + par_verdict(VERDICT_LIMITE):
+        icone = "🟢" if l.verdict == VERDICT_CONFIRME else "🟠"
+        out.append("- %s **%s** — %s" % (icone, l.titre, l.chiffre))
+    refutees = par_verdict(VERDICT_REFUTE)
+    if refutees:
+        out += ["", "🔴 Réfutées (ne pas ré-ouvrir sans donnée neuve) : %s"
+                % ", ".join("`%s`" % l.cle for l in refutees)]
     return out
 
 
@@ -444,6 +475,7 @@ def generer(root: str | Path = RACINE, *, now_ms: int | None = None) -> str:
         secs.append(_sec_economie_positions(racine, now))
         secs.append(_sec_univers_scan(racine))
         secs.append(_sec_allocation(racine))
+        secs.append(_sec_lois(racine))
         secs.append(_sec_a_faire(racine, now))
         for sec in secs:
             parts += sec + [""]

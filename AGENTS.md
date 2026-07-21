@@ -1,55 +1,133 @@
 # AGENTS.md — consignes pour tout agent/IA travaillant sur HyperSmart Observer
 
-**Règle n°1 (absolue, non négociable) : mainnet lecture seule, testnet verrouillé.**
-Aucun ordre mainnet, aucun argent réel, aucune clé privée exposée, aucun seed/mnemonic,
-aucun dépôt/retrait, aucun wallet-connect mainnet, aucun appel d'API privée mainnet.
-READ-ONLY-MAINNET, LOCAL-DECISION, TESTNET-ONLY, DENY-BY-DEFAULT. Un signal n'est jamais
-un ordre mainnet ; un paper-trade n'est jamais un ordre. Si une donnée est incertaine/trop
-vieille/incomplète : NO_TRADE.
+> **Dernière mise à jour : 2026-07-21.** Ce fichier avait 13 jours de retard (il pointait
+> encore le « testnet executor » comme cible produit alors que le chantier réel est le carry
+> paper). Un AGENTS.md périmé est pire que pas d'AGENTS.md : il oriente vers la mauvaise cible
+> avec autorité. **Si tu le lis et qu'il contredit `docs/ETAT_ET_FEUILLE_DE_ROUTE.md`, c'est
+> l'état qui gagne — et tu mets ce fichier à jour dans la foulée.**
 
-## Mise à jour testnet contrôlé (2026-07-04)
-- La simulation paper complète reste disponible seulement comme garde-fou/legacy minimal.
-- La cible produit devient : observer Hyperliquid mainnet en lecture seule, décider localement,
-  puis exécuter uniquement sur un environnement testnet à fausse monnaie via une couche
-  `testnet_executor` verrouillée.
-- Toute exécution externe doit refuser si l'environnement n'est pas explicitement testnet, si
-  `REAL_MAINNET_TRADING=false`, `TESTNET_ONLY=true` et `CONFIRM_TESTNET_EXECUTION=true` ne sont
-  pas satisfaits, ou si les plafonds `MAX_TESTNET_NOTIONAL` / `MAX_OPEN_TESTNET_POSITIONS` sont
-  dépassés.
-- Les adaptateurs testnet doivent passer par une interface `TestnetExchangeAdapter`, être
-  testables avec un fake adapter, journaliser chaque décision, et ne jamais contourner
-  DecisionEngine/RiskEngine.
-- Les clés/signatures testnet ne doivent jamais être écrites dans le repo, les logs, le
-  dashboard ou la documentation. Toute vraie signature testnet est une phase future explicite,
-  isolée et auditée ; le code par défaut reste fake-adapter/refusant.
+## Règle n°1 (absolue, non négociable)
 
-## Périmètre
-- Runtime par défaut : Hyperliquid mainnet en lecture seule (`/info` + WebSocket public). dYdX v4
-  reste dormant/comparatif. Les décisions viennent de prix réels du marché ; le PnL complet est
-  lu côté testnet quand l'exécuteur testnet est explicitement activé, sinon la simulation locale
-  reste minimale et honnête.
-- Pas de faux PnL, pas de faux wallet, pas de fausse simulation. Honnêteté avant tout :
-  ne jamais maquiller les chiffres, ne jamais promettre un PnL positif.
+**Aucune exécution réelle.** Aucun ordre réel, aucun `/exchange` réel, aucun argent réel,
+aucune clé privée, aucun seed/mnemonic, aucune signature réelle, aucun wallet-connect pour
+agir, aucun dépôt/retrait, aucun endpoint d'exécution activé.
+`READ-ONLY-MAINNET · LOCAL-DECISION · PAPER-ONLY · DENY-BY-DEFAULT`.
 
-## Surface IA (lecture seule)
-- Le modèle local (`ml/`) NOTE les trades (P(rentable)) et peut FILTRER, jamais ouvrir.
-- L'explainer (`research/local_llm_explainer.py`, Ollama optionnel) explique offline ; jamais
-  dans le chemin de décision. Aucune API LLM payante.
+Un signal n'est jamais un ordre ; un paper-trade n'est jamais un ordre. Les mots *trade,
+order, buy, sell, hedge, arbitrage* sont **autorisés** en test/mock/paper/doc/dashboard :
+seule l'**action réelle** est interdite. Donnée incertaine / trop vieille / incomplète →
+`NO_TRADE`.
 
-## Avant toute modif
-1. inspecter Git ; 2. comprendre l'archi ; 3. protéger le local ; 4. documenter ; 5. coder
-proprement ; 6. tester ; 7. vérifier que mainnet reste 100 % lecture seule et que testnet reste
-verrouillé par configuration, fake adapter et tests de refus.
+**Tout le reste est autorisé** (décision explicite de Flo, 08/07) : scraping public agressif,
+collecte 24/7, multi-sources, backfill massif, toute analyse, tout backtest, toute simulation.
 
-## Flags clés (tous OFF/sûrs par défaut)
-- `HYPERSMART_V12_GATE_AUTHORITATIVE`, `HYPERSMART_V13_MODEL_AUTHORITATIVE` : gates contraignants
-  (ne peuvent que RÉDUIRE/filtrer les trades, jamais en créer).
-- `HYPERSMART_V13_OLLAMA_ENABLED` : explainer local (repli règles si absent).
+## Où tu travailles (ne pas confondre — c'est la confusion la plus coûteuse du projet)
 
-## Où trouver le reste (2026-07-08)
-- **État actuel, méthode de travail, architecture, config, commandes, feuille de route :**
-  **`docs/ETAT_ET_FEUILLE_DE_ROUTE.md`** (document maître, à jour).
-- **Objectif condensé :** `OBJECTIF.md` (racine).
-- **Règles complètes de l'agent :** `CLAUDE.md` (racine, source de vérité).
-- **Replay / recherche de scénarios (après les 48h) :** `docs/REPLAY_SCENARIO_SEARCH.md`.
-- **Config détaillée :** `docs/CONFIG_FLAGS.md`.
+| chemin | rôle | y toucher ? |
+|---|---|---|
+| `src/hl_observer/` | **LE runtime actif.** Toute nouvelle idée va ici. | oui |
+| `tools/` | collecteurs, feeders, CLI. **Rechargés à chaque passe** → une modif ici est active en ≤ 10 min, sans redémarrage. | oui |
+| `hyper_smart_observer/dydx_v4/` | vrai dYdX legacy, pointe `indexer.dydx.trade`. **Ce n'est PAS la simulation.** | non |
+| `hyper_smart_observer/` (hors dydx_v4) | legacy/compat isolé | non |
+
+Une modif dans `src/` ne prend effet **qu'au prochain redémarrage** de Flo. Le dire dans le
+rapport final, toujours.
+
+## Ne jamais toucher
+
+- la session en cours quand Flo dit qu'elle tourne (lecture seule sur `runtime/`) ;
+- `runtime/data/*.jsonl` et `runtime/replay/` : append-only, jamais de réécriture ni de purge ;
+- les lanceurs `.cmd` sans vérifier que `cd /d "%~dp0"` reste correct ;
+- les très gros fichiers tronqués par le mount (`src/hl_observer/cli.py`, `ui/routes.py`) via
+  Write/bash — passer par de petits modules importés ;
+- une constante de sécurité (`SECURITE_LIQUIDATION`, plafonds de risque) pour améliorer un
+  chiffre : voir « le piège » plus bas.
+
+## Ce qui est DÉJÀ tranché par la mesure
+
+**`docs/LOIS_MESUREES.md`** — 13 verdicts datés, chacun avec le chiffre qui l'a tranché et la
+donnée qui justifierait de rouvrir le dossier. Source unique :
+`src/hl_observer/research/lois_mesurees.py` (le doc est généré, ne pas l'éditer à la main).
+
+Ne relance pas le copy-trading global, le market-making dans le spread, le lead-lag BTC→alts
+ou le funding perp↔perp sans avoir lu la loi correspondante. **Un argument neuf ne suffit
+pas : il faut une donnée neuve.** Le registre est branché dans `recherche_scenario` — une
+pépite qui retombe sur un mécanisme réfuté affiche le rappel automatiquement.
+
+## Le piège (il s'est produit, il se reproduira)
+
+Presque toutes les façons d'augmenter le PnL affiché reviennent à **prendre plus de risque
+sans le mesurer** : baisser `securite_liquidation`, monter le levier, réduire un plancher de
+break-even, élargir un seuil. Un backtest sur une fenêtre calme **ne contient pas** la
+liquidation qu'on vient de rendre possible — le PnL monte, le risque de ruine aussi, et seul
+le premier est mesuré. `carry_backtest.verdict()` **refuse** explicitement ce type de gain.
+
+Le bon levier ressemble toujours à ça : *même risque, mieux placé* (allocation par rendement
+net, renfort sans fermeture, plus de données).
+
+## Ordre de travail (les 7 étapes, dans cet ordre)
+
+1. **`git log -1 --date`** — savoir ce qui est committé avant de croire quoi que ce soit ;
+2. comprendre l'archi existante (renforcer, ne pas créer une 3ᵉ architecture) ;
+3. protéger le travail local (ne rien supprimer brutalement) ;
+4. **mesurer avant de proposer** — un chiffre ou rien ;
+5. coder proprement, petits modules importables ;
+6. **tester** — un nouveau module sans test = échec bloquant (voir plus bas) ;
+7. vérifier que le no-real-trade tient, et le dire dans le rapport.
+
+## Rien n'échappe aux tests
+
+`TEST-AUDIT-complet.cmd` auto-découvre le code : **un nouveau module dans `src/` ou
+`hyper_smart_observer/` sans test associé est un ÉCHEC BLOQUANT.** Le module et son test se
+créent dans le même mouvement. `resultat-audit.md` liste chaque fichier (lignes, importé par
+combien, testé oui/non, couverture réelle) : aucun fichier ne peut se cacher.
+
+**La vérité, c'est Windows**, pas le sandbox (qui tronque les gros fichiers et corrompt
+l'UTF-8). Avant de committer : `ast.parse` sur le blob **stagé**, pas sur le fichier lu.
+
+## La maladie du projet — à vérifier à chaque livraison
+
+Mesurée le 18/07 : **954 modules, 63,3 % câblés, 28,6 % testés-SEULEMENT, 8,1 % orphelins.**
+Un module importé n'est pas un module appelé ; une valeur mesurée qui ne franchit aucune porte
+est du code mort. **« mention ≠ porte. »**
+
+Une feature est DONE seulement si : codée, **testée**, documentée, **câblée** (ou marquée
+`PARTIAL_NOT_WIRED`), et sans affaiblir le no-real-trade.
+
+## Vérité des données et du PnL
+
+- Jamais de donnée fabriquée présentée comme réelle. Données réelles ou **état vide honnête**.
+- Le PnL vient d'un **ledger d'événements**, pas d'un compteur. Dashboard, audit, logs et
+  exports convergent sur le même ledger.
+- Le latent (base non réalisée) est **affiché séparément**, jamais additionné au net.
+- `LIVE / BACKTEST / REPLAY / TEST_FIXTURE` ne se mélangent jamais.
+- Un champ absent reste **absent** (`None`), il ne devient pas `0` : un zéro fabriqué ment
+  plus qu'un trou avoué.
+- **Enregistrer les REFUS** autant que les acceptations — sinon on n'a que des gagnants dans
+  ses propres données (biais de survivant maison).
+
+## But quant
+
+Moins de trades, beaucoup plus propres. Filtrer les mauvais signaux ; ne garder que ceux à
+**edge net positif après** frais + spread + slippage + latence + dégradation de copie. Juger
+au **profit factor**, pas au winrate. **Jamais de promesse de PnL.**
+
+## Où trouver le reste
+
+- **État, méthode, archi, config, feuille de route** → `docs/ETAT_ET_FEUILLE_DE_ROUTE.md` (maître)
+- **Règles complètes de l'agent** → `CLAUDE.md` (racine)
+- **Lois mesurées** → `docs/LOIS_MESUREES.md`
+- **Objectif condensé** → `OBJECTIF.md`
+- **Config détaillée** → `docs/CONFIG_FLAGS.md`
+- **Tout lancer en une fois** → `TOUT-TESTER.cmd` (sécurité, tests, invariants, câblage,
+  qualité des données, backtests carry+arbitrage, recherche de pépites, santé live)
+- **Rapports produits** : `RECAP-COMPLET.md`, `rapports/RAPPORT_DU_JOUR.md`,
+  `runtime/replay/BACKTEST_CARRY.md`, `runtime/replay/BACKTEST_ARBITRAGE.md`,
+  `runtime/replay/RESULTATS_RECHERCHE.md`
+
+## Rapport final attendu (en français, à chaque fois)
+
+fichiers modifiés · bugs trouvés · corrections appliquées · tests lancés · limites restantes ·
+prochaines étapes · puis, littéralement :
+
+**Sécurité : 0 ordre réel · 0 argent réel · 0 clé privée · 0 signature · 0 dépôt/retrait.**
