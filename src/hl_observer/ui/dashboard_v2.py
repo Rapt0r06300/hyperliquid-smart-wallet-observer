@@ -240,18 +240,21 @@ th{letter-spacing:1.2px}
      </div>
      <div class="hero-hl">EQUITY // <span id="mg-span">…</span><br><b id="mg-hi"></b><br><span id="mg-lo"></span></div>
    </div>
-   <div class="chart">
+   <div class="chart" style="position:relative">
    <svg viewBox="0 0 1000 210" preserveAspectRatio="none">
      <defs>
        <linearGradient id="mgfill" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#2ce69b" stop-opacity="0.22"/><stop offset="1" stop-color="#2ce69b" stop-opacity="0"/></linearGradient>
        <filter id="glow" x="-15%" y="-40%" width="130%" height="180%"><feGaussianBlur stdDeviation="2.4" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter>
      </defs>
+     <g id="mg-grid" opacity="0.42"></g>
      <line id="mg-base" x1="0" x2="1000" stroke="#2ce69b" stroke-width="1" stroke-dasharray="2 7" opacity="0.3"/>
      <path id="mg-area" fill="url(#mgfill)" d=""/>
      <path id="mg-line" fill="none" stroke="#2ce69b" stroke-width="2.1" stroke-linejoin="round" stroke-linecap="round" filter="url(#glow)" d=""/>
+     <g id="mg-evts"></g>
      <circle id="mg-ring" r="3.2" fill="none" stroke="#2ce69b" stroke-width="1.4" style="animation:ring 2s ease-out infinite"/>
      <circle id="mg-live" r="3.3" fill="#2ce69b" style="filter:drop-shadow(0 0 7px #2ce69b)"/>
    </svg>
+   <div id="mg-vide" style="display:none;position:absolute;inset:0;align-items:center;justify-content:center;font-family:var(--mono);font-size:12px;color:var(--mut2);text-align:center;line-height:1.8"></div>
    <div class="axis"><span id="mg-t0"></span><span id="mg-baselbl" style="color:var(--mut2)">╌ base = equity départ</span><span id="mg-t1"></span></div>
    </div>
  </div>
@@ -351,48 +354,103 @@ function smoothPath(pts){if(pts.length<2)return pts.length?('M'+pts[0][0]+' '+pt
   for(var i=0;i<pts.length-1;i++){var p0=pts[i>0?i-1:0],p1=pts[i],p2=pts[i+1],p3=pts[i+2<pts.length?i+2:i+1];
     d+=' C'+(p1[0]+(p2[0]-p0[0])/6).toFixed(1)+' '+(p1[1]+(p2[1]-p0[1])/6).toFixed(1)+','+(p2[0]-(p3[0]-p1[0])/6).toFixed(1)+' '+(p2[1]-(p3[1]-p1[1])/6).toFixed(1)+','+p2[0].toFixed(1)+' '+p2[1].toFixed(1);}
   return d;}
-function drawMeta(pts){var W=1000,H=210,PAD=14;if(!pts.length)return;
+// ══ LE METAGRAPHE, REFAIT ENTIEREMENT (21/07, Flo : « il est completement eclate ») ══
+// CE QUI CLOCHAIT, MESURE : l'historique servi contenait 600 points valant TOUS 1 000,00 $
+// avec pnl = 0,0 — la pile copy est eteinte depuis le 11/07 — et le net carry etait greffe
+// sur le DERNIER point seulement. A l'ecran : 599 points immobiles puis une FALAISE verticale.
+// Trois defauts s'ajoutaient : (a) `rng=(hi-lo)||1` inventait une echelle Y quand l'amplitude
+// etait nulle ; (b) le point vivant venait d'une AUTRE formule que la serie (realise SESSION
+// vs realise TOTAL) — il ne pouvait donc que sauter ; (c) rien ne distinguait ce qui est
+// MESURE de ce qui est extrapole.
+// CE QU'ON FAIT MAINTENANT : la serie vient du LEDGER (chaque CLOSE horodate), le point vivant
+// est le dernier point reel + le seul terme qui bouge vraiment entre deux evenements (le
+// funding couru non encore regle), et le segment vivant est DESSINE EN POINTILLES.
+function mgBornes(eqs){
+  // pas de `||1` : une amplitude nulle est un CAS, pas un accident a masquer.
+  var lo=Math.min.apply(null,eqs),hi=Math.max.apply(null,eqs);
+  if(!isFinite(lo)||!isFinite(hi))return{lo:0,hi:1,rng:1,plat:true,vlo:0,vhi:0};
+  if(hi-lo<1e-9){var d=Math.max(Math.abs(lo)*0.005,0.01);
+    return{lo:lo-d,hi:hi+d,rng:2*d,plat:true,vlo:lo,vhi:hi};}
+  var m=(hi-lo)*0.16;return{lo:lo-m,hi:hi+m,rng:(hi-lo)*1.32,plat:false,vlo:lo,vhi:hi};}
+function mgDire(msg){
+  // un graphe sans donnee le DIT. Il ne dessine pas une ligne pour avoir l'air occupe.
+  var v=document.getElementById('mg-vide');if(v){v.style.display='flex';v.innerHTML=msg;}
+  ['mg-line','mg-area'].forEach(function(id){var e=document.getElementById(id);if(e)e.setAttribute('d','');});
+  ['mg-live','mg-ring'].forEach(function(id){var e=document.getElementById(id);if(e)e.setAttribute('r','0');});
+  var g=document.getElementById('mg-evts');if(g)g.innerHTML='';}
+function drawMeta(pts,nReels){
+  var W=1000,H=210,PAD=14,v=document.getElementById('mg-vide');
+  if(!pts||pts.length<2){mgDire(pts&&pts.length===1
+      ? 'un seul point mesuré — une courbe en demande deux<br><span style="opacity:.6">le premier trade fermé fera apparaître la ligne</span>'
+      : 'pas encore d\'historique d\'equity<br><span style="opacity:.6">la courbe naît du ledger, au premier trade fermé</span>');return;}
+  if(v)v.style.display='none';
   var eqs=pts.map(function(p){return p.equity}),base=pts[0].equity;
-  var lo=Math.min.apply(null,eqs.concat([base])),hi=Math.max.apply(null,eqs.concat([base]));
-  var rng=(hi-lo)||1,pd=rng*0.16;lo-=pd;hi+=pd;rng=hi-lo;
+  var B=mgBornes(eqs.concat([base]));
   var t0=pts[0].t,t1=pts[pts.length-1].t,ts=(t1-t0)||1;
-  function X(t){return PAD+(W-2*PAD)*(t-t0)/ts}function Y(e){return PAD+(H-2*PAD)*(1-(e-lo)/rng)}
-  var xy=pts.map(function(p){return [X(p.t),Y(p.equity)]}),line=smoothPath(xy),last=pts[pts.length-1];
+  function X(t){return PAD+(W-2*PAD)*(t-t0)/ts}
+  function Y(e){return PAD+(H-2*PAD)*(1-(e-B.lo)/B.rng)}
+  var xy=pts.map(function(p){return [X(p.t),Y(p.equity)]}),last=pts[pts.length-1];
   var c=last.equity>=base?'#2ce69b':'#ff5c6a';
-  var L=document.getElementById('mg-line');L.setAttribute('d',line);L.setAttribute('stroke',c);
-  document.getElementById('mg-area').setAttribute('d',line+' L'+xy[xy.length-1][0].toFixed(1)+' '+(H-PAD)+' L'+xy[0][0].toFixed(1)+' '+(H-PAD)+' Z');
+  // le segment VIVANT (dernier point reel -> maintenant) est extrapole : on le dessine en
+  // POINTILLES. Ce qui est mesure et ce qui est projete ne doivent pas se ressembler.
+  var nr=Math.max(2,Math.min(nReels||pts.length,pts.length));
+  var solide=smoothPath(xy.slice(0,nr));
+  var L=document.getElementById('mg-line');L.setAttribute('d',solide);L.setAttribute('stroke',c);
+  var ev=document.getElementById('mg-evts'),h='';
+  if(nr<pts.length){var a=xy[nr-1],b=xy[xy.length-1];
+    h+='<path d="M'+a[0].toFixed(1)+' '+a[1].toFixed(1)+' L'+b[0].toFixed(1)+' '+b[1].toFixed(1)
+      +'" fill="none" stroke="'+c+'" stroke-width="1.6" stroke-dasharray="3 4" opacity="0.75"/>';}
+  if(ev)ev.innerHTML=h;
+  document.getElementById('mg-area').setAttribute('d',solide+' L'+xy[nr-1][0].toFixed(1)+' '+(H-PAD)+' L'+xy[0][0].toFixed(1)+' '+(H-PAD)+' Z');
   var by=Y(base),bl=document.getElementById('mg-base');bl.setAttribute('y1',by);bl.setAttribute('y2',by);bl.setAttribute('stroke',c);
+  // grille : 3 reperes horizontaux. Sans eux, on ne sait pas si la pente vaut 1 c ou 100 $.
+  var g=document.getElementById('mg-grid'),gh='';
+  for(var i=1;i<=3;i++){var gy=Y(B.lo+B.rng*i/4);
+    gh+='<line x1="0" x2="1000" y1="'+gy.toFixed(1)+'" y2="'+gy.toFixed(1)+'" stroke="#31405a" stroke-width="0.6" stroke-dasharray="1 6"/>';}
+  if(g)g.innerHTML=gh;
   var lx=xy[xy.length-1][0],ly=xy[xy.length-1][1];
-  ['mg-live','mg-ring'].forEach(function(id){var e=document.getElementById(id);e.setAttribute('cx',lx);e.setAttribute('cy',ly);e.setAttribute(id==='mg-live'?'fill':'stroke',c);});
-  document.getElementById('mg-hi').textContent='↑ '+n(hi-pd,6);document.getElementById('mg-lo').textContent='↓ '+n(lo+pd,6);
-  document.getElementById('mg-t0').textContent=hhmm(t0);document.getElementById('mg-t1').textContent=hhmm(t1)+' · '+pts.length+'pts';
-  var sp=(t1-t0)/3600000;document.getElementById('mg-span').textContent=(sp>=1?(sp.toFixed(1)+'h'):(Math.round((t1-t0)/60000)+'min'))+' ⤢';}
-// ── METAGRAPHE VIVANT (20/07 soir, demande de Flo : « le voir monter et descendre ») ──
-// 1) un POINT VIVANT (equity interpolee du ticker 1 s) prolonge la courbe chaque seconde ;
-// 2) la FENETRE est zoomable au CLIC sur la duree (1 h -> 5 min -> tout) : en 1 h/5 min,
-//    l'echelle Y adaptative fait remplir l'ecran a la pente reelle — le graphe RESPIRE.
-// Rien d'invente : le point vivant = la meme interpolation resnappee que le grand chiffre.
-window._metaWin=3600000;   // fenetre par defaut : 1 h (motion visible, contexte garde)
+  ['mg-live','mg-ring'].forEach(function(id){var e=document.getElementById(id);
+    e.setAttribute('cx',lx);e.setAttribute('cy',ly);e.setAttribute('r',id==='mg-live'?'3.3':'3.2');
+    e.setAttribute(id==='mg-live'?'fill':'stroke',c);});
+  document.getElementById('mg-hi').textContent='↑ '+n(B.vhi,6);
+  document.getElementById('mg-lo').textContent='↓ '+n(B.vlo,6);
+  document.getElementById('mg-t0').textContent=hhmm(t0);
+  document.getElementById('mg-t1').textContent=hhmm(t1)+' · '+nr+' mesures'+(B.plat?' · À PLAT':'');
+  var sp=(t1-t0)/3600000;
+  document.getElementById('mg-span').textContent=(sp>=24?((sp/24).toFixed(1)+'j'):sp>=1?(sp.toFixed(1)+'h'):(Math.round((t1-t0)/60000)+'min'))+' ⤢';}
+// La serie est EVENEMENTIELLE (un point par trade ferme), pas un tick regulier : la fenetre
+// par defaut est donc TOUT. Zoomer sur 1 h d'une serie etalee sur 3 jours ne montrerait rien.
+window._metaWin=0;
 function ptsFenetre(){
   var pts=window._metaPts||[],w=window._metaWin||0;
   if(w>0&&pts.length){var cut=Date.now()-w,f=pts.filter(function(p){return p.t>=cut});
     if(f.length>=2)pts=f;}
-  var lv=Number(window._eqLiveVal||0);
-  if(lv>0)pts=pts.concat([{t:Date.now(),equity:lv}]);
+  window._mgReels=pts.length;
+  // LE POINT VIVANT — construit sur LA MEME serie, donc incapable de produire une falaise :
+  // dernier point REEL + le seul terme qui bouge entre deux evenements, le funding couru
+  // non encore regle. Quand le reglement tombe, le ledger l'absorbe et l'ecart repart de 0.
+  var d=Number(window._mgLiveDelta||0);
+  if(pts.length&&isFinite(d)&&Math.abs(d)>0)
+    pts=pts.concat([{t:Date.now(),equity:pts[pts.length-1].equity+d,vivant:true}]);
   return pts;}
-function drawMetaLive(){var p=ptsFenetre();if(p.length)drawMeta(p);}
+function drawMetaLive(){var p=ptsFenetre();drawMeta(p,window._mgReels);}
 function loadMeta(){fetch('/v2/equity_history?max=600').then(function(r){return r.json()}).then(function(d){
-  var pts=(d.points||[]).map(function(p){return {t:Number(p.t),equity:Number(p.equity),pnl:Number(p.pnl)}}).filter(function(p){return p.equity>0});
-  if(pts.length){window._metaPts=pts;
-    // la BASE du % reste l'equity de DEPART de la serie complete — jamais le debut de la
-    // fenetre zoomee (sinon le % mentirait des qu'on zoome).
-    window._base=pts[0].equity;
-    drawMetaLive();}}).catch(function(e){signalerPanne('equity',e);});}
+  var pts=(d.points||[]).map(function(p){return {t:Number(p.t),equity:Number(p.equity),pnl:Number(p.pnl)}})
+    .filter(function(p){return isFinite(p.t)&&isFinite(p.equity)&&p.equity>0});
+  window._metaPts=pts;window._metaMeta=d;
+  // la BASE du % reste l'equity de DEPART de la serie complete — jamais le debut de la
+  // fenetre zoomee (sinon le % mentirait des qu'on zoome).
+  if(pts.length)window._base=pts[0].equity;
+  var bl=document.getElementById('mg-baselbl');
+  if(bl&&d.sources)bl.title='la courbe contient : '+d.sources.join(' + ')
+    +(d.copy_motif?(' — '+d.copy_motif):'');
+  if(!pts.length&&d.indisponible){mgDire('courbe indisponible<br><span style="opacity:.6">'+d.indisponible+'</span>');return;}
+  drawMetaLive();}).catch(function(e){signalerPanne('equity',e);});}
 document.addEventListener('DOMContentLoaded',function(){
   var s=document.getElementById('mg-span');
-  if(s){s.style.cursor='pointer';s.title='cliquer : 1 h -> 5 min -> tout';
+  if(s){s.style.cursor='pointer';s.title='cliquer : tout -> 24 h -> 1 h';
     s.onclick=function(){var w=window._metaWin;
-      window._metaWin=(w===3600000)?300000:(w===300000?0:3600000);
+      window._metaWin=(w===0)?86400000:(w===86400000?3600000:0);
       var bl=document.getElementById('mg-baselbl');
       if(bl)bl.textContent=(window._metaWin===0)?'╌ base = equity départ':'╌ base = début de fenêtre';
       drawMetaLive();};}});
@@ -580,7 +638,10 @@ function syncTop(){
   var P=document.getElementById('pnl'); if(P){P.textContent=(totNet>=0?'+':'')+n(totNet,6); P.className='pnl-big '+(totNet>=0?'pnl-pos':'pnl-neg');
     P.title='= realise session + funding COURU (encaisse : mesure + taux depuis la derniere mesure). Le latent de base (reversible) est affiche A COTE, jamais dedans. Resnappe sur chaque vraie mesure.';}
   var eqCopy=Number(window._copyEq||0)||1000; var E=document.getElementById('eq'); if(E){E.textContent=n(eqCopy+carryNet,6);}
-  window._eqLiveVal=eqCopy+carryNet;   // le point VIVANT du metagraphe (meme formule que l'equity affichee)
+  // ⚠️ 21/07 — `_eqLiveVal` N'ALIMENTE PLUS LE METAGRAPHE. Cette valeur melange l'equity copy
+  // et le net carry de SESSION ; la courbe, elle, cumule le realise TOTAL du ledger. Les
+  // rebrancher l'une sur l'autre recree la falaise verticale. Le graphe lit `_mgLiveDelta`.
+  window._eqLiveVal=eqCopy+carryNet;   // conservee pour l'affichage du bandeau equity uniquement
   var base=window._base||1000; var chg=base>0?(totNet/base*100):0; var C=document.getElementById('chg'); if(C){C.textContent=(chg>=0?'+':'')+n(chg,2)+'%';C.style.color=col(chg);}
   var cs=document.getElementById('carry-sub'); if(cs){
     var lat=Number(window._carryLatent||0);
@@ -744,6 +805,12 @@ function majAccruLive(){
     lt.title='MtM de base au MID, toutes positions — REVERSIBLE : ne se realise qu\'a la fermeture (A5). Volontairement HORS du net.';}
   window._carryLatent=mtmTot;
   window._carryNet=Number(window._carryReal||0)+live;
+  // 21/07 — LE POINT VIVANT DU METAGRAPHE. Avant, il valait `equity copy + net carry SESSION`,
+  // c'est-a-dire une AUTRE formule que la serie (qui cumule le realise TOTAL) : l'ecart entre
+  // les deux se lisait comme une falaise verticale. Desormais on ne transmet que le DELTA qui
+  // bouge reellement entre deux evenements du ledger — le funding couru pas encore regle —
+  // et le graphe l'ajoute au dernier point REEL. Continu par construction.
+  window._mgLiveDelta=live-Number(window._carryRegle||0);
   if(window.syncTop)syncTop();
   if(window.drawMetaLive)drawMetaLive();   // le metagraphe recoit son point vivant a chaque image
 }
@@ -855,8 +922,14 @@ def create_dashboard_v2_router() -> APIRouter:
         return HTMLResponse(_PAGE)
 
     def _avec_carry(points: list) -> list:
-        """Applique le net carry COURANT au dernier point. On ne rétro-projette PAS sur le passé :
-        le carry n'a pas d'historique horodaté, et réécrire l'histoire serait fabriquer une courbe."""
+        """⚠️ SUPERSEDED le 21/07 — NE PLUS BRANCHER SUR LA COURBE.
+
+        Cette fonction a produit le métagraphe « éclaté » : greffer le net carry sur le dernier
+        point d'une série copy à plat donne 599 points immobiles + une falaise. La courbe passe
+        désormais par `hl_observer.ui.courbe_equity`, qui reconstruit depuis le ledger. Conservée
+        (le projet ne supprime pas brutalement) et gardée pour les panneaux qui veulent le net
+        courant sur un point unique — jamais pour tracer une série.
+        """
         # DÉFENSE EN PROFONDEUR : `net_carry_courant` capture déjà ses erreurs, mais si un jour
         # elle en laisse passer une, la COURBE ne doit pas disparaître pour autant. Un panneau
         # secondaire ne fait jamais tomber le principal.
@@ -927,39 +1000,49 @@ def create_dashboard_v2_router() -> APIRouter:
 
     @router.get("/v2/equity_history")
     def equity_history(request: Request, max: int = 600) -> JSONResponse:
-        # Priorite: historique persiste par le MOTEUR (survit a la fermeture de Chrome).
+        """La courbe d'equity, RECONSTRUITE DEPUIS LE LEDGER (21/07).
+
+        🔴 CE QUI N'ALLAIT PAS. Le correctif du 19/07 ajoutait le net carry au dernier point
+        d'un historique qui, lui, ne connaissait que la pile copy. Mesure du jour : ces 600
+        points valent **tous 1 000,00 $ avec pnl = 0,0** — amplitude ZÉRO, la copy étant
+        éteinte depuis le 11/07. À l'écran : 599 points plats, puis une **falaise verticale**
+        de tout le PnL carry sur le dernier pixel. Le graphe ne se trompait pas ; il dessinait
+        fidèlement une série morte prolongée d'un saut.
+
+        CE QU'ON SERT MAINTENANT. La courbe vient du **ledger** — chaque CLOSE porte son
+        horodatage et son réalisé — plus le funding **réglé** (jamais l'estimation). La pile
+        copy y est fusionnée **si et seulement si elle bouge**, et la réponse énumère ses
+        propres sources. Le dernier point vaut alors exactement le `stable_net_pnl` du
+        bandeau : une seule vérité, deux affichages.
+        """
+        from pathlib import Path as _P
+
+        from hl_observer.ui import courbe_equity as _ce
+        # la racine est INJECTABLE : sans ça, un test lirait le ledger du runtime réel et ne
+        # testerait rien — il constaterait. Le piège s'est déjà refermé deux fois sur ce
+        # fichier (cf. `_isolate_persisted_store`), on ne le laisse pas une troisième.
+        _st = getattr(request.app.state, "ui_state", None)
+        root = (getattr(request.app.state, "project_root", None)
+                or getattr(_st, "project_root", None) or _P(__file__).resolve().parents[3])
+        try:
+            from hl_observer.funding.carry_positions_store import etat_carry as _etat
+            regle = float((_etat(root) or {}).get("net_funding_settled") or 0.0)
+        except Exception:  # noqa: BLE001
+            regle = 0.0
+        try:
+            courbe = _ce.construire(root, funding_regle_usd=regle, max_points=int(max or 600))
+        except Exception as exc:  # noqa: BLE001
+            # une courbe absente se DIT ; elle ne se remplace pas par une ligne inventée.
+            return JSONResponse({"count": 0, "points": [], "indisponible": str(exc),
+                                 "read_only": True})
         try:
             from hl_observer.runtime.equity_history_store import read_equity_points
-            persisted = read_equity_points(max=max)
-        except Exception:
-            persisted = []
-        if persisted:
-            # 🔴 INCOHERENCE CORRIGEE LE 2026-07-19 : la COURBE etait plate a 1 000,00 pendant que
-            # le bandeau affichait -5,00. Cause : l'historique d'equity ne connait QUE la pile
-            # copy ; le PnL du carry n'y entrait jamais. Deux nombres pour une seule verite ->
-            # exactement ce que CLAUDE.md interdit (« dashboard, audit, logs convergent sur le
-            # meme ledger »). On y ajoute donc le net carry, en le DECLARANT (`inclut_carry`).
-            # Le carry n'a pas d'historique horodate : on applique son net COURANT au dernier
-            # point, sans retro-projeter sur le passe (ce serait reecrire l'histoire).
-            return JSONResponse({"count": len(persisted),
-                                 "points": _avec_carry(persisted),
-                                 "inclut_carry": True, "read_only": True})
-        state = getattr(request.app.state, "ui_state", None)
-        raw = list(getattr(state, "simulation_equity_history", None) or [])
-        if max and len(raw) > max:
-            raw = raw[-max:]
-        points = []
-        for p in raw:
-            try:
-                points.append({
-                    "t": int(p.get("timestamp_ms") or 0),
-                    "equity": float(p.get("current_equity_usdt") or 0.0),
-                    "pnl": float(p.get("current_pnl_usdc") or 0.0),
-                })
-            except Exception:
-                continue
-        return JSONResponse({"count": len(points), "points": _avec_carry(points),
-                             "inclut_carry": True, "read_only": True})
+            courbe = _ce.fusionner_copy(courbe, read_equity_points(max=max))
+        except Exception:  # noqa: BLE001
+            pass
+        courbe.update({"count": len(courbe.get("points") or []), "inclut_carry": True,
+                       "read_only": True, "real_execution": False})
+        return JSONResponse(courbe)
 
     @router.get("/v2/carry")
     def carry_state() -> JSONResponse:
