@@ -164,12 +164,25 @@ def _perps() -> dict[str, dict]:
     return out
 
 
+#: index des metadonnees spot officielles, rempli par `_spots()` (P1-4).
+_SPOT_META_INDEX: dict = {"tokens": {}, "paires": {}}
+
+
 def _spots() -> dict[str, list[dict]]:
     """base -> [{mark(du ctx), vol24, pair(nom de paire pour le l2Book)}, ...]. Join par NOM.
     On garde TOUTES les paires candidates du meme ticker (le scanner choisira ensuite celle dont
     le prix colle au perp -> tue les 'base aberrante' dues a une collision de nom / paire stale)."""
     spot = _post({"type": "spotMetaAndAssetCtxs"})
     sm, sc = (spot[0], spot[1]) if isinstance(spot, list) and len(spot) == 2 else ({}, [])
+    # P1-4 (21/07) : on GARDE les metadonnees officielles pour pouvoir dire, plus tard, d'ou
+    # vient chaque appariement (nom officiel = certain, prefixe Unit = heuristique). Sans ca,
+    # un faux appariement plausible passerait sans laisser de trace.
+    global _SPOT_META_INDEX
+    try:
+        from hl_observer.market.mapping_unit import indexer_metadonnees
+        _SPOT_META_INDEX = indexer_metadonnees(sm)
+    except Exception:  # noqa: BLE001
+        _SPOT_META_INDEX = {"tokens": {}, "paires": {}}
     tok = {int(t["index"]): str(t.get("name") or "").upper() for t in (sm.get("tokens") or []) if "index" in t}
     p2b = {}
     for pr in sm.get("universe") or []:
@@ -533,6 +546,15 @@ def scanner(diagnostic: bool):
                  "liquidite_spot_usd": liq, "levier_max": p.get("levier_max"),
                  "pire_hausse_observee": pire, "securite_liquidation": SECURITE_LIQUIDATION,
                  "source": "hyperliquid public API (perp+spot) + bougies 1h"}
+        try:
+            from hl_observer.market.mapping_unit import apparier as _app
+            _m = _app(c, s.get("pair") or "", _SPOT_META_INDEX)
+            if _m:
+                trace["mapping_source"] = _m["mapping_source"]
+                trace["canonical_mapping"] = _m["canonical_mapping"]
+                trace["hypercore_token_name"] = _m["hypercore_token_name"]
+        except Exception:  # noqa: BLE001 — une provenance absente n'empeche pas de scanner
+            pass
         if abs(base) > BASE_ABERRANTE_BPS:
             # AUDITABLE : on montre CE qui a été matché et POURQUOI c'est absurde (pas un bug caché,
             # mais l'absence d'un vrai spot jumelable : le plus proche reste à des ordres de grandeur).

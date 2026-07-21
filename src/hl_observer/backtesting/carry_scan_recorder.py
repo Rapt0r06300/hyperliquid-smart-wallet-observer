@@ -54,7 +54,11 @@ CHAMPS_NOMBRE = (
     "levier_max", "levier_utilise", "marge_ratio", "pire_hausse_observee",
     "securite_liquidation", "cout_entree_bps", "break_even_h", "gain_net_24h_bps",
 )
-CHAMPS_TEXTE = ("coin", "motif", "alerte_rupture", "funding_regime", "funding_tendance", "source")
+CHAMPS_TEXTE = ("coin", "motif", "alerte_rupture", "funding_regime", "funding_tendance", "source",
+                # P1-4 : la PROVENANCE de l'appariement perp<->spot. Un appariement heuristique
+                # doit rester identifiable dans l'historique, sinon on ne pourra jamais
+                # rattacher une anomalie de base a un mauvais mapping.
+                "mapping_source", "canonical_mapping", "hypercore_token_name")
 CHAMPS_BOOL = ("viable", "funding_fiable", "maker")
 
 
