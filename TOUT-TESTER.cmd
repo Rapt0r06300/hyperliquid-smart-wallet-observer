@@ -12,6 +12,8 @@ REM    --securite-seulement   uniquement l'audit no-real-trade, environ 30 s
 REM    --sans-pause           ne demande pas d'appuyer sur une touche a la fin
 REM    --ouvrir               ouvre le RECAP a la fin
 REM    --forcer               ignore un verrou laisse par un run mort
+REM    --derniers-echecs      montre les echecs du DERNIER run, sans relancer (instantane)
+REM    --sans-triage          n'affiche pas le triage des echecs a la fin
 REM
 REM  Environ 1 h en mode complet. 100%% lecture seule.
 REM ============================================================================

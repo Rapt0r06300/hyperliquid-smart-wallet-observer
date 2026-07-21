@@ -66,9 +66,14 @@ SECRETS = ("PRIVATE_KEY", "HL_PRIVATE_KEY", "MNEMONIC", "SEED_PHRASE", "WALLET_S
 #: options consommées ICI ; tout le reste part au driver, qui possède la liste de référence.
 OPTIONS_LANCEUR = {"--sans-pause": "ne pas attendre une touche a la fin",
                    "--ouvrir": "ouvrir le RECAP a la fin",
-                   "--forcer": "ignorer un verrou existant"}
+                   "--forcer": "ignorer un verrou existant",
+                   "--derniers-echecs": "afficher les echecs du DERNIER run, sans relancer",
+                   "--sans-triage": "ne pas afficher le triage des echecs a la fin"}
 
 CODE_PREVOL, CODE_VERROU, CODE_SECURITE = 3, 4, 5
+
+#: où l'on garde la liste des échecs du run précédent, pour dire ce qui est NOUVEAU / RÉPARÉ.
+ETAT_ECHECS = LOGDIR / "derniers_echecs.json"
 
 
 class Echec(Exception):
@@ -242,12 +247,125 @@ def verdict_recap(racine: Path = RACINE, *, debut_ts: float) -> dict[str, Any]:
 
 # ─────────────────────────────── LE RUN ───────────────────────────────
 
+# ─────────────────────────────── TRIAGE DES ÉCHECS (nouveau) ───────────────────────────────
+# Le pire moment d'un audit rate, c'est celui ou l'on SCROLLE la fenetre pour lire les 53 lignes
+# FAILED a la main (exactement ce que Flo a fait 3 fois le 21/07). Le RECAP les contient deja,
+# dans ses blocs `<details>`. Le lanceur les EXTRAIT et te les met sous les yeux, avec le diff
+# vs la fois d'avant : ce qui est NOUVEAU (= une regression, la seule chose vraiment urgente) et
+# ce qui est REPARE. Un audit qui te fait chercher ses propres resultats fait la moitie du travail.
+
+def resumer_echecs_du_recap(recap: str | Path = RECAP) -> dict[str, Any]:
+    """Extrait du RECAP : la ligne de resume pytest et la LISTE des tests FAILED.
+
+    Lecture seule, tolerante : un RECAP absent ou tronque -> un resume vide, jamais une
+    exception. On ne fait pas tomber le lanceur pour afficher un bonus.
+    """
+    import re
+    out: dict[str, Any] = {"failed": [], "resume": "", "n_failed": 0, "n_passed": 0,
+                           "present": False}
+    try:
+        txt = Path(recap).read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return out
+    out["present"] = True
+    # les noms de tests : `FAILED tests/xxx.py::test_yyy` (pytest) ou `tests/xxx.py::test_yyy FAILED`
+    vus: set[str] = set()
+    for m in re.finditer(r"(tests/[\w/]+\.py::[\w\[\]./-]+)", txt):
+        nom = m.group(1)
+        # ne garder que ceux marques FAILED sur la meme ligne (evite d'attraper des noms cites)
+        ligne = txt[txt.rfind("\n", 0, m.start()) + 1: txt.find("\n", m.end())]
+        if "FAILED" in ligne and nom not in vus:
+            vus.add(nom)
+            out["failed"].append(nom)
+    for m in re.finditer(r"(\d+)\s+failed", txt):
+        out["n_failed"] = max(out["n_failed"], int(m.group(1)))
+    for m in re.finditer(r"(\d+)\s+passed", txt):
+        out["n_passed"] = max(out["n_passed"], int(m.group(1)))
+    ligne_resume = ""
+    for l in txt.splitlines():
+        if ("passed" in l or "failed" in l) and re.search(r"\d+\s+(passed|failed)", l):
+            ligne_resume = l.strip().strip("`= ").strip()
+    out["resume"] = ligne_resume
+    out["failed"] = sorted(out["failed"])
+    return out
+
+
+def comparer_aux_echecs_precedents(failed: list[str], racine: Path = RACINE) -> dict[str, Any]:
+    """{nouveaux, repares, persistants} vs le run precedent, puis MEMORISE le run courant.
+
+    « Nouveaux » = regressions : les seuls echecs vraiment urgents (le reste est deja connu).
+    L'etat precedent illisible -> tout est considere « persistant » (aucun faux « nouveau »).
+    """
+    chemin = racine / ETAT_ECHECS.relative_to(RACINE)
+    courant = set(failed or [])
+    avant: set[str] = set()
+    a_un_precedent = False
+    try:
+        avant = set(json.loads(chemin.read_text(encoding="utf-8")).get("failed") or [])
+        a_un_precedent = chemin.exists()
+    except (OSError, ValueError):
+        avant, a_un_precedent = set(), False    # base illisible = PAS de base fiable
+    if not a_un_precedent:
+        # sans base fiable, on ne CRIE PAS « regression » : tout est « deja connu » par defaut.
+        # Une fausse regression envoie chasser un bug qui n'en est pas un.
+        diff = {"nouveaux": [], "repares": [], "persistants": sorted(courant),
+                "avait_un_precedent": False}
+    else:
+        diff = {"nouveaux": sorted(courant - avant), "repares": sorted(avant - courant),
+                "persistants": sorted(courant & avant), "avait_un_precedent": True}
+    try:
+        chemin.parent.mkdir(parents=True, exist_ok=True)
+        chemin.write_text(json.dumps({"failed": sorted(courant),
+                                      "ts": time.time()}, ensure_ascii=False), encoding="utf-8")
+    except OSError:
+        pass
+    return diff
+
+
+def lignes_de_triage(resume: dict[str, Any], diff: dict[str, Any] | None = None) -> list[str]:
+    """Le bloc lisible affiché en fin de run (et par `--derniers-echecs`)."""
+    failed = resume.get("failed") or []
+    if not failed and not resume.get("n_failed"):
+        return ["  ✅ aucun test en echec dans le RECAP."]
+    out = ["  ─────────────────────────────────────────────────────────",
+           "  ÉCHECS (%d) — les voici, tu n'as PAS a ouvrir le RECAP :" % (
+               resume.get("n_failed") or len(failed))]
+    for nom in failed[:60]:
+        marque = "  🆕" if diff and nom in (diff.get("nouveaux") or []) else "    "
+        out.append("%s %s" % (marque, nom))
+    if len(failed) > 60:
+        out.append("    … et %d autre(s) — voir le RECAP." % (len(failed) - 60))
+    if diff and diff.get("avait_un_precedent"):
+        out.append("  ── depuis la derniere fois : %d nouveau(x) (🆕 = REGRESSION, le plus urgent) "
+                   "· %d repare(s)" % (len(diff.get("nouveaux") or []),
+                                       len(diff.get("repares") or [])))
+        for nom in (diff.get("repares") or [])[:8]:
+            out.append("    ✅ repare : %s" % nom)
+    out.append("  → copie ce bloc a Claude : il sait quoi en faire.")
+    out.append("  ─────────────────────────────────────────────────────────")
+    return out
+
+
 def lancer(argv: list[str] | None = None, racine: Path = RACINE) -> int:
     brut = list(sys.argv[1:] if argv is None else argv)
     pause = "--sans-pause" not in brut
     ouvrir = "--ouvrir" in brut
     forcer = "--forcer" in brut
+    triage = "--sans-triage" not in brut
     args = [a for a in brut if a not in OPTIONS_LANCEUR]
+
+    # --derniers-echecs : triage INSTANTANE du dernier RECAP, sans rien relancer (~0 s).
+    if "--derniers-echecs" in brut:
+        resume = resumer_echecs_du_recap(racine / RECAP.name)
+        if not resume["present"]:
+            print("  aucun RECAP-COMPLET.md — lance d'abord TOUT-TESTER.cmd.", flush=True)
+        else:
+            print("  dernier run : %s" % (resume["resume"] or "resume introuvable"), flush=True)
+            for l in lignes_de_triage(resume):
+                print(l, flush=True)
+        if pause:
+            _pause()
+        return 0 if not resume.get("n_failed") else 1
 
     session = time.strftime("%Y%m%d-%H%M%S")
     debut = time.time()
@@ -322,6 +440,20 @@ def lancer(argv: list[str] | None = None, racine: Path = RACINE) -> int:
     dire("    %s" % v["message"])
     dire("    %s" % _verdict(code))                                          # 33
     dire("  ============================================================")
+    # 🔴 21/07 — TRIAGE DES ÉCHECS, sous les yeux, sans scroller. Le RECAP contient les lignes
+    # FAILED ; on les extrait et on dit ce qui est NOUVEAU (regression) vs REPARE depuis la fois
+    # d'avant. C'est CE bloc que Flo copie a Claude — plus besoin d'une capture d'ecran.
+    if triage and code not in (0, 2, 130):
+        try:
+            resume = resumer_echecs_du_recap(racine / RECAP.name)
+            diff = comparer_aux_echecs_precedents(resume.get("failed") or [], racine)
+            for l in lignes_de_triage(resume, diff):
+                dire(l)
+        except Exception as exc:  # noqa: BLE001 — un bonus d'affichage ne fait jamais echouer le run
+            dire("    (triage des echecs indisponible : %s)" % str(exc)[:80])
+    elif triage and code == 0:
+        # run vert : on MEMORISE l'ensemble vide, pour que le prochain diff soit juste.
+        comparer_aux_echecs_precedents([], racine)
     n = purger_logs(racine)                                                  # 24
     if n:
         dire("    %d vieux log(s) purge(s) (on garde les %d derniers)" % (n, LOGS_CONSERVES))
