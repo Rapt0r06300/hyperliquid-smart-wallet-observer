@@ -1,27 +1,51 @@
 @echo off
 REM ============================================================================
-REM  RECHERCHE DE SCENARIO (replay A/B optimise) — 20/07
+REM  RECHERCHE DE PEPITES — le laboratoire du bot (21/07)
 REM ============================================================================
-REM  Grille SL/TP/horizon -> chaque config jugee sur DEUX moities temporelles
-REM  disjointes (embargo anti-fuite) + stress des couts x1,5 + PLATEAU des
-REM  voisins (un pic isole n'est jamais promu). Donnees chargees UNE fois.
-REM  Reprise possible : l'etat survit dans runtime\replay\recherche_scenario_etat.json
-REM  (supprime ce fichier pour repartir de zero).
+REM  CE QU'IL FAIT, EN FRANCAIS SIMPLE :
 REM
-REM  Ne touche PAS a la session en cours (lecture seule des shards consolides).
-REM  REPLAY-only : aucun ordre, aucune promesse — un verdict aux barres ecrites.
+REM   [1/3] Il RASSEMBLE toutes les donnees enregistrees (candidats + prix),
+REM         y compris les archives — rien n'est jamais perdu.
+REM
+REM   [2/3] Il CHERCHE, module par module (jamais melanges) :
+REM           - carry        : ~600 reglages SL/TP/horizon x 4 sous-populations
+REM           - copywallet   : idem, sur les 262 000+ signaux enregistres
+REM           - arbitrage    : idem, sur ce qui existe
+REM           - cross-venue  : ses propres seuils de dispersion (4 jambes)
+REM         Methodes : crible multi-fidelite (successive halving), grille large,
+REM         raffinage grossier->fin, folds purges CPCV (rang OR/ARGENT),
+REM         portes anti-mensonge (2 moities+embargo, couts x1,5, plateau).
+REM
+REM   [3/3] Il ECRIT les rapports et DIT quoi faire :
+REM           runtime\replay\RESULTATS_RECHERCHE.md  <- LE fichier a envoyer a Claude
+REM           runtime\replay\PEPITES.md              <- le resume court
+REM         Et il termine par : « FAIS CA avec le carry... / ARRETE de chercher
+REM         ici... / PATIENCE... » — une phrase par module.
+REM
+REM  BON A SAVOIR :
+REM   - Ctrl-C = PAUSE SANS PERTE : tout essai juge est sauvegarde ; a la
+REM     prochaine ouverture il reprend exactement ou il en etait.
+REM   - Ca peut durer des heures (copywallet surtout). C'est normal : chaque
+REM     ligne « essai N » a l'ecran = un reglage juge honnetement.
+REM   - Une PEPITE n'est PAS une promesse de gain : c'est un reglage qui a
+REM     SURVECU a toutes les portes — il devra encore le prouver en paper.
+REM   - 100%% lecture seule. 0 ordre reel, 0 cle, 0 signature.
 REM ============================================================================
 setlocal
 cd /d "%~dp0"
 set "PYTHONPATH=%~dp0src;%PYTHONPATH%"
 set "PYTHONIOENCODING=utf-8"
-REM 21/07 — CONSOLIDER D'ABORD, TOUJOURS : les consolides vivaient a 41 h d'age pendant que
-REM les shards frais s'empilaient a cote. La recherche merite les donnees d'AUJOURD'HUI.
-echo  [1/2] Consolidation des shards (candidats + marks, historique inclus)...
+
+echo.
+echo  [1/3] Rassemblement de toutes les donnees (candidats + prix, archives incluses)...
 python -m hl_observer.runtime.replay_recorder --base runtime\replay
 echo.
-echo  [2/2] Recherche de PEPITES — TOUS les modules (carry, copy, arbitrage, cross-venue)...
-echo        grille LARGE, portes inchangees (2 moities + stress x1,5 + plateau), 1 etat/module
-python -c "import json;from hl_observer.backtesting.recherche_scenario import chercher_toutes;r=chercher_toutes('.');print();print(json.dumps({s:{k:v for k,v in x.items() if k!='essais'} for s,x in r.items()},ensure_ascii=False,indent=1));print();print('>>> rapport : runtime\\replay\\PEPITES.md')"
+echo  [2/3] Recherche module par module (Ctrl-C = pause sans perte, reprise auto)...
+echo.
+python -c "from hl_observer.backtesting.recherche_scenario import chercher_toutes; chercher_toutes('.')"
+echo.
+echo  [3/3] Rapports ecrits :
+echo         - runtime\replay\RESULTATS_RECHERCHE.md  ^(a envoyer a Claude^)
+echo         - runtime\replay\PEPITES.md              ^(resume court^)
 echo.
 pause

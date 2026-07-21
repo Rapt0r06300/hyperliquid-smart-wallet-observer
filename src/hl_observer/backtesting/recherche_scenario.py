@@ -497,7 +497,45 @@ def chercher_toutes(root: str | Path, *, max_essais_par_strategie: int | None = 
         _ecrire_resultats_md(root, resultats)
     except OSError:
         print("  (rapports inecrivables)")
+    print("", flush=True)
+    print("=" * 62, flush=True)
+    print(" RECOMMANDATIONS (le detail est dans RESULTATS_RECHERCHE.md)", flush=True)
+    print("=" * 62, flush=True)
+    for strat, r in resultats.items():
+        print("  %-11s -> %s" % (strat, recommandation(strat, r)), flush=True)
     return resultats
+
+
+def recommandation(strat: str, r: dict[str, Any]) -> str:
+    """21/07 (Flo : « le rapport doit dire : c'est mieux si on fait ÇA avec le carry... ») —
+    la CONCLUSION en français, dérivée des résultats, jamais inventée. Quatre cas :
+    pépite OR (à câbler en paper), pépite ARGENT (à surveiller), espace épuisé (le réglage
+    n'existe pas dans ces données — le dire épargne des semaines), données insuffisantes."""
+    promus = sorted((r.get("promus") or []),
+                    key=lambda p: (p.get("rang") != "OR",
+                                   -float((p.get("nets") or {}).get("stress") or 0.0)))
+    if promus:
+        p = promus[0]
+        return ("FAIS ÇA : câble `%s` en paper (rang %s, nets %s%s) et juge-le au profit "
+                "factor sur une semaine avant d'y croire."
+                % (p["config"], p.get("rang", "?"), p.get("nets"),
+                   ", folds %s" % p["folds_vivants"] if p.get("folds_vivants") else ""))
+    if r.get("statut") == "INSUFFISANT":
+        return "PATIENCE : %s — laisse les collecteurs accumuler, relance demain." \
+            % (r.get("motif") or "données insuffisantes")
+    essais = r.get("essais") or []
+    if essais:
+        pires = [e for e in essais if e.get("nets")]
+        if pires and all(float((e["nets"].get("moitie_1") or 0))
+                         + float((e["nets"].get("moitie_2") or 0)) < 0 for e in pires):
+            return ("ARRÊTE DE CHERCHER ICI : aucun réglage ne rend ce module positif dans "
+                    "ces données (%d essais, tous négatifs) — le verrou actuel est la bonne "
+                    "décision ; la voie passe par un AUTRE mécanisme, pas un autre réglage."
+                    % len(essais))
+        return ("PRESQUE : %d essais jugés, des configs frôlent les portes — regarde les "
+                "presque-promus ci-dessus, et relance après 24 h de données en plus."
+                % len(essais))
+    return "RIEN À JUGER ce tour-ci."
 
 
 def _ecrire_resultats_md(root: str | Path, resultats: dict[str, Any]) -> None:
@@ -544,7 +582,13 @@ def _ecrire_resultats_md(root: str | Path, resultats: dict[str, Any]) -> None:
                                  " · %s" % e["instabilite"] if e.get("instabilite") else ""))
         if r.get("honnetete"):
             lignes.append("- ⚠️ %s" % r["honnetete"])
+        lignes.append("- **👉 RECOMMANDATION : %s**" % recommandation(strat, r))
         lignes.append("")
+    lignes.append("## En une phrase par module")
+    lignes.append("")
+    for strat, r in resultats.items():
+        lignes.append("- **%s** → %s" % (strat, recommandation(strat, r)))
+    lignes.append("")
     lignes.append("<!-- JSON_RESULTATS")
     lignes.append(_json.dumps(
         {s: {k: v for k, v in r.items() if k != "essais"} for s, r in resultats.items()},

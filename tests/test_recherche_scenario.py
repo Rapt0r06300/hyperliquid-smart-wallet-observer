@@ -271,3 +271,30 @@ def test_le_rapport_RESULTATS_est_ecrit_avec_le_bloc_JSON_machine_lisible(tmp_pa
     t = (tmp_path / "runtime" / "replay" / "RESULTATS_RECHERCHE.md").read_text(encoding="utf-8")
     assert "JSON_RESULTATS" in t and "AUCUNE promesse" in t
     assert "cross_venue" in t and "Module `carry`" in t
+
+
+# ---------------- 21/07 : la RECOMMANDATION en francais, derivee des resultats ----------------
+
+def test_la_recommandation_dit_quoi_faire_dans_les_quatre_cas():
+    from hl_observer.backtesting.recherche_scenario import recommandation
+    # 1. pepite OR -> cable-la en paper
+    r_or = {"promus": [{"config": {"sl": 40}, "rang": "OR",
+                        "nets": {"stress": 2.0}, "folds_vivants": "3/4"}]}
+    assert "FAIS ÇA" in recommandation("carry", r_or) and "paper" in recommandation("carry", r_or)
+    # 2. donnees insuffisantes -> patience
+    assert "PATIENCE" in recommandation("arbitrage", {"statut": "INSUFFISANT", "motif": "0 candidat"})
+    # 3. tout negatif -> arreter de chercher ICI (le verrou est la bonne decision)
+    r_neg = {"statut": "ESPACE_EPUISE", "essais": [
+        {"verdict": "REJETE", "nets": {"moitie_1": -132.4, "moitie_2": -191.4}}]}
+    assert "ARRÊTE DE CHERCHER ICI" in recommandation("copy", r_neg)
+    # 4. des configs frolent les portes -> presque
+    r_presque = {"statut": "ESPACE_EPUISE", "essais": [
+        {"verdict": "REJETE", "nets": {"moitie_1": 2.0, "moitie_2": -0.1}}]}
+    assert "PRESQUE" in recommandation("carry", r_presque)
+
+
+def test_le_rapport_contient_les_recommandations_et_la_synthese_par_module(tmp_path):
+    from hl_observer.backtesting.recherche_scenario import chercher_toutes
+    chercher_toutes(tmp_path, max_essais_par_strategie=1)
+    t = (tmp_path / "runtime" / "replay" / "RESULTATS_RECHERCHE.md").read_text(encoding="utf-8")
+    assert "RECOMMANDATION" in t and "En une phrase par module" in t
