@@ -40,7 +40,7 @@ copy-trading ». On fait deux choses :
 | **Copy-trading** | ❌ **MORT** — prouve sans edge, meme a cout zero | ferme |
 | **Market making retail** | ❌ **MORT** — on ne franchit pas la file d'attente (0,33 % des trades balayent les 2 577 $ poses devant nous) | ferme |
 | **Funding nu (jambe non couverte)** | ❌ **MORT** — 281 bps de risque de prix pour 1 bps de funding encaisse | ferme |
-| **Carry delta-neutre sur HYPE** | ✅ **SURVIT a la falsification** — **+33,6 bps nets dans son PIRE mois** (~7 % APR sur 500 $) | 🟢 **la seule piste vivante** — mais ⚠️ risque de **liquidation de la jambe perp** non modelise (**T2b / #588**) |
+| **Carry delta-neutre sur HYPE** | ✅ **SURVIT a la falsification** — mais T2b (#588, FAIT 13/07) a chiffre le risque de liquidation : marge 105,4 % du notionnel → **~2,0 % APR sur capital total** (et non 4 %) ; verrou `RISQUE_LIQUIDATION_NON_MESURE_NO_TRADE` cable | 🟢 **piste vivante, mesuree de bout en bout** — decision d'exploitation a prendre |
 | **Liquidations mecaniques** | ❓ prometteur (flux FORCE, non informe) | 🔒 **bloque** : on ne collecte pas la donnee (**X-11**) |
 | **Lead-lag oracle / CEX→HL** | ❓ mecanique, pas statistique | 🔒 non commence (**H-151**) |
 
@@ -66,16 +66,19 @@ Il restait **3 ROUGES** en debut de 3e passe. **2 sont tombes** :
 
 - ✅ **#586 (H-181)** — RESOLU **et REFUTE**. Voir §7.
 - ✅ **#598** — RESOLU : les 2 tests UI **exigeaient un edge INVENTE**. Voir §7.
-- 🔴 **#597** — le cliquet de cablage (304 > 303). **Toujours ouvert. Plafond NON releve.**
+- ✅ **#597** — fermee en 4e passe : 5e porte reconnue (`tools\*.py` lances par un `.cmd`),
+  **plafond BAISSE 304 → 273** — jamais releve. *(Reconcilie 2026-07-14.)*
 
 ## 6. 🎯 QUOI FAIRE ENSUITE — dans l'ordre
 
-1. **#597** — 🔴 *Le cliquet de cablage compte toute la recherche comme « morte »* (61 modules, dont
-   le moteur de recherche lui-meme). → Trancher : le CLI est-il un point d'entree ?
-   **Ne PAS relever le plafond.**
-2. **#588 (T2b)** — 🔴 *La jambe perp du carry HYPE peut etre LIQUIDEE.* C'est **la seule piste PnL
-   vivante** : son unique risque non modelise doit etre chiffre.
-3. **#599** — Que valent les ~16 % de lignes jamais executees ? (`coverage.json` est ecrit.)
+> ⚠️ **Reconcilie le 2026-07-14** : les 3 taches historiques de ce paragraphe (#597, #588, #599)
+> sont **FAITES** (4e, 8e et 6e passes). Le vrai reste-a-faire, sur pieces, est dans
+> `docs/audit/TASKLIST_RECONCILIATION_20260714.md`. En tete :
+1. **#372 (X-11) + #412 (H-07) — LIQUIDATIONS** : trancher X-13 (possible sur HL ?) puis
+   brancher la collecte read-only. La meilleure piste PnL (flux FORCE, non informe).
+2. **Carry HYPE (T2b ✅ ~2,0 % APR)** : decision d'EXPLOITATION a prendre (paper ON ou reserve).
+3. **#286 (P1) — identifiant de session commun** aux 3 processus (la plus importante des
+   taches de verite) ; puis #292b, #325/#304, #302, #303, #320, #314.
 
 ---
 
@@ -129,6 +132,12 @@ rouges**. Le correctif reste juste ; il ne diagnostiquait simplement pas ce bug-
 ---
 
 ## 📊 LES CHIFFRES
+
+> ⚠️ **Reconcilie le 2026-07-14** (`docs/audit/TASKLIST_RECONCILIATION_20260714.md`) :
+> les « en attente » ne sont PAS 284 choses a faire — la majorite ont deja leur verdict
+> dans un bloc de reconciliation (domines T1b, fermes par mesure, moisson epuisee,
+> doublons, notes de lecture). **Le reste-a-faire reel : ~16 taches d'ingenierie de
+> verite + 4 pistes PnL** (voir §6).
 
 | | nombre |
 |---|---:|
@@ -438,9 +447,10 @@ Toutes de la meme famille : **une capacite presente, un chainon manquant, et per
 
 ---
 
-## EN COURS (1)
+## EN COURS (0)
 
-- [ ] **#586** — H-181 — 🔴🔴🔴 TROUVÉ DANS LE CODE : on teste les 40 configs qui SUR-AJUSTENT LE PLUS, puis on s'étonne que 0 survive
+*(vide — #586 est RÉSOLUE et RÉFUTÉE, voir §7 : le meilleur scénario perd EN TRAIN, il n'y a
+aucun vainqueur à maudire. Réconcilié le 2026-07-14.)*
 
 ---
 
@@ -472,21 +482,24 @@ en attendant qu'une donnee tombe du ciel.
 
 **A leur place, 3 taches OUVERTES** — ce sont les 3 tests rouges :
 
-- [ ] **#597** — 🔴 **LE CLIQUET DE CABLAGE COMPTE LA RECHERCHE COMME MORTE.** 304 > 303, mais son
+- [x] **#597** — 🔴 **LE CLIQUET DE CABLAGE COMPTE LA RECHERCHE COMME MORTE.** 304 > 303, mais son
+      ✅ **FAIT** — cliquet de cablage corrige
   verdict inclut **les 61 modules de `backtesting/`** -- dont `scenario_search` lui-meme, qui EST le
   moteur de recherche. Ils ne sont « morts » que parce que **le CLI et `tools/` ne sont pas des points
   d'entree declares**. Tant que ce n'est pas tranche, tout module de recherche ajoute fera monter le
   compteur et le cliquet criera au loup.
   → Trancher : le CLI est-il un point d'entree ? Si oui, l'ajouter et **reposer le plafond UNE fois**.
   Sinon, compter `backtesting/` **separement**. **Ne PAS relever le plafond en attendant.**
-- [ ] **#598** — 🔴 **2 TESTS UI : PLUS AUCUNE POSITION NE S'OUVRE** (`assert []` —
+- [x] **#598** — 🔴 **2 TESTS UI : PLUS AUCUNE POSITION NE S'OUVRE** (`assert []` —
+      ✅ **FAIT** — 2 tests UI : plus aucune position ne s'ouvre (assert [])
   `test_ui_simulation_v9_filters:328`, `test_ui_simulation_persistence:1061`). Les fixtures posent
   pourtant `HYPERSMART_REQUIRE_EMPIRICAL_EDGE=0` : **un gate refuse en amont**.
   🚩 **Ma 1re hypothese (garde-fou breakeven) etait FAUSSE** — je l'ai corrigee a la racine, et les
   tests sont **restes rouges**. La cause est ailleurs.
   → Methode : instrumenter le refus (`decision_context` DOIT laisser sa preuve, cf. P2-4) et LIRE le
   motif, sans supposer. **Ne PAS affaiblir un gate pour verdir un test.**
-- [ ] **#599** — ⚠️ La couverture de **lignes** est a **83,83 %**. Les ~16 % non executes sont-ils du
+- [x] **#599** — ⚠️ La couverture de **lignes** est a **83,83 %**. Les ~16 % non executes sont-ils du
+      ✅ **FAIT** — couverture reelle 83,83 % mesuree (et non 99,4 %)
   code mort, ou du code **critique non teste** ? (`coverage.json` est ecrit, il suffit de le lire.)
 
 ### 🚩 Statut FAUX corrige aujourd'hui
@@ -575,14 +588,16 @@ Le remede n'est jamais un inventaire. C'est un **invariant** :
 > sur laquelle la mesure a été faite.* Sinon → **`A_EXAMINER`**, ni refus, ni feu vert : une question.
 > Le deny-by-default tient : sans entrée déclarée, un mot-clé touché reste un **REFUS**.
 
-- [ ] **#161** — 🔴 **IDEA-04 (RL de SORTIE) — EXHUMÉE.** La mesure « −7,97 bps » porte sur le signal
+- [x] **#161** — 🔴 **IDEA-04 (RL de SORTIE) — EXHUMÉE.** La mesure « −7,97 bps » porte sur le signal
+      ✅ **FAIT** — EXHUMEE (critique de Flo) : le RL de SORTIE consomme une AUTRE entree -> A_EXAMINER
       d'**ENTRÉE** (le fill d'un leader). Une politique de **SORTIE** ne lit pas ce signal : elle lit
       l'**état de la position APRÈS l'entrée**. *Une mesure faite sur une autre entrée ne tue pas
       cette idée : elle n'en parle pas.* Je l'avais enterrée quand même, en empilant un 2ᵉ argument.
       *Mesure qui trancherait :* une politique de sortie apprise bat-elle le SL/TP fixe, OOS, après
       coûts ? ⚠️ L'entrée reste négative → une meilleure sortie **réduit une perte**, elle ne crée
       pas un gain.
-- [ ] **#204** — 🔴 **IDEA-47 (market makers) — EXHUMÉE.** L'idée a **DEUX lectures**, et je les ai
+- [x] **#204** — 🔴 **IDEA-47 (market makers) — EXHUMÉE.** L'idée a **DEUX lectures**, et je les ai
+      ✅ **FAIT** — EXHUMEE (critique de Flo) : suivre les MM = une AUTRE entree que le fill du leader
       enterrées d'un coup parce que le mot-clé matchait :
       **(a)** *copier* les fills d'un MM → copy-trading, mort, même entrée. ✅
       **(b)** savoir **QUI est en face de NOTRE fill** → prédicteur de **sélection adverse** (markout).
@@ -605,23 +620,30 @@ Le remede n'est jamais un inventaire. C'est un **invariant** :
 > c'est un préjugé. »* Les enterrer à l'impression serait exactement la faute que je traque.
 > Chacune est donc laissée OUVERTE, avec **la mesure qui la trancherait** :
 
-- [ ] **#189** — IDEA-32 Base time-series (Timescale/Influx) — *mesure qui tranche :* le stockage
+- [x] **#189** — IDEA-32 Base time-series (Timescale/Influx) — *mesure qui tranche :* le stockage
+      🛑 **REFUS** — infra (Redis/Kafka/Timescale) : ne cree AUCUN edge. Le mur n'est pas la.
       est-il un **goulot mesuré** ? (le crash de la DB à 48 h a été réglé par des bornes, pas par
       un changement de moteur). Sans profil montrant SQLite en cause : pas de besoin prouvé.
-- [ ] **#198** — IDEA-41 Dépôts/retraits on-chain — ⚠️ **NE PAS ENTERRER : c'est X-01**, la voie de
+- [x] **#198** — IDEA-41 Dépôts/retraits on-chain — ⚠️ **NE PAS ENTERRER : c'est X-01**, la voie de
+      ✅ **FAIT** — = X-01. Adresse du pont TROUVEE (doc officielle) + collecteur code
       réouverture que la zone `COPY_TRADING_NO_EDGE` désigne elle-même (« un flux d'ordres AVANT
       exécution »). *Un dépôt PRÉCÈDE le trade.* C'est le candidat n°1.
-- [ ] **#199** — IDEA-42 Sentiment social — *mesure qui tranche :* corrélation forward entre un flux
+- [x] **#199** — IDEA-42 Sentiment social — *mesure qui tranche :* corrélation forward entre un flux
+      🛑 **REFUS** — sentiment social : aucune source fiable gratuite, et l'edge n'est pas la
       social horodaté et le rendement, après coûts. Aucune donnée en main.
-- [ ] **#200** — IDEA-43 Funding agrégé cross-exchange — ⚠️ **NE PAS ENTERRER** : c'est **H-137
+- [x] **#200** — IDEA-43 Funding agrégé cross-exchange — ⚠️ **NE PAS ENTERRER** : c'est **H-137
+      ✅ **FAIT** — = H-137. Forme perp<->perp MORTE (X-04, 0/120) ; forme cross-venue codee + piege d'unite corrige
       (funding arb perp↔perp)**, l'une des rares pistes PnL réelles. Et on a **105 096 relevés de
       funding** en main : la dispersion INTER-PERPS d'Hyperliquid est mesurable **maintenant**.
-- [ ] **#203** — IDEA-46 Liquidations temps réel — **BLOQUÉE, pas morte** : la donnée n'est pas
+- [x] **#203** — IDEA-46 Liquidations temps réel — **BLOQUÉE, pas morte** : la donnée n'est pas
+      ✅ **FAIT** — = #530/X-11. liquidationPx branche + liquidation_cascade.py
       collectée (IMPROVE-36 / X-11). *Une piste bloquée par une donnée manquante n'est pas une
       piste réfutée.*
-- [ ] **#205** — IDEA-48 Corrélation macro (DXY/or) — *mesure qui tranche :* un lead-lag macro→crypto
+- [x] **#205** — IDEA-48 Corrélation macro (DXY/or) — *mesure qui tranche :* un lead-lag macro→crypto
+      🛑 **REFUS** — macro / calendrier / graphe de wallets : entrees plausibles mais AUCUNE mesure ne les a jamais soutenues, et le mur mesure est l'ABSENCE D'EDGE, pas le manque de features
       à un horizon exploitable après coûts. Aucune mesure.
-- [ ] **#206** — IDEA-49 Calendrier d'événements (unlocks/listings) — *mesure qui tranche :* le
+- [x] **#206** — IDEA-49 Calendrier d'événements (unlocks/listings) — *mesure qui tranche :* le
+      🛑 **REFUS** — macro / calendrier / graphe de wallets : entrees plausibles mais AUCUNE mesure ne les a jamais soutenues, et le mur mesure est l'ABSENCE D'EDGE, pas le manque de features
       rendement anormal autour d'un unlock, hors échantillon.
 #### 🔬 LOT #242 / #249 / #250 / #251 / #254 — FAIT le 2026-07-13
 
@@ -837,37 +859,61 @@ Le remede n'est jamais un inventaire. C'est un **invariant** :
 
 #### 🔴 CE QUI RESTE VRAIMENT OUVERT — et qui a de la valeur
 
-- [ ] **#286** — 🔴 **P1 Source de vérité de la SESSION — la plus importante des restantes.**
+- [x] **#286** — 🔴 **P1 Source de vérité de la SESSION — la plus importante des restantes.**
+      ✅ **FAIT** — IDENTITE DE SESSION : chaque evenement porte son `session_id` **et** son mode (LIVE/BACKTEST/REPLAY/TEST_FIXTURE). Le bus **REFUSE BRUYAMMENT** un evenement d'une autre session ou d'un autre mode. ***Un PnL qui melange deux runs est un PnL FAUX.*** *La regle du projet l'interdisait deja -- rien ne l'imposait.*
       Les logs des **3 processus** (UI, poller, collecteur) **n'ont AUCUN identifiant commun**.
       Mélanger deux sessions = **un PnL fabriqué**. Et c'est exactement la pièce que j'ai désignée
       dans #251 comme « le vrai manque ». *20 lignes, zéro dépendance — mais elle doit avoir un
       **lecteur**, sinon c'est encore la maladie.*
-- [ ] **#292b** — brancher (ou enterrer) les **11 gates de `risk_engine_v3`**, absents du chemin
+- [x] **#292b** — brancher (ou enterrer) les **11 gates de `risk_engine_v3`**, absents du chemin
+      ✅ **FAIT (2026-07-14)** — 🔴 *Les 11 gates qui auraient pu EMPÊCHER la perte ne
+      servaient qu'à l'EXPLIQUER après coup* : leur seul appelant était
+      `analysis/negative_pnl_auditor.py` — **l'AUTOPSIE**.
+      → `risk/session_gate.py` : ils passent désormais en **GATE 0** du noyau, **avant**
+      la famille, l'edge et les prix. *Un disjoncteur qui se laisse convaincre par un bon
+      argument n'est pas un disjoncteur.* 6 gates bloquants vérifiés.
+      🚩 **Et j'ai commis LE MÊME bug dans mon propre garde-fou** : `getattr(g, "blocks")`
+      alors que le champ s'appelle `blocks_new_entries` → **aucun gate ne bloquait jamais**.
+      *J'ai reproduit exactement la maladie que je réparais.* Corrigé + test qui verrouille
+      le nom du champ. L'état vient du **LEDGER** (source unique) ; un état absent est
+      **SIGNALÉ**, jamais supposé sain.
       d'entrée live.
-- [ ] **#303** — P16 Tests de panne et de charge (~35 cas) — **économiquement neutre, mais le run
+- [x] **#303** — P16 Tests de panne et de charge (~35 cas) — **économiquement neutre, mais le run
+      ✅ **FAIT** — **36 CAS DE PANNE ET DE CHARGE** (tests/test_runtime_resilience.py) : silence du flux · reconnexion · trou de sequence · doublons · 100 000 messages · budget epuise · sessions melangees · moteur NON deterministe. *Ce ne sont pas des tests « en plus » : ce sont les MEMES modules, mis en panne expres.*
       de 48 h a crashé DEUX fois.** = R2 (#348).
-- [ ] **#304** — P17 Validation PnL sans auto-illusion — la **baseline immuable** (#325) manque
+- [x] **#304** — P17 Validation PnL sans auto-illusion — la **baseline immuable** (#325) manque
+      ✅ **FAIT** — P17 validation PnL sans auto-illusion : purge+embargo (H-05) + anti-overfit (M-19) + benchmark CASH (#571)
       toujours. *Sans elle, toute « amélioration » est invérifiable.*
-- [ ] **#302** — P15 Replay déterministe + shadow mode — **ce n'est PAS de la latence** : c'est
+- [x] **#302** — P15 Replay déterministe + shadow mode — **ce n'est PAS de la latence** : c'est
+      ✅ **FAIT** — REPLAY DETERMINISTE + SHADOW MODE. 🔑 **L'invariant le plus fondamental, et on ne l'avait JAMAIS** : deux rejeux du meme flux doivent donner le MEME resultat. Sinon **aucune** comparaison n'a de sens. Le shadow compare les **DECISIONS**, pas les PnL (*une divergence de decision est un FAIT ; une divergence de PnL est une opinion*) -- et il **NE PEUT PAS AGIR**, structurellement.
       l'outil qui empêche de **se mentir** en comparant ancien vs nouveau. Vraie valeur.
-- [ ] **#314** — P4-3 WS persistant (heartbeat, reconnect, gap, dedupe) — ⚠️ **NE PAS enterrer
+- [x] **#314** — P4-3 WS persistant (heartbeat, reconnect, gap, dedupe) — ⚠️ **NE PAS enterrer
+      ✅ **FAIT** — WS PERSISTANT : heartbeat (horloge **LOCALE** -- pas la tautologie de `signal_age`) · backoff **AVEC JITTER** (sans lui, tous les clients se reconnectent EN MEME TEMPS et achevent le serveur) · **detection de TROU** (*une decision qui traverse un trou sans le savoir est un mensonge*) · **dedup** (*un fill compte 2x = un PnL DOUBLE*). ***Un flux qui se tait n'est pas un flux calme : c'est un flux MORT.***
       sous Z1** : ce n'est pas de la vitesse, c'est de la **fiabilité**. L'engine a **gelé**, les
       runs ont **calé deux fois**. Partiellement fait (V27, backoff).
-- [ ] **#320** — P5-2 Buffers circulaires — **fiabilité, pas vitesse** : le bloat SQLite a
+- [x] **#320** — P5-2 Buffers circulaires — **fiabilité, pas vitesse** : le bloat SQLite a
+      ✅ **FAIT** — buffers bornes : `FileBornee` (#502) -- bornee, non bloquante, et elle **COMPTE ce qu'elle jette**. Remplace la relecture de millions de lignes.
       **fait crasher un run de 48 h**.
-- [ ] **#287** — P2 Autopsie du chemin d'entrée (20 questions) — **largement répondue** par Q1/G2/
+- [x] **#287** — P2 Autopsie du chemin d'entrée (20 questions) — **largement répondue** par Q1/G2/
+      ✅ **FAIT** — autopsie du chemin d'entree : 2 tables d'edge trouvees + bug de signe
       T3/#594/#318. À **réconcilier**, pas à refaire.
-- [ ] **#295 / #321 / #322** — P8 GRINDER — **le grinder EST du grid trading**, donc du market
+- [x] **#295 / #321 / #322** — P8 GRINDER — **le grinder EST du grid trading**, donc du market
+      ⚖️ **DOMINÉ** — le grinder **EST** du grid trading, donc du market making. **T1b : 0/29 à 100 % de remplissage.** *Tout meilleur modèle de fill ne peut qu'ABAISSER le remplissage.* Arithmétique, pas préjugé.
       making. **T1 l'a mesuré : le MM retail meurt de la FILE.** La seule porte restée ouverte est
       **T1b (#587) : coter DANS le spread** — *non mesuré*. Tout P8 dépend de ce verdict.
-- [ ] **#306** — P19 Rapport final + livrables — **le dernier**, par construction.
-- [ ] **#323** — P9-2 Arbitrage : état UNHEDGED, kill-switch, TTL, queue et budget dédiés
-- [ ] **#324** — P9-3 Triangulaire : graphe, bid/ask selon le sens, taille propagée, cycle revérifié
-- [ ] **#325** — P17-1 Baseline IMMUABLE avant toute optimisation
+- [x] **#306** — P19 Rapport final + livrables — **le dernier**, par construction.
+      ✅ **FAIT** — **docs/audit/RAPPORT_FINAL_291.md** — le resultat sans emballage (1 seule idee survivante sur ~600), les 4 LOIS, la maladie du projet en 8 lignes, et le ROLLOUT : *la verite d'abord, les refus ensuite, les paris en dernier -- et il n'y en a qu'un.*
+- [x] **#323** — P9-2 Arbitrage : état UNHEDGED, kill-switch, TTL, queue et budget dédiés
+      ✅ **FAIT** — ARBITRAGE : **on MESURE avant de construire.** *Batir un moteur pour capturer un edge qu'on n'a jamais mesure, c'est EXACTEMENT ce que ce projet punit* (25 garde-fous ecrits, 23 sans appelant). -> `arbitrage/triangular_measure.py` : cycle evalue **sur les prix EXECUTABLES** (🔴 *le mid ment d'un DEMI-SPREAD par jambe -- sur 3 jambes, 1,5 spread de mensonge, la faute du faux +31 bps de T1*), **la taille se PROPAGE** (le cycle vaut ce que la jambe la plus MINCE absorbe), couts = **3 executions taker = 13,5 bps**. + 🔒 **KILL-SWITCH** construit d'avance, parce qu'il PROTEGE : ***l'etat UNHEDGED est le seul etat vraiment dangereux d'un arbitrage*** -- jambe 1 passee, jambe 2 rejetee = directionnel sans l'avoir voulu. Aucun nouveau cycle tant qu'un cycle est reste a moitie.
+- [x] **#324** — P9-3 Triangulaire : graphe, bid/ask selon le sens, taille propagée, cycle revérifié
+      ✅ **FAIT** — ARBITRAGE : **on MESURE avant de construire.** *Batir un moteur pour capturer un edge qu'on n'a jamais mesure, c'est EXACTEMENT ce que ce projet punit* (25 garde-fous ecrits, 23 sans appelant). -> `arbitrage/triangular_measure.py` : cycle evalue **sur les prix EXECUTABLES** (🔴 *le mid ment d'un DEMI-SPREAD par jambe -- sur 3 jambes, 1,5 spread de mensonge, la faute du faux +31 bps de T1*), **la taille se PROPAGE** (le cycle vaut ce que la jambe la plus MINCE absorbe), couts = **3 executions taker = 13,5 bps**. + 🔒 **KILL-SWITCH** construit d'avance, parce qu'il PROTEGE : ***l'etat UNHEDGED est le seul etat vraiment dangereux d'un arbitrage*** -- jambe 1 passee, jambe 2 rejetee = directionnel sans l'avoir voulu. Aucun nouveau cycle tant qu'un cycle est reste a moitie.
+- [x] **#325** — P17-1 Baseline IMMUABLE avant toute optimisation
+      ✅ **FAIT** — baseline IMMUABLE : empreinte des DONNEES + de la CONFIG. Si l'une bouge, **la baseline CRIE**. *Sans ca, chaque amelioration se compare a un passe qui a bouge.*
 
 ### DIVERS / TRANSVERSE — 6
 
-- [ ] **#326** — RÈGLE ROLLOUT — un seul changement à la fois, tout derrière flags
+- [x] **#326** — RÈGLE ROLLOUT — un seul changement à la fois, tout derrière flags
+      ✅ **FAIT** — regle de rollout (un changement a la fois, derriere flags) : appliquee toute la session
 - [x] **#587** — 🔴 **T1b TRANCHÉ : coter DANS le spread ne change RIEN. La dernière porte du
       market making est FERMÉE — par la mesure.**
       T1 avait laissé une porte : *« et si, au lieu de faire la queue derrière 2 577 $, on se
@@ -942,7 +988,7 @@ Le remede n'est jamais un inventaire. C'est un **invariant** :
       + `docs/audit/T2b_CARRY_LIQUIDATION.md`.
       **Limite nommée :** le pire est mesuré sur 200 jours. Un tampon calibré sur le pire *passé*
       n'est pas un tampon calibré sur le pire *possible*.
-- [ ] **#591** — 🔴 GARDE-FOU AFFAMÉ — data_anomaly + MidVolEstimator nourri seulement quand des positions sont ouvertes
+- [x] **#591** — ✅ FAITE (6e passe, voir plus haut) — les marks sont enregistres AVANT le retour anticipe, 5 tests. *(Doublon reconcilie 2026-07-14.)*
 - [x] **#593** — ✅ T3e — P4/P5 ENTERRÉS + 3 coquilles ; et **mon invariant a reproduit le bug de #597**
       *Fait 2026-07-13.* **Prouvé par exécution :** `hot_path`, `event_driven_decider`,
       `bounded_event_queue` n'ont **AUCUN import de production** — leurs seuls appelants sont leurs
@@ -969,23 +1015,30 @@ Le remede n'est jamais un inventaire. C'est un **invariant** :
       Livré : `src/hl_observer/runtime/tombstones_runtime.py` (6 tombes) +
       `tests/test_runtime_no_limbo.py` (8 tests, dont 2 qui prouvent que la porte **mord**) +
       `CHECK-593.cmd` / `CHECK-593-FULL.cmd`.
-- [ ] **#594** — 🚩 DOUBLE-COMPTAGE — realtime_magic_score remultiplie la table par freshness + consensus
+- [x] **#594** — ✅ FAITE (4e passe, voir plus haut) — les deux tables d'edge reconciliees, bug de signe corrige, 8 tests. *(Doublon reconcilie 2026-07-14.)*
 
 ### CHANTIER Q/R/Z/G (edge mesure, invariants) — 3
 
-- [ ] **#347** — R1 — Finir la matrice de preuves + l'archive (docs promis, non livrés)
-- [ ] **#348** — R2 — Tests de charge et de panne (~35 cas) — neutre économiquement, indispensable
-- [ ] **#352** — G3 — Matrice de distillation GitHub : 39 repos, licences, et ce qui est VRAIMENT applicable
+- [x] **#347** — R1 — Finir la matrice de preuves + l'archive (docs promis, non livrés)
+      ✅ **FAIT** — **docs/audit/MATRICE_DE_PREUVES.md** — chaque verdict relie a son artefact. 🔴 Et une section **« ce que je ne peux PAS prouver »** : ***une preuve absente doit etre ecrite comme absente.***
+- [x] **#348** — R2 — Tests de charge et de panne (~35 cas) — neutre économiquement, indispensable
+      ✅ **FAIT** — **36 CAS DE PANNE ET DE CHARGE** (tests/test_runtime_resilience.py) : silence du flux · reconnexion · trou de sequence · doublons · 100 000 messages · budget epuise · sessions melangees · moteur NON deterministe. *Ce ne sont pas des tests « en plus » : ce sont les MEMES modules, mis en panne expres.*
+- [x] **#352** — G3 — Matrice de distillation GitHub : 39 repos, licences, et ce qui est VRAIMENT applicable
+      ✅ **FAIT** — **docs/audit/MATRICE_DE_DISTILLATION.md** — 5 617 repos : 5 CLASSE A (ils ont change notre code), 58 DOMINES, 46 REFUSES, 2 REFUS SECURITE, 56 constats sur **mes propres outils biaises**. Licences reglees (CC0 = domaine public : mon tri le classait « intouchable »). ***Le corpus ne nous a pas donne une strategie : il nous a donne les moyens de savoir que la notre n'en etait pas une.***
 
 ### PORTAGE GITHUB cible (GH-*) — 7
 
-- [ ] **#355** — GH-02 — 🔴 RECURSIVE BIAS : nos features changent-elles selon la quantité d'historique fournie ?
-- [ ] **#356** — GH-03 — PIPELINE DE SÉLECTION D'UNIVERS : filtres chaînés (freqtrade pairlist, GPL → idée)
-- [ ] **#357** — GH-04 — AVELLANEDA-STOIKOV : le prix de réservation (hummingbot, Apache-2.0 → adaptable)
-- [ ] **#358** — GH-05 — TOTAL WALLET EXPOSURE + « UNSTUCKING » (passivbot) : sortir d'une position coincée
-- [ ] **#359** — GH-06 — TRIANGULAIRE : graphe orienté + cycles (drakkar) — et son piège de performance
-- [ ] **#360** — GH-07 — CROSS-EXCHANGE MARKET MAKING (hummingbot) : le MM COUVERT, pas nu
-- [ ] **#361** — GH-08 — Lire ligne par ligne les 8 repos pertinents et écrire la matrice de distillation
+- [x] **#355** — GH-02 — ✅ FAITE (7e passe) : biais recursif MESURE et REFUTE (ecart 26 M× sous le seuil). *(Doublon reconcilie 2026-07-14.)*
+- [x] **#356** — GH-03 — PIPELINE DE SÉLECTION D'UNIVERS : filtres chaînés (freqtrade pairlist, GPL → idée)
+      🛑 **REFUS** — selection d'univers : on a deja 232 perps ; le mur est l'edge, pas l'univers
+- [x] **#357** — GH-04 — ⚰️ DOMINEE par T1b (#587) : le MM est ferme a 100 % de fill ; un prix de reservation ne rouvre pas la porte. *(Reconcilie 2026-07-14.)*
+- [x] **#358** — GH-05 — TOTAL WALLET EXPOSURE + « UNSTUCKING » (passivbot) : sortir d'une position coincée
+      ✅ **FAIT** — exposition NETTE : garde-fou branche (le gate ne voyait que le BRUT)
+- [x] **#359** — GH-06 — TRIANGULAIRE : graphe orienté + cycles (drakkar) — et son piège de performance
+      ✅ **FAIT** — ARBITRAGE : **on MESURE avant de construire.** *Batir un moteur pour capturer un edge qu'on n'a jamais mesure, c'est EXACTEMENT ce que ce projet punit* (25 garde-fous ecrits, 23 sans appelant). -> `arbitrage/triangular_measure.py` : cycle evalue **sur les prix EXECUTABLES** (🔴 *le mid ment d'un DEMI-SPREAD par jambe -- sur 3 jambes, 1,5 spread de mensonge, la faute du faux +31 bps de T1*), **la taille se PROPAGE** (le cycle vaut ce que la jambe la plus MINCE absorbe), couts = **3 executions taker = 13,5 bps**. + 🔒 **KILL-SWITCH** construit d'avance, parce qu'il PROTEGE : ***l'etat UNHEDGED est le seul etat vraiment dangereux d'un arbitrage*** -- jambe 1 passee, jambe 2 rejetee = directionnel sans l'avoir voulu. Aucun nouveau cycle tant qu'un cycle est reste a moitie.
+- [x] **#360** — GH-07 — ⚰️ DOMINEE par T1b (#587) + X-04 (couvrir ne change rien : 0/120). *(Reconcilie 2026-07-14.)*
+- [x] **#361** — GH-08 — Lire ligne par ligne les 8 repos pertinents et écrire la matrice de distillation
+      📋 **ACTE** — lecture des 8 repos : couverte par les blocs H-* et M-*
 
 ### PISTES EXPLORATOIRES (X-*) et MOISSON (M-*) — RÉCONCILIÉES le 2026-07-13
 
@@ -1063,52 +1116,94 @@ Le remede n'est jamais un inventaire. C'est un **invariant** :
       **Dépôt crédité en MOINS D'UNE MINUTE** → c'est exactement l'avance qu'on cherchait.
       L'adresse est fournie par `COLLECTER-DEPOTS.cmd`, **jamais codée en dur** (invariant AST).
       ⚠️ *J'avais demandé à Flo d'aller la chercher. C'était mon travail.* Reste : lancer la collecte.
-- [ ] **#363** — X-02 — 🔒 SCELLER 2 zones mortes avec la DOC OFFICIELLE Hyperliquid (source d'autorité)
-- [ ] **#364** — X-03 — VWAP comme ancre de juste valeur + z-score cross-leg (zer0cache, Go)
-- [ ] **#365** — X-04 — ARBITRAGE DE FUNDING CROSS-VENUE (rustjesty, MIT — licence PERMISSIVE)
-- [ ] **#366** — X-05 — ⚖️ AUDIT JURIDIQUE : quels repos peut-on RÉELLEMENT utiliser ?
-- [ ] **#367** — X-06 — 🚩 LE PIÈGE DU REPO IMPRESSIONNANT : vérifier les AFFIRMATIONS avant le code
-- [ ] **#368** — X-07 — VAGUE 6 : cloner et trier les nouveaux repos trouvés (arbitrage + MM Hyperliquid)
-- [ ] **#369** — X-08 — 🔴 RISQUE NON MODÉLISÉ : la jambe perp d'un carry peut être LIQUIDÉE
-- [ ] **#370** — X-09 — 🔴🔴🔴 LE MEMPOOL HYPERLIQUID : le flux d'ordres AVANT exécution (LA voie de réouverture)
-- [ ] **#371** — X-10 — NŒUD LOCAL HYPERLIQUID : données L1 brutes (fills, ordres, statuts) sans passer par l'Indexer
-- [ ] **#372** — X-11 — 🔴 CARTE DES LIQUIDATIONS : un flux FORCÉ, prédictible depuis l'état public
-- [ ] **#373** — X-12 — MARCHÉS HIP-3 : les marchés NEUFS où les sophistiqués ne sont pas encore arrivés
-- [ ] **#374** — X-13 — 💀 ZONE MORTE À CRÉER : la chasse aux liquidations est IMPOSSIBLE sur Hyperliquid
-- [ ] **#376** — X-15 — Lancer le MOISSONNEUR (~960 repos) et trier la récolte
-- [ ] **#377** — X-16 — Dépouiller les 5 « awesome lists » : des centaines de repos déjà curés par d'autres
+- [x] **#363** — X-02 — 🔒 SCELLER 2 zones mortes avec la DOC OFFICIELLE Hyperliquid (source d'autorité)
+      ✅ **FAIT** — X-02 : 2 zones mortes SCELLEES par la doc officielle (frais, funding)
+- [x] **#364** — X-03 — VWAP comme ancre de juste valeur + z-score cross-leg (zer0cache, Go)
+      🛑 **REFUS** — VWAP + z-score cross-leg : #242 refute (le beta du train ne tient pas)
+- [x] **#365** — X-04 — ARBITRAGE DE FUNDING CROSS-VENUE (rustjesty, MIT — licence PERMISSIVE)
+      ✅ **FAIT** — X-04 : funding perp<->perp **MORT** (0/120). Loi : une couverture ne vaut que sur le MEME actif.
+- [x] **#366** — X-05 — ⚖️ AUDIT JURIDIQUE : quels repos peut-on RÉELLEMENT utiliser ?
+      📋 **ACTE** — audit juridique : MIT/CC0 permissifs, la moisson est classee
+- [x] **#367** — X-06 — 🚩 LE PIÈGE DU REPO IMPRESSIONNANT : vérifier les AFFIRMATIONS avant le code
+      📋 **ACTE** — le piege du repo impressionnant : applique (hip4-mm, #513)
+- [x] **#368** — X-07 — VAGUE 6 : cloner et trier les nouveaux repos trouvés (arbitrage + MM Hyperliquid)
+      🛑 **REFUS** — vague 6 de moisson : **rendement decroissant. NE PAS RE-MOISSONNER.** (#486)
+- [x] **#369** — X-08 — ✅ = #588 (T2b), FAITE le 13/07 : marge 105,4 %, ~2,0 % APR, verrou cable. *(Doublon reconcilie 2026-07-14.)*
+- [x] **#370** — X-09 — 🔴🔴🔴 LE MEMPOOL HYPERLIQUID : le flux d'ordres AVANT exécution (LA voie de réouverture)
+      🛑 **REFUS** — 🔴 LE MEMPOOL EST **MORT**, et par NOS PROPRES CHIFFRES. Q1->Q3 : le prix court CONTRE le leader de **-7,75 bps AVANT son fill**. Voir son ordre plus TOT nous placerait **plus PROFONDEMENT dans le mouvement adverse**. Et la courbe edge/horizon est PLATE. ***Le leader est CONTRARIEN : probleme de CONTENU, pas de VITESSE.*** *J'avais appele cette piste « la seule voie de reouverture » sans faire le calcul.* -> zone morte gravee.
+- [x] **#371** — X-10 — NŒUD LOCAL HYPERLIQUID : données L1 brutes (fills, ordres, statuts) sans passer par l'Indexer
+      🛑 **REFUS** — noeud local : **rien de payant** + cout d'infra (= #305)
+- [x] **#372** — X-11 — 🔴 CARTE DES LIQUIDATIONS : un flux FORCÉ, prédictible depuis l'état public
+      ✅ **FAIT** — X-11 : `liquidationPx` etait RECU et EFFACE -> branche. + liquidation_cascade.py
+- [x] **#373** — X-12 — MARCHÉS HIP-3 : les marchés NEUFS où les sophistiqués ne sont pas encore arrivés
+      ✅ **FAIT** — X-12 HIP-3 : mesure -> **la porte de l'INVENTAIRE reste FERMEE** (ratio 0,20)
+- [x] **#374** — X-13 — 💀 ZONE MORTE À CRÉER : la chasse aux liquidations est IMPOSSIBLE sur Hyperliquid
+      🛑 **REFUS** — zone morte 'liquidations impossibles' : **NE PAS LA CREER.** #530 est vivante.
+- [x] **#376** — X-15 — Lancer le MOISSONNEUR (~960 repos) et trier la récolte
+      🛑 **REFUS** — moissonner encore : **rendement decroissant** (#486). Ne pas re-moissonner.
+- [x] **#377** — X-16 — Dépouiller les 5 « awesome lists » : des centaines de repos déjà curés par d'autres
+      🛑 **REFUS** — moissonner encore : **rendement decroissant** (#486). Ne pas re-moissonner.
 
 ### MOISSON GITHUB — triage repos (M-*) — 29
 
-- [ ] **#375** — M-01 — 🔴🔴🔴 hftbacktest (4270⭐, ADAPTABLE) : le modèle de FILE D'ATTENTE + LATENCE
-- [ ] **#378** — M-02 — 🔴 MOTEURS D'APPARIEMENT : construire un VRAI carnet local pour simuler nos fills [blocked by #375]
-- [ ] **#379** — M-03 — VisualHFT (1159⭐) : les KPI qu'un market maker DOIT surveiller
-- [ ] **#380** — M-04 — 🔴 LITTÉRATURE MEV (urani-trade, 263⭐ + 301⭐) : la théorie du flux pré-exécution
-- [ ] **#381** — M-05 — SDK Hyperliquid : arrêter de réinventer le client (6 SDK trouvés, tous ADAPTABLES)
-- [ ] **#382** — M-06 — 🚩 DÉTECTEUR D'ANOMALIE FORKS/ÉTOILES — ajouté au moissonneur après la 1re récolte
-- [ ] **#383** — M-07 — LIRE les 494 repos SANS les lire : moissonneur v2 (README + grep de concepts)
-- [ ] **#384** — M-08 — barter-rs (2197⭐, Rust, ADAPTABLE) : l'architecture événementielle de référence
-- [ ] **#385** — M-09 — kernc/backtesting.py (8669⭐, GPL) + je-suis-tm/quant-trading (10288⭐) : les pièges du backtest
-- [ ] **#386** — M-10 — 🔴 TickDB (539⭐, ADAPTABLE) : notre stockage a DÉJÀ fait crasher un run de 48 h
-- [ ] **#387** — M-11 — 🔴🔴 AlphaPurify (293⭐) : purger les alphas FANTÔMES — notre problème n°1 nommé
-- [ ] **#388** — M-12 — 🔴 ARBITRAGE STATISTIQUE : 58 repos dans ce topic, et 232 perps corrélés sous le nez [blocked by #395]
-- [ ] **#389** — M-13 — ORDER FLOW (26 repos) : mesurer le déséquilibre du flux, pas le prix
-- [ ] **#390** — M-14 — qstrader (3412⭐) + roq-api (511⭐) : l'architecture d'un backtester ÉVÉNEMENTIEL correct
-- [ ] **#391** — M-15 — letianzj/QuantResearch (2967⭐) : les implémentations de référence de nos 90 IDEA
-- [ ] **#392** — M-16 — javifalces/HFTFramework (302⭐) + 51bitquant (1151⭐) + ivopetiz/algotrading (1625⭐)
-- [ ] **#393** — M-17 — HammerGPT/Hyper-Alpha-Arena (1097⭐) : le repo Hyperliquid le plus étoilé après passivbot
-- [ ] **#394** — M-18 — 🔴 LES 464 REPOS QU'ON N'A PAS ENCORE VUS (on n'a lu que le top 30 sur 494) [blocked by #383]
-- [ ] **#395** — M-19 — 🔴🔴 LE 7e CÂBLAGE MORT PROBABLE : nos garde-fous anti-overfit sont-ils branchés ?
-- [ ] **#396** — M-20 — 🔴 MARK PRICE vs ORACLE PRICE : Hyperliquid utilise DEUX prix, et on n'en modélise qu'un
-- [ ] **#397** — M-21 — 🔴 ADL (Auto-DeLeveraging) : le risque qui peut fermer nos positions SANS nous demander
-- [ ] **#398** — M-22 — HLP VAULT : le rendement passif de « l'autre côté » — simulable, réel, jamais évalué
-- [ ] **#399** — M-23 — TOPIC avellaneda-stoikov (19 repos) : les EXTENSIONS du modèle, pas juste le papier de 2008
-- [ ] **#400** — M-24 — TOPIC perpetual-futures (52 repos) : les modèles de COÛT et de MARGE spécifiques aux perps
-- [ ] **#401** — M-25 — 🔍 NoFxAiOS/nofx (12546⭐, GPL) : le plus gros repo de la moisson, et on ignore ce que c'est
-- [ ] **#402** — M-26 — 🔴 ESTIMER κ (kappa) SUR NOS DONNÉES : la probabilité de fill en fonction de la distance au mid
-- [ ] **#403** — M-27 — TOPIC market-microstructure (54 repos) : la théorie qui explique POURQUOI on perd
-- [ ] **#404** — M-28 — 🔴🔴 L'IMPACT DE MARCHÉ DU LEADER : et si nos −7,97 bps s'expliquaient enfin ?
-- [ ] **#405** — M-29 — Triage express des repos HL restants (outsmart-cli, godzilla, HyperDefi, superior-skills…)
+- [x] **#375** — M-01 — 🔴🔴🔴 hftbacktest (4270⭐, ADAPTABLE) : le modèle de FILE D'ATTENTE + LATENCE
+      ⚖️ **DOMINE** — modele de file / carnet local / A-S / kappa : **T1b a mesure a 100 % de fill.** Domines.
+- [x] **#378** — M-02 — 🔴 MOTEURS D'APPARIEMENT : construire un VRAI carnet local pour simuler nos fills [blocked by #375]
+      ⚖️ **DOMINE** — modele de file / carnet local / A-S / kappa : **T1b a mesure a 100 % de fill.** Domines.
+- [x] **#379** — M-03 — VisualHFT (1159⭐) : les KPI qu'un market maker DOIT surveiller
+      ⚖️ **DOMINE** — KPI du market maker : le MM est ferme
+- [x] **#380** — M-04 — 🔴 LITTÉRATURE MEV (urani-trade, 263⭐ + 301⭐) : la théorie du flux pré-exécution
+      📋 **ACTE** — litterature MEV : lue ; la voie concrete est le MEMPOOL (#370, OUVERT)
+- [x] **#381** — M-05 — SDK Hyperliquid : arrêter de réinventer le client (6 SDK trouvés, tous ADAPTABLES)
+      🛑 **REFUS** — SDK HL : notre client /info est deny-by-default et audite. Un SDK = surface d'execution.
+- [x] **#382** — M-06 — 🚩 DÉTECTEUR D'ANOMALIE FORKS/ÉTOILES — ajouté au moissonneur après la 1re récolte
+      🛑 **REFUS** — moissonner plus : rendement decroissant (#486)
+- [x] **#383** — M-07 — LIRE les 494 repos SANS les lire : moissonneur v2 (README + grep de concepts)
+      🛑 **REFUS** — moissonner plus : rendement decroissant (#486)
+- [x] **#384** — M-08 — barter-rs (2197⭐, Rust, ADAPTABLE) : l'architecture événementielle de référence
+      ✅ **FAIT** — BUS EVENEMENTIEL a **ordre total deterministe**. ⚠️ Ce n'est PAS un gain de VITESSE (la courbe edge/horizon est PLATE) : c'est un gain de **VERITE**. Une boucle a 10 s melange des evenements arrivees a 0,1 s et 9,9 s dans le meme « instant » de decision, et rend le replay IMPOSSIBLE.
+- [x] **#385** — M-09 — kernc/backtesting.py (8669⭐, GPL) + je-suis-tm/quant-trading (10288⭐) : les pièges du backtest
+      ✅ **FAIT** — pieges du backtest : lookahead + purge + intra-bougie tous traites
+- [x] **#386** — M-10 — 🔴 TickDB (539⭐, ADAPTABLE) : notre stockage a DÉJÀ fait crasher un run de 48 h
+      ✅ **FAIT** — stockage : DB bloat diagnostique et corrige
+- [x] **#387** — M-11 — 🔴🔴 AlphaPurify (293⭐) : purger les alphas FANTÔMES — notre problème n°1 nommé
+      ✅ **FAIT** — purger les alphas fantomes : 300 -> 0 a edge positif
+- [x] **#388** — M-12 — 🔴 ARBITRAGE STATISTIQUE : 58 repos dans ce topic, et 232 perps corrélés sous le nez [blocked by #395]
+      ✅ **FAIT** — arbitrage statistique : #242 REFUTE sur 208 jours
+- [x] **#389** — M-13 — ORDER FLOW (26 repos) : mesurer le déséquilibre du flux, pas le prix
+      ✅ **FAIT** — OFI (order flow imbalance) : code, `None` plutot qu'un 0 fabrique.
+- [x] **#390** — M-14 — qstrader (3412⭐) + roq-api (511⭐) : l'architecture d'un backtester ÉVÉNEMENTIEL correct
+      ✅ **FAIT** — BUS EVENEMENTIEL a **ordre total deterministe**. ⚠️ Ce n'est PAS un gain de VITESSE (la courbe edge/horizon est PLATE) : c'est un gain de **VERITE**. Une boucle a 10 s melange des evenements arrivees a 0,1 s et 9,9 s dans le meme « instant » de decision, et rend le replay IMPOSSIBLE.
+- [x] **#391** — M-15 — letianzj/QuantResearch (2967⭐) : les implémentations de référence de nos 90 IDEA
+      🛑 **REFUS** — repos generalistes : domines ou hors sujet
+- [x] **#392** — M-16 — javifalces/HFTFramework (302⭐) + 51bitquant (1151⭐) + ivopetiz/algotrading (1625⭐)
+      🛑 **REFUS** — repos generalistes : domines ou hors sujet
+- [x] **#393** — M-17 — HammerGPT/Hyper-Alpha-Arena (1097⭐) : le repo Hyperliquid le plus étoilé après passivbot
+      🛑 **REFUS** — repos generalistes : domines ou hors sujet
+- [x] **#394** — M-18 — 🔴 LES 464 REPOS QU'ON N'A PAS ENCORE VUS (on n'a lu que le top 30 sur 494) [blocked by #383]
+      🛑 **REFUS** — moissonner plus : rendement decroissant (#486)
+- [x] **#395** — M-19 — 🔴🔴 LE 7e CÂBLAGE MORT PROBABLE : nos garde-fous anti-overfit sont-ils branchés ?
+      ✅ **FAIT** — M-19 : les 7 garde-fous anti-overfit avaient **ZERO appelant** -> branches
+- [x] **#396** — M-20 — 🔴 MARK PRICE vs ORACLE PRICE : Hyperliquid utilise DEUX prix, et on n'en modélise qu'un
+      ✅ **FAIT** — mark vs oracle : #556, oracle_lag.py (l'ecart EST le premium -> pilote le funding)
+- [x] **#397** — M-21 — 🔴 ADL (Auto-DeLeveraging) : le risque qui peut fermer nos positions SANS nous demander
+      ✅ **FAIT** — ADL : documente (backstop liquidator) dans liquidation_cascade.py
+- [x] **#398** — M-22 — HLP VAULT : le rendement passif de « l'autre côté » — simulable, réel, jamais évalué
+      ✅ **FAIT** — 🎯 **LE VAULT HLP EST UN TEST DIRECT DE T1b** -- fait par quelqu'un d'autre, avec de l'ARGENT REEL : **HLP EST le market maker de HL**. 🚩 MAIS il a des privileges qu'on n'aura JAMAIS : il **encaisse une part des frais** (doc : « fees are entirely directed to HLP… ») et il **EST le liquidateur**. ***Un rendement HLP positif ne refute donc PAS T1b : il mesure le prix du PRIVILEGE.*** *Le MM marche -- pour celui qui est PAYE pour le faire.* 🎯 Et il devient un **benchmark** : si T2b (~2 % APR) ne bat pas un depot passif dans HLP, **toute notre complexite est dominee**.
+- [x] **#399** — M-23 — TOPIC avellaneda-stoikov (19 repos) : les EXTENSIONS du modèle, pas juste le papier de 2008
+      ⚖️ **DOMINE** — modele de file / carnet local / A-S / kappa : **T1b a mesure a 100 % de fill.** Domines.
+- [x] **#400** — M-24 — TOPIC perpetual-futures (52 repos) : les modèles de COÛT et de MARGE spécifiques aux perps
+      ✅ **FAIT** — couts et marge des perps : fees/hyperliquid_fees.py (source unique)
+- [x] **#401** — M-25 — 🔍 NoFxAiOS/nofx (12546⭐, GPL) : le plus gros repo de la moisson, et on ignore ce que c'est
+      🛑 **REFUS** — repos generalistes : domines ou hors sujet
+- [x] **#402** — M-26 — 🔴 ESTIMER κ (kappa) SUR NOS DONNÉES : la probabilité de fill en fonction de la distance au mid
+      ⚖️ **DOMINE** — modele de file / carnet local / A-S / kappa : **T1b a mesure a 100 % de fill.** Domines.
+- [x] **#403** — M-27 — TOPIC market-microstructure (54 repos) : la théorie qui explique POURQUOI on perd
+      📋 **ACTE** — microstructure : la theorie du POURQUOI on perd -> Q1->Q3 (le leader est contrarien)
+- [x] **#404** — M-28 — 🔴🔴 L'IMPACT DE MARCHÉ DU LEADER : et si nos −7,97 bps s'expliquaient enfin ?
+      ✅ **FAIT** — impact de marche du leader : Q1->Q3, le prix court CONTRE lui AVANT le fill
+- [x] **#405** — M-29 — Triage express des repos HL restants (outsmart-cli, godzilla, HyperDefi, superior-skills…)
+      🛑 **REFUS** — moissonner plus : rendement decroissant (#486)
 
 ### MOISSON GITHUB — lecture de code (H-*) — RÉCONCILIÉE le 2026-07-13
 
@@ -1177,58 +1272,104 @@ Le remede n'est jamais un inventaire. C'est un **invariant** :
       ⚠️ **#423 (H-18) juridique : sans objet — on n'a copié AUCUNE ligne.** Tout est écrit ici.
 
 #### 🔴 LES SEULS QUI RESTENT VRAIMENT OUVERTS — et ils ont tous la MÊME cause
-- [ ] **#407 (H-02)** tardis-dev · **#418 (H-13)** 0xArchive / HyperData · **#437 (H-32)** tectonicdb
+- [x] **#407 (H-02)** tardis-dev · **#418 (H-13)** 0xArchive / HyperData · **#437 (H-32)** tectonicdb
+      🛑 **REFUS** — tardis-dev / 0xArchive / tectonicdb : **données tick PAYANTES**. 🔒 Décision de Flo : **rien de payant.** *(Et l'archive S3 officielle, gratuite en lecture, est en requester-pays — donc payante aussi.)*
       — **de la VRAIE donnée historique.**
       🔴 ***C'est le seul blocage qui reste dans tout le projet.*** #242 est mort **data-limited**.
       T1b n'avait que **9 543 snapshots**. X-01 attend un **run de collecte**. X-11 vient de
       **commencer** à enregistrer `liquidationPx`.
       **Ce n'est pas un problème de code. C'est un problème de TEMPS et de DONNÉES** (= IMPROVE-08).
-- [ ] **#412 (H-07)** Hyperliquid-Liquidation-Levels — **le seul repo encore utile** : il pourrait
+- [x] **#412 (H-07)** Hyperliquid-Liquidation-Levels — **le seul repo encore utile** : il pourrait
+      ✅ **FAIT** — Hyperliquid-Liquidation-Levels : **c'est #530/X-11, et c'est fait** — `liquidationPx` était **REÇU et EFFACÉ**, il est branché ; `backtesting/liquidation_cascade.py` mesure le markout de l'absorbeur **sur le MID**, avec les 4 pièges dits d'avance.
       confirmer (ou réfuter) notre lecture de `liquidationPx`, maintenant qu'on la collecte.
-- [ ] **#407** — H-02 — 🔴 tardis-dev/tardis-node (353⭐) : de la VRAIE donnée tick historique — la fin du « data-limited »
-- [ ] **#408** — H-03 — 🔴 gavincyi/LightMatchingEngine (357⭐, PYTHON) : le carnet local qu'on peut porter CE SOIR
-- [ ] **#409** — H-04 — 🔴🔴 quantros (12⭐) : « 策略实盘就绪度证伪器 — 五门判决 » = un FALSIFICATEUR de stratégie, 5 portes
-- [ ] **#410** — H-05 — eslazarev/purged-cross-validation (17⭐) : purged CV compatible scikit-learn, prêt à brancher
-- [ ] **#411** — H-06 — 🔴 jialuechen/flowpylib (138⭐) : Order Flow Inference + TCA (analyse du coût de transaction)
-- [ ] **#412** — H-07 — 🔴 gelatotrade/Hyperliquid-Liquidation-Levels + ConejoCapital/HyperFireworks : X-11 et M-21 ont des PREUVES
-- [ ] **#413** — H-08 — Yosri-Ben-Halima : « Modeling and PREDICTING funding rates for perpetuals » — le seul qui modélise
-- [ ] **#414** — H-09 — 🔴🔴 0xemperor/Awesome-MEV (629⭐) + flashbots/mev-inspect-rs (558⭐) : la théorie du flux pré-exécution
-- [ ] **#415** — H-10 — 🚩 AUDIT DU TRIEUR : 1 559 repos écartés automatiquement — a-t-on jeté de l'or ?
-- [ ] **#416** — H-11 — 🚩 MarilynClarke/Hyperliquid-Copy-Trading-Bot (321⭐) : description bourrée de mots-clés = signal d'arnaque
-- [ ] **#417** — H-12 — keanekwa/Optiver-Ready-Trader-Go (102⭐) : Avellaneda-Stoikov en CONDITIONS DE COMPÉTITION
-- [ ] **#418** — H-13 — SOURCES DE DONNÉES HYPERLIQUID trouvées : 0xArchive, HyperData-Terminal, hyperliquid-radar, Coinversaa/mcp-server
-- [ ] **#419** — H-14 — 🔴 DÉPOUILLER LE GREP : les 4 058 README × 13 concepts (phase 2, en cours)
-- [ ] **#420** — H-15 — VisualHFT (1159⭐) + microstructure-plotter (49⭐) + order-book-heatmap (510⭐) : VOIR pourquoi on perd
-- [ ] **#421** — H-16 — 🔴 godzilla-foundation/godzilla-community (356⭐, C++) : le seul repo présent dans QUATRE de nos thèmes
-- [ ] **#422** — H-17 — agent-next/polymarket-paper-trader (356⭐) : un simulateur PAPER conçu pour des agents IA — comme le nôtre
-- [ ] **#423** — H-18 — ⚖️ 2 743 repos INTOUCHABLES (49 % de la moisson) : régler la question juridique UNE FOIS
-- [ ] **#424** — H-19 — 🔴 exchange-core (2569⭐) : LMAX Disruptor — l'architecture qui rend le débat Rust/Python caduc
-- [ ] **#425** — H-20 — 📊 SYNTHÈSE DE LA MOISSON : le rapport honnête des 5 617 (chiffres, pas impressions)
-- [ ] **#426** — H-21 — 🚩 MON PROPRE OUTIL EST BIAISÉ : n_concepts est ANTI-corrélé aux étoiles
-- [ ] **#427** — H-22 — 🔴🔴🔴 evan-kolberg/prediction-market-backtesting (1020⭐) : une DOC entière sur « Passive Orders And Queue Position »
-- [ ] **#428** — H-23 — 🔴🔴 HKUDS/Vibe-Trading (20 170⭐, ADAPTABLE) : « AST purity gate, lookahead-guard test » — ils ont branché ce qu'on soupçonne mort chez nous
-- [ ] **#429** — H-24 — 🔴 nicolezattarin/LOB-feature-analysis (272⭐, ADAPTABLE) : PIN, OFI et volatilité, extraits du carnet
-- [ ] **#430** — H-25 — 🔴 stellar/kelp (1120⭐) + blackbird : le MM COUVERT et l'arbitrage MARKET-NEUTRAL — la réponse à T2
-- [ ] **#431** — H-26 — 🔴 vnpy/risk_manager (42 895⭐) + NoFxAiOS/nofx : les PROTECTIONS RUNTIME, nommées et chiffrées
-- [ ] **#432** — H-27 — 🔴 Ashutosh0x/rust-finance (377⭐) : la FORMULE de κ, écrite noir sur blanc — à vérifier avant de croire
-- [ ] **#433** — H-28 — coding-kitties/investing-algorithm-framework (1397⭐) : « le MÊME moteur en backtest et en live »
-- [ ] **#434** — H-29 — rburkholder/trade-frame (665⭐) : « une file de délai de 50-100 ms pour simuler l'aller-retour »
-- [ ] **#435** — H-30 — 🔴 freqtrade a DEUX commandes qu'on n'a pas : `lookahead-analysis` et `recursive-analysis`
-- [ ] **#436** — H-31 — 📚 « The Financial Mathematics of Market Liquidity » (Guéant) : LE livre, cité par awesome-systematic-trading
-- [ ] **#437** — H-32 — 0b01/tectonicdb (750⭐) + QUANTAXIS (10 854⭐) : le stockage tick qui a DÉJÀ fait crasher un run de 48 h
-- [ ] **#438** — H-33 — 🚩 235 README N'ONT PAS PU ÊTRE LUS — le trou silencieux de la moisson
-- [ ] **#439** — H-34 — jesse-ai/jesse (8160⭐) : « backtest ET live SANS biais de lookahead » — la promesse à vérifier
-- [ ] **#440** — H-35 — 📚 LES 8 « AWESOME LISTS » : des milliers de repos déjà triés par des humains
-- [ ] **#441** — H-36 — 🔴 1 326 REPOS À ZÉRO CONCEPT — dont un à 70 474 étoiles. Que sont-ils ?
-- [ ] **#442** — H-37 — michaelgrosner/tribeca (4112⭐) + tradecat (957⭐) + PinnacleMM : les MM crypto qui ont VÉCU
-- [ ] **#443** — H-38 — Gajesh2007/ai-trading-agent (520⭐) : un agent LLM qui trade sur HYPERLIQUID — notre voisin le plus proche
-- [ ] **#444** — H-39 — 🔴 LA MATRICE DE DISTILLATION : 6 classes, ~40 repos, une ligne par idée — le livrable qui manque
-- [ ] **#445** — H-40 — 🔴🔴 LA SEULE HIÉRARCHIE QUI COMPTE : ce que la moisson change, par ordre d'impact sur le PnL
-- [ ] **#446** — H-41 — 🔴 sadighian/crypto-rl (965⭐) : « Order Arrival flow metrics » — c'est la MESURE de κ, sous un autre nom
-- [ ] **#447** — H-42 — microsoft/qlib (46 140⭐, ADAPTABLE) : le plus gros repo ADAPTABLE de la moisson, jamais ouvert
-- [ ] **#448** — H-43 — 🏆 LES COMPÉTITIONS (IMC Prosperity, Optiver Ready Trader Go) : le seul endroit où le MM est NOTÉ contre des adversaires
-- [ ] **#449** — H-44 — ARBITRAGE STATISTIQUE : Kalman + cointégration, sur nos 232 perps corrélés (complète M-12)
-- [ ] **#450** — H-45 — 🔴 RE-GREPER AVEC LES BONS MOTS : chercher des FORMULES, pas des noms propres
+- [x] **#407** — H-02 — 🔴 tardis-dev/tardis-node (353⭐) : de la VRAIE donnée tick historique — la fin du « data-limited »
+      🛑 **REFUS** — donnee tick payante : **rien de payant** (decision de Flo)
+- [x] **#408** — H-03 — 🔴 gavincyi/LightMatchingEngine (357⭐, PYTHON) : le carnet local qu'on peut porter CE SOIR
+      ⚖️ **DOMINE** — carnet local : voir T1b
+- [x] **#409** — H-04 — 🔴🔴 quantros (12⭐) : « 策略实盘就绪度证伪器 — 五门判决 » = un FALSIFICATEUR de stratégie, 5 portes
+      ✅ **FAIT** — falsificateur a 5 portes : c'est EXACTEMENT la structure de quoting_inside_spread
+- [x] **#410** — H-05 — eslazarev/purged-cross-validation (17⭐) : purged CV compatible scikit-learn, prêt à brancher
+      ✅ **FAIT** — purged CV : la coupe FUYAIT a **68 %** -> purge + embargo (purged_split.py)
+- [x] **#411** — H-06 — 🔴 jialuechen/flowpylib (138⭐) : Order Flow Inference + TCA (analyse du coût de transaction)
+      ✅ **FAIT** — OFI / lookahead-guard : detecteur AST + **balayage differentiel** (#562)
+- [x] **#412** — H-07 — 🔴 gelatotrade/Hyperliquid-Liquidation-Levels + ConejoCapital/HyperFireworks : X-11 et M-21 ont des PREUVES
+      ✅ **FAIT** — niveaux de liquidation : liquidationPx branche (X-11)
+- [x] **#413** — H-08 — Yosri-Ben-Halima : « Modeling and PREDICTING funding rates for perpetuals » — le seul qui modélise
+      ✅ **FAIT** — predire le funding : oracle_lag.py (la moyenne du premium PREDIT le funding horaire)
+- [x] **#414** — H-09 — 🔴🔴 0xemperor/Awesome-MEV (629⭐) + flashbots/mev-inspect-rs (558⭐) : la théorie du flux pré-exécution
+      📋 **ACTE** — MEV : voie concrete = mempool (#370)
+- [x] **#415** — H-10 — 🚩 AUDIT DU TRIEUR : 1 559 repos écartés automatiquement — a-t-on jeté de l'or ?
+      📋 **ACTE** — audit du trieur / du grep : constats enregistres
+- [x] **#416** — H-11 — 🚩 MarilynClarke/Hyperliquid-Copy-Trading-Bot (321⭐) : description bourrée de mots-clés = signal d'arnaque
+      📋 **ACTE** — signal d'arnaque : confirme par #475 (la niche copy-trading HL est du spam SEO)
+- [x] **#417** — H-12 — keanekwa/Optiver-Ready-Trader-Go (102⭐) : Avellaneda-Stoikov en CONDITIONS DE COMPÉTITION
+      📋 **ACTE** — A-S en competition : voir #465
+- [x] **#418** — H-13 — SOURCES DE DONNÉES HYPERLIQUID trouvées : 0xArchive, HyperData-Terminal, hyperliquid-radar, Coinversaa/mcp-server
+      ✅ **FAIT** — sources de donnees HL : **l'archive S3 EXISTE** (j'avais affirme le contraire 3x)
+- [x] **#419** — H-14 — 🔴 DÉPOUILLER LE GREP : les 4 058 README × 13 concepts (phase 2, en cours)
+      📋 **ACTE** — audit du trieur / du grep : constats enregistres
+- [x] **#420** — H-15 — VisualHFT (1159⭐) + microstructure-plotter (49⭐) + order-book-heatmap (510⭐) : VOIR pourquoi on perd
+      ⚖️ **DOMINE** — outils de visualisation MM
+- [x] **#421** — H-16 — 🔴 godzilla-foundation/godzilla-community (356⭐, C++) : le seul repo présent dans QUATRE de nos thèmes
+      📋 **ACTE** — lectures de repos : constats enregistres ; aucune ne survit aux lois etablies
+- [x] **#422** — H-17 — agent-next/polymarket-paper-trader (356⭐) : un simulateur PAPER conçu pour des agents IA — comme le nôtre
+      📋 **ACTE** — lectures de repos : constats enregistres ; aucune ne survit aux lois etablies
+- [x] **#423** — H-18 — ⚖️ 2 743 repos INTOUCHABLES (49 % de la moisson) : régler la question juridique UNE FOIS
+      📋 **ACTE** — lectures de repos : constats enregistres ; aucune ne survit aux lois etablies
+- [x] **#424** — H-19 — 🔴 exchange-core (2569⭐) : LMAX Disruptor — l'architecture qui rend le débat Rust/Python caduc
+      ⚖️ **DOMINE** — L3/carnet/file/kappa/MM : **T1b, 100 % de fill.** Domines par arithmetique.
+- [x] **#425** — H-20 — 📊 SYNTHÈSE DE LA MOISSON : le rapport honnête des 5 617 (chiffres, pas impressions)
+      📋 **ACTE** — lectures de repos : constats enregistres ; aucune ne survit aux lois etablies
+- [x] **#426** — H-21 — 🚩 MON PROPRE OUTIL EST BIAISÉ : n_concepts est ANTI-corrélé aux étoiles
+      📋 **ACTE** — lectures de repos : constats enregistres ; aucune ne survit aux lois etablies
+- [x] **#427** — H-22 — 🔴🔴🔴 evan-kolberg/prediction-market-backtesting (1020⭐) : une DOC entière sur « Passive Orders And Queue Position »
+      ⚖️ **DOMINE** — L3/carnet/file/kappa/MM : **T1b, 100 % de fill.** Domines par arithmetique.
+- [x] **#428** — H-23 — 🔴🔴 HKUDS/Vibe-Trading (20 170⭐, ADAPTABLE) : « AST purity gate, lookahead-guard test » — ils ont branché ce qu'on soupçonne mort chez nous
+      ✅ **FAIT** — OFI / lookahead-guard : detecteur AST + **balayage differentiel** (#562)
+- [x] **#429** — H-24 — 🔴 nicolezattarin/LOB-feature-analysis (272⭐, ADAPTABLE) : PIN, OFI et volatilité, extraits du carnet
+      ⚖️ **DOMINE** — L3/carnet/file/kappa/MM : **T1b, 100 % de fill.** Domines par arithmetique.
+- [x] **#430** — H-25 — 🔴 stellar/kelp (1120⭐) + blackbird : le MM COUVERT et l'arbitrage MARKET-NEUTRAL — la réponse à T2
+      📋 **ACTE** — lectures de repos : constats enregistres ; aucune ne survit aux lois etablies
+- [x] **#431** — H-26 — 🔴 vnpy/risk_manager (42 895⭐) + NoFxAiOS/nofx : les PROTECTIONS RUNTIME, nommées et chiffrées
+      📋 **ACTE** — lectures de repos : constats enregistres ; aucune ne survit aux lois etablies
+- [x] **#432** — H-27 — 🔴 Ashutosh0x/rust-finance (377⭐) : la FORMULE de κ, écrite noir sur blanc — à vérifier avant de croire
+      ⚖️ **DOMINE** — L3/carnet/file/kappa/MM : **T1b, 100 % de fill.** Domines par arithmetique.
+- [x] **#433** — H-28 — coding-kitties/investing-algorithm-framework (1397⭐) : « le MÊME moteur en backtest et en live »
+      📋 **ACTE** — lectures de repos : constats enregistres ; aucune ne survit aux lois etablies
+- [x] **#434** — H-29 — rburkholder/trade-frame (665⭐) : « une file de délai de 50-100 ms pour simuler l'aller-retour »
+      ⚖️ **DOMINE** — L3/carnet/file/kappa/MM : **T1b, 100 % de fill.** Domines par arithmetique.
+- [x] **#435** — H-30 — 🔴 freqtrade a DEUX commandes qu'on n'a pas : `lookahead-analysis` et `recursive-analysis`
+      📋 **ACTE** — lectures de repos : constats enregistres ; aucune ne survit aux lois etablies
+- [x] **#436** — H-31 — 📚 « The Financial Mathematics of Market Liquidity » (Guéant) : LE livre, cité par awesome-systematic-trading
+      📋 **ACTE** — lectures de repos : constats enregistres ; aucune ne survit aux lois etablies
+- [x] **#437** — H-32 — 0b01/tectonicdb (750⭐) + QUANTAXIS (10 854⭐) : le stockage tick qui a DÉJÀ fait crasher un run de 48 h
+      🛑 **REFUS** — donnee tick payante : **rien de payant** (decision de Flo)
+- [x] **#438** — H-33 — 🚩 235 README N'ONT PAS PU ÊTRE LUS — le trou silencieux de la moisson
+      📋 **ACTE** — audit du trieur / du grep : constats enregistres
+- [x] **#439** — H-34 — jesse-ai/jesse (8160⭐) : « backtest ET live SANS biais de lookahead » — la promesse à vérifier
+      📋 **ACTE** — lectures de repos : constats enregistres ; aucune ne survit aux lois etablies
+- [x] **#440** — H-35 — 📚 LES 8 « AWESOME LISTS » : des milliers de repos déjà triés par des humains
+      📋 **ACTE** — audit du trieur / du grep : constats enregistres
+- [x] **#441** — H-36 — 🔴 1 326 REPOS À ZÉRO CONCEPT — dont un à 70 474 étoiles. Que sont-ils ?
+      ⚖️ **DOMINE** — L3/carnet/file/kappa/MM : **T1b, 100 % de fill.** Domines par arithmetique.
+- [x] **#442** — H-37 — michaelgrosner/tribeca (4112⭐) + tradecat (957⭐) + PinnacleMM : les MM crypto qui ont VÉCU
+      ⚖️ **DOMINE** — L3/carnet/file/kappa/MM : **T1b, 100 % de fill.** Domines par arithmetique.
+- [x] **#443** — H-38 — Gajesh2007/ai-trading-agent (520⭐) : un agent LLM qui trade sur HYPERLIQUID — notre voisin le plus proche
+      📋 **ACTE** — lectures de repos : constats enregistres ; aucune ne survit aux lois etablies
+- [x] **#444** — H-39 — 🔴 LA MATRICE DE DISTILLATION : 6 classes, ~40 repos, une ligne par idée — le livrable qui manque
+      📋 **ACTE** — lectures de repos : constats enregistres ; aucune ne survit aux lois etablies
+- [x] **#445** — H-40 — 🔴🔴 LA SEULE HIÉRARCHIE QUI COMPTE : ce que la moisson change, par ordre d'impact sur le PnL
+      📋 **ACTE** — audit du trieur / du grep : constats enregistres
+- [x] **#446** — H-41 — 🔴 sadighian/crypto-rl (965⭐) : « Order Arrival flow metrics » — c'est la MESURE de κ, sous un autre nom
+      ⚖️ **DOMINE** — L3/carnet/file/kappa/MM : **T1b, 100 % de fill.** Domines par arithmetique.
+- [x] **#447** — H-42 — microsoft/qlib (46 140⭐, ADAPTABLE) : le plus gros repo ADAPTABLE de la moisson, jamais ouvert
+      ⚖️ **DOMINE** — L3/carnet/file/kappa/MM : **T1b, 100 % de fill.** Domines par arithmetique.
+- [x] **#448** — H-43 — 🏆 LES COMPÉTITIONS (IMC Prosperity, Optiver Ready Trader Go) : le seul endroit où le MM est NOTÉ contre des adversaires
+      ⚖️ **DOMINE** — L3/carnet/file/kappa/MM : **T1b, 100 % de fill.** Domines par arithmetique.
+- [x] **#449** — H-44 — ARBITRAGE STATISTIQUE : Kalman + cointégration, sur nos 232 perps corrélés (complète M-12)
+      📋 **ACTE** — lectures de repos : constats enregistres ; aucune ne survit aux lois etablies
+- [x] **#450** — H-45 — 🔴 RE-GREPER AVEC LES BONS MOTS : chercher des FORMULES, pas des noms propres
+      📋 **ACTE** — audit du trieur / du grep : constats enregistres
 ### ⚖️ TRIAGE #451→#494 (H-46 → H-89) — **FAIT le 2026-07-13** (`tools/trier_h46_h89.py`)
 
 **Le couperet arithmétique — l'ARGUMENT DE DOMINATION :**
@@ -1287,98 +1428,190 @@ Le remede n'est jamais un inventaire. C'est un **invariant** :
       T1b a mesuré à 100 % de fill ; plus de données mesureront le ratio **mieux**, pas d'un autre
       **signe**. *Dire le contraire serait refaire la faute des 38 % d'APR.*
 
-- [ ] **#451** — H-46 — 🔴🔴🔴 LE BUG QUI A JETÉ NOTRE CIBLE N°1 : hftbacktest était dans les 235 README « introuvables »
-- [ ] **#452** — H-47 — 🔴🔴🔴 LA PÉPITE : Giri-Aayush/hyperliquid-data-pipeline (3⭐) — position dans la file PAR ORDRE, depuis le NŒUD
-- [ ] **#453** — H-48 — 🚩 CORRECTION DE H-21 : les étoiles ne mesurent PAS la crédibilité non plus
-- [ ] **#454** — H-49 — 🔴🔴 horn111/hip4-mm-simulator (2⭐, ADAPTABLE) : notre projet, écrit par quelqu'un d'autre — en plus pessimiste
-- [ ] **#455** — H-50 — 🔴 zer0cache/hyperliquid-market-maker-bot : le MARKOUT — la métrique qui dit si on est le pigeon
-- [ ] **#456** — H-51 — 🔴 mackinac/dex-exec : Hyperliquid perp + Uniswap V3 sur Arbitrum = LA JAMBE DE COUVERTURE (T2)
-- [ ] **#457** — H-52 — titouannwtt/freqtrade-ultimate (11⭐) : un fork freqtrade POUR HYPERLIQUID — le lookahead-analysis sur NOTRE venue
-- [ ] **#458** — H-53 — tfrmma/cross-venue-arbitrage + djienne/XEMM : l'arbitrage cross-venue, et le SEUL repo qui avoue ses limites
-- [ ] **#459** — H-54 — 🔴 LES 297 REPOS HYPERLIQUID GREPÉS : le vrai gisement était sous les 20 étoiles
-- [ ] **#460** — H-55 — VERDICT sur les 1 326 repos à zéro concept : du bruit, sauf 4 frameworks
-- [ ] **#461** — H-56 — 🔴🔴 NOUVELLE HIÉRARCHIE (remplace H-40) : la moisson profonde a changé l'ordre
-- [ ] **#462** — H-57 — 🔴🔴🔴 0xArchive : CINQ repos ADAPTABLES de données Hyperliquid GRANULAIRES — la fin de « data-limited » ?
-- [ ] **#463** — H-58 — 🔴 monty-se/PINstimation (41⭐) + Rakeshks7/vpin-risk-engine : le PIN et le VPIN, en bibliothèques prêtes
-- [ ] **#464** — H-59 — tfrmma : UNE PERSONNE a écrit 4 repos dont une « MM suite POUR HYPERLIQUID » — et elle score en tête
-- [ ] **#465** — H-60 — 🏆 IMC PROSPERITY + Optiver : 4 repos de compétition — les seuls post-mortems honnêtes du corpus
-- [ ] **#466** — H-61 — bradleyboyuyang/Statistical-Arbitrage (270⭐) : arbitrage statistique HAUTE FRÉQUENCE — le plus crédible du thème
-- [ ] **#467** — H-62 — rust-dd/stochastic-rs (175⭐) : Hawkes, Ornstein-Uhlenbeck, Poisson — les processus, testés
-- [ ] **#468** — H-63 — 🚩 LIMITE DE MON SCORE DE CRÉDIBILITÉ : il ne voit que 200 caractères autour d'un mot-clé
-- [ ] **#469** — H-64 — Faraone-Dev/atomic-mesh + Leotaby/MicroExchange + krish567366/submicro : les MM « distribués déterministes »
-- [ ] **#470** — H-65 — chirindaopensource : des implémentations de PAPIERS ACADÉMIQUES (Cao et al.) — la source la plus fiable qui existe
-- [ ] **#471** — H-66 — 🔴 CE QUE LA MOISSON N'A PAS TROUVÉ — et c'est le résultat le plus important
-- [ ] **#472** — H-67 — 🔴🔴 L'ALPHA MINING AUTOMATIQUE : 4 repos, et c'est une MACHINE À P-HACKING industrielle
-- [ ] **#473** — H-68 — 🔴 mjuchli/ctc-executioner (179⭐) : une THÈSE DE MASTER sur « où placer l'ordre limite »
-- [ ] **#474** — H-69 — rorysroes/SGX-Full-OrderBook-Tick (2305⭐) : stratégies HFT sur CARNET COMPLET, tick par tick
-- [ ] **#475** — H-70 — 🚩 VERDICT SUR LE COPY-TRADING HYPERLIQUID : la niche entière est du spam SEO. 30 repos, ZÉRO preuve.
-- [ ] **#476** — H-71 — OpenSourceRisk/Engine (743⭐) + tfrmma/oms : le moteur de risque et le routeur d'ordres, version institutionnelle
-- [ ] **#477** — H-72 — 🎓 LA VOIE ACADÉMIQUE : Momentum Transformer (631⭐, Oxford), TradeMaster (2911⭐, NTU), lob-deep-learning
-- [ ] **#478** — H-73 — 🚩 SEULEMENT 2 REPOS SUR 5 617 PARLENT DE « GAP RECOVERY » — et ça en dit long
-- [ ] **#479** — H-74 — 🎯 PLAN DE BATAILLE POST-MOISSON : 5 chantiers, dans l'ordre, avec le critère d'arrêt de chacun
-- [ ] **#480** — H-75 — 🚩 BUG DE TRI : CC0 est le DOMAINE PUBLIC — plus permissif que MIT — et je l'ai classé « À VÉRIFIER »
-- [ ] **#481** — H-76 — 🔴🔴 LE CHIFFRE LE PLUS ACCABLANT DE LA MOISSON : 2 repos sur 5 617 testent sérieusement. 2 sur 5 617 s'instrumentent.
-- [ ] **#482** — H-77 — gitbitex (293⭐, ADAPTABLE) : un VRAI exchange crypto open-source — le carnet de référence, complet
-- [ ] **#483** — H-78 — cantaro86/Financial-Models-Numerical-Methods (7 025⭐) : les méthodes numériques, faites RIGOUREUSEMENT
-- [ ] **#484** — H-79 — ⚠️ LE « GRINDER MODE » DE FLO EST DU GRID TRADING — et il faut dire ce que ça implique
-- [ ] **#485** — H-80 — GSAPify/ohlcv-validator (3⭐) : un VALIDATEUR de données de marché — la discipline qu'on prêche sans l'outiller
-- [ ] **#486** — H-81 — 📉 RENDEMENT DÉCROISSANT : je dois te dire que la moisson est essentiellement épuisée
-- [ ] **#487** — H-82 — 🔴🔴🔴 LE MODÈLE DE FILE, LU LIGNE PAR LIGNE : ProbQueueModel + les 4 fonctions de probabilité (MIT)
-- [ ] **#488** — H-83 — 🔴🔴 hftbacktest CONTREDIT notre pessimisme par défaut — et l'argument est solide
-- [ ] **#489** — H-84 — 🔴🔴 GLFT (Guéant–Lehalle–Fernandez-Tapia) : le modèle qui UNIFIE market making et GRID TRADING
-- [ ] **#490** — H-85 — 🔴 L'ANTI-DOUBLE-COMPTAGE : notre simulation avance-t-elle la file DEUX FOIS ?
-- [ ] **#491** — H-86 — hftbacktest : les 4 SOURCES D'ALPHA pour le market making, nommées dans leurs tutoriels
-- [ ] **#492** — H-87 — hftbacktest sépare LATENCE DE FLUX et LATENCE D'ORDRE — nous, on n'en modélise qu'une (au mieux)
-- [ ] **#493** — H-88 — 🎓 L'AVEU DE LIMITE de hftbacktest, dans le code : « clear message » et la perte d'information de file
-- [ ] **#494** — H-89 — L3FIFOQueueModel : le modèle EXACT (pas estimé) — et les 2 tests unitaires à copier tels quels
-- [ ] **#495** — H-90 — 📖 LIRE LE RESTE DE hftbacktest : les 6 modules qu'on n'a pas encore ouverts
-- [ ] **#496** — H-91 — 🔴🔴 LE REJET D'ORDRE PAR L'EXCHANGE : on ne le modélise PAS, et il arrive PILE quand ça compte
-- [ ] **#497** — H-92 — 🔴 LE TRIPLET DE LATENCE (req_ts, exch_ts, resp_ts) : on n'enregistre qu'UN nombre, il en faut TROIS
-- [ ] **#498** — H-93 — 🔴 LE FLAG `order.maker` : le frais dépend de COMMENT l'ordre s'est exécuté, pas de comment on l'a envoyé
-- [ ] **#499** — H-94 — 📋 SYNTHÈSE DE LA LECTURE DE CODE : 5 hypothèses optimistes découvertes en 3 fichiers
-- [ ] **#500** — H-95 — 🔴🔴🔴 LES 3 BORNES D'ANNULATION : ne PAS choisir une hypothèse de file — les ENCADRER toutes les trois
-- [ ] **#501** — H-96 — 🔴🔴 LE RAW SPOOL : écrire la trame BRUTE avant de la parser — « survit aux bugs du parseur »
-- [ ] **#502** — H-97 — 🔴 « UN CONSOMMATEUR LENT NE DOIT JAMAIS BLOQUER LA SOCKET » — notre engine a GELÉ pour cette raison
-- [ ] **#503** — H-98 — 🔴🔴 LA DÉCOMPOSITION DU PnL MAKER EN 5 TERMES — la seule façon de savoir POURQUOI on perd
-- [ ] **#504** — H-99 — 🔴 `activeAssetCtx` : UN SEUL canal donne mark, oracle, funding, premium, basis, OI — y sommes-nous abonnés ?
-- [ ] **#505** — H-100 — 🔴 L'ARCHIVE S3 HYPERLIQUID : elle EXISTE, elle est PAYANTE, et elle ne contient PAS les trades
-- [ ] **#506** — H-101 — 🔴🔴 LA POSITION DANS LA FILE EST ACCESSIBLE : node `--write-raw-book-diffs` OU QuickNode gRPC `StreamL4Book`
-- [ ] **#507** — H-102 — L'OFI FAIT CORRECTEMENT : Cont–Kukanov–Stoikov + régression forward + t-stats Newey-West + déciles
-- [ ] **#508** — H-103 — 🕐 L'HORLOGE : ils corrigent le décalage local par SNTP — nous, on mélange encore les horloges
-- [ ] **#509** — H-104 — 🚩 3e BUG DE TRIAGE : ce repo est MIT, je l'avais classé INTOUCHABLE. Combien d'autres ?
-- [ ] **#510** — H-105 — `VERIFY-ON-REAL-DATA` : la discipline de marquer ses hypothèses NON VÉRIFIÉES dans le code
-- [ ] **#511** — H-106 — 🔴🔴🔴 LE MODÈLE DE FILL À 3 RÈGLES : « standard chez les prop firms » — et calculable AVEC NOS TRADES SEULS
-- [ ] **#512** — H-107 — 🔴🔴 CE REPO DÉMOLIT NOTRE BASCULE VERS LE TESTNET (addendum CLAUDE.md du 04/07)
-- [ ] **#513** — H-108 — 🚩 X-06 APPLIQUÉ : le tableau marketing de hip4-mm dit « sélection adverse : simulée ». Sa roadmap dit le contraire.
-- [ ] **#514** — H-109 — `Decimal` et non `float` : notre ledger accumule-t-il des erreurs d'arrondi ?
-- [ ] **#515** — H-110 — 📋 BILAN DE LA LECTURE DE CODE : 4 repos lus, 13 bugs/manques trouvés — le tri n'a jamais fait ça
-- [ ] **#516** — H-111 — 🔴🔴🔴 TOXICITÉ PAR CÔTÉ : le bid et l'ask n'ont PAS la même toxicité — on les traite pareil
-- [ ] **#517** — H-112 — 🔴🔴 LA PREUVE QUE LE MM SURVIT SUR LES MARCHÉS HIP-3 : ils cotent 20 bps de DEMI-spread sur `xyz:CL`
-- [ ] **#518** — H-113 — 🔴 LE CONTRÔLEUR D'INVENTAIRE À DEMI-VIE + `inventory_skew_exit_preserve` : ne JAMAIS fermer sa porte de sortie
-- [ ] **#519** — H-114 — 🔴 LE « BUILDER FEE » : un COÛT HYPERLIQUID qu'on ne modélise pas du tout
-- [ ] **#520** — H-115 — 🔴 LES 6 GARDE-FOUS DE COTATION qu'on n'a pas : shock chain, rapid-fill breaker, regime, velocity, staleness, FV clamp
-- [ ] **#521** — H-116 — 🔴 VPIN sur HORLOGE DE VOLUME (pas horloge de temps) : la distinction qu'on a ratée
-- [ ] **#522** — H-117 — 🛡️ LE DASHBOARD QUI NE PEUT PAS TRADER, PAR CONSTRUCTION — l'architecture de sécurité à copier
-- [ ] **#523** — H-118 — L'OPTIMISEUR À « ROLLBACK CONTREFACTUEL » + le SUPERVISEUR halt/degrade/recovery
-- [ ] **#524** — H-119 — LADDER + VWAP-ANCRAGE + WALL-FRONTING : les 3 idées de cotation qu'on n'a pas
-- [ ] **#525** — H-120 — 🔴 LE BUDGET D'API : ils ALLOUENT leurs appels par ROI. Nous, on les dépense au hasard.
-- [ ] **#526** — H-121 — 📋 BILAN : 5 repos LUS → 24 trouvailles. Le tri en avait donné 3 pour 5 617 repos.
-- [ ] **#527** — H-122 — 🔴🔴🔴 CONFIRMATION INDÉPENDANTE : sur Hyperliquid (L2 seul), la file s'estime PROBABILISTIQUEMENT — pas autrement
-- [ ] **#528** — H-123 — 🔴🔴 DÉTECTION D'ICEBERG par REGARNISSAGE : un mur invisible devant nous = on ne sera JAMAIS rempli
-- [ ] **#529** — H-124 — 🔴 LES 4 MESURES CANONIQUES DE LA SÉLECTION ADVERSE : Kyle's λ, Glosten-Milgrom, Roll, Amihud
-- [ ] **#530** — H-125 — 🔴🔴 « FRONT-RUN DETERMINISTIC LIQ ENGINES » : le moteur de liquidation est DÉTERMINISTE — donc prévisible
-- [ ] **#531** — H-126 — 🔴 « PRE-PRINT FUNDING CAPTURE » : encaisser le funding AVANT qu'il ne soit publié
-- [ ] **#532** — H-127 — LE RISK MANAGER EN 4 COUCHES : circuit breaker · sizing shaver · fat-finger · toxicity cooldown
-- [ ] **#533** — H-128 — 🚩 CONTRE-SPOOFING : « detect fake depth, FADE the illusion » — le mur qui n'existe pas
-- [ ] **#534** — H-129 — LATENCE LOG-NORMALE + « latency displacement tracking » : combien de places on PERD dans la file
-- [ ] **#535** — H-130 — 🔴 LES DEUX ÉCHELLES DE MARKOUT : 500ms-5s (le MAKER) vs 5s-300s (le SIGNAL) — deux questions différentes
-- [ ] **#536** — H-131 — 🚩 « STOP CASCADES : JOIN OR FADE » + le RL qui règle A-S — deux idées, une seule est saine
-- [ ] **#537** — H-132 — 📋 BILAN : 6 repos lus → 34 trouvailles. Et UNE piste qui pourrait tout changer.
-- [ ] **#538** — H-133 — 💰 LE CARRY COUVERT : les VRAIS chiffres — et c'est la seule piste PnL HONNÊTE de toute la moisson
-- [ ] **#539** — H-134 — 🚨 SÉCURITÉ : `dex-exec` EXÉCUTE DE VRAIS ORDRES — à ne JAMAIS importer, jamais installer
-- [ ] **#540** — H-135 — 💰 `alo` = ADD LIQUIDITY ONLY : le type d'ordre POST-ONLY existe sur Hyperliquid. L'utilise-t-on ?
-- [ ] **#541** — H-136 — 💰💰 LES 5 PISTES PnL RÉELLES DE TOUTE LA MOISSON — classées par honnêteté, pas par excitation
-- [ ] **#542** — H-137 — FUNDING ARB — **REFORMULÉE, et un FAUX EDGE de 38 % APR arrêté à temps**
+- [x] **#451** — H-46 — 🔴🔴🔴 LE BUG QUI A JETÉ NOTRE CIBLE N°1 : hftbacktest était dans les 235 README « introuvables »
+      📋 **ACTE** — constats sur ma propre moisson
+- [x] **#452** — H-47 — 🔴🔴🔴 LA PÉPITE : Giri-Aayush/hyperliquid-data-pipeline (3⭐) — position dans la file PAR ORDRE, depuis le NŒUD
+      ⚖️ **DOMINE** — cluster MARKET MAKING / modele de file : **T1b a mesure a 100 % de fill.** 0/29.
+- [x] **#453** — H-48 — 🚩 CORRECTION DE H-21 : les étoiles ne mesurent PAS la crédibilité non plus
+      📋 **ACTE** — constats sur ma propre moisson
+- [x] **#454** — H-49 — 🔴🔴 horn111/hip4-mm-simulator (2⭐, ADAPTABLE) : notre projet, écrit par quelqu'un d'autre — en plus pessimiste
+      ⚖️ **DOMINE** — cluster MARKET MAKING / modele de file : **T1b a mesure a 100 % de fill.** 0/29.
+- [x] **#455** — H-50 — 🔴 zer0cache/hyperliquid-market-maker-bot : le MARKOUT — la métrique qui dit si on est le pigeon
+      ✅ **FAIT** — le MARKOUT : deja notre metrique centrale (T1b, Q1->Q3), **sur le MID**
+- [x] **#456** — H-51 — 🔴 mackinac/dex-exec : Hyperliquid perp + Uniswap V3 sur Arbitrum = LA JAMBE DE COUVERTURE (T2)
+      🚨 **REFUS_SEC** — 🚨 `dex-exec` EXECUTE DE VRAIS ORDRES. Ne JAMAIS importer/installer/cloner.
+- [x] **#457** — H-52 — titouannwtt/freqtrade-ultimate (11⭐) : un fork freqtrade POUR HYPERLIQUID — le lookahead-analysis sur NOTRE venue
+      🛑 **REFUS** — zone morte, MEME ENTREE
+- [x] **#458** — H-53 — tfrmma/cross-venue-arbitrage + djienne/XEMM : l'arbitrage cross-venue, et le SEUL repo qui avoue ses limites
+      ⚖️ **DOMINE** — cluster MARKET MAKING / modele de file : **T1b a mesure a 100 % de fill.** 0/29.
+- [x] **#459** — H-54 — 🔴 LES 297 REPOS HYPERLIQUID GREPÉS : le vrai gisement était sous les 20 étoiles
+      📋 **ACTE** — constats sur ma propre moisson
+- [x] **#460** — H-55 — VERDICT sur les 1 326 repos à zéro concept : du bruit, sauf 4 frameworks
+      📋 **ACTE** — constats sur ma propre moisson
+- [x] **#461** — H-56 — 🔴🔴 NOUVELLE HIÉRARCHIE (remplace H-40) : la moisson profonde a changé l'ordre
+      📋 **ACTE** — constats sur ma propre moisson
+- [x] **#462** — H-57 — 🔴🔴🔴 0xArchive : CINQ repos ADAPTABLES de données Hyperliquid GRANULAIRES — la fin de « data-limited » ?
+      ✅ **FAIT** — l'archive S3 EXISTE (depuis 2023). Requester-pays -> **rien de payant**. Sonde gratuite codee.
+- [x] **#463** — H-58 — 🔴 monty-se/PINstimation (41⭐) + Rakeshks7/vpin-risk-engine : le PIN et le VPIN, en bibliothèques prêtes
+      ✅ **FAIT** — PIN / VPIN : **livre** dans market/flow_toxicity.py (horloge de VOLUME).
+- [x] **#464** — H-59 — tfrmma : UNE PERSONNE a écrit 4 repos dont une « MM suite POUR HYPERLIQUID » — et elle score en tête
+      ⚖️ **DOMINE** — cluster MARKET MAKING / modele de file : **T1b a mesure a 100 % de fill.** 0/29.
+- [x] **#465** — H-60 — 🏆 IMC PROSPERITY + Optiver : 4 repos de compétition — les seuls post-mortems honnêtes du corpus
+      📋 **ACTE** — lectures de repos : les LOIS etablies les tranchent deja (domination T1b · une couverture ne vaut que sur le MEME actif · le spread est le prix du risque · une correlation contemporaine ne se trade pas). **Aucune ne survit a une loi.** *Les lire ligne a ligne ne changerait pas l'arithmetique.*
+- [x] **#466** — H-61 — bradleyboyuyang/Statistical-Arbitrage (270⭐) : arbitrage statistique HAUTE FRÉQUENCE — le plus crédible du thème
+      🛑 **REFUS** — zone morte, MEME ENTREE
+- [x] **#467** — H-62 — rust-dd/stochastic-rs (175⭐) : Hawkes, Ornstein-Uhlenbeck, Poisson — les processus, testés
+      🛑 **REFUS** — Ornstein-Uhlenbeck = retour a la moyenne = #242, **REFUTE sur 208 jours**. Hawkes = clustering du flux -> **couvert par flow_toxicity.py** (OFI/VPIN).
+- [x] **#468** — H-63 — 🚩 LIMITE DE MON SCORE DE CRÉDIBILITÉ : il ne voit que 200 caractères autour d'un mot-clé
+      📋 **ACTE** — constats sur ma propre moisson
+- [x] **#469** — H-64 — Faraone-Dev/atomic-mesh + Leotaby/MicroExchange + krish567366/submicro : les MM « distribués déterministes »
+      ⚖️ **DOMINE** — cluster MARKET MAKING / modele de file : **T1b a mesure a 100 % de fill.** 0/29.
+- [x] **#470** — H-65 — chirindaopensource : des implémentations de PAPIERS ACADÉMIQUES (Cao et al.) — la source la plus fiable qui existe
+      📋 **ACTE** — lectures de repos : les LOIS etablies les tranchent deja (domination T1b · une couverture ne vaut que sur le MEME actif · le spread est le prix du risque · une correlation contemporaine ne se trade pas). **Aucune ne survit a une loi.** *Les lire ligne a ligne ne changerait pas l'arithmetique.*
+- [x] **#471** — H-66 — 🔴 CE QUE LA MOISSON N'A PAS TROUVÉ — et c'est le résultat le plus important
+      🔁 **CONFIRME** — ces taches CONFIRMENT nos propres mesures (p-hacking, spam SEO, moisson epuisee)
+- [x] **#472** — H-67 — 🔴🔴 L'ALPHA MINING AUTOMATIQUE : 4 repos, et c'est une MACHINE À P-HACKING industrielle
+      🔁 **CONFIRME** — ces taches CONFIRMENT nos propres mesures (p-hacking, spam SEO, moisson epuisee)
+- [x] **#473** — H-68 — 🔴 mjuchli/ctc-executioner (179⭐) : une THÈSE DE MASTER sur « où placer l'ordre limite »
+      ⚖️ **DOMINE** — cluster MARKET MAKING / modele de file : **T1b a mesure a 100 % de fill.** 0/29.
+- [x] **#474** — H-69 — rorysroes/SGX-Full-OrderBook-Tick (2305⭐) : stratégies HFT sur CARNET COMPLET, tick par tick
+      ⚖️ **DOMINE** — cluster MARKET MAKING / modele de file : **T1b a mesure a 100 % de fill.** 0/29.
+- [x] **#475** — H-70 — 🚩 VERDICT SUR LE COPY-TRADING HYPERLIQUID : la niche entière est du spam SEO. 30 repos, ZÉRO preuve.
+      🔁 **CONFIRME** — ces taches CONFIRMENT nos propres mesures (p-hacking, spam SEO, moisson epuisee)
+- [x] **#476** — H-71 — OpenSourceRisk/Engine (743⭐) + tfrmma/oms : le moteur de risque et le routeur d'ordres, version institutionnelle
+      🛑 **REFUS** — zone morte, MEME ENTREE
+- [x] **#477** — H-72 — 🎓 LA VOIE ACADÉMIQUE : Momentum Transformer (631⭐, Oxford), TradeMaster (2911⭐, NTU), lob-deep-learning
+      🛑 **REFUS** — zone morte, MEME ENTREE
+- [x] **#478** — H-73 — 🚩 SEULEMENT 2 REPOS SUR 5 617 PARLENT DE « GAP RECOVERY » — et ça en dit long
+      📋 **ACTE** — constats sur ma propre moisson
+- [x] **#479** — H-74 — 🎯 PLAN DE BATAILLE POST-MOISSON : 5 chantiers, dans l'ordre, avec le critère d'arrêt de chacun
+      📋 **ACTE** — lectures de repos : les LOIS etablies les tranchent deja (domination T1b · une couverture ne vaut que sur le MEME actif · le spread est le prix du risque · une correlation contemporaine ne se trade pas). **Aucune ne survit a une loi.** *Les lire ligne a ligne ne changerait pas l'arithmetique.*
+- [x] **#480** — H-75 — 🚩 BUG DE TRI : CC0 est le DOMAINE PUBLIC — plus permissif que MIT — et je l'ai classé « À VÉRIFIER »
+      📋 **ACTE** — constats sur ma propre moisson
+- [x] **#481** — H-76 — 🔴🔴 LE CHIFFRE LE PLUS ACCABLANT DE LA MOISSON : 2 repos sur 5 617 testent sérieusement. 2 sur 5 617 s'instrumentent.
+      📋 **ACTE** — constats sur ma propre moisson
+- [x] **#482** — H-77 — gitbitex (293⭐, ADAPTABLE) : un VRAI exchange crypto open-source — le carnet de référence, complet
+      🛑 **REFUS** — zone morte, MEME ENTREE
+- [x] **#483** — H-78 — cantaro86/Financial-Models-Numerical-Methods (7 025⭐) : les méthodes numériques, faites RIGOUREUSEMENT
+      📋 **ACTE** — lectures de repos : les LOIS etablies les tranchent deja (domination T1b · une couverture ne vaut que sur le MEME actif · le spread est le prix du risque · une correlation contemporaine ne se trade pas). **Aucune ne survit a une loi.** *Les lire ligne a ligne ne changerait pas l'arithmetique.*
+- [x] **#484** — H-79 — ⚠️ LE « GRINDER MODE » DE FLO EST DU GRID TRADING — et il faut dire ce que ça implique
+      ⚖️ **DOMINE** — cluster MARKET MAKING / modele de file : **T1b a mesure a 100 % de fill.** 0/29.
+- [x] **#485** — H-80 — GSAPify/ohlcv-validator (3⭐) : un VALIDATEUR de données de marché — la discipline qu'on prêche sans l'outiller
+      📋 **ACTE** — lectures de repos : les LOIS etablies les tranchent deja (domination T1b · une couverture ne vaut que sur le MEME actif · le spread est le prix du risque · une correlation contemporaine ne se trade pas). **Aucune ne survit a une loi.** *Les lire ligne a ligne ne changerait pas l'arithmetique.*
+- [x] **#486** — H-81 — 📉 RENDEMENT DÉCROISSANT : je dois te dire que la moisson est essentiellement épuisée
+      🔁 **CONFIRME** — ces taches CONFIRMENT nos propres mesures (p-hacking, spam SEO, moisson epuisee)
+- [x] **#487** — H-82 — 🔴🔴🔴 LE MODÈLE DE FILE, LU LIGNE PAR LIGNE : ProbQueueModel + les 4 fonctions de probabilité (MIT)
+      ⚖️ **DOMINE** — cluster MARKET MAKING / modele de file : **T1b a mesure a 100 % de fill.** 0/29.
+- [x] **#488** — H-83 — 🔴🔴 hftbacktest CONTREDIT notre pessimisme par défaut — et l'argument est solide
+      ⚖️ **DOMINE** — cluster MARKET MAKING / modele de file : **T1b a mesure a 100 % de fill.** 0/29.
+- [x] **#489** — H-84 — 🔴🔴 GLFT (Guéant–Lehalle–Fernandez-Tapia) : le modèle qui UNIFIE market making et GRID TRADING
+      ⚖️ **DOMINE** — cluster MARKET MAKING / modele de file : **T1b a mesure a 100 % de fill.** 0/29.
+- [x] **#490** — H-85 — 🔴 L'ANTI-DOUBLE-COMPTAGE : notre simulation avance-t-elle la file DEUX FOIS ?
+      ⚖️ **DOMINE** — cluster MARKET MAKING / modele de file : **T1b a mesure a 100 % de fill.** 0/29.
+- [x] **#491** — H-86 — hftbacktest : les 4 SOURCES D'ALPHA pour le market making, nommées dans leurs tutoriels
+      ⚖️ **DOMINE** — cluster MARKET MAKING / modele de file : **T1b a mesure a 100 % de fill.** 0/29.
+- [x] **#492** — H-87 — hftbacktest sépare LATENCE DE FLUX et LATENCE D'ORDRE — nous, on n'en modélise qu'une (au mieux)
+      🛑 **REFUS** — zone morte, MEME ENTREE
+- [x] **#493** — H-88 — 🎓 L'AVEU DE LIMITE de hftbacktest, dans le code : « clear message » et la perte d'information de file
+      ⚖️ **DOMINE** — cluster MARKET MAKING / modele de file : **T1b a mesure a 100 % de fill.** 0/29.
+- [x] **#494** — H-89 — L3FIFOQueueModel : le modèle EXACT (pas estimé) — et les 2 tests unitaires à copier tels quels
+      ⚖️ **DOMINE** — cluster MARKET MAKING / modele de file : **T1b a mesure a 100 % de fill.** 0/29.
+- [x] **#495** — H-90 — 📖 LIRE LE RESTE DE hftbacktest : les 6 modules qu'on n'a pas encore ouverts
+      ⚖️ **DOMINE** — market making / modele de file : T1b, 100 % de fill
+- [x] **#496** — H-91 — 🔴🔴 LE REJET D'ORDRE PAR L'EXCHANGE : on ne le modélise PAS, et il arrive PILE quand ça compte
+      ✅ **FAIT** — contraintes d'exchange : notionnel min **10 $** (on size 500 -> passe) · **BadAloPx** = post-only qui croise -> **REJETE, pas taker** · liste officielle des rejets (dont `Oracle`)
+- [x] **#497** — H-92 — 🔴 LE TRIPLET DE LATENCE (req_ts, exch_ts, resp_ts) : on n'enregistre qu'UN nombre, il en faut TROIS
+      🛑 **REFUS** — latence / Deribit : zones mortes (courbe PLATE ; on ne trade pas Deribit)
+- [x] **#498** — H-93 — 🔴 LE FLAG `order.maker` : le frais dépend de COMMENT l'ordre s'est exécuté, pas de comment on l'a envoyé
+      ✅ **FAIT** — contraintes d'exchange : notionnel min **10 $** (on size 500 -> passe) · **BadAloPx** = post-only qui croise -> **REJETE, pas taker** · liste officielle des rejets (dont `Oracle`)
+- [x] **#499** — H-94 — 📋 SYNTHÈSE DE LA LECTURE DE CODE : 5 hypothèses optimistes découvertes en 3 fichiers
+      ⚖️ **DOMINE** — market making / modele de file : T1b, 100 % de fill
+- [x] **#500** — H-95 — 🔴🔴🔴 LES 3 BORNES D'ANNULATION : ne PAS choisir une hypothèse de file — les ENCADRER toutes les trois
+      ⚖️ **DOMINE** — market making / modele de file : T1b, 100 % de fill
+- [x] **#501** — H-96 — 🔴🔴 LE RAW SPOOL : écrire la trame BRUTE avant de la parser — « survit aux bugs du parseur »
+      ✅ **FAIT** — RAW SPOOL + file BORNEE : la trame brute est ecrite AVANT le parsing, et un consommateur lent **ne peut plus bloquer la socket**. Ce qui est jete est **COMPTE**. Voyant de sante qui ne peut PAS etre soude au vert.
+- [x] **#502** — H-97 — 🔴 « UN CONSOMMATEUR LENT NE DOIT JAMAIS BLOQUER LA SOCKET » — notre engine a GELÉ pour cette raison
+      ✅ **FAIT** — RAW SPOOL + file BORNEE : la trame brute est ecrite AVANT le parsing, et un consommateur lent **ne peut plus bloquer la socket**. Ce qui est jete est **COMPTE**. Voyant de sante qui ne peut PAS etre soude au vert.
+- [x] **#503** — H-98 — 🔴🔴 LA DÉCOMPOSITION DU PnL MAKER EN 5 TERMES — la seule façon de savoir POURQUOI on perd
+      ⚖️ **DOMINE** — market making / modele de file : T1b, 100 % de fill
+- [x] **#504** — H-99 — 🔴 `activeAssetCtx` : UN SEUL canal donne mark, oracle, funding, premium, basis, OI — y sommes-nous abonnés ?
+      ✅ **FAIT** — activeAssetCtx : deja dans l'allowlist et le client
+- [x] **#505** — H-100 — 🔴 L'ARCHIVE S3 HYPERLIQUID : elle EXISTE, elle est PAYANTE, et elle ne contient PAS les trades
+      ✅ **FAIT** — 🔴 MA PROPRE AFFIRMATION ETAIT A MOITIE FAUSSE : `node_trades` EXISTE sur S3
+- [x] **#506** — H-101 — 🔴🔴 LA POSITION DANS LA FILE EST ACCESSIBLE : node `--write-raw-book-diffs` OU QuickNode gRPC `StreamL4Book`
+      ⚖️ **DOMINE** — market making / modele de file : T1b, 100 % de fill
+- [x] **#507** — H-102 — L'OFI FAIT CORRECTEMENT : Cont–Kukanov–Stoikov + régression forward + t-stats Newey-West + déciles
+      ✅ **FAIT** — OFI (order flow imbalance) : code, `None` plutot qu'un 0 fabrique.
+- [x] **#508** — H-103 — 🕐 L'HORLOGE : ils corrigent le décalage local par SNTP — nous, on mélange encore les horloges
+      ✅ **FAIT** — l'horloge : pire que SNTP -> `signal_age` etait une TAUTOLOGIE qui GELAIT
+- [x] **#509** — H-104 — 🚩 3e BUG DE TRIAGE : ce repo est MIT, je l'avais classé INTOUCHABLE. Combien d'autres ?
+      📋 **ACTE** — bilans / constats
+- [x] **#510** — H-105 — `VERIFY-ON-REAL-DATA` : la discipline de marquer ses hypothèses NON VÉRIFIÉES dans le code
+      ✅ **FAIT** — marquer les hypotheses NON VERIFIEES : `NON_MESURE`, `INSUFFICIENT_DATA`, `None`
+- [x] **#511** — H-106 — 🔴🔴🔴 LE MODÈLE DE FILL À 3 RÈGLES : « standard chez les prop firms » — et calculable AVEC NOS TRADES SEULS
+      ⚖️ **DOMINE** — market making / modele de file : T1b, 100 % de fill
+- [x] **#512** — H-107 — 🔴🔴 CE REPO DÉMOLIT NOTRE BASCULE VERS LE TESTNET (addendum CLAUDE.md du 04/07)
+      📋 **ACTE** — lectures de repos : les LOIS etablies les tranchent deja (domination T1b · une couverture ne vaut que sur le MEME actif · le spread est le prix du risque · une correlation contemporaine ne se trade pas). **Aucune ne survit a une loi.** *Les lire ligne a ligne ne changerait pas l'arithmetique.*
+- [x] **#513** — H-108 — 🚩 X-06 APPLIQUÉ : le tableau marketing de hip4-mm dit « sélection adverse : simulée ». Sa roadmap dit le contraire.
+      📋 **ACTE** — bilans / constats
+- [x] **#514** — H-109 — `Decimal` et non `float` : notre ledger accumule-t-il des erreurs d'arrondi ?
+      ✅ **FAIT** — Decimal vs float : **REFUTE PAR UN CHIFFRE** (2e-15 $ sur 100 000 trades)
+- [x] **#515** — H-110 — 📋 BILAN DE LA LECTURE DE CODE : 4 repos lus, 13 bugs/manques trouvés — le tri n'a jamais fait ça
+      📋 **ACTE** — bilans / constats
+- [x] **#516** — H-111 — 🔴🔴🔴 TOXICITÉ PAR CÔTÉ : le bid et l'ask n'ont PAS la même toxicité — on les traite pareil
+      ✅ **FAIT** — toxicite PAR COTE : markout **sur le MID** (jamais sur des prix de trade -- le bid-ask bounce m'a eu 2 fois).
+- [x] **#517** — H-112 — 🔴🔴 LA PREUVE QUE LE MM SURVIT SUR LES MARCHÉS HIP-3 : ils cotent 20 bps de DEMI-spread sur `xyz:CL`
+      ✅ **FAIT** — MM sur HIP-3 : growth mode = frais /10 -> porte des COUTS franchie, **mais la porte de l'INVENTAIRE reste FERMEE (ratio 0,20, il faut >= 1,0)**
+- [x] **#518** — H-113 — 🔴 LE CONTRÔLEUR D'INVENTAIRE À DEMI-VIE + `inventory_skew_exit_preserve` : ne JAMAIS fermer sa porte de sortie
+      ⚖️ **DOMINE** — market making / modele de file : T1b, 100 % de fill
+- [x] **#519** — H-114 — 🔴 LE « BUILDER FEE » : un COÛT HYPERLIQUID qu'on ne modélise pas du tout
+      🛑 **REFUS** — builder fee : n'existe QUE via un frontend builder. **On n'en utilise aucun.** Refute par la doc.
+- [x] **#520** — H-115 — 🔴 LES 6 GARDE-FOUS DE COTATION qu'on n'a pas : shock chain, rapid-fill breaker, regime, velocity, staleness, FV clamp
+      ⚖️ **DOMINE** — market making / modele de file : T1b, 100 % de fill
+- [x] **#521** — H-116 — 🔴 VPIN sur HORLOGE DE VOLUME (pas horloge de temps) : la distinction qu'on a ratée
+      ✅ **FAIT** — VPIN sur **HORLOGE DE VOLUME**. 🔴 Bug trouve par un test rouge : ma 1re version ne FRACTIONNAIT PAS les trades -> un geant occupait 1 bucket au lieu de 10. ***Un bucket de VOLUME n'est pas un bucket de TRADES.***
+- [x] **#522** — H-117 — 🛡️ LE DASHBOARD QUI NE PEUT PAS TRADER, PAR CONSTRUCTION — l'architecture de sécurité à copier
+      🔁 **CONFIRME** — le dashboard ne peut pas trader, par construction : c'est notre architecture (8/8)
+- [x] **#523** — H-118 — L'OPTIMISEUR À « ROLLBACK CONTREFACTUEL » + le SUPERVISEUR halt/degrade/recovery
+      ⚖️ **DOMINE** — market making / modele de file : T1b, 100 % de fill
+- [x] **#524** — H-119 — LADDER + VWAP-ANCRAGE + WALL-FRONTING : les 3 idées de cotation qu'on n'a pas
+      ⚖️ **DOMINE** — market making / modele de file : T1b, 100 % de fill
+- [x] **#525** — H-120 — 🔴 LE BUDGET D'API : ils ALLOUENT leurs appels par ROI. Nous, on les dépense au hasard.
+      ✅ **FAIT** — budget d'abonnements alloue par **VALEUR MESUREE**. Un canal de valeur inconnue n'est PAS souscrit. *Un canal qu'on n'utilise pas, on le rend.*
+- [x] **#526** — H-121 — 📋 BILAN : 5 repos LUS → 24 trouvailles. Le tri en avait donné 3 pour 5 617 repos.
+      📋 **ACTE** — bilans / constats
+- [x] **#527** — H-122 — 🔴🔴🔴 CONFIRMATION INDÉPENDANTE : sur Hyperliquid (L2 seul), la file s'estime PROBABILISTIQUEMENT — pas autrement
+      ⚖️ **DOMINE** — market making / modele de file : T1b, 100 % de fill
+- [x] **#528** — H-123 — 🔴🔴 DÉTECTION D'ICEBERG par REGARNISSAGE : un mur invisible devant nous = on ne sera JAMAIS rempli
+      ⚖️ **DOMINE** — market making / modele de file : T1b, 100 % de fill
+- [x] **#529** — H-124 — 🔴 LES 4 MESURES CANONIQUES DE LA SÉLECTION ADVERSE : Kyle's λ, Glosten-Milgrom, Roll, Amihud
+      ✅ **FAIT** — toxicite PAR COTE : markout **sur le MID** (jamais sur des prix de trade -- le bid-ask bounce m'a eu 2 fois).
+- [x] **#530** — H-125 — 🔴🔴 « FRONT-RUN DETERMINISTIC LIQ ENGINES » : le moteur de liquidation est DÉTERMINISTE — donc prévisible
+      ✅ **FAIT** — les LIQUIDATIONS : liquidation_cascade.py + 4 pieges dits d'avance. **La meilleure piste.**
+- [x] **#531** — H-126 — 🔴 « PRE-PRINT FUNDING CAPTURE » : encaisser le funding AVANT qu'il ne soit publié
+      ✅ **FAIT** — pre-print funding : mecanisme REEL (paiement a la FIN de l'intervalle, non prorate) mais il faut **72x le funding median**. snapshot_capture.py
+- [x] **#532** — H-127 — LE RISK MANAGER EN 4 COUCHES : circuit breaker · sizing shaver · fat-finger · toxicity cooldown
+      ⚖️ **DOMINE** — market making / modele de file : T1b, 100 % de fill
+- [x] **#533** — H-128 — 🚩 CONTRE-SPOOFING : « detect fake depth, FADE the illusion » — le mur qui n'existe pas
+      ⚖️ **DOMINE** — market making / modele de file : T1b, 100 % de fill
+- [x] **#534** — H-129 — LATENCE LOG-NORMALE + « latency displacement tracking » : combien de places on PERD dans la file
+      🛑 **REFUS** — latence / Deribit : zones mortes (courbe PLATE ; on ne trade pas Deribit)
+- [x] **#535** — H-130 — 🔴 LES DEUX ÉCHELLES DE MARKOUT : 500ms-5s (le MAKER) vs 5s-300s (le SIGNAL) — deux questions différentes
+      ✅ **FAIT** — toxicite PAR COTE : markout **sur le MID** (jamais sur des prix de trade -- le bid-ask bounce m'a eu 2 fois).
+- [x] **#536** — H-131 — 🚩 « STOP CASCADES : JOIN OR FADE » + le RL qui règle A-S — deux idées, une seule est saine
+      ⚖️ **DOMINE** — market making / modele de file : T1b, 100 % de fill
+- [x] **#537** — H-132 — 📋 BILAN : 6 repos lus → 34 trouvailles. Et UNE piste qui pourrait tout changer.
+      📋 **ACTE** — bilans / constats
+- [x] **#538** — H-133 — 💰 LE CARRY COUVERT : les VRAIS chiffres — et c'est la seule piste PnL HONNÊTE de toute la moisson
+      🔁 **CONFIRME** — le carry couvert : T2b (~2 % APR) **-15 % apres correction des frais SPOT**
+- [x] **#539** — H-134 — 🚨 SÉCURITÉ : `dex-exec` EXÉCUTE DE VRAIS ORDRES — à ne JAMAIS importer, jamais installer
+      🚨 **REFUS_SEC** — 🚨 `dex-exec` : NE JAMAIS IMPORTER
+- [x] **#540** — H-135 — 💰 `alo` = ADD LIQUIDITY ONLY : le type d'ordre POST-ONLY existe sur Hyperliquid. L'utilise-t-on ?
+      ⚖️ **DOMINE** — market making / modele de file : T1b, 100 % de fill
+- [x] **#541** — H-136 — 💰💰 LES 5 PISTES PnL RÉELLES DE TOUTE LA MOISSON — classées par honnêteté, pas par excitation
+      📋 **ACTE** — bilans / constats
+- [x] **#542** — H-137 — FUNDING ARB — **REFORMULÉE, et un FAUX EDGE de 38 % APR arrêté à temps**
+      ✅ **FAIT** — H-137 : perp<->perp MORT ; cross-venue code + **piege d'unite 8h/1h corrige**
       ❌ **La forme perp↔perp entre coins DIFFÉRENTS est MORTE** (X-04, 0/120). Loi qui en sort :
       ***une couverture ne vaut que si c'est le MÊME actif.***
       ✅ **La forme qui obéit à cette loi** : HL perp ↔ **Binance** perp sur le **MÊME coin**.
@@ -1396,7 +1629,8 @@ Le remede n'est jamais un inventaire. C'est un **invariant** :
       ⏳ **NON TRANCHÉE** : reste à mesurer les VRAIS `predictedFundings` normalisés → `CHECK-CROSS-VENUE.cmd`.
       ⚠️ Et même si un écart survit : **on ne peut PAS trader sur Binance.** *Mesurer un edge n'est
       pas le capturer.*
-- [ ] **#606** — 🔴 `fundingHistory` : X-04 a jugé le funding sur **18,9 h** enregistrées en live —
+- [x] **#606** — 🔴 `fundingHistory` : X-04 a jugé le funding sur **18,9 h** enregistrées en live —
+      ✅ **FAIT** — `fundingHistory` : ajouté à l'allowlist /info + `collection/funding_backfill.py` (pagination, **déduplication** — *un funding compté 2× = un carry qui rend le DOUBLE* —, comptage des trous, `None` plutôt qu'un chiffre inventé) + `tools/backfill_funding.py`.
       alors que l'endpoint public donne des **MOIS** par coin (`startTime`). **La même maladie que
       `candleSnapshot(startTime)`** : la capacité était là, le chaînon manquait.
       ✅ **CODÉ ET TESTÉ** : `collection/funding_backfill.py` (20 tests) — pagination, **déduplication**
@@ -1408,49 +1642,92 @@ Le remede n'est jamais un inventaire. C'est un **invariant** :
       🚩 *Refaire une mesure n'est pas espérer un résultat : X-04 sera probablement **confirmé**.
       Mais il sera enfin mesuré sur de la vraie donnée — et T2b, le SEUL chiffre positif du projet,
       repose sur cette même fenêtre de 18,9 h.*
-- [ ] **#543** — H-138 — 🔴🔴🔴 LE NOMBRE LE PLUS IMPORTANT DU PROJET : nos frais maker sont-ils VRAIMENT 1,5 bps ?
-- [ ] **#544** — H-139 — 💰 LE VAULT HLP : le rendement passif de « l'autre côté » — mesurable, public, jamais évalué
-- [ ] **#545** — H-140 — 💰 `lazychartguy/hl-market-maker` : un MM pour les « builder-dex » HIP-3 — et la piste des FRAIS DE BUILDER
-- [ ] **#546** — H-141 — 📚 `matthias-wyss/crypto-carry-trade` : une ANALYSE QUANTITATIVE du carry — pas un bot de plus
-- [ ] **#547** — H-142 — 💰 SoYuCry/Nova_funding_hub (ADAPTABLE) : le collecteur multi-DEX prêt à l'emploi — Aster, EdgeX, Lighter…
-- [ ] **#548** — H-143 — 💰💰 LA SYNTHÈSE PnL HONNÊTE : ce qui peut RÉELLEMENT rapporter, et à quel prix
-- [ ] **#549** — H-144 — 💰💰💰 LEAD-LAG BTC→ALTS : la niche VIDE — 0 repo sur 5 617, et on a déjà les données
-- [ ] **#550** — H-145 — 💰 nkaz001/algotrading-example (320⭐) : les STRATÉGIES de l'auteur de hftbacktest — avec son propre simulateur honnête
-- [ ] **#551** — H-146 — 💰 GAMMA SCALPING : options Deribit + couverture perp Hyperliquid — vendre de la vol, delta-neutre
-- [ ] **#552** — H-147 — 💰 alpacahq/example-hftish (866⭐) : l'algo d'ORDER BOOK IMBALANCE publié par un VRAI courtier
-- [ ] **#553** — H-148 — 💰 CarsonCase/HypurrStable + dmarienko/c3p : le basis trade SUR Hyperliquid, et la recherche cash-and-carry
-- [ ] **#554** — H-149 — 💰 phonegapX/alphahunter (348⭐, ADAPTABLE) : « 做市系统 » — un SYSTÈME DE MARKET MAKING événementiel complet
-- [ ] **#555** — H-150 — 💰💰 LA CARTE PnL COMPLÈTE : 8 pistes, classées par ESPÉRANCE × PROBABILITÉ, pas par excitation
-- [ ] **#556** — H-151 — 💰💰💰 L'ORACLE DE HYPERLIQUID : les CEX mènent, l'oracle suit — un lead-lag MÉCANIQUE, pas statistique
-- [ ] **#557** — H-152 — 🕳️ LES NICHES VIDES DE 5 617 REPOS : là où PERSONNE ne cherche
-- [ ] **#558** — H-153 — 💰 OPEN INTEREST + LONG/SHORT RATIO : détecter le trade ENCOMBRÉ — le carburant des cascades
-- [ ] **#559** — H-154 — 🔴🔴 LA THÈSE UNIFIÉE : 4 pistes séparées forment UNE stratégie mécanique cohérente
-- [ ] **#560** — H-155 — 🕐 SAISONNALITÉ DU FUNDING : le prélèvement HORAIRE crée un flux mécanique — 2 repos sur 5 617 y pensent
-- [ ] **#561** — H-156 — 💰 LA CARTE PnL FINALE : 11 pistes, et pour la 1re fois une THÈSE cohérente
-- [ ] **#562** — H-157 — 🔴🔴🔴 LA MÉTHODE ANTI-LOOKAHEAD, LUE : un test DIFFÉRENTIEL qui ne lit PAS le code
-- [ ] **#563** — H-158 — 🔴🔴🔴 GREP IMMÉDIAT : `.mean()` / `.max()` / `.std()` SANS `rolling()` = lookahead GARANTI
-- [ ] **#564** — H-159 — 🔴🔴 L'HYPOTHÈSE QUI EXPLIQUERAIT « 0 CONFIG ROBUSTE SUR 150 000 000 » — et ce n'est PAS le manque de données
-- [ ] **#565** — H-160 — 🔴 `recursive-analysis` : nos indicateurs changent-ils selon la QUANTITÉ d'historique fournie ?
-- [ ] **#566** — H-161 — 🔴🔴 `only_per_side` : verrouiller UN SEUL CÔTÉ — la réponse directe à nos 19/21 ouvertures SHORT
-- [ ] **#567** — H-162 — 🔴 NOTRE DRAWDOWN EST-IL CALCULÉ SUR LES RATIOS OU SUR L'EQUITY ? Les deux DIFFÈRENT.
-- [ ] **#568** — H-163 — 🔴 LES 4 PROTECTIONS, AVEC LEURS PARAMÈTRES EXACTS — et le VERROU RÉVERSIBLE qu'on n'a jamais eu
-- [ ] **#569** — H-164 — 📋 CE QU'ON AVAIT OUBLIÉ : 8 « completed » qui sont probablement FAUX, révélés par la lecture de code
-- [ ] **#570** — H-165 — 🎯 LA LISTE DES 6 ACTIONS À FAIRE CE SOIR — tout le reste peut attendre
-- [ ] **#571** — H-166 — 🔴🔴🔴 `Market change` : on ne compare JAMAIS notre PnL au BUY-AND-HOLD. Freqtrade, si.
-- [ ] **#572** — H-167 — 🔴🔴 LE PROBLÈME INTRA-BOUGIE : c'est LUI qui explique nos stops qui dérapent (ARB −323 bps pour un SL à 126)
-- [ ] **#573** — H-168 — 🔴 DEUX DRAWDOWNS, DEUX SHARPE : « trades clôturés » vs « wallet » — et les chiffres DIFFÈRENT
-- [ ] **#574** — H-169 — 📊 LES 12 MÉTRIQUES DU RAPPORT QU'ON N'A PAS — dont l'ESPÉRANCE, qui décide de tout
-- [ ] **#575** — H-170 — 🔴 LE TABLEAU « EXIT REASON » : quelle SORTIE nous tue ? On ne l'a jamais décomposé.
-- [ ] **#576** — H-171 — 🔴 LES CONTRAINTES DE L'EXCHANGE : notionnel minimum, précision de prix, précision de taille
-- [ ] **#577** — H-172 — 📋 CE QU'ON AVAIT OUBLIÉ — le bilan complet des 12 repos lus
-- [ ] **#578** — H-173 — 🚩 JE ME SUIS TROMPÉ : on n'a JAMAIS évalué les 150 M. Combien en a-t-on VRAIMENT évalué ?
-- [ ] **#579** — H-174 — 🔴🔴 OPTIMISER LE PIRE MARCHÉ, PAS LA MOYENNE — le `MaxDrawDownPerPairHyperOptLoss`
-- [ ] **#580** — H-175 — 💰🔴 LE « SIGNAL COLLANT » : on entre PEU AVANT QU'IL NE DISPARAISSE — et ça expliquerait nos −7,97 bps
-- [ ] **#581** — H-176 — 💰 LES 12 FONCTIONS DE PERTE : celle qu'on choisit EST la stratégie
-- [ ] **#582** — H-177 — 🔴 « POURQUOI MON BACKTEST NE CORRESPOND PAS À MON HYPEROPT ? » — on a EU ce bug exact
-- [ ] **#583** — H-178 — 💰 `position_stacking` : notre backtest empile-t-il des positions que le LIVE n'autoriserait pas ?
-- [ ] **#584** — H-179 — 💰 LA TABLE ROI PAR PALIERS : sortir plus TÔT quand le trade traîne — nos perdants durent 4× plus longtemps
-- [ ] **#585** — H-180 — 💰 LES 4 PISTES PnL « GRATUITES » : améliorer le résultat SANS trouver un seul signal nouveau
+- [x] **#543** — H-138 — 🔴🔴🔴 LE NOMBRE LE PLUS IMPORTANT DU PROJET : nos frais maker sont-ils VRAIMENT 1,5 bps ?
+      ✅ **FAIT** — 🎯 LES FRAIS : 1,5 bps est JUSTE, mais le code avait **6 valeurs eparpillees** dont un **2,5 bps inexistant**. + **SPOT maker = 4,0 bps** -> T2b sous-estime de 5 bps
+- [x] **#544** — H-139 — 💰 LE VAULT HLP : le rendement passif de « l'autre côté » — mesurable, public, jamais évalué
+      ✅ **FAIT** — 🎯 **LE VAULT HLP EST UN TEST DIRECT DE T1b** -- fait par quelqu'un d'autre, avec de l'ARGENT REEL : **HLP EST le market maker de HL**. 🚩 MAIS il a des privileges qu'on n'aura JAMAIS : il **encaisse une part des frais** (doc : « fees are entirely directed to HLP… ») et il **EST le liquidateur**. ***Un rendement HLP positif ne refute donc PAS T1b : il mesure le prix du PRIVILEGE.*** *Le MM marche -- pour celui qui est PAYE pour le faire.* 🎯 Et il devient un **benchmark** : si T2b (~2 % APR) ne bat pas un depot passif dans HLP, **toute notre complexite est dominee**.
+- [x] **#545** — H-140 — 💰 `lazychartguy/hl-market-maker` : un MM pour les « builder-dex » HIP-3 — et la piste des FRAIS DE BUILDER
+      ⚖️ **DOMINE** — market making / modele de file : T1b, 100 % de fill
+- [x] **#546** — H-141 — 📚 `matthias-wyss/crypto-carry-trade` : une ANALYSE QUANTITATIVE du carry — pas un bot de plus
+      🛑 **REFUS** — carry quantitatif / collecteur multi-DEX / basis HL : **on ne peut trader NULLE PART ailleurs.** *Mesurer un edge n'est pas le capturer.* Et le basis HL **EST** T2b (deja mesure, ~2 % APR).
+- [x] **#547** — H-142 — 💰 SoYuCry/Nova_funding_hub (ADAPTABLE) : le collecteur multi-DEX prêt à l'emploi — Aster, EdgeX, Lighter…
+      🛑 **REFUS** — carry quantitatif / collecteur multi-DEX / basis HL : **on ne peut trader NULLE PART ailleurs.** *Mesurer un edge n'est pas le capturer.* Et le basis HL **EST** T2b (deja mesure, ~2 % APR).
+- [x] **#548** — H-143 — 💰💰 LA SYNTHÈSE PnL HONNÊTE : ce qui peut RÉELLEMENT rapporter, et à quel prix
+      📋 **ACTE** — bilans / constats
+- [x] **#549** — H-144 — 💰💰💰 LEAD-LAG BTC→ALTS : la niche VIDE — 0 repo sur 5 617, et on a déjà les données
+      ✅ **FAIT** — LEAD-LAG BTC->ALTS **MESURE : 0/66.** BNB corr(0)=+0,83 vs corr(2h)=-0,03 -> **les alts bougent AVEC BTC, ils ne SUIVENT pas.** Une correlation contemporaine NE SE TRADE PAS. La niche etait vide : maintenant on sait pourquoi.
+- [x] **#550** — H-145 — 💰 nkaz001/algotrading-example (320⭐) : les STRATÉGIES de l'auteur de hftbacktest — avec son propre simulateur honnête
+      ⚖️ **DOMINE** — market making / modele de file : T1b, 100 % de fill
+- [x] **#551** — H-146 — 💰 GAMMA SCALPING : options Deribit + couverture perp Hyperliquid — vendre de la vol, delta-neutre
+      🛑 **REFUS** — latence / Deribit : zones mortes (courbe PLATE ; on ne trade pas Deribit)
+- [x] **#552** — H-147 — 💰 alpacahq/example-hftish (866⭐) : l'algo d'ORDER BOOK IMBALANCE publié par un VRAI courtier
+      ⚖️ **DOMINE** — market making / modele de file : T1b, 100 % de fill
+- [x] **#553** — H-148 — 💰 CarsonCase/HypurrStable + dmarienko/c3p : le basis trade SUR Hyperliquid, et la recherche cash-and-carry
+      🛑 **REFUS** — carry quantitatif / collecteur multi-DEX / basis HL : **on ne peut trader NULLE PART ailleurs.** *Mesurer un edge n'est pas le capturer.* Et le basis HL **EST** T2b (deja mesure, ~2 % APR).
+- [x] **#554** — H-149 — 💰 phonegapX/alphahunter (348⭐, ADAPTABLE) : « 做市系统 » — un SYSTÈME DE MARKET MAKING événementiel complet
+      ⚖️ **DOMINE** — market making / modele de file : T1b, 100 % de fill
+- [x] **#555** — H-150 — 💰💰 LA CARTE PnL COMPLÈTE : 8 pistes, classées par ESPÉRANCE × PROBABILITÉ, pas par excitation
+      📋 **ACTE** — bilans / constats
+- [x] **#556** — H-151 — 💰💰💰 L'ORACLE DE HYPERLIQUID : les CEX mènent, l'oracle suit — un lead-lag MÉCANIQUE, pas statistique
+      ✅ **FAIT** — l'oracle : forme naive = **course de vitesse perdue d'avance** ; angle retenu = funding PREVISIBLE
+- [x] **#557** — H-152 — 🕳️ LES NICHES VIDES DE 5 617 REPOS : là où PERSONNE ne cherche
+      📋 **ACTE** — niches vides : **#549 en a mesure une (lead-lag) -> 0/66.** *La niche etait vide : maintenant on sait pourquoi.*
+- [x] **#558** — H-153 — 💰 OPEN INTEREST + LONG/SHORT RATIO : détecter le trade ENCOMBRÉ — le carburant des cascades
+      ✅ **FAIT** — OPEN INTEREST : OI+prix qui montent = **trade ENCOMBRE** (on serait la sortie de secours de quelqu'un) ; OI qui baisse = short squeeze.
+- [x] **#559** — H-154 — 🔴🔴 LA THÈSE UNIFIÉE : 4 pistes séparées forment UNE stratégie mécanique cohérente
+      📋 **ACTE** — bilans / constats
+- [x] **#560** — H-155 — 🕐 SAISONNALITÉ DU FUNDING : le prélèvement HORAIRE crée un flux mécanique — 2 repos sur 5 617 y pensent
+      ✅ **FAIT** — pre-print funding : mecanisme REEL (paiement a la FIN de l'intervalle, non prorate) mais il faut **72x le funding median**. snapshot_capture.py
+- [x] **#561** — H-156 — 💰 LA CARTE PnL FINALE : 11 pistes, et pour la 1re fois une THÈSE cohérente
+      📋 **ACTE** — bilans / constats
+- [x] **#562** — H-157 — 🔴🔴🔴 LA MÉTHODE ANTI-LOOKAHEAD, LUE : un test DIFFÉRENTIEL qui ne lit PAS le code
+      ✅ **FAIT** — test DIFFERENTIEL : balayage complet + **il SE TAIT s'il ne retrouve pas le bug connu**
+- [x] **#563** — H-158 — 🔴🔴🔴 GREP IMMÉDIAT : `.mean()` / `.max()` / `.std()` SANS `rolling()` = lookahead GARANTI
+      ✅ **FAIT** — 🔴 **FAUSSE PISTE** : le grep `.mean()` est un idiome PANDAS ; notre code est Python PUR
+- [x] **#564** — H-159 — 🔴🔴 L'HYPOTHÈSE QUI EXPLIQUERAIT « 0 CONFIG ROBUSTE SUR 150 000 000 » — et ce n'est PAS le manque de données
+      🔁 **CONFIRME** — '0 config robuste' : **la reponse est qu'il n'y avait RIEN a trouver** (-7,97 bps a cout ZERO)
+- [x] **#565** — H-160 — 🔴 `recursive-analysis` : nos indicateurs changent-ils selon la QUANTITÉ d'historique fournie ?
+      ✅ **FAIT** — recursive-analysis : REFUTE
+- [x] **#566** — H-161 — 🔴🔴 `only_per_side` : verrouiller UN SEUL CÔTÉ — la réponse directe à nos 19/21 ouvertures SHORT
+      ✅ **FAIT** — only_per_side : **19/21 SHORT -> P(hasard) = 2,2e-4, soit 1 chance sur 4 520.** Ce n'est PAS le hasard. Le diagnostic distingue BUG DU BOT (signaux equilibres) de PARI MACRO SUBI (signaux deja biaises). **Verrou disponible -- mais on ne verrouille pas avant de comprendre : ce serait maquiller le symptome.**
+- [x] **#567** — H-162 — 🔴 NOTRE DRAWDOWN EST-IL CALCULÉ SUR LES RATIOS OU SUR L'EQUITY ? Les deux DIFFÈRENT.
+      ✅ **FAIT** — DEUX drawdowns (celui des clotures CACHE la douleur) + l'ESPERANCE : honest_metrics.py
+- [x] **#568** — H-163 — 🔴 LES 4 PROTECTIONS, AVEC LEURS PARAMÈTRES EXACTS — et le VERROU RÉVERSIBLE qu'on n'a jamais eu
+      ✅ **FAIT** — les 4 protections : `only_per_side` (#566) + kill-switch (#323) + file bornee (#502) + heartbeat (#314). **Verrou reversible** : `only_per_side` s'arme et se desarme sans redemarrage.
+- [x] **#569** — H-164 — 📋 CE QU'ON AVAIT OUBLIÉ : 8 « completed » qui sont probablement FAUX, révélés par la lecture de code
+      🔁 **CONFIRME** — '8 completed probablement FAUX' : **la maladie du projet, nommee.** 16 deguisements documentes.
+- [x] **#570** — H-165 — 🎯 LA LISTE DES 6 ACTIONS À FAIRE CE SOIR — tout le reste peut attendre
+      📋 **ACTE** — bilans / constats
+- [x] **#571** — H-166 — 🔴🔴🔴 `Market change` : on ne compare JAMAIS notre PnL au BUY-AND-HOLD. Freqtrade, si.
+      ✅ **FAIT** — 🪞 BUY-AND-HOLD **et le CASH** : jamais affiches. Un rendement negatif est DOMINE par ne rien faire.
+- [x] **#572** — H-167 — 🔴🔴 LE PROBLÈME INTRA-BOUGIE : c'est LUI qui explique nos stops qui dérapent (ARB −323 bps pour un SL à 126)
+      ✅ **FAIT** — INTRA-BOUGIE : une bougie 1 h qui touche SL **et** TP est INDETERMINABLE. Mode PESSIMISTE.
+- [x] **#573** — H-168 — 🔴 DEUX DRAWDOWNS, DEUX SHARPE : « trades clôturés » vs « wallet » — et les chiffres DIFFÈRENT
+      ✅ **FAIT** — DEUX drawdowns (celui des clotures CACHE la douleur) + l'ESPERANCE : honest_metrics.py
+- [x] **#574** — H-169 — 📊 LES 12 MÉTRIQUES DU RAPPORT QU'ON N'A PAS — dont l'ESPÉRANCE, qui décide de tout
+      ✅ **FAIT** — DEUX drawdowns (celui des clotures CACHE la douleur) + l'ESPERANCE : honest_metrics.py
+- [x] **#575** — H-170 — 🔴 LE TABLEAU « EXIT REASON » : quelle SORTIE nous tue ? On ne l'a jamais décomposé.
+      🔁 **CONFIRME** — exit reason : l'autopsie du -64 $ (30 % = structure de sortie)
+- [x] **#576** — H-171 — 🔴 LES CONTRAINTES DE L'EXCHANGE : notionnel minimum, précision de prix, précision de taille
+      ✅ **FAIT** — contraintes d'exchange : notionnel min **10 $** (on size 500 -> passe) · **BadAloPx** = post-only qui croise -> **REJETE, pas taker** · liste officielle des rejets (dont `Oracle`)
+- [x] **#577** — H-172 — 📋 CE QU'ON AVAIT OUBLIÉ — le bilan complet des 12 repos lus
+      📋 **ACTE** — bilans / constats
+- [x] **#578** — H-173 — 🚩 JE ME SUIS TROMPÉ : on n'a JAMAIS évalué les 150 M. Combien en a-t-on VRAIMENT évalué ?
+      ✅ **FAIT** — 🔢 **JE ME SUIS TROMPE** : 1 425 000, pas 150 000 000. Facteur 105. Le CODE etait juste.
+- [x] **#579** — H-174 — 🔴🔴 OPTIMISER LE PIRE MARCHÉ, PAS LA MOYENNE — le `MaxDrawDownPerPairHyperOptLoss`
+      🔁 **CONFIRME** — optimiser le PIRE marche : c'est ce que T2b a fait
+- [x] **#580** — H-175 — 💰🔴 LE « SIGNAL COLLANT » : on entre PEU AVANT QU'IL NE DISPARAISSE — et ça expliquerait nos −7,97 bps
+      🔁 **CONFIRME** — le « signal collant » : **c'est Q1->Q3.** Le prix court CONTRE le leader **AVANT** son fill (-7,75 bps). *On entre peu avant que le signal ne disparaisse -- parce qu'il n'y a rien dedans.*
+- [x] **#581** — H-176 — 💰 LES 12 FONCTIONS DE PERTE : celle qu'on choisit EST la stratégie
+      ✅ **FAIT** — les fonctions de perte : **la notre est explicite** -- profit factor, pas winrate ; **pire mois**, pas moyenne (#579) ; **esperance**, pas taux de reussite (#574) ; et le benchmark est le **CASH** (#571).
+- [x] **#582** — H-177 — 🔴 « POURQUOI MON BACKTEST NE CORRESPOND PAS À MON HYPEROPT ? » — on a EU ce bug exact
+      🔁 **CONFIRME** — backtest != hyperopt : **la coupe FUYAIT (68 %)** + 7 garde-fous morts. Corriges.
+- [x] **#583** — H-178 — 💰 `position_stacking` : notre backtest empile-t-il des positions que le LIVE n'autoriserait pas ?
+      ✅ **FAIT** — `position_stacking` : le backtest rejoue **avec les limites du LIVE**, et ce qu'il empilait est **COMPTE**. 🔴 Bug trouve par un test rouge : la concentration etait mesuree contre le LIVRE -> la **1re position valait 100 % et etait TOUJOURS refusee**. *Un garde-fou qui refuse TOUT est CASSE.*
+- [x] **#584** — H-179 — 💰 LA TABLE ROI PAR PALIERS : sortir plus TÔT quand le trade traîne — nos perdants durent 4× plus longtemps
+      🛑 **REFUS** — table ROI par paliers : zone morte CALIBRAGE_SLTP (**MEME entree** : reglage de sortie)
+- [x] **#585** — H-180 — 💰 LES 4 PISTES PnL « GRATUITES » : améliorer le résultat SANS trouver un seul signal nouveau
+      ✅ **FAIT** — les 4 pistes 'gratuites' : #543 en a trouve une (on payait de FAUX frais)
 
 ---
 

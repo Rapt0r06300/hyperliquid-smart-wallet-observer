@@ -1,0 +1,146 @@
+============ 0. LA VRAIE LISTE DES MARCHES SPOT (spotMeta) ============ 
+============================================================================================
+  LA VRAIE LISTE DES MARCHES SPOT HYPERLIQUID
+  (je la SUPPOSAIS : {HYPE, PURR}. **On demande a l'API. On ne devine pas.**)
+============================================================================================
+
+  marches SPOT  : 296
+  marches PERP  : 232
+--------------------------------------------------------------------------------------------
+
+  🎯 **CARRYABLES** (perp **ET** spot -> delta-neutre POSSIBLE) : **8**
+     AZTEC  BERA  HYPE  MON  PUMP  PURR  STABLE  TRUMP
+
+  🔴 **PERP SANS SPOT** (carry IMPOSSIBLE — ce serait un short perp A NU) : 224
+     0G  2Z  AAVE  ACE  ADA  AERO  AI  AI16Z  AIXBT  ALGO
+     ALT  ANIME  APE  APEX  APT  AR  ARB  ARK  ASTER  ATOM
+     ... et 204 autres
+
+============================================================================================
+  NOS 12 COINS BACKFILLES — lesquels peuvent VRAIMENT porter un carry ?
+============================================================================================
+
+  ✅ CARRYABLES : HYPE
+  🔴 IMPOSSIBLES : BTC, ETH, SOL, BNB, AVAX, ARB, DOGE, LTC, SUI, OP, NEAR
+
+--------------------------------------------------------------------------------------------
+  🎯 **1 coin(s) peuvent porter un carry delta-neutre.**
+     -> relancer `LANCER-LE-CARRY.cmd` : le moteur les prendra tous.
+
+  ⚠️ Il reste 7 marches spot qu'on n'a PAS backfilles en funding.
+     **C'est la vraie piste d'elargissement** : backfiller leur funding et voir.
+--------------------------------------------------------------------------------------------
+
+  -> C:\Users\flo\Desktop\Projet invest\data\reports\spot_hl.json
+ 
+============ 1. LE MOTEUR CARRY (tests) ============ 
+..........                                                               [100%]
+10 passed in 0.58s
+ 
+============ 2. BACKFILL DU FUNDING (120 jours, endpoint public) ============ 
+============================================================================================
+  #606 -- BACKFILL DU FUNDING REALISE (endpoint PUBLIC `fundingHistory`)
+  X-04 et T2 ont ete juges sur 18,9 h. On demande 120 jours.
+============================================================================================
+  HYPE   :  2880 points |   120.0 j |   0 trous | funding cumule    +300.4 bps (+0.10 bps/h moyen)
+  PURR   :  2880 points |   120.0 j |   0 trous | funding cumule    +761.8 bps (+0.26 bps/h moyen)
+  BERA   :  2880 points |   120.0 j |   0 trous | funding cumule    -447.0 bps (-0.16 bps/h moyen)
+  TRUMP  :  2880 points |   120.0 j |   0 trous | funding cumule   -1325.7 bps (-0.46 bps/h moyen)
+  PUMP   :  2880 points |   120.0 j |   0 trous | funding cumule    +252.2 bps (+0.09 bps/h moyen)
+  MON    :  2880 points |   120.0 j |   0 trous | funding cumule     -12.7 bps (-0.00 bps/h moyen)
+  AZTEC  :  2880 points |   120.0 j |   0 trous | funding cumule    +360.6 bps (+0.13 bps/h moyen)
+  STABLE :  2880 points |   120.0 j |   0 trous | funding cumule   -4063.9 bps (-1.41 bps/h moyen)
+  BTC    :  2880 points |   120.0 j |   0 trous | funding cumule    +118.2 bps (+0.04 bps/h moyen)
+  ETH    :  2880 points |   120.0 j |   0 trous | funding cumule    +136.8 bps (+0.05 bps/h moyen)
+  SOL    :  2880 points |   120.0 j |   0 trous | funding cumule     -14.4 bps (-0.00 bps/h moyen)
+    BNB [1779076191606..1780876191606] : ECHEC (Hyperliquid /info call failed: Client error '429 Too Many Requests' for url 'https://api.hyperliquid.xyz/info'
+For more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/429) -- fenetre ignoree, PAS inventee
+  BNB    :  2380 points |   120.0 j | 500 trous | funding cumule    +160.6 bps (+0.07 bps/h moyen)
+  AVAX   :  2880 points |   120.0 j |   0 trous | funding cumule    +177.3 bps (+0.06 bps/h moyen)
+  ARB    :  2880 points |   120.0 j |   0 trous | funding cumule     +28.4 bps (+0.01 bps/h moyen)
+  DOGE   :  2880 points |   120.0 j |   0 trous | funding cumule    +179.5 bps (+0.06 bps/h moyen)
+  LTC    :  2880 points |   120.0 j |   0 trous | funding cumule    +244.1 bps (+0.08 bps/h moyen)
+  SUI    :  2880 points |   120.0 j |   0 trous | funding cumule     +85.1 bps (+0.03 bps/h moyen)
+  OP     :  2880 points |   120.0 j |   0 trous | funding cumule    -256.2 bps (-0.09 bps/h moyen)
+  NEAR   :  2880 points |   120.0 j |   0 trous | funding cumule    +382.9 bps (+0.13 bps/h moyen)
+--------------------------------------------------------------------------------------------
+  TOTAL : 54220 points, 19 coins
+  COUVERTURE REELLE : de 120.0 a 120.0 jours | 500 trous au total
+  (avant : **18,9 h**. Facteur ~152x)
+  -> C:\Users\flo\Desktop\Projet invest\runtime\history\funding.jsonl
+============================================================================================
+  ⚠️ Refaire une mesure n'est PAS esperer un resultat. X-04 sera probablement
+     CONFIRME sur des mois. Mais il sera enfin mesure sur de la vraie donnee.
+ 
+============ 3. LE CARRY REJOUE, ET SES TROIS JUGES ============ 
+================================================================================================
+  LE CARRY, REJOUÉ EN PAPER — et jugé par le CASH, le BUY-AND-HOLD et HLP
+================================================================================================
+
+  coin      jours    fund/h   CARRY apr     B&H apr        CASH   verdict
+  ----------------------------------------------------------------------------------------
+  ARB       120.0   +0.0098      +0.08%     -54.08%      0.00%   🔴 PAS DE SPOT HL
+  AVAX      120.0   +0.0616      +2.36%     -46.54%      0.00%   🔴 PAS DE SPOT HL
+  AZTEC     120.0   +0.1252      +5.22%      +0.00%      0.00%   ✅ OUVRABLE
+  BERA      120.0   -0.1552      -6.98%      +0.00%      0.00%   🔴 DOMINÉ PAR LE CASH
+  BNB        99.2   +0.0675      +2.55%     -34.27%      0.00%   🔴 PAS DE SPOT HL
+  BTC       120.0   +0.0410      +1.45%     -27.96%      0.00%   🔴 PAS DE SPOT HL
+  DOGE      120.0   +0.0623      +2.40%     -44.68%      0.00%   🔴 PAS DE SPOT HL
+  ETH       120.0   +0.0475      +1.74%     -39.48%      0.00%   🔴 PAS DE SPOT HL
+  HYPE      120.0   +0.1043      +4.28%    +130.94%      0.00%   ✅ OUVRABLE
+  LTC       120.0   +0.0848      +3.40%     -44.80%      0.00%   🔴 PAS DE SPOT HL
+  MON       120.0   -0.0044      -0.54%      +0.00%      0.00%   🔴 DOMINÉ PAR LE CASH
+  NEAR      120.0   +0.1329      +5.57%     +24.61%      0.00%   🔴 PAS DE SPOT HL
+  OP        120.0   -0.0890      -4.19%     -65.69%      0.00%   🔴 PAS DE SPOT HL
+  PUMP      120.0   +0.0876      +3.53%      +0.00%      0.00%   ✅ OUVRABLE
+  PURR      120.0   +0.2645     +11.66%      +0.00%      0.00%   ✅ OUVRABLE
+  SOL       120.0   -0.0050      -0.57%     -40.90%      0.00%   🔴 PAS DE SPOT HL
+  STABLE    120.0   -1.4111     -50.11%      +0.00%      0.00%   🔴 DOMINÉ PAR LE CASH
+  SUI       120.0   +0.0296      +0.95%     -50.95%      0.00%   🔴 PAS DE SPOT HL
+  TRUMP     120.0   -0.4603     -19.13%      +0.00%      0.00%   🔴 DOMINÉ PAR LE CASH
+
+================================================================================================
+  LA PORTE N°0 — **LE SPOT**
+================================================================================================
+
+  🔴 **11/19 coins n'ont PAS de marché SPOT sur Hyperliquid.**
+     *Sans spot, on n'est PAS delta-neutre : on est **short le perp À NU**.*
+     ***Un carry sans spot n'est pas un carry : c'est un pari directionnel déguisé.***
+
+  🎯 C'est EXACTEMENT ce que T2 avait trouvé : **7 des 8 candidats sont morts.**
+     Et la raison n'était pas le funding — **c'était l'existence du spot.**
+
+================================================================================================
+  LES TROIS JUGES
+================================================================================================
+
+  1️⃣  LE CASH (0 %% de rendement, 0 %% de drawdown)
+      6/19 coins sont **DOMINÉS PAR LE CASH** (rendement <= 0).
+
+  2️⃣  LE BUY-AND-HOLD
+      le carry bat le B&H sur **10/19** coins.
+
+  3️⃣  LE VAULT HLP — 🎯 **LE JUGE QUI COMPTE**
+      HLP **EST** le market maker de Hyperliquid. Il **encaisse une part des frais**
+      du protocole et il **EST le liquidateur**. C'est un virement, pas une stratégie.
+      Notre meilleur carry : **PURR à +11.66 % APR**.
+      ⚠️ **Lancer `MESURER-3-PISTES.cmd` pour obtenir l'APR réel de HLP.**
+         *S'il le bat, toute notre complexité est dominée par un dépôt passif —
+          et il faudra le dire.*
+
+------------------------------------------------------------------------------------------------
+  ⚠️ **Aucun chiffre n'est promis.** Ce sont des fundings OBSERVÉS — ils peuvent
+     s'inverser. Et la jambe PERP peut être LIQUIDÉE (X-08).
+     *Une stratégie qui ne tient que sur un actif n'est pas une stratégie.*
+
+  -> C:\Users\flo\Desktop\Projet invest\data\reports\carry_vs_hlp.json
+ 
+============ 4. SECURITE ============ 
+no_secret_patterns: ok
+env_not_committed: ok
+no_forbidden_mainnet_order_method: ok
+no_exchange_endpoint_in_runtime_source: ok
+live_executor_disabled_exists: ok
+mainnet_disabled_in_env_example: ok
+security_tests_present: ok
+no_real_execution_capable_package: ok

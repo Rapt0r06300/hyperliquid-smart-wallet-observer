@@ -1,0 +1,149 @@
+============ 1. LES TESTS DE L'APR NET ============ 
+......................                                                   [100%]
+22 passed in 1.12s
+ 
+============ 2. NON-REGRESSION (carry + noyau + session) ============ 
+..........................................                               [100%]
+42 passed in 1.38s
+ 
+============ 3. LE VERDICT : HLP MESURE vs NOS CARRYS AU NET ============ 
+====================================================================================================
+  LE VERDICT — *nos carrys battent-ils un simple VIREMENT dans HLP ?*
+====================================================================================================
+
+────────────────────────────────────────────────────────────────────────────────────────────────────
+  1. LE BENCHMARK — le vault HLP, **mesure** (j'avais SUPPOSE « 10 a 30 % »)
+────────────────────────────────────────────────────────────────────────────────────────────────────
+
+  vault  : Hyperliquidity Provider (HLP)
+  TVL    : 214965051.355283
+  🎯 **APR HLP (chiffre de Hyperliquid lui-meme) : -0.01 %**
+
+  🚩 **CE QUE JE NE SAIS PAS, ET QUE JE NE VAIS PAS CACHER :**
+     Ce chiffre est le champ `apr` que HL publie. ***Je ne connais pas la FENETRE
+     exacte qu'il utilise*** (30 j ? depuis le lancement ?). Il peut donc refleter
+     une periode recente defavorable plutot que la vie entiere du vault.
+     -> **le benchmark est MESURE, pas suppose** ; mais sa fenetre reste une
+        inconnue, et je prefere le dire que de faire passer une lecture pour une
+        preuve. *C'est exactement l'erreur qui a produit le faux 38 %% APR.*
+     drawdown max observe sur le solde du vault : **70.6 %**
+     *(le solde inclut les depots : c'est un indicateur, pas une NAV par part)*
+
+  🚩 **UN HLP GAGNANT NE REFUTE PAS T1b.** Ses privileges, aucun ne nous est accessible :
+       - encaisse une PART DES FRAIS du protocole (doc : « fees are entirely directed to HLP… »)
+       - est le LIQUIDATEUR : il reçoit le flux forcé à un prix imposé, par privilège
+       - a la taille et la permanence pour porter l'inventaire à travers les chocs
+       - est structurellement du bon côté du carnet
+     *Le market making marche — POUR CELUI QUI EST PAYE POUR LE FAIRE.*
+
+────────────────────────────────────────────────────────────────────────────────────────────────────
+  2. NOS CARRYS — **au NET** (les 23 bps de couts sont enfin DANS le chiffre)
+────────────────────────────────────────────────────────────────────────────────────────────────────
+
+  coin         fund/h   APR brut    APR net  net maker   verdict vs HLP -0.0 %
+  HYPE        +0.1341      5.87%      4.48%      5.21%   ✅ **BAT HLP**
+  MON         +0.0303      1.33%         -         -   ⚪ **NON OUVRABLE** — ne peut battre personne
+  PUMP        +0.1513      6.63%      5.23%      5.96%   ✅ **BAT HLP**
+  PURR        +0.2902     12.71%     11.31%     12.04%   ✅ **BAT HLP**
+
+====================================================================================================
+  VERDICT
+====================================================================================================
+
+  ✅ battent HLP  : HYPE (4.48 %), PUMP (5.23 %), PURR (11.31 %)
+  🔴 domines      : aucun
+
+  ⚠️ **MEME POUR CEUX QUI BATTENT HLP, ce n'est pas une promesse :**
+     - le funding **peut s'inverser** (BERA -0,83 · STABLE -0,99 : ils l'ont fait) ;
+     - la **jambe perp peut etre LIQUIDEE** (X-08) ;
+     - la **profondeur du carnet SPOT n'est pas encore verifiee** :
+       *un edge sur un carnet de 3 $ n'existe pas* ;
+     - HLP porte du risque aussi : comparer les **drawdowns**, pas que les APR.
+
+  -> C:\Users\flo\Desktop\Projet invest\data\reports\le_verdict.json
+ 
+============ 4. CE QUE LE BOT OUVRE (APR desormais NET) ============ 
+================================================================================================
+  LE SCANNER CARRY — **ce que le bot va réellement ouvrir**
+  funding 365 j (mesuré) -> SCANNER (4 portes) -> **NOYAU** (7 portes) -> PaperIntent
+================================================================================================
+
+  spot carryables (MESURÉS via `spotMeta`, jamais supposés) : AZTEC, BERA, HYPE, MON, PUMP, PURR, STABLE, TRUMP
+  coins avec du funding backfillé : 19
+
+------------------------------------------------------------------------------------------------
+  ÉTAPE 1 — LE SCANNER (4 portes)
+------------------------------------------------------------------------------------------------
+
+  coin         fund/h    %h>0       APR   retenu  motif
+  PURR        +0.2902     98%   +11.31%        ✅  CARRY_RETENU_A_SOUMETTRE_AU_NOYAU
+  PUMP        +0.1513     93%    +5.23%        ✅  CARRY_RETENU_A_SOUMETTRE_AU_NOYAU
+  HYPE        +0.1341     92%    +4.48%        ✅  CARRY_RETENU_A_SOUMETTRE_AU_NOYAU
+  ARB         +0.0000      0%    +0.00%        🔴  PAS_DE_SPOT_HL_UN_CARRY_SANS_SPOT_EST_UN_SHO
+  AVAX        +0.0000      0%    +0.00%        🔴  PAS_DE_SPOT_HL_UN_CARRY_SANS_SPOT_EST_UN_SHO
+  AZTEC       -0.8367     83%    +0.00%        🔴  FUNDING_NEGATIF_IL_FAUDRAIT_SHORTER_LE_SPOT_
+  BERA        -0.8328     40%    +0.00%        🔴  FUNDING_NEGATIF_IL_FAUDRAIT_SHORTER_LE_SPOT_
+  BNB         +0.0000      0%    +0.00%        🔴  PAS_DE_SPOT_HL_UN_CARRY_SANS_SPOT_EST_UN_SHO
+  BTC         +0.0000      0%    +0.00%        🔴  PAS_DE_SPOT_HL_UN_CARRY_SANS_SPOT_EST_UN_SHO
+  DOGE        +0.0000      0%    +0.00%        🔴  PAS_DE_SPOT_HL_UN_CARRY_SANS_SPOT_EST_UN_SHO
+  ETH         +0.0000      0%    +0.00%        🔴  PAS_DE_SPOT_HL_UN_CARRY_SANS_SPOT_EST_UN_SHO
+  LTC         +0.0000      0%    +0.00%        🔴  PAS_DE_SPOT_HL_UN_CARRY_SANS_SPOT_EST_UN_SHO
+  MON         +0.0303     81%    +0.00%        🔴  FUNDING_TROP_FAIBLE_POUR_AMORTIR_4_EXECUTION
+  NEAR        +0.0000      0%    +0.00%        🔴  PAS_DE_SPOT_HL_UN_CARRY_SANS_SPOT_EST_UN_SHO
+  OP          +0.0000      0%    +0.00%        🔴  PAS_DE_SPOT_HL_UN_CARRY_SANS_SPOT_EST_UN_SHO
+  SOL         +0.0000      0%    +0.00%        🔴  PAS_DE_SPOT_HL_UN_CARRY_SANS_SPOT_EST_UN_SHO
+  STABLE      -0.9936     37%    +0.00%        🔴  FUNDING_NEGATIF_IL_FAUDRAIT_SHORTER_LE_SPOT_
+  SUI         +0.0000      0%    +0.00%        🔴  PAS_DE_SPOT_HL_UN_CARRY_SANS_SPOT_EST_UN_SHO
+  TRUMP       -0.2812     37%    +0.00%        🔴  FUNDING_NEGATIF_IL_FAUDRAIT_SHORTER_LE_SPOT_
+
+------------------------------------------------------------------------------------------------
+  ÉTAPE 2 — **LE NOYAU** (il rejuge TOUT : frais, plancher, session, VPIN, exchange)
+------------------------------------------------------------------------------------------------
+
+  paires SPOT resolues (via `spotMeta`, jamais devinees) : HYPE->@107, PUMP->@20, PURR->PURR/USDC
+
+  PURR     ✅ ENTREE
+      raison  : NOYAU_EDGE_NET_MESURE_ET_EXECUTABLE
+      signaux : ETAT_SESSION_NON_FOURNI
+      spot    : slippage 27.88 bps sur les 2 jambes spot
+      APR     : +11.31 % (avant slippage) -> **+9.17 % APRES** (slippage total 35.28 bps : perp + spot)
+
+  PUMP     🔴 NO_TRADE
+      raison  : NOYAU_JAMBE_SPOT_IMPOSSIBLE_CARNET_TROP_MINCE
+      signaux : ETAT_SESSION_NON_FOURNI
+      spot    : CARNET_SPOT_TROP_MINCE : la jambe spot ne se remplit pas pour 500 $. *Un edge sur un carnet de 3 $ n'existe pas.*
+
+  HYPE     ✅ ENTREE
+      raison  : NOYAU_EDGE_NET_MESURE_ET_EXECUTABLE
+      signaux : ETAT_SESSION_NON_FOURNI
+      spot    : slippage 0.00 bps sur les 2 jambes spot
+      APR     : +4.48 % (avant slippage) -> **+4.48 % APRES** (slippage total 0.00 bps : perp + spot)
+
+================================================================================================
+  RÉSULTAT
+================================================================================================
+
+  scannés  : 19 coins
+  retenus par le SCANNER : 3
+  **AUTORISÉS PAR LE NOYAU : 2**
+     ✅ PURR     CARRY SHORT  +9.17 % APR  (funding +0.2902 bps/h)
+     ✅ HYPE     CARRY SHORT  +4.48 % APR  (funding +0.1341 bps/h)
+
+  🚩 **CE QUE CES CHIFFRES NE SONT PAS** :
+     - une promesse. Le funding **peut s'inverser** (BERA : -0,83 · TRUMP : -0,28).
+     - un chèque. **La profondeur du carnet reste à vérifier** : *un edge sur un
+       carnet de 3 $ n'existe pas.*
+     - sans risque. **La jambe perp peut être LIQUIDÉE** (X-08).
+     - un vainqueur. **Il doit encore battre un dépôt passif dans HLP.**
+
+  -> C:\Users\flo\Desktop\Projet invest\data\reports\carry_propositions.json
+ 
+============ 5. SECURITE : 0 ordre reel ============ 
+no_secret_patterns: ok
+env_not_committed: ok
+no_forbidden_mainnet_order_method: ok
+no_exchange_endpoint_in_runtime_source: ok
+live_executor_disabled_exists: ok
+mainnet_disabled_in_env_example: ok
+security_tests_present: ok
+no_real_execution_capable_package: ok

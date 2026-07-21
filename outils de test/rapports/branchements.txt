@@ -1,0 +1,293 @@
+============ 1. L'INVARIANT DE BRANCHEMENT ============ 
+.......................                                                  [100%]
+23 passed in 0.88s
+ 
+============ 2. LE NOYAU + LE CHEMIN D'ENTREE ============ 
+...................                                                      [100%]
+19 passed in 1.87s
+ 
+============ 3. QUI EST ENCORE MORT ? (audit de cablage) ============ 
+================================================================================================
+  QUI EST BRANCHE SUR LA SIMULATION ? (AST — pas une impression)
+  *Un module qui existe n'est pas un module qui garde. Un test n'est pas un branchement.*
+================================================================================================
+
+  🔒 LES GARDE-FOUS — ils doivent etre DANS LA PORTE (`noyau_unique.decider`)
+
+    ✅ DANS LA PORTE    fees.hyperliquid_fees                          #543 — la source unique des frais
+    ✅ DANS LA PORTE    risk.side_lock                                 #566 — 19/21 SHORT
+    ✅ DANS LA PORTE    market.flow_toxicity                           #521 — le VPIN
+    ✅ DANS LA PORTE    market.execution_constraints                   #576 — l'ordre est-il possible ?
+    ✅ DANS LA PORTE    risk.session_gate                              #292b — les 11 gates V19
+    ⚠️  runtime (1)    freshness.horloges                             #318 — la fraîcheur n'est plus une tautologie
+
+  🔬 LES OUTILS DE MESURE — hors runtime, et **c'est LEGITIME**
+
+    (outil)            backtesting.lead_lag                           #549 — mesure (0/66)
+    (outil)            market.hlp_vault                               #544 — benchmark
+    (outil)            market.hip3_markets                            #517 — mesure
+    (outil)            market.oracle_lag                              #556 — mesure
+    (outil)            backtesting.liquidation_cascade                #530 — mesure
+    (outil)            collection.archive_s3                          #462 — collecte (payant : REFUSE)
+    (outil)            funding.funding_cross_venue                    #542 — mesure
+    (outil)            funding.snapshot_capture                       #531 — mesure
+    (outil)            runtime.replay_shadow                          #302 — outil de vérité
+    runtime(1)         runtime.session_and_bus                        #286 — outil de vérité
+    (outil)            realtime.ws_resilience                         #314 — à brancher au collecteur
+    (outil)            realtime.raw_spool                             #501 — à brancher au collecteur
+    (outil)            backtesting.honest_metrics                     #571 — rapport
+    (outil)            backtesting.intrabar                           #572 — backtest
+    (outil)            backtesting.backtest_live_parity               #583 — backtest
+    (outil)            testing.lookahead_detector                     #562 — outil
+    (outil)            arbitrage.triangular_measure                   #296 — mesure
+    runtime(1)         collection.funding_backfill                    #606 — collecte
+
+------------------------------------------------------------------------------------------------
+  ✅ Tous les garde-fous sont importes par le runtime.
+     ⚠️ Les OUTILS restent hors runtime -- **et je le dis au lieu de le maquiller.**
+------------------------------------------------------------------------------------------------
+ 
+============ 4. SUITE COMPLETE (la verite est sur Windows) ============ 
+........................................................................ [  1%]
+........................................................................ [  3%]
+........................................................................ [  5%]
+........................................................................ [  7%]
+........................................................................ [  8%]
+........................................................................ [ 10%]
+........................................................................ [ 12%]
+........................................................................ [ 14%]
+........................................................................ [ 16%]
+........................................................................ [ 17%]
+................................
+[COUVERTURE] joignables=499  couverts=496  NON TESTES=3  (99.4 %)  baseline=3
+........................................ [ 19%]
+..................................F....FF.F...F......................... [ 21%]
+........................................................................ [ 23%]
+........................................................................ [ 25%]
+........................................................................ [ 26%]
+........................................................................ [ 28%]
+........................................................................ [ 30%]
+........................................................................ [ 32%]
+........................................................................ [ 34%]
+........................................................................ [ 35%]
+........................................................................ [ 37%]
+........................................................................ [ 39%]
+........................................................................ [ 41%]
+........................................................................ [ 42%]
+........................................................................ [ 44%]
+........................................................................ [ 46%]
+........................................................................ [ 48%]
+........................................................................ [ 50%]
+........................................................................ [ 51%]
+........................................................................ [ 53%]
+........................................................................ [ 55%]
+........................................................................ [ 57%]
+........................................................................ [ 59%]
+........................................................................ [ 60%]
+........................................................................ [ 62%]
+......................F............................................F.... [ 64%]
+........................................................................ [ 66%]
+........................................................................ [ 68%]
+........................................................................ [ 69%]
+........................................................................ [ 71%]
+........................................................................ [ 73%]
+........................................................................ [ 75%]
+........................................................................ [ 77%]
+........................................................................ [ 78%]
+........................................................................ [ 80%]
+........................................................................ [ 82%]
+........................................................................ [ 84%]
+........................................................................ [ 85%]
+........................................................................ [ 87%]
+........................................................................ [ 89%]
+........................................................................ [ 91%]
+........................................................................ [ 93%]
+........................................................................ [ 94%]
+........................................................................ [ 96%]
+........................................................................ [ 98%]
+............................................................             [100%]
+================================== FAILURES ===================================
+_________________ test_covering_costs_TWO_round_trips_not_one _________________
+
+    def test_covering_costs_TWO_round_trips_not_one():
+        """LE POINT QU'ON OUBLIE. Couvrir, c'est deux marches. Donc QUATRE allers-retours de frais."""
+>       assert COUT_MAKER_2_JAMBES_BPS == 6.0        # 4 x 1,5 bps
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       assert 11.0 == 6.0
+
+tests\test_delta_neutral_carry.py:127: AssertionError
+_________ test_the_BASIS_is_paid_at_entry_and_can_eat_the_whole_carry _________
+
+    def test_the_BASIS_is_paid_at_entry_and_can_eat_the_whole_carry():
+        """Si le perp cote 30 bps SOUS le spot, on achete cher et on vend bas : -30 bps a l'entree.
+        Un funding de 0,125 bps/h met une eternite a rembourser ca."""
+        v = evaluer_carry_neutre(coin="X", funding_bps_h=0.125, base_bps=-30.0,
+                                 liquidite_spot_usd=100_000.0)
+>       assert v.cout_entree_bps == pytest.approx(6.0 + 30.0)
+E       assert 41.0 == 36.0 ± 3.6e-05
+E         
+E         comparison failed
+E         Obtained: 41.0
+E         Expected: 36.0 ± 3.6e-05
+
+tests\test_delta_neutral_carry.py:184: AssertionError
+__________________ test_a_FAVOURABLE_basis_pays_us_at_entry ___________________
+
+    def test_a_FAVOURABLE_basis_pays_us_at_entry():
+        """Base POSITIVE = le perp est plus cher = on le short HAUT. La base joue POUR nous."""
+        v = evaluer_carry_neutre(coin="X", funding_bps_h=1.0, base_bps=+10.0,
+                                 liquidite_spot_usd=100_000.0)
+>       assert v.cout_entree_bps == pytest.approx(6.0 - 10.0)   # negatif : on est PAYE pour entrer
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       assert 1.0 == -4.0 ± 4.0e-06
+E         
+E         comparison failed
+E         Obtained: 1.0
+E         Expected: -4.0 ± 4.0e-06
+
+tests\test_delta_neutral_carry.py:195: AssertionError
+_________ test_the_MEDIAN_funding_DOES_repay_the_two_legs_in_48_hours _________
+
+    def test_the_MEDIAN_funding_DOES_repay_the_two_legs_in_48_hours():
+        """LE RENVERSEMENT. Avec le plancher permanent, le funding MEDIAN (0,125 bps/h) rembourse
+        les 6 bps des deux jambes en 48 heures -- puis c'est du portage pur.
+    
+        Il n'y a plus de SEUIL de funding. Il y a un DELAI. Ce n'est pas la meme chose du tout."""
+>       assert funding_cumule_bps(48, 0.125) == pytest.approx(COUT_MAKER_2_JAMBES_BPS)
+E       assert 6.0 == 11.0 ± 1.1e-05
+E         
+E         comparison failed
+E         Obtained: 6.0
+E         Expected: 11.0 ± 1.1e-05
+
+tests\test_delta_neutral_carry.py:210: AssertionError
+_________ test_maker_execution_more_than_halves_the_cost_of_covering __________
+
+    def test_maker_execution_more_than_halves_the_cost_of_covering():
+        """18 bps en taker contre 6 en maker. Sur un carry, l'execution N'EST PAS un detail."""
+        taker = evaluer_carry_neutre(coin="X", funding_bps_h=3.0, base_bps=0.0,
+                                     liquidite_spot_usd=100_000.0, maker=False)
+        maker = evaluer_carry_neutre(coin="X", funding_bps_h=3.0, base_bps=0.0,
+                                     liquidite_spot_usd=100_000.0, maker=True)
+>       assert maker.cout_entree_bps < taker.cout_entree_bps / 2.5
+E       assert 11.0 < (23.0 / 2.5)
+E        +  where 11.0 = CarryNeutre(coin='X', funding_bps_h=3.0, base_bps=0.0, liquidite_spot_usd=100000.0, cout_entree_bps=11.0, heures_pour_...=False, motif='RISQUE_LIQUIDATION_NON_MESURE_NO_TRADE', note="un risque qu'on ne mesure pas est un risque qu'on subit").cout_entree_bps
+E        +  and   23.0 = CarryNeutre(coin='X', funding_bps_h=3.0, base_bps=0.0, liquidite_spot_usd=100000.0, cout_entree_bps=23.0, heures_pour_...=False, motif='RISQUE_LIQUIDATION_NON_MESURE_NO_TRADE', note="un risque qu'on ne mesure pas est un risque qu'on subit").cout_entree_bps
+
+tests\test_delta_neutral_carry.py:268: AssertionError
+___________ test_le_nombre_de_modules_MORTS_ne_doit_JAMAIS_remonter ___________
+
+verdict = Verdict(orphelins=['hl_observer.analysis.copy_delay_model', 'hl_observer.analysis.entry_edge', 'hl_observer.analysis.e...strategies.engine_economics', 'hl_observer.testing.lookahead_detector', 'hl_observer.testing.mutation'], illisibles=[])
+
+    def test_le_nombre_de_modules_MORTS_ne_doit_JAMAIS_remonter(verdict):
+        """UN CLIQUET, PAS UN NETTOYAGE.
+    
+        L'invariant ci-dessus ne juge que 3 paquets. Le reste du depot compte encore ~300 modules
+        import-inatteignables. On ne peut pas tous les trancher ce soir. Mais on peut EMPECHER LE
+        NOMBRE D'AUGMENTER : c'est un cliquet, il ne tourne que dans un sens.
+    
+        Sans lui, le 301e module mort arriverait exactement comme les 300 autres : en silence.
+    
+        Ce test tourne dans MEGATEST (audit_report.py lance toute la suite pytest) -- donc le
+        cliquet est SERRE a chaque audit, sans rien ajouter au gros fichier d'audit.
+        """
+        morts = len(verdict.testes_non_branches)
+        orphelins = len(verdict.orphelins)
+    
+>       assert morts <= PLAFOND_MORTS_GLOBAL, (
+            "REGRESSION DE CABLAGE : %d modules testes-non-branches (plafond %d).\n"
+            "Un module de plus a ete ajoute sans etre appele par la production.\n"
+            "Soit tu le branches, soit tu l'enterres -- mais le nombre ne remonte pas."
+            % (morts, PLAFOND_MORTS_GLOBAL)
+        )
+E       AssertionError: REGRESSION DE CABLAGE : 287 modules testes-non-branches (plafond 273).
+E         Un module de plus a ete ajoute sans etre appele par la production.
+E         Soit tu le branches, soit tu l'enterres -- mais le nombre ne remonte pas.
+E       assert 287 <= 273
+
+tests\test_risk_guards_no_limbo.py:237: AssertionError
+_____________ test_aucun_module_de_runtime_ne_reste_dans_le_LIMBE _____________
+
+    def test_aucun_module_de_runtime_ne_reste_dans_le_LIMBE():
+        """🔴 Un module ni joignable ni enterre : PERSONNE ne sait s'il compte. Interdit.
+    
+        C'est exactement l'etat dans lequel P4 et P5 ont vecu, « completed », pendant des semaines.
+        """
+        # 🚩 LES DEUX PORTES, et il faut les DEUX : un import de `src/`, ou un LANCEUR.
+        # (J'ai d'abord ecrit `_portes_des_lanceurs()`... sans jamais l'appeler. Le test declarait donc
+        # MORT `persistent_poll_runner` -- le poller de la simulation vivante. Exactement le bug de
+        # #597, reproduit a l'identique. *Ecrire le detecteur ne suffit pas : il faut le BRANCHER.*)
+        limbes = sorted(_modules_runtime() - _vivants() - MODULES_ENTERRES_RUNTIME)
+>       assert not limbes, (
+            "modules de `runtime/` dans le LIMBE (ni appeles par la production, ni enterres) : %s\n\n"
+            "Decide, par ecrit :\n"
+            "  - BRANCHER : un chemin de production l'importe, et un test le prouve ; ou\n"
+            "  - ENTERRER : ajoute une TombeRuntime dans runtime/tombstones_runtime.py, avec une "
+            "raison qu'on puisse CONTREDIRE.\n"
+            "Rien entre les deux. Un test vert ne cable rien." % ", ".join(limbes)
+        )
+E       AssertionError: modules de `runtime/` dans le LIMBE (ni appeles par la production, ni enterres) : replay_shadow, session_and_bus
+E         
+E         Decide, par ecrit :
+E           - BRANCHER : un chemin de production l'importe, et un test le prouve ; ou
+E           - ENTERRER : ajoute une TombeRuntime dans runtime/tombstones_runtime.py, avec une raison qu'on puisse CONTREDIRE.
+E         Rien entre les deux. Un test vert ne cable rien.
+E       assert not ['replay_shadow', 'session_and_bus']
+
+tests\test_runtime_no_limbo.py:220: AssertionError
+============================== warnings summary ===============================
+src\hl_observer\testnet\models.py:13
+  C:\Users\flo\Desktop\Projet invest\src\hl_observer\testnet\models.py:13: PytestCollectionWarning: cannot collect test class 'TestnetAction' because it has a __new__ constructor (from: tests/test_loop_candidate_factory.py)
+    class TestnetAction(str, Enum):
+
+tests/dydx_v4/test_dydx_refused_route.py: 22 warnings
+tests/dydx_v4/test_dydx_routes_truth_endpoint.py: 11 warnings
+tests/test_dashboard_v2_metagraph.py: 6 warnings
+tests/test_dashboard_v2_panels.py: 6 warnings
+tests/test_dashboard_v2_route.py: 4 warnings
+tests/test_diag_598_qui_refuse.py: 176 warnings
+tests/test_hypersmart_simulation_diagnostic_logs.py: 176 warnings
+tests/test_loop_dashboard_route.py: 176 warnings
+tests/test_no_btc_only_hardcoded_scanner.py: 176 warnings
+tests/test_ui_action_catalog.py: 528 warnings
+tests/test_ui_app.py: 1056 warnings
+tests/test_ui_copy_dashboard.py: 1584 warnings
+tests/test_ui_discovery_autoscan.py: 1584 warnings
+tests/test_ui_discovery_simple_home.py: 1056 warnings
+tests/test_ui_explorer.py: 1056 warnings
+tests/test_ui_leaderboard.py: 528 warnings
+tests/test_ui_multi_assets.py: 880 warnings
+tests/test_ui_no_dead_buttons.py: 352 warnings
+tests/test_ui_overview_paper_ledger.py: 528 warnings
+tests/test_ui_routes.py: 352 warnings
+tests/test_ui_simulation_persistence.py: 5456 warnings
+tests/test_ui_simulation_status_fast.py: 5104 warnings
+tests/test_ui_simulation_v9_filters.py: 1408 warnings
+tests/test_ui_websocket.py: 176 warnings
+  C:\Users\flo\AppData\Roaming\Python\Python314\site-packages\fastapi\routing.py:233: DeprecationWarning: 'asyncio.iscoroutinefunction' is deprecated and slated for removal in Python 3.16; use inspect.iscoroutinefunction() instead
+    is_coroutine = asyncio.iscoroutinefunction(dependant.call)
+
+tests/test_whale_watchlist.py::TestWhaleScoreCandidate::test_score_recent_trades_get_higher_recency
+  C:\Users\flo\Desktop\Projet invest\tests\test_whale_watchlist.py:126: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    now = datetime.datetime.utcnow()
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ===========================
+FAILED tests/test_delta_neutral_carry.py::test_covering_costs_TWO_round_trips_not_one
+FAILED tests/test_delta_neutral_carry.py::test_the_BASIS_is_paid_at_entry_and_can_eat_the_whole_carry
+FAILED tests/test_delta_neutral_carry.py::test_a_FAVOURABLE_basis_pays_us_at_entry
+FAILED tests/test_delta_neutral_carry.py::test_the_MEDIAN_funding_DOES_repay_the_two_legs_in_48_hours
+FAILED tests/test_delta_neutral_carry.py::test_maker_execution_more_than_halves_the_cost_of_covering
+FAILED tests/test_risk_guards_no_limbo.py::test_le_nombre_de_modules_MORTS_ne_doit_JAMAIS_remonter
+FAILED tests/test_runtime_no_limbo.py::test_aucun_module_de_runtime_ne_reste_dans_le_LIMBE
+7 failed, 4013 passed, 22403 warnings in 266.03s (0:04:26)
+ 
+============ 5. SECURITE ============ 
+no_secret_patterns: ok
+env_not_committed: ok
+no_forbidden_mainnet_order_method: ok
+no_exchange_endpoint_in_runtime_source: ok
+live_executor_disabled_exists: ok
+mainnet_disabled_in_env_example: ok
+security_tests_present: ok
+no_real_execution_capable_package: ok
