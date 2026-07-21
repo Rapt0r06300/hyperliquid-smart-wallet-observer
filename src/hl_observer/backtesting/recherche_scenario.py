@@ -449,6 +449,10 @@ def rang_pepite(d: DonneesReplay, config: dict[str, Any], *,
 
 SEUIL_CRIBLE_CANDIDATS = 20_000
 FRACTION_CRIBLE = 0.25
+#: 21/07 matin : le crible sur 25 % de 262k = 65 000 candidats x 600 configs a tue le run de
+#: la nuit EN SILENCE (aucun print, aucun etat). Un crible est une PASSOIRE, pas une preuve :
+#: 12 000 candidats recents suffisent largement pour reperer un net<=0 evident.
+CAP_CRIBLE_CANDIDATS = 12_000
 
 
 def _cribler_configs(d: DonneesReplay, configs: list[dict], *,
@@ -461,9 +465,12 @@ def _cribler_configs(d: DonneesReplay, configs: list[dict], *,
     if len(d.candidats) < SEUIL_CRIBLE_CANDIDATS or not configs:
         return configs
     tries = sorted(d.candidats, key=lambda c: float(c.get("recorded_at") or 0.0))
-    recent = tries[int(len(tries) * (1 - FRACTION_CRIBLE)):]
+    n = min(int(len(tries) * FRACTION_CRIBLE), CAP_CRIBLE_CANDIDATS)
+    recent = tries[-n:]
+    print("  crible multi-fidelite : %d configs sur les %d candidats les plus recents..."
+          % (len(configs), len(recent)), flush=True)
     retenues = []
-    for cfg in configs:
+    for i, cfg in enumerate(configs, 1):
         f = filtrer_candidats(recent, cfg.get("filtres"))
         try:
             r = evaluer_ab(f, d.marks, base_config=_sltp(cfg),
@@ -473,25 +480,43 @@ def _cribler_configs(d: DonneesReplay, configs: list[dict], *,
                 retenues.append(cfg)
         except Exception:  # noqa: BLE001 — un crible qui explose laisse passer (porte derriere)
             retenues.append(cfg)
-    print("  crible multi-fidelite : %d/%d configs passent a l'evaluation complete"
+        if i % 25 == 0:                         # jamais plus de ~1 min de silence
+            print("    crible %d/%d (%d retenues)" % (i, len(configs), len(retenues)),
+                  flush=True)
+    print("  crible : %d/%d configs passent a l'evaluation complete"
           % (len(retenues), len(configs)), flush=True)
     return retenues
 
 
 # ================================================================ 6. TOUS les modules d'un coup
 
-def chercher_toutes(root: str | Path, *, max_essais_par_strategie: int | None = None) -> dict[str, Any]:
+def chercher_toutes(root: str | Path, *, max_essais_par_strategie: int | None = None,
+                    budget_s_par_module: float | None = 7_200.0) -> dict[str, Any]:
     """« Il doit replay TOUS nos modules » (21/07). Une recherche PAR module (populations
-    jamais mélangées), grille LARGE (le filet s'élargit, les mailles jamais), et un rapport
-    PEPITES.md écrit à la fin. Les actions REFUSÉES sont rejouées par ailleurs (rapport §7)."""
+    jamais mélangées), grille LARGE (le filet s'élargit, les mailles jamais), rapports écrits
+    À LA FIN QUOI QU'IL ARRIVE. Leçons du run de la nuit (mort en silence pendant copy,
+    AUCUN rapport) : (1) chaque module est blindé — s'il explose, son verdict devient
+    ERREUR et les AUTRES continuent ; (2) budget de 2 h par module — BUDGET_EPUISE honnête
+    et reprise au prochain lancement (états par module), jamais une nuit avalée."""
     resultats: dict[str, Any] = {}
     for strat in STRATEGIES_MODULES:
         print("=== module %s ===" % strat, flush=True)
-        resultats[strat] = chercher(root, strategie=strat, configs=grille_large(),
-                                    max_essais=max_essais_par_strategie,
-                                    s_arreter_au_premier=False, raffiner=True)
+        try:
+            resultats[strat] = chercher(root, strategie=strat, configs=grille_large(),
+                                        max_essais=max_essais_par_strategie,
+                                        budget_s=budget_s_par_module,
+                                        s_arreter_au_premier=False, raffiner=True)
+        except Exception as exc:  # noqa: BLE001 — un module qui explose ne tue plus la nuit
+            print("  !! module %s en ERREUR : %s" % (strat, str(exc)[:200]), flush=True)
+            resultats[strat] = {"statut": "ERREUR", "strategie": strat,
+                                "motif": str(exc)[:300], "essais": []}
     print("=== module cross_venue ===", flush=True)
-    resultats["cross_venue"] = chercher_cross_venue(root, max_essais=max_essais_par_strategie)
+    try:
+        resultats["cross_venue"] = chercher_cross_venue(root, max_essais=max_essais_par_strategie)
+    except Exception as exc:  # noqa: BLE001
+        print("  !! module cross_venue en ERREUR : %s" % str(exc)[:200], flush=True)
+        resultats["cross_venue"] = {"statut": "ERREUR", "strategie": "cross_venue",
+                                    "motif": str(exc)[:300], "essais": []}
     try:
         _ecrire_pepites(root, resultats)
         _ecrire_resultats_md(root, resultats)
@@ -520,6 +545,9 @@ def recommandation(strat: str, r: dict[str, Any]) -> str:
                 "factor sur une semaine avant d'y croire."
                 % (p["config"], p.get("rang", "?"), p.get("nets"),
                    ", folds %s" % p["folds_vivants"] if p.get("folds_vivants") else ""))
+    if r.get("statut") == "ERREUR":
+        return "PANNE À RÉPARER : ce module a explosé (%s) — envoie ça à Claude." \
+            % (r.get("motif") or "?")
     if r.get("statut") == "INSUFFISANT":
         return "PATIENCE : %s — laisse les collecteurs accumuler, relance demain." \
             % (r.get("motif") or "données insuffisantes")

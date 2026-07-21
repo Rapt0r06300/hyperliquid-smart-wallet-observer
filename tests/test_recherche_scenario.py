@@ -298,3 +298,27 @@ def test_le_rapport_contient_les_recommandations_et_la_synthese_par_module(tmp_p
     chercher_toutes(tmp_path, max_essais_par_strategie=1)
     t = (tmp_path / "runtime" / "replay" / "RESULTATS_RECHERCHE.md").read_text(encoding="utf-8")
     assert "RECOMMANDATION" in t and "En une phrase par module" in t
+
+
+def test_un_module_qui_EXPLOSE_ne_tue_plus_la_nuit_les_rapports_existent_quand_meme(tmp_path, monkeypatch):
+    """Nuit du 20-21/07 : copy est mort en silence -> AUCUN rapport. Desormais : le module
+    en panne recoit le verdict ERREUR, les autres continuent, les rapports sont ecrits."""
+    import hl_observer.backtesting.recherche_scenario as rs
+    vrai_chercher = rs.chercher
+    def chercher_qui_explose(root, **kw):
+        if kw.get("strategie") == "copy":
+            raise MemoryError("boum copy")
+        return vrai_chercher(root, **kw)
+    monkeypatch.setattr(rs, "chercher", chercher_qui_explose)
+    r = rs.chercher_toutes(tmp_path, max_essais_par_strategie=1)
+    assert r["copy"]["statut"] == "ERREUR" and "boum" in r["copy"]["motif"]
+    assert set(r) == {"carry", "copy", "arbitrage", "cross_venue"}
+    t = (tmp_path / "runtime" / "replay" / "RESULTATS_RECHERCHE.md").read_text(encoding="utf-8")
+    assert "PANNE À RÉPARER" in t
+
+
+def test_le_crible_est_borne_et_bavard():
+    src = open("src/hl_observer/backtesting/recherche_scenario.py", encoding="utf-8").read()
+    assert "CAP_CRIBLE_CANDIDATS = 12_000" in src
+    assert "crible %d/%d" in src, "progression toutes les 25 configs — plus jamais le silence"
+    assert "budget_s_par_module: float | None = 7_200.0" in src, "2 h max par module"

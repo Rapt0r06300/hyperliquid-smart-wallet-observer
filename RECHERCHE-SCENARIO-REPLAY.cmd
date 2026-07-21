@@ -44,7 +44,12 @@ echo  [2/3] Recherche module par module (Ctrl-C = pause sans perte, reprise auto
 echo.
 python -c "from hl_observer.backtesting.recherche_scenario import chercher_toutes; chercher_toutes('.')"
 echo.
-echo  [3/3] Rapports ecrits :
+echo  [3/3] Verification des rapports :
+if not exist "runtime\replay\RESULTATS_RECHERCHE.md" (
+  echo   !! AUCUN RAPPORT : un module a plante avant la fin. Envoie CETTE fenetre a Claude.
+) else (
+  echo   Rapports ecrits :
+)
 echo         - runtime\replay\RESULTATS_RECHERCHE.md  ^(a envoyer a Claude^)
 echo         - runtime\replay\PEPITES.md              ^(resume court^)
 echo.
