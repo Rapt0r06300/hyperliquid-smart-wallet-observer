@@ -4,7 +4,7 @@
 > Une loi n'est pas un interdit de penser : c'est un **chiffre à battre**, avec la
 > **donnée** qui justifierait de rouvrir le dossier. Un argument neuf ne suffit pas.
 
-## 🔴 Réfuté par la mesure (10)
+## 🔴 Réfuté par la mesure (11)
 
 ### Suivre les wallets « smart money » en moyenne — `copy_global`
 
@@ -69,6 +69,13 @@
 - **pour rouvrir** : aucune — c'est de l'arithmétique
 - **où vérifier** : `mémoire projet : benchmark CASH`
 
+### Le vault HLP comme référence à battre — `hlp_benchmark`
+
+- **le chiffre** : 🔴 CORRIGÉ le 21/07 : notre mesure interne disait −0,01 % APR — elle portait sur une fenêtre trop courte. La donnée PUBLIQUE 2026 dit **15 à 30 % APR** sur la plupart des fenêtres trimestrielles (drawdowns 5-12 %). Notre carry vaut ~12,9 %/an : **un dépôt passif dans HLP nous bat**. La stratégie est DOMINÉE par une alternative sans code, sans surveillance et sans risque d'exécution
+- **mesuré le** : 2026-07-21
+- **pour rouvrir** : que le carry dépasse durablement 30 % APR net, OU que HLP s'effondre. Attention : HLP n'est PAS delta-neutre (il porte du risque directionnel et de liquidation) — la comparaison est brutale mais pas parfaitement égale à risque
+- **où vérifier** : `defillama.com/protocol/hyperliquid-hlp (public) + carry_backtest`
+
 ### Le z-score du funding comme signal de taille — `zscore_au_plancher`
 
 - **le chiffre** : corrélation −0,596 entre le facteur de taille et le rendement net : on finançait le PLUS les coins les MOINS rentables. Au plancher protocolaire, tous les coins sont au même taux par construction — le z-score y mesure du bruit
@@ -76,14 +83,7 @@
 - **pour rouvrir** : un funding franchement AU-DESSUS du plancher (le garde du plancher réactive alors le z-score automatiquement)
 - **où vérifier** : `funding/carry_optimizer.py:facteur_zscore + carry_allocation_nette.py`
 
-## 🟠 Réel mais insuffisant en l'état (2)
-
-### Le vault HLP comme référence à battre — `hlp_benchmark`
-
-- **le chiffre** : mesuré à −0,01 % APR sur notre fenêtre : le battre ne prouve pas grand-chose, mais faire MOINS bien qu'un dépôt passif reste dominé
-- **mesuré le** : 2026-07-14
-- **pour rouvrir** : re-mesurer HLP sur une fenêtre plus longue
-- **où vérifier** : `mémoire projet : benchmark HLP`
+## 🟠 Réel mais insuffisant en l'état (1)
 
 ### Arbitrer une dislocation de prix Hyperliquid ↔ Binance — `arbitrage_cross_venue`
 

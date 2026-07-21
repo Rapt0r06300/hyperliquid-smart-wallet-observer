@@ -144,13 +144,20 @@ LOIS: tuple[Loi, ...] = (
 
     Loi(cle="hlp_benchmark",
         titre="Le vault HLP comme référence à battre",
-        verdict=VERDICT_LIMITE,
-        chiffre="mesuré à −0,01 % APR sur notre fenêtre : le battre ne prouve pas grand-chose, "
-                "mais faire MOINS bien qu'un dépôt passif reste dominé",
-        date="2026-07-14",
-        condition_de_reouverture="re-mesurer HLP sur une fenêtre plus longue",
-        mots_cles=("hlp", "vault", "benchmark", "depot passif"),
-        ou_verifier="mémoire projet : benchmark HLP"),
+        verdict=VERDICT_REFUTE,
+        chiffre="🔴 CORRIGÉ le 21/07 : notre mesure interne disait −0,01 % APR — elle portait "
+                "sur une fenêtre trop courte. La donnée PUBLIQUE 2026 dit **15 à 30 % APR** "
+                "sur la plupart des fenêtres trimestrielles (drawdowns 5-12 %). Notre carry "
+                "vaut ~12,9 %/an : **un dépôt passif dans HLP nous bat**. La stratégie est "
+                "DOMINÉE par une alternative sans code, sans surveillance et sans risque "
+                "d'exécution",
+        date="2026-07-21",
+        condition_de_reouverture="que le carry dépasse durablement 30 % APR net, OU que HLP "
+                                 "s'effondre. Attention : HLP n'est PAS delta-neutre (il porte "
+                                 "du risque directionnel et de liquidation) — la comparaison "
+                                 "est brutale mais pas parfaitement égale à risque",
+        mots_cles=("hlp", "vault", "benchmark", "depot passif", "rendement passif"),
+        ou_verifier="defillama.com/protocol/hyperliquid-hlp (public) + carry_backtest"),
 
     Loi(cle="carry_delta_neutre",
         titre="Carry delta-neutre (long spot + short perp) sur Hyperliquid",

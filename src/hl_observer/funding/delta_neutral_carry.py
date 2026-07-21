@@ -259,10 +259,16 @@ def evaluer_carry_neutre(
 
     # on n'encaisse le funding que si on est du BON cote : short perp encaisse un funding POSITIF
     funding_encaisse_h = max(0.0, float(funding_bps_h))
-    base_paie_seule = (base_bps >= frais * SEUIL_BASE_SEULE_FRACTION
+    # 🔴 21/07 — R3 DOIT SE MESURER SUR L'ALLER-RETOUR, comme le break-even. Ce seuil
+    # comparait la base aux frais d'ENTREE (11 bps) : une base de 20 bps semblait « payer a
+    # elle seule » alors qu'elle ne couvre pas les 22 bps des DEUX passages. On entrait donc
+    # pour une convergence qui, meme parfaite, laissait 2 bps de perte. Desormais la base doit
+    # couvrir l'aller-retour ENTIER, avec la meme marge de 30 %.
+    frais_aller_retour = 2.0 * frais
+    base_paie_seule = (base_bps >= frais_aller_retour * SEUIL_BASE_SEULE_FRACTION
                        and float(funding_bps_h) > FUNDING_MIN_TOLERE_BPS_H)
     if funding_encaisse_h <= 0 and not base_paie_seule:
-        if base_bps >= frais * SEUIL_BASE_SEULE_FRACTION:
+        if base_bps >= frais_aller_retour * SEUIL_BASE_SEULE_FRACTION:
             # la base payait, mais le funding est en HEMORRAGIE (<= -0,5 bps/h = -12 bps/jour) :
             # le loyer mangerait la capture avant la convergence. La note doit dire LA VRAIE
             # cause -- une note qui accuse le mauvais garde fabrique de faux diagnostics.
@@ -271,9 +277,10 @@ def evaluer_carry_neutre(
                                                    FUNDING_MIN_TOLERE_BPS_H))
         else:
             note = ("funding negatif : short le perp PAIE au lieu d'encaisser (et la base "
-                    "%.1f bps < %.1f = %.0f%% des frais : elle ne paie pas l'aller-retour a "
-                    "elle seule)" % (base_bps, frais * SEUIL_BASE_SEULE_FRACTION,
-                                     SEUIL_BASE_SEULE_FRACTION * 100))
+                    "%.1f bps < %.1f = %.0f%% des frais ALLER-RETOUR : elle ne paie pas les "
+                    "deux passages a elle seule)"
+                    % (base_bps, frais_aller_retour * SEUIL_BASE_SEULE_FRACTION,
+                       SEUIL_BASE_SEULE_FRACTION * 100))
         return CarryNeutre(coin, funding_bps_h, base_bps, liquidite_spot_usd, cout_entree,
                            None, None, None, False, MOTIF_FUNDING_TROP_FAIBLE, note)
     # R3 (19/07 soir) — LA PORTE BASE-CONVERGENCE. Le SEUL PnL realise positif du ledger vient
@@ -285,12 +292,24 @@ def evaluer_carry_neutre(
     # La sortie A5 (BASE_CONVERGEE_PREMIUM_CAPTURE) realise le gain ; le verrou de liquidation
     # s'applique comme a tout le monde.
 
-    # combien d'heures pour rembourser le cout d'entree ?
-    # Le plancher protocolaire est PERMANENT : meme un carry lent finit par rembourser.
-    # Ce n'est plus une question de "est-ce possible", mais de "en combien de temps".
+    # combien d'heures pour rembourser L'ALLER-RETOUR COMPLET ?
+    #
+    # 🔴 CORRIGE LE 21/07 — LE BREAK-EVEN IGNORAIT LA SORTIE. Cette boucle testait
+    # `funding_cumule >= cout_entree` : le cout de FERMETURE (11 bps maker, 2 jambes) n'y
+    # entrait pas. Au plancher protocolaire (0,125 bps/h) ces 11 bps valent **88 HEURES** de
+    # portage jamais comptees. La porte du feeder (MAX_BREAK_EVEN_H = 235 h) laissait donc
+    # passer des positions dont le vrai break-even atteignait 323 h, pour un age max de 336 h.
+    #
+    # MESURE DU 21/07 sur nos 12 positions vivantes : **4 coins sur 12** (STABLE, MON, AZTEC,
+    # AVAX) ne pouvaient PAS s'amortir avant leur revalidation forcee. Ce n'etaient pas des
+    # paris incertains : c'etaient des perdants garantis a l'ouverture.
+    #
+    # Une position ne « rembourse » pas quand elle a paye son entree — elle rembourse quand
+    # elle peut SORTIR sans perte. Tant qu'on n'a pas paye les deux jambes, on ne possede rien.
+    cout_aller_retour = cout_entree + COUT_MAKER_2_JAMBES_BPS
     heures = None
     for h in range(1, 24 * 30 + 1):               # jusqu'a 30 jours -- une position delta-neutre
-        if funding_cumule_bps(h, funding_encaisse_h) >= cout_entree:
+        if funding_cumule_bps(h, funding_encaisse_h) >= cout_aller_retour:
             heures = float(h)
             break
 

@@ -314,7 +314,7 @@ def _sec_univers_scan(root: Path) -> list[str]:
 
 def _sec_a_faire(root: Path, now_ms: int) -> list[str]:
     """Des CONSTATS actionnables dérivés des fichiers — jamais une promesse, jamais un ordre."""
-    out = ["## 12. À FAIRE — ce que les données d'aujourd'hui désignent", ""]
+    out = ["## 13. À FAIRE — ce que les données d'aujourd'hui désignent", ""]
     actions: list[str] = []
     try:  # cross-venue : verdict possible ?
         lignes = (root / "runtime" / "data" / "dispersion_venues.jsonl").read_text(
@@ -364,6 +364,32 @@ def _sec_a_faire(root: Path, now_ms: int) -> list[str]:
     return out
 
 
+def _sec_hors_plancher(root: Path) -> list[str]:
+    """QUI SORT DU PLANCHER (idée #7) — 57 % de nos relevés valent exactement 0,125 bps/h.
+    Classer des coins tous au plancher, c'est classer du bruit. Le vrai signal est : qui en
+    sort, et combien de temps. Statistique DESCRIPTIVE d'un passé, jamais une prédiction."""
+    out = ["## 11. Qui sort du plancher de funding", ""]
+    try:
+        import sys as _s
+        _s.path.insert(0, str(root / "src"))
+        from hl_observer.backtesting.carry_scan_recorder import charger
+        from hl_observer.funding.funding_hors_plancher import resume
+        r = resume(charger(root))
+    except Exception as exc:  # noqa: BLE001
+        return out + ["_indisponible : %s_" % exc]
+    if r.get("vide"):
+        return out + ["_%s_" % r.get("detail", "pas encore de données")]
+    out += ["- part globale du temps passé **au-dessus** du plancher : **%s %%** "
+            "(sur %d coin(s) exploitables)"
+            % (r["part_globale_hors_plancher_pct"], r["exploitables"]),
+            "- meilleur coin : **%s**" % r.get("meilleur"), "",
+            "| coin | temps hors plancher |", "|---|---:|"]
+    for c, pct in (r.get("classement") or []):
+        out.append("| %s | %.1f %% |" % (c, pct))
+    out += ["", "_%s._" % r.get("note", "")]
+    return out
+
+
 def _sec_lois(root: Path) -> list[str]:
     """CE QUI EST DÉJÀ TRANCHÉ — pour ne pas rouvrir dix fois le même dossier.
 
@@ -371,7 +397,7 @@ def _sec_lois(root: Path) -> list[str]:
     un autre outil, ou un redémarrage, et on pouvait ré-implémenter une stratégie qu'on avait
     prouvée perdante. Ils sont maintenant dans le dépôt, datés, avec leur chiffre.
     """
-    out = ["## 11. Ce qui est déjà tranché (lois mesurées)", ""]
+    out = ["## 12. Ce qui est déjà tranché (lois mesurées)", ""]
     try:
         import sys as _s
         _s.path.insert(0, str(root / "src"))
@@ -475,6 +501,7 @@ def generer(root: str | Path = RACINE, *, now_ms: int | None = None) -> str:
         secs.append(_sec_economie_positions(racine, now))
         secs.append(_sec_univers_scan(racine))
         secs.append(_sec_allocation(racine))
+        secs.append(_sec_hors_plancher(racine))
         secs.append(_sec_lois(racine))
         secs.append(_sec_a_faire(racine, now))
         for sec in secs:

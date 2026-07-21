@@ -69,10 +69,65 @@ LEVIERS_A_ESSAYER = (1.0, 1.5, 2.0, 3.0, 4.0, 5.0, 7.0, 10.0)
 # negative -> cout d'entree enorme -> jamais rembourse). Reglable :
 # HYPERSMART_CARRY_MAX_BREAK_EVEN_H. *** CONSEQUENCE HONNETE : un carry est NEGATIF ~3-4 jours
 # (le temps de rembourser l'entree), PUIS il monte. Il faut le TENIR, pas le churner. ***
+# 🔴 21/07 — LE PLAFOND DOIT ETRE COHERENT AVEC L'AGE MAX, pas une constante libre.
+# Une position vit au plus AGE_MAX_H_DEFAUT (336 h) avant revalidation forcee. Un carry dont
+# le break-even vaut 235 h ne passe que 101 h (30 % de sa vie) a GAGNER : on immobilise du
+# capital 14 jours pour 4 jours de rendement. On plafonne donc a la MOITIE de la vie de la
+# position -> au moins autant de temps a gagner qu'a rembourser.
+# (Le break-even inclut desormais la SORTIE — il a pris +88 h le meme jour, voir
+# delta_neutral_carry : le 235 d'hier valait en realite 323.)
 try:
-    MAX_BREAK_EVEN_H = float(os.environ.get("HYPERSMART_CARRY_MAX_BREAK_EVEN_H", "120") or 120.0)
+    from hl_observer.funding.carry_position_lifecycle import AGE_MAX_H_DEFAUT as _AGE_MAX
+except Exception:  # noqa: BLE001
+    _AGE_MAX = 336.0
+#: MARGE DE SECURITE : le funding encaisse sur la VIE ENTIERE d'une position doit couvrir
+#: k fois l'aller-retour. Pourquoi k > 1 : le COUT est CERTAIN et paye d'avance (frais +
+#: spread), le REVENU est INCERTAIN et peut s'arreter a toute heure. Exiger l'egalite (k=1)
+#: reviendrait a parier que le funding tient exactement jusqu'au bout. k=1,5 = on exige 50 %
+#: de revenu en plus que le cout certain.
+#: Valeurs mesurees au plancher (0,125 bps/h, vie 336 h, aller-retour 22 bps) :
+#:   k=1,00 -> plafond > 336 h (aucune marge)  |  k=1,25 -> 292 h
+#:   k=1,50 -> 248 h  <-- retenu               |  k=2,00 -> 160 h (ne laisse rien passer)
+#: k est un JUGEMENT, pas une mesure — il est ecrit ici pour pouvoir etre discute, et le
+#: backtest carry peut le balayer sur donnees reelles (`max_break_even_h`).
+MARGE_SECURITE_REVENU = 1.5
+
+
+def _plafond_break_even(age_max_h: float, funding_bps_h: float = 0.125,
+                        k: float = MARGE_SECURITE_REVENU) -> float:
+    """Le plafond de break-even DERIVE de la vie d'une position et de la marge exigee.
+
+    On cherche la plus grande heure `be` telle que le funding restant APRES le
+    remboursement couvre encore (k-1) fois l'aller-retour. Un plafond derive se defend par
+    une contrainte ; un plafond choisi se defend par une opinion.
+    """
+    try:
+        from hl_observer.funding.delta_neutral_carry import (COUT_MAKER_2_JAMBES_BPS,
+                                                             funding_cumule_bps)
+    except Exception:  # noqa: BLE001
+        return float(age_max_h) / 2.0
+    ar = 2.0 * COUT_MAKER_2_JAMBES_BPS
+    total = funding_cumule_bps(int(age_max_h), funding_bps_h)
+    if total < k * ar:                       # meme la vie entiere ne suffit pas
+        return 0.0
+    for h in range(1, int(age_max_h) + 1):
+        if total - funding_cumule_bps(h, funding_bps_h) < (k - 1.0) * ar:
+            return float(max(1, h - 1))
+    return float(age_max_h)
+
+
+PLAFOND_COHERENT_H = _plafond_break_even(_AGE_MAX)        # ~248 h au plancher, k=1,5
+try:
+    MAX_BREAK_EVEN_H = float(os.environ.get("HYPERSMART_CARRY_MAX_BREAK_EVEN_H",
+                                            str(PLAFOND_COHERENT_H)) or PLAFOND_COHERENT_H)
 except (TypeError, ValueError):
-    MAX_BREAK_EVEN_H = 120.0
+    MAX_BREAK_EVEN_H = PLAFOND_COHERENT_H
+# une valeur d'environnement ne peut pas rendre la porte INCOHERENTE : au-dela de la moitie de
+# la vie d'une position, on immobilise plus qu'on ne gagne. On ecrete, et on le DIT.
+if MAX_BREAK_EVEN_H > PLAFOND_COHERENT_H:
+    print("  plafond break-even %.0f h > le derive (%.0f h : vie %.0f h, marge x%.2f) -> ecrete"
+          % (MAX_BREAK_EVEN_H, PLAFOND_COHERENT_H, _AGE_MAX, MARGE_SECURITE_REVENU))
+    MAX_BREAK_EVEN_H = PLAFOND_COHERENT_H
 
 PLAFOND_SHORTLIST = 12   # top-K carrys viables : on ouvre TOUS les viables (plus d'ouvertures =
 #                        # plus de funding capté + plus de données pour le replay). Toujours filtré
@@ -382,7 +437,12 @@ def classer_viables(viables, *, top_k: int = PLAFOND_SHORTLIST):
         gain = x[3] if len(x) > 3 and x[3] is not None else -9e9
         z = x[4] if len(x) > 4 and x[4] is not None else 0.0     # A4 : a net ~egal, preferer le SPIKE
         heures = x[2] if x[2] is not None else 9e9
-        return (-gain, -z, heures)
+        # 🔴 21/07 — DEPARTAGER PAR BREAK-EVEN QUAND LES NETS SE TIENNENT. Le net est un gain
+        # MOYEN sur 30 jours : il dilue un cout d'entree qui est one-shot. Mesure du jour :
+        # XPL 148 h de break-even contre AVAX 567 h — un facteur ~4 que des nets voisins
+        # (2,22 vs 1,16 bps/j) ne montrent pas. On arrondit le net au centieme avant de trier :
+        # deux coins a net quasi identique sont alors departages par CELUI QUI REMBOURSE VITE.
+        return (-round(gain, 2), heures, -z)
     return sorted(viables, key=_cle)[:max(1, int(top_k))]
 
 
@@ -480,7 +540,11 @@ def scanner(diagnostic: bool):
             raison = ("base aberrante: perp %.4g$ vs spot %s %.4g$ (x%.0f -> pas de vrai spot jumelable)"
                       % (p["mark"], s["pair"], spot_px, ratio))
         elif liq < LIQUIDITE_MIN_USD:
-            raison = "spot HL trop mince (< 5k$)"
+            # 21/07 : ce motif annoncait « < 5k$ » alors que le seuil vaut LIQUIDITE_MIN_USD
+            # (derive : notionnel cible x securite de profondeur). Deuxieme motif en dur trouve
+            # en deux jours — un refus doit citer LE seuil applique, jamais un nombre de memoire.
+            raison = ("spot HL trop mince : %.0f $ < %.0f $ (notionnel cible %.0f x securite %.1f)"
+                      % (liq, LIQUIDITE_MIN_USD, NOTIONNEL_MAX_USD, SECURITE_PROFONDEUR))
         elif p["levier_max"] <= 0:
             raison = "levier max inconnu"
         elif pire is None:

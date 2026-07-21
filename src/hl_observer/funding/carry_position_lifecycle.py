@@ -260,6 +260,20 @@ class GestionnaireCarry:
                         cout_entree_bps=float(pos.get("cout_entree_bps") or 0.0),
                         funding_bps_h=fnow), 1),
                     "age_h": round((int(now_ms) - int(pos["entry_ts_ms"])) / 3.6e6, 2)}
+            # ── TIMING DU REGLEMENT (idee #6, 21/07) : Hyperliquid paie au SOMMET DE
+            # L'HEURE. Fermer 1 minute avant perd un reglement entier. On patiente — SAUF
+            # sur un DANGER, jamais retarde (le capital avant 0,125 bps).
+            if motif is not None:
+                try:
+                    from hl_observer.funding.carry_timing_reglement import conseil_sortie
+                    c = conseil_sortie(int(now_ms), funding_bps_h=fnow, motif_sortie=motif)
+                    if c["attendre"]:
+                        evt["sortie_reportee_reglement"] = {
+                            "ms": c["ms"], "gain_bps": c["gain_bps"], "motif": c["motif"]}
+                        self.ouvertes[coin] = pos
+                        return evt                      # on repasse au tick suivant
+                except Exception:  # noqa: BLE001 — un conseil rate ne bloque jamais une sortie
+                    pass
             if motif is not None:
                 base_sortie = (base_bps_courant if base_bps_courant is not None
                                else float(pos.get("base_bps_entree") or 0.0))   # inconnu -> conservateur

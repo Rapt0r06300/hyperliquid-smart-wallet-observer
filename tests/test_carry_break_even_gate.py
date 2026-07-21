@@ -7,6 +7,7 @@ carrys. On calibre donc à 120 h : les carrys normaux passent, les ABSURDES (bas
 coût d'entrée énorme) sont écartés. Conséquence honnête : un carry est négatif ~3-4 jours, PUIS monte."""
 from __future__ import annotations
 
+import pytest
 import importlib.util
 from pathlib import Path
 
@@ -25,8 +26,16 @@ def _break_even(funding_bps_h: float, base_bps: float = 0.0) -> float | None:
     return v.heures_pour_rentabiliser
 
 
-def test_plancher_calibre_sur_la_mesure():
-    assert _feeder.MAX_BREAK_EVEN_H == 120.0        # pas 24 : la mesure a montré que ça tuerait tout
+def test_le_plafond_est_DERIVE_de_la_vie_d_une_position_pas_choisi():
+    """🔴 REECRIT LE 21/07. L'ancien test gravait 120 h — un nombre choisi. Le plafond est
+    desormais DERIVE : la moitie de la vie d'une position (336 h / 2 = 168 h), pour qu'une
+    position passe au moins autant de temps a GAGNER qu'a rembourser. Un plafond choisi se
+    justifie par une opinion ; un plafond derive se justifie par une contrainte."""
+    from hl_observer.funding.carry_position_lifecycle import AGE_MAX_H_DEFAUT
+    assert _feeder.PLAFOND_COHERENT_H == pytest.approx(
+        _feeder._plafond_break_even(AGE_MAX_H_DEFAUT), abs=1.0)
+    assert 0 < _feeder.PLAFOND_COHERENT_H < AGE_MAX_H_DEFAUT
+    assert _feeder.MAX_BREAK_EVEN_H <= _feeder.PLAFOND_COHERENT_H
 
 
 def test_la_prime_decroit_le_break_even_reste_long():
@@ -37,9 +46,24 @@ def test_la_prime_decroit_le_break_even_reste_long():
     assert be_haut > 60.0                            # ...mais toujours ~3 jours, pas 20 h
 
 
-def test_carry_normal_PASSE_le_plancher():
-    be = _break_even(0.125)                          # cas réel d'aujourd'hui : ~88 h
-    assert be <= _feeder.MAX_BREAK_EVEN_H            # <= 120 -> on l'ouvre (il rembourse en 3-4 j)
+def test_carry_normal_PASSE_le_plafond():
+    """Le break-even inclut la sortie depuis le 21/07 : ~176 h au plancher, pas 88. Il doit
+    rester sous le plafond coherent (168 h) UNIQUEMENT si la base aide un peu — sinon un
+    carry a base nulle au plancher est, honnetement, a la limite."""
+    be = _break_even(0.125, base_bps=3.0)            # base legerement favorable
+    assert be is not None and be <= _feeder.MAX_BREAK_EVEN_H
+
+
+def test_un_carry_a_base_NULLE_au_plancher_PASSE_mais_de_justesse():
+    """Chiffre a garder sous les yeux : sans aide de la base, le funding plancher met ~176 h
+    a rembourser l'ALLER-RETOUR (7,3 jours), pour une position qui vit 14 jours. Ca passe —
+    mais il ne reste que la moitie de la vie pour gagner, et 20 bps nets au total."""
+    be = _break_even(0.125, base_bps=0.0)
+    assert be is not None
+    assert 160 <= be <= 200, be
+    assert be <= _feeder.MAX_BREAK_EVEN_H
+    from hl_observer.funding.carry_position_lifecycle import AGE_MAX_H_DEFAUT
+    assert be > AGE_MAX_H_DEFAUT * 0.4, "un carry au plancher n'est JAMAIS rapide, et le dire compte"
 
 
 def test_carry_ABSURDE_est_ecarte():

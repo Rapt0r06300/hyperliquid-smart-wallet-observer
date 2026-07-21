@@ -203,17 +203,19 @@ def test_a_NEGATIVE_funding_means_shorting_the_perp_PAYS_instead_of_earning():
     assert v.motif == MOTIF_FUNDING_TROP_FAIBLE
 
 
-def test_the_MEDIAN_funding_DOES_repay_the_two_legs_in_88_hours():
-    """LE RENVERSEMENT. Avec le plancher permanent, le funding MEDIAN (0,125 bps/h) rembourse
-    les 11 bps des deux jambes en 88 heures -- puis c'est du portage pur.
+def test_le_funding_MEDIAN_rembourse_l_ALLER_RETOUR_en_176_heures():
+    """🔴 REECRIT LE 21/07. Ce test affirmait 88 h — le temps de rembourser l'ENTREE seule.
+    Mais on ne possede rien tant qu'on n'a pas paye les DEUX aller-retours : entree 11 bps
+    ET sortie 11 bps. Au plancher (0,125 bps/h), c'est 176 h, pas 88.
 
-    (88 h et non 48 : le cout REEL de couverture est 11 bps, pas 6 -- spot maker 4,0 != perp 1,5.)
-    Il n'y a plus de SEUIL de funding. Il y a un DELAI. Ce n'est pas la meme chose du tout."""
+    L'ancienne version n'etait pas fausse sur son propre calcul : elle etait fausse sur ce
+    qu'elle appelait « rembourser ». Une position amortie a moitie n'est pas amortie."""
     assert funding_cumule_bps(88, 0.125) == pytest.approx(COUT_MAKER_2_JAMBES_BPS)
+    assert funding_cumule_bps(176, 0.125) == pytest.approx(2 * COUT_MAKER_2_JAMBES_BPS, rel=0.02)
     v = evaluer_carry_neutre(coin="MEDIAN", funding_bps_h=0.125, base_bps=0.0,
                              liquidite_spot_usd=100_000.0, **RISQUE_SURVIVABLE)
     assert v.viable is True
-    assert v.heures_pour_rentabiliser == 88.0
+    assert v.heures_pour_rentabiliser == pytest.approx(176.0, abs=4.0)
     # 🔴 T2b : le gain PUBLIE est desormais celui du CAPITAL TOTAL (spot cash + marge du perp).
     # Sur le notionnel seul on lisait ~84 bps ; avec m = 1,05 le capital double, et le vrai
     # rendement tombe a ~41 bps SUR L'HORIZON (30 j). C'est `gain_net_horizon_bps`.
@@ -236,7 +238,8 @@ def test_a_HIGH_and_PERSISTENT_funding_with_a_liquid_spot_IS_viable():
     v = evaluer_carry_neutre(coin="BON", funding_bps_h=8.0, base_bps=0.0,
                              liquidite_spot_usd=200_000.0, **RISQUE_SURVIVABLE)
     assert v.viable is True
-    assert v.heures_pour_rentabiliser is not None and v.heures_pour_rentabiliser <= 2
+    # 21/07 : <= 6 h et non <= 2 — le break-even inclut desormais la sortie.
+    assert v.heures_pour_rentabiliser is not None and v.heures_pour_rentabiliser <= 6
     assert v.gain_net_24h_bps is not None and v.gain_net_24h_bps > 0
 
 
@@ -302,7 +305,8 @@ def test_R3_une_base_riche_ouvre_MEME_a_funding_legerement_negatif():
     """LE SEUL PnL realise positif du ledger vient des captures de base (+0,12 $ x3).
     Avant : base 20 bps + funding -0,2 -> refuse (on jetait la strategie qui GAGNE).
     Desormais : la base paie l'aller-retour a elle seule -> on entre pour la convergence."""
-    v = evaluer_carry_neutre(coin="BASE_RICHE", funding_bps_h=-0.2, base_bps=20.0,
+    # 21/07 : 30 bps et non 20 — la base doit couvrir l'ALLER-RETOUR (22 bps), pas l'aller.
+    v = evaluer_carry_neutre(coin="BASE_RICHE", funding_bps_h=-0.2, base_bps=30.0,
                              liquidite_spot_usd=100_000.0, **RISQUE_SURVIVABLE)
     assert v.viable is True
     assert v.motif == "CARRY_BASE_CONVERGENCE_VIABLE"      # attribution distincte (P1 ops)

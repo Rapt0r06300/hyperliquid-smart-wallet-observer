@@ -48,7 +48,10 @@ def test_lignes_sans_ts_ou_sans_coin_sont_ignorees():
 
 def test_on_RE_DECIDE_le_levier_change_avec_la_securite():
     """Le cœur de l'honnêteté du backtest : changer un paramètre change VRAIMENT la décision."""
-    ligne = {"coin": "X", "funding_bps_h": 0.30, "base_bps": 5.0, "liquidite_spot_usd": 4e5,
+    # 21/07 : funding remonte a 3,0 — le break-even inclut desormais la SORTIE, un funding de
+    # 0,30 ne rembourse plus l'aller-retour sous le plafond par defaut. Le fixture doit tester
+    # le LEVIER, pas buter sur la porte de break-even.
+    ligne = {"coin": "X", "funding_bps_h": 3.0, "base_bps": 5.0, "liquidite_spot_usd": 4e5,
              "levier_max": 10.0, "pire_hausse_observee": 0.20, "perp_px": 100.0}
     lache = redecider(ligne, Config(securite_liquidation=1.0))
     serre = redecider(ligne, Config(securite_liquidation=3.0))
@@ -80,10 +83,10 @@ def test_un_levier_max_absurde_ecarte_le_coin_sans_lever():
 
 
 def test_le_backtest_utilise_le_snapshot_si_le_funding_de_decision_manque():
-    ligne = {"coin": "X", "funding_snapshot_bps_h": 0.30, "base_bps": 5.0,
+    ligne = {"coin": "X", "funding_snapshot_bps_h": 3.0, "base_bps": 5.0,
              "liquidite_spot_usd": 4e5, "levier_max": 10.0, "pire_hausse_observee": 0.10}
     rd = redecider(ligne, Config())
-    assert rd is not None and rd[0]["funding_bps_h"] == 0.30
+    assert rd is not None and rd[0]["funding_bps_h"] == 3.0
 
 
 # ------------------------------------------------------------------ rejeu
