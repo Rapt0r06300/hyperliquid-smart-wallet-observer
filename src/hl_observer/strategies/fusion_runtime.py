@@ -715,7 +715,8 @@ def _journaliser_fills_leaders(leader_votes) -> None:
             from hl_observer.ops.pannes_internes import noter_echec as _ne
             _ne("fusion_runtime:_journaliser_fills_leaders", exc)
         except Exception:  # noqa: BLE001 — le compteur lui-meme est best-effort
-            pass
+            from hl_observer.ops.echec_silencieux import noter as _ns
+            _ns("strategies/fusion_runtime.py:compteur_fallback")
 
 
 def _copy_whitelist_ok(conflict, leader_votes, no_trade) -> bool:

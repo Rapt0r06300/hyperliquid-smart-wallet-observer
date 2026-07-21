@@ -9,6 +9,7 @@ Regle dure : un fichier d'etat = UN seul mode. Si le mode demande != le mode du 
 VIDE (jamais de melange LIVE/BACKTEST/REPLAY/TEST_FIXTURE). PAPER only : aucun ordre, aucune signature.
 """
 from __future__ import annotations
+from hl_observer.ops.echec_silencieux import noter as _noter_echec
 
 import json
 import os
@@ -110,7 +111,7 @@ def _publier_allocation(root: str | Path, nets: dict, marges: dict, *, now_ms: i
         tmp.write_text(json.dumps(d, ensure_ascii=False, indent=1), encoding="utf-8")
         os.replace(tmp, chemin)
     except Exception:  # noqa: BLE001
-        pass
+        _noter_echec("hl_observer/funding/carry_positions_store.py:publier_allocation")
 
 
 def tick_multi_sur_disque(root: str | Path, mesures: dict[str, dict[str, Any]], *,
@@ -361,7 +362,7 @@ def etat_carry(root: str | Path = ".", *, mode: str = MODE_LIVE) -> dict[str, An
             r["stable_net_pnl_session"] = pnl_stable(r["realized_net_pnl_usdc_session"],
                                                      d["net_funding_settled"])
     except Exception:  # noqa: BLE001 — un decoupage rate ne fait pas disparaitre l'etat
-        pass
+        _noter_echec("hl_observer/funding/carry_positions_store.py:etat_carry_session")
     return r
 
 

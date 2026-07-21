@@ -17,6 +17,7 @@ Vérités respectées (CLAUDE.md) :
   * PAPER only : aucun ordre réel, aucune clé, aucune signature. Un paper trade n'est pas un ordre.
 """
 from __future__ import annotations
+from hl_observer.ops.echec_silencieux import noter as _noter_echec
 
 from dataclasses import dataclass, field
 from typing import Any
@@ -350,7 +351,7 @@ class GestionnaireCarry:
                         self.ouvertes[coin] = pos
                         return evt                      # on repasse au tick suivant
                 except Exception:  # noqa: BLE001 — un conseil rate ne bloque jamais une sortie
-                    pass
+                    _noter_echec("hl_observer/funding/carry_position_lifecycle.py:conseil_sortie")
             if motif is not None:
                 base_sortie = (base_bps_courant if base_bps_courant is not None
                                else float(pos.get("base_bps_entree") or 0.0))   # inconnu -> conservateur

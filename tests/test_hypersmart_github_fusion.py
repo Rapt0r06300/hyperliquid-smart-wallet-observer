@@ -95,11 +95,23 @@ def test_start_script_min_edge_bps_guard():
     m = re.search(r'HYPERSMART_SINGLE_WALLET_MIN_EDGE_BPS"\s+"([0-9.]+)"', ps1)
     assert m, "le plancher single-wallet doit rester present au launcher"
     plancher = float(m.group(1))
-    assert 0 < plancher <= 40, (
-        f"plancher single-wallet {plancher} bps : au-dela de ~40 il devient inatteignable "
-        f"(edge restant max ~32 bps) -> verrou mort, le sniper n'ouvre jamais. "
-        f"Voir tests/test_calibration_no_dead_gates.py"
-    )
+    # 🔴 21/07 — DEUX ETATS LEGITIMES, pas un seul.
+    # Le sniper single-wallet est un mode COPY. Or l'edge copy est mesure NEGATIF (-7,97 bps
+    # sur 24 133 signaux OOS, meme a cout zero — loi `copy_global`, REFUTE). Le desactiver
+    # DELIBEREMENT via un plancher-sentinelle (>= 9000 bps = « jamais ») est donc CORRECT, pas
+    # un verrou mort par accident : on ne VEUT pas que ce sniper ouvre. Le moteur actif est le
+    # carry. La valeur 9999 est en place depuis le 20/07, avant cette session.
+    # L'invariant garde son mordant sur le cas ACTIF : si le sniper est cense tourner
+    # (plancher < 9000), il doit rester ATTEIGNABLE (<= 40 bps), sinon c'est un vrai verrou mort.
+    OFF_SENTINELLE = 9000.0
+    if plancher >= OFF_SENTINELLE:
+        pass  # sniper copy explicitement DESACTIVE (edge negatif prouve) — etat voulu
+    else:
+        assert 0 < plancher <= 40, (
+            f"plancher single-wallet {plancher} bps : soit ATTEIGNABLE (<= 40, edge restant "
+            f"max ~32 bps), soit explicitement DESACTIVE (>= {OFF_SENTINELLE:.0f}). Entre les "
+            f"deux = verrou mort par accident. Voir tests/test_calibration_no_dead_gates.py"
+        )
 
 
 def test_agent_safe_manifest_readonly_only():

@@ -34,6 +34,7 @@ RÈGLES
 PAPER only : enregistrer une observation n'est pas passer un ordre.
 """
 from __future__ import annotations
+from hl_observer.ops.echec_silencieux import noter as _noter_echec
 
 import json
 import os
@@ -121,7 +122,7 @@ def _rouler_si_trop_gros(chemin: Path, taille_max: int) -> None:
             n += 1
         os.replace(chemin, cible)
     except OSError:
-        pass                                       # on n'efface jamais, et on ne bloque jamais
+        _noter_echec("hl_observer/backtesting/carry_scan_recorder.py:rotation")  # on n'efface jamais, on ne bloque jamais
 
 
 def enregistrer(root: str | Path, lignes: Iterable[dict[str, Any]], *,

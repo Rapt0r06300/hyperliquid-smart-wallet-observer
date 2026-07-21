@@ -24,6 +24,7 @@ L'AVERTISSEMENT DE L'ARTICLE, PRIS AU SÉRIEUX
 REPLAY-only : on rejoue des données enregistrées. Aucun ordre, aucun réseau requis ici.
 """
 from __future__ import annotations
+from hl_observer.ops.echec_silencieux import noter as _noter_echec
 
 import hashlib
 import json
@@ -57,7 +58,7 @@ def _ecrire_etat(chemin: Path, etat: dict[str, Any]) -> None:
         chemin.parent.mkdir(parents=True, exist_ok=True)
         chemin.write_text(json.dumps(etat, ensure_ascii=False, indent=1), encoding="utf-8")
     except OSError:
-        pass  # l'etat est un confort de reprise ; son echec d'ecriture ne stoppe pas la recherche
+        _noter_echec("hl_observer/backtesting/boucle_objectif_replay.py:sauver_etat")  # confort de reprise
 
 
 def boucle_objectif(

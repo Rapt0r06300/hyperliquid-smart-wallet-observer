@@ -52,6 +52,8 @@ import time
 from pathlib import Path
 from typing import Any
 
+from hl_observer.ops.echec_silencieux import noter as _noter_echec
+
 #: au-delà de ce retard, le consolidé est trop vieux pour ce qui le lit. 20 min = deux passes
 #: de feeder : on tolère qu'une passe saute sans déclencher une consolidation à chaque fois.
 RETARD_MAX_S = 20 * 60.0
@@ -83,7 +85,7 @@ def _verrou_pris(chemin: Path) -> bool:
         try:
             chemin.unlink()
         except OSError:
-            pass
+            _noter_echec("hl_observer/runtime/consolidation_periodique.py:verrou_perime")
         return False
     return True
 
@@ -114,7 +116,7 @@ def consolider_si_en_retard(root: str | Path = ".", *, retard_max_s: float = RET
         try:
             verrou.write_text(str(os.getpid()), encoding="utf-8")
         except OSError:
-            pass
+            _noter_echec("hl_observer/runtime/consolidation_periodique.py:pose_verrou")
         t0 = time.time()
         try:
             p = subprocess.run(
@@ -134,7 +136,7 @@ def consolider_si_en_retard(root: str | Path = ".", *, retard_max_s: float = RET
             try:
                 verrou.unlink()
             except OSError:
-                pass
+                _noter_echec("hl_observer/runtime/consolidation_periodique.py:libere_verrou")
         out["retard_apres_s"] = retard_s(racine)
         return out
     except Exception as exc:  # noqa: BLE001

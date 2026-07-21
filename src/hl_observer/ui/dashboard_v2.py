@@ -1100,7 +1100,7 @@ def create_dashboard_v2_router() -> APIRouter:
                             and (not sid or r.get("session_id") == sid)):
                         realise += float(r.get("realized_net_pnl_usdc") or 0.0)
             except (OSError, ValueError, TypeError):
-                pass
+                _noter_echec("hl_observer/ui/dashboard_v2.py:arb_realise_session")
             return JSONResponse({
                 "actif": bool(_os.environ.get("HYPERSMART_ARB_DISLOCATION_PAPER", "0") == "1"),
                 "positions_ouvertes": len(ouvertes), "positions": ouvertes,
@@ -1156,7 +1156,7 @@ def create_dashboard_v2_router() -> APIRouter:
             from hl_observer.runtime.equity_history_store import read_equity_points
             courbe = _ce.fusionner_copy(courbe, read_equity_points(max=max))
         except Exception:  # noqa: BLE001
-            pass
+            _noter_echec("hl_observer/ui/dashboard_v2.py:fusion_copy_courbe")
         courbe.update({"count": len(courbe.get("points") or []), "inclut_carry": True,
                        "read_only": True, "real_execution": False})
         return JSONResponse(courbe)

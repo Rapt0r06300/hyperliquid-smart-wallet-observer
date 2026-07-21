@@ -186,7 +186,7 @@ def merge_replay(base: str | Path, out_dir: str | Path | None = None) -> dict:
             if time.time() - orphelin.stat().st_mtime > 300.0:   # pas celui d'une fusion vivante
                 orphelin.unlink()
         except OSError:
-            pass
+            _noter_echec("hl_observer/runtime/replay_recorder.py:orphelin_mergetmp")
     counts: dict[str, int] = {}
     for name in ("candidates.jsonl", "marks.jsonl"):
         try:
@@ -220,7 +220,7 @@ def merge_replay(base: str | Path, out_dir: str | Path | None = None) -> dict:
                     try:
                         tmp.unlink()
                     except OSError:
-                        pass
+                        _noter_echec("hl_observer/runtime/replay_recorder.py:tmp_merge_cleanup")
         except Exception:
             _noter_echec("hl_observer/runtime/replay_recorder.py:186")
             counts[name] = None      # None = ECHEC avoue, jamais 0 (qui se lirait « vide »)
@@ -242,7 +242,7 @@ def merge_replay(base: str | Path, out_dir: str | Path | None = None) -> dict:
         marqueur.write_text(json.dumps({k: v for k, v in counts.items()
                                         if isinstance(v, int)}), encoding="utf-8")
     except OSError:
-        pass
+        _noter_echec("hl_observer/runtime/replay_recorder.py:marqueur_deltas")
     return {"out": str(out), "counts": counts, "depuis_la_derniere_fois": deltas}
 
 

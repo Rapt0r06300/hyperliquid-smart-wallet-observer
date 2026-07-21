@@ -117,11 +117,17 @@ def _plafond_break_even(age_max_h: float, funding_bps_h: float = 0.125,
 
 
 PLAFOND_COHERENT_H = _plafond_break_even(_AGE_MAX)        # ~248 h au plancher, k=1,5
+#: 🔴 repli FAIL-SAFE quand l'env est ILLISIBLE (pas absent) : on retombe sur une valeur
+#: CONSERVATRICE, jamais sur le plafond derive. Une saisie corrompue ne doit pas ELARGIR la
+#: fenetre d'admission par accident — le defaut sur en cas de doute est le plus BAS, pas le
+#: plus haut. 120 h etait le defaut historique avant la fenetre elargie : on y revient si le
+#: reglage est illisible (test_reglages_volume_donnees).
+FAIL_SAFE_BREAK_EVEN_H = 120.0
 try:
     MAX_BREAK_EVEN_H = float(os.environ.get("HYPERSMART_CARRY_MAX_BREAK_EVEN_H",
                                             str(PLAFOND_COHERENT_H)) or PLAFOND_COHERENT_H)
 except (TypeError, ValueError):
-    MAX_BREAK_EVEN_H = PLAFOND_COHERENT_H
+    MAX_BREAK_EVEN_H = FAIL_SAFE_BREAK_EVEN_H
 # une valeur d'environnement ne peut pas rendre la porte INCOHERENTE : au-dela de la moitie de
 # la vie d'une position, on immobilise plus qu'on ne gagne. On ecrete, et on le DIT.
 if MAX_BREAK_EVEN_H > PLAFOND_COHERENT_H:
