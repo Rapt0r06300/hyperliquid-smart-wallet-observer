@@ -55,11 +55,27 @@ def construire_fills_forward(root: str | Path = RACINE, *, horizon_min: float = 
                               for c, pts in marks.items()}
     lignes = []
     bruts = [l for l in bruts_p.read_text(encoding="utf-8").splitlines() if l.strip()]
+    import time as _time
+    _now = _time.time()
+    ecartes = 0
     for l in bruts[-max_bruts:]:
         try:
             f = json.loads(l)
             coin, ts = str(f.get("coin") or "").upper(), float(f.get("ts_ms") or 0) / 1000.0
         except (ValueError, TypeError):
+            continue
+        # 🔴 21/07 — DES FIXTURES DE TEST DANS LA DONNEE LIVE. L'audit de fraicheur annoncait
+        # 495 734 h d'etendue (56 ans) sur ce fichier : 3 lignes portaient ts_ms=0 et des
+        # adresses 0x1111.../0x2222.../0x3333.... Un leader synthetique qui accumulerait assez
+        # de fills pourrait entrer dans la whitelist — c'est-a-dire debloquer le copy sur une
+        # donnee FABRIQUEE. Regle : un fill doit etre horodate dans une fenetre plausible et
+        # porter une adresse qui n'est pas un motif de test.
+        if not (1_577_836_800.0 <= ts <= _now + 3600.0):
+            ecartes += 1
+            continue
+        _adr = str(f.get("adresse") or "").lower()
+        if _adr[2:].strip("0123456789abcdef") == "" and len(set(_adr[2:])) <= 1:
+            ecartes += 1          # 0x1111..., 0x0000... : motif synthetique, jamais un wallet
             continue
         pts = tries.get(coin)
         if not pts or not f.get("adresse") or ts <= 0:
@@ -71,6 +87,9 @@ def construire_fills_forward(root: str | Path = RACINE, *, horizon_min: float = 
             lignes.append(json.dumps({"adresse": f["adresse"], "side": f.get("side"),
                                       "mid_at_fill": mid_fill, "mid_forward": mid_fwd},
                                      ensure_ascii=False))
+    if ecartes:
+        print("  %d fill(s) ECARTE(S) : horodatage implausible ou adresse synthetique "
+              "(fixtures de test dans la donnee live)" % ecartes)
     sortie = racine / FILLS_DEFAUT
     sortie.parent.mkdir(parents=True, exist_ok=True)
     sortie.write_text("\n".join(lignes) + ("\n" if lignes else ""), encoding="utf-8")

@@ -25,7 +25,8 @@ Statuts : `DONE_VERIFIED` · `DONE_BUT_REGRESSED` · `DONE_DOC_ONLY` · `PARTIAL
 |---|---|---|---|
 | P0-1 | **Séparer funding ENCAISSÉ / funding ESTIMÉ.** `accruer()` crédite un prorata linéaire ; Hyperliquid règle au **sommet de l'heure**. Une estimation ne doit jamais s'appeler « encaissé ». | `DONE_VERIFIED` | `paper_trading/funding_settlement.py` + tests ; branché dans `etat_carry` et l'endpoint `/v2/carry` |
 | P0-2 | **Une seule couche faisant autorité** — dashboard, rapport, ledger, laboratoire. | `PARTIALLY_DONE` | le réalisé vient du ledger pour tous ✅ ; le dashboard recompose encore le MtM de base côté endpoint → à descendre dans une couche commune |
-| P0-3 | **Invariant anti-contournement des portes replay** — les portes existent, rien n'interdit de les désactiver. | `TODO_ACTIVE` | aucun test n'échoue si `stress ×1,5` ou `≥ 30 trades/moitié` est retiré |
+| P0-3 | **Invariant anti-contournement des portes replay** | `DONE_VERIFIED` | 23 tests : les 4 seuils gravés, 11 cas de triche refusés un par un, cohérence README↔code |
+| P0-3bis | Déterminisme du laboratoire, attaque directe du lookahead, reprise après Ctrl-C | `TODO_ACTIVE` | non testés (voir `REPLAY_ANTI_LIE_GATE_AUDIT.md` §4) |
 | P0-4 | **Tests PnL scénarisés** : carry neutre parfait, hedge insuffisant, funding ±, basis ±, fermeture partielle, frais 2 jambes, rééquilibrage, mapping UBTC/BTC, arbitrage 2 jambes, copy LONG/SHORT, fill dupliqué, snapshot répété, donnée absente. | `PARTIALLY_DONE` | 7 invariants économiques (L1-L7, ~700 cas générés) couvrent une partie ; 8 scénarios manquent |
 
 ## P1 — Protéger et prouver le Carry (seul moteur qui ouvre)
@@ -65,7 +66,7 @@ Statuts : `DONE_VERIFIED` · `DONE_BUT_REGRESSED` · `DONE_DOC_ONLY` · `PARTIAL
 
 | # | Tâche | Statut | Preuve / blocage |
 |---|---|---|---|
-| P4-1 | **Prix EXÉCUTABLES au lieu de deux mids** (best_bid/ask, tailles, âge de quote, santé de source) | `TODO_ACTIVE` | défaut confirmé : `ecart_prix_bps = (mid_HL − mid_BIN)/mid_BIN` |
+| P4-1 | **Prix EXÉCUTABLES au lieu de deux mids** | `TODO_ACTIVE` | défaut confirmé ; 369 opportunités exportées, toutes `prix_executable_mesure=false` |
 | P4-2 | Décomposer le coût all-in (frais ×2, spread ×2, slippage ×2, latence, funding, risque de jambe, incertitude) | `PARTIALLY_DONE` | `COUT_AR_BPS = 8` est un forfait 2 jambes ; la décomposition n'existe pas |
 | P4-3 | Seuil **dynamique** `coût_estimé + marge` au lieu d'une constante | `TODO_ACTIVE` | dépend de P4-2 |
 | P4-4 | Étude de **convergence avant** tout réglage de seuil | `DONE_VERIFIED` | −2,26 bps à 30 min sur 912 écarts, 64,9 % de réductions → verdict `LIMITE` |
@@ -77,15 +78,16 @@ Statuts : `DONE_VERIFIED` · `DONE_BUT_REGRESSED` · `DONE_DOC_ONLY` · `PARTIAL
 | # | Tâche | Statut | Preuve / blocage |
 |---|---|---|---|
 | P5-1 | Collecte C12 des fills de leaders | `DONE_VERIFIED` | 3 947 fills bruts sur 6,8 h |
-| P5-2 | Markout forward par leader | `PARTIALLY_DONE` | 173 fills marqués, 12 leaders évalués, **aucun n'atteint 30 fills** |
-| P5-3 | Scorecard complet par leader (edge brut/net, horizons, stabilité, copyability, LONG/SHORT, dépendance à un gros gain, taux de signaux incomplets) | `BLOCKED_DATA` | dépend de P5-2 |
+| P5-2 | Markout forward par leader | `DONE_VERIFIED` | 12 leaders scorés ; seuil **20 fills** ; **2 qualifiés, tous deux NÉGATIFS** (−4,09 et −34,06 bps) ; 0 garde retenu |
+| P5-3 | Scorecard complet (edge **net**, stabilité, copyability, LONG/SHORT, dépendance à un gros gain) | `PARTIALLY_DONE` | `copyability_scorecard.json` livré avec l'edge BRUT ; les 5 autres critères restent `DATA_MISSING` |
+| P5-5 | 🔴 Fixtures de test dans la donnée live (`ts_ms=0`, `0x1111…`) | `DONE_VERIFIED` | garde + test ; un leader fabriqué aurait pu déverrouiller le copy |
 | P5-4 | Première réhabilitation en **shadow paper**, jamais dans le moteur principal | `TODO_ACTIVE` | le mode shadow n'existe pas |
 
 ## P6 — Décision produit Liquidations
 
 | # | Tâche | Statut | Preuve / blocage |
 |---|---|---|---|
-| P6-1 | Trancher : arrêter / changer d'univers de wallets / détecter depuis le marché | `TODO_ACTIVE` | 231 grappes existent ; ce qui manque est un **mécanisme de décision**, pas la donnée |
+| P6-1 | Trancher : arrêter / changer d'univers / détecter depuis le marché | `DONE_VERIFIED` | verdict **`RESEARCH_NEW_UNIVERSE`** : cibler les comptes à fort levier. Réactivation conditionnée à ≥ 50 événements **et** markout net positif OOS |
 
 ## P7 — Clarifier Grinder / Sniper
 
@@ -99,7 +101,8 @@ Statuts : `DONE_VERIFIED` · `DONE_BUT_REGRESSED` · `DONE_DOC_ONLY` · `PARTIAL
 | # | Tâche | Statut | Preuve / blocage |
 |---|---|---|---|
 | P8-1 | `isSnapshot=true` distingué de `false` ; snapshot non rejoué comme événements | `TODO_ACTIVE` | non vérifié dans cette passe |
-| P8-2 | Métriques p50/p95/p99 par source, trous, reconnexions, doublons, hors-ordre | `TODO_ACTIVE` | `data/reports/source_freshness_metrics.json` non produit |
+| P8-2 | Métriques p50/p95/p99 par source, trous, doublons | `DONE_VERIFIED` | `source_freshness_metrics.json` : 4 sources, **0 doublon**, cross-venue p50 = 253,8 s |
+| P8-6 | ⚠️ La cadence ×5 n'est pas active | `BLOCKED_DEPENDENCY` | écrite dans les launchers, **effective au prochain redémarrage de Flo** |
 | P8-3 | Superviseur qui relance les collecteurs morts | `DONE_VERIFIED` | `ops/superviseur_collecteurs.py`, compteurs au rapport |
 | P8-4 | Anti-orphelins (les collecteurs meurent avec le moteur) | `DONE_VERIFIED` | `collecteur_doit_vivre.py` |
 | P8-5 | Prioriser la fraîcheur **là où elle a une valeur économique** (arbitrage, fills copy, rééquilibrage carry) — pas partout | `PARTIALLY_DONE` | cadence arbitrage ×5 faite ; le reste non priorisé |

@@ -82,9 +82,27 @@ marge et par jour, stabilité par régime.
 | Réactivation sur preuve individuelle | `PROVEN_BY_CODE` | `ecrire_copy_whitelist.py` → deny-by-default, liste vide = verrou |
 | « laboratoire confirmé sur 441 000 candidats » | `PARTIALLY_PROVEN` | le corpus fait **443 783** candidats ; le chiffre du README est arrondi vers le bas, pas faux |
 
-**Manque** : le scorecard par leader (fills, markout par horizon, edge net, stabilité,
-copyability, LONG/SHORT, dépendance à un gros gain). `DATA_MISSING` — 173 fills marqués, le
-seuil interne est de 30 par leader, aucun ne l'atteint encore.
+**Scorecard produit** (`data/reports/copy_leader_forward_markouts.csv`) :
+
+| leader | fills mesurés | markout forward | statut |
+|---|---:|---:|---|
+| `0xf5d81a135f756c…` | **96** | **−4,09 bps** | `LOCKED_NEGATIVE_EDGE` |
+| `0x71d0e11ebb6150…` | **27** | **−34,06 bps** | `LOCKED_NEGATIVE_EDGE` |
+| `0x5323b92268b4e1…` | 8 | +43,96 bps | `LOCKED_NO_DATA` |
+| 9 autres | 1-11 | — | `LOCKED_NO_DATA` |
+
+Seuil interne : **20 fills** (`MIN_EVENEMENTS`), pas 30 — correction d'une affirmation
+antérieure de ce document. **Deux leaders sont désormais qualifiés, et tous deux sont
+NÉGATIFS.** Le seul markout positif notable (+43,96) repose sur 8 fills : un seul mouvement
+suffit à le produire. Gardes retenus : **0 / 12** → whitelist vide → copy verrouillé.
+
+🔴 **Défaut d'intégrité trouvé et corrigé** : 3 fixtures de test (`ts_ms=0`, adresses
+`0x1111…`) polluaient `leader_fills_bruts.jsonl` et faisaient annoncer **495 734 h**
+d'étendue. Un leader fabriqué aurait pu entrer dans la whitelist. Garde posée + test.
+Étendue réelle : **7,4 h**.
+
+Restent `DATA_MISSING` : edge NET après coûts, stabilité temporelle, copyability,
+dégradation fill→détection, LONG/SHORT, dépendance à un gros gain.
 
 ---
 
