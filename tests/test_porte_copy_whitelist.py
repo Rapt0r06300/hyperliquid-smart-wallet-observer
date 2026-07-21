@@ -129,17 +129,27 @@ def test_construire_fills_forward_joint_bruts_et_marks_sans_jamais_inventer(tmp_
     spec = importlib.util.spec_from_file_location(
         "ecw", _P(__file__).resolve().parents[1] / "tools" / "ecrire_copy_whitelist.py")
     m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
-    d = tmp_path / "runtime" / "data"; d.mkdir(parents=True)
+    # 🔴 21/07 — FIXTURE CORRIGEE, ET C'ETAIT ELLE QUI AVAIT TORT.
+    # Elle datait le fill a `ts_ms = 1_000_000`, soit le 1er janvier 1970. Le garde
+    # anti-fixtures ajoute le meme jour (un horodatage doit tomber dans une fenetre
+    # plausible, sinon un leader SYNTHETIQUE pourrait entrer dans la whitelist et
+    # debloquer le copy sur une donnee FABRIQUEE) rejetait donc la fixture elle-meme.
+    # Le garde a raison ; la fixture doit vivre dans le present, comme la vraie donnee.
+    import time as _t
+    T0 = _t.time() - 7200.0                       # il y a 2 h : plausible, et assez vieux
+    d = tmp_path / "runtime" / "data"; d.mkdir(parents=True)                # pour le forward
     (d / "leader_fills_bruts.jsonl").write_text("\n".join([
-        _j.dumps({"adresse": "0xAA", "coin": "SOL", "side": "LONG", "ts_ms": 1_000_000}),
-        _j.dumps({"adresse": "0xBB", "coin": "SOL", "side": "SHORT", "ts_ms": 9_999_000_000}),
+        _j.dumps({"adresse": "0xa17e4f2c9b8d3e6a1f05c7d2b94e8a3f6c0d1b25", "coin": "SOL", "side": "LONG",
+                  "ts_ms": int(T0 * 1000)}),
+        _j.dumps({"adresse": "0xb28f5a3d0c9e4f7b2a16d8e3ca05f9b4d7e2c136", "coin": "SOL", "side": "SHORT",
+                  "ts_ms": int((T0 + 9_000_000) * 1000)}),   # hors de toute plage de marks
     ]) + "\n", encoding="utf-8")
     r = tmp_path / "runtime" / "replay" / "_merged"; r.mkdir(parents=True)
     (r / "candidates.jsonl").write_text("{}\n", encoding="utf-8")
     (r / "marks.jsonl").write_text("\n".join(
-        _j.dumps({"coin": "SOL", "ts": 1000 + k, "mid": 100.0 + k}) for k in (10, 1800, 1850))
+        _j.dumps({"coin": "SOL", "ts": T0 + k, "mid": 100.0 + k}) for k in (10, 1800, 1850))
         + "\n", encoding="utf-8")
     n = m.construire_fills_forward(tmp_path, horizon_min=30.0)
     assert n == 1, "0xAA a fill+forward ; 0xBB (aucun mark) est ignore, jamais invente"
     row = _j.loads((d / "leader_fills_forward.jsonl").read_text(encoding="utf-8"))
-    assert row["adresse"] == "0xAA" and row["mid_at_fill"] == 110.0 and row["mid_forward"] == 1900.0
+    assert row["adresse"].startswith("0xa17e4f") and row["mid_at_fill"] == 110.0 and row["mid_forward"] == 1900.0

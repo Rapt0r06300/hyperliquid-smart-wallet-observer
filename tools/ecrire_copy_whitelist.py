@@ -47,13 +47,26 @@ def construire_fills_forward(root: str | Path = RACINE, *, horizon_min: float = 
     bruts_p = racine / BRUTS_DEFAUT
     if not bruts_p.exists():
         return 0
-    from hl_observer.backtesting.ab_flag_replay import load_jsonl, marks_by_coin
-    from hl_observer.backtesting.recherche_scenario import repertoire_replay_consolide
-    base = repertoire_replay_consolide(racine)
-    marks = marks_by_coin(load_jsonl(str(base / "marks.jsonl")))
-    tries: dict[str, list] = {c: sorted((float(t), float(m)) for (t, m) in pts)
-                              for c, pts in marks.items()}
+    # ══ 🔴 21/07 — POURQUOI 97,6 % DES FILLS N'AVAIENT PAS DE PRIX ══
+    # La whitelist etait vide : 12 leaders evalues, 0 qualifie, aucun n'atteignant les 30
+    # mesures exigees. On croyait la porte trop stricte ; elle n'avait RIEN a juger.
+    #     fills bruts 7 184  ->  fills avec markout 173  =  2,4 %
+    # Instrumentation : 88,4 % perdus sur « pas de mark ». Puis la mesure decisive :
+    #     marks lus : de -319,1 h a -10,9 h   (s'ARRETENT il y a 11 h)
+    #     fills     : de  -11,8 h a  -0,2 h   (1 h de recouvrement)
+    # Ni la fenetre ni la densite : sur BTC/HYPE/ETH les marks tombent toutes les 2 SECONDES.
+    # Le pipeline lisait `_merged/marks.jsonl` fige a 10:06 pendant que les shards bruts
+    # `marks.*.jsonl` continuaient d'etre ecrits jusqu'a 20:38. La collecte VIVAIT ; c'est la
+    # CONSOLIDATION qui n'avait pas tourne depuis 11 heures.
+    # `marks_source` lit donc le consolide ET les shards frais, prend le mark le plus proche
+    # AVANT OU APRES (l'ancienne regle ne regardait qu'apres : un mark 30 s avant etait rejete
+    # quand un mark 290 s apres passait), et SIGNALE un recouvrement rompu.
+    from hl_observer.copy_wallet.marks_source import (apparier_avec_cause, charger_marks,
+                                                      diagnostic_recouvrement)
+    tries = charger_marks(racine)
     lignes = []
+    causes: dict[str, int] = {}
+    ts_fills: list[float] = []
     bruts = [l for l in bruts_p.read_text(encoding="utf-8").splitlines() if l.strip()]
     import time as _time
     _now = _time.time()
@@ -77,22 +90,51 @@ def construire_fills_forward(root: str | Path = RACINE, *, horizon_min: float = 
         if _adr[2:].strip("0123456789abcdef") == "" and len(set(_adr[2:])) <= 1:
             ecartes += 1          # 0x1111..., 0x0000... : motif synthetique, jamais un wallet
             continue
-        pts = tries.get(coin)
-        if not pts or not f.get("adresse") or ts <= 0:
+        if not f.get("adresse") or ts <= 0:
             continue
-        mid_fill = next((m for (t, m) in pts if ts <= t <= ts + 300.0), None)
-        h = horizon_min * 60.0
-        mid_fwd = next((m for (t, m) in pts if ts + h <= t <= ts + h + 900.0), None)
-        if mid_fill and mid_fwd:
-            lignes.append(json.dumps({"adresse": f["adresse"], "side": f.get("side"),
-                                      "mid_at_fill": mid_fill, "mid_forward": mid_fwd},
-                                     ensure_ascii=False))
+        ts_fills.append(ts)
+        r = apparier_avec_cause(tries, coin=coin, ts=ts, horizon_s=horizon_min * 60.0)
+        if not r.get("ok"):
+            causes[r["cause"]] = causes.get(r["cause"], 0) + 1
+            continue
+        lignes.append(json.dumps(
+            {"adresse": f["adresse"], "side": f.get("side"),
+             "mid_at_fill": r["mid_at_fill"], "mid_forward": r["mid_forward"],
+             # l'ECART temporel voyage avec la mesure : un appariement lointain doit rester
+             # contestable plus tard, pas se fondre anonymement dans une moyenne.
+             "ecart_fill_s": r["ecart_fill_s"], "ecart_forward_s": r["ecart_forward_s"],
+             "coin": coin, "ts_ms": int(ts * 1000)}, ensure_ascii=False))
     if ecartes:
         print("  %d fill(s) ECARTE(S) : horodatage implausible ou adresse synthetique "
               "(fixtures de test dans la donnee live)" % ecartes)
+    # ── LE CONTROLE QUI MANQUAIT ────────────────────────────────────────────────────────
+    # Ce bug a vecu 11 heures parce que le pipeline rendait 173 lignes au lieu de 7 000 SANS
+    # RIEN DIRE. Une mesure qui perd 97 % de sa matiere doit le declarer.
+    diag = diagnostic_recouvrement(tries, ts_fills)
+    total = max(1, len(ts_fills))
+    print("  markout : %d mesure(s) sur %d fill(s) = %.1f %%"
+          % (len(lignes), total, 100.0 * len(lignes) / total))
+    if causes:
+        print("  causes de perte : "
+              + " · ".join("%s=%d" % (k, v)
+                           for k, v in sorted(causes.items(), key=lambda kv: -kv[1])))
+    if diag.get("rompu"):
+        print("  !! RECOUVREMENT ROMPU : %s" % diag.get("motif"))
+        print("     -> lance la consolidation du replay AVANT de juger un leader :")
+        print("        python -m hl_observer.runtime.replay_recorder --base runtime/replay")
     sortie = racine / FILLS_DEFAUT
     sortie.parent.mkdir(parents=True, exist_ok=True)
     sortie.write_text("\n".join(lignes) + ("\n" if lignes else ""), encoding="utf-8")
+    # le diagnostic est ECRIT a cote : la whitelist doit pouvoir dire si son verdict repose
+    # sur une mesure complete ou sur un pipeline en retard.
+    try:
+        (racine / FILLS_DEFAUT).with_suffix(".diagnostic.json").write_text(
+            json.dumps({**diag, "mesures": len(lignes), "fills": total,
+                        "couverture_pct": round(100.0 * len(lignes) / total, 2),
+                        "causes": causes, "real_execution": False},
+                       ensure_ascii=False, indent=2), encoding="utf-8")
+    except OSError:
+        pass
     return len(lignes)
 
 
