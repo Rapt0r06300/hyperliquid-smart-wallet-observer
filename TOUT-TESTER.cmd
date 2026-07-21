@@ -12,8 +12,15 @@ REM    3. INVARIANTS      les LOIS du PnL (property-based, ~700 cas generes) :
 REM                       aucun gain sorti de rien, couts toujours payes, portes tenues
 REM    4. CABLAGE         modules cables / testes-seulement / orphelins
 REM    5. DONNEES         qualite du replay (etiquetage, couverture, doublons, prix)
-REM    6. RECHERCHE       pepites par module (carry, copy, arbitrage, cross-venue)
-REM    7. SANTE LIVE      moteur, collecteurs, positions, mesures en cours
+REM    6. BACKTESTS       carry (nos vraies passes rejouees sous d'autres reglages) et
+REM                       arbitrage (l'ecart HL<->Binance se referme-t-il ? convergence
+REM                       mesuree AVANT tout balayage de seuils)
+REM    7. RECHERCHE       pepites par module (carry, copy, arbitrage, cross-venue)
+REM    8. SANTE LIVE      moteur, collecteurs, positions, mesures en cours
+REM
+REM  LE RECAP CITE AUSSI LE VOLUME DE DONNEES par source (lignes / Mo / etendue).
+REM  Ce qu'on ne cite pas, on le surestime : c'est cette table qui a revele que le carry
+REM  n'avait que 96 lignes rejouables le 21/07.
 REM
 REM  BON A SAVOIR :
 REM    - une etape qui plante n'arrete PAS les suivantes (son verdict = ERREUR) ;

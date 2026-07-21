@@ -2,7 +2,7 @@
 
 > **Document maître.** Source de vérité des règles = `CLAUDE.md` (racine) + `AGENTS.md`.
 > Ce fichier résume **où on en est**, **comment on travaille**, et **ce qui reste à faire**.
-> Dernière mise à jour : **2026-07-21** (§3bis : allocation par rendement net).
+> Dernière mise à jour : **2026-07-21** (§3bis allocation ; §3ter données & backtests).
 
 ---
 
@@ -89,6 +89,36 @@ n'achète pas du risque.
 - **crash latent** : `levier_max <= 0` renvoyé par l'API levait une `ValueError` non attrapée →
   toute la passe du feeder tombait → plus de shortlist → `INPUTS_PERIMES` → bot affamé. C'est
   le mode de panne exact du 19/07. Un coin malformé est désormais **écarté**, pas fatal.
+
+## 3ter. Des données pour décider (2026-07-21, soir)
+
+**L'inventaire qui a tout déclenché** — combien de données rejouables par module :
+
+| source | volume | verdict |
+|---|---|---|
+| copy / replay | 443 783 candidats + 355 190 marks (215 Mo) | masse |
+| cross-venue | 9 038 lignes / 48 h | correct |
+| **carry** | **96 lignes** (le ledger OPEN/CLOSE) | **quasi rien** |
+
+Le carry est notre seul module rentable, et c'était celui dont on ne gardait presque rien.
+Chaque passe calculait pour ~20 coins un dossier complet — puis l'écrasait ; les coins
+**refusés** ne laissaient aucune trace.
+
+- `backtesting/carry_scan_recorder` — journal append-only des scans (~2 900 lignes/jour),
+  refus et motifs compris. Ne lève jamais, liste blanche de champs, rotation par renommage.
+- `backtesting/carry_backtest` — rejoue les vraies passes sous d'autres réglages en
+  **re-décidant** via `evaluer_carry_neutre` (pas un re-filtrage). Garde-fou : un gain obtenu
+  en **baissant la sécurité de liquidation est refusé** — une fenêtre sans krach ne contient
+  pas la liquidation qu'on vient de rendre possible.
+- `backtesting/arb_backtest` — la question de Flo (« il n'ouvre que deux fois par mois »)
+  prise dans le bon ordre : **la convergence d'abord**, les seuils ensuite. Mesuré sur 912
+  écarts réels : |écart| se réduit de **2,26 bps à 30 min** (64,9 % des cas) — ça converge,
+  mais moins que les **8 bps** d'aller-retour. Seuls les écarts extrêmes paient : à 8 bps
+  d'ouverture, 19 entrées, capture moyenne 8,53 bps. Notre seuil de 15 bps n'a produit
+  qu'**une** entrée. *Rien n'a été changé en live : 19 entrées, c'est mince.*
+- Cadence cross-venue **300 s → 60 s** (×5 de données) : à 5 min d'échantillonnage, une
+  dislocation de 20 bps qui dure 3 minutes est invisible — or c'est celle qu'on capture.
+- `TOUT-TESTER.cmd` : étape **backtests** + section **« Données disponibles »** chiffrée.
 
 ## 4. Façon de procéder (méthode)
 
