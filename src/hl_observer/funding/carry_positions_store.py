@@ -11,12 +11,14 @@ VIDE (jamais de melange LIVE/BACKTEST/REPLAY/TEST_FIXTURE). PAPER only : aucun o
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 from typing import Any
 
 from hl_observer.funding.carry_anti_churn import (
     SORTIE_ABSENCE_PROLONGEE, churn_excessif, doit_fermer_pour_absence, filtrer_sortie,
 )
+from hl_observer.funding.carry_allocation_nette import allouer_marges, diagnostic
 from hl_observer.funding.carry_marge_dynamique import marge_par_position
 from hl_observer.funding.carry_position_lifecycle import (
     MODE_LIVE, MODES_VALIDES, GestionnaireCarry, pnl_realise,
@@ -89,6 +91,28 @@ def tick_sur_disque(root: str | Path, decision: dict[str, Any], inputs: dict[str
     return evt
 
 
+ALLOCATION_RELPATH = Path("runtime") / "data" / "carry_allocation.json"
+
+
+def _publier_allocation(root: str | Path, nets: dict, marges: dict, *, now_ms: int,
+                        mode: str) -> None:
+    """Ecrit le diagnostic d'allocation (atomique : tmp + replace). Best-effort : une panne
+    d'ecriture ne doit JAMAIS empecher le carry de tourner."""
+    try:
+        d = diagnostic(nets, marges)
+        d.update({"ts_ms": int(now_ms), "mode": mode,
+                  "marges_usd": {c: round(float(v), 2) for c, v in (marges or {}).items()},
+                  "rendements_bps_j": {c: v for c, v in (nets or {}).items()},
+                  "real_execution": False})
+        chemin = Path(root) / ALLOCATION_RELPATH
+        chemin.parent.mkdir(parents=True, exist_ok=True)
+        tmp = chemin.with_suffix(".json.tmp")
+        tmp.write_text(json.dumps(d, ensure_ascii=False, indent=1), encoding="utf-8")
+        os.replace(tmp, chemin)
+    except Exception:  # noqa: BLE001
+        pass
+
+
 def tick_multi_sur_disque(root: str | Path, mesures: dict[str, dict[str, Any]], *,
                           now_ms: int, mode: str = MODE_LIVE,
                           max_slots: int | None = None,
@@ -107,10 +131,26 @@ def tick_multi_sur_disque(root: str | Path, mesures: dict[str, dict[str, Any]], 
     # `capital_usd` absent -> marge par défaut (on n'invente jamais un capital).
     n_visees = min(len(mesures) or 1, int(max_slots) if max_slots else (len(mesures) or 1))
     marge = marge_par_position(capital_usd=capital_usd, n_positions_visees=n_visees)
+    # 🔴 21/07 — ALLOCATION PAR RENDEMENT NET. La marge etait divisee en parts EGALES, puis
+    # modulee par un `facteur_taille` bati sur le z-score du funding : correlation mesuree
+    # entre ce facteur et le rendement net = -0,596, autrement dit on mettait le PLUS de
+    # capital sur les MOINS rentables (BTC, le meilleur, avait 25 $ ; STABLE, parmi les pires,
+    # 126 $). On repartit desormais le meme capital ∝ gain_net_24h_bps**3 — un nombre qu'on
+    # calculait DEJA et qu'on jetait. Aucun levier ne bouge : aucune distance de liquidation
+    # ne bouge. Donnee absente -> marge par defaut (on ne degrade jamais l'existant).
+    nets = {coin: (m.get("decision") or {}).get("gain_net_24h_bps") for coin, m in mesures.items()}
+    marges = allouer_marges(nets, capital_usd=capital_usd, n_positions_visees=n_visees,
+                            marge_defaut_usd=marge)
+    _publier_allocation(root, nets, marges, now_ms=now_ms, mode=mode)
     for coin, m in mesures.items():
+        marge_coin = marges.get(coin)
+        if not isinstance(marge_coin, (int, float)) or marge_coin <= 0:
+            # rendement absent ou <= 0 : l'ouverture est de toute facon refusee en amont ;
+            # une position DEJA ouverte garde simplement sa marge (aucun renfort, aucune vente).
+            marge_coin = float((g.ouvertes.get(coin) or {}).get("marge_usdt") or marge)
         evts.append(g.tick(m["decision"], m["inputs"], now_ms=now_ms,
                            funding_bps_h_courant=m.get("funding"), prix_courant=m.get("prix"),
-                           base_bps_courant=m.get("base"), marge_usd=marge))
+                           base_bps_courant=m.get("base"), marge_usd=float(marge_coin)))
     # 🔴 A1 — LE BUG QUI MANGEAIT TOUT LE PnL (mesuré le 19/07 : 29 fermetures sur 31 ici).
     # L'ancienne version fermait DES QU'un coin manquait d'une passe, au nom du deny-by-default.
     # C'etait une MAUVAISE application de la regle : deny-by-default veut dire « ne pas OUVRIR

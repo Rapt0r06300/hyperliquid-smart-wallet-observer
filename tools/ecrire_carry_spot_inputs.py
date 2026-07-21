@@ -466,7 +466,13 @@ def scanner(diagnostic: bool):
                            # (<=1, jamais d'amplification sur du predit) x RUPTURE CONSTATEE
                            # (>=1 seulement sur RUPTURE_HAUTE : la formule de la venue dit
                            # que F decolle DEJA). Le garde de risque borne le tout en aval.
-                           "facteur_taille": round(_fzs(zf.zscore) * facteur_prevision(
+                           # 21/07 — GARDE DU PLANCHER : au plancher protocolaire (0,125 bps/h,
+                           # ou TOUS les coins se retrouvent par la formule de la venue), un
+                           # z-score ne mesure que du bruit. Mesure ce jour-la : correlation
+                           # facteur_taille <-> rendement net = -0,596 (on finançait le plus
+                           # les coins les moins rentables). On lui passe donc le funding.
+                           "facteur_taille": round(_fzs(zf.zscore, p["funding_bps_h"])
+                               * facteur_prevision(
                                prevoir_funding_bps_h(p.get("premium_bps")),
                                p["funding_bps_h"])
                                * facteur_rupture(p.get("alerte_rupture")), 4),

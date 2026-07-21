@@ -13,6 +13,8 @@ ou sens NEUTRE (pas de carry). PAPER only, aucun ordre.
 """
 from __future__ import annotations
 
+from hl_observer.funding.funding_previsionnel import TAUX_INTERET_BPS_H
+
 # --- Y1 : couts d'entree (bps). Defauts prudents ; l'appelant passe les vrais frais HL. ---
 FRAIS_MAKER_1_JAMBE_BPS = 1.5     # maker HL par jambe (approx ; source = fees/hyperliquid_fees)
 FRAIS_TAKER_1_JAMBE_BPS = 4.5     # taker HL par jambe
@@ -63,10 +65,29 @@ def funding_encaisse_bps_h(funding_bps_h: float | None) -> float:
 
 
 # --- Y4/Y15/Y16 : facteurs de taille (chacun neutre = 1.0 quand l'entree manque) ---
-def facteur_zscore(zscore: float | None) -> float:
-    """Y4 : funding qui spike (z eleve) -> on capte plus ; qui s'evapore (z tres bas) -> on reduit."""
+def facteur_zscore(zscore: float | None, funding_bps_h: float | None = None) -> float:
+    """Y4 : funding qui spike (z eleve) -> on capte plus ; qui s'evapore (z tres bas) -> on reduit.
+
+    🔴 GARDE DU PLANCHER (21/07, mesure) — un z-score calcule AU PLANCHER PROTOCOLAIRE ne
+    mesure rien. La formule publique d'Hyperliquid est F = premium + clamp(0,125 − premium,
+    ±5) : tant que |premium| < ~5 bps, F vaut EXACTEMENT 0,125 pour TOUS les coins. Un coin
+    dont l'historique traine sous le plancher affiche alors un z eleve... alors qu'il n'y a,
+    par construction de la venue, RIEN d'inhabituel a capter.
+
+    Mesure du 21/07 sur les 8 coins de la shortlist, tous au plancher :
+        correlation facteur_taille <-> rendement net = −0,596
+    Autrement dit : on mettait le PLUS de capital sur les MOINS rentables (STABLE, rendement
+    le plus faible, recevait le plus gros facteur 1,27 ; BTC, le meilleur, 1,01).
+
+    Donc : au plancher (ou en dessous), le z-score n'a aucun contenu -> facteur neutre 1,0.
+    Au-dessus, il redevient ce qu'il a toujours ete : un signal d'intensite du funding.
+    Argument non fourni -> comportement d'avant (on ne casse aucun appelant).
+    """
     if zscore is None:
         return 1.0
+    if isinstance(funding_bps_h, (int, float)) and not isinstance(funding_bps_h, bool):
+        if float(funding_bps_h) <= TAUX_INTERET_BPS_H:
+            return 1.0
     z = float(zscore)
     if z >= 2.0:
         return 1.5
