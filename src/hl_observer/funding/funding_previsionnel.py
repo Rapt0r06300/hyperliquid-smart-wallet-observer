@@ -130,7 +130,27 @@ def alerte_rupture(premium_bps: float | None,
             "note": notes[niveau] + (" — CONFIRMEE par build-up d'OI" if confirmee else "")}
 
 
+#: 21/07 (Flo : « améliore tout ») — LE CHASSEUR DE SPIKES, dernier maillon. `alerte_rupture`
+#: était MESURÉE et AFFICHÉE... mais ne touchait pas la taille : mention ≠ porte, encore.
+#: RUPTURE_HAUTE n'est PAS une prévision : c'est un CONSTAT (premium ≥ 5,125 bps ⟹ F = P − 5
+#: DÉJÀ, par la formule publique de la venue). Amplifier sur un constat est légitime ;
+#: amplifier sur une APPROCHE (prévision) ne l'est pas — d'où 1.0 pour elle.
+FACTEUR_RUPTURE_CONFIRMEE = 1.30      # rupture haute + build-up d'OI : le spike est là ET soutenu
+FACTEUR_RUPTURE_SEULE = 1.15          # rupture haute sans confirmation d'OI : prudence
+
+
+def facteur_rupture(alerte: dict | None) -> float:
+    """≥ 1.0 UNIQUEMENT sur une rupture HAUTE constatée. Approches, ruptures basses, absence
+    d'alerte -> 1.0. Le garde de risque en aval borne toujours le résultat final."""
+    if not isinstance(alerte, dict):
+        return 1.0
+    if alerte.get("niveau") != NIVEAU_RUPTURE_HAUTE:
+        return 1.0
+    return FACTEUR_RUPTURE_CONFIRMEE if alerte.get("confirmee_par_oi") else FACTEUR_RUPTURE_SEULE
+
+
 __all__ = ["TAUX_INTERET_BPS_H", "BORNE_CLAMP_BPS_H", "BANDE_TENDANCE", "FACTEUR_DECRUE",
+           "facteur_rupture", "FACTEUR_RUPTURE_CONFIRMEE", "FACTEUR_RUPTURE_SEULE",
            "TENDANCE_HAUSSE", "TENDANCE_BAISSE", "TENDANCE_STABLE",
            "prevoir_funding_bps_h", "tendance", "facteur_prevision",
            "SEUIL_APPROCHE_BPS", "SEUIL_OI_CONFIRME_PCT", "alerte_rupture",

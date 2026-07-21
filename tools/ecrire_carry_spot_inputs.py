@@ -39,7 +39,7 @@ from hl_observer.funding.delta_neutral_carry import evaluer_carry_neutre  # noqa
 from hl_observer.funding.funding_persistence import estimer_persistance  # noqa: E402
 from hl_observer.funding.funding_zscore import zscore_funding  # noqa: E402
 from hl_observer.funding.carry_optimizer import facteur_zscore as _fzs  # noqa: E402  Y4 sizing
-from hl_observer.funding.funding_previsionnel import (  # noqa: E402  timing (20/07)
+from hl_observer.funding.funding_previsionnel import (facteur_rupture,  # noqa: E402  timing (20/07)
     prevoir_funding_bps_h, tendance as _tendance_prev, facteur_prevision, alerte_rupture)
 
 API = "https://api.hyperliquid.xyz/info"
@@ -462,9 +462,14 @@ def scanner(diagnostic: bool):
                                prevoir_funding_bps_h(p.get("premium_bps")), p["funding_bps_h"]),
                            # Y4 x PREVISION : le z-score peut GROSSIR (realise), la prevision ne
                            # peut que REDUIRE (entrer dans une decrue annoncee = risque, pas edge)
+                           # CHASSEUR DE SPIKES (21/07) : z-score (realise) x prevision
+                           # (<=1, jamais d'amplification sur du predit) x RUPTURE CONSTATEE
+                           # (>=1 seulement sur RUPTURE_HAUTE : la formule de la venue dit
+                           # que F decolle DEJA). Le garde de risque borne le tout en aval.
                            "facteur_taille": round(_fzs(zf.zscore) * facteur_prevision(
                                prevoir_funding_bps_h(p.get("premium_bps")),
-                               p["funding_bps_h"]), 4),
+                               p["funding_bps_h"])
+                               * facteur_rupture(p.get("alerte_rupture")), 4),
                            "base_bps": round(base, 4),
                            "base_mid_bps": (round(base_mid, 4) if base_mid is not None else None),
                            "break_even_h": round(float(be), 2),

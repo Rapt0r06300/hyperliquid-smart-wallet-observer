@@ -52,3 +52,25 @@ def test_5_le_feeder_ECRIT_les_champs_de_prevision():
     src = open("tools/ecrire_carry_spot_inputs.py", encoding="utf-8").read()
     assert '"funding_prevu_bps_h"' in src and '"funding_tendance"' in src
     assert "facteur_prevision" in src and "premium_bps" in src and "oraclePx" in src
+
+
+# ---------------- 21/07 : LE CHASSEUR DE SPIKES — l'alerte touche enfin la TAILLE ----------------
+
+def test_facteur_rupture_amplifie_UNIQUEMENT_sur_un_CONSTAT_jamais_sur_une_prevision():
+    """RUPTURE_HAUTE = premium >= 5,125 bps ⟹ F = P−5 DEJA (formule publique de la venue) :
+    c'est un CONSTAT. APPROCHE_HAUTE est une PREVISION -> jamais d'amplification (leçon du
+    facteur_prevision qui ne peut que reduire)."""
+    from hl_observer.funding.funding_previsionnel import (
+        FACTEUR_RUPTURE_CONFIRMEE, FACTEUR_RUPTURE_SEULE, alerte_rupture, facteur_rupture)
+    assert facteur_rupture(alerte_rupture(8.0, 3.0)) == FACTEUR_RUPTURE_CONFIRMEE  # +OI
+    assert facteur_rupture(alerte_rupture(8.0)) == FACTEUR_RUPTURE_SEULE
+    assert facteur_rupture(alerte_rupture(4.5)) == 1.0          # APPROCHE = prevision
+    assert facteur_rupture(alerte_rupture(-8.0)) == 1.0         # rupture BASSE (cross-venue)
+    assert facteur_rupture(None) == 1.0 and facteur_rupture({}) == 1.0
+
+
+def test_le_facteur_rupture_est_CABLE_dans_le_feeder():
+    """Mention != porte : l'alerte doit multiplier `facteur_taille`, pas seulement s'afficher."""
+    src = open("tools/ecrire_carry_spot_inputs.py", encoding="utf-8").read()
+    assert "facteur_rupture(p.get(\"alerte_rupture\"))" in src
+    assert "facteur_taille" in src
