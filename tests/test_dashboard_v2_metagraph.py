@@ -84,6 +84,37 @@ def test_equity_history_sur_un_projet_vide_est_honnete(tmp_path, monkeypatch):
     assert payload["read_only"] is True
 
 
+def test_le_grand_chiffre_lit_le_realise_TOTAL_pas_celui_de_la_session():
+    """🔴 21/07 — LE BANDEAU AFFICHAIT UN GAIN VERT PENDANT UNE PERTE.
+
+    Le grand chiffre valait `réalisé SESSION + funding TOUTE LA VIE`. Mesuré ce jour-là :
+    0,00 (0 close depuis le redémarrage) + 0,362469 = **+0,36 en vert**, pendant que le ledger
+    disait **−5,64** et que la courbe descendait en rouge juste en dessous. Ce n'était même pas
+    « le PnL de la session » : numérateur et dénominateur venaient de deux fenêtres différentes,
+    donc le nombre ne mesurait rien.
+
+    Ce test verrouille la formule côté page : le net qui alimente le grand chiffre doit partir
+    du réalisé TOTAL, celui-là même que la courbe cumule.
+    """
+    html = _endpoint("/v2")().body.decode("utf-8")
+    assert "window._carryNet=realTout+fundingRegle;" in html, (
+        "le grand chiffre doit partir du realise TOTAL — sinon il contredit la courbe")
+    assert "window._carryNet=realSess+" not in html, (
+        "la chimere session+all-time ne doit jamais revenir")
+    # la fenêtre session reste visible, mais ETIQUETEE et a cote
+    assert "_carryNetSess" in html and "session " in html
+    # et le libelle sous le grand chiffre doit dire de quelle fenetre il parle
+    assert "depuis le début" in html
+
+
+def test_l_axe_du_temps_ne_peut_pas_cacher_les_jours():
+    """Une série de 73 h s'affichait « 17:12 → 18:36 » : on lisait une chute de 84 minutes là
+    où il y avait 3 jours. Une échelle de temps qui perd son unité est un mensonge."""
+    html = _endpoint("/v2")().body.decode("utf-8")
+    assert "function horoAxe(" in html and "spanMs>=86400000" in html
+    assert "horoAxe(t0,ts)" in html and "horoAxe(t1,ts)" in html
+
+
 def test_le_dernier_point_de_l_endpoint_vaut_le_pnl_stable(tmp_path, monkeypatch):
     """L'INVARIANT qui interdit au dashboard d'afficher deux vérités : la courbe et le grand
     chiffre lisent la même couche (`réalisé + funding RÉGLÉ`)."""

@@ -235,7 +235,7 @@ th{letter-spacing:1.2px}
    <div class="hero-head">
      <div>
        <div class="pnl-big pnl-pos" id="pnl">+0.00</div>
-       <div class="pnl-sub">PnL net <span id="pnl-unit">USDC</span> · equity <span id="eq" class="num">…</span> · <span id="chg" class="num">+0.00%</span> · <span id="mode">live</span><span id="carry-sub" style="color:var(--cyan)"></span></div>
+       <div class="pnl-sub">PnL net <span id="pnl-unit">USDC</span> <span style="color:var(--mut2)">depuis le début</span> · equity <span id="eq" class="num">…</span> · <span id="chg" class="num">+0.00%</span> · <span id="mode">live</span><span id="carry-sub" style="color:var(--cyan)"></span></div>
        <div id="pannes" style="display:none;margin-top:6px;color:#f88;font-size:12px"></div>
      </div>
      <div class="hero-hl">EQUITY // <span id="mg-span">…</span><br><b id="mg-hi"></b><br><span id="mg-lo"></span></div>
@@ -340,6 +340,12 @@ th{letter-spacing:1.2px}
 function n(x,d){x=Number(x);return isNaN(x)?'—':x.toFixed(d==null?2:d)}
 function col(v){return v>=0?'var(--green)':'var(--red)'}
 function hhmm(ms){var d=new Date(ms);return ('0'+d.getHours()).slice(-2)+':'+('0'+d.getMinutes()).slice(-2)}
+// 🔴 21/07 — L'AXE CACHAIT TROIS JOURS. Une serie de 73 h s'affichait « 17:12 -> 18:36 » :
+// on lisait une chute de 84 minutes la ou il y avait 3 jours de churn. Au-dela de 24 h,
+// la DATE devient obligatoire — une echelle de temps qui perd son unite est un mensonge.
+function horoAxe(ms,spanMs){var d=new Date(ms);
+  var t=('0'+d.getHours()).slice(-2)+':'+('0'+d.getMinutes()).slice(-2);
+  return spanMs>=86400000 ? (('0'+d.getDate()).slice(-2)+'/'+('0'+(d.getMonth()+1)).slice(-2)+' '+t) : t;}
 function hms(){var d=new Date();return ('0'+d.getHours()).slice(-2)+':'+('0'+d.getMinutes()).slice(-2)+':'+('0'+d.getSeconds()).slice(-2)}
 var FEED=[],PREV=null,BOOTED=false;
 function push(cls,tag,msg){FEED.push({t:hms(),cls:cls,tag:tag,msg:msg});if(FEED.length>60)FEED.shift();renderFeed();}
@@ -414,8 +420,14 @@ function drawMeta(pts,nReels){
     e.setAttribute(id==='mg-live'?'fill':'stroke',c);});
   document.getElementById('mg-hi').textContent='↑ '+n(B.vhi,6);
   document.getElementById('mg-lo').textContent='↓ '+n(B.vlo,6);
-  document.getElementById('mg-t0').textContent=hhmm(t0);
-  document.getElementById('mg-t1').textContent=hhmm(t1)+' · '+nr+' mesures'+(B.plat?' · À PLAT':'');
+  document.getElementById('mg-t0').textContent=horoAxe(t0,ts);
+  document.getElementById('mg-t1').textContent=horoAxe(t1,ts)+' · '+nr+' mesures'+(B.plat?' · À PLAT':'');
+  // l'amplitude en % : sans elle, une perte de 0,6 % etiree sur toute la hauteur du panneau
+  // se lit comme un krach. L'echelle Y auto est utile, mais elle doit dire ce qu'elle zoome.
+  var amp=base>0?((B.vhi-B.vlo)/base*100):0;
+  var hl=document.getElementById('mg-hi');
+  if(hl)hl.title='amplitude de la serie : '+n(B.vhi-B.vlo,4)+' $ soit '+n(amp,3)+' % du capital — '
+    +'l\'echelle Y est ADAPTATIVE, elle remplit le panneau quelle que soit la taille du mouvement';
   var sp=(t1-t0)/3600000;
   document.getElementById('mg-span').textContent=(sp>=24?((sp/24).toFixed(1)+'j'):sp>=1?(sp.toFixed(1)+'h'):(Math.round((t1-t0)/60000)+'min'))+' ⤢';}
 // La serie est EVENEMENTIELLE (un point par trade ferme), pas un tick regulier : la fenetre
@@ -636,7 +648,9 @@ function syncTop(){
   // 20/07 soir (Flo) : 6 DECIMALES sur le grand chiffre aussi — le PnL doit VIVRE a l'ecran,
   // au meme grain que les cellules par position (le ticker 1 s le fait avancer chaque seconde).
   var P=document.getElementById('pnl'); if(P){P.textContent=(totNet>=0?'+':'')+n(totNet,6); P.className='pnl-big '+(totNet>=0?'pnl-pos':'pnl-neg');
-    P.title='= realise session + funding COURU (encaisse : mesure + taux depuis la derniere mesure). Le latent de base (reversible) est affiche A COTE, jamais dedans. Resnappe sur chaque vraie mesure.';}
+    P.title='PnL net DEPUIS LE DEBUT = realise TOTAL du ledger + funding COURU. C\'est exactement '
+      +'le dernier point de la courbe : un seul chiffre, une seule verite. Le PnL de la session '
+      +'courante est affiche a cote, etiquete. Le latent de base (reversible) reste HORS du net.';}
   var eqCopy=Number(window._copyEq||0)||1000; var E=document.getElementById('eq'); if(E){E.textContent=n(eqCopy+carryNet,6);}
   // ⚠️ 21/07 — `_eqLiveVal` N'ALIMENTE PLUS LE METAGRAPHE. Cette valeur melange l'equity copy
   // et le net carry de SESSION ; la courbe, elle, cumule le realise TOTAL du ledger. Les
@@ -645,7 +659,12 @@ function syncTop(){
   var base=window._base||1000; var chg=base>0?(totNet/base*100):0; var C=document.getElementById('chg'); if(C){C.textContent=(chg>=0?'+':'')+n(chg,2)+'%';C.style.color=col(chg);}
   var cs=document.getElementById('carry-sub'); if(cs){
     var lat=Number(window._carryLatent||0);
-    cs.textContent = '  ·  total '+(cp+cy)+' pos · copy '+(copyNet>=0?'+':'')+n(copyNet,2)+'$ · carry '+(carryNet>=0?'+':'')+n(carryNet,2)+'$ · latent base '+(lat>=0?'+':'')+n(lat,2)+'$ (réversible)';}
+    var ns=Number(window._carryNetSess||0);
+    cs.textContent = '  ·  total '+(cp+cy)+' pos · copy '+(copyNet>=0?'+':'')+n(copyNet,2)
+      +'$ · carry '+(carryNet>=0?'+':'')+n(carryNet,2)+'$ (session '+(ns>=0?'+':'')+n(ns,2)+'$)'
+      +' · latent base '+(lat>=0?'+':'')+n(lat,2)+'$ (réversible)';
+    cs.title='« carry » = depuis le tout debut (= la courbe). « session » = depuis le dernier '
+      +'redemarrage. Les deux sont vraies, elles ne repondent pas a la meme question.';}
   var st=document.getElementById('strattb');
   if(st){var mk=function(v){return (v>=0?'+':'')+n(v,2)+'$';};
     st.innerHTML=
@@ -668,12 +687,24 @@ function loadCarry(){fetch('/v2/carry').then(function(r){return r.json()}).then(
   // le ledger ligne par ligne, et dans le rapport quotidien. Repli honnete : si le champ
   // session n'existe pas encore (vieux moteur), on affiche le total comme avant.
   var realSess=(d.realized_net_pnl_usdc_session!=null)?Number(d.realized_net_pnl_usdc_session):Number(d.realized_net_pnl_usdc||0);
-  window._carryPos=(d.positions_ouvertes||0);window._carryReal=realSess;
+  var realTout=Number(d.realized_net_pnl_usdc||0);
+  window._carryPos=(d.positions_ouvertes||0);window._carryReal=realTout;window._carryRealSess=realSess;
   // v3 (20/07) : NET = realise + funding COURU (encaisse, stable). Le latent de base est
   // SEPARE — calcule ici pour l'affichage dedie, jamais additionne au net.
   window._carryLatent=(d.positions||[]).reduce(function(s,p){return s+(Number(p.base_mtm_usd)||0);},0);
-  // le NET « stable » n'absorbe QUE le funding REGLE (repli sur l'accru si vieux moteur).
-  window._carryNet=realSess+Number((d.net_funding_settled!=null)?d.net_funding_settled:d.funding_accru_usdt||0);
+  // ══ 🔴 21/07 — LE GRAND CHIFFRE ÉTAIT UNE CHIMÈRE, ET IL ÉTAIT VERT ══
+  // Il valait `realise SESSION + funding TOUTE LA VIE`. Mesure de ce jour : session = 0,00
+  // (0 close depuis le redemarrage) + funding all-time = +0,36 -> l'ecran affichait **+0,36 en
+  // VERT** pendant que le ledger disait **-5,64** et que la courbe descendait EN ROUGE juste
+  // en dessous. Deux nombres pour un seul PnL, cote a cote, qui se contredisent.
+  // Le pire : ce n'etait meme pas « le PnL de la session ». Numerateur (session) et
+  // denominateur (all-time) venaient de deux fenetres differentes -> le nombre ne mesurait RIEN.
+  // Le PnL par session reste affiche (demande de Flo, 20/07) mais A COTE et ETIQUETE ; le GRAND
+  // chiffre dit desormais la meme verite que la courbe, comme CLAUDE.md l'exige
+  // (« dashboard, audit, logs, exports convergent sur le meme ledger »).
+  var fundingRegle=Number((d.net_funding_settled!=null)?d.net_funding_settled:d.funding_accru_usdt||0);
+  window._carryNet=realTout+fundingRegle;          // == stable_net_pnl == dernier point de la courbe
+  window._carryNetSess=realSess+fundingRegle;      // fenetre session, montree A COTE
   window._carryEstime=Number(d.funding_accrual_estimate||0);
   // 🔴 20/07 : « TRADES CLOS 6 » melangeait TROIS perimetres sur la rangee SESSION (copy =
   // session moteur, carry = fenetre 24 h du churn). closes_session (ledger etiquete) aligne
