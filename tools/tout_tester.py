@@ -232,6 +232,80 @@ def _progression(etapes: list[dict], sante: dict, attrib: dict) -> tuple[list[st
     return lignes, courant
 
 
+def inventaire_donnees(root: Path = RACINE) -> list[dict]:
+    """COMBIEN de données chaque module a réellement, et sur quelle étendue.
+
+    Exigé par Flo le 21/07 (« des données en masse ») : une masse de données qu'on ne peut
+    pas citer finira par être surestimée. On mesure les fichiers, on ne devine pas.
+    Le carry est né avec 96 lignes ici — c'est cette ligne-là qui l'a rendu visible.
+    """
+    import json as _j
+    srcs = [
+        ("copy · candidats replay", "runtime/replay/_merged/candidates.jsonl"),
+        ("copy · marks replay", "runtime/replay/_merged/marks.jsonl"),
+        ("carry · journal de scans", "runtime/replay/carry_scan.jsonl"),
+        ("carry · ledger positions", "runtime/data/carry_paper_ledger.jsonl"),
+        ("arbitrage · cross-venue", "runtime/data/dispersion_venues.jsonl"),
+        ("copy · fills de leaders", "runtime/data/leader_fills_bruts.jsonl"),
+    ]
+    sqlites = [("liquidations · grappes", "runtime/data/liquidation_map.sqlite3",
+                "grappe_snapshots")]
+    out = []
+    for nom, rel in srcs:
+        chemin = Path(root) / rel
+        e = {"source": nom, "fichier": rel, "lignes": 0, "mo": 0.0, "etendue_h": None}
+        try:
+            e["mo"] = round(chemin.stat().st_size / 1e6, 2)
+            premier = dernier = None
+            n = 0
+            with chemin.open(encoding="utf-8", errors="ignore") as f:
+                for l in f:
+                    if not l.strip():
+                        continue
+                    n += 1
+                    if premier is None:
+                        premier = l
+                    dernier = l
+            e["lignes"] = n
+
+            def _ts(l):
+                try:
+                    d = _j.loads(l)
+                except (ValueError, TypeError):
+                    return None
+                for k in ("ts_ms", "ts", "time", "timestamp"):
+                    v = d.get(k) if isinstance(d, dict) else None
+                    if isinstance(v, (int, float)) and not isinstance(v, bool):
+                        return float(v) / 1000.0 if float(v) > 1e11 else float(v)
+                return None
+            a, b = _ts(premier or ""), _ts(dernier or "")
+            if a and b and b >= a:
+                e["etendue_h"] = round((b - a) / 3600.0, 1)
+        except OSError:
+            e["absent"] = True
+        out.append(e)
+    # sources SQLite (les liquidations ne sont pas un JSONL) — même exigence : on compte, on
+    # ne devine pas, et une base absente est DITE absente.
+    import sqlite3 as _sq
+    for nom, rel, table in sqlites:
+        chemin = Path(root) / rel
+        e = {"source": nom, "fichier": rel, "lignes": 0, "mo": 0.0, "etendue_h": None}
+        try:
+            e["mo"] = round(chemin.stat().st_size / 1e6, 2)
+            con = _sq.connect("file:%s?mode=ro" % chemin, uri=True)
+            try:
+                e["lignes"] = con.execute("select count(*) from %s" % table).fetchone()[0]
+                bornes = con.execute("select min(ts_ms), max(ts_ms) from %s" % table).fetchone()
+                if bornes and bornes[0] and bornes[1]:
+                    e["etendue_h"] = round((bornes[1] - bornes[0]) / 3.6e6, 1)
+            finally:
+                con.close()
+        except Exception:  # noqa: BLE001
+            e["absent"] = True
+        out.append(e)
+    return out
+
+
 def ecrire_recap(etapes: list[dict], sante: dict, chemin: Path = RECAP) -> Path:
     ok = [e for e in etapes if e["statut"] == "OK"]
     attrib = attribution_pnl()
@@ -256,6 +330,18 @@ def ecrire_recap(etapes: list[dict], sante: dict, chemin: Path = RECAP) -> Path:
         detail = e.get("resume") or (e["sortie"].strip().splitlines() or [""])[-1][:120]
         l.append("| %s | %s %s | %.0f s | %s |"
                  % (e["etape"], icone, e["statut"], e["duree_s"], detail.replace("|", "/")))
+    # LA MASSE DE DONNEES, CHIFFREE (exigence de Flo le 21/07). Le carry est ne avec 96
+    # lignes ici : c'est cette table qui l'a rendu visible. Ce qu'on ne cite pas, on le
+    # surestime.
+    l += ["", "## 📦 Données disponibles (ce que le replay peut manger)", "",
+          "| source | lignes | Mo | étendue |", "|---|---:|---:|---:|"]
+    for d in inventaire_donnees():
+        if d.get("absent"):
+            l.append("| %s | — | — | **fichier absent** (`%s`) |" % (d["source"], d["fichier"]))
+        else:
+            l.append("| %s | %d | %.2f | %s |"
+                     % (d["source"], d["lignes"], d["mo"],
+                        ("%.1f h" % d["etendue_h"]) if d["etendue_h"] is not None else "?"))
     l += ["", "## Santé live (lecture seule)", ""]
     l.append("- moteur : dernière décision il y a **%s s** · session `%s`"
              % (sante.get("moteur_derniere_decision_s"), sante.get("session")))
@@ -311,6 +397,10 @@ def main(argv: list[str] | None = None) -> int:
         etapes.append(_courir("cablage", [py, "tools/audit_cablage_cli.py"],
                               BUDGETS["cablage"]))
         etapes.append(_courir("donnees", [py, "tools/qualite_donnees_replay.py", "."],
+                              BUDGETS["donnees"]))
+        # BACKTEST CARRY (21/07) : rejoue nos VRAIES passes de scan sous d'autres reglages.
+        # Le carry n'avait que 96 lignes rejouables ; le journal de scans en produit ~2 900/j.
+        etapes.append(_courir("backtests", [py, "tools/backtest_carry_cli.py", "."],
                               BUDGETS["donnees"]))
         if not rapide:
             etapes.append(_courir(

@@ -422,7 +422,7 @@ def scanner(diagnostic: bool):
     # 20/07 : jointure ETENDUE (nom identique + tokens Unit U*) — voir _apparier_spots.
     apparies = _apparier_spots(perps, spots)
     communs = sorted(apparies)
-    rapport, viables = [], []
+    rapport, viables, traces = [], [], []
     # 🔴 20/07 soir (yoyo -0,22 -> +0,31 -> -0,18 en 20 min) : le MtM d'affichage etait marque
     # au VWAP D'ACHAT 500 $ (l'instrument d'ENTREE, qui saute avec la profondeur du carnet) et
     # seulement pour les coins de la shortlist (les autres clignotaient 0<->gros montant).
@@ -463,6 +463,16 @@ def scanner(diagnostic: bool):
         # honnete, comme avant.
         pire = _pire_avec_cache(ROOT, c, pire)
         raison, inp = "", None
+        # ENREGISTREMENT DU SCAN (21/07) : tout ce qu'on calcule ici etait JETE a chaque passe
+        # (le carry, seul module rentable, n'avait que 96 lignes rejouables). On garde une
+        # ligne par coin — VIABLE OU REFUSE, avec son motif : un refus est une donnee.
+        trace = {"coin": c, "funding_snapshot_bps_h": p.get("funding_bps_h"),
+                 "premium_bps": p.get("premium_bps"), "delta_oi_pct": p.get("delta_oi_pct"),
+                 "alerte_rupture": p.get("alerte_rupture"), "perp_px": p.get("mark"),
+                 "spot_px": spot_px, "base_bps": base, "base_mid_bps": base_mid,
+                 "liquidite_spot_usd": liq, "levier_max": p.get("levier_max"),
+                 "pire_hausse_observee": pire, "securite_liquidation": SECURITE_LIQUIDATION,
+                 "source": "hyperliquid public API (perp+spot) + bougies 1h"}
         if abs(base) > BASE_ABERRANTE_BPS:
             # AUDITABLE : on montre CE qui a été matché et POURQUOI c'est absurde (pas un bug caché,
             # mais l'absence d'un vrai spot jumelable : le plus proche reste à des ordres de grandeur).
@@ -481,12 +491,21 @@ def scanner(diagnostic: bool):
             fp = estimer_persistance(c, hist)
             zf = zscore_funding(c, hist, p["funding_bps_h"])   # courant = snapshot
             funding_decision = fp.funding_persistant_bps_h if fp.fiable else p["funding_bps_h"]
+            trace.update({"funding_bps_h": funding_decision,
+                          "funding_persistant_bps_h": fp.funding_persistant_bps_h,
+                          "funding_fiable": fp.fiable, "funding_zscore": zf.zscore,
+                          "funding_regime": zf.regime,
+                          "funding_prevu_bps_h": prevoir_funding_bps_h(p.get("premium_bps"))})
             best = _meilleur_levier(c, funding_decision, base, liq, p["levier_max"], pire)
             if best is None:
                 raison = pourquoi_aucun_levier(c, funding_decision, base, liq,
                                                p["levier_max"], pire)
             else:
                 lev, mr, v = best
+                trace.update({"levier_utilise": lev, "marge_ratio": mr,
+                              "cout_entree_bps": v.cout_entree_bps,
+                              "break_even_h": v.heures_pour_rentabiliser,
+                              "gain_net_24h_bps": v.gain_net_24h_bps})
                 # PLANCHER DE BREAK-EVEN (18/07) : un carry qui met des JOURS a rembourser son cout
                 # d'entree fait SAIGNER le PnL. On paie ~11 bps a l'ouverture ; au funding plancher
                 # (0,125 bps/h) il faut ~88 h pour les recuperer -> on reste dans le rouge des jours.
@@ -537,6 +556,12 @@ def scanner(diagnostic: bool):
                                                 if v.gain_net_24h_bps is not None else None),
                            "source": "hyperliquid public API (perp+spot) + bougies 1h", "real_execution": False}
                     viables.append((c, inp, v.heures_pour_rentabiliser, v.gain_net_24h_bps, zf.zscore))
+        trace["viable"] = inp is not None
+        if inp is not None:
+            trace["facteur_taille"] = inp.get("facteur_taille")
+        else:
+            trace["motif"] = raison or "refuse"
+        traces.append(trace)
         rapport.append((c, p["funding_bps_h"], liq, pire, "VIABLE" if inp else raison))
     # marquage MID pour TOUS les coins scannes (voir commentaire en tete de boucle)
     try:
@@ -547,6 +572,19 @@ def scanner(diagnostic: bool):
             ensure_ascii=False), encoding="utf-8")
     except OSError:
         print("  (carry_bases_courantes.json inecrivable — marquage MID indisponible ce tick)")
+    # ── LE JOURNAL DES SCANS (21/07) : append-only, jamais bloquant. C'est LUI qui donnera
+    # au backtest carry de la matiere (~2 900 lignes/jour) la ou on n'avait que 96 lignes.
+    try:
+        from hl_observer.backtesting.carry_scan_recorder import enregistrer as _enr
+        try:
+            from hl_observer.runtime.session_identity import session_courante as _sid
+            _s = _sid(ROOT)
+        except Exception:  # noqa: BLE001
+            _s = ""
+        _n = _enr(ROOT, traces, session_id=_s, mode="LIVE")
+        print("  journal de scans : +%d ligne(s) -> runtime/replay/carry_scan.jsonl" % _n)
+    except Exception as exc:  # noqa: BLE001 — un enregistreur ne casse JAMAIS le scan
+        print("  (journal de scans indisponible : %s)" % exc)
     viables = classer_viables(viables)          # A2 : classe par carry NET, coupe au top-K
     return rapport, viables
 

@@ -54,7 +54,12 @@ COINS_DEFAUT = ("BTC,ETH,SOL,HYPE,AVAX,LINK,DOGE,SUI,ARB,OP,"
                 "APT,ATOM,BNB,NEAR,LTC,XRP,ADA,TRX,DOT,FIL,"
                 "INJ,TIA,SEI,STX,RUNE,AAVE,MKR,CRV,LDO,ENA,"
                 "WIF,PEPE,BONK,ORDI,JUP,PYTH,BLUR,GMX,SNX,COMP")
-INTERVALLE_S_DEFAUT = 300.0
+# 21/07 — CADENCE x5 (300 -> 60 s). Mesure du jour : sur 874 ecarts enregistres, la
+# convergence se joue en MOINS D'UNE HEURE (|ecart| -2,26 bps a 30 min). A 5 min
+# d'echantillonnage, une dislocation de 20 bps qui dure 3 minutes est purement INVISIBLE —
+# or c'est exactement celle qu'un arbitrage capture. Le cout reseau ne bouge presque pas :
+# une passe = 2 appels publics, quel que soit le nombre de coins.
+INTERVALLE_S_DEFAUT = 60.0
 
 
 def _get(url: str, *, timeout_s: float = 12.0):
