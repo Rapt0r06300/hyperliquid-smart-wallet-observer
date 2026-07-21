@@ -104,14 +104,14 @@ def _venue(root, ecart, ts=1000.0):
                  encoding="utf-8")
 
 
-@pytest.mark.parametrize("ecart", [0.0, 1.0, 10.0, 34.9, -34.9, -0.5])
+@pytest.mark.parametrize("ecart", [0.0, 1.0, 10.0, 14.9, -14.9, -0.5])
 def test_L5_jamais_d_ouverture_sous_le_seuil(tmp_path, ecart):
     _venue(tmp_path, ecart)
     assert tick(tmp_path, now=1010.0) == [], "une ouverture sous %s bps = porte percee" % \
         SEUIL_OUVERTURE_BPS
 
 
-@pytest.mark.parametrize("ecart", [35.0, 60.0, -35.0, -120.0])
+@pytest.mark.parametrize("ecart", [15.0, 60.0, -15.0, -120.0])
 def test_L6_un_aller_retour_SANS_convergence_est_toujours_perdant(tmp_path, ecart):
     _venue(tmp_path, ecart)
     tick(tmp_path, now=1010.0, session_id="S")

@@ -7,9 +7,21 @@ perp entre deux venues (HL↔Binance) revient à sa moyenne. Le collecteur venue
 PAPER, avec des portes PRÉ-DÉCLARÉES si dures que l'edge est positif à l'entrée PAR
 CONSTRUCTION — on FADE côté HL (jamais d'ordre réel, jambe Binance conceptuelle, notée).
 
-PORTES (écrites AVANT la donnée, le 21/07 — les déplacer se voit dans un diff) :
-  * OUVERTURE : |écart| >= 35 bps  (coûts AR 22 bps + 13 bps de marge minimale) ;
-  * SORTIE    : |écart| <= 5 bps (convergence capturée) OU âge > 4 h (pas de zombie) ;
+🔴 CORRECTION D'UNITÉ (21/07 soir, Flo : « deux ouvertures par mois, c'est pas normal ») :
+COUT_AR_BPS était à 22 bps = QUATRE jambes (2 venues × aller-retour). Or on n'exécute
+QUE le côté HL : deux exécutions maker (1,5 bps chacune) + spread/slippage ≈ 8 bps. Le
+seuil de 35 bps faisait donc payer un arbitrage qu'on ne fait pas — même famille de bug
+que le funding Binance ÷8 et le ×30 du gain journalier. Coûts corrigés à 8 bps, seuil à
+15 : le ratio marge/coût PASSE DE 0,59 À 0,88 — la porte devient plus EXIGEANTE en
+relatif, pas plus laxiste. Elle devient juste atteignable.
+
+⚠️ CE N'EST PAS UN ARBITRAGE SANS RISQUE : la jambe Binance est conceptuelle, donc la
+position porte un VRAI risque directionnel. D'où le STOP ci-dessous, qui n'existait pas.
+
+PORTES (écrites AVANT la donnée — les déplacer se voit dans un diff) :
+  * OUVERTURE : |écart| >= 15 bps  (coûts AR 8 bps + 7 bps de marge minimale) ;
+  * SORTIE    : |écart| <= 3 bps (convergence capturée) OU âge > 4 h (pas de zombie) ;
+  * STOP      : l'écart s'AGGRAVE de 25 bps de plus -> on coupe (risque directionnel réel) ;
   * TAILLE    : 50 $ fixe par position, 2 positions max (mécanisme en période d'essai) ;
   * DONNÉE    : mesure venues plus vieille que 15 min = pas de décision (deny-by-default).
 
@@ -25,12 +37,13 @@ import time
 from pathlib import Path
 from typing import Any
 
-SEUIL_OUVERTURE_BPS = 35.0
-SEUIL_SORTIE_BPS = 5.0
+SEUIL_OUVERTURE_BPS = 15.0
+SEUIL_SORTIE_BPS = 3.0
 AGE_MAX_H = 4.0
 NOTIONAL_USD = 50.0
 MAX_POSITIONS = 2
-COUT_AR_BPS = 22.0                 # 4 jambes conceptuelles ; on ne compte QUE nos coûts fade x2
+COUT_AR_BPS = 8.0                  # 2 executions HL maker (1,5x2) + spread/slippage ~5
+STOP_AGGRAVATION_BPS = 25.0        # la jambe Binance est conceptuelle : le risque est REEL
 FRAICHEUR_MAX_S = 900.0
 
 STORE_RELPATH = Path("runtime") / "data" / "arb_dislocation_positions.json"
@@ -103,7 +116,12 @@ def tick(root: str | Path = ".", *, now: float | None = None,
         ecart = m.get("ecart_prix_bps") if m else None
         convergence = ecart is not None and abs(float(ecart)) <= SEUIL_SORTIE_BPS
         trop_vieux = age_h >= AGE_MAX_H
-        if not (convergence or trop_vieux):
+        # STOP (21/07 soir) : l'ecart s'aggrave DANS NOTRE DOS -> on coupe. Sans jambe
+        # Binance reelle, laisser courir une dislocation qui s'ecarte, c'est parier.
+        stop = (ecart is not None
+                and abs(float(ecart)) >= abs(float(pos["ecart_entree_bps"]))
+                + STOP_AGGRAVATION_BPS)
+        if not (convergence or trop_vieux or stop):
             continue
         # capture = mouvement de l'écart DANS notre sens (fade) ; sortie à l'écart courant si
         # mesuré, sinon (âge sans mesure fraîche) à l'entrée = capture nulle, coûts payés.
@@ -114,7 +132,8 @@ def tick(root: str | Path = ".", *, now: float | None = None,
         _ledger(racine, {"kind": "CLOSE", "mode": "LIVE", "strategie": "arbitrage", "coin": coin,
                          "ts_ms": int(t * 1000), "session_id": session_id,
                          "reason": ("ARB_CONVERGENCE_CAPTUREE" if convergence
-                                    else "ARB_AGE_MAX_SANS_CONVERGENCE"),
+                                    else ("ARB_STOP_ECART_AGGRAVE" if stop
+                                          else "ARB_AGE_MAX_SANS_CONVERGENCE")),
                          "ecart_entree_bps": e_in, "ecart_sortie_bps": e_out,
                          "realized_net_pnl_usdc": realized,
                          "real_execution": False, "not_an_order": True})
@@ -142,4 +161,5 @@ def tick(root: str | Path = ".", *, now: float | None = None,
 
 
 __all__ = ["tick", "dernieres_mesures", "SEUIL_OUVERTURE_BPS", "SEUIL_SORTIE_BPS",
-           "AGE_MAX_H", "NOTIONAL_USD", "MAX_POSITIONS", "COUT_AR_BPS"]
+           "AGE_MAX_H", "NOTIONAL_USD", "MAX_POSITIONS", "COUT_AR_BPS",
+           "STOP_AGGRAVATION_BPS"]

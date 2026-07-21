@@ -26,10 +26,10 @@ def _ledger_rows(root: Path):
 
 def test_ouverture_seulement_au_dela_de_35_bps_et_2_positions_max(tmp_path):
     _venue(tmp_path, [
-        {"ts": 1000.0, "coin": "BTC", "ecart_prix_bps": 40.0},
-        {"ts": 1000.0, "coin": "ETH", "ecart_prix_bps": -50.0},
-        {"ts": 1000.0, "coin": "SOL", "ecart_prix_bps": 60.0},    # 3e : refusee (max 2)
-        {"ts": 1000.0, "coin": "XPL", "ecart_prix_bps": 20.0},    # sous le seuil
+        {"ts": 1000.0, "coin": "BTC", "ecart_prix_bps": 20.0},
+        {"ts": 1000.0, "coin": "ETH", "ecart_prix_bps": -25.0},
+        {"ts": 1000.0, "coin": "SOL", "ecart_prix_bps": 30.0},    # 3e : refusee (max 2)
+        {"ts": 1000.0, "coin": "XPL", "ecart_prix_bps": 9.0},    # sous le seuil
     ])
     evts = tick(tmp_path, now=1010.0, session_id="S-TEST")
     opens = [e for e in evts if e["type"] == "OPEN"]
@@ -44,13 +44,13 @@ def test_mesure_perimee_aucune_decision_deny_by_default(tmp_path):
 
 
 def test_convergence_capturee_le_realise_paie_les_couts_et_va_au_ledger_unifie(tmp_path):
-    _venue(tmp_path, [{"ts": 1000.0, "coin": "BTC", "ecart_prix_bps": 40.0}])
+    _venue(tmp_path, [{"ts": 1000.0, "coin": "BTC", "ecart_prix_bps": 20.0}])
     tick(tmp_path, now=1010.0, session_id="S-TEST")
-    _venue(tmp_path, [{"ts": 2000.0, "coin": "BTC", "ecart_prix_bps": 2.0}])   # convergee
+    _venue(tmp_path, [{"ts": 2000.0, "coin": "BTC", "ecart_prix_bps": 1.0}])   # convergee
     evts = tick(tmp_path, now=2010.0, session_id="S-TEST")
     close = next(e for e in evts if e["type"] == "CLOSE")
-    # capture 40->2 = 38 bps - 22 de couts = 16 bps x 50$ = +0.08 $
-    assert abs(close["realized"] - (38.0 - COUT_AR_BPS) / 1e4 * NOTIONAL_USD) < 1e-9
+    # capture 20->1 = 19 bps - 8 de couts = 11 bps x 50$ = +0.055 $
+    assert abs(close["realized"] - (19.0 - COUT_AR_BPS) / 1e4 * NOTIONAL_USD) < 1e-9
     rows = _ledger_rows(tmp_path)
     fermeture = next(r for r in rows if r.get("kind") == "CLOSE")
     assert fermeture["strategie"] == "arbitrage" and fermeture["session_id"] == "S-TEST"
@@ -63,10 +63,10 @@ def test_convergence_capturee_le_realise_paie_les_couts_et_va_au_ledger_unifie(t
 
 
 def test_age_max_sans_convergence_ferme_et_paie_ses_couts_honnetement(tmp_path):
-    _venue(tmp_path, [{"ts": 1000.0, "coin": "BTC", "ecart_prix_bps": 40.0}])
+    _venue(tmp_path, [{"ts": 1000.0, "coin": "BTC", "ecart_prix_bps": 20.0}])
     tick(tmp_path, now=1010.0, session_id="S-TEST")
     # 5 h plus tard, mesure fraiche au meme ecart : capture 0 - couts = perte assumee
-    _venue(tmp_path, [{"ts": 19000.0, "coin": "BTC", "ecart_prix_bps": 40.0}])
+    _venue(tmp_path, [{"ts": 19000.0, "coin": "BTC", "ecart_prix_bps": 20.0}])
     evts = tick(tmp_path, now=19010.0, session_id="S-TEST")
     close = next(e for e in evts if e["type"] == "CLOSE")
     assert close["realized"] < 0, "pas de convergence = les couts sont PAYES, jamais caches"
@@ -77,3 +77,18 @@ def test_le_cablage_lanceur_et_runtime_existe():
     runtime = open("src/hl_observer/funding/carry_paper_runtime.py", encoding="utf-8").read()
     assert 'HYPERSMART_ARB_DISLOCATION_PAPER=1' in lanceur
     assert "arb_dislocation_paper import tick" in runtime
+
+
+def test_le_STOP_coupe_quand_l_ecart_s_AGGRAVE(tmp_path):
+    """21/07 soir : sans jambe Binance reelle, une dislocation qui S'ECARTE est un pari.
+    Le stop coupe a +25 bps d'aggravation — la perte est assumee, jamais laissee courir."""
+    from hl_observer.funding.arb_dislocation_paper import STOP_AGGRAVATION_BPS
+    _venue(tmp_path, [{"ts": 1000.0, "coin": "BTC", "ecart_prix_bps": 20.0}])
+    tick(tmp_path, now=1010.0, session_id="S")
+    _venue(tmp_path, [{"ts": 2000.0, "coin": "BTC",
+                       "ecart_prix_bps": 20.0 + STOP_AGGRAVATION_BPS}])
+    evts = tick(tmp_path, now=2010.0, session_id="S")
+    close = next(e for e in evts if e["type"] == "CLOSE")
+    assert close["realized"] < 0, "un stop coupe une PERTE, il ne la maquille pas"
+    ligne = next(r for r in _ledger_rows(tmp_path) if r.get("kind") == "CLOSE")
+    assert ligne["reason"] == "ARB_STOP_ECART_AGGRAVE"

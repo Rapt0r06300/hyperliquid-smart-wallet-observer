@@ -46,7 +46,14 @@ URL_BINANCE = "https://fapi.binance.com/fapi/v1/premiumIndex"
 HEURES_PAR_PERIODE_BINANCE = 8.0
 
 SORTIE = Path("runtime") / "data" / "dispersion_venues.jsonl"
-COINS_DEFAUT = "BTC,ETH,SOL,HYPE,AVAX,LINK,DOGE,SUI,ARB,OP"
+# 21/07 — LE BLOCAGE DE L'ARBITRAGE : on ne surveillait que 10 MAJORS, c'est-a-dire
+# precisement les marches les PLUS efficients (ecart max mesure : 8,9 bps sur 30 h, seuil
+# d'ouverture 35). Les dislocations vivent sur les alts moins suivis. Univers x4 : meme
+# cout reseau (2 appels globaux, les deux venues renvoient TOUT), 4x plus de chances.
+COINS_DEFAUT = ("BTC,ETH,SOL,HYPE,AVAX,LINK,DOGE,SUI,ARB,OP,"
+                "APT,ATOM,BNB,NEAR,LTC,XRP,ADA,TRX,DOT,FIL,"
+                "INJ,TIA,SEI,STX,RUNE,AAVE,MKR,CRV,LDO,ENA,"
+                "WIF,PEPE,BONK,ORDI,JUP,PYTH,BLUR,GMX,SNX,COMP")
 INTERVALLE_S_DEFAUT = 300.0
 
 

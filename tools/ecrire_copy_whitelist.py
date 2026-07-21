@@ -107,6 +107,12 @@ def construire_whitelist(root: str | Path = RACINE, *, fills_path: str | Path | 
     gardes = [{"adresse": v.adresse, "markout_moyen_bps": v.markout_moyen_bps,
                "n_evenements": v.n_evenements} for v in verdicts if v.predit]
     return {"genere_ts": time.time(), "gardes": gardes,
+            # 21/07 : la PROGRESSION vers la preuve, ecrite dans le fichier (pas seulement a
+            # l'ecran) — « 0 garde » sans detail ressemble a une panne ; avec le detail, on
+            # voit le copy revenir : qui est evalue, avec combien de fills, ce qui manque.
+            "details": [{"adresse": v.adresse, "n_events": v.n_evenements,
+                         "markout_moyen_bps": v.markout_moyen_bps, "motif": v.motif,
+                         "predit": v.predit} for v in verdicts],
             "rejetes": sum(1 for v in verdicts if not v.predit),
             "regle": "markout forward > seuil sur assez d'events (C12) ; liste vide = copy "
                      "verrouille (deny-by-default) ; les portes actuelles restent AU-DESSUS",
@@ -137,6 +143,20 @@ def main(argv: list | None = None) -> int:
     d = json.loads(chemin.read_text(encoding="utf-8"))
     print("whitelist ecrite : %s — %d garde(s), %d rejete(s)"
           % (chemin, len(d["gardes"]), d["rejetes"]))
+    # 21/07 (Flo : « je veux que notre copytrading soit parfait ») : un « 0 garde » muet
+    # ressemble a une panne. On DIT la progression : qui est evalue, avec combien de fills,
+    # et ce qu'il manque pour trancher. Le copy revient par la preuve — autant la voir venir.
+    det = d.get("details") or []
+    if det:
+        from hl_observer.copy_wallet.leader_markout import MIN_EVENEMENTS
+        print("  progression vers la preuve (il faut >= %d fills mesures par leader) :"
+              % MIN_EVENEMENTS)
+        for v in det[:8]:
+            print("    %-14s %3d fill(s) · markout %s · %s"
+                  % (str(v.get("adresse"))[:14], v.get("n_events") or 0,
+                     ("%+.2f bps" % v["markout_moyen_bps"])
+                     if v.get("markout_moyen_bps") is not None else "non mesurable",
+                     v.get("motif")))
     return 0
 
 
