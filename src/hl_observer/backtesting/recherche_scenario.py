@@ -563,6 +563,11 @@ def recommandation(strat: str, r: dict[str, Any]) -> str:
         return ("PRESQUE : %d essais jugés, des configs frôlent les portes — regarde les "
                 "presque-promus ci-dessus, et relance après 24 h de données en plus."
                 % len(essais))
+    if int(r.get("n_candidats") or 0) > 0 and r.get("statut") == "ESPACE_EPUISE":
+        return ("LE CRIBLE A TOUT ÉLIMINÉ : sur les %d candidats, AUCUNE des ~600 combinaisons "
+                "n'est même positive sur l'époque récente — ce module n'a pas de réglage, il a "
+                "un verrou justifié. La voie passe par un autre mécanisme."
+                % int(r["n_candidats"]))
     return "RIEN À JUGER ce tour-ci."
 
 
