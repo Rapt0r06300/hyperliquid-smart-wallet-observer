@@ -616,6 +616,10 @@ def scanner(diagnostic: bool):
                            "pire_hausse_observee": pire, "securite_liquidation": SECURITE_LIQUIDATION,
                            "levier_utilise": lev,
                            "perp_px": round(p["mark"], 8),   # prix perp COURANT -> suivi liquidation live
+                           # P1-1 : les DEUX prix spot (fill et mid) -> le spread reellement
+                           # paye sur la jambe spot devient mesurable, poste par poste.
+                           "spot_px": round(spot_px, 10) if spot_px else None,
+                           "spot_mid_px": (round(spot_mid, 10) if spot_mid else None),
                            "gain_net_24h_bps": (round(v.gain_net_24h_bps, 4)
                                                 if v.gain_net_24h_bps is not None else None),
                            "source": "hyperliquid public API (perp+spot) + bougies 1h", "real_execution": False}

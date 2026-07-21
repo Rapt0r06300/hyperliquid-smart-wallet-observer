@@ -57,7 +57,35 @@ SORTIE_BASE_CONVERGEE = "BASE_CONVERGEE_PREMIUM_CAPTURE"   # A5 : le 2e PnL est 
 # de la trajectoire de base. Seuil ABSOLU en dollars : au-dessus du bruit de mesure, plusieurs
 # jours de funding plancher — une capture qui ne paie pas sa sortie reste interdite (A4).
 SORTIE_PRISE_PROFIT_BASE = "PRISE_PROFIT_BASE_NET_POSITIF"
-SEUIL_PRISE_PROFIT_USD = 0.05
+#: 🔴 21/07 (P1-8) — MESURE : a notre notionnel (233 $/position), le bruit d'accrual vaut
+#: 0,0029 $/h et le seuil fixe de 0,05 $ vaut **17,2x le bruit**. Il tient AUJOURD'HUI.
+#: Mais un seuil FIXE contre un bruit PROPORTIONNEL au notionnel se degrade en silence :
+#: a 10x le notionnel, le bruit vaut 0,029 $/h et le ratio tombe a 1,7x — on prendrait des
+#: profits sur du bruit comptable sans que rien ne previenne.
+#: On le DERIVE donc : au moins `MULTIPLE_BRUIT` heures de funding, avec le plancher
+#: historique de 0,05 $ comme garde-bas.
+SEUIL_PRISE_PROFIT_USD = 0.05          # plancher absolu, conserve
+MULTIPLE_BRUIT_PRISE_PROFIT = 15.0     # marge mesuree le 21/07 (17,2x), arrondie vers le bas
+
+
+def seuil_prise_profit(notional_usdt: float | None, funding_bps_h: float | None,
+                       *, multiple: float = MULTIPLE_BRUIT_PRISE_PROFIT,
+                       plancher_usd: float = SEUIL_PRISE_PROFIT_USD) -> float:
+    """Le seuil de prise de profit, DERIVE du bruit d'accrual au lieu d'etre choisi.
+
+    Le bruit vaut une heure de funding sur le notionnel (c'est l'incertitude maximale du
+    decoupage regle/estime). Un seuil doit valoir plusieurs fois ce bruit, sinon il declenche
+    sur de la comptabilite, pas sur un gain. Donnee absente -> le plancher historique : on ne
+    baisse jamais une garde faute d'information.
+    """
+    n = notional_usdt if isinstance(notional_usdt, (int, float)) and not isinstance(
+        notional_usdt, bool) else None
+    f = funding_bps_h if isinstance(funding_bps_h, (int, float)) and not isinstance(
+        funding_bps_h, bool) else None
+    if n is None or f is None or n != n or f != f or n <= 0 or f <= 0:
+        return float(plancher_usd)
+    bruit_h = float(n) * float(f) / 1e4
+    return round(max(float(plancher_usd), float(multiple) * bruit_h), 6)
 
 
 def _f(d: dict, k: str, defaut: float = 0.0) -> float:
@@ -90,7 +118,26 @@ def ouvrir_position(decision: dict[str, Any], inputs: dict[str, Any], *,
                                       long_notional_usdt=notional, short_notional_usdt=notional)
     if not dn.balanced or notional <= 0:
         return None
+    # P1-1 (21/07) — L'ECONOMIE JAMBE PAR JAMBE, posee a l'ouverture. Sans elle, l'audit
+    # devait repondre DATA_MISSING a 5 des 15 questions, et « delta-neutre » restait une
+    # affirmation par construction, jamais une mesure.
+    eco = {}
+    try:
+        from hl_observer.funding.carry_economie_position import (decomposer_entree,
+                                                                 hedge_ratio,
+                                                                 quantites_par_jambe)
+        eco = decomposer_entree(notional_usdt=notional, base_bps=_f(decision, "base_bps"),
+                                perp_px=_nombre_ou_none(inputs, "perp_px"),
+                                spot_px=_nombre_ou_none(inputs, "spot_px"),
+                                spot_mid_px=_nombre_ou_none(inputs, "spot_mid_px"))
+        eco.update(quantites_par_jambe(notional_usdt=notional,
+                                       perp_px=_nombre_ou_none(inputs, "perp_px"),
+                                       spot_px=_nombre_ou_none(inputs, "spot_px")))
+        eco["hedge"] = hedge_ratio(eco)
+    except Exception:  # noqa: BLE001 — une decomposition ratee n'empeche pas d'ouvrir
+        eco = {}
     return {
+        **eco,
         "coin": str(decision.get("coin") or "").upper(),
         "mode": mode,
         "notional_usdt": notional,
@@ -164,7 +211,7 @@ def raison_de_sortie(position: dict[str, Any], *, now_ms: int, funding_bps_h_cou
     # que soit la forme de la base. Le +0,31 $ du 20/07 a 20h02 ne restera plus jamais latent.
     if (base_bps_courant is not None
             and pnl_realise(position, base_bps_courant=float(base_bps_courant))
-            >= SEUIL_PRISE_PROFIT_USD):
+            >= seuil_prise_profit(position.get("notional_usdt"), funding_bps_h_courant)):
         return SORTIE_PRISE_PROFIT_BASE
     _depuis_age = int(position.get("age_reference_ts_ms") or position["entry_ts_ms"])
     if (int(now_ms) - _depuis_age) / 3.6e6 >= float(age_max_h):
