@@ -33,17 +33,19 @@ Statuts : `DONE_VERIFIED` · `DONE_BUT_REGRESSED` · `DONE_DOC_ONLY` · `PARTIAL
 
 | # | Tâche | Statut | Preuve / blocage |
 |---|---|---|---|
-| P1-1 | **Économie complète par position** : hedge ratio, delta résiduel USD, frais spot/perp séparés, spread et slippage par jambe, basis entrée/sortie, coût de rééquilibrage, durée, marge, rendement par $ de marge et par jour. | `TODO_ACTIVE` | `BLOCKED_DATA` partiel : le schéma de position ne stocke ni frais par jambe ni hedge ratio → enrichir le schéma d'abord |
-| P1-2 | **Le carry est-il RÉELLEMENT delta-neutre ?** dérive du hedge ratio, exposition directionnelle résiduelle | `TODO_ACTIVE` | dépend de P1-1 |
+| P1-1 | **Économie complète par position** (frais spot/perp séparés, spread par jambe, quantités, hedge ratio) | `DONE_VERIFIED` | `funding/carry_economie_position` + 18 tests ; posée à l'OUVERTURE ; la décomposition redonne exactement le coût du moteur |
+| P1-2 | **Le carry est-il RÉELLEMENT delta-neutre ?** | `PARTIALLY_DONE` | hedge ratio passé de `MODELISE` à **`MESURE`** : delta **−3e-06 $** sur 100 $ de notionnel. Reste la DÉRIVE dans le temps (nécessite des prix courants par jambe à chaque tick) |
 | P1-3 | **Scorecard par coin** (`CARRY_PROVEN_POSITIVE` … `NEGATIVE_NET`) | `TODO_ACTIVE` | dépend de P1-1 |
-| P1-4 | **Mapping Unit depuis les métadonnées officielles** au lieu du préfixe de nom | `TODO_ACTIVE` | défaut prouvé : refus `base aberrante ×141` (BERA), `×3511` (TRUMP) |
+| P1-4 | **Mapping Unit : provenance conservée** | `DONE_VERIFIED` | `market/mapping_unit` + 22 tests : `NOM_OFFICIEL` (certain) vs `PREFIXE_UNIT` (heuristique, et le mot est écrit) vs `INCONNU` ; 9 champs de provenance ; détection d'un appariement qui change sans décision ; branché feeder + journal |
 | P1-5 | Allocation du capital ∝ rendement net³ | `DONE_VERIFIED` | corrélation marge↔rendement passée de **−0,596** à positive ; **+23,9 %** sur les positions réelles ; 34 tests |
 | P1-6 | Renfort de position sans churn (R1-R6, dont porte de risque identique à une ouverture) | `DONE_VERIFIED` | 27 tests dont bout-en-bout sur le chemin de production |
 | P1-7 | Garde du plancher sur le z-score de funding | `DONE_VERIFIED` | `facteur_zscore(z, funding)` + branché dans le feeder |
-| P1-8 | **Le seuil de prise de profit +0,05 $ est-il au-dessus du bruit comptable ?** | `TODO_ACTIVE` | jamais mesuré ; le bruit d'accrual vaut ~0,0147 $/h à notre notionnel |
+| P1-8 | **Le seuil de prise de profit vs le bruit** | `DONE_VERIFIED` | mesuré **17,2× le bruit** aujourd'hui — mais un seuil FIXE contre un bruit PROPORTIONNEL se dégrade en silence (1,7× à 10× le notionnel). Seuil désormais **DÉRIVÉ** (15× le bruit d'une heure), plancher 0,05 $ conservé |
 | P1-9 | Backtest carry paramétrique sur scans enregistrés | `DONE_VERIFIED` | `carry_backtest.py`, 24 tests, **refuse** tout gain venant d'une baisse de sécurité |
 | P1-10 | Journal de scans (~2 900 lignes/jour, refus compris) | `DONE_VERIFIED` | `carry_scan_recorder`, 25 tests, tourne en live |
-| P1-11 | **Les 7-8 viables le restent-ils sur plusieurs périodes ?** | `BLOCKED_DATA` | 7 passes enregistrées ; il en faut ≥ 12 (seuil du backtest) |
+| P1-11 | **Les viables le restent-ils sur plusieurs périodes ?** | `BLOCKED_DATA` | le journal grossit (~2 900 lignes/j) ; il faut ≥ 12 passes |
+| P1-12 | **Revalider n'est pas fermer** — l'âge max fermait une position vivante tous les 14 j | `DONE_VERIFIED` | **52,4 % du revenu brut détruit** par notre propre règle d'hygiène. À l'âge max on revalide ; on ne ferme que si le coin n'est plus viable. 11 tests |
+| P1-13 | **Timing du règlement** (ouvrir avant / fermer après le sommet d'heure) | `DONE_VERIFIED` | `funding/carry_timing_reglement`, branché dans la sortie ; **un DANGER n'est jamais retardé** |
 
 ## P2 — Clarifier les métriques affichées
 
