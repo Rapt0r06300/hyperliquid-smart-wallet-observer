@@ -68,6 +68,7 @@ def boucle_objectif(
     etat_path: str | Path | None = None,
     max_essais: int | None = None,
     budget_s: float | None = None,
+    s_arreter_au_premier: bool = True,
 ) -> dict[str, Any]:
     """La boucle. `evaluer(config) -> rapport` ; `porte(rapport) -> bool` (SÉPARÉE, externe).
 
@@ -97,6 +98,15 @@ def boucle_objectif(
             essai = {"cle": cle, "config": config, "verdict": "PROMU" if promu else "REJETE",
                      "rapport_resume": {k: rapport.get(k) for k in ("verdict", "gates")
                                         if isinstance(rapport, dict) and k in rapport}}
+            # nets par etage (si l'evaluateur les fournit) : diagnostic + classement des pepites
+            if isinstance(rapport, dict):
+                for etage in ("moitie_1", "moitie_2", "stress"):
+                    m = rapport.get(etage)
+                    if isinstance(m, dict) and "net_total_usd" in m:
+                        essai.setdefault("nets", {})[etage] = round(
+                            float(m.get("net_total_usd") or 0.0), 4)
+                if rapport.get("instabilite"):
+                    essai["instabilite"] = rapport["instabilite"]
         except Exception as exc:  # noqa: BLE001 — une eval qui explose n'arrete pas la recherche
             promu, essai = False, {"cle": cle, "config": config, "verdict": "ERREUR",
                                    "erreur": str(exc)[:200]}
@@ -104,12 +114,14 @@ def boucle_objectif(
         deja.add(cle)
         n_ce_run += 1
         # 21/07 (« le replay ne fonctionne pas ») : la recherche moulinait des MINUTES par
-        # config en silence total -> ca ressemble a un gel. Une ligne par essai : le silence
-        # qui ressemble a une panne est la maladie de ce projet, jamais on n'y retombe.
-        print("  essai %d : %s -> %s" % (len(essais), config, essai.get("verdict")), flush=True)
+        # config en silence total -> ca ressemble a un gel. Une ligne par essai, AVEC le
+        # diagnostic (quels nets, quelle porte a tue) : on apprend a chaque ligne.
+        print("  essai %d : %s -> %s%s" % (
+            len(essais), config, essai.get("verdict"),
+            (" %s" % essai["nets"]) if essai.get("nets") else ""), flush=True)
         if chemin:
             _ecrire_etat(chemin, {"essais": essais})   # APRES CHAQUE essai : un Ctrl-C ne perd rien
-        if promu:
+        if promu and s_arreter_au_premier:
             resultat = {"statut": STATUT_PROMU, "gagnant": config, "essais": essais,
                         "n_essais_total": len(essais)}
             if chemin:
@@ -119,10 +131,19 @@ def boucle_objectif(
     else:
         statut = STATUT_ESPACE_EPUISE
 
-    resultat = {"statut": statut, "gagnant": None, "essais": essais,
-                "n_essais_total": len(essais)}
+    # 21/07 (« PLUSIEURS pepites ») : en mode collection, on balaie TOUT l'espace puis on
+    # classe les promus par leur net SOUS STRESS (la barre la plus dure) — le gagnant est le
+    # plus robuste, et toute la liste part au rapport.
+    promus = [e for e in essais if e.get("verdict") == "PROMU"]
+    gagnant = None
+    if promus:
+        statut = STATUT_PROMU
+        gagnant = max(promus, key=lambda e: (e.get("nets") or {}).get("stress", 0.0))["config"]
+    resultat = {"statut": statut, "gagnant": gagnant, "essais": essais,
+                "n_essais_total": len(essais),
+                "promus": [{"config": e["config"], "nets": e.get("nets")} for e in promus]}
     if chemin:
-        _ecrire_etat(chemin, {"essais": essais, "resultat": statut})
+        _ecrire_etat(chemin, {"essais": essais, "resultat": statut, "gagnant": gagnant})
     return resultat
 
 

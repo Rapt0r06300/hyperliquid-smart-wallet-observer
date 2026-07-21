@@ -110,14 +110,50 @@ class DonneesReplay:
 
 # ================================================================ 2. l'espace de recherche
 
+#: 21/07 (« combinaisons ultra travaillées ») : chaque config SL/TP/horizon se croise avec des
+#: FILTRES D'ENTRÉE mesurés sur nos candidats — les pépites vivent dans les SOUS-POPULATIONS
+#: (un SL/TP moyen sur tout le monde n'a jamais payé ; sur les signaux frais+consensus, peut-être).
+FILTRES_PRESETS: dict[str, dict] = {
+    "tous": {},
+    "frais": {"age_max_ms": 10_000},
+    "consensus": {"min_consensus": 3},
+    "frais_liquide": {"age_max_ms": 10_000, "min_liquidity": 0.55},
+}
+
+
+def filtrer_candidats(cands: list[dict], filtres: dict | None) -> list[dict]:
+    """Applique un preset de filtres aux candidats — champs MESURÉS des candidats, jamais
+    inventés (un candidat sans le champ requis est exclu du sous-échantillon : deny-by-default)."""
+    if not filtres:
+        return cands
+    out = []
+    for c in cands:
+        try:
+            if "age_max_ms" in filtres and not (
+                    float(c.get("signal_age_ms") or 9e9) <= filtres["age_max_ms"]):
+                continue
+            if "min_consensus" in filtres and not (
+                    float(c.get("consensus_wallets") or 0) >= filtres["min_consensus"]):
+                continue
+            if "min_liquidity" in filtres and not (
+                    float(c.get("liquidity_score") or 0.0) >= filtres["min_liquidity"]):
+                continue
+        except (TypeError, ValueError):
+            continue
+        out.append(c)
+    return out
+
+
 def grille_large() -> Iterator[dict[str, Any]]:
-    """21/07 (« il doit nous trouver des pépites ! ») : le FILET s'élargit — ~150 configs
-    (SL 20→120, TP 40→300, horizons 15 min→4 h). Les MAILLES ne bougent pas : chaque config
-    passe les mêmes portes (deux moitiés + stress ×1,5 + plateau). Plus de candidats au
-    concours, jamais un concours plus facile."""
-    return grille_configs(sls=(20.0, 30.0, 40.0, 60.0, 90.0, 120.0),
-                          tps=(40.0, 50.0, 70.0, 100.0, 150.0, 200.0, 300.0),
-                          horizons=(15.0, 30.0, 60.0, 120.0, 240.0))
+    """21/07 (« il doit nous trouver des pépites ! ») : le FILET s'élargit — SL 20→120,
+    TP 40→300, horizons 15 min→4 h, CROISÉS avec les 4 presets de filtres (~600 configs).
+    Les MAILLES ne bougent pas : chaque config passe les mêmes portes (deux moitiés +
+    stress ×1,5 + plateau). Plus de candidats au concours, jamais un concours plus facile."""
+    for base in grille_configs(sls=(20.0, 30.0, 40.0, 60.0, 90.0, 120.0),
+                               tps=(40.0, 50.0, 70.0, 100.0, 150.0, 200.0, 300.0),
+                               horizons=(15.0, 30.0, 60.0, 120.0, 240.0)):
+        for nom, f in FILTRES_PRESETS.items():
+            yield {**base, "filtre": nom, "filtres": f}
 
 
 def grille_configs(*, sls=(30.0, 40.0, 60.0, 90.0), tps=(50.0, 70.0, 100.0, 150.0),
@@ -167,6 +203,10 @@ def evaluer_sur_moities(donnees: DonneesReplay, config: dict[str, Any], *,
     `evaluer_ab` est injectable : les tests jugent NOTRE logique sans payer le vrai replay."""
     h = float(config.get("horizon_min") or 60.0)
     m1, m2 = donnees.moities_avec_embargo(h)
+    # sous-population du preset de filtres (21/07) — APRES la coupe temporelle : la coupe ne
+    # depend que du temps, le filtre ne peut pas la biaiser.
+    m1 = filtrer_candidats(m1, config.get("filtres"))
+    m2 = filtrer_candidats(m2, config.get("filtres"))
     cfg = _sltp(config)
     r1 = evaluer_ab(m1, donnees.marks, base_config=cfg, horizon_min=h, cost_bps=cost_bps)
     r2 = evaluer_ab(m2, donnees.marks, base_config=cfg, horizon_min=h, cost_bps=cost_bps)
@@ -197,6 +237,7 @@ def chercher(root: str | Path, *, configs: Iterable[dict[str, Any]] | None = Non
              max_essais: int | None = None, budget_s: float | None = None,
              donnees: DonneesReplay | None = None,
              strategie: str | None = None,
+             s_arreter_au_premier: bool = True, raffiner: bool = False,
              evaluer_ab: Callable[..., dict] = run_ab_replay) -> dict[str, Any]:
     """Grille -> porte deux-moitiés+stress -> PLATEAU des voisins -> verdict.
 
@@ -236,7 +277,35 @@ def chercher(root: str | Path, *, configs: Iterable[dict[str, Any]] | None = Non
     r = boucle_objectif(
         configs if configs is not None else grille_configs(),
         evaluer, porte_avec_plateau,
-        etat_path=etat, max_essais=max_essais, budget_s=budget_s)
+        etat_path=etat, max_essais=max_essais, budget_s=budget_s,
+        s_arreter_au_premier=s_arreter_au_premier)
+    # ── RAFFINAGE grossier -> fin (21/07, « ultra intelligent ») : on resserre la grille
+    # (pas/2) autour des PROMUS et des meilleurs presque-promus (net m1+m2 les plus hauts).
+    # Les raffines passent LES MEMES portes ; la dedup par cle (etat) evite tout double calcul.
+    if raffiner and r.get("essais"):
+        def _net12(e):
+            n = e.get("nets") or {}
+            return float(n.get("moitie_1") or 0.0) + float(n.get("moitie_2") or 0.0)
+        graines = [e["config"] for e in r["essais"] if e.get("verdict") == "PROMU"]
+        graines += [e["config"] for e in sorted(
+            (e for e in r["essais"] if e.get("verdict") == "REJETE" and e.get("nets")),
+            key=_net12, reverse=True)[:3]]
+        raffines: list[dict[str, Any]] = []
+        for g in graines[:6]:
+            raffines.extend(raffiner_autour(g, pas_sl=5.0, pas_tp=10.0))
+        if raffines:
+            print("  -- raffinage : %d configs autour de %d graine(s) --"
+                  % (len(raffines), len(graines[:6])), flush=True)
+            r2 = boucle_objectif(raffines, evaluer, porte_avec_plateau, etat_path=etat,
+                                 max_essais=max_essais, budget_s=budget_s,
+                                 s_arreter_au_premier=False)
+            promus = (r.get("promus") or []) + (r2.get("promus") or [])
+            r["essais"] = r["essais"] + r2["essais"]
+            r["promus"] = promus
+            if promus:
+                r["statut"] = "PROMU"
+                r["gagnant"] = max(promus, key=lambda p: float(
+                    (p.get("nets") or {}).get("stress") or 0.0))["config"]
     r["strategie"] = strategie
     return r
 
@@ -336,7 +405,8 @@ def chercher_toutes(root: str | Path, *, max_essais_par_strategie: int | None = 
     for strat in STRATEGIES_MODULES:
         print("=== module %s ===" % strat, flush=True)
         resultats[strat] = chercher(root, strategie=strat, configs=grille_large(),
-                                    max_essais=max_essais_par_strategie)
+                                    max_essais=max_essais_par_strategie,
+                                    s_arreter_au_premier=False, raffiner=True)
     print("=== module cross_venue ===", flush=True)
     resultats["cross_venue"] = chercher_cross_venue(root, max_essais=max_essais_par_strategie)
     try:
@@ -353,7 +423,14 @@ def _ecrire_pepites(root: str | Path, resultats: dict[str, Any]) -> None:
               "Ce n'est PAS une promesse de PnL : c'est un candidat à valider en paper._", ""]
     for strat, r in resultats.items():
         lignes.append("## %s — %s" % (strat, r.get("statut")))
-        if r.get("gagnant"):
+        promus = sorted((r.get("promus") or []),
+                        key=lambda p: float((p.get("nets") or {}).get("stress") or 0.0),
+                        reverse=True)
+        if promus:
+            lignes.append("- **%d pépite(s)**, classées par net SOUS STRESS ×1,5 :" % len(promus))
+            for i, p in enumerate(promus[:5], 1):
+                lignes.append("  %d. `%s` — nets %s" % (i, p["config"], p.get("nets")))
+        elif r.get("gagnant"):
             lignes.append("- **PÉPITE** : `%s`" % r["gagnant"])
         if r.get("motif"):
             lignes.append("- %s" % r["motif"])

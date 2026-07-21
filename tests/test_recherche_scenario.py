@@ -177,3 +177,52 @@ def test_chercher_toutes_ecrit_le_rapport_PEPITES_meme_sans_donnees(tmp_path):
     assert all(x["statut"] == "INSUFFISANT" for x in r.values())
     t = (tmp_path / "runtime" / "replay" / "PEPITES.md").read_text(encoding="utf-8")
     assert "PAS une promesse" in t and "cross_venue" in t
+
+
+# ---------------- 21/07 : « ultra intelligent » — collection, filtres, raffinage ----------------
+
+def test_mode_collection_balaie_TOUT_et_classe_les_pepites_par_net_sous_stress(tmp_path):
+    """PLUSIEURS pepites : on ne s'arrete plus a la premiere. Le gagnant final = le plus
+    robuste SOUS STRESS (pas le plus clinquant sur une moitie)."""
+    nets = {40.0: (3.0, 2.5), 50.0: (6.0, 5.0),          # DEUX gagnants potentiels
+            30.0: (2.0, 2.0), 45.0: (2.0, 1.5), 35.0: (1.0, 1.0),
+            60.0: (2.0, 1.0), 55.0: (1.0, 1.0)}          # voisins vivants
+    configs = [{"sl": 40.0, "tp": 70.0, "horizon_min": 60.0},
+               {"sl": 50.0, "tp": 90.0, "horizon_min": 60.0}]
+    r = chercher(tmp_path, configs=configs, donnees=DONNEES, evaluer_ab=_fake_ab(nets),
+                 s_arreter_au_premier=False)
+    assert r["statut"] == "PROMU" and len(r["promus"]) == 2
+    assert r["gagnant"]["sl"] == 50.0, "sl=50 a le meilleur net sous stress (11-1 > 5.5-1)"
+
+
+def test_filtrer_candidats_reduit_a_la_sous_population_mesuree():
+    from hl_observer.backtesting.recherche_scenario import FILTRES_PRESETS, filtrer_candidats
+    cands = [{"signal_age_ms": 5000, "consensus_wallets": 4, "liquidity_score": 0.7},
+             {"signal_age_ms": 60000, "consensus_wallets": 4, "liquidity_score": 0.7},
+             {"consensus_wallets": 1}]
+    assert len(filtrer_candidats(cands, FILTRES_PRESETS["frais"])) == 1
+    assert len(filtrer_candidats(cands, FILTRES_PRESETS["consensus"])) == 2
+    assert len(filtrer_candidats(cands, FILTRES_PRESETS["frais_liquide"])) == 1
+    assert len(filtrer_candidats(cands, {})) == 3
+    # champ absent = exclu du sous-echantillon (deny-by-default), jamais suppose conforme
+    assert filtrer_candidats([{}], FILTRES_PRESETS["frais"]) == []
+
+
+def test_la_grille_large_croise_les_presets_de_filtres():
+    from hl_observer.backtesting.recherche_scenario import FILTRES_PRESETS, grille_large
+    configs = list(grille_large())
+    assert len(configs) > 400
+    assert {c["filtre"] for c in configs} == set(FILTRES_PRESETS)
+    assert all(c["tp"] > c["sl"] for c in configs)
+
+
+def test_le_raffinage_resserre_autour_des_graines_et_regate_tout(tmp_path):
+    """Grossier -> fin : les promus ET les meilleurs presque-promus recoivent des voisins a
+    pas/2, juges par LES MEMES portes (dedup par cle : rien n'est calcule deux fois)."""
+    nets = {40.0: (3.0, 2.5), 30.0: (2.0, 2.0), 45.0: (2.0, 1.5), 35.0: (2.0, 1.5),
+            50.0: (1.0, 1.0)}
+    r = chercher(tmp_path, configs=[{"sl": 40.0, "tp": 70.0, "horizon_min": 60.0}],
+                 donnees=DONNEES, evaluer_ab=_fake_ab(nets),
+                 s_arreter_au_premier=False, raffiner=True)
+    assert r["statut"] == "PROMU"
+    assert len(r["essais"]) > 1, "le raffinage a bien juge des configs supplementaires"
