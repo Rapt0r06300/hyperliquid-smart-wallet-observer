@@ -339,7 +339,12 @@ def test_la_chaine_MID_est_cablee_feeder_entree_endpoint_et_poll():
     assert '"base_mid_bps"' in feed, "les inputs portent la base MID"
     assert '"base_mid_bps_entree": _f(inputs, "base_mid_bps")' in lifec
     assert "bases_courantes_mid(root)" in src
-    assert "window._carryNet=realSess+Number(d.funding_accru_usdt||0)" in src   # v3 : sans latent
+    # v4 (P0, 21/07) — l'invariant se DURCIT : le net stable n'absorbe ni le latent de base
+    # (reversible) NI l'accrual non regle (une estimation). Seul le funding REGLE y entre.
+    assert "window._carryNet=realSess+Number((d.net_funding_settled!=null)" in src
+    assert "d.funding_accrual_estimate" in src, "l'estimation doit etre exposee A PART"
+    assert "window._carryNet=realSess+Number(d.funding_accru_usdt||0)" not in src, (
+        "regression : le net stable est reparti absorber l'accrual non regle")
 
 
 # ---------------- 21/07 : l'ARBITRAGE a sa ligne, avec son ETAT MESURE ----------------

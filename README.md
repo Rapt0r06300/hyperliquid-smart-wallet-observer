@@ -26,16 +26,20 @@ launcher principal ni montes dans l'UI Hyperliquid.
 
 ## Où en est le bot (21/07/2026)
 
-**Quatre modules, chacun avec son verdict mesuré — un module qui n'ouvre pas le DIT et
-explique pourquoi.**
+**Un moteur en production paper (Carry), un en guet (Arbitrage), un verrouillé (Copy), une
+mesure en cours (Cross-venue funding), un suspendu (Liquidations).** Chacun avec son verdict
+mesuré — un moteur qui n'ouvre pas le DIT et explique pourquoi.
+
+> Compté au ledger (21/07) : **Carry 54 OPEN / 42 CLOSE**, **Arbitrage 1 OPEN**, les trois
+> autres n'ont jamais ouvert. Vérité complète : `docs/research/PROJECT_GROUND_TRUTH_2026.md`.
 
 | Module | État | Pourquoi |
 |---|---|---|
-| **Carry delta-neutre** | 🟢 **actif** — la seule source de PnL positif | Long spot + short perp, funding encaissé. Univers étendu aux tokens Unit (UBTC→BTC…) : 8 → 20 coins scannés, ~7 viables. Marge dynamique (capital réel / positions visées), sortie prise-de-profit dès +0,05 $ net. |
+| **Carry delta-neutre** | 🟢 **actif** — le seul moteur à taux positif (**+0,35 $/j** mesuré ; le **cumul** reste à **−5,73 $**, dette de l'ère churn du 19/07 en cours de remboursement) | Long spot + short perp, funding encaissé. Univers étendu aux tokens Unit (UBTC→BTC…) : 8 → 20 coins scannés, ~7 viables. Marge dynamique (capital réel / positions visées), sortie prise-de-profit dès +0,05 $ net. |
 | **Copy-trading** | 🔒 **verrouillé, en réhabilitation** | Loi mesurée : **−7,97 bps** sur 24 133 signaux OOS à coût zéro (leader contrarien) ; le laboratoire l'a reconfirmé sur 441 000 candidats. La whitelist C12 (markout forward **par leader**) enregistre les fills depuis le 21/07 : le copy reviendra par la preuve individuelle, jamais par l'espoir. |
-| **Arbitrage de dislocation** | 🟡 **en guet** | Écart de prix du même perp HL↔Binance ; ouvre à ≥ 35 bps (22 de coûts + 13 de marge → edge positif à l'entrée par construction). Marchés efficients aujourd'hui : il attend, et affiche « plus gros écart X bps < seuil 35 ». |
+| **Arbitrage de dislocation** | 🟡 **en guet** | Écart de prix du même perp HL↔Binance ; ouvre à ≥ **15 bps** (8 de coûts **2 jambes** + 7 de marge). Les 22 bps annoncés jusqu'au 20/07 supposaient 4 jambes : une dislocation se ferme sur 2. **Convergence mesurée sur 912 écarts : −2,26 bps à 30 min (64,9 % des cas) — soit MOINS que les 8 bps de coûts.** Verdict `LIMITE` : seuls les écarts extrêmes paient. Il attend, et dit pourquoi. |
 | **Cross-venue funding** | 🕐 **en mesure** | Protocole 72 h, barres pré-écrites. Verdict à échéance, jamais avant. |
-| Liquidations | ⏸️ suspendu | Wallets suivis trop peu leveragés : 0 événement déclenché. Décision produit à prendre (viser des comptes à fort levier). |
+| Liquidations | ⏸️ suspendu | **231 grappes enregistrées** sur 31,6 h — la collecte marche. Ce qui manque est un **mécanisme de décision** : les wallets suivis sont trop peu leveragés pour produire un signal exploitable. Décision produit à prendre (`docs/research/LIQUIDATION_ENGINE_PRODUCT_DECISION.md`). |
 
 ### Le laboratoire — `RECHERCHE-SCENARIO-REPLAY.cmd`
 
@@ -67,9 +71,17 @@ univers du scan **avec le verrou de chaque coin**, et la liste À FAIRE du jour.
 
 ### Ce que l'écran montre
 
-PnL unifié = **réalisé + funding couru** (l'encaissé, stable) ; le **latent de base**
-(réversible, marqué au MID) est affiché **à côté**, jamais mélangé. Rafraîchi à chaque image
-de l'écran, resnappé sur chaque vraie mesure : le chiffre vit, et il dit vrai.
+**PnL stable = réalisé + funding RÉGLÉ.** Hyperliquid paie le funding au **sommet de chaque
+heure** : seuls les sommets réellement franchis comptent comme encaissés. Deux quantités sont
+donc affichées **à part, et ne se mélangent jamais** :
+
+- **funding estimé (en cours)** — la fraction d'heure non encore réglée. Une estimation.
+- **latent de base** — réversible, marqué au MID.
+
+Jusqu'au 21/07, ce README appelait l'accrual complet « l'encaissé, stable » : c'était
+l'interpolation linéaire d'une fonction en escalier présentée comme un fait comptable.
+Corrigé (`paper_trading/funding_settlement.py`). Le ticker anime l'**estimé** — le réglé, lui,
+saute d'un cran à chaque heure, il ne s'anime pas.
 
 > Sizing : marge dynamique (capital réel ÷ positions visées, réserve 20 %, plafond 40 % par
 > coin) ; levier choisi en risk-parity selon la pire hausse observée sur 200 jours.

@@ -281,7 +281,8 @@ th{letter-spacing:1.2px}
    <div class="g3" style="margin:0 0 8px">
      <div class="kv"><span>positions ouvertes</span><b id="carry-pos">…</b></div>
      <div class="kv"><span>PnL réalisé cumulé</span><b id="carry-real">…</b></div>
-     <div class="kv"><span>funding accru (ouvert)</span><b id="carry-accru">…</b></div>
+     <div class="kv" title="funding REGLE : sommets d'heure reellement franchis (Hyperliquid paie a l'heure)"><span>funding encaissé (réglé)</span><b id="carry-regle">…</b></div>
+     <div class="kv" title="fraction d'heure en cours, PAS encore reglee — une estimation, jamais un encaissement"><span>funding estimé (en cours)</span><b id="carry-estime">…</b></div>
      <!-- v3 (20/07) : le latent de base est AFFICHE, etiquete reversible — jamais dans le net -->
      <div class="kv"><span>latent de base (réversible)</span><b id="carry-latent">…</b></div>
    </div>
@@ -610,7 +611,9 @@ function loadCarry(){fetch('/v2/carry').then(function(r){return r.json()}).then(
   // v3 (20/07) : NET = realise + funding COURU (encaisse, stable). Le latent de base est
   // SEPARE — calcule ici pour l'affichage dedie, jamais additionne au net.
   window._carryLatent=(d.positions||[]).reduce(function(s,p){return s+(Number(p.base_mtm_usd)||0);},0);
-  window._carryNet=realSess+Number(d.funding_accru_usdt||0);
+  // le NET « stable » n'absorbe QUE le funding REGLE (repli sur l'accru si vieux moteur).
+  window._carryNet=realSess+Number((d.net_funding_settled!=null)?d.net_funding_settled:d.funding_accru_usdt||0);
+  window._carryEstime=Number(d.funding_accrual_estimate||0);
   // 🔴 20/07 : « TRADES CLOS 6 » melangeait TROIS perimetres sur la rangee SESSION (copy =
   // session moteur, carry = fenetre 24 h du churn). closes_session (ledger etiquete) aligne
   // la tuile sur la session, comme le grand PnL ; repli honnete : compteur 24 h si vieux moteur.
@@ -623,7 +626,14 @@ function loadCarry(){fetch('/v2/carry').then(function(r){return r.json()}).then(
     +n(Number(d.realized_net_pnl_usdc||0))+'$ — jamais supprime (ledger + rapport quotidien).';
   // 6 decimales ICI AUSSI (20/07 : le poll ecrivait 4, le ticker 6 -> l'accru CLIGNOTAIT
   // $0.0287 <-> $0.028677 a chaque resnap. Un seul format, partout.)
-  document.getElementById('carry-accru').textContent='$'+n(d.funding_accru_usdt,6);
+  // P0 : on n'affiche plus « accru » comme s'il etait encaisse — deux cases, deux verites.
+  var er_=document.getElementById('carry-regle');
+  window._carryRegle=Number((d.net_funding_settled!=null)?d.net_funding_settled:d.funding_accru_usdt||0);
+  if(er_){er_.textContent='$'+n(window._carryRegle,6);
+          er_.title='sommets d\'heure reellement franchis — le seul funding qui compte comme encaisse';}
+  var ee_=document.getElementById('carry-estime');
+  if(ee_){ee_.textContent=(d.funding_accrual_estimate!=null)?('$'+n(d.funding_accrual_estimate,6)):'—';
+          ee_.style.color='var(--mut)';}
   var cfc=document.getElementById('c-fund-carry');if(cfc)cfc.textContent='$'+n(d.funding_accru_usdt,6);
   var ps=d.positions||[];
   // MARGE CIBLE (21/07) : la marge que l'ALLOCATION PAR RENDEMENT NET accorde a ce coin.
@@ -708,8 +718,11 @@ function majAccruLive(){
   if(!t0)return;
   var extraH=(Date.now()-t0)/3.6e6, extra=rate*extraH;
   var base=Number(window._carryAccruBase||0), live=base+extra;
-  var el=document.getElementById('carry-accru');
-  if(el){el.textContent='$'+n(live,6);el.title='+$'+n(rate,6)+'/h — le funding coule en continu (taux mesure)';}
+  // P0 (21/07) : ce qui COULE en continu est par definition l'ESTIME (fraction d'heure non
+  // encore reglee). Le REGLE, lui, saute d'un cran a chaque sommet d'heure — il ne s'anime pas.
+  var el=document.getElementById('carry-estime');
+  if(el){el.textContent='$'+n(Math.max(0,live-Number(window._carryRegle||0)),6);
+         el.title='+$'+n(rate,6)+'/h couru, PAS encore regle — Hyperliquid paie au sommet de chaque heure';}
   var c2=document.getElementById('c-fund-carry');if(c2)c2.textContent='$'+n(live,6);
   // v3 (20/07, 3 allers-retours avec Flo) : la cellule montre le GAGNE (funding, coule et ne
   // recule jamais) ; le LATENT de base (reversible, MtM MID) vit dans l'infobulle et dans le
@@ -1065,6 +1078,13 @@ def create_dashboard_v2_router() -> APIRouter:
                 # provenance/perimetre, version endpoint : un filtre de cles est une porte,
                 # il doit laisser passer TOUT ce que l'ecran promet.
                 "realized_net_pnl_usdc_session": etat.get("realized_net_pnl_usdc_session"),
+                # 🔴 P0 (21/07) — REGLE vs ESTIME. `funding_accru_usdt` est un PRORATA
+                # LINEAIRE ; Hyperliquid regle au SOMMET DE CHAQUE HEURE. On expose les deux
+                # separement : seul le REGLE a le droit d'entrer dans un chiffre « stable ».
+                "net_funding_settled": etat.get("net_funding_settled"),
+                "funding_accrual_estimate": etat.get("funding_accrual_estimate"),
+                "stable_net_pnl": etat.get("stable_net_pnl"),
+                "stable_net_pnl_session": etat.get("stable_net_pnl_session"),
                 "closes_session": etat.get("closes_session"),
                 "session_id": etat.get("session_id"),
                 "funding_accru_usdt": round(accru, 6),

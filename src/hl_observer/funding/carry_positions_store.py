@@ -342,6 +342,26 @@ def etat_carry(root: str | Path = ".", *, mode: str = MODE_LIVE) -> dict[str, An
         sum(float(p.get("marge_usdt") or 0.0) for p in g.ouvertes.values()), 4)
     r["positions_renforcees"] = sum(1 for p in g.ouvertes.values()
                                     if int(p.get("renforts") or 0) > 0)
+    # 🔴 P0 (21/07) — FUNDING REGLE vs FUNDING ESTIME. `funding_accrued_usdt` est un PRORATA
+    # LINEAIRE, alors qu'Hyperliquid regle au SOMMET DE CHAQUE HEURE. Une position ouverte
+    # depuis 20 min se voyait crediter 1/3 d'heure de funding : c'est une ESTIMATION, pas un
+    # encaissement. Le README l'appelait « l'encaisse, stable » — doublement faux (c'est
+    # l'interpolation lineaire d'une fonction en escalier). On decoupe : seul le REGLE entre
+    # dans le PnL stable ; l'estimation s'affiche a cote, comme le latent de base.
+    # La somme des deux vaut EXACTEMENT l'accru : aucune valeur creee ni detruite.
+    try:
+        import time as _t
+        from hl_observer.paper_trading.funding_settlement import agreger, pnl_stable
+        d = agreger(g.ouvertes, now_ms=int(_t.time() * 1000))
+        r["net_funding_settled"] = d["net_funding_settled"]
+        r["funding_accrual_estimate"] = d["funding_accrual_estimate"]
+        r["stable_net_pnl"] = pnl_stable(r.get("realized_net_pnl_usdc") or 0.0,
+                                         d["net_funding_settled"])
+        if r.get("realized_net_pnl_usdc_session") is not None:
+            r["stable_net_pnl_session"] = pnl_stable(r["realized_net_pnl_usdc_session"],
+                                                     d["net_funding_settled"])
+    except Exception:  # noqa: BLE001 — un decoupage rate ne fait pas disparaitre l'etat
+        pass
     return r
 
 

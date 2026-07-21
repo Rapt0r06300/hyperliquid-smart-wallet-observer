@@ -1,97 +1,49 @@
-# Matrice de preuves — ce qui est vraiment fait, et ce qui ne l'est pas
+# MATRICE DE PREUVES — TASKLIST (2026-07-21)
 
-**2026-07-11.** Phase 0 du brief. Une tâche n'est `DONE_VERIFIED` que si l'on trouve **simultanément** :
-code + câblage dans le runtime actif + test utile + aucune contradiction dans les logs.
+> Une tâche cochée sans preuve est une dette. Cette matrice donne, pour chaque tâche de
+> `docs/TASKLIST_ACTIVE.md`, **la commande ou le fichier qui prouve son statut**.
+> Version précédente archivée : `docs/archive/TASKLIST_EVIDENCE_MATRIX_20260711_archivee.md`.
 
----
+| tâche | statut | preuve exécutable / fichier | mesure |
+|---|---|---|---|
+| P0-1 funding réglé/estimé | `DONE_VERIFIED` | `pytest -q tests/test_funding_settlement.py` | 28 verts ; somme conservée |
+| P0-2 source unique PnL | `PARTIALLY_DONE` | `resume_depuis_ledger()` seul agrégateur | MtM base encore dans l'endpoint |
+| P0-3 invariant portes replay | `TODO_ACTIVE` | — | aucun test n'échoue si `stress` est retiré |
+| P0-4 scénarios PnL | `PARTIALLY_DONE` | `pytest -q tests/test_invariants_economiques.py` | 7 lois / ~700 cas ; 8 scénarios manquants |
+| P1-1 économie par position | `TODO_ACTIVE` | `data/reports/carry_position_economics.csv` | 12 lignes, mais hedge **modélisé** |
+| P1-2 delta réel | `TODO_ACTIVE` | — | `DATA_MISSING` : quantités par jambe non stockées |
+| P1-3 scorecard par coin | `TODO_ACTIVE` | `data/reports/carry_coin_scorecard.json` | 12 × `POSITIVE_BEFORE_COSTS_ONLY` |
+| P1-4 mapping Unit officiel | `TODO_ACTIVE` | log feeder | refus `base aberrante ×141` / `×3511` |
+| P1-5 allocation ∝ net³ | `DONE_VERIFIED` | `pytest -q tests/test_carry_allocation_nette.py` | 34 verts ; +23,9 % mesuré |
+| P1-6 renfort sans churn | `DONE_VERIFIED` | `pytest -q tests/test_carry_renfort.py` | 27 verts, bout-en-bout production |
+| P1-7 garde du plancher z-score | `DONE_VERIFIED` | `facteur_zscore(2.5, 0.125) == 1.0` | corrélation −0,596 corrigée |
+| P1-8 seuil +0,05 $ vs bruit | `TODO_ACTIVE` | — | bruit ~0,0147 $/h → seuil ≈ 3,4 h de bruit |
+| P1-9 backtest carry | `DONE_VERIFIED` | `python tools/backtest_carry_cli.py .` | 24 verts ; garde anti-baisse-de-sécurité |
+| P1-10 journal de scans | `DONE_VERIFIED` | `carry_scan_recorder.resume('.')` | 20 coins, 7 passes, en croissance |
+| P1-11 stabilité des viables | `BLOCKED_DATA` | idem | 7 passes / 12 minimum |
+| P2-1..5 README | `DONE_VERIFIED` | `git diff README.md` | 5 contradictions prouvées corrigées |
+| P3-1 critères figés | `DONE_VERIFIED` | `docs/research/CROSS_VENUE_FUNDING_72H_VERDICT.md` | 5 critères écrits avant échéance |
+| P3-2 verdict 72 h | `BLOCKED_DATA` | étendue `dispersion_venues.jsonl` | 48,5 h / 72 h |
+| P4-1 prix exécutables | `TODO_ACTIVE` | `collecter_dispersion_venues.py` | écart = deux **mids** |
+| P4-2 coût all-in décomposé | `PARTIALLY_DONE` | `COUT_AR_BPS = 8.0` | forfait, non décomposé |
+| P4-4 convergence mesurée | `DONE_VERIFIED` | `runtime/replay/BACKTEST_ARBITRAGE.md` | −2,26 bps à 30 min, 912 écarts |
+| P4-5 cadence ×5 | `DONE_VERIFIED` | `grep 60 LANCER_HYPERSMART.cmd` | 300 s → 60 s |
+| P4-6 seuil 15 → 8 bps | `BLOCKED_DATA` | idem | 19 entrées < 10 min. requis ×… |
+| P5-1 collecte C12 | `DONE_VERIFIED` | `leader_fills_bruts.jsonl` | 3 947 lignes / 6,8 h |
+| P5-2 markout par leader | `PARTIALLY_DONE` | `copy_whitelist.json` | 173 marqués, 12 leaders, 0 à 30 fills |
+| P6-1 décision Liquidations | `TODO_ACTIVE` | `liquidation_map.sqlite3` | 231 grappes / 31,6 h |
+| P7-1 Grinder/Sniper | `DONE_VERIFIED` | `docs/research/GRINDER_SNIPER_REAL_STATUS.md` | ledger : 0 ligne, 7 termes `NOT_FOUND` |
+| P8-3 superviseur | `DONE_VERIFIED` | compteurs au rapport du jour | relances tracées |
+| P9-1..5 rapports | `DONE_VERIFIED` | `RECAP-COMPLET.md`, `RAPPORT_DU_JOUR.md` | 8 étapes, 12 sections |
 
-## 🔴 Les 3 découvertes qui dominent tout le reste
+## Tâches ROUVERTES (l'état contredit un ancien rapport)
 
-### 1. L'edge qui autorisait chaque entrée était FABRIQUÉ
+| tâche | ancien statut | nouveau | raison |
+|---|---|---|---|
+| README « quatre modules » | présenté comme exact | `CONTRADICTED` puis corrigé | 5 lignes dans le tableau |
+| Arbitrage « 35 bps / 22 de coûts » | annoncé | `CONTRADICTED` puis corrigé | code : 15 / 8 bps |
+| « funding couru = l'encaissé » | annoncé « stable » | `CONTRADICTED` puis corrigé | prorata linéaire ≠ règlement horaire |
+| Liquidations « 0 événement » | annoncé | `CONTRADICTED` puis corrigé | 231 grappes enregistrées |
+| Carry « seule source de PnL positif » | annoncé | `PARTIALLY_PROVEN` puis nuancé | taux +0,35 $/j, **cumul −5,73 $** |
 
-```python
-# fusion_paper_engine_adapter.py:288
-dominance    = |long_score − short_score| / total     # un score de VOTE
-gross_signal = dominance * 45.0 + bonus               # ← 45. D'où vient 45 ?
-```
-
-Le code l'avouait : `edge_source = "CONSENSUS_VOTE_PROXY_NOT_EMPIRICAL"`.
-**Ce nombre n'a jamais touché un prix.** Le seuil `min_edge` comparait donc une valeur inventée à
-un plancher — c'est pourquoi aucun réglage de ce seuil n'a jamais rien changé.
-
-Deuxième source (`fresh_opportunity._expected_edge_bps`) : `score×0,55 + wallets×9 +
-notional/25000 + tightness×10`. Même maladie.
-
-→ **CORRIGÉ** : `edge/empirical_edge.py`, deny-by-default. Un edge est mesuré, ou il n'existe pas.
-
-### 2. Le « funding-arb delta-neutre » n'a qu'une jambe
-
-Position **nue** sur un perp, dont le PnL **ignorait totalement le prix**. Il aurait imprimé des
-profits fictifs. **Le verrou d'entrée mort nous en a accidentellement protégés.**
-
-→ **CORRIGÉ** : le PnL de prix est compté, de la position jusqu'au ledger.
-
-### 3. La décision attend la fin d'un cycle de 30-50 s
-
-Le firehose WS persistant **est allumé** et stocke les fills en sub-seconde. Mais **personne ne
-décide** avant la fin de la boucle de poll (médiane 30,6 s, p95 50,4 s, max 106 s).
-**Le hot path est prisonnier du cold path.** → **NON CORRIGÉ** (P4).
-
----
-
-## Ce que l'analyse externe a mal lu (vérifié)
-
-| affirmation | verdict |
-|---|---|
-| `strategy_mode = null` → régression | **FAUX**. Ledger 19:28:50, code 20:04-20:45. Le serveur analysé tournait l'**ancien code**. |
-| userFills relancé toutes les 10 s (pas de firehose) | **FAUX**. Le firehose multiplexé est allumé (`.ps1` l.239). La fenêtre de 10 s est un scan borné **en plus**. |
-| `FUSION_PAPER_ENTRY` contourne les gates | **PIRE** : il les *satisfait* avec un edge fabriqué et des coûts constants. |
-| Le modèle IA menace le hot path | **FAUX**. `apply_model_promotion` n'est appelé **nulle part**. Influence : zéro. |
-
----
-
-## Statut par tâche
-
-### ✅ DONE_VERIFIED (code + câblage + test + preuve)
-
-| tâche | preuve |
-|---|---|
-| Edge empirique obligatoire | `edge/empirical_edge.py` + câblé en 2 points + **16 tests** |
-| Frais Hyperliquid réels (maker COÛTE 1,5 bps) | `exec_model.py` — aller-retour taker = **9 bps** |
-| PnL de prix du funding-arb | `funding_arb_paper.py` + ledger + **8 tests** |
-| `strategy_mode` posé à la source | entrées + **toutes** les sorties + **20 tests** |
-| PnL séparé par moteur | `engine_pnl.py` + câblé au statut + **15 tests** |
-| Budget de risque par moteur | `engine_risk_budget.py` + câblé au gate + **13 tests** |
-| Exposition directionnelle NETTE | `directional_exposure.py` — 9 shorts = 250 % du capital |
-| Économie : config perdante détectée | `engine_economics.py` — l'ancienne config : breakeven **90 %** |
-| Symétrie LONG/SHORT | **8 tests** — aucun bug ; le biais vient des leaders |
-| Promotion IA bloquée | `ml/promotion_gate.py` + **9 tests** |
-| Carnet L2 + funding enregistrés | `microstructure_recorder.py` — actif au lancement |
-
-### 🔴 REGRESSION_DETECTED / TODO_ACTIVE (le vrai reste-à-faire)
-
-| # | tâche | pourquoi ça compte |
-|---|---|---|
-| P4 | **La décision attend 30-50 s** | Le Sniper meurt de la fraîcheur. Tout le reste est secondaire. |
-| P2-2 | Spread/slippage/profondeur **constants** dans le gate fusion | Un carnet imaginaire de 50 000 $, le même pour BTC et un meme coin |
-| P2-3 | 2 chemins de décision non alignés | Celui qui **mesure** refuse ; celui qui **invente** ouvre |
-| P3 | Latence bout-en-bout non instrumentée | On ne peut pas corriger ce qu'on ne mesure pas |
-| P7-1 | **Courbe edge/horizon 100 ms → 5 min** | **Jamais mesuré sous 1 s.** La seule raison honnête d'espérer un edge de copie |
-
-### 🔵 BLOCKED_DATA (le code peut être écrit ; la donnée n'existe pas encore)
-
-Microstructure (OFI, VPIN, micro-prix, queue), exécution maker, funding historique, scoring de
-leaders. **Les modules d'analyse existent déjà et sont testés.** Il leur manque *uniquement* la
-donnée — que le bot enregistre depuis ton redémarrage.
-
----
-
-## La phrase qui résume
-
-> Le bot a **cessé de perdre bêtement**. Il n'a **pas commencé à gagner**.
-> Ces deux choses sont différentes, et je ne les confondrai pas pour te faire plaisir.
-
----
-
-*Simulation paper uniquement. **0 ordre réel, 0 argent réel, 0 clé privée, 0 signature,
-0 dépôt/retrait.***
+**Sécurité : 0 ordre réel · 0 argent réel · 0 clé privée · 0 signature · 0 dépôt/retrait.**
