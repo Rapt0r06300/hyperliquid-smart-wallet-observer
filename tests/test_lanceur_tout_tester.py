@@ -37,6 +37,38 @@ def test_le_cmd_ne_contient_aucune_redirection_dans_un_commentaire():
                 "ligne %d : un chevron dans un REM devient une REDIRECTION -> %s" % (i, s))
 
 
+def test_le_cmd_n_a_NI_goto_NI_label_NI_chcp_NI_endlocal():
+    """🔴 LA CAUSE DE LA 2e PANNE : la fenêtre se fermait instantanément, sans rien afficher.
+
+    `LANCER_HYPERSMART.cmd`, qui tourne chez Flo depuis des semaines, n'a **aucune** de ces
+    quatre constructions ; ma version en avait les quatre. Avec des fins de ligne LF, la
+    recherche de label d'un `goto` échoue et cmd sort en silence. Un `chcp` au milieu d'un
+    fichier contenant du non-ASCII décale le parseur. On imite ce qui MARCHE, on n'invente pas.
+    """
+    corps = "\n".join(l for l in CMD.read_text(encoding="utf-8").splitlines()
+                      if not l.strip().upper().startswith("REM"))
+    for interdit in ("goto", "chcp", "endlocal"):
+        assert interdit not in corps.lower(), "%s a fait mourir le lanceur en silence" % interdit
+    assert not [l for l in corps.splitlines() if l.strip().startswith(":")], "aucun label"
+
+
+def test_le_cmd_est_en_PUR_ASCII():
+    """Un caractère non-ASCII dans un batch dépend de la page de code active — et le tiret
+    cadratin de mon en-tête était sur la même ligne qu'un `title`. On ne prend plus le risque."""
+    octets = CMD.read_bytes()
+    mauvais = [(i, b) for i, b in enumerate(octets) if b > 127]
+    assert not mauvais, "octets non-ASCII a l'offset %s" % [i for i, _ in mauvais[:5]]
+
+
+def test_le_cmd_est_en_CRLF():
+    """Écrit depuis Linux, un `.cmd` part en LF. cmd.exe le tolère pour des commandes simples
+    mais pas pour tout. Le fichier est donc écrit explicitement en CRLF."""
+    octets = CMD.read_bytes()
+    lf = octets.count(b"\n")
+    crlf = octets.count(b"\r\n")
+    assert lf > 0 and crlf == lf, "%d LF dont seulement %d en CRLF" % (lf, crlf)
+
+
 def test_le_cmd_ne_contient_plus_de_for_f_ni_de_bloc_parenthese():
     """Un `for /f` avec backticks à l'intérieur d'un bloc `if ( )` casse le parseur de cmd.
     Ces constructions ne sont pas testables d'ici : elles n'ont plus le droit d'exister."""
@@ -57,7 +89,7 @@ def test_le_cmd_reste_court():
 def test_le_cmd_appelle_bien_le_lanceur_python():
     txt = CMD.read_text(encoding="utf-8")
     assert "tools\\lanceur_tout_tester.py" in txt
-    assert "exit /b %CODE%" in txt, "le code de sortie doit etre PROPAGE"
+    assert "exit /b %ERRORLEVEL%" in txt, "le code de sortie doit etre PROPAGE"
 
 
 # ═══════════════ PRÉ-VOL (01-10) ═══════════════
@@ -215,6 +247,38 @@ def test_la_duree_est_lisible():
     assert L._hms(0) == "00:00:00"
     assert L._hms(3661) == "01:01:01"
     assert L._hms(-5) == "00:00:00"
+
+
+def test_une_exception_IMPREVUE_affiche_et_attend_au_lieu_de_disparaitre(monkeypatch, capsys):
+    """🔴 LE PIRE MODE D'ÉCHEC : la fenêtre se ferme sans rien dire, et Flo n'a AUCUNE
+    information à me transmettre. Le `.cmd` ne peut plus rien garantir (il n'a plus ni `goto`
+    ni bloc, précisément parce que ça le tuait) : la garantie est ici."""
+    def explose(_a=None):
+        raise RuntimeError("panne jamais prevue")
+
+    monkeypatch.setattr(L, "lancer", explose)
+    monkeypatch.setattr(L, "_pause", lambda: None)
+    code = L.point_d_entree([])
+    sortie = capsys.readouterr().out
+    assert code == 1
+    assert "LE LANCEUR A PLANTE" in sortie
+    assert "panne jamais prevue" in sortie, "la traceback doit etre VISIBLE, pas avalee"
+    assert "envoie-le a Claude" in sortie, "l'utilisateur doit savoir quoi faire"
+
+
+def test_un_refus_de_demarrer_reste_lisible_et_garde_son_code(monkeypatch, capsys):
+    monkeypatch.setattr(L, "lancer", lambda _a=None: (_ for _ in ()).throw(
+        L.Echec("verrou pose", L.CODE_VERROU)))
+    monkeypatch.setattr(L, "_pause", lambda: None)
+    assert L.point_d_entree([]) == L.CODE_VERROU
+    assert "verrou pose" in capsys.readouterr().out
+
+
+def test_ctrl_c_ne_passe_pas_pour_un_plantage(monkeypatch, capsys):
+    monkeypatch.setattr(L, "lancer", lambda _a=None: (_ for _ in ()).throw(KeyboardInterrupt()))
+    monkeypatch.setattr(L, "_pause", lambda: None)
+    assert L.point_d_entree([]) == 130
+    assert "INTERROMPU" in capsys.readouterr().out
 
 
 def test_aucune_execution_reelle():

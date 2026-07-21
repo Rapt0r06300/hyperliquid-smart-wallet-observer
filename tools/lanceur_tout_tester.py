@@ -382,5 +382,36 @@ def etat_json(racine: Path = RACINE) -> str:
                        "real_execution": False}, ensure_ascii=False)
 
 
+def point_d_entree(argv: list[str] | None = None) -> int:
+    """LE FILET DE SÉCURITÉ. Une fenêtre qui se ferme sans rien dire est le pire mode
+    d'échec possible : Flo n'a alors AUCUNE information à me transmettre.
+
+    Le `.cmd` ne peut plus rien garantir (il n'a plus ni `goto` ni bloc, précisément parce
+    que ces constructions le faisaient mourir en silence). C'est donc ici, en Python, que
+    l'on garantit qu'une erreur — même une exception jamais prévue, même une erreur à
+    l'import — s'AFFICHE et attende une touche avant de disparaître.
+    """
+    try:
+        return lancer(argv)
+    except Echec as exc:                       # refus de démarrer : déjà lisible
+        print("\n  ARRET : %s\n" % exc, flush=True)
+        _pause()
+        return exc.code
+    except KeyboardInterrupt:
+        print("\n  INTERROMPU (Ctrl-C).\n", flush=True)
+        return 130
+    except BaseException:                      # noqa: BLE001 — y compris SystemExit imprévu
+        import traceback
+        print("\n" + "=" * 62, flush=True)
+        print("  LE LANCEUR A PLANTE. Copie ce qui suit et envoie-le a Claude :", flush=True)
+        print("=" * 62, flush=True)
+        # sur STDOUT, pas stderr : Flo copie une fenetre, pas deux flux. Deux flux
+        # s'entrelacent et la traceback se retrouve coupee en morceaux illisibles.
+        traceback.print_exc(file=sys.stdout)
+        print("=" * 62, flush=True)
+        _pause()
+        return 1
+
+
 if __name__ == "__main__":
-    raise SystemExit(lancer())
+    raise SystemExit(point_d_entree())
