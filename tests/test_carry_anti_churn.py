@@ -122,15 +122,50 @@ def test_le_churn_est_detecte():
 
 # ---------------------------------------------------------------- bout en bout, sur disque
 
-def _mesure(coin="HYPE"):
-    decision = {"coin": coin, "viable": True, "funding_bps_h": 0.125, "base_bps": -1.5,
+#: 🔴 21/07 — CE FUNDING A CHANGÉ, ET C'EST VOULU.
+#: La fixture portait 0,125 bps/h : le PLANCHER protocolaire, repris tel quel de l'incident du
+#: 19/07. Depuis, la porte du coût d'opportunité (`carry_benchmark_gate`) refuse d'ouvrir au
+#: plancher — APR net 2,65 % contre 15-30 % pour le vault HLP. Ces tests-ci portent sur
+#: l'ANTI-CHURN, pas sur la rentabilité du plancher : ils ont besoin qu'une position EXISTE.
+#: On leur donne donc un funding que le système ouvrirait réellement aujourd'hui.
+#: Le comportement au plancher n'est pas perdu pour autant — il a son propre test, plus bas :
+#: `test_BOUT_EN_BOUT_au_plancher_le_systeme_n_ouvre_PLUS_DU_TOUT`.
+FUNDING_QUI_PASSE_LA_PORTE = 0.45          # 3,6 × le plancher -> APR net ~26,7 %
+
+
+def _mesure(coin="HYPE", funding=FUNDING_QUI_PASSE_LA_PORTE):
+    decision = {"coin": coin, "viable": True, "funding_bps_h": funding, "base_bps": -1.5,
                 "levier": 1.5, "cout_entree_bps": 12.47, "gain_net_24h_bps": 46.5,
                 "liquidite_spot_usd": 150_000.0, "marge_ratio": 0.667, "levier_max": 10.0,
                 "pire_hausse_observee": 0.29}
     inputs = {"coin": coin, "perp_px": 61.0, "levier_max": 10.0, "marge_ratio": 0.667,
               "liquidite_spot_usd": 150_000.0, "pire_hausse_observee": 0.29}
-    return {coin: {"decision": decision, "inputs": inputs, "funding": 0.125,
+    return {coin: {"decision": decision, "inputs": inputs, "funding": funding,
                    "prix": 61.0, "base": -1.5}}
+
+
+def test_BOUT_EN_BOUT_au_plancher_le_systeme_n_ouvre_PLUS_DU_TOUT(tmp_path):
+    """LE NOUVEAU COMPORTEMENT (21/07), mesuré bout en bout.
+
+    Au plancher protocolaire, personne ne paie pour être long : l'APR net vaut 2,65 % quand le
+    vault HLP en paie 15 à 30. Les 29 fermetures subies du 18-19/07 (−5,07 $) portaient TOUTES
+    sur des positions ouvertes à ce taux-là — elles étaient perdantes avant d'exister.
+    Ne pas ouvrir n'a jamais coûté un dollar.
+    """
+    from hl_observer.funding.carry_benchmark_gate import (MOTIF_PLANCHER,
+                                                          PLANCHER_PROTOCOLAIRE_BPS_H)
+    res = tick_multi_sur_disque(tmp_path, _mesure(funding=PLANCHER_PROTOCOLAIRE_BPS_H),
+                                now_ms=1_800_000_000_000, max_slots=12)
+    assert res and res[0]["ouvert"] is False, "au plancher, aucune position ne doit s'ouvrir"
+    assert res[0]["refus_risque"] == MOTIF_PLANCHER
+    assert res[0]["porte_risque"]["gardes"] == ["cout_opportunite:REFUS"], (
+        "le refus doit tomber a la PREMIERE porte : les suivantes travailleraient sur une "
+        "position deja perdante")
+    # et le contraste : au-dessus du seuil, la meme mesure ouvre normalement
+    ok = tick_multi_sur_disque(tmp_path, _mesure(funding=FUNDING_QUI_PASSE_LA_PORTE),
+                               now_ms=1_800_000_000_000, max_slots=12)
+    assert ok and ok[0]["ouvert"] is True
+    assert any("cout_opportunite:OK" in g for g in ok[0]["porte_risque"]["gardes"])
 
 
 def test_BOUT_EN_BOUT_le_coin_qui_disparait_une_passe_NE_SE_FERME_PLUS(tmp_path):

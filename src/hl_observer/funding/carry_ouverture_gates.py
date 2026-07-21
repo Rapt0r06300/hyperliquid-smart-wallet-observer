@@ -85,6 +85,10 @@ def porte_risque_ouverture(
     regime: str | None = None,
     edge_attendu: float | None = None,
     variance_attendue: float | None = None,
+    # --- 21/07 : le COÛT D'OPPORTUNITÉ. Sans ces deux entrées, la porte s'abstient.
+    funding_bps_h: float | None = None,
+    cout_entree_bps: float | None = None,
+    coin: str = "",
 ) -> dict[str, Any]:
     """Autorise (ou non) l'ouverture d'un carry, et donne le facteur de taille à appliquer.
 
@@ -93,6 +97,24 @@ def porte_risque_ouverture(
     """
     gardes: list[str] = []
     facteur = 1.0
+
+    # --- 0) COÛT D'OPPORTUNITÉ (21/07) — la porte la plus en amont, parce que c'est la moins
+    # chère : refuser ne coûte jamais rien, et toutes les portes suivantes travaillent sur une
+    # position qui, au plancher, était perdante avant même d'exister.
+    # MESURE qui l'a imposée : 12/12 positions ouvertes et 580/580 lectures de scan au plancher
+    # protocolaire (0,125 bps/h) -> APR net 2,65 % alors que le vault HLP paie 15-30 % (public).
+    # Notre capital rendait plus en dormant ailleurs. Loi `hlp_benchmark`, verdict REFUTE.
+    if _nombre(funding_bps_h) is not None:
+        from hl_observer.funding.carry_benchmark_gate import evaluer as _bench
+        v = _bench(coin=coin, funding_bps_h=float(funding_bps_h),
+                   cout_entree_bps=_nombre(cout_entree_bps))
+        if not v["autorise"]:
+            return {"autorise": False, "motif": v["motif"], "facteur_taille": 0.0,
+                    "gardes": gardes + ["cout_opportunite:REFUS"],
+                    "benchmark": v}
+        gardes.append("cout_opportunite:OK(APR_net=%.2f%%)" % (v["apr_net_pct"] or 0.0))
+    else:
+        gardes.append("cout_opportunite:ABSTENTION_funding_absent")
 
     # --- 1) KILL-SWITCH divergence de sources (M6) : donnée douteuse -> on ne touche à rien.
     if marks_multi_sources and len([m for m in marks_multi_sources if _nombre(m) is not None]) >= 2:

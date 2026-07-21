@@ -281,7 +281,15 @@ class GestionnaireCarry:
             levier_demande=_f(decision, "levier") or _nombre_ou_none(inputs, "levier_max"),
             regime=(risque_contexte or {}).get("regime"),
             edge_attendu=_nombre_ou_none(risque_contexte, "edge_attendu"),
-            variance_attendue=_nombre_ou_none(risque_contexte, "variance_attendue"))
+            variance_attendue=_nombre_ou_none(risque_contexte, "variance_attendue"),
+            # 21/07 — COÛT D'OPPORTUNITÉ. Le funding vient du dossier du coin (`inputs`), pas du
+            # contexte de risque : c'est une propriété du MARCHÉ, pas de notre portefeuille.
+            # Sans lui la porte s'abstient — elle ne devine pas un rendement.
+            funding_bps_h=(_f(decision, "funding_bps_h")
+                           or _nombre_ou_none(inputs, "funding_bps_h")),
+            cout_entree_bps=(_f(decision, "cout_entree_bps")
+                             or _nombre_ou_none(inputs, "cout_entree_bps")),
+            coin=str((decision or {}).get("coin") or (inputs or {}).get("coin") or ""))
 
     def tick(self, decision: dict[str, Any], inputs: dict[str, Any], *, now_ms: int,
              funding_bps_h_courant: float | None = None, hausse_depuis_entree: float = 0.0,

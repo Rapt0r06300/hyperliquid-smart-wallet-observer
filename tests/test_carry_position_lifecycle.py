@@ -16,8 +16,17 @@ from hl_observer.funding.carry_position_lifecycle import (
 H = 3_600_000  # 1h en ms
 
 
+#: 🔴 21/07 — funding relevé du PLANCHER (0,125) à 0,45 bps/h, volontairement.
+#: La porte du coût d'opportunité refuse désormais d'ouvrir au plancher (APR net 2,65 % contre
+#: 15-30 % pour HLP). Ces tests portent sur le CYCLE DE VIE — accrual, liquidation, convergence,
+#: ledger — pas sur la rentabilité du plancher : il leur faut une position que le système
+#: ouvrirait vraiment. Le refus au plancher a son test dédié dans `test_carry_benchmark_gate.py`
+#: et dans `test_carry_anti_churn.py`.
+FUNDING_OUVRABLE = 0.45
+
+
 def _decision(viable=True, **kw):
-    d = {"coin": "HYPE", "funding_bps_h": 0.125, "base_bps": -0.68,
+    d = {"coin": "HYPE", "funding_bps_h": FUNDING_OUVRABLE, "base_bps": -0.68,
          "liquidite_spot_usd": 200_000.0, "cout_entree_bps": 9.0,
          "heures_pour_rentabiliser": 72.0, "viable": viable, "motif": "CARRY_NEUTRE_VIABLE",
          "real_execution": False}
@@ -26,7 +35,7 @@ def _decision(viable=True, **kw):
 
 
 def _inputs(**kw):
-    d = {"ts_ms": 1_000_000, "coin": "HYPE", "funding_bps_h": 0.125, "base_bps": -0.68,
+    d = {"ts_ms": 1_000_000, "coin": "HYPE", "funding_bps_h": FUNDING_OUVRABLE, "base_bps": -0.68,
          "liquidite_spot_usd": 200_000.0, "maker": True, "levier_max": 10.0,
          "marge_ratio": 0.5, "pire_hausse_observee": 0.29, "levier_utilise": 2.0, "perp_px": 40.0}
     d.update(kw)

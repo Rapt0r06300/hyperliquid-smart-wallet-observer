@@ -945,6 +945,19 @@ def net_latent_base_usd(root: "Path | str | None" = None) -> float:
         return 0.0
 
 
+def _resume_benchmark(positions: list) -> dict:
+    """Combien du book vivant est DOMINÉ par l'alternative disponible (vault HLP).
+
+    Un panneau secondaire ne fait jamais tomber le principal : toute erreur ici rend un état
+    « indisponible » honnête, jamais une exception qui viderait la page carry.
+    """
+    try:
+        from hl_observer.funding.carry_benchmark_gate import resume_portefeuille
+        return resume_portefeuille(positions)
+    except Exception as exc:  # noqa: BLE001
+        return {"indisponible": str(exc), "positions": 0, "dominees": 0}
+
+
 def create_dashboard_v2_router() -> APIRouter:
     router = APIRouter()
 
@@ -1203,6 +1216,11 @@ def create_dashboard_v2_router() -> APIRouter:
                 "session_id": etat.get("session_id"),
                 "funding_accru_usdt": round(accru, 6),
                 "opens": etat["opens"], "closes": etat["closes"],
+                # 21/07 — LE COÛT D'OPPORTUNITÉ DU BOOK DÉJÀ OUVERT. La porte ne protège que
+                # les ouvertures FUTURES ; sans ce résumé on croirait le problème réglé alors
+                # qu'il dort encore dans les positions vivantes. Mesure du jour : 12/12 au
+                # plancher = 2,65 % APR net contre 15-30 % pour HLP.
+                "benchmark": _resume_benchmark(positions),
                 "positions": positions, "viables": viables,
                 "read_only": True, "paper_only": True, "real_execution": False,
             })
