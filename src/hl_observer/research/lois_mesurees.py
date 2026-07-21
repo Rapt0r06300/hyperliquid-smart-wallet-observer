@@ -51,6 +51,53 @@ class Loi:
 
 
 LOIS: tuple[Loi, ...] = (
+    Loi(cle="arb_dislocation_cout_all_in",
+        titre="L'arbitrage de dislocation HL↔Binance paie après coûts",
+        verdict=VERDICT_REFUTE,
+        chiffre="le forfait `COUT_AR_BPS = 8` ne comptait que 2 exécutions sur 4 et oubliait "
+                "les frais de la 2ᵉ venue. Coût all-in réel : 16,0 bps (13 de frais + 2 de "
+                "spread + 1 d'adverse selection). Les 4 trades réels passent de +0,0929 $ "
+                "à **−0,0671 $**. Convergence mesurée : le meilleur seau (10-20 bps, n=245) "
+                "ne se referme que de **3,98 bps en 30 min** — contre 16 bps de coûts",
+        date="2026-07-21",
+        condition_de_reouverture="une MESURE du taux de fill passif sur les 4 exécutions : à "
+                                 "9 bps (tout maker) les mêmes trades survivent (+0,0729 $). "
+                                 "Sans cette mesure, l'hypothèse tout-maker est un espoir",
+        mots_cles=("arbitrage", "dislocation", "cross-venue", "spread", "convergence", "binance"),
+        ou_verifier="funding/arb_cout_all_in.py + backtesting/arb_backtest.py"),
+
+    Loi(cle="arb_ecart_fige",
+        titre="Un gros écart entre venues est une grosse opportunité",
+        verdict=VERDICT_REFUTE,
+        chiffre="MKR affichait 71,44 bps sur **208 observations avec un écart-type de 0,0000** "
+                "(min = max). Le seau 40+ bps convergeait à **0 %** sur 176 observations, "
+                "quand le seau 10-20 bps convergeait à 86 %. Le plus gros écart de l'univers "
+                "était le seul à franchir le seuil — et le seul à ne jamais bouger",
+        date="2026-07-21",
+        condition_de_reouverture="aucune pour un écart figé : sigma nul = prix périmé, contrat "
+                                 "différent ou mauvais appariement. Un écart CAPTURABLE fluctue",
+        mots_cles=("arbitrage", "ecart fige", "prix mort", "adverse selection", "mapping"),
+        ou_verifier="funding/arb_cout_all_in.ecart_vivant + arb_dislocation_paper.tick"),
+
+    Loi(cle="carry_plancher_domine",
+        titre="Un carry au plancher protocolaire vaut la peine d'être ouvert",
+        verdict=VERDICT_REFUTE,
+        chiffre="12/12 positions ouvertes et 580/580 lectures de scan au plancher "
+                "(0,125 bps/h) → **APR net 2,65 %** contre **15-30 %** pour le vault HLP. "
+                "Il faut **0,2660 bps/h, soit 2,13 × le plancher**, juste pour égaler la "
+                "borne basse. 1 343,61 $ de marge dormaient sous l'alternative",
+        date="2026-07-21",
+        condition_de_reouverture="un funding durablement au-dessus de 0,266 bps/h — le journal "
+                                 "de scans le dira. Positif ne suffit pas : il faut battre "
+                                 "l'alternative disponible",
+        # ⚠️ PAS de mot-clé « carry » nu : cette loi porte sur le PLANCHER, pas sur le carry en
+        # général. L'y mettre déclenchait un avertissement décourageant sur toute idée
+        # d'améliorer le carry — alors que l'améliorer est précisément ce qu'il faut faire
+        # pour sortir du plancher. Une loi n'est pas un interdit de penser.
+        mots_cles=("plancher", "hlp", "cout d'opportunite", "benchmark", "domine",
+                   "carry au plancher"),
+        ou_verifier="funding/carry_benchmark_gate.py (branché sur porte_risque_ouverture)"),
+
     Loi(cle="copy_global",
         titre="Suivre les wallets « smart money » en moyenne",
         verdict=VERDICT_REFUTE,

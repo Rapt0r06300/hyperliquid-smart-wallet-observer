@@ -4,7 +4,28 @@
 > Une loi n'est pas un interdit de penser : c'est un **chiffre à battre**, avec la
 > **donnée** qui justifierait de rouvrir le dossier. Un argument neuf ne suffit pas.
 
-## 🔴 Réfuté par la mesure (11)
+## 🔴 Réfuté par la mesure (14)
+
+### L'arbitrage de dislocation HL↔Binance paie après coûts — `arb_dislocation_cout_all_in`
+
+- **le chiffre** : le forfait `COUT_AR_BPS = 8` ne comptait que 2 exécutions sur 4 et oubliait les frais de la 2ᵉ venue. Coût all-in réel : 16,0 bps (13 de frais + 2 de spread + 1 d'adverse selection). Les 4 trades réels passent de +0,0929 $ à **−0,0671 $**. Convergence mesurée : le meilleur seau (10-20 bps, n=245) ne se referme que de **3,98 bps en 30 min** — contre 16 bps de coûts
+- **mesuré le** : 2026-07-21
+- **pour rouvrir** : une MESURE du taux de fill passif sur les 4 exécutions : à 9 bps (tout maker) les mêmes trades survivent (+0,0729 $). Sans cette mesure, l'hypothèse tout-maker est un espoir
+- **où vérifier** : `funding/arb_cout_all_in.py + backtesting/arb_backtest.py`
+
+### Un gros écart entre venues est une grosse opportunité — `arb_ecart_fige`
+
+- **le chiffre** : MKR affichait 71,44 bps sur **208 observations avec un écart-type de 0,0000** (min = max). Le seau 40+ bps convergeait à **0 %** sur 176 observations, quand le seau 10-20 bps convergeait à 86 %. Le plus gros écart de l'univers était le seul à franchir le seuil — et le seul à ne jamais bouger
+- **mesuré le** : 2026-07-21
+- **pour rouvrir** : aucune pour un écart figé : sigma nul = prix périmé, contrat différent ou mauvais appariement. Un écart CAPTURABLE fluctue
+- **où vérifier** : `funding/arb_cout_all_in.ecart_vivant + arb_dislocation_paper.tick`
+
+### Un carry au plancher protocolaire vaut la peine d'être ouvert — `carry_plancher_domine`
+
+- **le chiffre** : 12/12 positions ouvertes et 580/580 lectures de scan au plancher (0,125 bps/h) → **APR net 2,65 %** contre **15-30 %** pour le vault HLP. Il faut **0,2660 bps/h, soit 2,13 × le plancher**, juste pour égaler la borne basse. 1 343,61 $ de marge dormaient sous l'alternative
+- **mesuré le** : 2026-07-21
+- **pour rouvrir** : un funding durablement au-dessus de 0,266 bps/h — le journal de scans le dira. Positif ne suffit pas : il faut battre l'alternative disponible
+- **où vérifier** : `funding/carry_benchmark_gate.py (branché sur porte_risque_ouverture)`
 
 ### Suivre les wallets « smart money » en moyenne — `copy_global`
 
