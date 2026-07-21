@@ -195,6 +195,29 @@ class GestionnaireCarry:
         if self.mode not in MODES_VALIDES:
             raise ValueError("mode inconnu: %r" % (self.mode,))
 
+    def _porte_risque(self, decision: dict[str, Any], inputs: dict[str, Any], *,
+                      marge_demandee: float,
+                      risque_contexte: dict[str, Any] | None) -> dict[str, Any]:
+        """LA porte de risque, UNE seule fois. Ouvrir et RENFORCER passent par ici (R6) : ajouter
+        du notional EST une ouverture, elle n'a aucune raison d'etre moins gardee. Une entree
+        absente fait ABSTENIR le garde concerne (jamais refuser) : un garde affame ne protege
+        de rien."""
+        return porte_risque_ouverture(
+            marge_demandee_usd=marge_demandee,
+            marge_utilisee_usd=sum(float(p.get("marge_usdt") or MARGE_USD)
+                                   for p in self.ouvertes.values()),
+            capital_usd=_nombre_ou_none(risque_contexte, "capital_usd"),
+            distance_tampon_frac=_nombre_ou_none(risque_contexte, "distance_tampon_frac"),
+            funding_paye_cumule_bps=_nombre_ou_none(risque_contexte, "funding_paye_cumule_bps"),
+            budget_funding_bps=_nombre_ou_none(risque_contexte, "budget_funding_bps"),
+            marks_multi_sources=(risque_contexte or {}).get("marks_multi_sources"),
+            pnls_realises_recents=(risque_contexte or {}).get("pnls_realises_recents"),
+            drawdown_frac=_nombre_ou_none(risque_contexte, "drawdown_frac"),
+            levier_demande=_f(decision, "levier") or _nombre_ou_none(inputs, "levier_max"),
+            regime=(risque_contexte or {}).get("regime"),
+            edge_attendu=_nombre_ou_none(risque_contexte, "edge_attendu"),
+            variance_attendue=_nombre_ou_none(risque_contexte, "variance_attendue"))
+
     def tick(self, decision: dict[str, Any], inputs: dict[str, Any], *, now_ms: int,
              funding_bps_h_courant: float | None = None, hausse_depuis_entree: float = 0.0,
              prix_courant: float | None = None, base_bps_courant: float | None = None,
@@ -248,6 +271,44 @@ class GestionnaireCarry:
                 evt["ferme"] = motif
                 evt["pnl_realise_usdt"] = realized
                 return evt
+            # ── RENFORT (21/07) : la position VIT et le capital dort ailleurs. On ajoute du
+            # notional sans jamais fermer (donc sans payer de sortie), aux memes portes que
+            # l'ouverture + AMORTISSEMENT exige. Les moyennes ponderees gardent le PnL exact.
+            try:
+                from hl_observer.funding.carry_renfort import (MOTIF as MOTIF_RENFORT,
+                                                               ajout_amortissable,
+                                                               peut_renforcer, renforcer)
+                heures_restantes = float(age_max_h) - (int(now_ms) - int(pos["entry_ts_ms"])) / 3.6e6
+                ok, refus = peut_renforcer(
+                    pos, marge_cible_usd=float(marge_usd), now_ms=int(now_ms),
+                    viable=bool(decision.get("viable")),
+                    amortissable=ajout_amortissable(
+                        cout_entree_bps_ajout=_f(decision, "cout_entree_bps"),
+                        funding_bps_h=fnow, heures_restantes=heures_restantes))
+                if ok:
+                    # R6 — meme porte de risque qu'une ouverture, sur la marge AJOUTEE seule.
+                    ajout = float(marge_usd) - float(pos.get("marge_usdt") or 0.0)
+                    porte_r = self._porte_risque(decision, inputs, marge_demandee=ajout,
+                                                 risque_contexte=risque_contexte)
+                    if not porte_r["autorise"]:
+                        ok, refus = False, "PORTE_RISQUE:" + str(porte_r["motif"])
+                if ok:
+                    avant = float(pos.get("notional_usdt") or 0.0)
+                    pos = renforcer(pos, marge_cible_usd=float(marge_usd), now_ms=int(now_ms),
+                                    prix_perp=_nombre_ou_none(inputs, "perp_px"),
+                                    base_bps=_nombre_ou_none(decision, "base_bps"),
+                                    cout_entree_bps_ajout=_nombre_ou_none(
+                                        decision, "cout_entree_bps"))
+                    self.journal.record(kind="RENFORT", coin=coin, side="CARRY",
+                                        notional_usdt=float(pos["notional_usdt"]) - avant,
+                                        realized_net_pnl_usdc=0.0, reason=MOTIF_RENFORT,
+                                        now_ms=int(now_ms))
+                    evt["renfort"] = {"notional_ajoute": round(
+                        float(pos["notional_usdt"]) - avant, 4)}
+                elif refus not in ("MARGE_DEJA_AU_NIVEAU", "ECART_TROP_FAIBLE"):
+                    evt["renfort_refuse"] = refus
+            except Exception:  # noqa: BLE001 — un renfort rate ne casse jamais la position
+                evt["renfort_refuse"] = "ERREUR_INTERNE"
             self.ouvertes[coin] = pos
             return evt
 
@@ -256,21 +317,8 @@ class GestionnaireCarry:
         #    les avais posés sur `v12_decision_pipeline`, que l'audit de câblage a mesuré MORT.
         #    Ils sont ici, sur le seul chemin qui ouvre vraiment une position. Une entrée absente
         #    fait ABSTENIR le garde concerné (jamais refuser) : un garde affamé ne protège de rien.
-        porte = porte_risque_ouverture(
-            marge_demandee_usd=marge_usd,
-            marge_utilisee_usd=sum(float(p.get("marge_usdt") or MARGE_USD)
-                                   for p in self.ouvertes.values()),
-            capital_usd=_nombre_ou_none(risque_contexte, "capital_usd"),
-            distance_tampon_frac=_nombre_ou_none(risque_contexte, "distance_tampon_frac"),
-            funding_paye_cumule_bps=_nombre_ou_none(risque_contexte, "funding_paye_cumule_bps"),
-            budget_funding_bps=_nombre_ou_none(risque_contexte, "budget_funding_bps"),
-            marks_multi_sources=(risque_contexte or {}).get("marks_multi_sources"),
-            pnls_realises_recents=(risque_contexte or {}).get("pnls_realises_recents"),
-            drawdown_frac=_nombre_ou_none(risque_contexte, "drawdown_frac"),
-            levier_demande=_f(decision, "levier") or _nombre_ou_none(inputs, "levier_max"),
-            regime=(risque_contexte or {}).get("regime"),
-            edge_attendu=_nombre_ou_none(risque_contexte, "edge_attendu"),
-            variance_attendue=_nombre_ou_none(risque_contexte, "variance_attendue"))
+        porte = self._porte_risque(decision, inputs, marge_demandee=marge_usd,
+                                   risque_contexte=risque_contexte)
         evt["porte_risque"] = {"autorise": porte["autorise"], "motif": porte["motif"],
                                "facteur_taille": porte["facteur_taille"], "gardes": porte["gardes"]}
         if not porte["autorise"]:

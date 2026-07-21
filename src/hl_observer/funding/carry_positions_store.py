@@ -241,6 +241,7 @@ def resume_depuis_ledger(root: str | Path = ".", *, mode: str = MODE_LIVE,
     """
     realized, opens, closes = 0.0, 0, 0
     realized_sess, closes_sess = 0.0, 0
+    renforts, notional_renforce = 0, 0.0
     try:
         lignes = _ledger_path(root).read_text(encoding="utf-8").splitlines()
     except OSError:
@@ -254,6 +255,12 @@ def resume_depuis_ledger(root: str | Path = ".", *, mode: str = MODE_LIVE,
             continue
         if r.get("kind") == "OPEN":
             opens += 1
+        elif r.get("kind") == "RENFORT":
+            # un renfort ne REALISE rien (il ajoute du notional a une position vivante) : il
+            # n'entre donc JAMAIS dans le PnL. On le compte pour qu'il soit VISIBLE — une
+            # action invisible finit toujours par etre confondue avec un bug.
+            renforts += 1
+            notional_renforce += float(r.get("notional_usdt") or 0.0)
         elif r.get("kind") == "CLOSE":
             closes += 1
             pnl = float(r.get("realized_net_pnl_usdc") or 0.0)
@@ -262,6 +269,7 @@ def resume_depuis_ledger(root: str | Path = ".", *, mode: str = MODE_LIVE,
                 closes_sess += 1
                 realized_sess += pnl
     out = {"mode": mode, "opens": opens, "closes": closes,
+           "renforts": renforts, "notional_renforce_usdt": round(notional_renforce, 4),
            "realized_net_pnl_usdc": round(realized, 6)}
     if session_id is not None:
         out["session_id"] = session_id
@@ -287,6 +295,13 @@ def etat_carry(root: str | Path = ".", *, mode: str = MODE_LIVE) -> dict[str, An
     r["coins_ouverts"] = sorted(g.ouvertes)
     r["funding_accru_ouvert_usdt"] = round(
         sum(float(p.get("funding_accrued_usdt") or 0.0) for p in g.ouvertes.values()), 6)
+    # capital REELLEMENT deploye — la seule mesure qui dit si le renfort sert a quelque chose.
+    r["notional_ouvert_usdt"] = round(
+        sum(float(p.get("notional_usdt") or 0.0) for p in g.ouvertes.values()), 4)
+    r["marge_ouverte_usdt"] = round(
+        sum(float(p.get("marge_usdt") or 0.0) for p in g.ouvertes.values()), 4)
+    r["positions_renforcees"] = sum(1 for p in g.ouvertes.values()
+                                    if int(p.get("renforts") or 0) > 0)
     return r
 
 
