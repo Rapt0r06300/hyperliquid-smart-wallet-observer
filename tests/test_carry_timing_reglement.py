@@ -126,12 +126,16 @@ def test_bout_en_bout_une_sortie_ORDINAIRE_est_reportee_mais_pas_un_DANGER():
     # l'anti-churn (A3) annule toute sortie non amortie : on force l'amortissement, sinon on
     # testerait le garde anti-churn, pas le timing.
     g.ouvertes["HYPE"]["funding_accrued_usdt"] = 50.0
-    # âge > 96 h : l'anti-churn A3 exige d'avoir tenu le temps d'amortir avant toute sortie
-    evt = g.tick(dec, inputs, now_ms=T_PILE + 120 * H + 59 * MIN, marge_usd=50.0,
+    # âge > 96 h (anti-churn A3) ET décision NON viable — depuis le 21/07, une position
+    # VIABLE n'est plus fermée à l'âge max, elle est revalidée. Il faut donc une vraie
+    # raison de sortir pour que le timing du règlement ait quelque chose à reporter.
+    dec_ko = dict(dec)
+    dec_ko["viable"] = False
+    evt = g.tick(dec_ko, inputs, now_ms=T_PILE + 120 * H + 59 * MIN, marge_usd=50.0,
                  age_max_h=1.0, risque_contexte={"capital_usd": 5000.0})
     assert evt.get("sortie_reportee_reglement"), evt
     assert evt["ferme"] is None, "la position doit rester ouverte une minute de plus"
     # une minute plus tard, le reglement est passe : la sortie s'execute
-    evt2 = g.tick(dec, inputs, now_ms=T_PILE + 121 * H + 1 * MIN, marge_usd=50.0,
+    evt2 = g.tick(dec_ko, inputs, now_ms=T_PILE + 121 * H + 1 * MIN, marge_usd=50.0,
                   age_max_h=1.0, risque_contexte={"capital_usd": 5000.0})
     assert evt2.get("ferme"), evt2

@@ -167,6 +167,23 @@ def raison_de_sortie(position: dict[str, Any], *, now_ms: int, funding_bps_h_cou
             >= SEUIL_PRISE_PROFIT_USD):
         return SORTIE_PRISE_PROFIT_BASE
     if (int(now_ms) - int(position["entry_ts_ms"])) / 3.6e6 >= float(age_max_h):
+        # 🔴 21/07 — REVALIDER N'EST PAS FERMER. Cette porte fermait une position vivante
+        # tous les 14 jours « pour revalider ». MESURE : l'aller-retour vaut 22 bps ; a 14
+        # jours, le renouvellement coute 1,571 bps/jour contre 3,000 bps/jour de revenu brut
+        # au plancher — soit **52,4 % du revenu detruit par notre propre regle d'hygiene**.
+        # (a 90 j : 8,1 % ; a 365 j : 2,0 %.)
+        #
+        # Or la revalidation a DEJA lieu : chaque tick recalcule la decision et dispose de
+        # ses propres sorties (funding non rentable, liquidation, base convergee, donnee
+        # absente prolongee, hors shortlist). L'age max etait un DOUBLON de ces sorties —
+        # un doublon qui coutait la moitie du revenu.
+        #
+        # Desormais : a l'age max on REVALIDE. Le coin est-il toujours viable CE TICK ?
+        #   * oui -> on garde, et on remet le compteur a zero (aucun frais paye) ;
+        #   * non -> les autres sorties ont deja tranche plus haut dans cette fonction.
+        # Fermer reste possible : simplement, plus pour cause d'anniversaire.
+        if bool(position.get("revalidee_viable")):
+            return None
         return SORTIE_AGE
     return None
 
@@ -236,6 +253,10 @@ class GestionnaireCarry:
         # 1) gérer la position déjà ouverte pour ce coin (accruer puis, si besoin, fermer)
         pos = self.ouvertes.get(coin)
         if pos is not None:
+            # REVALIDATION CONTINUE (21/07) : la decision de CE tick dit si le coin tient
+            # encore. C'est elle qui remplace la fermeture-anniversaire — revalider n'est
+            # pas fermer, et une position qui reste viable n'a aucune raison de payer 22 bps.
+            pos["revalidee_viable"] = bool(decision.get("viable"))
             pos, add = accruer(pos, now_ms=now_ms, funding_bps_h_courant=fnow)
             evt["funding_add_usdt"] = round(add, 6)
             # hausse REELLE depuis l'entree (prix live) -> attrape un pic avant funding<=0/age
@@ -323,6 +344,15 @@ class GestionnaireCarry:
                     evt["renfort_refuse"] = refus
             except Exception:  # noqa: BLE001 — un renfort rate ne casse jamais la position
                 evt["renfort_refuse"] = "ERREUR_INTERNE"
+            # l'horloge d'age repart a chaque revalidation reussie : sans ca, la porte se
+            # redeclencherait a chaque tick une fois l'age max franchi.
+            age_h = (int(now_ms) - int(pos["entry_ts_ms"])) / 3.6e6
+            if age_h >= float(age_max_h) and pos.get("revalidee_viable"):
+                pos["entry_ts_ms"] = int(now_ms)
+                pos["revalidations"] = int(pos.get("revalidations") or 0) + 1
+                evt["revalidee_sans_fermer"] = {"age_h": round(age_h, 1),
+                                                "revalidations": pos["revalidations"],
+                                                "frais_evites_bps": COUT_SORTIE_2_JAMBES_BPS * 2}
             self.ouvertes[coin] = pos
             return evt
 
