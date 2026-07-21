@@ -37,12 +37,33 @@ import time
 from pathlib import Path
 from typing import Any
 
-SEUIL_OUVERTURE_BPS = 15.0
 SEUIL_SORTIE_BPS = 3.0
 AGE_MAX_H = 4.0
 NOTIONAL_USD = 50.0
 MAX_POSITIONS = 2
-COUT_AR_BPS = 8.0                  # 2 executions HL maker (1,5x2) + spread/slippage ~5
+
+# ══ 🔴 21/07 — LE FORFAIT QUI DECIDAIT DE TOUT (P4-2/P4-3) ══
+# `COUT_AR_BPS = 8.0` etait commente « 2 executions HL maker (1,5x2) + spread/slippage ~5 ».
+# Un aller-retour d'arbitrage, c'est **4** executions (ouverture ET fermeture, sur CHACUNE des
+# deux venues), et le commentaire oubliait les frais de la seconde venue.
+# Re-pricing des 4 trades reellement enregistres :
+#     cout  8 bps (le forfait)                  -> +0,0929 $  survit
+#     cout 13 bps (frais mixtes + 2 bps spread) -> **-0,0071 $  MEURT**
+# Tout le PnL positif tenait dans l'incertitude de cette constante.
+# Le cout vient desormais de `arb_cout_all_in`, poste par poste, et le SEUIL en est DERIVE :
+# un seuil qui ne bouge pas quand son cout bouge n'est pas un seuil, c'est une habitude.
+from hl_observer.funding.arb_cout_all_in import (MODE_REALISTE, decomposer,  # noqa: E402
+                                                 ecart_vivant, seuil_dynamique_bps)
+
+#: fenêtre d'historique sur laquelle on juge la vivacité d'un écart.
+VIVACITE_FENETRE_S = 6 * 3600.0
+
+#: mode d'execution retenu. REALISTE = passif ou l'on peut attendre (HL), agressif la ou la
+#: couverture doit se completer sous peine d'etre a nu. Passer a TOUT_MAKER exige une MESURE
+#: du taux de fill passif, pas un espoir : un trade de dislocation est une course.
+MODE_EXECUTION = MODE_REALISTE
+COUT_AR_BPS = decomposer(mode=MODE_EXECUTION)["cout_aller_retour_bps"]
+SEUIL_OUVERTURE_BPS = seuil_dynamique_bps(mode=MODE_EXECUTION)
 STOP_AGGRAVATION_BPS = 25.0        # la jambe Binance est conceptuelle : le risque est REEL
 FRAICHEUR_MAX_S = 900.0
 
@@ -98,6 +119,33 @@ def dernieres_mesures(root: Path, *, now: float | None = None) -> dict[str, dict
     return out
 
 
+def _historique_ecarts(root: Path, coin: str, *, now: float,
+                       fenetre_s: float = VIVACITE_FENETRE_S) -> list[float]:
+    """Les écarts récents de ce coin, pour juger si le prix bouge. Fichier illisible -> liste
+    VIDE, jamais une exception : `ecart_vivant` s'abstiendra, ce qui est le bon défaut."""
+    out: list[float] = []
+    cible = str(coin).upper()
+    try:
+        with (root / VENUES_RELPATH).open(encoding="utf-8", errors="ignore") as f:
+            for ligne in f:
+                ligne = ligne.strip()
+                if not ligne or cible not in ligne:
+                    continue
+                try:
+                    r = json.loads(ligne)
+                except ValueError:
+                    continue
+                if str(r.get("coin") or "").upper() != cible:
+                    continue
+                ts, e = r.get("ts"), r.get("ecart_prix_bps")
+                if ts is None or e is None or float(now) - float(ts) > float(fenetre_s):
+                    continue
+                out.append(float(e))
+    except (OSError, TypeError, ValueError):
+        return []
+    return out
+
+
 def tick(root: str | Path = ".", *, now: float | None = None,
          session_id: str | None = None) -> list[dict[str, Any]]:
     """Une passe paper : ouvre/tient/ferme selon les portes. Retourne les événements."""
@@ -145,6 +193,16 @@ def tick(root: str | Path = ".", *, now: float | None = None,
         if coin in ouvertes or len(ouvertes) >= MAX_POSITIONS:
             continue
         ecart = float(m.get("ecart_prix_bps") or 0.0)
+        # 🔴 21/07 — L'ÉCART BOUGE-T-IL ? Porte placée AVANT le seuil, parce qu'un écart figé
+        # est d'autant plus gros qu'il est faux : il passerait tous les seuils.
+        # MESURE : MKR affichait 71,44 bps sur **208 observations, ecart-type 0,0000** (min =
+        # max, jamais un mouvement). C'etait le plus gros ecart de l'univers — donc le seul a
+        # franchir le seuil — et il a perdu. Le seau 40+ bps convergeait a **0 %** sur 176 obs.
+        # Un vrai ecart de dislocation FLUCTUE ; c'est ce qui le rend capturable.
+        hist = _historique_ecarts(racine, coin, now=t)
+        viv = ecart_vivant(hist)
+        if viv["vivant"] is False:
+            continue
         if abs(ecart) < SEUIL_OUVERTURE_BPS:
             continue
         ouvertes[coin] = {"coin": coin, "entry_ts": t, "ecart_entree_bps": ecart,

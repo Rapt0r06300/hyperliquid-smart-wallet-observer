@@ -958,8 +958,81 @@ def _resume_benchmark(positions: list) -> dict:
         return {"indisponible": str(exc), "positions": 0, "dominees": 0}
 
 
+def _pourquoi_rien_nouvre(root) -> dict:
+    """POURQUOI AUCUNE POSITION NE S'OUVRE — avec des nombres, jamais un silence.
+
+    Depuis le 21/07, deux portes dérivées refusent presque tout : le coût d'opportunité côté
+    carry (il faut battre le vault HLP) et le coût all-in côté arbitrage (16 bps sur 4
+    exécutions). C'est le bon comportement — mais un écran qui n'affiche RIEN se lit comme une
+    panne. Ce panneau dit, pour chaque moteur : combien de candidats, le meilleur, et **ce qui
+    lui manque exactement** pour passer.
+    """
+    out: dict = {"real_execution": False, "read_only": True}
+    # ── CARRY ──
+    try:
+        from hl_observer.backtesting.carry_scan_recorder import charger
+        from hl_observer.funding.carry_benchmark_gate import (evaluer,
+                                                              funding_requis_bps_h)
+        lignes = [x for x in charger(root) if x.get("funding_bps_h") is not None]
+        recents = lignes[-400:]
+        meilleur, best_f = None, None
+        for x in recents:
+            f = float(x["funding_bps_h"])
+            if best_f is None or f > best_f:
+                best_f, meilleur = f, x
+        requis = funding_requis_bps_h()
+        v = (evaluer(coin=str(meilleur.get("coin") or ""), funding_bps_h=best_f,
+                     cout_entree_bps=meilleur.get("cout_entree_bps")) if meilleur else None)
+        out["carry"] = {
+            "candidats": len(recents),
+            "meilleur_coin": (meilleur or {}).get("coin"),
+            "meilleur_funding_bps_h": best_f,
+            "funding_requis_bps_h": requis,
+            "manque_bps_h": (round(requis - best_f, 6)
+                             if (requis is not None and best_f is not None) else None),
+            "multiple_manquant": (round(requis / best_f, 2)
+                                  if (requis and best_f) else None),
+            "apr_net_pct": (v or {}).get("apr_net_pct"),
+            "motif": (v or {}).get("motif"),
+            "explication": (v or {}).get("explication"),
+        }
+    except Exception as exc:  # noqa: BLE001
+        out["carry"] = {"indisponible": str(exc)}
+    # ── ARBITRAGE ──
+    try:
+        from hl_observer.funding import arb_dislocation_paper as _arb
+        from hl_observer.funding.arb_cout_all_in import decomposer, verdict
+        mes = _arb.dernieres_mesures(root)
+        ecarts = [abs(float(m.get("ecart_prix_bps") or 0.0)) for m in mes.values()]
+        best = max(ecarts) if ecarts else None
+        coin = None
+        for c_, m in mes.items():
+            if best is not None and abs(float(m.get("ecart_prix_bps") or 0.0)) == best:
+                coin = c_
+                break
+        v = verdict(ecart_bps=best, mode=_arb.MODE_EXECUTION)
+        out["arbitrage"] = {
+            "candidats": len(mes),
+            "meilleur_coin": coin,
+            "meilleur_ecart_bps": (round(best, 4) if best is not None else None),
+            "seuil_bps": v["seuil_bps"],
+            "manque_bps": v.get("manque_bps"),
+            "cout": decomposer(mode=_arb.MODE_EXECUTION),
+            "motif": v.get("motif"),
+        }
+    except Exception as exc:  # noqa: BLE001
+        out["arbitrage"] = {"indisponible": str(exc)}
+    return out
+
+
 def create_dashboard_v2_router() -> APIRouter:
     router = APIRouter()
+
+    @router.get("/v2/pourquoi")
+    def pourquoi() -> JSONResponse:
+        """« Pas de trade » n'est jamais un silence : c'est une mesure. Lecture seule."""
+        from pathlib import Path as _P
+        return JSONResponse(_pourquoi_rien_nouvre(_P(__file__).resolve().parents[3]))
 
     @router.get("/v2", response_class=HTMLResponse)
     def dashboard_v2() -> HTMLResponse:
