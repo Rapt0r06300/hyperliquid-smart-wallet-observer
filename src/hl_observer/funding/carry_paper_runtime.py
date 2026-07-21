@@ -224,6 +224,17 @@ def evaluer_et_journaliser(root: str | Path = ".", *, now_ms: int | None = None,
     except Exception:  # noqa: BLE001 — un superviseur qui tue le moteur serait pire que la panne
         _noter_echec("hl_observer/funding/carry_paper_runtime.py:superviseur")
 
+    # ── ARBITRAGE DE DISLOCATION paper v1 (21/07) — portes dures pre-declarees (35 bps
+    # d'ouverture = couts 22 + marge 13 : edge positif a l'entree PAR CONSTRUCTION). Ecrit
+    # dans LE MEME ledger -> PnL unifie. Jamais bloquant pour le carry.
+    if os.environ.get("HYPERSMART_ARB_DISLOCATION_PAPER", "0").strip() == "1":
+        try:
+            from hl_observer.funding.arb_dislocation_paper import tick as _arb_tick
+            from hl_observer.runtime.session_identity import session_courante as _sid
+            _arb_tick(root, session_id=_sid(root))
+        except Exception:  # noqa: BLE001 — compte, jamais silencieux, jamais bloquant
+            _noter_echec("hl_observer/funding/carry_paper_runtime.py:arb_dislocation")
+
     etape2 = None
     if etape2_active():
         try:

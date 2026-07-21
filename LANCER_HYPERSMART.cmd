@@ -37,6 +37,10 @@ REM 20/07 — CAPITAL DECLARE (repli de la marge dynamique si l'etat UI est illi
 REM Sans lui : capital=None -> marge 50 $/position -> 40 %% du capital dort. La distance a la
 REM liquidation depend du LEVIER, pas de la taille : deployer plus a levier constant est sur.
 set "HYPERSMART_SIMULATION_INITIAL_EQUITY_USDT=1000"
+REM 21/07 — ARBITRAGE DE DISLOCATION paper v1 (portes dures pre-declarees : ouverture
+REM >=35 bps = couts 22 + marge 13 -> edge positif a l entree PAR CONSTRUCTION ; sortie
+REM <=5 bps ou 4 h ; 50$ x2 max). Ecrit au MEME ledger -> PnL unifie. 0 ordre reel.
+set "HYPERSMART_ARB_DISLOCATION_PAPER=1"
 set "HYPERSMART_REDUCE_MAX_SIGNAL_AGE_MS=15000"
 REM Les reductions leader sont proportionnelles a NOTRE position paper. Sur un compte
 REM de simulation 1000 USDT, une vraie sortie partielle peut valoir moins de 10 USDT:

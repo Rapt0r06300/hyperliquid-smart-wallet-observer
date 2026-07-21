@@ -63,67 +63,120 @@ def _post(url: str, charge: dict, *, timeout_s: float = 12.0):
         return json.loads(rep.read().decode("utf-8"))
 
 
-def funding_hyperliquid() -> dict[str, float]:
-    """{coin: funding en bps/HEURE}. HL publie deja un taux horaire (fraction)."""
+def donnees_hyperliquid() -> dict[str, dict]:
+    """{coin: {"f": funding bps/h, "px": mark}}. Le MEME appel portait deja le prix — le
+    mecanisme d'arbitrage (21/07) le lit sans un octet reseau de plus."""
     data = _post(URL_HL, {"type": "metaAndAssetCtxs"})
     if not isinstance(data, list) or len(data) < 2:
         return {}
     univers = (data[0] or {}).get("universe") or []
     ctxs = data[1] or []
-    out: dict[str, float] = {}
+    out: dict[str, dict] = {}
     for meta, ctx in zip(univers, ctxs):
         try:
             coin = str(meta.get("name") or "").upper()
             f = float((ctx or {}).get("funding"))
+            px = float((ctx or {}).get("markPx") or 0.0)
         except (TypeError, ValueError, AttributeError):
             continue
         if coin and f == f:                       # NaN écarté
-            out[coin] = f * 1e4                   # fraction/h -> bps/h
+            out[coin] = {"f": f * 1e4, "px": px if px > 0 else None}
     return out
 
 
-def funding_binance() -> dict[str, float]:
-    """{coin: funding en bps/HEURE}. ⚠️ Binance publie un taux PAR 8 H -> on divise par 8."""
+def funding_hyperliquid() -> dict[str, float]:
+    """Compat : {coin: funding bps/h}."""
+    return {c: d["f"] for c, d in donnees_hyperliquid().items()}
+
+
+def donnees_binance() -> dict[str, dict]:
+    """{coin: {"f": bps/h, "px": markPrice}}. ⚠️ funding Binance = PAR 8 H -> /8."""
     data = _get(URL_BINANCE)
     if not isinstance(data, list):
         return {}
-    out: dict[str, float] = {}
+    out: dict[str, dict] = {}
     for row in data:
         try:
             sym = str(row.get("symbol") or "")
             if not sym.endswith("USDT"):
                 continue
             f8 = float(row.get("lastFundingRate"))
+            px = float(row.get("markPrice") or 0.0)
         except (TypeError, ValueError, AttributeError):
             continue
         if f8 != f8:
             continue
-        coin = sym[:-4].upper()
-        out[coin] = (f8 / HEURES_PAR_PERIODE_BINANCE) * 1e4          # fraction/8h -> bps/h
+        out[sym[:-4].upper()] = {"f": (f8 / HEURES_PAR_PERIODE_BINANCE) * 1e4,
+                                 "px": px if px > 0 else None}
     return out
+
+
+def funding_binance() -> dict[str, float]:
+    """Compat : {coin: funding bps/h}."""
+    return {c: d["f"] for c, d in donnees_binance().items()}
+
+
+#: ── MÉCANISME D'ARBITRAGE (21/07, demande de Flo — recherche X/GitHub) ──────────────────
+#: La littérature des desks : « les spreads normalisés entre le MÊME perp sur deux venues
+#: REVIENNENT à leur moyenne » (dislocation de prix). MESURE d'abord : quand l'écart de prix
+#: HL↔Binance dépasse le seuil PRÉ-DÉCLARÉ ci-dessous, on émet un CANDIDAT `arbitrage` dans
+#: le replay (fade côté HL : short HL si HL est riche, long sinon). Le laboratoire jugera
+#: aux mêmes portes (2 moitiés + stress + plateau). Barres AVANT la donnée, jamais après.
+SEUIL_CANDIDAT_ARB_BPS = 20.0
+CANDIDATS_ARB_MAX_BYTES = 20_000_000
+CANDIDATS_ARB_MAX_LINES = 200_000
 
 
 def une_passe(root: Path, coins: list[str]) -> tuple[int, int]:
     """(lignes écrites, coins comparables). Une venue muette -> 0 ligne, jamais d'invention."""
     try:
-        hl, binance = funding_hyperliquid(), funding_binance()
+        dhl, dbin = donnees_hyperliquid(), donnees_binance()
     except (urllib.error.URLError, OSError, ValueError, TimeoutError):
         return 0, 0
-    if not hl or not binance:
+    if not dhl or not dbin:
         return 0, 0
 
     maintenant = time.time()
-    lignes = []
+    lignes, candidats_arb = [], []
     for coin in coins:
         c = coin.upper().strip()
-        a, b = hl.get(c), binance.get(c)
-        if not isinstance(a, (int, float)) or not isinstance(b, (int, float)):
+        da, db = dhl.get(c), dbin.get(c)
+        if not da or not db:
             continue                              # coin absent d'une venue -> on n'ecrit RIEN
-        lignes.append({"ts": round(maintenant, 3), "coin": c,
-                       "hl_bps_h": round(float(a), 6), "bin_bps_h": round(float(b), 6),
-                       "dispersion_bps_h": round(abs(float(a) - float(b)), 6),
-                       "venue_haute": "BINANCE" if b > a else "HL",
-                       "read_only": True, "real_execution": False})
+        a, b = da["f"], db["f"]
+        ligne = {"ts": round(maintenant, 3), "coin": c,
+                 "hl_bps_h": round(float(a), 6), "bin_bps_h": round(float(b), 6),
+                 "dispersion_bps_h": round(abs(float(a) - float(b)), 6),
+                 "venue_haute": "BINANCE" if b > a else "HL",
+                 "read_only": True, "real_execution": False}
+        # dislocation de PRIX du meme perp (les deux mids etaient deja dans les reponses)
+        if da.get("px") and db.get("px"):
+            ecart = (float(da["px"]) - float(db["px"])) / float(db["px"]) * 1e4
+            ligne["hl_px"] = da["px"]
+            ligne["bin_px"] = db["px"]
+            ligne["ecart_prix_bps"] = round(ecart, 4)
+            if abs(ecart) >= SEUIL_CANDIDAT_ARB_BPS:
+                candidats_arb.append({
+                    "recorded_at": round(maintenant, 3), "strategie": "arbitrage",
+                    "action_type": "FADE_DISLOCATION_HL",
+                    "coin": c, "direction": "SHORT" if ecart > 0 else "LONG",
+                    "current_mid": da["px"], "ecart_prix_bps": round(ecart, 4),
+                    "venue_riche": "HL" if ecart > 0 else "BINANCE",
+                    "note": "jambe HL seule mesuree; la couverture binance est conceptuelle",
+                    "real_execution": False})
+        lignes.append(ligne)
+    if candidats_arb:
+        try:
+            import sys as _s
+            _s.path.insert(0, str(root / "src"))
+            from hl_observer.runtime.replay_recorder import append_replay_lines
+            append_replay_lines(root / "runtime" / "replay", "candidates.jsonl",
+                                candidats_arb, max_bytes=CANDIDATS_ARB_MAX_BYTES,
+                                max_lines=CANDIDATS_ARB_MAX_LINES)
+            print("[venues] %d candidat(s) ARBITRAGE emis (dislocation >= %.0f bps)"
+                  % (len(candidats_arb), SEUIL_CANDIDAT_ARB_BPS))
+        except Exception as exc:  # noqa: BLE001 — la mesure funding ne depend pas du replay
+            print("[venues] candidats arb non ecrits : %s" % exc)
     if not lignes:
         return 0, 0
     chemin = root / SORTIE

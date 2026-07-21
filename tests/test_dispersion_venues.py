@@ -68,8 +68,8 @@ def test_une_venue_MUETTE_n_ecrit_RIEN(tmp_path, monkeypatch):
 
 
 def test_un_coin_absent_d_une_venue_est_ECARTE(tmp_path, monkeypatch):
-    monkeypatch.setattr(COLL, "funding_hyperliquid", lambda: {"BTC": 0.125, "HYPE": 0.125})
-    monkeypatch.setattr(COLL, "funding_binance", lambda: {"BTC": 0.4})   # pas de HYPE
+    monkeypatch.setattr(COLL, "donnees_hyperliquid", lambda: {"BTC": {"f": 0.125, "px": None}, "HYPE": {"f": 0.125, "px": None}})
+    monkeypatch.setattr(COLL, "donnees_binance", lambda: {"BTC": {"f": 0.4, "px": None}})   # pas de HYPE
     n, _ = COLL.une_passe(tmp_path, ["BTC", "HYPE"])
     assert n == 1
     lignes = (tmp_path / COLL.SORTIE).read_text(encoding="utf-8").strip().splitlines()
@@ -77,8 +77,8 @@ def test_un_coin_absent_d_une_venue_est_ECARTE(tmp_path, monkeypatch):
 
 
 def test_la_dispersion_ecrite_est_juste(tmp_path, monkeypatch):
-    monkeypatch.setattr(COLL, "funding_hyperliquid", lambda: {"BTC": 0.125})
-    monkeypatch.setattr(COLL, "funding_binance", lambda: {"BTC": 0.425})
+    monkeypatch.setattr(COLL, "donnees_hyperliquid", lambda: {"BTC": {"f": 0.125, "px": None}})
+    monkeypatch.setattr(COLL, "donnees_binance", lambda: {"BTC": {"f": 0.425, "px": None}})
     COLL.une_passe(tmp_path, ["BTC"])
     r = json.loads((tmp_path / COLL.SORTIE).read_text(encoding="utf-8").strip())
     assert round(r["dispersion_bps_h"], 6) == 0.3
@@ -149,3 +149,44 @@ def test_les_BARRES_correspondent_au_protocole_ecrit():
     texte = (RACINE / "docs" / "audit" / "PROTOCOLE_CROSS_VENUE.md").read_text(encoding="utf-8")
     for attendu in ("168 h", "2 %/an", "60 %", "72 h", "5 coins", "22 bps"):
         assert attendu in texte, "le protocole ecrit ne mentionne plus %r" % attendu
+
+
+# ---------------- 21/07 : MECANISME ARBITRAGE — dislocation de prix HL<->Binance ----------------
+# Litterature (recherche X/GitHub) : le spread du MEME perp entre 2 venues revient a sa
+# moyenne. MESURE d'abord : ecart >= 20 bps (seuil PRE-declare) -> candidat 'arbitrage' au
+# replay, jamais un trade. Le laboratoire jugera aux memes portes.
+
+def test_l_ecart_de_prix_est_mesure_et_le_candidat_emis_au_dela_du_seuil(tmp_path, monkeypatch):
+    import json as _j
+    m = COLL
+    monkeypatch.setattr(m, "donnees_hyperliquid", lambda: {
+        "BTC": {"f": 0.125, "px": 64000.0},          # HL riche de ~31 bps
+        "ETH": {"f": 0.125, "px": 3200.0}})          # ecart nul
+    monkeypatch.setattr(m, "donnees_binance", lambda: {
+        "BTC": {"f": 0.100, "px": 63800.0},
+        "ETH": {"f": 0.100, "px": 3200.0}})
+    n, _ = m.une_passe(tmp_path, ["BTC", "ETH"])
+    assert n == 2
+    lignes = [_j.loads(l) for l in
+              (tmp_path / "runtime" / "data" / "dispersion_venues.jsonl")
+              .read_text(encoding="utf-8").splitlines()]
+    btc = next(l for l in lignes if l["coin"] == "BTC")
+    assert abs(btc["ecart_prix_bps"] - 31.3480) < 0.01
+    # le candidat arbitrage est emis dans le shard replay du process
+    import glob
+    shards = glob.glob(str(tmp_path / "runtime" / "replay" / "candidates.*.jsonl"))
+    assert shards, "l'ecart 31 bps >= seuil 20 -> candidat emis"
+    cands = [_j.loads(l) for l in open(shards[0], encoding="utf-8")]
+    assert len(cands) == 1 and cands[0]["strategie"] == "arbitrage"
+    assert cands[0]["direction"] == "SHORT" and cands[0]["venue_riche"] == "HL"
+    assert cands[0]["real_execution"] is False
+
+
+def test_sous_le_seuil_AUCUN_candidat_la_mesure_funding_continue(tmp_path, monkeypatch):
+    m = COLL
+    monkeypatch.setattr(m, "donnees_hyperliquid", lambda: {"ETH": {"f": 0.2, "px": 3201.0}})
+    monkeypatch.setattr(m, "donnees_binance", lambda: {"ETH": {"f": 0.1, "px": 3200.0}})
+    n, _ = m.une_passe(tmp_path, ["ETH"])           # ecart ~3 bps < 20
+    assert n == 1
+    import glob
+    assert not glob.glob(str(tmp_path / "runtime" / "replay" / "candidates.*.jsonl"))
