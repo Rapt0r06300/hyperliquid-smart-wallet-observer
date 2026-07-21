@@ -115,16 +115,26 @@ def auditer(root: str | Path = ".", *, max_lignes: int = 400_000) -> dict[str, A
         rap["defauts"].append(
             "RÉSOLUTION : %s ont un mark toutes les >%.0f min — les sorties SL/TP simulées y "
             "sont grossières" % (", ".join(c for c, _ in pires[:5]), RESOLUTION_MAX_MIN))
-    absurdes = 0
+    # 21/07 — enquête sur les 52 « sauts » du premier audit : TOUS sur des tickers TECHNIQUES
+    # (`@128`, `#5101` = paires spot / indices internes HL, jamais nos coins) ou entre deux
+    # marks séparés de 7 JOURS (664 397 s) — le prix a le droit de bouger en une semaine.
+    # Un saut n'est suspect que s'il est RAPIDE (<10 min) et sur un VRAI coin.
+    absurdes, suspects = 0, []
     for c, série in prix_par_coin.items():
+        if not c or c[0] in "@#":                     # ticker technique : hors périmètre
+            continue
         série.sort()
-        for (_, p0), (_, p1) in zip(série, série[1:]):
-            if p0 > 0 and abs(p1 - p0) / p0 > SAUT_PRIX_ABSURDE:
+        for (t0, p0), (t1, p1) in zip(série, série[1:]):
+            if p0 > 0 and (t1 - t0) <= 600.0 and abs(p1 - p0) / p0 > SAUT_PRIX_ABSURDE:
                 absurdes += 1
+                if len(suspects) < 5:
+                    suspects.append("%s %.6g->%.6g en %.0fs" % (c, p0, p1, t1 - t0))
     rap["sauts_prix_absurdes"] = absurdes
+    rap["sauts_exemples"] = suspects
     if absurdes:
-        rap["defauts"].append("PRIX : %d sauts > %.0f%% entre deux marks — vérifier la source"
-                              % (absurdes, SAUT_PRIX_ABSURDE * 100))
+        rap["defauts"].append("PRIX : %d sauts > %.0f%% en moins de 10 min sur de VRAIS coins "
+                              "(%s) — vérifier la source"
+                              % (absurdes, SAUT_PRIX_ABSURDE * 100, "; ".join(suspects)))
 
     # 5. doublons
     vus, doublons = set(), 0

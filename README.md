@@ -21,7 +21,58 @@ launcher principal ni montes dans l'UI Hyperliquid.
 
 > **Doc maître** (état, méthode, architecture, config, roadmap) : `docs/ETAT_ET_FEUILLE_DE_ROUTE.md`.
 > Règles agent : `CLAUDE.md` et `AGENTS.md`. Objectif condensé : `OBJECTIF.md`.
-> Sizing actuel : marge **$50** × levier **10** = notional **$500** par position ; 20 positions = 1000 USDT.
+
+---
+
+## Où en est le bot (21/07/2026)
+
+**Quatre modules, chacun avec son verdict mesuré — un module qui n'ouvre pas le DIT et
+explique pourquoi.**
+
+| Module | État | Pourquoi |
+|---|---|---|
+| **Carry delta-neutre** | 🟢 **actif** — la seule source de PnL positif | Long spot + short perp, funding encaissé. Univers étendu aux tokens Unit (UBTC→BTC…) : 8 → 20 coins scannés, ~7 viables. Marge dynamique (capital réel / positions visées), sortie prise-de-profit dès +0,05 $ net. |
+| **Copy-trading** | 🔒 **verrouillé, en réhabilitation** | Loi mesurée : **−7,97 bps** sur 24 133 signaux OOS à coût zéro (leader contrarien) ; le laboratoire l'a reconfirmé sur 441 000 candidats. La whitelist C12 (markout forward **par leader**) enregistre les fills depuis le 21/07 : le copy reviendra par la preuve individuelle, jamais par l'espoir. |
+| **Arbitrage de dislocation** | 🟡 **en guet** | Écart de prix du même perp HL↔Binance ; ouvre à ≥ 35 bps (22 de coûts + 13 de marge → edge positif à l'entrée par construction). Marchés efficients aujourd'hui : il attend, et affiche « plus gros écart X bps < seuil 35 ». |
+| **Cross-venue funding** | 🕐 **en mesure** | Protocole 72 h, barres pré-écrites. Verdict à échéance, jamais avant. |
+| Liquidations | ⏸️ suspendu | Wallets suivis trop peu leveragés : 0 événement déclenché. Décision produit à prendre (viser des comptes à fort levier). |
+
+### Le laboratoire — `RECHERCHE-SCENARIO-REPLAY.cmd`
+
+Le chercheur de réglages, en 4 étapes lisibles : **rassemble** les données (438 k+ candidats,
+355 k marks, archives incluses) → **audite leur qualité** → **cherche module par module**
+(~600 combinaisons × 4 sous-populations, crible multi-fidélité, raffinage grossier→fin,
+folds purgés CPCV) → **écrit les rapports**.
+
+Portes anti-mensonge (jamais assouplies) : deux moitiés temporelles disjointes avec embargo,
+coûts stressés ×1,5, plateau des voisins, ≥ 30 trades par moitié. Une config promue est
+classée **OR** (net > 0 sur ≥ 3/4 des époques) ou **ARGENT**.
+
+Sorties dans `runtime/replay/` :
+
+- `RESULTATS_RECHERCHE.md` — le rapport complet, une **recommandation en français par
+  module** (« FAIS ÇA… », « ARRÊTE DE CHERCHER ICI… », « PATIENCE… ») + bloc JSON ;
+- `PEPITES.md` — le résumé court ;
+- `QUALITE_DONNEES.md` — santé des données (étiquetage, horodatage, **couverture** = cause
+  n°1 des « 0 trade », résolution, doublons, prix aberrants).
+
+Ctrl-C = **pause sans perte** : chaque essai jugé est sauvegardé, la reprise est automatique.
+
+### Le rapport du matin — `RAPPORT-DU-JOUR.cmd`
+
+Régénéré automatiquement toutes les 6 h dans `rapports/RAPPORT_DU_JOUR.md` (+ archive datée) :
+PnL 24 h par motif, positions et leur **économie** ($/jour, amortissement), santé des
+collecteurs, mesures en cours, refus dominants, leçons du ledger, PnL des refus (hebdo),
+univers du scan **avec le verrou de chaque coin**, et la liste À FAIRE du jour.
+
+### Ce que l'écran montre
+
+PnL unifié = **réalisé + funding couru** (l'encaissé, stable) ; le **latent de base**
+(réversible, marqué au MID) est affiché **à côté**, jamais mélangé. Rafraîchi à chaque image
+de l'écran, resnappé sur chaque vraie mesure : le chiffre vit, et il dit vrai.
+
+> Sizing : marge dynamique (capital réel ÷ positions visées, réserve 20 %, plafond 40 % par
+> coin) ; levier choisi en risk-parity selon la pire hausse observée sur 200 jours.
 
 ---
 

@@ -85,3 +85,23 @@ def test_la_source_etiquette_desormais_les_candidats_copy():
     src = open(RACINE / "src/hl_observer/signals/v26_entry_vetos.py", encoding="utf-8").read()
     assert '"recorded_at": time.time(), "strategie": "copy", **snapshot' in src, \
         "un snapshot portant deja `strategie` la garde (jamais d'ecrasement)"
+
+
+def test_les_tickers_TECHNIQUES_et_les_sauts_LENTS_ne_sont_plus_des_faux_positifs(tmp_path):
+    """Enquête du 21/07 : les 52 « sauts » etaient des tickers @128/#5101 (paires spot et
+    indices internes HL) ou des ecarts de 7 JOURS. Un prix a le droit de doubler en une
+    semaine. Un saut n'est suspect que RAPIDE (<10 min) et sur un VRAI coin."""
+    cands = [{"recorded_at": 1000, "coin": "BTC", "strategie": "carry"}]
+    marks = [
+        {"ts": 1000, "coin": "@128", "mid": 1.0}, {"ts": 1060, "coin": "@128", "mid": 5.0},
+        {"ts": 1000, "coin": "ETH", "mid": 3000.0},
+        {"ts": 1000 + 7 * 86400, "coin": "ETH", "mid": 9000.0},          # 7 jours : legitime
+        {"ts": 2000, "coin": "BTC", "mid": 64000.0},
+    ]
+    _ecrire(tmp_path, cands, marks)
+    r = Q.auditer(tmp_path)
+    assert r["sauts_prix_absurdes"] == 0, r.get("sauts_exemples")
+    # mais un VRAI saut rapide sur un VRAI coin reste detecte
+    marks.append({"ts": 2300, "coin": "BTC", "mid": 6400.0})             # -90 % en 5 min
+    _ecrire(tmp_path, cands, marks)
+    assert Q.auditer(tmp_path)["sauts_prix_absurdes"] == 1
