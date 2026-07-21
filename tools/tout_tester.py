@@ -370,14 +370,49 @@ def ecrire_recap(etapes: list[dict], sante: dict, chemin: Path = RECAP) -> Path:
     return chemin
 
 
+#: options reconnues. Toute autre option est REFUSÉE plutôt qu'ignorée en silence : une
+#: option avalée sans effet donne un run qui ne fait pas ce que l'on croit — et on lit
+#: ensuite un RECAP en pensant qu'il répond à une question qu'on n'a jamais posée.
+OPTIONS = {
+    "--rapide": "saute la recherche de pepites (l'etape la plus longue) -> ~10 min",
+    "--tests-seulement": "securite + suite pytest + invariants, rien d'autre (~5 min)",
+    "--securite-seulement": "UNIQUEMENT l'audit no-real-trade (~30 s)",
+    "--sans-recherche": "synonyme de --rapide",
+    "--aide": "affiche cette liste et sort",
+}
+
+
+def _aide() -> int:
+    print("TOUT-TESTER — options reconnues :\n")
+    for o, d in OPTIONS.items():
+        print("  %-22s %s" % (o, d))
+    print("\n  (sans option : tout, ~1 h)")
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
-    args = set(argv if argv is not None else sys.argv[1:])
-    rapide = "--rapide" in args           # saute la recherche de pépites (la plus longue)
+    brut = list(argv if argv is not None else sys.argv[1:])
+    inconnues = [a for a in brut if a.startswith("-") and a not in OPTIONS]
+    if inconnues:
+        print("option inconnue : %s" % ", ".join(inconnues), file=sys.stderr)
+        _aide()
+        return 2
+    args = set(brut)
+    if "--aide" in args:
+        return _aide()
+    rapide = bool(args & {"--rapide", "--sans-recherche"})
+    tests_seuls = "--tests-seulement" in args
+    securite_seule = "--securite-seulement" in args
     py = sys.executable
     etapes: list[dict] = []
     try:
         etapes.append(_courir("securite", [py, "-m", "hl_observer", "safety-audit"],
                               BUDGETS["securite"]))
+        if securite_seule:
+            sante = _sante_live()
+            chemin = ecrire_recap(etapes, sante)
+            print("\n  --securite-seulement : RECAP %s" % chemin, flush=True)
+            return 0 if etapes[0]["statut"] == "OK" else 1
         # consolidation AVANT tout ce qui lit le replay (qualite + recherche) : on ne juge
         # jamais sur des donnees d'hier alors que les shards du jour sont la.
         etapes.append(_courir("consolidation",
@@ -394,6 +429,11 @@ def main(argv: list[str] | None = None) -> int:
                      BUDGETS["cablage"])
         ri["resume"] = _resume_pytest(ri["sortie"])
         etapes.append(ri)
+        if tests_seuls:
+            sante = _sante_live()
+            chemin = ecrire_recap(etapes, sante)
+            print("\n  --tests-seulement : RECAP %s" % chemin, flush=True)
+            return 0 if all(e["statut"] in ("OK", "SAUTEE") for e in etapes) else 1
         etapes.append(_courir("cablage", [py, "tools/audit_cablage_cli.py"],
                               BUDGETS["cablage"]))
         etapes.append(_courir("donnees", [py, "tools/qualite_donnees_replay.py", "."],
