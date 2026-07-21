@@ -219,16 +219,22 @@ LOIS: tuple[Loi, ...] = (
 
     Loi(cle="arbitrage_cross_venue",
         titre="Arbitrer une dislocation de prix Hyperliquid ↔ Binance",
-        verdict=VERDICT_LIMITE,
-        chiffre="l'écart CONVERGE (−2,26 bps à 30 min, 64,9 % des cas) mais MOINS que les "
-                "8 bps d'aller-retour : edge net négatif en moyenne. Seuls les écarts extrêmes "
-                "paient — à 8 bps d'ouverture : 19 entrées, capture moyenne 8,53 bps",
-        date="2026-07-21",
-        condition_de_reouverture="la même mesure sur ≥ 5 000 écarts (la cadence est passée à "
-                                 "60 s le 21/07 pour ça) — si la capture tient au-dessus de "
-                                 "8 bps, le seuil descend de 15 à ~8",
+        verdict=VERDICT_REFUTE,
+        # 🔴 22/07 — CORRIGE : cette loi disait « 8 bps d'aller-retour », en contradiction avec
+        # `arb_dislocation_cout_all_in` (le vrai cout est 16 bps : 4 executions, 2 venues). Le
+        # rapport affichait donc DEUX chiffres pour le meme trade. On aligne : la convergence
+        # existe mais elle est ~4x trop petite pour le cout reel -> ce n'est plus « limite »,
+        # c'est REFUTE, coherent avec les deux autres lois d'arbitrage.
+        chiffre="l'écart CONVERGE (le meilleur seau, 10-20 bps, ne se referme que de −3,98 bps "
+                "en 30 min) mais le coût all-in réel est **16 bps** (4 exécutions, cf. "
+                "arb_dislocation_cout_all_in) : l'edge net est franchement négatif. Le seul "
+                "seau au-dessus du coût (40+ bps) ne converge JAMAIS (arb_ecart_fige)",
+        date="2026-07-22",
+        condition_de_reouverture="une MESURE du taux de fill PASSIF sur les 4 exécutions : à "
+                                 "9 bps (tout maker) les mêmes trades survivent. Sans cette "
+                                 "mesure, l'hypothèse tout-maker est un espoir, pas un edge",
         mots_cles=("arbitrage", "dislocation", "cross venue", "binance", "ecart de prix"),
-        ou_verifier="backtesting/arb_backtest.py + runtime/replay/BACKTEST_ARBITRAGE.md"),
+        ou_verifier="backtesting/arb_backtest.py + funding/arb_cout_all_in.py"),
 
     Loi(cle="zscore_au_plancher",
         titre="Le z-score du funding comme signal de taille",

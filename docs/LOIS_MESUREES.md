@@ -4,7 +4,7 @@
 > Une loi n'est pas un interdit de penser : c'est un **chiffre à battre**, avec la
 > **donnée** qui justifierait de rouvrir le dossier. Un argument neuf ne suffit pas.
 
-## 🔴 Réfuté par la mesure (14)
+## 🔴 Réfuté par la mesure (15)
 
 ### L'arbitrage de dislocation HL↔Binance paie après coûts — `arb_dislocation_cout_all_in`
 
@@ -97,21 +97,19 @@
 - **pour rouvrir** : que le carry dépasse durablement 30 % APR net, OU que HLP s'effondre. Attention : HLP n'est PAS delta-neutre (il porte du risque directionnel et de liquidation) — la comparaison est brutale mais pas parfaitement égale à risque
 - **où vérifier** : `defillama.com/protocol/hyperliquid-hlp (public) + carry_backtest`
 
+### Arbitrer une dislocation de prix Hyperliquid ↔ Binance — `arbitrage_cross_venue`
+
+- **le chiffre** : l'écart CONVERGE (le meilleur seau, 10-20 bps, ne se referme que de −3,98 bps en 30 min) mais le coût all-in réel est **16 bps** (4 exécutions, cf. arb_dislocation_cout_all_in) : l'edge net est franchement négatif. Le seul seau au-dessus du coût (40+ bps) ne converge JAMAIS (arb_ecart_fige)
+- **mesuré le** : 2026-07-22
+- **pour rouvrir** : une MESURE du taux de fill PASSIF sur les 4 exécutions : à 9 bps (tout maker) les mêmes trades survivent. Sans cette mesure, l'hypothèse tout-maker est un espoir, pas un edge
+- **où vérifier** : `backtesting/arb_backtest.py + funding/arb_cout_all_in.py`
+
 ### Le z-score du funding comme signal de taille — `zscore_au_plancher`
 
 - **le chiffre** : corrélation −0,596 entre le facteur de taille et le rendement net : on finançait le PLUS les coins les MOINS rentables. Au plancher protocolaire, tous les coins sont au même taux par construction — le z-score y mesure du bruit
 - **mesuré le** : 2026-07-21
 - **pour rouvrir** : un funding franchement AU-DESSUS du plancher (le garde du plancher réactive alors le z-score automatiquement)
 - **où vérifier** : `funding/carry_optimizer.py:facteur_zscore + carry_allocation_nette.py`
-
-## 🟠 Réel mais insuffisant en l'état (1)
-
-### Arbitrer une dislocation de prix Hyperliquid ↔ Binance — `arbitrage_cross_venue`
-
-- **le chiffre** : l'écart CONVERGE (−2,26 bps à 30 min, 64,9 % des cas) mais MOINS que les 8 bps d'aller-retour : edge net négatif en moyenne. Seuls les écarts extrêmes paient — à 8 bps d'ouverture : 19 entrées, capture moyenne 8,53 bps
-- **mesuré le** : 2026-07-21
-- **pour rouvrir** : la même mesure sur ≥ 5 000 écarts (la cadence est passée à 60 s le 21/07 pour ça) — si la capture tient au-dessus de 8 bps, le seuil descend de 15 à ~8
-- **où vérifier** : `backtesting/arb_backtest.py + runtime/replay/BACKTEST_ARBITRAGE.md`
 
 ## 🟢 Confirmé — en production (1)
 

@@ -165,18 +165,40 @@ def construire_whitelist(root: str | Path = RACINE, *, fills_path: str | Path | 
         if a:
             par_leader[a].append(f)
     verdicts = selectionner_leaders(par_leader)
+    # 🔴 22/07 — LA WHITELIST EXIGE DESORMAIS LE NET, PAS LE BRUT.
+    # Le rapport du 22/07 listait 10 leaders « prouves » (markout brut > 0) et disait « copy
+    # peut suivre CES leaders ». Or suivre = arriver APRES = taker aller-retour = ~9 bps. Sur
+    # ces 10, un SEUL survivait au cout (0x5306, +17,9 brut -> +8,9 net) ; les 9 autres
+    # PERDAIENT de l'argent. Un leader qui « predit » +2 bps mais coute 9 bps a suivre n'est
+    # pas quelqu'un a copier. `gardes` = ceux dont le markout NET (brut − cout de suivi) est
+    # POSITIF. Les « predisent-mais-perdent » restent dans `details`, honnetement, mais
+    # verrouilles. Meme discipline que les portes carry/arbitrage : le brut n'est jamais l'edge.
+    from hl_observer.copy_wallet.leader_markout import (COPY_FOLLOW_COST_BPS,
+                                                        markout_net_de_copie_bps)
+
+    def _net(v):
+        return markout_net_de_copie_bps(v.markout_moyen_bps)
+
     gardes = [{"adresse": v.adresse, "markout_moyen_bps": v.markout_moyen_bps,
-               "n_evenements": v.n_evenements} for v in verdicts if v.predit]
+               "markout_net_bps": _net(v), "n_evenements": v.n_evenements}
+              for v in verdicts if v.predit and (_net(v) or -9e9) > 0]
+    predisent = sum(1 for v in verdicts if v.predit)
     return {"genere_ts": time.time(), "gardes": gardes,
+            "cout_de_suivi_bps": COPY_FOLLOW_COST_BPS,
+            "predisent_brut": predisent,          # combien passent le brut (avant cout)
+            "survivent_net": len(gardes),         # combien passent le NET (apres cout de suivi)
             # 21/07 : la PROGRESSION vers la preuve, ecrite dans le fichier (pas seulement a
             # l'ecran) — « 0 garde » sans detail ressemble a une panne ; avec le detail, on
             # voit le copy revenir : qui est evalue, avec combien de fills, ce qui manque.
             "details": [{"adresse": v.adresse, "n_events": v.n_evenements,
-                         "markout_moyen_bps": v.markout_moyen_bps, "motif": v.motif,
-                         "predit": v.predit} for v in verdicts],
+                         "markout_moyen_bps": v.markout_moyen_bps,
+                         "markout_net_bps": _net(v),
+                         "survit_au_cout": bool((_net(v) or -9e9) > 0),
+                         "motif": v.motif, "predit": v.predit} for v in verdicts],
             "rejetes": sum(1 for v in verdicts if not v.predit),
-            "regle": "markout forward > seuil sur assez d'events (C12) ; liste vide = copy "
-                     "verrouille (deny-by-default) ; les portes actuelles restent AU-DESSUS",
+            "regle": "markout NET (brut − %.0f bps de cout de suivi taker A/R) > 0 sur assez "
+                     "d'events ; predire ne suffit pas, il faut battre le cout de copie ; "
+                     "liste vide = copy verrouille (deny-by-default)" % COPY_FOLLOW_COST_BPS,
             "real_execution": False}
 
 

@@ -66,6 +66,25 @@ CAUSES_CONNUES: dict[str, dict[str, Any]] = {
         "commit": "e82dd4a",
         "note": "une 'capture' ne se verrouille plus a perte (A5 x A4 : pnl_realise > 0 "
                 "exige). Une perte ici apres la date = la porte a saute."},
+    # -- ARBITRAGE de dislocation (ajoute le 22/07 : les MKR '-0,04/-0,08 $' etaient marques
+    #    INEXPLIQUEES faute d'entree ici, alors que la LECON EXISTE, loi `arb_ecart_fige`). ----
+    "ARB_AGE_MAX_SANS_CONVERGENCE": {
+        "statut": "ATTENDU",
+        "note": "l'ecart n'a pas converge avant l'age max -> on coupe, on paie le cout (loi "
+                "arb_dislocation_cout_all_in : 16 bps A/R). Cas MKR : ecart FIGE a 71,44 bps "
+                "(sigma 0,0000 sur 208 obs, loi arb_ecart_fige) -> ce qui ne bouge pas n'est "
+                "pas capturable. La porte de vivacite (21/07) refuse desormais ce coin AVANT "
+                "l'ouverture : une perte ARB_AGE_MAX sur un ecart FIGE apres le 21/07 = "
+                "REGRESSION (la porte a saute)."},
+    "ARB_STOP_ECART_AGGRAVE": {
+        "statut": "ATTENDU",
+        "note": "l'ecart s'est ELARGI dans notre dos (>= entree + 25 bps) -> on coupe pour ne "
+                "pas parier une dislocation qui diverge (jambe Binance conceptuelle, risque "
+                "reel). Perte bornee par le stop, voulue."},
+    "ARB_CONVERGENCE_CAPTUREE": {
+        "statut": "ATTENDU",
+        "note": "l'ecart a converge dans notre sens et on a capture au-dessus du cout all-in "
+                "-> PnL positif. C'est le seul cas d'arbitrage qui doit finir en vert."},
 }
 
 VERDICT_EXPLIQUEE = "EXPLIQUEE"

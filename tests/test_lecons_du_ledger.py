@@ -27,6 +27,21 @@ def _ledger(root: Path, lignes: list[dict]) -> None:
     p.write_text("\n".join(json.dumps(l) for l in lignes) + "\n", encoding="utf-8")
 
 
+def test_les_pertes_d_ARBITRAGE_sont_EXPLIQUEES_pas_inexpliquees():
+    """🔴 22/07 — le rapport marquait les MKR '-0,04/-0,08 $' comme INEXPLIQUÉES, alors que la
+    leçon EXISTE (loi arb_ecart_fige : écart figé, sigma 0). Le motif manquait juste au
+    registre. « Aucune perte sans explication » : les trois motifs d'arbitrage y sont."""
+    for motif in ("ARB_AGE_MAX_SANS_CONVERGENCE", "ARB_STOP_ECART_AGGRAVE",
+                  "ARB_CONVERGENCE_CAPTUREE"):
+        assert motif in CAUSES_CONNUES, "%s doit etre au registre" % motif
+        v, note = classer_perte(motif, 1_784_650_000_000)
+        assert v != VERDICT_INEXPLIQUEE, "%s ne doit plus etre INEXPLIQUE" % motif
+        assert note, "la lecon doit porter une note"
+    # la note du cas MKR cite la loi qui l'explique
+    _, note = classer_perte("ARB_AGE_MAX_SANS_CONVERGENCE", 1_784_650_000_000)
+    assert "fige" in note.lower() or "16 bps" in note, note
+
+
 def test_une_perte_ATTENDUE_est_expliquee_sans_alarme():
     v, note = classer_perte("SORTIE_LIQUIDATION", 2_000_000_000_000)
     assert v == VERDICT_EXPLIQUEE and "risque" in note

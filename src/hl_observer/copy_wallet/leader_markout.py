@@ -21,6 +21,27 @@ from typing import Any, Iterable
 MIN_EVENEMENTS = 20        # < 20 fills : pas de verdict (un chiffre sur 3 fills ment). Cf. doctrine markout.
 MIN_MARKOUT_BPS = 0.0      # au minimum le leader doit PRÉDIRE (markout > 0) ; l'edge net après coûts = noyau
 
+#: 🔴 22/07 — LE COÛT DE SUIVRE UN LEADER. Copier, c'est arriver APRÈS lui : on est TAKER a
+#: l'entree ET a la sortie (on n'a pas le luxe d'attendre un fill maker, le prix bouge deja
+#: dans son sens). Taker HL tier 0 = 4,5 bps -> aller-retour = 9,0 bps. Un leader dont le
+#: markout brut ne depasse pas 9 bps nous fait PERDRE quand on le suit, meme s'il « predit ».
+#: C'est le meme piege que le forfait d'arbitrage : un markout brut n'est pas un edge net.
+#: (La degradation de copie — latence, prix deja parti — s'AJOUTE a ce cout ; elle est mesuree
+#: a part par le noyau. 9 bps est donc un PLANCHER de cout, pas le cout complet.)
+COPY_FOLLOW_COST_BPS = 9.0
+
+
+def markout_net_de_copie_bps(markout_brut_bps: float | None,
+                             cout_suivi_bps: float = COPY_FOLLOW_COST_BPS) -> float | None:
+    """Le markout NET, une fois payé le coût de suivre le leader (taker aller-retour).
+
+    C'est LUI qui dit si copier ce leader gagne de l'argent, pas le brut. `None` reste `None` :
+    on ne fabrique pas un edge pour un leader qu'on n'a pas su mesurer.
+    """
+    if markout_brut_bps is None:
+        return None
+    return round(float(markout_brut_bps) - float(cout_suivi_bps), 4)
+
 
 def markout_fill_bps(side: str, mid_at_fill: float, mid_forward: float) -> float | None:
     """Markout forward d'UN fill, sur le MID. None si prix invalide."""
