@@ -264,3 +264,25 @@ def test_NUIT_1920_une_capture_de_base_PERDANTE_ne_ferme_pas():
     assert pnl_realise(pos_riche, base_bps_courant=0.0) > 0
     assert raison_de_sortie(pos_riche, now_ms=3_600_000, funding_bps_h_courant=0.125,
                             base_bps_courant=0.0) == "BASE_CONVERGEE_PREMIUM_CAPTURE"
+
+
+# ---------------- 21/07 : « la fermeture des carry ne se fait jamais » ----------------
+
+def test_prise_de_profit_base_ferme_quand_le_net_paie_TOUT_meme_sans_convergence():
+    """Le 20/07 a 20h02, +0,31 $ de latent et RIEN pour l'encaisser (A5 exige la convergence
+    vers zero). Desormais : profit net >= 0,05 $ (tous couts payes) -> verrouillage."""
+    from hl_observer.funding.carry_position_lifecycle import (
+        SEUIL_PRISE_PROFIT_USD, SORTIE_PRISE_PROFIT_BASE, pnl_realise, raison_de_sortie)
+    # modele A5 : cout_entree_bps = frais reels (5,5) - base creditee a l'entree (30) = -24,5
+    p = {"coin": "SOL", "notional_usdt": 150.0, "funding_accrued_usdt": 0.02,
+         "cout_entree_bps": -24.5, "base_bps_entree": 30.0, "liquidite_spot_usd": 100000.0,
+         "levier_max": 10.0, "marge_ratio": 0.5, "pire_hausse_entree": 0.10,
+         "entry_ts_ms": 0}
+    # base 30 -> -10 : PAS convergee vers zero (overshoot), mais 40 bps captures sur 150$
+    assert pnl_realise(p, base_bps_courant=-10.0) >= SEUIL_PRISE_PROFIT_USD
+    motif = raison_de_sortie(p, now_ms=3_600_000, funding_bps_h_courant=0.125,
+                             base_bps_courant=-10.0)
+    assert motif in (SORTIE_PRISE_PROFIT_BASE, "BASE_CONVERGEE_PREMIUM_CAPTURE"), motif
+    # profit sous le seuil -> on GARDE (le funding court, pas de churn)
+    assert raison_de_sortie(p, now_ms=3_600_000, funding_bps_h_courant=0.125,
+                            base_bps_courant=28.0) is None

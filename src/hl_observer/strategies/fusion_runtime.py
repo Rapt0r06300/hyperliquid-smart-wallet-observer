@@ -164,6 +164,7 @@ def run_fusion_strategy_runtime(payload: FusionRuntimeInput) -> FusionRuntimeRes
         copy_ratio=payload.copy_ratio,
     )
     conflict, conflict_votes = _select_copy_conflict(payload.leader_votes)
+    _journaliser_fills_leaders(payload.leader_votes)   # #185-source : la whitelist se nourrit ici
     latency = profile_copy_latency(payload.latencies_ms)
     drawdown = evaluate_drawdown_kill_switch(peak_equity=payload.peak_equity, current_equity=payload.current_equity)
 
@@ -673,6 +674,48 @@ def _float(value: object) -> float:
         return float(value)  # type: ignore[arg-type]
     except (TypeError, ValueError):
         return 0.0
+
+
+_FILLS_LEADERS_VUS: set = set()
+
+
+def _journaliser_fills_leaders(leader_votes) -> None:
+    """#185-SOURCE (21/07, Flo : « il faut brancher le copy whitelist ») — le producteur qui
+    MANQUAIT : la whitelist a besoin de fills leaders horodatés (adresse/coin/side/ts) pour
+    mesurer leur markout forward, et RIEN ne les écrivait (leader_wallet vide sur 50 000
+    candidats replay, scanners .out vides). Le moteur les VOIT à chaque cycle : on les
+    journalise ici. Les mids (au fill + forward) viennent des MARKS au moment de la
+    construction — ce fichier ne porte que des faits bruts. Dédup mémoire, append-only,
+    jamais bloquant (une panne d'écriture ne touche pas la décision)."""
+    try:
+        import json as _json
+        from pathlib import Path as _P
+        p = _P("runtime") / "data" / "leader_fills_bruts.jsonl"
+        p.parent.mkdir(parents=True, exist_ok=True)
+        lignes = []
+        for v in leader_votes or ():
+            w = str(getattr(v, "wallet", "") or "")
+            if not w:
+                continue
+            cle = (w, str(getattr(v, "coin", "") or ""), int(getattr(v, "observed_at_ms", 0) or 0))
+            if cle in _FILLS_LEADERS_VUS:
+                continue
+            if len(_FILLS_LEADERS_VUS) > 60_000:      # borne memoire, jamais un bloat
+                _FILLS_LEADERS_VUS.clear()
+            _FILLS_LEADERS_VUS.add(cle)
+            lignes.append(_json.dumps({"adresse": w, "coin": cle[1].upper(),
+                                       "side": str(getattr(v, "side", "") or ""),
+                                       "ts_ms": cle[2], "real_execution": False},
+                                      ensure_ascii=False))
+        if lignes:
+            with p.open("a", encoding="utf-8") as fh:
+                fh.write("\n".join(lignes) + "\n")
+    except Exception as exc:  # noqa: BLE001 — comptee, jamais silencieuse, jamais bloquante
+        try:
+            from hl_observer.ops.pannes_internes import noter_echec as _ne
+            _ne("fusion_runtime:_journaliser_fills_leaders", exc)
+        except Exception:  # noqa: BLE001 — le compteur lui-meme est best-effort
+            pass
 
 
 def _copy_whitelist_ok(conflict, leader_votes, no_trade) -> bool:

@@ -50,6 +50,14 @@ SORTIE_FUNDING = "FUNDING_NON_RENTABLE"
 SORTIE_LIQUIDATION = "LA_JAMBE_PERP_AURAIT_ETE_LIQUIDEE"
 SORTIE_AGE = "AGE_MAX_ATTEINT_REVALIDATION"
 SORTIE_BASE_CONVERGEE = "BASE_CONVERGEE_PREMIUM_CAPTURE"   # A5 : le 2e PnL est capture, on verrouille
+# 21/07 (Flo : « la fermeture des carry ne se fait jamais ») — LA SORTIE MANQUANTE : le 20/07 a
+# 20h02 le livre affichait +0,31 $ de latent de base et RIEN ne pouvait l'encaisser, car A5
+# n'accepte que la base CONVERGEE vers zero. Ici : si le PnL realise (funding accru − TOUS les
+# couts + base capturee) depasse un VRAI profit plancher, on verrouille — peu importe la forme
+# de la trajectoire de base. Seuil ABSOLU en dollars : au-dessus du bruit de mesure, plusieurs
+# jours de funding plancher — une capture qui ne paie pas sa sortie reste interdite (A4).
+SORTIE_PRISE_PROFIT_BASE = "PRISE_PROFIT_BASE_NET_POSITIF"
+SEUIL_PRISE_PROFIT_USD = 0.05
 
 
 def _f(d: dict, k: str, defaut: float = 0.0) -> float:
@@ -152,6 +160,12 @@ def raison_de_sortie(position: dict[str, Any], *, now_ms: int, funding_bps_h_cou
         # propres sorties : liquidation, hemorragie de funding, age).
         if pnl_realise(position, base_bps_courant=float(base_bps_courant)) > 0.0:
             return SORTIE_BASE_CONVERGEE                   # A5 : 2e PnL capture -> on verrouille
+    # 21/07 — PRISE DE PROFIT (voir constante) : profit net >= seuil, TOUS couts payes, quelle
+    # que soit la forme de la base. Le +0,31 $ du 20/07 a 20h02 ne restera plus jamais latent.
+    if (base_bps_courant is not None
+            and pnl_realise(position, base_bps_courant=float(base_bps_courant))
+            >= SEUIL_PRISE_PROFIT_USD):
+        return SORTIE_PRISE_PROFIT_BASE
     if (int(now_ms) - int(position["entry_ts_ms"])) / 3.6e6 >= float(age_max_h):
         return SORTIE_AGE
     return None

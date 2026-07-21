@@ -32,6 +32,51 @@ FILLS_DEFAUT = Path("runtime") / "data" / "leader_fills_forward.jsonl"
 SORTIE = Path("runtime") / "data" / "copy_whitelist.json"
 
 
+BRUTS_DEFAUT = Path("runtime") / "data" / "leader_fills_bruts.jsonl"
+
+
+def construire_fills_forward(root: str | Path = RACINE, *, horizon_min: float = 30.0,
+                             max_bruts: int = 60_000) -> int:
+    """#185-SOURCE (21/07) — fabrique `leader_fills_forward.jsonl` en joignant :
+      * les fills BRUTS du moteur (adresse/coin/side/ts — écrits par fusion_runtime) ;
+      * les MARKS du replay (mid au fill : ≤5 min après le fill ; mid forward : premier mark
+        ≥ ts+horizon, toléré jusqu'à horizon+15 min).
+    Un fill sans mark exploitable est COMPTE PUIS IGNORÉ — jamais un mid inventé.
+    Retourne le nombre de lignes écrites."""
+    racine = Path(root)
+    bruts_p = racine / BRUTS_DEFAUT
+    if not bruts_p.exists():
+        return 0
+    from hl_observer.backtesting.ab_flag_replay import load_jsonl, marks_by_coin
+    from hl_observer.backtesting.recherche_scenario import repertoire_replay_consolide
+    base = repertoire_replay_consolide(racine)
+    marks = marks_by_coin(load_jsonl(str(base / "marks.jsonl")))
+    tries: dict[str, list] = {c: sorted((float(t), float(m)) for (t, m) in pts)
+                              for c, pts in marks.items()}
+    lignes = []
+    bruts = [l for l in bruts_p.read_text(encoding="utf-8").splitlines() if l.strip()]
+    for l in bruts[-max_bruts:]:
+        try:
+            f = json.loads(l)
+            coin, ts = str(f.get("coin") or "").upper(), float(f.get("ts_ms") or 0) / 1000.0
+        except (ValueError, TypeError):
+            continue
+        pts = tries.get(coin)
+        if not pts or not f.get("adresse") or ts <= 0:
+            continue
+        mid_fill = next((m for (t, m) in pts if ts <= t <= ts + 300.0), None)
+        h = horizon_min * 60.0
+        mid_fwd = next((m for (t, m) in pts if ts + h <= t <= ts + h + 900.0), None)
+        if mid_fill and mid_fwd:
+            lignes.append(json.dumps({"adresse": f["adresse"], "side": f.get("side"),
+                                      "mid_at_fill": mid_fill, "mid_forward": mid_fwd},
+                                     ensure_ascii=False))
+    sortie = racine / FILLS_DEFAUT
+    sortie.parent.mkdir(parents=True, exist_ok=True)
+    sortie.write_text("\n".join(lignes) + ("\n" if lignes else ""), encoding="utf-8")
+    return len(lignes)
+
+
 def construire_whitelist(root: str | Path = RACINE, *, fills_path: str | Path | None = None,
                          fills: list | None = None) -> dict:
     """{gardes: [{adresse, markout_moyen_bps, n}], rejetes: n, regle}. Vide si pas de donnees
@@ -69,6 +114,13 @@ def construire_whitelist(root: str | Path = RACINE, *, fills_path: str | Path | 
 
 
 def ecrire(root: str | Path = RACINE, **kw) -> Path:
+    # #185-source : reconstruire les fills forward depuis les bruts du moteur AVANT la
+    # selection — la chaine complete tourne a chaque passe du collecteur (6 h).
+    try:
+        n = construire_fills_forward(root)
+        print("fills forward reconstruits : %d ligne(s) (bruts moteur x marks replay)" % n)
+    except Exception as exc:  # noqa: BLE001 — la selection tombera sur liste vide, honnete
+        print("fills forward indisponibles : %s" % exc)
     r = construire_whitelist(root, **kw)
     chemin = Path(root) / SORTIE
     chemin.parent.mkdir(parents=True, exist_ok=True)

@@ -103,6 +103,10 @@ def boucle_objectif(
         essais.append(essai)
         deja.add(cle)
         n_ce_run += 1
+        # 21/07 (« le replay ne fonctionne pas ») : la recherche moulinait des MINUTES par
+        # config en silence total -> ca ressemble a un gel. Une ligne par essai : le silence
+        # qui ressemble a une panne est la maladie de ce projet, jamais on n'y retombe.
+        print("  essai %d : %s -> %s" % (len(essais), config, essai.get("verdict")), flush=True)
         if chemin:
             _ecrire_etat(chemin, {"essais": essais})   # APRES CHAQUE essai : un Ctrl-C ne perd rien
         if promu:

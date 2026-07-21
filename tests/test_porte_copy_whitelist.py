@@ -97,3 +97,49 @@ def test_integration_le_helper_extrait_les_votants_gagnants_et_motive_le_refus(t
     _ecrire(tmp_path, [{"adresse": A2}])   # le votant gagnant n'y est plus
     assert _copy_whitelist_ok(conflict, votes, no_trade) is False
     assert no_trade == [MOTIF_HORS_LISTE], "le motif precis doit partir dans no_trade"
+
+
+# ---------------- 21/07 : la SOURCE de la whitelist enfin branchee ----------------
+
+def test_le_moteur_journalise_les_fills_leaders_avec_dedup(tmp_path, monkeypatch):
+    """leader_wallet etait VIDE sur 50 000 candidats replay : RIEN ne produisait les fills.
+    Le moteur les voit a chaque cycle -> il les journalise (dedup, append, jamais bloquant)."""
+    import json as _j
+    from hl_observer.copy_wallet.copy_conflict_resolver import LeaderVote
+    from hl_observer.strategies import fusion_runtime as fr
+    monkeypatch.chdir(tmp_path)
+    fr._FILLS_LEADERS_VUS.clear()
+    votes = (LeaderVote(wallet="0xAA", coin="SOL", side="LONG", observed_at_ms=1000),
+             LeaderVote(wallet="", coin="SOL", side="LONG", observed_at_ms=1000),   # sans wallet: ignore
+             LeaderVote(wallet="0xAA", coin="SOL", side="LONG", observed_at_ms=1000))  # doublon
+    fr._journaliser_fills_leaders(votes)
+    fr._journaliser_fills_leaders(votes)                # rejoue : le dedup tient entre cycles
+    lignes = (tmp_path / "runtime" / "data" / "leader_fills_bruts.jsonl").read_text(
+        encoding="utf-8").strip().splitlines()
+    assert len(lignes) == 1
+    assert _j.loads(lignes[0]) == {"adresse": "0xAA", "coin": "SOL", "side": "LONG",
+                                   "ts_ms": 1000, "real_execution": False}
+
+
+def test_construire_fills_forward_joint_bruts_et_marks_sans_jamais_inventer(tmp_path):
+    """mid au fill (<=5 min apres) + mid forward (a l'horizon, tolere 15 min) : un fill sans
+    mark exploitable est IGNORE — jamais un prix invente."""
+    import importlib.util, json as _j
+    from pathlib import Path as _P
+    spec = importlib.util.spec_from_file_location(
+        "ecw", _P(__file__).resolve().parents[1] / "tools" / "ecrire_copy_whitelist.py")
+    m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
+    d = tmp_path / "runtime" / "data"; d.mkdir(parents=True)
+    (d / "leader_fills_bruts.jsonl").write_text("\n".join([
+        _j.dumps({"adresse": "0xAA", "coin": "SOL", "side": "LONG", "ts_ms": 1_000_000}),
+        _j.dumps({"adresse": "0xBB", "coin": "SOL", "side": "SHORT", "ts_ms": 9_999_000_000}),
+    ]) + "\n", encoding="utf-8")
+    r = tmp_path / "runtime" / "replay" / "_merged"; r.mkdir(parents=True)
+    (r / "candidates.jsonl").write_text("{}\n", encoding="utf-8")
+    (r / "marks.jsonl").write_text("\n".join(
+        _j.dumps({"coin": "SOL", "ts": 1000 + k, "mid": 100.0 + k}) for k in (10, 1800, 1850))
+        + "\n", encoding="utf-8")
+    n = m.construire_fills_forward(tmp_path, horizon_min=30.0)
+    assert n == 1, "0xAA a fill+forward ; 0xBB (aucun mark) est ignore, jamais invente"
+    row = _j.loads((d / "leader_fills_forward.jsonl").read_text(encoding="utf-8"))
+    assert row["adresse"] == "0xAA" and row["mid_at_fill"] == 110.0 and row["mid_forward"] == 1900.0
