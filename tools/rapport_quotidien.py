@@ -349,6 +349,8 @@ def _sec_a_faire(root: Path, now_ms: int) -> list[str]:
         pass
     try:  # replay : assez de données pour la recherche de scénario ?
         base = root / "runtime" / "replay"
+        if (base / "_merged" / "candidates.jsonl").exists():
+            base = base / "_merged"     # 21/07 : les consolides vivent dans _merged/
         n_cand = sum(1 for _ in (base / "candidates.jsonl").open(encoding="utf-8")) \
             if (base / "candidates.jsonl").exists() else 0
         if n_cand >= 2000:

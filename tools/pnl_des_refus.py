@@ -31,7 +31,8 @@ def pnl_des_refus(root: str | Path = RACINE, *, horizon_min: float = DEFAULT_HOR
                   cost_bps: float = DEFAULT_COST_BPS,
                   candidats: list | None = None, marks_rows: list | None = None) -> dict:
     """{par_motif: {motif: {n, mesures, pnl_simule_usd}}, total_usd, non_mesurables}."""
-    base = Path(root) / "runtime" / "replay"
+    from hl_observer.backtesting.recherche_scenario import repertoire_replay_consolide
+    base = repertoire_replay_consolide(root)   # 21/07 : les consolides vivent dans _merged/
     cands = candidats if candidats is not None else load_jsonl(str(base / "candidates.jsonl"))
     mrows = marks_rows if marks_rows is not None else load_jsonl(str(base / "marks.jsonl"))
     marks = marks_by_coin(mrows)

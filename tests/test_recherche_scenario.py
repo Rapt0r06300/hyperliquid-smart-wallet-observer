@@ -114,3 +114,14 @@ def test_le_PIC_ISOLE_est_rejete_par_le_plateau(tmp_path):
 def test_zero_candidat_est_un_INSUFFISANT_honnete(tmp_path):
     r = chercher(tmp_path, donnees=DonneesReplay(), evaluer_ab=_fake_ab({}))
     assert r["statut"] == "INSUFFISANT" and "W2" in r["motif"]
+
+
+def test_le_resolveur_prefere_les_consolides_de_MERGED(tmp_path):
+    """21/07 : le consolidateur ecrit dans _merged/ (pour ne pas se re-lire) mais la recherche
+    lisait la RACINE -> INSUFFISANT devant 331 366 candidats. Un resolveur, trois lecteurs."""
+    from hl_observer.backtesting.recherche_scenario import repertoire_replay_consolide
+    base = tmp_path / "runtime" / "replay"
+    (base / "_merged").mkdir(parents=True)
+    assert repertoire_replay_consolide(tmp_path) == base          # pas de consolide -> racine
+    (base / "_merged" / "candidates.jsonl").write_text("{}\n", encoding="utf-8")
+    assert repertoire_replay_consolide(tmp_path) == base / "_merged"

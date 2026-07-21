@@ -47,6 +47,17 @@ EMBARGO_FACTEUR = 1.0             # embargo = 1 horizon de part et d'autre de la
 ETAT_RECHERCHE_RELPATH = Path("runtime") / "replay" / "recherche_scenario_etat.json"
 
 
+def repertoire_replay_consolide(root: str | Path) -> Path:
+    """Où vivent les consolidés. 🔴 21/07 : le consolidateur (`merge_replay`) écrit dans
+    `_merged/` (dossier DIFFÉRENT pour ne pas se re-lire) — mais la recherche lisait la
+    RACINE de runtime/replay → INSUFFISANT devant 331 366 candidats consolidés. Un seul
+    résolveur, partagé par la recherche, le PnL des refus et le rapport (§10)."""
+    base = Path(root) / "runtime" / "replay"
+    if (base / "_merged" / "candidates.jsonl").exists():
+        return base / "_merged"
+    return base
+
+
 # ================================================================ 1. données chargées UNE fois
 
 @dataclass
@@ -57,7 +68,7 @@ class DonneesReplay:
 
     @classmethod
     def charger(cls, root: str | Path) -> "DonneesReplay":
-        base = Path(root) / "runtime" / "replay"
+        base = repertoire_replay_consolide(root)
         return cls(candidats=load_jsonl(str(base / "candidates.jsonl")),
                    marks=load_jsonl(str(base / "marks.jsonl")))
 
