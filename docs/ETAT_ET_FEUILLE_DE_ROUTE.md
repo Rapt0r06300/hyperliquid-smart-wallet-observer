@@ -2,7 +2,7 @@
 
 > **Document maître.** Source de vérité des règles = `CLAUDE.md` (racine) + `AGENTS.md`.
 > Ce fichier résume **où on en est**, **comment on travaille**, et **ce qui reste à faire**.
-> Dernière mise à jour : **2026-07-08**.
+> Dernière mise à jour : **2026-07-21** (§3bis : allocation par rendement net).
 
 ---
 
@@ -39,6 +39,56 @@ Acquis récents (tous committés) :
 - **Enregistrement replay** : `runtime/replay/candidates.jsonl` + `marks.jsonl` (avec **coin** —
   bug coin-vide corrigé, sans quoi le replay était inutilisable).
 - **Anti-bloat DB** actif (`HYPERSMART_DISABLE_RAW_STORAGE=1`) — la cause du crash du 1er run 48h.
+
+## 3bis. Le capital allait aux mauvais coins (2026-07-21)
+
+**Ce qu'on a mesuré, pas ce qu'on croyait.** Sur les 11 positions vivantes :
+
+| coin | rendement net | marge engagée |
+|---|---:|---:|
+| BTC | **2,221 bps/j** (le meilleur) | **25 $** (le moins financé) |
+| STABLE | 1,326 bps/j (parmi les pires) | **126 $** (le plus financé) |
+
+Corrélation entre la marge engagée et le rendement net : **−0,596**. On finançait le plus les
+coins les moins rentables — depuis toujours, sans qu'aucun écran ne le trahisse.
+
+**La cause, nommée.** `marge_par_position` divise le capital en parts *égales* ; le seul
+modulateur (`facteur_taille`) repose sur le **z-score du funding**. Or, au plancher
+protocolaire (0,125 bps/h), *tous* les coins sont au même taux **par construction de la venue**
+(`F = premium + clamp(0,125 − premium, ±5)`). Un z-score y mesure du **bruit** : un coin dont
+l'historique traîne sous le plancher affiche un z élevé sans qu'il y ait rien à capter.
+
+**Ce qui a changé (4 commits, 68 tests neufs) :**
+
+1. `carry_optimizer.facteur_zscore(z, funding)` — **garde du plancher** : au plancher ou en
+   dessous, facteur neutre. Au-dessus, il retrouve tout son rôle. Branché dans le feeder.
+2. `funding/carry_allocation_nette.py` — le capital déployable est réparti
+   **∝ `gain_net_24h_bps` ³**, un nombre que le moteur calculait déjà et jetait. Mêmes
+   garde-fous que la marge dynamique (réserve 20 %, plafond 40 %/coin, plancher 25 $).
+   Exposant choisi sur mesure : net¹ +5,4 % · net² +10,0 % · **net³ +14,9 %** · net⁵ +20,5 %
+   (colle au plafond de concentration). **Sur les positions réelles : +23,9 %.**
+3. `funding/carry_renfort.py` — **RENFORT** : combler l'écart marge → cible en *ajoutant* du
+   notional à une position vivante (on ne paie que l'entrée de l'ajout, **jamais de sortie**).
+   Six règles : viable ce tick · l'ajout doit amortir son propre coût avant la fin de vie ·
+   moyennes pondérées par le notional · écart minimum 40 % · un renfort/position/24 h ·
+   **même porte de risque qu'une ouverture**.
+4. Visibilité — badge « marge cible » et compteur de renforts sur le dashboard, section
+   **10. Où va le capital** dans le rapport quotidien.
+
+**Aucun levier ne bouge : aucune distance de liquidation ne bouge.** On déplace du capital, on
+n'achète pas du risque.
+
+**Deux bugs attrapés en chemin** (`tools/ecrire_carry_spot_inputs.py`) :
+
+- le motif de refus du scan était une **phrase écrite en dur** (« liquidée même à 2x ») datant
+  de l'époque où le scan démarrait à 2x ; il descend à 1,0x depuis. ETHFI — meilleur funding du
+  board — était refusé chaque passe sans cause lisible. Le motif est maintenant réel et
+  détaillé (verdict après enquête : **le refus d'ETHFI est correct** — la venue le plafonne à
+  3x, donc marge de maintenance 16,7 %, donc même un short 1x saute sur +76 %. Ce qui était
+  cassé, c'est notre capacité à le savoir) ;
+- **crash latent** : `levier_max <= 0` renvoyé par l'API levait une `ValueError` non attrapée →
+  toute la passe du feeder tombait → plus de shortlist → `INPUTS_PERIMES` → bot affamé. C'est
+  le mode de panne exact du 19/07. Un coin malformé est désormais **écarté**, pas fatal.
 
 ## 4. Façon de procéder (méthode)
 
