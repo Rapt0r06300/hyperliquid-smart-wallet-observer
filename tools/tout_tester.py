@@ -30,7 +30,7 @@ RACINE = Path(__file__).resolve().parents[1]
 RECAP = RACINE / "RECAP-COMPLET.md"
 
 #: budgets par étape (s) — un test qui pend ne doit jamais manger la soirée
-BUDGETS = {"securite": 300, "tests": 3600, "cablage": 900, "donnees": 900,
+BUDGETS = {"securite": 300, "tests": 3600, "invariants": 900, "cablage": 900, "donnees": 900,
            "recherche": 5400, "sante": 120}
 
 
@@ -301,6 +301,13 @@ def main(argv: list[str] | None = None) -> int:
                     BUDGETS["tests"])
         r["resume"] = _resume_pytest(r["sortie"])
         etapes.append(r)
+        # INVARIANTS ECONOMIQUES (property-based, ~700 cas generes) : les LOIS qui protegent
+        # le PnL (pas de gain sorti de rien, couts toujours payes, portes infranchissables).
+        ri = _courir("invariants",
+                     [py, "-m", "pytest", "-q", "tests/test_invariants_economiques.py"],
+                     BUDGETS["cablage"])
+        ri["resume"] = _resume_pytest(ri["sortie"])
+        etapes.append(ri)
         etapes.append(_courir("cablage", [py, "tools/audit_cablage_cli.py"],
                               BUDGETS["cablage"]))
         etapes.append(_courir("donnees", [py, "tools/qualite_donnees_replay.py", "."],

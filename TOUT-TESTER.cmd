@@ -8,10 +8,12 @@ REM
 REM  LES 6 ETAPES, DANS L'ORDRE :
 REM    1. SECURITE        0 ordre reel possible (la barriere non negociable)
 REM    2. TESTS           la suite pytest COMPLETE (~800 fichiers) = la verite du code
-REM    3. CABLAGE         modules cables / testes-seulement / orphelins
-REM    4. DONNEES         qualite du replay (etiquetage, couverture, doublons, prix)
-REM    5. RECHERCHE       pepites par module (carry, copy, arbitrage, cross-venue)
-REM    6. SANTE LIVE      moteur, collecteurs, positions, mesures en cours
+REM    3. INVARIANTS      les LOIS du PnL (property-based, ~700 cas generes) :
+REM                       aucun gain sorti de rien, couts toujours payes, portes tenues
+REM    4. CABLAGE         modules cables / testes-seulement / orphelins
+REM    5. DONNEES         qualite du replay (etiquetage, couverture, doublons, prix)
+REM    6. RECHERCHE       pepites par module (carry, copy, arbitrage, cross-venue)
+REM    7. SANTE LIVE      moteur, collecteurs, positions, mesures en cours
 REM
 REM  BON A SAVOIR :
 REM    - une etape qui plante n'arrete PAS les suivantes (son verdict = ERREUR) ;
