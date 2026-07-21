@@ -37,14 +37,17 @@ set "PYTHONPATH=%~dp0src;%PYTHONPATH%"
 set "PYTHONIOENCODING=utf-8"
 
 echo.
-echo  [1/3] Rassemblement de toutes les donnees (candidats + prix, archives incluses)...
+echo  [1/4] Rassemblement de toutes les donnees (candidats + prix, archives incluses)...
 python -m hl_observer.runtime.replay_recorder --base runtime\replay
 echo.
-echo  [2/3] Recherche module par module (Ctrl-C = pause sans perte, reprise auto)...
+echo  [2/4] Audit QUALITE des donnees (un replay ne vaut jamais mieux que ses donnees)...
+python tools\qualite_donnees_replay.py .
+echo.
+echo  [3/4] Recherche module par module (Ctrl-C = pause sans perte, reprise auto)...
 echo.
 python -c "from hl_observer.backtesting.recherche_scenario import chercher_toutes; chercher_toutes('.')"
 echo.
-echo  [3/3] Verification des rapports :
+echo  [4/4] Verification des rapports :
 if not exist "runtime\replay\RESULTATS_RECHERCHE.md" (
   echo   !! AUCUN RAPPORT : un module a plante avant la fin. Envoie CETTE fenetre a Claude.
 ) else (
@@ -52,5 +55,6 @@ if not exist "runtime\replay\RESULTATS_RECHERCHE.md" (
 )
 echo         - runtime\replay\RESULTATS_RECHERCHE.md  ^(a envoyer a Claude^)
 echo         - runtime\replay\PEPITES.md              ^(resume court^)
+echo         - runtime\replay\QUALITE_DONNEES.md      ^(sante des donnees^)
 echo.
 pause

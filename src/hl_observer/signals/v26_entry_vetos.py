@@ -174,7 +174,13 @@ def _record_candidate(snapshot: dict, env: dict | None) -> None:
     try:
         e = env if env is not None else os.environ
         base = str(e.get(RECORD_PATH_ENV, "") or "runtime/replay")
-        row = {"recorded_at": time.time(), **snapshot}
+        # 🔴 QUALITÉ DES DONNÉES (21/07, audit de Flo) : 99,3 % des 400 000 candidats
+        # arrivaient SANS `strategie` -> tous rangés dans le seau « copy » par défaut, et le
+        # module arbitrage se retrouvait avec « aucun candidat ». Un seau qu'on remplit à
+        # l'aveugle finit par contaminer une mesure. ICI, c'est le veto d'entrée du COPY
+        # (leader/consensus/liquidité) : l'étiquette est connue, on l'écrit. Un snapshot qui
+        # porterait déjà `strategie` la garde (jamais d'écrasement).
+        row = {"recorded_at": time.time(), "strategie": "copy", **snapshot}
         # ANTI-BLOAT: append CAPÉ (le run 48h a crashé sur du stockage non borné).
         from hl_observer.runtime.replay_recorder import (
             CANDIDATES_MAX_BYTES, CANDIDATES_MAX_LINES, append_replay_lines)
