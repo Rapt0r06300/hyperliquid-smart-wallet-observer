@@ -139,4 +139,19 @@ def test_une_esperance_positive_est_reconnue() -> None:
 def test_aucune_perte_ne_fait_pas_diviser_par_zero() -> None:
     e = esperance([1.0] * 25)
     assert e.profit_factor is None          # pas d'infini fabrique
-    assert e.esperanc
+    assert e.esperance == pytest.approx(1.0)
+
+
+# ════════════════════════════════════════════════════════════════════════════════════════════
+# #579 — LA MOYENNE CACHE LE DESASTRE
+# ════════════════════════════════════════════════════════════════════════════════════════════
+def test_on_juge_sur_le_PIRE_mois_pas_sur_la_moyenne() -> None:
+    """C'est ce que T2b a fait correctement pour le carry HYPE. On generalise."""
+    mois = {"jan": 50.0, "fev": 60.0, "mar": -80.0, "avr": 40.0}
+    assert sum(mois.values()) / len(mois) > 0        # la MOYENNE est positive...
+    p = pire_periode(mois)
+    assert p == ("mar", -80.0)                        # ... et elle cache un desastre
+
+
+def test_aucune_periode_rend_None_pas_un_zero() -> None:
+    assert pire_periode({}) is None

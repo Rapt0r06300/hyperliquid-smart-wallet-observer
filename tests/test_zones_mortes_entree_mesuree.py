@@ -205,4 +205,32 @@ def test_identifier_la_CONTREPARTIE_de_notre_fill_ne_peut_PLUS_etre_refuse():
     )
 
 
-# ================================
+# ============================================================ 4. LE DENY-BY-DEFAULT TIENT TOUJOURS
+
+
+def test_sans_entree_declaree_le_registre_REFUSE_toujours():
+    """⚠️ Le correctif ne doit pas devenir une PORTE DE SORTIE.
+
+    Si personne ne declare d'entree, on retombe sur le comportement historique : mot-cle touche =
+    refus. On ne relache RIEN par omission. Il faut un acte POSITIF (declarer une entree que la
+    mesure n'a jamais consommee) pour transformer un refus en question.
+    """
+    ex = registre_officiel().examiner("relancer un scanner de wallets pour copier les meilleurs")
+    assert ex.refuse
+    assert "COPY_TRADING_NO_EDGE" in ex.motif
+
+
+def test_declarer_une_entree_BIDON_ne_blanchit_pas_l_idee_mais_la_MARQUE():
+    """Et si quelqu'un declare une entree fantaisiste pour contourner le registre ?
+
+    Il n'obtient PAS un feu vert : il obtient A_EXAMINER, avec le nom des zones touchees et
+    l'entree qu'elles ont reellement mesuree. La question devient VISIBLE au lieu d'etre
+    silencieuse. *Un registre honnete ne cache ni ses refus, ni ses doutes.*
+    """
+    ex = registre_officiel().examiner(
+        "copier les fills des leaders", entree="entree_magique_inventee",
+    )
+    assert ex.statut == "A_EXAMINER"
+    assert "COPY_TRADING_NO_EDGE" in ex.motif
+    assert "fill_public_leader" in ex.motif      # la vraie entree mesuree est CITEE
+    assert not ex.refuse

@@ -152,8 +152,17 @@ CONCEPTS: dict[str, tuple[str, ...]] = {
 # Concepts DEJA fermes par une mesure : les signaler, mais NE PAS les compter comme une trouvaille.
 CONCEPTS_EN_ZONE_MORTE = {"copy_trading"}
 
-RAW = "https://raw.githubusercontent.com/%s/%s/README.md"
-BRANCHES = ("main", "master")
+# 🔴 LES BRANCHES ET LES NOMS QU'ON RATAIT.
+#    L'ancienne version ne tentait que `README.md` sur `main`/`master`.
+#    -> 235 repos perdus EN SILENCE, dont **hftbacktest (4 270 etoiles, notre cible n°1)**,
+#       backtrader (22 413), zipline (19 967)... et 19 repos a plus de 1 000 etoiles.
+BRANCHES = ("main", "master", "develop", "dev", "trunk")
+NOMS_README = (
+    "README.md", "readme.md", "Readme.md", "README.MD",
+    "README.rst", "readme.rst",
+    "README.markdown", "README.txt", "README",
+    "docs/README.md", ".github/README.md",
+)
 PAUSE = 0.35            # raw.githubusercontent est bien plus permissif que l'API search
 
 
@@ -182,25 +191,85 @@ class Trouvaille:
 
 
 def _readme(nom: str) -> str:
-    """Recupere le README brut. Essaie main puis master. Rend '' si introuvable."""
+    r"""Recupere le README. **Par l'API, qui resout nom + extension + branche.**
+
+    ═══════════════════════════════════════════════════════════════════════════════════════════
+    🔴🔴🔴 LE BUG LE PLUS CHER DU MOISSONNEUR — et il a dure 2 jours de plus.
+    ═══════════════════════════════════════════════════════════════════════════════════════════
+
+    L'ancienne version ne tentait QUE :
+
+        https://raw.githubusercontent.com/{repo}/{main|master}/**README.md**
+
+    Elle ratait donc, **EN SILENCE** :
+        `README.rst` · `README.markdown` · `readme.md` (minuscules) · `docs/README.md`
+        · les repos dont la branche par defaut est `dev`, `develop`, `trunk`...
+
+    ***235 repos perdus. Dont :***
+        🎯 **nkaz001/hftbacktest** — 4 270 etoiles, **NOTRE CIBLE N°1**
+           (c'est le repo dont 20 min de lecture ont donne **5 bugs** dans notre simu)
+        · backtrader (22 413 etoiles) · zipline (19 967) · alphalens · catalyst
+        · une awesome-list entiere · **19 repos a plus de 1 000 etoiles**
+
+    Et l'erreur etait **avalee** : `return ""` -> comptee comme « README vide », pas comme
+    « JE N'AI PAS SU LE LIRE ».
+
+        *Une capacite presente, un chemin non emprunte, personne qui se plaint.*
+        **7e occurrence du motif -- cette fois dans MON propre outil.**
+
+    ═══════════════════════════════════════════════════════════════════════════════════════════
+    LA REPARATION
+    ═══════════════════════════════════════════════════════════════════════════════════════════
+
+    `GET /repos/{owner}/{repo}/readme` **resout tout seul** le nom, l'extension et la branche
+    par defaut. C'est **exactement** l'endpoint prevu pour ca -- il existait depuis toujours.
+
+    Repli sur `raw.githubusercontent` seulement si l'API echoue. Et **si les deux echouent,
+    on le DIT** (l'appelant compte `README_INTROUVABLE`), on ne fait pas semblant.
+    """
+    # 1) L'API — elle resout nom + extension + branche. **La bonne porte, enfin.**
+    entetes = {
+        "User-Agent": "hypersmart-research",
+        "Accept": "application/vnd.github.raw+json",   # le contenu BRUT, pas du base64
+        "X-GitHub-Api-Version": "2022-11-28",
+    }
+    jeton = os.environ.get("GITHUB_TOKEN", "").strip()
+    if jeton:
+        entetes["Authorization"] = "Bearer %s" % jeton
+
+    try:
+        req = urllib.request.Request(
+            "https://api.github.com/repos/%s/readme" % nom, headers=entetes)
+        with urllib.request.urlopen(req, timeout=20.0) as r:
+            txt = r.read().decode("utf-8", errors="replace")
+            if txt.strip():
+                return txt
+    except urllib.error.HTTPError as exc:
+        if exc.code in (403, 429):
+            time.sleep(10.0)          # quota : on souffle, puis on tente le repli
+    except Exception:  # noqa: BLE001
+        pass
+
+    # 2) LE REPLI — plusieurs noms x plusieurs branches. *On ne suppose plus une seule forme.*
     for br in BRANCHES:
-        try:
-            req = urllib.request.Request(
-                RAW % (nom, br),
-                headers={"User-Agent": "hypersmart-research", "Accept": "text/plain"},
-            )
-            with urllib.request.urlopen(req, timeout=15.0) as r:
-                return r.read().decode("utf-8", errors="replace")
-        except urllib.error.HTTPError as exc:
-            if exc.code == 404:
-                continue          # mauvaise branche : on essaie l'autre
-            if exc.code in (403, 429):
-                time.sleep(10.0)
+        for fichier in NOMS_README:
+            try:
+                req = urllib.request.Request(
+                    "https://raw.githubusercontent.com/%s/%s/%s" % (nom, br, fichier),
+                    headers={"User-Agent": "hypersmart-research", "Accept": "text/plain"},
+                )
+                with urllib.request.urlopen(req, timeout=15.0) as r:
+                    txt = r.read().decode("utf-8", errors="replace")
+                    if txt.strip():
+                        return txt
+            except urllib.error.HTTPError as exc:
+                if exc.code in (403, 429):
+                    time.sleep(5.0)
+                continue              # 404 : mauvaise combinaison, on continue
+            except Exception:  # noqa: BLE001
                 continue
-            return ""
-        except Exception:  # noqa: BLE001
-            return ""
-    return ""
+
+    return ""                         # -> l'appelant marque README_INTROUVABLE. **On l'assume.**
 
 
 def _analyser(nom: str, texte: str) -> tuple[list[str], dict[str, str]]:

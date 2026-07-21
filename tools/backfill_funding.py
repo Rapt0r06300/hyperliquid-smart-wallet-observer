@@ -33,7 +33,19 @@ from hl_observer.collection.funding_backfill import (  # noqa: E402
 )
 from hl_observer.hyperliquid.rest_info_client import HyperliquidInfoClient  # noqa: E402
 
-COINS = ["BTC", "ETH", "SOL", "BNB", "AVAX", "ARB", "DOGE", "LTC", "SUI", "OP", "HYPE", "NEAR"]
+# 🔴 2026-07-14 — **LA VRAIE LISTE DES CARRYABLES**, mesurée via `spotMeta` (pas supposée).
+#
+# Le carry EXIGE une jambe SPOT. Sur **232 perps**, seuls **8** ont AUSSI un marché spot HL.
+# Les 224 autres sont NON-CARRYABLES : y « faire du carry » serait un **short perp à nu**,
+# c'est-à-dire un pari directionnel déguisé.
+#
+# *J'avais supposé {HYPE, PURR}. Il y en a **8**. On demande à l'API, on ne devine pas.*
+CARRYABLES = ["HYPE", "PURR", "BERA", "TRUMP", "PUMP", "MON", "AZTEC", "STABLE"]
+
+# Les gros perps : gardés pour le contexte (funding, mesures) — mais **PAS carryables**.
+CONTEXTE = ["BTC", "ETH", "SOL", "BNB", "AVAX", "ARB", "DOGE", "LTC", "SUI", "OP", "NEAR"]
+
+COINS = CARRYABLES + CONTEXTE
 SORTIE = RACINE / "runtime" / "history" / "funding.jsonl"
 
 

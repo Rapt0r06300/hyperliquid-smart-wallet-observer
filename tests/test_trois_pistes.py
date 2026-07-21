@@ -214,4 +214,6 @@ def test_un_markout_POSITIF_est_reconnu_MAIS_avec_ses_reserves() -> None:
 
 
 def test_moins_de_20_evenements_ne_donne_AUCUN_verdict() -> None:
-    
+    v = juger("BTC", {30.0: [50.0] * 19})
+    assert not v.viable and MOTIF_PAS_ASSEZ_D_EVENEMENTS in v.motif
+    assert MIN_EVENEMENTS == 20

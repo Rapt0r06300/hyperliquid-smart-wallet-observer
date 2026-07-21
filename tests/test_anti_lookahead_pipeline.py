@@ -56,4 +56,6 @@ def test_un_signal_qui_lit_le_futur_est_attrape_par_l_AST() -> None:
     )
     assert v.ast_verifie is True
     assert v.ast_propre is False
-    asse
+    assert v.n_suspicions >= 1
+    assert v.accepte is False
+    assert MOTIF_AST_SALE in v.motifs
