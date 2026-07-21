@@ -56,3 +56,59 @@ def test_le_cmd_unique_pointe_sur_l_orchestrateur():
     c = open(RACINE / "TOUT-TESTER.cmd", encoding="utf-8", errors="replace").read()
     assert "tools\\tout_tester.py" in c and "RECAP-COMPLET.md" in c
     assert "--rapide" in c, "l'option courte doit etre documentee dans l'en-tete"
+
+
+# ---------------- 21/07 : le recap doit SERVIR le PnL, pas lister des etapes ----------------
+
+def test_l_attribution_dit_OU_va_l_argent_par_strategie_et_par_motif(tmp_path):
+    import json, time
+    d = tmp_path / "runtime" / "data"; d.mkdir(parents=True)
+    now = time.time() * 1000
+    (d / "carry_paper_ledger.jsonl").write_text("\n".join([
+        json.dumps({"kind": "CLOSE", "strategie": "carry", "reason": "CHURN",
+                    "ts_ms": now - 3600_000, "realized_net_pnl_usdc": -0.30}),
+        json.dumps({"kind": "CLOSE", "strategie": "arbitrage", "reason": "ARB_CONVERGENCE",
+                    "ts_ms": now - 7200_000, "realized_net_pnl_usdc": 0.08}),
+        json.dumps({"kind": "CLOSE", "strategie": "carry", "reason": "VIEUX",
+                    "ts_ms": now - 30 * 24 * 3600_000, "realized_net_pnl_usdc": -99.0}),
+    ]) + "\n", encoding="utf-8")
+    a = T.attribution_pnl(tmp_path)
+    assert a["n_fermetures"] == 2, "la fenetre 24 h exclut la vieille epoque"
+    assert a["par_strategie"] == {"arbitrage": 0.08, "carry": -0.3}
+    assert abs(a["total_24h"] - (-0.22)) < 1e-9
+
+
+def test_le_plan_d_action_designe_le_motif_le_plus_couteux():
+    attrib = {"n_fermetures": 3, "total_24h": -0.5,
+              "par_motif": {"CHURN": -0.4, "BASE": -0.1}, "par_strategie": {}}
+    plan = "\n".join(T.plan_action_pnl([], {"cross_venue_h": 46.6}, attrib))
+    assert "CHURN" in plan and "le plus coûteux" in plan
+    assert "46.6 h / 72 h" in plan and "ne rien conclure avant" in plan
+
+
+def test_le_plan_reclame_le_verdict_quand_la_mesure_est_MURE():
+    plan = "\n".join(T.plan_action_pnl([], {"cross_venue_h": 73.0}, {"n_fermetures": 0}))
+    assert "verdict est mûr" in plan
+
+
+def test_le_plan_signale_les_collecteurs_muets_et_les_tests_rouges():
+    etapes = [{"etape": "tests", "statut": "ECHEC", "resume": "2 failed", "sortie": ""}]
+    sante = {"collecteurs_age_s": {"marks-collector": 9999, "carry-feeder": 60}}
+    plan = "\n".join(T.plan_action_pnl(etapes, sante, {"n_fermetures": 0}))
+    assert "marks-collector" in plan and "carry-feeder" not in plan.split("Santé")[1][:200]
+    assert "2 failed" in plan and "AVANT d'ajouter" in plan
+
+
+def test_le_recap_commence_par_le_plan_et_compare_au_passage_precedent(tmp_path, monkeypatch):
+    monkeypatch.setattr(T, "HISTORIQUE", tmp_path / "hist.jsonl")
+    etapes = [{"etape": "tests", "statut": "OK", "duree_s": 10.0, "sortie": "ok",
+               "resume": "800 passed"}]
+    sante = {"realise_total": -6.05, "positions_carry": 11, "cross_venue_h": 46.6}
+    p1 = T.ecrire_recap(etapes, sante, chemin=tmp_path / "R1.md")
+    t1 = p1.read_text(encoding="utf-8")
+    assert t1.index("PLAN D'ACTION") < t1.index("| Étape |"), "le plan passe AVANT les etapes"
+    assert "Premier passage" in t1
+    sante2 = dict(sante, realise_total=-5.0, positions_carry=12)
+    t2 = T.ecrire_recap(etapes, sante2, chemin=tmp_path / "R2.md").read_text(encoding="utf-8")
+    assert "▲" in t2, "la progression se voit d'un coup d'oeil"
+    assert (tmp_path / "hist.jsonl").read_text(encoding="utf-8").count("\n") == 2

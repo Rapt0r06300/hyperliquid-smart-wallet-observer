@@ -102,12 +102,154 @@ def _sante_live() -> dict[str, Any]:
     return out
 
 
+HISTORIQUE = RACINE / "runtime" / "data" / "recap_historique.jsonl"
+
+
+def attribution_pnl(root: Path = RACINE, *, fenetre_h: float = 24.0) -> dict[str, Any]:
+    """OÙ VA L'ARGENT (21/07) : réalisé 24 h PAR STRATÉGIE et PAR MOTIF, depuis le ledger.
+    Un récap qui ne dit pas où part chaque dollar ne sert pas le PnL."""
+    from collections import Counter
+    out: dict[str, Any] = {"par_strategie": {}, "par_motif": {}, "total_24h": 0.0,
+                           "n_fermetures": 0}
+    seuil = (time.time() - fenetre_h * 3600) * 1000
+    try:
+        strat: Counter = Counter()
+        motif: Counter = Counter()
+        for l in (root / "runtime/data/carry_paper_ledger.jsonl").read_text(
+                encoding="utf-8").splitlines():
+            try:
+                r = json.loads(l)
+            except ValueError:
+                continue
+            if r.get("kind") != "CLOSE" or float(r.get("ts_ms") or 0) < seuil:
+                continue
+            pnl = float(r.get("realized_net_pnl_usdc") or 0.0)
+            strat[str(r.get("strategie") or "carry")] += pnl
+            motif[str(r.get("reason") or "?")] += pnl
+            out["n_fermetures"] += 1
+            out["total_24h"] += pnl
+        out["par_strategie"] = {k: round(v, 4) for k, v in strat.most_common()}
+        out["par_motif"] = {k: round(v, 4) for k, v in motif.most_common()}
+        out["total_24h"] = round(out["total_24h"], 4)
+    except OSError:
+        out["erreur"] = "ledger illisible"
+    return out
+
+
+def plan_action_pnl(etapes: list[dict], sante: dict, attrib: dict,
+                    root: Path = RACINE) -> list[str]:
+    """LE PLAN, en tête du récap (21/07, Flo : « les tests doivent servir le PnL »).
+    Chaque ligne est DÉRIVÉE d'une mesure de ce run — jamais un conseil générique."""
+    actions: list[str] = []
+    # 1. les recommandations de la recherche, remontées telles quelles
+    try:
+        md = (root / "runtime/replay/RESULTATS_RECHERCHE.md").read_text(encoding="utf-8")
+        bloc = md.split("<!-- JSON_RESULTATS", 1)[1].split("-->", 1)[0].strip()
+        from hl_observer.backtesting.recherche_scenario import recommandation
+        for strat, r in json.loads(bloc).items():
+            actions.append("**%s** → %s" % (strat, recommandation(strat, r)))
+    except Exception:  # noqa: BLE001
+        actions.append("Recherche de pépites : pas de résultat lisible ce tour-ci.")
+    # 2. la qualité des données commande tout le reste
+    for e in etapes:
+        if e["etape"] == "donnees" and "ÉTIQUETAGE" in e.get("sortie", ""):
+            actions.append("**Données** → défaut d'ÉTIQUETAGE encore présent : redémarre le "
+                           "bot pour que les nouveaux candidats portent leur `strategie` "
+                           "(sinon chaque module cherche dans le mauvais seau).")
+        if e["etape"] == "donnees" and "COUVERTURE" in e.get("sortie", ""):
+            actions.append("**Données** → COUVERTURE insuffisante : des candidats n'ont aucun "
+                           "mark après eux (outcomes inmesurables) — vérifier marks-collector.")
+    # 3. l'argent : où il part
+    if attrib.get("n_fermetures"):
+        pires = [(k, v) for k, v in attrib["par_motif"].items() if v < 0]
+        if pires:
+            k, v = min(pires, key=lambda kv: kv[1])
+            actions.append("**PnL 24 h** → le motif le plus coûteux est `%s` (%.4f $) : "
+                           "c'est LUI qu'il faut comprendre avant d'ajouter quoi que ce soit."
+                           % (k, v))
+        else:
+            actions.append("**PnL 24 h** → aucune fermeture perdante sur la fenêtre (%+.4f $ "
+                           "sur %d fermetures)." % (attrib["total_24h"], attrib["n_fermetures"]))
+    else:
+        actions.append("**PnL 24 h** → aucune fermeture : le PnL vit dans le funding couru "
+                       "(positions ouvertes), rien à corriger de ce côté.")
+    # 4. les mesures qui arrivent à échéance
+    h = sante.get("cross_venue_h")
+    if isinstance(h, (int, float)):
+        actions.append("**Cross-venue** → %.1f h / 72 h %s"
+                       % (h, "→ **le verdict est mûr, lance-le**" if h >= 72
+                          else "— verdict dans ~%.0f h, ne rien conclure avant." % (72 - h)))
+    # 5. la santé qui bloquerait tout
+    morts = [n for n, a in (sante.get("collecteurs_age_s") or {}).items()
+             if a is None or a > 1800]
+    if morts:
+        actions.append("**Santé** → collecteur(s) muet(s) : %s — sans eux, les mesures "
+                       "s'arrêtent (REANIMER-COLLECTEURS.cmd)." % ", ".join(morts))
+    for e in etapes:
+        if e["etape"] == "tests" and e["statut"] != "OK":
+            actions.append("**Tests** → %s : réparer AVANT d'ajouter une stratégie (un test "
+                           "rouge = une mesure qui ment peut-être)." % e.get("resume", "échec"))
+    return actions
+
+
+def _progression(etapes: list[dict], sante: dict, attrib: dict) -> tuple[list[str], dict]:
+    """Compare au passage PRÉCÉDENT : on progresse ou on régresse ? (le journal est
+    append-only : l'historique des runs ne s'écrase jamais)."""
+    courant = {"ts": time.time(),
+               "tests": next((e.get("resume") for e in etapes if e["etape"] == "tests"), None),
+               "verts": sum(1 for e in etapes if e["statut"] == "OK"),
+               "n_etapes": len(etapes),
+               "pnl_total": sante.get("realise_total"),
+               "pnl_24h": attrib.get("total_24h"),
+               "positions": sante.get("positions_carry"),
+               "cross_venue_h": sante.get("cross_venue_h")}
+    lignes: list[str] = []
+    try:
+        precedents = [json.loads(l) for l in
+                      HISTORIQUE.read_text(encoding="utf-8").splitlines() if l.strip()]
+    except (OSError, ValueError):
+        precedents = []
+    if precedents:
+        p = precedents[-1]
+        dt_h = (courant["ts"] - float(p.get("ts") or courant["ts"])) / 3600.0
+        lignes.append("_Comparé au passage d'il y a %.1f h._" % dt_h)
+        for cle, label in (("verts", "étapes vertes"), ("pnl_total", "PnL total"),
+                           ("pnl_24h", "PnL 24 h"), ("positions", "positions carry")):
+            a, b = p.get(cle), courant.get(cle)
+            if isinstance(a, (int, float)) and isinstance(b, (int, float)):
+                fleche = "▲" if b > a else ("▼" if b < a else "=")
+                lignes.append("- %s : %s → **%s** %s" % (label, a, b, fleche))
+        if p.get("tests") != courant.get("tests"):
+            lignes.append("- tests : `%s` → `%s`" % (p.get("tests"), courant.get("tests")))
+    else:
+        lignes.append("_Premier passage : la comparaison arrivera au prochain lancement._")
+    try:
+        HISTORIQUE.parent.mkdir(parents=True, exist_ok=True)
+        with HISTORIQUE.open("a", encoding="utf-8") as fh:
+            fh.write(json.dumps(courant, ensure_ascii=False) + "\n")
+    except OSError:
+        pass
+    return lignes, courant
+
+
 def ecrire_recap(etapes: list[dict], sante: dict, chemin: Path = RECAP) -> Path:
     ok = [e for e in etapes if e["statut"] == "OK"]
+    attrib = attribution_pnl()
+    plan = plan_action_pnl(etapes, sante, attrib)
+    progres, _ = _progression(etapes, sante, attrib)
     l = ["# RÉCAPITULATIF COMPLET — HyperSmart Observer", "",
          "_Généré le %s · %d/%d étapes vertes · durée totale %.1f min._"
          % (time.strftime("%d/%m/%Y %H:%M"), len(ok), len(etapes),
             sum(e["duree_s"] for e in etapes) / 60), "",
+         "## 🎯 PLAN D'ACTION POUR LE PnL (dérivé des mesures de CE run)", ""]
+    l += ["%d. %s" % (i, a) for i, a in enumerate(plan, 1)]
+    l += ["", "## 📈 Progression depuis le dernier passage", ""] + progres
+    l += ["", "## 💰 Où va l'argent (24 h)", "",
+          "- total : **%+.4f $** sur %d fermeture(s)"
+          % (attrib.get("total_24h", 0.0), attrib.get("n_fermetures", 0)),
+          "- par stratégie : `%s`" % (attrib.get("par_strategie") or "aucune"),
+          "- par motif : `%s`" % (attrib.get("par_motif") or "aucun"), "",
+         "## Étapes", "",
          "| Étape | Statut | Durée | Détail |", "|---|---|---|---|"]
     for e in etapes:
         icone = {"OK": "✅", "ECHEC": "🔴", "BUDGET": "⏱️", "ERREUR": "💥"}.get(e["statut"], "?")
