@@ -340,3 +340,23 @@ def test_la_chaine_MID_est_cablee_feeder_entree_endpoint_et_poll():
     assert '"base_mid_bps_entree": _f(inputs, "base_mid_bps")' in lifec
     assert "bases_courantes_mid(root)" in src
     assert "window._carryNet=realSess+Number(d.funding_accru_usdt||0)" in src   # v3 : sans latent
+
+
+# ---------------- 21/07 : l'ARBITRAGE a sa ligne, avec son ETAT MESURE ----------------
+
+def test_l_endpoint_arbitrage_dit_POURQUOI_il_n_ouvre_pas(tmp_path, monkeypatch):
+    """« j'ai l'impression qu'il ne fonctionne pas » : un module qui attend doit DIRE ce
+    qu'il attend. Ici : le plus gros ecart mesure face au seuil — une mesure, pas un silence."""
+    ep = _endpoint("/v2/arbitrage")
+    d = json.loads(ep().body.decode("utf-8"))
+    for k in ("positions_ouvertes", "realise_session_usd", "etat", "seuil_ouverture_bps"):
+        assert k in d, k
+    assert "EN ATTENTE" in d["etat"] or "position" in d["etat"] or "indisponible" in d["etat"]
+
+
+def test_la_ligne_arbitrage_existe_dans_le_tableau_des_strategies():
+    src = _src()
+    assert "Arbitrage dislocation" in src
+    assert "window._arbPos" in src and "window._arbReal" in src and "window._arbEtat" in src
+    assert "loadArb" in src and "setInterval(loadArb,10000)" in src
+    assert "module éteint (flag off)" in src, "le flag off se DIT, il ne se devine pas"

@@ -586,6 +586,9 @@ function syncTop(){
     st.innerHTML=
        '<tr><td>Copy-trading</td><td>'+cp+'</td><td style="color:'+col(copyNet)+'">'+mk(copyNet)+'</td><td style="text-align:right;color:var(--mut)">'+(cp>0?'actif':'attend un edge prouvé (protège le capital)')+'</td></tr>'
       +'<tr><td>Carry delta-neutre</td><td>'+cy+'</td><td style="color:'+col(carryNet)+'">'+mk(carryNet)+'</td><td style="text-align:right;color:var(--mut)">'+(cy>0?'actif · funding encaissé':'attend un meilleur funding')+'</td></tr>'
+      // 21/07 : l'ARBITRAGE de dislocation a sa ligne — avec l'ETAT MESURE (« plus gros
+      // ecart X bps < seuil 35 »), jamais un tiret muet. Un module qui attend le DIT.
+      +'<tr><td>Arbitrage dislocation</td><td>'+(window._arbPos||0)+'</td><td style="color:'+col(Number(window._arbReal||0))+'">'+mk(Number(window._arbReal||0))+'</td><td style="text-align:right;color:var(--mut)">'+(window._arbEtat||'—')+'</td></tr>'
       +'<tr><td>Liquidations</td><td>—</td><td style="color:var(--mut2)">—</td><td style="text-align:right;color:var(--mut)">mesure · données en accumulation</td></tr>'
       +'<tr style="border-top:1px solid var(--mut2)"><td><b>TOTAL paper</b></td><td><b>'+totPos+'</b></td><td style="color:'+col(totNet)+'"><b>'+mk(totNet)+'</b></td><td></td></tr>';
   }
@@ -661,6 +664,15 @@ function loadCarry(){fetch('/v2/carry').then(function(r){return r.json()}).then(
   signalerOK('carry');
 }).catch(function(e){signalerPanne('carry',e);});}
 setInterval(loadCarry,2000);setTimeout(loadCarry,600);
+// ── Panneau ARBITRAGE (21/07) : poll 10 s (les venues bougent aux 5 min) ──
+function loadArb(){fetch('/v2/arbitrage').then(function(r){return r.json()}).then(function(d){
+  window._arbPos=Number(d.positions_ouvertes||0);
+  window._arbReal=Number(d.realise_session_usd||0);
+  window._arbEtat=d.actif?(d.etat||'—'):'module éteint (flag off)';
+  if(window.syncTop)syncTop();
+  signalerOK('arbitrage');
+}).catch(function(e){signalerPanne('arbitrage',e);});}
+setInterval(loadArb,10000);setTimeout(loadArb,900);
 // ── FRAICHEUR MAXIMALE (20/07, demande de Flo : « le PnL ne bouge pas en temps reel »).
 // Le funding s'accumule CONTINUMENT dans la realite ; le moteur ne le releve que par passes.
 // Ce ticker 1 s fait couler le temps entre deux releves : accru_affiche = dernier releve REEL
@@ -832,6 +844,52 @@ def create_dashboard_v2_router() -> APIRouter:
             return points
         sortie[-1] = dernier
         return sortie
+
+    @router.get("/v2/arbitrage")
+    def arbitrage() -> JSONResponse:
+        """État du module ARBITRAGE de dislocation (21/07). Dit TOUJOURS pourquoi il n'ouvre
+        pas : le plus gros écart mesuré face au seuil — « pas de trade » n'est jamais un
+        silence, c'est une mesure. Lecture seule."""
+        import json as _json
+        import os as _os
+        from pathlib import Path as _P
+        try:
+            from hl_observer.funding import arb_dislocation_paper as _arb
+            root = _P(__file__).resolve().parents[3]
+            mes = _arb.dernieres_mesures(root)
+            meilleur = max((abs(float(m.get("ecart_prix_bps") or 0.0)) for m in mes.values()),
+                           default=0.0)
+            coin_max = max(mes.items(), key=lambda kv: abs(float(kv[1].get("ecart_prix_bps") or 0)),
+                           default=(None, {}))[0] if mes else None
+            try:
+                store = _json.loads((root / _arb.STORE_RELPATH).read_text(encoding="utf-8"))
+            except (OSError, ValueError):
+                store = {"ouvertes": {}}
+            ouvertes = list((store.get("ouvertes") or {}).values())
+            realise = 0.0
+            try:
+                from hl_observer.funding.carry_positions_store import etat_carry as _ec
+                sid = _ec(root).get("session_id")
+                for l in (root / _arb.LEDGER_RELPATH).read_text(encoding="utf-8").splitlines():
+                    r = _json.loads(l)
+                    if (r.get("strategie") == "arbitrage" and r.get("kind") == "CLOSE"
+                            and (not sid or r.get("session_id") == sid)):
+                        realise += float(r.get("realized_net_pnl_usdc") or 0.0)
+            except (OSError, ValueError, TypeError):
+                pass
+            return JSONResponse({
+                "actif": bool(_os.environ.get("HYPERSMART_ARB_DISLOCATION_PAPER", "0") == "1"),
+                "positions_ouvertes": len(ouvertes), "positions": ouvertes,
+                "realise_session_usd": round(realise, 6),
+                "coins_mesures": len(mes), "meilleur_ecart_bps": round(meilleur, 2),
+                "coin_meilleur": coin_max, "seuil_ouverture_bps": _arb.SEUIL_OUVERTURE_BPS,
+                "etat": ("EN ATTENTE : plus gros écart %.1f bps < seuil %.0f"
+                         % (meilleur, _arb.SEUIL_OUVERTURE_BPS)) if not ouvertes
+                        else "%d position(s) ouverte(s)" % len(ouvertes),
+                "read_only": True, "real_execution": False})
+        except Exception as exc:  # noqa: BLE001 — un panneau ne casse jamais la page
+            return JSONResponse({"actif": False, "etat": "indisponible : %s" % exc,
+                                 "positions_ouvertes": 0, "realise_session_usd": 0.0})
 
     @router.get("/v2/equity_history")
     def equity_history(request: Request, max: int = 600) -> JSONResponse:
