@@ -502,11 +502,24 @@ def scanner(diagnostic: bool):
     # Remede : publier a CHAQUE passe la base au MID (l'instrument de MARQUAGE standard) pour
     # TOUS les coins scannes -> marquage stable, complet, et remontable a cette passe.
     bases_mid_dump: dict[str, dict] = {}
+    # 🔴 21/07 — « ce chiffre ne grandit jamais ». Le pool de marks croissait (~1 240/h) mais
+    # 0,43 %/h sur 384 k est invisible. Cause du DEBIT : on ne marquait que la shortlist viable
+    # (6 coins ce soir) alors qu'ici on tient le prix perp FRAIS de TOUT l'univers perp∩spot
+    # (~100-200 coins) — et on le jetait pour les non-viables. On collecte donc le mark de
+    # CHAQUE coin price, et on l'enregistre en bloc apres la boucle. Prix reels deja mesures,
+    # zero appel reseau nouveau, zero prix invente. Elargit surtout la COUVERTURE (utile au
+    # markout copy, qui laissait des fills sans prix hors shortlist).
+    univers_mids: dict[str, float] = {}
     for c in communs:
         p = perps[c]
         cands = [x for x in apparies.get(c, []) if x["mark"] > 0]
         if p["mark"] <= 0 or not cands:
             continue
+        # le prix perp frais de ce coin part au marquage large, viable ou non.
+        try:
+            univers_mids[str(c).upper()] = float(p["mark"])
+        except (TypeError, ValueError):
+            pass
         # MAPPING PAR PRIX : parmi les paires spot du meme ticker, prendre celle dont le prix
         # colle au perp (tue les "base aberrante" dues a une collision de nom / paire stale).
         s = min(cands, key=lambda x: abs(x["mark"] - p["mark"]) / p["mark"])
@@ -662,6 +675,17 @@ def scanner(diagnostic: bool):
             ensure_ascii=False), encoding="utf-8")
     except OSError:
         print("  (carry_bases_courantes.json inecrivable — marquage MID indisponible ce tick)")
+    # ── MARKS DE PRIX POUR TOUT L'UNIVERS (21/07) — « augmenter le nombre ».
+    # On ne marquait que la shortlist (6 coins) ; ici on a le prix frais de ~100-200 coins.
+    # Prix reels deja mesures, aucun appel reseau nouveau, aucun prix invente. Best-effort.
+    if not diagnostic and univers_mids:
+        try:
+            from hl_observer.ops.marks_univers import enregistrer_univers
+            _nm = enregistrer_univers(str(ROOT), univers_mids, ts_s=time.time())
+            print("  marks univers : +%d coin(s) marque(s) (etait ~%d avec la seule shortlist)"
+                  % (_nm, len(viables)))
+        except Exception as exc:  # noqa: BLE001 — un marquage ne casse JAMAIS le scan
+            print("  (marks univers indisponible : %s)" % exc)
     # ── LE JOURNAL DES SCANS (21/07) : append-only, jamais bloquant. C'est LUI qui donnera
     # au backtest carry de la matiere (~2 900 lignes/jour) la ou on n'avait que 96 lignes.
     try:

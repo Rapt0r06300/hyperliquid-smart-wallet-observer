@@ -226,7 +226,24 @@ def merge_replay(base: str | Path, out_dir: str | Path | None = None) -> dict:
             counts[name] = None      # None = ECHEC avoue, jamais 0 (qui se lirait « vide »)
             continue
         counts[name] = len(rows)
-    return {"out": str(out), "counts": counts}
+    # 🔴 21/07 — « ce chiffre ne grandit jamais ». Il grandit (~1 240 marks/h) mais 0,43 %/h sur
+    # 384 k est INVISIBLE a l'oeil. Un total cumule enorme cache sa propre croissance. On publie
+    # donc le DELTA depuis la fusion precedente : c'est lui qu'on regarde pour savoir si ca vit.
+    deltas: dict[str, Any] = {}
+    marqueur = out / ".counts_precedents.json"
+    try:
+        avant = json.loads(marqueur.read_text(encoding="utf-8")) if marqueur.exists() else {}
+    except (OSError, ValueError):
+        avant = {}
+    for name, n in counts.items():
+        if isinstance(n, int) and isinstance(avant.get(name), int):
+            deltas[name] = n - avant[name]
+    try:
+        marqueur.write_text(json.dumps({k: v for k, v in counts.items()
+                                        if isinstance(v, int)}), encoding="utf-8")
+    except OSError:
+        pass
+    return {"out": str(out), "counts": counts, "depuis_la_derniere_fois": deltas}
 
 
 def _main(argv=None) -> int:  # pragma: no cover
