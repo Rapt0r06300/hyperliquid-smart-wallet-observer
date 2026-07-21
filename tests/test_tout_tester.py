@@ -53,8 +53,15 @@ def test_le_resume_pytest_est_extrait_de_la_sortie():
 
 
 def test_le_cmd_unique_pointe_sur_l_orchestrateur():
+    # 🔴 21/07 — le .cmd pointe desormais sur le LANCEUR (lanceur_tout_tester.py), pas
+    # directement sur l'orchestrateur : apres deux plantages batch, toute la logique (pre-vol,
+    # securite, tracabilite) est passee en Python testable. Le lanceur, lui, appelle bien
+    # l'orchestrateur tout_tester.py. La chaine .cmd -> lanceur -> orchestrateur est verifiee.
     c = open(RACINE / "TOUT-TESTER.cmd", encoding="utf-8", errors="replace").read()
-    assert "tools\\tout_tester.py" in c and "RECAP-COMPLET.md" in c
+    assert "tools\\lanceur_tout_tester.py" in c, "le .cmd appelle le lanceur Python"
+    lanceur = open(RACINE / "tools" / "lanceur_tout_tester.py", encoding="utf-8").read()
+    assert "tout_tester.py" in lanceur, "le lanceur appelle bien l'orchestrateur"
+    assert "RECAP-COMPLET.md" in c or "RECAP" in lanceur
     assert "--rapide" in c, "l'option courte doit etre documentee dans l'en-tete"
 
 

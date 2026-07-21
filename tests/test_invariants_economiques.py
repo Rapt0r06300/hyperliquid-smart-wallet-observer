@@ -111,7 +111,13 @@ def test_L5_jamais_d_ouverture_sous_le_seuil(tmp_path, ecart):
         SEUIL_OUVERTURE_BPS
 
 
-@pytest.mark.parametrize("ecart", [15.0, 60.0, -15.0, -120.0])
+# 🔴 21/07 — les ecarts d'ouverture sont DERIVES du seuil, plus codes en dur. Le seuil est
+# passe de 15 a 19 bps (cout all-in 16 + marge 3) : les anciennes valeurs 15/-15 tombaient
+# SOUS le nouveau seuil -> plus d'ouverture -> plus de CLOSE. L'invariant, lui, est intact :
+# une position ouverte qui ne converge pas perd exactement ses couts. On le teste donc
+# JUSTE AU-DESSUS du seuil, quelle que soit sa valeur future.
+@pytest.mark.parametrize("ecart", [SEUIL_OUVERTURE_BPS + 1.0, 60.0,
+                                   -(SEUIL_OUVERTURE_BPS + 1.0), -120.0])
 def test_L6_un_aller_retour_SANS_convergence_est_toujours_perdant(tmp_path, ecart):
     _venue(tmp_path, ecart)
     tick(tmp_path, now=1010.0, session_id="S")

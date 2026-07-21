@@ -25,60 +25,82 @@ def _endpoint(chemin: str):
     return next(r.endpoint for r in create_dashboard_v2_router().routes if r.path == chemin)
 
 
-def _requete(points):
-    etat = SimpleNamespace(simulation_equity_history=points)
-    return SimpleNamespace(app=SimpleNamespace(state=SimpleNamespace(ui_state=etat)))
+# 🔴 21/07 — CES TROIS TESTS ONT ÉTÉ RÉÉCRITS, PAS RÉPARÉS.
+# Ils vérifiaient l'ANCIEN endpoint : `_avec_carry` greffait le net carry sur le dernier point
+# d'un historique copy (d'où l'assertion `== 995.0`). C'est PRÉCISÉMENT ce mécanisme qui
+# produisait le métagraphe éclaté (599 points plats + une falaise). La courbe vient désormais
+# du LEDGER via `courbe_equity`. L'intention est conservée mot pour mot — « la courbe reflète
+# le carry », « le passé ne bouge pas », « un carry illisible ne casse pas la courbe » — seule
+# la source de vérité change : on injecte un ledger au lieu d'un historique copy.
+
+def _req_root(root):
+    """Le nouvel endpoint lit le LEDGER sous `project_root` : sans injection il lirait le
+    runtime réel (le piège « un test qui lit l'état live ne teste pas, il constate »)."""
+    return SimpleNamespace(app=SimpleNamespace(state=SimpleNamespace(
+        ui_state=None, project_root=root)))
 
 
 def _appel(req, **kw):
     return json.loads(_endpoint("/v2/equity_history")(req, **kw).body.decode("utf-8"))
 
 
+def _ledger(tmp_path, closes):
+    from hl_observer.funding.carry_positions_store import LEDGER_RELPATH
+    p = tmp_path / LEDGER_RELPATH
+    p.parent.mkdir(parents=True, exist_ok=True)
+    p.write_text("\n".join(json.dumps(c) for c in closes) + "\n", encoding="utf-8")
+    return tmp_path
+
+
+def _close(ts, pnl):
+    return {"kind": "CLOSE", "mode": "LIVE", "ts_ms": ts, "realized_net_pnl_usdc": pnl,
+            "coin": "HYPE", "strategie": "carry"}
+
+
 # ------------------------------------------------------------- défaut 1 : une seule vérité
 
-def test_la_courbe_INCLUT_le_net_carry(monkeypatch):
-    """LE BUG : bandeau -5,00 / courbe 1 000,00 plate. Le dernier point doit porter le carry."""
+def test_la_courbe_INCLUT_le_net_carry(tmp_path, monkeypatch):
+    """LE BUG : bandeau -5,00 / courbe 1 000,00 plate. La courbe DOIT refléter le carry —
+    désormais parce qu'elle EST le ledger carry, pas une greffe sur une série copy."""
     monkeypatch.setattr("hl_observer.runtime.equity_history_store.read_equity_points",
                         lambda max=600: [])
-    monkeypatch.setattr(dashboard_v2, "net_carry_courant", lambda root=None: -5.0)
-    d = _appel(_requete([{"timestamp_ms": 1000, "current_equity_usdt": 1000.0,
-                          "current_pnl_usdc": 0.0}]))
+    root = _ledger(tmp_path, [_close(1000, -5.0)])
+    d = _appel(_req_root(root))
     assert d["inclut_carry"] is True
     assert d["points"][-1]["equity"] == 995.0
     assert d["points"][-1]["pnl"] == -5.0
-    assert d["points"][-1]["carry_net_usdc"] == -5.0
+    assert d["amplitude_usd"] > 0, "la courbe doit BOUGER quand le carry perd 5$"
 
 
-def test_le_PASSE_n_est_PAS_reecrit(monkeypatch):
-    """Le carry n'a pas d'historique horodaté. Rétro-projeter son net sur les points anciens
+def test_le_PASSE_n_est_PAS_reecrit(tmp_path, monkeypatch):
+    """Le funding réglé ne touche que le point COURANT. Rétro-projeter sur les points anciens
     fabriquerait une courbe — on n'écrit pas l'histoire qu'on n'a pas mesurée."""
     monkeypatch.setattr("hl_observer.runtime.equity_history_store.read_equity_points",
                         lambda max=600: [])
-    monkeypatch.setattr(dashboard_v2, "net_carry_courant", lambda root=None: -5.0)
-    d = _appel(_requete([
-        {"timestamp_ms": 1000, "current_equity_usdt": 1000.0, "current_pnl_usdc": 0.0},
-        {"timestamp_ms": 2000, "current_equity_usdt": 1000.0, "current_pnl_usdc": 0.0},
-    ]))
-    assert d["points"][0]["equity"] == 1000.0, "un point PASSÉ ne doit pas bouger"
-    assert d["points"][-1]["equity"] == 995.0
+    monkeypatch.setattr("hl_observer.funding.carry_positions_store.etat_carry",
+                        lambda root=None: {"net_funding_settled": 5.0})
+    root = _ledger(tmp_path, [_close(1000, -3.0), _close(2000, -2.0)])
+    d = _appel(_req_root(root))
+    assert d["points"][1]["equity"] == 997.0, "un CLOSE passé garde sa valeur"
+    assert d["points"][2]["equity"] == 995.0, "le 2e CLOSE passé ne bouge pas non plus"
+    # le funding réglé (+5) n'entre QUE dans le point courant : -5 réalisé + 5 réglé = 0
+    assert d["points"][-1]["pnl"] == 0.0
+    assert d["points"][-1].get("inclut_funding_courant") is True
 
 
-def test_un_carry_illisible_ne_CASSE_PAS_la_courbe(monkeypatch):
-    """Deny-by-default appliqué correctement : donnée absente -> 0, pas d'exception, pas
-    d'invention. La courbe copy reste affichable même si le carry est HS."""
+def test_un_carry_illisible_ne_CASSE_PAS_la_courbe(tmp_path, monkeypatch):
+    """Deny-by-default : un ledger absent/illisible -> ligne plate honnête, jamais une
+    exception qui viderait la page."""
     monkeypatch.setattr("hl_observer.runtime.equity_history_store.read_equity_points",
                         lambda max=600: [])
-
-    def explose(root=None):
-        raise RuntimeError("ledger carry corrompu")
-
-    monkeypatch.setattr(dashboard_v2, "net_carry_courant", explose)
+    monkeypatch.setattr("hl_observer.funding.carry_positions_store.etat_carry",
+                        lambda root=None: (_ for _ in ()).throw(RuntimeError("ledger corrompu")))
     try:
-        d = _appel(_requete([{"timestamp_ms": 1, "current_equity_usdt": 1000.0,
-                              "current_pnl_usdc": 0.0}]))
+        d = _appel(_req_root(tmp_path))          # aucun ledger sous tmp_path
     except RuntimeError:
         raise AssertionError("un carry illisible ne doit JAMAIS casser la courbe d'equity")
-    assert d["points"][-1]["equity"] == 1000.0
+    assert d["points"][-1]["equity"] == 1000.0, "pas de données -> ligne plate au capital"
+    assert d["plate"] is True
 
 
 def test_net_carry_courant_est_INJECTABLE():
@@ -239,11 +261,16 @@ def test_la_boucle_de_fraicheur_est_calee_sur_l_ecran_requestAnimationFrame():
 
 
 def test_le_metagraphe_recoit_le_point_vivant_et_a_une_fenetre_zoomable():
+    # 🔴 21/07 — le point vivant NE vient plus de `_eqLiveVal` (equity copy + carry SESSION) :
+    # cette formule differait de la serie (realise TOTAL) et produisait une falaise verticale.
+    # Il vient de `_mgLiveDelta` = le seul terme qui bouge entre deux evenements (funding couru
+    # non regle), ajoute au dernier point REEL -> continu par construction. Fenetre par defaut
+    # TOUT (la serie est evenementielle : zoomer 1 h d'une serie de 3 j ne montrerait rien).
     src = _src()
-    assert "window._eqLiveVal" in src and "pts.concat([{t:Date.now(),equity:lv}])" in src, \
-        "le point vivant prolonge la courbe (meme interpolation que le grand chiffre)"
-    assert "window._metaWin=3600000" in src, "fenetre par defaut 1 h (pente visible)"
-    assert "(w===3600000)?300000:(w===300000?0:3600000)" in src, "cycle 1h -> 5min -> tout au clic"
+    assert "window._mgLiveDelta" in src, "le point vivant vient du delta funding, pas de _eqLiveVal"
+    assert "vivant:true" in src, "le segment vivant est distinct (dessine en pointilles)"
+    assert "window._metaWin=0" in src, "fenetre par defaut TOUT (serie evenementielle)"
+    assert "(w===0)?86400000:(w===86400000?3600000:0)" in src, "cycle tout -> 24h -> 1h au clic"
     assert "mg-baselbl" in src, "l'etiquette de base dit si c'est l'equity depart ou la fenetre"
 
 
@@ -339,12 +366,18 @@ def test_la_chaine_MID_est_cablee_feeder_entree_endpoint_et_poll():
     assert '"base_mid_bps"' in feed, "les inputs portent la base MID"
     assert '"base_mid_bps_entree": _f(inputs, "base_mid_bps")' in lifec
     assert "bases_courantes_mid(root)" in src
-    # v4 (P0, 21/07) — l'invariant se DURCIT : le net stable n'absorbe ni le latent de base
-    # (reversible) NI l'accrual non regle (une estimation). Seul le funding REGLE y entre.
-    assert "window._carryNet=realSess+Number((d.net_funding_settled!=null)" in src
+    # v4 (P0, 21/07) — le net stable n'absorbe ni le latent de base (reversible) NI l'accrual
+    # non regle (une estimation). Seul le funding REGLE y entre.
+    # v5 (21/07 soir) — le grand chiffre part du realise TOTAL, plus de la SESSION : il affichait
+    # +0,36 EN VERT (session 0 + funding all-time) pendant une perte de -5,64. Numerateur et
+    # denominateur venaient de deux fenetres differentes -> le nombre ne mesurait rien.
+    assert "window._carryNet=realTout+fundingRegle" in src, (
+        "le grand chiffre doit partir du realise TOTAL (== la courbe), pas de la session")
     assert "d.funding_accrual_estimate" in src, "l'estimation doit etre exposee A PART"
     assert "window._carryNet=realSess+Number(d.funding_accru_usdt||0)" not in src, (
         "regression : le net stable est reparti absorber l'accrual non regle")
+    assert "window._carryNet=realSess+" not in src, (
+        "regression : la chimere session+all-time (grand chiffre vert pendant une perte)")
 
 
 # ---------------- 21/07 : l'ARBITRAGE a sa ligne, avec son ETAT MESURE ----------------

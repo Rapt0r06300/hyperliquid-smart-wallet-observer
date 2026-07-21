@@ -347,6 +347,25 @@ def _sec_a_faire(root: Path, now_ms: int) -> list[str]:
                         "verrouillé (aucun leader au markout prouvé — c'est la protection, pas une panne)"))
     except Exception:  # noqa: BLE001
         pass
+    try:  # 🔴 21/07 — SANTE DU PIPELINE DE MARKOUT (le diagnostic ecrit a cote de la whitelist).
+        # Un markout a faible couverture ne PEUT pas qualifier un leader : la whitelist reste vide
+        # non parce qu'aucun leader n'est bon, mais parce qu'on ne mesure presque rien. Le rapport
+        # doit distinguer les deux. `marks_source` porte le diagnostic de recouvrement marks/fills.
+        from hl_observer.copy_wallet.marks_source import RECOUVREMENT_MIN_FRAC
+        diag = _json(root / "runtime" / "data" / "leader_fills_forward.diagnostic.json")
+        cov = diag.get("couverture_pct")
+        if cov is not None:
+            if diag.get("rompu"):
+                actions.append("Markout copy : recouvrement ROMPU (%s) — la mesure est "
+                               "incomplete, PAS un verdict. Consolider le replay avant de juger "
+                               "un leader (seuil sain : couverture > %.0f%%)."
+                               % (diag.get("motif", "?"), RECOUVREMENT_MIN_FRAC * 100))
+            else:
+                actions.append("Markout copy : %.1f%% des fills mesures (%d/%d) — "
+                               "le pipeline nourrit la whitelist." %
+                               (cov, diag.get("mesures", 0), diag.get("fills", 0)))
+    except Exception:  # noqa: BLE001
+        pass
     try:  # replay : assez de données pour la recherche de scénario ?
         base = root / "runtime" / "replay"
         if (base / "_merged" / "candidates.jsonl").exists():

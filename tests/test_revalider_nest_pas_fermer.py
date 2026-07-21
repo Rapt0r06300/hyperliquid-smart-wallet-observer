@@ -29,7 +29,11 @@ INPUTS = {"levier_utilise": 3.0, "levier_max": 3.0, "perp_px": 100.0,
 
 
 def _dec(viable=True):
-    return {"coin": "HYPE", "viable": viable, "funding_bps_h": 0.125, "cout_entree_bps": 12.0,
+    # 🔴 21/07 — funding d'OUVERTURE 0.125 -> 0.45 (porte du cout d'opportunite). Ces tests
+    # portent sur « revalider n'est pas fermer », pas sur le plancher. Les positions
+    # construites DIRECTEMENT plus bas (funding_bps_h_entree) gardent 0.125 : elles existent
+    # deja, elles ne passent pas par la porte d'ouverture.
+    return {"coin": "HYPE", "viable": viable, "funding_bps_h": 0.45, "cout_entree_bps": 12.0,
             "base_bps": 20.0, "gain_net_24h_bps": 3.0, "liquidite_spot_usd": 50_000.0}
 
 

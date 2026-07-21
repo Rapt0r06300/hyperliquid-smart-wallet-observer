@@ -11,15 +11,24 @@ from hl_observer.funding.carry_positions_store import (
 H = 3_600_000
 
 
+# 🔴 21/07 — funding d'ENTREE releve du plancher (0.125) a 0.45 : la porte du cout
+# d'opportunite (carry_benchmark_gate) refuse desormais d'ouvrir au plancher (APR net 2,65 %
+# contre 15-30 % pour HLP). Ces tests portent sur le STORE (persistance, dedup, PnL, slots),
+# pas sur la rentabilite du plancher : il leur faut une position que le systeme ouvrirait
+# vraiment. Le refus au plancher a son propre test dans test_carry_benchmark_gate.py.
+# Le funding COURANT d'accrual reste a 0.125 : il n'est pas gate, seule l'OUVERTURE l'est.
+_FUNDING_OUVRABLE = 0.45
+
+
 def _decision(viable=True, **kw):
-    d = {"coin": "HYPE", "funding_bps_h": 0.125, "base_bps": -0.68, "liquidite_spot_usd": 200_000.0,
+    d = {"coin": "HYPE", "funding_bps_h": _FUNDING_OUVRABLE, "base_bps": -0.68, "liquidite_spot_usd": 200_000.0,
          "cout_entree_bps": 9.0, "viable": viable, "motif": "CARRY_NEUTRE_VIABLE"}
     d.update(kw)
     return d
 
 
 def _inputs(**kw):
-    d = {"ts_ms": 1, "coin": "HYPE", "funding_bps_h": 0.125, "base_bps": -0.68,
+    d = {"ts_ms": 1, "coin": "HYPE", "funding_bps_h": _FUNDING_OUVRABLE, "base_bps": -0.68,
          "liquidite_spot_usd": 200_000.0, "maker": True, "levier_max": 10.0,
          "marge_ratio": 0.5, "pire_hausse_observee": 0.29, "levier_utilise": 2.0}
     d.update(kw)
@@ -89,7 +98,7 @@ def test_etat_carry_expose_pnl_et_positions(tmp_path):
 
 # ---------- tick_multi_sur_disque (shortlist multi-coins) ----------
 
-def _mesure(coin, funding=0.125, levier=2.0):
+def _mesure(coin, funding=_FUNDING_OUVRABLE, levier=2.0):
     dec = _decision(coin=coin, funding_bps_h=funding)
     inp = _inputs(coin=coin, funding_bps_h=funding, levier_utilise=levier)
     return {"decision": dec, "inputs": inp, "funding": funding}

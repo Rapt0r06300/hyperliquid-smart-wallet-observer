@@ -154,7 +154,11 @@ _INPUTS = {"levier_utilise": _LEVIER, "levier_max": _LEVIER, "perp_px": 100.0,
 
 
 def _decision(viable=True, **kw):
-    d = {"coin": "HYPE", "viable": viable, "funding_bps_h": 0.125, "cout_entree_bps": 12.0,
+    # 🔴 21/07 — funding d'ENTREE 0.125 -> 0.45 : la porte du cout d'opportunite refuse
+    # d'ouvrir au plancher. Ces tests portent sur le RENFORT (grossir sans payer de sortie),
+    # pas sur la rentabilite du plancher. Les tests de la MATH d'amortissement, plus bas,
+    # gardent 0.125 : ils calculent, ils n'ouvrent pas.
+    d = {"coin": "HYPE", "viable": viable, "funding_bps_h": 0.45, "cout_entree_bps": 12.0,
          "base_bps": 20.0, "gain_net_24h_bps": 3.0, "liquidite_spot_usd": 50_000.0}
     d.update(kw)
     return d

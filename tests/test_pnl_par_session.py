@@ -18,7 +18,9 @@ from hl_observer.funding.carry_positions_store import (
     LEDGER_RELPATH, etat_carry, resume_depuis_ledger, tick_sur_disque,
 )
 
-_DEC = {"coin": "HYPE", "funding_bps_h": 0.125, "base_bps": -0.68,
+# 🔴 21/07 — funding d'ENTREE 0.125 -> 0.45 : la porte du cout d'opportunite refuse le
+# plancher. Ces tests portent sur le PnL PAR SESSION, pas sur la rentabilite du plancher.
+_DEC = {"coin": "HYPE", "funding_bps_h": 0.45, "base_bps": -0.68,
         "liquidite_spot_usd": 200_000.0, "cout_entree_bps": -19.0, "base_bps_entree": 30.0,
         "heures_pour_rentabiliser": 72.0, "viable": True, "motif": "CARRY_NEUTRE_VIABLE",
         "real_execution": False}

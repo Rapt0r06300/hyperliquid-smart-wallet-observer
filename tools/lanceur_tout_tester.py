@@ -291,13 +291,21 @@ def lancer(argv: list[str] | None = None, racine: Path = RACINE) -> int:
         dire("")
         dire("  --- lancement : tools/tout_tester.py %s ---" % " ".join(args))
         dire("")
+        # ISOLATION DU GROUPE (invariant test_outils_isoles_du_ctrl_c) : tout sous-processus
+        # qui touche a pytest recoit son PROPRE groupe. Sans `creationflags`, un Ctrl-C console
+        # tuerait tout_tester.py AVANT qu'il n'ecrive le RECAP — le bug du 11/07 (audit_report)
+        # et du 13/07 (couverture). On NE capture PAS la sortie de l'orchestrateur : le lanceur
+        # STREAME sa progression en direct (run_isole capturerait, on ne l'utilise donc pas ici).
+        from tools.sous_processus_isole import creationflags as _cflags
         try:
             subprocess.run([sys.executable, "-m", "pip", "install", "-q", "pytest-timeout"],
-                           cwd=racine, capture_output=True, timeout=120)     # 07
+                           cwd=racine, capture_output=True, timeout=120,
+                           creationflags=_cflags())                          # 07
         except Exception:  # noqa: BLE001
             pass
         p = subprocess.run([sys.executable, str(racine / "tools" / "tout_tester.py"), *args],
-                           cwd=racine, env=environnement_fils(racine))
+                           cwd=racine, env=environnement_fils(racine),
+                           creationflags=_cflags())
         code = p.returncode
     except KeyboardInterrupt:                                                # 39
         code = 130

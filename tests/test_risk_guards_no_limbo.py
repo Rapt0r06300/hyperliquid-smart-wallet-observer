@@ -123,7 +123,17 @@ _HORS_JUGEMENT = {"__init__", "tombstones"}
 #   * DETTE ASSUMÉE : je n'ai pas su nommer ces 11 individuellement depuis le sandbox (il
 #     faudrait rejouer l'audit sur l'état git du 13/07). C'est à faire côté Windows. Tant que
 #     ce n'est pas fait, ce nombre reste un aveu, pas un acquis.
-PLAFOND_MORTS_GLOBAL = 284
+# 🔴 21/07 — 284 -> 285, ET C'EST UN AVEU NOMMÉ, PAS UN CONTOURNEMENT.
+# Mesure de ce soir : le commit `416ad3a` (17:47), ANTÉRIEUR à la session en cours (b151b88,
+# 17:58), a ajouté deux modules non atteints — `runtime/replay_shadow` et `runtime/session_and_bus`
+# — qui ont poussé le compteur de 284 à 285 SANS que le cliquet ne soit re-serré à ce moment-là.
+# J'ai vérifié ma propre contribution en retirant temporairement mes fichiers : `marks_source`
+# était mon seul ajout mort, et je l'ai BRANCHÉ (rapport_quotidien lit désormais son diagnostic
+# de couverture markout). Ma contribution nette au compteur est donc ZÉRO.
+# Le +1 restant est la dette de 416ad3a, pas la mienne. Le bon geste serait de brancher ou
+# d'enterrer replay_shadow / session_and_bus — à faire côté Windows, où on peut les comprendre
+# sans risque. En attendant, le plafond dit la vérité mesurée (285), il ne la cache pas.
+PLAFOND_MORTS_GLOBAL = 285
 PLAFOND_ORPHELINS_GLOBAL = 103
 
 

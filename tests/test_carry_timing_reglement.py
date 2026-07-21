@@ -119,7 +119,10 @@ def test_bout_en_bout_une_sortie_ORDINAIRE_est_reportee_mais_pas_un_DANGER():
 
     inputs = {"levier_utilise": 3.0, "levier_max": 3.0, "perp_px": 100.0,
               "pire_hausse_observee": 0.01, "liquidite_spot_usd": 500_000.0}
-    dec = {"coin": "HYPE", "viable": True, "funding_bps_h": 0.125, "cout_entree_bps": 12.0,
+    # 🔴 21/07 — funding d'OUVERTURE 0.45 (la porte du cout d'opportunite refuse le plancher).
+    # Ce test porte sur le TIMING du reglement, pas sur le plancher. Les `conseil_ouverture`
+    # unitaires plus haut gardent 0.125 : ils calculent un conseil, ils n'ouvrent pas.
+    dec = {"coin": "HYPE", "viable": True, "funding_bps_h": 0.45, "cout_entree_bps": 12.0,
            "base_bps": 20.0, "gain_net_24h_bps": 3.0, "liquidite_spot_usd": 50_000.0}
     g = GestionnaireCarry(mode="TEST_FIXTURE")
     g.tick(dec, inputs, now_ms=T_PILE, marge_usd=50.0, risque_contexte={"capital_usd": 5000.0})
