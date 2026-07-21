@@ -226,3 +226,48 @@ def test_le_raffinage_resserre_autour_des_graines_et_regate_tout(tmp_path):
                  s_arreter_au_premier=False, raffiner=True)
     assert r["statut"] == "PROMU"
     assert len(r["essais"]) > 1, "le raffinage a bien juge des configs supplementaires"
+
+
+# ---------------- 21/07 soir : les canons integres (CPCV + successive halving + rapport) ----------------
+
+def test_folds_purges_decoupent_en_epoques_disjointes_avec_embargo():
+    from hl_observer.backtesting.recherche_scenario import folds_purges
+    d = DonneesReplay(candidats=[_cand(t) for t in range(0, 40000, 1000)], marks=[])
+    folds = folds_purges(d, horizon_min=10.0, k=4)
+    assert len(folds) == 4 and all(f for f in folds)
+    fins = [max(c["recorded_at"] for c in f) for f in folds]
+    debuts = [min(c["recorded_at"] for c in f) for f in folds]
+    for i in range(3):
+        assert debuts[i + 1] - fins[i] >= 600.0, "embargo d'un horizon ENTRE les folds"
+
+
+def test_le_crible_multi_fidelite_epargne_les_perdants_evidents_jamais_n_admet():
+    """Successive halving : net<=0 sur le quart recent -> pas d'evaluation complete. Un crible
+    n'ADMET jamais (la porte reste juge) : il epargne du calcul."""
+    from hl_observer.backtesting.recherche_scenario import _cribler_configs
+    d = DonneesReplay(candidats=[_cand(t) for t in range(0, 30000)], marks=[])
+    def eval_crible(cands, marks, *, base_config, horizon_min, cost_bps):
+        return {"arm_a": {"net_total_usd": 1.0 if base_config.stop_loss_bps == 40.0 else -1.0}}
+    configs = [{"sl": 40.0, "tp": 70.0, "horizon_min": 60.0},
+               {"sl": 90.0, "tp": 150.0, "horizon_min": 60.0}]
+    retenues = _cribler_configs(d, configs, evaluer_ab=eval_crible)
+    assert [c["sl"] for c in retenues] == [40.0]
+
+
+def test_rang_OR_exige_3_folds_vivants_sur_4(tmp_path):
+    from hl_observer.backtesting.recherche_scenario import rang_pepite
+    d = DonneesReplay(candidats=[_cand(t) for t in range(0, 40000, 1000)], marks=[])
+    def ab(cands, marks, *, base_config, horizon_min, cost_bps):
+        # le fold se reconnait a son premier candidat : 3 premiers folds gagnent, le 4e perd
+        t0 = min(c["recorded_at"] for c in cands) if cands else 0
+        return {"arm_a": {"net_total_usd": 1.0 if t0 < 30000 else -0.5}}
+    r = rang_pepite(d, {"sl": 40.0, "tp": 70.0, "horizon_min": 10.0}, evaluer_ab=ab)
+    assert r["rang"] == "OR" and r["folds_vivants"] == "3/4"
+
+
+def test_le_rapport_RESULTATS_est_ecrit_avec_le_bloc_JSON_machine_lisible(tmp_path):
+    from hl_observer.backtesting.recherche_scenario import chercher_toutes
+    chercher_toutes(tmp_path, max_essais_par_strategie=2)
+    t = (tmp_path / "runtime" / "replay" / "RESULTATS_RECHERCHE.md").read_text(encoding="utf-8")
+    assert "JSON_RESULTATS" in t and "AUCUNE promesse" in t
+    assert "cross_venue" in t and "Module `carry`" in t

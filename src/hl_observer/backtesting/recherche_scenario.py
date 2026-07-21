@@ -274,8 +274,10 @@ def chercher(root: str | Path, *, configs: Iterable[dict[str, Any]] | None = Non
     etat = Path(root) / ETAT_RECHERCHE_RELPATH
     if strategie:                                 # un etat PAR module : jamais de melange
         etat = etat.with_name("recherche_scenario_etat_%s.json" % strategie)
+    liste_configs = list(configs if configs is not None else grille_configs())
+    liste_configs = _cribler_configs(d, liste_configs, evaluer_ab=evaluer_ab)
     r = boucle_objectif(
-        configs if configs is not None else grille_configs(),
+        liste_configs,
         evaluer, porte_avec_plateau,
         etat_path=etat, max_essais=max_essais, budget_s=budget_s,
         s_arreter_au_premier=s_arreter_au_premier)
@@ -306,7 +308,14 @@ def chercher(root: str | Path, *, configs: Iterable[dict[str, Any]] | None = Non
                 r["statut"] = "PROMU"
                 r["gagnant"] = max(promus, key=lambda p: float(
                     (p.get("nets") or {}).get("stress") or 0.0))["config"]
+    # rang OR / ARGENT (CPCV — folds purges) : promus seulement, 4 evals chacun (rares = pas cher)
+    for p in (r.get("promus") or []):
+        try:
+            p.update(rang_pepite(d, p["config"], evaluer_ab=evaluer_ab))
+        except Exception:  # noqa: BLE001 — un rang illisible reste ARGENT, jamais un plantage
+            p.setdefault("rang", "ARGENT")
     r["strategie"] = strategie
+    r["n_candidats"] = len(d.candidats)
     return r
 
 
@@ -395,6 +404,80 @@ def chercher_cross_venue(root: str | Path, *, series: list[dict] | None = None,
     return r
 
 
+# ================================================================ 5bis. les canons du 21/07
+# Recherche X/GitHub (demande de Flo) : CPCV/folds purges (Lopez de Prado — PBO plus bas que
+# le walk-forward simple) + successive halving (multi-fidelite : cribler sur un sous-echantillon
+# AVANT de payer l'evaluation complete). References : ml4t/diagnostic, Optuna Hyperband.
+
+def folds_purges(d: DonneesReplay, horizon_min: float, k: int = 4) -> list[list[dict]]:
+    """K tranches TEMPORELLES avec embargo d'un horizon entre chaque — l'esprit CPCV : une
+    pepite doit gagner sur PLUSIEURS epoques disjointes, pas sur une coupe chanceuse."""
+    ts = sorted(float(c.get("recorded_at") or 0.0) for c in d.candidats)
+    if len(ts) < k * 2:
+        return []
+    marge = float(horizon_min) * 60.0
+    bornes = [ts[int(len(ts) * i / k)] for i in range(k)] + [ts[-1] + 1]
+    folds = []
+    for i in range(k):
+        lo = bornes[i] + (marge if i > 0 else 0.0)
+        hi = bornes[i + 1] - (marge if i < k - 1 else 0.0)
+        folds.append([c for c in d.candidats
+                      if lo <= float(c.get("recorded_at") or 0.0) < hi])
+    return folds
+
+
+def rang_pepite(d: DonneesReplay, config: dict[str, Any], *,
+                evaluer_ab: Callable[..., dict] = run_ab_replay,
+                cost_bps: float = DEFAULT_COST_BPS) -> dict[str, Any]:
+    """OR / ARGENT (post-porte, sur les promus seulement — 4 evals, pas cher car ils sont
+    rares) : OR = net > 0 sur >= 3 des 4 folds purges EN PLUS de la porte. L'ARGENT reste
+    une pepite ; l'OR a survecu a une decoupe de plus."""
+    h = float(config.get("horizon_min") or 60.0)
+    folds = folds_purges(d, h)
+    if not folds:
+        return {"rang": "ARGENT", "folds_nets": None}
+    cfg = _sltp(config)
+    nets = []
+    for f in folds:
+        f2 = filtrer_candidats(f, config.get("filtres"))
+        r = evaluer_ab(f2, d.marks, base_config=cfg, horizon_min=h, cost_bps=cost_bps)
+        nets.append(round(float((r.get("arm_a") or {}).get("net_total_usd") or 0.0), 4))
+    vivants = sum(1 for n in nets if n > 0)
+    return {"rang": "OR" if vivants >= 3 else "ARGENT", "folds_nets": nets,
+            "folds_vivants": "%d/%d" % (vivants, len(nets))}
+
+
+SEUIL_CRIBLE_CANDIDATS = 20_000
+FRACTION_CRIBLE = 0.25
+
+
+def _cribler_configs(d: DonneesReplay, configs: list[dict], *,
+                     evaluer_ab: Callable[..., dict] = run_ab_replay) -> list[dict]:
+    """SUCCESSIVE HALVING (multi-fidelite) : sur les grosses populations (copy : 262k), payer
+    3 evaluations completes par config est un gachis — on crible d'abord chaque config sur le
+    QUART LE PLUS RECENT (structure temporelle preservee, jamais un sous-echantillon aleatoire)
+    et seules les configs a net > 0 au crible passent a l'evaluation complete. Un crible
+    n'admet jamais personne : il ne fait qu'EPARGNER du calcul aux perdants evidents."""
+    if len(d.candidats) < SEUIL_CRIBLE_CANDIDATS or not configs:
+        return configs
+    tries = sorted(d.candidats, key=lambda c: float(c.get("recorded_at") or 0.0))
+    recent = tries[int(len(tries) * (1 - FRACTION_CRIBLE)):]
+    retenues = []
+    for cfg in configs:
+        f = filtrer_candidats(recent, cfg.get("filtres"))
+        try:
+            r = evaluer_ab(f, d.marks, base_config=_sltp(cfg),
+                           horizon_min=float(cfg.get("horizon_min") or 60.0),
+                           cost_bps=DEFAULT_COST_BPS)
+            if float((r.get("arm_a") or {}).get("net_total_usd") or 0.0) > 0.0:
+                retenues.append(cfg)
+        except Exception:  # noqa: BLE001 — un crible qui explose laisse passer (porte derriere)
+            retenues.append(cfg)
+    print("  crible multi-fidelite : %d/%d configs passent a l'evaluation complete"
+          % (len(retenues), len(configs)), flush=True)
+    return retenues
+
+
 # ================================================================ 6. TOUS les modules d'un coup
 
 def chercher_toutes(root: str | Path, *, max_essais_par_strategie: int | None = None) -> dict[str, Any]:
@@ -411,9 +494,67 @@ def chercher_toutes(root: str | Path, *, max_essais_par_strategie: int | None = 
     resultats["cross_venue"] = chercher_cross_venue(root, max_essais=max_essais_par_strategie)
     try:
         _ecrire_pepites(root, resultats)
+        _ecrire_resultats_md(root, resultats)
     except OSError:
-        print("  (PEPITES.md inecrivable)")
+        print("  (rapports inecrivables)")
     return resultats
+
+
+def _ecrire_resultats_md(root: str | Path, resultats: dict[str, Any]) -> None:
+    """21/07 (Flo : « un fichier .md contenant TOUS les résultats pour que tu puisses les
+    examiner ») — le rapport COMPLET : profil de données, pépites OR/ARGENT avec leurs nets
+    et leurs folds, meilleurs presque-promus avec la porte qui les a tués, et un bloc JSON
+    embarqué (machine-lisible) pour l'examen par Claude. Écriture atomique."""
+    import datetime as _dt
+    import json as _json
+    import os as _os
+    lignes = ["# RÉSULTATS DE RECHERCHE — replay multi-modules",
+              "", "_Généré le %s. Portes : 2 moitiés purgées+embargo, coûts ×1,5, plateau "
+              "des voisins ; rang OR = net>0 sur ≥3/4 folds purgés (CPCV) en plus. "
+              "Crible multi-fidélité sur les grosses populations. AUCUNE promesse : une "
+              "pépite est un candidat à valider en paper._"
+              % _dt.datetime.now().strftime("%d/%m/%Y %H:%M"), ""]
+    for strat, r in resultats.items():
+        lignes.append("## Module `%s` — statut %s" % (strat, r.get("statut")))
+        lignes.append("- candidats évalués : %s · essais jugés : %d"
+                      % (r.get("n_candidats", "?"), len(r.get("essais") or [])))
+        promus = sorted((r.get("promus") or []),
+                        key=lambda p: (p.get("rang") != "OR",
+                                       -float((p.get("nets") or {}).get("stress") or 0.0)))
+        if promus:
+            lignes.append("- **%d pépite(s)** :" % len(promus))
+            for i, p in enumerate(promus[:8], 1):
+                lignes.append("  %d. [%s] `%s` — nets %s%s"
+                              % (i, p.get("rang", "?"), p["config"], p.get("nets"),
+                                 (" · folds %s %s" % (p.get("folds_vivants"),
+                                                      p.get("folds_nets"))
+                                  if p.get("folds_nets") else "")))
+        elif r.get("motif"):
+            lignes.append("- %s" % r["motif"])
+        # les presque-promus les plus instructifs (la porte tueuse est ecrite dans l'essai)
+        rates = [e for e in (r.get("essais") or [])
+                 if e.get("verdict") == "REJETE" and e.get("nets")]
+        rates.sort(key=lambda e: float((e.get("nets") or {}).get("moitie_1") or 0.0)
+                   + float((e.get("nets") or {}).get("moitie_2") or 0.0), reverse=True)
+        if rates:
+            lignes.append("- presque-promus (à comprendre, pas à repêcher) :")
+            for e in rates[:3]:
+                lignes.append("  - `%s` — nets %s%s"
+                              % (e["config"], e.get("nets"),
+                                 " · %s" % e["instabilite"] if e.get("instabilite") else ""))
+        if r.get("honnetete"):
+            lignes.append("- ⚠️ %s" % r["honnetete"])
+        lignes.append("")
+    lignes.append("<!-- JSON_RESULTATS")
+    lignes.append(_json.dumps(
+        {s: {k: v for k, v in r.items() if k != "essais"} for s, r in resultats.items()},
+        ensure_ascii=False, default=str))
+    lignes.append("-->")
+    p = Path(root) / "runtime" / "replay" / "RESULTATS_RECHERCHE.md"
+    p.parent.mkdir(parents=True, exist_ok=True)
+    tmp = p.with_suffix(".md.tmp")
+    tmp.write_text("\n".join(lignes), encoding="utf-8")
+    _os.replace(tmp, p)
 
 
 def _ecrire_pepites(root: str | Path, resultats: dict[str, Any]) -> None:
