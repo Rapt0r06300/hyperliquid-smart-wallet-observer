@@ -2,6 +2,7 @@
 Rien n'echappe aux tests, meme un tool. Le reseau (_post) est monkeypatche -> 100% offline."""
 from __future__ import annotations
 
+import pytest
 import importlib.util
 from pathlib import Path
 
@@ -210,3 +211,38 @@ def test_le_marquage_MID_refuse_les_fausses_paires_au_dela_de_500_bps():
     fait quelques dizaines de bps ; ±500 est deja genereux."""
     src = open(str(ROOT / "tools" / "ecrire_carry_spot_inputs.py"), encoding="utf-8").read()
     assert "abs(base_mid) <= 500.0" in src
+
+
+# ------------------------------------------------------------------ 21/07 : le motif qui MENTAIT
+
+def test_le_motif_de_refus_nomme_la_VRAIE_cause_et_pas_une_phrase_en_dur():
+    """Le scan imprimait toujours « liquidee meme a 2x » — une phrase écrite en dur datant de
+    l'époque où le scan commençait à 2x. Il descend à 1,0x depuis, et ce texte mélangeait au
+    moins trois causes. ETHFI (meilleur funding du board) était refusé derrière ce message
+    sans qu'on puisse savoir pourquoi. Un refus non remontable à une cause est incorrigible."""
+    m = _load()
+    # ETHFI réel : pire hausse 50,8 %, funding +0,248 b/h, liquidité 412 k.
+    # Plafonné à 3x par la venue -> marge de maintenance 16,7 % -> même un short 1x saute.
+    refus = m.pourquoi_aucun_levier("ETHFI", 0.248, 2.0, 412_000.0, 3.0, 0.508)
+    assert "1.0x" in refus                       # on DIT jusqu'où on est descendu
+    assert "LIQUIDE" in refus
+    assert "maintenance 16.7 %" in refus         # et POURQUOI : une propriété de l'ACTIF
+    # le même coin, si la venue l'autorisait à 10x (mm 5 %), serait VIABLE : la cause est bien là
+    assert "VIABLE" in m.pourquoi_aucun_levier("ETHFI", 0.248, 2.0, 412_000.0, 10.0, 0.508)
+
+
+@pytest.mark.parametrize("levier_max", [0.0, -1.0, None, "10", float("nan")])
+def test_un_coin_malforme_est_ECARTE_jamais_un_scan_qui_tombe(levier_max):
+    """🔴 CRASH LATENT : `fraction_marge_maintenance` lève sur levier_max <= 0. Le scan ne
+    l'attrapait pas -> UN coin malformé rendu par l'API aurait tué TOUTE la passe -> plus de
+    shortlist -> INPUTS_PERIMES -> bot affamé. C'est le mode de panne exact du 19/07."""
+    m = _load()
+    assert m._meilleur_levier("X", 1.0, 0.0, 200_000.0, levier_max, 0.10) is None
+    assert isinstance(m.pourquoi_aucun_levier("X", 1.0, 0.0, 200_000.0, levier_max, 0.10), str)
+
+
+def test_le_levier_max_de_la_venue_est_RESPECTE():
+    """`if levier_max and lev > levier_max` laissait passer levier_max=0 (falsy)."""
+    m = _load()
+    best = m._meilleur_levier("X", 5.0, 0.0, 500_000.0, 2.0, 0.02)
+    assert best is not None and best[0] <= 2.0

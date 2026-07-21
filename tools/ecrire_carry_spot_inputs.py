@@ -312,18 +312,66 @@ def _meilleur_levier(coin, funding, base, liq, levier_max, pire, *, securite=SEC
     """A3 — LEVIER en RISK-PARITY : le plus haut levier qui survit a `securite` x la pire hausse
     observee. Exiger le MEME multiple de securite pour tous les coins egalise le risque de
     liquidation (un coin volatil recoit MOINS de levier). On ne maximise plus le levier a nu."""
+    if not isinstance(levier_max, (int, float)) or float(levier_max) <= 0:
+        return None            # coin malforme cote venue -> ECARTE, jamais un scan qui tombe
     pire_stresse = max(0.0, float(pire)) * float(securite)
     best = None
     for lev in LEVIERS_A_ESSAYER:
-        if levier_max and lev > levier_max:
+        if lev > float(levier_max):
             continue
         mr = round(1.0 / lev, 6)
-        v = evaluer_carry_neutre(coin=coin, funding_bps_h=funding, base_bps=base, liquidite_spot_usd=liq,
-                                 maker=True, levier_max=levier_max, marge_ratio=mr,
-                                 pire_hausse_observee=pire_stresse)
+        try:
+            v = evaluer_carry_neutre(coin=coin, funding_bps_h=funding, base_bps=base,
+                                     liquidite_spot_usd=liq, maker=True, levier_max=levier_max,
+                                     marge_ratio=mr, pire_hausse_observee=pire_stresse)
+        except (ValueError, TypeError, ZeroDivisionError):
+            continue           # une entree aberrante ecarte CE levier, pas les 19 autres coins
         if v.viable:
             best = (lev, mr, v)
     return best
+
+
+def pourquoi_aucun_levier(coin, funding, base, liq, levier_max, pire, *,
+                          securite=SECURITE_LIQUIDATION):
+    """LE VRAI MOTIF quand AUCUN levier ne passe — au levier le PLUS FAVORABLE (le plus bas).
+
+    🔴 21/07 — LE MESSAGE MENTAIT. Quand `_meilleur_levier` rendait None, le scan imprimait
+    toujours « jambe perp liquidee meme a 2x », une phrase ECRITE EN DUR datant de l'epoque ou
+    le scan commencait a 2x. Depuis, il descend a 1,0x, et ce texte melangeait au moins trois
+    causes distinctes (levier max de la venue, liquidation, cout d'entree/base). ETHFI —
+    meilleur funding du board (+0,248 b/h, 412 k de liquidite, RUPTURE_HAUTE constatee) —
+    etait refuse chaque passe derriere ce message, sans qu'on puisse savoir pourquoi.
+
+    Un refus qu'on ne peut pas remonter a une cause est un refus qu'on ne peut pas corriger.
+    """
+    if not isinstance(levier_max, (int, float)) or float(levier_max) <= 0:
+        return "levier max illisible cote venue (%r) -> coin ecarte" % (levier_max,)
+    leviers = [l for l in LEVIERS_A_ESSAYER if l <= float(levier_max)]
+    if not leviers:
+        return ("levier max de la venue %.2fx < %.1fx (aucun levier essayable)"
+                % (float(levier_max), LEVIERS_A_ESSAYER[0]))
+    lev = min(leviers)
+    try:
+        v = evaluer_carry_neutre(coin=coin, funding_bps_h=funding, base_bps=base,
+                                 liquidite_spot_usd=liq, maker=True, levier_max=levier_max,
+                                 marge_ratio=round(1.0 / lev, 6),
+                                 pire_hausse_observee=max(0.0, float(pire)) * float(securite))
+    except (ValueError, TypeError, ZeroDivisionError) as exc:
+        return "evaluation impossible (%s) -> coin ecarte" % exc
+    detail = ""
+    if "LIQUID" in str(v.motif):
+        # LA cause reelle sur les coins volatils : la marge de MAINTENANCE est une propriete de
+        # l'ACTIF (mm = 1/(2 x levier_max de la venue)), pas du levier qu'on choisit. Un actif
+        # plafonne a 3x porte mm = 16,7 % : meme un short 1x est liquide par une hausse ~71 %.
+        try:
+            from hl_observer.funding.carry_liquidation_risk import fraction_marge_maintenance
+            mm = fraction_marge_maintenance(float(levier_max))
+            detail = (" [levier max venue %.0fx -> marge de maintenance %.1f %% ; pire hausse "
+                      "stressee %.0f %%]" % (float(levier_max), 100 * mm,
+                                             100 * max(0.0, float(pire)) * float(securite)))
+        except Exception:  # noqa: BLE001
+            detail = ""
+    return "refuse jusqu'au levier le plus bas (%.1fx) : %s%s" % (lev, v.motif, detail)
 
 
 def classer_viables(viables, *, top_k: int = PLAFOND_SHORTLIST):
@@ -435,7 +483,8 @@ def scanner(diagnostic: bool):
             funding_decision = fp.funding_persistant_bps_h if fp.fiable else p["funding_bps_h"]
             best = _meilleur_levier(c, funding_decision, base, liq, p["levier_max"], pire)
             if best is None:
-                raison = "jambe perp liquidee meme a 2x (funding persistant<=cout / trop volatil)"
+                raison = pourquoi_aucun_levier(c, funding_decision, base, liq,
+                                               p["levier_max"], pire)
             else:
                 lev, mr, v = best
                 # PLANCHER DE BREAK-EVEN (18/07) : un carry qui met des JOURS a rembourser son cout
