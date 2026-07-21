@@ -166,7 +166,8 @@ def raison_de_sortie(position: dict[str, Any], *, now_ms: int, funding_bps_h_cou
             and pnl_realise(position, base_bps_courant=float(base_bps_courant))
             >= SEUIL_PRISE_PROFIT_USD):
         return SORTIE_PRISE_PROFIT_BASE
-    if (int(now_ms) - int(position["entry_ts_ms"])) / 3.6e6 >= float(age_max_h):
+    _depuis_age = int(position.get("age_reference_ts_ms") or position["entry_ts_ms"])
+    if (int(now_ms) - _depuis_age) / 3.6e6 >= float(age_max_h):
         # 🔴 21/07 — REVALIDER N'EST PAS FERMER. Cette porte fermait une position vivante
         # tous les 14 jours « pour revalider ». MESURE : l'aller-retour vaut 22 bps ; a 14
         # jours, le renouvellement coute 1,571 bps/jour contre 3,000 bps/jour de revenu brut
@@ -313,7 +314,8 @@ class GestionnaireCarry:
                 from hl_observer.funding.carry_renfort import (MOTIF as MOTIF_RENFORT,
                                                                ajout_amortissable,
                                                                peut_renforcer, renforcer)
-                heures_restantes = float(age_max_h) - (int(now_ms) - int(pos["entry_ts_ms"])) / 3.6e6
+                heures_restantes = float(age_max_h) - (
+                    int(now_ms) - int(pos.get("age_reference_ts_ms") or pos["entry_ts_ms"])) / 3.6e6
                 ok, refus = peut_renforcer(
                     pos, marge_cible_usd=float(marge_usd), now_ms=int(now_ms),
                     viable=bool(decision.get("viable")),
@@ -346,9 +348,14 @@ class GestionnaireCarry:
                 evt["renfort_refuse"] = "ERREUR_INTERNE"
             # l'horloge d'age repart a chaque revalidation reussie : sans ca, la porte se
             # redeclencherait a chaque tick une fois l'age max franchi.
-            age_h = (int(now_ms) - int(pos["entry_ts_ms"])) / 3.6e6
+            depuis = int(pos.get("age_reference_ts_ms") or pos["entry_ts_ms"])
+            age_h = (int(now_ms) - depuis) / 3.6e6
             if age_h >= float(age_max_h) and pos.get("revalidee_viable"):
-                pos["entry_ts_ms"] = int(now_ms)
+                # on remet l'HORLOGE D'AGE a zero, JAMAIS `entry_ts_ms` : ce dernier est la
+                # reference du decoupage regle/estime du funding (funding_settlement compte
+                # les sommets d'heure franchis DEPUIS l'entree). Le toucher ferait chuter le
+                # PnL stable de tout l'accru a chaque revalidation.
+                pos["age_reference_ts_ms"] = int(now_ms)
                 pos["revalidations"] = int(pos.get("revalidations") or 0) + 1
                 evt["revalidee_sans_fermer"] = {"age_h": round(age_h, 1),
                                                 "revalidations": pos["revalidations"],
