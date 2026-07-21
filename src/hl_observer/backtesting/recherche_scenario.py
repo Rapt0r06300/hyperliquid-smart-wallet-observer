@@ -46,6 +46,14 @@ EMBARGO_FACTEUR = 1.0             # embargo = 1 horizon de part et d'autre de la
 
 ETAT_RECHERCHE_RELPATH = Path("runtime") / "replay" / "recherche_scenario_etat.json"
 
+#: seaux de strategies (21/07) : les '?' historiques sont des signaux COPY du firehose.
+ALIAS_STRATEGIES: dict[str, set] = {
+    "copy": {"copy", "?", "none"},
+    "carry": {"carry"},
+    "arbitrage": {"arbitrage", "funding_arb", "triangular"},
+}
+STRATEGIES_MODULES = ("carry", "copy", "arbitrage")
+
 
 def repertoire_replay_consolide(root: str | Path) -> Path:
     """Où vivent les consolidés. 🔴 21/07 : le consolidateur (`merge_replay`) écrit dans
@@ -67,10 +75,19 @@ class DonneesReplay:
     marks: list[dict] = field(default_factory=list)
 
     @classmethod
-    def charger(cls, root: str | Path) -> "DonneesReplay":
+    def charger(cls, root: str | Path, *, strategie: str | None = None) -> "DonneesReplay":
+        """21/07 (Flo : « les meilleurs scénarios pour TOUS nos modules ») : chargement
+        PAR STRATÉGIE — mélanger 262k signaux copy et les candidats carry dans une même
+        grille donnerait le scénario moyen de RIEN. `strategie=None` garde tout (compat)."""
         base = repertoire_replay_consolide(root)
-        return cls(candidats=load_jsonl(str(base / "candidates.jsonl")),
-                   marks=load_jsonl(str(base / "marks.jsonl")))
+        if not (base / "candidates.jsonl").exists():
+            return cls(candidats=[], marks=[])            # dossier vide = INSUFFISANT honnete
+        cands = load_jsonl(str(base / "candidates.jsonl"))
+        if strategie is not None:
+            seaux = ALIAS_STRATEGIES.get(strategie, {strategie})
+            cands = [c for c in cands
+                     if str(c.get("strategie") or "?").lower() in seaux]
+        return cls(candidats=cands, marks=load_jsonl(str(base / "marks.jsonl")))
 
     def moities_avec_embargo(self, horizon_min: float) -> tuple[list[dict], list[dict]]:
         """Coupe TEMPORELLE médiane + embargo d'un horizon DE CHAQUE CÔTÉ de la frontière.
@@ -92,6 +109,16 @@ class DonneesReplay:
 
 
 # ================================================================ 2. l'espace de recherche
+
+def grille_large() -> Iterator[dict[str, Any]]:
+    """21/07 (« il doit nous trouver des pépites ! ») : le FILET s'élargit — ~150 configs
+    (SL 20→120, TP 40→300, horizons 15 min→4 h). Les MAILLES ne bougent pas : chaque config
+    passe les mêmes portes (deux moitiés + stress ×1,5 + plateau). Plus de candidats au
+    concours, jamais un concours plus facile."""
+    return grille_configs(sls=(20.0, 30.0, 40.0, 60.0, 90.0, 120.0),
+                          tps=(40.0, 50.0, 70.0, 100.0, 150.0, 200.0, 300.0),
+                          horizons=(15.0, 30.0, 60.0, 120.0, 240.0))
+
 
 def grille_configs(*, sls=(30.0, 40.0, 60.0, 90.0), tps=(50.0, 70.0, 100.0, 150.0),
                    horizons=(30.0, 60.0, 120.0)) -> Iterator[dict[str, Any]]:
@@ -169,6 +196,7 @@ def porte_robuste(rapport: dict[str, Any]) -> bool:
 def chercher(root: str | Path, *, configs: Iterable[dict[str, Any]] | None = None,
              max_essais: int | None = None, budget_s: float | None = None,
              donnees: DonneesReplay | None = None,
+             strategie: str | None = None,
              evaluer_ab: Callable[..., dict] = run_ab_replay) -> dict[str, Any]:
     """Grille -> porte deux-moitiés+stress -> PLATEAU des voisins -> verdict.
 
@@ -176,10 +204,11 @@ def chercher(root: str | Path, *, configs: Iterable[dict[str, Any]] | None = Non
     mais dont les voisins meurent est rejeté (REJETE_INSTABLE dans son rapport) — un pic
     isolé n'est pas promu, jamais.
     """
-    d = donnees if donnees is not None else DonneesReplay.charger(root)
+    d = donnees if donnees is not None else DonneesReplay.charger(root, strategie=strategie)
     if not d.candidats:
-        return {"statut": "INSUFFISANT", "motif": "aucun candidat consolide "
-                "(lancer la consolidation W2 d'abord)", "essais": []}
+        return {"statut": "INSUFFISANT", "strategie": strategie,
+                "motif": "aucun candidat consolide pour %r "
+                "(lancer la consolidation W2 d'abord)" % (strategie or "toutes"), "essais": []}
 
     def evaluer(config: dict[str, Any]) -> dict[str, Any]:
         return evaluer_sur_moities(d, config, evaluer_ab=evaluer_ab)
@@ -201,14 +230,148 @@ def chercher(root: str | Path, *, configs: Iterable[dict[str, Any]] | None = Non
             rapport["instabilite"] = "REJETE_INSTABLE: %d/%d voisins vivants" % (vivants, len(vs))
         return stable
 
-    return boucle_objectif(
+    etat = Path(root) / ETAT_RECHERCHE_RELPATH
+    if strategie:                                 # un etat PAR module : jamais de melange
+        etat = etat.with_name("recherche_scenario_etat_%s.json" % strategie)
+    r = boucle_objectif(
         configs if configs is not None else grille_configs(),
         evaluer, porte_avec_plateau,
-        etat_path=Path(root) / ETAT_RECHERCHE_RELPATH,
-        max_essais=max_essais, budget_s=budget_s)
+        etat_path=etat, max_essais=max_essais, budget_s=budget_s)
+    r["strategie"] = strategie
+    return r
 
 
-__all__ = ["DonneesReplay", "grille_configs", "voisins", "raffiner_autour",
-           "evaluer_sur_moities", "porte_robuste", "chercher",
+# ================================================================ 5. cross-venue (son PROPRE espace)
+
+def evaluer_episodes_cross_venue(series: list[dict], config: dict[str, Any], *,
+                                 cout_ar_bps: float = 22.0) -> dict[str, Any]:
+    """Rejoue la strategie de dispersion : ENTRER quand `dispersion_bps_h >= seuil_entree`,
+    SORTIR quand elle retombe sous `seuil_sortie`. Gain d'un episode = ∫dispersion·dt (bps)
+    − coût aller-retour 4 jambes (2 venues × 2 jambes, ~22 bps — stress ×1,5 ailleurs).
+    Retourne la même forme que l'arm A du replay -> les MÊMES portes jugent (net, PF, trades).
+    Sur 100 $ de notional par jambe : bps → $ directement (100$/1e4 = 0,01 $/bps)."""
+    se, ss = float(config["seuil_entree"]), float(config["seuil_sortie"])
+    par_coin: dict[str, list] = {}
+    for r in series:
+        c = str(r.get("coin") or "")
+        t = float(r.get("ts_ms") or (r.get("ts") or 0) * 1000.0) / 1000.0
+        d = r.get("dispersion_bps_h")
+        if c and t > 0 and isinstance(d, (int, float)):
+            par_coin.setdefault(c, []).append((t, float(d)))
+    nets: list[float] = []
+    for pts in par_coin.values():
+        pts.sort()
+        en_pos, capture, t_prec, d_prec = False, 0.0, None, 0.0
+        for (t, d) in pts:
+            if en_pos and t_prec is not None:
+                capture += d_prec * (t - t_prec) / 3600.0          # bps/h × h = bps
+            if not en_pos and d >= se:
+                en_pos, capture = True, 0.0
+            elif en_pos and d < ss:
+                nets.append((capture - cout_ar_bps) / 1e4 * 100.0)  # $ sur 100 $/jambe
+                en_pos = False
+            t_prec, d_prec = t, d
+    gains = sum(x for x in nets if x > 0)
+    pertes = -sum(x for x in nets if x < 0)
+    pf = "inf" if (gains > 0 and pertes == 0) else (gains / pertes if pertes > 0 else 0.0)
+    return {"net_total_usd": round(sum(nets), 6), "trades": len(nets), "profit_factor": pf}
+
+
+def chercher_cross_venue(root: str | Path, *, series: list[dict] | None = None,
+                         max_essais: int | None = None) -> dict[str, Any]:
+    """La recherche cross-venue — MÊMES portes (deux moitiés temporelles + stress coûts ×1,5
+    + plateau des seuils voisins). ⚠️ EXPLORATOIRE : ne touche pas au verdict 72 h du
+    protocole (barres pré-écrites) — un seuil optimisé ici devra survivre au hors-échantillon
+    APRÈS les 72 h avant d'exister en live."""
+    if series is None:
+        p = Path(root) / "runtime" / "data" / "dispersion_venues.jsonl"
+        series = load_jsonl(str(p)) if p.exists() else []
+    if len(series) < 500:
+        return {"statut": "INSUFFISANT", "strategie": "cross_venue",
+                "motif": "%d observations (<500) — laisser le collecteur tourner" % len(series),
+                "essais": []}
+    def ts(r):
+        return float(r.get("ts_ms") or (r.get("ts") or 0) * 1000.0)
+    tries = sorted(series, key=ts)
+    coupe = ts(tries[len(tries) // 2])
+    m1 = [r for r in tries if ts(r) <= coupe - 3600_000.0]   # embargo 1 h de part et d'autre
+    m2 = [r for r in tries if ts(r) >= coupe + 3600_000.0]
+    def evaluer(config):
+        return {"config": config,
+                "moitie_1": evaluer_episodes_cross_venue(m1, config),
+                "moitie_2": evaluer_episodes_cross_venue(m2, config),
+                "stress": evaluer_episodes_cross_venue(tries, config, cout_ar_bps=22.0 * STRESS_COUTS)}
+    def porte(rapport):
+        if not porte_robuste(rapport):
+            return False
+        vivants = 0
+        vs = [dict(rapport["config"], seuil_entree=rapport["config"]["seuil_entree"] + d)
+              for d in (-0.05, 0.05)]
+        for v in vs:
+            rv = evaluer(v)
+            net = (float(rv["moitie_1"].get("net_total_usd") or 0)
+                   + float(rv["moitie_2"].get("net_total_usd") or 0))
+            vivants += 1 if net > 0 else 0
+        return vivants / len(vs) >= FRACTION_VOISINS_VIVANTS
+    configs = [{"seuil_entree": se, "seuil_sortie": ss}
+               for se in (0.10, 0.15, 0.20, 0.30, 0.50, 0.80)
+               for ss in (0.02, 0.05, 0.10, 0.20) if ss < se]
+    r = boucle_objectif(configs, evaluer, porte,
+                        etat_path=Path(root) / "runtime" / "replay"
+                        / "recherche_scenario_etat_cross_venue.json",
+                        max_essais=max_essais)
+    r["strategie"] = "cross_venue"
+    r["honnetete"] = ("exploratoire — le verdict officiel reste celui du protocole 72 h "
+                      "(barres pre-ecrites), puis survie hors echantillon exigee")
+    return r
+
+
+# ================================================================ 6. TOUS les modules d'un coup
+
+def chercher_toutes(root: str | Path, *, max_essais_par_strategie: int | None = None) -> dict[str, Any]:
+    """« Il doit replay TOUS nos modules » (21/07). Une recherche PAR module (populations
+    jamais mélangées), grille LARGE (le filet s'élargit, les mailles jamais), et un rapport
+    PEPITES.md écrit à la fin. Les actions REFUSÉES sont rejouées par ailleurs (rapport §7)."""
+    resultats: dict[str, Any] = {}
+    for strat in STRATEGIES_MODULES:
+        print("=== module %s ===" % strat, flush=True)
+        resultats[strat] = chercher(root, strategie=strat, configs=grille_large(),
+                                    max_essais=max_essais_par_strategie)
+    print("=== module cross_venue ===", flush=True)
+    resultats["cross_venue"] = chercher_cross_venue(root, max_essais=max_essais_par_strategie)
+    try:
+        _ecrire_pepites(root, resultats)
+    except OSError:
+        print("  (PEPITES.md inecrivable)")
+    return resultats
+
+
+def _ecrire_pepites(root: str | Path, resultats: dict[str, Any]) -> None:
+    lignes = ["# PÉPITES — recherche de scénarios par module", "",
+              "_Replay sur données enregistrées : un PROMU a survécu à deux moitiés "
+              "temporelles disjointes (embargo), aux coûts ×1,5 et au plateau des voisins. "
+              "Ce n'est PAS une promesse de PnL : c'est un candidat à valider en paper._", ""]
+    for strat, r in resultats.items():
+        lignes.append("## %s — %s" % (strat, r.get("statut")))
+        if r.get("gagnant"):
+            lignes.append("- **PÉPITE** : `%s`" % r["gagnant"])
+        if r.get("motif"):
+            lignes.append("- %s" % r["motif"])
+        if r.get("honnetete"):
+            lignes.append("- ⚠️ %s" % r["honnetete"])
+        lignes.append("- essais jugés : %d" % len(r.get("essais") or []))
+        lignes.append("")
+    p = Path(root) / "runtime" / "replay" / "PEPITES.md"
+    p.parent.mkdir(parents=True, exist_ok=True)
+    tmp = p.with_suffix(".md.tmp")
+    tmp.write_text("\n".join(lignes), encoding="utf-8")
+    import os as _os
+    _os.replace(tmp, p)
+
+
+__all__ = ["DonneesReplay", "grille_configs", "grille_large", "voisins", "raffiner_autour",
+           "evaluer_sur_moities", "porte_robuste", "chercher", "chercher_cross_venue",
+           "chercher_toutes", "evaluer_episodes_cross_venue", "repertoire_replay_consolide",
+           "ALIAS_STRATEGIES", "STRATEGIES_MODULES",
            "MIN_TRADES_PAR_MOITIE", "MIN_PF_PAR_MOITIE", "STRESS_COUTS",
            "FRACTION_VOISINS_VIVANTS", "ETAT_RECHERCHE_RELPATH"]

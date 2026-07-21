@@ -20,7 +20,8 @@ REM les shards frais s'empilaient a cote. La recherche merite les donnees d'AUJO
 echo  [1/2] Consolidation des shards (candidats + marks, historique inclus)...
 python -m hl_observer.runtime.replay_recorder --base runtime\replay
 echo.
-echo  [2/2] Recherche de scenario (deux moities + stress + plateau)...
-python -c "import json;from hl_observer.backtesting.recherche_scenario import chercher;r=chercher('.');print(json.dumps({k:v for k,v in r.items() if k!='essais'},ensure_ascii=False,indent=1));print();print('essais juges :',r.get('n_essais_total'));print('etat/reprise : runtime\\replay\\recherche_scenario_etat.json')"
+echo  [2/2] Recherche de PEPITES — TOUS les modules (carry, copy, arbitrage, cross-venue)...
+echo        grille LARGE, portes inchangees (2 moities + stress x1,5 + plateau), 1 etat/module
+python -c "import json;from hl_observer.backtesting.recherche_scenario import chercher_toutes;r=chercher_toutes('.');print();print(json.dumps({s:{k:v for k,v in x.items() if k!='essais'} for s,x in r.items()},ensure_ascii=False,indent=1));print();print('>>> rapport : runtime\\replay\\PEPITES.md')"
 echo.
 pause

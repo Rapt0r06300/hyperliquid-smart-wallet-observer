@@ -125,3 +125,55 @@ def test_le_resolveur_prefere_les_consolides_de_MERGED(tmp_path):
     assert repertoire_replay_consolide(tmp_path) == base          # pas de consolide -> racine
     (base / "_merged" / "candidates.jsonl").write_text("{}\n", encoding="utf-8")
     assert repertoire_replay_consolide(tmp_path) == base / "_merged"
+
+
+# ---------------- 21/07 : PEPITES — tous les modules, populations JAMAIS melangees ----------------
+
+def test_charger_filtre_par_strategie_les_seaux_d_alias(tmp_path):
+    """262k signaux copy + candidats carry dans une meme grille = le scenario moyen de RIEN.
+    Les '?' historiques sont du COPY (firehose) ; carry et arbitrage ont leurs seaux."""
+    import json as _j
+    base = tmp_path / "runtime" / "replay" / "_merged"; base.mkdir(parents=True)
+    (base / "candidates.jsonl").write_text("\n".join([
+        _j.dumps({"recorded_at": 1, "strategie": "carry"}),
+        _j.dumps({"recorded_at": 2, "strategie": "?"}),
+        _j.dumps({"recorded_at": 3}),                       # sans etiquette -> copy
+        _j.dumps({"recorded_at": 4, "strategie": "arbitrage"}),
+    ]) + "\n", encoding="utf-8")
+    (base / "marks.jsonl").write_text("", encoding="utf-8")
+    from hl_observer.backtesting.recherche_scenario import DonneesReplay
+    assert len(DonneesReplay.charger(tmp_path, strategie="carry").candidats) == 1
+    assert len(DonneesReplay.charger(tmp_path, strategie="copy").candidats) == 2
+    assert len(DonneesReplay.charger(tmp_path, strategie="arbitrage").candidats) == 1
+    assert len(DonneesReplay.charger(tmp_path).candidats) == 4      # compat : tout
+
+
+def test_cross_venue_episode_paye_quand_la_dispersion_couvre_les_4_jambes():
+    """20 bps/h pendant 2 h = 40 bps captures - 22 bps de couts = +18 bps -> +0.18$ /100$."""
+    from hl_observer.backtesting.recherche_scenario import evaluer_episodes_cross_venue
+    serie = ([{"coin": "BTC", "ts": 1000 + k * 600, "dispersion_bps_h": 20.0} for k in range(13)]
+             + [{"coin": "BTC", "ts": 1000 + 13 * 600, "dispersion_bps_h": 0.0}])
+    r = evaluer_episodes_cross_venue(serie, {"seuil_entree": 10.0, "seuil_sortie": 5.0})
+    assert r["trades"] == 1
+    # 13 intervalles de detention (on encaisse JUSQU'A l'observation de sortie incluse)
+    assert abs(r["net_total_usd"] - ((20.0 * (13 * 600) / 3600 - 22.0) / 1e4 * 100)) < 1e-6
+    # sous le seuil d'entree : aucun episode, jamais un trade invente
+    r2 = evaluer_episodes_cross_venue(serie, {"seuil_entree": 50.0, "seuil_sortie": 5.0})
+    assert r2["trades"] == 0
+
+
+def test_cross_venue_INSUFFISANT_sous_500_observations(tmp_path):
+    from hl_observer.backtesting.recherche_scenario import chercher_cross_venue
+    r = chercher_cross_venue(tmp_path, series=[{"coin": "BTC", "ts": 1, "dispersion_bps_h": 1.0}])
+    assert r["statut"] == "INSUFFISANT" and "cross_venue" == r["strategie"]
+
+
+def test_chercher_toutes_ecrit_le_rapport_PEPITES_meme_sans_donnees(tmp_path):
+    """4 modules balayes, verdicts honnetes (INSUFFISANT partout sur un dossier vide), et le
+    rapport PEPITES.md existe avec l'avertissement anti-promesse."""
+    from hl_observer.backtesting.recherche_scenario import chercher_toutes
+    r = chercher_toutes(tmp_path, max_essais_par_strategie=2)
+    assert set(r) == {"carry", "copy", "arbitrage", "cross_venue"}
+    assert all(x["statut"] == "INSUFFISANT" for x in r.values())
+    t = (tmp_path / "runtime" / "replay" / "PEPITES.md").read_text(encoding="utf-8")
+    assert "PAS une promesse" in t and "cross_venue" in t
