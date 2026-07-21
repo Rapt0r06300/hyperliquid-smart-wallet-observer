@@ -208,3 +208,56 @@ def test_regenerer_N_fois_ne_perd_RIEN_le_rapport_lit_les_sources_sans_les_touch
         assert t.startswith("# Rapport quotidien") and t.rstrip().endswith("retrait.**")
     assert ledger.read_bytes() == avant, "le rapport ne doit JAMAIS ecrire dans une source"
     assert (tmp_path / "rapports" / "archive_quotidienne").exists()
+
+
+# ------------------------------------------------------------------ §10 : où va le capital
+
+def _ecrire_allocation(root: Path) -> None:
+    d = root / "runtime" / "data"
+    d.mkdir(parents=True, exist_ok=True)
+    (d / "carry_allocation.json").write_text(json.dumps({
+        "regle": "marge ∝ gain_net_24h_bps ** 3, plafond 40 % par coin, plancher 25 $",
+        "coins_finances": 2, "coins_ecartes": ["MAUVAIS"], "capital_alloue_usd": 637.7,
+        "rendement_pondere_bps_j": 1.8291, "rendement_part_egale_bps_j": 1.6095,
+        "gain_vs_part_egale_pct": 13.65, "meilleur": "BTC",
+        "marges_usd": {"BTC": 240.36, "VIRTUAL": 38.25, "MAUVAIS": 0.0},
+        "rendements_bps_j": {"BTC": 2.207, "VIRTUAL": 1.196, "MAUVAIS": -0.4},
+    }, ensure_ascii=False), encoding="utf-8")
+
+
+def test_section10_dit_ou_va_le_capital_et_ce_qui_est_ecarte(tmp_path):
+    _ecrire_allocation(tmp_path)
+    txt = "\n".join(RQ._sec_allocation(tmp_path))
+    assert "BTC" in txt and "240.36" in txt
+    assert "13.65" in txt                       # le gain est ANNONCÉ, pas déduit
+    assert "MAUVAIS" in txt                     # un coin écarté est NOMMÉ, jamais silencieux
+
+
+def test_section10_dit_honnetement_quand_rien_n_a_ete_publie(tmp_path):
+    txt = "\n".join(RQ._sec_allocation(tmp_path))
+    assert "Aucune allocation publiée" in txt   # absence DITE, pas masquée
+
+
+def test_section10_signale_les_positions_sous_financees(tmp_path):
+    """L'écart marge réelle -> marge cible est ce que le RENFORT comblera. Il doit être VU."""
+    _ecrire_allocation(tmp_path)
+    pos = tmp_path / "runtime" / "data"
+    pos.mkdir(parents=True, exist_ok=True)
+    (pos / "carry_paper_positions.json").write_text(json.dumps({
+        "mode": "LIVE", "ouvertes": {"BTC": {"coin": "BTC", "mode": "LIVE", "marge_usdt": 25.0,
+                                             "notional_usdt": 125.0, "levier": 5.0,
+                                             "entry_ts_ms": 1, "last_accrual_ts_ms": 1,
+                                             "cout_entree_bps": 10.0,
+                                             "funding_accrued_usdt": 0.0}}},
+        ensure_ascii=False), encoding="utf-8")
+    txt = "\n".join(RQ._sec_allocation(tmp_path))
+    assert "sous-financée" in txt.lower()
+    assert "+215.36" in txt                     # 240,36 − 25,00, le montant exact
+
+
+def test_le_rapport_complet_numerote_ses_sections_sans_doublon(tmp_path):
+    _ecrire_allocation(tmp_path)
+    titres = [l for l in RQ.generer(tmp_path).splitlines() if l.startswith("## ")]
+    numeros = [t.split(".")[0].removeprefix("## ") for t in titres]
+    assert numeros == sorted(numeros, key=int)
+    assert len(numeros) == len(set(numeros))    # deux « ## 10. » = un rapport illisible

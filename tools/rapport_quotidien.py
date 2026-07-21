@@ -314,7 +314,7 @@ def _sec_univers_scan(root: Path) -> list[str]:
 
 def _sec_a_faire(root: Path, now_ms: int) -> list[str]:
     """Des CONSTATS actionnables dérivés des fichiers — jamais une promesse, jamais un ordre."""
-    out = ["## 10. À FAIRE — ce que les données d'aujourd'hui désignent", ""]
+    out = ["## 11. À FAIRE — ce que les données d'aujourd'hui désignent", ""]
     actions: list[str] = []
     try:  # cross-venue : verdict possible ?
         lignes = (root / "runtime" / "data" / "dispersion_venues.jsonl").read_text(
@@ -364,6 +364,58 @@ def _sec_a_faire(root: Path, now_ms: int) -> list[str]:
     return out
 
 
+def _sec_allocation(root: Path) -> list[str]:
+    """OÙ VA LE CAPITAL, et est-ce qu'il va au bon endroit ? (21/07)
+
+    Le 21/07 on a mesuré une corrélation de −0,596 entre la marge engagée et le rendement
+    net : on finançait le PLUS les coins les MOINS rentables (BTC, le meilleur, avait 25 $ ;
+    STABLE, parmi les pires, 126 $). Cette section existe pour que ça ne puisse plus jamais
+    passer une journée entière sans être vu.
+    """
+    lignes = ["## 10. Où va le capital (allocation)", ""]
+    d = _json(root / "runtime" / "data" / "carry_allocation.json")
+    if not d:
+        return lignes + ["_Aucune allocation publiée (le carry n'a pas encore tourné avec "
+                         "l'allocation par rendement net — redémarrage requis)._"]
+    lignes += [
+        "- règle : `%s`" % d.get("regle", "?"),
+        "- capital alloué : **%s $** sur %s coin(s) financé(s)"
+        % (d.get("capital_alloue_usd"), d.get("coins_finances")),
+        "- rendement pondéré : **%s bps/j** (part égale : %s bps/j -> **%s %%** de mieux)"
+        % (d.get("rendement_pondere_bps_j"), d.get("rendement_part_egale_bps_j"),
+           d.get("gain_vs_part_egale_pct")),
+        "- meilleur coin : **%s**" % d.get("meilleur"),
+    ]
+    ecartes = d.get("coins_ecartes") or []
+    if ecartes:
+        lignes.append("- écartés (rendement absent ou <= 0, donc ZÉRO capital) : %s"
+                      % ", ".join(map(str, ecartes)))
+    marges, nets = d.get("marges_usd") or {}, d.get("rendements_bps_j") or {}
+    if marges:
+        lignes += ["", "| coin | rendement net (bps/j) | marge cible ($) |",
+                   "|---|---:|---:|"]
+        for c in sorted(marges, key=lambda c: -(nets.get(c) or 0)):
+            lignes.append("| %s | %s | %s |" % (c, nets.get(c), marges[c]))
+    # ce que la marge RÉELLE vaut aujourd'hui, comparé à la cible : l'écart se comble par
+    # RENFORT (aucune fermeture, donc aucun frais de sortie), une position par jour maximum.
+    try:
+        import sys as _s
+        _s.path.insert(0, str(root / "src"))
+        from hl_observer.funding.carry_positions_store import charger_gestionnaire
+        ouvertes = charger_gestionnaire(root, mode="LIVE").ouvertes
+        retards = [(c, float(p.get("marge_usdt") or 0), float(marges.get(c) or 0))
+                   for c, p in sorted(ouvertes.items())
+                   if float(marges.get(c) or 0) > float(p.get("marge_usdt") or 0) * 1.4]
+        if retards:
+            lignes += ["", "**Positions sous-financées** (le renfort les comblera, une par "
+                       "jour et par position, sans jamais fermer) :", ""]
+            for c, a, cible in retards:
+                lignes.append("- %s : %.2f $ -> %.2f $ (**%+.2f $**)" % (c, a, cible, cible - a))
+    except Exception as exc:  # noqa: BLE001
+        lignes.append("_comparaison aux positions vivantes indisponible : %s_" % exc)
+    return lignes
+
+
 def generer(root: str | Path = RACINE, *, now_ms: int | None = None) -> str:
     """Le rapport complet en Markdown. Ne lève JAMAIS (un rapport absent = un matin aveugle)."""
     try:
@@ -391,6 +443,7 @@ def generer(root: str | Path = RACINE, *, now_ms: int | None = None) -> str:
         # 20/07 : le rapport qui PILOTE — economie/position, univers du scan, actions du jour.
         secs.append(_sec_economie_positions(racine, now))
         secs.append(_sec_univers_scan(racine))
+        secs.append(_sec_allocation(racine))
         secs.append(_sec_a_faire(racine, now))
         for sec in secs:
             parts += sec + [""]

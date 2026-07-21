@@ -286,6 +286,9 @@ th{letter-spacing:1.2px}
      <div class="kv"><span>latent de base (réversible)</span><b id="carry-latent">…</b></div>
    </div>
    <table><thead><tr><th style="width:20%">coin</th><th style="width:20%">notional</th><th style="width:18%">levier</th><th style="width:22%">funding accru</th><th style="width:20%;text-align:right">âge</th></tr></thead><tbody id="carrytb"></tbody></table>
+   <!-- 21/07 : OU VA LE CAPITAL. On finançait le plus les coins les MOINS rentables
+        (correlation marge/rendement = -0,596). Cette ligne rend l'allocation lisible. -->
+   <div class="hint" id="carry-alloc" style="margin-top:8px"></div>
    <div class="hint" id="carryviab" style="margin-top:8px"></div>
  </div>
 
@@ -623,7 +626,25 @@ function loadCarry(){fetch('/v2/carry').then(function(r){return r.json()}).then(
   document.getElementById('carry-accru').textContent='$'+n(d.funding_accru_usdt,6);
   var cfc=document.getElementById('c-fund-carry');if(cfc)cfc.textContent='$'+n(d.funding_accru_usdt,6);
   var ps=d.positions||[];
-  tb.innerHTML=ps.map(function(p){return '<tr><td><b>'+p.coin+'</b></td><td>$'+n(p.notional_usdt,0)+'</td><td>'+n(p.levier,1)+'x</td><td data-carrylive="'+p.coin+'" style="color:var(--cyan)">$'+n(p.funding_accrued_usdt,6)+'</td><td style="text-align:right">'+n(p.age_h,1)+'h</td></tr>';}).join('')||'<tr><td colspan="5" style="color:var(--mut2)">— aucune position carry ouverte —</td></tr>';
+  // MARGE CIBLE (21/07) : la marge que l'ALLOCATION PAR RENDEMENT NET accorde a ce coin.
+  // On mesurait une correlation -0,596 entre marge engagee et rendement net : le capital
+  // allait aux MOINS rentables (BTC 25$, STABLE 126$). Une position sous-financee est
+  // marquee en jaune avec le montant qui manque -- le RENFORT le comblera (une fois par
+  // jour, sans jamais fermer, donc sans payer de sortie). Cible absente -> rien d'affiche.
+  tb.innerHTML=ps.map(function(p){
+    var cible=(p.marge_cible_usdt!=null)?Number(p.marge_cible_usdt):null,m=Number(p.marge_usdt||0),
+        sous=(cible!=null&&m>0&&cible>m*1.4),
+        badge=sous?(' <span title="marge cible de l\'allocation par rendement net — le renfort comblera l\'ecart, sans fermer" style="color:var(--warn,#e0b341);font-size:11px">→$'+n(cible,0)+'</span>'):'',
+        rf=(Number(p.renforts||0)>0)?(' <span title="renforts appliques" style="color:var(--cyan);font-size:11px">+'+p.renforts+'</span>'):'';
+    return '<tr><td><b>'+p.coin+'</b>'+rf+'</td><td>$'+n(p.notional_usdt,0)+badge+'</td><td>'+n(p.levier,1)+'x</td><td data-carrylive="'+p.coin+'" style="color:var(--cyan)">$'+n(p.funding_accrued_usdt,6)+'</td><td style="text-align:right">'+n(p.age_h,1)+'h</td></tr>';}).join('')||'<tr><td colspan="5" style="color:var(--mut2)">— aucune position carry ouverte —</td></tr>';
+  // ALLOCATION, en une ligne lisible : ou va le capital et ce que ca rapporte de plus.
+  var ea=document.getElementById('carry-alloc');
+  if(ea){var al=d.allocation||{};
+    ea.textContent=(al.gain_vs_part_egale_pct!=null)
+      ?('capital ∝ rendement net : '+al.coins_finances+' coin(s), '+n(al.capital_alloue_usd,0)
+        +'$ places, '+n(al.rendement_pondere_bps_j,3)+' bps/j (+'+n(al.gain_vs_part_egale_pct,1)
+        +'% vs part egale) · meilleur : '+al.meilleur)
+      :'allocation par rendement net : pas encore publiee (redemarrage requis)';}
   // UNIFICATION + FRAICHEUR (20/07) : les positions carry partent AUSSI dans le panneau
   // POSITIONS unifie, et leur taux d'accrual (usd/h) alimente le ticker 1 s qui fait vivre
   // le PnL entre les releves moteur -- interpolation honnete, resnappee au reel a chaque poll.
@@ -944,6 +965,18 @@ def create_dashboard_v2_router() -> APIRouter:
             # du yoyo VWAP + fin du clignotement hors-shortlist). Fichier absent/perime -> pas
             # de MtM du tout (un marquage perime n'est pas un marquage), jamais un repli bruite.
             bases_courantes = bases_courantes_mid(root)
+            # ALLOCATION (21/07) : la marge CIBLE par coin, publiee par le carry. On mesurait
+            # une correlation -0,596 entre la marge engagee et le rendement net -- le capital
+            # allait aux MOINS rentables. L'ecart marge/cible est ce que le RENFORT comble,
+            # sans jamais fermer. Fichier absent -> pas de cible (jamais un chiffre invente).
+            allocation, marges_cibles = {}, {}
+            try:
+                allocation = _json.loads(
+                    (root / "runtime" / "data" / "carry_allocation.json")
+                    .read_text(encoding="utf-8-sig"))
+                marges_cibles = allocation.get("marges_usd") or {}
+            except (OSError, ValueError):
+                allocation, marges_cibles = {}, {}
             positions = []
             accru = 0.0
             for coin, p in g.ouvertes.items():
@@ -969,6 +1002,9 @@ def create_dashboard_v2_router() -> APIRouter:
                     "taux_accrual_usd_h": round(
                         float(p.get("notional_usdt") or 0.0)
                         * float(p.get("funding_bps_h_entree") or 0.0) / 1e4, 8),
+                    "marge_cible_usdt": (round(float(marges_cibles[str(coin).upper()]), 2)
+                                         if str(coin).upper() in marges_cibles else None),
+                    "renforts": int(p.get("renforts") or 0),
                 })
             viables = []
             try:
@@ -1019,6 +1055,7 @@ def create_dashboard_v2_router() -> APIRouter:
             except Exception:  # noqa: BLE001
                 _noter_echec("hl_observer/ui/dashboard_v2.py:732")
             return JSONResponse({
+                "allocation": allocation,
                 "churn": churn, "revenu_jour_usd": revenu_jour, "heures_amorti": heures_amorti,
                 "positions_ouvertes": etat["positions_ouvertes"],
                 "realized_net_pnl_usdc": etat["realized_net_pnl_usdc"],
