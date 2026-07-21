@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import json
 import os
+import time
 from pathlib import Path
 from typing import Any, Iterable
 from hl_observer.ops.echec_silencieux import noter as _noter_echec
@@ -176,15 +177,54 @@ def merge_replay(base: str | Path, out_dir: str | Path | None = None) -> dict:
     b = Path(base)
     out = Path(out_dir) if out_dir else (b / "_merged")
     out.mkdir(parents=True, exist_ok=True)
+    # 🔴 Le `finally` ci-dessous ne suffit PAS : un SIGKILL (budget d'un appelant, OOM,
+    # arrêt machine) ne l'exécute jamais. Constaté en vrai : un `.9.mergetmp` de 105 Mo
+    # survivant à une fusion tuée. On balaie donc les temporaires orphelins AU DÉMARRAGE —
+    # sinon chaque interruption laisse un fichier de la taille du consolidé sur le disque.
+    for orphelin in out.glob("*.mergetmp"):
+        try:
+            if time.time() - orphelin.stat().st_mtime > 300.0:   # pas celui d'une fusion vivante
+                orphelin.unlink()
+        except OSError:
+            pass
     counts: dict[str, int] = {}
     for name in ("candidates.jsonl", "marks.jsonl"):
-        rows = read_replay_lines(b, name, include_archive=True)  # tout l'historique accumule
         try:
-            with (out / name).open("w", encoding="utf-8") as fh:
-                for r in rows:
-                    fh.write(json.dumps(r, ensure_ascii=False) + "\n")
+            # 🔴 la LECTURE etait HORS du try, alors que la fonction se dit « best-effort ».
+            # Une exception ici (shard corrompu, disque, memoire) faisait tomber TOUTE la
+            # consolidation — y compris le stem qui, lui, allait bien. Attrape par son
+            # propre test : la fusion doit degrader, pas s'effondrer.
+            rows = read_replay_lines(b, name, include_archive=True)  # tout l'historique
+            # 🔴 21/07 — ÉCRITURE RENDUE ATOMIQUE. Cette fusion ouvrait la CIBLE en "w" :
+            # elle la vidait, puis la remplissait ligne par ligne pendant des dizaines de
+            # secondes (215 Mo). Toute interruption dans cet intervalle — Ctrl-C, crash,
+            # arrêt de la machine, budget d'un appelant — laissait le consolidé TRONQUÉ,
+            # dernière ligne coupée en plein milieu d'un objet JSON. Constaté en vrai ce
+            # soir : 215 Mo -> 130 Mo, dernière ligne « Unterminated string ».
+            # Le trim du même module était déjà atomique (tmp + os.replace) ; la fusion,
+            # qui écrit 1 600 fois plus de données, ne l'était pas. Elle l'est maintenant :
+            # un lecteur voit l'ANCIEN fichier complet, ou le NOUVEAU complet, jamais un
+            # entre-deux. Le temporaire porte le PID — deux fusions concurrentes ne se
+            # marchent pas dessus.
+            cible = out / name
+            tmp = cible.with_name("%s.%d.mergetmp" % (cible.name, os.getpid()))
+            try:
+                with tmp.open("w", encoding="utf-8") as fh:
+                    for r in rows:
+                        fh.write(json.dumps(r, ensure_ascii=False) + "\n")
+                    fh.flush()
+                    os.fsync(fh.fileno())   # les octets sont sur le disque AVANT le rename
+                os.replace(str(tmp), str(cible))
+            finally:
+                if tmp.exists():            # échec en cours de route : on ne laisse pas de déchet
+                    try:
+                        tmp.unlink()
+                    except OSError:
+                        pass
         except Exception:
             _noter_echec("hl_observer/runtime/replay_recorder.py:186")
+            counts[name] = None      # None = ECHEC avoue, jamais 0 (qui se lirait « vide »)
+            continue
         counts[name] = len(rows)
     return {"out": str(out), "counts": counts}
 

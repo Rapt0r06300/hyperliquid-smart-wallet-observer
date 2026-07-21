@@ -683,6 +683,26 @@ def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--diagnostic", action="store_true", help="montre l'univers, n'ecrit rien")
     a = ap.parse_args()
+
+    # ══ 🔴 21/07 — LA SESSION DOIT SE SUFFIRE ══
+    # La consolidation du replay n'etait lancee qu'au DEMARRAGE (LANCER_HYPERSMART:287) et
+    # par TOUT-TESTER. Entre les deux, rien. Mesure de ce soir, session de ~11 h :
+    #     _merged/marks.jsonl       20,7 Mo  FIGE depuis 11,5 h
+    #     _merged/candidates.jsonl 215,1 Mo  FIGE depuis 11,5 h
+    #     marks.<pid>.jsonl                  ecrits en continu (276 coins, un mark/61 s)
+    # Ce n'est pas la collecte qui manquait, c'est le RANGEMENT. Et tout ce qui lit le
+    # consolide (recherche de pepites, PnL des refus, audit qualite) travaillait sur des
+    # donnees de 11 heures — c'est ce qui a reduit le markout copy a 2,4 % de couverture.
+    # Le feeder est re-execute a chaque passe : c'est le bon endroit pour rattraper, sans
+    # redemarrage. Ne leve jamais, et DIT quand il y a du retard.
+    if not a.diagnostic:
+        try:
+            from hl_observer.runtime.consolidation_periodique import (
+                consolider_si_en_retard, ligne_de_rapport)
+            print(ligne_de_rapport(consolider_si_en_retard(ROOT)))
+        except Exception as exc:  # noqa: BLE001
+            print("  consolidation : indisponible (%s)" % str(exc)[:100])
+
     try:
         rapport, viables = scanner(a.diagnostic)
     except Exception as exc:  # noqa: BLE001
