@@ -55,7 +55,8 @@ URL_INFO = "https://api.hyperliquid.xyz/info"
 URL_LEADERBOARD = "https://stats-data.hyperliquid.xyz/Mainnet/leaderboard"
 
 INTERVALLE_S_DEFAUT = 300.0      # 5 min : une carte de liquidation ne bouge pas à la seconde
-MAX_WALLETS_DEFAUT = 80          # borne le poids sur l'API publique (se faire couper = MOINS de données)
+MAX_WALLETS_DEFAUT = 150         # 22/07 : élargi (80->150) — plus de comptes = plus de chances qu'au
+                                 # moins 2 partagent un niveau de liq (une grappe). Politesse gardée (pause).
 PAUSE_ENTRE_WALLETS_S = 0.15     # politesse : on veut durer 3 jours, pas 3 minutes
 #: en dessous, une grappe (>= 2 wallets au MEME niveau de prix) ne se formera quasi jamais.
 MIN_WALLETS_UTILE = 20
@@ -134,6 +135,52 @@ def wallets_de_secours(root: Path) -> list[str]:
     return vus
 
 
+#: 🟢 LEVIER 4 (22/07) — une position à <= 5 % de sa liquidation = FORT levier = candidate à
+#: être liquidée. C'est LE ciblage qui manquait : le haut du leaderboard, ce sont des baleines
+#: PEU leveragées (liq loin du marché, jamais déclenchée) — d'où 3 événements en des jours.
+SEUIL_A_RISQUE_BPS = 500.0
+MAX_WATCHLIST = 400
+WATCHLIST_REL = Path("runtime") / "data" / "wallets_a_risque.json"
+
+
+def wallets_a_risque(positions: list, mids: dict[str, float], *,
+                     seuil_bps: float = SEUIL_A_RISQUE_BPS) -> list[str]:
+    """Les wallets dont AU MOINS une position est à <= `seuil_bps` de son prix de liquidation.
+    Le vrai flux FORCÉ vient d'eux (fort levier), pas des grosses baleines du leaderboard."""
+    a_risque: list[str] = []
+    for p in positions or []:
+        try:
+            px = float(mids.get(str(p.coin).upper()) or 0.0)
+            liq = float(p.liq_px)
+            wallet = p.wallet
+        except (TypeError, ValueError, AttributeError):
+            continue
+        if px > 0 and liq > 0:
+            dist = abs(1e4 * (liq - px) / px)
+            if dist <= float(seuil_bps) and wallet not in a_risque:
+                a_risque.append(wallet)
+    return a_risque
+
+
+def charger_watchlist(root: Path) -> list[str]:
+    """La watchlist accumulée des comptes à risque (fort levier), vue après vue."""
+    try:
+        d = json.loads((Path(root) / WATCHLIST_REL).read_text(encoding="utf-8"))
+        return [a for a in (d.get("wallets") or []) if isinstance(a, str)]
+    except (OSError, ValueError):
+        return []
+
+
+def sauver_watchlist(root: Path, wallets: list[str]) -> int:
+    """Fusionne + dédoublonne + borne aux plus récents. Rend la taille finale."""
+    uniq = list(dict.fromkeys(w for w in wallets if isinstance(w, str)))[-MAX_WATCHLIST:]
+    p = Path(root) / WATCHLIST_REL
+    p.parent.mkdir(parents=True, exist_ok=True)
+    p.write_text(json.dumps({"wallets": uniq, "maj": time.time(), "real_execution": False},
+                            ensure_ascii=False), encoding="utf-8")
+    return len(uniq)
+
+
 def _expliquer_zero(positions: list, mids: dict[str, float]) -> None:
     """POURQUOI 0 GRAPPE ? — le chiffre, pas une hypothese.
 
@@ -205,6 +252,12 @@ def une_passe(root: Path, wallets: list[str], *, pause_s: float = PAUSE_ENTRE_WA
 
     if not positions:
         return 0, 0, lus
+    # 🟢 LEVIER 4 : on APPREND les comptes à fort levier vus cette passe et on les garde. Vue
+    # après vue, la watchlist se remplit de comptes VRAIMENT liquidables -> les grappes (>= 2
+    # wallets au même niveau) finissent par se former. Code maintenant, verdict à l'accumulation.
+    a_risque = wallets_a_risque(positions, mids)
+    if a_risque:
+        sauver_watchlist(root, charger_watchlist(root) + a_risque)
     grappes = construire_carte(positions, mids)
     if not grappes:
         _expliquer_zero(positions, mids)
@@ -232,6 +285,13 @@ def main(argv: list[str] | None = None) -> int:
     if not wallets:
         wallets = wallets_de_secours(root)[: args.max_wallets]
         origine = "statut moteur (REPLI — le leaderboard n'a pas repondu)"
+    # 🟢 LEVIER 4 : on ADJOINT la watchlist accumulée des comptes à RISQUE (fort levier). C'est
+    # eux qui se font liquider ; les rajouter à chaque démarrage fait grossir la bonne population.
+    watch = charger_watchlist(root)
+    ajoutes = [a for a in watch if a not in wallets]
+    wallets = wallets + ajoutes
+    if ajoutes:
+        origine += " + %d compte(s) a risque memorises" % len(ajoutes)
     print("[liq] collecteur demarre — %d wallet(s) a observer (%s)" % (len(wallets), origine),
           flush=True)
     if not wallets:

@@ -148,3 +148,45 @@ def test_le_repli_lit_les_wallets_deja_vus_par_le_bot(tmp_path):
         json.dumps({"leaders": ["0x" + "f" * 40, "0x" + "e" * 40, "0x" + "f" * 40]}),
         encoding="utf-8")
     assert m.wallets_de_secours(tmp_path) == ["0x" + "f" * 40, "0x" + "e" * 40]
+
+
+# ---------------------------------------- Levier 4 (22/07) : ciblage FORT LEVIER + watchlist
+
+from types import SimpleNamespace  # noqa: E402
+
+
+def _pos(wallet: str, coin: str, liq: float, notionnel: float = 30000.0):
+    return SimpleNamespace(wallet=wallet, coin=coin, liq_px=liq, notionnel_usd=notionnel)
+
+
+def test_wallets_a_risque_ne_garde_QUE_le_fort_levier():
+    """🟢 LE CIBLAGE QUI MANQUAIT : seul un compte dont la liq est PROCHE du mid (fort levier)
+    est retenu. La baleine peu leveragee (liq a 50 % du marche) est ecartee — elle ne se liquide pas."""
+    m = _mod()
+    positions = [_pos("0xLEVIER", "BTC", 59800.0),    # ~33 bps -> A RISQUE
+                 _pos("0xBALEINE", "BTC", 30000.0)]    # 5000 bps -> ecartee
+    assert m.wallets_a_risque(positions, {"BTC": 60000.0}, seuil_bps=500.0) == ["0xLEVIER"]
+
+
+def test_un_mid_absent_n_invente_pas_de_risque():
+    m = _mod()
+    assert m.wallets_a_risque([_pos("0xX", "PEPE", 1.0)], {}, seuil_bps=500.0) == []
+
+
+def test_la_watchlist_s_accumule_et_se_dedoublonne(tmp_path):
+    m = _mod()
+    assert m.sauver_watchlist(tmp_path, ["0xA", "0xB", "0xA"]) == 2
+    assert set(m.charger_watchlist(tmp_path)) == {"0xA", "0xB"}
+    m.sauver_watchlist(tmp_path, m.charger_watchlist(tmp_path) + ["0xC"])
+    assert set(m.charger_watchlist(tmp_path)) == {"0xA", "0xB", "0xC"}
+
+
+def test_la_watchlist_est_bornee_aux_plus_recents(tmp_path):
+    m = _mod()
+    assert m.sauver_watchlist(tmp_path, ["0x%03d" % i for i in range(m.MAX_WATCHLIST + 50)]) \
+        == m.MAX_WATCHLIST
+
+
+def test_watchlist_absente_rend_liste_vide():
+    m = _mod()
+    assert m.charger_watchlist(RACINE / "n_existe_pas_xyz") == []
