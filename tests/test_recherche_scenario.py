@@ -232,7 +232,7 @@ def test_le_crible_memoise_le_filtrage_par_preset(monkeypatch):
     d = rs.DonneesReplay(candidats=[{"recorded_at": float(i)} for i in range(25_000)], marks=[])
     configs = [{"sl": 30, "tp": 60, "horizon_min": 60, "filtres": p}
                for p in ({}, {"age_max_ms": 10_000}, {}, {"age_max_ms": 10_000}) for _ in range(50)]
-    rs._cribler_configs(d, configs, evaluer_ab=lambda *a, **k: {"arm_a": {"net_total_usd": -1.0}})
+    rs._cribler_configs(d, configs, screen=lambda *a, **k: {"arm_a": {"net_total_usd": -1.0}})
     assert appels["n"] == 2, "2 presets distincts -> 2 filtrages, pas %d" % appels["n"]
 
 
@@ -270,7 +270,7 @@ def test_le_crible_multi_fidelite_epargne_les_perdants_evidents_jamais_n_admet()
         return {"arm_a": {"net_total_usd": 1.0 if base_config.stop_loss_bps == 40.0 else -1.0}}
     configs = [{"sl": 40.0, "tp": 70.0, "horizon_min": 60.0},
                {"sl": 90.0, "tp": 150.0, "horizon_min": 60.0}]
-    retenues = _cribler_configs(d, configs, evaluer_ab=eval_crible)
+    retenues = _cribler_configs(d, configs, screen=eval_crible)
     assert [c["sl"] for c in retenues] == [40.0]
 
 

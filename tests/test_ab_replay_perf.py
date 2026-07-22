@@ -20,12 +20,53 @@ from __future__ import annotations
 import time
 
 from hl_observer.backtesting.ab_flag_replay import (
-    SLTPConfig, marks_by_coin, run_ab_replay, simulate_exit_on_path)
+    SLTPConfig, marks_by_coin, net_baseline_seul, run_ab_replay, simulate_exit_on_path)
 
 
 def _marks(coin: str, n: int, t0: float = 1000.0, px: float = 100.0) -> list[dict]:
     return [{"coin": coin, "ts": t0 + i * 60.0, "mid": px * (1.0 + 0.0001 * (i % 7 - 3))}
             for i in range(n)]
+
+
+# ═══════════ 22/07 : le raccourci du CRIBLE doit donner EXACTEMENT le bras A ═══════════
+
+def test_net_baseline_seul_EGALE_le_bras_A_de_run_ab_replay():
+    """« Améliore notre façon de faire » — le crible ne lit que le net du bras A. `net_baseline_seul`
+    le calcule sans le bras B / vetos / estimateur (plus rapide). Une optimisation qui CHANGE un
+    résultat serait un bug : on VERROUILLE l'égalité au centime, sur données variées."""
+    import random
+    rng = random.Random(1234)
+    marks: list[dict] = []
+    for coin, px in (("BTC", 100.0), ("ETH", 50.0), ("SOL", 12.0), ("ARB", 3.0)):
+        base = _marks(coin, 300, t0=1000.0, px=px)
+        for r in base:                                   # un peu de vraie amplitude -> vrais exits
+            r["mid"] *= (1.0 + 0.01 * rng.uniform(-1, 1))
+        marks += base
+    cands: list[dict] = []
+    for i in range(120):
+        coin, px = rng.choice([("BTC", 100.0), ("ETH", 50.0), ("SOL", 12.0), ("ARB", 3.0)])
+        cands.append({"coin": coin, "direction": rng.choice(["LONG", "SHORT"]),
+                      "current_mid": px * (1.0 + 0.002 * rng.uniform(-1, 1)),
+                      "recorded_at": 1000.0 + rng.uniform(0, 15000.0),
+                      "leader_notional_usdt": rng.choice([0, 50.0, 200.0])})
+    for cfg in (SLTPConfig(stop_loss_bps=40.0, take_profit_bps=70.0),
+                SLTPConfig(stop_loss_bps=20.0, take_profit_bps=150.0),
+                SLTPConfig(stop_loss_bps=90.0, take_profit_bps=100.0)):
+        for h in (30.0, 120.0, 240.0):
+            plein = run_ab_replay(cands, marks, base_config=cfg, horizon_min=h)["arm_a"]["net_total_usd"]
+            rapide = net_baseline_seul(cands, marks, base_config=cfg, horizon_min=h)["arm_a"]["net_total_usd"]
+            assert rapide == plein, "cfg=%s h=%s : rapide %s != bras A %s" % (cfg, h, rapide, plein)
+
+
+def test_net_baseline_seul_accepte_un_index_marks_deja_construit():
+    """Le crible réutilise le MÊME index marks pour 5 640 configs -> on ne le reconstruit pas."""
+    marks = _marks("BTC", 200)
+    idx = marks_by_coin(marks)
+    cfg = SLTPConfig(stop_loss_bps=40.0, take_profit_bps=70.0)
+    cands = [{"coin": "BTC", "direction": "LONG", "current_mid": 100.0, "recorded_at": 1100.0}]
+    via_index = net_baseline_seul(cands, idx, base_config=cfg, horizon_min=120.0)
+    via_brut = net_baseline_seul(cands, marks, base_config=cfg, horizon_min=120.0)
+    assert via_index == via_brut
 
 
 def _cands(coin: str, n: int, t0: float = 1000.0) -> list[dict]:

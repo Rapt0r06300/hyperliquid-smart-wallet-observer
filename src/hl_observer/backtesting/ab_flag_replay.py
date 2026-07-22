@@ -279,6 +279,44 @@ def run_ab_replay(
     }
 
 
+def net_baseline_seul(
+    candidates: list[dict],
+    mark_rows_or_marks,
+    *,
+    base_config: SLTPConfig,
+    horizon_min: float = DEFAULT_HORIZON_MIN,
+    cost_bps: float = DEFAULT_COST_BPS,
+) -> dict:
+    """Le NET du BRAS A (baseline, tous vetos OFF) UNIQUEMENT — pour le CRIBLE, qui ne lit que
+    `arm_a.net_total_usd`. `run_ab_replay` calcule EN PLUS le bras B, les vetos et l'estimateur de
+    vol : pur gâchis ici. Avec tout OFF, le bras A = simuler chaque candidat sur son chemin de marks
+    (aucun veto, aucune vol-barrière). Résultat PROUVÉ identique au bras A (test d'équivalence).
+
+    Accepte soit des lignes de marks brutes, soit un index `marks_by_coin` déjà construit (le crible
+    réutilise le même index pour toutes les configs → on ne le reconstruit pas 5 640 fois)."""
+    marks = (mark_rows_or_marks if isinstance(mark_rows_or_marks, dict)
+             else marks_by_coin(mark_rows_or_marks))
+    trades: list[float] = []
+    for cand in candidates:
+        if not isinstance(cand, dict):
+            continue
+        coin = str(cand.get("coin") or "").upper()
+        side = str(cand.get("direction") or "").upper()
+        entry = float(cand.get("current_mid") or 0.0)
+        ts = float(cand.get("recorded_at") or 0.0)
+        if not coin or side not in ("LONG", "SHORT") or entry <= 0 or ts <= 0:
+            continue
+        notio = float(cand.get("leader_notional_usdt") or 0.0)
+        pnl = simulate_exit_on_path(
+            side=side, entry_price=entry, path=marks.get(coin, []), entry_ts=ts,
+            config=base_config, horizon_min=horizon_min, cost_bps=cost_bps,
+            notional_usd=notio if notio > 0 else 50.0)
+        if pnl is not None:                      # None = non mesurable, exclu (comme le bras A)
+            trades.append(round(pnl, 6))
+    # même forme que run_ab_replay pour le crible (il lit r["arm_a"]["net_total_usd"])
+    return {"arm_a": {"net_total_usd": round(sum(trades), 4), "trades": len(trades)}}
+
+
 def main(argv: list[str] | None = None) -> int:  # pragma: no cover — CLI mince
     import argparse
 
@@ -302,5 +340,5 @@ if __name__ == "__main__":  # pragma: no cover
 
 __all__ = [
     "CONTEXT", "ArmMetrics", "load_jsonl", "marks_by_coin",
-    "simulate_exit_on_path", "run_ab_replay", "DEFAULT_ARM_B_ENV",
+    "simulate_exit_on_path", "run_ab_replay", "net_baseline_seul", "DEFAULT_ARM_B_ENV",
 ]

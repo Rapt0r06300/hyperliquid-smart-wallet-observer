@@ -23,7 +23,7 @@ from pathlib import Path
 from typing import Any, Callable, Iterable, Iterator
 
 from hl_observer.backtesting.ab_flag_replay import (
-    DEFAULT_COST_BPS, load_jsonl, run_ab_replay,
+    DEFAULT_COST_BPS, load_jsonl, marks_by_coin, net_baseline_seul, run_ab_replay,
 )
 from hl_observer.paper_trading.sl_tp import SLTPConfig
 from hl_observer.backtesting.boucle_objectif_replay import boucle_objectif
@@ -266,7 +266,7 @@ def chercher(root: str | Path, *, configs: Iterable[dict[str, Any]] | None = Non
     if strategie:                                 # un etat PAR module : jamais de melange
         etat = etat.with_name("recherche_scenario_etat_%s.json" % strategie)
     liste_configs = list(configs if configs is not None else grille_configs())
-    liste_configs = _cribler_configs(d, liste_configs, evaluer_ab=evaluer_ab)
+    liste_configs = _cribler_configs(d, liste_configs)      # screen bras-A rapide, index bâti 1×
     r = boucle_objectif(
         liste_configs,
         evaluer, porte_avec_plateau,
@@ -532,10 +532,15 @@ CAP_CRIBLE_CANDIDATS = 12_000
 
 
 def _cribler_configs(d: DonneesReplay, configs: list[dict], *,
-                     evaluer_ab: Callable[..., dict] = run_ab_replay) -> list[dict]:
+                     screen: Callable[..., dict] = net_baseline_seul) -> list[dict]:
     """SUCCESSIVE HALVING : sur les grosses populations (copy : 262k), on crible d'abord chaque
     config sur le QUART LE PLUS RECENT (structure temporelle préservée) ; seules celles à net > 0
-    passent à l'évaluation complète. Le crible n'admet personne, il ÉPARGNE du calcul aux perdants."""
+    passent à l'évaluation complète. Le crible n'admet personne, il ÉPARGNE du calcul aux perdants.
+
+    22/07 (« améliore notre façon de faire ») — DEUX économies, résultat IDENTIQUE (testé) :
+    (1) le SCREEN est `net_baseline_seul` (bras A seul) et non `run_ab_replay` : plus de bras B, de
+    vetos ni d'estimateur de vol calculés pour rien ; (2) l'index des marks est bâti UNE fois
+    (run_ab_replay le reconstruisait à chaque config) et le filtrage est mémoïsé par preset."""
     if len(d.candidats) < SEUIL_CRIBLE_CANDIDATS or not configs:
         return configs
     tries = sorted(d.candidats, key=lambda c: float(c.get("recorded_at") or 0.0))
@@ -543,9 +548,7 @@ def _cribler_configs(d: DonneesReplay, configs: list[dict], *,
     recent = tries[-n:]
     print("  crible multi-fidelite : %d configs sur les %d candidats les plus recents..."
           % (len(configs), len(recent)), flush=True)
-    # 22/07 (« améliore notre façon de faire ») — MÉMOÏSATION du filtrage : 5000 configs mais
-    # seulement 4 presets distincts. On ne re-filtre plus les 12 000 candidats à chaque config
-    # (60 M tests) mais UNE fois par preset. Résultat identique, un gros bloc de calcul en moins.
+    idx_marks = marks_by_coin(d.marks)                    # UNE fois, réutilisé par toutes les configs
     cache_f: dict[tuple, list] = {}
     def _filtre(cfg: dict) -> list:
         cle = tuple(sorted((cfg.get("filtres") or {}).items()))
@@ -557,9 +560,9 @@ def _cribler_configs(d: DonneesReplay, configs: list[dict], *,
     for i, cfg in enumerate(configs, 1):
         f = _filtre(cfg)
         try:
-            r = evaluer_ab(f, d.marks, base_config=_sltp(cfg),
-                           horizon_min=float(cfg.get("horizon_min") or 60.0),
-                           cost_bps=DEFAULT_COST_BPS)
+            r = screen(f, idx_marks, base_config=_sltp(cfg),
+                       horizon_min=float(cfg.get("horizon_min") or 60.0),
+                       cost_bps=DEFAULT_COST_BPS)
             if float((r.get("arm_a") or {}).get("net_total_usd") or 0.0) > 0.0:
                 retenues.append(cfg)
         except Exception:  # noqa: BLE001 — un crible qui explose laisse passer (porte derriere)
