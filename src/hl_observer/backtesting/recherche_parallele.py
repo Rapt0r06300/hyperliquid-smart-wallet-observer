@@ -22,11 +22,11 @@ import time as _t
 from pathlib import Path
 from typing import Any, Iterable
 
-#: le corps du sous-processus : chercher UN module et sérialiser son résultat dans un fichier.
+#: le corps du sous-processus : chercher UN module (via l'AIGUILLAGE, donc carry -> sa vraie grille)
+#: et sérialiser son résultat dans un fichier.
 _GABARIT = (
-    "import json;from hl_observer.backtesting.recherche_scenario import chercher,grille_large;"
-    "json.dump(chercher({root!r},strategie={strat!r},configs=grille_large(),max_essais={me!r},"
-    "budget_s={bs!r},s_arreter_au_premier=False,raffiner=True),"
+    "import json;from hl_observer.backtesting.recherche_scenario import chercher_module;"
+    "json.dump(chercher_module({root!r},{strat!r},budget_s={bs!r},max_essais={me!r}),"
     "open({out!r},'w',encoding='utf-8'),default=str)"
 )
 

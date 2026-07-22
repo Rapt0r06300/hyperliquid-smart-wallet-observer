@@ -29,6 +29,7 @@ from hl_observer.paper_trading.sl_tp import SLTPConfig
 from hl_observer.backtesting.boucle_objectif_replay import boucle_objectif
 from hl_observer.backtesting import robustesse_selection
 from hl_observer.backtesting.recherche_parallele import remplir_en_parallele
+from hl_observer.backtesting.recherche_carry import chercher_carry
 import statistics as _stats
 
 # --- les barres de la porte, FIXÉES ICI (les déplacer se voit dans un diff) -------------
@@ -578,6 +579,17 @@ def _cribler_configs(d: DonneesReplay, configs: list[dict], *,
 
 # ================================================================ 6. TOUS les modules d'un coup
 
+def chercher_module(root: str | Path, strat: str, *, budget_s: float | None = None,
+                    max_essais: int | None = None) -> dict[str, Any]:
+    """AIGUILLAGE : chaque module vers SA vraie grille. 22/07 — le carry n'est PAS directionnel,
+    il a sa propre grille (funding × durée, `chercher_carry`) ; le SL/TP est l'outil de COPY. Copy
+    (et fallback) passent par `chercher` (grille SL/TP + filtres copy)."""
+    if strat == "carry":
+        return chercher_carry(root, budget_s=budget_s)
+    return chercher(root, strategie=strat, configs=grille_large(), max_essais=max_essais,
+                    budget_s=budget_s, s_arreter_au_premier=False, raffiner=True)
+
+
 def chercher_toutes(root: str | Path, *, max_essais_par_strategie: int | None = None,
                     budget_s_par_module: float | None = 7_200.0,
                     parallele: bool = False) -> dict[str, Any]:
@@ -602,10 +614,8 @@ def chercher_toutes(root: str | Path, *, max_essais_par_strategie: int | None = 
         for i, strat in enumerate(STRATEGIES_MODULES, 1):
             print("=== module %s (%d/%d) ===" % (strat, i, total), flush=True)
             try:
-                resultats[strat] = chercher(root, strategie=strat, configs=grille_large(),
-                                            max_essais=max_essais_par_strategie,
-                                            budget_s=budget_s_par_module,
-                                            s_arreter_au_premier=False, raffiner=True)
+                resultats[strat] = chercher_module(root, strat, budget_s=budget_s_par_module,
+                                                   max_essais=max_essais_par_strategie)
             except Exception as exc:  # noqa: BLE001 — un module qui explose ne tue plus la nuit
                 print("  !! module %s en ERREUR : %s" % (strat, str(exc)[:200]), flush=True)
                 resultats[strat] = {"statut": "ERREUR", "strategie": strat,
