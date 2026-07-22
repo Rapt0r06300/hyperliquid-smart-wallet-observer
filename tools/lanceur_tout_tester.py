@@ -55,6 +55,14 @@ DISQUE_MIN_GO = 1.0
 VERROU_PERIME_S = 4 * 3600.0
 #: 24 — on garde, mais on ne noie pas le dossier.
 LOGS_CONSERVES = 30
+#: 41 (22/07) — FILET ANTI-BLOCAGE. Le run complet dure ~1 h 15 ; ce plafond très large (4 h)
+#: n'ampute jamais un run légitime mais garantit qu'un sous-processus figé (réseau bloqué, pytest
+#: coincé) NE FAIT PAS tourner l'audit à l'infini. Sans lui, « ça ne finit jamais » = un plantage
+#: silencieux d'un autre genre. Réglable par env pour les cas extrêmes.
+try:
+    BUDGET_TOTAL_S = float(os.environ.get("TOUT_TESTER_BUDGET_S", "") or 4 * 3600.0)
+except (TypeError, ValueError):
+    BUDGET_TOTAL_S = 4 * 3600.0
 
 #: 11 — un seul de ces interrupteurs armé et on refuse de démarrer.
 INTERRUPTEURS_REELS = ("REAL_MAINNET_TRADING", "HYPERSMART_REAL_TRADING",
@@ -168,6 +176,28 @@ def environnement_fils(racine: Path = RACINE) -> dict[str, str]:
     e["HYPERSMART_READ_ONLY"] = "1"
     e["HYPERSMART_PAPER_ONLY"] = "1"
     return e
+
+
+def _cflags() -> int:
+    """`creationflags` pour isoler le groupe de process (un Ctrl-C console ne doit pas tuer
+    l'orchestrateur AVANT qu'il n'écrive le RECAP — bug du 11/07).
+
+    🔴 22/07 — IMPORT ROBUSTE. `tools/` n'a pas d'`__init__.py` : selon la façon dont le lanceur
+    démarre, le module d'isolation est importable en direct (`python tools/x.py` -> `tools/` est
+    sur sys.path) OU via `tools.` (racine sur sys.path, cas des tests). L'ancien code n'essayait
+    QUE `from tools.sous_processus_isole import` : dans l'invocation réelle, cet import lève
+    `ModuleNotFoundError` -> le run ratait. On tente les deux formes, puis 0 (aucune isolation) —
+    un run SANS isolation vaut infiniment mieux qu'un run qui plante à l'import."""
+    d = str(RACINE / "tools")
+    if d not in sys.path:
+        sys.path.insert(0, d)
+    for nom in ("sous_processus_isole", "tools.sous_processus_isole"):
+        try:
+            mod = __import__(nom, fromlist=["creationflags"])
+            return int(mod.creationflags())
+        except Exception:  # noqa: BLE001 — un import fragile ne doit JAMAIS faire échouer l'audit
+            continue
+    return 0
 
 
 # ─────────────────────────────── TRAÇABILITÉ (16-25) ───────────────────────────────
@@ -414,7 +444,6 @@ def lancer(argv: list[str] | None = None, racine: Path = RACINE) -> int:
         # tuerait tout_tester.py AVANT qu'il n'ecrive le RECAP — le bug du 11/07 (audit_report)
         # et du 13/07 (couverture). On NE capture PAS la sortie de l'orchestrateur : le lanceur
         # STREAME sa progression en direct (run_isole capturerait, on ne l'utilise donc pas ici).
-        from tools.sous_processus_isole import creationflags as _cflags
         try:
             subprocess.run([sys.executable, "-m", "pip", "install", "-q", "pytest-timeout"],
                            cwd=racine, capture_output=True, timeout=120,
@@ -423,12 +452,23 @@ def lancer(argv: list[str] | None = None, racine: Path = RACINE) -> int:
             pass
         p = subprocess.run([sys.executable, str(racine / "tools" / "tout_tester.py"), *args],
                            cwd=racine, env=environnement_fils(racine),
-                           creationflags=_cflags())
+                           creationflags=_cflags(), timeout=BUDGET_TOTAL_S)   # 41 filet anti-blocage
         code = p.returncode
     except KeyboardInterrupt:                                                # 39
         code = 130
         dire("")
         dire("  INTERROMPU (Ctrl-C) — le RECAP couvre les etapes deja faites.")
+    except subprocess.TimeoutExpired:                                        # 41
+        code = 124
+        dire("")
+        dire("  BUDGET DE TEMPS DEPASSE (%s) : un sous-processus s'est FIGE. L'audit s'arrete"
+             % _hms(BUDGET_TOTAL_S))
+        dire("  proprement au lieu de tourner a l'infini. Le RECAP couvre les etapes deja faites.")
+    except Exception as _exc:  # noqa: BLE001 — 22/07 : plus AUCUNE exception du run ne fuit sans trace
+        code = 1
+        dire("")
+        dire("  ERREUR PENDANT LE RUN : %s" % str(_exc)[:200])
+        dire("  (le filet Python l'a capturee — la fenetre reste ouverte, envoie ce bloc a Claude)")
     finally:
         liberer_verrou(racine)
 
@@ -492,6 +532,7 @@ def lancer(argv: list[str] | None = None, racine: Path = RACINE) -> int:
 def _verdict(code: int) -> str:
     return {0: "TOUT EST VERT.",
             2: "OPTION INCONNUE — rien n'a ete lance.  TOUT-TESTER.cmd --aide",
+            124: "BUDGET DE TEMPS DEPASSE — un sous-processus s'est fige, l'audit s'est arrete net.",
             130: "INTERROMPU."}.get(
         code, "Des etapes ont ECHOUE (code %d) — le detail est dans le RECAP." % code)
 
@@ -562,6 +603,7 @@ def point_d_entree(argv: list[str] | None = None) -> int:
         return exc.code
     except KeyboardInterrupt:
         print("\n  INTERROMPU (Ctrl-C).\n", flush=True)
+        _pause()                                   # 22/07 : la fenetre reste ouverte meme sur Ctrl-C
         return 130
     except BaseException:                      # noqa: BLE001 — y compris SystemExit imprévu
         import traceback

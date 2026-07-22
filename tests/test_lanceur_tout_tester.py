@@ -284,3 +284,32 @@ def test_ctrl_c_ne_passe_pas_pour_un_plantage(monkeypatch, capsys):
 def test_aucune_execution_reelle():
     import json
     assert json.loads(L.etat_json())["real_execution"] is False
+
+
+# ═══════════════ DURCISSEMENTS CRASH-SAFETY (22/07) ═══════════════
+
+def test_cflags_ne_leve_JAMAIS_et_rend_un_int():
+    """🔴 tools/ n'a pas d'__init__.py : l'ancien `from tools.sous_processus_isole import` levait
+    ModuleNotFoundError dans l'invocation reelle. Le helper robuste tente les deux formes puis 0 —
+    il ne doit JAMAIS lever, et toujours rendre un entier (0 = aucune isolation, mais un run vivant)."""
+    v = L._cflags()
+    assert isinstance(v, int) and v >= 0
+
+
+def test_le_budget_total_est_genereux_mais_fini():
+    """Un plafond fini garantit que l'audit TERMINE toujours ; assez large pour ne jamais amputer
+    un run legitime (~1 h 15)."""
+    assert L.BUDGET_TOTAL_S >= 2 * 3600.0
+
+
+def test_le_verdict_nomme_le_TIMEOUT():
+    assert "BUDGET" in L._verdict(124) and "fige" in L._verdict(124)
+
+
+def test_ctrl_c_au_TOP_NIVEAU_garde_la_fenetre_ouverte(monkeypatch):
+    """La fenetre ne doit JAMAIS se fermer sans pause — meme sur un Ctrl-C hors du bloc protege."""
+    appels = {"pause": 0}
+    monkeypatch.setattr(L, "lancer", lambda _a=None: (_ for _ in ()).throw(KeyboardInterrupt()))
+    monkeypatch.setattr(L, "_pause", lambda: appels.__setitem__("pause", appels["pause"] + 1))
+    assert L.point_d_entree([]) == 130
+    assert appels["pause"] == 1, "un Ctrl-C top-niveau doit PAUSER avant de fermer"
