@@ -16,6 +16,8 @@ import re
 from pathlib import Path
 from typing import Any
 
+from hl_observer.collection import collecte_fiable as _CF
+
 #: bps/h qu'il faut dépasser pour battre le bas de HLP (cf. carry_benchmark_gate).
 SEUIL_HLP_BPS_H = 0.266
 PLANCHER_BPS_H = 0.125
@@ -199,7 +201,9 @@ def _charger_jsonl(chemin: Path, *, limite: int = 200_000) -> list[dict]:
                     d = json.loads(line)
                 except ValueError:
                     continue
-                if isinstance(d, dict):
+                # porte de qualité (socle `collecte_fiable`) : on écarte les lignes à horodatage
+                # implausible (fixtures/erreurs) avant toute mesure — une donnée pourrie ment.
+                if isinstance(d, dict) and _CF.qualite_ok(d):
                     out.append(d)
                 if len(out) >= limite:
                     break

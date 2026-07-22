@@ -135,6 +135,8 @@ def funding_binance() -> dict[str, float]:
 #: le replay (fade côté HL : short HL si HL est riche, long sinon). Le laboratoire jugera
 #: aux mêmes portes (2 moitiés + stress + plateau). Barres AVANT la donnée, jamais après.
 SEUIL_CANDIDAT_ARB_BPS = 20.0
+#: au-delà, ce n'est pas une dislocation mais un mauvais appariement de paires (cf. arb_executable).
+ECART_PLAUSIBLE_MAX_BPS = 500.0
 CANDIDATS_ARB_MAX_BYTES = 20_000_000
 CANDIDATS_ARB_MAX_LINES = 200_000
 
@@ -176,7 +178,11 @@ def une_passe(root: Path, coins: list[str]) -> tuple[int, int]:
             ligne["hl_px"] = da["px"]
             ligne["bin_px"] = db["px"]
             ligne["ecart_prix_bps"] = round(ecart, 4)
-            if abs(ecart) >= SEUIL_CANDIDAT_ARB_BPS:
+            # 🔴 22/07 — QUALITÉ À LA SOURCE. 35 % des candidats d'arb étaient des appariements
+            # ABERRANTS (|écart| jusqu'à 1 670 000 bps : perp HL vs perp Binance mal jumelés). On
+            # ne les émet PLUS comme candidats : un calibrage nourri de poubelle ment. La ligne de
+            # dispersion, elle, garde l'écart brut (traçable), mais le CANDIDAT exige la plausibilité.
+            if SEUIL_CANDIDAT_ARB_BPS <= abs(ecart) <= ECART_PLAUSIBLE_MAX_BPS:
                 candidats_arb.append({
                     "recorded_at": round(maintenant, 3), "strategie": "arbitrage",
                     "action_type": "FADE_DISLOCATION_HL",
