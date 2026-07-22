@@ -501,29 +501,39 @@ def lancer(argv: list[str] | None = None, racine: Path = RACINE) -> int:
     elif triage and code == 0:
         # run vert : on MEMORISE l'ensemble vide, pour que le prochain diff soit juste.
         comparer_aux_echecs_precedents([], racine)
-    # 22/07 — BOT-READY : UN score de maturite + le niveau d'autonomie SUR (porte de
-    # loop-engineering, lentille trading). Apres le RECAP, en try/except : un bonus d'affichage
-    # ne doit JAMAIS faire echouer l'audit. Plafond = testnet verrouille ; le REEL est hors echelle.
+    # 22/07 — BOT-READY (score de maturite + niveau d'autonomie SUR) + CERVELLE (« comprendre le
+    # PnL & trouver l'edge »). Affiches a l'ecran ET ecrits DANS le RECAP.md : Flo (« le fichier
+    # .md doit etre ULTRA riche pour Claude, analyse mot par mot ») veut que le .md qu'il m'envoie
+    # contienne TOUT — le score, la synthese edge, la prochaine action. Sinon je pilote a l'aveugle.
+    # Try/except partout : un bonus d'analyse ne fait JAMAIS echouer l'audit.
+    _enrichissement: list[str] = []
     try:
         if str(racine / "src") not in sys.path:
             sys.path.insert(0, str(racine / "src"))
         from hl_observer.ops import loop_readiness as _LR
-        for _l in _LR.markdown(_LR.depuis_le_recap(racine)).splitlines():
+        _bloc = _LR.markdown(_LR.depuis_le_recap(racine))
+        for _l in _bloc.splitlines():
             dire(_l)
+        _enrichissement.append(_bloc)
     except Exception as _exc:  # noqa: BLE001 — jamais fatal
         dire("    (BOT-READY indisponible : %s)" % str(_exc)[:80])
-    # 22/07 — LA CERVELLE : « comprendre le PnL & trouver l'edge ». Elle transforme les chiffres
-    # du RECAP en une synthese actionnable (ou va l'argent, l'edge existe-t-il, prochaine action).
-    # Try/except : la comprehension est un bonus d'affichage, jamais un point de panne de l'audit.
     try:
         if str(racine / "src") not in sys.path:
             sys.path.insert(0, str(racine / "src"))
         from hl_observer.ops import diagnostic_pnl as _DPNL
+        _bloc = _DPNL.construire(racine)
         dire("")
-        for _l in _DPNL.construire(racine).splitlines():
+        for _l in _bloc.splitlines():
             dire(_l)
+        _enrichissement.append(_bloc)
     except Exception as _exc:  # noqa: BLE001 — jamais fatal
         dire("    (diagnostic PnL indisponible : %s)" % str(_exc)[:80])
+    if _enrichissement:            # ON ENRICHIT LE .md (append best-effort, jamais fatal)
+        try:
+            with (racine / RECAP.name).open("a", encoding="utf-8") as _fh:
+                _fh.write("\n\n---\n\n" + "\n\n".join(_enrichissement) + "\n")
+        except OSError:
+            pass
     n = purger_logs(racine)                                                  # 24
     if n:
         dire("    %d vieux log(s) purge(s) (on garde les %d derniers)" % (n, LOGS_CONSERVES))

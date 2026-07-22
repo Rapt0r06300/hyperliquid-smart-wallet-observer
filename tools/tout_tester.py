@@ -547,7 +547,7 @@ def main(argv: list[str] | None = None) -> int:
                 "recherche", [py, "-c",
                               "from hl_observer.backtesting.recherche_scenario import "
                               "chercher_toutes; chercher_toutes('.', "
-                              "budget_s_par_module=1200)"], BUDGETS["recherche"]))
+                              "budget_s_par_module=1200, parallele=True)"], BUDGETS["recherche"]))
         else:
             etapes.append({"etape": "recherche", "statut": "SAUTEE", "code": 0, "duree_s": 0,
                            "sortie": "--rapide : recherche de pepites sautee"})

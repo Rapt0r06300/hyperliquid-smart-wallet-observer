@@ -593,8 +593,30 @@ def _cribler_configs(d: DonneesReplay, configs: list[dict], *,
 
 # ================================================================ 6. TOUS les modules d'un coup
 
+def _chercher_un_module(args: tuple) -> tuple:
+    """Worker (process séparé, 22/07) : lance `chercher` pour UN module et CAPTURE sa sortie, pour
+    un affichage GROUPÉ par module (parallèle = rapide ET lisible, jamais un entrelacement illisible).
+    Blindé : un module qui explose rend un verdict ERREUR, il n'en tue aucun autre. Les résultats
+    sont IDENTIQUES au séquentiel (chaque module est indépendant ; seule la concurrence change)."""
+    root, strat, max_essais, budget_s = args
+    import io
+    import sys as _sys
+    buf = io.StringIO()
+    vieux, _sys.stdout = _sys.stdout, buf
+    try:
+        r = chercher(root, strategie=strat, configs=grille_large(), max_essais=max_essais,
+                     budget_s=budget_s, s_arreter_au_premier=False, raffiner=True)
+    except Exception as exc:  # noqa: BLE001
+        print("  !! module %s en ERREUR : %s" % (strat, str(exc)[:200]))
+        r = {"statut": "ERREUR", "strategie": strat, "motif": str(exc)[:300], "essais": []}
+    finally:
+        _sys.stdout = vieux
+    return strat, r, buf.getvalue()
+
+
 def chercher_toutes(root: str | Path, *, max_essais_par_strategie: int | None = None,
-                    budget_s_par_module: float | None = 7_200.0) -> dict[str, Any]:
+                    budget_s_par_module: float | None = 7_200.0,
+                    parallele: bool = False) -> dict[str, Any]:
     """« Il doit replay TOUS nos modules » (21/07). Une recherche PAR module (populations
     jamais mélangées), grille LARGE (le filet s'élargit, les mailles jamais), rapports écrits
     À LA FIN QUOI QU'IL ARRIVE. Leçons du run de la nuit (mort en silence pendant copy,
@@ -602,17 +624,40 @@ def chercher_toutes(root: str | Path, *, max_essais_par_strategie: int | None = 
     ERREUR et les AUTRES continuent ; (2) budget de 2 h par module — BUDGET_EPUISE honnête
     et reprise au prochain lancement (états par module), jamais une nuit avalée."""
     resultats: dict[str, Any] = {}
-    for strat in STRATEGIES_MODULES:
-        print("=== module %s ===" % strat, flush=True)
+    fait_en_parallele = False
+    # 22/07 (Flo : « plus rapide ») — les 3 modules sont INDÉPENDANTS : on peut les chercher EN
+    # PARALLÈLE (÷3 sur le temps) sans changer un seul résultat. Sortie GROUPÉE par module (via
+    # capture dans le worker) pour rester lisible. Défaut = séquentiel (les tests monkeypatchent
+    # `chercher`, ce qui ne traverse pas un sous-process) ; seul TOUT-TESTER active `parallele`.
+    if parallele:
         try:
-            resultats[strat] = chercher(root, strategie=strat, configs=grille_large(),
-                                        max_essais=max_essais_par_strategie,
-                                        budget_s=budget_s_par_module,
-                                        s_arreter_au_premier=False, raffiner=True)
-        except Exception as exc:  # noqa: BLE001 — un module qui explose ne tue plus la nuit
-            print("  !! module %s en ERREUR : %s" % (strat, str(exc)[:200]), flush=True)
-            resultats[strat] = {"statut": "ERREUR", "strategie": strat,
-                                "motif": str(exc)[:300], "essais": []}
+            from concurrent.futures import ProcessPoolExecutor
+            print("=== %d modules cherchés EN PARALLÈLE (sortie groupée par module) ==="
+                  % len(STRATEGIES_MODULES), flush=True)
+            jobs = [(str(root), s, max_essais_par_strategie, budget_s_par_module)
+                    for s in STRATEGIES_MODULES]
+            with ProcessPoolExecutor(max_workers=len(STRATEGIES_MODULES)) as ex:
+                for strat, r, texte in ex.map(_chercher_un_module, jobs):
+                    print("=== module %s ===" % strat, flush=True)
+                    if texte:
+                        print(texte, end="", flush=True)
+                    resultats[strat] = r
+            fait_en_parallele = True
+        except Exception as exc:  # noqa: BLE001 — souci de pool -> repli SÉQUENTIEL (jamais un run perdu)
+            print("  (parallèle indisponible : %s -> séquentiel)" % str(exc)[:120], flush=True)
+            resultats = {}
+    if not fait_en_parallele:
+        for strat in STRATEGIES_MODULES:
+            print("=== module %s ===" % strat, flush=True)
+            try:
+                resultats[strat] = chercher(root, strategie=strat, configs=grille_large(),
+                                            max_essais=max_essais_par_strategie,
+                                            budget_s=budget_s_par_module,
+                                            s_arreter_au_premier=False, raffiner=True)
+            except Exception as exc:  # noqa: BLE001 — un module qui explose ne tue plus la nuit
+                print("  !! module %s en ERREUR : %s" % (strat, str(exc)[:200]), flush=True)
+                resultats[strat] = {"statut": "ERREUR", "strategie": strat,
+                                    "motif": str(exc)[:300], "essais": []}
     print("=== module cross_venue ===", flush=True)
     try:
         resultats["cross_venue"] = chercher_cross_venue(root, max_essais=max_essais_par_strategie)

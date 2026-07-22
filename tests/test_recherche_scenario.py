@@ -374,3 +374,23 @@ def test_chercher_cross_venue_ATTACHE_l_etude_maker(tmp_path):
     r = chercher_cross_venue(tmp_path, series=serie, max_essais=2)
     assert "etude_maker_refuge" in r, "le refuge maker doit voyager avec le rapport"
     assert r["etude_maker_refuge"]["real_execution"] is False
+
+
+# ---- 22/07 : recherche des 3 modules EN PARALLÈLE (plus rapide, résultats identiques)
+
+def test_le_worker_de_module_capture_sa_sortie(tmp_path):
+    """Le worker parallèle rend (strat, résultat, TEXTE capturé) — la capture permet l'affichage
+    GROUPÉ par module (parallèle sans entrelacement illisible). Sur données vides : INSUFFISANT."""
+    from hl_observer.backtesting.recherche_scenario import _chercher_un_module
+    strat, r, texte = _chercher_un_module((str(tmp_path), "carry", 1, 5.0))
+    assert strat == "carry" and isinstance(r, dict) and isinstance(texte, str)
+    assert r.get("statut") == "INSUFFISANT"           # aucun candidat -> honnête, pas un faux vert
+
+
+def test_chercher_toutes_PARALLELE_rend_les_memes_modules_que_le_sequentiel(tmp_path):
+    """`parallele=True` produit EXACTEMENT les mêmes modules (carry/copy/arbitrage/cross_venue) —
+    seule la concurrence change, jamais les résultats. Défaut séquentiel (les tests le prouvent)."""
+    from hl_observer.backtesting.recherche_scenario import chercher_toutes
+    seq = chercher_toutes(tmp_path, max_essais_par_strategie=1)
+    par = chercher_toutes(tmp_path, max_essais_par_strategie=1, parallele=True)
+    assert set(par.keys()) == set(seq.keys()) == {"carry", "copy", "arbitrage", "cross_venue"}
