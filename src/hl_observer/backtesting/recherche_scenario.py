@@ -84,9 +84,12 @@ class DonneesReplay:
             return cls(candidats=[], marks=[])            # dossier vide = INSUFFISANT honnete
         cands = load_jsonl(str(base / "candidates.jsonl"))
         if strategie is not None:
-            seaux = ALIAS_STRATEGIES.get(strategie, {strategie})
-            cands = [c for c in cands
-                     if str(c.get("strategie") or "?").lower() in seaux]
+            # 🔴 22/07 — bucketing par STRATEGIE EFFECTIVE (label OU inference de champs), plus
+            # par l'alias aveugle qui mappait tout « ? » en copy. Un candidat carry/arbitrage
+            # sans label est desormais reconnu par SES champs, jamais range en copy par accident.
+            from hl_observer.ops.strategie_candidat import strategie_effective
+            cible = ALIAS_STRATEGIES.get(strategie, {strategie})
+            cands = [c for c in cands if strategie_effective(c) in cible]
         return cls(candidats=cands, marks=load_jsonl(str(base / "marks.jsonl")))
 
     def moities_avec_embargo(self, horizon_min: float) -> tuple[list[dict], list[dict]]:

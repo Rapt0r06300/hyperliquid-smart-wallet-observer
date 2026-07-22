@@ -61,15 +61,23 @@ def auditer(root: str | Path = ".", *, max_lignes: int = 400_000) -> dict[str, A
         return rap
 
     # 1. étiquetage + 2. horodatage
-    strat = Counter(str(c.get("strategie") or "?") for c in cands)
-    rap["par_strategie"] = dict(strat)
-    etiquetes = 100.0 * (len(cands) - strat.get("?", 0)) / len(cands)
-    rap["etiquetage_pct"] = round(etiquetes, 2)
-    if etiquetes < ETIQUETAGE_MIN_PCT:
+    # 🔴 22/07 — ON MESURE LA STRATEGIE EFFECTIVE, PAS LE LABEL BRUT. L'ancienne metrique criait
+    # « 9 % etiquetes » alors que ~100 % sont CLASSABLES : 77,6 % de l'historique n'a pas de
+    # label mais porte `leader_wallet`/`leader_score` -> ce sont des candidats copy, inferables
+    # sans ambiguite. L'alarme ne doit se declencher que sur les VRAIMENT ambigus (ni label,
+    # ni marqueur) : c'est ca, un candidat perdu pour le crible.
+    from hl_observer.ops.strategie_candidat import resume_etiquetage
+    et = resume_etiquetage(cands)
+    rap["par_strategie"] = et["par_strategie"]
+    rap["etiquetage_pct"] = et["classes_pct"]          # label OU inference : la verite
+    rap["label_brut_pct"] = et["label_brut_pct"]       # info : combien portent l'etiquette
+    rap["ambigus_pct"] = et["ambigus_pct"]
+    if et["classes_pct"] < ETIQUETAGE_MIN_PCT:
         rap["defauts"].append(
-            "ÉTIQUETAGE : %.1f%% des candidats portent une `strategie` (barre %.0f%%) — les "
-            "'?' sont traités comme copy ; un module mal étiqueté cherche dans le mauvais seau"
-            % (etiquetes, ETIQUETAGE_MIN_PCT))
+            "ÉTIQUETAGE : %.1f%% des candidats sont AMBIGUS (ni `strategie`, ni champ "
+            "distinctif) — eux seuls partent dans le mauvais seau. (%.1f%% portent le label "
+            "brut ; le reste est infere de ses champs, sans ambiguite.)"
+            % (et["ambigus_pct"], et["label_brut_pct"]))
     sans_ts = sum(1 for c in cands if not float(c.get("recorded_at") or 0))
     rap["horodatage_pct"] = round(100.0 * (len(cands) - sans_ts) / len(cands), 2)
     if sans_ts:
