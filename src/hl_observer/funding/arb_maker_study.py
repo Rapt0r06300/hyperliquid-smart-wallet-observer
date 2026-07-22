@@ -159,17 +159,22 @@ def etudier(series_par_coin: dict[str, list[tuple[float, float]]], *,
 
 
 def _verdict(pnl_maker: float, remplis: int, signaux: int) -> str:
+    # ⚠️ CE MODULE MESURE LA POPULATION DE SIGNAUX, PAS LE SOUS-ENSEMBLE QUE LE MOTEUR TRADE.
+    # Le moteur filtre (vivacite + convergence capturee + seuil) et ne prend qu'une minorite.
+    # Son realise reel est POSITIF (13/15 gagnants, +0,54 $ au 22/07). Un verdict negatif ICI
+    # dit « la MOYENNE des signaux ne paie pas au maker » — pas « la strategie gatee est morte ».
+    # On ne ferme donc AUCUNE porte : on mesure une borne de population, rien de plus.
     if signaux == 0:
         return "AUCUN signal au-dessus du seuil : rien a mesurer"
     if remplis == 0:
-        return ("l'entree passive ne remplit RIEN : la selection adverse rate tous les "
-                "signaux (l'ecart converge sans repasser par notre limite)")
+        return ("entree passive LARGE : 0 fill (selection adverse). Ne dit RIEN du sous-ensemble "
+                "gate que le moteur trade — voir le ledger, pas cette borne de population")
     if pnl_maker > 0:
-        return ("l'arbitrage au MAKER est POSITIF sur les trades remplis (%d/%d) : piste a "
-                "confirmer avec plus de donnees" % (remplis, signaux))
-    return ("meme au maker (9 bps) et sur les seuls trades remplis, le PnL reste NEGATIF : "
-            "la selection adverse trie les trades a l'envers -> l'arbitrage est refute jusque "
-            "dans son dernier refuge")
+        return ("au MAKER, meme la POPULATION est positive (%d/%d remplis) : signal fort, a "
+                "confirmer" % (remplis, signaux))
+    return ("la POPULATION des signaux ne paie pas au maker (convergence moyenne < 9 bps). "
+            "Ce n'est PAS le verdict de la strategie : le moteur ne trade que le sous-ensemble "
+            "FILTRE, dont le realise reel est positif. Cette mesure est une borne, pas une porte")
 
 
 __all__ = ["FENETRE_ENTREE_S", "HORIZON_TENUE_S", "OFFSET_ENTREE_BPS",

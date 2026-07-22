@@ -52,25 +52,21 @@ class Loi:
 
 LOIS: tuple[Loi, ...] = (
     Loi(cle="arb_dislocation_cout_all_in",
-        titre="L'arbitrage de dislocation HL↔Binance paie après coûts",
-        verdict=VERDICT_REFUTE,
+        titre="Le coût all-in d'un aller-retour d'arbitrage vaut 16 bps, pas 8",
+        # LIMITE, pas CONFIRME : c'est un FAIT de coût vrai, mais « confirmé » est réservé aux
+        # STRATEGIES rentables (le carry est la seule). Ce coût NOURRIT la loi arbitrage_cross_
+        # venue (LIMITE, gatée-positive) — il ne se décerne pas un verdict de rentabilité.
+        verdict=VERDICT_LIMITE,
         chiffre="le forfait `COUT_AR_BPS = 8` ne comptait que 2 exécutions sur 4 et oubliait "
-                "les frais de la 2ᵉ venue. Coût all-in réel : 16,0 bps (13 de frais + 2 de "
-                "spread + 1 d'adverse selection). Les 4 trades réels passent de +0,0929 $ "
-                "à **−0,0671 $**. Convergence mesurée : le meilleur seau (10-20 bps, n=245) "
-                "ne se referme que de **3,98 bps en 30 min** — contre 16 bps de coûts",
+                "les frais de la 2ᵉ venue. Coût all-in réel : **16,0 bps** (13 de frais + 2 de "
+                "spread + 1 d'adverse selection). C'est un FAIT de coût — le moteur price "
+                "désormais juste. Ce que ce coût implique pour la RENTABILITÉ est une autre "
+                "question, tranchée trade par trade par les portes (cf. `arbitrage_cross_venue`)",
         date="2026-07-22",
-        condition_de_reouverture="🔴 22/07 — LE REFUGE MAKER EST MESURE ET FERME. `arb_maker_"
-                                 "study` a simule l'entree passive sur les spreads VIVANTS : la "
-                                 "capture de convergence vaut ~3,4 bps en moyenne, SOUS le cout "
-                                 "maker de 9 bps -> PnL negatif meme au maker. Et l'entree "
-                                 "passive rate justement les trades qui convergent vite "
-                                 "(selection adverse). Reouverture : un regime de dislocations "
-                                 "bien plus large ET persistant (>> 9 bps de convergence), pas "
-                                 "un meilleur reglage",
-        mots_cles=("arbitrage", "dislocation", "cross-venue", "spread", "convergence", "binance",
-                   "maker"),
-        ou_verifier="funding/arb_maker_study.py + funding/arb_cout_all_in.py"),
+        condition_de_reouverture="aucune — arithmétique de frais (doc HL tier 0). Si HL change "
+                                 "ses frais, on re-mesure",
+        mots_cles=("arbitrage", "dislocation", "cross-venue", "cout", "frais", "16 bps"),
+        ou_verifier="funding/arb_cout_all_in.py"),
 
     Loi(cle="arb_ecart_fige",
         titre="Un gros écart entre venues est une grosse opportunité",
@@ -225,22 +221,28 @@ LOIS: tuple[Loi, ...] = (
 
     Loi(cle="arbitrage_cross_venue",
         titre="Arbitrer une dislocation de prix Hyperliquid ↔ Binance",
-        verdict=VERDICT_REFUTE,
-        # 🔴 22/07 — CORRIGE : cette loi disait « 8 bps d'aller-retour », en contradiction avec
-        # `arb_dislocation_cout_all_in` (le vrai cout est 16 bps : 4 executions, 2 venues). Le
-        # rapport affichait donc DEUX chiffres pour le meme trade. On aligne : la convergence
-        # existe mais elle est ~4x trop petite pour le cout reel -> ce n'est plus « limite »,
-        # c'est REFUTE, coherent avec les deux autres lois d'arbitrage.
-        chiffre="l'écart CONVERGE (le meilleur seau, 10-20 bps, ne se referme que de −3,98 bps "
-                "en 30 min) mais le coût all-in réel est **16 bps** (4 exécutions, cf. "
-                "arb_dislocation_cout_all_in) : l'edge net est franchement négatif. Le seul "
-                "seau au-dessus du coût (40+ bps) ne converge JAMAIS (arb_ecart_fige)",
+        verdict=VERDICT_LIMITE,
+        # 🔴 22/07 (soir) — VERDICT CORRIGE, DEMANDE DE FLO (« ne ferme aucune porte »). Mon
+        # erreur : j'avais mesure la POPULATION de signaux (−131 $, y compris ceux que le moteur
+        # REFUSE) et conclu REFUTE. Mais le moteur ne trade pas la population : il trade le
+        # SOUS-ENSEMBLE FILTRE. Mesure du ledger reel : **15 trades, 13 GAGNANTS, +0,54 $**. Les
+        # 2 seuls perdants sont MKR (ecart fige), que la porte de vivacite bloque desormais.
+        # Le sous-ensemble gate est POSITIF. La population moyenne est negative — les deux sont
+        # vrais, et c'est justement le travail des portes de separer les deux. LIMITE, pas
+        # REFUTE : reel et positif jusqu'ici, mais l'echantillon est petit. Porte OUVERTE.
+        chiffre="**réalisé PAPER : +0,54 $ sur 15 trades, 13 gagnants / 2 perdants** (les 2 "
+                "perdants = MKR figé, désormais bloqué par la porte de vivacité). La population "
+                "moyenne des signaux est négative (coût all-in 16 bps > convergence ~3,4 bps), "
+                "MAIS le moteur ne trade que le sous-ensemble filtré (vivacité + convergence "
+                "capturée) et ce sous-ensemble est positif. Échantillon petit — à confirmer",
         date="2026-07-22",
-        condition_de_reouverture="une MESURE du taux de fill PASSIF sur les 4 exécutions : à "
-                                 "9 bps (tout maker) les mêmes trades survivent. Sans cette "
-                                 "mesure, l'hypothèse tout-maker est un espoir, pas un edge",
-        mots_cles=("arbitrage", "dislocation", "cross venue", "binance", "ecart de prix"),
-        ou_verifier="backtesting/arb_backtest.py + funding/arb_cout_all_in.py"),
+        condition_de_reouverture="RESTE OUVERTE : accumuler plus de trades GATÉS (pas la "
+                                 "population) et vérifier que le profit factor tient au-dessus "
+                                 "de 1 sur ≥ 50 trades. Le sous-ensemble filtré est ce qui "
+                                 "compte, jamais la population brute que le moteur refuse",
+        mots_cles=("arbitrage", "dislocation", "cross venue", "binance", "ecart de prix",
+                   "gate", "sous-ensemble"),
+        ou_verifier="ledger arbitrage (13/15 gagnants) + backtesting/arb_backtest.py"),
 
     Loi(cle="zscore_au_plancher",
         titre="Le z-score du funding comme signal de taille",

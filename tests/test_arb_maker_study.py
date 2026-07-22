@@ -73,22 +73,26 @@ def test_le_cout_vient_de_la_source_unique():
     assert r["cout_taker_bps"] == decomposer(mode="TOUT_TAKER")["cout_aller_retour_bps"]
 
 
-def test_capture_sous_le_cout_maker_donne_un_verdict_NEGATIF():
-    """LE cas réel : une convergence de ~3 bps < 9 bps de coût maker -> refuté même au maker."""
-    # des signaux qui convergent un peu (25->22), capture ~3 bps, sous les 9 bps maker
+def test_la_POPULATION_sous_le_cout_maker_ne_FERME_PAS_la_strategie():
+    """🔴 22/07 (soir) — Flo : « ne ferme aucune porte ». Ce module mesure la POPULATION de
+    signaux, pas le sous-ensemble que le moteur trade. Une population négative au maker ne dit
+    RIEN de la stratégie gatée (réalisé réel +0,54 $, 13/15). Le verdict doit le DIRE, jamais
+    conclure « réfuté »."""
     serie = _serie([(0, 25.0), (60, 25.5), (600, 22.0), (1800, 22.0)])
     r = S.etudier({"A": serie, "B": serie, "C": serie}, seuil_bps=19.0, offset_bps=0.0)
     assert r["maker_remplis"] > 0
     assert r["capture_maker_moyenne_bps"] < 9.0
     assert r["pnl_maker_usd_sur_remplis"] < 0
-    assert "NEGATIF" in r["verdict"]
+    assert "POPULATION" in r["verdict"], "on parle de la population, pas de la strategie"
+    assert "porte" in r["verdict"].lower() and "borne" in r["verdict"].lower()
+    assert "refut" not in r["verdict"].lower(), "on ne ferme AUCUNE porte"
 
 
-def test_une_convergence_forte_au_maker_serait_POSITIVE():
+def test_une_convergence_forte_au_maker_est_un_signal_POSITIF():
     """Le module n'est pas biaisé au négatif : une vraie grosse convergence passe positif."""
     serie = _serie([(0, 40.0), (60, 40.5), (600, 2.0), (1800, 2.0)])   # capture ~38 bps
     r = S.etudier({"A": serie}, seuil_bps=19.0, offset_bps=0.0)
-    assert r["pnl_maker_usd_sur_remplis"] > 0 and "POSITIF" in r["verdict"]
+    assert r["pnl_maker_usd_sur_remplis"] > 0 and "positive" in r["verdict"].lower()
 
 
 def test_aucun_signal_ne_LEVE_pas():

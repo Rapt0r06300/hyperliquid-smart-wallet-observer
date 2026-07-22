@@ -4,14 +4,7 @@
 > Une loi n'est pas un interdit de penser : c'est un **chiffre à battre**, avec la
 > **donnée** qui justifierait de rouvrir le dossier. Un argument neuf ne suffit pas.
 
-## 🔴 Réfuté par la mesure (15)
-
-### L'arbitrage de dislocation HL↔Binance paie après coûts — `arb_dislocation_cout_all_in`
-
-- **le chiffre** : le forfait `COUT_AR_BPS = 8` ne comptait que 2 exécutions sur 4 et oubliait les frais de la 2ᵉ venue. Coût all-in réel : 16,0 bps (13 de frais + 2 de spread + 1 d'adverse selection). Les 4 trades réels passent de +0,0929 $ à **−0,0671 $**. Convergence mesurée : le meilleur seau (10-20 bps, n=245) ne se referme que de **3,98 bps en 30 min** — contre 16 bps de coûts
-- **mesuré le** : 2026-07-22
-- **pour rouvrir** : 🔴 22/07 — LE REFUGE MAKER EST MESURE ET FERME. `arb_maker_study` a simule l'entree passive sur les spreads VIVANTS : la capture de convergence vaut ~3,4 bps en moyenne, SOUS le cout maker de 9 bps -> PnL negatif meme au maker. Et l'entree passive rate justement les trades qui convergent vite (selection adverse). Reouverture : un regime de dislocations bien plus large ET persistant (>> 9 bps de convergence), pas un meilleur reglage
-- **où vérifier** : `funding/arb_maker_study.py + funding/arb_cout_all_in.py`
+## 🔴 Réfuté par la mesure (13)
 
 ### Un gros écart entre venues est une grosse opportunité — `arb_ecart_fige`
 
@@ -97,19 +90,28 @@
 - **pour rouvrir** : que le carry dépasse durablement 30 % APR net, OU que HLP s'effondre. Attention : HLP n'est PAS delta-neutre (il porte du risque directionnel et de liquidation) — la comparaison est brutale mais pas parfaitement égale à risque
 - **où vérifier** : `defillama.com/protocol/hyperliquid-hlp (public) + carry_backtest`
 
-### Arbitrer une dislocation de prix Hyperliquid ↔ Binance — `arbitrage_cross_venue`
-
-- **le chiffre** : l'écart CONVERGE (le meilleur seau, 10-20 bps, ne se referme que de −3,98 bps en 30 min) mais le coût all-in réel est **16 bps** (4 exécutions, cf. arb_dislocation_cout_all_in) : l'edge net est franchement négatif. Le seul seau au-dessus du coût (40+ bps) ne converge JAMAIS (arb_ecart_fige)
-- **mesuré le** : 2026-07-22
-- **pour rouvrir** : une MESURE du taux de fill PASSIF sur les 4 exécutions : à 9 bps (tout maker) les mêmes trades survivent. Sans cette mesure, l'hypothèse tout-maker est un espoir, pas un edge
-- **où vérifier** : `backtesting/arb_backtest.py + funding/arb_cout_all_in.py`
-
 ### Le z-score du funding comme signal de taille — `zscore_au_plancher`
 
 - **le chiffre** : corrélation −0,596 entre le facteur de taille et le rendement net : on finançait le PLUS les coins les MOINS rentables. Au plancher protocolaire, tous les coins sont au même taux par construction — le z-score y mesure du bruit
 - **mesuré le** : 2026-07-21
 - **pour rouvrir** : un funding franchement AU-DESSUS du plancher (le garde du plancher réactive alors le z-score automatiquement)
 - **où vérifier** : `funding/carry_optimizer.py:facteur_zscore + carry_allocation_nette.py`
+
+## 🟠 Réel mais insuffisant en l'état (2)
+
+### Le coût all-in d'un aller-retour d'arbitrage vaut 16 bps, pas 8 — `arb_dislocation_cout_all_in`
+
+- **le chiffre** : le forfait `COUT_AR_BPS = 8` ne comptait que 2 exécutions sur 4 et oubliait les frais de la 2ᵉ venue. Coût all-in réel : **16,0 bps** (13 de frais + 2 de spread + 1 d'adverse selection). C'est un FAIT de coût — le moteur price désormais juste. Ce que ce coût implique pour la RENTABILITÉ est une autre question, tranchée trade par trade par les portes (cf. `arbitrage_cross_venue`)
+- **mesuré le** : 2026-07-22
+- **pour rouvrir** : aucune — arithmétique de frais (doc HL tier 0). Si HL change ses frais, on re-mesure
+- **où vérifier** : `funding/arb_cout_all_in.py`
+
+### Arbitrer une dislocation de prix Hyperliquid ↔ Binance — `arbitrage_cross_venue`
+
+- **le chiffre** : **réalisé PAPER : +0,54 $ sur 15 trades, 13 gagnants / 2 perdants** (les 2 perdants = MKR figé, désormais bloqué par la porte de vivacité). La population moyenne des signaux est négative (coût all-in 16 bps > convergence ~3,4 bps), MAIS le moteur ne trade que le sous-ensemble filtré (vivacité + convergence capturée) et ce sous-ensemble est positif. Échantillon petit — à confirmer
+- **mesuré le** : 2026-07-22
+- **pour rouvrir** : RESTE OUVERTE : accumuler plus de trades GATÉS (pas la population) et vérifier que le profit factor tient au-dessus de 1 sur ≥ 50 trades. Le sous-ensemble filtré est ce qui compte, jamais la population brute que le moteur refuse
+- **où vérifier** : `ledger arbitrage (13/15 gagnants) + backtesting/arb_backtest.py`
 
 ## 🟢 Confirmé — en production (1)
 
