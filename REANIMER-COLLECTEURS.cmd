@@ -26,6 +26,7 @@ start "" /b tools\boucle_collecteur.cmd carry-feeder tools\ecrire_carry_spot_inp
 start "" /b tools\boucle_collecteur.cmd marks-collector tools\ecrire_marks_tous_coins.py 60 --une-fois
 start "" /b tools\boucle_collecteur.cmd liq-collector tools\collecter_liquidations.py 300 --une-fois
 start "" /b tools\boucle_collecteur.cmd venues-collector tools\collecter_dispersion_venues.py 60 --une-fois
+start "" /b tools\boucle_collecteur.cmd carnet-collector tools\collecter_carnet.py 60 --une-fois
 start "" /b tools\boucle_collecteur.cmd copy-whitelist tools\ecrire_copy_whitelist.py 21600
 start "" /b tools\boucle_collecteur.cmd rapport-quotidien tools\rapport_quotidien.py 21600
 

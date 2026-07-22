@@ -55,6 +55,20 @@ def _cap_atomic(p: Path, max_bytes: int, max_lines: int) -> None:
             keep = int(max_lines)
         else:
             keep = max(1000, len(lines) // 2)  # sous le cap-lignes mais trop gros -> on halve vraiment
+        # 🔴 22/07 (Flo : « rien d'important ne doit être supprimé, il nous faut le MAXIMUM de
+        # données »). L'ancien code JETAIT les lignes au-delà du cap : si la consolidation prenait
+        # du retard, ces observations étaient perdues À JAMAIS. On les ARCHIVE désormais (append)
+        # avant de borner le shard vivant — le cap protège la taille du fichier chaud, plus jamais
+        # la survie des données. TOUT-TESTER lit les archives (iter_replay_files include_archive).
+        drop = lines[:-keep] if keep < len(lines) else []
+        if drop:
+            try:
+                arch = p.parent / _ARCHIVE_DIRNAME
+                arch.mkdir(parents=True, exist_ok=True)
+                with (arch / (p.name + ".archive.jsonl")).open("a", encoding="utf-8") as fa:
+                    fa.write("\n".join(drop) + "\n")
+            except OSError:
+                _noter_echec("hl_observer/runtime/replay_recorder.py:archive")
         lines = lines[-keep:]
         tmp = p.with_name(p.name + f".{os.getpid()}.captmp")
         tmp.write_text("\n".join(lines) + "\n", encoding="utf-8")

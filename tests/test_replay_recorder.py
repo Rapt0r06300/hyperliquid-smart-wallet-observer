@@ -27,6 +27,22 @@ def test_cap_bounds_file(tmp_path):
     assert 1 <= len(rows) <= 80  # borne (garde une fenetre recente)
 
 
+def test_le_cap_ARCHIVE_l_overflow_au_lieu_de_le_SUPPRIMER(tmp_path):
+    """🔴 22/07 (Flo : « rien d'important ne doit être supprimé, il nous faut le MAX de données »).
+    Les lignes au-delà du cap ne sont plus JETÉES mais ARCHIVÉES : `include_archive=True` récupère
+    tout l'historique, et la consolidation (`merge_replay`, include_archive=True) le fait remonter
+    dans `_merged` que TOUT-TESTER mange. Le cap borne le fichier CHAUD, plus jamais la survie."""
+    for i in range(400):
+        rr.append_replay_lines(tmp_path, "marks.jsonl",
+                               [{"coin": "AAA", "ts": float(i), "mid": 1.0}],
+                               max_bytes=2000, max_lines=50)
+    vivants = rr.read_replay_lines(tmp_path, "marks.jsonl")                    # fichier chaud seul
+    tout = rr.read_replay_lines(tmp_path, "marks.jsonl", include_archive=True)  # + archives
+    assert len(tout) > len(vivants), "l'archive doit contenir l'overflow (rien perdu)"
+    assert len(tout) >= 300, "la grande majorité des observations survit (archive + vivant)"
+    assert list((tmp_path / "_archive").glob("marks.*.archive.jsonl")), "archive absente"
+
+
 def test_merge_replay(tmp_path):
     rr.append_replay_lines(tmp_path, "candidates.jsonl", [{"coin": "AAA"}, {"coin": "CCC"}],
                            max_bytes=10_000_000, max_lines=1000)

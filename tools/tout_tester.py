@@ -246,7 +246,11 @@ def inventaire_donnees(root: Path = RACINE) -> list[dict]:
         ("carry · journal de scans", "runtime/replay/carry_scan.jsonl"),
         ("carry · ledger positions", "runtime/data/carry_paper_ledger.jsonl"),
         ("arbitrage · cross-venue", "runtime/data/dispersion_venues.jsonl"),
+        # 22/07 — LA donnée qui manquait à l'arbitrage : le carnet (bid/ask+profondeur) pour le
+        # prix EXÉCUTABLE. Collecteur auto-démarré (LANCER/REANIMER) et supervisé.
+        ("arbitrage · carnet bid/ask", "runtime/data/carnet_venues.jsonl"),
         ("copy · fills de leaders", "runtime/data/leader_fills_bruts.jsonl"),
+        ("copy · fills markout", "runtime/data/leader_fills_forward.jsonl"),
     ]
     sqlites = [("liquidations · grappes", "runtime/data/liquidation_map.sqlite3",
                 "grappe_snapshots")]

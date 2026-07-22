@@ -75,6 +75,11 @@ REGISTRE: tuple[dict[str, Any], ...] = (
     # que l'arbitrage mesure) : on aligne la supervision sur la realite, 60 s.
     {"nom": "venues-collector", "script": "tools/collecter_dispersion_venues.py",
      "intervalle_s": 60, "args": ("--une-fois",), "limite_minutes": 20.0},
+    # 22/07 — CARNET bid/ask+profondeur des coins disloqués : LA donnée qui manquait à l'arbitrage
+    # (le +0,54 $ au mid était une illusion ; le prix exécutable exige le vrai carnet). Démarré
+    # AVEC le bot (LANCER), réanimé (REANIMER), supervisé ici — les 3 listes bougent ensemble.
+    {"nom": "carnet-collector", "script": "tools/collecter_carnet.py",
+     "intervalle_s": 60, "args": ("--une-fois",), "limite_minutes": 20.0},
     # #185 : nourrit la porte copy (whitelist C12, se perime a 24 h) — cadence 6 h.
     # limite = 1,5x cadence + marge (regle du test des limites) : silence > 9,5 h = mort.
     {"nom": "copy-whitelist", "script": "tools/ecrire_copy_whitelist.py",

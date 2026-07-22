@@ -344,6 +344,7 @@ REM Celle-ci n'a jamais ete testee : HL et Binance ne cotent pas le meme funding
 REM Barres de rejet fixees AVANT la donnee : docs\audit\PROTOCOLE_CROSS_VENUE.md
 REM ⚠️ Binance = SOURCE DE PRIX uniquement. Lecture seule, 0 cle, 0 ordre.
 start "" /b tools\boucle_collecteur.cmd venues-collector tools\collecter_dispersion_venues.py 60 --une-fois
+start "" /b tools\boucle_collecteur.cmd carnet-collector tools\collecter_carnet.py 60 --une-fois
 
 REM ---- COPY-WHITELIST (#185, 20/07) : nourrit la porte copy (leaders au markout prouve). ----
 REM La whitelist se PERIME a 24 h (porte deny-by-default) -> regeneree toutes les 6 h.
