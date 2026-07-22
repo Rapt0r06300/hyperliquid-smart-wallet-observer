@@ -139,6 +139,24 @@ def test_courir_STREAME_et_CAPTURE_a_la_fois():
     assert r["statut"] == "OK" and "AA" in r["sortie"] and "BB" in r["sortie"]
 
 
+def test_courir_TUE_TOUT_L_ARBRE_pas_seulement_le_parent():
+    """🔴 22/07 — le budget doit tuer TOUTE la descendance. Un parent qui SPAWN un enfant dormeur
+    (héritant du tube) puis dort : si on ne tuait que le parent, le petit-enfant garderait le tube
+    ouvert et `_courir` pendrait ~30 s. Le tueur d'arbre (`_tuer_arbre`) doit couper net -> BUDGET
+    rapide. C'est la correction du blocage 'recherche 114 min sur budget 90'."""
+    import sys as _s
+    code = ("import subprocess, sys, time; "
+            "subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(90)']); "
+            "time.sleep(90)")
+    T._planifier(["tests"])
+    r = T._courir("tests", [_s.executable, "-c", code], 2)
+    assert r["statut"] == "BUDGET" and r["duree_s"] < 15.0, r
+
+
+def test_tuer_arbre_sur_None_est_sans_effet():
+    T._tuer_arbre(None)          # idempotent / défensif : jamais un plantage
+
+
 def test_courir_TIMEOUT_dur_meme_sans_sortie():
     """Un sous-processus figé SANS rien afficher doit quand même être coupé (Timer), sinon
     l'audit tournerait à l'infini — un plantage silencieux d'un autre genre."""
@@ -245,6 +263,26 @@ def test_hud_imprimer_ligne_met_a_jour_le_dernier_ET_capture(capsys):
     out = capsys.readouterr().out
     assert "1234 passed" in out                      # la sortie réelle n'est jamais avalée
     assert T._HUD["derniere"] == "1234 passed in 42s" and T._HUD["n"] == 1
+
+
+def test_hud_ETA_MESUREE_depuis_l_avancement_reel():
+    """Quand l'étape émet '… avancement i/n configs', le HUD calcule un temps restant sur la
+    VITESSE observée (pas la constante). C'est la demande de Flo : 'temps estimé ultra précis'."""
+    import time as _t
+    _armer_hud(nom="recherche", est=2700.0, ecoule=30.0)
+    T._hud_imprimer_ligne("=== module copy (2/5) ===\n")     # nouveau module -> reset compteur
+    T._HUD["t_module"] = _t.time() - 10.0                    # simule 10 s écoulées sur ce module
+    T._hud_imprimer_ligne("  … avancement 100/1100 configs\n")
+    assert T._HUD["fait"] == 100 and T._HUD["total_iter"] == 1100
+    txt = T._hud_texte(220)
+    assert "MESURÉ 100/1100" in txt and "reste ≈" in txt     # ~10/s -> reste ~1:40
+
+
+def test_hud_nouveau_module_remet_la_mesure_a_zero():
+    _armer_hud(nom="recherche")
+    T._HUD.update({"fait": 500, "total_iter": 1100})
+    T._hud_imprimer_ligne("=== module arbitrage (3/5) ===\n")
+    assert T._HUD["fait"] == 0 and T._HUD["total_iter"] == 0   # la mesure repart proprement
 
 
 def test_hud_demarrer_puis_arreter_est_idempotent_et_propre():

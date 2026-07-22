@@ -25,6 +25,18 @@ from tools import lanceur_tout_tester as L
 CMD = Path(__file__).resolve().parents[1] / "TOUT-TESTER.cmd"
 
 
+# ═══════════════ 22/07 : jamais d'orphelin (le blocage vécu par Flo) ═══════════════
+
+def test_le_lanceur_tue_TOUT_L_ARBRE_pas_seulement_l_enfant():
+    """La brique qui évite le blocage : au timeout / Ctrl-C, le lanceur tue l'ARBRE (workers
+    compris), pas juste tout_tester.py. Le run passe donc par Popen (tuable), pas subprocess.run."""
+    import inspect
+    assert L._tuer_arbre(None) is None                 # défensif : None ne plante jamais
+    src = inspect.getsource(L.lancer)
+    assert "Popen(" in src, "le run doit être un Popen tuable, pas subprocess.run(timeout=)"
+    assert src.count("_tuer_arbre(") >= 2, "arbre tué au timeout ET au Ctrl-C"
+
+
 # ═══════════════ le .cmd ne doit plus JAMAIS porter de logique ═══════════════
 
 def test_le_cmd_ne_contient_aucune_redirection_dans_un_commentaire():

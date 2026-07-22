@@ -15,6 +15,19 @@ from hl_observer.backtesting.boucle_objectif_replay import (
 CONFIGS = [{"sl": 40, "tp": 70}, {"sl": 30, "tp": 90}, {"sl": 50, "tp": 60}]
 
 
+def test_0_avancement_emis_avec_total_hint_pour_l_ETA_mesuree(capsys):
+    """22/07 — avec `total_hint`, la boucle émet '… avancement i/n configs' (toutes les 20) que le
+    HUD parse pour un temps restant MESURÉ. Sans hint : rien (compat, aucune régression)."""
+    configs = [{"sl": 40, "tp": 70, "i": i} for i in range(40)]
+    boucle_objectif(configs, lambda c: {"score": 0}, porte=lambda r: False,
+                    s_arreter_au_premier=False, total_hint=40)
+    out = capsys.readouterr().out
+    assert "avancement 20/40 configs" in out and "avancement 40/40 configs" in out
+    boucle_objectif(configs, lambda c: {"score": 0}, porte=lambda r: False,
+                    s_arreter_au_premier=False)                  # sans hint
+    assert "avancement" not in capsys.readouterr().out
+
+
 def test_1_la_boucle_s_arrete_a_la_PREMIERE_config_promue():
     vus = []
     def evaluer(c):

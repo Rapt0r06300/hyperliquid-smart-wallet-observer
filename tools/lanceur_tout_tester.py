@@ -457,20 +457,33 @@ def lancer(argv: list[str] | None = None, racine: Path = RACINE) -> int:
                                creationflags=_cflags())                      # 07
             except Exception:  # noqa: BLE001
                 pass
-        p = subprocess.run([sys.executable, str(racine / "tools" / "tout_tester.py"), *args],
-                           cwd=racine, env=environnement_fils(racine),
-                           creationflags=_cflags(), timeout=BUDGET_TOTAL_S)   # 41 filet anti-blocage
-        code = p.returncode
+        # 22/07 — Popen (pas subprocess.run) pour pouvoir TUER L'ARBRE au timeout : run() ne tuerait
+        # que tout_tester.py et laisserait la recherche + workers orphelins (le bug vécu par Flo).
+        # start_new_session : groupe POSIX pour killpg ; _cflags() : groupe Windows pour taskkill /T.
+        proc = subprocess.Popen(
+            [sys.executable, str(racine / "tools" / "tout_tester.py"), *args],
+            cwd=racine, env=environnement_fils(racine),
+            creationflags=_cflags(), start_new_session=True)
+        try:
+            code = proc.wait(timeout=BUDGET_TOTAL_S)                          # 41 filet anti-blocage
+        except subprocess.TimeoutExpired:
+            _tuer_arbre(proc)                        # TOUT l'arbre, sinon workers orphelins
+            try:
+                proc.wait(timeout=30)
+            except Exception:  # noqa: BLE001
+                pass
+            raise
     except KeyboardInterrupt:                                                # 39
         code = 130
+        _tuer_arbre(locals().get("proc"))           # 22/07 : Ctrl-C coupe l'arbre -> la fenetre se libere
         dire("")
-        dire("  INTERROMPU (Ctrl-C) — le RECAP couvre les etapes deja faites.")
+        dire("  INTERROMPU (Ctrl-C) — arret propre, recherche et workers coupes. Relance pour un RECAP complet.")
     except subprocess.TimeoutExpired:                                        # 41
         code = 124
         dire("")
         dire("  BUDGET DE TEMPS DEPASSE (%s) : un sous-processus s'est FIGE. L'audit s'arrete"
              % _hms(BUDGET_TOTAL_S))
-        dire("  proprement au lieu de tourner a l'infini. Le RECAP couvre les etapes deja faites.")
+        dire("  proprement (TOUT l'arbre a ete coupe, aucun orphelin). Le RECAP couvre les etapes faites.")
     except Exception as _exc:  # noqa: BLE001 — 22/07 : plus AUCUNE exception du run ne fuit sans trace
         code = 1
         dire("")
@@ -586,6 +599,38 @@ def _ouvrir(p: Path) -> None:
             subprocess.run(["xdg-open", str(p)], capture_output=True, timeout=10)
     except Exception:  # noqa: BLE001
         pass
+
+
+def _tuer_arbre(proc) -> None:
+    """Tue le processus ET toute sa descendance (workers compris). 22/07 — sans ça, sous Windows,
+    un timeout ou un Ctrl-C ne tue que `tout_tester.py` et laisse la recherche + ses workers tourner
+    ORPHELINS (le blocage 114 min vu par Flo, Ctrl-C sans effet). psutil si présent (portable),
+    sinon `taskkill /T` (Windows) ou `killpg` (POSIX). Idempotent, jamais une exception qui remonte."""
+    if proc is None:
+        return
+    try:
+        import psutil  # type: ignore
+        p = psutil.Process(proc.pid)
+        for enfant in p.children(recursive=True):
+            try:
+                enfant.kill()
+            except Exception:  # noqa: BLE001
+                pass
+        p.kill()
+        return
+    except Exception:  # noqa: BLE001 — psutil absent ou course : repli natif
+        pass
+    try:
+        if sys.platform.startswith("win"):
+            subprocess.run(["taskkill", "/F", "/T", "/PID", str(proc.pid)],
+                           capture_output=True, timeout=15)
+        else:
+            os.killpg(os.getpgid(proc.pid), 9)
+    except Exception:  # noqa: BLE001
+        try:
+            proc.kill()
+        except Exception:  # noqa: BLE001
+            pass
 
 
 def _pause() -> None:

@@ -20,6 +20,7 @@ RÈGLES (chèrement payées) :
 from __future__ import annotations
 
 import json
+import re
 import shutil
 import subprocess
 import sys
@@ -63,9 +64,13 @@ def _mmss(s: float) -> str:
 # les 15 s, sans caractère de contrôle. Aucun ordre, aucune donnée inventée : pur affichage.
 _SPINNER = "|/-\\"          # ASCII : lisible même sur une vieille console Windows
 _HEARTBEAT_S = 15.0        # cadence de la ligne d'état en sortie NON-TTY (fichier/pipe)
+#: 22/07 — la recherche émet « … avancement 340/1123 configs » ; le HUD en tire un temps restant
+#: MESURÉ sur la vitesse RÉELLE du run (pas une constante). C'est le « temps estimé ultra précis ».
+_RE_AVANCEMENT = re.compile(r"avancement\s+(\d+)\s*/\s*(\d+)\s+configs")
 _HUD: dict[str, Any] = {"actif": False, "nom": "", "i": 0, "total": 0, "t_etape": 0.0,
                         "budget": 0.0, "est": 0.0, "derniere": "", "n": 0, "tick": 0,
-                        "t_hb": 0.0, "lock": threading.Lock(), "thread": None}
+                        "t_hb": 0.0, "fait": 0, "total_iter": 0, "t_module": 0.0,
+                        "lock": threading.Lock(), "thread": None}
 
 
 def _tty() -> bool:
@@ -112,9 +117,20 @@ def _hud_texte(largeur: int) -> str:
     over = ecoule > est
     signe = "≤" if over else "~"                          # dépassement : plafond, pas estimé
     note = " (étape +%s au-delà de l'estimé, ≤ budget)" % _mmss(ecoule - est) if ecoule > est + 5 else ""
-    base = ("%s étape %d/%d %-12s [%s] %3.0f%% · écoulé %s/~%s · budget %s · reste run %s %s%s"
+    # ETA MESURÉE : si l'étape fournit une progression réelle (fait/total), on affiche un temps
+    # restant calculé sur la VITESSE observée — pas la constante. C'est le « ultra précis ».
+    fait, tot = int(_HUD.get("fait") or 0), int(_HUD.get("total_iter") or 0)
+    mesure = ""
+    dt = time.time() - (_HUD.get("t_module") or 0.0)
+    if fait > 0 and tot > 0 and _HUD.get("t_module") and dt >= 2.0:   # ≥2 s : la vitesse s'est posée
+        rate = fait / dt
+        reste_mod = (tot - fait) / rate if rate > 0 else 0.0
+        mesure = (" · MESURÉ %d/%d (%.1f/s, reste ≈ %s)"
+                  % (fait, tot, rate, _mmss(reste_mod)))
+    base = ("%s étape %d/%d %-12s [%s] %3.0f%% · écoulé %s/~%s · budget %s · reste run %s %s%s%s"
             % (spin, _HUD["i"], _HUD["total"], (_HUD["nom"] or "")[:12], barre, 100 * frac,
-               _mmss(ecoule), _mmss(est), _mmss(_HUD["budget"]), signe, _mmss(_reste_run_s()), note))
+               _mmss(ecoule), _mmss(est), _mmss(_HUD["budget"]), signe, _mmss(_reste_run_s()),
+               note, mesure))
     tail = (_HUD["derniere"] or "").strip()
     if tail:
         libre = largeur - len(base) - 4
@@ -141,6 +157,18 @@ def _hud_imprimer_ligne(ligne: str) -> None:
     if st:
         _HUD["derniere"] = st
         _HUD["n"] += 1
+        # progression MESURÉE : nouveau module -> le compteur repart ; ligne d'avancement -> maj
+        if "=== module " in st:
+            _HUD["fait"] = 0
+            _HUD["total_iter"] = 0
+            _HUD["t_module"] = time.time()
+        else:
+            m = _RE_AVANCEMENT.search(st)
+            if m:
+                _HUD["fait"] = int(m.group(1))
+                _HUD["total_iter"] = int(m.group(2))
+                if not _HUD.get("t_module"):
+                    _HUD["t_module"] = time.time()
     if not _tty():                              # flux capturé/fichier : comportement d'origine
         with _HUD["lock"]:
             sys.stdout.write(ligne)
@@ -173,7 +201,7 @@ def _hud_demarrer(nom: str, budget_s: float) -> None:
     _HUD.update({"actif": True, "nom": nom, "i": _PLAN.get("i", 0), "total": _PLAN.get("total", 0),
                  "t_etape": time.time(), "budget": float(budget_s),
                  "est": float(DUREE_TYPIQUE_S.get(nom, 60)), "derniere": "", "n": 0, "tick": 0,
-                 "t_hb": time.time()})
+                 "t_hb": time.time(), "fait": 0, "total_iter": 0, "t_module": 0.0})
     th = threading.Thread(target=_hud_boucle, name="hud", daemon=True)
     _HUD["thread"] = th
     th.start()
@@ -215,6 +243,43 @@ def _entete_progres(nom: str) -> None:
           % (_PLAN["i"], _PLAN.get("total", 0), _mmss(ecoule), _mmss(reste)), flush=True)
 
 
+def _tuer_arbre(proc) -> None:
+    """Tue le processus ET toute sa descendance. 22/07 (Flo a vu la recherche tourner 114 min sur
+    un budget de 90) : sous Windows, `proc.kill()` ne tue QUE le parent — un pool de workers
+    (recherche parallèle) survit, garde le tube ouvert et le budget n'est jamais respecté. On tue
+    l'ARBRE : psutil si présent (portable), sinon `taskkill /T` (Windows) ou `killpg` (POSIX)."""
+    if proc is None:
+        return
+    try:
+        import psutil  # type: ignore
+        p = psutil.Process(proc.pid)
+        for enfant in p.children(recursive=True):
+            try:
+                enfant.kill()
+            except Exception:  # noqa: BLE001
+                pass
+        p.kill()
+        return
+    except Exception:  # noqa: BLE001 — psutil absent ou course : repli natif
+        pass
+    try:
+        if sys.platform.startswith("win"):
+            subprocess.run(["taskkill", "/F", "/T", "/PID", str(proc.pid)],
+                           capture_output=True, timeout=15)
+        else:
+            import os as _os
+            import signal as _sig
+            try:
+                _os.killpg(_os.getpgid(proc.pid), _sig.SIGKILL)
+            except Exception:  # noqa: BLE001
+                proc.kill()
+    except Exception:  # noqa: BLE001
+        try:
+            proc.kill()
+        except Exception:  # noqa: BLE001
+            pass
+
+
 def _courir(nom: str, cmd: list[str], budget_s: float) -> dict[str, Any]:
     """Lance une étape en STREAMANT sa sortie en direct (Flo voit tout ce qui se passe), tout en
     la capturant pour le RECAP, avec un timeout DUR (un Timer tue le process même s'il se fige en
@@ -232,14 +297,11 @@ def _courir(nom: str, cmd: list[str], budget_s: float) -> dict[str, Any]:
     try:
         proc = subprocess.Popen(cmd, cwd=str(RACINE), stdout=subprocess.PIPE,
                                 stderr=subprocess.STDOUT, text=True, encoding="utf-8",
-                                errors="replace", bufsize=1)
+                                errors="replace", bufsize=1, start_new_session=True)
 
         def _tuer_si_depasse() -> None:
             depasse["v"] = True
-            try:
-                proc.kill()
-            except Exception:  # noqa: BLE001
-                pass
+            _tuer_arbre(proc)          # ARBRE entier : un pool de workers survivrait à proc.kill()
 
         minuteur = threading.Timer(max(1.0, float(budget_s)), _tuer_si_depasse)
         minuteur.daemon = True
@@ -698,7 +760,7 @@ def main(argv: list[str] | None = None) -> int:
                 "recherche", [py, "-c",
                               "from hl_observer.backtesting.recherche_scenario import "
                               "chercher_toutes; chercher_toutes('.', "
-                              "budget_s_par_module=1200, parallele=True)"], BUDGETS["recherche"]))
+                              "budget_s_par_module=1200)"], BUDGETS["recherche"]))
         else:
             etapes.append({"etape": "recherche", "statut": "SAUTEE", "code": 0, "duree_s": 0,
                            "sortie": "--rapide : recherche de pepites sautee"})

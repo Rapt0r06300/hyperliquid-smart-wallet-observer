@@ -70,6 +70,7 @@ def boucle_objectif(
     max_essais: int | None = None,
     budget_s: float | None = None,
     s_arreter_au_premier: bool = True,
+    total_hint: int | None = None,
 ) -> dict[str, Any]:
     """La boucle. `evaluer(config) -> rapport` ; `porte(rapport) -> bool` (SÉPARÉE, externe).
 
@@ -120,6 +121,10 @@ def boucle_objectif(
         print("  essai %d : %s -> %s%s" % (
             len(essais), config, essai.get("verdict"),
             (" %s" % essai["nets"]) if essai.get("nets") else ""), flush=True)
+        # 22/07 — jeton d'AVANCEMENT lisible ET parsable (le HUD en tire un temps restant MESURÉ
+        # sur la vitesse réelle du run, pas une constante). Toutes les 20 configs pour rester léger.
+        if total_hint and n_ce_run % 20 == 0:
+            print("  … avancement %d/%d configs" % (n_ce_run, int(total_hint)), flush=True)
         if chemin:
             _ecrire_etat(chemin, {"essais": essais})   # APRES CHAQUE essai : un Ctrl-C ne perd rien
         if promu and s_arreter_au_premier:

@@ -376,21 +376,24 @@ def test_chercher_cross_venue_ATTACHE_l_etude_maker(tmp_path):
     assert r["etude_maker_refuge"]["real_execution"] is False
 
 
-# ---- 22/07 : recherche des 3 modules EN PARALLÈLE (plus rapide, résultats identiques)
+# ---- 22/07 : recherche SÉQUENTIELLE des modules (le pool parallèle a été RETIRÉ — il deadlockait
+# sur Windows avec 556k candidats : 0 % CPU, workers non tuables, budget non respecté).
 
-def test_le_worker_de_module_capture_sa_sortie(tmp_path):
-    """Le worker parallèle rend (strat, résultat, TEXTE capturé) — la capture permet l'affichage
-    GROUPÉ par module (parallèle sans entrelacement illisible). Sur données vides : INSUFFISANT."""
-    from hl_observer.backtesting.recherche_scenario import _chercher_un_module
-    strat, r, texte = _chercher_un_module((str(tmp_path), "carry", 1, 5.0))
-    assert strat == "carry" and isinstance(r, dict) and isinstance(texte, str)
-    assert r.get("statut") == "INSUFFISANT"           # aucun candidat -> honnête, pas un faux vert
+def test_chercher_toutes_est_SEQUENTIELLE_et_ne_peut_pas_deadlock(tmp_path):
+    """Plus AUCUN ProcessPoolExecutor : la fonction ne doit importer ni pool ni worker. Le
+    séquentiel streame en direct et ne peut pas se bloquer. C'est LA correction du blocage 22/07."""
+    import inspect
+    from hl_observer.backtesting import recherche_scenario as rs
+    src = inspect.getsource(rs.chercher_toutes)
+    # on cible l'USAGE réel (avec parenthèse), pas le mot cité dans le docstring qui explique le retrait
+    assert "ProcessPoolExecutor(" not in src and "ex.map(" not in src, "le pool doit avoir disparu"
+    assert not hasattr(rs, "_chercher_un_module"), "le worker parallèle doit avoir disparu"
 
 
-def test_chercher_toutes_PARALLELE_rend_les_memes_modules_que_le_sequentiel(tmp_path):
-    """`parallele=True` produit EXACTEMENT les mêmes modules (carry/copy/arbitrage/cross_venue) —
-    seule la concurrence change, jamais les résultats. Défaut séquentiel (les tests le prouvent)."""
+def test_chercher_toutes_rend_les_4_modules_et_ignore_parallele(tmp_path):
+    """Les 4 modules (carry/copy/arbitrage/cross_venue) sont produits. `parallele=True` est accepté
+    mais IGNORÉ (compat d'appel) — même résultat, toujours séquentiel, jamais de deadlock."""
     from hl_observer.backtesting.recherche_scenario import chercher_toutes
     seq = chercher_toutes(tmp_path, max_essais_par_strategie=1)
-    par = chercher_toutes(tmp_path, max_essais_par_strategie=1, parallele=True)
-    assert set(par.keys()) == set(seq.keys()) == {"carry", "copy", "arbitrage", "cross_venue"}
+    compat = chercher_toutes(tmp_path, max_essais_par_strategie=1, parallele=True)
+    assert set(compat.keys()) == set(seq.keys()) == {"carry", "copy", "arbitrage", "cross_venue"}
