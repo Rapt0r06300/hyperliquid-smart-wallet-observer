@@ -11,6 +11,8 @@ from __future__ import annotations
 import importlib.util
 from pathlib import Path
 
+import pytest
+
 RACINE = Path(__file__).resolve().parents[1]
 spec = importlib.util.spec_from_file_location("tout_tester", RACINE / "tools" / "tout_tester.py")
 T = importlib.util.module_from_spec(spec)
@@ -175,3 +177,79 @@ def test_entete_progres_montre_l_etape_et_le_reste(capsys):
     T._entete_progres("securite")
     out = capsys.readouterr().out
     assert "étape 1/3" in out and "reste" in out and "estimé" in out
+
+
+# ═══════════════ HUD « à la seconde » (22/07) : la progression doit VRAIMENT bouger ═══════════════
+
+def _armer_hud(nom="recherche", est=1800.0, ecoule=0.0, budget=5400.0, restant=None, tick=0):
+    """Place le HUD dans un état connu pour juger l'affichage SANS lancer de sous-processus."""
+    import time as _t
+    T._PLAN["restant"] = {} if restant is None else dict(restant)
+    T._PLAN["total"] = 6
+    T._HUD.update({"actif": True, "nom": nom, "i": 5, "total": 6,
+                   "t_etape": _t.time() - ecoule, "budget": budget, "est": est,
+                   "derniere": "", "n": 0, "tick": tick})
+
+
+def test_hud_texte_montre_etape_barre_et_reste_run():
+    _armer_hud(nom="recherche", est=1800.0, ecoule=60.0, budget=5400.0,
+               restant={"sante": 120})
+    txt = T._hud_texte(160)
+    assert "étape 5/6" in txt and "recherche" in txt
+    assert "reste run" in txt and "budget" in txt and "%" in txt
+    assert txt[0] in T._SPINNER                      # un spinner en tête = ça vit
+
+
+def test_hud_le_reste_run_DECROIT_seconde_apres_seconde():
+    """Le cœur de la demande : le temps restant se met à jour. À 10 s d'intervalle simulé, il
+    doit avoir baissé d'~10 s (l'étape courante consomme le budget du run)."""
+    _armer_hud(est=1800.0, ecoule=0.0, restant={"sante": 120})
+    r0 = T._reste_run_s()
+    _armer_hud(est=1800.0, ecoule=10.0, restant={"sante": 120})
+    r10 = T._reste_run_s()
+    assert r0 - r10 == pytest.approx(10.0, abs=1.5), (r0, r10)
+
+
+def test_hud_le_spinner_change_a_chaque_tick():
+    _armer_hud(tick=0)
+    a = T._hud_texte(120)[0]
+    _armer_hud(tick=1)
+    b = T._hud_texte(120)[0]
+    assert a != b and a in T._SPINNER and b in T._SPINNER
+
+
+def test_hud_ne_se_fige_pas_a_zero_quand_l_etape_deborde():
+    """Le bug d'avant : le reste tombait à 0 et restait figé. Ici, étape en dépassement ->
+    on l'ANNONCE et le reste run reste celui des étapes suivantes (jamais un 0:00 mort)."""
+    _armer_hud(nom="tests", est=10.0, ecoule=40.0, restant={"recherche": 1800, "sante": 120})
+    txt = T._hud_texte(160)
+    assert "dépasse l'estimé" in txt
+    assert T._reste_run_s() == pytest.approx(1920.0, abs=2.0)   # 1800 + 120, pas 0
+
+
+def test_hud_texte_est_TRONQUE_a_la_largeur_pour_ne_pas_casser_le_retour_chariot():
+    _armer_hud()
+    T._HUD["derniere"] = "x" * 500          # une très longue dernière ligne
+    for largeur in (60, 100, 200):
+        assert len(T._hud_texte(largeur)) <= largeur - 1
+
+
+def test_hud_imprimer_ligne_met_a_jour_le_dernier_ET_capture(capsys):
+    """En sortie capturée (non-TTY, comme ici) : comportement d'origine (la ligne sort telle
+    quelle pour le RECAP) ET le HUD retient la dernière ligne non vide."""
+    _armer_hud()
+    T._HUD["n"] = 0
+    T._hud_imprimer_ligne("  1234 passed in 42s\n")
+    out = capsys.readouterr().out
+    assert "1234 passed" in out                      # la sortie réelle n'est jamais avalée
+    assert T._HUD["derniere"] == "1234 passed in 42s" and T._HUD["n"] == 1
+
+
+def test_hud_demarrer_puis_arreter_est_idempotent_et_propre():
+    T._planifier(["securite", "tests"])
+    T._entete_progres("securite")
+    T._hud_demarrer("tests", 300.0)
+    assert T._HUD["actif"] is True and T._HUD["nom"] == "tests" and T._HUD["est"] == 300.0
+    T._hud_arreter()
+    assert T._HUD["actif"] is False and T._HUD["thread"] is None
+    T._hud_arreter()                                 # deux fois de suite = aucun plantage

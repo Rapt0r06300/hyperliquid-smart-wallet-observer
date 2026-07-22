@@ -20,8 +20,10 @@ RÈGLES (chèrement payées) :
 from __future__ import annotations
 
 import json
+import shutil
 import subprocess
 import sys
+import threading
 import time
 from pathlib import Path
 from typing import Any
@@ -48,6 +50,140 @@ def _mmss(s: float) -> str:
     return "%d:%02d" % (s // 60, s % 60)
 
 
+# ══════════ HUD « où en est le test À LA SECONDE » (22/07, Flo : « je veux voir à chaque seconde
+# où en est le test, un temps restant qui se met à jour ») ══════════
+# Le problème d'avant : l'en-tête ne s'imprimait qu'au DÉBUT de chaque étape → pendant la
+# recherche (30-50 min) rien ne bougeait, le « reste » restait figé. Ici un fil rafraîchit une
+# ligne d'état COLLANTE chaque seconde (spinner + barre + écoulé + compte à rebours du run entier
+# + budget + dernière ligne du sous-processus), MÊME quand le sous-processus est silencieux.
+# La sortie réelle défile au-dessus ; le HUD reste collé en bas via un retour-chariot `\r`.
+# Repli honnête si la sortie n'est pas un terminal (log/pipe) : une ligne « heartbeat » toutes
+# les 15 s, sans caractère de contrôle. Aucun ordre, aucune donnée inventée : pur affichage.
+_SPINNER = "|/-\\"          # ASCII : lisible même sur une vieille console Windows
+_HEARTBEAT_S = 15.0        # cadence de la ligne d'état en sortie NON-TTY (fichier/pipe)
+_HUD: dict[str, Any] = {"actif": False, "nom": "", "i": 0, "total": 0, "t_etape": 0.0,
+                        "budget": 0.0, "est": 0.0, "derniere": "", "n": 0, "tick": 0,
+                        "t_hb": 0.0, "lock": threading.Lock(), "thread": None}
+
+
+def _tty() -> bool:
+    """Vrai terminal (le HUD tique en place) ou flux capturé/fichier (repli heartbeat) ?"""
+    try:
+        return bool(getattr(sys.stdout, "isatty", lambda: False)())
+    except Exception:  # noqa: BLE001
+        return False
+
+
+def _largeur() -> int:
+    try:
+        return max(40, shutil.get_terminal_size((100, 24)).columns)
+    except Exception:  # noqa: BLE001
+        return 100
+
+
+def _reste_run_s() -> float:
+    """Temps restant ESTIMÉ pour TOUT le run = étapes pas encore démarrées + reste de l'étape
+    courante. Décroît chaque seconde ; ne se fige pas à 0 tant qu'il reste des étapes après."""
+    try:
+        apres = float(sum(_PLAN.get("restant", {}).values()))
+    except Exception:  # noqa: BLE001
+        apres = 0.0
+    ecoule = time.time() - (_HUD["t_etape"] or time.time())
+    return apres + max(0.0, float(_HUD["est"]) - ecoule)
+
+
+def _hud_texte(largeur: int) -> str:
+    """La ligne d'état, tronquée à la largeur (impératif : sinon `\\r` casse sur 2 lignes)."""
+    ecoule = time.time() - (_HUD["t_etape"] or time.time())
+    est = float(_HUD["est"]) or 1.0
+    frac = min(0.99, ecoule / est)
+    w = 12
+    barre = "#" * int(round(frac * w)) + "." * (w - int(round(frac * w)))
+    spin = _SPINNER[_HUD["tick"] % len(_SPINNER)]
+    deborde = " (dépasse l'estimé +%s)" % _mmss(ecoule - est) if ecoule > est + 5 else ""
+    base = ("%s étape %d/%d %-12s [%s] %3.0f%% · écoulé %s/~%s · budget %s · reste run ~%s%s"
+            % (spin, _HUD["i"], _HUD["total"], (_HUD["nom"] or "")[:12], barre, 100 * frac,
+               _mmss(ecoule), _mmss(est), _mmss(_HUD["budget"]), _mmss(_reste_run_s()), deborde))
+    tail = (_HUD["derniere"] or "").strip()
+    if tail:
+        libre = largeur - len(base) - 4
+        if libre > 12:
+            base = base + " » " + tail[:libre]
+    return base[:largeur - 1]
+
+
+def _redessiner_hud() -> None:
+    if not _HUD["actif"] or not _tty():
+        return
+    largeur = _largeur()
+    txt = _hud_texte(largeur)
+    with _HUD["lock"]:
+        sys.stdout.write("\r" + txt + " " * max(0, (largeur - 1) - len(txt)))
+        sys.stdout.flush()
+
+
+def _hud_imprimer_ligne(ligne: str) -> None:
+    """Une ligne de sortie du sous-processus : efface le HUD, imprime la ligne au propre, met à
+    jour le 'dernier vu', laisse le ticker recoller le HUD dessous."""
+    s = ligne.rstrip("\n")
+    st = s.strip()
+    if st:
+        _HUD["derniere"] = st
+        _HUD["n"] += 1
+    if not _tty():                              # flux capturé/fichier : comportement d'origine
+        with _HUD["lock"]:
+            sys.stdout.write(ligne)
+            sys.stdout.flush()
+        return
+    largeur = _largeur()
+    with _HUD["lock"]:
+        sys.stdout.write("\r" + " " * (largeur - 1) + "\r" + s + "\n")
+        sys.stdout.flush()
+    _redessiner_hud()
+
+
+def _hud_boucle() -> None:
+    dernier = 0.0
+    while _HUD["actif"]:
+        now = time.time()
+        if now - dernier >= 1.0:               # une pulsation par seconde (le « à la seconde »)
+            dernier = now
+            _HUD["tick"] += 1
+            if _tty():
+                _redessiner_hud()
+            elif now - _HUD["t_hb"] >= _HEARTBEAT_S:
+                _HUD["t_hb"] = now
+                with _HUD["lock"]:
+                    print("  … %s" % _hud_texte(200), flush=True)
+        time.sleep(0.15)                       # réveil fréquent → arrêt quasi immédiat au join
+
+
+def _hud_demarrer(nom: str, budget_s: float) -> None:
+    _HUD.update({"actif": True, "nom": nom, "i": _PLAN.get("i", 0), "total": _PLAN.get("total", 0),
+                 "t_etape": time.time(), "budget": float(budget_s),
+                 "est": float(DUREE_TYPIQUE_S.get(nom, 60)), "derniere": "", "n": 0, "tick": 0,
+                 "t_hb": time.time()})
+    th = threading.Thread(target=_hud_boucle, name="hud", daemon=True)
+    _HUD["thread"] = th
+    th.start()
+
+
+def _hud_arreter() -> None:
+    """Idempotent : coupe le ticker et efface la ligne collante (le run continue au propre)."""
+    _HUD["actif"] = False
+    th = _HUD.get("thread")
+    if th is not None:
+        try:
+            th.join(timeout=2.0)
+        except Exception:  # noqa: BLE001
+            pass
+        _HUD["thread"] = None
+    if _tty():
+        with _HUD["lock"]:
+            sys.stdout.write("\r" + " " * (_largeur() - 1) + "\r")
+            sys.stdout.flush()
+
+
 def _planifier(noms: list[str]) -> None:
     """Fixe le plan : les étapes qui VONT tourner (selon les options) et leur durée estimée."""
     _PLAN["debut"] = time.time()
@@ -71,13 +207,14 @@ def _entete_progres(nom: str) -> None:
 def _courir(nom: str, cmd: list[str], budget_s: float) -> dict[str, Any]:
     """Lance une étape en STREAMANT sa sortie en direct (Flo voit tout ce qui se passe), tout en
     la capturant pour le RECAP, avec un timeout DUR (un Timer tue le process même s'il se fige en
-    silence — le stream seul ne suffirait pas à couper un blocage sans sortie)."""
-    import threading
+    silence — le stream seul ne suffirait pas à couper un blocage sans sortie). Un HUD collant
+    (`_hud_*`) affiche la progression À LA SECONDE au-dessus, même si le sous-processus se tait."""
     t0 = time.time()
     print("\n" + "=" * 70, flush=True)
     print("  [%s] %s" % (nom.upper(), " ".join(cmd[-2:])), flush=True)
     _entete_progres(nom)
     print("=" * 70, flush=True)
+    _hud_demarrer(nom, budget_s)
     lignes: list[str] = []
     proc = None
     depasse = {"v": False}
@@ -97,11 +234,12 @@ def _courir(nom: str, cmd: list[str], budget_s: float) -> dict[str, Any]:
         minuteur.daemon = True
         minuteur.start()
         try:
-            for ligne in proc.stdout:              # STREAM : la progression s'affiche en direct
-                print(ligne, end="", flush=True)
-                lignes.append(ligne)
+            for ligne in proc.stdout:              # STREAM : la progression s'affiche en direct,
+                lignes.append(ligne)               # capturée pour le RECAP + routée sous le HUD
+                _hud_imprimer_ligne(ligne)
         finally:
             minuteur.cancel()
+            _hud_arreter()
             code = proc.wait(timeout=30)
         sortie = "".join(lignes)
         if depasse["v"]:
@@ -111,6 +249,7 @@ def _courir(nom: str, cmd: list[str], budget_s: float) -> dict[str, Any]:
         return {"etape": nom, "code": code, "duree_s": round(time.time() - t0, 1),
                 "sortie": sortie[-20000:], "statut": "OK" if code == 0 else "ECHEC"}
     except Exception as exc:  # noqa: BLE001 — une étape morte n'arrête pas les autres
+        _hud_arreter()
         try:
             if proc is not None:
                 proc.kill()
