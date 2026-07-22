@@ -59,12 +59,18 @@ LOIS: tuple[Loi, ...] = (
                 "spread + 1 d'adverse selection). Les 4 trades réels passent de +0,0929 $ "
                 "à **−0,0671 $**. Convergence mesurée : le meilleur seau (10-20 bps, n=245) "
                 "ne se referme que de **3,98 bps en 30 min** — contre 16 bps de coûts",
-        date="2026-07-21",
-        condition_de_reouverture="une MESURE du taux de fill passif sur les 4 exécutions : à "
-                                 "9 bps (tout maker) les mêmes trades survivent (+0,0729 $). "
-                                 "Sans cette mesure, l'hypothèse tout-maker est un espoir",
-        mots_cles=("arbitrage", "dislocation", "cross-venue", "spread", "convergence", "binance"),
-        ou_verifier="funding/arb_cout_all_in.py + backtesting/arb_backtest.py"),
+        date="2026-07-22",
+        condition_de_reouverture="🔴 22/07 — LE REFUGE MAKER EST MESURE ET FERME. `arb_maker_"
+                                 "study` a simule l'entree passive sur les spreads VIVANTS : la "
+                                 "capture de convergence vaut ~3,4 bps en moyenne, SOUS le cout "
+                                 "maker de 9 bps -> PnL negatif meme au maker. Et l'entree "
+                                 "passive rate justement les trades qui convergent vite "
+                                 "(selection adverse). Reouverture : un regime de dislocations "
+                                 "bien plus large ET persistant (>> 9 bps de convergence), pas "
+                                 "un meilleur reglage",
+        mots_cles=("arbitrage", "dislocation", "cross-venue", "spread", "convergence", "binance",
+                   "maker"),
+        ou_verifier="funding/arb_maker_study.py + funding/arb_cout_all_in.py"),
 
     Loi(cle="arb_ecart_fige",
         titre="Un gros écart entre venues est une grosse opportunité",

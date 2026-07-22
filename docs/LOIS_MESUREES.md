@@ -9,9 +9,9 @@
 ### L'arbitrage de dislocation HL↔Binance paie après coûts — `arb_dislocation_cout_all_in`
 
 - **le chiffre** : le forfait `COUT_AR_BPS = 8` ne comptait que 2 exécutions sur 4 et oubliait les frais de la 2ᵉ venue. Coût all-in réel : 16,0 bps (13 de frais + 2 de spread + 1 d'adverse selection). Les 4 trades réels passent de +0,0929 $ à **−0,0671 $**. Convergence mesurée : le meilleur seau (10-20 bps, n=245) ne se referme que de **3,98 bps en 30 min** — contre 16 bps de coûts
-- **mesuré le** : 2026-07-21
-- **pour rouvrir** : une MESURE du taux de fill passif sur les 4 exécutions : à 9 bps (tout maker) les mêmes trades survivent (+0,0729 $). Sans cette mesure, l'hypothèse tout-maker est un espoir
-- **où vérifier** : `funding/arb_cout_all_in.py + backtesting/arb_backtest.py`
+- **mesuré le** : 2026-07-22
+- **pour rouvrir** : 🔴 22/07 — LE REFUGE MAKER EST MESURE ET FERME. `arb_maker_study` a simule l'entree passive sur les spreads VIVANTS : la capture de convergence vaut ~3,4 bps en moyenne, SOUS le cout maker de 9 bps -> PnL negatif meme au maker. Et l'entree passive rate justement les trades qui convergent vite (selection adverse). Reouverture : un regime de dislocations bien plus large ET persistant (>> 9 bps de convergence), pas un meilleur reglage
+- **où vérifier** : `funding/arb_maker_study.py + funding/arb_cout_all_in.py`
 
 ### Un gros écart entre venues est une grosse opportunité — `arb_ecart_fige`
 
