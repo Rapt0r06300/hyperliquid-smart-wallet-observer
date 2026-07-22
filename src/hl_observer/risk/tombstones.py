@@ -331,8 +331,12 @@ TOMBES: tuple[Tombe, ...] = (
           "contribution marginale au risque + capacite. Une mesure n'est pas une porte : elle "
           "informe une decision, elle ne la refuse pas."),
     Tombe("budget_turnover", "DOUBLON",
-          "MAX_SLOTS_CARRY=12 (funding/carry_paper_runtime) + max_concurrent : le nombre de "
-          "positions simultanees est deja borne sur le chemin vivant.",
+          # 🔴 22/07 — remplacant cite en notation POINTEE (funding.carry_positions_store),
+          # pas avec un slash : le verificateur de tombes attend un module que la machine peut
+          # aller confirmer vivant. `funding.carry_positions_store` porte `max_slots` (A7), qui
+          # plafonne le nombre de positions simultanees sur le chemin vivant.
+          "funding.carry_positions_store (parametre max_slots, A7) plafonne le nombre de "
+          "positions simultanees sur le chemin vivant.",
           "N trades par fenetre glissante + barre d'edge haute. Meme raisonnement que la tombe "
           "`trade_budget` : a nos volumes (quelques ouvertures par jour), ce budget NE MORD PAS, "
           "et le plafond de slots fait deja le travail. Le rebrancher ajouterait un 2e compteur "

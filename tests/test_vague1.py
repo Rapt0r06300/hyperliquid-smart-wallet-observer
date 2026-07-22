@@ -91,8 +91,12 @@ def _fill(adresse, mk):
 
 
 def test_whitelist_garde_le_predicteur_et_rejette_le_contrarien(tmp_path):
+    # 🔴 22/07 — le predicteur passe de +8 a +15 bps. Depuis le 22/07, la whitelist exige le
+    # markout NET (brut − 9 bps de cout de suivi taker A/R), pas le brut : +8 brut = -1 net, il
+    # PERDRAIT quand on le suit. Un vrai predicteur a copier doit BATTRE le cout de copie ;
+    # +15 brut -> +6 net survit. Le contrarien (-6) reste rejete. (cf. test_copy_follow_cost_gate)
     m = _outil("ecrire_copy_whitelist")
-    fills = [_fill("0xBON", 8.0) for _ in range(40)] + [_fill("0xMAUVAIS", -6.0) for _ in range(40)]
+    fills = [_fill("0xBON", 15.0) for _ in range(40)] + [_fill("0xMAUVAIS", -6.0) for _ in range(40)]
     r = m.construire_whitelist(tmp_path, fills=fills)
     assert [g["adresse"] for g in r["gardes"]] == ["0xBON"]
     assert r["rejetes"] == 1

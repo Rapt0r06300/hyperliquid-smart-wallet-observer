@@ -26,6 +26,12 @@ import pytest
 from hl_observer.funding import carry_paper_runtime as runtime
 
 
+
+# 🔴 22/07 — funding d'ENTREE des fixtures d'OUVERTURE releve du plancher (0.125) a
+# 0.45 : la porte du cout d'opportunite (carry_benchmark_gate) refuse d'ouvrir au
+# plancher (APR net 2,65 %% vs HLP 15-30 %%). Ces tests ont besoin qu'une position
+# EXISTE. Les appels-maths revenu_journalier_usd(...=0.125) restent au plancher.
+
 @pytest.fixture(autouse=True)
 def _env_propre(monkeypatch):
     monkeypatch.delenv(runtime.ENV_CAPITAL, raising=False)
@@ -74,11 +80,11 @@ def test_LA_PREUVE_le_capital_change_VRAIMENT_la_taille(tmp_path):
     correcte (c'est deja fait ailleurs) -- on verifie que le capital ARRIVE jusqu'a elle."""
     from hl_observer.funding.carry_positions_store import charger_gestionnaire, tick_multi_sur_disque
 
-    decision = {"coin": "HYPE", "viable": True, "funding_bps_h": 0.125, "base_bps": -1.5,
+    decision = {"coin": "HYPE", "viable": True, "funding_bps_h": 0.45, "base_bps": -1.5,
                 "levier": 1.5, "cout_entree_bps": 12.47, "liquidite_spot_usd": 150_000.0,
                 "marge_ratio": 0.667, "levier_max": 10.0}
     inputs = {"coin": "HYPE", "perp_px": 61.0, "levier_utilise": 1.5, "marge_ratio": 0.667}
-    mesures = {"HYPE": {"decision": decision, "inputs": inputs, "funding": 0.125, "prix": 61.0}}
+    mesures = {"HYPE": {"decision": decision, "inputs": inputs, "funding": 0.45, "prix": 61.0}}
 
     # capital INCONNU -> defaut
     tick_multi_sur_disque(tmp_path / "sans", mesures, now_ms=1_800_000_000_000, max_slots=12,

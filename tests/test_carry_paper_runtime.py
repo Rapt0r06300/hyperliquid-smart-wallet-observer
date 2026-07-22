@@ -5,6 +5,12 @@ from __future__ import annotations
 import json
 
 from hl_observer.funding.carry_paper_runtime import (
+
+# 🔴 22/07 — funding d'ENTREE des fixtures d'OUVERTURE releve du plancher (0.125) a
+# 0.45 : la porte du cout d'opportunite (carry_benchmark_gate) refuse d'ouvrir au
+# plancher (APR net 2,65 %% vs HLP 15-30 %%). Ces tests ont besoin qu'une position
+# EXISTE. Les appels-maths revenu_journalier_usd(...=0.125) restent au plancher.
+
     ENV_ENABLED, JOURNAL_RELPATH, INPUTS_RELPATH, enabled, evaluer_et_journaliser,
 )
 
@@ -60,7 +66,7 @@ def test_inputs_mesures_verdict_complet_avec_verrou(tmp_path, monkeypatch):
 
 # ---------- ETAPE 2 (cablage opt-in) : ouvrir REELLEMENT la position paper ----------
 
-_INPUTS_VIABLES = {"ts_ms": 100_000_000, "coin": "HYPE", "funding_bps_h": 0.125, "base_bps": -0.68,
+_INPUTS_VIABLES = {"ts_ms": 100_000_000, "coin": "HYPE", "funding_bps_h": 0.45, "base_bps": -0.68,
                    "liquidite_spot_usd": 200_000.0, "maker": True, "levier_max": 10.0,
                    "marge_ratio": 0.5, "pire_hausse_observee": 0.29, "levier_utilise": 2.0}
 
@@ -133,8 +139,18 @@ def test_etape2_shortlist_sortie_selective_APRES_amortissement(tmp_path, monkeyp
     monkeypatch.setenv("HYPERSMART_CARRY_ETAPE2", "1")
     H = 3_600_000
 
+    # 🔴 22/07 — ce test est calibre autour de 0,125 bps/h (amortissement ~93 h) : c'est SA
+    # mesure. La porte du cout d'opportunite (21/07) refuse d'ouvrir au plancher — mais ce test
+    # ne teste PAS cette porte, il teste l'ANTI-CHURN. On neutralise donc la porte ICI (elle a
+    # son propre test dans test_carry_benchmark_gate.py) et on garde le funding plancher qui
+    # fixe le timing d'amortissement. Sinon, a 0,45, HYPE amortit trop vite et prend son profit.
+    monkeypatch.setattr("hl_observer.funding.carry_benchmark_gate.evaluer",
+                        lambda **k: {"autorise": True, "motif": "", "apr_net_pct": 99.0,
+                                     "real_execution": False})
+
     def _inp(coin, ts):
         d = dict(_INPUTS_VIABLES); d["coin"] = coin; d["ts_ms"] = ts
+        d["funding_bps_h"] = 0.125          # SA calibration : ~93 h d'amortissement
         return d
 
     def _ecrire(ts, coins):

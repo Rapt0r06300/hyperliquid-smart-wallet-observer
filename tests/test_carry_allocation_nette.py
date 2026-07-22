@@ -13,6 +13,12 @@ from __future__ import annotations
 import pytest
 
 from hl_observer.funding.carry_allocation_nette import (EXPOSANT_DEFAUT, allouer_marges,
+
+# 🔴 22/07 — funding d'ENTREE des fixtures d'OUVERTURE releve du plancher (0.125) a
+# 0.45 : la porte du cout d'opportunite (carry_benchmark_gate) refuse d'ouvrir au
+# plancher (APR net 2,65 %% vs HLP 15-30 %%). Ces tests ont besoin qu'une position
+# EXISTE. Les appels-maths revenu_journalier_usd(...=0.125) restent au plancher.
+
                                                         diagnostic, poids_par_rendement)
 from hl_observer.funding.carry_marge_dynamique import (MARGE_MIN_USD, PART_MAX_PAR_COIN,
                                                        RESERVE_FRAC_DEFAUT, marge_par_position)
@@ -188,12 +194,12 @@ def test_chemin_production_le_meilleur_coin_recoit_vraiment_plus_de_capital(tmp_
                                                            tick_multi_sur_disque)
 
     def mesure(coin, net, lev):
-        return {"decision": {"coin": coin, "viable": True, "funding_bps_h": 0.125,
+        return {"decision": {"coin": coin, "viable": True, "funding_bps_h": 0.45,
                              "cout_entree_bps": 10.0, "base_bps": 5.0,
                              "gain_net_24h_bps": net, "liquidite_spot_usd": 400_000.0},
                 "inputs": {"levier_utilise": lev, "levier_max": lev, "perp_px": 100.0,
                            "pire_hausse_observee": 0.01, "liquidite_spot_usd": 400_000.0},
-                "funding": 0.125}
+                "funding": 0.45}
 
     mesures = {"BTC": mesure("BTC", 2.221, 3.0), "VIRTUAL": mesure("VIRTUAL", 1.158, 3.0)}
     tick_multi_sur_disque(tmp_path, mesures, now_ms=1_760_000_000_000, mode="TEST_FIXTURE",
@@ -217,12 +223,12 @@ def test_chemin_production_donnee_absente_ne_degrade_rien(tmp_path):
     from hl_observer.funding.carry_positions_store import (charger_gestionnaire,
                                                            tick_multi_sur_disque)
 
-    mes = {c: {"decision": {"coin": c, "viable": True, "funding_bps_h": 0.125,
+    mes = {c: {"decision": {"coin": c, "viable": True, "funding_bps_h": 0.45,
                             "cout_entree_bps": 10.0, "base_bps": 5.0,
                             "liquidite_spot_usd": 400_000.0},
                "inputs": {"levier_utilise": 3.0, "levier_max": 3.0, "perp_px": 100.0,
                           "pire_hausse_observee": 0.01, "liquidite_spot_usd": 400_000.0},
-               "funding": 0.125} for c in ("BTC", "ETH")}
+               "funding": 0.45} for c in ("BTC", "ETH")}
     tick_multi_sur_disque(tmp_path, mes, now_ms=1_760_000_000_000, mode="TEST_FIXTURE",
                           capital_usd=1000.0)
     attendu = marge_par_position(capital_usd=1000.0, n_positions_visees=2)

@@ -13,6 +13,12 @@ INCHANGÉ. C'est le seul levier de revenu gratuit en risque.
 from __future__ import annotations
 
 from hl_observer.funding.carry_marge_dynamique import (
+
+# 🔴 22/07 — funding d'ENTREE des fixtures d'OUVERTURE releve du plancher (0.125) a
+# 0.45 : la porte du cout d'opportunite (carry_benchmark_gate) refuse d'ouvrir au
+# plancher (APR net 2,65 %% vs HLP 15-30 %%). Ces tests ont besoin qu'une position
+# EXISTE. Les appels-maths revenu_journalier_usd(...=0.125) restent au plancher.
+
     MARGE_MAX_USD, MARGE_MIN_USD, marge_par_position, revenu_journalier_usd)
 
 
@@ -70,11 +76,11 @@ def test_la_marge_dynamique_est_VRAIMENT_utilisee_a_l_ouverture(tmp_path):
     Un module de sizing que personne n'appelle ne fait pas bouger un PnL."""
     from hl_observer.funding.carry_positions_store import charger_gestionnaire, tick_multi_sur_disque
 
-    decision = {"coin": "HYPE", "viable": True, "funding_bps_h": 0.125, "base_bps": -1.5,
+    decision = {"coin": "HYPE", "viable": True, "funding_bps_h": 0.45, "base_bps": -1.5,
                 "levier": 1.5, "cout_entree_bps": 12.47, "gain_net_24h_bps": 46.5,
                 "liquidite_spot_usd": 150_000.0, "marge_ratio": 0.667, "levier_max": 10.0}
     inputs = {"coin": "HYPE", "perp_px": 61.0, "levier_utilise": 1.5, "marge_ratio": 0.667}
-    mesures = {"HYPE": {"decision": decision, "inputs": inputs, "funding": 0.125,
+    mesures = {"HYPE": {"decision": decision, "inputs": inputs, "funding": 0.45,
                         "prix": 61.0, "base": -1.5}}
 
     tick_multi_sur_disque(tmp_path / "a", mesures, now_ms=1_800_000_000_000, max_slots=12)
@@ -91,11 +97,11 @@ def test_la_marge_dynamique_est_VRAIMENT_utilisee_a_l_ouverture(tmp_path):
 def test_le_levier_NE_CHANGE_PAS_avec_la_marge(tmp_path):
     """Le garde-fou le plus important de ce fichier : grossir ne doit pas rapprocher la liquidation."""
     from hl_observer.funding.carry_positions_store import charger_gestionnaire, tick_multi_sur_disque
-    decision = {"coin": "HYPE", "viable": True, "funding_bps_h": 0.125, "base_bps": -1.5,
+    decision = {"coin": "HYPE", "viable": True, "funding_bps_h": 0.45, "base_bps": -1.5,
                 "levier": 1.5, "cout_entree_bps": 12.47, "liquidite_spot_usd": 150_000.0,
                 "marge_ratio": 0.667, "levier_max": 10.0}
     inputs = {"coin": "HYPE", "perp_px": 61.0, "levier_utilise": 1.5, "marge_ratio": 0.667}
-    mesures = {"HYPE": {"decision": decision, "inputs": inputs, "funding": 0.125, "prix": 61.0}}
+    mesures = {"HYPE": {"decision": decision, "inputs": inputs, "funding": 0.45, "prix": 61.0}}
     tick_multi_sur_disque(tmp_path, mesures, now_ms=1_800_000_000_000, max_slots=12,
                           capital_usd=5000.0)
     pos = charger_gestionnaire(tmp_path).ouvertes["HYPE"]

@@ -13,6 +13,12 @@ from __future__ import annotations
 import pytest
 
 from hl_observer.backtesting.carry_backtest import (PASSES_MIN, Config, balayer, grille_defaut,
+
+# 🔴 22/07 — funding d'ENTREE des fixtures d'OUVERTURE releve du plancher (0.125) a
+# 0.45 : la porte du cout d'opportunite (carry_benchmark_gate) refuse d'ouvrir au
+# plancher (APR net 2,65 %% vs HLP 15-30 %%). Ces tests ont besoin qu'une position
+# EXISTE. Les appels-maths revenu_journalier_usd(...=0.125) restent au plancher.
+
                                                     grouper_par_passe, redecider, rejouer,
                                                     verdict)
 
@@ -20,8 +26,11 @@ T0 = 1_760_000_000_000
 PASSE = 600_000                      # 10 min, la cadence réelle du feeder
 
 #: profils réalistes (funding, base bps, liquidité $, levier max venue, pire hausse)
-PROFILS = {"BTC": (0.125, 12.0, 4.0e5, 10.0, 0.12), "ETH": (0.125, 6.0, 3.7e5, 10.0, 0.22),
-           "SOL": (0.125, 10.0, 1.0e5, 5.0, 0.31), "PUMP": (0.300, 25.0, 3.0e4, 3.0, 0.82)}
+#: 🔴 22/07 — funding 0.125 -> 0.45 : la porte du cout d'opportunite refuse le plancher. Le
+#: rejeu doit OUVRIR des positions pour prouver qu'il re-decide sans toucher au mode LIVE ;
+#: il lui faut donc des coins que le systeme ouvrirait vraiment.
+PROFILS = {"BTC": (0.45, 12.0, 4.0e5, 10.0, 0.12), "ETH": (0.45, 6.0, 3.7e5, 10.0, 0.22),
+           "SOL": (0.45, 10.0, 1.0e5, 5.0, 0.31), "PUMP": (0.45, 25.0, 3.0e4, 3.0, 0.82)}
 
 
 def _lignes(n_passes=40, profils=None):
@@ -60,7 +69,7 @@ def test_on_RE_DECIDE_le_levier_change_avec_la_securite():
 
 
 def test_le_plancher_de_break_even_est_un_VRAI_parametre():
-    ligne = {"coin": "X", "funding_bps_h": 0.125, "base_bps": 5.0, "liquidite_spot_usd": 4e5,
+    ligne = {"coin": "X", "funding_bps_h": 0.45, "base_bps": 5.0, "liquidite_spot_usd": 4e5,
              "levier_max": 10.0, "pire_hausse_observee": 0.10, "perp_px": 100.0}
     assert redecider(ligne, Config(max_break_even_h=1.0)) is None      # trop lent -> refusé
     assert redecider(ligne, Config(max_break_even_h=500.0)) is not None
