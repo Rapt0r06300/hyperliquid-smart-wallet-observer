@@ -53,9 +53,11 @@ def test_net_baseline_seul_EGALE_le_bras_A_de_run_ab_replay():
                 SLTPConfig(stop_loss_bps=20.0, take_profit_bps=150.0),
                 SLTPConfig(stop_loss_bps=90.0, take_profit_bps=100.0)):
         for h in (30.0, 120.0, 240.0):
-            plein = run_ab_replay(cands, marks, base_config=cfg, horizon_min=h)["arm_a"]["net_total_usd"]
-            rapide = net_baseline_seul(cands, marks, base_config=cfg, horizon_min=h)["arm_a"]["net_total_usd"]
-            assert rapide == plein, "cfg=%s h=%s : rapide %s != bras A %s" % (cfg, h, rapide, plein)
+            plein = run_ab_replay(cands, marks, base_config=cfg, horizon_min=h)["arm_a"]
+            rapide = net_baseline_seul(cands, marks, base_config=cfg, horizon_min=h)["arm_a"]
+            # rapport COMPLET identique (net, profit factor, win rate, drawdown, comptes) — pas juste
+            # le net : la vectorisation sert AUSSI l'évaluation complète, qui lit PF et drawdown.
+            assert rapide == plein, "cfg=%s h=%s :\n  rapide %s\n  bras A %s" % (cfg, h, rapide, plein)
 
 
 def test_net_baseline_seul_accepte_un_index_marks_deja_construit():

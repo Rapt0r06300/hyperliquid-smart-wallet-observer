@@ -279,6 +279,23 @@ def run_ab_replay(
     }
 
 
+#: cache 1-entrée de l'index des marks : la recherche appelle net_baseline_seul des milliers de fois
+#: avec LE MÊME `d.marks` (même objet liste) → on ne reconstruit pas `marks_by_coin` à chaque appel.
+#: Garde id + longueur (un id réutilisé après GC sur une liste de même taille rebâtirait, sans risque).
+_MARKS_INDEX_CACHE: dict = {"id": None, "len": -1, "idx": None}
+
+
+def _index_marks(mark_rows_or_marks):
+    if isinstance(mark_rows_or_marks, dict):
+        return mark_rows_or_marks
+    if (_MARKS_INDEX_CACHE["id"] == id(mark_rows_or_marks)
+            and _MARKS_INDEX_CACHE["len"] == len(mark_rows_or_marks)):
+        return _MARKS_INDEX_CACHE["idx"]
+    idx = marks_by_coin(mark_rows_or_marks)
+    _MARKS_INDEX_CACHE.update(id=id(mark_rows_or_marks), len=len(mark_rows_or_marks), idx=idx)
+    return idx
+
+
 def net_baseline_seul(
     candidates: list[dict],
     mark_rows_or_marks,
@@ -287,34 +304,36 @@ def net_baseline_seul(
     horizon_min: float = DEFAULT_HORIZON_MIN,
     cost_bps: float = DEFAULT_COST_BPS,
 ) -> dict:
-    """Le NET du BRAS A (baseline, tous vetos OFF) UNIQUEMENT — pour le CRIBLE, qui ne lit que
-    `arm_a.net_total_usd`. `run_ab_replay` calcule EN PLUS le bras B, les vetos et l'estimateur de
-    vol : pur gâchis ici. Avec tout OFF, le bras A = simuler chaque candidat sur son chemin de marks
-    (aucun veto, aucune vol-barrière). Résultat PROUVÉ identique au bras A (test d'équivalence).
-
-    Accepte soit des lignes de marks brutes, soit un index `marks_by_coin` déjà construit (le crible
-    réutilise le même index pour toutes les configs → on ne le reconstruit pas 5 640 fois)."""
-    marks = (mark_rows_or_marks if isinstance(mark_rows_or_marks, dict)
-             else marks_by_coin(mark_rows_or_marks))
-    trades: list[float] = []
-    for cand in candidates:
-        if not isinstance(cand, dict):
-            continue
+    """Le rapport du BRAS A (baseline, tous vetos OFF) UNIQUEMENT — DROP-IN pour `arm_a` de
+    run_ab_replay. La recherche ne lit JAMAIS le bras B : le calculer (+ vetos + estimateur de vol,
+    + reconstruire l'index des marks à chaque appel) est pur gâchis. Avec tout OFF, le bras A =
+    simuler chaque candidat sur son chemin de marks. Résultat PROUVÉ IDENTIQUE au bras A — rapport
+    COMPLET (net, PF, win rate, drawdown) via `ArmMetrics`, dans le MÊME ordre chronologique
+    (le drawdown en dépend). Accepte des marks bruts ou un index déjà bâti (réutilisé)."""
+    marks = _index_marks(mark_rows_or_marks)
+    m = ArmMetrics(name="A_baseline_v26_off")
+    # ordre chronologique (recorded_at, coin) — IDENTIQUE à _evaluate_arm, sinon le drawdown diffère
+    for cand in sorted((c for c in candidates if isinstance(c, dict)),
+                       key=lambda c: (float(c.get("recorded_at") or 0.0), str(c.get("coin") or ""))):
         coin = str(cand.get("coin") or "").upper()
         side = str(cand.get("direction") or "").upper()
         entry = float(cand.get("current_mid") or 0.0)
         ts = float(cand.get("recorded_at") or 0.0)
         if not coin or side not in ("LONG", "SHORT") or entry <= 0 or ts <= 0:
             continue
+        m.candidates_seen += 1
+        m.accepted += 1                          # bras A : aucun veto (tout OFF)
         notio = float(cand.get("leader_notional_usdt") or 0.0)
         pnl = simulate_exit_on_path(
             side=side, entry_price=entry, path=marks.get(coin, []), entry_ts=ts,
             config=base_config, horizon_min=horizon_min, cost_bps=cost_bps,
             notional_usd=notio if notio > 0 else 50.0)
-        if pnl is not None:                      # None = non mesurable, exclu (comme le bras A)
-            trades.append(round(pnl, 6))
-    # même forme que run_ab_replay pour le crible (il lit r["arm_a"]["net_total_usd"])
-    return {"arm_a": {"net_total_usd": round(sum(trades), 4), "trades": len(trades)}}
+        if pnl is None:                          # non mesurable : exclu, exactement comme le bras A
+            m.unmeasurable += 1
+            m.accepted -= 1
+            continue
+        m.trades.append(round(pnl, 6))
+    return {"arm_a": m.report()}
 
 
 def main(argv: list[str] | None = None) -> int:  # pragma: no cover — CLI mince

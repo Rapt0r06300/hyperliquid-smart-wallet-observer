@@ -232,7 +232,7 @@ def chercher(root: str | Path, *, configs: Iterable[dict[str, Any]] | None = Non
              donnees: DonneesReplay | None = None,
              strategie: str | None = None,
              s_arreter_au_premier: bool = True, raffiner: bool = False,
-             evaluer_ab: Callable[..., dict] = run_ab_replay) -> dict[str, Any]:
+             evaluer_ab: Callable[..., dict] = net_baseline_seul) -> dict[str, Any]:
     """Grille -> porte deux-moitiés+stress -> PLATEAU des voisins -> verdict. Le plateau vit DANS
     la porte : un candidat qui passe les moitiés mais dont les voisins meurent est REJETE_INSTABLE
     — un pic isolé n'est jamais promu."""
