@@ -90,6 +90,22 @@ def test_la_dispersion_ecrite_est_juste(tmp_path, monkeypatch):
     assert r["real_execution"] is False
 
 
+def test_univers_complet_etoile_ecrit_l_intersection_des_deux_venues(tmp_path, monkeypatch):
+    """🟢 LEVIER 1 (22/07) — avec "*", on suit TOUT l'arbitrable (intersection HL∩Binance), pas
+    un filtre de ~38 coins. Un coin present sur une seule venue est ECARTE (rien d'invente)."""
+    monkeypatch.setattr(COLL, "donnees_hyperliquid", lambda: {
+        "BTC": {"f": 0.125, "px": 60000.0}, "WIF": {"f": 0.45, "px": 2.0},
+        "PEPE": {"f": 0.30, "px": 1e-5}, "SOLO_HL": {"f": 0.9, "px": 1.0}})
+    monkeypatch.setattr(COLL, "donnees_binance", lambda: {
+        "BTC": {"f": 0.079, "px": 60010.0}, "WIF": {"f": 0.10, "px": 2.01},
+        "PEPE": {"f": 0.12, "px": 1.01e-5}})            # SOLO_HL absent de Binance
+    n, comparables = COLL.une_passe(tmp_path, ["*"])
+    coins = {json.loads(l)["coin"]
+             for l in (tmp_path / COLL.SORTIE).read_text(encoding="utf-8").strip().splitlines()}
+    assert coins == {"BTC", "WIF", "PEPE"}, "l'univers complet doit suivre l'intersection"
+    assert "SOLO_HL" not in coins and n == 3
+
+
 # ------------------------------------------------------------------ 3. le juge
 
 def _ecrire(tmp_path, *, disp: float, heures: float, coins: int, n_par_coin: int = 60):

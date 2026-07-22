@@ -149,8 +149,17 @@ def une_passe(root: Path, coins: list[str]) -> tuple[int, int]:
         return 0, 0
 
     maintenant = time.time()
+    # 🟢 LEVIER 1 (22/07) — UNIVERS COMPLET, quasi GRATUIT. Les 2 venues renvoient DEJA le funding
+    # + le mid de TOUS leurs coins dans les memes 2 appels (cf. `donnees_hyperliquid`). Le filtre a
+    # ~38 coins nous cachait exactement les coins CHAUDS ou vit l'edge : vraie demande longue ->
+    # funding au-dessus du plancher (le carry n'existe QUE la), et dislocations de prix plus vives.
+    # "*" ou liste vide => on ecrit l'INTERSECTION des deux venues (tout ce qui est arbitrable).
+    if not coins or "*" in coins:
+        cible = sorted(set(dhl) & set(dbin))
+    else:
+        cible = [c.upper().strip() for c in coins]
     lignes, candidats_arb = [], []
-    for coin in coins:
+    for coin in cible:
         c = coin.upper().strip()
         da, db = dhl.get(c), dbin.get(c)
         if not da or not db:
@@ -205,15 +214,18 @@ def une_passe(root: Path, coins: list[str]) -> tuple[int, int]:
 def main(argv: list[str] | None = None) -> int:
     p = argparse.ArgumentParser(description="Collecteur de dispersion de funding (lecture seule).")
     p.add_argument("--root", default=str(RACINE))
-    p.add_argument("--coins", default=COINS_DEFAUT)
+    # LEVIER 1 : par defaut on suit l'UNIVERS COMPLET ("*"). Passer une liste explicite
+    # (--coins BTC,ETH) reste possible pour un test cible ; COINS_DEFAUT sert de repli lisible.
+    p.add_argument("--coins", default="*")
     p.add_argument("--intervalle", type=float, default=INTERVALLE_S_DEFAUT)
     p.add_argument("--une-fois", action="store_true")
     a = p.parse_args(argv)
 
     root = Path(a.root)
-    coins = [c for c in (a.coins or "").split(",") if c.strip()]
-    print("[venues] collecteur demarre — %d coin(s) suivis, toutes les %.0f s"
-          % (len(coins), a.intervalle), flush=True)
+    coins = [c for c in (a.coins or "").split(",") if c.strip()] or ["*"]
+    univers = "UNIVERS COMPLET (intersection HL∩Binance)" if "*" in coins else "%d coin(s)" % len(coins)
+    print("[venues] collecteur demarre — %s, toutes les %.0f s"
+          % (univers, a.intervalle), flush=True)
     total = 0
     while True:
         n, comparables = une_passe(root, coins)
