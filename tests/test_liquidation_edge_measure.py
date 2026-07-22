@@ -94,6 +94,20 @@ def test_la_meme_grappe_rephotographiee_54_fois_ne_compte_qu_UNE_fois():
     assert len(evs) == 1, "54 snapshots de la meme grappe = 1 evenement, pas 54"
 
 
+def test_deux_purges_au_MEME_niveau_mais_SEPAREES_dans_le_temps_sont_DEUX():
+    """🔴 22/07 — L'EXCÈS INVERSE, corrigé. Sur données réelles, 286 snapshots (une zone BTC
+    re-photographiée) s'effondraient en 1 SEUL événement : la clé de dedup n'avait pas de temps.
+    Deux liquidations au même niveau mais séparées de plus d'une fenêtre sont DEUX événements —
+    chacune exige toujours un franchissement de mark réel."""
+    W = 6 * 3600.0
+    # même niveau 59 500, deux purges a t=0 et a t=2W (bien separees), chacune franchie.
+    marks = {"BTC": [(0, 63800.0), (600, 59400.0),
+                     (2 * W, 63800.0), (2 * W + 600, 59400.0)]}
+    grappes = [_grappe(0, 59500.0), _grappe(2 * W, 59500.0)]
+    evs = evenements_declenches(grappes, marks)
+    assert len(evs) == 2, "deux purges distinctes dans le temps = deux evenements"
+
+
 def test_le_sens_BUY_franchit_vers_le_HAUT():
     marks = {"ETH": [(0, 3000.0), (600, 3220.0)]}
     evs = evenements_declenches([_grappe(0, 3200.0, coin="ETH", sens="BUY")], marks)

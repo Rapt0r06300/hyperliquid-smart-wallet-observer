@@ -104,7 +104,15 @@ def evenements_declenches(grappes: Iterable[dict], marks_par_coin: dict[str, lis
             continue
         if not coin or niveau <= 0 or coin not in marks:
             continue
-        cle = (coin, str(g.get("sens") or ""), round(niveau / max(niveau * 20e-4, 1e-9)))
+        # 🔴 22/07 — LA CLE DE DEDUP INCLUT LE TEMPS. Avant : (coin, sens, niveau) SANS temps ->
+        # une liquidation BTC a 60k aujourd'hui et une AUTRE a 60k dans 3 jours comptaient pour
+        # UNE seule (286 snapshots -> 1 evenement). C'est l'exces INVERSE de l'artefact du 20/07 :
+        # on avait tue le sur-comptage de la meme grappe, mais aussi le comptage d'evenements
+        # DISTINCTS au meme niveau. Deux purges separees de plus d'une fenetre sont deux
+        # evenements. Chacune exige toujours un franchissement de mark REEL -> rien d'invente.
+        bucket_t = round(ts / max(float(fenetre_s), 1.0))
+        cle = (coin, str(g.get("sens") or ""),
+               round(niveau / max(niveau * 20e-4, 1e-9)), bucket_t)
         if cle in vus:
             continue
         sens = str(g.get("sens") or "").upper()
