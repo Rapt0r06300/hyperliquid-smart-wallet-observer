@@ -208,12 +208,32 @@ def test_filtrer_candidats_reduit_a_la_sous_population_mesuree():
     assert filtrer_candidats([{}], FILTRES_PRESETS["frais"]) == []
 
 
-def test_la_grille_large_croise_les_presets_de_filtres():
+def test_la_grille_large_est_montee_vers_5000():
+    """22/07 (Flo : « monte vers 5000 ») — la grille de recherche fine croise SL/TP/horizons ×
+    presets pour ~5 000 configs (contre ~1 200). TP>SL toujours, tous les presets présents."""
     from hl_observer.backtesting.recherche_scenario import FILTRES_PRESETS, grille_large
     configs = list(grille_large())
-    assert len(configs) > 400
+    assert 4000 <= len(configs) <= 6000, "grille visée ~5000, obtenu %d" % len(configs)
     assert {c["filtre"] for c in configs} == set(FILTRES_PRESETS)
     assert all(c["tp"] > c["sl"] for c in configs)
+    assert len({(c["sl"], c["tp"], c["horizon_min"]) for c in configs}) > 900   # maillage fin
+
+
+def test_le_crible_memoise_le_filtrage_par_preset(monkeypatch):
+    """« Améliore notre façon de faire » : sur N configs mais peu de presets, le filtrage n'est
+    calculé qu'UNE fois par preset (pas N fois). Économie réelle, résultat identique."""
+    from hl_observer.backtesting import recherche_scenario as rs
+    appels = {"n": 0}
+    vrai = rs.filtrer_candidats
+    def _compte(cands, filtres):
+        appels["n"] += 1
+        return vrai(cands, filtres)
+    monkeypatch.setattr(rs, "filtrer_candidats", _compte)
+    d = rs.DonneesReplay(candidats=[{"recorded_at": float(i)} for i in range(25_000)], marks=[])
+    configs = [{"sl": 30, "tp": 60, "horizon_min": 60, "filtres": p}
+               for p in ({}, {"age_max_ms": 10_000}, {}, {"age_max_ms": 10_000}) for _ in range(50)]
+    rs._cribler_configs(d, configs, evaluer_ab=lambda *a, **k: {"arm_a": {"net_total_usd": -1.0}})
+    assert appels["n"] == 2, "2 presets distincts -> 2 filtrages, pas %d" % appels["n"]
 
 
 def test_le_raffinage_resserre_autour_des_graines_et_regate_tout(tmp_path):

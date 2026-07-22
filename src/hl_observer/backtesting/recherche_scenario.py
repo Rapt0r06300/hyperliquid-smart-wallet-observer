@@ -135,12 +135,18 @@ def filtrer_candidats(cands: list[dict], filtres: dict | None) -> list[dict]:
 
 
 def grille_large() -> Iterator[dict[str, Any]]:
-    """Filet large ET fin (~1 100 configs) : SL 15→120, TP 30→300, horizons 15 min→4 h × presets
-    de filtres. Mailles inchangées (deux moitiés + stress ×1,5 + plateau). L'élargissement est SÛR :
-    le juge PBO (`annoter_robustesse`) empêche un plus grand filet de fabriquer un faux gagnant."""
-    for base in grille_configs(sls=(15.0, 20.0, 30.0, 40.0, 50.0, 60.0, 75.0, 90.0, 120.0),
-                               tps=(30.0, 40.0, 50.0, 70.0, 100.0, 150.0, 200.0, 300.0),
-                               horizons=(15.0, 30.0, 45.0, 60.0, 120.0, 240.0)):
+    """Filet LARGE et FIN (~5 000 configs, 22/07 « monte vers 5000 ») : SL 15→160, TP 25→520,
+    8 horizons 15 min→4 h, croisés aux presets de filtres — mailles fines là où vit l'edge. Portes
+    inchangées (deux moitiés + stress ×1,5 + plateau). L'élargissement reste SÛR : le juge PBO
+    (`annoter_robustesse`) fait monter la barre du multiple-testing avec la taille du filet, donc
+    un plus grand filet NE PEUT PAS fabriquer un faux gagnant. Coût : le crible re-mesure ~4× plus
+    de configs — c'est voulu (« teste tout »), et la mémoïsation du filtrage en amortit une part."""
+    for base in grille_configs(
+            sls=(15.0, 18.0, 22.0, 26.0, 30.0, 35.0, 40.0, 45.0, 50.0, 55.0,
+                 62.0, 70.0, 80.0, 92.0, 105.0, 120.0, 140.0, 160.0),
+            tps=(25.0, 30.0, 35.0, 42.0, 50.0, 60.0, 72.0, 86.0, 102.0, 122.0,
+                 146.0, 175.0, 210.0, 250.0, 300.0, 360.0, 430.0, 520.0),
+            horizons=(15.0, 30.0, 45.0, 60.0, 120.0, 240.0)):
         for nom, f in FILTRES_PRESETS.items():
             yield {**base, "filtre": nom, "filtres": f}
 
@@ -537,9 +543,19 @@ def _cribler_configs(d: DonneesReplay, configs: list[dict], *,
     recent = tries[-n:]
     print("  crible multi-fidelite : %d configs sur les %d candidats les plus recents..."
           % (len(configs), len(recent)), flush=True)
+    # 22/07 (« améliore notre façon de faire ») — MÉMOÏSATION du filtrage : 5000 configs mais
+    # seulement 4 presets distincts. On ne re-filtre plus les 12 000 candidats à chaque config
+    # (60 M tests) mais UNE fois par preset. Résultat identique, un gros bloc de calcul en moins.
+    cache_f: dict[tuple, list] = {}
+    def _filtre(cfg: dict) -> list:
+        cle = tuple(sorted((cfg.get("filtres") or {}).items()))
+        r = cache_f.get(cle)
+        if r is None:
+            r = cache_f[cle] = filtrer_candidats(recent, cfg.get("filtres"))
+        return r
     retenues = []
     for i, cfg in enumerate(configs, 1):
-        f = filtrer_candidats(recent, cfg.get("filtres"))
+        f = _filtre(cfg)
         try:
             r = evaluer_ab(f, d.marks, base_config=_sltp(cfg),
                            horizon_min=float(cfg.get("horizon_min") or 60.0),
