@@ -39,6 +39,15 @@ exclude = ["tests*", "data*", "logs*"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["src", "."]
+# 22/07 — ZÉRO WARNING. FastAPI/Starlette (code TIERS) appellent `asyncio.iscoroutinefunction`,
+# déprécié en Python 3.14 : on ne contrôle pas leur code, on suppresse ce bruit (ce n'est pas
+# notre bug). On ne suppresse QUE ce message tiers précis — nos propres DeprecationWarning
+# resteraient visibles. La classe `TestnetAction` (faux positif de collecte) est réglée par
+# `__test__ = False` dans le module, pas ici.
+filterwarnings = [
+    "ignore:'asyncio.iscoroutinefunction' is deprecated:DeprecationWarning",
+    "ignore:.*iscoroutinefunction.*is deprecated.*:DeprecationWarning",
+]
 
 [tool.ruff]
 line-length = 100

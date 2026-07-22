@@ -23,6 +23,8 @@ import time
 from pathlib import Path
 from typing import Any, Iterable, Sequence
 
+from hl_observer.ops.echec_silencieux import noter as _noter
+
 
 # ─────────────────────────────── déduplication ───────────────────────────────
 
@@ -73,7 +75,7 @@ def append_jsonl(chemin: str | Path, enrs: Sequence[dict], *, fsync: bool = True
             try:
                 os.fsync(fh.fileno())
             except OSError:
-                pass
+                _noter("collection/collecte_fiable.py:append_jsonl_fsync")
     return n
 
 
@@ -89,7 +91,7 @@ def ecrire_atomique(chemin: str | Path, texte: str) -> None:
         try:
             os.fsync(fh.fileno())
         except OSError:
-            pass
+            _noter("collection/collecte_fiable.py:ecrire_atomique_fsync")
     os.replace(tmp, p)
 
 

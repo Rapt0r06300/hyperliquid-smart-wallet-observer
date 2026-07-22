@@ -145,25 +145,29 @@ def test_courir_TIMEOUT_dur_meme_sans_sortie():
     assert r["statut"] == "BUDGET" and r["duree_s"] < 5.0
 
 
-def test_pytest_parallele_repli_SERIE_est_sur(monkeypatch):
-    """Coupe-circuit + repli : jamais un run cassé pour aller vite."""
-    monkeypatch.setenv("TOUT_TESTER_PYTEST_SERIE", "1")
-    assert T._pytest_parallele() == []                      # forcé série
-    monkeypatch.delenv("TOUT_TESTER_PYTEST_SERIE", raising=False)
-    import importlib.util as _iu
-    monkeypatch.setattr(_iu, "find_spec", lambda *_a, **_k: None)  # xdist 'absent'
-    assert T._pytest_parallele() == []                      # repli série si xdist manque
-
-
-def test_pytest_parallele_donne_loadfile_si_dispo(monkeypatch):
-    """Quand xdist est là et la machine multi-cœurs : parallèle avec loadfile (fichier = 1 worker)."""
+def test_pytest_parallele_est_SERIE_par_defaut(monkeypatch):
+    """🔴 22/07 — le parallèle xdist est OPT-IN : par défaut SÉRIE (une flake de contamination
+    inter-fichiers sous parallèle sur Windows ; sans régression > plus vite). Même xdist présent
+    et 8 cœurs : rien tant que TOUT_TESTER_PYTEST_PARALLELE n'est pas armé."""
+    monkeypatch.delenv("TOUT_TESTER_PYTEST_PARALLELE", raising=False)
     import importlib.util as _iu
     import os as _os
-    monkeypatch.delenv("TOUT_TESTER_PYTEST_SERIE", raising=False)
     monkeypatch.setattr(_iu, "find_spec", lambda *_a, **_k: object())   # xdist 'présent'
     monkeypatch.setattr(_os, "cpu_count", lambda: 8)
-    args = T._pytest_parallele()
-    assert args == ["-n", "auto", "--dist", "loadfile"]
+    assert T._pytest_parallele() == []                      # défaut = série
+
+
+def test_pytest_parallele_S_ACTIVE_explicitement(monkeypatch):
+    """Armé + xdist + multi-cœurs : parallèle avec loadfile (fichier = 1 worker)."""
+    import importlib.util as _iu
+    import os as _os
+    monkeypatch.setenv("TOUT_TESTER_PYTEST_PARALLELE", "1")
+    monkeypatch.setattr(_iu, "find_spec", lambda *_a, **_k: object())   # xdist 'présent'
+    monkeypatch.setattr(_os, "cpu_count", lambda: 8)
+    assert T._pytest_parallele() == ["-n", "auto", "--dist", "loadfile"]
+    # armé mais xdist absent -> repli série (jamais un run cassé)
+    monkeypatch.setattr(_iu, "find_spec", lambda *_a, **_k: None)
+    assert T._pytest_parallele() == []
 
 
 def test_entete_progres_montre_l_etape_et_le_reste(capsys):

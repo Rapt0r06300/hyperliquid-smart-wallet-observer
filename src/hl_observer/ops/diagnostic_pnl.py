@@ -17,6 +17,7 @@ from pathlib import Path
 from typing import Any
 
 from hl_observer.collection import collecte_fiable as _CF
+from hl_observer.ops.echec_silencieux import noter as _noter
 
 #: bps/h qu'il faut dépasser pour battre le bas de HLP (cf. carry_benchmark_gate).
 SEUIL_HLP_BPS_H = 0.266
@@ -123,7 +124,7 @@ def synthese_edge(racine: str | Path) -> list[str]:
         if va["signaux"] or va.get("ecartes_aberrants"):
             lignes.append("- **arbitrage** (prix exécutable, modèle) : %s" % va["verdict"])
     except Exception:  # noqa: BLE001 — une synthèse absente ne casse pas le diagnostic
-        pass
+        _noter("ops/diagnostic_pnl.py:synthese_edge_arb")
     # liquidations
     liq = liq_progression(racine)
     lignes.append("- **liquidations** : %s" % liq["verdict"])

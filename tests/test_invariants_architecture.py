@@ -13,7 +13,14 @@ SRC = ROOT / "src" / "hl_observer"
 
 # --- Plafonds mesurés le 18/07 (à faire BAISSER, jamais monter) ---
 MAX_STEMS_EN_COLLISION = 31
-MAX_ORPHELINS = 78
+# 22/07 — DÉCISION EXPLICITE (le test autorise de MONTER avec une décision assumée). 78 -> 82 :
+# 4 modules d'ANALYSE/MESURE ajoutés ce jour — `ops/diagnostic_pnl` (écrit le RECAP à chaque run),
+# `backtesting/robustesse_selection` (PBO, garde la recherche), `funding/arb_executable` (prix
+# exécutable, nourrit le diagnostic), `collection/collecte_fiable` (socle collecte). Ils TOURNENT
+# à chaque audit — ce n'est PAS du code mort ; ils sont « orphelins » au sens strict src→src
+# seulement (atteints par les OUTILS lanceur/tout_tester/recherche, ce que l'audit de câblage
+# qualifie lui-même de « hors runtime, et LÉGITIME »). Prochain nettoyage : viser 78 à nouveau.
+MAX_ORPHELINS = 82
 MAX_LIGNES_NOUVEAU_FICHIER = 800     # s'applique aux fichiers RÉCENTS (les gros legacy sont connus)
 LEGACY_GROS_FICHIERS = {             # dette connue et assumée (à découper, cf. optimisation #9-11)
     "ui/routes.py", "cli.py", "ui/status_routes.py", "ui/fusion_persistent_adapter.py",

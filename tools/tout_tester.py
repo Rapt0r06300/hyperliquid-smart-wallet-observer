@@ -121,15 +121,16 @@ def _courir(nom: str, cmd: list[str], budget_s: float) -> dict[str, Any]:
 
 
 def _pytest_parallele() -> list[str]:
-    """Arguments xdist pour paralléliser la suite — SEULEMENT si `xdist` est installé et la
-    machine a plusieurs cœurs. Sinon liste vide = exécution SÉRIE (aucune régression possible).
-    `--dist loadfile` : chaque FICHIER de test reste sur un seul worker, l'état intra-fichier est
-    préservé. Coupe-circuit : TOUT_TESTER_PYTEST_SERIE=1 force la série."""
+    """Parallélisme xdist — **OPT-IN**, série par défaut. 22/07 : sous `-n auto` sur Windows, un
+    test legacy (dydx) flakait par CONTAMINATION d'état inter-fichiers (il passe en série). « Sans
+    régression » prime sur « plus vite » : on ne rend PAS la suite flaky par défaut. Active avec
+    `TOUT_TESTER_PYTEST_PARALLELE=1` une fois l'isolation auditée. Le gros gain de vitesse — la
+    recherche des 3 modules en parallèle — reste actif, LUI, sans risque (process séparés)."""
     try:
         import importlib.util
         import os as _os
-        if _os.environ.get("TOUT_TESTER_PYTEST_SERIE", "").strip() in ("1", "true", "oui"):
-            return []
+        if _os.environ.get("TOUT_TESTER_PYTEST_PARALLELE", "").strip() not in ("1", "true", "oui"):
+            return []                                  # défaut = SÉRIE (zéro flake garanti)
         if importlib.util.find_spec("xdist") is None or (_os.cpu_count() or 1) <= 1:
             return []
         return ["-n", "auto", "--dist", "loadfile"]

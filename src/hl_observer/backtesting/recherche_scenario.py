@@ -1,31 +1,22 @@
 """RECHERCHE DE SCÉNARIO — l'étage au-dessus du replay A/B, optimisé pour trouver un
 scénario qui SURVIT, pas un pic qui brille.
 
-DEMANDE DE FLO (20/07) : « le replay doit être optimisé au maximum pour trouver le scénario
-parfait ». Ce projet a déjà payé pour savoir ce que « parfait » veut dire : le faux
-« 1 sur 1M » était un gagnant chanceux sorti de ~0 donnée ; 0 calibrage SL/TP n'a jamais
-tenu hors échantillon ; la coupe train/test fuyait à 68 %. Donc ici, « optimisé au
-maximum » = trois choses PRÉCISES :
+Ce projet a déjà payé pour savoir ce que « parfait » veut dire : le faux « 1 sur 1M » était
+un gagnant chanceux sorti de ~0 donnée ; 0 calibrage SL/TP n'a tenu hors échantillon ; la
+coupe train/test fuyait à 68 %. Donc « optimisé au maximum » = trois choses PRÉCISES :
 
-  1. VITESSE — les données (candidats + marks, ~500k lignes) sont chargées UNE fois et
-     réutilisées pour toutes les configurations. C'est le levier n°1 : sans ça, chaque
-     config repaierait des secondes de parsing.
-  2. HONNÊTETÉ — chaque config est jugée sur DEUX MOITIÉS TEMPORELLES DISJOINTES avec
-     EMBARGO (les candidats à moins d'un horizon de la coupe sont jetés des deux côtés :
-     aucune fenêtre d'outcome ne chevauche la frontière). Gagner sur les deux moitiés,
-     c'est le minimum vital contre le gagnant chanceux.
-  3. STABILITÉ — un candidat à la promotion doit vivre sur un PLATEAU : la majorité de
-     ses VOISINS (SL±, TP±) doivent aussi être profitables. Un pic isolé dans la grille
-     est un artefact, pas un scénario (W8).
+  1. VITESSE — candidats + marks (~500k lignes) chargés UNE fois, réutilisés pour toutes les
+     configs (levier n°1 : sinon chaque config repaie des secondes de parsing).
+  2. HONNÊTETÉ — chaque config jugée sur DEUX MOITIÉS TEMPORELLES DISJOINTES avec EMBARGO
+     (les candidats à moins d'un horizon de la coupe sont jetés des deux côtés). Gagner sur
+     les deux moitiés = le minimum vital contre le gagnant chanceux.
+  3. STABILITÉ — un promu doit vivre sur un PLATEAU : la majorité de ses VOISINS (SL±, TP±)
+     doivent aussi être profitables. Un pic isolé est un artefact, pas un scénario (W8).
 
-La porte finale exige EN PLUS la survie à un stress des coûts ×1,5 (F29) : un scénario qui
-meurt quand les frais respirent n'était pas un scénario.
-
-REPLAY-only : données enregistrées, aucun réseau, aucun ordre. La session live n'est pas
-touchée (lecture seule des shards, état de recherche dans son propre fichier).
+La porte finale exige EN PLUS la survie à un stress des coûts ×1,5 (F29). REPLAY-only :
+données enregistrées, aucun réseau, aucun ordre ; la session live n'est pas touchée.
 """
 from __future__ import annotations
-
 
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -58,10 +49,9 @@ STRATEGIES_MODULES = ("carry", "copy", "arbitrage")
 
 
 def repertoire_replay_consolide(root: str | Path) -> Path:
-    """Où vivent les consolidés. 🔴 21/07 : le consolidateur (`merge_replay`) écrit dans
-    `_merged/` (dossier DIFFÉRENT pour ne pas se re-lire) — mais la recherche lisait la
-    RACINE de runtime/replay → INSUFFISANT devant 331 366 candidats consolidés. Un seul
-    résolveur, partagé par la recherche, le PnL des refus et le rapport (§10)."""
+    """Où vivent les consolidés. 🔴 21/07 : `merge_replay` écrit dans `_merged/` (dossier différent
+    pour ne pas se re-lire) mais la recherche lisait la RACINE → INSUFFISANT devant 331k candidats.
+    Un seul résolveur, partagé par la recherche, le PnL des refus et le rapport."""
     base = Path(root) / "runtime" / "replay"
     if (base / "_merged" / "candidates.jsonl").exists():
         return base / "_merged"
@@ -78,29 +68,24 @@ class DonneesReplay:
 
     @classmethod
     def charger(cls, root: str | Path, *, strategie: str | None = None) -> "DonneesReplay":
-        """21/07 (Flo : « les meilleurs scénarios pour TOUS nos modules ») : chargement
-        PAR STRATÉGIE — mélanger 262k signaux copy et les candidats carry dans une même
-        grille donnerait le scénario moyen de RIEN. `strategie=None` garde tout (compat)."""
+        """Chargement PAR STRATÉGIE — mélanger 262k signaux copy et les candidats carry dans
+        une même grille donnerait le scénario moyen de RIEN. `strategie=None` garde tout."""
         base = repertoire_replay_consolide(root)
         if not (base / "candidates.jsonl").exists():
             return cls(candidats=[], marks=[])            # dossier vide = INSUFFISANT honnete
         cands = load_jsonl(str(base / "candidates.jsonl"))
         if strategie is not None:
-            # 🔴 22/07 — bucketing par STRATEGIE EFFECTIVE (label OU inference de champs), plus
-            # par l'alias aveugle qui mappait tout « ? » en copy. Un candidat carry/arbitrage
-            # sans label est desormais reconnu par SES champs, jamais range en copy par accident.
+            # 🔴 22/07 — bucketing par STRATEGIE EFFECTIVE (label OU inference de champs) : un
+            # candidat carry/arbitrage sans label est reconnu par SES champs, jamais rangé en copy.
             from hl_observer.ops.strategie_candidat import strategie_effective
             cible = ALIAS_STRATEGIES.get(strategie, {strategie})
             cands = [c for c in cands if strategie_effective(c) in cible]
         return cls(candidats=cands, marks=load_jsonl(str(base / "marks.jsonl")))
 
     def moities_avec_embargo(self, horizon_min: float) -> tuple[list[dict], list[dict]]:
-        """Coupe TEMPORELLE médiane + embargo d'un horizon DE CHAQUE CÔTÉ de la frontière.
-
-        La leçon du 13/07 (fuite à 68 %) : sans embargo, les outcomes des derniers candidats
-        de la moitié 1 se réalisent DANS la zone de la moitié 2 — les deux moitiés ne sont
-        plus indépendantes, et le « hors échantillon » n'en est pas un.
-        """
+        """Coupe TEMPORELLE médiane + embargo d'un horizon DE CHAQUE CÔTÉ. Leçon du 13/07 (fuite
+        à 68 %) : sans embargo, les outcomes des derniers candidats de la moitié 1 se réalisent
+        dans la zone de la moitié 2 — le « hors échantillon » n'en est plus un."""
         ts = sorted(float(c.get("recorded_at") or 0.0) for c in self.candidats)
         if not ts:
             return [], []
@@ -150,14 +135,9 @@ def filtrer_candidats(cands: list[dict], filtres: dict | None) -> list[dict]:
 
 
 def grille_large() -> Iterator[dict[str, Any]]:
-    """« Trouve TOUS les meilleurs calibrages » (22/07) : le FILET s'élargit ET se raffine —
-    SL 15→120 (grain plus fin où vit l'edge), TP 30→300, horizons 15 min→4 h + le palier 45 min,
-    CROISÉS avec les presets de filtres (~1 100 configs). Les MAILLES ne bougent pas : chaque
-    config passe les mêmes portes (deux moitiés + stress ×1,5 + plateau).
-
-    Et surtout, l'élargissement est désormais SÛR : le juge PBO (`annoter_robustesse`) mesure si
-    la procédure GÉNÉRALISE. Plus on essaie de configs, plus la barre du multiple-testing monte —
-    un plus grand filet ne peut plus fabriquer un faux gagnant en douce."""
+    """Filet large ET fin (~1 100 configs) : SL 15→120, TP 30→300, horizons 15 min→4 h × presets
+    de filtres. Mailles inchangées (deux moitiés + stress ×1,5 + plateau). L'élargissement est SÛR :
+    le juge PBO (`annoter_robustesse`) empêche un plus grand filet de fabriquer un faux gagnant."""
     for base in grille_configs(sls=(15.0, 20.0, 30.0, 40.0, 50.0, 60.0, 75.0, 90.0, 120.0),
                                tps=(30.0, 40.0, 50.0, 70.0, 100.0, 150.0, 200.0, 300.0),
                                horizons=(15.0, 30.0, 45.0, 60.0, 120.0, 240.0)):
@@ -212,8 +192,7 @@ def evaluer_sur_moities(donnees: DonneesReplay, config: dict[str, Any], *,
     `evaluer_ab` est injectable : les tests jugent NOTRE logique sans payer le vrai replay."""
     h = float(config.get("horizon_min") or 60.0)
     m1, m2 = donnees.moities_avec_embargo(h)
-    # sous-population du preset de filtres (21/07) — APRES la coupe temporelle : la coupe ne
-    # depend que du temps, le filtre ne peut pas la biaiser.
+    # filtres APRÈS la coupe temporelle (la coupe ne dépend que du temps, pas du filtre).
     m1 = filtrer_candidats(m1, config.get("filtres"))
     m2 = filtrer_candidats(m2, config.get("filtres"))
     cfg = _sltp(config)
@@ -248,12 +227,9 @@ def chercher(root: str | Path, *, configs: Iterable[dict[str, Any]] | None = Non
              strategie: str | None = None,
              s_arreter_au_premier: bool = True, raffiner: bool = False,
              evaluer_ab: Callable[..., dict] = run_ab_replay) -> dict[str, Any]:
-    """Grille -> porte deux-moitiés+stress -> PLATEAU des voisins -> verdict.
-
-    Le contrôle de plateau vit DANS la porte du /goal : un candidat qui passe les moitiés
-    mais dont les voisins meurent est rejeté (REJETE_INSTABLE dans son rapport) — un pic
-    isolé n'est pas promu, jamais.
-    """
+    """Grille -> porte deux-moitiés+stress -> PLATEAU des voisins -> verdict. Le plateau vit DANS
+    la porte : un candidat qui passe les moitiés mais dont les voisins meurent est REJETE_INSTABLE
+    — un pic isolé n'est jamais promu."""
     d = donnees if donnees is not None else DonneesReplay.charger(root, strategie=strategie)
     if not d.candidats:
         return {"statut": "INSUFFISANT", "strategie": strategie,
@@ -290,9 +266,8 @@ def chercher(root: str | Path, *, configs: Iterable[dict[str, Any]] | None = Non
         evaluer, porte_avec_plateau,
         etat_path=etat, max_essais=max_essais, budget_s=budget_s,
         s_arreter_au_premier=s_arreter_au_premier)
-    # ── RAFFINAGE grossier -> fin (21/07, « ultra intelligent ») : on resserre la grille
-    # (pas/2) autour des PROMUS et des meilleurs presque-promus (net m1+m2 les plus hauts).
-    # Les raffines passent LES MEMES portes ; la dedup par cle (etat) evite tout double calcul.
+    # ── RAFFINAGE grossier -> fin : on resserre la grille (pas/2) autour des PROMUS et meilleurs
+    # presque-promus ; les raffinés passent LES MÊMES portes, la dedup par clé évite tout doublon.
     if raffiner and r.get("essais"):
         def _net12(e):
             n = e.get("nets") or {}
@@ -323,9 +298,8 @@ def chercher(root: str | Path, *, configs: Iterable[dict[str, Any]] | None = Non
             p.update(rang_pepite(d, p["config"], evaluer_ab=evaluer_ab))
         except Exception:  # noqa: BLE001 — un rang illisible reste ARGENT, jamais un plantage
             p.setdefault("rang", "ARGENT")
-    # 22/07 — LE JUGE DU SUR-AJUSTEMENT. Après avoir cherché large, on mesure si la PROCÉDURE
-    # généralise (PBO) ou si elle a juste eu de la chance sur 1420 essais. La recommandation
-    # en tiendra compte : un PBO > 0,5 interdit tout « FAIS ÇA ».
+    # 22/07 — LE JUGE DU SUR-AJUSTEMENT (PBO) : mesure si la PROCÉDURE généralise ou a eu de la
+    # chance ; un PBO > 0,5 interdit tout « FAIS ÇA ».
     annoter_robustesse(d, r, evaluer_ab=evaluer_ab)
     r["strategie"] = strategie
     r["n_candidats"] = len(d.candidats)
@@ -369,14 +343,10 @@ def evaluer_episodes_cross_venue(series: list[dict], config: dict[str, Any], *,
 
 
 def etude_maker_refuge(series: list[dict], *, seuil_bps: float = 19.0) -> dict[str, Any]:
-    """Le refuge MAKER de l'arbitrage, MESURÉ sur la même série de dispersion (étape 2/3, 22/07).
-
-    La loi `arb_dislocation_cout_all_in` gardait une porte de sortie : « à 9 bps (tout maker)
-    les mêmes trades survivent ». `arb_maker_study` la mesure — sélection adverse d'une entrée
-    passive comprise. On la BRANCHE ici, dans la recherche cross-venue, pour que sa réponse
-    voyage AVEC le rapport plutôt que de dormir dans un test. Rien d'inventé : un écart absent
-    ou illisible n'est jamais un fill. MESURE only, aucun réseau, aucun ordre.
-    """
+    """Refuge MAKER de l'arbitrage, MESURÉ sur la même série de dispersion (22/07). La loi
+    `arb_dislocation_cout_all_in` gardait la porte « à 9 bps tout-maker les trades survivent » :
+    `arb_maker_study` la mesure (sélection adverse comprise), branchée ici pour voyager AVEC le
+    rapport. Un écart absent/illisible n'est jamais un fill. MESURE only, aucun réseau, aucun ordre."""
     from hl_observer.funding.arb_maker_study import etudier as _etudier_maker
     par_coin: dict[str, list[tuple[float, float]]] = {}
     for r in series or []:
@@ -395,10 +365,9 @@ def etude_maker_refuge(series: list[dict], *, seuil_bps: float = 19.0) -> dict[s
 
 def chercher_cross_venue(root: str | Path, *, series: list[dict] | None = None,
                          max_essais: int | None = None) -> dict[str, Any]:
-    """La recherche cross-venue — MÊMES portes (deux moitiés temporelles + stress coûts ×1,5
-    + plateau des seuils voisins). ⚠️ EXPLORATOIRE : ne touche pas au verdict 72 h du
-    protocole (barres pré-écrites) — un seuil optimisé ici devra survivre au hors-échantillon
-    APRÈS les 72 h avant d'exister en live."""
+    """Recherche cross-venue, MÊMES portes (deux moitiés + stress ×1,5 + plateau). ⚠️ EXPLORATOIRE :
+    ne touche pas au verdict 72 h (barres pré-écrites) — un seuil optimisé ici devra survivre au
+    hors-échantillon APRÈS les 72 h avant d'exister en live."""
     if series is None:
         p = Path(root) / "runtime" / "data" / "dispersion_venues.jsonl"
         series = load_jsonl(str(p)) if p.exists() else []
@@ -448,9 +417,8 @@ def chercher_cross_venue(root: str | Path, *, series: list[dict] | None = None,
 
 
 # ================================================================ 5bis. les canons du 21/07
-# Recherche X/GitHub (demande de Flo) : CPCV/folds purges (Lopez de Prado — PBO plus bas que
-# le walk-forward simple) + successive halving (multi-fidelite : cribler sur un sous-echantillon
-# AVANT de payer l'evaluation complete). References : ml4t/diagnostic, Optuna Hyperband.
+# CPCV/folds purgés (Lopez de Prado — PBO plus bas que le walk-forward) + successive halving
+# (cribler sur un sous-échantillon avant l'évaluation complète). Réf. ml4t, Optuna Hyperband.
 
 def folds_purges(d: DonneesReplay, horizon_min: float, k: int = 4) -> list[list[dict]]:
     """K tranches TEMPORELLES avec embargo d'un horizon entre chaque — l'esprit CPCV : une
@@ -472,9 +440,9 @@ def folds_purges(d: DonneesReplay, horizon_min: float, k: int = 4) -> list[list[
 def rang_pepite(d: DonneesReplay, config: dict[str, Any], *,
                 evaluer_ab: Callable[..., dict] = run_ab_replay,
                 cost_bps: float = DEFAULT_COST_BPS) -> dict[str, Any]:
-    """OR / ARGENT (post-porte, sur les promus seulement — 4 evals, pas cher car ils sont
-    rares) : OR = net > 0 sur >= 3 des 4 folds purges EN PLUS de la porte. L'ARGENT reste
-    une pepite ; l'OR a survecu a une decoupe de plus."""
+    """OR / ARGENT (post-porte, promus seulement — 4 evals, rares donc pas cher) : OR = net > 0
+    sur ≥ 3 des 4 folds purgés EN PLUS de la porte. L'ARGENT reste une pépite ; l'OR a survécu à
+    une découpe de plus."""
     h = float(config.get("horizon_min") or 60.0)
     folds = folds_purges(d, h)
     if not folds:
@@ -493,9 +461,8 @@ def rang_pepite(d: DonneesReplay, config: dict[str, Any], *,
 def _matrice_robustesse(d: DonneesReplay, configs: list[dict], *, k: int = 8,
                         evaluer_ab: Callable[..., dict] = run_ab_replay,
                         cost_bps: float = DEFAULT_COST_BPS) -> list[list[float]]:
-    """Matrice [config][fold] du net, pour le PBO (blocs temporels purgés = `folds_purges`).
-    Bornée : au plus ~24 configs (promus + presque-promus) × k folds — les survivants sont rares,
-    donc c'est peu cher. Une matrice vide (< 4 folds ou 0 config) => PBO INSUFFISANT plus haut."""
+    """Matrice [config][fold] du net pour le PBO (blocs temporels purgés). Bornée à ~24 configs ×
+    k folds (survivants rares = peu cher) ; matrice vide (< 4 folds) => PBO INSUFFISANT plus haut."""
     if not configs:
         return []
     h_ref = float(configs[0].get("horizon_min") or 60.0)
@@ -518,8 +485,8 @@ def _matrice_robustesse(d: DonneesReplay, configs: list[dict], *, k: int = 8,
 
 
 def _candidats_pour_robustesse(r: dict[str, Any], maximum: int = 24) -> list[dict]:
-    """Les configs à passer au PBO : les PROMUS d'abord, complétés par les meilleurs
-    presque-promus (net m1+m2) — il faut du CORPS dans la matrice pour que le rang OOS ait un sens."""
+    """Configs pour le PBO : PROMUS d'abord, complétés des meilleurs presque-promus (net m1+m2) —
+    il faut du CORPS dans la matrice pour que le rang OOS ait un sens."""
     cands = [p["config"] for p in (r.get("promus") or []) if p.get("config")]
     def _net12(e):
         n = e.get("nets") or {}
@@ -560,11 +527,9 @@ CAP_CRIBLE_CANDIDATS = 12_000
 
 def _cribler_configs(d: DonneesReplay, configs: list[dict], *,
                      evaluer_ab: Callable[..., dict] = run_ab_replay) -> list[dict]:
-    """SUCCESSIVE HALVING (multi-fidelite) : sur les grosses populations (copy : 262k), payer
-    3 evaluations completes par config est un gachis — on crible d'abord chaque config sur le
-    QUART LE PLUS RECENT (structure temporelle preservee, jamais un sous-echantillon aleatoire)
-    et seules les configs a net > 0 au crible passent a l'evaluation complete. Un crible
-    n'admet jamais personne : il ne fait qu'EPARGNER du calcul aux perdants evidents."""
+    """SUCCESSIVE HALVING : sur les grosses populations (copy : 262k), on crible d'abord chaque
+    config sur le QUART LE PLUS RECENT (structure temporelle préservée) ; seules celles à net > 0
+    passent à l'évaluation complète. Le crible n'admet personne, il ÉPARGNE du calcul aux perdants."""
     if len(d.candidats) < SEUIL_CRIBLE_CANDIDATS or not configs:
         return configs
     tries = sorted(d.candidats, key=lambda c: float(c.get("recorded_at") or 0.0))
@@ -594,10 +559,9 @@ def _cribler_configs(d: DonneesReplay, configs: list[dict], *,
 # ================================================================ 6. TOUS les modules d'un coup
 
 def _chercher_un_module(args: tuple) -> tuple:
-    """Worker (process séparé, 22/07) : lance `chercher` pour UN module et CAPTURE sa sortie, pour
-    un affichage GROUPÉ par module (parallèle = rapide ET lisible, jamais un entrelacement illisible).
-    Blindé : un module qui explose rend un verdict ERREUR, il n'en tue aucun autre. Les résultats
-    sont IDENTIQUES au séquentiel (chaque module est indépendant ; seule la concurrence change)."""
+    """Worker (process séparé) : lance `chercher` pour UN module et CAPTURE sa sortie (affichage
+    GROUPÉ par module = parallèle rapide ET lisible). Blindé : un module qui explose rend ERREUR sans
+    tuer les autres ; résultats IDENTIQUES au séquentiel (modules indépendants)."""
     root, strat, max_essais, budget_s = args
     import io
     import sys as _sys
@@ -617,18 +581,15 @@ def _chercher_un_module(args: tuple) -> tuple:
 def chercher_toutes(root: str | Path, *, max_essais_par_strategie: int | None = None,
                     budget_s_par_module: float | None = 7_200.0,
                     parallele: bool = False) -> dict[str, Any]:
-    """« Il doit replay TOUS nos modules » (21/07). Une recherche PAR module (populations
-    jamais mélangées), grille LARGE (le filet s'élargit, les mailles jamais), rapports écrits
-    À LA FIN QUOI QU'IL ARRIVE. Leçons du run de la nuit (mort en silence pendant copy,
-    AUCUN rapport) : (1) chaque module est blindé — s'il explose, son verdict devient
-    ERREUR et les AUTRES continuent ; (2) budget de 2 h par module — BUDGET_EPUISE honnête
-    et reprise au prochain lancement (états par module), jamais une nuit avalée."""
+    """Recherche PAR module (populations jamais mélangées), grille LARGE, rapports écrits À LA FIN
+    QUOI QU'IL ARRIVE. Leçon du run mort en silence : (1) chaque module blindé — s'il explose son
+    verdict devient ERREUR, les autres continuent ; (2) budget 2 h/module (BUDGET_EPUISE honnête +
+    reprise au prochain lancement), jamais une nuit avalée."""
     resultats: dict[str, Any] = {}
     fait_en_parallele = False
-    # 22/07 (Flo : « plus rapide ») — les 3 modules sont INDÉPENDANTS : on peut les chercher EN
-    # PARALLÈLE (÷3 sur le temps) sans changer un seul résultat. Sortie GROUPÉE par module (via
-    # capture dans le worker) pour rester lisible. Défaut = séquentiel (les tests monkeypatchent
-    # `chercher`, ce qui ne traverse pas un sous-process) ; seul TOUT-TESTER active `parallele`.
+    # 22/07 — les 3 modules sont INDÉPENDANTS : parallélisables (÷3) sans changer un résultat,
+    # sortie groupée par module. Défaut = séquentiel (les tests monkeypatchent `chercher`, ce qui
+    # ne traverse pas un sous-process) ; seul TOUT-TESTER active `parallele`.
     if parallele:
         try:
             from concurrent.futures import ProcessPoolExecutor
@@ -680,14 +641,11 @@ def chercher_toutes(root: str | Path, *, max_essais_par_strategie: int | None = 
 
 
 def recommandation(strat: str, r: dict[str, Any]) -> str:
-    """21/07 (Flo : « le rapport doit dire : c'est mieux si on fait ÇA avec le carry... ») —
-    la CONCLUSION en français, dérivée des résultats, jamais inventée. Quatre cas :
-    pépite OR (à câbler en paper), pépite ARGENT (à surveiller), espace épuisé (le réglage
-    n'existe pas dans ces données — le dire épargne des semaines), données insuffisantes."""
-    # 21/07 — LES LOIS MESUREES. Une pepite qui retombe sur un mecanisme deja REFUTE par nos
-    # propres chiffres doit le dire ICI, au moment ou elle est proposee. Sinon le rapport
-    # recommande d'implementer quelque chose qu'on a deja prouve perdant — et personne ne s'en
-    # souvient trois semaines plus tard. Ce n'est pas un interdit : c'est le chiffre a battre.
+    """La CONCLUSION en français, dérivée des résultats, jamais inventée. Quatre cas : pépite OR
+    (à câbler en paper), ARGENT (à surveiller), espace épuisé (le réglage n'existe pas dans ces
+    données), données insuffisantes."""
+    # 21/07 — LES LOIS MESUREES : une pépite qui retombe sur un mécanisme déjà RÉFUTÉ par nos
+    # chiffres le dit ICI (le chiffre à battre, pas un interdit) — sinon on ré-implémente un perdant.
     rappel = ""
     try:
         from hl_observer.research.lois_mesurees import avertissement as _avert
@@ -696,9 +654,8 @@ def recommandation(strat: str, r: dict[str, Any]) -> str:
             rappel = " ⚠️ RAPPEL — %s" % a
     except Exception:  # noqa: BLE001 — un rappel absent ne casse jamais une recommandation
         rappel = ""
-    # 22/07 — GARDE-FOU ANTI-SUR-AJUSTEMENT (PBO). Une recherche extrême peut produire un
-    # « promu » par pure chance sur des milliers d'essais. Si la PROCÉDURE sur-ajuste, AUCUN
-    # « FAIS ÇA » — même avec un beau net. La barre monte avec l'ambition de la recherche.
+    # 22/07 — GARDE-FOU PBO : une recherche extrême peut promouvoir par pure chance. Si la
+    # PROCÉDURE sur-ajuste, AUCUN « FAIS ÇA » même avec un beau net (la barre monte avec l'ambition).
     rob = r.get("robustesse") or {}
     if rob.get("pbo") is not None and rob.get("verdict") == "SUR_AJUSTE":
         return ("NE FAIS RIEN ENCORE : la recherche SUR-AJUSTE (PBO %.0f%% > 50%% sur %d essais) "
@@ -741,10 +698,8 @@ def recommandation(strat: str, r: dict[str, Any]) -> str:
 
 
 def _ecrire_resultats_md(root: str | Path, resultats: dict[str, Any]) -> None:
-    """21/07 (Flo : « un fichier .md contenant TOUS les résultats pour que tu puisses les
-    examiner ») — le rapport COMPLET : profil de données, pépites OR/ARGENT avec leurs nets
-    et leurs folds, meilleurs presque-promus avec la porte qui les a tués, et un bloc JSON
-    embarqué (machine-lisible) pour l'examen par Claude. Écriture atomique."""
+    """Le rapport COMPLET : profil de données, pépites OR/ARGENT (nets + folds), meilleurs
+    presque-promus avec la porte qui les a tués, et un bloc JSON machine-lisible. Écriture atomique."""
     import datetime as _dt
     import json as _json
     import os as _os

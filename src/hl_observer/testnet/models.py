@@ -11,6 +11,7 @@ def unix_ms() -> int:
 
 
 class TestnetAction(str, Enum):
+    __test__ = False   # 22/07 : ce n'est PAS une classe de test — empêche la PytestCollectionWarning
     OPEN = "open"
     REDUCE = "reduce"
     CLOSE = "close"
