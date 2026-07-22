@@ -179,6 +179,23 @@ def test_un_script_tools_lance_par_un_cmd_est_une_PORTE():
     assert len(demarres) == 2, "un `-m` a ete pris pour un script d'outil : %r" % demarres
 
 
+def test_un_lanceur_avec_prefixe_pdp0_est_reconnu():
+    """🔴 22/07 — TOUT-TESTER.cmd lance `python \"%~dp0tools\\lanceur_tout_tester.py\"`. Le
+    prefixe `%~dp0` (chemin relatif au .cmd, idiome Windows du projet) faisait RATER le match ->
+    le lanceur passait pour non demarre, et tout ce qu'il importe (dont loop_readiness) pour mort.
+    On reconnait desormais `%~dp0` et `.\\`/`./` avant le chemin capture."""
+    from hl_observer.audit.cablage import outils_demarres_par_les_lanceurs
+    lanceurs = {
+        "TOUT-TESTER.cmd": 'python "%~dp0tools\\lanceur_tout_tester.py" %*\n',
+        "AUTRE.cmd": "python .\\tools\\bot_ready.py\n",
+    }
+    d = outils_demarres_par_les_lanceurs(lanceurs)
+    assert "tools/lanceur_tout_tester.py" in d, "le prefixe %~dp0 fait toujours rater le lanceur"
+    assert "tools/bot_ready.py" in d
+    # non-regression : un `-m` n'est toujours PAS un script d'outil
+    assert outils_demarres_par_les_lanceurs({"L.cmd": "python -m hl_observer ui\n"}) == []
+
+
 def test_le_MOTEUR_DE_RECHERCHE_n_est_plus_declare_MORT():
     """De bout en bout : sans les outils, la recherche est "morte". Avec, elle est OUTILLEE."""
     fichiers = {

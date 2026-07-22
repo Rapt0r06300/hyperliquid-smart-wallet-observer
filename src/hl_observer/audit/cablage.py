@@ -370,8 +370,14 @@ def portes_declarees_par_les_lanceurs(lanceurs: dict[str, str], racine: str = "h
 # est range a part (`Verdict.outilles`), et pour les paquets du chemin de production (`risk/`,
 # `paper_trading/`, `exits/`) il continue de compter comme MORT. Un garde-fou joignable
 # uniquement depuis un script d'audit ne protege aucune position.
+# 🔴 22/07 — ANGLE MORT CORRIGÉ. La regex exigeait que le chemin commence par `tools`/`scripts`,
+# mais nos lanceurs .cmd utilisent l'idiome Windows `python "%~dp0tools\x.py"` (chemin relatif au
+# script). Le préfixe `%~dp0` faisait rater le match -> `lanceur_tout_tester.py` (démarré par
+# TOUT-TESTER.cmd) passait pour NON lancé, et tout ce qu'il importe pour MORT. On autorise donc un
+# préfixe `%~dp0` ou `.\`/`./` avant le chemin capturé (la capture reste `tools\x.py`, propre).
 _OUTIL_DANS_UN_LANCEUR = re.compile(
-    r"""python(?:\.exe)?["']?\s+(?:-\S+\s+)*["']?((?:tools|scripts)[/\\][\w\-./\\]+\.py)""",
+    r"""python(?:\.exe)?["']?\s+(?:-\S+\s+)*["']?(?:%~dp0|\.[\\/])?"""
+    r"""((?:tools|scripts)[/\\][\w\-./\\]+\.py)""",
     re.IGNORECASE,
 )
 

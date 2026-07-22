@@ -454,6 +454,17 @@ def lancer(argv: list[str] | None = None, racine: Path = RACINE) -> int:
     elif triage and code == 0:
         # run vert : on MEMORISE l'ensemble vide, pour que le prochain diff soit juste.
         comparer_aux_echecs_precedents([], racine)
+    # 22/07 — BOT-READY : UN score de maturite + le niveau d'autonomie SUR (porte de
+    # loop-engineering, lentille trading). Apres le RECAP, en try/except : un bonus d'affichage
+    # ne doit JAMAIS faire echouer l'audit. Plafond = testnet verrouille ; le REEL est hors echelle.
+    try:
+        if str(racine / "src") not in sys.path:
+            sys.path.insert(0, str(racine / "src"))
+        from hl_observer.ops import loop_readiness as _LR
+        for _l in _LR.markdown(_LR.depuis_le_recap(racine)).splitlines():
+            dire(_l)
+    except Exception as _exc:  # noqa: BLE001 — jamais fatal
+        dire("    (BOT-READY indisponible : %s)" % str(_exc)[:80])
     n = purger_logs(racine)                                                  # 24
     if n:
         dire("    %d vieux log(s) purge(s) (on garde les %d derniers)" % (n, LOGS_CONSERVES))
