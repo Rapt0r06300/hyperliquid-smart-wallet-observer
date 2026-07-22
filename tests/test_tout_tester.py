@@ -119,3 +119,55 @@ def test_le_recap_commence_par_le_plan_et_compare_au_passage_precedent(tmp_path,
     t2 = T.ecrire_recap(etapes, sante2, chemin=tmp_path / "R2.md").read_text(encoding="utf-8")
     assert "▲" in t2, "la progression se voit d'un coup d'oeil"
     assert (tmp_path / "hist.jsonl").read_text(encoding="utf-8").count("\n") == 2
+
+
+# ═══════════════ VITESSE & VISIBILITÉ (22/07) ═══════════════
+
+def test_mmss_est_lisible():
+    assert T._mmss(0) == "0:00" and T._mmss(75) == "1:15" and T._mmss(-3) == "0:00"
+
+
+def test_courir_STREAME_et_CAPTURE_a_la_fois():
+    """🔴 « voir tout ce qui se passe » : l'ancien _courir capturait tout et n'affichait qu'à la
+    fin (écran figé 53 min pendant la recherche). Le nouveau STREAME en direct ET capture pour
+    le RECAP. On vérifie la capture (le stream est prouvé par le smoke)."""
+    import sys as _s
+    T._planifier(["securite", "tests"])
+    r = T._courir("securite", [_s.executable, "-c", "print('AA'); print('BB')"], 30)
+    assert r["statut"] == "OK" and "AA" in r["sortie"] and "BB" in r["sortie"]
+
+
+def test_courir_TIMEOUT_dur_meme_sans_sortie():
+    """Un sous-processus figé SANS rien afficher doit quand même être coupé (Timer), sinon
+    l'audit tournerait à l'infini — un plantage silencieux d'un autre genre."""
+    import sys as _s
+    r = T._courir("tests", [_s.executable, "-c", "import time; time.sleep(10)"], 1)
+    assert r["statut"] == "BUDGET" and r["duree_s"] < 5.0
+
+
+def test_pytest_parallele_repli_SERIE_est_sur(monkeypatch):
+    """Coupe-circuit + repli : jamais un run cassé pour aller vite."""
+    monkeypatch.setenv("TOUT_TESTER_PYTEST_SERIE", "1")
+    assert T._pytest_parallele() == []                      # forcé série
+    monkeypatch.delenv("TOUT_TESTER_PYTEST_SERIE", raising=False)
+    import importlib.util as _iu
+    monkeypatch.setattr(_iu, "find_spec", lambda *_a, **_k: None)  # xdist 'absent'
+    assert T._pytest_parallele() == []                      # repli série si xdist manque
+
+
+def test_pytest_parallele_donne_loadfile_si_dispo(monkeypatch):
+    """Quand xdist est là et la machine multi-cœurs : parallèle avec loadfile (fichier = 1 worker)."""
+    import importlib.util as _iu
+    import os as _os
+    monkeypatch.delenv("TOUT_TESTER_PYTEST_SERIE", raising=False)
+    monkeypatch.setattr(_iu, "find_spec", lambda *_a, **_k: object())   # xdist 'présent'
+    monkeypatch.setattr(_os, "cpu_count", lambda: 8)
+    args = T._pytest_parallele()
+    assert args == ["-n", "auto", "--dist", "loadfile"]
+
+
+def test_entete_progres_montre_l_etape_et_le_reste(capsys):
+    T._planifier(["securite", "tests", "recherche"])
+    T._entete_progres("securite")
+    out = capsys.readouterr().out
+    assert "étape 1/3" in out and "reste" in out and "estimé" in out

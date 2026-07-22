@@ -444,12 +444,19 @@ def lancer(argv: list[str] | None = None, racine: Path = RACINE) -> int:
         # tuerait tout_tester.py AVANT qu'il n'ecrive le RECAP — le bug du 11/07 (audit_report)
         # et du 13/07 (couverture). On NE capture PAS la sortie de l'orchestrateur : le lanceur
         # STREAME sa progression en direct (run_isole capturerait, on ne l'utilise donc pas ici).
-        try:
-            subprocess.run([sys.executable, "-m", "pip", "install", "-q", "pytest-timeout"],
-                           cwd=racine, capture_output=True, timeout=120,
-                           creationflags=_cflags())                          # 07
-        except Exception:  # noqa: BLE001
-            pass
+        # 07 — outils pytest : timeout (cap par test) + xdist (parallélisme = suite plus rapide).
+        # 22/07 : on n'installe QUE ce qui MANQUE — une fois en place, plus aucun aller-retour pip
+        # (gain de temps + aucun blocage réseau à chaque lancement).
+        import importlib.util as _iu
+        _manque = [pkg for pkg, mod in (("pytest-timeout", "pytest_timeout"),
+                                        ("pytest-xdist", "xdist")) if _iu.find_spec(mod) is None]
+        if _manque:
+            try:
+                subprocess.run([sys.executable, "-m", "pip", "install", "-q", *_manque],
+                               cwd=racine, capture_output=True, timeout=180,
+                               creationflags=_cflags())                      # 07
+            except Exception:  # noqa: BLE001
+                pass
         p = subprocess.run([sys.executable, str(racine / "tools" / "tout_tester.py"), *args],
                            cwd=racine, env=environnement_fils(racine),
                            creationflags=_cflags(), timeout=BUDGET_TOTAL_S)   # 41 filet anti-blocage

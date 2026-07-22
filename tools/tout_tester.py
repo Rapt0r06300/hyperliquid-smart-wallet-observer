@@ -34,24 +34,107 @@ BUDGETS = {"securite": 300, "tests": 3600, "invariants": 900, "cablage": 900, "d
            "recherche": 5400, "sante": 120}
 
 
+#: durées TYPIQUES (s) observées sur un vrai RECAP — pour l'ETA. C'est une ESTIMATION affichée
+#: comme telle, jamais une promesse. Sert uniquement à donner « le temps restant » à Flo.
+DUREE_TYPIQUE_S = {"securite": 21, "consolidation": 12, "tests": 300, "invariants": 3,
+                   "cablage": 2, "donnees": 6, "backtests": 900, "recherche": 1800,
+                   "rapport_jour": 15}
+#: état de progression, rempli par `_planifier()` au début de `main`.
+_PLAN: dict[str, Any] = {"debut": 0.0, "restant": {}, "total": 0, "i": 0}
+
+
+def _mmss(s: float) -> str:
+    s = int(max(0, s))
+    return "%d:%02d" % (s // 60, s % 60)
+
+
+def _planifier(noms: list[str]) -> None:
+    """Fixe le plan : les étapes qui VONT tourner (selon les options) et leur durée estimée."""
+    _PLAN["debut"] = time.time()
+    _PLAN["restant"] = {n: DUREE_TYPIQUE_S.get(n, 60) for n in noms}
+    _PLAN["total"] = len(noms)
+    _PLAN["i"] = 0
+
+
+def _entete_progres(nom: str) -> None:
+    """La ligne « où on en est + temps restant » avant chaque étape. Flo VOIT sa progression."""
+    if not _PLAN.get("debut"):
+        return
+    _PLAN["i"] = _PLAN.get("i", 0) + 1
+    ecoule = time.time() - _PLAN["debut"]
+    reste = sum(_PLAN["restant"].values())         # inclut l'étape qui démarre
+    _PLAN["restant"].pop(nom, None)
+    print("  ⏱  étape %d/%d · écoulé %s · reste ~%s (estimé)"
+          % (_PLAN["i"], _PLAN.get("total", 0), _mmss(ecoule), _mmss(reste)), flush=True)
+
+
 def _courir(nom: str, cmd: list[str], budget_s: float) -> dict[str, Any]:
+    """Lance une étape en STREAMANT sa sortie en direct (Flo voit tout ce qui se passe), tout en
+    la capturant pour le RECAP, avec un timeout DUR (un Timer tue le process même s'il se fige en
+    silence — le stream seul ne suffirait pas à couper un blocage sans sortie)."""
+    import threading
     t0 = time.time()
     print("\n" + "=" * 70, flush=True)
     print("  [%s] %s" % (nom.upper(), " ".join(cmd[-2:])), flush=True)
+    _entete_progres(nom)
     print("=" * 70, flush=True)
+    lignes: list[str] = []
+    proc = None
+    depasse = {"v": False}
     try:
-        p = subprocess.run(cmd, cwd=str(RACINE), capture_output=True, text=True,
-                           timeout=budget_s, encoding="utf-8", errors="replace")
-        sortie = (p.stdout or "") + (p.stderr or "")
-        print(sortie[-4000:], flush=True)          # la queue suffit à l'écran
-        return {"etape": nom, "code": p.returncode, "duree_s": round(time.time() - t0, 1),
-                "sortie": sortie[-20000:], "statut": "OK" if p.returncode == 0 else "ECHEC"}
-    except subprocess.TimeoutExpired:
-        return {"etape": nom, "code": -9, "duree_s": round(time.time() - t0, 1),
-                "sortie": "BUDGET DEPASSE (%.0f s)" % budget_s, "statut": "BUDGET"}
+        proc = subprocess.Popen(cmd, cwd=str(RACINE), stdout=subprocess.PIPE,
+                                stderr=subprocess.STDOUT, text=True, encoding="utf-8",
+                                errors="replace", bufsize=1)
+
+        def _tuer_si_depasse() -> None:
+            depasse["v"] = True
+            try:
+                proc.kill()
+            except Exception:  # noqa: BLE001
+                pass
+
+        minuteur = threading.Timer(max(1.0, float(budget_s)), _tuer_si_depasse)
+        minuteur.daemon = True
+        minuteur.start()
+        try:
+            for ligne in proc.stdout:              # STREAM : la progression s'affiche en direct
+                print(ligne, end="", flush=True)
+                lignes.append(ligne)
+        finally:
+            minuteur.cancel()
+            code = proc.wait(timeout=30)
+        sortie = "".join(lignes)
+        if depasse["v"]:
+            return {"etape": nom, "code": -9, "duree_s": round(time.time() - t0, 1),
+                    "sortie": (sortie[-20000:] + "\nBUDGET DEPASSE (%.0f s)" % budget_s),
+                    "statut": "BUDGET"}
+        return {"etape": nom, "code": code, "duree_s": round(time.time() - t0, 1),
+                "sortie": sortie[-20000:], "statut": "OK" if code == 0 else "ECHEC"}
     except Exception as exc:  # noqa: BLE001 — une étape morte n'arrête pas les autres
+        try:
+            if proc is not None:
+                proc.kill()
+        except Exception:  # noqa: BLE001
+            pass
         return {"etape": nom, "code": -1, "duree_s": round(time.time() - t0, 1),
-                "sortie": str(exc)[:2000], "statut": "ERREUR"}
+                "sortie": ("".join(lignes)[-20000:] or str(exc)[:2000]), "statut": "ERREUR"}
+
+
+def _pytest_parallele() -> list[str]:
+    """Arguments xdist pour paralléliser la suite — SEULEMENT si `xdist` est installé et la
+    machine a plusieurs cœurs. Sinon liste vide = exécution SÉRIE (aucune régression possible).
+    `--dist loadfile` : chaque FICHIER de test reste sur un seul worker, l'état intra-fichier est
+    préservé. Coupe-circuit : TOUT_TESTER_PYTEST_SERIE=1 force la série."""
+    try:
+        import importlib.util
+        import os as _os
+        if _os.environ.get("TOUT_TESTER_PYTEST_SERIE", "").strip() in ("1", "true", "oui"):
+            return []
+        if importlib.util.find_spec("xdist") is None or (_os.cpu_count() or 1) <= 1:
+            return []
+        return ["-n", "auto", "--dist", "loadfile"]
+    except Exception:  # noqa: BLE001 — dans le doute, série (jamais un run cassé pour aller vite)
+        return []
 
 
 def _resume_pytest(sortie: str) -> str:
@@ -408,6 +491,16 @@ def main(argv: list[str] | None = None) -> int:
     tests_seuls = "--tests-seulement" in args
     securite_seule = "--securite-seulement" in args
     py = sys.executable
+    # PLAN DE PROGRESSION (22/07, « voir tout ce qui se passe et le temps restant ») : on liste
+    # les étapes qui VONT tourner selon les options, pour afficher « étape i/N · reste ~ETA ».
+    if securite_seule:
+        _planifier(["securite"])
+    elif tests_seuls:
+        _planifier(["securite", "consolidation", "tests", "invariants"])
+    else:
+        _plan = ["securite", "consolidation", "tests", "invariants", "cablage", "donnees",
+                 "backtests"] + ([] if rapide else ["recherche"]) + ["rapport_jour"]
+        _planifier(_plan)
     etapes: list[dict] = []
     try:
         etapes.append(_courir("securite", [py, "-m", "hl_observer", "safety-audit"],
@@ -422,8 +515,11 @@ def main(argv: list[str] | None = None) -> int:
         etapes.append(_courir("consolidation",
                               [py, "-m", "hl_observer.runtime.replay_recorder",
                                "--base", "runtime/replay"], BUDGETS["donnees"]))
-        r = _courir("tests", [py, "-m", "pytest", "-q", "--timeout=120", "tests"],
-                    BUDGETS["tests"])
+        # 22/07 — PLUS RAPIDE : la suite complète en PARALLÈLE (xdist) si dispo. `--dist loadfile`
+        # garde chaque fichier sur un worker (état intra-fichier préservé) -> pas de régression.
+        # Repli automatique en série si xdist absent ou 1 seul cœur (jamais un run cassé).
+        r = _courir("tests", [py, "-m", "pytest", "-q", "--timeout=120",
+                              *_pytest_parallele(), "tests"], BUDGETS["tests"])
         r["resume"] = _resume_pytest(r["sortie"])
         etapes.append(r)
         # INVARIANTS ECONOMIQUES (property-based, ~700 cas generes) : les LOIS qui protegent
