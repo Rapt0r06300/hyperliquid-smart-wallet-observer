@@ -28,6 +28,7 @@ from hl_observer.backtesting.ab_flag_replay import (
 from hl_observer.paper_trading.sl_tp import SLTPConfig
 from hl_observer.backtesting.boucle_objectif_replay import boucle_objectif
 from hl_observer.backtesting import robustesse_selection
+from hl_observer.backtesting.recherche_parallele import remplir_en_parallele
 import statistics as _stats
 
 # --- les barres de la porte, FIXÉES ICI (les déplacer se voit dans un diff) -------------
@@ -584,24 +585,31 @@ def chercher_toutes(root: str | Path, *, max_essais_par_strategie: int | None = 
     QUOI QU'IL ARRIVE. Chaque module est blindé (s'il explose, verdict ERREUR, les autres
     continuent) et borné par son budget. AUCUN plafond de population : on teste TOUT.
 
-    🔴 22/07 — SÉQUENTIEL, définitivement. Le pool `ProcessPoolExecutor` a été RETIRÉ : sur Windows
-    avec de grosses populations (556k candidats) il DEADLOCK (0 % CPU, workers non tuables, budget
-    jamais respecté — le blocage vu par Flo à 114 min sur budget 90). Le séquentiel streame sa
-    progression EN DIRECT, ne peut pas se bloquer, et donne un temps restant MESURÉ. Le paramètre
-    `parallele` est accepté mais ignoré (compat d'appel)."""
+    🔴 22/07 — SÉQUENTIEL PAR DÉFAUT (HUD en direct + ETA mesurée). Le `ProcessPoolExecutor` a été
+    RETIRÉ : il DEADLOCKAIT sur grosses populations (le blocage vu par Flo à 114 min sur budget 90).
+    Le séquentiel streame en direct et ne peut pas se bloquer. Le PARALLÉLISME est désormais OPT-IN
+    (`parallele=True` ou env `TOUT_TESTER_RECHERCHE_PARALLELE=1`) et passe par des SOUS-PROCESSUS
+    ISOLÉS (`recherche_parallele`, sortie en fichiers, tuables) — jamais le pool qui deadlockait."""
     resultats: dict[str, Any] = {}
-    total = len(STRATEGIES_MODULES) + 1                       # +1 pour cross_venue (progression run)
-    for i, strat in enumerate(STRATEGIES_MODULES, 1):
-        print("=== module %s (%d/%d) ===" % (strat, i, total), flush=True)
-        try:
-            resultats[strat] = chercher(root, strategie=strat, configs=grille_large(),
-                                        max_essais=max_essais_par_strategie,
-                                        budget_s=budget_s_par_module,
-                                        s_arreter_au_premier=False, raffiner=True)
-        except Exception as exc:  # noqa: BLE001 — un module qui explose ne tue plus la nuit
-            print("  !! module %s en ERREUR : %s" % (strat, str(exc)[:200]), flush=True)
-            resultats[strat] = {"statut": "ERREUR", "strategie": strat,
-                                "motif": str(exc)[:300], "essais": []}
+    import os as _os
+    veut_par = parallele or _os.environ.get(
+        "TOUT_TESTER_RECHERCHE_PARALLELE", "").strip().lower() in ("1", "true", "oui")
+    if veut_par:
+        remplir_en_parallele(root, budget_s_par_module, max_essais_par_strategie,
+                             STRATEGIES_MODULES, resultats)
+    else:
+        total = len(STRATEGIES_MODULES) + 1                   # +1 pour cross_venue (progression run)
+        for i, strat in enumerate(STRATEGIES_MODULES, 1):
+            print("=== module %s (%d/%d) ===" % (strat, i, total), flush=True)
+            try:
+                resultats[strat] = chercher(root, strategie=strat, configs=grille_large(),
+                                            max_essais=max_essais_par_strategie,
+                                            budget_s=budget_s_par_module,
+                                            s_arreter_au_premier=False, raffiner=True)
+            except Exception as exc:  # noqa: BLE001 — un module qui explose ne tue plus la nuit
+                print("  !! module %s en ERREUR : %s" % (strat, str(exc)[:200]), flush=True)
+                resultats[strat] = {"statut": "ERREUR", "strategie": strat,
+                                    "motif": str(exc)[:300], "essais": []}
     print("=== module cross_venue ===", flush=True)
     try:
         resultats["cross_venue"] = chercher_cross_venue(root, max_essais=max_essais_par_strategie)
