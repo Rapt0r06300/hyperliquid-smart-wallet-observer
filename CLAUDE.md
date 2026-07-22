@@ -133,3 +133,29 @@ En cas de doute entre « collecter plus » et « rester poli avec la source » :
 
 Rappel : `resultat-audit.md` est réécrit **après chaque contrôle** — il existe même si l'audit est
 interrompu (Ctrl-C, fermeture, crash).
+
+## 🏆 Addendum 2026-07-22 — ÉTAT D'ESPRIT GAGNANT + instruments en place
+
+**Le cap, non négociable : PnL paper POSITIF et ROI POSITIF.** On y croit, on pousse fort, on
+explore toutes les pistes, on ne se résigne jamais. « Tout est possible. » Flo a promis de l'argent
+à ses parents — l'objectif est sérieux et on le vise pour de vrai.
+
+**Mais le gagnant refuse le faux gain.** Un PnL maquillé, un edge d'illusion, un gain issu d'une
+baisse de sécurité — tout ça trahit l'objectif. La règle du gagnant est donc double et indivisible :
+**ambition maximale pour TROUVER l'edge** (collecte massive, univers large, nouveaux signaux, IA)
++ **honnêteté totale pour ne GARDER que ce qui survit** aux coûts réels (frais+spread+slippage+
+latence) ET bat l'alternative (cash/HLP), sur données vraies. La discipline (tests, no-real-trade,
+vérité des données, PBO anti-sur-ajustement) **n'est pas un frein : c'est le chemin** vers un PnL
+positif qui se répète. En cas de doute « beau chiffre vs vérité » → **la vérité, toujours.**
+
+**Instruments désormais disponibles (s'en servir, ne pas les réinventer) :**
+- `ops/diagnostic_pnl.py` — la cervelle « comprendre le PnL & trouver l'edge », écrite dans le RECAP.
+- `ops/loop_readiness.py` (score BOT-READY + autonomie N0→N2, réel hors échelle) · `tools/bot_ready.py`.
+- `backtesting/robustesse_selection.py` — PBO : la recherche extrême ne fabrique plus de faux gagnant.
+- `funding/arb_executable.py` (prix exécutable) · `tools/collecter_carnet.py` (carnet bid/ask, à
+  brancher dans la calibration arb) · `collection/collecte_fiable.py` (collecte fiable).
+- Les 4 leviers d'edge et leur verdict au 22/07 : voir `AGENTS.md` §Instruments et `docs/LOIS_MESUREES.md`.
+- TOUT-TESTER : ne plante jamais en silence, streame en direct + ETA, pytest & recherche en
+  parallèle, RECAP-COMPLET.md ultra riche (à analyser mot par mot), collecte auto-démarrée +
+  archivée (rien de supprimé). Détail : `docs/audit/TOUT-TESTER_50_AMELIORATIONS.md` et
+  `docs/audit/50_AMELIORATIONS_DATA.md`.

@@ -22,13 +22,41 @@ launcher principal ni montes dans l'UI Hyperliquid.
 > **Doc maître** (état, méthode, architecture, config, roadmap) : `docs/ETAT_ET_FEUILLE_DE_ROUTE.md`.
 > Règles agent : `CLAUDE.md` et `AGENTS.md`. Objectif condensé : `OBJECTIF.md`.
 
+## 🏆 Objectif & état d'esprit : GAGNANT
+
+**Le but est un PnL paper POSITIF et un ROI POSITIF, réels et tenus.** On y croit, on pousse fort,
+on explore toutes les pistes, on ne se résigne jamais. « Tout est possible. »
+
+**Tous les droits sont donnés à l'agent — SAUF une seule barrière : aucune exécution réelle.**
+Scraping public agressif, collecte 24/7, univers large, backtests, IA, toute analyse : autorisé,
+encouragé. La seule ligne rouge (`no-real-trade`) n'est pas une contrainte contre l'objectif —
+c'est ce qui le protège : elle garantit qu'aucun chiffre n'est un faux et qu'aucun argent réel
+n'est en jeu. **Un vrai gagnant refuse de se mentir :** on ne garde un edge que s'il survit aux
+coûts réels et bat l'alternative (cash/HLP), mesuré sur données vraies. La discipline EST le chemin
+vers un PnL positif qui se répète.
+
 ---
 
-## Où en est le bot (21/07/2026)
+## Où en est le bot (22/07/2026)
 
 **Un moteur en production paper (Carry), un en guet (Arbitrage), un verrouillé (Copy), une
 mesure en cours (Cross-venue funding), un suspendu (Liquidations).** Chacun avec son verdict
 mesuré — un moteur qui n'ouvre pas le DIT et explique pourquoi.
+
+> **Mesures fraîches du 22/07 (données réelles, pas d'estimation) :**
+> - **Carry** : sur **206 coins** et 71,7 h, le funding bat le seuil HLP **0,00 %** du temps → le
+>   carry au plancher est **dominé** ; ce n'est pas un problème d'univers, il n'y a pas de demande
+>   à capter. Élargir l'univers (levier 1) était nécessaire mais ne suffit pas.
+> - **Arbitrage** : le +0,54 $ était mesuré au **mid** ; au **prix exécutable** (modèle
+>   conservateur) il perd **−2,7 $**, et **35 %** des signaux étaient des appariements aberrants
+>   (écartés). Verdict : illusion d'exécution. Le carnet réel (bid/ask) est désormais collecté
+>   (`tools/collecter_carnet.py`, auto-démarré) pour trancher pour de vrai.
+> - **Liquidations** : le ciblage vise désormais les comptes à **fort levier** (le vrai flux
+>   forcé) ; verdict à l'accumulation (~50 événements distincts requis).
+>
+> Nouveaux instruments de décision : **BOT-READY** (score de maturité + autonomie), **PBO**
+> (anti-sur-ajustement de la recherche), **cervelle diagnostic** (écrite dans le RECAP). Détail :
+> `AGENTS.md` §Instruments.
 
 > Compté au ledger (21/07) : **Carry 54 OPEN / 42 CLOSE**, **Arbitrage 1 OPEN**, les trois
 > autres n'ont jamais ouvert. Vérité complète : `docs/research/PROJECT_GROUND_TRUTH_2026.md`.

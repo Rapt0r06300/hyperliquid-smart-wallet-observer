@@ -1,10 +1,31 @@
 # AGENTS.md — consignes pour tout agent/IA travaillant sur HyperSmart Observer
 
-> **Dernière mise à jour : 2026-07-21.** Ce fichier avait 13 jours de retard (il pointait
-> encore le « testnet executor » comme cible produit alors que le chantier réel est le carry
-> paper). Un AGENTS.md périmé est pire que pas d'AGENTS.md : il oriente vers la mauvaise cible
-> avec autorité. **Si tu le lis et qu'il contredit `docs/ETAT_ET_FEUILLE_DE_ROUTE.md`, c'est
-> l'état qui gagne — et tu mets ce fichier à jour dans la foulée.**
+> **Dernière mise à jour : 2026-07-22.** Un AGENTS.md périmé est pire que pas d'AGENTS.md : il
+> oriente vers la mauvaise cible avec autorité. **Si tu le lis et qu'il contredit
+> `docs/ETAT_ET_FEUILLE_DE_ROUTE.md`, c'est l'état qui gagne — et tu mets ce fichier à jour dans
+> la foulée.**
+
+## 🏆 ÉTAT D'ESPRIT : GAGNANT (le cap, non négociable)
+
+**L'objectif est un PnL paper POSITIF et un ROI POSITIF. Point.** On y croit, on pousse fort, on
+explore TOUTES les pistes, on ne se contente jamais de « ça ne marche pas » — on cherche la piste
+suivante. Flo a promis de l'argent à ses parents : cet objectif est sérieux, et on le vise pour
+de vrai.
+
+**Ce qui sépare un vrai gagnant d'un joueur qui se ment : le gagnant refuse le faux gain.** Un PnL
+maquillé, un edge d'illusion (le +0,54 $ d'arbitrage au mid qui perd −2,7 $ à l'exécution), un
+gain sorti d'une baisse de sécurité — tout ça trahirait l'objectif au lieu de le servir. Donc la
+règle du gagnant est double et indivisible :
+
+1. **Ambition maximale** : tout est permis pour TROUVER l'edge (collecte massive, univers large,
+   nouveaux signaux, backtests, IA). Aucune timidité. « Tout est possible. »
+2. **Honnêteté totale** : on ne GARDE un edge que s'il survit aux coûts réels (frais + spread +
+   slippage + latence) ET bat l'alternative (cash/HLP), mesuré sur données vraies. Un chiffre ou
+   rien. La discipline (tests, no-real-trade, vérité des données) **n'est pas un frein à
+   l'objectif — elle EST le chemin** vers un PnL positif qui tient dans la durée.
+
+En cas de doute entre « annoncer un beau chiffre » et « dire la vérité » : **la vérité**, toujours.
+Un PnL positif honnête vaut infiniment plus qu'un faux, parce que lui seul se répète.
 
 ## Règle n°1 (absolue, non négociable)
 
@@ -111,6 +132,55 @@ Une feature est DONE seulement si : codée, **testée**, documentée, **câblée
 Moins de trades, beaucoup plus propres. Filtrer les mauvais signaux ; ne garder que ceux à
 **edge net positif après** frais + spread + slippage + latence + dégradation de copie. Juger
 au **profit factor**, pas au winrate. **Jamais de promesse de PnL.**
+
+## Instruments disponibles (2026-07-22 — s'en servir, ne PAS les réinventer)
+
+Le bot a désormais tout pour CHERCHER l'edge honnêtement. Avant d'ajouter, vérifie que ça
+n'existe pas déjà :
+
+**Comprendre / juger le PnL et l'edge**
+- `ops/diagnostic_pnl.py` — LA cervelle : « où va l'argent · l'edge existe-t-il · prochaine
+  action ». Écrite dans `RECAP-COMPLET.md` à chaque run — **à analyser mot par mot.**
+- `ops/loop_readiness.py` — score **BOT-READY** (0-100) + échelle d'autonomie N0 observe → N1
+  paper → N2 testnet (le RÉEL est hors échelle, plafond codé en dur ; no-real-trade = gate dur).
+  Commande : `python tools/bot_ready.py`.
+- `backtesting/robustesse_selection.py` — **PBO** (Probability of Backtest Overfitting, CSCV,
+  López de Prado) + seuil de bruit du multiple-testing. La recherche à ~1400 essais ne peut plus
+  fabriquer un faux gagnant : un PBO > 50 % **interdit** tout « FAIS ÇA ».
+- `docs/LOIS_MESUREES.md` — ce qui est déjà tranché (ne pas re-litiger sans donnée neuve).
+
+**Les 4 leviers d'edge (état au 22/07)**
+- **L1** univers complet 38→**206 coins** (dispersion cross-venue) — fait, quasi gratuit.
+- **L2** funding au-dessus du plancher — MESURÉ : **0,00 %** bat HLP même sur 206 coins → le carry
+  au plancher est dominé ; ce n'est pas un problème d'univers, il n'y a pas de demande à capter.
+- **L3** arbitrage au **prix EXÉCUTABLE** (`funding/arb_executable.py`) — le +0,54 $ au mid était
+  une **illusion** (−2,7 $ exécutable ; 35 % des signaux = appariements aberrants, désormais
+  écartés). Il manquait le carnet réel : `tools/collecter_carnet.py` le collecte (auto-démarré) —
+  **à BRANCHER dans la calibration arb** quand il aura accumulé quelques heures.
+- **L4** liquidations (flux forcé — le liquidé est FORCÉ, il ne choisit pas) : ciblage **fort
+  levier** + watchlist accumulée. Verdict à l'accumulation (~50 événements DISTINCTS requis ;
+  ⚠️ les « grappes » brutes ≠ événements distincts).
+
+**Collecte fiable & maximale**
+- `collection/collecte_fiable.py` — socle réutilisable : dedup borné, écriture atomique (fsync),
+  backoff+jitter, limiteur de débit, provenance, porte de qualité. « Plus de données SANS ban ni
+  poubelle. »
+- Collecteurs **auto-démarrés avec le bot** (LANCER_HYPERSMART + REANIMER-COLLECTEURS + REGISTRE
+  du superviseur) : carry-feeder, marks, liq, venues, **carnet**, copy-whitelist, rapport. Les
+  **trois listes bougent ENSEMBLE** (canari `test_le_REGISTRE_correspond_au_LANCEUR`).
+- Rétention : le cap des shards replay **ARCHIVE** l'overflow (`_archive/`), ne le supprime plus ;
+  `merge_replay(include_archive=True)` le fait remonter dans `_merged` que TOUT-TESTER mange.
+  **Rien d'important n'est perdu à la fermeture.**
+
+**TOUT-TESTER — le fichier qui mène à l'objectif**
+- Ne plante **jamais** en silence (filet Python `except BaseException`, timeout dur via Timer,
+  Ctrl-C toujours en pause). Le `.cmd` reste minimal (il a planté 2× quand il portait de la logique).
+- **Voir tout** : sortie streamée en direct + progression/ETA (« étape i/N · écoulé · reste ~mm:ss »).
+- **Plus rapide** : suite pytest en parallèle (xdist `--dist loadfile`, repli série sûr via
+  `TOUT_TESTER_PYTEST_SERIE=1`) ; recherche des 3 modules en parallèle (résultats identiques) ;
+  `pip install` sauté si déjà présent.
+- Écrit un `RECAP-COMPLET.md` **ultra riche** (étapes, PnL par stratégie/motif, données
+  disponibles, santé, BOT-READY, cervelle edge, prochaine action) — le fichier à m'envoyer.
 
 ## Où trouver le reste
 
