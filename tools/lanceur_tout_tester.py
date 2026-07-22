@@ -465,6 +465,18 @@ def lancer(argv: list[str] | None = None, racine: Path = RACINE) -> int:
             dire(_l)
     except Exception as _exc:  # noqa: BLE001 — jamais fatal
         dire("    (BOT-READY indisponible : %s)" % str(_exc)[:80])
+    # 22/07 — LA CERVELLE : « comprendre le PnL & trouver l'edge ». Elle transforme les chiffres
+    # du RECAP en une synthese actionnable (ou va l'argent, l'edge existe-t-il, prochaine action).
+    # Try/except : la comprehension est un bonus d'affichage, jamais un point de panne de l'audit.
+    try:
+        if str(racine / "src") not in sys.path:
+            sys.path.insert(0, str(racine / "src"))
+        from hl_observer.ops import diagnostic_pnl as _DPNL
+        dire("")
+        for _l in _DPNL.construire(racine).splitlines():
+            dire(_l)
+    except Exception as _exc:  # noqa: BLE001 — jamais fatal
+        dire("    (diagnostic PnL indisponible : %s)" % str(_exc)[:80])
     n = purger_logs(racine)                                                  # 24
     if n:
         dire("    %d vieux log(s) purge(s) (on garde les %d derniers)" % (n, LOGS_CONSERVES))
