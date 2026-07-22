@@ -38,8 +38,10 @@ BUDGETS = {"securite": 300, "tests": 3600, "invariants": 900, "cablage": 900, "d
 
 #: durées TYPIQUES (s) observées sur un vrai RECAP — pour l'ETA. C'est une ESTIMATION affichée
 #: comme telle, jamais une promesse. Sert uniquement à donner « le temps restant » à Flo.
+#: 22/07 — recherche recalée à 2700 s (45 min) : une vraie passe TOUT-TESTER a montré ~45:39
+#: (grille large ~1100 configs × 3 modules). L'estimé colle mieux, le dépassement est rare.
 DUREE_TYPIQUE_S = {"securite": 21, "consolidation": 12, "tests": 300, "invariants": 3,
-                   "cablage": 2, "donnees": 6, "backtests": 900, "recherche": 1800,
+                   "cablage": 2, "donnees": 6, "backtests": 900, "recherche": 2700,
                    "rapport_jour": 15}
 #: état de progression, rempli par `_planifier()` au début de `main`.
 _PLAN: dict[str, Any] = {"debut": 0.0, "restant": {}, "total": 0, "i": 0}
@@ -82,14 +84,21 @@ def _largeur() -> int:
 
 
 def _reste_run_s() -> float:
-    """Temps restant ESTIMÉ pour TOUT le run = étapes pas encore démarrées + reste de l'étape
-    courante. Décroît chaque seconde ; ne se fige pas à 0 tant qu'il reste des étapes après."""
+    """Temps restant pour TOUT le run = étapes pas encore démarrées + reste de l'étape courante.
+    22/07 (Flo a vu « reste run ~0:15 » pendant une recherche encore en cours) : quand l'étape
+    DÉPASSE son estimé, sa durée est inconnue MAIS bornée par son budget. On renvoie alors le
+    plafond honnête `budget − écoulé` (et non 0), pour ne jamais afficher un « presque fini »
+    mensonger. Décroît chaque seconde ; ne se fige pas à 0 tant qu'une étape tourne encore."""
     try:
         apres = float(sum(_PLAN.get("restant", {}).values()))
     except Exception:  # noqa: BLE001
         apres = 0.0
     ecoule = time.time() - (_HUD["t_etape"] or time.time())
-    return apres + max(0.0, float(_HUD["est"]) - ecoule)
+    est = float(_HUD["est"])
+    if ecoule <= est:
+        return apres + (est - ecoule)                     # dans les temps : estimé qui décroît
+    budget = float(_HUD["budget"]) or est                 # dépassement : plafond = budget restant
+    return apres + max(0.0, budget - ecoule)
 
 
 def _hud_texte(largeur: int) -> str:
@@ -100,10 +109,12 @@ def _hud_texte(largeur: int) -> str:
     w = 12
     barre = "#" * int(round(frac * w)) + "." * (w - int(round(frac * w)))
     spin = _SPINNER[_HUD["tick"] % len(_SPINNER)]
-    deborde = " (dépasse l'estimé +%s)" % _mmss(ecoule - est) if ecoule > est + 5 else ""
-    base = ("%s étape %d/%d %-12s [%s] %3.0f%% · écoulé %s/~%s · budget %s · reste run ~%s%s"
+    over = ecoule > est
+    signe = "≤" if over else "~"                          # dépassement : plafond, pas estimé
+    note = " (étape +%s au-delà de l'estimé, ≤ budget)" % _mmss(ecoule - est) if ecoule > est + 5 else ""
+    base = ("%s étape %d/%d %-12s [%s] %3.0f%% · écoulé %s/~%s · budget %s · reste run %s %s%s"
             % (spin, _HUD["i"], _HUD["total"], (_HUD["nom"] or "")[:12], barre, 100 * frac,
-               _mmss(ecoule), _mmss(est), _mmss(_HUD["budget"]), _mmss(_reste_run_s()), deborde))
+               _mmss(ecoule), _mmss(est), _mmss(_HUD["budget"]), signe, _mmss(_reste_run_s()), note))
     tail = (_HUD["derniere"] or "").strip()
     if tail:
         libre = largeur - len(base) - 4

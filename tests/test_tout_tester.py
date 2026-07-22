@@ -219,12 +219,14 @@ def test_hud_le_spinner_change_a_chaque_tick():
 
 
 def test_hud_ne_se_fige_pas_a_zero_quand_l_etape_deborde():
-    """Le bug d'avant : le reste tombait à 0 et restait figé. Ici, étape en dépassement ->
-    on l'ANNONCE et le reste run reste celui des étapes suivantes (jamais un 0:00 mort)."""
-    _armer_hud(nom="tests", est=10.0, ecoule=40.0, restant={"recherche": 1800, "sante": 120})
-    txt = T._hud_texte(160)
-    assert "dépasse l'estimé" in txt
-    assert T._reste_run_s() == pytest.approx(1920.0, abs=2.0)   # 1800 + 120, pas 0
+    """Le bug repéré par Flo (« reste run ~0:15 » pendant une recherche ENCORE active) : quand
+    l'étape déborde son estimé, on ne réduit PLUS le reste aux seules étapes suivantes — on le
+    BORNE par le budget (plafond honnête), avec le signe ≤, et on l'annonce."""
+    _armer_hud(nom="tests", est=10.0, ecoule=40.0, budget=60.0, restant={"rapport_jour": 15})
+    txt = T._hud_texte(180)
+    assert "au-delà de l'estimé" in txt and "≤" in txt
+    # plafond = étapes suivantes (15) + budget restant de l'étape (60-40=20) = 35 ; jamais 0 ni 15 seul
+    assert T._reste_run_s() == pytest.approx(35.0, abs=2.0) and T._reste_run_s() > 15.0
 
 
 def test_hud_texte_est_TRONQUE_a_la_largeur_pour_ne_pas_casser_le_retour_chariot():
