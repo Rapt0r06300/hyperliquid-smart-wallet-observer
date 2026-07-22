@@ -61,8 +61,12 @@ def test_le_funding_HL_reste_horaire(monkeypatch):
 
 def test_une_venue_MUETTE_n_ecrit_RIEN(tmp_path, monkeypatch):
     """Si Binance ne répond pas, on n'écrit pas une dispersion contre un zéro imaginaire."""
-    monkeypatch.setattr(COLL, "funding_hyperliquid", lambda: {"BTC": 0.125})
-    monkeypatch.setattr(COLL, "funding_binance", lambda: {})
+    # 🔴 22/07 — `une_passe` appelle `donnees_*` (funding + prix), pas les anciens `funding_*`.
+    # Patcher `funding_hyperliquid`/`funding_binance` ici NE FAISAIT RIEN : la passe tapait la
+    # vraie API réseau et le test cassait. On patche donc les fonctions réellement appelées,
+    # exactement comme les tests voisins. Binance muette = `donnees_binance` rend {}.
+    monkeypatch.setattr(COLL, "donnees_hyperliquid", lambda: {"BTC": {"f": 0.125, "px": None}})
+    monkeypatch.setattr(COLL, "donnees_binance", lambda: {})
     assert COLL.une_passe(tmp_path, ["BTC"]) == (0, 0)
     assert not (tmp_path / COLL.SORTIE).exists()
 
