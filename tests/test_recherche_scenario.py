@@ -322,3 +322,33 @@ def test_le_crible_est_borne_et_bavard():
     assert "CAP_CRIBLE_CANDIDATS = 12_000" in src
     assert "crible %d/%d" in src, "progression toutes les 25 configs — plus jamais le silence"
     assert "budget_s_par_module: float | None = 7_200.0" in src, "2 h max par module"
+
+
+# ---- 22/07 : le refuge MAKER de l'arbitrage est BRANCHÉ dans la recherche (plus un test qui dort)
+
+def test_le_refuge_maker_de_l_arbitrage_est_MESURE_et_ne_FABRIQUE_rien():
+    """`arb_maker_study` n'est plus import-inatteignable : la recherche cross-venue le branche,
+    sa réponse voyage AVEC le rapport. Une série de dispersion qui converge -> le refuge est
+    mesuré ; jamais un ordre. Une série vide -> rien d'inventé."""
+    from hl_observer.backtesting.recherche_scenario import etude_maker_refuge
+    serie = [{"coin": "BTC", "ts_ms": t * 1000.0, "dispersion_bps_h": d}
+             for t, d in ((0, 25.0), (60, 25.5), (600, 3.0), (1800, 2.0))]
+    r = etude_maker_refuge(serie, seuil_bps=19.0)
+    assert r["signaux"] >= 1
+    assert r["real_execution"] is False           # MESURE, jamais un ordre réel
+    assert isinstance(r.get("verdict"), str) and r["verdict"]
+
+    vide = etude_maker_refuge([], seuil_bps=19.0)
+    assert vide["signaux"] == 0 and vide["real_execution"] is False
+
+
+def test_chercher_cross_venue_ATTACHE_l_etude_maker(tmp_path):
+    """Le branchement est PROUVÉ bout en bout : sur une série assez longue, `chercher_cross_venue`
+    ATTACHE `etude_maker_refuge` — le module est APPELÉ, pas juste importé (mention ≠ porte)."""
+    from hl_observer.backtesting.recherche_scenario import chercher_cross_venue
+    # >= 500 observations pour dépasser la garde INSUFFISANT, avec quelques dislocations réelles.
+    serie = [{"coin": "BTC", "ts_ms": float(i * 60_000),
+              "dispersion_bps_h": (25.0 if 100 <= i <= 110 else 0.05)} for i in range(600)]
+    r = chercher_cross_venue(tmp_path, series=serie, max_essais=2)
+    assert "etude_maker_refuge" in r, "le refuge maker doit voyager avec le rapport"
+    assert r["etude_maker_refuge"]["real_execution"] is False

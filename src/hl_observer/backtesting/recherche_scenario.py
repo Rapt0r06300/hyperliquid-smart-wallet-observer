@@ -358,6 +358,31 @@ def evaluer_episodes_cross_venue(series: list[dict], config: dict[str, Any], *,
     return {"net_total_usd": round(sum(nets), 6), "trades": len(nets), "profit_factor": pf}
 
 
+def etude_maker_refuge(series: list[dict], *, seuil_bps: float = 19.0) -> dict[str, Any]:
+    """Le refuge MAKER de l'arbitrage, MESURÉ sur la même série de dispersion (étape 2/3, 22/07).
+
+    La loi `arb_dislocation_cout_all_in` gardait une porte de sortie : « à 9 bps (tout maker)
+    les mêmes trades survivent ». `arb_maker_study` la mesure — sélection adverse d'une entrée
+    passive comprise. On la BRANCHE ici, dans la recherche cross-venue, pour que sa réponse
+    voyage AVEC le rapport plutôt que de dormir dans un test. Rien d'inventé : un écart absent
+    ou illisible n'est jamais un fill. MESURE only, aucun réseau, aucun ordre.
+    """
+    from hl_observer.funding.arb_maker_study import etudier as _etudier_maker
+    par_coin: dict[str, list[tuple[float, float]]] = {}
+    for r in series or []:
+        if not isinstance(r, dict):
+            continue
+        c = str(r.get("coin") or "")
+        try:
+            t = float(r.get("ts_ms") or (r.get("ts") or 0) * 1000.0) / 1000.0
+        except (TypeError, ValueError):
+            continue
+        d = r.get("dispersion_bps_h")
+        if c and t > 0 and isinstance(d, (int, float)):
+            par_coin.setdefault(c, []).append((t, float(d)))
+    return _etudier_maker(par_coin, seuil_bps=seuil_bps)
+
+
 def chercher_cross_venue(root: str | Path, *, series: list[dict] | None = None,
                          max_essais: int | None = None) -> dict[str, Any]:
     """La recherche cross-venue — MÊMES portes (deux moitiés temporelles + stress coûts ×1,5
@@ -404,6 +429,11 @@ def chercher_cross_venue(root: str | Path, *, series: list[dict] | None = None,
     r["strategie"] = "cross_venue"
     r["honnetete"] = ("exploratoire — le verdict officiel reste celui du protocole 72 h "
                       "(barres pre-ecrites), puis survie hors echantillon exigee")
+    # 22/07 — le refuge MAKER voyage AVEC le rapport (branché, plus dans un test qui dort).
+    try:
+        r["etude_maker_refuge"] = etude_maker_refuge(series)
+    except Exception:  # noqa: BLE001 — une mesure absente ne casse jamais la recherche
+        r["etude_maker_refuge"] = {"signaux": 0, "verdict": "non mesurable ce tour"}
     return r
 
 
