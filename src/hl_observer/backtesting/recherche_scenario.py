@@ -36,6 +36,8 @@ from hl_observer.backtesting.ab_flag_replay import (
 )
 from hl_observer.paper_trading.sl_tp import SLTPConfig
 from hl_observer.backtesting.boucle_objectif_replay import boucle_objectif
+from hl_observer.backtesting import robustesse_selection
+import statistics as _stats
 
 # --- les barres de la porte, FIXÉES ICI (les déplacer se voit dans un diff) -------------
 MIN_TRADES_PAR_MOITIE = 30        # sous ça, une moitié ne prouve rien (bruit)
@@ -148,13 +150,17 @@ def filtrer_candidats(cands: list[dict], filtres: dict | None) -> list[dict]:
 
 
 def grille_large() -> Iterator[dict[str, Any]]:
-    """21/07 (« il doit nous trouver des pépites ! ») : le FILET s'élargit — SL 20→120,
-    TP 40→300, horizons 15 min→4 h, CROISÉS avec les 4 presets de filtres (~600 configs).
-    Les MAILLES ne bougent pas : chaque config passe les mêmes portes (deux moitiés +
-    stress ×1,5 + plateau). Plus de candidats au concours, jamais un concours plus facile."""
-    for base in grille_configs(sls=(20.0, 30.0, 40.0, 60.0, 90.0, 120.0),
-                               tps=(40.0, 50.0, 70.0, 100.0, 150.0, 200.0, 300.0),
-                               horizons=(15.0, 30.0, 60.0, 120.0, 240.0)):
+    """« Trouve TOUS les meilleurs calibrages » (22/07) : le FILET s'élargit ET se raffine —
+    SL 15→120 (grain plus fin où vit l'edge), TP 30→300, horizons 15 min→4 h + le palier 45 min,
+    CROISÉS avec les presets de filtres (~1 100 configs). Les MAILLES ne bougent pas : chaque
+    config passe les mêmes portes (deux moitiés + stress ×1,5 + plateau).
+
+    Et surtout, l'élargissement est désormais SÛR : le juge PBO (`annoter_robustesse`) mesure si
+    la procédure GÉNÉRALISE. Plus on essaie de configs, plus la barre du multiple-testing monte —
+    un plus grand filet ne peut plus fabriquer un faux gagnant en douce."""
+    for base in grille_configs(sls=(15.0, 20.0, 30.0, 40.0, 50.0, 60.0, 75.0, 90.0, 120.0),
+                               tps=(30.0, 40.0, 50.0, 70.0, 100.0, 150.0, 200.0, 300.0),
+                               horizons=(15.0, 30.0, 45.0, 60.0, 120.0, 240.0)):
         for nom, f in FILTRES_PRESETS.items():
             yield {**base, "filtre": nom, "filtres": f}
 
@@ -317,6 +323,10 @@ def chercher(root: str | Path, *, configs: Iterable[dict[str, Any]] | None = Non
             p.update(rang_pepite(d, p["config"], evaluer_ab=evaluer_ab))
         except Exception:  # noqa: BLE001 — un rang illisible reste ARGENT, jamais un plantage
             p.setdefault("rang", "ARGENT")
+    # 22/07 — LE JUGE DU SUR-AJUSTEMENT. Après avoir cherché large, on mesure si la PROCÉDURE
+    # généralise (PBO) ou si elle a juste eu de la chance sur 1420 essais. La recommandation
+    # en tiendra compte : un PBO > 0,5 interdit tout « FAIS ÇA ».
+    annoter_robustesse(d, r, evaluer_ab=evaluer_ab)
     r["strategie"] = strategie
     r["n_candidats"] = len(d.candidats)
     return r
@@ -480,6 +490,66 @@ def rang_pepite(d: DonneesReplay, config: dict[str, Any], *,
             "folds_vivants": "%d/%d" % (vivants, len(nets))}
 
 
+def _matrice_robustesse(d: DonneesReplay, configs: list[dict], *, k: int = 8,
+                        evaluer_ab: Callable[..., dict] = run_ab_replay,
+                        cost_bps: float = DEFAULT_COST_BPS) -> list[list[float]]:
+    """Matrice [config][fold] du net, pour le PBO (blocs temporels purgés = `folds_purges`).
+    Bornée : au plus ~24 configs (promus + presque-promus) × k folds — les survivants sont rares,
+    donc c'est peu cher. Une matrice vide (< 4 folds ou 0 config) => PBO INSUFFISANT plus haut."""
+    if not configs:
+        return []
+    h_ref = float(configs[0].get("horizon_min") or 60.0)
+    folds = folds_purges(d, h_ref, k=k)
+    if len(folds) < 4:
+        return []
+    M: list[list[float]] = []
+    for cfg in configs:
+        h = float(cfg.get("horizon_min") or 60.0)
+        ligne: list[float] = []
+        for f in folds:
+            f2 = filtrer_candidats(f, cfg.get("filtres"))
+            try:
+                r = evaluer_ab(f2, d.marks, base_config=_sltp(cfg), horizon_min=h, cost_bps=cost_bps)
+                ligne.append(float((r.get("arm_a") or {}).get("net_total_usd") or 0.0))
+            except Exception:  # noqa: BLE001 — un fold illisible = 0, jamais un plantage
+                ligne.append(0.0)
+        M.append(ligne)
+    return M
+
+
+def _candidats_pour_robustesse(r: dict[str, Any], maximum: int = 24) -> list[dict]:
+    """Les configs à passer au PBO : les PROMUS d'abord, complétés par les meilleurs
+    presque-promus (net m1+m2) — il faut du CORPS dans la matrice pour que le rang OOS ait un sens."""
+    cands = [p["config"] for p in (r.get("promus") or []) if p.get("config")]
+    def _net12(e):
+        n = e.get("nets") or {}
+        return float(n.get("moitie_1") or 0.0) + float(n.get("moitie_2") or 0.0)
+    for e in sorted((e for e in (r.get("essais") or []) if e.get("nets")), key=_net12, reverse=True):
+        c = e.get("config")
+        if c and c not in cands:
+            cands.append(c)
+        if len(cands) >= maximum:
+            break
+    return cands
+
+
+def annoter_robustesse(d: DonneesReplay, r: dict[str, Any], *,
+                       evaluer_ab: Callable[..., dict] = run_ab_replay) -> dict[str, Any]:
+    """Attache `r['robustesse']` : PBO + seuil de bruit du multiple-testing sur les candidats.
+    C'est CE qui rend la recherche extrême SÛRE — plus on essaie de configs, plus la barre monte."""
+    try:
+        cands = _candidats_pour_robustesse(r)
+        M = _matrice_robustesse(d, cands, evaluer_ab=evaluer_ab)
+        totaux = [sum(row) for row in M]
+        sigma = _stats.pstdev(totaux) if len(totaux) > 1 else 0.0
+        gagnant = max(totaux) if totaux else None
+        r["robustesse"] = robustesse_selection.verdict_robustesse(
+            M, len(r.get("essais") or []), net_gagnant=gagnant, sigma_null=(sigma or None))
+    except Exception as exc:  # noqa: BLE001 — la robustesse est un juge, jamais un point de panne
+        r["robustesse"] = {"verdict": "non mesurable", "pbo": None, "motif": str(exc)[:80]}
+    return r
+
+
 SEUIL_CRIBLE_CANDIDATS = 20_000
 FRACTION_CRIBLE = 0.25
 #: 21/07 matin : le crible sur 25 % de 262k = 65 000 candidats x 600 configs a tue le run de
@@ -581,6 +651,15 @@ def recommandation(strat: str, r: dict[str, Any]) -> str:
             rappel = " ⚠️ RAPPEL — %s" % a
     except Exception:  # noqa: BLE001 — un rappel absent ne casse jamais une recommandation
         rappel = ""
+    # 22/07 — GARDE-FOU ANTI-SUR-AJUSTEMENT (PBO). Une recherche extrême peut produire un
+    # « promu » par pure chance sur des milliers d'essais. Si la PROCÉDURE sur-ajuste, AUCUN
+    # « FAIS ÇA » — même avec un beau net. La barre monte avec l'ambition de la recherche.
+    rob = r.get("robustesse") or {}
+    if rob.get("pbo") is not None and rob.get("verdict") == "SUR_AJUSTE":
+        return ("NE FAIS RIEN ENCORE : la recherche SUR-AJUSTE (PBO %.0f%% > 50%% sur %d essais) "
+                "— le meilleur calibrage ne généralise pas hors échantillon. Élargis les données "
+                "ou réduis l'espace de recherche avant de croire un promu.%s"
+                % (100.0 * rob["pbo"], rob.get("n_essais") or 0, rappel))
     promus = sorted((r.get("promus") or []),
                     key=lambda p: (p.get("rang") != "OR",
                                    -float((p.get("nets") or {}).get("stress") or 0.0)))

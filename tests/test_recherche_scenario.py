@@ -342,6 +342,28 @@ def test_le_refuge_maker_de_l_arbitrage_est_MESURE_et_ne_FABRIQUE_rien():
     assert vide["signaux"] == 0 and vide["real_execution"] is False
 
 
+def test_la_recommandation_REFUSE_de_promouvoir_si_la_recherche_SUR_AJUSTE():
+    """🔴 22/07 — extreme ET robuste. Un promu au PBO > 50% ne generalise pas : la recommandation
+    doit dire NE FAIS RIEN, jamais FAIS CA. Sans sur-ajustement, le meme promu repasse en FAIS CA."""
+    from hl_observer.backtesting.recherche_scenario import recommandation
+    r = {"promus": [{"config": {"sl": 30}, "rang": "OR", "nets": {"stress": 5.0}}],
+         "robustesse": {"pbo": 0.83, "verdict": "SUR_AJUSTE", "n_essais": 1420}}
+    msg = recommandation("carry", r)
+    assert "NE FAIS RIEN" in msg and "SUR-AJUSTE" in msg
+    r["robustesse"] = {"pbo": 0.10, "verdict": "ROBUSTE", "n_essais": 1420}
+    assert "FAIS ÇA" in recommandation("carry", r)
+
+
+def test_annoter_robustesse_attache_un_verdict_sans_jamais_planter(tmp_path):
+    """Sur peu de donnees, la matrice est maigre -> verdict INSUFFISANT/non mesurable, JAMAIS
+    une exception. Le juge de robustesse n'est pas un point de panne."""
+    from hl_observer.backtesting.recherche_scenario import annoter_robustesse
+    r = {"essais": [], "promus": []}
+    out = annoter_robustesse(DONNEES, r)
+    assert "robustesse" in out and out["robustesse"].get("pbo") in (None,) or isinstance(
+        out["robustesse"].get("pbo"), float)
+
+
 def test_chercher_cross_venue_ATTACHE_l_etude_maker(tmp_path):
     """Le branchement est PROUVÉ bout en bout : sur une série assez longue, `chercher_cross_venue`
     ATTACHE `etude_maker_refuge` — le module est APPELÉ, pas juste importé (mention ≠ porte)."""
