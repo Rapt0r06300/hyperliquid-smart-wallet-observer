@@ -30,6 +30,7 @@ from hl_observer.backtesting.boucle_objectif_replay import boucle_objectif
 from hl_observer.backtesting import robustesse_selection
 from hl_observer.backtesting.recherche_parallele import remplir_en_parallele
 from hl_observer.backtesting.recherche_carry import chercher_carry
+from hl_observer.backtesting.recherche_arbitrage import chercher_arbitrage
 import statistics as _stats
 
 # --- les barres de la porte, FIXÉES ICI (les déplacer se voit dans un diff) -------------
@@ -581,11 +582,13 @@ def _cribler_configs(d: DonneesReplay, configs: list[dict], *,
 
 def chercher_module(root: str | Path, strat: str, *, budget_s: float | None = None,
                     max_essais: int | None = None) -> dict[str, Any]:
-    """AIGUILLAGE : chaque module vers SA vraie grille. 22/07 — le carry n'est PAS directionnel,
-    il a sa propre grille (funding × durée, `chercher_carry`) ; le SL/TP est l'outil de COPY. Copy
-    (et fallback) passent par `chercher` (grille SL/TP + filtres copy)."""
+    """AIGUILLAGE : chaque module vers SA vraie grille (22/07). Carry → funding×durée
+    (`chercher_carry`) ; arbitrage → fade au coût exécutable (`chercher_arbitrage`) ; le SL/TP +
+    filtres copy (`chercher`) est l'outil de COPY seul."""
     if strat == "carry":
         return chercher_carry(root, budget_s=budget_s)
+    if strat == "arbitrage":
+        return chercher_arbitrage(root, budget_s=budget_s)
     return chercher(root, strategie=strat, configs=grille_large(), max_essais=max_essais,
                     budget_s=budget_s, s_arreter_au_premier=False, raffiner=True)
 
