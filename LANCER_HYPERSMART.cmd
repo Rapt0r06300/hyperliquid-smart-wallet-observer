@@ -419,8 +419,9 @@ REM ---- VOIE EXPERIMENTAL_PAPER (23/07) : ouvre/gere/sort de VRAIES positions S
 REM (cross-venue geles + lead-lag + copy-vaults) des qu'un signal est frais + executable + edge net > 0.
 REM Ledger/budget/limites ISOLES du livre live. Gate par HYPERSMART_EXPERIMENTAL_PAPER=1. 0 ordre reel.
 start "" /b tools\boucle_collecteur.cmd experimental-paper tools\experimental_paper_tick.py 60 --une-fois
-REM COHORTE EXPLORATOIRE (apprend maintenant) : mouvements live des vaults retenus + edge preliminaire.
-start "" /b tools\boucle_collecteur.cmd exploratory-paper tools\exploratory_paper_tick.py 60 --une-fois
+REM 23/07 (rectif Flo) — l'ouverture exploratoire est desormais INLINE dans le flux WS userFills
+REM (voir userfills-live plus bas : 2 cohortes ALPHA + DISCOVERY_PROBE, admission->L2->open dans le
+REM meme flux). L'ancien tick passif exploratory-paper est donc RETIRE (remplace par l'inline).
 
 REM ---- COPY-WHITELIST (#185, 20/07) : nourrit la porte copy (leaders au markout prouve). ----
 REM La whitelist se PERIME a 24 h (porte deny-by-default) -> regeneree toutes les 6 h.

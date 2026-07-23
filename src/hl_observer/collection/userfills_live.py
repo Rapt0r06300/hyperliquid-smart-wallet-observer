@@ -52,9 +52,11 @@ def snapshot_depuis_positions(vault: str, positions: dict[str, dict], *, nav_usd
 
 
 def parser_message_userfills(msg: Any, *, vault: str = "") -> list[dict]:
-    """Normalise un message WS userFills → fills {coin, px, sz, signe, ts_ms, dir}. Tolérant."""
+    """Normalise un message WS userFills → fills {coin, px, sz, signe, ts_ms, dir, hash, isSnapshot}.
+    `isSnapshot` est propagé (le snapshot initial rejoue l'historique : à IGNORER pour trader). Tolérant."""
     data = msg.get("data") if isinstance(msg, dict) else None
     fills = (data or {}).get("fills") if isinstance(data, dict) else None
+    est_snapshot = bool((data or {}).get("isSnapshot")) if isinstance(data, dict) else False
     out: list[dict] = []
     for f in (fills or []):
         try:
@@ -67,7 +69,8 @@ def parser_message_userfills(msg: Any, *, vault: str = "") -> list[dict]:
         side = str(f.get("side") or "").upper()
         out.append({"vault": vault, "coin": coin, "px": px, "sz": sz,
                     "signe": 1 if side == "B" else (-1 if side == "A" else 0),
-                    "ts_ms": ts, "dir": str(f.get("dir") or ""), "hash": f.get("hash")})
+                    "ts_ms": ts, "dir": str(f.get("dir") or ""), "hash": f.get("hash"),
+                    "isSnapshot": est_snapshot})
     return out
 
 

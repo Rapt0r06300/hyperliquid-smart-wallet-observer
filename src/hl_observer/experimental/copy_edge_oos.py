@@ -291,7 +291,8 @@ def calibrer_risque(events: list[dict], tape: dict[str, list[tuple[int, float]]]
 
 def construire_table_prelim(events: list[dict], tape: dict[str, list[tuple[int, float]]], *,
                             horizons_ms: Iterable[float] = HORIZONS_DEFAUT_MS, frais_bps: float = 12.0,
-                            min_events: int = 20, forward_fn=FORWARD_DEFAUT, delai_ms: float = 0.0) -> dict[str, dict]:
+                            min_events: int = 20, forward_fn=FORWARD_DEFAUT, delai_ms: float = 0.0,
+                            appliquer_kill_risque: bool = True) -> dict[str, dict]:
     """Table d'edge PRÉLIMINAIRE PAR COIN (descriptif, PAS une validation OOS) : pour chaque coin couvert,
     le meilleur horizon dont le rendement forward NET (anti-lookahead, coûts inclus) est POSITIF sur assez
     d'entrées, AVEC son risque CALIBRÉ (stop=MAE_p75, TP=MFE_p50). Un coin est EXCLU si net<=0 OU si son
@@ -318,10 +319,12 @@ def construire_table_prelim(events: list[dict], tape: dict[str, list[tuple[int, 
                     best = {"horizon_ms": h, "net_bps": round(net, 3), "brut_bps": round(net + frais_bps, 3),
                             "ic95_bas_bps": ic_bas, "ic95_haut_bps": ic_haut, "n": len(nets)}
         if best:
-            # RISQUE CALIBRÉ sur MAE/MFE : un coin dont le risque ≫ edge est KILL (jamais copié)
+            # RISQUE CALIBRÉ sur MAE/MFE. ALPHA : KILL si risque ≫ edge (jamais copié). PROBE
+            # (appliquer_kill_risque=False) : on GARDE pour OBSERVER en tout petit, mais on garde le
+            # stop/TP calibré pour borner la perte — jamais un stop démesuré.
             risque = calibrer_risque(evs, tape, best["horizon_ms"], best["net_bps"], delai_ms=delai_ms,
                                      min_events=min_events)
-            if risque["decision_risque"] == "KILL":
+            if appliquer_kill_risque and risque["decision_risque"] == "KILL":
                 continue
             best["edge_brut_bps"] = best["brut_bps"]              # alias pour le gate du signal
             best["risque"] = risque

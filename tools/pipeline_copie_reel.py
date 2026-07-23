@@ -30,6 +30,7 @@ from hl_observer.experimental.copy_edge_oos import (mesurer_oos, simuler_paper, 
 
 FILLS = Path("runtime") / "data" / "vault_fills.jsonl"
 PRELIM = Path("runtime") / "data" / "copy_prelim_edge.json"
+PRELIM_PROBE = Path("runtime") / "data" / "copy_prelim_probe.json"
 HORIZONS_CANDLES_MS = (300_000.0, 900_000.0, 1_800_000.0, 3_600_000.0)   # 5/15/30/60 min (adaptés aux candles)
 DELAI_COPIE_MS = 60_000.0        # délai de détection/copie appliqué avant l'entrée (anti-lookahead)
 
@@ -93,12 +94,20 @@ def construire(root: Path, *, geler_si_valide: bool = True) -> dict:
     if horizons:
         kw["horizons_ms"] = horizons
     m = mesurer_oos(entrees, tape, **kw)
-    # TABLE PRÉLIMINAIRE par coin (edge net POSITIF, descriptif) → source du gate de la cohorte EXPLORATOIRE
-    table_prelim = construire_table_prelim(entrees, tape, forward_fn=fwd,
-                                           horizons_ms=(horizons or HORIZONS_CANDLES_MS))
+    # TABLE PRÉLIMINAIRE par coin (edge net POSITIF, descriptif + risque calibré).
+    hz = (horizons or HORIZONS_CANDLES_MS)
+    # ALPHA : avec KILL risque strict (risque ≫ edge exclu) — source du gate de la cohorte stricte.
+    table_alpha = construire_table_prelim(entrees, tape, forward_fn=fwd, horizons_ms=hz, appliquer_kill_risque=True)
     (root / PRELIM).write_text(json.dumps({"maj_ms": int(time.time() * 1000), "source_prix": source,
-                                           "n_coins_positifs": len(table_prelim), "table": table_prelim},
+                                           "n_coins_positifs": len(table_alpha), "table": table_alpha},
                                           ensure_ascii=False, indent=1), encoding="utf-8")
+    # PROBE : édition LARGE (edge net>0 gardé même si risque élevé, mais stop/TP calibré) — pour OBSERVER
+    # en tout petit les autres coins liquides sans polluer le PnL ALPHA.
+    table_probe = construire_table_prelim(entrees, tape, forward_fn=fwd, horizons_ms=hz, appliquer_kill_risque=False)
+    (root / PRELIM_PROBE).write_text(json.dumps({"maj_ms": int(time.time() * 1000), "source_prix": source,
+                                                 "n_coins_positifs": len(table_probe), "table": table_probe},
+                                                ensure_ascii=False, indent=1), encoding="utf-8")
+    table_prelim = table_alpha
     rap = {"maj_ms": int(time.time() * 1000), "source_prix": source, "delai_copie_ms": DELAI_COPIE_MS,
            "n_entrees_alpha": len(entrees), "n_coins_tape": len(tape), "couverture": audit,
            "n_coins_prelim_positifs": len(table_prelim), "mesure": m}
