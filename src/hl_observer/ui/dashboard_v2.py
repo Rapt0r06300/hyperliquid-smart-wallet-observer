@@ -270,6 +270,10 @@ th{letter-spacing:1.2px}
  <div class="card" style="margin-bottom:12px"><h3>STRATÉGIES <span class="hint">— toutes actives EN PARALLÈLE · une position ne s'ouvre QUE si l'edge est prouvé (refuser = protéger le capital) —</span></h3>
    <table><thead><tr><th style="width:34%">stratégie</th><th style="width:16%">positions</th><th style="width:26%">réalisé paper</th><th style="width:24%;text-align:right">état</th></tr></thead><tbody id="strattb"></tbody></table></div>
 
+ <div class="card" style="margin-bottom:12px"><h3>EXPERIMENTAL_PAPER <span class="hint">— vraies positions SIMULÉES, SANS attendre l'OOS · ledger/budget ISOLÉS du livre live · <span id="xp-sum">…</span></span></h3>
+   <table><thead><tr><th style="width:16%">moteur</th><th style="width:12%">coin</th><th style="width:9%">sens</th><th style="width:17%">entrée (exéc.)</th><th style="width:16%">edge est. (bps)</th><th style="width:14%">notional</th><th style="width:16%;text-align:right">type PnL</th></tr></thead><tbody id="xptb"></tbody></table>
+   <div class="hint" id="xp-refus" style="margin-top:8px"></div></div>
+
  <div class="card" style="margin-bottom:12px"><h3>TOP OPPORTUNITÉS <span class="hint" id="oppsum">— toutes stratégies · edge net après coûts —</span></h3>
    <table><thead><tr><th style="width:7%">#</th><th style="width:23%">coin</th><th style="width:28%">stratégie</th><th style="width:20%">edge net</th><th style="width:22%;text-align:right">power</th></tr></thead><tbody id="opptb"></tbody></table></div>
 
@@ -804,6 +808,21 @@ function loadArb(){fetch('/v2/arbitrage').then(function(r){return r.json()}).the
   signalerOK('arbitrage');
 }).catch(function(e){signalerPanne('arbitrage',e);});}
 setInterval(loadArb,10000);setTimeout(loadArb,900);
+// ── VOIE EXPERIMENTAL_PAPER (23/07) : vraies positions SIMULEES, ISOLEES du livre live. ──
+function loadExperimental(){fetch('/v2/experimental').then(function(r){return r.json()}).then(function(d){
+  var tb=document.getElementById('xptb'); if(!tb)return;
+  var pos=d.positions||[];
+  var sm=document.getElementById('xp-sum');
+  if(sm){var pm=d.par_moteur||{};var parts=[];for(var k in pm){parts.push(k+' '+(pm[k].positions||0)+'p / '+(Number(pm[k].realise_usd||0)>=0?'+':'')+n(Number(pm[k].realise_usd||0),2)+'$');}
+    sm.textContent=(d.actif?'ACTIF':'éteint')+' · '+(d.positions_ouvertes||0)+' positions · réalisé '+(Number(d.realise_total_usd||0)>=0?'+':'')+n(Number(d.realise_total_usd||0),2)+'$ · '+parts.join(' · ');}
+  if(!pos.length){tb.innerHTML='<tr><td colspan="7" style="color:var(--mut)">— aucune position experimental_paper ouverte (en attente d\'un signal admissible) —</td></tr>';}
+  else{tb.innerHTML=pos.map(function(p){return '<tr><td>'+p.moteur+'</td><td><b>'+p.coin+'</b></td><td>'+(p.sens>0?'LONG':'SHORT')+'</td><td>'+p.prix_entree+'</td><td style="color:var(--grn)">+'+n(Number(p.edge_estime_bps||0),1)+'</td><td>'+n(Number(p.notional_usd||0),0)+'$</td><td style="text-align:right;color:var(--mut)">'+p.type_pnl+'</td></tr>';}).join('');}
+  var rf=document.getElementById('xp-refus');
+  if(rf){var rm=d.refus_par_motif||{};var rp=[];for(var m in rm){rp.push(m+'×'+rm[m]);}
+    rf.textContent=rp.length?('refus dernier tick : '+rp.join(' · ')):'';}
+  signalerOK('experimental');
+}).catch(function(e){signalerPanne('experimental',e);});}
+setInterval(loadExperimental,5000);setTimeout(loadExperimental,800);
 // ── FRAICHEUR MAXIMALE (20/07, demande de Flo : « le PnL ne bouge pas en temps reel »).
 // Le funding s'accumule CONTINUMENT dans la realite ; le moteur ne le releve que par passes.
 // Ce ticker 1 s fait couler le temps entre deux releves : accru_affiche = dernier releve REEL
@@ -1122,6 +1141,34 @@ def create_dashboard_v2_router() -> APIRouter:
         except Exception as exc:  # noqa: BLE001 — un panneau ne casse jamais la page
             return JSONResponse({"actif": False, "etat": "indisponible : %s" % exc,
                                  "positions_ouvertes": 0, "realise_session_usd": 0.0})
+
+    @router.get("/v2/experimental")
+    def experimental_state() -> JSONResponse:
+        """Voie EXPERIMENTAL_PAPER (ISOLÉE du livre live) : positions ouvertes + PnL réalisé PAR moteur +
+        refus du dernier tick. 100% lecture seule, real_execution=False. Jamais mélangée au PnL canonique."""
+        try:
+            import json as _json
+            from pathlib import Path as _P
+            from hl_observer.experimental.moteur_paper import charger_store, resume
+            root = _P(__file__).resolve().parents[3]
+            r = resume(root)
+            store = charger_store(root)
+            positions = [{"coin": p.get("coin"), "moteur": p.get("moteur"), "sens": p.get("sens"),
+                          "notional_usd": p.get("notional_usd"), "prix_entree": p.get("prix_entree"),
+                          "edge_estime_bps": p.get("edge_estime_bps"), "type_pnl": p.get("type_pnl")}
+                         for p in store.get("ouvertes", {}).values()]
+            statut = {}
+            try:
+                statut = _json.loads((root / "runtime" / "data" / "experimental_paper_status.json")
+                                     .read_text(encoding="utf-8"))
+            except (OSError, ValueError):
+                pass
+            return JSONResponse({**r, "actif": bool(_os.environ.get("HYPERSMART_EXPERIMENTAL_PAPER", "0") == "1"),
+                                 "positions": positions, "refus_par_motif": statut.get("refus_par_motif", {}),
+                                 "premier_signal": statut.get("premier_signal"), "read_only": True})
+        except Exception as exc:  # noqa: BLE001 — un panneau ne casse jamais la page
+            return JSONResponse({"error": str(exc), "positions": [], "positions_ouvertes": 0,
+                                 "par_moteur": {}, "realise_total_usd": 0.0})
 
     @router.get("/v2/equity_history")
     def equity_history(request: Request, max: int = 600) -> JSONResponse:
