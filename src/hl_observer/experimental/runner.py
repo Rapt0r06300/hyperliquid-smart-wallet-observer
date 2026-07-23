@@ -72,12 +72,12 @@ def _raison_sortie_carry(pos: dict, m: dict, car: dict | None, *, now_ms: float,
     base_cur = float(m.get("base_bps") if m.get("base_bps") is not None else base_ent)
     if -int(pos.get("sens") or 1) * (base_cur - base_ent) < -BASIS_ADVERSE_BPS:
         return "BASIS_ADVERSE"
+    if age_h >= float(pos.get("hold_h") or 168.0):          # durée max AVANT edge (sinon reste_h=0 masque)
+        return "HOLD_ATTEINT"
     reste_h = max(0.0, float(pos.get("hold_h") or 168.0) - age_h)
     cout_ar = float((pos.get("meta") or {}).get("cout_ar_bps") or 0.0)
     if abs(d_now) * reste_h <= cout_ar:
         return "EDGE_DISPARU"
-    if age_h >= float(pos.get("hold_h") or 168.0):
-        return "HOLD_ATTEINT"
     return None
 
 

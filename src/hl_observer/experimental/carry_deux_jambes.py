@@ -90,7 +90,9 @@ def decomposer(pos: dict, *, carnet_courant: dict | None, d_courant: float | Non
     notional = float(pos.get("notional_usd") or 0.0)
     sens = int(pos.get("sens") or 1)
     d = float(pos.get("d_bps_h") or 0.0)                    # funding net/h signé (à l'entrée)
-    age_h = max(0.0, (now_ms - float(pos.get("ts_ouverture_ms") or now_ms)) / 3.6e6)
+    ts_ouv = pos.get("ts_ouverture_ms")                     # 🔴 pas de `or now` : ts=0 est falsy -> age=0
+    ts_ouv = float(ts_ouv) if ts_ouv is not None else now_ms
+    age_h = max(0.0, (now_ms - ts_ouv) / 3.6e6)
     heures_pleines = int(age_h)                             # heures FRANCHIES -> funding réglé
     # frais d'entrée RÉELS (recalculés au carnet, corrige le v1) ; sortie ESTIMÉE au carnet courant
     aud = construire_jambes(pos["coin"], sens, notional, carnet_courant) if carnet_courant else None
