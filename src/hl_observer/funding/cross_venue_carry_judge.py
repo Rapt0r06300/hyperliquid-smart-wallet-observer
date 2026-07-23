@@ -124,5 +124,43 @@ def juger_tous(root: str | Path = ".", *, hold_h: float = HOLD_DEFAUT_H) -> dict
                              "OOS = 2ᵉ moitié in-sample, pas une preuve live. Capacité mid-cap limitée."}
 
 
+def valider_live_forward(root: str | Path = ".", *, baseline_path: str | Path | None = None,
+                         min_obs_post: int = 100, hold_h: float = HOLD_DEFAUT_H) -> dict[str, Any]:
+    """VALIDATION LIVE-FORWARD (chantier 1) : rejuge les survivants GELÉS uniquement sur les données
+    collectées APRÈS le gel (`gele_ts`), avec les MÊMES règles. C'est le seul OOS honnête : des
+    données que la sélection n'a jamais vues. Ne modifie RIEN au juge — il lit le baseline et applique
+    `juger_coin` tel quel. Tant qu'il n'y a pas `min_obs_post` points post-gel : NEED_MORE_DATA."""
+    from pathlib import Path as _P
+    bp = _P(baseline_path) if baseline_path else _P(root) / "runtime" / "data" / "cross_venue_juge_baseline.json"
+    try:
+        base = json.loads(bp.read_text(encoding="utf-8"))
+        gele_ts = float(base["gele_ts"])
+        survivants = {s["coin"]: s for s in base.get("survivants", [])}
+    except (OSError, ValueError, KeyError, TypeError):
+        return {"statut": "PAS_DE_BASELINE", "detail": "geler le juge d'abord (écrit le baseline)."}
+    series = charger_series(root)
+    couts = couts_carnet(_P(root))
+    resultats: dict[str, Any] = {}
+    tiennent = 0
+    for coin, s0 in survivants.items():
+        post = [r for r in series.get(coin, []) if r[0] > gele_ts]   # STRICTEMENT après le gel
+        if len(post) < min_obs_post:
+            resultats[coin] = {"verdict": "INSUFFISANT_POST_GEL", "n_post": len(post)}
+            continue
+        r = juger_coin(post, cout_ar_bps=couts.get(coin), hold_h=hold_h, min_obs=min_obs_post)
+        tient = r.get("verdict") == "SURVIVANT_OOS"
+        tiennent += 1 if tient else 0
+        resultats[coin] = {"verdict": "TIENT_LIVE_FORWARD" if tient else "DEGRADE",
+                           "baseline_net_bps": s0.get("net_hold_bps"),
+                           "live_net_bps": r.get("net_hold_bps"), "juge_live": r.get("verdict")}
+    prets = [c for c, v in resultats.items() if v["verdict"] == "TIENT_LIVE_FORWARD"]
+    assez = any(v["verdict"] != "INSUFFISANT_POST_GEL" for v in resultats.values())
+    return {"statut": ("PRETS_A_PROMOUVOIR" if prets else ("MESURE_EN_COURS" if assez else "NEED_MORE_DATA")),
+            "gele_iso": base.get("gele_iso"), "tiennent_live_forward": prets,
+            "n_tiennent": tiennent, "n_survivants_baseline": len(survivants), "par_coin": resultats,
+            "note": "promotion allouée SEULEMENT aux coins qui TIENNENT en live-forward (données "
+                    "post-gel), et via la porte de preuve de allocation_moteurs (> HLP + capacité)."}
+
+
 __all__ = ["MAX_BASE_MEDIANE_BPS", "MIN_PERSIST", "FRAIS_AR_BPS", "HOLD_DEFAUT_H",
-           "charger_series", "juger_coin", "juger_tous"]
+           "charger_series", "juger_coin", "juger_tous", "valider_live_forward"]
