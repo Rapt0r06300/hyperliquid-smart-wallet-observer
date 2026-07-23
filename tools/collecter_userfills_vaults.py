@@ -306,6 +306,22 @@ async def _promotion_periodique(root: Path, *, intervalle_s: float = 300.0) -> N
         await asyncio.sleep(intervalle_s)
 
 
+async def _rapport_periodique(root: Path, *, intervalle_s: float = 30.0) -> None:
+    """WATCHER LÉGER : dès qu'un 1er OPEN RAW réel existe, écrit runtime/rapports/PREMIER_RAW.md (OPEN puis
+    CLOSE : timestamps monotones, prix L2, coûts, MFE/MAE, PnL, ROI, paire vault+coin). Signale une fois."""
+    from hl_observer.experimental import rapport_raw as RR
+    deja = False
+    while True:
+        try:
+            p = RR.ecrire_rapport(root)
+            if p and not deja:
+                print("[userfills] PREMIER RAW capturé → %s" % p, flush=True)
+                deja = True
+        except Exception as exc:  # noqa: BLE001
+            print("[userfills] rapport err %s" % str(exc)[:40], flush=True)
+        await asyncio.sleep(intervalle_s)
+
+
 async def _boucle(root: Path) -> None:
     global RUN_ID, RUN_TOKEN, _MUTEX
     import secrets
@@ -340,7 +356,8 @@ async def _boucle(root: Path) -> None:
     file: asyncio.Queue = asyncio.Queue(maxsize=FILE_MAX)
     try:
         await asyncio.gather(_worker(root, file), _exits_periodiques(root), _heartbeat(root, info),
-                             _promotion_periodique(root), *[_un_vault(root, v, file) for v in vaults])
+                             _promotion_periodique(root), _rapport_periodique(root),
+                             *[_un_vault(root, v, file) for v in vaults])
     finally:
         VI.liberer(root, NOM_VERROU, info)
 
