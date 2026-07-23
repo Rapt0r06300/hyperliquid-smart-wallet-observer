@@ -45,6 +45,16 @@ def test_parser_bookticker_binance():
 _NS = 1_000_000_000                                            # 1 s en nanosecondes (horloge monotone)
 
 
+def test_parser_aggtrade_detecte_le_sens_agressif():
+    m = _mod()
+    # m=True -> l'acheteur est maker -> l'agressif est le VENDEUR
+    assert m.parser_aggtrade_binance({"data": {"e": "aggTrade", "s": "ETHUSDT", "p": "3000.0",
+                                                "q": "1.5", "m": True, "T": 42}})["side"] == "SELL"
+    assert m.parser_aggtrade_binance({"data": {"e": "aggTrade", "s": "ETHUSDT", "p": "3000", "q": "1",
+                                                "m": False, "T": 42}})["side"] == "BUY"
+    assert m.parser_aggtrade_binance({"data": {"e": "bookTicker"}}) is None    # pas un trade
+
+
 def test_magasin_rejette_les_quotes_PERIMEES_et_non_synchrones():
     m = _mod()
     mag = m.MagasinBBO()

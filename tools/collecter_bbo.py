@@ -88,6 +88,19 @@ def parser_bookticker_binance(msg: Any) -> dict | None:
             "ts_ex": float(d.get("T") or d.get("E") or 0.0), "update_id": d.get("u")}
 
 
+def parser_aggtrade_binance(msg: Any) -> dict | None:
+    """WS Binance `<sym>@aggTrade` -> {symbol, px, sz, side, ts_ex}. Le CHOC exécutable (Flo : détecter
+    le choc sur les TRADES, pas le mid). `m`=True -> l'agressif est le VENDEUR (l'acheteur est maker)."""
+    d = msg.get("data") if isinstance(msg, dict) and "data" in msg else msg
+    if not isinstance(d, dict) or d.get("e") != "aggTrade" or "p" not in d:
+        return None
+    px = _f(d.get("p"))
+    if px is None:
+        return None
+    return {"symbol": str(d.get("s")).upper(), "px": px, "sz": _f(d.get("q")) or 0.0,
+            "side": "SELL" if d.get("m") else "BUY", "ts_ex": float(d.get("T") or 0.0)}
+
+
 class MagasinBBO:
     """Dernier BBO de chaque venue par coin, horodaté sur l'horloge MONOTONE de réception. Ne produit
     un snapshot SYNCHRONISÉ que si les DEUX venues sont FRAÎCHES (âge monotone < AGE_MAX) et proches."""
@@ -191,7 +204,9 @@ async def _boucle(root: Path, coins: list[str]) -> None:  # pragma: no cover (I/
                 await asyncio.sleep(1.0)
 
     async def binance():
-        streams = "/".join("%s@bookTicker" % s.lower() for s in sym.values())
+        # bookTicker (entrée exécutable) ET aggTrade (détection du CHOC) sur une seule connexion.
+        streams = "/".join(["%s@bookTicker" % s.lower() for s in sym.values()]
+                           + ["%s@aggTrade" % s.lower() for s in sym.values()])
         inv = {s.upper(): c for c, s in sym.items()}
         while True:
             try:
@@ -201,13 +216,20 @@ async def _boucle(root: Path, coins: list[str]) -> None:  # pragma: no cover (I/
                         if stats["dernier_bin_ns"] and (r - stats["dernier_bin_ns"]) / 1e6 > GAP_MS:
                             stats["trous"] += 1
                         stats["dernier_bin_ns"] = r
-                        q = parser_bookticker_binance(json.loads(raw))
+                        m = json.loads(raw)
+                        q = parser_bookticker_binance(m)
                         if q and q["symbol"] in inv:
                             mag.maj_binance(q, inv[q["symbol"]], recu_mono_ns=r)
                             tape.append({"venue": "BIN", "coin": inv[q["symbol"]], "recu_ns": r,
                                          "mid": (q["bid"] + q["ask"]) / 2, "bid": q["bid"], "ask": q["ask"],
                                          "ts_wall_ms": time.time() * 1000, "ts_ex": q["ts_ex"],
                                          "update_id": q.get("update_id")})
+                            continue
+                        t = parser_aggtrade_binance(m)
+                        if t and t["symbol"] in inv:                # le CHOC exécutable
+                            tape.append({"venue": "BIN_TRADE", "coin": inv[t["symbol"]], "recu_ns": r,
+                                         "px": t["px"], "sz": t["sz"], "side": t["side"],
+                                         "ts_wall_ms": time.time() * 1000, "ts_ex": t["ts_ex"]})
             except Exception:  # noqa: BLE001
                 stats["reconnexions_bin"] += 1
                 await asyncio.sleep(1.0)

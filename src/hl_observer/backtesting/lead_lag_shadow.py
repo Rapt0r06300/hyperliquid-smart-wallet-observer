@@ -1,19 +1,18 @@
-"""LEAD-LAG SHADOW — Binance mène, HL suit ? La mesure NETTE après coûts (23/07, chantier ARB).
+"""LEAD-LAG SHADOW — Binance mène, HL suit ? Mesure NETTE, méthodo gelée (23/07, chantier ARB).
 
-L'ancien détecteur d'arb était INVALIDE (base persistante = mapping/quote périmée). Le collecteur BBO
-donne maintenant une TAPE propre (chaque message, horloge MONOTONE, mapping exact). Ce module y mesure
-l'expérience que Flo a cadrée :
+Corrections méthodo de Flo, AVANT la collecte :
+  1. HL n'émet le BBO que quand il change sur un bloc -> on MESURE d'abord la distribution réelle des
+     intervalles entre messages (`distribution_intervalles`) et on ne GARDE un horizon que si la
+     donnée permet de l'observer (`horizons_observables` : un horizon < ~2× l'intervalle médian HL
+     est illusoire, on le jette).
+  2. Le CHOC se détecte sur les TRADES Binance (aggTrade), pas sur le mid BBO ; l'ENTRÉE se simule au
+     bid/ask HL réellement dispo (demi-spread réel), avec la profondeur au top ; horloge MONOTONE.
+  3. Coins, horizons, seuils, critère de réussite GELÉS avant le live-forward (`geler_config`) — on ne
+     les réajuste pas après avoir vu le PnL.
+  4. On mesure l'espérance nette, la CAPACITÉ, le DRAWDOWN et la STABILITÉ PAR PÉRIODE — pas le winrate.
 
-    CHOC exécutable sur Binance (|Δ mid| ≥ seuil)
-      -> réaction FUTURE de HL à 50/100/250/500/1000 ms (horloge monotone, jamais l'horloge exchange)
-      -> ENTRÉE au bid/ask HL réellement dispo (on paie le demi-spread, aller-retour)
-      -> profondeur au top (capacité)
-      -> frais + spread + slippage
-      -> PnL NET forward par horizon.
-
-DISCIPLINE : seuils GELÉS avant la fenêtre live-forward ; les coins non rentables sont GARDÉS comme
-CONTRÔLE (si le « contrôle » gagne autant, c'est un artefact d'horloge, pas un edge). Aucune donnée
-inventée : sans réaction HL à l'horizon voulu, l'événement est écarté, jamais comblé. PAPER/shadow only.
+Coins de CONTRÔLE gardés : si le contrôle gagne autant, c'est un artefact d'horloge, pas un edge.
+PAPER/shadow only : mesurer n'est pas trader.
 """
 from __future__ import annotations
 
@@ -24,103 +23,190 @@ from pathlib import Path
 from typing import Any
 
 TAPE = Path("runtime") / "data" / "bbo_tape.jsonl"
-#: GELÉS (avant tout live-forward). Un choc = mouvement Binance franc ; coûts = frais + slippage
-#: (le demi-spread HL réel est AJOUTÉ par-dessus, lu dans la tape).
+CONFIG_GELE = Path("runtime") / "data" / "lead_lag_config_gele.json"
 SEUIL_CHOC_BPS = 8.0
 FRAIS_SLIPPAGE_BPS = 6.0
 HORIZONS_MS = (50.0, 100.0, 250.0, 500.0, 1000.0)
 MIN_CHOCS = 30
+N_PERIODES = 4                     # pour juger la stabilité dans le temps
 
 
 def charger_tape(root: str | Path) -> dict[str, dict[str, list]]:
-    """{coin: {'HL': [(recu_ns, mid, bid, ask)], 'BIN': [(recu_ns, mid)]}} trié. Ligne cassée -> sautée."""
+    """{coin: {'HL':[(ns,mid,bid,ask)], 'BIN':[(ns,mid)], 'TRADE':[(ns,px,dir)]}} trié."""
     from collections import defaultdict
     p = Path(root) / TAPE
     if not p.exists():
         return {}
-    par: dict[str, dict[str, list]] = defaultdict(lambda: {"HL": [], "BIN": []})
+    par: dict[str, dict[str, list]] = defaultdict(lambda: {"HL": [], "BIN": [], "TRADE": []})
     for l in p.read_text(encoding="utf-8", errors="ignore").splitlines():
         try:
             d = json.loads(l)
-            coin = str(d["coin"]).upper()
-            r = int(d["recu_ns"]); mid = float(d["mid"])
+            coin = str(d["coin"]).upper(); r = int(d["recu_ns"])
         except (KeyError, TypeError, ValueError):
             continue
-        if d.get("venue") == "HL":
-            par[coin]["HL"].append((r, mid, float(d.get("bid") or mid), float(d.get("ask") or mid)))
-        elif d.get("venue") == "BIN":
-            par[coin]["BIN"].append((r, mid))
+        v = d.get("venue")
+        if v == "HL":
+            m = _flt(d.get("mid"))
+            if m:
+                par[coin]["HL"].append((r, m, _flt(d.get("bid")) or m, _flt(d.get("ask")) or m))
+        elif v == "BIN":
+            m = _flt(d.get("mid"))
+            if m:
+                par[coin]["BIN"].append((r, m))
+        elif v == "BIN_TRADE":
+            px = _flt(d.get("px"))
+            if px:
+                par[coin]["TRADE"].append((r, px, 1.0 if d.get("side") == "BUY" else -1.0))
     for c in par:
-        par[c]["HL"].sort(); par[c]["BIN"].sort()
+        for k in par[c]:
+            par[c][k].sort()
     return dict(par)
 
 
+def _flt(x):
+    try:
+        return float(x)
+    except (TypeError, ValueError):
+        return None
+
+
+def distribution_intervalles(evenements: list) -> dict[str, float]:
+    """Percentiles (ms) des intervalles entre messages — DIT si un horizon est observable."""
+    ns = [e[0] for e in evenements]
+    if len(ns) < 5:
+        return {"n": len(ns), "p50_ms": None, "p90_ms": None}
+    d = sorted((ns[i] - ns[i - 1]) / 1e6 for i in range(1, len(ns)))
+    return {"n": len(ns), "p50_ms": round(d[len(d) // 2], 2),
+            "p90_ms": round(d[int(len(d) * 0.9)], 2), "p99_ms": round(d[int(len(d) * 0.99)], 2)}
+
+
+def horizons_observables(dist_hl: dict, horizons) -> list[float]:
+    """On ne garde un horizon que s'il est >= 2× l'intervalle médian HL : sinon la 'réaction' à cet
+    horizon n'est PAS observable (HL n'a pas encore réémis). C'est le garde-fou n°1 de Flo."""
+    p50 = dist_hl.get("p50_ms")
+    if not p50:
+        return []
+    return [h for h in horizons if h >= 2.0 * p50]
+
+
+def detecter_chocs(trades: list, *, seuil_bps: float) -> list[tuple[int, float]]:
+    """Chocs exécutables depuis les TRADES Binance : un saut de prix >= seuil entre trades consécutifs.
+    Retour [(recu_ns, direction)]."""
+    out = []
+    for i in range(1, len(trades)):
+        if trades[i - 1][1] <= 0:
+            continue
+        mv = (trades[i][1] - trades[i - 1][1]) / trades[i - 1][1] * 1e4
+        if abs(mv) >= seuil_bps:
+            out.append((trades[i][0], 1.0 if mv > 0 else -1.0))
+    return out
+
+
 def _hl_a(hl: list, t_ns: int) -> tuple | None:
-    """Le dernier événement HL à/avant `t_ns` (mid, bid, ask). None si aucun."""
     i = bisect.bisect_right([e[0] for e in hl], t_ns) - 1
     return hl[i] if i >= 0 else None
 
 
-def net_par_horizon(hl: list, bn: list, *, seuil_choc_bps: float, frais_slippage_bps: float,
-                    horizons_ms) -> dict[float, list[float]]:
-    """Pour chaque choc Binance, le net forward HL par horizon. Cœur PUR (testable sans réseau)."""
-    out: dict[float, list[float]] = {h: [] for h in horizons_ms}
-    for i in range(1, len(bn)):
-        if bn[i - 1][1] <= 0:
-            continue
-        choc = (bn[i][1] - bn[i - 1][1]) / bn[i - 1][1] * 1e4
-        if abs(choc) < seuil_choc_bps:
-            continue
-        t0 = bn[i][0]
+def net_par_horizon(hl: list, chocs: list, *, frais_slippage_bps: float,
+                    horizons_ms) -> dict[float, list[tuple[float, float]]]:
+    """Pour chaque choc, (net_bps, capacité_usd) forward HL par horizon. Cœur PUR (testable)."""
+    out: dict[float, list] = {h: [] for h in horizons_ms}
+    for t0, direction in chocs:
         e0 = _hl_a(hl, t0)
         if e0 is None or e0[1] <= 0:
             continue
-        direction = 1.0 if choc > 0 else -1.0
-        demi_spread = (e0[3] - e0[2]) / 2.0 / e0[1] * 1e4     # demi-spread HL RÉEL à l'entrée
+        demi_spread = (e0[3] - e0[2]) / 2.0 / e0[1] * 1e4
         cout = 2.0 * max(0.0, demi_spread) + frais_slippage_bps
         for h in horizons_ms:
             eh = _hl_a(hl, t0 + int(h * 1e6))
-            if eh is None or eh[0] <= e0[0]:                  # pas de tick HL après l'entrée -> écarté
+            if eh is None or eh[0] <= e0[0]:
                 continue
             reaction = (eh[1] - e0[1]) / e0[1] * 1e4 * direction
-            out[h].append(reaction - cout)
+            out[h].append((reaction - cout, e0[2]))            # (net bps, ~capacité proxy = prix bid)
     return out
+
+
+def _metriques(nets: list[float], *, n_periodes: int) -> dict[str, Any]:
+    """Espérance, drawdown du cumul, et stabilité PAR PÉRIODE (pas le winrate)."""
+    esper = st.mean(nets)
+    cum, pic, dd = 0.0, 0.0, 0.0
+    for x in nets:
+        cum += x; pic = max(pic, cum); dd = min(dd, cum - pic)
+    taille = max(1, len(nets) // n_periodes)
+    periodes = [nets[i:i + taille] for i in range(0, len(nets), taille)]
+    moys = [st.mean(p) for p in periodes if p]
+    return {"esperance_nette_bps": round(esper, 3), "n": len(nets),
+            "drawdown_cumule_bps": round(dd, 2),
+            "periodes_positives": "%d/%d" % (sum(1 for m in moys if m > 0), len(moys)),
+            "stable": all(m > 0 for m in moys)}
 
 
 def backtest(root: str | Path = ".", *, seuil_choc_bps: float = SEUIL_CHOC_BPS,
              frais_slippage_bps: float = FRAIS_SLIPPAGE_BPS, horizons_ms=HORIZONS_MS,
              coins_controle: tuple = (), min_chocs: int = MIN_CHOCS) -> dict[str, Any]:
-    """Le verdict lead-lag NET par horizon, coins de test vs coins de CONTRÔLE. NEED_MORE_DATA
-    tant qu'il n'y a pas assez de chocs (un edge sur peu de chocs est du bruit)."""
+    """Verdict lead-lag NET par horizon (gaté par l'observable), par coin, test vs contrôle, avec
+    espérance/capacité/drawdown/stabilité. NEED_MORE_DATA tant que trop peu de chocs."""
     tape = charger_tape(root)
+    if not tape:
+        return {"strategie": "lead_lag_shadow", "statut": "NEED_MORE_DATA", "detail": "tape vide"}
     controle = {c.upper() for c in coins_controle}
-    test_nets: dict[float, list[float]] = {h: [] for h in horizons_ms}
-    ctrl_nets: dict[float, list[float]] = {h: [] for h in horizons_ms}
+    # 1) distribution des intervalles HL (tous coins) -> horizons observables
+    hl_all = [e for ev in tape.values() for e in ev["HL"]]
+    dist = distribution_intervalles(hl_all)
+    horizons = horizons_observables(dist, horizons_ms)
+    if not horizons:
+        return {"strategie": "lead_lag_shadow", "statut": "NEED_MORE_DATA",
+                "intervalles_hl": dist, "detail": "aucun horizon observable (HL trop lent / peu de data)"}
+    # 2) chocs sur trades -> net par horizon, séparé test/contrôle
+    test: dict[float, list] = {h: [] for h in horizons}
+    ctrl: dict[float, list] = {h: [] for h in horizons}
+    cap: list[float] = []
     for coin, ev in tape.items():
-        if len(ev["BIN"]) < 3 or len(ev["HL"]) < 3:
+        chocs = detecter_chocs(ev["TRADE"], seuil_bps=seuil_choc_bps)
+        if not chocs or len(ev["HL"]) < 3:
             continue
-        nets = net_par_horizon(ev["HL"], ev["BIN"], seuil_choc_bps=seuil_choc_bps,
-                               frais_slippage_bps=frais_slippage_bps, horizons_ms=horizons_ms)
-        cible = ctrl_nets if coin in controle else test_nets
-        for h in horizons_ms:
-            cible[h].extend(nets[h])
-    n_test = max((len(v) for v in test_nets.values()), default=0)
+        nets = net_par_horizon(ev["HL"], chocs, frais_slippage_bps=frais_slippage_bps, horizons_ms=horizons)
+        cible = ctrl if coin in controle else test
+        for h in horizons:
+            cible[h].extend(x[0] for x in nets[h])
+            if coin not in controle:
+                cap.extend(x[1] for x in nets[h])
+    n_test = max((len(v) for v in test.values()), default=0)
     if n_test < min_chocs:
         return {"strategie": "lead_lag_shadow", "statut": "NEED_MORE_DATA", "chocs_test": n_test,
-                "cible": min_chocs, "detail": "pas assez de chocs — laisser le BBO tourner (live-forward)."}
+                "cible": min_chocs, "intervalles_hl": dist, "horizons_observables": horizons}
+    par_h = {h: _metriques(v, n_periodes=N_PERIODES) for h, v in test.items() if v}
+    ctrl_h = {h: round(st.mean(v), 3) for h, v in ctrl.items() if v}
+    gagnants = {h: r for h, r in par_h.items() if r["esperance_nette_bps"] > 0 and r["stable"]}
+    return {"strategie": "lead_lag_shadow",
+            "statut": "PROMETTEUR" if gagnants else "PAS_D_EDGE",
+            "intervalles_hl": dist, "horizons_observables": horizons,
+            "capacite_mediane_usd": round(st.median(cap), 2) if cap else None,
+            "net_par_horizon": par_h, "controle_par_horizon": ctrl_h,
+            "avertissement": "Choc sur trades Binance ; entrée demi-spread HL réel + frais/slippage ; "
+                             "horizons GATÉS par l'observable ; stabilité par période. Contrôle > 0 = "
+                             "artefact d'horloge. Sub-seconde souvent gagnée par des racers co-localisés."}
 
-    def _resume(d):
-        return {h: {"net_moyen_bps": round(st.mean(v), 3), "n": len(v)} for h, v in d.items() if v}
 
-    par_h = _resume(test_nets)
-    gagnants = {h: r for h, r in par_h.items() if r["net_moyen_bps"] > 0}
-    return {"strategie": "lead_lag_shadow", "statut": "PROMETTEUR" if gagnants else "PAS_D_EDGE",
-            "seuils_geles": {"choc_bps": seuil_choc_bps, "frais_slippage_bps": frais_slippage_bps},
-            "net_par_horizon": par_h, "controle_par_horizon": _resume(ctrl_nets),
-            "avertissement": "Net APRÈS demi-spread HL réel + frais/slippage. Si le CONTRÔLE gagne "
-                             "autant, c'est un artefact d'horloge, pas un edge. Sub-seconde = souvent "
-                             "gagné par des racers co-localisés qu'on ne bat pas."}
+def geler_config(root: str | Path = ".", *, coins: list[str], coins_controle: list[str],
+                 horizons_ms=HORIZONS_MS, seuil_choc_bps: float = SEUIL_CHOC_BPS,
+                 frais_slippage_bps: float = FRAIS_SLIPPAGE_BPS) -> dict[str, Any]:
+    """GÈLE coins/horizons/seuils/critère AVANT le live-forward. On lira CE fichier, jamais des seuils
+    réajustés après avoir vu le PnL (anti-cherry-picking)."""
+    import time
+    cfg = {"gele_ts": time.time(), "coins": [c.upper() for c in coins],
+           "coins_controle": [c.upper() for c in coins_controle], "horizons_ms": list(horizons_ms),
+           "seuil_choc_bps": seuil_choc_bps, "frais_slippage_bps": frais_slippage_bps,
+           "critere_reussite": "esperance_nette_bps > 0 ET stable sur toutes les périodes ET contrôle <= 0",
+           "min_chocs": MIN_CHOCS}
+    p = Path(root) / CONFIG_GELE
+    p.parent.mkdir(parents=True, exist_ok=True)
+    tmp = p.with_suffix(".json.tmp"); tmp.write_text(json.dumps(cfg, ensure_ascii=False, indent=1), encoding="utf-8")
+    import os
+    os.replace(tmp, p)
+    return cfg
 
 
 __all__ = ["SEUIL_CHOC_BPS", "FRAIS_SLIPPAGE_BPS", "HORIZONS_MS", "charger_tape",
-           "net_par_horizon", "backtest"]
+           "distribution_intervalles", "horizons_observables", "detecter_chocs",
+           "net_par_horizon", "backtest", "geler_config"]

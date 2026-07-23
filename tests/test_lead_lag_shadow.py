@@ -1,55 +1,65 @@
-"""LEAD-LAG SHADOW (chantier ARB, 23/07). On prouve la mécanique de mesure : un choc Binance, la
-réaction HL à un horizon, l'entrée au demi-spread RÉEL, les coûts déduits -> PnL net ; et le garde
-NEED_MORE_DATA tant qu'il n'y a pas assez de chocs. Aucun réseau : tape synthétique."""
+"""LEAD-LAG SHADOW — méthodo gelée (chantier ARB, 23/07). On prouve : la distribution des intervalles
+GÈLE les horizons observables, le CHOC vient des trades Binance, l'entrée paie le demi-spread HL réel,
+et la stabilité se juge PAR PÉRIODE. Tape synthétique, aucun réseau."""
 from __future__ import annotations
 
 import json
 
-from hl_observer.backtesting.lead_lag_shadow import net_par_horizon, backtest
+from hl_observer.backtesting.lead_lag_shadow import (
+    distribution_intervalles, horizons_observables, detecter_chocs, net_par_horizon,
+    backtest, geler_config, CONFIG_GELE)
 
 
-def test_net_par_horizon_mesure_la_reaction_apres_le_choc_moins_les_couts():
-    # Binance saute +50 bps à t=10 ms ; HL réagit +40 bps à t=110 ms. Demi-spread HL 1 bps, frais 6.
+def test_distribution_intervalles_et_gating_des_horizons():
+    ev = [(i * 200_000_000, 100.0, 99.9, 100.1) for i in range(20)]   # 1 message / 200 ms
+    d = distribution_intervalles(ev)
+    assert d["p50_ms"] == 200.0
+    # HL n'émet que toutes les 200 ms -> un horizon < 400 ms n'est PAS observable
+    assert horizons_observables(d, [50.0, 100.0, 250.0, 500.0, 1000.0]) == [500.0, 1000.0]
+
+
+def test_detecter_chocs_sur_les_trades():
+    trades = [(0, 100.0, 1.0), (10_000_000, 100.5, 1.0), (20_000_000, 100.51, 1.0)]
+    chocs = detecter_chocs(trades, seuil_bps=8.0)                     # +50 bps puis +1 bps
+    assert len(chocs) == 1 and chocs[0][1] == 1.0                     # un seul choc, direction +
+
+
+def test_net_par_horizon_paie_le_demi_spread_reel_et_rend_la_capacite():
     hl = [(5_000_000, 100.0, 99.99, 100.01), (110_000_000, 100.4, 100.39, 100.41)]
-    bn = [(0, 100.0), (10_000_000, 100.5)]
-    r = net_par_horizon(hl, bn, seuil_choc_bps=8.0, frais_slippage_bps=6.0, horizons_ms=[100.0])
-    # net = réaction 40 − (2×demi_spread 1 + frais 6) = 40 − 8 = +32
-    assert len(r[100.0]) == 1 and 30.0 < r[100.0][0] < 34.0
+    r = net_par_horizon(hl, [(10_000_000, 1.0)], frais_slippage_bps=6.0, horizons_ms=[100.0])
+    net, cap = r[100.0][0]
+    assert 30.0 < net < 34.0 and cap == 99.99                        # réaction 40 − (2×1 + 6) = 32
 
 
-def test_un_choc_trop_petit_n_est_pas_un_evenement():
-    hl = [(0, 100.0, 99.99, 100.01), (110_000_000, 100.02, 100.01, 100.03)]
-    bn = [(0, 100.0), (10_000_000, 100.02)]                 # +2 bps < seuil 8 -> ignoré
-    r = net_par_horizon(hl, bn, seuil_choc_bps=8.0, frais_slippage_bps=6.0, horizons_ms=[100.0])
-    assert r[100.0] == []
-
-
-def _tape(root, rows):
-    p = root / "runtime" / "data" / "bbo_tape.jsonl"
-    p.parent.mkdir(parents=True, exist_ok=True)
-    p.write_text("\n".join(json.dumps(r) for r in rows) + "\n", encoding="utf-8")
-
-
-def test_backtest_NEED_MORE_DATA_sous_le_seuil_de_chocs(tmp_path):
-    _tape(tmp_path, [{"venue": "BIN", "coin": "ETH", "recu_ns": 0, "mid": 100.0},
-                     {"venue": "BIN", "coin": "ETH", "recu_ns": 10_000_000, "mid": 100.5},
-                     {"venue": "HL", "coin": "ETH", "recu_ns": 5_000_000, "mid": 100.0, "bid": 99.99, "ask": 100.01},
-                     {"venue": "HL", "coin": "ETH", "recu_ns": 110_000_000, "mid": 100.4, "bid": 100.39, "ask": 100.41}])
-    assert backtest(tmp_path, horizons_ms=[100.0])["statut"] == "NEED_MORE_DATA"   # 1 choc < 30
-
-
-def test_backtest_promet_quand_HL_suit_binance(tmp_path):
+def _rows(n_chocs):
     rows = []
-    for k in range(40):                                     # 40 chocs identiques -> assez pour juger
+    for k in range(n_chocs):
         base = k * 1_000_000_000
-        rows += [{"venue": "BIN", "coin": "ETH", "recu_ns": base, "mid": 100.0},
-                 {"venue": "BIN", "coin": "ETH", "recu_ns": base + 10_000_000, "mid": 100.5},
-                 {"venue": "HL", "coin": "ETH", "recu_ns": base + 5_000_000, "mid": 100.0, "bid": 99.99, "ask": 100.01},
-                 {"venue": "HL", "coin": "ETH", "recu_ns": base + 110_000_000, "mid": 100.4, "bid": 100.39, "ask": 100.41}]
-    _tape(tmp_path, rows)
+        for j in range(21):                                          # HL dense : 1 tick / 10 ms
+            mid = 100.0 if j * 10 < 110 else 100.4
+            rows.append({"venue": "HL", "coin": "ETH", "recu_ns": base + j * 10_000_000,
+                         "mid": mid, "bid": mid - 0.01, "ask": mid + 0.01})
+        rows += [{"venue": "BIN_TRADE", "coin": "ETH", "recu_ns": base, "px": 100.0, "side": "BUY"},
+                 {"venue": "BIN_TRADE", "coin": "ETH", "recu_ns": base + 10_000_000, "px": 100.5, "side": "BUY"}]
+    return rows
+
+
+def test_backtest_promet_quand_HL_suit_et_est_STABLE_par_periode(tmp_path):
+    p = tmp_path / "runtime" / "data" / "bbo_tape.jsonl"
+    p.parent.mkdir(parents=True, exist_ok=True)
+    p.write_text("\n".join(json.dumps(r) for r in _rows(40)) + "\n", encoding="utf-8")
     r = backtest(tmp_path, horizons_ms=[100.0], min_chocs=30)
-    assert r["statut"] == "PROMETTEUR" and r["net_par_horizon"][100.0]["net_moyen_bps"] > 0
+    assert r["statut"] == "PROMETTEUR"
+    h = r["net_par_horizon"][100.0]
+    assert h["esperance_nette_bps"] > 0 and h["stable"] and r["capacite_mediane_usd"] is not None
 
 
-def test_charger_survit_a_l_absence(tmp_path):
+def test_backtest_NEED_MORE_DATA_si_tape_vide(tmp_path):
     assert backtest(tmp_path)["statut"] == "NEED_MORE_DATA"
+
+
+def test_geler_config_ecrit_les_seuils_avant_le_live(tmp_path):
+    cfg = geler_config(tmp_path, coins=["ETH", "SOL"], coins_controle=["DOGE"], horizons_ms=[100.0, 500.0])
+    assert (tmp_path / CONFIG_GELE).exists()
+    assert cfg["coins"] == ["ETH", "SOL"] and cfg["coins_controle"] == ["DOGE"]
+    assert "critere_reussite" in cfg and cfg["horizons_ms"] == [100.0, 500.0]
