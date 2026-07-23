@@ -41,6 +41,11 @@ DISPERSION = Path("runtime") / "data" / "dispersion_venues.jsonl"
 N_COINS_PRIORITAIRES = 15        # borné : on capture le carnet là où l'écart est le plus vif
 N_COINS_PREMIUM_FUNDING = 18     # 23/07 : + les cibles du carry cross-venue (premium de funding)
 PREMIUM_PLAUSIBLE_MAX_BPS_H = 5.0  # |hl−bin| > 5 bps/h (~438 %/an) = artefact probable, ignoré
+#: 🟢 23/07 (nouveau cap) — MID-CAPS À CARRY PROPRE ET PERSISTANT, mesurés par le juge signé
+#: (17-23 %/an, persist 96-100 %, base < 2,5 bps) MAIS ratés par la sélection au |premium| (leur
+#: premium ~0,2 bph est plus PETIT que les spikes d'alts type GAS -> jamais dans le top-N). Or ce
+#: sont les SEULS costables-manquants qui comptent. On les capte TOUJOURS, en plus de l'union.
+CIBLES_CARRY_PERSISTANT = ("DASH", "INJ", "VIRTUAL", "NEO", "RUNE", "FET", "AR", "GMT", "YGG", "KAS")
 ECART_PLAUSIBLE_MAX_BPS = 500.0  # au-delà = mauvais appariement (cf. arb_executable)
 INTERVALLE_S_DEFAUT = 60.0
 
@@ -203,7 +208,11 @@ def main(argv: list[str] | None = None) -> int:
         lignes = _lire_dispersion_recente(root)
         # UNION arb (dislocation de prix) + carry (premium de funding) — dédupliquée, ordre stable.
         vus: dict[str, None] = {}
-        for c in coins_prioritaires(lignes, n=a.n_coins) + coins_premium_funding(lignes, n=a.n_premium):
+        # UNION : dislocation de prix (arb) + premium de funding (carry) + les mid-caps à carry
+        # PERSISTANT qu'on veut TOUJOURS coster (sinon les meilleurs profils restent incostables).
+        for c in (coins_prioritaires(lignes, n=a.n_coins)
+                  + coins_premium_funding(lignes, n=a.n_premium)
+                  + list(CIBLES_CARRY_PERSISTANT)):
             vus.setdefault(c, None)
         coins = list(vus)
         if not coins:
