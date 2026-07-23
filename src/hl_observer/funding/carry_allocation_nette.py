@@ -54,14 +54,26 @@ from hl_observer.funding.carry_marge_dynamique import (MARGE_MAX_USD, MARGE_MIN_
 EXPOSANT_DEFAUT = 3.0
 
 
+#: 23/07 — borne DURE du tilt qualité cross-venue (défensive : même si un appelant passe un
+#: facteur aberrant, l'allocation le ramène ici). Un tilt SOFT ne peut NI renverser l'ordre du
+#: net³ NI baisser la barre (un net ≤ 0 reste à ZÉRO). Cf. `carry_qualite_cross_venue`.
+TILT_QUALITE_MIN, TILT_QUALITE_MAX = 0.90, 1.10
+
+
 def poids_par_rendement(net_par_coin: dict[str, float | None], *,
                         exposant: float = EXPOSANT_DEFAUT,
-                        part_max_par_coin: float = PART_MAX_PAR_COIN) -> dict[str, float]:
-    """{coin: poids} sommant à 1, ∝ net**exposant, plafonné par coin (excédent redistribué).
+                        part_max_par_coin: float = PART_MAX_PAR_COIN,
+                        qualite_par_coin: dict[str, float] | None = None) -> dict[str, float]:
+    """{coin: poids} sommant à 1, ∝ (net × tilt_qualité)**exposant, plafonné par coin (excédent
+    redistribué).
 
     Rendement absent, non numérique ou ≤ 0 -> poids ZÉRO (deny-by-default : on ne finance pas
     ce qu'on ne sait pas mesurer, et on ne finance pas une ligne qui perd). Si AUCUN coin n'a
     de rendement positif, retourne {} — l'appelant retombe alors sur la marge par défaut.
+
+    `qualite_par_coin` (23/07, OPTIONNEL) : un facteur de QUALITÉ cross-venue par coin, BORNÉ à
+    [0.90, 1.10] par sécurité. Il INCLINE le capital vers les coins au funding HL le plus robuste,
+    sans jamais toucher au levier ni baisser la barre du net. Absent -> comportement identique.
     """
     bruts: dict[str, float] = {}
     for coin, net in (net_par_coin or {}).items():
@@ -70,6 +82,10 @@ def poids_par_rendement(net_par_coin: dict[str, float | None], *,
         v = float(net)
         if v != v or v <= 0.0:                      # NaN ou ≤ 0
             continue
+        if qualite_par_coin:                        # tilt qualité SOFT et BORNÉ (jamais décisif seul)
+            q = qualite_par_coin.get(str(coin))
+            if isinstance(q, (int, float)) and not isinstance(q, bool) and q == q:
+                v *= min(TILT_QUALITE_MAX, max(TILT_QUALITE_MIN, float(q)))
         bruts[str(coin)] = v ** max(0.0, float(exposant))
     total = sum(bruts.values())
     if total <= 0.0:
@@ -98,7 +114,8 @@ def allouer_marges(net_par_coin: dict[str, float | None], *, capital_usd: float 
                    reserve_frac: float = RESERVE_FRAC_DEFAUT,
                    part_max_par_coin: float = PART_MAX_PAR_COIN,
                    marge_min_usd: float = MARGE_MIN_USD,
-                   marge_max_usd: float = MARGE_MAX_USD) -> dict[str, float]:
+                   marge_max_usd: float = MARGE_MAX_USD,
+                   qualite_par_coin: dict[str, float] | None = None) -> dict[str, float]:
     """{coin: marge_usd}. La marge PAR COIN, pondérée par le rendement net.
 
     Garde-fous identiques à `marge_par_position` (c'est le même capital, les mêmes règles) :
@@ -124,7 +141,8 @@ def allouer_marges(net_par_coin: dict[str, float | None], *, capital_usd: float 
         return {c: defaut for c in coins}
 
     poids = poids_par_rendement(net_par_coin, exposant=exposant,
-                                part_max_par_coin=part_max_par_coin)
+                                part_max_par_coin=part_max_par_coin,
+                                qualite_par_coin=qualite_par_coin)
     if not poids:
         return {c: defaut for c in coins}
 
@@ -138,7 +156,8 @@ def allouer_marges(net_par_coin: dict[str, float | None], *, capital_usd: float 
         for c in petits:
             marges.pop(c)
         restant = poids_par_rendement({c: net_par_coin[c] for c in marges}, exposant=exposant,
-                                      part_max_par_coin=part_max_par_coin)
+                                      part_max_par_coin=part_max_par_coin,
+                                      qualite_par_coin=qualite_par_coin)
         marges = {c: deployable * w for c, w in restant.items()}
     # dernier recours : capital trop petit pour QUI QUE CE SOIT -> une seule ligne au plancher.
     if marges and all(m < float(marge_min_usd) for m in marges.values()):

@@ -20,6 +20,7 @@ from hl_observer.funding.carry_anti_churn import (
     SORTIE_ABSENCE_PROLONGEE, churn_excessif, doit_fermer_pour_absence, filtrer_sortie,
 )
 from hl_observer.funding.carry_allocation_nette import allouer_marges, diagnostic
+from hl_observer.funding.carry_qualite_cross_venue import facteurs_qualite_carry
 from hl_observer.funding.carry_marge_dynamique import marge_par_position
 from hl_observer.funding.carry_position_lifecycle import (
     MODE_LIVE, MODES_VALIDES, GestionnaireCarry, pnl_realise,
@@ -140,8 +141,17 @@ def tick_multi_sur_disque(root: str | Path, mesures: dict[str, dict[str, Any]], 
     # calculait DEJA et qu'on jetait. Aucun levier ne bouge : aucune distance de liquidation
     # ne bouge. Donnee absente -> marge par defaut (on ne degrade jamais l'existant).
     nets = {coin: (m.get("decision") or {}).get("gain_net_24h_bps") for coin, m in mesures.items()}
+    # 🟠 23/07 — TILT QUALITÉ CROSS-VENUE (« gagner de l'argent avec le cross-venue », capturable).
+    # On incline le capital du carry vers les coins dont le funding HL est PERSISTAMMENT au-dessus de
+    # Binance (premium structurel, plus robuste), BORNÉ ±10 % : jamais décisif seul, jamais un levier
+    # ne bouge, un net ≤ 0 reste à ZÉRO. Source absente/illisible -> {} -> allocation INCHANGÉE. Ne
+    # peut PAS casser le poll (try/except) : le carry doit tourner même sans cette source.
+    try:
+        qualite = facteurs_qualite_carry(root)
+    except Exception:
+        qualite = {}
     marges = allouer_marges(nets, capital_usd=capital_usd, n_positions_visees=n_visees,
-                            marge_defaut_usd=marge)
+                            marge_defaut_usd=marge, qualite_par_coin=qualite)
     _publier_allocation(root, nets, marges, now_ms=now_ms, mode=mode)
     for coin, m in mesures.items():
         marge_coin = marges.get(coin)
