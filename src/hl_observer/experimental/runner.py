@@ -117,11 +117,28 @@ def tick(root: str | Path = ".", *, now_ms: float | None = None,
                 premier_signal = info
     MP.sauver_store(root, store)
     resume = MP.resume(root)
+    # 🔴 MtM COURANT par position -> pour que le dashboard MONTRE le mouvement (funding qui s'accumule,
+    # prix qui bougent). Recalcule les marks une fois ; donnée absente -> MtM = coût d'entrée (honnête).
+    cv = _marks_cross_venue(root)
+    dir_coins = {p["coin"] for p in store["ouvertes"].values() if p.get("type_pnl") == "directional"}
+    mids = _marks_hl_mid(root, dir_coins) if dir_coins else {}
+    positions = []
+    mtm_total = 0.0
+    for p in store["ouvertes"].values():
+        m = cv.get(p["coin"]) or {}
+        mtm = MP.pnl_courant_usd(p, mark=(mids.get(p["coin"]) or m.get("hl_px")),
+                                 base_courant_bps=m.get("base_bps"), now_ms=now)
+        mtm_total += mtm
+        positions.append({"coin": p["coin"], "moteur": p["moteur"], "sens": p["sens"],
+                          "notional_usd": p["notional_usd"], "prix_entree": p["prix_entree"],
+                          "edge_estime_bps": p["edge_estime_bps"], "type_pnl": p["type_pnl"],
+                          "mtm_usd": round(mtm, 6), "age_min": round((now - float(p["ts_ouverture_ms"])) / 60000.0, 1)})
     from collections import Counter
     refus_par_motif = dict(Counter(r.get("motif") for r in refus))
     statut = {"ts": time.time(), "now_ms": int(now), "ouvertures": ouvertures, "fermetures": fermetures,
               "n_refus": len(refus), "refus_par_motif": refus_par_motif, "premier_signal": premier_signal,
-              "resume": resume, "real_execution": False}
+              "resume": resume, "positions": positions, "mtm_total_usd": round(mtm_total, 6),
+              "real_execution": False}
     p = root / STATUS_RELPATH
     p.parent.mkdir(parents=True, exist_ok=True)
     tmp = p.with_suffix(".json.tmp")

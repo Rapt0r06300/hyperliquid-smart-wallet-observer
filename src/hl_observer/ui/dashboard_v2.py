@@ -271,7 +271,7 @@ th{letter-spacing:1.2px}
    <table><thead><tr><th style="width:34%">stratégie</th><th style="width:16%">positions</th><th style="width:26%">réalisé paper</th><th style="width:24%;text-align:right">état</th></tr></thead><tbody id="strattb"></tbody></table></div>
 
  <div class="card" style="margin-bottom:12px"><h3>EXPERIMENTAL_PAPER <span class="hint">— vraies positions SIMULÉES, SANS attendre l'OOS · ledger/budget ISOLÉS du livre live · <span id="xp-sum">…</span></span></h3>
-   <table><thead><tr><th style="width:16%">moteur</th><th style="width:12%">coin</th><th style="width:9%">sens</th><th style="width:17%">entrée (exéc.)</th><th style="width:16%">edge est. (bps)</th><th style="width:14%">notional</th><th style="width:16%;text-align:right">type PnL</th></tr></thead><tbody id="xptb"></tbody></table>
+   <table><thead><tr><th style="width:14%">moteur</th><th style="width:10%">coin</th><th style="width:8%">sens</th><th style="width:14%">entrée (exéc.)</th><th style="width:13%">edge est. (bps)</th><th style="width:11%">notional</th><th style="width:15%">MtM $ (vit)</th><th style="width:15%;text-align:right">âge (min)</th></tr></thead><tbody id="xptb"></tbody></table>
    <div class="hint" id="xp-refus" style="margin-top:8px"></div></div>
 
  <div class="card" style="margin-bottom:12px"><h3>TOP OPPORTUNITÉS <span class="hint" id="oppsum">— toutes stratégies · edge net après coûts —</span></h3>
@@ -815,8 +815,8 @@ function loadExperimental(){fetch('/v2/experimental').then(function(r){return r.
   var sm=document.getElementById('xp-sum');
   if(sm){var pm=d.par_moteur||{};var parts=[];for(var k in pm){parts.push(k+' '+(pm[k].positions||0)+'p / '+(Number(pm[k].realise_usd||0)>=0?'+':'')+n(Number(pm[k].realise_usd||0),2)+'$');}
     sm.textContent=(d.actif?'ACTIF':'éteint')+' · '+(d.positions_ouvertes||0)+' positions · réalisé '+(Number(d.realise_total_usd||0)>=0?'+':'')+n(Number(d.realise_total_usd||0),2)+'$ · '+parts.join(' · ');}
-  if(!pos.length){tb.innerHTML='<tr><td colspan="7" style="color:var(--mut)">— aucune position experimental_paper ouverte (en attente d\'un signal admissible) —</td></tr>';}
-  else{tb.innerHTML=pos.map(function(p){return '<tr><td>'+p.moteur+'</td><td><b>'+p.coin+'</b></td><td>'+(p.sens>0?'LONG':'SHORT')+'</td><td>'+p.prix_entree+'</td><td style="color:var(--grn)">+'+n(Number(p.edge_estime_bps||0),1)+'</td><td>'+n(Number(p.notional_usd||0),0)+'$</td><td style="text-align:right;color:var(--mut)">'+p.type_pnl+'</td></tr>';}).join('');}
+  if(!pos.length){tb.innerHTML='<tr><td colspan="8" style="color:var(--mut)">— aucune position experimental_paper ouverte (en attente d\'un signal admissible) —</td></tr>';}
+  else{tb.innerHTML=pos.map(function(p){var mtm=Number(p.mtm_usd||0);return '<tr><td>'+p.moteur+'</td><td><b>'+p.coin+'</b></td><td>'+(p.sens>0?'LONG':'SHORT')+'</td><td>'+p.prix_entree+'</td><td style="color:var(--grn)">+'+n(Number(p.edge_estime_bps||0),1)+'</td><td>'+n(Number(p.notional_usd||0),0)+'$</td><td style="color:'+col(mtm)+'">'+(mtm>=0?'+':'')+n(mtm,4)+'$</td><td style="text-align:right;color:var(--mut)">'+n(Number(p.age_min||0),1)+'</td></tr>';}).join('');}
   var rf=document.getElementById('xp-refus');
   if(rf){var rm=d.refus_par_motif||{};var rp=[];for(var m in rm){rp.push(m+'×'+rm[m]);}
     rf.textContent=rp.length?('refus dernier tick : '+rp.join(' · ')):'';}
@@ -1144,28 +1144,30 @@ def create_dashboard_v2_router() -> APIRouter:
 
     @router.get("/v2/experimental")
     def experimental_state() -> JSONResponse:
-        """Voie EXPERIMENTAL_PAPER (ISOLÉE du livre live) : positions ouvertes + PnL réalisé PAR moteur +
-        refus du dernier tick. 100% lecture seule, real_execution=False. Jamais mélangée au PnL canonique."""
+        """Voie EXPERIMENTAL_PAPER (ISOLÉE du livre live) — lit DIRECTEMENT le statut écrit par le
+        collecteur (aucun import du package -> robuste même si l'engine a démarré avant la synchro).
+        `actif` = le collecteur a tourné récemment. 100% lecture seule, real_execution=False."""
         try:
             import json as _json
+            import time as _time
             from pathlib import Path as _P
-            from hl_observer.experimental.moteur_paper import charger_store, resume
-            root = _P(__file__).resolve().parents[3]
-            r = resume(root)
-            store = charger_store(root)
-            positions = [{"coin": p.get("coin"), "moteur": p.get("moteur"), "sens": p.get("sens"),
-                          "notional_usd": p.get("notional_usd"), "prix_entree": p.get("prix_entree"),
-                          "edge_estime_bps": p.get("edge_estime_bps"), "type_pnl": p.get("type_pnl")}
-                         for p in store.get("ouvertes", {}).values()]
+            rd = _P(__file__).resolve().parents[3] / "runtime" / "data"
             statut = {}
             try:
-                statut = _json.loads((root / "runtime" / "data" / "experimental_paper_status.json")
-                                     .read_text(encoding="utf-8"))
+                statut = _json.loads((rd / "experimental_paper_status.json").read_text(encoding="utf-8"))
             except (OSError, ValueError):
                 pass
-            return JSONResponse({**r, "actif": bool(_os.environ.get("HYPERSMART_EXPERIMENTAL_PAPER", "0") == "1"),
-                                 "positions": positions, "refus_par_motif": statut.get("refus_par_motif", {}),
-                                 "premier_signal": statut.get("premier_signal"), "read_only": True})
+            frais = bool(statut and (_time.time() - float(statut.get("ts") or 0)) < 180.0)
+            resume = statut.get("resume", {})
+            positions = statut.get("positions", [])
+            return JSONResponse({
+                "actif": frais, "positions": positions,
+                "positions_ouvertes": resume.get("positions_ouvertes", len(positions)),
+                "realise_total_usd": resume.get("realise_total_usd", 0.0),
+                "mtm_total_usd": statut.get("mtm_total_usd", 0.0),
+                "par_moteur": resume.get("par_moteur", {}),
+                "refus_par_motif": statut.get("refus_par_motif", {}),
+                "premier_signal": statut.get("premier_signal"), "read_only": True, "real_execution": False})
         except Exception as exc:  # noqa: BLE001 — un panneau ne casse jamais la page
             return JSONResponse({"error": str(exc), "positions": [], "positions_ouvertes": 0,
                                  "par_moteur": {}, "realise_total_usd": 0.0})
