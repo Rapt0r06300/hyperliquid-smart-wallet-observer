@@ -24,19 +24,22 @@ HOLD_H = 168.0
 def signaux_cross_venue(root: str | Path = ".", *, now_ms: float | None = None) -> tuple[list[Signal], list[dict]]:
     """Sur les SURVIVANTS GELÉS : ouvre un carry delta-neutre quand le funding courant est frais, le
     carnet donne un coût exécutable, et l'edge NET (|d|×hold − coûts) reste > 0. PAS d'attente des 168 h."""
+    import os
     from hl_observer.funding.cross_venue_carry_judge import charger_series
-    from hl_observer.funding.cross_venue_carry_paper import couts_carnet
+    from hl_observer.experimental.carry_deux_jambes import carnet_par_coin, construire_jambes, FRAIS_TAKER_HL_BPS, FRAIS_TAKER_BIN_BPS
     root = Path(root)
     now = float(now_ms if now_ms is not None else time.time() * 1000)
     sigs: list[Signal] = []
     refus: list[dict] = []
+    if os.environ.get("HYPERSMART_EXPERIMENTAL_CROSS_VENUE_GELE", "0") == "1":
+        return sigs, [{"moteur": "cross_venue", "motif": "COHORTE_GELEE"}]   # audit : plus d'ouverture
     try:
         base = json.loads((root / BASELINE_RELPATH).read_text(encoding="utf-8"))
         survivants = {s["coin"].upper() for s in base.get("survivants", [])}
     except (OSError, ValueError, KeyError):
         return sigs, [{"moteur": "cross_venue", "motif": "PAS_DE_BASELINE"}]
     series = charger_series(root)
-    couts = couts_carnet(root)
+    carnet = carnet_par_coin(root)
     notional = LIMITES["cross_venue"]["notional_usd"]
     for coin in survivants:
         s = series.get(coin)
@@ -45,23 +48,31 @@ def signaux_cross_venue(root: str | Path = ".", *, now_ms: float | None = None) 
         ts, hl_px, bin_px, hl_f, bin_f = s[-1]                     # dernier tick réel
         if (now / 1000.0 - float(ts)) > 120.0:                    # funding > 2 min = périmé
             refus.append({"moteur": "cross_venue", "coin": coin, "motif": "FUNDING_PERIME"}); continue
-        cout_ar = couts.get(coin)
-        if cout_ar is None:
+        car = carnet.get(coin)
+        if not car:
             refus.append({"moteur": "cross_venue", "coin": coin, "motif": "CARNET_ABSENT"}); continue
         d = hl_f - bin_f                                          # funding net/h signé
-        base_bps = 1e4 * (hl_px - bin_px) / bin_px if bin_px else 0.0
-        edge_net = abs(d) * HOLD_H - (cout_ar + FRAIS_AR_BPS)     # net après coûts A/R complets
+        sens = 1 if d >= 0 else -1
+        aud = construire_jambes(coin, sens, notional, car)        # DEUX jambes exécutables
+        if not aud["liquidite_ok"]:                              # profondeur < notional -> non exécutable
+            refus.append({"moteur": "cross_venue", "coin": coin, "motif": "LIQUIDITE_INSUFFISANTE",
+                          "profondeur_usd": aud["profondeur_usd"]}); continue
+        cout_ar = aud["frais_entree_reels_bps"] + aud["cout_sortie_estime_bps"]   # A/R RÉEL des 2 jambes
+        edge_net = abs(d) * HOLD_H - cout_ar
         if edge_net <= 0:
             refus.append({"moteur": "cross_venue", "coin": coin, "motif": "EDGE_NEGATIF",
                           "edge_bps": round(edge_net, 2)}); continue
-        if hl_px <= 0:
-            refus.append({"moteur": "cross_venue", "coin": coin, "motif": "PRIX_NON_EXECUTABLE"}); continue
+        j = aud["jambes"]
         sigs.append(Signal(
-            moteur="cross_venue", coin=coin, sens=1 if d >= 0 else -1, type_pnl="funding_carry",
-            notional_usd=notional, prix_entree=float(hl_px), cout_entree_bps=(cout_ar + FRAIS_AR_BPS) / 2.0,
+            moteur="cross_venue", coin=coin, sens=sens, type_pnl="funding_carry", notional_usd=notional,
+            prix_entree=j["hl"]["prix_exec"], cout_entree_bps=aud["frais_entree_reels_bps"],
             edge_estime_bps=round(edge_net, 4), ts_signal_ms=float(ts) * 1000.0,
-            frais_bps=FRAIS_AR_BPS / 2.0, spread_bps=cout_ar / 2.0, d_bps_h=d, base_entree_bps=base_bps,
-            hold_h=HOLD_H, meta={"hl_px": hl_px, "bin_px": bin_px, "cout_ar_bps": cout_ar}))
+            frais_bps=FRAIS_TAKER_HL_BPS + FRAIS_TAKER_BIN_BPS,
+            spread_bps=j["hl"]["demi_spread_bps"] + j["bin"]["demi_spread_bps"],
+            slippage_bps=j["hl"]["slippage_bps"] + j["bin"]["slippage_bps"], d_bps_h=d,
+            base_entree_bps=aud["base_bps"], hold_h=HOLD_H,
+            meta={"jambes": j, "hedge_ratio": aud["hedge_ratio"], "hl_px": aud["hl_mid"],
+                  "bin_px": aud["bin_mid"], "cout_ar_bps": cout_ar, "profondeur_usd": aud["profondeur_usd"]}))
     return sigs, refus
 
 

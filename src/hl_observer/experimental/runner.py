@@ -54,25 +54,59 @@ def _marks_hl_mid(root: Path, coins: set[str], *, max_lignes: int = 40000) -> di
     return out
 
 
+BASIS_ADVERSE_BPS = 15.0            # base qui dérive contre nous de > ça -> sortie
+
+
+def _raison_sortie_carry(pos: dict, m: dict, car: dict | None, *, now_ms: float, age_h: float) -> str | None:
+    """Les 6 sorties auto du carry : funding flip, quote périmée, liquidité insuffisante, basis adverse,
+    edge net restant disparu, durée max. Renvoie le motif OU None (on garde)."""
+    from hl_observer.experimental.carry_deux_jambes import CARNET_AGE_MAX_S
+    d_now, d_ent = float(m["d_bps_h"]), float(pos.get("d_bps_h") or 0.0)
+    if (d_now >= 0) != (d_ent >= 0):
+        return "FUNDING_FLIP"
+    if car and (now_ms / 1000.0 - float(car.get("collecte_ts") or 0.0)) > CARNET_AGE_MAX_S:
+        return "QUOTE_PERIMEE"
+    if car and float(car.get("taille_min_usd") or 0.0) < float(pos.get("notional_usd") or 0.0):
+        return "LIQUIDITE_INSUFFISANTE"
+    base_ent = float(pos.get("base_entree_bps") or 0.0)
+    base_cur = float(m.get("base_bps") if m.get("base_bps") is not None else base_ent)
+    if -int(pos.get("sens") or 1) * (base_cur - base_ent) < -BASIS_ADVERSE_BPS:
+        return "BASIS_ADVERSE"
+    reste_h = max(0.0, float(pos.get("hold_h") or 168.0) - age_h)
+    cout_ar = float((pos.get("meta") or {}).get("cout_ar_bps") or 0.0)
+    if abs(d_now) * reste_h <= cout_ar:
+        return "EDGE_DISPARU"
+    if age_h >= float(pos.get("hold_h") or 168.0):
+        return "HOLD_ATTEINT"
+    return None
+
+
 def _gerer_sorties(store: dict, root: Path, *, now_ms: float) -> list[dict]:
-    """Sort les positions dont la condition de sortie est atteinte, au prix exécutable courant."""
+    """Sort les positions dont une condition de sortie est atteinte, au prix exécutable courant.
+    Les sorties CROSS-VENUE sont GELÉES pendant l'audit (HYPERSMART_EXPERIMENTAL_CROSS_VENUE_GELE=1) :
+    on garde la cohorte intacte. Les sorties directionnelles (lead-lag) restent actives."""
+    import os
     fermetures: list[dict] = []
     cv = _marks_cross_venue(root)
+    from hl_observer.experimental.carry_deux_jambes import carnet_par_coin
+    carnet = carnet_par_coin(root)
+    gele_cv = os.environ.get("HYPERSMART_EXPERIMENTAL_CROSS_VENUE_GELE", "0") == "1"
     dir_coins = {p["coin"] for p in store["ouvertes"].values() if p.get("type_pnl") == "directional"}
     mids = _marks_hl_mid(root, dir_coins) if dir_coins else {}
     for pos in list(store["ouvertes"].values()):
         age_h = (now_ms - float(pos.get("ts_ouverture_ms") or now_ms)) / 3.6e6
         if pos.get("type_pnl") == "funding_carry":
+            if gele_cv:
+                continue                                          # cohorte GELÉE pour l'audit -> aucune sortie
             m = cv.get(pos["coin"])
             if not m or m.get("hl_px") is None:
                 continue                                          # pas de mark frais -> on GARDE (pas de sortie aveugle)
-            d_now = float(m["d_bps_h"])
-            flip = (d_now >= 0) != (float(pos.get("d_bps_h") or 0.0) >= 0)
-            if flip or age_h >= float(pos.get("hold_h") or MP.LIMITES["cross_venue"].get("hold_h", 168.0)):
+            raison = _raison_sortie_carry(pos, m, carnet.get(pos["coin"]), now_ms=now_ms, age_h=age_h)
+            if raison:
                 cout_sortie = (m.get("cout_ar_bps") or 0.0) / 2.0 + 3.3
                 fermetures.append(MP.sortir(pos, store, root, prix_sortie=m["hl_px"],
                                             cout_sortie_bps=cout_sortie, base_courant_bps=m["base_bps"],
-                                            raison="FUNDING_FLIP" if flip else "HOLD_ATTEINT", now_ms=now_ms))
+                                            raison=raison, now_ms=now_ms))
         else:  # directionnel (lead_lag / copy_vault)
             horizon_ms = float((pos.get("meta") or {}).get("horizon_ms") or 1000.0)
             mur_ms = max(horizon_ms, 2000.0) if pos["moteur"] == "lead_lag" else 24 * 3.6e6
@@ -119,7 +153,9 @@ def tick(root: str | Path = ".", *, now_ms: float | None = None,
     resume = MP.resume(root)
     # 🔴 MtM COURANT par position -> pour que le dashboard MONTRE le mouvement (funding qui s'accumule,
     # prix qui bougent). Recalcule les marks une fois ; donnée absente -> MtM = coût d'entrée (honnête).
+    from hl_observer.experimental.carry_deux_jambes import carnet_par_coin, decomposer
     cv = _marks_cross_venue(root)
+    carnet = carnet_par_coin(root)
     dir_coins = {p["coin"] for p in store["ouvertes"].values() if p.get("type_pnl") == "directional"}
     mids = _marks_hl_mid(root, dir_coins) if dir_coins else {}
     positions = []
@@ -129,10 +165,17 @@ def tick(root: str | Path = ".", *, now_ms: float | None = None,
         mtm = MP.pnl_courant_usd(p, mark=(mids.get(p["coin"]) or m.get("hl_px")),
                                  base_courant_bps=m.get("base_bps"), now_ms=now)
         mtm_total += mtm
-        positions.append({"coin": p["coin"], "moteur": p["moteur"], "sens": p["sens"],
-                          "notional_usd": p["notional_usd"], "prix_entree": p["prix_entree"],
-                          "edge_estime_bps": p["edge_estime_bps"], "type_pnl": p["type_pnl"],
-                          "mtm_usd": round(mtm, 6), "age_min": round((now - float(p["ts_ouverture_ms"])) / 60000.0, 1)})
+        e = {"coin": p["coin"], "moteur": p["moteur"], "sens": p["sens"], "notional_usd": p["notional_usd"],
+             "prix_entree": p["prix_entree"], "edge_estime_bps": p["edge_estime_bps"], "type_pnl": p["type_pnl"],
+             "mtm_usd": round(mtm, 6), "age_min": round((now - float(p["ts_ouverture_ms"])) / 60000.0, 1)}
+        if p.get("type_pnl") == "funding_carry":                 # AUDIT DEUX JAMBES + décomposition PnL
+            dec = decomposer(p, carnet_courant=carnet.get(p["coin"]), d_courant=m.get("d_bps_h"),
+                             base_courant_bps=m.get("base_bps"), now_ms=now)
+            e["decomposition"] = dec
+            e["jambes"] = dec.get("jambes") or (p.get("meta") or {}).get("jambes")
+            e["hedge_ratio"] = dec.get("hedge_ratio") or (p.get("meta") or {}).get("hedge_ratio")
+            e["liquidite_ok"] = dec.get("liquidite_ok")
+        positions.append(e)
     from collections import Counter
     refus_par_motif = dict(Counter(r.get("motif") for r in refus))
     statut = {"ts": time.time(), "now_ms": int(now), "ouvertures": ouvertures, "fermetures": fermetures,

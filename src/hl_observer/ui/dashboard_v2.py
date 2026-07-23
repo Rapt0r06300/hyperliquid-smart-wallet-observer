@@ -267,11 +267,11 @@ th{letter-spacing:1.2px}
    <div class="st"><div class="k">Profit factor</div><div class="v" id="pf">…</div></div>
  </div>
 
- <div class="card" style="margin-bottom:12px"><h3>STRATÉGIES <span class="hint">— toutes actives EN PARALLÈLE · une position ne s'ouvre QUE si l'edge est prouvé (refuser = protéger le capital) —</span></h3>
+ <div class="card" style="margin-bottom:12px"><h3>MAIN_PAPER <span class="hint">— livre principal (copy · carry RETIRÉ · arbitrage) · le grand chiffre en haut = MAIN_PAPER · la voie EXPERIMENTAL_PAPER ci-dessous est SÉPARÉE (ledger/budget isolés, jamais mélangée) —</span></h3>
    <table><thead><tr><th style="width:34%">stratégie</th><th style="width:16%">positions</th><th style="width:26%">réalisé paper</th><th style="width:24%;text-align:right">état</th></tr></thead><tbody id="strattb"></tbody></table></div>
 
- <div class="card" style="margin-bottom:12px"><h3>EXPERIMENTAL_PAPER <span class="hint">— vraies positions SIMULÉES, SANS attendre l'OOS · ledger/budget ISOLÉS du livre live · <span id="xp-sum">…</span></span></h3>
-   <table><thead><tr><th style="width:14%">moteur</th><th style="width:10%">coin</th><th style="width:8%">sens</th><th style="width:14%">entrée (exéc.)</th><th style="width:13%">edge est. (bps)</th><th style="width:11%">notional</th><th style="width:15%">MtM $ (vit)</th><th style="width:15%;text-align:right">âge (min)</th></tr></thead><tbody id="xptb"></tbody></table>
+ <div class="card" style="margin-bottom:12px"><h3>EXPERIMENTAL_PAPER <span class="hint">— vraies positions SIMULÉES, SANS attendre l'OOS · ledger/budget ISOLÉS du livre live (≠ MAIN_PAPER = copy+carry) · <span id="xp-sum">…</span></span></h3>
+   <table><thead><tr><th style="width:16%">coin · 2 jambes (venue sens @ prix exéc.)</th><th style="width:8%">hedge</th><th style="width:11%">frais RÉELS payés</th><th style="width:14%">funding settled / accru</th><th style="width:9%">basis</th><th style="width:13%">liquidable maintenant</th><th style="width:8%">liq.</th><th style="width:9%;text-align:right">âge min</th></tr></thead><tbody id="xptb"></tbody></table>
    <div class="hint" id="xp-refus" style="margin-top:8px"></div></div>
 
  <div class="card" style="margin-bottom:12px"><h3>TOP OPPORTUNITÉS <span class="hint" id="oppsum">— toutes stratégies · edge net après coûts —</span></h3>
@@ -815,8 +815,17 @@ function loadExperimental(){fetch('/v2/experimental').then(function(r){return r.
   var sm=document.getElementById('xp-sum');
   if(sm){var pm=d.par_moteur||{};var parts=[];for(var k in pm){parts.push(k+' '+(pm[k].positions||0)+'p / '+(Number(pm[k].realise_usd||0)>=0?'+':'')+n(Number(pm[k].realise_usd||0),2)+'$');}
     sm.textContent=(d.actif?'ACTIF':'éteint')+' · '+(d.positions_ouvertes||0)+' positions · réalisé '+(Number(d.realise_total_usd||0)>=0?'+':'')+n(Number(d.realise_total_usd||0),2)+'$ · '+parts.join(' · ');}
-  if(!pos.length){tb.innerHTML='<tr><td colspan="8" style="color:var(--mut)">— aucune position experimental_paper ouverte (en attente d\'un signal admissible) —</td></tr>';}
-  else{tb.innerHTML=pos.map(function(p){var mtm=Number(p.mtm_usd||0);return '<tr><td>'+p.moteur+'</td><td><b>'+p.coin+'</b></td><td>'+(p.sens>0?'LONG':'SHORT')+'</td><td>'+p.prix_entree+'</td><td style="color:var(--grn)">+'+n(Number(p.edge_estime_bps||0),1)+'</td><td>'+n(Number(p.notional_usd||0),0)+'$</td><td style="color:'+col(mtm)+'">'+(mtm>=0?'+':'')+n(mtm,4)+'$</td><td style="text-align:right;color:var(--mut)">'+n(Number(p.age_min||0),1)+'</td></tr>';}).join('');}
+  if(!pos.length){tb.innerHTML='<tr><td colspan="8" style="color:var(--mut)">— aucune position experimental_paper ouverte (cohorte gelée ou en attente d\'un signal admissible) —</td></tr>';}
+  else{tb.innerHTML=pos.map(function(p){var d=p.decomposition||{};var j=p.jambes||{};
+    var jtxt=(j.hl&&j.bin)?('<b>'+p.coin+'</b> · HL '+j.hl.sens_txt+'@'+j.hl.prix_exec+' · BIN '+j.bin.sens_txt+'@'+j.bin.prix_exec):('<b>'+p.coin+'</b> ('+p.moteur+')');
+    var liq=Number((d.pnl_liquidable_maintenant_usd!=null)?d.pnl_liquidable_maintenant_usd:p.mtm_usd||0);
+    var liqok=(p.liquidite_ok===false)?'<span style="color:var(--red)">INSUFF</span>':'OK';
+    return '<tr><td>'+jtxt+'</td><td>'+(p.hedge_ratio!=null?n(Number(p.hedge_ratio),2):'—')+'</td>'
+      +'<td style="color:var(--red)">-'+n(Number(d.frais_entree_payes_usd||0),4)+'$ <span style="color:var(--mut)">('+n(Number(d.frais_entree_reels_bps||0),1)+'bps)</span></td>'
+      +'<td>'+n(Number(d.funding_settled_usd||0),4)+'$ / <span style="color:var(--mut)">~'+n(Number(d.funding_accru_estime_usd||0),4)+'$</span></td>'
+      +'<td style="color:'+col(Number(d.pnl_basis_usd||0))+'">'+n(Number(d.pnl_basis_usd||0),4)+'$</td>'
+      +'<td style="color:'+col(liq)+'"><b>'+(liq>=0?'+':'')+n(liq,4)+'$</b></td>'
+      +'<td>'+liqok+'</td><td style="text-align:right;color:var(--mut)">'+n(Number(p.age_min||0),1)+'</td></tr>';}).join('');}
   var rf=document.getElementById('xp-refus');
   if(rf){var rm=d.refus_par_motif||{};var rp=[];for(var m in rm){rp.push(m+'×'+rm[m]);}
     rf.textContent=rp.length?('refus dernier tick : '+rp.join(' · ')):'';}
