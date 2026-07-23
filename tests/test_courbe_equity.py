@@ -22,9 +22,21 @@ def _ledger(tmp_path, lignes):
     return tmp_path
 
 
-def _close(ts, pnl, coin="BTC", mode="LIVE", strategie="carry"):
+# 🔴 23/07 : le carry delta-neutre est RETIRÉ (exclu de la courbe live par défaut). Ces tests vérifient
+# la MÉCANIQUE de la courbe (agnostique à la stratégie) -> on utilise une stratégie VIVANTE (arbitrage).
+def _close(ts, pnl, coin="BTC", mode="LIVE", strategie="arbitrage"):
     return {"kind": "CLOSE", "mode": mode, "ts_ms": ts, "realized_net_pnl_usdc": pnl,
             "coin": coin, "strategie": strategie}
+
+
+def test_le_carry_retire_est_exclu_de_la_courbe_live_mais_reste_au_ledger(tmp_path):
+    """🔴 23/07 (décision Flo) — les CLOSE du carry retiré n'entrent plus dans la courbe LIVE ;
+    l'arbitrage du même ledger reste. Tout est réaffichable (audit) via exclure_strategies=∅."""
+    root = _ledger(tmp_path, [_close(1000, -10.0, strategie="carry"),
+                              _close(2000, -2.0, strategie="arbitrage")])
+    c = ce.construire(root, now_ms=3000)
+    assert c["evenements"] == 1 and c["realise_cumule"] == pytest.approx(-2.0)   # seul l'arbitrage
+    assert len(ce.evenements_realises(root, exclure_strategies=frozenset())) == 2   # audit : voit tout
 
 
 # ─────────────────────────── la série vient du ledger ───────────────────────────
