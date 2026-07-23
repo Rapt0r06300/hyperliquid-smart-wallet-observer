@@ -81,6 +81,25 @@ def test_snapshot_porte_ecart_ages_timestamps_et_update_id():
     assert "age_hl_ms" in s and "desync_ms" in s and s["real_execution"] is False
 
 
+def test_sceller_shard_compresse_immuable_et_retention_bornee(tmp_path):
+    m = _mod()
+    tape = tmp_path / "runtime" / "data" / "bbo_tape.jsonl"
+    tape.parent.mkdir(parents=True, exist_ok=True)
+    tape.write_text("x" * 5000 + "\n", encoding="utf-8")          # > seuil de test
+    nom = m.sceller_shard(tmp_path, seuil_octets=1000, max_shards=2)
+    assert nom and nom.endswith(".jsonl.gz")
+    shards = tmp_path / "runtime" / "data" / "bbo_shards"
+    assert list(shards.glob("*.jsonl.gz")) and not list(shards.glob("*.tmp"))  # immuable, pas de temp
+    assert tape.read_text(encoding="utf-8") == ""                 # la tape vivante repart a zero
+    # trop petite -> pas de shard ; retention FIFO : au-dela de max_shards on purge le plus vieux
+    tape.write_text("y" * 20, encoding="utf-8")
+    assert m.sceller_shard(tmp_path, seuil_octets=1000) is None
+    for _ in range(3):
+        tape.write_text("z" * 5000, encoding="utf-8")
+        m.sceller_shard(tmp_path, seuil_octets=1000, max_shards=2)
+    assert len(list(shards.glob("*.jsonl.gz"))) <= 2              # borne respectee
+
+
 def test_mesurer_lead_lag_detecte_que_binance_MENE():
     m = _mod()
     # HL suit Binance avec 2 pas (200 ms) de retard : hl_mid[i] = bin_mid[i-2]

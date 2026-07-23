@@ -29,9 +29,13 @@ MARQUEUR = Path("runtime") / "data" / "lanceur_session_marqueur.txt"
 AGE_MAX_MS = 750.0                 # au-delà (horloge MONOTONE), quote périmée -> rejet
 FENETRE_SYNCHRO_MS = 250.0         # HL et Binance frais à moins de ça l'un de l'autre (monotone)
 GAP_MS = 5000.0                    # aucun message d'une venue pendant ça = TROU de données noté
-#: 🔴 garde-fou DISQUE : la tape brute grossit ~1 Go/h (chaque message BBO). Au-dela de ce plafond on
-#: ROTE (rename -> .prev) : bornee a 2×, garde le recent. Le bot a deja crashe une fois sur disque plein.
-MAX_TAPE_OCTETS = 500 * 1024 * 1024
+#: 🔴 garde-fou DISQUE + PREUVES. La tape brute grossit ~1 Go/h. Plutot que RENOMMER (qui DETRUIT
+#: l'historique au-dela de 2×), on SCELLE la tape vivante en SHARD COMPRESSE IMMUABLE (.jsonl.gz,
+#: ~10× plus petit) quand elle depasse SHARD_OCTETS, puis retention BORNEE (purge du plus vieux au-dela
+#: de MAX_SHARDS). Ainsi on garde des JOURS d'historique pour le forward/OOS sans jamais remplir le disque.
+SHARDS_DIR = Path("runtime") / "data" / "bbo_shards"
+SHARD_OCTETS = 80 * 1024 * 1024
+MAX_SHARDS = 60                    # ~60 shards gz (~0,6-1 Go compresses, plusieurs jours) puis purge FIFO
 
 _EXCEPTIONS = {"PEPE": "1000PEPEUSDT", "SHIB": "1000SHIBUSDT", "BONK": "1000BONKUSDT",
                "FLOKI": "1000FLOKIUSDT", "LUNC": "1000LUNCUSDT", "SATS": "1000SATSUSDT",
@@ -167,6 +171,37 @@ def mesurer_lead_lag(series: list[tuple[float, float, float]], *, lag_ms: float)
     return round(num / den, 4) if den > 0 else None
 
 
+def sceller_shard(root: Path, *, seuil_octets: int = SHARD_OCTETS, max_shards: int = MAX_SHARDS) -> str | None:
+    """SCELLE la tape vivante en shard IMMUABLE compresse (gzip) + retention FIFO bornee. Preserve
+    l'historique pour le forward/OOS sans laisser le disque exploser. None si la tape est trop petite.
+    Appelee UNIQUEMENT depuis la tache d'ecriture, juste apres un flush (aucune ecriture concurrente
+    du fichier entre le flush et le scellement : asyncio mono-thread, pas d'await entre les deux)."""
+    import gzip
+    import os
+    src = root / TAPE
+    if not src.exists() or src.stat().st_size < seuil_octets:
+        return None
+    dossier = root / SHARDS_DIR
+    dossier.mkdir(parents=True, exist_ok=True)
+    nom = "bbo_tape_%d.jsonl.gz" % time.time_ns()
+    tmp = dossier / (nom + ".tmp")
+    with src.open("rb") as fi, gzip.open(tmp, "wb") as fo:    # compresse ~10×
+        while True:
+            buf = fi.read(1 << 20)
+            if not buf:
+                break
+            fo.write(buf)
+    os.replace(tmp, dossier / nom)                            # atomique -> shard IMMUABLE (jamais reouvert)
+    src.write_text("", encoding="utf-8")                      # la tape vivante repart a zero (= recent)
+    shards = sorted(dossier.glob("bbo_tape_*.jsonl.gz"))
+    for vieux in shards[:-max_shards]:                        # retention bornee : purge du plus vieux
+        try:
+            vieux.unlink()
+        except OSError:
+            pass
+    return nom
+
+
 # ─────────────────────────────── boucle WS PERSISTANTE (asyncio) ───────────────────────────────
 
 async def _boucle(root: Path, coins: list[str]) -> None:  # pragma: no cover (I/O réseau)
@@ -181,6 +216,7 @@ async def _boucle(root: Path, coins: list[str]) -> None:  # pragma: no cover (I/
     #: chaque BBO reçu ; `lead_lag_shadow` reconstruit ensuite la réaction HL à n'importe quel horizon.
     tape: list[dict] = []
     stats = {"ecrits": 0, "rejets": 0, "reconnexions_hl": 0, "reconnexions_bin": 0, "trous": 0,
+             "frames_bookticker": 0, "frames_aggtrade": 0, "shards_scelles": 0,
              "dernier_hl_ns": 0, "dernier_bin_ns": 0, "debut_mono_ns": time.monotonic_ns()}
     marqueur0 = MARQUEUR.read_text(encoding="utf-8").strip() if MARQUEUR.exists() else ""
 
@@ -206,11 +242,12 @@ async def _boucle(root: Path, coins: list[str]) -> None:  # pragma: no cover (I/
                 stats["reconnexions_hl"] += 1
                 await asyncio.sleep(1.0)
 
-    async def binance():
-        # bookTicker (entrée exécutable) ET aggTrade (détection du CHOC) sur une seule connexion.
-        streams = "/".join(["%s@bookTicker" % s.lower() for s in sym.values()]
-                           + ["%s@aggTrade" % s.lower() for s in sym.values()])
-        inv = {s.upper(): c for c, s in sym.items()}
+    inv = {s.upper(): c for c, s in sym.items()}
+
+    async def binance_bt():
+        # bookTicker (entrée exécutable) sur SA connexion. Séparée de l'aggTrade : la très haute
+        # fréquence du bookTicker ne peut plus AFFAMER l'aggTrade (cause probable des 0 trades captés).
+        streams = "/".join("%s@bookTicker" % s.lower() for s in sym.values())
         while True:
             try:
                 async with websockets.connect("%s?streams=%s" % (WS_BINANCE, streams), ping_interval=20) as ws:
@@ -219,17 +256,29 @@ async def _boucle(root: Path, coins: list[str]) -> None:  # pragma: no cover (I/
                         if stats["dernier_bin_ns"] and (r - stats["dernier_bin_ns"]) / 1e6 > GAP_MS:
                             stats["trous"] += 1
                         stats["dernier_bin_ns"] = r
-                        m = json.loads(raw)
-                        q = parser_bookticker_binance(m)
+                        q = parser_bookticker_binance(json.loads(raw))
                         if q and q["symbol"] in inv:
+                            stats["frames_bookticker"] += 1
                             mag.maj_binance(q, inv[q["symbol"]], recu_mono_ns=r)
                             tape.append({"venue": "BIN", "coin": inv[q["symbol"]], "recu_ns": r,
                                          "mid": (q["bid"] + q["ask"]) / 2, "bid": q["bid"], "ask": q["ask"],
                                          "ts_wall_ms": time.time() * 1000, "ts_ex": q["ts_ex"],
                                          "update_id": q.get("update_id")})
-                            continue
-                        t = parser_aggtrade_binance(m)
-                        if t and t["symbol"] in inv:                # le CHOC exécutable
+            except Exception:  # noqa: BLE001 — reconnecte SEULEMENT sur panne
+                stats["reconnexions_bin"] += 1
+                await asyncio.sleep(1.0)
+
+    async def binance_ag():
+        # aggTrade = le CHOC exécutable (jamais le mid, qui reste un simple CONTRÔLE dans lead_lag).
+        streams = "/".join("%s@aggTrade" % s.lower() for s in sym.values())
+        while True:
+            try:
+                async with websockets.connect("%s?streams=%s" % (WS_BINANCE, streams), ping_interval=20) as ws:
+                    async for raw in ws:
+                        r = time.monotonic_ns()
+                        t = parser_aggtrade_binance(json.loads(raw))
+                        if t and t["symbol"] in inv:
+                            stats["frames_aggtrade"] += 1
                             tape.append({"venue": "BIN_TRADE", "coin": inv[t["symbol"]], "recu_ns": r,
                                          "px": t["px"], "sz": t["sz"], "side": t["side"],
                                          "ts_wall_ms": time.time() * 1000, "ts_ex": t["ts_ex"]})
@@ -251,10 +300,8 @@ async def _boucle(root: Path, coins: list[str]) -> None:  # pragma: no cover (I/
             if tape:                                           # flush de la TAPE brute (lead-lag fin)
                 CF.append_jsonl(root / TAPE, list(tape))
                 tape.clear()
-                p_tape = root / TAPE                           # garde-fou disque : rotation bornee
-                if p_tape.exists() and p_tape.stat().st_size > MAX_TAPE_OCTETS:
-                    import os as _os
-                    _os.replace(p_tape, p_tape.with_suffix(".jsonl.prev"))
+                if sceller_shard(root):                        # scelle un shard gz immuable si la tape est pleine
+                    stats["shards_scelles"] += 1
             duree_s = (now_ns - stats["debut_mono_ns"]) / 1e9
             hb = {"ts": time.time(), "duree_continue_s": round(duree_s, 1), **stats,
                   "taux_rejet": round(stats["rejets"] / max(1, stats["ecrits"] + stats["rejets"]), 4)}
@@ -263,7 +310,7 @@ async def _boucle(root: Path, coins: list[str]) -> None:  # pragma: no cover (I/
             if marq != marqueur0:                              # anti-orphelin : la session a changé -> stop
                 return
 
-    await asyncio.gather(hl(), binance(), ecrire_et_superviser())
+    await asyncio.gather(hl(), binance_bt(), binance_ag(), ecrire_et_superviser())
 
 
 def main(argv: list[str] | None = None) -> int:  # pragma: no cover
@@ -304,8 +351,9 @@ def resume(root: str | Path = ".") -> dict[str, Any]:
         return {"duree_continue_s": 0, "ecrits": 0, "taux_rejet": None, "verdict": "PAS_ENCORE_LANCE"}
 
 
-__all__ = ["symbole_binance", "parser_bbo_hl", "parser_bookticker_binance", "MagasinBBO",
-           "mesurer_lead_lag", "resume", "AGE_MAX_MS", "FENETRE_SYNCHRO_MS", "GAP_MS", "SORTIE"]
+__all__ = ["symbole_binance", "parser_bbo_hl", "parser_bookticker_binance", "parser_aggtrade_binance",
+           "MagasinBBO", "mesurer_lead_lag", "sceller_shard", "resume",
+           "AGE_MAX_MS", "FENETRE_SYNCHRO_MS", "GAP_MS", "SHARD_OCTETS", "MAX_SHARDS", "SORTIE"]
 
 
 if __name__ == "__main__":                                 # 🔴 MANQUAIT : sans ce garde, le script
