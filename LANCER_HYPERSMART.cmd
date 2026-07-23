@@ -346,6 +346,13 @@ REM ⚠️ Binance = SOURCE DE PRIX uniquement. Lecture seule, 0 cle, 0 ordre.
 start "" /b tools\boucle_collecteur.cmd venues-collector tools\collecter_dispersion_venues.py 60 --une-fois
 start "" /b tools\boucle_collecteur.cmd carnet-collector tools\collecter_carnet.py 60 --une-fois
 
+REM === EVENEMENTS DE LIQUIDATION (overshoot mark/oracle) : l'infra n1 du 23/07 ===
+REM La meilleure piste (fade de cascades de liquidations) etait BLOQUEE faute d'events reels.
+REM On capture l'overshoot mid-vs-oracle (le forced-flow deborde le mid de l'oracle puis revient)
+REM + le chemin forward -> matiere du fade. BTC exclu (mort). Etat persiste (survit aux relances).
+REM ⚠️ 2 endpoints PUBLICS en lecture (metaAndAssetCtxs + allMids). 0 cle, 0 ordre, 0 signature.
+start "" /b tools\boucle_collecteur.cmd overshoot-collector tools\collecter_overshoots.py 10 --une-fois
+
 REM ---- COPY-WHITELIST (#185, 20/07) : nourrit la porte copy (leaders au markout prouve). ----
 REM La whitelist se PERIME a 24 h (porte deny-by-default) -> regeneree toutes les 6 h.
 REM Sans donnees de fills forward, elle ecrit une liste VIDE = copy verrouille (honnete).
