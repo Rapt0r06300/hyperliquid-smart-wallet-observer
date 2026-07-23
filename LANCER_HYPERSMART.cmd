@@ -287,13 +287,16 @@ REM Le replay (merge_replay/include_archive) lit TOUT l'historique. Best-effort,
 python -m hl_observer.runtime.replay_recorder --archive-run --base "%~dp0runtime\replay" 1>nul 2>nul
 
 REM -MaxLeaders eleve = scan TRES large (pool de leaders) ; le gate de qualite (smart money) garde la copie etroite.
-REM === CARRY : ACTIVER l'ouverture REELLE des positions paper (etape 2, decision Flo 2026-07-18) ===
-REM Sans ces flags, la boucle EVALUE le carry mais n'OUVRE RIEN -> 0 position (cause du "n'ouvre
-REM aucune position"). Avec, il ouvre / tient / ferme en PAPER (aucun ordre reel, aucune signature,
-REM PnL au vrai prix marche). Combine au plancher de levier 1x/1.5x (coins volatils VIABLES a bas
-REM levier), le carry ouvre enfin des positions quand un carry est viable.
-set "HYPERSMART_CARRY_HYPE_PAPER=1"
-set "HYPERSMART_CARRY_ETAPE2=1"
+REM === CARRY HISTORIQUE : DESACTIVE / SHADOW (decision Flo 2026-07-23) ===
+REM Ce carry delta-neutre HL-only affichait -8,24 $ : 100%% du funding au PLANCHER (0,125 bph) -> ~2-3%%
+REM APR net, DOMINE par HLP (15-30%%). Le cross-venue mid-cap (DOT/NEO/RUNE, net OOS positif battant
+REM HLP) le remplace comme piste carry. On coupe donc l'OUVERTURE (budget 0, AUCUNE entree). Les 6
+REM positions ouvertes sont fermees proprement aux prix executables (couts complets) par
+REM tools\fermer_carry_historique.py APRES la relance ; l'historique reste au ledger. SHADOW : le
+REM module peut encore EVALUER/journaliser mais n'OUVRE plus rien. Remettre a 1 = re-litiger une piste refutee.
+set "HYPERSMART_CARRY_HYPE_PAPER=0"
+set "HYPERSMART_CARRY_ETAPE2=0"
+set "HYPERSMART_CARRY_DISABLED=1"
 REM === CARRY : alimentation AUTO des inputs spot (best coin, toutes les 10 min, en arriere-plan) ===
 REM Sans ca, carry_spot_inputs.json n'est jamais ecrit -> le carry refuse tout (INPUTS_SPOT_ABSENTS).
 REM 19/07 — SANS FENETRE. Ces 3 collecteurs ouvraient 3 fenetres cmd a chaque demarrage :
@@ -321,7 +324,9 @@ REM d'une session precedente voient le marqueur changer et s'arretent d'elles-me
 REM plus jamais deux carry-feeders en parallele apres un Q, une croix ou un crash.
 if not exist "runtime\data" mkdir "runtime\data" >nul 2>&1
 echo %random%-%random%-%date%-%time% > "runtime\data\lanceur_session_marqueur.txt"
-start "" /b tools\boucle_collecteur.cmd carry-feeder tools\ecrire_carry_spot_inputs.py 240
+REM [SHADOW 23/07] carry-feeder COUPE : le carry historique n'ouvre plus -> inputs spot inutiles.
+REM (Reactiver cette ligne uniquement si on re-litige le carry historique, une piste refutee.)
+REM start "" /b tools\boucle_collecteur.cmd carry-feeder tools\ecrire_carry_spot_inputs.py 240
 
 REM === REPLAY : collecte des MARKS (prix futur) sur TOUS les coins des candidats ===
 REM Mesure du 19/07 : 30 148 candidats sur 106 coins, mais des marks sur 2 coins seulement

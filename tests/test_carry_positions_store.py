@@ -184,3 +184,22 @@ def test_a7_sans_max_slots_comportement_inchange(tmp_path):
                    "funding": 0.125} for c, g in [("A", 10.0), ("B", 50.0), ("C", 5.0)]}
     tick_multi_sur_disque(tmp_path, mesures, now_ms=0)                  # pas de max_slots
     assert set(charger_gestionnaire(tmp_path).ouvertes) == {"A", "B", "C"}   # les 3 restent
+
+
+# ---------- fermeture propre + SHADOW du carry historique (decision Flo 23/07) ----------
+
+def test_fermer_tout_et_desactiver_solde_aux_prix_executables_garde_historique_idempotent(tmp_path):
+    from hl_observer.funding.carry_positions_store import (
+        tick_multi_sur_disque, fermer_tout_et_desactiver, charger_gestionnaire,
+        resume_depuis_ledger, SORTIE_MODULE_DESACTIVE, LEDGER_RELPATH)
+    tick_multi_sur_disque(tmp_path, {"HYPE": _mesure("HYPE"), "PURR": _mesure("PURR")}, now_ms=0)
+    assert len(charger_gestionnaire(tmp_path).ouvertes) == 2
+    # base executable fournie pour HYPE, absente pour PURR -> repli conservateur sur la base d'entree
+    r = fermer_tout_et_desactiver(tmp_path, bases_courantes={"HYPE": 2.0}, now_ms=100 * H)
+    assert r["n_fermees"] == 2 and r["real_execution"] is False
+    assert charger_gestionnaire(tmp_path).ouvertes == {}             # plus aucune position fantome
+    assert resume_depuis_ledger(tmp_path)["closes"] == 2            # historique CONSERVE au ledger
+    reasons = [json.loads(l).get("reason") for l in (tmp_path / LEDGER_RELPATH).read_text().splitlines()
+               if '"CLOSE"' in l]
+    assert reasons and all(x == SORTIE_MODULE_DESACTIVE for x in reasons)
+    assert fermer_tout_et_desactiver(tmp_path, now_ms=101 * H)["n_fermees"] == 0   # idempotent

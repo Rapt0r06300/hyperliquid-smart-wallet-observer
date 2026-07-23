@@ -28,6 +28,7 @@ from hl_observer.funding.carry_position_lifecycle import (
 
 SORTIE_HORS_SHORTLIST = "COIN_PLUS_DANS_SHORTLIST"   # conservé : d'anciennes lignes de ledger le portent
 SORTIE_ROTATION = "ROTATION_HORS_TOP_SLOTS"   # A7 : plafond de slots -> on garde les meilleurs nets
+SORTIE_MODULE_DESACTIVE = "MODULE_CARRY_DESACTIVE"   # 23/07 : fermeture propre a la mise en SHADOW
 
 POSITIONS_RELPATH = Path("runtime") / "data" / "carry_paper_positions.json"
 LEDGER_RELPATH = Path("runtime") / "data" / "carry_paper_ledger.jsonl"
@@ -96,6 +97,34 @@ def tick_sur_disque(root: str | Path, decision: dict[str, Any], inputs: dict[str
     for r in g.journal.rows():                       # journal frais a chaque charge -> uniquement CE tick
         _append_ledger(root, {**r, "ts_ms": int(now_ms), "mode": mode})
     return evt
+
+
+def fermer_tout_et_desactiver(root: str | Path, *, bases_courantes: dict[str, float] | None = None,
+                              now_ms: int, mode: str = MODE_LIVE) -> dict[str, Any]:
+    """Ferme TOUTES les positions carry ouvertes aux prix EXÉCUTABLES courants (base par coin depuis
+    `bases_courantes`, sinon base d'entrée = conservateur, aucun premium inventé), COÛTS COMPLETS via
+    `pnl_realise` (frais spot+perp, spread, slippage — le MÊME chemin comptable que les closes normaux,
+    donc le ledger reste cohérent), écrit chaque CLOSE au ledger (historique CONSERVÉ) et vide le
+    fichier de positions. Idempotent : 0 ouverte -> no-op. Sert à passer le carry historique en
+    DISABLED/SHADOW sans laisser de position fantôme (décision Flo 23/07 : ce carry est DOMINÉ par HLP).
+    PAPER only : aucun ordre, aucune signature, real_execution=False."""
+    g = charger_gestionnaire(root, mode=mode)
+    fermees: list[dict[str, Any]] = []
+    for coin in list(g.ouvertes):
+        pos = g.ouvertes[coin]
+        b = (bases_courantes or {}).get(coin)
+        base_bps = float(b) if isinstance(b, (int, float)) else float(pos.get("base_bps_entree") or 0.0)
+        realized = pnl_realise(pos, base_bps_courant=base_bps)
+        g.journal.record(kind="CLOSE", coin=coin, side="CARRY", notional_usdt=pos["notional_usdt"],
+                         realized_net_pnl_usdc=realized, reason=SORTIE_MODULE_DESACTIVE, now_ms=int(now_ms))
+        g.ouvertes.pop(coin, None)
+        fermees.append({"coin": coin, "pnl_realise_usdt": round(float(realized), 4),
+                        "base_executable_bps": round(base_bps, 3), "notional_usdt": pos.get("notional_usdt")})
+    sauver_gestionnaire(root, g)
+    for r in g.journal.rows():
+        _append_ledger(root, {**r, "ts_ms": int(now_ms), "mode": mode, "raison_module": "DESACTIVE_SHADOW"})
+    return {"n_fermees": len(fermees), "fermees": fermees, "real_execution": False,
+            "pnl_realise_total_usdt": round(sum(f["pnl_realise_usdt"] for f in fermees), 4)}
 
 
 ALLOCATION_RELPATH = Path("runtime") / "data" / "carry_allocation.json"
