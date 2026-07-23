@@ -74,7 +74,8 @@ def parser_message_userfills(msg: Any, *, vault: str = "") -> list[dict]:
         out.append({"vault": vault, "coin": coin, "px": px, "sz": sz,
                     "signe": 1 if side == "B" else (-1 if side == "A" else 0),
                     "ts_ms": ts, "dir": str(f.get("dir") or ""), "hash": f.get("hash"),
-                    "start_position": start_pos, "isSnapshot": est_snapshot})
+                    "start_position": start_pos, "isSnapshot": est_snapshot,
+                    "source": "LIVE_WS"})                          # PROVENANCE : seuls les vrais fills WS sont tradables
     return out
 
 

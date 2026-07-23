@@ -3,6 +3,7 @@ après reconnexion, seuls les fills inconnus plus récents que le curseur sont r
 from __future__ import annotations
 
 import importlib.util
+import json
 from pathlib import Path
 
 RACINE = Path(__file__).resolve().parents[1]
@@ -39,3 +40,19 @@ def test_live_filtre_sur_curseur():
     cur = {"0xV": 300}
     a = C.fills_a_traiter("0xV", [_f(300), _f(400), _f(500)], cur)  # 300 = curseur (pas strictement >)
     assert [f["ts_ms"] for f in a] == [400, 500] and cur["0xV"] == 500
+
+
+def test_vaults_et_roles(tmp_path):
+    (tmp_path / "runtime" / "data").mkdir(parents=True)
+    (tmp_path / "runtime" / "data" / "vaults_scores.json").write_text(json.dumps({
+        "retenus": ["0xC1", "0xC2"],
+        "classement": [
+            {"vault": "0xC1", "retenu": True, "facteurs": {}},
+            {"vault": "0xC2", "retenu": True, "facteurs": {}},
+            {"vault": "0xSAFE", "retenu": False, "facteurs": {"anciennete_j": 200, "drawdown_pct": 20, "copyabilite": 0.8}},
+            {"vault": "0xOBS", "retenu": False, "facteurs": {"anciennete_j": 5, "drawdown_pct": 20, "copyabilite": 0.8}}]}))
+    roles = C.vaults_et_roles(tmp_path)
+    d = {v: r for v, r, _w in roles}
+    assert d["0xC1"] == "CORE" and d["0xC2"] == "CORE"             # retenus stricts = CORE (tradent)
+    assert d["0xSAFE"] == "CANDIDAT_TRADABLE"                       # passe la sécurité mini -> PROBE l'ouvre
+    assert d["0xOBS"] == "CANDIDAT_OBSERVE"                         # trop jeune -> observé seulement

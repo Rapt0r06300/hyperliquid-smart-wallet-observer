@@ -20,21 +20,46 @@ RACINE = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(RACINE / "src"))
 
 from hl_observer.collection import userfills_live as UL  # noqa: E402
+from hl_observer.collection import verrou_instance as VI  # noqa: E402
 from hl_observer.experimental import cohortes as CO  # noqa: E402
 
 WS_URL = "wss://api.hyperliquid.xyz/ws"
 FILLS_LIVE = Path("runtime") / "data" / "vault_fills_live.jsonl"
+JOURNAL = Path("runtime") / "data" / "fills_journal.jsonl"       # CHAQUE fill live non-snapshot + gate + latence
 CURSEURS = Path("runtime") / "data" / "userfills_curseurs.json"
 SCORES = Path("runtime") / "data" / "vaults_scores.json"
 FILE_MAX = 2000                  # file bornée : si saturée, on drop (on ne bloque JAMAIS la reception WS)
+NOM_VERROU = "userfills_live"
+RUN_ID = ""
 
 
-def vaults_suivis(root: Path, *, n: int = 8) -> list[str]:
-    """CORE + CHALLENGERS réellement abonnés (deny-by-default). On complète progressivement jusqu'à
-    2 CORE + 6 CHALLENGERS À MESURE qu'ils passent la barre de sécurité — jamais tout-venant."""
-    from hl_observer.experimental.exploratoire import tiers
-    core, chal = tiers(root)
-    return sorted(core) + sorted(chal)[: max(0, n - len(core))]
+def vaults_et_roles(root: Path, *, n_candidats: int = 6) -> list[tuple[str, str, str]]:
+    """(vault, role, raison) réellement ABONNÉS : CORE (retenus stricts, TRADENT ALPHA+PROBE) + jusqu'à
+    n_candidats CANDIDATS (suivants par composite, OBSERVÉS en WS ; PROBE ne les TRADE que s'ils passent la
+    sécurité mini via _vaults_cohorte). Deny-by-default : sans score, aucun abonnement."""
+    try:
+        d = json.loads((root / SCORES).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return []
+    classement = d.get("classement") or []
+    core = [c["vault"] for c in classement if c.get("retenu")][:2]
+    out = [(v, "CORE", "retenu strict (score) → trade ALPHA+PROBE") for v in core]
+    for c in classement:
+        if c["vault"] in core:
+            continue
+        f = c.get("facteurs", {})
+        sur = (float(f.get("anciennete_j") or 0) >= 45 and float(f.get("drawdown_pct") or 100) <= 45
+               and float(f.get("copyabilite") or 0) >= 0.5)
+        role = "CANDIDAT_TRADABLE" if sur else "CANDIDAT_OBSERVE"
+        raison = "observé en WS ; PROBE l'ouvre" if sur else "observé en WS seulement (sécurité mini non passée)"
+        out.append((c["vault"], role, raison))
+        if len(out) >= 2 + n_candidats:
+            break
+    return out
+
+
+def vaults_suivis(root: Path) -> list[str]:
+    return [v for v, _r, _why in vaults_et_roles(root)]
 
 
 def _charger_curseurs(root: Path) -> dict:
@@ -71,12 +96,28 @@ def fills_a_traiter(vault: str, fills: list[dict], curseurs: dict) -> list[dict]
 ETATS = {}
 
 
+def _journal(root: Path, fill: dict, cohorte: str, decision: dict | None, recu_ms: float) -> None:
+    """Journalise CHAQUE fill live non-snapshot (même refusé) : gate/motif, latence fill→décision, source."""
+    d = decision or {}
+    etat = "OUVERTURE" if d.get("ouverture") else ("FERMETURE" if d.get("fermeture") else (
+        "REDUCTION" if d.get("reduction") else ("REFUS:" + str(d.get("refus")) if d.get("refus") else "AUCUN")))
+    ligne = {"recu_ms": int(recu_ms), "cohorte": cohorte, "coin": fill.get("coin"), "vault": str(fill.get("vault") or "")[:12],
+             "dir": fill.get("dir"), "source": fill.get("source"), "fill_ts_ms": fill.get("ts_ms"),
+             "latence_fill_decision_ms": round(recu_ms - float(fill.get("ts_ms") or recu_ms)),
+             "decision": etat, "run_id": RUN_ID}
+    with (root / JOURNAL).open("a", encoding="utf-8") as f:
+        f.write(json.dumps(ligne, ensure_ascii=False) + "\n")
+
+
 def _traiter_un(root: Path, fill: dict, coins_a_verifier: set) -> None:
+    import time as _t
+    recu = _t.time() * 1000
     with (root / FILLS_LIVE).open("a", encoding="utf-8") as f:
         f.write(json.dumps(fill, ensure_ascii=False) + "\n")
     coins_a_verifier.add(fill.get("coin"))
     for nom, coh in CO.COHORTES.items():
         r = CO.traiter_fill(coh, ETATS[nom], fill, root)
+        _journal(root, fill, nom, r, recu)                        # trace TOUT, même les refus
         if r and r.get("ouverture"):
             print("[userfills] %s OUVRE %s @ %.4f latence=%dms (fill %s ts=%s)"
                   % (nom, r["ouverture"]["coin"], r["ouverture"]["prix_entree"], r.get("latence_ms", 0),
@@ -141,18 +182,37 @@ async def _exits_periodiques(root: Path, *, intervalle_s: float = 2.0) -> None:
         await asyncio.sleep(intervalle_s)
 
 
+async def _heartbeat(root: Path, info: dict, *, intervalle_s: float = 10.0) -> None:
+    while True:
+        VI.heartbeat(root, NOM_VERROU, info)
+        await asyncio.sleep(intervalle_s)
+
+
 async def _boucle(root: Path) -> None:
+    global RUN_ID
+    ok, info = VI.acquerir(root, NOM_VERROU)                       # VERROU D'INSTANCE UNIQUE
+    if not ok:
+        print("[userfills] REFUS DEMARRAGE — une instance est deja active: %s" % info.get("detenteur"), flush=True)
+        return
+    RUN_ID = info["run_id"]
     for nom, coh in CO.COHORTES.items():
-        ETATS[nom] = CO.etat_initial(coh, root)
-    vaults = vaults_suivis(root)
-    if not vaults:
+        ETATS[nom] = CO.etat_initial(coh, root, run_id=RUN_ID)
+    roles = vaults_et_roles(root)
+    if not roles:
         print("[userfills] aucun vault suivi (deny-by-default) — rien a faire", flush=True)
+        VI.liberer(root, NOM_VERROU, info)
         return
     (root / FILLS_LIVE).parent.mkdir(parents=True, exist_ok=True)
-    print("[userfills] VAULTS ABONNES (%d) : %s" % (len(vaults), ", ".join(v[:10] for v in vaults)), flush=True)
+    print("[userfills] run_id=%s — VAULTS ABONNES (%d) :" % (RUN_ID, len(roles)), flush=True)
+    for v, role, why in roles:
+        print("[userfills]   %s [%s] %s" % (v[:12], role, why), flush=True)
+    vaults = [v for v, _r, _w in roles]
     file: asyncio.Queue = asyncio.Queue(maxsize=FILE_MAX)
-    await asyncio.gather(_worker(root, file), _exits_periodiques(root),
-                         *[_un_vault(root, v, file) for v in vaults])
+    try:
+        await asyncio.gather(_worker(root, file), _exits_periodiques(root), _heartbeat(root, info),
+                             *[_un_vault(root, v, file) for v in vaults])
+    finally:
+        VI.liberer(root, NOM_VERROU, info)
 
 
 def main(argv: list[str] | None = None) -> int:

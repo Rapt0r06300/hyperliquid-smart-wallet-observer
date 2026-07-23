@@ -103,8 +103,13 @@ def _mark(coin: str, root: Path, now_ms: float, lecteur_l2) -> float | None:
     return _allmids(root, now_ms=now_ms).get(coin)
 
 
-def etat_initial(coh: Cohorte, root: Path) -> dict:
-    return {"store": charger_store(coh, root), "agg": {}, "vus": set()}
+SOURCE_LIVE = "LIVE_WS"           # seule provenance de fill acceptée pour TRADER (anti-pollution)
+
+
+def etat_initial(coh: Cohorte, root: Path, *, run_id: str | None = None) -> dict:
+    import uuid
+    return {"store": charger_store(coh, root), "agg": {}, "vus": set(),
+            "run_id": run_id or ("run-" + uuid.uuid4().hex[:12])}
 
 
 def _expectancy(coh: Cohorte, root: Path) -> dict:
@@ -130,7 +135,7 @@ def cohorte_active(coh: Cohorte, root: Path) -> bool:
 
 
 def _ouvrir(coh: Cohorte, store: dict, root: Path, *, coin, sens, notional, prix, cfg, cout_ar,
-            spread, slippage, fhl, vault, now_ms, fill_ts, latence_ms) -> dict:
+            spread, slippage, fhl, vault, now_ms, fill_ts, latence_ms, run_id="", src_l2="") -> dict:
     edge_net = float(cfg.get("edge_brut_bps") or 0.0) - cout_ar
     pos = {"coin": coin, "moteur": "copy_" + coh.nom, "sens": sens, "type_pnl": "directional",
            "notional_usd": round(notional, 2), "prix_entree": prix, "ts_ouverture_ms": now_ms,
@@ -139,12 +144,13 @@ def _ouvrir(coh: Cohorte, store: dict, root: Path, *, coin, sens, notional, prix
            "hold_h": float(cfg.get("horizon_ms") or 0.0) / 3_600_000.0,
            "meta": {"vault": vault, "coin": coin, "stop_bps": cfg.get("stop_bps"),
                     "take_profit_bps": cfg.get("take_profit_bps"), "latence_fill_copie_ms": round(latence_ms),
-                    "fill_leader_ts_ms": int(fill_ts)}}
+                    "fill_leader_ts_ms": int(fill_ts), "run_id": run_id, "source": SOURCE_LIVE, "src_l2": src_l2}}
     store["ouvertes"][coin] = pos
     store["cash"] = round(store["cash"] - notional, 6)
     _ledger(coh, root, {"evt": "OPEN", "ts_ms": now_ms, "coin": coin, "sens": sens, "notional_usd": pos["notional_usd"],
                         "prix_entree": prix, "edge_net_bps": pos["edge_estime_bps"], "latence_ms": round(latence_ms),
-                        "vault": vault, "motif": "copy OPEN/ADD agrégé $ + L2<1s + edge net>0"})
+                        "vault": vault, "run_id": run_id, "source": SOURCE_LIVE, "src_l2": src_l2,
+                        "motif": "copy OPEN/ADD agrégé $ + L2<1s + edge net>0"})
     _sauver(coh, root, store)
     return pos
 
@@ -158,7 +164,9 @@ def _sortir(coh: Cohorte, pos: dict, store: dict, root: Path, *, prix_sortie, co
     _ledger(coh, root, {"evt": "CLOSE", "ts_ms": now_ms, "coin": pos["coin"], "sens": pos["sens"],
                         "notional_usd": pos["notional_usd"], "prix_entree": pos["prix_entree"], "prix_sortie": prix_sortie,
                         "realized_usd": realized, "raison": raison, "mae_bps": mae_bps, "mfe_bps": mfe_bps,
-                        "latence_ms": pos.get("meta", {}).get("latence_fill_copie_ms"), "vault": pos.get("meta", {}).get("vault")})
+                        "latence_ms": pos.get("meta", {}).get("latence_fill_copie_ms"),
+                        "run_id": pos.get("meta", {}).get("run_id"), "source": SOURCE_LIVE,
+                        "vault": pos.get("meta", {}).get("vault")})
     _sauver(coh, root, store)
     return {"coin": pos["coin"], "realized_usd": realized, "raison": raison}
 
@@ -175,6 +183,7 @@ def _reduire(coh: Cohorte, pos: dict, store: dict, root: Path, *, fraction: floa
     store["realise_total_usd"] = round(store.get("realise_total_usd", 0.0) + realized, 6)
     _ledger(coh, root, {"evt": "REDUCE", "ts_ms": now_ms, "coin": pos["coin"], "fraction": round(frac, 3),
                         "part_notional_usd": part, "realized_usd": realized, "prix_sortie": prix,
+                        "run_id": pos.get("meta", {}).get("run_id"), "source": SOURCE_LIVE,
                         "vault": pos.get("meta", {}).get("vault")})
     _sauver(coh, root, store)
     return {"coin": pos["coin"], "realized_usd": realized, "raison": "LEADER_A_REDUIT", "fraction": round(frac, 3)}
@@ -187,6 +196,8 @@ def traiter_fill(coh: Cohorte, etat: dict, fill: dict, root: Path, *, now_ms: fl
     now = float(now_ms if now_ms is not None else time.time() * 1000)
     if fill.get("isSnapshot"):
         return None                                               # snapshot initial : on ne trade pas dessus
+    if fill.get("source") != SOURCE_LIVE:                         # PROVENANCE OBLIGATOIRE : refuse tout fill
+        return {"refus": "SOURCE_NON_LIVE", "coin": fill.get("coin"), "source": fill.get("source")}  # non LIVE_WS
     h = fill.get("hash")
     if h:
         if h in etat["vus"]:
@@ -278,7 +289,7 @@ def traiter_fill(coh: Cohorte, etat: dict, fill: dict, root: Path, *, now_ms: fl
     latence = max(0.0, now - ag["fill_ts"])                       # fill leader -> décision/ouverture
     pos = _ouvrir(coh, store, root, coin=coin, sens=sens, notional=notional, prix=prix, cfg=cfg, cout_ar=cout_ar,
                   spread=spread, slippage=slippage, fhl=fhl, vault=vault, now_ms=now, fill_ts=ag["fill_ts"],
-                  latence_ms=latence)
+                  latence_ms=latence, run_id=etat.get("run_id", ""), src_l2=l2.get("src", ""))
     return {"ouverture": pos, "latence_ms": round(latence)}
 
 

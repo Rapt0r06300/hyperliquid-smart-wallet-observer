@@ -25,7 +25,7 @@ def _l2(coin):
 
 def _fill(**kw):
     d = {"vault": "0xV", "coin": "SOL", "px": 150.0, "sz": 20.0, "signe": 1, "dir": "Open Long",
-         "ts_ms": 1_000_000_000_000, "hash": "h1", "isSnapshot": False}
+         "ts_ms": 1_000_000_000_000, "hash": "h1", "isSnapshot": False, "source": "LIVE_WS"}
     d.update(kw)
     return d
 
@@ -48,6 +48,25 @@ def test_agrege_plusieurs_petits_open(tmp_path):
     assert CO.traiter_fill(CO.ALPHA, etat, _fill(sz=7, hash="a"), tmp_path, now_ms=now, lecteur_l2=_l2) is None  # 1050 < 2000
     r = CO.traiter_fill(CO.ALPHA, etat, _fill(sz=7, hash="b"), tmp_path, now_ms=now + 1000, lecteur_l2=_l2)      # cumul 2100
     assert r and r.get("ouverture")                                                        # agrégé -> ouvre
+
+
+def test_refuse_fill_non_live_ws(tmp_path):
+    """ANTI-POLLUTION : un fill sans provenance LIVE_WS (injecté/replay) est REFUSÉ, jamais tradé."""
+    _setup(tmp_path)
+    etat = CO.etat_initial(CO.ALPHA, tmp_path, run_id="run-test")
+    r = CO.traiter_fill(CO.ALPHA, etat, _fill(source="INJECTE"), tmp_path, now_ms=1e12, lecteur_l2=_l2)
+    assert r and r.get("refus") == "SOURCE_NON_LIVE"
+    r2 = CO.traiter_fill(CO.ALPHA, etat, _fill(source=None), tmp_path, now_ms=1e12, lecteur_l2=_l2)
+    assert r2 and r2.get("refus") == "SOURCE_NON_LIVE"
+
+
+def test_run_id_et_provenance_dans_ledger(tmp_path):
+    _setup(tmp_path)
+    etat = CO.etat_initial(CO.ALPHA, tmp_path, run_id="run-abc123")
+    CO.traiter_fill(CO.ALPHA, etat, _fill(), tmp_path, now_ms=1e12, lecteur_l2=_l2)   # ouvre (LIVE_WS)
+    import json as _j
+    ligne = _j.loads((tmp_path / "runtime" / "data" / "exploratory_paper_ledger.jsonl").read_text().splitlines()[0])
+    assert ligne["run_id"] == "run-abc123" and ligne["source"] == "LIVE_WS" and ligne["evt"] == "OPEN"
 
 
 def test_dedup_snapshot_et_hash(tmp_path):
