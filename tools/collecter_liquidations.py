@@ -135,6 +135,38 @@ def wallets_de_secours(root: Path) -> list[str]:
     return vus
 
 
+#: 🟢 22/07 — SOURCES LOCALES pour ÉLARGIR la population. Le leaderboard ne donne que des baleines
+#: PEU leveragées (liq loin, jamais déclenchée -> 2 coins). Or le bot connaît déjà ~60 adresses de
+#: TRADERS ACTIFS (leaders copy suivis, fills) : ceux-là prennent du levier. Les adjoindre élargit
+#: le filet -> plus de comptes à risque trouvés -> plus de grappes. Aucun NOUVEL appel réseau pour
+#: la LISTE (fichiers déjà là) ; seul le `clearinghouseState` par wallet reste, borné par max-wallets.
+FICHIERS_ADRESSES_LOCALES = (
+    "runtime/data/leader_fills_bruts.jsonl", "runtime/data/leader_fills_forward.jsonl",
+    "runtime/data/copy_whitelist.json", "runtime/data/hypersmart_engine_status.json",
+)
+
+
+def wallets_locaux_connus(root: Path, *, fichiers: tuple = FICHIERS_ADRESSES_LOCALES,
+                          limite: int = 300) -> list[str]:
+    """Toutes les adresses 0x déjà VUES localement (traders actifs), dédupliquées et bornées. Un
+    fichier illisible est ignoré (jamais une exception, jamais une adresse inventée)."""
+    import re
+    motif = re.compile(r"0x[0-9a-fA-F]{40}")
+    vus: list[str] = []
+    for rel in fichiers:
+        try:
+            texte = (Path(root) / rel).read_text(encoding="utf-8", errors="ignore")
+        except OSError:
+            continue
+        for m in motif.finditer(texte):
+            a = m.group(0)
+            if a not in vus:
+                vus.append(a)
+                if len(vus) >= int(limite):
+                    return vus
+    return vus
+
+
 #: 🟢 LEVIER 4 (22/07) — une position à <= 5 % de sa liquidation = FORT levier = candidate à
 #: être liquidée. C'est LE ciblage qui manquait : le haut du leaderboard, ce sont des baleines
 #: PEU leveragées (liq loin du marché, jamais déclenchée) — d'où 3 événements en des jours.
@@ -292,6 +324,13 @@ def main(argv: list[str] | None = None) -> int:
     wallets = wallets + ajoutes
     if ajoutes:
         origine += " + %d compte(s) a risque memorises" % len(ajoutes)
+    # 🟢 22/07 — ÉLARGISSEMENT DE LA POPULATION : les traders ACTIFS déjà connus localement (leaders
+    # copy, fills) sont plus leveragés que les baleines du leaderboard -> filet plus large, plus de
+    # grappes. C'est LE goulot mesuré : la base ne voyait que 2 coins faute de comptes leveragés.
+    locaux = [a for a in wallets_locaux_connus(root) if a not in wallets]
+    wallets = wallets + locaux
+    if locaux:
+        origine += " + %d trader(s) actif(s) local(-aux)" % len(locaux)
     print("[liq] collecteur demarre — %d wallet(s) a observer (%s)" % (len(wallets), origine),
           flush=True)
     if not wallets:

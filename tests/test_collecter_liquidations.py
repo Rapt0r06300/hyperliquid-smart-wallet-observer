@@ -28,6 +28,30 @@ def _mod():
     return m
 
 
+def test_wallets_locaux_connus_ELARGIT_depuis_les_traders_actifs(tmp_path):
+    """🟢 22/07 — LE goulot mesuré : la base de liquidations ne voyait que 2 coins car la source
+    (leaderboard) ne donne que des baleines PEU leveragées. On élargit avec les adresses de traders
+    ACTIFS déjà connues localement (leaders copy, fills) — dédupliquées, dans l'ordre."""
+    m = _mod()
+    d = tmp_path / "runtime" / "data"
+    d.mkdir(parents=True)
+    a1, a2, a3 = "0x" + "1" * 40, "0x" + "2" * 40, "0x" + "3" * 40
+    (d / "leader_fills_bruts.jsonl").write_text(
+        json.dumps({"user": a1, "coin": "BTC"}) + "\n" + json.dumps({"user": a2}) + "\n", encoding="utf-8")
+    (d / "copy_whitelist.json").write_text(json.dumps({"leaders": [a2, a3]}), encoding="utf-8")  # a2 en double
+    assert m.wallets_locaux_connus(tmp_path) == [a1, a2, a3]
+
+
+def test_wallets_locaux_connus_borne_et_survit_a_l_absence(tmp_path):
+    m = _mod()
+    d = tmp_path / "runtime" / "data"
+    d.mkdir(parents=True)
+    (d / "leader_fills_bruts.jsonl").write_text(
+        "\n".join(json.dumps({"user": "0x%040x" % i}) for i in range(50)), encoding="utf-8")
+    assert len(m.wallets_locaux_connus(tmp_path, limite=10)) == 10        # borné
+    assert m.wallets_locaux_connus(tmp_path / "inexistant") == []          # aucun fichier -> vide, pas d'erreur
+
+
 def _etat_clearinghouse(coin: str, *, liq_px: float | None, szi: float = 200.0) -> dict:
     """Réponse /info réaliste. `liq_px=None` = position SANS prix de liquidation.
 
