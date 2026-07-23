@@ -34,7 +34,7 @@ MIN_PNL_ATTENDU_USD = 0.25               # PnL attendu sur le hold < ça -> capi
 LIMITES: dict[str, dict[str, float]] = {
     "cross_venue": {"max_positions": 6, "max_notional_usd": 300.0, "notional_usd": 50.0},
     "lead_lag":    {"max_positions": 4, "max_notional_usd": 200.0, "notional_usd": 50.0},
-    "copy_vault":  {"max_positions": 4, "max_notional_usd": 200.0, "notional_usd": 50.0},
+    "copy_vault":  {"max_positions": 4, "max_notional_usd": 600.0, "notional_usd": 150.0},
 }
 MOTEURS = tuple(LIMITES)
 

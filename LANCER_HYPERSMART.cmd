@@ -345,6 +345,10 @@ REM futur : impossible de calculer leur PnL forward. Sans ce collecteur, le repl
 REM peut juger qu'une poignee de coins. Lecture seule (/info allMids), 0 ordre.
 start "" /b tools\boucle_collecteur.cmd marks-collector tools\ecrire_marks_tous_coins.py 60 --une-fois
 
+REM === allMids TOUS-COINS (non filtre) : prix HL frais pour Copy-Vaults sur les ~100 coins que ===
+REM les vaults tradent (le flux BBO n'en couvre que 8). Un seul appel public /info allMids, 0 ordre. ===
+start "" /b tools\boucle_collecteur.cmd allmids-collector tools\collecter_allmids.py 15 --une-fois
+
 REM === LIQUIDATIONS : sans ce collecteur, la mesure #3 est impossible A JAMAIS ===
 REM Constat du 19/07 : "snapshots": 0 -> AUCUN_HISTORIQUE_LA_MESURE_EST_IMPOSSIBLE. Le message
 REM conseillait d'attendre plus longtemps -- mauvais conseil : RIEN n'ecrivait ces donnees

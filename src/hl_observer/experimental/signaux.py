@@ -45,6 +45,35 @@ def _snapshots_bbo(root: str | Path, *, max_lignes: int = 20000) -> dict[str, di
     return out
 
 
+ALLMIDS_RELPATH = Path("runtime") / "data" / "hl_allmids.json"
+ALLMIDS_AGE_MAX_MS = 60_000.0        # cache allMids > 60 s = plus assez frais pour entrer -> ignoré
+SPREAD_ESTIME_ALT_BPS = 6.0          # demi-spread conservateur pour un alt hors-BBO (pas de carnet) -> coût réaliste
+
+
+def _allmids(root: str | Path, *, now_ms: float | None = None) -> dict[str, float]:
+    """{coin: mid} depuis le cache allMids (tous-coins HL) SI le cache est frais (< 60 s). Sinon {}.
+    C'est le prix HL exécutable de repli pour les ~92 coins que le flux BBO (8 coins) ne couvre pas."""
+    p = Path(root) / ALLMIDS_RELPATH
+    if not p.exists():
+        return {}
+    try:
+        d = json.loads(p.read_text(encoding="utf-8", errors="ignore"))
+    except (OSError, ValueError):
+        return {}
+    now = float(now_ms if now_ms is not None else time.time() * 1000)
+    if now - float(d.get("ts_ms") or 0) > ALLMIDS_AGE_MAX_MS:
+        return {}
+    mids = d.get("mids") or {}
+    return {str(c).upper(): float(v) for c, v in mids.items() if _positif(v)}
+
+
+def _positif(v: Any) -> bool:
+    try:
+        return float(v) > 0
+    except (TypeError, ValueError):
+        return False
+
+
 def signaux_cross_venue(root: str | Path = ".", *, now_ms: float | None = None) -> tuple[list[Signal], list[dict]]:
     """CROSS-VENUE COURT TERME (v2b, rectif Flo) : source = flux WS BBO SYNCHRONISÉ (HL bbo + Binance
     bookTicker, horloge MONOTONE). REFUSE tout snapshot > 1 s (`SNAPSHOT_PERIME_1S`) ou désaligné
@@ -200,16 +229,30 @@ def signaux_lead_lag(root: str | Path = ".", *, now_ms: float | None = None,
     return sigs, refus
 
 
-# ─────────────────────────────── 3) COPY-VAULTS (changement d'exposition réplicable) ───────────────────────────────
+# ─────────────────────────────── 3) COPY-VAULTS (changement d'exposition PAR COIN réplicable) ───────────────────────────────
 
 VAULTS_SNAP_RELPATH = Path("runtime") / "data" / "vault_snapshots.jsonl"
-SEUIL_DELTA_EXPO_USD = 0.15          # variation d'exposition nette >= 15 % du notional = réplicable
+SEUIL_MOVE_FRAC_NAV = 0.05           # le vault doit bouger >= 5 % de son NAV sur UN coin = décision copiable
+K_CONVICTION = 0.03                  # proxy conviction : 5 % de NAV bougé -> 15 bps d'edge brut (le forward MESURE le vrai)
+PLAFOND_EDGE_COPY_BPS = 60.0         # on ne SURVEND jamais un edge de copie (incertain par nature)
+
+
+def _positions_par_coin(snap: dict) -> dict[str, tuple[float, float]]:
+    """{coin: (szi signé, entryPx)} depuis un snapshot de vault."""
+    out: dict[str, tuple[float, float]] = {}
+    for p in (snap.get("positions") or []):
+        c = str(p.get("coin") or "").upper()
+        if c:
+            out[c] = (float(p.get("szi") or 0.0), float(p.get("entryPx") or 0.0))
+    return out
 
 
 def signaux_vaults(root: str | Path = ".", *, now_ms: float | None = None) -> tuple[list[Signal], list[dict]]:
-    """Ouvre une position directionnelle quand un vault SUIVI change d'exposition nette de façon
-    réplicable (delta entre 2 snapshots), dans le sens du changement. Prix exécutable = dernier mark HL
-    du vault (proxy). Sans 2 snapshots ou sans changement : rien."""
+    """Copy-Vaults : détecte le CHANGEMENT D'EXPOSITION PAR COIN (Δszi entre 2 snapshots) chez un vault
+    suivi performant, et le mirroir au prix HL RÉELLEMENT EXÉCUTABLE (BBO synchro). Le coin doit être
+    couvert par le flux BBO (sinon pas de prix exécutable frais → refus honnête). Sans 2 snapshots,
+    sans changement significatif, ou coin non exécutable : rien. Le forward MESURE le vrai PnL de copie."""
+    from hl_observer.experimental.carry_deux_jambes import frais_venues, LATENCE_MS, LATENCE_COUT_BPS
     root = Path(root)
     now = float(now_ms if now_ms is not None else time.time() * 1000)
     refus: list[dict] = []
@@ -223,9 +266,12 @@ def signaux_vaults(root: str | Path = ".", *, now_ms: float | None = None) -> tu
             d = json.loads(l)
         except ValueError:
             continue
-        a = str(d.get("adresse") or d.get("address") or "")
+        a = str(d.get("vault") or d.get("adresse") or d.get("address") or "")
         if a:
             par_vault.setdefault(a, []).append(d)
+    bbo = _snapshots_bbo(root)                                     # {COIN: dernier snapshot BBO synchro HL/Binance}
+    allmids = _allmids(root, now_ms=now)                           # {COIN: mid HL frais} — repli tous-coins
+    fhl, _fbin, _src = frais_venues(root)
     sigs: list[Signal] = []
     for adr, snaps in par_vault.items():
         if len(snaps) < 2:
@@ -233,29 +279,55 @@ def signaux_vaults(root: str | Path = ".", *, now_ms: float | None = None) -> tu
         snaps.sort(key=lambda s: int(s.get("ts_ms") or 0))
         av, ap = snaps[-2], snaps[-1]
         nav = float(ap.get("nav_usd") or 0.0)
-        e0 = float(av.get("expo_nette_usd") or 0.0)
-        e1 = float(ap.get("expo_nette_usd") or 0.0)
         if nav <= 0:
             refus.append({"moteur": "copy_vault", "vault": adr[:10], "motif": "NAV_NULLE"}); continue
-        delta_frac = (e1 - e0) / nav
-        if abs(delta_frac) < SEUIL_DELTA_EXPO_USD:
+        p0, p1 = _positions_par_coin(av), _positions_par_coin(ap)
+        # plus gros changement d'exposition PAR COIN (Δszi × prix), en fraction du NAV
+        best_coin, best_dnot, best_dszi = "", 0.0, 0.0
+        for c in set(p0) | set(p1):
+            dszi = p1.get(c, (0.0, 0.0))[0] - p0.get(c, (0.0, 0.0))[0]
+            px_ref = p1.get(c, (0.0, 0.0))[1] or p0.get(c, (0.0, 0.0))[1]
+            dnot = abs(dszi) * px_ref
+            if dnot > abs(best_dnot):
+                best_coin, best_dnot, best_dszi = c, dnot, dszi
+        move_frac = (best_dnot / nav) if nav else 0.0
+        if not best_coin or move_frac < SEUIL_MOVE_FRAC_NAV:
             refus.append({"moteur": "copy_vault", "vault": adr[:10], "motif": "CHANGEMENT_TROP_FAIBLE",
-                          "delta_frac": round(delta_frac, 3)}); continue
-        px = float(ap.get("mark_px") or ap.get("prix") or 0.0)
-        if px <= 0:
-            refus.append({"moteur": "copy_vault", "vault": adr[:10], "motif": "PRIX_NON_EXECUTABLE"}); continue
-        coin = str(ap.get("coin_principal") or ap.get("coin") or adr[:6]).upper()
-        # coût exécutable conservateur : demi-spread + frais taker HL (approx, faute de carnet du vault)
-        cout = 8.0
-        edge = abs(delta_frac) * 1e4 * 0.10 - cout                # 10 % du move répliqué comme edge brut proxy
+                          "coin": best_coin, "move_frac": round(move_frac, 3)}); continue
+        sens = 1 if best_dszi > 0 else -1
+        # prix HL exécutable : BBO synchro (bid/ask réel, < 1 s) prioritaire, sinon allMids (mid frais + spread estimé)
+        b = bbo.get(best_coin)
+        if b and float(b.get("hl_bid") or 0.0) > 0 and float(b.get("hl_ask") or 0.0) > 0:
+            hl_bid, hl_ask = float(b["hl_bid"]), float(b["hl_ask"])
+            mid = (hl_bid + hl_ask) / 2.0
+            prix = hl_ask if sens > 0 else hl_bid                  # côté agressif (taker)
+            hl_spread_bps = (hl_ask - hl_bid) / mid * 1e4
+            src_prix = "bbo"
+        elif best_coin in allmids:
+            mid = allmids[best_coin]
+            hl_spread_bps = SPREAD_ESTIME_ALT_BPS * 2.0            # spread plein estimé (conservateur, pas de carnet)
+            prix = mid * (1.0 + SPREAD_ESTIME_ALT_BPS / 1e4) if sens > 0 else mid * (1.0 - SPREAD_ESTIME_ALT_BPS / 1e4)
+            src_prix = "allmids"
+        else:
+            refus.append({"moteur": "copy_vault", "vault": adr[:10], "motif": "PRIX_NON_EXECUTABLE_HL",
+                          "coin": best_coin}); continue
+        cout_ar = 2.0 * fhl + hl_spread_bps + LATENCE_COUT_BPS     # A/R : 2× taker HL + spread + latence
+        edge = min(move_frac * 1e4 * K_CONVICTION, PLAFOND_EDGE_COPY_BPS) - cout_ar
         if edge <= 0:
-            refus.append({"moteur": "copy_vault", "vault": adr[:10], "motif": "EDGE_NEGATIF"}); continue
+            refus.append({"moteur": "copy_vault", "vault": adr[:10], "motif": "EDGE_NEGATIF_APRES_COUTS",
+                          "coin": best_coin, "move_frac": round(move_frac, 3)}); continue
+        notional = LIMITES["copy_vault"]["notional_usd"]
+        lag_ms = max(0.0, now - float(ap.get("ts_ms") or now))    # retard d'observation (snapshot vault ~300 s cadencé)
         sigs.append(Signal(
-            moteur="copy_vault", coin=coin, sens=1 if delta_frac > 0 else -1, type_pnl="directional",
-            notional_usd=LIMITES["copy_vault"]["notional_usd"], prix_entree=px, cout_entree_bps=cout / 2.0,
-            edge_estime_bps=round(edge, 4), pnl_attendu_usd=round(edge / 1e4 * LIMITES["copy_vault"]["notional_usd"], 4),
-            ts_signal_ms=float(ap.get("ts_ms") or now), frais_bps=cout / 2.0,
-            meta={"vault": adr, "delta_frac": round(delta_frac, 3)}))
+            moteur="copy_vault", coin=best_coin, sens=sens, type_pnl="directional",
+            notional_usd=notional, prix_entree=prix, cout_entree_bps=round(cout_ar / 2.0, 4),
+            edge_estime_bps=round(edge, 4), pnl_attendu_usd=round(edge / 1e4 * notional, 4),
+            ts_signal_ms=now, frais_bps=fhl, spread_bps=round(hl_spread_bps, 4), latence_ms=LATENCE_MS,
+            meta={"vault": adr, "coin": best_coin, "move_frac": round(move_frac, 3), "src_prix": src_prix,
+                  "observation_lag_ms": round(lag_ms), "szi_avant": round(p0.get(best_coin, (0.0, 0.0))[0], 6),
+                  "szi_apres": round(p1.get(best_coin, (0.0, 0.0))[0], 6),
+                  "edge_est_note": "proxy conviction (move×K, plafonné) — le forward MESURE le vrai PnL de copie ; "
+                                   "entrée au prix HL FRAIS (ts=now), retard d'observation copié dans observation_lag_ms"}))
     return sigs, refus
 
 
