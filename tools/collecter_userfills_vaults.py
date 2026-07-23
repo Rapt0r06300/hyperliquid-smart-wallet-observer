@@ -216,9 +216,9 @@ async def _boucle(root: Path) -> None:
     if ok_mx is False:
         print("[userfills] REFUS DEMARRAGE — mutex Windows deja tenu (instance active)", flush=True)
         return
-    ok, info = VI.acquerir(root, NOM_VERROU)                       # verrou fichier = diagnostic/heartbeat
-    if ok_mx is None and not ok:                                   # hors Windows : le fichier fait foi
-        print("[userfills] REFUS DEMARRAGE — instance deja active: %s" % info.get("detenteur"), flush=True)
+    ok, info = VI.acquerir(root, NOM_VERROU)                       # verrou fichier (aussi gate : ancien code sans mutex)
+    if not ok:                                                    # verrou fichier tenu par une instance FRAICHE -> refus
+        print("[userfills] REFUS DEMARRAGE — verrou fichier deja tenu: %s" % info.get("detenteur"), flush=True)
         return
     RUN_ID = info["run_id"]
     RUN_TOKEN = secrets.token_hex(16)                             # provenance hors payload (en memoire)
