@@ -235,6 +235,17 @@ def evaluer_et_journaliser(root: str | Path = ".", *, now_ms: int | None = None,
         except Exception:  # noqa: BLE001 — compte, jamais silencieux, jamais bloquant
             _noter_echec("hl_observer/funding/carry_paper_runtime.py:arb_dislocation")
 
+    # ── CARRY CROSS-VENUE paper (23/07) — delta-neutre : SHORT perp HL (encaisse le funding le
+    # plus haut) / LONG perp Binance. Encaisse le premium `hl_bps_h − bin_bps_h` tant qu'il tient,
+    # coûts RÉELS du carnet déduits. Même ledger -> PnL unifié. Jamais bloquant pour le carry.
+    if os.environ.get("HYPERSMART_CROSS_VENUE_CARRY_PAPER", "0").strip() == "1":
+        try:
+            from hl_observer.funding.cross_venue_carry_paper import tick as _cv_tick
+            from hl_observer.runtime.session_identity import session_courante as _sid2
+            _cv_tick(root, session_id=_sid2(root))
+        except Exception:  # noqa: BLE001 — compte, jamais silencieux, jamais bloquant
+            _noter_echec("hl_observer/funding/carry_paper_runtime.py:cross_venue_carry")
+
     etape2 = None
     if etape2_active():
         try:

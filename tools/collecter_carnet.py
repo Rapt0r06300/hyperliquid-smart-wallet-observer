@@ -39,6 +39,8 @@ URL_BIN_DEPTH = "https://fapi.binance.com/fapi/v1/depth"
 SORTIE = Path("runtime") / "data" / "carnet_venues.jsonl"
 DISPERSION = Path("runtime") / "data" / "dispersion_venues.jsonl"
 N_COINS_PRIORITAIRES = 15        # borné : on capture le carnet là où l'écart est le plus vif
+N_COINS_PREMIUM_FUNDING = 18     # 23/07 : + les cibles du carry cross-venue (premium de funding)
+PREMIUM_PLAUSIBLE_MAX_BPS_H = 5.0  # |hl−bin| > 5 bps/h (~438 %/an) = artefact probable, ignoré
 ECART_PLAUSIBLE_MAX_BPS = 500.0  # au-delà = mauvais appariement (cf. arb_executable)
 INTERVALLE_S_DEFAUT = 60.0
 
@@ -55,6 +57,24 @@ def coins_prioritaires(lignes: list[dict], *, n: int = N_COINS_PRIORITAIRES) -> 
         if c and isinstance(e, (int, float)) and abs(float(e)) <= ECART_PLAUSIBLE_MAX_BPS:
             pire[c] = max(pire.get(c, 0.0), abs(float(e)))
     return [c for c, _ in sorted(pire.items(), key=lambda kv: -kv[1])[: int(n)]]
+
+
+def coins_premium_funding(lignes: list[dict], *, n: int = N_COINS_PREMIUM_FUNDING) -> list[str]:
+    """🟠 23/07 — Les N coins au plus fort |premium de funding| (hl_bps_h − bin_bps_h) : les cibles
+    du CARRY cross-venue. Le carnet ne suivait que la dislocation de PRIX (arb) → il RATAIT les coins
+    rentables en carry (DASH/NEO/INJ : premium de funding fort mais prix peu disloqué), donc on ne
+    pouvait pas les COSTER, donc le backtest carry les excluait. On les ajoute ici. Premium aberrant
+    (> plafond ≈ artefact d'unité) ignoré : deny-by-default."""
+    prem: dict[str, float] = {}
+    for r in lignes or ():
+        c = str(r.get("coin") or "").upper()
+        try:
+            p = abs(float(r["hl_bps_h"]) - float(r["bin_bps_h"]))
+        except (KeyError, TypeError, ValueError):
+            continue
+        if c and p <= PREMIUM_PLAUSIBLE_MAX_BPS_H:
+            prem[c] = max(prem.get(c, 0.0), p)
+    return [c for c, _ in sorted(prem.items(), key=lambda kv: -kv[1])[: int(n)]]
 
 
 # ─────────────────────────────── parseurs de carnet (tolérants) ───────────────────────────────
@@ -172,6 +192,7 @@ def main(argv: list[str] | None = None) -> int:
     p = argparse.ArgumentParser(description="Collecteur de carnet bid/ask (lecture seule).")
     p.add_argument("--root", default=str(RACINE))
     p.add_argument("--n-coins", type=int, default=N_COINS_PRIORITAIRES)
+    p.add_argument("--n-premium", type=int, default=N_COINS_PREMIUM_FUNDING)
     p.add_argument("--intervalle", type=float, default=INTERVALLE_S_DEFAUT)
     p.add_argument("--une-fois", action="store_true")
     a = p.parse_args(argv)
@@ -179,7 +200,12 @@ def main(argv: list[str] | None = None) -> int:
     limiteur, cache = CF.Limiteur(0.15), CF.CacheDedup()
     total, echecs = 0, 0
     while True:
-        coins = coins_prioritaires(_lire_dispersion_recente(root), n=a.n_coins)
+        lignes = _lire_dispersion_recente(root)
+        # UNION arb (dislocation de prix) + carry (premium de funding) — dédupliquée, ordre stable.
+        vus: dict[str, None] = {}
+        for c in coins_prioritaires(lignes, n=a.n_coins) + coins_premium_funding(lignes, n=a.n_premium):
+            vus.setdefault(c, None)
+        coins = list(vus)
         if not coins:
             print("[carnet] aucun coin disloque a suivre ce tour (dispersion vide/plate)", flush=True)
         else:

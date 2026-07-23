@@ -28,6 +28,17 @@ def test_coins_prioritaires_classe_par_ecart_et_ignore_l_aberrant():
     assert top == ["ETH", "BTC"]                 # ETH (40) > BTC (25) ; MKR aberrant ecarte
 
 
+def test_coins_premium_funding_classe_par_premium_et_ignore_l_artefact():
+    """🟠 23/07 — le carnet ratait les cibles du CARRY (premium de funding fort mais prix peu
+    disloqué : DASH/NEO/INJ). On les sélectionne par |hl−bin| ; un premium aberrant est écarté."""
+    lignes = [{"coin": "DASH", "hl_bps_h": 0.20, "bin_bps_h": 0.0},    # premium 0.20
+              {"coin": "INJ", "hl_bps_h": 0.30, "bin_bps_h": 0.05},    # premium 0.25 (le plus fort)
+              {"coin": "BTC", "hl_bps_h": 0.125, "bin_bps_h": 0.10},   # premium 0.025
+              {"coin": "ARTE", "hl_bps_h": 9.0, "bin_bps_h": 0.0}]     # 9 > 5 bps/h -> artefact, ignoré
+    top = K.coins_premium_funding(lignes, n=2)
+    assert top == ["INJ", "DASH"]                # INJ (0.25) > DASH (0.20) ; ARTE aberrant écarté
+
+
 def test_parser_book_hl_lit_le_haut_de_carnet_ou_None():
     rep = {"levels": [[{"px": "100.0", "sz": "3"}], [{"px": "100.2", "sz": "4"}]]}
     assert K.parser_book_hl(rep) == (100.0, 100.2, 3.0, 4.0)
