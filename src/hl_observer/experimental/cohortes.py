@@ -54,7 +54,7 @@ PROBE = Cohorte("DISCOVERY_PROBE", "discovery_probe", 100.0, 4, 15.0, 30.0, 500.
 # RAW_PROBE : ouvre sur TOUT OPEN/ADD candidat liquide (SANS edge requis) pour MESURER la paire vault+coin.
 # Mini 5 $, MAX 2, budget minuscule (perte totale plafonnée), positions marquées NON_VALIDEE.
 RAW_PROBE = Cohorte("RAW_PROBE", "raw_probe", 20.0, 2, 5.0, 40.0, 200.0, (),
-                    edge_requis=False, depth_min_usd=500.0, marque="NON_VALIDEE")
+                    edge_requis=False, depth_min_usd=100.0, marque="NON_VALIDEE")
 COHORTES = {"ALPHA": ALPHA, "PROBE": PROBE, "RAW_PROBE": RAW_PROBE}
 
 

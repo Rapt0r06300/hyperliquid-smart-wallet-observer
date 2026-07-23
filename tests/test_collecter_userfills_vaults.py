@@ -56,3 +56,17 @@ def test_vaults_et_roles(tmp_path):
     assert d["0xC1"] == "CORE" and d["0xC2"] == "CORE"             # retenus stricts = CORE (tradent)
     assert d["0xSAFE"] == "CANDIDAT_TRADABLE"                       # passe la sécurité mini -> PROBE l'ouvre
     assert d["0xOBS"] == "CANDIDAT_OBSERVE"                         # trop jeune -> observé seulement
+
+
+def test_depth_executable_somme_5_niveaux_cote_le_plus_mince():
+    """Profondeur = somme des 5 premiers niveaux du côté le plus MINCE × mid (plus honnête que le top
+    tick seul). Ici bids plus minces que asks -> c'est la somme bids qui décide."""
+    rep = {"levels": [
+        [{"px": "0.999", "sz": "100"}, {"px": "0.998", "sz": "100"}, {"px": "0.997", "sz": "100"}],   # bids : 300 unités
+        [{"px": "1.001", "sz": "500"}, {"px": "1.002", "sz": "500"}]]}                                 # asks : 1000 unités
+    d = C._depth_executable(rep, mid=1.0)
+    assert abs(d - 300.0) < 1e-6                                    # min(300, 1000) × mid(1.0) = 300 $
+
+
+def test_depth_executable_carnet_illisible_rend_zero():
+    assert C._depth_executable({}, mid=1.0) == 0.0                 # pas de 'levels' -> 0 (jamais inventé)

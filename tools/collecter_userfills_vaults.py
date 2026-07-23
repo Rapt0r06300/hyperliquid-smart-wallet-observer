@@ -121,6 +121,19 @@ _L2_POST = None
 _L2_PARSE = None
 
 
+def _depth_executable(rep: dict, mid: float, *, n: int = 5) -> float:
+    """Profondeur EXÉCUTABLE en USD sur les `n` premiers niveaux, côté le plus mince. Plus HONNÊTE que le
+    seul top tick (qui sous-estime massivement un carnet profond : un alt liquide a peu au 1er tick mais
+    beaucoup juste en dessous). `rep` = réponse l2Book HL ({'levels': [bids, asks]}, niveaux {px,sz})."""
+    try:
+        bids, asks = rep["levels"][0], rep["levels"][1]
+    except (KeyError, IndexError, TypeError):
+        return 0.0
+    def somme(cote: list) -> float:
+        return sum(float(x.get("sz") or 0.0) for x in (cote or [])[:n]) * mid
+    return min(somme(bids), somme(asks))
+
+
 def _lecteur_l2_ondemand(coin: str) -> dict | None:
     """L2 HL FRAIS (<1 s) pour `coin`, à la demande (POST public l2Book). Rend
     {hl_bid, hl_ask, depth_usd, age_ms} ou None. Cache court pour ne pas marteler l'API."""
@@ -139,6 +152,7 @@ def _lecteur_l2_ondemand(coin: str) -> dict | None:
         except Exception:  # noqa: BLE001
             _L2_CACHE[coin] = (now, None)
             return None
+    rep = None
     try:
         rep = _L2_POST(coin, timeout_s=2.0)
         p = _L2_PARSE(rep)
@@ -149,7 +163,8 @@ def _lecteur_l2_ondemand(coin: str) -> dict | None:
         return None
     bid, ask, bsz, asz = p
     mid = 0.5 * (bid + ask)
-    d = {"hl_bid": bid, "hl_ask": ask, "depth_usd": round(min(bsz, asz) * mid, 2), "age_ms": 0.0}
+    depth = _depth_executable(rep, mid) or (min(bsz, asz) * mid)   # top-5 niveaux (secours : top tick)
+    d = {"hl_bid": bid, "hl_ask": ask, "depth_usd": round(depth, 2), "age_ms": 0.0}
     _L2_CACHE[coin] = (now, d)
     return d
 
