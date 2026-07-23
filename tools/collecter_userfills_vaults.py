@@ -111,6 +111,49 @@ def _journal(root: Path, fill: dict, cohorte: str, decision: dict | None, recu_m
         f.write(json.dumps(ligne, ensure_ascii=False) + "\n")
 
 
+# ── L2 ON-DEMAND (rectif Flo 23/07) : fetch L2<1s du coin EXACT du fill, pour que RAW_PROBE/ALPHA/PROBE
+#    puissent juger un coin CANDIDAT (AERO/LDO/WLD…) hors table BBO/carnet. PUBLIC lecture seule (l2Book).
+#    Cache TTL 0.8 s partagé entre cohortes -> une seule requête par coin par vague de fills (poli, borné).
+#    Le réseau ne fait JAMAIS crasher le worker (tout est capté). 0 ordre, 0 clé, 0 signature.
+_L2_CACHE: dict[str, tuple[float, dict | None]] = {}
+_L2_TTL_S = 0.8
+_L2_POST = None
+_L2_PARSE = None
+
+
+def _lecteur_l2_ondemand(coin: str) -> dict | None:
+    """L2 HL FRAIS (<1 s) pour `coin`, à la demande (POST public l2Book). Rend
+    {hl_bid, hl_ask, depth_usd, age_ms} ou None. Cache court pour ne pas marteler l'API."""
+    global _L2_POST, _L2_PARSE
+    if not coin:
+        return None
+    now = time.monotonic()
+    hit = _L2_CACHE.get(coin)
+    if hit is not None and (now - hit[0]) < _L2_TTL_S:
+        return hit[1]
+    if _L2_POST is None:
+        try:
+            sys.path.insert(0, str(RACINE / "tools"))
+            from collecter_carnet import _post_hl as _p, parser_book_hl as _q
+            _L2_POST, _L2_PARSE = _p, _q
+        except Exception:  # noqa: BLE001
+            _L2_CACHE[coin] = (now, None)
+            return None
+    try:
+        rep = _L2_POST(coin, timeout_s=2.0)
+        p = _L2_PARSE(rep)
+    except Exception:  # noqa: BLE001 — le réseau ne doit jamais faire crasher le tick paper
+        p = None
+    if not p:
+        _L2_CACHE[coin] = (now, None)
+        return None
+    bid, ask, bsz, asz = p
+    mid = 0.5 * (bid + ask)
+    d = {"hl_bid": bid, "hl_ask": ask, "depth_usd": round(min(bsz, asz) * mid, 2), "age_ms": 0.0}
+    _L2_CACHE[coin] = (now, d)
+    return d
+
+
 def _traiter_un(root: Path, fill: dict, coins_a_verifier: set, t_ws_mono: float) -> None:
     import time as _t
     recu = _t.time() * 1000
@@ -118,7 +161,8 @@ def _traiter_un(root: Path, fill: dict, coins_a_verifier: set, t_ws_mono: float)
         f.write(json.dumps(fill, ensure_ascii=False) + "\n")
     coins_a_verifier.add(fill.get("coin"))
     for nom, coh in CO.COHORTES.items():
-        r = CO.traiter_fill(coh, ETATS[nom], fill, root, token=RUN_TOKEN, t_ws_mono=t_ws_mono)   # token + horloge monotone
+        r = CO.traiter_fill(coh, ETATS[nom], fill, root, token=RUN_TOKEN, t_ws_mono=t_ws_mono,
+                            lecteur_l2=_lecteur_l2_ondemand)                # token + horloge monotone + L2<1s on-demand
         _journal(root, fill, nom, r, recu)                        # trace TOUT, même les refus
         if r and r.get("ouverture"):
             print("[userfills] %s OUVRE %s @ %.4f latence=%dms (fill %s ts=%s)"
@@ -141,7 +185,7 @@ async def _worker(root: Path, file: asyncio.Queue) -> None:
                     _traiter_un(root, f, coins, t_ws)
                 _sauver_curseurs(root, curseurs)
                 for coh in CO.COHORTES.values():                 # exits ÉVÉNEMENTIELS sur les coins bougés
-                    CO.gerer_exits(coh, root)
+                    CO.gerer_exits(coh, root, lecteur_l2=_lecteur_l2_ondemand)   # mark-to-market L2<1s frais
         except Exception as exc:  # noqa: BLE001
             print("[userfills] worker err %s" % str(exc)[:60], flush=True)
         finally:
@@ -178,8 +222,8 @@ async def _exits_periodiques(root: Path, *, intervalle_s: float = 2.0) -> None:
     while True:
         for coh in CO.COHORTES.values():
             try:
-                CO.gerer_exits(coh, root)
-                CO.statut(coh, root)
+                CO.gerer_exits(coh, root, lecteur_l2=_lecteur_l2_ondemand)
+                CO.statut(coh, root, lecteur_l2=_lecteur_l2_ondemand)
             except Exception as exc:  # noqa: BLE001
                 print("[userfills] exits %s err %s" % (coh.nom, str(exc)[:40]), flush=True)
         await asyncio.sleep(intervalle_s)
