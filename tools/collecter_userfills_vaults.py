@@ -1,11 +1,11 @@
-"""MOTEUR WS userFills INLINE (rectif Flo 23/07) — ouvre dans le MÊME flux que le fill.
+"""MOTEUR WS userFills INLINE (rectif Flo 23/07) — ouvre dans le MÊME flux que le fill, sans bloquer.
 
-S'abonne au WS `userFills` des vaults CORE+CHALLENGERS et, DÈS chaque fill, appelle
-`cohortes.traiter_fill` pour les DEUX cohortes (ALPHA stricte + DISCOVERY_PROBE) : dédup isSnapshot/hash,
-agrégation des OPEN/ADD en dollars, admission → L2<1s → coûts → edge net>0 → OUVERTURE paper immédiate,
-avec mesure de la latence fill→copie. Les REDUCE/CLOSE du leader sortent inline. Une tâche périodique
-gère les sorties prix/temps (stop calibré / take-profit / horizon), écrit les statuts, et l'auto-KILL
-d'une cohorte à expectancy live négative. Lecture seule ; 0 ordre, 0 clé, 0 signature.
+Boucle WS = réception PURE (met chaque message dans une FILE BORNÉE) ; un WORKER consomme la file et
+appelle `cohortes.traiter_fill` pour les DEUX cohortes (ALPHA + PROBE) : admission → L2<1s → open inline,
+avec latence fill→copie. Snapshot INITIAL ignoré ; après RECONNEXION, on rejoue seulement les fills
+INCONNUS plus récents que le CURSEUR PERSISTANT par vault (aucun événement perdu pendant la coupure).
+REDUCE/CLOSE/FLIP du leader suivis proportionnellement. Exits stop/TP re-vérifiés à chaque événement
+(fill) + toutes ~2 s. Lecture seule ; 0 ordre, 0 clé, 0 signature.
 """
 from __future__ import annotations
 
@@ -24,60 +24,113 @@ from hl_observer.experimental import cohortes as CO  # noqa: E402
 
 WS_URL = "wss://api.hyperliquid.xyz/ws"
 FILLS_LIVE = Path("runtime") / "data" / "vault_fills_live.jsonl"
+CURSEURS = Path("runtime") / "data" / "userfills_curseurs.json"
 SCORES = Path("runtime") / "data" / "vaults_scores.json"
+FILE_MAX = 2000                  # file bornée : si saturée, on drop (on ne bloque JAMAIS la reception WS)
 
 
 def vaults_suivis(root: Path, *, n: int = 8) -> list[str]:
-    """CORE + CHALLENGERS (deny-by-default : sans score, aucun vault donc aucun abonnement)."""
+    """CORE + CHALLENGERS réellement abonnés (deny-by-default). On complète progressivement jusqu'à
+    2 CORE + 6 CHALLENGERS À MESURE qu'ils passent la barre de sécurité — jamais tout-venant."""
+    from hl_observer.experimental.exploratoire import tiers
+    core, chal = tiers(root)
+    return sorted(core) + sorted(chal)[: max(0, n - len(core))]
+
+
+def _charger_curseurs(root: Path) -> dict:
     try:
-        d = json.loads((root / SCORES).read_text(encoding="utf-8"))
+        return json.loads((root / CURSEURS).read_text(encoding="utf-8"))
     except (OSError, ValueError):
+        return {}
+
+
+def _sauver_curseurs(root: Path, cur: dict) -> None:
+    (root / CURSEURS).parent.mkdir(parents=True, exist_ok=True)
+    tmp = (root / CURSEURS).with_suffix(".json.tmp")
+    tmp.write_text(json.dumps(cur, ensure_ascii=False), encoding="utf-8")
+    tmp.replace(root / CURSEURS)
+
+
+def fills_a_traiter(vault: str, fills: list[dict], curseurs: dict) -> list[dict]:
+    """Filtre anti-perte : snapshot INITIAL (curseur absent) → ignoré + curseur posé à maintenant ;
+    sinon (live OU snapshot de reconnexion) → seulement les fills STRICTEMENT plus récents que le curseur.
+    Met le curseur à jour. Rend la liste à traiter."""
+    if not fills:
         return []
-    core = [c["vault"] for c in (d.get("classement") or []) if c.get("retenu")][:2]
-    autres = [c["vault"] for c in (d.get("classement") or []) if not c.get("retenu")][: n - len(core)]
-    return core + autres
+    est_snap = bool(fills[0].get("isSnapshot"))
+    cur = float(curseurs.get(vault, 0) or 0)
+    if est_snap and cur == 0:                                     # première connexion : on ne trade pas l'historique
+        curseurs[vault] = max(f["ts_ms"] for f in fills)
+        return []
+    a_traiter = [f for f in fills if float(f["ts_ms"]) > cur]     # catch-up : uniquement les inconnus récents
+    if a_traiter:
+        curseurs[vault] = max(float(f["ts_ms"]) for f in a_traiter)
+    return a_traiter
 
 
-ETATS = {}  # {cohorte_nom: etat} — partagé entre les tâches vault (asyncio mono-thread : pas de course réelle)
+ETATS = {}
 
 
-def _traiter(root: Path, fills: list[dict]) -> None:
-    for x in fills:
-        with (root / FILLS_LIVE).open("a", encoding="utf-8") as f:
-            f.write(json.dumps(x, ensure_ascii=False) + "\n")
-    for x in fills:
-        for nom, coh in CO.COHORTES.items():
-            r = CO.traiter_fill(coh, ETATS[nom], x, root)
-            if r and r.get("ouverture"):
-                print("[userfills] %s OUVRE %s @ %.4f latence=%dms (fill %s)"
-                      % (nom, r["ouverture"]["coin"], r["ouverture"]["prix_entree"], r.get("latence_ms", 0),
-                         x.get("vault", "")[:10]), flush=True)
-            elif r and r.get("fermeture"):
-                print("[userfills] %s FERME %s (%s) pnl=%.4f$"
-                      % (nom, r["fermeture"]["coin"], r["fermeture"]["raison"], r["fermeture"]["realized_usd"]), flush=True)
+def _traiter_un(root: Path, fill: dict, coins_a_verifier: set) -> None:
+    with (root / FILLS_LIVE).open("a", encoding="utf-8") as f:
+        f.write(json.dumps(fill, ensure_ascii=False) + "\n")
+    coins_a_verifier.add(fill.get("coin"))
+    for nom, coh in CO.COHORTES.items():
+        r = CO.traiter_fill(coh, ETATS[nom], fill, root)
+        if r and r.get("ouverture"):
+            print("[userfills] %s OUVRE %s @ %.4f latence=%dms (fill %s ts=%s)"
+                  % (nom, r["ouverture"]["coin"], r["ouverture"]["prix_entree"], r.get("latence_ms", 0),
+                     fill.get("vault", "")[:10], fill.get("ts_ms")), flush=True)
+        elif r and (r.get("fermeture") or r.get("reduction")):
+            e = r.get("fermeture") or r.get("reduction")
+            print("[userfills] %s %s %s pnl=%.4f$" % (nom, e["raison"], e["coin"], e["realized_usd"]), flush=True)
 
 
-async def _un_vault(root: Path, vault: str) -> None:
+async def _worker(root: Path, file: asyncio.Queue) -> None:
+    curseurs = _charger_curseurs(root)
+    while True:
+        vault, fills = await file.get()
+        try:
+            a_traiter = fills_a_traiter(vault, fills, curseurs)
+            if a_traiter:
+                coins = set()
+                for f in a_traiter:
+                    _traiter_un(root, f, coins)
+                _sauver_curseurs(root, curseurs)
+                for coh in CO.COHORTES.values():                 # exits ÉVÉNEMENTIELS sur les coins bougés
+                    CO.gerer_exits(coh, root)
+        except Exception as exc:  # noqa: BLE001
+            print("[userfills] worker err %s" % str(exc)[:60], flush=True)
+        finally:
+            file.task_done()
+
+
+async def _un_vault(root: Path, vault: str, file: asyncio.Queue) -> None:
     import websockets
     while True:
         try:
             async with websockets.connect(WS_URL, ping_interval=20, max_size=2 ** 22) as ws:
                 await ws.send(json.dumps({"method": "subscribe",
                                           "subscription": {"type": "userFills", "user": vault}}))
+                print("[userfills] ACK subscribe userFills %s" % vault[:10], flush=True)
                 async for brut in ws:
                     try:
                         msg = json.loads(brut)
                     except ValueError:
                         continue
                     fills = UL.parser_message_userfills(msg, vault=vault)
-                    if fills:
-                        _traiter(root, fills)
-        except Exception as exc:  # noqa: BLE001 — reconnect, on ne meurt pas
+                    if not fills:
+                        continue
+                    try:
+                        file.put_nowait((vault, fills))           # ne bloque JAMAIS la réception
+                    except asyncio.QueueFull:
+                        print("[userfills] FILE SATUREE — drop (%s)" % vault[:10], flush=True)
+        except Exception as exc:  # noqa: BLE001 — reconnect
             print("[userfills] %s reconnect (%s)" % (vault[:10], str(exc)[:50]), flush=True)
             await asyncio.sleep(3.0)
 
 
-async def _exits_periodiques(root: Path, *, intervalle_s: float = 10.0) -> None:
+async def _exits_periodiques(root: Path, *, intervalle_s: float = 2.0) -> None:
     while True:
         for coh in CO.COHORTES.values():
             try:
@@ -96,8 +149,10 @@ async def _boucle(root: Path) -> None:
         print("[userfills] aucun vault suivi (deny-by-default) — rien a faire", flush=True)
         return
     (root / FILLS_LIVE).parent.mkdir(parents=True, exist_ok=True)
-    print("[userfills] userFills WS de %d vaults -> 2 cohortes inline (ALPHA + PROBE)" % len(vaults), flush=True)
-    await asyncio.gather(_exits_periodiques(root), *[_un_vault(root, v) for v in vaults])
+    print("[userfills] VAULTS ABONNES (%d) : %s" % (len(vaults), ", ".join(v[:10] for v in vaults)), flush=True)
+    file: asyncio.Queue = asyncio.Queue(maxsize=FILE_MAX)
+    await asyncio.gather(_worker(root, file), _exits_periodiques(root),
+                         *[_un_vault(root, v, file) for v in vaults])
 
 
 def main(argv: list[str] | None = None) -> int:

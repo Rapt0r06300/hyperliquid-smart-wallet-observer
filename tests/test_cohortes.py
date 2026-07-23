@@ -64,9 +64,49 @@ def test_leader_close_sort_inline(tmp_path):
     etat = CO.etat_initial(CO.ALPHA, tmp_path)
     CO.traiter_fill(CO.ALPHA, etat, _fill(), tmp_path, now_ms=now, lecteur_l2=_l2)          # ouvre SOL
     r = CO.traiter_fill(CO.ALPHA, etat, _fill(dir="Close Long", signe=-1, hash="c2"),
-                        tmp_path, now_ms=now + 5000, lecteur_l2=_l2)                        # leader clôt
-    assert r and r.get("fermeture") and r["fermeture"]["raison"] == "LEADER_A_REDUIT"
+                        tmp_path, now_ms=now + 5000, lecteur_l2=_l2)                        # leader clôt (start absent)
+    assert r and r.get("fermeture") and r["fermeture"]["raison"] == "LEADER_A_CLOS"
     assert CO.charger_store(CO.ALPHA, tmp_path)["ouvertes"] == {}
+
+
+def test_reduce_proportionnel_close_total_flip(tmp_path):
+    _setup(tmp_path)
+    now = 1_000_000_000_500.0
+    etat = CO.etat_initial(CO.ALPHA, tmp_path)
+    CO.traiter_fill(CO.ALPHA, etat, _fill(sz=20), tmp_path, now_ms=now, lecteur_l2=_l2)   # ouvre SOL (leader long 20)
+    notional0 = CO.charger_store(CO.ALPHA, tmp_path)["ouvertes"]["SOL"]["notional_usd"]
+    # REDUCE : le leader vend 5 sur 20 (start=20) -> réduit la copie de 25 %
+    r = CO.traiter_fill(CO.ALPHA, etat, _fill(dir="Close Long", signe=-1, sz=5, start_position=20.0, hash="r1"),
+                        tmp_path, now_ms=now + 1000, lecteur_l2=_l2)
+    assert r["reduction"]["raison"] == "LEADER_A_REDUIT" and round(r["reduction"]["fraction"], 2) == 0.25
+    notional1 = CO.charger_store(CO.ALPHA, tmp_path)["ouvertes"]["SOL"]["notional_usd"]
+    assert notional1 < notional0                                    # copie réduite proportionnellement
+    # CLOSE : le leader vend le reste (15 sur 15) -> ferme tout
+    r2 = CO.traiter_fill(CO.ALPHA, etat, _fill(dir="Close Long", signe=-1, sz=15, start_position=15.0, hash="c1"),
+                         tmp_path, now_ms=now + 2000, lecteur_l2=_l2)
+    assert r2["fermeture"]["raison"] == "LEADER_A_CLOS" and CO.charger_store(CO.ALPHA, tmp_path)["ouvertes"] == {}
+
+
+def test_flip_ferme_et_reamorce(tmp_path):
+    _setup(tmp_path)
+    now = 1_000_000_000_500.0
+    etat = CO.etat_initial(CO.ALPHA, tmp_path)
+    CO.traiter_fill(CO.ALPHA, etat, _fill(sz=20), tmp_path, now_ms=now, lecteur_l2=_l2)   # long 20
+    # FLIP : le leader vend 30 (start=20) -> passe short 10 -> ferme la copie + réamorce l'agrégation
+    r = CO.traiter_fill(CO.ALPHA, etat, _fill(dir="Close Long", signe=-1, sz=30, start_position=20.0, hash="f1"),
+                        tmp_path, now_ms=now + 1000, lecteur_l2=_l2)
+    assert r["fermeture"]["raison"] == "LEADER_A_FLIP" and r.get("flip") is True
+    assert ("0xV", "SOL") in etat["agg"] and etat["agg"][("0xV", "SOL")]["sens"] == -1   # résidu short réamorcé
+
+
+def test_probe_exclut_les_coins_alpha(tmp_path):
+    _setup(tmp_path)
+    # SOL est dans ALPHA (gelé) ; on le met AUSSI dans la table PROBE -> il doit être EXCLU côté PROBE
+    (tmp_path / "runtime" / "data" / "copy_prelim_probe.json").write_text(json.dumps(
+        {"table": {"SOL": {"edge_brut_bps": 40.0, "horizon_ms": 3.6e6, "stop_bps": 40.0},
+                   "DOT": {"edge_brut_bps": 40.0, "horizon_ms": 3.6e6, "stop_bps": 40.0}}}))
+    tp = CO.charger_table(CO.PROBE, tmp_path)
+    assert "SOL" not in tp and "DOT" in tp                          # anti-double-comptage : SOL réservé à ALPHA
 
 
 def test_auto_kill_expectancy_negative(tmp_path):
@@ -82,10 +122,10 @@ def test_auto_kill_expectancy_negative(tmp_path):
 
 def test_isolation_alpha_probe(tmp_path):
     _setup(tmp_path)
-    # PROBE utilise sa propre table + ses propres fichiers -> pas de pollution croisée
+    # PROBE trade un coin HORS ALPHA (DOT), ses propres fichiers -> pas de pollution croisée
     (tmp_path / "runtime" / "data" / "copy_prelim_probe.json").write_text(json.dumps(
-        {"table": {"SOL": {"edge_brut_bps": 40.0, "horizon_ms": 3_600_000.0, "stop_bps": 40.0, "take_profit_bps": 60.0}}}))
+        {"table": {"DOT": {"edge_brut_bps": 40.0, "horizon_ms": 3_600_000.0, "stop_bps": 40.0, "take_profit_bps": 60.0}}}))
     etat = CO.etat_initial(CO.PROBE, tmp_path)
-    r = CO.traiter_fill(CO.PROBE, etat, _fill(sz=5), tmp_path, now_ms=1e12, lecteur_l2=_l2)  # 5×150=750 ≥ 500 (PROBE)
+    r = CO.traiter_fill(CO.PROBE, etat, _fill(coin="DOT", sz=5), tmp_path, now_ms=1e12, lecteur_l2=_l2)  # 750 ≥ 500
     assert r and r.get("ouverture") and r["ouverture"]["notional_usd"] <= 15.0              # notional PROBE tout petit
     assert not (tmp_path / "runtime" / "data" / "exploratory_paper_positions.json").exists()  # ALPHA intact

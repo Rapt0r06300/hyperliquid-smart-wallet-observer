@@ -78,6 +78,7 @@ def _ledger(coh: Cohorte, root: Path, evt: dict) -> None:
 
 
 def charger_table(coh: Cohorte, root: Path) -> dict[str, dict]:
+    t: dict[str, dict] = {}
     for rel in coh.tables:
         try:
             d = json.loads((root / "runtime" / "data" / rel).read_text(encoding="utf-8"))
@@ -85,8 +86,13 @@ def charger_table(coh: Cohorte, root: Path) -> dict[str, dict]:
             continue
         t = {str(k).upper(): v for k, v in (d.get("table") or d).items() if isinstance(v, dict)}
         if t:
-            return t
-    return {}
+            break
+    if coh is PROBE and t:
+        # ANTI-DOUBLE-COMPTAGE : PROBE ne trade JAMAIS un coin déjà géré par ALPHA (ex. ADA/SOL).
+        # ALPHA a la priorité ; PROBE se réserve les AUTRES coins liquides.
+        coins_alpha = set(charger_table(ALPHA, root))
+        t = {c: v for c, v in t.items() if c not in coins_alpha}
+    return t
 
 
 def _mark(coin: str, root: Path, now_ms: float, lecteur_l2) -> float | None:
@@ -157,6 +163,23 @@ def _sortir(coh: Cohorte, pos: dict, store: dict, root: Path, *, prix_sortie, co
     return {"coin": pos["coin"], "realized_usd": realized, "raison": raison}
 
 
+def _reduire(coh: Cohorte, pos: dict, store: dict, root: Path, *, fraction: float, prix: float,
+             cout_sortie_bps: float, now_ms: float) -> dict:
+    """REDUCE : réduit la copie de `fraction` (0<f<1) proportionnellement au leader — réalise le PnL sur
+    la part fermée, garde le reste ouvert."""
+    frac = max(0.0, min(1.0, fraction))
+    part = round(pos["notional_usd"] * frac, 2)
+    realized = round(MP.pnl_courant_usd(pos, mark=prix, now_ms=now_ms) * frac - cout_sortie_bps / 1e4 * part, 6)
+    pos["notional_usd"] = round(pos["notional_usd"] - part, 2)
+    store["cash"] = round(store["cash"] + part + realized, 6)
+    store["realise_total_usd"] = round(store.get("realise_total_usd", 0.0) + realized, 6)
+    _ledger(coh, root, {"evt": "REDUCE", "ts_ms": now_ms, "coin": pos["coin"], "fraction": round(frac, 3),
+                        "part_notional_usd": part, "realized_usd": realized, "prix_sortie": prix,
+                        "vault": pos.get("meta", {}).get("vault")})
+    _sauver(coh, root, store)
+    return {"coin": pos["coin"], "realized_usd": realized, "raison": "LEADER_A_REDUIT", "fraction": round(frac, 3)}
+
+
 def traiter_fill(coh: Cohorte, etat: dict, fill: dict, root: Path, *, now_ms: float | None = None,
                  lecteur_l2=None, table: dict | None = None) -> dict | None:
     """INLINE : traite UN fill leader. Dédup (hash/isSnapshot) ; REDUCE/CLOSE → sortie ; OPEN/ADD agrégés
@@ -177,15 +200,32 @@ def traiter_fill(coh: Cohorte, etat: dict, fill: dict, root: Path, *, now_ms: fl
     if not coin or sens == 0:
         return None
     table = table if table is not None else charger_table(coh, root)
-    # LEADER REDUCE/CLOSE -> sortie inline de notre copie sur ce coin (si copiée du même vault)
+    # LEADER REDUCE / CLOSE / FLIP -> on suit proportionnellement (via startPosition du fill)
     if "close" in dir_bas:
         pos = store["ouvertes"].get(coin)
-        if pos and pos.get("meta", {}).get("vault") == vault:
-            mark = _mark(coin, root, now, lecteur_l2)
-            cout = float(pos.get("spread_bps") or 0.0) / 2.0 + float(pos.get("frais_bps") or 0.0) + float(pos.get("slippage_bps") or 0.0)
-            return {"fermeture": _sortir(coh, pos, store, root, prix_sortie=(mark or pos["prix_entree"]),
-                                         cout_sortie_bps=cout, raison="LEADER_A_REDUIT", now_ms=now)}
-        return None
+        if not (pos and pos.get("meta", {}).get("vault") == vault):
+            return None
+        mark = _mark(coin, root, now, lecteur_l2) or pos["prix_entree"]
+        cout = float(pos.get("spread_bps") or 0.0) / 2.0 + float(pos.get("frais_bps") or 0.0) + float(pos.get("slippage_bps") or 0.0)
+        start = fill.get("start_position")
+        sz = abs(float(fill.get("sz") or 0.0))
+        if start is None or abs(start) < 1e-9:                     # info absente -> fermeture prudente complète
+            return {"fermeture": _sortir(coh, pos, store, root, prix_sortie=mark, cout_sortie_bps=cout,
+                                         raison="LEADER_A_CLOS", now_ms=now)}
+        pos_after = start + sens * sz
+        if abs(pos_after) < 1e-9:                                  # CLOSE : le leader ferme entièrement -> on ferme tout
+            return {"fermeture": _sortir(coh, pos, store, root, prix_sortie=mark, cout_sortie_bps=cout,
+                                         raison="LEADER_A_CLOS", now_ms=now)}
+        if (start > 0) != (pos_after > 0):                        # FLIP : fermer puis REPASSER l'admission (résidu = nouvel OPEN)
+            ferm = _sortir(coh, pos, store, root, prix_sortie=mark, cout_sortie_bps=cout, raison="LEADER_A_FLIP", now_ms=now)
+            etat["agg"][(vault, coin)] = {"sens": 1 if pos_after > 0 else -1, "notional": abs(pos_after) * float(fill.get("px") or 0.0),
+                                          "t0": now, "fill_ts": int(fill.get("ts_ms") or now)}
+            return {"fermeture": ferm, "flip": True}
+        fraction = min(1.0, sz / abs(start))                      # REDUCE : réduire la copie de la même fraction
+        if fraction >= 0.999:
+            return {"fermeture": _sortir(coh, pos, store, root, prix_sortie=mark, cout_sortie_bps=cout,
+                                         raison="LEADER_A_CLOS", now_ms=now)}
+        return {"reduction": _reduire(coh, pos, store, root, fraction=fraction, prix=mark, cout_sortie_bps=cout, now_ms=now)}
     if "open" not in dir_bas:
         return None
     # OPEN/ADD : agrégation EN DOLLARS sur quelques secondes (plus de ΔNAV 2 % obligatoire)

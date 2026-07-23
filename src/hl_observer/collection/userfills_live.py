@@ -67,10 +67,14 @@ def parser_message_userfills(msg: Any, *, vault: str = "") -> list[dict]:
         except (KeyError, TypeError, ValueError):
             continue
         side = str(f.get("side") or "").upper()
+        try:
+            start_pos = float(f.get("startPosition"))
+        except (TypeError, ValueError):
+            start_pos = None
         out.append({"vault": vault, "coin": coin, "px": px, "sz": sz,
                     "signe": 1 if side == "B" else (-1 if side == "A" else 0),
                     "ts_ms": ts, "dir": str(f.get("dir") or ""), "hash": f.get("hash"),
-                    "isSnapshot": est_snapshot})
+                    "start_position": start_pos, "isSnapshot": est_snapshot})
     return out
 
 
