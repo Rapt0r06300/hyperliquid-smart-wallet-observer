@@ -203,3 +203,21 @@ def test_fermer_tout_et_desactiver_solde_aux_prix_executables_garde_historique_i
                if '"CLOSE"' in l]
     assert reasons and all(x == SORTIE_MODULE_DESACTIVE for x in reasons)
     assert fermer_tout_et_desactiver(tmp_path, now_ms=101 * H)["n_fermees"] == 0   # idempotent
+
+
+def test_strategie_retiree_exclue_du_live_mais_preservee_dans_l_audit(tmp_path):
+    """🔴 23/07 (décision Flo) — le carry delta-neutre est RETIRÉ : sa perte sort du LIVRE LIVE
+    (grand chiffre + courbe) mais reste INTACTE au ledger (audit). L'arbitrage (même ledger) reste."""
+    from hl_observer.funding.carry_positions_store import (
+        _append_ledger, resume_depuis_ledger, etat_carry, STRATEGIES_RETIREES)
+    _append_ledger(tmp_path, {"kind": "CLOSE", "coin": "BTC", "mode": "LIVE",
+                              "realized_net_pnl_usdc": -10.0, "strategie": "carry"})
+    _append_ledger(tmp_path, {"kind": "CLOSE", "coin": "ETH", "mode": "LIVE",
+                              "realized_net_pnl_usdc": -2.0, "strategie": "arbitrage"})
+    _append_ledger(tmp_path, {"kind": "CLOSE", "coin": "SOL", "mode": "LIVE",
+                              "realized_net_pnl_usdc": -1.0})                       # non tagué = carry
+    assert resume_depuis_ledger(tmp_path)["realized_net_pnl_usdc"] == -13.0         # audit : voit TOUT
+    live = resume_depuis_ledger(tmp_path, exclure_strategies=STRATEGIES_RETIREES)
+    assert live["realized_net_pnl_usdc"] == -2.0                                    # live : carry (tagué + non tagué) exclu
+    e = etat_carry(tmp_path)
+    assert e["realized_net_pnl_usdc"] == -13.0 and e["realized_net_pnl_usdc_live"] == -2.0

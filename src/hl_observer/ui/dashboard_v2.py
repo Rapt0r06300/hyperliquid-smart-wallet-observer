@@ -661,7 +661,7 @@ function syncTop(){
     var lat=Number(window._carryLatent||0);
     var ns=Number(window._carryNetSess||0);
     cs.textContent = '  ·  total '+(cp+cy)+' pos · copy '+(copyNet>=0?'+':'')+n(copyNet,2)
-      +'$ · carry '+(carryNet>=0?'+':'')+n(carryNet,2)+'$ (session '+(ns>=0?'+':'')+n(ns,2)+'$)'
+      +'$ · carry RETIRÉ ('+n(Number(window._carryRetireArchive||0),2)+'$ archivé)'
       +' · latent base '+(lat>=0?'+':'')+n(lat,2)+'$ (réversible)';
     cs.title='« carry » = depuis le tout debut (= la courbe). « session » = depuis le dernier '
       +'redemarrage. Les deux sont vraies, elles ne repondent pas a la meme question.';}
@@ -669,7 +669,7 @@ function syncTop(){
   if(st){var mk=function(v){return (v>=0?'+':'')+n(v,2)+'$';};
     st.innerHTML=
        '<tr><td>Copy-trading</td><td>'+cp+'</td><td style="color:'+col(copyNet)+'">'+mk(copyNet)+'</td><td style="text-align:right;color:var(--mut)">'+(cp>0?'actif':'attend un edge prouvé (protège le capital)')+'</td></tr>'
-      +'<tr><td>Carry delta-neutre</td><td>'+cy+'</td><td style="color:'+col(carryNet)+'">'+mk(carryNet)+'</td><td style="text-align:right;color:var(--mut)">'+(cy>0?'actif · funding encaissé':'attend un meilleur funding')+'</td></tr>'
+      +'<tr style="opacity:.55"><td>Carry delta-neutre</td><td>0</td><td style="color:var(--mut)">RETIRÉ</td><td style="text-align:right;color:var(--mut)">retiré le 23/07 — historique '+mk(Number(window._carryRetireArchive||0))+' archivé au ledger</td></tr>'
       // 21/07 : l'ARBITRAGE de dislocation a sa ligne — avec l'ETAT MESURE (« plus gros
       // ecart X bps < seuil 35 »), jamais un tiret muet. Un module qui attend le DIT.
       +'<tr><td>Arbitrage dislocation</td><td>'+(window._arbPos||0)+'</td><td style="color:'+col(Number(window._arbReal||0))+'">'+mk(Number(window._arbReal||0))+'</td><td style="text-align:right;color:var(--mut)">'+(window._arbEtat||'—')+'</td></tr>'
@@ -688,7 +688,12 @@ function loadCarry(){fetch('/v2/carry').then(function(r){return r.json()}).then(
   // session n'existe pas encore (vieux moteur), on affiche le total comme avant.
   var realSess=(d.realized_net_pnl_usdc_session!=null)?Number(d.realized_net_pnl_usdc_session):Number(d.realized_net_pnl_usdc||0);
   var realTout=Number(d.realized_net_pnl_usdc||0);
+  // 🔴 23/07 — CARRY DELTA-NEUTRE RETIRÉ (décision Flo). Le GRAND chiffre affiche le LIVRE LIVE = réalisé
+  // HORS carry (l'arbitrage du même ledger reste) ; le carry retiré reste au ledger (audit) et s'affiche
+  // « archivé », à part. Repli : si le champ live manque (vieux moteur), on retombe sur l'ancien total.
+  var realLive=(d.realized_net_pnl_usdc_live!=null)?Number(d.realized_net_pnl_usdc_live):realTout;
   window._carryPos=(d.positions_ouvertes||0);window._carryReal=realTout;window._carryRealSess=realSess;
+  window._carryRetireArchive=realTout-realLive;   // = perte du carry retiré, préservée mais HORS du live
   // v3 (20/07) : NET = realise + funding COURU (encaisse, stable). Le latent de base est
   // SEPARE — calcule ici pour l'affichage dedie, jamais additionne au net.
   window._carryLatent=(d.positions||[]).reduce(function(s,p){return s+(Number(p.base_mtm_usd)||0);},0);
@@ -703,7 +708,7 @@ function loadCarry(){fetch('/v2/carry').then(function(r){return r.json()}).then(
   // chiffre dit desormais la meme verite que la courbe, comme CLAUDE.md l'exige
   // (« dashboard, audit, logs, exports convergent sur le meme ledger »).
   var fundingRegle=Number((d.net_funding_settled!=null)?d.net_funding_settled:d.funding_accru_usdt||0);
-  window._carryNet=realTout+fundingRegle;          // == stable_net_pnl == dernier point de la courbe
+  window._carryNet=realLive+fundingRegle;          // LIVRE LIVE (hors carry retiré) == dernier point de la courbe
   window._carryNetSess=realSess+fundingRegle;      // fenetre session, montree A COTE
   window._carryEstime=Number(d.funding_accrual_estimate||0);
   // 🔴 20/07 : « TRADES CLOS 6 » melangeait TROIS perimetres sur la rangee SESSION (copy =
@@ -1278,6 +1283,10 @@ def create_dashboard_v2_router() -> APIRouter:
                 # provenance/perimetre, version endpoint : un filtre de cles est une porte,
                 # il doit laisser passer TOUT ce que l'ecran promet.
                 "realized_net_pnl_usdc_session": etat.get("realized_net_pnl_usdc_session"),
+                # 🔴 23/07 — LIVRE LIVE (carry delta-neutre RETIRÉ, décision Flo). Le GRAND chiffre
+                # affiche le réalisé HORS stratégies retirées (arbitrage inclus, carry exclu) ;
+                # l'historique carry reste dans realized_net_pnl_usdc (audit/ledger, jamais supprimé).
+                "realized_net_pnl_usdc_live": etat.get("realized_net_pnl_usdc_live"),
                 # 🔴 P0 (21/07) — REGLE vs ESTIME. `funding_accru_usdt` est un PRORATA
                 # LINEAIRE ; Hyperliquid regle au SOMMET DE CHAQUE HEURE. On expose les deux
                 # separement : seul le REGLE a le droit d'entrer dans un chiffre « stable ».

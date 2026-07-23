@@ -53,11 +53,17 @@ def _f(v: Any) -> float | None:
 
 
 def evenements_realises(root: str | Path = ".", *, mode: str = "LIVE",
-                        ledger_relpath: str | Path | None = None) -> list[dict[str, Any]]:
+                        ledger_relpath: str | Path | None = None,
+                        exclure_strategies: frozenset[str] = frozenset({"carry"})
+                        ) -> list[dict[str, Any]]:
     """Les CLOSE du ledger, triés dans le temps : `[{ts_ms, realise, coin, strategie}]`.
 
     C'est la seule source du réalisé. Une ligne sans horodatage ou sans montant est ignorée —
     on ne devine pas quand un gain a eu lieu.
+
+    🔴 23/07 : les stratégies RETIRÉES (carry delta-neutre, défaut) sont EXCLUES de la courbe LIVE —
+    leur historique reste dans le ledger, mais la courbe montre le livre live (arbitrage inclus). Les
+    vieilles lignes sans `strategie` datent du carry -> exclues elles aussi.
     """
     from hl_observer.funding.carry_positions_store import LEDGER_RELPATH
     chemin = Path(root) / (ledger_relpath or LEDGER_RELPATH)
@@ -75,6 +81,8 @@ def evenements_realises(root: str | Path = ".", *, mode: str = "LIVE",
                 continue
             if r.get("mode") != mode:
                 continue
+            if (r.get("strategie") or "carry") in exclure_strategies:
+                continue                                 # stratégie RETIRÉE : hors de la courbe live
             ts, pnl = _f(r.get("ts_ms")), _f(r.get("realized_net_pnl_usdc"))
             if ts is None or pnl is None:
                 continue

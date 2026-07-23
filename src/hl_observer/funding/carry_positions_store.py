@@ -29,6 +29,11 @@ from hl_observer.funding.carry_position_lifecycle import (
 SORTIE_HORS_SHORTLIST = "COIN_PLUS_DANS_SHORTLIST"   # conservé : d'anciennes lignes de ledger le portent
 SORTIE_ROTATION = "ROTATION_HORS_TOP_SLOTS"   # A7 : plafond de slots -> on garde les meilleurs nets
 SORTIE_MODULE_DESACTIVE = "MODULE_CARRY_DESACTIVE"   # 23/07 : fermeture propre a la mise en SHADOW
+#: 🔴 23/07 — STRATEGIES RETIREES (decision Flo). Le carry delta-neutre est retire : sa perte historique
+#: (−10,73 $) ne doit PLUS apparaitre dans le LIVRE LIVE (grand chiffre + courbe). Elle reste INTACTE dans
+#: le ledger append-only (audit/rapport), simplement EXCLUE des vues live. L'arbitrage (meme ledger) reste.
+#: Les vieilles lignes SANS `strategie` datent du carry -> traitees comme "carry" (retirees) elles aussi.
+STRATEGIES_RETIREES = frozenset({"carry"})
 
 POSITIONS_RELPATH = Path("runtime") / "data" / "carry_paper_positions.json"
 LEDGER_RELPATH = Path("runtime") / "data" / "carry_paper_ledger.jsonl"
@@ -314,7 +319,8 @@ def diagnostic_churn(root: str | Path = ".", *, now_ms: int | None = None,
 
 
 def resume_depuis_ledger(root: str | Path = ".", *, mode: str = MODE_LIVE,
-                         session_id: str | None = None) -> dict[str, Any]:
+                         session_id: str | None = None,
+                         exclure_strategies: frozenset[str] = frozenset()) -> dict[str, Any]:
     """Le PnL realise TOTAL, lu depuis le ledger append-only (source de verite, pas un compteur).
 
     PnL PAR SESSION (demande de Flo, 20/07) : chaque ligne du ledger porte desormais son
@@ -338,6 +344,8 @@ def resume_depuis_ledger(root: str | Path = ".", *, mode: str = MODE_LIVE,
             continue
         if r.get("mode") != mode:
             continue
+        if (r.get("strategie") or "carry") in exclure_strategies:
+            continue                                     # stratégie RETIRÉE : hors du livre live
         if r.get("kind") == "OPEN":
             opens += 1
         elif r.get("kind") == "RENFORT":
@@ -375,6 +383,11 @@ def etat_carry(root: str | Path = ".", *, mode: str = MODE_LIVE) -> dict[str, An
     except Exception:  # noqa: BLE001
         sid = ""
     r = resume_depuis_ledger(root, mode=mode, session_id=sid)
+    # 🔴 23/07 — LIVRE LIVE (hors stratégies RETIRÉES). Le carry delta-neutre est retiré (décision Flo) :
+    # sa perte historique reste dans `realized_net_pnl_usdc` (audit/ledger, jamais supprimée) mais le
+    # GRAND chiffre du dashboard affiche le livre LIVE = ledger MOINS les retirées. L'arbitrage reste.
+    r["realized_net_pnl_usdc_live"] = resume_depuis_ledger(
+        root, mode=mode, exclure_strategies=STRATEGIES_RETIREES)["realized_net_pnl_usdc"]
     g = charger_gestionnaire(root, mode=mode)
     r["positions_ouvertes"] = len(g.ouvertes)
     r["coins_ouverts"] = sorted(g.ouvertes)
