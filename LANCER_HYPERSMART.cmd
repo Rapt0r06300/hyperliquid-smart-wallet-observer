@@ -385,6 +385,13 @@ REM PnL net + regularite + drawdown + anciennete + concentration + turnover + ca
 REM Ecrit vaults_scores.json ; le signal copy_vault ne copie QUE les vaults RETENUS. 0 ordre.
 start "" /b tools\boucle_collecteur.cmd scorer-vaults tools\scorer_vaults.py 600 --une-fois
 
+REM === BACKFILL FILLS + MESURE OOS DE L'EDGE DE COPIE (rectif Flo 23/07 : ne pas attendre des jours) ===
+REM backfill_vault_fills : userFillsByTime des vaults RETENUS + temoin -> episodes OPEN/ADD/REDUCE/CLOSE
+REM (reduces de RETRAIT exclus). mesurer_copie : edge OOS train->walk-forward vs placebo -> gel si valide.
+REM 2 endpoints PUBLICS en lecture. 0 ordre, 0 cle, 0 signature. Le signal copy_vault ne copie que si gele.
+start "" /b tools\boucle_collecteur.cmd backfill-fills tools\backfill_vault_fills.py 14400 --une-fois
+start "" /b tools\boucle_collecteur.cmd mesure-copie tools\mesurer_copie.py 1800 --une-fois
+
 REM === BBO RAPIDE HL/Binance (chantier ARB 23/07) : quotes SYNCHRONISEES pour trancher le lead-lag ===
 REM Le detecteur d'arb actuel est INVALIDE (base persistante +17-30bps = mapping/quote perimee).
 REM Ce collecteur WS PERSISTANT (HL bbo + Binance bookTicker) donne des quotes MAPPEES exactement,

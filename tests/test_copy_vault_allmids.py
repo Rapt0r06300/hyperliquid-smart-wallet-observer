@@ -13,12 +13,15 @@ from hl_observer.experimental.copy_edge_forward import geler
 import tools.collecter_allmids as CA
 
 
-def _base(root, snaps, *, carnet=None, gele=False, allmids=None, ts_allmids_ms=None, now=1_000_000_000_000.0):
+def _base(root, snaps, *, carnet=None, gele=False, allmids=None, ts_allmids_ms=None,
+          retenus=("0xAAA",), now=1_000_000_000_000.0):
     (root / "runtime" / "data").mkdir(parents=True, exist_ok=True)
     (root / "config").mkdir(parents=True, exist_ok=True)
     (root / "runtime" / "data" / "vault_snapshots.jsonl").write_text(
         "\n".join(json.dumps(s) for s in snaps), encoding="utf-8")
     (root / "config" / "frais_venues.json").write_text(json.dumps({"hl_taker_bps": 3.5, "bin_taker_bps": 4.5}))
+    if retenus is not None:                                         # DENY-BY-DEFAULT : sans score, rien n'est copié
+        (root / "runtime" / "data" / "vaults_scores.json").write_text(json.dumps({"retenus": list(retenus)}))
     if carnet is not None:
         (root / "runtime" / "data" / "carnet_venues.jsonl").write_text(
             "\n".join(json.dumps(c) for c in carnet), encoding="utf-8")
@@ -77,9 +80,9 @@ def test_sans_edge_mesure_NO_TRADE_meme_avec_carnet(tmp_path):
 def test_sans_carnet_frais_NO_TRADE_et_coin_file_au_carnet(tmp_path):
     """Barre (a) : edge gelé mais L2 absent -> CARNET_ABSENT, et le coin est ABONNÉ au carnet."""
     now = 1_000_000_000_000.0
-    _base(tmp_path, _snaps_move(), carnet=[], gele=True)                 # carnet vide
+    _base(tmp_path, _snaps_move(), carnet=[], gele=True)                 # carnet vide -> aucun L2 <1 s
     sigs, refus = signaux_vaults(tmp_path, now_ms=now)
-    assert not sigs and refus[0]["motif"] == "CARNET_ABSENT"
+    assert not sigs and refus[0]["motif"] == "L2_INDISPONIBLE_1S"
     files = json.loads((tmp_path / COINS_BOUGES_RELPATH).read_text())["coins"]
     assert "HYPE" in files                                               # abonnement dynamique
 
@@ -91,10 +94,11 @@ def test_ouvre_quand_L2_frais_ET_edge_mesure(tmp_path):
     sigs, refus = signaux_vaults(tmp_path, now_ms=now)
     assert len(sigs) == 1
     s = sigs[0]
-    assert s.coin == "HYPE" and s.sens == 1 and s.meta["src_prix"] == "carnet_l2"
+    assert s.coin == "HYPE" and s.sens == 1 and s.meta["src_prix"] == "carnet"
     assert s.prix_entree == 20.01                                        # ask L2 réel (taker long)
     assert s.notional_usd == 150.0                                       # min(cible 150, profondeur 5000)
-    # edge net = edge_brut mesuré (45) − coût A/R L2 réel ; strictement mesuré, pas inventé
+    assert s.meta["fill_partiel"] is False and s.meta["l2_age_ms"] <= 1000   # L2 < 1 s
+    # edge net = edge_brut mesuré (45) − coût A/R L2 réel (spread+2×slippage+frais) ; mesuré, pas inventé
     assert s.meta["edge_brut_mesure_bps"] == 45.0 and s.edge_estime_bps < 45.0
     assert MP.admettre(s, MP.charger_store(tmp_path), now_ms=now) == (True, None)
 
@@ -112,6 +116,47 @@ def test_move_trop_faible_NO_TRADE(tmp_path):
     _base(tmp_path, _snaps_move(szi1=50.0), carnet=_carnet(), gele=True)     # +1 % du NAV < 5 %
     sigs, refus = signaux_vaults(tmp_path, now_ms=now)
     assert not sigs and refus[0]["motif"] == "CHANGEMENT_TROP_FAIBLE"
+
+
+def test_deny_by_default_sans_scoring(tmp_path):
+    """Rectif Flo : PAS de repli permissif. Sans fichier de scores, on ne copie RIEN, même move+L2+edge."""
+    now = 1_000_000_000_000.0
+    _base(tmp_path, _snaps_move(), carnet=_carnet(), gele=True, retenus=None)   # aucun vaults_scores.json
+    sigs, refus = signaux_vaults(tmp_path, now_ms=now)
+    assert not sigs and not refus                                       # deny silencieux : aucun vault retenu
+
+
+def test_l2_trop_vieux_refuse(tmp_path):
+    """Un carnet vieux de > 1 s n'est PAS un L2 admissible (rectif Flo : 120 s trop vieux)."""
+    now = 1_000_000_000_000.0
+    vieux = [{"coin": "HYPE", "hl_bid": 19.99, "hl_ask": 20.01, "taille_min_usd": 5000.0,
+              "collecte_ts": now / 1000.0 - 30}]                         # 30 s -> périmé
+    _base(tmp_path, _snaps_move(), carnet=vieux, gele=True)
+    sigs, refus = signaux_vaults(tmp_path, now_ms=now)
+    assert not sigs and refus[0]["motif"] == "L2_INDISPONIBLE_1S"
+
+
+def test_lecteur_l2_on_demand(tmp_path):
+    """Lecture L2 À LA DEMANDE (WS/REST au signal) : source la plus fraîche, admet quand fournie."""
+    now = 1_000_000_000_000.0
+    _base(tmp_path, _snaps_move(), carnet=[], gele=True)                 # pas de carnet
+    l2 = lambda coin: {"hl_bid": 19.99, "hl_ask": 20.01, "depth_usd": 4000.0, "age_ms": 50}
+    sigs, _ = signaux_vaults(tmp_path, now_ms=now, lecteur_l2=l2)
+    assert len(sigs) == 1 and sigs[0].meta["src_prix"] == "on_demand" and sigs[0].meta["l2_age_ms"] == 50
+
+
+def test_leader_close_declenche_sortie(tmp_path):
+    """Suivi réel du leader (rectif Flo) : quand le vault RÉDUIT/CLOS, la copie doit sortir."""
+    from hl_observer.experimental.runner import _leader_a_reduit
+    (tmp_path / "runtime" / "data").mkdir(parents=True)
+    snap = tmp_path / "runtime" / "data" / "vault_snapshots.jsonl"
+    pos = {"coin": "HYPE", "moteur": "copy_vault", "meta": {"vault": "0xAAA", "coin": "HYPE", "szi_apres": 1000.0}}
+    snap.write_text(json.dumps({"vault": "0xAAA", "positions": [{"coin": "HYPE", "szi": 1000.0}]}))
+    assert _leader_a_reduit(pos, tmp_path) == (False, "")               # leader tient -> on reste
+    snap.write_text(json.dumps({"vault": "0xAAA", "positions": []}))
+    assert _leader_a_reduit(pos, tmp_path) == (True, "LEADER_A_CLOS")    # leader a clos -> on sort
+    snap.write_text(json.dumps({"vault": "0xAAA", "positions": [{"coin": "HYPE", "szi": 300.0}]}))
+    assert _leader_a_reduit(pos, tmp_path) == (True, "LEADER_A_REDUIT")  # réduit à 30 % -> on sort
 
 
 def test_filtre_de_retention_du_score(tmp_path):

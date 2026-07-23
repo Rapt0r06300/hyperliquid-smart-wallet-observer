@@ -114,6 +114,44 @@ def _raison_sortie_dislocation(pos: dict, car: dict | None, *, now_ms: float) ->
     return None, gap_cur
 
 
+def _leader_a_reduit(pos: dict, root: Path, *, seuil: float = 0.5) -> tuple[bool, str]:
+    """Copy-vault (rectif Flo 23/07) : le LEADER a-t-il RÉDUIT/CLOS sa position sur le coin depuis notre
+    entrée ? On copie son alpha ; s'il sort, le signal a disparu → on sort aussi. Lit le dernier snapshot
+    du vault : |szi actuel| ≈ 0 → LEADER_A_CLOS ; < seuil × |szi à l'entrée| → LEADER_A_REDUIT."""
+    import json as _j
+    meta = pos.get("meta") or {}
+    vault, coin = meta.get("vault"), str(pos.get("coin") or "").upper()
+    szi_entree = abs(float(meta.get("szi_apres") or 0.0))
+    if not vault or not coin or szi_entree <= 0:
+        return False, ""
+    try:
+        lignes = (root / "runtime" / "data" / "vault_snapshots.jsonl").read_text(
+            encoding="utf-8", errors="ignore").splitlines()
+    except OSError:
+        return False, ""
+    dernier = None
+    for l in reversed(lignes[-8000:]):
+        try:
+            d = _j.loads(l)
+        except ValueError:
+            continue
+        if d.get("vault") == vault:
+            dernier = d
+            break
+    if not dernier:
+        return False, ""
+    szi_now = 0.0
+    for p in (dernier.get("positions") or []):
+        if str(p.get("coin") or "").upper() == coin:
+            szi_now = abs(float(p.get("szi") or 0.0))
+            break
+    if szi_now <= 1e-9:
+        return True, "LEADER_A_CLOS"
+    if szi_now < seuil * szi_entree:
+        return True, "LEADER_A_REDUIT"
+    return False, ""
+
+
 def _gerer_sorties(store: dict, root: Path, *, now_ms: float) -> list[dict]:
     """Sort les positions dont une condition de sortie est atteinte, au prix exécutable courant.
     Les sorties CROSS-VENUE sont GELÉES pendant l'audit (HYPERSMART_EXPERIMENTAL_CROSS_VENUE_GELE=1) :
@@ -149,13 +187,16 @@ def _gerer_sorties(store: dict, root: Path, *, now_ms: float) -> list[dict]:
                                             cout_sortie_bps=cout_sortie, base_courant_bps=m["base_bps"],
                                             raison=raison, now_ms=now_ms))
         else:  # directionnel (lead_lag / copy_vault)
+            # COPY-VAULT : sortir si le LEADER a réduit/clos (suivi réel demandé par Flo), avant l'horizon
+            leader_sort, raison_leader = (_leader_a_reduit(pos, root) if pos["moteur"] == "copy_vault" else (False, ""))
             horizon_ms = float((pos.get("meta") or {}).get("horizon_ms") or 1000.0)
             mur_ms = max(horizon_ms, 2000.0) if pos["moteur"] == "lead_lag" else 24 * 3.6e6
-            if (now_ms - float(pos.get("ts_ouverture_ms") or now_ms)) >= mur_ms:
+            horizon_atteint = (now_ms - float(pos.get("ts_ouverture_ms") or now_ms)) >= mur_ms
+            if leader_sort or horizon_atteint:
                 mid = mids.get(pos["coin"]) or pos.get("prix_entree")
                 fermetures.append(MP.sortir(pos, store, root, prix_sortie=mid,
                                             cout_sortie_bps=float(pos.get("spread_bps") or 0.0) + float(pos.get("frais_bps") or 0.0),
-                                            raison="HORIZON_ATTEINT", now_ms=now_ms))
+                                            raison=(raison_leader or "HORIZON_ATTEINT"), now_ms=now_ms))
     return fermetures
 
 
