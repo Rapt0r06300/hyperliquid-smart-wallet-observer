@@ -32,15 +32,21 @@ def test_net_par_horizon_paie_le_demi_spread_reel_et_rend_la_capacite():
 
 
 def _rows(n_chocs):
+    # prix CONTINU (pas de reset entre blocs, sinon un faux choc baissier apparaît) : chaque bloc saute
+    # de +50 bps sur Binance, HL suit de +40 bps 100 ms plus tard, et le bloc suivant repart d'en haut.
     rows = []
+    px = 100.0
     for k in range(n_chocs):
         base = k * 1_000_000_000
+        px_haut = px * 1.005                                          # +50 bps (choc Binance)
+        px_hl = px * 1.004                                            # HL suit +40 bps
+        rows += [{"venue": "BIN_TRADE", "coin": "ETH", "recu_ns": base, "px": px, "side": "BUY"},
+                 {"venue": "BIN_TRADE", "coin": "ETH", "recu_ns": base + 10_000_000, "px": px_haut, "side": "BUY"}]
         for j in range(21):                                          # HL dense : 1 tick / 10 ms
-            mid = 100.0 if j * 10 < 110 else 100.4
+            mid = px if j * 10 < 110 else px_hl
             rows.append({"venue": "HL", "coin": "ETH", "recu_ns": base + j * 10_000_000,
-                         "mid": mid, "bid": mid - 0.01, "ask": mid + 0.01})
-        rows += [{"venue": "BIN_TRADE", "coin": "ETH", "recu_ns": base, "px": 100.0, "side": "BUY"},
-                 {"venue": "BIN_TRADE", "coin": "ETH", "recu_ns": base + 10_000_000, "px": 100.5, "side": "BUY"}]
+                         "mid": mid, "bid": mid * 0.9999, "ask": mid * 1.0001})
+        px = px_haut                                                  # CONTINU : le bloc suivant repart d'ici
     return rows
 
 

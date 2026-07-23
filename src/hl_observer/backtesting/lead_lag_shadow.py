@@ -89,16 +89,27 @@ def horizons_observables(dist_hl: dict, horizons) -> list[float]:
     return [h for h in horizons if h >= 2.0 * p50]
 
 
-def detecter_chocs(trades: list, *, seuil_bps: float) -> list[tuple[int, float]]:
+FENETRE_GROUPE_MS = 100.0          # deux chocs à moins de ça = le MÊME mouvement -> groupés (1 seul)
+
+
+def detecter_chocs(trades: list, *, seuil_bps: float,
+                   fenetre_groupe_ms: float = FENETRE_GROUPE_MS) -> list[tuple[int, float]]:
     """Chocs exécutables depuis les TRADES Binance : un saut de prix >= seuil entre trades consécutifs.
-    Retour [(recu_ns, direction)]."""
+    Les chocs qui SE CHEVAUCHENT (< fenetre_groupe_ms) sont GROUPÉS en un seul (sinon on compte 5 fois
+    le même mouvement et on gonfle l'échantillon). Retour [(recu_ns, direction)]."""
     out = []
+    dernier_ns = -1e30
     for i in range(1, len(trades)):
         if trades[i - 1][1] <= 0:
             continue
         mv = (trades[i][1] - trades[i - 1][1]) / trades[i - 1][1] * 1e4
-        if abs(mv) >= seuil_bps:
-            out.append((trades[i][0], 1.0 if mv > 0 else -1.0))
+        if abs(mv) < seuil_bps:
+            continue
+        t = trades[i][0]
+        if (t - dernier_ns) / 1e6 < fenetre_groupe_ms:        # chevauche le choc précédent -> groupé
+            continue
+        out.append((t, 1.0 if mv > 0 else -1.0))
+        dernier_ns = t
     return out
 
 
@@ -109,20 +120,24 @@ def _hl_a(hl: list, t_ns: int) -> tuple | None:
 
 def net_par_horizon(hl: list, chocs: list, *, frais_slippage_bps: float,
                     horizons_ms) -> dict[float, list[tuple[float, float]]]:
-    """Pour chaque choc, (net_bps, capacité_usd) forward HL par horizon. Cœur PUR (testable)."""
+    """Pour chaque choc, (net_bps, capacité_usd) forward HL par horizon. ENTRÉE au côté cher, SORTIE au
+    côté défavorable (bid/ask HL RÉELS des deux côtés — le spread est payé aller ET retour, pas modélisé
+    par un forfait). Cœur PUR (testable)."""
     out: dict[float, list] = {h: [] for h in horizons_ms}
     for t0, direction in chocs:
         e0 = _hl_a(hl, t0)
-        if e0 is None or e0[1] <= 0:
+        if e0 is None:
             continue
-        demi_spread = (e0[3] - e0[2]) / 2.0 / e0[1] * 1e4
-        cout = 2.0 * max(0.0, demi_spread) + frais_slippage_bps
+        entree = e0[3] if direction > 0 else e0[2]             # long -> on paie l'ASK ; short -> le BID
+        if entree <= 0:
+            continue
         for h in horizons_ms:
             eh = _hl_a(hl, t0 + int(h * 1e6))
             if eh is None or eh[0] <= e0[0]:
                 continue
-            reaction = (eh[1] - e0[1]) / e0[1] * 1e4 * direction
-            out[h].append((reaction - cout, e0[2]))            # (net bps, ~capacité proxy = prix bid)
+            sortie = eh[2] if direction > 0 else eh[3]         # long -> on sort au BID ; short -> à l'ASK
+            net = (sortie - entree) / entree * 1e4 * direction - frais_slippage_bps
+            out[h].append((net, e0[2]))                        # capacité proxy = prix (taille au top ailleurs)
     return out
 
 
@@ -158,8 +173,10 @@ def backtest(root: str | Path = ".", *, seuil_choc_bps: float = SEUIL_CHOC_BPS,
         return {"strategie": "lead_lag_shadow", "statut": "NEED_MORE_DATA",
                 "intervalles_hl": dist, "detail": "aucun horizon observable (HL trop lent / peu de data)"}
     # 2) chocs sur trades -> net par horizon, séparé test/contrôle
+    import random
     test: dict[float, list] = {h: [] for h in horizons}
     ctrl: dict[float, list] = {h: [] for h in horizons}
+    placebo: dict[float, list] = {h: [] for h in horizons}     # directions MÉLANGÉES -> doit donner ~0
     cap: list[float] = []
     for coin, ev in tape.items():
         chocs = detecter_chocs(ev["TRADE"], seuil_bps=seuil_choc_bps)
@@ -169,20 +186,30 @@ def backtest(root: str | Path = ".", *, seuil_choc_bps: float = SEUIL_CHOC_BPS,
         cible = ctrl if coin in controle else test
         for h in horizons:
             cible[h].extend(x[0] for x in nets[h])
-            if coin not in controle:
+        if coin not in controle:
+            for h in horizons:
                 cap.extend(x[1] for x in nets[h])
+            rng = random.Random(20260723)                      # placebo REPRODUCTIBLE : mêmes t0, sens aléatoire
+            faux = [(t0, 1.0 if rng.random() > 0.5 else -1.0) for t0, _ in chocs]
+            netpl = net_par_horizon(ev["HL"], faux, frais_slippage_bps=frais_slippage_bps, horizons_ms=horizons)
+            for h in horizons:
+                placebo[h].extend(x[0] for x in netpl[h])
     n_test = max((len(v) for v in test.values()), default=0)
     if n_test < min_chocs:
         return {"strategie": "lead_lag_shadow", "statut": "NEED_MORE_DATA", "chocs_test": n_test,
                 "cible": min_chocs, "intervalles_hl": dist, "horizons_observables": horizons}
     par_h = {h: _metriques(v, n_periodes=N_PERIODES) for h, v in test.items() if v}
     ctrl_h = {h: round(st.mean(v), 3) for h, v in ctrl.items() if v}
-    gagnants = {h: r for h, r in par_h.items() if r["esperance_nette_bps"] > 0 and r["stable"]}
+    plac_h = {h: round(st.mean(v), 3) for h, v in placebo.items() if v}
+    # KEEP seulement si : espérance>0, STABLE par période, ET bat le PLACEBO (sinon = artefact d'horloge)
+    gagnants = {h: r for h, r in par_h.items()
+                if r["esperance_nette_bps"] > 0 and r["stable"]
+                and r["esperance_nette_bps"] > plac_h.get(h, 0.0)}
     return {"strategie": "lead_lag_shadow",
             "statut": "PROMETTEUR" if gagnants else "PAS_D_EDGE",
             "intervalles_hl": dist, "horizons_observables": horizons,
             "capacite_mediane_usd": round(st.median(cap), 2) if cap else None,
-            "net_par_horizon": par_h, "controle_par_horizon": ctrl_h,
+            "net_par_horizon": par_h, "controle_par_horizon": ctrl_h, "placebo_par_horizon": plac_h,
             "avertissement": "Choc sur trades Binance ; entrée demi-spread HL réel + frais/slippage ; "
                              "horizons GATÉS par l'observable ; stabilité par période. Contrôle > 0 = "
                              "artefact d'horloge. Sub-seconde souvent gagnée par des racers co-localisés."}
