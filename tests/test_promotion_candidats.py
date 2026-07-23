@@ -37,6 +37,16 @@ def test_pas_de_promotion_sans_shadow_positif(tmp_path):
     assert PC.promouvoir(scores) == {}                                       # deny-by-default
 
 
+def test_scorer_paires_meme_hors_table(tmp_path):
+    """Shadow PAR PAIRE vault+coin depuis le journal, même hors table PROBE. Paire montante -> positive."""
+    T = 1_000_000_000_000
+    _journal(tmp_path, [{"cohorte": "ALPHA", "vault": "0xV", "coin": "LDO", "dir": "Open Long",
+                         "fill_ts_ms": T + i * 60000} for i in range(4)])
+    tape = {"LDO": [(T + i * 60000, 100.0 + i * 0.1) for i in range(200)]}   # monte -> shadow net>0
+    paires = PC.scorer_paires(tmp_path, tape=tape, frais_bps=1.0)
+    assert "0xV|LDO" in paires and paires["0xV|LDO"]["positive"] is True and paires["0xV|LDO"]["n_open"] == 4
+
+
 def test_construire_ecrit_et_relit(tmp_path):
     T = 1_000_000_000_000
     _journal(tmp_path, [{"vault": "0xW", "coin": "DOT", "dir": "Open Long", "fill_ts_ms": T + i * 60000} for i in range(6)])

@@ -42,17 +42,29 @@ class Cohorte:
     stop_bps_defaut: float
     seuil_open_usd: float         # cumulé $ d'OPEN/ADD du leader qui déclenche une copie
     tables: tuple                 # tables prélim à essayer (ordre de priorité)
+    edge_requis: bool = True       # ALPHA/PROBE : edge mesuré requis. RAW_PROBE : non (on MESURE)
+    depth_min_usd: float = 0.0    # RAW_PROBE : profondeur mini pour juger un coin « liquide »
+    marque: str = ""              # étiquette de statut des positions (ex. NON_VALIDEE pour RAW)
 
 
 ALPHA = Cohorte("ALPHA_PAPER", "exploratory_paper", 300.0, 3, 60.0, 20.0, 2000.0,
                 ("copy_prelim_gele_v1.json", "copy_prelim_edge.json"))
 PROBE = Cohorte("DISCOVERY_PROBE", "discovery_probe", 100.0, 4, 15.0, 30.0, 500.0,
                 ("copy_prelim_probe.json",))
-COHORTES = {"ALPHA": ALPHA, "PROBE": PROBE}
+# RAW_PROBE : ouvre sur TOUT OPEN/ADD candidat liquide (SANS edge requis) pour MESURER la paire vault+coin.
+# Mini 5 $, MAX 2, budget minuscule (perte totale plafonnée), positions marquées NON_VALIDEE.
+RAW_PROBE = Cohorte("RAW_PROBE", "raw_probe", 20.0, 2, 5.0, 40.0, 200.0, (),
+                    edge_requis=False, depth_min_usd=500.0, marque="NON_VALIDEE")
+COHORTES = {"ALPHA": ALPHA, "PROBE": PROBE, "RAW_PROBE": RAW_PROBE}
 
 
 def _p(coh: Cohorte, root: Path, quoi: str) -> Path:
     return root / "runtime" / "data" / ("%s_%s" % (coh.prefixe, quoi))
+
+
+def _cle(coh: Cohorte, vault: str, coin: str) -> str:
+    """Clé d'une position : PAR PAIRE vault+coin pour RAW_PROBE (on mesure chaque paire), par coin sinon."""
+    return ("%s|%s" % (vault, coin)) if not coh.edge_requis else coin
 
 
 def charger_store(coh: Cohorte, root: Path) -> dict:
@@ -159,23 +171,26 @@ def cohorte_active(coh: Cohorte, root: Path) -> bool:
     return not (ex.get("n_trades", 0) >= 10 and ex.get("expectancy_usd_par_trade", 0.0) < 0)
 
 
-def _ouvrir(coh: Cohorte, store: dict, root: Path, *, coin, sens, notional, prix, cfg, cout_ar,
-            spread, slippage, fhl, vault, now_ms, fill_ts, latence_ms, run_id="", src_l2="") -> dict:
-    edge_net = float(cfg.get("edge_brut_bps") or 0.0) - cout_ar
-    pos = {"coin": coin, "moteur": "copy_" + coh.nom, "sens": sens, "type_pnl": "directional",
+def _ouvrir(coh: Cohorte, store: dict, root: Path, *, cle, coin, sens, notional, prix, cfg, cout_ar,
+            spread, slippage, fhl, vault, now_ms, fill_ts, lat_mono, run_id="", src_l2="", marque="") -> dict:
+    eb = cfg.get("edge_brut_bps")
+    edge_net = (float(eb) - cout_ar) if eb is not None else None    # RAW : pas d'edge (NON_VALIDEE)
+    pos = {"coin": coin, "paire": cle, "moteur": "copy_" + coh.nom, "sens": sens, "type_pnl": "directional",
            "notional_usd": round(notional, 2), "prix_entree": prix, "ts_ouverture_ms": now_ms,
-           "cout_entree_bps": round(cout_ar / 2.0, 4), "edge_estime_bps": round(edge_net, 4),
+           "cout_entree_bps": round(cout_ar / 2.0, 4), "edge_estime_bps": round(edge_net, 4) if edge_net is not None else None,
            "spread_bps": round(spread, 4), "frais_bps": fhl, "slippage_bps": round(slippage, 4),
            "hold_h": float(cfg.get("horizon_ms") or 0.0) / 3_600_000.0,
            "meta": {"vault": vault, "coin": coin, "stop_bps": cfg.get("stop_bps"),
-                    "take_profit_bps": cfg.get("take_profit_bps"), "latence_fill_copie_ms": round(latence_ms),
-                    "fill_leader_ts_ms": int(fill_ts), "run_id": run_id, "source": SOURCE_LIVE, "src_l2": src_l2}}
-    store["ouvertes"][coin] = pos
+                    "take_profit_bps": cfg.get("take_profit_bps"), "latence_ws_open_ms": lat_mono.get("ws_open_ms"),
+                    "latences_mono": lat_mono, "fill_leader_ts_ms": int(fill_ts), "run_id": run_id,
+                    "source": SOURCE_LIVE, "src_l2": src_l2, "statut": marque or "VALIDEE"}}
+    store["ouvertes"][cle] = pos
     store["cash"] = round(store["cash"] - notional, 6)
-    _ledger(coh, root, {"evt": "OPEN", "ts_ms": now_ms, "coin": coin, "sens": sens, "notional_usd": pos["notional_usd"],
-                        "prix_entree": prix, "edge_net_bps": pos["edge_estime_bps"], "latence_ms": round(latence_ms),
-                        "vault": vault, "run_id": run_id, "source": SOURCE_LIVE, "src_l2": src_l2,
-                        "motif": "copy OPEN/ADD agrégé $ + L2<1s + edge net>0"})
+    _ledger(coh, root, {"evt": "OPEN", "ts_ms": now_ms, "paire": cle, "coin": coin, "sens": sens,
+                        "notional_usd": pos["notional_usd"], "prix_entree": prix, "edge_net_bps": pos["edge_estime_bps"],
+                        "latences_mono": lat_mono, "vault": vault, "run_id": run_id, "source": SOURCE_LIVE,
+                        "src_l2": src_l2, "statut": marque or "VALIDEE",
+                        "motif": ("RAW mesure (sans edge)" if not coh.edge_requis else "copy OPEN/ADD + L2<1s + edge net>0")})
     _sauver(coh, root, store)
     return pos
 
@@ -215,7 +230,8 @@ def _reduire(coh: Cohorte, pos: dict, store: dict, root: Path, *, fraction: floa
 
 
 def traiter_fill(coh: Cohorte, etat: dict, fill: dict, root: Path, *, now_ms: float | None = None,
-                 lecteur_l2=None, table: dict | None = None, token: str | None = None) -> dict | None:
+                 lecteur_l2=None, table: dict | None = None, token: str | None = None,
+                 t_ws_mono: float | None = None) -> dict | None:
     """INLINE : traite UN fill leader. Dédup (hash/isSnapshot) ; REDUCE/CLOSE → sortie ; OPEN/ADD agrégés
     en $ → admission → L2<1s → coûts → edge net>0 → OUVERTURE. Rend {ouverture|fermeture|refus, latence_ms}."""
     now = float(now_ms if now_ms is not None else time.time() * 1000)
@@ -241,7 +257,7 @@ def traiter_fill(coh: Cohorte, etat: dict, fill: dict, root: Path, *, now_ms: fl
     table = table if table is not None else charger_table(coh, root)
     # LEADER REDUCE / CLOSE / FLIP -> on suit proportionnellement (via startPosition du fill)
     if "close" in dir_bas:
-        pos = store["ouvertes"].get(coin)
+        pos = store["ouvertes"].get(_cle(coh, vault, coin))
         if not (pos and pos.get("meta", {}).get("vault") == vault):
             return None
         mark = _mark(coin, root, now, lecteur_l2) or pos["prix_entree"]
@@ -279,22 +295,30 @@ def traiter_fill(coh: Cohorte, etat: dict, fill: dict, root: Path, *, now_ms: fl
     if ag["notional"] < coh.seuil_open_usd:
         return None                                               # pas encore un OPEN/ADD significatif
     etat["agg"].pop(key, None)
+    t_dec = time.monotonic()                                     # HORLOGE MONOTONE LOCALE : décision
+    cle = _cle(coh, vault, coin)
     if not cohorte_active(coh, root):                             # AUTO-KILL : cohorte en pause (expectancy live < 0)
         return {"refus": "COHORTE_EN_PAUSE_AUTO_KILL", "coin": coin}
     # deny-by-default : le vault doit être suivi par la cohorte
     if vault not in _vaults_cohorte(coh, root):
         return {"refus": "VAULT_NON_SUIVI", "coin": coin}
-    cfg = table.get(coin)
-    if not cfg:
-        return {"refus": "EDGE_PRELIM_ABSENT", "coin": coin}
-    if coin in store["ouvertes"]:
+    # EDGE : requis pour ALPHA/PROBE (table par paire coin) ; PAS pour RAW_PROBE (on OUVRE pour MESURER)
+    if coh.edge_requis:
+        cfg = table.get(coin)
+        if not cfg:
+            return {"refus": "EDGE_PRELIM_ABSENT", "coin": coin}
+    else:
+        cfg = {"horizon_ms": 3_600_000.0, "stop_bps": coh.stop_bps_defaut, "take_profit_bps": None, "edge_brut_bps": None}
+    if cle in store["ouvertes"]:
         return {"refus": "DEJA_OUVERT", "coin": coin}
     if len(store["ouvertes"]) >= coh.max_positions:
         return {"refus": "LIMITE_POSITIONS", "coin": coin}
-    if store["cash"] < NOTIONAL_MIN_USD:
+    min_notional = 3.0 if not coh.edge_requis else NOTIONAL_MIN_USD
+    if store["cash"] < min_notional:
         return {"refus": "BUDGET_EPUISE", "coin": coin}
     l2 = _l2_pour_coin(coin, lecteur_l2=lecteur_l2, bbo=_snapshots_bbo(root),
                        carnet=_carnet_l2_frais(root, now_ms=now), now_ms=now)
+    t_l2 = time.monotonic()                                      # MONOTONE : L2 obtenu
     if not l2:
         return {"refus": "L2_INDISPONIBLE_1S", "coin": coin}
     from hl_observer.experimental.carry_deux_jambes import frais_venues
@@ -306,6 +330,8 @@ def traiter_fill(coh: Cohorte, etat: dict, fill: dict, root: Path, *, now_ms: fl
         return {"refus": "L2_ABERRANT", "coin": coin, "mid": round(mid, 6), "ref": round(ref, 6)}
     spread = (hl_ask - hl_bid) / mid * 1e4
     depth = float(l2.get("depth_usd") or 0.0)
+    if not coh.edge_requis and depth < coh.depth_min_usd:         # RAW : coin doit être LIQUIDE
+        return {"refus": "COIN_TROP_ILLIQUIDE_RAW", "coin": coin, "depth_usd": round(depth, 1)}
     cible_notional = coh.notional_usd
     if coh is PROBE:                                              # un CANDIDAT PROMU trade en MINI (5-10 $)
         from hl_observer.experimental.promotion_candidats import charger_promus
@@ -313,27 +339,40 @@ def traiter_fill(coh: Cohorte, etat: dict, fill: dict, root: Path, *, now_ms: fl
         if pr:
             cible_notional = float(pr.get("notional_usd") or coh.notional_usd)
     notional = min(cible_notional, min(depth, store["cash"]))
-    if notional < NOTIONAL_MIN_USD:
+    if notional < min_notional:
         return {"refus": "LIQUIDITE_INSUFFISANTE", "coin": coin}
     slippage = SLIPPAGE_BASE_BPS + SLIPPAGE_IMPACT_COEF * (notional / depth if depth else 1.0)
     cout_ar = 2.0 * fhl + spread + 2.0 * slippage + LATENCE_COUT_BPS
-    if float(cfg.get("edge_brut_bps") or 0.0) - cout_ar <= 0:
+    if coh.edge_requis and float(cfg.get("edge_brut_bps") or 0.0) - cout_ar <= 0:
         return {"refus": "EDGE_NEGATIF_APRES_COUTS", "coin": coin}
     prix = hl_ask if sens > 0 else hl_bid
-    latence = max(0.0, now - ag["fill_ts"])                       # fill leader -> décision/ouverture
-    pos = _ouvrir(coh, store, root, coin=coin, sens=sens, notional=notional, prix=prix, cfg=cfg, cout_ar=cout_ar,
-                  spread=spread, slippage=slippage, fhl=fhl, vault=vault, now_ms=now, fill_ts=ag["fill_ts"],
-                  latence_ms=latence, run_id=etat.get("run_id", ""), src_l2=l2.get("src", ""))
-    return {"ouverture": pos, "latence_ms": round(latence)}
+    t_open = time.monotonic()
+    t0 = t_ws_mono if t_ws_mono is not None else t_dec
+    lat_mono = {"ws_decision_ms": round((t_dec - t0) * 1000, 1), "decision_l2_ms": round((t_l2 - t_dec) * 1000, 1),
+                "l2_open_ms": round((t_open - t_l2) * 1000, 1), "ws_open_ms": round((t_open - t0) * 1000, 1),
+                "age_event_ms": round(now - float(fill.get("ts_ms") or now))}   # HL ts = âge/skew (peut être négatif)
+    pos = _ouvrir(coh, store, root, cle=cle, coin=coin, sens=sens, notional=notional, prix=prix, cfg=cfg,
+                  cout_ar=cout_ar, spread=spread, slippage=slippage, fhl=fhl, vault=vault, now_ms=now,
+                  fill_ts=ag["fill_ts"], lat_mono=lat_mono, run_id=etat.get("run_id", ""), src_l2=l2.get("src", ""),
+                  marque=coh.marque)
+    return {"ouverture": pos, "latence_ws_open_ms": lat_mono["ws_open_ms"], "paire": cle}
 
 
 def _vaults_cohorte(coh: Cohorte, root: Path) -> set[str]:
     """Vaults TRADABLES par la cohorte (deny-by-default). ALPHA = retenus stricts ; PROBE = CORE +
-    CHALLENGERS sûrs + CANDIDATS PROMUS (mini-PROBE)."""
+    CHALLENGERS sûrs + CANDIDATS PROMUS ; RAW_PROBE = TOUS les abonnés (CORE + candidats) — on MESURE."""
     from hl_observer.experimental.exploratoire import tiers
     if coh is ALPHA:
         return _vaults_retenus(root)
     core, chal = tiers(root)
+    if coh is RAW_PROBE:
+        # tous les abonnés (retenus + candidats scorés) — RAW ouvre pour mesurer la paire, pas pour valider
+        try:
+            d = json.loads((root / "runtime" / "data" / "vaults_scores.json").read_text(encoding="utf-8"))
+            tous = {c["vault"] for c in (d.get("classement") or [])[:8]}
+        except (OSError, ValueError):
+            tous = set()
+        return core | chal | tous
     from hl_observer.experimental.promotion_candidats import charger_promus
     return core | chal | set(charger_promus(root))
 

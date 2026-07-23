@@ -111,14 +111,14 @@ def _journal(root: Path, fill: dict, cohorte: str, decision: dict | None, recu_m
         f.write(json.dumps(ligne, ensure_ascii=False) + "\n")
 
 
-def _traiter_un(root: Path, fill: dict, coins_a_verifier: set) -> None:
+def _traiter_un(root: Path, fill: dict, coins_a_verifier: set, t_ws_mono: float) -> None:
     import time as _t
     recu = _t.time() * 1000
     with (root / FILLS_LIVE).open("a", encoding="utf-8") as f:
         f.write(json.dumps(fill, ensure_ascii=False) + "\n")
     coins_a_verifier.add(fill.get("coin"))
     for nom, coh in CO.COHORTES.items():
-        r = CO.traiter_fill(coh, ETATS[nom], fill, root, token=RUN_TOKEN)   # token hors-payload
+        r = CO.traiter_fill(coh, ETATS[nom], fill, root, token=RUN_TOKEN, t_ws_mono=t_ws_mono)   # token + horloge monotone
         _journal(root, fill, nom, r, recu)                        # trace TOUT, même les refus
         if r and r.get("ouverture"):
             print("[userfills] %s OUVRE %s @ %.4f latence=%dms (fill %s ts=%s)"
@@ -132,13 +132,13 @@ def _traiter_un(root: Path, fill: dict, coins_a_verifier: set) -> None:
 async def _worker(root: Path, file: asyncio.Queue) -> None:
     curseurs = _charger_curseurs(root)
     while True:
-        vault, fills = await file.get()
+        vault, fills, t_ws = await file.get()
         try:
             a_traiter = fills_a_traiter(vault, fills, curseurs)
             if a_traiter:
                 coins = set()
                 for f in a_traiter:
-                    _traiter_un(root, f, coins)
+                    _traiter_un(root, f, coins, t_ws)
                 _sauver_curseurs(root, curseurs)
                 for coh in CO.COHORTES.values():                 # exits ÉVÉNEMENTIELS sur les coins bougés
                     CO.gerer_exits(coh, root)
@@ -164,8 +164,9 @@ async def _un_vault(root: Path, vault: str, file: asyncio.Queue) -> None:
                     fills = UL.parser_message_userfills(msg, vault=vault)
                     if not fills:
                         continue
+                    t_ws = time.monotonic()                       # HORLOGE MONOTONE LOCALE : réception WS
                     try:
-                        file.put_nowait((vault, fills))           # ne bloque JAMAIS la réception
+                        file.put_nowait((vault, fills, t_ws))     # ne bloque JAMAIS la réception
                     except asyncio.QueueFull:
                         print("[userfills] FILE SATUREE — drop (%s)" % vault[:10], flush=True)
         except Exception as exc:  # noqa: BLE001 — reconnect
@@ -199,7 +200,9 @@ async def _promotion_periodique(root: Path, *, intervalle_s: float = 300.0) -> N
         try:
             observes = {v for v, role, _w in vaults_et_roles(root) if role.startswith("CANDIDAT")}
             coins_probe = set(_CO.charger_table(_CO.PROBE, root))
-            PC.construire(root, coins_probe=coins_probe, tape=charger_prix_tape(root), candidats_observes=observes)
+            tape = charger_prix_tape(root)
+            PC.construire(root, coins_probe=coins_probe, tape=tape, candidats_observes=observes)
+            PC.scorer_paires(root, tape=tape)                     # SHADOW PAR PAIRE (même hors table PROBE)
         except Exception as exc:  # noqa: BLE001
             print("[userfills] promotion err %s" % str(exc)[:40], flush=True)
         await asyncio.sleep(intervalle_s)

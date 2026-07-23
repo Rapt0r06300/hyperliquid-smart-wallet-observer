@@ -36,9 +36,30 @@ def test_ouvre_inline_sur_open_add_significatif(tmp_path):
     etat = CO.etat_initial(CO.ALPHA, tmp_path)
     r = CO.traiter_fill(CO.ALPHA, etat, _fill(), tmp_path, now_ms=now, lecteur_l2=_l2, token=etat["token"])   # 20×150 = 3000$ ≥ 2000
     assert r and r.get("ouverture") and r["ouverture"]["coin"] == "SOL"
-    assert r["ouverture"]["prix_entree"] == 150.02 and r["latence_ms"] == 500              # ask L2, latence fill→copie
+    assert r["ouverture"]["prix_entree"] == 150.02 and r["paire"] == "SOL"                  # ask L2, clé paire = coin (ALPHA)
+    assert r["latence_ws_open_ms"] is not None                                             # latence MONOTONE locale
     st = CO.statut(CO.ALPHA, tmp_path, now_ms=now)
     assert st["positions_ouvertes"] == 1 and st["cohorte"] == "ALPHA_PAPER" and st["real_execution"] is False
+
+
+def test_raw_probe_ouvre_sans_edge_par_paire(tmp_path):
+    """RAW_PROBE : ouvre sur tout OPEN/ADD candidat liquide SANS edge requis, clé PAR PAIRE vault+coin,
+    mini 5 $, marquée NON_VALIDEE (sert à MESURER la paire)."""
+    _setup(tmp_path)
+    now = 1_000_000_000_500.0
+    etat = CO.etat_initial(CO.RAW_PROBE, tmp_path)
+    # DOGE n'est dans AUCUNE table prélim -> ALPHA/PROBE refuseraient. RAW ouvre quand même (liquide).
+    fill = _fill(coin="DOGE", sz=2, px=150.0)                       # 2×150 = 300 ≥ seuil RAW 200
+    r = CO.traiter_fill(CO.RAW_PROBE, etat, fill, tmp_path, now_ms=now, lecteur_l2=_l2, token=etat["token"])
+    assert r and r.get("ouverture")
+    pos = r["ouverture"]
+    assert pos["paire"] == "0xV|DOGE" and pos["notional_usd"] <= 5.0                        # clé paire + mini 5 $
+    assert pos["meta"]["statut"] == "NON_VALIDEE" and pos["edge_estime_bps"] is None         # sans edge, non validée
+    assert r["latence_ws_open_ms"] is not None
+    # max 2 positions : une 2e paire ouvre, une 3e est refusée
+    CO.traiter_fill(CO.RAW_PROBE, etat, _fill(coin="WLD", sz=2, px=150.0, hash="w"), tmp_path, now_ms=now, lecteur_l2=_l2, token=etat["token"])
+    r3 = CO.traiter_fill(CO.RAW_PROBE, etat, _fill(coin="LDO", sz=2, px=150.0, hash="l"), tmp_path, now_ms=now, lecteur_l2=_l2, token=etat["token"])
+    assert r3 and r3.get("refus") == "LIMITE_POSITIONS"
 
 
 def test_agrege_plusieurs_petits_open(tmp_path):

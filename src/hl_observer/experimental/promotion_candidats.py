@@ -92,6 +92,49 @@ def construire(root: str | Path, *, coins_probe: set[str], tape: dict, candidats
     return payload
 
 
+PAIRES = Path("runtime") / "data" / "paires_shadow.json"
+
+
+def scorer_paires(root: str | Path, *, tape: dict, frais_bps: float = 12.0) -> dict[str, dict]:
+    """SHADOW PAR PAIRE vault+coin (rectif Flo 23/07), depuis le journal de fills — MÊME hors table.
+    Pour chaque OPEN candidat, rendement forward 1 h net de coûts. Une paire au shadow net>0 devient
+    éligible à la promotion RAW_PROBE → PROBE. Écrit `paires_shadow.json`."""
+    from hl_observer.experimental.copy_edge_forward import rendement_forward
+    root = Path(root)
+    try:
+        lignes = (root / JOURNAL).read_text(encoding="utf-8", errors="ignore").splitlines()
+    except OSError:
+        return {}
+    par: dict[str, dict] = {}
+    for l in lignes:
+        try:
+            d = json.loads(l)
+        except ValueError:
+            continue
+        if d.get("cohorte") != "ALPHA" or "open" not in str(d.get("dir") or "").lower():
+            continue                                              # 1 seule cohorte pour ne pas compter 2×
+        vault, coin = d.get("vault"), str(d.get("coin") or "").upper()
+        if not vault or not coin:
+            continue
+        cle = "%s|%s" % (vault, coin)
+        e = par.setdefault(cle, {"paire": cle, "vault": vault, "coin": coin, "n_open": 0, "shadow": []})
+        e["n_open"] += 1
+        serie = (tape or {}).get(coin)
+        if serie:
+            r = rendement_forward({"ts_ms": d.get("fill_ts_ms") or 0, "direction": 1}, serie, 3_600_000.0)
+            if r is not None:
+                e["shadow"].append(r - frais_bps)
+    out = {}
+    for cle, e in par.items():
+        sh = e["shadow"]
+        out[cle] = {"paire": cle, "vault": e["vault"], "coin": e["coin"], "n_open": e["n_open"],
+                    "n_shadow": len(sh), "shadow_net_bps": round(sum(sh) / len(sh), 2) if sh else None,
+                    "positive": bool(sh and sum(sh) / len(sh) > 0)}
+    (root / PAIRES).write_text(json.dumps({"n_paires": len(out), "paires": out}, ensure_ascii=False, indent=1),
+                               encoding="utf-8")
+    return out
+
+
 def charger_promus(root: str | Path) -> dict[str, dict]:
     try:
         d = json.loads((Path(root) / PROMUS).read_text(encoding="utf-8"))
