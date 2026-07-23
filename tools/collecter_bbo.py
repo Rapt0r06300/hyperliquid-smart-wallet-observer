@@ -314,7 +314,18 @@ async def _boucle(root: Path, coins: list[str]) -> None:  # pragma: no cover (I/
             if marq != marqueur0:                              # anti-orphelin : la session a changé -> stop
                 return
 
-    await asyncio.gather(hl(), binance_bt(), binance_ag(), ecrire_et_superviser())
+    # 🔴 SORTIE PROPRE (bug corrige le 23/07). Avant : `gather(hl, binance_bt, binance_ag, superviseur)`.
+    # Quand le superviseur RETOURNE (marqueur de session change), les 3 coroutines WS tournaient a
+    # l'INFINI via gather -> le process ne mourait JAMAIS -> a la relance suivante, un ZOMBIE gardait
+    # les WS ouverts et le heartbeat/tape se figeait (« fichier utilise par un autre processus »).
+    # Desormais on n'attend QUE le superviseur, puis on ANNULE les WS -> le process sort et libere tout.
+    taches = [asyncio.create_task(c()) for c in (hl, binance_bt, binance_ag)]
+    try:
+        await ecrire_et_superviser()
+    finally:
+        for t in taches:
+            t.cancel()
+        await asyncio.gather(*taches, return_exceptions=True)
 
 
 def main(argv: list[str] | None = None) -> int:  # pragma: no cover

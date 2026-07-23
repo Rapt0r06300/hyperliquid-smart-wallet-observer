@@ -1,25 +1,21 @@
-# Rapport quotidien HyperSmart — 23/07/2026 15:30
+# Rapport quotidien HyperSmart — 23/07/2026 15:40
 
 _Chaque chiffre se remonte à un fichier (ledger, positions, journaux). Fenêtre : dernières 24 h._
 
 ## 1. PnL réalisé (dernières 24 h)
 
+- `MODULE_CARRY_DESACTIVE` : **-3.3242 $** (×6)
 - `ARB_STOP_ECART_AGGRAVE` : **-3.1958 $** (×12)
 - `DONNEE_ABSENTE_PROLONGEE` : **-1.4779 $** (×6)
 - `ARB_AGE_MAX_SANS_CONVERGENCE` : **+0.6061 $** (×8)
 
-**Total 24 h : -4.0676 $** · 26 fermeture(s)
+**Total 24 h : -7.3918 $** · 32 fermeture(s)
 
-Total historique (toutes époques, jamais maquillé) : **-9.4567 $** sur 84 fermetures.
+Total historique (toutes époques, jamais maquillé) : **-12.7808 $** sur 90 fermetures.
 
 ## 2. Positions ouvertes (paper)
 
-- **BTC** : 1180 $ à 5.0x · âge 69.3 h · funding accru +0.7124 $
-- **ETH** : 271 $ à 2.0x · âge 69.3 h · funding accru +0.1843 $
-- **PURR** : 164 $ à 1.5x · âge 77.6 h · funding accru +0.1234 $
-- **SOL** : 136 $ à 1.5x · âge 69.3 h · funding accru +0.1044 $
-- **XPL** : 77 $ à 1.0x · âge 69.3 h · funding accru +0.0585 $
-- **ZEC** : 79 $ à 1.0x · âge 44.1 h · funding accru +0.0437 $
+Aucune position ouverte.
 
 ## 3. Santé du système
 
@@ -28,8 +24,8 @@ Total historique (toutes époques, jamais maquillé) : **-9.4567 $** sur 84 ferm
 
 ## 4. Mesures en cours
 
-- Cross-venue : **96.0 h / 72 h** (325812 observations) — verdict aux barres pré-écrites, jamais avant.
-- Usine à données replay (24 h) : **11 candidats** · **233166 marks** — c'est le carburant du replay A/B.
+- Cross-venue : **96.2 h / 72 h** (327872 observations) — verdict aux barres pré-écrites, jamais avant.
+- Usine à données replay (24 h) : **12 candidats** · **233693 marks** — c'est le carburant du replay A/B.
 
 ## 5. Refus dominants (24 h) — le bot explique pourquoi il n'ouvre pas
 
@@ -37,13 +33,19 @@ Total historique (toutes époques, jamais maquillé) : **-9.4567 $** sur 84 ferm
 
 ## 6. Leçons du ledger — aucune perte sans explication
 
-22 perte(s), -4.8891 $ au total :
+28 perte(s), -8.2133 $ au total :
 - 🔴 **RÉGRESSION** HYPE -0.1358 $ `DONNEE_ABSENTE_PROLONGEE` — cause reparee (e82dd4a+b6debb2) qui REVIENT apres le correctif : fermetures famine/rate-de-bougies : hors-shortlist gate par amortissement quand la donnee est vivante + cache pire-hausse 24 h. Le vrai blackout (0 mesure) reste une fermeture legitime -> demi-alarme seulement.
 - 🔴 **RÉGRESSION** AZTEC -0.1070 $ `DONNEE_ABSENTE_PROLONGEE` — cause reparee (e82dd4a+b6debb2) qui REVIENT apres le correctif : fermetures famine/rate-de-bougies : hors-shortlist gate par amortissement quand la donnee est vivante + cache pire-hausse 24 h. Le vrai blackout (0 mesure) reste une fermeture legitime -> demi-alarme seulement.
 - 🔴 **RÉGRESSION** VIRTUAL -0.2804 $ `DONNEE_ABSENTE_PROLONGEE` — cause reparee (e82dd4a+b6debb2) qui REVIENT apres le correctif : fermetures famine/rate-de-bougies : hors-shortlist gate par amortissement quand la donnee est vivante + cache pire-hausse 24 h. Le vrai blackout (0 mesure) reste une fermeture legitime -> demi-alarme seulement.
 - 🔴 **RÉGRESSION** MON -0.1811 $ `DONNEE_ABSENTE_PROLONGEE` — cause reparee (e82dd4a+b6debb2) qui REVIENT apres le correctif : fermetures famine/rate-de-bougies : hors-shortlist gate par amortissement quand la donnee est vivante + cache pire-hausse 24 h. Le vrai blackout (0 mesure) reste une fermeture legitime -> demi-alarme seulement.
 - 🔴 **RÉGRESSION** AVAX -0.5029 $ `DONNEE_ABSENTE_PROLONGEE` — cause reparee (e82dd4a+b6debb2) qui REVIENT apres le correctif : fermetures famine/rate-de-bougies : hors-shortlist gate par amortissement quand la donnee est vivante + cache pire-hausse 24 h. Le vrai blackout (0 mesure) reste une fermeture legitime -> demi-alarme seulement.
 - 🔴 **RÉGRESSION** STABLE -0.2708 $ `DONNEE_ABSENTE_PROLONGEE` — cause reparee (e82dd4a+b6debb2) qui REVIENT apres le correctif : fermetures famine/rate-de-bougies : hors-shortlist gate par amortissement quand la donnee est vivante + cache pire-hausse 24 h. Le vrai blackout (0 mesure) reste une fermeture legitime -> demi-alarme seulement.
+- 🔴 **INEXPLIQUÉE** PURR -0.4130 $ `MODULE_CARRY_DESACTIVE` — motif 'MODULE_CARRY_DESACTIVE' absent du registre : la leçon n'existe pas encore — autopsie due
+- 🔴 **INEXPLIQUÉE** BTC -2.1315 $ `MODULE_CARRY_DESACTIVE` — motif 'MODULE_CARRY_DESACTIVE' absent du registre : la leçon n'existe pas encore — autopsie due
+- 🔴 **INEXPLIQUÉE** ETH -0.2982 $ `MODULE_CARRY_DESACTIVE` — motif 'MODULE_CARRY_DESACTIVE' absent du registre : la leçon n'existe pas encore — autopsie due
+- 🔴 **INEXPLIQUÉE** SOL -0.2138 $ `MODULE_CARRY_DESACTIVE` — motif 'MODULE_CARRY_DESACTIVE' absent du registre : la leçon n'existe pas encore — autopsie due
+- 🔴 **INEXPLIQUÉE** XPL -0.1332 $ `MODULE_CARRY_DESACTIVE` — motif 'MODULE_CARRY_DESACTIVE' absent du registre : la leçon n'existe pas encore — autopsie due
+- 🔴 **INEXPLIQUÉE** ZEC -0.1345 $ `MODULE_CARRY_DESACTIVE` — motif 'MODULE_CARRY_DESACTIVE' absent du registre : la leçon n'existe pas encore — autopsie due
 - ✔ BADGER -0.0800 $ `ARB_AGE_MAX_SANS_CONVERGENCE` (attendu : l'ecart n'a pas converge avant l'age max -> on coupe, on paie le cout )
 - ✔ BNT -0.5008 $ `ARB_STOP_ECART_AGGRAVE` (attendu : l'ecart s'est ELARGI dans notre dos (>= entree + 25 bps) -> on coupe p)
 - ✔ ARK -0.2066 $ `ARB_STOP_ECART_AGGRAVE` (attendu : l'ecart s'est ELARGI dans notre dos (>= entree + 25 bps) -> on coupe p)
@@ -72,16 +74,7 @@ _Calculé il y a 2.3 j (cadence : hebdo). Simulation sur candidats refusés enre
 
 ## 8. Carry — l'économie de chaque position ($/jour, amortissement)
 
-| coin | marge | notional | funding b/h | $/jour | accru | coût d'entrée | amortie ? |
-|---|---|---|---|---|---|---|---|
-| BTC | 236$ | 1180$ | 0.125 | 0.3539$ | 0.7124$ | 1.3376$ | dans ~42 h |
-| ETH | 135$ | 271$ | 0.125 | 0.0812$ | 0.1843$ | 0.2062$ | dans ~6 h |
-| PURR | 109$ | 164$ | 0.125 | 0.0492$ | 0.1234$ | 0.1567$ | dans ~16 h |
-| SOL | 90$ | 136$ | 0.125 | 0.0407$ | 0.1044$ | 0.1539$ | dans ~29 h |
-| XPL | 77$ | 77$ | 0.125 | 0.0230$ | 0.0585$ | 0.0993$ | dans ~43 h |
-| ZEC | 79$ | 79$ | 0.125 | 0.0238$ | 0.0437$ | 0.0605$ | dans ~17 h |
-
-**Total : 0.5719 $/jour au taux courant · marge engagée 727 $** (déploiement à comparer au capital — la réserve de 20 % est voulue).
+Aucune position carry ouverte.
 
 ## 9. Scan carry — univers, viables, et presque-viables (avec leur verrou)
 
@@ -155,7 +148,7 @@ _16 loi(s) : 13 réfutée(s), 2 limite(s), 1 confirmée(s). Détail complet : `d
 - **Cross-venue : 72 h atteintes (96 h)** → lancer `python tools/mesurer_dispersion_venues.py` pour LE verdict (#178).
 - Relances de collecteurs au compteur : {'carry-feeder': 2, 'marks-collector': 2, 'liq-collector': 2, 'venues-collector': 3, 'rapport-quotidien': 1, 'carnet-collector': 1} — si un compteur grimpe SEUL demain, c'est lui le malade (doc R5).
 - Copy-whitelist : 4 leader(s) prouvé(s) → copy peut suivre CES leaders uniquement.
-- Markout copy : 89.5% des fills mesures (29070/32464) — le pipeline nourrit la whitelist.
+- Markout copy : 89.7% des fills mesures (29211/32568) — le pipeline nourrit la whitelist.
 - Replay : 603097 candidats consolidés → `RECHERCHE-SCENARIO-REPLAY.cmd` a de quoi travailler (porte deux-moitiés + plateau).
 
 ---
