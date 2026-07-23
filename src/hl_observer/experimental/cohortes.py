@@ -262,6 +262,9 @@ def traiter_fill(coh: Cohorte, etat: dict, fill: dict, root: Path, *, now_ms: fl
     fhl = frais_venues(root)[0]
     hl_bid, hl_ask = l2["hl_bid"], l2["hl_ask"]
     mid = (hl_bid + hl_ask) / 2.0
+    ref = _allmids(root, now_ms=now).get(coin)                    # garde-fou : prix L2 plausible vs allMids
+    if ref and ref > 0 and abs(mid - ref) / ref > 0.10:           # >10 % d'écart = L2 aberrant/injecté -> refus
+        return {"refus": "L2_ABERRANT", "coin": coin, "mid": round(mid, 6), "ref": round(ref, 6)}
     spread = (hl_ask - hl_bid) / mid * 1e4
     depth = float(l2.get("depth_usd") or 0.0)
     notional = min(coh.notional_usd, min(depth, store["cash"]))
