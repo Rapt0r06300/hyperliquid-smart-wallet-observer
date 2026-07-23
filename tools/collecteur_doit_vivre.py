@@ -21,7 +21,12 @@ from pathlib import Path
 GRACE_S = 20 * 60.0
 
 MARQUEUR_RELPATH = Path("runtime") / "data" / "lanceur_session_marqueur.txt"
-HEARTBEATS = (Path("runtime") / "data" / "carry_hype_paper_decisions.jsonl",
+#: battements « le moteur est vivant ». hypersmart_engine_status.json est le battement RÉEL du moteur
+#: (réécrit chaque seconde par `python -m hl_observer ui`) ; il manquait -> l'anti-orphelin croyait le
+#: moteur mort alors qu'il tournait (rectif Flo 23/07). Si le moteur meurt (croix/crash/kill), ce fichier
+#: vieillit lui aussi -> le collecteur s'arrête quand même après la grâce : le garde reste entier.
+HEARTBEATS = (Path("runtime") / "data" / "hypersmart_engine_status.json",
+              Path("runtime") / "data" / "carry_hype_paper_decisions.jsonl",
               Path("runtime") / "data" / "ui_simulation_state.json")
 
 

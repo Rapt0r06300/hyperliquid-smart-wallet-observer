@@ -74,6 +74,19 @@ def test_marqueur_absent_compat_ancienne_session_le_heartbeat_decide(tmp_path):
     assert cdv.doit_vivre("", tmp_path)[0] is False     # silencieux -> stop
 
 
+def test_engine_status_est_un_battement_moteur(tmp_path):
+    """RECTIF 23/07 : hypersmart_engine_status.json (réécrit chaque seconde par le moteur) EST un
+    battement de vie. Frais -> la boucle vit, même marqueur vieux et anciens heartbeats périmés.
+    (Sur l'ancienne liste HEARTBEATS ce cas renvoyait MOTEUR_SILENCIEUX — faux positif corrigé.)"""
+    import os
+    _marqueur(tmp_path, "session-A", age_s=3600)                # marqueur vieux (1 h)
+    p = tmp_path / "runtime" / "data" / "hypersmart_engine_status.json"
+    p.parent.mkdir(parents=True, exist_ok=True)
+    p.write_text("{}", encoding="utf-8")
+    os.utime(p, (time.time() - 5, time.time() - 5))             # moteur vivant (5 s)
+    assert cdv.doit_vivre("session-A", tmp_path) == (True, "")
+
+
 def test_le_cablage_existe_boucle_lanceur_et_handler_Q():
     """Mention ≠ porte : le garde doit être APPELÉ par la boucle, le marqueur ÉCRIT par le
     lanceur, et Q doit tuer les boucles par ligne de commande."""
