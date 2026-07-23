@@ -118,7 +118,7 @@ def marquer_retraits(events: list[dict], *, fenetre_ms: int = 5_000, min_coins: 
     reduces.sort(key=lambda e: e["ts_ms"])
     i = 0
     for e in events:
-        e["retrait_probable"] = False
+        e.setdefault("retrait_probable", False)                   # n'EFFACE pas une marque déjà posée (ex. ledger)
     # regroupe les réductions par grappe temporelle
     n = len(reduces)
     while i < n:

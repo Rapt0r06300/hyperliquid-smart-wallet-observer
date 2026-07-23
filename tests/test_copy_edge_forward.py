@@ -73,6 +73,20 @@ def test_mesurer_produit_un_edge_et_un_placebo(tmp_path):
     assert "placebo_bps" in h and "edge_vs_placebo_bps" in h
 
 
+def test_charger_prix_tape_candles(tmp_path):
+    from hl_observer.experimental.copy_edge_forward import charger_prix_tape_candles
+    (tmp_path / "runtime" / "history").mkdir(parents=True)
+    (tmp_path / "runtime" / "history" / "candles_1m.jsonl").write_text("\n".join([
+        json.dumps({"coin": "BTC", "t_ms": 1000, "c": 60000.0}),
+        json.dumps({"coin": "BTC", "t_ms": 2000, "c": 60100.0}),
+        json.dumps({"coin": "eth", "t_ms": 1500, "c": 2000.0}),
+        json.dumps({"coin": "BAD", "t_ms": 3000, "c": 0}),           # px<=0 ignoré
+    ]))
+    tape = charger_prix_tape_candles(tmp_path, intervalle="1m")
+    assert tape["BTC"] == [(1000, 60000.0), (2000, 60100.0)] and tape["ETH"] == [(1500, 2000.0)]
+    assert "BAD" not in tape
+
+
 def test_geler_et_relire(tmp_path):
     assert CE.config_gelee(tmp_path) is None
     CE.geler(tmp_path, horizon_ms=900_000.0, edge_brut_bps=45.0, edge_net_mesure_bps=33.0)

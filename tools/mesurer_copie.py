@@ -17,7 +17,7 @@ RACINE = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(RACINE / "src"))
 
 from hl_observer.collection import vault_fills_backfill as VB  # noqa: E402
-from hl_observer.experimental.copy_edge_forward import charger_prix_tape, geler  # noqa: E402
+from hl_observer.experimental.copy_edge_forward import charger_prix_tape, charger_prix_tape_candles, geler  # noqa: E402
 from hl_observer.experimental.copy_edge_oos import mesurer_oos, simuler_paper  # noqa: E402
 
 EPISODES = Path("runtime") / "data" / "vault_episodes.jsonl"
@@ -59,18 +59,20 @@ def charger_entrees_alpha(root: Path) -> list[dict]:
     return out
 
 
-def construire(root: Path, *, geler_si_valide: bool = True) -> dict:
+def construire(root: Path, *, geler_si_valide: bool = True, intervalle_candles: str = "1m") -> dict:
     entrees = charger_entrees_alpha(root)
-    tape = charger_prix_tape(root)
+    # RECHERCHE HISTORIQUE = candles backfillées (séparées du forward L2 <1s). Repli allMids si pas de candles.
+    tape = charger_prix_tape_candles(root, intervalle=intervalle_candles) or charger_prix_tape(root)
     m = mesurer_oos(entrees, tape)
     rapport = {"maj_ms": int(time.time() * 1000), "n_entrees_alpha": len(entrees),
-               "n_coins_tape": len(tape), "mesure": m}
-    if m.get("statut") == "MESURE" and m.get("edge_valide_oos"):
+               "n_coins_tape": len(tape), "source_prix": "candles" if tape else "aucune", "mesure": m}
+    if m.get("statut") in ("PRELIMINAIRE", "VALIDATION"):
         oos = m["oos"]
-        sim = simuler_paper(entrees, tape, horizon_ms=oos["horizon_ms"], seuil=oos["seuil"],
-                            notional_usd=150.0, cout_ar_bps=m.get("frais_bps", 12.0))
-        rapport["simulation_paper_oos"] = sim
-        if geler_si_valide:
+        rapport["simulation_paper_oos"] = simuler_paper(entrees, tape, horizon_ms=oos["horizon_ms"],
+                                                        seuil=oos["seuil"], notional_usd=150.0,
+                                                        cout_ar_bps=m.get("frais_bps", 12.0))
+        # GEL seulement si l'edge est VALIDÉ en OOS (VALIDATION + net>0 + bat placebo + IC bas>0)
+        if geler_si_valide and m.get("edge_valide_oos"):
             rapport["gel"] = geler(root, horizon_ms=oos["horizon_ms"], edge_brut_bps=oos["brut_bps"],
                                    edge_net_mesure_bps=oos["net_bps"], source="mesure_oos_reelle")
     return rapport
@@ -89,8 +91,9 @@ def main(argv: list[str] | None = None) -> int:
         (root / RAPPORT).write_text(json.dumps(rap, ensure_ascii=False, indent=1), encoding="utf-8")
         m = rap["mesure"]
         extra = ""
-        if m.get("statut") == "MESURE":
-            extra = " | edge_valide_oos=%s" % m.get("edge_valide_oos")
+        if m.get("statut") in ("PRELIMINAIRE", "VALIDATION"):
+            extra = " | decision=%s net_oos=%.1fbps IC95=[%s,%s]" % (
+                m.get("decision"), m["oos"]["net_bps"], m["oos"]["ic95_bas_bps"], m["oos"]["ic95_haut_bps"])
         print("[mesure-copie] %s  entrees_alpha=%d statut=%s%s"
               % (time.strftime("%H:%M:%S"), rap["n_entrees_alpha"], m.get("statut"), extra), flush=True)
         if a.une_fois:

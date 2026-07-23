@@ -74,7 +74,10 @@ def charger_evenements(root: str | Path, *, seuil: float = SEUIL_MOVE_FRAC_NAV) 
 
 
 def charger_prix_tape(root: str | Path) -> dict[str, list[tuple[int, float]]]:
-    """{coin: [(ts_ms, px)] trié} depuis la tape allMids historique. C'est la matière de la mesure."""
+    """{coin: [(ts_ms, px)] trié} depuis la tape allMids historique. ⚠️ Cette tape commence AUJOURD'HUI
+    (le collecteur allMids vient d'être créé) : pour la RECHERCHE historique, préférer
+    `charger_prix_tape_candles` (candleSnapshot backfillé, remonte loin). L'allMids reste utile pour un
+    contrôle récent."""
     p = Path(root) / PRIX_TAPE_RELPATH
     try:
         lignes = p.read_text(encoding="utf-8", errors="ignore").splitlines()
@@ -92,6 +95,37 @@ def charger_prix_tape(root: str | Path) -> dict[str, list[tuple[int, float]]]:
                 tape.setdefault(str(c).upper(), []).append((ts, float(px)))
             except (TypeError, ValueError):
                 continue
+    for c in tape:
+        tape[c].sort()
+    return tape
+
+
+CANDLES_HISTORY_DIR = Path("runtime") / "history"
+
+
+def charger_prix_tape_candles(root: str | Path, *, intervalle: str = "1m") -> dict[str, list[tuple[int, float]]]:
+    """{coin: [(t_ms, close)] trié} depuis les candles BACKFILLÉES (`runtime/history/candles_<i>.jsonl`).
+    C'EST LA MATIÈRE DE LA RECHERCHE HISTORIQUE — séparée du forward exécutable (rectif Flo 23/07) :
+    ici on ne mesure QUE l'historique ; le forward temps réel utilise le L2 local < 1 s, jamais ceci."""
+    p = Path(root) / CANDLES_HISTORY_DIR / ("candles_%s.jsonl" % intervalle)
+    try:
+        lignes = p.read_text(encoding="utf-8", errors="ignore").splitlines()
+    except OSError:
+        return {}
+    tape: dict[str, list[tuple[int, float]]] = {}
+    for l in lignes:
+        try:
+            d = json.loads(l)
+        except ValueError:
+            continue
+        try:
+            c = str(d.get("coin") or "").upper()
+            t = int(d.get("t_ms"))
+            px = float(d.get("c"))
+        except (TypeError, ValueError):
+            continue
+        if c and px > 0:
+            tape.setdefault(c, []).append((t, px))
     for c in tape:
         tape[c].sort()
     return tape

@@ -22,8 +22,10 @@ sys.path.insert(0, str(RACINE / "src"))
 
 from hl_observer.collection import collecte_fiable as CF  # noqa: E402
 from hl_observer.collection import vault_fills_backfill as VB  # noqa: E402
+from hl_observer.collection import vault_ledger as VL  # noqa: E402
 
 URL_HL = "https://api.hyperliquid.xyz/info"
+OUT_LEDGER = Path("runtime") / "data" / "vault_ledger.jsonl"
 SCORES = Path("runtime") / "data" / "vaults_scores.json"
 SUIVIS = Path("runtime") / "data" / "vaults_suivis.json"
 OUT_FILLS = Path("runtime") / "data" / "vault_fills.jsonl"
@@ -38,6 +40,29 @@ def _post_userfills(vault: str, start_ms: int, end_ms: int, *, timeout_s: float 
     req = urllib.request.Request(URL_HL, data=corps, headers={"Content-Type": "application/json"})
     with urllib.request.urlopen(req, timeout=timeout_s) as rep:      # noqa: S310 (URL constante)
         return json.loads(rep.read().decode("utf-8"))
+
+
+def _post_ledger(vault: str, start_ms: int, end_ms: int, *, timeout_s: float = 10.0) -> Any:
+    corps = json.dumps({"type": "userNonFundingLedgerUpdates", "user": vault,
+                        "startTime": int(start_ms), "endTime": int(end_ms)}).encode("utf-8")
+    req = urllib.request.Request(URL_HL, data=corps, headers={"Content-Type": "application/json"})
+    with urllib.request.urlopen(req, timeout=timeout_s) as rep:      # noqa: S310 (URL constante)
+        return json.loads(rep.read().decode("utf-8"))
+
+
+def backfill_ledger_un_vault(root: Path, vault: str, *, lookback_j: int, limiteur: CF.Limiteur,
+                             poster=_post_ledger) -> list[dict]:
+    """Backfill du ledger dépôts/retraits d'UN vault (userNonFundingLedgerUpdates), paginé + parsé."""
+    fin = int(time.time() * 1000)
+    debut = fin - lookback_j * 24 * VB.MS_PAR_HEURE
+    out: list[dict] = []
+    for a, b in VB.plan_de_requetes(debut, fin):
+        limiteur.attente()
+        try:
+            out.extend(VL.parser_ledger(poster(vault, a, b), vault=vault))
+        except (urllib.error.URLError, OSError, ValueError, TimeoutError):
+            continue
+    return out
 
 
 def vaults_cibles(root: Path, *, n_temoin: int = 10) -> tuple[list[str], list[str]]:
@@ -85,22 +110,30 @@ def main(argv: list[str] | None = None) -> int:
         return 0
     limiteur = CF.Limiteur(0.2)
     tous_fills: list[dict] = []
+    tous_ledger: list[dict] = []
     for grp, vaults in (("RETENU", retenus), ("TEMOIN", temoin)):
         for v in vaults:
             fills = backfill_un_vault(root, v, lookback_j=a.lookback_j, limiteur=limiteur)
             for f in fills:
                 f["groupe"] = grp
             tous_fills.extend(fills)
+            tous_ledger.extend(backfill_ledger_un_vault(root, v, lookback_j=a.lookback_j, limiteur=limiteur))
             print("[backfill-fills] %s %s : %d fills" % (grp, v[:10], len(fills)), flush=True)
-    episodes = VB.marquer_retraits(VB.reconstruire_episodes(tous_fills))
+    # RETRAITS : d'abord par le LEDGER (vérité), heuristique pro-rata seulement en secours
+    episodes = VL.marquer_retraits_ledger(VB.reconstruire_episodes(tous_fills), tous_ledger,
+                                          heuristique_secours=VB.marquer_retraits)
     (root / OUT_FILLS).write_text("\n".join(json.dumps(f, ensure_ascii=False) for f in tous_fills), encoding="utf-8")
     (root / OUT_EPISODES).write_text("\n".join(json.dumps(e, ensure_ascii=False) for e in episodes), encoding="utf-8")
+    (root / OUT_LEDGER).write_text("\n".join(json.dumps(x, ensure_ascii=False) for x in tous_ledger), encoding="utf-8")
     cov = VB.couverture(tous_fills)
     cov["n_episodes"] = len(episodes)
     cov["n_entrees_alpha"] = len(VB.entrees_alpha(episodes))
+    cov["n_retraits_ledger"] = sum(1 for e in episodes if e.get("retrait_source") == "ledger")
+    cov["n_retraits_heuristique"] = sum(1 for e in episodes if e.get("retrait_source") == "heuristique")
     (root / OUT_COUVERTURE).write_text(json.dumps(cov, ensure_ascii=False, indent=1), encoding="utf-8")
-    print("[backfill-fills] couverture: %d fills, %.1f h, %d coins, %d episodes, %d entrees alpha"
-          % (cov["n_fills"], cov["span_h"], len(cov["coins"]), cov["n_episodes"], cov["n_entrees_alpha"]), flush=True)
+    print("[backfill-fills] couverture: %d fills, %.1f h, %d coins, %d episodes, %d entrees alpha (retraits ledger=%d heur=%d)"
+          % (cov["n_fills"], cov["span_h"], len(cov["coins"]), cov["n_episodes"], cov["n_entrees_alpha"],
+             cov["n_retraits_ledger"], cov["n_retraits_heuristique"]), flush=True)
     return 0
 
 
