@@ -41,6 +41,11 @@ REM 21/07 — ARBITRAGE DE DISLOCATION paper v1 (portes dures pre-declarees : ou
 REM >=35 bps = couts 22 + marge 13 -> edge positif a l entree PAR CONSTRUCTION ; sortie
 REM <=5 bps ou 4 h ; 50$ x2 max). Ecrit au MEME ledger -> PnL unifie. 0 ordre reel.
 set "HYPERSMART_ARB_DISLOCATION_PAPER=1"
+REM 23/07 — VOIE EXPERIMENTAL_PAPER (decision Flo) : ouvre de VRAIES positions SIMULEES tout de suite
+REM (cross-venue survivants geles / lead-lag / copy-vaults) SANS attendre la preuve OOS. Ledger, budget
+REM et limites ISOLES du livre live (experimental_paper_ledger.jsonl). Admission = frais + executable +
+REM edge net > 0 apres couts. L'allocateur strict de promotion et le no-real-trade restent intacts.
+set "HYPERSMART_EXPERIMENTAL_PAPER=1"
 set "HYPERSMART_REDUCE_MAX_SIGNAL_AGE_MS=15000"
 REM Les reductions leader sont proportionnelles a NOTRE position paper. Sur un compte
 REM de simulation 1000 USDT, une vraie sortie partielle peut valoir moins de 10 USDT:
@@ -375,6 +380,11 @@ REM MONOTONE a la reception (un skew d'horloge ne doit PAS ressembler a un edge)
 REM anti-orphelin INTERNE (sort si la session change). boucle_collecteur ne relance qu'en cas de crash.
 REM ⚠️ 2 flux PUBLICS en lecture. 0 cle, 0 ordre, 0 signature. Necessite le module python `websockets`.
 start "" /b tools\boucle_collecteur.cmd bbo-collector tools\collecter_bbo.py 5
+
+REM ---- VOIE EXPERIMENTAL_PAPER (23/07) : ouvre/gere/sort de VRAIES positions SIMULEES toutes les 60 s
+REM (cross-venue geles + lead-lag + copy-vaults) des qu'un signal est frais + executable + edge net > 0.
+REM Ledger/budget/limites ISOLES du livre live. Gate par HYPERSMART_EXPERIMENTAL_PAPER=1. 0 ordre reel.
+start "" /b tools\boucle_collecteur.cmd experimental-paper tools\experimental_paper_tick.py 60 --une-fois
 
 REM ---- COPY-WHITELIST (#185, 20/07) : nourrit la porte copy (leaders au markout prouve). ----
 REM La whitelist se PERIME a 24 h (porte deny-by-default) -> regeneree toutes les 6 h.

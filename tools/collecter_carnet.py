@@ -46,6 +46,18 @@ PREMIUM_PLAUSIBLE_MAX_BPS_H = 5.0  # |hl−bin| > 5 bps/h (~438 %/an) = artefact
 #: premium ~0,2 bph est plus PETIT que les spikes d'alts type GAS -> jamais dans le top-N). Or ce
 #: sont les SEULS costables-manquants qui comptent. On les capte TOUJOURS, en plus de l'union.
 CIBLES_CARRY_PERSISTANT = ("DASH", "INJ", "VIRTUAL", "NEO", "RUNE", "FET", "AR", "GMT", "YGG", "KAS")
+
+
+def coins_survivants_baseline(root: Path) -> list[str]:
+    """Coins SURVIVANTS gelés (cross_venue_juge_baseline) — TOUJOURS costés pour que la voie
+    EXPERIMENTAL_PAPER puisse les ouvrir (sinon refus CARNET_ABSENT sur les meilleurs profils)."""
+    try:
+        import json as _j
+        b = _j.loads((Path(root) / "runtime" / "data" / "cross_venue_juge_baseline.json")
+                     .read_text(encoding="utf-8"))
+        return [str(s.get("coin") or "").upper() for s in b.get("survivants", []) if s.get("coin")]
+    except (OSError, ValueError, KeyError, TypeError):
+        return []
 ECART_PLAUSIBLE_MAX_BPS = 500.0  # au-delà = mauvais appariement (cf. arb_executable)
 INTERVALLE_S_DEFAUT = 60.0
 
@@ -212,7 +224,8 @@ def main(argv: list[str] | None = None) -> int:
         # PERSISTANT qu'on veut TOUJOURS coster (sinon les meilleurs profils restent incostables).
         for c in (coins_prioritaires(lignes, n=a.n_coins)
                   + coins_premium_funding(lignes, n=a.n_premium)
-                  + list(CIBLES_CARRY_PERSISTANT)):
+                  + list(CIBLES_CARRY_PERSISTANT)
+                  + coins_survivants_baseline(root)):     # EXPERIMENTAL_PAPER : survivants toujours costés
             vus.setdefault(c, None)
         coins = list(vus)
         if not coins:
