@@ -1,4 +1,4 @@
-# Rapport quotidien HyperSmart — 23/07/2026 16:22
+# Rapport quotidien HyperSmart — 23/07/2026 16:36
 
 _Chaque chiffre se remonte à un fichier (ledger, positions, journaux). Fenêtre : dernières 24 h._
 
@@ -19,13 +19,13 @@ Aucune position ouverte.
 
 ## 3. Santé du système
 
-- Collecteurs : **1 MUET(S)** — carry-feeder (silence 53.3 min)
+- Collecteurs : **1 MUET(S)** — carry-feeder (silence 66.4 min)
 - Superviseur : relances cumulées {'carry-feeder': 2, 'marks-collector': 2, 'liq-collector': 2, 'venues-collector': 3, 'rapport-quotidien': 1, 'carnet-collector': 1}
 
 ## 4. Mesures en cours
 
-- Cross-venue : **96.9 h / 72 h** (334876 observations) — verdict aux barres pré-écrites, jamais avant.
-- Usine à données replay (24 h) : **8 candidats** · **238294 marks** — c'est le carburant du replay A/B.
+- Cross-venue : **97.1 h / 72 h** (337348 observations) — verdict aux barres pré-écrites, jamais avant.
+- Usine à données replay (24 h) : **8 candidats** · **240164 marks** — c'est le carburant du replay A/B.
 
 ## 5. Refus dominants (24 h) — le bot explique pourquoi il n'ouvre pas
 

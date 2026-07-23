@@ -1290,6 +1290,8 @@ def create_dashboard_v2_router() -> APIRouter:
                 # affiche le réalisé HORS stratégies retirées (arbitrage inclus, carry exclu) ;
                 # l'historique carry reste dans realized_net_pnl_usdc (audit/ledger, jamais supprimé).
                 "realized_net_pnl_usdc_live": etat.get("realized_net_pnl_usdc_live"),
+                # archive PAR moteur (carry vs arbitrage) : chaque ligne retirée affiche SON historique.
+                "realise_par_strategie": etat.get("realise_par_strategie", {}),
                 # 🔴 P0 (21/07) — REGLE vs ESTIME. `funding_accru_usdt` est un PRORATA
                 # LINEAIRE ; Hyperliquid regle au SOMMET DE CHAQUE HEURE. On expose les deux
                 # separement : seul le REGLE a le droit d'entrer dans un chiffre « stable ».
