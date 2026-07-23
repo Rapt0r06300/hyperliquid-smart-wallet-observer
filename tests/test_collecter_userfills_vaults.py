@@ -90,3 +90,26 @@ def test_rotation_10_places_2_core_8_candidats_par_activite(tmp_path):
     assert vaults[:2] == ["0xC1", "0xC2"] and len(vaults) == 10     # 2 CORE + 8 candidats (10 places)
     cand = vaults[2:]
     assert "0x14" in cand and cand.index("0x14") < cand.index("0x03")   # le plus actif passe devant
+
+
+def test_parse_l2_ws_rend_bid_ask_depth():
+    d = {"coin": "WLD", "levels": [
+        [{"px": "0.385", "sz": "1000"}, {"px": "0.384", "sz": "1000"}],   # bids
+        [{"px": "0.386", "sz": "1000"}, {"px": "0.387", "sz": "1000"}]]}   # asks
+    b = C._parse_l2_ws(d)
+    assert b and abs(b[0] - 0.385) < 1e-9 and abs(b[1] - 0.386) < 1e-9 and b[2] > 0   # (bid, ask, depth>0)
+    assert C._parse_l2_ws({"coin": "X"}) is None                          # illisible -> None (jamais inventé)
+
+
+def test_book_ws_frais_prefere_au_marquage(tmp_path, monkeypatch):
+    import time
+    monkeypatch.setattr(C, "_ROOT_LIVE", tmp_path)
+    (tmp_path / "runtime" / "data").mkdir(parents=True, exist_ok=True)
+    (tmp_path / C.RAW_L2_LIVE).write_text(json.dumps(
+        {"WLD": {"hl_bid": 0.385, "hl_ask": 0.386, "depth_usd": 3000.0, "collecte_ts": time.time()}}))
+    b = C._book_ws_frais("WLD")
+    assert b and b["hl_bid"] == 0.385 and b["hl_ask"] == 0.386             # book WS frais servi
+    assert C._lecteur_l2_marquage("WLD")["hl_bid"] == 0.385               # marquage préfère le book WS (pas de REST)
+    (tmp_path / C.RAW_L2_LIVE).write_text(json.dumps(
+        {"WLD": {"hl_bid": 0.385, "hl_ask": 0.386, "depth_usd": 3000.0, "collecte_ts": time.time() - 10}}))
+    assert C._book_ws_frais("WLD") is None                                # périmé -> None (pas de fraîcheur inventée)

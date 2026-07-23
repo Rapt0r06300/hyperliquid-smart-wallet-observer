@@ -89,6 +89,20 @@ def test_declencheur_relatif_au_vault(tmp_path):
     assert sur and sur.get("ouverture")                            # 2 001 $ > seuil relatif -> ouvre
 
 
+def test_declencheur_plafonne_ne_bloque_pas_les_grands_vaults(tmp_path):
+    """PLAFOND RAW : TVL 100 M$ -> 0.2 % = 200 k$ serait infranchissable ; clampé à 2 000 $ -> un fill de
+    2 001 $ ouvre quand même. Un très gros vault n'est jamais bloqué."""
+    _setup(tmp_path)
+    (tmp_path / "runtime" / "data" / "vaults_scores.json").write_text(json.dumps({
+        "retenus": ["0xV"], "classement": [{"vault": "0xV", "retenu": True,
+                                            "facteurs": {"tvl_usd": 100_000_000.0}}]}))
+    now = 1_000_000_000_500.0
+    etat = CO.etat_initial(CO.RAW_PROBE, tmp_path)
+    r = CO.traiter_fill(CO.RAW_PROBE, etat, _fill(coin="DOGE", px=1.0, sz=2001.0), tmp_path,
+                        now_ms=now, lecteur_l2=_l2, token=etat["token"])
+    assert r and r.get("ouverture")                                # plafonné à 2 000 $ -> ouvre malgré TVL géant
+
+
 def test_close_retire_la_paire_et_desabonne(tmp_path):
     """Clôture leader d'une position RAW : la PAIRE vault|coin est retirée (fix pop par paire) et le coin
     sort de raw_coins_actifs.json (désabonnement à la clôture)."""

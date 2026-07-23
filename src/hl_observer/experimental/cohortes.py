@@ -30,9 +30,10 @@ NOTIONAL_MIN_USD = 8.0
 SLIPPAGE_BASE_BPS = 1.0
 SLIPPAGE_IMPACT_COEF = 8.0
 LATENCE_COUT_BPS = 1.0
-AGE_MAX_OPEN_MS = 5_000.0         # un fill de CATCH-UP plus vieux que ça ne doit JAMAIS ouvrir (fraîcheur d'abord)
+AGE_MAX_OPEN_MS = 5_000.0         # PLAFOND DE SÉCURITÉ (pas une cible) : un fill de CATCH-UP plus vieux ne doit JAMAIS ouvrir
 SEUIL_ABS_MIN_USD = 150.0         # plancher EXÉCUTABLE anti-dust : jamais copier un OPEN cumulé sous ça
 FRAC_TVL_SIGNIF = 0.002           # significatif RELATIF au vault : cumulé >= 0.2 % de son TVL = vraie conviction
+PLAFOND_RAW_USD = 2_000.0         # PLAFOND du seuil relatif : un TRÈS gros vault ne doit pas être bloqué (clamp haut)
 COINS_ACTIFS_RELPATH = Path("runtime") / "data" / "raw_coins_actifs.json"
 
 
@@ -187,12 +188,29 @@ def _tvl_vault(vault: str, root: Path) -> float:
     return 0.0
 
 
+def _params_trigger(root: Path) -> dict:
+    """Params du déclencheur RAW — variante VERSIONNÉE (défauts = v1). Externalisés pour NE PAS re-tuner la
+    cohorte en dur : versionner runtime/data/raw_trigger.json {variante, floor_usd, frac_tvl, plafond_usd}."""
+    d = {"variante": "v1", "floor_usd": SEUIL_ABS_MIN_USD, "frac_tvl": FRAC_TVL_SIGNIF, "plafond_usd": PLAFOND_RAW_USD}
+    try:
+        j = json.loads((root / "runtime" / "data" / "raw_trigger.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return d
+    for k in ("variante", "floor_usd", "frac_tvl", "plafond_usd"):
+        if k in j:
+            d[k] = j[k]
+    return d
+
+
 def _declencheur_significatif(coh: Cohorte, vault: str, notional_agg: float, root: Path) -> tuple[bool, float]:
-    """Le cumulé same-side est-il SIGNIFICATIF ? Seuil = max(plancher exécutable, frac × TVL du vault) — petit
-    vault gouverné par le plancher exécutable, gros vault par une conviction PROPORTIONNELLE. TVL inconnu ->
-    repli sur coh.seuil_open_usd. Remplace le seuil fixe unique. Rend (significatif, seuil_retenu)."""
+    """Le cumulé same-side est-il SIGNIFICATIF ? Seuil = clamp(frac × TVL, [floor, PLAFOND]) — petit vault
+    gouverné par le floor, GROS vault PLAFONNÉ (jamais bloqué). TVL inconnu -> repli coh.seuil_open_usd.
+    Params VERSIONNÉS (raw_trigger.json, défaut v1). Rend (significatif, seuil_retenu)."""
     tvl = _tvl_vault(vault, root)
-    seuil = max(SEUIL_ABS_MIN_USD, FRAC_TVL_SIGNIF * tvl) if tvl > 0 else coh.seuil_open_usd
+    if tvl <= 0:
+        return notional_agg >= coh.seuil_open_usd, coh.seuil_open_usd
+    p = _params_trigger(root)
+    seuil = min(max(float(p["floor_usd"]), float(p["frac_tvl"]) * tvl), float(p["plafond_usd"]))
     return notional_agg >= seuil, seuil
 
 
