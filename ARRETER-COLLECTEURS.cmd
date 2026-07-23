@@ -23,7 +23,7 @@ REM  On reste STRICTEMENT borne aux processus dont la ligne de commande contient
 REM  (%~dp0) -- aucun autre python de la machine n'est touche. + on tue le detenteur du verrou userfills.
 powershell -NoProfile -Command ^
   "$projet = '%~dp0';" ^
-  "$c = Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -and ($_.CommandLine -like '*boucle_collecteur.cmd*' -or ($_.CommandLine -like ('*'+$projet+'*') -and $_.CommandLine -like '*.py*')) };" ^
+  "$c = Get-CimInstance Win32_Process | Where-Object { $_.ProcessId -ne $PID -and $_.CommandLine -and ($_.CommandLine -like '*boucle_collecteur.cmd*' -or (($_.Name -eq 'python.exe' -or $_.Name -eq 'pythonw.exe') -and ($_.CommandLine -like ('*'+$projet+'*') -or $_.CommandLine -like '*collecter_userfills_vaults.py*'))) };" ^
   "if (-not $c) { Write-Host '  aucun collecteur en cours.' } else {" ^
   "  $c | ForEach-Object { Write-Host ('  arret PID ' + $_.ProcessId + ' -- ' + ($_.CommandLine.Substring(0,[Math]::Min(90,$_.CommandLine.Length)))) };" ^
   "  $c | ForEach-Object { try { Stop-Process -Id $_.ProcessId -Force -ErrorAction Stop } catch {} };" ^
