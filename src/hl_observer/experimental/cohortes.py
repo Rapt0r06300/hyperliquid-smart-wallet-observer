@@ -23,13 +23,17 @@ from typing import Any
 
 from hl_observer.experimental import moteur_paper as MP
 from hl_observer.experimental.signaux import (_l2_pour_coin, _snapshots_bbo, _carnet_l2_frais, _allmids,
-                                              _vaults_retenus)
+                                              _vaults_retenus, _filer_coins_au_carnet)
 
 FENETRE_AGG_MS = 5_000.0          # on agrège les OPEN/ADD d'un (vault,coin) sur 5 s
 NOTIONAL_MIN_USD = 8.0
 SLIPPAGE_BASE_BPS = 1.0
 SLIPPAGE_IMPACT_COEF = 8.0
 LATENCE_COUT_BPS = 1.0
+AGE_MAX_OPEN_MS = 5_000.0         # un fill de CATCH-UP plus vieux que ça ne doit JAMAIS ouvrir (fraîcheur d'abord)
+SEUIL_ABS_MIN_USD = 150.0         # plancher EXÉCUTABLE anti-dust : jamais copier un OPEN cumulé sous ça
+FRAC_TVL_SIGNIF = 0.002           # significatif RELATIF au vault : cumulé >= 0.2 % de son TVL = vraie conviction
+COINS_ACTIFS_RELPATH = Path("runtime") / "data" / "raw_coins_actifs.json"
 
 
 @dataclass(frozen=True)
@@ -53,7 +57,7 @@ PROBE = Cohorte("DISCOVERY_PROBE", "discovery_probe", 100.0, 4, 15.0, 30.0, 500.
                 ("copy_prelim_probe.json",))
 # RAW_PROBE : ouvre sur TOUT OPEN/ADD candidat liquide (SANS edge requis) pour MESURER la paire vault+coin.
 # Mini 5 $, MAX 2, budget minuscule (perte totale plafonnée), positions marquées NON_VALIDEE.
-RAW_PROBE = Cohorte("RAW_PROBE", "raw_probe", 20.0, 2, 5.0, 40.0, 200.0, (),
+RAW_PROBE = Cohorte("RAW_PROBE", "raw_probe", 20.0, 2, 10.0, 40.0, 200.0, (),
                     edge_requis=False, depth_min_usd=100.0, marque="NON_VALIDEE")
 COHORTES = {"ALPHA": ALPHA, "PROBE": PROBE, "RAW_PROBE": RAW_PROBE}
 
@@ -171,6 +175,53 @@ def cohorte_active(coh: Cohorte, root: Path) -> bool:
     return not (ex.get("n_trades", 0) >= 10 and ex.get("expectancy_usd_par_trade", 0.0) < 0)
 
 
+def _tvl_vault(vault: str, root: Path) -> float:
+    """TVL (capital) du vault depuis vaults_scores.json — sert au déclencheur RELATIF (0 si inconnu)."""
+    try:
+        d = json.loads((root / "runtime" / "data" / "vaults_scores.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return 0.0
+    for c in (d.get("classement") or []):
+        if c.get("vault") == vault:
+            return float((c.get("facteurs") or {}).get("tvl_usd") or 0.0)
+    return 0.0
+
+
+def _declencheur_significatif(coh: Cohorte, vault: str, notional_agg: float, root: Path) -> tuple[bool, float]:
+    """Le cumulé same-side est-il SIGNIFICATIF ? Seuil = max(plancher exécutable, frac × TVL du vault) — petit
+    vault gouverné par le plancher exécutable, gros vault par une conviction PROPORTIONNELLE. TVL inconnu ->
+    repli sur coh.seuil_open_usd. Remplace le seuil fixe unique. Rend (significatif, seuil_retenu)."""
+    tvl = _tvl_vault(vault, root)
+    seuil = max(SEUIL_ABS_MIN_USD, FRAC_TVL_SIGNIF * tvl) if tvl > 0 else coh.seuil_open_usd
+    return notional_agg >= seuil, seuil
+
+
+def _maj_coins_actifs(root: Path, coin: str, *, ajouter: bool, now_ms: float) -> None:
+    """Abonnement BBO/L2 DYNAMIQUE du coin pendant la vie de la position : à l'ouverture on inscrit le coin
+    (les collecteurs carnet/bbo l'abonnent -> flux frais pour le marquage/VWAP/MFE/MAE) ; à la clôture on le
+    retire. `raw_coins_actifs.json` = registre de cycle de vie. Best-effort, ne casse jamais le tick."""
+    if not _ecriture_permise(root):
+        return
+    if ajouter:
+        try:
+            _filer_coins_au_carnet(root, [coin], now_ms=now_ms)      # prompt d'abonnement (mécanisme carnet existant)
+        except Exception:  # noqa: BLE001
+            pass
+    p = root / COINS_ACTIFS_RELPATH
+    try:
+        cur = set(json.loads(p.read_text(encoding="utf-8")).get("coins") or []) if p.exists() else set()
+    except (OSError, ValueError):
+        cur = set()
+    cur.add(coin) if ajouter else cur.discard(coin)
+    try:
+        p.parent.mkdir(parents=True, exist_ok=True)
+        tmp = p.with_suffix(".json.tmp")
+        tmp.write_text(json.dumps({"maj_ms": int(now_ms), "coins": sorted(cur)}, ensure_ascii=False), encoding="utf-8")
+        tmp.replace(p)
+    except OSError:
+        pass
+
+
 def _ouvrir(coh: Cohorte, store: dict, root: Path, *, cle, coin, sens, notional, prix, cfg, cout_ar,
             spread, slippage, fhl, vault, now_ms, fill_ts, lat_mono, run_id="", src_l2="", marque="") -> dict:
     eb = cfg.get("edge_brut_bps")
@@ -192,13 +243,15 @@ def _ouvrir(coh: Cohorte, store: dict, root: Path, *, cle, coin, sens, notional,
                         "src_l2": src_l2, "statut": marque or "VALIDEE",
                         "motif": ("RAW mesure (sans edge)" if not coh.edge_requis else "copy OPEN/ADD + L2<1s + edge net>0")})
     _sauver(coh, root, store)
+    if not coh.edge_requis:                                          # RAW : abonne le coin en BBO/L2 pour la vie de la position
+        _maj_coins_actifs(root, coin, ajouter=True, now_ms=now_ms)
     return pos
 
 
 def _sortir(coh: Cohorte, pos: dict, store: dict, root: Path, *, prix_sortie, cout_sortie_bps, raison,
             now_ms, mae_bps=None, mfe_bps=None) -> dict:
     realized = round(MP.pnl_courant_usd(pos, mark=prix_sortie, now_ms=now_ms) - cout_sortie_bps / 1e4 * pos["notional_usd"], 6)
-    store["ouvertes"].pop(pos["coin"], None)
+    store["ouvertes"].pop(pos.get("paire", pos["coin"]), None)       # clé = paire (RAW = vault|coin), pas coin
     store["cash"] = round(store["cash"] + pos["notional_usd"] + realized, 6)
     store["realise_total_usd"] = round(store.get("realise_total_usd", 0.0) + realized, 6)
     _ledger(coh, root, {"evt": "CLOSE", "ts_ms": now_ms, "coin": pos["coin"], "sens": pos["sens"],
@@ -208,6 +261,8 @@ def _sortir(coh: Cohorte, pos: dict, store: dict, root: Path, *, prix_sortie, co
                         "run_id": pos.get("meta", {}).get("run_id"), "source": SOURCE_LIVE,
                         "vault": pos.get("meta", {}).get("vault")})
     _sauver(coh, root, store)
+    if not coh.edge_requis and not any(p.get("coin") == pos["coin"] for p in store["ouvertes"].values()):
+        _maj_coins_actifs(root, pos["coin"], ajouter=False, now_ms=now_ms)   # désabonne si plus aucune position sur ce coin
     return {"coin": pos["coin"], "realized_usd": realized, "raison": raison}
 
 
@@ -283,7 +338,13 @@ def traiter_fill(coh: Cohorte, etat: dict, fill: dict, root: Path, *, now_ms: fl
         return {"reduction": _reduire(coh, pos, store, root, fraction=fraction, prix=mark, cout_sortie_bps=cout, now_ms=now)}
     if "open" not in dir_bas:
         return None
-    # OPEN/ADD : agrégation EN DOLLARS sur quelques secondes (plus de ΔNAV 2 % obligatoire)
+    # GATE D'ÂGE STRICT : un fill de CATCH-UP vieux de plusieurs secondes ne doit JAMAIS ouvrir (on n'agit
+    # que sur du FRAIS ; le skew d'horloge HL rend l'âge parfois négatif -> seul un âge franchement positif
+    # trahit un rejeu tardif). Les REDUCE/CLOSE (traités plus haut) restent suivis quel que soit l'âge.
+    age_ms = now - float(fill.get("ts_ms") or now)
+    if age_ms > AGE_MAX_OPEN_MS:
+        return {"refus": "FILL_TROP_VIEUX_OPEN", "coin": coin, "age_ms": round(age_ms)}
+    # OPEN/ADD : agrégation EN DOLLARS sur quelques secondes (gros OPEN OU plusieurs fills même sens)
     key = (vault, coin)
     ag = etat["agg"].get(key)
     notional_fill = abs(float(fill.get("sz") or 0.0)) * float(fill.get("px") or 0.0)
@@ -292,8 +353,11 @@ def traiter_fill(coh: Cohorte, etat: dict, fill: dict, root: Path, *, now_ms: fl
     else:
         ag = {"sens": sens, "notional": notional_fill, "t0": now, "fill_ts": int(fill.get("ts_ms") or now)}
         etat["agg"][key] = ag
-    if ag["notional"] < coh.seuil_open_usd:
-        return None                                               # pas encore un OPEN/ADD significatif
+    # DÉCLENCHEUR SIGNIFICATIF RELATIF AU VAULT (remplace le seuil fixe unique) : cumulé >= max(plancher
+    # exécutable, frac × TVL). Petit vault -> plancher ; gros vault -> conviction proportionnelle.
+    signif, _seuil = _declencheur_significatif(coh, vault, ag["notional"], root)
+    if not signif:
+        return None                                               # pas encore un OPEN/ADD significatif pour CE vault
     etat["agg"].pop(key, None)
     t_dec = time.monotonic()                                     # HORLOGE MONOTONE LOCALE : décision
     cle = _cle(coh, vault, coin)

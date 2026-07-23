@@ -44,7 +44,7 @@ def test_ouvre_inline_sur_open_add_significatif(tmp_path):
 
 def test_raw_probe_ouvre_sans_edge_par_paire(tmp_path):
     """RAW_PROBE : ouvre sur tout OPEN/ADD candidat liquide SANS edge requis, clé PAR PAIRE vault+coin,
-    mini 5 $, marquée NON_VALIDEE (sert à MESURER la paire)."""
+    mini 10 $ (position exécutable), marquée NON_VALIDEE (sert à MESURER la paire)."""
     _setup(tmp_path)
     now = 1_000_000_000_500.0
     etat = CO.etat_initial(CO.RAW_PROBE, tmp_path)
@@ -53,13 +53,59 @@ def test_raw_probe_ouvre_sans_edge_par_paire(tmp_path):
     r = CO.traiter_fill(CO.RAW_PROBE, etat, fill, tmp_path, now_ms=now, lecteur_l2=_l2, token=etat["token"])
     assert r and r.get("ouverture")
     pos = r["ouverture"]
-    assert pos["paire"] == "0xV|DOGE" and pos["notional_usd"] <= 5.0                        # clé paire + mini 5 $
+    assert pos["paire"] == "0xV|DOGE" and pos["notional_usd"] == 10.0                       # clé paire + mini 10 $
     assert pos["meta"]["statut"] == "NON_VALIDEE" and pos["edge_estime_bps"] is None         # sans edge, non validée
     assert r["latence_ws_open_ms"] is not None
     # max 2 positions : une 2e paire ouvre, une 3e est refusée
     CO.traiter_fill(CO.RAW_PROBE, etat, _fill(coin="WLD", sz=2, px=150.0, hash="w"), tmp_path, now_ms=now, lecteur_l2=_l2, token=etat["token"])
     r3 = CO.traiter_fill(CO.RAW_PROBE, etat, _fill(coin="LDO", sz=2, px=150.0, hash="l"), tmp_path, now_ms=now, lecteur_l2=_l2, token=etat["token"])
     assert r3 and r3.get("refus") == "LIMITE_POSITIONS"
+
+
+def test_gate_age_refuse_fill_catchup(tmp_path):
+    """Un fill de CATCH-UP (vieux de > AGE_MAX_OPEN_MS) ne doit JAMAIS ouvrir : REFUS FILL_TROP_VIEUX_OPEN."""
+    _setup(tmp_path)
+    now = 1_000_000_000_000 + CO.AGE_MAX_OPEN_MS + 60_000            # fill à ts 1e12, décision 65 s plus tard
+    etat = CO.etat_initial(CO.RAW_PROBE, tmp_path)
+    r = CO.traiter_fill(CO.RAW_PROBE, etat, _fill(coin="DOGE", sz=2, px=150.0), tmp_path,
+                        now_ms=now, lecteur_l2=_l2, token=etat["token"])
+    assert r and r.get("refus") == "FILL_TROP_VIEUX_OPEN"           # trop vieux -> aucune ouverture
+
+
+def test_declencheur_relatif_au_vault(tmp_path):
+    """Seuil RELATIF au TVL du vault (remplace le fixe) : TVL 1 M$ -> seuil 0.2 % = 2 000 $. 1 999 $ ne
+    déclenche pas ; 2 001 $ déclenche. Coins distincts pour éviter l'agrégation."""
+    _setup(tmp_path)
+    (tmp_path / "runtime" / "data" / "vaults_scores.json").write_text(json.dumps({
+        "retenus": ["0xV"], "classement": [{"vault": "0xV", "retenu": True,
+                                            "facteurs": {"tvl_usd": 1_000_000.0}}]}))
+    now = 1_000_000_000_500.0
+    etat = CO.etat_initial(CO.RAW_PROBE, tmp_path)
+    sous = CO.traiter_fill(CO.RAW_PROBE, etat, _fill(coin="DOGE", px=1.0, sz=1999.0), tmp_path,
+                           now_ms=now, lecteur_l2=_l2, token=etat["token"])
+    assert sous is None                                             # 1 999 $ < 0.2 % de 1 M$ -> pas significatif
+    sur = CO.traiter_fill(CO.RAW_PROBE, etat, _fill(coin="PEPE", px=1.0, sz=2001.0, hash="h2"), tmp_path,
+                          now_ms=now, lecteur_l2=_l2, token=etat["token"])
+    assert sur and sur.get("ouverture")                            # 2 001 $ > seuil relatif -> ouvre
+
+
+def test_close_retire_la_paire_et_desabonne(tmp_path):
+    """Clôture leader d'une position RAW : la PAIRE vault|coin est retirée (fix pop par paire) et le coin
+    sort de raw_coins_actifs.json (désabonnement à la clôture)."""
+    _setup(tmp_path)
+    now = 1_000_000_000_500.0
+    etat = CO.etat_initial(CO.RAW_PROBE, tmp_path)
+    o = CO.traiter_fill(CO.RAW_PROBE, etat, _fill(coin="DOGE", sz=2, px=150.0), tmp_path,
+                        now_ms=now, lecteur_l2=_l2, token=etat["token"])
+    assert o and o.get("ouverture") and "0xV|DOGE" in etat["store"]["ouvertes"]
+    actifs = json.loads((tmp_path / "runtime" / "data" / "raw_coins_actifs.json").read_text())["coins"]
+    assert "DOGE" in actifs                                         # abonné à l'ouverture
+    c = CO.traiter_fill(CO.RAW_PROBE, etat, _fill(coin="DOGE", sz=2, px=150.0, signe=-1, dir="Close Long",
+                        start_position=2.0, hash="c1"), tmp_path, now_ms=now + 1000, lecteur_l2=_l2, token=etat["token"])
+    assert c and c.get("fermeture")
+    assert "0xV|DOGE" not in etat["store"]["ouvertes"]              # paire retirée (pop par paire, pas par coin)
+    actifs2 = json.loads((tmp_path / "runtime" / "data" / "raw_coins_actifs.json").read_text())["coins"]
+    assert "DOGE" not in actifs2                                    # désabonné à la clôture
 
 
 def test_agrege_plusieurs_petits_open(tmp_path):
