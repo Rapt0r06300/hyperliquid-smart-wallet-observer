@@ -158,6 +158,26 @@ def rendement_forward(ev: dict, serie: list[tuple[int, float]], horizon_ms: floa
     return ev["direction"] * (p1 - p0) / p0 * 1e4
 
 
+def rendement_forward_candles(ev: dict, serie: list[tuple[int, float]], horizon_ms: float,
+                              *, delai_ms: float = 0.0) -> float | None:
+    """Rendement forward (bps) ANTI-LOOKAHEAD pour la RECHERCHE candles (rectif Flo 23/07) : entrée à la
+    PREMIÈRE bougie STRICTEMENT APRÈS ts+délai (jamais le close de la bougie contenant le signal), sortie
+    à la première bougie après ts+délai+horizon. `serie` = [(t_ms début de bougie, close)] trié. None si
+    une des deux bougies manque (jamais extrapolé)."""
+    if not serie:
+        return None
+    ts = [t for t, _ in serie]
+    t_sig = int(ev["ts_ms"] + delai_ms)
+    i = bisect.bisect_right(ts, t_sig)                             # 1re bougie qui COMMENCE après le signal+délai
+    j = bisect.bisect_right(ts, t_sig + int(horizon_ms))          # 1re bougie après signal+délai+horizon
+    if i >= len(serie) or j >= len(serie) or i == j:
+        return None
+    p_ent, p_sor = serie[i][1], serie[j][1]
+    if p_ent <= 0:
+        return None
+    return ev["direction"] * (p_sor - p_ent) / p_ent * 1e4
+
+
 def _placebo_forward(ev: dict, serie: list[tuple[int, float]], horizon_ms: float,
                      rng: random.Random) -> float | None:
     """Même coin/direction mais à un instant ALÉATOIRE de la tape (neutralise la dérive du coin)."""

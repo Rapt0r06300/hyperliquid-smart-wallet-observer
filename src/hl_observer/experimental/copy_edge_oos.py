@@ -21,12 +21,13 @@ from typing import Any, Iterable
 from hl_observer.experimental.copy_edge_forward import rendement_forward
 
 SEUILS_DEFAUT = (0.03, 0.05, 0.10, 0.20)
+FORWARD_DEFAUT = rendement_forward       # tick (allmids) ; passer rendement_forward_candles pour la recherche candles
 HORIZONS_DEFAUT_MS = (60_000.0, 300_000.0, 900_000.0, 3_600_000.0)
 SEUIL_VALIDATION_N = 100          # n_oos >= ça => VALIDATION ; en-dessous => PRÉLIMINAIRE (Flo : 30 = préliminaire)
 
 
 def _returns_nets(events: list[dict], tape: dict[str, list[tuple[int, float]]], horizon_ms: float,
-                  seuil: float, frais_bps: float) -> list[float]:
+                  seuil: float, frais_bps: float, forward_fn=FORWARD_DEFAUT) -> list[float]:
     """Rendements NETS (bps) par entrée de move_frac >= seuil, appariables à la tape."""
     out: list[float] = []
     for e in events:
@@ -35,14 +36,14 @@ def _returns_nets(events: list[dict], tape: dict[str, list[tuple[int, float]]], 
         serie = tape.get(e["coin"])
         if not serie:
             continue
-        r = rendement_forward(e, serie, horizon_ms)
+        r = forward_fn(e, serie, horizon_ms)
         if r is not None:
             out.append(r - frais_bps)
     return out
 
 
 def _placebo_nets(events: list[dict], tape: dict[str, list[tuple[int, float]]], horizon_ms: float,
-                  seuil: float, frais_bps: float, rng: random.Random) -> list[float]:
+                  seuil: float, frais_bps: float, rng: random.Random, forward_fn=FORWARD_DEFAUT) -> list[float]:
     out: list[float] = []
     for e in events:
         if float(e.get("move_frac", 0.0)) < seuil:
@@ -51,7 +52,7 @@ def _placebo_nets(events: list[dict], tape: dict[str, list[tuple[int, float]]], 
         if not serie or len(serie) < 3:
             continue
         t0 = serie[rng.randrange(len(serie))][0]
-        r = rendement_forward({"ts_ms": t0, "direction": e["direction"]}, serie, horizon_ms)
+        r = forward_fn({"ts_ms": t0, "direction": e["direction"]}, serie, horizon_ms)
         if r is not None:
             out.append(r - frais_bps)
     return out
@@ -89,38 +90,39 @@ def mesurer_oos(events: list[dict], tape: dict[str, list[tuple[int, float]]], *,
                 seuils: Iterable[float] = SEUILS_DEFAUT, horizons_ms: Iterable[float] = HORIZONS_DEFAUT_MS,
                 frais_bps: float = 12.0, frac_train: float = 0.6, min_events_train: int = 20,
                 min_events_oos: int = 20, seuil_validation: int = SEUIL_VALIDATION_N,
-                separer_par_vault: bool = True, graine: int = 12345) -> dict[str, Any]:
-    """Choix (seuil,horizon) sur TRAIN (vaults+période de train), validation OOS PURGÉE sur vaults
-    held-out + période postérieure, vs placebo, avec IC bootstrap. Verdict honnête (NEED_MORE_DATA /
-    PRÉLIMINAIRE / VALIDATION) + SCALE/OBSERVE/KILL."""
+                graine: int = 12345, forward_fn=FORWARD_DEFAUT) -> dict[str, Any]:
+    """PRIMAIRE = walk-forward TEMPOREL sur les MÊMES vaults (choix sur période de train, validation sur
+    période postérieure, PURGÉE). SECONDAIRE = généralisation par vault held-out (rectif Flo 23/07 : le
+    split par vault est un test secondaire). IC bootstrap, vs placebo. Verdict NEED_MORE_DATA /
+    PRÉLIMINAIRE / VALIDATION + SCALE/OBSERVE/KILL."""
     ev = sorted(events, key=lambda e: int(e.get("ts_ms") or 0))
     if len(ev) < (min_events_train + min_events_oos):
         return {"statut": "NEED_MORE_DATA", "n_events": len(ev), "requis": min_events_train + min_events_oos}
     purge = max(horizons_ms)                                       # la fenêtre forward la plus large
     ts = [int(e["ts_ms"]) for e in ev]
     t_cut = ts[int(len(ts) * frac_train)]
-    tv, ov = _split_vaults(ev) if separer_par_vault else (None, None)
-
-    def _in(e, vaults):
-        return vaults is None or str(e.get("vault") or "") in vaults
-
-    # TRAIN : vaults de train, fenêtre forward terminée AVANT la coupe (purge) -> aucune fuite période
-    train = [e for e in ev if _in(e, tv) and int(e["ts_ms"]) + purge <= t_cut]
-    # OOS : vaults HELD-OUT, période postérieure à la coupe
-    oos = [e for e in ev if _in(e, ov) and int(e["ts_ms"]) >= t_cut]
+    # PRIMAIRE (temporel, mêmes vaults) : train = fenêtre forward terminée avant la coupe (purge) ; oos = après
+    train = [e for e in ev if int(e["ts_ms"]) + purge <= t_cut]
+    oos = [e for e in ev if int(e["ts_ms"]) >= t_cut]
     grille: list[dict] = []
     for s in seuils:
         for h in horizons_ms:
-            nets = _returns_nets(train, tape, h, s, frais_bps)
+            nets = _returns_nets(train, tape, h, s, frais_bps, forward_fn)
             if len(nets) >= min_events_train:
                 grille.append({"seuil": s, "horizon_ms": h, "train_net_bps": round(_moy(nets), 3), "train_n": len(nets)})
     if not grille:
         return {"statut": "NEED_MORE_DATA", "n_train": len(train), "n_oos": len(oos),
                 "note": "aucune combinaison n'atteint le minimum d'entrées sur le TRAIN"}
     choix = max(grille, key=lambda g: g["train_net_bps"])
-    nets_oos = _returns_nets(oos, tape, choix["horizon_ms"], choix["seuil"], frais_bps)
+    nets_oos = _returns_nets(oos, tape, choix["horizon_ms"], choix["seuil"], frais_bps, forward_fn)
     rng = random.Random(graine)
-    placebo = _placebo_nets(oos, tape, choix["horizon_ms"], choix["seuil"], frais_bps, rng)
+    placebo = _placebo_nets(oos, tape, choix["horizon_ms"], choix["seuil"], frais_bps, rng, forward_fn)
+    # SECONDAIRE : généralisation sur vaults HELD-OUT (période OOS), aux mêmes params
+    tv, ov = _split_vaults(ev)
+    oos_vault = [e for e in oos if str(e.get("vault") or "") in ov]
+    nets_gv = _returns_nets(oos_vault, tape, choix["horizon_ms"], choix["seuil"], frais_bps, forward_fn)
+    generalisation_vault = {"n": len(nets_gv), "net_bps": round(_moy(nets_gv), 3) if nets_gv else None,
+                            "vaults_held_out": sorted(ov)}
     n = len(nets_oos)
     net_oos = _moy(nets_oos)
     pb = _moy(placebo)
@@ -138,22 +140,23 @@ def mesurer_oos(events: list[dict], tape: dict[str, list[tuple[int, float]]], *,
     elif net_oos > 0 and bat_placebo:
         decision = "OBSERVE"
     return {"statut": statut, "n_events": len(ev), "n_train": len(train), "n_oos": n,
-            "purge_ms": purge, "separe_par_vault": bool(separer_par_vault),
-            "vaults_train": sorted(tv) if tv else [], "vaults_oos": sorted(ov) if ov else [],
+            "purge_ms": purge, "validation": "temporelle_walk_forward_meme_vaults",
             "choix_sur_train": choix, "grille_train": grille,
             "oos": {"seuil": choix["seuil"], "horizon_ms": choix["horizon_ms"], "n": n,
                     "net_bps": round(net_oos, 3), "brut_bps": round(net_oos + frais_bps, 3),
                     "placebo_bps": round(pb, 3), "edge_vs_placebo_bps": round(net_oos - pb, 3),
                     "ic95_bas_bps": ic_bas, "ic95_haut_bps": ic_haut},
+            "generalisation_par_vault": generalisation_vault,      # test SECONDAIRE (vaults held-out)
             "edge_valide_oos": bool(statut == "VALIDATION" and net_oos > 0 and bat_placebo and ic_bas > 0),
             "decision": decision, "frais_bps": frais_bps, "seuil_validation": seuil_validation,
-            "note": "Choix sur TRAIN ; OOS purgé (purge=horizon) sur vaults held-out + période postérieure ; "
-                    "IC bootstrap. SCALE seulement si VALIDATION + net>0 + bat placebo + IC bas>0."}
+            "note": "PRIMAIRE = walk-forward TEMPOREL (mêmes vaults, purge=horizon) ; SECONDAIRE = "
+                    "généralisation par vault held-out ; IC bootstrap. SCALE si VALIDATION + net>0 + bat "
+                    "placebo + IC bas>0."}
 
 
 def simuler_paper(events: list[dict], tape: dict[str, list[tuple[int, float]]], *, horizon_ms: float,
                   seuil: float, notional_usd: float, cout_ar_bps: float,
-                  capital_usd: float = 1000.0, graine: int = 7) -> dict[str, Any]:
+                  capital_usd: float = 1000.0, graine: int = 7, forward_fn=FORWARD_DEFAUT) -> dict[str, Any]:
     """Backtest paper des trades de copie. ROI CUMULATIF (PnL/capital) **et** ROI PAR TRADE (bps moyen)
     clairement distingués (rectif Flo). IC bootstrap sur le PnL/trade. Aucune exécution."""
     trades: list[dict] = []
@@ -167,7 +170,7 @@ def simuler_paper(events: list[dict], tape: dict[str, list[tuple[int, float]]], 
         serie = tape.get(e["coin"])
         if not serie:
             continue
-        r = rendement_forward(e, serie, horizon_ms)
+        r = forward_fn(e, serie, horizon_ms)
         if r is None:
             continue
         pnl_bps = r - cout_ar_bps
@@ -200,14 +203,15 @@ def _profit_factor(trades: list[dict]) -> float:
 
 def ranger_variantes(events: list[dict], tape: dict[str, list[tuple[int, float]]], *,
                      variantes: Iterable[dict], notional_usd: float = 150.0, cout_ar_bps: float = 12.0,
-                     capital_usd: float = 1000.0) -> list[dict]:
+                     capital_usd: float = 1000.0, forward_fn=FORWARD_DEFAUT) -> list[dict]:
     """Classe des variantes {seuil,horizon_ms} par SCORE = PnL_net × ROI_cumulatif × capacité ÷
     (drawdown+ε), avec la sim paper de chacune. Le drawdown pénalise, la capacité récompense."""
     eps = 1e-6
     out: list[dict] = []
     for v in variantes:
         sim = simuler_paper(events, tape, horizon_ms=v["horizon_ms"], seuil=v["seuil"],
-                            notional_usd=notional_usd, cout_ar_bps=cout_ar_bps, capital_usd=capital_usd)
+                            notional_usd=notional_usd, cout_ar_bps=cout_ar_bps, capital_usd=capital_usd,
+                            forward_fn=forward_fn)
         dd = sim["drawdown_usd"] + eps
         score = sim["pnl_net_usd"] * sim["roi_cumulatif_pct"] * sim["capacite_usd_par_trade"] / dd
         out.append({"seuil": v["seuil"], "horizon_ms": v["horizon_ms"], "score": round(score, 3),

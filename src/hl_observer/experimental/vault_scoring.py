@@ -151,10 +151,14 @@ POIDS = {"pnl_net": 0.24, "regularite": 0.18, "drawdown": 0.16, "anciennete": 0.
 
 
 def scorer_vault(snaps: list[dict], *, age_j: float = 0.0, tvl_usd: float = 0.0,
-                 coins_executables: Iterable[str] = ()) -> dict[str, Any]:
+                 coins_executables: Iterable[str] = (), date_max_ms: int | None = None) -> dict[str, Any]:
     """Score un vault depuis sa série de snapshots + méta (âge, TVL) + l'univers exécutable.
-    Rend les 8 facteurs bruts, leurs versions normalisées [0,1], et le composite pondéré."""
+    Rend les 8 facteurs bruts, leurs versions normalisées [0,1], et le composite pondéré.
+    POINT-IN-TIME (rectif Flo 23/07) : si `date_max_ms`, on n'utilise QUE les snapshots ≤ cette date —
+    le score à une date historique ne connaît jamais le futur (anti-fuite de sélection)."""
     snaps = sorted(snaps, key=lambda s: int(s.get("ts_ms") or 0))
+    if date_max_ms is not None:
+        snaps = [s for s in snaps if int(s.get("ts_ms") or 0) <= date_max_ms]
     dernier = snaps[-1] if snaps else {}
     rn = rendement_net(snaps)
     reg = regularite(snaps)
@@ -196,16 +200,17 @@ def retenu(score: dict[str, Any]) -> tuple[bool, str]:
 
 
 def classer(vaults: dict[str, list[dict]], *, meta: dict[str, dict] | None = None,
-            coins_executables: Iterable[str] = ()) -> list[dict[str, Any]]:
+            coins_executables: Iterable[str] = (), date_max_ms: int | None = None) -> list[dict[str, Any]]:
     """Score et CLASSE tous les vaults (composite décroissant). `meta[adr]` peut porter age_j/tvl_usd.
-    Chaque entrée : {vault, composite, retenu, raison, facteurs, normalises}."""
+    `date_max_ms` (point-in-time) propage le cutoff : à une date historique, aucun vault n'est jugé sur
+    des données futures. Chaque entrée : {vault, composite, retenu, raison, facteurs, normalises}."""
     meta = meta or {}
     exe = list(coins_executables)
     out: list[dict[str, Any]] = []
     for adr, snaps in vaults.items():
         m = meta.get(adr, {})
         sc = scorer_vault(snaps, age_j=float(m.get("age_j") or 0.0),
-                          tvl_usd=float(m.get("tvl_usd") or 0.0), coins_executables=exe)
+                          tvl_usd=float(m.get("tvl_usd") or 0.0), coins_executables=exe, date_max_ms=date_max_ms)
         ok, raison = retenu(sc)
         out.append({"vault": adr, "composite": sc["composite"], "retenu": ok, "raison": raison,
                     "facteurs": sc["facteurs"], "normalises": sc["normalises"], "n_snapshots": sc["n_snapshots"]})

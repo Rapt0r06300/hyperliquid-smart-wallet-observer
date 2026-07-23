@@ -158,5 +158,39 @@ def couverture(fills: list[dict]) -> dict:
             "fills_par_vault": par_vault, "t0_ms": min(ts), "t1_ms": max(ts)}
 
 
+CAP_USERFILLS = 10_000            # userFillsByTime plafonne aux ~10k fills RÉCENTS (limite officielle)
+
+
+def auditer_couverture(fills: list[dict], *, cap: int = CAP_USERFILLS, lookback_debut_ms: int | None = None,
+                       coins_tape: set[str] | None = None) -> dict:
+    """Audit HONNÊTE de couverture/troncature par vault (rectif Flo 23/07) : n fills, span réel, plus
+    ancien/récent, et TRONCATURE probable si le vault a atteint le cap OU si son plus ancien fill est
+    bien postérieur au début demandé (userFillsByTime a coupé l'ancien). `coins_tape` = coins avec prix
+    (candles) → part des coins réellement mesurables. On ne PROMET jamais 14 j : on constate."""
+    par: dict[str, list[int]] = {}
+    coins_fills: set[str] = set()
+    for f in fills:
+        par.setdefault(f.get("vault", ""), []).append(int(f["ts_ms"]))
+        coins_fills.add(str(f.get("coin") or "").upper())
+    vaults = []
+    for v, ts in par.items():
+        ts.sort()
+        tronque = len(ts) >= cap
+        if lookback_debut_ms is not None and ts and (ts[0] - lookback_debut_ms) > 12 * MS_PAR_HEURE:
+            tronque = True                                        # le plus ancien fill est >12 h après le début demandé
+        vaults.append({"vault": v, "n_fills": len(ts), "t0_ms": ts[0] if ts else None,
+                       "t1_ms": ts[-1] if ts else None,
+                       "span_h": round((ts[-1] - ts[0]) / MS_PAR_HEURE, 1) if len(ts) >= 2 else 0.0,
+                       "tronque_probable": bool(tronque)})
+    vaults.sort(key=lambda x: -x["n_fills"])
+    coins_mesurables = sorted(coins_fills & coins_tape) if coins_tape else []
+    return {"n_vaults": len(vaults), "n_fills": len(fills), "n_coins_fills": len(coins_fills),
+            "n_coins_mesurables": len(coins_mesurables), "coins_mesurables": coins_mesurables,
+            "n_vaults_tronques": sum(1 for v in vaults if v["tronque_probable"]),
+            "part_coins_avec_prix": round(len(coins_mesurables) / len(coins_fills), 3) if coins_fills else 0.0,
+            "par_vault": vaults}
+
+
 __all__ = ["plan_de_requetes", "parser_fills", "dedupliquer", "reconstruire_episodes",
-           "marquer_retraits", "entrees_alpha", "couverture", "MS_PAR_HEURE"]
+           "marquer_retraits", "entrees_alpha", "couverture", "auditer_couverture", "CAP_USERFILLS",
+           "MS_PAR_HEURE"]

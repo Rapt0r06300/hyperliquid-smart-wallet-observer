@@ -390,9 +390,11 @@ REM backfill_vault_fills : userFillsByTime des vaults RETENUS + temoin -> episod
 REM (reduces de RETRAIT exclus). mesurer_copie : edge OOS train->walk-forward vs placebo -> gel si valide.
 REM 2 endpoints PUBLICS en lecture. 0 ordre, 0 cle, 0 signature. Le signal copy_vault ne copie que si gele.
 start "" /b tools\boucle_collecteur.cmd backfill-fills tools\backfill_vault_fills.py 14400 --une-fois
-REM prix HISTORIQUES (candleSnapshot) pour la RECHERCHE, separes du forward L2 <1s (rectif Flo 23/07).
-start "" /b tools\boucle_collecteur.cmd backfill-candles tools\backfill_candles.py 14400
-REM ORCHESTRATEUR REEL : episodes+ledger+candles -> OOS purge (periode ET vault) + IC + ranking + SCALE/KILL.
+REM prix HISTORIQUES candles 5m SUR LES COINS DE VAULTS (5000 bougies = 416 h couvrent les 335 h des
+REM fills) : DEBLOQUE la couverture prix pour la RECHERCHE, separee du forward L2 <1s (rectif Flo 23/07).
+start "" /b tools\boucle_collecteur.cmd backfill-candles-vaults tools\backfill_candles_vaults.py 14400 --une-fois
+REM ORCHESTRATEUR REEL : episodes+ledger+candles -> audit couverture + OOS walk-forward temporel purge
+REM (generalisation vault en secondaire) + IC + ranking + SCALE/KILL. Forward candle ANTI-LOOKAHEAD.
 start "" /b tools\boucle_collecteur.cmd pipeline-reel tools\pipeline_copie_reel.py 1800 --une-fois
 
 REM === BBO RAPIDE HL/Binance (chantier ARB 23/07) : quotes SYNCHRONISEES pour trancher le lead-lag ===

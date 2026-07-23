@@ -20,9 +20,16 @@ from pathlib import Path
 RACINE = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(RACINE / "src"))
 
+import functools  # noqa: E402
+
 from hl_observer.collection import vault_fills_backfill as VB  # noqa: E402
-from hl_observer.experimental.copy_edge_forward import charger_prix_tape_candles, charger_prix_tape, geler  # noqa: E402
-from hl_observer.experimental.copy_edge_oos import mesurer_oos, simuler_paper, ranger_variantes, SEUILS_DEFAUT, HORIZONS_DEFAUT_MS  # noqa: E402
+from hl_observer.experimental.copy_edge_forward import (charger_prix_tape_candles, charger_prix_tape,  # noqa: E402
+                                                        rendement_forward, rendement_forward_candles, geler)
+from hl_observer.experimental.copy_edge_oos import mesurer_oos, simuler_paper, ranger_variantes, SEUILS_DEFAUT  # noqa: E402
+
+FILLS = Path("runtime") / "data" / "vault_fills.jsonl"
+HORIZONS_CANDLES_MS = (300_000.0, 900_000.0, 1_800_000.0, 3_600_000.0)   # 5/15/30/60 min (adaptés aux candles)
+DELAI_COPIE_MS = 60_000.0        # délai de détection/copie appliqué avant l'entrée (anti-lookahead)
 
 EPISODES = Path("runtime") / "data" / "vault_episodes.jsonl"
 SNAP = Path("runtime") / "data" / "vault_snapshots.jsonl"
@@ -59,21 +66,39 @@ def charger_entrees_alpha(root: Path) -> list[dict]:
     return out
 
 
-def construire(root: Path, *, intervalle: str = "1m", geler_si_valide: bool = True) -> dict:
+def _charger_fills(root: Path) -> list[dict]:
+    try:
+        return [json.loads(l) for l in (root / FILLS).read_text(encoding="utf-8", errors="ignore").splitlines() if l.strip()]
+    except OSError:
+        return []
+
+
+def construire(root: Path, *, geler_si_valide: bool = True) -> dict:
     entrees = charger_entrees_alpha(root)
-    tape = charger_prix_tape_candles(root, intervalle=intervalle)
-    source = "candles"
-    if not tape:                                                  # repli allMids (récent) si pas de candles
+    # RECHERCHE = candles 5m (couvre le train : 5000 bougies = 416 h) -> 1m -> repli allMids récent
+    tape, source = charger_prix_tape_candles(root, intervalle="5m"), "candles_5m"
+    if not tape:
+        tape, source = charger_prix_tape_candles(root, intervalle="1m"), "candles_1m"
+    if not tape:
         tape, source = charger_prix_tape(root), "allmids"
-    m = mesurer_oos(entrees, tape)
-    rap = {"maj_ms": int(time.time() * 1000), "source_prix": source, "n_entrees_alpha": len(entrees),
-           "n_coins_tape": len(tape), "mesure": m}
+    est_candles = source.startswith("candles")
+    # forward ANTI-LOOKAHEAD (entrée 1re bougie après signal+délai) pour candles ; tick pour allmids
+    fwd = functools.partial(rendement_forward_candles, delai_ms=DELAI_COPIE_MS) if est_candles else rendement_forward
+    horizons = HORIZONS_CANDLES_MS if est_candles else None
+    # AUDIT couverture/troncature RÉEL (par vault/coin), part des coins mesurables
+    audit = VB.auditer_couverture(_charger_fills(root), coins_tape=set(tape)) if entrees else {}
+    kw = {"forward_fn": fwd}
+    if horizons:
+        kw["horizons_ms"] = horizons
+    m = mesurer_oos(entrees, tape, **kw)
+    rap = {"maj_ms": int(time.time() * 1000), "source_prix": source, "delai_copie_ms": DELAI_COPIE_MS,
+           "n_entrees_alpha": len(entrees), "n_coins_tape": len(tape), "couverture": audit, "mesure": m}
     if m.get("statut") in ("PRELIMINAIRE", "VALIDATION"):
-        variantes = [{"seuil": s, "horizon_ms": h} for s in SEUILS_DEFAUT for h in HORIZONS_DEFAUT_MS]
-        rap["ranking_variantes"] = ranger_variantes(entrees, tape, variantes=variantes)[:8]
+        variantes = [{"seuil": s, "horizon_ms": h} for s in SEUILS_DEFAUT for h in (horizons or HORIZONS_CANDLES_MS)]
+        rap["ranking_variantes"] = ranger_variantes(entrees, tape, variantes=variantes, forward_fn=fwd)[:8]
         o = m["oos"]
         rap["simulation_paper_oos"] = simuler_paper(entrees, tape, horizon_ms=o["horizon_ms"], seuil=o["seuil"],
-                                                    notional_usd=150.0, cout_ar_bps=m.get("frais_bps", 12.0))
+                                                    notional_usd=150.0, cout_ar_bps=m.get("frais_bps", 12.0), forward_fn=fwd)
         if geler_si_valide and m.get("edge_valide_oos"):
             rap["gel"] = geler(root, horizon_ms=o["horizon_ms"], edge_brut_bps=o["brut_bps"],
                                edge_net_mesure_bps=o["net_bps"], source="pipeline_reel_oos")
@@ -83,12 +108,11 @@ def construire(root: Path, *, intervalle: str = "1m", geler_si_valide: bool = Tr
 def main(argv: list[str] | None = None) -> int:
     p = argparse.ArgumentParser(description="Orchestrateur pipeline réel de copie (lecture seule).")
     p.add_argument("--root", default=str(RACINE))
-    p.add_argument("--intervalle", default="1m")
     p.add_argument("--pas-de-gel", action="store_true")
     p.add_argument("--une-fois", action="store_true")
     a = p.parse_args(argv)
     root = Path(a.root)
-    rap = construire(root, intervalle=a.intervalle, geler_si_valide=not a.pas_de_gel)
+    rap = construire(root, geler_si_valide=not a.pas_de_gel)
     (root / RAPPORT).write_text(json.dumps(rap, ensure_ascii=False, indent=1), encoding="utf-8")
     m = rap["mesure"]
     print("[pipeline-reel] entrees_alpha=%d source_prix=%s statut=%s"

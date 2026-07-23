@@ -52,6 +52,18 @@ def test_scorer_et_retenir():
     assert VS.retenu(jeune) == (False, "TROP_JEUNE")
 
 
+def test_scoring_point_in_time_ignore_le_futur():
+    """Rectif Flo : à une date, le score n'utilise QUE les snapshots ≤ cette date (anti-fuite)."""
+    snaps = _snaps([100_000, 101_000, 500_000],                       # 3e snapshot = envolée FUTURE
+                   [{"coin": "BTC", "szi": 1.0, "entryPx": 50_000}])
+    # sans cutoff : le rendement inclut l'envolée future
+    sans = VS.scorer_vault(snaps, age_j=300, tvl_usd=2_000_000, coins_executables={"BTC"})
+    # avec cutoff à la 2e date (ts_ms=1000) : n'utilise que les 2 premiers snapshots
+    avec = VS.scorer_vault(snaps, age_j=300, tvl_usd=2_000_000, coins_executables={"BTC"}, date_max_ms=1000)
+    assert avec["n_snapshots"] == 2 and sans["n_snapshots"] == 3
+    assert avec["facteurs"]["pnl_net"] < sans["facteurs"]["pnl_net"]   # le futur (envolée) est exclu
+
+
 def test_classer_ordonne_par_composite():
     snaps_bon = _snaps([100_000, 103_000], [{"coin": "BTC", "szi": 1.0, "entryPx": 50_000}])
     snaps_plat = _snaps([100_000, 100_000], [{"coin": "BTC", "szi": 1.0, "entryPx": 50_000}])
