@@ -165,10 +165,13 @@ def backtest(root: str | Path = ".", *, seuil_choc_bps: float = SEUIL_CHOC_BPS,
     if not tape:
         return {"strategie": "lead_lag_shadow", "statut": "NEED_MORE_DATA", "detail": "tape vide"}
     controle = {c.upper() for c in coins_controle}
-    # 1) distribution des intervalles HL (tous coins) -> horizons observables
-    hl_all = [e for ev in tape.values() for e in ev["HL"]]
-    dist = distribution_intervalles(hl_all)
-    horizons = horizons_observables(dist, horizons_ms)
+    # 1) cadence HL PAR COIN (jamais poolée : l'interleaving de N coins donne un p50 illusoire ~0 ms
+    #    et ferait croire que 50/100 ms sont observables alors qu'HL n'emet ~qu'aux 100 ms PAR coin).
+    p50s = [d["p50_ms"] for ev in tape.values() if len(ev["HL"]) >= 5
+            and (d := distribution_intervalles(ev["HL"]))["p50_ms"]]
+    med_p50 = st.median(p50s) if p50s else None
+    dist = {"p50_ms_par_coin_median": round(med_p50, 2) if med_p50 else None, "n_coins_mesures": len(p50s)}
+    horizons = [h for h in horizons_ms if med_p50 and h >= 2.0 * med_p50]
     if not horizons:
         return {"strategie": "lead_lag_shadow", "statut": "NEED_MORE_DATA",
                 "intervalles_hl": dist, "detail": "aucun horizon observable (HL trop lent / peu de data)"}

@@ -29,6 +29,9 @@ MARQUEUR = Path("runtime") / "data" / "lanceur_session_marqueur.txt"
 AGE_MAX_MS = 750.0                 # au-delà (horloge MONOTONE), quote périmée -> rejet
 FENETRE_SYNCHRO_MS = 250.0         # HL et Binance frais à moins de ça l'un de l'autre (monotone)
 GAP_MS = 5000.0                    # aucun message d'une venue pendant ça = TROU de données noté
+#: 🔴 garde-fou DISQUE : la tape brute grossit ~1 Go/h (chaque message BBO). Au-dela de ce plafond on
+#: ROTE (rename -> .prev) : bornee a 2×, garde le recent. Le bot a deja crashe une fois sur disque plein.
+MAX_TAPE_OCTETS = 500 * 1024 * 1024
 
 _EXCEPTIONS = {"PEPE": "1000PEPEUSDT", "SHIB": "1000SHIBUSDT", "BONK": "1000BONKUSDT",
                "FLOKI": "1000FLOKIUSDT", "LUNC": "1000LUNCUSDT", "SATS": "1000SATSUSDT",
@@ -248,6 +251,10 @@ async def _boucle(root: Path, coins: list[str]) -> None:  # pragma: no cover (I/
             if tape:                                           # flush de la TAPE brute (lead-lag fin)
                 CF.append_jsonl(root / TAPE, list(tape))
                 tape.clear()
+                p_tape = root / TAPE                           # garde-fou disque : rotation bornee
+                if p_tape.exists() and p_tape.stat().st_size > MAX_TAPE_OCTETS:
+                    import os as _os
+                    _os.replace(p_tape, p_tape.with_suffix(".jsonl.prev"))
             duree_s = (now_ns - stats["debut_mono_ns"]) / 1e9
             hb = {"ts": time.time(), "duree_continue_s": round(duree_s, 1), **stats,
                   "taux_rejet": round(stats["rejets"] / max(1, stats["ecrits"] + stats["rejets"]), 4)}
