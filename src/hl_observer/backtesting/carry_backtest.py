@@ -54,11 +54,16 @@ class Config:
     max_slots: int = 12
     part_max_par_coin: float = PART_MAX_PAR_COIN
     capital_usd: float = 1000.0
+    #: 🧪 EXP#1 (23/07) — seuil d'OUVERTURE sur le funding. 0.0 = BASELINE (production, aucun
+    #: changement). > 0 = n'ouvre que si funding ≥ seuil : teste si concentrer le capital sur le
+    #: funding au-dessus du plancher améliore le net. Porte par LIGNE (aucun lookahead : ne lit que
+    #: le funding de SA passe). Rollback = remettre 0.0.
+    funding_min_bps_h: float = 0.0
 
     def nom(self) -> str:
-        return ("exp%.3g/be%.0f/sec%.2g/slots%d/part%.0f%%"
+        return ("exp%.3g/be%.0f/sec%.2g/slots%d/part%.0f%%/fmin%.3g"
                 % (self.exposant_allocation, self.max_break_even_h, self.securite_liquidation,
-                   self.max_slots, 100 * self.part_max_par_coin))
+                   self.max_slots, 100 * self.part_max_par_coin, self.funding_min_bps_h))
 
 
 @dataclass
@@ -132,6 +137,9 @@ def redecider(ligne: dict, cfg: Config) -> tuple[dict, dict] | None:
     funding = _f(ligne, "funding_bps_h")
     if funding is None:
         funding = _f(ligne, "funding_snapshot_bps_h")
+    # 🧪 EXP#1 — porte de funding (par ligne, aucun lookahead) : sous le seuil testé, on n'ouvre pas.
+    if funding is not None and funding < float(cfg.funding_min_bps_h):
+        return None
     base = _f(ligne, "base_bps")
     liq = _f(ligne, "liquidite_spot_usd")
     lmax = _f(ligne, "levier_max")

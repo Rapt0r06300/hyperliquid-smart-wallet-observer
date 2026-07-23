@@ -75,6 +75,16 @@ def test_le_plancher_de_break_even_est_un_VRAI_parametre():
     assert redecider(ligne, Config(max_break_even_h=500.0)) is not None
 
 
+def test_EXP1_la_porte_de_funding_gate_les_ouvertures_sous_le_seuil():
+    """🧪 EXP#1 (23/07) — le seuil d'ouverture `funding_min_bps_h` refuse un funding sous le seuil,
+    SANS lookahead (ne lit que le funding de SA passe). `funding_min=0.0` = BASELINE inchangé."""
+    ligne = {"coin": "X", "funding_bps_h": 0.45, "base_bps": 5.0, "liquidite_spot_usd": 4e5,
+             "levier_max": 10.0, "pire_hausse_observee": 0.10, "perp_px": 100.0}
+    assert redecider(ligne, Config(max_break_even_h=500.0)) is not None            # baseline : ouvre
+    assert redecider(ligne, Config(max_break_even_h=500.0, funding_min_bps_h=0.30)) is not None  # 0.45 ≥ 0.30
+    assert redecider(ligne, Config(max_break_even_h=500.0, funding_min_bps_h=0.50)) is None       # 0.45 < 0.50 -> gaté
+
+
 @pytest.mark.parametrize("manquant", ["funding_bps_h", "base_bps", "liquidite_spot_usd",
                                       "levier_max", "pire_hausse_observee", "coin"])
 def test_une_donnee_manquante_rend_None_jamais_une_valeur_comblee(manquant):
