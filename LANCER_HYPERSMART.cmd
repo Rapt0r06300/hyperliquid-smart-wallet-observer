@@ -46,6 +46,10 @@ REM (cross-venue survivants geles / lead-lag / copy-vaults) SANS attendre la pre
 REM et limites ISOLES du livre live (experimental_paper_ledger.jsonl). Admission = frais + executable +
 REM edge net > 0 apres couts. L'allocateur strict de promotion et le no-real-trade restent intacts.
 set "HYPERSMART_EXPERIMENTAL_PAPER=1"
+REM 23/07 (rectif Flo) — COHORTE EXPLORATORY_PAPER : apprend MAINTENANT sans attendre l'OOS complet.
+REM Ouvre sur mouvement LIVE d'un vault retenu + edge PRELIMINAIRE positif (copy_prelim_edge.json) +
+REM L2<1s + VWAP + couts complets + sortie definie. Budget $300, max 3, pertes plafonnees. Isole. 0 reel.
+set "HYPERSMART_EXPLORATORY_PAPER=1"
 REM 23/07 (v2) — CARRY FUNDING SUPPRIME DU SCOPE (rectif Flo) : la v1 cross-venue (funding + hold 168 h)
 REM est en QUARANTAINE (fichiers experimental_paper_positions/ledger sans suffixe, plus lus). Le scope
 REM ACTIF est experimental_paper_V2_* : cross-venue COURT TERME (dislocation de prix executable, entree/
@@ -411,6 +415,8 @@ REM ---- VOIE EXPERIMENTAL_PAPER (23/07) : ouvre/gere/sort de VRAIES positions S
 REM (cross-venue geles + lead-lag + copy-vaults) des qu'un signal est frais + executable + edge net > 0.
 REM Ledger/budget/limites ISOLES du livre live. Gate par HYPERSMART_EXPERIMENTAL_PAPER=1. 0 ordre reel.
 start "" /b tools\boucle_collecteur.cmd experimental-paper tools\experimental_paper_tick.py 60 --une-fois
+REM COHORTE EXPLORATOIRE (apprend maintenant) : mouvements live des vaults retenus + edge preliminaire.
+start "" /b tools\boucle_collecteur.cmd exploratory-paper tools\exploratory_paper_tick.py 60 --une-fois
 
 REM ---- COPY-WHITELIST (#185, 20/07) : nourrit la porte copy (leaders au markout prouve). ----
 REM La whitelist se PERIME a 24 h (porte deny-by-default) -> regeneree toutes les 6 h.

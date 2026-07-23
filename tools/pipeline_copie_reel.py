@@ -25,9 +25,11 @@ import functools  # noqa: E402
 from hl_observer.collection import vault_fills_backfill as VB  # noqa: E402
 from hl_observer.experimental.copy_edge_forward import (charger_prix_tape_candles, charger_prix_tape,  # noqa: E402
                                                         rendement_forward, rendement_forward_candles, geler)
-from hl_observer.experimental.copy_edge_oos import mesurer_oos, simuler_paper, ranger_variantes, SEUILS_DEFAUT  # noqa: E402
+from hl_observer.experimental.copy_edge_oos import (mesurer_oos, simuler_paper, ranger_variantes,  # noqa: E402
+                                                    construire_table_prelim, SEUILS_DEFAUT)
 
 FILLS = Path("runtime") / "data" / "vault_fills.jsonl"
+PRELIM = Path("runtime") / "data" / "copy_prelim_edge.json"
 HORIZONS_CANDLES_MS = (300_000.0, 900_000.0, 1_800_000.0, 3_600_000.0)   # 5/15/30/60 min (adaptés aux candles)
 DELAI_COPIE_MS = 60_000.0        # délai de détection/copie appliqué avant l'entrée (anti-lookahead)
 
@@ -91,8 +93,15 @@ def construire(root: Path, *, geler_si_valide: bool = True) -> dict:
     if horizons:
         kw["horizons_ms"] = horizons
     m = mesurer_oos(entrees, tape, **kw)
+    # TABLE PRÉLIMINAIRE par coin (edge net POSITIF, descriptif) → source du gate de la cohorte EXPLORATOIRE
+    table_prelim = construire_table_prelim(entrees, tape, forward_fn=fwd,
+                                           horizons_ms=(horizons or HORIZONS_CANDLES_MS))
+    (root / PRELIM).write_text(json.dumps({"maj_ms": int(time.time() * 1000), "source_prix": source,
+                                           "n_coins_positifs": len(table_prelim), "table": table_prelim},
+                                          ensure_ascii=False, indent=1), encoding="utf-8")
     rap = {"maj_ms": int(time.time() * 1000), "source_prix": source, "delai_copie_ms": DELAI_COPIE_MS,
-           "n_entrees_alpha": len(entrees), "n_coins_tape": len(tape), "couverture": audit, "mesure": m}
+           "n_entrees_alpha": len(entrees), "n_coins_tape": len(tape), "couverture": audit,
+           "n_coins_prelim_positifs": len(table_prelim), "mesure": m}
     if m.get("statut") in ("PRELIMINAIRE", "VALIDATION"):
         variantes = [{"seuil": s, "horizon_ms": h} for s in SEUILS_DEFAUT for h in (horizons or HORIZONS_CANDLES_MS)]
         rap["ranking_variantes"] = ranger_variantes(entrees, tape, variantes=variantes, forward_fn=fwd)[:8]

@@ -334,16 +334,21 @@ def _vaults_retenus(root: Path) -> set[str]:
     return {str(a) for a in (d.get("retenus") or [])}
 
 
-def signaux_vaults(root: str | Path = ".", *, now_ms: float | None = None, lecteur_l2=None) -> tuple[list[Signal], list[dict]]:
+def signaux_vaults(root: str | Path = ".", *, now_ms: float | None = None, lecteur_l2=None,
+                   edge_par_coin: dict | None = None, seuil_move: float = SEUIL_MOVE_FRAC_NAV) -> tuple[list[Signal], list[dict]]:
     """Copy-Vaults (rectif Flo 23/07) : détecte le CHANGEMENT D'EXPO PAR COIN (Δszi) d'un vault RETENU
     par le score 8-facteurs (DENY-BY-DEFAULT), ABONNE le coin au carnet, puis N'ADMET QUE si (a) un L2 HL
     FRAIS < 1 s existe sur le coin (lecture on-demand `lecteur_l2` ou BBO WS ; profondeur/VWAP/slippage +
-    coût de sortie réels) ET (b) un edge de copie a été MESURÉ et gelé (jamais inventé). Sinon NO_TRADE."""
+    coût de sortie réels) ET (b) un edge de copie POSITIF sur ce coin. Source de l'edge :
+      • STRICT (allocateur) : `edge_par_coin=None` → config MESURÉE et GELÉE (OOS validé) ;
+      • EXPLORATOIRE (apprendre) : `edge_par_coin={coin: {edge_brut_bps, horizon_ms}}` → edge PRÉLIMINAIRE
+        positif par coin (descriptif, PAS OOS). Jamais inventé, jamais forcé. Sinon NO_TRADE."""
     from hl_observer.experimental.carry_deux_jambes import frais_venues, LATENCE_MS, LATENCE_COUT_BPS
     from hl_observer.experimental.copy_edge_forward import config_gelee
     root = Path(root)
     now = float(now_ms if now_ms is not None else time.time() * 1000)
     refus: list[dict] = []
+    exploratoire = edge_par_coin is not None
     retenus = _vaults_retenus(root)                                # DENY-BY-DEFAULT : vide = on ne copie rien
     try:
         lignes = (root / VAULTS_SNAP_RELPATH).read_text(encoding="utf-8", errors="ignore").splitlines()
@@ -360,7 +365,7 @@ def signaux_vaults(root: str | Path = ".", *, now_ms: float | None = None, lecte
             par_vault.setdefault(a, []).append(d)
     bbo = _snapshots_bbo(root)                                     # flux WS synchro (<1 s) — L2 d'admission
     carnet = _carnet_l2_frais(root, now_ms=now)                    # carnet <1 s (repli)
-    cfg = config_gelee(root)                                       # edge de copie MESURÉ + gelé (sinon NO_TRADE)
+    cfg_global = None if exploratoire else config_gelee(root)      # STRICT : edge MESURÉ + gelé (sinon NO_TRADE)
     fhl, _fbin, _src = frais_venues(root)
     sigs: list[Signal] = []
     coins_bouges: list[str] = []
@@ -382,15 +387,22 @@ def signaux_vaults(root: str | Path = ".", *, now_ms: float | None = None, lecte
             if abs(dszi) * px_ref > abs(best_dnot):
                 best_coin, best_dnot, best_dszi = c, dszi * px_ref, dszi
         move_frac = (abs(best_dnot) / nav) if nav else 0.0
-        if not best_coin or move_frac < SEUIL_MOVE_FRAC_NAV:
+        if not best_coin or move_frac < seuil_move:
             refus.append({"moteur": "copy_vault", "vault": adr[:10], "motif": "CHANGEMENT_TROP_FAIBLE",
                           "coin": best_coin, "move_frac": round(move_frac, 3)}); continue
         coins_bouges.append(best_coin)                             # → abonnement dynamique du carnet
         sens = 1 if best_dszi > 0 else -1
-        # (b) edge MESURÉ obligatoire : sans config gelée validée, on n'ouvre RIEN (pas d'edge inventé)
-        if not (cfg and cfg.get("gele")):
-            refus.append({"moteur": "copy_vault", "vault": adr[:10], "motif": "EDGE_NON_MESURE",
-                          "coin": best_coin, "move_frac": round(move_frac, 3)}); continue
+        # (b) edge POSITIF obligatoire (jamais inventé) : STRICT = gelé OOS ; EXPLORATOIRE = préliminaire par coin
+        if exploratoire:
+            cfg = edge_par_coin.get(best_coin)
+            if not cfg:
+                refus.append({"moteur": "copy_vault", "vault": adr[:10], "motif": "EDGE_PRELIM_ABSENT",
+                              "coin": best_coin, "move_frac": round(move_frac, 3)}); continue
+        else:
+            cfg = cfg_global
+            if not (cfg and cfg.get("gele")):
+                refus.append({"moteur": "copy_vault", "vault": adr[:10], "motif": "EDGE_NON_MESURE",
+                              "coin": best_coin, "move_frac": round(move_frac, 3)}); continue
         # (a) L2 HL frais < 1 s obligatoire (on-demand ou BBO WS) : prix + profondeur + coût de sortie réels
         l2 = _l2_pour_coin(best_coin, lecteur_l2=lecteur_l2, bbo=bbo, carnet=carnet, now_ms=now)
         if not l2:

@@ -222,5 +222,38 @@ def ranger_variantes(events: list[dict], tape: dict[str, list[tuple[int, float]]
     return out
 
 
-__all__ = ["mesurer_oos", "simuler_paper", "ranger_variantes", "SEUILS_DEFAUT", "HORIZONS_DEFAUT_MS",
-           "SEUIL_VALIDATION_N"]
+def construire_table_prelim(events: list[dict], tape: dict[str, list[tuple[int, float]]], *,
+                            horizons_ms: Iterable[float] = HORIZONS_DEFAUT_MS, frais_bps: float = 12.0,
+                            min_events: int = 20, forward_fn=FORWARD_DEFAUT) -> dict[str, dict]:
+    """Table d'edge PRÉLIMINAIRE PAR COIN (descriptif, PAS une validation OOS) : pour chaque coin couvert,
+    le meilleur horizon dont le rendement forward NET (anti-lookahead, coûts inclus) est POSITIF sur assez
+    d'entrées. C'est la source du gate de la cohorte EXPLORATORY (ouvre pour APPRENDRE, sans SCALE). Un
+    coin sans horizon net-positif n'apparaît pas → pas d'ouverture (jamais de trade forcé)."""
+    par_coin: dict[str, list[dict]] = {}
+    for e in events:
+        par_coin.setdefault(e["coin"], []).append(e)
+    table: dict[str, dict] = {}
+    for coin, evs in par_coin.items():
+        serie = tape.get(coin)
+        if not serie:
+            continue
+        best = None
+        for h in horizons_ms:
+            nets = []
+            for e in evs:
+                r = forward_fn(e, serie, h)
+                if r is not None:
+                    nets.append(r - frais_bps)
+            if len(nets) >= min_events:
+                net = _moy(nets)
+                ic_bas, ic_haut = _bootstrap_ic(nets)
+                if net > 0 and (best is None or net > best["net_bps"]):
+                    best = {"horizon_ms": h, "net_bps": round(net, 3), "brut_bps": round(net + frais_bps, 3),
+                            "ic95_bas_bps": ic_bas, "ic95_haut_bps": ic_haut, "n": len(nets)}
+        if best:
+            table[coin] = best
+    return table
+
+
+__all__ = ["mesurer_oos", "simuler_paper", "ranger_variantes", "construire_table_prelim",
+           "SEUILS_DEFAUT", "HORIZONS_DEFAUT_MS", "SEUIL_VALIDATION_N"]
