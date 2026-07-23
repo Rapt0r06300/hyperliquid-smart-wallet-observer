@@ -52,6 +52,11 @@ def test_parser_aggtrade_detecte_le_sens_agressif():
                                                 "q": "1.5", "m": True, "T": 42}})["side"] == "SELL"
     assert m.parser_aggtrade_binance({"data": {"e": "aggTrade", "s": "ETHUSDT", "p": "3000", "q": "1",
                                                 "m": False, "T": 42}})["side"] == "BUY"
+    # 🔴 23/07 : @aggTrade ne pousse RIEN sur fstream ici (prouvé au navigateur) -> on lit @trade
+    # (e="trade", meme structure p/q/m/T/s). Le parser doit accepter les deux.
+    t = m.parser_aggtrade_binance({"data": {"e": "trade", "s": "BTCUSDT", "p": "65138.4", "q": "0.5",
+                                            "m": True, "T": 7}})
+    assert t["side"] == "SELL" and t["symbol"] == "BTCUSDT" and t["px"] == 65138.4
     assert m.parser_aggtrade_binance({"data": {"e": "bookTicker"}}) is None    # pas un trade
 
 

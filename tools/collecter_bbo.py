@@ -96,10 +96,13 @@ def parser_bookticker_binance(msg: Any) -> dict | None:
 
 
 def parser_aggtrade_binance(msg: Any) -> dict | None:
-    """WS Binance `<sym>@aggTrade` -> {symbol, px, sz, side, ts_ex}. Le CHOC exécutable (Flo : détecter
-    le choc sur les TRADES, pas le mid). `m`=True -> l'agressif est le VENDEUR (l'acheteur est maker)."""
+    """WS Binance `<sym>@trade` (ou `@aggTrade`) -> {symbol, px, sz, side, ts_ex}. Le CHOC exécutable
+    (Flo : détecter le choc sur les TRADES, pas le mid). `m`=True -> l'agressif est le VENDEUR.
+    🔴 23/07 PROUVÉ AU NAVIGATEUR (même réseau que le bot) : `fstream …@aggTrade` ouvre mais ne pousse
+    ZÉRO frame (0 vs 9827 bookTicker en 6 s), alors que `@trade` en pousse 548/6 s. On accepte donc les
+    DEUX `e` : `trade` (utilisé, trades individuels, plus granulaires) et `aggTrade` (si jamais rétabli)."""
     d = msg.get("data") if isinstance(msg, dict) and "data" in msg else msg
-    if not isinstance(d, dict) or d.get("e") != "aggTrade" or "p" not in d:
+    if not isinstance(d, dict) or d.get("e") not in ("trade", "aggTrade") or "p" not in d:
         return None
     px = _f(d.get("p"))
     if px is None:
@@ -216,7 +219,7 @@ async def _boucle(root: Path, coins: list[str]) -> None:  # pragma: no cover (I/
     #: chaque BBO reçu ; `lead_lag_shadow` reconstruit ensuite la réaction HL à n'importe quel horizon.
     tape: list[dict] = []
     stats = {"ecrits": 0, "rejets": 0, "reconnexions_hl": 0, "reconnexions_bin": 0, "trous": 0,
-             "frames_bookticker": 0, "frames_aggtrade": 0, "shards_scelles": 0,
+             "frames_bookticker": 0, "frames_trades": 0, "shards_scelles": 0,
              "dernier_hl_ns": 0, "dernier_bin_ns": 0, "debut_mono_ns": time.monotonic_ns()}
     marqueur0 = MARQUEUR.read_text(encoding="utf-8").strip() if MARQUEUR.exists() else ""
 
@@ -269,8 +272,9 @@ async def _boucle(root: Path, coins: list[str]) -> None:  # pragma: no cover (I/
                 await asyncio.sleep(1.0)
 
     async def binance_ag():
-        # aggTrade = le CHOC exécutable (jamais le mid, qui reste un simple CONTRÔLE dans lead_lag).
-        streams = "/".join("%s@aggTrade" % s.lower() for s in sym.values())
+        # TRADES = le CHOC exécutable (jamais le mid, qui reste un simple CONTRÔLE dans lead_lag).
+        # `@trade` et NON `@aggTrade` : prouvé au navigateur que fstream ...@aggTrade ne pousse rien ici.
+        streams = "/".join("%s@trade" % s.lower() for s in sym.values())
         while True:
             try:
                 async with websockets.connect("%s?streams=%s" % (WS_BINANCE, streams), ping_interval=20) as ws:
@@ -278,7 +282,7 @@ async def _boucle(root: Path, coins: list[str]) -> None:  # pragma: no cover (I/
                         r = time.monotonic_ns()
                         t = parser_aggtrade_binance(json.loads(raw))
                         if t and t["symbol"] in inv:
-                            stats["frames_aggtrade"] += 1
+                            stats["frames_trades"] += 1
                             tape.append({"venue": "BIN_TRADE", "coin": inv[t["symbol"]], "recu_ns": r,
                                          "px": t["px"], "sz": t["sz"], "side": t["side"],
                                          "ts_wall_ms": time.time() * 1000, "ts_ex": t["ts_ex"]})
