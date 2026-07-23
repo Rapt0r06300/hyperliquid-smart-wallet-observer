@@ -1,0 +1,79 @@
+"""COLLECTEUR BBO RAPIDE HL↔Binance (chantier ARB, 23/07). On prouve le CŒUR qui a manqué au détecteur
+d'arb invalide : mapping EXACT des contrats (refus si non mappable), parsers, rejet des quotes PÉRIMÉES,
+synchronisation, et mesure de lead-lag. Aucun réseau réel : la boucle WS n'est pas testée ici (I/O)."""
+from __future__ import annotations
+
+import importlib.util
+from pathlib import Path
+
+RACINE = Path(__file__).resolve().parents[1]
+
+
+def _mod():
+    spec = importlib.util.spec_from_file_location("bbo", RACINE / "tools" / "collecter_bbo.py")
+    m = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(m)
+    return m
+
+
+def test_mapping_exact_refuse_le_non_mappable():
+    m = _mod()
+    assert m.symbole_binance("ETH") == "ETHUSDT"
+    assert m.symbole_binance("kPEPE") == "1000PEPEUSDT"       # k-token -> 1000x Binance
+    assert m.symbole_binance("PEPE") == "1000PEPEUSDT"        # exception connue
+    assert m.symbole_binance("HYPE") is None                  # pas sur Binance perp -> REFUS
+    assert m.symbole_binance("") is None
+
+
+def test_parser_bbo_hl():
+    m = _mod()
+    msg = {"channel": "bbo", "data": {"coin": "ETH", "time": 111,
+           "bbo": [{"px": "3000.0", "sz": "5"}, {"px": "3000.5", "sz": "4"}]}}
+    r = m.parser_bbo_hl(msg)
+    assert r["coin"] == "ETH" and r["bid"] == 3000.0 and r["ask"] == 3000.5 and r["ts_ex"] == 111
+    assert m.parser_bbo_hl({"channel": "trades"}) is None     # autre canal -> None
+
+
+def test_parser_bookticker_binance():
+    m = _mod()
+    msg = {"data": {"s": "ETHUSDT", "b": "3000.1", "a": "3000.4", "B": "10", "A": "9", "T": 222}}
+    r = m.parser_bookticker_binance(msg)
+    assert r["symbol"] == "ETHUSDT" and r["bid"] == 3000.1 and r["ask"] == 3000.4 and r["ts_ex"] == 222
+    assert m.parser_bookticker_binance({"x": 1}) is None
+
+
+def test_magasin_rejette_les_quotes_PERIMEES_et_non_synchrones():
+    m = _mod()
+    mag = m.MagasinBBO()
+    hl = {"coin": "ETH", "bid": 3000.0, "ask": 3000.5, "bid_sz": 5, "ask_sz": 4, "ts_ex": 1}
+    bn = {"symbol": "ETHUSDT", "bid": 3000.1, "ask": 3000.4, "bid_sz": 5, "ask_sz": 4, "ts_ex": 2}
+    mag.maj_hl(hl, now_ms=1000.0)
+    mag.maj_binance(bn, "ETH", now_ms=1000.0)
+    assert mag.snapshot("ETH", now_ms=1000.0) is not None      # frais + synchrones -> OK
+    assert mag.snapshot("ETH", now_ms=2000.0) is None          # âge 1000 ms > 750 -> PÉRIMÉ, rejeté
+    mag.maj_binance(bn, "ETH", now_ms=1400.0)                   # Binance 400 ms après HL
+    assert mag.snapshot("ETH", now_ms=1400.0) is None          # |Δ ts_local| 400 > 250 -> non synchrone
+    assert mag.snapshot("SOL", now_ms=1000.0) is None          # une jambe manque
+
+
+def test_snapshot_porte_ecart_ages_et_timestamps():
+    m = _mod()
+    mag = m.MagasinBBO()
+    mag.maj_hl({"coin": "ETH", "bid": 3001, "ask": 3002, "bid_sz": 5, "ask_sz": 4, "ts_ex": 10}, now_ms=1000.0)
+    mag.maj_binance({"symbol": "ETHUSDT", "bid": 3000, "ask": 3001, "bid_sz": 5, "ask_sz": 4, "ts_ex": 11},
+                    "ETH", now_ms=1000.0)
+    s = mag.snapshot("ETH", now_ms=1000.0)
+    assert s["ecart_mid_bps"] > 0 and s["ts_ex_hl"] == 10 and s["ts_ex_bin"] == 11
+    assert "age_hl_ms" in s and "age_bin_ms" in s and s["real_execution"] is False
+
+
+def test_mesurer_lead_lag_detecte_que_binance_MENE():
+    m = _mod()
+    # HL suit Binance avec 2 pas (200 ms) de retard : hl_mid[i] = bin_mid[i-2]
+    bin_mid = [100.0 + (i % 11) * 0.1 for i in range(60)]
+    serie = []
+    for i in range(2, 60):
+        serie.append((i * 100.0, bin_mid[i - 2], bin_mid[i]))   # (ts, hl_mid=bin décalé, bin_mid)
+    c_lead = m.mesurer_lead_lag(serie, lag_ms=200.0)            # au bon lag -> forte corrélation
+    assert c_lead is not None and c_lead > 0.5
+    assert m.mesurer_lead_lag(serie[:5], lag_ms=200.0) is None  # trop peu de points -> None honnête

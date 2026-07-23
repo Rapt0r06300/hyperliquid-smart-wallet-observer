@@ -361,6 +361,14 @@ REM (vaults DIRECTIONNELS ; les vaults de MARKET-MAKING type HLP sont exclus). V
 REM ⚠️ 2 endpoints PUBLICS en lecture (clearinghouseState + vaultDetails). 0 cle, 0 ordre, 0 signature.
 start "" /b tools\boucle_collecteur.cmd vault-collector tools\collecter_vaults.py 300 --une-fois
 
+REM === BBO RAPIDE HL/Binance (chantier ARB 23/07) : quotes SYNCHRONISEES pour trancher le lead-lag ===
+REM Le detecteur d'arb actuel est INVALIDE (base persistante +17-30bps = mapping/quote perimee).
+REM Ce collecteur WS PERSISTANT (HL bbo + Binance bookTicker) donne des quotes MAPPEES exactement,
+REM FRAICHES (rejet des perimees), HORODATEES (exchange+local) -> teste proprement le lead-lag
+REM Binance->HL en shadow. Run borne 300s -> boucle_collecteur relance + garde anti-orphelin.
+REM ⚠️ 2 flux PUBLICS en lecture. 0 cle, 0 ordre, 0 signature. Necessite le module python `websockets`.
+start "" /b tools\boucle_collecteur.cmd bbo-collector tools\collecter_bbo.py 2 --duree 300
+
 REM ---- COPY-WHITELIST (#185, 20/07) : nourrit la porte copy (leaders au markout prouve). ----
 REM La whitelist se PERIME a 24 h (porte deny-by-default) -> regeneree toutes les 6 h.
 REM Sans donnees de fills forward, elle ecrit une liste VIDE = copy verrouille (honnete).

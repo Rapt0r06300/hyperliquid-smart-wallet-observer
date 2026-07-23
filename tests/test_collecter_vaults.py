@@ -98,3 +98,37 @@ def test_reseau_coupe_ne_tue_pas_la_passe(tmp_path, monkeypatch):
 def test_resume_honnete_quand_vide(tmp_path):
     m = _mod()
     assert m.resume(tmp_path)["verdict"] == "AUCUN_VAULT_SUIVI_OU_COLLECTE"
+
+
+def _snaps(net, *, jours=4.0, dd=-10.0, n=15):
+    pas = jours * 86_400_000.0 / n
+    return [{"nav_usd": 10000.0, "expo_brute_usd": 20000.0, "expo_nette_usd": net,
+             "levier": 2.0, "drawdown_pct": dd, "ts_ms": int(i * pas)} for i in range(n)]
+
+
+def test_classer_retient_un_DIRECTIONNEL_sain():
+    m = _mod()
+    r = m.classer_vault(_snaps(15000.0))                       # net/gross = 0.75 -> directionnel
+    assert r["verdict"] == "RETENU_DIRECTIONNEL" and r["directionnalite"] == 0.75
+
+
+def test_classer_ECARTE_un_market_maker_net_proche_de_zero():
+    m = _mod()
+    assert m.classer_vault(_snaps(300.0))["verdict"] == "ECARTE_MARKET_MAKING"   # net/gross 0.015
+
+
+def test_classer_ECARTE_un_vault_trop_jeune():
+    m = _mod()
+    assert m.classer_vault(_snaps(15000.0, jours=1.0))["verdict"] == "ECARTE_TROP_JEUNE"
+
+
+def test_classer_ne_se_fie_ni_au_nom_ni_a_l_apr_et_exige_de_la_donnee():
+    m = _mod()
+    assert m.classer_vault(_snaps(15000.0, n=5))["verdict"] == "INSUFFISANT"      # < 10 snapshots
+
+
+def test_import_assiste_fusionne_et_exclut_les_MM(tmp_path):
+    m = _mod()
+    hlp = next(iter(m.VAULTS_EXCLUS))
+    assert m.importer_vaults(tmp_path, ["0xAAA", hlp, "0xaaa", "0xBBB"]) == 2   # dédup + HLP exclu
+    assert set(m.charger_vaults_suivis(tmp_path)) == {"0xaaa", "0xbbb"}

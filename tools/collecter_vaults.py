@@ -218,6 +218,53 @@ def resume(root: str | Path = ".") -> dict[str, Any]:
             "verdict": ("PRET_POUR_BACKTEST_REPLICATION" if jours >= 3 else "INSUFFISANT_LAISSER_TOURNER")}
 
 
+def importer_vaults(root: str | Path, adresses: list[str]) -> int:
+    """Import ASSISTÉ : fusionne des adresses dans `vaults_suivis.json` (dédup, MM exclus). Rend le
+    nombre total suivi. Pour ne pas rester vide en attendant — Flo colle une liste, on l'ingère."""
+    p = Path(root) / CONFIG
+    existant = charger_vaults_suivis(root)
+    vus = dict.fromkeys(existant)
+    for a in adresses or ():
+        a = str(a).lower().strip()
+        if a.startswith("0x") and a not in VAULTS_EXCLUS:
+            vus.setdefault(a)
+    CF.ecrire_atomique(p, json.dumps({"vaults": list(vus)}, ensure_ascii=False, indent=1))
+    return len(vus)
+
+
+def classer_vault(snapshots: list[dict]) -> dict[str, Any]:
+    """Classe un vault sur son COMPORTEMENT RÉEL (jamais son nom ni son APR affiché) : ancienneté
+    observée, drawdown, stabilité de NAV, exposition, directionnalité (un MM garde le net ≈ 0). Un
+    vault de MM ou trop instable/tiré est ÉCARTÉ — on ne réplique QUE du directionnel sain."""
+    import statistics as st
+    n = len(snapshots)
+    if n < 10:
+        return {"verdict": "INSUFFISANT", "n": n}
+    navs = [float(s.get("nav_usd") or 0.0) for s in snapshots]
+    ts = [int(s.get("ts_ms") or 0) for s in snapshots]
+    gross = [float(s.get("expo_brute_usd") or 0.0) for s in snapshots]
+    net = [abs(float(s.get("expo_nette_usd") or 0.0)) for s in snapshots]
+    age_j = (max(ts) - min(ts)) / 86_400_000.0
+    dd = min((float(s.get("drawdown_pct") or 0.0) for s in snapshots), default=0.0)
+    nav_moy = st.mean(navs) or 1e-9
+    stabilite = st.pstdev(navs) / nav_moy                       # coeff de variation NAV (bas = stable)
+    gross_moy = st.mean(gross) or 1e-9
+    directionnalite = st.mean(net) / gross_moy                  # ~0 = MM ; élevé = directionnel
+    lev_moy = st.mean(float(s.get("levier") or 0.0) for s in snapshots)
+    if directionnalite < 0.25:
+        verdict = "ECARTE_MARKET_MAKING"                        # net ≈ 0 -> MM, pas copiable en taker
+    elif dd < -50.0:
+        verdict = "ECARTE_DRAWDOWN"
+    elif age_j < 3.0:
+        verdict = "ECARTE_TROP_JEUNE"                           # pas assez de track record OBSERVÉ
+    else:
+        verdict = "RETENU_DIRECTIONNEL"
+    return {"verdict": verdict, "n": n, "age_jours": round(age_j, 2), "drawdown_pct": round(dd, 2),
+            "stabilite_nav": round(stabilite, 4), "directionnalite": round(directionnalite, 3),
+            "levier_moyen": round(lev_moy, 2), "nav_moyenne_usd": round(nav_moy, 2),
+            "note": "classé sur le comportement mesuré, PAS le nom ni l'APR affiché"}
+
+
 def main(argv: list[str] | None = None) -> int:
     p = argparse.ArgumentParser(description="Collecteur de vaults HL (lecture seule).")
     p.add_argument("--root", default=".")
