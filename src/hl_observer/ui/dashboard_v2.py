@@ -692,8 +692,9 @@ function loadCarry(){fetch('/v2/carry').then(function(r){return r.json()}).then(
   // HORS carry (l'arbitrage du même ledger reste) ; le carry retiré reste au ledger (audit) et s'affiche
   // « archivé », à part. Repli : si le champ live manque (vieux moteur), on retombe sur l'ancien total.
   var realLive=(d.realized_net_pnl_usdc_live!=null)?Number(d.realized_net_pnl_usdc_live):realTout;
-  window._carryPos=(d.positions_ouvertes||0);window._carryReal=realTout;window._carryRealSess=realSess;
-  window._carryRetireArchive=realTout-realLive;   // = perte du carry retiré, préservée mais HORS du live
+  window._carryPos=(d.positions_ouvertes||0);window._carryReal=realLive;window._carryRealSess=realSess;
+  window._carryRealFull=realTout;                 // COMPLET (audit) — carry retiré inclus, pour l'affichage « archivé »
+  window._carryRetireArchive=realTout-realLive;   // = perte du carry retiré (complet − live = −10,73), HORS du live
   // v3 (20/07) : NET = realise + funding COURU (encaisse, stable). Le latent de base est
   // SEPARE — calcule ici pour l'affichage dedie, jamais additionne au net.
   window._carryLatent=(d.positions||[]).reduce(function(s,p){return s+(Number(p.base_mtm_usd)||0);},0);
@@ -840,7 +841,7 @@ function majAccruLive(){
   if(lt){lt.textContent=(mtmTot>=0?'+':'')+n(mtmTot,6)+'$';lt.style.color=col(mtmTot);
     lt.title='MtM de base au MID, toutes positions — REVERSIBLE : ne se realise qu\'a la fermeture (A5). Volontairement HORS du net.';}
   window._carryLatent=mtmTot;
-  window._carryNet=Number(window._carryReal||0)+live;
+  window._carryNet=Number(window._carryReal||0)+live;   // _carryReal = LIVRE LIVE (hors carry retiré)
   // 21/07 — LE POINT VIVANT DU METAGRAPHE. Avant, il valait `equity copy + net carry SESSION`,
   // c'est-a-dire une AUTRE formule que la serie (qui cumule le realise TOTAL) : l'ecart entre
   // les deux se lisait comme une falaise verticale. Desormais on ne transmet que le DELTA qui
