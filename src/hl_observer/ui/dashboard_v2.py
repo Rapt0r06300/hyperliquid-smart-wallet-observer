@@ -1163,7 +1163,7 @@ def create_dashboard_v2_router() -> APIRouter:
             rd = _P(__file__).resolve().parents[3] / "runtime" / "data"
             statut = {}
             try:
-                statut = _json.loads((rd / "experimental_paper_status.json").read_text(encoding="utf-8"))
+                statut = _json.loads((rd / "experimental_paper_v2_status.json").read_text(encoding="utf-8"))
             except (OSError, ValueError):
                 pass
             frais = bool(statut and (_time.time() - float(statut.get("ts") or 0)) < 180.0)

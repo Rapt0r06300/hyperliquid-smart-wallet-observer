@@ -14,7 +14,7 @@ from typing import Any
 from hl_observer.experimental import moteur_paper as MP
 from hl_observer.experimental.signaux import COLLECTEURS
 
-STATUS_RELPATH = Path("runtime") / "data" / "experimental_paper_status.json"
+STATUS_RELPATH = MP.STATUS_RELPATH        # versionné (v2) : la v1 reste en quarantaine
 
 
 def _marks_cross_venue(root: Path) -> dict[str, dict]:
@@ -81,6 +81,39 @@ def _raison_sortie_carry(pos: dict, m: dict, car: dict | None, *, now_ms: float,
     return None
 
 
+def _gap_courant_bps(car: dict, sens: int) -> float:
+    """Écart EXÉCUTABLE courant dans le sens d'entrée (bps). Converge vers 0 (ou négatif) quand les
+    deux venues se rejoignent -> c'est le signal de déboucle rentable."""
+    hl_bid, hl_ask = float(car["hl_bid"]), float(car["hl_ask"])
+    bin_bid, bin_ask = float(car["bin_bid"]), float(car["bin_ask"])
+    hl_mid, bin_mid = (hl_bid + hl_ask) / 2, (bin_bid + bin_ask) / 2
+    if sens >= 0:                                              # long HL / short BIN
+        return (bin_bid - hl_ask) / hl_mid * 1e4 if hl_mid else 0.0
+    return (hl_bid - bin_ask) / bin_mid * 1e4 if bin_mid else 0.0
+
+
+def _raison_sortie_dislocation(pos: dict, car: dict | None, *, now_ms: float) -> tuple[str | None, float]:
+    """Sorties dislocation : convergence capturée, écart aggravé (stop), liquidité, quote périmée, durée
+    max. Renvoie (motif|None, gap_courant_bps)."""
+    from hl_observer.experimental.carry_deux_jambes import CARNET_AGE_MAX_S
+    if not car:
+        return None, 0.0                                      # pas de carnet -> on garde (pas de sortie aveugle)
+    gap_ent = float((pos.get("meta") or {}).get("gap_entree_bps") or 0.0)
+    gap_cur = _gap_courant_bps(car, int(pos.get("sens") or 1))
+    age_min = (now_ms - float(pos.get("ts_ouverture_ms") or now_ms)) / 60000.0
+    if (now_ms / 1000.0 - float(car.get("collecte_ts") or 0.0)) > CARNET_AGE_MAX_S:
+        return "QUOTE_PERIMEE", gap_cur
+    if float(car.get("taille_min_usd") or 0.0) < float(pos.get("notional_usd") or 0.0):
+        return "LIQUIDITE_INSUFFISANTE", gap_cur
+    if gap_cur <= gap_ent * 0.3:                              # écart quasi refermé -> on capture
+        return "CONVERGENCE_CAPTUREE", gap_cur
+    if gap_cur > gap_ent * 1.5:                               # écart s'aggrave contre nous -> stop
+        return "ECART_AGGRAVE", gap_cur
+    if age_min >= float(pos.get("hold_h") or 0.5) * 60.0:     # durée max (court terme)
+        return "DUREE_MAX", gap_cur
+    return None, gap_cur
+
+
 def _gerer_sorties(store: dict, root: Path, *, now_ms: float) -> list[dict]:
     """Sort les positions dont une condition de sortie est atteinte, au prix exécutable courant.
     Les sorties CROSS-VENUE sont GELÉES pendant l'audit (HYPERSMART_EXPERIMENTAL_CROSS_VENUE_GELE=1) :
@@ -95,12 +128,20 @@ def _gerer_sorties(store: dict, root: Path, *, now_ms: float) -> list[dict]:
     mids = _marks_hl_mid(root, dir_coins) if dir_coins else {}
     for pos in list(store["ouvertes"].values()):
         age_h = (now_ms - float(pos.get("ts_ouverture_ms") or now_ms)) / 3.6e6
-        if pos.get("type_pnl") == "funding_carry":
+        if pos.get("type_pnl") == "dislocation":              # cross-venue COURT TERME : capture/stop rapide
+            car = carnet.get(pos["coin"])
+            raison, gap_cur = _raison_sortie_dislocation(pos, car, now_ms=now_ms)
+            if raison:
+                px = (float(car["hl_bid"]) + float(car["hl_ask"])) / 2 if car else pos.get("prix_entree")
+                fermetures.append(MP.sortir(pos, store, root, prix_sortie=px,
+                                            cout_sortie_bps=float(pos.get("spread_bps") or 0.0) + float(pos.get("frais_bps") or 0.0),
+                                            base_courant_bps=gap_cur, raison=raison, now_ms=now_ms))
+        elif pos.get("type_pnl") == "funding_carry":         # LEGACY (v1 quarantaine) — plus émis en v2
             if gele_cv:
-                continue                                          # cohorte GELÉE pour l'audit -> aucune sortie
+                continue
             m = cv.get(pos["coin"])
             if not m or m.get("hl_px") is None:
-                continue                                          # pas de mark frais -> on GARDE (pas de sortie aveugle)
+                continue
             raison = _raison_sortie_carry(pos, m, carnet.get(pos["coin"]), now_ms=now_ms, age_h=age_h)
             if raison:
                 cout_sortie = (m.get("cout_ar_bps") or 0.0) / 2.0 + 3.3
@@ -161,16 +202,31 @@ def tick(root: str | Path = ".", *, now_ms: float | None = None,
     positions = []
     mtm_total = 0.0
     for p in store["ouvertes"].values():
-        m = cv.get(p["coin"]) or {}
-        mtm = MP.pnl_courant_usd(p, mark=(mids.get(p["coin"]) or m.get("hl_px")),
-                                 base_courant_bps=m.get("base_bps"), now_ms=now)
+        car = carnet.get(p["coin"])
+        typ = p.get("type_pnl")
+        if typ == "dislocation":                                 # court terme : MtM = convergence de l'écart
+            gap_ent = float((p.get("meta") or {}).get("gap_entree_bps") or 0.0)
+            gap_cur = _gap_courant_bps(car, int(p.get("sens") or 1)) if car else gap_ent
+            mtm = MP.pnl_courant_usd(p, base_courant_bps=gap_cur, now_ms=now)
+        else:
+            m = cv.get(p["coin"]) or {}
+            mtm = MP.pnl_courant_usd(p, mark=(mids.get(p["coin"]) or m.get("hl_px")),
+                                     base_courant_bps=m.get("base_bps"), now_ms=now)
         mtm_total += mtm
         e = {"coin": p["coin"], "moteur": p["moteur"], "sens": p["sens"], "notional_usd": p["notional_usd"],
-             "prix_entree": p["prix_entree"], "edge_estime_bps": p["edge_estime_bps"], "type_pnl": p["type_pnl"],
+             "prix_entree": p["prix_entree"], "edge_estime_bps": p["edge_estime_bps"], "type_pnl": typ,
              "mtm_usd": round(mtm, 6), "age_min": round((now - float(p["ts_ouverture_ms"])) / 60000.0, 1)}
-        if p.get("type_pnl") == "funding_carry":                 # AUDIT DEUX JAMBES + décomposition PnL
-            dec = decomposer(p, carnet_courant=carnet.get(p["coin"]), d_courant=m.get("d_bps_h"),
-                             base_courant_bps=m.get("base_bps"), now_ms=now)
+        if typ == "dislocation":
+            e["jambes"] = (p.get("meta") or {}).get("jambes")
+            e["hedge_ratio"] = (p.get("meta") or {}).get("hedge_ratio")
+            e["liquidite_ok"] = bool(car and float(car.get("taille_min_usd") or 0.0) >= float(p["notional_usd"]))
+            e["decomposition"] = {"gap_entree_bps": round(gap_ent, 3), "gap_courant_bps": round(gap_cur, 3),
+                                  "convergence_bps": round(gap_ent - gap_cur, 3), "funding_settled_usd": 0.0,
+                                  "funding_accru_estime_usd": 0.0, "pnl_basis_usd": round((gap_ent - gap_cur) / 1e4 * float(p["notional_usd"]), 6),
+                                  "frais_entree_payes_usd": round(MP._cout_usd(p.get("cout_entree_bps") or 0.0, p["notional_usd"]), 6),
+                                  "pnl_liquidable_maintenant_usd": round(mtm, 6)}
+        elif typ == "funding_carry":                            # legacy quarantaine
+            dec = decomposer(p, carnet_courant=car, d_courant=None, base_courant_bps=None, now_ms=now)
             e["decomposition"] = dec
             e["jambes"] = dec.get("jambes") or (p.get("meta") or {}).get("jambes")
             e["hedge_ratio"] = dec.get("hedge_ratio") or (p.get("meta") or {}).get("hedge_ratio")

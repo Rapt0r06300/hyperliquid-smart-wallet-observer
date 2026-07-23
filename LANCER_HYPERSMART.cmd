@@ -46,11 +46,11 @@ REM (cross-venue survivants geles / lead-lag / copy-vaults) SANS attendre la pre
 REM et limites ISOLES du livre live (experimental_paper_ledger.jsonl). Admission = frais + executable +
 REM edge net > 0 apres couts. L'allocateur strict de promotion et le no-real-trade restent intacts.
 set "HYPERSMART_EXPERIMENTAL_PAPER=1"
-REM 23/07 — COHORTE CROSS-VENUE GELEE (audit deux jambes demande par Flo) : on GARDE les 6 positions
-REM ouvertes, on n'en ouvre PLUS et on ne les sort PAS tant que ce flag=1. Les sorties auto (funding
-REM flip / edge disparu / basis adverse / quote perimee / liquidite / duree max) sont codees+testees,
-REM actives des que ce flag repasse a 0. Lead-lag et copy-vaults restent actifs.
-set "HYPERSMART_EXPERIMENTAL_CROSS_VENUE_GELE=1"
+REM 23/07 (v2) — CARRY FUNDING SUPPRIME DU SCOPE (rectif Flo) : la v1 cross-venue (funding + hold 168 h)
+REM est en QUARANTAINE (fichiers experimental_paper_positions/ledger sans suffixe, plus lus). Le scope
+REM ACTIF est experimental_paper_V2_* : cross-venue COURT TERME (dislocation de prix executable, entree/
+REM sortie rapide, ZERO funding) + lead-lag + copy-vaults. Ce flag ne gele plus que le legacy funding.
+set "HYPERSMART_EXPERIMENTAL_CROSS_VENUE_GELE=0"
 set "HYPERSMART_REDUCE_MAX_SIGNAL_AGE_MS=15000"
 REM Les reductions leader sont proportionnelles a NOTRE position paper. Sur un compte
 REM de simulation 1000 USDT, une vraie sortie partielle peut valoir moins de 10 USDT:

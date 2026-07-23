@@ -21,58 +21,62 @@ FRAIS_AR_BPS = 6.6
 HOLD_H = 168.0
 
 
+HOLD_MAX_H = 0.5                    # dislocation = COURT TERME (30 min max), JAMAIS 168 h ni funding
+
+
 def signaux_cross_venue(root: str | Path = ".", *, now_ms: float | None = None) -> tuple[list[Signal], list[dict]]:
-    """Sur les SURVIVANTS GELÉS : ouvre un carry delta-neutre quand le funding courant est frais, le
-    carnet donne un coût exécutable, et l'edge NET (|d|×hold − coûts) reste > 0. PAS d'attente des 168 h."""
-    import os
-    from hl_observer.funding.cross_venue_carry_judge import charger_series
-    from hl_observer.experimental.carry_deux_jambes import carnet_par_coin, construire_jambes, FRAIS_TAKER_HL_BPS, FRAIS_TAKER_BIN_BPS
+    """CROSS-VENUE COURT TERME (v2, rectification Flo 23/07) : capture un ÉCART DE PRIX EXÉCUTABLE entre
+    HL et Binance, entrée/sortie RAPIDE, **sans aucune dépendance au funding ni au hold 168 h**. On achète
+    la venue la moins chère (à l'ask) et on vend la plus chère (au bid) ; on débouble à la convergence.
+    Signal SEULEMENT si l'écart exécutable (net des spreads croisés) dépasse les coûts A/R + le plancher
+    de profit exigeant. La v1 (carry funding) est en QUARANTAINE — ce moteur ne la lit plus."""
+    from hl_observer.experimental.carry_deux_jambes import (
+        carnet_par_coin, construire_jambes, dimensionner_notional, FRAIS_TAKER_HL_BPS,
+        FRAIS_TAKER_BIN_BPS, CARNET_AGE_MAX_S, LATENCE_MS, LATENCE_COUT_BPS)
     root = Path(root)
     now = float(now_ms if now_ms is not None else time.time() * 1000)
     sigs: list[Signal] = []
     refus: list[dict] = []
-    if os.environ.get("HYPERSMART_EXPERIMENTAL_CROSS_VENUE_GELE", "0") == "1":
-        return sigs, [{"moteur": "cross_venue", "motif": "COHORTE_GELEE"}]   # audit : plus d'ouverture
-    try:
-        base = json.loads((root / BASELINE_RELPATH).read_text(encoding="utf-8"))
-        survivants = {s["coin"].upper() for s in base.get("survivants", [])}
-    except (OSError, ValueError, KeyError):
-        return sigs, [{"moteur": "cross_venue", "motif": "PAS_DE_BASELINE"}]
-    series = charger_series(root)
     carnet = carnet_par_coin(root)
-    notional = LIMITES["cross_venue"]["notional_usd"]
-    for coin in survivants:
-        s = series.get(coin)
-        if not s:
-            refus.append({"moteur": "cross_venue", "coin": coin, "motif": "PAS_DE_DONNEE"}); continue
-        ts, hl_px, bin_px, hl_f, bin_f = s[-1]                     # dernier tick réel
-        if (now / 1000.0 - float(ts)) > 120.0:                    # funding > 2 min = périmé
-            refus.append({"moteur": "cross_venue", "coin": coin, "motif": "FUNDING_PERIME"}); continue
-        car = carnet.get(coin)
-        if not car:
-            refus.append({"moteur": "cross_venue", "coin": coin, "motif": "CARNET_ABSENT"}); continue
-        d = hl_f - bin_f                                          # funding net/h signé
-        sens = 1 if d >= 0 else -1
-        aud = construire_jambes(coin, sens, notional, car)        # DEUX jambes exécutables
-        if not aud["liquidite_ok"]:                              # profondeur < notional -> non exécutable
+    if not carnet:
+        return sigs, [{"moteur": "cross_venue", "motif": "CARNET_ABSENT"}]
+    cible = LIMITES["cross_venue"]["notional_usd"]
+    for coin, car in carnet.items():
+        if (now / 1000.0 - float(car.get("collecte_ts") or 0.0)) > CARNET_AGE_MAX_S:
+            refus.append({"moteur": "cross_venue", "coin": coin, "motif": "QUOTE_PERIMEE"}); continue
+        hl_bid, hl_ask = float(car["hl_bid"]), float(car["hl_ask"])
+        bin_bid, bin_ask = float(car["bin_bid"]), float(car["bin_ask"])
+        hl_mid, bin_mid = (hl_bid + hl_ask) / 2, (bin_bid + bin_ask) / 2
+        if hl_mid <= 0 or bin_mid <= 0:
+            continue
+        gap_hl_cheap = (bin_bid - hl_ask) / hl_mid * 1e4          # HL moins cher -> long HL / short BIN
+        gap_bin_cheap = (hl_bid - bin_ask) / bin_mid * 1e4        # BIN moins cher -> short HL / long BIN
+        gap = max(gap_hl_cheap, gap_bin_cheap)                    # écart EXÉCUTABLE capturable (bps)
+        sens = 1 if gap_hl_cheap >= gap_bin_cheap else -1         # +1 = long HL (HL moins cher)
+        depth = float(car.get("taille_min_usd") or 0.0)
+        notional = dimensionner_notional(depth, cible)           # VWAP/profondeur : taille exécutable
+        if notional <= 0:
             refus.append({"moteur": "cross_venue", "coin": coin, "motif": "LIQUIDITE_INSUFFISANTE",
-                          "profondeur_usd": aud["profondeur_usd"]}); continue
-        cout_ar = aud["frais_entree_reels_bps"] + aud["cout_sortie_estime_bps"]   # A/R RÉEL des 2 jambes
-        edge_net = abs(d) * HOLD_H - cout_ar
+                          "profondeur_usd": depth}); continue
+        # l'écart exécutable a DÉJÀ payé l'entrée (bid/ask) ; reste le déboucle : exit spreads + 4 fills + latence
+        cout_ar = (float(car.get("hl_demi_spread_bps") or 0.0) + float(car.get("bin_demi_spread_bps") or 0.0)
+                   + 2 * (FRAIS_TAKER_HL_BPS + FRAIS_TAKER_BIN_BPS) + LATENCE_COUT_BPS)
+        edge_net = gap - cout_ar
         if edge_net <= 0:
-            refus.append({"moteur": "cross_venue", "coin": coin, "motif": "EDGE_NEGATIF",
-                          "edge_bps": round(edge_net, 2)}); continue
+            refus.append({"moteur": "cross_venue", "coin": coin, "motif": "ECART_SOUS_LES_COUTS",
+                          "gap_bps": round(gap, 2), "cout_bps": round(cout_ar, 2)}); continue
+        aud = construire_jambes(coin, sens, notional, car)
         j = aud["jambes"]
         sigs.append(Signal(
-            moteur="cross_venue", coin=coin, sens=sens, type_pnl="funding_carry", notional_usd=notional,
-            prix_entree=j["hl"]["prix_exec"], cout_entree_bps=aud["frais_entree_reels_bps"],
-            edge_estime_bps=round(edge_net, 4), ts_signal_ms=float(ts) * 1000.0,
+            moteur="cross_venue", coin=coin, sens=sens, type_pnl="dislocation", notional_usd=notional,
+            prix_entree=j["hl"]["prix_exec"], cout_entree_bps=cout_ar / 2.0, edge_estime_bps=round(edge_net, 4),
+            pnl_attendu_usd=round(edge_net / 1e4 * notional, 4), ts_signal_ms=float(car.get("collecte_ts") or now / 1000) * 1000,
             frais_bps=FRAIS_TAKER_HL_BPS + FRAIS_TAKER_BIN_BPS,
             spread_bps=j["hl"]["demi_spread_bps"] + j["bin"]["demi_spread_bps"],
-            slippage_bps=j["hl"]["slippage_bps"] + j["bin"]["slippage_bps"], d_bps_h=d,
-            base_entree_bps=aud["base_bps"], hold_h=HOLD_H,
-            meta={"jambes": j, "hedge_ratio": aud["hedge_ratio"], "hl_px": aud["hl_mid"],
-                  "bin_px": aud["bin_mid"], "cout_ar_bps": cout_ar, "profondeur_usd": aud["profondeur_usd"]}))
+            slippage_bps=j["hl"]["slippage_bps"] + j["bin"]["slippage_bps"], latence_ms=LATENCE_MS,
+            base_entree_bps=round(gap, 3), hold_h=HOLD_MAX_H,
+            meta={"jambes": j, "hedge_ratio": aud["hedge_ratio"], "gap_entree_bps": round(gap, 3),
+                  "cout_ar_bps": cout_ar, "profondeur_usd": depth}))
     return sigs, refus
 
 
@@ -139,6 +143,7 @@ def signaux_lead_lag(root: str | Path = ".", *, now_ms: float | None = None,
         sigs.append(Signal(
             moteur="lead_lag", coin=c, sens=sens, type_pnl="directional", notional_usd=LIMITES["lead_lag"]["notional_usd"],
             prix_entree=prix, cout_entree_bps=demi_spread_bps + frais / 2.0, edge_estime_bps=round(edge_net, 4),
+            pnl_attendu_usd=round(edge_net / 1e4 * LIMITES["lead_lag"]["notional_usd"], 4),
             ts_signal_ms=now, frais_bps=frais / 2.0, spread_bps=demi_spread_bps,
             latence_ms=meilleur_h, meta={"choc_bps": round(choc_bps, 2), "horizon_ms": meilleur_h}))
     return sigs, refus
@@ -197,7 +202,8 @@ def signaux_vaults(root: str | Path = ".", *, now_ms: float | None = None) -> tu
         sigs.append(Signal(
             moteur="copy_vault", coin=coin, sens=1 if delta_frac > 0 else -1, type_pnl="directional",
             notional_usd=LIMITES["copy_vault"]["notional_usd"], prix_entree=px, cout_entree_bps=cout / 2.0,
-            edge_estime_bps=round(edge, 4), ts_signal_ms=float(ap.get("ts_ms") or now), frais_bps=cout / 2.0,
+            edge_estime_bps=round(edge, 4), pnl_attendu_usd=round(edge / 1e4 * LIMITES["copy_vault"]["notional_usd"], 4),
+            ts_signal_ms=float(ap.get("ts_ms") or now), frais_bps=cout / 2.0,
             meta={"vault": adr, "delta_frac": round(delta_frac, 3)}))
     return sigs, refus
 

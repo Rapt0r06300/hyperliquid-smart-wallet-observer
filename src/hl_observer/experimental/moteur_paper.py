@@ -18,16 +18,23 @@ from pathlib import Path
 from typing import Any
 
 MODE = "EXPERIMENTAL_PAPER"
-LEDGER_RELPATH = Path("runtime") / "data" / "experimental_paper_ledger.jsonl"
-POSITIONS_RELPATH = Path("runtime") / "data" / "experimental_paper_positions.json"
+VERSION = "v2"                            # v1 (carry-style) EN QUARANTAINE ; v2 = deux jambes VWAP + barème exigeant
+LEDGER_RELPATH = Path("runtime") / "data" / ("experimental_paper_%s_ledger.jsonl" % VERSION)
+POSITIONS_RELPATH = Path("runtime") / "data" / ("experimental_paper_%s_positions.json" % VERSION)
+STATUS_RELPATH = Path("runtime") / "data" / ("experimental_paper_%s_status.json" % VERSION)
 
 BUDGET_TOTAL_USD = 1000.0                 # budget FICTIF isolé (jamais le capital live)
 AGE_MAX_SIGNAL_MS = 30_000.0              # un signal plus vieux que ça = périmé (NO_TRADE)
+#: 🔴 BARÈME EXIGEANT v2 (Flo) : « PnL énorme, ROI ultra positif, refuse micro-edges / illiquide /
+#: capital-pour-des-centimes ». On ne prend QUE ce qui bat clairement l'alternative (HLP ~15-30 %/an).
+MIN_EDGE_NET_BPS = 12.0                   # edge net après TOUS les coûts < ça -> micro-edge, REFUSÉ
+MIN_ROI_ANNUEL_NET_PCT = 15.0            # ROI net annualisé < ça -> dominé par HLP/cash, REFUSÉ
+MIN_PNL_ATTENDU_USD = 0.25               # PnL attendu sur le hold < ça -> capital pour des centimes, REFUSÉ
 #: petites limites PAR moteur : max positions simultanées, notional max déployé, notional par entrée.
 LIMITES: dict[str, dict[str, float]] = {
-    "cross_venue": {"max_positions": 6, "max_notional_usd": 600.0, "notional_usd": 100.0},
-    "lead_lag":    {"max_positions": 4, "max_notional_usd": 400.0, "notional_usd": 100.0},
-    "copy_vault":  {"max_positions": 4, "max_notional_usd": 400.0, "notional_usd": 100.0},
+    "cross_venue": {"max_positions": 6, "max_notional_usd": 300.0, "notional_usd": 50.0},
+    "lead_lag":    {"max_positions": 4, "max_notional_usd": 200.0, "notional_usd": 50.0},
+    "copy_vault":  {"max_positions": 4, "max_notional_usd": 200.0, "notional_usd": 50.0},
 }
 MOTEURS = tuple(LIMITES)
 
@@ -42,8 +49,10 @@ class Signal:
     notional_usd: float
     prix_entree: float                     # prix EXÉCUTABLE d'entrée (bid si on vend, ask si on achète)
     cout_entree_bps: float                 # frais + demi-spread + slippage payés À L'ENTRÉE
-    edge_estime_bps: float                 # edge NET estimé après TOUS les coûts (doit être > 0)
+    edge_estime_bps: float                 # edge NET estimé après TOUS les coûts (doit passer le barème)
     ts_signal_ms: float                    # horodatage de la mesure (fraîcheur)
+    roi_annuel_pct: float = 0.0            # ROI net annualisé estimé (doit battre HLP ~15-30 %)
+    pnl_attendu_usd: float = 0.0           # PnL $ attendu sur le hold (refuse les centimes)
     frais_bps: float = 0.0
     spread_bps: float = 0.0
     slippage_bps: float = 0.0
@@ -106,6 +115,12 @@ def admettre(sig: Signal, store: dict, *, now_ms: float) -> tuple[bool, str | No
         return False, "COUT_INCONNU"
     if not (float(sig.edge_estime_bps) > 0.0):
         return False, "EDGE_NEGATIF_APRES_COUTS"
+    if float(sig.edge_estime_bps) < MIN_EDGE_NET_BPS:          # 🔴 barème v2 : refuse les micro-edges
+        return False, "MICRO_EDGE"
+    if sig.type_pnl == "funding_carry" and float(sig.roi_annuel_pct) < MIN_ROI_ANNUEL_NET_PCT:
+        return False, "ROI_TROP_FAIBLE_VS_HLP"                 # carry : capital immobilisé -> doit battre HLP
+    if float(sig.pnl_attendu_usd) < MIN_PNL_ATTENDU_USD:       # capital immobilisé pour des centimes
+        return False, "PNL_POUR_DES_CENTIMES"
     if sig.sens not in (-1, 1):
         return False, "SENS_INVALIDE"
     lim = LIMITES[sig.moteur]
@@ -158,6 +173,10 @@ def pnl_courant_usd(pos: dict, *, mark: float | None = None, base_courant_bps: f
         if base_courant_bps is not None:
             derive = -abs(float(base_courant_bps) - float(pos.get("base_entree_bps") or 0.0)) / 1e4 * notional
         return round(funding + derive - entree_cout, 6)
+    if pos.get("type_pnl") == "dislocation":                   # court terme : convergence de l'écart capturée
+        gap_ent = float((pos.get("meta") or {}).get("gap_entree_bps") or pos.get("base_entree_bps") or 0.0)
+        gap_cur = float(base_courant_bps) if base_courant_bps is not None else gap_ent
+        return round((gap_ent - gap_cur) / 1e4 * notional - entree_cout, 6)
     # directionnel : variation relative de prix × sens
     if mark is None or not pos.get("prix_entree"):
         return round(-entree_cout, 6)

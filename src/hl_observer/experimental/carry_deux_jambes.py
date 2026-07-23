@@ -22,6 +22,16 @@ CARNET_RELPATH = Path("runtime") / "data" / "carnet_venues.jsonl"
 FRAIS_TAKER_HL_BPS = 3.5           # HL perp taker (tier 0, conservateur)
 FRAIS_TAKER_BIN_BPS = 4.5          # Binance USDⓈ-M perp taker (conservateur)
 CARNET_AGE_MAX_S = 120.0           # carnet plus vieux = quote périmée
+NOTIONAL_MIN_UTILE_USD = 20.0      # en dessous, capital immobilisé pour des centimes -> on n'ouvre pas
+LATENCE_MS = 700.0                 # latence d'exécution (Binance mène HL ~700 ms) ; coût conservateur
+LATENCE_COUT_BPS = 1.0             # pénalité conservatrice pour la dérive pendant la latence
+
+
+def dimensionner_notional(depth_usd: float, cible_usd: float) -> float:
+    """VWAP/profondeur : on ne déploie QUE ce qui tient dans la profondeur top-of-book (VWAP = bid/ask,
+    slippage ~0). En dessous du minimum UTILE -> 0 (refuse le capital-pour-des-centimes)."""
+    n = min(float(cible_usd), float(depth_usd or 0.0))
+    return n if n >= NOTIONAL_MIN_UTILE_USD else 0.0
 
 
 def carnet_par_coin(root: str | Path = ".", *, max_lignes: int = 60000) -> dict[str, dict]:
