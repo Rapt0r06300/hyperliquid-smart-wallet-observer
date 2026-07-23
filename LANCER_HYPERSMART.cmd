@@ -353,6 +353,14 @@ REM + le chemin forward -> matiere du fade. BTC exclu (mort). Etat persiste (sur
 REM ⚠️ 2 endpoints PUBLICS en lecture (metaAndAssetCtxs + allMids). 0 cle, 0 ordre, 0 signature.
 start "" /b tools\boucle_collecteur.cmd overshoot-collector tools\collecter_overshoots.py 10 --une-fois
 
+REM === VAULTS HL (chantier COPY 23/07) : la derniere porte copy non ouverte ===
+REM Le copy de fills est mort (signal 62s, 76%% = 4 wallets MM). Un VAULT tient des JOURS -> nos 62s
+REM sont negligeables. On capture NAV/positions/levier/PnL latent+realise/drawdown/expo pour mesurer
+REM si repliquer sa trajectoire reste rentable apres delai+couts. Liste = runtime\data\vaults_suivis.json
+REM (vaults DIRECTIONNELS ; les vaults de MARKET-MAKING type HLP sont exclus). Vide -> idle propre.
+REM ⚠️ 2 endpoints PUBLICS en lecture (clearinghouseState + vaultDetails). 0 cle, 0 ordre, 0 signature.
+start "" /b tools\boucle_collecteur.cmd vault-collector tools\collecter_vaults.py 300 --une-fois
+
 REM ---- COPY-WHITELIST (#185, 20/07) : nourrit la porte copy (leaders au markout prouve). ----
 REM La whitelist se PERIME a 24 h (porte deny-by-default) -> regeneree toutes les 6 h.
 REM Sans donnees de fills forward, elle ecrit une liste VIDE = copy verrouille (honnete).
