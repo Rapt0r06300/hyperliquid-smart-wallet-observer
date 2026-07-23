@@ -267,10 +267,24 @@ def main(argv: list[str] | None = None) -> int:  # pragma: no cover
     p.add_argument("--coins", default="BTC,ETH,SOL,INJ,DASH,NEO,AVAX,LINK")
     a = p.parse_args(argv)
     coins = [c.strip().upper() for c in a.coins.split(",") if c.strip()]
+    try:                                                     # 🔴 sans `websockets`, RIEN ne se collecte
+        import websockets  # noqa: F401
+    except ImportError:
+        print("[bbo] MODULE `websockets` MANQUANT -> lance:  pip install websockets  (collecteur inactif "
+              "tant qu'il n'est pas installe).", flush=True)
+        return 0
+    print("[bbo] demarrage PERSISTANT : %d coins mappes, WS HL bbo + Binance bookTicker/aggTrade..."
+          % len(coins), flush=True)
     try:
         asyncio.run(_boucle(Path(a.root), coins))            # PERSISTANT : sort seulement sur fin de session
     except KeyboardInterrupt:
         return 0
+    except Exception as exc:                                 # noqa: BLE001 — une panne DOIT etre visible
+        import traceback
+        print("[bbo] ARRET sur exception: %r" % exc, flush=True)
+        traceback.print_exc()
+        return 1
+    print("[bbo] boucle terminee (fin de session).", flush=True)
     return 0
 
 
