@@ -15,6 +15,7 @@ s'il est net>0, bat le placebo, et son IC bas est > 0. Sinon OBSERVE (prélimina
 """
 from __future__ import annotations
 
+import bisect
 import random
 from typing import Any, Iterable
 
@@ -222,13 +223,79 @@ def ranger_variantes(events: list[dict], tape: dict[str, list[tuple[int, float]]
     return out
 
 
+def _percentile(v: list[float], p: float) -> float:
+    if not v:
+        return 0.0
+    s = sorted(v)
+    i = min(len(s) - 1, max(0, int(round(p / 100.0 * (len(s) - 1)))))
+    return s[i]
+
+
+def mae_mfe(ev: dict, serie: list[tuple[int, float]], horizon_ms: float, *, delai_ms: float = 0.0):
+    """(MAE_bps<=0, MFE_bps>=0) : pires excursions ADVERSE et FAVORABLE (dans le sens de la position)
+    entre l'entrée (1re bougie après signal+délai, anti-lookahead) et l'horizon. None si trou de tape."""
+    if not serie:
+        return None
+    ts = [t for t, _ in serie]
+    t_ent = int(ev["ts_ms"] + delai_ms)
+    t_sor = t_ent + int(horizon_ms)
+    i = bisect.bisect_right(ts, t_ent)
+    if i >= len(serie):
+        return None
+    p_ent = serie[i][1]
+    if p_ent <= 0:
+        return None
+    d = ev["direction"]
+    mae, mfe = 0.0, 0.0
+    j = i
+    while j < len(serie) and serie[j][0] <= t_sor:
+        move = d * (serie[j][1] - p_ent) / p_ent * 1e4
+        mae = min(mae, move)
+        mfe = max(mfe, move)
+        j += 1
+    if j == i:
+        return None
+    return round(mae, 3), round(mfe, 3)
+
+
+RATIO_KILL_RISQUE = 4.0          # si l'excursion adverse TYPIQUE > 4× l'edge net -> risque ≫ edge -> KILL
+
+
+def calibrer_risque(events: list[dict], tape: dict[str, list[tuple[int, float]]], horizon_ms: float,
+                    edge_net_bps: float, *, delai_ms: float = 0.0, ratio_kill: float = RATIO_KILL_RISQUE,
+                    min_events: int = 20) -> dict[str, Any]:
+    """Calibre STOP / TAKE-PROFIT / horizon sur les MAE/MFE HISTORIQUES (rectif Flo : un edge de 7-26 bps
+    ne peut pas porter un stop de 150 bps). stop = MAE_p75 (cap la queue, survit au bruit typique),
+    take-profit = MFE_p50 (capture le favorable typique). KILL si edge<=0 OU si l'adverse TYPIQUE (MAE_p50)
+    dépasse largement l'edge (> ratio_kill × edge)."""
+    maes, mfes = [], []
+    for e in events:
+        serie = tape.get(e["coin"])
+        if not serie:
+            continue
+        mm = mae_mfe(e, serie, horizon_ms, delai_ms=delai_ms)
+        if mm is not None:
+            maes.append(abs(mm[0]))
+            mfes.append(mm[1])
+    n = len(maes)
+    mae_p50, mae_p75, mae_p90 = _percentile(maes, 50), _percentile(maes, 75), _percentile(maes, 90)
+    mfe_p50 = _percentile(mfes, 50)
+    trop_risque = edge_net_bps <= 0 or (mae_p50 > ratio_kill * edge_net_bps)
+    return {"n": n, "stop_bps": round(mae_p75, 2), "take_profit_bps": round(mfe_p50, 2),
+            "horizon_ms": horizon_ms, "mae_p50_bps": round(mae_p50, 2), "mae_p90_bps": round(mae_p90, 2),
+            "mfe_p50_bps": round(mfe_p50, 2), "edge_net_bps": round(edge_net_bps, 2),
+            "ratio_risque_sur_edge": round(mae_p50 / edge_net_bps, 2) if edge_net_bps > 0 else None,
+            "decision_risque": "KILL" if trop_risque else "OK",
+            "note": "stop=MAE_p75, TP=MFE_p50 ; KILL si edge<=0 ou MAE_p50 > %.0f×edge (risque ≫ edge)" % ratio_kill}
+
+
 def construire_table_prelim(events: list[dict], tape: dict[str, list[tuple[int, float]]], *,
                             horizons_ms: Iterable[float] = HORIZONS_DEFAUT_MS, frais_bps: float = 12.0,
-                            min_events: int = 20, forward_fn=FORWARD_DEFAUT) -> dict[str, dict]:
+                            min_events: int = 20, forward_fn=FORWARD_DEFAUT, delai_ms: float = 0.0) -> dict[str, dict]:
     """Table d'edge PRÉLIMINAIRE PAR COIN (descriptif, PAS une validation OOS) : pour chaque coin couvert,
     le meilleur horizon dont le rendement forward NET (anti-lookahead, coûts inclus) est POSITIF sur assez
-    d'entrées. C'est la source du gate de la cohorte EXPLORATORY (ouvre pour APPRENDRE, sans SCALE). Un
-    coin sans horizon net-positif n'apparaît pas → pas d'ouverture (jamais de trade forcé)."""
+    d'entrées, AVEC son risque CALIBRÉ (stop=MAE_p75, TP=MFE_p50). Un coin est EXCLU si net<=0 OU si son
+    risque dépasse largement l'edge (KILL MAE/MFE). Source du gate EXPLORATORY. Jamais de trade forcé."""
     par_coin: dict[str, list[dict]] = {}
     for e in events:
         par_coin.setdefault(e["coin"], []).append(e)
@@ -251,9 +318,18 @@ def construire_table_prelim(events: list[dict], tape: dict[str, list[tuple[int, 
                     best = {"horizon_ms": h, "net_bps": round(net, 3), "brut_bps": round(net + frais_bps, 3),
                             "ic95_bas_bps": ic_bas, "ic95_haut_bps": ic_haut, "n": len(nets)}
         if best:
+            # RISQUE CALIBRÉ sur MAE/MFE : un coin dont le risque ≫ edge est KILL (jamais copié)
+            risque = calibrer_risque(evs, tape, best["horizon_ms"], best["net_bps"], delai_ms=delai_ms,
+                                     min_events=min_events)
+            if risque["decision_risque"] == "KILL":
+                continue
+            best["edge_brut_bps"] = best["brut_bps"]              # alias pour le gate du signal
+            best["risque"] = risque
+            best["stop_bps"] = risque["stop_bps"]
+            best["take_profit_bps"] = risque["take_profit_bps"]
             table[coin] = best
     return table
 
 
 __all__ = ["mesurer_oos", "simuler_paper", "ranger_variantes", "construire_table_prelim",
-           "SEUILS_DEFAUT", "HORIZONS_DEFAUT_MS", "SEUIL_VALIDATION_N"]
+           "mae_mfe", "calibrer_risque", "SEUILS_DEFAUT", "HORIZONS_DEFAUT_MS", "SEUIL_VALIDATION_N"]

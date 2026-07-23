@@ -335,7 +335,8 @@ def _vaults_retenus(root: Path) -> set[str]:
 
 
 def signaux_vaults(root: str | Path = ".", *, now_ms: float | None = None, lecteur_l2=None,
-                   edge_par_coin: dict | None = None, seuil_move: float = SEUIL_MOVE_FRAC_NAV) -> tuple[list[Signal], list[dict]]:
+                   edge_par_coin: dict | None = None, seuil_move: float = SEUIL_MOVE_FRAC_NAV,
+                   retenus: set | None = None) -> tuple[list[Signal], list[dict]]:
     """Copy-Vaults (rectif Flo 23/07) : détecte le CHANGEMENT D'EXPO PAR COIN (Δszi) d'un vault RETENU
     par le score 8-facteurs (DENY-BY-DEFAULT), ABONNE le coin au carnet, puis N'ADMET QUE si (a) un L2 HL
     FRAIS < 1 s existe sur le coin (lecture on-demand `lecteur_l2` ou BBO WS ; profondeur/VWAP/slippage +
@@ -349,7 +350,8 @@ def signaux_vaults(root: str | Path = ".", *, now_ms: float | None = None, lecte
     now = float(now_ms if now_ms is not None else time.time() * 1000)
     refus: list[dict] = []
     exploratoire = edge_par_coin is not None
-    retenus = _vaults_retenus(root)                                # DENY-BY-DEFAULT : vide = on ne copie rien
+    if retenus is None:                                            # override possible (tiers CORE+CHALLENGERS)
+        retenus = _vaults_retenus(root)                            # DENY-BY-DEFAULT : vide = on ne copie rien
     try:
         lignes = (root / VAULTS_SNAP_RELPATH).read_text(encoding="utf-8", errors="ignore").splitlines()
     except OSError:
@@ -440,6 +442,7 @@ def signaux_vaults(root: str | Path = ".", *, now_ms: float | None = None, lecte
                   "fill_partiel": partiel, "cible_notional_usd": round(cible, 2), "slippage_bps": round(slippage_bps, 3),
                   "delai_detection_ms": round(lag_ms), "edge_brut_mesure_bps": round(edge_brut, 3),
                   "cout_ar_bps": round(cout_ar, 3), "horizon_mesure_ms": cfg.get("horizon_ms"),
+                  "stop_bps": cfg.get("stop_bps"), "take_profit_bps": cfg.get("take_profit_bps"),  # risque calibré MAE/MFE
                   "szi_avant": round(p0.get(best_coin, (0.0, 0.0))[0], 6),
                   "szi_apres": round(p1.get(best_coin, (0.0, 0.0))[0], 6),
                   "note": "edge MESURÉ (config gelée) − coût L2 RÉEL (spread+2×slippage+frais A/R) ; prix/profondeur "

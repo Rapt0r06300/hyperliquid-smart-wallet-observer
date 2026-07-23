@@ -400,6 +400,10 @@ start "" /b tools\boucle_collecteur.cmd backfill-candles-vaults tools\backfill_c
 REM ORCHESTRATEUR REEL : episodes+ledger+candles -> audit couverture + OOS walk-forward temporel purge
 REM (generalisation vault en secondaire) + IC + ranking + SCALE/KILL. Forward candle ANTI-LOOKAHEAD.
 start "" /b tools\boucle_collecteur.cmd pipeline-reel tools\pipeline_copie_reel.py 1800 --une-fois
+REM GEL VERSIONNE de la table prelim (anti-reoptimisation : le forward ne se reoptimise jamais dessus).
+start "" /b tools\boucle_collecteur.cmd geler-prelim tools\geler_prelim_copie.py 3600 --une-fois
+REM FLUX WS userFills des vaults CORE+CHALLENGERS -> snapshots FRAIS event-driven (ouverture immediate).
+start "" /b tools\boucle_collecteur.cmd userfills-live tools\collecter_userfills_vaults.py 5
 
 REM === BBO RAPIDE HL/Binance (chantier ARB 23/07) : quotes SYNCHRONISEES pour trancher le lead-lag ===
 REM Le detecteur d'arb actuel est INVALIDE (base persistante +17-30bps = mapping/quote perimee).

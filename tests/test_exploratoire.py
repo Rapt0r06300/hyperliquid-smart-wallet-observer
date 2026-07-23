@@ -13,7 +13,10 @@ def _setup(root, *, move_szi=200.0, prelim=True, retenu="0xAAA", now=1_000_000_0
     (root / "runtime" / "data").mkdir(parents=True, exist_ok=True)
     (root / "config").mkdir(parents=True, exist_ok=True)
     (root / "config" / "frais_venues.json").write_text(json.dumps({"hl_taker_bps": 3.5, "bin_taker_bps": 4.5}))
-    (root / "runtime" / "data" / "vaults_scores.json").write_text(json.dumps({"retenus": [retenu]}))
+    (root / "runtime" / "data" / "vaults_scores.json").write_text(json.dumps({
+        "retenus": [retenu],
+        "classement": [{"vault": retenu, "retenu": True,
+                        "facteurs": {"anciennete_j": 300, "drawdown_pct": 10, "copyabilite": 1.0}}]}))
     (root / "runtime" / "data" / "vault_snapshots.jsonl").write_text("\n".join(json.dumps(s) for s in [
         {"vault": "0xAAA", "ts_ms": now - 300_000, "nav_usd": 100_000, "positions": [{"coin": "HYPE", "szi": 0.0, "entryPx": 20.0}]},
         {"vault": "0xAAA", "ts_ms": now - 5_000, "nav_usd": 100_000, "positions": [{"coin": "HYPE", "szi": move_szi, "entryPx": 20.0}]},
@@ -66,6 +69,30 @@ def test_limite_3_positions(tmp_path):
     sig = MP.Signal(moteur="copy_vault", coin="HYPE", sens=1, type_pnl="directional", notional_usd=60.0,
                     prix_entree=20.0, cout_entree_bps=5.0, edge_estime_bps=20.0, ts_signal_ms=now)
     assert EX.admettre(sig, store) == (False, "LIMITE_3_POSITIONS")
+
+
+def test_tiers_core_et_challengers(tmp_path):
+    (tmp_path / "runtime" / "data").mkdir(parents=True)
+    (tmp_path / "runtime" / "data" / "vaults_scores.json").write_text(json.dumps({
+        "retenus": ["0xCORE1", "0xCORE2"],
+        "classement": [
+            {"vault": "0xCORE1", "retenu": True, "facteurs": {}},
+            {"vault": "0xCORE2", "retenu": True, "facteurs": {}},
+            {"vault": "0xCHAL", "retenu": False, "facteurs": {"anciennete_j": 200, "drawdown_pct": 20, "copyabilite": 0.8}},
+            {"vault": "0xJEUNE", "retenu": False, "facteurs": {"anciennete_j": 5, "drawdown_pct": 20, "copyabilite": 0.8}}]}))
+    core, chal = EX.tiers(tmp_path)
+    assert core == {"0xCORE1", "0xCORE2"} and chal == {"0xCHAL"}     # 0xJEUNE recalé (trop jeune)
+
+
+def test_take_profit_declenche_sortie(tmp_path):
+    now = 1_000_000_000_000.0
+    (tmp_path / "runtime" / "data").mkdir(parents=True)
+    pos = {"coin": "HYPE", "moteur": "copy_vault_explo", "sens": 1, "type_pnl": "directional",
+           "notional_usd": 60.0, "prix_entree": 20.0, "ts_ouverture_ms": now, "hold_h": 1.0,
+           "spread_bps": 1.0, "frais_bps": 3.5, "slippage_bps": 1.0, "meta": {"stop_bps": 20.0, "take_profit_bps": 15.0}}
+    # +0,3 % = +30 bps >= TP 15 -> TAKE_PROFIT
+    raison, _ = EX._raison_sortie(pos, tmp_path, now_ms=now + 1000, mark=20.0 * 1.003)
+    assert raison == "TAKE_PROFIT"
 
 
 def test_stop_perte_declenche_sortie(tmp_path):

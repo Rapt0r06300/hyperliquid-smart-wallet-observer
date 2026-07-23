@@ -3,7 +3,8 @@ vault, IC bootstrap, statut PRÉLIMINAIRE/VALIDATION, décision SCALE/OBSERVE/KI
 trade, ranking de variantes. Aucune exécution."""
 from __future__ import annotations
 
-from hl_observer.experimental.copy_edge_oos import mesurer_oos, simuler_paper, ranger_variantes
+from hl_observer.experimental.copy_edge_oos import (mesurer_oos, simuler_paper, ranger_variantes,
+                                                    mae_mfe, calibrer_risque, construire_table_prelim)
 
 H = 300_000
 
@@ -81,6 +82,32 @@ def test_simuler_paper_roi_cumule_vs_par_trade():
     # ROI cumulé = 20 trades × 28 bps × 150$ / 1000$ = +8,4 %  (≠ 28 bps par trade)
     assert round(sim["roi_cumulatif_pct"], 2) == round(20 * 28 / 1e4 * 150 / 1000 * 100, 2)
     assert len(sim["roi_par_trade_ic95_bps"]) == 2 and sim["drawdown_pct"] == 0.0
+
+
+def test_mae_mfe_excursions():
+    # entrée anti-lookahead = 1re bougie APRÈS le signal ; les excursions arrivent ensuite
+    serie = [(-60_000, 100.0), (0, 100.0), (60_000, 100.5), (120_000, 99.7), (180_000, 100.0)]
+    ev = {"ts_ms": -30_000, "direction": 1}                          # entrée à t=0 (px 100), puis +50 / -30
+    mae, mfe = mae_mfe(ev, serie, 200_000, delai_ms=0.0)
+    assert round(mfe) == 50 and round(mae) == -30                    # MFE +50, MAE -30 bps
+
+
+def test_calibrer_risque_kill_si_risque_domine_edge():
+    """Un edge minuscule avec une grosse excursion adverse APRÈS l'entrée -> KILL (risque ≫ edge)."""
+    serie = [(-60_000, 100.0), (0, 100.0), (60_000, 98.0), (120_000, 100.05)]   # entrée 100, plonge -200
+    ev = [{"ts_ms": -30_000, "coin": "X", "direction": 1, "move_frac": 0.1} for _ in range(30)]
+    r = calibrer_risque(ev, {"X": serie}, 200_000, edge_net_bps=5.0, min_events=5)
+    assert r["decision_risque"] == "KILL" and r["mae_p50_bps"] > 5.0   # adverse typique ≫ edge 5 bps
+
+
+def test_table_prelim_exclut_les_coins_a_risque_domine():
+    # WIN : monte doucement (edge>0, faible MAE) -> gardé ; VOLA : edge ~0 mais MAE énorme -> exclu
+    ev = [{"ts_ms": i * 1000, "coin": "WIN", "direction": 1, "move_frac": 0.1} for i in range(30)] \
+        + [{"ts_ms": i * 1000, "coin": "VOLA", "direction": 1, "move_frac": 0.1} for i in range(30)]
+    tape = {"WIN": [(i * 1000, 100.0 + 0.02 * i) for i in range(200)],
+            "VOLA": [(i * 1000, 100.0 + (5.0 if i % 2 else -5.0)) for i in range(200)]}
+    t = construire_table_prelim(ev, tape, horizons_ms=(60_000.0,), frais_bps=1.0, min_events=10)
+    assert "WIN" in t and t["WIN"]["stop_bps"] is not None and "VOLA" not in t
 
 
 def test_ranger_variantes_par_score():

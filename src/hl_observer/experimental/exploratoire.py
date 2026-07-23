@@ -23,24 +23,58 @@ VERSION = "v1"
 LEDGER_RELPATH = Path("runtime") / "data" / "exploratory_paper_ledger.jsonl"
 POSITIONS_RELPATH = Path("runtime") / "data" / "exploratory_paper_positions.json"
 STATUS_RELPATH = Path("runtime") / "data" / "exploratory_paper_status.json"
-PRELIM_RELPATH = Path("runtime") / "data" / "copy_prelim_edge.json"
+PRELIM_GELE_RELPATH = Path("runtime") / "data" / "copy_prelim_gele_v1.json"   # table GELÉE versionnée (prioritaire)
+PRELIM_RELPATH = Path("runtime") / "data" / "copy_prelim_edge.json"          # table live (repli d'amorçage)
 
 BUDGET_TOTAL_USD = 300.0          # PETIT budget isolé
 MAX_POSITIONS = 3                 # au plus 3 positions ouvertes
 NOTIONAL_CIBLE_USD = 60.0         # cible par position (bornée ensuite par la profondeur du L2)
-STOP_PERTE_USD = 0.90             # PERTE PLAFONNÉE par position (~1,5 % de 60 $) -> sortie STOP_PERTE
+STOP_BPS_DEFAUT = 20.0            # stop de repli (bps) si le coin n'a pas de risque calibré — JAMAIS 150 bps
 HOLD_MAX_H_DEFAUT = 1.0           # sortie au plus tard après l'horizon (défini)
 SEUIL_MOVE_EXPLO = 0.02           # exploratoire : seuil NAV plus bas (2 %) pour APPRENDRE de plus de moves live
+N_CORE = 2                        # 2 vaults CORE (retenus stricts)
+N_CHALLENGERS = 6                 # + jusqu'à 6 CHALLENGERS (bar plus souple, notional réduit)
+NOTIONAL_CHALLENGER_FACTOR = 0.5  # les challengers ouvrent en plus PETIT (on apprend en risquant moins)
+SCORES_RELPATH = Path("runtime") / "data" / "vaults_scores.json"
+
+
+def tiers(root: Path) -> tuple[set[str], set[str]]:
+    """(CORE, CHALLENGERS) depuis vaults_scores : CORE = retenus stricts (top 2) ; CHALLENGERS = suivants
+    par composite passant une barre de SÉCURITÉ (âge/drawdown/copyabilité), jamais tout-venant. DENY-BY-
+    DEFAULT reste : sans score, les deux ensembles sont vides."""
+    try:
+        d = json.loads((root / SCORES_RELPATH).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return set(), set()
+    classement = d.get("classement") or []
+    core = [c["vault"] for c in classement if c.get("retenu")][:N_CORE]
+    challengers: list[str] = []
+    for c in classement:
+        if c["vault"] in core:
+            continue
+        f = c.get("facteurs", {})
+        if (float(f.get("anciennete_j") or 0) >= 45 and float(f.get("drawdown_pct") or 100) <= 45
+                and float(f.get("copyabilite") or 0) >= 0.5):     # sécurité minimale (deny-by-default conservé)
+            challengers.append(c["vault"])
+        if len(challengers) >= N_CHALLENGERS:
+            break
+    return set(core), set(challengers)
 
 
 def charger_table_prelim(root: Path) -> dict[str, dict]:
-    """{coin: {edge_brut_bps, horizon_ms, net_bps}} — edge PRÉLIMINAIRE positif par coin (source du gate).
-    Vide si le fichier n'existe pas → la cohorte n'ouvre RIEN (deny-by-default, jamais forcé)."""
-    try:
-        d = json.loads((root / PRELIM_RELPATH).read_text(encoding="utf-8"))
-    except (OSError, ValueError):
-        return {}
-    return {str(k).upper(): v for k, v in (d.get("table") or d).items() if isinstance(v, dict)}
+    """{coin: {edge_brut_bps, horizon_ms, net_bps, stop_bps, take_profit_bps}} — edge PRÉLIMINAIRE positif
+    par coin, avec risque calibré. Priorité à la table GELÉE VERSIONNÉE (anti-réoptimisation : le forward
+    ne se réoptimise jamais après coup) ; repli sur la table live seulement pour l'amorçage. Vide → la
+    cohorte n'ouvre RIEN (deny-by-default, jamais forcé)."""
+    for rel in (PRELIM_GELE_RELPATH, PRELIM_RELPATH):
+        try:
+            d = json.loads((root / rel).read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            continue
+        t = {str(k).upper(): v for k, v in (d.get("table") or d).items() if isinstance(v, dict)}
+        if t:
+            return t
+    return {}
 
 
 def charger_store(root: Path) -> dict:
@@ -97,18 +131,21 @@ def ouvrir(sig: MP.Signal, store: dict, root: Path, *, now_ms: float) -> dict:
 
 
 def sortir(pos: dict, store: dict, root: Path, *, prix_sortie: float, cout_sortie_bps: float,
-           raison: str, now_ms: float) -> dict:
+           raison: str, now_ms: float, mae_bps: float | None = None, mfe_bps: float | None = None) -> dict:
     realized = MP.pnl_courant_usd(pos, mark=prix_sortie, now_ms=now_ms) - cout_sortie_bps / 1e4 * pos["notional_usd"]
     realized = round(realized, 6)
+    duree_ms = now_ms - float(pos.get("ts_ouverture_ms") or now_ms)
     store["ouvertes"].pop(pos["coin"], None)
     store["cash"] = round(store["cash"] + pos["notional_usd"] + realized, 6)
     store["realise_total_usd"] = round(store.get("realise_total_usd", 0.0) + realized, 6)
     _ledger(root, {"evt": "CLOSE", "ts_ms": now_ms, "coin": pos["coin"], "sens": pos["sens"],
                    "notional_usd": pos["notional_usd"], "prix_entree": pos["prix_entree"],
                    "prix_sortie": prix_sortie, "realized_usd": realized, "raison": raison,
+                   "duree_ms": round(duree_ms), "mae_bps": mae_bps, "mfe_bps": mfe_bps,
+                   "delai_detection_ms": pos.get("meta", {}).get("delai_detection_ms"),
                    "vault": pos.get("meta", {}).get("vault")})
     _sauver(root, store)
-    return {"coin": pos["coin"], "realized_usd": realized, "raison": raison}
+    return {"coin": pos["coin"], "realized_usd": realized, "raison": raison, "mae_bps": mae_bps, "mfe_bps": mfe_bps}
 
 
 def _mark(root: Path, coin: str, *, now_ms: float, lecteur_l2=None) -> float | None:
@@ -121,21 +158,55 @@ def _mark(root: Path, coin: str, *, now_ms: float, lecteur_l2=None) -> float | N
 
 
 def _raison_sortie(pos: dict, root: Path, *, now_ms: float, mark: float | None) -> tuple[str | None, float]:
-    """Sortie DÉFINIE : (1) le LEADER a réduit/clos ; (2) perte plafonnée ; (3) horizon atteint. Rend
-    (raison ou None, cout_sortie_bps)."""
+    """Sortie DÉFINIE avec risque CALIBRÉ (rectif Flo : plus de stop fixe démesuré). (1) le LEADER a
+    réduit/clos ; (2) STOP calibré = MAE_p75 du coin (excursion adverse en bps) ; (3) TAKE-PROFIT calibré
+    = MFE_p50 ; (4) horizon. Le stop/TP sont en bps (proportionnés à l'edge), jamais un forfait absurde."""
     from hl_observer.experimental.runner import _leader_a_reduit
+    meta = pos.get("meta") or {}
     cout_sortie = float(pos.get("spread_bps") or 0.0) / 2.0 + float(pos.get("frais_bps") or 0.0) + float(pos.get("slippage_bps") or 0.0)
     leader, raison_leader = _leader_a_reduit(pos, root)
     if leader:
         return raison_leader, cout_sortie
-    if mark is not None:
-        pnl = MP.pnl_courant_usd(pos, mark=mark, now_ms=now_ms)
-        if pnl <= -STOP_PERTE_USD:
+    if mark is not None and pos.get("prix_entree"):
+        # excursion BRUTE courante dans le sens de la position (bps)
+        excursion_bps = pos["sens"] * (mark - pos["prix_entree"]) / pos["prix_entree"] * 1e4
+        stop_bps = float(meta.get("stop_bps") or STOP_BPS_DEFAUT)
+        tp_bps = meta.get("take_profit_bps")
+        if excursion_bps <= -stop_bps:
             return "STOP_PERTE", cout_sortie
+        if tp_bps and excursion_bps >= float(tp_bps):
+            return "TAKE_PROFIT", cout_sortie
     horizon_ms = float(pos.get("hold_h") or HOLD_MAX_H_DEFAUT) * 3_600_000.0
     if (now_ms - float(pos.get("ts_ouverture_ms") or now_ms)) >= horizon_ms:
         return "HORIZON_ATTEINT", cout_sortie
     return None, cout_sortie
+
+
+def _expectancy(root: Path) -> dict:
+    """Expectancy des trades CLÔTURÉS (depuis le ledger) : n, winrate, gain/perte moyens, expectancy $ par
+    trade, MAE/MFE moyens, délai fill→copie moyen. Vide si aucun trade clos."""
+    try:
+        closes = [json.loads(l) for l in (root / LEDGER_RELPATH).read_text(encoding="utf-8", errors="ignore").splitlines()
+                  if l.strip()]
+    except OSError:
+        return {"n_trades": 0}
+    closes = [c for c in closes if c.get("evt") == "CLOSE"]
+    if not closes:
+        return {"n_trades": 0}
+    pnls = [float(c.get("realized_usd") or 0.0) for c in closes]
+    gains = [p for p in pnls if p > 0]
+    pertes = [p for p in pnls if p < 0]
+    maes = [float(c["mae_bps"]) for c in closes if c.get("mae_bps") is not None]
+    mfes = [float(c["mfe_bps"]) for c in closes if c.get("mfe_bps") is not None]
+    delais = [float(c["delai_detection_ms"]) for c in closes if c.get("delai_detection_ms") is not None]
+    n = len(pnls)
+    return {"n_trades": n, "winrate_pct": round(len(gains) / n * 100, 1),
+            "gain_moyen_usd": round(sum(gains) / len(gains), 4) if gains else 0.0,
+            "perte_moyenne_usd": round(sum(pertes) / len(pertes), 4) if pertes else 0.0,
+            "expectancy_usd_par_trade": round(sum(pnls) / n, 4),
+            "mae_moyen_bps": round(sum(maes) / len(maes), 2) if maes else None,
+            "mfe_moyen_bps": round(sum(mfes) / len(mfes), 2) if mfes else None,
+            "delai_fill_copie_moyen_ms": round(sum(delais) / len(delais)) if delais else None}
 
 
 def tick(root: str | Path = ".", *, now_ms: float | None = None, lecteur_l2=None) -> dict[str, Any]:
@@ -149,16 +220,29 @@ def tick(root: str | Path = ".", *, now_ms: float | None = None, lecteur_l2=None
     fermetures: list[dict] = []
     for pos in list(store["ouvertes"].values()):
         mark = _mark(root, pos["coin"], now_ms=now, lecteur_l2=lecteur_l2)
+        if mark is not None and pos.get("prix_entree"):           # MAE/MFE suivis en continu (rectif Flo)
+            exc = pos["sens"] * (mark - pos["prix_entree"]) / pos["prix_entree"] * 1e4
+            pos["mae_bps"] = round(min(pos.get("mae_bps", 0.0), exc), 3)
+            pos["mfe_bps"] = round(max(pos.get("mfe_bps", 0.0), exc), 3)
         raison, cout = _raison_sortie(pos, root, now_ms=now, mark=mark)
         if raison:
             fermetures.append(sortir(pos, store, root, prix_sortie=(mark or pos["prix_entree"]),
-                                     cout_sortie_bps=cout, raison=raison, now_ms=now))
+                                     cout_sortie_bps=cout, raison=raison, now_ms=now,
+                                     mae_bps=pos.get("mae_bps"), mfe_bps=pos.get("mfe_bps")))
+    _sauver(root, store)                                           # persiste les MAE/MFE mis à jour
+    core, challengers = tiers(root)                               # CORE (2) + CHALLENGERS (≤6)
     sigs, refus = signaux_vaults(root, now_ms=now, lecteur_l2=lecteur_l2, edge_par_coin=table,
-                                 seuil_move=SEUIL_MOVE_EXPLO)
+                                 seuil_move=SEUIL_MOVE_EXPLO, retenus=core | challengers)
     ouvertures: list[dict] = []
     from collections import Counter
     motifs = Counter(r["motif"] for r in refus)
     for sig in sigs:
+        vault = sig.meta.get("vault")
+        tier = "CORE" if vault in core else ("CHALLENGER" if vault in challengers else "?")
+        if tier == "CHALLENGER":                                  # challengers : notional PLUS PETIT (on apprend)
+            sig.notional_usd = round(sig.notional_usd * NOTIONAL_CHALLENGER_FACTOR, 2)
+            sig.pnl_attendu_usd = round(sig.pnl_attendu_usd * NOTIONAL_CHALLENGER_FACTOR, 4)
+        sig.meta["tier"] = tier
         ok, motif = admettre(sig, store)
         if ok:
             ouvertures.append(ouvrir(sig, store, root, now_ms=now))
@@ -176,10 +260,12 @@ def tick(root: str | Path = ".", *, now_ms: float | None = None, lecteur_l2=None
           "realise_total_usd": store.get("realise_total_usd", 0.0), "non_realise_usd": round(non_realise, 4),
           "equity_usd": equity, "roi_cumulatif_pct": round((equity - BUDGET_TOTAL_USD) / BUDGET_TOTAL_USD * 100, 3),
           "ouvertures_ce_tick": len(ouvertures), "n_coins_prelim_positifs": len(table),
-          "refus_par_motif": dict(motifs),
+          "expectancy": _expectancy(root), "refus_par_motif": dict(motifs),
           "positions": [{"coin": p["coin"], "sens": p["sens"], "notional_usd": p["notional_usd"],
                          "prix_entree": p["prix_entree"], "vault": p.get("meta", {}).get("vault"),
-                         "edge_prelim_bps": p["edge_estime_bps"]} for p in store["ouvertes"].values()]}
+                         "edge_prelim_bps": p["edge_estime_bps"], "mae_bps": p.get("mae_bps"),
+                         "mfe_bps": p.get("mfe_bps"), "delai_detection_ms": p.get("meta", {}).get("delai_detection_ms")}
+                        for p in store["ouvertes"].values()]}
     p = root / STATUS_RELPATH
     p.parent.mkdir(parents=True, exist_ok=True)
     p.write_text(json.dumps(st, ensure_ascii=False, indent=1), encoding="utf-8")
@@ -187,4 +273,4 @@ def tick(root: str | Path = ".", *, now_ms: float | None = None, lecteur_l2=None
 
 
 __all__ = ["tick", "admettre", "ouvrir", "sortir", "charger_store", "charger_table_prelim",
-           "BUDGET_TOTAL_USD", "MAX_POSITIONS", "STOP_PERTE_USD", "MODE"]
+           "BUDGET_TOTAL_USD", "MAX_POSITIONS", "STOP_BPS_DEFAUT", "MODE"]
