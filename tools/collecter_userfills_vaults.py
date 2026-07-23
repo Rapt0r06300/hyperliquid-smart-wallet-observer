@@ -33,6 +33,7 @@ NOM_VERROU = "userfills_live"
 RUN_ID = ""
 RUN_TOKEN = ""                    # provenance HORS PAYLOAD (en mémoire) — arme le trade + l'écriture runtime
 _MUTEX = None                     # handle du mutex Windows (à garder vivant)
+TRIGGER_VERSION = "v1"            # version du déclencheur (estampillée OPEN+CLOSE ; filtre les stats config courante)
 
 
 def _activite_par_vault(root: Path, *, fenetre_h: float = 2.0, max_lignes: int = 4000) -> dict:
@@ -227,10 +228,20 @@ def _log_l2(root: Path, evt: str, coin: str, extra: dict | None = None) -> None:
 
 
 def _coins_actifs(root: Path) -> set:
+    """Cibles d'abonnement L2 WS = coins à POSITION RAW ouverte UNION coins en AGRÉGATION (prewarm, TTL 12 s)
+    -> l'abonnement L2 démarre EN PARALLÈLE dès le début de l'agrégation (course avec le REST)."""
+    coins: set = set()
     try:
-        return set(json.loads((root / CO.COINS_ACTIFS_RELPATH).read_text(encoding="utf-8")).get("coins") or [])
+        coins |= set(json.loads((root / CO.COINS_ACTIFS_RELPATH).read_text(encoding="utf-8")).get("coins") or [])
     except (OSError, ValueError):
-        return set()
+        pass
+    try:
+        pw = json.loads((root / CO.COINS_PREWARM_RELPATH).read_text(encoding="utf-8")).get("coins") or {}
+        maintenant = time.time() * 1000
+        coins |= {c for c, t in pw.items() if maintenant - float(t) <= 12_000}
+    except (OSError, ValueError):
+        pass
+    return coins
 
 
 def _parse_l2_ws(d: dict) -> tuple | None:
@@ -342,7 +353,7 @@ def _traiter_un(root: Path, fill: dict, coins_a_verifier: set, t_ws_mono: float)
     coins_a_verifier.add(fill.get("coin"))
     for nom, coh in CO.COHORTES.items():
         r = CO.traiter_fill(coh, ETATS[nom], fill, root, token=RUN_TOKEN, t_ws_mono=t_ws_mono,
-                            lecteur_l2=_lecteur_l2_ondemand)                # token + horloge monotone + L2<1s on-demand
+                            lecteur_l2=_lecteur_l2_marquage)               # admission = book WS prewarmé si frais, sinon REST
         _journal(root, fill, nom, r, recu)                        # trace TOUT, même les refus
         if r and r.get("ouverture"):
             print("[userfills] %s OUVRE %s @ %.4f latence=%dms (fill %s ts=%s)"
@@ -403,7 +414,7 @@ async def _exits_periodiques(root: Path, *, intervalle_s: float = 2.0) -> None:
         for coh in CO.COHORTES.values():
             try:
                 CO.gerer_exits(coh, root, lecteur_l2=_lecteur_l2_marquage)
-                CO.statut(coh, root, lecteur_l2=_lecteur_l2_marquage)
+                CO.statut(coh, root, lecteur_l2=_lecteur_l2_marquage, run_id=RUN_ID, trigger_version=TRIGGER_VERSION)
             except Exception as exc:  # noqa: BLE001
                 print("[userfills] exits %s err %s" % (coh.nom, str(exc)[:40]), flush=True)
         await asyncio.sleep(intervalle_s)
@@ -451,8 +462,9 @@ async def _rapport_periodique(root: Path, *, intervalle_s: float = 30.0) -> None
 
 
 async def _boucle(root: Path) -> None:
-    global RUN_ID, RUN_TOKEN, _MUTEX, _ROOT_LIVE
+    global RUN_ID, RUN_TOKEN, _MUTEX, _ROOT_LIVE, TRIGGER_VERSION
     _ROOT_LIVE = root
+    TRIGGER_VERSION = CO._params_trigger(root).get("variante", "v1")
     import secrets
     # VERROU PRINCIPAL = mutex nommé Windows ; le verrou fichier ne sert plus qu'au DIAGNOSTIC
     ok_mx, _MUTEX = VI.acquerir_mutex(NOM_VERROU)

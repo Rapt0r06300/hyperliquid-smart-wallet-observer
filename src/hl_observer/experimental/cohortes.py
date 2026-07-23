@@ -34,7 +34,9 @@ AGE_MAX_OPEN_MS = 5_000.0         # PLAFOND DE SÉCURITÉ (pas une cible) : un f
 SEUIL_ABS_MIN_USD = 150.0         # plancher EXÉCUTABLE anti-dust : jamais copier un OPEN cumulé sous ça
 FRAC_TVL_SIGNIF = 0.002           # significatif RELATIF au vault : cumulé >= 0.2 % de son TVL = vraie conviction
 PLAFOND_RAW_USD = 2_000.0         # PLAFOND du seuil relatif : un TRÈS gros vault ne doit pas être bloqué (clamp haut)
+AGE_MAX_PAPER_FILL_MS = 5_000.0   # ENTRÉE refusée si le délai TOTAL fill_leader->exécution_paper dépasse ça
 COINS_ACTIFS_RELPATH = Path("runtime") / "data" / "raw_coins_actifs.json"
+COINS_PREWARM_RELPATH = Path("runtime") / "data" / "raw_coins_prewarm.json"   # coins en agrégation -> abonnement L2 EN PARALLÈLE
 
 
 @dataclass(frozen=True)
@@ -154,25 +156,42 @@ def etat_initial(coh: Cohorte, root: Path, *, run_id: str | None = None, token: 
             "token": token or secrets.token_hex(16)}      # provenance HORS PAYLOAD (en mémoire)
 
 
-def _expectancy(coh: Cohorte, root: Path) -> dict:
+def _expectancy(coh: Cohorte, root: Path, *, run_id: str | None = None, trigger_version: str | None = None) -> dict:
+    """Stats des CLOSE. Si run_id (+ trigger_version) fourni : SEULS les trades de la CONFIG COURANTE comptent ;
+    les autres sont comptés à part LEGACY_CROSS_RUN (ancien run/version : $5, pas d'ACK L2) et n'entrent PAS
+    dans l'expectancy courante. PnL/ROI cumulé + alpha placebo moyen inclus."""
     try:
-        closes = [json.loads(l) for l in _p(coh, root, "ledger.jsonl").read_text(encoding="utf-8", errors="ignore").splitlines() if l.strip()]
+        evs = [json.loads(l) for l in _p(coh, root, "ledger.jsonl").read_text(encoding="utf-8", errors="ignore").splitlines() if l.strip()]
     except OSError:
         return {"n_trades": 0}
-    closes = [c for c in closes if c.get("evt") == "CLOSE"]
+    closes = [c for c in evs if c.get("evt") == "CLOSE"]
+    n_legacy = 0
+    if run_id is not None:
+        courant = []
+        for c in closes:
+            if c.get("run_id") == run_id and (trigger_version is None or c.get("trigger_version") == trigger_version):
+                courant.append(c)
+            else:
+                n_legacy += 1
+        closes = courant
     if not closes:
-        return {"n_trades": 0}
+        return {"n_trades": 0, "n_legacy_cross_run": n_legacy}
     pnls = [float(c.get("realized_usd") or 0.0) for c in closes]
+    rois = [float(c.get("realized_usd") or 0.0) / (float(c.get("notional_usd") or 0.0) or 1.0) * 100 for c in closes]
     lat = [float(c["latence_ms"]) for c in closes if c.get("latence_ms") is not None]
+    alphas = [float(c["alpha_vs_marche_bps"]) for c in closes if c.get("alpha_vs_marche_bps") is not None]
     n = len(pnls)
     return {"n_trades": n, "winrate_pct": round(sum(1 for p in pnls if p > 0) / n * 100, 1),
-            "expectancy_usd_par_trade": round(sum(pnls) / n, 4),
-            "latence_moyenne_ms": round(sum(lat) / len(lat)) if lat else None}
+            "expectancy_usd_par_trade": round(sum(pnls) / n, 4), "pnl_cumule_usd": round(sum(pnls), 4),
+            "roi_moyen_par_trade_pct": round(sum(rois) / n, 3),
+            "alpha_vs_marche_moyen_bps": round(sum(alphas) / len(alphas), 2) if alphas else None,
+            "latence_moyenne_ms": round(sum(lat) / len(lat)) if lat else None, "n_legacy_cross_run": n_legacy}
 
 
-def cohorte_active(coh: Cohorte, root: Path) -> bool:
-    """AUTO-KILL : une cohorte dont l'expectancy LIVE est négative (sur assez de trades) se met en pause."""
-    ex = _expectancy(coh, root)
+def cohorte_active(coh: Cohorte, root: Path, *, run_id: str | None = None, trigger_version: str | None = None) -> bool:
+    """AUTO-KILL : une cohorte dont l'expectancy LIVE (config COURANTE seule) est négative sur assez de trades
+    se met en pause. Le legacy cross-run ne peut ni sauver ni tuer la config courante."""
+    ex = _expectancy(coh, root, run_id=run_id, trigger_version=trigger_version)
     return not (ex.get("n_trades", 0) >= 10 and ex.get("expectancy_usd_par_trade", 0.0) < 0)
 
 
@@ -240,8 +259,31 @@ def _maj_coins_actifs(root: Path, coin: str, *, ajouter: bool, now_ms: float) ->
         pass
 
 
+def _maj_coins_prewarm(root: Path, coin: str, *, now_ms: float) -> None:
+    """PREWARM L2 EN PARALLÈLE : dès qu'un OPEN commence à s'agréger, on inscrit le coin ici pour que
+    l'abonnement L2 WS démarre TOUT DE SUITE (course avec le REST). Au moment du déclenchement, le book WS
+    est souvent déjà chaud -> admission rapide ; sinon repli REST. Best-effort, TTL géré côté collecteur."""
+    if not _ecriture_permise(root):
+        return
+    p = root / COINS_PREWARM_RELPATH
+    try:
+        cur = dict(json.loads(p.read_text(encoding="utf-8")).get("coins") or {}) if p.exists() else {}
+    except (OSError, ValueError):
+        cur = {}
+    cur[coin] = int(now_ms)
+    cur = {c: t for c, t in cur.items() if now_ms - float(t) <= 15_000}   # purge > 15 s
+    try:
+        p.parent.mkdir(parents=True, exist_ok=True)
+        tmp = p.with_suffix(".json.tmp")
+        tmp.write_text(json.dumps({"maj_ms": int(now_ms), "coins": cur}, ensure_ascii=False), encoding="utf-8")
+        tmp.replace(p)
+    except OSError:
+        pass
+
+
 def _ouvrir(coh: Cohorte, store: dict, root: Path, *, cle, coin, sens, notional, prix, cfg, cout_ar,
-            spread, slippage, fhl, vault, now_ms, fill_ts, lat_mono, run_id="", src_l2="", marque="") -> dict:
+            spread, slippage, fhl, vault, now_ms, fill_ts, lat_mono, run_id="", src_l2="", marque="",
+            trigger_version="", placebo=None) -> dict:
     eb = cfg.get("edge_brut_bps")
     edge_net = (float(eb) - cout_ar) if eb is not None else None    # RAW : pas d'edge (NON_VALIDEE)
     pos = {"coin": coin, "paire": cle, "moteur": "copy_" + coh.nom, "sens": sens, "type_pnl": "directional",
@@ -252,13 +294,15 @@ def _ouvrir(coh: Cohorte, store: dict, root: Path, *, cle, coin, sens, notional,
            "meta": {"vault": vault, "coin": coin, "stop_bps": cfg.get("stop_bps"),
                     "take_profit_bps": cfg.get("take_profit_bps"), "latence_ws_open_ms": lat_mono.get("ws_open_ms"),
                     "latences_mono": lat_mono, "fill_leader_ts_ms": int(fill_ts), "run_id": run_id,
-                    "source": SOURCE_LIVE, "src_l2": src_l2, "statut": marque or "VALIDEE"}}
+                    "source": SOURCE_LIVE, "src_l2": src_l2, "statut": marque or "VALIDEE",
+                    "trigger_version": trigger_version, "placebo": placebo}}
     store["ouvertes"][cle] = pos
     store["cash"] = round(store["cash"] - notional, 6)
     _ledger(coh, root, {"evt": "OPEN", "ts_ms": now_ms, "paire": cle, "coin": coin, "sens": sens,
                         "notional_usd": pos["notional_usd"], "prix_entree": prix, "edge_net_bps": pos["edge_estime_bps"],
                         "latences_mono": lat_mono, "vault": vault, "run_id": run_id, "source": SOURCE_LIVE,
-                        "src_l2": src_l2, "statut": marque or "VALIDEE",
+                        "src_l2": src_l2, "statut": marque or "VALIDEE", "trigger_version": trigger_version,
+                        "age_at_paper_fill_ms": lat_mono.get("age_at_paper_fill_ms"),
                         "motif": ("RAW mesure (sans edge)" if not coh.edge_requis else "copy OPEN/ADD + L2<1s + edge net>0")})
     _sauver(coh, root, store)
     if not coh.edge_requis:                                          # RAW : abonne le coin en BBO/L2 pour la vie de la position
@@ -269,15 +313,25 @@ def _ouvrir(coh: Cohorte, store: dict, root: Path, *, cle, coin, sens, notional,
 def _sortir(coh: Cohorte, pos: dict, store: dict, root: Path, *, prix_sortie, cout_sortie_bps, raison,
             now_ms, mae_bps=None, mfe_bps=None) -> dict:
     realized = round(MP.pnl_courant_usd(pos, mark=prix_sortie, now_ms=now_ms) - cout_sortie_bps / 1e4 * pos["notional_usd"], 6)
+    meta = pos.get("meta", {})
+    pl = meta.get("placebo") or {}                                   # PLACEBO même coin/même instant : alpha vs marché
+    mc0, mm0 = float(pl.get("mid_coin_open") or 0.0), float(pl.get("mid_marche_open") or 0.0)
+    mm1 = float(_allmids(root, now_ms=now_ms).get("BTC") or 0.0)
+    ret_coin_bps = round((prix_sortie / mc0 - 1.0) * 1e4, 3) if mc0 > 0 else None        # dérive brute du coin
+    ret_marche_bps = round((mm1 / mm0 - 1.0) * 1e4, 3) if (mm0 > 0 and mm1 > 0) else None  # dérive du MARCHÉ (BTC)
+    placebo_marche_bps = round(pos["sens"] * ret_marche_bps, 3) if ret_marche_bps is not None else None   # même sens sur le marché
+    alpha_vs_marche_bps = (round(pos["sens"] * ret_coin_bps - placebo_marche_bps, 3)     # capture coin MOINS marché = alpha vault
+                           if (ret_coin_bps is not None and placebo_marche_bps is not None) else None)
     store["ouvertes"].pop(pos.get("paire", pos["coin"]), None)       # clé = paire (RAW = vault|coin), pas coin
     store["cash"] = round(store["cash"] + pos["notional_usd"] + realized, 6)
     store["realise_total_usd"] = round(store.get("realise_total_usd", 0.0) + realized, 6)
     _ledger(coh, root, {"evt": "CLOSE", "ts_ms": now_ms, "coin": pos["coin"], "sens": pos["sens"],
                         "notional_usd": pos["notional_usd"], "prix_entree": pos["prix_entree"], "prix_sortie": prix_sortie,
                         "realized_usd": realized, "raison": raison, "mae_bps": mae_bps, "mfe_bps": mfe_bps,
-                        "latence_ms": pos.get("meta", {}).get("latence_fill_copie_ms"),
-                        "run_id": pos.get("meta", {}).get("run_id"), "source": SOURCE_LIVE,
-                        "vault": pos.get("meta", {}).get("vault")})
+                        "latence_ms": meta.get("latence_fill_copie_ms"), "run_id": meta.get("run_id"),
+                        "trigger_version": meta.get("trigger_version"), "source": SOURCE_LIVE, "vault": meta.get("vault"),
+                        "ret_coin_bps": ret_coin_bps, "ret_marche_bps": ret_marche_bps,
+                        "placebo_marche_bps": placebo_marche_bps, "alpha_vs_marche_bps": alpha_vs_marche_bps})
     _sauver(coh, root, store)
     if not coh.edge_requis and not any(p.get("coin") == pos["coin"] for p in store["ouvertes"].values()):
         _maj_coins_actifs(root, pos["coin"], ajouter=False, now_ms=now_ms)   # désabonne si plus aucune position sur ce coin
@@ -371,6 +425,8 @@ def traiter_fill(coh: Cohorte, etat: dict, fill: dict, root: Path, *, now_ms: fl
     else:
         ag = {"sens": sens, "notional": notional_fill, "t0": now, "fill_ts": int(fill.get("ts_ms") or now)}
         etat["agg"][key] = ag
+        if not coh.edge_requis:
+            _maj_coins_prewarm(root, coin, now_ms=now)             # RAW : lance l'abonnement L2 WS EN PARALLÈLE
     # DÉCLENCHEUR SIGNIFICATIF RELATIF AU VAULT (remplace le seuil fixe unique) : cumulé >= max(plancher
     # exécutable, frac × TVL). Petit vault -> plancher ; gros vault -> conviction proportionnelle.
     signif, _seuil = _declencheur_significatif(coh, vault, ag["notional"], root)
@@ -379,7 +435,8 @@ def traiter_fill(coh: Cohorte, etat: dict, fill: dict, root: Path, *, now_ms: fl
     etat["agg"].pop(key, None)
     t_dec = time.monotonic()                                     # HORLOGE MONOTONE LOCALE : décision
     cle = _cle(coh, vault, coin)
-    if not cohorte_active(coh, root):                             # AUTO-KILL : cohorte en pause (expectancy live < 0)
+    _trig = _params_trigger(root).get("variante", "v1")          # version du déclencheur (estampillée OPEN+CLOSE)
+    if not cohorte_active(coh, root, run_id=etat.get("run_id"), trigger_version=_trig):   # AUTO-KILL : config COURANTE seule
         return {"refus": "COHORTE_EN_PAUSE_AUTO_KILL", "coin": coin}
     # deny-by-default : le vault doit être suivi par la cohorte
     if vault not in _vaults_cohorte(coh, root):
@@ -430,14 +487,22 @@ def traiter_fill(coh: Cohorte, etat: dict, fill: dict, root: Path, *, now_ms: fl
     prix = hl_ask if sens > 0 else hl_bid
     t_open = time.monotonic()
     t0 = t_ws_mono if t_ws_mono is not None else t_dec
+    # ÂGE RÉEL À L'EXÉCUTION PAPER = fill leader -> réception -> décision -> acquisition L2 -> open (PAS juste
+    # l'âge à la décision : les 2 1ers trades faisaient ~1,7 s, pas 317/769 ms). ENTRÉE refusée si trop tardive.
+    age_paper = round(now - float(fill.get("ts_ms") or now) + (t_open - t_dec) * 1000)
+    if age_paper > AGE_MAX_PAPER_FILL_MS:
+        return {"refus": "ENTREE_TROP_TARDIVE", "coin": coin, "age_at_paper_fill_ms": age_paper}
     lat_mono = {"ws_decision_ms": round((t_dec - t0) * 1000, 1), "decision_l2_ms": round((t_l2 - t_dec) * 1000, 1),
                 "l2_open_ms": round((t_open - t_l2) * 1000, 1), "ws_open_ms": round((t_open - t0) * 1000, 1),
-                "age_event_ms": round(now - float(fill.get("ts_ms") or now))}   # HL ts = âge/skew (peut être négatif)
+                "age_event_ms": round(now - float(fill.get("ts_ms") or now)),   # HL ts à la décision (skew possible)
+                "age_at_paper_fill_ms": age_paper}                              # DÉLAI TOTAL à l'exécution paper
+    placebo = {"mid_coin_open": round(mid, 8), "mid_marche_open": _allmids(root, now_ms=now).get("BTC"), "ts_open": now}
     pos = _ouvrir(coh, store, root, cle=cle, coin=coin, sens=sens, notional=notional, prix=prix, cfg=cfg,
                   cout_ar=cout_ar, spread=spread, slippage=slippage, fhl=fhl, vault=vault, now_ms=now,
                   fill_ts=ag["fill_ts"], lat_mono=lat_mono, run_id=etat.get("run_id", ""), src_l2=l2.get("src", ""),
-                  marque=coh.marque)
-    return {"ouverture": pos, "latence_ws_open_ms": lat_mono["ws_open_ms"], "paire": cle}
+                  marque=coh.marque, trigger_version=_trig, placebo=placebo)
+    return {"ouverture": pos, "latence_ws_open_ms": lat_mono["ws_open_ms"], "paire": cle,
+            "age_at_paper_fill_ms": age_paper}
 
 
 def _vaults_cohorte(coh: Cohorte, root: Path) -> set[str]:
@@ -490,7 +555,8 @@ def gerer_exits(coh: Cohorte, root: Path, *, now_ms: float | None = None, lecteu
     return fermetures
 
 
-def statut(coh: Cohorte, root: Path, *, now_ms: float | None = None, lecteur_l2=None) -> dict:
+def statut(coh: Cohorte, root: Path, *, now_ms: float | None = None, lecteur_l2=None,
+           run_id: str | None = None, trigger_version: str | None = None) -> dict:
     now = float(now_ms if now_ms is not None else time.time() * 1000)
     store = charger_store(coh, root)
     non_realise = 0.0
@@ -499,11 +565,13 @@ def statut(coh: Cohorte, root: Path, *, now_ms: float | None = None, lecteur_l2=
         if mark is not None:
             non_realise += MP.pnl_courant_usd(pos, mark=mark, now_ms=now)
     equity = round(store["cash"] + sum(p["notional_usd"] for p in store["ouvertes"].values()) + non_realise, 4)
-    st = {"cohorte": coh.nom, "real_execution": False, "ts_ms": int(now), "active": cohorte_active(coh, root),
+    st = {"cohorte": coh.nom, "real_execution": False, "ts_ms": int(now),
+          "active": cohorte_active(coh, root, run_id=run_id, trigger_version=trigger_version),
+          "config": {"run_id": run_id, "trigger_version": trigger_version},
           "budget_usd": coh.budget_usd, "cash": store["cash"], "positions_ouvertes": len(store["ouvertes"]),
           "realise_total_usd": store.get("realise_total_usd", 0.0), "non_realise_usd": round(non_realise, 4),
           "equity_usd": equity, "roi_cumulatif_pct": round((equity - coh.budget_usd) / coh.budget_usd * 100, 3),
-          "expectancy": _expectancy(coh, root),
+          "expectancy": _expectancy(coh, root, run_id=run_id, trigger_version=trigger_version),
           "positions": [{"coin": p["coin"], "sens": p["sens"], "notional_usd": p["notional_usd"],
                          "prix_entree": p["prix_entree"], "vault": p.get("meta", {}).get("vault"),
                          "edge_net_bps": p["edge_estime_bps"], "mae_bps": p.get("mae_bps"), "mfe_bps": p.get("mfe_bps"),

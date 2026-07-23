@@ -227,13 +227,66 @@ def test_probe_exclut_les_coins_alpha(tmp_path):
 
 def test_auto_kill_expectancy_negative(tmp_path):
     _setup(tmp_path)
-    # 10 trades clôturés perdants -> cohorte inactive
-    led = tmp_path / "runtime" / "data" / "exploratory_paper_ledger.jsonl"
-    led.write_text("\n".join(json.dumps({"evt": "CLOSE", "realized_usd": -0.5}) for _ in range(10)))
-    assert CO.cohorte_active(CO.ALPHA, tmp_path) is False
     etat = CO.etat_initial(CO.ALPHA, tmp_path)
+    rid = etat["run_id"]
+    # 10 CLOSE perdants SOUS LA CONFIG COURANTE (run_id + trigger v1) -> auto-KILL de la config courante
+    led = tmp_path / "runtime" / "data" / "exploratory_paper_ledger.jsonl"
+    led.write_text("\n".join(json.dumps({"evt": "CLOSE", "realized_usd": -0.5, "notional_usd": 60.0,
+                                          "run_id": rid, "trigger_version": "v1"}) for _ in range(10)))
+    assert CO.cohorte_active(CO.ALPHA, tmp_path, run_id=rid, trigger_version="v1") is False
     r = CO.traiter_fill(CO.ALPHA, etat, _fill(), tmp_path, now_ms=1e12, lecteur_l2=_l2, token=etat["token"])
     assert r and r.get("refus") == "COHORTE_EN_PAUSE_AUTO_KILL"
+
+
+def test_legacy_cross_run_exclu_des_stats_courantes(tmp_path):
+    """Les trades d'un ANCIEN run (ou autre trigger_version) sont LEGACY_CROSS_RUN : ils n'entrent PAS dans
+    l'expectancy de la config courante et ne peuvent pas la mettre en pause."""
+    _setup(tmp_path)
+    led = tmp_path / "runtime" / "data" / "exploratory_paper_ledger.jsonl"
+    # 10 perdants LEGACY (run ancien) + 0 courant -> config courante NON tuée (n_trades courant = 0)
+    led.write_text("\n".join(json.dumps({"evt": "CLOSE", "realized_usd": -0.5, "notional_usd": 5.0,
+                                          "run_id": "run-ANCIEN", "trigger_version": "v0"}) for _ in range(10)))
+    ex = CO._expectancy(CO.ALPHA, tmp_path, run_id="run-COURANT", trigger_version="v1")
+    assert ex["n_trades"] == 0 and ex["n_legacy_cross_run"] == 10                 # legacy compté à part, exclu
+    assert CO.cohorte_active(CO.ALPHA, tmp_path, run_id="run-COURANT", trigger_version="v1") is True   # pas tuée par le legacy
+
+
+def test_entree_trop_tardive_refusee(tmp_path, monkeypatch):
+    """ENTRÉE refusée si le délai TOTAL (fill->exécution paper) dépasse le plafond, même si l'âge à la
+    décision passe le gate catch-up. (On rend le plafond minuscule pour le prouver.)"""
+    _setup(tmp_path)
+    monkeypatch.setattr(CO, "AGE_MAX_PAPER_FILL_MS", 100.0)
+    now = 1_000_000_000_500.0
+    etat = CO.etat_initial(CO.RAW_PROBE, tmp_path)
+    r = CO.traiter_fill(CO.RAW_PROBE, etat, _fill(coin="DOGE", sz=3, px=150.0, ts_ms=now - 300), tmp_path,
+                        now_ms=now, lecteur_l2=_l2, token=etat["token"])
+    assert r and r.get("refus") == "ENTREE_TROP_TARDIVE"          # 300 ms > plafond 100 ms
+
+
+def test_trigger_version_et_placebo_au_cycle(tmp_path):
+    """OPEN+CLOSE estampillés trigger_version ; âge total journalisé ; placebo marché (BTC) -> alpha calculé."""
+    _setup(tmp_path)
+    now1 = 1_000_000_000_500.0
+    (tmp_path / "runtime" / "data" / "hl_allmids.json").write_text(json.dumps(
+        {"ts_ms": now1, "mids": {"BTC": 60000.0, "DOGE": 150.0}}))
+    etat = CO.etat_initial(CO.RAW_PROBE, tmp_path)
+    o = CO.traiter_fill(CO.RAW_PROBE, etat, _fill(coin="DOGE", sz=3, px=150.0), tmp_path,
+                        now_ms=now1, lecteur_l2=_l2, token=etat["token"])
+    assert o and o.get("ouverture") and o["age_at_paper_fill_ms"] is not None
+    assert o["ouverture"]["meta"]["trigger_version"] == "v1"
+    assert o["ouverture"]["meta"]["placebo"]["mid_marche_open"] == 60000.0
+    led = [json.loads(x) for x in (tmp_path / "runtime" / "data" / "raw_probe_ledger.jsonl").read_text().splitlines()]
+    opn = [e for e in led if e["evt"] == "OPEN"][0]
+    assert opn["trigger_version"] == "v1" and opn["age_at_paper_fill_ms"] is not None
+    # clôture au HORIZON : BTC baisse de 1 % -> ret_marche/placebo/alpha calculés
+    now2 = now1 + 3_600_001
+    (tmp_path / "runtime" / "data" / "hl_allmids.json").write_text(json.dumps(
+        {"ts_ms": now2, "mids": {"BTC": 59400.0, "DOGE": 150.0}}))
+    assert CO.gerer_exits(CO.RAW_PROBE, tmp_path, now_ms=now2, lecteur_l2=_l2)
+    led2 = [json.loads(x) for x in (tmp_path / "runtime" / "data" / "raw_probe_ledger.jsonl").read_text().splitlines()]
+    clo = [e for e in led2 if e["evt"] == "CLOSE"][0]
+    assert clo["trigger_version"] == "v1" and clo["ret_marche_bps"] is not None
+    assert clo["placebo_marche_bps"] is not None and clo["alpha_vs_marche_bps"] is not None
 
 
 def test_isolation_alpha_probe(tmp_path):

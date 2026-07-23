@@ -53,15 +53,19 @@ def construire_rapport(root: str | Path) -> str | None:
          "- edge estimé : %s (RAW = NON_VALIDÉE, aucun edge requis)" % op.get("edge_net_bps"),
          "- latences monotones (ms) : WS→déc %s · déc→L2 %s · L2→open %s · WS→open %s" % (
              lm.get("ws_decision_ms"), lm.get("decision_l2_ms"), lm.get("l2_open_ms"), lm.get("ws_open_ms")),
-         "- âge événement (skew HL, peut être négatif) : %s ms" % lm.get("age_event_ms"),
-         "- run_id : %s · statut : %s" % (op.get("run_id"), op.get("statut")), ""]
+         "- âge événement à la décision (skew HL possible) : %s ms" % lm.get("age_event_ms"),
+         "- **âge RÉEL à l'exécution paper (total fill→open)** : %s ms" % lm.get("age_at_paper_fill_ms"),
+         "- run_id : %s · trigger_version : %s · statut : %s" % (op.get("run_id"), op.get("trigger_version"), op.get("statut")), ""]
     if cl:
         notional = float(op.get("notional_usd") or 0.0) or 1.0
         roi = float(cl.get("realized_usd") or 0.0) / notional * 100.0
         L += ["## CLÔTURE — %s" % cl.get("raison"),
-              "- prix de sortie : %s" % cl.get("prix_sortie"),
+              "- prix de sortie : %s · trigger_version : %s" % (cl.get("prix_sortie"), cl.get("trigger_version")),
               "- MFE / MAE (bps) : %s / %s" % (cl.get("mfe_bps"), cl.get("mae_bps")),
-              "- PnL réalisé : %s $ · ROI : %s %%" % (cl.get("realized_usd"), round(roi, 3)), ""]
+              "- PnL réalisé : %s $ · ROI : %s %%" % (cl.get("realized_usd"), round(roi, 3)),
+              "- PLACEBO même coin/instant : ret_coin %s bps · ret_marché(BTC) %s bps · placebo %s bps · "
+              "**alpha vs marché %s bps**" % (cl.get("ret_coin_bps"), cl.get("ret_marche_bps"),
+                                              cl.get("placebo_marche_bps"), cl.get("alpha_vs_marche_bps")), ""]
     else:
         L += ["## CLÔTURE", "- position encore OUVERTE (pas de close du leader pour l'instant)", ""]
     L += ["_Sécurité : paper only · real_execution=false · 0 ordre réel · 0 clé · 0 signature._"]

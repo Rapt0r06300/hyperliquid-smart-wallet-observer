@@ -1,15 +1,15 @@
-# Rapport quotidien HyperSmart — 23/07/2026 17:59
+# Rapport quotidien HyperSmart — 23/07/2026 23:57
 
 _Chaque chiffre se remonte à un fichier (ledger, positions, journaux). Fenêtre : dernières 24 h._
 
 ## 1. PnL réalisé (dernières 24 h)
 
 - `MODULE_CARRY_DESACTIVE` : **-3.3242 $** (×6)
-- `ARB_STOP_ECART_AGGRAVE` : **-3.1958 $** (×12)
 - `DONNEE_ABSENTE_PROLONGEE` : **-1.4779 $** (×6)
-- `ARB_AGE_MAX_SANS_CONVERGENCE` : **+0.6061 $** (×8)
+- `ARB_STOP_ECART_AGGRAVE` : **-1.2222 $** (×5)
+- `ARB_AGE_MAX_SANS_CONVERGENCE` : **+0.0334 $** (×6)
 
-**Total 24 h : -7.3918 $** · 32 fermeture(s)
+**Total 24 h : -5.9909 $** · 23 fermeture(s)
 
 Total historique (toutes époques, jamais maquillé) : **-12.7808 $** sur 90 fermetures.
 
@@ -19,13 +19,13 @@ Aucune position ouverte.
 
 ## 3. Santé du système
 
-- Collecteurs : **1 MUET(S)** — carry-feeder (silence 150.2 min)
+- Collecteurs : **1 MUET(S)** — carry-feeder (silence 507.5 min)
 - Superviseur : relances cumulées {'carry-feeder': 2, 'marks-collector': 2, 'liq-collector': 2, 'venues-collector': 3, 'rapport-quotidien': 1, 'carnet-collector': 1}
 
 ## 4. Mesures en cours
 
-- Cross-venue : **98.5 h / 72 h** (352386 observations) — verdict aux barres pré-écrites, jamais avant.
-- Usine à données replay (24 h) : **9 candidats** · **247170 marks** — c'est le carburant du replay A/B.
+- Cross-venue : **104.5 h / 72 h** (398736 observations) — verdict aux barres pré-écrites, jamais avant.
+- Usine à données replay (24 h) : **9 candidats** · **256551 marks** — c'est le carburant du replay A/B.
 
 ## 5. Refus dominants (24 h) — le bot explique pourquoi il n'ouvre pas
 
@@ -33,7 +33,7 @@ Aucune position ouverte.
 
 ## 6. Leçons du ledger — aucune perte sans explication
 
-28 perte(s), -8.2133 $ au total :
+20 perte(s), -6.1597 $ au total :
 - 🔴 **RÉGRESSION** HYPE -0.1358 $ `DONNEE_ABSENTE_PROLONGEE` — cause reparee (e82dd4a+b6debb2) qui REVIENT apres le correctif : fermetures famine/rate-de-bougies : hors-shortlist gate par amortissement quand la donnee est vivante + cache pire-hausse 24 h. Le vrai blackout (0 mesure) reste une fermeture legitime -> demi-alarme seulement.
 - 🔴 **RÉGRESSION** AZTEC -0.1070 $ `DONNEE_ABSENTE_PROLONGEE` — cause reparee (e82dd4a+b6debb2) qui REVIENT apres le correctif : fermetures famine/rate-de-bougies : hors-shortlist gate par amortissement quand la donnee est vivante + cache pire-hausse 24 h. Le vrai blackout (0 mesure) reste une fermeture legitime -> demi-alarme seulement.
 - 🔴 **RÉGRESSION** VIRTUAL -0.2804 $ `DONNEE_ABSENTE_PROLONGEE` — cause reparee (e82dd4a+b6debb2) qui REVIENT apres le correctif : fermetures famine/rate-de-bougies : hors-shortlist gate par amortissement quand la donnee est vivante + cache pire-hausse 24 h. Le vrai blackout (0 mesure) reste une fermeture legitime -> demi-alarme seulement.
@@ -46,14 +46,6 @@ Aucune position ouverte.
 - 🔴 **INEXPLIQUÉE** SOL -0.2138 $ `MODULE_CARRY_DESACTIVE` — motif 'MODULE_CARRY_DESACTIVE' absent du registre : la leçon n'existe pas encore — autopsie due
 - 🔴 **INEXPLIQUÉE** XPL -0.1332 $ `MODULE_CARRY_DESACTIVE` — motif 'MODULE_CARRY_DESACTIVE' absent du registre : la leçon n'existe pas encore — autopsie due
 - 🔴 **INEXPLIQUÉE** ZEC -0.1345 $ `MODULE_CARRY_DESACTIVE` — motif 'MODULE_CARRY_DESACTIVE' absent du registre : la leçon n'existe pas encore — autopsie due
-- ✔ BADGER -0.0800 $ `ARB_AGE_MAX_SANS_CONVERGENCE` (attendu : l'ecart n'a pas converge avant l'age max -> on coupe, on paie le cout )
-- ✔ BNT -0.5008 $ `ARB_STOP_ECART_AGGRAVE` (attendu : l'ecart s'est ELARGI dans notre dos (>= entree + 25 bps) -> on coupe p)
-- ✔ ARK -0.2066 $ `ARB_STOP_ECART_AGGRAVE` (attendu : l'ecart s'est ELARGI dans notre dos (>= entree + 25 bps) -> on coupe p)
-- ✔ ARK -0.2299 $ `ARB_STOP_ECART_AGGRAVE` (attendu : l'ecart s'est ELARGI dans notre dos (>= entree + 25 bps) -> on coupe p)
-- ✔ BNT -0.2212 $ `ARB_STOP_ECART_AGGRAVE` (attendu : l'ecart s'est ELARGI dans notre dos (>= entree + 25 bps) -> on coupe p)
-- ✔ BNT -0.2922 $ `ARB_STOP_ECART_AGGRAVE` (attendu : l'ecart s'est ELARGI dans notre dos (>= entree + 25 bps) -> on coupe p)
-- ✔ ARK -0.2229 $ `ARB_STOP_ECART_AGGRAVE` (attendu : l'ecart s'est ELARGI dans notre dos (>= entree + 25 bps) -> on coupe p)
-- ✔ BNT -0.3000 $ `ARB_STOP_ECART_AGGRAVE` (attendu : l'ecart s'est ELARGI dans notre dos (>= entree + 25 bps) -> on coupe p)
 - ✔ ARK -0.0289 $ `ARB_AGE_MAX_SANS_CONVERGENCE` (attendu : l'ecart n'a pas converge avant l'age max -> on coupe, on paie le cout )
 - ✔ BNT -0.0555 $ `ARB_AGE_MAX_SANS_CONVERGENCE` (attendu : l'ecart n'a pas converge avant l'age max -> on coupe, on paie le cout )
 - ✔ ARK -0.2784 $ `ARB_STOP_ECART_AGGRAVE` (attendu : l'ecart s'est ELARGI dans notre dos (>= entree + 25 bps) -> on coupe p)
@@ -65,7 +57,7 @@ Aucune position ouverte.
 
 ## 7. PnL des refus (hebdo) — combien coûtent nos portes ?
 
-_Calculé il y a 2.4 j (cadence : hebdo). Simulation sur candidats refusés enregistrés — pas une promesse._
+_Calculé il y a 2.6 j (cadence : hebdo). Simulation sur candidats refusés enregistrés — pas une promesse._
 
 - `?` : ×435768 refus, 189688 mesurés, PnL simulé si on avait ouvert : -21388.03 $
 - non mesurables (pas de marks sur la fenêtre) : ×246080 — comptés, jamais inventés
@@ -145,10 +137,10 @@ _16 loi(s) : 13 réfutée(s), 2 limite(s), 1 confirmée(s). Détail complet : `d
 
 ## 13. À FAIRE — ce que les données d'aujourd'hui désignent
 
-- **Cross-venue : 72 h atteintes (99 h)** → lancer `python tools/mesurer_dispersion_venues.py` pour LE verdict (#178).
+- **Cross-venue : 72 h atteintes (104 h)** → lancer `python tools/mesurer_dispersion_venues.py` pour LE verdict (#178).
 - Relances de collecteurs au compteur : {'carry-feeder': 2, 'marks-collector': 2, 'liq-collector': 2, 'venues-collector': 3, 'rapport-quotidien': 1, 'carnet-collector': 1} — si un compteur grimpe SEUL demain, c'est lui le malade (doc R5).
 - Copy-whitelist : 4 leader(s) prouvé(s) → copy peut suivre CES leaders uniquement.
-- Markout copy : 87.2% des fills mesures (29211/33484) — le pipeline nourrit la whitelist.
+- Markout copy : 82.0% des fills mesures (29211/35640) — le pipeline nourrit la whitelist.
 - Replay : 603097 candidats consolidés → `RECHERCHE-SCENARIO-REPLAY.cmd` a de quoi travailler (porte deux-moitiés + plateau).
 
 ---
