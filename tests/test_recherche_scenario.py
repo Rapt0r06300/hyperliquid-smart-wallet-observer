@@ -198,12 +198,13 @@ def test_mode_collection_balaie_TOUT_et_classe_les_pepites_par_net_sous_stress(t
 def test_filtrer_candidats_reduit_a_la_sous_population_mesuree():
     from hl_observer.backtesting.recherche_scenario import FILTRES_PRESETS, filtrer_candidats
     cands = [{"signal_age_ms": 5000, "consensus_wallets": 4, "liquidity_score": 0.7},
+             {"signal_age_ms": 25000, "consensus_wallets": 4, "liquidity_score": 0.7},  # 23/07 : passe 'frais' 30s (calibré médiane ~62s), aurait échoué l'ancien seuil 10s
              {"signal_age_ms": 60000, "consensus_wallets": 4, "liquidity_score": 0.7},
              {"consensus_wallets": 1}]
-    assert len(filtrer_candidats(cands, FILTRES_PRESETS["frais"])) == 1
-    assert len(filtrer_candidats(cands, FILTRES_PRESETS["consensus"])) == 2
-    assert len(filtrer_candidats(cands, FILTRES_PRESETS["frais_liquide"])) == 1
-    assert len(filtrer_candidats(cands, {})) == 3
+    assert len(filtrer_candidats(cands, FILTRES_PRESETS["frais"])) == 2  # 5000 + 25000 (seuil 30_000 calibré sur la vraie distribution)
+    assert len(filtrer_candidats(cands, FILTRES_PRESETS["consensus"])) == 3
+    assert len(filtrer_candidats(cands, FILTRES_PRESETS["frais_liquide"])) == 2
+    assert len(filtrer_candidats(cands, {})) == 4
     # champ absent = exclu du sous-echantillon (deny-by-default), jamais suppose conforme
     assert filtrer_candidats([{}], FILTRES_PRESETS["frais"]) == []
 

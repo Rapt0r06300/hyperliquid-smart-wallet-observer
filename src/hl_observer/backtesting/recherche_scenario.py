@@ -103,14 +103,14 @@ class DonneesReplay:
 
 # ================================================================ 2. l'espace de recherche
 
-#: 21/07 (« combinaisons ultra travaillées ») : chaque config SL/TP/horizon se croise avec des
-#: FILTRES D'ENTRÉE mesurés sur nos candidats — les pépites vivent dans les SOUS-POPULATIONS
-#: (un SL/TP moyen sur tout le monde n'a jamais payé ; sur les signaux frais+consensus, peut-être).
+#: 21/07 : chaque config SL/TP/horizon se croise avec des FILTRES D'ENTRÉE mesurés — les pépites
+#: vivent dans les SOUS-POPULATIONS. 23/07 : `age_max_ms` 10_000→30_000 (MÉDIANE `signal_age_ms` ~62 s ;
+#: 10 s ne passait que ~5 % → « 0 retenues » VIDE ≠ « pas d'edge » ; négatif MESURÉ, cf. copytrade-no-edge-proof).
 FILTRES_PRESETS: dict[str, dict] = {
     "tous": {},
-    "frais": {"age_max_ms": 10_000},
+    "frais": {"age_max_ms": 30_000},
     "consensus": {"min_consensus": 3},
-    "frais_liquide": {"age_max_ms": 10_000, "min_liquidity": 0.55},
+    "frais_liquide": {"age_max_ms": 30_000, "min_liquidity": 0.55},
 }
 
 
