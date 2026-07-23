@@ -38,6 +38,21 @@ def test_ouverture_seulement_au_dela_de_35_bps_et_2_positions_max(tmp_path):
     assert all(r.get("real_execution") is False for r in _ledger_rows(tmp_path))
 
 
+def test_ecart_IMPLAUSIBLE_est_refuse_appariement_structurel(tmp_path):
+    """🔴 22/07 — autopsie ledger : BNT tradé à 3634 bps d'écart (= 36 %, appariement structurel
+    wrapped/décimales) = perte n°1 EN COURS (−1,87 $). Les gagnants d'arb ont un |écart| ≤ 65 bps.
+    Un écart énorme n'est PAS une opportunité : on le REFUSE, même s'il « vit »."""
+    from hl_observer.funding.arb_dislocation_paper import ECART_MAX_ENTREE_BPS
+    assert 3634.0 > ECART_MAX_ENTREE_BPS >= 65.0            # plafond entre gagnants (65) et perdants (135+)
+    _venue(tmp_path, [
+        {"ts": 1000.0, "coin": "BNT", "ecart_prix_bps": 3634.0},   # structurel -> REFUSÉ
+        {"ts": 1000.0, "coin": "BTC", "ecart_prix_bps": 30.0},     # dislocation normale -> ouvert
+    ])
+    opens = {e["coin"] for e in tick(tmp_path, now=1010.0, session_id="S-TEST") if e["type"] == "OPEN"}
+    assert "BNT" not in opens, "un écart de 3634 bps ne doit JAMAIS s'ouvrir"
+    assert "BTC" in opens
+
+
 def test_mesure_perimee_aucune_decision_deny_by_default(tmp_path):
     _venue(tmp_path, [{"ts": 1000.0, "coin": "BTC", "ecart_prix_bps": 80.0}])
     assert tick(tmp_path, now=1000.0 + 1200.0) == []      # 20 min > 15 min de fraicheur

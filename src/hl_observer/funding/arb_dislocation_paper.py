@@ -41,6 +41,13 @@ SEUIL_SORTIE_BPS = 3.0
 AGE_MAX_H = 4.0
 NOTIONAL_USD = 50.0
 MAX_POSITIONS = 2
+#: 🔴 22/07 — PLAFOND D'ÉCART D'ENTRÉE. Autopsie du ledger : par coin, les GAGNANTS d'arbitrage
+#: ont un |écart| médian de ~21 bps (max 65) ; les PERDANTS 71→3634 bps (BNT à 3634 = perte n°1
+#: EN COURS, −1,87 $). Un écart énorme n'est PAS une opportunité : c'est un APPARIEMENT STRUCTUREL
+#: (wrapped/décimales/coin homonyme) qui ne converge JAMAIS. La garde de vivacité laissait passer un
+#: écart faux MAIS mouvant (BNT bouge). On REFUSE au-dessus de ce plafond (gap net 65→135 dans la
+#: donnée). Deny-by-default : un écart implausible est écarté, jamais tradé.
+ECART_MAX_ENTREE_BPS = 100.0
 
 # ══ 🔴 21/07 — LE FORFAIT QUI DECIDAIT DE TOUT (P4-2/P4-3) ══
 # `COUT_AR_BPS = 8.0` etait commente « 2 executions HL maker (1,5x2) + spread/slippage ~5 ».
@@ -193,6 +200,10 @@ def tick(root: str | Path = ".", *, now: float | None = None,
         if coin in ouvertes or len(ouvertes) >= MAX_POSITIONS:
             continue
         ecart = float(m.get("ecart_prix_bps") or 0.0)
+        # 🔴 22/07 — PLAFOND : un écart implausible (BNT à 3634 bps) est un APPARIEMENT STRUCTUREL,
+        # jamais une dislocation qui converge. On le refuse AVANT tout (même s'il « vit »).
+        if abs(ecart) > ECART_MAX_ENTREE_BPS:
+            continue
         # 🔴 21/07 — L'ÉCART BOUGE-T-IL ? Porte placée AVANT le seuil, parce qu'un écart figé
         # est d'autant plus gros qu'il est faux : il passerait tous les seuils.
         # MESURE : MKR affichait 71,44 bps sur **208 observations, ecart-type 0,0000** (min =
