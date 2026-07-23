@@ -1,99 +1,128 @@
-"""Copy-Vaults (rectif 23/07) : on PROUVE que le signal détecte le changement d'exposition PAR COIN
-d'un vault suivi et le price au prix HL exécutable — BBO synchro prioritaire, sinon cache allMids
-(tous-coins, frais < 60 s). Le collecteur allMids parse/écrit proprement. Aucune exécution réelle."""
+"""Copy-Vaults (rectif Flo 23/07) — DISCIPLINE : allMids ne sert QU'À détecter/pricer grossièrement ;
+AUCUNE position n'est admise sans (a) L2 HL frais sur le coin (profondeur/VWAP + coût de sortie) ET
+(b) un edge de copie MESURÉ et gelé (jamais inventé). On prouve les refus honnêtes ET l'ouverture
+quand les deux conditions réelles sont réunies. Le collecteur allMids parse/écrit/archive proprement.
+Aucune exécution réelle."""
 from __future__ import annotations
 
 import json
 
 from hl_observer.experimental import moteur_paper as MP
-from hl_observer.experimental.signaux import signaux_vaults, _allmids, SPREAD_ESTIME_ALT_BPS
+from hl_observer.experimental.signaux import signaux_vaults, _allmids, COINS_BOUGES_RELPATH
+from hl_observer.experimental.copy_edge_forward import geler
 import tools.collecter_allmids as CA
 
 
-def _ecrire(root, snaps, allmids=None, ts_allmids_ms=None):
+def _base(root, snaps, *, carnet=None, gele=False, allmids=None, ts_allmids_ms=None, now=1_000_000_000_000.0):
     (root / "runtime" / "data").mkdir(parents=True, exist_ok=True)
     (root / "config").mkdir(parents=True, exist_ok=True)
     (root / "runtime" / "data" / "vault_snapshots.jsonl").write_text(
         "\n".join(json.dumps(s) for s in snaps), encoding="utf-8")
     (root / "config" / "frais_venues.json").write_text(json.dumps({"hl_taker_bps": 3.5, "bin_taker_bps": 4.5}))
+    if carnet is not None:
+        (root / "runtime" / "data" / "carnet_venues.jsonl").write_text(
+            "\n".join(json.dumps(c) for c in carnet), encoding="utf-8")
     if allmids is not None:
-        (root / "runtime" / "data" / "hl_allmids.json").write_text(
-            json.dumps({"ts_ms": ts_allmids_ms, "mids": allmids}))
+        (root / "runtime" / "data" / "hl_allmids.json").write_text(json.dumps({"ts_ms": ts_allmids_ms, "mids": allmids}))
+    if gele:
+        geler(root, horizon_ms=900_000.0, edge_brut_bps=45.0, edge_net_mesure_bps=33.0)
 
 
-# ─────────────────────────────── collecteur allMids ───────────────────────────────
+def _snaps_move(vault="0xAAA", coin="HYPE", szi0=0.0, szi1=1000.0, px=20.0, nav=100_000, now=1_000_000_000_000.0):
+    return [{"vault": vault, "ts_ms": now - 300_000, "nav_usd": nav,
+             "positions": [{"coin": coin, "szi": szi0, "entryPx": px}]},
+            {"vault": vault, "ts_ms": now - 5_000, "nav_usd": nav,
+             "positions": [{"coin": coin, "szi": szi1, "entryPx": px}]}]
+
+
+def _carnet(coin="HYPE", bid=19.99, ask=20.01, taille=5000.0, now=1_000_000_000_000.0):
+    return [{"coin": coin, "hl_bid": bid, "hl_ask": ask, "bin_bid": bid, "bin_ask": ask,
+             "taille_min_usd": taille, "collecte_ts": now / 1000.0}]
+
+
+# ─────────────────────────────── collecteur allMids (parse / cache / tape) ───────────────────────────────
 
 def test_parser_allmids_tolerant():
     assert CA.parser_allmids({"HYPE": "20.5", "BTC": "60000"}) == {"HYPE": 20.5, "BTC": 60000.0}
-    assert CA.parser_allmids({"mids": {"sol": "150"}}) == {"SOL": 150.0}      # enveloppe + upper
-    assert CA.parser_allmids({"X": "nan?", "Y": "-3", "Z": "0"}) == {}        # illisible / <=0 ignoré
+    assert CA.parser_allmids({"mids": {"sol": "150"}}) == {"SOL": 150.0}
+    assert CA.parser_allmids({"X": "nan?", "Y": "-3", "Z": "0"}) == {}
 
 
-def test_ecrire_cache_atomique(tmp_path):
-    n = CA.ecrire_cache(tmp_path, {"HYPE": 20.0, "FARTCOIN": 1.23})
-    assert n == 2
-    d = json.loads((tmp_path / CA.SORTIE).read_text())
-    assert d["n"] == 2 and d["mids"]["HYPE"] == 20.0 and "ts_ms" in d
+def test_une_passe_ecrit_cache_et_tape(tmp_path):
+    n = CA.une_passe(tmp_path, post_allmids=lambda: {"HYPE": "20", "NEO": "12.5"}, archiver_tape=True)
+    assert n == 2 and (tmp_path / CA.SORTIE).exists() and (tmp_path / CA.TAPE).exists()
+    tape = (tmp_path / CA.TAPE).read_text().splitlines()
+    assert len(tape) == 1 and json.loads(tape[0])["mids"]["HYPE"] == 20.0
+    assert CA.une_passe(tmp_path, post_allmids=lambda: (_ for _ in ()).throw(OSError())) == 0
 
-
-def test_une_passe_ecrit_le_cache(tmp_path):
-    n = CA.une_passe(tmp_path, post_allmids=lambda: {"HYPE": "20", "NEO": "12.5"})
-    assert n == 2 and (tmp_path / CA.SORTIE).exists()
-    assert CA.une_passe(tmp_path, post_allmids=lambda: (_ for _ in ()).throw(OSError())) == 0  # réseau KO -> 0
-
-
-# ─────────────────────────────── fraîcheur allMids ───────────────────────────────
 
 def test_allmids_ignore_si_perime(tmp_path):
     now = 1_000_000_000_000.0
-    _ecrire(tmp_path, [], allmids={"HYPE": 20.0}, ts_allmids_ms=now - 2000)
-    assert _allmids(tmp_path, now_ms=now).get("HYPE") == 20.0           # frais (<60 s)
-    _ecrire(tmp_path, [], allmids={"HYPE": 20.0}, ts_allmids_ms=now - 120_000)
-    assert _allmids(tmp_path, now_ms=now) == {}                          # périmé -> ignoré
+    _base(tmp_path, [], allmids={"HYPE": 20.0}, ts_allmids_ms=now - 2000)
+    assert _allmids(tmp_path, now_ms=now).get("HYPE") == 20.0
+    _base(tmp_path, [], allmids={"HYPE": 20.0}, ts_allmids_ms=now - 120_000)
+    assert _allmids(tmp_path, now_ms=now) == {}
 
 
-# ─────────────────────────────── détection PAR COIN + prix allMids ───────────────────────────────
+# ─────────────────────────────── discipline d'admission ───────────────────────────────
 
-def test_copy_vault_detecte_move_par_coin_et_price_via_allmids(tmp_path):
+def test_sans_edge_mesure_NO_TRADE_meme_avec_carnet(tmp_path):
+    """Barre (b) : sans config d'edge gelée, on n'ouvre RIEN même si le L2 est là (pas d'edge inventé)."""
     now = 1_000_000_000_000.0
-    snaps = [
-        {"vault": "0xAAA", "ts_ms": now - 300_000, "nav_usd": 100_000,
-         "positions": [{"coin": "HYPE", "szi": 0.0, "entryPx": 20.0}]},
-        {"vault": "0xAAA", "ts_ms": now - 5_000, "nav_usd": 100_000,
-         "positions": [{"coin": "HYPE", "szi": 1000.0, "entryPx": 20.0}]},   # +20 000 $ = 20 % du NAV
-    ]
-    _ecrire(tmp_path, snaps, allmids={"HYPE": 20.0}, ts_allmids_ms=now - 2000)
+    _base(tmp_path, _snaps_move(), carnet=_carnet(), gele=False)
     sigs, refus = signaux_vaults(tmp_path, now_ms=now)
-    assert len(sigs) == 1 and not refus
+    assert not sigs and refus[0]["motif"] == "EDGE_NON_MESURE"
+
+
+def test_sans_carnet_frais_NO_TRADE_et_coin_file_au_carnet(tmp_path):
+    """Barre (a) : edge gelé mais L2 absent -> CARNET_ABSENT, et le coin est ABONNÉ au carnet."""
+    now = 1_000_000_000_000.0
+    _base(tmp_path, _snaps_move(), carnet=[], gele=True)                 # carnet vide
+    sigs, refus = signaux_vaults(tmp_path, now_ms=now)
+    assert not sigs and refus[0]["motif"] == "CARNET_ABSENT"
+    files = json.loads((tmp_path / COINS_BOUGES_RELPATH).read_text())["coins"]
+    assert "HYPE" in files                                               # abonnement dynamique
+
+
+def test_ouvre_quand_L2_frais_ET_edge_mesure(tmp_path):
+    """Les DEUX conditions réunies : prix/profondeur = L2 réel, edge = mesuré − coût L2, admission OK."""
+    now = 1_000_000_000_000.0
+    _base(tmp_path, _snaps_move(), carnet=_carnet(bid=19.99, ask=20.01, taille=5000.0), gele=True)
+    sigs, refus = signaux_vaults(tmp_path, now_ms=now)
+    assert len(sigs) == 1
     s = sigs[0]
-    assert s.coin == "HYPE" and s.sens == 1 and s.meta["src_prix"] == "allmids"
-    assert s.prix_entree == round(20.0 * (1 + SPREAD_ESTIME_ALT_BPS / 1e4), 6)  # côté taker
-    assert s.meta["observation_lag_ms"] == 5000 and s.ts_signal_ms == now       # entrée au prix FRAIS
-    # passe le barème exigeant SANS OOS (fraîcheur + exécutable + gros edge + pas de centimes)
+    assert s.coin == "HYPE" and s.sens == 1 and s.meta["src_prix"] == "carnet_l2"
+    assert s.prix_entree == 20.01                                        # ask L2 réel (taker long)
+    assert s.notional_usd == 150.0                                       # min(cible 150, profondeur 5000)
+    # edge net = edge_brut mesuré (45) − coût A/R L2 réel ; strictement mesuré, pas inventé
+    assert s.meta["edge_brut_mesure_bps"] == 45.0 and s.edge_estime_bps < 45.0
     assert MP.admettre(s, MP.charger_store(tmp_path), now_ms=now) == (True, None)
 
 
-def test_copy_vault_refuse_move_trop_faible(tmp_path):
+def test_profondeur_insuffisante_NO_TRADE(tmp_path):
+    """Dimensionnement par la profondeur : un L2 trop mince -> LIQUIDITE_INSUFFISANTE (jamais forcé)."""
     now = 1_000_000_000_000.0
-    snaps = [
-        {"vault": "0xBBB", "ts_ms": now - 300_000, "nav_usd": 100_000,
-         "positions": [{"coin": "HYPE", "szi": 0.0, "entryPx": 20.0}]},
-        {"vault": "0xBBB", "ts_ms": now - 5_000, "nav_usd": 100_000,
-         "positions": [{"coin": "HYPE", "szi": 50.0, "entryPx": 20.0}]},      # +1 000 $ = 1 % du NAV < 5 %
-    ]
-    _ecrire(tmp_path, snaps, allmids={"HYPE": 20.0}, ts_allmids_ms=now - 2000)
+    _base(tmp_path, _snaps_move(), carnet=_carnet(taille=5.0), gele=True)   # 5 $ de profondeur
     sigs, refus = signaux_vaults(tmp_path, now_ms=now)
-    assert not sigs and refus and refus[0]["motif"] == "CHANGEMENT_TROP_FAIBLE"
+    assert not sigs and refus[0]["motif"] == "LIQUIDITE_INSUFFISANTE"
 
 
-def test_copy_vault_refuse_si_coin_non_executable(tmp_path):
+def test_move_trop_faible_NO_TRADE(tmp_path):
     now = 1_000_000_000_000.0
-    snaps = [
-        {"vault": "0xCCC", "ts_ms": now - 300_000, "nav_usd": 100_000,
-         "positions": [{"coin": "OBSCURE", "szi": 0.0, "entryPx": 5.0}]},
-        {"vault": "0xCCC", "ts_ms": now - 5_000, "nav_usd": 100_000,
-         "positions": [{"coin": "OBSCURE", "szi": 8000.0, "entryPx": 5.0}]},  # gros move mais aucun prix HL
-    ]
-    _ecrire(tmp_path, snaps, allmids={"HYPE": 20.0}, ts_allmids_ms=now - 2000)  # OBSCURE absent d'allMids
+    _base(tmp_path, _snaps_move(szi1=50.0), carnet=_carnet(), gele=True)     # +1 % du NAV < 5 %
     sigs, refus = signaux_vaults(tmp_path, now_ms=now)
-    assert not sigs and refus and refus[0]["motif"] == "PRIX_NON_EXECUTABLE_HL"
+    assert not sigs and refus[0]["motif"] == "CHANGEMENT_TROP_FAIBLE"
+
+
+def test_filtre_de_retention_du_score(tmp_path):
+    """Seul un vault RETENU par le score est copié : un vault absent des retenus est ignoré en silence."""
+    now = 1_000_000_000_000.0
+    _base(tmp_path, _snaps_move(vault="0xAAA"), carnet=_carnet(), gele=True)
+    # score qui NE retient PAS 0xAAA -> aucun signal
+    (tmp_path / "runtime" / "data" / "vaults_scores.json").write_text(json.dumps({"retenus": ["0xAUTRE"]}))
+    sigs, refus = signaux_vaults(tmp_path, now_ms=now)
+    assert not sigs and not any(r.get("vault") == "0xAAA"[:10] for r in refus)   # ignoré, pas même un refus
+    # score qui RETIENT 0xAAA -> le signal repart
+    (tmp_path / "runtime" / "data" / "vaults_scores.json").write_text(json.dumps({"retenus": ["0xAAA"]}))
+    sigs2, _ = signaux_vaults(tmp_path, now_ms=now)
+    assert len(sigs2) == 1 and sigs2[0].meta["vault"] == "0xAAA"

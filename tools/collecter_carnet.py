@@ -48,6 +48,22 @@ PREMIUM_PLAUSIBLE_MAX_BPS_H = 5.0  # |hl−bin| > 5 bps/h (~438 %/an) = artefact
 CIBLES_CARRY_PERSISTANT = ("DASH", "INJ", "VIRTUAL", "NEO", "RUNE", "FET", "AR", "GMT", "YGG", "KAS")
 
 
+def coins_bouges_par_vaults(root: Path, *, age_max_h: float = 6.0) -> list[str]:
+    """🟢 23/07 (copy-vaults) — coins réellement BOUGÉS par les vaults suivis (écrits par le signal
+    copy_vault dans coins_bouges_par_vaults.json). On abonne leur L2 pour pouvoir ADMETTRE une copie
+    (l'admission exige un carnet frais). Récents seulement (le vault a sans doute refermé au-delà)."""
+    try:
+        import json as _j
+        import time as _t
+        d = _j.loads((Path(root) / "runtime" / "data" / "coins_bouges_par_vaults.json")
+                     .read_text(encoding="utf-8"))
+        now_ms = _t.time() * 1000
+        return [str(c).upper() for c, ts in (d.get("coins") or {}).items()
+                if now_ms - float(ts) <= age_max_h * 3600 * 1000]
+    except (OSError, ValueError, KeyError, TypeError):
+        return []
+
+
 def coins_survivants_baseline(root: Path) -> list[str]:
     """Coins SURVIVANTS gelés (cross_venue_juge_baseline) — TOUJOURS costés pour que la voie
     EXPERIMENTAL_PAPER puisse les ouvrir (sinon refus CARNET_ABSENT sur les meilleurs profils)."""
@@ -225,7 +241,8 @@ def main(argv: list[str] | None = None) -> int:
         for c in (coins_prioritaires(lignes, n=a.n_coins)
                   + coins_premium_funding(lignes, n=a.n_premium)
                   + list(CIBLES_CARRY_PERSISTANT)
-                  + coins_survivants_baseline(root)):     # EXPERIMENTAL_PAPER : survivants toujours costés
+                  + coins_survivants_baseline(root)         # EXPERIMENTAL_PAPER : survivants toujours costés
+                  + coins_bouges_par_vaults(root)):         # COPY-VAULTS : coins bougés par les vaults -> L2 frais
             vus.setdefault(c, None)
         coins = list(vus)
         if not coins:

@@ -35,6 +35,8 @@ from hl_observer.collection import collecte_fiable as CF  # noqa: E402
 
 URL_HL = "https://api.hyperliquid.xyz/info"
 SORTIE = Path("runtime") / "data" / "hl_allmids.json"
+TAPE = Path("runtime") / "data" / "hl_allmids_tape.jsonl"   # HISTORIQUE (pour mesurer l'edge forward de copie)
+TAPE_INTERVALLE_S = 60.0                                    # on n'archive qu'1 point/min (le cache reste à 15 s)
 INTERVALLE_S_DEFAUT = 15.0
 
 
@@ -74,15 +76,44 @@ def ecrire_cache(root: Path, mids: dict[str, float]) -> int:
     return len(mids)
 
 
-def une_passe(root: Path, *, post_allmids=_post_allmids) -> int:
-    """Un fetch allMids → cache. Rend le nombre de coins (0 si réseau KO)."""
+def ecrire_tape(root: Path, mids: dict[str, float]) -> None:
+    """Append UN point (ts + mids compacts) à la tape historique — la matière du backtest d'edge."""
+    dest = root / TAPE
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    ligne = json.dumps({"ts_ms": int(time.time() * 1000), "mids": {c: round(p, 8) for c, p in mids.items()}},
+                       ensure_ascii=False)
+    with dest.open("a", encoding="utf-8") as f:
+        f.write(ligne + "\n")
+
+
+def une_passe(root: Path, *, post_allmids=_post_allmids, archiver_tape: bool = False) -> int:
+    """Un fetch allMids → cache courant (+ tape historique si `archiver_tape`). Rend le nb de coins (0 si KO)."""
     try:
         mids = parser_allmids(post_allmids())
     except (urllib.error.URLError, OSError, ValueError, TimeoutError):
         return 0
     if not mids:
         return 0
-    return ecrire_cache(root, mids)
+    n = ecrire_cache(root, mids)
+    if archiver_tape:
+        ecrire_tape(root, mids)
+    return n
+
+
+def _tape_due(root: Path) -> bool:
+    """La tape est-elle « en retard » ? Décision basée sur le DERNIER ts de la tape (robuste même en
+    --une-fois relancé toutes les 15 s par boucle_collecteur : on n'archive qu'1 point/min)."""
+    p = root / TAPE
+    try:
+        with p.open("rb") as f:
+            f.seek(0, 2)
+            taille = f.tell()
+            f.seek(max(0, taille - 4096))
+            derniere = f.read().decode("utf-8", "ignore").splitlines()[-1]
+        ts = float(json.loads(derniere).get("ts_ms") or 0)
+    except (OSError, ValueError, IndexError):
+        return True
+    return (time.time() * 1000 - ts) >= TAPE_INTERVALLE_S * 1000
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -92,10 +123,10 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--une-fois", action="store_true")
     a = p.parse_args(argv)
     root = Path(a.root)
-    echecs = 0
+    echecs = 0.0
     while True:
         try:
-            n = une_passe(root)
+            n = une_passe(root, archiver_tape=_tape_due(root))
             if n:
                 echecs = 0
                 print("[allmids] %s  coins=%d  -> %s" % (time.strftime("%H:%M:%S"), n, SORTIE), flush=True)

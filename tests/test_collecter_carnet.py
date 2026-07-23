@@ -28,6 +28,19 @@ def test_coins_prioritaires_classe_par_ecart_et_ignore_l_aberrant():
     assert top == ["ETH", "BTC"]                 # ETH (40) > BTC (25) ; MKR aberrant ecarte
 
 
+def test_coins_bouges_par_vaults_abonnement_dynamique(tmp_path):
+    """COPY-VAULTS : le carnet abonne les coins recents ecrits par le signal, ignore les perimes."""
+    import time
+    now_ms = time.time() * 1000
+    (tmp_path / "runtime" / "data").mkdir(parents=True)
+    (tmp_path / "runtime" / "data" / "coins_bouges_par_vaults.json").write_text(json.dumps(
+        {"coins": {"HYPE": now_ms - 1000, "FARTCOIN": now_ms - 60_000,
+                   "VIEUX": now_ms - 9 * 3600 * 1000}}))          # VIEUX > 6 h -> ignore
+    coins = K.coins_bouges_par_vaults(tmp_path)
+    assert "HYPE" in coins and "FARTCOIN" in coins and "VIEUX" not in coins
+    assert K.coins_bouges_par_vaults(tmp_path / "vide") == []      # fichier absent -> liste vide
+
+
 def test_coins_premium_funding_classe_par_premium_et_ignore_l_artefact():
     """🟠 23/07 — le carnet ratait les cibles du CARRY (premium de funding fort mais prix peu
     disloqué : DASH/NEO/INJ). On les sélectionne par |hl−bin| ; un premium aberrant est écarté."""

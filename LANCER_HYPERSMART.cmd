@@ -380,6 +380,11 @@ REM (vaults DIRECTIONNELS ; les vaults de MARKET-MAKING type HLP sont exclus). V
 REM ⚠️ 2 endpoints PUBLICS en lecture (clearinghouseState + vaultDetails). 0 cle, 0 ordre, 0 signature.
 start "" /b tools\boucle_collecteur.cmd vault-collector tools\collecter_vaults.py 300 --une-fois
 
+REM === SCORE 8-FACTEURS DES VAULTS (rectif Flo 23/07) : on ne selectionne PLUS sur l'APR ===
+REM PnL net + regularite + drawdown + anciennete + concentration + turnover + capacite + copyabilite.
+REM Ecrit vaults_scores.json ; le signal copy_vault ne copie QUE les vaults RETENUS. 0 ordre.
+start "" /b tools\boucle_collecteur.cmd scorer-vaults tools\scorer_vaults.py 600 --une-fois
+
 REM === BBO RAPIDE HL/Binance (chantier ARB 23/07) : quotes SYNCHRONISEES pour trancher le lead-lag ===
 REM Le detecteur d'arb actuel est INVALIDE (base persistante +17-30bps = mapping/quote perimee).
 REM Ce collecteur WS PERSISTANT (HL bbo + Binance bookTicker) donne des quotes MAPPEES exactement,

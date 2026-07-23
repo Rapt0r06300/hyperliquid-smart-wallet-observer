@@ -46,13 +46,12 @@ def _snapshots_bbo(root: str | Path, *, max_lignes: int = 20000) -> dict[str, di
 
 
 ALLMIDS_RELPATH = Path("runtime") / "data" / "hl_allmids.json"
-ALLMIDS_AGE_MAX_MS = 60_000.0        # cache allMids > 60 s = plus assez frais pour entrer -> ignoré
-SPREAD_ESTIME_ALT_BPS = 6.0          # demi-spread conservateur pour un alt hors-BBO (pas de carnet) -> coût réaliste
+ALLMIDS_AGE_MAX_MS = 60_000.0        # cache allMids > 60 s = plus assez frais -> ignoré
 
 
 def _allmids(root: str | Path, *, now_ms: float | None = None) -> dict[str, float]:
-    """{coin: mid} depuis le cache allMids (tous-coins HL) SI le cache est frais (< 60 s). Sinon {}.
-    C'est le prix HL exécutable de repli pour les ~92 coins que le flux BBO (8 coins) ne couvre pas."""
+    """{coin: mid} depuis le cache allMids (tous-coins HL) SI frais (< 60 s). Sinon {}. Rôle : DÉTECTION
+    et prix GROSSIER (monitoring) — JAMAIS un prix d'exécution (l'admission exige un L2 frais, cf. signaux_vaults)."""
     p = Path(root) / ALLMIDS_RELPATH
     if not p.exists():
         return {}
@@ -229,12 +228,14 @@ def signaux_lead_lag(root: str | Path = ".", *, now_ms: float | None = None,
     return sigs, refus
 
 
-# ─────────────────────────────── 3) COPY-VAULTS (changement d'exposition PAR COIN réplicable) ───────────────────────────────
+# ─────────────────────────────── 3) COPY-VAULTS (changement d'exposition PAR COIN, edge MESURÉ) ───────────────────────────────
 
 VAULTS_SNAP_RELPATH = Path("runtime") / "data" / "vault_snapshots.jsonl"
+CARNET_RELPATH = Path("runtime") / "data" / "carnet_venues.jsonl"       # L2 top-of-book HL (bid/ask/profondeur)
+COINS_BOUGES_RELPATH = Path("runtime") / "data" / "coins_bouges_par_vaults.json"  # abonnement dynamique du carnet
 SEUIL_MOVE_FRAC_NAV = 0.05           # le vault doit bouger >= 5 % de son NAV sur UN coin = décision copiable
-K_CONVICTION = 0.03                  # proxy conviction : 5 % de NAV bougé -> 15 bps d'edge brut (le forward MESURE le vrai)
-PLAFOND_EDGE_COPY_BPS = 60.0         # on ne SURVEND jamais un edge de copie (incertain par nature)
+CARNET_AGE_MAX_S = 120.0             # L2 plus vieux que ça = pas assez frais pour ADMETTRE (détection seule)
+NOTIONAL_MIN_UTILE_USD = 20.0        # sous ce notional dimensionnable par la profondeur : illiquide -> NO_TRADE
 
 
 def _positions_par_coin(snap: dict) -> dict[str, tuple[float, float]]:
@@ -247,15 +248,74 @@ def _positions_par_coin(snap: dict) -> dict[str, tuple[float, float]]:
     return out
 
 
+def _carnet_l2_frais(root: Path, *, now_ms: float, age_max_s: float = CARNET_AGE_MAX_S) -> dict[str, dict]:
+    """{COIN: dernière ligne de carnet HL FRAÎCHE} depuis carnet_venues.jsonl : hl_bid/hl_ask/taille/spread.
+    C'est la SEULE source qui autorise une admission (profondeur + prix exécutable réels)."""
+    p = root / CARNET_RELPATH
+    if not p.exists():
+        return {}
+    out: dict[str, dict] = {}
+    for l in p.read_text(encoding="utf-8", errors="ignore").splitlines()[-20000:]:
+        try:
+            d = json.loads(l)
+        except ValueError:
+            continue
+        c = str(d.get("coin") or "").upper()
+        ts = float(d.get("collecte_ts") or 0.0) * 1000.0
+        if c and float(d.get("hl_bid") or 0) > 0 and float(d.get("hl_ask") or 0) > 0 and \
+                (now_ms - ts) <= age_max_s * 1000.0:
+            out[c] = d                                             # dernière ligne fraîche gagne
+    return out
+
+
+def _filer_coins_au_carnet(root: Path, coins: list[str], *, now_ms: float) -> None:
+    """Écrit les coins réellement bougés par les vaults dans coins_bouges_par_vaults.json pour que le
+    collecteur de carnet les ABONNE (capture leur L2 frais au prochain tour). Borné, horodaté, atomique."""
+    if not coins:
+        return
+    p = root / COINS_BOUGES_RELPATH
+    try:
+        cur = json.loads(p.read_text(encoding="utf-8")) if p.exists() else {}
+    except (OSError, ValueError):
+        cur = {}
+    vus = dict(cur.get("coins") or {})
+    for c in coins:
+        vus[str(c).upper()] = int(now_ms)
+    # rétention : on garde les coins vus dans les dernières 6 h (au-delà, le vault a sans doute reфermé)
+    vus = {c: t for c, t in vus.items() if now_ms - float(t) <= 6 * 3600 * 1000}
+    p.parent.mkdir(parents=True, exist_ok=True)
+    tmp = p.with_suffix(".json.tmp")
+    tmp.write_text(json.dumps({"maj_ms": int(now_ms), "coins": vus}, ensure_ascii=False), encoding="utf-8")
+    tmp.replace(p)
+
+
+SCORES_RELPATH = Path("runtime") / "data" / "vaults_scores.json"
+
+
+def _vaults_retenus(root: Path) -> set[str] | None:
+    """Ensemble des vaults RETENUS par le score 8-facteurs (vaults_scores.json). None si le fichier
+    n'existe pas encore (repli permissif : on ne bloque pas l'amorçage avant le 1er scoring)."""
+    p = root / SCORES_RELPATH
+    if not p.exists():
+        return None
+    try:
+        d = json.loads(p.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    return {str(a) for a in (d.get("retenus") or [])}
+
+
 def signaux_vaults(root: str | Path = ".", *, now_ms: float | None = None) -> tuple[list[Signal], list[dict]]:
-    """Copy-Vaults : détecte le CHANGEMENT D'EXPOSITION PAR COIN (Δszi entre 2 snapshots) chez un vault
-    suivi performant, et le mirroir au prix HL RÉELLEMENT EXÉCUTABLE (BBO synchro). Le coin doit être
-    couvert par le flux BBO (sinon pas de prix exécutable frais → refus honnête). Sans 2 snapshots,
-    sans changement significatif, ou coin non exécutable : rien. Le forward MESURE le vrai PnL de copie."""
+    """Copy-Vaults (rectif Flo 23/07) : détecte le CHANGEMENT D'EXPO PAR COIN (Δszi) d'un vault RETENU
+    par le score 8-facteurs, ABONNE le coin au carnet, puis N'ADMET QUE si (a) un L2 HL FRAIS existe sur
+    le coin (profondeur/VWAP + coût de sortie réels) ET (b) un edge de copie a été MESURÉ et gelé (jamais
+    inventé). Sinon NO_TRADE explicite. allMids ne sert QU'À détecter, jamais de prix d'exécution."""
     from hl_observer.experimental.carry_deux_jambes import frais_venues, LATENCE_MS, LATENCE_COUT_BPS
+    from hl_observer.experimental.copy_edge_forward import config_gelee
     root = Path(root)
     now = float(now_ms if now_ms is not None else time.time() * 1000)
     refus: list[dict] = []
+    retenus = _vaults_retenus(root)                                # None = pas encore scoré (permissif)
     try:
         lignes = (root / VAULTS_SNAP_RELPATH).read_text(encoding="utf-8", errors="ignore").splitlines()
     except OSError:
@@ -269,11 +329,14 @@ def signaux_vaults(root: str | Path = ".", *, now_ms: float | None = None) -> tu
         a = str(d.get("vault") or d.get("adresse") or d.get("address") or "")
         if a:
             par_vault.setdefault(a, []).append(d)
-    bbo = _snapshots_bbo(root)                                     # {COIN: dernier snapshot BBO synchro HL/Binance}
-    allmids = _allmids(root, now_ms=now)                           # {COIN: mid HL frais} — repli tous-coins
+    carnet = _carnet_l2_frais(root, now_ms=now)                    # L2 HL frais (la SEULE clé d'admission)
+    cfg = config_gelee(root)                                       # edge de copie MESURÉ + gelé (sinon NO_TRADE)
     fhl, _fbin, _src = frais_venues(root)
     sigs: list[Signal] = []
+    coins_bouges: list[str] = []
     for adr, snaps in par_vault.items():
+        if retenus is not None and adr not in retenus:
+            continue                                              # vault non retenu par le score -> jamais copié
         if len(snaps) < 2:
             refus.append({"moteur": "copy_vault", "vault": adr[:10], "motif": "MOINS_DE_2_SNAPSHOTS"}); continue
         snaps.sort(key=lambda s: int(s.get("ts_ms") or 0))
@@ -282,52 +345,59 @@ def signaux_vaults(root: str | Path = ".", *, now_ms: float | None = None) -> tu
         if nav <= 0:
             refus.append({"moteur": "copy_vault", "vault": adr[:10], "motif": "NAV_NULLE"}); continue
         p0, p1 = _positions_par_coin(av), _positions_par_coin(ap)
-        # plus gros changement d'exposition PAR COIN (Δszi × prix), en fraction du NAV
         best_coin, best_dnot, best_dszi = "", 0.0, 0.0
         for c in set(p0) | set(p1):
             dszi = p1.get(c, (0.0, 0.0))[0] - p0.get(c, (0.0, 0.0))[0]
             px_ref = p1.get(c, (0.0, 0.0))[1] or p0.get(c, (0.0, 0.0))[1]
-            dnot = abs(dszi) * px_ref
-            if dnot > abs(best_dnot):
-                best_coin, best_dnot, best_dszi = c, dnot, dszi
-        move_frac = (best_dnot / nav) if nav else 0.0
+            if abs(dszi) * px_ref > abs(best_dnot):
+                best_coin, best_dnot, best_dszi = c, dszi * px_ref, dszi
+        move_frac = (abs(best_dnot) / nav) if nav else 0.0
         if not best_coin or move_frac < SEUIL_MOVE_FRAC_NAV:
             refus.append({"moteur": "copy_vault", "vault": adr[:10], "motif": "CHANGEMENT_TROP_FAIBLE",
                           "coin": best_coin, "move_frac": round(move_frac, 3)}); continue
+        coins_bouges.append(best_coin)                             # → abonnement dynamique du carnet
         sens = 1 if best_dszi > 0 else -1
-        # prix HL exécutable : BBO synchro (bid/ask réel, < 1 s) prioritaire, sinon allMids (mid frais + spread estimé)
-        b = bbo.get(best_coin)
-        if b and float(b.get("hl_bid") or 0.0) > 0 and float(b.get("hl_ask") or 0.0) > 0:
-            hl_bid, hl_ask = float(b["hl_bid"]), float(b["hl_ask"])
-            mid = (hl_bid + hl_ask) / 2.0
-            prix = hl_ask if sens > 0 else hl_bid                  # côté agressif (taker)
-            hl_spread_bps = (hl_ask - hl_bid) / mid * 1e4
-            src_prix = "bbo"
-        elif best_coin in allmids:
-            mid = allmids[best_coin]
-            hl_spread_bps = SPREAD_ESTIME_ALT_BPS * 2.0            # spread plein estimé (conservateur, pas de carnet)
-            prix = mid * (1.0 + SPREAD_ESTIME_ALT_BPS / 1e4) if sens > 0 else mid * (1.0 - SPREAD_ESTIME_ALT_BPS / 1e4)
-            src_prix = "allmids"
-        else:
-            refus.append({"moteur": "copy_vault", "vault": adr[:10], "motif": "PRIX_NON_EXECUTABLE_HL",
-                          "coin": best_coin}); continue
-        cout_ar = 2.0 * fhl + hl_spread_bps + LATENCE_COUT_BPS     # A/R : 2× taker HL + spread + latence
-        edge = min(move_frac * 1e4 * K_CONVICTION, PLAFOND_EDGE_COPY_BPS) - cout_ar
-        if edge <= 0:
-            refus.append({"moteur": "copy_vault", "vault": adr[:10], "motif": "EDGE_NEGATIF_APRES_COUTS",
+        # (b) edge MESURÉ obligatoire : sans config gelée validée, on n'ouvre RIEN (pas d'edge inventé)
+        if not (cfg and cfg.get("gele")):
+            refus.append({"moteur": "copy_vault", "vault": adr[:10], "motif": "EDGE_NON_MESURE",
                           "coin": best_coin, "move_frac": round(move_frac, 3)}); continue
-        notional = LIMITES["copy_vault"]["notional_usd"]
-        lag_ms = max(0.0, now - float(ap.get("ts_ms") or now))    # retard d'observation (snapshot vault ~300 s cadencé)
+        # (a) L2 HL frais obligatoire sur le coin : prix exécutable + profondeur + coût de sortie réels
+        car = carnet.get(best_coin)
+        if not car:
+            refus.append({"moteur": "copy_vault", "vault": adr[:10], "motif": "CARNET_ABSENT",
+                          "coin": best_coin}); continue           # coin déjà filé au carnet ci-dessus
+        hl_bid, hl_ask = float(car["hl_bid"]), float(car["hl_ask"])
+        mid = (hl_bid + hl_ask) / 2.0
+        hl_spread_bps = (hl_ask - hl_bid) / mid * 1e4
+        depth_usd = float(car.get("taille_min_usd") or 0.0)
+        notional = min(float(LIMITES["copy_vault"]["notional_usd"]), depth_usd)   # dimensionnement par la PROFONDEUR (VWAP top)
+        if notional < NOTIONAL_MIN_UTILE_USD:
+            refus.append({"moteur": "copy_vault", "vault": adr[:10], "motif": "LIQUIDITE_INSUFFISANTE",
+                          "coin": best_coin, "depth_usd": round(depth_usd, 1)}); continue
+        prix = hl_ask if sens > 0 else hl_bid                      # taker, côté agressif (prix L2 réel)
+        cout_ar = 2.0 * fhl + hl_spread_bps + LATENCE_COUT_BPS     # entrée + SORTIE : 2× taker + spread + latence
+        edge_brut = float(cfg.get("edge_brut_bps") or 0.0)        # rendement forward MESURÉ (jamais inventé)
+        edge_net = edge_brut - cout_ar
+        if edge_net <= 0:
+            refus.append({"moteur": "copy_vault", "vault": adr[:10], "motif": "EDGE_NEGATIF_APRES_COUTS",
+                          "coin": best_coin, "edge_brut_bps": round(edge_brut, 2), "cout_ar_bps": round(cout_ar, 2)})
+            continue
+        lag_ms = max(0.0, now - float(ap.get("ts_ms") or now))    # retard de COPIE (snapshot vault ~300 s cadencé)
         sigs.append(Signal(
             moteur="copy_vault", coin=best_coin, sens=sens, type_pnl="directional",
-            notional_usd=notional, prix_entree=prix, cout_entree_bps=round(cout_ar / 2.0, 4),
-            edge_estime_bps=round(edge, 4), pnl_attendu_usd=round(edge / 1e4 * notional, 4),
+            notional_usd=round(notional, 2), prix_entree=prix, cout_entree_bps=round(cout_ar / 2.0, 4),
+            edge_estime_bps=round(edge_net, 4), pnl_attendu_usd=round(edge_net / 1e4 * notional, 4),
             ts_signal_ms=now, frais_bps=fhl, spread_bps=round(hl_spread_bps, 4), latence_ms=LATENCE_MS,
-            meta={"vault": adr, "coin": best_coin, "move_frac": round(move_frac, 3), "src_prix": src_prix,
-                  "observation_lag_ms": round(lag_ms), "szi_avant": round(p0.get(best_coin, (0.0, 0.0))[0], 6),
+            hold_h=float(cfg.get("horizon_ms") or 0.0) / 3_600_000.0,
+            meta={"vault": adr, "coin": best_coin, "move_frac": round(move_frac, 3), "src_prix": "carnet_l2",
+                  "depth_usd": round(depth_usd, 1), "delai_copie_ms": round(lag_ms),
+                  "edge_brut_mesure_bps": round(edge_brut, 3), "cout_ar_bps": round(cout_ar, 3),
+                  "horizon_mesure_ms": cfg.get("horizon_ms"),
+                  "szi_avant": round(p0.get(best_coin, (0.0, 0.0))[0], 6),
                   "szi_apres": round(p1.get(best_coin, (0.0, 0.0))[0], 6),
-                  "edge_est_note": "proxy conviction (move×K, plafonné) — le forward MESURE le vrai PnL de copie ; "
-                                   "entrée au prix HL FRAIS (ts=now), retard d'observation copié dans observation_lag_ms"}))
+                  "note": "edge MESURÉ (config gelée) − coût L2 RÉEL ; prix/profondeur = carnet L2 frais ; "
+                          "allMids sert seulement à détecter"}))
+    _filer_coins_au_carnet(root, coins_bouges, now_ms=now)         # abonne le carnet aux coins réellement bougés
     return sigs, refus
 
 
