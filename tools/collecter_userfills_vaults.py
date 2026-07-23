@@ -35,10 +35,43 @@ RUN_TOKEN = ""                    # provenance HORS PAYLOAD (en mémoire) — ar
 _MUTEX = None                     # handle du mutex Windows (à garder vivant)
 
 
-def vaults_et_roles(root: Path, *, n_candidats: int = 6) -> list[tuple[str, str, str]]:
-    """(vault, role, raison) réellement ABONNÉS : CORE (retenus stricts, TRADENT ALPHA+PROBE) + jusqu'à
-    n_candidats CANDIDATS (suivants par composite, OBSERVÉS en WS ; PROBE ne les TRADE que s'ils passent la
-    sécurité mini via _vaults_cohorte). Deny-by-default : sans score, aucun abonnement."""
+def _activite_par_vault(root: Path, *, fenetre_h: float = 2.0, max_lignes: int = 4000) -> dict:
+    """Fills récents par vault (activité LIVE) depuis vault_fills_live.jsonl — un vault qui trade offre plus
+    d'occasions de mesure. Lecture bornée (les dernières lignes)."""
+    seuil = time.time() * 1000 - fenetre_h * 3_600_000.0
+    cnt: dict[str, int] = {}
+    try:
+        lignes = (root / FILLS_LIVE).read_text(encoding="utf-8", errors="ignore").splitlines()[-max_lignes:]
+    except OSError:
+        return cnt
+    for l in lignes:
+        try:
+            d = json.loads(l)
+        except ValueError:
+            continue
+        if float(d.get("ts_ms") or 0) >= seuil and d.get("vault"):
+            cnt[d["vault"]] = cnt.get(d["vault"], 0) + 1
+    return cnt
+
+
+def _shadow_par_vault(root: Path) -> dict:
+    """Qualité shadow par vault (moyenne des shadow_net_bps de ses paires, part positive) depuis paires_shadow.json."""
+    try:
+        d = json.loads((root / "runtime" / "data" / "paires_shadow.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+    agg: dict[str, list] = {}
+    for p in (d.get("paires") or {}).values():
+        if p.get("vault") and p.get("shadow_net_bps") is not None:
+            agg.setdefault(p["vault"], []).append(float(p["shadow_net_bps"]))
+    return {v: sum(x for x in xs if x > 0) / len(xs) for v, xs in agg.items() if xs}
+
+
+def vaults_et_roles(root: Path, *, n_candidats: int = 8) -> list[tuple[str, str, str]]:
+    """(vault, role, raison) sur les 10 places WS : 2 CORE (retenus stricts, TRADENT ALPHA+PROBE) + jusqu'à
+    n_candidats=8 CANDIDATS OBSERVÉS choisis par ROTATION = activité live + qualité shadow + copyabilité
+    (pas seulement le composite). PROBE ne TRADE un candidat que s'il passe la sécurité mini (via
+    _vaults_cohorte). Deny-by-default : sans score, aucun abonnement."""
     try:
         d = json.loads((root / SCORES).read_text(encoding="utf-8"))
     except (OSError, ValueError):
@@ -46,17 +79,23 @@ def vaults_et_roles(root: Path, *, n_candidats: int = 6) -> list[tuple[str, str,
     classement = d.get("classement") or []
     core = [c["vault"] for c in classement if c.get("retenu")][:2]
     out = [(v, "CORE", "retenu strict (score) → trade ALPHA+PROBE") for v in core]
-    for c in classement:
-        if c["vault"] in core:
-            continue
+    act, sha = _activite_par_vault(root), _shadow_par_vault(root)
+    a_max = max(act.values()) if act else 1
+    s_max = max(sha.values()) if sha else 1
+    def _rotation(c: dict) -> float:                                  # score de rotation des candidats
+        v, f = c["vault"], c.get("facteurs", {})
+        a = act.get(v, 0) / a_max if a_max else 0.0                   # activité live
+        s = max(0.0, sha.get(v, 0.0)) / s_max if s_max else 0.0       # qualité shadow (positive)
+        cp = float(f.get("copyabilite") or 0.0)                       # copyabilité
+        return 0.45 * a + 0.30 * s + 0.25 * cp
+    cands = sorted((c for c in classement if c["vault"] not in core), key=_rotation, reverse=True)
+    for c in cands[:n_candidats]:
         f = c.get("facteurs", {})
         sur = (float(f.get("anciennete_j") or 0) >= 45 and float(f.get("drawdown_pct") or 100) <= 45
                and float(f.get("copyabilite") or 0) >= 0.5)
         role = "CANDIDAT_TRADABLE" if sur else "CANDIDAT_OBSERVE"
         raison = "observé en WS ; PROBE l'ouvre" if sur else "observé en WS seulement (sécurité mini non passée)"
         out.append((c["vault"], role, raison))
-        if len(out) >= 2 + n_candidats:
-            break
     return out
 
 

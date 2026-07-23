@@ -70,3 +70,23 @@ def test_depth_executable_somme_5_niveaux_cote_le_plus_mince():
 
 def test_depth_executable_carnet_illisible_rend_zero():
     assert C._depth_executable({}, mid=1.0) == 0.0                 # pas de 'levels' -> 0 (jamais inventé)
+
+
+def test_rotation_10_places_2_core_8_candidats_par_activite(tmp_path):
+    """10 places WS : 2 CORE + 8 candidats, ROTATION par activité live. À copyabilité égale, le candidat
+    le PLUS ACTIF passe devant, et on plafonne à 8 candidats (12 en lice)."""
+    import time
+    (tmp_path / "runtime" / "data").mkdir(parents=True, exist_ok=True)
+    now = time.time() * 1000
+    cl = [{"vault": "0xC1", "retenu": True, "facteurs": {}}, {"vault": "0xC2", "retenu": True, "facteurs": {}}]
+    for i in range(3, 15):                                          # 12 candidats non-core
+        cl.append({"vault": "0x%02d" % i, "retenu": False,
+                   "facteurs": {"anciennete_j": 5, "drawdown_pct": 20, "copyabilite": 0.8}})
+    (tmp_path / "runtime" / "data" / "vaults_scores.json").write_text(json.dumps({"retenus": ["0xC1", "0xC2"], "classement": cl}))
+    fills = [{"vault": "0x14", "coin": "WLD", "ts_ms": now - 1000} for _ in range(20)]     # très actif
+    fills += [{"vault": "0x03", "coin": "WLD", "ts_ms": now - 1000}]                        # peu actif
+    (tmp_path / "runtime" / "data" / "vault_fills_live.jsonl").write_text("\n".join(json.dumps(x) for x in fills))
+    vaults = [v for v, _r, _w in C.vaults_et_roles(tmp_path)]
+    assert vaults[:2] == ["0xC1", "0xC2"] and len(vaults) == 10     # 2 CORE + 8 candidats (10 places)
+    cand = vaults[2:]
+    assert "0x14" in cand and cand.index("0x14") < cand.index("0x03")   # le plus actif passe devant
