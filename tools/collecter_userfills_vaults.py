@@ -31,6 +31,8 @@ SCORES = Path("runtime") / "data" / "vaults_scores.json"
 FILE_MAX = 2000                  # file bornée : si saturée, on drop (on ne bloque JAMAIS la reception WS)
 NOM_VERROU = "userfills_live"
 RUN_ID = ""
+RUN_TOKEN = ""                    # provenance HORS PAYLOAD (en mémoire) — arme le trade + l'écriture runtime
+_MUTEX = None                     # handle du mutex Windows (à garder vivant)
 
 
 def vaults_et_roles(root: Path, *, n_candidats: int = 6) -> list[tuple[str, str, str]]:
@@ -116,7 +118,7 @@ def _traiter_un(root: Path, fill: dict, coins_a_verifier: set) -> None:
         f.write(json.dumps(fill, ensure_ascii=False) + "\n")
     coins_a_verifier.add(fill.get("coin"))
     for nom, coh in CO.COHORTES.items():
-        r = CO.traiter_fill(coh, ETATS[nom], fill, root)
+        r = CO.traiter_fill(coh, ETATS[nom], fill, root, token=RUN_TOKEN)   # token hors-payload
         _journal(root, fill, nom, r, recu)                        # trace TOUT, même les refus
         if r and r.get("ouverture"):
             print("[userfills] %s OUVRE %s @ %.4f latence=%dms (fill %s ts=%s)"
@@ -188,15 +190,42 @@ async def _heartbeat(root: Path, info: dict, *, intervalle_s: float = 10.0) -> N
         await asyncio.sleep(intervalle_s)
 
 
+async def _promotion_periodique(root: Path, *, intervalle_s: float = 300.0) -> None:
+    """Note les CANDIDAT_OBSERVE depuis le journal et promeut les 2 meilleurs en mini-PROBE (5-10 $)."""
+    from hl_observer.experimental import promotion_candidats as PC
+    from hl_observer.experimental import cohortes as _CO
+    from hl_observer.experimental.copy_edge_forward import charger_prix_tape
+    while True:
+        try:
+            observes = {v for v, role, _w in vaults_et_roles(root) if role.startswith("CANDIDAT")}
+            coins_probe = set(_CO.charger_table(_CO.PROBE, root))
+            PC.construire(root, coins_probe=coins_probe, tape=charger_prix_tape(root), candidats_observes=observes)
+        except Exception as exc:  # noqa: BLE001
+            print("[userfills] promotion err %s" % str(exc)[:40], flush=True)
+        await asyncio.sleep(intervalle_s)
+
+
 async def _boucle(root: Path) -> None:
-    global RUN_ID
-    ok, info = VI.acquerir(root, NOM_VERROU)                       # VERROU D'INSTANCE UNIQUE
-    if not ok:
-        print("[userfills] REFUS DEMARRAGE — une instance est deja active: %s" % info.get("detenteur"), flush=True)
+    global RUN_ID, RUN_TOKEN, _MUTEX
+    import secrets
+    # VERROU PRINCIPAL = mutex nommé Windows ; le verrou fichier ne sert plus qu'au DIAGNOSTIC
+    ok_mx, _MUTEX = VI.acquerir_mutex(NOM_VERROU)
+    if ok_mx is False:
+        print("[userfills] REFUS DEMARRAGE — mutex Windows deja tenu (instance active)", flush=True)
+        return
+    ok, info = VI.acquerir(root, NOM_VERROU)                       # verrou fichier = diagnostic/heartbeat
+    if ok_mx is None and not ok:                                   # hors Windows : le fichier fait foi
+        print("[userfills] REFUS DEMARRAGE — instance deja active: %s" % info.get("detenteur"), flush=True)
         return
     RUN_ID = info["run_id"]
+    RUN_TOKEN = secrets.token_hex(16)                             # provenance hors payload (en memoire)
+    (root / "runtime" / "data").mkdir(parents=True, exist_ok=True)
+    (root / CO.MARQUEUR_RUNTIME).write_text("runtime", encoding="utf-8")   # marque le RUNTIME_ROOT
+    CO.autoriser_runtime(RUN_TOKEN)                               # SEUL le collecteur arme l'ecriture runtime
+    print("[userfills] mutex=%s pid=%d run_id=%s (ecriture runtime armee)"
+          % ("WIN" if ok_mx else "fichier", info["pid"], RUN_ID), flush=True)
     for nom, coh in CO.COHORTES.items():
-        ETATS[nom] = CO.etat_initial(coh, root, run_id=RUN_ID)
+        ETATS[nom] = CO.etat_initial(coh, root, run_id=RUN_ID, token=RUN_TOKEN)
     roles = vaults_et_roles(root)
     if not roles:
         print("[userfills] aucun vault suivi (deny-by-default) — rien a faire", flush=True)
@@ -210,7 +239,7 @@ async def _boucle(root: Path) -> None:
     file: asyncio.Queue = asyncio.Queue(maxsize=FILE_MAX)
     try:
         await asyncio.gather(_worker(root, file), _exits_periodiques(root), _heartbeat(root, info),
-                             *[_un_vault(root, v, file) for v in vaults])
+                             _promotion_periodique(root), *[_un_vault(root, v, file) for v in vaults])
     finally:
         VI.liberer(root, NOM_VERROU, info)
 

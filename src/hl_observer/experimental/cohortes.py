@@ -63,6 +63,8 @@ def charger_store(coh: Cohorte, root: Path) -> dict:
 
 
 def _sauver(coh: Cohorte, root: Path, store: dict) -> None:
+    if not _ecriture_permise(root):
+        raise PermissionError("ecriture RUNTIME_ROOT non autorisee (hors collecteur) — isolation TEST/RUNTIME")
     p = _p(coh, root, "positions.json")
     p.parent.mkdir(parents=True, exist_ok=True)
     tmp = p.with_suffix(".json.tmp")
@@ -71,6 +73,8 @@ def _sauver(coh: Cohorte, root: Path, store: dict) -> None:
 
 
 def _ledger(coh: Cohorte, root: Path, evt: dict) -> None:
+    if not _ecriture_permise(root):
+        raise PermissionError("ecriture RUNTIME_ROOT non autorisee (hors collecteur) — isolation TEST/RUNTIME")
     p = _p(coh, root, "ledger.jsonl")
     p.parent.mkdir(parents=True, exist_ok=True)
     with p.open("a", encoding="utf-8") as f:
@@ -103,13 +107,34 @@ def _mark(coin: str, root: Path, now_ms: float, lecteur_l2) -> float | None:
     return _allmids(root, now_ms=now_ms).get(coin)
 
 
-SOURCE_LIVE = "LIVE_WS"           # seule provenance de fill acceptée pour TRADER (anti-pollution)
+SOURCE_LIVE = "LIVE_WS"           # étiquette d'audit dans le journal (PAS le gate — cf. token hors-payload)
+MARQUEUR_RUNTIME = Path("runtime") / "data" / ".runtime_marker"   # présent dans le VRAI runtime, absent des tmp de test
+_RUNTIME_AUTORISE: str | None = None   # token en mémoire ; seul le collecteur (via autoriser_runtime) l'arme
 
 
-def etat_initial(coh: Cohorte, root: Path, *, run_id: str | None = None) -> dict:
+def autoriser_runtime(token: str) -> None:
+    """Le COLLECTEUR appelle ceci APRÈS avoir pris le mutex : arme l'écriture sous le RUNTIME_ROOT marqué.
+    Un pytest ne l'appelle jamais → il ne peut pas écrire dans le vrai runtime (cf. _ecriture_permise)."""
+    global _RUNTIME_AUTORISE
+    _RUNTIME_AUTORISE = token
+
+
+def _est_runtime_marque(root: Path) -> bool:
+    return (Path(root) / MARQUEUR_RUNTIME).exists()
+
+
+def _ecriture_permise(root: Path) -> bool:
+    """Écrire sous un RUNTIME_ROOT MARQUÉ exige l'autorisation du collecteur. Les racines de test (tmp,
+    sans marqueur) sont toujours permises. => aucun pytest ne peut écrire dans le vrai runtime."""
+    return (not _est_runtime_marque(root)) or (_RUNTIME_AUTORISE is not None)
+
+
+def etat_initial(coh: Cohorte, root: Path, *, run_id: str | None = None, token: str | None = None) -> dict:
+    import secrets
     import uuid
     return {"store": charger_store(coh, root), "agg": {}, "vus": set(),
-            "run_id": run_id or ("run-" + uuid.uuid4().hex[:12])}
+            "run_id": run_id or ("run-" + uuid.uuid4().hex[:12]),
+            "token": token or secrets.token_hex(16)}      # provenance HORS PAYLOAD (en mémoire)
 
 
 def _expectancy(coh: Cohorte, root: Path) -> dict:
@@ -190,14 +215,17 @@ def _reduire(coh: Cohorte, pos: dict, store: dict, root: Path, *, fraction: floa
 
 
 def traiter_fill(coh: Cohorte, etat: dict, fill: dict, root: Path, *, now_ms: float | None = None,
-                 lecteur_l2=None, table: dict | None = None) -> dict | None:
+                 lecteur_l2=None, table: dict | None = None, token: str | None = None) -> dict | None:
     """INLINE : traite UN fill leader. Dédup (hash/isSnapshot) ; REDUCE/CLOSE → sortie ; OPEN/ADD agrégés
     en $ → admission → L2<1s → coûts → edge net>0 → OUVERTURE. Rend {ouverture|fermeture|refus, latence_ms}."""
     now = float(now_ms if now_ms is not None else time.time() * 1000)
+    # PROVENANCE HORS PAYLOAD : le token doit correspondre au token EN MÉMOIRE de la cohorte (créé par le
+    # collecteur). Un fill fabriqué ne peut PAS le connaître → refusé. Le champ source du payload n'est
+    # plus le gate (contournable) ; il ne sert qu'à l'audit du journal.
+    if token is None or token != etat.get("token"):
+        return {"refus": "PROVENANCE_NON_AUTORISEE", "coin": fill.get("coin")}
     if fill.get("isSnapshot"):
         return None                                               # snapshot initial : on ne trade pas dessus
-    if fill.get("source") != SOURCE_LIVE:                         # PROVENANCE OBLIGATOIRE : refuse tout fill
-        return {"refus": "SOURCE_NON_LIVE", "coin": fill.get("coin"), "source": fill.get("source")}  # non LIVE_WS
     h = fill.get("hash")
     if h:
         if h in etat["vus"]:
@@ -278,7 +306,13 @@ def traiter_fill(coh: Cohorte, etat: dict, fill: dict, root: Path, *, now_ms: fl
         return {"refus": "L2_ABERRANT", "coin": coin, "mid": round(mid, 6), "ref": round(ref, 6)}
     spread = (hl_ask - hl_bid) / mid * 1e4
     depth = float(l2.get("depth_usd") or 0.0)
-    notional = min(coh.notional_usd, min(depth, store["cash"]))
+    cible_notional = coh.notional_usd
+    if coh is PROBE:                                              # un CANDIDAT PROMU trade en MINI (5-10 $)
+        from hl_observer.experimental.promotion_candidats import charger_promus
+        pr = charger_promus(root).get(vault)
+        if pr:
+            cible_notional = float(pr.get("notional_usd") or coh.notional_usd)
+    notional = min(cible_notional, min(depth, store["cash"]))
     if notional < NOTIONAL_MIN_USD:
         return {"refus": "LIQUIDITE_INSUFFISANTE", "coin": coin}
     slippage = SLIPPAGE_BASE_BPS + SLIPPAGE_IMPACT_COEF * (notional / depth if depth else 1.0)
@@ -294,12 +328,14 @@ def traiter_fill(coh: Cohorte, etat: dict, fill: dict, root: Path, *, now_ms: fl
 
 
 def _vaults_cohorte(coh: Cohorte, root: Path) -> set[str]:
-    """Vaults suivis par la cohorte (deny-by-default). ALPHA = retenus stricts ; PROBE = CORE+CHALLENGERS."""
+    """Vaults TRADABLES par la cohorte (deny-by-default). ALPHA = retenus stricts ; PROBE = CORE +
+    CHALLENGERS sûrs + CANDIDATS PROMUS (mini-PROBE)."""
     from hl_observer.experimental.exploratoire import tiers
     if coh is ALPHA:
         return _vaults_retenus(root)
     core, chal = tiers(root)
-    return core | chal
+    from hl_observer.experimental.promotion_candidats import charger_promus
+    return core | chal | set(charger_promus(root))
 
 
 def gerer_exits(coh: Cohorte, root: Path, *, now_ms: float | None = None, lecteur_l2=None) -> list[dict]:

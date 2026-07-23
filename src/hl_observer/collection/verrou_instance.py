@@ -28,6 +28,21 @@ def _lire(p: Path) -> dict | None:
         return None
 
 
+def acquerir_mutex(nom: str) -> tuple[bool | None, object]:
+    """VERROU PRINCIPAL sous Windows : mutex NOMMÉ (kernel). Rend (True, handle) si acquis, (False, None)
+    si une autre instance le tient déjà (ERROR_ALREADY_EXISTS=183), (None, None) hors Windows (l'appelant
+    retombe alors sur le verrou fichier). Le handle DOIT être gardé vivant tant que l'instance tourne."""
+    try:
+        import ctypes  # noqa: PLC0415
+        k = ctypes.windll.kernel32                                # noqa: attr — Windows only
+    except (AttributeError, OSError, ImportError):
+        return None, None                                         # pas Windows -> fallback fichier
+    handle = k.CreateMutexW(None, True, "Global\\hypersmart_%s" % nom)
+    if not handle or k.GetLastError() == 183:                     # ERROR_ALREADY_EXISTS
+        return False, None
+    return True, handle
+
+
 def acquerir(root: Path, nom: str, *, now_ms: float | None = None) -> tuple[bool, dict]:
     """Tente d'acquérir le verrou. Rend (ok, info). ok=False si une instance FRAÎCHE tient déjà le verrou."""
     now = float(now_ms if now_ms is not None else time.time() * 1000)
