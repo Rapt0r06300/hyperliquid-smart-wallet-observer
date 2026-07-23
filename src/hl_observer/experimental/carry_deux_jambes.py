@@ -34,6 +34,16 @@ def dimensionner_notional(depth_usd: float, cible_usd: float) -> float:
     return n if n >= NOTIONAL_MIN_UTILE_USD else 0.0
 
 
+def frais_venues(root: str | Path = ".") -> tuple[float, float, str]:
+    """Frais takers HL/Binance SOURCÉS (config/frais_venues.json), JAMAIS codés en dur (décision Flo).
+    Renvoie (hl_bps, bin_bps, source). Config absente/illisible -> défaut DOCUMENTÉ."""
+    try:
+        d = json.loads((Path(root) / "config" / "frais_venues.json").read_text(encoding="utf-8"))
+        return float(d["hl_taker_bps"]), float(d["bin_taker_bps"]), str(d.get("source") or "config")
+    except (OSError, ValueError, KeyError, TypeError):
+        return FRAIS_TAKER_HL_BPS, FRAIS_TAKER_BIN_BPS, "DEFAUT (config absente)"
+
+
 def carnet_par_coin(root: str | Path = ".", *, max_lignes: int = 60000) -> dict[str, dict]:
     """{coin: dernière ligne de carnet} (bid/ask des deux venues, demi-spreads, profondeur, ts)."""
     p = Path(root) / CARNET_RELPATH
@@ -62,10 +72,13 @@ def _slippage_bps(notional: float, profondeur_usd: float, demi_spread_bps: float
     return (notional / prof - 1.0) * demi_spread_bps * 2.0  # dépassement -> slippage croissant
 
 
-def construire_jambes(coin: str, sens: int, notional: float, carnet: dict) -> dict[str, Any]:
-    """Les DEUX jambes exécutables. `sens=+1` -> SHORT HL / LONG Binance (funding HL > Binance) ;
-    `sens=-1` -> LONG HL / SHORT Binance. Chaque jambe : venue, sens, qté, prix EXÉCUTABLE (bid si on
-    vend, ask si on achète), profondeur, demi-spread, frais, slippage — tout SÉPARÉ."""
+def construire_jambes(coin: str, sens: int, notional: float, carnet: dict, *,
+                      frais_hl: float | None = None, frais_bin: float | None = None) -> dict[str, Any]:
+    """Les DEUX jambes exécutables. `sens=+1` -> SHORT HL / LONG Binance ; `sens=-1` -> l'inverse.
+    Chaque jambe : venue, sens, qté, prix EXÉCUTABLE (bid si on vend, ask si on achète), profondeur,
+    demi-spread, frais (SOURCÉS, pas codés en dur), slippage — tout SÉPARÉ."""
+    fhl = FRAIS_TAKER_HL_BPS if frais_hl is None else float(frais_hl)
+    fbin = FRAIS_TAKER_BIN_BPS if frais_bin is None else float(frais_bin)
     hl_bid, hl_ask = float(carnet["hl_bid"]), float(carnet["hl_ask"])
     bin_bid, bin_ask = float(carnet["bin_bid"]), float(carnet["bin_ask"])
     hl_mid, bin_mid = (hl_bid + hl_ask) / 2, (bin_bid + bin_ask) / 2
@@ -80,13 +93,13 @@ def construire_jambes(coin: str, sens: int, notional: float, carnet: dict) -> di
     bin_slip = _slippage_bps(notional, prof, bin_dspr)
     jambe_hl = {"venue": "HL", "sens": -1 if hl_short else 1, "sens_txt": "SHORT" if hl_short else "LONG",
                 "qty": round(notional / hl_mid, 6), "prix_exec": hl_px, "bid": hl_bid, "ask": hl_ask,
-                "profondeur_usd": prof, "demi_spread_bps": round(hl_dspr, 3), "frais_bps": FRAIS_TAKER_HL_BPS,
+                "profondeur_usd": prof, "demi_spread_bps": round(hl_dspr, 3), "frais_bps": fhl,
                 "slippage_bps": round(hl_slip, 3), "ts_ms": int(ts_ms)}
     jambe_bin = {"venue": "BINANCE", "sens": 1 if hl_short else -1, "sens_txt": "LONG" if hl_short else "SHORT",
                  "qty": round(notional / bin_mid, 6), "prix_exec": bin_px, "bid": bin_bid, "ask": bin_ask,
-                 "profondeur_usd": prof, "demi_spread_bps": round(bin_dspr, 3), "frais_bps": FRAIS_TAKER_BIN_BPS,
+                 "profondeur_usd": prof, "demi_spread_bps": round(bin_dspr, 3), "frais_bps": fbin,
                  "slippage_bps": round(bin_slip, 3), "ts_ms": int(ts_ms)}
-    frais_entree_bps = (hl_dspr + bin_dspr + FRAIS_TAKER_HL_BPS + FRAIS_TAKER_BIN_BPS + hl_slip + bin_slip)
+    frais_entree_bps = (hl_dspr + bin_dspr + fhl + fbin + hl_slip + bin_slip)
     hedge_ratio = round((jambe_hl["qty"] * hl_mid) / (jambe_bin["qty"] * bin_mid), 4) if bin_mid else 0.0
     return {"jambes": {"hl": jambe_hl, "bin": jambe_bin}, "hedge_ratio": hedge_ratio,
             "frais_entree_reels_bps": round(frais_entree_bps, 3), "cout_sortie_estime_bps": round(frais_entree_bps, 3),

@@ -22,62 +22,113 @@ HOLD_H = 168.0
 
 
 HOLD_MAX_H = 0.5                    # dislocation = COURT TERME (30 min max), JAMAIS 168 h ni funding
+SYNCHRO_RELPATH = Path("runtime") / "data" / "bbo_synchro.jsonl"
+AGE_MAX_MS_DISLOC = 1000.0          # < 1 s (Flo) : snapshot plus vieux -> périmé
+DESYNC_MAX_MS = 250.0               # HL/Binance alignés à moins de ça, sinon skew -> rejet
+
+
+def _snapshots_bbo(root: str | Path, *, max_lignes: int = 20000) -> dict[str, dict]:
+    """{coin: dernier snapshot SYNCHRONISÉ (flux WS bbo, horloge monotone)} : hl/bin bid/ask, profondeur
+    top-of-book, âges monotones, desync (skew). C'est la source TEMPS RÉEL du cross-venue court terme."""
+    p = Path(root) / SYNCHRO_RELPATH
+    if not p.exists():
+        return {}
+    out: dict[str, dict] = {}
+    for l in p.read_text(encoding="utf-8", errors="ignore").splitlines()[-max_lignes:]:
+        try:
+            d = json.loads(l)
+        except ValueError:
+            continue
+        c = str(d.get("coin") or "").upper()
+        if c and d.get("hl_bid") and d.get("bin_bid"):
+            out[c] = d
+    return out
 
 
 def signaux_cross_venue(root: str | Path = ".", *, now_ms: float | None = None) -> tuple[list[Signal], list[dict]]:
-    """CROSS-VENUE COURT TERME (v2, rectification Flo 23/07) : capture un ÉCART DE PRIX EXÉCUTABLE entre
-    HL et Binance, entrée/sortie RAPIDE, **sans aucune dépendance au funding ni au hold 168 h**. On achète
-    la venue la moins chère (à l'ask) et on vend la plus chère (au bid) ; on débouble à la convergence.
-    Signal SEULEMENT si l'écart exécutable (net des spreads croisés) dépasse les coûts A/R + le plancher
-    de profit exigeant. La v1 (carry funding) est en QUARANTAINE — ce moteur ne la lit plus."""
+    """CROSS-VENUE COURT TERME (v2b, rectif Flo) : source = flux WS BBO SYNCHRONISÉ (HL bbo + Binance
+    bookTicker, horloge MONOTONE). REFUSE tout snapshot > 1 s (`SNAPSHOT_PERIME_1S`) ou désaligné
+    (`SKEW_DESALIGNE`). Capture un ÉCART DE PRIX EXÉCUTABLE, entrée/sortie rapide, ZÉRO funding. Frais
+    SOURCÉS (config). La v1 carry est en quarantaine — ce moteur ne la lit plus."""
     from hl_observer.experimental.carry_deux_jambes import (
-        carnet_par_coin, construire_jambes, dimensionner_notional, FRAIS_TAKER_HL_BPS,
-        FRAIS_TAKER_BIN_BPS, CARNET_AGE_MAX_S, LATENCE_MS, LATENCE_COUT_BPS)
+        construire_jambes, dimensionner_notional, frais_venues, LATENCE_MS, LATENCE_COUT_BPS)
     root = Path(root)
     now = float(now_ms if now_ms is not None else time.time() * 1000)
     sigs: list[Signal] = []
     refus: list[dict] = []
-    carnet = carnet_par_coin(root)
-    if not carnet:
-        return sigs, [{"moteur": "cross_venue", "motif": "CARNET_ABSENT"}]
+    snaps = _snapshots_bbo(root)
+    if not snaps:
+        return sigs, [{"moteur": "cross_venue", "motif": "BBO_ABSENT"}]
+    fhl, fbin, _src = frais_venues(root)
     cible = LIMITES["cross_venue"]["notional_usd"]
-    for coin, car in carnet.items():
-        if (now / 1000.0 - float(car.get("collecte_ts") or 0.0)) > CARNET_AGE_MAX_S:
-            refus.append({"moteur": "cross_venue", "coin": coin, "motif": "QUOTE_PERIMEE"}); continue
-        hl_bid, hl_ask = float(car["hl_bid"]), float(car["hl_ask"])
-        bin_bid, bin_ask = float(car["bin_bid"]), float(car["bin_ask"])
+    for coin, d in snaps.items():
+        age = max(float(d.get("age_hl_ms") or 1e9), float(d.get("age_bin_ms") or 1e9))
+        desync = float(d.get("desync_ms") or 1e9)
+        if age > AGE_MAX_MS_DISLOC:
+            refus.append({"moteur": "cross_venue", "coin": coin, "motif": "SNAPSHOT_PERIME_1S", "age_ms": round(age)}); continue
+        if desync > DESYNC_MAX_MS:
+            refus.append({"moteur": "cross_venue", "coin": coin, "motif": "SKEW_DESALIGNE", "desync_ms": round(desync, 1)}); continue
+        hl_bid, hl_ask = float(d["hl_bid"]), float(d["hl_ask"])
+        bin_bid, bin_ask = float(d["bin_bid"]), float(d["bin_ask"])
         hl_mid, bin_mid = (hl_bid + hl_ask) / 2, (bin_bid + bin_ask) / 2
         if hl_mid <= 0 or bin_mid <= 0:
             continue
-        gap_hl_cheap = (bin_bid - hl_ask) / hl_mid * 1e4          # HL moins cher -> long HL / short BIN
-        gap_bin_cheap = (hl_bid - bin_ask) / bin_mid * 1e4        # BIN moins cher -> short HL / long BIN
-        gap = max(gap_hl_cheap, gap_bin_cheap)                    # écart EXÉCUTABLE capturable (bps)
-        sens = 1 if gap_hl_cheap >= gap_bin_cheap else -1         # +1 = long HL (HL moins cher)
-        depth = float(car.get("taille_min_usd") or 0.0)
-        notional = dimensionner_notional(depth, cible)           # VWAP/profondeur : taille exécutable
+        gap = max((bin_bid - hl_ask) / hl_mid * 1e4, (hl_bid - bin_ask) / bin_mid * 1e4)   # écart EXÉCUTABLE
+        sens = 1 if (bin_bid - hl_ask) / hl_mid >= (hl_bid - bin_ask) / bin_mid else -1
+        depth = float(d.get("taille_top_usd") or 0.0)
+        notional = dimensionner_notional(depth, cible)
         if notional <= 0:
-            refus.append({"moteur": "cross_venue", "coin": coin, "motif": "LIQUIDITE_INSUFFISANTE",
-                          "profondeur_usd": depth}); continue
-        # l'écart exécutable a DÉJÀ payé l'entrée (bid/ask) ; reste le déboucle : exit spreads + 4 fills + latence
-        cout_ar = (float(car.get("hl_demi_spread_bps") or 0.0) + float(car.get("bin_demi_spread_bps") or 0.0)
-                   + 2 * (FRAIS_TAKER_HL_BPS + FRAIS_TAKER_BIN_BPS) + LATENCE_COUT_BPS)
+            refus.append({"moteur": "cross_venue", "coin": coin, "motif": "LIQUIDITE_INSUFFISANTE", "profondeur_usd": depth}); continue
+        car = {"hl_bid": hl_bid, "hl_ask": hl_ask, "bin_bid": bin_bid, "bin_ask": bin_ask,
+               "hl_demi_spread_bps": (hl_ask - hl_bid) / 2 / hl_mid * 1e4,
+               "bin_demi_spread_bps": (bin_ask - bin_bid) / 2 / bin_mid * 1e4,
+               "taille_min_usd": depth, "collecte_ts": d.get("collecte_ts") or now / 1000}
+        cout_ar = (car["hl_demi_spread_bps"] + car["bin_demi_spread_bps"] + 2 * (fhl + fbin) + LATENCE_COUT_BPS)
         edge_net = gap - cout_ar
         if edge_net <= 0:
             refus.append({"moteur": "cross_venue", "coin": coin, "motif": "ECART_SOUS_LES_COUTS",
                           "gap_bps": round(gap, 2), "cout_bps": round(cout_ar, 2)}); continue
-        aud = construire_jambes(coin, sens, notional, car)
+        aud = construire_jambes(coin, sens, notional, car, frais_hl=fhl, frais_bin=fbin)
         j = aud["jambes"]
         sigs.append(Signal(
             moteur="cross_venue", coin=coin, sens=sens, type_pnl="dislocation", notional_usd=notional,
             prix_entree=j["hl"]["prix_exec"], cout_entree_bps=cout_ar / 2.0, edge_estime_bps=round(edge_net, 4),
-            pnl_attendu_usd=round(edge_net / 1e4 * notional, 4), ts_signal_ms=float(car.get("collecte_ts") or now / 1000) * 1000,
-            frais_bps=FRAIS_TAKER_HL_BPS + FRAIS_TAKER_BIN_BPS,
+            pnl_attendu_usd=round(edge_net / 1e4 * notional, 4), ts_signal_ms=now, frais_bps=fhl + fbin,
             spread_bps=j["hl"]["demi_spread_bps"] + j["bin"]["demi_spread_bps"],
             slippage_bps=j["hl"]["slippage_bps"] + j["bin"]["slippage_bps"], latence_ms=LATENCE_MS,
             base_entree_bps=round(gap, 3), hold_h=HOLD_MAX_H,
             meta={"jambes": j, "hedge_ratio": aud["hedge_ratio"], "gap_entree_bps": round(gap, 3),
-                  "cout_ar_bps": cout_ar, "profondeur_usd": depth}))
+                  "cout_ar_bps": cout_ar, "profondeur_usd": depth, "desync_ms": round(desync, 1)}))
     return sigs, refus
+
+
+def metriques_cross_venue(root: str | Path = ".") -> dict[str, Any]:
+    """Preuve runtime (Flo) : couverture FRAÎCHE (<1 s), skew p50/p95, écarts BRUTS vs coûts, par tick."""
+    import statistics as st
+    from hl_observer.experimental.carry_deux_jambes import frais_venues, LATENCE_COUT_BPS
+    snaps = _snapshots_bbo(root)
+    fhl, fbin, src = frais_venues(root)
+    fresh, skews, bruts = 0, [], []
+    for coin, d in snaps.items():
+        age = max(float(d.get("age_hl_ms") or 1e9), float(d.get("age_bin_ms") or 1e9))
+        skews.append(float(d.get("desync_ms") or 0.0))
+        if age > AGE_MAX_MS_DISLOC:
+            continue
+        fresh += 1
+        hl_bid, hl_ask = float(d["hl_bid"]), float(d["hl_ask"])
+        bin_bid, bin_ask = float(d["bin_bid"]), float(d["bin_ask"])
+        hl_mid, bin_mid = (hl_bid + hl_ask) / 2, (bin_bid + bin_ask) / 2
+        if hl_mid > 0 and bin_mid > 0:
+            gap = max((bin_bid - hl_ask) / hl_mid * 1e4, (hl_bid - bin_ask) / bin_mid * 1e4)
+            spread = (hl_ask - hl_bid) / 2 / hl_mid * 1e4 + (bin_ask - bin_bid) / 2 / bin_mid * 1e4
+            cout = spread + 2 * (fhl + fbin) + LATENCE_COUT_BPS
+            bruts.append({"coin": coin, "gap_brut_bps": round(gap, 2), "cout_bps": round(cout, 2),
+                          "net_bps": round(gap - cout, 2), "depth_usd": round(float(d.get("taille_top_usd") or 0.0), 1)})
+    bruts.sort(key=lambda x: -x["net_bps"])
+    q = lambda a, p: (sorted(a)[min(len(a) - 1, int(len(a) * p))] if a else 0.0)
+    return {"coins_bbo": len(snaps), "coins_frais_1s": fresh, "frais_source": src, "frais_hl_bps": fhl, "frais_bin_bps": fbin,
+            "skew_p50_ms": round(st.median(skews), 1) if skews else 0.0, "skew_p95_ms": round(q(skews, 0.95), 1),
+            "meilleur_net_bps": bruts[0]["net_bps"] if bruts else None, "top": bruts[:6]}
 
 
 # ─────────────────────────────── 2) LEAD-LAG (choc Binance → réaction HL) ───────────────────────────────

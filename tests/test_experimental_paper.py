@@ -24,11 +24,9 @@ def test_admission_sans_oos_mais_barème_exigeant(tmp_path):
     assert MP.admettre(_sig(ts_signal_ms=0.0), store, now_ms=now)[1] == "SIGNAL_PERIME"
     assert MP.admettre(_sig(prix_entree=0.0), store, now_ms=now)[1] == "PRIX_NON_EXECUTABLE"
     assert MP.admettre(_sig(edge_estime_bps=-1.0), store, now_ms=now)[1] == "EDGE_NEGATIF_APRES_COUTS"
-    # 🔴 barème v2 : refuse micro-edges + PnL pour des centimes
+    # 🔴 barème v2 : refuse micro-edges + PnL pour des centimes (la porte ROI_vs_HLP a été RETIRÉE, carry mort)
     assert MP.admettre(_sig(edge_estime_bps=5.0), store, now_ms=now)[1] == "MICRO_EDGE"
     assert MP.admettre(_sig(pnl_attendu_usd=0.05), store, now_ms=now)[1] == "PNL_POUR_DES_CENTIMES"
-    # carry : ROI doit battre HLP
-    assert MP.admettre(_sig(type_pnl="funding_carry", roi_annuel_pct=5.0), store, now_ms=now)[1] == "ROI_TROP_FAIBLE_VS_HLP"
 
 
 def test_limites_par_moteur_et_un_marche_une_position(tmp_path):
@@ -102,4 +100,4 @@ def test_runner_refuse_et_motive(tmp_path, monkeypatch):
     monkeypatch.setattr(R, "COLLECTEURS",
                         {"lead_lag": lambda root, now_ms=None: ([_sig(edge_estime_bps=-5.0, ts_signal_ms=now_ms)], [])})
     st = tick(tmp_path, now_ms=50_000.0, moteurs=("lead_lag",))
-    assert st["ouvertures"] == [] and st["refus_par_motif"].get("EDGE_NEGATIF_APRES_COUTS") == 1
+    assert st["ouvertures"] == [] and st["refus_par_motif_ce_tick"].get("EDGE_NEGATIF_APRES_COUTS") == 1

@@ -234,10 +234,15 @@ def tick(root: str | Path = ".", *, now_ms: float | None = None,
         positions.append(e)
     from collections import Counter
     refus_par_motif = dict(Counter(r.get("motif") for r in refus))
+    try:
+        from hl_observer.experimental.signaux import metriques_cross_venue
+        metriques = metriques_cross_venue(root)
+    except Exception:  # noqa: BLE001 — les métriques ne bloquent jamais le tick
+        metriques = {}
     statut = {"ts": time.time(), "now_ms": int(now), "ouvertures": ouvertures, "fermetures": fermetures,
-              "n_refus": len(refus), "refus_par_motif": refus_par_motif, "premier_signal": premier_signal,
-              "resume": resume, "positions": positions, "mtm_total_usd": round(mtm_total, 6),
-              "real_execution": False}
+              "n_refus_ce_tick": len(refus), "refus_par_motif_ce_tick": refus_par_motif,   # PAR TICK, pas cumulé
+              "premier_signal": premier_signal, "resume": resume, "positions": positions,
+              "mtm_total_usd": round(mtm_total, 6), "metriques_cross_venue": metriques, "real_execution": False}
     p = root / STATUS_RELPATH
     p.parent.mkdir(parents=True, exist_ok=True)
     tmp = p.with_suffix(".json.tmp")

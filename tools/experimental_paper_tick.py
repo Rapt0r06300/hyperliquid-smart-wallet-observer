@@ -21,7 +21,7 @@ def main(argv: list[str] | None = None) -> int:
     st = tick(a.root)
     print("[experimental] ouvertures=%d fermetures=%d positions=%d realise=%.4f$ refus=%d" % (
         len(st["ouvertures"]), len(st["fermetures"]), st["resume"]["positions_ouvertes"],
-        st["resume"]["realise_total_usd"], st["n_refus"]), flush=True)
+        st["resume"]["realise_total_usd"], st["n_refus_ce_tick"]), flush=True)
     if st.get("premier_signal"):
         print("[experimental] 1er signal admis:", json.dumps(st["premier_signal"], ensure_ascii=False), flush=True)
     return 0

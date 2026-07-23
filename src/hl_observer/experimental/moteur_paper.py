@@ -117,8 +117,6 @@ def admettre(sig: Signal, store: dict, *, now_ms: float) -> tuple[bool, str | No
         return False, "EDGE_NEGATIF_APRES_COUTS"
     if float(sig.edge_estime_bps) < MIN_EDGE_NET_BPS:          # 🔴 barème v2 : refuse les micro-edges
         return False, "MICRO_EDGE"
-    if sig.type_pnl == "funding_carry" and float(sig.roi_annuel_pct) < MIN_ROI_ANNUEL_NET_PCT:
-        return False, "ROI_TROP_FAIBLE_VS_HLP"                 # carry : capital immobilisé -> doit battre HLP
     if float(sig.pnl_attendu_usd) < MIN_PNL_ATTENDU_USD:       # capital immobilisé pour des centimes
         return False, "PNL_POUR_DES_CENTIMES"
     if sig.sens not in (-1, 1):

@@ -1175,7 +1175,8 @@ def create_dashboard_v2_router() -> APIRouter:
                 "realise_total_usd": resume.get("realise_total_usd", 0.0),
                 "mtm_total_usd": statut.get("mtm_total_usd", 0.0),
                 "par_moteur": resume.get("par_moteur", {}),
-                "refus_par_motif": statut.get("refus_par_motif", {}),
+                "refus_par_motif": statut.get("refus_par_motif_ce_tick", {}),   # PAR TICK, pas cumulé
+                "metriques_cross_venue": statut.get("metriques_cross_venue", {}),
                 "premier_signal": statut.get("premier_signal"), "read_only": True, "real_execution": False})
         except Exception as exc:  # noqa: BLE001 — un panneau ne casse jamais la page
             return JSONResponse({"error": str(exc), "positions": [], "positions_ouvertes": 0,
