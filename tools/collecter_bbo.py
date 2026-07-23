@@ -299,3 +299,7 @@ def resume(root: str | Path = ".") -> dict[str, Any]:
 
 __all__ = ["symbole_binance", "parser_bbo_hl", "parser_bookticker_binance", "MagasinBBO",
            "mesurer_lead_lag", "resume", "AGE_MAX_MS", "FENETRE_SYNCHRO_MS", "GAP_MS", "SORTIE"]
+
+
+if __name__ == "__main__":                                 # 🔴 MANQUAIT : sans ce garde, le script
+    raise SystemExit(main())                               # definissait tout et sortait sans lancer main()
