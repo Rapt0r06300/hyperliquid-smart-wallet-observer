@@ -76,6 +76,11 @@ def _append_ledger(root: str | Path, row: dict[str, Any]) -> None:
             row = {**row, "session_id": session_courante(root)}
         except Exception:  # noqa: BLE001 — une identite illisible ne bloque pas le ledger
             row = {**row, "session_id": ""}
+    # 🔴 23/07 — ÉTIQUETAGE À LA SOURCE (casseur de confiance n°1). Ce store n'écrit QUE du carry ;
+    # sans ce champ, 60 % des closes du ledger sortaient en `?` -> attribution du PnL PAR MOTEUR
+    # fausse et risque de mélange carry/arb/cross-venue dans le même fichier. On tague ici, une fois.
+    if not row.get("strategie"):
+        row = {**row, "strategie": "carry"}
     with p.open("a", encoding="utf-8") as fh:
         fh.write(json.dumps(row, ensure_ascii=False) + "\n")
 

@@ -5,10 +5,21 @@ import json
 
 from hl_observer.funding.carry_positions_store import (
     charger_gestionnaire, tick_sur_disque, resume_depuis_ledger,
-    POSITIONS_RELPATH, LEDGER_RELPATH,
+    _append_ledger, POSITIONS_RELPATH, LEDGER_RELPATH,
 )
 
 H = 3_600_000
+
+
+def test_le_ledger_carry_est_ETIQUETE_a_la_source(tmp_path):
+    """🔴 23/07 (casseur de confiance n°1) — 60 % des closes du ledger sortaient en `?` : le store
+    carry écrivait sans `strategie` -> attribution du PnL PAR MOTEUR fausse. Désormais tagué à la
+    source, sans jamais écraser une étiquette explicite (pas de mélange carry/arb/cross-venue)."""
+    _append_ledger(tmp_path, {"kind": "CLOSE", "coin": "BTC", "realized_net_pnl_usdc": -0.05})
+    _append_ledger(tmp_path, {"kind": "OPEN", "coin": "ETH", "strategie": "cross_venue_carry"})
+    lignes = [json.loads(l) for l in (tmp_path / LEDGER_RELPATH).read_text(encoding="utf-8").splitlines()]
+    assert lignes[0]["strategie"] == "carry"                 # tagué à la source
+    assert lignes[1]["strategie"] == "cross_venue_carry"     # étiquette explicite JAMAIS écrasée
 
 
 # 🔴 21/07 — funding d'ENTREE releve du plancher (0.125) a 0.45 : la porte du cout
