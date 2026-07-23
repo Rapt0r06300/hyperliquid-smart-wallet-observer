@@ -42,29 +42,33 @@ def test_parser_bookticker_binance():
     assert m.parser_bookticker_binance({"x": 1}) is None
 
 
+_NS = 1_000_000_000                                            # 1 s en nanosecondes (horloge monotone)
+
+
 def test_magasin_rejette_les_quotes_PERIMEES_et_non_synchrones():
     m = _mod()
     mag = m.MagasinBBO()
     hl = {"coin": "ETH", "bid": 3000.0, "ask": 3000.5, "bid_sz": 5, "ask_sz": 4, "ts_ex": 1}
-    bn = {"symbol": "ETHUSDT", "bid": 3000.1, "ask": 3000.4, "bid_sz": 5, "ask_sz": 4, "ts_ex": 2}
-    mag.maj_hl(hl, now_ms=1000.0)
-    mag.maj_binance(bn, "ETH", now_ms=1000.0)
-    assert mag.snapshot("ETH", now_ms=1000.0) is not None      # frais + synchrones -> OK
-    assert mag.snapshot("ETH", now_ms=2000.0) is None          # âge 1000 ms > 750 -> PÉRIMÉ, rejeté
-    mag.maj_binance(bn, "ETH", now_ms=1400.0)                   # Binance 400 ms après HL
-    assert mag.snapshot("ETH", now_ms=1400.0) is None          # |Δ ts_local| 400 > 250 -> non synchrone
-    assert mag.snapshot("SOL", now_ms=1000.0) is None          # une jambe manque
+    bn = {"symbol": "ETHUSDT", "bid": 3000.1, "ask": 3000.4, "bid_sz": 5, "ask_sz": 4, "ts_ex": 2, "update_id": 7}
+    mag.maj_hl(hl, recu_mono_ns=_NS)
+    mag.maj_binance(bn, "ETH", recu_mono_ns=_NS)
+    assert mag.snapshot("ETH", now_mono_ns=_NS, ts_wall_ms=1000.0) is not None       # frais + synchrones
+    assert mag.snapshot("ETH", now_mono_ns=_NS + _NS, ts_wall_ms=2000.0) is None     # âge 1000 ms > 750 -> périmé
+    mag.maj_binance(bn, "ETH", recu_mono_ns=_NS + 400_000_000)                        # Binance 400 ms après HL
+    assert mag.snapshot("ETH", now_mono_ns=_NS + 400_000_000, ts_wall_ms=1400.0) is None  # désync 400 > 250
+    assert mag.snapshot("SOL", now_mono_ns=_NS, ts_wall_ms=1000.0) is None            # une jambe manque
 
 
-def test_snapshot_porte_ecart_ages_et_timestamps():
+def test_snapshot_porte_ecart_ages_timestamps_et_update_id():
     m = _mod()
     mag = m.MagasinBBO()
-    mag.maj_hl({"coin": "ETH", "bid": 3001, "ask": 3002, "bid_sz": 5, "ask_sz": 4, "ts_ex": 10}, now_ms=1000.0)
-    mag.maj_binance({"symbol": "ETHUSDT", "bid": 3000, "ask": 3001, "bid_sz": 5, "ask_sz": 4, "ts_ex": 11},
-                    "ETH", now_ms=1000.0)
-    s = mag.snapshot("ETH", now_ms=1000.0)
-    assert s["ecart_mid_bps"] > 0 and s["ts_ex_hl"] == 10 and s["ts_ex_bin"] == 11
-    assert "age_hl_ms" in s and "age_bin_ms" in s and s["real_execution"] is False
+    mag.maj_hl({"coin": "ETH", "bid": 3001, "ask": 3002, "bid_sz": 5, "ask_sz": 4, "ts_ex": 10},
+               recu_mono_ns=_NS)
+    mag.maj_binance({"symbol": "ETHUSDT", "bid": 3000, "ask": 3001, "bid_sz": 5, "ask_sz": 4,
+                     "ts_ex": 11, "update_id": 9}, "ETH", recu_mono_ns=_NS)
+    s = mag.snapshot("ETH", now_mono_ns=_NS, ts_wall_ms=1000.0)
+    assert s["ecart_mid_bps"] > 0 and s["ts_ex_hl"] == 10 and s["update_id_bin"] == 9
+    assert "age_hl_ms" in s and "desync_ms" in s and s["real_execution"] is False
 
 
 def test_mesurer_lead_lag_detecte_que_binance_MENE():

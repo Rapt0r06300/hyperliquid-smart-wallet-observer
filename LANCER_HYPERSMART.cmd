@@ -365,9 +365,11 @@ REM === BBO RAPIDE HL/Binance (chantier ARB 23/07) : quotes SYNCHRONISEES pour t
 REM Le detecteur d'arb actuel est INVALIDE (base persistante +17-30bps = mapping/quote perimee).
 REM Ce collecteur WS PERSISTANT (HL bbo + Binance bookTicker) donne des quotes MAPPEES exactement,
 REM FRAICHES (rejet des perimees), HORODATEES (exchange+local) -> teste proprement le lead-lag
-REM Binance->HL en shadow. Run borne 300s -> boucle_collecteur relance + garde anti-orphelin.
+REM Binance->HL en shadow. PERSISTANT : reconnecte SEULEMENT sur panne, garde son etat, horloge
+REM MONOTONE a la reception (un skew d'horloge ne doit PAS ressembler a un edge), heartbeat +
+REM anti-orphelin INTERNE (sort si la session change). boucle_collecteur ne relance qu'en cas de crash.
 REM ⚠️ 2 flux PUBLICS en lecture. 0 cle, 0 ordre, 0 signature. Necessite le module python `websockets`.
-start "" /b tools\boucle_collecteur.cmd bbo-collector tools\collecter_bbo.py 2 --duree 300
+start "" /b tools\boucle_collecteur.cmd bbo-collector tools\collecter_bbo.py 5
 
 REM ---- COPY-WHITELIST (#185, 20/07) : nourrit la porte copy (leaders au markout prouve). ----
 REM La whitelist se PERIME a 24 h (porte deny-by-default) -> regeneree toutes les 6 h.

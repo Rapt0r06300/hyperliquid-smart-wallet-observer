@@ -1,4 +1,4 @@
-# Rapport quotidien HyperSmart — 23/07/2026 13:34
+# Rapport quotidien HyperSmart — 23/07/2026 13:42
 
 _Chaque chiffre se remonte à un fichier (ledger, positions, journaux). Fenêtre : dernières 24 h._
 
@@ -14,12 +14,12 @@ Total historique (toutes époques, jamais maquillé) : **-9.4567 $** sur 84 ferm
 
 ## 2. Positions ouvertes (paper)
 
-- **BTC** : 1180 $ à 5.0x · âge 67.4 h · funding accru +0.6839 $
-- **ETH** : 271 $ à 2.0x · âge 67.4 h · funding accru +0.1778 $
-- **PURR** : 164 $ à 1.5x · âge 75.6 h · funding accru +0.1196 $
-- **SOL** : 136 $ à 1.5x · âge 67.4 h · funding accru +0.1011 $
-- **XPL** : 77 $ à 1.0x · âge 67.4 h · funding accru +0.0566 $
-- **ZEC** : 79 $ à 1.0x · âge 42.2 h · funding accru +0.0418 $
+- **BTC** : 1180 $ à 5.0x · âge 67.5 h · funding accru +0.6858 $
+- **ETH** : 271 $ à 2.0x · âge 67.5 h · funding accru +0.1782 $
+- **PURR** : 164 $ à 1.5x · âge 75.8 h · funding accru +0.1199 $
+- **SOL** : 136 $ à 1.5x · âge 67.5 h · funding accru +0.1014 $
+- **XPL** : 77 $ à 1.0x · âge 67.5 h · funding accru +0.0568 $
+- **ZEC** : 79 $ à 1.0x · âge 42.3 h · funding accru +0.0419 $
 
 ## 3. Santé du système
 
@@ -28,8 +28,8 @@ Total historique (toutes époques, jamais maquillé) : **-9.4567 $** sur 84 ferm
 
 ## 4. Mesures en cours
 
-- Cross-venue : **94.1 h / 72 h** (301916 observations) — verdict aux barres pré-écrites, jamais avant.
-- Usine à données replay (24 h) : **9 candidats** · **238431 marks** — c'est le carburant du replay A/B.
+- Cross-venue : **94.2 h / 72 h** (303564 observations) — verdict aux barres pré-écrites, jamais avant.
+- Usine à données replay (24 h) : **10 candidats** · **238032 marks** — c'est le carburant du replay A/B.
 
 ## 5. Refus dominants (24 h) — le bot explique pourquoi il n'ouvre pas
 
@@ -74,12 +74,12 @@ _Calculé il y a 2.2 j (cadence : hebdo). Simulation sur candidats refusés enre
 
 | coin | marge | notional | funding b/h | $/jour | accru | coût d'entrée | amortie ? |
 |---|---|---|---|---|---|---|---|
-| BTC | 236$ | 1180$ | 0.125 | 0.3539$ | 0.6839$ | 1.3376$ | dans ~44 h |
-| ETH | 135$ | 271$ | 0.125 | 0.0812$ | 0.1778$ | 0.2062$ | dans ~8 h |
-| PURR | 109$ | 164$ | 0.125 | 0.0492$ | 0.1196$ | 0.1567$ | dans ~18 h |
-| SOL | 90$ | 136$ | 0.125 | 0.0407$ | 0.1011$ | 0.1539$ | dans ~31 h |
-| XPL | 77$ | 77$ | 0.125 | 0.0230$ | 0.0566$ | 0.0993$ | dans ~45 h |
-| ZEC | 79$ | 79$ | 0.125 | 0.0238$ | 0.0418$ | 0.0605$ | dans ~19 h |
+| BTC | 236$ | 1180$ | 0.125 | 0.3539$ | 0.6858$ | 1.3376$ | dans ~44 h |
+| ETH | 135$ | 271$ | 0.125 | 0.0812$ | 0.1782$ | 0.2062$ | dans ~8 h |
+| PURR | 109$ | 164$ | 0.125 | 0.0492$ | 0.1199$ | 0.1567$ | dans ~18 h |
+| SOL | 90$ | 136$ | 0.125 | 0.0407$ | 0.1014$ | 0.1539$ | dans ~31 h |
+| XPL | 77$ | 77$ | 0.125 | 0.0230$ | 0.0568$ | 0.0993$ | dans ~44 h |
+| ZEC | 79$ | 79$ | 0.125 | 0.0238$ | 0.0419$ | 0.0605$ | dans ~19 h |
 
 **Total : 0.5719 $/jour au taux courant · marge engagée 727 $** (déploiement à comparer au capital — la réserve de 20 % est voulue).
 
@@ -90,19 +90,22 @@ Univers introuvable dans le log feeder (collecteur pas encore passé ?).
 ## 10. Où va le capital (allocation)
 
 - règle : `marge ∝ gain_net_24h_bps ** 3, plafond 40 % par coin, plancher 25 $`
-- capital alloué : **800.0 $** sur 7 coin(s) financé(s)
-- rendement pondéré : **1.8533 bps/j** (part égale : 1.7219 bps/j -> **7.64 %** de mieux)
-- meilleur coin : **BTC**
+- capital alloué : **800.01 $** sur 6 coin(s) financé(s)
+- rendement pondéré : **2.0076 bps/j** (part égale : 1.7623 bps/j -> **13.92 %** de mieux)
+- meilleur coin : **PURR**
 
 | coin | rendement net (bps/j) | marge cible ($) |
 |---|---:|---:|
-| BTC | 2.211 | 236.02 |
-| PURR | 2.02 | 135.23 |
-| STABLE | 1.757 | 118.44 |
-| ETH | 1.698 | 106.91 |
-| SOL | 1.541 | 79.91 |
-| HYPE | 1.452 | 66.85 |
-| ZEC | 1.374 | 56.64 |
+| PURR | 2.397 | 236.63 |
+| BTC | 2.22 | 250.21 |
+| ETH | 1.732 | 118.82 |
+| SOL | 1.544 | 84.17 |
+| ZEC | 1.344 | 55.52 |
+| XPL | 1.337 | 54.66 |
+
+**Positions sous-financées** (le renfort les comblera, une par jour et par position, sans jamais fermer) :
+
+- PURR : 109.24 $ -> 236.63 $ (**+127.39 $**)
 
 ## 11. Qui sort du plancher de funding
 
@@ -139,7 +142,7 @@ _16 loi(s) : 13 réfutée(s), 2 limite(s), 1 confirmée(s). Détail complet : `d
 - **Cross-venue : 72 h atteintes (94 h)** → lancer `python tools/mesurer_dispersion_venues.py` pour LE verdict (#178).
 - Relances de collecteurs au compteur : {'carry-feeder': 2, 'marks-collector': 2, 'liq-collector': 2, 'venues-collector': 3, 'rapport-quotidien': 1, 'carnet-collector': 1} — si un compteur grimpe SEUL demain, c'est lui le malade (doc R5).
 - Copy-whitelist : 3 leader(s) prouvé(s) → copy peut suivre CES leaders uniquement.
-- Markout copy : 90.0% des fills mesures (28358/31518) — le pipeline nourrit la whitelist.
+- Markout copy : 89.7% des fills mesures (28483/31738) — le pipeline nourrit la whitelist.
 - Replay : 596652 candidats consolidés → `RECHERCHE-SCENARIO-REPLAY.cmd` a de quoi travailler (porte deux-moitiés + plateau).
 
 ---
