@@ -33,6 +33,7 @@ SORTIE_MODULE_DESACTIVE = "MODULE_CARRY_DESACTIVE"   # 23/07 : fermeture propre 
 #: (−10,73 $) ne doit PLUS apparaitre dans le LIVRE LIVE (grand chiffre + courbe). Elle reste INTACTE dans
 #: le ledger append-only (audit/rapport), simplement EXCLUE des vues live. L'arbitrage (meme ledger) reste.
 #: Les vieilles lignes SANS `strategie` datent du carry -> traitees comme "carry" (retirees) elles aussi.
+#: (L'arbitrage N'EST PAS retire : Flo le garde. Le grand chiffre live = arbitrage -2,05, carry exclu.)
 STRATEGIES_RETIREES = frozenset({"carry"})
 
 POSITIONS_RELPATH = Path("runtime") / "data" / "carry_paper_positions.json"
@@ -371,6 +372,27 @@ def resume_depuis_ledger(root: str | Path = ".", *, mode: str = MODE_LIVE,
     return out
 
 
+def realise_par_strategie(root: str | Path = ".", *, mode: str = MODE_LIVE) -> dict[str, float]:
+    """{strategie: réalisé cumulé} depuis le ledger (ligne non taguée -> 'carry'). Sert à attribuer
+    CORRECTEMENT l'archive de CHAQUE stratégie retirée sur le dashboard (carry vs arbitrage), au lieu
+    de tout étiqueter « carry ». Lecture seule, ne modifie rien."""
+    from collections import defaultdict
+    out: dict[str, float] = defaultdict(float)
+    try:
+        lignes = _ledger_path(root).read_text(encoding="utf-8").splitlines()
+    except OSError:
+        return {}
+    for l in lignes:
+        try:
+            r = json.loads(l)
+        except ValueError:
+            continue
+        if r.get("mode") != mode or r.get("kind") != "CLOSE":
+            continue
+        out[str(r.get("strategie") or "carry")] += float(r.get("realized_net_pnl_usdc") or 0.0)
+    return {k: round(v, 6) for k, v in out.items()}
+
+
 def etat_carry(root: str | Path = ".", *, mode: str = MODE_LIVE) -> dict[str, Any]:
     """Vue complete pour le dashboard/metrics : PnL realise CUMULE (du ledger) + positions
     ouvertes + funding deja accru (non encore realise). Source de verite = les fichiers, jamais
@@ -388,6 +410,7 @@ def etat_carry(root: str | Path = ".", *, mode: str = MODE_LIVE) -> dict[str, An
     # GRAND chiffre du dashboard affiche le livre LIVE = ledger MOINS les retirées. L'arbitrage reste.
     r["realized_net_pnl_usdc_live"] = resume_depuis_ledger(
         root, mode=mode, exclure_strategies=STRATEGIES_RETIREES)["realized_net_pnl_usdc"]
+    r["realise_par_strategie"] = realise_par_strategie(root, mode=mode)   # archive correcte PAR moteur
     g = charger_gestionnaire(root, mode=mode)
     r["positions_ouvertes"] = len(g.ouvertes)
     r["coins_ouverts"] = sorted(g.ouvertes)

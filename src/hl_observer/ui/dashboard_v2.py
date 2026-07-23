@@ -280,7 +280,7 @@ th{letter-spacing:1.2px}
      <table><thead><tr><th style="width:26%">coin</th><th style="width:26%">mode</th><th style="width:22%">marge</th><th style="width:26%;text-align:right">pnl</th></tr></thead><tbody id="postb"></tbody></table></div>
  </div>
 
- <div class="card" style="margin-bottom:12px"><h3>CARRY DELTA-NEUTRE <span class="hint">paper · long spot + short perp · funding encaissé</span></h3>
+ <div class="card" style="margin-bottom:12px;display:none"><h3>CARRY DELTA-NEUTRE <span class="hint">paper · long spot + short perp · funding encaissé</span></h3>
    <div class="g3" style="margin:0 0 8px">
      <div class="kv"><span>positions ouvertes</span><b id="carry-pos">…</b></div>
      <div class="kv"><span>PnL réalisé cumulé</span><b id="carry-real">…</b></div>
@@ -669,7 +669,7 @@ function syncTop(){
   if(st){var mk=function(v){return (v>=0?'+':'')+n(v,2)+'$';};
     st.innerHTML=
        '<tr><td>Copy-trading</td><td>'+cp+'</td><td style="color:'+col(copyNet)+'">'+mk(copyNet)+'</td><td style="text-align:right;color:var(--mut)">'+(cp>0?'actif':'attend un edge prouvé (protège le capital)')+'</td></tr>'
-      +'<tr style="opacity:.55"><td>Carry delta-neutre</td><td>0</td><td style="color:var(--mut)">RETIRÉ</td><td style="text-align:right;color:var(--mut)">retiré le 23/07 — historique '+mk(Number(window._carryRetireArchive||0))+' archivé au ledger</td></tr>'
+      +'<tr style="opacity:.55"><td>Carry delta-neutre</td><td>0</td><td style="color:var(--mut)">RETIRÉ</td><td style="text-align:right;color:var(--mut)">retiré le 23/07 — historique '+mk(Number(window._carryArchive||0))+' archivé au ledger</td></tr>'
       // 21/07 : l'ARBITRAGE de dislocation a sa ligne — avec l'ETAT MESURE (« plus gros
       // ecart X bps < seuil 35 »), jamais un tiret muet. Un module qui attend le DIT.
       +'<tr><td>Arbitrage dislocation</td><td>'+(window._arbPos||0)+'</td><td style="color:'+col(Number(window._arbReal||0))+'">'+mk(Number(window._arbReal||0))+'</td><td style="text-align:right;color:var(--mut)">'+(window._arbEtat||'—')+'</td></tr>'
@@ -694,7 +694,9 @@ function loadCarry(){fetch('/v2/carry').then(function(r){return r.json()}).then(
   var realLive=(d.realized_net_pnl_usdc_live!=null)?Number(d.realized_net_pnl_usdc_live):realTout;
   window._carryPos=(d.positions_ouvertes||0);window._carryReal=realLive;window._carryRealSess=realSess;
   window._carryRealFull=realTout;                 // COMPLET (audit) — carry retiré inclus, pour l'affichage « archivé »
-  window._carryRetireArchive=realTout-realLive;   // = perte du carry retiré (complet − live = −10,73), HORS du live
+  window._carryRetireArchive=realTout-realLive;   // = total des stratégies RETIRÉES (complet − live), HORS du live
+  window._carryArchive=(d.realise_par_strategie&&d.realise_par_strategie.carry)||0;    // carry SEUL (archive)
+  window._arbArchive=(d.realise_par_strategie&&d.realise_par_strategie.arbitrage)||0;  // arbitrage SEUL (archive)
   // v3 (20/07) : NET = realise + funding COURU (encaisse, stable). Le latent de base est
   // SEPARE — calcule ici pour l'affichage dedie, jamais additionne au net.
   window._carryLatent=(d.positions||[]).reduce(function(s,p){return s+(Number(p.base_mtm_usd)||0);},0);
