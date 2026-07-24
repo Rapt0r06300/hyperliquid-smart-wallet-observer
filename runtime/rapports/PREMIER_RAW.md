@@ -8,10 +8,12 @@
 - latences monotones (ms) : WS→déc 7.9 · déc→L2 1402.4 · L2→open 2.7 · WS→open 1412.9
 - âge événement à la décision (skew HL possible) : 317 ms
 - **âge RÉEL à l'exécution paper (total fill→open)** : None ms
-- cycle_id : None · open_run_id : run-2f7a72fa293f · trigger_version : None · statut : NON_VALIDEE
+- cycle_id : None · open_run_id : run-2f7a72fa293f · statut : NON_VALIDEE
+- trigger_version : None · **config_hash : None** (clé de config immuable)
 
 ## CLÔTURE — HORIZON_ATTEINT
 - cycle_id : None · open_run_id → close_run_id : None → None (le cycle traverse les redémarrages)
+- config_hash (recopié de l'OPEN) : None — ✓ identique à l'OPEN
 - prix de sortie : 0.40154 · trigger_version (stockée à l'OPEN) : None
 - MFE / MAE (bps) : 80.246 / 0.0
 - PnL réalisé : 0.027997 $ · ROI : 0.56 %

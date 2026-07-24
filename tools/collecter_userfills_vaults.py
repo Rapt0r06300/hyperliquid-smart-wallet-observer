@@ -34,6 +34,7 @@ RUN_ID = ""
 RUN_TOKEN = ""                    # provenance HORS PAYLOAD (en mémoire) — arme le trade + l'écriture runtime
 _MUTEX = None                     # handle du mutex Windows (à garder vivant)
 TRIGGER_VERSION = "v1"            # version du déclencheur (estampillée OPEN+CLOSE ; filtre les stats config courante)
+GIT_COMMIT = ""                   # commit git chargé (audit SÉPARÉ, JAMAIS dans config_hash)
 
 
 def _activite_par_vault(root: Path, *, fenetre_h: float = 2.0, max_lignes: int = 4000) -> dict:
@@ -462,10 +463,29 @@ async def _rapport_periodique(root: Path, *, intervalle_s: float = 30.0) -> None
         await asyncio.sleep(intervalle_s)
 
 
+def _git_commit(root: Path) -> str:
+    """Commit git courant (audit SÉPARÉ du config_hash). Lit .git sans subprocess. '' si indisponible."""
+    try:
+        g = root / ".git"
+        head = (g / "HEAD").read_text(encoding="utf-8").strip()
+        if not head.startswith("ref:"):
+            return head                                          # detached HEAD = le sha directement
+        ref = head[4:].strip()
+        if (g / ref).exists():
+            return (g / ref).read_text(encoding="utf-8").strip()
+        for l in (g / "packed-refs").read_text(encoding="utf-8", errors="ignore").splitlines():
+            if l.strip().endswith(ref):
+                return l.split()[0]
+        return ""
+    except OSError:
+        return ""
+
+
 async def _boucle(root: Path) -> None:
-    global RUN_ID, RUN_TOKEN, _MUTEX, _ROOT_LIVE, TRIGGER_VERSION
+    global RUN_ID, RUN_TOKEN, _MUTEX, _ROOT_LIVE, TRIGGER_VERSION, GIT_COMMIT
     _ROOT_LIVE = root
     TRIGGER_VERSION = CO._params_trigger(root).get("variante", "v1")
+    GIT_COMMIT = _git_commit(root)
     import secrets
     # VERROU PRINCIPAL = mutex nommé Windows ; le verrou fichier ne sert plus qu'au DIAGNOSTIC
     ok_mx, _MUTEX = VI.acquerir_mutex(NOM_VERROU)
@@ -483,8 +503,10 @@ async def _boucle(root: Path) -> None:
     CO.autoriser_runtime(RUN_TOKEN)                               # SEUL le collecteur arme l'ecriture runtime
     print("[userfills] mutex=%s pid=%d run_id=%s (ecriture runtime armee)"
           % ("WIN" if ok_mx else "fichier", info["pid"], RUN_ID), flush=True)
+    print("[userfills] commit=%s trigger_version=%s config_hash(RAW)=%s"
+          % (GIT_COMMIT[:12] or "?", TRIGGER_VERSION, CO.config_hash_courant(CO.RAW_PROBE, root)[:19]), flush=True)
     for nom, coh in CO.COHORTES.items():
-        ETATS[nom] = CO.etat_initial(coh, root, run_id=RUN_ID, token=RUN_TOKEN)
+        ETATS[nom] = CO.etat_initial(coh, root, run_id=RUN_ID, token=RUN_TOKEN, git_commit=GIT_COMMIT)
     roles = vaults_et_roles(root)
     if not roles:
         print("[userfills] aucun vault suivi (deny-by-default) — rien a faire", flush=True)

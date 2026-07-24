@@ -148,11 +148,12 @@ def _ecriture_permise(root: Path) -> bool:
     return (not _est_runtime_marque(root)) or (_RUNTIME_AUTORISE is not None)
 
 
-def etat_initial(coh: Cohorte, root: Path, *, run_id: str | None = None, token: str | None = None) -> dict:
+def etat_initial(coh: Cohorte, root: Path, *, run_id: str | None = None, token: str | None = None,
+                 git_commit: str = "") -> dict:
     import secrets
     import uuid
     return {"store": charger_store(coh, root), "agg": {}, "vus": set(),
-            "run_id": run_id or ("run-" + uuid.uuid4().hex[:12]),
+            "run_id": run_id or ("run-" + uuid.uuid4().hex[:12]), "git_commit": git_commit,
             "token": token or secrets.token_hex(16)}      # provenance HORS PAYLOAD (en mémoire)
 
 
@@ -239,6 +240,8 @@ def _declencheur_significatif(coh: Cohorte, vault: str, notional_agg: float, roo
 
 
 L2_MODELE = "top5depth+rest_ondemand+ws_prewarm+book_ws_marquage"   # identifiant du MODÈLE L2 (entre dans config_hash)
+MODELE_EXECUTION = "exec_v1"       # VERSION du modèle d'exécution paper (entre dans config_hash)
+MODELE_FRAIS = "hl_taker_roundtrip_2x+spread+2xslippage+latence"    # hypothèse EXACTE de frais applicable
 
 
 def _cfg_defaut(coh: Cohorte) -> dict:
@@ -247,19 +250,22 @@ def _cfg_defaut(coh: Cohorte) -> dict:
 
 
 def _config_hash(coh: Cohorte, cfg: dict, fhl: float, root: Path) -> str:
-    """Empreinte STABLE de la configuration IMMUABLE au moment de l'OPEN : notional, params du déclencheur,
-    âges max, frais, stop/TP, horizon, profondeur/slippage et MODÈLE L2. C'est la VRAIE clé de séparation
-    des stats (trigger_version n'est qu'une étiquette éditable). Change une seule valeur -> hash différent."""
+    """Empreinte DÉTERMINISTE de la config IMMUABLE à l'OPEN : JSON CANONIQUE (clés triées) puis SHA-256
+    (hash COMPLET). Inclut notional, params du déclencheur, âges max, HYPOTHÈSE de frais exacte, stop/TP/
+    horizon (du cfg = par coin pour ALPHA/PROBE), TABLES/paire, profondeur/slippage, MODÈLE L2 et VERSION du
+    modèle d'exécution. PAS le commit Git (gardé à part). VRAIE clé de séparation (trigger_version = étiquette)."""
     import hashlib
     p = _params_trigger(root)
     payload = {"notional_usd": coh.notional_usd,
                "trigger": {"floor": p["floor_usd"], "frac_tvl": p["frac_tvl"], "plafond": p["plafond_usd"], "variante": p["variante"]},
                "age_max_open_ms": AGE_MAX_OPEN_MS, "age_max_paper_fill_ms": AGE_MAX_PAPER_FILL_MS,
-               "frais_hl_bps": round(float(fhl), 4), "stop_bps": cfg.get("stop_bps"),
-               "take_profit_bps": cfg.get("take_profit_bps"), "horizon_ms": cfg.get("horizon_ms"),
-               "depth_min_usd": coh.depth_min_usd, "slippage_base_bps": SLIPPAGE_BASE_BPS,
-               "slippage_impact_coef": SLIPPAGE_IMPACT_COEF, "latence_cout_bps": LATENCE_COUT_BPS, "modele_l2": L2_MODELE}
-    return "cfg-" + hashlib.sha1(json.dumps(payload, sort_keys=True).encode("utf-8")).hexdigest()[:12]
+               "frais": {"hl_bps": round(float(fhl), 4), "modele": MODELE_FRAIS},
+               "cfg": {"stop_bps": cfg.get("stop_bps"), "take_profit_bps": cfg.get("take_profit_bps"), "horizon_ms": cfg.get("horizon_ms")},
+               "tables": list(coh.tables), "depth_min_usd": coh.depth_min_usd, "slippage_base_bps": SLIPPAGE_BASE_BPS,
+               "slippage_impact_coef": SLIPPAGE_IMPACT_COEF, "latence_cout_bps": LATENCE_COUT_BPS,
+               "modele_l2": L2_MODELE, "modele_execution": MODELE_EXECUTION}
+    canon = json.dumps(payload, sort_keys=True, separators=(",", ":"))
+    return "cfg-" + hashlib.sha256(canon.encode("utf-8")).hexdigest()
 
 
 def config_hash_courant(coh: Cohorte, root: Path) -> str:
@@ -324,7 +330,7 @@ def _maj_coins_prewarm(root: Path, coin: str, *, now_ms: float) -> None:
 
 def _ouvrir(coh: Cohorte, store: dict, root: Path, *, cle, coin, sens, notional, prix, cfg, cout_ar,
             spread, slippage, fhl, vault, now_ms, fill_ts, lat_mono, run_id="", src_l2="", marque="",
-            trigger_version="", placebo=None, config_hash="") -> dict:
+            trigger_version="", placebo=None, config_hash="", git_commit="") -> dict:
     import uuid
     eb = cfg.get("edge_brut_bps")
     edge_net = (float(eb) - cout_ar) if eb is not None else None    # RAW : pas d'edge (NON_VALIDEE)
@@ -339,7 +345,8 @@ def _ouvrir(coh: Cohorte, store: dict, root: Path, *, cle, coin, sens, notional,
                     "latences_mono": lat_mono, "fill_leader_ts_ms": int(fill_ts), "run_id": run_id,
                     "source": SOURCE_LIVE, "src_l2": src_l2, "statut": marque or "VALIDEE",
                     "trigger_version": trigger_version, "placebo": placebo, "config_hash": config_hash,
-                    "cycle_id": cycle_id, "open_run_id": run_id, "notional_open_usd": round(notional, 2)}}
+                    "cycle_id": cycle_id, "open_run_id": run_id, "notional_open_usd": round(notional, 2),
+                    "git_commit": git_commit}}
     store["ouvertes"][cle] = pos
     store["cash"] = round(store["cash"] - notional, 6)
     _ledger(coh, root, {"evt": "OPEN", "ts_ms": now_ms, "paire": cle, "coin": coin, "sens": sens,
@@ -347,7 +354,7 @@ def _ouvrir(coh: Cohorte, store: dict, root: Path, *, cle, coin, sens, notional,
                         "latences_mono": lat_mono, "vault": vault, "run_id": run_id, "source": SOURCE_LIVE,
                         "src_l2": src_l2, "statut": marque or "VALIDEE", "trigger_version": trigger_version,
                         "age_at_paper_fill_ms": lat_mono.get("age_at_paper_fill_ms"),
-                        "cycle_id": cycle_id, "open_run_id": run_id, "config_hash": config_hash,
+                        "cycle_id": cycle_id, "open_run_id": run_id, "config_hash": config_hash, "git_commit": git_commit,
                         "motif": ("RAW mesure (sans edge)" if not coh.edge_requis else "copy OPEN/ADD + L2<1s + edge net>0")})
     _sauver(coh, root, store)
     if not coh.edge_requis:                                          # RAW : abonne le coin en BBO/L2 pour la vie de la position
@@ -377,7 +384,7 @@ def _sortir(coh: Cohorte, pos: dict, store: dict, root: Path, *, prix_sortie, co
                         "trigger_version": meta.get("trigger_version"), "source": SOURCE_LIVE, "vault": meta.get("vault"),
                         "cycle_id": meta.get("cycle_id"), "open_run_id": meta.get("open_run_id") or meta.get("run_id"),
                         "close_run_id": close_run_id, "notional_open_usd": meta.get("notional_open_usd"),
-                        "config_hash": meta.get("config_hash"),
+                        "config_hash": meta.get("config_hash"), "git_commit": meta.get("git_commit"),
                         "ret_coin_bps": ret_coin_bps, "ret_marche_bps": ret_marche_bps,
                         "placebo_marche_bps": placebo_marche_bps, "alpha_vs_marche_bps": alpha_vs_marche_bps})
     _sauver(coh, root, store)
@@ -485,8 +492,8 @@ def traiter_fill(coh: Cohorte, etat: dict, fill: dict, root: Path, *, now_ms: fl
     t_dec = time.monotonic()                                     # HORLOGE MONOTONE LOCALE : décision
     cle = _cle(coh, vault, coin)
     _trig = _params_trigger(root).get("variante", "v1")          # étiquette éditable (indicative)
-    _chash = config_hash_courant(coh, root)                      # VRAIE clé de config immuable (valeurs réelles)
-    if not cohorte_active(coh, root, trigger_version=_trig, config_hash=_chash):   # AUTO-KILL : config COURANTE seule
+    _chash_gate = config_hash_courant(coh, root)                 # clé de config pour le gate (RAW = identique au stamp)
+    if not cohorte_active(coh, root, trigger_version=_trig, config_hash=_chash_gate):   # AUTO-KILL : config COURANTE seule
         return {"refus": "COHORTE_EN_PAUSE_AUTO_KILL", "coin": coin}
     # deny-by-default : le vault doit être suivi par la cohorte
     if vault not in _vaults_cohorte(coh, root):
@@ -546,11 +553,13 @@ def traiter_fill(coh: Cohorte, etat: dict, fill: dict, root: Path, *, now_ms: fl
                 "l2_open_ms": round((t_open - t_l2) * 1000, 1), "ws_open_ms": round((t_open - t0) * 1000, 1),
                 "age_event_ms": round(now - float(fill.get("ts_ms") or now)),   # HL ts à la décision (skew possible)
                 "age_at_paper_fill_ms": age_paper}                              # DÉLAI TOTAL à l'exécution paper
+    _chash = _config_hash(coh, cfg, fhl, root)                   # STAMP : cfg RÉEL (stop/TP/horizon par coin) + frais réels
     placebo = {"mid_coin_open": round(mid, 8), "mid_marche_open": _allmids(root, now_ms=now).get("BTC"), "ts_open": now}
     pos = _ouvrir(coh, store, root, cle=cle, coin=coin, sens=sens, notional=notional, prix=prix, cfg=cfg,
                   cout_ar=cout_ar, spread=spread, slippage=slippage, fhl=fhl, vault=vault, now_ms=now,
                   fill_ts=ag["fill_ts"], lat_mono=lat_mono, run_id=etat.get("run_id", ""), src_l2=l2.get("src", ""),
-                  marque=coh.marque, trigger_version=_trig, placebo=placebo, config_hash=_chash)
+                  marque=coh.marque, trigger_version=_trig, placebo=placebo, config_hash=_chash,
+                  git_commit=etat.get("git_commit", ""))
     return {"ouverture": pos, "latence_ws_open_ms": lat_mono["ws_open_ms"], "paire": cle,
             "age_at_paper_fill_ms": age_paper}
 

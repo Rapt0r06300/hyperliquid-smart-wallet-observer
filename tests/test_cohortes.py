@@ -283,7 +283,7 @@ def test_trigger_version_et_placebo_au_cycle(tmp_path):
     now1 = 1_000_000_000_500.0
     (tmp_path / "runtime" / "data" / "hl_allmids.json").write_text(json.dumps(
         {"ts_ms": now1, "mids": {"BTC": 60000.0, "DOGE": 150.0}}))
-    etat = CO.etat_initial(CO.RAW_PROBE, tmp_path)
+    etat = CO.etat_initial(CO.RAW_PROBE, tmp_path, git_commit="deadbeef1234")
     o = CO.traiter_fill(CO.RAW_PROBE, etat, _fill(coin="DOGE", sz=3, px=150.0), tmp_path,
                         now_ms=now1, lecteur_l2=_l2, token=etat["token"])
     assert o and o.get("ouverture") and o["age_at_paper_fill_ms"] is not None
@@ -306,6 +306,8 @@ def test_trigger_version_et_placebo_au_cycle(tmp_path):
     assert clo["cycle_id"] == cyc and clo["close_run_id"] == "run-CLOSE"          # cycle_id persistant, 2 run_id
     assert clo["open_run_id"] == opn["open_run_id"] and clo["open_run_id"] != clo["close_run_id"]
     assert opn["config_hash"] == ch and clo["config_hash"] == ch                  # config_hash stampé OPEN + recopié CLOSE
+    assert ch.startswith("cfg-") and len(ch) == 4 + 64                            # SHA-256 COMPLET (64 hex) au ledger
+    assert opn["git_commit"] == "deadbeef1234" and clo["git_commit"] == "deadbeef1234"   # commit git audité À PART
 
 
 def test_config_hash_stable_et_change_si_config_change(tmp_path):

@@ -57,16 +57,16 @@ def construire_rapport(root: str | Path) -> str | None:
          "- **âge RÉEL à l'exécution paper (total fill→open)** : %s ms" % lm.get("age_at_paper_fill_ms"),
          "- cycle_id : %s · open_run_id : %s · statut : %s" % (
              op.get("cycle_id"), op.get("open_run_id") or op.get("run_id"), op.get("statut")),
-         "- trigger_version : %s · **config_hash : %s** (clé de config immuable)" % (
-             op.get("trigger_version"), op.get("config_hash")), ""]
+         "- trigger_version : %s · **config_hash : %s…** · commit : %s" % (
+             op.get("trigger_version"), (op.get("config_hash") or "")[:19], (op.get("git_commit") or "")[:12]), ""]
     if cl:
         notional = float(op.get("notional_usd") or 0.0) or 1.0
         roi = float(cl.get("realized_usd") or 0.0) / notional * 100.0
         L += ["## CLÔTURE — %s" % cl.get("raison"),
               "- cycle_id : %s · open_run_id → close_run_id : %s → %s (le cycle traverse les redémarrages)" % (
                   cl.get("cycle_id"), cl.get("open_run_id"), cl.get("close_run_id")),
-              "- config_hash (recopié de l'OPEN) : %s%s" % (cl.get("config_hash"),
-                  " — ✓ identique à l'OPEN" if cl.get("config_hash") == op.get("config_hash") else " — ⚠ DIFFÉRENT"),
+              "- config_hash (recopié de l'OPEN) : %s…%s" % ((cl.get("config_hash") or "")[:19],
+                  " ✓ identique à l'OPEN" if cl.get("config_hash") == op.get("config_hash") else " ⚠ DIFFÉRENT"),
               "- prix de sortie : %s · trigger_version (stockée à l'OPEN) : %s" % (cl.get("prix_sortie"), cl.get("trigger_version")),
               "- MFE / MAE (bps) : %s / %s" % (cl.get("mfe_bps"), cl.get("mae_bps")),
               "- PnL réalisé : %s $ · ROI : %s %%" % (cl.get("realized_usd"), round(roi, 3)),
