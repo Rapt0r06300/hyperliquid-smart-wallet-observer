@@ -37,6 +37,7 @@ TRIGGER_VERSION = "v1"            # version du déclencheur (estampillée OPEN+C
 GIT_COMMIT = ""                   # commit git chargé (audit SÉPARÉ, JAMAIS dans config_hash)
 TRANSPORT_VERSION = "userfills_2sock_v1"   # transport WS (HORS config_hash) : 2 sockets de 5 vaults + L2 ; compare latence
 TAILLE_SHARD = 5                           # HL cape ~5 abonnements userFills/connexion -> shards déterministes de 5
+_WS_PAR_SOCKET: dict = {}                   # socket_id -> connexion WS vivante (pour reconnecter UN shard depuis le garde)
 
 
 def _activite_par_vault(root: Path, *, fenetre_h: float = 2.0, max_lignes: int = 4000) -> dict:
@@ -410,6 +411,7 @@ async def _userfills_multiplex(root: Path, vaults: list, file: asyncio.Queue, so
     while True:
         try:
             async with websockets.connect(WS_URL, ping_interval=20, max_size=2 ** 22) as ws:
+                _WS_PAR_SOCKET[socket_id] = ws                    # exposé au garde REST↔WS (reconnexion ciblée)
                 for i, v in enumerate(vaults):
                     await ws.send(json.dumps({"method": "subscribe", "subscription": {"type": "userFills", "user": v}}))
                     print("[userfills] socket %s subscribe %d/%d userFills %s" % (socket_id, i + 1, len(vaults), v[:10]), flush=True)
@@ -441,8 +443,51 @@ async def _userfills_multiplex(root: Path, vaults: list, file: asyncio.Queue, so
                     except asyncio.QueueFull:
                         print("[userfills] FILE SATUREE — drop (%s)" % vault[:10], flush=True)
         except Exception as exc:  # noqa: BLE001 — reconnecte SEULEMENT ce shard de 5 (curseur+dédup -> catch-up)
+            _WS_PAR_SOCKET.pop(socket_id, None)
             print("[userfills] socket %s reconnect (%s)" % (socket_id, str(exc)[:50]), flush=True)
             await asyncio.sleep(3.0)
+
+
+async def _garde_reconciliation_rest(root: Path, shards: list, *, intervalle_s: float = 90.0,
+                                     age_min_ms: float = 45_000.0) -> None:
+    """GARDE REST↔WS (TRANSPORT seulement, config_hash inchangé) : périodiquement, pour chaque vault, on
+    interroge REST userFills (hors event-loop) et on compare au CURSEUR WS. Si REST voit un fill PLUS RÉCENT
+    que le curseur ET assez vieux (≥ age_min_ms) que le WS AURAIT DÛ recevoir → le shard est DÉFAILLANT : on
+    ferme SA socket → reconnexion CIBLÉE (curseur+dédup rejouent le fill manqué). Baseline par vault pour ne
+    jamais accuser sur l'historique déjà là au démarrage. Lecture seule ; 0 ordre, 0 clé, 0 signature."""
+    try:
+        import sonde_confirmation_vaults as SD
+    except Exception as exc:  # noqa: BLE001
+        print("[userfills] garde REST↔WS indisponible (%s)" % str(exc)[:40], flush=True)
+        return
+    vault_socket = {v: sid for sid, grp in shards for v in grp}
+    baseline: dict = {}
+    loop = asyncio.get_event_loop()
+    await asyncio.sleep(intervalle_s)                             # laisse le WS s'installer avant tout jugement
+    while True:
+        cur = _charger_curseurs(root)
+        for v, sid in vault_socket.items():
+            try:
+                rep = await loop.run_in_executor(None, SD.userfills_rest, v)   # REST bloquant hors event-loop
+                fr = SD.fills_rest_normalises(v, rep)
+            except Exception:  # noqa: BLE001 — le réseau ne fait JAMAIS crasher le garde
+                continue
+            dernier = max((f["ts_ms"] for f in fr), default=0)
+            ref = max(float(cur.get(v) or 0), float(baseline.get(v) or 0))
+            if ref <= 0:                                          # jamais de curseur -> baseline = historique connu
+                baseline[v] = dernier
+                continue
+            if SD.fills_rest_en_retard(fr, ref, age_min_ms=age_min_ms):
+                print("[userfills] ⛔ shard %s DEFAILLANT : REST voit un fill que le WS a rate sur %s "
+                      "(dernier ts=%s > ref=%d) -> reconnexion ciblee" % (sid, v[:10], dernier, int(ref)), flush=True)
+                ws = _WS_PAR_SOCKET.get(sid)
+                if ws is not None:
+                    try:
+                        await ws.close()                          # rompt le async-for -> except -> reconnect de CE shard
+                    except Exception:  # noqa: BLE001
+                        pass
+            baseline[v] = max(float(baseline.get(v) or 0), dernier)
+        await asyncio.sleep(intervalle_s)
 
 
 async def _exits_periodiques(root: Path, *, intervalle_s: float = 2.0) -> None:
@@ -560,6 +605,7 @@ async def _boucle(root: Path) -> None:
             print("[userfills] shard socket %s (%d vaults) : %s" % (sid, len(grp), ", ".join(v[:10] for v in grp)), flush=True)
         await asyncio.gather(_worker(root, file), _exits_periodiques(root), _heartbeat(root, info),
                              _promotion_periodique(root), _rapport_periodique(root), _l2_dynamique(root),
+                             _garde_reconciliation_rest(root, shards),   # REST↔WS : reconnecte un shard qui rate un fill
                              *[_userfills_multiplex(root, grp, file, sid) for sid, grp in shards])   # 2 sockets de 5 + L2 = 3 conn
     finally:
         VI.liberer(root, NOM_VERROU, info)
