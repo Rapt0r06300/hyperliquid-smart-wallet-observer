@@ -123,3 +123,15 @@ def test_vault_du_message_demux_multiplex():
     assert C._vault_du_message({"data": {"user": "0xZZZZ"}}, connus) is None   # user inconnu -> None
     assert C._vault_du_message({"data": {}}, connus) is None              # pas de user -> None
     assert C._vault_du_message({"channel": "x"}, connus) is None          # message sans data -> None
+
+
+def test_shards_userfills_disjoints_de_5():
+    """Sharding DÉTERMINISTE en groupes de 5 (HL cape ~5/connexion) : 2 sockets A/B disjoints couvrant tout."""
+    vaults = ["0xv%02d" % i for i in range(10)]
+    shards = C._shards_userfills(vaults, taille=5)
+    assert [s for s, _ in shards] == ["A", "B"] and len(shards) == 2   # 2 sockets
+    a, b = shards[0][1], shards[1][1]
+    assert a == vaults[:5] and b == vaults[5:]                        # déterministe, 5 chacun
+    assert set(a).isdisjoint(set(b)) and set(a) | set(b) == set(vaults)   # DISJOINTS + couvrent tout (pas de doublon)
+    # 8 vaults -> A(5) + B(3)
+    assert [len(g) for _, g in C._shards_userfills(vaults[:8], taille=5)] == [5, 3]

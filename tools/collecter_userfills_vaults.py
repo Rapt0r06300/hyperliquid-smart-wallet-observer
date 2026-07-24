@@ -35,7 +35,8 @@ RUN_TOKEN = ""                    # provenance HORS PAYLOAD (en mémoire) — ar
 _MUTEX = None                     # handle du mutex Windows (à garder vivant)
 TRIGGER_VERSION = "v1"            # version du déclencheur (estampillée OPEN+CLOSE ; filtre les stats config courante)
 GIT_COMMIT = ""                   # commit git chargé (audit SÉPARÉ, JAMAIS dans config_hash)
-TRANSPORT_VERSION = "userfills_multiplex_v1"   # transport WS (HORS config_hash) : compare la latence avant/après
+TRANSPORT_VERSION = "userfills_2sock_v1"   # transport WS (HORS config_hash) : 2 sockets de 5 vaults + L2 ; compare latence
+TAILLE_SHARD = 5                           # HL cape ~5 abonnements userFills/connexion -> shards déterministes de 5
 
 
 def _activite_par_vault(root: Path, *, fenetre_h: float = 2.0, max_lignes: int = 4000) -> dict:
@@ -385,6 +386,13 @@ async def _worker(root: Path, file: asyncio.Queue) -> None:
             file.task_done()
 
 
+def _shards_userfills(vaults: list, taille: int = TAILLE_SHARD) -> list:
+    """Découpe DÉTERMINISTE des vaults en shards de `taille` (5) — HL cape ~5 userFills/connexion. Rend
+    [("A", [v...]), ("B", [v...]), ...] : groupes DISJOINTS (aucun doublon), ordre stable. Une socket par shard."""
+    lettres = "ABCDEFGH"
+    return [(lettres[i // taille], vaults[i:i + taille]) for i in range(0, len(vaults), taille)]
+
+
 def _vault_du_message(msg, connus_par_lc: dict) -> str | None:
     """Démux d'un message userFills MULTIPLEXÉ : extrait le user (data.user) et le mappe sur la forme
     canonique abonnée (insensible à la casse). None si inconnu/illisible."""
@@ -393,10 +401,10 @@ def _vault_du_message(msg, connus_par_lc: dict) -> str | None:
     return connus_par_lc.get(str(u).lower()) if u else None
 
 
-async def _userfills_multiplex(root: Path, vaults: list, file: asyncio.Queue) -> None:
-    """UNE SEULE connexion WS pour TOUS les userFills (multiplex) : ≤10 abonnements sur 1 connexion -> le
-    collecteur reste à 2 connexions (userFills + L2), bien sous le plafond. Démux par data.user ; ACK réel =
-    subscriptionResponse. Reconnexion : ré-abonne tout ; le curseur + la dédup rejouent les fills manqués."""
+async def _userfills_multiplex(root: Path, vaults: list, file: asyncio.Queue, socket_id: str = "A") -> None:
+    """UNE socket WS pour un SHARD de ≤5 userFills (HL cape ~5/connexion). 2 shards (A,B) de 5 + la socket L2
+    = 3 connexions au total (< 10). Démux par data.user ; ACK réel = subscriptionResponse. Si CETTE socket
+    tombe, SEUL son groupe de 5 se reconnecte ; le curseur + la dédup rejouent ses fills manqués (catch-up)."""
     import websockets
     connus = {v.lower(): v for v in vaults}
     while True:
@@ -404,9 +412,9 @@ async def _userfills_multiplex(root: Path, vaults: list, file: asyncio.Queue) ->
             async with websockets.connect(WS_URL, ping_interval=20, max_size=2 ** 22) as ws:
                 for i, v in enumerate(vaults):
                     await ws.send(json.dumps({"method": "subscribe", "subscription": {"type": "userFills", "user": v}}))
-                    print("[userfills] subscribe %d/%d userFills %s" % (i + 1, len(vaults), v[:10]), flush=True)
-                    await asyncio.sleep(1.0)                   # THROTTLE : HL rate-limite les subscribes rapides -> 1 s d'espacement
-                print("[userfills] 1 connexion multiplex — %d abonnements userFills demandes (throttle 1.0s)" % len(vaults), flush=True)
+                    print("[userfills] socket %s subscribe %d/%d userFills %s" % (socket_id, i + 1, len(vaults), v[:10]), flush=True)
+                    await asyncio.sleep(0.3)                   # THROTTLE léger (5 subscribes) : évite tout drop HL
+                print("[userfills] socket %s — %d abonnements userFills demandes" % (socket_id, len(vaults)), flush=True)
                 async for brut in ws:
                     try:
                         msg = json.loads(brut)
@@ -415,7 +423,7 @@ async def _userfills_multiplex(root: Path, vaults: list, file: asyncio.Queue) ->
                     if isinstance(msg, dict) and msg.get("channel") == "subscriptionResponse":
                         sub = ((msg.get("data") or {}).get("subscription")) or {}
                         if sub.get("type") == "userFills":
-                            print("[userfills] ACK subscribe userFills %s" % str(sub.get("user") or "")[:10], flush=True)
+                            print("[userfills] socket %s ACK subscribe userFills %s" % (socket_id, str(sub.get("user") or "")[:10]), flush=True)
                         continue
                     vault = _vault_du_message(msg, connus)
                     if not vault:
@@ -428,8 +436,8 @@ async def _userfills_multiplex(root: Path, vaults: list, file: asyncio.Queue) ->
                         file.put_nowait((vault, fills, t_ws))     # ne bloque JAMAIS la réception
                     except asyncio.QueueFull:
                         print("[userfills] FILE SATUREE — drop (%s)" % vault[:10], flush=True)
-        except Exception as exc:  # noqa: BLE001 — reconnect (une seule connexion à relancer)
-            print("[userfills] multiplex reconnect (%s)" % str(exc)[:50], flush=True)
+        except Exception as exc:  # noqa: BLE001 — reconnecte SEULEMENT ce shard de 5 (curseur+dédup -> catch-up)
+            print("[userfills] socket %s reconnect (%s)" % (socket_id, str(exc)[:50]), flush=True)
             await asyncio.sleep(3.0)
 
 
@@ -543,9 +551,12 @@ async def _boucle(root: Path) -> None:
     vaults = [v for v, _r, _w in roles]
     file: asyncio.Queue = asyncio.Queue(maxsize=FILE_MAX)
     try:
+        shards = _shards_userfills(vaults)                            # ≤5 vaults par socket (HL cape ~5/connexion)
+        for sid, grp in shards:
+            print("[userfills] shard socket %s (%d vaults) : %s" % (sid, len(grp), ", ".join(v[:10] for v in grp)), flush=True)
         await asyncio.gather(_worker(root, file), _exits_periodiques(root), _heartbeat(root, info),
                              _promotion_periodique(root), _rapport_periodique(root), _l2_dynamique(root),
-                             _userfills_multiplex(root, vaults, file))   # 1 connexion multiplex (au lieu d'1/vault)
+                             *[_userfills_multiplex(root, grp, file, sid) for sid, grp in shards])   # 2 sockets de 5 + L2 = 3 conn
     finally:
         VI.liberer(root, NOM_VERROU, info)
 
