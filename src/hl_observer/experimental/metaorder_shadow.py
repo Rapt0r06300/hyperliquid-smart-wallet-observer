@@ -679,14 +679,14 @@ def executer(root: str | Path, vaults: list, *, fills_provider=None, twap_provid
     # SYNCHRONISATION L2 : carnet HORODATÉ au fill (tape) — sinon carnet COURANT = provisoire, ne prouve rien
     book_sync: dict = {}
     for s in signaux:
-        e = tape_l2.get(MT.cle_fill(s.get("coin"), s.get("hash"), s.get("fill_time")), {}).get("continuation")
-        a_book = bool(e and (e.get("top5") or {}).get("bids"))
+        c = tape_l2.get(MT.cle_fill(s.get("coin"), s.get("hash"), s.get("fill_time")), {}).get("fill")
+        ent = (c or {}).get("entree") or {}
+        a_book = bool(ent.get("bids"))                            # carnet d'ENTRÉE synchronisé (horodaté au fill)
         s["l2_synchronise"] = a_book
         if a_book:
-            t5 = e.get("top5") or {}
             book_sync[(s.get("coin"), s.get("hash"), s.get("fill_time"))] = {
-                "levels": [[{"px": px, "sz": sz} for px, sz in t5.get("bids", [])],
-                           [{"px": px, "sz": sz} for px, sz in t5.get("asks", [])]]}
+                "levels": [[{"px": b[0], "sz": b[1]} for b in ent.get("bids", [])],
+                           [{"px": a[0], "sz": a[1]} for a in ent.get("asks", [])]]}
     n_sync = sum(1 for s in signaux if s.get("l2_synchronise"))
     courbe = courbe_edge_cout(signaux, book_par_coin, book_sync=book_sync, fee_ar_bps=fee_base,
                               fees_tiers=(fee_base, fee_config, 5.0))

@@ -1,89 +1,112 @@
-"""TAPE L2/OFI SHADOW synchronisée autour des fills métaordre — SCHÉMA v2 (rectif Flo 24/07).
+"""TAPE L2/OFI SHADOW — SCHÉMA v3 (rectif Flo 25/07) : niveaux BRUTS conservés pour tout recalculer.
 
-Corrige les mauvaises features de la v1 AVANT accumulation :
-  • `book_imbalance_top5` (STATIQUE, un seul snapshot : Σbid5 − Σask5) N'EST PAS un OFI ;
-  • le **vrai OFI top-5** se calcule sur les VARIATIONS entre snapshots L2 SUCCESSIFS (Cont et al.) — donc il
-    faut un BUFFER de carnets horodatés. On abonne le coin au l2Book **dès le 1er fill (FIRST_SLICE)** et on
-    garde un petit buffer WS. Par continuation : un état PRÉ-fill + plusieurs POST-fill. **Sans état pré-fill →
-    `OFI_NON_MESURABLE`** (rien inventé).
+Pour CHAQUE fill métaordre, on persiste (append-only, borné, compact) :
+  • trois snapshots — PRE (avant le fill), ENTRÉE (1er carnet POSTÉRIEUR au fill), plusieurs POST ;
+  • top-5 bid/ask COMPLETS : prix, taille ET **nombre d'ordres** (`n`) — niveaux BRUTS toujours conservés ;
+  • horloges séparées : `fill_exchange_time`, `book_exchange_time`, réceptions locales MONOTONES ;
+  • `metaorder_id`, `fill_id`, `coin`, `stade` (FIRST_SLICE/CONTINUATION/REVERSAL live ; LATE_STAGE dérivé offline).
 
-QUATRE horloges STRICTEMENT séparées (une latence de −650 ms n'est pas une latence, c'est un mélange) :
-  • `fill_exchange_time`  : temps HL du fill ;
-  • `book_exchange_time`  : temps HL du carnet (champ `time` du l2Book) ;
-  • `fill_recv_mono` / `book_recv_mono` : réception LOCALE MONOTONE (même process → comparables) ;
-  • `latence_pipeline_ms` = book_recv_mono − fill_recv_mono, **TOUJOURS ≥ 0** (snapshot d'entrée POSTÉRIEUR au
-    fill exigé). Le snapshot de SORTIE journalise son retard réel vs +horizon.
+On dérive ensuite (mais on GARDE les niveaux bruts pour tout recalculer) : **OFI par niveau**, OFI agrégé, OFI
+**normalisé par profondeur**, et `book_imbalance_top5` (statique). `latence_pipeline_ms` = book_recv − fill_recv,
+TOUJOURS ≥ 0. **Sans état pré-fill → `OFI_NON_MESURABLE`** (rien inventé). Ne JAMAIS comparer une valeur OFI
+BRUTE entre coins différents (échelles ≠) : c'est pourquoi l'OFI normalisé par profondeur est aussi fourni.
 
-Lecture seule (l2Book public), `shadow=true`, `real_execution=false`. Aucune position, RAW intact.
+Schéma versionné `shadow_l2_v3` ; v1/v2 ignorés dans les stats. Lecture seule (l2Book public), aucune position,
+RAW intact. `shadow=true`, `real_execution=false`. 0 ordre, 0 clé, 0 signature.
 """
 from __future__ import annotations
 
+import hashlib
 import json
 from pathlib import Path
 
 TAPE_RELPATH = Path("runtime") / "data" / "metaorder_l2_tape.jsonl"
-SCHEMA_VERSION = "shadow_l2_v2"
+SCHEMA_VERSION = "shadow_l2_v3"
 
 
-def cle_fill(coin, hsh, fill_time) -> tuple:
-    return (str(coin).upper() if coin else None, hsh, int(fill_time or 0))
+def cle_fill(coin, fill_id, fill_time) -> tuple:
+    return (str(coin).upper() if coin else None, fill_id, int(fill_time or 0))
+
+
+def metaorder_id(vault, coin, sens, t0) -> str:
+    brut = "%s|%s|%d|%d" % (str(vault).lower(), str(coin).upper(), int(sens), int(t0))
+    return "mo-" + hashlib.sha1(brut.encode("utf-8")).hexdigest()[:12]
 
 
 def resume_book(book_brut: dict) -> dict | None:
-    """Résumé d'un l2Book BRUT : bid/ask/mid, spread bps, 5 niveaux [px,sz] de chaque côté, et
-    `book_exchange_time` (champ `time` HL du carnet). None si illisible."""
+    """Résumé d'un l2Book BRUT : bid/ask/mid, spread bps, et top-5 [px, sz, **n**] (nombre d'ordres) de chaque
+    côté — niveaux BRUTS conservés. `book_exchange_time` = champ `time` HL. None si illisible."""
     try:
         bids, asks = book_brut["levels"][0], book_brut["levels"][1]
         bid, ask = float(bids[0]["px"]), float(asks[0]["px"])
         if bid <= 0 or ask <= 0:
             return None
         mid = 0.5 * (bid + ask)
-        top = lambda cote: [[float(x["px"]), float(x["sz"])] for x in cote[:5]]   # noqa: E731
-        b5, a5 = top(bids), top(asks)
+        top = lambda cote: [[float(x["px"]), float(x["sz"]), int(x.get("n") or 0)] for x in cote[:5]]  # noqa: E731
         return {"bid": bid, "ask": ask, "mid": round(mid, 8), "spread_bps": round((ask - bid) / mid * 1e4, 3),
-                "bids5": b5, "asks5": a5, "book_exchange_time": book_brut.get("time"),
-                "book_imbalance_top5": round(sum(s for _, s in b5) - sum(s for _, s in a5), 4)}
+                "bids5": top(bids), "asks5": top(asks), "book_exchange_time": book_brut.get("time")}
     except (KeyError, IndexError, TypeError, ValueError):
         return None
 
 
 def book_imbalance_top5(resume: dict | None) -> float | None:
-    """Déséquilibre STATIQUE du carnet (Σ tailles bid − Σ tailles ask, top-5) — une PHOTO, PAS un OFI."""
-    if not resume:
-        return None
+    """Déséquilibre STATIQUE (Σ tailles bid − Σ tailles ask, top-5) — une PHOTO, PAS un OFI."""
     try:
-        return round(sum(s for _, s in resume["bids5"]) - sum(s for _, s in resume["asks5"]), 4)
-    except (KeyError, TypeError, ValueError):
+        return round(sum(l[1] for l in resume["bids5"]) - sum(l[1] for l in resume["asks5"]), 4)
+    except (KeyError, TypeError, IndexError):
         return None
 
 
-def ofi_top5(prev: dict | None, cur: dict | None) -> float | None:
-    """VRAI OFI top-5 entre deux snapshots SUCCESSIFS (Cont, Kukanov & Stoikov). Contributions déjà SIGNÉES,
-    OFI = Σ_bid + Σ_ask (>0 = pression acheteuse nette) :
-    BID (demande) → px↑ : +sz_cur ; px= : +(sz_cur−sz_prev) ; px↓ : −sz_prev.
-    ASK (offre)   → px↓ : −sz_cur (offre plus agressive = vente) ; px= : −(sz_cur−sz_prev) (offre ajoutée =
-                    vente ; retirée = +) ; px↑ : +sz_prev (offre retirée = moins de vente).
-    **None si un snapshot manque** (→ OFI_NON_MESURABLE)."""
+def profondeur_top5(resume: dict | None) -> float | None:
+    """Profondeur totale top-5 (Σ tailles bid + Σ tailles ask) — sert à NORMALISER l'OFI (comparable entre coins)."""
+    try:
+        return round(sum(l[1] for l in resume["bids5"]) + sum(l[1] for l in resume["asks5"]), 4)
+    except (KeyError, TypeError, IndexError):
+        return None
+
+
+def _contrib_bid(pv, cv, i):
+    if i >= len(pv) or i >= len(cv):
+        return 0.0
+    ppx, psz, cpx, csz = pv[i][0], pv[i][1], cv[i][0], cv[i][1]
+    return csz if cpx > ppx else (csz - psz if cpx == ppx else -psz)
+
+
+def _contrib_ask(pv, cv, i):
+    if i >= len(pv) or i >= len(cv):
+        return 0.0
+    ppx, psz, cpx, csz = pv[i][0], pv[i][1], cv[i][0], cv[i][1]
+    return -csz if cpx < ppx else (-(csz - psz) if cpx == ppx else psz)
+
+
+def ofi_par_niveau(prev: dict | None, cur: dict | None) -> list | None:
+    """OFI PAR NIVEAU (liste top-5) entre deux snapshots SUCCESSIFS : contribution bid + ask à CHAQUE niveau
+    (>0 = pression acheteuse). None si un snapshot manque (→ OFI_NON_MESURABLE). Recalculable depuis les niveaux."""
     if not prev or not cur:
         return None
     try:
         pb, cb, pa, ca = prev["bids5"], cur["bids5"], prev["asks5"], cur["asks5"]
     except (KeyError, TypeError):
         return None
-    e_bid = 0.0
-    for i in range(min(len(pb), len(cb), 5)):
-        (ppx, psz), (cpx, csz) = pb[i], cb[i]
-        e_bid += csz if cpx > ppx else (csz - psz if cpx == ppx else -psz)
-    e_ask = 0.0
-    for i in range(min(len(pa), len(ca), 5)):
-        (ppx, psz), (cpx, csz) = pa[i], ca[i]
-        e_ask += -csz if cpx < ppx else (-(csz - psz) if cpx == ppx else psz)
-    return round(e_bid + e_ask, 4)
+    return [round(_contrib_bid(pb, cb, i) + _contrib_ask(pa, ca, i), 4) for i in range(5)]
+
+
+def ofi_top5(prev: dict | None, cur: dict | None) -> float | None:
+    """OFI AGRÉGÉ = somme de l'OFI par niveau (top-5). None si non mesurable."""
+    niv = ofi_par_niveau(prev, cur)
+    return round(sum(niv), 4) if niv is not None else None
+
+
+def ofi_normalise_profondeur(prev: dict | None, cur: dict | None) -> float | None:
+    """OFI NORMALISÉ par la profondeur top-5 du snapshot courant (sans dimension) → COMPARABLE entre coins,
+    contrairement à l'OFI brut. None si non mesurable."""
+    o, d = ofi_top5(prev, cur), profondeur_top5(cur)
+    return round(o / d, 6) if (o is not None and d) else None
 
 
 def latence_pipeline_ms(fill_recv_mono, book_recv_mono) -> float | None:
-    """Latence de NOTRE pipeline = réception locale du carnet − réception locale du fill (MONOTONE, même
-    process). TOUJOURS ≥ 0 : None si le carnet est ANTÉRIEUR au fill (pas un snapshot d'entrée valide)."""
+    """Latence pipeline LOCALE = book_recv_mono − fill_recv_mono (MONOTONE, même process). TOUJOURS ≥ 0 :
+    None si le carnet est ANTÉRIEUR au fill (pas un snapshot d'entrée valide)."""
     try:
         d = float(book_recv_mono) - float(fill_recv_mono)
         return round(d, 1) if d >= 0 else None
@@ -92,15 +115,11 @@ def latence_pipeline_ms(fill_recv_mono, book_recv_mono) -> float | None:
 
 
 def etat_pre(buffer: list, fill_recv_mono: float) -> dict | None:
-    """Dernier état du buffer STRICTEMENT ANTÉRIEUR à la réception du fill (base de l'OFI). None si aucun
-    (ex. FIRST_SLICE : rien avant → OFI_NON_MESURABLE)."""
     pre = [e for e in buffer if float(e["recv_mono"]) < float(fill_recv_mono)]
     return pre[-1] if pre else None
 
 
 def etat_entree(buffer: list, fill_recv_mono: float, fill_exchange_time) -> dict | None:
-    """Premier état POSTÉRIEUR au fill (réception locale ≥ fill ET, si dispo, temps HL du carnet ≥ temps HL du
-    fill). C'est le carnet contre lequel on EXÉCUTERAIT — obligatoirement après le fill. None si pas encore là."""
     fx = fill_exchange_time
     for e in buffer:
         if float(e["recv_mono"]) >= float(fill_recv_mono):
@@ -111,51 +130,73 @@ def etat_entree(buffer: list, fill_recv_mono: float, fill_exchange_time) -> dict
 
 
 def etats_post(buffer: list, entree_recv_mono: float, *, n: int = 3, fenetre_ms: float = 30_000.0) -> list:
-    """Jusqu'à `n` états postérieurs à l'entrée, dans `fenetre_ms` (évolution de l'OFI après le fill)."""
     return [e for e in buffer
             if float(entree_recv_mono) < float(e["recv_mono"]) <= float(entree_recv_mono) + fenetre_ms][:n]
 
 
-def ligne_continuation(fill: dict, *, pre: dict | None, entree: dict | None, posts: list,
-                       fill_recv_mono: float) -> dict | None:
-    """Ligne de tape v2 pour un fill : 4 horloges séparées, latence pipeline ≥ 0, `book_imbalance_top5`
-    (statique) SÉPARÉ du **vrai OFI** (pré→entrée), OFI post successifs, `OFI_NON_MESURABLE` si pas de pré.
-    None si aucun état d'entrée postérieur (snapshot d'entrée pas encore disponible)."""
+def stade_live(etat: dict, fill: dict, *, intervalle_ms: float = 60_000.0) -> tuple:
+    """Assigne LIVE (metaorder_id, stade) à un fill via `etat` par (vault, coin) : CONTINUATION si même sens et
+    écart ≤ intervalle ; sinon nouveau métaordre → FIRST_SLICE (ou REVERSAL s'il inverse le précédent). LATE_STAGE
+    se dérive OFFLINE (join sur metaorder_id). Mute `etat`."""
+    vault = str(fill.get("vault") or "")
+    coin = str(fill.get("coin") or "").upper()
+    sens = int(fill.get("signe") or fill.get("sens") or 0)
+    ft = int(fill.get("ts_ms") or fill.get("fill_time") or 0)
+    key = (vault, coin)
+    st = etat.get(key)
+    if st and st["sens"] == sens and (ft - st["last_ft"]) <= intervalle_ms:
+        st["last_ft"] = ft
+        return st["mo_id"], "CONTINUATION"
+    reversal = bool(st and st["sens"] == -sens and (ft - st["last_ft"]) <= intervalle_ms)
+    mo = metaorder_id(vault, coin, sens, ft)
+    etat[key] = {"sens": sens, "mo_id": mo, "last_ft": ft}
+    return mo, ("REVERSAL" if reversal else "FIRST_SLICE")
+
+
+def _snap(e: dict | None) -> dict | None:
+    """Snapshot COMPACT d'un état : réception monotone + temps HL + niveaux BRUTS top-5 [px, sz, n]."""
+    if not e:
+        return None
+    r = e.get("resume") or {}
+    return {"recv_mono": round(float(e["recv_mono"]), 1), "book_exchange_time": r.get("book_exchange_time"),
+            "bids": r.get("bids5"), "asks": r.get("asks5")}
+
+
+def ligne_fill(fill: dict, *, metaorder_id: str, stade: str, pre: dict | None, entree: dict | None,
+               posts: list, fill_recv_mono: float) -> dict | None:
+    """Ligne v3 d'un fill : PRE/ENTRÉE/POST bruts (px,sz,n) + horloges séparées + features DÉRIVÉES (OFI par
+    niveau, agrégé, normalisé profondeur, imbalance) — les niveaux bruts restent pour TOUT recalculer. None si
+    aucun état d'entrée postérieur au fill."""
     if entree is None:
         return None
-    r = entree.get("resume") or {}
+    re_ = entree.get("resume") or {}
+    rp = (pre or {}).get("resume")
     coin = str(fill.get("coin") or "").upper()
     fx = int(fill.get("ts_ms") or fill.get("fill_time") or 0)
-    ofi = ofi_top5((pre or {}).get("resume"), r) if pre else None
-    # OFI successifs post-fill (entrée→post1→post2…)
-    seq, prev_r = [], r
-    for e in posts:
-        seq.append(ofi_top5(prev_r, e.get("resume")))
-        prev_r = e.get("resume") or prev_r
-    return {"schema_version": SCHEMA_VERSION, "phase": "continuation", "coin": coin,
+    return {"schema_version": SCHEMA_VERSION, "phase": "fill", "coin": coin, "metaorder_id": metaorder_id,
+            "fill_id": fill.get("hash"), "stade": stade,
             "sens": int(fill.get("signe") or fill.get("sens") or 0), "vault": str(fill.get("vault") or "")[:42],
-            "hash": fill.get("hash"),
-            "fill_exchange_time": fx, "book_exchange_time": r.get("book_exchange_time"),
+            "fill_exchange_time": fx, "book_exchange_time": re_.get("book_exchange_time"),
             "fill_recv_mono": round(float(fill_recv_mono), 1), "book_recv_mono": round(float(entree["recv_mono"]), 1),
             "latence_pipeline_ms": latence_pipeline_ms(fill_recv_mono, entree["recv_mono"]),
-            "mid": r.get("mid"), "spread_bps": r.get("spread_bps"),
-            "top5": {"bids": r.get("bids5"), "asks": r.get("asks5")},
-            "book_imbalance_top5": r.get("book_imbalance_top5"),           # STATIQUE (photo)
-            "ofi_top5": ofi, "ofi_mesurable": pre is not None,            # VRAI OFI (variation) ; sinon…
-            "ofi_statut": "OK" if pre is not None else "OFI_NON_MESURABLE",
-            "ofi_post_sequence": seq, "n_post": len(posts),
+            "pre": _snap(pre), "entree": _snap(entree), "posts": [_snap(p) for p in posts],   # NIVEAUX BRUTS
+            "ofi_par_niveau": ofi_par_niveau(rp, re_), "ofi_top5": ofi_top5(rp, re_),
+            "ofi_normalise_profondeur": ofi_normalise_profondeur(rp, re_),
+            "book_imbalance_top5": book_imbalance_top5(re_), "profondeur_top5": profondeur_top5(re_),
+            "ofi_statut": "OK" if rp else "OFI_NON_MESURABLE", "ofi_mesurable": rp is not None,
             "shadow": True, "real_execution": False}
 
 
-def ligne_sortie(fill: dict, *, entree_resume: dict, capture_recv_mono: float, horizon_ms: float,
+def ligne_sortie(fill: dict, *, sortie: dict, capture_recv_mono: float, horizon_ms: float,
                  fill_recv_mono: float) -> dict:
-    """Ligne de SORTIE : carnet à ≈ entrée+horizon + **retard RÉEL** du snapshot vs la cible (fill_recv+horizon)."""
+    """Ligne de SORTIE v3 : niveaux BRUTS du carnet à ≈ entrée+horizon + **retard RÉEL** vs (fill_recv+horizon)."""
+    r = sortie.get("resume") or {}
     cible = float(fill_recv_mono) + float(horizon_ms)
     return {"schema_version": SCHEMA_VERSION, "phase": "sortie", "coin": str(fill.get("coin") or "").upper(),
-            "hash": fill.get("hash"), "fill_exchange_time": int(fill.get("ts_ms") or 0),
-            "book_exchange_time": entree_resume.get("book_exchange_time"),
-            "retard_sortie_ms": round(float(capture_recv_mono) - cible, 1),   # >0 = snapshot APRÈS +horizon
-            "mid": entree_resume.get("mid"), "spread_bps": entree_resume.get("spread_bps"),
+            "fill_id": fill.get("hash"), "fill_exchange_time": int(fill.get("ts_ms") or 0),
+            "book_exchange_time": r.get("book_exchange_time"),
+            "retard_sortie_ms": round(float(capture_recv_mono) - cible, 1),
+            "bids": r.get("bids5"), "asks": r.get("asks5"), "book_imbalance_top5": book_imbalance_top5(r),
             "shadow": True, "real_execution": False}
 
 
@@ -170,7 +211,7 @@ def ecrire_lignes(root, lignes: list) -> None:
 
 
 def charger_tape(root) -> dict:
-    """Charge la tape → {cle_fill: {'continuation': ligne, 'sortie': ligne}} (schéma v2). Lecture seule."""
+    """Charge la tape v3 → {cle_fill: {'fill': ligne, 'sortie': ligne}}. Ignore v1/v2 (features douteuses)."""
     p = Path(root) / TAPE_RELPATH
     out: dict = {}
     try:
@@ -185,12 +226,13 @@ def charger_tape(root) -> dict:
         except ValueError:
             continue
         if d.get("schema_version") != SCHEMA_VERSION:
-            continue                                             # on ignore l'ancien schéma (features douteuses)
-        k = cle_fill(d.get("coin"), d.get("hash"), d.get("fill_exchange_time"))
+            continue
+        k = cle_fill(d.get("coin"), d.get("fill_id"), d.get("fill_exchange_time"))
         out.setdefault(k, {})[d.get("phase")] = d
     return out
 
 
-__all__ = ["TAPE_RELPATH", "SCHEMA_VERSION", "cle_fill", "resume_book", "book_imbalance_top5", "ofi_top5",
-           "latence_pipeline_ms", "etat_pre", "etat_entree", "etats_post", "ligne_continuation", "ligne_sortie",
+__all__ = ["TAPE_RELPATH", "SCHEMA_VERSION", "cle_fill", "metaorder_id", "resume_book", "book_imbalance_top5",
+           "profondeur_top5", "ofi_par_niveau", "ofi_top5", "ofi_normalise_profondeur", "latence_pipeline_ms",
+           "etat_pre", "etat_entree", "etats_post", "stade_live", "ligne_fill", "ligne_sortie",
            "ecrire_lignes", "charger_tape"]

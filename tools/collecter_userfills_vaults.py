@@ -654,6 +654,7 @@ async def _tape_consumer(root: Path, *, horizon_ms: float = 300_000.0, post_wind
     from hl_observer.experimental import metaorder_l2_tape as T
     en_attente: list = []
     exits: list = []
+    meta_etat: dict = {}                                          # (vault,coin) -> métaordre live (id/sens/last_ft)
     await asyncio.sleep(15.0)
     while True:
         try:
@@ -672,7 +673,9 @@ async def _tape_consumer(root: Path, *, horizon_ms: float = 300_000.0, post_wind
                 pre = T.etat_pre(buf, it["frm"])
                 entree = T.etat_entree(buf, it["frm"], it["fill"].get("ts_ms"))
                 posts = T.etats_post(buf, entree["recv_mono"], n=3) if entree else []
-                l = T.ligne_continuation(it["fill"], pre=pre, entree=entree, posts=posts, fill_recv_mono=it["frm"])
+                mo, stade = T.stade_live(meta_etat, it["fill"])
+                l = T.ligne_fill(it["fill"], metaorder_id=mo, stade=stade, pre=pre, entree=entree,
+                                 posts=posts, fill_recv_mono=it["frm"])
                 if l:
                     lignes.append(l)
                     exits.append({"fill": it["fill"], "frm": it["frm"], "due": it["frm"] + horizon_ms})
@@ -685,9 +688,8 @@ async def _tape_consumer(root: Path, *, horizon_ms: float = 300_000.0, post_wind
                 buf = _TAPE_BUFFER.get(str(ex["fill"].get("coin") or "").upper(), [])
                 sortie = T.etat_entree(buf, ex["frm"] + horizon_ms, None)   # 1er carnet ≥ +horizon
                 if sortie:
-                    lignes.append(T.ligne_sortie(ex["fill"], entree_resume=sortie["resume"],
-                                                 capture_recv_mono=sortie["recv_mono"], horizon_ms=horizon_ms,
-                                                 fill_recv_mono=ex["frm"]))
+                    lignes.append(T.ligne_sortie(ex["fill"], sortie=sortie, capture_recv_mono=sortie["recv_mono"],
+                                                 horizon_ms=horizon_ms, fill_recv_mono=ex["frm"]))
             exits = reste_ex
             T.ecrire_lignes(root, lignes)
         except Exception as exc:  # noqa: BLE001 — la tape ne fait JAMAIS crasher le collecteur
