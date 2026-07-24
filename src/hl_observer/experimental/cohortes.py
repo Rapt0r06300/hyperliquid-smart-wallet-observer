@@ -35,6 +35,7 @@ SEUIL_ABS_MIN_USD = 150.0         # plancher EXÉCUTABLE anti-dust : jamais copi
 FRAC_TVL_SIGNIF = 0.002           # significatif RELATIF au vault : cumulé >= 0.2 % de son TVL = vraie conviction
 PLAFOND_RAW_USD = 2_000.0         # PLAFOND du seuil relatif : un TRÈS gros vault ne doit pas être bloqué (clamp haut)
 AGE_MAX_PAPER_FILL_MS = 5_000.0   # ENTRÉE refusée si le délai TOTAL fill_leader->exécution_paper dépasse ça
+RAW_BASELINE_MAX_CYCLES = 20      # RAW = baseline MINUSCULE : figée à 20 cycles clôturés (config courante) puis KILL/OBSERVE
 COINS_ACTIFS_RELPATH = Path("runtime") / "data" / "raw_coins_actifs.json"
 COINS_PREWARM_RELPATH = Path("runtime") / "data" / "raw_coins_prewarm.json"   # coins en agrégation -> abonnement L2 EN PARALLÈLE
 
@@ -198,6 +199,8 @@ def cohorte_active(coh: Cohorte, root: Path, *, run_id: str | None = None, trigg
                    config_hash: str | None = None) -> bool:
     """AUTO-KILL : une cohorte dont l'expectancy LIVE (config COURANTE seule, clé config_hash) est négative sur
     assez de trades se met en pause. Une autre config (legacy) ne peut ni sauver ni tuer la config courante."""
+    if not coh.edge_requis:        # RAW = baseline de MESURE : gouvernée par le CAP 20 cycles, pas par l'auto-KILL d'expectancy
+        return True                # (on VEUT l'échantillon complet jusqu'à 20 ; la perte reste bornée par son budget minuscule)
     ex = _expectancy(coh, root, run_id=run_id, trigger_version=trigger_version, config_hash=config_hash)
     return not (ex.get("n_trades", 0) >= 10 and ex.get("expectancy_usd_par_trade", 0.0) < 0)
 
@@ -498,6 +501,10 @@ def traiter_fill(coh: Cohorte, etat: dict, fill: dict, root: Path, *, now_ms: fl
     _chash_gate = config_hash_courant(coh, root)                 # clé de config pour le gate (RAW = identique au stamp)
     if not cohorte_active(coh, root, trigger_version=_trig, config_hash=_chash_gate):   # AUTO-KILL : config COURANTE seule
         return {"refus": "COHORTE_EN_PAUSE_AUTO_KILL", "coin": coin}
+    if not coh.edge_requis:                                       # RAW = baseline minuscule : FIGÉE à N cycles clôturés
+        n_clot = _expectancy(coh, root, config_hash=_chash_gate).get("n_trades", 0)   # cycles config COURANTE (run-agnostique)
+        if n_clot >= RAW_BASELINE_MAX_CYCLES:                     # jamais promue ; ne perd pas indéfiniment -> on FIGE pour décision
+            return {"refus": "RAW_BASELINE_FIGEE_%d" % RAW_BASELINE_MAX_CYCLES, "coin": coin, "cycles_clotures": n_clot}
     # deny-by-default : le vault doit être suivi par la cohorte
     if vault not in _vaults_cohorte(coh, root):
         return {"refus": "VAULT_NON_SUIVI", "coin": coin}

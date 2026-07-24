@@ -559,6 +559,30 @@ async def _rapport_periodique(root: Path, *, intervalle_s: float = 30.0) -> None
         await asyncio.sleep(intervalle_s)
 
 
+async def _metaorder_shadow_periodique(root: Path, vaults: list, *, intervalle_s: float = 600.0) -> None:
+    """SHADOW METAORDER_V1 : toutes les ~10 min, mesure l'edge par STADE de métaordre (TWAP étiqueté via
+    userTwapSliceFills, métaordres cachés agrégés, stades FIRST/CONTINUATION/LATE/REVERSAL, PnL forward net
+    après coûts, placebo, taille rel, maker/taker, âges). N'OUVRE AUCUNE POSITION ; ledger SÉPARÉ, jamais
+    mélangé au PnL live. REST hors event-loop ; poids journalisé. 0 ordre, 0 clé, 0 signature."""
+    from hl_observer.experimental import metaorder_shadow as MS
+    import sonde_confirmation_vaults as SD
+    loop = asyncio.get_event_loop()
+    await asyncio.sleep(30.0)                                     # démarrage doux (laisse le live s'installer)
+    while True:
+        try:
+            chash = CO.config_hash_courant(CO.RAW_PROBE, root)
+            res = await loop.run_in_executor(
+                None, lambda: MS.executer(root, list(vaults), config_hash=chash, git_commit=GIT_COMMIT))
+            poids = SD.poids_rest_estime(res.get("n_appels_rest", 0), fenetre_s=intervalle_s)
+            stades = {k: v.get("n") for k, v in (res.get("stats") or {}).items()}
+            print("[userfills] metaorder_shadow : %d signaux · %d appels REST · poids~%.0f/%d IP·min · stades=%s"
+                  % (res.get("n_signaux", 0), res.get("n_appels_rest", 0), poids["poids_estime_par_min"],
+                     poids["limite_ip_par_min"], stades), flush=True)
+        except Exception as exc:  # noqa: BLE001 — la passe shadow ne fait JAMAIS crasher le collecteur
+            print("[userfills] metaorder_shadow err %s" % str(exc)[:60], flush=True)
+        await asyncio.sleep(intervalle_s)
+
+
 def _git_commit(root: Path) -> str:
     """Commit git courant (audit SÉPARÉ du config_hash). Lit .git sans subprocess. '' si indisponible."""
     try:
@@ -623,6 +647,7 @@ async def _boucle(root: Path) -> None:
         await asyncio.gather(_worker(root, file), _exits_periodiques(root), _heartbeat(root, info),
                              _promotion_periodique(root), _rapport_periodique(root), _l2_dynamique(root),
                              _garde_reconciliation_rest(root, shards),   # REST↔WS : reconnecte un shard qui rate un fill
+                             _metaorder_shadow_periodique(root, vaults),  # SHADOW : edge par stade de métaordre (n'ouvre rien)
                              *[_userfills_multiplex(root, grp, file, sid) for sid, grp in shards])   # 2 sockets de 5 + L2 = 3 conn
     finally:
         VI.liberer(root, NOM_VERROU, info)
