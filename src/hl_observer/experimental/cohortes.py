@@ -156,24 +156,27 @@ def etat_initial(coh: Cohorte, root: Path, *, run_id: str | None = None, token: 
             "token": token or secrets.token_hex(16)}      # provenance HORS PAYLOAD (en mémoire)
 
 
-def _expectancy(coh: Cohorte, root: Path, *, run_id: str | None = None, trigger_version: str | None = None) -> dict:
-    """Stats des CLOSE. Si trigger_version fourni : SEULS les cycles de la CONFIG COURANTE comptent (validité =
-    trigger_version de l'OPEN, RUN-AGNOSTIQUE — un cycle peut traverser un redémarrage). Les autres sont comptés
-    à part LEGACY_CROSS_RUN (ancien $5 sans version). `run_id` est ignoré pour la validité (audit seulement).
-    PnL/ROI cumulé + alpha placebo moyen inclus."""
+def _expectancy(coh: Cohorte, root: Path, *, run_id: str | None = None, trigger_version: str | None = None,
+                config_hash: str | None = None) -> dict:
+    """Stats des CLOSE, séparées par CONFIG. Clé = config_hash (empreinte des VRAIES valeurs) si fourni, sinon
+    trigger_version (étiquette). Validité RUN-AGNOSTIQUE (un cycle traverse un redémarrage). Les cycles d'une
+    AUTRE config comptent à part LEGACY_CROSS_RUN — jamais reclassés. `run_id` ignoré (audit). PnL/ROI cumulé
+    + alpha placebo moyen inclus."""
     try:
         evs = [json.loads(l) for l in _p(coh, root, "ledger.jsonl").read_text(encoding="utf-8", errors="ignore").splitlines() if l.strip()]
     except OSError:
         return {"n_trades": 0}
     closes = [c for c in evs if c.get("evt") == "CLOSE"]
     n_legacy = 0
-    if trigger_version is not None:                             # VALIDITÉ = trigger_version de l'OPEN (RUN-AGNOSTIQUE :
-        courant = []                                           # une position peut traverser un redémarrage -> pas de gate run_id)
+    cle = config_hash if config_hash is not None else trigger_version   # config_hash = clé PRÉCISE ; sinon l'étiquette
+    champ = "config_hash" if config_hash is not None else "trigger_version"
+    if cle is not None:                                        # VALIDITÉ RUN-AGNOSTIQUE (un cycle traverse un redémarrage)
+        courant = []
         for c in closes:
-            if c.get("trigger_version") == trigger_version:
+            if c.get(champ) == cle:
                 courant.append(c)
             else:
-                n_legacy += 1                                  # LEGACY_CROSS_RUN : autre version / ancien $5 sans trigger_version
+                n_legacy += 1                                  # LEGACY_CROSS_RUN : autre config -> à part, JAMAIS reclassé
         closes = courant
     if not closes:
         return {"n_trades": 0, "n_legacy_cross_run": n_legacy}
@@ -189,10 +192,11 @@ def _expectancy(coh: Cohorte, root: Path, *, run_id: str | None = None, trigger_
             "latence_moyenne_ms": round(sum(lat) / len(lat)) if lat else None, "n_legacy_cross_run": n_legacy}
 
 
-def cohorte_active(coh: Cohorte, root: Path, *, run_id: str | None = None, trigger_version: str | None = None) -> bool:
-    """AUTO-KILL : une cohorte dont l'expectancy LIVE (config COURANTE seule) est négative sur assez de trades
-    se met en pause. Le legacy cross-run ne peut ni sauver ni tuer la config courante."""
-    ex = _expectancy(coh, root, run_id=run_id, trigger_version=trigger_version)
+def cohorte_active(coh: Cohorte, root: Path, *, run_id: str | None = None, trigger_version: str | None = None,
+                   config_hash: str | None = None) -> bool:
+    """AUTO-KILL : une cohorte dont l'expectancy LIVE (config COURANTE seule, clé config_hash) est négative sur
+    assez de trades se met en pause. Une autre config (legacy) ne peut ni sauver ni tuer la config courante."""
+    ex = _expectancy(coh, root, run_id=run_id, trigger_version=trigger_version, config_hash=config_hash)
     return not (ex.get("n_trades", 0) >= 10 and ex.get("expectancy_usd_par_trade", 0.0) < 0)
 
 
@@ -232,6 +236,42 @@ def _declencheur_significatif(coh: Cohorte, vault: str, notional_agg: float, roo
     p = _params_trigger(root)
     seuil = min(max(float(p["floor_usd"]), float(p["frac_tvl"]) * tvl), float(p["plafond_usd"]))
     return notional_agg >= seuil, seuil
+
+
+L2_MODELE = "top5depth+rest_ondemand+ws_prewarm+book_ws_marquage"   # identifiant du MODÈLE L2 (entre dans config_hash)
+
+
+def _cfg_defaut(coh: Cohorte) -> dict:
+    """cfg par défaut d'une cohorte (RAW = exactement le cfg synthétique utilisé à l'ouverture)."""
+    return {"horizon_ms": 3_600_000.0, "stop_bps": coh.stop_bps_defaut, "take_profit_bps": None, "edge_brut_bps": None}
+
+
+def _config_hash(coh: Cohorte, cfg: dict, fhl: float, root: Path) -> str:
+    """Empreinte STABLE de la configuration IMMUABLE au moment de l'OPEN : notional, params du déclencheur,
+    âges max, frais, stop/TP, horizon, profondeur/slippage et MODÈLE L2. C'est la VRAIE clé de séparation
+    des stats (trigger_version n'est qu'une étiquette éditable). Change une seule valeur -> hash différent."""
+    import hashlib
+    p = _params_trigger(root)
+    payload = {"notional_usd": coh.notional_usd,
+               "trigger": {"floor": p["floor_usd"], "frac_tvl": p["frac_tvl"], "plafond": p["plafond_usd"], "variante": p["variante"]},
+               "age_max_open_ms": AGE_MAX_OPEN_MS, "age_max_paper_fill_ms": AGE_MAX_PAPER_FILL_MS,
+               "frais_hl_bps": round(float(fhl), 4), "stop_bps": cfg.get("stop_bps"),
+               "take_profit_bps": cfg.get("take_profit_bps"), "horizon_ms": cfg.get("horizon_ms"),
+               "depth_min_usd": coh.depth_min_usd, "slippage_base_bps": SLIPPAGE_BASE_BPS,
+               "slippage_impact_coef": SLIPPAGE_IMPACT_COEF, "latence_cout_bps": LATENCE_COUT_BPS, "modele_l2": L2_MODELE}
+    return "cfg-" + hashlib.sha1(json.dumps(payload, sort_keys=True).encode("utf-8")).hexdigest()[:12]
+
+
+def config_hash_courant(coh: Cohorte, root: Path) -> str:
+    """config_hash de la config COURANTE d'une cohorte (cfg par défaut + frais courants). Sert au filtre des
+    stats et au gate live. Pour RAW, identique au hash estampillé à l'ouverture (même cfg)."""
+    root = Path(root)
+    try:
+        from hl_observer.experimental.carry_deux_jambes import frais_venues
+        fhl = frais_venues(root)[0]
+    except Exception:  # noqa: BLE001
+        fhl = 0.0
+    return _config_hash(coh, _cfg_defaut(coh), fhl, root)
 
 
 def _maj_coins_actifs(root: Path, coin: str, *, ajouter: bool, now_ms: float) -> None:
@@ -284,7 +324,7 @@ def _maj_coins_prewarm(root: Path, coin: str, *, now_ms: float) -> None:
 
 def _ouvrir(coh: Cohorte, store: dict, root: Path, *, cle, coin, sens, notional, prix, cfg, cout_ar,
             spread, slippage, fhl, vault, now_ms, fill_ts, lat_mono, run_id="", src_l2="", marque="",
-            trigger_version="", placebo=None) -> dict:
+            trigger_version="", placebo=None, config_hash="") -> dict:
     import uuid
     eb = cfg.get("edge_brut_bps")
     edge_net = (float(eb) - cout_ar) if eb is not None else None    # RAW : pas d'edge (NON_VALIDEE)
@@ -298,7 +338,7 @@ def _ouvrir(coh: Cohorte, store: dict, root: Path, *, cle, coin, sens, notional,
                     "take_profit_bps": cfg.get("take_profit_bps"), "latence_ws_open_ms": lat_mono.get("ws_open_ms"),
                     "latences_mono": lat_mono, "fill_leader_ts_ms": int(fill_ts), "run_id": run_id,
                     "source": SOURCE_LIVE, "src_l2": src_l2, "statut": marque or "VALIDEE",
-                    "trigger_version": trigger_version, "placebo": placebo,
+                    "trigger_version": trigger_version, "placebo": placebo, "config_hash": config_hash,
                     "cycle_id": cycle_id, "open_run_id": run_id, "notional_open_usd": round(notional, 2)}}
     store["ouvertes"][cle] = pos
     store["cash"] = round(store["cash"] - notional, 6)
@@ -307,7 +347,7 @@ def _ouvrir(coh: Cohorte, store: dict, root: Path, *, cle, coin, sens, notional,
                         "latences_mono": lat_mono, "vault": vault, "run_id": run_id, "source": SOURCE_LIVE,
                         "src_l2": src_l2, "statut": marque or "VALIDEE", "trigger_version": trigger_version,
                         "age_at_paper_fill_ms": lat_mono.get("age_at_paper_fill_ms"),
-                        "cycle_id": cycle_id, "open_run_id": run_id,
+                        "cycle_id": cycle_id, "open_run_id": run_id, "config_hash": config_hash,
                         "motif": ("RAW mesure (sans edge)" if not coh.edge_requis else "copy OPEN/ADD + L2<1s + edge net>0")})
     _sauver(coh, root, store)
     if not coh.edge_requis:                                          # RAW : abonne le coin en BBO/L2 pour la vie de la position
@@ -337,6 +377,7 @@ def _sortir(coh: Cohorte, pos: dict, store: dict, root: Path, *, prix_sortie, co
                         "trigger_version": meta.get("trigger_version"), "source": SOURCE_LIVE, "vault": meta.get("vault"),
                         "cycle_id": meta.get("cycle_id"), "open_run_id": meta.get("open_run_id") or meta.get("run_id"),
                         "close_run_id": close_run_id, "notional_open_usd": meta.get("notional_open_usd"),
+                        "config_hash": meta.get("config_hash"),
                         "ret_coin_bps": ret_coin_bps, "ret_marche_bps": ret_marche_bps,
                         "placebo_marche_bps": placebo_marche_bps, "alpha_vs_marche_bps": alpha_vs_marche_bps})
     _sauver(coh, root, store)
@@ -443,8 +484,9 @@ def traiter_fill(coh: Cohorte, etat: dict, fill: dict, root: Path, *, now_ms: fl
     etat["agg"].pop(key, None)
     t_dec = time.monotonic()                                     # HORLOGE MONOTONE LOCALE : décision
     cle = _cle(coh, vault, coin)
-    _trig = _params_trigger(root).get("variante", "v1")          # version du déclencheur (estampillée OPEN+CLOSE)
-    if not cohorte_active(coh, root, run_id=etat.get("run_id"), trigger_version=_trig):   # AUTO-KILL : config COURANTE seule
+    _trig = _params_trigger(root).get("variante", "v1")          # étiquette éditable (indicative)
+    _chash = config_hash_courant(coh, root)                      # VRAIE clé de config immuable (valeurs réelles)
+    if not cohorte_active(coh, root, trigger_version=_trig, config_hash=_chash):   # AUTO-KILL : config COURANTE seule
         return {"refus": "COHORTE_EN_PAUSE_AUTO_KILL", "coin": coin}
     # deny-by-default : le vault doit être suivi par la cohorte
     if vault not in _vaults_cohorte(coh, root):
@@ -508,7 +550,7 @@ def traiter_fill(coh: Cohorte, etat: dict, fill: dict, root: Path, *, now_ms: fl
     pos = _ouvrir(coh, store, root, cle=cle, coin=coin, sens=sens, notional=notional, prix=prix, cfg=cfg,
                   cout_ar=cout_ar, spread=spread, slippage=slippage, fhl=fhl, vault=vault, now_ms=now,
                   fill_ts=ag["fill_ts"], lat_mono=lat_mono, run_id=etat.get("run_id", ""), src_l2=l2.get("src", ""),
-                  marque=coh.marque, trigger_version=_trig, placebo=placebo)
+                  marque=coh.marque, trigger_version=_trig, placebo=placebo, config_hash=_chash)
     return {"ouverture": pos, "latence_ws_open_ms": lat_mono["ws_open_ms"], "paire": cle,
             "age_at_paper_fill_ms": age_paper}
 
@@ -564,7 +606,7 @@ def gerer_exits(coh: Cohorte, root: Path, *, now_ms: float | None = None, lecteu
 
 
 def statut(coh: Cohorte, root: Path, *, now_ms: float | None = None, lecteur_l2=None,
-           run_id: str | None = None, trigger_version: str | None = None) -> dict:
+           run_id: str | None = None, trigger_version: str | None = None, config_hash: str | None = None) -> dict:
     now = float(now_ms if now_ms is not None else time.time() * 1000)
     store = charger_store(coh, root)
     non_realise = 0.0
@@ -574,12 +616,12 @@ def statut(coh: Cohorte, root: Path, *, now_ms: float | None = None, lecteur_l2=
             non_realise += MP.pnl_courant_usd(pos, mark=mark, now_ms=now)
     equity = round(store["cash"] + sum(p["notional_usd"] for p in store["ouvertes"].values()) + non_realise, 4)
     st = {"cohorte": coh.nom, "real_execution": False, "ts_ms": int(now),
-          "active": cohorte_active(coh, root, run_id=run_id, trigger_version=trigger_version),
-          "config": {"run_id": run_id, "trigger_version": trigger_version},
+          "active": cohorte_active(coh, root, run_id=run_id, trigger_version=trigger_version, config_hash=config_hash),
+          "config": {"run_id": run_id, "trigger_version": trigger_version, "config_hash": config_hash},
           "budget_usd": coh.budget_usd, "cash": store["cash"], "positions_ouvertes": len(store["ouvertes"]),
           "realise_total_usd": store.get("realise_total_usd", 0.0), "non_realise_usd": round(non_realise, 4),
           "equity_usd": equity, "roi_cumulatif_pct": round((equity - coh.budget_usd) / coh.budget_usd * 100, 3),
-          "expectancy": _expectancy(coh, root, run_id=run_id, trigger_version=trigger_version),
+          "expectancy": _expectancy(coh, root, run_id=run_id, trigger_version=trigger_version, config_hash=config_hash),
           "positions": [{"coin": p["coin"], "sens": p["sens"], "notional_usd": p["notional_usd"],
                          "prix_entree": p["prix_entree"], "vault": p.get("meta", {}).get("vault"),
                          "edge_net_bps": p["edge_estime_bps"], "mae_bps": p.get("mae_bps"), "mfe_bps": p.get("mfe_bps"),

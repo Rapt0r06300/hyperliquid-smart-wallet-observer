@@ -414,7 +414,8 @@ async def _exits_periodiques(root: Path, *, intervalle_s: float = 2.0) -> None:
         for coh in CO.COHORTES.values():
             try:
                 CO.gerer_exits(coh, root, lecteur_l2=_lecteur_l2_marquage, close_run_id=RUN_ID)
-                CO.statut(coh, root, lecteur_l2=_lecteur_l2_marquage, run_id=RUN_ID, trigger_version=TRIGGER_VERSION)
+                CO.statut(coh, root, lecteur_l2=_lecteur_l2_marquage, run_id=RUN_ID, trigger_version=TRIGGER_VERSION,
+                          config_hash=CO.config_hash_courant(coh, root))
             except Exception as exc:  # noqa: BLE001
                 print("[userfills] exits %s err %s" % (coh.nom, str(exc)[:40]), flush=True)
         await asyncio.sleep(intervalle_s)

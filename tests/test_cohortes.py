@@ -228,12 +228,12 @@ def test_probe_exclut_les_coins_alpha(tmp_path):
 def test_auto_kill_expectancy_negative(tmp_path):
     _setup(tmp_path)
     etat = CO.etat_initial(CO.ALPHA, tmp_path)
-    rid = etat["run_id"]
-    # 10 CLOSE perdants SOUS LA CONFIG COURANTE (run_id + trigger v1) -> auto-KILL de la config courante
+    ch = CO.config_hash_courant(CO.ALPHA, tmp_path)
+    # 10 CLOSE perdants SOUS LA CONFIG COURANTE (config_hash courant) -> auto-KILL de la config courante
     led = tmp_path / "runtime" / "data" / "exploratory_paper_ledger.jsonl"
     led.write_text("\n".join(json.dumps({"evt": "CLOSE", "realized_usd": -0.5, "notional_usd": 60.0,
-                                          "run_id": rid, "trigger_version": "v1"}) for _ in range(10)))
-    assert CO.cohorte_active(CO.ALPHA, tmp_path, run_id=rid, trigger_version="v1") is False
+                                          "config_hash": ch, "trigger_version": "v1"}) for _ in range(10)))
+    assert CO.cohorte_active(CO.ALPHA, tmp_path, config_hash=ch) is False
     r = CO.traiter_fill(CO.ALPHA, etat, _fill(), tmp_path, now_ms=1e12, lecteur_l2=_l2, token=etat["token"])
     assert r and r.get("refus") == "COHORTE_EN_PAUSE_AUTO_KILL"
 
@@ -288,7 +288,8 @@ def test_trigger_version_et_placebo_au_cycle(tmp_path):
                         now_ms=now1, lecteur_l2=_l2, token=etat["token"])
     assert o and o.get("ouverture") and o["age_at_paper_fill_ms"] is not None
     cyc = o["ouverture"]["meta"]["cycle_id"]
-    assert o["ouverture"]["meta"]["trigger_version"] == "v1" and cyc.startswith("cyc-")
+    ch = o["ouverture"]["meta"]["config_hash"]
+    assert o["ouverture"]["meta"]["trigger_version"] == "v1" and cyc.startswith("cyc-") and ch.startswith("cfg-")
     assert o["ouverture"]["meta"]["placebo"]["mid_marche_open"] == 60000.0
     led = [json.loads(x) for x in (tmp_path / "runtime" / "data" / "raw_probe_ledger.jsonl").read_text().splitlines()]
     opn = [e for e in led if e["evt"] == "OPEN"][0]
@@ -304,6 +305,31 @@ def test_trigger_version_et_placebo_au_cycle(tmp_path):
     assert clo["placebo_marche_bps"] is not None and clo["alpha_vs_marche_bps"] is not None
     assert clo["cycle_id"] == cyc and clo["close_run_id"] == "run-CLOSE"          # cycle_id persistant, 2 run_id
     assert clo["open_run_id"] == opn["open_run_id"] and clo["open_run_id"] != clo["close_run_id"]
+    assert opn["config_hash"] == ch and clo["config_hash"] == ch                  # config_hash stampé OPEN + recopié CLOSE
+
+
+def test_config_hash_stable_et_change_si_config_change(tmp_path):
+    """config_hash = empreinte des VRAIES valeurs : stable à config égale, DIFFÉRENT si on édite raw_trigger
+    (floor/frac/plafond) même en gardant la même trigger_version. C'est la vraie clé immuable."""
+    _setup(tmp_path)
+    h1 = CO.config_hash_courant(CO.RAW_PROBE, tmp_path)
+    assert h1.startswith("cfg-") and CO.config_hash_courant(CO.RAW_PROBE, tmp_path) == h1     # stable
+    # on change une valeur du déclencheur SANS changer la variante -> le hash DOIT changer
+    (tmp_path / "runtime" / "data" / "raw_trigger.json").write_text(json.dumps(
+        {"variante": "v1", "floor_usd": 300.0, "frac_tvl": 0.002, "plafond_usd": 2000.0}))
+    h2 = CO.config_hash_courant(CO.RAW_PROBE, tmp_path)
+    assert h2 != h1                                                                # config réellement différente
+
+
+def test_stats_separees_par_config_hash_sans_reclassement(tmp_path):
+    """Les stats sont séparées par config_hash ; une AUTRE config est LEGACY (comptée à part), jamais reclassée."""
+    _setup(tmp_path)
+    led = tmp_path / "runtime" / "data" / "exploratory_paper_ledger.jsonl"
+    lignes = [{"evt": "CLOSE", "realized_usd": 0.03, "notional_usd": 10.0, "config_hash": "cfg-AAA"} for _ in range(4)]
+    lignes += [{"evt": "CLOSE", "realized_usd": -0.10, "notional_usd": 5.0, "config_hash": "cfg-OLD"} for _ in range(6)]
+    led.write_text("\n".join(json.dumps(x) for x in lignes))
+    ex = CO._expectancy(CO.ALPHA, tmp_path, config_hash="cfg-AAA")
+    assert ex["n_trades"] == 4 and ex["n_legacy_cross_run"] == 6 and ex["pnl_cumule_usd"] == 0.12   # cfg-OLD exclu
 
 
 def test_isolation_alpha_probe(tmp_path):

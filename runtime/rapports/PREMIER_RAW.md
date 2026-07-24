@@ -6,12 +6,15 @@
 - prix d'entrée (L2) : 0.40438 · source L2 : on_demand
 - edge estimé : None (RAW = NON_VALIDÉE, aucun edge requis)
 - latences monotones (ms) : WS→déc 7.9 · déc→L2 1402.4 · L2→open 2.7 · WS→open 1412.9
-- âge événement (skew HL, peut être négatif) : 317 ms
-- run_id : run-2f7a72fa293f · statut : NON_VALIDEE
+- âge événement à la décision (skew HL possible) : 317 ms
+- **âge RÉEL à l'exécution paper (total fill→open)** : None ms
+- cycle_id : None · open_run_id : run-2f7a72fa293f · trigger_version : None · statut : NON_VALIDEE
 
 ## CLÔTURE — HORIZON_ATTEINT
-- prix de sortie : 0.40154
+- cycle_id : None · open_run_id → close_run_id : None → None (le cycle traverse les redémarrages)
+- prix de sortie : 0.40154 · trigger_version (stockée à l'OPEN) : None
 - MFE / MAE (bps) : 80.246 / 0.0
 - PnL réalisé : 0.027997 $ · ROI : 0.56 %
+- PLACEBO même coin/instant : ret_coin None bps · ret_marché(BTC) None bps · placebo None bps · **alpha vs marché None bps**
 
 _Sécurité : paper only · real_execution=false · 0 ordre réel · 0 clé · 0 signature._
