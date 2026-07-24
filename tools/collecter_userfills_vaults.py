@@ -578,13 +578,89 @@ async def _metaorder_shadow_periodique(root: Path, vaults: list, *, intervalle_s
                 None, lambda: MS.executer(root, list(vaults), config_hash=chash, git_commit=GIT_COMMIT))
             bt = res.get("budget_total") or {}
             stades = {k: (v.get("n_metaordres"), v.get("pnl_net_bps_moy")) for k, v in (res.get("stats") or {}).items()}
-            cap = {k: v.get("capacite_usd_edge_positif") for k, v in (res.get("courbe") or {}).items()}
-            print("[userfills] metaorder_shadow : %d signaux · %d metaordres · %d appels · poids/passe=%d (rafale) · total REST~%.0f/%d IP·min · stades(n_mo,pnl)=%s · capacite$edge+=%s"
-                  % (res.get("n_signaux", 0), res.get("n_metaordres", 0), res.get("n_appels", 0),
-                     res.get("poids_passe", 0), bt.get("total_par_min_moyen", 0), bt.get("limite_ip_par_min", 1200),
-                     stades, cap), flush=True)
+            cap = {k: v.get("capacite_edge_prouve_usd") for k, v in (res.get("courbe") or {}).items()}
+            print("[userfills] metaorder_shadow : %d signaux · %d metaordres · L2_sync=%.0f%% · %d appels · poids/passe=%d · total REST~%.0f/%d IP·min · stades(n_mo,pnl)=%s · cap_edge_prouve$=%s"
+                  % (res.get("n_signaux", 0), res.get("n_metaordres", 0), res.get("l2_synchronise_pct", 0),
+                     res.get("n_appels", 0), res.get("poids_passe", 0), bt.get("total_par_min_moyen", 0),
+                     bt.get("limite_ip_par_min", 1200), stades, cap), flush=True)
         except Exception as exc:  # noqa: BLE001 — la passe shadow ne fait JAMAIS crasher le collecteur
             print("[userfills] metaorder_shadow err %s" % str(exc)[:60], flush=True)
+        await asyncio.sleep(intervalle_s)
+
+
+async def _metaorder_l2_tape_periodique(root: Path, *, intervalle_s: float = 2.0, horizon_ms: float = 300_000.0,
+                                        ttl_book_s: float = 2.0, cap_fetch_par_min: int = 120) -> None:
+    """TAPE L2/OFI SHADOW synchronisée : autour de chaque fill de vault suivi, capture le carnet à l'ENTRÉE
+    (réception + latence réelle) ET à la SORTIE (entrée + horizon) + OFI top-5, pour un coût EXÉCUTABLE
+    synchronisé (les prochaines fenêtres OOS n'utiliseront plus le carnet courant sur des fills historiques).
+    REST l2Book BORNÉ (cache coin + PLAFOND/minute) ; budget journalisé. Aucune position, RAW intact."""
+    from hl_observer.experimental import metaorder_l2_tape as T
+    from collecter_carnet import _post_hl
+    loop = asyncio.get_event_loop()
+    deja: set = set()
+    pending: dict = {}                                            # cle_fill -> due_ts (sortie)
+    pending_meta: dict = {}                                       # cle_fill -> (fill, entry_ts)
+    prev_resume: dict = {}                                        # coin -> resume (pour OFI)
+    book_cache: dict = {}                                         # coin -> (ts, book)
+    fetch_ts: list = []                                           # horodatages des fetchs (plafond/minute)
+    await asyncio.sleep(20.0)                                     # démarrage doux
+    while True:
+        appels: list = []
+        try:
+            now = time.time() * 1000
+
+            async def _book(coin):
+                c = book_cache.get(coin)
+                if c and (time.time() - c[0]) < ttl_book_s:
+                    return c[1]
+                maintenant = time.time()
+                fetch_ts[:] = [t for t in fetch_ts if maintenant - t < 60.0]
+                if len(fetch_ts) >= cap_fetch_par_min:            # PLAFOND IP : on saute (mieux vaut un trou qu'un ban)
+                    return None
+                b = await loop.run_in_executor(None, lambda: _post_hl(coin, timeout_s=6.0))
+                fetch_ts.append(maintenant)
+                book_cache[coin] = (time.time(), b)
+                appels.append(("l2Book", 0))
+                return b
+
+            try:
+                fills = [json.loads(l) for l in
+                         (root / FILLS_LIVE).read_text(encoding="utf-8", errors="ignore").splitlines()[-400:] if l.strip()]
+            except (OSError, ValueError):
+                fills = []
+            lignes: list = []
+            for f in T.fills_a_enregistrer(fills, deja, now_ms=now, age_max_ms=5_000.0):   # ENTRÉES (fills frais)
+                coin = str(f.get("coin") or "").upper()
+                b = await _book(coin)
+                if b is None:
+                    continue
+                l = T.ligne_tape(phase="entry", fill=f, book_brut=b, capture_ts=time.time() * 1000,
+                                 prev_resume=prev_resume.get(coin))
+                if l is None:
+                    continue
+                lignes.append(l)
+                k = T.cle_fill(coin, f.get("hash"), int(f.get("ts_ms") or 0))
+                deja.add(k)
+                pending[k] = int(f.get("ts_ms") or now) + horizon_ms
+                pending_meta[k] = (f, l["capture_ts"])
+                r = T.resume_book(b)
+                if r:
+                    prev_resume[coin] = {"bids5": r["bids5"], "asks5": r["asks5"]}
+            for k in T.exits_dus(pending, now):                  # SORTIES dues (entrée + horizon)
+                f, entry_ts = pending_meta.get(k, ({}, None))
+                b = await _book(k[0])
+                pending.pop(k, None)
+                pending_meta.pop(k, None)
+                if b is None:
+                    continue
+                l = T.ligne_tape(phase="exit", fill=f, book_brut=b, capture_ts=time.time() * 1000, entry_ts=entry_ts)
+                if l:
+                    lignes.append(l)
+            T.ecrire_lignes(root, lignes)
+            if appels:
+                SD.journaliser_budget(root, "metaorder_l2_tape", SD.poids_info(appels), intervalle_s)
+        except Exception as exc:  # noqa: BLE001 — la tape ne fait JAMAIS crasher le collecteur
+            print("[userfills] l2_tape err %s" % str(exc)[:60], flush=True)
         await asyncio.sleep(intervalle_s)
 
 
@@ -653,6 +729,7 @@ async def _boucle(root: Path) -> None:
                              _promotion_periodique(root), _rapport_periodique(root), _l2_dynamique(root),
                              _garde_reconciliation_rest(root, shards),   # REST↔WS : reconnecte un shard qui rate un fill
                              _metaorder_shadow_periodique(root, vaults),  # SHADOW : edge par stade de métaordre (n'ouvre rien)
+                             _metaorder_l2_tape_periodique(root),         # TAPE L2/OFI synchronisée autour des fills (n'ouvre rien)
                              *[_userfills_multiplex(root, grp, file, sid) for sid, grp in shards])   # 2 sockets de 5 + L2 = 3 conn
     finally:
         VI.liberer(root, NOM_VERROU, info)

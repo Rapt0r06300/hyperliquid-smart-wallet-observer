@@ -122,16 +122,23 @@ def test_vwap_slippage_et_composants_separes():
     assert M.vwap_slippage(b, 10_000_000.0, 1)[3] is False
 
 
-def test_courbe_edge_cout_capacite_L2_vraie():
+def test_courbe_capacite_exige_IC_bas_positif_ET_synchronise():
     b = _book(20.0)
-    sig = [{"stade": "LATE_STAGE", "metaorder_id": "m%d" % i, "coin": "SOL", "sens": 1, "ret_coin_bps": 40.0}
-           for i in range(3)]                                    # gross +40 bps, coût ~29 -> net ~+11
-    c = M.courbe_edge_cout(sig, {"SOL": b}, fee_ar_bps=9.0, n_boot=200)["LATE_STAGE"]
-    assert c["courbe"]["100"]["net_moy_bps"] > 0 and c["courbe"]["100"]["spread_moy_bps"] > 0
-    assert c["capacite_usd_edge_positif"] == 500.0              # net>0 jusqu'à 500 $ -> capacité = 500
-    # gross négatif -> aucune capacité
-    sign = [{"stade": "LATE_STAGE", "metaorder_id": "m%d" % i, "coin": "SOL", "sens": 1, "ret_coin_bps": -5.0} for i in range(3)]
-    assert M.courbe_edge_cout(sign, {"SOL": b}, fee_ar_bps=9.0, n_boot=200)["LATE_STAGE"]["capacite_usd_edge_positif"] == 0.0
+    # 3 métaordres IDENTIQUES (variance ~0) -> IC serré ; net = gross40 - (spread20+fee9) = +11 ; SYNCHRONISÉS
+    sig = [{"stade": "LATE_STAGE", "metaorder_id": "m%d" % i, "coin": "SOL", "sens": 1, "ret_coin_bps": 40.0,
+            "hash": "h%d" % i, "fill_time": 1000 + i, "l2_synchronise": True} for i in range(3)]
+    c = M.courbe_edge_cout(sig, {"SOL": b}, fee_ar_bps=9.0, fees_tiers=(9.0, 7.0), n_boot=300)["LATE_STAGE"]
+    assert c["courbe"]["100"]["net_ic95"][0] > 0                 # BORNE BASSE > 0 = edge prouvé
+    assert c["l2_synchronise_pct"] == 100.0 and c["capacite_edge_prouve_usd"] == 500.0
+    assert c["profondeur_suffisante_usd"] == 500.0
+    # NON synchronisé -> capacité d'edge prouvé = 0 (carnet courant sur fills historiques ne prouve rien)
+    sig2 = [dict(s, l2_synchronise=False) for s in sig]
+    assert M.courbe_edge_cout(sig2, {"SOL": b}, fee_ar_bps=9.0)["LATE_STAGE"]["capacite_edge_prouve_usd"] == 0.0
+    # point positif MAIS IC traverse 0 (variance) -> capacité d'edge prouvé = 0
+    sigv = [{"stade": "LATE_STAGE", "metaorder_id": "m%d" % i, "coin": "SOL", "sens": 1, "ret_coin_bps": g,
+             "hash": "hv%d" % i, "fill_time": i, "l2_synchronise": True} for i, g in enumerate([40, 40, 40, -100, 200])]
+    cv = M.courbe_edge_cout(sigv, {"SOL": b}, fee_ar_bps=9.0, n_boot=400)["LATE_STAGE"]
+    assert cv["courbe"]["100"]["net_moy_bps"] > 0 and cv["capacite_edge_prouve_usd"] == 0.0
 
 
 def test_comparer_executions_passif_fill_miss_sans_fill_fictif():

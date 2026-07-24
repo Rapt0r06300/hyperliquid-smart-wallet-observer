@@ -427,23 +427,37 @@ def cout_composants(book: dict, notional_usd: float, sens: int, fee_ar_bps: floa
             "profondeur_suffisante": complet, "filled_usd": filled}
 
 
-def courbe_edge_cout(signaux: list, book_par_coin: dict, *, fee_ar_bps: float,
-                     notionals=NOTIONALS_DEFAUT, n_boot: int = 1000) -> dict:
-    """Courbe EDGE/COÛTS par STADE et par NOTIONAL : net = gross(ret_coin_bps) − coût_A/R(notional) mesuré au
-    VRAI carnet (spread + slippage VWAP + frais). Par stade → {courbe: {notional: {net_moy, IC95 clusterisé,
-    n_métaordres, spread, slippage, fee, %profondeur}}, **capacite_usd_edge_positif** = plus grand notional où
-    net_moy > 0 (0 si aucun)}. C'est la VRAIE capacité L2 (pas la somme des tailles leader)."""
+FEE_AR_BASE_BPS = 9.0                      # scénario CONSERVATEUR de base (taker A/R) tant que le palier n'est pas prouvé
+FEES_TIERS_DEFAUT = (9.0, 7.0, 5.0)        # paliers pour la sensibilité de la capacité
+
+
+def courbe_edge_cout(signaux: list, book_par_coin: dict, *, book_sync: dict | None = None,
+                     fee_ar_bps: float = FEE_AR_BASE_BPS, notionals=NOTIONALS_DEFAUT,
+                     fees_tiers=FEES_TIERS_DEFAUT, n_boot: int = 1000) -> dict:
+    """Courbe EDGE/COÛTS par STADE et par NOTIONAL : net = gross(ret_coin_bps) − coût_A/R(notional) au VRAI
+    carnet (spread + slippage VWAP + frais). Par stade :
+    • `courbe` : {notional: {net_moy, **IC95 clusterisé**, n_métaordres, spread, slippage, fee, %profondeur}} ;
+    • `profondeur_suffisante_usd` : plus grand notional où le carnet remplit 100 % (≠ capacité d'edge) ;
+    • `l2_synchronise_pct` : % de signaux dont le carnet est HORODATÉ au fill (pas le carnet courant) ;
+    • **`capacite_edge_prouve_usd_par_palier`** : par palier de frais, plus grand notional où la **BORNE BASSE**
+      de l'IC95 > 0 (edge PROUVÉ) — **ET** carnet synchronisé (sinon 0 : un carnet courant sur des fills
+      historiques n'prouve rien). Un point estimate positif à IC traversant 0 ⇒ capacité **0 $**."""
     from collections import defaultdict
+    bs = book_sync or {}
     parstade = defaultdict(list)
     for s in signaux:
         parstade[s.get("stade")].append(s)
     out: dict = {}
     for stade, xs in parstade.items():
-        courbe, cap = {}, 0.0
+        courbe = {}
+        n_sync = sum(1 for s in xs if s.get("l2_synchronise"))
+        sync_pct = round(100 * n_sync / len(xs), 1) if xs else 0.0
+        prof_ok = 0.0
         for N in notionals:
             paires, sp, sl, cp, tot = [], [], [], 0, 0
             for s in xs:
-                g, book = s.get("ret_coin_bps"), book_par_coin.get(s.get("coin"))
+                g = s.get("ret_coin_bps")
+                book = bs.get((s.get("coin"), s.get("hash"), s.get("fill_time"))) or book_par_coin.get(s.get("coin"))
                 if g is None or not book:
                     continue
                 cc = cout_composants(book, N, int(s.get("sens") or 1), fee_ar_bps)
@@ -455,15 +469,27 @@ def courbe_edge_cout(signaux: list, book_par_coin: dict, *, fee_ar_bps: float,
                 tot += 1
                 cp += 1 if cc["profondeur_suffisante"] else 0
             boot = bootstrap_clusterise(paires, n=n_boot)
+            prof_pct = round(100 * cp / tot, 1) if tot else None
+            if prof_pct == 100.0:
+                prof_ok = max(prof_ok, float(N))
             courbe[str(int(N))] = {"net_moy_bps": boot["moy"], "net_ic95": [boot["ic_bas"], boot["ic_haut"]],
                                    "n_metaordres": boot["n_clusters"],
                                    "spread_moy_bps": round(sum(sp) / len(sp), 2) if sp else None,
                                    "slippage_moy_bps": round(sum(sl) / len(sl), 2) if sl else None,
-                                   "fee_bps": round(float(fee_ar_bps), 2),
-                                   "profondeur_suffisante_pct": round(100 * cp / tot, 1) if tot else None}
-            if boot["moy"] is not None and boot["moy"] > 0:
-                cap = max(cap, float(N))
-        out[stade] = {"courbe": courbe, "capacite_usd_edge_positif": cap}
+                                   "fee_bps": round(float(fee_ar_bps), 2), "profondeur_suffisante_pct": prof_pct}
+        capa_palier: dict = {}
+        for tier in fees_tiers:
+            shift = float(fee_ar_bps) - float(tier)                # net augmente de `shift` si le palier est plus bas
+            cap = 0.0
+            if sync_pct >= 100.0:                                  # capacité d'EDGE PROUVÉ exige un carnet synchronisé
+                for N in notionals:
+                    icb = courbe[str(int(N))]["net_ic95"][0]
+                    if icb is not None and (icb + shift) > 0:      # BORNE BASSE > 0 = edge prouvé (pas le point)
+                        cap = max(cap, float(N))
+            capa_palier[str(tier)] = cap
+        out[stade] = {"courbe": courbe, "profondeur_suffisante_usd": prof_ok, "l2_synchronise_pct": sync_pct,
+                      "capacite_edge_prouve_usd_par_palier": capa_palier,
+                      "capacite_edge_prouve_usd": capa_palier.get(str(float(fee_ar_bps)), 0.0)}
     return out
 
 
@@ -595,11 +621,14 @@ def executer(root: str | Path, vaults: list, *, fills_provider=None, twap_provid
             tape = charger_prix_tape(root)
         except Exception:  # noqa: BLE001
             tape = {}
+    fee_base = FEE_AR_BASE_BPS                                    # 9 bps A/R : scénario CONSERVATEUR de base
     try:
         from hl_observer.experimental.carry_deux_jambes import frais_venues
-        fee_ar = round(2.0 * float(frais_venues(root)[0]), 3)     # PALIER EXACT sourcé (A/R taker)
+        fee_config = round(2.0 * float(frais_venues(root)[0]), 3)  # palier CONFIG (donnée de sensibilité, PAS le défaut)
     except Exception:  # noqa: BLE001
-        fee_ar = FRAIS_TAKER_BPS
+        fee_config = 7.0
+    from hl_observer.experimental import metaorder_l2_tape as MT   # tape L2 synchronisée (coût entrée/sortie horodaté)
+    tape_l2 = MT.charger_tape(root)
     tape_btc = tape.get("BTC") or []
     start = int(now - fenetre_ms)
     signaux: list = []
@@ -647,8 +676,20 @@ def executer(root: str | Path, vaults: list, *, fills_provider=None, twap_provid
             signaux.extend(sigs)
 
     book_par_coin = {c: b for c, b in book_cache.items() if b}
-    courbe = courbe_edge_cout(signaux, book_par_coin, fee_ar_bps=fee_ar)
-    execs = _comparer_stades(signaux, tape, book_par_coin, fee_ar, horizon_ms)   # taker/passif/no-trade
+    # SYNCHRONISATION L2 : carnet HORODATÉ au fill (tape) — sinon carnet COURANT = provisoire, ne prouve rien
+    book_sync: dict = {}
+    for s in signaux:
+        e = tape_l2.get(MT.cle_fill(s.get("coin"), s.get("hash"), s.get("fill_time")), {}).get("entry")
+        s["l2_synchronise"] = e is not None
+        if e:
+            t5 = e.get("top5") or {}
+            book_sync[(s.get("coin"), s.get("hash"), s.get("fill_time"))] = {
+                "levels": [[{"px": px, "sz": sz} for px, sz in t5.get("bids", [])],
+                           [{"px": px, "sz": sz} for px, sz in t5.get("asks", [])]]}
+    n_sync = sum(1 for s in signaux if s.get("l2_synchronise"))
+    courbe = courbe_edge_cout(signaux, book_par_coin, book_sync=book_sync, fee_ar_bps=fee_base,
+                              fees_tiers=(fee_base, fee_config, 5.0))
+    execs = _comparer_stades(signaux, tape, book_par_coin, fee_base, horizon_ms)   # taker/passif/no-trade
     prereg = write_preregistration(root, horizon_ms=horizon_ms)
     stats = stats_par_stade(signaux)
     wf = walk_forward_purge(signaux, horizon_ms=horizon_ms)
@@ -658,7 +699,10 @@ def executer(root: str | Path, vaults: list, *, fills_provider=None, twap_provid
     n_twap = {k: sum(1 for vv in twap_statut.values() if vv == k) for k in set(twap_statut.values())}
     _ecrire(root, signaux, {
         "version": VERSION, "n_signaux": len(signaux), "n_metaordres": len({s["metaorder_id"] for s in signaux}),
-        "fee_ar_bps": fee_ar, "stats_par_stade": stats, "courbe_edge_cout_par_notional": courbe,
+        "fee_ar_base_bps": fee_base, "fee_config_bps": fee_config,
+        "l2_synchronise_pct": round(100 * n_sync / len(signaux), 1) if signaux else 0.0,
+        "n_dans_tape_l2": len(tape_l2),
+        "stats_par_stade": stats, "courbe_edge_cout_par_notional": courbe,
         "execution_comparee_continuation_late": execs, "walk_forward_purge": wf,
         "par_vault": agreger_par(signaux, "vault"), "par_coin": agreger_par(signaux, "coin"),
         "par_jour": agreger_par(signaux, "jour"), "twap_statut_par_vault": n_twap,
@@ -667,6 +711,7 @@ def executer(root: str | Path, vaults: list, *, fills_provider=None, twap_provid
     }, now)
     return {"n_signaux": len(signaux), "n_metaordres": len({s["metaorder_id"] for s in signaux}),
             "poids_passe": poids, "n_appels": len(appels_budget), "budget_total": budget,
+            "l2_synchronise_pct": round(100 * n_sync / len(signaux), 1) if signaux else 0.0,
             "stats": stats, "courbe": courbe, "execs": execs}
 
 
