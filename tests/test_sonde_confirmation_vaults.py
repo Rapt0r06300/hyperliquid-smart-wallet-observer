@@ -132,7 +132,17 @@ def test_fenetre_debut_ne_remonte_jamais_avant_le_demarrage():
     assert S.fenetre_debut_ms(None, demarrage, now) == int(demarrage)
 
 
-def test_poids_rest_estime_reste_sous_la_limite_ip():
-    p = S.poids_rest_estime(10, poids_par_appel=20, fenetre_s=90.0)   # 10 vaults / 90 s
-    assert p["n_appels"] == 10 and p["limite_ip_par_min"] == 1200
-    assert p["poids_estime_par_min"] < p["limite_ip_par_min"]         # le garde ne menace jamais la limite IP
+def test_poids_info_exact_selon_la_doc_hl():
+    # doc HL : info=20 (2 pour l2Book/allMids…, 60 pour userRole) + floor(items/20) pour les endpoints paginés
+    assert S.poids_info([("userFillsByTime", 2)]) == 20            # < 20 items -> pas de supplément
+    assert S.poids_info([("userFillsByTime", 200)]) == 30          # 20 + floor(200/20) = 20 + 10
+    assert S.poids_info([("l2Book", 0)]) == 2 and S.poids_info([("userRole", 0)]) == 60
+    assert S.poids_info([("userFillsByTime", 0)] * 18) == 360      # 18 appels info = 360 (PAS 36 amorti)
+
+
+def test_budget_total_agrege_les_sources(tmp_path):
+    S.journaliser_budget(tmp_path, "garde_rest_ws", 200, 90.0)     # 200/passe toutes les 90 s
+    S.journaliser_budget(tmp_path, "metaorder_shadow", 360, 600.0)
+    bt = S.budget_total(tmp_path)
+    assert bt["limite_ip_par_min"] == 1200 and set(bt["sources"]) == {"garde_rest_ws", "metaorder_shadow"}
+    assert bt["total_par_min_moyen"] < 1200                        # vrai total IP (moyen) sous la limite

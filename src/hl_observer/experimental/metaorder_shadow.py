@@ -1,28 +1,30 @@
-"""METAORDER_SHADOW_V1 — détection de métaordres en SHADOW (rectif Flo 24/07).
+"""METAORDER_SHADOW_V1 — détection de métaordres en SHADOW (rectif Flo 24/07, révision statistique).
 
-Objectif : sans TOUCHER aux entrées RAW, étiqueter les fills des vaults suivis et mesurer, PAR STADE de
-métaordre, l'edge forward NET après coûts. On ne prend AUCUNE position : c'est une mesure pure, écrite dans
-un ledger SÉPARÉ (`metaorder_shadow_ledger.jsonl`), jamais mélangée au PnL live.
+Sans TOUCHER aux entrées RAW, on étiquette les fills des vaults suivis et on mesure, PAR STADE de métaordre,
+l'edge forward NET après coûts. AUCUNE position : mesure pure, ledger SÉPARÉ (`metaorder_shadow_ledger.jsonl`),
+jamais mélangée au PnL live. `real_execution=false`, `shadow=true`. Lecture seule.
 
-Pipeline :
-  1. TWAP : étiqueté DIRECTEMENT via `userTwapSliceFills` / `userTwapHistory` (index tid|hash -> twapId).
-  2. Métaordre caché : on agrège les autres fills par (vault, coin, sens) contigus dans le temps (intervalle).
-  3. Stade : FIRST_SLICE / CONTINUATION / LATE_STAGE / REVERSAL.
-  4. Mesure par stade : PnL forward NET après coûts, taille relative, crossed maker/taker, âge, + en shadow :
-     OFI top-5 du carnet (confirmation) et placebo même coin/même instant (vs dérive marché BTC).
+RIGUEUR STATISTIQUE (les slices d'un même métaordre et les fenêtres forward chevauchées NE SONT PAS
+indépendantes) :
+  • `metaorder_id` STABLE + déduplication de chaque fill (clé composite) ;
+  • unité statistique = le MÉTAORDRE (épisode), résultats aussi groupés par vault / coin / jour ;
+  • **bootstrap CLUSTERISÉ** par métaordre (IC de la moyenne) + **walk-forward PURGÉ** (embargo = horizon),
+    PAS d'IC calculé sur chaque slice ;
+  • on rapporte le nombre de MÉTAORDRES UNIQUES derrière FIRST/CONTINUATION/LATE/REVERSAL ;
+  • **coûts L2 RÉELS par signal** (spread + slippage par la taille + frais + latence) ; 16 bps = screening ;
+  • TWAP vérifié via `userTwapSliceFills`/`userTwapHistory` en distinguant « aucun TWAP observé » (endpoint
+    couvert, vide) de « endpoint non couvert » (erreur/indispo).
 
-TROIS ÂGES bien SÉPARÉS (réconciliation demandée) :
-  • `age_fill_hl_ms`    = âge/skew de l'ÉVÉNEMENT HL (fill.time vs horloge) — staleness du signal côté source.
-  • `latence_locale_ms` = latence de NOTRE pipeline WS→décision→open (~382 ms médian en live ; hors shadow).
-  • `age_stade_ms`      = âge du STADE = temps écoulé depuis le FIRST_SLICE du métaordre parent (secondes→min).
-Le « price-in ~60 s » évoqué avant était une propriété du SIGNAL de copie mesurée offline (décroissance de
-l'edge), PAS la latence locale (382 ms). Ces trois axes sont distincts et mesurés séparément.
-
-Lecture seule ; 0 ordre, 0 clé, 0 signature. `real_execution=false`, `shadow=true` sur chaque ligne.
+TROIS ÂGES séparés (réconciliation « 60 s » vs « 382 ms ») : âge du fill HL (skew événement) ≠ latence locale
+(pipeline WS→open, ~382 ms médian en live, N/A en shadow) ≠ âge du stade (depuis le FIRST_SLICE). Détail :
+`docs/METAORDER_SHADOW_V1.md`. OFI top-5 : fonction pure prête (`ofi_top5`) mais NON branchée par-signal tant
+qu'un stade n'est pas mesuré proprement (étape suivante, exige un tape de carnet). 0 ordre, 0 clé, 0 signature.
 """
 from __future__ import annotations
 
+import hashlib
 import json
+import random
 import time
 from pathlib import Path
 
@@ -30,27 +32,55 @@ VERSION = "metaorder_shadow_v1"
 LEDGER_RELPATH = Path("runtime") / "data" / "metaorder_shadow_ledger.jsonl"
 STATS_RELPATH = Path("runtime") / "data" / "metaorder_shadow_stats.json"
 
-INTERVALLE_METAORDRE_MS = 60_000.0     # 2 fills same-side espacés de ≤ 60 s = même métaordre parent (défaut)
-HORIZON_FWD_MS = 300_000.0             # horizon forward de mesure de l'edge (5 min)
-COUT_AR_DEFAUT_BPS = 16.0             # coût aller-retour ESTIMÉ par défaut (2×taker+spread+2×slippage+latence)
-LATE_FRAC = 0.66                       # part du métaordre à partir de laquelle un slice est LATE_STAGE
+INTERVALLE_METAORDRE_MS = 60_000.0     # 2 fills same-side espacés de ≤ 60 s = même métaordre parent
+HORIZON_FWD_MS = 300_000.0             # horizon forward de mesure (5 min)
+COUT_AR_DEFAUT_BPS = 16.0             # coût aller-retour de SCREENING (fallback si L2 indisponible)
+LATE_FRAC = 0.66
+JOUR_MS = 86_400_000.0
+# coûts L2 réels (mêmes hypothèses que la cohorte RAW)
+SLIPPAGE_BASE_BPS = 1.0
+SLIPPAGE_IMPACT_COEF = 8.0
+LATENCE_COUT_BPS = 1.0
+FRAIS_TAKER_BPS = 3.5                  # aller-retour taker HL ≈ 2×1,5 + marge (screening ; L2 affine le spread)
 
 
 # ─────────────────────────────── cœur PUR (testable sans réseau) ───────────────────────────────
 
 def sens_fill(f) -> int:
-    """+1 achat (side B), -1 vente (side A), 0 inconnu."""
     s = str((f or {}).get("side") or "").upper()
     return 1 if s == "B" else (-1 if s == "A" else 0)
 
 
 def maker_taker(f) -> str:
-    """`crossed`=true ⇒ l'ordre a traversé le spread = TAKER ; sinon MAKER (au repos)."""
     return "taker" if bool((f or {}).get("crossed")) else "maker"
 
 
+def _cle_fill(f) -> tuple:
+    """Clé composite d'un fill pour la DÉDUP (time, hash, tid, oid, coin) — robuste aux fills au même ts."""
+    coin = (f or {}).get("coin")
+    return (int((f or {}).get("time") or 0), (f or {}).get("hash"), (f or {}).get("tid"),
+            (f or {}).get("oid"), str(coin).upper() if coin else None)
+
+
+def dedup_fills(fills: list) -> list:
+    """Déduplique par clé composite (garde la 1re occurrence). Un même fill ne compte JAMAIS deux fois."""
+    vus, out = set(), []
+    for f in fills or []:
+        k = _cle_fill(f)
+        if k in vus:
+            continue
+        vus.add(k)
+        out.append(f)
+    return out
+
+
+def metaorder_id(vault: str, coin: str, sens: int, t0: int) -> str:
+    """ID STABLE et déterministe d'un métaordre = hash court de (vault, coin, sens, t0 du 1er slice)."""
+    brut = "%s|%s|%d|%d" % (str(vault).lower(), str(coin).upper(), int(sens), int(t0))
+    return "mo-" + hashlib.sha1(brut.encode("utf-8")).hexdigest()[:12]
+
+
 def index_twap(twap_slice_fills) -> dict:
-    """De `userTwapSliceFills` [{fill:{tid,hash,...}, twapId}] → index {tid|hash -> twapId} pour étiqueter."""
     idx: dict = {}
     for s in (twap_slice_fills or []):
         f = (s or {}).get("fill") or {}
@@ -62,15 +92,13 @@ def index_twap(twap_slice_fills) -> dict:
 
 
 def est_twap(f, idx_twap: dict) -> bool:
-    """Un fill est TWAP s'il apparaît dans l'index TWAP (par tid ou hash)."""
     return bool(idx_twap) and ((f or {}).get("tid") in idx_twap or (f or {}).get("hash") in idx_twap)
 
 
 def detecter_metaordres(fills: list, *, intervalle_ms: float = INTERVALLE_METAORDRE_MS) -> list:
-    """Groupe des fills (triés par temps) en MÉTAORDRES : même sens ET écart ≤ intervalle_ms. Un changement de
-    sens (ou un trou) ferme le métaordre courant. `reversal`=True si le nouveau métaordre inverse le précédent
-    (sur la même série passée). Rend [{sens, fills:[...], t0, t1, sz_tot, reversal}]."""
-    fs = sorted(fills, key=lambda f: int((f or {}).get("time") or 0))
+    """Regroupe des fills (DÉDUPLIQUÉS, triés par temps) en métaordres : même sens ET écart ≤ intervalle_ms.
+    Changement de sens ou trou ⇒ nouveau métaordre. `reversal`=True s'il inverse le précédent."""
+    fs = sorted(dedup_fills(fills), key=lambda f: int((f or {}).get("time") or 0))
     metas: list = []
     cur = None
     for f in fs:
@@ -84,7 +112,7 @@ def detecter_metaordres(fills: list, *, intervalle_ms: float = INTERVALLE_METAOR
             cur["t1"] = t
             cur["sz_tot"] += sz
         else:
-            reversal = bool(cur and s == -cur["sens"])            # inverse le métaordre juste précédent
+            reversal = bool(cur and s == -cur["sens"])
             if cur:
                 metas.append(cur)
             cur = {"sens": s, "fills": [f], "t0": t, "t1": t, "sz_tot": sz, "reversal": reversal}
@@ -94,8 +122,6 @@ def detecter_metaordres(fills: list, *, intervalle_ms: float = INTERVALLE_METAOR
 
 
 def classer_stade(i: int, n: int, meta: dict, *, late_frac: float = LATE_FRAC) -> str:
-    """Stade du slice i (0-based) parmi n : REVERSAL (1er slice d'un métaordre qui inverse le précédent),
-    sinon FIRST_SLICE (i==0), LATE_STAGE (dernier ou i/n ≥ late_frac), CONTINUATION au milieu."""
     if meta.get("reversal") and i == 0:
         return "REVERSAL"
     if i == 0:
@@ -106,20 +132,16 @@ def classer_stade(i: int, n: int, meta: dict, *, late_frac: float = LATE_FRAC) -
 
 
 def pnl_forward_net_bps(prix_entree, prix_forward, sens: int, cout_ar_bps: float) -> float | None:
-    """Rendement forward NET (bps) dans le sens du signal, moins les coûts aller-retour. None si prix absent."""
     try:
         pe = float(prix_entree)
         if pe <= 0 or prix_forward is None:
             return None
-        brut = sens * (float(prix_forward) - pe) / pe * 1e4
-        return round(brut - float(cout_ar_bps or 0.0), 3)
+        return round(sens * (float(prix_forward) - pe) / pe * 1e4 - float(cout_ar_bps or 0.0), 3)
     except (TypeError, ValueError):
         return None
 
 
 def placebo_bps(pe_coin, pf_coin, pe_btc, pf_btc, sens: int) -> dict | None:
-    """Placebo même coin/même instant : ret_coin (sens du signal) et ret_marché (BTC, même sens) ; alpha =
-    coin − marché. Sépare l'edge propre du signal de la simple dérive de marché. None si le coin est illisible."""
     def r(pe, pf):
         try:
             pe = float(pe)
@@ -136,8 +158,8 @@ def placebo_bps(pe_coin, pf_coin, pe_btc, pf_btc, sens: int) -> dict | None:
 
 
 def ofi_top5(book_avant, book_apres) -> float | None:
-    """OFI top-5 (order flow imbalance) SIMPLIFIÉ entre deux snapshots l2Book {'levels':[bids,asks]} : variation
-    de la taille bid moins variation de la taille ask sur 5 niveaux. >0 = pression acheteuse. None si illisible."""
+    """OFI top-5 SIMPLIFIÉ entre deux snapshots l2Book. Fonction PRÊTE mais non branchée par-signal (étape
+    suivante : exige un tape de carnet horodaté autour de chaque fill). >0 = pression acheteuse."""
     def cotes(b):
         try:
             return (b["levels"][0][:5], b["levels"][1][:5])
@@ -151,27 +173,7 @@ def ofi_top5(book_avant, book_apres) -> float | None:
     return round((somme(c[0]) - somme(a[0])) - (somme(c[1]) - somme(a[1])), 4)
 
 
-def ic_pearson(signaux: list, *, cle_force: str = "taille_relative", cle_y: str = "pnl_net_bps") -> float | None:
-    """IC = corrélation de Pearson entre une FORCE de signal (défaut : taille relative du slice) et le
-    rendement forward NET. Mesure « un slice plus gros prédit-il un meilleur forward ? ». None si < 3 points."""
-    xs, ys = [], []
-    for s in signaux:
-        x, y = s.get(cle_force), s.get(cle_y)
-        if x is not None and y is not None:
-            xs.append(float(x))
-            ys.append(float(y))
-    n = len(xs)
-    if n < 3:
-        return None
-    mx, my = sum(xs) / n, sum(ys) / n
-    num = sum((x - mx) * (y - my) for x, y in zip(xs, ys))
-    dx = sum((x - mx) ** 2 for x in xs) ** 0.5
-    dy = sum((y - my) ** 2 for y in ys) ** 0.5
-    return round(num / (dx * dy), 4) if dx > 0 and dy > 0 else None
-
-
 def prix_au(serie: list, ts_ms) -> float | None:
-    """Dernier prix de `serie` [(ts, px)] au temps ≤ ts_ms (dérive minimale). None si aucun point antérieur."""
     if not serie or ts_ms is None:
         return None
     best = None
@@ -183,19 +185,39 @@ def prix_au(serie: list, ts_ms) -> float | None:
     return best
 
 
-def construire_signaux(fills: list, *, idx_twap: dict, tape_coin: list, tape_btc: list,
-                       cout_ar_bps: float = COUT_AR_DEFAUT_BPS, horizon_ms: float = HORIZON_FWD_MS,
-                       intervalle_ms: float = INTERVALLE_METAORDRE_MS, taille_ref_usd: float | None = None,
-                       maintenant_ms: float | None = None) -> list:
-    """CŒUR TESTABLE : à partir des fills BRUTS d'un (vault, coin), construit un signal SHADOW par slice avec
-    stade, TWAP, taille relative, maker/taker, les 3 âges, PnL forward net après coûts et placebo. `tape_coin`
-    et `tape_btc` = séries [(ts, px)] pour le prix d'entrée (≈ fill.time) et forward (fill.time + horizon).
-    N'ouvre RIEN. Un slice sans prix forward (trop récent / tape absente) garde pnl_net_bps=None (jamais inventé)."""
+def cout_l2_reel_bps(l2: dict | None, taille_usd) -> tuple[float, str]:
+    """Coût aller-retour RÉEL depuis le carnet L2 {hl_bid, hl_ask, depth_usd} et la TAILLE : frais taker +
+    spread + 2×slippage(taille/profondeur) + latence. Rend (bps, source). Fallback screening 16 si L2 absent."""
+    try:
+        bid, ask, depth = float(l2["hl_bid"]), float(l2["hl_ask"]), float(l2.get("depth_usd") or 0.0)
+        if bid <= 0 or ask <= 0:
+            raise ValueError
+        mid = 0.5 * (bid + ask)
+        spread = (ask - bid) / mid * 1e4
+        slip = SLIPPAGE_BASE_BPS + SLIPPAGE_IMPACT_COEF * (float(taille_usd or 0.0) / depth if depth else 1.0)
+        return round(FRAIS_TAKER_BPS + spread + 2.0 * slip + LATENCE_COUT_BPS, 3), "l2_courant_par_taille"
+    except (TypeError, ValueError, KeyError):
+        return COUT_AR_DEFAUT_BPS, "screening_16bps"
+
+
+def _cout_screening(coin, taille_usd) -> tuple[float, str]:
+    return COUT_AR_DEFAUT_BPS, "screening_16bps"
+
+
+def construire_signaux(fills: list, *, vault: str, idx_twap: dict, tape_coin: list, tape_btc: list,
+                       cout_fn=None, horizon_ms: float = HORIZON_FWD_MS,
+                       intervalle_ms: float = INTERVALLE_METAORDRE_MS, maintenant_ms: float | None = None) -> list:
+    """CŒUR TESTABLE : fills BRUTS d'un (vault, coin) → un signal par slice, avec metaorder_id STABLE, stade,
+    TWAP, taille rel, maker/taker, les 3 âges, jour, coût L2 réel (via cout_fn) et PnL forward net + placebo.
+    N'ouvre RIEN ; slice sans forward → pnl_net_bps=None (jamais inventé). Fills dédupliqués en amont."""
     now = maintenant_ms if maintenant_ms is not None else time.time() * 1000
+    cfn = cout_fn or _cout_screening
     metas = detecter_metaordres(fills, intervalle_ms=intervalle_ms)
     out: list = []
     for meta in metas:
         n = len(meta["fills"])
+        coin0 = str(meta["fills"][0].get("coin") or "").upper()
+        mid_id = metaorder_id(vault, coin0, meta["sens"], meta["t0"])
         for i, f in enumerate(meta["fills"]):
             t = int(f.get("time") or 0)
             sens = meta["sens"]
@@ -205,94 +227,192 @@ def construire_signaux(fills: list, *, idx_twap: dict, tape_coin: list, tape_btc
                 taille_usd = sz * float(px) if px is not None else None
             except (TypeError, ValueError):
                 taille_usd = None
+            cout_bps, cout_src = cfn(coin0, taille_usd)
             pe_coin = prix_au(tape_coin, t) if tape_coin else (float(px) if px is not None else None)
             pf_coin = prix_au(tape_coin, t + horizon_ms) if tape_coin else None
             pe_btc = prix_au(tape_btc, t) if tape_btc else None
             pf_btc = prix_au(tape_btc, t + horizon_ms) if tape_btc else None
-            pnl = pnl_forward_net_bps(pe_coin, pf_coin, sens, cout_ar_bps)
             plc = placebo_bps(pe_coin, pf_coin, pe_btc, pf_btc, sens) or {}
-            ref = taille_ref_usd if taille_ref_usd else (meta["sz_tot"] * float(px) if px is not None else None)
-            sig = {
-                "stade": classer_stade(i, n, meta),
-                "is_twap": est_twap(f, idx_twap),
-                "sens": sens,
-                "coin": str(f.get("coin") or "").upper(),
-                "slice_i": i, "n_slices": n,
+            ref = meta["sz_tot"] * float(px) if px is not None else None
+            out.append({
+                "metaorder_id": mid_id, "stade": classer_stade(i, n, meta), "is_twap": est_twap(f, idx_twap),
+                "sens": sens, "vault": vault, "coin": coin0, "slice_i": i, "n_slices": n,
                 "taille_usd": round(taille_usd, 2) if taille_usd is not None else None,
                 "taille_relative": round(taille_usd / ref, 4) if (taille_usd and ref) else None,
                 "maker_taker": maker_taker(f),
-                "age_stade_ms": t - meta["t0"],                   # temps depuis le FIRST_SLICE (âge du STADE)
-                "age_fill_hl_ms": round(now - t),                 # âge/skew de l'événement HL (staleness signal)
-                "latence_locale_ms": None,                        # N/A en shadow (mesuré en live : ~382 ms médian)
-                "horizon_ms": horizon_ms, "cout_ar_bps": cout_ar_bps,
-                "pnl_net_bps": pnl,
+                "age_stade_ms": t - meta["t0"], "age_fill_hl_ms": round(now - t), "latence_locale_ms": None,
+                "jour": int(t // JOUR_MS),
+                "horizon_ms": horizon_ms, "cout_ar_bps": cout_bps, "cout_source": cout_src,
+                "pnl_net_bps": pnl_forward_net_bps(pe_coin, pf_coin, sens, cout_bps),
                 "ret_coin_bps": plc.get("ret_coin_bps"), "ret_marche_bps": plc.get("ret_marche_bps"),
                 "alpha_vs_marche_bps": plc.get("alpha_vs_marche_bps"),
                 "fill_time": t, "tid": f.get("tid"), "hash": f.get("hash"),
-            }
-            out.append(sig)
+            })
     return out
 
 
-def stats_par_stade(signaux: list) -> dict:
-    """Agrège les signaux par STADE : n, PnL net moyen/médian, part positive, IC, placebo alpha moyen,
-    capacité (somme des tailles), % taker. Base de la décision « ce stade devient-il fortement positif ? »."""
+def bootstrap_clusterise(paires: list, *, n: int = 2000, seed: int = 0, alpha: float = 0.05) -> dict:
+    """IC de la MOYENNE par bootstrap CLUSTERISÉ : `paires` = [(cluster_id, valeur)]. On rééchantillonne les
+    CLUSTERS avec remise (tous les points d'un cluster ensemble) → respecte la dépendance intra-cluster.
+    Rend {moy, ic_bas, ic_haut, n_clusters, n_obs}. CI None si < 2 clusters."""
+    from collections import defaultdict
+    g: dict = defaultdict(list)
+    for c, v in paires:
+        if v is not None:
+            g[c].append(float(v))
+    clusters = [vs for vs in g.values() if vs]
+    allv = [v for vs in clusters for v in vs]
+    if not allv:
+        return {"moy": None, "ic_bas": None, "ic_haut": None, "n_clusters": 0, "n_obs": 0}
+    moy = sum(allv) / len(allv)
+    if len(clusters) < 2:
+        return {"moy": round(moy, 3), "ic_bas": None, "ic_haut": None, "n_clusters": len(clusters), "n_obs": len(allv)}
+    rnd = random.Random(seed)
+    k = len(clusters)
+    moys = []
+    for _ in range(n):
+        pool: list = []
+        for _ in range(k):
+            pool.extend(clusters[rnd.randrange(k)])
+        if pool:
+            moys.append(sum(pool) / len(pool))
+    moys.sort()
+    lo = moys[int(alpha / 2 * len(moys))]
+    hi = moys[min(len(moys) - 1, int((1 - alpha / 2) * len(moys)))]
+    return {"moy": round(moy, 3), "ic_bas": round(lo, 3), "ic_haut": round(hi, 3),
+            "n_clusters": k, "n_obs": len(allv)}
+
+
+def walk_forward_purge(signaux: list, *, n_folds: int = 3, horizon_ms: float = HORIZON_FWD_MS,
+                       cle: str = "fill_time") -> dict:
+    """Walk-forward PURGÉ : découpe le temps en n_folds contigus ; pour chaque fold, on DROPPE le 1er horizon
+    (embargo → pas de chevauchement de fenêtre forward avec le fold précédent) et on rapporte la moyenne OOS
+    du PnL net PAR STADE. Vérifie qu'un stade n'est pas porté par une seule période."""
+    from collections import defaultdict
+    s = sorted([x for x in signaux if x.get(cle) is not None and x.get("pnl_net_bps") is not None],
+               key=lambda x: x[cle])
+    if len(s) < max(2 * n_folds, 6):
+        return {"n_folds": n_folds, "folds": [], "note": "trop peu de signaux pour un walk-forward"}
+    t0, t1 = s[0][cle], s[-1][cle]
+    bornes = [t0 + (t1 - t0) * i / n_folds for i in range(n_folds + 1)]
+    folds = []
+    for i in range(n_folds):
+        a, b = bornes[i] + (horizon_ms if i > 0 else 0), bornes[i + 1]   # embargo au début du fold
+        seg = [x for x in s if a <= x[cle] < b]
+        ps: dict = defaultdict(list)
+        for x in seg:
+            ps[x["stade"]].append(x["pnl_net_bps"])
+        folds.append({"fold": i, "n": len(seg),
+                      "par_stade": {st: round(sum(v) / len(v), 2) for st, v in ps.items() if v}})
+    return {"n_folds": n_folds, "folds": folds}
+
+
+def _agg_metaordre(xs: list) -> list:
+    """Agrège les slices en points par MÉTAORDRE : (metaorder_id, moyenne du pnl_net) — 1 point/métaordre."""
+    from collections import defaultdict
+    g: dict = defaultdict(list)
+    for x in xs:
+        if x.get("pnl_net_bps") is not None:
+            g[x.get("metaorder_id")].append(x["pnl_net_bps"])
+    return [(mid, sum(v) / len(v)) for mid, v in g.items() if v]
+
+
+def stats_par_stade(signaux: list, *, n_boot: int = 2000) -> dict:
+    """Par STADE : n_slices, **n_metaordres UNIQUES**, PnL net moyen + **IC bootstrap CLUSTERISÉ par métaordre**,
+    part de MÉTAORDRES positifs, placebo alpha (clusterisé), capacité, % taker, % TWAP, coût moyen + source.
+    (Pas d'IC par slice : dépendance intra-métaordre respectée.)"""
     from collections import defaultdict
     g: dict = defaultdict(list)
     for s in signaux:
         g[s.get("stade")].append(s)
     out: dict = {}
     for stade, xs in g.items():
-        pnls = [x["pnl_net_bps"] for x in xs if x.get("pnl_net_bps") is not None]
-        alphas = [x["alpha_vs_marche_bps"] for x in xs if x.get("alpha_vs_marche_bps") is not None]
+        paires_pnl = [(x.get("metaorder_id"), x["pnl_net_bps"]) for x in xs if x.get("pnl_net_bps") is not None]
+        paires_alpha = [(x.get("metaorder_id"), x["alpha_vs_marche_bps"]) for x in xs
+                        if x.get("alpha_vs_marche_bps") is not None]
+        mo = _agg_metaordre(xs)
         caps = [x["taille_usd"] for x in xs if x.get("taille_usd") is not None]
-        takers = sum(1 for x in xs if x.get("maker_taker") == "taker")
-        twaps = sum(1 for x in xs if x.get("is_twap"))
-        pnls_tries = sorted(pnls)
+        couts = [x["cout_ar_bps"] for x in xs if x.get("cout_ar_bps") is not None]
+        srcs = {}
+        for x in xs:
+            srcs[x.get("cout_source")] = srcs.get(x.get("cout_source"), 0) + 1
+        boot = bootstrap_clusterise(paires_pnl, n=n_boot)
         out[stade] = {
-            "n": len(xs), "n_avec_pnl": len(pnls),
-            "pnl_net_bps_moy": round(sum(pnls) / len(pnls), 3) if pnls else None,
-            "pnl_net_bps_med": pnls_tries[len(pnls_tries) // 2] if pnls else None,
-            "part_positive_pct": round(100 * sum(1 for p in pnls if p > 0) / len(pnls), 1) if pnls else None,
-            "ic_taille_vs_pnl": ic_pearson(xs),
-            "placebo_alpha_moy_bps": round(sum(alphas) / len(alphas), 3) if alphas else None,
+            "n_slices": len(xs), "n_metaordres": len({x.get("metaorder_id") for x in xs}),
+            "pnl_net_bps_moy": boot["moy"], "pnl_net_ic95": [boot["ic_bas"], boot["ic_haut"]],
+            "part_metaordres_positifs_pct": round(100 * sum(1 for _, v in mo if v > 0) / len(mo), 1) if mo else None,
+            "placebo_alpha_moy_bps": bootstrap_clusterise(paires_alpha, n=n_boot)["moy"],
             "capacite_usd": round(sum(caps), 1) if caps else None,
-            "taker_pct": round(100 * takers / len(xs), 1) if xs else None,
-            "twap_pct": round(100 * twaps / len(xs), 1) if xs else None,
+            "taker_pct": round(100 * sum(1 for x in xs if x.get("maker_taker") == "taker") / len(xs), 1) if xs else None,
+            "twap_pct": round(100 * sum(1 for x in xs if x.get("is_twap")) / len(xs), 1) if xs else None,
+            "cout_moy_bps": round(sum(couts) / len(couts), 2) if couts else None, "cout_sources": srcs,
         }
+    return out
+
+
+def agreger_par(signaux: list, cle: str) -> dict:
+    """Résultats groupés par `cle` (vault/coin/jour) : par groupe → n_metaordres + PnL net moyen (clusterisé)."""
+    from collections import defaultdict
+    g: dict = defaultdict(list)
+    for s in signaux:
+        g[s.get(cle)].append(s)
+    out: dict = {}
+    for k, xs in g.items():
+        paires = [(x.get("metaorder_id"), x["pnl_net_bps"]) for x in xs if x.get("pnl_net_bps") is not None]
+        out[str(k)] = {"n_metaordres": len({x.get("metaorder_id") for x in xs}),
+                       "pnl_net_bps_moy": bootstrap_clusterise(paires)["moy"]}
     return out
 
 
 # ─────────────────────────────── runner SHADOW (réseau, borné, poli) ───────────────────────────────
 
 def _providers_reels():
-    """Fournisseurs REST réels (userFillsByTime + userTwapSliceFills), importés paresseusement. Lecture seule."""
+    """Fournisseurs REST réels : userFillsByTime, userTwapSliceFills, l2Book (coût L2). Lecture seule."""
     import sys
-    sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "tools"))
-    from sonde_confirmation_vaults import userfills_by_time_rest  # réutilise le POST /info borné
     import urllib.request
+    sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "tools"))
+    from sonde_confirmation_vaults import userfills_by_time_rest
 
-    def twap_provider(vault, start_ms):
-        corps = json.dumps({"type": "userTwapSliceFills", "user": vault}).encode("utf-8")
-        req = urllib.request.Request("https://api.hyperliquid.xyz/info", data=corps,
+    def _post(corps):
+        req = urllib.request.Request("https://api.hyperliquid.xyz/info", data=json.dumps(corps).encode("utf-8"),
                                      headers={"Content-Type": "application/json"})
         with urllib.request.urlopen(req, timeout=8) as rep:      # noqa: S310 (URL publique constante)
             return json.loads(rep.read().decode("utf-8"))
-    return userfills_by_time_rest, twap_provider
+
+    def twap_provider(vault, start_ms):
+        return _post({"type": "userTwapSliceFills", "user": vault})
+
+    def l2_provider(coin):
+        import sys as _s
+        _s.path.insert(0, str(Path(__file__).resolve().parents[3] / "tools"))
+        from collecter_carnet import _post_hl, parser_book_hl
+        rep = _post_hl(coin, timeout_s=6.0)
+        p = parser_book_hl(rep)
+        if not p:
+            return None
+        bid, ask, bsz, asz = p
+        mid = 0.5 * (bid + ask)
+        depth = min(bsz, asz) * mid
+        return {"hl_bid": bid, "hl_ask": ask, "depth_usd": round(depth, 2)}
+    return userfills_by_time_rest, twap_provider, l2_provider
 
 
-def executer(root: str | Path, vaults: list, *, fills_provider=None, twap_provider=None, tape=None,
-             tape_candles=None, horizon_ms: float = HORIZON_FWD_MS, fenetre_ms: float = 7_200_000.0,
+def executer(root: str | Path, vaults: list, *, fills_provider=None, twap_provider=None, l2_provider=None,
+             tape=None, horizon_ms: float = HORIZON_FWD_MS, fenetre_ms: float = 7_200_000.0,
              config_hash: str = "", git_commit: str = "", maintenant_ms: float | None = None) -> dict:
-    """Passe SHADOW : pour chaque vault, lit `userFillsByTime` (fenêtre bornée) + TWAP, construit les signaux
-    par coin, écrit le ledger + les stats par stade. INJECTABLE (fills_provider/twap_provider/tape) pour test
-    sans réseau. N'OUVRE AUCUNE POSITION. Rend {n_signaux, n_appels_rest, stats}."""
+    """Passe SHADOW : par vault, `userFillsByTime` (fenêtre bornée) + `userTwapSliceFills` (statut TWAP), coût
+    L2 réel par coin, construit les signaux (dédup + metaorder_id), écrit ledger + stats (clusterisées,
+    walk-forward, groupées) + budget REST EXACT. INJECTABLE pour test. N'OUVRE AUCUNE POSITION."""
+    import sys
+    sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "tools"))
+    import sonde_confirmation_vaults as SD
     root = Path(root)
     now = maintenant_ms if maintenant_ms is not None else time.time() * 1000
-    if fills_provider is None or twap_provider is None:
-        fp, tp = _providers_reels()
+    if fills_provider is None or twap_provider is None or l2_provider is None:
+        fp, tp, lp = _providers_reels()
         fills_provider = fills_provider or fp
         twap_provider = twap_provider or tp
+        l2_provider = l2_provider or lp
     if tape is None:
         try:
             from hl_observer.experimental.copy_edge_forward import charger_prix_tape
@@ -302,47 +422,75 @@ def executer(root: str | Path, vaults: list, *, fills_provider=None, twap_provid
     tape_btc = tape.get("BTC") or []
     start = int(now - fenetre_ms)
     signaux: list = []
-    n_rest = 0
+    appels_budget: list = []
+    twap_statut: dict = {}
+    l2_cache: dict = {}
+
+    def _cout_fn(coin, taille_usd):
+        if coin not in l2_cache:
+            try:
+                l2_cache[coin] = l2_provider(coin)
+                appels_budget.append(("l2Book", 0))
+            except Exception:  # noqa: BLE001
+                l2_cache[coin] = None
+        return cout_l2_reel_bps(l2_cache.get(coin), taille_usd)
+
     for v in vaults:
         try:
             fills = fills_provider(v, start)
-            n_rest += 1
-            twaps = twap_provider(v, start)
-            n_rest += 1
-        except Exception:  # noqa: BLE001 — le réseau ne fait JAMAIS crasher la passe shadow
+            appels_budget.append(("userFillsByTime", len(fills) if isinstance(fills, list) else 0))
+        except Exception:  # noqa: BLE001 — le réseau ne fait JAMAIS crasher la passe
             continue
+        try:
+            twaps = twap_provider(v, start)
+            appels_budget.append(("userTwapSliceFills", len(twaps) if isinstance(twaps, list) else 0))
+            twap_statut[v] = "couvert_avec_twap" if (isinstance(twaps, list) and twaps) else "couvert_vide"
+        except Exception:  # noqa: BLE001
+            twaps, twap_statut[v] = [], "non_couvert"           # endpoint indisponible ≠ aucun TWAP
         if not isinstance(fills, list):
             continue
         idx = index_twap(twaps if isinstance(twaps, list) else [])
         par_coin: dict = {}
         for f in fills:
-            if int((f or {}).get("time") or 0) <= now - horizon_ms:   # seulement les fills assez vieux (forward dispo)
+            if int((f or {}).get("time") or 0) <= now - horizon_ms:   # assez vieux : forward disponible
                 par_coin.setdefault(str(f.get("coin") or "").upper(), []).append(f)
         for coin, fs in par_coin.items():
-            sigs = construire_signaux(fs, idx_twap=idx, tape_coin=tape.get(coin) or [], tape_btc=tape_btc,
-                                      horizon_ms=horizon_ms, maintenant_ms=now)
+            sigs = construire_signaux(fs, vault=v, idx_twap=idx, tape_coin=tape.get(coin) or [],
+                                      tape_btc=tape_btc, cout_fn=_cout_fn, horizon_ms=horizon_ms, maintenant_ms=now)
             for s in sigs:
-                s.update({"vault": v, "version": VERSION, "config_hash": config_hash, "git_commit": git_commit,
+                s.update({"version": VERSION, "config_hash": config_hash, "git_commit": git_commit,
                           "shadow": True, "real_execution": False, "ts_ms": int(now)})
             signaux.extend(sigs)
+
     stats = stats_par_stade(signaux)
-    _ecrire(root, signaux, stats, now)
-    return {"n_signaux": len(signaux), "n_appels_rest": n_rest, "stats": stats}
+    wf = walk_forward_purge(signaux, horizon_ms=horizon_ms)
+    poids = SD.poids_info(appels_budget)
+    SD.journaliser_budget(root, "metaorder_shadow", poids, 600.0)
+    budget = SD.budget_total(root)
+    n_twap = {k: sum(1 for vv in twap_statut.values() if vv == k) for k in set(twap_statut.values())}
+    _ecrire(root, signaux, {
+        "version": VERSION, "n_signaux": len(signaux), "n_metaordres": len({s["metaorder_id"] for s in signaux}),
+        "stats_par_stade": stats, "walk_forward_purge": wf,
+        "par_vault": agreger_par(signaux, "vault"), "par_coin": agreger_par(signaux, "coin"),
+        "par_jour": agreger_par(signaux, "jour"), "twap_statut_par_vault": n_twap,
+        "budget_rest": {"poids_passe": poids, "n_appels": len(appels_budget), "total_ip": budget},
+    }, now)
+    return {"n_signaux": len(signaux), "n_metaordres": len({s["metaorder_id"] for s in signaux}),
+            "poids_passe": poids, "n_appels": len(appels_budget), "budget_total": budget, "stats": stats}
 
 
-def _ecrire(root: Path, signaux: list, stats: dict, now: float) -> None:
-    """Écrit le ledger shadow (append) + le snapshot de stats (atomique). Jamais mélangé au PnL live."""
+def _ecrire(root: Path, signaux: list, resume: dict, now: float) -> None:
     (root / LEDGER_RELPATH).parent.mkdir(parents=True, exist_ok=True)
     with (root / LEDGER_RELPATH).open("a", encoding="utf-8") as fh:
         for s in signaux:
             fh.write(json.dumps(s, ensure_ascii=False) + "\n")
     p = root / STATS_RELPATH
     tmp = p.with_suffix(".json.tmp")
-    tmp.write_text(json.dumps({"ts_ms": int(now), "version": VERSION, "stats_par_stade": stats},
-                              ensure_ascii=False, indent=2), encoding="utf-8")
+    tmp.write_text(json.dumps({"ts_ms": int(now), **resume}, ensure_ascii=False, indent=2), encoding="utf-8")
     tmp.replace(p)
 
 
-__all__ = ["VERSION", "sens_fill", "maker_taker", "index_twap", "est_twap", "detecter_metaordres",
-           "classer_stade", "pnl_forward_net_bps", "placebo_bps", "ofi_top5", "ic_pearson", "prix_au",
-           "construire_signaux", "stats_par_stade", "executer", "LEDGER_RELPATH", "STATS_RELPATH"]
+__all__ = ["VERSION", "sens_fill", "maker_taker", "dedup_fills", "metaorder_id", "index_twap", "est_twap",
+           "detecter_metaordres", "classer_stade", "pnl_forward_net_bps", "placebo_bps", "ofi_top5", "prix_au",
+           "cout_l2_reel_bps", "construire_signaux", "bootstrap_clusterise", "walk_forward_purge",
+           "stats_par_stade", "agreger_par", "executer", "LEDGER_RELPATH", "STATS_RELPATH"]

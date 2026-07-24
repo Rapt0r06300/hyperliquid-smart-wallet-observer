@@ -474,13 +474,14 @@ async def _garde_reconciliation_rest(root: Path, shards: list, *, intervalle_s: 
     while True:
         cur = _charger_curseurs(root)
         maintenant = time.time() * 1000
-        n_appels, total_manquants, defaillants = 0, 0, set()
+        n_appels, total_manquants, defaillants, appels_budget = 0, 0, set(), []
         for v, sid in vault_socket.items():
             # fenêtre BORNÉE (curseur − chevauchement), JAMAIS avant le démarrage (clés en mémoire depuis là) :
             start = SD.fenetre_debut_ms(cur.get(v), _DEMARRAGE_MS, maintenant, overlap_ms=overlap_ms)
             try:
                 rep = await loop.run_in_executor(None, SD.userfills_by_time_rest, v, start)   # REST hors event-loop
                 n_appels += 1
+                appels_budget.append(("userFillsByTime", len(rep) if isinstance(rep, list) else 0))
             except Exception:  # noqa: BLE001 — le réseau ne fait JAMAIS crasher le garde
                 continue
             if not isinstance(rep, list):
@@ -499,9 +500,11 @@ async def _garde_reconciliation_rest(root: Path, shards: list, *, intervalle_s: 
                     await ws.close()                              # rompt le async-for -> except -> reconnect de CE shard
                 except Exception:  # noqa: BLE001
                     pass
-        poids = SD.poids_rest_estime(n_appels, fenetre_s=intervalle_s)
-        print("[userfills] garde REST↔WS : REST-WS=%d par id · %d appels userFillsByTime · poids~%.0f/%d IP·min · %s"
-              % (total_manquants, n_appels, poids["poids_estime_par_min"], poids["limite_ip_par_min"],
+        poids_passe = SD.poids_info(appels_budget)                # poids HL EXACT (20 + floor(items/20)) de la rafale
+        SD.journaliser_budget(root, "garde_rest_ws", poids_passe, intervalle_s)
+        bt = SD.budget_total(root)
+        print("[userfills] garde REST↔WS : REST-WS=%d par id · %d appels · poids/passe=%d (rafale) · total REST~%.0f/%d IP·min · %s"
+              % (total_manquants, n_appels, poids_passe, bt["total_par_min_moyen"], bt["limite_ip_par_min"],
                  ("defaillants=%s" % sorted(defaillants)) if defaillants else "10/10 couverts (REST-WS=0)"), flush=True)
         await asyncio.sleep(intervalle_s)
 
@@ -573,11 +576,12 @@ async def _metaorder_shadow_periodique(root: Path, vaults: list, *, intervalle_s
             chash = CO.config_hash_courant(CO.RAW_PROBE, root)
             res = await loop.run_in_executor(
                 None, lambda: MS.executer(root, list(vaults), config_hash=chash, git_commit=GIT_COMMIT))
-            poids = SD.poids_rest_estime(res.get("n_appels_rest", 0), fenetre_s=intervalle_s)
-            stades = {k: v.get("n") for k, v in (res.get("stats") or {}).items()}
-            print("[userfills] metaorder_shadow : %d signaux · %d appels REST · poids~%.0f/%d IP·min · stades=%s"
-                  % (res.get("n_signaux", 0), res.get("n_appels_rest", 0), poids["poids_estime_par_min"],
-                     poids["limite_ip_par_min"], stades), flush=True)
+            bt = res.get("budget_total") or {}
+            stades = {k: (v.get("n_metaordres"), v.get("pnl_net_bps_moy")) for k, v in (res.get("stats") or {}).items()}
+            print("[userfills] metaorder_shadow : %d signaux · %d metaordres · %d appels · poids/passe=%d (rafale) · total REST~%.0f/%d IP·min · stades(n_mo,pnl_net)=%s"
+                  % (res.get("n_signaux", 0), res.get("n_metaordres", 0), res.get("n_appels", 0),
+                     res.get("poids_passe", 0), bt.get("total_par_min_moyen", 0), bt.get("limite_ip_par_min", 1200),
+                     stades), flush=True)
         except Exception as exc:  # noqa: BLE001 — la passe shadow ne fait JAMAIS crasher le collecteur
             print("[userfills] metaorder_shadow err %s" % str(exc)[:60], flush=True)
         await asyncio.sleep(intervalle_s)

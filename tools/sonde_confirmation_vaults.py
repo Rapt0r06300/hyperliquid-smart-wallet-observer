@@ -150,14 +150,56 @@ def fenetre_debut_ms(curseur_ts, demarrage_ms, maintenant_ms, *, overlap_ms: flo
     return int(max(float(curseur_ts or 0.0) - overlap_ms, plancher))
 
 
-def poids_rest_estime(n_appels: int, *, poids_par_appel: int = 20, fenetre_s: float = 90.0,
-                      limite_ip_par_min: int = 1200) -> dict:
-    """Poids REST ESTIMÉ du garde (visibilité budget IP HL ≈ 1200 poids/min/IP). `userFillsByTime` ≈ 20 poids/
-    appel (hypothèse prudente, labellisée « estimé »). Rend n_appels, poids/min estimé et la limite IP pour
-    comparer — afin que ce garde, AJOUTÉ aux autres collecteurs, ne menace jamais la limite."""
-    par_min = (n_appels / max(fenetre_s, 1.0)) * 60.0 * poids_par_appel
-    return {"n_appels": n_appels, "poids_par_appel": poids_par_appel,
-            "poids_estime_par_min": round(par_min, 1), "limite_ip_par_min": limite_ip_par_min}
+_INFO_LEGER = {"l2Book", "allMids", "clearinghouseState", "orderStatus", "spotClearinghouseState", "exchangeStatus"}
+_INFO_SUPPL = {"userFills", "userFillsByTime", "userTwapSliceFills", "userTwapSliceFillsByTime", "twapHistory",
+               "recentTrades", "historicalOrders", "fundingHistory", "userFunding", "nonUserFundingUpdates",
+               "delegatorHistory", "delegatorRewards", "validatorStats"}
+BUDGET_RELPATH = Path("runtime") / "data" / "rest_budget.json"
+LIMITE_IP_PAR_MIN = 1200
+
+
+def poids_info(appels) -> int:
+    """Poids REST HL EXACT d'une RAFALE d'appels `info` (doc : limite 1200/min/IP). Par appel : 2 pour
+    l2Book/allMids/clearinghouseState/orderStatus/spotClearinghouseState/exchangeStatus, 60 pour userRole,
+    sinon 20 ; PLUS floor(n_items/20) de SUPPLÉMENT pour les endpoints paginés (userFills, userFillsByTime,
+    userTwapSliceFills, twapHistory, fundingHistory…). `appels` = itérable de (type, n_items). Rend le poids
+    total de la rafale — à comparer à 1200/min (ex. 18 userFillsByTime = ≥ 360, PAS 36)."""
+    tot = 0
+    for typ, n in appels:
+        base = 2 if typ in _INFO_LEGER else (60 if typ == "userRole" else 20)
+        tot += base + ((int(n or 0) // 20) if typ in _INFO_SUPPL else 0)
+    return tot
+
+
+def journaliser_budget(root, source: str, poids_par_passe: int, intervalle_s: float) -> dict:
+    """Écrit le poids REST d'un consommateur (guard/shadow/…) dans `rest_budget.json` (fusion par source) pour
+    calculer le VRAI total IP de tous les collecteurs. Rend le budget courant."""
+    p = Path(root) / BUDGET_RELPATH
+    try:
+        cur = json.loads(p.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        cur = {}
+    cur[source] = {"poids_par_passe": int(poids_par_passe), "intervalle_s": float(intervalle_s),
+                   "poids_par_min_moyen": round(poids_par_passe * 60.0 / max(intervalle_s, 1.0), 1),
+                   "ts_ms": int(time.time() * 1000)}
+    p.parent.mkdir(parents=True, exist_ok=True)
+    tmp = p.with_suffix(".json.tmp")
+    tmp.write_text(json.dumps(cur, ensure_ascii=False, indent=2), encoding="utf-8")
+    tmp.replace(p)
+    return cur
+
+
+def budget_total(root, *, frais_ms: float = 1_800_000.0) -> dict:
+    """Somme des poids REST/min (moyens) de toutes les sources RÉCENTES (< frais_ms) → vrai total IP vs 1200."""
+    p = Path(root) / BUDGET_RELPATH
+    try:
+        cur = json.loads(p.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {"total_par_min_moyen": 0.0, "limite_ip_par_min": LIMITE_IP_PAR_MIN, "sources": {}}
+    now = time.time() * 1000
+    src = {k: v.get("poids_par_min_moyen", 0.0) for k, v in cur.items()
+           if now - float(v.get("ts_ms") or 0) <= frais_ms}
+    return {"total_par_min_moyen": round(sum(src.values()), 1), "limite_ip_par_min": LIMITE_IP_PAR_MIN, "sources": src}
 
 
 # ─────────────────────────────── réseau (lecture seule, borné, poli) ───────────────────────────────
