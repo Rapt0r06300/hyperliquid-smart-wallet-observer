@@ -114,6 +114,27 @@ def latence_pipeline_ms(fill_recv_mono, book_recv_mono) -> float | None:
         return None
 
 
+LATENCE_PLAFOND_ELIGIBLE_MS = 2000.0       # plafond PRÉ-ENREGISTRÉ : au-delà, le carnet d'entrée n'est pas synchronisé
+
+
+def est_eligible(ligne: dict, *, plafond_ms: float = LATENCE_PLAFOND_ELIGIBLE_MS) -> bool:
+    """ÉLIGIBILITÉ STATISTIQUE (≠ simple capture) d'une ligne 'fill' pour les coûts EXÉCUTABLES / l'OOS :
+    carnet d'ENTRÉE POSTÉRIEUR au fill en horloge HL (`book_exchange_time ≥ fill_exchange_time`) ET latence
+    pipeline ≥ 0 et ≤ plafond pré-enregistré. Sinon **L2_NON_SYNCHRONISE** : la ligne est CONSERVÉE (brute) mais
+    EXCLUE des statistiques. Les FIRST_SLICE (abonnement froid) sont souvent au-dessus du plafond → non éligibles."""
+    bx, fx, lat = ligne.get("book_exchange_time"), ligne.get("fill_exchange_time"), ligne.get("latence_pipeline_ms")
+    try:
+        return (bx is not None and fx is not None and lat is not None
+                and float(bx) >= float(fx) and 0.0 <= float(lat) <= float(plafond_ms))
+    except (TypeError, ValueError):
+        return False
+
+
+def statut_eligibilite(ligne: dict, *, plafond_ms: float = LATENCE_PLAFOND_ELIGIBLE_MS) -> str:
+    """'ELIGIBLE' (synchro L2 prouvée) ou 'L2_NON_SYNCHRONISE' (capturé mais hors stats)."""
+    return "ELIGIBLE" if est_eligible(ligne, plafond_ms=plafond_ms) else "L2_NON_SYNCHRONISE"
+
+
 def etat_pre(buffer: list, fill_recv_mono: float) -> dict | None:
     pre = [e for e in buffer if float(e["recv_mono"]) < float(fill_recv_mono)]
     return pre[-1] if pre else None
@@ -232,7 +253,8 @@ def charger_tape(root) -> dict:
     return out
 
 
-__all__ = ["TAPE_RELPATH", "SCHEMA_VERSION", "cle_fill", "metaorder_id", "resume_book", "book_imbalance_top5",
-           "profondeur_top5", "ofi_par_niveau", "ofi_top5", "ofi_normalise_profondeur", "latence_pipeline_ms",
+__all__ = ["TAPE_RELPATH", "SCHEMA_VERSION", "LATENCE_PLAFOND_ELIGIBLE_MS", "cle_fill", "metaorder_id",
+           "resume_book", "book_imbalance_top5", "profondeur_top5", "ofi_par_niveau", "ofi_top5",
+           "ofi_normalise_profondeur", "latence_pipeline_ms", "est_eligible", "statut_eligibilite",
            "etat_pre", "etat_entree", "etats_post", "stade_live", "ligne_fill", "ligne_sortie",
            "ecrire_lignes", "charger_tape"]

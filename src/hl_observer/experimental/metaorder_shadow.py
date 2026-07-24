@@ -549,7 +549,9 @@ def write_preregistration(root, *, notionals=NOTIONALS_DEFAUT, horizon_ms: float
         "version": "prereg_v1", "gele_le_ts_ms": int(time.time() * 1000),
         "hypothese_unique": {"stades": ["CONTINUATION", "LATE_STAGE"], "filtre": "OFI_top5>0 (confirmation flux)",
                              "executions_comparees": ["taker_immediat", "limite_passive_bornee", "no_trade"],
-                             "notionals_usd": list(notionals), "horizon_ms": horizon_ms},
+                             "notionals_usd": list(notionals), "horizon_ms": horizon_ms,
+                             "l2_eligibilite": {"book_posterieur_au_fill": True, "latence_plafond_ms": 2000,
+                                                "note": "sinon L2_NON_SYNCHRONISE : capturé mais exclu des coûts/OOS"}},
         "regle_validation": "walk-forward OOS sur les PROCHAINES fenetres UNIQUEMENT ; aucune selection ni retune "
                             "sur la fenetre courante",
         "regle_decision": "n'ouvrir une cohorte QUE si edge net FORTEMENT positif apres couts, contre placebo, "
@@ -681,8 +683,11 @@ def executer(root: str | Path, vaults: list, *, fills_provider=None, twap_provid
     for s in signaux:
         c = tape_l2.get(MT.cle_fill(s.get("coin"), s.get("hash"), s.get("fill_time")), {}).get("fill")
         ent = (c or {}).get("entree") or {}
-        a_book = bool(ent.get("bids"))                            # carnet d'ENTRÉE synchronisé (horodaté au fill)
+        # ÉLIGIBLE seulement si carnet d'entrée POSTÉRIEUR au fill ET sous le plafond de latence pré-enregistré :
+        # une ligne capturée mais non synchronisée (ex. FIRST_SLICE 7 s) est CONSERVÉE mais EXCLUE des coûts/OOS.
+        a_book = bool(ent.get("bids")) and MT.est_eligible(c)
         s["l2_synchronise"] = a_book
+        s["l2_eligibilite"] = MT.statut_eligibilite(c) if c else "ABSENT"
         if a_book:
             book_sync[(s.get("coin"), s.get("hash"), s.get("fill_time"))] = {
                 "levels": [[{"px": b[0], "sz": b[1]} for b in ent.get("bids", [])],

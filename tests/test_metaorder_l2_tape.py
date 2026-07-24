@@ -37,6 +37,17 @@ def test_latence_pipeline_toujours_positive():
     assert T.latence_pipeline_ms(1000.0, 1300.0) == 300.0 and T.latence_pipeline_ms(1000.0, 900.0) is None
 
 
+def test_eligibilite_capture_vs_statistiquement_eligible():
+    ok = {"fill_exchange_time": 1000, "book_exchange_time": 1200, "latence_pipeline_ms": 300.0}
+    assert T.est_eligible(ok) is True and T.statut_eligibilite(ok) == "ELIGIBLE"
+    # cas WLD : latence 7067 ms > plafond 2000 -> capturé mais NON synchronisé (exclu des coûts/OOS)
+    wld = {"fill_exchange_time": 1784931778238, "book_exchange_time": 1784931828858, "latence_pipeline_ms": 7067.7}
+    assert T.est_eligible(wld) is False and T.statut_eligibilite(wld) == "L2_NON_SYNCHRONISE"
+    # carnet ANTÉRIEUR au fill (horloge HL) -> non éligible ; latence absente -> non éligible
+    assert T.est_eligible({"fill_exchange_time": 2000, "book_exchange_time": 1000, "latence_pipeline_ms": 100.0}) is False
+    assert T.est_eligible({"fill_exchange_time": 1000, "book_exchange_time": 1200, "latence_pipeline_ms": None}) is False
+
+
 def test_stade_live_first_continuation_reversal():
     etat = {}
     f = lambda sens, ft: {"vault": "0xV", "coin": "SOL", "signe": sens, "ts_ms": ft, "hash": "h%d" % ft}
