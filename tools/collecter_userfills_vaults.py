@@ -402,10 +402,11 @@ async def _userfills_multiplex(root: Path, vaults: list, file: asyncio.Queue) ->
     while True:
         try:
             async with websockets.connect(WS_URL, ping_interval=20, max_size=2 ** 22) as ws:
-                for v in vaults:
+                for i, v in enumerate(vaults):
                     await ws.send(json.dumps({"method": "subscribe", "subscription": {"type": "userFills", "user": v}}))
-                    await asyncio.sleep(0.25)                  # THROTTLE : HL FERME la connexion si 10 subscribes trop rapides
-                print("[userfills] 1 connexion multiplex — %d abonnements userFills demandes (throttle 0.25s)" % len(vaults), flush=True)
+                    print("[userfills] subscribe %d/%d userFills %s" % (i + 1, len(vaults), v[:10]), flush=True)
+                    await asyncio.sleep(1.0)                   # THROTTLE : HL rate-limite les subscribes rapides -> 1 s d'espacement
+                print("[userfills] 1 connexion multiplex — %d abonnements userFills demandes (throttle 1.0s)" % len(vaults), flush=True)
                 async for brut in ws:
                     try:
                         msg = json.loads(brut)
