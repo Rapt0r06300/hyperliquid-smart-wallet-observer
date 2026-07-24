@@ -141,6 +141,15 @@ def fills_manquants_par_id(fills_rest: list, cles_ws, *, age_min_ms: float = AGE
     return out
 
 
+def fenetre_debut_ms(curseur_ts, demarrage_ms, maintenant_ms, *, overlap_ms: float = 60_000.0,
+                     lookback_max_ms: float = 900_000.0) -> int:
+    """startTime de `userFillsByTime` pour la réconciliation : depuis (curseur − chevauchement), mais JAMAIS
+    avant le DÉMARRAGE (les clés WS en mémoire n'existent que depuis là → sinon faux « manquant » sur
+    l'historique), ni au-delà d'un lookback max (borne le poids REST et reste sous la capacité de `_WS_KEYS`)."""
+    plancher = max(float(demarrage_ms or 0.0), float(maintenant_ms) - lookback_max_ms)
+    return int(max(float(curseur_ts or 0.0) - overlap_ms, plancher))
+
+
 def poids_rest_estime(n_appels: int, *, poids_par_appel: int = 20, fenetre_s: float = 90.0,
                       limite_ip_par_min: int = 1200) -> dict:
     """Poids REST ESTIMÉ du garde (visibilité budget IP HL ≈ 1200 poids/min/IP). `userFillsByTime` ≈ 20 poids/

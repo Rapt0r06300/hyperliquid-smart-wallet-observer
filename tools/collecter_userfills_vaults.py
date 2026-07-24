@@ -43,6 +43,7 @@ TAILLE_SHARD = 5                           # HL cape ~5 abonnements userFills/co
 _WS_PAR_SOCKET: dict = {}                   # socket_id -> connexion WS vivante (pour reconnecter UN shard depuis le garde)
 _WS_KEYS: dict = {}                          # vault -> deque(maxlen) des CLÉS COMPOSITES de fills REÇUES par le WS
 WS_KEYS_CAP = 6000                          # borne par vault (couvre très largement la fenêtre de réconciliation)
+_DEMARRAGE_MS = 0.0                          # instant de démarrage : _WS_KEYS ne peut contenir QUE des fills reçus après
 
 
 def _activite_par_vault(root: Path, *, fenetre_h: float = 2.0, max_lignes: int = 4000) -> dict:
@@ -472,10 +473,11 @@ async def _garde_reconciliation_rest(root: Path, shards: list, *, intervalle_s: 
     await asyncio.sleep(intervalle_s)                             # laisse le WS s'installer avant tout jugement
     while True:
         cur = _charger_curseurs(root)
+        maintenant = time.time() * 1000
         n_appels, total_manquants, defaillants = 0, 0, set()
         for v, sid in vault_socket.items():
-            c = float(cur.get(v) or 0)
-            start = int((c if c > 0 else time.time() * 1000) - overlap_ms)   # fenêtre bornée (léger chevauchement)
+            # fenêtre BORNÉE (curseur − chevauchement), JAMAIS avant le démarrage (clés en mémoire depuis là) :
+            start = SD.fenetre_debut_ms(cur.get(v), _DEMARRAGE_MS, maintenant, overlap_ms=overlap_ms)
             try:
                 rep = await loop.run_in_executor(None, SD.userfills_by_time_rest, v, start)   # REST hors event-loop
                 n_appels += 1
@@ -576,8 +578,9 @@ def _git_commit(root: Path) -> str:
 
 
 async def _boucle(root: Path) -> None:
-    global RUN_ID, RUN_TOKEN, _MUTEX, _ROOT_LIVE, TRIGGER_VERSION, GIT_COMMIT
+    global RUN_ID, RUN_TOKEN, _MUTEX, _ROOT_LIVE, TRIGGER_VERSION, GIT_COMMIT, _DEMARRAGE_MS
     _ROOT_LIVE = root
+    _DEMARRAGE_MS = time.time() * 1000                            # plancher de confiance du garde REST↔WS (clés en mémoire dès ici)
     TRIGGER_VERSION = CO._params_trigger(root).get("variante", "v1")
     GIT_COMMIT = _git_commit(root)
     import secrets

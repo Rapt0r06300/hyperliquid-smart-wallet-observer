@@ -119,6 +119,19 @@ def test_fills_manquants_par_id_couvert_et_anticourse():
     assert S.fills_manquants_par_id([frais], [], maintenant_ms=now) == []                    # <45 s -> anti-course
 
 
+def test_fenetre_debut_ne_remonte_jamais_avant_le_demarrage():
+    now = 10_000_000.0
+    demarrage = now - 120_000                                     # collecteur démarré il y a 2 min
+    vieux_curseur = now - 50 * 86_400_000                         # curseur d'il y a 50 JOURS (vault calme)
+    # sans plancher, on remonterait 50 j en arrière (faux « manquants » sur l'historique) ; ici on plafonne au démarrage
+    assert S.fenetre_debut_ms(vieux_curseur, demarrage, now) == int(demarrage)
+    # curseur récent (après démarrage) -> on prend curseur − chevauchement (léger overlap pour même-timestamp)
+    cur_recent = now - 10_000
+    assert S.fenetre_debut_ms(cur_recent, demarrage, now, overlap_ms=60_000) == int(cur_recent - 60_000)
+    # pas de curseur -> plancher démarrage (jamais l'historique)
+    assert S.fenetre_debut_ms(None, demarrage, now) == int(demarrage)
+
+
 def test_poids_rest_estime_reste_sous_la_limite_ip():
     p = S.poids_rest_estime(10, poids_par_appel=20, fenetre_s=90.0)   # 10 vaults / 90 s
     assert p["n_appels"] == 10 and p["limite_ip_par_min"] == 1200
