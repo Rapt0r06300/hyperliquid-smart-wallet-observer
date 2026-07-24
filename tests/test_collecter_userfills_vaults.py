@@ -113,3 +113,13 @@ def test_book_ws_frais_prefere_au_marquage(tmp_path, monkeypatch):
     (tmp_path / C.RAW_L2_LIVE).write_text(json.dumps(
         {"WLD": {"hl_bid": 0.385, "hl_ask": 0.386, "depth_usd": 3000.0, "collecte_ts": time.time() - 10}}))
     assert C._book_ws_frais("WLD") is None                                # périmé -> None (pas de fraîcheur inventée)
+
+
+def test_vault_du_message_demux_multiplex():
+    """Multiplex userFills : on démux par data.user, mappé sur la forme canonique abonnée (casse insensible)."""
+    connus = {v.lower(): v for v in ["0xAbCdEf01", "0x12345678"]}
+    m = {"channel": "userFills", "data": {"user": "0xabcdef01", "fills": []}}
+    assert C._vault_du_message(m, connus) == "0xAbCdEf01"                 # casse insensible -> canonique abonné
+    assert C._vault_du_message({"data": {"user": "0xZZZZ"}}, connus) is None   # user inconnu -> None
+    assert C._vault_du_message({"data": {}}, connus) is None              # pas de user -> None
+    assert C._vault_du_message({"channel": "x"}, connus) is None          # message sans data -> None

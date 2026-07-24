@@ -384,18 +384,38 @@ async def _worker(root: Path, file: asyncio.Queue) -> None:
             file.task_done()
 
 
-async def _un_vault(root: Path, vault: str, file: asyncio.Queue) -> None:
+def _vault_du_message(msg, connus_par_lc: dict) -> str | None:
+    """Démux d'un message userFills MULTIPLEXÉ : extrait le user (data.user) et le mappe sur la forme
+    canonique abonnée (insensible à la casse). None si inconnu/illisible."""
+    data = msg.get("data") if isinstance(msg, dict) else None
+    u = (data or {}).get("user") if isinstance(data, dict) else None
+    return connus_par_lc.get(str(u).lower()) if u else None
+
+
+async def _userfills_multiplex(root: Path, vaults: list, file: asyncio.Queue) -> None:
+    """UNE SEULE connexion WS pour TOUS les userFills (multiplex) : ≤10 abonnements sur 1 connexion -> le
+    collecteur reste à 2 connexions (userFills + L2), bien sous le plafond. Démux par data.user ; ACK réel =
+    subscriptionResponse. Reconnexion : ré-abonne tout ; le curseur + la dédup rejouent les fills manqués."""
     import websockets
+    connus = {v.lower(): v for v in vaults}
     while True:
         try:
             async with websockets.connect(WS_URL, ping_interval=20, max_size=2 ** 22) as ws:
-                await ws.send(json.dumps({"method": "subscribe",
-                                          "subscription": {"type": "userFills", "user": vault}}))
-                print("[userfills] ACK subscribe userFills %s" % vault[:10], flush=True)
+                for v in vaults:
+                    await ws.send(json.dumps({"method": "subscribe", "subscription": {"type": "userFills", "user": v}}))
+                print("[userfills] 1 connexion multiplex — %d abonnements userFills demandes" % len(vaults), flush=True)
                 async for brut in ws:
                     try:
                         msg = json.loads(brut)
                     except ValueError:
+                        continue
+                    if isinstance(msg, dict) and msg.get("channel") == "subscriptionResponse":
+                        sub = ((msg.get("data") or {}).get("subscription")) or {}
+                        if sub.get("type") == "userFills":
+                            print("[userfills] ACK subscribe userFills %s" % str(sub.get("user") or "")[:10], flush=True)
+                        continue
+                    vault = _vault_du_message(msg, connus)
+                    if not vault:
                         continue
                     fills = UL.parser_message_userfills(msg, vault=vault)
                     if not fills:
@@ -405,8 +425,8 @@ async def _un_vault(root: Path, vault: str, file: asyncio.Queue) -> None:
                         file.put_nowait((vault, fills, t_ws))     # ne bloque JAMAIS la réception
                     except asyncio.QueueFull:
                         print("[userfills] FILE SATUREE — drop (%s)" % vault[:10], flush=True)
-        except Exception as exc:  # noqa: BLE001 — reconnect
-            print("[userfills] %s reconnect (%s)" % (vault[:10], str(exc)[:50]), flush=True)
+        except Exception as exc:  # noqa: BLE001 — reconnect (une seule connexion à relancer)
+            print("[userfills] multiplex reconnect (%s)" % str(exc)[:50], flush=True)
             await asyncio.sleep(3.0)
 
 
@@ -521,7 +541,7 @@ async def _boucle(root: Path) -> None:
     try:
         await asyncio.gather(_worker(root, file), _exits_periodiques(root), _heartbeat(root, info),
                              _promotion_periodique(root), _rapport_periodique(root), _l2_dynamique(root),
-                             *[_un_vault(root, v, file) for v in vaults])
+                             _userfills_multiplex(root, vaults, file))   # 1 connexion multiplex (au lieu d'1/vault)
     finally:
         VI.liberer(root, NOM_VERROU, info)
 
