@@ -35,6 +35,7 @@ STATS_RELPATH = Path("runtime") / "data" / "metaorder_shadow_stats.json"
 INTERVALLE_METAORDRE_MS = 60_000.0     # 2 fills same-side espacés de ≤ 60 s = même métaordre parent
 HORIZON_FWD_MS = 300_000.0             # horizon forward de mesure (5 min)
 COUT_AR_DEFAUT_BPS = 16.0             # coût aller-retour de SCREENING (fallback si L2 indisponible)
+COPY_NOTIONAL_USD = 500.0            # TAILLE DE COPIE pour le coût L2 : on tradrait PETIT, PAS la taille du leader
 LATE_FRAC = 0.66
 JOUR_MS = 86_400_000.0
 # coûts L2 réels (mêmes hypothèses que la cohorte RAW)
@@ -205,10 +206,12 @@ def _cout_screening(coin, taille_usd) -> tuple[float, str]:
 
 
 def construire_signaux(fills: list, *, vault: str, idx_twap: dict, tape_coin: list, tape_btc: list,
-                       cout_fn=None, horizon_ms: float = HORIZON_FWD_MS,
+                       cout_fn=None, horizon_ms: float = HORIZON_FWD_MS, copy_notional_usd: float = COPY_NOTIONAL_USD,
                        intervalle_ms: float = INTERVALLE_METAORDRE_MS, maintenant_ms: float | None = None) -> list:
     """CŒUR TESTABLE : fills BRUTS d'un (vault, coin) → un signal par slice, avec metaorder_id STABLE, stade,
     TWAP, taille rel, maker/taker, les 3 âges, jour, coût L2 réel (via cout_fn) et PnL forward net + placebo.
+    IMPORTANT : le coût L2 est calculé pour NOTRE taille de copie (`copy_notional_usd`, petite), PAS pour la
+    taille du LEADER (qui sert à la capacité/taille relative) — sinon le slippage du leader fausse tout.
     N'ouvre RIEN ; slice sans forward → pnl_net_bps=None (jamais inventé). Fills dédupliqués en amont."""
     now = maintenant_ms if maintenant_ms is not None else time.time() * 1000
     cfn = cout_fn or _cout_screening
@@ -227,7 +230,7 @@ def construire_signaux(fills: list, *, vault: str, idx_twap: dict, tape_coin: li
                 taille_usd = sz * float(px) if px is not None else None
             except (TypeError, ValueError):
                 taille_usd = None
-            cout_bps, cout_src = cfn(coin0, taille_usd)
+            cout_bps, cout_src = cfn(coin0, copy_notional_usd)   # coût pour NOTRE taille de copie, pas celle du leader
             pe_coin = prix_au(tape_coin, t) if tape_coin else (float(px) if px is not None else None)
             pf_coin = prix_au(tape_coin, t + horizon_ms) if tape_coin else None
             pe_btc = prix_au(tape_btc, t) if tape_btc else None
@@ -243,6 +246,7 @@ def construire_signaux(fills: list, *, vault: str, idx_twap: dict, tape_coin: li
                 "age_stade_ms": t - meta["t0"], "age_fill_hl_ms": round(now - t), "latence_locale_ms": None,
                 "jour": int(t // JOUR_MS),
                 "horizon_ms": horizon_ms, "cout_ar_bps": cout_bps, "cout_source": cout_src,
+                "cout_notional_usd": copy_notional_usd,
                 "pnl_net_bps": pnl_forward_net_bps(pe_coin, pf_coin, sens, cout_bps),
                 "ret_coin_bps": plc.get("ret_coin_bps"), "ret_marche_bps": plc.get("ret_marche_bps"),
                 "alpha_vs_marche_bps": plc.get("alpha_vs_marche_bps"),
