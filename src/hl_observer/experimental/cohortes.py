@@ -339,6 +339,8 @@ def _ouvrir(coh: Cohorte, store: dict, root: Path, *, cle, coin, sens, notional,
     eb = cfg.get("edge_brut_bps")
     edge_net = (float(eb) - cout_ar) if eb is not None else None    # RAW : pas d'edge (NON_VALIDEE)
     cycle_id = "cyc-" + uuid.uuid4().hex[:12]                       # IDENTITÉ PERSISTANTE du cycle (survit aux redémarrages)
+    from hl_observer.experimental.selecteur_audit import snapshot_selecteur
+    sel = snapshot_selecteur(root, vault)                          # SÉLECTEUR figé À L'OPEN (couche SÉPARÉE, hors config_hash)
     pos = {"coin": coin, "paire": cle, "moteur": "copy_" + coh.nom, "sens": sens, "type_pnl": "directional",
            "notional_usd": round(notional, 2), "prix_entree": prix, "ts_ouverture_ms": now_ms,
            "cout_entree_bps": round(cout_ar / 2.0, 4), "edge_estime_bps": round(edge_net, 4) if edge_net is not None else None,
@@ -350,7 +352,7 @@ def _ouvrir(coh: Cohorte, store: dict, root: Path, *, cle, coin, sens, notional,
                     "source": SOURCE_LIVE, "src_l2": src_l2, "statut": marque or "VALIDEE",
                     "trigger_version": trigger_version, "placebo": placebo, "config_hash": config_hash,
                     "cycle_id": cycle_id, "open_run_id": run_id, "notional_open_usd": round(notional, 2),
-                    "git_commit": git_commit, "transport_version": transport_version}}
+                    "git_commit": git_commit, "transport_version": transport_version, "selecteur": sel}}
     store["ouvertes"][cle] = pos
     store["cash"] = round(store["cash"] - notional, 6)
     _ledger(coh, root, {"evt": "OPEN", "ts_ms": now_ms, "paire": cle, "coin": coin, "sens": sens,
@@ -359,7 +361,9 @@ def _ouvrir(coh: Cohorte, store: dict, root: Path, *, cle, coin, sens, notional,
                         "src_l2": src_l2, "statut": marque or "VALIDEE", "trigger_version": trigger_version,
                         "age_at_paper_fill_ms": lat_mono.get("age_at_paper_fill_ms"),
                         "cycle_id": cycle_id, "open_run_id": run_id, "config_hash": config_hash, "git_commit": git_commit,
-                        "transport_version": transport_version,
+                        "transport_version": transport_version, "selecteur": sel,   # SÉLECTEUR figé (hors config_hash)
+                        "vault_role_at_open": sel.get("vault_role_at_open"), "roster_hash": sel.get("roster_hash"),
+                        "score_model_version": sel.get("score_model_version"), "score_snapshot_ts": sel.get("score_snapshot_ts"),
                         "motif": ("RAW mesure (sans edge)" if not coh.edge_requis else "copy OPEN/ADD + L2<1s + edge net>0")})
     _sauver(coh, root, store)
     if not coh.edge_requis:                                          # RAW : abonne le coin en BBO/L2 pour la vie de la position
@@ -391,6 +395,10 @@ def _sortir(coh: Cohorte, pos: dict, store: dict, root: Path, *, prix_sortie, co
                         "close_run_id": close_run_id, "notional_open_usd": meta.get("notional_open_usd"),
                         "config_hash": meta.get("config_hash"), "git_commit": meta.get("git_commit"),
                         "transport_version": meta.get("transport_version"),
+                        "selecteur": meta.get("selecteur"),                       # SÉLECTEUR figé à l'OPEN, recopié (pas reclassé)
+                        "vault_role_at_open": (meta.get("selecteur") or {}).get("vault_role_at_open"),
+                        "roster_hash": (meta.get("selecteur") or {}).get("roster_hash"),
+                        "score_model_version": (meta.get("selecteur") or {}).get("score_model_version"),
                         "ret_coin_bps": ret_coin_bps, "ret_marche_bps": ret_marche_bps,
                         "placebo_marche_bps": placebo_marche_bps, "alpha_vs_marche_bps": alpha_vs_marche_bps})
     _sauver(coh, root, store)
