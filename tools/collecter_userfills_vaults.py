@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import collections
 import json
 import sys
 import time
@@ -18,10 +19,12 @@ from pathlib import Path
 
 RACINE = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(RACINE / "src"))
+sys.path.insert(0, str(RACINE / "tools"))
 
 from hl_observer.collection import userfills_live as UL  # noqa: E402
 from hl_observer.collection import verrou_instance as VI  # noqa: E402
 from hl_observer.experimental import cohortes as CO  # noqa: E402
+import sonde_confirmation_vaults as SD  # noqa: E402  (helpers de réconciliation par CLÉ COMPOSITE, partagés)
 
 WS_URL = "wss://api.hyperliquid.xyz/ws"
 FILLS_LIVE = Path("runtime") / "data" / "vault_fills_live.jsonl"
@@ -38,6 +41,8 @@ GIT_COMMIT = ""                   # commit git chargé (audit SÉPARÉ, JAMAIS d
 TRANSPORT_VERSION = "userfills_2sock_v1"   # transport WS (HORS config_hash) : 2 sockets de 5 vaults + L2 ; compare latence
 TAILLE_SHARD = 5                           # HL cape ~5 abonnements userFills/connexion -> shards déterministes de 5
 _WS_PAR_SOCKET: dict = {}                   # socket_id -> connexion WS vivante (pour reconnecter UN shard depuis le garde)
+_WS_KEYS: dict = {}                          # vault -> deque(maxlen) des CLÉS COMPOSITES de fills REÇUES par le WS
+WS_KEYS_CAP = 6000                          # borne par vault (couvre très largement la fenêtre de réconciliation)
 
 
 def _activite_par_vault(root: Path, *, fenetre_h: float = 2.0, max_lignes: int = 4000) -> dict:
@@ -434,6 +439,11 @@ async def _userfills_multiplex(root: Path, vaults: list, file: asyncio.Queue, so
                     if vault not in confirmes:                     # 1er message (snapshot/fill) = ABONNEMENT CONFIRMÉ (fiable,
                         confirmes.add(vault)                       # contrairement au subscriptionResponse partiel de HL)
                         print("[userfills] socket %s vault CONFIRME (1er msg) %s [%d/%d]" % (socket_id, vault[:10], len(confirmes), len(vaults)), flush=True)
+                    bruts = (msg.get("data") or {}).get("fills") or []   # CLÉS COMPOSITES REÇUES (pour REST−WS par id)
+                    if bruts:
+                        dq = _WS_KEYS.setdefault(vault, collections.deque(maxlen=WS_KEYS_CAP))
+                        for rf in bruts:
+                            dq.append(SD.cle_fill(rf))
                     fills = UL.parser_message_userfills(msg, vault=vault)
                     if not fills:
                         continue
@@ -449,44 +459,48 @@ async def _userfills_multiplex(root: Path, vaults: list, file: asyncio.Queue, so
 
 
 async def _garde_reconciliation_rest(root: Path, shards: list, *, intervalle_s: float = 90.0,
-                                     age_min_ms: float = 45_000.0) -> None:
-    """GARDE REST↔WS (TRANSPORT seulement, config_hash inchangé) : périodiquement, pour chaque vault, on
-    interroge REST userFills (hors event-loop) et on compare au CURSEUR WS. Si REST voit un fill PLUS RÉCENT
-    que le curseur ET assez vieux (≥ age_min_ms) que le WS AURAIT DÛ recevoir → le shard est DÉFAILLANT : on
-    ferme SA socket → reconnexion CIBLÉE (curseur+dédup rejouent le fill manqué). Baseline par vault pour ne
-    jamais accuser sur l'historique déjà là au démarrage. Lecture seule ; 0 ordre, 0 clé, 0 signature."""
-    try:
-        import sonde_confirmation_vaults as SD
-    except Exception as exc:  # noqa: BLE001
-        print("[userfills] garde REST↔WS indisponible (%s)" % str(exc)[:40], flush=True)
-        return
+                                     age_min_ms: float = 45_000.0, overlap_ms: float = 60_000.0) -> None:
+    """GARDE REST↔WS (TRANSPORT seulement, config_hash inchangé) : périodiquement, pour chaque vault, on lit
+    `userFillsByTime` depuis (curseur − chevauchement) [fenêtre BORNÉE ⇒ poids REST faible], on déduplique, et
+    on compare les ENSEMBLES de fills par CLÉ COMPOSITE (time, hash, tid, oid, coin) — pas un simple curseur —
+    contre les clés REÇUES par le WS (`_WS_KEYS`). Un vault est COUVERT tant que REST − WS = 0 par identifiant.
+    Si REST − WS > 0 (fills assez vieux que le WS AURAIT DÛ recevoir) → shard DÉFAILLANT : on ferme SA socket →
+    reconnexion CIBLÉE (curseur+dédup rejouent les manqués). On journalise le POIDS REST estimé (budget IP HL).
+    REST hors event-loop ; le garde n'ouvre AUCUNE connexion WS. Lecture seule ; 0 ordre, 0 clé, 0 signature."""
     vault_socket = {v: sid for sid, grp in shards for v in grp}
-    baseline: dict = {}
     loop = asyncio.get_event_loop()
     await asyncio.sleep(intervalle_s)                             # laisse le WS s'installer avant tout jugement
     while True:
         cur = _charger_curseurs(root)
+        n_appels, total_manquants, defaillants = 0, 0, set()
         for v, sid in vault_socket.items():
+            c = float(cur.get(v) or 0)
+            start = int((c if c > 0 else time.time() * 1000) - overlap_ms)   # fenêtre bornée (léger chevauchement)
             try:
-                rep = await loop.run_in_executor(None, SD.userfills_rest, v)   # REST bloquant hors event-loop
-                fr = SD.fills_rest_normalises(v, rep)
+                rep = await loop.run_in_executor(None, SD.userfills_by_time_rest, v, start)   # REST hors event-loop
+                n_appels += 1
             except Exception:  # noqa: BLE001 — le réseau ne fait JAMAIS crasher le garde
                 continue
-            dernier = max((f["ts_ms"] for f in fr), default=0)
-            ref = max(float(cur.get(v) or 0), float(baseline.get(v) or 0))
-            if ref <= 0:                                          # jamais de curseur -> baseline = historique connu
-                baseline[v] = dernier
+            if not isinstance(rep, list):
                 continue
-            if SD.fills_rest_en_retard(fr, ref, age_min_ms=age_min_ms):
-                print("[userfills] ⛔ shard %s DEFAILLANT : REST voit un fill que le WS a rate sur %s "
-                      "(dernier ts=%s > ref=%d) -> reconnexion ciblee" % (sid, v[:10], dernier, int(ref)), flush=True)
-                ws = _WS_PAR_SOCKET.get(sid)
-                if ws is not None:
-                    try:
-                        await ws.close()                          # rompt le async-for -> except -> reconnect de CE shard
-                    except Exception:  # noqa: BLE001
-                        pass
-            baseline[v] = max(float(baseline.get(v) or 0), dernier)
+            manquants = SD.fills_manquants_par_id(rep, _WS_KEYS.get(v, ()), age_min_ms=age_min_ms)
+            if manquants:
+                total_manquants += len(manquants)
+                defaillants.add(sid)
+                k0 = SD.cle_fill(manquants[0]) or (None, None, None, None, None)
+                print("[userfills] ⛔ shard %s DEFAILLANT : REST-WS=%d par id sur %s (ex tid=%s ts=%s) -> reconnexion ciblee"
+                      % (sid, len(manquants), v[:10], k0[2], k0[0]), flush=True)
+        for sid in defaillants:                                   # reconnecte CHAQUE shard fautif (curseur+dédup -> catch-up)
+            ws = _WS_PAR_SOCKET.get(sid)
+            if ws is not None:
+                try:
+                    await ws.close()                              # rompt le async-for -> except -> reconnect de CE shard
+                except Exception:  # noqa: BLE001
+                    pass
+        poids = SD.poids_rest_estime(n_appels, fenetre_s=intervalle_s)
+        print("[userfills] garde REST↔WS : REST-WS=%d par id · %d appels userFillsByTime · poids~%.0f/%d IP·min · %s"
+              % (total_manquants, n_appels, poids["poids_estime_par_min"], poids["limite_ip_par_min"],
+                 ("defaillants=%s" % sorted(defaillants)) if defaillants else "10/10 couverts (REST-WS=0)"), flush=True)
         await asyncio.sleep(intervalle_s)
 
 

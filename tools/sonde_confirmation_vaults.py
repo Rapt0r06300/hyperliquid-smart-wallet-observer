@@ -105,6 +105,52 @@ def intervalle_debit_s(n_max_par_min: int = CONN_MAX_PAR_MIN, *, marge: float = 
     return (60.0 / max(1, n_max_par_min)) * marge
 
 
+def cle_fill(f) -> tuple | None:
+    """CLÉ COMPOSITE d'un fill = (time, hash, tid, oid, coin) — robuste aux PLUSIEURS fills au même timestamp
+    (même hash de tx mais tid distincts). Fonctionne sur un fill BRUT HL (WS ou REST userFillsByTime). None si
+    illisible. `tid` (trade id) est l'identifiant réellement unique ; les autres composants le renforcent."""
+    if not isinstance(f, dict):
+        return None
+    def g(*noms):
+        for n in noms:
+            if f.get(n) is not None:
+                return f.get(n)
+        return None
+    t = g("time", "ts_ms")                                           # brut HL = 'time' ; toléré 'ts_ms' si déjà normalisé
+    coin = g("coin")
+    return (int(t) if t is not None else None, g("hash"), g("tid"), g("oid"),
+            str(coin).upper() if coin else None)
+
+
+def fills_manquants_par_id(fills_rest: list, cles_ws, *, age_min_ms: float = AGE_MIN_RETARD_MS,
+                           maintenant_ms: float | None = None) -> list:
+    """REST − WS PAR IDENTIFIANT : fills REST dont la CLÉ COMPOSITE n'est PAS dans l'ensemble des clés reçues
+    par le WS, ET assez vieux (âge ≥ age_min_ms : le WS a eu le temps de les recevoir). NON-VIDE ⇒ le WS a
+    raté un ou plusieurs fills que REST voit ⇒ shard DÉFAILLANT. Compare des ENSEMBLES, pas un simple curseur
+    (détecte les fills au même timestamp)."""
+    vus = {k for k in (cle_fill(x) if not isinstance(x, tuple) else x for x in cles_ws) if k is not None}
+    now = maintenant_ms if maintenant_ms is not None else time.time() * 1000
+    out = []
+    for f in fills_rest:
+        k = cle_fill(f)
+        if k is None:
+            continue
+        t = k[0] or 0
+        if k not in vus and (now - t) >= age_min_ms:
+            out.append(f)
+    return out
+
+
+def poids_rest_estime(n_appels: int, *, poids_par_appel: int = 20, fenetre_s: float = 90.0,
+                      limite_ip_par_min: int = 1200) -> dict:
+    """Poids REST ESTIMÉ du garde (visibilité budget IP HL ≈ 1200 poids/min/IP). `userFillsByTime` ≈ 20 poids/
+    appel (hypothèse prudente, labellisée « estimé »). Rend n_appels, poids/min estimé et la limite IP pour
+    comparer — afin que ce garde, AJOUTÉ aux autres collecteurs, ne menace jamais la limite."""
+    par_min = (n_appels / max(fenetre_s, 1.0)) * 60.0 * poids_par_appel
+    return {"n_appels": n_appels, "poids_par_appel": poids_par_appel,
+            "poids_estime_par_min": round(par_min, 1), "limite_ip_par_min": limite_ip_par_min}
+
+
 # ─────────────────────────────── réseau (lecture seule, borné, poli) ───────────────────────────────
 
 def _curseurs(root: Path) -> dict:
@@ -117,6 +163,16 @@ def _curseurs(root: Path) -> dict:
 def userfills_rest(vault: str, *, timeout_s: float = 8.0):
     """POST /info {"type":"userFills","user":vault} PUBLIC (lecture seule). Rend la liste brute ou []."""
     corps = json.dumps({"type": "userFills", "user": vault}).encode("utf-8")
+    req = urllib.request.Request(URL_HL_INFO, data=corps, headers={"Content-Type": "application/json"})
+    with urllib.request.urlopen(req, timeout=timeout_s) as rep:  # noqa: S310 (URL constante publique)
+        return json.loads(rep.read().decode("utf-8"))
+
+
+def userfills_by_time_rest(vault: str, start_ms: int, *, timeout_s: float = 8.0):
+    """POST /info {"type":"userFillsByTime","user":vault,"startTime":start_ms} PUBLIC (lecture seule). FENÊTRE
+    BORNÉE depuis le dernier curseur (avec léger chevauchement) → peu de fills → poids REST faible. Rend la
+    liste brute ou []. À dédupliquer/comparer par CLÉ COMPOSITE côté appelant."""
+    corps = json.dumps({"type": "userFillsByTime", "user": vault, "startTime": int(start_ms)}).encode("utf-8")
     req = urllib.request.Request(URL_HL_INFO, data=corps, headers={"Content-Type": "application/json"})
     with urllib.request.urlopen(req, timeout=timeout_s) as rep:  # noqa: S310 (URL constante publique)
         return json.loads(rep.read().decode("utf-8"))

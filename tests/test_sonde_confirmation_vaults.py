@@ -90,3 +90,36 @@ def test_intervalle_debit_reste_sous_le_plafond():
     # avec marge ×2, 30/min -> 4 s entre connexions -> effectif 15/min << 30 (largement sous le plafond)
     assert S.intervalle_debit_s(30, marge=2.0) == 4.0
     assert 60.0 / S.intervalle_debit_s(30, marge=2.0) <= 30
+
+
+def test_cle_fill_composite_distingue_meme_timestamp_meme_hash():
+    a = {"time": 1000, "hash": "0xabc", "tid": 111, "oid": 9, "coin": "sol"}
+    b = {"time": 1000, "hash": "0xabc", "tid": 222, "oid": 9, "coin": "SOL"}   # même ts+hash, tid distinct
+    assert S.cle_fill(a) == (1000, "0xabc", 111, 9, "SOL")
+    assert S.cle_fill(a) != S.cle_fill(b)                          # 2 fills au même timestamp -> clés DISTINCTES
+    assert S.cle_fill("pas un dict") is None
+    assert S.cle_fill({"coin": "SOL"}) == (None, None, None, None, "SOL")   # tolérant aux champs manquants
+
+
+def test_fills_manquants_par_id_detecte_le_fill_rate_au_meme_ts():
+    now = 10_000_000.0
+    T = int(now - 60_000)                                          # fill vieux de 60 s (≥ 45 s : le WS aurait dû l'avoir)
+    a = {"time": T, "hash": "0xh", "tid": 1, "oid": 5, "coin": "SOL"}
+    b = {"time": T, "hash": "0xh", "tid": 2, "oid": 5, "coin": "SOL"}   # 2e fill AU MÊME timestamp
+    ws_vus = [S.cle_fill(a)]                                       # le WS n'a reçu que A
+    manq = S.fills_manquants_par_id([a, b], ws_vus, maintenant_ms=now)
+    assert [S.cle_fill(x)[2] for x in manq] == [2]                # B (tid=2) détecté manquant — le curseur==dernier_ts l'aurait raté
+
+
+def test_fills_manquants_par_id_couvert_et_anticourse():
+    now = 10_000_000.0
+    vieux = {"time": int(now - 60_000), "hash": "h", "tid": 7, "coin": "SOL"}
+    frais = {"time": int(now - 5_000), "hash": "h", "tid": 8, "coin": "SOL"}   # trop frais -> pas d'accusation
+    assert S.fills_manquants_par_id([vieux], [S.cle_fill(vieux)], maintenant_ms=now) == []   # vu par WS -> couvert
+    assert S.fills_manquants_par_id([frais], [], maintenant_ms=now) == []                    # <45 s -> anti-course
+
+
+def test_poids_rest_estime_reste_sous_la_limite_ip():
+    p = S.poids_rest_estime(10, poids_par_appel=20, fenetre_s=90.0)   # 10 vaults / 90 s
+    assert p["n_appels"] == 10 and p["limite_ip_par_min"] == 1200
+    assert p["poids_estime_par_min"] < p["limite_ip_par_min"]         # le garde ne menace jamais la limite IP
