@@ -415,6 +415,7 @@ async def _userfills_multiplex(root: Path, vaults: list, file: asyncio.Queue, so
                     print("[userfills] socket %s subscribe %d/%d userFills %s" % (socket_id, i + 1, len(vaults), v[:10]), flush=True)
                     await asyncio.sleep(0.3)                   # THROTTLE léger (5 subscribes) : évite tout drop HL
                 print("[userfills] socket %s — %d abonnements userFills demandes" % (socket_id, len(vaults)), flush=True)
+                confirmes: set = set()                            # vaults ayant envoyé ≥1 message = ABONNEMENT CONFIRMÉ
                 async for brut in ws:
                     try:
                         msg = json.loads(brut)
@@ -428,6 +429,9 @@ async def _userfills_multiplex(root: Path, vaults: list, file: asyncio.Queue, so
                     vault = _vault_du_message(msg, connus)
                     if not vault:
                         continue
+                    if vault not in confirmes:                     # 1er message (snapshot/fill) = ABONNEMENT CONFIRMÉ (fiable,
+                        confirmes.add(vault)                       # contrairement au subscriptionResponse partiel de HL)
+                        print("[userfills] socket %s vault CONFIRME (1er msg) %s [%d/%d]" % (socket_id, vault[:10], len(confirmes), len(vaults)), flush=True)
                     fills = UL.parser_message_userfills(msg, vault=vault)
                     if not fills:
                         continue
