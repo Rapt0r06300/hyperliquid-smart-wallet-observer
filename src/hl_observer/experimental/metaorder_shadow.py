@@ -368,6 +368,171 @@ def agreger_par(signaux: list, cle: str) -> dict:
     return out
 
 
+NOTIONALS_DEFAUT = (10.0, 25.0, 50.0, 100.0, 250.0, 500.0)   # courbe edge/coûts par taille de copie
+PREREG_RELPATH = Path("runtime") / "data" / "metaorder_preregistration.json"
+
+
+def vwap_slippage(book: dict, notional_usd: float, sens: int) -> tuple:
+    """WALK du carnet l2Book pour un notional : côté ASK si achat (sens>0), BID si vente. Rend
+    (vwap, slippage_bps_vs_mid, filled_usd, profondeur_suffisante). Slippage = coût d'exécuter la TAILLE
+    (inclut le demi-spread du touch). profondeur_suffisante=False si le carnet ne remplit pas le notional."""
+    try:
+        bids, asks = book["levels"][0], book["levels"][1]
+        bid, ask = float(bids[0]["px"]), float(asks[0]["px"])
+    except (KeyError, IndexError, TypeError, ValueError):
+        return (None, None, 0.0, False)
+    if bid <= 0 or ask <= 0:
+        return (None, None, 0.0, False)
+    mid = 0.5 * (bid + ask)
+    cote = asks if sens > 0 else bids
+    reste, base = float(notional_usd), 0.0
+    for niv in cote:
+        try:
+            px, sz = float(niv["px"]), float(niv["sz"])
+        except (KeyError, TypeError, ValueError):
+            continue
+        pris = min(px * sz, reste)
+        if px > 0:
+            base += pris / px
+        reste -= pris
+        if reste <= 1e-9:
+            break
+    filled = float(notional_usd) - reste
+    if base <= 0:
+        return (None, None, 0.0, False)
+    vwap = filled / base
+    slip = sens * (vwap - mid) / mid * 1e4
+    return (round(vwap, 8), round(slip, 3), round(filled, 2), reste <= 1e-9)
+
+
+def cout_composants(book: dict, notional_usd: float, sens: int, fee_ar_bps: float) -> dict | None:
+    """Coût aller-retour DÉCOMPOSÉ pour un notional : spread (½ à l'entrée + ½ à la sortie), slippage VWAP PUR
+    (impact au-delà du touch, ×2 A/R) et frais (palier exact, déjà A/R dans fee_ar_bps). Rend chaque composant
+    séparément + le total. None si carnet illisible."""
+    v = vwap_slippage(book, notional_usd, sens)
+    vwap, slip_touch, filled, complet = v
+    try:
+        bids, asks = book["levels"][0], book["levels"][1]
+        bid, ask = float(bids[0]["px"]), float(asks[0]["px"])
+        mid = 0.5 * (bid + ask)
+        spread = (ask - bid) / mid * 1e4
+    except (KeyError, IndexError, TypeError, ValueError):
+        return None
+    if vwap is None or slip_touch is None:
+        return None
+    slip_pur = max(0.0, slip_touch - spread / 2.0)                # au-delà du 1er niveau (le ½ spread est le touch)
+    cout_ar = spread + 2.0 * slip_pur + float(fee_ar_bps)
+    return {"spread_bps": round(spread, 3), "slippage_vwap_bps": round(2.0 * slip_pur, 3),
+            "fee_bps": round(float(fee_ar_bps), 3), "vwap": vwap, "cout_ar_bps": round(cout_ar, 3),
+            "profondeur_suffisante": complet, "filled_usd": filled}
+
+
+def courbe_edge_cout(signaux: list, book_par_coin: dict, *, fee_ar_bps: float,
+                     notionals=NOTIONALS_DEFAUT, n_boot: int = 1000) -> dict:
+    """Courbe EDGE/COÛTS par STADE et par NOTIONAL : net = gross(ret_coin_bps) − coût_A/R(notional) mesuré au
+    VRAI carnet (spread + slippage VWAP + frais). Par stade → {courbe: {notional: {net_moy, IC95 clusterisé,
+    n_métaordres, spread, slippage, fee, %profondeur}}, **capacite_usd_edge_positif** = plus grand notional où
+    net_moy > 0 (0 si aucun)}. C'est la VRAIE capacité L2 (pas la somme des tailles leader)."""
+    from collections import defaultdict
+    parstade = defaultdict(list)
+    for s in signaux:
+        parstade[s.get("stade")].append(s)
+    out: dict = {}
+    for stade, xs in parstade.items():
+        courbe, cap = {}, 0.0
+        for N in notionals:
+            paires, sp, sl, cp, tot = [], [], [], 0, 0
+            for s in xs:
+                g, book = s.get("ret_coin_bps"), book_par_coin.get(s.get("coin"))
+                if g is None or not book:
+                    continue
+                cc = cout_composants(book, N, int(s.get("sens") or 1), fee_ar_bps)
+                if not cc:
+                    continue
+                paires.append((s.get("metaorder_id"), float(g) - cc["cout_ar_bps"]))
+                sp.append(cc["spread_bps"])
+                sl.append(cc["slippage_vwap_bps"])
+                tot += 1
+                cp += 1 if cc["profondeur_suffisante"] else 0
+            boot = bootstrap_clusterise(paires, n=n_boot)
+            courbe[str(int(N))] = {"net_moy_bps": boot["moy"], "net_ic95": [boot["ic_bas"], boot["ic_haut"]],
+                                   "n_metaordres": boot["n_clusters"],
+                                   "spread_moy_bps": round(sum(sp) / len(sp), 2) if sp else None,
+                                   "slippage_moy_bps": round(sum(sl) / len(sl), 2) if sl else None,
+                                   "fee_bps": round(float(fee_ar_bps), 2),
+                                   "profondeur_suffisante_pct": round(100 * cp / tot, 1) if tot else None}
+            if boot["moy"] is not None and boot["moy"] > 0:
+                cap = max(cap, float(N))
+        out[stade] = {"courbe": courbe, "capacite_usd_edge_positif": cap}
+    return out
+
+
+def comparer_executions(signal: dict, tape_coin: list, book: dict, *, fee_taker_ar_bps: float,
+                        fee_maker_ar_bps: float, notional_usd: float = 100.0, horizon_ms: float = HORIZON_FWD_MS,
+                        fenetre_passif_ms: float = 60_000.0) -> dict:
+    """Compare 3 exécutions en SHADOW pour un signal, SANS fill fictif :
+    • taker_immediat : net = gross − coût_A/R(taker, notional) au vrai carnet ;
+    • limite_passive_bornee : limite au TOUCH passif (bid si achat), valable fenetre_passif_ms. FILL SEULEMENT si
+      le tape atteint notre limite (sinon `rempli=False` = fill MANQUÉ). Si rempli : délai, queue devant (taille
+      au niveau), adverse selection (rendement conditionnel au fill) ; frais maker, ~0 slippage/spread ;
+    • no_trade : 0. Rend un dict complet. Aucune position inventée."""
+    sens = int(signal.get("sens") or 1)
+    t = int(signal.get("fill_time") or 0)
+    pe = prix_au(tape_coin, t)
+    pf = prix_au(tape_coin, t + horizon_ms)
+    res = {"taker_immediat": None, "limite_passive": None, "no_trade": 0.0}
+    # taker
+    cc = cout_composants(book, notional_usd, sens, fee_taker_ar_bps)
+    if pe and pf is not None and cc:
+        res["taker_immediat"] = round(sens * (pf - pe) / pe * 1e4 - cc["cout_ar_bps"], 3)
+    # passive au touch
+    try:
+        bids, asks = book["levels"][0], book["levels"][1]
+        limite = float(bids[0]["px"]) if sens > 0 else float(asks[0]["px"])
+        q_sz = float((bids[0] if sens > 0 else asks[0])["sz"])
+    except (KeyError, IndexError, TypeError, ValueError):
+        limite = q_sz = None
+    if limite and pf is not None:
+        # fill si le tape franchit la limite dans la fenêtre (achat: prix <= limite ; vente: prix >= limite)
+        t_fill = None
+        for (tt, px) in tape_coin or []:
+            if t < tt <= t + fenetre_passif_ms and ((sens > 0 and px <= limite) or (sens < 0 and px >= limite)):
+                t_fill = tt
+                break
+        if t_fill is None:
+            res["limite_passive"] = {"rempli": False, "raison": "fill_manque"}
+        else:
+            net = sens * (pf - limite) / limite * 1e4 - float(fee_maker_ar_bps)   # entrée au touch, frais maker
+            adverse = sens * (prix_au(tape_coin, t_fill + 5_000) - limite) / limite * 1e4 \
+                if prix_au(tape_coin, t_fill + 5_000) is not None else None
+            res["limite_passive"] = {"rempli": True, "delai_ms": t_fill - t, "queue_devant_usd": round((q_sz or 0) * limite, 1),
+                                     "adverse_selection_bps": round(adverse, 3) if adverse is not None else None,
+                                     "net_bps": round(net, 3)}
+    return res
+
+
+def write_preregistration(root, *, notionals=NOTIONALS_DEFAUT, horizon_ms: float = HORIZON_FWD_MS) -> Path:
+    """PRÉ-ENREGISTRE (une seule fois, jamais réécrit → anti data-snooping) l'UNIQUE variante future testable :
+    `CONTINUATION/LATE + OFI top-5`, exécutions {taker_immediat, limite_passive_bornee, no_trade}, validée
+    UNIQUEMENT en walk-forward OOS sur les PROCHAINES fenêtres. Aucune sélection/retune sur la fenêtre courante."""
+    p = Path(root) / PREREG_RELPATH
+    if p.exists():
+        return p                                                 # gelé : on ne réécrit JAMAIS (anti-retune)
+    p.parent.mkdir(parents=True, exist_ok=True)
+    p.write_text(json.dumps({
+        "version": "prereg_v1", "gele_le_ts_ms": int(time.time() * 1000),
+        "hypothese_unique": {"stades": ["CONTINUATION", "LATE_STAGE"], "filtre": "OFI_top5>0 (confirmation flux)",
+                             "executions_comparees": ["taker_immediat", "limite_passive_bornee", "no_trade"],
+                             "notionals_usd": list(notionals), "horizon_ms": horizon_ms},
+        "regle_validation": "walk-forward OOS sur les PROCHAINES fenetres UNIQUEMENT ; aucune selection ni retune "
+                            "sur la fenetre courante",
+        "regle_decision": "n'ouvrir une cohorte QUE si edge net FORTEMENT positif apres couts, contre placebo, "
+                          "sur OOS futur ; sinon KILL/OBSERVE",
+        "note": "pre-enregistre pour eviter le data-snooping ; JAMAIS modifie retroactivement",
+    }, ensure_ascii=False, indent=2), encoding="utf-8")
+    return p
+
+
 # ─────────────────────────────── runner SHADOW (réseau, borné, poli) ───────────────────────────────
 
 def _providers_reels():
@@ -386,58 +551,73 @@ def _providers_reels():
     def twap_provider(vault, start_ms):
         return _post({"type": "userTwapSliceFills", "user": vault})
 
-    def l2_provider(coin):
+    def book_provider(coin):
         import sys as _s
         _s.path.insert(0, str(Path(__file__).resolve().parents[3] / "tools"))
-        from collecter_carnet import _post_hl, parser_book_hl
-        rep = _post_hl(coin, timeout_s=6.0)
-        p = parser_book_hl(rep)
-        if not p:
-            return None
-        bid, ask, bsz, asz = p
+        from collecter_carnet import _post_hl
+        return _post_hl(coin, timeout_s=6.0)                      # carnet BRUT {levels:[bids,asks]} pour le VWAP-walk
+    return userfills_by_time_rest, twap_provider, book_provider
+
+
+def _resume_book(book) -> dict | None:
+    """Résumé {hl_bid, hl_ask, depth_usd top-5} depuis un carnet BRUT (pour le coût per-signal existant)."""
+    try:
+        bids, asks = book["levels"][0], book["levels"][1]
+        bid, ask = float(bids[0]["px"]), float(asks[0]["px"])
         mid = 0.5 * (bid + ask)
-        depth = min(bsz, asz) * mid
+        depth = min(sum(float(x["sz"]) for x in bids[:5]), sum(float(x["sz"]) for x in asks[:5])) * mid
         return {"hl_bid": bid, "hl_ask": ask, "depth_usd": round(depth, 2)}
-    return userfills_by_time_rest, twap_provider, l2_provider
+    except (KeyError, IndexError, TypeError, ValueError):
+        return None
 
 
-def executer(root: str | Path, vaults: list, *, fills_provider=None, twap_provider=None, l2_provider=None,
+def executer(root: str | Path, vaults: list, *, fills_provider=None, twap_provider=None, book_provider=None,
              tape=None, horizon_ms: float = HORIZON_FWD_MS, fenetre_ms: float = 7_200_000.0,
              config_hash: str = "", git_commit: str = "", maintenant_ms: float | None = None) -> dict:
-    """Passe SHADOW : par vault, `userFillsByTime` (fenêtre bornée) + `userTwapSliceFills` (statut TWAP), coût
-    L2 réel par coin, construit les signaux (dédup + metaorder_id), écrit ledger + stats (clusterisées,
-    walk-forward, groupées) + budget REST EXACT. INJECTABLE pour test. N'OUVRE AUCUNE POSITION."""
+    """Passe SHADOW : par vault, `userFillsByTime` + `userTwapSliceFills` (statut TWAP) ; carnet BRUT par coin
+    (VWAP-walk) → coût per-signal + **courbe edge/coûts par notional** (10..500 $, spread/slippage/frais séparés,
+    VRAIE capacité L2) + **comparaison d'exécutions** (taker/passif/no-trade) sur CONTINUATION/LATE. Pré-enregistre
+    l'unique variante future. Écrit ledger + stats (clusterisées, walk-forward, groupées) + budget REST EXACT.
+    INJECTABLE pour test. N'OUVRE AUCUNE POSITION."""
     import sys
     sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "tools"))
     import sonde_confirmation_vaults as SD
     root = Path(root)
     now = maintenant_ms if maintenant_ms is not None else time.time() * 1000
-    if fills_provider is None or twap_provider is None or l2_provider is None:
-        fp, tp, lp = _providers_reels()
+    if fills_provider is None or twap_provider is None or book_provider is None:
+        fp, tp, bp = _providers_reels()
         fills_provider = fills_provider or fp
         twap_provider = twap_provider or tp
-        l2_provider = l2_provider or lp
+        book_provider = book_provider or bp
     if tape is None:
         try:
             from hl_observer.experimental.copy_edge_forward import charger_prix_tape
             tape = charger_prix_tape(root)
         except Exception:  # noqa: BLE001
             tape = {}
+    try:
+        from hl_observer.experimental.carry_deux_jambes import frais_venues
+        fee_ar = round(2.0 * float(frais_venues(root)[0]), 3)     # PALIER EXACT sourcé (A/R taker)
+    except Exception:  # noqa: BLE001
+        fee_ar = FRAIS_TAKER_BPS
     tape_btc = tape.get("BTC") or []
     start = int(now - fenetre_ms)
     signaux: list = []
     appels_budget: list = []
     twap_statut: dict = {}
-    l2_cache: dict = {}
+    book_cache: dict = {}
 
-    def _cout_fn(coin, taille_usd):
-        if coin not in l2_cache:
+    def _book(coin):
+        if coin not in book_cache:
             try:
-                l2_cache[coin] = l2_provider(coin)
+                book_cache[coin] = book_provider(coin)
                 appels_budget.append(("l2Book", 0))
             except Exception:  # noqa: BLE001
-                l2_cache[coin] = None
-        return cout_l2_reel_bps(l2_cache.get(coin), taille_usd)
+                book_cache[coin] = None
+        return book_cache.get(coin)
+
+    def _cout_fn(coin, notional_usd):
+        return cout_l2_reel_bps(_resume_book(_book(coin)), notional_usd)
 
     for v in vaults:
         try:
@@ -466,6 +646,10 @@ def executer(root: str | Path, vaults: list, *, fills_provider=None, twap_provid
                           "shadow": True, "real_execution": False, "ts_ms": int(now)})
             signaux.extend(sigs)
 
+    book_par_coin = {c: b for c, b in book_cache.items() if b}
+    courbe = courbe_edge_cout(signaux, book_par_coin, fee_ar_bps=fee_ar)
+    execs = _comparer_stades(signaux, tape, book_par_coin, fee_ar, horizon_ms)   # taker/passif/no-trade
+    prereg = write_preregistration(root, horizon_ms=horizon_ms)
     stats = stats_par_stade(signaux)
     wf = walk_forward_purge(signaux, horizon_ms=horizon_ms)
     poids = SD.poids_info(appels_budget)
@@ -474,13 +658,56 @@ def executer(root: str | Path, vaults: list, *, fills_provider=None, twap_provid
     n_twap = {k: sum(1 for vv in twap_statut.values() if vv == k) for k in set(twap_statut.values())}
     _ecrire(root, signaux, {
         "version": VERSION, "n_signaux": len(signaux), "n_metaordres": len({s["metaorder_id"] for s in signaux}),
-        "stats_par_stade": stats, "walk_forward_purge": wf,
+        "fee_ar_bps": fee_ar, "stats_par_stade": stats, "courbe_edge_cout_par_notional": courbe,
+        "execution_comparee_continuation_late": execs, "walk_forward_purge": wf,
         "par_vault": agreger_par(signaux, "vault"), "par_coin": agreger_par(signaux, "coin"),
         "par_jour": agreger_par(signaux, "jour"), "twap_statut_par_vault": n_twap,
+        "preregistration": str(prereg.name),
         "budget_rest": {"poids_passe": poids, "n_appels": len(appels_budget), "total_ip": budget},
     }, now)
     return {"n_signaux": len(signaux), "n_metaordres": len({s["metaorder_id"] for s in signaux}),
-            "poids_passe": poids, "n_appels": len(appels_budget), "budget_total": budget, "stats": stats}
+            "poids_passe": poids, "n_appels": len(appels_budget), "budget_total": budget,
+            "stats": stats, "courbe": courbe, "execs": execs}
+
+
+def _comparer_stades(signaux: list, tape: dict, book_par_coin: dict, fee_ar: float, horizon_ms: float,
+                     *, notional_usd: float = 100.0) -> dict:
+    """Agrège la comparaison taker/passif/no-trade sur les stades pré-enregistrés (CONTINUATION/LATE), à
+    notional=100 $. Passif : taux de fill, délai, adverse selection (aucun fill fictif)."""
+    from collections import defaultdict
+    g: dict = defaultdict(lambda: {"taker": [], "fill": 0, "miss": 0, "net": [], "delai": [], "adverse": []})
+    for s in signaux:
+        if s.get("stade") not in ("CONTINUATION", "LATE_STAGE"):
+            continue
+        book = book_par_coin.get(s.get("coin"))
+        if not book:
+            continue
+        r = comparer_executions(s, tape.get(s.get("coin")) or [], book, fee_taker_ar_bps=fee_ar,
+                                fee_maker_ar_bps=fee_ar, notional_usd=notional_usd, horizon_ms=horizon_ms)
+        gg = g[s["stade"]]
+        if r["taker_immediat"] is not None:
+            gg["taker"].append(r["taker_immediat"])
+        lp = r.get("limite_passive")
+        if isinstance(lp, dict):
+            if lp.get("rempli"):
+                gg["fill"] += 1
+                gg["net"].append(lp["net_bps"])
+                gg["delai"].append(lp["delai_ms"])
+                if lp.get("adverse_selection_bps") is not None:
+                    gg["adverse"].append(lp["adverse_selection_bps"])
+            else:
+                gg["miss"] += 1
+    out: dict = {}
+    for st, d in g.items():
+        nf, nm = d["fill"], d["miss"]
+        out[st] = {"notional_usd": notional_usd,
+                   "taker_net_moy_bps": round(sum(d["taker"]) / len(d["taker"]), 2) if d["taker"] else None,
+                   "passif_fill_rate_pct": round(100 * nf / (nf + nm), 1) if (nf + nm) else None,
+                   "passif_net_moy_bps_si_fill": round(sum(d["net"]) / len(d["net"]), 2) if d["net"] else None,
+                   "passif_delai_moy_ms": round(sum(d["delai"]) / len(d["delai"])) if d["delai"] else None,
+                   "passif_adverse_moy_bps": round(sum(d["adverse"]) / len(d["adverse"]), 2) if d["adverse"] else None,
+                   "no_trade_net_bps": 0.0}
+    return out
 
 
 def _ecrire(root: Path, signaux: list, resume: dict, now: float) -> None:
@@ -497,4 +724,6 @@ def _ecrire(root: Path, signaux: list, resume: dict, now: float) -> None:
 __all__ = ["VERSION", "sens_fill", "maker_taker", "dedup_fills", "metaorder_id", "index_twap", "est_twap",
            "detecter_metaordres", "classer_stade", "pnl_forward_net_bps", "placebo_bps", "ofi_top5", "prix_au",
            "cout_l2_reel_bps", "construire_signaux", "bootstrap_clusterise", "walk_forward_purge",
-           "stats_par_stade", "agreger_par", "executer", "LEDGER_RELPATH", "STATS_RELPATH"]
+           "stats_par_stade", "agreger_par", "vwap_slippage", "cout_composants", "courbe_edge_cout",
+           "comparer_executions", "write_preregistration", "NOTIONALS_DEFAUT", "executer",
+           "LEDGER_RELPATH", "STATS_RELPATH", "PREREG_RELPATH"]

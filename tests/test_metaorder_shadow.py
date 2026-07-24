@@ -102,21 +102,81 @@ def test_agreger_par_vault():
     assert g["0xA"]["n_metaordres"] == 1 and g["0xB"]["pnl_net_bps_moy"] == 5.0
 
 
-def test_executer_runner_injecte_budget_exact_et_n_ouvre_rien(tmp_path):
+def _book(mid_spread=20.0):
+    # carnet symétrique autour de mid=100, spread=mid_spread bps, 1000 unités par niveau
+    demi = mid_spread / 2.0 / 1e4 * 100.0
+    return {"levels": [[{"px": str(100 - demi), "sz": "1000"}, {"px": str(100 - demi - 0.1), "sz": "1000"}],
+                       [{"px": str(100 + demi), "sz": "1000"}, {"px": str(100 + demi + 0.1), "sz": "1000"}]]}
+
+
+def test_vwap_slippage_et_composants_separes():
+    b = _book(20.0)                                              # spread 20 bps, mid 100
+    vwap, slip, filled, complet = M.vwap_slippage(b, 100.0, 1)   # petit achat -> au touch
+    assert complet is True and abs(slip - 10.0) < 0.5            # slippage ~ demi-spread (touch)
+    cc = M.cout_composants(b, 100.0, 1, 9.0)
+    assert abs(cc["spread_bps"] - 20.0) < 0.5 and cc["slippage_vwap_bps"] == 0.0 and cc["fee_bps"] == 9.0
+    assert abs(cc["cout_ar_bps"] - 29.0) < 0.5                   # spread(20) + slippage(0) + frais(9)
+    # notional qui dépasse le 1er niveau -> slippage VWAP > 0
+    assert M.cout_composants(b, 150_000.0, 1, 9.0)["slippage_vwap_bps"] > 0
+    # profondeur insuffisante -> flag False
+    assert M.vwap_slippage(b, 10_000_000.0, 1)[3] is False
+
+
+def test_courbe_edge_cout_capacite_L2_vraie():
+    b = _book(20.0)
+    sig = [{"stade": "LATE_STAGE", "metaorder_id": "m%d" % i, "coin": "SOL", "sens": 1, "ret_coin_bps": 40.0}
+           for i in range(3)]                                    # gross +40 bps, coût ~29 -> net ~+11
+    c = M.courbe_edge_cout(sig, {"SOL": b}, fee_ar_bps=9.0, n_boot=200)["LATE_STAGE"]
+    assert c["courbe"]["100"]["net_moy_bps"] > 0 and c["courbe"]["100"]["spread_moy_bps"] > 0
+    assert c["capacite_usd_edge_positif"] == 500.0              # net>0 jusqu'à 500 $ -> capacité = 500
+    # gross négatif -> aucune capacité
+    sign = [{"stade": "LATE_STAGE", "metaorder_id": "m%d" % i, "coin": "SOL", "sens": 1, "ret_coin_bps": -5.0} for i in range(3)]
+    assert M.courbe_edge_cout(sign, {"SOL": b}, fee_ar_bps=9.0, n_boot=200)["LATE_STAGE"]["capacite_usd_edge_positif"] == 0.0
+
+
+def test_comparer_executions_passif_fill_miss_sans_fill_fictif():
+    b = _book(20.0)
+    sig = {"sens": 1, "fill_time": 1000, "coin": "SOL"}
+    tape_fill = [(1000, 100.0), (2000, 99.9), (301000, 100.5)]   # descend au bid (99.9) -> fill passif
+    r = M.comparer_executions(sig, tape_fill, b, fee_taker_ar_bps=9.0, fee_maker_ar_bps=9.0,
+                              notional_usd=100.0, horizon_ms=300_000, fenetre_passif_ms=60_000)
+    assert r["taker_immediat"] is not None and r["no_trade"] == 0.0
+    assert r["limite_passive"]["rempli"] is True and r["limite_passive"]["delai_ms"] == 1000
+    assert r["limite_passive"]["queue_devant_usd"] > 0
+    tape_miss = [(1000, 100.0), (2000, 100.2), (301000, 100.5)]   # ne redescend jamais au bid -> MISS
+    r2 = M.comparer_executions(sig, tape_miss, b, fee_taker_ar_bps=9.0, fee_maker_ar_bps=9.0,
+                               notional_usd=100.0, horizon_ms=300_000, fenetre_passif_ms=60_000)
+    assert r2["limite_passive"]["rempli"] is False                # aucun fill fictif
+
+
+def test_preregistration_gelee_une_seule_fois(tmp_path):
+    p1 = M.write_preregistration(tmp_path)
+    d = json.loads(p1.read_text(encoding="utf-8"))
+    assert d["hypothese_unique"]["stades"] == ["CONTINUATION", "LATE_STAGE"]
+    assert "OFI" in d["hypothese_unique"]["filtre"] and "walk-forward" in d["regle_validation"]
+    t0 = d["gele_le_ts_ms"]
+    M.write_preregistration(tmp_path)                            # 2e appel : NE réécrit PAS (anti-retune)
+    assert json.loads(p1.read_text(encoding="utf-8"))["gele_le_ts_ms"] == t0
+
+
+def test_executer_runner_injecte_courbe_execs_prereg_et_n_ouvre_rien(tmp_path):
     now = 10_000_000
     fills = [_f("B", now - 400_000, tid=1, hsh="h1"), _f("B", now - 390_000, tid=2, hsh="h2")]
     tape = {"SOL": [(now - 400_000, 100.0), (now - 100_000, 101.0)], "BTC": [(now - 400_000, 50.0)]}
     res = M.executer(tmp_path, ["0xVault"],
                      fills_provider=lambda v, s: fills,
                      twap_provider=lambda v, s: [{"fill": {"tid": 1, "hash": "h1"}, "twapId": 7}],
-                     l2_provider=lambda c: {"hl_bid": 100.0, "hl_ask": 100.1, "depth_usd": 50_000.0},
+                     book_provider=lambda c: _book(20.0),
                      tape=tape, horizon_ms=300_000, maintenant_ms=now)
     assert res["n_signaux"] == 2 and res["n_metaordres"] == 1
-    # budget EXACT : userFillsByTime(2)=20 + userTwapSliceFills(1)=20 + l2Book=2 -> 42 (pas 36 amorti)
+    # budget EXACT : userFillsByTime(2)=20 + userTwapSliceFills(1)=20 + l2Book=2 -> 42
     assert res["poids_passe"] == 42 and res["n_appels"] == 3
-    lignes = (tmp_path / M.LEDGER_RELPATH).read_text(encoding="utf-8").splitlines()
-    assert len(lignes) == 2 and json.loads(lignes[0])["real_execution"] is False
     stats = json.loads((tmp_path / M.STATS_RELPATH).read_text(encoding="utf-8"))
+    assert "courbe_edge_cout_par_notional" in stats and "execution_comparee_continuation_late" in stats
     assert stats["twap_statut_par_vault"].get("couvert_avec_twap") == 1
-    assert stats["stats_par_stade"]["FIRST_SLICE"]["n_metaordres"] == 1
-    assert stats["budget_rest"]["poids_passe"] == 42
+    assert (tmp_path / M.PREREG_RELPATH).exists()               # pré-enregistrement écrit
+    assert json.loads(lines_first(tmp_path))["real_execution"] is False
+
+
+def lines_first(tmp_path):
+    return (tmp_path / M.LEDGER_RELPATH).read_text(encoding="utf-8").splitlines()[0]

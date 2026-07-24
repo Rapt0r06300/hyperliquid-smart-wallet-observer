@@ -578,10 +578,11 @@ async def _metaorder_shadow_periodique(root: Path, vaults: list, *, intervalle_s
                 None, lambda: MS.executer(root, list(vaults), config_hash=chash, git_commit=GIT_COMMIT))
             bt = res.get("budget_total") or {}
             stades = {k: (v.get("n_metaordres"), v.get("pnl_net_bps_moy")) for k, v in (res.get("stats") or {}).items()}
-            print("[userfills] metaorder_shadow : %d signaux · %d metaordres · %d appels · poids/passe=%d (rafale) · total REST~%.0f/%d IP·min · stades(n_mo,pnl_net)=%s"
+            cap = {k: v.get("capacite_usd_edge_positif") for k, v in (res.get("courbe") or {}).items()}
+            print("[userfills] metaorder_shadow : %d signaux · %d metaordres · %d appels · poids/passe=%d (rafale) · total REST~%.0f/%d IP·min · stades(n_mo,pnl)=%s · capacite$edge+=%s"
                   % (res.get("n_signaux", 0), res.get("n_metaordres", 0), res.get("n_appels", 0),
                      res.get("poids_passe", 0), bt.get("total_par_min_moyen", 0), bt.get("limite_ip_par_min", 1200),
-                     stades), flush=True)
+                     stades, cap), flush=True)
         except Exception as exc:  # noqa: BLE001 — la passe shadow ne fait JAMAIS crasher le collecteur
             print("[userfills] metaorder_shadow err %s" % str(exc)[:60], flush=True)
         await asyncio.sleep(intervalle_s)
