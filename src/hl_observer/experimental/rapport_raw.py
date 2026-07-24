@@ -57,8 +57,9 @@ def construire_rapport(root: str | Path) -> str | None:
          "- **âge RÉEL à l'exécution paper (total fill→open)** : %s ms" % lm.get("age_at_paper_fill_ms"),
          "- cycle_id : %s · open_run_id : %s · statut : %s" % (
              op.get("cycle_id"), op.get("open_run_id") or op.get("run_id"), op.get("statut")),
-         "- trigger_version : %s · **config_hash : %s…** · commit : %s" % (
-             op.get("trigger_version"), (op.get("config_hash") or "")[:19], (op.get("git_commit") or "")[:12]), ""]
+         "- trigger_version : %s · **config_hash : %s…** · commit : %s · transport : %s" % (
+             op.get("trigger_version"), (op.get("config_hash") or "")[:19], (op.get("git_commit") or "")[:12],
+             op.get("transport_version")), ""]
     if cl:
         notional = float(op.get("notional_usd") or 0.0) or 1.0
         roi = float(cl.get("realized_usd") or 0.0) / notional * 100.0

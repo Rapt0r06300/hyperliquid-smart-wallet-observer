@@ -149,11 +149,12 @@ def _ecriture_permise(root: Path) -> bool:
 
 
 def etat_initial(coh: Cohorte, root: Path, *, run_id: str | None = None, token: str | None = None,
-                 git_commit: str = "") -> dict:
+                 git_commit: str = "", transport_version: str = "") -> dict:
     import secrets
     import uuid
     return {"store": charger_store(coh, root), "agg": {}, "vus": set(),
             "run_id": run_id or ("run-" + uuid.uuid4().hex[:12]), "git_commit": git_commit,
+            "transport_version": transport_version,        # transport WS (hors config_hash) : compare latence avant/après
             "token": token or secrets.token_hex(16)}      # provenance HORS PAYLOAD (en mémoire)
 
 
@@ -330,7 +331,7 @@ def _maj_coins_prewarm(root: Path, coin: str, *, now_ms: float) -> None:
 
 def _ouvrir(coh: Cohorte, store: dict, root: Path, *, cle, coin, sens, notional, prix, cfg, cout_ar,
             spread, slippage, fhl, vault, now_ms, fill_ts, lat_mono, run_id="", src_l2="", marque="",
-            trigger_version="", placebo=None, config_hash="", git_commit="") -> dict:
+            trigger_version="", placebo=None, config_hash="", git_commit="", transport_version="") -> dict:
     import uuid
     eb = cfg.get("edge_brut_bps")
     edge_net = (float(eb) - cout_ar) if eb is not None else None    # RAW : pas d'edge (NON_VALIDEE)
@@ -346,7 +347,7 @@ def _ouvrir(coh: Cohorte, store: dict, root: Path, *, cle, coin, sens, notional,
                     "source": SOURCE_LIVE, "src_l2": src_l2, "statut": marque or "VALIDEE",
                     "trigger_version": trigger_version, "placebo": placebo, "config_hash": config_hash,
                     "cycle_id": cycle_id, "open_run_id": run_id, "notional_open_usd": round(notional, 2),
-                    "git_commit": git_commit}}
+                    "git_commit": git_commit, "transport_version": transport_version}}
     store["ouvertes"][cle] = pos
     store["cash"] = round(store["cash"] - notional, 6)
     _ledger(coh, root, {"evt": "OPEN", "ts_ms": now_ms, "paire": cle, "coin": coin, "sens": sens,
@@ -355,6 +356,7 @@ def _ouvrir(coh: Cohorte, store: dict, root: Path, *, cle, coin, sens, notional,
                         "src_l2": src_l2, "statut": marque or "VALIDEE", "trigger_version": trigger_version,
                         "age_at_paper_fill_ms": lat_mono.get("age_at_paper_fill_ms"),
                         "cycle_id": cycle_id, "open_run_id": run_id, "config_hash": config_hash, "git_commit": git_commit,
+                        "transport_version": transport_version,
                         "motif": ("RAW mesure (sans edge)" if not coh.edge_requis else "copy OPEN/ADD + L2<1s + edge net>0")})
     _sauver(coh, root, store)
     if not coh.edge_requis:                                          # RAW : abonne le coin en BBO/L2 pour la vie de la position
@@ -385,6 +387,7 @@ def _sortir(coh: Cohorte, pos: dict, store: dict, root: Path, *, prix_sortie, co
                         "cycle_id": meta.get("cycle_id"), "open_run_id": meta.get("open_run_id") or meta.get("run_id"),
                         "close_run_id": close_run_id, "notional_open_usd": meta.get("notional_open_usd"),
                         "config_hash": meta.get("config_hash"), "git_commit": meta.get("git_commit"),
+                        "transport_version": meta.get("transport_version"),
                         "ret_coin_bps": ret_coin_bps, "ret_marche_bps": ret_marche_bps,
                         "placebo_marche_bps": placebo_marche_bps, "alpha_vs_marche_bps": alpha_vs_marche_bps})
     _sauver(coh, root, store)
@@ -559,7 +562,7 @@ def traiter_fill(coh: Cohorte, etat: dict, fill: dict, root: Path, *, now_ms: fl
                   cout_ar=cout_ar, spread=spread, slippage=slippage, fhl=fhl, vault=vault, now_ms=now,
                   fill_ts=ag["fill_ts"], lat_mono=lat_mono, run_id=etat.get("run_id", ""), src_l2=l2.get("src", ""),
                   marque=coh.marque, trigger_version=_trig, placebo=placebo, config_hash=_chash,
-                  git_commit=etat.get("git_commit", ""))
+                  git_commit=etat.get("git_commit", ""), transport_version=etat.get("transport_version", ""))
     return {"ouverture": pos, "latence_ws_open_ms": lat_mono["ws_open_ms"], "paire": cle,
             "age_at_paper_fill_ms": age_paper}
 

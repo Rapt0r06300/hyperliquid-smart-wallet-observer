@@ -1,14 +1,13 @@
-# Rapport quotidien HyperSmart — 24/07/2026 11:24
+# Rapport quotidien HyperSmart — 24/07/2026 12:11
 
 _Chaque chiffre se remonte à un fichier (ledger, positions, journaux). Fenêtre : dernières 24 h._
 
 ## 1. PnL réalisé (dernières 24 h)
 
 - `MODULE_CARRY_DESACTIVE` : **-3.3242 $** (×6)
-- `DONNEE_ABSENTE_PROLONGEE` : **-1.4779 $** (×6)
 - `ARB_AGE_MAX_SANS_CONVERGENCE` : **+0.1667 $** (×2)
 
-**Total 24 h : -4.6354 $** · 14 fermeture(s)
+**Total 24 h : -3.1574 $** · 8 fermeture(s)
 
 Total historique (toutes époques, jamais maquillé) : **-12.7808 $** sur 90 fermetures.
 
@@ -18,27 +17,21 @@ Aucune position ouverte.
 
 ## 3. Santé du système
 
-- Collecteurs : **1 MUET(S)** — carry-feeder (silence 1194.6 min)
+- Collecteurs : **1 MUET(S)** — carry-feeder (silence 1241.6 min)
 - Superviseur : relances cumulées {'carry-feeder': 2, 'marks-collector': 2, 'liq-collector': 2, 'venues-collector': 3, 'rapport-quotidien': 1, 'carnet-collector': 1}
 
 ## 4. Mesures en cours
 
-- Cross-venue : **115.9 h / 72 h** (401826 observations) — verdict aux barres pré-écrites, jamais avant.
-- Usine à données replay (24 h) : **6 candidats** · **122191 marks** — c'est le carburant du replay A/B.
+- Cross-venue : **116.1 h / 72 h** (403886 observations) — verdict aux barres pré-écrites, jamais avant.
+- Usine à données replay (24 h) : **9 candidats** · **116182 marks** — c'est le carburant du replay A/B.
 
 ## 5. Refus dominants (24 h) — le bot explique pourquoi il n'ouvre pas
 
-- ×10 `INPUTS_SPOT_PERIMES_NO_TRADE`
+Aucun refus sur la fenêtre (ou aucune décision).
 
 ## 6. Leçons du ledger — aucune perte sans explication
 
-12 perte(s), -4.8021 $ au total :
-- 🔴 **RÉGRESSION** HYPE -0.1358 $ `DONNEE_ABSENTE_PROLONGEE` — cause reparee (e82dd4a+b6debb2) qui REVIENT apres le correctif : fermetures famine/rate-de-bougies : hors-shortlist gate par amortissement quand la donnee est vivante + cache pire-hausse 24 h. Le vrai blackout (0 mesure) reste une fermeture legitime -> demi-alarme seulement.
-- 🔴 **RÉGRESSION** AZTEC -0.1070 $ `DONNEE_ABSENTE_PROLONGEE` — cause reparee (e82dd4a+b6debb2) qui REVIENT apres le correctif : fermetures famine/rate-de-bougies : hors-shortlist gate par amortissement quand la donnee est vivante + cache pire-hausse 24 h. Le vrai blackout (0 mesure) reste une fermeture legitime -> demi-alarme seulement.
-- 🔴 **RÉGRESSION** VIRTUAL -0.2804 $ `DONNEE_ABSENTE_PROLONGEE` — cause reparee (e82dd4a+b6debb2) qui REVIENT apres le correctif : fermetures famine/rate-de-bougies : hors-shortlist gate par amortissement quand la donnee est vivante + cache pire-hausse 24 h. Le vrai blackout (0 mesure) reste une fermeture legitime -> demi-alarme seulement.
-- 🔴 **RÉGRESSION** MON -0.1811 $ `DONNEE_ABSENTE_PROLONGEE` — cause reparee (e82dd4a+b6debb2) qui REVIENT apres le correctif : fermetures famine/rate-de-bougies : hors-shortlist gate par amortissement quand la donnee est vivante + cache pire-hausse 24 h. Le vrai blackout (0 mesure) reste une fermeture legitime -> demi-alarme seulement.
-- 🔴 **RÉGRESSION** AVAX -0.5029 $ `DONNEE_ABSENTE_PROLONGEE` — cause reparee (e82dd4a+b6debb2) qui REVIENT apres le correctif : fermetures famine/rate-de-bougies : hors-shortlist gate par amortissement quand la donnee est vivante + cache pire-hausse 24 h. Le vrai blackout (0 mesure) reste une fermeture legitime -> demi-alarme seulement.
-- 🔴 **RÉGRESSION** STABLE -0.2708 $ `DONNEE_ABSENTE_PROLONGEE` — cause reparee (e82dd4a+b6debb2) qui REVIENT apres le correctif : fermetures famine/rate-de-bougies : hors-shortlist gate par amortissement quand la donnee est vivante + cache pire-hausse 24 h. Le vrai blackout (0 mesure) reste une fermeture legitime -> demi-alarme seulement.
+6 perte(s), -3.3242 $ au total :
 - 🔴 **INEXPLIQUÉE** PURR -0.4130 $ `MODULE_CARRY_DESACTIVE` — motif 'MODULE_CARRY_DESACTIVE' absent du registre : la leçon n'existe pas encore — autopsie due
 - 🔴 **INEXPLIQUÉE** BTC -2.1315 $ `MODULE_CARRY_DESACTIVE` — motif 'MODULE_CARRY_DESACTIVE' absent du registre : la leçon n'existe pas encore — autopsie due
 - 🔴 **INEXPLIQUÉE** ETH -0.2982 $ `MODULE_CARRY_DESACTIVE` — motif 'MODULE_CARRY_DESACTIVE' absent du registre : la leçon n'existe pas encore — autopsie due
@@ -128,10 +121,10 @@ _16 loi(s) : 13 réfutée(s), 2 limite(s), 1 confirmée(s). Détail complet : `d
 
 ## 13. À FAIRE — ce que les données d'aujourd'hui désignent
 
-- **Cross-venue : 72 h atteintes (116 h)** → lancer `python tools/mesurer_dispersion_venues.py` pour LE verdict (#178).
+- **Cross-venue : 72 h atteintes (117 h)** → lancer `python tools/mesurer_dispersion_venues.py` pour LE verdict (#178).
 - Relances de collecteurs au compteur : {'carry-feeder': 2, 'marks-collector': 2, 'liq-collector': 2, 'venues-collector': 3, 'rapport-quotidien': 1, 'carnet-collector': 1} — si un compteur grimpe SEUL demain, c'est lui le malade (doc R5).
 - Copy-whitelist : 4 leader(s) prouvé(s) → copy peut suivre CES leaders uniquement.
-- Markout copy : 81.8% des fills mesures (29211/35724) — le pipeline nourrit la whitelist.
+- Markout copy : 81.7% des fills mesures (29211/35777) — le pipeline nourrit la whitelist.
 - Replay : 603097 candidats consolidés → `RECHERCHE-SCENARIO-REPLAY.cmd` a de quoi travailler (porte deux-moitiés + plateau).
 
 ---

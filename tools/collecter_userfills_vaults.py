@@ -35,6 +35,7 @@ RUN_TOKEN = ""                    # provenance HORS PAYLOAD (en mémoire) — ar
 _MUTEX = None                     # handle du mutex Windows (à garder vivant)
 TRIGGER_VERSION = "v1"            # version du déclencheur (estampillée OPEN+CLOSE ; filtre les stats config courante)
 GIT_COMMIT = ""                   # commit git chargé (audit SÉPARÉ, JAMAIS dans config_hash)
+TRANSPORT_VERSION = "userfills_multiplex_v1"   # transport WS (HORS config_hash) : compare la latence avant/après
 
 
 def _activite_par_vault(root: Path, *, fenetre_h: float = 2.0, max_lignes: int = 4000) -> dict:
@@ -523,10 +524,11 @@ async def _boucle(root: Path) -> None:
     CO.autoriser_runtime(RUN_TOKEN)                               # SEUL le collecteur arme l'ecriture runtime
     print("[userfills] mutex=%s pid=%d run_id=%s (ecriture runtime armee)"
           % ("WIN" if ok_mx else "fichier", info["pid"], RUN_ID), flush=True)
-    print("[userfills] commit=%s trigger_version=%s config_hash(RAW)=%s"
-          % (GIT_COMMIT[:12] or "?", TRIGGER_VERSION, CO.config_hash_courant(CO.RAW_PROBE, root)[:19]), flush=True)
+    print("[userfills] commit=%s transport=%s trigger_version=%s config_hash(RAW)=%s"
+          % (GIT_COMMIT[:12] or "?", TRANSPORT_VERSION, TRIGGER_VERSION, CO.config_hash_courant(CO.RAW_PROBE, root)[:19]), flush=True)
     for nom, coh in CO.COHORTES.items():
-        ETATS[nom] = CO.etat_initial(coh, root, run_id=RUN_ID, token=RUN_TOKEN, git_commit=GIT_COMMIT)
+        ETATS[nom] = CO.etat_initial(coh, root, run_id=RUN_ID, token=RUN_TOKEN, git_commit=GIT_COMMIT,
+                                     transport_version=TRANSPORT_VERSION)
     roles = vaults_et_roles(root)
     if not roles:
         print("[userfills] aucun vault suivi (deny-by-default) — rien a faire", flush=True)
