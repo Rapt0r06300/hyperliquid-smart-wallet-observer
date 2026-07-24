@@ -55,12 +55,15 @@ def construire_rapport(root: str | Path) -> str | None:
              lm.get("ws_decision_ms"), lm.get("decision_l2_ms"), lm.get("l2_open_ms"), lm.get("ws_open_ms")),
          "- âge événement à la décision (skew HL possible) : %s ms" % lm.get("age_event_ms"),
          "- **âge RÉEL à l'exécution paper (total fill→open)** : %s ms" % lm.get("age_at_paper_fill_ms"),
-         "- run_id : %s · trigger_version : %s · statut : %s" % (op.get("run_id"), op.get("trigger_version"), op.get("statut")), ""]
+         "- cycle_id : %s · open_run_id : %s · trigger_version : %s · statut : %s" % (
+             op.get("cycle_id"), op.get("open_run_id") or op.get("run_id"), op.get("trigger_version"), op.get("statut")), ""]
     if cl:
         notional = float(op.get("notional_usd") or 0.0) or 1.0
         roi = float(cl.get("realized_usd") or 0.0) / notional * 100.0
         L += ["## CLÔTURE — %s" % cl.get("raison"),
-              "- prix de sortie : %s · trigger_version : %s" % (cl.get("prix_sortie"), cl.get("trigger_version")),
+              "- cycle_id : %s · open_run_id → close_run_id : %s → %s (le cycle traverse les redémarrages)" % (
+                  cl.get("cycle_id"), cl.get("open_run_id"), cl.get("close_run_id")),
+              "- prix de sortie : %s · trigger_version (stockée à l'OPEN) : %s" % (cl.get("prix_sortie"), cl.get("trigger_version")),
               "- MFE / MAE (bps) : %s / %s" % (cl.get("mfe_bps"), cl.get("mae_bps")),
               "- PnL réalisé : %s $ · ROI : %s %%" % (cl.get("realized_usd"), round(roi, 3)),
               "- PLACEBO même coin/instant : ret_coin %s bps · ret_marché(BTC) %s bps · placebo %s bps · "

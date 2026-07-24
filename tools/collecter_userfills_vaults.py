@@ -376,7 +376,7 @@ async def _worker(root: Path, file: asyncio.Queue) -> None:
                     _traiter_un(root, f, coins, t_ws)
                 _sauver_curseurs(root, curseurs)
                 for coh in CO.COHORTES.values():                 # exits ÉVÉNEMENTIELS sur les coins bougés
-                    CO.gerer_exits(coh, root, lecteur_l2=_lecteur_l2_marquage)   # marquage = book WS frais, repli REST
+                    CO.gerer_exits(coh, root, lecteur_l2=_lecteur_l2_marquage, close_run_id=RUN_ID)   # marquage book WS frais
         except Exception as exc:  # noqa: BLE001
             print("[userfills] worker err %s" % str(exc)[:60], flush=True)
         finally:
@@ -413,7 +413,7 @@ async def _exits_periodiques(root: Path, *, intervalle_s: float = 2.0) -> None:
     while True:
         for coh in CO.COHORTES.values():
             try:
-                CO.gerer_exits(coh, root, lecteur_l2=_lecteur_l2_marquage)
+                CO.gerer_exits(coh, root, lecteur_l2=_lecteur_l2_marquage, close_run_id=RUN_ID)
                 CO.statut(coh, root, lecteur_l2=_lecteur_l2_marquage, run_id=RUN_ID, trigger_version=TRIGGER_VERSION)
             except Exception as exc:  # noqa: BLE001
                 print("[userfills] exits %s err %s" % (coh.nom, str(exc)[:40]), flush=True)

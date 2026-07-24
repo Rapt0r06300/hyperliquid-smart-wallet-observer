@@ -247,8 +247,22 @@ def test_legacy_cross_run_exclu_des_stats_courantes(tmp_path):
     led.write_text("\n".join(json.dumps({"evt": "CLOSE", "realized_usd": -0.5, "notional_usd": 5.0,
                                           "run_id": "run-ANCIEN", "trigger_version": "v0"}) for _ in range(10)))
     ex = CO._expectancy(CO.ALPHA, tmp_path, run_id="run-COURANT", trigger_version="v1")
-    assert ex["n_trades"] == 0 and ex["n_legacy_cross_run"] == 10                 # legacy compté à part, exclu
+    assert ex["n_trades"] == 0 and ex["n_legacy_cross_run"] == 10                 # legacy (v0) compté à part, exclu
     assert CO.cohorte_active(CO.ALPHA, tmp_path, run_id="run-COURANT", trigger_version="v1") is True   # pas tuée par le legacy
+
+
+def test_cycle_valide_traverse_un_redemarrage(tmp_path):
+    """VALIDITÉ RUN-AGNOSTIQUE : un cycle OUVERT sous un run et FERMÉ sous un AUTRE (redémarrage) reste
+    VALIDE — la validité tient à la trigger_version de l'OPEN, pas au processus. Les 2 run_id sont juste
+    enregistrés pour l'audit."""
+    _setup(tmp_path)
+    led = tmp_path / "runtime" / "data" / "exploratory_paper_ledger.jsonl"
+    led.write_text("\n".join(json.dumps({"evt": "CLOSE", "realized_usd": 0.02, "notional_usd": 10.0,
+                                          "trigger_version": "v1", "cycle_id": "cyc-%d" % i,
+                                          "open_run_id": "run-A", "close_run_id": "run-B"}) for i in range(3)))
+    ex = CO._expectancy(CO.ALPHA, tmp_path, trigger_version="v1")                  # aucun gate run_id
+    assert ex["n_trades"] == 3 and ex["n_legacy_cross_run"] == 0                   # comptés malgré open_run != close_run
+    assert ex["pnl_cumule_usd"] == 0.06
 
 
 def test_entree_trop_tardive_refusee(tmp_path, monkeypatch):
@@ -273,20 +287,23 @@ def test_trigger_version_et_placebo_au_cycle(tmp_path):
     o = CO.traiter_fill(CO.RAW_PROBE, etat, _fill(coin="DOGE", sz=3, px=150.0), tmp_path,
                         now_ms=now1, lecteur_l2=_l2, token=etat["token"])
     assert o and o.get("ouverture") and o["age_at_paper_fill_ms"] is not None
-    assert o["ouverture"]["meta"]["trigger_version"] == "v1"
+    cyc = o["ouverture"]["meta"]["cycle_id"]
+    assert o["ouverture"]["meta"]["trigger_version"] == "v1" and cyc.startswith("cyc-")
     assert o["ouverture"]["meta"]["placebo"]["mid_marche_open"] == 60000.0
     led = [json.loads(x) for x in (tmp_path / "runtime" / "data" / "raw_probe_ledger.jsonl").read_text().splitlines()]
     opn = [e for e in led if e["evt"] == "OPEN"][0]
-    assert opn["trigger_version"] == "v1" and opn["age_at_paper_fill_ms"] is not None
-    # clôture au HORIZON : BTC baisse de 1 % -> ret_marche/placebo/alpha calculés
+    assert opn["trigger_version"] == "v1" and opn["age_at_paper_fill_ms"] is not None and opn["cycle_id"] == cyc
+    # clôture au HORIZON sous un AUTRE run (redémarrage) : BTC baisse 1 % -> ret_marche/placebo/alpha calculés
     now2 = now1 + 3_600_001
     (tmp_path / "runtime" / "data" / "hl_allmids.json").write_text(json.dumps(
         {"ts_ms": now2, "mids": {"BTC": 59400.0, "DOGE": 150.0}}))
-    assert CO.gerer_exits(CO.RAW_PROBE, tmp_path, now_ms=now2, lecteur_l2=_l2)
+    assert CO.gerer_exits(CO.RAW_PROBE, tmp_path, now_ms=now2, lecteur_l2=_l2, close_run_id="run-CLOSE")
     led2 = [json.loads(x) for x in (tmp_path / "runtime" / "data" / "raw_probe_ledger.jsonl").read_text().splitlines()]
     clo = [e for e in led2 if e["evt"] == "CLOSE"][0]
     assert clo["trigger_version"] == "v1" and clo["ret_marche_bps"] is not None
     assert clo["placebo_marche_bps"] is not None and clo["alpha_vs_marche_bps"] is not None
+    assert clo["cycle_id"] == cyc and clo["close_run_id"] == "run-CLOSE"          # cycle_id persistant, 2 run_id
+    assert clo["open_run_id"] == opn["open_run_id"] and clo["open_run_id"] != clo["close_run_id"]
 
 
 def test_isolation_alpha_probe(tmp_path):

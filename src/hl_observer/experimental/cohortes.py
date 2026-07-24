@@ -157,22 +157,23 @@ def etat_initial(coh: Cohorte, root: Path, *, run_id: str | None = None, token: 
 
 
 def _expectancy(coh: Cohorte, root: Path, *, run_id: str | None = None, trigger_version: str | None = None) -> dict:
-    """Stats des CLOSE. Si run_id (+ trigger_version) fourni : SEULS les trades de la CONFIG COURANTE comptent ;
-    les autres sont comptés à part LEGACY_CROSS_RUN (ancien run/version : $5, pas d'ACK L2) et n'entrent PAS
-    dans l'expectancy courante. PnL/ROI cumulé + alpha placebo moyen inclus."""
+    """Stats des CLOSE. Si trigger_version fourni : SEULS les cycles de la CONFIG COURANTE comptent (validité =
+    trigger_version de l'OPEN, RUN-AGNOSTIQUE — un cycle peut traverser un redémarrage). Les autres sont comptés
+    à part LEGACY_CROSS_RUN (ancien $5 sans version). `run_id` est ignoré pour la validité (audit seulement).
+    PnL/ROI cumulé + alpha placebo moyen inclus."""
     try:
         evs = [json.loads(l) for l in _p(coh, root, "ledger.jsonl").read_text(encoding="utf-8", errors="ignore").splitlines() if l.strip()]
     except OSError:
         return {"n_trades": 0}
     closes = [c for c in evs if c.get("evt") == "CLOSE"]
     n_legacy = 0
-    if run_id is not None:
-        courant = []
+    if trigger_version is not None:                             # VALIDITÉ = trigger_version de l'OPEN (RUN-AGNOSTIQUE :
+        courant = []                                           # une position peut traverser un redémarrage -> pas de gate run_id)
         for c in closes:
-            if c.get("run_id") == run_id and (trigger_version is None or c.get("trigger_version") == trigger_version):
+            if c.get("trigger_version") == trigger_version:
                 courant.append(c)
             else:
-                n_legacy += 1
+                n_legacy += 1                                  # LEGACY_CROSS_RUN : autre version / ancien $5 sans trigger_version
         closes = courant
     if not closes:
         return {"n_trades": 0, "n_legacy_cross_run": n_legacy}
@@ -284,8 +285,10 @@ def _maj_coins_prewarm(root: Path, coin: str, *, now_ms: float) -> None:
 def _ouvrir(coh: Cohorte, store: dict, root: Path, *, cle, coin, sens, notional, prix, cfg, cout_ar,
             spread, slippage, fhl, vault, now_ms, fill_ts, lat_mono, run_id="", src_l2="", marque="",
             trigger_version="", placebo=None) -> dict:
+    import uuid
     eb = cfg.get("edge_brut_bps")
     edge_net = (float(eb) - cout_ar) if eb is not None else None    # RAW : pas d'edge (NON_VALIDEE)
+    cycle_id = "cyc-" + uuid.uuid4().hex[:12]                       # IDENTITÉ PERSISTANTE du cycle (survit aux redémarrages)
     pos = {"coin": coin, "paire": cle, "moteur": "copy_" + coh.nom, "sens": sens, "type_pnl": "directional",
            "notional_usd": round(notional, 2), "prix_entree": prix, "ts_ouverture_ms": now_ms,
            "cout_entree_bps": round(cout_ar / 2.0, 4), "edge_estime_bps": round(edge_net, 4) if edge_net is not None else None,
@@ -295,7 +298,8 @@ def _ouvrir(coh: Cohorte, store: dict, root: Path, *, cle, coin, sens, notional,
                     "take_profit_bps": cfg.get("take_profit_bps"), "latence_ws_open_ms": lat_mono.get("ws_open_ms"),
                     "latences_mono": lat_mono, "fill_leader_ts_ms": int(fill_ts), "run_id": run_id,
                     "source": SOURCE_LIVE, "src_l2": src_l2, "statut": marque or "VALIDEE",
-                    "trigger_version": trigger_version, "placebo": placebo}}
+                    "trigger_version": trigger_version, "placebo": placebo,
+                    "cycle_id": cycle_id, "open_run_id": run_id, "notional_open_usd": round(notional, 2)}}
     store["ouvertes"][cle] = pos
     store["cash"] = round(store["cash"] - notional, 6)
     _ledger(coh, root, {"evt": "OPEN", "ts_ms": now_ms, "paire": cle, "coin": coin, "sens": sens,
@@ -303,6 +307,7 @@ def _ouvrir(coh: Cohorte, store: dict, root: Path, *, cle, coin, sens, notional,
                         "latences_mono": lat_mono, "vault": vault, "run_id": run_id, "source": SOURCE_LIVE,
                         "src_l2": src_l2, "statut": marque or "VALIDEE", "trigger_version": trigger_version,
                         "age_at_paper_fill_ms": lat_mono.get("age_at_paper_fill_ms"),
+                        "cycle_id": cycle_id, "open_run_id": run_id,
                         "motif": ("RAW mesure (sans edge)" if not coh.edge_requis else "copy OPEN/ADD + L2<1s + edge net>0")})
     _sauver(coh, root, store)
     if not coh.edge_requis:                                          # RAW : abonne le coin en BBO/L2 pour la vie de la position
@@ -311,7 +316,7 @@ def _ouvrir(coh: Cohorte, store: dict, root: Path, *, cle, coin, sens, notional,
 
 
 def _sortir(coh: Cohorte, pos: dict, store: dict, root: Path, *, prix_sortie, cout_sortie_bps, raison,
-            now_ms, mae_bps=None, mfe_bps=None) -> dict:
+            now_ms, mae_bps=None, mfe_bps=None, close_run_id=None) -> dict:
     realized = round(MP.pnl_courant_usd(pos, mark=prix_sortie, now_ms=now_ms) - cout_sortie_bps / 1e4 * pos["notional_usd"], 6)
     meta = pos.get("meta", {})
     pl = meta.get("placebo") or {}                                   # PLACEBO même coin/même instant : alpha vs marché
@@ -330,6 +335,8 @@ def _sortir(coh: Cohorte, pos: dict, store: dict, root: Path, *, prix_sortie, co
                         "realized_usd": realized, "raison": raison, "mae_bps": mae_bps, "mfe_bps": mfe_bps,
                         "latence_ms": meta.get("latence_fill_copie_ms"), "run_id": meta.get("run_id"),
                         "trigger_version": meta.get("trigger_version"), "source": SOURCE_LIVE, "vault": meta.get("vault"),
+                        "cycle_id": meta.get("cycle_id"), "open_run_id": meta.get("open_run_id") or meta.get("run_id"),
+                        "close_run_id": close_run_id, "notional_open_usd": meta.get("notional_open_usd"),
                         "ret_coin_bps": ret_coin_bps, "ret_marche_bps": ret_marche_bps,
                         "placebo_marche_bps": placebo_marche_bps, "alpha_vs_marche_bps": alpha_vs_marche_bps})
     _sauver(coh, root, store)
@@ -393,20 +400,21 @@ def traiter_fill(coh: Cohorte, etat: dict, fill: dict, root: Path, *, now_ms: fl
         sz = abs(float(fill.get("sz") or 0.0))
         if start is None or abs(start) < 1e-9:                     # info absente -> fermeture prudente complète
             return {"fermeture": _sortir(coh, pos, store, root, prix_sortie=mark, cout_sortie_bps=cout,
-                                         raison="LEADER_A_CLOS", now_ms=now)}
+                                         raison="LEADER_A_CLOS", now_ms=now, close_run_id=etat.get("run_id"))}
         pos_after = start + sens * sz
         if abs(pos_after) < 1e-9:                                  # CLOSE : le leader ferme entièrement -> on ferme tout
             return {"fermeture": _sortir(coh, pos, store, root, prix_sortie=mark, cout_sortie_bps=cout,
-                                         raison="LEADER_A_CLOS", now_ms=now)}
+                                         raison="LEADER_A_CLOS", now_ms=now, close_run_id=etat.get("run_id"))}
         if (start > 0) != (pos_after > 0):                        # FLIP : fermer puis REPASSER l'admission (résidu = nouvel OPEN)
-            ferm = _sortir(coh, pos, store, root, prix_sortie=mark, cout_sortie_bps=cout, raison="LEADER_A_FLIP", now_ms=now)
+            ferm = _sortir(coh, pos, store, root, prix_sortie=mark, cout_sortie_bps=cout, raison="LEADER_A_FLIP",
+                           now_ms=now, close_run_id=etat.get("run_id"))
             etat["agg"][(vault, coin)] = {"sens": 1 if pos_after > 0 else -1, "notional": abs(pos_after) * float(fill.get("px") or 0.0),
                                           "t0": now, "fill_ts": int(fill.get("ts_ms") or now)}
             return {"fermeture": ferm, "flip": True}
         fraction = min(1.0, sz / abs(start))                      # REDUCE : réduire la copie de la même fraction
         if fraction >= 0.999:
             return {"fermeture": _sortir(coh, pos, store, root, prix_sortie=mark, cout_sortie_bps=cout,
-                                         raison="LEADER_A_CLOS", now_ms=now)}
+                                         raison="LEADER_A_CLOS", now_ms=now, close_run_id=etat.get("run_id"))}
         return {"reduction": _reduire(coh, pos, store, root, fraction=fraction, prix=mark, cout_sortie_bps=cout, now_ms=now)}
     if "open" not in dir_bas:
         return None
@@ -524,7 +532,7 @@ def _vaults_cohorte(coh: Cohorte, root: Path) -> set[str]:
     return core | chal | set(charger_promus(root))
 
 
-def gerer_exits(coh: Cohorte, root: Path, *, now_ms: float | None = None, lecteur_l2=None) -> list[dict]:
+def gerer_exits(coh: Cohorte, root: Path, *, now_ms: float | None = None, lecteur_l2=None, close_run_id=None) -> list[dict]:
     """Sorties par PRIX/TEMPS (stop calibré / take-profit / horizon) — complète les sorties leader inline.
     MAE/MFE suivis en continu."""
     now = float(now_ms if now_ms is not None else time.time() * 1000)
@@ -549,8 +557,8 @@ def gerer_exits(coh: Cohorte, root: Path, *, now_ms: float | None = None, lecteu
         elif (now - float(pos.get("ts_ouverture_ms") or now)) >= float(pos.get("hold_h") or 1.0) * 3_600_000.0:
             raison = "HORIZON_ATTEINT"
         if raison:
-            fermetures.append(_sortir(coh, pos, store, root, prix_sortie=mark, cout_sortie_bps=cout,
-                                      raison=raison, now_ms=now, mae_bps=pos.get("mae_bps"), mfe_bps=pos.get("mfe_bps")))
+            fermetures.append(_sortir(coh, pos, store, root, prix_sortie=mark, cout_sortie_bps=cout, raison=raison,
+                                      now_ms=now, mae_bps=pos.get("mae_bps"), mfe_bps=pos.get("mfe_bps"), close_run_id=close_run_id))
     _sauver(coh, root, store)
     return fermetures
 
