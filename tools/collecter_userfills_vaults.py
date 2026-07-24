@@ -361,6 +361,11 @@ def _traiter_un(root: Path, fill: dict, coins_a_verifier: set, t_ws_mono: float)
     with (root / FILLS_LIVE).open("a", encoding="utf-8") as f:
         f.write(json.dumps(fill, ensure_ascii=False) + "\n")
     coins_a_verifier.add(fill.get("coin"))
+    if _TAPE_FILLS is not None:                                   # → tape L2/OFI : réception MONOTONE (même process)
+        try:
+            _TAPE_FILLS.put_nowait((fill, t_ws_mono * 1000))
+        except asyncio.QueueFull:
+            pass
     for nom, coh in CO.COHORTES.items():
         r = CO.traiter_fill(coh, ETATS[nom], fill, root, token=RUN_TOKEN, t_ws_mono=t_ws_mono,
                             lecteur_l2=_lecteur_l2_marquage)               # admission = book WS prewarmé si frais, sinon REST
@@ -588,79 +593,105 @@ async def _metaorder_shadow_periodique(root: Path, vaults: list, *, intervalle_s
         await asyncio.sleep(intervalle_s)
 
 
-async def _metaorder_l2_tape_periodique(root: Path, *, intervalle_s: float = 2.0, horizon_ms: float = 300_000.0,
-                                        ttl_book_s: float = 2.0, cap_fetch_par_min: int = 120) -> None:
-    """TAPE L2/OFI SHADOW synchronisée : autour de chaque fill de vault suivi, capture le carnet à l'ENTRÉE
-    (réception + latence réelle) ET à la SORTIE (entrée + horizon) + OFI top-5, pour un coût EXÉCUTABLE
-    synchronisé (les prochaines fenêtres OOS n'utiliseront plus le carnet courant sur des fills historiques).
-    REST l2Book BORNÉ (cache coin + PLAFOND/minute) ; budget journalisé. Aucune position, RAW intact."""
+# ── TAPE L2/OFI SHADOW v2 : buffer WS l2Book (snapshots SUCCESSIFS horodatés) + consommateur (états pré/post
+#    par fill, VRAI OFI, 4 horloges séparées, latence pipeline ≥ 0). 1 connexion WS de plus (total 4 < 10).
+_TAPE_FILLS = None                           # asyncio.Queue((fill, fill_recv_mono_ms)) — alimentée par le worker
+_TAPE_COINS_ACTIFS: dict = {}                # coin -> dernier fill_recv (ms wall) : fenêtre d'abonnement l2Book
+_TAPE_BUFFER: dict = {}                      # coin -> list[{recv_mono, resume}] (snapshots successifs)
+TAPE_BUFFER_MAX = 400
+TAPE_COIN_TTL_MS = 360_000.0                # coin abonné jusqu'à horizon(5 min)+marge après le dernier fill
+
+
+async def _tape_l2_buffer(root: Path, *, sync_s: float = 0.5) -> None:
+    """Abonne au l2Book WS les coins à métaordre ACTIF (dès le 1er fill = FIRST_SLICE) et BUFFERISE des
+    snapshots HORODATÉS (réception MONOTONE) → base du VRAI OFI (variations successives). 1 connexion WS
+    (total 4 < 10). Résilient. Lecture seule ; aucune position, RAW intact."""
+    import websockets
     from hl_observer.experimental import metaorder_l2_tape as T
-    from collecter_carnet import _post_hl
-    loop = asyncio.get_event_loop()
-    deja: set = set()
-    pending: dict = {}                                            # cle_fill -> due_ts (sortie)
-    pending_meta: dict = {}                                       # cle_fill -> (fill, entry_ts)
-    prev_resume: dict = {}                                        # coin -> resume (pour OFI)
-    book_cache: dict = {}                                         # coin -> (ts, book)
-    fetch_ts: list = []                                           # horodatages des fetchs (plafond/minute)
-    await asyncio.sleep(20.0)                                     # démarrage doux
+    abonnes: set = set()
     while True:
-        appels: list = []
         try:
-            now = time.time() * 1000
+            async with websockets.connect(WS_URL, ping_interval=20, max_size=2 ** 22) as ws:
+                abonnes.clear()
+                while True:
+                    now = time.time() * 1000
+                    cibles = {c for c, t in _TAPE_COINS_ACTIFS.items() if now - t <= TAPE_COIN_TTL_MS}
+                    for c in cibles - abonnes:
+                        await ws.send(json.dumps({"method": "subscribe", "subscription": {"type": "l2Book", "coin": c}}))
+                        abonnes.add(c)
+                    for c in abonnes - cibles:
+                        await ws.send(json.dumps({"method": "unsubscribe", "subscription": {"type": "l2Book", "coin": c}}))
+                        abonnes.discard(c)
+                        _TAPE_BUFFER.pop(c, None)
+                    try:
+                        brut = await asyncio.wait_for(ws.recv(), timeout=sync_s)
+                    except asyncio.TimeoutError:
+                        continue
+                    try:
+                        msg = json.loads(brut)
+                    except ValueError:
+                        continue
+                    if isinstance(msg, dict) and msg.get("channel") == "l2Book":
+                        d = msg.get("data") or {}
+                        coin = str(d.get("coin") or "").upper()
+                        r = T.resume_book(d)
+                        if coin and r:
+                            buf = _TAPE_BUFFER.setdefault(coin, [])
+                            buf.append({"recv_mono": time.monotonic() * 1000, "resume": r})
+                            if len(buf) > TAPE_BUFFER_MAX:
+                                del buf[:len(buf) - TAPE_BUFFER_MAX]
+        except Exception as exc:  # noqa: BLE001
+            print("[userfills] tape_l2 reconnect (%s)" % str(exc)[:50], flush=True)
+            await asyncio.sleep(3.0)
 
-            async def _book(coin):
-                c = book_cache.get(coin)
-                if c and (time.time() - c[0]) < ttl_book_s:
-                    return c[1]
-                maintenant = time.time()
-                fetch_ts[:] = [t for t in fetch_ts if maintenant - t < 60.0]
-                if len(fetch_ts) >= cap_fetch_par_min:            # PLAFOND IP : on saute (mieux vaut un trou qu'un ban)
-                    return None
-                b = await loop.run_in_executor(None, lambda: _post_hl(coin, timeout_s=6.0))
-                fetch_ts.append(maintenant)
-                book_cache[coin] = (time.time(), b)
-                appels.append(("l2Book", 0))
-                return b
 
-            try:
-                fills = [json.loads(l) for l in
-                         (root / FILLS_LIVE).read_text(encoding="utf-8", errors="ignore").splitlines()[-400:] if l.strip()]
-            except (OSError, ValueError):
-                fills = []
+async def _tape_consumer(root: Path, *, horizon_ms: float = 300_000.0, post_window_ms: float = 8_000.0,
+                         intervalle_s: float = 1.0) -> None:
+    """Consomme les fills (file EN PROCESS → réception MONOTONE fiable) : marque le coin actif (abonnement),
+    attend des snapshots POST-fill, puis extrait l'état PRÉ-fill + l'état d'ENTRÉE (postérieur au fill) + posts
+    → ligne v2 (VRAI OFI, imbalance séparé, horloges séparées, latence ≥ 0). Sortie à +horizon avec retard réel.
+    Aucun fill fictif : sans état d'entrée, on n'écrit rien. RAW intact ; aucune position."""
+    from hl_observer.experimental import metaorder_l2_tape as T
+    en_attente: list = []
+    exits: list = []
+    await asyncio.sleep(15.0)
+    while True:
+        try:
+            while _TAPE_FILLS is not None and not _TAPE_FILLS.empty():
+                f, frm = _TAPE_FILLS.get_nowait()
+                _TAPE_COINS_ACTIFS[str(f.get("coin") or "").upper()] = time.time() * 1000   # abonne dès ce fill
+                en_attente.append({"fill": f, "frm": float(frm), "due": time.monotonic() * 1000 + post_window_ms})
+            mono = time.monotonic() * 1000
             lignes: list = []
-            for f in T.fills_a_enregistrer(fills, deja, now_ms=now, age_max_ms=5_000.0):   # ENTRÉES (fills frais)
-                coin = str(f.get("coin") or "").upper()
-                b = await _book(coin)
-                if b is None:
+            reste: list = []
+            for it in en_attente:
+                if mono < it["due"]:
+                    reste.append(it)
                     continue
-                l = T.ligne_tape(phase="entry", fill=f, book_brut=b, capture_ts=time.time() * 1000,
-                                 prev_resume=prev_resume.get(coin))
-                if l is None:
-                    continue
-                lignes.append(l)
-                k = T.cle_fill(coin, f.get("hash"), int(f.get("ts_ms") or 0))
-                deja.add(k)
-                pending[k] = int(f.get("ts_ms") or now) + horizon_ms
-                pending_meta[k] = (f, l["capture_ts"])
-                r = T.resume_book(b)
-                if r:
-                    prev_resume[coin] = {"bids5": r["bids5"], "asks5": r["asks5"]}
-            for k in T.exits_dus(pending, now):                  # SORTIES dues (entrée + horizon)
-                f, entry_ts = pending_meta.get(k, ({}, None))
-                b = await _book(k[0])
-                pending.pop(k, None)
-                pending_meta.pop(k, None)
-                if b is None:
-                    continue
-                l = T.ligne_tape(phase="exit", fill=f, book_brut=b, capture_ts=time.time() * 1000, entry_ts=entry_ts)
+                buf = _TAPE_BUFFER.get(str(it["fill"].get("coin") or "").upper(), [])
+                pre = T.etat_pre(buf, it["frm"])
+                entree = T.etat_entree(buf, it["frm"], it["fill"].get("ts_ms"))
+                posts = T.etats_post(buf, entree["recv_mono"], n=3) if entree else []
+                l = T.ligne_continuation(it["fill"], pre=pre, entree=entree, posts=posts, fill_recv_mono=it["frm"])
                 if l:
                     lignes.append(l)
+                    exits.append({"fill": it["fill"], "frm": it["frm"], "due": it["frm"] + horizon_ms})
+            en_attente = reste
+            reste_ex: list = []
+            for ex in exits:
+                if mono < ex["due"]:
+                    reste_ex.append(ex)
+                    continue
+                buf = _TAPE_BUFFER.get(str(ex["fill"].get("coin") or "").upper(), [])
+                sortie = T.etat_entree(buf, ex["frm"] + horizon_ms, None)   # 1er carnet ≥ +horizon
+                if sortie:
+                    lignes.append(T.ligne_sortie(ex["fill"], entree_resume=sortie["resume"],
+                                                 capture_recv_mono=sortie["recv_mono"], horizon_ms=horizon_ms,
+                                                 fill_recv_mono=ex["frm"]))
+            exits = reste_ex
             T.ecrire_lignes(root, lignes)
-            if appels:
-                SD.journaliser_budget(root, "metaorder_l2_tape", SD.poids_info(appels), intervalle_s)
         except Exception as exc:  # noqa: BLE001 — la tape ne fait JAMAIS crasher le collecteur
-            print("[userfills] l2_tape err %s" % str(exc)[:60], flush=True)
+            print("[userfills] tape_consumer err %s" % str(exc)[:60], flush=True)
         await asyncio.sleep(intervalle_s)
 
 
@@ -683,8 +714,9 @@ def _git_commit(root: Path) -> str:
 
 
 async def _boucle(root: Path) -> None:
-    global RUN_ID, RUN_TOKEN, _MUTEX, _ROOT_LIVE, TRIGGER_VERSION, GIT_COMMIT, _DEMARRAGE_MS
+    global RUN_ID, RUN_TOKEN, _MUTEX, _ROOT_LIVE, TRIGGER_VERSION, GIT_COMMIT, _DEMARRAGE_MS, _TAPE_FILLS
     _ROOT_LIVE = root
+    _TAPE_FILLS = asyncio.Queue(maxsize=5000)                     # fills → tape L2 (réception MONOTONE en process)
     _DEMARRAGE_MS = time.time() * 1000                            # plancher de confiance du garde REST↔WS (clés en mémoire dès ici)
     TRIGGER_VERSION = CO._params_trigger(root).get("variante", "v1")
     GIT_COMMIT = _git_commit(root)
@@ -729,7 +761,7 @@ async def _boucle(root: Path) -> None:
                              _promotion_periodique(root), _rapport_periodique(root), _l2_dynamique(root),
                              _garde_reconciliation_rest(root, shards),   # REST↔WS : reconnecte un shard qui rate un fill
                              _metaorder_shadow_periodique(root, vaults),  # SHADOW : edge par stade de métaordre (n'ouvre rien)
-                             _metaorder_l2_tape_periodique(root),         # TAPE L2/OFI synchronisée autour des fills (n'ouvre rien)
+                             _tape_l2_buffer(root), _tape_consumer(root),  # TAPE L2/OFI v2 : buffer WS + états pré/post (n'ouvre rien)
                              *[_userfills_multiplex(root, grp, file, sid) for sid, grp in shards])   # 2 sockets de 5 + L2 = 3 conn
     finally:
         VI.liberer(root, NOM_VERROU, info)

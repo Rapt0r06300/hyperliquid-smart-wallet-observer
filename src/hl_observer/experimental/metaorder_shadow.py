@@ -679,9 +679,10 @@ def executer(root: str | Path, vaults: list, *, fills_provider=None, twap_provid
     # SYNCHRONISATION L2 : carnet HORODATÉ au fill (tape) — sinon carnet COURANT = provisoire, ne prouve rien
     book_sync: dict = {}
     for s in signaux:
-        e = tape_l2.get(MT.cle_fill(s.get("coin"), s.get("hash"), s.get("fill_time")), {}).get("entry")
-        s["l2_synchronise"] = e is not None
-        if e:
+        e = tape_l2.get(MT.cle_fill(s.get("coin"), s.get("hash"), s.get("fill_time")), {}).get("continuation")
+        a_book = bool(e and (e.get("top5") or {}).get("bids"))
+        s["l2_synchronise"] = a_book
+        if a_book:
             t5 = e.get("top5") or {}
             book_sync[(s.get("coin"), s.get("hash"), s.get("fill_time"))] = {
                 "levels": [[{"px": px, "sz": sz} for px, sz in t5.get("bids", [])],
