@@ -235,6 +235,8 @@ async def _boucle(root: Path, coins: list[str]) -> None:  # pragma: no cover (I/
     import websockets
     mag = MagasinBBO()
     sym = {c: symbole_binance(c) for c in coins if symbole_binance(c)}
+    coins_set = set(coins)   # LIQUIDATION_LIVE_COVERAGE : le HL bbo est écrit pour TOUS les coins (memes/HL-only
+    #                          inclus) ; la jambe Binance (sym) ne couvre que les coins réellement listés là-bas.
     from hl_observer.collection import collecte_fiable as CF
     cache = CF.CacheDedup()
     #: TAPE BRUTE par message (horloge MONOTONE) — indispensable pour un lead-lag à 50/100 ms : un
@@ -250,7 +252,7 @@ async def _boucle(root: Path, coins: list[str]) -> None:  # pragma: no cover (I/
         while True:
             try:
                 async with websockets.connect(WS_HL, ping_interval=20) as ws:
-                    for c in sym:
+                    for c in coins:                          # HL bbo pour TOUS les coins (HL-only inclus)
                         await ws.send(json.dumps({"method": "subscribe",
                                                   "subscription": {"type": "bbo", "coin": c}}))
                     async for raw in ws:
@@ -259,7 +261,7 @@ async def _boucle(root: Path, coins: list[str]) -> None:  # pragma: no cover (I/
                             stats["trous"] += 1
                         stats["dernier_hl_ns"] = r
                         q = parser_bbo_hl(json.loads(raw))
-                        if q and q["coin"] in sym:
+                        if q and q["coin"] in coins_set:      # écrit le bid/ask HL des coins de liquidation
                             mag.maj_hl(q, recu_mono_ns=r)
                             tape.append({"venue": "HL", "coin": q["coin"], "recu_ns": r,
                                          "mid": (q["bid"] + q["ask"]) / 2, "bid": q["bid"], "ask": q["ask"],
