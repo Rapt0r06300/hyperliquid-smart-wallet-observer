@@ -51,6 +51,19 @@ class Loi:
 
 
 LOIS: tuple[Loi, ...] = (
+    Loi(cle="cross_venue_leadlag_taker_no_edge",
+        titre="Lead-lag cross-venue Binance→HL en TAKER scalp : aucun edge (le choc ne précède pas HL)",
+        verdict=VERDICT_REFUTE,
+        chiffre="sur données RÉELLES live (bbo_tape : BIN bookTicker + aggTrades + HL BBO, horloge locale "
+                "recu_ns) : gross markout ~0,2 bps/épisode (AGG_IMBALANCE/TAKER_BURST) à ~1,5 (PRICE_SHOCK) "
+                "vs coût A/R HL ~10-14 bps (spread plein ask-entrée/bid-sortie + 9 bps taker) → net ~−10 à "
+                "−11 bps/épisode sur les 3 familles ET les 5 horizons (250 ms-5 s) ; placebo directionnel ≈ net "
+                "⇒ aucune directionnalité (coût pur). Ratio signal:coût ≈ 1:50.",
+        date="2026-07-25",
+        condition_de_reouverture="entrée MAKER (post-only, éviter le spread) — MAIS MM HL mesuré 0/29 la rend "
+                "improbable ; OU un choc bien plus rare/extrême dont le markout dépasse le coût A/R HL.",
+        mots_cles=("cross-venue", "lead-lag", "binance", "taker", "scalp", "rapid_alpha", "shock"),
+        ou_verifier="tools/rapid_alpha_run.py · src/hl_observer/experimental/cross_venue_events.py"),
     Loi(cle="arb_dislocation_cout_all_in",
         titre="Le coût all-in d'un aller-retour d'arbitrage vaut 16 bps, pas 8",
         # LIMITE, pas CONFIRME : c'est un FAIT de coût vrai, mais « confirmé » est réservé aux
