@@ -1,0 +1,132 @@
+===== DIAG PLANIF HyperSmart_VerifOOS =====
+
+[1] QUERY /V /FO LIST (etat / prochaine exec / derniere exec / resultat / commande)
+
+Dossier : \
+Nom de l’hôte:                                             DESKTOP-BMVQHGM
+Nom de la tâche:                                           \HyperSmart_VerifOOS
+Prochaine exécution:                                       25/07/2026 16:37:00
+Statut:                                                    Prêt
+Mode d’ouverture de session:                               Interactive uniquement
+Heure de la dernière exécution:                            30/11/1999 00:00:00
+Dernier résultat:                                          267011
+Auteur:                                                    DESKTOP-BMVQHGM\flo
+Tâche à exécuter:                                          "C:\Users\flo\Desktop\Projet invest\LANCER-VERIF-OOS.cmd" 
+Démarrer dans:                                             N/A
+Commentaire:                                               N/A
+Statut de la tâche planifiée:                              Activée
+Durée d’inactivité:                                        Désactivée
+Gestion de l’alimentation:                                 Arrêter sur la batterie, Ne pas lancer sur batterie
+Exécuter en tant qu’utilisateur:                           flo
+Supprimer la tâche si elle n’est pas replanifiée:          Désactivée
+Arrêter la tâche après X heures et X minutes:              72:00:00
+Planification:                                             Les données de planification ne sont pas disponibles dans ce format.
+Type de planification:                                     Une seule fois, minute 
+Heure de début:                                            16:07:00
+Date de début:                                             25/07/2026
+Date de fin:                                               N/A
+Jours:                                                     N/A
+Mois:                                                      N/A
+Répéter : Chaque:                                          0 heure(s), 30 minute(s)
+Répéter : Jusqu’à : Heure:                                 Aucune
+Répétition : pendant une durée donnée:                     Désactivée
+Répétition : arrêter si l’exécution est toujours en cours: Désactivée
+
+[2] QUERY /XML (commande + arguments exacts enregistres)
+<?xml version="1.0" encoding="UTF-16"?>
+<Task version="1.2" xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task">
+  <RegistrationInfo>
+    <Date>2026-07-25T16:07:48</Date>
+    <Author>DESKTOP-BMVQHGM\flo</Author>
+    <URI>\HyperSmart_VerifOOS</URI>
+  </RegistrationInfo>
+  <Principals>
+    <Principal id="Author">
+      <UserId>S-1-5-21-667911651-3645488510-1590342650-1000</UserId>
+      <LogonType>InteractiveToken</LogonType>
+    </Principal>
+  </Principals>
+  <Settings>
+    <DisallowStartIfOnBatteries>true</DisallowStartIfOnBatteries>
+    <StopIfGoingOnBatteries>true</StopIfGoingOnBatteries>
+    <MultipleInstancesPolicy>IgnoreNew</MultipleInstancesPolicy>
+    <IdleSettings>
+      <Duration>PT10M</Duration>
+      <WaitTimeout>PT1H</WaitTimeout>
+      <StopOnIdleEnd>true</StopOnIdleEnd>
+      <RestartOnIdle>false</RestartOnIdle>
+    </IdleSettings>
+  </Settings>
+  <Triggers>
+    <TimeTrigger>
+      <StartBoundary>2026-07-25T16:07:00</StartBoundary>
+      <Repetition>
+        <Interval>PT30M</Interval>
+      </Repetition>
+    </TimeTrigger>
+  </Triggers>
+  <Actions Context="Author">
+    <Exec>
+      <Command>"C:\Users\flo\Desktop\Projet invest\LANCER-VERIF-OOS.cmd"</Command>
+    </Exec>
+  </Actions>
+</Task>
+[3] RUN NOW (schtasks /Run)
+Opération réussie : tentative d’exécution de la tâche planifiée "HyperSmart_VerifOOS".
+
+[4] QUERY APRES RUN (Last Run Time / Last Result doivent avoir bouge)
+
+Dossier : \
+Nom de l’hôte:                                             DESKTOP-BMVQHGM
+Nom de la tâche:                                           \HyperSmart_VerifOOS
+Prochaine exécution:                                       25/07/2026 16:37:00
+Statut:                                                    Prêt
+Mode d’ouverture de session:                               Interactive uniquement
+Heure de la dernière exécution:                            25/07/2026 16:14:12
+Dernier résultat:                                          0
+Auteur:                                                    DESKTOP-BMVQHGM\flo
+Tâche à exécuter:                                          "C:\Users\flo\Desktop\Projet invest\LANCER-VERIF-OOS.cmd" 
+Démarrer dans:                                             N/A
+Commentaire:                                               N/A
+Statut de la tâche planifiée:                              Activée
+Durée d’inactivité:                                        Désactivée
+Gestion de l’alimentation:                                 Arrêter sur la batterie, Ne pas lancer sur batterie
+Exécuter en tant qu’utilisateur:                           flo
+Supprimer la tâche si elle n’est pas replanifiée:          Désactivée
+Arrêter la tâche après X heures et X minutes:              72:00:00
+Planification:                                             Les données de planification ne sont pas disponibles dans ce format.
+Type de planification:                                     Une seule fois, minute 
+Heure de début:                                            16:07:00
+Date de début:                                             25/07/2026
+Date de fin:                                               N/A
+Jours:                                                     N/A
+Mois:                                                      N/A
+Répéter : Chaque:                                          0 heure(s), 30 minute(s)
+Répéter : Jusqu’à : Heure:                                 Aucune
+Répétition : pendant une durée donnée:                     Désactivée
+Répétition : arrêter si l’exécution est toujours en cours: Désactivée
+
+[5] STATUS.JSON APRES RUN
+{
+  "checkpoint_id": "ckpt-oos-shadow-2836d5515a9b",
+  "checkpoint_hash": "2836d5515a9b3a70c27e7f480f9da4cb75e814008b689a7ee3fc1d805316d987",
+  "t_prereg_ms": 1784986837881,
+  "n_population_eligible": 0,
+  "nA": 0,
+  "cible_A": 30,
+  "A_complete": false,
+  "A_fin_ts": null,
+  "embargo_ms": 300000.0,
+  "seuil_B_ts": null,
+  "nB": 0,
+  "cible_B": 30,
+  "B_complete": false,
+  "pret_pour_rapport": false,
+  "mesure_ts_ms": 1784988853166
+}
+[6] VERIF.LOG (dernieres lignes)
+[verif OOS shadow] ckpt-oos-shadow-2836d5515a9b · A:0/30 · B:0/30 · population=0 · pret=False
+  LOCAL · read-only · 0 réseau · 0 modèle Claude · runtime intact.
+[verif OOS shadow] ckpt-oos-shadow-2836d5515a9b · A:0/30 · B:0/30 · population=0 · pret=False
+  LOCAL · read-only · 0 réseau · 0 modèle Claude · runtime intact.
+===== FIN =====

@@ -1,0 +1,106 @@
+{
+  "ts_ms": 1785002676353,
+  "source": "overshoots_liquidation.jsonl",
+  "horizon_ref_s": 30,
+  "cout_ar_bps": 13.0,
+  "note_couts": "mid-only (fichier) ; bid/ask reel = raffinement via join bbo",
+  "variantes": {
+    "overshoot>=30bps": {
+      "n_episodes": 19,
+      "net_bps_par_horizon": {
+        "15": -71.04,
+        "30": -56.25,
+        "60": -84.64,
+        "120": 13.91
+      },
+      "net_moyen_bps_par_horizon": {
+        "15": -3.739,
+        "30": -2.961,
+        "60": -4.455,
+        "120": 0.732
+      },
+      "gross_moyen_bps@ref": 10.039,
+      "continuation_vs_reversal@ref": {
+        "REVERSAL": 15,
+        "CONTINUATION": 4
+      },
+      "profit_factor@ref": 0.726,
+      "drawdown_bps@ref": -124.42,
+      "placebo_directionnel_net@ref": -437.74,
+      "leave_one_out@ref": {
+        "sans_meilleur_event": -93.55,
+        "sans_meilleur_coin": -83.66,
+        "sans_meilleure_heure": -138.89
+      },
+      "decision_2_fenetres@ref": {
+        "probe_armable": false,
+        "raison": "trop peu d'épisodes mesurables (19, requis 40)",
+        "n_episodes": 19
+      },
+      "n_events_filtres": 19
+    },
+    "overshoot>=80bps": {
+      "n_episodes": 0,
+      "net_bps_par_horizon": {
+        "15": 0,
+        "30": 0,
+        "60": 0,
+        "120": 0
+      },
+      "net_moyen_bps_par_horizon": {
+        "15": null,
+        "30": null,
+        "60": null,
+        "120": null
+      },
+      "gross_moyen_bps@ref": null,
+      "continuation_vs_reversal@ref": {},
+      "profit_factor@ref": 0.0,
+      "drawdown_bps@ref": 0.0,
+      "placebo_directionnel_net@ref": null,
+      "leave_one_out@ref": {
+        "sans_meilleur_event": null,
+        "sans_meilleur_coin": null,
+        "sans_meilleure_heure": null
+      },
+      "decision_2_fenetres@ref": {
+        "probe_armable": false,
+        "raison": "trop peu d'épisodes mesurables (0, requis 40)",
+        "n_episodes": 0
+      },
+      "n_events_filtres": 0
+    },
+    "overshoot>=150bps": {
+      "n_episodes": 0,
+      "net_bps_par_horizon": {
+        "15": 0,
+        "30": 0,
+        "60": 0,
+        "120": 0
+      },
+      "net_moyen_bps_par_horizon": {
+        "15": null,
+        "30": null,
+        "60": null,
+        "120": null
+      },
+      "gross_moyen_bps@ref": null,
+      "continuation_vs_reversal@ref": {},
+      "profit_factor@ref": 0.0,
+      "drawdown_bps@ref": 0.0,
+      "placebo_directionnel_net@ref": null,
+      "leave_one_out@ref": {
+        "sans_meilleur_event": null,
+        "sans_meilleur_coin": null,
+        "sans_meilleure_heure": null
+      },
+      "decision_2_fenetres@ref": {
+        "probe_armable": false,
+        "raison": "trop peu d'épisodes mesurables (0, requis 40)",
+        "n_episodes": 0
+      },
+      "n_events_filtres": 0
+    }
+  },
+  "verdict": "PAS_ENCORE_PROBE"
+}

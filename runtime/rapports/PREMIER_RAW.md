@@ -9,7 +9,7 @@
 - âge événement à la décision (skew HL possible) : 317 ms
 - **âge RÉEL à l'exécution paper (total fill→open)** : None ms
 - cycle_id : None · open_run_id : run-2f7a72fa293f · statut : NON_VALIDEE
-- trigger_version : None · **config_hash : …** · commit : 
+- trigger_version : None · **config_hash : …** · commit :  · transport : None
 
 ## CLÔTURE — HORIZON_ATTEINT
 - cycle_id : None · open_run_id → close_run_id : None → None (le cycle traverse les redémarrages)

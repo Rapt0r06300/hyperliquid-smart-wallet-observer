@@ -100,7 +100,10 @@ def scanner(root: Path, *, lookback_j: int = LOOKBACK_J_DEFAUT, poster=None, lim
     if resume["confirmees"]:
         with (root / LIQ_CONFIRMEES).open("a", encoding="utf-8") as f:
             for r in resume["confirmees"]:
-                f.write(json.dumps({**r, "backfill": True, "recu_ms": fin}, ensure_ascii=False) + "\n")
+                # PROVENANCE HONNÊTE (25/07) : trouvé APRÈS coup par REST -> REST_BACKFILL = descriptif/OOS,
+                # jamais causal (ne peut pas déclencher une position rétroactive). Cf. liquidation_sentinels.est_causal.
+                f.write(json.dumps({**r, "backfill": True, "source": "REST_BACKFILL", "recu_ms": fin},
+                                   ensure_ascii=False) + "\n")
     (root / RESUME).write_text(json.dumps({k: v for k, v in resume.items() if k != "confirmees"},
                                           ensure_ascii=False, indent=1), encoding="utf-8")
     return resume

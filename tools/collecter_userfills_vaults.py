@@ -24,6 +24,7 @@ sys.path.insert(0, str(RACINE / "tools"))
 from hl_observer.collection import userfills_live as UL  # noqa: E402
 from hl_observer.collection import verrou_instance as VI  # noqa: E402
 from hl_observer.experimental import cohortes as CO  # noqa: E402
+from hl_observer.experimental import liquidation_sentinels as LS  # noqa: E402  (LIQUIDATOR_SENTINELS_V2)
 import sonde_confirmation_vaults as SD  # noqa: E402  (helpers de réconciliation par CLÉ COMPOSITE, partagés)
 
 WS_URL = "wss://api.hyperliquid.xyz/ws"
@@ -85,11 +86,27 @@ def _shadow_par_vault(root: Path) -> dict:
     return {v: sum(x for x in xs if x > 0) / len(xs) for v, xs in agg.items() if xs}
 
 
+MAX_SLOTS = 10                          # plafond dur des places userFills (inchangé)
+SENTINELLES_K = 3                       # ≤3 slots RÉSERVÉS aux LIQUIDATOR_SENTINELS (top liquidateurs)
+
+
+def charger_sentinelles(root: Path, *, k: int = SENTINELLES_K) -> list[str]:
+    """LIQUIDATOR_SENTINELS = les vaults les plus souvent LIQUIDATEURS dans le journal confirmé
+    (`liquidations_confirmees.jsonl`). Les épingler garantit qu'on capte leurs fills de liquidation forward.
+    Deny-by-default : sans journal, aucune sentinelle. Pur (réutilise le cœur testé LS)."""
+    try:
+        recs = [json.loads(l) for l in (root / LIQ_CONFIRMEES).read_text(encoding="utf-8").splitlines() if l.strip()]
+    except (OSError, ValueError):
+        return []
+    return LS.selectionner_sentinelles(recs, k=k)["sentinelles"]
+
+
 def vaults_et_roles(root: Path, *, n_candidats: int = 8) -> list[tuple[str, str, str]]:
-    """(vault, role, raison) sur les 10 places WS : 2 CORE (retenus stricts, TRADENT ALPHA+PROBE) + jusqu'à
-    n_candidats=8 CANDIDATS OBSERVÉS choisis par ROTATION = activité live + qualité shadow + copyabilité
-    (pas seulement le composite). PROBE ne TRADE un candidat que s'il passe la sécurité mini (via
-    _vaults_cohorte). Deny-by-default : sans score, aucun abonnement."""
+    """(vault, role, raison) sur ≤10 places WS : 2 CORE (retenus stricts, TRADENT ALPHA+PROBE) + ≤3
+    LIQUIDATOR_SENTINELS ÉPINGLÉS (top liquidateurs confirmés — pour capter les liquidations forward) +
+    le reste en CANDIDATS OBSERVÉS par ROTATION = activité live + qualité shadow + copyabilité. Total borné
+    à MAX_SLOTS : les sentinelles NE dépassent JAMAIS la limite et NE volent PAS les slots CORE. PROBE ne
+    TRADE un candidat que s'il passe la sécurité mini. Deny-by-default : sans score, aucun abonnement."""
     try:
         d = json.loads((root / SCORES).read_text(encoding="utf-8"))
     except (OSError, ValueError):
@@ -97,6 +114,13 @@ def vaults_et_roles(root: Path, *, n_candidats: int = 8) -> list[tuple[str, str,
     classement = d.get("classement") or []
     core = [c["vault"] for c in classement if c.get("retenu")][:2]
     out = [(v, "CORE", "retenu strict (score) → trade ALPHA+PROBE") for v in core]
+    pris = set(core)
+    # Sentinelles épinglées (dédupliquées vs CORE), sans jamais dépasser MAX_SLOTS
+    for v in charger_sentinelles(root):
+        if v in pris or len(out) >= MAX_SLOTS:
+            continue
+        out.append((v, "LIQUIDATOR_SENTINEL", "top liquidateur confirmé → épinglé pour capter les liquidations"))
+        pris.add(v)
     act, sha = _activite_par_vault(root), _shadow_par_vault(root)
     a_max = max(act.values()) if act else 1
     s_max = max(sha.values()) if sha else 1
@@ -106,8 +130,9 @@ def vaults_et_roles(root: Path, *, n_candidats: int = 8) -> list[tuple[str, str,
         s = max(0.0, sha.get(v, 0.0)) / s_max if s_max else 0.0       # qualité shadow (positive)
         cp = float(f.get("copyabilite") or 0.0)                       # copyabilité
         return 0.45 * a + 0.30 * s + 0.25 * cp
-    cands = sorted((c for c in classement if c["vault"] not in core), key=_rotation, reverse=True)
-    for c in cands[:n_candidats]:
+    reste = max(0, min(n_candidats, MAX_SLOTS - len(out)))            # les autres slots pour le runtime existant
+    cands = sorted((c for c in classement if c["vault"] not in pris), key=_rotation, reverse=True)
+    for c in cands[:reste]:
         f = c.get("facteurs", {})
         sur = (float(f.get("anciennete_j") or 0) >= 45 and float(f.get("drawdown_pct") or 100) <= 45
                and float(f.get("copyabilite") or 0) >= 0.5)
@@ -178,8 +203,13 @@ def _journal_liquidations(root: Path, recs: list, *, socket_id: str = "") -> Non
     try:
         with (root / LIQ_CONFIRMEES).open("a", encoding="utf-8") as f:
             for r in recs:
-                f.write(json.dumps({**r, "recu_ms": int(time.time() * 1000), "socket": socket_id,
-                                    "run_id": RUN_ID}, ensure_ascii=False) + "\n")
+                # CAUSALITÉ (25/07) : recv_wall_ms = horloge WALL commune inter-processus (join avec la BBO) ;
+                # recv_mono_ns = monotone INTRA-processus (latence/provenance, PAS comparable à un autre process).
+                # source LIVE_WS -> éligible à un fade causal ; le backfill REST marque REST_BACKFILL (OOS only).
+                wall_ms = int(time.time() * 1000)
+                f.write(json.dumps({**r, "recu_ms": wall_ms, "recv_wall_ms": wall_ms,
+                                    "recv_mono_ns": time.monotonic_ns(), "source": "LIVE_WS",
+                                    "socket": socket_id, "run_id": RUN_ID}, ensure_ascii=False) + "\n")
         for r in recs:
             print("[userfills] LIQUIDATION CONFIRMEE %s sz=%s px=%s method=%s user=%s" % (
                 r.get("coin"), r.get("sz"), r.get("px"), r.get("method"),
