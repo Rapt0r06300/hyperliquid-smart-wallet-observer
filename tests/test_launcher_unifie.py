@@ -119,8 +119,10 @@ def test_le_lanceur_unique_n_est_pas_archive():
 # ------------------------------------------------------------------ 4. racine nettoyee
 
 def test_la_racine_ne_contient_que_le_lanceur_unique():
-    """L'OBJECTIF final (25/07) : EXACTEMENT UN seul .cmd en racine. POUSSER-GITHUB-FORCE.cmd retire
-    (archive conserve). Tout le reste est absorbe en sous-commandes du lanceur unique."""
-    cmd_racine = sorted(p.name for p in RACINE.glob("*.cmd"))
-    assert cmd_racine == ["LANCER_HYPERSMART.cmd"], (
-        "la racine ne doit contenir QUE LANCER_HYPERSMART.cmd ; trouve : %r" % cmd_racine)
+    """UN SEUL lanceur unifie en racine : LANCER_HYPERSMART.cmd. Seule exception TOLEREE (demande de Flo) :
+    POUSSER-GITHUB-FORCE.cmd, escape-hatch de force-push manuel (le sous-commande github-push reste
+    fast-forward-only). Tout le reste est absorbe en sous-commandes."""
+    cmd_racine = {p.name for p in RACINE.glob("*.cmd")}
+    assert "LANCER_HYPERSMART.cmd" in cmd_racine, "le lanceur unifie doit exister"
+    reste = cmd_racine - {"LANCER_HYPERSMART.cmd", "POUSSER-GITHUB-FORCE.cmd"}
+    assert reste == set(), "aucun autre .cmd que le lanceur (+ POUSSER-GITHUB-FORCE.cmd tolere) ; trouve : %r" % sorted(reste)
