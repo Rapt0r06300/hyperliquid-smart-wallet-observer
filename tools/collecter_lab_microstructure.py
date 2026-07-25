@@ -133,11 +133,16 @@ def _heartbeat_micro(root: Path, coins, reco: int, msgs: int) -> None:  # pragma
 
 
 async def _une_connexion(root: Path, coins: list[str], seqs: dict, cpt: dict):  # pragma: no cover
+    import asyncio
     import websockets
-    async with websockets.connect(WS_URL, ping_interval=15, ping_timeout=15, max_size=None) as ws:
+    async with websockets.connect(WS_URL, ping_interval=30, ping_timeout=30, max_size=None,
+                                  close_timeout=5) as ws:
+        # THROTTLE des abonnements : HL ferme la connexion si on FLOOD 72 souscriptions d'un coup (mesuré :
+        # "no close frame" + reconnexions en boucle). On espace les envois -> connexion stable.
         for c in coins:
             for typ in ("l2Book", "trades", "bbo"):
                 await ws.send(json.dumps({"method": "subscribe", "subscription": {"type": typ, "coin": c}}))
+                await asyncio.sleep(0.06)
         _heartbeat_micro(root, coins, cpt["reco"], cpt["msgs"])
         async for brut in ws:
             try:
