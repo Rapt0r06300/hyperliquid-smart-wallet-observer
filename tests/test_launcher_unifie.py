@@ -71,13 +71,18 @@ def test_pas_de_fenetre_cachee_ni_kill_global():
     assert "taskkill /f /im python" not in t.lower()
 
 
-def test_github_push_jamais_automatiquement_force():
-    """github-push normal = push simple ; --force seulement si demande EXPLICITEMENT."""
+def test_github_push_AUCUN_force_fast_forward_seulement():
+    """25/07 Fix 3 : plus AUCUN force-push. github-push affiche status/diff, pousse en FAST-FORWARD
+    uniquement, et refuse proprement une divergence distante — jamais de --force nulle part."""
     t = _txt()
+    assert "--force" not in t, "aucun --force ne doit subsister dans le lanceur"
+    assert "push --force" not in t
     m = re.search(r'(?ms)^:cmd_github\b.*?(?=^goto :fin)', t)
     assert m, "bloc :cmd_github introuvable"
     bloc = m.group(0)
-    assert 'if /I "%~2"=="--force"' in bloc, "le force doit etre garde par --force explicite"
+    assert "git push --ff-only origin main" in bloc, "push FAST-FORWARD uniquement"
+    assert "git status --short" in bloc and "diff --stat" in bloc, "status/diff affiches"
+    assert "REFUS PROPRE" in bloc, "refus propre en cas de divergence"
 
 
 def test_verrou_instance_unique_et_registre_pid():
@@ -114,9 +119,8 @@ def test_le_lanceur_unique_n_est_pas_archive():
 # ------------------------------------------------------------------ 4. racine nettoyee
 
 def test_la_racine_ne_contient_que_le_lanceur_unique():
-    """L'OBJECTIF de la migration : un seul .cmd ACTIF en racine. Seule exception demandee par
-    Flo : POUSSER-GITHUB-FORCE.cmd, garde a part. Tout le reste est absorbe en sous-commandes."""
+    """L'OBJECTIF final (25/07) : EXACTEMENT UN seul .cmd en racine. POUSSER-GITHUB-FORCE.cmd retire
+    (archive conserve). Tout le reste est absorbe en sous-commandes du lanceur unique."""
     cmd_racine = sorted(p.name for p in RACINE.glob("*.cmd"))
-    assert cmd_racine == ["LANCER_HYPERSMART.cmd", "POUSSER-GITHUB-FORCE.cmd"], (
-        "la racine ne doit contenir que le lanceur unique (+ POUSSER-GITHUB-FORCE.cmd) ; trouve : %r"
-        % cmd_racine)
+    assert cmd_racine == ["LANCER_HYPERSMART.cmd"], (
+        "la racine ne doit contenir QUE LANCER_HYPERSMART.cmd ; trouve : %r" % cmd_racine)

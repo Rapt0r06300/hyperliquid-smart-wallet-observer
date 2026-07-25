@@ -43,9 +43,9 @@ def _tous_vivants(root: Path) -> None:
 
 def test_un_log_FIGE_est_declare_mort(tmp_path):
     _tous_vivants(tmp_path)
-    _log(tmp_path, "carry-feeder", age_s=16 * 60)          # limite : 15 min
+    _log(tmp_path, "marks-collector", age_s=16 * 60)          # limite : 15 min
     morts = [e["nom"] for e in SC.etat_collecteurs(tmp_path) if e["mort"]]
-    assert morts == ["carry-feeder"]
+    assert morts == ["marks-collector"]
 
 
 def test_un_log_ABSENT_est_mort_aussi(tmp_path):
@@ -68,19 +68,19 @@ def test_des_logs_frais_ne_declenchent_RIEN(tmp_path):
 
 def test_un_mort_est_RELANCE_avec_la_commande_du_lanceur(tmp_path):
     _tous_vivants(tmp_path)
-    _log(tmp_path, "carry-feeder", age_s=16 * 60)
+    _log(tmp_path, "marks-collector", age_s=16 * 60)
     appels: list[list[str]] = []
     r = SC.verifier_et_relancer(tmp_path, lanceur=lambda cmd, cwd: appels.append(cmd) or True)
-    assert r["relances"] == ["carry-feeder"]
+    assert r["relances"] == ["marks-collector"]
     assert len(appels) == 1
     cmd = appels[0]
     # La MÊME forme que LANCER : start "" /b + chemins RELATIFS, AUCUN guillemet ajouté.
     # (Leçon du 19/07 : cmd /c mange la 1re et la dernière quote -> 3 lancements cassés.)
     assert cmd[:5] == ["cmd", "/c", "start", "", "/b"]
     assert cmd[5] == "tools\\boucle_collecteur.cmd"
-    assert cmd[6] == "carry-feeder"
-    assert cmd[7] == "tools\\ecrire_carry_spot_inputs.py"
-    assert cmd[8] == "240"
+    assert cmd[6] == "marks-collector"
+    assert cmd[7] == "tools\\ecrire_marks_tous_coins.py"
+    assert cmd[8] == "60"
     assert not any('"' in p for p in cmd), "aucun guillemet : cmd /c les mange par paires"
 
 
@@ -143,7 +143,7 @@ def test_pas_de_MITRAILLAGE_dans_le_cooldown(tmp_path):
 def test_l_interrupteur_env_coupe_tout(tmp_path, monkeypatch):
     monkeypatch.setenv(SC.ENV_INTERRUPTEUR, "0")
     _tous_vivants(tmp_path)
-    _log(tmp_path, "carry-feeder", age_s=60 * 60)
+    _log(tmp_path, "marks-collector", age_s=60 * 60)
     appels: list[list[str]] = []
     r = SC.verifier_et_relancer(tmp_path, lanceur=lambda cmd, cwd: appels.append(cmd) or True)
     assert r["actif"] is False and appels == []
@@ -152,11 +152,11 @@ def test_l_interrupteur_env_coupe_tout(tmp_path, monkeypatch):
 def test_ne_leve_JAMAIS_meme_si_le_lanceur_explose(tmp_path):
     """Un superviseur qui tue le moteur qu'il protège serait pire que la panne."""
     _tous_vivants(tmp_path)
-    _log(tmp_path, "carry-feeder", age_s=60 * 60)
+    _log(tmp_path, "marks-collector", age_s=60 * 60)
     def bombe(cmd, cwd):
         raise RuntimeError("boum")
     r = SC.verifier_et_relancer(tmp_path, lanceur=bombe)
-    assert r["morts"] == ["carry-feeder"] and r["relances"] == []
+    assert r["morts"] == ["marks-collector"] and r["relances"] == []
 
 
 def test_racine_inexistante_ne_leve_pas(tmp_path):

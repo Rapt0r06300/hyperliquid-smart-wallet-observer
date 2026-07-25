@@ -311,7 +311,10 @@ REM RESET DES LOGS 2026-06-25: en plus, le dossier logs\ encombre est REMIS A ZE
 REM lancement (prepare-simulation-logs --purge-top-level): les gros *.log sont vides (tronques a 0),
 REM les archives lourdes *.zip supprimees, l'ancien dossier mojibake retire. L'INTELLIGENCE DE
 REM L'IA n'est JAMAIS touchee (modele + echantillons d'apprentissage vivent dans runtime\, hors logs\).
-set "HYPERSMART_RESET_ON_LAUNCH=1"
+REM 25/07 (Fix 1) : DEFAUT = CONSERVER equity/PnL/ledgers/positions/historique entre lancements.
+REM AUTOPILOT et `restart` ne remettent PLUS a zero. Le reset ne se fait QUE via
+REM `LANCER_HYPERSMART.cmd reset-paper --confirm` (sauvegarde horodatee AVANT toute remise a zero).
+set "HYPERSMART_RESET_ON_LAUNCH=0"
 REM Les anciens modules d'analyse multi-plateforme restent sur disque, non lances.
 REM Les auxiliaires HyperSmart utiles (IA shadow + stream read-only) sont demarres par le script
 REM principal, rattaches a la meme session, et stoppes avec Q.
@@ -374,17 +377,13 @@ REM plus jamais deux carry-feeders en parallele apres un Q, une croix ou un cras
 if not exist "runtime\data" mkdir "runtime\data" >nul 2>&1
 echo %random%-%random%-%date%-%time% > "runtime\data\lanceur_session_marqueur.txt"
 call :demarrer_collecteurs
-REM AUTO-VERIFICATION : un collecteur cache qui ne demarre pas ne se voit PAS. On attend qu'il
-REM ecrive son log (il l'ecrit des la 1re ligne) et on DIT si l'un des trois manque a l'appel.
-ping -n 6 127.0.0.1 >nul 2>&1
-for %%C in (carry-feeder marks-collector liq-collector venues-collector copy-whitelist rapport-quotidien) do (
-  if exist "%~dp0runtime\logs\%%C.log" (
-    echo   [collecteurs] %%C ......... demarre
-  ) else (
-    echo   [collecteurs] %%C ......... !! N'A PAS DEMARRE -- voir runtime\logs\
-  )
-)
-echo   [collecteurs] sans fenetre. Journaux : runtime\logs\  ^|  arret : ARRETER-COLLECTEURS.cmd
+REM AUTO-VERIFICATION + REGISTRE PID (25/07) : on laisse les 17 collecteurs ecrire leur 1re ligne,
+REM puis on ENREGISTRE leurs PID (base de l'arret CIBLE, Fix 5) et on affiche l'etat du REGISTRE
+REM UNIQUE des 17 (source: hl_observer.ops.superviseur_collecteurs).
+ping -n 7 127.0.0.1 >nul 2>&1
+python -m hl_observer.ops.superviseur_collecteurs enregistrer-pids
+python -m hl_observer.ops.superviseur_collecteurs status
+echo   [collecteurs] sans fenetre. Journaux : runtime\logs\  ^|  arret cible : LANCER_HYPERSMART.cmd stop
 
 powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0tools\start_hypersmart_simulation.ps1" -Port 8794 -IntervalSeconds 15 -MaxLeaders 50 -Interactive
 
@@ -515,6 +514,7 @@ if /I "%SUB%"=="replay"            goto :cmd_replay
 if /I "%SUB%"=="moisson"           goto :cmd_moisson
 if /I "%SUB%"=="verify-oos"        goto :cmd_verifoos
 if /I "%SUB%"=="github-push"       goto :cmd_github
+if /I "%SUB%"=="reset-paper"       goto :cmd_resetpaper
 if /I "%SUB%"=="self-test"         goto :cmd_selftest
 if /I "%SUB%"=="menu"              goto :cmd_menu
 if /I "%SUB%"=="audit-moissonneur" goto :cmd_auditmoiss
@@ -547,7 +547,8 @@ echo     replay              recherche de scenarios / pepites
 echo     moisson [github^|relire^|voir^|stop]     moissonneur de recherche
 echo   Ops :
 echo     verify-oos [install^|uninstall^|run^|diag^|test-notif]   verificateur OOS local
-echo     github-push [--force]     push git EXPLICITE ^(jamais automatique^)
+echo     github-push     push git fast-forward EXPLICITE ^(jamais de force^)
+echo     reset-paper --confirm   remise a zero VOLONTAIRE ^(sauvegarde horodatee avant^)
 echo     menu                cette aide
 echo.
 echo   Securite : lecture seule marche. 0 ordre reel, 0 cle, 0 signature.
@@ -559,9 +560,8 @@ REM -------- STATUT (lecture seule) --------
 echo.
 echo   ===  STATUT HYPERSMART  ^(lecture seule^)  ===
 if exist "runtime\data\launcher_pids.json" ( echo   Registre lanceur : & type "runtime\data\launcher_pids.json" & echo. ) else ( echo   Pas de registre lanceur. )
-powershell -NoProfile -Command "$p='%~dp0'; try { $ok=(Test-NetConnection -ComputerName 127.0.0.1 -Port 8794 -WarningAction SilentlyContinue -InformationLevel Quiet) } catch { $ok=$false }; Write-Host ('  UI 8794 : ' + $(if($ok){'ACTIVE'}else{'inactive'})); $py=@(Get-CimInstance Win32_Process | Where-Object { ($_.Name -eq 'python.exe' -or $_.Name -eq 'pythonw.exe') -and $_.CommandLine -like ('*'+$p+'*') }); Write-Host ('  python du projet : ' + $py.Count + ' processus'); $lk=Join-Path $p 'runtime\data\userfills_live.lock'; if (Test-Path $lk) { Write-Host '  userfills : verrou present' } else { Write-Host '  userfills : pas de verrou' }"
-echo   Collecteurs ^(presence des journaux^) :
-for %%C in (marks-collector liq-collector venues-collector bbo-collector userfills-live rapport-quotidien) do if exist "runtime\logs\%%C.log" ( echo     %%C : log present ) else ( echo     %%C : ABSENT )
+powershell -NoProfile -Command "try { $ok=(Test-NetConnection -ComputerName 127.0.0.1 -Port 8794 -WarningAction SilentlyContinue -InformationLevel Quiet) } catch { $ok=$false }; Write-Host ('  UI 8794 : ' + $(if($ok){'ACTIVE'}else{'inactive'}))"
+python -m hl_observer.ops.superviseur_collecteurs status
 echo.
 goto :fin
 
@@ -576,7 +576,9 @@ echo.
 goto :fin
 
 :stop_impl
-powershell -NoProfile -Command "$projet='%~dp0'; $motifs=@('*boucle_collecteur.cmd*','*collecter_userfills_vaults.py*','*start_hypersmart_simulation.ps1*','*hypersmart_simulation_poll_loop.ps1*','*ia_train_loop.ps1*','*stream_loop.ps1*','*hl_observer*'); $c = Get-CimInstance Win32_Process | Where-Object { $p=$_; $_.ProcessId -ne $PID -and $_.CommandLine -and ( ($motifs | Where-Object { $p.CommandLine -like $_ }) -or (($_.Name -eq 'python.exe' -or $_.Name -eq 'pythonw.exe') -and $_.CommandLine -like ('*'+$projet+'*')) ) }; if ($c) { $c | ForEach-Object { try { Stop-Process -Id $_.ProcessId -Force -ErrorAction Stop; Write-Host ('  arret PID ' + $_.ProcessId) } catch {} }; Write-Host ('  ' + $c.Count + ' processus projet arretes.') } else { Write-Host '  aucun processus projet en cours.' }; try { Get-NetTCPConnection -LocalPort 8794 -State Listen -ErrorAction SilentlyContinue | ForEach-Object { Stop-Process -Id $_.OwningProcess -Force -ErrorAction SilentlyContinue } } catch {}; $lk=Join-Path $projet 'runtime\data\userfills_live.lock'; if (Test-Path $lk) { try { $pp=(Get-Content $lk -Raw | ConvertFrom-Json).pid; Stop-Process -Id $pp -Force -ErrorAction SilentlyContinue; Remove-Item $lk -Force -ErrorAction SilentlyContinue; Write-Host ('  verrou userfills libere (PID ' + $pp + ')') } catch {} }"
+REM ARRET CIBLE (Fix 5) : SEULEMENT les PID enregistres du run + enfants verifies + process signes
+REM registre + detenteur valide du port 8794 + verrou userfills. AUCUN motif large (*hl_observer*/*projet*).
+python -m hl_observer.ops.superviseur_collecteurs arreter
 exit /b 0
 
 REM -------- RESTART = stop puis autopilot --------
@@ -725,14 +727,29 @@ REM -------- GITHUB-PUSH (absorbe POUSSER-GITHUB / POUSSER-GITHUB-FORCE ; jamais
 :cmd_github
 echo === Remote configure ===
 git remote -v
-if /I "%~2"=="--force" (
-  echo === Envoi FORCE de la branche main ^(remplace le README initial du depot^) ===
-  git push -u origin main --force
-) else (
-  echo === Envoi de la branche main vers GitHub ===
-  git push -u origin main
-  echo   Si rejet "fetch first" : relance avec  LANCER_HYPERSMART.cmd github-push --force
+echo.
+echo === Etat local (status court + branche) ===
+git status --short --branch
+echo.
+echo === Diff a pousser (resume) ===
+git --no-pager diff --stat origin/main..HEAD 2>nul
+echo.
+echo === Envoi FAST-FORWARD de la branche main (jamais de force) ===
+git push --ff-only origin main
+if errorlevel 1 (
+  echo.
+  echo   REFUS PROPRE : le distant a diverge -- push fast-forward impossible. AUCUN force-push.
+  echo   Resous d'abord :  git pull --rebase origin main   puis relance  LANCER_HYPERSMART.cmd github-push
 )
+echo.
+pause
+goto :fin
+
+REM -------- RESET-PAPER (Fix 1) : remise a zero VOLONTAIRE, sauvegarde horodatee, exige --confirm --------
+:cmd_resetpaper
+echo.
+echo   RESET PAPER : efface equity/PnL/positions ^(sauvegarde horodatee AVANT^). Exige --confirm.
+python tools\reset_paper.py %2 %3
 echo.
 pause
 goto :fin

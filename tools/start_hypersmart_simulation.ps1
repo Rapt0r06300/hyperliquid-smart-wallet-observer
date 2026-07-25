@@ -645,18 +645,20 @@ try {
     Push-Location $Root
     $initOutput = & python -m hl_observer init-db 2>&1
     foreach ($line in $initOutput) { Write-LauncherLog $line }
-    if ($env:HYPERSMART_RESET_ON_LAUNCH -ne "0") {
+    if ($env:HYPERSMART_RESET_ON_LAUNCH -eq "1") {
+        # RESET seulement si DEMANDE EXPLICITEMENT (=1). Defaut (unset/0) = CONSERVER. AUTOPILOT et
+        # restart passent =0 -> jamais de reset. Le vrai reset volontaire passe par reset-paper --confirm.
         $resetOutput = & python -m hl_observer reset-simulation-state --starting-equity 1000 2>&1
         foreach ($line in $resetOutput) { Write-LauncherLog $line }
-        Write-LauncherLine "Capital virtuel REMIS a 1000 USDT pour ce lancement. Mettre HYPERSMART_RESET_ON_LAUNCH=0 pour conserver une session."
+        Write-LauncherLine "Capital virtuel REMIS a 1000 USDT (HYPERSMART_RESET_ON_LAUNCH=1 explicite)."
     } else {
-        Write-LauncherLine "Capital virtuel CONSERVE entre lancements: HYPERSMART_RESET_ON_LAUNCH=0."
+        Write-LauncherLine "Capital virtuel CONSERVE entre lancements (defaut garanti): equity/PnL/ledgers/positions/historique intacts. Reset uniquement via reset-paper --confirm."
     }
     Write-LauncherLine "Nouvelle session simulation: moteur Hyperliquid read-only + paper local actif."
     $prepareLogsOutput = & python -m hl_observer prepare-simulation-logs 2>&1
     foreach ($line in $prepareLogsOutput) { Write-LauncherLog $line }
     Write-LauncherLine "Logs a envoyer prepares: session fraiche, anciens fichiers deplaces dans _archives."
-    Write-LauncherLine "Nouvelle session de logs preparee (reset a 1000 par defaut; conservation seulement avec HYPERSMART_RESET_ON_LAUNCH=0)."
+    Write-LauncherLine "Nouvelle session de logs preparee (capital CONSERVE par defaut; reset uniquement via reset-paper --confirm ou HYPERSMART_RESET_ON_LAUNCH=1)."
     Write-LauncherLine "Decouverte read-only des marches Hyperliquid pour scanner davantage de coins."
     $marketsOutput = & python -m hl_observer discover-markets --store --max-coins 80 2>&1
     foreach ($line in $marketsOutput) { Write-LauncherLog $line }
