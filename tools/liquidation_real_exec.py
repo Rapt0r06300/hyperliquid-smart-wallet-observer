@@ -29,7 +29,7 @@ _specL.loader.exec_module(LCR)
 
 DATA = RACINE / "runtime" / "data"
 SORTIE = RACINE / "runtime" / "rapports" / "liquidation_cascade"
-HORIZONS_S = (15, 30, 60, 120)
+HORIZONS_S = (1, 3, 5, 15, 30, 60, 120)   # LIQUIDATION_LIVE_COVERAGE : markout complet 1s->120s (bid/ask reel)
 FEE_AR_BPS = 9.0
 DEGRAD_LAT_BPS = 1.0
 TOL_JOIN_MS = 2000.0                         # cotation HL acceptée si à ≤ 2 s de l'instant visé

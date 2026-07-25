@@ -41,6 +41,29 @@ _EXCEPTIONS = {"PEPE": "1000PEPEUSDT", "SHIB": "1000SHIBUSDT", "BONK": "1000BONK
                "FLOKI": "1000FLOKIUSDT", "LUNC": "1000LUNCUSDT", "SATS": "1000SATSUSDT",
                "RATS": "1000RATSUSDT", "XEC": "1000XECUSDT", "WHYPE": None, "HYPE": None}
 
+#: LIQUIDATION_LIVE_COVERAGE_V1 (25/07). Le HL WS bbo couvre N'IMPORTE QUEL coin (memes inclus) ; la
+#: jointure Binance est ignorée si le coin n'y est pas. On garde donc un BBO/L2 synchronisé sur les coins
+#: où les liquidations ARRIVENT — sinon 0 couverture (les 71 épisodes étaient sur ONDO/AAVE/HYPE/memes,
+#: hors des 8 majors). La tape bbo_tape.jsonl EST le ring-buffer (continu, avant + après l'événement).
+MAJORS_BBO = ("BTC", "ETH", "SOL", "INJ", "DASH", "NEO", "AVAX", "LINK")
+LIQ_CONFIRMEES_REL = Path("runtime") / "data" / "liquidations_confirmees.jsonl"
+
+
+def coins_couverture(root: Path | str = ".", *, k: int = 16) -> list[str]:
+    """Majors + les K coins les PLUS FRÉQUENTS des liquidations confirmées (journal). Relu à CHAQUE
+    démarrage -> tout NOUVEAU coin de liquidation entre dans la couverture. Borné (majors + K). Pur."""
+    import collections
+    coins = list(MAJORS_BBO)
+    try:
+        recs = [json.loads(l) for l in (Path(root) / LIQ_CONFIRMEES_REL).open(encoding="utf-8") if l.strip()]
+        for coin, _ in collections.Counter(r.get("coin") for r in recs if r.get("coin")).most_common(k):
+            cu = str(coin).upper()
+            if cu and cu not in coins:
+                coins.append(cu)
+    except (OSError, ValueError):
+        pass
+    return coins
+
 
 def symbole_binance(coin_hl: str) -> str | None:
     """Symbole perp Binance correspondant EXACTEMENT au coin HL, ou None si non mappable (refus)."""
@@ -333,9 +356,12 @@ def main(argv: list[str] | None = None) -> int:  # pragma: no cover
     import asyncio
     p = argparse.ArgumentParser(description="Collecteur BBO rapide HL/Binance (PERSISTANT, lecture seule).")
     p.add_argument("--root", default=".")
-    p.add_argument("--coins", default="BTC,ETH,SOL,INJ,DASH,NEO,AVAX,LINK")
+    p.add_argument("--coins", default="AUTO")   # AUTO = majors + coins fréquents des liquidations (journal)
     a = p.parse_args(argv)
-    coins = [c.strip().upper() for c in a.coins.split(",") if c.strip()]
+    if a.coins.strip().upper() == "AUTO":
+        coins = coins_couverture(a.root)        # LIQUIDATION_LIVE_COVERAGE : couvre les coins de liquidation
+    else:
+        coins = [c.strip().upper() for c in a.coins.split(",") if c.strip()]
     try:                                                     # 🔴 sans `websockets`, RIEN ne se collecte
         import websockets  # noqa: F401
     except ImportError:
