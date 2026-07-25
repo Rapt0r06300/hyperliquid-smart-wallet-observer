@@ -29,6 +29,13 @@ import sonde_confirmation_vaults as SD  # noqa: E402  (helpers de réconciliatio
 WS_URL = "wss://api.hyperliquid.xyz/ws"
 FILLS_LIVE = Path("runtime") / "data" / "vault_fills_live.jsonl"
 JOURNAL = Path("runtime") / "data" / "fills_journal.jsonl"       # CHAQUE fill live non-snapshot + gate + latence
+LIQ_CONFIRMEES = Path("runtime") / "data" / "liquidations_confirmees.jsonl"  # 25/07 : fill.liquidation non-null = REAL_LIQUIDATION
+# 25/07 — userEvents/WsLiquidation NON ajouté À DESSEIN : le champ `liquidation` {liquidatedUser, markPx,
+# method} est DÉJÀ porté par les messages userFills qu'on reçoit (une liquidation du user suivi apparaît
+# comme un fill portant ce champ). Ajouter un abonnement userEvents doublerait les abonnements par socket
+# et risquerait le plafond HL (~5/connexion) -> MOINS de données, pas plus. On préserve donc le champ
+# userFills (ci-dessus) plutôt qu'ouvrir un 2e canal redondant. Réactiver seulement si HL cesse de porter
+# `liquidation` sur userFills (mesuré, pas supposé).
 CURSEURS = Path("runtime") / "data" / "userfills_curseurs.json"
 SCORES = Path("runtime") / "data" / "vaults_scores.json"
 FILE_MAX = 2000                  # file bornée : si saturée, on drop (on ne bloque JAMAIS la reception WS)
@@ -160,6 +167,25 @@ def _journal(root: Path, fill: dict, cohorte: str, decision: dict | None, recu_m
              "decision": etat, "run_id": RUN_ID}
     with (root / JOURNAL).open("a", encoding="utf-8") as f:
         f.write(json.dumps(ligne, ensure_ascii=False) + "\n")
+
+
+def _journal_liquidations(root: Path, recs: list, *, socket_id: str = "") -> None:
+    """Journalise les liquidations CONFIRMÉES (fill.liquidation non-null) dans LIQ_CONFIRMEES — NO-OP si la
+    liste est vide (cas quasi systématique) : zéro coût sur les fills normaux. Best-effort, ne lève JAMAIS
+    (le hot-path WS ne doit pas casser pour un journal). Purement observationnel : aucune décision de trade."""
+    if not recs:
+        return
+    try:
+        with (root / LIQ_CONFIRMEES).open("a", encoding="utf-8") as f:
+            for r in recs:
+                f.write(json.dumps({**r, "recu_ms": int(time.time() * 1000), "socket": socket_id,
+                                    "run_id": RUN_ID}, ensure_ascii=False) + "\n")
+        for r in recs:
+            print("[userfills] LIQUIDATION CONFIRMEE %s sz=%s px=%s method=%s user=%s" % (
+                r.get("coin"), r.get("sz"), r.get("px"), r.get("method"),
+                str(r.get("liquidatedUser") or "")[:10]), flush=True)
+    except OSError:
+        pass
 
 
 # ── L2 ON-DEMAND (rectif Flo 23/07) : fetch L2<1s du coin EXACT du fill, pour que RAW_PROBE/ALPHA/PROBE
@@ -453,6 +479,7 @@ async def _userfills_multiplex(root: Path, vaults: list, file: asyncio.Queue, so
                     fills = UL.parser_message_userfills(msg, vault=vault)
                     if not fills:
                         continue
+                    _journal_liquidations(root, UL.liquidations_confirmees(fills), socket_id=socket_id)  # CONFIRMÉES only
                     t_ws = time.monotonic()                       # HORLOGE MONOTONE LOCALE : réception WS
                     try:
                         file.put_nowait((vault, fills, t_ws))     # ne bloque JAMAIS la réception

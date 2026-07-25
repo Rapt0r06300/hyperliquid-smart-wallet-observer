@@ -53,7 +53,12 @@ def snapshot_depuis_positions(vault: str, positions: dict[str, dict], *, nav_usd
 
 def parser_message_userfills(msg: Any, *, vault: str = "") -> list[dict]:
     """Normalise un message WS userFills → fills {coin, px, sz, signe, ts_ms, dir, hash, isSnapshot}.
-    `isSnapshot` est propagé (le snapshot initial rejoue l'historique : à IGNORER pour trader). Tolérant."""
+    `isSnapshot` est propagé (le snapshot initial rejoue l'historique : à IGNORER pour trader). Tolérant.
+
+    25/07 (Flo) — PRÉSERVE le champ `liquidation` de WsFill ({liquidatedUser, markPx, method}) quand il est
+    présent : c'était perdu au parsing (on reconstruisait un sous-ensemble). C'est notre SEULE source de
+    liquidations CONFIRMÉES (REAL_LIQUIDATION). Purement additif : la logique de trading lit coin/px/sz/
+    signe/ts_ms/dir et ignore les clés inconnues — aucune décision ne change."""
     data = msg.get("data") if isinstance(msg, dict) else None
     fills = (data or {}).get("fills") if isinstance(data, dict) else None
     est_snapshot = bool((data or {}).get("isSnapshot")) if isinstance(data, dict) else False
@@ -71,13 +76,34 @@ def parser_message_userfills(msg: Any, *, vault: str = "") -> list[dict]:
             start_pos = float(f.get("startPosition"))
         except (TypeError, ValueError):
             start_pos = None
-        out.append({"vault": vault, "coin": coin, "px": px, "sz": sz,
-                    "signe": 1 if side == "B" else (-1 if side == "A" else 0),
-                    "ts_ms": ts, "dir": str(f.get("dir") or ""), "hash": f.get("hash"),
-                    "start_position": start_pos, "isSnapshot": est_snapshot,
-                    "source": "LIVE_WS"})                          # PROVENANCE : seuls les vrais fills WS sont tradables
+        entry = {"vault": vault, "coin": coin, "px": px, "sz": sz,
+                 "signe": 1 if side == "B" else (-1 if side == "A" else 0),
+                 "ts_ms": ts, "dir": str(f.get("dir") or ""), "hash": f.get("hash"),
+                 "start_position": start_pos, "isSnapshot": est_snapshot,
+                 "source": "LIVE_WS"}                             # PROVENANCE : seuls les vrais fills WS sont tradables
+        liq = f.get("liquidation")
+        if liq:                                                   # non-null uniquement -> jamais de clé vide
+            entry["liquidation"] = liq                            # {liquidatedUser, markPx, method} CONSERVÉ
+        out.append(entry)
+    return out
+
+
+def liquidations_confirmees(fills: list[dict]) -> list[dict]:
+    """Fills normalisés PORTANT un `liquidation` non-null → records aplatis de liquidations CONFIRMÉES.
+    Provenance = REAL_LIQUIDATION (fill.liquidation), JAMAIS un proxy mark/oracle. Prêt pour le journal
+    `liquidations_confirmees.jsonl` et la jointure BBO/L2 synchronisée. 0 réseau, pur, testable."""
+    out: list[dict] = []
+    for f in (fills or []):
+        liq = f.get("liquidation")
+        if not liq:
+            continue
+        out.append({"vault": f.get("vault"), "coin": f.get("coin"), "px": f.get("px"), "sz": f.get("sz"),
+                    "signe": f.get("signe"), "ts_ms": f.get("ts_ms"), "dir": f.get("dir"), "hash": f.get("hash"),
+                    "liquidatedUser": liq.get("liquidatedUser"), "markPx": liq.get("markPx"),
+                    "method": liq.get("method"), "provenance": "REAL_LIQUIDATION",
+                    "source": "userFills.liquidation"})
     return out
 
 
 __all__ = ["positions_depuis_snapshot", "appliquer_fill", "snapshot_depuis_positions",
-           "parser_message_userfills"]
+           "parser_message_userfills", "liquidations_confirmees"]
