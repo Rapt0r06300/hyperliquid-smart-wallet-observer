@@ -148,12 +148,34 @@ async def _boucle_ws(root: Path, coins: list[str]):  # pragma: no cover (réseau
                     ecrire_micro(root, "bbo", [r], seqs=seqs)
 
 
+#: univers 24 coins par défaut (majors + actifs + coins de liquidation fréquents) tant que asset_ctx du
+#: labo n'a pas encore de quoi classer par vol×OI×liq. Remplacé dès que la data ctx arrive.
+UNIVERS_DEFAUT = ("BTC", "ETH", "SOL", "AVAX", "INJ", "LINK", "DASH", "NEO", "AAVE", "ONDO", "HYPE",
+                  "XRP", "DOGE", "WLD", "ARB", "OP", "SUI", "TIA", "SEI", "APT", "LTC", "BNB", "PEPE", "FARTCOIN")
+
+
+def _charger_univers(root: Path, *, k: int = UNIVERS_K) -> list[str]:
+    """Univers ADAPTATIF : classe par vol×OI×liq depuis l'asset_ctx du labo (LOT 1) si présent, sinon
+    l'univers 24 par défaut. Relu à chaque démarrage/passe -> s'adapte sans redémarrage manuel."""
+    from hl_observer.research_parallel.plugins import _commun as K
+    recs = K.charger_lab_jsonl(root, "asset_ctx")
+    if recs:
+        derniers = {}
+        for r in recs:
+            if r.get("coin"):
+                derniers[r["coin"]] = r
+        u = univers_adaptatif({c: d for c, d in derniers.items()}, k=k)
+        if len(u) >= 8:
+            return u
+    return list(UNIVERS_DEFAUT[:k])
+
+
 def main(argv=None) -> int:  # pragma: no cover
     ap = argparse.ArgumentParser(description="Collecteur WS microstructure dense isolé (read-only).")
     ap.add_argument("--root", default=str(RACINE))
     ap.add_argument("--coins", default="")
     a = ap.parse_args(argv)
-    coins = [c for c in a.coins.split(",") if c] or ["BTC", "ETH", "SOL"]
+    coins = [c for c in a.coins.split(",") if c] or _charger_univers(Path(a.root))
     try:
         import asyncio
         asyncio.run(_boucle_ws(Path(a.root), coins))

@@ -501,6 +501,12 @@ REM Une panne ou surcharge du labo n'affecte JAMAIS le moteur principal (process
 REM plugin dans le superviseur). Lecture seule, 0 cle, 0 ordre, 0 signature.
 start "" /b tools\boucle_collecteur.cmd research-lab tools\lancer_research_parallel.py 60 --max-ticks 1
 
+REM === LABO : collecteur WS microstructure DENSE (l2Book top20 + trades + BBO tailles), univers adaptatif ===
+REM 24 coins (vol x OI x liquidations), isole sous research_lab. PERSISTANT : boucle_collecteur ne relance
+REM qu'en cas de crash (comme bbo-collector). Debloque la profondeur (VWAP/capacite) + les familles HL
+REM natives (OFI/microprice/absorption/cascade). Necessite le module python `websockets`. 0 cle, 0 ordre.
+start "" /b tools\boucle_collecteur.cmd lab-microstructure tools\collecter_lab_microstructure.py 30
+
 exit /b 0
 
 REM ############################################################################
