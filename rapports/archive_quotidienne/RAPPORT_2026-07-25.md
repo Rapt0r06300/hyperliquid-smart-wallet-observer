@@ -1,4 +1,4 @@
-# Rapport quotidien HyperSmart — 25/07/2026 22:15
+# Rapport quotidien HyperSmart — 25/07/2026 23:29
 
 _Chaque chiffre se remonte à un fichier (ledger, positions, journaux). Fenêtre : dernières 24 h._
 
@@ -14,13 +14,13 @@ Aucune position ouverte.
 
 ## 3. Santé du système
 
-- Collecteurs : **1 MUET(S)** — bbo-collector (silence 57.9 min)
+- Collecteurs : 4/4 vivants.
 - Superviseur : relances cumulées {'carry-feeder': 2, 'marks-collector': 2, 'liq-collector': 2, 'venues-collector': 3, 'rapport-quotidien': 1, 'carnet-collector': 1}
 
 ## 4. Mesures en cours
 
-- Cross-venue : **150.8 h / 72 h** (800642 observations) — verdict aux barres pré-écrites, jamais avant.
-- Usine à données replay (24 h) : **62 candidats** · **244176 marks** — c'est le carburant du replay A/B.
+- Cross-venue : **152.0 h / 72 h** (815680 observations) — verdict aux barres pré-écrites, jamais avant.
+- Usine à données replay (24 h) : **10 candidats** · **244984 marks** — c'est le carburant du replay A/B.
 
 ## 5. Refus dominants (24 h) — le bot explique pourquoi il n'ouvre pas
 
@@ -32,7 +32,7 @@ Aucune perte sur la fenêtre. (La boucle perte→leçon n'a rien à dire.)
 
 ## 7. PnL des refus (hebdo) — combien coûtent nos portes ?
 
-_Calculé il y a 4.5 j (cadence : hebdo). Simulation sur candidats refusés enregistrés — pas une promesse._
+_Calculé il y a 4.6 j (cadence : hebdo). Simulation sur candidats refusés enregistrés — pas une promesse._
 
 - `?` : ×435768 refus, 189688 mesurés, PnL simulé si on avait ouvert : -21388.03 $
 - non mesurables (pas de marks sur la fenêtre) : ×246080 — comptés, jamais inventés
@@ -112,10 +112,10 @@ _17 loi(s) : 14 réfutée(s), 2 limite(s), 1 confirmée(s). Détail complet : `d
 
 ## 13. À FAIRE — ce que les données d'aujourd'hui désignent
 
-- **Cross-venue : 72 h atteintes (151 h)** → lancer `python tools/mesurer_dispersion_venues.py` pour LE verdict (#178).
+- **Cross-venue : 72 h atteintes (152 h)** → lancer `python tools/mesurer_dispersion_venues.py` pour LE verdict (#178).
 - Relances de collecteurs au compteur : {'carry-feeder': 2, 'marks-collector': 2, 'liq-collector': 2, 'venues-collector': 3, 'rapport-quotidien': 1, 'carnet-collector': 1} — si un compteur grimpe SEUL demain, c'est lui le malade (doc R5).
 - Copy-whitelist : 4 leader(s) prouvé(s) → copy peut suivre CES leaders uniquement.
-- Markout copy : 61.9% des fills mesures (29211/47232) — le pipeline nourrit la whitelist.
+- Markout copy : 61.1% des fills mesures (29211/47843) — le pipeline nourrit la whitelist.
 - Replay : 603097 candidats consolidés → `RECHERCHE-SCENARIO-REPLAY.cmd` a de quoi travailler (porte deux-moitiés + plateau).
 
 ---
