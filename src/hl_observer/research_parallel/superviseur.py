@@ -38,10 +38,15 @@ def _journal_erreur(root: Path, plugin: str, exc: BaseException) -> None:
         pass
 
 
+_ORDRE_CAT = {"data": 0, "router": 1, "signal": 2}     # data collecté AVANT que les signaux le lisent
+
+
 def tick_tous(root: Path, ident: dict, contexte: dict, *, plugins=None) -> dict:
     """Un tick : chaque plugin est appelé DANS UN try/except. Un crash est isolé + journalisé ; les autres
-    continuent. Rend {plugin_id: {statut, n|erreur}}. N'échoue jamais globalement."""
+    continuent. Rend {plugin_id: {statut, n|erreur}}. N'échoue jamais globalement. Ordre par catégorie :
+    data (collecte) -> router (régime) -> signal (émission), pour que les signaux lisent une data fraîche."""
     plugins = plugins if plugins is not None else REG.lister()
+    plugins = sorted(plugins, key=lambda p: _ORDRE_CAT.get(p.categorie, 3))
     resultats = {}
     ok = 0
     for p in plugins:
