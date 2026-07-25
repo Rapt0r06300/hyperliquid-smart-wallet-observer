@@ -571,20 +571,20 @@ echo.
 echo   Arret cible des collecteurs + userfills ^(par ligne de commande du projet ; aucun kill global^)...
 call :stop_impl
 echo.
-echo   Collecteurs + userfills arretes. Le MOTEUR se ferme par Q dans sa fenetre.
+echo   Collecteurs + userfills + moteur ^(port 8794^) arretes ^(cible par PID/port ; aucun kill global^).
 echo.
 goto :fin
 
 :stop_impl
-powershell -NoProfile -Command "$projet='%~dp0'; $c = Get-CimInstance Win32_Process | Where-Object { $_.ProcessId -ne $PID -and $_.CommandLine -and ($_.CommandLine -like '*boucle_collecteur.cmd*' -or (($_.Name -eq 'python.exe' -or $_.Name -eq 'pythonw.exe') -and ($_.CommandLine -like ('*'+$projet+'*') -or $_.CommandLine -like '*collecter_userfills_vaults.py*'))) }; if ($c) { $c | ForEach-Object { try { Stop-Process -Id $_.ProcessId -Force -ErrorAction Stop; Write-Host ('  arret PID ' + $_.ProcessId) } catch {} }; Write-Host ('  ' + $c.Count + ' processus projet arretes.') } else { Write-Host '  aucun collecteur en cours.' }; $lk=Join-Path $projet 'runtime\data\userfills_live.lock'; if (Test-Path $lk) { try { $pp=(Get-Content $lk -Raw | ConvertFrom-Json).pid; Stop-Process -Id $pp -Force -ErrorAction SilentlyContinue; Remove-Item $lk -Force -ErrorAction SilentlyContinue; Write-Host ('  verrou userfills libere (PID ' + $pp + ')') } catch {} }"
+powershell -NoProfile -Command "$projet='%~dp0'; $motifs=@('*boucle_collecteur.cmd*','*collecter_userfills_vaults.py*','*start_hypersmart_simulation.ps1*','*hypersmart_simulation_poll_loop.ps1*','*ia_train_loop.ps1*','*stream_loop.ps1*','*hl_observer*'); $c = Get-CimInstance Win32_Process | Where-Object { $p=$_; $_.ProcessId -ne $PID -and $_.CommandLine -and ( ($motifs | Where-Object { $p.CommandLine -like $_ }) -or (($_.Name -eq 'python.exe' -or $_.Name -eq 'pythonw.exe') -and $_.CommandLine -like ('*'+$projet+'*')) ) }; if ($c) { $c | ForEach-Object { try { Stop-Process -Id $_.ProcessId -Force -ErrorAction Stop; Write-Host ('  arret PID ' + $_.ProcessId) } catch {} }; Write-Host ('  ' + $c.Count + ' processus projet arretes.') } else { Write-Host '  aucun processus projet en cours.' }; try { Get-NetTCPConnection -LocalPort 8794 -State Listen -ErrorAction SilentlyContinue | ForEach-Object { Stop-Process -Id $_.OwningProcess -Force -ErrorAction SilentlyContinue } } catch {}; $lk=Join-Path $projet 'runtime\data\userfills_live.lock'; if (Test-Path $lk) { try { $pp=(Get-Content $lk -Raw | ConvertFrom-Json).pid; Stop-Process -Id $pp -Force -ErrorAction SilentlyContinue; Remove-Item $lk -Force -ErrorAction SilentlyContinue; Write-Host ('  verrou userfills libere (PID ' + $pp + ')') } catch {} }"
 exit /b 0
 
 REM -------- RESTART = stop puis autopilot --------
 :cmd_restart
 echo.
-echo   Redemarrage : arret cible puis autopilot...
+echo   Redemarrage : arret cible ^(collecteurs + userfills + moteur^) puis autopilot...
 call :stop_impl
-timeout /t 3 >nul
+timeout /t 6 >nul
 goto :autopilot
 
 REM -------- RESTART-USERFILLS (absorbe REDEMARRER / RELANCER / TUER-ORPHELIN) --------
