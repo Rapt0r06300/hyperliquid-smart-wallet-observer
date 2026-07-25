@@ -16,11 +16,25 @@
   métaordres+stades, OFI top-5, coût exécutable L2, placebo, IC clusterisé, capacité, verdict (aucune promotion
   si IC bas ≤ 0). Il ne dépend d'aucune donnée réelle pour être valide ; il ne demande que les octets décompressés.
 
-## 1. Prérequis (action de Flo — je ne manipule ni clé ni paiement)
-1. Ouvrir un compte AWS (gratuit à l'ouverture ; on ne paie que l'usage).
-2. Placer `AWS_ACCESS_KEY_ID` et `AWS_SECRET_ACCESS_KEY` **dans l'environnement** (jamais dans un fichier du repo).
-3. Me dire « autorisé, micro-échantillon » → je lance le one-click **borné** ci-dessous. Sans ces clés, le
-   script **refuse** (deny-by-default).
+## 1. Setup profil AWS — étapes minimales (Flo les fait ; je ne touche à aucune clé)
+Profil **dédié, lecture S3 uniquement**. Aucune clé dans le dépôt, les logs ou la conversation.
+1. **AWS Console → IAM → Users → Create user** : nom `hl-holdout-ro`, **sans accès console**.
+2. **Permissions → attach policy → `AmazonS3ReadOnlyAccess`** (lecture seule : ce profil ne peut RIEN
+   écrire/supprimer/trader). *(Plus strict, optionnel : policy inline `s3:GetObject`+`s3:ListBucket` limitée à
+   `hl-mainnet-node-data` et `hyperliquid-archive`.)*
+3. **User → Security credentials → Create access key → « Application running outside AWS »** → copier
+   **Access key ID** + **Secret**.
+4. Sur Windows, les mettre dans un **profil dédié HORS dépôt** — créer `%USERPROFILE%\.aws\credentials` :
+   ```
+   [hl-holdout-ro]
+   aws_access_key_id = AKIA...
+   aws_secret_access_key = ...
+   ```
+   ⚠️ **Jamais** ces clés dans la conversation, un fichier du dépôt ou un log. Le script les lit via le profil
+   et ne les **affiche jamais**. (`~/.aws/` est ton dossier personnel, pas le repo.)
+5. `pip install boto3` (paquet Python gratuit pour signer le requester-pays — **pas** un compte/paiement).
+6. Me dire **« profil prêt »** → je te donne le feu vert pour lancer `LANCER-HOLDOUT-MICRO.cmd` (que **tu**
+   lances). Sans profil, le script **REFUSE** (deny-by-default) ; il ne dépasse jamais les plafonds §2.
 
 ## 2. Objets ciblés (exacts) — micro-échantillon
 - **Étape méta (≤ 30 requêtes LIST, signées, ~0 €)** : lister les dates de `node_fills_by_block/` et de
@@ -54,9 +68,14 @@ Sur l'échantillon décompressé, `historical_holdout.executer(...)` doit prouve
 - **Le coût monétaire est négligeable (centimes)** ; le vrai « coût » est l'**ouverture du compte AWS**. Chiffres
   exacts finalisés par l'étape méta (≤ 30 LIST) une fois les clés présentes.
 
-## 6. One-click (à construire au feu vert)
-`LANCER-HOLDOUT-MICRO.cmd` → `tools/holdout_micro_download.py` : refuse sans clés ; LIST bornée ; sélection des
-objets pré-enregistrés ; download avec **compteur d'octets 50 Mo + compteur de requêtes + garde 1 €** (abandon
-immédiat au dépassement) ; décompression ; `historical_holdout.executer` → PASS/FAIL + couverture. **Aucun**
-téléchargement au-delà de l'échantillon sans nouvelle autorisation. *(Non construit tant que Flo n'a pas autorisé
-— pour ne pas livrer du code non exécutable/non testé, et respecter « aucun compte/download sans accord ».)*
+## 6. One-click — CONSTRUIT (ne s'exécute qu'au feu vert)
+- `tools/holdout_micro_download.py` (+ `tests/test_holdout_micro_download.py`, **3 verts**) — client S3 **borné**
+  (30 LIST, 6 GET, **compteur d'octets 50 Mo**, **garde 1 €**), `RequestPayer=requester`, **refuse sans profil**
+  (deny-by-default), **ne logge aucune clé**. Règle déterministe : dates node_fills ∩ L2 → **médiane** = date
+  holdout, heure 12, objets L2 {coin, BTC} + node_fills de la date → **pré-registration figée AVANT lecture**
+  (`holdout_micro_preregistration.json` + `prereg_hash`). **Arrêt AUTO immédiat** si taille/coût/format/attribution
+  vault/jointure L2 échoue. Rapport **GO/NO-GO** (`holdout_micro_go_nogo.json`) : verdict, couverture, objets,
+  octets, requêtes, coût max.
+- `LANCER-HOLDOUT-MICRO.cmd` — lanceur Windows (tu le lances après le setup §1 + mon feu vert).
+- **Rien n'est téléchargé tant que le profil n'existe pas ET que je n'ai pas donné le feu vert.** Aucun
+  téléchargement au-delà de l'échantillon sans nouvelle autorisation explicite.
