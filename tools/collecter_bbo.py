@@ -34,6 +34,7 @@ GAP_MS = 5000.0                    # aucun message d'une venue pendant ça = TRO
 #: ~10× plus petit) quand elle depasse SHARD_OCTETS, puis retention BORNEE (purge du plus vieux au-dela
 #: de MAX_SHARDS). Ainsi on garde des JOURS d'historique pour le forward/OOS sans jamais remplir le disque.
 SHARDS_DIR = Path("runtime") / "data" / "bbo_shards"
+ARCHIVE_DIR = Path("runtime") / "data" / "bbo_shards_archive"   # historique PRÉSERVÉ (jamais supprimé, Flo 25/07)
 SHARD_OCTETS = 80 * 1024 * 1024
 MAX_SHARDS = 60                    # ~60 shards gz (~0,6-1 Go compresses, plusieurs jours) puis purge FIFO
 
@@ -219,10 +220,15 @@ def sceller_shard(root: Path, *, seuil_octets: int = SHARD_OCTETS, max_shards: i
             fo.write(buf)
     os.replace(tmp, dossier / nom)                            # atomique -> shard IMMUABLE (jamais reouvert)
     src.write_text("", encoding="utf-8")                      # la tape vivante repart a zero (= recent)
+    # PRÉSERVATION (Flo 25/07) : on NE SUPPRIME PLUS les vieux shards — « il te faut des données, on
+    # n'écrase pas les anciennes sessions ». Le set de travail reste borné à max_shards (fraîcheur/scan
+    # rapide) ; au-delà, on DÉPLACE le plus vieux vers bbo_shards_archive/ (immuable, jamais effacé).
     shards = sorted(dossier.glob("bbo_tape_*.jsonl.gz"))
-    for vieux in shards[:-max_shards]:                        # retention bornee : purge du plus vieux
+    archive = root / ARCHIVE_DIR
+    for vieux in shards[:-max_shards]:                        # rétention bornée du SET DE TRAVAIL, sans perte
         try:
-            vieux.unlink()
+            archive.mkdir(parents=True, exist_ok=True)
+            os.replace(vieux, archive / vieux.name)          # ARCHIVE (déplace), ne supprime jamais
         except OSError:
             pass
     return nom
