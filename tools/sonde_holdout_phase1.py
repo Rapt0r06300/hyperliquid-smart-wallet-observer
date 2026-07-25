@@ -1,34 +1,37 @@
 """HISTORICAL_HOLDOUT_V1 — PHASE 1 : sonde MÉTADONNÉES S3, STRICTEMENT BORNÉE (rectif Flo 25/07).
 
-Objectif : savoir GRATUITEMENT ce que l'archive Hyperliquid contient, SANS rien télécharger et SANS
-identifiants. On ne fait que des `aws s3 ls --no-sign-request` (aucune signature, aucune facturation).
+Objectif : savoir GRATUITEMENT ce que l'archive Hyperliquid contient, SANS rien télécharger, SANS
+identifiants, SANS installer le moindre outil. On interroge l'API REST S3 en **ANONYME** (`list-type=2`)
+avec la seule bibliothèque standard `urllib` — donc **aucune CLI aws**, **aucun compte AWS**, **aucun
+moyen de paiement**.
 
 Garde-fous durs (décision de Flo) :
   • **≤ 30 requêtes S3 au total** (compteur strict, refus au-delà) ;
-  • **AUCUN téléchargement** (seulement des `ls`) ;
-  • **AUCUN compte / moyen de paiement AWS** installé ou configuré ;
-  • si `aws` est absent → on s'arrête et on le dit (on n'installe RIEN sans accord) ;
-  • si le bucket n'est pas public (`--no-sign-request` refusé) → requester-pays → on s'arrête proprement.
+  • **AUCUN téléchargement d'objet** — uniquement des LISTES de métadonnées (clés, tailles, préfixes) ;
+  • **AUCUN compte / moyen de paiement AWS** ;
+  • si un bucket n'autorise pas la liste anonyme (403) → il est **requester-pays** → on s'arrête proprement,
+    Flo décide (« rien de payant »). Aucune approximation : on rapporte ce que S3 renvoie, pas une supposition.
 
 Sortie : dates disponibles, préfixes (L2 / node_fills), tailles d'objets échantillon, et CHEVAUCHEMENT
-des dates node_fills ↔ L2. Rapport écrit dans runtime/rapports/holdout/phase1_sonde.txt. Aucune approximation :
-on rapporte ce que S3 renvoie, pas ce qu'on suppose.
+des dates node_fills ↔ L2. Rapport dans runtime/rapports/holdout/phase1_sonde.txt.
 """
 from __future__ import annotations
 
 import re
-import shutil
-import subprocess
-import sys
+import urllib.error
+import urllib.parse
+import urllib.request
+import xml.etree.ElementTree as ET
 from pathlib import Path
 
 RACINE = Path(__file__).resolve().parents[1]
 SORTIE = RACINE / "runtime" / "rapports" / "holdout"
 REQUETE_MAX = 30
-BUCKET_NOEUD = "s3://hl-mainnet-node-data/"
-BUCKET_MARCHE = "s3://hyperliquid-archive/"
+NS = "{http://s3.amazonaws.com/doc/2006-03-01/}"
+BUCKET_NOEUD = "hl-mainnet-node-data"
+BUCKET_MARCHE = "hyperliquid-archive"
 
-_compteur = {"n": 0}
+_etat = {"n": 0, "region": None}
 _journal: list[str] = []
 
 
@@ -37,127 +40,140 @@ def _log(msg: str = "") -> None:
     _journal.append(msg)
 
 
-def _aws_dispo() -> bool:
-    return shutil.which("aws") is not None
+def _url(bucket: str, prefix: str, delimiter: str, max_keys: int, region: str | None) -> str:
+    host = "%s.s3.%s.amazonaws.com" % (bucket, region) if region else "%s.s3.amazonaws.com" % bucket
+    q = "list-type=2&max-keys=%d" % max_keys
+    if delimiter:
+        q += "&delimiter=" + urllib.parse.quote(delimiter)
+    if prefix:
+        q += "&prefix=" + urllib.parse.quote(prefix)
+    return "https://%s/?%s" % (host, q)
 
 
-def _ls(uri: str) -> tuple[bool, list[str], str]:
-    """`aws s3 ls --no-sign-request uri`. Compte la requête ; refuse au-delà de REQUETE_MAX. 0 téléchargement."""
-    if _compteur["n"] >= REQUETE_MAX:
-        return False, [], "PLAFOND_30_REQUETES_ATTEINT"
-    _compteur["n"] += 1
+def s3_list(bucket: str, *, prefix: str = "", delimiter: str = "/", max_keys: int = 400):
+    """Liste ANONYME (list-type=2). Rend (ok, prefixes[list], contents[(cle,octets)], err). Compte la requête ;
+    refuse au-delà de REQUETE_MAX. Suit UNE fois la redirection de région (mise en cache)."""
+    if _etat["n"] >= REQUETE_MAX:
+        return False, [], [], "PLAFOND_30_REQUETES_ATTEINT"
+    _etat["n"] += 1
+    url = _url(bucket, prefix, delimiter, max_keys, _etat["region"])
+    req = urllib.request.Request(url, headers={"User-Agent": "holdout-phase1-metadata"})
     try:
-        r = subprocess.run(["aws", "s3", "ls", "--no-sign-request", uri],
-                           capture_output=True, text=True, timeout=40, check=False)
+        with urllib.request.urlopen(req, timeout=30) as r:
+            data = r.read()
+    except urllib.error.HTTPError as e:
+        body = e.read()
+        reg = e.headers.get("x-amz-bucket-region")
+        if e.code in (301, 307) and _etat["region"] is None:
+            if not reg:
+                try:
+                    reg = ET.fromstring(body).findtext(".//Endpoint")
+                    m = re.search(r"s3[.-]([a-z0-9-]+)\.amazonaws", reg or "")
+                    reg = m.group(1) if m else None
+                except ET.ParseError:
+                    reg = None
+            if reg:
+                _etat["region"] = reg
+                return s3_list(bucket, prefix=prefix, delimiter=delimiter, max_keys=max_keys)
+        return False, [], [], "HTTP %d %s" % (e.code, body[:100].decode("utf-8", "replace").replace("\n", " "))
     except Exception as exc:  # noqa: BLE001
-        return False, [], str(exc)[:120]
-    if r.returncode != 0:
-        det = (r.stderr or "").strip().splitlines()
-        return False, [], (det[-1][:130] if det else "code %d" % r.returncode)
-    return True, (r.stdout or "").splitlines(), ""
+        return False, [], [], str(exc)[:120]
+    try:
+        root = ET.fromstring(data)
+    except ET.ParseError as exc:
+        return False, [], [], "XML illisible: %s" % str(exc)[:80]
+    prefixes = [cp.findtext(NS + "Prefix") or "" for cp in root.findall(NS + "CommonPrefixes")]
+    contents = [((c.findtext(NS + "Key") or ""), int(c.findtext(NS + "Size") or 0))
+                for c in root.findall(NS + "Contents")]
+    return True, prefixes, contents, ""
 
 
 _DATE = re.compile(r"(20\d{2})[-/]?(\d{2})[-/]?(\d{2})")
 
 
-def _dates(lignes: list[str]) -> list[str]:
-    """Extrait les jetons date (YYYYMMDD) des lignes `PRE .../` ou clés."""
+def _dates(chaines: list[str]) -> list[str]:
     out = set()
-    for l in lignes:
-        m = _DATE.search(l)
+    for s in chaines:
+        m = _DATE.search(s or "")
         if m:
             out.add("".join(m.groups()))
     return sorted(out)
 
 
-def _tailles(lignes: list[str]) -> list[tuple[str, int]]:
-    """(clé, octets) des lignes objets (pas les PRE/)."""
-    out = []
-    for l in lignes:
-        p = l.split()
-        if len(p) >= 4 and p[2].isdigit():
-            out.append((p[3], int(p[2])))
-    return out
-
-
 def main() -> int:
     SORTIE.mkdir(parents=True, exist_ok=True)
-    _log("=" * 88)
-    _log("  HISTORICAL_HOLDOUT_V1 — PHASE 1 : sonde MÉTADONNÉES S3 (≤30 req, GRATUIT, 0 download)")
-    _log("=" * 88)
-    if not _aws_dispo():
-        _log("\n  ❌ La CLI `aws` n'est pas installée sur ce PC.")
-        _log("     -> Installe-la (https://aws.amazon.com/cli/) OU dis-moi de le faire.")
-        _log("     RIEN n'a été téléchargé, RIEN n'a été facturé, aucun compte AWS configuré.")
-        (SORTIE / "phase1_sonde.txt").write_text("\n".join(_journal), encoding="utf-8")
-        return 2
+    _log("=" * 90)
+    _log("  HISTORICAL_HOLDOUT_V1 — PHASE 1 : sonde MÉTADONNÉES S3 (urllib, ANONYME, ≤30 req, 0 download)")
+    _log("=" * 90)
+    _log("  (aucune CLI aws, aucun compte, aucun paiement — bibliothèque standard Python uniquement)\n")
 
-    _log("\n  [A] Racines de bucket (le bucket est-il PUBLIC en lecture ?)")
-    noeud_ok, noeud_root, e1 = _ls(BUCKET_NOEUD)
-    _log(("    ✅ node-data PUBLIC : " + ", ".join(x.strip() for x in noeud_root[:12])) if noeud_ok
-         else f"    🔒 node-data FERMÉ ({e1})")
-    marche_ok, marche_root, e2 = _ls(BUCKET_MARCHE)
-    _log(("    ✅ market PUBLIC : " + ", ".join(x.strip() for x in marche_root[:12])) if marche_ok
-         else f"    🔒 market FERMÉ ({e2})")
+    _log("  [A] Le bucket est-il listable ANONYMEMENT (= gratuit) ?")
+    ok_n, pref_n, _, e_n = s3_list(BUCKET_NOEUD, prefix="", delimiter="/")
+    if ok_n:
+        _log("    ✅ node-data LISTABLE (region=%s) : %s" % (_etat["region"] or "us-east-1",
+             ", ".join(p.rstrip("/") for p in pref_n[:14]) or "(racine vide)"))
+    else:
+        _log("    🔒 node-data : %s" % e_n)
+    ok_m, pref_m, _, e_m = s3_list(BUCKET_MARCHE, prefix="", delimiter="/")
+    if ok_m:
+        _log("    ✅ market LISTABLE : %s" % (", ".join(p.rstrip("/") for p in pref_m[:14]) or "(racine vide)"))
+    else:
+        _log("    🔒 market : %s" % e_m)
 
-    if not (noeud_ok or marche_ok):
-        _log("\n  🔒 AUCUN bucket public en lecture anonyme → l'archive exige le requester-pays (PAYANT).")
-        _log("     Décision de Flo = 'rien de payant' → on S'ARRÊTE ici, sans identifiants, sans coût.")
-        _log("     Ce n'est pas un mur technique : c'est un CHOIX, enregistré comme tel.")
+    if not (ok_n or ok_m):
+        _log("\n  🔒 AUCUNE liste anonyme possible → l'archive exige le requester-pays (PAYANT).")
+        _log("     Décision de Flo = « rien de payant » → on S'ARRÊTE ici. 0 identifiant, 0 coût, 0 install.")
+        _log("     Porte fermée par CHOIX, enregistrée comme telle (pas une fatalité technique).")
         (SORTIE / "phase1_sonde.txt").write_text("\n".join(_journal), encoding="utf-8")
         return 1
 
     dates_fills: list[str] = []
     dates_l2: list[str] = []
 
-    if noeud_ok:
+    if ok_n:
         _log("\n  [B] node_fills / node_fills_by_block : préfixes + dates")
         for jeu in ("node_fills/", "node_fills_by_block/"):
-            ok, li, err = _ls(BUCKET_NOEUD + jeu)
+            ok, pref, cont, err = s3_list(BUCKET_NOEUD, prefix=jeu, delimiter="/")
             if ok:
-                d = _dates(li)
+                d = _dates(pref + [k for k, _ in cont])
                 if d:
                     dates_fills = sorted(set(dates_fills) | set(d))
-                    _log(f"    {jeu:22s} {len(d)} dates · {d[0]}..{d[-1]}")
+                    _log("    %-22s %d dates · %s .. %s" % (jeu, len(d), d[0], d[-1]))
                 else:
-                    _log(f"    {jeu:22s} contenu : {', '.join(x.strip() for x in li[:6])}")
+                    apercu = [p.rstrip("/").split("/")[-1] for p in pref[:6]] or [k for k, _ in cont[:6]]
+                    _log("    %-22s contenu : %s" % (jeu, ", ".join(apercu) or "(vide)"))
             else:
-                _log(f"    {jeu:22s} 🔒 ({err})")
+                _log("    %-22s 🔒 %s" % (jeu, err))
 
-    if marche_ok:
+    if ok_m:
         _log("\n  [C] market_data (L2) : dates")
-        ok, li, err = _ls(BUCKET_MARCHE + "market_data/")
+        ok, pref, cont, err = s3_list(BUCKET_MARCHE, prefix="market_data/", delimiter="/")
         if ok:
-            dates_l2 = _dates(li)
-            _log(f"    market_data/ : {len(dates_l2)} dates · {dates_l2[0]}..{dates_l2[-1]}" if dates_l2
-                 else f"    market_data/ contenu : {', '.join(x.strip() for x in li[:6])}")
+            dates_l2 = _dates(pref + [k for k, _ in cont])
+            _log("    market_data/ : %d dates · %s .. %s" % (len(dates_l2), dates_l2[0], dates_l2[-1])
+                 if dates_l2 else "    market_data/ contenu : %s" % ", ".join(p.rstrip("/") for p in pref[:6]))
         else:
-            _log(f"    market_data/ 🔒 ({err})")
+            _log("    market_data/ 🔒 %s" % err)
 
-    # [D] chevauchement + tailles échantillon (bornées par le plafond restant)
     overlap = sorted(set(dates_fills) & set(dates_l2))
     _log("\n  [D] CHEVAUCHEMENT node_fills ↔ L2")
-    _log(f"    dates node_fills={len(dates_fills)} · dates L2={len(dates_l2)} · communes={len(overlap)}")
+    _log("    dates node_fills=%d · dates L2=%d · communes=%d" % (len(dates_fills), len(dates_l2), len(overlap)))
     if overlap:
-        _log(f"    plage commune : {overlap[0]} .. {overlap[-1]}")
-        d = overlap[len(overlap) // 2]                                # une date au milieu (échantillon)
-        an, mo, jo = d[:4], d[4:6], d[6:8]
-        for uri in (f"{BUCKET_MARCHE}market_data/{d}/12/l2Book/",
-                    f"{BUCKET_MARCHE}market_data/{an}{mo}{jo}/12/l2Book/BTC.lz4"):
-            ok, li, err = _ls(uri)
-            if ok:
-                t = _tailles(li)
-                if t:
-                    _log(f"    L2 {uri.split('market_data/')[1]} : " +
-                         ", ".join(f"{k.split('/')[-1]}={o/1e6:.2f}Mo" for k, o in t[:6]))
-                else:
-                    _log(f"    L2 {uri.split('market_data/')[1]} : {', '.join(x.strip() for x in li[:6])}")
-            else:
-                _log(f"    L2 {uri} 🔒 ({err})")
+        _log("    plage commune : %s .. %s" % (overlap[0], overlap[-1]))
+        d = overlap[len(overlap) // 2]
+        okL, prefL, contL, errL = s3_list(BUCKET_MARCHE, prefix="market_data/%s/12/l2Book/" % d, delimiter="/")
+        if okL and contL:
+            _log("    échantillon L2 %s/12h : %s" % (d, ", ".join("%s=%.2fMo" % (k.split("/")[-1], o / 1e6)
+                                                                    for k, o in contL[:8])))
+        elif okL:
+            _log("    échantillon L2 %s/12h : préfixes %s" % (d, ", ".join(p.rstrip("/").split("/")[-1]
+                                                                            for p in prefL[:8]) or "(vide)"))
+        else:
+            _log("    échantillon L2 %s : 🔒 %s" % (d, errL))
 
-    _log("\n" + "-" * 88)
-    _log(f"  Requêtes S3 utilisées : {_compteur['n']}/{REQUETE_MAX}  ·  téléchargement : 0 octet  ·  coût : 0 €")
-    _log("  Prochaine étape = Phase 2 (figer 2 fenêtres disjointes selon CES dates + pré-registration).")
+    _log("\n" + "-" * 90)
+    _log("  Requêtes S3 : %d/%d  ·  téléchargement : 0 octet  ·  coût : 0 €  ·  install : 0" % (_etat["n"], REQUETE_MAX))
+    _log("  Prochaine étape = Phase 2 : figer 2 fenêtres disjointes selon CES dates + pré-registration.")
     _log("  AUCUN téléchargement supplémentaire sans ton accord explicite.")
     (SORTIE / "phase1_sonde.txt").write_text("\n".join(_journal), encoding="utf-8")
     return 0
