@@ -211,24 +211,23 @@ def _bureau(racine: str | Path) -> Path:
 
 
 def _fenetre_et_son(texte: str, titre: str) -> str:
-    """Affiche une fenêtre Windows + joue le son système UNE fois, en processus DÉTACHÉ (non bloquant).
-    Hors Windows : ne fait rien (retourne 'non_windows'). N'accède à AUCUN réseau."""
+    """Joue le son système UNE fois PUIS affiche une fenêtre Windows native (MessageBox) via l'API NATIVE
+    (winsound + ctypes) — fiable dans la session interactive, SANS PowerShell ni processus détaché. La fenêtre
+    est topmost/system-modal et reste jusqu'au clic OK. Hors Windows : ne fait rien ('non_windows'). Aucun réseau."""
     if sys.platform != "win32":
         return "non_windows"
     try:
-        import base64
-        import subprocess
-        ps = ("Add-Type -AssemblyName System.Windows.Forms,System.Drawing; "
-              "[System.Media.SystemSounds]::Asterisk.Play(); "
-              "[System.Windows.Forms.MessageBox]::Show('" + texte.replace("'", "''") + "','"
-              + titre.replace("'", "''") + "','OK','Information') | Out-Null")
-        enc = base64.b64encode(ps.encode("utf-16-le")).decode("ascii")
-        DETACHED = 0x00000008                                        # DETACHED_PROCESS : ne bloque pas la tâche
-        subprocess.Popen(["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass",
-                          "-WindowStyle", "Hidden", "-EncodedCommand", enc], creationflags=DETACHED, close_fds=True)
+        import winsound
+        winsound.MessageBeep(0x40)                                   # MB_ICONASTERISK : son système, une fois (non bloquant)
+    except Exception:                                                # noqa: BLE001 — le son est accessoire
+        pass
+    try:
+        import ctypes
+        MB = 0x40 | 0x1000 | 0x10000                                 # ICONINFORMATION | SYSTEMMODAL(topmost) | SETFOREGROUND
+        ctypes.windll.user32.MessageBoxW(0, texte, titre, MB)        # fenêtre native, au premier plan, jusqu'au clic OK
         return "affichee"
     except Exception as exc:                                         # noqa: BLE001 — une alerte ne doit JAMAIS casser la tâche
-        return "erreur:" + str(exc)[:60]
+        return "erreur:" + str(exc)[:80]
 
 
 def alerter_checkpoint(prereg: dict, bornes: dict, racine: str | Path, sortie: Path) -> str:
@@ -255,8 +254,9 @@ def alerter_checkpoint(prereg: dict, bornes: dict, racine: str | Path, sortie: P
         (_bureau(racine) / "CHECKPOINT_OOS_ATTEINT.txt").write_text(contenu, encoding="utf-8")
     except OSError:
         pass
-    etat_fenetre = _fenetre_et_son(MSG_ALERTE, "HyperSmart")
-    lock.write_text(json.dumps({"alerte_ts_ms": int(time.time() * 1000), "fenetre": etat_fenetre}), encoding="utf-8")
+    # verrou one-shot AVANT la fenêtre (bloquante) : le signal durable est garanti même si la fenêtre attend le clic
+    lock.write_text(json.dumps({"alerte_ts_ms": int(time.time() * 1000)}), encoding="utf-8")
+    _fenetre_et_son(MSG_ALERTE, "HyperSmart")                        # son + fenêtre native en dernier
     return "alertee"
 
 
