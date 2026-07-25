@@ -65,34 +65,53 @@ def _jeu_complet():
     return tape, led, ids_A, ids_B
 
 
-def test_pipeline_complet_forward_embargo_oneshot(tmp_path):
+def test_pipeline_complet_forward_embargo_oneshot(tmp_path, monkeypatch):
+    monkeypatch.setenv("USERPROFILE", str(tmp_path)); monkeypatch.setenv("HOME", str(tmp_path))
+    repo = tmp_path / "repo"                                          # racine isolée -> Bureau = repo.parent = tmp_path
     tape, led, ids_A, ids_B = _jeu_complet()
-    _ecrire(tmp_path, tape, led)
-    sortie = tmp_path / V.SORTIE_REL
+    _ecrire(repo, tape, led)
+    sortie = repo / V.SORTIE_REL
     V.assurer_preregistration(sortie, t_prereg_ms=T0)                # fige t_prereg AVANT
 
-    # 1) chemin NON SURVEILLÉ (Planificateur Windows) : compteurs + sentinelle, AUCUN IC
-    c = V.executer(tmp_path)
+    # 1) chemin NON SURVEILLÉ (Planificateur Windows) : compteurs + sentinelle + ALERTE, AUCUN IC
+    c = V.executer(repo)
     assert c["n_population_eligible"] == 63                          # 30 A + 3 embargo + 30 B (exclus non comptés)
     assert c["nA"] == 30 and c["A_complete"] is True
     assert c["nB"] == 30 and c["B_complete"] is True and c["pret_pour_rapport"] is True
     assert c["sentinelle"] == "creee"
     assert (sortie / "status.json").exists()
-    assert (sortie / "CHECKPOINT_OOS_ATTEINT.txt").exists()          # sentinelle one-shot
+    assert (sortie / "CHECKPOINT_OOS_ATTEINT.txt").exists()          # sentinelle runtime (conservée)
     assert not (sortie / "RAPPORT_OOS_SHADOW_PRELIMINAIRE.md").exists()   # PAS d'analyse dans ce chemin
+    # ALERTE one-shot : fichier Bureau très visible + verrou
+    assert c["alerte"] == "alertee"
+    bureau_file = tmp_path / "CHECKPOINT_OOS_ATTEINT.txt"
+    assert bureau_file.exists() and "checkpoint_id" in bureau_file.read_text(encoding="utf-8")
+    assert (sortie / ".alerte.done").exists()
     bornes = json.loads((sortie / "bornes_figees.json").read_text(encoding="utf-8"))
     assert bornes["A_metaorder_ids"] == ids_A and bornes["B_metaorder_ids"] == ids_B  # A/B disjoints, ordre chrono
     assert bornes["B_debut_ts"] >= bornes["B_seuil_ts"]             # embargo respecté
     assert "mo-old" not in ids_A and "mo-old" not in ids_B          # forward-only
-    # sentinelle idempotente
-    assert V.executer(tmp_path)["sentinelle"] == "deja_presente"
+    # idempotence : sentinelle ET alerte ne se redéclenchent pas
+    c2 = V.executer(repo)
+    assert c2["sentinelle"] == "deja_presente" and c2["alerte"] == "deja_alertee"
 
     # 2) mode --rapport (Claude uniquement) : analyse sur bornes figées
-    rap = V.generer_rapport(tmp_path)
+    rap = V.generer_rapport(repo)
     assert (sortie / "RAPPORT_OOS_SHADOW_PRELIMINAIRE.md").exists() and (sortie / ".rapport.done").exists()
     assert rap["pnl_net_bps"]["B_ic"]["n_clusters"] == 30            # unité = métaordre (30), pas les slices
     assert rap["verdict"] == "PAS_DE_PROMOTION_IC_BAS_NON_POSITIF"  # IC ~0 symétrique -> aucune promotion
-    assert V.generer_rapport(tmp_path).get("deja_genere") is True   # one-shot
+    assert V.generer_rapport(repo).get("deja_genere") is True       # one-shot
+
+
+def test_test_notification_ne_cree_ni_sentinelle_ni_compteur(tmp_path, monkeypatch):
+    monkeypatch.setenv("USERPROFILE", str(tmp_path)); monkeypatch.setenv("HOME", str(tmp_path))
+    etat = V.tester_notification()                                  # affichage seul (hors Windows -> 'non_windows')
+    assert etat in ("non_windows", "affichee", "erreur")            # ne casse jamais
+    # AUCUN fichier créé : ni sentinelle Bureau, ni sortie, ni verrou, ni status
+    assert not (tmp_path / "CHECKPOINT_OOS_ATTEINT.txt").exists()
+    assert not (tmp_path / V.SORTIE_REL / "CHECKPOINT_OOS_ATTEINT.txt").exists()
+    assert not (tmp_path / V.SORTIE_REL / ".alerte.done").exists()
+    assert not (tmp_path / V.SORTIE_REL / "status.json").exists()
 
 
 def test_compteurs_seuls_avant_B_complet(tmp_path):

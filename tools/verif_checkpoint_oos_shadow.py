@@ -24,8 +24,10 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import sys
 import time
+from datetime import datetime
 from pathlib import Path
 
 SCHEMA = "checkpoint_oos_shadow_v1"
@@ -186,6 +188,84 @@ def _figer_bornes(prereg: dict, fen: dict) -> dict:
             "A_metaorder_ids": [it["metaorder_id"] for it in A], "B_metaorder_ids": [it["metaorder_id"] for it in B]}
 
 
+# ================================ alerte ONE-SHOT (fenêtre + son + fichier Bureau) =================
+MSG_ALERTE = "HyperSmart : checkpoint OOS atteint — retourne voir Claude"
+
+
+def _bureau(racine: str | Path) -> Path:
+    """Localise le Bureau de l'utilisateur. Le projet est dans …\\Bureau\\Projet invest → le parent EST le
+    Bureau. Sinon fallback USERPROFILE\\Desktop|Bureau, sinon le parent (toujours écrivable)."""
+    p = Path(racine).parent
+    cands = []
+    if p.name.lower() in ("desktop", "bureau"):
+        cands.append(p)
+    up = os.environ.get("USERPROFILE") or os.environ.get("HOME") or os.path.expanduser("~")
+    cands += [Path(up) / "Desktop", Path(up) / "Bureau", p]
+    for c in cands:
+        try:
+            if c.exists():
+                return c
+        except OSError:
+            pass
+    return p
+
+
+def _fenetre_et_son(texte: str, titre: str) -> str:
+    """Affiche une fenêtre Windows + joue le son système UNE fois, en processus DÉTACHÉ (non bloquant).
+    Hors Windows : ne fait rien (retourne 'non_windows'). N'accède à AUCUN réseau."""
+    if sys.platform != "win32":
+        return "non_windows"
+    try:
+        import base64
+        import subprocess
+        ps = ("Add-Type -AssemblyName System.Windows.Forms,System.Drawing; "
+              "[System.Media.SystemSounds]::Asterisk.Play(); "
+              "[System.Windows.Forms.MessageBox]::Show('" + texte.replace("'", "''") + "','"
+              + titre.replace("'", "''") + "','OK','Information') | Out-Null")
+        enc = base64.b64encode(ps.encode("utf-16-le")).decode("ascii")
+        DETACHED = 0x00000008                                        # DETACHED_PROCESS : ne bloque pas la tâche
+        subprocess.Popen(["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass",
+                          "-WindowStyle", "Hidden", "-EncodedCommand", enc], creationflags=DETACHED, close_fds=True)
+        return "affichee"
+    except Exception as exc:                                         # noqa: BLE001 — une alerte ne doit JAMAIS casser la tâche
+        return "erreur:" + str(exc)[:60]
+
+
+def alerter_checkpoint(prereg: dict, bornes: dict, racine: str | Path, sortie: Path) -> str:
+    """Alerte ONE-SHOT (verrou `.alerte.done`) : fichier Bureau très visible + fenêtre + son. Idempotent :
+    ne se déclenche qu'une seule fois même aux exécutions suivantes. N'accède à AUCUN réseau."""
+    lock = sortie / ".alerte.done"
+    if lock.exists():
+        return "deja_alertee"
+    nA = len(bornes.get("A_metaorder_ids") or [])
+    nB = len(bornes.get("B_metaorder_ids") or [])
+    rapport_md = sortie / "RAPPORT_OOS_SHADOW_PRELIMINAIRE.md"
+    contenu = (
+        "HyperSmart — CHECKPOINT OOS SHADOW ATTEINT\n"
+        "==========================================\n"
+        f"Date            : {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n"
+        f"checkpoint_id   : {prereg.get('checkpoint_id')}\n"
+        f"checkpoint_hash : {prereg.get('checkpoint_hash')}\n"
+        f"Fenetre A / B   : {nA}/30  /  {nB}/30  (metaordres uniques L2-eligibles)\n"
+        f"Rapport (a generer par Claude) : {rapport_md}\n"
+        f"Sentinelle      : {sortie / 'CHECKPOINT_OOS_ATTEINT.txt'}\n"
+        "\n>> Retourne voir Claude et demande le rapport OOS shadow (mode --rapport).\n"
+        "   Aucune promotion si l'IC bas OOS n'est pas strictement > 0.\n")
+    try:
+        (_bureau(racine) / "CHECKPOINT_OOS_ATTEINT.txt").write_text(contenu, encoding="utf-8")
+    except OSError:
+        pass
+    etat_fenetre = _fenetre_et_son(MSG_ALERTE, "HyperSmart")
+    lock.write_text(json.dumps({"alerte_ts_ms": int(time.time() * 1000), "fenetre": etat_fenetre}), encoding="utf-8")
+    return "alertee"
+
+
+def tester_notification() -> str:
+    """`--test-notification` : teste UNIQUEMENT l'affichage (fenêtre + son). NE crée AUCUNE sentinelle (ni
+    runtime ni Bureau), NE modifie AUCUN compteur, NE pose AUCUN verrou. Message préfixé [TEST] (honnêteté)."""
+    return _fenetre_et_son("[TEST] " + MSG_ALERTE, "HyperSmart (test)")
+
+
 # ================================ chemin par DÉFAUT : compteurs + sentinelle =======================
 def executer(racine: str | Path) -> dict:
     """Chemin NON SURVEILLÉ (Planificateur Windows) : compteurs → status.json ; à B=30 (1re fois) écrit la
@@ -201,23 +281,27 @@ def executer(racine: str | Path) -> dict:
     (sortie / "status.json").write_text(json.dumps(cpt, indent=2, ensure_ascii=False), encoding="utf-8")
 
     sentinelle = sortie / "CHECKPOINT_OOS_ATTEINT.txt"
-    if cpt["pret_pour_rapport"] and not sentinelle.exists():
-        bornes = _figer_bornes(prereg, fen)
-        (sortie / "bornes_figees.json").write_text(json.dumps(bornes, indent=2, ensure_ascii=False), encoding="utf-8")
-        sentinelle.write_text(
-            "CHECKPOINT OOS SHADOW ATTEINT\n"
-            f"checkpoint_id   : {prereg.get('checkpoint_id')}\n"
-            f"checkpoint_hash : {prereg.get('checkpoint_hash')}\n"
-            f"atteint_ts_ms   : {cpt['mesure_ts_ms']}\n"
-            f"fenetre A       : 30 metaordres [{int(bornes['A_debut_ts'])} -> {int(bornes['A_fin_ts'])}]\n"
-            f"embargo         : {int(EMBARGO_MS/1000)} s\n"
-            f"fenetre B (OOS) : 30 metaordres [{int(bornes['B_debut_ts'])} -> {int(bornes['B_fin_ts'])}]\n"
-            "-> ANALYSE PAR CLAUDE UNIQUEMENT (mode --rapport). Aucune promotion si IC bas OOS <= 0.\n"
-            "   Le verificateur local NE calcule PAS l'IC : il ne fait que signaler.\n",
-            encoding="utf-8")
-        cpt["sentinelle"] = "creee"
-    elif cpt["pret_pour_rapport"]:
-        cpt["sentinelle"] = "deja_presente"
+    bornes_p = sortie / "bornes_figees.json"
+    if cpt["pret_pour_rapport"]:
+        if not sentinelle.exists():
+            bornes = _figer_bornes(prereg, fen)
+            bornes_p.write_text(json.dumps(bornes, indent=2, ensure_ascii=False), encoding="utf-8")
+            sentinelle.write_text(
+                "CHECKPOINT OOS SHADOW ATTEINT\n"
+                f"checkpoint_id   : {prereg.get('checkpoint_id')}\n"
+                f"checkpoint_hash : {prereg.get('checkpoint_hash')}\n"
+                f"atteint_ts_ms   : {cpt['mesure_ts_ms']}\n"
+                f"fenetre A       : 30 metaordres [{int(bornes['A_debut_ts'])} -> {int(bornes['A_fin_ts'])}]\n"
+                f"embargo         : {int(EMBARGO_MS/1000)} s\n"
+                f"fenetre B (OOS) : 30 metaordres [{int(bornes['B_debut_ts'])} -> {int(bornes['B_fin_ts'])}]\n"
+                "-> ANALYSE PAR CLAUDE UNIQUEMENT (mode --rapport). Aucune promotion si IC bas OOS <= 0.\n"
+                "   Le verificateur local NE calcule PAS l'IC : il ne fait que signaler.\n",
+                encoding="utf-8")
+            cpt["sentinelle"] = "creee"
+        else:
+            cpt["sentinelle"] = "deja_presente"
+            bornes = json.loads(bornes_p.read_text(encoding="utf-8")) if bornes_p.exists() else _figer_bornes(prereg, fen)
+        cpt["alerte"] = alerter_checkpoint(prereg, bornes, racine, sortie)   # ONE-SHOT (fenêtre + son + fichier Bureau)
     return cpt
 
 
@@ -348,8 +432,13 @@ if __name__ == "__main__":
     ap.add_argument("--racine", default=str(_racine_defaut()))
     ap.add_argument("--rapport", action="store_true",
                     help="ANALYSE OOS (Claude uniquement) : à lancer APRÈS l'apparition de CHECKPOINT_OOS_ATTEINT.txt.")
+    ap.add_argument("--test-notification", dest="test_notification", action="store_true",
+                    help="Teste UNIQUEMENT l'affichage (fenêtre + son). Ne crée aucune sentinelle, ne modifie aucun compteur.")
     a = ap.parse_args()
-    if a.rapport:
+    if a.test_notification:
+        etat = tester_notification()
+        print(f"[test-notification] fenêtre+son = {etat} (aucune sentinelle, aucun compteur modifié).")
+    elif a.rapport:
         r = generer_rapport(a.racine)
         print("[rapport OOS shadow]", ("déjà généré" if r.get("deja_genere") else r.get("erreur") or r.get("verdict")))
     else:
