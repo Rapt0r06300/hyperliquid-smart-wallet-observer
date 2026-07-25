@@ -91,10 +91,14 @@ REGISTRE: tuple[dict[str, Any], ...] = (
      "intervalle_s": 1800, "args": ("--une-fois",), "limite_minutes": 60.0},
     {"nom": "geler-prelim", "script": "tools/geler_prelim_copie.py",
      "intervalle_s": 3600, "args": ("--une-fois",), "limite_minutes": 120.0},
+    # PERSISTANTS : écrivent la DATA en continu, pas un log par seconde -> la vie se mesure au HEARTBEAT
+    # (fraîcheur du fichier), JAMAIS au log (sinon faux STALL + le watchdog dupliquerait un collecteur vivant).
     {"nom": "userfills-live", "script": "tools/collecter_userfills_vaults.py",
-     "intervalle_s": 5, "args": (), "limite_minutes": 5.0},
+     "intervalle_s": 5, "args": (), "limite_minutes": 5.0,
+     "heartbeat": "runtime/data/userfills_live.lock"},
     {"nom": "bbo-collector", "script": "tools/collecter_bbo.py",
-     "intervalle_s": 5, "args": (), "limite_minutes": 5.0},
+     "intervalle_s": 5, "args": (), "limite_minutes": 5.0,
+     "heartbeat": "runtime/data/bbo_heartbeat.json"},
     {"nom": "experimental-paper", "script": "tools/experimental_paper_tick.py",
      "intervalle_s": 60, "args": ("--une-fois",), "limite_minutes": 20.0},
     {"nom": "copy-whitelist", "script": "tools/ecrire_copy_whitelist.py",
@@ -118,11 +122,25 @@ def age_log_minutes(root: Path, nom: str, *, maintenant: float | None = None) ->
     return ((maintenant if maintenant is not None else time.time()) - mtime) / 60.0
 
 
+def age_vie_minutes(root: Path, c: dict[str, Any], *, maintenant: float | None = None) -> float | None:
+    """Âge de la DERNIÈRE PREUVE DE VIE. Pour un collecteur PERSISTANT (clé `heartbeat`), c'est la fraîcheur
+    de son fichier heartbeat (il écrit la DATA en continu, jamais un log par seconde) ; sinon la fraîcheur du
+    log. Corrige le FAUX STALL de bbo/userfills (vivants mais log figé) et empêche le watchdog de les dupliquer."""
+    hb = c.get("heartbeat")
+    if hb:
+        try:
+            mt = (Path(root) / hb).stat().st_mtime
+            return ((maintenant if maintenant is not None else time.time()) - mt) / 60.0
+        except OSError:
+            pass                                   # heartbeat absent -> repli honnête sur le log
+    return age_log_minutes(root, c["nom"], maintenant=maintenant)
+
+
 def etat_collecteurs(root: Path, *, maintenant: float | None = None) -> list[dict[str, Any]]:
     """Un dict par collecteur du REGISTRE : {nom, age_minutes, limite_minutes, mort}."""
     out: list[dict[str, Any]] = []
     for c in REGISTRE:
-        age = age_log_minutes(root, c["nom"], maintenant=maintenant)
+        age = age_vie_minutes(root, c, maintenant=maintenant)
         out.append({
             "nom": c["nom"],
             "age_minutes": None if age is None else round(age, 1),

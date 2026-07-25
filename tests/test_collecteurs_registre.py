@@ -59,6 +59,29 @@ def test_status_detaille_rend_17(tmp_path):
     assert all(set(s) >= {"nom", "pid_enregistre", "instances", "age_log_min", "etat"} for s in st)
 
 
+def test_persistant_vivant_par_heartbeat_meme_si_log_fige(tmp_path):
+    """FAUX STALL corrigé : un collecteur PERSISTANT (bbo/userfills) écrit la DATA en continu mais pas un
+    log par seconde. Sa vie se mesure au HEARTBEAT frais, PAS au log figé -> jamais de faux mort (sinon le
+    watchdog dupliquerait un collecteur vivant)."""
+    import os
+    import time
+    (tmp_path / "runtime" / "logs").mkdir(parents=True)
+    (tmp_path / "runtime" / "data").mkdir(parents=True, exist_ok=True)
+    c = {"nom": "bbo-collector", "limite_minutes": 5.0, "heartbeat": "runtime/data/bbo_heartbeat.json"}
+    # log VIEUX (20 min) mais heartbeat FRAIS -> vivant
+    log = tmp_path / "runtime" / "logs" / "bbo-collector.log"
+    log.write_text("x", encoding="utf-8")
+    vieux = time.time() - 20 * 60
+    os.utime(log, (vieux, vieux))
+    (tmp_path / "runtime" / "data" / "bbo_heartbeat.json").write_text("{}", encoding="utf-8")   # frais
+    age = SC.age_vie_minutes(tmp_path, c)
+    assert age is not None and age < 1.0, "la vie = heartbeat frais, pas le log fige"
+    # heartbeat absent -> repli honnete sur le log (vieux) -> mort
+    (tmp_path / "runtime" / "data" / "bbo_heartbeat.json").unlink()
+    age2 = SC.age_vie_minutes(tmp_path, c)
+    assert age2 is not None and age2 > 15.0, "sans heartbeat, on retombe sur le log (honnete)"
+
+
 def test_arret_cible_ne_tue_JAMAIS_un_process_etranger(tmp_path):
     """LE test de Fix 5 : un python étranger dont la ligne de commande contient « hl_observer »
     (l'ancien motif large l'aurait tué) N'EST PAS visé. Seuls PID enregistrés + signés + enfants +
