@@ -492,6 +492,15 @@ start "" /b tools\boucle_collecteur.cmd copy-whitelist tools\ecrire_copy_whiteli
 REM ---- RAPPORT QUOTIDIEN AUTO (20/07) : rapports\RAPPORT_DU_JOUR.md toujours frais (6 h). ----
 start "" /b tools\boucle_collecteur.cmd rapport-quotidien tools\rapport_quotidien.py 21600
 
+REM === LABORATOIRE DE RECHERCHE PARALLELE (RESEARCH_PARALLEL_V1, 25/07) : process ISOLE, read-only ===
+REM UNE seule ligne reversible (la retirer = rollback total). Tout futur module de recherche passe par le
+REM REGISTRE de plugins (src\hl_observer\research_parallel), plus jamais par ce lanceur. Data / ledgers /
+REM positions / logs ISOLES sous runtime\research_lab (rien touche a RAW/OOS/MAIN). Kill-switch mou :
+REM creer le fichier runtime\research_lab\DISABLED arrete le labo proprement sans toucher ce lanceur.
+REM Une panne ou surcharge du labo n'affecte JAMAIS le moteur principal (process separe + isolation par
+REM plugin dans le superviseur). Lecture seule, 0 cle, 0 ordre, 0 signature.
+start "" /b tools\boucle_collecteur.cmd research-lab tools\lancer_research_parallel.py 60 --max-ticks 1
+
 exit /b 0
 
 REM ############################################################################

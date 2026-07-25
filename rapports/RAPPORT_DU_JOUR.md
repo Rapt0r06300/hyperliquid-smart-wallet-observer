@@ -1,4 +1,4 @@
-# Rapport quotidien HyperSmart — 25/07/2026 23:29
+# Rapport quotidien HyperSmart — 25/07/2026 23:54
 
 _Chaque chiffre se remonte à un fichier (ledger, positions, journaux). Fenêtre : dernières 24 h._
 
@@ -19,8 +19,8 @@ Aucune position ouverte.
 
 ## 4. Mesures en cours
 
-- Cross-venue : **152.0 h / 72 h** (815680 observations) — verdict aux barres pré-écrites, jamais avant.
-- Usine à données replay (24 h) : **10 candidats** · **244984 marks** — c'est le carburant du replay A/B.
+- Cross-venue : **152.4 h / 72 h** (820418 observations) — verdict aux barres pré-écrites, jamais avant.
+- Usine à données replay (24 h) : **9 candidats** · **248757 marks** — c'est le carburant du replay A/B.
 
 ## 5. Refus dominants (24 h) — le bot explique pourquoi il n'ouvre pas
 
@@ -115,7 +115,7 @@ _17 loi(s) : 14 réfutée(s), 2 limite(s), 1 confirmée(s). Détail complet : `d
 - **Cross-venue : 72 h atteintes (152 h)** → lancer `python tools/mesurer_dispersion_venues.py` pour LE verdict (#178).
 - Relances de collecteurs au compteur : {'carry-feeder': 2, 'marks-collector': 2, 'liq-collector': 2, 'venues-collector': 3, 'rapport-quotidien': 1, 'carnet-collector': 1} — si un compteur grimpe SEUL demain, c'est lui le malade (doc R5).
 - Copy-whitelist : 4 leader(s) prouvé(s) → copy peut suivre CES leaders uniquement.
-- Markout copy : 61.1% des fills mesures (29211/47843) — le pipeline nourrit la whitelist.
+- Markout copy : 60.2% des fills mesures (29211/48546) — le pipeline nourrit la whitelist.
 - Replay : 603097 candidats consolidés → `RECHERCHE-SCENARIO-REPLAY.cmd` a de quoi travailler (porte deux-moitiés + plateau).
 
 ---
