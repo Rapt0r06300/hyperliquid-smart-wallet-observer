@@ -122,14 +122,23 @@ def ecrire_micro(root: Path, flux: str, lignes: list[dict], *, seqs: dict | None
     return n
 
 
-async def _boucle_ws(root: Path, coins: list[str]):  # pragma: no cover (réseau, tourne sur Windows)
+def _heartbeat_micro(root: Path, coins, reco: int, msgs: int) -> None:  # pragma: no cover
+    try:
+        (ISO.lab_root(root) / "micro_heartbeat.json").write_text(
+            json.dumps({"ts_wall_ms": int(time.time() * 1000), "ts_mono_ns": time.monotonic_ns(),
+                        "coins": len(coins), "reconnexions": reco, "messages": msgs}, ensure_ascii=False),
+            encoding="utf-8")
+    except OSError:
+        pass
+
+
+async def _une_connexion(root: Path, coins: list[str], seqs: dict, cpt: dict):  # pragma: no cover
     import websockets
-    seqs: dict = {}
-    async with websockets.connect(WS_URL, ping_interval=20) as ws:
+    async with websockets.connect(WS_URL, ping_interval=15, ping_timeout=15, max_size=None) as ws:
         for c in coins:
             for typ in ("l2Book", "trades", "bbo"):
                 await ws.send(json.dumps({"method": "subscribe", "subscription": {"type": typ, "coin": c}}))
-        ISO.battre_coeur(root, {"run_id": "micro", "config_hash": "-"}, extra={"coins": len(coins)})
+        _heartbeat_micro(root, coins, cpt["reco"], cpt["msgs"])
         async for brut in ws:
             try:
                 msg = json.loads(brut)
@@ -146,6 +155,25 @@ async def _boucle_ws(root: Path, coins: list[str]):  # pragma: no cover (réseau
                 r = parser_bbo(msg)
                 if r:
                     ecrire_micro(root, "bbo", [r], seqs=seqs)
+            cpt["msgs"] += 1
+            if cpt["msgs"] % 200 == 0:
+                _heartbeat_micro(root, coins, cpt["reco"], cpt["msgs"])
+
+
+async def _boucle_ws(root: Path, coins: list[str]):  # pragma: no cover (réseau, tourne sur Windows)
+    """RECONNEXION robuste : si la connexion tombe (HL ferme, ping timeout), on RECONNECTE après un backoff
+    borné — on ne meurt JAMAIS sur une déconnexion (exigence live de Flo). Chaque reconnexion est comptée."""
+    import asyncio
+    seqs: dict = {}
+    cpt = {"reco": 0, "msgs": 0}
+    while True:
+        try:
+            await _une_connexion(root, coins, seqs, cpt)
+        except Exception as e:  # noqa: BLE001 (déconnexion/erreur -> on reconnecte, on ne tombe pas)
+            print("[micro] deconnexion (%s) -> reconnexion" % str(e)[:80], flush=True)
+        cpt["reco"] += 1
+        _heartbeat_micro(root, coins, cpt["reco"], cpt["msgs"])
+        await asyncio.sleep(min(2.0 + cpt["reco"], 15.0))
 
 
 #: univers 24 coins par défaut (majors + actifs + coins de liquidation fréquents) tant que asset_ctx du
@@ -176,11 +204,12 @@ def main(argv=None) -> int:  # pragma: no cover
     ap.add_argument("--coins", default="")
     a = ap.parse_args(argv)
     coins = [c for c in a.coins.split(",") if c] or _charger_univers(Path(a.root))
+    print("[micro] connexion HL WS, %d coins: %s" % (len(coins), ",".join(coins)), flush=True)
     try:
         import asyncio
         asyncio.run(_boucle_ws(Path(a.root), coins))
-    except Exception as e:  # noqa: BLE001
-        print("[micro] arrêt: %s" % e, flush=True)
+    except KeyboardInterrupt:
+        print("[micro] arret manuel", flush=True)
     return 0
 
 
