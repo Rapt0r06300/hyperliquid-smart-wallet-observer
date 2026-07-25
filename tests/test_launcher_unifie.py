@@ -109,3 +109,14 @@ def test_chaque_archive_a_un_sha256_valide():
 def test_le_lanceur_unique_n_est_pas_archive():
     """On archive les ABSORBES, jamais le lanceur lui-meme."""
     assert not (ARCHIVE / "LANCER_HYPERSMART.cmd.txt").exists()
+
+
+# ------------------------------------------------------------------ 4. racine nettoyee
+
+def test_la_racine_ne_contient_que_le_lanceur_unique():
+    """L'OBJECTIF de la migration : un seul .cmd ACTIF en racine. Seule exception demandee par
+    Flo : POUSSER-GITHUB-FORCE.cmd, garde a part. Tout le reste est absorbe en sous-commandes."""
+    cmd_racine = sorted(p.name for p in RACINE.glob("*.cmd"))
+    assert cmd_racine == ["LANCER_HYPERSMART.cmd", "POUSSER-GITHUB-FORCE.cmd"], (
+        "la racine ne doit contenir que le lanceur unique (+ POUSSER-GITHUB-FORCE.cmd) ; trouve : %r"
+        % cmd_racine)

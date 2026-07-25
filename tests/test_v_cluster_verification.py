@@ -163,5 +163,6 @@ def test_v11_le_garde_DISCRIMINE_bon_vs_mauvais_input():
 
 def test_v12_sandbox_sans_reseau_documente():
     # Marqueur explicite : le sandbox ne peut PAS être la vérité complète (ni réseau ni UTF-8 fiable).
-    # La suite complète tourne sous Windows (TEST-AUDIT-complet.cmd). Ce test documente la limite.
-    assert (ROOT / "TEST-AUDIT-complet.cmd").exists() or (ROOT / "TOUT-VERIFIER.cmd").exists()
+    # La suite complète tourne sous Windows via le lanceur unique (`LANCER_HYPERSMART.cmd audit`,
+    # qui absorbe l'ancien TEST-AUDIT-complet.cmd). Ce test documente la limite.
+    assert (ROOT / "LANCER_HYPERSMART.cmd").exists()

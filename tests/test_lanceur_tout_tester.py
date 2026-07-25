@@ -22,7 +22,11 @@ import pytest
 
 from tools import lanceur_tout_tester as L
 
-CMD = Path(__file__).resolve().parents[1] / "TOUT-TESTER.cmd"
+# 2026-07-25 — TOUT-TESTER.cmd est ABSORBE dans le lanceur unique (sous-commande `test` :
+# `LANCER_HYPERSMART.cmd test`). L'ancien wrapper minimal est conserve OCTET POUR OCTET dans
+# l'archive ; ces garde-fous de forme (ASCII/CRLF/pas de goto/court) continuent de le proteger.
+# Le CHEMIN ACTIF (`:cmd_test`) est garde par tests/test_launcher_unifie.py.
+CMD = Path(__file__).resolve().parents[1] / "docs" / "archive" / "legacy_cmd" / "2026-07-25" / "TOUT-TESTER.cmd.txt"
 
 
 # ═══════════════ 22/07 : jamais d'orphelin (le blocage vécu par Flo) ═══════════════

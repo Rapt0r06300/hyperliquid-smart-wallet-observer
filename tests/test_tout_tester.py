@@ -59,7 +59,9 @@ def test_le_cmd_unique_pointe_sur_l_orchestrateur():
     # directement sur l'orchestrateur : apres deux plantages batch, toute la logique (pre-vol,
     # securite, tracabilite) est passee en Python testable. Le lanceur, lui, appelle bien
     # l'orchestrateur tout_tester.py. La chaine .cmd -> lanceur -> orchestrateur est verifiee.
-    c = open(RACINE / "TOUT-TESTER.cmd", encoding="utf-8", errors="replace").read()
+    # 2026-07-25 — absorbe dans le lanceur unique ; la chaine est verifiee sur la copie archivee.
+    c = open(RACINE / "docs" / "archive" / "legacy_cmd" / "2026-07-25" / "TOUT-TESTER.cmd.txt",
+             encoding="utf-8", errors="replace").read()
     assert "tools\\lanceur_tout_tester.py" in c, "le .cmd appelle le lanceur Python"
     lanceur = open(RACINE / "tools" / "lanceur_tout_tester.py", encoding="utf-8").read()
     assert "tout_tester.py" in lanceur, "le lanceur appelle bien l'orchestrateur"

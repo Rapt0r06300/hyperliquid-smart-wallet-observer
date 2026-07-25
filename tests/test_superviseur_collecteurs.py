@@ -169,11 +169,13 @@ def test_racine_inexistante_ne_leve_pas(tmp_path):
 import pytest
 
 
-@pytest.mark.parametrize("fichier", ["LANCER_HYPERSMART.cmd", "REANIMER-COLLECTEURS.cmd"])
+@pytest.mark.parametrize("fichier", ["LANCER_HYPERSMART.cmd"])
 def test_le_REGISTRE_correspond_au_LANCEUR(fichier):
-    """CANARI ANTI-DÉRIVE. Un collecteur présent dans le lanceur (ou le bouton de réanimation)
-    mais absent du registre mourrait SANS supervision — la panne du 19/07, en silence, pour
-    toujours. Les TROIS listes (LANCER, REANIMER, registre) doivent évoluer ENSEMBLE."""
+    """CANARI ANTI-DÉRIVE. Un collecteur présent dans le lanceur mais absent du registre mourrait
+    SANS supervision — la panne du 19/07, en silence, pour toujours. Les deux listes (lanceur,
+    registre) doivent évoluer ENSEMBLE. (2026-07-25 : REANIMER-COLLECTEURS.cmd absorbé dans le
+    lanceur unique — la sous-commande `collectors` réutilise la MÊME sous-routine
+    :demarrer_collecteurs, donc une seule source de vérité au lieu de deux fichiers.)"""
     texte = (RACINE / fichier).read_text(encoding="utf-8", errors="ignore")
     lignes = [l for l in texte.splitlines()
               if "boucle_collecteur.cmd" in l and l.strip().lower().startswith("start")]
