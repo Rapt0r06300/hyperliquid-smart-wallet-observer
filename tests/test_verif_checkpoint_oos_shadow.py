@@ -70,29 +70,29 @@ def test_pipeline_complet_forward_embargo_oneshot(tmp_path):
     _ecrire(tmp_path, tape, led)
     sortie = tmp_path / V.SORTIE_REL
     V.assurer_preregistration(sortie, t_prereg_ms=T0)                # fige t_prereg AVANT
-    c = V.executer(tmp_path)
 
+    # 1) chemin NON SURVEILLÉ (Planificateur Windows) : compteurs + sentinelle, AUCUN IC
+    c = V.executer(tmp_path)
     assert c["n_population_eligible"] == 63                          # 30 A + 3 embargo + 30 B (exclus non comptés)
     assert c["nA"] == 30 and c["A_complete"] is True
-    assert c["nB"] == 30 and c["B_complete"] is True
-    assert c["pret_pour_rapport"] is True
-    # rapport one-shot généré + verrou
-    assert (sortie / "RAPPORT_OOS_SHADOW_PRELIMINAIRE.md").exists()
-    assert (sortie / "RAPPORT_OOS_SHADOW_PRELIMINAIRE.json").exists()
-    assert (sortie / ".rapport.done").exists()
-    rap = json.loads((sortie / "RAPPORT_OOS_SHADOW_PRELIMINAIRE.json").read_text(encoding="utf-8"))
-    # bornes figées cohérentes : A et B disjoints, embargo respecté
-    assert rap["bornes_figees"]["A_metaorder_ids"] == ids_A
-    assert rap["bornes_figees"]["B_metaorder_ids"] == ids_B
-    assert rap["bornes_figees"]["B_debut_ts"] >= rap["bornes_figees"]["B_seuil_ts"]
+    assert c["nB"] == 30 and c["B_complete"] is True and c["pret_pour_rapport"] is True
+    assert c["sentinelle"] == "creee"
+    assert (sortie / "status.json").exists()
+    assert (sortie / "CHECKPOINT_OOS_ATTEINT.txt").exists()          # sentinelle one-shot
+    assert not (sortie / "RAPPORT_OOS_SHADOW_PRELIMINAIRE.md").exists()   # PAS d'analyse dans ce chemin
+    bornes = json.loads((sortie / "bornes_figees.json").read_text(encoding="utf-8"))
+    assert bornes["A_metaorder_ids"] == ids_A and bornes["B_metaorder_ids"] == ids_B  # A/B disjoints, ordre chrono
+    assert bornes["B_debut_ts"] >= bornes["B_seuil_ts"]             # embargo respecté
     assert "mo-old" not in ids_A and "mo-old" not in ids_B          # forward-only
-    # IC ~0 symétrique -> AUCUNE promotion
-    assert rap["verdict"] == "PAS_DE_PROMOTION_IC_BAS_NON_POSITIF"
-    assert rap["pnl_net_bps"]["B_ic"]["n_clusters"] == 30            # unité = métaordre (30), pas les slices
+    # sentinelle idempotente
+    assert V.executer(tmp_path)["sentinelle"] == "deja_presente"
 
-    # idempotence : 2e passage ne régénère pas
-    c2 = V.executer(tmp_path)
-    assert c2["rapport"] == "deja_present"
+    # 2) mode --rapport (Claude uniquement) : analyse sur bornes figées
+    rap = V.generer_rapport(tmp_path)
+    assert (sortie / "RAPPORT_OOS_SHADOW_PRELIMINAIRE.md").exists() and (sortie / ".rapport.done").exists()
+    assert rap["pnl_net_bps"]["B_ic"]["n_clusters"] == 30            # unité = métaordre (30), pas les slices
+    assert rap["verdict"] == "PAS_DE_PROMOTION_IC_BAS_NON_POSITIF"  # IC ~0 symétrique -> aucune promotion
+    assert V.generer_rapport(tmp_path).get("deja_genere") is True   # one-shot
 
 
 def test_compteurs_seuls_avant_B_complet(tmp_path):
