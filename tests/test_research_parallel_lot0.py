@@ -92,6 +92,7 @@ def test_boucle_tourne_puis_s_arrete_sur_DISABLED(tmp_path):
 
 
 def test_plafond_12_variantes(tmp_path):
+    snap = dict(REG._REGISTRE)                         # snapshot : ne PAS détruire le registre partagé
     REG.reset_pour_tests()
     try:
         REG.enregistrer(_plugin("A", lambda c: [], variantes=tuple("abcdefgh")))   # 8
@@ -101,7 +102,8 @@ def test_plafond_12_variantes(tmp_path):
         with pytest.raises(ValueError):
             REG.enregistrer(_plugin("C", lambda c: [], variantes=("m",)))           # 13 -> refus
     finally:
-        REG.reset_pour_tests()
+        REG._REGISTRE.clear()
+        REG._REGISTRE.update(snap)                     # restaure l'état d'avant (plugins réels réenregistrés)
 
 
 def test_config_hash_stable_et_sensible(tmp_path):
