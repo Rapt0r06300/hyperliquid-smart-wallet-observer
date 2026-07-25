@@ -1,0 +1,22 @@
+@echo off
+chcp 65001 >nul
+REM Transfert du projet local vers GitHub : Rapt0r06300/hyperliquid-smart-wallet-observer
+REM Le remote 'origin' est deja configure. Depot propre (~few Mo, 0 fichier >100 Mo, 0 secret reel).
+REM Claude ne pousse PAS lui-meme (sandbox sans reseau) et ne touche a aucun identifiant : c'est TOI qui t'authentifies.
+cd /d "%~dp0"
+echo === Remote configure ===
+git remote -v
+echo.
+echo === Envoi de la branche main vers GitHub ===
+echo (Au 1er push, le Gestionnaire d'identifiants Git ouvre un navigateur pour te connecter a GitHub.)
+git push -u origin main
+echo.
+if %ERRORLEVEL%==0 (
+  echo OK : projet pousse sur https://github.com/Rapt0r06300/hyperliquid-smart-wallet-observer
+) else (
+  echo ECHEC. Cas frequents :
+  echo   - Depot cree avec un README - historique divergent : relance avec  git push -u origin main --force
+  echo   - Pas connecte : installe Git ^(git-scm.com^) ou 'gh auth login', puis relance ce fichier.
+)
+echo.
+pause

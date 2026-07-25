@@ -1,6 +1,41 @@
 @echo off
 setlocal
 cd /d "%~dp0"
+REM ============================================================================
+REM  LANCER_HYPERSMART.cmd  --  LE FICHIER .cmd UNIQUE DU PROJET (2026-07-25)
+REM ----------------------------------------------------------------------------
+REM  Double-clic SANS argument = AUTOPILOT : prevol securite/paper-only, verrou
+REM  d'instance unique, registre PID/run_id, moteur + dashboard + TOUS les
+REM  collecteurs (userFills, BBO/L2, Binance, liquidation, RAW/OOS/shadows),
+REM  verificateur OOS local, un seul terminal. Tout tourne harmonieusement ici.
+REM
+REM  Sous-commandes (LANCER_HYPERSMART.cmd <cmd>) :
+REM    status stop restart restart-userfills collectors report test audit
+REM    replay moisson verify-oos github-push menu self-test
+REM  Avances : audit-moissonneur premier-raw kill-userfills verif-l2 sonde notif-test
+REM
+REM  Les anciens .cmd de la racine sont ABSORBES ici (archives en .cmd.txt dans
+REM  docs\archive\legacy_cmd\). Aucun lanceur parallele ne subsiste.
+REM  Securite : lecture seule marche. 0 ordre reel, 0 argent, 0 cle, 0 signature.
+REM ============================================================================
+if not "%~1"=="" goto :dispatch
+
+:autopilot
+REM ---- PREVOL : verrou d'instance unique (evite tout double lancement) ----
+powershell -NoProfile -Command "try { if ((Test-NetConnection -ComputerName 127.0.0.1 -Port 8794 -WarningAction SilentlyContinue -InformationLevel Quiet)) { exit 2 } else { exit 0 } } catch { exit 0 }"
+if errorlevel 2 (
+  echo.
+  echo   HyperSmart tourne DEJA ^(UI 127.0.0.1:8794 active^).
+  echo   Pour redemarrer proprement : LANCER_HYPERSMART.cmd restart
+  echo.
+  goto :fin
+)
+REM ---- PREVOL : registre PID/run_id + dossier logs du lanceur ----
+if not exist "runtime\data" mkdir "runtime\data" >nul 2>&1
+if not exist "runtime\logs\launcher" mkdir "runtime\logs\launcher" >nul 2>&1
+powershell -NoProfile -Command "$o=[ordered]@{ role='launcher_autopilot'; ps_pid=$PID; run_id=([guid]::NewGuid().ToString('N').Substring(0,12)); port=8794; demarre=(Get-Date).ToString('s'); commit=(& git rev-parse --short HEAD 2>$null) }; ($o | ConvertTo-Json -Compress) | Set-Content -Encoding UTF8 (Join-Path '%~dp0' 'runtime\data\launcher_pids.json')" 2>nul
+REM ---- PREVOL : verificateur OOS local (re)pointe sur le lanceur unique (idempotent, lecture seule) ----
+schtasks /Create /SC MINUTE /MO 30 /TN "HyperSmart_VerifOOS" /TR "\"%~dp0LANCER_HYPERSMART.cmd\" verify-oos run" /F >nul 2>&1
 
 set "PYTHONPATH=%~dp0src;%PYTHONPATH%"
 set "HL_ENV=paper"
@@ -338,6 +373,34 @@ REM d'une session precedente voient le marqueur changer et s'arretent d'elles-me
 REM plus jamais deux carry-feeders en parallele apres un Q, une croix ou un crash.
 if not exist "runtime\data" mkdir "runtime\data" >nul 2>&1
 echo %random%-%random%-%date%-%time% > "runtime\data\lanceur_session_marqueur.txt"
+call :demarrer_collecteurs
+REM AUTO-VERIFICATION : un collecteur cache qui ne demarre pas ne se voit PAS. On attend qu'il
+REM ecrive son log (il l'ecrit des la 1re ligne) et on DIT si l'un des trois manque a l'appel.
+ping -n 6 127.0.0.1 >nul 2>&1
+for %%C in (carry-feeder marks-collector liq-collector venues-collector copy-whitelist rapport-quotidien) do (
+  if exist "%~dp0runtime\logs\%%C.log" (
+    echo   [collecteurs] %%C ......... demarre
+  ) else (
+    echo   [collecteurs] %%C ......... !! N'A PAS DEMARRE -- voir runtime\logs\
+  )
+)
+echo   [collecteurs] sans fenetre. Journaux : runtime\logs\  ^|  arret : ARRETER-COLLECTEURS.cmd
+
+powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0tools\start_hypersmart_simulation.ps1" -Port 8794 -IntervalSeconds 15 -MaxLeaders 50 -Interactive
+
+goto :fin
+
+:fin
+endlocal
+exit /b 0
+
+REM ############################################################################
+REM #  SOUS-ROUTINE PARTAGEE : DEMARRAGE DES COLLECTEURS (source unique)
+REM #  Reutilisee par l'AUTOPILOT et par la sous-commande `collectors`.
+REM #  Le canari test_superviseur_collecteurs compte ces lignes 'start' : NE PAS
+REM #  en ajouter/retirer sans mettre a jour le registre du superviseur.
+REM ############################################################################
+:demarrer_collecteurs
 REM [SHADOW 23/07] carry-feeder COUPE : le carry historique n'ouvre plus -> inputs spot inutiles.
 REM (Reactiver cette ligne uniquement si on re-litige le carry historique, une piste refutee.)
 REM start "" /b tools\boucle_collecteur.cmd carry-feeder tools\ecrire_carry_spot_inputs.py 240
@@ -430,18 +493,287 @@ start "" /b tools\boucle_collecteur.cmd copy-whitelist tools\ecrire_copy_whiteli
 REM ---- RAPPORT QUOTIDIEN AUTO (20/07) : rapports\RAPPORT_DU_JOUR.md toujours frais (6 h). ----
 start "" /b tools\boucle_collecteur.cmd rapport-quotidien tools\rapport_quotidien.py 21600
 
-REM AUTO-VERIFICATION : un collecteur cache qui ne demarre pas ne se voit PAS. On attend qu'il
-REM ecrive son log (il l'ecrit des la 1re ligne) et on DIT si l'un des trois manque a l'appel.
-ping -n 6 127.0.0.1 >nul 2>&1
-for %%C in (carry-feeder marks-collector liq-collector venues-collector copy-whitelist rapport-quotidien) do (
-  if exist "%~dp0runtime\logs\%%C.log" (
-    echo   [collecteurs] %%C ......... demarre
-  ) else (
-    echo   [collecteurs] %%C ......... !! N'A PAS DEMARRE -- voir runtime\logs\
-  )
-)
-echo   [collecteurs] sans fenetre. Journaux : runtime\logs\  ^|  arret : ARRETER-COLLECTEURS.cmd
-
-powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0tools\start_hypersmart_simulation.ps1" -Port 8794 -IntervalSeconds 15 -MaxLeaders 50 -Interactive
-
 exit /b 0
+
+REM ############################################################################
+REM #  DISPATCHER DES SOUS-COMMANDES
+REM ############################################################################
+:dispatch
+set "PYTHONPATH=%~dp0src;%PYTHONPATH%"
+set "PYTHONIOENCODING=utf-8"
+set "PYTHONUTF8=1"
+set "SUB=%~1"
+if /I "%SUB%"=="status"            goto :cmd_status
+if /I "%SUB%"=="stop"              goto :cmd_stop
+if /I "%SUB%"=="restart"           goto :cmd_restart
+if /I "%SUB%"=="restart-userfills" goto :cmd_ruserfills
+if /I "%SUB%"=="collectors"        goto :cmd_collectors
+if /I "%SUB%"=="report"            goto :cmd_report
+if /I "%SUB%"=="test"              goto :cmd_test
+if /I "%SUB%"=="audit"             goto :cmd_audit
+if /I "%SUB%"=="replay"            goto :cmd_replay
+if /I "%SUB%"=="moisson"           goto :cmd_moisson
+if /I "%SUB%"=="verify-oos"        goto :cmd_verifoos
+if /I "%SUB%"=="github-push"       goto :cmd_github
+if /I "%SUB%"=="self-test"         goto :cmd_selftest
+if /I "%SUB%"=="menu"              goto :cmd_menu
+if /I "%SUB%"=="audit-moissonneur" goto :cmd_auditmoiss
+if /I "%SUB%"=="premier-raw"       goto :cmd_premierraw
+if /I "%SUB%"=="kill-userfills"    goto :cmd_killuserfills
+if /I "%SUB%"=="verif-l2"          goto :cmd_verifl2
+if /I "%SUB%"=="sonde"             goto :cmd_sonde
+if /I "%SUB%"=="notif-test"        goto :cmd_notiftest
+echo.
+echo   Sous-commande inconnue : "%SUB%"
+goto :cmd_menu
+
+:cmd_menu
+echo.
+echo   =================  LANCER_HYPERSMART.cmd  =================
+echo   Double-clic sans argument = AUTOPILOT ^(moteur + dashboard + tous les collecteurs^).
+echo.
+echo   Controle :
+echo     status              etat des processus du lanceur ^(lecture seule^)
+echo     stop                arret cible ^(collecteurs + userfills^), jamais un kill global
+echo     restart             stop puis autopilot
+echo     restart-userfills   recharge le collecteur userfills avec le code courant
+echo     collectors          reanime les collecteurs sans toucher au moteur
+echo   Rapports / recherche :
+echo     report              rapport du jour
+echo     self-test           verification rapide 7 sections
+echo     test                suite complete TOUT-TESTER
+echo     audit               audit ~180 controles ^(resultat-audit.md^)
+echo     replay              recherche de scenarios / pepites
+echo     moisson [github^|relire^|voir^|stop]     moissonneur de recherche
+echo   Ops :
+echo     verify-oos [install^|uninstall^|run^|diag^|test-notif]   verificateur OOS local
+echo     github-push [--force]     push git EXPLICITE ^(jamais automatique^)
+echo     menu                cette aide
+echo.
+echo   Securite : lecture seule marche. 0 ordre reel, 0 cle, 0 signature.
+echo.
+goto :fin
+
+REM -------- STATUT (lecture seule) --------
+:cmd_status
+echo.
+echo   ===  STATUT HYPERSMART  ^(lecture seule^)  ===
+if exist "runtime\data\launcher_pids.json" ( echo   Registre lanceur : & type "runtime\data\launcher_pids.json" & echo. ) else ( echo   Pas de registre lanceur. )
+powershell -NoProfile -Command "$p='%~dp0'; try { $ok=(Test-NetConnection -ComputerName 127.0.0.1 -Port 8794 -WarningAction SilentlyContinue -InformationLevel Quiet) } catch { $ok=$false }; Write-Host ('  UI 8794 : ' + $(if($ok){'ACTIVE'}else{'inactive'})); $py=@(Get-CimInstance Win32_Process | Where-Object { ($_.Name -eq 'python.exe' -or $_.Name -eq 'pythonw.exe') -and $_.CommandLine -like ('*'+$p+'*') }); Write-Host ('  python du projet : ' + $py.Count + ' processus'); $lk=Join-Path $p 'runtime\data\userfills_live.lock'; if (Test-Path $lk) { Write-Host '  userfills : verrou present' } else { Write-Host '  userfills : pas de verrou' }"
+echo   Collecteurs ^(presence des journaux^) :
+for %%C in (marks-collector liq-collector venues-collector bbo-collector userfills-live rapport-quotidien) do if exist "runtime\logs\%%C.log" ( echo     %%C : log present ) else ( echo     %%C : ABSENT )
+echo.
+goto :fin
+
+REM -------- STOP (cible, jamais de kill global) --------
+:cmd_stop
+echo.
+echo   Arret cible des collecteurs + userfills ^(par ligne de commande du projet ; aucun kill global^)...
+call :stop_impl
+echo.
+echo   Collecteurs + userfills arretes. Le MOTEUR se ferme par Q dans sa fenetre.
+echo.
+goto :fin
+
+:stop_impl
+powershell -NoProfile -Command "$projet='%~dp0'; $c = Get-CimInstance Win32_Process | Where-Object { $_.ProcessId -ne $PID -and $_.CommandLine -and ($_.CommandLine -like '*boucle_collecteur.cmd*' -or (($_.Name -eq 'python.exe' -or $_.Name -eq 'pythonw.exe') -and ($_.CommandLine -like ('*'+$projet+'*') -or $_.CommandLine -like '*collecter_userfills_vaults.py*'))) }; if ($c) { $c | ForEach-Object { try { Stop-Process -Id $_.ProcessId -Force -ErrorAction Stop; Write-Host ('  arret PID ' + $_.ProcessId) } catch {} }; Write-Host ('  ' + $c.Count + ' processus projet arretes.') } else { Write-Host '  aucun collecteur en cours.' }; $lk=Join-Path $projet 'runtime\data\userfills_live.lock'; if (Test-Path $lk) { try { $pp=(Get-Content $lk -Raw | ConvertFrom-Json).pid; Stop-Process -Id $pp -Force -ErrorAction SilentlyContinue; Remove-Item $lk -Force -ErrorAction SilentlyContinue; Write-Host ('  verrou userfills libere (PID ' + $pp + ')') } catch {} }"
+exit /b 0
+
+REM -------- RESTART = stop puis autopilot --------
+:cmd_restart
+echo.
+echo   Redemarrage : arret cible puis autopilot...
+call :stop_impl
+timeout /t 3 >nul
+goto :autopilot
+
+REM -------- RESTART-USERFILLS (absorbe REDEMARRER / RELANCER / TUER-ORPHELIN) --------
+:cmd_ruserfills
+echo.
+echo   Rechargement du collecteur userfills-live avec le code courant...
+powershell -NoProfile -Command "$projet='%~dp0'; $lk=Join-Path $projet 'runtime\data\userfills_live.lock'; if (Test-Path $lk) { try { $pp=(Get-Content $lk -Raw | ConvertFrom-Json).pid; Stop-Process -Id $pp -Force -ErrorAction SilentlyContinue } catch {} }; $py = Get-CimInstance Win32_Process | Where-Object { ($_.Name -eq 'python.exe' -or $_.Name -eq 'pythonw.exe') -and $_.CommandLine -like '*collecter_userfills_vaults.py*' }; foreach ($x in $py) { Stop-Process -Id $x.ProcessId -Force -ErrorAction SilentlyContinue }; $w = Get-CimInstance Win32_Process | Where-Object { $_.Name -eq 'cmd.exe' -and $_.CommandLine -like '*boucle_collecteur.cmd userfills-live*' }; foreach ($x in $w) { Stop-Process -Id $x.ProcessId -Force -ErrorAction SilentlyContinue }; Start-Sleep -Milliseconds 800; Remove-Item $lk -Force -ErrorAction SilentlyContinue; Write-Host '  ancien userfills arrete + verrou libere.'"
+cmd /c start "" /b tools\boucle_collecteur.cmd userfills-live tools\collecter_userfills_vaults.py 5
+echo   collecteur userfills-live relance ^(detache, sans fenetre, code courant^).
+timeout /t 9 >nul
+if exist "runtime\data\userfills_live.lock" ( echo   OK : verrou recree : & type "runtime\data\userfills_live.lock" ) else ( echo   Pas encore de verrou ^(demarrage en cours, patiente ~10 s^). )
+echo.
+goto :fin
+
+REM -------- COLLECTORS (absorbe REANIMER-COLLECTEURS ; reutilise la source unique) --------
+:cmd_collectors
+echo.
+echo   Reanimation des collecteurs ^(idempotent ; les lecteurs dedupliquent^)...
+call :demarrer_collecteurs
+echo   Collecteurs relances. Journaux : runtime\logs\. Le moteur n'a pas ete touche.
+echo.
+goto :fin
+
+REM -------- REPORT (absorbe RAPPORT-DU-JOUR) --------
+:cmd_report
+echo.
+python tools\rapport_quotidien.py
+echo.
+pause
+goto :fin
+
+REM -------- TEST (absorbe TOUT-TESTER) --------
+:cmd_test
+python "%~dp0tools\lanceur_tout_tester.py" %2 %3 %4 %5 %6 %7 %8 %9
+goto :fin
+
+REM -------- AUDIT (absorbe TEST-AUDIT-complet) --------
+:cmd_audit
+echo.
+echo   Lancement de l'audit ^(~180 controles^)...
+python -m pip install -q pytest-timeout coverage 2>nul
+python tools\audit_report.py %2 %3 %4 %5 %6 %7 %8 %9
+set "AUDIT_CODE=%ERRORLEVEL%"
+if exist "resultat-audit.md" ( echo   Rapport ecrit : %~dp0resultat-audit.md ) else ( echo   ATTENTION : le rapport n'a pas ete ecrit. )
+echo.
+pause
+goto :fin
+
+REM -------- REPLAY (absorbe RECHERCHE-SCENARIO-REPLAY) --------
+:cmd_replay
+echo.
+echo   [1/4] Rassemblement des donnees ^(candidats + prix, archives incluses^)...
+python -m hl_observer.runtime.replay_recorder --base runtime\replay
+echo   [2/4] Audit QUALITE des donnees...
+python tools\qualite_donnees_replay.py .
+echo   [3/4] Recherche module par module ^(Ctrl-C = pause sans perte, reprise auto^)...
+python -c "from hl_observer.backtesting.recherche_scenario import chercher_toutes; chercher_toutes('.')"
+echo   [4/4] Rapports : runtime\replay\RESULTATS_RECHERCHE.md ^| PEPITES.md ^| QUALITE_DONNEES.md
+echo.
+pause
+goto :fin
+
+REM -------- MOISSON (absorbe LANCER-MOISSON-12H / MOISSONNER-GITHUB / RELIRE / VOIR / FERMER + workers) --------
+:cmd_moisson
+if /I "%~2"=="voir"   goto :moisson_voir
+if /I "%~2"=="stop"   goto :moisson_stop
+if /I "%~2"=="github" goto :moisson_github
+if /I "%~2"=="relire" goto :moisson_relire
+if not "%GITHUB_TOKEN%"=="" ( echo   Cle GitHub deja presente : on l'utilise. & goto :moisson_go )
+set /p GITHUB_TOKEN=  Ta cle GitHub ^(vide = 60 req/h, sans recherche code^) :
+:moisson_go
+if exist "%~dp0moisson-termine.flag" del "%~dp0moisson-termine.flag" >nul 2>&1
+if exist "%~dp0moisson-en-cours.txt" del "%~dp0moisson-en-cours.txt" >nul 2>&1
+start "MOISSON 12h - travail (NE PAS FERMER)" /min cmd /c "set PYTHONPATH=%~dp0src;%~dp0& set PYTHONIOENCODING=utf-8& set PYTHONUTF8=1& python tools\moissonner_10h.py --heures 12 > "%~dp0moisson_console.txt" 2>&1& echo done> "%~dp0moisson-termine.flag""
+powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0tools\voir_dashboard.ps1" -Root "%~dp0"
+echo   Moisson terminee. Resultat : moisson-fini.md
+goto :fin
+:moisson_relire
+if not exist "%~dp0data\reports\moisson_10h_etat.json" ( echo   Aucun etat sauvegarde -- lance d'abord `moisson`. & goto :fin )
+if exist "%~dp0moisson-termine.flag" del "%~dp0moisson-termine.flag" >nul 2>&1
+start "MOISSON 12h - travail (NE PAS FERMER)" /min cmd /c "set PYTHONPATH=%~dp0src;%~dp0& set PYTHONIOENCODING=utf-8& set PYTHONUTF8=1& python tools\moissonner_10h.py --heures 3 --relire > "%~dp0moisson_console.txt" 2>&1& echo done> "%~dp0moisson-termine.flag""
+powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0tools\voir_dashboard.ps1" -Root "%~dp0"
+goto :fin
+:moisson_github
+python tools\moissonner_10h.py %3 %4 %5 %6 %7 %8 %9
+echo.
+pause
+goto :fin
+:moisson_voir
+title Tableau de bord - Moisson
+powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0tools\voir_dashboard.ps1" -Root "%~dp0"
+goto :fin
+:moisson_stop
+taskkill /FI "WINDOWTITLE eq MOISSON 12h*" /T /F >nul 2>&1
+taskkill /FI "WINDOWTITLE eq Tableau de bord*" /T /F >nul 2>&1
+if exist "%~dp0moisson-termine.flag" del "%~dp0moisson-termine.flag" >nul 2>&1
+echo   Moisson fermee. Rien n'est perdu : relancer reprend ou on s'etait arrete.
+goto :fin
+
+REM -------- VERIFY-OOS (absorbe LANCER/INSTALLER/DESINSTALLER/VERIF-PLANIF/TESTER-NOTIFICATION) --------
+:cmd_verifoos
+if /I "%~2"=="install"    goto :oos_install
+if /I "%~2"=="uninstall"  goto :oos_uninstall
+if /I "%~2"=="diag"       goto :oos_diag
+if /I "%~2"=="test-notif" goto :oos_testnotif
+if not exist "runtime\rapports\checkpoint_oos_shadow" mkdir "runtime\rapports\checkpoint_oos_shadow" >nul 2>&1
+python tools\verif_checkpoint_oos_shadow.py >> "runtime\rapports\checkpoint_oos_shadow\verif.log" 2>&1
+goto :fin
+:oos_install
+schtasks /Create /SC MINUTE /MO 30 /TN "HyperSmart_VerifOOS" /TR "\"%~dp0LANCER_HYPERSMART.cmd\" verify-oos run" /F
+schtasks /Query /TN "HyperSmart_VerifOOS" /V /FO LIST 2>nul | findstr /I "TaskName Next Task_To_Run Scheduled"
+echo.
+pause
+goto :fin
+:oos_uninstall
+schtasks /Delete /TN "HyperSmart_VerifOOS" /F
+echo.
+pause
+goto :fin
+:oos_diag
+set "DIR=%~dp0runtime\rapports\checkpoint_oos_shadow"
+if not exist "%DIR%" mkdir "%DIR%" >nul 2>&1
+schtasks /Query /TN "HyperSmart_VerifOOS" /V /FO LIST
+schtasks /Run /TN "HyperSmart_VerifOOS"
+timeout /t 12 /nobreak >nul
+if exist "%DIR%\status.json" type "%DIR%\status.json"
+echo.
+pause
+goto :fin
+:oos_testnotif
+python tools\verif_checkpoint_oos_shadow.py --test-notification
+echo   Code de sortie : %ERRORLEVEL%
+echo.
+pause
+goto :fin
+
+REM -------- GITHUB-PUSH (absorbe POUSSER-GITHUB / POUSSER-GITHUB-FORCE ; jamais automatique) --------
+:cmd_github
+echo === Remote configure ===
+git remote -v
+if /I "%~2"=="--force" (
+  echo === Envoi FORCE de la branche main ^(remplace le README initial du depot^) ===
+  git push -u origin main --force
+) else (
+  echo === Envoi de la branche main vers GitHub ===
+  git push -u origin main
+  echo   Si rejet "fetch first" : relance avec  LANCER_HYPERSMART.cmd github-push --force
+)
+echo.
+pause
+goto :fin
+
+REM -------- SELF-TEST (absorbe VERIFIER-TOUT) --------
+:cmd_selftest
+python tools\verifier_tout.py %2 %3 %4 %5 %6 %7 %8 %9
+echo.
+pause
+goto :fin
+
+REM -------- AVANCES (conservation totale) --------
+:cmd_auditmoiss
+python tools\audit_moissonneur.py > audit_moissonneur.txt 2>&1
+echo   Rapport : audit_moissonneur.txt
+goto :fin
+:cmd_premierraw
+python -c "from hl_observer.experimental import rapport_raw as R; p=R.ecrire_rapport('.'); print('Rapport ecrit :', p) if p else print('Aucun OPEN RAW pour l instant.')"
+if exist "runtime\rapports\PREMIER_RAW.md" type "runtime\rapports\PREMIER_RAW.md"
+echo.
+pause
+goto :fin
+:cmd_killuserfills
+powershell -NoProfile -Command "$projet='%~dp0'; $lk=Join-Path $projet 'runtime\data\userfills_live.lock'; if (Test-Path $lk) { try { $p=(Get-Content $lk -Raw | ConvertFrom-Json).pid; Stop-Process -Id $p -Force -ErrorAction SilentlyContinue; Start-Sleep -Milliseconds 700; Remove-Item $lk -Force -ErrorAction SilentlyContinue; Write-Host ('  PID ' + $p + ' arrete, verrou supprime.') } catch {} } else { Write-Host '  pas de verrou.' }; $py = Get-CimInstance Win32_Process | Where-Object { ($_.Name -eq 'python.exe' -or $_.Name -eq 'pythonw.exe') -and $_.CommandLine -like '*collecter_userfills_vaults.py*' }; foreach ($x in $py) { Stop-Process -Id $x.ProcessId -Force -ErrorAction SilentlyContinue }"
+echo.
+pause
+goto :fin
+:cmd_verifl2
+if not exist "runtime\data" mkdir "runtime\data" >nul 2>&1
+python -c "import sys; sys.path.insert(0,'tools'); import collecter_userfills_vaults as C; [print(c, C._lecteur_l2_ondemand(c)) for c in ('WLD','AERO','TIA','IO','LDO','SOL')]"
+echo.
+pause
+goto :fin
+:cmd_sonde
+if not exist "runtime\data" mkdir "runtime\data" >nul 2>&1
+python "tools\sonde_confirmation_vaults.py" --shard B
+echo.
+pause
+goto :fin
+:cmd_notiftest
+python tools\verif_checkpoint_oos_shadow.py --test-notification
+echo.
+pause
+goto :fin
