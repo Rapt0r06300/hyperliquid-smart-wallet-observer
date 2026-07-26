@@ -561,6 +561,64 @@ def test_cmd_auto_et_admin():
     assert ":menu" in admin                                                # menu déplacé en ADMIN
 
 
+# ═══════════════ OPS — run terminé non repris + PID reprise + OPEN/CLOSE + progression + compteurs ═══════════════
+def test_run_termine_jamais_repris_run_incomplet_repris(tmp_path):
+    rr = RC._run_root(tmp_path)
+    t = rr / "rcont-done"; (t / "manifeste").mkdir(parents=True)
+    (t / "run_identity.json").write_text(json.dumps({"run_id": "rcont-done", "rundir": str(t)}))
+    (t / "manifeste" / "SHA256_MANIFEST_FINAL.json").write_text(json.dumps({"etat": "FINALIZATION_COMPLETE"}))
+    assert RC._dernier_run_recuperable(tmp_path) is None       # run terminé -> pas reproposé
+    time.sleep(0.02)
+    u = rr / "rcont-live"; u.mkdir(parents=True)
+    (u / "run_identity.json").write_text(json.dumps({"run_id": "rcont-live", "rundir": str(u)}))
+    rec = RC._dernier_run_recuperable(tmp_path)
+    assert rec and rec["run_id"] == "rcont-live"               # run incomplet -> reprenable
+
+
+def test_reprise_adopte_le_pid_courant(tmp_path):
+    import os
+    u = RC._run_root(tmp_path) / "rcont-x"; u.mkdir(parents=True)
+    (u / "run_identity.json").write_text(json.dumps({"run_id": "rcont-x", "rundir": str(u), "pid": 999999}))
+    r = RC.creer_ou_reprendre(tmp_path, mode="resume")
+    assert r["start"] == "REPRISE"
+    assert json.loads(RC._active_path(tmp_path).read_text())["pid"] == os.getpid()
+
+
+def test_open_sans_close_jamais_promu(tmp_path):
+    _camp_verdict(tmp_path, "c1", "PASS_PRE_FORWARD")
+    reg = RCL.RegistreCandidatsLive(tmp_path); reg.figer("c1", freeze_exchange_ts=1000.0)
+    reg.suivre("c1", paires=[("e%d" % i, 1.0) for i in range(40)], maintenant_ms=4000.0)
+    PG.PortefeuilleGlobal(tmp_path / "global_portfolio").ouvrir(
+        "c1:0", coin="BTC", sens=1, notional=100.0, prix=100.0, ts_ms=0.0)   # OPEN seul, PAS de CLOSE
+    assert RC._promouvoir_pass_live(tmp_path)["n_promus"] == 0   # exige ≥1 OPEN ET ≥1 CLOSE
+
+
+def test_progres_publie_pendant_le_pipeline(tmp_path):
+    import progres_live as PROG
+    PROG.reset(1, job="init")
+    variantes = [{"family": "OFI", "direction": 1, "horizon_ms": 250, "regime": "vol", "coin": "BTC",
+                  "params": {"seuil": 8}} for _ in range(30)]
+    PL.phase_discovery(tmp_path, PL.corpus_fixtures(), variantes, code_sha="x", source_hash="s")
+    r = PROG.lire()
+    assert r["total"] and r["job"] and "test des idées" in (r["job"] or "")   # progression bouge DANS la boucle
+
+
+def test_compteurs_reels_apres_cycle(tmp_path):
+    RC._ARRET.clear(); RC._URGENCE.clear()
+    d = tmp_path / "runtime" / "research_lab" / "data"; d.mkdir(parents=True)
+    lignes = [{"venue": "HL", "coin": "BTC", "ts_wall_ms": 1_000_000 + i * 1000,
+               "bid": 64000 * (1 + i * 0.003), "ask": 64000 * (1 + i * 0.003) + 1, "isSnapshot": False}
+              for i in range(60)]
+    (d / "bbo.jsonl").write_text("\n".join(json.dumps(x) for x in lignes) + "\n")
+    RC.creer_ou_reprendre(tmp_path, exiger_flux=False)
+    RC.boucle_continue(tmp_path, stop_event=threading.Event(), max_cycles=1, intervalle_s=0.0)
+    rd = next((tmp_path / "runtime" / "research_lab" / "continuous").glob("rcont-*"))
+    etat = json.loads((rd / "LIVE-RESEARCH-STATE.json").read_text(encoding="utf-8"))
+    for k in ("testees", "idees_trouvees", "combinaisons_preparees"):
+        assert k in etat["totaux"]                            # compteurs RÉELS présents (aucun champ inventé)
+    assert "donnees_live" in etat and "collecteurs" in etat["donnees_live"]
+
+
 # ═══════════════ FX-10 — CI + recette Windows livrées ═══════════════
 def test_livrables_ci_et_recette_presents():
     assert (RACINE / ".github" / "workflows" / "labo-continu-ci.yml").exists()

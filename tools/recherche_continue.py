@@ -355,8 +355,7 @@ def _corpus_reel_du_run(rundir: Path):
                     continue
     ready = rundir / "canonical" / "ready.jsonl"                # épisodes live mûris (FWD_BOOK)
     if ready.exists():
-        lignes = ready.read_text(encoding="utf-8", errors="ignore").splitlines()[-5000:]
-        for l in lignes:
+        for l in _tail_lignes(ready, max_lignes=5000, max_octets=4_000_000):   # PF-4 : tail borné (fichier croissant)
             try:
                 corp.append(json.loads(l))
             except ValueError:
@@ -526,6 +525,31 @@ def _evenements_candidat(gp_dir: Path, cid: str) -> int:
     return n
 
 
+def _open_close_candidat(gp_dir: Path, cid: str) -> tuple:
+    """Compte, en STREAMING, les OPEN et les CLOSE du ledger appartenant à CE candidat (préfixe 'cid:').
+    PASS_FORWARD_PAPER exige au moins UN OPEN **et** UN CLOSE de CE candidat (pas un simple événement)."""
+    led = Path(gp_dir) / "ledger.jsonl"
+    n_open = n_close = 0
+    if led.exists():
+        with led.open("r", encoding="utf-8", errors="ignore") as f:
+            for l in f:
+                l = l.strip()
+                if not l:
+                    continue
+                try:
+                    e = json.loads(l)
+                except ValueError:
+                    continue
+                if not str(e.get("position_id") or "").startswith(str(cid) + ":"):
+                    continue
+                t = e.get("type")
+                if t == "OPEN":
+                    n_open += 1
+                elif t == "CLOSE":
+                    n_close += 1
+    return n_open, n_close
+
+
 def _suivi_candidats_live(rundir: Path, prets_live: list) -> dict:
     """FX-5 + GR + PF-2/PF-3 : registre RUN-LEVEL des candidats figés, suivi CUMULATIF, et alimentation de DEUX
     portefeuilles ISOLÉS depuis le SEUL vrai live (épisodes CanonicalStore FWD_BOOK après freeze) :
@@ -614,7 +638,7 @@ def _promouvoir_pass_live(rundir: Path) -> dict:
                 pnl, roi, pf = c.get("pnl_live_bps"), c.get("roi_live_pct"), c.get("pf_live")
                 ic, dd, duree = c.get("ic_bas_live"), c.get("dd_live_bps"), float(c.get("duree_live_ms") or 0.0)
                 n_live = int(c.get("n_episodes_live", 0))
-                n_led = _evenements_candidat(strict_dir, f.get("trial_id"))   # ops du MÊME candidate_id
+                n_open, n_close = _open_close_candidat(strict_dir, f.get("trial_id"))   # OPEN+CLOSE du MÊME candidat
                 crit = {
                     "n_post_freeze>=30": n_live >= MIN_LIVE_EPISODES_POUR_PASS,
                     "pnl_live>0": (pnl is not None and pnl > 0),
@@ -623,14 +647,15 @@ def _promouvoir_pass_live(rundir: Path) -> dict:
                     "ic_bas_live>0": (ic is not None and ic > 0),
                     "drawdown_borne": (dd is not None and dd <= DD_MAX_LIVE_BPS),
                     "duree_live_min": (duree >= DUREE_LIVE_MIN_MS),
-                    "ledger_meme_candidat": (n_led >= 1),        # opérations RÉELLES de CE candidat (jamais un autre)
+                    "open_ET_close_meme_candidat": (n_open >= 1 and n_close >= 1),   # point 5 : ≥1 OPEN ET ≥1 CLOSE
                     "global_reconcilie": global_ok,
                 }
                 f["criteres_live"] = crit
                 if all(crit.values()):
                     f["verdict"] = "PASS_FORWARD_PAPER"; f["live_confirme"] = True
                     f["n_episodes_live"] = n_live; f["pnl_live_bps"] = pnl; f["roi_live_pct"] = roi
-                    f["pf_live"] = pf; f["ic_bas_live"] = ic; f["dd_live_bps"] = dd; f["n_ops_ledger"] = n_led
+                    f["pf_live"] = pf; f["ic_bas_live"] = ic; f["dd_live_bps"] = dd
+                    f["n_open"] = n_open; f["n_close"] = n_close; f["n_ops_ledger"] = n_open + n_close
                     f.setdefault("raisons", []).append("LIVE_CONFIRMED")
                     change = True; n_promus += 1
             if change:
@@ -672,7 +697,8 @@ def construire_etat(root: Path, rundir: Path, ident: dict, *, cycle: int, phase:
     """Agrège les compteurs RÉELS depuis les campagnes/ledgers/fichiers pour le dashboard + LIVE-RESEARCH-STATE."""
     import registre_18h as REG
     tot = {"preregistres": 0, "resultats": 0, "fast_screen": 0, "exact_replays": 0, "survivants": 0,
-           "forward_events": 0, "n_pass": 0, "sources_detectees": 0, "sources_utilisees": 0, "events_utilises": 0}
+           "forward_events": 0, "n_pass": 0, "sources_detectees": 0, "sources_utilisees": 0, "events_utilises": 0,
+           "combinaisons_preparees": 0}
     interessantes, rejets = [], {"total": 0}
     camps = sorted((rundir / "campagnes").glob("camp-*")) if (rundir / "campagnes").exists() else []
     for c in camps:
@@ -686,6 +712,7 @@ def construire_etat(root: Path, rundir: Path, ident: dict, *, cycle: int, phase:
         tot["survivants"] += r.get("n_survivants", 0); tot["forward_events"] += r.get("n_forward_events", 0)
         tot["n_pass"] += r.get("n_pass", 0); tot["sources_detectees"] = max(tot["sources_detectees"], acc.get("n_total_detected", 0))
         tot["sources_utilisees"] = max(tot["sources_utilisees"], acc.get("n_parsed", 0)); tot["events_utilises"] += cc.get("utilises", 0)
+        tot["combinaisons_preparees"] += r.get("n_variantes", 0)
         rc = REG.compter(c); tot["preregistres"] += rc["preregistres"]; tot["resultats"] += rc["resultats"]
         try:
             for fv in json.loads((c / "resultats" / "final_verdicts.json").read_text(encoding="utf-8")):
@@ -697,6 +724,11 @@ def construire_etat(root: Path, rundir: Path, ident: dict, *, cycle: int, phase:
                     rejets["total"] += 1
         except (OSError, ValueError):
             pass
+    # POINT 2 : compteurs dashboard RÉELS dérivés des vrais chiffres (aucun champ inventé).
+    tot["testees"] = tot["fast_screen"]                       # idées réellement testées (fast-screen)
+    tot["idees_trouvees"] = tot["survivants"]                 # idées qui survivent au discovery
+    if not tot["combinaisons_preparees"]:
+        tot["combinaisons_preparees"] = tot["preregistres"]  # repli : préenregistrées = préparées
     interessantes.sort(key=lambda x: -(x["net_bps"] or -1e9))
     debut = ident.get("t0_wall_ms", time.time() * 1000) / 1000.0
     ecoule = time.time() - debut
@@ -732,6 +764,40 @@ _PHRASES_PHASE = {
     "FORWARD_PAPER": ("je suis une piste sur les données récentes", "voir si elle tient en conditions réelles"),
     "ANALYSE": ("je résume ce que j'ai appris", "garder seulement ce qui survit"),
 }
+
+
+def _donnees_live(root: Path, rundir: Path) -> dict:
+    """POINT 2 : débit, âge du dernier événement et nombre de collecteurs, calculés depuis les VRAIES sources
+    (heartbeats des collecteurs + buffer marché du CanonicalStore, lu en TAIL borné). Aucun champ inventé."""
+    n_col = 0
+    hb_age = None
+    try:
+        import heartbeat_collecteur as HB
+        for nom in _collecteurs_lecture_seule(root):
+            a = HB.age_ms(root, nom)
+            if a is not None:
+                n_col += 1
+                hb_age = a if hb_age is None else min(hb_age, a)
+    except Exception:  # noqa: BLE001
+        pass
+    ticks = []
+    for l in _tail_lignes(Path(rundir) / "canonical" / "marche.jsonl", 500):
+        try:
+            t = float(json.loads(l).get("ts_ms") or 0.0)
+        except (ValueError, TypeError):
+            continue
+        if t > 0:
+            ticks.append(t)
+    debit = age_ev = None
+    if len(ticks) >= 2:
+        span = (max(ticks) - min(ticks)) / 1000.0
+        debit = round(len(ticks) / span, 1) if span > 0 else None
+    if ticks and max(ticks) > 1e12:                          # epoch ms -> âge réel du dernier événement
+        age_ev = round((time.time() * 1000.0 - max(ticks)) / 1000.0, 1)
+    return {"collecteurs": n_col, "debit": ("%s ev/s" % debit if debit is not None else "…"),
+            "age_dernier": ("%ss" % age_ev if age_ev is not None else "…"),
+            "etat": ("frais" if (hb_age is not None and hb_age < 120_000) else "en attente"),
+            "heartbeat_age_ms": hb_age}
 
 
 STALL_SECONDES = 60.0                                       # aucun compteur ne bouge > 60 s -> CALCUL LONG / TÂCHE BLOQUÉE
@@ -790,6 +856,7 @@ def _enrichir_etat_dashboard(root, rundir, etat, *, cycle, phase, tot, interessa
     _sh = _sante_et_stall(root, rundir, etat)              # PF-5 : santé RÉELLE (heartbeat + croissance) + stall 60s
     etat["sante"] = _sh["sante"]
     etat["stall"] = _sh
+    etat["donnees_live"] = _donnees_live(root, rundir)     # POINT 2 : débit / âge dernier événement / collecteurs RÉELS
     # progression RÉELLE (FX-2) : position de la phase dans le cycle (l'état est réécrit à CHAQUE phase, donc ça
     # bouge), FUSIONNÉE avec la progression fine publiée par le moteur pendant un long calcul (progres_live).
     phases = list(CYCLE_PHASES)
@@ -961,10 +1028,22 @@ def dry_run(root: Path) -> dict:
             "securite_ligne": "0 ordre reel · 0 argent reel · 0 cle privee · 0 signature · 0 depot/retrait"}
 
 
+def _run_est_termine(rundir: Path) -> bool:
+    """Vrai si le run porte un manifeste FINALIZATION_COMPLETE* (rapport final déjà produit)."""
+    man = Path(rundir) / "manifeste" / "SHA256_MANIFEST_FINAL.json"
+    try:
+        return str(json.loads(man.read_text(encoding="utf-8")).get("etat", "")).startswith("FINALIZATION_COMPLETE")
+    except (OSError, ValueError):
+        return False
+
+
 def _dernier_run_recuperable(root: Path) -> dict | None:
-    """Dernier run sur disque (pour `resume` quand ACTIVE.json a disparu après un crash)."""
+    """Dernier run INTERROMPU/INCOMPLET sur disque (PF-3.point3). On IGNORE tout run déjà finalisé
+    (manifeste FINALIZATION_COMPLETE) : le double-clic ne reprend qu'un run interrompu, sinon il démarre un neuf."""
     runs = sorted(_run_root(root).glob("rcont-*"), key=lambda p: p.stat().st_mtime if p.exists() else 0)
     for r in reversed(runs):
+        if _run_est_termine(r):                              # run terminé -> non reprenable
+            continue
         try:
             return json.loads((r / "run_identity.json").read_text(encoding="utf-8"))
         except (OSError, ValueError):
@@ -984,8 +1063,12 @@ def creer_ou_reprendre(root: Path, *, exiger_flux: bool = True, mode: str = "aut
         rec = ident or _dernier_run_recuperable(root)
         if not rec:
             return {"start": "AUCUN_RUN_A_REPRENDRE"}
-        if not ident:                                        # reprise après crash : on réarme ACTIVE.json
-            _ecrire_atomique(_active_path(root), json.dumps(rec, ensure_ascii=False, indent=1))
+        rec = {**rec, "pid": os.getpid()}                    # PF-3.point3 : la reprise adopte le PID COURANT
+        _ecrire_atomique(_active_path(root), json.dumps(rec, ensure_ascii=False, indent=1))
+        try:
+            _ecrire_atomique(Path(rec["rundir"]) / "run_identity.json", json.dumps(rec, ensure_ascii=False, indent=1))
+        except (OSError, KeyError):
+            pass
         return {"start": "REPRISE", "run_id": rec["run_id"], "rundir": rec["rundir"], "reprise": True}
     if ident:
         return {"start": "REPRISE", "run_id": ident["run_id"], "rundir": ident["rundir"], "reprise": True}

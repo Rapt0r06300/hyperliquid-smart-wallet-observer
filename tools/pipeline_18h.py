@@ -133,6 +133,16 @@ def _filtrer_corpus(corpus, *, coin=None, regime=None, predicat=None, family=Non
 
 
 # ─────────────── PHASE DISCOVERY ───────────────
+def _publier_progres(fait: int, total: int, *, job=None, ensuite=None):
+    """Publie la progression FINE dans progres_live PENDANT les boucles lourdes (point 1) — défensif : si le
+    module n'est pas là (18h/tests), on ne casse rien. Le dashboard cesse ainsi de rester bloqué à 2/7."""
+    try:
+        import progres_live as PROG
+        PROG.publier(int(fait), int(total), job=job, ensuite=ensuite)
+    except Exception:  # noqa: BLE001
+        pass
+
+
 def phase_discovery(rundir: Path, corpus_disc: list[dict], variantes: list[dict], *, code_sha: str,
                     source_hash: str, top_survivants: int = 8, stop_event=None, predicat=None) -> dict:
     """Préenregistre CHAQUE variante, FAST_SCREEN sur discovery, enregistre TOUS les résultats (KILL compris),
@@ -141,7 +151,11 @@ def phase_discovery(rundir: Path, corpus_disc: list[dict], variantes: list[dict]
     rundir = Path(rundir)
     n_prereg = n_fast = n_exact = 0
     survivants = []
-    for v in variantes:
+    _ntot = max(1, len(variantes))
+    for i, v in enumerate(variantes):
+        if i % 25 == 0 or i == _ntot - 1:                    # progression FINE (point 1) : chaque ~25 trials
+            _publier_progres(i, _ntot, job="test des idées %d/%d (fast-screen + rejeu exact)" % (i, _ntot),
+                             ensuite="validation")
         if stop_event is not None and stop_event.is_set():   # interruption rapide en plein replay
             break
         ph = REG.parameter_hash({**v["params"], "dir": v["direction"], "h": v["horizon_ms"],
@@ -233,7 +247,9 @@ def phase_validation(rundir: Path, corpus_val: list[dict], *, survivants: list[d
     sharpes_tous = REG.sharpes_tous_resultats(rundir)       # TOUS les essais terminaux (multiplicité)
     perf_pbo, rapports = {}, []
     interrompu = False
-    for s in survivants:
+    _nsv = max(1, len(survivants))
+    for i, s in enumerate(survivants):
+        _publier_progres(i, _nsv, job="validation solidité %d/%d (WF/placebo/DSR)" % (i, _nsv), ensuite="holdout")
         if stop_event is not None and stop_event.is_set():   # arrêt coopératif en pleine validation
             interrompu = True
             break
