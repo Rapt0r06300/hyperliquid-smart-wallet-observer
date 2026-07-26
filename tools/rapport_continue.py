@@ -183,9 +183,10 @@ def construire(rundir, ident, *, final: bool = True, partial: bool = False, reto
         len(champs), len(positifs)))
     # ── AF-P9 : architecture, outils, robustesse (plateau/concentration/capacité), jobs de fond ──
     L.append("## 28. Architecture (chaîne PROD-TRUTH)")
-    L.append("- ingestion incrémentale (curseurs) → CanonicalStore (maturation PENDING→READY) → discovery → "
-             "validation → holdout historique → **gel (freeze_ts)** → forward live (exchange_ts>freeze_ts) → "
-             "portefeuille GLOBAL persistant → réconciliation ledger. Prix exécutables ask→bid, coûts complets.\n")
+    L.append("- ingestion incrémentale (curseurs) → CanonicalStore (maturation PENDING→READY PAR HORIZON) → "
+             "discovery → validation → holdout historique → **gel (freeze_exchange_ts)** → PRÉ-FORWARD (archive, "
+             "post-gel) → FORWARD LIVE (registre_candidats_live : épisodes du CanonicalStore APRÈS le gel) → "
+             "portefeuille GLOBAL persistant → réconciliation ledger↔snapshot. Prix exécutables ask→bid, coûts complets.\n")
     camps_dirs = ag["camps"]
     ou = _lire((camps_dirs[-1] / "resultats" / "outils_recherche.json") if camps_dirs else Path("/nonexistent"), {})
     L.append("## 29. Outils d'optimisation réellement utilisés")

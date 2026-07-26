@@ -158,17 +158,21 @@ class PortefeuilleGlobal:
         cash = self.capital_initial; realized = 0.0; marge = 0.0
         n = {"OPEN": 0, "ADD": 0, "REDUCE": 0, "CLOSE": 0}
         if self.ledger_path.exists():
-            for l in self.ledger_path.read_text(encoding="utf-8", errors="ignore").splitlines():
-                try:
-                    e = json.loads(l)
-                except ValueError:
-                    continue
-                t = e.get("type"); cout = float(e.get("cout_usd") or 0.0); pnl = float(e.get("pnl_usd") or 0.0)
-                m = abs(float(e.get("notional") or 0.0)) / self.levier
-                if t in ("OPEN", "ADD"):
-                    cash -= (m + cout); realized -= cout; marge += m; n[t] += 1
-                elif t in ("REDUCE", "CLOSE"):
-                    cash += (m + pnl - cout); realized += pnl - cout; marge = max(0.0, marge - m); n[t] += 1
+            with self.ledger_path.open("r", encoding="utf-8", errors="ignore") as fled:  # STREAMING (FX-7), pas splitlines()
+                for l in fled:
+                    l = l.strip()
+                    if not l:
+                        continue
+                    try:
+                        e = json.loads(l)
+                    except ValueError:
+                        continue
+                    t = e.get("type"); cout = float(e.get("cout_usd") or 0.0); pnl = float(e.get("pnl_usd") or 0.0)
+                    m = abs(float(e.get("notional") or 0.0)) / self.levier
+                    if t in ("OPEN", "ADD"):
+                        cash -= (m + cout); realized -= cout; marge += m; n[t] += 1
+                    elif t in ("REDUCE", "CLOSE"):
+                        cash += (m + pnl - cout); realized += pnl - cout; marge = max(0.0, marge - m); n[t] += 1
         coherent = abs(cash - self.cash) < 1e-4 and abs(realized - self.realized) < 1e-4
         roi_total = (self.equity() - self.capital_initial) / self.capital_initial * 100.0 if self.capital_initial else None
         deploye = max(self.capital_initial - self.cash, 1e-9)

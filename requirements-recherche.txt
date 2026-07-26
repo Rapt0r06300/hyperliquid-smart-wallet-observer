@@ -1,0 +1,15 @@
+# Dépendances OPTIONNELLES du laboratoire de recherche continu (Flo, FX-3).
+# Le labo FONCTIONNE sans elles : grid / random / QMC (Halton) sont purs Python et toujours disponibles.
+# Ces paquets ACTIVENT les optimiseurs avancés d'Optuna (samplers + pruners) :
+#   - TPESampler, CmaEsSampler, QMCSampler, NSGAIISampler (multi-objectifs)
+#   - SuccessiveHalvingPruner, HyperbandPruner (passés en pruner=)
+# Absents => ces outils sont marqués `disponible=False` HONNÊTEMENT (jamais comptés parce que le nom existe).
+#
+# Installation :  python -m pip install -r requirements-recherche.txt
+#
+# SÉCURITÉ : 0 ordre réel · 0 argent réel · 0 clé privée · 0 signature · 0 dépôt/retrait. Paper-only, read-only.
+
+optuna>=3.6
+cmaes>=0.10        # backend de CmaEsSampler
+scipy>=1.11        # QMC/qmc et certains samplers
+numpy>=1.24

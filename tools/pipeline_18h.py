@@ -243,7 +243,8 @@ def phase_validation(rundir: Path, corpus_val: list[dict], *, survivants: list[d
         # walk-forward par ÉPISODE PROMOUVABLE (ts propre, jamais un zip filtrer→réassocier)
         eps = [{"ts_ms": o["entry_ts"], "net_bps": o["net_bps"]} for o in episodes
                if o.get("status") == "OK" and o.get("promotable") and o.get("exit_source") == "FWD_BOOK"]
-        wf = V18.walk_forward(eps, k=3, embargo_ms=1.0)
+        emb_s = embargo_reel([s["horizon_ms"]])               # FX-9 : embargo RÉEL = max(horizon,latence,features), jamais 1 ms
+        wf = V18.walk_forward(eps, k=3, embargo_ms=emb_s)
         # PLACEBO direction opposée RÉELLEMENT rejoué (recalcul par prix)
         nets_opp = _nets_promo(nets_exact(sub, sens=-s["direction"], horizon_ms=s["horizon_ms"]))
         # PLACEBO coin aléatoire compatible (autre coin, même régime)
@@ -285,7 +286,8 @@ def phase_holdout_forward(rundir: Path, corpus_hold: list[dict], corpus_fwd: lis
     for c in geles:
         sub_h = _filtrer_corpus(corpus_hold, coin=c["coin"], regime=c["regime"])
         nets_h = _nets_promo(nets_exact(sub_h, sens=c["direction"], horizon_ms=c["horizon_ms"]))   # P0
-        # forward LIVE : filtré par COIN seul (le régime dérive en live ; on ENREGISTRE les régimes rencontrés)
+        # PRÉ-FORWARD (archive, STRICTEMENT après le gel) — PAS le « forward live » (celui-ci = registre_candidats_live,
+        # alimenté par le CanonicalStore). Filtré par COIN seul (le régime dérive ; on ENREGISTRE les régimes vus).
         sub_f = _filtrer_corpus(corpus_fwd, coin=c["coin"])
         n_live = 0
         last_fwd_id = None
@@ -331,7 +333,8 @@ def phase_holdout_forward(rundir: Path, corpus_hold: list[dict], corpus_fwd: lis
         capa = MP.capacite_reelle(sub_h, sens=c["direction"], horizon_ms=c["horizon_ms"], courbe_capacite=MEP.courbe_capacite)
         hold.append({"trial_id": c["trial_id"], "family": fam, "coin": c["coin"], "horizon_ms": c["horizon_ms"],
                      "freeze_ts": freeze_ts, "data_cutoff": data_cutoff, "embargo_ms": embargo_ms,
-                     "n_forward_live": n_live, "last_forward_event_id": last_fwd_id,
+                     "n_pre_forward": n_live, "n_forward_live": n_live, "pre_forward": True,
+                     "last_forward_event_id": last_fwd_id,
                      "forward_regimes": sorted(str(r) for r in regimes_vus if r is not None),
                      "n_holdout": len(nets_h), "holdout_net_median_bps": nm_h,
                      "holdout_pf": pf_h, "holdout_drawdown_bps": dd_h, "stress_survit": stress_survit,
@@ -357,9 +360,12 @@ def phase_holdout_forward(rundir: Path, corpus_hold: list[dict], corpus_fwd: lis
         if portefeuille_global_dir is not None:              # AF-P3 : UN portefeuille GLOBAL vivant du run
             from portefeuille_global import PortefeuilleGlobal
             pfg = PortefeuilleGlobal(portefeuille_global_dir)
+            pending_path = Path(portefeuille_global_dir) / "pending_exits.json"    # FX-6 : sorties persistées (reprise crash)
+        else:
+            pending_path = rundir / "ledger" / "pending_exits.json"
         sim = FPF.simuler(geles, corpus_fwd, filtrer=_filtrer_corpus,
                           evaluer=lambda ep, sens, horizon_ms: MEP.evaluer_episode(ep, sens=sens, horizon_ms=horizon_ms),
-                          portefeuille=pfg)
+                          portefeuille=pfg, pending_path=pending_path)
         if hasattr(sim["portefeuille"], "ecrire_ledger"):    # portefeuille local -> on écrit son ledger de campagne
             sim["portefeuille"].ecrire_ledger(rundir / "ledger" / "forward_portfolio.jsonl")
         reco_pf = sim["reconciliation"]

@@ -202,9 +202,12 @@ def _maturer_live(rundir: Path, new_events: list) -> tuple[list, dict]:
     with buf.open("a", encoding="utf-8") as f:               # buffer marché append-only (ticks futurs)
         for e in new_events:
             c = str(e.get("coin") or e.get("symbol") or "").upper()
-            ts = e.get("ts_wall_ms") or e.get("ts_ms") or e.get("exchange_ts")
+            ts = e.get("exchange_ts") or e.get("ts_ms") or e.get("ts_wall_ms")   # FX-8 : exchange_ts prioritaire (même horloge que l'ingestion)
             if c and ts is not None and e.get("bid") is not None and e.get("ask") is not None:
-                f.write(json.dumps({"coin": c, "ts_ms": float(ts), "bid": float(e["bid"]), "ask": float(e["ask"])}) + "\n")
+                tick = {"coin": c, "ts_ms": float(ts), "bid": float(e["bid"]), "ask": float(e["ask"])}
+                if e.get("bids") is not None and e.get("asks") is not None:       # vrai L2 futur si présent (FX-8)
+                    tick["bids"], tick["asks"] = e["bids"], e["asks"]
+                f.write(json.dumps(tick) + "\n")
     # relit un buffer BORNÉ (les N derniers ticks par coin) pour la maturation
     marche: dict = {}
     for l in buf.read_text(encoding="utf-8", errors="ignore").splitlines()[-20000:]:
@@ -249,6 +252,17 @@ def executer_cycle(root: Path, rundir: Path, *, cycle: int, code_sha: str,
     import pipeline_18h as PL
     import familles_continue as FAM
     import curseurs_continue as CUR
+    try:
+        import progres_live as PROG                          # FX-2 : progression fine PENDANT le calcul
+        PROG.reset(7, job="lecture des nouvelles données", ensuite="maturation live")
+    except Exception:  # noqa: BLE001
+        PROG = None
+    def _prog(n, job, ensuite=None):
+        if PROG is not None:
+            try:
+                PROG.publier(n, 7, job=job, ensuite=ensuite)
+            except Exception:  # noqa: BLE001
+                pass
     t0 = time.time()
     scan = _scanner_nouveautes(root, rundir)
     new_events = scan["new_events"]
@@ -279,9 +293,11 @@ def executer_cycle(root: Path, rundir: Path, *, cycle: int, code_sha: str,
         "sources_avec_nouveaute": scan["sources_avec_nouveaute"], "affected_windows": fen,
         "n_variantes_nouvelles": len(variantes), "files_consommees": plan["files_consommees"],
         "read_only": True, "real_execution": False}, ensure_ascii=False, indent=1), encoding="utf-8")
+    _prog(1, "maturation des données live", "rejeu exact des idées")
     prets, mat = _maturer_live(rundir, new_events)             # AF-P1 : maturation live -> épisodes FWD_BOOK
     resume = {}
     interrompu = bool(stop_event is not None and stop_event.is_set())
+    _prog(2, "rejeu exact + validation (le gros du calcul)", "portefeuille + jobs de fond")
     try:
         resume = PL.executer_pipeline_donnees_completes(
             root, camp_dir, code_sha=code_sha, variantes=variantes, stop_event=stop_event,
@@ -296,14 +312,20 @@ def executer_cycle(root: Path, rundir: Path, *, cycle: int, code_sha: str,
     # Une variante interrompue reste RETRYABLE (non persistée -> régénérée au prochain cycle).
     n_term = int(resume.get("n_preregistres", 0 if interrompu else len(variantes)))
     _sauver_signatures(rundir, SCH.marquer_vues(deja, variantes, n_term))
+    _prog(3, "enregistrement des champions", "jobs de fond")
     _enregistrer_champions(camp_dir, rundir)               # candidats/statuts append-only (FINAL-11)
+    _prog(4, "jobs de fond (stress/placebo/WF/LOCO/LORO)", "outils d'optimisation")
     jobs_resume = _travail_de_fond(rundir, camp_dir)       # AF-P4 : jobs réellement exécutés (aucun idle)
+    _prog(5, "outils d'optimisation (grid/random/QMC/Optuna)", "suivi live des candidats")
     _outils_recherche(rundir, camp_dir)                    # AF-P5 : registre d'outils réellement lancés
+    _prog(6, "suivi live des candidats figés", "clôture du cycle")
+    suivi = _suivi_candidats_live(rundir, prets)           # FX-5 : suivi live run-level (épisodes après freeze)
+    _prog(7, "clôture du cycle", "nouveau cycle")
     resume.update({"campaign_id": camp_id, "cycle": cycle, "nouvelles_donnees": bool(scan["n_new"]),
                    "n_new_events": scan["n_new"], "n_variantes_nouvelles": len(variantes),
                    "affected_windows": fen, "maturation": mat,
                    "jobs": {k: jobs_resume.get(k) for k in ("n_jobs_executes", "n_done", "aucun_idle")},
-                   "duree_cycle_s": round(time.time() - t0, 2)})
+                   "candidats_live": suivi, "duree_cycle_s": round(time.time() - t0, 2)})
     # journal d'événements + checkpoint atomiques
     with (rundir / "LIVE-RESEARCH-EVENTS.jsonl").open("a", encoding="utf-8") as f:
         f.write(json.dumps({"ts_ms": int(time.time() * 1000), "cycle": cycle, "campaign_id": camp_id,
@@ -313,31 +335,57 @@ def executer_cycle(root: Path, rundir: Path, *, cycle: int, code_sha: str,
     return resume
 
 
+def _corpus_reel_du_run(rundir: Path):
+    """Corpus RÉEL du run (FX-3) : épisodes historiques (historique/episodes.jsonl) + épisodes live MÛRIS et
+    consommés (canonical/ready.jsonl, FWD_BOOK). Fixtures SEULEMENT en dernier repli, et alors marqué SYNTHÉTIQUE
+    pour que ses résultats n'entrent JAMAIS dans les compteurs réels du dashboard. Rend (corpus, source)."""
+    import pipeline_18h as PL
+    rundir = Path(rundir)
+    corp = []
+    hist = rundir / "historique" / "episodes.jsonl"
+    if hist.exists():
+        with hist.open("r", encoding="utf-8", errors="ignore") as f:
+            for i, l in enumerate(f):
+                if i >= 5000:
+                    break
+                try:
+                    corp.append(json.loads(l))
+                except ValueError:
+                    continue
+    ready = rundir / "canonical" / "ready.jsonl"                # épisodes live mûris (FWD_BOOK)
+    if ready.exists():
+        lignes = ready.read_text(encoding="utf-8", errors="ignore").splitlines()[-5000:]
+        for l in lignes:
+            try:
+                corp.append(json.loads(l))
+            except ValueError:
+                continue
+    if corp:
+        return corp, "REEL_RUN"
+    return PL.corpus_fixtures(), "SYNTHETIC_FALLBACK"
+
+
 def _travail_de_fond(rundir: Path, camp_dir: Path) -> dict:
     """AF-P4 : à chaque cycle, exécute RÉELLEMENT des jobs utiles (stress/placebo/WF/LOCO/LORO/voisins/
-    revalidation/analyse rejets) sur le corpus historique et les champions. Jamais d'idle. Défensif."""
+    revalidation/analyse rejets) sur le corpus RÉEL du run et les champions. Jamais d'idle. Défensif."""
     try:
         import jobs_continue as JOBS
         import pipeline_18h as PL
         import familles_continue as FAM
         import champions_continue as CH
-        # corpus historique borné (source de vérité), sinon petit corpus de démonstration
-        hist = rundir / "historique" / "episodes.jsonl"
-        corp = []
-        if hist.exists():
-            for l in hist.read_text(encoding="utf-8", errors="ignore").splitlines()[:2000]:
-                try:
-                    corp.append(json.loads(l))
-                except ValueError:
-                    continue
-        if not corp:
-            corp = PL.corpus_fixtures()
+        corp, _corp_source = _corpus_reel_du_run(rundir)       # FX-3 : corpus réel (historique + live mûri)
         def _ev_seuil(cand, seuil):
             sub = PL._filtrer_corpus(corp, predicat=FAM.predicat, family=cand.get("family", "GENERIC"), seuil=seuil)
             return PL._nets_promo(PL.nets_exact(sub, sens=cand["direction"], horizon_ms=cand["horizon_ms"]))
+        def _ev_famille(sub_corpus, cand):
+            """MÊME famille + prédicat + seuil + direction + horizon du candidat, sur un sous-corpus (LOCO/LORO)."""
+            ss = PL._filtrer_corpus(sub_corpus, predicat=FAM.predicat, family=cand.get("family", "GENERIC"),
+                                    seuil=cand.get("seuil", 8))
+            return PL._nets_promo(PL.nets_exact(ss, sens=cand["direction"], horizon_ms=cand["horizon_ms"]))
         ctx = {"corpus": corp,
                "evaluer_promo": lambda c, s, h: PL._nets_promo(PL.nets_exact(c, sens=s, horizon_ms=h)),
-               "evaluer_seuil": _ev_seuil}
+               "evaluer_objets": lambda c, s, h: PL.nets_exact(c, sens=s, horizon_ms=h),  # objets par épisode (WF sans zip)
+               "evaluer_seuil": _ev_seuil, "evaluer_famille": _ev_famille}
         champs = [c for c in CH.charger(rundir) if c.get("direction") and c.get("horizon_ms")][-5:]
         cands = [{"family": c.get("family", "GENERIC"), "direction": c["direction"], "horizon_ms": c["horizon_ms"],
                   "seuil": 8} for c in champs] or [{"family": "GENERIC", "direction": 1, "horizon_ms": 1000, "seuil": 8}]
@@ -359,7 +407,7 @@ def _outils_recherche(rundir: Path, camp_dir: Path) -> dict:
         import outils_recherche as OUT
         import pipeline_18h as PL
         import statistics
-        corp = PL.corpus_fixtures()
+        corp, corp_source = _corpus_reel_du_run(rundir)        # FX-3 : corpus RÉEL du run, plus de fixtures en prod
         def _eval(params):
             sens = 1 if params.get("direction", 1) >= 0 else -1
             h = int(params.get("horizon_ms", 1000))
@@ -370,8 +418,41 @@ def _outils_recherche(rundir: Path, camp_dir: Path) -> dict:
         espace = {"direction": [1, -1], "horizon_ms": [250, 1000, 5000]}
         reg = OUT.lancer_registre(_eval, espace, n_trials=8, storage_dir=(rundir / "optuna"))
         reg["disponibilite"] = OUT.disponibilite()
+        reg["corpus_source"] = corp_source
+        reg["synthetique"] = (corp_source != "REEL_RUN")        # FX-3 : jamais compté comme réel si synthétique
         _ecrire_atomique(camp_dir / "resultats" / "outils_recherche.json", json.dumps(reg, ensure_ascii=False, indent=1))
         return reg
+    except Exception as e:  # noqa: BLE001
+        return {"erreur": str(e)[:160]}
+
+
+def _suivi_candidats_live(rundir: Path, prets_live: list) -> dict:
+    """FX-5 : registre RUN-LEVEL des candidats figés. Fige les champions (freeze_exchange_ts immuable), puis suit
+    TOUS les candidats (y compris ceux des cycles précédents) sur les seuls épisodes live arrivés APRÈS leur gel.
+    Une pépite « positive en live » n'utilise donc jamais un épisode d'avant-gel. Défensif."""
+    try:
+        import registre_candidats_live as RCL
+        import champions_continue as CH
+        import pipeline_18h as PL
+        reg = RCL.RegistreCandidatsLive(rundir)
+        maintenant = max((float(e.get("ts_ms", 0)) for e in (prets_live or [])), default=0.0)
+        # 1) figer les champions courants (freeze_exchange_ts = instant live courant ; immuable une fois posé)
+        for c in CH.charger(rundir):
+            cid = c.get("trial_id") or c.get("candidate_id")
+            if cid and c.get("direction") and c.get("horizon_ms"):
+                reg.figer(cid, freeze_exchange_ts=maintenant,
+                          meta={"direction": c["direction"], "horizon_ms": c["horizon_ms"],
+                                "coin": c.get("coin"), "family": c.get("family")})
+        # 2) suivre chaque candidat sur SES épisodes admissibles (STRICTEMENT après son propre freeze)
+        for c in reg.candidats():
+            adm = reg.episodes_admissibles(c["candidate_id"], prets_live)
+            coin = (c.get("meta") or {}).get("coin")
+            sous = [e for e in adm if (not coin or e.get("coin") == coin)]
+            nets = PL._nets_promo(PL.nets_exact(sous, sens=(c["meta"].get("direction") or 1),
+                                                horizon_ms=(c["meta"].get("horizon_ms") or 1000)))
+            dernier = (adm[-1].get("event_id") or adm[-1].get("episode_id")) if adm else None
+            reg.suivre(c["candidate_id"], nets_live=nets, last_event_id=dernier, maintenant_ms=maintenant)
+        return reg.resume()
     except Exception as e:  # noqa: BLE001
         return {"erreur": str(e)[:160]}
 
@@ -474,11 +555,29 @@ def _enrichir_etat_dashboard(root, rundir, etat, *, cycle, phase, tot, interessa
     """AF-P6 : ajoute à l'état les champs des 12 panneaux (mots simples). Valeurs absentes = laissées None
     -> le dashboard affiche « PAS ENCORE CALCULABLE »."""
     rundir = Path(rundir)
-    fait, pourquoi = _PHRASES_PHASE.get(phase, ("je travaille", "pour trouver un edge honnête"))
+    phrase, pourquoi = _PHRASES_PHASE.get(phase, ("je travaille", "pour trouver un edge honnête"))
     etat["sante"] = "tout fonctionne"
-    etat["ce_que_je_fais"] = {"je_fais": fait, "parce_que": pourquoi, "j_utilise": "recherche + tests + simulation",
-                              "fait": etat.get("cycles_termines"), "total": None, "pourcentage": None,
-                              "vitesse": None, "eta": None, "ensuite": "tester d'autres réglages"}
+    # progression RÉELLE (FX-2) : position de la phase dans le cycle (l'état est réécrit à CHAQUE phase, donc ça
+    # bouge), FUSIONNÉE avec la progression fine publiée par le moteur pendant un long calcul (progres_live).
+    phases = list(CYCLE_PHASES)
+    idx = (phases.index(phase) + 1) if phase in phases else 0
+    ntot = len(phases)
+    dc = float(etat.get("duree_cycle_s") or 0.0)
+    vit_ph = round(idx / dc, 2) if (idx and dc > 0) else None
+    eta_ph = round((ntot - idx) / vit_ph, 1) if (vit_ph and vit_ph > 0) else None
+    try:
+        import progres_live as PROG
+        pg = PROG.lire()
+    except Exception:  # noqa: BLE001
+        pg = {}
+    a_fin = bool(pg.get("total"))                            # le moteur publie une progression fine ?
+    etat["ce_que_je_fais"] = {
+        "je_fais": (pg.get("job") or phrase), "parce_que": pourquoi, "j_utilise": "recherche + tests + simulation",
+        "fait": (pg.get("fait") if a_fin else idx), "total": (pg.get("total") if a_fin else ntot),
+        "pourcentage": (pg.get("pourcentage") if a_fin else round(100.0 * idx / ntot, 1)),
+        "vitesse": (pg.get("vitesse") if a_fin else vit_ph),
+        "eta": (pg.get("eta") if a_fin else eta_ph),
+        "ensuite": (pg.get("ensuite") or "tester d'autres réglages")}
     # système (psutil si dispo)
     try:
         import psutil  # type: ignore
@@ -501,22 +600,56 @@ def _enrichir_etat_dashboard(root, rundir, etat, *, cycle, phase, tot, interessa
     etat["pepites"] = [{"candidate_id": p.get("candidate_id"), "explication": "%s %sms" % (p.get("coin"), p.get("horizon_ms")),
                         "net": p.get("net_bps"), "statut": p.get("statut")} for p in (interessantes or [])[:8]]
     etat["resultats_idees"] = {"pepites_possibles": len(interessantes or []), "rejetees": (etat.get("rejets") or {}).get("total")}
-    # est-ce le bon moment pour Ctrl+C ?
+    # ── EST-CE LE BON MOMENT POUR CTRL+C ? (signaux RÉELS, FX-2 : durée live, candidats suivis, validations,
+    #    gaps, jobs importants en cours, qualité du rapport — plus jamais le seul compte de cycles) ──
     ct = int(etat.get("cycles_termines") or 0)
-    feu, msg = ("🔴", "RAPPORT ENCORE TROP JEUNE")
-    if ct >= 6:
-        feu, msg = ("🟢", "BON MOMENT POUR ENVISAGER LE RAPPORT")
-    elif ct >= 2:
-        feu, msg = ("🟡", "RAPPORT DÉJÀ UTILE, CONTINUER APPORTERA PLUS")
-    etat["ctrl_c"] = {"feu": feu, "message": msg, "termine": "%d cycles" % ct,
-                      "manque": ("plus de suivi live des pépites" if ct < 6 else "rien de bloquant"),
-                      "tests_en_cours": etat.get("phase"), "prochaine": "nouveau cycle de recherche"}
+    dcm = etat.get("duree", {})
+    duree_min = int(dcm.get("jours", 0)) * 1440 + int(dcm.get("heures", 0)) * 60 + int(dcm.get("minutes", 0))
+    try:
+        import registre_candidats_live as RCL
+        rcl = RCL.RegistreCandidatsLive(rundir).resume()
+        n_suivis, n_pos = rcl.get("n_candidats", 0), rcl.get("n_positifs_live", 0)
+    except Exception:  # noqa: BLE001
+        n_suivis = n_pos = 0
+    n_pass = int((tot or {}).get("n_pass", 0))
+    try:
+        import jobs_continue as JOBS
+        jobs_running = JOBS.JobStore(rundir).compte().get("RUNNING", 0)
+    except Exception:  # noqa: BLE001
+        jobs_running = 0
+    live = etat.get("donnees_live") or {}
+    gaps = live.get("gaps")
+    rapport_riche = (n_suivis > 0) or (n_pass > 0) or (ct >= 2)
+    if jobs_running > 0:
+        feu, msg = "🟡", "DES TESTS IMPORTANTS TOURNENT — mieux vaut les laisser finir"
+    elif isinstance(gaps, (int, float)) and gaps > 0:
+        feu, msg = "🟡", "DES TROUS DE DONNÉES RÉCENTS — le live n'est pas parfaitement continu"
+    elif n_suivis == 0 and n_pass == 0 and duree_min < 5:
+        feu, msg = "🔴", "TROP TÔT — peu de suivi live, rapport encore pauvre"
+    elif rapport_riche:
+        feu, msg = "🟢", "BON MOMENT — le rapport est déjà utile et stable"
+    else:
+        feu, msg = "🟡", "RAPPORT DÉJÀ UTILE, CONTINUER APPORTERA PLUS"
+    etat["ctrl_c"] = {
+        "feu": feu, "message": msg,
+        "termine": "%d cycles · %d PASS · %d candidats suivis (%d positifs live)" % (ct, n_pass, n_suivis, n_pos),
+        "manque": ("du suivi live" if n_suivis == 0 else ("laisser mûrir les positions" if n_pos == 0 else "rien de bloquant")),
+        "tests_en_cours": (("%d job(s) en cours" % jobs_running) if jobs_running else etat.get("phase")),
+        "duree_suivi": "%d min de live" % duree_min, "gaps": gaps,
+        "stabilite": ("stable" if ct >= 2 else "jeune"),
+        "qualite_rapport": ("riche" if rapport_riche else "encore mince"),
+        "prochaine": "nouveau cycle de recherche", "eta_prochaine": None}
     # outils (dernier tableau écrit)
     try:
         camps = sorted((rundir / "campagnes").glob("camp-*"))
         ou = json.loads((camps[-1] / "resultats" / "outils_recherche.json").read_text(encoding="utf-8")) if camps else {}
-        etat["outils"] = {"disponibles": ou.get("n_disponibles"), "utilises": ou.get("n_lances"),
-                          "actifs": ou.get("n_avec_trials_reels"), "detail": list((ou.get("outils") or {}).keys())}
+        synth = bool(ou.get("synthetique"))                    # FX-3 : résultats synthétiques -> jamais dans les compteurs réels
+        etat["outils"] = {"disponibles": ou.get("n_disponibles"),
+                          "utilises": (None if synth else ou.get("n_lances")),
+                          "actifs": (None if synth else ou.get("n_avec_trials_reels")),
+                          "corpus_source": ou.get("corpus_source"),
+                          "detail": ([("%s (SYNTHÉTIQUE — non compté)" % k) for k in (ou.get("outils") or {})]
+                                     if synth else list((ou.get("outils") or {}).keys()))}
     except (OSError, ValueError):
         etat["outils"] = {}
 
@@ -569,6 +702,20 @@ def boucle_continue(root: Path, *, stop_event: threading.Event | None = None, ma
 
 
 # ─────────────── dry-run / start / status / snapshot / stop / resume ───────────────
+def _dependances_optionnelles() -> dict:
+    """État des dépendances d'optimisation OPTIONNELLES (FX-3). Absentes -> outils avancés indisponibles
+    HONNÊTEMENT (grid/random/QMC-Halton restent toujours dispo). Voir requirements-recherche.txt."""
+    etat = {}
+    for mod in ("optuna", "cmaes", "scipy", "numpy"):
+        try:
+            __import__(mod)
+            etat[mod] = "present"
+        except Exception:  # noqa: BLE001
+            etat[mod] = "absent"
+    return {"paquets": etat, "requirements": "requirements-recherche.txt",
+            "note": "optuna+cmaes activent TPE/CMA-ES/QMC/NSGA-II + pruners Hyperband/SuccessiveHalving ; absents = grid/random/QMC-Halton seuls (honnête)."}
+
+
 def dry_run(root: Path) -> dict:
     root = Path(root)
     sec = SEC.auditer(root)
@@ -576,6 +723,7 @@ def dry_run(root: Path) -> dict:
     return {"commande": "dry-run", "PASS": bool(sec["securise"] and dok),
             "securite": {"securise": sec["securise"], "fichiers": sec["fichiers_scannes"]},
             "disque": {"ok": dok, "detail": dmsg}, "ressources": CFG.limites(str(root)),
+            "outils_optionnels": _dependances_optionnelles(),
             "mode": "CONTINU (sans limite de duree ; Ctrl+C = finalisation)",
             "securite_ligne": "0 ordre reel · 0 argent reel · 0 cle privee · 0 signature · 0 depot/retrait"}
 
@@ -669,6 +817,35 @@ def stopper(root: Path, run_id: str) -> dict:
 
 
 # ─────────────── réconciliation PnL/ROI/equity/DD (FINAL-18) ───────────────
+def _coherence_reconciliation(rundir: Path, glob: dict) -> tuple:
+    """Cohérence RÉELLE (FX-7) : compare la reconstruction indépendante `glob` (depuis le ledger, en streaming)
+    au SNAPSHOT persistant du portefeuille global (state.json) via PortefeuilleGlobal.reconcilier() qui recalcule
+    cash/réalisé depuis SON ledger et les confronte à SON snapshot. `coherent` est CALCULÉ, jamais codé True.
+    Rend (coherent, detail). coherent=None SEULEMENT s'il n'y a aucun portefeuille global (rien à vérifier)."""
+    gp = Path(rundir) / "global_portfolio"
+    if not (gp / "state.json").exists() and not (gp / "ledger.jsonl").exists():
+        return None, {"verifie": False, "raison": "PAS_DE_PORTEFEUILLE_GLOBAL"}
+    try:
+        import portefeuille_global as PG
+        rc = PG.PortefeuilleGlobal(gp).reconcilier()          # compare ledger reconstruit ↔ snapshot du portefeuille
+        # On confronte DEUX reconstructions INDÉPENDANTES du MÊME ledger (doivent être identiques) : `glob`
+        # (reconciliation_prod, streaming) vs les valeurs LEDGER du portefeuille. On NE compare PAS l'equity :
+        # elle inclut le latent des positions restées ouvertes (FX-6), absent de la reconstruction streaming.
+        cash_g, cash_led = float(glob.get("cash") or 0.0), float(rc.get("cash_ledger") or 0.0)
+        pnl_g, pnl_led = float(glob.get("pnl_realise") or 0.0), float(rc.get("realized_ledger") or 0.0)
+        ecart_cash, ecart_pnl = abs(cash_g - cash_led), abs(pnl_g - pnl_led)
+        tol = 1e-2
+        coherent = bool(rc.get("coherent")) and ecart_cash < tol and ecart_pnl < tol
+        return coherent, {"verifie": True, "portefeuille_ledger_vs_snapshot": bool(rc.get("coherent")),
+                          "ecart_cash_streaming_vs_ledger_usd": round(ecart_cash, 6),
+                          "ecart_pnl_streaming_vs_ledger_usd": round(ecart_pnl, 6),
+                          "cash_snapshot": rc.get("cash_snapshot"), "cash_ledger": rc.get("cash_ledger"),
+                          "realized_snapshot": rc.get("realized_snapshot"), "realized_ledger": rc.get("realized_ledger"),
+                          "positions_ouvertes": rc.get("positions_ouvertes"), "tolerance_usd": tol}
+    except Exception as e:  # noqa: BLE001
+        return False, {"verifie": False, "raison": "ERREUR:%s" % str(e)[:120]}
+
+
 def _reconcilier(rundir: Path) -> dict:
     """RÉCONCILIATION RÉELLE (PT-10) : reconstruit le PnL depuis les LEDGERS D'ÉVÉNEMENTS des portefeuilles
     paper (OPEN/ADD/REDUCE/CLOSE), en streaming, par campagne, puis agrège. La somme des médianes n'est PAS un
@@ -700,13 +877,14 @@ def _reconcilier(rundir: Path) -> dict:
         except (OSError, ValueError):
             pass
     exclusions = RECO.agreger_exclusions(rundir)
+    coherent, coherence = _coherence_reconciliation(rundir, glob)   # FX-7 : CALCULÉ (jamais True codé)
     rec = {"n_campagnes": len(camps), "n_verdicts": n_verdicts, "n_pass": n_pass,
            "capital_initial_usd": glob["capital_initial"], "pnl_realise_usd": glob["pnl_realise"],
            "equity_usd": glob["equity"], "drawdown_usd": glob["drawdown_usd"],
            "roi_total_pct": glob["roi_total_pct"], "roi_deploye_pct": glob["roi_deploye_pct"],
-           "coherent": True, "par_campagne": par_campagne[:50], "evenements": glob["evenements"],
-           "n_exclusions": len(exclusions), "exclusions": exclusions[:100],
-           "note": "Portefeuille GLOBAL : une seule equity curve chronologique sur un capital unique ; drawdown non additionné ; equity_curve.jsonl."}
+           "coherent": coherent, "coherence": coherence, "par_campagne": par_campagne[:50],
+           "evenements": glob["evenements"], "n_exclusions": len(exclusions), "exclusions": exclusions[:100],
+           "note": "Portefeuille GLOBAL : une seule equity curve chronologique sur un capital unique ; drawdown non additionné ; equity_curve.jsonl. `coherent` = ledger reconstruit vs snapshot persistant (None si aucun portefeuille global)."}
     _ecrire_atomique(rundir / "results" / "reconciliation.json", json.dumps(rec, ensure_ascii=False, indent=1))
     return rec
 
@@ -743,6 +921,9 @@ def finaliser(root: Path, *, partial: bool = False, raison: str = "ctrl-c") -> d
     _checkpoint(rundir, int(ident.get("cycle_courant", 0)), "FINALIZE")
     rec = _reconcilier(rundir)                                # réconciliation PnL/ROI/equity/DD AVANT le rapport
     partial = partial or _URGENCE.is_set()                   # 2e Ctrl+C RELU pendant la finalisation (PT-8)
+    incoherent = (rec.get("coherent") is False)              # FX-7 : ledger ≠ snapshot -> JAMAIS COMPLETE
+    if incoherent:
+        partial = True
     etat = "FINALIZATION_PARTIAL" if partial else "FINALIZATION_COMPLETE"
     date_fin = time.strftime("%Y%m%d-%H%M%S")
     # dossier racine dédié + SOUS-DOSSIER par run_id (FINAL-17)
@@ -822,32 +1003,79 @@ def _demarrer_ipc_stop_thread(root: Path, *, intervalle_s: float = 0.5) -> threa
     return t
 
 
-def _demarrer_dashboard_thread(root: Path, ident: dict, *, intervalle_s: float = 1.5) -> threading.Thread:
-    """Dashboard VRAIMENT vivant (FINAL-13) : un thread relit LIVE-RESEARCH-STATE.json toutes les ~1.5 s et
-    ré-affiche, MÊME pendant un long calcul de cycle (le rafraîchissement ne dépend pas de la fin du cycle).
-    Non-daemon volontairement évité : c'est un afficheur, il s'arrête net à _ARRET."""
+def _demarrer_dashboard_thread(root: Path, ident: dict, *, intervalle_s: float = 0.4) -> threading.Thread:
+    """Dashboard VRAIMENT vivant (FINAL-13 + FX-2). Rich Live + Layout + Progress à ~3 rafraîchissements/s (repli
+    texte si Rich absent), MÊME pendant un long calcul. Fusionne la progression fine publiée par le moteur
+    (progres_live). La touche S appelle la VRAIE fonction snapshot et AFFICHE le chemin du fichier créé (pas une
+    simple vue nommée « snapshot »). Nav 1-7 sans intercepter Ctrl+C."""
     rundir = Path(ident["rundir"])
-
     debut = ident.get("t0_wall_ms", time.time() * 1000) / 1000.0
+    etat_ui = {"vue": "tout", "snapshot_msg": None}
+
+    def _etat():
+        etat = json.loads((rundir / "LIVE-RESEARCH-STATE.json").read_text(encoding="utf-8"))
+        ecoule = time.time() - debut                        # horloge RÉELLE recalculée à chaque rafraîchi
+        etat["duree"] = {"jours": int(ecoule // 86400), "heures": int(ecoule % 86400 // 3600),
+                         "minutes": int(ecoule % 3600 // 60), "secondes": int(ecoule % 60)}
+        try:                                                # fusion progression FINE live (même process)
+            import progres_live as PROG
+            pg = PROG.lire()
+            if pg.get("total"):
+                cj = dict(etat.get("ce_que_je_fais") or {})
+                cj.update(fait=pg["fait"], total=pg["total"], pourcentage=pg["pourcentage"],
+                          vitesse=pg["vitesse"], eta=pg["eta"], je_fais=(pg.get("job") or cj.get("je_fais")))
+                etat["ce_que_je_fais"] = cj
+        except Exception:  # noqa: BLE001
+            pass
+        if etat_ui["snapshot_msg"]:
+            etat["dernier_checkpoint"] = etat_ui["snapshot_msg"]
+        return etat
+
+    def _touche(console=None):
+        import dashboard_flow as DF
+        ch = DF.lire_touche_non_bloquante()                 # sans intercepter Ctrl+C
+        if ch is None:
+            return
+        if ch in ("s", "S"):                                # VRAIE fonction snapshot + chemin affiché (FX-2)
+            try:
+                res = snapshot(root)
+                chemin = res.get("rapport") or res.get("snapshot") or res.get("chemin") or "(inconnu)"
+                etat_ui["snapshot_msg"] = "snapshot créé : %s" % chemin
+                if console is not None:
+                    console.print("[green]Snapshot écrit :[/green] %s" % chemin)
+                else:
+                    print("\n[SNAPSHOT] écrit : %s" % chemin, flush=True)
+            except Exception as e:  # noqa: BLE001
+                etat_ui["snapshot_msg"] = "snapshot échoué : %s" % str(e)[:80]
+            return
+        v = DF.touche_vers_vue(ch)
+        if v and v != "snapshot":
+            etat_ui["vue"] = v
 
     def loop():
-        import dashboard_flow as DF                        # AF-P6 : dashboard 12 panneaux + nav clavier
-        vue = "tout"
-        while not _ARRET.is_set():
+        import dashboard_flow as DF
+        try:
+            from rich.console import Console
+            from rich.live import Live
+            console = Console()
+            with Live(DF.rendre_rich(_etat()), console=console, refresh_per_second=3, screen=False) as live:
+                while not _ARRET.is_set():
+                    try:
+                        _touche(console)
+                        live.update(DF.rendre_rich(_etat()))
+                    except Exception:  # noqa: BLE001 — un afficheur ne casse jamais le moteur
+                        pass
+                    _ARRET.wait(intervalle_s)
+            return
+        except Exception:  # noqa: BLE001 — Rich indisponible -> repli texte
+            pass
+        while not _ARRET.is_set():                          # repli texte (sans Rich)
             try:
-                ch = DF.lire_touche_non_bloquante()        # navigation 1-7/S sans intercepter Ctrl+C
-                if ch is not None:
-                    v = DF.touche_vers_vue(ch)
-                    if v:
-                        vue = v
-                etat = json.loads((rundir / "LIVE-RESEARCH-STATE.json").read_text(encoding="utf-8"))
-                ecoule = time.time() - debut               # horloge RÉELLE recalculée à chaque rafraîchi
-                etat["duree"] = {"jours": int(ecoule // 86400), "heures": int(ecoule % 86400 // 3600),
-                                 "minutes": int(ecoule % 3600 // 60), "secondes": int(ecoule % 60)}
-                print("\033c" + DF.rendre_texte(etat, vue=vue), flush=True)
-            except Exception:  # noqa: BLE001 — un afficheur ne casse jamais le moteur
+                _touche(None)
+                print("\033c" + DF.rendre_texte(_etat(), vue=etat_ui["vue"]), flush=True)
+            except Exception:  # noqa: BLE001
                 pass
-            _ARRET.wait(intervalle_s)
+            _ARRET.wait(max(0.5, intervalle_s))
 
     t = threading.Thread(target=loop, name="dashboard-live", daemon=True)
     t.start()
@@ -879,6 +1107,26 @@ def _demarrer_surveillance_thread(sup, *, intervalle_s: float = 15.0) -> threadi
     return t
 
 
+def _ecrire_dernier_run_lance(root: Path, run_id: str | None) -> None:
+    """FX-1 : mémorise le run_id RÉELLEMENT lancé (au démarrage). Après le Ctrl+C, le pointeur ACTIVE.json est
+    retiré à la finalisation ; ce fichier permet au CMD de vérifier LE MÊME run (SHA recalculés)."""
+    if not run_id:
+        return
+    try:
+        p = _run_root(root) / "DERNIER_RUN_LANCE.txt"
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_text(str(run_id), encoding="utf-8")
+    except OSError:
+        pass
+
+
+def _lire_dernier_run_lance(root: Path) -> str:
+    try:
+        return (_run_root(root) / "DERNIER_RUN_LANCE.txt").read_text(encoding="utf-8").strip()
+    except OSError:
+        return ""
+
+
 def demarrer_foreground(root: Path, *, exiger_flux: bool = True, max_cycles: int | None = None,
                         collecteurs: dict | None = None, afficher_live: bool = True, mode: str = "auto") -> dict:
     """Démarre le run et TRAVAILLE au premier plan jusqu'au Ctrl+C, puis finalise proprement (partiel si 2e
@@ -890,6 +1138,7 @@ def demarrer_foreground(root: Path, *, exiger_flux: bool = True, max_cycles: int
     if r.get("start") in ("PRECHECK_ECHEC", "RUN_ACTIF_EXISTE", "AUCUN_RUN_A_REPRENDRE"):
         return r
     ident = _identite_active(root) or {}
+    _ecrire_dernier_run_lance(root, ident.get("run_id"))     # FX-1 : run_id RÉELLEMENT lancé (le CMD vérifiera CE run)
     _installer_signal(root)
     sup = watch = None
     if collecteurs:                                          # supervision optionnelle (read-only), sinon rien
@@ -918,25 +1167,60 @@ def demarrer_foreground(root: Path, *, exiger_flux: bool = True, max_cycles: int
     return finaliser(root, partial=_URGENCE.is_set(), raison="ctrl-c")
 
 
+def _verifier_manifeste_sha(man: Path, rundir: Path) -> dict:
+    """RECALCULE réellement le SHA-256 de CHAQUE fichier listé au manifeste et le compare (FX-1) : la simple
+    présence d'un dictionnaire `fichiers` NE prouve rien. Rend le détail (n_ok / manquants / divergents)."""
+    try:
+        m = json.loads(Path(man).read_text(encoding="utf-8"))
+    except (OSError, ValueError) as e:
+        return {"ok": False, "erreur": "MANIFESTE_ILLISIBLE:%s" % str(e)[:80]}
+    fichiers = m.get("fichiers") or {}
+    if not fichiers:
+        return {"ok": False, "erreur": "AUCUN_FICHIER_DANS_MANIFESTE"}
+    rundir = Path(rundir)
+    n_ok = n_manq = n_div = 0
+    div = []
+    for rel, sha_attendu in fichiers.items():
+        cible = (rundir / rel.split("/", 1)[1]) if str(rel).startswith("__RAPPORT__/") else (rundir / rel)
+        if not cible.exists():
+            n_manq += 1
+            if len(div) < 20:
+                div.append({"fichier": rel, "cause": "MANQUANT"})
+        elif _sha(cible) != sha_attendu:                     # SHA RECALCULÉ ≠ SHA du manifeste
+            n_div += 1
+            if len(div) < 20:
+                div.append({"fichier": rel, "cause": "SHA_DIVERGENT"})
+        else:
+            n_ok += 1
+    ok = bool(n_manq == 0 and n_div == 0 and n_ok > 0)
+    return {"ok": ok, "n_verifies": len(fichiers), "n_ok": n_ok, "n_manquants": n_manq,
+            "n_diverge": n_div, "divergences": div, "code_sha_manifeste": m.get("code_sha")}
+
+
 def verifier_finalisation(root: Path, run_id: str | None = None) -> dict:
     """Le CMD ne déclare « terminé » que si le rapport ET le manifeste de CE run existent, que l'état est
-    FINALIZATION_COMPLETE*, avec des SHA présents. Sans run_id : vérif globale (au moins un rapport+manifeste)."""
+    FINALIZATION_COMPLETE*, et que TOUS les SHA du manifeste sont RECALCULÉS et concordent (FX-1). Sans run_id :
+    vérif globale (au moins un rapport+manifeste)."""
     root = Path(root)
     if run_id:
         dossier = root / "Rapports en continu" / run_id
         rapports = list(dossier.glob("RAPPORT-RECHERCHE-CONTINUE_*.md")) if dossier.exists() else []
-        man = _run_root(root) / run_id / "manifeste" / "SHA256_MANIFEST_FINAL.json"
+        rundir = _run_root(root) / run_id
+        man = rundir / "manifeste" / "SHA256_MANIFEST_FINAL.json"
         etat_ok = shas_ok = False
+        verif = {}
         if man.exists():
             try:
                 m = json.loads(man.read_text(encoding="utf-8"))
                 etat_ok = str(m.get("etat", "")).startswith("FINALIZATION_COMPLETE")
-                shas_ok = bool(m.get("fichiers")) and m.get("contient_rapport") is True
             except (OSError, ValueError):
-                pass
+                etat_ok = False
+            verif = _verifier_manifeste_sha(man, rundir)      # RECALCULE tous les SHA (pas une simple présence)
+            shas_ok = bool(verif.get("ok"))
         ok = bool(rapports and man.exists() and etat_ok and shas_ok)
         return {"finalisation_confirmee": ok, "run_id": run_id, "rapport": bool(rapports),
-                "manifeste": man.exists(), "etat_complete": etat_ok, "sha_presents": shas_ok}
+                "manifeste": man.exists(), "etat_complete": etat_ok, "sha_presents": shas_ok,
+                "sha_recalcule": verif}
     dossier = root / "Rapports en continu"
     rapports = list(dossier.rglob("RAPPORT-RECHERCHE-CONTINUE_*.md")) if dossier.exists() else []
     manifs = list(_run_root(root).rglob("SHA256_MANIFEST_FINAL.json"))
@@ -946,7 +1230,7 @@ def verifier_finalisation(root: Path, run_id: str | None = None) -> dict:
 def _cli():
     ap = argparse.ArgumentParser(description="Laboratoire de recherche CONTINU (paper-only)")
     ap.add_argument("commande", choices=["dry-run", "start", "resume", "status", "snapshot", "stop",
-                                         "verifier-finalisation", "run-id-actif"])
+                                         "verifier-finalisation", "run-id-actif", "dernier-run-lance"])
     ap.add_argument("--run-id", default=None)
     a = ap.parse_args()
     root = RACINE
@@ -967,6 +1251,8 @@ def _cli():
     elif a.commande == "run-id-actif":
         ident = _identite_active(root)
         print(ident["run_id"] if ident else "")
+    elif a.commande == "dernier-run-lance":                   # FX-1 : run_id du dernier run LANCÉ (survit à la finalisation)
+        print(_lire_dernier_run_lance(root))
     elif a.commande == "verifier-finalisation":
         v = verifier_finalisation(root, a.run_id)
         print(json.dumps(v, ensure_ascii=False))

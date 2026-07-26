@@ -12,8 +12,12 @@ import time
 from pathlib import Path
 
 OUTILS = ("grid", "random", "qmc", "tpe", "cma_es", "nsga2", "successive_halving", "hyperband")
-OUTILS_OPTUNA = {"tpe": "TPESampler", "cma_es": "CmaEsSampler", "nsga2": "NSGAIISampler",
-                 "hyperband": "HyperbandPruner", "successive_halving": "SuccessiveHalvingPruner"}
+#: outils Optuna qui sont des SAMPLERS (stratégie de proposition des points).
+SAMPLERS_OPTUNA = {"tpe": "TPESampler", "cma_es": "CmaEsSampler", "nsga2": "NSGAIISampler", "qmc": "QMCSampler"}
+#: outils Optuna qui sont des PRUNERS — passés en `pruner=`, JAMAIS comme un sampler (FX-3).
+PRUNERS_OPTUNA = {"successive_halving": "SuccessiveHalvingPruner", "hyperband": "HyperbandPruner"}
+#: nsga2 est MULTI-OBJECTIFS (plusieurs objectifs, pas un score scalaire unique).
+MULTI_OBJECTIF = {"nsga2"}
 
 
 def _optuna():
@@ -25,14 +29,22 @@ def _optuna():
 
 
 def disponibilite() -> dict:
-    """État de disponibilité de chaque outil (avec raison si indisponible)."""
+    """État de disponibilité de chaque outil (rôle + raison si indisponible). JAMAIS compté comme dispo juste
+    parce que le nom existe : les samplers/pruners Optuna sont indisponibles honnêtement si optuna est absent."""
     opt = _optuna()
     d = {}
     for o in OUTILS:
-        if o in ("grid", "random", "qmc"):
-            d[o] = {"disponible": True, "raison": "pur Python (toujours dispo)"}
+        if o in ("grid", "random"):
+            d[o] = {"disponible": True, "role": "sampler_pur", "raison": "pur Python (toujours dispo)"}
+        elif o == "qmc":
+            d[o] = {"disponible": True, "role": "sampler",
+                    "raison": ("QMCSampler Optuna" if opt else "repli Halton pur (optuna absent)")}
+        elif o in PRUNERS_OPTUNA:
+            d[o] = {"disponible": bool(opt), "role": "pruner", "classe": PRUNERS_OPTUNA[o],
+                    "raison": ("optuna present" if opt else "optuna non installe")}
         else:
-            d[o] = {"disponible": bool(opt), "raison": ("optuna present" if opt else "optuna non installe")}
+            d[o] = {"disponible": bool(opt), "role": ("sampler_multiobjectif" if o in MULTI_OBJECTIF else "sampler"),
+                    "classe": SAMPLERS_OPTUNA.get(o), "raison": ("optuna present" if opt else "optuna non installe")}
     return d
 
 
@@ -96,14 +108,16 @@ def optimiser(evaluer_params, espace: dict, *, outil: str = "random", n_trials: 
         except Exception:  # noqa: BLE001
             return None, None
 
-    # ── outils purs ──
-    if outil in ("grid", "random", "qmc"):
+    # ── outils purs (grid/random toujours ; qmc en repli Halton SEULEMENT si Optuna absent) ──
+    opt_present = _optuna() is not None
+    if outil in ("grid", "random") or (outil == "qmc" and not opt_present):
         if outil == "grid":
             props = _grille(espace, n_trials)
         elif outil == "qmc":
             props = [{k: (dom[int(_halton(i, 2) * len(dom)) % len(dom)] if isinstance(dom, (list, tuple))
                           else dom["min"] + (dom["max"] - dom["min"]) * _halton(i, 3))
                       for k, dom in espace.items()} for i in range(n_trials)]
+            base["moteur"] = "halton_pur"
         else:
             props = [_echantillon(espace, lambda n: rng.random() * n) for _ in range(n_trials)]
         base["lance"] = True; base["trials_proposes"] = len(props)
@@ -118,33 +132,79 @@ def optimiser(evaluer_params, espace: dict, *, outil: str = "random", n_trials: 
         base["cpu_s"] = round(time.time() - t0, 4)
         return base
 
-    # ── outils Optuna ──
+    # ── outils Optuna (samplers + pruners) ──
     opt = _optuna()
     if not opt:
+        if outil == "qmc":                                   # qmc a un repli pur Python (déjà géré plus haut)
+            return base
         return {**base, "disponible": False, "lance": False, "raison": "optuna non installe"}
     try:
         storage = None
         if storage_dir is not None:
             Path(storage_dir).mkdir(parents=True, exist_ok=True)
             storage = "sqlite:///%s" % (Path(storage_dir) / ("optuna_%s.db" % outil))
+
+        def _suggest(trial):
+            p = {}
+            for k, dom in espace.items():
+                if isinstance(dom, (list, tuple)):
+                    p[k] = trial.suggest_categorical(k, list(dom))
+                elif isinstance(dom, dict):
+                    p[k] = trial.suggest_float(k, dom["min"], dom["max"])
+            return p
+
+        # 1) SAMPLER (proposition des points)
         sampler = None
-        nm = OUTILS_OPTUNA.get(outil)
-        if nm in ("TPESampler", "CmaEsSampler", "NSGAIISampler") and hasattr(opt.samplers, nm):
+        nm = SAMPLERS_OPTUNA.get(outil)
+        if nm and hasattr(opt.samplers, nm):
             sampler = getattr(opt.samplers, nm)()
-        study = opt.create_study(direction="maximize", sampler=sampler, storage=storage,
+
+        # 2) PRUNER — passé en `pruner=`, jamais comme sampler (FX-3). Base sampler = TPE (ou Random).
+        pruner = None
+        pn = PRUNERS_OPTUNA.get(outil)
+        if pn and hasattr(opt.pruners, pn):
+            pruner = getattr(opt.pruners, pn)()
+            sampler = getattr(opt.samplers, "TPESampler")() if hasattr(opt.samplers, "TPESampler") else None
+
+        # 3) NSGA-II : MULTI-OBJECTIFS (maximiser net ET pf), pas un score scalaire unique.
+        if outil in MULTI_OBJECTIF:
+            study = opt.create_study(directions=["maximize", "maximize"], sampler=sampler, storage=storage,
+                                     study_name="af_%s" % outil, load_if_exists=True)
+
+            def _obj_multi(trial):
+                sc, m = _eval(_suggest(trial))
+                if sc is None or m is None:
+                    raise opt.TrialPruned()
+                return sc, float(m.get("pf", 1.0) or 1.0)    # deux objectifs distincts
+
+            study.optimize(_obj_multi, n_trials=n_trials, catch=(Exception,))
+            etats = [t.state.name for t in study.trials]
+            pareto = list(getattr(study, "best_trials", []) or [])
+            base.update({"lance": True, "multi_objectif": True, "objectifs": ["net", "pf"],
+                         "trials_proposes": len(study.trials), "trials_termines": etats.count("COMPLETE"),
+                         "trials_prunes": etats.count("PRUNED"), "trials_echoues": etats.count("FAIL"),
+                         "n_pareto": len(pareto), "meilleur": ({"n_solutions_pareto": len(pareto)} if pareto else None),
+                         "cpu_s": round(time.time() - t0, 4), "storage": storage,
+                         "sampler": nm, "pruner": pn})
+            return base
+
+        # 4) mono-objectif (tpe / cma_es / qmc / pruners). Les pruners exigent des rapports intermédiaires.
+        study = opt.create_study(direction="maximize", sampler=sampler, pruner=pruner, storage=storage,
                                  study_name="af_%s" % outil, load_if_exists=True)
 
         def _obj(trial):
-            params = {}
-            for k, dom in espace.items():
-                if isinstance(dom, (list, tuple)):
-                    params[k] = trial.suggest_categorical(k, list(dom))
-                elif isinstance(dom, dict):
-                    params[k] = trial.suggest_float(k, dom["min"], dom["max"])
-            sc, _ = _eval(params)
-            if sc is None:
-                raise opt.TrialPruned()
-            return sc
+            params = _suggest(trial)
+            dernier = None
+            for step in range(4):                            # étapes -> le pruner peut réellement élaguer
+                sc, _ = _eval(params)
+                if sc is None:
+                    raise opt.TrialPruned()
+                dernier = sc
+                if pruner is not None:
+                    trial.report(sc, step)
+                    if trial.should_prune():
+                        raise opt.TrialPruned()
+            return dernier
 
         study.optimize(_obj, n_trials=n_trials, catch=(Exception,))
         etats = [t.state.name for t in study.trials]
@@ -153,7 +213,8 @@ def optimiser(evaluer_params, espace: dict, *, outil: str = "random", n_trials: 
                      "trials_echoues": etats.count("FAIL"),
                      "meilleur_score": (round(study.best_value, 4) if study.best_trial else None),
                      "meilleur": ({"params": study.best_params} if study.best_trial else None),
-                     "cpu_s": round(time.time() - t0, 4), "storage": storage})
+                     "cpu_s": round(time.time() - t0, 4), "storage": storage,
+                     "sampler": nm, "pruner": pn})
         return base
     except Exception as e:  # noqa: BLE001
         return {**base, "disponible": True, "lance": False, "raison": "erreur optuna: %s" % str(e)[:120]}
@@ -169,4 +230,5 @@ def lancer_registre(evaluer_params, espace: dict, *, n_trials: int = 16, storage
             "n_avec_trials_reels": sum(1 for v in res.values() if (v.get("trials_termines") or 0) > 0)}
 
 
-__all__ = ["OUTILS", "disponibilite", "objectif_multicritere", "optimiser", "lancer_registre"]
+__all__ = ["OUTILS", "SAMPLERS_OPTUNA", "PRUNERS_OPTUNA", "MULTI_OBJECTIF", "disponibilite",
+           "objectif_multicritere", "optimiser", "lancer_registre"]

@@ -43,7 +43,7 @@ goto :menu
 :dispatch
 if /i "%ACTION%"=="dry-run"  goto :dryrun
 if /i "%ACTION%"=="start"    goto :start
-if /i "%ACTION%"=="resume"   goto :start
+if /i "%ACTION%"=="resume"   goto :resume
 if /i "%ACTION%"=="status"   goto :status
 if /i "%ACTION%"=="snapshot" goto :snapshot
 if /i "%ACTION%"=="stop"     goto :stop
@@ -58,16 +58,32 @@ if errorlevel 1 ( echo [ECHEC] Verification KO - voir ci-dessus. ) else ( echo [
 goto :fin
 
 :start
-echo === DEMARRAGE DU LABO CONTINU (Ctrl+C = arret propre + rapport final) ===
+echo === DEMARRAGE D'UN NOUVEAU LABO CONTINU (Ctrl+C = arret propre + rapport final) ===
 echo === Collecteurs lecture-seule SUPERVISES par Python (PID, anti-doublon, restart, arret explicite). ===
 echo === Le moteur tourne AU PREMIER PLAN. Appuie sur Ctrl+C quand tu veux le rapport final. ===
 python tools\recherche_continue.py start
-REM le CMD ne declare "finalisation terminee" que si un rapport ET un manifeste existent reellement.
-python tools\recherche_continue.py verifier-finalisation
+goto :postrun
+
+:resume
+echo === REPRISE DU LABO EXISTANT (Ctrl+C = arret propre + rapport final) ===
+echo === Le moteur tourne AU PREMIER PLAN. Appuie sur Ctrl+C quand tu veux le rapport final. ===
+python tools\recherche_continue.py resume
+goto :postrun
+
+:postrun
+REM run_id REELLEMENT lance (persiste meme apres la finalisation qui retire ACTIVE.json).
+set "RID="
+for /f "usebackq tokens=* delims=" %%R in (`python tools\recherche_continue.py dernier-run-lance`) do set "RID=%%R"
+if "%RID%"=="" (
+  echo [ATTENTION] run_id introuvable - finalisation NON verifiee par SHA.
+  goto :fin
+)
+echo Verification de la finalisation de CE run (SHA du manifeste RECALCULES) : %RID%
+python tools\recherche_continue.py verifier-finalisation --run-id "%RID%"
 if errorlevel 1 (
-  echo [ATTENTION] Aucun rapport/manifeste confirme - finalisation NON garantie.
+  echo [ATTENTION] Finalisation NON confirmee pour %RID% - rapport/manifeste/SHA manquants ou divergents.
 ) else (
-  echo [OK] Finalisation confirmee : rapport ET manifeste presents. Voir le chemin ci-dessus.
+  echo [OK] Finalisation confirmee : rapport + manifeste + SHA RECALCULES concordent (meme run).
 )
 goto :fin
 
