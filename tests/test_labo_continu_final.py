@@ -197,7 +197,7 @@ def test_champions_derive():
 # ─────────────── 9) superviseur : anti-doublon + restart + arrêt explicite ───────────────
 def test_superviseur_anti_doublon_restart_arret(tmp_path):
     rd = tmp_path / "run"; rd.mkdir()
-    sup = SUP.Superviseur(rd, {"col_a": ["x.py"]})
+    sup = SUP.Superviseur(rd, {"col_a": ["x.py"]}, backoff_s=0.0)   # backoff 0 pour tester le restart déterministe
     lancer = lambda nom, argv: os.getpid()                   # "démarre" -> pid vivant (le process courant)
     r1 = sup.demarrer_un("col_a", lancer=lancer)
     assert r1["etat"] == "DEMARRE"
@@ -205,7 +205,7 @@ def test_superviseur_anti_doublon_restart_arret(tmp_path):
     assert r2["etat"] == "DEJA_VIVANT"                       # pas de 2e copie
     sup.etat["col_a"]["pid"] = 999_999                        # simule un collecteur mort
     surv = sup.surveiller(lancer=lancer)
-    assert "col_a" in surv["redemarres"] and sup.etat["col_a"]["restart_count"] >= 1
+    assert any(r.get("nom") == "col_a" for r in surv["redemarres"]) and sup.etat["col_a"]["restart_count"] >= 1
     sup.arreter_tous()
     assert sup.etat["col_a"]["pid"] is None                   # arrêt explicite
 
@@ -261,7 +261,7 @@ def test_rapport_dossier_run_id_index_et_reconciliation(tmp_path):
     idx = tmp_path / "Rapports en continu" / "INDEX-RAPPORTS.md"
     assert idx.exists() and ident["run_id"] in idx.read_text(encoding="utf-8")
     rec = json.loads((rd / "results" / "reconciliation.json").read_text())
-    assert "somme_net_bps" in rec and rec["drawdown_bps"] <= 0
+    assert "pnl_realise_usd" in rec and rec["drawdown_usd"] >= 0    # réconciliation réelle (ledgers d'événements)
     assert "reconciliation" in fin
 
 

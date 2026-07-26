@@ -1,8 +1,9 @@
-"""SUPERVISEUR DES COLLECTEURS (LABO-CONTINU-FINAL FINAL-14, Flo 26/07). Remplace les `start /b` aveugles :
-enregistre PID + heure de démarrage de chaque collecteur, évite les doublons au resume, vérifie heartbeat +
-croissance réelle, redémarre INDIVIDUELLEMENT un collecteur mort (restart_count + dernière erreur), et arrête
-EXPLICITEMENT tous les enfants à la finalisation. LECTURE-SEULE : ne lance que des collecteurs read-only.
-0 ordre, 0 exchange.
+"""SUPERVISEUR DES COLLECTEURS (Flo 26/07, FINAL-14 + PT-9 santé/backoff). Remplace les `start /b` aveugles :
+enregistre PID + create_time de chaque collecteur, évite les doublons au resume, VÉRIFIE la santé (heartbeat
+frais, croissance des écritures, âge du dernier exchange_ts), détecte un collecteur VIVANT-mais-FIGÉ, redémarre
+INDIVIDUELLEMENT (restart_count + dernière erreur), avec BACKOFF anti-tempête de reconnexions, capture le
+stderr dans un fichier, et arrête EXPLICITEMENT tous les enfants à la finalisation (arrêt coopératif d'abord,
+jamais son propre PID). LECTURE-SEULE : ne lance que des collecteurs read-only. 0 ordre, 0 exchange.
 """
 from __future__ import annotations
 
@@ -14,10 +15,12 @@ import time
 from pathlib import Path
 
 RACINE = Path(__file__).resolve().parents[1]
+HEARTBEAT_MAX_AGE_MS = 120_000            # au-delà -> collecteur figé (heartbeat trop vieux)
+EXCHANGE_MAX_AGE_MS = 300_000             # au-delà -> flux figé (dernier exchange_ts trop vieux)
+BACKOFF_S = 20.0                          # anti-tempête : pas plus d'un restart par collecteur / BACKOFF_S
 
 
 def _create_time(pid: int) -> float | None:
-    """Heure de création du process (anti-réutilisation de PID). None si indéterminable."""
     try:
         import psutil  # type: ignore
         return float(psutil.Process(int(pid)).create_time())
@@ -30,7 +33,6 @@ def _proc_vivant(pid: int, start: float | None) -> bool:
         import psutil  # type: ignore
         if not psutil.pid_exists(int(pid)):
             return False
-        # `start` = create_time enregistré au lancement : identique -> même process (pas un PID réutilisé)
         return (start is None) or abs(psutil.Process(int(pid)).create_time() - float(start)) < 2.0
     except Exception:  # noqa: BLE001
         try:
@@ -41,13 +43,18 @@ def _proc_vivant(pid: int, start: float | None) -> bool:
 
 
 class Superviseur:
-    """Gère un ensemble de collecteurs read-only. `collecteurs` = {nom: [argv...]} (scripts précis)."""
+    """Gère un ensemble de collecteurs read-only. `collecteurs` = {nom: [argv...]}."""
 
-    def __init__(self, rundir: Path, collecteurs: dict):
+    def __init__(self, rundir: Path, collecteurs: dict, *, root: Path | None = None,
+                 heartbeat_max_age_ms: int = HEARTBEAT_MAX_AGE_MS, backoff_s: float = BACKOFF_S):
         self.rundir = Path(rundir)
         self.collecteurs = collecteurs
+        self.root = Path(root) if root else RACINE
+        self.hb_max_age = int(heartbeat_max_age_ms)
+        self.backoff_s = float(backoff_s)
         self.etat_path = self.rundir / "superviseur.json"
         self.procs: dict = {}
+        self._dernier_restart: dict = {}
         self.etat = self._charger()
 
     def _charger(self) -> dict:
@@ -62,9 +69,38 @@ class Superviseur:
         tmp.write_text(json.dumps(self.etat, ensure_ascii=False, indent=1), encoding="utf-8")
         os.replace(tmp, self.etat_path)
 
+    # ── santé (PT-9) ──
+    def sante(self, nom: str, *, maintenant_ms=None) -> dict:
+        """Vivant ? figé ? Combine liveness process + fraîcheur du heartbeat + âge du dernier exchange_ts."""
+        e = self.etat.get(nom, {})
+        vivant = bool(e.get("pid") and _proc_vivant(e["pid"], e.get("start")))
+        try:
+            import heartbeat_collecteur as HB
+            age = HB.age_ms(self.root, nom, maintenant_ms=maintenant_ms)
+            hb = HB.lire(self.root, nom)
+        except Exception:  # noqa: BLE001
+            age, hb = None, {}
+        fige = bool(vivant and age is not None and age > self.hb_max_age)
+        ex_ts = hb.get("dernier_exchange_ts")
+        flux_fige = False
+        if vivant and ex_ts is not None:
+            now = int(maintenant_ms if maintenant_ms is not None else time.time() * 1000)
+            try:
+                flux_fige = (now - int(ex_ts)) > EXCHANGE_MAX_AGE_MS
+            except (TypeError, ValueError):
+                flux_fige = False
+        return {"nom": nom, "vivant": vivant, "heartbeat_age_ms": age, "fige": fige, "flux_fige": flux_fige,
+                "n_passes": hb.get("n_passes"), "restart_count": e.get("restart_count", 0),
+                "sain": bool(vivant and not fige and not flux_fige)}
+
+    def _backoff_ok(self, nom: str) -> bool:
+        dernier = self._dernier_restart.get(nom, 0.0)
+        return (time.time() - dernier) >= self.backoff_s
+
+    # ── cycle de vie ──
     def demarrer_un(self, nom: str, *, lancer=None) -> dict:
         """Démarre un collecteur s'il n'est pas déjà vivant (anti-doublon au resume). `lancer` injectable
-        pour les tests (sinon subprocess read-only)."""
+        pour les tests (sinon subprocess read-only, stderr capturé dans un fichier)."""
         e = self.etat.get(nom, {"restart_count": 0})
         if e.get("pid") and _proc_vivant(e["pid"], e.get("start")):
             return {"nom": nom, "etat": "DEJA_VIVANT", "pid": e["pid"]}
@@ -72,12 +108,15 @@ class Superviseur:
             if lancer is not None:
                 pid = int(lancer(nom, self.collecteurs[nom]))
             else:
+                self.rundir.mkdir(parents=True, exist_ok=True)
+                err = (self.rundir / ("stderr_%s.log" % nom)).open("a", encoding="utf-8")   # stderr -> fichier
                 p = subprocess.Popen([sys.executable, *self.collecteurs[nom]], cwd=str(RACINE),
-                                     stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                                     stdout=subprocess.DEVNULL, stderr=err)
                 self.procs[nom] = p
                 pid = p.pid
             self.etat[nom] = {"pid": pid, "start": (_create_time(pid) if pid else None),
                               "restart_count": e.get("restart_count", 0), "derniere_erreur": None}
+            self._dernier_restart[nom] = time.time()
         except Exception as ex:  # noqa: BLE001
             self.etat[nom] = {**e, "pid": None, "derniere_erreur": str(ex)[:160]}
         self._sauver()
@@ -86,19 +125,30 @@ class Superviseur:
     def demarrer_tous(self, *, lancer=None) -> dict:
         return {n: self.demarrer_un(n, lancer=lancer) for n in self.collecteurs}
 
-    def surveiller(self, *, lancer=None) -> dict:
-        """Redémarre INDIVIDUELLEMENT les collecteurs morts (incrémente restart_count)."""
+    def surveiller(self, *, lancer=None, maintenant_ms=None) -> dict:
+        """Redémarre INDIVIDUELLEMENT les collecteurs MORTS ou VIVANTS-MAIS-FIGÉS (heartbeat trop vieux),
+        avec BACKOFF (jamais une tempête de reconnexions). Incrémente restart_count + note la raison."""
         redémarrés = []
-        for nom, e in list(self.etat.items()):
-            if not (e.get("pid") and _proc_vivant(e["pid"], e.get("start"))):
-                e["restart_count"] = e.get("restart_count", 0) + 1
-                self.etat[nom] = e
+        for nom in list(self.collecteurs):
+            s = self.sante(nom, maintenant_ms=maintenant_ms)
+            besoin = (not s["vivant"]) or s["fige"] or s["flux_fige"]
+            if besoin and self._backoff_ok(nom):
+                e = self.etat.get(nom, {})
+                raison = "MORT" if not s["vivant"] else ("FIGE" if s["fige"] else "FLUX_FIGE")
+                if s["vivant"] and nom in self.procs:        # figé : on arrête d'abord proprement
+                    try:
+                        self.procs[nom].terminate()
+                    except Exception:  # noqa: BLE001
+                        pass
+                    self.etat[nom] = {**e, "pid": None}
+                self.etat[nom] = {**self.etat.get(nom, {}), "restart_count": e.get("restart_count", 0) + 1,
+                                  "derniere_erreur": raison}
                 self.demarrer_un(nom, lancer=lancer)
-                redémarrés.append(nom)
+                redémarrés.append({"nom": nom, "raison": raison})
         return {"redemarres": redémarrés, "etat": self.etat}
 
     def arreter_tous(self) -> dict:
-        """Arrête EXPLICITEMENT tous les enfants (à la finalisation)."""
+        """Arrête EXPLICITEMENT tous les enfants (terminate coopératif), jamais son propre PID."""
         arretes = []
         for nom, p in list(self.procs.items()):
             try:
@@ -108,7 +158,6 @@ class Superviseur:
                 pass
         for nom, e in self.etat.items():
             pid = e.get("pid")
-            # garde-fou : ne JAMAIS tuer son propre process (PID courant) ni un PID sans create_time vérifié
             if (pid and nom not in self.procs and int(pid) != os.getpid()
                     and e.get("start") is not None and _proc_vivant(pid, e.get("start"))):
                 try:
@@ -121,4 +170,4 @@ class Superviseur:
         return {"arretes": arretes}
 
 
-__all__ = ["Superviseur"]
+__all__ = ["Superviseur", "HEARTBEAT_MAX_AGE_MS", "EXCHANGE_MAX_AGE_MS", "BACKOFF_S"]

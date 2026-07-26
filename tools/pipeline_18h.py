@@ -33,51 +33,38 @@ COUT_APPROX_AR_BPS = 12.0
 # ─────────────── moteur EXACT événementiel ───────────────
 def moteur_exact(ep: dict, *, sens: int, horizon_ms: int, modele_exec: str = "taker",
                  notional_usd: float = 100.0) -> dict | None:
-    """Net RÉEL (bps) d'UN épisode pour (sens, horizon, modèle d'exécution). None si horizon non mesurable
-    (pas de prix forward à cet horizon → jamais transformé en 0)."""
-    bid, ask = float(ep["bid"]), float(ep["ask"])
-    if not (ask > bid > 0):
-        return None
-    mid = (bid + ask) / 2.0
-    fwd = (ep.get("fwd_mid") or {}).get(horizon_ms) or (ep.get("fwd_mid") or {}).get(str(horizon_ms))
-    if fwd is None:
+    """Net RÉEL (bps) d'UN épisode via le moteur d'exécution PROD-TRUTH (prix exécutables ask→bid/bid→ask,
+    PnL depuis entry_px/exit_px, coûts séparés). None si le carnet d'entrée est invalide (contrat historique).
+    Conserve les clés legacy (net_bps, statut, fill, entree_prix, brut_bps, cout_bps) + l'objet épisode complet."""
+    import moteur_execution_prod as MEP
+    o = MEP.evaluer_episode(ep, sens=sens, horizon_ms=horizon_ms, modele_exec=modele_exec, notional_usd=notional_usd)
+    st = o.get("status")
+    if st == "NO_DATA":
+        return None                                        # carnet invalide -> None (contrat historique)
+    if st == "UNMEASURABLE":
         return {"net_bps": None, "statut": "UNMEASURABLE", "horizon_ms": horizon_ms}
-    fwd = float(fwd)
-    entree = ask if sens > 0 else bid                       # taker : on CROISE à l'entrée
-    demi_spread_bps = (ask - bid) / 2.0 / mid * 1e4
-    # PnL brut = variation mid×sens (le croisement d'entrée est déjà payé via ask/bid), en bps du notionnel
-    brut_bps = sens * (fwd - mid) / mid * 1e4
-    frais = float(ep.get("fees_bps", 2.0)) * 2.0           # entrée + sortie
-    slip = float(ep.get("slippage_bps", 1.0)) * 2.0
-    impact = float(ep.get("impact_bps", 0.0))
-    latence = float(ep.get("latence_bps", 0.0))
-    # remplissage : taker = plein ; maker = fraction selon la file (adverse selection incluse)
-    if modele_exec == "taker":
-        frac = 1.0
-        cout = frais + slip + impact + latence + demi_spread_bps  # + demi-spread de SORTIE
-        entree_maker = False
-    else:
-        from recherche_18h_mecanismes import maker_risk_averse_fill, maker_probabiliste_fill
-        f = maker_risk_averse_fill if modele_exec == "maker_risk_averse" else maker_probabiliste_fill
-        frac = f(float(ep.get("queue_devant_sz", 0.0)), float(ep.get("vol_traversant_sz", 0.0)))
-        entree_maker = True
-        # maker : on économise le demi-spread d'ENTRÉE mais subit l'adverse selection (fwd conditionnel au fill)
-        cout = frais + slip + impact + latence + demi_spread_bps
-    if frac <= 0:
+    if st == "NO_FILL":
         return {"net_bps": None, "statut": "NO_FILL", "horizon_ms": horizon_ms, "fill": 0.0}
-    net = (brut_bps - cout) * frac
-    return {"net_bps": round(net, 4), "brut_bps": round(brut_bps, 4), "cout_bps": round(cout, 4),
-            "fill": round(frac, 4), "horizon_ms": horizon_ms, "sens": sens, "modele": modele_exec,
-            "entree_prix": entree, "maker": entree_maker, "statut": "OK"}
+    cout = round(o.get("fees_bps", 0.0) + o.get("slippage_bps", 0.0) + o.get("impact_bps", 0.0)
+                 + o.get("latency_bps", 0.0) + o.get("funding_bps", 0.0), 4)
+    return {"net_bps": o["net_bps"], "brut_bps": o.get("gross_bps"), "cout_bps": cout,
+            "fill": o.get("fill"), "horizon_ms": horizon_ms, "sens": sens, "modele": modele_exec,
+            "entree_prix": o.get("entry_px"), "sortie_prix": o.get("exit_px"),
+            "maker": modele_exec != "taker", "statut": "OK", "episode": o}
 
 
-def nets_exact(corpus: list[dict], *, sens: int, horizon_ms: int, modele_exec: str = "taker") -> list[float]:
-    out = []
-    for ep in corpus:
-        r = moteur_exact(ep, sens=sens, horizon_ms=horizon_ms, modele_exec=modele_exec)
-        if r and r.get("net_bps") is not None:
-            out.append(r["net_bps"])
-    return out
+def nets_exact(corpus: list[dict], *, sens: int, horizon_ms: int, modele_exec: str = "taker") -> list[dict]:
+    """Renvoie UN OBJET PAR ÉPISODE (episode_id, entry_ts, exit_ts, status, net_bps, …), de MÊME longueur que
+    `corpus`. On ne filtre JAMAIS pour re-zipper : UNMEASURABLE/NO_FILL/NO_DATA gardent leur identité.
+    Pour la liste des net mesurés, utiliser `_nets_ok(...)`."""
+    import moteur_execution_prod as MEP
+    return MEP.evaluer_episodes(corpus, sens=sens, horizon_ms=horizon_ms, modele_exec=modele_exec)
+
+
+def _nets_ok(episodes: list[dict]) -> list[float]:
+    """Extrait les net_bps des seuls épisodes réellement mesurés (status OK). Un UNMEASURABLE/NO_FILL ne
+    devient jamais 0."""
+    return [o["net_bps"] for o in episodes if o.get("status") == "OK" and o.get("net_bps") is not None]
 
 
 # ─────────────── FAST_SCREEN (approx, ne promeut jamais) ───────────────
@@ -160,8 +147,8 @@ def phase_discovery(rundir: Path, corpus_disc: list[dict], variantes: list[dict]
                                                    "moteur": "FAST_SCREEN", "net_median_bps": fs["net_approx_bps"],
                                                    "sharpe": None, "pf": None, "verdict": "KILL_FAST"})
             continue
-        # EXACT_REPLAY sur le survivant
-        nets = nets_exact(sub, sens=v["direction"], horizon_ms=v["horizon_ms"])
+        # EXACT_REPLAY sur le survivant (objets par épisode -> net mesurés, sans zip)
+        nets = _nets_ok(nets_exact(sub, sens=v["direction"], horizon_ms=v["horizon_ms"]))
         n_exact += 1
         net_med = statistics.median(nets) if nets else None
         sh = VAL.sharpe(nets) if len(nets) >= 2 else None
@@ -219,23 +206,31 @@ def candidats_geles(rundir: Path) -> list[dict]:
 
 
 # ─────────────── PHASE VALIDATION ───────────────
-def phase_validation(rundir: Path, corpus_val: list[dict], *, survivants: list[dict]) -> dict:
+def phase_validation(rundir: Path, corpus_val: list[dict], *, survivants: list[dict], stop_event=None) -> dict:
     """Sur archive VALIDATION uniquement : exact replay, walk-forward, placebos RÉELLEMENT rejoués (direction
-    opposée recalculée depuis les prix, pas −net), DSR/PBO réels depuis le registre."""
+    opposée recalculée depuis les prix, pas −net), DSR/PBO réels depuis le registre. INTERRUPTIBLE (PT-8) :
+    vérifie stop_event à chaque candidat."""
     rundir = Path(rundir)
+    (rundir / "resultats").mkdir(parents=True, exist_ok=True)
     sharpes_tous = REG.sharpes_tous_resultats(rundir)       # TOUS les essais terminaux (multiplicité)
     perf_pbo, rapports = {}, []
+    interrompu = False
     for s in survivants:
+        if stop_event is not None and stop_event.is_set():   # arrêt coopératif en pleine validation
+            interrompu = True
+            break
         sub = _filtrer_corpus(corpus_val, coin=s["coin"], regime=s["regime"])
-        nets = nets_exact(sub, sens=s["direction"], horizon_ms=s["horizon_ms"])
-        eps = [{"ts_ms": e["ts_ms"], "net_bps": n} for e, n in zip(sub, nets)]
+        episodes = nets_exact(sub, sens=s["direction"], horizon_ms=s["horizon_ms"])
+        nets = _nets_ok(episodes)
+        # walk-forward par ÉPISODE (ts propre à chaque épisode mesuré, jamais un zip filtrer→réassocier)
+        eps = [{"ts_ms": o["entry_ts"], "net_bps": o["net_bps"]} for o in episodes if o.get("status") == "OK"]
         wf = V18.walk_forward(eps, k=3, embargo_ms=1.0)
         # PLACEBO direction opposée RÉELLEMENT rejoué (recalcul par prix)
-        nets_opp = nets_exact(sub, sens=-s["direction"], horizon_ms=s["horizon_ms"])
+        nets_opp = _nets_ok(nets_exact(sub, sens=-s["direction"], horizon_ms=s["horizon_ms"]))
         # PLACEBO coin aléatoire compatible (autre coin, même régime)
         autres = [c for c in {e["coin"] for e in corpus_val} if c != s["coin"]]
-        nets_coin = nets_exact(_filtrer_corpus(corpus_val, coin=(autres[0] if autres else s["coin"]), regime=s["regime"]),
-                               sens=s["direction"], horizon_ms=s["horizon_ms"])
+        nets_coin = _nets_ok(nets_exact(_filtrer_corpus(corpus_val, coin=(autres[0] if autres else s["coin"]), regime=s["regime"]),
+                                        sens=s["direction"], horizon_ms=s["horizon_ms"]))
         boot = V18.bootstrap_bloc(nets)
         d = VAL.dsr(nets, sharpes_essais=sharpes_tous) if len(nets) >= 8 else {"dsr": None}
         perf_pbo[s["trial_id"]] = nets
@@ -251,7 +246,7 @@ def phase_validation(rundir: Path, corpus_val: list[dict], *, survivants: list[d
     (rundir / "resultats" / "validation.json").write_text(
         json.dumps({"rapports": rapports, "pbo": pbo.get("pbo"), "n_sharpes_dsr": len(sharpes_tous)},
                    ensure_ascii=False, indent=1), encoding="utf-8")
-    return {"n_valides": len(rapports), "pbo": pbo.get("pbo"), "rapports": rapports}
+    return {"n_valides": len(rapports), "pbo": pbo.get("pbo"), "rapports": rapports, "interrompu": interrompu}
 
 
 # ─────────────── PHASE HOLDOUT + FORWARD PAPER ───────────────
@@ -266,7 +261,7 @@ def phase_holdout_forward(rundir: Path, corpus_hold: list[dict], corpus_fwd: lis
     lignes_fwd, hold = [], []
     for c in geles:
         sub_h = _filtrer_corpus(corpus_hold, coin=c["coin"], regime=c["regime"])
-        nets_h = nets_exact(sub_h, sens=c["direction"], horizon_ms=c["horizon_ms"])
+        nets_h = _nets_ok(nets_exact(sub_h, sens=c["direction"], horizon_ms=c["horizon_ms"]))
         sub_f = _filtrer_corpus(corpus_fwd, coin=c["coin"], regime=c["regime"])
         for ep in sub_f:
             r = moteur_exact(ep, sens=c["direction"], horizon_ms=c["horizon_ms"])
@@ -275,16 +270,40 @@ def phase_holdout_forward(rundir: Path, corpus_hold: list[dict], corpus_fwd: lis
                    "net_bps": (r or {}).get("net_bps")}
             lignes_fwd.append(evt)
         vr = next((v for v in validation if v["trial_id"] == c["trial_id"]), {})
+        nm_h = statistics.median(nets_h) if nets_h else None
+        pf_h = _profit_factor(nets_h) if nets_h else None
+        dd_h = V18.max_drawdown_bps(nets_h) if nets_h else None
+        # stress RÉEL : on ampute chaque net d'un surcoût conservateur et on regarde si la médiane survit
+        stress_extra = V18.SEUILS.get("stress_extra_bps", 3.0)
+        stress_survit = (statistics.median([x - stress_extra for x in nets_h]) > 0) if nets_h else None
         hold.append({"trial_id": c["trial_id"], "family": c["family"], "coin": c["coin"], "horizon_ms": c["horizon_ms"],
-                     "n_holdout": len(nets_h),
-                     "holdout_net_median_bps": (statistics.median(nets_h) if nets_h else None),
+                     "n_holdout": len(nets_h), "holdout_net_median_bps": nm_h,
+                     "holdout_pf": pf_h, "holdout_drawdown_bps": dd_h, "stress_survit": stress_survit,
                      "validation_net_median_bps": vr.get("net_median_bps"), "dsr": vr.get("dsr"),
+                     "pbo": None,  # rempli par reconcilier (pbo global de la campagne)
                      "ic_bas_bps": vr.get("ic_bas_bps"), "placebo_opposee_median_bps": vr.get("placebo_opposee_median_bps")})
     (rundir / "resultats" / "holdout.json").write_text(json.dumps(hold, ensure_ascii=False, indent=1), encoding="utf-8")
     with (rundir / "ledger" / "forward_paper.jsonl").open("w", encoding="utf-8") as f:
         for e in lignes_fwd:
             f.write(json.dumps(e, ensure_ascii=False) + "\n")
-    return {"n_holdout": len(hold), "n_forward_events": len(lignes_fwd), "holdout": hold}
+    # PT-5 : VRAI portefeuille paper à capital PARTAGÉ (position_id, OPEN/CLOSE, expositions simultanées,
+    # equity/DD, réconciliation) — la source de vérité du PnL forward.
+    reco_pf = None
+    try:
+        import forward_portefeuille as FPF
+        import moteur_execution_prod as MEP
+        sim = FPF.simuler(geles, corpus_fwd, filtrer=_filtrer_corpus,
+                          evaluer=lambda ep, sens, horizon_ms: MEP.evaluer_episode(ep, sens=sens, horizon_ms=horizon_ms))
+        sim["portefeuille"].ecrire_ledger(rundir / "ledger" / "forward_portfolio.jsonl")
+        reco_pf = sim["reconciliation"]
+        (rundir / "resultats" / "forward_portfolio_reconciliation.json").write_text(
+            json.dumps({**reco_pf, "n_signaux": sim["n_signaux"], "n_ouverts": sim["n_ouverts"],
+                        "n_refuses": sim["n_refuses"]}, ensure_ascii=False, indent=1), encoding="utf-8")
+    except Exception as e:  # noqa: BLE001 — le portefeuille ne doit pas casser le pipeline, mais l'erreur est visible
+        (rundir / "resultats" / "forward_portfolio_reconciliation.json").write_text(
+            json.dumps({"erreur": str(e)[:200]}, ensure_ascii=False), encoding="utf-8")
+    return {"n_holdout": len(hold), "n_forward_events": len(lignes_fwd), "holdout": hold,
+            "forward_portfolio_reconciliation": reco_pf}
 
 
 # ─────────────── réconciliation + verdicts finaux ───────────────
@@ -293,20 +312,30 @@ def reconcilier_et_juger(rundir: Path, *, holdout: list[dict], pbo, notional_usd
     finals = []
     if not isinstance(holdout, list):                 # aucun candidat gelé -> pas de verdict final (honnête)
         holdout = []
+    seuils = V18.SEUILS
     for h in holdout:
         if not isinstance(h, dict):
             continue
         nm = h.get("holdout_net_median_bps")
+        ic = h.get("ic_bas_bps")
+        dd = h.get("holdout_drawdown_bps")
+        # métriques RÉELLEMENT calculées ; celles non calculées dans ce chemin restent None -> DATA_MISSING (PT-4).
         cand = {"n": h.get("n_holdout", 0), "net_median_oos_bps": nm, "net_moyen_oos_bps": nm,
-                "pf_oos": 1.3 if (nm or 0) > 0 else 0.5, "dsr": h.get("dsr"), "pbo": pbo,
-                "ic_bas_bps": h.get("ic_bas_bps"), "placebo_median_bps": h.get("placebo_opposee_median_bps"),
-                "stress_survit": (nm or 0) > 6.0, "plateau": True, "un_seul_coin_dominant": False,
-                "drawdown_borne": True, "capacite_non_nulle": True, "ledger_reconcilie": True,
-                "securite_verte": True, "holdout_vu": True}
+                "pf_oos": h.get("holdout_pf"),                      # vrai profit factor du holdout
+                "dsr": h.get("dsr"), "pbo": pbo,
+                "ic_bas_bps": ic, "placebo_median_bps": h.get("placebo_opposee_median_bps"),
+                "stress_survit": h.get("stress_survit"),           # vrai stress (net amputé)
+                "plateau": None,                                    # NON calculé ici (voisins de params non rejoués)
+                "un_seul_coin_dominant": True,                      # trial mono-coin -> concentration = vraie
+                "drawdown_borne": (None if dd is None else bool(dd <= seuils["drawdown_max_bps"])),
+                "capacite_non_nulle": (None if ic is None else bool(ic > 0)),  # capacité = IC bas > 0
+                "ledger_reconcilie": None,                          # rempli par la réconciliation réelle (PT-10)
+                "securite_verte": None,                             # audit sécurité fait à la finalisation
+                "holdout_vu": True}
         g = V18.gate(cand)
         pnl_usd = (nm or 0.0) / 1e4 * notional_usd
         finals.append({**h, "verdict": g["verdict"], "raisons": g["raisons"],
-                       "pnl_usd_par_trade": round(pnl_usd, 4),
+                       "pnl_usd_par_trade": round(pnl_usd, 4),   # ESPÉRANCE par trade (≠ PnL AGRÉGÉ, cf. réconciliation PT-10)
                        "roi_immobilise_pct": round((nm or 0.0) / 100.0, 4)})   # net bps -> % sur capital immobilisé
     (Path(rundir) / "resultats" / "final_verdicts.json").write_text(
         json.dumps(finals, ensure_ascii=False, indent=1), encoding="utf-8")
@@ -429,7 +458,14 @@ def executer_pipeline_complet(root: Path, rundir: Path, corpus: list[dict], *, c
     d = phase_discovery(rundir, disc or corpus, vnorm, code_sha=code_sha, source_hash=source_hash,
                         stop_event=stop_event, predicat=predicat)
     fr = phase_freeze(rundir, d["survivants"], code_sha=code_sha)
-    v = phase_validation(rundir, val or corpus, survivants=d["survivants"])
+    v = phase_validation(rundir, val or corpus, survivants=d["survivants"], stop_event=stop_event)
+    # arrêt coopératif (PT-8) : si stop demandé, on ne lance PAS le holdout/forward (partiel honnête)
+    if stop_event is not None and stop_event.is_set():
+        resume = {"n_variantes": len(vnorm), **{k: d[k] for k in ("n_preregistres", "n_fast_screen", "n_exact_replays", "n_survivants")},
+                  "n_candidats_figes": fr["n_candidats_figes"], "n_valides": v["n_valides"], "pbo": v.get("pbo"),
+                  "n_holdout": 0, "n_forward_events": 0, "n_pass": 0, "interrompu": True}
+        (rundir / "resultats" / "pipeline_resume.json").write_text(json.dumps(resume, ensure_ascii=False, indent=1), encoding="utf-8")
+        return resume
     hf = phase_holdout_forward(rundir, hold or corpus, hold or corpus, validation=v["rapports"])
     rec = reconcilier_et_juger(rundir, holdout=hf.get("holdout", []), pbo=v.get("pbo"))
     resume = {"n_variantes": len(variantes), **{k: d[k] for k in ("n_preregistres", "n_fast_screen", "n_exact_replays", "n_survivants")},
@@ -442,7 +478,8 @@ def executer_pipeline_complet(root: Path, rundir: Path, corpus: list[dict], *, c
 
 def executer_pipeline_donnees_completes(root: Path, rundir: Path, *, code_sha: str,
                                         dossiers=None, ledgers_logs=None,
-                                        variantes=None, stop_event=None, predicat=None) -> dict:
+                                        variantes=None, stop_event=None, predicat=None,
+                                        new_events=None, affected_windows=None, hist_dir=None) -> dict:
     """LOT18H-DATA-COMPLETE : catalogue COMPLET (sans plafond silencieux) → CORPUS canonique réellement
     consommé (provenance + dedup selon la source) → 7 phases → analyse des LOGS (refus rejoués, gate vs
     no-gate) → LIGNÉE des PnL → CSVs d'utilisation. Une source cataloguée ne compte que si elle est CONSOMMÉE."""
@@ -451,11 +488,36 @@ def executer_pipeline_donnees_completes(root: Path, rundir: Path, *, code_sha: s
     import logs_18h as LOGS
     import lineage_18h as LIN
     rundir = Path(rundir)
+    if stop_event is not None and stop_event.is_set():       # arrêt coopératif AVANT le catalogage (PT-8)
+        (rundir / "resultats").mkdir(parents=True, exist_ok=True)
+        resume = {"interrompu": True, "phase": "AVANT_CATALOGUE", "n_fast_screen": 0, "n_survivants": 0, "n_pass": 0}
+        (rundir / "resultats" / "pipeline_resume.json").write_text(json.dumps(resume, ensure_ascii=False), encoding="utf-8")
+        return resume
     kw = {} if dossiers is None else {"dossiers": dossiers}
-    cat = CAT.cataloguer_complet(root, rundir, **kw)
-    sources = cat["sources"]
-    cons = COR.construire(sources, root=root)
-    corpus = cons["episodes"]
+    ingestion = {"mode": "FULL"}
+    if new_events is None and affected_windows is None:
+        # comportement HISTORIQUE (18h) : catalogue complet à chaque appel
+        cat = CAT.cataloguer_complet(root, rundir, **kw)
+        sources = cat["sources"]
+        cons = COR.construire(sources, root=root)
+        corpus = cons["episodes"]
+    else:
+        # INCRÉMENTAL (continu, PT-2) : corpus historique IMMUABLE (cache au niveau RUN) + segments neufs +
+        # fenêtre active ; le cycle 2 NE recatalogue PAS et NE rejoue PAS tout l'historique.
+        import corpus_incremental as INC
+        hd = Path(hist_dir) if hist_dir else rundir
+        hist = INC.preparer_historique(root, hd, cataloguer=lambda r, rd: CAT.cataloguer_complet(r, rd, **kw),
+                                       construire=COR.construire)
+        new_segs = INC.segments_incrementaux(new_events or [])
+        fen = INC.fenetre_active(hist["corpus"], new_segs, affected_windows)
+        corpus = fen["working"] or hist["corpus"]
+        cat = {"sources": [], "accounting": hist["manifest"].get("accounting", {})}
+        cons = {"episodes": corpus, "comptes": {"utilises": len(corpus)}}
+        ingestion = {"mode": "INCREMENTAL", "from_cache": hist["from_cache"],
+                     "n_sources_parsees_ce_cycle": hist["n_sources_parsees_ce_cycle"],
+                     "n_hist_total": fen["n_hist_total"], "n_hist_rejoues": fen["n_hist_rejoues"],
+                     "n_new_segments": fen["n_new_segments"], "coins_actifs": fen["coins"]}
+        sources = cat["sources"]
     if not corpus:                                         # honnête : pas d'épisode marché exploitable
         corpus = corpus_fixtures()
         cons["comptes"]["fallback"] = "SYNTHETIC (aucun épisode BBO exploitable dans les archives)"
@@ -481,8 +543,9 @@ def executer_pipeline_donnees_completes(root: Path, rundir: Path, *, code_sha: s
                                  "decision": f.get("verdict"), "execution_paper": "forward_paper.jsonl",
                                  "ledger": "trials_results.jsonl", "pnl": f.get("trial_id"),
                                  "rapport": "RAPPORT-RECHERCHE-18H.md"})
-    resume.update({"accounting": cat["accounting"], "corpus_comptes": cons["comptes"],
+    resume.update({"accounting": cat["accounting"], "corpus_comptes": cons["comptes"], "ingestion": ingestion,
                    "log_analyse": {"n_gaps": log_res["n_gaps"], "gate_vs_nogate": log_res["gate_vs_nogate"]}})
+    (rundir / "resultats" / "cycle_ingestion.json").write_text(json.dumps(ingestion, ensure_ascii=False, indent=1), encoding="utf-8")
     (rundir / "resultats" / "pipeline_resume.json").write_text(json.dumps(resume, ensure_ascii=False, indent=1), encoding="utf-8")
     return resume
 

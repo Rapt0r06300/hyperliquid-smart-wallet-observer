@@ -184,8 +184,7 @@ def _variantes_du_cycle(rundir: Path, *, cycle: int, code_sha: str, coins, regim
     vs = SCH.generer(cycle=cycle, deja_vus=deja, familles=familles, directions=directions,
                      horizons=horizons, regimes=regimes, coins=coins, meilleurs=meilleurs,
                      budget=48, seed=abs(hash(code_sha)) % 997, code_sha=code_sha)
-    for v in vs:
-        deja.add(SCH.signature_canonique(v))     # v porte déjà code_sha (estampillé par generer)
+    # NE PAS persister ici : une signature n'est « définitivement vue » qu'après résultat TERMINAL (PT-7).
     return vs, deja
 
 
@@ -207,28 +206,42 @@ def executer_cycle(root: Path, rundir: Path, *, cycle: int, code_sha: str,
     coins = fen.get("coins") or []
     regimes = []
     horizons = FAM.horizons_pour(new_events if new_events else None)
-    variantes, sigs = _variantes_du_cycle(rundir, cycle=cycle, code_sha=code_sha,
-                                           coins=coins, regimes=regimes, horizons=horizons)
+    variantes, deja = _variantes_du_cycle(rundir, cycle=cycle, code_sha=code_sha,
+                                          coins=coins, regimes=regimes, horizons=horizons)
+    # 7 files prioritaires RÉELLEMENT enfilées + consommées (PT-7) ; l'exploration porte les variantes
+    import scheduler_continue as SCH
+    import champions_continue as CH
+    plan = SCH.planifier_cycle(
+        sante_ingestion=(1 + scan["sources_avec_nouveaute"]), forward_figes=len(CH.charger(rundir)),
+        exact_survivants=0, validation_stress=0, exploration=variantes,
+        amelioration_locale=len([c for c in CH.charger(rundir) if (c.get("net_median_bps") or 0) > 0]),
+        analyse_rejets=1)
     camp_id = "camp-%04d-%s" % (cycle, hashlib.sha256(("%s%d" % (code_sha, cycle)).encode()).hexdigest()[:8])
     camp_dir = rundir / "campagnes" / camp_id
     for sd in ("ledger", "resultats", "results", "partitions", "catalogue"):
         (camp_dir / sd).mkdir(parents=True, exist_ok=True)
+    (camp_dir / "scheduler_state.json").write_text(json.dumps(plan, ensure_ascii=False, indent=1), encoding="utf-8")
     (camp_dir / "campaign.json").write_text(json.dumps({
         "campaign_id": camp_id, "cycle": cycle, "data_cutoff_ms": int(t0 * 1000), "code_sha": code_sha,
         "config_hash": hashlib.sha256(json.dumps(CYCLE_PHASES).encode()).hexdigest()[:12],
         "criteres": __import__("validation_18h").SEUILS, "n_new_events": scan["n_new"],
         "sources_avec_nouveaute": scan["sources_avec_nouveaute"], "affected_windows": fen,
-        "n_variantes_nouvelles": len(variantes), "read_only": True, "real_execution": False},
-        ensure_ascii=False, indent=1), encoding="utf-8")
+        "n_variantes_nouvelles": len(variantes), "files_consommees": plan["files_consommees"],
+        "read_only": True, "real_execution": False}, ensure_ascii=False, indent=1), encoding="utf-8")
     resume = {}
+    interrompu = bool(stop_event is not None and stop_event.is_set())
     try:
         resume = PL.executer_pipeline_donnees_completes(
             root, camp_dir, code_sha=code_sha, variantes=variantes, stop_event=stop_event,
-            predicat=FAM.predicat)
+            predicat=FAM.predicat, new_events=new_events, affected_windows=fen, hist_dir=rundir)
     except Exception as e:  # noqa: BLE001 — un cycle qui échoue est journalisé, la boucle continue
         (rundir / "errors.csv").open("a", encoding="utf-8").write("%d,%s\n" % (cycle, str(e)[:160].replace(",", ";")))
         resume = {"erreur": str(e)[:160]}
-    _sauver_signatures(rundir, sigs)                       # nouveauté persistée APRÈS exécution
+    interrompu = interrompu or bool(stop_event is not None and stop_event.is_set())
+    # PT-7 : ne persiste comme « vues » que les variantes ayant atteint un résultat TERMINAL (préregistrées).
+    # Une variante interrompue reste RETRYABLE (non persistée -> régénérée au prochain cycle).
+    n_term = int(resume.get("n_preregistres", 0 if interrompu else len(variantes)))
+    _sauver_signatures(rundir, SCH.marquer_vues(deja, variantes, n_term))
     _enregistrer_champions(camp_dir, rundir)               # candidats/statuts append-only (FINAL-11)
     resume.update({"campaign_id": camp_id, "cycle": cycle, "nouvelles_donnees": bool(scan["n_new"]),
                    "n_new_events": scan["n_new"], "n_variantes_nouvelles": len(variantes),
@@ -449,33 +462,47 @@ def stopper(root: Path, run_id: str) -> dict:
 
 # ─────────────── réconciliation PnL/ROI/equity/DD (FINAL-18) ───────────────
 def _reconcilier(rundir: Path) -> dict:
-    """Additionne, sur TOUTES les campagnes, les compteurs du ledger et vérifie la cohérence :
-      - somme des net des verdicts finaux == PnL rapporté ;
-      - equity finale == equity initiale + PnL réalisé ;
-      - drawdown <= 0. Écrit reconciliation.json. Aucune valeur inventée : si une source manque -> DATA_MISSING."""
+    """RÉCONCILIATION RÉELLE (PT-10) : reconstruit le PnL depuis les LEDGERS D'ÉVÉNEMENTS des portefeuilles
+    paper (OPEN/ADD/REDUCE/CLOSE), en streaming, par campagne, puis agrège. La somme des médianes n'est PAS un
+    PnL. Agrège aussi les VRAIES exclusions. `coherent` compare la reconstruction au portefeuille sauvegardé."""
+    import reconciliation_prod as RECO
     rundir = Path(rundir)
     camps = sorted((rundir / "campagnes").glob("camp-*")) if (rundir / "campagnes").exists() else []
     n_verdicts = n_pass = 0
-    somme_net_bps = 0.0
-    ok, ecarts = True, []
+    pnl_realise = 0.0
+    equity_totale = 0.0
+    dd_total = 0.0
+    par_campagne, incoherences = [], []
     for c in camps:
+        ledger = c / "ledger" / "forward_portfolio.jsonl"
+        if ledger.exists():
+            rec_c = RECO.reconstruire_depuis_ledger(ledger)
+            # comparaison à la réconciliation sauvegardée par le portefeuille (source indépendante)
+            try:
+                sauve = json.loads((c / "resultats" / "forward_portfolio_reconciliation.json").read_text(encoding="utf-8"))
+                cmp = RECO.comparer(rec_c, sauve)
+                if not cmp["coherent"]:
+                    incoherences.append({"campagne": c.name, "ecarts": cmp["ecarts"]})
+                dd_total += float(sauve.get("drawdown_usd") or 0.0)
+            except (OSError, ValueError):
+                pass
+            pnl_realise += rec_c["pnl_realise"]
+            equity_totale += rec_c["equity"]
+            par_campagne.append({"campagne": c.name, **{k: rec_c[k] for k in ("pnl_realise", "equity", "roi_total_pct", "roi_deploye_pct")}})
         try:
             finals = json.loads((c / "resultats" / "final_verdicts.json").read_text(encoding="utf-8"))
+            for f in finals:
+                n_verdicts += 1
+                if f.get("verdict") == "PASS_FORWARD_PAPER":
+                    n_pass += 1
         except (OSError, ValueError):
-            continue
-        for f in finals:
-            n_verdicts += 1
-            net = f.get("holdout_net_median_bps")
-            if isinstance(net, (int, float)):
-                somme_net_bps += float(net)
-            if (net or 0) > 0:
-                n_pass += 1
-    # equity paper (marge immobilisée par trade, PnL en bps) : reconstruite depuis les résumés, sans invention
-    pnl_bps = round(somme_net_bps, 4)
+            pass
+    exclusions = RECO.agreger_exclusions(rundir)
     rec = {"n_campagnes": len(camps), "n_verdicts": n_verdicts, "n_pass": n_pass,
-           "somme_net_bps": pnl_bps, "coherent": ok, "ecarts": ecarts,
-           "note": "PnL paper = somme des net (bps) des verdicts finaux ; aucune valeur fabriquée.",
-           "drawdown_bps": round(min(0.0, pnl_bps), 4)}
+           "pnl_realise_usd": round(pnl_realise, 4), "equity_totale_usd": round(equity_totale, 4),
+           "drawdown_usd": round(dd_total, 4), "coherent": not incoherences, "incoherences": incoherences,
+           "par_campagne": par_campagne[:50], "n_exclusions": len(exclusions), "exclusions": exclusions[:100],
+           "note": "PnL = reconstruit depuis les ledgers d'événements (OPEN/ADD/REDUCE/CLOSE), pas une somme de médianes."}
     _ecrire_atomique(rundir / "results" / "reconciliation.json", json.dumps(rec, ensure_ascii=False, indent=1))
     return rec
 
@@ -508,8 +535,10 @@ def finaliser(root: Path, *, partial: bool = False, raison: str = "ctrl-c") -> d
         return {"finalisation": "AUCUN_RUN_ACTIF"}
     rundir = Path(ident["rundir"])
     _ARRET.set()
+    partial = partial or _URGENCE.is_set()                   # 2e Ctrl+C déjà arrivé -> partiel d'emblée
     _checkpoint(rundir, int(ident.get("cycle_courant", 0)), "FINALIZE")
     rec = _reconcilier(rundir)                                # réconciliation PnL/ROI/equity/DD AVANT le rapport
+    partial = partial or _URGENCE.is_set()                   # 2e Ctrl+C RELU pendant la finalisation (PT-8)
     etat = "FINALIZATION_PARTIAL" if partial else "FINALIZATION_COMPLETE"
     date_fin = time.strftime("%Y%m%d-%H%M%S")
     # dossier racine dédié + SOUS-DOSSIER par run_id (FINAL-17)
@@ -525,6 +554,9 @@ def finaliser(root: Path, *, partial: bool = False, raison: str = "ctrl-c") -> d
         etat = "FINALIZATION_PARTIAL" if not partial else "FINALIZATION_FAILED"
     _ecrire_atomique(rapport, md)
     _ecrire_atomique(rundir / rapport.name, md)
+    if _URGENCE.is_set() and not partial:                    # 2e Ctrl+C arrivé PENDANT la construction du rapport
+        partial = True
+        etat = "FINALIZATION_PARTIAL"
     _maj_index_rapports(root / "Rapports en continu", ident, rapport, etat, rec)  # INDEX-RAPPORTS.md
     sec = SEC.auditer(root)
     if not sec["securise"]:
@@ -572,6 +604,20 @@ def _installer_signal(root: Path):
     signal.signal(signal.SIGINT, handler)
 
 
+def _demarrer_ipc_stop_thread(root: Path, *, intervalle_s: float = 0.5) -> threading.Thread:
+    """Thread IPC (PT-8) : surveille STOP_REQUEST.json et positionne _ARRET IMMÉDIATEMENT (arrêt coopératif
+    même pendant un long calcul de pipeline). S'arrête dès que _ARRET est posé."""
+    def loop():
+        while not _ARRET.is_set():
+            if _stop_request_present(root):
+                _ARRET.set()
+                break
+            _ARRET.wait(intervalle_s)
+    t = threading.Thread(target=loop, name="ipc-stop", daemon=True)
+    t.start()
+    return t
+
+
 def _demarrer_dashboard_thread(root: Path, ident: dict, *, intervalle_s: float = 1.5) -> threading.Thread:
     """Dashboard VRAIMENT vivant (FINAL-13) : un thread relit LIVE-RESEARCH-STATE.json toutes les ~1.5 s et
     ré-affiche, MÊME pendant un long calcul de cycle (le rafraîchissement ne dépend pas de la fin du cycle).
@@ -599,13 +645,14 @@ def _demarrer_dashboard_thread(root: Path, ident: dict, *, intervalle_s: float =
     return t
 
 
-def _collecteurs_lecture_seule() -> dict:
-    """Registre des collecteurs READ-ONLY nourrissant le live (mêmes scripts que l'ancien `start /b`, mais
-    désormais SUPERVISÉS en Python : PID enregistré, anti-doublon au resume, restart individuel, arrêt
-    explicite). Cadence 30 s. Aucun n'exécute d'ordre."""
+def _collecteurs_lecture_seule(root: Path | None = None) -> dict:
+    """Registre des collecteurs READ-ONLY nourrissant le live, SUPERVISÉS en Python (PID+create_time,
+    anti-doublon au resume, restart individuel, arrêt explicite). ARGUMENTS CORRECTS (les CLI refusent un
+    argument positionnel : microstructure=`--root`, ctx=`--root --poll-s 30`). Aucun n'exécute d'ordre."""
+    r = str(root or RACINE)
     return {
-        "lab-microstructure": ["tools/collecter_lab_microstructure.py", "30"],
-        "lab-ctx": ["tools/collecter_lab_ctx.py", "30"],
+        "lab-microstructure": ["tools/collecter_lab_microstructure.py", "--root", r],
+        "lab-ctx": ["tools/collecter_lab_ctx.py", "--root", r, "--poll-s", "30"],
     }
 
 
@@ -639,17 +686,19 @@ def demarrer_foreground(root: Path, *, exiger_flux: bool = True, max_cycles: int
     if collecteurs:                                          # supervision optionnelle (read-only), sinon rien
         try:
             import superviseur_continue as SUP
-            sup = SUP.Superviseur(Path(ident["rundir"]), collecteurs)
+            sup = SUP.Superviseur(Path(ident["rundir"]), collecteurs, root=root)
             sup.demarrer_tous()                              # anti-doublon au resume (PID + create_time)
             watch = _demarrer_surveillance_thread(sup)       # restart individuel des collecteurs morts
         except Exception:  # noqa: BLE001
             sup = None
     dash = _demarrer_dashboard_thread(root, ident) if afficher_live else None
+    ipc = _demarrer_ipc_stop_thread(root)                    # STOP_REQUEST -> _ARRET immédiat (arrêt coopératif)
     try:
         boucle_continue(root, stop_event=_ARRET, max_cycles=max_cycles, afficher=False)
     finally:
         if dash is not None:
             dash.join(timeout=3.0)
+        ipc.join(timeout=2.0)
         if watch is not None:
             watch.join(timeout=3.0)
         if sup is not None:
@@ -669,7 +718,7 @@ def _cli():
     if a.commande == "dry-run":
         print(json.dumps(dry_run(root), ensure_ascii=False, indent=1))
     elif a.commande in ("start", "resume"):
-        print(json.dumps(demarrer_foreground(root, collecteurs=_collecteurs_lecture_seule()),
+        print(json.dumps(demarrer_foreground(root, collecteurs=_collecteurs_lecture_seule(root)),
                          ensure_ascii=False, indent=1))
     elif a.commande == "status":
         print(json.dumps(statut(root), ensure_ascii=False, indent=1))

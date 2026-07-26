@@ -164,11 +164,14 @@ def construire(rundir, ident, *, final: bool = True, partial: bool = False, reto
     L.append("## 22-25. Matrices (voir CSV)\n- horizon_matrix.csv · regime_matrix.csv · pnl_by_coin.csv\n")
     # ── réconciliation PnL/ROI/equity/DD ──
     rec = _lire(rundir / "results" / "reconciliation.json", {})
-    L.append("## 26. Réconciliation PnL / ROI / equity / drawdown")
+    L.append("## 26. Réconciliation PnL / ROI / equity / drawdown (reconstruite depuis les ledgers d'événements)")
     if rec:
-        L.append("- campagnes **%s** · verdicts **%s** · PASS **%s** · somme net **%s bps** · drawdown **%s bps** · cohérent **%s**" % (
-            rec.get("n_campagnes"), rec.get("n_verdicts"), rec.get("n_pass"), rec.get("somme_net_bps"),
-            rec.get("drawdown_bps"), rec.get("coherent")))
+        L.append("- campagnes **%s** · verdicts **%s** · PASS forward **%s** · PnL réalisé **%s $** · equity totale **%s $** · drawdown **%s $** · cohérent **%s**" % (
+            rec.get("n_campagnes"), rec.get("n_verdicts"), rec.get("n_pass"), rec.get("pnl_realise_usd"),
+            rec.get("equity_totale_usd"), rec.get("drawdown_usd"), rec.get("coherent")))
+        if rec.get("incoherences"):
+            L.append("- ⚠️ incohérences ledger↔portefeuille : %s (jamais masquées)" % len(rec["incoherences"]))
+        L.append("- exclusions réelles agrégées : **%s** (voir reconciliation.json)" % rec.get("n_exclusions", 0))
         L.append("- %s\n" % rec.get("note", ""))
     else:
         L.append("- réconciliation indisponible (aucune campagne finalisée) — DATA_MISSING honnête.\n")
@@ -191,7 +194,12 @@ def construire(rundir, ident, *, final: bool = True, partial: bool = False, reto
     L.append("---\n**Sécurité : 0 ordre réel · 0 argent réel · 0 clé privée · 0 signature · 0 dépôt/retrait.**")
     md = "\n".join(L) + "\n"
     if retourner_exclusions:
-        return md, []
+        try:
+            import reconciliation_prod as RECO
+            exclusions = RECO.agreger_exclusions(rundir)      # VRAIES exclusions (jamais [] par défaut si présentes)
+        except Exception:  # noqa: BLE001
+            exclusions = []
+        return md, exclusions
     return md
 
 

@@ -109,6 +109,49 @@ def score_multicritere(m: dict) -> float:
     return round(bonus - penal, 4)
 
 
+def marquer_vues(deja: set, variantes: list, n_terminales: int) -> set:
+    """Ajoute à `deja` UNIQUEMENT les signatures des variantes ayant atteint un résultat TERMINAL
+    (`variantes[:n_terminales]`). Les variantes au-delà (non traitées, ex. interruption) restent RETRYABLE :
+    leur signature n'est PAS persistée -> elles seront régénérées au prochain cycle."""
+    d = set(deja)
+    for v in variantes[:max(0, int(n_terminales))]:
+        d.add(signature_canonique(v))
+    return d
+
+
+def planifier_cycle(*, sante_ingestion: int, forward_figes: int, exact_survivants: int,
+                    validation_stress: int, exploration: list, amelioration_locale: int,
+                    analyse_rejets: int) -> dict:
+    """Instancie un ResearchScheduler et ENFILE réellement des tâches dans les 7 files, puis les DÉFILE par
+    priorité (la file la plus prioritaire non vide d'abord). Rend l'ordre de consommation + le compte par file
+    -> preuve que les 7 files sont vivantes (pas décoratives). `exploration` porte les variantes à tester."""
+    sc = ResearchScheduler()
+    for _ in range(max(0, sante_ingestion)):
+        sc.enfiler("ingestion_sante", {"tache": "verifier_ingestion"})
+    for _ in range(max(0, forward_figes)):
+        sc.enfiler("forward_figes", {"tache": "forward_paper_champion"})
+    for _ in range(max(0, exact_survivants)):
+        sc.enfiler("exact_survivants", {"tache": "exact_replay"})
+    for _ in range(max(0, validation_stress)):
+        sc.enfiler("validation_stress", {"tache": "validation"})
+    for v in (exploration or []):
+        sc.enfiler("exploration_familles", {"tache": "tester_variante", "variante": v})
+    for _ in range(max(0, amelioration_locale)):
+        sc.enfiler("amelioration_locale", {"tache": "raffiner_plateau"})
+    for _ in range(max(0, analyse_rejets)):
+        sc.enfiler("analyse_rejets", {"tache": "analyser_refus"})
+    tailles_avant = sc.taille()
+    ordre, par_file = [], {f: 0 for f in FILES}
+    while not sc.vide():
+        t = sc.defiler()
+        ordre.append(t["file"])
+        par_file[t["file"]] += 1
+    consommees = [f for f in FILES if par_file[f] > 0]
+    return {"tailles_enfilees": tailles_avant, "par_file_consommee": par_file,
+            "files_consommees": consommees, "ordre_debut": ordre[:12],
+            "toutes_consommees": all(par_file[f] > 0 for f in FILES)}
+
+
 class ResearchScheduler:
     """7 files prioritaires. On enfile des tâches, on défile toujours la file la plus prioritaire non vide.
     Le moteur ne reste jamais inactif : s'il n'y a pas de nouvelle donnée, les files exploration/amélioration/

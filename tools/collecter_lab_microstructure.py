@@ -225,16 +225,30 @@ def _charger_univers(root: Path, *, k: int = UNIVERS_K) -> list[str]:
     return blanche[:k]
 
 
-def main(argv=None) -> int:  # pragma: no cover
+def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description="Collecteur WS microstructure dense isolé (read-only).")
     ap.add_argument("--root", default=str(RACINE))
     ap.add_argument("--coins", default="")
+    ap.add_argument("--une-passe", action="store_true",
+                    help="mode borné : écrit un heartbeat + prépare l'univers, sans se connecter au WS (test/offline)")
     a = ap.parse_args(argv)
-    coins = [c for c in a.coins.split(",") if c] or _charger_univers(Path(a.root))
+    root = Path(a.root)
+    try:
+        import heartbeat_collecteur as HB
+    except Exception:  # noqa: BLE001
+        HB = None
+    coins = [c for c in a.coins.split(",") if c] or _charger_univers(root)
+    if a.une_passe:                                          # borné : prouve le CLI + heartbeat, sans WS (offline-safe)
+        if HB is not None:
+            HB.battre(root, "lab-microstructure", note="une-passe: %d coins prets" % len(coins))
+        print("[micro] une-passe: %d coins prets (%s)" % (len(coins), ",".join(coins[:5])), flush=True)
+        return 0
+    if HB is not None:
+        HB.battre(root, "lab-microstructure", note="connexion WS %d coins" % len(coins))
     print("[micro] connexion HL WS, %d coins: %s" % (len(coins), ",".join(coins)), flush=True)
     try:
         import asyncio
-        asyncio.run(_boucle_ws(Path(a.root), coins))
+        asyncio.run(_boucle_ws(root, coins))
     except KeyboardInterrupt:
         print("[micro] arret manuel", flush=True)
     return 0

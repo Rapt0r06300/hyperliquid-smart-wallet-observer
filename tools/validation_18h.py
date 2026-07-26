@@ -23,8 +23,27 @@ from hl_observer.research_parallel import validation as VAL  # noqa: E402
 
 #: seuils SCELLÉS avant le holdout (aucun assoupli après lecture).
 SEUILS = {"pf_min": 1.2, "dsr_min": 0.95, "pbo_max": 0.20, "net_median_min_bps": 0.0,
-          "min_episodes": 30, "placebo_marge_bps": 2.0}
+          "min_episodes": 30, "placebo_marge_bps": 2.0, "drawdown_max_bps": 60.0, "stress_extra_bps": 3.0}
 FRACTIONS = {"discovery": 0.55, "validation": 0.20, "holdout": 0.25}
+
+#: métriques que le gate exige RÉELLEMENT calculées ; None = non calculée -> DATA_MISSING (jamais PASS fabriqué).
+METRIQUES_REQUISES = ("pf_oos", "dsr", "pbo", "ic_bas_bps", "stress_survit", "plateau",
+                      "un_seul_coin_dominant", "drawdown_borne", "capacite_non_nulle",
+                      "ledger_reconcilie", "securite_verte")
+
+
+def max_drawdown_bps(nets_ordonnes) -> float | None:
+    """Drawdown maximal (bps) d'une courbe d'equity cumulée depuis une séquence de net (bps) ORDONNÉE dans le
+    temps. None si vide. Valeur >= 0 (0 = jamais sous le pic)."""
+    seq = [x for x in nets_ordonnes if isinstance(x, (int, float))]
+    if not seq:
+        return None
+    equity, pic, dd = 0.0, 0.0, 0.0
+    for x in seq:
+        equity += x
+        pic = max(pic, equity)
+        dd = max(dd, pic - equity)
+    return round(dd, 4)
 
 
 # ─────────── partitions anti-fuite ───────────
@@ -181,6 +200,12 @@ def gate(candidat: dict, *, seuils: dict | None = None) -> dict:
         return {"verdict": "DATA_MISSING", "raisons": ["net OOS absent"]}
     if not candidat.get("holdout_vu"):
         return {"verdict": "RESEARCH_ONLY", "raisons": ["holdout non consulté (positif discovery seul)"]}
+    # net POSITIF mais une métrique requise NON calculée -> DATA_MISSING (jamais un PASS fabriqué).
+    # (net <= 0 continue vers KILL : pas d'edge, quelle que soit la métrique manquante.)
+    if nm > s["net_median_min_bps"]:
+        manquantes = [k for k in METRIQUES_REQUISES if candidat.get(k) is None]
+        if manquantes:
+            return {"verdict": "DATA_MISSING", "raisons": ["métriques non calculées: " + ",".join(manquantes)]}
     def chk(cond, msg):
         if not cond:
             raisons.append(msg)

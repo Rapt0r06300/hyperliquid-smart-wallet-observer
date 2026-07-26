@@ -194,14 +194,30 @@ def main(argv=None) -> int:
     root = Path(a.root)
     ISO.preparer(root)
     etats: dict = {}
+    try:
+        import heartbeat_collecteur as HB
+    except Exception:  # noqa: BLE001
+        HB = None
+    if HB is not None:
+        HB.battre(root, "lab-ctx", note="demarrage")         # battement AVANT toute I/O réseau (liveness immédiate)
+
+    def _passe():
+        res = une_passe(root, etats=etats)
+        if HB is not None:                                   # battement à CHAQUE passe (même si réseau KO)
+            n = sum(v for v in res.values() if isinstance(v, int))
+            HB.battre(root, "lab-ctx", n_ecrites=n, note=str(res)[:100])
+        return res
+
     if a.une_passe:
-        print("[lab_ctx] %s" % une_passe(root, etats=etats), flush=True)
+        print("[lab_ctx] %s" % _passe(), flush=True)
         return 0
     while True:
         try:
-            print("[lab_ctx] %s" % une_passe(root, etats=etats), flush=True)
+            print("[lab_ctx] %s" % _passe(), flush=True)
         except Exception as e:  # noqa: BLE001
             print("[lab_ctx] passe KO: %s" % e, flush=True)
+            if HB is not None:
+                HB.battre(root, "lab-ctx", note="passe KO: %s" % str(e)[:60])
         time.sleep(a.poll_s)
 
 
