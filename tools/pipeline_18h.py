@@ -350,33 +350,32 @@ def phase_holdout_forward(rundir: Path, corpus_hold: list[dict], corpus_fwd: lis
     with (rundir / "ledger" / "forward_paper.jsonl").open("w", encoding="utf-8") as f:
         for e in lignes_fwd:
             f.write(json.dumps(e, ensure_ascii=False) + "\n")
-    # PT-5 : VRAI portefeuille paper à capital PARTAGÉ (position_id, OPEN/CLOSE, expositions simultanées,
-    # equity/DD, réconciliation) — la source de vérité du PnL forward.
+    # GR-2 : ce PRÉ-FORWARD (archive, post-gel) est DIAGNOSTIC UNIQUEMENT. Il tourne sur un portefeuille paper
+    # LOCAL et n'alimente JAMAIS le portefeuille GLOBAL du run (ni son PnL/ROI/DD). Le portefeuille GLOBAL n'est
+    # alimenté que par le VRAI live (épisodes CanonicalStore FWD_BOOK reçus après freeze_exchange_ts), câblé dans
+    # recherche_continue._suivi_candidats_live. `portefeuille_global_dir` est donc ignoré ici (volontairement).
     reco_pf = None
     try:
         import forward_portefeuille as FPF
         import moteur_execution_prod as MEP
-        pfg = None
-        if portefeuille_global_dir is not None:              # AF-P3 : UN portefeuille GLOBAL vivant du run
-            from portefeuille_global import PortefeuilleGlobal
-            pfg = PortefeuilleGlobal(portefeuille_global_dir)
-            pending_path = Path(portefeuille_global_dir) / "pending_exits.json"    # FX-6 : sorties persistées (reprise crash)
-        else:
-            pending_path = rundir / "ledger" / "pending_exits.json"
+        from portefeuille_paper import PortefeuillePaper
+        pf_local = PortefeuillePaper(1000.0, levier=3.0)      # LOCAL : diagnostic pré-forward, jamais le global
+        pending_path = rundir / "ledger" / "pending_exits.json"
         sim = FPF.simuler(geles, corpus_fwd, filtrer=_filtrer_corpus,
                           evaluer=lambda ep, sens, horizon_ms: MEP.evaluer_episode(ep, sens=sens, horizon_ms=horizon_ms),
-                          portefeuille=pfg, pending_path=pending_path)
-        if hasattr(sim["portefeuille"], "ecrire_ledger"):    # portefeuille local -> on écrit son ledger de campagne
+                          portefeuille=pf_local, pending_path=pending_path)
+        if hasattr(sim["portefeuille"], "ecrire_ledger"):    # ledger de campagne (diagnostic), séparé du global
             sim["portefeuille"].ecrire_ledger(rundir / "ledger" / "forward_portfolio.jsonl")
         reco_pf = sim["reconciliation"]
         (rundir / "resultats" / "forward_portfolio_reconciliation.json").write_text(
             json.dumps({**reco_pf, "n_signaux": sim["n_signaux"], "n_ouverts": sim["n_ouverts"],
-                        "n_refuses": sim["n_refuses"]}, ensure_ascii=False, indent=1), encoding="utf-8")
+                        "n_refuses": sim["n_refuses"], "pre_forward_diagnostic": True,
+                        "alimente_global": False}, ensure_ascii=False, indent=1), encoding="utf-8")
     except Exception as e:  # noqa: BLE001 — le portefeuille ne doit pas casser le pipeline, mais l'erreur est visible
         (rundir / "resultats" / "forward_portfolio_reconciliation.json").write_text(
             json.dumps({"erreur": str(e)[:200]}, ensure_ascii=False), encoding="utf-8")
     return {"n_holdout": len(hold), "n_forward_events": len(lignes_fwd), "holdout": hold,
-            "forward_portfolio_reconciliation": reco_pf}
+            "forward_portfolio_reconciliation": reco_pf, "pre_forward_diagnostic": True}
 
 
 # ─────────────── réconciliation + verdicts finaux ───────────────

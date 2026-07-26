@@ -311,6 +311,77 @@ def test_capture_dernier_run_lance(tmp_path):
     assert RC._lire_dernier_run_lance(tmp_path) == "rcont-abc123"
 
 
+# ═══════════════ GR-1 — suivi live CUMULATIF (dédup id, cumul multi-cycles, cycle vide sans reset) ═══════
+def test_suivi_live_cumule_et_deduplique(tmp_path):
+    reg = RCL.RegistreCandidatsLive(tmp_path)
+    reg.figer("c1", freeze_exchange_ts=0.0)
+    reg.suivre("c1", paires=[("e1", 10.0), ("e2", -4.0)])
+    reg.suivre("c1", paires=[("e2", -4.0), ("e3", 6.0)])     # e2 DÉJÀ vu -> dédup par episode_id
+    c = reg.etat["c1"]
+    assert c["n_episodes_live"] == 3 and c["pnl_live_bps"] == 12.0   # cumul 10-4+6 ; e2 non recompté
+    assert c["dd_live_bps"] >= 0.0 and c["last_forward_event_id"] == "e3"
+    reg.suivre("c1", paires=[], maintenant_ms=100.0)         # cycle VIDE -> AUCUN reset
+    c2 = reg.etat["c1"]
+    assert c2["n_episodes_live"] == 3 and c2["pnl_live_bps"] == 12.0 and c2["duree_live_ms"] == 100.0
+
+
+def test_suivi_live_cumul_survit_aux_cycles(tmp_path):
+    RCL.RegistreCandidatsLive(tmp_path).figer("c1", freeze_exchange_ts=0.0)
+    RCL.RegistreCandidatsLive(tmp_path).suivre("c1", paires=[("a", 5.0)])   # nouvelle instance = nouveau cycle
+    RCL.RegistreCandidatsLive(tmp_path).suivre("c1", paires=[("b", 5.0)])
+    assert RCL.RegistreCandidatsLive(tmp_path).etat["c1"]["n_episodes_live"] == 2   # cumul persistant
+
+
+# ═══════════════ GR-2 — pré-forward diagnostic n'alimente PAS le global ═══════════════
+def test_pre_forward_ne_nourrit_pas_le_portefeuille_global(tmp_path):
+    rd = tmp_path / "rd"
+    PL.executer_pipeline_complet(tmp_path, rd, PL.corpus_fixtures(), code_sha="gr2",
+                                 portefeuille_global_dir=(rd / "global_portfolio"))
+    # le PRÉ-FORWARD (archive) ne crée JAMAIS le ledger du portefeuille global
+    assert not (rd / "global_portfolio" / "ledger.jsonl").exists()
+    r = json.loads((rd / "resultats" / "forward_portfolio_reconciliation.json").read_text(encoding="utf-8"))
+    assert r.get("alimente_global") is False and r.get("pre_forward_diagnostic") is True
+
+
+# ═══════════════ GR-4 — Hyperband/SuccessiveHalving : ressource RÉELLEMENT croissante ═══════════════
+def test_ladder_ressource_strictement_croissante():
+    assert list(OUT.RESSOURCE_LADDER) == sorted(OUT.RESSOURCE_LADDER) and len(set(OUT.RESSOURCE_LADDER)) >= 4
+
+
+def test_hyperband_utilise_ressource_croissante_reelle():
+    import importlib
+    if importlib.util.find_spec("optuna") is None:
+        import pytest
+        pytest.skip("optuna absent — samplers/pruners avancés indisponibles (honnête)")
+    budgets_vus = []
+    def _eval(params, budget=1.0):
+        budgets_vus.append(round(float(budget), 3))
+        return {"net_median_bps": 5.0 * budget, "pf": 1.1, "n": int(100 * budget)}
+    r = OUT.optimiser(_eval, {"x": [0, 1, 2]}, outil="hyperband", n_trials=4)
+    assert r["disponible"] and r["lance"] and r["pruner"] == "HyperbandPruner"
+    assert r.get("ressource_croissante") == list(OUT.RESSOURCE_LADDER)
+    assert 0.2 in budgets_vus and max(budgets_vus) > min(budgets_vus)      # étapes à budget CROISSANT
+    assert len(set(budgets_vus)) >= 2                                       # pas 4x exactement le même calcul
+
+
+def test_successive_halving_disponible_avec_optuna():
+    import importlib
+    if importlib.util.find_spec("optuna") is None:
+        import pytest
+        pytest.skip("optuna absent")
+    r = OUT.optimiser(lambda p, budget=1.0: {"net_median_bps": 3.0, "pf": 1.0, "n": 10},
+                      {"x": [0, 1]}, outil="successive_halving", n_trials=3)
+    assert r["disponible"] and r["pruner"] == "SuccessiveHalvingPruner" and r.get("ressource_croissante")
+
+
+# ═══════════════ GR-3 — CMD durci : effacement du pointeur de run ═══════════════
+def test_effacer_dernier_run_lance(tmp_path):
+    RC._ecrire_dernier_run_lance(tmp_path, "rcont-x")
+    assert RC._lire_dernier_run_lance(tmp_path) == "rcont-x"
+    RC._effacer_dernier_run_lance(tmp_path)
+    assert RC._lire_dernier_run_lance(tmp_path) == ""        # effacé -> le CMD ne vérifiera jamais un ancien run
+
+
 # ═══════════════ FX-10 — CI + recette Windows livrées ═══════════════
 def test_livrables_ci_et_recette_presents():
     assert (RACINE / ".github" / "workflows" / "labo-continu-ci.yml").exists()

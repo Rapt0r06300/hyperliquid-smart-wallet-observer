@@ -61,13 +61,17 @@ goto :fin
 echo === DEMARRAGE D'UN NOUVEAU LABO CONTINU (Ctrl+C = arret propre + rapport final) ===
 echo === Collecteurs lecture-seule SUPERVISES par Python (PID, anti-doublon, restart, arret explicite). ===
 echo === Le moteur tourne AU PREMIER PLAN. Appuie sur Ctrl+C quand tu veux le rapport final. ===
+del /q "runtime\research_lab\continuous\DERNIER_RUN_LANCE.txt" 2>nul
 python tools\recherche_continue.py start
+if errorlevel 1 ( echo [ECHEC] Demarrage KO ^(precheck/securite^) - AUCUN run a verifier. & goto :fin )
 goto :postrun
 
 :resume
 echo === REPRISE DU LABO EXISTANT (Ctrl+C = arret propre + rapport final) ===
 echo === Le moteur tourne AU PREMIER PLAN. Appuie sur Ctrl+C quand tu veux le rapport final. ===
+del /q "runtime\research_lab\continuous\DERNIER_RUN_LANCE.txt" 2>nul
 python tools\recherche_continue.py resume
+if errorlevel 1 ( echo [ECHEC] Reprise KO ^(aucun run a reprendre^) - AUCUN run a verifier. & goto :fin )
 goto :postrun
 
 :postrun

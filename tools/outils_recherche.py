@@ -18,6 +18,8 @@ SAMPLERS_OPTUNA = {"tpe": "TPESampler", "cma_es": "CmaEsSampler", "nsga2": "NSGA
 PRUNERS_OPTUNA = {"successive_halving": "SuccessiveHalvingPruner", "hyperband": "HyperbandPruner"}
 #: nsga2 est MULTI-OBJECTIFS (plusieurs objectifs, pas un score scalaire unique).
 MULTI_OBJECTIF = {"nsga2"}
+#: échelle de RESSOURCE croissante des pruners (part des données par étape) — Successive Halving / Hyperband.
+RESSOURCE_LADDER = (0.2, 0.4, 0.6, 0.8, 1.0)
 
 
 def _optuna():
@@ -101,9 +103,14 @@ def optimiser(evaluer_params, espace: dict, *, outil: str = "random", n_trials: 
             "trials_prunes": 0, "trials_echoues": 0, "meilleur": None, "meilleur_score": None, "cpu_s": 0.0}
     rng = random.Random(seed)
 
-    def _eval(params):
+    def _eval(params, budget: float = 1.0):
+        """Évalue `params`. `budget` in (0,1] = part CROISSANTE des données allouée (pour Hyperband/Successive
+        Halving). Transmis à evaluer_params s'il l'accepte, sinon ignoré (repli honnête)."""
         try:
-            m = evaluer_params(params)
+            try:
+                m = evaluer_params(params, budget=budget)     # évaluateur conscient de la ressource
+            except TypeError:
+                m = evaluer_params(params)                    # évaluateur simple (budget ignoré)
             return objectif_multicritere(m), m
         except Exception:  # noqa: BLE001
             return None, None
@@ -188,23 +195,29 @@ def optimiser(evaluer_params, espace: dict, *, outil: str = "random", n_trials: 
                          "sampler": nm, "pruner": pn})
             return base
 
-        # 4) mono-objectif (tpe / cma_es / qmc / pruners). Les pruners exigent des rapports intermédiaires.
+        # 4) mono-objectif (tpe / cma_es / qmc / pruners). Les PRUNERS montent en RESSOURCE : chaque étape évalue
+        #    sur une part CROISSANTE des données (budget 0.2 -> 1.0), PAS quatre fois le même calcul. C'est le
+        #    principe de Successive Halving / Hyperband (allocation de budget croissante + élagage).
         study = opt.create_study(direction="maximize", sampler=sampler, pruner=pruner, storage=storage,
                                  study_name="af_%s" % outil, load_if_exists=True)
 
         def _obj(trial):
             params = _suggest(trial)
             dernier = None
-            for step in range(4):                            # étapes -> le pruner peut réellement élaguer
-                sc, _ = _eval(params)
-                if sc is None:
-                    raise opt.TrialPruned()
-                dernier = sc
-                if pruner is not None:
-                    trial.report(sc, step)
+            if pruner is not None:
+                for step, frac in enumerate(RESSOURCE_LADDER):
+                    sc, _ = _eval(params, budget=frac)        # RESSOURCE croissante (plus de données à chaque étape)
+                    if sc is None:
+                        raise opt.TrialPruned()
+                    dernier = sc
+                    trial.report(sc, step)                    # `step` = niveau de ressource (0..N), croissant
                     if trial.should_prune():
                         raise opt.TrialPruned()
-            return dernier
+                return dernier
+            sc, _ = _eval(params, budget=1.0)                 # sampler pur (pas de pruner) : budget plein
+            if sc is None:
+                raise opt.TrialPruned()
+            return sc
 
         study.optimize(_obj, n_trials=n_trials, catch=(Exception,))
         etats = [t.state.name for t in study.trials]
@@ -214,7 +227,8 @@ def optimiser(evaluer_params, espace: dict, *, outil: str = "random", n_trials: 
                      "meilleur_score": (round(study.best_value, 4) if study.best_trial else None),
                      "meilleur": ({"params": study.best_params} if study.best_trial else None),
                      "cpu_s": round(time.time() - t0, 4), "storage": storage,
-                     "sampler": nm, "pruner": pn})
+                     "sampler": nm, "pruner": pn,
+                     "ressource_croissante": (list(RESSOURCE_LADDER) if pn else None)})
         return base
     except Exception as e:  # noqa: BLE001
         return {**base, "disponible": True, "lance": False, "raison": "erreur optuna: %s" % str(e)[:120]}
@@ -230,5 +244,5 @@ def lancer_registre(evaluer_params, espace: dict, *, n_trials: int = 16, storage
             "n_avec_trials_reels": sum(1 for v in res.values() if (v.get("trials_termines") or 0) > 0)}
 
 
-__all__ = ["OUTILS", "SAMPLERS_OPTUNA", "PRUNERS_OPTUNA", "MULTI_OBJECTIF", "disponibilite",
-           "objectif_multicritere", "optimiser", "lancer_registre"]
+__all__ = ["OUTILS", "SAMPLERS_OPTUNA", "PRUNERS_OPTUNA", "MULTI_OBJECTIF", "RESSOURCE_LADDER",
+           "disponibilite", "objectif_multicritere", "optimiser", "lancer_registre"]

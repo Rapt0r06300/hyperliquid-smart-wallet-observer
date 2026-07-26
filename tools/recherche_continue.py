@@ -408,10 +408,14 @@ def _outils_recherche(rundir: Path, camp_dir: Path) -> dict:
         import pipeline_18h as PL
         import statistics
         corp, corp_source = _corpus_reel_du_run(rundir)        # FX-3 : corpus RÉEL du run, plus de fixtures en prod
-        def _eval(params):
+        def _eval(params, budget: float = 1.0):
+            # GR-4 : `budget` in (0,1] = part CROISSANTE des données (Hyperband/Successive Halving alloue plus
+            # d'événements à chaque étape). On coupe le corpus au prorata (au moins 8 épisodes pour rester mesurable).
             sens = 1 if params.get("direction", 1) >= 0 else -1
             h = int(params.get("horizon_ms", 1000))
-            nets = PL._nets_promo(PL.nets_exact(corp, sens=sens, horizon_ms=h))
+            n_budget = max(8, int(len(corp) * max(0.0, min(1.0, float(budget)))))
+            sous = corp[:n_budget]
+            nets = PL._nets_promo(PL.nets_exact(sous, sens=sens, horizon_ms=h))
             nm = statistics.median(nets) if nets else -50.0
             pf = PL._profit_factor(nets) if nets else 0.0
             return {"net_median_bps": nm, "pf": (pf if isinstance(pf, (int, float)) else 1.0), "n": len(nets)}
@@ -427,13 +431,18 @@ def _outils_recherche(rundir: Path, camp_dir: Path) -> dict:
 
 
 def _suivi_candidats_live(rundir: Path, prets_live: list) -> dict:
-    """FX-5 : registre RUN-LEVEL des candidats figés. Fige les champions (freeze_exchange_ts immuable), puis suit
-    TOUS les candidats (y compris ceux des cycles précédents) sur les seuls épisodes live arrivés APRÈS leur gel.
-    Une pépite « positive en live » n'utilise donc jamais un épisode d'avant-gel. Défensif."""
+    """FX-5 + GR-1/GR-2 : registre RUN-LEVEL des candidats figés, suivi CUMULATIF et alimentation du portefeuille
+    GLOBAL depuis le SEUL vrai live. Fige les champions (freeze immuable), puis, pour chaque candidat (y compris
+    des cycles précédents), ne prend que les NOUVEAUX épisodes live FWD_BOOK arrivés APRÈS son freeze_exchange_ts
+    (dédup par episode_id) : (1) cumule PnL/ROI/DD/n_episodes ; (2) OUVRE/FERME dans le portefeuille GLOBAL. Le
+    pré-forward historique (archive) n'alimente JAMAIS ce portefeuille. Un cycle vide ne remet rien à zéro."""
     try:
         import registre_candidats_live as RCL
         import champions_continue as CH
         import pipeline_18h as PL
+        import portefeuille_global as PG
+        import forward_portefeuille as FPF
+        import moteur_execution_prod as MEP
         reg = RCL.RegistreCandidatsLive(rundir)
         maintenant = max((float(e.get("ts_ms", 0)) for e in (prets_live or [])), default=0.0)
         # 1) figer les champions courants (freeze_exchange_ts = instant live courant ; immuable une fois posé)
@@ -443,15 +452,30 @@ def _suivi_candidats_live(rundir: Path, prets_live: list) -> dict:
                 reg.figer(cid, freeze_exchange_ts=maintenant,
                           meta={"direction": c["direction"], "horizon_ms": c["horizon_ms"],
                                 "coin": c.get("coin"), "family": c.get("family")})
-        # 2) suivre chaque candidat sur SES épisodes admissibles (STRICTEMENT après son propre freeze)
+        gp_dir = rundir / "global_portfolio"                 # le SEUL portefeuille global du run (alimenté LIVE only)
+        pfg = PG.PortefeuilleGlobal(gp_dir)
+        gp_pending = gp_dir / "pending_exits.json"
+        _ev = lambda ep, sens, horizon_ms: MEP.evaluer_episode(ep, sens=sens, horizon_ms=horizon_ms)
+        _passe = lambda corp, coin=None, regime=None: corp
+        # 2) suivre + alimenter le global sur les NOUVEAUX épisodes admissibles (strictement après le gel)
         for c in reg.candidats():
-            adm = reg.episodes_admissibles(c["candidate_id"], prets_live)
-            coin = (c.get("meta") or {}).get("coin")
+            cid = c["candidate_id"]; meta = c.get("meta") or {}
+            coin = meta.get("coin"); direction = meta.get("direction") or 1; h = meta.get("horizon_ms") or 1000
+            adm = reg.episodes_admissibles(cid, prets_live)   # STRICTEMENT après SON freeze
             sous = [e for e in adm if (not coin or e.get("coin") == coin)]
-            nets = PL._nets_promo(PL.nets_exact(sous, sens=(c["meta"].get("direction") or 1),
-                                                horizon_ms=(c["meta"].get("horizon_ms") or 1000)))
-            dernier = (adm[-1].get("event_id") or adm[-1].get("episode_id")) if adm else None
-            reg.suivre(c["candidate_id"], nets_live=nets, last_event_id=dernier, maintenant_ms=maintenant)
+            vus_before = set(c.get("vus") or [])
+            nouveaux = [e for e in sous if (e.get("episode_id") or e.get("event_id")) not in vus_before]
+            # nets PAR ÉPISODE (objets, même longueur que `nouveaux` -> index sûr, jamais un zip corpus/filtré)
+            objs = PL.nets_exact(nouveaux, sens=direction, horizon_ms=h) if nouveaux else []
+            paires = [((nouveaux[i].get("episode_id") or nouveaux[i].get("event_id")), o.get("net_bps"))
+                      for i, o in enumerate(objs)
+                      if o.get("status") == "OK" and o.get("promotable") and o.get("exit_source") == "FWD_BOOK"]
+            dernier = paires[-1][0] if paires else None
+            reg.suivre(cid, paires=paires, last_event_id=dernier, maintenant_ms=maintenant)   # CUMULATIF + dédup
+            if nouveaux:                                      # GR-2 : global alimenté par le LIVE FWD_BOOK uniquement
+                cand_meta = {"trial_id": cid, "coin": coin, "regime": None, "direction": direction, "horizon_ms": h}
+                FPF.simuler([cand_meta], nouveaux, filtrer=_passe, evaluer=_ev, portefeuille=pfg,
+                            pending_path=gp_pending, maintenant_ms=maintenant)
         return reg.resume()
     except Exception as e:  # noqa: BLE001
         return {"erreur": str(e)[:160]}
@@ -855,19 +879,18 @@ def _reconcilier(rundir: Path) -> dict:
     camps = sorted((rundir / "campagnes").glob("camp-*")) if (rundir / "campagnes").exists() else []
     n_verdicts = n_pass = 0
     par_campagne = []
-    # AF-P3 : le LEDGER DU PORTEFEUILLE GLOBAL est la source de vérité unique s'il existe ; sinon on fusionne
-    # les ledgers de campagne (UF-4). Dans les deux cas : UNE equity curve, UN capital, drawdown NON additionné.
+    # GR-2 : le PnL/ROI/DD GLOBAL provient EXCLUSIVEMENT du portefeuille GLOBAL (alimenté par le vrai live
+    # CanonicalStore FWD_BOOK après freeze). S'il n'existe pas encore, le global est VIDE (capital intact) — on ne
+    # RETOMBE JAMAIS sur les ledgers de campagne (pré-forward archive = diagnostic uniquement, jamais le PnL global).
     global_led = rundir / "global_portfolio" / "ledger.jsonl"
-    if global_led.exists():
-        ledgers = [global_led]
-    else:
-        ledgers = [c / "ledger" / "forward_portfolio.jsonl" for c in camps if (c / "ledger" / "forward_portfolio.jsonl").exists()]
+    ledgers = [global_led] if global_led.exists() else []
     glob = RECO.reconstruire_global(ledgers, equity_curve_out=(rundir / "results" / "equity_curve.jsonl"))
     for c in camps:
         led = c / "ledger" / "forward_portfolio.jsonl"
         if led.exists():
-            rc = RECO.reconstruire_depuis_ledger(led)
-            par_campagne.append({"campagne": c.name, **{k: rc[k] for k in ("pnl_realise", "equity", "roi_total_pct")}})
+            rc = RECO.reconstruire_depuis_ledger(led)         # DIAGNOSTIC pré-forward (jamais agrégé au global)
+            par_campagne.append({"campagne": c.name, "pre_forward_diagnostic": True,
+                                 **{k: rc[k] for k in ("pnl_realise", "equity", "roi_total_pct")}})
         try:
             finals = json.loads((c / "resultats" / "final_verdicts.json").read_text(encoding="utf-8"))
             for f in finals:
@@ -884,7 +907,7 @@ def _reconcilier(rundir: Path) -> dict:
            "roi_total_pct": glob["roi_total_pct"], "roi_deploye_pct": glob["roi_deploye_pct"],
            "coherent": coherent, "coherence": coherence, "par_campagne": par_campagne[:50],
            "evenements": glob["evenements"], "n_exclusions": len(exclusions), "exclusions": exclusions[:100],
-           "note": "Portefeuille GLOBAL : une seule equity curve chronologique sur un capital unique ; drawdown non additionné ; equity_curve.jsonl. `coherent` = ledger reconstruit vs snapshot persistant (None si aucun portefeuille global)."}
+           "note": "PnL/ROI/DD = portefeuille GLOBAL live UNIQUEMENT (CanonicalStore FWD_BOOK après freeze) ; le pré-forward archive est diagnostic (par_campagne) et n'entre jamais dans le global. Vide = capital intact (aucun trade live). `coherent` = ledger reconstruit vs snapshot (None si aucun portefeuille global)."}
     _ecrire_atomique(rundir / "results" / "reconciliation.json", json.dumps(rec, ensure_ascii=False, indent=1))
     return rec
 
@@ -1127,6 +1150,15 @@ def _lire_dernier_run_lance(root: Path) -> str:
         return ""
 
 
+def _effacer_dernier_run_lance(root: Path) -> None:
+    """GR-3 : efface le pointeur AVANT tout start/resume. Un démarrage qui échoue ne laisse donc jamais un
+    ancien run_id que le CMD irait vérifier par erreur."""
+    try:
+        (_run_root(root) / "DERNIER_RUN_LANCE.txt").unlink()
+    except OSError:
+        pass
+
+
 def demarrer_foreground(root: Path, *, exiger_flux: bool = True, max_cycles: int | None = None,
                         collecteurs: dict | None = None, afficher_live: bool = True, mode: str = "auto") -> dict:
     """Démarre le run et TRAVAILLE au premier plan jusqu'au Ctrl+C, puis finalise proprement (partiel si 2e
@@ -1134,6 +1166,7 @@ def demarrer_foreground(root: Path, *, exiger_flux: bool = True, max_cycles: int
     Ctrl+C ne contrôlerait pas la finalisation). Un Superviseur relance les collecteurs read-only en option."""
     root = Path(root)
     _ARRET.clear(); _URGENCE.clear()
+    _effacer_dernier_run_lance(root)                         # GR-3 : jamais de pointeur périmé si le démarrage échoue
     r = creer_ou_reprendre(root, exiger_flux=exiger_flux, mode=mode)
     if r.get("start") in ("PRECHECK_ECHEC", "RUN_ACTIF_EXISTE", "AUCUN_RUN_A_REPRENDRE"):
         return r

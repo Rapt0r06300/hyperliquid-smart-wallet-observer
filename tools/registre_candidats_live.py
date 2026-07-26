@@ -68,8 +68,8 @@ class RegistreCandidatsLive:
         self.etat[candidate_id] = {
             "candidate_id": candidate_id, "freeze_exchange_ts": float(freeze_exchange_ts),
             "last_forward_event_id": None, "n_episodes_live": 0, "duree_live_ms": 0.0,
-            "pnl_live_bps": 0.0, "roi_live_pct": 0.0, "dd_live_bps": 0.0,
-            "positif_live": False, "meta": meta or {}, "fige_ms": int(time.time() * 1000)}
+            "pnl_live_bps": 0.0, "roi_live_pct": 0.0, "pic_live_bps": 0.0, "dd_live_bps": 0.0,
+            "vus": [], "positif_live": False, "meta": meta or {}, "fige_ms": int(time.time() * 1000)}
         self._sauver()
         return self.etat[candidate_id]
 
@@ -80,25 +80,50 @@ class RegistreCandidatsLive:
             return []
         return filtrer_apres_freeze(episodes, c["freeze_exchange_ts"])
 
-    def suivre(self, candidate_id: str, *, nets_live, last_event_id=None, maintenant_ms=None) -> dict | None:
-        """Met à jour le suivi live d'un candidat à partir des nets (bps) de SES épisodes admissibles. PnL/ROI/DD
-        cumulés sur le live UNIQUEMENT. `positif_live` n'est vrai que s'il y a de la donnée live ET un cumul > 0."""
+    def suivre(self, candidate_id: str, *, paires=None, nets_live=None, last_event_id=None,
+               maintenant_ms=None, cap_vus: int = 5000) -> dict | None:
+        """Suivi live CUMULATIF (FX/GR-1). N'ajoute QUE les NOUVEAUX épisodes : `paires` = [(episode_id, net_bps)]
+        (dédup par episode_id via `vus`) ; `nets_live` = nets bruts sans id (repli, comptés comme nouveaux). Les
+        compteurs PnL/ROI/DD/n_episodes CUMULENT sur plusieurs cycles ; le drawdown est mesuré sur la courbe
+        cumulée, épisode par épisode. Un cycle SANS nouvel épisode ne remet JAMAIS les compteurs à zéro."""
         c = self.etat.get(candidate_id)
         if not c:
             return None
-        nets = [float(x) for x in (nets_live or []) if isinstance(x, (int, float))]
-        cum = 0.0; pic = 0.0; dd = 0.0
-        for x in nets:
-            cum += x
-            pic = max(pic, cum)
-            dd = max(dd, pic - cum)
-        c["n_episodes_live"] = len(nets)
-        c["pnl_live_bps"] = round(cum, 4)
-        c["roi_live_pct"] = round(cum / 100.0, 4)            # bps -> % (1 bps = 0.01 %)
-        c["dd_live_bps"] = round(dd, 4)
-        c["positif_live"] = bool(nets and cum > 0)
+        vus = set(c.get("vus") or [])
+        ajout = []
+        dernier_id = c.get("last_forward_event_id")
+        if paires:
+            for eid, net in paires:
+                if eid is not None and eid in vus:            # dédup par episode_id (jamais compté deux fois)
+                    continue
+                if not isinstance(net, (int, float)):
+                    continue
+                ajout.append(float(net))
+                if eid is not None:
+                    vus.add(eid)
+                    dernier_id = eid
+        elif nets_live:
+            ajout = [float(x) for x in nets_live if isinstance(x, (int, float))]
+        if ajout:                                             # CUMUL (repart de l'état persistant, jamais de 0)
+            cum = float(c.get("pnl_live_bps", 0.0))
+            pic = float(c.get("pic_live_bps", 0.0))
+            dd = float(c.get("dd_live_bps", 0.0))
+            for net in ajout:
+                cum += net
+                pic = max(pic, cum)
+                dd = max(dd, pic - cum)
+            c["pnl_live_bps"] = round(cum, 4)
+            c["pic_live_bps"] = round(pic, 4)
+            c["dd_live_bps"] = round(dd, 4)
+            c["roi_live_pct"] = round(cum / 100.0, 4)         # bps -> % (1 bps = 0.01 %)
+            c["n_episodes_live"] = int(c.get("n_episodes_live", 0)) + len(ajout)
+            c["positif_live"] = bool(c["n_episodes_live"] > 0 and cum > 0)
+            c["vus"] = list(vus)[-int(cap_vus):]              # borné (24/7) : on garde les plus récents
+        # last_event_id / durée : mis à jour même sans nouvel épisode, MAIS sans toucher aux compteurs (pas de reset)
         if last_event_id is not None:
             c["last_forward_event_id"] = last_event_id
+        elif dernier_id is not None:
+            c["last_forward_event_id"] = dernier_id
         if maintenant_ms is not None:
             c["duree_live_ms"] = round(float(maintenant_ms) - c["freeze_exchange_ts"], 2)
         self._sauver()
