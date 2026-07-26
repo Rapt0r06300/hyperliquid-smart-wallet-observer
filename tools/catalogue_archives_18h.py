@@ -233,6 +233,11 @@ def cataloguer_complet(root: str | Path, rundir: str | Path, *, dossiers=DOSSIER
                 continue
             if str(rundir) in str(p):
                 continue
+            # anti self-ingestion : ne jamais cataloguer les SORTIES du labo (ses propres runs) comme des
+            # sources de recherche -> sinon le corpus grossit tout seul a chaque cycle. Les ledgers/logs
+            # utiles restent lus par logs_18h ; les donnees marche vivent dans runtime/data.
+            if ("continuous" in p.parts) or any("overnight" in part for part in p.parts):
+                continue
             detectees += 1
             fmt = p.suffix.lower().lstrip(".")
             try:
