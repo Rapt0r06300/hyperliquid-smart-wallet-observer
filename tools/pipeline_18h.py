@@ -112,19 +112,34 @@ def generer_variantes(*, familles, directions, horizons, regimes, coins, params_
     return out
 
 
-def _filtrer_corpus(corpus, *, coin=None, regime=None):
-    return [e for e in corpus if (coin is None or e.get("coin") == coin) and (regime is None or e.get("regime") == regime)]
+def _filtrer_corpus(corpus, *, coin=None, regime=None, predicat=None, family=None, seuil=None):
+    """Filtre par coin/régime ET, si `predicat` fourni, par le prédicat RÉEL de la famille sur l'épisode.
+    Une famille dont la donnée ne porte pas le prédicat renvoie 0 épisode -> DATA_MISSING honnête (jamais
+    un net générique mal étiqueté)."""
+    out = []
+    for e in corpus:
+        if coin is not None and e.get("coin") != coin:
+            continue
+        if regime is not None and e.get("regime") != regime:
+            continue
+        if predicat is not None and not predicat(e, family, seuil):
+            continue
+        out.append(e)
+    return out
 
 
 # ─────────────── PHASE DISCOVERY ───────────────
 def phase_discovery(rundir: Path, corpus_disc: list[dict], variantes: list[dict], *, code_sha: str,
-                    source_hash: str, top_survivants: int = 8) -> dict:
+                    source_hash: str, top_survivants: int = 8, stop_event=None, predicat=None) -> dict:
     """Préenregistre CHAQUE variante, FAST_SCREEN sur discovery, enregistre TOUS les résultats (KILL compris),
-    EXACT_REPLAY sur les survivants (successive halving), sans masquer aucune variante testée."""
+    EXACT_REPLAY sur les survivants (successive halving), sans masquer aucune variante testée. INTERRUPTIBLE :
+    vérifie stop_event à chaque variante (Ctrl+C traité en secondes, FINAL-9)."""
     rundir = Path(rundir)
     n_prereg = n_fast = n_exact = 0
     survivants = []
     for v in variantes:
+        if stop_event is not None and stop_event.is_set():   # interruption rapide en plein replay
+            break
         ph = REG.parameter_hash({**v["params"], "dir": v["direction"], "h": v["horizon_ms"],
                                  "reg": v["regime"], "coin": v["coin"], "code": code_sha, "src": source_hash,
                                  "part": "discovery"})
@@ -136,7 +151,8 @@ def phase_discovery(rundir: Path, corpus_disc: list[dict], variantes: list[dict]
                                     "direction": v["direction"], "cost_model": "AR_complet", "latency_model": "feed+dec+entry+resp",
                                     "fill_model": "taker", "code_sha": code_sha, "params": v["params"]})
         n_prereg += 1
-        sub = _filtrer_corpus(corpus_disc, coin=v["coin"], regime=v["regime"])
+        sub = _filtrer_corpus(corpus_disc, coin=v["coin"], regime=v["regime"], predicat=predicat,
+                              family=v["family"], seuil=(v.get("params") or {}).get("seuil"))
         fs = fast_screen_variante(sub, sens=v["direction"], horizon_ms=v["horizon_ms"])
         n_fast += 1
         if not fs["garder"]:
@@ -379,7 +395,8 @@ def corpus_depuis_archives(root: Path, *, max_episodes: int = 4000, horizons=HOR
 
 
 def executer_pipeline_complet(root: Path, rundir: Path, corpus: list[dict], *, code_sha: str,
-                              source_hash: str = "fixtures", horizons=(250, 1000, 5000, 30000)) -> dict:
+                              source_hash: str = "fixtures", horizons=(250, 1000, 5000, 30000),
+                              variantes=None, stop_event=None, predicat=None) -> dict:
     """Chaîne les 7 phases sur un corpus (fixtures en test, archives en prod), en SÉPARANT les partitions
     temporelles (anti-fuite) : discovery/validation/holdout par ts. Retourne les compteurs prouvant que la
     boucle produit RÉELLEMENT trials/replays/validation/holdout/forward. Écrit tous les artefacts."""
@@ -394,9 +411,23 @@ def executer_pipeline_complet(root: Path, rundir: Path, corpus: list[dict], *, c
     hold = [e for e in corpus if V18.partition_de(e["ts_ms"], split) == "holdout"]
     coins = sorted({e["coin"] for e in corpus})
     regimes = sorted({e["regime"] for e in corpus})
-    variantes = generer_variantes(familles=("OFI", "SWEEP"), directions=(1, -1), horizons=horizons,
-                                  regimes=regimes, coins=coins, params_grille=({"seuil": 8},))
-    d = phase_discovery(rundir, disc or corpus, variantes, code_sha=code_sha, source_hash=source_hash)
+    if variantes is None:
+        variantes = generer_variantes(familles=("OFI", "SWEEP"), directions=(1, -1), horizons=horizons,
+                                      regimes=regimes, coins=coins, params_grille=({"seuil": 8},))
+    # normalise les variantes du scheduler (coins:[c]) vers le champ singulier attendu ; remappe les coins
+    # ABSENTS du corpus vers un coin réellement présent (round-robin) pour ne pas gaspiller le budget en
+    # trials vides — la nouveauté reste portée par family/horizon/direction/seuil.
+    vnorm = []
+    for i, v in enumerate(variantes):
+        c = v.get("coin") or (v.get("coins") or [None])[0]
+        if coins and c not in coins:
+            c = coins[i % len(coins)]
+        reg = v.get("regime")
+        if regimes and reg not in regimes:                 # régime inconnu du corpus -> "tous régimes" (pas de filtre)
+            reg = None
+        vnorm.append({**v, "coin": c, "regime": reg, "params": v.get("params") or {"seuil": 8}})
+    d = phase_discovery(rundir, disc or corpus, vnorm, code_sha=code_sha, source_hash=source_hash,
+                        stop_event=stop_event, predicat=predicat)
     fr = phase_freeze(rundir, d["survivants"], code_sha=code_sha)
     v = phase_validation(rundir, val or corpus, survivants=d["survivants"])
     hf = phase_holdout_forward(rundir, hold or corpus, hold or corpus, validation=v["rapports"])
@@ -410,7 +441,8 @@ def executer_pipeline_complet(root: Path, rundir: Path, corpus: list[dict], *, c
 
 
 def executer_pipeline_donnees_completes(root: Path, rundir: Path, *, code_sha: str,
-                                        dossiers=None, ledgers_logs=None) -> dict:
+                                        dossiers=None, ledgers_logs=None,
+                                        variantes=None, stop_event=None, predicat=None) -> dict:
     """LOT18H-DATA-COMPLETE : catalogue COMPLET (sans plafond silencieux) → CORPUS canonique réellement
     consommé (provenance + dedup selon la source) → 7 phases → analyse des LOGS (refus rejoués, gate vs
     no-gate) → LIGNÉE des PnL → CSVs d'utilisation. Une source cataloguée ne compte que si elle est CONSOMMÉE."""
@@ -428,7 +460,8 @@ def executer_pipeline_donnees_completes(root: Path, rundir: Path, *, code_sha: s
         corpus = corpus_fixtures()
         cons["comptes"]["fallback"] = "SYNTHETIC (aucun épisode BBO exploitable dans les archives)"
     resume = executer_pipeline_complet(root, rundir, corpus, code_sha=code_sha,
-                                       source_hash=(sources[0]["sha256"] if sources and sources[0].get("sha256") else "corpus"))
+                                       source_hash=(sources[0]["sha256"] if sources and sources[0].get("sha256") else "corpus"),
+                                       variantes=variantes, stop_event=stop_event, predicat=predicat)
     # analyse des logs / ledgers (refus rejoués + gate vs no-gate)
     if ledgers_logs is None:
         ledgers_logs = _ledgers_logs_par_defaut(root)

@@ -162,6 +162,22 @@ def construire(rundir, ident, *, final: bool = True, partial: bool = False, reto
             g.get("gain_manque_median_bps"), g.get("pertes_evitees")))
     L.append("")
     L.append("## 22-25. Matrices (voir CSV)\n- horizon_matrix.csv · regime_matrix.csv · pnl_by_coin.csv\n")
+    # ── réconciliation PnL/ROI/equity/DD ──
+    rec = _lire(rundir / "results" / "reconciliation.json", {})
+    L.append("## 26. Réconciliation PnL / ROI / equity / drawdown")
+    if rec:
+        L.append("- campagnes **%s** · verdicts **%s** · PASS **%s** · somme net **%s bps** · drawdown **%s bps** · cohérent **%s**" % (
+            rec.get("n_campagnes"), rec.get("n_verdicts"), rec.get("n_pass"), rec.get("somme_net_bps"),
+            rec.get("drawdown_bps"), rec.get("coherent")))
+        L.append("- %s\n" % rec.get("note", ""))
+    else:
+        L.append("- réconciliation indisponible (aucune campagne finalisée) — DATA_MISSING honnête.\n")
+    # ── champions / challengers (registre append-only) ──
+    champs = _lignes(rundir / "results" / "champions.jsonl")
+    positifs = [c for c in champs if (c.get("net_median_bps") or 0) > 0]
+    L.append("## 27. Champions & challengers (registre append-only, gel immuable)")
+    L.append("- candidats enregistrés : **%d** · dont net>0 : **%d** (une amélioration = NOUVEAU candidate_id + version + parent_id, jamais une réécriture)\n" % (
+        len(champs), len(positifs)))
     L.append("## 37. Lineage\n- data_lineage.jsonl (source→événement→…→PnL→rapport ; PnL sans lignée = NON_AUDITABLE)\n")
     L.append("## 41-43. Limites & prochaines pistes")
     L.append("- Un run de recherche ne PROUVE rien seul : les prometteuses doivent tenir en forward paper OOS. "

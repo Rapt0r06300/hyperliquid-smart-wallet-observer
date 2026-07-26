@@ -31,12 +31,11 @@ goto :fin
 
 :start
 echo === DEMARRAGE DU LABO CONTINU (Ctrl+C = arret propre + rapport final) ===
-echo === (re)demarrage des collecteurs lecture-seule pour nourrir le live... ===
-start "" /b tools\boucle_collecteur.cmd lab-microstructure tools\collecter_lab_microstructure.py 30
-start "" /b tools\boucle_collecteur.cmd lab-ctx tools\collecter_lab_ctx.py 30
-ping -n 6 127.0.0.1 >nul 2>&1
+echo === Les collecteurs lecture-seule sont desormais SUPERVISES par Python ===
+echo ===  (PID enregistre, anti-doublon au resume, restart individuel, arret explicite a la fin). ===
 echo === Le moteur tourne AU PREMIER PLAN. Appuie sur Ctrl+C quand tu veux le rapport final. ===
 REM PAS de "start" : le moteur reste dans CE terminal pour que Ctrl+C controle la finalisation.
+REM PAS de "start /b" aveugle des collecteurs : le superviseur Python (FINAL-14) les gere proprement.
 python tools\recherche_continue.py start
 echo === Finalisation terminee. Voir le chemin du rapport ci-dessus. ===
 goto :fin
