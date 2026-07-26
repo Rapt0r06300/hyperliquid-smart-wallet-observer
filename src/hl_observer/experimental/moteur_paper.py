@@ -17,6 +17,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from hl_observer.experimental import invariants as INV
+
 MODE = "EXPERIMENTAL_PAPER"
 VERSION = "v2"                            # v1 (carry-style) EN QUARANTAINE ; v2 = deux jambes VWAP + barème exigeant
 LEDGER_RELPATH = Path("runtime") / "data" / ("experimental_paper_%s_ledger.jsonl" % VERSION)
@@ -107,6 +109,10 @@ def admettre(sig: Signal, store: dict, *, now_ms: float) -> tuple[bool, str | No
     Renvoie (True, None) si admis, sinon (False, motif). Un refus est TOUJOURS motivé."""
     if sig.moteur not in LIMITES:
         return False, "MOTEUR_INCONNU"
+    # 🔴 LOT14 #3 : validation numérique CENTRALE d'abord — aucune décision sur un NaN/inf/notionnel<=0/horizon<=0.
+    ok_num, motif_num = INV.valider_signal(sig)
+    if not ok_num:
+        return False, motif_num
     if not (sig.ts_signal_ms and (now_ms - float(sig.ts_signal_ms)) <= AGE_MAX_SIGNAL_MS):
         return False, "SIGNAL_PERIME"
     if not (isinstance(sig.prix_entree, (int, float)) and sig.prix_entree > 0):
@@ -117,6 +123,10 @@ def admettre(sig: Signal, store: dict, *, now_ms: float) -> tuple[bool, str | No
         return False, "EDGE_NEGATIF_APRES_COUTS"
     if float(sig.edge_estime_bps) < MIN_EDGE_NET_BPS:          # 🔴 barème v2 : refuse les micro-edges
         return False, "MICRO_EDGE"
+    # 🔴 LOT14 #1 : gate ROI RÉELLE — MIN_ROI_ANNUEL_NET_PCT était déclaré mais JAMAIS vérifié.
+    ok_roi, motif_roi = INV.roi_gate(sig.roi_annuel_pct, min_roi=MIN_ROI_ANNUEL_NET_PCT)
+    if not ok_roi:
+        return False, motif_roi
     if float(sig.pnl_attendu_usd) < MIN_PNL_ATTENDU_USD:       # capital immobilisé pour des centimes
         return False, "PNL_POUR_DES_CENTIMES"
     if sig.sens not in (-1, 1):
@@ -130,6 +140,12 @@ def admettre(sig: Signal, store: dict, *, now_ms: float) -> tuple[bool, str | No
         return False, "LIMITE_POSITIONS_MOTEUR"
     if sum(float(p.get("notional_usd") or 0.0) for p in ouvertes) + float(sig.notional_usd) > lim["max_notional_usd"]:
         return False, "LIMITE_NOTIONAL_MOTEUR"
+    # 🔴 LOT14 #2 : gate BUDGET GLOBAL — les limites par moteur totalisent 1100 > budget 1000 ; on borne la
+    # somme de TOUTES les positions (tous moteurs) au budget total. Sans ça, le PnL/ROI reposerait sur un
+    # capital incohérent.
+    ok_bud, motif_bud = INV.budget_global_ok(store, sig.notional_usd, budget_total=BUDGET_TOTAL_USD)
+    if not ok_bud:
+        return False, motif_bud
     return True, None
 
 
