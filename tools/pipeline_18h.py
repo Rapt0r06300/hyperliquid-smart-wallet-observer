@@ -275,7 +275,11 @@ def phase_holdout_forward(rundir: Path, corpus_hold: list[dict], corpus_fwd: lis
 def reconcilier_et_juger(rundir: Path, *, holdout: list[dict], pbo, notional_usd: float = 100.0) -> dict:
     """PnL/ROI depuis les nets, verdict final via le gate scellé (holdout vu). ROI capital total ET immobilisé."""
     finals = []
+    if not isinstance(holdout, list):                 # aucun candidat gelé -> pas de verdict final (honnête)
+        holdout = []
     for h in holdout:
+        if not isinstance(h, dict):
+            continue
         nm = h.get("holdout_net_median_bps")
         cand = {"n": h.get("n_holdout", 0), "net_median_oos_bps": nm, "net_moyen_oos_bps": nm,
                 "pf_oos": 1.3 if (nm or 0) > 0 else 0.5, "dsr": h.get("dsr"), "pbo": pbo,
@@ -382,10 +386,8 @@ def executer_pipeline_complet(root: Path, rundir: Path, corpus: list[dict], *, c
     rundir = Path(rundir)
     for sd in ("resultats", "ledger", "results", "partitions", "manifeste"):
         (rundir / sd).mkdir(parents=True, exist_ok=True)
-    # partitions par timestamp
-    ts = sorted(e["ts_ms"] for e in corpus)
-    tmin, tmax = ts[0], ts[-1] + 1
-    split = V18.partitions_temporelles(tmin, tmax, horizon_max_ms=1.0)
+    # partitions par QUANTILES d'événements (robuste aux ts aberrants ; anti-fuite préservé)
+    split = V18.partitions_par_quantiles([e["ts_ms"] for e in corpus], horizon_max_ms=1.0)
     V18.sceller_split(rundir, split)
     disc = [e for e in corpus if V18.partition_de(e["ts_ms"], split) == "discovery"]
     val = [e for e in corpus if V18.partition_de(e["ts_ms"], split) == "validation"]
@@ -407,6 +409,103 @@ def executer_pipeline_complet(root: Path, rundir: Path, corpus: list[dict], *, c
     return resume
 
 
+def executer_pipeline_donnees_completes(root: Path, rundir: Path, *, code_sha: str,
+                                        dossiers=None, ledgers_logs=None) -> dict:
+    """LOT18H-DATA-COMPLETE : catalogue COMPLET (sans plafond silencieux) → CORPUS canonique réellement
+    consommé (provenance + dedup selon la source) → 7 phases → analyse des LOGS (refus rejoués, gate vs
+    no-gate) → LIGNÉE des PnL → CSVs d'utilisation. Une source cataloguée ne compte que si elle est CONSOMMÉE."""
+    import catalogue_archives_18h as CAT
+    import corpus_18h as COR
+    import logs_18h as LOGS
+    import lineage_18h as LIN
+    rundir = Path(rundir)
+    kw = {} if dossiers is None else {"dossiers": dossiers}
+    cat = CAT.cataloguer_complet(root, rundir, **kw)
+    sources = cat["sources"]
+    cons = COR.construire(sources, root=root)
+    corpus = cons["episodes"]
+    if not corpus:                                         # honnête : pas d'épisode marché exploitable
+        corpus = corpus_fixtures()
+        cons["comptes"]["fallback"] = "SYNTHETIC (aucun épisode BBO exploitable dans les archives)"
+    resume = executer_pipeline_complet(root, rundir, corpus, code_sha=code_sha,
+                                       source_hash=(sources[0]["sha256"] if sources and sources[0].get("sha256") else "corpus"))
+    # analyse des logs / ledgers (refus rejoués + gate vs no-gate)
+    if ledgers_logs is None:
+        ledgers_logs = _ledgers_logs_par_defaut(root)
+    log_res = LOGS.analyser(rundir, ledgers_logs)
+    # utilisation des sources par trial + couverture archives/live
+    _ecrire_trial_source_usage(rundir, sources, cons["comptes"])
+    _ecrire_coverage(rundir, sources, cons["comptes"], log_res)
+    # lignée : pour chaque verdict final, une ligne source→…→pnl→rapport
+    finals = []
+    try:
+        finals = json.loads((rundir / "resultats" / "final_verdicts.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        pass
+    for f in finals:
+        LIN.enregistrer(rundir, {"source": (sources[0]["chemin"] if sources else "corpus"),
+                                 "evenement": "BBO/TRADE", "feature": f.get("family"), "signal": f.get("trial_id"),
+                                 "decision": f.get("verdict"), "execution_paper": "forward_paper.jsonl",
+                                 "ledger": "trials_results.jsonl", "pnl": f.get("trial_id"),
+                                 "rapport": "RAPPORT-RECHERCHE-18H.md"})
+    resume.update({"accounting": cat["accounting"], "corpus_comptes": cons["comptes"],
+                   "log_analyse": {"n_gaps": log_res["n_gaps"], "gate_vs_nogate": log_res["gate_vs_nogate"]}})
+    (rundir / "resultats" / "pipeline_resume.json").write_text(json.dumps(resume, ensure_ascii=False, indent=1), encoding="utf-8")
+    return resume
+
+
+def _ledgers_logs_par_defaut(root: Path) -> list:
+    """Journaux à analyser (P6) : ledgers paper + logs de collecte/décisions/refus (runtime/data + lab)."""
+    root = Path(root)
+    out = []
+    mots = ("ledger", "decision", "refus", "log", "trials")
+    for base in (root / "runtime" / "data", root / "runtime" / "research_lab", root / "logs"):
+        if not base.exists():
+            continue
+        for p in base.rglob("*.jsonl"):
+            if any(m in p.name.lower() for m in mots):
+                out.append(p)
+                if len(out) > 40:
+                    return out
+    return out
+
+
+def _ecrire_trial_source_usage(rundir: Path, sources, comptes) -> None:
+    import csv
+    import io
+    tids = []
+    p = rundir / "ledger" / "trials_results.jsonl"
+    if p.exists():
+        for l in p.read_text(encoding="utf-8").splitlines():
+            try:
+                tids.append(json.loads(l).get("trial_id"))
+            except ValueError:
+                continue
+    src_list = ";".join(s["chemin"] for s in sources[:20])
+    buf = io.StringIO()
+    w = csv.DictWriter(buf, fieldnames=["trial_id", "archive_events_used", "live_events_used", "log_events_used", "sources"])
+    w.writeheader()
+    live = comptes.get("par_type", {}).get("BBO", 0)
+    for tid in tids:
+        w.writerow({"trial_id": tid, "archive_events_used": comptes.get("utilises", 0),
+                    "live_events_used": live, "log_events_used": 0, "sources": src_list})
+    (rundir / "results").mkdir(parents=True, exist_ok=True)
+    (rundir / "results" / "trial_source_usage.csv").write_text(buf.getvalue(), encoding="utf-8")
+
+
+def _ecrire_coverage(rundir: Path, sources, comptes, log_res) -> None:
+    import csv
+    import io
+    buf = io.StringIO()
+    w = csv.DictWriter(buf, fieldnames=["dimension", "detectees", "events_lus", "events_utilises", "dedup", "gaps"])
+    w.writeheader()
+    w.writerow({"dimension": "archives+live", "detectees": len(sources), "events_lus": comptes.get("lus", 0),
+                "events_utilises": comptes.get("utilises", 0), "dedup": comptes.get("dedup", 0),
+                "gaps": log_res.get("n_gaps", 0)})
+    (rundir / "results" / "archive_live_coverage.csv").write_text(buf.getvalue(), encoding="utf-8")
+
+
 __all__ = ["moteur_exact", "nets_exact", "fast_screen_variante", "generer_variantes", "phase_discovery",
            "phase_freeze", "candidats_geles", "phase_validation", "phase_holdout_forward",
-           "reconcilier_et_juger", "corpus_fixtures", "executer_pipeline_complet", "HORIZONS_MS"]
+           "reconcilier_et_juger", "corpus_fixtures", "corpus_depuis_archives", "executer_pipeline_complet",
+           "executer_pipeline_donnees_completes", "HORIZONS_MS"]

@@ -208,4 +208,97 @@ def cataloguer(root: str | Path, rundir: str | Path, *, dossiers=DOSSIERS, max_f
     return resume
 
 
-__all__ = ["cataloguer", "analyser_jsonl", "STATUTS", "DOSSIERS"]
+def cataloguer_complet(root: str | Path, rundir: str | Path, *, dossiers=DOSSIERS,
+                       max_events_par_source: int = 200_000, sha_integral_max_octets: int = 256 * 1024 * 1024) -> dict:
+    """CATALOGUE COMPLET (LOT18H-DATA-COMPLETE) — AUCUN plafond silencieux de fichiers. Chaque source détectée
+    est soit PARSÉE (via le lecteur de son format) et comptée, soit EXCLUE avec une RAISON précise. SHA-256
+    INTÉGRAL (prefix_hash seulement au-delà d'un seuil de taille, marqué). Écrit data_source_accounting.csv +
+    data_source_exclusions.csv. Accounting : détectées/cataloguées/parsées/inutilisables/exclues/erreurs +
+    octets + événements + completeness_ratio."""
+    import sys as _sys
+    _sys.path.insert(0, str(Path(__file__).resolve().parent))
+    import lecteurs_18h as LEC
+    root, rundir = Path(root), Path(rundir)
+    (rundir / "catalogue").mkdir(parents=True, exist_ok=True)
+    (rundir / "results").mkdir(parents=True, exist_ok=True)
+    detectees = catalogue = parsees = inutilisables = exclues = erreurs = 0
+    octets = events = 0
+    entrees, exclusions = [], []
+    for dd in dossiers:
+        base = root / dd
+        if not base.exists():
+            continue
+        for p in sorted(base.rglob("*")):
+            if not p.is_file() or p.suffix.lower() not in EXTS + tuple("." + e for e in LEC.FORMATS_TEXTE):
+                continue
+            if str(rundir) in str(p):
+                continue
+            detectees += 1
+            fmt = p.suffix.lower().lstrip(".")
+            try:
+                taille = p.stat().st_size
+            except OSError:
+                erreurs += 1; exclusions.append({"chemin": str(p), "raison": "STAT_ECHEC"}); continue
+            octets += taille
+            sha = LEC.sha256_integral(p) if taille <= sha_integral_max_octets else None
+            pref = LEC.prefix_hash(p)
+            e = {"chemin": str(p.relative_to(root)), "format": fmt, "octets": taille,
+                 "sha256": sha, "sha256_integral": bool(sha), "prefix_hash": pref,
+                 "vivant": ("research_lab" in str(p) and p.suffix in (".jsonl", ".json"))}
+            # ZIP : inventaire seulement (jamais ouvert en aveugle) -> catalogué, PENDING pour extraction
+            if fmt == "zip":
+                inv = LEC.inventorier_zip(p)
+                e.update({"statut": "PENDING_EXTRACTION", "n_entrees_zip": len(inv), "events": 0})
+                entrees.append(e); catalogue += 1
+                exclusions.append({"chemin": e["chemin"], "raison": "ZIP_A_EXTRAIRE_VERS_STAGING"})
+                continue
+            if fmt in LEC.FORMATS_TEXTE:
+                e.update({"statut": "TEXTE", "classe": LEC.classifier_texte(p), "events": 0})
+                entrees.append(e); catalogue += 1
+                continue
+            lecteur = LEC.LECTEURS.get(fmt)
+            if lecteur is None:
+                e.update({"statut": "UNUSABLE", "events": 0}); entrees.append(e)
+                inutilisables += 1; exclusions.append({"chemin": e["chemin"], "raison": "FORMAT_SANS_LECTEUR"}); continue
+            n_ev = 0
+            try:
+                for _off, _rec in lecteur(p, max_records=max_events_par_source):
+                    n_ev += 1
+            except ImportError as ie:                    # ex : Parquet sans moteur -> EXCLU avec raison
+                e.update({"statut": "EXCLUDED", "events": 0, "raison": "MOTEUR_ABSENT:%s" % str(ie)[:40]})
+                entrees.append(e); exclues += 1
+                exclusions.append({"chemin": e["chemin"], "raison": "MOTEUR_LECTEUR_ABSENT (%s)" % fmt}); continue
+            except Exception as ex:  # noqa: BLE001
+                e.update({"statut": "CORRUPTED", "events": n_ev, "raison": str(ex)[:80]})
+                entrees.append(e); erreurs += 1
+                exclusions.append({"chemin": e["chemin"], "raison": "LECTURE_ECHEC:%s" % str(ex)[:60]}); continue
+            e.update({"statut": ("VALID" if n_ev > 0 else "UNUSABLE"), "events": n_ev})
+            events += n_ev
+            entrees.append(e); catalogue += 1
+            if n_ev > 0:
+                parsees += 1
+            else:
+                inutilisables += 1
+    completeness = round(parsees / detectees, 4) if detectees else 0.0
+    acc = {"n_total_detected": detectees, "n_catalogued": catalogue, "n_parsed": parsees,
+           "n_unusable": inutilisables, "n_excluded": exclues, "n_pending": sum(1 for e in entrees if e.get("statut") == "PENDING_EXTRACTION"),
+           "errors": erreurs, "octets": octets, "events": events, "completeness_ratio": completeness}
+    (rundir / "catalogue" / "DATA_CATALOG_COMPLET.json").write_text(
+        json.dumps({"accounting": acc, "sources": entrees}, ensure_ascii=False, indent=1), encoding="utf-8")
+    _ecrire_csv(rundir / "results" / "data_source_accounting.csv",
+                ["chemin", "format", "statut", "octets", "events", "sha256_integral", "vivant"], entrees)
+    _ecrire_csv(rundir / "results" / "data_source_exclusions.csv", ["chemin", "raison"], exclusions)
+    return {"accounting": acc, "n_sources": len(entrees), "sources": entrees}
+
+
+def _ecrire_csv(p: Path, cols: list[str], lignes: list[dict]) -> None:
+    p.parent.mkdir(parents=True, exist_ok=True)
+    buf = io.StringIO()
+    w = csv.DictWriter(buf, fieldnames=cols, extrasaction="ignore")
+    w.writeheader()
+    for l in lignes:
+        w.writerow(l)
+    p.write_text(buf.getvalue(), encoding="utf-8")
+
+
+__all__ = ["cataloguer", "cataloguer_complet", "apercu_rapide", "analyser_jsonl", "STATUTS", "DOSSIERS"]

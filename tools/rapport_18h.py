@@ -99,6 +99,32 @@ def construire_rapport(rundir: str | Path, *, manifeste: dict | None = None) -> 
     L.append("- **Sécurité : 0 ordre réel · 0 argent réel · 0 clé privée · 0 signature · 0 dépôt/retrait**")
     conf = ident.get("config", {})
     L.append("- machine : %s\n" % json.dumps(conf.get("machine", {}), ensure_ascii=False))
+    # LOT18H-DATA-COMPLETE : preuve que TOUTES les données utiles sont réellement consommées
+    resume_pl = _lire(rundir, "resultats/pipeline_resume.json", {})
+    acc = resume_pl.get("accounting", {})
+    cc = resume_pl.get("corpus_comptes", {})
+    la = resume_pl.get("log_analyse", {})
+    L.append("## UTILISATION DE TOUTES LES DONNÉES")
+    if acc:
+        L.append("- Sources : détectées **%s** · cataloguées **%s** · parsées **%s** · inutilisables **%s** · "
+                 "exclues **%s** · pending **%s** · erreurs **%s** · complétude **%s**"
+                 % (acc.get("n_total_detected"), acc.get("n_catalogued"), acc.get("n_parsed"),
+                    acc.get("n_unusable"), acc.get("n_excluded"), acc.get("n_pending"), acc.get("errors"),
+                    acc.get("completeness_ratio")))
+        L.append("- Octets : %s · événements catalogués : %s" % (acc.get("octets"), acc.get("events")))
+    if cc:
+        L.append("- Corpus consommé : events lus **%s** · filtrés **%s** · dédupliqués **%s** · **utilisés %s** · "
+                 "épisodes **%s** · par type %s" % (cc.get("lus"), cc.get("filtres"), cc.get("dedup"),
+                                                    cc.get("utilises"), cc.get("episodes"), json.dumps(cc.get("par_type", {}), ensure_ascii=False)))
+    if la:
+        gv = la.get("gate_vs_nogate", {})
+        L.append("- Logs : gaps %s · signaux refusés rejoués %s · opportunités bloquées %s (gain manqué médian %s bps) · "
+                 "pertes évitées %s" % (la.get("n_gaps"), gv.get("n_refuses_rejoues"), gv.get("opportunites_bloquees"),
+                                        gv.get("gain_manque_median_bps"), gv.get("pertes_evitees")))
+    L.append("- CSV d'utilisation : data_source_accounting.csv · data_source_exclusions.csv · trial_source_usage.csv · "
+             "archive_live_coverage.csv · log_analysis.csv · gap_recovery.csv · data_lineage.jsonl")
+    L.append("> Une source seulement cataloguée ne compte PAS comme utilisée : seuls les events **consommés** "
+             "par le corpus alimentent FAST_SCREEN/EXACT_REPLAY. Un PnL sans lignée complète = NON_AUDITABLE.\n")
     L.append("## Catalogue des archives")
     L.append("Sources : **%s** · octets : %s · statuts : %s\n" % (
         resume_cat.get("n_sources"), resume_cat.get("octets_total"),

@@ -243,6 +243,10 @@ def watch_ecran(root: Path) -> str:
         " Ecoule          : %.2f h   Restant : %.2f h" % (st.get("elapsed_h", 0), st.get("reste_h", 0)),
         " Fin prevue      : %s" % fin_iso,
         "",
+        " DONNEES (utilisation reelle)",
+        " Sources detectees/utilisees/exclues : %s / %s / %s" % (c.get("sources_detectees", 0), c.get("sources_utilisees", 0), c.get("sources_exclues", 0)),
+        " Events archives utilises : %s   dedup : %s   gaps : %s" % (c.get("events_archives", 0), c.get("events_dedup", 0), c.get("gaps", 0)),
+        "",
         " RECHERCHE (compteurs RÉELS depuis les fichiers)",
         " Trials preregistres : %s" % c.get("preregistres", 0),
         " Resultats (terminaux): %s" % c.get("resultats", 0),
@@ -407,16 +411,13 @@ def _corpus_pour_run(root: Path):
 
 
 def _executer_travail(root: Path, ident: dict, rundir: Path) -> dict:
-    """Exécute le PIPELINE RÉEL (discovery→freeze→validation→holdout→forward→reconcile). Idempotent : ne
-    relance pas si pipeline_resume.json existe déjà. C'est ce qui fait que la boucle PRODUIT des trials."""
+    """Exécute le PIPELINE RÉEL sur TOUTES les données (LOT18H-DATA-COMPLETE) : catalogue complet → corpus
+    canonique consommé → discovery→freeze→validation→holdout→forward→reconcile → logs → lignée → CSVs.
+    Idempotent : ne relance pas si pipeline_resume.json existe déjà."""
     import pipeline_18h as PL
     if (rundir / "resultats" / "pipeline_resume.json").exists():
         return json.loads((rundir / "resultats" / "pipeline_resume.json").read_text(encoding="utf-8"))
-    corpus, source = _corpus_pour_run(root)
-    resume = PL.executer_pipeline_complet(root, rundir, corpus, code_sha=ident.get("code_sha", "?"), source_hash=source)
-    resume["source_corpus"] = source
-    (rundir / "resultats" / "pipeline_resume.json").write_text(json.dumps(resume, ensure_ascii=False, indent=1), encoding="utf-8")
-    return resume
+    return PL.executer_pipeline_donnees_completes(root, rundir, code_sha=ident.get("code_sha", "?"))
 
 
 def _compteurs(rundir: Path) -> dict:
@@ -429,10 +430,16 @@ def _compteurs(rundir: Path) -> dict:
         pass
     fwd = rundir / "ledger" / "forward_paper.jsonl"
     n_fwd = sum(1 for _ in fwd.read_text(encoding="utf-8").splitlines()) if fwd.exists() else 0
+    acc = resume.get("accounting", {})
+    cc = resume.get("corpus_comptes", {})
+    la = resume.get("log_analyse", {})
     return {"preregistres": c["preregistres"], "resultats": c["resultats"], "superseded": c["superseded"],
             "fast_screen": resume.get("n_fast_screen", 0), "exact_replays": resume.get("n_exact_replays", 0),
             "candidats_vivants": resume.get("n_survivants", 0), "finalistes": resume.get("n_pass", 0),
-            "forward_events": n_fwd}
+            "forward_events": n_fwd,
+            "sources_detectees": acc.get("n_total_detected", 0), "sources_utilisees": acc.get("n_parsed", 0),
+            "sources_exclues": acc.get("n_excluded", 0), "events_archives": cc.get("utilises", 0),
+            "events_dedup": cc.get("dedup", 0), "gaps": la.get("n_gaps", 0)}
 
 
 def boucle(root: Path, *, intervalle_s: float = 60.0, max_cycles: int | None = None) -> dict:

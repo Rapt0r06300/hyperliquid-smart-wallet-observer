@@ -47,6 +47,24 @@ def partitions_temporelles(ts_min: float, ts_max: float, *, horizon_max_ms: floa
     }
 
 
+def partitions_par_quantiles(ts_list: list[float], *, horizon_max_ms: float, fractions: dict | None = None) -> dict:
+    """Partitions par QUANTILES d'ÉVÉNEMENTS (robuste aux ts aberrants) : chaque partition contient ~la même
+    proportion d'événements, pas la même durée. Embargo autour des frontières. Anti-fuite correct même si un
+    outlier temporel existe (un vieux ts isolé ne vide plus la discovery)."""
+    fr = fractions or FRACTIONS
+    xs = sorted(float(t) for t in ts_list if t is not None)
+    if len(xs) < 4:
+        lo, hi = (xs[0] if xs else 0.0), (xs[-1] if xs else 1.0)
+        return partitions_temporelles(lo, hi, horizon_max_ms=horizon_max_ms, fractions=fr)
+    d_end = xs[int(len(xs) * fr["discovery"])]
+    v_end = xs[int(len(xs) * (fr["discovery"] + fr["validation"]))]
+    emb = float(horizon_max_ms)
+    return {"discovery": [xs[0], d_end - emb], "embargo_1": [d_end - emb, d_end + emb],
+            "validation": [d_end + emb, v_end - emb], "embargo_2": [v_end - emb, v_end + emb],
+            "holdout": [v_end + emb, xs[-1] + 1], "horizon_max_ms": emb, "ts_min": xs[0], "ts_max": xs[-1],
+            "methode": "quantiles_evenements"}
+
+
 def sceller_split(rundir: str | Path, split: dict) -> dict:
     """Écrit DATA_SPLIT_MANIFEST.json + DATA_SPLIT_SHA256.json (bornes FIGÉES avant tout résultat)."""
     rundir = Path(rundir)
