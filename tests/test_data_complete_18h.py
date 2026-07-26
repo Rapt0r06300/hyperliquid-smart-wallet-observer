@@ -37,7 +37,9 @@ def _fixtures(root: Path):
     lignes = []
     for i in range(120):
         for coin, base in (("BTC", 64000), ("ETH", 3200)):
-            lignes.append(_bbo(coin, 1_000_000 + i * 1000, base * (1 + i * 0.001)))
+            # dérive ~30 bps/tick : un LONG court horizon capte un edge net > coûts RÉELS (frais 9 bps A/R +
+            # spread croisé aux deux jambes) -> des survivants existent -> le forward paper produit des events.
+            lignes.append(_bbo(coin, 1_000_000 + i * 1000, base * (1 + i * 0.003)))
     dup = _bbo("BTC", 1_000_000, 64000 + (0 % 20) - 10, snap=True)
     lignes += [dup, dup, dup, dup, dup]                       # 5 doublons exacts
     (d / "bbo_tape.jsonl").write_text("\n".join(json.dumps(x) for x in lignes) + "\n")

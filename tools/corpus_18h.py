@@ -147,13 +147,15 @@ def _episodes_depuis_bbo(bbo_par_coin: dict) -> list[dict]:
         ticks.sort(key=lambda x: x[0])
         mids = [(ts, (b + a) / 2.0, b, a, prov) for ts, b, a, prov in ticks]
         for i, (ts, mid, bid, ask, prov) in enumerate(mids):
-            fwd = {}
+            fwd, fwd_b, fwd_a = {}, {}, {}
             for h in HORIZONS_MS:
                 j = i
                 while j < len(mids) and mids[j][0] - ts < h:
                     j += 1
                 if j < len(mids):
                     fwd[h] = mids[j][1]
+                    fwd_b[h] = mids[j][2]                     # vrai BID futur du tick ultérieur (FWD_BOOK causal)
+                    fwd_a[h] = mids[j][3]                     # vrai ASK futur -> exit exécutable, PROMOUVABLE
             if not fwd or mid <= 0:
                 continue
             spread = (ask - bid) / mid
@@ -161,7 +163,7 @@ def _episodes_depuis_bbo(bbo_par_coin: dict) -> list[dict]:
                         "bid": bid, "ask": ask, "bid_sz": 3000.0, "ask_sz": 3000.0,
                         "queue_devant_sz": 200.0, "vol_traversant_sz": 600.0,
                         "fees_bps": 1.5, "slippage_bps": 0.8, "impact_bps": 0.2, "latence_bps": 0.3,
-                        "fwd_mid": fwd, "provenance": prov})
+                        "fwd_mid": fwd, "fwd_bid": fwd_b, "fwd_ask": fwd_a, "provenance": prov})
     return eps
 
 

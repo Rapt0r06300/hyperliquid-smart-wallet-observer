@@ -188,6 +188,41 @@ def _variantes_du_cycle(rundir: Path, *, cycle: int, code_sha: str, coins, regim
     return vs, deja
 
 
+def _maturer_live(rundir: Path, new_events: list) -> tuple[list, dict]:
+    """AF-P1 : ingère les nouveaux événements dans le CanonicalStore (PENDING), les mûrit contre un buffer de
+    marché persistant (les ticks FUTURS arrivés aux cycles suivants), puis consomme les épisodes READY
+    (FWD_BOOK, promouvables). Les PENDING survivent aux cycles/redémarrages. Rend (episodes_prets, compte)."""
+    try:
+        import canonical_store as CS
+    except Exception:  # noqa: BLE001
+        return [], {"canonical": "INDISPONIBLE"}
+    rundir = Path(rundir)
+    buf = rundir / "canonical" / "marche.jsonl"
+    buf.parent.mkdir(parents=True, exist_ok=True)
+    with buf.open("a", encoding="utf-8") as f:               # buffer marché append-only (ticks futurs)
+        for e in new_events:
+            c = str(e.get("coin") or e.get("symbol") or "").upper()
+            ts = e.get("ts_wall_ms") or e.get("ts_ms") or e.get("exchange_ts")
+            if c and ts is not None and e.get("bid") is not None and e.get("ask") is not None:
+                f.write(json.dumps({"coin": c, "ts_ms": float(ts), "bid": float(e["bid"]), "ask": float(e["ask"])}) + "\n")
+    # relit un buffer BORNÉ (les N derniers ticks par coin) pour la maturation
+    marche: dict = {}
+    for l in buf.read_text(encoding="utf-8", errors="ignore").splitlines()[-20000:]:
+        try:
+            d = json.loads(l)
+        except ValueError:
+            continue
+        marche.setdefault(d["coin"], []).append(d)
+    store = CS.CanonicalStore(rundir)
+    store.ingerer(new_events)
+    maintenant = max((t["ts_ms"] for ticks in marche.values() for t in ticks), default=0.0)
+    mat = store.maturer(marche, maintenant_ms=maintenant)
+    prets = store.consommer()
+    _ecrire_atomique(rundir / "canonical" / "maturation.json",
+                     json.dumps({**mat, "consommes": len(prets), "compte": store.compte()}, ensure_ascii=False, indent=1))
+    return prets, {"muris": mat.get("maries"), "consommes": len(prets), "backlog": mat.get("backlog"), "compte": store.compte()}
+
+
 def _securite_run(root: Path, rundir: Path) -> bool:
     """Audit sécurité fait UNE FOIS par run (mis en cache) — évite un scan complet du dépôt à chaque campagne.
     Sert de `securite_verte` au gate (UF-3/§8 : audit AVANT le gate final)."""
@@ -244,13 +279,15 @@ def executer_cycle(root: Path, rundir: Path, *, cycle: int, code_sha: str,
         "sources_avec_nouveaute": scan["sources_avec_nouveaute"], "affected_windows": fen,
         "n_variantes_nouvelles": len(variantes), "files_consommees": plan["files_consommees"],
         "read_only": True, "real_execution": False}, ensure_ascii=False, indent=1), encoding="utf-8")
+    prets, mat = _maturer_live(rundir, new_events)             # AF-P1 : maturation live -> épisodes FWD_BOOK
     resume = {}
     interrompu = bool(stop_event is not None and stop_event.is_set())
     try:
         resume = PL.executer_pipeline_donnees_completes(
             root, camp_dir, code_sha=code_sha, variantes=variantes, stop_event=stop_event,
             predicat=FAM.predicat, new_events=new_events, affected_windows=fen, hist_dir=rundir,
-            securise=_securite_run(root, rundir))
+            securise=_securite_run(root, rundir), episodes_prets=prets,
+            portefeuille_global_dir=(rundir / "global_portfolio"))   # AF-P3 : UN portefeuille pour tout le run
     except Exception as e:  # noqa: BLE001 — un cycle qui échoue est journalisé, la boucle continue
         (rundir / "errors.csv").open("a", encoding="utf-8").write("%d,%s\n" % (cycle, str(e)[:160].replace(",", ";")))
         resume = {"erreur": str(e)[:160]}
@@ -262,7 +299,7 @@ def executer_cycle(root: Path, rundir: Path, *, cycle: int, code_sha: str,
     _enregistrer_champions(camp_dir, rundir)               # candidats/statuts append-only (FINAL-11)
     resume.update({"campaign_id": camp_id, "cycle": cycle, "nouvelles_donnees": bool(scan["n_new"]),
                    "n_new_events": scan["n_new"], "n_variantes_nouvelles": len(variantes),
-                   "affected_windows": fen, "duree_cycle_s": round(time.time() - t0, 2)})
+                   "affected_windows": fen, "maturation": mat, "duree_cycle_s": round(time.time() - t0, 2)})
     # journal d'événements + checkpoint atomiques
     with (rundir / "LIVE-RESEARCH-EVENTS.jsonl").open("a", encoding="utf-8") as f:
         f.write(json.dumps({"ts_ms": int(time.time() * 1000), "cycle": cycle, "campaign_id": camp_id,
@@ -487,8 +524,13 @@ def _reconcilier(rundir: Path) -> dict:
     camps = sorted((rundir / "campagnes").glob("camp-*")) if (rundir / "campagnes").exists() else []
     n_verdicts = n_pass = 0
     par_campagne = []
-    ledgers = [c / "ledger" / "forward_portfolio.jsonl" for c in camps if (c / "ledger" / "forward_portfolio.jsonl").exists()]
-    # PORTEFEUILLE GLOBAL : UNE seule equity curve, UN capital, drawdown NON additionné (UF-4)
+    # AF-P3 : le LEDGER DU PORTEFEUILLE GLOBAL est la source de vérité unique s'il existe ; sinon on fusionne
+    # les ledgers de campagne (UF-4). Dans les deux cas : UNE equity curve, UN capital, drawdown NON additionné.
+    global_led = rundir / "global_portfolio" / "ledger.jsonl"
+    if global_led.exists():
+        ledgers = [global_led]
+    else:
+        ledgers = [c / "ledger" / "forward_portfolio.jsonl" for c in camps if (c / "ledger" / "forward_portfolio.jsonl").exists()]
     glob = RECO.reconstruire_global(ledgers, equity_curve_out=(rundir / "results" / "equity_curve.jsonl"))
     for c in camps:
         led = c / "ledger" / "forward_portfolio.jsonl"

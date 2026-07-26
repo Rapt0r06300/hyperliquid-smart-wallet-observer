@@ -28,6 +28,9 @@ from hl_observer.research_parallel import validation as VAL  # noqa: E402
 HORIZONS_MS = (100, 250, 500, 1000, 2000, 3000, 5000, 10000, 15000, 30000, 60000,
                120000, 300000, 900000, 1800000, 3600000)
 COUT_APPROX_AR_BPS = 12.0
+#: bornes pour l'embargo réel = max(horizon, latence max, durée max des features) — jamais 1 ms codé en dur.
+LATENCE_MAX_MS = 2000.0
+FEATURE_DUREE_MAX_MS = 60000.0
 
 
 # ─────────────── moteur EXACT événementiel ───────────────
@@ -62,9 +65,18 @@ def nets_exact(corpus: list[dict], *, sens: int, horizon_ms: int, modele_exec: s
 
 
 def _nets_ok(episodes: list[dict]) -> list[float]:
-    """Extrait les net_bps des seuls épisodes réellement mesurés (status OK). Un UNMEASURABLE/NO_FILL ne
-    devient jamais 0."""
+    """Flux MESURÉ (diagnostic) : net_bps des épisodes status OK (APPROXIMATE inclus, pour AFFICHAGE seulement).
+    Un UNMEASURABLE/NO_FILL ne devient jamais 0. NE PAS utiliser pour promouvoir."""
     return [o["net_bps"] for o in episodes if o.get("status") == "OK" and o.get("net_bps") is not None]
+
+
+def _nets_promo(episodes: list[dict]) -> list[float]:
+    """Flux PROMOUVABLE (P0) : ne garde que ce qui peut réellement devenir survivant/candidat/pépite/PASS :
+    status == OK AND promotable == True AND exit_source == FWD_BOOK. Une sortie APPROXIMATE (fwd_mid±spread)
+    est diagnostique mais JAMAIS promouvable."""
+    return [o["net_bps"] for o in episodes
+            if o.get("status") == "OK" and o.get("promotable") is True
+            and o.get("exit_source") == "FWD_BOOK" and o.get("net_bps") is not None]
 
 
 # ─────────────── FAST_SCREEN (approx, ne promeut jamais) ───────────────
@@ -97,6 +109,11 @@ def generer_variantes(*, familles, directions, horizons, regimes, coins, params_
                             out.append({"family": fam, "direction": int(d), "horizon_ms": int(h),
                                         "regime": reg, "coin": coin, "params": dict(pv)})
     return out
+
+
+def embargo_reel(horizons, *, latence_max_ms: float = LATENCE_MAX_MS, feature_dur_max_ms: float = FEATURE_DUREE_MAX_MS) -> float:
+    """Embargo/purge = max(horizon max du trial, latence maximale, durée maximale des features). Jamais 1 ms."""
+    return max([float(h) for h in horizons] + [float(latence_max_ms), float(feature_dur_max_ms)])
 
 
 def _filtrer_corpus(corpus, *, coin=None, regime=None, predicat=None, family=None, seuil=None):
@@ -147,8 +164,8 @@ def phase_discovery(rundir: Path, corpus_disc: list[dict], variantes: list[dict]
                                                    "moteur": "FAST_SCREEN", "net_median_bps": fs["net_approx_bps"],
                                                    "sharpe": None, "pf": None, "verdict": "KILL_FAST"})
             continue
-        # EXACT_REPLAY sur le survivant (objets par épisode -> net mesurés, sans zip)
-        nets = _nets_ok(nets_exact(sub, sens=v["direction"], horizon_ms=v["horizon_ms"]))
+        # EXACT_REPLAY sur le survivant : SEULS les nets PROMOUVABLES (FWD_BOOK) décident du survivant (P0)
+        nets = _nets_promo(nets_exact(sub, sens=v["direction"], horizon_ms=v["horizon_ms"]))
         n_exact += 1
         net_med = statistics.median(nets) if nets else None
         sh = VAL.sharpe(nets) if len(nets) >= 2 else None
@@ -191,8 +208,9 @@ def phase_freeze(rundir: Path, survivants: list[dict], *, code_sha: str) -> dict
         vus.add(cle)
         uniques.append(s)
     frozen = {"code_sha": code_sha, "gele": True, "criteres": V18.SEUILS,
-              "candidats": [{k: s[k] for k in ("trial_id", "family", "coin", "horizon_ms", "regime", "direction",
-                                               "net_median_bps", "sharpe", "pf")} for s in uniques]}
+              "candidats": [{**{k: s[k] for k in ("trial_id", "family", "coin", "horizon_ms", "regime", "direction",
+                                                  "net_median_bps", "sharpe", "pf")},
+                             "params": s.get("params") or {}} for s in uniques]}
     (rundir / "resultats" / "CANDIDATES_FROZEN.json").write_text(
         json.dumps(frozen, ensure_ascii=False, indent=1), encoding="utf-8")
     return {"n_candidats_figes": len(uniques), "gele": True}
@@ -221,16 +239,17 @@ def phase_validation(rundir: Path, corpus_val: list[dict], *, survivants: list[d
             break
         sub = _filtrer_corpus(corpus_val, coin=s["coin"], regime=s["regime"])
         episodes = nets_exact(sub, sens=s["direction"], horizon_ms=s["horizon_ms"])
-        nets = _nets_ok(episodes)
-        # walk-forward par ÉPISODE (ts propre à chaque épisode mesuré, jamais un zip filtrer→réassocier)
-        eps = [{"ts_ms": o["entry_ts"], "net_bps": o["net_bps"]} for o in episodes if o.get("status") == "OK"]
+        nets = _nets_promo(episodes)                          # P0 : seuls les PROMOUVABLES (FWD_BOOK) valident
+        # walk-forward par ÉPISODE PROMOUVABLE (ts propre, jamais un zip filtrer→réassocier)
+        eps = [{"ts_ms": o["entry_ts"], "net_bps": o["net_bps"]} for o in episodes
+               if o.get("status") == "OK" and o.get("promotable") and o.get("exit_source") == "FWD_BOOK"]
         wf = V18.walk_forward(eps, k=3, embargo_ms=1.0)
         # PLACEBO direction opposée RÉELLEMENT rejoué (recalcul par prix)
-        nets_opp = _nets_ok(nets_exact(sub, sens=-s["direction"], horizon_ms=s["horizon_ms"]))
+        nets_opp = _nets_promo(nets_exact(sub, sens=-s["direction"], horizon_ms=s["horizon_ms"]))
         # PLACEBO coin aléatoire compatible (autre coin, même régime)
         autres = [c for c in {e["coin"] for e in corpus_val} if c != s["coin"]]
-        nets_coin = _nets_ok(nets_exact(_filtrer_corpus(corpus_val, coin=(autres[0] if autres else s["coin"]), regime=s["regime"]),
-                                        sens=s["direction"], horizon_ms=s["horizon_ms"]))
+        nets_coin = _nets_promo(nets_exact(_filtrer_corpus(corpus_val, coin=(autres[0] if autres else s["coin"]), regime=s["regime"]),
+                                           sens=s["direction"], horizon_ms=s["horizon_ms"]))
         boot = V18.bootstrap_bloc(nets)
         d = VAL.dsr(nets, sharpes_essais=sharpes_tous) if len(nets) >= 8 else {"dsr": None}
         perf_pbo[s["trial_id"]] = nets
@@ -251,24 +270,35 @@ def phase_validation(rundir: Path, corpus_val: list[dict], *, survivants: list[d
 
 # ─────────────── PHASE HOLDOUT + FORWARD PAPER ───────────────
 def phase_holdout_forward(rundir: Path, corpus_hold: list[dict], corpus_fwd: list[dict], *,
-                          validation: list[dict]) -> dict:
-    """Ouvre le holdout SEULEMENT ici, rejoue les paramètres FIGÉS, et journalise le forward paper (chaque
-    signal / no-trade / fill / no-fill / partiel). Aucun tuning."""
+                          validation: list[dict], freeze_ts: float = 0.0, embargo_ms: float = 1.0,
+                          data_cutoff=None, portefeuille_global_dir=None) -> dict:
+    """HOLDOUT ≠ FORWARD (P2). Le holdout (avant freeze_ts) sert AUX MÉTRIQUES OOS. Le forward paper ne rejoue
+    QUE des événements STRICTEMENT après le gel (exchange_ts > freeze_ts) — jamais le holdout réutilisé. Aucun
+    tuning. Chaque candidat conserve freeze_ts / data_cutoff / last_forward_event_id / n_live / régimes / etc."""
     rundir = Path(rundir)
     geles = candidats_geles(rundir)
     if not geles:
-        return {"holdout": "AUCUN_CANDIDAT_GELE"}
+        return {"holdout": "AUCUN_CANDIDAT_GELE", "freeze_ts": freeze_ts}
+    # garde-fou DUR : le forward ne contient que du STRICTEMENT après le gel (disjoint du holdout)
+    corpus_fwd = [e for e in corpus_fwd if e.get("ts_ms", 0) > freeze_ts]
     lignes_fwd, hold = [], []
     for c in geles:
         sub_h = _filtrer_corpus(corpus_hold, coin=c["coin"], regime=c["regime"])
-        nets_h = _nets_ok(nets_exact(sub_h, sens=c["direction"], horizon_ms=c["horizon_ms"]))
-        sub_f = _filtrer_corpus(corpus_fwd, coin=c["coin"], regime=c["regime"])
+        nets_h = _nets_promo(nets_exact(sub_h, sens=c["direction"], horizon_ms=c["horizon_ms"]))   # P0
+        # forward LIVE : filtré par COIN seul (le régime dérive en live ; on ENREGISTRE les régimes rencontrés)
+        sub_f = _filtrer_corpus(corpus_fwd, coin=c["coin"])
+        n_live = 0
+        last_fwd_id = None
+        regimes_vus = set()
         for ep in sub_f:
             r = moteur_exact(ep, sens=c["direction"], horizon_ms=c["horizon_ms"])
             evt = {"trial_id": c["trial_id"], "coin": c["coin"], "ts_ms": ep.get("ts_ms"),
                    "type": ("FILL" if r and r.get("statut") == "OK" else (r or {}).get("statut", "NO_DATA")),
                    "net_bps": (r or {}).get("net_bps")}
             lignes_fwd.append(evt)
+            n_live += 1
+            last_fwd_id = ep.get("episode_id") or ep.get("ts_ms")
+            regimes_vus.add(ep.get("regime"))
         vr = next((v for v in validation if v["trial_id"] == c["trial_id"]), {})
         nm_h = statistics.median(nets_h) if nets_h else None
         pf_h = _profit_factor(nets_h) if nets_h else None
@@ -276,21 +306,39 @@ def phase_holdout_forward(rundir: Path, corpus_hold: list[dict], corpus_fwd: lis
         # stress RÉEL : on ampute chaque net d'un surcoût conservateur et on regarde si la médiane survit
         stress_extra = V18.SEUILS.get("stress_extra_bps", 3.0)
         stress_survit = (statistics.median([x - stress_extra for x in nets_h]) > 0) if nets_h else None
-        # UF-3 : plateau / concentration / capacité RÉELLEMENT calculés (débloquent DATA_MISSING)
+        # AF-P0 : plateau de PARAMÈTRES (prédicat famille), stabilité horizons SÉPARÉE, concentration = MÊME
+        # signal filtré, capacité exigeant du L2 réel — tous sur le flux PROMOUVABLE uniquement.
         import metriques_pepites as MP
         import moteur_execution_prod as MEP
-        ev_nets = lambda corp, s, h: _nets_ok(nets_exact(corp, sens=s, horizon_ms=h))
-        plat = MP.plateau_reel(sub_h, sens=c["direction"], horizon_ms=c["horizon_ms"], evaluer_nets=ev_nets)
+        import familles_continue as FAM
+        fam = c["family"]
+        seuil0 = (c.get("params") or {}).get("seuil")
+        a_pred = FAM.FEATURE_REQUISE.get(fam) is not None
+        # évaluateur générique (par horizon) pour la stabilité d'horizons
+        ev_nets = lambda corp, s, h: _nets_promo(nets_exact(corp, sens=s, horizon_ms=h))
+        # évaluateur au seuil courant (prédicat famille) pour le plateau de paramètres
+        def _ev_seuil(seuil):
+            sub = _filtrer_corpus(sub_h, predicat=FAM.predicat, family=fam, seuil=seuil)
+            return _nets_promo(nets_exact(sub, sens=c["direction"], horizon_ms=c["horizon_ms"]))
+        # évaluateur par coin (MÊME signal filtré) pour la concentration
+        def _ev_coin(coin):
+            sub = _filtrer_corpus(corpus_hold, coin=coin, regime=c["regime"], predicat=FAM.predicat, family=fam, seuil=seuil0)
+            return _nets_promo(nets_exact(sub, sens=c["direction"], horizon_ms=c["horizon_ms"]))
+        plat = MP.plateau_parametres(seuil=seuil0, evaluer_seuil=_ev_seuil, famille_a_predicat=a_pred)
+        stab_h = MP.stabilite_horizons(sub_h, sens=c["direction"], horizon_ms=c["horizon_ms"], evaluer_nets=ev_nets)
         coins_dispo = sorted({e["coin"] for e in corpus_hold})
-        conc = MP.concentration_reelle(corpus_hold, sens=c["direction"], horizon_ms=c["horizon_ms"],
-                                       coins=coins_dispo, filtrer=lambda corp, coin: _filtrer_corpus(corp, coin=coin),
-                                       evaluer_nets=ev_nets)
+        conc = MP.concentration_reelle(coins=coins_dispo, evaluer_coin=_ev_coin)
         capa = MP.capacite_reelle(sub_h, sens=c["direction"], horizon_ms=c["horizon_ms"], courbe_capacite=MEP.courbe_capacite)
-        hold.append({"trial_id": c["trial_id"], "family": c["family"], "coin": c["coin"], "horizon_ms": c["horizon_ms"],
+        hold.append({"trial_id": c["trial_id"], "family": fam, "coin": c["coin"], "horizon_ms": c["horizon_ms"],
+                     "freeze_ts": freeze_ts, "data_cutoff": data_cutoff, "embargo_ms": embargo_ms,
+                     "n_forward_live": n_live, "last_forward_event_id": last_fwd_id,
+                     "forward_regimes": sorted(str(r) for r in regimes_vus if r is not None),
                      "n_holdout": len(nets_h), "holdout_net_median_bps": nm_h,
                      "holdout_pf": pf_h, "holdout_drawdown_bps": dd_h, "stress_survit": stress_survit,
-                     "plateau": plat.get("plateau"), "un_seul_coin_dominant": conc.get("un_seul_coin_dominant"),
-                     "capacite_non_nulle": capa.get("capacite_non_nulle"),
+                     "plateau": plat.get("plateau_parametres"), "plateau_motif": plat.get("motif"),
+                     "stabilite_horizons": stab_h.get("stabilite_horizons"),
+                     "un_seul_coin_dominant": conc.get("un_seul_coin_dominant"),
+                     "capacite_non_nulle": capa.get("capacite_non_nulle"), "capacite_motif": capa.get("motif"),
                      "capacite_courbe": capa.get("courbe"), "concentration": conc.get("contribution"),
                      "validation_net_median_bps": vr.get("net_median_bps"), "dsr": vr.get("dsr"),
                      "pbo": None,  # rempli par reconcilier (pbo global de la campagne)
@@ -305,9 +353,15 @@ def phase_holdout_forward(rundir: Path, corpus_hold: list[dict], corpus_fwd: lis
     try:
         import forward_portefeuille as FPF
         import moteur_execution_prod as MEP
+        pfg = None
+        if portefeuille_global_dir is not None:              # AF-P3 : UN portefeuille GLOBAL vivant du run
+            from portefeuille_global import PortefeuilleGlobal
+            pfg = PortefeuilleGlobal(portefeuille_global_dir)
         sim = FPF.simuler(geles, corpus_fwd, filtrer=_filtrer_corpus,
-                          evaluer=lambda ep, sens, horizon_ms: MEP.evaluer_episode(ep, sens=sens, horizon_ms=horizon_ms))
-        sim["portefeuille"].ecrire_ledger(rundir / "ledger" / "forward_portfolio.jsonl")
+                          evaluer=lambda ep, sens, horizon_ms: MEP.evaluer_episode(ep, sens=sens, horizon_ms=horizon_ms),
+                          portefeuille=pfg)
+        if hasattr(sim["portefeuille"], "ecrire_ledger"):    # portefeuille local -> on écrit son ledger de campagne
+            sim["portefeuille"].ecrire_ledger(rundir / "ledger" / "forward_portfolio.jsonl")
         reco_pf = sim["reconciliation"]
         (rundir / "resultats" / "forward_portfolio_reconciliation.json").write_text(
             json.dumps({**reco_pf, "n_signaux": sim["n_signaux"], "n_ouverts": sim["n_ouverts"],
@@ -386,16 +440,22 @@ def corpus_fixtures(*, n_par_coin: int = 60, coins=("BTC", "ETH"), regimes=("cal
                 bid, ask = mid - spread / 2, mid + spread / 2
                 # edge brut court terme (bps) : positif et net-positif seulement en régime 'vol' à court horizon
                 edge_court = (rng.gauss(30, 8) if reg == "vol" else rng.gauss(-12, 6))
-                fwd = {}
+                fwd, fwd_b, fwd_a = {}, {}, {}
                 for h in HORIZONS_MS:
                     decay = max(0.0, 1.0 - (h / 2000.0))      # l'edge s'estompe : ~0 au-delà de 2 s
                     e_bps = edge_court * decay + rng.gauss(0, 3)
-                    fwd[h] = mid * (1.0 + e_bps / 1e4)
+                    m = mid * (1.0 + e_bps / 1e4)
+                    fwd[h] = m
+                    fwd_b[h] = m - spread / 2                 # vrai bid/ask FUTUR (FWD_BOOK -> promouvable)
+                    fwd_a[h] = m + spread / 2
+                # profondeur L2 réelle (pour la capacité) : quelques niveaux de part et d'autre
+                asks = [[ask + k * spread, 3000.0] for k in range(5)]
+                bids = [[bid - k * spread, 3000.0] for k in range(5)]
                 eps.append({"coin": coin, "regime": reg, "ts_ms": float(horodatage),
                             "bid": bid, "ask": ask, "bid_sz": 5000.0, "ask_sz": 5000.0,
                             "queue_devant_sz": 200.0, "vol_traversant_sz": 800.0,
                             "fees_bps": 1.5, "slippage_bps": 0.8, "impact_bps": 0.2, "latence_bps": 0.3,
-                            "fwd_mid": fwd})
+                            "fwd_mid": fwd, "fwd_bid": fwd_b, "fwd_ask": fwd_a, "bids": bids, "asks": asks})
     return eps
 
 
@@ -448,19 +508,43 @@ def corpus_depuis_archives(root: Path, *, max_episodes: int = 4000, horizons=HOR
 
 def executer_pipeline_complet(root: Path, rundir: Path, corpus: list[dict], *, code_sha: str,
                               source_hash: str = "fixtures", horizons=(250, 1000, 5000, 30000),
-                              variantes=None, stop_event=None, predicat=None, securise=None) -> dict:
+                              variantes=None, stop_event=None, predicat=None, securise=None,
+                              portefeuille_global_dir=None) -> dict:
     """Chaîne les 7 phases sur un corpus (fixtures en test, archives en prod), en SÉPARANT les partitions
     temporelles (anti-fuite) : discovery/validation/holdout par ts. Retourne les compteurs prouvant que la
     boucle produit RÉELLEMENT trials/replays/validation/holdout/forward. Écrit tous les artefacts."""
     rundir = Path(rundir)
     for sd in ("resultats", "ledger", "results", "partitions", "manifeste"):
         (rundir / sd).mkdir(parents=True, exist_ok=True)
-    # partitions par QUANTILES d'événements (robuste aux ts aberrants ; anti-fuite préservé)
-    split = V18.partitions_par_quantiles([e["ts_ms"] for e in corpus], horizon_max_ms=1.0)
+    # EMBARGO RÉEL (P2) = max(horizon du trial, latence max, durée max des features) — jamais 1 ms codé en dur.
+    embargo_ms = embargo_reel(horizons)
+    # plafond de FAISABILITÉ : l'embargo ne peut pas manger plus de ~8% de la fenêtre (sinon les partitions
+    # s'effondrent) — sur des données réelles (heures), 60 s << 8% et le plafond ne s'active jamais.
+    tss = [e["ts_ms"] for e in corpus]
+    span = (max(tss) - min(tss)) if tss else 0.0
+    embargo_eff = min(embargo_ms, span * 0.08) if span > 0 else embargo_ms
+    split = V18.partitions_par_quantiles(tss, horizon_max_ms=embargo_eff)
     V18.sceller_split(rundir, split)
     disc = [e for e in corpus if V18.partition_de(e["ts_ms"], split) == "discovery"]
     val = [e for e in corpus if V18.partition_de(e["ts_ms"], split) == "validation"]
-    hold = [e for e in corpus if V18.partition_de(e["ts_ms"], split) == "holdout"]
+    hold_full = [e for e in corpus if V18.partition_de(e["ts_ms"], split) == "holdout"]
+    if not hold_full and corpus:                             # repli robuste : partition holdout vide (embargo/quantiles)
+        ts_all = sorted(e["ts_ms"] for e in corpus)
+        s55 = ts_all[int(len(ts_all) * 0.55)]
+        s75 = ts_all[int(len(ts_all) * 0.75)]
+        disc = disc or [e for e in corpus if e["ts_ms"] < s55]
+        val = val or [e for e in corpus if s55 <= e["ts_ms"] < s75]
+        hold_full = [e for e in corpus if e["ts_ms"] >= s75]
+    # HOLDOUT ≠ FORWARD (P2) : le gel se produit au MILIEU du holdout. holdout = avant le gel (métriques OOS) ;
+    # forward = STRICTEMENT après le gel (exchange_ts > freeze_ts). Les deux ensembles sont DISJOINTS par ts.
+    ts_hold = sorted(e["ts_ms"] for e in hold_full)
+    freeze_ts = (ts_hold[len(ts_hold) // 3] if ts_hold else 0.0)   # gel au 1er tiers -> forward = 2/3 restants
+    hold = [e for e in hold_full if e["ts_ms"] <= freeze_ts]
+    forward = [e for e in hold_full if e["ts_ms"] > freeze_ts]
+    (rundir / "resultats" / "freeze.json").write_text(json.dumps(
+        {"freeze_ts": freeze_ts, "embargo_ms": embargo_ms, "embargo_effectif_ms": embargo_eff,
+         "n_holdout": len(hold), "n_forward": len(forward),
+         "data_cutoff": (max(e["ts_ms"] for e in disc) if disc else None)}, ensure_ascii=False, indent=1), encoding="utf-8")
     coins = sorted({e["coin"] for e in corpus})
     regimes = sorted({e["regime"] for e in corpus})
     if variantes is None:
@@ -489,7 +573,10 @@ def executer_pipeline_complet(root: Path, rundir: Path, corpus: list[dict], *, c
                   "n_holdout": 0, "n_forward_events": 0, "n_pass": 0, "interrompu": True}
         (rundir / "resultats" / "pipeline_resume.json").write_text(json.dumps(resume, ensure_ascii=False, indent=1), encoding="utf-8")
         return resume
-    hf = phase_holdout_forward(rundir, hold or corpus, hold or corpus, validation=v["rapports"])
+    hf = phase_holdout_forward(rundir, hold or corpus, forward, validation=v["rapports"],
+                               freeze_ts=freeze_ts, embargo_ms=embargo_ms,
+                               data_cutoff=(max(e["ts_ms"] for e in disc) if disc else None),
+                               portefeuille_global_dir=portefeuille_global_dir)
     rec = reconcilier_et_juger(rundir, holdout=hf.get("holdout", []), pbo=v.get("pbo"), securise=securise)
     resume = {"n_variantes": len(variantes), **{k: d[k] for k in ("n_preregistres", "n_fast_screen", "n_exact_replays", "n_survivants")},
               "n_candidats_figes": fr["n_candidats_figes"], "n_valides": v["n_valides"], "pbo": v.get("pbo"),
@@ -502,7 +589,8 @@ def executer_pipeline_complet(root: Path, rundir: Path, corpus: list[dict], *, c
 def executer_pipeline_donnees_completes(root: Path, rundir: Path, *, code_sha: str,
                                         dossiers=None, ledgers_logs=None,
                                         variantes=None, stop_event=None, predicat=None,
-                                        new_events=None, affected_windows=None, hist_dir=None, securise=None) -> dict:
+                                        new_events=None, affected_windows=None, hist_dir=None, securise=None,
+                                        episodes_prets=None, portefeuille_global_dir=None) -> dict:
     """LOT18H-DATA-COMPLETE : catalogue COMPLET (sans plafond silencieux) → CORPUS canonique réellement
     consommé (provenance + dedup selon la source) → 7 phases → analyse des LOGS (refus rejoués, gate vs
     no-gate) → LIGNÉE des PnL → CSVs d'utilisation. Une source cataloguée ne compte que si elle est CONSOMMÉE."""
@@ -536,17 +624,23 @@ def executer_pipeline_donnees_completes(root: Path, rundir: Path, *, code_sha: s
         corpus = fen["working"] or hist["corpus"]
         cat = {"sources": [], "accounting": hist["manifest"].get("accounting", {})}
         cons = {"episodes": corpus, "comptes": {"utilises": len(corpus)}}
+        # AF-P1 : les épisodes LIVE MÛRIS (FWD_BOOK, promouvables) s'ajoutent au corpus de travail
+        prets = list(episodes_prets or [])
+        if prets:
+            corpus = corpus + prets
         ingestion = {"mode": "INCREMENTAL", "from_cache": hist["from_cache"],
                      "n_sources_parsees_ce_cycle": hist["n_sources_parsees_ce_cycle"],
                      "n_hist_total": fen["n_hist_total"], "n_hist_rejoues": fen["n_hist_rejoues"],
-                     "n_new_segments": fen["n_new_segments"], "coins_actifs": fen["coins"]}
+                     "n_new_segments": fen["n_new_segments"], "n_episodes_muris": len(prets),
+                     "coins_actifs": fen["coins"]}
         sources = cat["sources"]
     if not corpus:                                         # honnête : pas d'épisode marché exploitable
         corpus = corpus_fixtures()
         cons["comptes"]["fallback"] = "SYNTHETIC (aucun épisode BBO exploitable dans les archives)"
     resume = executer_pipeline_complet(root, rundir, corpus, code_sha=code_sha,
                                        source_hash=(sources[0]["sha256"] if sources and sources[0].get("sha256") else "corpus"),
-                                       variantes=variantes, stop_event=stop_event, predicat=predicat, securise=securise)
+                                       variantes=variantes, stop_event=stop_event, predicat=predicat, securise=securise,
+                                       portefeuille_global_dir=portefeuille_global_dir)
     # analyse des logs / ledgers (refus rejoués + gate vs no-gate)
     if ledgers_logs is None:
         ledgers_logs = _ledgers_logs_par_defaut(root)

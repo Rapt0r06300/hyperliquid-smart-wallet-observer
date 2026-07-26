@@ -38,10 +38,15 @@ def _signaux(geles, corpus_fwd, *, filtrer, evaluer, max_par_candidat=400, stop_
 
 
 def simuler(geles, corpus_fwd, *, filtrer, evaluer, capital: float = 1000.0, notional_par_trade: float = 100.0,
-            levier: float = 3.0, stop_event=None) -> dict:
-    """Rejoue le forward à capital PARTAGÉ. Rend {portefeuille, n_signaux, n_ouverts, n_refuses, reconciliation}."""
-    from portefeuille_paper import PortefeuillePaper
-    pf = PortefeuillePaper(capital, levier=levier)
+            levier: float = 3.0, stop_event=None, portefeuille=None) -> dict:
+    """Rejoue le forward à capital PARTAGÉ. Si `portefeuille` est fourni (ex. le portefeuille GLOBAL persistant
+    du run, AF-P3), il est UTILISÉ TEL QUEL (positions partagées entre candidats/campagnes) ; sinon on crée un
+    portefeuille paper local. Rend {portefeuille, n_signaux, n_ouverts, n_refuses, reconciliation}."""
+    if portefeuille is not None:
+        pf = portefeuille
+    else:
+        from portefeuille_paper import PortefeuillePaper
+        pf = PortefeuillePaper(capital, levier=levier)
     sigs = _signaux(geles, corpus_fwd, filtrer=filtrer, evaluer=evaluer, stop_event=stop_event)
     pending = []                                              # (exit_ts, position_id, exit_px)
     n_ouverts = n_refuses = 0

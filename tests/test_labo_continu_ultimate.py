@@ -65,20 +65,26 @@ def test_courbe_capacite():
 
 # ─────────── UF-3 : métriques qui débloquent les pépites ───────────
 def test_plateau_concentration_capacite_calcules():
-    # corpus multi-coins, multi-horizons -> plateau + concentration calculables
+    # corpus multi-coins avec vrai carnet futur (FWD_BOOK) -> stabilité horizons + concentration calculables
     corpus = []
     for coin, base in (("BTC", 100.0), ("ETH", 50.0)):
         for i in range(30):
             corpus.append({"coin": coin, "ts_ms": i, "bid": base - 0.02, "ask": base + 0.02,
-                           "fwd_mid": {250: base * 1.001, 1000: base * 1.002, 5000: base * 1.003}})
-    ev = lambda corp, s, h: MEP.nets_mesures(MEP.evaluer_episodes(corp, sens=s, horizon_ms=h))
-    plat = MP.plateau_reel(corpus, sens=1, horizon_ms=1000, evaluer_nets=ev)
-    conc = MP.concentration_reelle(corpus, sens=1, horizon_ms=1000, coins=["BTC", "ETH"],
-                                   filtrer=lambda c, coin: [e for e in c if e["coin"] == coin], evaluer_nets=ev)
-    capa = MP.capacite_reelle(corpus, sens=1, horizon_ms=1000, courbe_capacite=MEP.courbe_capacite)
-    assert plat["plateau"] is not None and plat["n_horizons"] >= 3      # calculé, pas None
+                           "fwd_bid": {250: base * 1.0008, 1000: base * 1.0018, 5000: base * 1.0028},
+                           "fwd_ask": {250: base * 1.0012, 1000: base * 1.0022, 5000: base * 1.0032}})
+    evp = lambda corp, s, h: [o["net_bps"] for o in MEP.evaluer_episodes(corp, sens=s, horizon_ms=h)
+                              if o.get("status") == "OK" and o.get("promotable") and o.get("exit_source") == "FWD_BOOK"]
+    stab = MP.stabilite_horizons(corpus, sens=1, horizon_ms=1000, evaluer_nets=evp)
+    conc = MP.concentration_reelle(coins=["BTC", "ETH"], evaluer_coin=lambda coin: evp([e for e in corpus if e["coin"] == coin], 1, 1000))
+    # plateau de PARAMÈTRES : sans famille à prédicat -> None (PAS_DE_PARAMETRE_ACTIF), honnête
+    plat_sans = MP.plateau_parametres(seuil=8, evaluer_seuil=lambda s: [1, 2, 3], famille_a_predicat=False)
+    plat_avec = MP.plateau_parametres(seuil=8, evaluer_seuil=lambda s: [5.0, 6.0, 5.5], famille_a_predicat=True)
+    capa_sans_l2 = MP.capacite_reelle(corpus, sens=1, horizon_ms=1000, courbe_capacite=MEP.courbe_capacite)
+    assert stab["stabilite_horizons"] is not None and stab["n_horizons"] >= 3
     assert conc["un_seul_coin_dominant"] is not None and conc["n_coins"] == 2
-    assert capa["capacite_non_nulle"] is not None
+    assert plat_sans["plateau_parametres"] is None and plat_sans["motif"] == "PAS_DE_PARAMETRE_ACTIF"
+    assert plat_avec["plateau_parametres"] is True                       # vrai plateau de paramètres
+    assert capa_sans_l2["capacite_non_nulle"] is None and capa_sans_l2["motif"] == "DATA_MISSING_L2"  # pas de profondeur
     assert MP.statut_simple("PASS_FORWARD_PAPER", net_bps=5) == MP.STATUTS_SIMPLES["MEILLEURE"]
 
 
