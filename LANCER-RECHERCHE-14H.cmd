@@ -40,8 +40,9 @@ REM 1) relancer PROPREMENT les collecteurs isoles (throttle actif). boucle_colle
 start "" /b tools\boucle_collecteur.cmd research-lab tools\lancer_research_parallel.py 60 --max-ticks 1
 start "" /b tools\boucle_collecteur.cmd lab-microstructure tools\collecter_lab_microstructure.py 30
 start "" /b tools\boucle_collecteur.cmd lab-ctx tools\collecter_lab_ctx.py 30
-REM 2) laisser 20 s aux flux pour grossir (le precheck EXIGE une croissance WS reelle)
-ping -n 21 127.0.0.1 >nul 2>&1
+REM 2) laisser 45 s aux flux pour se connecter + s'abonner (72 souscriptions throttlees) + recevoir
+REM    (le precheck EXIGE une croissance WS reelle : messages qui montent).
+ping -n 46 127.0.0.1 >nul 2>&1
 REM 3) precheck bloquant + creation du run (chrono demarre seulement si PASS). Sortie tracee (preuve).
 if not exist "runtime\research_lab\overnight_14h" mkdir "runtime\research_lab\overnight_14h" >nul 2>&1
 python tools\recherche_14h.py start > "runtime\research_lab\overnight_14h\_last_start.json" 2>&1

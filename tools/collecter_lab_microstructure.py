@@ -181,26 +181,33 @@ async def _boucle_ws(root: Path, coins: list[str]):  # pragma: no cover (réseau
         await asyncio.sleep(min(2.0 + cpt["reco"], 15.0))
 
 
-#: univers 24 coins par défaut (majors + actifs + coins de liquidation fréquents) tant que asset_ctx du
-#: labo n'a pas encore de quoi classer par vol×OI×liq. Remplacé dès que la data ctx arrive.
-UNIVERS_DEFAUT = ("BTC", "ETH", "SOL", "AVAX", "INJ", "LINK", "DASH", "NEO", "AAVE", "ONDO", "HYPE",
-                  "XRP", "DOGE", "WLD", "ARB", "OP", "SUI", "TIA", "SEI", "APT", "LTC", "BNB", "PEPE", "FARTCOIN")
+#: WHITELIST de 24 coins STREAMABLES (établis, liquides). MESURE LOT 8 : l'univers adaptatif brut par
+#: vol×OI×liq surface des memes ultra-illiquides (PUMP/KSHIB/KPEPE/MON/KBONK/CASHCAT…) que HL FERME
+#: immédiatement (pas de l2Book/bbo) -> 0 message. On restreint donc l'adaptatif à cette whitelist : on
+#: garde le classement par activité, mais JAMAIS un coin que HL ne streame pas.
+UNIVERS_DEFAUT = ("BTC", "ETH", "SOL", "AVAX", "INJ", "LINK", "DASH", "NEO", "AAVE", "ONDO", "XRP", "DOGE",
+                  "WLD", "ARB", "OP", "SUI", "TIA", "SEI", "APT", "LTC", "BNB", "ATOM", "NEAR", "ADA")
 
 
 def _charger_univers(root: Path, *, k: int = UNIVERS_K) -> list[str]:
-    """Univers ADAPTATIF : classe par vol×OI×liq depuis l'asset_ctx du labo (LOT 1) si présent, sinon
-    l'univers 24 par défaut. Relu à chaque démarrage/passe -> s'adapte sans redémarrage manuel."""
+    """Univers ADAPTATIF **restreint à la whitelist streamable** : classe par vol×OI×liq (asset_ctx du labo)
+    mais ne retient QUE des coins que HL streame vraiment (sinon HL ferme la connexion). Complète avec la
+    whitelist si < k. Relu à chaque démarrage -> s'adapte sans redémarrage, sans jamais casser le flux."""
     from hl_observer.research_parallel.plugins import _commun as K
+    blanche = list(UNIVERS_DEFAUT)
     recs = K.charger_lab_jsonl(root, "asset_ctx")
     if recs:
-        derniers = {}
-        for r in recs:
-            if r.get("coin"):
-                derniers[r["coin"]] = r
-        u = univers_adaptatif({c: d for c, d in derniers.items()}, k=k)
+        wl = set(blanche)
+        derniers = {r["coin"]: r for r in recs if r.get("coin") in wl}   # filtre streamable AVANT le classement
+        u = univers_adaptatif(derniers, k=k)
+        for c in blanche:                                                # complète avec la whitelist
+            if len(u) >= k:
+                break
+            if c not in u:
+                u.append(c)
         if len(u) >= 8:
-            return u
-    return list(UNIVERS_DEFAUT[:k])
+            return u[:k]
+    return blanche[:k]
 
 
 def main(argv=None) -> int:  # pragma: no cover
