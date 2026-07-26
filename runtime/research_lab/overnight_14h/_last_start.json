@@ -1,18 +1,34 @@
 {
- "demarrage": "REFUSE",
- "PRECHECK": "FAIL",
+ "demarrage": "OK",
+ "run_id": "r14h-6a1374643d22",
+ "t0_wall_ms": 1785025138800,
+ "fin_prevue_wall_ms": 1785075538800,
+ "rundir": "C:\\Users\\flo\\Desktop\\Projet invest\\runtime\\research_lab\\overnight_14h\\r14h-6a1374643d22",
+ "mecanismes": [
+  "OFI_TOP1",
+  "OFI_TOP5",
+  "OFI_TOP20",
+  "QUEUE_MICROPRICE",
+  "LIQUIDITY_VACUUM",
+  "HL_ABSORPTION_NATIVE",
+  "TRADE_SWEEP_BURST",
+  "OI_VEL_ACCEL_PRICE_FUNDING",
+  "FUNDING_CLOCK_DIVERGENCE",
+  "LIQUIDATION_CASCADE_DEPTH"
+ ],
+ "PRECHECK": "PASS",
  "checks": {
   "tests_verts": {
    "verts": true,
-   "resume": "33 passed in 1.74s"
+   "resume": "33 passed in 1.77s"
   },
   "instance_unique": true,
-  "heartbeat_main_frais_s": 0.06487274169921875,
-  "heartbeat_labo_frais_s": 24.03105854988098,
-  "ws_grossit": false,
+  "heartbeat_main_frais_s": 0.1082773208618164,
+  "heartbeat_labo_frais_s": 10.382996320724487,
+  "ws_grossit": true,
   "reconnexions_stables": true,
-  "disque_libre_go": 699.7,
-  "projection_14h_go": 9.5,
+  "disque_libre_go": 699.9,
+  "projection_14h_go": 12.6,
   "disque_2x_ok": true
  }
 }

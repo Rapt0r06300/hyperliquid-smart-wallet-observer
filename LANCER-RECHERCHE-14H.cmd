@@ -80,4 +80,6 @@ python tools\recherche_14h.py finalize
 goto :fin
 
 :fin
+REM la fenetre reste ouverte pour montrer la sortie (sauf start qui a deja son propre pause)
+if /i not "%ACTION%"=="start" pause
 endlocal

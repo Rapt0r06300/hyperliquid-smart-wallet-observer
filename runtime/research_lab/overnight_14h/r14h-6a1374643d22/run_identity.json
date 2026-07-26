@@ -1,0 +1,56 @@
+{
+ "run_id": "r14h-6a1374643d22",
+ "pid": 37240,
+ "t0_wall_ms": 1785025138800,
+ "t0_mono_ns": 1570900385328900,
+ "fin_prevue_wall_ms": 1785075538800,
+ "phases": [
+  {
+   "nom": "A_DECOUVERTE",
+   "debut_s": 0,
+   "fin_s": 18000
+  },
+  {
+   "nom": "EMBARGO_1",
+   "debut_s": 18000,
+   "fin_s": 21600
+  },
+  {
+   "nom": "B_VALIDATION",
+   "debut_s": 21600,
+   "fin_s": 36000
+  },
+  {
+   "nom": "EMBARGO_2",
+   "debut_s": 36000,
+   "fin_s": 39600
+  },
+  {
+   "nom": "C_HOLDOUT",
+   "debut_s": 39600,
+   "fin_s": 50400
+  }
+ ],
+ "mecanismes": [
+  "OFI_TOP1",
+  "OFI_TOP5",
+  "OFI_TOP20",
+  "QUEUE_MICROPRICE",
+  "LIQUIDITY_VACUUM",
+  "HL_ABSORPTION_NATIVE",
+  "TRADE_SWEEP_BURST",
+  "OI_VEL_ACCEL_PRICE_FUNDING",
+  "FUNDING_CLOCK_DIVERGENCE",
+  "LIQUIDATION_CASCADE_DEPTH"
+ ],
+ "criteres": {
+  "min_episodes": 30,
+  "pf_min": 1.2,
+  "dsr_min": 0.95,
+  "pbo_max": 0.2,
+  "cout_stress_pct": 50
+ },
+ "rundir": "C:\\Users\\flo\\Desktop\\Projet invest\\runtime\\research_lab\\overnight_14h\\r14h-6a1374643d22",
+ "read_only": true,
+ "real_execution": false
+}
