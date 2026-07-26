@@ -294,7 +294,9 @@ def snapshot(root: Path) -> dict:
         return {"snapshot": "AUCUN_RUN_ACTIF"}
     import rapport_continue as RAP
     rundir = Path(ident["rundir"])
-    chemin = rundir / ("SNAPSHOT-%d.md" % int(time.time()))
+    dossier_rapports = Path(root) / "Rapports en continu"    # snapshots aussi dans le dossier racine dedie
+    dossier_rapports.mkdir(parents=True, exist_ok=True)
+    chemin = dossier_rapports / ("SNAPSHOT_%s_%d.md" % (ident["run_id"], int(time.time())))
     _ecrire_atomique(chemin, RAP.construire(rundir, ident, final=False))
     return {"snapshot": "OK", "chemin": str(chemin)}
 
@@ -324,7 +326,9 @@ def finaliser(root: Path, *, partial: bool = False, raison: str = "ctrl-c") -> d
     _checkpoint(rundir, int(ident.get("cycle_courant", 0)), "FINALIZE")
     etat = "FINALIZATION_PARTIAL" if partial else "FINALIZATION_COMPLETE"
     date_fin = time.strftime("%Y%m%d-%H%M%S")
-    rapport = root / ("RAPPORT-RECHERCHE-CONTINUE_%s_%s.md" % (ident["run_id"], date_fin))
+    dossier_rapports = root / "Rapports en continu"          # tous les rapports dans un dossier racine dedie
+    dossier_rapports.mkdir(parents=True, exist_ok=True)
+    rapport = dossier_rapports / ("RAPPORT-RECHERCHE-CONTINUE_%s_%s.md" % (ident["run_id"], date_fin))
     try:
         md, exclusions = RAP.construire(rundir, ident, final=True, partial=partial, retourner_exclusions=True)
         if exclusions:
