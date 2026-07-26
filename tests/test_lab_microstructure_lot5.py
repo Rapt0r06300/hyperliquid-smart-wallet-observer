@@ -20,11 +20,14 @@ def test_univers_adaptatif_classe_par_volume_oi_liq():
     assert u[0] == "SOL", "le boost liquidation remonte SOL en tête"
 
 
-def test_parser_l2book_top20_avec_tailles():
+def test_parser_l2book_top20_avec_tailles_et_n():
+    # LOT12 : le champ n (nb d'ordres) est CONSERVE -> niveaux [px, sz, n]
     msg = {"channel": "l2Book", "data": {"coin": "ETH", "time": 111,
-           "levels": [[{"px": "100", "sz": "3"}], [{"px": "100.1", "sz": "4"}]]}}
+           "levels": [[{"px": "100", "sz": "3", "n": 7}], [{"px": "100.1", "sz": "4"}]]}}
     r = MIC.parser_l2book(msg)
-    assert r["coin"] == "ETH" and r["bids"] == [(100.0, 3.0)] and r["asks"] == [(100.1, 4.0)]
+    assert r["coin"] == "ETH"
+    assert r["bids"] == [[100.0, 3.0, 7]], "n conserve au niveau bid"
+    assert r["asks"] == [[100.1, 4.0, 0]], "n absent -> 0 (additif, jamais None)"
 
 
 def test_parser_trades_cote_agresseur():
@@ -34,11 +37,12 @@ def test_parser_trades_cote_agresseur():
     assert r[0]["side"] == 1 and r[1]["side"] == -1 and r[0]["sz"] == 5.0
 
 
-def test_parser_bbo_avec_tailles_obligatoires():
+def test_parser_bbo_avec_tailles_et_n():
     msg = {"channel": "bbo", "data": {"coin": "BTC", "time": 9,
-           "bbo": [{"px": "100", "sz": "2"}, {"px": "100.2", "sz": "3"}]}}
+           "bbo": [{"px": "100", "sz": "2", "n": 5}, {"px": "100.2", "sz": "3"}]}}
     r = MIC.parser_bbo(msg)
     assert r["bid_sz"] == 2.0 and r["ask_sz"] == 3.0
+    assert r["bid_n"] == 5 and r["ask_n"] == 0                                  # n conserve (LOT12)
     assert MIC.parser_bbo({"channel": "bbo", "data": {"coin": "X"}}) is None    # sans tailles -> None
 
 

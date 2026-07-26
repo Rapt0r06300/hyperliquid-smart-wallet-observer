@@ -44,13 +44,17 @@ def univers_adaptatif(ctxs: dict, *, k: int = UNIVERS_K, liq_counts: dict | None
 
 # ─────────────── parseurs WS (PURS) ───────────────
 def parser_l2book(msg: dict) -> dict | None:
-    """l2Book -> {coin, ts_ex, bids:[(px,sz)], asks:[(px,sz)]} (top 20). None si illisible."""
+    """l2Book -> {coin, ts_ex, bids:[(px,sz,n)], asks:[(px,sz,n)]} (top 20). Le `n` (nb d'ordres au niveau)
+    est CONSERVE (LOT12) : indispensable au modele de file maker (position devant = sz ET n). Additif :
+    [px,sz] (v1) et [px,sz,n] (v2) coexistent, tout parseur lisant l'index 1 (sz) reste valide. None si illisible."""
     try:
         d = msg["data"]
         coin = str(d["coin"]).upper()
         niveaux = d["levels"]
-        bids = [(float(x["px"]), float(x["sz"])) for x in niveaux[0][:TOP_L2]]
-        asks = [(float(x["px"]), float(x["sz"])) for x in niveaux[1][:TOP_L2]]
+        def _niv(x):
+            return [float(x["px"]), float(x["sz"]), int(x.get("n") or 0)]
+        bids = [_niv(x) for x in niveaux[0][:TOP_L2]]
+        asks = [_niv(x) for x in niveaux[1][:TOP_L2]]
     except (KeyError, TypeError, IndexError, ValueError):
         return None
     return {"flux": "l2book", "coin": coin, "ts_ex": d.get("time"), "bids": bids, "asks": asks}
@@ -80,8 +84,8 @@ def parser_bbo(msg: dict) -> dict | None:
         coin = str(d["coin"]).upper()
         bid, ask = d["bbo"][0], d["bbo"][1]
         return {"flux": "bbo", "coin": coin, "ts_ex": d.get("time"),
-                "bid": float(bid["px"]), "bid_sz": float(bid["sz"]),
-                "ask": float(ask["px"]), "ask_sz": float(ask["sz"])}
+                "bid": float(bid["px"]), "bid_sz": float(bid["sz"]), "bid_n": int(bid.get("n") or 0),
+                "ask": float(ask["px"]), "ask_sz": float(ask["sz"]), "ask_n": int(ask.get("n") or 0)}
     except (KeyError, TypeError, IndexError, ValueError):
         return None
 
@@ -109,9 +113,10 @@ def ecrire_micro(root: Path, flux: str, lignes: list[dict], *, seqs: dict | None
                     prev = seqs.get("_last_ts_%s" % coin)
                     if prev is not None and l["ts_ex"] < prev:
                         gap = "TS_RECUL"                 # horodatage exchange en recul = anomalie
+                        seqs["_gaps"] = seqs.get("_gaps", 0) + 1
                     seqs["_last_ts_%s" % coin] = l["ts_ex"]
                 corps = {**l, "ts_wall_ms": now_ms, "ts_mono_ns": mono, "seq": seq, "gap": gap,
-                         "source": "hl_ws_public", "read_only": True, "real_execution": False}
+                         "schema_version": 2, "source": "hl_ws_public", "read_only": True, "real_execution": False}
                 corps["checksum"] = hashlib.sha256(
                     json.dumps(corps, sort_keys=True, ensure_ascii=False).encode()).hexdigest()[:12]
                 f.write(json.dumps(corps, ensure_ascii=False) + "\n")
@@ -122,11 +127,19 @@ def ecrire_micro(root: Path, flux: str, lignes: list[dict], *, seqs: dict | None
     return n
 
 
-def _heartbeat_micro(root: Path, coins, reco: int, msgs: int) -> None:  # pragma: no cover
+def _heartbeat_micro(root: Path, coins, cpt: dict, seqs: dict | None = None) -> None:  # pragma: no cover
+    """Heartbeat ENRICHI (LOT12) : ACK reçus, couverture par coin/flux, messages/s, gaps, reconnexions,
+    schema_version. Sert de preuve de santé du flux dense."""
+    seqs = seqs or {}
+    elapsed = max(1.0, time.monotonic() - cpt.get("t0", time.monotonic()))
+    couv = sorted({k for k in seqs if not str(k).startswith("_")})
     try:
         (ISO.lab_root(root) / "micro_heartbeat.json").write_text(
             json.dumps({"ts_wall_ms": int(time.time() * 1000), "ts_mono_ns": time.monotonic_ns(),
-                        "coins": len(coins), "reconnexions": reco, "messages": msgs}, ensure_ascii=False),
+                        "schema_version": 2, "coins": len(coins), "couverture_coins": len(couv),
+                        "ack": cpt.get("ack", 0), "reconnexions": cpt.get("reco", 0),
+                        "messages": cpt.get("msgs", 0), "messages_par_s": round(cpt.get("msgs", 0) / elapsed, 2),
+                        "gaps": seqs.get("_gaps", 0)}, ensure_ascii=False),
             encoding="utf-8")
     except OSError:
         pass
@@ -143,7 +156,7 @@ async def _une_connexion(root: Path, coins: list[str], seqs: dict, cpt: dict):  
             for typ in ("l2Book", "trades", "bbo"):
                 await ws.send(json.dumps({"method": "subscribe", "subscription": {"type": typ, "coin": c}}))
                 await asyncio.sleep(0.06)
-        _heartbeat_micro(root, coins, cpt["reco"], cpt["msgs"])
+        _heartbeat_micro(root, coins, cpt, seqs)
         async for brut in ws:
             try:
                 msg = json.loads(brut)
@@ -160,9 +173,11 @@ async def _une_connexion(root: Path, coins: list[str], seqs: dict, cpt: dict):  
                 r = parser_bbo(msg)
                 if r:
                     ecrire_micro(root, "bbo", [r], seqs=seqs)
+            elif ch in ("subscriptionResponse", "post"):     # ACK d'abonnement HL
+                cpt["ack"] = cpt.get("ack", 0) + 1
             cpt["msgs"] += 1
             if cpt["msgs"] % 200 == 0:
-                _heartbeat_micro(root, coins, cpt["reco"], cpt["msgs"])
+                _heartbeat_micro(root, coins, cpt, seqs)
 
 
 async def _boucle_ws(root: Path, coins: list[str]):  # pragma: no cover (réseau, tourne sur Windows)
@@ -170,14 +185,14 @@ async def _boucle_ws(root: Path, coins: list[str]):  # pragma: no cover (réseau
     borné — on ne meurt JAMAIS sur une déconnexion (exigence live de Flo). Chaque reconnexion est comptée."""
     import asyncio
     seqs: dict = {}
-    cpt = {"reco": 0, "msgs": 0}
+    cpt = {"reco": 0, "msgs": 0, "ack": 0, "t0": time.monotonic()}
     while True:
         try:
             await _une_connexion(root, coins, seqs, cpt)
         except Exception as e:  # noqa: BLE001 (déconnexion/erreur -> on reconnecte, on ne tombe pas)
             print("[micro] deconnexion (%s) -> reconnexion" % str(e)[:80], flush=True)
         cpt["reco"] += 1
-        _heartbeat_micro(root, coins, cpt["reco"], cpt["msgs"])
+        _heartbeat_micro(root, coins, cpt, seqs)
         await asyncio.sleep(min(2.0 + cpt["reco"], 15.0))
 
 
