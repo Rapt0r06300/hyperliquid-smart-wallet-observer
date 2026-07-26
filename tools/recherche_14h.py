@@ -285,7 +285,12 @@ def finaliser(root: Path) -> dict:
     (rundir / "manifeste" / "SHA256_MANIFEST.json").write_text(
         json.dumps(manifeste, ensure_ascii=False, indent=1), encoding="utf-8")
     rapport = Path(root) / "RAPPORT-RECHERCHE-14H.md"
-    rapport.write_text(_rapport_md(ident, manifeste), encoding="utf-8")
+    try:                                                       # 🔴 VRAI rapport détaillé (plus de stub vide)
+        from rapport_14h import construire_rapport
+        contenu = construire_rapport(rundir, manifeste=manifeste)
+    except Exception:  # noqa: BLE001 — repli sûr : jamais de finalisation qui plante faute de rapport
+        contenu = _rapport_md(ident, manifeste)
+    rapport.write_text(contenu, encoding="utf-8")
     try:
         (_run_root(Path(root)) / "ACTIVE.json").unlink()
     except OSError:
