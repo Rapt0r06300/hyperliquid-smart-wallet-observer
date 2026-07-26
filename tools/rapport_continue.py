@@ -166,11 +166,11 @@ def construire(rundir, ident, *, final: bool = True, partial: bool = False, reto
     rec = _lire(rundir / "results" / "reconciliation.json", {})
     L.append("## 26. Réconciliation PnL / ROI / equity / drawdown (reconstruite depuis les ledgers d'événements)")
     if rec:
-        L.append("- campagnes **%s** · verdicts **%s** · PASS forward **%s** · PnL réalisé **%s $** · equity totale **%s $** · drawdown **%s $** · cohérent **%s**" % (
-            rec.get("n_campagnes"), rec.get("n_verdicts"), rec.get("n_pass"), rec.get("pnl_realise_usd"),
-            rec.get("equity_totale_usd"), rec.get("drawdown_usd"), rec.get("coherent")))
-        if rec.get("incoherences"):
-            L.append("- ⚠️ incohérences ledger↔portefeuille : %s (jamais masquées)" % len(rec["incoherences"]))
+        L.append("- capital initial **%s $** · PnL réalisé **%s $** · equity **%s $** · drawdown **%s $** · ROI total **%s%%** · ROI déployé **%s%%**" % (
+            rec.get("capital_initial_usd"), rec.get("pnl_realise_usd"), rec.get("equity_usd"),
+            rec.get("drawdown_usd"), rec.get("roi_total_pct"), rec.get("roi_deploye_pct")))
+        L.append("- campagnes **%s** · verdicts **%s** · PASS forward **%s** · equity curve : results/equity_curve.jsonl" % (
+            rec.get("n_campagnes"), rec.get("n_verdicts"), rec.get("n_pass")))
         L.append("- exclusions réelles agrégées : **%s** (voir reconciliation.json)" % rec.get("n_exclusions", 0))
         L.append("- %s\n" % rec.get("note", ""))
     else:

@@ -17,14 +17,16 @@ from __future__ import annotations
 
 import hashlib
 
-# ─────────── profils de frais VERSIONNÉS (bps par jambe) ───────────
-#: maker peut être un rebate (négatif) mais on ne l'exploite pas par défaut (conservateur). taker = payé.
+# ─────────── profils de frais VERSIONNÉS/DATÉS (bps par jambe) ───────────
+#: défaut PERP CONSERVATEUR quand userFees manque : taker 4,5 bps / maker 1,5 bp par jambe (2026-07-26).
+#: maker peut être un rebate ailleurs mais on ne l'exploite pas par défaut (conservateur). taker = payé.
 PROFILS_FRAIS = {
-    "hl_v1_conservateur": {"maker_bps": 1.0, "taker_bps": 3.5, "source": "conservateur (userFees absents)"},
-    "hl_v1_standard":     {"maker_bps": 1.0, "taker_bps": 2.5, "source": "grille HL standard"},
-    "hl_v1_vip":          {"maker_bps": 0.0, "taker_bps": 2.0, "source": "grille HL réduite"},
+    "hl_perp_2026_07_conservateur": {"maker_bps": 1.5, "taker_bps": 4.5, "date": "2026-07-26",
+                                     "source": "défaut conservateur (userFees absents)"},
+    "hl_perp_2026_07_standard":     {"maker_bps": 1.0, "taker_bps": 2.5, "date": "2026-07-26", "source": "grille HL standard"},
+    "hl_perp_2026_07_vip":          {"maker_bps": 0.0, "taker_bps": 2.0, "date": "2026-07-26", "source": "grille HL réduite"},
 }
-PROFIL_DEFAUT = "hl_v1_conservateur"
+PROFIL_DEFAUT = "hl_perp_2026_07_conservateur"
 
 
 def frais_par_jambe(profil: str, *, maker: bool, user_fees_bps=None) -> float:
@@ -138,13 +140,16 @@ def evaluer_episode(ep: dict, *, sens: int, horizon_ms: int, modele_exec: str = 
         entry_px = bid if sens > 0 else ask          # passif : on POSTE du bon côté (économise le spread d'entrée)
     else:
         entry_px = ask if sens > 0 else bid          # taker : on CROISE
-    # slippage de profondeur (VWAP par notionnel) si le carnet est fourni
+    # slippage de profondeur (VWAP par notionnel) si le carnet est fourni. ANTI-DOUBLE-COMPTAGE :
+    # si l'entrée exécute au VWAP, le coût de profondeur est DÉJÀ dans entry_px -> on ne le soustrait PAS une 2e fois.
+    slippage_dans_prix = False
     cote_entree = (ep.get("asks") if sens > 0 else ep.get("bids")) if not maker else None
     if cote_entree:
         vp = vwap_profondeur(cote_entree, notional_usd)
         if vp["vwap"]:
             entry_px = vp["vwap"]
-        slippage_bps = abs((entry_px - (vp["px_top"] or entry_px)) / mid) * 1e4
+            slippage_dans_prix = True
+        slippage_bps = 0.0 if slippage_dans_prix else (_num(ep.get("slippage_bps")) or 0.0)
     else:
         slippage_bps = (_num(ep.get("slippage_bps")) or 0.0)
     # ── SORTIE exécutable ──
@@ -179,8 +184,12 @@ def evaluer_episode(ep: dict, *, sens: int, horizon_ms: int, modele_exec: str = 
     funding_bps = (abs(fbph) * heures) if fbph is not None else 0.0   # coût conservateur : on paie le funding
     spread_effectif_bps = (ask - bid) / mid * 1e4                     # transparence (déjà dans le prix)
     net_bps = (gross_bps - fees_bps - slippage_bps - impact_bps - latence_bps - funding_bps) * frac
+    # exit reconstruit depuis fwd_mid ± demi-spread = APPROXIMATE -> ne peut PAS promouvoir une pépite.
+    approximate = src_exit != "FWD_BOOK"
     return {**base, "status": "OK", "entry_px": round(entry_px, 8), "exit_px": round(exit_px, 8),
-            "exit_source": src_exit, "gross_bps": round(gross_bps, 4), "fees_bps": round(fees_bps, 4),
+            "exit_source": src_exit, "approximate": approximate, "promotable": (not approximate),
+            "slippage_source": ("DANS_PRIX_VWAP" if slippage_dans_prix else "SEPARE"),
+            "gross_bps": round(gross_bps, 4), "fees_bps": round(fees_bps, 4),
             "spread_bps": round(spread_effectif_bps, 4), "slippage_bps": round(slippage_bps, 4),
             "impact_bps": round(impact_bps, 4), "funding_bps": round(funding_bps, 4),
             "latency_bps": round(latence_bps, 4), "fill": round(frac, 4), "profil_frais": profil,
@@ -201,5 +210,24 @@ def nets_mesures(episodes) -> list:
     return [o["net_bps"] for o in episodes if o.get("status") == "OK" and o.get("net_bps") is not None]
 
 
+NOTIONALS_CAPACITE = (10, 25, 50, 100, 250, 500, 1000)
+
+
+def courbe_capacite(corpus, *, sens: int, horizon_ms: int, notionals=NOTIONALS_CAPACITE, profil: str = PROFIL_DEFAUT) -> list:
+    """Vraie courbe de capacité : à chaque taille de notionnel, on rejoue le corpus (le VWAP de profondeur
+    fait monter le coût avec la taille) et on rend la médiane du net + le remplissage moyen. Un edge « capable »
+    garde un net positif quand la taille monte ; sinon la capacité est faible (honnête)."""
+    import statistics
+    out = []
+    for N in notionals:
+        eps = evaluer_episodes(corpus, sens=sens, horizon_ms=horizon_ms, notional_usd=float(N), profil=profil)
+        nets = nets_mesures(eps)
+        fills = [o.get("fill", 1.0) for o in eps if o.get("status") == "OK"]
+        out.append({"notional_usd": N, "n": len(nets),
+                    "net_median_bps": (round(statistics.median(nets), 4) if nets else None),
+                    "fill_moyen": (round(statistics.fmean(fills), 4) if fills else None)})
+    return out
+
+
 __all__ = ["PROFILS_FRAIS", "PROFIL_DEFAUT", "frais_par_jambe", "vwap_profondeur", "prix_exit_executable",
-           "evaluer_episode", "evaluer_episodes", "nets_mesures"]
+           "evaluer_episode", "evaluer_episodes", "nets_mesures", "courbe_capacite", "NOTIONALS_CAPACITE"]

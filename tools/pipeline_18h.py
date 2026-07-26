@@ -276,9 +276,22 @@ def phase_holdout_forward(rundir: Path, corpus_hold: list[dict], corpus_fwd: lis
         # stress RÉEL : on ampute chaque net d'un surcoût conservateur et on regarde si la médiane survit
         stress_extra = V18.SEUILS.get("stress_extra_bps", 3.0)
         stress_survit = (statistics.median([x - stress_extra for x in nets_h]) > 0) if nets_h else None
+        # UF-3 : plateau / concentration / capacité RÉELLEMENT calculés (débloquent DATA_MISSING)
+        import metriques_pepites as MP
+        import moteur_execution_prod as MEP
+        ev_nets = lambda corp, s, h: _nets_ok(nets_exact(corp, sens=s, horizon_ms=h))
+        plat = MP.plateau_reel(sub_h, sens=c["direction"], horizon_ms=c["horizon_ms"], evaluer_nets=ev_nets)
+        coins_dispo = sorted({e["coin"] for e in corpus_hold})
+        conc = MP.concentration_reelle(corpus_hold, sens=c["direction"], horizon_ms=c["horizon_ms"],
+                                       coins=coins_dispo, filtrer=lambda corp, coin: _filtrer_corpus(corp, coin=coin),
+                                       evaluer_nets=ev_nets)
+        capa = MP.capacite_reelle(sub_h, sens=c["direction"], horizon_ms=c["horizon_ms"], courbe_capacite=MEP.courbe_capacite)
         hold.append({"trial_id": c["trial_id"], "family": c["family"], "coin": c["coin"], "horizon_ms": c["horizon_ms"],
                      "n_holdout": len(nets_h), "holdout_net_median_bps": nm_h,
                      "holdout_pf": pf_h, "holdout_drawdown_bps": dd_h, "stress_survit": stress_survit,
+                     "plateau": plat.get("plateau"), "un_seul_coin_dominant": conc.get("un_seul_coin_dominant"),
+                     "capacite_non_nulle": capa.get("capacite_non_nulle"),
+                     "capacite_courbe": capa.get("courbe"), "concentration": conc.get("contribution"),
                      "validation_net_median_bps": vr.get("net_median_bps"), "dsr": vr.get("dsr"),
                      "pbo": None,  # rempli par reconcilier (pbo global de la campagne)
                      "ic_bas_bps": vr.get("ic_bas_bps"), "placebo_opposee_median_bps": vr.get("placebo_opposee_median_bps")})
@@ -307,9 +320,19 @@ def phase_holdout_forward(rundir: Path, corpus_hold: list[dict], corpus_fwd: lis
 
 
 # ─────────────── réconciliation + verdicts finaux ───────────────
-def reconcilier_et_juger(rundir: Path, *, holdout: list[dict], pbo, notional_usd: float = 100.0) -> dict:
-    """PnL/ROI depuis les nets, verdict final via le gate scellé (holdout vu). ROI capital total ET immobilisé."""
+def reconcilier_et_juger(rundir: Path, *, holdout: list[dict], pbo, notional_usd: float = 100.0,
+                         securise=None) -> dict:
+    """PnL/ROI depuis les nets, verdict final via le gate scellé (holdout vu). ROI capital total ET immobilisé.
+    Métriques RÉELLES : plateau/concentration/capacité viennent du holdout ; ledger_reconcilie du portefeuille
+    forward ; securite_verte de l'audit (passé une fois par le run)."""
+    rundir = Path(rundir)
     finals = []
+    # ledger réconcilié = cohérence RÉELLE du portefeuille forward de la campagne
+    ledger_ok = None
+    try:
+        ledger_ok = bool(json.loads((rundir / "resultats" / "forward_portfolio_reconciliation.json").read_text(encoding="utf-8")).get("coherent"))
+    except (OSError, ValueError):
+        ledger_ok = None
     if not isinstance(holdout, list):                 # aucun candidat gelé -> pas de verdict final (honnête)
         holdout = []
     seuils = V18.SEUILS
@@ -325,12 +348,12 @@ def reconcilier_et_juger(rundir: Path, *, holdout: list[dict], pbo, notional_usd
                 "dsr": h.get("dsr"), "pbo": pbo,
                 "ic_bas_bps": ic, "placebo_median_bps": h.get("placebo_opposee_median_bps"),
                 "stress_survit": h.get("stress_survit"),           # vrai stress (net amputé)
-                "plateau": None,                                    # NON calculé ici (voisins de params non rejoués)
-                "un_seul_coin_dominant": True,                      # trial mono-coin -> concentration = vraie
+                "plateau": h.get("plateau"),                        # UF-3 : rejoué sur horizons voisins
+                "un_seul_coin_dominant": h.get("un_seul_coin_dominant"),   # UF-3 : contribution multi-coins
                 "drawdown_borne": (None if dd is None else bool(dd <= seuils["drawdown_max_bps"])),
-                "capacite_non_nulle": (None if ic is None else bool(ic > 0)),  # capacité = IC bas > 0
-                "ledger_reconcilie": None,                          # rempli par la réconciliation réelle (PT-10)
-                "securite_verte": None,                             # audit sécurité fait à la finalisation
+                "capacite_non_nulle": h.get("capacite_non_nulle"), # UF-3 : profondeur/VWAP/fills, pas l'IC
+                "ledger_reconcilie": ledger_ok,                     # cohérence RÉELLE du portefeuille forward
+                "securite_verte": securise,                         # audit sécurité (passé une fois par le run)
                 "holdout_vu": True}
         g = V18.gate(cand)
         pnl_usd = (nm or 0.0) / 1e4 * notional_usd
@@ -425,7 +448,7 @@ def corpus_depuis_archives(root: Path, *, max_episodes: int = 4000, horizons=HOR
 
 def executer_pipeline_complet(root: Path, rundir: Path, corpus: list[dict], *, code_sha: str,
                               source_hash: str = "fixtures", horizons=(250, 1000, 5000, 30000),
-                              variantes=None, stop_event=None, predicat=None) -> dict:
+                              variantes=None, stop_event=None, predicat=None, securise=None) -> dict:
     """Chaîne les 7 phases sur un corpus (fixtures en test, archives en prod), en SÉPARANT les partitions
     temporelles (anti-fuite) : discovery/validation/holdout par ts. Retourne les compteurs prouvant que la
     boucle produit RÉELLEMENT trials/replays/validation/holdout/forward. Écrit tous les artefacts."""
@@ -467,7 +490,7 @@ def executer_pipeline_complet(root: Path, rundir: Path, corpus: list[dict], *, c
         (rundir / "resultats" / "pipeline_resume.json").write_text(json.dumps(resume, ensure_ascii=False, indent=1), encoding="utf-8")
         return resume
     hf = phase_holdout_forward(rundir, hold or corpus, hold or corpus, validation=v["rapports"])
-    rec = reconcilier_et_juger(rundir, holdout=hf.get("holdout", []), pbo=v.get("pbo"))
+    rec = reconcilier_et_juger(rundir, holdout=hf.get("holdout", []), pbo=v.get("pbo"), securise=securise)
     resume = {"n_variantes": len(variantes), **{k: d[k] for k in ("n_preregistres", "n_fast_screen", "n_exact_replays", "n_survivants")},
               "n_candidats_figes": fr["n_candidats_figes"], "n_valides": v["n_valides"], "pbo": v.get("pbo"),
               "n_holdout": hf.get("n_holdout", 0), "n_forward_events": hf.get("n_forward_events", 0),
@@ -479,7 +502,7 @@ def executer_pipeline_complet(root: Path, rundir: Path, corpus: list[dict], *, c
 def executer_pipeline_donnees_completes(root: Path, rundir: Path, *, code_sha: str,
                                         dossiers=None, ledgers_logs=None,
                                         variantes=None, stop_event=None, predicat=None,
-                                        new_events=None, affected_windows=None, hist_dir=None) -> dict:
+                                        new_events=None, affected_windows=None, hist_dir=None, securise=None) -> dict:
     """LOT18H-DATA-COMPLETE : catalogue COMPLET (sans plafond silencieux) → CORPUS canonique réellement
     consommé (provenance + dedup selon la source) → 7 phases → analyse des LOGS (refus rejoués, gate vs
     no-gate) → LIGNÉE des PnL → CSVs d'utilisation. Une source cataloguée ne compte que si elle est CONSOMMÉE."""
@@ -523,7 +546,7 @@ def executer_pipeline_donnees_completes(root: Path, rundir: Path, *, code_sha: s
         cons["comptes"]["fallback"] = "SYNTHETIC (aucun épisode BBO exploitable dans les archives)"
     resume = executer_pipeline_complet(root, rundir, corpus, code_sha=code_sha,
                                        source_hash=(sources[0]["sha256"] if sources and sources[0].get("sha256") else "corpus"),
-                                       variantes=variantes, stop_event=stop_event, predicat=predicat)
+                                       variantes=variantes, stop_event=stop_event, predicat=predicat, securise=securise)
     # analyse des logs / ledgers (refus rejoués + gate vs no-gate)
     if ledgers_logs is None:
         ledgers_logs = _ledgers_logs_par_defaut(root)

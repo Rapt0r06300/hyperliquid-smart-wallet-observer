@@ -95,7 +95,13 @@ def nouveaux_evenements(root: Path, rundir: Path, chemin: Path, *, max_events: i
     return news, info
 
 
-def scanner_nouveautes(root: Path, rundir: Path, *, dossiers=("runtime/data",), max_events_par_source: int = 100_000) -> dict:
+#: dossiers RÉELLEMENT surveillés (les collecteurs écrivent dans research_lab/data, pas runtime/data).
+DOSSIERS_INGESTION = ("runtime/research_lab/data", "runtime/research_lab/archives", "runtime/data", "logs")
+#: segments de chemin ignorés (sortie du run lui-même, heartbeats, runs datés) — jamais des événements marché.
+IGNORER = ("continuous", "heartbeats", "overnight_18h", "overnight_14h", "overnight")
+
+
+def scanner_nouveautes(root: Path, rundir: Path, *, dossiers=DOSSIERS_INGESTION, max_events_par_source: int = 100_000) -> dict:
     """Parcourt les sources JSONL et n'extrait que les NOUVEAUX événements par source (offsets). Rend
     {new_events, par_source, n_new, sources_avec_nouveaute}. Les non-JSONL sont suivis par identité (sha/taille)."""
     import catalogue_archives_18h as CAT
@@ -108,7 +114,7 @@ def scanner_nouveautes(root: Path, rundir: Path, *, dossiers=("runtime/data",), 
         if not base.exists():
             continue
         for p in sorted(base.rglob("*")):
-            if not p.is_file() or "continuous" in p.parts or any("overnight" in x for x in p.parts):
+            if not p.is_file() or any(seg in p.parts for seg in IGNORER):
                 continue
             if p.suffix.lower() in EXTS_STREAM:
                 news, info = nouveaux_evenements(root, rundir, p, max_events=max_events_par_source)

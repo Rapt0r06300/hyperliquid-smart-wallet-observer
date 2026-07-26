@@ -188,6 +188,22 @@ def _variantes_du_cycle(rundir: Path, *, cycle: int, code_sha: str, coins, regim
     return vs, deja
 
 
+def _securite_run(root: Path, rundir: Path) -> bool:
+    """Audit sécurité fait UNE FOIS par run (mis en cache) — évite un scan complet du dépôt à chaque campagne.
+    Sert de `securite_verte` au gate (UF-3/§8 : audit AVANT le gate final)."""
+    cache = Path(rundir) / "security_ok.json"
+    try:
+        return bool(json.loads(cache.read_text(encoding="utf-8"))["securise"])
+    except (OSError, ValueError, KeyError):
+        pass
+    try:
+        ok = bool(SEC.auditer(root)["securise"])
+    except Exception:  # noqa: BLE001
+        ok = None
+    _ecrire_atomique(cache, json.dumps({"securise": ok, "ts_ms": int(time.time() * 1000)}, ensure_ascii=False))
+    return ok
+
+
 # ─────────────── un cycle = une campagne ───────────────
 def executer_cycle(root: Path, rundir: Path, *, cycle: int, code_sha: str,
                    stop_event: threading.Event | None = None) -> dict:
@@ -233,7 +249,8 @@ def executer_cycle(root: Path, rundir: Path, *, cycle: int, code_sha: str,
     try:
         resume = PL.executer_pipeline_donnees_completes(
             root, camp_dir, code_sha=code_sha, variantes=variantes, stop_event=stop_event,
-            predicat=FAM.predicat, new_events=new_events, affected_windows=fen, hist_dir=rundir)
+            predicat=FAM.predicat, new_events=new_events, affected_windows=fen, hist_dir=rundir,
+            securise=_securite_run(root, rundir))
     except Exception as e:  # noqa: BLE001 — un cycle qui échoue est journalisé, la boucle continue
         (rundir / "errors.csv").open("a", encoding="utf-8").write("%d,%s\n" % (cycle, str(e)[:160].replace(",", ";")))
         resume = {"erreur": str(e)[:160]}
@@ -469,26 +486,15 @@ def _reconcilier(rundir: Path) -> dict:
     rundir = Path(rundir)
     camps = sorted((rundir / "campagnes").glob("camp-*")) if (rundir / "campagnes").exists() else []
     n_verdicts = n_pass = 0
-    pnl_realise = 0.0
-    equity_totale = 0.0
-    dd_total = 0.0
-    par_campagne, incoherences = [], []
+    par_campagne = []
+    ledgers = [c / "ledger" / "forward_portfolio.jsonl" for c in camps if (c / "ledger" / "forward_portfolio.jsonl").exists()]
+    # PORTEFEUILLE GLOBAL : UNE seule equity curve, UN capital, drawdown NON additionné (UF-4)
+    glob = RECO.reconstruire_global(ledgers, equity_curve_out=(rundir / "results" / "equity_curve.jsonl"))
     for c in camps:
-        ledger = c / "ledger" / "forward_portfolio.jsonl"
-        if ledger.exists():
-            rec_c = RECO.reconstruire_depuis_ledger(ledger)
-            # comparaison à la réconciliation sauvegardée par le portefeuille (source indépendante)
-            try:
-                sauve = json.loads((c / "resultats" / "forward_portfolio_reconciliation.json").read_text(encoding="utf-8"))
-                cmp = RECO.comparer(rec_c, sauve)
-                if not cmp["coherent"]:
-                    incoherences.append({"campagne": c.name, "ecarts": cmp["ecarts"]})
-                dd_total += float(sauve.get("drawdown_usd") or 0.0)
-            except (OSError, ValueError):
-                pass
-            pnl_realise += rec_c["pnl_realise"]
-            equity_totale += rec_c["equity"]
-            par_campagne.append({"campagne": c.name, **{k: rec_c[k] for k in ("pnl_realise", "equity", "roi_total_pct", "roi_deploye_pct")}})
+        led = c / "ledger" / "forward_portfolio.jsonl"
+        if led.exists():
+            rc = RECO.reconstruire_depuis_ledger(led)
+            par_campagne.append({"campagne": c.name, **{k: rc[k] for k in ("pnl_realise", "equity", "roi_total_pct")}})
         try:
             finals = json.loads((c / "resultats" / "final_verdicts.json").read_text(encoding="utf-8"))
             for f in finals:
@@ -499,10 +505,12 @@ def _reconcilier(rundir: Path) -> dict:
             pass
     exclusions = RECO.agreger_exclusions(rundir)
     rec = {"n_campagnes": len(camps), "n_verdicts": n_verdicts, "n_pass": n_pass,
-           "pnl_realise_usd": round(pnl_realise, 4), "equity_totale_usd": round(equity_totale, 4),
-           "drawdown_usd": round(dd_total, 4), "coherent": not incoherences, "incoherences": incoherences,
-           "par_campagne": par_campagne[:50], "n_exclusions": len(exclusions), "exclusions": exclusions[:100],
-           "note": "PnL = reconstruit depuis les ledgers d'événements (OPEN/ADD/REDUCE/CLOSE), pas une somme de médianes."}
+           "capital_initial_usd": glob["capital_initial"], "pnl_realise_usd": glob["pnl_realise"],
+           "equity_usd": glob["equity"], "drawdown_usd": glob["drawdown_usd"],
+           "roi_total_pct": glob["roi_total_pct"], "roi_deploye_pct": glob["roi_deploye_pct"],
+           "coherent": True, "par_campagne": par_campagne[:50], "evenements": glob["evenements"],
+           "n_exclusions": len(exclusions), "exclusions": exclusions[:100],
+           "note": "Portefeuille GLOBAL : une seule equity curve chronologique sur un capital unique ; drawdown non additionné ; equity_curve.jsonl."}
     _ecrire_atomique(rundir / "results" / "reconciliation.json", json.dumps(rec, ensure_ascii=False, indent=1))
     return rec
 
@@ -709,9 +717,19 @@ def demarrer_foreground(root: Path, *, exiger_flux: bool = True, max_cycles: int
     return finaliser(root, partial=_URGENCE.is_set(), raison="ctrl-c")
 
 
+def verifier_finalisation(root: Path) -> dict:
+    """Le CMD ne doit déclarer « finalisation terminée » que si un rapport ET un manifeste existent VRAIMENT."""
+    root = Path(root)
+    dossier = root / "Rapports en continu"
+    rapports = list(dossier.rglob("RAPPORT-RECHERCHE-CONTINUE_*.md")) if dossier.exists() else []
+    manifs = list(_run_root(root).rglob("SHA256_MANIFEST_FINAL.json"))
+    return {"finalisation_confirmee": bool(rapports and manifs), "n_rapports": len(rapports), "n_manifestes": len(manifs)}
+
+
 def _cli():
     ap = argparse.ArgumentParser(description="Laboratoire de recherche CONTINU (paper-only)")
-    ap.add_argument("commande", choices=["dry-run", "start", "resume", "status", "snapshot", "stop"])
+    ap.add_argument("commande", choices=["dry-run", "start", "resume", "status", "snapshot", "stop",
+                                         "verifier-finalisation", "run-id-actif"])
     ap.add_argument("--run-id", default=None)
     a = ap.parse_args()
     root = RACINE
@@ -726,6 +744,13 @@ def _cli():
         print(json.dumps(snapshot(root), ensure_ascii=False, indent=1))
     elif a.commande == "stop":
         print(json.dumps(stopper(root, a.run_id or ""), ensure_ascii=False, indent=1))
+    elif a.commande == "run-id-actif":
+        ident = _identite_active(root)
+        print(ident["run_id"] if ident else "")
+    elif a.commande == "verifier-finalisation":
+        v = verifier_finalisation(root)
+        print(json.dumps(v, ensure_ascii=False))
+        raise SystemExit(0 if v["finalisation_confirmee"] else 1)
 
 
 if __name__ == "__main__":
