@@ -27,9 +27,13 @@ def test_decompo_reconcile_brut_spread_frais_slippage():
 
 
 def test_horizon_sous_seconde_non_mesurable_sans_donnee():
-    # données espacées de 5 s : un horizon 0,1 s n'a AUCUNE cotation dedans -> NON_MESURABLE (jamais faux)
-    prix = _prix(n=5, dt=5000.0)
-    r = NAC.markout_decompose({"ts_ms": 1_000_000.0, "coin": "X", "sens": 1}, prix, horizons=(0.1, 5))
+    # entrée trouvée (cotation à +500 ms), mais AUCUNE cotation dans les 100 ms suivant l'horizon 0,1 s
+    # -> 0,1 s NON_MESURABLE ; 5 s mesurable (cotation à +5,5 s). Honnête : jamais un markout 0,1 s bidon.
+    t0 = 1_000_000.0
+    prix = {"tps": [t0, t0 + 500, t0 + 5500],
+            "rows": [(t0, 99.99, 100.01), (t0 + 500, 99.99, 100.01), (t0 + 5500, 99.99, 100.01)]}
+    r = NAC.markout_decompose({"ts_ms": t0, "coin": "X", "sens": 1}, prix, horizons=(0.1, 5))
+    assert r["statut"] == "OK"
     assert r["par_horizon"]["0.1"]["statut"] == "NON_MESURABLE"
     assert r["par_horizon"]["5"]["statut"] == "OK", "5 s mesurable, 0,1 s non (honnête)"
 
