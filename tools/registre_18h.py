@@ -32,12 +32,15 @@ def parameter_hash(params: dict) -> str:
 
 
 def preenregistrer(rundir: Path, essai: dict) -> dict:
-    """Écrit un préreg (created_before_result=True, status=PREREGISTERED). trial_id dérivé si absent."""
+    """Écrit un préreg (created_before_result=True, status=PREREGISTERED). trial_id dérivé si absent.
+    IDEMPOTENT (P7) : un trial_id déjà préenregistré n'est PAS réécrit (le préreg initial fait foi)."""
     ligne = {c: essai.get(c) for c in CHAMPS}
     if not ligne["parameter_hash"] and isinstance(essai.get("params"), dict):
         ligne["parameter_hash"] = parameter_hash(essai["params"])
     if not ligne["trial_id"]:
         ligne["trial_id"] = trial_id(ligne["family"] or "?", ligne["variant"] or "?", ligne["parameter_hash"] or "?")
+    if ligne["trial_id"] in _prereg_ids(rundir):        # déjà préenregistré -> ne pas dupliquer
+        return ligne
     ligne["created_before_result"] = True
     ligne["status"] = "PREREGISTERED"
     ligne["preregistration_ts"] = int(time.time() * 1000)
@@ -58,12 +61,28 @@ def _prereg_ids(rundir: Path) -> set:
     return ids
 
 
+def _ids_resultats(rundir: Path) -> set:
+    ids = set()
+    p = _p(rundir, "trials_results.jsonl")
+    if p.exists():
+        for l in p.read_text(encoding="utf-8").splitlines():
+            try:
+                ids.add(json.loads(l).get("trial_id"))
+            except ValueError:
+                continue
+    return ids
+
+
 def enregistrer_resultat(rundir: Path, trial_id_: str, resultat: dict) -> dict:
-    """Résultat lié à un trial_id DÉJÀ préenregistré (sinon REFUSÉ). Append-only. `resultat` doit porter au
-    moins {sharpe, net_median_bps, pf, verdict}."""
+    """Résultat TERMINAL lié à un trial_id DÉJÀ préenregistré (sinon REFUSÉ). UN SEUL résultat terminal par
+    trial_id (P7) : un 2e est un RETRY technique -> journal séparé (ne compte pas comme nouvel essai)."""
     if trial_id_ not in _prereg_ids(rundir):
         raise ValueError("RESULTAT_SANS_PREREGISTRATION: %s" % trial_id_)
     ligne = {"trial_id": trial_id_, "ts_ms": int(time.time() * 1000), **resultat}
+    if trial_id_ in _ids_resultats(rundir):             # déjà un résultat terminal -> retry, pas un nouvel essai
+        with _p(rundir, "trials_retries.jsonl").open("a", encoding="utf-8") as f:
+            f.write(json.dumps(ligne, ensure_ascii=False) + "\n")
+        return {**ligne, "_retry": True}
     with _p(rundir, "trials_results.jsonl").open("a", encoding="utf-8") as f:
         f.write(json.dumps(ligne, ensure_ascii=False) + "\n")
     return ligne

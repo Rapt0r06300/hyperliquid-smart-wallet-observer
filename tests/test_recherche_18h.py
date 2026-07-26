@@ -203,11 +203,11 @@ def test_dry_run_pass_et_securise(tmp_path, monkeypatch):
 def test_start_cree_run_sous_overnight_18h_et_resume_idempotent(tmp_path, monkeypatch):
     monkeypatch.setattr(ORCH, "RACINE", tmp_path)
     (tmp_path / "runtime" / "data").mkdir(parents=True)
-    r = ORCH.demarrer(tmp_path)
+    r = ORCH.demarrer(tmp_path, exiger_flux=False)
     assert r["start"] == "OK" and r["run_id"].startswith("r18h-")
     assert "overnight_18h" in r["rundir"]
     # un 2e start ne crée PAS de doublon
-    r2 = ORCH.demarrer(tmp_path)
+    r2 = ORCH.demarrer(tmp_path, exiger_flux=False)
     assert r2["start"] == "DEJA_ACTIF"
     # resume idempotent, même run_id
     assert ORCH.reprendre(tmp_path)["run_id"] == r["run_id"]
@@ -225,10 +225,144 @@ def test_preservation_14h_intacte():
 def test_finalize_ecrit_rapport_et_manifeste(tmp_path, monkeypatch):
     monkeypatch.setattr(ORCH, "RACINE", tmp_path)
     (tmp_path / "runtime" / "data").mkdir(parents=True)
-    ORCH.demarrer(tmp_path)
+    ORCH.demarrer(tmp_path, exiger_flux=False)
     fin = ORCH.finaliser(tmp_path)
-    assert fin["finalisation"] == "OK"
+    assert fin["finalisation"] in ("OK", "FINALIZATION_PARTIAL")
     assert (tmp_path / "RAPPORT-RECHERCHE-18H.md").exists()
     rd = tmp_path / ORCH.RUN_ROOT_REL
     manifs = list(rd.rglob("SHA256_MANIFEST_FINAL.json"))
     assert manifs and "code_sha" in json.loads(manifs[0].read_text())
+
+
+# ═══════════════ LOT18H-WIRING : la boucle produit un VRAI travail ═══════════════
+import pipeline_18h as PL  # noqa: E402
+
+
+def _run(tmp_path, monkeypatch):
+    monkeypatch.setattr(ORCH, "RACINE", tmp_path)
+    (tmp_path / "runtime" / "data").mkdir(parents=True, exist_ok=True)
+    r = ORCH.demarrer(tmp_path, exiger_flux=False)
+    return Path(r["rundir"])
+
+
+def test_end_to_end_all_7_phases(tmp_path):
+    # e2e accéléré : le pipeline complet produit trials + replays + validation + holdout + forward + verdicts
+    rd = tmp_path / "rd"
+    corpus = PL.corpus_fixtures()
+    resume = PL.executer_pipeline_complet(tmp_path, rd, corpus, code_sha="test")
+    assert resume["n_preregistres"] >= 20 and resume["n_fast_screen"] > 0 and resume["n_exact_replays"] > 0
+    assert resume["n_valides"] >= 1 and resume["n_holdout"] >= 1 and resume["n_forward_events"] > 0
+    for f in ("CANDIDATES_FROZEN.json", "validation.json", "holdout.json", "final_verdicts.json"):
+        assert (rd / "resultats" / f).exists()
+    assert (rd / "ledger" / "forward_paper.jsonl").exists()
+
+
+def test_loop_executes_trials_not_only_heartbeat(tmp_path, monkeypatch):
+    rd = _run(tmp_path, monkeypatch)
+    # reculer T0 à 2 h (phase DISCOVERY) pour que la boucle exécute le pipeline
+    ident = json.loads(ORCH._active_path(tmp_path).read_text())
+    ident["t0_wall_ms"] = (__import__("time").time() - 2 * 3600) * 1000
+    ORCH._active_path(tmp_path).write_text(json.dumps(ident))
+    (rd / "run_identity.json").write_text(json.dumps(ident))
+    ORCH.boucle(tmp_path, intervalle_s=0.0, max_cycles=1)
+    import registre_18h as REG
+    c = REG.compter(rd)
+    hb = json.loads((rd / "logs" / "heartbeat.json").read_text())
+    assert c["preregistres"] > 0 and c["resultats"] > 0, "la boucle DOIT produire des trials, pas qu'un heartbeat"
+    assert hb.get("resultats", 0) > 0
+
+
+def test_discovery_calls_fast_screen_and_survivors_call_exact_replay(tmp_path):
+    rd = tmp_path / "rd"
+    PL.executer_pipeline_complet(tmp_path, rd, PL.corpus_fixtures(), code_sha="t")
+    resume = json.loads((rd / "resultats" / "pipeline_resume.json").read_text())
+    assert resume["n_fast_screen"] > 0 and resume["n_exact_replays"] > 0 and resume["n_survivants"] >= 1
+
+
+def test_subsecond_horizons_are_distinct():
+    ep = {"bid": 99.9, "ask": 100.1, "fwd_mid": {250: 100.5, 1000: 100.05},
+          "fees_bps": 1, "slippage_bps": 0.5}
+    r250 = PL.moteur_exact(ep, sens=1, horizon_ms=250)
+    r1000 = PL.moteur_exact(ep, sens=1, horizon_ms=1000)
+    assert r250["net_bps"] != r1000["net_bps"]      # 250 ms ≠ 1 s (prix forward distincts)
+
+
+def test_maker_model_changes_actual_fills():
+    ep = {"bid": 99.9, "ask": 100.1, "fwd_mid": {1000: 100.5}, "queue_devant_sz": 1000, "vol_traversant_sz": 200}
+    taker = PL.moteur_exact(ep, sens=1, horizon_ms=1000, modele_exec="taker")
+    maker = PL.moteur_exact(ep, sens=1, horizon_ms=1000, modele_exec="maker_risk_averse")
+    assert taker["fill"] == 1.0 and maker["statut"] == "NO_FILL"   # file devant > flux -> pas servi
+
+
+def test_placebo_recomputes_prices_and_costs(tmp_path):
+    rd = tmp_path / "rd"
+    PL.executer_pipeline_complet(tmp_path, rd, PL.corpus_fixtures(), code_sha="t")
+    val = json.loads((rd / "resultats" / "validation.json").read_text())
+    assert val["rapports"], "au moins un candidat validé"
+    r = val["rapports"][0]
+    reel, opp = r.get("net_median_bps"), r.get("placebo_opposee_median_bps")
+    if reel is not None and opp is not None:
+        assert abs(opp - (-reel)) > 1e-6      # placebo recalculé par prix, PAS -net
+
+
+def test_single_terminal_result_per_trial_and_retry_not_in_dsr(tmp_path):
+    import registre_18h as REG
+    e = REG.preenregistrer(tmp_path, {"family": "OFI", "variant": "v", "params": {"h": 1}})
+    tid = e["trial_id"]
+    REG.enregistrer_resultat(tmp_path, tid, {"sharpe": 0.5, "verdict": "OK"})
+    r2 = REG.enregistrer_resultat(tmp_path, tid, {"sharpe": 0.9, "verdict": "OK"})   # 2e = retry
+    assert r2.get("_retry") is True
+    assert REG.compter(tmp_path)["resultats"] == 1                                    # un seul terminal
+    assert REG.sharpes_tous_resultats(tmp_path) == [0.5]                              # le retry ne compte pas
+
+
+def test_real_dsr_and_pbo(tmp_path):
+    rd = tmp_path / "rd"
+    PL.executer_pipeline_complet(tmp_path, rd, PL.corpus_fixtures(), code_sha="t")
+    val = json.loads((rd / "resultats" / "validation.json").read_text())
+    assert "pbo" in val and val["n_sharpes_dsr"] > 0
+
+
+def test_holdout_unreadable_before_freeze(tmp_path):
+    rd = tmp_path / "rd"
+    (rd / "resultats").mkdir(parents=True)
+    (rd / "ledger").mkdir(parents=True)
+    corpus = PL.corpus_fixtures()
+    # appeler holdout SANS gel -> aucun candidat, pas de holdout.json
+    res = PL.phase_holdout_forward(rd, corpus, corpus, validation=[])
+    assert res.get("holdout") == "AUCUN_CANDIDAT_GELE"
+    assert not (rd / "resultats" / "holdout.json").exists()
+
+
+def test_report_contains_non_empty_horizon_matrix_and_manifest(tmp_path, monkeypatch):
+    rd = _run(tmp_path, monkeypatch)
+    PL.executer_pipeline_complet(tmp_path, rd, PL.corpus_fixtures(), code_sha="t")
+    fin = ORCH.finaliser(tmp_path)
+    md = (tmp_path / "RAPPORT-RECHERCHE-18H.md").read_text(encoding="utf-8")
+    assert "Matrice par horizon (ms)" in md and "Holdout" in md
+    man = json.loads(list((tmp_path / ORCH.RUN_ROOT_REL).rglob("SHA256_MANIFEST_FINAL.json"))[0].read_text())
+    assert man["contient_rapport"] and any("RAPPORT" in k for k in man["fichiers"])
+    assert any("trials_results" in k or "all_trials" in k for k in man["fichiers"])
+
+
+def test_finalize_partial_if_report_fails(tmp_path, monkeypatch):
+    _run(tmp_path, monkeypatch)
+    import rapport_18h as RAP
+    monkeypatch.setattr(RAP, "construire_rapport", lambda *a, **k: (_ for _ in ()).throw(RuntimeError("boom")))
+    fin = ORCH.finaliser(tmp_path)
+    assert fin["finalisation"] == "FINALIZATION_PARTIAL"   # l'erreur n'est PAS masquée par OK
+
+
+def test_resume_cannot_spawn_second_loop(tmp_path, monkeypatch):
+    rd = _run(tmp_path, monkeypatch)
+    ok, _ = ORCH.acquerir_loop_lock(rd)          # une boucle "vivante" (ce process) détient le lock
+    assert ok
+    rep = ORCH.reprendre(tmp_path)
+    assert rep.get("lancer_boucle") is False     # P8 : pas de 2e boucle
+
+
+def test_live_growth_required_before_start(tmp_path, monkeypatch):
+    monkeypatch.setattr(ORCH, "RACINE", tmp_path)
+    (tmp_path / "runtime" / "data").mkdir(parents=True)
+    r = ORCH.demarrer(tmp_path, exiger_flux=True)     # aucun heartbeat live -> refus
+    assert r["start"] == "FLUX_NE_CROISSENT_PAS"

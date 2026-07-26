@@ -113,6 +113,40 @@ def construire_rapport(rundir: str | Path, *, manifeste: dict | None = None) -> 
     L.append("Préenregistrés : **%d** · résultats : **%d** · familles : %d\n" % (len(prereg), len(results), len(familles)))
     L.append("## Verdicts")
     L.append(json.dumps(verdicts, ensure_ascii=False) + "\n")
+    # matrices RÉELLES depuis les résultats (P10) : par horizon, par coin, par régime
+    def _matrice(cle):
+        agg = {}
+        for r in results:
+            k = r.get(cle)
+            v = r.get("net_median_bps")
+            if k is None or v is None:
+                continue
+            agg.setdefault(k, []).append(v)
+        return {k: round(sorted(vs)[len(vs) // 2], 3) for k, vs in agg.items() if vs}
+    for nom, cle in (("horizon (ms)", "horizon_ms"), ("coin", "coin"), ("régime", "regime")):
+        m = _matrice(cle)
+        L.append("## Matrice par %s (net médian bps)" % nom)
+        if m:
+            L.append("| %s | net médian bps |" % nom + "\n|---|---:|")
+            for k in sorted(m, key=lambda x: (str(type(x)), x)):
+                L.append("| %s | %s |" % (k, m[k]))
+            L.append("")
+        else:
+            L.append("(pas encore de résultats mesurés pour cette dimension)\n")
+    holdout = _lire(rundir, "resultats/holdout.json", [])
+    finals = _lire(rundir, "resultats/final_verdicts.json", [])
+    fwd = _lignes(rundir, "ledger/forward_paper.jsonl")
+    L.append("## Holdout (OOS terminal) & forward paper")
+    L.append("- lignes holdout : %d · événements forward paper : %d" % (len(holdout), len(fwd)))
+    if finals:
+        L.append("| trial_id | coin | horizon | holdout net bps | PnL$/trade | ROI immob % | verdict |")
+        L.append("|---|---|---:|---:|---:|---:|---|")
+        for f in finals[:20]:
+            L.append("| %s | %s | %s | %s | %s | %s | %s |" % (
+                f.get("trial_id", "—"), f.get("coin", "—"), f.get("horizon_ms", "—"),
+                f.get("holdout_net_median_bps", "—"), f.get("pnl_usd_par_trade", "—"),
+                f.get("roi_immobilise_pct", "—"), f.get("verdict", "—")))
+    L.append("")
     if results:
         L.append("## Leaderboard (net médian bps, décroissant)")
         L.append("| trial_id | family | variant | net médian bps | PF | Sharpe | verdict |")

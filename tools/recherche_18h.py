@@ -108,15 +108,54 @@ def dry_run(root: Path) -> dict:
 
 
 # ─────────────────────────── start ───────────────────────────
-def demarrer(root: Path) -> dict:
+def flux_croissent(root: Path) -> dict:
+    """P5 — les collecteurs live grossissent-ils ? Lit deux fois (à 2 s) les heartbeats microstructure/context
+    et exige une croissance du compteur de messages + des timestamps frais. Rend {ok, detail}."""
+    root = Path(root)
+    def lire():
+        out = {}
+        for nom, rel in (("micro", "runtime/research_lab/micro_heartbeat.json"),
+                         ("ctx", "runtime/research_lab/heartbeat.json")):
+            try:
+                out[nom] = json.loads((root / rel).read_text(encoding="utf-8"))
+            except (OSError, ValueError):
+                out[nom] = None
+        return out
+    a = lire()
+    time.sleep(2.0)
+    b = lire()
+    def compteur(d):
+        if not d:
+            return None
+        for k in ("messages", "events", "n_messages", "count", "ticks"):
+            if isinstance(d.get(k), (int, float)):
+                return d[k]
+        return None
+    croit = False
+    detail = {}
+    for nom in ("micro", "ctx"):
+        ca, cb = compteur(a.get(nom)), compteur(b.get(nom))
+        detail[nom] = {"avant": ca, "apres": cb}
+        if ca is not None and cb is not None and cb > ca:
+            croit = True
+    return {"ok": croit, "detail": detail}
+
+
+def demarrer(root: Path, *, exiger_flux: bool = True) -> dict:
     """Precheck bloquant puis création du run (chrono démarre SEULEMENT si PASS). Écrit run_identity.json +
-    ACTIVE.json, catalogue les archives, scelle les partitions, initialise le registre."""
+    ACTIVE.json, catalogue les archives, scelle les partitions, initialise le registre. P5 : refuse de
+    démarrer si les flux live ne croissent pas (sauf exiger_flux=False pour les tests)."""
     root = Path(root)
     if _identite_active(root) is not None:
         return {"start": "DEJA_ACTIF", "run_id": _identite_active(root).get("run_id")}
     dr = dry_run(root)
     if not dr["PASS"]:
         return {"start": "PRECHECK_ECHEC", "raisons": {"securite": dr["securite"]["securise"], "disque": dr["disque"]}}
+    if exiger_flux:
+        fx = flux_croissent(root)
+        if not fx["ok"]:
+            return {"start": "FLUX_NE_CROISSENT_PAS", "detail": fx["detail"],
+                    "aide": "les collecteurs live doivent tourner et grossir avant le chrono (P5)"}
     run_id = "r18h-" + hashlib.sha256(str(time.time_ns()).encode()).hexdigest()[:12]
     rundir = _run_root(root) / run_id
     for sd in ("catalogue", "partitions", "ledger", "resultats", "manifeste", "results", "logs"):
@@ -188,7 +227,11 @@ def watch_ecran(root: Path) -> str:
     if not st.get("actif") and not st.get("run_id"):
         return "HYPERSMART 18H — aucun run actif.\n"
     ident = _identite_active(root) or {}
-    hb = _lire_heartbeat(Path(ident.get("rundir", ".")))
+    rundir = Path(ident.get("rundir", "."))
+    c = _compteurs(rundir) if rundir.exists() else {}
+    hb = _lire_heartbeat(rundir)
+    import time as _t
+    fin_iso = _t.strftime("%d/%m/%Y %H:%M", _t.localtime((ident.get("fin_prevue_wall_ms") or 0) / 1000.0)) if ident.get("fin_prevue_wall_ms") else "?"
     fige = phase_courante((time.time() - ident.get("t0_wall_ms", time.time() * 1000) / 1000.0)) in (
         "AUDIT", "HOLDOUT_FORWARD", "FINALIZE")
     lignes = [
@@ -196,18 +239,20 @@ def watch_ecran(root: Path) -> str:
         " HYPERSMART — RECHERCHE AUTONOME 18 H — PAPER ONLY",
         "==========================================================",
         " Run             : %s" % st.get("run_id"),
-        " Etat            : %s" % ("ACTIF" if st.get("actif") else "TERMINE"),
-        " Phase           : %s" % st.get("phase"),
-        " Ecoule          : %.2f h" % st.get("elapsed_h", 0),
-        " Restant estime  : %.2f h" % st.get("reste_h", 0),
+        " Etat            : %s   Phase : %s" % (("ACTIF" if st.get("actif") else "TERMINE"), st.get("phase")),
+        " Ecoule          : %.2f h   Restant : %.2f h" % (st.get("elapsed_h", 0), st.get("reste_h", 0)),
+        " Fin prevue      : %s" % fin_iso,
         "",
-        " RECHERCHE",
-        " Trials preregistres : %s" % hb.get("preregistres", 0),
-        " Fast-screen termines: %s" % hb.get("fast_screen", 0),
-        " Exact replays       : %s" % hb.get("exact_replays", 0),
-        " Candidats vivants   : %s" % hb.get("candidats_vivants", 0),
-        " Finalistes figes    : %s" % hb.get("finalistes", 0),
+        " RECHERCHE (compteurs RÉELS depuis les fichiers)",
+        " Trials preregistres : %s" % c.get("preregistres", 0),
+        " Resultats (terminaux): %s" % c.get("resultats", 0),
+        " Fast-screen         : %s" % c.get("fast_screen", 0),
+        " Exact replays       : %s" % c.get("exact_replays", 0),
+        " Candidats vivants   : %s" % c.get("candidats_vivants", 0),
+        " Finalistes (PASS)   : %s" % c.get("finalistes", 0),
+        " Forward paper events: %s" % c.get("forward_events", 0),
         "",
+        " Derniere action     : %s (cycle %s)" % (hb.get("phase", "?"), hb.get("cycle", 0)),
         " AVANT GEL : resultats exploratoires — NON VALIDES" if not fige else " APRES GEL : archive_validation / archive_holdout / forward_paper separes",
         "",
         " SECURITE        : 0 ordre reel · 0 cle · 0 signature · 0 executor",
@@ -218,10 +263,14 @@ def watch_ecran(root: Path) -> str:
 
 # ─────────────────────────── resume / stop / boucle / finalize ───────────────────────────
 def reprendre(root: Path) -> dict:
+    """Reprise idempotente. P8 : si une boucle vivante détient déjà LOOP_LOCK, NE PAS en lancer une 2e."""
     ident = _identite_active(Path(root))
     if not ident:
         return {"resume": "AUCUN_RUN_ACTIF"}
-    return {"resume": "OK", "run_id": ident["run_id"], "idempotent": True}
+    rundir = Path(ident["rundir"])
+    if loop_lock_actif(rundir):
+        return {"resume": "BOUCLE_DEJA_VIVANTE", "run_id": ident["run_id"], "lancer_boucle": False}
+    return {"resume": "OK", "run_id": ident["run_id"], "idempotent": True, "lancer_boucle": True}
 
 
 def stopper(root: Path, run_id: str) -> dict:
@@ -254,22 +303,34 @@ def finaliser(root: Path) -> dict:
             if f.is_file():
                 manifeste[str(f.relative_to(rundir))] = {"sha256": _sha256(f), "octets": f.stat().st_size}
     (rundir / "manifeste").mkdir(parents=True, exist_ok=True)
-    (rundir / "manifeste" / "SHA256_MANIFEST_FINAL.json").write_text(
-        json.dumps({"code_sha": _code_sha(), "fichiers": manifeste}, ensure_ascii=False, indent=1), encoding="utf-8")
+    # ORDRE P10 : 1) résultats déjà écrits par le pipeline ; 2) RAPPORT ; 3) sécurité ; 4) hashes ; 5) MANIFESTE EN DERNIER.
+    etat = "OK"
     try:
         import rapport_18h as RAP
-        md = RAP.construire_rapport(rundir, manifeste=manifeste)
-    except Exception as e:  # noqa: BLE001
-        md = "# RAPPORT-RECHERCHE-18H\n\n(rapport minimal — %s)\n\nSécurité : 0 ordre réel.\n" % (str(e)[:120])
+        md = RAP.construire_rapport(rundir, manifeste=None)   # le manifeste final n'existe pas encore (écrit en dernier)
+    except Exception as e:  # noqa: BLE001 — une erreur de rapport n'est PAS masquée par 'OK'
+        md = "# RAPPORT-RECHERCHE-18H\n\n(rapport PARTIEL — erreur : %s)\n\nSécurité : 0 ordre réel.\n" % (str(e)[:160])
+        etat = "FINALIZATION_PARTIAL"
     (root / "RAPPORT-RECHERCHE-18H.md").write_text(md, encoding="utf-8")
     (rundir / ("RAPPORT-RECHERCHE-18H_%s.md" % ident.get("run_id", "run"))).write_text(md, encoding="utf-8")
-    # re-scan sécurité à la finalisation
-    sec = SEC.auditer(root)
+    sec = SEC.auditer(root)                                   # re-scan sécurité à la finalisation
+    if not sec["securise"]:
+        etat = "FINALIZATION_FAILED"
+    # hashes de TOUS les livrables (rapport inclus) PUIS manifeste final en dernier
+    manifeste = {}
+    for f in sorted(rundir.rglob("*")):
+        if f.is_file() and f.name != "SHA256_MANIFEST_FINAL.json":
+            manifeste[str(f.relative_to(rundir))] = {"sha256": _sha256(f), "octets": f.stat().st_size}
+    manifeste["__RAPPORT_RACINE__/RAPPORT-RECHERCHE-18H.md"] = {
+        "sha256": _sha256(root / "RAPPORT-RECHERCHE-18H.md"), "octets": (root / "RAPPORT-RECHERCHE-18H.md").stat().st_size}
+    (rundir / "manifeste" / "SHA256_MANIFEST_FINAL.json").write_text(
+        json.dumps({"etat": etat, "code_sha": _code_sha(), "securise": sec["securise"],
+                    "contient_rapport": True, "fichiers": manifeste}, ensure_ascii=False, indent=1), encoding="utf-8")
     try:
         _active_path(root).unlink()
     except OSError:
         pass
-    return {"finalisation": "OK", "fichiers_scelles": len(manifeste), "securise": sec["securise"],
+    return {"finalisation": etat, "fichiers_scelles": len(manifeste), "securise": sec["securise"],
             "rapport": str(root / "RAPPORT-RECHERCHE-18H.md")}
 
 
@@ -281,20 +342,116 @@ def _sha256(p: Path) -> str:
     return h.hexdigest()
 
 
+# ─────────────────────────── LOOP_LOCK (P8) ───────────────────────────
+def _loop_lock_path(rundir: Path) -> Path:
+    return Path(rundir) / "logs" / "LOOP_LOCK.json"
+
+
+def _proc_vivant(pid: int, start_iso: str | None) -> bool:
+    try:
+        import psutil  # type: ignore
+        if not psutil.pid_exists(pid):
+            return False
+        if start_iso is not None:
+            return abs(psutil.Process(pid).create_time() - float(start_iso)) < 2.0   # anti-PID réutilisé
+        return True
+    except Exception:  # noqa: BLE001
+        try:
+            os.kill(pid, 0)                      # POSIX : le signal 0 teste l'existence
+            return True
+        except (OSError, ProcessLookupError):
+            return False
+
+
+def acquerir_loop_lock(rundir: Path) -> tuple[bool, dict]:
+    """Verrou de boucle ATOMIQUE. Refuse si une boucle vivante détient déjà le verrou (P8 : resume ne lance
+    jamais une 2e boucle). Rend (obtenu, info)."""
+    import uuid
+    p = _loop_lock_path(rundir)
+    p.parent.mkdir(parents=True, exist_ok=True)
+    if p.exists():
+        try:
+            cur = json.loads(p.read_text(encoding="utf-8"))
+            if _proc_vivant(int(cur.get("loop_pid", -1)), cur.get("process_start_time")):
+                return False, {"lock": "DEJA_DETENU", "loop_pid": cur.get("loop_pid")}
+        except (ValueError, OSError):
+            pass
+    start = None
+    try:
+        import psutil  # type: ignore
+        start = psutil.Process(os.getpid()).create_time()
+    except Exception:  # noqa: BLE001
+        pass
+    info = {"loop_pid": os.getpid(), "process_start_time": start, "worker_token": uuid.uuid4().hex[:12],
+            "ts_ms": int(time.time() * 1000)}
+    tmp = p.with_suffix(".tmp")
+    tmp.write_text(json.dumps(info, ensure_ascii=False), encoding="utf-8")
+    os.replace(tmp, p)                          # écriture atomique
+    return True, info
+
+
+def loop_lock_actif(rundir: Path) -> bool:
+    p = _loop_lock_path(rundir)
+    if not p.exists():
+        return False
+    try:
+        cur = json.loads(p.read_text(encoding="utf-8"))
+    except (ValueError, OSError):
+        return False
+    return _proc_vivant(int(cur.get("loop_pid", -1)), cur.get("process_start_time"))
+
+
+def _corpus_pour_run(root: Path):
+    import pipeline_18h as PL
+    return PL.corpus_depuis_archives(root)
+
+
+def _executer_travail(root: Path, ident: dict, rundir: Path) -> dict:
+    """Exécute le PIPELINE RÉEL (discovery→freeze→validation→holdout→forward→reconcile). Idempotent : ne
+    relance pas si pipeline_resume.json existe déjà. C'est ce qui fait que la boucle PRODUIT des trials."""
+    import pipeline_18h as PL
+    if (rundir / "resultats" / "pipeline_resume.json").exists():
+        return json.loads((rundir / "resultats" / "pipeline_resume.json").read_text(encoding="utf-8"))
+    corpus, source = _corpus_pour_run(root)
+    resume = PL.executer_pipeline_complet(root, rundir, corpus, code_sha=ident.get("code_sha", "?"), source_hash=source)
+    resume["source_corpus"] = source
+    (rundir / "resultats" / "pipeline_resume.json").write_text(json.dumps(resume, ensure_ascii=False, indent=1), encoding="utf-8")
+    return resume
+
+
+def _compteurs(rundir: Path) -> dict:
+    import registre_18h as REG
+    c = REG.compter(rundir)
+    resume = {}
+    try:
+        resume = json.loads((rundir / "resultats" / "pipeline_resume.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        pass
+    fwd = rundir / "ledger" / "forward_paper.jsonl"
+    n_fwd = sum(1 for _ in fwd.read_text(encoding="utf-8").splitlines()) if fwd.exists() else 0
+    return {"preregistres": c["preregistres"], "resultats": c["resultats"], "superseded": c["superseded"],
+            "fast_screen": resume.get("n_fast_screen", 0), "exact_replays": resume.get("n_exact_replays", 0),
+            "candidats_vivants": resume.get("n_survivants", 0), "finalistes": resume.get("n_pass", 0),
+            "forward_events": n_fwd}
+
+
 def boucle(root: Path, *, intervalle_s: float = 60.0, max_cycles: int | None = None) -> dict:
-    """Boucle 18 h : phase-aware, heartbeat (watchdog), reprise idempotente (relit ACTIVE.json), finalise à
-    H18. Arrêt propre sur fichier STOP. Windows reste éveillé."""
+    """Boucle 18 h : phase-aware, LOOP_LOCK (une seule boucle), heartbeat avec COMPTEURS RÉELS, exécute le
+    PIPELINE (pas seulement un heartbeat), reprise idempotente, finalise à H18. STOP propre. Windows éveillé."""
     root = Path(root)
     ident = _identite_active(root)
     if not ident:
         return {"boucle": "AUCUN_RUN_ACTIF"}
+    rundir = Path(ident["rundir"])
+    obtenu, info = acquerir_loop_lock(rundir)
+    if not obtenu:
+        return {"boucle": "LOCK_DEJA_DETENU", **info}   # P8 : pas de 2e boucle
     try:
         if os.name == "nt":
             import ctypes
             ctypes.windll.kernel32.SetThreadExecutionState(0x80000000 | 0x00000001 | 0x00000002)
     except Exception:  # noqa: BLE001
         pass
-    rundir = Path(ident["rundir"])
     stop = _run_root(root) / ("%s.STOP" % ident["run_id"])
     cycles = 0
     while True:
@@ -304,10 +461,19 @@ def boucle(root: Path, *, intervalle_s: float = 60.0, max_cycles: int | None = N
         if elapsed >= DUREE_TOTALE_S:
             return {"boucle": "TERMINEE_H18", "cycles": cycles, **finaliser(root)}
         phase = phase_courante(elapsed)
-        battre_coeur(rundir, {"phase": phase, "elapsed_h": round(elapsed / 3600.0, 3), "cycle": cycles})
+        # 🔴 TRAVAIL RÉEL : dès DISCOVERY, exécuter le pipeline (idempotent). La boucle PRODUIT des trials.
+        travail = {}
+        if phase not in ("PREFLIGHT",):
+            try:
+                travail = _executer_travail(root, ident, rundir)
+            except Exception as e:  # noqa: BLE001 — un échec de travail est journalisé, la boucle survit (watchdog)
+                (rundir / "logs" / "erreurs.jsonl").open("a", encoding="utf-8").write(
+                    json.dumps({"ts_ms": int(time.time() * 1000), "phase": phase, "erreur": str(e)[:200]}) + "\n")
+        battre_coeur(rundir, {"phase": phase, "elapsed_h": round(elapsed / 3600.0, 3), "cycle": cycles,
+                              **_compteurs(rundir)})
         cycles += 1
         if max_cycles is not None and cycles >= max_cycles:
-            return {"boucle": "MAX_CYCLES", "cycles": cycles, "phase": phase}
+            return {"boucle": "MAX_CYCLES", "cycles": cycles, "phase": phase, "travail": travail}
         time.sleep(intervalle_s)
 
 
