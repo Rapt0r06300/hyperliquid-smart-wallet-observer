@@ -42,12 +42,20 @@ start "" /b tools\boucle_collecteur.cmd lab-microstructure tools\collecter_lab_m
 start "" /b tools\boucle_collecteur.cmd lab-ctx tools\collecter_lab_ctx.py 30
 REM 2) laisser 20 s aux flux pour grossir (le precheck EXIGE une croissance WS reelle)
 ping -n 21 127.0.0.1 >nul 2>&1
-REM 3) precheck bloquant + creation du run (chrono demarre seulement si PASS)
-python tools\recherche_14h.py start
-REM 4) lancer la boucle de mesure autonome 14 h (une seule fenetre)
-start "RECHERCHE-14H-boucle" cmd /c "set PYTHONPATH=%CD%\src && python tools\recherche_14h.py boucle"
-echo === boucle 14 h lancee. Voir status. ===
+REM 3) precheck bloquant + creation du run (chrono demarre seulement si PASS). Sortie tracee (preuve).
+if not exist "runtime\research_lab\overnight_14h" mkdir "runtime\research_lab\overnight_14h" >nul 2>&1
+python tools\recherche_14h.py start > "runtime\research_lab\overnight_14h\_last_start.json" 2>&1
+type "runtime\research_lab\overnight_14h\_last_start.json"
+REM 4) lancer la boucle de mesure autonome 14 h SEULEMENT si un run est actif (PRECHECK PASS)
+python tools\recherche_14h.py status | findstr /C:"\"actif\": true" >nul 2>&1
+if not errorlevel 1 (
+  start "RECHERCHE-14H-boucle" cmd /c "set PYTHONPATH=%CD%\src && python tools\recherche_14h.py boucle"
+  echo === boucle 14 h lancee. ===
+) else (
+  echo === PRECHECK non PASS : boucle NON lancee. Voir _last_start.json. ===
+)
 python tools\recherche_14h.py status
+pause
 goto :fin
 
 :status
