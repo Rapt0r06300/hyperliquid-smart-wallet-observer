@@ -12,7 +12,8 @@ PANNEAUX = [
     "11. ÉTAT DE L'ORDINATEUR", "12. EST-CE LE BON MOMENT POUR CTRL+C ?",
 ]
 
-NAV = {"1": "general", "2": "donnees", "3": "idees", "4": "pepites", "5": "simulation", "6": "rejets",
+NAV = {"0": "compact", "c": "compact", "C": "compact",
+       "1": "general", "2": "donnees", "3": "idees", "4": "pepites", "5": "simulation", "6": "rejets",
        "7": "systeme", "s": "snapshot", "S": "snapshot"}
 
 
@@ -148,7 +149,14 @@ def construire_panneaux(etat: dict) -> dict:
 
 
 def rendre_texte(etat: dict, *, vue: str = "tout") -> str:
-    """Rend le dashboard en TEXTE (pour tests/terminaux sans Rich). `vue` = 'tout' ou une des vues NAV."""
+    """Rend le dashboard en TEXTE (pour tests/terminaux sans Rich). `vue` = 'compact' (défaut visuel), 'tout',
+    ou une des vues NAV."""
+    if vue == "compact":                                     # PF-6 : vue principale compacte (repli texte)
+        out = ["┌─ HYPERSMART — RECHERCHE CONTINUE"]
+        for label, valeur in construire_vue_compacte(etat):
+            out.append("│  %-22s %s" % (label + " :", valeur))
+        out.append("[1-7] détails · [S] snapshot · Ctrl+C = rapport final")
+        return "\n".join(out)
     P = construire_panneaux(etat)
     if vue in (None, "tout"):
         blocs = list(P.items())
@@ -165,16 +173,80 @@ def rendre_texte(etat: dict, *, vue: str = "tout") -> str:
     return "\n".join(out)
 
 
-def rendre_rich(etat: dict):
-    """Construit un Layout Rich (12 panneaux). Renvoie un renderable ; utilisé par la boucle Live."""
+def _premiers_resultats_absents(etat: dict) -> bool:
+    """Vrai tant qu'AUCUN premier résultat n'existe (on affiche alors une seule ligne d'attente au lieu de
+    dizaines de « PAS ENCORE CALCULABLE »)."""
+    tot = etat.get("totaux", {})
+    res = etat.get("resultats_idees", {})
+    cles = [tot.get("idees_trouvees"), tot.get("testees"), tot.get("forward_events"),
+            res.get("pepites_possibles"), (etat.get("simulation") or {}).get("equity")]
+    return not any(bool(x) for x in cles)
+
+
+def _barre(pct) -> str:
+    """Petite barre de progression texte (animée par Rich Live à 4 fps)."""
+    try:
+        p = max(0.0, min(100.0, float(pct)))
+    except (TypeError, ValueError):
+        return "…"
+    n = int(round(p / 10.0))
+    return "[%s%s] %s%%" % ("#" * n, "·" * (10 - n), int(p))
+
+
+def construire_vue_compacte(etat: dict) -> list:
+    """VUE PRINCIPALE COMPACTE (PF-6) : tient sur un écran. Rend une liste de (label, valeur)."""
+    d = etat.get("duree", {})
+    fait = etat.get("ce_que_je_fais", {})
+    tot = etat.get("totaux", {})
+    res = etat.get("resultats_idees", {})
+    sim = etat.get("simulation", {})
+    live = etat.get("donnees_live", {})
+    duree = "%sj %sh %sm %ss" % (d.get("jours", 0), d.get("heures", 0), d.get("minutes", 0), d.get("secondes", 0))
+    etat_donnees = "%s · débit %s · âge %s" % (
+        (etat.get("sante") or "démarrage…"), live.get("debit", "…"), live.get("age_dernier", "…"))
+    prog = "%s · %s/%s · %s/s · ETA %s" % (
+        _barre(fait.get("pourcentage")), fait.get("fait", "…"), fait.get("total", "…"),
+        fait.get("vitesse", "…"), fait.get("eta", "…"))
+    attente = _premiers_resultats_absents(etat)
+    def _ou(v):
+        return "En attente des premiers résultats…" if attente else (v if v not in (None, "") else "…")
+    lignes = [
+        ("État des données", etat_donnees),
+        ("Durée", duree),
+        ("Travail actuel", fait.get("je_fais", "…")),
+        ("Pourquoi", fait.get("parce_que", "…")),
+        ("Progression", prog),
+        ("Événements reçus", _ou(tot.get("events_utilises") or tot.get("forward_events"))),
+        ("Combinaisons testées", _ou(tot.get("testees"))),
+        ("Idées trouvées", _ou(tot.get("idees_trouvees"))),
+        ("Pépites possibles", _ou(res.get("pepites_possibles"))),
+        ("PnL / ROI paper", _ou(None if not sim else "%s $ · %s%%" % (sim.get("pnl_net", sim.get("pnl_realise", "…")), sim.get("roi_total", "…")))),
+        ("Prochaine tâche", fait.get("ensuite", "…")),
+        ("Ctrl+C", "= rapport final (arrêt propre)"),
+    ]
+    return lignes
+
+
+def rendre_rich(etat: dict, *, vue: str = "compact"):
+    """VUE PRINCIPALE = COMPACTE (PF-6, Rich Live + Layout + Progress, animée à 4 fps). Les 12 panneaux détaillés
+    restent accessibles en arrière-plan via vue != 'compact'. Repli texte si Rich absent."""
     try:
         from rich.panel import Panel
-        from rich.columns import Columns
+        from rich.table import Table
     except Exception:  # noqa: BLE001
-        return rendre_texte(etat)
-    P = construire_panneaux(etat)
-    panels = [Panel("\n".join(str(x) for x in lignes), title=titre, expand=True) for titre, lignes in P.items()]
-    return Columns(panels, equal=True, expand=True)
+        return rendre_texte(etat, vue=("tout" if vue != "compact" else "compact"))
+    if vue and vue != "compact":                             # vues détaillées (12 panneaux) en arrière-plan
+        from rich.columns import Columns
+        P = construire_panneaux(etat)
+        return Columns([Panel("\n".join(str(x) for x in l), title=t, expand=True) for t, l in P.items()],
+                       equal=True, expand=True)
+    t = Table.grid(padding=(0, 1))
+    t.add_column(justify="right", style="bold cyan", no_wrap=True)
+    t.add_column()
+    for label, valeur in construire_vue_compacte(etat):
+        t.add_row(label, str(valeur))
+    return Panel(t, title="HYPERSMART — RECHERCHE CONTINUE", subtitle="[1-7] détails · [S] snapshot · Ctrl+C = rapport",
+                 expand=True)
 
 
 def lire_touche_non_bloquante():
@@ -191,5 +263,5 @@ def lire_touche_non_bloquante():
     return None
 
 
-__all__ = ["PANNEAUX", "NAV", "touche_vers_vue", "construire_panneaux", "rendre_texte", "rendre_rich",
-           "lire_touche_non_bloquante"]
+__all__ = ["PANNEAUX", "NAV", "touche_vers_vue", "construire_panneaux", "construire_vue_compacte",
+           "rendre_texte", "rendre_rich", "lire_touche_non_bloquante"]

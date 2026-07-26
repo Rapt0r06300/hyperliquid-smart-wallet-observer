@@ -29,6 +29,22 @@ def _ts_episode(e: dict):
     return None
 
 
+def _profit_factor(nets) -> float | None:
+    """PF = somme des gains / |somme des pertes| (None si aucune perte -> non mesurable)."""
+    g = sum(x for x in nets if x > 0)
+    p = -sum(x for x in nets if x < 0)
+    return round(g / p, 4) if p > 0 else None
+
+
+def _ic_bas(nets) -> float | None:
+    """Borne basse de l'IC 95 % de la médiane par bootstrap-bloc (réutilise validation_18h ; None si trop peu)."""
+    try:
+        import validation_18h as V18
+        return V18.bootstrap_bloc([float(x) for x in nets]).get("ic_bas")
+    except Exception:  # noqa: BLE001
+        return None
+
+
 def filtrer_apres_freeze(episodes, freeze_exchange_ts: float) -> list:
     """Ne garde QUE les épisodes STRICTEMENT postérieurs au gel (exchange_ts > freeze_exchange_ts). Garde-fou
     dur contre l'utilisation d'un épisode d'avant-gel pour prétendre à un edge live."""
@@ -84,6 +100,7 @@ class RegistreCandidatsLive:
             "candidate_id": candidate_id, "freeze_exchange_ts": float(freeze_exchange_ts),
             "last_forward_event_id": None, "n_episodes_live": 0, "duree_live_ms": 0.0,
             "pnl_live_bps": 0.0, "roi_live_pct": 0.0, "pic_live_bps": 0.0, "dd_live_bps": 0.0,
+            "pf_live": None, "ic_bas_live": None, "nets": [],
             "vus": [], "positif_live": False, "meta": meta or {}, "fige_ms": int(time.time() * 1000)}
         if candidate_id in self.attente:                     # promu de l'attente au gel (horloge live devenue valide)
             self.attente.pop(candidate_id, None)
@@ -137,6 +154,10 @@ class RegistreCandidatsLive:
             c["n_episodes_live"] = int(c.get("n_episodes_live", 0)) + len(ajout)
             c["positif_live"] = bool(c["n_episodes_live"] > 0 and cum > 0)
             c["vus"] = list(vus)[-int(cap_vus):]              # borné (24/7) : on garde les plus récents
+            nets = (list(c.get("nets") or []) + ajout)[-500:]  # échantillon LIVE borné pour PF + IC bootstrap
+            c["nets"] = nets
+            c["pf_live"] = _profit_factor(nets)               # profit factor LIVE
+            c["ic_bas_live"] = _ic_bas(nets)                  # borne basse IC 95 % (bootstrap) sur le LIVE
         # last_event_id / durée : mis à jour même sans nouvel épisode, MAIS sans toucher aux compteurs (pas de reset)
         if last_event_id is not None:
             c["last_forward_event_id"] = last_event_id

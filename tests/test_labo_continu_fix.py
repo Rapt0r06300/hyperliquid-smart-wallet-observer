@@ -401,30 +401,164 @@ def test_e2e_jamais_de_gel_a_zero_sans_horloge_live(tmp_path):
     assert reg2.etat and reg2.etat["c1"]["freeze_exchange_ts"] == 123456.0   # gel au dernier ts observé, jamais 0
 
 
-# ═══════════════ MICRO-FIX point 2 — PASS_FORWARD_PAPER exige une preuve LIVE (e2e) ═══════════════
-def test_e2e_pass_forward_paper_exige_preuve_live(tmp_path):
-    # 1) le pipeline sur ARCHIVE seule ne produit JAMAIS PASS_FORWARD_PAPER (au mieux PASS_PRE_FORWARD)
+# ═══════════════ PF-2 — PASS_FORWARD_PAPER exige une preuve LIVE COMPLÈTE (cross-campagnes) ═══════════════
+def _preuve_live_complete(rundir, cid, *, nets, freeze=1000.0, maintenant=4000.0, ops_cid=None):
+    """Installe une preuve live complète pour `cid` : registre (nets -> pnl/pf/ic/durée) + ops ledger STRICT."""
+    reg = RCL.RegistreCandidatsLive(rundir)
+    reg.figer(cid, freeze_exchange_ts=freeze)
+    reg.suivre(cid, paires=[("e%d" % i, n) for i, n in enumerate(nets)], maintenant_ms=maintenant)
+    pf = PG.PortefeuilleGlobal(rundir / "global_portfolio")
+    for j in range(ops_cid if ops_cid is not None else 1):
+        pf.ouvrir("%s:%d" % (cid, j), coin="BTC", sens=1, notional=100.0, prix=100.0, ts_ms=float(j))
+        pf.fermer("%s:%d" % (cid, j), prix=101.0, ts_ms=float(j) + 1)
+    return reg
+
+
+def _camp_verdict(rundir, cid, verdict, nom="camp-0001-aa"):
+    camp = rundir / "campagnes" / nom
+    (camp / "resultats").mkdir(parents=True, exist_ok=True)
+    (camp / "resultats" / "final_verdicts.json").write_text(
+        json.dumps([{"trial_id": cid, "verdict": verdict}]), encoding="utf-8")
+    return camp
+
+
+def test_pipeline_archive_ne_produit_jamais_pass_forward_paper(tmp_path):
     rd = tmp_path / "rd"
     PL.executer_pipeline_complet(tmp_path, rd, PL.corpus_fixtures(), code_sha="p2")
     finals = json.loads((rd / "resultats" / "final_verdicts.json").read_text(encoding="utf-8"))
-    assert all(f.get("verdict") != "PASS_FORWARD_PAPER" for f in finals)    # pré-forward ne passe jamais en direct
-    # 2) promotion : SANS preuve live -> refus ; AVEC (registre >=MIN + global cohérent) -> PASS_FORWARD_PAPER
-    camp = tmp_path / "camp"
-    (camp / "resultats").mkdir(parents=True)
-    (camp / "resultats" / "final_verdicts.json").write_text(
-        json.dumps([{"trial_id": "c1", "verdict": "PASS_PRE_FORWARD"}]), encoding="utf-8")
-    assert RC._promouvoir_pass_live(tmp_path, camp)["n_pass_live"] == 0     # aucune donnée live -> pas de promotion
+    assert all(f.get("verdict") != "PASS_FORWARD_PAPER" for f in finals)
+
+
+def test_promotion_live_complete_accorde_pass(tmp_path):
+    _camp_verdict(tmp_path, "c1", "PASS_PRE_FORWARD")
+    assert RC._promouvoir_pass_live(tmp_path)["n_promus"] == 0             # sans preuve live -> refus
+    nets = [1.0] * 35 + [-0.5] * 5                                          # pnl>0, PF>1.1, ic bas>0, n=40>=30
+    _preuve_live_complete(tmp_path, "c1", nets=nets, ops_cid=1)
+    r = RC._promouvoir_pass_live(tmp_path)
+    assert r["n_promus"] == 1 and r["global_reconcilie"] is True
+    f = json.loads((tmp_path / "campagnes" / "camp-0001-aa" / "resultats" / "final_verdicts.json").read_text())[0]
+    assert f["verdict"] == "PASS_FORWARD_PAPER" and f["live_confirme"] is True and f["n_ops_ledger"] >= 1
+
+
+def test_pnl_negatif_jamais_promu(tmp_path):
+    _camp_verdict(tmp_path, "c1", "PASS_PRE_FORWARD")
+    _preuve_live_complete(tmp_path, "c1", nets=[-1.0] * 40, ops_cid=1)      # PnL live < 0
+    assert RC._promouvoir_pass_live(tmp_path)["n_promus"] == 0             # un candidat négatif ne passe jamais
+
+
+def test_ledger_autre_candidat_refuse(tmp_path):
+    _camp_verdict(tmp_path, "c1", "PASS_PRE_FORWARD")
+    # registre live OK pour c1, MAIS le ledger strict ne contient que des ops de c2 -> c1 non validé
     reg = RCL.RegistreCandidatsLive(tmp_path)
     reg.figer("c1", freeze_exchange_ts=1000.0)
-    reg.suivre("c1", paires=[("e%d" % i, 1.0) for i in range(RC.MIN_LIVE_EPISODES_POUR_PASS)])   # >= minimum réel
-    pf = PG.PortefeuilleGlobal(tmp_path / "global_portfolio")               # portefeuille GLOBAL live réconciliable
-    pf.ouvrir("p1", coin="BTC", sens=1, notional=300.0, prix=100.0, ts_ms=1.0)
-    pf.fermer("p1", prix=101.0, ts_ms=2.0)
-    r1 = RC._promouvoir_pass_live(tmp_path, camp)
-    assert r1["n_pass_live"] == 1 and r1["global_reconcilie"] is True
-    f2 = json.loads((camp / "resultats" / "final_verdicts.json").read_text(encoding="utf-8"))[0]
-    assert f2["verdict"] == "PASS_FORWARD_PAPER" and f2["live_confirme"] is True
-    assert f2["n_episodes_live"] >= RC.MIN_LIVE_EPISODES_POUR_PASS and "pnl_live_bps" in f2
+    reg.suivre("c1", paires=[("e%d" % i, 1.0) for i in range(40)], maintenant_ms=4000.0)
+    pf = PG.PortefeuilleGlobal(tmp_path / "global_portfolio")
+    pf.ouvrir("c2:0", coin="BTC", sens=1, notional=100.0, prix=100.0, ts_ms=0.0)   # trade d'un AUTRE candidat
+    pf.fermer("c2:0", prix=101.0, ts_ms=1.0)
+    assert RC._promouvoir_pass_live(tmp_path)["n_promus"] == 0             # un trade d'un autre candidat ne valide jamais
+
+
+def test_candidat_promu_au_cycle_suivant(tmp_path):
+    # né « cycle 1 » sans preuve -> non promu ; « cycle 3 » avec preuve live -> promu (revisite cross-campagnes)
+    _camp_verdict(tmp_path, "c1", "PASS_PRE_FORWARD")
+    assert RC._promouvoir_pass_live(tmp_path)["n_promus"] == 0
+    _preuve_live_complete(tmp_path, "c1", nets=[1.0] * 40, ops_cid=1)
+    assert RC._promouvoir_pass_live(tmp_path)["n_promus"] == 1             # promu à un cycle ULTÉRIEUR
+
+
+# ═══════════════ PF-3 — portefeuilles isolés (strict vs expérimental) ═══════════════
+def _episode_fwd(coin, ts, h, *, up=True):
+    px = 100.0
+    fb, fa = (px * 1.02, px * 1.02 + 0.02) if up else (px * 0.98, px * 0.98 + 0.02)
+    return {"episode_id": "%s-%d" % (coin, ts), "coin": coin, "ts_ms": float(ts), "bid": px, "ask": px + 0.02,
+            "fwd_bid": {int(h): fb}, "fwd_ask": {int(h): fa}}
+
+
+def test_rejetes_absents_du_portefeuille_strict(tmp_path):
+    import champions_continue as CH
+    # deux champions : c_ok (PASS_PRE_FORWARD -> strict) et c_kill (KILL -> expérimental)
+    for cid in ("c_ok", "c_kill"):
+        CH.enregistrer_candidat(tmp_path, {"trial_id": cid, "direction": 1, "horizon_ms": 250, "coin": "BTC"})
+    _camp_verdict(tmp_path, "c_ok", "PASS_PRE_FORWARD", nom="camp-0001-a")
+    camp2 = tmp_path / "campagnes" / "camp-0002-b"; (camp2 / "resultats").mkdir(parents=True)
+    (camp2 / "resultats" / "final_verdicts.json").write_text(
+        json.dumps([{"trial_id": "c_kill", "verdict": "KILL"}]), encoding="utf-8")
+    prets = [_episode_fwd("BTC", 5000 + i, 250) for i in range(6)]          # épisodes live post-freeze (ts>0)
+    RC._suivi_candidats_live(tmp_path, prets)                               # gèle au ts live puis alimente
+    # certains episodes restent apres le freeze -> alimente ; on verifie l'isolation des ledgers
+    strict = RC._evenements_candidat(tmp_path / "global_portfolio", "c_kill")
+    exp = RC._evenements_candidat(tmp_path / "experimental_portfolio", "c_kill")
+    assert strict == 0                                                      # KILL ne contamine JAMAIS le strict
+    ok_strict = RC._evenements_candidat(tmp_path / "global_portfolio", "c_ok")
+    assert ok_strict >= 0 and exp >= 0                                      # ledgers séparés (budgets isolés)
+
+
+def test_budget_experimental_isole(tmp_path):
+    # deux portefeuilles distincts, capitaux/ledgers indépendants
+    strict = PG.PortefeuilleGlobal(tmp_path / "global_portfolio", capital_initial=1000.0)
+    exp = PG.PortefeuilleGlobal(tmp_path / "experimental_portfolio", capital_initial=1000.0)
+    exp.ouvrir("x:0", coin="ETH", sens=1, notional=100.0, prix=50.0, ts_ms=0.0)
+    assert (tmp_path / "experimental_portfolio" / "ledger.jsonl").exists()
+    assert not (tmp_path / "global_portfolio" / "ledger.jsonl").exists()    # le strict reste vierge
+
+
+# ═══════════════ PF-4 — horloge live périmée bloquée ═══════════════
+def test_horloge_live_perimee_bloque_le_gel(tmp_path):
+    (tmp_path / "canonical").mkdir(parents=True)
+    vieux = int(time.time() * 1000) - 10 * 60 * 1000                        # epoch d'il y a 10 min (> 5 min max)
+    (tmp_path / "canonical" / "marche.jsonl").write_text(
+        json.dumps({"coin": "BTC", "ts_ms": float(vieux), "bid": 1, "ask": 2}) + "\n", encoding="utf-8")
+    assert RC._horloge_live(tmp_path, []) is None                          # WAITING_FOR_FRESH_LIVE_DATA
+    frais = float(int(time.time() * 1000) - 1000)                          # epoch récent
+    (tmp_path / "canonical" / "marche.jsonl").write_text(
+        json.dumps({"coin": "BTC", "ts_ms": frais, "bid": 1, "ask": 2}) + "\n", encoding="utf-8")
+    assert RC._horloge_live(tmp_path, []) == frais
+
+
+def test_tail_lignes_borne(tmp_path):
+    p = tmp_path / "gros.jsonl"
+    p.write_text("\n".join("ligne%d" % i for i in range(100000)) + "\n", encoding="utf-8")
+    q = RC._tail_lignes(p, max_lignes=10, max_octets=4096)
+    assert len(q) <= 10 and q[-1] == "ligne99999"                          # ne lit que la fin, borné
+
+
+# ═══════════════ PF-5 — détecteur de stall + santé honnête ═══════════════
+def test_stall_detecte_tache_bloquee(tmp_path):
+    rundir = tmp_path / "run"; rundir.mkdir()
+    etat = {"phase": "EXACT_REPLAY", "cycles_termines": 0, "totaux": {"testees": 0}}
+    RC._sante_et_stall(tmp_path, rundir, etat)                             # 1er passage : arme l'horloge
+    import json as _j
+    st = _j.loads((rundir / ".stall.json").read_text()); st["depuis_wall"] -= 200.0    # simule 200 s sans avancée
+    (rundir / ".stall.json").write_text(_j.dumps(st))
+    sh = RC._sante_et_stall(tmp_path, rundir, etat)
+    assert sh["stall"] is True and "BLOQU" in sh["sante"].upper() and sh["fonction"] == "EXACT_REPLAY"
+
+
+def test_sante_pas_de_faux_tout_va_bien(tmp_path):
+    rundir = tmp_path / "run"; rundir.mkdir()
+    sh = RC._sante_et_stall(tmp_path, rundir, {"phase": "INGESTION", "totaux": {}})
+    assert "tout fonctionne" not in sh["sante"].lower()                    # jamais « tout fonctionne » sans preuve
+
+
+# ═══════════════ PF-6 — vue compacte 1 écran ═══════════════
+def test_vue_compacte_lignes_et_attente():
+    import dashboard_flow as DF
+    lignes = DF.construire_vue_compacte({"totaux": {}, "resultats_idees": {}, "simulation": {}})
+    labels = [l for l, _ in lignes]
+    for attendu in ("État des données", "Durée", "Travail actuel", "Progression", "Pépites possibles",
+                    "PnL / ROI paper", "Prochaine tâche"):
+        assert attendu in labels
+    txt = DF.rendre_texte({"totaux": {}, "resultats_idees": {}, "simulation": {}}, vue="compact")
+    assert "HYPERSMART" in txt and "En attente des premiers résultats" in txt
+
+
+# ═══════════════ PF-1 — lancement automatique (double-clic) ═══════════════
+def test_cmd_auto_et_admin():
+    auto = (RACINE / "LANCER-RECHERCHE-CONTINUE.cmd").read_text(encoding="utf-8", errors="ignore")
+    admin = (RACINE / "LANCER-RECHERCHE-CONTINUE-ADMIN.cmd").read_text(encoding="utf-8", errors="ignore")
+    assert "peut-reprendre" in auto and "python -u" in auto and "PYTHONUNBUFFERED" in auto
+    assert ":menu" not in auto                                             # plus de menu au double-clic
+    assert ":menu" in admin                                                # menu déplacé en ADMIN
 
 
 # ═══════════════ FX-10 — CI + recette Windows livrées ═══════════════

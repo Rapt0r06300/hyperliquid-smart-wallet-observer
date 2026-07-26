@@ -208,9 +208,9 @@ def _maturer_live(rundir: Path, new_events: list) -> tuple[list, dict]:
                 if e.get("bids") is not None and e.get("asks") is not None:       # vrai L2 futur si présent (FX-8)
                     tick["bids"], tick["asks"] = e["bids"], e["asks"]
                 f.write(json.dumps(tick) + "\n")
-    # relit un buffer BORNÉ (les N derniers ticks par coin) pour la maturation
+    # relit un buffer BORNÉ (tail depuis la FIN, PF-4 : jamais tout le fichier croissant) pour la maturation
     marche: dict = {}
-    for l in buf.read_text(encoding="utf-8", errors="ignore").splitlines()[-20000:]:
+    for l in _tail_lignes(buf, max_lignes=20000, max_octets=4_000_000):
         try:
             d = json.loads(l)
         except ValueError:
@@ -320,7 +320,7 @@ def executer_cycle(root: Path, rundir: Path, *, cycle: int, code_sha: str,
     _outils_recherche(rundir, camp_dir)                    # AF-P5 : registre d'outils réellement lancés
     _prog(6, "suivi live des candidats figés", "clôture du cycle")
     suivi = _suivi_candidats_live(rundir, prets)           # FX-5 : suivi live run-level (épisodes après freeze)
-    _promouvoir_pass_live(rundir, camp_dir)                # POINT 2 : PASS_FORWARD_PAPER SEULEMENT si prouvé live
+    _promouvoir_pass_live(rundir)                          # POINT 2 : revisite TOUTES les campagnes, PASS live-only
     _prog(7, "clôture du cycle", "nouveau cycle")
     resume.update({"campaign_id": camp_id, "cycle": cycle, "nouvelles_donnees": bool(scan["n_new"]),
                    "n_new_events": scan["n_new"], "n_variantes_nouvelles": len(variantes),
@@ -431,10 +431,31 @@ def _outils_recherche(rundir: Path, camp_dir: Path) -> dict:
         return {"erreur": str(e)[:160]}
 
 
-def _horloge_live(rundir: Path, prets_live: list):
-    """Dernier exchange_ts RÉELLEMENT observé (point 1) : max des ts des épisodes live consommés, sinon dernier
-    tick du buffer marché du CanonicalStore (canonical/marche.jsonl). Rend None si AUCUNE horloge live valide
-    (> 0) — dans ce cas on NE GÈLE PAS (WAITING_FOR_LIVE_CLOCK)."""
+MAX_AGE_LIVE_MS = 300_000.0                                   # au-delà, l'horloge live est PÉRIMÉE (WAITING_FOR_FRESH_LIVE_DATA)
+
+
+def _tail_lignes(chemin: Path, max_lignes: int = 500, max_octets: int = 262144) -> list:
+    """Lecture TAIL BORNÉE (PF-4) d'un fichier CROISSANT : on ne lit que les derniers `max_octets` depuis la FIN
+    (seek), jamais tout le fichier. Rend au plus `max_lignes` dernières lignes. Sûr pour un run 24/7."""
+    p = Path(chemin)
+    if not p.exists():
+        return []
+    try:
+        taille = p.stat().st_size
+        with p.open("rb") as f:
+            if taille > max_octets:
+                f.seek(taille - max_octets)                  # borne dure : on saute au dernier bloc
+                f.readline()                                 # jette la ligne partielle du début de bloc
+            data = f.read()
+        return data.decode("utf-8", "ignore").splitlines()[-int(max_lignes):]
+    except OSError:
+        return []
+
+
+def _horloge_live(rundir: Path, prets_live: list, *, max_age_ms: float = MAX_AGE_LIVE_MS):
+    """Dernier exchange_ts RÉEL & FRAIS (points 1 + PF-4) : max des ts des épisodes live consommés, sinon dernier
+    tick du buffer marché du CanonicalStore (lecture TAIL bornée). Rend None si AUCUNE horloge live valide (> 0)
+    ou si elle est PÉRIMÉE (epoch trop ancien vs maintenant) -> on NE GÈLE PAS (WAITING_FOR_FRESH_LIVE_DATA)."""
     m = 0.0
     for e in (prets_live or []):
         try:
@@ -442,33 +463,75 @@ def _horloge_live(rundir: Path, prets_live: list):
         except (TypeError, ValueError):
             continue
     if m <= 0.0:
-        buf = Path(rundir) / "canonical" / "marche.jsonl"
-        if buf.exists():
+        for l in reversed(_tail_lignes(Path(rundir) / "canonical" / "marche.jsonl", 500)):
+            l = l.strip()
+            if not l:
+                continue
             try:
-                with buf.open("r", encoding="utf-8", errors="ignore") as f:
-                    lignes = f.readlines()[-500:]
-                for l in reversed(lignes):
-                    l = l.strip()
-                    if not l:
-                        continue
-                    try:
-                        t = float(json.loads(l).get("ts_ms") or 0.0)
-                    except (ValueError, TypeError):
-                        continue
-                    if t > m:
-                        m = t
-                        break
-            except OSError:
-                pass
-    return m if m > 0.0 else None
+                t = float(json.loads(l).get("ts_ms") or 0.0)
+            except (ValueError, TypeError):
+                continue
+            if t > m:
+                m = t
+                break
+    if m <= 0.0:
+        return None
+    # fraîcheur : un exchange_ts qui ressemble à un epoch ms (> ~2001) et plus vieux que max_age -> PÉRIMÉ
+    if m > 1e12 and (time.time() * 1000.0 - m) > float(max_age_ms):
+        return None
+    return m
+
+
+#: verdicts qui rendent un candidat ADMISSIBLE au portefeuille STRICT (les autres -> expérimental).
+VERDICTS_STRICTS = ("PASS_PRE_FORWARD", "PASS_FORWARD_PAPER")
+MIN_LIVE_EPISODES_POUR_PASS = 30            # minimum RÉEL d'épisodes post-freeze pour un PASS live
+PF_MIN_LIVE = 1.1                           # profit factor live minimal
+DD_MAX_LIVE_BPS = 300.0                     # drawdown live borné
+DUREE_LIVE_MIN_MS = 1000.0                  # durée live minimale (span exchange_ts)
+
+
+def _verdicts_par_candidat(rundir: Path) -> dict:
+    """Dernier verdict connu de CHAQUE candidat sur TOUTES les campagnes (la campagne la plus récente gagne)."""
+    m = {}
+    base = Path(rundir) / "campagnes"
+    if base.exists():
+        for c in sorted(base.glob("camp-*")):
+            try:
+                for f in json.loads((c / "resultats" / "final_verdicts.json").read_text(encoding="utf-8")):
+                    cid = f.get("trial_id")
+                    if cid:
+                        m[cid] = f.get("verdict")
+            except (OSError, ValueError):
+                continue
+    return m
+
+
+def _evenements_candidat(gp_dir: Path, cid: str) -> int:
+    """Compte, en STREAMING, les opérations du ledger dont le position_id appartient à CE candidat (préfixe
+    'cid:'). Un trade d'un AUTRE candidat n'est jamais compté ici."""
+    led = Path(gp_dir) / "ledger.jsonl"
+    n = 0
+    if led.exists():
+        with led.open("r", encoding="utf-8", errors="ignore") as f:
+            for l in f:
+                l = l.strip()
+                if not l:
+                    continue
+                try:
+                    pid = str(json.loads(l).get("position_id") or "")
+                except ValueError:
+                    continue
+                if pid.startswith(str(cid) + ":"):
+                    n += 1
+    return n
 
 
 def _suivi_candidats_live(rundir: Path, prets_live: list) -> dict:
-    """FX-5 + GR-1/GR-2 : registre RUN-LEVEL des candidats figés, suivi CUMULATIF et alimentation du portefeuille
-    GLOBAL depuis le SEUL vrai live. Fige les champions (freeze immuable), puis, pour chaque candidat (y compris
-    des cycles précédents), ne prend que les NOUVEAUX épisodes live FWD_BOOK arrivés APRÈS son freeze_exchange_ts
-    (dédup par episode_id) : (1) cumule PnL/ROI/DD/n_episodes ; (2) OUVRE/FERME dans le portefeuille GLOBAL. Le
-    pré-forward historique (archive) n'alimente JAMAIS ce portefeuille. Un cycle vide ne remet rien à zéro."""
+    """FX-5 + GR + PF-2/PF-3 : registre RUN-LEVEL des candidats figés, suivi CUMULATIF, et alimentation de DEUX
+    portefeuilles ISOLÉS depuis le SEUL vrai live (épisodes CanonicalStore FWD_BOOK après freeze) :
+      • STRICT (global_portfolio) : UNIQUEMENT les candidats admissibles (verdict PASS_PRE_FORWARD/…_PAPER) ;
+      • EXPÉRIMENTAL (experimental_portfolio) : les autres (exploration). KILL/DATA_MISSING/rejetés ne touchent
+        JAMAIS le PnL/ROI/DD strict. Capital/ledger/limites séparés. Un cycle vide ne remet rien à zéro."""
     try:
         import registre_candidats_live as RCL
         import champions_continue as CH
@@ -477,23 +540,21 @@ def _suivi_candidats_live(rundir: Path, prets_live: list) -> dict:
         import forward_portefeuille as FPF
         import moteur_execution_prod as MEP
         reg = RCL.RegistreCandidatsLive(rundir)
-        maintenant = _horloge_live(rundir, prets_live)        # point 1 : dernier exchange_ts RÉELLEMENT observé (jamais 0)
-        # 1) figer les champions courants au dernier exchange_ts live. Sans horloge live valide (maintenant None),
-        #    figer() bascule le candidat en WAITING_FOR_LIVE_CLOCK et NE GÈLE PAS (freeze=0 interdit).
-        for c in CH.charger(rundir):
+        maintenant = _horloge_live(rundir, prets_live)        # dernier exchange_ts RÉEL & FRAIS (jamais 0, jamais périmé)
+        for c in CH.charger(rundir):                          # figer les champions au dernier ts live ; sinon WAITING
             cid = c.get("trial_id") or c.get("candidate_id")
             if cid and c.get("direction") and c.get("horizon_ms"):
                 reg.figer(cid, freeze_exchange_ts=maintenant,
                           meta={"direction": c["direction"], "horizon_ms": c["horizon_ms"],
                                 "coin": c.get("coin"), "family": c.get("family")})
-        if maintenant is None:                                # aucune horloge live -> rien à suivre ce cycle
-            return reg.resume()
-        gp_dir = rundir / "global_portfolio"                 # le SEUL portefeuille global du run (alimenté LIVE only)
-        pfg = PG.PortefeuilleGlobal(gp_dir)
-        gp_pending = gp_dir / "pending_exits.json"
+        if maintenant is None:                                # aucune horloge live fraîche -> rien à suivre ce cycle
+            return {**reg.resume(), "statut": "WAITING_FOR_FRESH_LIVE_DATA"}
+        verdicts = _verdicts_par_candidat(rundir)             # PF-3 : route strict vs expérimental par verdict
+        strict_dir, exp_dir = rundir / "global_portfolio", rundir / "experimental_portfolio"
+        pf_strict = PG.PortefeuilleGlobal(strict_dir)
+        pf_exp = PG.PortefeuilleGlobal(exp_dir, max_expo_coin_frac=1.0)   # budget/ledger/limites INDÉPENDANTS
         _ev = lambda ep, sens, horizon_ms: MEP.evaluer_episode(ep, sens=sens, horizon_ms=horizon_ms)
         _passe = lambda corp, coin=None, regime=None: corp
-        # 2) suivre + alimenter le global sur les NOUVEAUX épisodes admissibles (strictement après le gel)
         for c in reg.candidats():
             cid = c["candidate_id"]; meta = c.get("meta") or {}
             coin = meta.get("coin"); direction = meta.get("direction") or 1; h = meta.get("horizon_ms") or 1000
@@ -501,62 +562,80 @@ def _suivi_candidats_live(rundir: Path, prets_live: list) -> dict:
             sous = [e for e in adm if (not coin or e.get("coin") == coin)]
             vus_before = set(c.get("vus") or [])
             nouveaux = [e for e in sous if (e.get("episode_id") or e.get("event_id")) not in vus_before]
-            # nets PAR ÉPISODE (objets, même longueur que `nouveaux` -> index sûr, jamais un zip corpus/filtré)
             objs = PL.nets_exact(nouveaux, sens=direction, horizon_ms=h) if nouveaux else []
             paires = [((nouveaux[i].get("episode_id") or nouveaux[i].get("event_id")), o.get("net_bps"))
                       for i, o in enumerate(objs)
                       if o.get("status") == "OK" and o.get("promotable") and o.get("exit_source") == "FWD_BOOK"]
             dernier = paires[-1][0] if paires else None
             reg.suivre(cid, paires=paires, last_event_id=dernier, maintenant_ms=maintenant)   # CUMULATIF + dédup
-            if nouveaux:                                      # GR-2 : global alimenté par le LIVE FWD_BOOK uniquement
+            if nouveaux:
+                est_strict = verdicts.get(cid) in VERDICTS_STRICTS      # PF-3 : seuls les admissibles -> STRICT
+                pf = pf_strict if est_strict else pf_exp
+                pend = (strict_dir if est_strict else exp_dir) / "pending_exits.json"
                 cand_meta = {"trial_id": cid, "coin": coin, "regime": None, "direction": direction, "horizon_ms": h}
-                FPF.simuler([cand_meta], nouveaux, filtrer=_passe, evaluer=_ev, portefeuille=pfg,
-                            pending_path=gp_pending, maintenant_ms=maintenant)
+                FPF.simuler([cand_meta], nouveaux, filtrer=_passe, evaluer=_ev, portefeuille=pf,
+                            pending_path=pend, maintenant_ms=maintenant)
         return reg.resume()
     except Exception as e:  # noqa: BLE001
         return {"erreur": str(e)[:160]}
 
 
-MIN_LIVE_EPISODES_POUR_PASS = 30                             # minimum RÉEL d'épisodes post-freeze pour un PASS live
-
-
-def _promouvoir_pass_live(rundir: Path, camp_dir: Path) -> dict:
-    """POINT 2 : un PASS_FORWARD_PAPER n'est délivré QUE s'il est prouvé en LIVE — jamais par le pré-forward
-    archive. Promeut PASS_PRE_FORWARD -> PASS_FORWARD_PAPER pour un candidat SEULEMENT si, dans RegistreCandidatsLive :
-    (a) >= MIN_LIVE_EPISODES_POUR_PASS épisodes live post-freeze ; (b) PnL/ROI live calculés par le registre ;
-    (c) portefeuille GLOBAL live réconcilié cohérent avec au moins un événement ; (d) AUCUNE donnée historique
-    (garanti : le registre ne compte que des épisodes strictement après le freeze). Défensif."""
+def _promouvoir_pass_live(rundir: Path) -> dict:
+    """POINT 2 (renforcé) : à CHAQUE cycle, revisite TOUS les PASS_PRE_FORWARD de TOUTES les campagnes. Promeut
+    PASS_PRE_FORWARD -> PASS_FORWARD_PAPER pour un candidat SEULEMENT si, pour CE candidate_id, TOUS ces critères
+    LIVE (RegistreCandidatsLive, aucune donnée historique) sont vrais : ≥30 épisodes post-freeze ; PnL live > 0 ;
+    ROI live > 0 ; PF live suffisant ; IC bas (bootstrap) > 0 ; drawdown borné ; durée live minimale ; ET des
+    opérations RÉELLES de CE candidat dans le ledger STRICT (un trade d'un autre candidat ne valide jamais). Un
+    candidat négatif ne passe jamais. Défensif."""
     try:
         import registre_candidats_live as RCL
         import portefeuille_global as PG
         reg = RCL.RegistreCandidatsLive(rundir)
-        gp = Path(rundir) / "global_portfolio"
+        strict_dir = Path(rundir) / "global_portfolio"
         global_ok = False
-        if (gp / "ledger.jsonl").exists():
-            rc = PG.PortefeuilleGlobal(gp).reconcilier()
-            global_ok = bool(rc.get("coherent")) and sum((rc.get("evenements") or {}).values()) > 0
-        fpath = Path(camp_dir) / "resultats" / "final_verdicts.json"
-        finals = json.loads(fpath.read_text(encoding="utf-8"))
-        change = False
-        for f in finals:
-            if f.get("verdict") != "PASS_PRE_FORWARD":
+        if (strict_dir / "ledger.jsonl").exists():
+            global_ok = bool(PG.PortefeuilleGlobal(strict_dir).reconcilier().get("coherent"))
+        camps = sorted((Path(rundir) / "campagnes").glob("camp-*")) if (Path(rundir) / "campagnes").exists() else []
+        n_promus = 0
+        for camp in camps:
+            fpath = camp / "resultats" / "final_verdicts.json"
+            try:
+                finals = json.loads(fpath.read_text(encoding="utf-8"))
+            except (OSError, ValueError):
                 continue
-            c = reg.etat.get(f.get("trial_id"))
-            live_ok = bool(c and int(c.get("n_episodes_live", 0)) >= MIN_LIVE_EPISODES_POUR_PASS
-                           and c.get("pnl_live_bps") is not None and global_ok)
-            if live_ok:
-                f["verdict"] = "PASS_FORWARD_PAPER"
-                f["live_confirme"] = True
-                f["n_episodes_live"] = c["n_episodes_live"]
-                f["pnl_live_bps"] = c["pnl_live_bps"]; f["roi_live_pct"] = c["roi_live_pct"]
-                f["dd_live_bps"] = c["dd_live_bps"]
-                f.setdefault("raisons", []).append("LIVE_CONFIRMED")
-                change = True
-        if change:
-            _ecrire_atomique(fpath, json.dumps(finals, ensure_ascii=False, indent=1))
-        return {"n_pass_live": sum(1 for f in finals if f.get("verdict") == "PASS_FORWARD_PAPER"),
-                "n_pass_pre_forward": sum(1 for f in finals if f.get("verdict") == "PASS_PRE_FORWARD"),
-                "global_reconcilie": global_ok}
+            change = False
+            for f in finals:
+                if f.get("verdict") != "PASS_PRE_FORWARD":
+                    continue
+                c = reg.etat.get(f.get("trial_id"))
+                if not c:
+                    f["criteres_live"] = {"registre_live": False}
+                    continue
+                pnl, roi, pf = c.get("pnl_live_bps"), c.get("roi_live_pct"), c.get("pf_live")
+                ic, dd, duree = c.get("ic_bas_live"), c.get("dd_live_bps"), float(c.get("duree_live_ms") or 0.0)
+                n_live = int(c.get("n_episodes_live", 0))
+                n_led = _evenements_candidat(strict_dir, f.get("trial_id"))   # ops du MÊME candidate_id
+                crit = {
+                    "n_post_freeze>=30": n_live >= MIN_LIVE_EPISODES_POUR_PASS,
+                    "pnl_live>0": (pnl is not None and pnl > 0),
+                    "roi_live>0": (roi is not None and roi > 0),
+                    "pf_live_suffisant": (pf >= PF_MIN_LIVE) if pf is not None else (pnl is not None and pnl > 0),
+                    "ic_bas_live>0": (ic is not None and ic > 0),
+                    "drawdown_borne": (dd is not None and dd <= DD_MAX_LIVE_BPS),
+                    "duree_live_min": (duree >= DUREE_LIVE_MIN_MS),
+                    "ledger_meme_candidat": (n_led >= 1),        # opérations RÉELLES de CE candidat (jamais un autre)
+                    "global_reconcilie": global_ok,
+                }
+                f["criteres_live"] = crit
+                if all(crit.values()):
+                    f["verdict"] = "PASS_FORWARD_PAPER"; f["live_confirme"] = True
+                    f["n_episodes_live"] = n_live; f["pnl_live_bps"] = pnl; f["roi_live_pct"] = roi
+                    f["pf_live"] = pf; f["ic_bas_live"] = ic; f["dd_live_bps"] = dd; f["n_ops_ledger"] = n_led
+                    f.setdefault("raisons", []).append("LIVE_CONFIRMED")
+                    change = True; n_promus += 1
+            if change:
+                _ecrire_atomique(fpath, json.dumps(finals, ensure_ascii=False, indent=1))
+        return {"n_promus": n_promus, "global_reconcilie": global_ok, "n_campagnes_revisitees": len(camps)}
     except Exception as e:  # noqa: BLE001
         return {"erreur": str(e)[:160]}
 
@@ -655,12 +734,62 @@ _PHRASES_PHASE = {
 }
 
 
+STALL_SECONDES = 60.0                                       # aucun compteur ne bouge > 60 s -> CALCUL LONG / TÂCHE BLOQUÉE
+
+
+def _sante_et_stall(root: Path, rundir: Path, etat: dict) -> dict:
+    """PF-5 : santé HONNÊTE. « en marche » SEULEMENT si un heartbeat collecteur est frais OU si des compteurs
+    grandissent. Si AUCUN compteur ne change pendant > 60 s -> `CALCUL LONG` puis `TÂCHE BLOQUÉE`, avec la phase
+    (fonction) et la dernière ligne d'erreur (log). Jamais « tout fonctionne » sans preuve."""
+    tot = etat.get("totaux", {})
+    sig = [etat.get("cycles_termines"), tot.get("testees"), tot.get("forward_events"),
+           tot.get("events_utilises"), tot.get("idees_trouvees")]
+    p = Path(rundir) / ".stall.json"
+    now = time.time()
+    try:
+        st = json.loads(p.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        st = {}
+    if st.get("sig") != sig:                                # un compteur a bougé -> on ré-arme l'horloge d'inactivité
+        st = {"sig": sig, "depuis_wall": now}
+        try:
+            _ecrire_atomique(p, json.dumps(st))
+        except OSError:
+            pass
+    fixe_s = now - float(st.get("depuis_wall", now))
+    hb_age = None
+    try:
+        import heartbeat_collecteur as HB
+        ages = [HB.age_ms(root, n) for n in _collecteurs_lecture_seule(root)]
+        ages = [a for a in ages if a is not None]
+        hb_age = min(ages) if ages else None
+    except Exception:  # noqa: BLE001
+        hb_age = None
+    croissance = any(bool(x) for x in sig)
+    if fixe_s > STALL_SECONDES:                             # RIEN ne bouge -> le dire clairement (jamais « tout va bien »)
+        log = ""
+        errs = Path(rundir) / "errors.csv"
+        tl = _tail_lignes(errs, 1) if errs.exists() else []
+        log = (tl[-1] if tl else "")[:160]
+        etiquette = "TÂCHE BLOQUÉE" if fixe_s > 3 * STALL_SECONDES else "CALCUL LONG"
+        return {"sante": "%s — phase %s (%ds sans avancée)" % (etiquette, etat.get("phase") or "?", int(fixe_s)),
+                "stall": True, "fonction": etat.get("phase"), "log": log, "fixe_s": int(fixe_s),
+                "heartbeat_age_ms": hb_age}
+    if (hb_age is not None and hb_age < 120_000) or croissance:
+        return {"sante": "en marche (heartbeat frais / données qui avancent)", "stall": False,
+                "heartbeat_age_ms": hb_age, "fixe_s": int(fixe_s)}
+    return {"sante": "démarrage… (pas encore de heartbeat ni de données confirmées)", "stall": False,
+            "heartbeat_age_ms": hb_age, "fixe_s": int(fixe_s)}
+
+
 def _enrichir_etat_dashboard(root, rundir, etat, *, cycle, phase, tot, interessantes) -> None:
     """AF-P6 : ajoute à l'état les champs des 12 panneaux (mots simples). Valeurs absentes = laissées None
     -> le dashboard affiche « PAS ENCORE CALCULABLE »."""
     rundir = Path(rundir)
     phrase, pourquoi = _PHRASES_PHASE.get(phase, ("je travaille", "pour trouver un edge honnête"))
-    etat["sante"] = "tout fonctionne"
+    _sh = _sante_et_stall(root, rundir, etat)              # PF-5 : santé RÉELLE (heartbeat + croissance) + stall 60s
+    etat["sante"] = _sh["sante"]
+    etat["stall"] = _sh
     # progression RÉELLE (FX-2) : position de la phase dans le cycle (l'état est réécrit à CHAQUE phase, donc ça
     # bouge), FUSIONNÉE avec la progression fine publiée par le moteur pendant un long calcul (progres_live).
     phases = list(CYCLE_PHASES)
@@ -965,6 +1094,9 @@ def _reconcilier(rundir: Path) -> dict:
     global_led = rundir / "global_portfolio" / "ledger.jsonl"
     ledgers = [global_led] if global_led.exists() else []
     glob = RECO.reconstruire_global(ledgers, equity_curve_out=(rundir / "results" / "equity_curve.jsonl"))
+    # PF-3 : portefeuille EXPÉRIMENTAL isolé (budget/ledger séparés) — reporté à part, n'affecte JAMAIS le strict.
+    exp_led = rundir / "experimental_portfolio" / "ledger.jsonl"
+    exp = RECO.reconstruire_global([exp_led] if exp_led.exists() else [])
     for c in camps:
         led = c / "ledger" / "forward_portfolio.jsonl"
         if led.exists():
@@ -986,6 +1118,10 @@ def _reconcilier(rundir: Path) -> dict:
            "equity_usd": glob["equity"], "drawdown_usd": glob["drawdown_usd"],
            "roi_total_pct": glob["roi_total_pct"], "roi_deploye_pct": glob["roi_deploye_pct"],
            "coherent": coherent, "coherence": coherence, "par_campagne": par_campagne[:50],
+           "experimental": {"equity_usd": exp["equity"], "pnl_realise_usd": exp["pnl_realise"],
+                            "roi_total_pct": exp["roi_total_pct"], "drawdown_usd": exp["drawdown_usd"],
+                            "n_evenements": exp["n_evenements"],
+                            "note": "portefeuille EXPÉRIMENTAL isolé — budget/ledger séparés, n'affecte jamais le PnL/ROI/DD strict"},
            "evenements": glob["evenements"], "n_exclusions": len(exclusions), "exclusions": exclusions[:100],
            "note": "PnL/ROI/DD = portefeuille GLOBAL live UNIQUEMENT (CanonicalStore FWD_BOOK après freeze) ; le pré-forward archive est diagnostic (par_campagne) et n'entre jamais dans le global. Vide = capital intact (aucun trade live). `coherent` = ledger reconstruit vs snapshot (None si aucun portefeuille global)."}
     _ecrire_atomique(rundir / "results" / "reconciliation.json", json.dumps(rec, ensure_ascii=False, indent=1))
@@ -1113,7 +1249,7 @@ def _demarrer_dashboard_thread(root: Path, ident: dict, *, intervalle_s: float =
     simple vue nommée « snapshot »). Nav 1-7 sans intercepter Ctrl+C."""
     rundir = Path(ident["rundir"])
     debut = ident.get("t0_wall_ms", time.time() * 1000) / 1000.0
-    etat_ui = {"vue": "tout", "snapshot_msg": None}
+    etat_ui = {"vue": "compact", "snapshot_msg": None}      # PF-6 : vue COMPACTE par défaut (détails via 1-7)
 
     def _etat():
         etat = json.loads((rundir / "LIVE-RESEARCH-STATE.json").read_text(encoding="utf-8"))
@@ -1161,11 +1297,12 @@ def _demarrer_dashboard_thread(root: Path, ident: dict, *, intervalle_s: float =
             from rich.console import Console
             from rich.live import Live
             console = Console()
-            with Live(DF.rendre_rich(_etat()), console=console, refresh_per_second=3, screen=False) as live:
+            with Live(DF.rendre_rich(_etat(), vue=etat_ui["vue"]), console=console,
+                      refresh_per_second=4, screen=False) as live:      # PF-6 : 4 rafraîchissements/s
                 while not _ARRET.is_set():
                     try:
                         _touche(console)
-                        live.update(DF.rendre_rich(_etat()))
+                        live.update(DF.rendre_rich(_etat(), vue=etat_ui["vue"]))
                     except Exception:  # noqa: BLE001 — un afficheur ne casse jamais le moteur
                         pass
                     _ARRET.wait(intervalle_s)
@@ -1343,7 +1480,8 @@ def verifier_finalisation(root: Path, run_id: str | None = None) -> dict:
 def _cli():
     ap = argparse.ArgumentParser(description="Laboratoire de recherche CONTINU (paper-only)")
     ap.add_argument("commande", choices=["dry-run", "start", "resume", "status", "snapshot", "stop",
-                                         "verifier-finalisation", "run-id-actif", "dernier-run-lance"])
+                                         "verifier-finalisation", "run-id-actif", "dernier-run-lance",
+                                         "peut-reprendre"])
     ap.add_argument("--run-id", default=None)
     a = ap.parse_args()
     root = RACINE
@@ -1366,6 +1504,9 @@ def _cli():
         print(ident["run_id"] if ident else "")
     elif a.commande == "dernier-run-lance":                   # FX-1 : run_id du dernier run LANCÉ (survit à la finalisation)
         print(_lire_dernier_run_lance(root))
+    elif a.commande == "peut-reprendre":                      # PF-1 : code 0 si un run est reprenable, 1 sinon
+        reprenable = bool(_identite_active(root) or _dernier_run_recuperable(root))
+        raise SystemExit(0 if reprenable else 1)
     elif a.commande == "verifier-finalisation":
         v = verifier_finalisation(root, a.run_id)
         print(json.dumps(v, ensure_ascii=False))
