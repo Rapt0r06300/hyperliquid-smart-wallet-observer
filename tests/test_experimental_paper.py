@@ -31,12 +31,12 @@ def test_admission_sans_oos_mais_barème_exigeant(tmp_path):
 
 def test_limites_par_moteur_et_un_marche_une_position(tmp_path):
     store = MP.charger_store(tmp_path)
-    MP.ouvrir(_sig(coin="ETH"), store, tmp_path, now_ms=1000)
-    assert MP.admettre(_sig(coin="ETH"), store, now_ms=1000)[1] == "DEJA_OUVERT"
+    MP.ouvrir(_sig(coin="ETH"), store, tmp_path, now_ms=20_000)
+    assert MP.admettre(_sig(coin="ETH"), store, now_ms=20_000)[1] == "DEJA_OUVERT"
     # remplir la limite de positions du moteur lead_lag (max 4)
     for c in ("SOL", "BTC", "AVAX"):
-        MP.ouvrir(_sig(coin=c), store, tmp_path, now_ms=1000)
-    assert MP.admettre(_sig(coin="LINK"), store, now_ms=1000)[1] == "LIMITE_POSITIONS_MOTEUR"
+        MP.ouvrir(_sig(coin=c), store, tmp_path, now_ms=20_000)
+    assert MP.admettre(_sig(coin="LINK"), store, now_ms=20_000)[1] == "LIMITE_POSITIONS_MOTEUR"
 
 
 def test_pnl_directionnel_et_funding_carry(tmp_path):

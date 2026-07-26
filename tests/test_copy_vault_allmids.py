@@ -146,17 +146,22 @@ def test_lecteur_l2_on_demand(tmp_path):
 
 
 def test_leader_close_declenche_sortie(tmp_path):
-    """Suivi réel du leader (rectif Flo) : quand le vault RÉDUIT/CLOS, la copie doit sortir."""
-    from hl_observer.experimental.runner import _leader_a_reduit
+    """Suivi réel du leader (LOT14 P1/P2/P3) : _etat_leader classe AUCUN/CLOSE/REDUCE depuis un snapshot
+    COMPLET, FRAIS et POSTÉRIEUR à l'entrée (taille SIGNÉE, dédup snapshot par le runner)."""
+    from hl_observer.experimental.runner import _etat_leader
     (tmp_path / "runtime" / "data").mkdir(parents=True)
     snap = tmp_path / "runtime" / "data" / "vault_snapshots.jsonl"
-    pos = {"coin": "HYPE", "moteur": "copy_vault", "meta": {"vault": "0xAAA", "coin": "HYPE", "szi_apres": 1000.0}}
-    snap.write_text(json.dumps({"vault": "0xAAA", "positions": [{"coin": "HYPE", "szi": 1000.0}]}))
-    assert _leader_a_reduit(pos, tmp_path) == (False, "")               # leader tient -> on reste
-    snap.write_text(json.dumps({"vault": "0xAAA", "positions": []}))
-    assert _leader_a_reduit(pos, tmp_path) == (True, "LEADER_A_CLOS")    # leader a clos -> on sort
-    snap.write_text(json.dumps({"vault": "0xAAA", "positions": [{"coin": "HYPE", "szi": 300.0}]}))
-    assert _leader_a_reduit(pos, tmp_path) == (True, "LEADER_A_REDUIT")  # réduit à 30 % -> on sort
+    now = 1_000_000.0
+    pos = {"coin": "HYPE", "moteur": "copy_vault", "ts_ouverture_ms": now - 10_000, "entry_leader_szi": 1000.0,
+           "last_leader_szi_applied": 1000.0, "meta": {"vault": "0xAAA", "coin": "HYPE", "szi_apres": 1000.0}}
+
+    def w(szi, sid):
+        positions = [{"coin": "HYPE", "szi": szi}] if szi else []
+        snap.write_text(json.dumps({"vault": "0xAAA", "ts_ms": int(now - 1000), "nav_usd": 100000.0,
+                                    "positions": positions, "snapshot_id": sid}))
+    w(1000.0, "s1"); assert _etat_leader(pos, tmp_path, now_ms=now)["action"] == "AUCUN"     # leader tient
+    w(0.0, "s2");    assert _etat_leader(pos, tmp_path, now_ms=now)["action"] == "CLOSE"     # leader a clos
+    w(300.0, "s3");  assert _etat_leader(pos, tmp_path, now_ms=now)["action"] == "REDUCE"    # réduit à 30 %
 
 
 def test_filtre_de_retention_du_score(tmp_path):

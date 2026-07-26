@@ -23,20 +23,20 @@ def test_pnl_deux_jambes_somme_exacte():
     assert r["jambes"][0]["realized_usd"] > -1 and r["jambes"][1]["realized_usd"] > -1
 
 
-# ── #6 copy-vault REDUCE proportionnel ──
-def test_reduce_proportionnel_ferme_la_fraction():
-    pos = {"notional_usd": 100.0, "sens": 1, "prix_entree": 100.0}
-    r = EP.reduce_proportionnel(pos, taille_leader_avant=10.0, taille_leader_apres=6.0,
-                                prix_sortie=100.1, cout_sortie_bps=5.0)
+# ── #6 copy-vault REDUCE vers cible (P1 idempotent + P4 coût d'entrée) ──
+def test_reduire_vers_cible_ferme_la_fraction():
+    pos = {"notional_usd": 100.0, "initial_paper_notional_usd": 100.0, "sens": 1, "prix_entree": 100.0}
+    r = EP.reduire_vers_cible(pos, entry_leader_szi=10.0, current_leader_szi=6.0,
+                              prix_sortie=100.1, cout_sortie_bps=5.0, cout_entree_bps=4.0)
     assert r["action"] == "REDUCE" and r["ratio_restant"] == 0.6
     assert abs(r["notional_ferme_usd"] - 40.0) < 1e-6 and abs(r["notional_residuel_usd"] - 60.0) < 1e-6
-    assert r["frais_partie_fermee_usd"] > 0                      # frais SEULEMENT sur la partie fermée
+    assert r["entry_cost_allocated_usd"] > 0 and r["exit_cost_usd"] > 0   # P4 : coût d'entrée ET de sortie
 
 
 def test_close_integral_seulement_si_leader_quasi_zero():
-    pos = {"notional_usd": 100.0, "sens": 1, "prix_entree": 100.0}
-    r = EP.reduce_proportionnel(pos, taille_leader_avant=10.0, taille_leader_apres=0.2,
-                                prix_sortie=100.1, cout_sortie_bps=5.0)   # ratio 0.02 <= 0.05
+    pos = {"notional_usd": 100.0, "initial_paper_notional_usd": 100.0, "sens": 1, "prix_entree": 100.0}
+    r = EP.reduire_vers_cible(pos, entry_leader_szi=10.0, current_leader_szi=0.2,
+                              prix_sortie=100.1, cout_sortie_bps=5.0)   # ratio 0.02 <= 0.05
     assert r["action"] == "CLOSE_INTEGRAL" and r["notional_residuel_usd"] == 0.0
 
 
@@ -88,15 +88,17 @@ def test_moteur_reduire_garde_le_residu_et_journalise_reduce(tmp_path):
     """Câblage #6 dans le runtime : MP.reduire ferme la fraction, GARDE le résidu ouvert, écrit un REDUCE
     (jamais un CLOSE) ; la réconciliation #8 lit ce REDUCE et reste cohérente."""
     store = MP.charger_store(tmp_path)
-    pos = {"id": "copy_vault:SOL", "moteur": "copy_vault", "coin": "SOL", "sens": 1, "prix_entree": 100.0,
-           "notional_usd": 100.0, "cout_entree_bps": 0.0, "edge_estime_bps": 20.0, "ts_ouverture_ms": 0,
-           "type_pnl": "directional"}
+    pos = {"id": "copy_vault:SOL", "position_id": "copy_vault:SOL:1:abcd", "moteur": "copy_vault",
+           "coin": "SOL", "sens": 1, "prix_entree": 100.0, "notional_usd": 100.0,
+           "initial_paper_notional_usd": 100.0, "cout_entree_bps": 0.0, "entry_cost_remaining_usd": 0.0,
+           "edge_estime_bps": 20.0, "ts_ouverture_ms": 0, "type_pnl": "directional"}
     store["ouvertes"]["copy_vault:SOL"] = pos
-    rp = EP.reduce_proportionnel(pos, taille_leader_avant=10.0, taille_leader_apres=6.0,
-                                 prix_sortie=100.1, cout_sortie_bps=5.0)
+    rp = EP.reduire_vers_cible(pos, entry_leader_szi=10.0, current_leader_szi=6.0,
+                               prix_sortie=100.1, cout_sortie_bps=5.0, cout_entree_bps=0.0)
     res = MP.reduire(pos, store, tmp_path, notional_ferme_usd=rp["notional_ferme_usd"],
                      notional_residuel_usd=rp["notional_residuel_usd"], realized_usd=rp["realized_usd"],
-                     prix_sortie=100.1, cout_sortie_bps=5.0, raison="LEADER_A_REDUIT", now_ms=1000)
+                     prix_sortie=100.1, cout_sortie_bps=5.0, raison="LEADER_A_REDUIT", now_ms=1000,
+                     entry_cost_allocated_usd=rp["entry_cost_allocated_usd"], exit_cost_usd=rp["exit_cost_usd"])
     assert "copy_vault:SOL" in store["ouvertes"], "la position reste OUVERTE (résidu)"
     assert abs(pos["notional_usd"] - 60.0) < 1e-6 and abs(res["notional_ferme_usd"] - 40.0) < 1e-6
     lignes = [json.loads(l) for l in (tmp_path / MP.LEDGER_RELPATH).read_text(encoding="utf-8").splitlines()]

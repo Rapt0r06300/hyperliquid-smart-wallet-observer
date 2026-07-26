@@ -23,21 +23,29 @@ def _store():
     return {"mode": MP.MODE, "ouvertes": {}}
 
 
-# ── #1 ROI gate ──
+# ── #1 ROI gate (voie STRICTE) ──
 def test_roi_sous_seuil_rejete():
-    ok, motif = MP.admettre(_sig(roi_annuel_pct=10.0), _store(), now_ms=1_000_100.0)   # < 15
+    ok, motif = MP.admettre(_sig(roi_annuel_pct=10.0), _store(), now_ms=1_000_100.0, mode="strict")   # < 15
     assert ok is False and motif == "ROI_INSUFFISANT"
 
 
 def test_roi_au_seuil_admis():
-    ok, _ = MP.admettre(_sig(roi_annuel_pct=15.0), _store(), now_ms=1_000_100.0)       # == 15
+    ok, _ = MP.admettre(_sig(roi_annuel_pct=15.0), _store(), now_ms=1_000_100.0, mode="strict")       # == 15
     assert ok is True
 
 
 def test_roi_nan_inf_rejete():
     for bad in (float("nan"), float("inf")):
-        ok, motif = MP.admettre(_sig(roi_annuel_pct=bad), _store(), now_ms=1_000_100.0)
+        ok, motif = MP.admettre(_sig(roi_annuel_pct=bad), _store(), now_ms=1_000_100.0, mode="strict")
         assert ok is False and motif == "ROI_NON_MESURABLE"
+
+
+def test_roi_none_experimental_admet_strict_rejette():
+    # 🔴 P0 cœur : roi INDÉTERMINÉ (None) -> experimental_paper ADMET (collecte forward), strict REFUSE.
+    ok_exp, motif_exp = MP.admettre(_sig(roi_annuel_pct=None), _store(), now_ms=1_000_100.0)  # défaut = experimental
+    assert ok_exp is True and motif_exp is None
+    ok_str, motif_str = MP.admettre(_sig(roi_annuel_pct=None), _store(), now_ms=1_000_100.0, mode="strict")
+    assert ok_str is False and motif_str == "ROI_NON_MESURABLE"
 
 
 def test_signal_valide_admis():

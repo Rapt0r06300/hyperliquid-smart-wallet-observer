@@ -15,7 +15,8 @@ from pathlib import Path
 
 REGISTRE_RELPATH = Path("runtime") / "data" / "registre_essais.jsonl"
 CHAMPS = ("family", "variant", "parameter_hash", "data_cutoff", "universe", "horizon",
-          "cost_model_version", "execution_model_version", "result", "pass_kill", "preregistration_ts")
+          "cost_model_version", "execution_model_version", "result", "pass_kill", "preregistration_ts",
+          "phase")            # phase ∈ {preregistration, resultat} : préreg AVANT exécution, résultat APRÈS (append-only)
 
 
 def parameter_hash(params: dict) -> str:

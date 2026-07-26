@@ -161,12 +161,13 @@ def _raison_sortie(pos: dict, root: Path, *, now_ms: float, mark: float | None) 
     """Sortie DÉFINIE avec risque CALIBRÉ (rectif Flo : plus de stop fixe démesuré). (1) le LEADER a
     réduit/clos ; (2) STOP calibré = MAE_p75 du coin (excursion adverse en bps) ; (3) TAKE-PROFIT calibré
     = MFE_p50 ; (4) horizon. Le stop/TP sont en bps (proportionnés à l'edge), jamais un forfait absurde."""
-    from hl_observer.experimental.runner import _leader_a_reduit
+    from hl_observer.experimental.runner import _etat_leader
     meta = pos.get("meta") or {}
     cout_sortie = float(pos.get("spread_bps") or 0.0) / 2.0 + float(pos.get("frais_bps") or 0.0) + float(pos.get("slippage_bps") or 0.0)
-    leader, raison_leader = _leader_a_reduit(pos, root)
-    if leader:
-        return raison_leader, cout_sortie
+    # LOT14 P1/P2/P3 : _etat_leader classe le changement du leader depuis un snapshot COMPLET/FRAIS/postérieur.
+    et = _etat_leader(pos, root, now_ms=now_ms)
+    if et["action"] in ("REDUCE", "CLOSE", "FLIP_LONG_SHORT", "FLIP_SHORT_LONG"):
+        return "LEADER_%s" % et["action"], cout_sortie
     if mark is not None and pos.get("prix_entree"):
         # excursion BRUTE courante dans le sens de la position (bps)
         excursion_bps = pos["sens"] * (mark - pos["prix_entree"]) / pos["prix_entree"] * 1e4

@@ -58,31 +58,59 @@ def snapshot_complet_ok(snapshot: dict, coin: str, *, ts_entree_ms: float, now_m
     return True, None
 
 
-def reduce_proportionnel(pos: dict, *, taille_leader_avant: float, taille_leader_apres: float,
-                         prix_sortie: float, cout_sortie_bps: float, quasi_zero: float = 0.05) -> dict:
-    """Réplique proportionnellement la réduction du LEADER. ratio_restant = apres/avant. On ferme la
-    fraction (1−ratio) de NOTRE position au prix exécutable (frais sur la partie fermée), on garde le
-    résidu. Close INTÉGRAL seulement si le leader est réellement ~0 (ratio <= quasi_zero)."""
-    if taille_leader_avant <= 0 or not INV.est_fini(taille_leader_apres):
+def classifier_changement_leader(*, entry_szi: float, current_szi: float, last_applied_szi: float,
+                                 tol_frac: float = 0.02) -> str:
+    """P2 — classe le changement d'exposition SIGNÉE du leader depuis le dernier état DÉJÀ appliqué. Détecte
+    toute variation au-delà d'une tolérance relative (pas seulement > 50 %) : REDUCE, ADD, CLOSE, FLIP_*,
+    AUCUN. Un FLIP (changement de signe) est explicite, JAMAIS interprété comme 'aucun changement'."""
+    if not (INV.est_fini(entry_szi) and INV.est_fini(current_szi) and INV.est_fini(last_applied_szi)) \
+            or abs(float(entry_szi)) <= 0:
+        return "INVALIDE"
+    e, cur, last = float(entry_szi), float(current_szi), float(last_applied_szi)
+    if cur != 0 and last != 0 and (cur > 0) != (last > 0):     # changement de SIGNE = flip explicite
+        return "FLIP_LONG_SHORT" if last > 0 else "FLIP_SHORT_LONG"
+    if abs(cur) <= abs(e) * 1e-9:                              # exposition ~0 -> clos
+        return "CLOSE"
+    delta = abs(cur) - abs(last)
+    seuil = abs(e) * float(tol_frac)
+    if delta < -seuil:
+        return "REDUCE"
+    if delta > seuil:
+        return "ADD"
+    return "AUCUN"
+
+
+def reduire_vers_cible(pos: dict, *, entry_leader_szi: float, current_leader_szi: float, prix_sortie: float,
+                       cout_sortie_bps: float, cout_entree_bps: float = 0.0, quasi_zero: float = 0.05) -> dict:
+    """P1 (idempotence) + P4 (coût d'entrée réparti). Le notionnel CIBLE se calcule TOUJOURS depuis le
+    notionnel INITIAL et la taille COURANTE du leader :
+        cible = initial_paper_notional × |current_leader_szi / entry_leader_szi|
+        à_fermer = current_paper_notional − cible          (JAMAIS un résidu re-multiplié par un ratio)
+    Rejouer EXACTEMENT le même snapshot -> current == cible -> 0 à fermer (idempotent).
+    realized = brut(sur la tranche) − coût d'entrée réparti − coût de sortie."""
+    initial = float(pos.get("initial_paper_notional_usd") or pos.get("notional_usd") or 0.0)
+    current = float(pos.get("notional_usd") or 0.0)
+    if not (INV.est_fini(entry_leader_szi) and INV.est_fini(current_leader_szi)) or abs(float(entry_leader_szi)) <= 0:
         return {"action": "AUCUNE", "motif": "TAILLE_LEADER_INVALIDE"}
-    ratio = max(0.0, min(1.0, taille_leader_apres / taille_leader_avant))
-    notional0 = float(pos["notional_usd"])
-    if ratio <= quasi_zero:                                    # leader ~0 -> on ferme tout
-        ferme = notional0
-        residuel = 0.0
-        action = "CLOSE_INTEGRAL"
-    elif ratio >= 1.0 - 1e-9:                                  # pas de réduction -> rien
-        return {"action": "AUCUNE", "ratio_restant": 1.0}
+    ratio = abs(float(current_leader_szi)) / abs(float(entry_leader_szi))     # 1 = inchangé ; 0 = leader clos
+    if ratio <= quasi_zero:                                    # leader ~0 -> close intégral
+        ferme, residuel, action = current, 0.0, "CLOSE_INTEGRAL"
     else:
-        ferme = round(notional0 * (1.0 - ratio), 6)            # on ferme la fraction réduite
-        residuel = round(notional0 - ferme, 6)
-        action = "REDUCE"
+        cible = min(current, initial * ratio)                 # borne au courant (une réduction ne fait pas ADD)
+        ferme = round(current - cible, 6)
+        if ferme <= 1e-9:                                     # même snapshot rejoué / pas de réduction nette
+            return {"action": "AUCUNE", "ratio_restant": round(ratio, 4), "notional_ferme_usd": 0.0,
+                    "notional_residuel_usd": round(current, 6)}
+        residuel, action = round(current - ferme, 6), "REDUCE"
     sens = int(pos["sens"]); entree = float(pos["prix_entree"])
     brut = (float(prix_sortie) - entree) / entree if sens > 0 else (entree - float(prix_sortie)) / entree
-    realized = round((brut - float(cout_sortie_bps) / 1e4) * ferme, 6)  # PnL sur la partie FERMÉE seulement
+    entry_cost = float(cout_entree_bps) / 1e4 * ferme          # P4 : coût d'ENTRÉE de la tranche fermée
+    exit_cost = float(cout_sortie_bps) / 1e4 * ferme
+    realized = round(brut * ferme - entry_cost - exit_cost, 6)
     return {"action": action, "ratio_restant": round(ratio, 4), "notional_ferme_usd": round(ferme, 6),
             "notional_residuel_usd": residuel, "realized_usd": realized,
-            "frais_partie_fermee_usd": round(float(cout_sortie_bps) / 1e4 * ferme, 6)}
+            "entry_cost_allocated_usd": round(entry_cost, 6), "exit_cost_usd": round(exit_cost, 6),
+            "frais_partie_fermee_usd": round(entry_cost + exit_cost, 6)}
 
 
 # ─────────────── #7 donnée manquante ───────────────
@@ -104,4 +132,5 @@ def politique_data_missing(pos: dict, *, now_ms: float, grace_ms: float = 120_00
             "slippage_stress_bps": slippage_stress_bps}
 
 
-__all__ = ["pnl_jambe", "pnl_deux_jambes", "snapshot_complet_ok", "reduce_proportionnel", "politique_data_missing"]
+__all__ = ["pnl_jambe", "pnl_deux_jambes", "snapshot_complet_ok", "classifier_changement_leader",
+           "reduire_vers_cible", "politique_data_missing"]

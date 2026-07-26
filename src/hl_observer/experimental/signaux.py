@@ -12,6 +12,25 @@ from pathlib import Path
 from typing import Any
 
 from hl_observer.experimental.moteur_paper import LIMITES, Signal
+from hl_observer.experimental.roi_estimateur import roi_depuis_signal
+
+#: P8 — fraîcheur des ÉVÉNEMENTS-source (trade Binance / snapshot leader) : au-delà = STALE ; dans le futur = skew.
+STALE_SIGNAL_MS = 30_000.0
+SKEW_TOL_MS = 2_000.0
+
+
+def _fraicheur_evenement(event_ms, now_ms, *, stale_ms: float = STALE_SIGNAL_MS,
+                         skew_ms: float = SKEW_TOL_MS) -> str | None:
+    """P8 — None si l'événement est frais ; sinon le motif : TS_ABSENT / STALE_SIGNAL / CLOCK_SKEW_FUTURE_DATA.
+    Le signal doit porter l'horodatage RÉEL de l'événement (pas `now`) pour que ce contrôle ait un sens."""
+    if event_ms is None:
+        return "TS_ABSENT"
+    age = float(now_ms) - float(event_ms)
+    if age > stale_ms:
+        return "STALE_SIGNAL"
+    if age < -skew_ms:
+        return "CLOCK_SKEW_FUTURE_DATA"
+    return None
 
 # ─────────────────────────────── 1) CROSS-VENUE (survivants gelés) ───────────────────────────────
 
@@ -118,15 +137,20 @@ def signaux_cross_venue(root: str | Path = ".", *, now_ms: float | None = None) 
                           "gap_bps": round(gap, 2), "cout_bps": round(cout_ar, 2)}); continue
         aud = construire_jambes(coin, sens, notional, car, frais_hl=fhl, frais_bin=fbin)
         j = aud["jambes"]
-        sigs.append(Signal(
+        event_ms = now - age                                     # 🔴 P8 : horodatage RÉEL du snapshot (pas `now`)
+        s = Signal(
             moteur="cross_venue", coin=coin, sens=sens, type_pnl="dislocation", notional_usd=notional,
             prix_entree=j["hl"]["prix_exec"], cout_entree_bps=cout_ar / 2.0, edge_estime_bps=round(edge_net, 4),
-            pnl_attendu_usd=round(edge_net / 1e4 * notional, 4), ts_signal_ms=now, frais_bps=fhl + fbin,
+            pnl_attendu_usd=round(edge_net / 1e4 * notional, 4), ts_signal_ms=event_ms, frais_bps=fhl + fbin,
             spread_bps=j["hl"]["demi_spread_bps"] + j["bin"]["demi_spread_bps"],
             slippage_bps=j["hl"]["slippage_bps"] + j["bin"]["slippage_bps"], latence_ms=LATENCE_MS,
             base_entree_bps=round(gap, 3), hold_h=HOLD_MAX_H,
             meta={"jambes": j, "hedge_ratio": aud["hedge_ratio"], "gap_entree_bps": round(gap, 3),
-                  "cout_ar_bps": cout_ar, "profondeur_usd": depth, "desync_ms": round(desync, 1)}))
+                  "cout_ar_bps": cout_ar, "profondeur_usd": depth, "desync_ms": round(desync, 1)})
+        # ROI mesurable seulement si une fréquence d'événements est mesurée ; ici cross-venue n'en fournit pas
+        # -> None (la voie experimental_paper admet quand même ; la voie stricte refuserait ROI_NON_MESURABLE).
+        s.roi_annuel_pct = roi_depuis_signal(s, freq_evenements_par_jour=None)
+        sigs.append(s)
     return sigs, refus
 
 
@@ -203,12 +227,18 @@ def signaux_lead_lag(root: str | Path = ".", *, now_ms: float | None = None,
         elif d.get("venue") == "HL" and d.get("bid") and d.get("ask"):
             hl_quote[c] = {"bid": float(d["bid"]), "ask": float(d["ask"]), "recu_ns": float(d["recu_ns"])}
     sigs: list[Signal] = []
+    freq_jour = cfg.get("freq_evenements_par_jour")              # fréquence MESURÉE causalement (ou None)
     for c, (t_ns, px, side) in dernier_trade.items():
         q = hl_quote.get(c)
         if not q:
             refus.append({"moteur": "lead_lag", "coin": c, "motif": "PAS_DE_QUOTE_HL"}); continue
-        # choc = le trade agressif a bougé le prix vs le mid HL de plus que le seuil
-        mid = (q["bid"] + q["ask"]) / 2.0
+        # 🔴 P8 : horodatage RÉEL de l'événement = le trade Binance (recu_ns), PAS `now`. Fraîcheur d'abord.
+        event_ms = float(t_ns) / 1e6
+        motif_frais = _fraicheur_evenement(event_ms, now)
+        if motif_frais:
+            refus.append({"moteur": "lead_lag", "coin": c, "motif": motif_frais,
+                          "age_ms": round(now - event_ms)}); continue
+        mid = (q["bid"] + q["ask"]) / 2.0                        # choc = trade agressif vs mid HL > seuil
         choc_bps = 1e4 * (px - mid) / mid if mid else 0.0
         if abs(choc_bps) < seuil:
             refus.append({"moteur": "lead_lag", "coin": c, "motif": "CHOC_TROP_FAIBLE",
@@ -219,12 +249,16 @@ def signaux_lead_lag(root: str | Path = ".", *, now_ms: float | None = None,
         edge_net = float(edge_par_h[meilleur_h]) - demi_spread_bps  # edge validé − demi-spread payé
         if edge_net <= 0:
             refus.append({"moteur": "lead_lag", "coin": c, "motif": "EDGE_NEGATIF_APRES_SPREAD"}); continue
-        sigs.append(Signal(
-            moteur="lead_lag", coin=c, sens=sens, type_pnl="directional", notional_usd=LIMITES["lead_lag"]["notional_usd"],
+        notional = LIMITES["lead_lag"]["notional_usd"]
+        s = Signal(
+            moteur="lead_lag", coin=c, sens=sens, type_pnl="directional", notional_usd=notional,
             prix_entree=prix, cout_entree_bps=demi_spread_bps + frais / 2.0, edge_estime_bps=round(edge_net, 4),
-            pnl_attendu_usd=round(edge_net / 1e4 * LIMITES["lead_lag"]["notional_usd"], 4),
-            ts_signal_ms=now, frais_bps=frais / 2.0, spread_bps=demi_spread_bps,
-            latence_ms=meilleur_h, meta={"choc_bps": round(choc_bps, 2), "horizon_ms": meilleur_h}))
+            pnl_attendu_usd=round(edge_net / 1e4 * notional, 4),
+            ts_signal_ms=event_ms, frais_bps=frais / 2.0, spread_bps=demi_spread_bps,
+            latence_ms=meilleur_h, hold_h=float(meilleur_h) / 3_600_000.0,
+            meta={"choc_bps": round(choc_bps, 2), "horizon_ms": meilleur_h, "event_ms": event_ms})
+        s.roi_annuel_pct = roi_depuis_signal(s, freq_evenements_par_jour=freq_jour)   # P0 : mesuré si freq connue, sinon None
+        sigs.append(s)
     return sigs, refus
 
 
@@ -429,15 +463,23 @@ def signaux_vaults(root: str | Path = ".", *, now_ms: float | None = None, lecte
             refus.append({"moteur": "copy_vault", "vault": adr[:10], "motif": "EDGE_NEGATIF_APRES_COUTS",
                           "coin": best_coin, "edge_brut_bps": round(edge_brut, 2), "cout_ar_bps": round(cout_ar, 2)})
             continue
-        lag_ms = max(0.0, now - float(ap.get("ts_ms") or now))    # DÉLAI DE DÉTECTION/copie (snapshot vault cadencé)
-        sigs.append(Signal(
+        # 🔴 P8 : horodatage RÉEL = le snapshot du leader (ap.ts_ms), PAS `now`. Un snapshot trop vieux =
+        # copie tardive sans edge -> STALE_SIGNAL (le délai est honnêtement mesuré, jamais masqué).
+        snap_ts = float(ap.get("ts_ms") or 0.0)
+        lag_ms = max(0.0, now - snap_ts)                          # DÉLAI DE DÉTECTION/copie (snapshot vault cadencé)
+        motif_frais = _fraicheur_evenement(snap_ts or None, now)
+        if motif_frais:
+            refus.append({"moteur": "copy_vault", "vault": adr[:10], "coin": best_coin,
+                          "motif": motif_frais, "age_ms": round(lag_ms)}); continue
+        s = Signal(
             moteur="copy_vault", coin=best_coin, sens=sens, type_pnl="directional",
             notional_usd=round(notional, 2), prix_entree=prix, cout_entree_bps=round(cout_ar / 2.0, 4),
             edge_estime_bps=round(edge_net, 4), pnl_attendu_usd=round(edge_net / 1e4 * notional, 4),
-            ts_signal_ms=now, frais_bps=fhl, spread_bps=round(hl_spread_bps, 4),
+            ts_signal_ms=snap_ts, frais_bps=fhl, spread_bps=round(hl_spread_bps, 4),
             slippage_bps=round(slippage_bps, 4), latence_ms=LATENCE_MS,
-            hold_h=float(cfg.get("horizon_ms") or 0.0) / 3_600_000.0,
+            hold_h=max(1e-6, float(cfg.get("horizon_ms") or 0.0) / 3_600_000.0),
             meta={"vault": adr, "coin": best_coin, "move_frac": round(move_frac, 3), "src_prix": l2["src"],
+                  "snapshot_ts_ms": snap_ts, "snapshot_id": ap.get("snapshot_id"),
                   "l2_age_ms": round(float(l2.get("age_ms") or 0.0)), "depth_usd": round(depth_usd, 1),
                   "fill_partiel": partiel, "cible_notional_usd": round(cible, 2), "slippage_bps": round(slippage_bps, 3),
                   "delai_detection_ms": round(lag_ms), "edge_brut_mesure_bps": round(edge_brut, 3),
@@ -446,7 +488,10 @@ def signaux_vaults(root: str | Path = ".", *, now_ms: float | None = None, lecte
                   "szi_avant": round(p0.get(best_coin, (0.0, 0.0))[0], 6),
                   "szi_apres": round(p1.get(best_coin, (0.0, 0.0))[0], 6),
                   "note": "edge MESURÉ (config gelée) − coût L2 RÉEL (spread+2×slippage+frais A/R) ; prix/profondeur "
-                          "= L2 <1 s (%s) ; allMids sert seulement à détecter" % l2["src"]}))
+                          "= L2 <1 s (%s) ; allMids sert seulement à détecter" % l2["src"]})
+        s.roi_annuel_pct = roi_depuis_signal(s, freq_evenements_par_jour=cfg.get("freq_evenements_par_jour"),
+                                             fill_rate=(1.0 if not partiel else notional / max(cible, 1e-9)))
+        sigs.append(s)
     _filer_coins_au_carnet(root, coins_bouges, now_ms=now)         # abonne le carnet aux coins réellement bougés
     return sigs, refus
 
