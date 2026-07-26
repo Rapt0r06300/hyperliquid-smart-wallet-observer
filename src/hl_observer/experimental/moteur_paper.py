@@ -212,6 +212,23 @@ def sortir(pos: dict, store: dict, root: str | Path, *, prix_sortie: float | Non
     return {"coin": pos["coin"], "moteur": pos["moteur"], "realized_usd": realized, "raison": raison}
 
 
+def reduire(pos: dict, store: dict, root: str | Path, *, notional_ferme_usd: float,
+            notional_residuel_usd: float, realized_usd: float, prix_sortie: float | None,
+            cout_sortie_bps: float, raison: str, now_ms: float) -> dict:
+    """REDUCE PARTIEL (LOT14 #6) : le LEADER a réduit -> on ferme la FRACTION réduite au prix exécutable et on
+    GARDE le résidu ouvert. Realized SEULEMENT sur la partie fermée (valeurs déjà calculées par le cœur testé
+    execution_paper.reduce_proportionnel). Journalise REDUCE (jamais CLOSE : la position vit encore)."""
+    pos["notional_usd"] = round(float(notional_residuel_usd), 6)
+    _ledger(root, {"kind": "REDUCE", "strategie": pos["moteur"], "coin": pos["coin"],
+                   "realized_net_pnl_usdc": round(float(realized_usd), 6), "realized_usd": round(float(realized_usd), 6),
+                   "notional_ferme_usd": round(float(notional_ferme_usd), 6),
+                   "notional_residuel_usd": round(float(notional_residuel_usd), 6),
+                   "prix_sortie": prix_sortie, "cout_sortie_bps": float(cout_sortie_bps),
+                   "raison": raison, "edge_estime_bps": pos.get("edge_estime_bps"), "ts_ms": int(now_ms)})
+    return {"coin": pos["coin"], "moteur": pos["moteur"], "realized_usd": round(float(realized_usd), 6),
+            "notional_ferme_usd": round(float(notional_ferme_usd), 6), "raison": raison, "action": "REDUCE"}
+
+
 def resume(root: str | Path = ".") -> dict[str, Any]:
     """État du livre EXPERIMENTAL_PAPER pour le dashboard/rapport : positions + PnL réalisé, PAR moteur."""
     store = charger_store(root)

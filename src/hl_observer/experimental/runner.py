@@ -133,21 +133,26 @@ def _raison_sortie_dislocation(pos: dict, car: dict | None, *, now_ms: float) ->
     return None, gap_cur
 
 
-def _leader_a_reduit(pos: dict, root: Path, *, seuil: float = 0.5) -> tuple[bool, str]:
+def _leader_a_reduit(pos: dict, root: Path, *, seuil: float = 0.5) -> tuple[bool, str, float, float]:
     """Copy-vault (rectif Flo 23/07) : le LEADER a-t-il RÉDUIT/CLOS sa position sur le coin depuis notre
     entrée ? On copie son alpha ; s'il sort, le signal a disparu → on sort aussi. Lit le dernier snapshot
-    du vault : |szi actuel| ≈ 0 → LEADER_A_CLOS ; < seuil × |szi à l'entrée| → LEADER_A_REDUIT."""
+    du vault : |szi actuel| ≈ 0 → LEADER_A_CLOS ; < seuil × |szi à l'entrée| → LEADER_A_REDUIT.
+    Rend (sort?, raison, szi_entree, szi_now) — les tailles alimentent le REDUCE PROPORTIONNEL (#6),
+    pour ne PAS fermer toute la position quand le leader n'a réduit que partiellement.
+    ⚠️ un snapshot INCOMPLET (leader absent d'un snapshot partiel) ne doit jamais conclure au close ->
+       ici on ne conclut que sur un snapshot du BON vault ; coin absent = szi_now 0 SEULEMENT si le vault
+       est bien présent (sinon on garde)."""
     import json as _j
     meta = pos.get("meta") or {}
     vault, coin = meta.get("vault"), str(pos.get("coin") or "").upper()
     szi_entree = abs(float(meta.get("szi_apres") or 0.0))
     if not vault or not coin or szi_entree <= 0:
-        return False, ""
+        return False, "", szi_entree, szi_entree
     try:
         lignes = (root / "runtime" / "data" / "vault_snapshots.jsonl").read_text(
             encoding="utf-8", errors="ignore").splitlines()
     except OSError:
-        return False, ""
+        return False, "", szi_entree, szi_entree
     dernier = None
     for l in reversed(lignes[-8000:]):
         try:
@@ -158,17 +163,17 @@ def _leader_a_reduit(pos: dict, root: Path, *, seuil: float = 0.5) -> tuple[bool
             dernier = d
             break
     if not dernier:
-        return False, ""
+        return False, "", szi_entree, szi_entree
     szi_now = 0.0
     for p in (dernier.get("positions") or []):
         if str(p.get("coin") or "").upper() == coin:
             szi_now = abs(float(p.get("szi") or 0.0))
             break
     if szi_now <= 1e-9:
-        return True, "LEADER_A_CLOS"
+        return True, "LEADER_A_CLOS", szi_entree, 0.0
     if szi_now < seuil * szi_entree:
-        return True, "LEADER_A_REDUIT"
-    return False, ""
+        return True, "LEADER_A_REDUIT", szi_entree, szi_now
+    return False, "", szi_entree, szi_now
 
 
 def _gerer_sorties(store: dict, root: Path, *, now_ms: float) -> list[dict]:
@@ -189,8 +194,24 @@ def _gerer_sorties(store: dict, root: Path, *, now_ms: float) -> list[dict]:
         age_h = (now_ms - float(pos.get("ts_ouverture_ms") or now_ms)) / 3.6e6
         if pos.get("type_pnl") == "dislocation":              # cross-venue COURT TERME : capture/stop rapide
             car = carnet.get(pos["coin"])
+            if car:
+                pos["ts_derniere_donnee_ms"] = now_ms         # trace de fraîcheur pour la politique data-missing
             raison, gap_cur = _raison_sortie_dislocation(pos, car, now_ms=now_ms)
+            # LOT14 #7 — DONNÉE MANQUANTE : sans carnet frais, on ne GARDE PAS indéfiniment. Grace courte puis
+            # sortie DATA_MISSING_TIMEOUT à un mark CONSERVATEUR (entrée, gain nul) + slippage de STRESS.
+            if not raison and not car:
+                from hl_observer.experimental import execution_paper as EP
+                dm = EP.politique_data_missing(pos, now_ms=now_ms)
+                if dm["action"] == "SORTIE":
+                    cout_dm = float(pos.get("frais_bps") or 0.0) + float(dm["slippage_stress_bps"])
+                    fermetures.append(MP.sortir(pos, store, root, prix_sortie=dm["mark_conservateur"],
+                                                cout_sortie_bps=cout_dm, base_courant_bps=gap_cur,
+                                                raison="DATA_MISSING_TIMEOUT", now_ms=now_ms))
+                    continue
             if raison:
+                # #5 — le PnL dislocation est la CONVERGENCE de base (gap_ent−gap_cur), équivalent à la somme
+                # des DEUX jambes (long venue A / short venue B), JAMAIS un seul mid HL : pnl_courant_usd
+                # (branche dislocation) ignore `px` et n'utilise que base_courant_bps. `px` reste indicatif.
                 px = (float(car["hl_bid"]) + float(car["hl_ask"])) / 2 if car else pos.get("prix_entree")
                 fermetures.append(MP.sortir(pos, store, root, prix_sortie=px,
                                             cout_sortie_bps=float(pos.get("spread_bps") or 0.0) + float(pos.get("frais_bps") or 0.0),
@@ -208,14 +229,15 @@ def _gerer_sorties(store: dict, root: Path, *, now_ms: float) -> list[dict]:
                                             cout_sortie_bps=cout_sortie, base_courant_bps=m["base_bps"],
                                             raison=raison, now_ms=now_ms))
         else:  # directionnel (lead_lag / copy_vault)
-            # COPY-VAULT : sortir si le LEADER a réduit/clos (suivi réel demandé par Flo), avant l'horizon
-            leader_sort, raison_leader = (_leader_a_reduit(pos, root) if pos["moteur"] == "copy_vault" else (False, ""))
+            # COPY-VAULT : sortir si le LEADER a réduit/clos (suivi réel demandé par Flo), avant l'horizon.
+            leader_sort, raison_leader, szi_ent, szi_now = (
+                _leader_a_reduit(pos, root) if pos["moteur"] == "copy_vault" else (False, "", 0.0, 0.0))
             horizon_ms = float((pos.get("meta") or {}).get("horizon_ms") or 1000.0)
             mur_ms = max(horizon_ms, 2000.0) if pos["moteur"] == "lead_lag" else 24 * 3.6e6
             horizon_atteint = (now_ms - float(pos.get("ts_ouverture_ms") or now_ms)) >= mur_ms
             if leader_sort or horizon_atteint:
-                # LOT14 #4 — FERMER au prix EXÉCUTABLE (long au bid, short à l'ask), coût SANS double-spread
-                # (le spread est déjà payé en croisant). Repli mid uniquement si le carnet est illisible.
+                # LOT14 #4 — prix EXÉCUTABLE (long au bid, short à l'ask), coût SANS double-spread (le spread
+                # est déjà payé en croisant). Repli mid uniquement si le carnet est illisible.
                 ba = bidask.get(pos["coin"])
                 px_exec = INV.prix_sortie_executable(int(pos.get("sens") or 1),
                                                      bid=(ba or {}).get("bid"), ask=(ba or {}).get("ask")) if ba else None
@@ -226,6 +248,22 @@ def _gerer_sorties(store: dict, root: Path, *, now_ms: float) -> list[dict]:
                 else:                                    # carnet illisible -> repli mid + spread explicite (conservateur)
                     prix_sortie = mids.get(pos["coin"]) or pos.get("prix_entree")
                     cout_sortie = float(pos.get("spread_bps") or 0.0) + float(pos.get("frais_bps") or 0.0)
+                # LOT14 #6 — REDUCE PROPORTIONNEL : si le leader n'a réduit que PARTIELLEMENT (pas clos, pas
+                # horizon), on ferme la seule fraction réduite et on GARDE le résidu ouvert. Le cœur testé
+                # execution_paper.reduce_proportionnel décide REDUCE vs CLOSE_INTEGRAL (leader ~0).
+                if raison_leader == "LEADER_A_REDUIT" and not horizon_atteint:
+                    from hl_observer.experimental import execution_paper as EP
+                    rp = EP.reduce_proportionnel(pos, taille_leader_avant=szi_ent, taille_leader_apres=szi_now,
+                                                 prix_sortie=float(prix_sortie), cout_sortie_bps=cout_sortie)
+                    if rp.get("action") == "REDUCE":
+                        pos["ts_derniere_donnee_ms"] = now_ms
+                        fermetures.append(MP.reduire(pos, store, root,
+                                                     notional_ferme_usd=rp["notional_ferme_usd"],
+                                                     notional_residuel_usd=rp["notional_residuel_usd"],
+                                                     realized_usd=rp["realized_usd"], prix_sortie=prix_sortie,
+                                                     cout_sortie_bps=cout_sortie, raison="LEADER_A_REDUIT",
+                                                     now_ms=now_ms))
+                        continue                          # position TOUJOURS ouverte (résidu) -> pas de close
                 fermetures.append(MP.sortir(pos, store, root, prix_sortie=prix_sortie,
                                             cout_sortie_bps=cout_sortie,
                                             raison=(raison_leader or "HORIZON_ATTEINT"), now_ms=now_ms))

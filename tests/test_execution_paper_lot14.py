@@ -1,9 +1,11 @@
 """LOT14 #5-#9 — exécution deux jambes, REDUCE proportionnel, data-missing, réconciliation, registre/PBO."""
 from __future__ import annotations
 
+import json
 import random
 
 from hl_observer.experimental import execution_paper as EP
+from hl_observer.experimental import moteur_paper as MP
 from hl_observer.experimental import reconciliation_paper as REC
 from hl_observer.experimental import registre_essais as REG
 from hl_observer.research_parallel import validation as VAL
@@ -80,6 +82,28 @@ def test_registre_append_only_et_dsr_tous_essais(tmp_path):
     assert len(essais) == 2 and all(e["preregistration_ts"] for e in essais)
     sh = REG.sharpes_tous_essais(essais)
     assert sh == [-0.3, 0.1], "le DSR reçoit TOUS les essais (KILL compris), pas seulement les gagnants"
+
+
+def test_moteur_reduire_garde_le_residu_et_journalise_reduce(tmp_path):
+    """Câblage #6 dans le runtime : MP.reduire ferme la fraction, GARDE le résidu ouvert, écrit un REDUCE
+    (jamais un CLOSE) ; la réconciliation #8 lit ce REDUCE et reste cohérente."""
+    store = MP.charger_store(tmp_path)
+    pos = {"id": "copy_vault:SOL", "moteur": "copy_vault", "coin": "SOL", "sens": 1, "prix_entree": 100.0,
+           "notional_usd": 100.0, "cout_entree_bps": 0.0, "edge_estime_bps": 20.0, "ts_ouverture_ms": 0,
+           "type_pnl": "directional"}
+    store["ouvertes"]["copy_vault:SOL"] = pos
+    rp = EP.reduce_proportionnel(pos, taille_leader_avant=10.0, taille_leader_apres=6.0,
+                                 prix_sortie=100.1, cout_sortie_bps=5.0)
+    res = MP.reduire(pos, store, tmp_path, notional_ferme_usd=rp["notional_ferme_usd"],
+                     notional_residuel_usd=rp["notional_residuel_usd"], realized_usd=rp["realized_usd"],
+                     prix_sortie=100.1, cout_sortie_bps=5.0, raison="LEADER_A_REDUIT", now_ms=1000)
+    assert "copy_vault:SOL" in store["ouvertes"], "la position reste OUVERTE (résidu)"
+    assert abs(pos["notional_usd"] - 60.0) < 1e-6 and abs(res["notional_ferme_usd"] - 40.0) < 1e-6
+    lignes = [json.loads(l) for l in (tmp_path / MP.LEDGER_RELPATH).read_text(encoding="utf-8").splitlines()]
+    kinds = [x.get("kind") for x in lignes]
+    assert "REDUCE" in kinds and "CLOSE" not in kinds, "un REDUCE partiel n'écrit PAS de CLOSE"
+    audit = REC.auditer(lignes, realise_store_usd=res["realized_usd"], realise_statut_usd=res["realized_usd"])
+    assert audit["coherent"] is True
 
 
 def test_pbo_discrimine_surappris_vs_robuste():
