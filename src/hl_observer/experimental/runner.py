@@ -54,6 +54,25 @@ def _marks_hl_mid(root: Path, coins: set[str], *, max_lignes: int = 40000) -> di
     return out
 
 
+def _marks_hl_bidask(root: Path, coins: set[str], *, max_lignes: int = 40000) -> dict[str, dict]:
+    """{coin: {bid, ask, ts_ms}} HL depuis la tape BBO — pour FERMER au prix EXÉCUTABLE (LOT14 #4 : long au
+    bid, short à l'ask), pas au mid. Garde bid/ask + horodatage exchange pour la fraîcheur."""
+    p = root / Path("runtime") / "data" / "bbo_tape.jsonl"
+    if not p.exists():
+        return {}
+    out: dict[str, dict] = {}
+    for l in p.read_text(encoding="utf-8", errors="ignore").splitlines()[-max_lignes:]:
+        try:
+            d = json.loads(l)
+        except ValueError:
+            continue
+        c = str(d.get("coin") or "").upper()
+        if c in coins and d.get("venue") == "HL" and d.get("bid") and d.get("ask"):
+            out[c] = {"bid": float(d["bid"]), "ask": float(d["ask"]),
+                      "ts_ms": d.get("ts_wall_ms") or d.get("ts_ex")}
+    return out
+
+
 BASIS_ADVERSE_BPS = 15.0            # base qui dérive contre nous de > ça -> sortie
 
 
@@ -164,6 +183,8 @@ def _gerer_sorties(store: dict, root: Path, *, now_ms: float) -> list[dict]:
     gele_cv = os.environ.get("HYPERSMART_EXPERIMENTAL_CROSS_VENUE_GELE", "0") == "1"
     dir_coins = {p["coin"] for p in store["ouvertes"].values() if p.get("type_pnl") == "directional"}
     mids = _marks_hl_mid(root, dir_coins) if dir_coins else {}
+    bidask = _marks_hl_bidask(root, dir_coins) if dir_coins else {}   # LOT14 #4 : prix EXÉCUTABLE de sortie
+    from hl_observer.experimental import invariants as INV
     for pos in list(store["ouvertes"].values()):
         age_h = (now_ms - float(pos.get("ts_ouverture_ms") or now_ms)) / 3.6e6
         if pos.get("type_pnl") == "dislocation":              # cross-venue COURT TERME : capture/stop rapide
@@ -193,9 +214,20 @@ def _gerer_sorties(store: dict, root: Path, *, now_ms: float) -> list[dict]:
             mur_ms = max(horizon_ms, 2000.0) if pos["moteur"] == "lead_lag" else 24 * 3.6e6
             horizon_atteint = (now_ms - float(pos.get("ts_ouverture_ms") or now_ms)) >= mur_ms
             if leader_sort or horizon_atteint:
-                mid = mids.get(pos["coin"]) or pos.get("prix_entree")
-                fermetures.append(MP.sortir(pos, store, root, prix_sortie=mid,
-                                            cout_sortie_bps=float(pos.get("spread_bps") or 0.0) + float(pos.get("frais_bps") or 0.0),
+                # LOT14 #4 — FERMER au prix EXÉCUTABLE (long au bid, short à l'ask), coût SANS double-spread
+                # (le spread est déjà payé en croisant). Repli mid uniquement si le carnet est illisible.
+                ba = bidask.get(pos["coin"])
+                px_exec = INV.prix_sortie_executable(int(pos.get("sens") or 1),
+                                                     bid=(ba or {}).get("bid"), ask=(ba or {}).get("ask")) if ba else None
+                if px_exec is not None:
+                    prix_sortie = px_exec
+                    cout_sortie = INV.cout_sortie_sans_double_spread(frais_bps=float(pos.get("frais_bps") or 0.0),
+                                                                     slippage_bps=float(pos.get("slippage_bps") or 0.0))
+                else:                                    # carnet illisible -> repli mid + spread explicite (conservateur)
+                    prix_sortie = mids.get(pos["coin"]) or pos.get("prix_entree")
+                    cout_sortie = float(pos.get("spread_bps") or 0.0) + float(pos.get("frais_bps") or 0.0)
+                fermetures.append(MP.sortir(pos, store, root, prix_sortie=prix_sortie,
+                                            cout_sortie_bps=cout_sortie,
                                             raison=(raison_leader or "HORIZON_ATTEINT"), now_ms=now_ms))
     return fermetures
 
@@ -240,6 +272,8 @@ def tick(root: str | Path = ".", *, now_ms: float | None = None,
     carnet = carnet_par_coin(root)
     dir_coins = {p["coin"] for p in store["ouvertes"].values() if p.get("type_pnl") == "directional"}
     mids = _marks_hl_mid(root, dir_coins) if dir_coins else {}
+    bidask = _marks_hl_bidask(root, dir_coins) if dir_coins else {}   # LOT14 #4 : MtM = valeur LIQUIDABLE
+    from hl_observer.experimental import invariants as INV
     positions = []
     mtm_total = 0.0
     for p in store["ouvertes"].values():
@@ -251,7 +285,12 @@ def tick(root: str | Path = ".", *, now_ms: float | None = None,
             mtm = MP.pnl_courant_usd(p, base_courant_bps=gap_cur, now_ms=now)
         else:
             m = cv.get(p["coin"]) or {}
-            mtm = MP.pnl_courant_usd(p, mark=(mids.get(p["coin"]) or m.get("hl_px")),
+            # LOT14 #4 — marque à la valeur RÉELLEMENT liquidable : un long au BID, un short à l'ASK. Repli mid
+            # seulement si le carnet est illisible (jamais un prix plus favorable que ce qu'on obtiendrait).
+            ba = bidask.get(p["coin"])
+            px_exec = INV.prix_sortie_executable(int(p.get("sens") or 1),
+                                                 bid=(ba or {}).get("bid"), ask=(ba or {}).get("ask")) if ba else None
+            mtm = MP.pnl_courant_usd(p, mark=(px_exec if px_exec is not None else (mids.get(p["coin"]) or m.get("hl_px"))),
                                      base_courant_bps=m.get("base_bps"), now_ms=now)
         mtm_total += mtm
         e = {"coin": p["coin"], "moteur": p["moteur"], "sens": p["sens"], "notional_usd": p["notional_usd"],

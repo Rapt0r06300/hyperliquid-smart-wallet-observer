@@ -34,13 +34,13 @@ def valider_numerique(champs: dict) -> tuple[bool, str | None]:
 
 
 def valider_signal(sig) -> tuple[bool, str | None]:
-    """Validation numérique + bornes physiques d'un Signal : notionnel>0, horizon>0, latence>=0, prix>0."""
+    """Validation numérique CENTRALE + bornes physiques : notionnel>0, horizon>0, latence>=0. La finitude
+    du prix est vérifiée ici (NaN/inf refusés) ; sa POSITIVITÉ (prix>0) reste la propriété de la gate
+    dédiée `PRIX_NON_EXECUTABLE` en aval, pour ne pas changer le motif de refus historique."""
     champs = {c: getattr(sig, c, None) for c in CHAMPS_SIGNAL}
     ok, motif = valider_numerique(champs)
     if not ok:
         return False, motif
-    if float(sig.prix_entree) <= 0:
-        return False, "PRIX_NON_POSITIF"
     if float(sig.notional_usd) <= 0:
         return False, "NOTIONAL_NON_POSITIF"
     if float(sig.hold_h) <= 0:
