@@ -85,7 +85,21 @@ echo === ARRET + RAPPORT FINAL ===
 for /f "usebackq tokens=* delims=" %%R in (`python tools\recherche_continue.py run-id-actif`) do set "RID=%%R"
 if "%RID%"=="" ( echo Aucun run actif a arreter. & goto :fin )
 echo Run actif : %RID%
+echo Envoi de la demande d'arret (STOP_REQUEST)...
 python tools\recherche_continue.py stop --run-id "%RID%"
+echo Attente de la finalisation (rapport + manifeste de CE run)...
+set /a _try=0
+:attente
+set /a _try+=1
+python tools\recherche_continue.py verifier-finalisation --run-id "%RID%" >nul 2>&1
+if not errorlevel 1 goto :fini_ok
+if %_try% GEQ 60 ( echo [ATTENTION] Finalisation non confirmee apres attente. & goto :fin )
+ping -n 3 127.0.0.1 >nul 2>&1
+goto :attente
+:fini_ok
+echo [OK] Finalisation confirmee pour %RID% (etat COMPLETE, rapport + manifeste + SHA).
+python tools\recherche_continue.py verifier-finalisation --run-id "%RID%"
+echo Rapport dans : "Rapports en continu\%RID%\"
 goto :fin
 
 :stop

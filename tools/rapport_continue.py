@@ -181,6 +181,36 @@ def construire(rundir, ident, *, final: bool = True, partial: bool = False, reto
     L.append("## 27. Champions & challengers (registre append-only, gel immuable)")
     L.append("- candidats enregistrés : **%d** · dont net>0 : **%d** (une amélioration = NOUVEAU candidate_id + version + parent_id, jamais une réécriture)\n" % (
         len(champs), len(positifs)))
+    # ── AF-P9 : architecture, outils, robustesse (plateau/concentration/capacité), jobs de fond ──
+    L.append("## 28. Architecture (chaîne PROD-TRUTH)")
+    L.append("- ingestion incrémentale (curseurs) → CanonicalStore (maturation PENDING→READY) → discovery → "
+             "validation → holdout historique → **gel (freeze_ts)** → forward live (exchange_ts>freeze_ts) → "
+             "portefeuille GLOBAL persistant → réconciliation ledger. Prix exécutables ask→bid, coûts complets.\n")
+    camps_dirs = ag["camps"]
+    ou = _lire((camps_dirs[-1] / "resultats" / "outils_recherche.json") if camps_dirs else Path("/nonexistent"), {})
+    L.append("## 29. Outils d'optimisation réellement utilisés")
+    if ou:
+        L.append("- disponibles : **%s** · lancés : **%s** · avec vrais trials : **%s**" % (
+            ou.get("n_disponibles"), ou.get("n_lances"), ou.get("n_avec_trials_reels")))
+        for nom, v in (ou.get("outils") or {}).items():
+            L.append("  - %s : dispo=%s lancé=%s trials_terminés=%s prunés=%s échoués=%s cpu=%ss%s" % (
+                nom, v.get("disponible"), v.get("lance"), v.get("trials_termines"), v.get("trials_prunes"),
+                v.get("trials_echoues"), v.get("cpu_s"), (" [%s]" % v["raison"] if v.get("raison") else "")))
+    else:
+        L.append("- PAS ENCORE CALCULABLE — aucun tableau d'outils écrit.")
+    L.append("")
+    L.append("## 30. Robustesse des pistes (plateau de PARAMÈTRES, concentration, capacité)")
+    for f in (prom + conf)[:10]:
+        L.append("- %s | plateau_params=%s | concentration(1 coin domine)=%s | capacité=%s%s | horizons_stables=%s" % (
+            f.get("trial_id"), f.get("plateau"), f.get("un_seul_coin_dominant"), f.get("capacite_non_nulle"),
+            (" (%s)" % f["capacite_motif"] if f.get("capacite_motif") else ""), f.get("stabilite_horizons")))
+    if not (prom + conf):
+        L.append("- aucune piste prometteuse (honnête).")
+    L.append("")
+    jf = _lire(rundir / "jobs" / "travail_de_fond.json", {})
+    L.append("## 31. Travail de fond (aucun idle)")
+    L.append("- jobs exécutés : **%s** · DONE : **%s** · bloqués faute de données : **%s** (stress/placebos/WF/LOCO/LORO/voisins/revalidation)\n" % (
+        jf.get("n_jobs_executes", "PAS ENCORE CALCULABLE"), jf.get("n_done", "-"), jf.get("n_bloques_data", "-")))
     L.append("## 37. Lineage\n- data_lineage.jsonl (source→événement→…→PnL→rapport ; PnL sans lignée = NON_AUDITABLE)\n")
     L.append("## 41-43. Limites & prochaines pistes")
     L.append("- Un run de recherche ne PROUVE rien seul : les prometteuses doivent tenir en forward paper OOS. "

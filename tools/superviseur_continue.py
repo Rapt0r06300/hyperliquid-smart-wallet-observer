@@ -110,8 +110,12 @@ class Superviseur:
             else:
                 self.rundir.mkdir(parents=True, exist_ok=True)
                 err = (self.rundir / ("stderr_%s.log" % nom)).open("a", encoding="utf-8")   # stderr -> fichier
+                # Windows : groupe de processus dédié (permet un CTRL_BREAK_EVENT coopératif à l'arrêt)
+                flags = 0
+                if os.name == "nt":
+                    flags = getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
                 p = subprocess.Popen([sys.executable, *self.collecteurs[nom]], cwd=str(RACINE),
-                                     stdout=subprocess.DEVNULL, stderr=err)
+                                     stdout=subprocess.DEVNULL, stderr=err, creationflags=flags)
                 self.procs[nom] = p
                 pid = p.pid
             self.etat[nom] = {"pid": pid, "start": (_create_time(pid) if pid else None),
@@ -147,27 +151,62 @@ class Superviseur:
                 redémarrés.append({"nom": nom, "raison": raison})
         return {"redemarres": redémarrés, "etat": self.etat}
 
+    def _arret_process(self, nom: str, p, *, attente_s: float = 5.0) -> str:
+        """Arrêt gradué et JOURNALISÉ (P8) : 1) coopératif (SIGINT/CTRL_BREAK) ; 2) attente bornée ;
+        3) terminate ; 4) TerminateProcess/kill en DERNIER recours. Rend la méthode qui a fonctionné."""
+        import time as _t
+        methode = "aucune"
+        try:
+            if os.name == "nt":
+                sig = getattr(__import__("signal"), "CTRL_BREAK_EVENT", None)
+                if sig is not None:
+                    p.send_signal(sig); methode = "CTRL_BREAK_EVENT"       # coopératif Windows (groupe de process)
+            else:
+                p.send_signal(__import__("signal").SIGINT); methode = "SIGINT"
+        except Exception:  # noqa: BLE001
+            methode = "aucune"
+        t0 = _t.time()
+        while _t.time() - t0 < attente_s:                    # attente BORNÉE
+            if p.poll() is not None:
+                return methode + "+sortie_propre"
+            _t.sleep(0.1)
+        try:
+            p.terminate(); methode += "+terminate"
+            t0 = _t.time()
+            while _t.time() - t0 < 2.0:
+                if p.poll() is not None:
+                    return methode
+                _t.sleep(0.1)
+        except Exception:  # noqa: BLE001
+            pass
+        try:
+            p.kill(); methode += "+kill_dernier_recours"     # TerminateProcess/SIGKILL en dernier
+        except Exception:  # noqa: BLE001
+            pass
+        return methode
+
     def arreter_tous(self) -> dict:
-        """Arrête EXPLICITEMENT tous les enfants (terminate coopératif), jamais son propre PID."""
-        arretes = []
+        """Arrête EXPLICITEMENT tous les enfants (coopératif -> CTRL_BREAK -> terminate -> kill), méthode
+        JOURNALISÉE par collecteur. Ne tue jamais son propre PID."""
+        arretes, methodes = [], {}
         for nom, p in list(self.procs.items()):
             try:
-                p.terminate()
+                methodes[nom] = self._arret_process(nom, p)
                 arretes.append(nom)
             except Exception:  # noqa: BLE001
-                pass
+                methodes[nom] = "echec"
         for nom, e in self.etat.items():
             pid = e.get("pid")
             if (pid and nom not in self.procs and int(pid) != os.getpid()
                     and e.get("start") is not None and _proc_vivant(pid, e.get("start"))):
                 try:
-                    os.kill(int(pid), 15)
-                    arretes.append(nom)
+                    os.kill(int(pid), 15); arretes.append(nom); methodes[nom] = "SIGTERM_pid_oriphelin"
                 except (OSError, ProcessLookupError, ValueError):
                     pass
-            self.etat[nom] = {**e, "pid": None}
+            self.etat[nom] = {**e, "pid": None, "methode_arret": methodes.get(nom)}
         self._sauver()
-        return {"arretes": arretes}
+        (self.rundir / "arret_methodes.json").write_text(json.dumps(methodes, ensure_ascii=False), encoding="utf-8")
+        return {"arretes": arretes, "methodes": methodes}
 
 
 __all__ = ["Superviseur", "HEARTBEAT_MAX_AGE_MS", "EXCHANGE_MAX_AGE_MS", "BACKOFF_S"]

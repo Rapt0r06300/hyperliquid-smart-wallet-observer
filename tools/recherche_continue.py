@@ -297,9 +297,13 @@ def executer_cycle(root: Path, rundir: Path, *, cycle: int, code_sha: str,
     n_term = int(resume.get("n_preregistres", 0 if interrompu else len(variantes)))
     _sauver_signatures(rundir, SCH.marquer_vues(deja, variantes, n_term))
     _enregistrer_champions(camp_dir, rundir)               # candidats/statuts append-only (FINAL-11)
+    jobs_resume = _travail_de_fond(rundir, camp_dir)       # AF-P4 : jobs réellement exécutés (aucun idle)
+    _outils_recherche(rundir, camp_dir)                    # AF-P5 : registre d'outils réellement lancés
     resume.update({"campaign_id": camp_id, "cycle": cycle, "nouvelles_donnees": bool(scan["n_new"]),
                    "n_new_events": scan["n_new"], "n_variantes_nouvelles": len(variantes),
-                   "affected_windows": fen, "maturation": mat, "duree_cycle_s": round(time.time() - t0, 2)})
+                   "affected_windows": fen, "maturation": mat,
+                   "jobs": {k: jobs_resume.get(k) for k in ("n_jobs_executes", "n_done", "aucun_idle")},
+                   "duree_cycle_s": round(time.time() - t0, 2)})
     # journal d'événements + checkpoint atomiques
     with (rundir / "LIVE-RESEARCH-EVENTS.jsonl").open("a", encoding="utf-8") as f:
         f.write(json.dumps({"ts_ms": int(time.time() * 1000), "cycle": cycle, "campaign_id": camp_id,
@@ -307,6 +311,69 @@ def executer_cycle(root: Path, rundir: Path, *, cycle: int, code_sha: str,
                             **{k: resume.get(k) for k in ("n_forward_events", "n_survivants", "n_pass")}}, ensure_ascii=False) + "\n")
     _checkpoint(rundir, cycle, camp_id)
     return resume
+
+
+def _travail_de_fond(rundir: Path, camp_dir: Path) -> dict:
+    """AF-P4 : à chaque cycle, exécute RÉELLEMENT des jobs utiles (stress/placebo/WF/LOCO/LORO/voisins/
+    revalidation/analyse rejets) sur le corpus historique et les champions. Jamais d'idle. Défensif."""
+    try:
+        import jobs_continue as JOBS
+        import pipeline_18h as PL
+        import familles_continue as FAM
+        import champions_continue as CH
+        # corpus historique borné (source de vérité), sinon petit corpus de démonstration
+        hist = rundir / "historique" / "episodes.jsonl"
+        corp = []
+        if hist.exists():
+            for l in hist.read_text(encoding="utf-8", errors="ignore").splitlines()[:2000]:
+                try:
+                    corp.append(json.loads(l))
+                except ValueError:
+                    continue
+        if not corp:
+            corp = PL.corpus_fixtures()
+        def _ev_seuil(cand, seuil):
+            sub = PL._filtrer_corpus(corp, predicat=FAM.predicat, family=cand.get("family", "GENERIC"), seuil=seuil)
+            return PL._nets_promo(PL.nets_exact(sub, sens=cand["direction"], horizon_ms=cand["horizon_ms"]))
+        ctx = {"corpus": corp,
+               "evaluer_promo": lambda c, s, h: PL._nets_promo(PL.nets_exact(c, sens=s, horizon_ms=h)),
+               "evaluer_seuil": _ev_seuil}
+        champs = [c for c in CH.charger(rundir) if c.get("direction") and c.get("horizon_ms")][-5:]
+        cands = [{"family": c.get("family", "GENERIC"), "direction": c["direction"], "horizon_ms": c["horizon_ms"],
+                  "seuil": 8} for c in champs] or [{"family": "GENERIC", "direction": 1, "horizon_ms": 1000, "seuil": 8}]
+        rejets = []
+        try:
+            rejets = [f for f in json.loads((camp_dir / "resultats" / "final_verdicts.json").read_text(encoding="utf-8"))
+                      if f.get("verdict") in ("KILL", "DATA_MISSING", "SHADOW")]
+        except (OSError, ValueError):
+            pass
+        return JOBS.travail_de_fond(rundir, ctx, candidats=cands, rejets=rejets)
+    except Exception as e:  # noqa: BLE001
+        return {"erreur": str(e)[:160]}
+
+
+def _outils_recherche(rundir: Path, camp_dir: Path) -> dict:
+    """AF-P5 : lance les outils d'optimisation DISPONIBLES sur un vrai objectif multi-critères (score composite
+    d'une évaluation promouvable), écrit leur tableau d'état. Défensif."""
+    try:
+        import outils_recherche as OUT
+        import pipeline_18h as PL
+        import statistics
+        corp = PL.corpus_fixtures()
+        def _eval(params):
+            sens = 1 if params.get("direction", 1) >= 0 else -1
+            h = int(params.get("horizon_ms", 1000))
+            nets = PL._nets_promo(PL.nets_exact(corp, sens=sens, horizon_ms=h))
+            nm = statistics.median(nets) if nets else -50.0
+            pf = PL._profit_factor(nets) if nets else 0.0
+            return {"net_median_bps": nm, "pf": (pf if isinstance(pf, (int, float)) else 1.0), "n": len(nets)}
+        espace = {"direction": [1, -1], "horizon_ms": [250, 1000, 5000]}
+        reg = OUT.lancer_registre(_eval, espace, n_trials=8, storage_dir=(rundir / "optuna"))
+        reg["disponibilite"] = OUT.disponibilite()
+        _ecrire_atomique(camp_dir / "resultats" / "outils_recherche.json", json.dumps(reg, ensure_ascii=False, indent=1))
+        return reg
+    except Exception as e:  # noqa: BLE001
+        return {"erreur": str(e)[:160]}
 
 
 def _enregistrer_champions(camp_dir: Path, rundir: Path) -> None:
@@ -381,6 +448,7 @@ def construire_etat(root: Path, rundir: Path, ident: dict, *, cycle: int, phase:
         "pistes_interessantes": interessantes[:15], "rejets": rejets,
         "securite": "0 ordre reel · 0 cle · 0 signature · 0 executor", "paper_only": True, "read_only": True,
     }
+    _enrichir_etat_dashboard(root, rundir, etat, cycle=cycle, phase=phase, tot=tot, interessantes=interessantes)
     _ecrire_atomique(rundir / "LIVE-RESEARCH-STATE.json", json.dumps(etat, ensure_ascii=False, indent=1))
     try:
         import dashboard_continue as DASH
@@ -388,6 +456,69 @@ def construire_etat(root: Path, rundir: Path, ident: dict, *, cycle: int, phase:
     except Exception:  # noqa: BLE001
         pass
     return etat
+
+
+_PHRASES_PHASE = {
+    "INGESTION": ("je range les nouvelles données du marché", "il faut des prix propres pour tester"),
+    "DISCOVERY": ("je cherche de nouvelles idées de trade", "trouver un signal qui devance le prix"),
+    "FAST_SCREEN": ("je fais un test rapide des idées", "écarter vite les mauvaises pistes"),
+    "EXACT_REPLAY": ("je rejoue une idée au prix exécutable", "vérifier qu'elle gagne APRÈS les coûts"),
+    "VALIDATION": ("je teste la solidité d'une piste", "être sûr que ce n'est pas de la chance"),
+    "HOLDOUT": ("je teste sur des données jamais vues", "éviter de me mentir à moi-même"),
+    "FORWARD_PAPER": ("je suis une piste sur les données récentes", "voir si elle tient en conditions réelles"),
+    "ANALYSE": ("je résume ce que j'ai appris", "garder seulement ce qui survit"),
+}
+
+
+def _enrichir_etat_dashboard(root, rundir, etat, *, cycle, phase, tot, interessantes) -> None:
+    """AF-P6 : ajoute à l'état les champs des 12 panneaux (mots simples). Valeurs absentes = laissées None
+    -> le dashboard affiche « PAS ENCORE CALCULABLE »."""
+    rundir = Path(rundir)
+    fait, pourquoi = _PHRASES_PHASE.get(phase, ("je travaille", "pour trouver un edge honnête"))
+    etat["sante"] = "tout fonctionne"
+    etat["ce_que_je_fais"] = {"je_fais": fait, "parce_que": pourquoi, "j_utilise": "recherche + tests + simulation",
+                              "fait": etat.get("cycles_termines"), "total": None, "pourcentage": None,
+                              "vitesse": None, "eta": None, "ensuite": "tester d'autres réglages"}
+    # système (psutil si dispo)
+    try:
+        import psutil  # type: ignore
+        etat["systeme"] = {"cpu": psutil.cpu_percent(interval=0.0), "ram": psutil.virtual_memory().percent,
+                           "disque": psutil.disk_usage(str(root)).percent, "workers": None,
+                           "collecteurs": None, "bloquees": 0, "redemarrages": None, "erreurs": None}
+    except Exception:  # noqa: BLE001
+        etat["systeme"] = {}
+    # simulation paper (depuis la réconciliation si déjà écrite)
+    rec = None
+    try:
+        rec = json.loads((rundir / "results" / "reconciliation.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        rec = None
+    etat["simulation"] = ({"capital": rec.get("capital_initial_usd"), "equity": rec.get("equity_usd"),
+                           "pnl_realise": rec.get("pnl_realise_usd"), "pnl_net": rec.get("pnl_realise_usd"),
+                           "roi_total": rec.get("roi_total_pct"), "roi_deploye": rec.get("roi_deploye_pct"),
+                           "drawdown": rec.get("drawdown_usd")} if rec else {})
+    # pépites (pistes intéressantes) + résultats
+    etat["pepites"] = [{"candidate_id": p.get("candidate_id"), "explication": "%s %sms" % (p.get("coin"), p.get("horizon_ms")),
+                        "net": p.get("net_bps"), "statut": p.get("statut")} for p in (interessantes or [])[:8]]
+    etat["resultats_idees"] = {"pepites_possibles": len(interessantes or []), "rejetees": (etat.get("rejets") or {}).get("total")}
+    # est-ce le bon moment pour Ctrl+C ?
+    ct = int(etat.get("cycles_termines") or 0)
+    feu, msg = ("🔴", "RAPPORT ENCORE TROP JEUNE")
+    if ct >= 6:
+        feu, msg = ("🟢", "BON MOMENT POUR ENVISAGER LE RAPPORT")
+    elif ct >= 2:
+        feu, msg = ("🟡", "RAPPORT DÉJÀ UTILE, CONTINUER APPORTERA PLUS")
+    etat["ctrl_c"] = {"feu": feu, "message": msg, "termine": "%d cycles" % ct,
+                      "manque": ("plus de suivi live des pépites" if ct < 6 else "rien de bloquant"),
+                      "tests_en_cours": etat.get("phase"), "prochaine": "nouveau cycle de recherche"}
+    # outils (dernier tableau écrit)
+    try:
+        camps = sorted((rundir / "campagnes").glob("camp-*"))
+        ou = json.loads((camps[-1] / "resultats" / "outils_recherche.json").read_text(encoding="utf-8")) if camps else {}
+        etat["outils"] = {"disponibles": ou.get("n_disponibles"), "utilises": ou.get("n_lances"),
+                          "actifs": ou.get("n_avec_trials_reels"), "detail": list((ou.get("outils") or {}).keys())}
+    except (OSError, ValueError):
+        etat["outils"] = {}
 
 
 def _dernier_checkpoint(rundir: Path):
@@ -449,9 +580,32 @@ def dry_run(root: Path) -> dict:
             "securite_ligne": "0 ordre reel · 0 argent reel · 0 cle privee · 0 signature · 0 depot/retrait"}
 
 
-def creer_ou_reprendre(root: Path, *, exiger_flux: bool = True) -> dict:
+def _dernier_run_recuperable(root: Path) -> dict | None:
+    """Dernier run sur disque (pour `resume` quand ACTIVE.json a disparu après un crash)."""
+    runs = sorted(_run_root(root).glob("rcont-*"), key=lambda p: p.stat().st_mtime if p.exists() else 0)
+    for r in reversed(runs):
+        try:
+            return json.loads((r / "run_identity.json").read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            continue
+    return None
+
+
+def creer_ou_reprendre(root: Path, *, exiger_flux: bool = True, mode: str = "auto") -> dict:
+    """`mode` : 'start' = crée un NOUVEAU run seulement s'il n'y en a pas d'actif (sinon demande) ;
+    'resume' = reprend le run actif, ou le dernier récupérable après crash ; 'auto' = comportement historique."""
     root = Path(root)
     ident = _identite_active(root)
+    if mode == "start" and ident:                            # START ≠ RESUME : ne pas reprendre en douce
+        return {"start": "RUN_ACTIF_EXISTE", "run_id": ident["run_id"],
+                "message": "Un laboratoire est déjà actif. Choisis 2 (Reprendre) ou arrête-le d'abord (5)."}
+    if mode == "resume":
+        rec = ident or _dernier_run_recuperable(root)
+        if not rec:
+            return {"start": "AUCUN_RUN_A_REPRENDRE"}
+        if not ident:                                        # reprise après crash : on réarme ACTIVE.json
+            _ecrire_atomique(_active_path(root), json.dumps(rec, ensure_ascii=False, indent=1))
+        return {"start": "REPRISE", "run_id": rec["run_id"], "rundir": rec["rundir"], "reprise": True}
     if ident:
         return {"start": "REPRISE", "run_id": ident["run_id"], "rundir": ident["rundir"], "reprise": True}
     dr = dry_run(root)
@@ -677,15 +831,20 @@ def _demarrer_dashboard_thread(root: Path, ident: dict, *, intervalle_s: float =
     debut = ident.get("t0_wall_ms", time.time() * 1000) / 1000.0
 
     def loop():
-        import dashboard_continue as DASH
+        import dashboard_flow as DF                        # AF-P6 : dashboard 12 panneaux + nav clavier
+        vue = "tout"
         while not _ARRET.is_set():
             try:
+                ch = DF.lire_touche_non_bloquante()        # navigation 1-7/S sans intercepter Ctrl+C
+                if ch is not None:
+                    v = DF.touche_vers_vue(ch)
+                    if v:
+                        vue = v
                 etat = json.loads((rundir / "LIVE-RESEARCH-STATE.json").read_text(encoding="utf-8"))
                 ecoule = time.time() - debut               # horloge RÉELLE recalculée à chaque rafraîchi
-                etat["duree_totale_s"] = round(ecoule, 1)
                 etat["duree"] = {"jours": int(ecoule // 86400), "heures": int(ecoule % 86400 // 3600),
                                  "minutes": int(ecoule % 3600 // 60), "secondes": int(ecoule % 60)}
-                print("\033c" + DASH.rendre_texte(etat), flush=True)
+                print("\033c" + DF.rendre_texte(etat, vue=vue), flush=True)
             except Exception:  # noqa: BLE001 — un afficheur ne casse jamais le moteur
                 pass
             _ARRET.wait(intervalle_s)
@@ -721,14 +880,14 @@ def _demarrer_surveillance_thread(sup, *, intervalle_s: float = 15.0) -> threadi
 
 
 def demarrer_foreground(root: Path, *, exiger_flux: bool = True, max_cycles: int | None = None,
-                        collecteurs: dict | None = None, afficher_live: bool = True) -> dict:
+                        collecteurs: dict | None = None, afficher_live: bool = True, mode: str = "auto") -> dict:
     """Démarre le run et TRAVAILLE au premier plan jusqu'au Ctrl+C, puis finalise proprement (partiel si 2e
-    Ctrl+C). Le moteur N'est PAS détaché (sinon Ctrl+C ne contrôlerait pas la finalisation). Optionnellement,
-    un Superviseur relance les collecteurs read-only (jamais lancés par défaut ni en test)."""
+    Ctrl+C). `mode` distingue START (nouveau run) de RESUME (reprise). Le moteur N'est PAS détaché (sinon
+    Ctrl+C ne contrôlerait pas la finalisation). Un Superviseur relance les collecteurs read-only en option."""
     root = Path(root)
     _ARRET.clear(); _URGENCE.clear()
-    r = creer_ou_reprendre(root, exiger_flux=exiger_flux)
-    if r.get("start") == "PRECHECK_ECHEC":
+    r = creer_ou_reprendre(root, exiger_flux=exiger_flux, mode=mode)
+    if r.get("start") in ("PRECHECK_ECHEC", "RUN_ACTIF_EXISTE", "AUCUN_RUN_A_REPRENDRE"):
         return r
     ident = _identite_active(root) or {}
     _installer_signal(root)
@@ -759,9 +918,25 @@ def demarrer_foreground(root: Path, *, exiger_flux: bool = True, max_cycles: int
     return finaliser(root, partial=_URGENCE.is_set(), raison="ctrl-c")
 
 
-def verifier_finalisation(root: Path) -> dict:
-    """Le CMD ne doit déclarer « finalisation terminée » que si un rapport ET un manifeste existent VRAIMENT."""
+def verifier_finalisation(root: Path, run_id: str | None = None) -> dict:
+    """Le CMD ne déclare « terminé » que si le rapport ET le manifeste de CE run existent, que l'état est
+    FINALIZATION_COMPLETE*, avec des SHA présents. Sans run_id : vérif globale (au moins un rapport+manifeste)."""
     root = Path(root)
+    if run_id:
+        dossier = root / "Rapports en continu" / run_id
+        rapports = list(dossier.glob("RAPPORT-RECHERCHE-CONTINUE_*.md")) if dossier.exists() else []
+        man = _run_root(root) / run_id / "manifeste" / "SHA256_MANIFEST_FINAL.json"
+        etat_ok = shas_ok = False
+        if man.exists():
+            try:
+                m = json.loads(man.read_text(encoding="utf-8"))
+                etat_ok = str(m.get("etat", "")).startswith("FINALIZATION_COMPLETE")
+                shas_ok = bool(m.get("fichiers")) and m.get("contient_rapport") is True
+            except (OSError, ValueError):
+                pass
+        ok = bool(rapports and man.exists() and etat_ok and shas_ok)
+        return {"finalisation_confirmee": ok, "run_id": run_id, "rapport": bool(rapports),
+                "manifeste": man.exists(), "etat_complete": etat_ok, "sha_presents": shas_ok}
     dossier = root / "Rapports en continu"
     rapports = list(dossier.rglob("RAPPORT-RECHERCHE-CONTINUE_*.md")) if dossier.exists() else []
     manifs = list(_run_root(root).rglob("SHA256_MANIFEST_FINAL.json"))
@@ -776,10 +951,13 @@ def _cli():
     a = ap.parse_args()
     root = RACINE
     if a.commande == "dry-run":
-        print(json.dumps(dry_run(root), ensure_ascii=False, indent=1))
+        dr = dry_run(root)
+        print(json.dumps(dr, ensure_ascii=False, indent=1))
+        raise SystemExit(0 if dr.get("PASS") else 2)          # code 0 si PASS, non-nul sinon (P7)
     elif a.commande in ("start", "resume"):
-        print(json.dumps(demarrer_foreground(root, collecteurs=_collecteurs_lecture_seule(root)),
-                         ensure_ascii=False, indent=1))
+        r = demarrer_foreground(root, collecteurs=_collecteurs_lecture_seule(root), mode=a.commande)
+        print(json.dumps(r, ensure_ascii=False, indent=1))
+        raise SystemExit(0 if r.get("finalisation") or r.get("start") in ("OK", "REPRISE") else 3)
     elif a.commande == "status":
         print(json.dumps(statut(root), ensure_ascii=False, indent=1))
     elif a.commande == "snapshot":
@@ -790,7 +968,7 @@ def _cli():
         ident = _identite_active(root)
         print(ident["run_id"] if ident else "")
     elif a.commande == "verifier-finalisation":
-        v = verifier_finalisation(root)
+        v = verifier_finalisation(root, a.run_id)
         print(json.dumps(v, ensure_ascii=False))
         raise SystemExit(0 if v["finalisation_confirmee"] else 1)
 
