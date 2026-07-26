@@ -47,29 +47,47 @@ class RegistreCandidatsLive:
 
     def __init__(self, rundir: Path):
         self.path = Path(rundir) / "registre_candidats_live.json"
-        self.etat = self._charger()                          # {candidate_id: {...}}
+        self.attente_path = Path(rundir) / "registre_candidats_live_attente.json"
+        self.etat = self._charger(self.path)                 # {candidate_id: {...}} (candidats GELÉS)
+        self.attente = self._charger(self.attente_path)      # {candidate_id: {...}} (en attente d'horloge live)
 
-    def _charger(self) -> dict:
+    def _charger(self, chemin: Path) -> dict:
         try:
-            return json.loads(self.path.read_text(encoding="utf-8"))
+            return json.loads(Path(chemin).read_text(encoding="utf-8"))
         except (OSError, ValueError):
             return {}
 
-    def _sauver(self):
-        self.path.parent.mkdir(parents=True, exist_ok=True)
-        tmp = self.path.with_suffix(".json.tmp")
-        tmp.write_text(json.dumps(self.etat, ensure_ascii=False, indent=1), encoding="utf-8")
-        os.replace(tmp, self.path)
+    def _sauver_fichier(self, chemin: Path, obj: dict):
+        Path(chemin).parent.mkdir(parents=True, exist_ok=True)
+        tmp = Path(chemin).with_suffix(".json.tmp")
+        tmp.write_text(json.dumps(obj, ensure_ascii=False, indent=1), encoding="utf-8")
+        os.replace(tmp, chemin)
 
-    def figer(self, candidate_id: str, *, freeze_exchange_ts: float, meta: dict | None = None) -> dict:
-        """Fige un candidat (immuable). Si déjà figé, renvoie l'entrée existante SANS changer son freeze."""
+    def _sauver(self):
+        self._sauver_fichier(self.path, self.etat)
+
+    def _sauver_attente(self):
+        self._sauver_fichier(self.attente_path, self.attente)
+
+    def figer(self, candidate_id: str, *, freeze_exchange_ts, meta: dict | None = None) -> dict:
+        """Fige un candidat (immuable). GR/micro-fix point 1 : on NE GÈLE JAMAIS avec un freeze_exchange_ts <= 0
+        (horloge live invalide) — le candidat passe alors en WAITING_FOR_LIVE_CLOCK (aucun gel). Si déjà figé,
+        renvoie l'entrée existante SANS changer son freeze."""
         if candidate_id in self.etat:
             return self.etat[candidate_id]
+        if freeze_exchange_ts is None or float(freeze_exchange_ts) <= 0.0:
+            self.attente[candidate_id] = {"candidate_id": candidate_id, "statut": "WAITING_FOR_LIVE_CLOCK",
+                                          "meta": meta or {}, "maj_ms": int(time.time() * 1000)}
+            self._sauver_attente()
+            return self.attente[candidate_id]                # PAS de gel : horloge live absente
         self.etat[candidate_id] = {
             "candidate_id": candidate_id, "freeze_exchange_ts": float(freeze_exchange_ts),
             "last_forward_event_id": None, "n_episodes_live": 0, "duree_live_ms": 0.0,
             "pnl_live_bps": 0.0, "roi_live_pct": 0.0, "pic_live_bps": 0.0, "dd_live_bps": 0.0,
             "vus": [], "positif_live": False, "meta": meta or {}, "fige_ms": int(time.time() * 1000)}
+        if candidate_id in self.attente:                     # promu de l'attente au gel (horloge live devenue valide)
+            self.attente.pop(candidate_id, None)
+            self._sauver_attente()
         self._sauver()
         return self.etat[candidate_id]
 
@@ -135,7 +153,8 @@ class RegistreCandidatsLive:
     def resume(self) -> dict:
         cs = self.candidats()
         return {"n_candidats": len(cs), "n_positifs_live": sum(1 for c in cs if c.get("positif_live")),
-                "n_avec_donnee_live": sum(1 for c in cs if (c.get("n_episodes_live") or 0) > 0)}
+                "n_avec_donnee_live": sum(1 for c in cs if (c.get("n_episodes_live") or 0) > 0),
+                "n_attente_horloge_live": len(self.attente)}
 
 
 __all__ = ["RegistreCandidatsLive", "filtrer_apres_freeze"]

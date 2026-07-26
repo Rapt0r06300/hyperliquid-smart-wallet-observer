@@ -320,6 +320,7 @@ def executer_cycle(root: Path, rundir: Path, *, cycle: int, code_sha: str,
     _outils_recherche(rundir, camp_dir)                    # AF-P5 : registre d'outils réellement lancés
     _prog(6, "suivi live des candidats figés", "clôture du cycle")
     suivi = _suivi_candidats_live(rundir, prets)           # FX-5 : suivi live run-level (épisodes après freeze)
+    _promouvoir_pass_live(rundir, camp_dir)                # POINT 2 : PASS_FORWARD_PAPER SEULEMENT si prouvé live
     _prog(7, "clôture du cycle", "nouveau cycle")
     resume.update({"campaign_id": camp_id, "cycle": cycle, "nouvelles_donnees": bool(scan["n_new"]),
                    "n_new_events": scan["n_new"], "n_variantes_nouvelles": len(variantes),
@@ -430,6 +431,38 @@ def _outils_recherche(rundir: Path, camp_dir: Path) -> dict:
         return {"erreur": str(e)[:160]}
 
 
+def _horloge_live(rundir: Path, prets_live: list):
+    """Dernier exchange_ts RÉELLEMENT observé (point 1) : max des ts des épisodes live consommés, sinon dernier
+    tick du buffer marché du CanonicalStore (canonical/marche.jsonl). Rend None si AUCUNE horloge live valide
+    (> 0) — dans ce cas on NE GÈLE PAS (WAITING_FOR_LIVE_CLOCK)."""
+    m = 0.0
+    for e in (prets_live or []):
+        try:
+            m = max(m, float(e.get("ts_ms") or 0.0))
+        except (TypeError, ValueError):
+            continue
+    if m <= 0.0:
+        buf = Path(rundir) / "canonical" / "marche.jsonl"
+        if buf.exists():
+            try:
+                with buf.open("r", encoding="utf-8", errors="ignore") as f:
+                    lignes = f.readlines()[-500:]
+                for l in reversed(lignes):
+                    l = l.strip()
+                    if not l:
+                        continue
+                    try:
+                        t = float(json.loads(l).get("ts_ms") or 0.0)
+                    except (ValueError, TypeError):
+                        continue
+                    if t > m:
+                        m = t
+                        break
+            except OSError:
+                pass
+    return m if m > 0.0 else None
+
+
 def _suivi_candidats_live(rundir: Path, prets_live: list) -> dict:
     """FX-5 + GR-1/GR-2 : registre RUN-LEVEL des candidats figés, suivi CUMULATIF et alimentation du portefeuille
     GLOBAL depuis le SEUL vrai live. Fige les champions (freeze immuable), puis, pour chaque candidat (y compris
@@ -444,14 +477,17 @@ def _suivi_candidats_live(rundir: Path, prets_live: list) -> dict:
         import forward_portefeuille as FPF
         import moteur_execution_prod as MEP
         reg = RCL.RegistreCandidatsLive(rundir)
-        maintenant = max((float(e.get("ts_ms", 0)) for e in (prets_live or [])), default=0.0)
-        # 1) figer les champions courants (freeze_exchange_ts = instant live courant ; immuable une fois posé)
+        maintenant = _horloge_live(rundir, prets_live)        # point 1 : dernier exchange_ts RÉELLEMENT observé (jamais 0)
+        # 1) figer les champions courants au dernier exchange_ts live. Sans horloge live valide (maintenant None),
+        #    figer() bascule le candidat en WAITING_FOR_LIVE_CLOCK et NE GÈLE PAS (freeze=0 interdit).
         for c in CH.charger(rundir):
             cid = c.get("trial_id") or c.get("candidate_id")
             if cid and c.get("direction") and c.get("horizon_ms"):
                 reg.figer(cid, freeze_exchange_ts=maintenant,
                           meta={"direction": c["direction"], "horizon_ms": c["horizon_ms"],
                                 "coin": c.get("coin"), "family": c.get("family")})
+        if maintenant is None:                                # aucune horloge live -> rien à suivre ce cycle
+            return reg.resume()
         gp_dir = rundir / "global_portfolio"                 # le SEUL portefeuille global du run (alimenté LIVE only)
         pfg = PG.PortefeuilleGlobal(gp_dir)
         gp_pending = gp_dir / "pending_exits.json"
@@ -477,6 +513,50 @@ def _suivi_candidats_live(rundir: Path, prets_live: list) -> dict:
                 FPF.simuler([cand_meta], nouveaux, filtrer=_passe, evaluer=_ev, portefeuille=pfg,
                             pending_path=gp_pending, maintenant_ms=maintenant)
         return reg.resume()
+    except Exception as e:  # noqa: BLE001
+        return {"erreur": str(e)[:160]}
+
+
+MIN_LIVE_EPISODES_POUR_PASS = 30                             # minimum RÉEL d'épisodes post-freeze pour un PASS live
+
+
+def _promouvoir_pass_live(rundir: Path, camp_dir: Path) -> dict:
+    """POINT 2 : un PASS_FORWARD_PAPER n'est délivré QUE s'il est prouvé en LIVE — jamais par le pré-forward
+    archive. Promeut PASS_PRE_FORWARD -> PASS_FORWARD_PAPER pour un candidat SEULEMENT si, dans RegistreCandidatsLive :
+    (a) >= MIN_LIVE_EPISODES_POUR_PASS épisodes live post-freeze ; (b) PnL/ROI live calculés par le registre ;
+    (c) portefeuille GLOBAL live réconcilié cohérent avec au moins un événement ; (d) AUCUNE donnée historique
+    (garanti : le registre ne compte que des épisodes strictement après le freeze). Défensif."""
+    try:
+        import registre_candidats_live as RCL
+        import portefeuille_global as PG
+        reg = RCL.RegistreCandidatsLive(rundir)
+        gp = Path(rundir) / "global_portfolio"
+        global_ok = False
+        if (gp / "ledger.jsonl").exists():
+            rc = PG.PortefeuilleGlobal(gp).reconcilier()
+            global_ok = bool(rc.get("coherent")) and sum((rc.get("evenements") or {}).values()) > 0
+        fpath = Path(camp_dir) / "resultats" / "final_verdicts.json"
+        finals = json.loads(fpath.read_text(encoding="utf-8"))
+        change = False
+        for f in finals:
+            if f.get("verdict") != "PASS_PRE_FORWARD":
+                continue
+            c = reg.etat.get(f.get("trial_id"))
+            live_ok = bool(c and int(c.get("n_episodes_live", 0)) >= MIN_LIVE_EPISODES_POUR_PASS
+                           and c.get("pnl_live_bps") is not None and global_ok)
+            if live_ok:
+                f["verdict"] = "PASS_FORWARD_PAPER"
+                f["live_confirme"] = True
+                f["n_episodes_live"] = c["n_episodes_live"]
+                f["pnl_live_bps"] = c["pnl_live_bps"]; f["roi_live_pct"] = c["roi_live_pct"]
+                f["dd_live_bps"] = c["dd_live_bps"]
+                f.setdefault("raisons", []).append("LIVE_CONFIRMED")
+                change = True
+        if change:
+            _ecrire_atomique(fpath, json.dumps(finals, ensure_ascii=False, indent=1))
+        return {"n_pass_live": sum(1 for f in finals if f.get("verdict") == "PASS_FORWARD_PAPER"),
+                "n_pass_pre_forward": sum(1 for f in finals if f.get("verdict") == "PASS_PRE_FORWARD"),
+                "global_reconcilie": global_ok}
     except Exception as e:  # noqa: BLE001
         return {"erreur": str(e)[:160]}
 

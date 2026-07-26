@@ -415,13 +415,19 @@ def reconcilier_et_juger(rundir: Path, *, holdout: list[dict], pbo, notional_usd
                 "securite_verte": securise,                         # audit sécurité (passé une fois par le run)
                 "holdout_vu": True}
         g = V18.gate(cand)
+        verdict = g["verdict"]
+        raisons = list(g["raisons"])
+        if verdict == "PASS_FORWARD_PAPER":               # POINT 2 : ce chemin ne voit QUE le holdout + pré-forward
+            verdict = "PASS_PRE_FORWARD"                   # ARCHIVE (diagnostic) -> jamais PASS_FORWARD_PAPER en direct ;
+            raisons.append("PRE_FORWARD_ONLY_REQUIERT_PREUVE_LIVE")   # promu SEULEMENT si prouvé en LIVE (registre + global)
         pnl_usd = (nm or 0.0) / 1e4 * notional_usd
-        finals.append({**h, "verdict": g["verdict"], "raisons": g["raisons"],
+        finals.append({**h, "verdict": verdict, "raisons": raisons,
                        "pnl_usd_par_trade": round(pnl_usd, 4),   # ESPÉRANCE par trade (≠ PnL AGRÉGÉ, cf. réconciliation PT-10)
                        "roi_immobilise_pct": round((nm or 0.0) / 100.0, 4)})   # net bps -> % sur capital immobilisé
     (Path(rundir) / "resultats" / "final_verdicts.json").write_text(
         json.dumps(finals, ensure_ascii=False, indent=1), encoding="utf-8")
-    return {"finals": finals, "n_pass": sum(1 for f in finals if f["verdict"] == "PASS_FORWARD_PAPER")}
+    return {"finals": finals, "n_pass": sum(1 for f in finals if f["verdict"] == "PASS_FORWARD_PAPER"),
+            "n_pass_pre_forward": sum(1 for f in finals if f["verdict"] == "PASS_PRE_FORWARD")}
 
 
 # ─────────────── corpus (fixtures déterministes ; en prod : construit depuis les archives) ───────────────

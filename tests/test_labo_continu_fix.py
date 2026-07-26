@@ -314,7 +314,7 @@ def test_capture_dernier_run_lance(tmp_path):
 # ═══════════════ GR-1 — suivi live CUMULATIF (dédup id, cumul multi-cycles, cycle vide sans reset) ═══════
 def test_suivi_live_cumule_et_deduplique(tmp_path):
     reg = RCL.RegistreCandidatsLive(tmp_path)
-    reg.figer("c1", freeze_exchange_ts=0.0)
+    reg.figer("c1", freeze_exchange_ts=1.0)                  # freeze > 0 (0 est désormais interdit)
     reg.suivre("c1", paires=[("e1", 10.0), ("e2", -4.0)])
     reg.suivre("c1", paires=[("e2", -4.0), ("e3", 6.0)])     # e2 DÉJÀ vu -> dédup par episode_id
     c = reg.etat["c1"]
@@ -322,11 +322,11 @@ def test_suivi_live_cumule_et_deduplique(tmp_path):
     assert c["dd_live_bps"] >= 0.0 and c["last_forward_event_id"] == "e3"
     reg.suivre("c1", paires=[], maintenant_ms=100.0)         # cycle VIDE -> AUCUN reset
     c2 = reg.etat["c1"]
-    assert c2["n_episodes_live"] == 3 and c2["pnl_live_bps"] == 12.0 and c2["duree_live_ms"] == 100.0
+    assert c2["n_episodes_live"] == 3 and c2["pnl_live_bps"] == 12.0 and c2["duree_live_ms"] == 99.0  # 100 - freeze(1)
 
 
 def test_suivi_live_cumul_survit_aux_cycles(tmp_path):
-    RCL.RegistreCandidatsLive(tmp_path).figer("c1", freeze_exchange_ts=0.0)
+    RCL.RegistreCandidatsLive(tmp_path).figer("c1", freeze_exchange_ts=1.0)
     RCL.RegistreCandidatsLive(tmp_path).suivre("c1", paires=[("a", 5.0)])   # nouvelle instance = nouveau cycle
     RCL.RegistreCandidatsLive(tmp_path).suivre("c1", paires=[("b", 5.0)])
     assert RCL.RegistreCandidatsLive(tmp_path).etat["c1"]["n_episodes_live"] == 2   # cumul persistant
@@ -380,6 +380,51 @@ def test_effacer_dernier_run_lance(tmp_path):
     assert RC._lire_dernier_run_lance(tmp_path) == "rcont-x"
     RC._effacer_dernier_run_lance(tmp_path)
     assert RC._lire_dernier_run_lance(tmp_path) == ""        # effacé -> le CMD ne vérifiera jamais un ancien run
+
+
+# ═══════════════ MICRO-FIX point 1 — jamais de gel à 0 (e2e) ═══════════════
+def test_e2e_jamais_de_gel_a_zero_sans_horloge_live(tmp_path):
+    import champions_continue as CH
+    CH.enregistrer_candidat(tmp_path, {"trial_id": "c1", "direction": 1, "horizon_ms": 250, "coin": "BTC",
+                                       "family": "GENERIC"})
+    # AUCUNE horloge live (pas de prets, pas de buffer marché) -> le champion N'EST PAS gelé, il ATTEND
+    RC._suivi_candidats_live(tmp_path, [])
+    reg = RCL.RegistreCandidatsLive(tmp_path)
+    assert reg.etat == {}                                    # aucun candidat gelé (jamais freeze=0)
+    assert any(v.get("statut") == "WAITING_FOR_LIVE_CLOCK" for v in reg.attente.values())
+    # une horloge live arrive via le buffer marché du CanonicalStore -> gel au VRAI exchange_ts (> 0)
+    (tmp_path / "canonical").mkdir(parents=True, exist_ok=True)
+    (tmp_path / "canonical" / "marche.jsonl").write_text(
+        json.dumps({"coin": "BTC", "ts_ms": 123456.0, "bid": 1, "ask": 2}) + "\n", encoding="utf-8")
+    RC._suivi_candidats_live(tmp_path, [])
+    reg2 = RCL.RegistreCandidatsLive(tmp_path)
+    assert reg2.etat and reg2.etat["c1"]["freeze_exchange_ts"] == 123456.0   # gel au dernier ts observé, jamais 0
+
+
+# ═══════════════ MICRO-FIX point 2 — PASS_FORWARD_PAPER exige une preuve LIVE (e2e) ═══════════════
+def test_e2e_pass_forward_paper_exige_preuve_live(tmp_path):
+    # 1) le pipeline sur ARCHIVE seule ne produit JAMAIS PASS_FORWARD_PAPER (au mieux PASS_PRE_FORWARD)
+    rd = tmp_path / "rd"
+    PL.executer_pipeline_complet(tmp_path, rd, PL.corpus_fixtures(), code_sha="p2")
+    finals = json.loads((rd / "resultats" / "final_verdicts.json").read_text(encoding="utf-8"))
+    assert all(f.get("verdict") != "PASS_FORWARD_PAPER" for f in finals)    # pré-forward ne passe jamais en direct
+    # 2) promotion : SANS preuve live -> refus ; AVEC (registre >=MIN + global cohérent) -> PASS_FORWARD_PAPER
+    camp = tmp_path / "camp"
+    (camp / "resultats").mkdir(parents=True)
+    (camp / "resultats" / "final_verdicts.json").write_text(
+        json.dumps([{"trial_id": "c1", "verdict": "PASS_PRE_FORWARD"}]), encoding="utf-8")
+    assert RC._promouvoir_pass_live(tmp_path, camp)["n_pass_live"] == 0     # aucune donnée live -> pas de promotion
+    reg = RCL.RegistreCandidatsLive(tmp_path)
+    reg.figer("c1", freeze_exchange_ts=1000.0)
+    reg.suivre("c1", paires=[("e%d" % i, 1.0) for i in range(RC.MIN_LIVE_EPISODES_POUR_PASS)])   # >= minimum réel
+    pf = PG.PortefeuilleGlobal(tmp_path / "global_portfolio")               # portefeuille GLOBAL live réconciliable
+    pf.ouvrir("p1", coin="BTC", sens=1, notional=300.0, prix=100.0, ts_ms=1.0)
+    pf.fermer("p1", prix=101.0, ts_ms=2.0)
+    r1 = RC._promouvoir_pass_live(tmp_path, camp)
+    assert r1["n_pass_live"] == 1 and r1["global_reconcilie"] is True
+    f2 = json.loads((camp / "resultats" / "final_verdicts.json").read_text(encoding="utf-8"))[0]
+    assert f2["verdict"] == "PASS_FORWARD_PAPER" and f2["live_confirme"] is True
+    assert f2["n_episodes_live"] >= RC.MIN_LIVE_EPISODES_POUR_PASS and "pnl_live_bps" in f2
 
 
 # ═══════════════ FX-10 — CI + recette Windows livrées ═══════════════
