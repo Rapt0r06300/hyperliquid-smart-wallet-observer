@@ -17,13 +17,27 @@ PAPER/shadow only : mesurer n'est pas trader.
 from __future__ import annotations
 
 import bisect
+import hashlib
 import json
+import math
 import statistics as st
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from hl_observer.backtesting.anti_overfit_gate import evaluer as evaluer_dsr
+from hl_observer.backtesting.anti_overfit_gate import sharpe
+from hl_observer.backtesting.lead_lag_evidence import (
+    REQUIRED_CRITERIA,
+    SCHEMA_VERSION,
+    SUPPORTED_HORIZONS_MS,
+)
+from hl_observer.backtesting.quant_methods import block_bootstrap
+from hl_observer.backtesting.robustesse_selection import pbo_cscv
+
 TAPE = Path("runtime") / "data" / "bbo_tape.jsonl"
 CONFIG_GELE = Path("runtime") / "data" / "lead_lag_config_gele.json"
+GLOBAL_TRIAL_LEDGER = Path("runtime") / "research_lab" / "ledgers" / "global_trials.jsonl"
 SEUIL_CHOC_BPS = 8.0
 FRAIS_SLIPPAGE_BPS = 6.0
 HORIZONS_MS = (50.0, 100.0, 250.0, 500.0, 1000.0)
@@ -38,10 +52,11 @@ def charger_tape(root: str | Path) -> dict[str, dict[str, list]]:
     if not p.exists():
         return {}
     par: dict[str, dict[str, list]] = defaultdict(lambda: {"HL": [], "BIN": [], "TRADE": []})
-    for l in p.read_text(encoding="utf-8", errors="ignore").splitlines():
+    for line in p.read_text(encoding="utf-8", errors="ignore").splitlines():
         try:
-            d = json.loads(l)
-            coin = str(d["coin"]).upper(); r = int(d["recu_ns"])
+            d = json.loads(line)
+            coin = str(d["coin"]).upper()
+            r = int(d["recu_ns"])
         except (KeyError, TypeError, ValueError):
             continue
         v = d.get("venue")
@@ -146,14 +161,34 @@ def _metriques(nets: list[float], *, n_periodes: int) -> dict[str, Any]:
     esper = st.mean(nets)
     cum, pic, dd = 0.0, 0.0, 0.0
     for x in nets:
-        cum += x; pic = max(pic, cum); dd = min(dd, cum - pic)
+        cum += x
+        pic = max(pic, cum)
+        dd = min(dd, cum - pic)
     taille = max(1, len(nets) // n_periodes)
     periodes = [nets[i:i + taille] for i in range(0, len(nets), taille)]
     moys = [st.mean(p) for p in periodes if p]
+    bootstrap_totals = block_bootstrap(
+        nets,
+        block=max(1, int(math.sqrt(len(nets)))),
+        n=500,
+        seed=20260729,
+    )
+    bootstrap_means = sorted(total / len(nets) for total in bootstrap_totals)
+    lower_index = max(0, int(len(bootstrap_means) * 0.025) - 1)
+    upper_index = min(len(bootstrap_means) - 1, int(len(bootstrap_means) * 0.975))
+    bootstrap_ci = (
+        [round(bootstrap_means[lower_index], 3), round(bootstrap_means[upper_index], 3)]
+        if bootstrap_means
+        else [None, None]
+    )
     return {"esperance_nette_bps": round(esper, 3), "n": len(nets),
             "drawdown_cumule_bps": round(dd, 2),
-            "periodes_positives": "%d/%d" % (sum(1 for m in moys if m > 0), len(moys)),
-            "stable": all(m > 0 for m in moys)}
+            "periodes_positives": (
+                f"{sum(1 for value in moys if value > 0)}/{len(moys)}"
+            ),
+            "moyennes_par_periode_bps": [round(value, 3) for value in moys],
+            "bootstrap_mean_ci95_bps": bootstrap_ci,
+            "stable": bool(moys) and all(m > 0 for m in moys)}
 
 
 def backtest(root: str | Path = ".", *, seuil_choc_bps: float = SEUIL_CHOC_BPS,
@@ -181,6 +216,7 @@ def backtest(root: str | Path = ".", *, seuil_choc_bps: float = SEUIL_CHOC_BPS,
     ctrl: dict[float, list] = {h: [] for h in horizons}
     placebo: dict[float, list] = {h: [] for h in horizons}     # directions MÉLANGÉES -> doit donner ~0
     cap: list[float] = []
+    test_event_times: list[int] = []
     for coin, ev in tape.items():
         chocs = detecter_chocs(ev["TRADE"], seuil_bps=seuil_choc_bps)
         if not chocs or len(ev["HL"]) < 3:
@@ -190,6 +226,7 @@ def backtest(root: str | Path = ".", *, seuil_choc_bps: float = SEUIL_CHOC_BPS,
         for h in horizons:
             cible[h].extend(x[0] for x in nets[h])
         if coin not in controle:
+            test_event_times.extend(t0 for t0, _direction in chocs)
             for h in horizons:
                 cap.extend(x[1] for x in nets[h])
             rng = random.Random(20260723)                      # placebo REPRODUCTIBLE : mêmes t0, sens aléatoire
@@ -204,6 +241,27 @@ def backtest(root: str | Path = ".", *, seuil_choc_bps: float = SEUIL_CHOC_BPS,
     par_h = {h: _metriques(v, n_periodes=N_PERIODES) for h, v in test.items() if v}
     ctrl_h = {h: round(st.mean(v), 3) for h, v in ctrl.items() if v}
     plac_h = {h: round(st.mean(v), 3) for h, v in placebo.items() if v}
+    trial_sharpes = [sharpe(values) for values in test.values() if len(values) >= 2]
+    dsr_h = {
+        h: evaluer_dsr(
+            values,
+            n_essais=max(1, len(horizons_ms)),
+            trial_sharpes=trial_sharpes,
+        ).as_dict()
+        for h, values in test.items()
+        if values
+    }
+    pbo_rows = [
+        metrics["moyennes_par_periode_bps"]
+        for metrics in par_h.values()
+        if len(metrics.get("moyennes_par_periode_bps") or ()) >= 4
+    ]
+    pbo = pbo_cscv(pbo_rows) if len(pbo_rows) >= 2 else pbo_cscv([])
+    event_frequency = None
+    if len(test_event_times) >= 2:
+        duration_days = (max(test_event_times) - min(test_event_times)) / 1e9 / 86400.0
+        if duration_days > 0:
+            event_frequency = round(len(test_event_times) / duration_days, 6)
     # KEEP seulement si : espérance>0, STABLE par période, ET bat le PLACEBO (sinon = artefact d'horloge)
     gagnants = {h: r for h, r in par_h.items()
                 if r["esperance_nette_bps"] > 0 and r["stable"]
@@ -213,14 +271,25 @@ def backtest(root: str | Path = ".", *, seuil_choc_bps: float = SEUIL_CHOC_BPS,
             "intervalles_hl": dist, "horizons_observables": horizons,
             "capacite_mediane_usd": round(st.median(cap), 2) if cap else None,
             "net_par_horizon": par_h, "controle_par_horizon": ctrl_h, "placebo_par_horizon": plac_h,
+            "dsr_par_horizon": dsr_h,
+            "pbo": pbo,
+            "frequence_evenements_par_jour": event_frequency,
+            "information_coefficient": {
+                "value": None,
+                "status": "UNMEASURABLE_WITH_DIRECTION_ONLY_SHOCKS",
+            },
+            "regimes": {
+                "period_count": N_PERIODES,
+                "stable_horizons_ms": [h for h, row in par_h.items() if row.get("stable")],
+            },
             "avertissement": "Choc sur trades Binance ; entrée demi-spread HL réel + frais/slippage ; "
                              "horizons GATÉS par l'observable ; stabilité par période. Contrôle > 0 = "
                              "artefact d'horloge. Sub-seconde souvent gagnée par des racers co-localisés."}
 
 
-def geler_config(root: str | Path = ".", *, coins: list[str], coins_controle: list[str],
-                 horizons_ms=HORIZONS_MS, seuil_choc_bps: float = SEUIL_CHOC_BPS,
-                 frais_slippage_bps: float = FRAIS_SLIPPAGE_BPS) -> dict[str, Any]:
+def _legacy_geler_config(root: str | Path = ".", *, coins: list[str], coins_controle: list[str],
+                         horizons_ms=HORIZONS_MS, seuil_choc_bps: float = SEUIL_CHOC_BPS,
+                         frais_slippage_bps: float = FRAIS_SLIPPAGE_BPS) -> dict[str, Any]:
     """GÈLE coins/horizons/seuils/critère AVANT le live-forward. On lira CE fichier, jamais des seuils
     réajustés après avoir vu le PnL (anti-cherry-picking)."""
     import time
@@ -231,12 +300,251 @@ def geler_config(root: str | Path = ".", *, coins: list[str], coins_controle: li
            "min_chocs": MIN_CHOCS}
     p = Path(root) / CONFIG_GELE
     p.parent.mkdir(parents=True, exist_ok=True)
-    tmp = p.with_suffix(".json.tmp"); tmp.write_text(json.dumps(cfg, ensure_ascii=False, indent=1), encoding="utf-8")
+    tmp = p.with_suffix(".json.tmp")
+    tmp.write_text(json.dumps(cfg, ensure_ascii=False, indent=1), encoding="utf-8")
     import os
     os.replace(tmp, p)
     return cfg
 
 
+def _sha256_file(path: Path) -> str:
+    digest = hashlib.sha256()
+    if path.exists():
+        with path.open("rb") as handle:
+            for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+                digest.update(chunk)
+    else:
+        digest.update(b"<missing>")
+    return f"sha256:{digest.hexdigest()}"
+
+
+def _horizon_value(mapping: Any, horizon: float, default: Any = None) -> Any:
+    if not isinstance(mapping, dict):
+        return default
+    for key in (horizon, str(horizon), str(int(horizon))):
+        if key in mapping:
+            return mapping[key]
+    return default
+
+
+def _register_clock_boundary_trials(
+    root: Path,
+    *,
+    dataset_hash: str,
+    pipeline_hash: str,
+    requested_horizons: list[float],
+) -> dict[str, Any]:
+    """Register every tested clock boundary once in the global research ledger."""
+
+    ledger = root / GLOBAL_TRIAL_LEDGER
+    ledger.parent.mkdir(parents=True, exist_ok=True)
+    known_ids: set[str] = set()
+    valid_rows = 0
+    if ledger.exists():
+        for line in ledger.read_text(encoding="utf-8", errors="ignore").splitlines():
+            try:
+                row = json.loads(line)
+            except (TypeError, ValueError):
+                continue
+            if isinstance(row, dict):
+                valid_rows += 1
+                if row.get("trial_id"):
+                    known_ids.add(str(row["trial_id"]))
+
+    added = 0
+    now = datetime.now(timezone.utc).isoformat()
+    with ledger.open("a", encoding="utf-8") as handle:
+        for horizon in requested_horizons:
+            identity = "|".join(
+                (dataset_hash, pipeline_hash, "lead_lag_shadow", f"{horizon:g}ms")
+            )
+            trial_id = hashlib.sha256(identity.encode("utf-8")).hexdigest()
+            if trial_id in known_ids:
+                continue
+            row = {
+                "trial_id": trial_id,
+                "strategy": "lead_lag_shadow",
+                "dimension": "clock_boundary_ms",
+                "value": horizon,
+                "dataset_hash": dataset_hash,
+                "pipeline_hash": pipeline_hash,
+                "registered_at": now,
+                "real_execution": False,
+            }
+            handle.write(json.dumps(row, ensure_ascii=False, sort_keys=True) + "\n")
+            known_ids.add(trial_id)
+            added += 1
+    return {
+        "count": valid_rows + added,
+        "added": added,
+        "ledger": str(ledger),
+    }
+
+
+def geler_config(
+    root: str | Path = ".",
+    *,
+    coins: list[str],
+    coins_controle: list[str],
+    horizons_ms=HORIZONS_MS,
+    seuil_choc_bps: float = SEUIL_CHOC_BPS,
+    frais_slippage_bps: float = FRAIS_SLIPPAGE_BPS,
+    minimum_events: int = MIN_CHOCS,
+    evidence: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Freeze a complete, versioned and deny-by-default lead-lag evidence artefact."""
+
+    root_path = Path(root)
+    requested = [float(value) for value in horizons_ms]
+    unsupported = [value for value in requested if value not in SUPPORTED_HORIZONS_MS]
+    if unsupported:
+        raise ValueError(f"unsupported lead-lag horizons: {unsupported}")
+
+    dataset_path = root_path / TAPE
+    pipeline_path = Path(__file__)
+    dataset_hash = _sha256_file(dataset_path)
+    pipeline_hash = _sha256_file(pipeline_path)
+    global_trials = _register_clock_boundary_trials(
+        root_path,
+        dataset_hash=dataset_hash,
+        pipeline_hash=pipeline_hash,
+        requested_horizons=requested,
+    )
+    result = evidence or backtest(
+        root_path,
+        seuil_choc_bps=seuil_choc_bps,
+        frais_slippage_bps=frais_slippage_bps,
+        horizons_ms=requested,
+        coins_controle=tuple(coins_controle),
+        min_chocs=minimum_events,
+    )
+    observable = [
+        float(value)
+        for value in result.get("horizons_observables", ())
+        if float(value) in requested
+    ]
+    net_rows = result.get("net_par_horizon") or {}
+    controls = result.get("controle_par_horizon") or {}
+    placebos = result.get("placebo_par_horizon") or {}
+    dsr_rows = result.get("dsr_par_horizon") or {}
+
+    edges: dict[str, float] = {}
+    samples: dict[str, int] = {}
+    stability: dict[str, bool] = {}
+    bootstrap: dict[str, list[float | None]] = {}
+    placebo_edges: dict[str, float | None] = {}
+    control_edges: dict[str, float | None] = {}
+    dsr: dict[str, dict[str, Any]] = {}
+    for horizon in observable:
+        key = str(int(horizon) if horizon.is_integer() else horizon)
+        row = _horizon_value(net_rows, horizon, {}) or {}
+        edges[key] = float(row.get("esperance_nette_bps") or 0.0)
+        samples[key] = int(row.get("n") or 0)
+        stability[key] = row.get("stable") is True
+        bootstrap[key] = list(row.get("bootstrap_mean_ci95_bps") or [None, None])
+        placebo = _horizon_value(placebos, horizon)
+        control = _horizon_value(controls, horizon)
+        placebo_edges[key] = float(placebo) if placebo is not None else None
+        control_edges[key] = float(control) if control is not None else None
+        dsr[key] = dict(_horizon_value(dsr_rows, horizon, {}) or {})
+
+    pbo = dict(result.get("pbo") or {})
+    criteria = {
+        "minimum_sample": bool(observable)
+        and all(samples.get(str(int(h)), 0) >= minimum_events for h in observable),
+        "observable_horizon": bool(observable),
+        "net_positive": bool(observable)
+        and all(edges.get(str(int(h)), 0.0) > 0 for h in observable),
+        "period_stability": bool(observable)
+        and all(stability.get(str(int(h))) is True for h in observable),
+        "placebo_beaten": bool(observable)
+        and all(
+            placebo_edges.get(str(int(h))) is not None
+            and edges.get(str(int(h)), 0.0) > float(placebo_edges[str(int(h))])
+            for h in observable
+        ),
+        "controls_non_winning": bool(observable)
+        and all(
+            control_edges.get(str(int(h))) is not None
+            and float(control_edges[str(int(h))]) <= 0
+            for h in observable
+        ),
+        "costs_executable": math.isfinite(float(frais_slippage_bps))
+        and float(frais_slippage_bps) >= 0,
+        "bootstrap_positive": bool(observable)
+        and all(
+            len(bootstrap.get(str(int(h)), ())) == 2
+            and bootstrap[str(int(h))][0] is not None
+            and float(bootstrap[str(int(h))][0]) > 0
+            for h in observable
+        ),
+        "pbo_acceptable": pbo.get("pbo") is not None and float(pbo["pbo"]) <= 0.5,
+        "dsr_acceptable": bool(observable)
+        and all(dsr.get(str(int(h)), {}).get("survit") is True for h in observable),
+    }
+    promotion_status = (
+        "PROMOTED"
+        if all(criteria.get(name) is True for name in REQUIRED_CRITERIA)
+        else "REJECTED"
+    )
+    now = datetime.now(timezone.utc)
+    config = {
+        "schema_version": SCHEMA_VERSION,
+        "strategy": "lead_lag_shadow",
+        "promotion_status": promotion_status,
+        "dataset_hash": dataset_hash,
+        "pipeline_hash": pipeline_hash,
+        "freeze_ts": now.isoformat(),
+        "freeze_ts_ms": int(now.timestamp() * 1000),
+        "coins": sorted({str(coin).upper() for coin in coins if coin}),
+        "control_coins": sorted(
+            {str(coin).upper() for coin in coins_controle if coin}
+        ),
+        "requested_horizons_ms": requested,
+        "observable_horizons_ms": observable,
+        "unobservable_horizons_ms": [
+            horizon for horizon in requested if horizon not in observable
+        ],
+        "minimum_events": int(minimum_events),
+        "seuil_choc_bps": float(seuil_choc_bps),
+        "edge_net_par_horizon_bps": edges,
+        "sample_n_by_horizon": samples,
+        "period_stability_by_horizon": stability,
+        "bootstrap_mean_ci95_bps": bootstrap,
+        "placebo_edge_by_horizon_bps": placebo_edges,
+        "control_edge_by_horizon_bps": control_edges,
+        "dsr_by_horizon": dsr,
+        "pbo": pbo,
+        "costs": {
+            "round_trip_bps": float(frais_slippage_bps),
+            "model": "real_hl_bid_ask_plus_configured_fees_and_slippage",
+            "executable": criteria["costs_executable"],
+        },
+        "frequency": {
+            "events_per_day": result.get("frequence_evenements_par_jour"),
+        },
+        "information_coefficient": result.get("information_coefficient")
+        or {"value": None, "status": "UNMEASURABLE"},
+        "regimes": result.get("regimes") or {},
+        "criteria": criteria,
+        "global_trials": global_trials,
+        "source_status": str(result.get("statut") or "UNKNOWN"),
+        "source_detail": result.get("detail"),
+        "real_execution": False,
+    }
+    output = root_path / CONFIG_GELE
+    output.parent.mkdir(parents=True, exist_ok=True)
+    temporary = output.with_suffix(".json.tmp")
+    temporary.write_text(
+        json.dumps(config, ensure_ascii=False, indent=2, sort_keys=True),
+        encoding="utf-8",
+    )
+    import os
+
+    os.replace(temporary, output)
+    return config
+
+
 __all__ = ["SEUIL_CHOC_BPS", "FRAIS_SLIPPAGE_BPS", "HORIZONS_MS", "charger_tape",
            "distribution_intervalles", "horizons_observables", "detecter_chocs",
-           "net_par_horizon", "backtest", "geler_config"]
+           "net_par_horizon", "backtest", "geler_config", "GLOBAL_TRIAL_LEDGER"]

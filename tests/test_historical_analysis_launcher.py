@@ -26,6 +26,7 @@ def test_standard_plan_covers_replay_backtest_ab_and_diagnostics(tmp_path):
         # -> ledger reconcilie) etait testee mais sans aucun appelant. Elle est
         # desormais une etape a part entiere du lanceur d'analyse officiel.
         "market_truth_replay",
+        "lead_lag_shadow",
         "ab_exact",
         "realtime_replay",
         "closed_ledger_replay",
@@ -103,7 +104,7 @@ def test_suite_always_writes_consolidated_json_and_markdown(tmp_path):
 
     code, report_path, results = run_suite(tmp_path, stage_runner=fake_runner)
     assert code == 0
-    assert len(results) == 12  # +1 : etape market_truth_replay (recablage)
+    assert len(results) == 13
     assert report_path.exists()
     latest = tmp_path / "runtime" / "reports" / "backtest_replay" / "RAPPORT_LATEST.md"
     latest_json = tmp_path / "runtime" / "reports" / "backtest_replay" / "report_latest.json"
@@ -112,7 +113,7 @@ def test_suite_always_writes_consolidated_json_and_markdown(tmp_path):
     assert payload["local_data_only"] is True
     assert payload["network_used"] is False
     assert payload["real_execution"] is False
-    assert payload["summary"]["PASSED"] == 12  # +1 : etape market_truth_replay (recablage)
+    assert payload["summary"]["PASSED"] == 13
 
 
 def test_consolidated_report_surfaces_pnl_findings(tmp_path):

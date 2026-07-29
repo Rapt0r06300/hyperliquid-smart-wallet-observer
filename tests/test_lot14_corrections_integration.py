@@ -10,6 +10,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+from hl_observer.backtesting.lead_lag_evidence import REQUIRED_CRITERIA, SCHEMA_VERSION
 from hl_observer.experimental import execution_paper as EP
 from hl_observer.experimental import moteur_paper as MP
 from hl_observer.experimental import reconciliation_paper as REC
@@ -33,8 +34,26 @@ def _ecrire(p: Path, lignes: list[dict]) -> None:
 def _fixture_lead_lag(root: Path, *, trade_ms: float = NOW - 500, edge_h_bps: float = 66.0) -> None:
     d = _data(root)
     (d / "lead_lag_config_gele.json").write_text(json.dumps({
-        "coins": ["SOL"], "coins_controle": [], "seuil_choc_bps": 8.0, "frais_slippage_bps": 6.0,
-        "edge_net_par_horizon_bps": {"1000": edge_h_bps}, "freq_evenements_par_jour": 5.0}))
+        "schema_version": SCHEMA_VERSION,
+        "strategy": "lead_lag_shadow",
+        "promotion_status": "PROMOTED",
+        "dataset_hash": "sha256:" + "1" * 64,
+        "pipeline_hash": "sha256:" + "2" * 64,
+        "freeze_ts": "2026-07-29T00:00:00+00:00",
+        "freeze_ts_ms": 1,
+        "coins": ["SOL"],
+        "control_coins": [],
+        "requested_horizons_ms": [1000.0],
+        "observable_horizons_ms": [1000.0],
+        "minimum_events": 30,
+        "seuil_choc_bps": 8.0,
+        "edge_net_par_horizon_bps": {"1000": edge_h_bps},
+        "sample_n_by_horizon": {"1000": 30},
+        "costs": {"round_trip_bps": 6.0, "executable": True},
+        "frequency": {"events_per_day": 5.0},
+        "criteria": {name: True for name in REQUIRED_CRITERIA},
+        "global_trials": {"count": 1},
+    }))
     _ecrire(d / "bbo_tape.jsonl", [
         {"coin": "SOL", "venue": "HL", "bid": 100.0, "ask": 100.03,
          "recu_ns": 10, "ts_wall_ms": trade_ms - 100},

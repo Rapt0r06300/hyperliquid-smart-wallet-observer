@@ -5,6 +5,7 @@ import json
 
 import pytest
 
+from hl_observer.backtesting.lead_lag_evidence import REQUIRED_CRITERIA, SCHEMA_VERSION
 from hl_observer.core.causal_time import (
     CausalTimestamp,
     causal_timestamp_from_record,
@@ -48,12 +49,28 @@ def _lead_lag_config(root) -> None:
     path.write_text(
         json.dumps(
             {
+                "schema_version": SCHEMA_VERSION,
+                "strategy": "lead_lag_shadow",
+                "promotion_status": "PROMOTED",
+                "dataset_hash": "sha256:" + "1" * 64,
+                "pipeline_hash": "sha256:" + "2" * 64,
+                "freeze_ts": "2026-07-29T00:00:00+00:00",
+                "freeze_ts_ms": 1,
                 "coins": ["SOL"],
-                "coins_controle": [],
+                "control_coins": [],
+                "requested_horizons_ms": [1000.0],
+                "observable_horizons_ms": [1000.0],
+                "minimum_events": 30,
                 "seuil_choc_bps": 8.0,
-                "frais_slippage_bps": 6.0,
                 "edge_net_par_horizon_bps": {"1000": 80.0},
-                "freq_evenements_par_jour": 2.0,
+                "sample_n_by_horizon": {"1000": 30},
+                "costs": {
+                    "round_trip_bps": 6.0,
+                    "executable": True,
+                },
+                "frequency": {"events_per_day": 2.0},
+                "criteria": {name: True for name in REQUIRED_CRITERIA},
+                "global_trials": {"count": 1},
             }
         ),
         encoding="utf-8",

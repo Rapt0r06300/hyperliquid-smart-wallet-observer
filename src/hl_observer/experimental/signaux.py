@@ -13,6 +13,10 @@ from pathlib import Path
 from typing import Any
 
 from hl_observer.arbitrage.cross_venue_contract import select_executable_direction
+from hl_observer.backtesting.lead_lag_evidence import (
+    FrozenLeadLagEvidenceError,
+    load_frozen_evidence,
+)
 from hl_observer.core.causal_time import current_record_age_ms
 from hl_observer.experimental.moteur_paper import LIMITES, Signal
 from hl_observer.experimental.roi_estimateur import roi_depuis_signal
@@ -359,15 +363,19 @@ def signaux_lead_lag(
     now = float(now_ms if now_ms is not None else time.time() * 1000)
     refus: list[dict] = []
     try:
-        cfg = json.loads((root / CONFIG_GELE_RELPATH).read_text(encoding="utf-8"))
-        coins = {c.upper() for c in cfg.get("coins", [])} - {c.upper() for c in cfg.get("coins_controle", [])}
-        seuil = float(cfg.get("seuil_choc_bps", 8.0))
-        frais = float(cfg.get("frais_slippage_bps", 6.0))
-        edge_par_h = {float(k): v for k, v in (cfg.get("edge_net_par_horizon_bps") or {}).items()}
-    except (OSError, ValueError):
-        return [], [{"moteur": "lead_lag", "motif": "CONFIG_NON_GELEE"}]
-    if not coins or not edge_par_h:
-        return [], [{"moteur": "lead_lag", "motif": "CONFIG_INCOMPLETE"}]
+        cfg = load_frozen_evidence(root / CONFIG_GELE_RELPATH)
+    except FrozenLeadLagEvidenceError as exc:
+        motif = "CONFIG_NON_GELEE" if exc.code == "CONFIG_NOT_FOUND" else "CONFIG_INCOMPLETE"
+        return [], [{"moteur": "lead_lag", "motif": motif, "detail": exc.code}]
+    coins = {c.upper() for c in cfg["coins"]} - {
+        c.upper() for c in cfg["control_coins"]
+    }
+    seuil = float(cfg["seuil_choc_bps"])
+    frais = float(cfg["costs"]["round_trip_bps"])
+    edge_par_h = {
+        float(horizon): float(edge)
+        for horizon, edge in cfg["edge_net_par_horizon_bps"].items()
+    }
     meilleur_h = max(edge_par_h, key=lambda h: edge_par_h[h] or -1e9)
     if (edge_par_h.get(meilleur_h) or 0) <= 0:
         return [], [{"moteur": "lead_lag", "motif": "AUCUN_HORIZON_POSITIF"}]
@@ -418,7 +426,7 @@ def signaux_lead_lag(
                 }
             )
     sigs: list[Signal] = []
-    freq_jour = cfg.get("freq_evenements_par_jour")  # fréquence MESURÉE causalement (ou None)
+    freq_jour = cfg["frequency"].get("events_per_day")
     for c in sorted(coins):
         coin_trades = trades.get(c) or []
         if not coin_trades:

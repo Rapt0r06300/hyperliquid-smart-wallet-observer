@@ -215,6 +215,26 @@ def build_stage_plan(
             timeout_seconds=timeout_seconds,
         ),
         AnalysisStage(
+            "lead_lag_shadow",
+            "Preuve lead-lag gelee",
+            (
+                "Mesure causalement les frontieres temporelles, couts, placebos, "
+                "controles et robustesse avant toute consommation runtime."
+            ),
+            (
+                py,
+                "-m",
+                "hl_observer.ops.lead_lag_evidence",
+                "--root",
+                str(root),
+                "--output",
+                str(output_dir / "lead_lag_shadow.json"),
+                "--freeze",
+            ),
+            required_paths=(root / "runtime" / "data" / "bbo_tape.jsonl",),
+            timeout_seconds=timeout_seconds,
+        ),
+        AnalysisStage(
             "ab_exact",
             "Replay A/B exact",
             "Compare le bras de reference et les flags candidats sur les marks reels locaux.",
