@@ -31,6 +31,7 @@ from hl_observer.backtesting.lead_lag_evidence import (
     REQUIRED_CRITERIA,
     SCHEMA_VERSION,
     SUPPORTED_HORIZONS_MS,
+    estimate_alpha_half_life_ms,
 )
 from hl_observer.backtesting.quant_methods import block_bootstrap
 from hl_observer.backtesting.robustesse_selection import pbo_cscv
@@ -449,6 +450,26 @@ def geler_config(
         dsr[key] = dict(_horizon_value(dsr_rows, horizon, {}) or {})
 
     pbo = dict(result.get("pbo") or {})
+    estimated_half_life_ms = estimate_alpha_half_life_ms(
+        {float(horizon): edge for horizon, edge in edges.items()}
+    )
+    alpha_half_life_p95_ms = _optional_finite_positive(
+        result.get("alpha_half_life_p95_ms")
+    )
+    end_to_end_latency_p95_ms = _optional_finite_non_negative(
+        result.get("end_to_end_latency_p95_ms")
+    )
+    latency_safety_margin_ms = _optional_finite_non_negative(
+        result.get("latency_safety_margin_ms")
+    )
+    if latency_safety_margin_ms is None:
+        latency_safety_margin_ms = 25.0
+    latency_budget_passed = (
+        alpha_half_life_p95_ms is not None
+        and end_to_end_latency_p95_ms is not None
+        and alpha_half_life_p95_ms
+        > end_to_end_latency_p95_ms + latency_safety_margin_ms
+    )
     criteria = {
         "minimum_sample": bool(observable)
         and all(samples.get(str(int(h)), 0) >= minimum_events for h in observable),
@@ -481,6 +502,7 @@ def geler_config(
         "pbo_acceptable": pbo.get("pbo") is not None and float(pbo["pbo"]) <= 0.5,
         "dsr_acceptable": bool(observable)
         and all(dsr.get(str(int(h)), {}).get("survit") is True for h in observable),
+        "latency_budget_passed": latency_budget_passed,
     }
     promotion_status = (
         "PROMOTED"
@@ -520,6 +542,20 @@ def geler_config(
             "model": "real_hl_bid_ask_plus_configured_fees_and_slippage",
             "executable": criteria["costs_executable"],
         },
+        "latency_budget": {
+            "estimated_alpha_half_life_ms": estimated_half_life_ms,
+            "alpha_half_life_p95_ms": alpha_half_life_p95_ms,
+            "end_to_end_latency_p95_ms": end_to_end_latency_p95_ms,
+            "safety_margin_ms": latency_safety_margin_ms,
+            "remaining_budget_ms": (
+                alpha_half_life_p95_ms
+                - end_to_end_latency_p95_ms
+                - latency_safety_margin_ms
+                if latency_budget_passed
+                else None
+            ),
+            "status": "PASS" if latency_budget_passed else "UNMEASURABLE_OR_TOO_SLOW",
+        },
         "frequency": {
             "events_per_day": result.get("frequence_evenements_par_jour"),
         },
@@ -543,6 +579,23 @@ def geler_config(
 
     os.replace(temporary, output)
     return config
+
+
+def _optional_finite_positive(value: Any) -> float | None:
+    parsed = _optional_finite_non_negative(value)
+    if parsed is None or parsed <= 0:
+        return None
+    return parsed
+
+
+def _optional_finite_non_negative(value: Any) -> float | None:
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError):
+        return None
+    if not math.isfinite(parsed) or parsed < 0:
+        return None
+    return parsed
 
 
 __all__ = ["SEUIL_CHOC_BPS", "FRAIS_SLIPPAGE_BPS", "HORIZONS_MS", "charger_tape",

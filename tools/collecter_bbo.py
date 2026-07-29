@@ -173,6 +173,21 @@ def parser_aggtrade_binance(msg: Any) -> dict | None:
             "side": "SELL" if d.get("m") else "BUY", "ts_ex": float(d.get("T") or 0.0)}
 
 
+def dispatch_lead_lag_trade(
+    runtime: Any,
+    trade_event: dict[str, Any],
+    hl_quote: dict[str, Any] | None,
+    *,
+    now_ms: int,
+) -> Any:
+    """Dispatch inline; a diagnostic failure must never stop market capture."""
+
+    try:
+        return runtime.on_trade(trade_event, hl_quote, now_ms=now_ms)
+    except Exception:
+        return None
+
+
 class MagasinBBO:
     """Dernier BBO de chaque venue par coin, horodaté sur l'horloge MONOTONE de réception. Ne produit
     un snapshot SYNCHRONISÉ que si les DEUX venues sont FRAÎCHES (âge monotone < AGE_MAX) et proches."""
@@ -321,7 +336,9 @@ def sceller_shard(root: Path, *, seuil_octets: int = SHARD_OCTETS, max_shards: i
 
 async def _boucle(root: Path, coins: list[str]) -> None:  # pragma: no cover (I/O réseau)
     import asyncio
+
     import websockets
+
     from hl_observer.collection.tick_dataset import TickDatasetWriter, TickEnvelope
     from hl_observer.normalization.market_events import (
         CanonicalEventWriter,
@@ -334,7 +351,10 @@ async def _boucle(root: Path, coins: list[str]) -> None:  # pragma: no cover (I/
         FeedQualityGate,
         stable_event_id,
     )
+    from hl_observer.runtime.lead_lag_event_runtime import LeadLagEventPaperRuntime
+
     mag = MagasinBBO()
+    lead_lag_runtime = LeadLagEventPaperRuntime(root)
     sym = {c: symbole_binance(c) for c in coins if symbole_binance(c)}
     coins_set = set(coins)   # LIQUIDATION_LIVE_COVERAGE : le HL bbo est écrit pour TOUS les coins (memes/HL-only
     #                          inclus) ; la jambe Binance (sym) ne couvre que les coins réellement listés là-bas.
@@ -781,18 +801,31 @@ async def _boucle(root: Path, coins: list[str]) -> None:  # pragma: no cover (I/
                             stats["frames_trades"] += 1
                             coin_name = inv[t["symbol"]]
                             sequence = next_sequence("binance_trade", coin_name)
-                            tape.append({"venue": "BIN_TRADE", "coin": inv[t["symbol"]], "recu_ns": r,
-                                         "px": t["px"], "sz": t["sz"], "side": t["side"],
-                                         "ts_wall_ms": recv_wall_ms,
-                                         "recv_wall_ts_ms": recv_wall_ms,
-                                         "connection_id": connection_id,
-                                         "sequence": sequence,
-                                         "event_id": "bin-trade:%s:%s:%s" % (
-                                             t["symbol"],
-                                             t.get("ts_ex") or recv_wall_ms,
-                                             sequence,
-                                         ),
-                                         "ts_ex": t["ts_ex"]})
+                            trade_event = {
+                                "venue": "BIN_TRADE",
+                                "coin": coin_name,
+                                "recu_ns": r,
+                                "px": t["px"],
+                                "sz": t["sz"],
+                                "side": t["side"],
+                                "ts_wall_ms": recv_wall_ms,
+                                "recv_wall_ts_ms": recv_wall_ms,
+                                "connection_id": connection_id,
+                                "sequence": sequence,
+                                "event_id": "bin-trade:%s:%s:%s" % (
+                                    t["symbol"],
+                                    t.get("ts_ex") or recv_wall_ms,
+                                    sequence,
+                                ),
+                                "ts_ex": t["ts_ex"],
+                            }
+                            tape.append(trade_event)
+                            dispatch_lead_lag_trade(
+                                lead_lag_runtime,
+                                trade_event,
+                                mag.hl.get(coin_name),
+                                now_ms=recv_wall_ms,
+                            )
             except Exception:  # noqa: BLE001
                 stats["reconnexions_bin"] += 1
                 await asyncio.sleep(1.0)
@@ -952,7 +985,7 @@ def resume(root: str | Path = ".") -> dict[str, Any]:
 
 
 __all__ = ["symbole_binance", "parser_bbo_hl", "parser_l2_hl", "parser_trades_hl",
-           "parser_bookticker_binance", "parser_aggtrade_binance",
+           "parser_bookticker_binance", "parser_aggtrade_binance", "dispatch_lead_lag_trade",
            "MagasinBBO", "mesurer_lead_lag", "sceller_shard", "resume",
            "AGE_MAX_MS", "FENETRE_SYNCHRO_MS", "GAP_MS", "SHARD_OCTETS", "MAX_SHARDS",
            "SORTIE", "FEED_QUALITY", "TICK_DATASET_DIR", "TICK_QUEUE_MAX"]

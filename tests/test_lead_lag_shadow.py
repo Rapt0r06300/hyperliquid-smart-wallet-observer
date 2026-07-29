@@ -108,6 +108,9 @@ def test_geler_config_promotes_only_complete_robust_evidence(tmp_path):
         "dsr_par_horizon": {1000.0: {"survit": True}},
         "pbo": {"pbo": 0.25, "verdict": "ROBUSTE"},
         "frequence_evenements_par_jour": 4.0,
+        "alpha_half_life_p95_ms": 2_000.0,
+        "end_to_end_latency_p95_ms": 100.0,
+        "latency_safety_margin_ms": 25.0,
         "information_coefficient": {"value": None, "status": "UNMEASURABLE"},
         "regimes": {"stable_horizons_ms": [1000.0]},
     }
@@ -122,6 +125,7 @@ def test_geler_config_promotes_only_complete_robust_evidence(tmp_path):
     normalized = validate_frozen_evidence(cfg)
     assert normalized["edge_net_par_horizon_bps"][1000.0] == 12.0
     assert normalized["sample_n_by_horizon"][1000.0] == 40
+    assert normalized["latency_budget"]["remaining_budget_ms"] == 1_875.0
 
 
 def test_clock_boundary_trials_are_global_and_idempotent(tmp_path):
@@ -194,6 +198,9 @@ def test_exact_frozen_producer_contract_is_consumed_by_runtime(tmp_path):
         "dsr_par_horizon": {1000.0: {"survit": True}},
         "pbo": {"pbo": 0.25},
         "frequence_evenements_par_jour": 4.0,
+        "alpha_half_life_p95_ms": 2_000.0,
+        "end_to_end_latency_p95_ms": 100.0,
+        "latency_safety_margin_ms": 25.0,
     }
     geler_config(
         tmp_path,

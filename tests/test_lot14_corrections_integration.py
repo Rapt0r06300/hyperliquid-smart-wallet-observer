@@ -50,6 +50,11 @@ def _fixture_lead_lag(root: Path, *, trade_ms: float = NOW - 500, edge_h_bps: fl
         "edge_net_par_horizon_bps": {"1000": edge_h_bps},
         "sample_n_by_horizon": {"1000": 30},
         "costs": {"round_trip_bps": 6.0, "executable": True},
+        "latency_budget": {
+            "alpha_half_life_p95_ms": 2000.0,
+            "end_to_end_latency_p95_ms": 100.0,
+            "safety_margin_ms": 25.0,
+        },
         "frequency": {"events_per_day": 5.0},
         "criteria": {name: True for name in REQUIRED_CRITERIA},
         "global_trials": {"count": 1},

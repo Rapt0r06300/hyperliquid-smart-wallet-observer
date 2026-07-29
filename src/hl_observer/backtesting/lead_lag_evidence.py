@@ -25,6 +25,7 @@ REQUIRED_CRITERIA = (
     "bootstrap_positive",
     "pbo_acceptable",
     "dsr_acceptable",
+    "latency_budget_passed",
 )
 
 
@@ -56,6 +57,37 @@ def _sha256_identity(value: Any, field: str) -> str:
     except ValueError as exc:
         raise FrozenLeadLagEvidenceError("INVALID_HASH", field) from exc
     return identity
+
+
+def estimate_alpha_half_life_ms(edges_by_horizon: Mapping[float, float]) -> float | None:
+    """Estimate the first measured 50% edge-decay crossing.
+
+    The function interpolates only between observed horizons.  It deliberately
+    refuses to extrapolate when the recorded edge never crosses half of its
+    earliest value.
+    """
+
+    points = sorted(
+        (
+            _finite_number(horizon),
+            _finite_number(edge),
+        )
+        for horizon, edge in edges_by_horizon.items()
+    )
+    if not points or points[0][1] <= 0:
+        return None
+    half_edge = points[0][1] / 2.0
+    previous_horizon, previous_edge = points[0]
+    if previous_edge <= half_edge:
+        return previous_horizon
+    for horizon, edge in points[1:]:
+        if edge <= half_edge:
+            if edge == previous_edge:
+                return horizon
+            ratio = (previous_edge - half_edge) / (previous_edge - edge)
+            return previous_horizon + ratio * (horizon - previous_horizon)
+        previous_horizon, previous_edge = horizon, edge
+    return None
 
 
 def validate_frozen_evidence(payload: Mapping[str, Any]) -> dict[str, Any]:
@@ -129,6 +161,20 @@ def validate_frozen_evidence(payload: Mapping[str, Any]) -> dict[str, Any]:
     if total_cost_bps < 0:
         raise FrozenLeadLagEvidenceError("NEGATIVE_COST_MODEL")
 
+    latency_budget = payload.get("latency_budget")
+    if not isinstance(latency_budget, Mapping):
+        raise FrozenLeadLagEvidenceError("MISSING_LATENCY_BUDGET")
+    half_life_ms = _finite_number(latency_budget.get("alpha_half_life_p95_ms"))
+    end_to_end_latency_ms = _finite_number(
+        latency_budget.get("end_to_end_latency_p95_ms")
+    )
+    safety_margin_ms = _finite_number(latency_budget.get("safety_margin_ms"))
+    if half_life_ms <= 0 or end_to_end_latency_ms < 0 or safety_margin_ms < 0:
+        raise FrozenLeadLagEvidenceError("INVALID_LATENCY_BUDGET")
+    remaining_budget_ms = half_life_ms - end_to_end_latency_ms - safety_margin_ms
+    if remaining_budget_ms <= 0:
+        raise FrozenLeadLagEvidenceError("ALPHA_HALF_LIFE_BELOW_RUNTIME_LATENCY")
+
     frequency = payload.get("frequency")
     if not isinstance(frequency, Mapping):
         raise FrozenLeadLagEvidenceError("MISSING_FREQUENCY")
@@ -152,6 +198,13 @@ def validate_frozen_evidence(payload: Mapping[str, Any]) -> dict[str, Any]:
     normalized["edge_net_par_horizon_bps"] = edges
     normalized["sample_n_by_horizon"] = samples
     normalized["costs"] = dict(costs)
+    normalized["latency_budget"] = {
+        **dict(latency_budget),
+        "alpha_half_life_p95_ms": half_life_ms,
+        "end_to_end_latency_p95_ms": end_to_end_latency_ms,
+        "safety_margin_ms": safety_margin_ms,
+        "remaining_budget_ms": remaining_budget_ms,
+    }
     normalized["frequency"] = {**dict(frequency), "events_per_day": events_per_day}
     return normalized
 
@@ -173,6 +226,7 @@ __all__ = [
     "REQUIRED_CRITERIA",
     "SCHEMA_VERSION",
     "SUPPORTED_HORIZONS_MS",
+    "estimate_alpha_half_life_ms",
     "load_frozen_evidence",
     "validate_frozen_evidence",
 ]

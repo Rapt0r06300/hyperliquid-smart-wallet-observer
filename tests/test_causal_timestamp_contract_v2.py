@@ -68,6 +68,11 @@ def _lead_lag_config(root) -> None:
                     "round_trip_bps": 6.0,
                     "executable": True,
                 },
+                "latency_budget": {
+                    "alpha_half_life_p95_ms": 2000.0,
+                    "end_to_end_latency_p95_ms": 100.0,
+                    "safety_margin_ms": 25.0,
+                },
                 "frequency": {"events_per_day": 2.0},
                 "criteria": {name: True for name in REQUIRED_CRITERIA},
                 "global_trials": {"count": 1},
