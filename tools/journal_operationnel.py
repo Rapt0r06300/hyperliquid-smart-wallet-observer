@@ -14,8 +14,10 @@ LEDGER_MISMATCH, PNL_UNTRUSTED.
 from __future__ import annotations
 
 import json
+import hashlib
 import os
 import time
+import uuid
 from pathlib import Path
 
 TYPES = (
@@ -53,7 +55,13 @@ class JournalOperationnel:
         try:
             if self.chemin.exists() and self.chemin.stat().st_size > self.max_octets:
                 self.archive.mkdir(parents=True, exist_ok=True)
-                os.replace(self.chemin, self.archive / ("operational_%d.jsonl" % int(time.time())))
+                os.replace(
+                    self.chemin,
+                    self.archive / (
+                        "operational_%d_%s.jsonl"
+                        % (time.time_ns(), uuid.uuid4().hex[:12])
+                    ),
+                )
         except OSError:
             pass
 
@@ -62,12 +70,15 @@ class JournalOperationnel:
         t = str(type_).upper()
         if t not in TYPES:
             raise ValueError("type d'incident inconnu: %s" % type_)
-        evt = {"ts_ms": float(ts_ms if ts_ms is not None else time.time() * 1000.0), "type": t,
+        evt = {"event_id": uuid.uuid4().hex,
+               "ts_ms": float(ts_ms if ts_ms is not None else time.time() * 1000.0), "type": t,
                "source": source, "coin": coin, "detail": (str(detail)[:300] if detail is not None else None),
                "bloquant": t in BLOQUANTS, "stress": STRESS_REPLAY.get(t), **extra}
         self._rotation_si_besoin()
         with self.chemin.open("a", encoding="utf-8") as f:
             f.write(json.dumps(evt, ensure_ascii=False) + "\n")
+            f.flush()
+            os.fsync(f.fileno())
         return evt
 
     def _lire(self, max_lignes: int = MAX_LIGNES_LUES) -> list:
@@ -87,10 +98,59 @@ class JournalOperationnel:
                     del out[0]
         return out
 
+    def _lire_tous(self, max_lignes: int = MAX_LIGNES_LUES) -> list:
+        """Read active and archived journals with stable deduplication."""
+        chemins = []
+        if self.archive.exists():
+            chemins.extend(sorted(self.archive.glob("operational_*.jsonl")))
+        if self.chemin.exists():
+            chemins.append(self.chemin)
+        out, seen = [], set()
+        corruptions = 0
+        for chemin in chemins:
+            with chemin.open("r", encoding="utf-8", errors="strict") as handle:
+                for raw_line in handle:
+                    line = raw_line.strip()
+                    if not line:
+                        continue
+                    try:
+                        event = json.loads(line)
+                    except ValueError:
+                        corruptions += 1
+                        continue
+                    event_id = str(
+                        event.get("event_id")
+                        or hashlib.sha256(raw_line.encode("utf-8")).hexdigest()
+                    )
+                    if event_id in seen:
+                        continue
+                    seen.add(event_id)
+                    event["event_id"] = event_id
+                    out.append(event)
+        out.sort(
+            key=lambda event: (
+                float(event.get("ts_ms") or 0),
+                str(event["event_id"]),
+            )
+        )
+        if len(out) > max_lignes:
+            out = out[-max_lignes:]
+        if corruptions:
+            out.append({
+                "event_id": f"journal-corruption-{corruptions}",
+                "ts_ms": time.time() * 1000.0,
+                "type": "PNL_UNTRUSTED",
+                "source": "operational_journal",
+                "detail": f"{corruptions} corrupted JSONL line(s)",
+                "bloquant": True,
+                "stress": "pnl_non_fiable",
+            })
+        return out
+
     def resume(self, *, depuis_ms: float | None = None) -> dict:
         """Compte par type + drapeau bloquant. Sert au dashboard et au rapport final."""
         par_type, n_bloquants = {}, 0
-        for e in self._lire():
+        for e in self._lire_tous():
             if depuis_ms is not None and float(e.get("ts_ms") or 0) < float(depuis_ms):
                 continue
             t = e.get("type", "?")
@@ -105,7 +165,7 @@ class JournalOperationnel:
         observée. Une stratégie devra survivre à CE qui est déjà arrivé, pas à un monde idéal."""
         compte = {}
         total = 0
-        for e in self._lire():
+        for e in self._lire_tous():
             if depuis_ms is not None and float(e.get("ts_ms") or 0) < float(depuis_ms):
                 continue
             s = e.get("stress") or STRESS_REPLAY.get(e.get("type", ""), None)

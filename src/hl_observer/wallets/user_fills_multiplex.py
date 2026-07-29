@@ -16,17 +16,25 @@ de cle, de depot. Plafond dur anti-ban: on ne depasse JAMAIS ``MAX_CONNECTIONS_H
 from __future__ import annotations
 
 import asyncio
+import time
+import uuid
 from collections.abc import Iterable
 from dataclasses import dataclass, field
 from typing import Any
 
 from hl_observer.collection.collector import WALLET_RE
 from hl_observer.config.settings import Settings
+from hl_observer.realtime.global_ws_budget import (
+    GlobalWsBudget,
+    WS_MAX_CONNECTIONS,
+    WS_MAX_UNIQUE_USERS,
+)
 from hl_observer.wallets.user_fills_live import StreamStats, stream_user_fills_ws
 from hl_observer.ops.echec_silencieux import noter as _noter_echec
 
-HL_MAX_WALLETS_PER_CONNECTION = 10       # limite dure Hyperliquid (userFills)
-MAX_CONNECTIONS_HARD = 8                  # plafond anti-ban : 8*10 = 80 leaders temps reel
+HL_MAX_WALLETS_PER_CONNECTION = 10
+HL_MAX_UNIQUE_USERS_GLOBAL = WS_MAX_UNIQUE_USERS
+MAX_CONNECTIONS_HARD = WS_MAX_CONNECTIONS
 
 
 @dataclass(slots=True)
@@ -55,7 +63,9 @@ def plan_multiplex_chunks(
     (lui-meme borne par ``MAX_CONNECTIONS_HARD``). Deterministe, pur."""
     wpc = max(1, min(int(wallets_per_connection), HL_MAX_WALLETS_PER_CONNECTION))
     conns = max(1, min(int(max_connections), MAX_CONNECTIONS_HARD))
-    limit = wpc * conns
+    # Hyperliquid caps unique user-specific subscriptions globally, not once
+    # per connection. Extra leaders must use the bounded REST rotation.
+    limit = min(wpc * conns, HL_MAX_UNIQUE_USERS_GLOBAL)
     seen: set[str] = set()
     clean: list[str] = []
     for raw in wallets:
@@ -87,6 +97,7 @@ async def stream_user_fills_multiplex(
     sleep: Any | None = None,
     connect_timeout_s: float = 15.0,
     recv_timeout_s: float = 30.0,
+    global_budget: GlobalWsBudget | None = None,
 ) -> MultiplexStats:
     """Ouvre jusqu'a ``max_connections`` streams userFills persistants EN PARALLELE
     (chacun <=10 leaders) et agrege leurs stats. Chaque stream stocke ses fills frais
@@ -103,8 +114,36 @@ async def stream_user_fills_multiplex(
         stats.stopped_reason = "SOURCE_UNAVAILABLE"
         stats.warnings.append("No complete wallet addresses for multiplex userFills firehose.")
         return stats
-    stats.connections = len(chunks)
-    stats.wallets_covered = sum(len(chunk) for chunk in chunks)
+    budget = global_budget or GlobalWsBudget(
+        settings.logs_dir.resolve().parent / "runtime" / "ws" / "global_budget.json"
+    )
+    reserved: list[tuple[str, list[str]]] = []
+    reserved_at = int(time.time() * 1000)
+    for chunk in chunks:
+        connection_id = f"userfills-{uuid.uuid4().hex}"
+        decision = budget.reserve_connection(
+            connection_id=connection_id,
+            users=chunk,
+            subscriptions=len(chunk),
+            now_ms=reserved_at,
+        )
+        if not decision.allowed:
+            stats.warnings.extend(decision.reasons)
+            continue
+        message_decision = budget.reserve_messages(
+            len(chunk),
+            now_ms=reserved_at,
+        )
+        if not message_decision.allowed:
+            budget.release(connection_id, now_ms=reserved_at)
+            stats.warnings.extend(message_decision.reasons)
+            continue
+        reserved.append((connection_id, chunk))
+    if not reserved:
+        stats.stopped_reason = "RATE_LIMIT_GUARD"
+        return stats
+    stats.connections = len(reserved)
+    stats.wallets_covered = sum(len(chunk) for _, chunk in reserved)
 
     async def _one(chunk: list[str]) -> StreamStats:
         return await stream_user_fills_ws(
@@ -122,7 +161,15 @@ async def stream_user_fills_multiplex(
             recv_timeout_s=recv_timeout_s,
         )
 
-    results = await asyncio.gather(*[_one(chunk) for chunk in chunks], return_exceptions=True)
+    try:
+        results = await asyncio.gather(
+            *[_one(chunk) for _, chunk in reserved],
+            return_exceptions=True,
+        )
+    finally:
+        released_at = int(time.time() * 1000)
+        for connection_id, _ in reserved:
+            budget.release(connection_id, now_ms=released_at)
     reasons: set[str] = set()
     for res in results:
         if isinstance(res, BaseException):
@@ -189,15 +236,17 @@ def _run_cli(argv: list[str] | None = None) -> int:
     session_factory = _session_factory(settings)
     conns = max(1, min(int(args.max_connections), MAX_CONNECTIONS_HARD))
     wpc = max(1, min(int(args.wallets_per_connection), HL_MAX_WALLETS_PER_CONNECTION))
-    pool = conns * wpc
+    pool = min(conns * wpc, HL_MAX_UNIQUE_USERS_GLOBAL)
     with session_factory() as session:
         rows = session.scalars(
             _select(_TopWallet).order_by(_TopWallet.score.desc()).limit(max(pool, 50))
         ).all()
         try:
             rows = _apply_leader_quality_gate(session, rows, limit=pool)
-        except Exception:
+        except Exception as exc:
             _noter_echec("hl_observer/wallets/user_fills_multiplex.py:199")
+            print(f"live_user_fills_multiplex=quality_gate_failed error={exc!r}")
+            return 2
         wallets = [r.wallet_address for r in rows[:pool] if getattr(r, "wallet_address", None)]
     if not wallets:
         print("live_user_fills_multiplex=no_leaders_available")
@@ -233,6 +282,7 @@ def _run_cli(argv: list[str] | None = None) -> int:
 
 __all__ = [
     "HL_MAX_WALLETS_PER_CONNECTION",
+    "HL_MAX_UNIQUE_USERS_GLOBAL",
     "MAX_CONNECTIONS_HARD",
     "MultiplexStats",
     "plan_multiplex_chunks",

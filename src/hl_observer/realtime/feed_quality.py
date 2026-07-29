@@ -24,6 +24,8 @@ from dataclasses import asdict, dataclass
 from enum import Enum
 from typing import Any, Iterable, Mapping, Sequence
 
+from hl_observer.realtime.event_identity import canonicalize_frame
+
 
 class FeedMode(str, Enum):
     FULL_SNAPSHOT = "FULL_SNAPSHOT"
@@ -82,7 +84,14 @@ class FeedQualitySnapshot:
     heartbeat_age_ms: float | None
     latency_p50_ms: float | None
     latency_p95_ms: float | None
+    latency_p99_ms: float | None
     jitter_p95_ms: float | None
+    jitter_ema_ms: float | None
+    gap_duration_ms: float
+    stale_rate: float | None
+    duplicate_rate: float | None
+    out_of_order_rate: float | None
+    reconnect_rate: float | None
     coherent_events: int
     total_events: int
     accepted_events: int
@@ -96,6 +105,7 @@ class FeedQualitySnapshot:
     crossed_books: int
     outliers: int
     reconnects: int
+    snapshot_conflicts: int
     unresolved_gap: bool
     reason_counts: Mapping[str, int]
 
@@ -189,6 +199,9 @@ class FeedQualityGate:
         self._latencies: deque[float] = deque(maxlen=self.config.sample_window)
         self._intervals: deque[float] = deque(maxlen=self.config.sample_window)
         self._jitters: deque[float] = deque(maxlen=self.config.sample_window)
+        self._gap_durations: deque[float] = deque(maxlen=self.config.sample_window)
+        self._jitter_ema: float | None = None
+        self._last_latency_ms: float | None = None
         self._seen_ids: set[str] = set()
         self._seen_order: deque[str] = deque()
         self._reason_counts: Counter[str] = Counter()
@@ -206,6 +219,7 @@ class FeedQualityGate:
         self.crossed_books = 0
         self.outliers = 0
         self.reconnects = 0
+        self.snapshot_conflicts = 0
 
     @property
     def bids(self) -> dict[float, float]:
@@ -385,6 +399,73 @@ class FeedQualityGate:
         self._last_reasons = tuple(dict.fromkeys(reasons))
         return self.snapshot(now_ms=received_ts_ms)
 
+    def ingest_event_batch(
+        self,
+        *,
+        payloads: Iterable[Mapping[str, Any]],
+        received_ts_ms: int,
+        frame_sequence: int | None = None,
+        is_snapshot: bool = False,
+    ) -> list[FeedQualitySnapshot]:
+        """Ingest all items from one transport frame without false sequence gaps.
+
+        A frame sequence is applied once, to the first item only.  Snapshot
+        batches establish a baseline but do not pretend that the remaining
+        items in that same frame are post-snapshot incrementals.
+        """
+
+        events = canonicalize_frame(
+            payloads,
+            source=self.source_id,
+            channel=self.channel,
+            received_at_ms=received_ts_ms,
+            frame_sequence=frame_sequence,
+        )
+        snapshots: list[FeedQualitySnapshot] = []
+        if is_snapshot:
+            self.snapshots += 1
+            self._snapshot_seen = True
+            self._incremental_seen = False
+            self._unresolved_gap = False
+            self._coherent_events = 0
+        for index, event in enumerate(events):
+            exchange_ts = (
+                event.exchange_ts_ms
+                if event.exchange_ts_ms is not None
+                else int(received_ts_ms)
+            )
+            reasons = self._start_observation(
+                exchange_ts_ms=exchange_ts,
+                received_ts_ms=received_ts_ms,
+                event_id=event.stable_event_id,
+                sequence=frame_sequence if index == 0 else None,
+            )
+            if self._contains_hard_rejection(reasons):
+                snapshots.append(self._reject(reasons, received_ts_ms))
+                continue
+            self.accepted_events += 1
+            self._coherent_events += 1
+            self._last_reasons = tuple(dict.fromkeys(reasons))
+            snapshots.append(self.snapshot(now_ms=received_ts_ms))
+        if not is_snapshot and events:
+            self.incrementals += 1
+            self._incremental_seen = True
+        if self.mode is FeedMode.EVENT_STREAM:
+            self._synchronized = (
+                not self._unresolved_gap
+                and self._coherent_events >= self.config.min_coherent_events
+            )
+        else:
+            self._synchronized = (
+                self._snapshot_seen
+                and self._incremental_seen
+                and not self._unresolved_gap
+                and self._coherent_events >= self.config.min_coherent_events
+            )
+        if snapshots:
+            snapshots[-1] = self.snapshot(now_ms=received_ts_ms)
+        return snapshots
+
     def snapshot(self, *, now_ms: int) -> FeedQualitySnapshot:
         now = int(now_ms)
         latest_age = (
@@ -412,6 +493,12 @@ class FeedQualityGate:
             readiness_reasons.append("FEED_QUALITY_SCORE_TOO_LOW")
         reasons = tuple(dict.fromkeys((*self._last_reasons, *readiness_reasons)))
         ready = not readiness_reasons
+        denominator = self.total_events
+        ratio = (
+            (lambda numerator: numerator / denominator)
+            if denominator
+            else (lambda _numerator: None)
+        )
         return FeedQualitySnapshot(
             source_id=self.source_id,
             channel=self.channel,
@@ -429,7 +516,14 @@ class FeedQualityGate:
             heartbeat_age_ms=heartbeat_age,
             latency_p50_ms=_percentile(tuple(self._latencies), 0.50),
             latency_p95_ms=_percentile(tuple(self._latencies), 0.95),
+            latency_p99_ms=_percentile(tuple(self._latencies), 0.99),
             jitter_p95_ms=_percentile(tuple(self._jitters), 0.95),
+            jitter_ema_ms=self._jitter_ema,
+            gap_duration_ms=round(sum(self._gap_durations), 3),
+            stale_rate=ratio(self.stale_events),
+            duplicate_rate=ratio(self.duplicates),
+            out_of_order_rate=ratio(self.non_monotonic),
+            reconnect_rate=ratio(self.reconnects),
             coherent_events=self._coherent_events,
             total_events=self.total_events,
             accepted_events=self.accepted_events,
@@ -443,6 +537,7 @@ class FeedQualityGate:
             crossed_books=self.crossed_books,
             outliers=self.outliers,
             reconnects=self.reconnects,
+            snapshot_conflicts=self.snapshot_conflicts,
             unresolved_gap=self._unresolved_gap,
             reason_counts=dict(self._reason_counts),
         )
@@ -473,7 +568,17 @@ class FeedQualityGate:
             self.outliers += 1
             reasons.append("EXCHANGE_TIMESTAMP_IN_FUTURE")
         else:
-            self._latencies.append(max(0.0, float(latency)))
+            bounded_latency = max(0.0, float(latency))
+            self._latencies.append(bounded_latency)
+            if self._last_latency_ms is not None:
+                jitter = abs(bounded_latency - self._last_latency_ms)
+                self._jitters.append(jitter)
+                self._jitter_ema = (
+                    jitter
+                    if self._jitter_ema is None
+                    else 0.2 * jitter + 0.8 * self._jitter_ema
+                )
+            self._last_latency_ms = bounded_latency
         if latency > self.config.max_age_ms:
             self.stale_events += 1
             reasons.append("STALE_EVENT")
@@ -484,11 +589,10 @@ class FeedQualityGate:
                 self.non_monotonic += 1
                 reasons.append("NON_MONOTONIC_RECEIVE_TIMESTAMP")
             else:
-                if self._intervals:
-                    self._jitters.append(abs(interval - self._intervals[-1]))
                 self._intervals.append(interval)
                 if interval > self.config.max_gap_ms:
                     self.gaps += 1
+                    self._gap_durations.append(interval)
                     self._unresolved_gap = True
                     self._synchronized = False
                     self._coherent_events = 0

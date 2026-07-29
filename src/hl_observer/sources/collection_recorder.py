@@ -13,11 +13,14 @@ a recorder failure can NEVER break or alter the collection path.
 
 from __future__ import annotations
 
+import os
+
 from hl_observer.sources.models import (
     FetchProvenance,
     SourceDefinition,
     SourceHealthSnapshot,
     SourceKind,
+    SourceStatus,
 )
 from hl_observer.sources.registry import SourceRegistry
 from hl_observer.storage.raw_store import RawStore, make_raw_event
@@ -42,11 +45,89 @@ class CollectionRecorder:
         raw_store: RawStore | None = None,
         context: RunContext = RunContext.LIVE,
         stale_after_ms: int = 60_000,
+        run_id: str | None = None,
+        config_hash: str | None = None,
+        code_hash: str | None = None,
+        git_head: str | None = None,
     ) -> None:
         self.registry = registry or SourceRegistry(stale_after_ms=stale_after_ms)
         self.raw_store = raw_store or RawStore()
         self.context = context
+        self.run_id = str(run_id or f"{context.value.lower()}-{os.getpid()}")
+        self.config_hash = config_hash
+        self.code_hash = code_hash
+        self.git_head = git_head
         self._counter = 0
+        self.recorder_failures = 0
+        self.last_recorder_error: str | None = None
+
+    def _origin(self) -> str:
+        if self.context is RunContext.LIVE:
+            return "LIVE_REAL"
+        if self.context in (RunContext.BACKTEST, RunContext.REPLAY):
+            return "RECORDED_REAL"
+        if self.context is RunContext.TEST_FIXTURE:
+            return "TEST_FIXTURE"
+        return "UNKNOWN"
+
+    def _provenance(
+        self,
+        *,
+        source_id: str,
+        request_id: str,
+        timestamp: int,
+        ok: bool,
+        error: str | None,
+        item_count: int | None,
+    ) -> FetchProvenance:
+        return FetchProvenance(
+            source_id=source_id,
+            request_id=request_id,
+            fetched_at_ms=timestamp,
+            received_at_ms=timestamp,
+            written_at_ms=timestamp,
+            origin=self._origin(),
+            run_id=self.run_id,
+            config_hash=self.config_hash,
+            code_hash=self.code_hash,
+            git_head=self.git_head,
+            ok=bool(ok),
+            data_quality="OK" if ok else "BAD",
+            error=error,
+            item_count=item_count,
+        )
+
+    def _failure_health(
+        self,
+        *,
+        source_id: str,
+        timestamp: int,
+        exc: BaseException,
+    ) -> SourceHealthSnapshot:
+        self.recorder_failures += 1
+        self.last_recorder_error = f"{type(exc).__name__}: {exc}"
+        try:
+            self.registry.record_fetch(
+                self._provenance(
+                    source_id=source_id,
+                    request_id=f"{source_id}:{timestamp}:recorder-failure:{self.recorder_failures}",
+                    timestamp=timestamp,
+                    ok=False,
+                    error=f"RECORDER_FAILURE: {self.last_recorder_error}",
+                    item_count=None,
+                )
+            )
+            return self.registry.health(source_id, now_ms=timestamp)
+        except Exception:
+            return SourceHealthSnapshot(
+                source_id=source_id,
+                status=SourceStatus.DOWN,
+                last_fetch_ms=timestamp,
+                consecutive_errors=1,
+                samples=1,
+                last_error=self.last_recorder_error,
+                reasons=("RECORDER_FAILURE",),
+            )
 
     # ---- internals ----
     @staticmethod
@@ -97,12 +178,11 @@ class CollectionRecorder:
             self._counter += 1
             request_id = f"{sid}:{ts}:{self._counter}"
             item_count = _safe_len(response)
-            self.registry.record_fetch(FetchProvenance(
+            self.registry.record_fetch(self._provenance(
                 source_id=sid,
                 request_id=request_id,
-                fetched_at_ms=ts,
-                ok=bool(ok),
-                data_quality="OK" if ok else "BAD",
+                timestamp=ts,
+                ok=ok,
                 error=error,
                 item_count=item_count,
             ))
@@ -117,10 +197,19 @@ class CollectionRecorder:
                     context=self.context,
                     item_count=item_count,
                     request_id=request_id,
+                    origin=self._origin(),
+                    received_at_ms=ts,
+                    written_at_ms=ts,
+                    run_id=self.run_id,
+                    config_hash=self.config_hash,
+                    code_hash=self.code_hash,
+                    git_head=self.git_head,
                 ))
             return self.registry.health(sid, now_ms=ts)
-        except Exception:
-            return None
+        except Exception as exc:
+            sid = self.source_id(request_type)
+            ts = int(now_ms if now_ms is not None else _now_ms())
+            return self._failure_health(source_id=sid, timestamp=ts, exc=exc)
 
     def record_ws(
         self,
@@ -138,12 +227,11 @@ class CollectionRecorder:
             self._counter += 1
             request_id = f"{sid}:{ts}:{self._counter}"
             item_count = _safe_len(message)
-            self.registry.record_fetch(FetchProvenance(
+            self.registry.record_fetch(self._provenance(
                 source_id=sid,
                 request_id=request_id,
-                fetched_at_ms=ts,
-                ok=bool(ok),
-                data_quality="OK" if ok else "BAD",
+                timestamp=ts,
+                ok=ok,
                 error=error,
                 item_count=item_count,
             ))
@@ -156,10 +244,19 @@ class CollectionRecorder:
                     context=self.context,
                     item_count=item_count,
                     request_id=request_id,
+                    origin=self._origin(),
+                    received_at_ms=ts,
+                    written_at_ms=ts,
+                    run_id=self.run_id,
+                    config_hash=self.config_hash,
+                    code_hash=self.code_hash,
+                    git_head=self.git_head,
                 ))
             return self.registry.health(sid, now_ms=ts)
-        except Exception:
-            return None
+        except Exception as exc:
+            sid = self.ws_source_id(channel)
+            ts = int(now_ms if now_ms is not None else _now_ms())
+            return self._failure_health(source_id=sid, timestamp=ts, exc=exc)
 
     # ---- read-only queries ----
     def health(self, request_type: str, *, now_ms: int | None = None) -> SourceHealthSnapshot:
@@ -187,6 +284,8 @@ class CollectionRecorder:
             "by_status": by_status,
             "usable": sum(1 for r in rows if r.usable),
             "raw_events_stored": self.raw_store.count(context=self.context),
+            "recorder_failures": self.recorder_failures,
+            "last_recorder_error": self.last_recorder_error,
         }
 
 

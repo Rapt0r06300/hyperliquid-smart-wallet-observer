@@ -14,7 +14,13 @@ from __future__ import annotations
 
 import json
 import os
+import time
+import uuid
 from pathlib import Path
+
+
+class DedupCorruptionError(RuntimeError):
+    pass
 
 FENETRE_DEFAUT = 200_000          # nombre max d'identités conservées (borne mémoire/disque 24/7)
 COMPACTION_TOUS_LES = 50_000      # au-delà de N ajouts journalisés -> compaction + archive
@@ -39,12 +45,16 @@ class DedupDurable:
 
     # ── persistance ──
     def _charger(self):
-        try:
-            for eid in json.loads(self.snapshot.read_text(encoding="utf-8")).get("ids", []):
+        if self.snapshot.exists():
+            try:
+                payload = json.loads(self.snapshot.read_text(encoding="utf-8"))
+            except (OSError, ValueError) as exc:
+                raise DedupCorruptionError(
+                    "dedup snapshot is unreadable; strict reuse is blocked"
+                ) from exc
+            for eid in payload.get("ids", []):
                 if eid not in self._vus:
                     self._vus.add(eid); self._ordre.append(eid)
-        except (OSError, ValueError):
-            pass
         if self.journal.exists():                       # rejeu du journal post-snapshot (reprise après crash)
             with self.journal.open("r", encoding="utf-8", errors="ignore") as f:
                 for ligne in f:
@@ -64,12 +74,23 @@ class DedupDurable:
     def compacter(self) -> dict:
         """Écrit un snapshot de l'état courant et ARCHIVE le journal (jamais supprimé), puis le vide."""
         tmp = self.snapshot.with_suffix(".json.tmp")
-        tmp.write_text(json.dumps({"ids": self._ordre[-self.fenetre:]}, ensure_ascii=False), encoding="utf-8")
+        with tmp.open("w", encoding="utf-8") as handle:
+            json.dump({"ids": self._ordre[-self.fenetre:]}, handle, ensure_ascii=False)
+            handle.flush()
+            os.fsync(handle.fileno())
         os.replace(tmp, self.snapshot)
         if self.journal.exists() and self.journal.stat().st_size > 0:
             self.archive.mkdir(parents=True, exist_ok=True)
-            os.replace(self.journal, self.archive / ("dedup_%d.jsonl" % len(self._ordre)))
-        self.journal.write_text("", encoding="utf-8")
+            os.replace(
+                self.journal,
+                self.archive / (
+                    "dedup_%d_%s.jsonl"
+                    % (time.time_ns(), uuid.uuid4().hex[:12])
+                ),
+            )
+        with self.journal.open("w", encoding="utf-8") as handle:
+            handle.flush()
+            os.fsync(handle.fileno())
         self._depuis_compaction = 0
         return {"n_ids": len(self._ordre), "snapshot": str(self.snapshot)}
 
@@ -82,6 +103,8 @@ class DedupDurable:
         self._vus.add(eid); self._ordre.append(eid)
         with self.journal.open("a", encoding="utf-8") as f:
             f.write(eid + "\n")
+            f.flush()
+            os.fsync(f.fileno())
         self._depuis_compaction += 1
         self._borner()
         if self._depuis_compaction >= self.compaction_tous_les:
@@ -110,4 +133,9 @@ class DedupDurable:
                 "depuis_compaction": self._depuis_compaction}
 
 
-__all__ = ["DedupDurable", "FENETRE_DEFAUT", "COMPACTION_TOUS_LES"]
+__all__ = [
+    "DedupCorruptionError",
+    "DedupDurable",
+    "FENETRE_DEFAUT",
+    "COMPACTION_TOUS_LES",
+]

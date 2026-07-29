@@ -11,6 +11,8 @@ from __future__ import annotations
 
 from typing import Any
 
+from hl_observer.realtime.event_identity import canonicalize_frame
+
 
 def positions_depuis_snapshot(snap: dict) -> dict[str, dict]:
     """{coin: {szi, entryPx}} depuis un snapshot vault (seed de l'état live)."""
@@ -62,8 +64,35 @@ def parser_message_userfills(msg: Any, *, vault: str = "") -> list[dict]:
     data = msg.get("data") if isinstance(msg, dict) else None
     fills = (data or {}).get("fills") if isinstance(data, dict) else None
     est_snapshot = bool((data or {}).get("isSnapshot")) if isinstance(data, dict) else False
+    sequence_raw = (
+        msg.get("sequence", msg.get("seq"))
+        if isinstance(msg, dict)
+        else None
+    )
+    if sequence_raw is None and isinstance(data, dict):
+        sequence_raw = data.get("sequence", data.get("seq"))
+    try:
+        frame_sequence = int(sequence_raw) if sequence_raw is not None else None
+    except (TypeError, ValueError):
+        frame_sequence = None
+    raw_fills = [item for item in (fills or []) if isinstance(item, dict)]
+    frame_events = canonicalize_frame(
+        raw_fills,
+        source="LIVE_WS",
+        channel="userFills",
+        received_at_ms=max(
+            (
+                int(item.get("time") or 0)
+                for item in raw_fills
+                if str(item.get("time") or "").isdigit()
+            ),
+            default=0,
+        ),
+        frame_sequence=frame_sequence,
+    )
     out: list[dict] = []
-    for f in (fills or []):
+    for frame_event in frame_events:
+        f = frame_event.payload
         try:
             coin = str(f["coin"]).upper()
             px = float(f["px"])
@@ -80,7 +109,10 @@ def parser_message_userfills(msg: Any, *, vault: str = "") -> list[dict]:
                  "signe": 1 if side == "B" else (-1 if side == "A" else 0),
                  "ts_ms": ts, "dir": str(f.get("dir") or ""), "hash": f.get("hash"),
                  "start_position": start_pos, "isSnapshot": est_snapshot,
-                 "source": "LIVE_WS"}                             # PROVENANCE : seuls les vrais fills WS sont tradables
+                 "source": "LIVE_WS",
+                 "frame_sequence": frame_event.frame_sequence,
+                 "event_index_in_frame": frame_event.event_index_in_frame,
+                 "stable_event_id": frame_event.stable_event_id}
         liq = f.get("liquidation")
         if liq:                                                   # non-null uniquement -> jamais de clé vide
             entry["liquidation"] = liq                            # {liquidatedUser, markPx, method} CONSERVÉ

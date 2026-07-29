@@ -1,18 +1,22 @@
 from __future__ import annotations
 
 import json
+import uuid
 from dataclasses import dataclass, field
 from hashlib import sha256
 from typing import Any
 
 from hl_observer.collection.backoff import BackoffPolicy, compute_backoff_delay
+from hl_observer.realtime.durable_dedup import DurableEventDedup
+from hl_observer.realtime.global_ws_budget import (
+    GlobalWsBudget,
+    WS_MAX_CONNECTIONS,
+    WS_MAX_MESSAGES_PER_MINUTE,
+    WS_MAX_NEW_CONNECTIONS_PER_MINUTE,
+    WS_MAX_SUBSCRIPTIONS,
+    WS_MAX_UNIQUE_USERS,
+)
 from hl_observer.sources.collection_recorder import CollectionRecorder
-
-
-WS_MAX_UNIQUE_USERS = 10
-WS_MAX_SUBSCRIPTIONS = 1000
-WS_MAX_MESSAGES_PER_MINUTE = 2000
-WS_MAX_NEW_CONNECTIONS_PER_MINUTE = 30
 
 
 @dataclass(frozen=True, slots=True)
@@ -41,6 +45,9 @@ class WsSupervisor:
     heartbeat_max_age_ms: int = 30_000
     backoff_policy: BackoffPolicy = field(default_factory=BackoffPolicy)
     recorder: CollectionRecorder | None = None
+    durable_dedup: DurableEventDedup | None = None
+    global_budget: GlobalWsBudget | None = None
+    connection_id: str = field(default_factory=lambda: f"ws-{uuid.uuid4().hex}")
     reconnect_attempt: int = 0
     last_heartbeat_ms: int | None = None
     accepted_events: int = 0
@@ -55,6 +62,7 @@ class WsSupervisor:
         *,
         messages_per_minute: int = 0,
         new_connections_per_minute: int = 1,
+        total_connections: int = 1,
     ) -> WsSubscriptionPlan:
         unique_wallets = tuple(dict.fromkeys(str(wallet).lower() for wallet in wallets if str(wallet).strip()))
         subscription_count = len(unique_wallets) + max(0, int(market_channels))
@@ -62,6 +70,8 @@ class WsSupervisor:
         warnings: list[str] = []
         if len(unique_wallets) > WS_MAX_UNIQUE_USERS:
             reasons.append("WS_UNIQUE_USER_CAP_EXCEEDED")
+        if total_connections > WS_MAX_CONNECTIONS:
+            reasons.append("WS_CONNECTION_CAP_EXCEEDED")
         if subscription_count > WS_MAX_SUBSCRIPTIONS:
             reasons.append("WS_SUBSCRIPTION_CAP_EXCEEDED")
         if messages_per_minute > WS_MAX_MESSAGES_PER_MINUTE:
@@ -81,6 +91,50 @@ class WsSupervisor:
             fallback_to_rest=bool(reasons),
         )
 
+    def reserve_subscriptions(
+        self,
+        wallets: list[str] | tuple[str, ...],
+        *,
+        market_channels: int = 0,
+        now_ms: int,
+    ) -> WsSubscriptionPlan:
+        """Reserve host-wide capacity before opening a connection."""
+
+        local = self.plan_subscriptions(
+            wallets,
+            market_channels,
+            messages_per_minute=0,
+            new_connections_per_minute=1,
+            total_connections=1,
+        )
+        if not local.allowed or self.global_budget is None:
+            return local
+        unique_wallets = tuple(
+            dict.fromkeys(
+                str(wallet).lower()
+                for wallet in wallets
+                if str(wallet).strip()
+            )
+        )
+        reservation = self.global_budget.reserve_connection(
+            connection_id=self.connection_id,
+            users=unique_wallets,
+            subscriptions=len(unique_wallets) + max(0, int(market_channels)),
+            now_ms=now_ms,
+        )
+        return WsSubscriptionPlan(
+            allowed=reservation.allowed,
+            unique_user_count=len(unique_wallets),
+            subscription_count=len(unique_wallets) + max(0, int(market_channels)),
+            refusal_reasons=reservation.reasons,
+            warnings=local.warnings,
+            fallback_to_rest=not reservation.allowed,
+        )
+
+    def release_subscriptions(self, *, now_ms: int) -> None:
+        if self.global_budget is not None:
+            self.global_budget.release(self.connection_id, now_ms=now_ms)
+
     def accept_message(self, message: dict[str, Any], *, received_at_ms: int) -> WsMessageDecision:
         key = _event_key(message)
         is_snapshot = bool(_data(message).get("isSnapshot"))
@@ -89,7 +143,17 @@ class WsSupervisor:
         if is_snapshot:
             snapshot_items = _snapshot_item_keys(message)
             if snapshot_items:
-                new_items = snapshot_items - self._seen_snapshot_items
+                if self.durable_dedup is None:
+                    new_items = snapshot_items - self._seen_snapshot_items
+                else:
+                    new_items = {
+                        item_key
+                        for item_key in snapshot_items
+                        if not self.durable_dedup.check_and_mark(
+                            f"ws-snapshot-item:{item_key}",
+                            seen_at_ms=received_at_ms,
+                        ).duplicate
+                    }
                 if not new_items:
                     self.duplicate_events += 1
                     return WsMessageDecision(False, key, True, "DUPLICATE_WS_SNAPSHOT")
@@ -97,10 +161,28 @@ class WsSupervisor:
         if key in self._seen_keys:
             self.duplicate_events += 1
             return WsMessageDecision(False, key, is_snapshot, "DUPLICATE_WS_EVENT")
+        if self.durable_dedup is not None and not is_snapshot:
+            durable = self.durable_dedup.check_and_mark(
+                f"ws-event:{key}",
+                seen_at_ms=received_at_ms,
+            )
+            if durable.duplicate:
+                self.duplicate_events += 1
+                return WsMessageDecision(
+                    False,
+                    key,
+                    is_snapshot,
+                    "DUPLICATE_WS_EVENT_DURABLE",
+                )
         self._seen_keys.add(key)
         self.accepted_events += 1
         self.last_heartbeat_ms = received_at_ms
         self.reconnect_attempt = 0
+        if self.global_budget is not None:
+            self.global_budget.heartbeat(
+                self.connection_id,
+                now_ms=received_at_ms,
+            )
         return WsMessageDecision(True, key, is_snapshot, "ACCEPTED")
 
     def heartbeat_stale(self, *, now_ms: int) -> bool:

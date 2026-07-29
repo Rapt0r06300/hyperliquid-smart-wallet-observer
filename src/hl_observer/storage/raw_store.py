@@ -37,6 +37,13 @@ class RawEvent:
     raw_hash: str
     fetched_at_ms: int
     context: RunContext = RunContext.LIVE
+    origin: str = "UNKNOWN"
+    received_at_ms: int | None = None
+    written_at_ms: int | None = None
+    run_id: str | None = None
+    config_hash: str | None = None
+    code_hash: str | None = None
+    git_head: str | None = None
     parsed_hash: str | None = None
     source_ts_ms: int | None = None
     item_count: int | None = None
@@ -59,6 +66,13 @@ def make_raw_event(
     item_count: int | None = None,
     request_id: str | None = None,
     parsed_hash: str | None = None,
+    origin: str = "UNKNOWN",
+    received_at_ms: int | None = None,
+    written_at_ms: int | None = None,
+    run_id: str | None = None,
+    config_hash: str | None = None,
+    code_hash: str | None = None,
+    git_head: str | None = None,
 ) -> RawEvent:
     """Build a RawEvent, computing ``raw_hash`` from the payload."""
     return RawEvent(
@@ -67,6 +81,13 @@ def make_raw_event(
         raw_hash=compute_raw_hash(payload),
         fetched_at_ms=int(fetched_at_ms),
         context=context if isinstance(context, RunContext) else RunContext(str(context).upper()),
+        origin=str(origin),
+        received_at_ms=received_at_ms,
+        written_at_ms=written_at_ms,
+        run_id=run_id,
+        config_hash=config_hash,
+        code_hash=code_hash,
+        git_head=git_head,
         parsed_hash=parsed_hash,
         source_ts_ms=source_ts_ms,
         item_count=item_count,

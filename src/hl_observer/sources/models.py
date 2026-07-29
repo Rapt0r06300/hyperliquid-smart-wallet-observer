@@ -62,6 +62,13 @@ class FetchProvenance:
     source_id: str
     request_id: str
     fetched_at_ms: int                 # local clock when received
+    origin: str = "UNKNOWN"            # LIVE_REAL | RECORDED_REAL | TEST_FIXTURE | UNKNOWN
+    received_at_ms: int | None = None
+    written_at_ms: int | None = None
+    run_id: str | None = None
+    config_hash: str | None = None
+    code_hash: str | None = None
+    git_head: str | None = None
     ok: bool = True
     source_ts_ms: int | None = None    # server timestamp if available
     latency_ms: float | None = None

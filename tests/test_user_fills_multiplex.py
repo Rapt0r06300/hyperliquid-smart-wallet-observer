@@ -48,17 +48,18 @@ class _FakeWS:
 
 def test_chunking_splits_by_ten():
     chunks = plan_multiplex_chunks([_wallet(i) for i in range(1, 26)], wallets_per_connection=10, max_connections=4)
-    assert [len(c) for c in chunks] == [10, 10, 5]     # 25 leaders -> 3 connexions
+    assert [len(c) for c in chunks] == [10]
 
 
 def test_chunking_capped_by_max_connections():
     chunks = plan_multiplex_chunks([_wallet(i) for i in range(1, 101)], wallets_per_connection=10, max_connections=3)
-    assert len(chunks) == 3 and sum(len(c) for c in chunks) == 30   # borne a 3*10
+    assert len(chunks) == 1 and sum(len(c) for c in chunks) == 10
 
 
 def test_chunking_hard_cap_on_connections():
-    chunks = plan_multiplex_chunks([_wallet(i) for i in range(1, 200)], wallets_per_connection=10, max_connections=999)
-    assert len(chunks) == MAX_CONNECTIONS_HARD          # jamais au-dela du plafond anti-ban
+    chunks = plan_multiplex_chunks([_wallet(i) for i in range(1, 200)], wallets_per_connection=1, max_connections=999)
+    assert len(chunks) == MAX_CONNECTIONS_HARD
+    assert sum(len(chunk) for chunk in chunks) == 10
 
 
 def test_chunking_dedupes_and_validates():
@@ -92,11 +93,12 @@ def test_opens_one_connection_per_chunk():
 
     res = asyncio.run(stream_user_fills_multiplex(
         Settings(), wallets=[_wallet(i) for i in range(1, 26)], session_factory=lambda: None,
-        network_read=True, max_connections=4, websocket_connect=fake_connect,
+        network_read=True, max_connections=4, wallets_per_connection=3,
+        websocket_connect=fake_connect,
         max_reconnects=0, sleep=lambda s: asyncio.sleep(0)))
-    assert res.connections == 3                        # 25 leaders -> 3 connexions paralleles
-    assert res.wallets_covered == 25
-    assert calls["n"] == 3 and res.total_connects == 3
+    assert res.connections == 4
+    assert res.wallets_covered == 10
+    assert calls["n"] == 4 and res.total_connects == 4
     assert res.stopped_reason == "max_reconnects"
 
 
