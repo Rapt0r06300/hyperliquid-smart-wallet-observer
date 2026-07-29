@@ -17,9 +17,10 @@ import hashlib
 import json
 import os
 import time
-from dataclasses import asdict, dataclass, field
+from collections.abc import Iterable, Iterator, Mapping
+from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Iterable, Iterator, Mapping
+from typing import Any
 
 from hl_observer.realtime.feed_quality import FeedEventKind
 
@@ -69,6 +70,12 @@ class TickEnvelope:
             if isinstance(self.event_kind, FeedEventKind)
             else str(self.event_kind)
         )
+        write_wall_ts_ms = int(
+            self.written_ts_ms if self.written_ts_ms is not None else written_ts_ms
+        )
+        recv_mono_ns = (
+            None if self.local_monotonic_ns is None else int(self.local_monotonic_ns)
+        )
         return {
             "schema_version": SCHEMA_VERSION,
             "source_id": str(self.source_id),
@@ -79,12 +86,12 @@ class TickEnvelope:
                 None if self.exchange_ts_ms is None else int(self.exchange_ts_ms)
             ),
             "received_ts_ms": int(self.received_ts_ms),
-            "written_ts_ms": int(
-                self.written_ts_ms if self.written_ts_ms is not None else written_ts_ms
-            ),
-            "local_monotonic_ns": (
-                None if self.local_monotonic_ns is None else int(self.local_monotonic_ns)
-            ),
+            "written_ts_ms": write_wall_ts_ms,
+            "local_monotonic_ns": recv_mono_ns,
+            # Canonical V2 names. Legacy aliases above remain replay-compatible.
+            "recv_wall_ts_ms": int(self.received_ts_ms),
+            "recv_mono_ns": recv_mono_ns,
+            "write_wall_ts_ms": write_wall_ts_ms,
             "connection_id": self.connection_id,
             "sequence": None if self.sequence is None else int(self.sequence),
             "reconnect_count": int(self.reconnect_count),

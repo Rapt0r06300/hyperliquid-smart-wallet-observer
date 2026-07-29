@@ -183,11 +183,40 @@ class MagasinBBO:
         self.age_max_ms = age_max_ms
         self.fenetre_ms = fenetre_ms
 
-    def maj_hl(self, q: dict, *, recu_mono_ns: int) -> None:
-        self.hl[q["coin"]] = {**q, "recu_ns": recu_mono_ns}
+    def maj_hl(
+        self,
+        q: dict,
+        *,
+        recu_mono_ns: int,
+        recu_wall_ms: int,
+        connection_id: str | None = None,
+        sequence: int | None = None,
+    ) -> None:
+        self.hl[q["coin"]] = {
+            **q,
+            "recu_ns": recu_mono_ns,
+            "recv_wall_ts_ms": int(recu_wall_ms),
+            "connection_id": connection_id,
+            "sequence": sequence,
+        }
 
-    def maj_binance(self, q: dict, coin_hl: str, *, recu_mono_ns: int) -> None:
-        self.bin[coin_hl] = {**q, "recu_ns": recu_mono_ns}
+    def maj_binance(
+        self,
+        q: dict,
+        coin_hl: str,
+        *,
+        recu_mono_ns: int,
+        recu_wall_ms: int,
+        connection_id: str | None = None,
+        sequence: int | None = None,
+    ) -> None:
+        self.bin[coin_hl] = {
+            **q,
+            "recu_ns": recu_mono_ns,
+            "recv_wall_ts_ms": int(recu_wall_ms),
+            "connection_id": connection_id,
+            "sequence": sequence,
+        }
 
     def snapshot(self, coin: str, *, now_mono_ns: int, ts_wall_ms: float) -> dict | None:
         """Snapshot synchronisé FRAIS, âges/synchro sur l'horloge MONOTONE. None si rejeté."""
@@ -202,11 +231,27 @@ class MagasinBBO:
         if desync > self.fenetre_ms:
             return None                                        # pas assez synchrones -> rejet
         hmid, bmid = (h["bid"] + h["ask"]) / 2, (b["bid"] + b["ask"]) / 2
-        return {"coin": coin, "ts_ms": int(ts_wall_ms),
+        snapshot_wall_ts_ms = int(ts_wall_ms)
+        event_id = "bbo_pair:%s:%s:%s" % (
+            coin,
+            h["recv_wall_ts_ms"],
+            b["recv_wall_ts_ms"],
+        )
+        return {"coin": coin, "ts_ms": snapshot_wall_ts_ms,
+                "snapshot_wall_ts_ms": snapshot_wall_ts_ms,
+                "write_wall_ts_ms": snapshot_wall_ts_ms,
+                "event_id": event_id,
                 "hl_bid": h["bid"], "hl_ask": h["ask"], "bin_bid": b["bid"], "bin_ask": b["ask"],
                 "hl_mid": hmid, "bin_mid": bmid, "ecart_mid_bps": round(1e4 * (hmid - bmid) / bmid, 3),
                 "taille_top_usd": round(min(h["bid_sz"] * hmid, b["bid_sz"] * bmid), 2),
-                "ts_ex_hl": h.get("ts_ex"), "ts_ex_bin": b.get("ts_ex"), "update_id_bin": b.get("update_id"),
+                "ts_ex_hl": h.get("ts_ex"), "ts_ex_bin": b.get("ts_ex"),
+                "exchange_ts_hl_ms": h.get("ts_ex"), "exchange_ts_bin_ms": b.get("ts_ex"),
+                "recv_wall_hl_ms": h["recv_wall_ts_ms"],
+                "recv_wall_bin_ms": b["recv_wall_ts_ms"],
+                "connection_id_hl": h.get("connection_id"),
+                "connection_id_bin": b.get("connection_id"),
+                "sequence_hl": h.get("sequence"), "sequence_bin": b.get("sequence"),
+                "update_id_bin": b.get("update_id"),
                 "recu_mono_hl_ns": h["recu_ns"], "recu_mono_bin_ns": b["recu_ns"],
                 "age_hl_ms": round(age_h, 2), "age_bin_ms": round(age_b, 2), "desync_ms": round(desync, 2),
                 "read_only": True, "real_execution": False}
@@ -327,6 +372,8 @@ async def _boucle(root: Path, coins: list[str]) -> None:  # pragma: no cover (I/
             )
     local_sequences: dict[tuple[str, str], int] = {}
     hl_connection_serial = 0
+    bin_bbo_connection_serial = 0
+    bin_trade_connection_serial = 0
     #: TAPE BRUTE par message (horloge MONOTONE) — indispensable pour un lead-lag à 50/100 ms : un
     #: snapshot échantillonné à 250 ms ne peut PAS mesurer une réaction sous 250 ms. On enregistre
     #: chaque BBO reçu ; `lead_lag_shadow` reconstruit ensuite la réaction HL à n'importe quel horizon.
@@ -390,15 +437,23 @@ async def _boucle(root: Path, coins: list[str]) -> None:  # pragma: no cover (I/
                                                   "subscription": {"type": "bbo", "coin": c}}))
                     async for raw in ws:
                         r = time.monotonic_ns()
+                        recv_wall_ms = int(time.time() * 1000)
                         if stats["dernier_hl_ns"] and (r - stats["dernier_hl_ns"]) / 1e6 > GAP_MS:
                             stats["trous"] += 1
                         stats["dernier_hl_ns"] = r
                         q = parser_bbo_hl(json.loads(raw))
                         if q and q["coin"] in coins_set:      # écrit le bid/ask HL des coins de liquidation
-                            mag.maj_hl(q, recu_mono_ns=r)
+                            mag.maj_hl(
+                                q,
+                                recu_mono_ns=r,
+                                recu_wall_ms=recv_wall_ms,
+                                connection_id="hl-legacy",
+                            )
                             tape.append({"venue": "HL", "coin": q["coin"], "recu_ns": r,
                                          "mid": (q["bid"] + q["ask"]) / 2, "bid": q["bid"], "ask": q["ask"],
-                                         "ts_wall_ms": time.time() * 1000, "ts_ex": q["ts_ex"]})
+                                         "ts_wall_ms": recv_wall_ms,
+                                         "recv_wall_ts_ms": recv_wall_ms,
+                                         "connection_id": "hl-legacy", "ts_ex": q["ts_ex"]})
             except Exception:  # noqa: BLE001 — reconnecte SEULEMENT sur panne
                 stats["reconnexions_hl"] += 1
                 await asyncio.sleep(1.0)
@@ -560,7 +615,13 @@ async def _boucle(root: Path, coins: list[str]) -> None:  # pragma: no cover (I/
                                 "data_gate_ready": quality.ready,
                                 "quality_reasons": list(quality.reasons),
                             }
-                            mag.maj_hl(quote, recu_mono_ns=received_mono_ns)
+                            mag.maj_hl(
+                                quote,
+                                recu_mono_ns=received_mono_ns,
+                                recu_wall_ms=received_ts_ms,
+                                connection_id=connection_id,
+                                sequence=sequence,
+                            )
                             tape.append(
                                 {
                                     "venue": "HL",
@@ -570,6 +631,10 @@ async def _boucle(root: Path, coins: list[str]) -> None:  # pragma: no cover (I/
                                     "bid": quote["bid"],
                                     "ask": quote["ask"],
                                     "ts_wall_ms": received_ts_ms,
+                                    "recv_wall_ts_ms": received_ts_ms,
+                                    "connection_id": connection_id,
+                                    "sequence": sequence,
+                                    "event_id": stable_event_id(message),
                                     "ts_ex": quote["ts_ex"],
                                 }
                             )
@@ -648,44 +713,86 @@ async def _boucle(root: Path, coins: list[str]) -> None:  # pragma: no cover (I/
     inv = {s.upper(): c for c, s in sym.items()}
 
     async def binance_bt():
+        nonlocal bin_bbo_connection_serial
         # bookTicker (entrée exécutable) sur SA connexion. Séparée de l'aggTrade : la très haute
         # fréquence du bookTicker ne peut plus AFFAMER l'aggTrade (cause probable des 0 trades captés).
         streams = "/".join("%s@bookTicker" % s.lower() for s in sym.values())
         while True:
             try:
                 async with websockets.connect("%s?streams=%s" % (WS_BINANCE, streams), ping_interval=20) as ws:
+                    bin_bbo_connection_serial += 1
+                    connection_id = "bin-bbo-%d-%d" % (
+                        int(time.time() * 1000),
+                        bin_bbo_connection_serial,
+                    )
                     async for raw in ws:
                         r = time.monotonic_ns()
+                        recv_wall_ms = int(time.time() * 1000)
                         if stats["dernier_bin_ns"] and (r - stats["dernier_bin_ns"]) / 1e6 > GAP_MS:
                             stats["trous"] += 1
                         stats["dernier_bin_ns"] = r
                         q = parser_bookticker_binance(json.loads(raw))
                         if q and q["symbol"] in inv:
                             stats["frames_bookticker"] += 1
-                            mag.maj_binance(q, inv[q["symbol"]], recu_mono_ns=r)
+                            coin_name = inv[q["symbol"]]
+                            sequence = next_sequence("binance_bbo", coin_name)
+                            mag.maj_binance(
+                                q,
+                                coin_name,
+                                recu_mono_ns=r,
+                                recu_wall_ms=recv_wall_ms,
+                                connection_id=connection_id,
+                                sequence=sequence,
+                            )
                             tape.append({"venue": "BIN", "coin": inv[q["symbol"]], "recu_ns": r,
                                          "mid": (q["bid"] + q["ask"]) / 2, "bid": q["bid"], "ask": q["ask"],
-                                         "ts_wall_ms": time.time() * 1000, "ts_ex": q["ts_ex"],
+                                         "ts_wall_ms": recv_wall_ms,
+                                         "recv_wall_ts_ms": recv_wall_ms,
+                                         "connection_id": connection_id,
+                                         "sequence": sequence,
+                                         "event_id": "bin-bbo:%s:%s" % (
+                                             q["symbol"],
+                                             q.get("update_id") or recv_wall_ms,
+                                         ),
+                                         "ts_ex": q["ts_ex"],
                                          "update_id": q.get("update_id")})
             except Exception:  # noqa: BLE001 — reconnecte SEULEMENT sur panne
                 stats["reconnexions_bin"] += 1
                 await asyncio.sleep(1.0)
 
     async def binance_ag():
+        nonlocal bin_trade_connection_serial
         # TRADES = le CHOC exécutable (jamais le mid, qui reste un simple CONTRÔLE dans lead_lag).
         # `@trade` et NON `@aggTrade` : prouvé au navigateur que fstream ...@aggTrade ne pousse rien ici.
         streams = "/".join("%s@trade" % s.lower() for s in sym.values())
         while True:
             try:
                 async with websockets.connect("%s?streams=%s" % (WS_BINANCE, streams), ping_interval=20) as ws:
+                    bin_trade_connection_serial += 1
+                    connection_id = "bin-trade-%d-%d" % (
+                        int(time.time() * 1000),
+                        bin_trade_connection_serial,
+                    )
                     async for raw in ws:
                         r = time.monotonic_ns()
+                        recv_wall_ms = int(time.time() * 1000)
                         t = parser_aggtrade_binance(json.loads(raw))
                         if t and t["symbol"] in inv:
                             stats["frames_trades"] += 1
+                            coin_name = inv[t["symbol"]]
+                            sequence = next_sequence("binance_trade", coin_name)
                             tape.append({"venue": "BIN_TRADE", "coin": inv[t["symbol"]], "recu_ns": r,
                                          "px": t["px"], "sz": t["sz"], "side": t["side"],
-                                         "ts_wall_ms": time.time() * 1000, "ts_ex": t["ts_ex"]})
+                                         "ts_wall_ms": recv_wall_ms,
+                                         "recv_wall_ts_ms": recv_wall_ms,
+                                         "connection_id": connection_id,
+                                         "sequence": sequence,
+                                         "event_id": "bin-trade:%s:%s:%s" % (
+                                             t["symbol"],
+                                             t.get("ts_ex") or recv_wall_ms,
+                                             sequence,
+                                         ),
+                                         "ts_ex": t["ts_ex"]})
             except Exception:  # noqa: BLE001
                 stats["reconnexions_bin"] += 1
                 await asyncio.sleep(1.0)

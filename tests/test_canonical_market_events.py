@@ -36,6 +36,7 @@ def test_canonical_event_uses_durable_observable_time_and_tick_reference() -> No
     assert result.event is not None
     assert result.event.observable_at_ms == 1_010
     assert result.event.exchange_ts_ms == 900
+    assert result.event.connection_id is None
     assert result.event.source_tick_ref.startswith("tick:")
     assert result.event.signal_eligible
     assert result.event.data_gate_ready
@@ -65,3 +66,5 @@ def test_canonical_writer_deduplicates_and_replays(tmp_path) -> None:
     [row] = list(writer.iter_events())
     assert row["event_id"] == event.event_id
     assert row["observable_at_ms"] == 1_010
+    assert row["recv_wall_ts_ms"] == 1_000
+    assert row["write_wall_ts_ms"] == 1_010

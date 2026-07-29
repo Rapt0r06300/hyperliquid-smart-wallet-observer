@@ -36,8 +36,10 @@ def _fixture_lead_lag(root: Path, *, trade_ms: float = NOW - 500, edge_h_bps: fl
         "coins": ["SOL"], "coins_controle": [], "seuil_choc_bps": 8.0, "frais_slippage_bps": 6.0,
         "edge_net_par_horizon_bps": {"1000": edge_h_bps}, "freq_evenements_par_jour": 5.0}))
     _ecrire(d / "bbo_tape.jsonl", [
-        {"coin": "SOL", "venue": "BIN_TRADE", "px": 100.6, "side": "buy", "recu_ns": trade_ms * 1e6},
-        {"coin": "SOL", "venue": "HL", "bid": 100.0, "ask": 100.03, "recu_ns": (NOW - 400) * 1e6}])
+        {"coin": "SOL", "venue": "HL", "bid": 100.0, "ask": 100.03,
+         "recu_ns": 10, "ts_wall_ms": trade_ms - 100},
+        {"coin": "SOL", "venue": "BIN_TRADE", "px": 100.6, "side": "buy",
+         "recu_ns": 20, "ts_wall_ms": trade_ms}])
 
 
 def _fixture_vaults(root: Path, *, snap2_ms: float = NOW - 1000) -> None:
@@ -62,7 +64,8 @@ def _fixture_cross_venue(root: Path) -> None:
     _ecrire(_data(root) / "bbo_synchro.jsonl", [
         {"coin": "DOT", "hl_bid": 99.9, "hl_ask": 100.0, "bin_bid": 101.0, "bin_ask": 101.1,
          "age_hl_ms": 100, "age_bin_ms": 120, "desync_ms": 40, "taille_top_usd": 5000.0,
-         "collecte_ts": NOW / 1000.0}])
+         "recv_wall_hl_ms": NOW - 120, "recv_wall_bin_ms": NOW - 100,
+         "write_wall_ts_ms": NOW - 90, "ts_ms": NOW - 90}])
 
 
 # ══════════════ P0 — la gate ROI ne bloque plus les VRAIS signaux ══════════════

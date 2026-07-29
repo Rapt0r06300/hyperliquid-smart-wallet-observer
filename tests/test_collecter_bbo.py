@@ -65,11 +65,16 @@ def test_magasin_rejette_les_quotes_PERIMEES_et_non_synchrones():
     mag = m.MagasinBBO()
     hl = {"coin": "ETH", "bid": 3000.0, "ask": 3000.5, "bid_sz": 5, "ask_sz": 4, "ts_ex": 1}
     bn = {"symbol": "ETHUSDT", "bid": 3000.1, "ask": 3000.4, "bid_sz": 5, "ask_sz": 4, "ts_ex": 2, "update_id": 7}
-    mag.maj_hl(hl, recu_mono_ns=_NS)
-    mag.maj_binance(bn, "ETH", recu_mono_ns=_NS)
+    mag.maj_hl(hl, recu_mono_ns=_NS, recu_wall_ms=1000)
+    mag.maj_binance(bn, "ETH", recu_mono_ns=_NS, recu_wall_ms=1000)
     assert mag.snapshot("ETH", now_mono_ns=_NS, ts_wall_ms=1000.0) is not None       # frais + synchrones
     assert mag.snapshot("ETH", now_mono_ns=_NS + _NS, ts_wall_ms=2000.0) is None     # âge 1000 ms > 750 -> périmé
-    mag.maj_binance(bn, "ETH", recu_mono_ns=_NS + 400_000_000)                        # Binance 400 ms après HL
+    mag.maj_binance(
+        bn,
+        "ETH",
+        recu_mono_ns=_NS + 400_000_000,
+        recu_wall_ms=1400,
+    )  # Binance 400 ms après HL
     assert mag.snapshot("ETH", now_mono_ns=_NS + 400_000_000, ts_wall_ms=1400.0) is None  # désync 400 > 250
     assert mag.snapshot("SOL", now_mono_ns=_NS, ts_wall_ms=1000.0) is None            # une jambe manque
 
@@ -78,12 +83,19 @@ def test_snapshot_porte_ecart_ages_timestamps_et_update_id():
     m = _mod()
     mag = m.MagasinBBO()
     mag.maj_hl({"coin": "ETH", "bid": 3001, "ask": 3002, "bid_sz": 5, "ask_sz": 4, "ts_ex": 10},
-               recu_mono_ns=_NS)
+               recu_mono_ns=_NS, recu_wall_ms=1000, connection_id="hl-1", sequence=3)
     mag.maj_binance({"symbol": "ETHUSDT", "bid": 3000, "ask": 3001, "bid_sz": 5, "ask_sz": 4,
-                     "ts_ex": 11, "update_id": 9}, "ETH", recu_mono_ns=_NS)
+                     "ts_ex": 11, "update_id": 9}, "ETH", recu_mono_ns=_NS,
+                    recu_wall_ms=1000, connection_id="bin-1", sequence=4)
     s = mag.snapshot("ETH", now_mono_ns=_NS, ts_wall_ms=1000.0)
     assert s["ecart_mid_bps"] > 0 and s["ts_ex_hl"] == 10 and s["update_id_bin"] == 9
     assert "age_hl_ms" in s and "desync_ms" in s and s["real_execution"] is False
+    assert s["recv_wall_hl_ms"] == 1000
+    assert s["recv_wall_bin_ms"] == 1000
+    assert s["write_wall_ts_ms"] == 1000
+    assert s["connection_id_hl"] == "hl-1"
+    assert s["sequence_bin"] == 4
+    assert s["event_id"].startswith("bbo_pair:ETH:")
 
 
 def test_sceller_shard_compresse_immuable_et_retention_bornee(tmp_path):

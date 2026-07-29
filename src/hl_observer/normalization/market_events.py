@@ -11,9 +11,12 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+from collections.abc import Iterable, Iterator, Mapping
 from dataclasses import asdict, dataclass
 from pathlib import Path
-from typing import Any, Iterable, Iterator, Mapping
+from typing import Any
+
+from hl_observer.core.causal_time import causal_timestamp_from_record
 
 CANONICAL_SCHEMA_VERSION = "hypersmart.market_event.v1"
 
@@ -26,6 +29,9 @@ class CanonicalMarketEvent:
     source_id: str
     channel: str
     instrument: str
+    connection_id: str | None
+    sequence: int | None
+    recv_mono_ns: int | None
     exchange_ts_ms: int | None
     received_ts_ms: int
     written_ts_ms: int
@@ -42,6 +48,8 @@ class CanonicalMarketEvent:
         return {
             "schema_version": CANONICAL_SCHEMA_VERSION,
             **asdict(self),
+            "recv_wall_ts_ms": self.received_ts_ms,
+            "write_wall_ts_ms": self.written_ts_ms,
             "parsed_summary": dict(self.parsed_summary),
             "provenance": dict(self.provenance),
             "read_only": True,
@@ -75,9 +83,12 @@ def canonicalize_tick_record(record: Mapping[str, Any]) -> CanonicalizationResul
         reasons.append("RAW_HASH_MISMATCH")
 
     try:
-        received_ts_ms = int(record["received_ts_ms"])
-        written_ts_ms = int(record["written_ts_ms"])
-    except (KeyError, TypeError, ValueError):
+        clock = causal_timestamp_from_record(record)
+        if clock.recv_wall_ts_ms is None or clock.write_wall_ts_ms is None:
+            raise ValueError("missing durable wall clock")
+        received_ts_ms = clock.recv_wall_ts_ms
+        written_ts_ms = clock.write_wall_ts_ms
+    except (TypeError, ValueError):
         reasons.append("MISSING_LOCAL_TIMESTAMPS")
         received_ts_ms = written_ts_ms = 0
     if written_ts_ms < received_ts_ms:
@@ -126,6 +137,9 @@ def canonicalize_tick_record(record: Mapping[str, Any]) -> CanonicalizationResul
         source_id=source_id,
         channel=channel,
         instrument=instrument,
+        connection_id=clock.connection_id,
+        sequence=clock.sequence,
+        recv_mono_ns=clock.recv_mono_ns,
         exchange_ts_ms=(
             None
             if record.get("exchange_ts_ms") is None

@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import Any
 
 from hl_observer.arbitrage.cross_venue_contract import select_executable_direction
+from hl_observer.core.causal_time import current_record_age_ms
 from hl_observer.experimental.moteur_paper import LIMITES, Signal
 from hl_observer.experimental.roi_estimateur import roi_depuis_signal
 
@@ -96,6 +97,50 @@ def _positif(v: Any) -> bool:
         return False
 
 
+def _timestamp_ms(record: dict[str, Any], *keys: str) -> float | None:
+    for key in keys:
+        value = record.get(key)
+        if value is None or isinstance(value, bool):
+            continue
+        try:
+            return float(value)
+        except (TypeError, ValueError):
+            continue
+    return None
+
+
+def _pair_snapshot_clock(
+    snapshot: dict[str, Any],
+    *,
+    now_wall_ms: float,
+) -> tuple[float | None, float | None, float | None, float | None]:
+    """Recompute pair freshness from durable receive wall timestamps."""
+    recv_hl = _timestamp_ms(snapshot, "recv_wall_hl_ms")
+    recv_bin = _timestamp_ms(snapshot, "recv_wall_bin_ms")
+    observed = _timestamp_ms(
+        snapshot,
+        "write_wall_ts_ms",
+        "snapshot_wall_ts_ms",
+        "ts_ms",
+    )
+    if recv_hl is None or recv_bin is None or observed is None:
+        return None, None, observed, None
+    current_hl = current_record_age_ms(
+        {"recv_wall_ts_ms": recv_hl},
+        now_wall_ms=now_wall_ms,
+    )
+    current_bin = current_record_age_ms(
+        {"recv_wall_ts_ms": recv_bin},
+        now_wall_ms=now_wall_ms,
+    )
+    if current_hl is None or current_bin is None:
+        return None, None, observed, None
+    stored_hl = max(0.0, float(snapshot.get("age_hl_ms") or 0.0))
+    stored_bin = max(0.0, float(snapshot.get("age_bin_ms") or 0.0))
+    age = max(current_hl, current_bin, stored_hl, stored_bin)
+    return age, abs(recv_hl - recv_bin), observed, max(stored_hl, stored_bin)
+
+
 def signaux_cross_venue(
     root: str | Path = ".", *, now_ms: float | None = None
 ) -> tuple[list[Signal], list[dict]]:
@@ -121,8 +166,25 @@ def signaux_cross_venue(
     fhl, fbin, _src = frais_venues(root)
     cible = LIMITES["cross_venue"]["notional_usd"]
     for coin, d in snaps.items():
-        age = max(float(d.get("age_hl_ms") or 1e9), float(d.get("age_bin_ms") or 1e9))
-        desync = float(d.get("desync_ms") or 1e9)
+        age, desync, observed_ms, source_age_at_write = _pair_snapshot_clock(
+            d,
+            now_wall_ms=now,
+        )
+        if age is None or desync is None or observed_ms is None:
+            refus.append(
+                {"moteur": "cross_venue", "coin": coin, "motif": "TS_ABSENT"}
+            )
+            continue
+        if age < -SKEW_TOL_MS:
+            refus.append(
+                {
+                    "moteur": "cross_venue",
+                    "coin": coin,
+                    "motif": "CLOCK_SKEW_FUTURE_DATA",
+                    "age_ms": round(age),
+                }
+            )
+            continue
         if age > AGE_MAX_MS_DISLOC:
             refus.append(
                 {"moteur": "cross_venue", "coin": coin, "motif": "SNAPSHOT_PERIME_1S", "age_ms": round(age)}
@@ -170,7 +232,7 @@ def signaux_cross_venue(
             "hl_demi_spread_bps": (hl_ask - hl_bid) / 2 / hl_mid * 1e4,
             "bin_demi_spread_bps": (bin_ask - bin_bid) / 2 / bin_mid * 1e4,
             "taille_min_usd": depth,
-            "collecte_ts": d.get("collecte_ts") or now / 1000,
+            "collecte_ts": observed_ms / 1000.0,
         }
         cout_ar = car["hl_demi_spread_bps"] + car["bin_demi_spread_bps"] + 2 * (fhl + fbin) + LATENCE_COUT_BPS
         edge_net = gap - cout_ar
@@ -187,7 +249,7 @@ def signaux_cross_venue(
             continue
         aud = construire_jambes(coin, direction, notional, car, frais_hl=fhl, frais_bin=fbin)
         j = aud["jambes"]
-        event_ms = now - age  # 🔴 P8 : horodatage RÉEL du snapshot (pas `now`)
+        event_ms = observed_ms
         s = Signal(
             moteur="cross_venue",
             coin=coin,
@@ -214,6 +276,9 @@ def signaux_cross_venue(
                 "cout_ar_bps": cout_ar,
                 "profondeur_usd": depth,
                 "desync_ms": round(desync, 1),
+                "current_age_ms": round(age, 1),
+                "source_age_at_write_ms": source_age_at_write,
+                "source_event_id": d.get("event_id"),
             },
         )
         # ROI mesurable seulement si une fréquence d'événements est mesurée ; ici cross-venue n'en fournit pas
@@ -223,18 +288,28 @@ def signaux_cross_venue(
     return sigs, refus
 
 
-def metriques_cross_venue(root: str | Path = ".") -> dict[str, Any]:
+def metriques_cross_venue(
+    root: str | Path = ".",
+    *,
+    now_ms: float | None = None,
+) -> dict[str, Any]:
     """Preuve runtime (Flo) : couverture FRAÎCHE (<1 s), skew p50/p95, écarts BRUTS vs coûts, par tick."""
     import statistics as st
     from hl_observer.experimental.carry_deux_jambes import frais_venues, LATENCE_COUT_BPS
 
     snaps = _snapshots_bbo(root)
     fhl, fbin, src = frais_venues(root)
+    now = float(now_ms if now_ms is not None else time.time() * 1000)
     fresh, skews, bruts = 0, [], []
     for coin, d in snaps.items():
-        age = max(float(d.get("age_hl_ms") or 1e9), float(d.get("age_bin_ms") or 1e9))
-        skews.append(float(d.get("desync_ms") or 0.0))
-        if age > AGE_MAX_MS_DISLOC:
+        age, desync, _observed_ms, _source_age = _pair_snapshot_clock(
+            d,
+            now_wall_ms=now,
+        )
+        if age is None or desync is None:
+            continue
+        skews.append(desync)
+        if age < -SKEW_TOL_MS or age > AGE_MAX_MS_DISLOC:
             continue
         fresh += 1
         hl_bid, hl_ask = float(d["hl_bid"]), float(d["hl_ask"])
@@ -301,8 +376,9 @@ def signaux_lead_lag(
         if (root / TAPE_RELPATH).exists()
         else []
     )
-    dernier_trade: dict[str, tuple] = {}
-    hl_quote: dict[str, dict] = {}
+    trades: dict[str, list[dict[str, Any]]] = {}
+    quotes: dict[str, list[dict[str, Any]]] = {}
+    missing_wall_ts: set[str] = set()
     for l in lignes:
         try:
             d = json.loads(l)
@@ -312,22 +388,73 @@ def signaux_lead_lag(
         if c not in coins:
             continue
         if d.get("venue") == "BIN_TRADE" and d.get("px"):
-            dernier_trade[c] = (float(d["recu_ns"]), float(d["px"]), str(d.get("side") or ""))
+            wall_ms = _timestamp_ms(d, "recv_wall_ts_ms", "ts_wall_ms")
+            if wall_ms is None:
+                missing_wall_ts.add(c)
+                continue
+            trades.setdefault(c, []).append(
+                {
+                    "wall_ms": wall_ms,
+                    "px": float(d["px"]),
+                    "side": str(d.get("side") or ""),
+                    "event_id": d.get("event_id"),
+                    "connection_id": d.get("connection_id"),
+                    "sequence": d.get("sequence"),
+                }
+            )
         elif d.get("venue") == "HL" and d.get("bid") and d.get("ask"):
-            hl_quote[c] = {"bid": float(d["bid"]), "ask": float(d["ask"]), "recu_ns": float(d["recu_ns"])}
+            wall_ms = _timestamp_ms(d, "recv_wall_ts_ms", "ts_wall_ms")
+            if wall_ms is None:
+                missing_wall_ts.add(c)
+                continue
+            quotes.setdefault(c, []).append(
+                {
+                    "bid": float(d["bid"]),
+                    "ask": float(d["ask"]),
+                    "wall_ms": wall_ms,
+                    "event_id": d.get("event_id"),
+                    "connection_id": d.get("connection_id"),
+                    "sequence": d.get("sequence"),
+                }
+            )
     sigs: list[Signal] = []
     freq_jour = cfg.get("freq_evenements_par_jour")  # fréquence MESURÉE causalement (ou None)
-    for c, (t_ns, px, side) in dernier_trade.items():
-        q = hl_quote.get(c)
-        if not q:
+    for c in sorted(coins):
+        coin_trades = trades.get(c) or []
+        if not coin_trades:
+            if c in missing_wall_ts:
+                refus.append({"moteur": "lead_lag", "coin": c, "motif": "TS_ABSENT"})
+            continue
+        trade = max(coin_trades, key=lambda item: item["wall_ms"])
+        event_ms = float(trade["wall_ms"])
+        px = float(trade["px"])
+        causal_quotes = [
+            item for item in (quotes.get(c) or []) if item["wall_ms"] <= event_ms
+        ]
+        if not causal_quotes:
             refus.append({"moteur": "lead_lag", "coin": c, "motif": "PAS_DE_QUOTE_HL"})
             continue
-        # 🔴 P8 : horodatage RÉEL de l'événement = le trade Binance (recu_ns), PAS `now`. Fraîcheur d'abord.
-        event_ms = float(t_ns) / 1e6
+        q = max(causal_quotes, key=lambda item: item["wall_ms"])
+        # Durable wall time drives freshness; monotonic clocks never survive a restart.
         motif_frais = _fraicheur_evenement(event_ms, now)
         if motif_frais:
             refus.append(
                 {"moteur": "lead_lag", "coin": c, "motif": motif_frais, "age_ms": round(now - event_ms)}
+            )
+            continue
+        quote_freshness = _fraicheur_evenement(float(q["wall_ms"]), now)
+        if quote_freshness:
+            refus.append(
+                {
+                    "moteur": "lead_lag",
+                    "coin": c,
+                    "motif": (
+                        "TS_ABSENT"
+                        if quote_freshness == "TS_ABSENT"
+                        else "QUOTE_" + quote_freshness
+                    ),
+                    "age_ms": round(now - float(q["wall_ms"])),
+                }
             )
             continue
         mid = (q["bid"] + q["ask"]) / 2.0  # choc = trade agressif vs mid HL > seuil
@@ -360,7 +487,15 @@ def signaux_lead_lag(
             spread_bps=demi_spread_bps,
             latence_ms=meilleur_h,
             hold_h=float(meilleur_h) / 3_600_000.0,
-            meta={"choc_bps": round(choc_bps, 2), "horizon_ms": meilleur_h, "event_ms": event_ms},
+            meta={
+                "choc_bps": round(choc_bps, 2),
+                "horizon_ms": meilleur_h,
+                "event_ms": event_ms,
+                "trade_event_id": trade.get("event_id"),
+                "quote_event_id": q.get("event_id"),
+                "trade_connection_id": trade.get("connection_id"),
+                "quote_connection_id": q.get("connection_id"),
+            },
         )
         s.roi_annuel_pct = roi_depuis_signal(
             s, freq_evenements_par_jour=freq_jour

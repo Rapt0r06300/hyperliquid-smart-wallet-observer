@@ -44,6 +44,9 @@ def test_tick_dataset_preserves_raw_payload_three_clocks_and_provenance(tmp_path
     assert record["received_ts_ms"] == 1_012
     assert record["written_ts_ms"] == 1_020
     assert record["local_monotonic_ns"] == 123_456
+    assert record["recv_wall_ts_ms"] == 1_012
+    assert record["write_wall_ts_ms"] == 1_020
+    assert record["recv_mono_ns"] == 123_456
     assert record["event_kind"] == "SNAPSHOT"
     assert record["provenance"]["access"] == "read_only"
     assert record["real_execution"] is False
