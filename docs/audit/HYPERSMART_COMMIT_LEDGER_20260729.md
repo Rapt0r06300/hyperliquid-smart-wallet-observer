@@ -6,4 +6,4 @@ commit correspondant; aucun état `DONE` n'est déduit d'un simple flag.
 
 | Bloc | Objet | SHA code | Tests | Preuve runtime | Statut |
 |---:|---|---|---|---|---|
-| 1 | Périmètre stratégique autoritaire | À enregistrer après commit | `test_active_strategy_scope_v2.py` | payload `strategy_scope` du runtime officiel | EN_COURS |
+| 1 | Périmètre stratégique autoritaire | `0ffa5e5` | 30 tests ciblés verts | CLI `refactor-fusion-run`: 1 ordre cross-venue, 0 funding, 0 bus externe | DONE |
