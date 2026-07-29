@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from hl_observer.paper_trading.execution_truth import ExecutionTruth
 from hl_observer.paper_trading.paper_engine import PaperEngine, PaperEngineConfig
 from hl_observer.pipeline.v12_decision_pipeline import (
     V12DecisionPipelineConfig,
@@ -29,6 +30,18 @@ def _cfg() -> V12DecisionPipelineConfig:
     )
 
 
+def _book(price: float, observed_at_ms: int) -> ExecutionTruth:
+    return ExecutionTruth.from_levels(
+        coin="HYPE",
+        bids=((price - 0.01, 10_000.0),),
+        asks=((price + 0.01, 10_000.0),),
+        received_ts_ms=observed_at_ms - 1,
+        exchange_ts_ms=observed_at_ms - 2,
+        source="recorded_hyperliquid_l2_fixture",
+        data_origin="RECORDED_REAL",
+    )
+
+
 def test_v12_decision_pipeline_opens_then_follows_leader_close(tmp_path):
     store = V12SQLiteStore(tmp_path / "v12.sqlite3")
     raw_store = RawStore()
@@ -41,6 +54,7 @@ def test_v12_decision_pipeline_opens_then_follows_leader_close(tmp_path):
             market_mids={"HYPE": 100.5},
             leader_expected_edge_bps_by_coin={"HYPE": 80.0},
             run_context=RunContext.TEST_FIXTURE,
+            execution_truth_by_coin={"HYPE": _book(100.5, 1_700_000_000_200)},
             raw_fills=(
                 {
                     "coin": "HYPE",
@@ -81,6 +95,7 @@ def test_v12_decision_pipeline_opens_then_follows_leader_close(tmp_path):
             # edge is required, but the real current mid still is.
             leader_expected_edge_bps_by_coin={},
             run_context=RunContext.TEST_FIXTURE,
+            execution_truth_by_coin={"HYPE": _book(103.0, 1_700_000_010_200)},
             raw_fills=(
                 {
                     "coin": "HYPE",

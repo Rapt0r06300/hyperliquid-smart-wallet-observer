@@ -17,8 +17,11 @@ def _cost(side: str = "BUY", *, maker: bool) -> float:
         mid_price=100.0,
         top_depth_usdc=50_000.0,
         is_maker=maker,
+        queue_depletion_usdc=20.0 if maker else None,
+        adverse_selection_bps=0.0 if maker else None,
         config=ExecModelConfig(),
     )
+    assert result.net_cost_bps is not None
     return result.net_cost_bps
 
 
@@ -36,7 +39,17 @@ def test_maker_fill_is_much_cheaper_than_taker(monkeypatch):
 
 def test_adverse_selection_penalty_applies_in_grinder_mode(monkeypatch):
     monkeypatch.setenv("HYPERSMART_MAKER_ADVERSE_SELECTION_BPS", "2.0")
-    maker = _cost(maker=True)
+    result = simulate_execution(
+        side="BUY",
+        notional_usdc=20.0,
+        mid_price=100.0,
+        top_depth_usdc=50_000.0,
+        is_maker=True,
+        queue_depletion_usdc=20.0,
+        config=ExecModelConfig(),
+    )
+    assert result.net_cost_bps is not None
+    maker = result.net_cost_bps
     # cout maker = frais reels (1,5) + selection adverse (2,0) -- et non plus un rebate de -1,0
     assert abs(maker - (1.5 + 2.0)) < 1e-9
     monkeypatch.setenv("HYPERSMART_MAKER_ADVERSE_SELECTION_BPS", "0")

@@ -13,17 +13,20 @@ It never sends an order or touches external money.
 
 from __future__ import annotations
 
+import math
 import os
 from typing import Any
 
+from hl_observer.ops.echec_silencieux import noter as _noter_echec
 from hl_observer.simulation.session_memory import evaluate_coin_side_session_memory
 from hl_observer.strategies.strategy_mode import (
     GRINDER,
-    classify as classify_strategy_mode,
     mode_of_position,
 )
+from hl_observer.strategies.strategy_mode import (
+    classify as classify_strategy_mode,
+)
 from hl_observer.ui.state import UiState
-from hl_observer.ops.echec_silencieux import noter as _noter_echec
 
 # BUG CORRIGE (audit 2026-07-11) -- CHEMIN A/B MORT.
 # La liste ne contenait que ("ext_", "copy_"). Elle datait d'une epoque ou TOUTES les strategies
@@ -311,13 +314,11 @@ def apply_fusion_paper_orders_to_state(
                 "estimated_net_pnl_usdc": None,
                 "gross_pnl_usdc": None,
                 "fee_cost_usdc": round(entry_costs, 8),
-                # PIEGE A DOUBLE COMPTAGE (2026-07-11). Ce cout est DEJA dans `entry_price` :
-                # le PaperEngine pose entry_price = fill_price, cout d'execution inclus
-                # (embedded_cost_model = fill_price_includes_spread_slippage_fee_latency).
-                # `fee_cost_usdc` ci-dessus n'est qu'un REPORT, pas une seconde ponction.
-                # Le soustraire du gross NOIRCIT le PnL. Un outil d'audit s'y est deja fait
-                # prendre. Ce drapeau existe pour que plus personne ne s'y trompe.
-                "fee_already_embedded_in_entry_price": True,
+                # This legacy A/B path receives a raw reference price rather than
+                # a PaperEngine fill price. Its explicit entry cost is carried to
+                # the matching close exactly once.
+                "fee_already_embedded_in_entry_price": False,
+                "cost_accounting": "SEPARATE_ENTRY_COST_CARRIED_TO_CLOSE",
                 "copied_notional_usdt": notional,
                 "bot_position_size_after": quantity if side == "LONG" else -quantity,
                 "entry_price": entry_price,
@@ -446,9 +447,21 @@ def apply_fusion_paper_orders_to_state(
             state.simulation_processed_delta_keys.add(delta_key)
             continue
 
-        fees_bps = _safe_float((order.get("metadata") or {}).get("fees_bps") if isinstance(order.get("metadata"), dict) else None)
-        entry_costs = notional * (fees_bps if fees_bps is not None else 8.0) / 10_000.0
         metadata = order.get("metadata") if isinstance(order.get("metadata"), dict) else {}
+        execution_cost_bps, execution_cost_status = _direct_execution_cost_bps(metadata)
+        if execution_cost_bps is None:
+            result["skipped_count"] += 1
+            result["reasons"].append("DIRECT_EXECUTION_COST_UNMEASURABLE")
+            _record_direct_order_refusal(
+                state,
+                order,
+                delta_key=delta_key,
+                current_ms=current_ms,
+                reason="DIRECT_EXECUTION_COST_UNMEASURABLE",
+            )
+            state.simulation_processed_delta_keys.add(delta_key)
+            continue
+        entry_costs = notional * execution_cost_bps / 10_000.0
         evidence_fields = _copy_direct_evidence_fields(metadata)
         _mode = classify_strategy_mode(
             strategy_id=strategy_id,
@@ -465,6 +478,8 @@ def apply_fusion_paper_orders_to_state(
             "avg_price": entry_price,
             "entry_price": entry_price,
             "entry_costs": round(entry_costs, 8),
+            "execution_cost_bps": execution_cost_bps,
+            "execution_cost_status": execution_cost_status,
             "opened_at_ms": current_ms,
             "last_update_at_ms": current_ms,
             "source_delta_key": delta_key,
@@ -506,6 +521,8 @@ def apply_fusion_paper_orders_to_state(
                 "estimated_net_pnl_usdc": None,
                 "gross_pnl_usdc": None,
                 "fee_cost_usdc": round(entry_costs, 8),
+                "execution_cost_bps": execution_cost_bps,
+                "execution_cost_status": execution_cost_status,
                 # PIEGE A DOUBLE COMPTAGE (2026-07-11). Ce cout est DEJA dans `entry_price` :
                 # le PaperEngine pose entry_price = fill_price, cout d'execution inclus
                 # (embedded_cost_model = fill_price_includes_spread_slippage_fee_latency).
@@ -1480,9 +1497,20 @@ def _apply_direct_paper_close_order(
         return
     closed_notional = abs(size * exit_price)
     gross_pnl = (exit_price - entry_price) * size
-    fees_bps = _safe_float(metadata.get("fees_bps")) if isinstance(metadata, dict) else None
-    exit_costs = closed_notional * (fees_bps if fees_bps is not None else 8.0) / 10_000.0
-    net_pnl = gross_pnl - exit_costs
+    entry_costs = _safe_float(position.get("entry_costs"))
+    if entry_costs is None or not math.isfinite(entry_costs) or entry_costs < 0:
+        result["skipped_count"] += 1
+        result["reasons"].append("DIRECT_ENTRY_COST_UNMEASURABLE")
+        state.simulation_processed_delta_keys.add(delta_key)
+        return
+    execution_cost_bps, execution_cost_status = _direct_execution_cost_bps(metadata)
+    if execution_cost_bps is None:
+        result["skipped_count"] += 1
+        result["reasons"].append("DIRECT_EXECUTION_COST_UNMEASURABLE")
+        state.simulation_processed_delta_keys.add(delta_key)
+        return
+    exit_costs = closed_notional * execution_cost_bps / 10_000.0
+    net_pnl = gross_pnl - entry_costs - exit_costs
     strategy_id = str(order.get("strategy_id") or "")
     order_id = str(order.get("order_id") or "")
 
@@ -1503,6 +1531,13 @@ def _apply_direct_paper_close_order(
             "estimated_net_pnl_usdc": round(net_pnl, 8),
             "gross_pnl_usdc": round(gross_pnl, 8),
             "fee_cost_usdc": round(exit_costs, 8),
+            "entry_cost_carried_usdc": round(entry_costs, 8),
+            "total_round_trip_cost_usdc": round(entry_costs + exit_costs, 8),
+            "fee_already_embedded_in_entry_price": False,
+            "fee_already_embedded_in_exit_price": False,
+            "cost_accounting": "ROUND_TRIP_COST_SUBTRACTED_EXACTLY_ONCE",
+            "execution_cost_bps": execution_cost_bps,
+            "execution_cost_status": execution_cost_status,
             "copied_notional_usdt": closed_notional,
             "bot_position_size_after": 0.0,
             "matched_position_key": position_key,
@@ -1535,15 +1570,14 @@ def _apply_direct_paper_close_order(
 
 
 def _release_processed_key_for_position(state: UiState, position: dict[str, Any]) -> None:
-    processed = getattr(state, "simulation_processed_delta_keys", None)
-    if not isinstance(processed, set):
-        return
-    source_delta_key = str(position.get("source_delta_key") or "")
-    if source_delta_key:
-        processed.discard(source_delta_key)
-    last_paper_ref = str(position.get("last_paper_ref") or "")
-    if last_paper_ref:
-        processed.discard(f"fusion-runtime-order:{last_paper_ref}")
+    """Keep consumed event identities immutable after a close.
+
+    A position lifecycle ending does not make its source event new again.  The
+    compatibility hook intentionally remains callable by older close paths, but
+    releasing either identity would permit the same OPEN to be replayed.
+    """
+
+    del state, position
 
 
 def _find_close_position_key(
@@ -1555,8 +1589,14 @@ def _find_close_position_key(
 ) -> str:
     if not isinstance(positions, dict):
         return ""
-    if preferred_key and isinstance(positions.get(preferred_key), dict):
-        return preferred_key
+    if preferred_key:
+        preferred = positions.get(preferred_key)
+        if not isinstance(preferred, dict):
+            return ""
+        preferred_coin = str(preferred.get("coin") or "").upper()
+        preferred_side = str(preferred.get("side") or preferred.get("direction") or "").upper()
+        return preferred_key if preferred_coin == coin and preferred_side == side else ""
+    matches: list[str] = []
     for key, position in positions.items():
         if not isinstance(position, dict):
             continue
@@ -1564,8 +1604,25 @@ def _find_close_position_key(
             continue
         pos_side = str(position.get("side") or position.get("direction") or "").upper()
         if pos_side == side:
-            return str(key)
-    return ""
+            matches.append(str(key))
+    return matches[0] if len(matches) == 1 else ""
+
+
+def _direct_execution_cost_bps(metadata: dict[str, Any]) -> tuple[float | None, str]:
+    """Return an explicit paper execution cost, never an invented fallback.
+
+    New producers should emit ``all_in_cost_bps``.  Older A/B fixtures emitted
+    one explicit ``fees_bps`` rate and are retained as a labelled legacy input.
+    Missing, negative, NaN, or infinite values are unmeasurable.
+    """
+
+    all_in = _safe_float(metadata.get("all_in_cost_bps"))
+    if all_in is not None and math.isfinite(all_in) and all_in >= 0:
+        return all_in, "EXPLICIT_ALL_IN"
+    legacy = _safe_float(metadata.get("fees_bps"))
+    if legacy is not None and math.isfinite(legacy) and legacy >= 0:
+        return legacy, "EXPLICIT_LEGACY_SINGLE_RATE"
+    return None, "UNMEASURABLE"
 
 
 def _safe_float(value: object) -> float | None:

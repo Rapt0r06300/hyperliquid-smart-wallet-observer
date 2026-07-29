@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import replace
 
 from hl_observer.evidence.decision_ledger import evidence_from_paper_result
+from hl_observer.paper_trading.execution_truth import ExecutionTruth
 from hl_observer.paper_trading.paper_engine import PaperEngine, PaperEngineConfig
 from hl_observer.position_lifecycle.reconstructor import LifecycleAction
 from hl_observer.signals.leader_delta import LeaderDelta
@@ -40,6 +41,19 @@ def _apply_ok(engine: PaperEngine, delta: LeaderDelta, price: float, observed: i
         wallet_score=90.0,
         signal_score=80.0,
         marks={"HYPE": price},
+        execution_truth=_book(price, observed),
+    )
+
+
+def _book(price: float, observed: int) -> ExecutionTruth:
+    return ExecutionTruth.from_levels(
+        coin="HYPE",
+        bids=((price - 0.01, 10_000.0),),
+        asks=((price + 0.01, 10_000.0),),
+        received_ts_ms=observed - 1,
+        exchange_ts_ms=observed - 2,
+        source="recorded_hyperliquid_l2_fixture",
+        data_origin="RECORDED_REAL",
     )
 
 
@@ -131,6 +145,7 @@ def test_v12_paper_engine_follows_exit_even_when_entry_edge_gate_would_block():
         wallet_score=0.0,
         signal_score=0.0,
         marks={"HYPE": 97.0},
+        execution_truth=_book(97.0, 1_700_000_090_100),
     )
 
     assert result.accepted

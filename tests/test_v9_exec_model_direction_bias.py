@@ -47,7 +47,9 @@ def test_maker_pays_a_fee_it_does_not_earn_a_rebate():
     """
     cfg = ExecModelConfig(taker_fee_bps=4.5, maker_fee_bps=1.5, maker_rebate_bps=0.0)
     r = simulate_execution(side="LONG", notional_usdc=50, mid_price=100.0,
-                           top_depth_usdc=50_000, is_maker=True, config=cfg)
+                           top_depth_usdc=50_000, is_maker=True,
+                           queue_depletion_usdc=50.0,
+                           adverse_selection_bps=0.0, config=cfg)
     assert r.is_maker
     assert r.fee_bps == pytest.approx(1.5)          # on PAIE 1,5 bps
     assert r.slippage_bps == 0.0                    # mais on ne traverse pas le spread
@@ -59,7 +61,9 @@ def test_a_configured_rebate_can_make_the_maker_cost_negative():
     """Un vrai rebate (palier de volume) reste modelisable -- mais il doit etre EXPLICITE."""
     cfg = ExecModelConfig(maker_fee_bps=1.5, maker_rebate_bps=2.0)
     r = simulate_execution(side="LONG", notional_usdc=50, mid_price=100.0,
-                           top_depth_usdc=50_000, is_maker=True, config=cfg)
+                           top_depth_usdc=50_000, is_maker=True,
+                           queue_depletion_usdc=50.0,
+                           adverse_selection_bps=0.0, config=cfg)
     assert r.fee_bps == pytest.approx(-0.5)         # 1,5 de frais - 2,0 de rebate
 
 def test_unknown_depth_is_conservative():

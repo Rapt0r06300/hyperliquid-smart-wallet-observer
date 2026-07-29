@@ -4,6 +4,7 @@ terms so the 1000$ caps still hold. Real market prices only — no fabrication."
 
 from __future__ import annotations
 
+from hl_observer.paper_trading.execution_truth import ExecutionTruth
 from hl_observer.paper_trading.paper_engine import PaperEngine, PaperEngineConfig
 from hl_observer.position_lifecycle.reconstructor import LifecycleAction
 from hl_observer.signals.leader_delta import LeaderDelta
@@ -21,10 +22,20 @@ def _delta(ts: int = 1_700_000_000_000) -> LeaderDelta:
 
 
 def _open(engine: PaperEngine, price: float = 100.0):
+    observed = 1_700_000_000_100
     return engine.apply_delta(
-        _delta(), market_price=price, observed_at_ms=1_700_000_000_100,
+        _delta(), market_price=price, observed_at_ms=observed,
         edge_remaining_bps=80.0, spread_bps=2.0, estimated_slippage_bps=2.0,
         top_depth_usdt=1_000_000.0, wallet_score=90.0, signal_score=80.0, marks={"HYPE": price},
+        execution_truth=ExecutionTruth.from_levels(
+            coin="HYPE",
+            bids=((price - 0.01, 50_000.0),),
+            asks=((price + 0.01, 50_000.0),),
+            received_ts_ms=observed - 1,
+            exchange_ts_ms=observed - 2,
+            source="recorded_hyperliquid_l2_fixture",
+            data_origin="RECORDED_REAL",
+        ),
     )
 
 

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from hl_observer.paper_trading.execution_truth import ExecutionTruth
 from hl_observer.paper_trading.paper_engine import PaperEngine, PaperEngineConfig
 from hl_observer.position_lifecycle.reconstructor import LifecycleAction
 from hl_observer.signals.leader_delta import LeaderDelta
@@ -39,6 +40,15 @@ def _apply(engine: PaperEngine, delta: LeaderDelta, price: float):
         wallet_score=95.0,
         signal_score=90.0,
         marks={"HYPE": price},
+        execution_truth=ExecutionTruth.from_levels(
+            coin="HYPE",
+            bids=((price - 0.01, 10_000.0),),
+            asks=((price + 0.01, 10_000.0),),
+            received_ts_ms=delta.observed_at_ms - 1,
+            exchange_ts_ms=delta.observed_at_ms - 2,
+            source="recorded_hyperliquid_l2_fixture",
+            data_origin="RECORDED_REAL",
+        ),
     )
 
 
@@ -50,7 +60,8 @@ def test_paper_engine_writes_canonical_ledger_for_open_and_close() -> None:
     assert opened.accepted
     assert opened.ledger_snapshot is not None
     assert opened.ledger_snapshot["reconciliation"]["ok"] is True
-    assert "HYPE:LONG" in opened.ledger_snapshot["positions"]
+    position_id = opened.position.position_id
+    assert position_id in opened.ledger_snapshot["positions"]
     assert any(event.refs.get("embedded_cost_model") for event in engine.ledger.events)
 
     closed = _apply(engine, _delta(LifecycleAction.CLOSE_LONG, 1.0, 0.0, 1_700_000_010_000), 102.0)

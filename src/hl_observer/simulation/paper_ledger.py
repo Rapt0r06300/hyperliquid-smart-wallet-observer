@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 from dataclasses import asdict, dataclass, field
 from hashlib import sha256
 
@@ -10,6 +11,7 @@ from hl_observer.simulation.pnl_reconciliation import PnlReconciliation, reconci
 
 @dataclass(slots=True)
 class LedgerPosition:
+    position_id: str
     coin: str
     side: str
     quantity: float
@@ -57,18 +59,32 @@ class PaperLedger:
         coin: str,
         side: str,
         notional_usdc: float,
+        quantity: float | None = None,
         fill_price: float,
         timestamp_ms: int,
         fee_bps: float = 4.5,
+        position_id: str | None = None,
         refs: dict | None = None,
     ) -> PaperEvent:
         normalized_side = str(side).upper()
         if normalized_side not in {"LONG", "SHORT"}:
             return self.no_trade(coin=coin, reason="SIDE_INVALID", timestamp_ms=timestamp_ms, refs=refs)
-        if fill_price <= 0 or notional_usdc <= 0:
+        if (
+            not _finite_positive(fill_price)
+            or not _finite_positive(notional_usdc)
+            or (quantity is not None and not _finite_positive(quantity))
+        ):
             return self.no_trade(coin=coin, reason="FILL_INVALID", timestamp_ms=timestamp_ms, refs=refs)
-        qty = float(notional_usdc) / float(fill_price)
-        key = self._key(coin, normalized_side)
+        qty = (
+            float(quantity)
+            if quantity is not None
+            else float(notional_usdc) / float(fill_price)
+        )
+        key = self._position_key(
+            coin,
+            normalized_side,
+            position_id=position_id,
+        )
         existing = self.positions.get(key)
         if existing:
             new_qty = existing.quantity + qty
@@ -79,6 +95,7 @@ class PaperLedger:
             event_type = PaperEventType.POSITION_INCREASED
         else:
             self.positions[key] = LedgerPosition(
+                position_id=key,
                 coin=str(coin).upper(),
                 side=normalized_side,
                 quantity=qty,
@@ -112,10 +129,15 @@ class PaperLedger:
         timestamp_ms: int,
         fee_bps: float = 4.5,
         reason: str = "leader_exit",
+        position_id: str | None = None,
         refs: dict | None = None,
     ) -> PaperEvent:
         normalized_side = str(side).upper()
-        key = self._key(coin, normalized_side)
+        key = self._position_key(
+            coin,
+            normalized_side,
+            position_id=position_id,
+        )
         pos = self.positions.get(key)
         if pos is None:
             return self.no_trade(
@@ -244,6 +266,7 @@ class PaperLedger:
             "positions": {
                 key: {
                     "coin": pos.coin,
+                    "position_id": pos.position_id,
                     "side": pos.side,
                     "quantity": round(pos.quantity, 10),
                     "average_entry_price": round(pos.average_entry_price, 10),
@@ -278,10 +301,28 @@ class PaperLedger:
     def _key(coin: str, side: str) -> str:
         return f"{str(coin).upper()}:{str(side).upper()}"
 
+    @classmethod
+    def _position_key(
+        cls,
+        coin: str,
+        side: str,
+        *,
+        position_id: str | None,
+    ) -> str:
+        return str(position_id) if position_id else cls._key(coin, side)
+
     @staticmethod
     def event_hash(events: list[PaperEvent]) -> str:
         material = "|".join(event.event_id for event in events)
         return sha256(material.encode("utf-8")).hexdigest()
+
+
+def _finite_positive(value: object) -> bool:
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError, OverflowError):
+        return False
+    return math.isfinite(parsed) and parsed > 0
 
 
 __all__ = ["LedgerPosition", "PaperLedger"]

@@ -130,11 +130,10 @@ def test_maker_fill_is_not_a_free_lunch():
     cfg = ExecModelConfig()
     r = simulate_execution(side="LONG", notional_usdc=500, mid_price=100.0,
                            top_depth_usdc=50_000, is_maker=True, config=cfg)
-    if r.net_cost_bps < 0:
-        assert os.environ.get("HYPERSMART_MAKER_ADVERSE_SELECTION_BPS") is None, (
-            "cout maker NEGATIF sans penalite de selection adverse : le PnL serait flatte. "
-            "Le mode maker n'est justifiable qu'avec une penalite d'adverse explicite."
-        )
+    assert r.filled_notional_usdc == 0.0
+    assert r.net_cost_bps is None
+    assert r.reason == "NO_FILL_NO_QUEUE_EVIDENCE"
+    assert os.environ.get("HYPERSMART_MAKER_ADVERSE_SELECTION_BPS") is None
 
 
 # ======================================================================================
@@ -154,7 +153,10 @@ def test_a_maker_fill_costs_money_it_does_not_earn_it():
         "le rebate n'existe qu'aux paliers de volume eleves : 0 par defaut, jamais par accident"
     )
     r = simulate_execution(side="LONG", notional_usdc=500, mid_price=100.0,
-                           top_depth_usdc=50_000, is_maker=True, config=cfg)
+                           top_depth_usdc=50_000, is_maker=True,
+                           queue_depletion_usdc=500.0,
+                           adverse_selection_bps=0.0, config=cfg)
+    assert r.net_cost_bps is not None
     assert r.net_cost_bps > 0, (
         f"cout maker {r.net_cost_bps:+.2f} bps : le bot serait PAYE pour entrer -- mirage."
     )
@@ -172,9 +174,13 @@ def test_the_official_hyperliquid_tariff_is_respected():
 def test_maker_is_cheaper_than_taker_but_not_free():
     cfg = ExecModelConfig()
     maker = simulate_execution(side="LONG", notional_usdc=500, mid_price=100.0,
-                               top_depth_usdc=50_000, is_maker=True, config=cfg)
+                               top_depth_usdc=50_000, is_maker=True,
+                               queue_depletion_usdc=500.0,
+                               adverse_selection_bps=0.0, config=cfg)
     taker = simulate_execution(side="LONG", notional_usdc=500, mid_price=100.0,
                                top_depth_usdc=50_000, is_maker=False, config=cfg)
+    assert maker.net_cost_bps is not None
+    assert taker.net_cost_bps is not None
     assert 0 < maker.net_cost_bps < taker.net_cost_bps, (
         "le maker doit etre MOINS CHER que le taker (pas de spread paye), mais jamais GRATUIT"
     )

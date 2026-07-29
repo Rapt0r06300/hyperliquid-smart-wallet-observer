@@ -23,6 +23,7 @@ from hl_observer.gating.filter_pipeline import ContexteDecision, appliquer_filtr
 from hl_observer.risk.drawdown_scaling import facteur_capital
 from hl_observer.models import DataQuality, Fill, SourceMeta
 from hl_observer.normalization.fills import NormalizedFillResult, normalize_hyperliquid_fill
+from hl_observer.paper_trading.execution_truth import ExecutionTruth
 from hl_observer.paper_trading.paper_engine import PaperDecisionResult, PaperEngine, PaperEngineConfig
 from hl_observer.position_lifecycle.reconstructor import LifecycleAction, LifecycleEvent, event_from_fill
 from hl_observer.signals.cluster_detector import ClusterConfig, SignalCluster, detect_signal_clusters
@@ -48,7 +49,7 @@ class V12DecisionPipelineConfig:
     volatility_penalty_bps: float = 0.0
     adverse_selection_penalty_bps: float = 0.0
     crowding_penalty_bps: float = 0.0
-    top_depth_usdt: float | None = 100_000.0
+    top_depth_usdt: float | None = None
     wallet_score: float = 90.0
     signal_score: float = 85.0
     min_feed_quality_score: float = 75.0
@@ -70,6 +71,7 @@ class V12DecisionPipelineInput:
     wallet_stats: dict[str, Any] | None = None            # G5 : winrate/pnl/n_trades → structurel ?
     reference_mids: dict[str, float] = field(default_factory=dict)   # G4 : prix de référence stale-tick
     edge_history_by_coin: dict[str, dict[str, float]] = field(default_factory=dict)  # S4 : {coin:{hist,recent}}
+    execution_truth_by_coin: dict[str, ExecutionTruth] = field(default_factory=dict)
 
 
 @dataclass(frozen=True, slots=True)
@@ -177,12 +179,18 @@ def run_v12_decision_pipeline(
         if edge.reason_codes:
             enriched_delta = replace(delta, reason_codes=tuple(dict.fromkeys((*delta.reason_codes, *edge.reason_codes))))
         market_price = float(mid or 0.0)
+        execution_truth = pipeline_input.execution_truth_by_coin.get(delta.coin.upper())
+        measured_spread_bps = (
+            execution_truth.spread_bps
+            if execution_truth is not None
+            else float(cfg.spread_bps or 0.0)
+        )
         paper_result = engine.apply_delta(
             enriched_delta,
             market_price=market_price,
             observed_at_ms=pipeline_input.observed_at_ms,
             edge_remaining_bps=float(edge.net_edge_bps or 0.0),
-            spread_bps=float(cfg.spread_bps or 0.0),
+            spread_bps=measured_spread_bps,
             estimated_slippage_bps=float(cfg.slippage_bps or 0.0),
             top_depth_usdt=cfg.top_depth_usdt,
             wallet_score=cfg.wallet_score,
@@ -190,6 +198,7 @@ def run_v12_decision_pipeline(
             marks={delta.coin: market_price} if market_price > 0 else {},
             margin_scale=margin_scale,
             decision_context=gardes_ctx,
+            execution_truth=execution_truth,
         )
         paper_results.append(paper_result)
         evidence = evidence_from_paper_result(

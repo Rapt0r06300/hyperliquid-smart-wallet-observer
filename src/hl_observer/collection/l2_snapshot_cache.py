@@ -19,7 +19,9 @@ import json
 import os
 import threading
 import time
+
 from hl_observer.ops.echec_silencieux import noter as _noter_echec
+from hl_observer.paper_trading.execution_truth import ExecutionTruth
 
 CONSUME_FLAG = "HYPERSMART_V26_LIVE_BOOK_COSTS"
 POLLER_FLAG = "HYPERSMART_V26_BOOK_POLLER"
@@ -34,6 +36,7 @@ _DEF = {INTERVAL_ENV: 30.0, MAX_COINS_ENV: 12.0, FRESH_ENV: 90.0, NOTIONAL_ENV: 
 
 _lock = threading.Lock()
 _cache: dict[str, tuple[float, float, float]] = {}   # coin -> (spread_bps, slip_bps, ts)
+_book_cache: dict[str, ExecutionTruth] = {}
 _started_lock = threading.Lock()
 _started = False
 
@@ -128,6 +131,30 @@ def push_costs(coin: str, spread_bps: float, slip_bps: float, ts: float | None =
         _cache[key] = (float(spread_bps), float(slip_bps), float(ts) if ts is not None else time.time())
 
 
+def push_book(
+    coin: str,
+    bids: list[tuple[float, float]] | tuple[tuple[float, float], ...],
+    asks: list[tuple[float, float]] | tuple[tuple[float, float], ...],
+    *,
+    received_ts_ms: int,
+    exchange_ts_ms: int | None = None,
+    source: str = "hyperliquid:/info:l2Book",
+) -> ExecutionTruth:
+    """Store the full causal L2 snapshot used by strict paper execution."""
+
+    truth = ExecutionTruth.from_levels(
+        coin=coin,
+        bids=bids,
+        asks=asks,
+        received_ts_ms=received_ts_ms,
+        exchange_ts_ms=exchange_ts_ms,
+        source=source,
+    )
+    with _lock:
+        _book_cache[truth.coin] = truth
+    return truth
+
+
 def live_costs_for(coin: str, env: dict | None = None, now: float | None = None) -> tuple[float, float] | None:
     """(spread_bps, slip_bps) si flag consommation actif ET entrée fraîche, sinon None."""
     if not _on(CONSUME_FLAG, env):
@@ -144,12 +171,34 @@ def live_costs_for(coin: str, env: dict | None = None, now: float | None = None)
     return spread, slip
 
 
+def live_execution_truth_for(
+    coin: str,
+    *,
+    decision_ts_ms: int,
+    env: dict | None = None,
+    require_consume_flag: bool = True,
+) -> ExecutionTruth | None:
+    """Return a fresh full book, never a scalar-depth substitute."""
+
+    if require_consume_flag and not _on(CONSUME_FLAG, env):
+        return None
+    key = str(coin or "").strip().upper()
+    with _lock:
+        truth = _book_cache.get(key)
+    if truth is None:
+        return None
+    max_age_ms = int(max(0.0, _f(FRESH_ENV, env)) * 1_000)
+    if not truth.is_fresh(decision_ts_ms=int(decision_ts_ms), max_age_ms=max_age_ms):
+        return None
+    return truth
+
+
 def parse_l2book(payload: object) -> tuple[list[tuple[float, float]], list[tuple[float, float]]] | None:
     """Extrait ([(bid_px, sz)...], [(ask_px, sz)...]) du retour public l2Book."""
     try:
         levels = payload.get("levels")  # type: ignore[union-attr]
-        bids = [(float(l["px"]), float(l["sz"])) for l in levels[0]]
-        asks = [(float(l["px"]), float(l["sz"])) for l in levels[1]]
+        bids = [(float(level["px"]), float(level["sz"])) for level in levels[0]]
+        asks = [(float(level["px"]), float(level["sz"])) for level in levels[1]]
         if not bids or not asks:
             return None
         return bids, asks
@@ -176,13 +225,27 @@ def poll_once(coins: list[str], *, opener=None, env: dict | None = None) -> int:
                 )
                 with urllib.request.urlopen(req, timeout=10.0) as resp:
                     raw = resp.read()
-            parsed = parse_l2book(json.loads(raw.decode("utf-8")))
+            decoded = json.loads(raw.decode("utf-8"))
+            parsed = parse_l2book(decoded)
             if parsed is None:
                 continue
+            received_ts_ms = int(time.time() * 1_000)
+            raw_exchange_ts = decoded.get("time") if isinstance(decoded, dict) else None
+            try:
+                exchange_ts_ms = int(raw_exchange_ts) if raw_exchange_ts is not None else None
+            except (TypeError, ValueError, OverflowError):
+                exchange_ts_ms = None
+            push_book(
+                coin,
+                parsed[0],
+                parsed[1],
+                received_ts_ms=received_ts_ms,
+                exchange_ts_ms=exchange_ts_ms,
+                source=f"hyperliquid:/info:l2Book:{target}",
+            )
             costs = compute_book_costs(parsed[0], parsed[1], notional)
-            if costs is None:
-                continue
-            push_costs(coin, costs[0], costs[1])
+            if costs is not None:
+                push_costs(coin, costs[0], costs[1], ts=received_ts_ms / 1_000.0)
             # ENREGISTREMENT (audit PnL 2026-07-11, opt-in HYPERSMART_RECORD_MICROSTRUCTURE=1).
             # Ce poller recuperait DEJA le carnet complet et le JETAIT apres en avoir tire deux
             # chiffres. Or le carnet est la seule donnee qui permette de tester les strategies
@@ -323,10 +386,12 @@ def ensure_started(env: dict | None = None) -> bool:
 def clear() -> None:
     with _lock:
         _cache.clear()
+        _book_cache.clear()
 
 
 __all__ = [
     "CONSUME_FLAG", "POLLER_FLAG", "compute_book_costs", "push_costs",
-    "live_costs_for", "parse_l2book", "poll_once", "ensure_started", "clear",
+    "live_costs_for", "live_execution_truth_for", "push_book",
+    "parse_l2book", "poll_once", "ensure_started", "clear",
     "coins_a_sonder", "DEFAUT_COINS", "DEFAUT_COINS_ENV", "BALAYAGE_FLAG",
 ]

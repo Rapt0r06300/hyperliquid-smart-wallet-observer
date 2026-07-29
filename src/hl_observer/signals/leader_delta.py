@@ -29,6 +29,8 @@ class LeaderDelta:
     confidence: float
     reason_codes: tuple[str, ...] = field(default_factory=tuple)
     evidence_ref: str | None = None
+    leader_reference_price: float | None = None
+    source_position_id: str | None = None
 
     @property
     def is_entry(self) -> bool:
@@ -75,6 +77,7 @@ def leader_delta_from_lifecycle_event(
         confidence=event.confidence,
         reason_codes=tuple(dict.fromkeys(reasons)),
         evidence_ref=event.evidence_ref,
+        leader_reference_price=event.price,
     )
 
 

@@ -11,13 +11,13 @@ from __future__ import annotations
 # paper_trading.fusion_paper_engine_adapter (cycle préexistant copy_wallet ->
 # copy_mode -> strategies -> fusion_runtime -> fusion_paper_engine_adapter).
 from hl_observer.copy_wallet.copy_conflict_resolver import LeaderVote  # noqa: F401
-
-from hl_observer.paper_trading.fusion_paper_engine_adapter import (
-    run_distilled_opportunities_through_paper_engine,
-)
 from hl_observer.copying.whale_consensus_sizing import (
     FLOOR_MULTIPLIER,
     compute_whale_consensus_sizing,
+)
+from hl_observer.paper_trading.execution_truth import ExecutionTruth
+from hl_observer.paper_trading.fusion_paper_engine_adapter import (
+    run_distilled_opportunities_through_paper_engine,
 )
 from hl_observer.signals.distilled_opportunity_detector import DistilledOpportunity
 
@@ -66,6 +66,25 @@ def _opportunity(wallet_count: int = 2, age_ms: int = 2_500, notional: float = 6
     )
 
 
+def _install_recorded_book(monkeypatch) -> None:
+    def inputs(coin: str, *, observed_at_ms: int):
+        truth = ExecutionTruth.from_levels(
+            coin=coin,
+            bids=((69.9965, 10_000.0),),
+            asks=((70.0035, 10_000.0),),
+            received_ts_ms=observed_at_ms,
+            exchange_ts_ms=observed_at_ms,
+            source="TEST_RECORDED_L2",
+            data_origin="RECORDED_REAL",
+        )
+        return truth.spread_bps, 1.0, truth
+
+    monkeypatch.setattr(
+        "hl_observer.paper_trading.fusion_paper_engine_adapter._live_execution_inputs",
+        inputs,
+    )
+
+
 def test_adapter_scales_margin_when_flag_enabled(monkeypatch):
     # SEMANTIQUE CORRIGEE (audit 2026-07-11) : depuis le fix des "centimes",
     # MAX_POSITION_USDT = la MARGE, et le notional = marge x levier. On fixe le levier a 1
@@ -73,6 +92,7 @@ def test_adapter_scales_margin_when_flag_enabled(monkeypatch):
     monkeypatch.setenv("HYPERSMART_WHALE_CONSENSUS_SIZING", "1")
     monkeypatch.setenv("HYPERSMART_MAX_POSITION_USDT", "40")
     monkeypatch.setenv("HYPERSMART_SIMULATION_LEVERAGE", "1")
+    _install_recorded_book(monkeypatch)
     summary = run_distilled_opportunities_through_paper_engine(
         (_opportunity(),),
         market_prices={"HYPE": 70.0},
@@ -91,6 +111,7 @@ def test_adapter_keeps_full_size_when_flag_disabled(monkeypatch):
     monkeypatch.delenv("HYPERSMART_WHALE_CONSENSUS_SIZING", raising=False)
     monkeypatch.setenv("HYPERSMART_MAX_POSITION_USDT", "40")
     monkeypatch.setenv("HYPERSMART_SIMULATION_LEVERAGE", "1")   # marge x levier = notional
+    _install_recorded_book(monkeypatch)
     summary = run_distilled_opportunities_through_paper_engine(
         (_opportunity(),),
         market_prices={"HYPE": 70.0},

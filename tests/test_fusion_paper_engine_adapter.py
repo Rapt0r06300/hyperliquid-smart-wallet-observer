@@ -11,6 +11,7 @@ Ces tests verifient donc les DEUX comportements :
     encore, pour pouvoir COMPARER. Il ne doit jamais redevenir le defaut.
 """
 from hl_observer.copy_wallet.copy_conflict_resolver import LeaderVote
+from hl_observer.paper_trading.execution_truth import ExecutionTruth
 from hl_observer.paper_trading.fusion_paper_engine_adapter import (
     run_copy_votes_through_paper_engine,
     run_distilled_opportunities_through_paper_engine,
@@ -18,9 +19,30 @@ from hl_observer.paper_trading.fusion_paper_engine_adapter import (
 from hl_observer.signals.distilled_opportunity_detector import DistilledOpportunity
 
 
+def _install_recorded_books(monkeypatch, prices: dict[str, float]) -> None:
+    def inputs(coin: str, *, observed_at_ms: int):
+        mid = float(prices[str(coin).upper()])
+        truth = ExecutionTruth.from_levels(
+            coin=coin,
+            bids=((mid * 0.99995, 100.0),),
+            asks=((mid * 1.00005, 100.0),),
+            received_ts_ms=observed_at_ms,
+            exchange_ts_ms=observed_at_ms,
+            source="TEST_RECORDED_L2",
+            data_origin="RECORDED_REAL",
+        )
+        return truth.spread_bps, 1.0, truth
+
+    monkeypatch.setattr(
+        "hl_observer.paper_trading.fusion_paper_engine_adapter._live_execution_inputs",
+        inputs,
+    )
+
+
 def test_fusion_paper_engine_adapter_uses_existing_paper_engine(monkeypatch):
     # mode A/B explicite : on exerce l'ANCIEN chemin (edge proxy), pas le defaut.
     monkeypatch.setenv("HYPERSMART_REQUIRE_EMPIRICAL_EDGE", "0")
+    _install_recorded_books(monkeypatch, {"HYPE": 100.0})
     result = run_copy_votes_through_paper_engine(
         (
             LeaderVote(wallet="0x1", coin="HYPE", side="LONG", score=2.0),
@@ -54,6 +76,30 @@ def test_fusion_paper_engine_adapter_uses_existing_paper_engine(monkeypatch):
     # bon comportement -- l'appelant ne raconte plus l'origine de l'edge, la mesure la raconte.
     # (J'avais d'abord assert le contraire : c'etait moi qui me trompais, pas le code.)
     assert str(context.get("edge_source", "")), "la provenance de l'edge ne doit jamais etre vide"
+    assert context["book_costs_are_live"] is True
+    assert context["execution_snapshot_id"]
+
+
+def test_fusion_runtime_refuses_when_full_live_book_is_missing(monkeypatch):
+    monkeypatch.setenv("HYPERSMART_REQUIRE_EMPIRICAL_EDGE", "0")
+    monkeypatch.setattr(
+        "hl_observer.paper_trading.fusion_paper_engine_adapter._live_execution_inputs",
+        lambda coin, observed_at_ms: (6.0, 6.0, None),
+    )
+
+    result = run_copy_votes_through_paper_engine(
+        (
+            LeaderVote(wallet="0x1", coin="HYPE", side="LONG", score=2.0),
+            LeaderVote(wallet="0x2", coin="HYPE", side="LONG", score=1.0),
+        ),
+        market_price=100.0,
+        observed_at_ms=1_000,
+    )
+
+    assert result.accepted_count == 0
+    assert result.decisions
+    assert "NO_LIVE_EXECUTABLE_BOOK" in result.decisions[0].reason_codes
+    assert result.decisions[0].decision_context["book_costs_are_live"] is False
 
 
 def test_fusion_paper_engine_does_not_count_wallets_from_other_coins_as_consensus(monkeypatch):
@@ -75,6 +121,7 @@ def test_fusion_paper_engine_does_not_count_wallets_from_other_coins_as_consensu
 def test_distilled_opportunities_use_existing_paper_engine_with_real_mark(monkeypatch):
     # mode A/B explicite : on exerce l'ANCIEN chemin (edge proxy), pas le defaut.
     monkeypatch.setenv("HYPERSMART_REQUIRE_EMPIRICAL_EDGE", "0")
+    _install_recorded_books(monkeypatch, {"HYPE": 100.0})
     result = run_distilled_opportunities_through_paper_engine(
         (
             DistilledOpportunity(
@@ -106,6 +153,7 @@ def test_distilled_opportunities_use_existing_paper_engine_with_real_mark(monkey
 def test_distilled_opportunities_refuse_when_real_mark_is_missing(monkeypatch):
     # mode A/B explicite : on exerce l'ANCIEN chemin (edge proxy), pas le defaut.
     monkeypatch.setenv("HYPERSMART_REQUIRE_EMPIRICAL_EDGE", "0")
+    _install_recorded_books(monkeypatch, {"HYPE": 100.0})
     result = run_distilled_opportunities_through_paper_engine(
         (
             DistilledOpportunity(

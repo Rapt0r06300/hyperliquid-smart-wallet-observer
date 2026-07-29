@@ -1298,35 +1298,15 @@ def _status_full_close_already_exists(
 
 
 def _release_processed_keys_for_closed_positions(state: UiState, closed: list[dict[str, Any]]) -> None:
-    """Free duplicate guards after a paper position has genuinely closed."""
+    """Compatibility hook: consumed event identities remain immutable."""
 
-    positions = getattr(state, "simulation_virtual_positions", {}) or {}
-    if not isinstance(positions, dict):
-        return
-    for row in closed:
-        if not isinstance(row, dict):
-            continue
-        source_delta_key = str(row.get("source_delta_key") or "")
-        if source_delta_key:
-            processed = getattr(state, "simulation_processed_delta_keys", None)
-            if isinstance(processed, set):
-                processed.discard(source_delta_key)
-        key = str(row.get("position_key") or row.get("matched_position_key") or "")
-        position = positions.get(key)
-        if isinstance(position, dict):
-            _release_processed_key_for_position(state, position)
+    del state, closed
 
 
 def _release_processed_key_for_position(state: UiState, position: dict[str, Any]) -> None:
-    processed = getattr(state, "simulation_processed_delta_keys", None)
-    if not isinstance(processed, set):
-        return
-    source_delta_key = str(position.get("source_delta_key") or "")
-    if source_delta_key:
-        processed.discard(source_delta_key)
-    last_paper_ref = str(position.get("last_paper_ref") or "")
-    if last_paper_ref:
-        processed.discard(f"fusion-runtime-order:{last_paper_ref}")
+    """Compatibility hook: closing a position never re-arms its source event."""
+
+    del state, position
 
 
 def _ledger_spike_links_from_status_state(

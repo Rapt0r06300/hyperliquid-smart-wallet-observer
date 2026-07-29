@@ -1,8 +1,30 @@
+import pytest
+
 from hl_observer.arbitrage.triangular_graph import TriangularEdge
+from hl_observer.collection.l2_snapshot_cache import clear, push_book
 from hl_observer.copy_wallet.copy_conflict_resolver import LeaderVote
 from hl_observer.realtime.multi_source_price_stream import PriceEvent
 from hl_observer.signals.distilled_opportunity_detector import DistilledSignalCandidate
 from hl_observer.strategies.fusion_runtime import FusionRuntimeInput, run_fusion_strategy_runtime
+
+
+@pytest.fixture(autouse=True)
+def _recorded_execution_books(monkeypatch):
+    """Make runtime acceptance deterministic with explicit recorded-real L2."""
+
+    clear()
+    monkeypatch.setenv("HYPERSMART_V26_LIVE_BOOK_COSTS", "1")
+    for coin, mid in (("HYPE", 100.0), ("BTC", 65_000.0), ("ETH", 1_800.0)):
+        push_book(
+            coin,
+            bids=((mid - 0.01, 10_000.0),),
+            asks=((mid + 0.01, 10_000.0),),
+            received_ts_ms=999,
+            exchange_ts_ms=998,
+            source="recorded_hyperliquid_l2_fixture",
+        )
+    yield
+    clear()
 
 
 def _payload(**overrides):

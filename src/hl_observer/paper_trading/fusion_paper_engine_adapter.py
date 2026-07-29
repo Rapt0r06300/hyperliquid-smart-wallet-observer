@@ -2,15 +2,16 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, asdict
 import os
+from dataclasses import asdict, dataclass
 
 from hl_observer.copy_wallet.copy_conflict_resolver import LeaderVote, resolve_copy_conflict
+from hl_observer.ops.echec_silencieux import noter as _noter_echec
+from hl_observer.paper_trading.execution_truth import ExecutionTruth
 from hl_observer.paper_trading.paper_engine import PaperDecisionResult, PaperEngine, PaperEngineConfig
 from hl_observer.position_lifecycle.reconstructor import LifecycleAction
 from hl_observer.signals.distilled_opportunity_detector import DistilledOpportunity
 from hl_observer.signals.leader_delta import LeaderDelta
-from hl_observer.ops.echec_silencieux import noter as _noter_echec
 
 
 @dataclass(frozen=True, slots=True)
@@ -78,7 +79,8 @@ def run_copy_votes_through_paper_engine(
             max_total_exposure_usdt=max_total_exposure_usdt,
             max_open_positions=max_open_positions,
             leverage=leverage,
-            default_top_depth_usdt=_env_float("HYPERSMART_FUSION_COPY_TOP_DEPTH_USDT", 50_000.0),
+            default_top_depth_usdt=None,
+            strict_execution_truth=True,
         )
     )
     conflict = resolve_copy_conflict(votes)
@@ -164,7 +166,11 @@ def run_copy_votes_through_paper_engine(
         # DENY-BY-DEFAULT. Le proxy reste accessible pour une comparaison A/B explicite
         # (HYPERSMART_REQUIRE_EMPIRICAL_EDGE=0), jamais par defaut.
         _trace.stamp("features")
-        _spread_bps, _slip_bps, _book_live = _live_book_costs(conflict.coin)
+        _spread_bps, _slip_bps, _execution_truth = _live_execution_inputs(
+            conflict.coin,
+            observed_at_ms=int(observed_at_ms),
+        )
+        _book_live = _execution_truth is not None
         _trace.stamp("score")
         from hl_observer.edge.empirical_edge import edge_from_calibration, empirical_edge_refusal
 
@@ -218,10 +224,11 @@ def run_copy_votes_through_paper_engine(
                 edge_remaining_bps=edge_remaining_bps,
                 spread_bps=_spread_bps,
                 estimated_slippage_bps=_slip_bps,
-                top_depth_usdt=_env_float("HYPERSMART_FUSION_COPY_TOP_DEPTH_USDT", 50_000.0),
+                top_depth_usdt=None,
                 wallet_score=_consensus_wallet_score(conflict, distinct_wallets=distinct_wallets),
                 signal_score=_consensus_signal_score(conflict, distinct_wallets=distinct_wallets),
                 marks={conflict.coin: float(market_price)},
+                execution_truth=_execution_truth,
                 decision_context={
                     "consensus_wallets": distinct_wallets,
                     "leader_wallets": list(winning_wallets),
@@ -239,7 +246,18 @@ def run_copy_votes_through_paper_engine(
                        if k in ("source_age_ms", "local_processing_ms", "stage_durations_ms")},
                     "data_quality_status": ("LIVE_BOOK" if _book_live
                                             else "DEGRADED_CONSTANT_COSTS_FALLBACK"),
-                    "top_depth_usdt": _env_float("HYPERSMART_FUSION_COPY_TOP_DEPTH_USDT", 50_000.0),
+                    "top_depth_usdt": (
+                        _execution_truth.visible_notional("BUY")
+                        if _execution_truth is not None and conflict.winning_side == "LONG"
+                        else (
+                            _execution_truth.visible_notional("SELL")
+                            if _execution_truth is not None
+                            else None
+                        )
+                    ),
+                    "execution_snapshot_id": (
+                        _execution_truth.snapshot_id if _execution_truth is not None else None
+                    ),
                     **_emp.as_dict(),
                     "winning_vote_score": (
                         float(conflict.long_score)
@@ -315,7 +333,8 @@ def run_distilled_opportunities_through_paper_engine(
             max_total_exposure_usdt=max_total_exposure_usdt,
             max_open_positions=max_open_positions,
             leverage=leverage,
-            default_top_depth_usdt=_env_float("HYPERSMART_DISTILLED_TOP_DEPTH_USDT", 75_000.0),
+            default_top_depth_usdt=None,
+            strict_execution_truth=True,
         )
     )
     whale_sizing_enabled = str(_env_str("HYPERSMART_WHALE_CONSENSUS_SIZING", "0")).strip().lower() in {"1", "true", "yes", "on"}
@@ -324,6 +343,10 @@ def run_distilled_opportunities_through_paper_engine(
         coin = str(opportunity.coin or "").upper()
         side = str(opportunity.side or "").upper()
         market_price = float(market_prices.get(coin, 0.0) or 0.0)
+        spread_bps, slippage_bps, execution_truth = _live_execution_inputs(
+            coin,
+            observed_at_ms=int(observed_at_ms),
+        )
         action = LifecycleAction.OPEN_LONG if side == "LONG" else LifecycleAction.OPEN_SHORT
         wallets = ",".join(opportunity.wallets[:5]) or "distilled_cluster"
         margin_scale = 1.0
@@ -361,13 +384,14 @@ def run_distilled_opportunities_through_paper_engine(
                 market_price=market_price,
                 observed_at_ms=int(observed_at_ms),
                 edge_remaining_bps=float(opportunity.average_edge_bps),
-                spread_bps=_env_float("HYPERSMART_DISTILLED_SPREAD_BPS", 6.0),
-                estimated_slippage_bps=_env_float("HYPERSMART_DISTILLED_SLIPPAGE_BPS", 8.0),
-                top_depth_usdt=_env_float("HYPERSMART_DISTILLED_TOP_DEPTH_USDT", 75_000.0),
+                spread_bps=spread_bps,
+                estimated_slippage_bps=slippage_bps,
+                top_depth_usdt=None,
                 wallet_score=_distilled_wallet_score(opportunity),
                 signal_score=_distilled_signal_score(opportunity),
                 marks=market_prices,
                 margin_scale=margin_scale,
+                execution_truth=execution_truth,
                 decision_context={
                     "consensus_wallets": int(opportunity.wallet_count),
                     "leader_wallets": list(opportunity.wallets),
@@ -385,6 +409,10 @@ def run_distilled_opportunities_through_paper_engine(
                     # la table (`edge_from_calibration`) par le moteur de score, jamais declaree ici.
                     "edge_source": "DISTILLED_CANDIDATE_EDGE_NOT_A_MEASUREMENT",
                     "source_profiles": list(opportunity.source_profiles),
+                    "book_costs_are_live": execution_truth is not None,
+                    "execution_snapshot_id": (
+                        execution_truth.snapshot_id if execution_truth is not None else None
+                    ),
                 },
             )
         )
@@ -433,6 +461,34 @@ def _live_book_costs(coin: str) -> tuple[float, float, bool]:
         _env_float("HYPERSMART_FUSION_COPY_SLIPPAGE_BPS", 6.0),
         False,          # <- repli. Marque comme tel dans le contexte de decision.
     )
+
+
+def _live_execution_inputs(
+    coin: str,
+    *,
+    observed_at_ms: int,
+) -> tuple[float, float, ExecutionTruth | None]:
+    """Return measured costs and the exact fresh book used for execution.
+
+    Scalar fallbacks remain visible for diagnostics and risk explanations, but
+    the strict PaperEngine receives ``None`` as execution truth and therefore
+    cannot turn those constants into a fill or PnL.
+    """
+
+    spread_bps, slippage_bps, _ = _live_book_costs(coin)
+    truth: ExecutionTruth | None = None
+    try:
+        from hl_observer.collection.l2_snapshot_cache import live_execution_truth_for
+
+        truth = live_execution_truth_for(
+            str(coin or ""),
+            decision_ts_ms=int(observed_at_ms),
+        )
+    except Exception:
+        _noter_echec("hl_observer/paper_trading/fusion_paper_engine_adapter.py:_live_execution_inputs")
+    if truth is not None:
+        spread_bps = truth.spread_bps
+    return float(spread_bps), float(slippage_bps), truth
 
 
 def _consensus_edge_remaining_bps(conflict: object, *, distinct_wallets: int) -> float:

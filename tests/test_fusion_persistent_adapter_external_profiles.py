@@ -575,7 +575,7 @@ def test_adapter_refuses_copy_profile_direct_order_without_measurable_edge(monke
     )
 
 
-def test_adapter_releases_open_duplicate_key_after_direct_paper_close(monkeypatch):
+def test_closed_position_does_not_release_consumed_event_identity(monkeypatch):
     monkeypatch.setenv("HYPERSMART_EXTERNAL_GITHUB_DIRECT_MATERIALIZATION", "1")
     monkeypatch.setenv("HYPERSMART_AB_RESEARCH_ACK", "1")
     state = UiState()
@@ -640,10 +640,203 @@ def test_adapter_releases_open_duplicate_key_after_direct_paper_close(monkeypatc
 
     assert close_report["applied_count"] == 1
     assert state.simulation_virtual_positions == {}
-    assert "fusion-runtime-order:paper:hype-open-release" not in state.simulation_processed_delta_keys
+    assert "fusion-runtime-order:paper:hype-open-release" in state.simulation_processed_delta_keys
     assert "fusion-runtime-order:paper:hype-close-release" in state.simulation_processed_delta_keys
     assert state.simulation_ledger_events[-1]["paper_action_type"] == "CLOSE"
     assert state.simulation_ledger_events[-1]["source_delta_key"] == "fusion-runtime-order:paper:hype-open-release"
+
+
+def test_direct_close_requires_exact_position_instance(monkeypatch):
+    monkeypatch.setenv("HYPERSMART_EXTERNAL_GITHUB_DIRECT_MATERIALIZATION", "1")
+    monkeypatch.setenv("HYPERSMART_AB_RESEARCH_ACK", "1")
+    state = UiState()
+    state.simulation_virtual_positions = {
+        "ext_strategy_a|HYPE|LONG": {
+            "coin": "HYPE",
+            "side": "LONG",
+            "size": 1.0,
+            "entry_price": 70.0,
+            "entry_costs": 0.0,
+            "wallet_address": "ext_strategy_a",
+            "source_delta_key": "open-a",
+        },
+        "ext_strategy_b|HYPE|LONG": {
+            "coin": "HYPE",
+            "side": "LONG",
+            "size": 2.0,
+            "entry_price": 71.0,
+            "entry_costs": 0.0,
+            "wallet_address": "ext_strategy_b",
+            "source_delta_key": "open-b",
+        },
+    }
+    ambiguous_close = _fusion_status_with_runtime(
+        {
+            "session": {"session_id": "exact-close"},
+            "external_profile_executions": [],
+            "paper_orders": [
+                {
+                    "accepted": True,
+                    "paper_only": True,
+                    "real_execution": False,
+                    "order_id": "paper:hype-close-ambiguous",
+                    "coin": "HYPE",
+                    "side": "LONG",
+                    "notional_usdt": 25.0,
+                    "action": "CLOSE",
+                    "order_type": "PAPER_MARKET",
+                    "strategy_id": "ext_strategy_a",
+                    "reference_price": 72.0,
+                    "metadata": {"fees_bps": 8.0, "paper_only": True},
+                }
+            ],
+        }
+    )
+
+    ambiguous_report = apply_fusion_paper_orders_to_state(state, ambiguous_close, current_ms=127_000)
+
+    assert ambiguous_report["applied_count"] == 0
+    assert "NO_MATCHING_DIRECT_PAPER_POSITION_TO_CLOSE" in ambiguous_report["reasons"]
+    assert set(state.simulation_virtual_positions) == {
+        "ext_strategy_a|HYPE|LONG",
+        "ext_strategy_b|HYPE|LONG",
+    }
+
+    exact_close = _fusion_status_with_runtime(
+        {
+            "session": {"session_id": "exact-close"},
+            "external_profile_executions": [],
+            "paper_orders": [
+                {
+                    "accepted": True,
+                    "paper_only": True,
+                    "real_execution": False,
+                    "order_id": "paper:hype-close-exact",
+                    "coin": "HYPE",
+                    "side": "LONG",
+                    "notional_usdt": 25.0,
+                    "action": "CLOSE",
+                    "order_type": "PAPER_MARKET",
+                    "strategy_id": "ext_strategy_a",
+                    "reference_price": 72.0,
+                    "metadata": {
+                        "fees_bps": 8.0,
+                        "paper_only": True,
+                        "position_key": "ext_strategy_a|HYPE|LONG",
+                    },
+                }
+            ],
+        }
+    )
+
+    exact_report = apply_fusion_paper_orders_to_state(state, exact_close, current_ms=128_000)
+
+    assert exact_report["applied_count"] == 1
+    assert set(state.simulation_virtual_positions) == {"ext_strategy_b|HYPE|LONG"}
+    assert state.simulation_ledger_events[-1]["matched_position_key"] == "ext_strategy_a|HYPE|LONG"
+
+
+def test_direct_ab_entry_and_exit_costs_are_both_in_net_pnl(monkeypatch):
+    monkeypatch.setenv("HYPERSMART_EXTERNAL_GITHUB_DIRECT_MATERIALIZATION", "1")
+    monkeypatch.setenv("HYPERSMART_AB_RESEARCH_ACK", "1")
+    monkeypatch.setenv("HYPERSMART_SIMULATION_LEVERAGE", "1")
+    monkeypatch.setenv("HYPERSMART_MAX_POSITION_USDT", "100")
+    state = UiState()
+    open_status = _fusion_status_with_runtime(
+        {
+            "session": {"session_id": "round-trip-costs"},
+            "external_profile_executions": [],
+            "paper_orders": [
+                {
+                    "accepted": True,
+                    "paper_only": True,
+                    "real_execution": False,
+                    "order_id": "paper:cost-open",
+                    "coin": "HYPE",
+                    "side": "LONG",
+                    "notional_usdt": 100.0,
+                    "action": "OPEN",
+                    "order_type": "PAPER_MARKET",
+                    "strategy_id": "ext_cost_test",
+                    "reference_price": 100.0,
+                    "metadata": {"all_in_cost_bps": 10.0, "paper_only": True},
+                }
+            ],
+        }
+    )
+    assert apply_fusion_paper_orders_to_state(state, open_status, current_ms=129_000)["applied_count"] == 1
+    position_key = "ext_cost_test|HYPE|LONG"
+    assert state.simulation_virtual_positions[position_key]["entry_costs"] == 0.1
+
+    close_status = _fusion_status_with_runtime(
+        {
+            "session": {"session_id": "round-trip-costs"},
+            "external_profile_executions": [],
+            "paper_orders": [
+                {
+                    "accepted": True,
+                    "paper_only": True,
+                    "real_execution": False,
+                    "order_id": "paper:cost-close",
+                    "coin": "HYPE",
+                    "side": "LONG",
+                    "notional_usdt": 101.0,
+                    "action": "CLOSE",
+                    "order_type": "PAPER_MARKET",
+                    "strategy_id": "ext_cost_test",
+                    "reference_price": 101.0,
+                    "metadata": {
+                        "all_in_cost_bps": 10.0,
+                        "paper_only": True,
+                        "position_key": position_key,
+                    },
+                }
+            ],
+        }
+    )
+
+    assert apply_fusion_paper_orders_to_state(state, close_status, current_ms=130_000)["applied_count"] == 1
+    close_event = state.simulation_ledger_events[-1]
+    assert close_event["gross_pnl_usdc"] == 1.0
+    assert close_event["entry_cost_carried_usdc"] == 0.1
+    assert close_event["fee_cost_usdc"] == 0.101
+    assert close_event["total_round_trip_cost_usdc"] == 0.201
+    assert close_event["estimated_net_pnl_usdc"] == 0.799
+    assert state.simulation_realized_pnl_usdc == 0.799
+
+
+def test_direct_ab_missing_execution_cost_is_rejected(monkeypatch):
+    monkeypatch.setenv("HYPERSMART_EXTERNAL_GITHUB_DIRECT_MATERIALIZATION", "1")
+    monkeypatch.setenv("HYPERSMART_AB_RESEARCH_ACK", "1")
+    state = UiState()
+    status = _fusion_status_with_runtime(
+        {
+            "session": {"session_id": "missing-cost"},
+            "external_profile_executions": [],
+            "paper_orders": [
+                {
+                    "accepted": True,
+                    "paper_only": True,
+                    "real_execution": False,
+                    "order_id": "paper:missing-cost",
+                    "coin": "HYPE",
+                    "side": "LONG",
+                    "notional_usdt": 100.0,
+                    "action": "OPEN",
+                    "order_type": "PAPER_MARKET",
+                    "strategy_id": "ext_missing_cost",
+                    "reference_price": 100.0,
+                    "metadata": {"paper_only": True},
+                }
+            ],
+        }
+    )
+
+    report = apply_fusion_paper_orders_to_state(state, status, current_ms=131_000)
+
+    assert report["applied_count"] == 0
+    assert "DIRECT_EXECUTION_COST_UNMEASURABLE" in report["reasons"]
+    assert state.simulation_virtual_positions == {}
 
 
 def test_adapter_refuses_direct_external_order_without_reference_price():
