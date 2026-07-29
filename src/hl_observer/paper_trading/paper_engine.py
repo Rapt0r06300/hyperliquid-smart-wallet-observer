@@ -29,10 +29,13 @@ from hl_observer.simulation.paper_ledger import PaperLedger
 @dataclass(frozen=True, slots=True)
 class PaperEngineConfig:
     starting_cash_usdt: float = 1_000.0
-    max_position_usdt: float = 40.0          # MARGIN per position (capital deployed)
-    max_total_exposure_usdt: float = 1_200.0  # total MARGIN cap (capital), not leveraged notional
+    max_position_usdt: float = 40.0  # Margin per position.
+    # Backward-compatible name: this setting has always capped margin, not
+    # gross notional. New callers should prefer max_total_margin_usdt.
+    max_total_exposure_usdt: float = 1_200.0
+    max_total_margin_usdt: float | None = None
     max_open_positions: int = 60
-    leverage: float = 1.0                     # perp leverage: position notional = margin * leverage
+    leverage: float = 1.0
     default_top_depth_usdt: float | None = None
     strict_execution_truth: bool = True
     max_execution_book_age_ms: int = 5_000
@@ -51,6 +54,9 @@ class PaperPosition:
     opened_at_ms: int
     source_delta_id: str
     leader_wallet: str
+    margin_locked_usdt: float = 0.0
+    leverage_effective: float = 1.0
+    leg_notional_usdt: tuple[float, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -238,7 +244,8 @@ class PaperEngine:
             )
         if len(self._positions) >= self.config.max_open_positions:
             reasons.append("MAX_OPEN_POSITIONS_REACHED")
-        if self._gross_exposure_usdt() >= self.config.max_total_exposure_usdt:
+        margin_cap = self._margin_cap_usdt()
+        if self._margin_locked_usdt() >= margin_cap:
             reasons.append("MAX_TOTAL_EXPOSURE_REACHED")
         if reasons:
             return self._result(
@@ -255,7 +262,10 @@ class PaperEngine:
         # margin_scale (<=1.0) permet un sizing proportionnel (consensus whale)
         # sans jamais dépasser le cap de position ni l'exposition restante.
         safe_scale = min(1.0, max(0.1, float(margin_scale or 1.0)))
-        margin = min(self.config.max_position_usdt * safe_scale, max(0.0, self.config.max_total_exposure_usdt - self._gross_exposure_usdt()))
+        margin = min(
+            self.config.max_position_usdt * safe_scale,
+            max(0.0, margin_cap - self._margin_locked_usdt()),
+        )
         notional = margin * max(1.0, float(self.config.leverage))
         # BUG CORRIGE (chasse aux bugs PnL 2026-07-11) — LA LATENCE N'ETAIT PAS TRANSMISE.
         # `spread_bps` et `estimated_slippage_bps` sont recus en parametres, servent au RiskContext
@@ -342,6 +352,13 @@ class PaperEngine:
                 entry_price=average_entry,
                 notional_usdt=existing.notional_usdt + filled_notional,
                 source_delta_id=delta.delta_id,
+                margin_locked_usdt=(
+                    existing.margin_locked_usdt
+                    + filled_notional / max(1.0, float(self.config.leverage))
+                ),
+                leg_notional_usdt=(
+                    existing.notional_usdt + filled_notional,
+                ),
             )
             trade_action = "ADD"
         else:
@@ -362,6 +379,11 @@ class PaperEngine:
                 opened_at_ms=observed_at_ms,
                 source_delta_id=delta.delta_id,
                 leader_wallet=delta.wallet,
+                margin_locked_usdt=(
+                    filled_notional / max(1.0, float(self.config.leverage))
+                ),
+                leverage_effective=max(1.0, float(self.config.leverage)),
+                leg_notional_usdt=(filled_notional,),
             )
             trade_action = "OPEN"
         self._positions[position_id] = position
@@ -373,6 +395,9 @@ class PaperEngine:
             fill_price=exec_result.fill_price,
             timestamp_ms=observed_at_ms,
             fee_bps=0.0,
+            leverage_effective=max(1.0, float(self.config.leverage)),
+            leg_notional_usd=(filled_notional,),
+            leg_direction=((1 if side == "LONG" else -1),),
             position_id=position_id,
             refs=_ledger_refs(
                 delta,
@@ -538,6 +563,14 @@ class PaperEngine:
                 position,
                 quantity=remaining_quantity,
                 notional_usdt=remaining_quantity * position.entry_price,
+                margin_locked_usdt=(
+                    remaining_quantity
+                    * position.entry_price
+                    / max(1.0, position.leverage_effective)
+                ),
+                leg_notional_usdt=(
+                    remaining_quantity * position.entry_price,
+                ),
             )
         self.ledger.reduce_or_close(
             coin=position.coin,
@@ -622,8 +655,29 @@ class PaperEngine:
         return matches[0] if len(matches) == 1 else None
 
     def _gross_exposure_usdt(self) -> float:
-        # MARGIN terms (capital at risk): notional_usdt is leveraged, divide back by leverage.
-        return sum(position.notional_usdt for position in self._positions.values()) / max(1.0, float(self.config.leverage))
+        return sum(
+            sum(position.leg_notional_usdt)
+            if position.leg_notional_usdt
+            else position.notional_usdt
+            for position in self._positions.values()
+        )
+
+    def _margin_locked_usdt(self) -> float:
+        return sum(
+            position.margin_locked_usdt
+            if position.margin_locked_usdt > 0
+            else (
+                position.notional_usdt
+                / max(1.0, position.leverage_effective)
+            )
+            for position in self._positions.values()
+        )
+
+    def _margin_cap_usdt(self) -> float:
+        explicit = getattr(self.config, "max_total_margin_usdt", None)
+        if explicit is not None:
+            return max(0.0, float(explicit))
+        return max(0.0, float(self.config.max_total_exposure_usdt))
 
     def _no_trade(
         self,

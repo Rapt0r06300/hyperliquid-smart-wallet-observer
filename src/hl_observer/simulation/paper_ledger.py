@@ -7,6 +7,11 @@ from enum import Enum
 from hashlib import sha256
 
 from hl_observer.simulation.accounting_truth import first_not_none, named_roi_metrics
+from hl_observer.simulation.capital_accounting import (
+    CapitalAccountingSnapshot,
+    CapitalAccountingTracker,
+    PositionCapitalInput,
+)
 from hl_observer.simulation.fee_model import compute_fee_usdc
 from hl_observer.simulation.ledger_integrity import GENESIS_HASH, seal_event, verify_chain
 from hl_observer.simulation.paper_event import PaperEvent, PaperEventType
@@ -23,6 +28,11 @@ class LedgerPosition:
     average_entry_price: float
     opened_at_ms: int
     last_mark_price: float
+    leverage_effective: float = 1.0
+    leg_notional_usd: tuple[float, ...] = ()
+    leg_direction: tuple[int, ...] = ()
+    liquidation_buffer_bps: float | None = None
+    last_liquidatable_price: float | None = None
 
     @property
     def notional_usdc(self) -> float:
@@ -33,6 +43,26 @@ class LedgerPosition:
         if self.side == "LONG":
             return (mark - self.average_entry_price) * self.quantity
         return (self.average_entry_price - mark) * self.quantity
+
+    def liquidatable_unrealized(self) -> float | None:
+        if self.last_liquidatable_price is None:
+            return None
+        return self.unrealized(self.last_liquidatable_price)
+
+    def capital_input(self) -> PositionCapitalInput:
+        notionals = self.leg_notional_usd or (self.notional_usdc,)
+        directions = self.leg_direction or (
+            (1 if self.side == "LONG" else -1),
+        )
+        return PositionCapitalInput(
+            position_id=self.position_id,
+            leg_notional_usd=notionals,
+            leg_direction=directions,
+            leverage_effective=self.leverage_effective,
+            unrealized_mid_pnl_usd=self.unrealized(),
+            liquidatable_pnl_usd=self.liquidatable_unrealized(),
+            liquidation_buffer_bps=self.liquidation_buffer_bps,
+        )
 
 
 @dataclass(slots=True)
@@ -48,12 +78,18 @@ class PaperLedger:
     cash_balance_usdc: float | None = None
     high_water_equity_usdc: float | None = None
     drawdown_usdc: float = 0.0
+    turnover_usdc: float = 0.0
+    capital_tracker: CapitalAccountingTracker = field(init=False, repr=False)
 
     def __post_init__(self) -> None:
         if self.cash_balance_usdc is None:
             self.cash_balance_usdc = float(self.starting_balance_usdc)
         if self.high_water_equity_usdc is None:
             self.high_water_equity_usdc = float(self.starting_balance_usdc)
+        self.capital_tracker = CapitalAccountingTracker(
+            starting_equity_usd=self.starting_balance_usdc
+        )
+        self._observe_capital()
 
     @property
     def equity_usdc(self) -> float:
@@ -70,6 +106,10 @@ class PaperLedger:
         fill_price: float,
         timestamp_ms: int,
         fee_bps: float = 4.5,
+        leverage_effective: float = 1.0,
+        leg_notional_usd: tuple[float, ...] | None = None,
+        leg_direction: tuple[int, ...] | None = None,
+        liquidation_buffer_bps: float | None = None,
         position_id: str | None = None,
         refs: dict | None = None,
     ) -> PaperEvent:
@@ -87,6 +127,37 @@ class PaperLedger:
             if quantity is not None
             else float(notional_usdc) / float(fill_price)
         )
+        if not _finite_positive(leverage_effective):
+            return self.no_trade(
+                coin=coin,
+                reason="CAPITAL_LEVERAGE_INVALID",
+                timestamp_ms=timestamp_ms,
+                refs=refs,
+            )
+        leverage = max(1.0, float(leverage_effective))
+        new_leg_notional = tuple(
+            float(value)
+            for value in (leg_notional_usd or (float(notional_usdc),))
+        )
+        new_leg_direction = tuple(
+            int(value)
+            for value in (
+                leg_direction
+                or ((1 if normalized_side == "LONG" else -1),)
+            )
+        )
+        if (
+            len(new_leg_notional) != len(new_leg_direction)
+            or not new_leg_notional
+            or any(not _finite_positive(value) for value in new_leg_notional)
+            or any(direction not in {-1, 1} for direction in new_leg_direction)
+        ):
+            return self.no_trade(
+                coin=coin,
+                reason="CAPITAL_LEG_SCHEMA_INVALID",
+                timestamp_ms=timestamp_ms,
+                refs=refs,
+            )
         key = self._position_key(
             coin,
             normalized_side,
@@ -94,11 +165,45 @@ class PaperLedger:
         )
         existing = self.positions.get(key)
         if existing:
+            existing_directions = existing.leg_direction or (
+                (1 if existing.side == "LONG" else -1),
+            )
+            existing_notionals = existing.leg_notional_usd or (
+                existing.notional_usdc,
+            )
+            if (
+                len(existing_notionals) != len(new_leg_notional)
+                or existing_directions != new_leg_direction
+            ):
+                return self.no_trade(
+                    coin=coin,
+                    reason="CAPITAL_LEG_SCHEMA_MISMATCH",
+                    timestamp_ms=timestamp_ms,
+                    refs=refs,
+                )
             new_qty = existing.quantity + qty
             avg = ((existing.quantity * existing.average_entry_price) + (qty * fill_price)) / new_qty
+            combined_legs = _combine_leg_notionals(
+                existing_notionals,
+                new_leg_notional,
+            )
+            existing_margin = sum(existing_notionals) / max(
+                1.0,
+                existing.leverage_effective,
+            )
+            added_margin = sum(new_leg_notional) / leverage
             existing.quantity = new_qty
             existing.average_entry_price = avg
             existing.last_mark_price = fill_price
+            existing.leverage_effective = sum(combined_legs) / (
+                existing_margin + added_margin
+            )
+            existing.leg_notional_usd = combined_legs
+            existing.leg_direction = new_leg_direction
+            existing.liquidation_buffer_bps = _minimum_optional(
+                existing.liquidation_buffer_bps,
+                liquidation_buffer_bps,
+            )
             event_type = PaperEventType.POSITION_INCREASED
         else:
             self.positions[key] = LedgerPosition(
@@ -109,8 +214,16 @@ class PaperLedger:
                 average_entry_price=float(fill_price),
                 opened_at_ms=int(timestamp_ms),
                 last_mark_price=float(fill_price),
+                leverage_effective=leverage,
+                leg_notional_usd=new_leg_notional,
+                leg_direction=new_leg_direction,
+                liquidation_buffer_bps=liquidation_buffer_bps,
             )
             event_type = PaperEventType.POSITION_OPENED
+        self.turnover_usdc = round(
+            self.turnover_usdc + sum(new_leg_notional),
+            10,
+        )
         fee = compute_fee_usdc(notional_usdc, fee_bps)
         fee_event = self._charge_fee(
             fee,
@@ -138,7 +251,9 @@ class PaperLedger:
             fee_usdc=fee,
             refs=event_refs,
         )
-        return self._append(event)
+        appended = self._append(event)
+        self._observe_capital()
+        return appended
 
     def reduce_or_close(
         self,
@@ -188,6 +303,23 @@ class PaperLedger:
         )
         pos.quantity -= close_qty
         pos.last_mark_price = float(fill_price)
+        close_fraction = min(1.0, close_qty / max(close_qty + pos.quantity, 1e-12))
+        closed_leg_notional = tuple(
+            value * close_fraction
+            for value in (pos.leg_notional_usd or (notional,))
+        )
+        self.turnover_usdc = round(
+            self.turnover_usdc + sum(closed_leg_notional),
+            10,
+        )
+        pos.leg_notional_usd = tuple(
+            max(0.0, value - closed)
+            for value, closed in zip(
+                pos.leg_notional_usd or (notional,),
+                closed_leg_notional,
+                strict=True,
+            )
+        )
         fully_closed = pos.quantity <= 1e-12
         if fully_closed:
             del self.positions[key]
@@ -216,12 +348,22 @@ class PaperLedger:
         self.mark_to_market({str(coin).upper(): float(fill_price)}, timestamp_ms=timestamp_ms)
         return event
 
-    def mark_to_market(self, marks: dict[str, float], *, timestamp_ms: int) -> PaperEvent:
+    def mark_to_market(
+        self,
+        marks: dict[str, float],
+        *,
+        timestamp_ms: int,
+        liquidatable_marks: dict[str, float] | None = None,
+    ) -> PaperEvent:
         total = 0.0
         for pos in self.positions.values():
             mark = marks.get(pos.coin, pos.last_mark_price)
             if mark and mark > 0:
                 pos.last_mark_price = float(mark)
+            pos.last_liquidatable_price = _position_mark(
+                pos,
+                liquidatable_marks or {},
+            )
             total += pos.unrealized()
         self.unrealized_pnl_usdc = round(total, 10)
         equity = self.equity_usdc
@@ -236,7 +378,9 @@ class PaperLedger:
             drawdown_usdc=self.drawdown_usdc,
             refs={"marks": dict(marks)},
         )
-        return self._append(event)
+        appended = self._append(event)
+        self._observe_capital()
+        return appended
 
     def apply_funding(
         self,
@@ -251,7 +395,7 @@ class PaperLedger:
         cash = first_not_none(self.cash_balance_usdc, 0.0)
         self.cash_balance_usdc = float(cash) + float(amount_usdc)
         event_type = PaperEventType.FUNDING_RECEIVED if amount_usdc >= 0 else PaperEventType.FUNDING_CHARGED
-        return self._append(
+        appended = self._append(
             PaperEvent.create(
                 event_type,
                 timestamp_ms=timestamp_ms,
@@ -261,6 +405,8 @@ class PaperLedger:
                 refs=refs or {},
             )
         )
+        self._observe_capital()
+        return appended
 
     def no_trade(
         self,
@@ -306,6 +452,7 @@ class PaperLedger:
             "funding_net_usdc": round(self.funding_net_usdc, 10),
             "equity_usdc": self.equity_usdc,
             "drawdown_usdc": self.drawdown_usdc,
+            "turnover_usdc": round(self.turnover_usdc, 10),
             "positions": {
                 key: {
                     "coin": pos.coin,
@@ -315,6 +462,21 @@ class PaperLedger:
                     "average_entry_price": round(pos.average_entry_price, 10),
                     "last_mark_price": round(pos.last_mark_price, 10),
                     "unrealized_pnl_usdc": round(pos.unrealized(), 10),
+                    "liquidatable_pnl_usdc": (
+                        round(pos.liquidatable_unrealized(), 10)
+                        if pos.liquidatable_unrealized() is not None
+                        else None
+                    ),
+                    "leverage_effective": round(pos.leverage_effective, 10),
+                    "leg_notional_usd": [
+                        round(value, 10)
+                        for value in (pos.leg_notional_usd or (pos.notional_usdc,))
+                    ],
+                    "leg_direction": list(
+                        pos.leg_direction
+                        or ((1 if pos.side == "LONG" else -1),)
+                    ),
+                    "liquidation_buffer_bps": pos.liquidation_buffer_bps,
                 }
                 for key, pos in sorted(self.positions.items())
             },
@@ -324,14 +486,39 @@ class PaperLedger:
             "last_event_hash": self.events[-1].event_hash if self.events else GENESIS_HASH,
             "roi": roi_metrics.to_dict(),
             "reconciliation": asdict(self.reconciliation()),
+            "capital_accounting": self.capital_snapshot().to_dict(),
         }
         pnl_audit = audit_paper_ledger(
             (event.to_dict() for event in self.events),
             snapshot=payload,
         )
         payload["pnl_audit"] = pnl_audit.to_dict()
+        capital = self.capital_snapshot()
+        payload["authoritative_equity_usdc"] = capital.liquidatable_equity_usd
         payload["strict_pnl_allowed"] = pnl_audit.pnl_valid
+        payload["strict_roi_allowed"] = (
+            pnl_audit.pnl_valid
+            and capital.liquidatable_equity_usd is not None
+        )
         return payload
+
+    def capital_snapshot(self) -> CapitalAccountingSnapshot:
+        latest = self.capital_tracker.latest
+        if latest is None:
+            return self._observe_capital()
+        return latest
+
+    def _observe_capital(self) -> CapitalAccountingSnapshot:
+        cash = float(first_not_none(self.cash_balance_usdc, 0.0))
+        return self.capital_tracker.observe(
+            collateral_cash_usd=cash,
+            positions=tuple(
+                position.capital_input()
+                for position in self.positions.values()
+            ),
+            realized_pnl_usd=cash - self.starting_balance_usdc,
+            turnover_usd=self.turnover_usdc,
+        )
 
     def _charge_fee(
         self,
@@ -454,6 +641,41 @@ def _finite_positive(value: object) -> bool:
     except (TypeError, ValueError, OverflowError):
         return False
     return math.isfinite(parsed) and parsed > 0
+
+
+def _combine_leg_notionals(
+    existing: tuple[float, ...],
+    added: tuple[float, ...],
+) -> tuple[float, ...]:
+    if len(existing) != len(added):
+        raise ValueError("capital leg schemas must have the same length")
+    return tuple(
+        float(current) + float(increment)
+        for current, increment in zip(existing, added, strict=True)
+    )
+
+
+def _minimum_optional(
+    left: float | None,
+    right: float | None,
+) -> float | None:
+    values = [float(value) for value in (left, right) if value is not None]
+    return min(values) if values else None
+
+
+def _position_mark(
+    position: LedgerPosition,
+    marks: dict[str, float],
+) -> float | None:
+    for key in (
+        position.position_id,
+        f"{position.coin}:{position.side}",
+        position.coin,
+    ):
+        value = marks.get(key)
+        if _finite_positive(value):
+            return float(value)
+    return None
 
 
 __all__ = ["LedgerPosition", "PaperLedger", "LedgerScope", "ScopedLedgerBook"]

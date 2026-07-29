@@ -58,9 +58,11 @@ def test_leverage_scales_pnl_and_keeps_margin_exposure():
     assert u5 >= 3.0                       # ~5$ on 100$ @5x for +1% (minus fees) -> euros, not cents
     assert 4.0 < (u5 / u1) < 6.0           # scales ~linearly with leverage
 
-    # EXPOSURE is measured in MARGIN (capital), identical regardless of leverage -> caps protect 1000$
-    assert abs(e1._gross_exposure_usdt() - e5._gross_exposure_usdt()) < 1e-6
-    assert e5._gross_exposure_usdt() <= 100.0 + 1e-6
+    # Margin is the capital locked by the risk cap; gross exposure is leveraged
+    # notional and must not be mislabeled as margin.
+    assert abs(e1._margin_locked_usdt() - e5._margin_locked_usdt()) < 1e-6
+    assert e5._margin_locked_usdt() <= 100.0 + 1e-6
+    assert 4.9 < e5._gross_exposure_usdt() / e1._gross_exposure_usdt() < 5.1
 
     # the stored position notional IS leveraged (true HL position size)
     assert abs(e5.positions[0].notional_usdt / e1.positions[0].notional_usdt - 5.0) < 0.05
