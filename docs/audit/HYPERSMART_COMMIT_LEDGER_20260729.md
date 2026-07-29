@@ -6,6 +6,7 @@ commit correspondant; aucun état `DONE` n'est déduit d'un simple flag.
 
 | Bloc | Objet | SHA code | Tests | Preuve runtime | Statut |
 |---:|---|---|---|---|---|
+| 10 | Decisions lead-lag paper evenementielles | `8024534` | 57 tests lead-lag/runtime/causal/integration verts + Ruff cible | Dispatch synchrone depuis chaque vrai trade Binance vers le dernier BBO HL causal; budget `demi-vie P95 > latence P95 + marge`; preuve locale actuelle rejetee -> runtime `enabled=false`, 0 position, `real_execution=false` | DONE |
 | 9 | Preuve lead-lag gelee et consommable | `7f750fc` | 49 tests lead-lag/causal/integration/lanceur verts + Ruff | Tape locale 60.6 MB : cadence mediane HL/coin `7129.28 ms`, aucun horizon 50-1000 ms observable, artefact `REJECTED`, lecteur runtime `EVIDENCE_NOT_PROMOTED`; aucune valeur inventee | DONE |
 | 8 | Execution cross-venue non atomique | `0fb83c7` | 57 tests cross-venue/paper/ledger verts + Ruff | Appel live read-only HL/Binance dans les deux ordres; P50/P95/P99 mesures; snapshots distincts; residu deboucle ou explicite; deux ledgers `TRUSTED`, chaines valides | DONE |
 | 3 | Contrat d'horodatage causal et fraîcheur après redémarrage | `4589481` | 59 tests ciblés verts | Appel runtime : frais à 120 ms, même snapshot refusé à 2120 ms ; données legacy sans wall clock refusées `TS_ABSENT` | DONE |
