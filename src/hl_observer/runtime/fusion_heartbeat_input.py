@@ -11,18 +11,17 @@ from __future__ import annotations
 import json
 import os
 import time
-from dataclasses import dataclass, asdict
+from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any
 
 from sqlalchemy import desc
 from sqlalchemy.orm import Session
 
-from hl_observer.storage.models import MarketSnapshot, PositionDeltaModel, TopWallet
-from hl_observer.utils.time import now_ms
 from hl_observer.ops.echec_silencieux import noter as _noter_echec
 from hl_observer.simulation.accounting_truth import first_not_none
-
+from hl_observer.storage.models import MarketSnapshot, PositionDeltaModel, TopWallet
+from hl_observer.utils.time import now_ms
 
 ENTRY_ACTIONS = {"OPEN_LONG", "OPEN_SHORT", "ADD", "INCREASE", "ADD_LONG", "ADD_SHORT", "INCREASE_LONG", "INCREASE_SHORT"}
 DEFAULT_FRESH_WINDOW_MS = 60_000
@@ -303,7 +302,8 @@ def write_fusion_runtime_input_to_engine_status(
         open_exposure_usdt=state_summary["open_exposure_usdt"],
     )
     payload = _read_json_object(engine_status_path)
-    payload.setdefault("updated_at_ms", int(current_ms or now_ms()))
+    status_updated_at_ms = int(current_ms or now_ms())
+    payload["updated_at_ms"] = status_updated_at_ms
     payload.setdefault("phase", "fusion_runtime_input")
     payload.setdefault("message", report.message)
     payload.setdefault("read_only", True)
@@ -353,6 +353,15 @@ def write_fusion_runtime_input_to_engine_status(
         }
     )
     payload["metrics"] = metrics
+    from hl_observer.runtime.status_freshness import stamp_status_fields
+
+    stamp_status_fields(
+        payload,
+        ("fusion_runtime_group",),
+        producer="fusion_heartbeat_input",
+        session_id=str(payload.get("session_id") or ""),
+        updated_at_ms=status_updated_at_ms,
+    )
     _write_json_atomic(engine_status_path, payload)
     return report
 

@@ -10,6 +10,9 @@ from sqlalchemy.orm import Session, sessionmaker
 from hl_observer.collection.collector import InvalidWalletAddress, validate_wallet_address
 from hl_observer.config.settings import Settings
 from hl_observer.hyperliquid.endpoints import info_url_for_settings
+from hl_observer.hyperliquid.rate_weights import (
+    HYPERSMART_INFO_TIME_RANGE_PAGE_LIMIT,
+)
 from hl_observer.hyperliquid.rest_info_client import (
     HyperliquidInfoClient,
     HyperliquidInfoError,
@@ -25,8 +28,8 @@ from hl_observer.storage.repositories import CollectionRepository, stable_payloa
 from hl_observer.utils.time import now_ms
 from hl_observer.wallets.activity_summary import summarize_wallet_activity
 from hl_observer.wallets.per_coin_scoring import score_wallet_coin
-from hl_observer.wallets.wallet_coin_profile import build_wallet_coin_profiles
 from hl_observer.wallets.position_rebuilder import rebuild_positions_from_fills
+from hl_observer.wallets.wallet_coin_profile import build_wallet_coin_profiles
 
 DEFAULT_BACKFILL_WINDOW_MS = 7 * 24 * 60 * 60 * 1000
 
@@ -365,10 +368,16 @@ async def _fetch_user_fills_by_time(
             page_index += 1
             pages_results.append((page, None, latency))
             
-            if page_window_ms and len(page) < 2000:  # MAX_USER_FILLS_PAGE_SIZE = 2000
+            if (
+                page_window_ms
+                and len(page) < HYPERSMART_INFO_TIME_RANGE_PAGE_LIMIT
+            ):
                 cursor = request_end + 1
                 continue
-            if not page_window_ms and len(page) < 2000:
+            if (
+                not page_window_ms
+                and len(page) < HYPERSMART_INFO_TIME_RANGE_PAGE_LIMIT
+            ):
                 break
             page_times = [int(fill["time"]) for fill in page if "time" in fill]
             if not page_times:
@@ -515,9 +524,8 @@ def _process_fetched_user_fills_by_time(
 ) -> None:
     if not pages_results:
         return
-        
-    page_index = 0
-    for page, exc, latency in pages_results:
+
+    for page_index, (page, exc, latency) in enumerate(pages_results, start=1):
         if exc is not None:
             error_message = str(exc)
             result.errors_count += 1
@@ -547,8 +555,7 @@ def _process_fetched_user_fills_by_time(
                 )
                 result.raw_events_stored += 1
             break
-            
-        page_index += 1
+
         repo.add_collection_item(
             run_id=run_id,
             item_type=f"userFillsByTime:{page_index}",
@@ -587,7 +594,7 @@ async def _backfill_wallets(
     fetched_results = await asyncio.gather(*fetch_tasks)
 
     # 2. Process and write sequentially to the database
-    for wallet, network_data in zip(plan.wallets, fetched_results):
+    for wallet, network_data in zip(plan.wallets, fetched_results, strict=True):
         repo.ensure_wallet(wallet)
         backfill_run = repo.create_wallet_backfill_run(
             wallet_address=wallet,

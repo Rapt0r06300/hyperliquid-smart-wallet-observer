@@ -31,10 +31,12 @@ import subprocess
 import sys
 import tempfile
 import time
-from dataclasses import dataclass, field
+from collections.abc import Callable
+from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any
+
 from hl_observer.ops.echec_silencieux import noter as _noter_echec
 
 EXIT_STOP = 0
@@ -70,6 +72,8 @@ _FUSION_PRESERVED_METRICS = (
     "fusion_runtime_starting_equity_usdt", "fusion_runtime_peak_equity_usdt",
     "fusion_runtime_open_exposure_usdt",
 )
+_FUSION_STATUS_GROUP = "fusion_runtime_group"
+_FUSION_STATUS_MAX_AGE_MS = 30_000
 
 
 def now_ms() -> int:
@@ -106,6 +110,9 @@ class RunnerConfig:
     start_poll_index: int = 1
     fills_multiplex: bool = False
     fills_multiplex_connections: int = 4
+    fills_multiplex_max_restarts: int = 5
+    fills_multiplex_restart_window_ms: int = 300_000
+    fills_multiplex_log_max_bytes: int = 5_000_000
 
     @property
     def logs_dir(self) -> Path:
@@ -170,6 +177,7 @@ class PersistentPollRunner:
         self.current_poll = 0
         self._cli_runner = None
         self._session_id = ""
+        self._fills_supervisor: Any | None = None
 
     # ------------------------------------------------------------------ infra
 
@@ -224,13 +232,34 @@ class PersistentPollRunner:
                 existing = json.loads(
                     self.config.engine_status_path.read_text(encoding="utf-8-sig")
                 )
-                for key in _FUSION_PRESERVED_TOP_KEYS:
-                    if existing.get(key) is not None:
-                        preserved_top[key] = existing[key]
-                old_metrics = existing.get("metrics") or {}
-                for key in _FUSION_PRESERVED_METRICS:
-                    if key in old_metrics:
-                        self.metrics[key] = str(old_metrics[key])
+                from hl_observer.runtime.status_freshness import status_field_is_fresh
+
+                fusion_fresh = status_field_is_fresh(
+                    existing,
+                    _FUSION_STATUS_GROUP,
+                    current_ms=self._now_ms(),
+                    session_id=self._session_id,
+                    max_age_ms=_FUSION_STATUS_MAX_AGE_MS,
+                )
+                if fusion_fresh:
+                    for key in _FUSION_PRESERVED_TOP_KEYS:
+                        if existing.get(key) is not None:
+                            preserved_top[key] = existing[key]
+                    old_metrics = existing.get("metrics") or {}
+                    for key in _FUSION_PRESERVED_METRICS:
+                        if key in old_metrics:
+                            self.metrics[key] = str(old_metrics[key])
+                    if isinstance(existing.get("status_field_meta"), dict):
+                        preserved_top["status_field_meta"] = existing["status_field_meta"]
+                else:
+                    for key in _FUSION_PRESERVED_METRICS:
+                        self.metrics.pop(key, None)
+                    if any(existing.get(key) is not None for key in _FUSION_PRESERVED_TOP_KEYS):
+                        preserved_top["fusion_runtime_input_status"] = "STALE"
+                        preserved_top["fusion_runtime_input_message"] = (
+                            "Ancien statut fusion non reutilise: producteur, session "
+                            "ou horodatage perime."
+                        )
             except Exception:  # noqa: BLE001 - best-effort, comme le .ps1
                 _noter_echec("hl_observer/runtime/persistent_poll_runner.py:233")
             for metric_key, env_key in _BASE_ENV_METRICS.items():
@@ -604,32 +633,72 @@ class PersistentPollRunner:
         No-op si HYPERSMART_FILLS_MULTIPLEX n'est pas explicitement actif."""
         if not self.config.fills_multiplex:
             return None
-        conns = max(1, int(self.config.fills_multiplex_connections))
+        conns = max(1, min(10, int(self.config.fills_multiplex_connections)))
         try:
+            from hl_observer.runtime.child_process_supervisor import (
+                ChildProcessSupervisor,
+            )
+
             argv = [
                 sys.executable, "-u", "-m", "hl_observer.wallets.user_fills_multiplex",
                 "--network-read", "--max-connections", str(conns),
                 "--max-live-fill-age-ms", str(self.config.user_fills_max_live_age_ms),
             ]
-            proc = subprocess.Popen(  # noqa: S603 - argv local, read-only, jamais d'ordre
-                argv, stdout=subprocess.DEVNULL, stderr=subprocess.STDOUT, cwd=str(self.config.root)
+            supervisor = ChildProcessSupervisor(
+                name="fills-multiplex",
+                argv=argv,
+                cwd=self.config.root,
+                log_path=self.config.logs_dir / "user_fills_multiplex.log",
+                spawn=self._popen,
+                now_ms=self._now_ms,
+                announce=self.log,
+                max_restarts=self.config.fills_multiplex_max_restarts,
+                restart_window_ms=self.config.fills_multiplex_restart_window_ms,
+                max_log_bytes=self.config.fills_multiplex_log_max_bytes,
             )
-            self.log(f"fills-multiplex firehose demarre (always-on) connections={conns} pid={proc.pid} read_only=true")
+            status = supervisor.start()
             self.metrics["fills_multiplex_connections"] = str(conns)
-            return proc
+            self._record_fills_supervisor_status(status)
+            self._fills_supervisor = supervisor
+            return supervisor
         except Exception as exc:  # noqa: BLE001 - un firehose qui ne demarre pas n'arrete pas la boucle
-            self.log(f"fills-multiplex spawn failed (absorbe): {exc}")
+            self.log(f"fills-multiplex spawn failed: {exc}")
+            self.metrics["fills_multiplex_status"] = "SPAWN_FAILED"
+            self.metrics["fills_multiplex_error"] = repr(exc)
             return None
 
-    def _terminate_fills_multiplex(self, proc: Any | None) -> None:
-        if proc is None:
+    def _check_fills_multiplex(self, supervisor: Any | None) -> Any | None:
+        if supervisor is None:
+            if self.config.fills_multiplex:
+                return self._spawn_fills_multiplex()
+            return None
+        try:
+            status = supervisor.check_and_recover()
+            self._record_fills_supervisor_status(status)
+        except Exception as exc:  # noqa: BLE001
+            self.log(f"fills-multiplex supervision failed: {exc}")
+            self.metrics["fills_multiplex_status"] = "SUPERVISION_FAILED"
+            self.metrics["fills_multiplex_error"] = repr(exc)
+        return supervisor
+
+    def _record_fills_supervisor_status(self, status: Any) -> None:
+        self.metrics["fills_multiplex_status"] = str(status.state)
+        self.metrics["fills_multiplex_pid"] = str(status.pid or "")
+        self.metrics["fills_multiplex_restart_count"] = str(status.restart_count)
+        self.metrics["fills_multiplex_last_exit_code"] = str(
+            status.last_exit_code if status.last_exit_code is not None else ""
+        )
+        self.metrics["fills_multiplex_last_checked_at_ms"] = str(
+            status.last_checked_at_ms
+        )
+        self.metrics["fills_multiplex_log_path"] = str(status.log_path)
+
+    def _terminate_fills_multiplex(self, supervisor: Any | None) -> None:
+        if supervisor is None:
             return
         try:
-            proc.terminate()
-            try:
-                proc.wait(timeout=10)
-            except Exception:  # noqa: BLE001
-                proc.kill()
+            status = supervisor.stop()
+            self._record_fills_supervisor_status(status)
         except Exception:  # noqa: BLE001
             _noter_echec("hl_observer/runtime/persistent_poll_runner.py:600")
 
@@ -661,6 +730,7 @@ class PersistentPollRunner:
         self.write_engine_status("starting", "Poller simulation Hyperliquid en demarrage (runner persistant T44).")
         fills_mux = self._spawn_fills_multiplex()
         for i in range(max(1, cfg.start_poll_index), cfg.max_runs + 1):
+            fills_mux = self._check_fills_multiplex(fills_mux)
             if self.stop_requested():
                 self.log("Stop demande (stop-file): arret propre du runner persistant.")
                 self.write_engine_status("finished", "Poller simulation termine (stop demande).")
@@ -671,6 +741,7 @@ class PersistentPollRunner:
             except Exception as exc:  # noqa: BLE001 - un poll casse n'arrete pas la boucle
                 self.log(f"poll failed: {exc!r}")
                 self.write_engine_status("poll_failed", f"Erreur poller: {exc!r}")
+            fills_mux = self._check_fills_multiplex(fills_mux)
             if cfg.restart_every_polls > 0 and i % cfg.restart_every_polls == 0 and i < cfg.max_runs:
                 self.log(f"Self-restart apres {i} polls (garde-fou memoire du process chaud); le lanceur relance.")
                 self.write_engine_status("self_restart", "Runner persistant: rotation planifiee du process.")
@@ -722,7 +793,24 @@ def build_config(argv: list[str] | None = None) -> RunnerConfig:
         start_poll_index=args.start_poll_index,
         fills_multiplex=str(os.environ.get("HYPERSMART_FILLS_MULTIPLEX", "")).strip().lower()
         in {"1", "true", "yes", "on"},
-        fills_multiplex_connections=max(1, min(8, _env_int("HYPERSMART_FILLS_MULTIPLEX_CONNECTIONS", 4))),
+        fills_multiplex_connections=max(1, min(10, _env_int("HYPERSMART_FILLS_MULTIPLEX_CONNECTIONS", 4))),
+        fills_multiplex_max_restarts=max(
+            0, _env_int("HYPERSMART_FILLS_MULTIPLEX_MAX_RESTARTS", 5)
+        ),
+        fills_multiplex_restart_window_ms=max(
+            1,
+            _env_int(
+                "HYPERSMART_FILLS_MULTIPLEX_RESTART_WINDOW_MS",
+                300_000,
+            ),
+        ),
+        fills_multiplex_log_max_bytes=max(
+            1,
+            _env_int(
+                "HYPERSMART_FILLS_MULTIPLEX_LOG_MAX_BYTES",
+                5_000_000,
+            ),
+        ),
     )
 
 

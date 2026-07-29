@@ -118,7 +118,7 @@ def test_failing_step_absorbed_loop_continues(tmp_path):
     assert runner.metrics.get("step_failed_opportunity_report") == "1"
 
 
-def test_engine_status_schema_and_fusion_preserved(tmp_path):
+def test_engine_status_schema_does_not_preserve_unstamped_fusion(tmp_path):
     (tmp_path / "runtime" / "data").mkdir(parents=True, exist_ok=True)
     pre = {"updated_at_ms": 1, "phase": "old", "fusion_runtime_input": {"votes": 3},
            "metrics": {"fusion_runtime_votes": "3"}}
@@ -132,8 +132,9 @@ def test_engine_status_schema_and_fusion_preserved(tmp_path):
     assert status["read_only"] is True
     assert status["simulation_only"] is True
     assert status["external_action"] is False
-    assert status["fusion_runtime_input"] == {"votes": 3}          # preserve
-    assert status["metrics"]["fusion_runtime_votes"] == "3"        # preserve
+    assert "fusion_runtime_input" not in status
+    assert status["fusion_runtime_input_status"] == "STALE"
+    assert "fusion_runtime_votes" not in status["metrics"]
     assert status["metrics"]["loop_mode"] == "persistent_t44"
     assert "poll_total_ms" in status["metrics"]
     assert any(k.startswith("step_ms_") for k in status["metrics"])
