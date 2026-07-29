@@ -3,9 +3,55 @@
 from __future__ import annotations
 
 from collections.abc import Iterable
+from dataclasses import asdict, dataclass
 from typing import Any
 
 STATUS_FIELD_META_KEY = "status_field_meta"
+
+
+@dataclass(frozen=True, slots=True)
+class ComponentSLA:
+    component: str
+    max_age_ms: int
+    required: bool = True
+
+
+def component_health(
+    payload: dict[str, Any],
+    sla: ComponentSLA,
+    *,
+    current_ms: int,
+    session_id: str,
+) -> dict[str, Any]:
+    meta = payload.get(STATUS_FIELD_META_KEY)
+    stamp = meta.get(sla.component) if isinstance(meta, dict) else None
+    if not isinstance(stamp, dict):
+        status = "MISSING" if sla.required else "OPTIONAL_MISSING"
+        return {**asdict(sla), "status": status, "age_ms": None, "error": "STATUS_FIELD_MISSING"}
+    try:
+        updated_at_ms = int(stamp["updated_at_ms"])
+        age_ms = int(current_ms) - updated_at_ms
+    except (KeyError, TypeError, ValueError):
+        return {
+            **asdict(sla),
+            "status": "READ_ERROR",
+            "age_ms": None,
+            "error": "STATUS_TIMESTAMP_INVALID",
+        }
+    stamped_session = str(stamp.get("session_id") or "")
+    if session_id and stamped_session != session_id:
+        return {
+            **asdict(sla),
+            "status": "SESSION_MISMATCH",
+            "age_ms": age_ms,
+            "error": f"{stamped_session}!={session_id}",
+        }
+    return {
+        **asdict(sla),
+        "status": "HEALTHY" if 0 <= age_ms <= sla.max_age_ms else "STALE",
+        "age_ms": age_ms,
+        "error": None if 0 <= age_ms <= sla.max_age_ms else "SLA_EXCEEDED",
+    }
 
 
 def stamp_status_fields(
@@ -55,6 +101,8 @@ def status_field_is_fresh(
 
 __all__ = [
     "STATUS_FIELD_META_KEY",
+    "ComponentSLA",
+    "component_health",
     "stamp_status_fields",
     "status_field_is_fresh",
 ]

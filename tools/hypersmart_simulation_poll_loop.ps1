@@ -7,11 +7,11 @@ param(
     [int]$FreshWindowMinutes = 15,
     [int]$MaxPages = 1,
     [string]$PublicTradeCoins = "AUTO",
-    [int]$PublicTradeMaxCoins = 40,
+    [int]$PublicTradeMaxCoins = 60,
     [int]$PublicTradeScanSeconds = 8,
     [int]$PublicTradeMaxWallets = 10000,
     [int]$PublicTradeScanEveryPolls = 1,
-    [int]$UserFillsMaxLiveAgeMs = 120000,
+    [int]$UserFillsMaxLiveAgeMs = 20000,
     [int]$MaxRuns = 5760,
     # Cadence 2026-07-07: le poll prenait ~200s au lieu de 15s parce que CHAQUE poll
     # payait ~14 demarrages python dont des etapes de diagnostic lourdes. Les plans et

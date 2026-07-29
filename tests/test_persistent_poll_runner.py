@@ -12,7 +12,9 @@ from hl_observer.runtime.persistent_poll_runner import (
     EXIT_STOP,
     PersistentPollRunner,
     RunnerConfig,
+    structured_metric_line,
 )
+from hl_observer.runtime.session_identity import demarrer_session
 
 
 class _FakeProc:
@@ -28,6 +30,7 @@ class _FakeProc:
 
 def _mk(tmp_path, *, max_runs=1, overlap=False, restart_every=0, fail_labels=(), on_step=None):
     journal: list[str] = []
+    demarrer_session(tmp_path, session_id="S-TEST", now_ms=1)
     cfg = RunnerConfig(
         root=tmp_path, interval_seconds=15, max_runs=max_runs,
         plans_every_polls=5, diagnostics_every_polls=5,
@@ -41,13 +44,18 @@ def _mk(tmp_path, *, max_runs=1, overlap=False, restart_every=0, fail_labels=(),
             on_step(label)
         if label in fail_labels:
             return 1, f"{label} boom"
-        return 0, f"ok_metric=1\ninline value_a=2 for {label}"
+        return 0, structured_metric_line(
+            "ok_metric", 1, session_id="S-TEST", timestamp_ms=2,
+        )
 
     def fake_popen(argv, stdout_file):
         # argv = [python, -u, -m, hl_observer, <command>, ...]
         label = argv[4]
         journal.append(f"spawn:{label}")
-        stdout_file.write(f"{label.replace('-', '_')}_ws=1\n")
+        stdout_file.write(structured_metric_line(
+            f"{label.replace('-', '_')}_ws", 1,
+            session_id="S-TEST", timestamp_ms=2,
+        ) + "\n")
         return _FakeProc(journal, label)
 
     runner = PersistentPollRunner(

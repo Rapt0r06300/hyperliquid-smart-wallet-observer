@@ -9,7 +9,7 @@ never places, signs, or sends anything.
 from __future__ import annotations
 
 from hl_observer.storage.run_context import RunContext
-from hl_observer.strategies.models import StrategyDefinition
+from hl_observer.strategies.models import StrategyDefinition, StrategyLane
 
 
 class PaperStrategyRegistry:
@@ -54,6 +54,19 @@ class PaperStrategyRegistry:
         if defn is None or not defn.enabled:
             return False
         return defn.valid_in(context)
+
+    def can_open(
+        self,
+        strategy_id: str,
+        *,
+        context: RunContext,
+        lane: StrategyLane = StrategyLane.STRICT,
+    ) -> bool:
+        """Capability-based admission; strategy names never grant access."""
+        definition = self.get(strategy_id)
+        if definition is None or not definition.valid_in(context):
+            return False
+        return definition.can_open(lane)
 
 
 __all__ = ["PaperStrategyRegistry"]

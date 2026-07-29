@@ -4,7 +4,8 @@ from __future__ import annotations
 import json
 
 from hl_observer.runtime.session_identity import (
-    SESSION_ENV, demarrer_session, lire_manifest, session_courante, verifier_coherence,
+    SESSION_ENV, demarrer_session, lire_manifest, session_courante, terminer_session,
+    verifier_coherence,
 )
 
 
@@ -58,3 +59,12 @@ def test_verifier_ledger_melange_detecte(tmp_path, monkeypatch):
     ledger.write_text(json.dumps({"ts_ms": START + 60_000, "event": "OPEN"}) + "\n", encoding="utf-8")
     ok2, motifs2 = verifier_coherence(tmp_path)
     assert ok2 and motifs2 == []
+
+
+def test_session_terminee_ne_peut_pas_etre_reprise(tmp_path, monkeypatch):
+    monkeypatch.delenv(SESSION_ENV, raising=False)
+    sid = demarrer_session(tmp_path, session_id="S-DONE", now_ms=1_000)
+    assert terminer_session(tmp_path, session_id=sid, now_ms=2_000)
+    replacement = demarrer_session(tmp_path, session_id=sid, now_ms=3_000)
+    assert replacement != sid
+    assert lire_manifest(tmp_path)["status"] == "ACTIVE"

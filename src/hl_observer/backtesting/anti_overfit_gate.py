@@ -87,6 +87,7 @@ class VerdictAntiOverfit:
     survit: bool
     motif: str
     note: str = ""
+    n_sharpes_distribution: int = 0
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -97,6 +98,7 @@ class VerdictAntiOverfit:
             "survit": self.survit,
             "motif": self.motif,
             "note": self.note,
+            "n_sharpes_distribution": self.n_sharpes_distribution,
             "real_execution": False,
         }
 
@@ -106,6 +108,7 @@ def evaluer(
     *,
     n_essais: int,
     proba_min: float = PROBA_MIN,
+    trial_sharpes: Sequence[float] | None = None,
 ) -> VerdictAntiOverfit:
     """Ce finaliste survit-il a la DEFLATION par le nombre d'essais ?
 
@@ -127,7 +130,15 @@ def evaluer(
         )
 
     sr = sharpe(pnls)
-    p = float(deflated_sharpe(sr, n, int(n_essais)))
+    distribution = tuple(float(value) for value in (trial_sharpes or ()))
+    p = float(
+        deflated_sharpe(
+            sr,
+            n,
+            int(n_essais),
+            trial_sharpes=distribution,
+        )
+    )
     survit = p >= float(proba_min)
     return VerdictAntiOverfit(
         sr, n, int(n_essais), p, survit,
@@ -138,6 +149,7 @@ def evaluer(
            "Il survit." if survit else
            "**Il ne survit pas.** Le meilleur d'un tres grand nombre de tirages a l'air genial "
            "meme si tout est du bruit."),
+        len(distribution),
     )
 
 

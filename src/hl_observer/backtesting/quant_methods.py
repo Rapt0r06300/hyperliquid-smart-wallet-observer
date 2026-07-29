@@ -89,9 +89,23 @@ def probabilistic_sharpe_ratio(sr: float, T: int, *, sr_star: float = 0.0,
     return _norm_cdf(z)
 
 
-def deflated_sharpe(sr: float, T: int, n_trials: int, *, sr_variance: float | None = None,
-                    skew: float = 0.0, kurt: float = 3.0) -> float:
+def deflated_sharpe(
+    sr: float,
+    T: int,
+    n_trials: int,
+    *,
+    sr_variance: float | None = None,
+    trial_sharpes: list[float] | tuple[float, ...] | None = None,
+    skew: float = 0.0,
+    kurt: float = 3.0,
+) -> float:
     """Déflate le Sharpe pour le NOMBRE d'essais tentés (plus on cherche, plus le seuil monte)."""
+    empirical = [float(value) for value in (trial_sharpes or ()) if math.isfinite(float(value))]
+    if empirical:
+        n_trials = max(int(n_trials), len(empirical))
+        if len(empirical) > 1:
+            mean = fmean(empirical)
+            sr_variance = sum((value - mean) ** 2 for value in empirical) / (len(empirical) - 1)
     if sr_variance is None or sr_variance <= 0:
         sr_variance = 1.0 / max(1, T)
     if n_trials < 2:

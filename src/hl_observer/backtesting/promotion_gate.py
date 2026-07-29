@@ -33,9 +33,22 @@ class VerdictPromotion:
     real_execution: bool = False       # invariant : cette porte ne déclenche aucun ordre réel
 
 
-def decision_promotion(*, pnl_paper: float | None, profit_factor: float | None, n_trades: int | None,
-                       survit: bool | None, parite_ok: bool | None,
-                       criteres: CriteresPromotion = CriteresPromotion()) -> VerdictPromotion:
+def decision_promotion(
+    *,
+    pnl_paper: float | None,
+    profit_factor: float | None,
+    n_trades: int | None,
+    survit: bool | None,
+    parite_ok: bool | None,
+    candidate_id: str | None = None,
+    evidence_candidate_id: str | None = None,
+    validation_stage: str | None = None,
+    frozen_at_ms: int | None = None,
+    observed_at_ms: int | None = None,
+    replay_pipeline_hash: str | None = None,
+    forward_pipeline_hash: str | None = None,
+    criteres: CriteresPromotion = CriteresPromotion(),
+) -> VerdictPromotion:
     """Compose les critères. Tout critère non satisfait OU manquant -> RESTE_PAPER (deny-by-default)."""
     motifs: list[str] = []
     if n_trades is None or int(n_trades) < int(criteres.min_trades):
@@ -48,6 +61,18 @@ def decision_promotion(*, pnl_paper: float | None, profit_factor: float | None, 
         motifs.append("NE_SURVIT_PAS_AUX_STRESS")
     if criteres.exige_parite and not bool(parite_ok):
         motifs.append("PARITE_LIVE_BACKTEST_KO")
+    if not candidate_id or candidate_id != evidence_candidate_id:
+        motifs.append("PREUVE_NON_SPECIFIQUE_AU_CANDIDAT")
+    if validation_stage != "FORWARD_PAPER_POST_FREEZE":
+        motifs.append("HOLDOUT_HISTORIQUE_N_EST_PAS_FORWARD_PAPER")
+    if not frozen_at_ms or not observed_at_ms or int(observed_at_ms) <= int(frozen_at_ms):
+        motifs.append("OBSERVATION_NON_POSTERIEURE_AU_FREEZE")
+    if (
+        not replay_pipeline_hash
+        or not forward_pipeline_hash
+        or replay_pipeline_hash != forward_pipeline_hash
+    ):
+        motifs.append("PARITE_MOTEUR_EVENEMENTS_NON_PROUVEE")
     decision = PROMOUVOIR_TESTNET if not motifs else RESTE_PAPER
     return VerdictPromotion(decision=decision, motifs=tuple(motifs), real_execution=False)
 

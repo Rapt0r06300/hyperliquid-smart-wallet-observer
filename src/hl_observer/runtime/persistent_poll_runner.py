@@ -24,6 +24,9 @@ commandes read-only existantes. Aucun ordre, aucune clé, aucune signature.
 from __future__ import annotations
 
 import argparse
+import contextlib
+import hashlib
+import io
 import json
 import os
 import re
@@ -32,7 +35,7 @@ import sys
 import tempfile
 import time
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -42,8 +45,7 @@ from hl_observer.ops.echec_silencieux import noter as _noter_echec
 EXIT_STOP = 0
 EXIT_SELF_RESTART = 3
 
-_METRIC_LINE_RE = re.compile(r"^([A-Za-z0-9_]+)=(.*)$")
-_METRIC_TOKEN_RE = re.compile(r"(?<![A-Za-z0-9_])([A-Za-z][A-Za-z0-9_]{1,48})=([^ \t,;]+)")
+STRUCTURED_METRIC_PREFIX = "HYPERSMART_METRIC_JSON "
 
 _BASE_ENV_METRICS = {
     "sltp_enabled": "HYPERSMART_SLTP_ENABLED",
@@ -87,6 +89,59 @@ def _env_int(name: str, default: int) -> int:
         return default
 
 
+class RunnerError(RuntimeError):
+    """Base class for failures surfaced by the persistent runner."""
+
+
+class RecoverableRunnerError(RunnerError):
+    """Transient I/O, data or command failure; the next poll may continue."""
+
+
+class ProgrammerRunnerError(RunnerError):
+    """Invariant/programming failure; it must not be silently absorbed."""
+
+
+def structured_metric_line(
+    name: str,
+    value: object,
+    *,
+    session_id: str,
+    timestamp_ms: int,
+) -> str:
+    payload = {
+        "name": str(name),
+        "value": value,
+        "session_id": str(session_id),
+        "timestamp_ms": int(timestamp_ms),
+    }
+    return STRUCTURED_METRIC_PREFIX + json.dumps(payload, sort_keys=True)
+
+
+def parse_structured_metric_line(text: str) -> dict[str, object] | None:
+    if not str(text).startswith(STRUCTURED_METRIC_PREFIX):
+        return None
+    try:
+        payload = json.loads(str(text)[len(STRUCTURED_METRIC_PREFIX):])
+    except (TypeError, ValueError):
+        return None
+    if not isinstance(payload, dict):
+        return None
+    if not str(payload.get("name") or "").strip():
+        return None
+    try:
+        timestamp_ms = int(payload["timestamp_ms"])
+    except (KeyError, TypeError, ValueError):
+        return None
+    if timestamp_ms <= 0 or "session_id" not in payload or "value" not in payload:
+        return None
+    return {
+        "name": str(payload["name"]),
+        "value": payload["value"],
+        "session_id": str(payload["session_id"]),
+        "timestamp_ms": timestamp_ms,
+    }
+
+
 @dataclass
 class RunnerConfig:
     root: Path
@@ -113,6 +168,8 @@ class RunnerConfig:
     fills_multiplex_max_restarts: int = 5
     fills_multiplex_restart_window_ms: int = 300_000
     fills_multiplex_log_max_bytes: int = 5_000_000
+    config_provenance: dict[str, dict[str, object]] = field(default_factory=dict)
+    config_hash: str = ""
 
     @property
     def logs_dir(self) -> Path:
@@ -173,33 +230,37 @@ class PersistentPollRunner:
             "paper_engine": "local_only",
             "loop_mode": "persistent_t44",
         }
+        self.metric_meta: dict[str, dict[str, object]] = {}
         self.step_durations: dict[str, int] = {}
         self.current_poll = 0
-        self._cli_runner = None
         self._session_id = ""
         self._fills_supervisor: Any | None = None
 
     # ------------------------------------------------------------------ infra
 
     def _default_invoke(self, argv: list[str]) -> tuple[int, str]:
-        """Invoque une commande CLI in-process (imports chauds). Jamais d'exception."""
-        if self._cli_runner is None:
-            from typer.testing import CliRunner  # import tardif: peu coûteux, testable
+        """Invoke the production Click command directly; no test harness in runtime."""
+        from click.exceptions import Exit, UsageError
+        from typer.main import get_command
+        from hl_observer.cli import app
 
-            self._cli_runner = CliRunner()
-        from hl_observer.cli import app  # chaud après le 1er appel
-
-        result = self._cli_runner.invoke(app, argv, catch_exceptions=True)
-        output = ""
+        stdout = io.StringIO()
+        stderr = io.StringIO()
+        exit_code = 0
         try:
-            output = result.output or ""
-        except Exception:  # noqa: BLE001 - la sortie ne doit jamais tuer la boucle
-            output = ""
-        if result.exception is not None and result.exit_code == 0:
-            return 1, output + f"\n[runner] exception absorbee: {result.exception!r}"
-        if result.exception is not None:
-            output += f"\n[runner] exception absorbee: {result.exception!r}"
-        return int(result.exit_code or 0), output
+            with contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
+                get_command(app).main(
+                    args=list(argv),
+                    prog_name="hl-observer",
+                    standalone_mode=False,
+                )
+        except Exit as exc:
+            exit_code = int(exc.exit_code or 0)
+        except UsageError as exc:
+            exit_code = int(exc.exit_code or 2)
+            stderr.write(str(exc))
+        output = stdout.getvalue() + stderr.getvalue()
+        return exit_code, output
 
     def _default_popen(self, argv: list[str], stdout_file: Any) -> Any:
         return subprocess.Popen(  # noqa: S603 - argv construit localement, read-only
@@ -275,14 +336,19 @@ class PersistentPollRunner:
                 "max_runs": self.config.max_runs,
                 "pool": self.config.max_leaders,
                 "leaders_per_poll": self.config.leaders_per_poll,
+                "config_hash": self.config.config_hash,
+                "config_provenance": self.config.config_provenance,
                 "read_only": True,
                 "simulation_only": True,
                 "external_action": False,
                 "metrics": self.metrics,
+                "metric_meta": self.metric_meta,
             }
             payload.update(preserved_top)
             self.config.runtime_data_dir.mkdir(parents=True, exist_ok=True)
-            tmp = self.config.engine_status_path.with_suffix(f".{os.getpid()}.tmp")
+            tmp = self.config.engine_status_path.with_suffix(
+                f".{os.getpid()}.{time.time_ns()}.tmp"
+            )
             tmp.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
             os.replace(tmp, self.config.engine_status_path)
             if phase == "sleeping":
@@ -347,13 +413,17 @@ class PersistentPollRunner:
                 continue
             if not text.strip():
                 continue
-            match = _METRIC_LINE_RE.match(text)
-            if match:
-                self.metrics[match.group(1)] = match.group(2)
-            safe_label = re.sub(r"[^A-Za-z0-9_]", "_", label).strip("_")
-            for token in _METRIC_TOKEN_RE.finditer(text):
-                if safe_label:
-                    self.metrics[f"{safe_label}_{token.group(1)}"] = token.group(2)
+            metric = parse_structured_metric_line(text)
+            if metric is not None and (
+                not self._session_id or metric["session_id"] == self._session_id
+            ):
+                key = str(metric["name"])
+                self.metrics[key] = str(metric["value"])
+                self.metric_meta[key] = {
+                    "session_id": metric["session_id"],
+                    "timestamp_ms": metric["timestamp_ms"],
+                    "producer": label,
+                }
             self.log(text)
         if suppressed:
             self.log(f"{label}: suppressed {suppressed} successful /info HTTP 200 log lines")
@@ -371,7 +441,9 @@ class PersistentPollRunner:
         start = self._now_ms()
         try:
             exit_code, output = self._invoke(argv)
-        except Exception as exc:  # noqa: BLE001 - ceinture: _invoke ne doit pas lever
+        except (AssertionError, NameError, TypeError) as exc:
+            raise ProgrammerRunnerError(f"{label}: {exc!r}") from exc
+        except (OSError, TimeoutError, ValueError) as exc:
             exit_code, output = 1, f"[runner] invoke crash absorbe: {exc!r}"
         duration = max(0, self._now_ms() - start)
         self._record_output(label, output)
@@ -757,6 +829,7 @@ class PersistentPollRunner:
 
 
 def build_config(argv: list[str] | None = None) -> RunnerConfig:
+    argv_list = list(argv or [])
     parser = argparse.ArgumentParser(description="HyperSmart T44 persistent poll runner (read-only, paper-only)")
     parser.add_argument("--root", default=".")
     parser.add_argument("--interval-seconds", type=int, default=15)
@@ -777,8 +850,8 @@ def build_config(argv: list[str] | None = None) -> RunnerConfig:
     parser.add_argument("--restart-every-polls", type=int, default=400)
     parser.add_argument("--start-poll-index", type=int, default=1)
     parser.add_argument("--no-overlap-ws-scans", dest="overlap_ws_scans", action="store_false")
-    args = parser.parse_args(argv)
-    return RunnerConfig(
+    args = parser.parse_args(argv_list)
+    config = RunnerConfig(
         root=Path(args.root).resolve(),
         interval_seconds=args.interval_seconds, max_leaders=args.max_leaders,
         leaders_per_poll=args.leaders_per_poll, backfill_days=args.backfill_days,
@@ -812,6 +885,34 @@ def build_config(argv: list[str] | None = None) -> RunnerConfig:
             ),
         ),
     )
+    env_sources = {
+        "fills_multiplex": "HYPERSMART_FILLS_MULTIPLEX",
+        "fills_multiplex_connections": "HYPERSMART_FILLS_MULTIPLEX_CONNECTIONS",
+        "fills_multiplex_max_restarts": "HYPERSMART_FILLS_MULTIPLEX_MAX_RESTARTS",
+        "fills_multiplex_restart_window_ms": "HYPERSMART_FILLS_MULTIPLEX_RESTART_WINDOW_MS",
+        "fills_multiplex_log_max_bytes": "HYPERSMART_FILLS_MULTIPLEX_LOG_MAX_BYTES",
+    }
+    values = {
+        key: value
+        for key, value in vars(config).items()
+        if key not in {"config_provenance", "config_hash"}
+    }
+    provenance: dict[str, dict[str, object]] = {}
+    for key, value in values.items():
+        cli_flag = "--" + key.replace("_", "-")
+        source = "CLI" if cli_flag in argv_list else "DEFAULT"
+        env_name = env_sources.get(key)
+        if source == "DEFAULT" and env_name and env_name in os.environ:
+            source = "ENV"
+        provenance[key] = {
+            "value": str(value),
+            "source": source,
+            "source_name": cli_flag if source == "CLI" else env_name if source == "ENV" else None,
+        }
+    material = json.dumps(provenance, sort_keys=True, separators=(",", ":"))
+    config.config_provenance = provenance
+    config.config_hash = hashlib.sha256(material.encode("utf-8")).hexdigest()
+    return config
 
 
 def main(argv: list[str] | None = None) -> int:

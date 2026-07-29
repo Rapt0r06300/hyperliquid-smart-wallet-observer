@@ -126,6 +126,7 @@ def test_adapter_shadows_accepted_ext_profile_direct_order_by_default(monkeypatc
 def test_adapter_can_materialize_ext_profile_direct_order_only_with_explicit_research_flag(monkeypatch):
     monkeypatch.setenv("HYPERSMART_EXTERNAL_GITHUB_DIRECT_MATERIALIZATION", "1")
     monkeypatch.setenv("HYPERSMART_AB_RESEARCH_ACK", "1")
+    monkeypatch.setenv("HYPERSMART_LEDGER_SCOPE", "EXPERIMENTAL")
     state = UiState()
     fusion_status = _fusion_status_with_runtime(
         {
@@ -527,6 +528,7 @@ def test_adapter_refuses_paper_engine_entry_when_global_exposure_cap_reached(mon
 def test_adapter_refuses_copy_profile_direct_order_without_measurable_edge(monkeypatch):
     monkeypatch.setenv("HYPERSMART_EXTERNAL_GITHUB_DIRECT_MATERIALIZATION", "1")
     monkeypatch.setenv("HYPERSMART_AB_RESEARCH_ACK", "1")
+    monkeypatch.setenv("HYPERSMART_LEDGER_SCOPE", "EXPERIMENTAL")
     state = UiState()
     fusion_status = _fusion_status_with_runtime(
         {
@@ -578,6 +580,7 @@ def test_adapter_refuses_copy_profile_direct_order_without_measurable_edge(monke
 def test_closed_position_does_not_release_consumed_event_identity(monkeypatch):
     monkeypatch.setenv("HYPERSMART_EXTERNAL_GITHUB_DIRECT_MATERIALIZATION", "1")
     monkeypatch.setenv("HYPERSMART_AB_RESEARCH_ACK", "1")
+    monkeypatch.setenv("HYPERSMART_LEDGER_SCOPE", "EXPERIMENTAL")
     state = UiState()
     open_status = _fusion_status_with_runtime(
         {
@@ -649,6 +652,7 @@ def test_closed_position_does_not_release_consumed_event_identity(monkeypatch):
 def test_direct_close_requires_exact_position_instance(monkeypatch):
     monkeypatch.setenv("HYPERSMART_EXTERNAL_GITHUB_DIRECT_MATERIALIZATION", "1")
     monkeypatch.setenv("HYPERSMART_AB_RESEARCH_ACK", "1")
+    monkeypatch.setenv("HYPERSMART_LEDGER_SCOPE", "EXPERIMENTAL")
     state = UiState()
     state.simulation_virtual_positions = {
         "ext_strategy_a|HYPE|LONG": {
@@ -739,6 +743,7 @@ def test_direct_close_requires_exact_position_instance(monkeypatch):
 def test_direct_ab_entry_and_exit_costs_are_both_in_net_pnl(monkeypatch):
     monkeypatch.setenv("HYPERSMART_EXTERNAL_GITHUB_DIRECT_MATERIALIZATION", "1")
     monkeypatch.setenv("HYPERSMART_AB_RESEARCH_ACK", "1")
+    monkeypatch.setenv("HYPERSMART_LEDGER_SCOPE", "EXPERIMENTAL")
     monkeypatch.setenv("HYPERSMART_SIMULATION_LEVERAGE", "1")
     monkeypatch.setenv("HYPERSMART_MAX_POSITION_USDT", "100")
     state = UiState()
@@ -808,6 +813,7 @@ def test_direct_ab_entry_and_exit_costs_are_both_in_net_pnl(monkeypatch):
 def test_direct_ab_missing_execution_cost_is_rejected(monkeypatch):
     monkeypatch.setenv("HYPERSMART_EXTERNAL_GITHUB_DIRECT_MATERIALIZATION", "1")
     monkeypatch.setenv("HYPERSMART_AB_RESEARCH_ACK", "1")
+    monkeypatch.setenv("HYPERSMART_LEDGER_SCOPE", "EXPERIMENTAL")
     state = UiState()
     status = _fusion_status_with_runtime(
         {

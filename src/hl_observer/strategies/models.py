@@ -59,6 +59,18 @@ class StrategyKind(StrEnum):
     RAG_EVIDENCE_CONTEXT = "RAG_EVIDENCE_CONTEXT"
 
 
+class StrategyState(StrEnum):
+    ACTIVE = "ACTIVE"
+    SHADOW = "SHADOW"
+    KILLED = "KILLED"
+    LEGACY = "LEGACY"
+
+
+class StrategyLane(StrEnum):
+    STRICT = "STRICT"
+    EXPERIMENTAL = "EXPERIMENTAL"
+
+
 class IntentSide(StrEnum):
     LONG = "LONG"
     SHORT = "SHORT"
@@ -179,12 +191,29 @@ class StrategyDefinition:
     tags: tuple[str, ...] = ()
     read_only: bool = True
     params_items: tuple[tuple[str, str], ...] = ()
+    family: str = "UNSPECIFIED"
+    state: StrategyState = StrategyState.ACTIVE
+    can_open_strict: bool = True
+    can_open_experimental: bool = True
+    multi_leg_execution_ready: bool = False
 
     def __post_init__(self) -> None:
         if self.read_only is not True:
             raise ValueError("strategies are paper-only / read-only by construction")
         if int(self.version) < 1:
             raise ValueError("strategy version must be >= 1")
+        if self.state is not StrategyState.ACTIVE and self.can_open_strict:
+            raise ValueError("only ACTIVE strategies may open in the STRICT ledger")
+        if self.state in {StrategyState.KILLED, StrategyState.LEGACY} and (
+            self.can_open_strict or self.can_open_experimental
+        ):
+            raise ValueError("KILLED/LEGACY strategies cannot open a paper position")
+        if (
+            self.kind in {StrategyKind.ARBITRAGE_SIM, StrategyKind.CROSS_SOURCE_DISCREPANCY}
+            and not self.multi_leg_execution_ready
+            and (self.can_open_strict or self.can_open_experimental)
+        ):
+            raise ValueError("multi-leg diagnostics cannot open before realistic execution is ready")
 
     @property
     def params(self) -> dict[str, str]:
@@ -202,6 +231,13 @@ class StrategyDefinition:
     def valid_in(self, context: RunContext) -> bool:
         return context in self.contexts
 
+    def can_open(self, lane: StrategyLane) -> bool:
+        if not self.enabled or self.state in {StrategyState.KILLED, StrategyState.LEGACY}:
+            return False
+        if lane is StrategyLane.STRICT:
+            return self.state is StrategyState.ACTIVE and self.can_open_strict
+        return self.can_open_experimental
+
 
 def make_strategy(
     *,
@@ -214,9 +250,40 @@ def make_strategy(
     contexts: Sequence[RunContext] | None = None,
     tags: Sequence[str] = (),
     params: dict[str, object] | None = None,
+    family: str = "",
+    state: StrategyState | None = None,
+    can_open_strict: bool | None = None,
+    can_open_experimental: bool | None = None,
+    multi_leg_execution_ready: bool = False,
 ) -> StrategyDefinition:
     items = tuple(sorted((str(k), str(v)) for k, v in (params or {}).items()))
     ctxs = tuple(contexts) if contexts else _ALL_PAPER_CONTEXTS
+    strategy_text = str(strategy_id).lower()
+    diagnostic_multi_leg = kind in {
+        StrategyKind.ARBITRAGE_SIM,
+        StrategyKind.CROSS_SOURCE_DISCREPANCY,
+    }
+    carry_or_funding = "carry" in strategy_text or "funding" in strategy_text
+    external = strategy_text.startswith("ext_")
+    inferred_state = state or (
+        StrategyState.SHADOW
+        if external or carry_or_funding or (diagnostic_multi_leg and not multi_leg_execution_ready)
+        else StrategyState.ACTIVE
+    )
+    inferred_strict = (
+        inferred_state is StrategyState.ACTIVE
+        and not carry_or_funding
+        and (not diagnostic_multi_leg or multi_leg_execution_ready)
+        if can_open_strict is None
+        else bool(can_open_strict)
+    )
+    inferred_experimental = (
+        inferred_state not in {StrategyState.KILLED, StrategyState.LEGACY}
+        and not carry_or_funding
+        and (not diagnostic_multi_leg or multi_leg_execution_ready)
+        if can_open_experimental is None
+        else bool(can_open_experimental)
+    )
     return StrategyDefinition(
         strategy_id=strategy_id,
         version=int(version),
@@ -227,11 +294,18 @@ def make_strategy(
         contexts=ctxs,
         tags=tuple(tags),
         params_items=items,
+        family=str(family or kind.value),
+        state=inferred_state,
+        can_open_strict=inferred_strict,
+        can_open_experimental=inferred_experimental,
+        multi_leg_execution_ready=bool(multi_leg_execution_ready),
     )
 
 
 __all__ = [
     "StrategyKind",
+    "StrategyState",
+    "StrategyLane",
     "IntentSide",
     "IntentAction",
     "PaperIntent",

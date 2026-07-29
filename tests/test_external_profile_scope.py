@@ -148,6 +148,7 @@ def _direct_copy_order() -> dict:
             "leader_wallets_count": 4,
             "liquidity_score": 0.9,
             "copy_degradation_bps": 5.0,
+            "all_in_cost_bps": 8.0,
         },
     }
 
@@ -181,6 +182,7 @@ def test_single_flag_no_longer_materializes_direct_orders(monkeypatch):
 def test_both_flags_allow_ab_research_materialization(monkeypatch):
     monkeypatch.setenv("HYPERSMART_EXTERNAL_GITHUB_DIRECT_MATERIALIZATION", "1")
     monkeypatch.setenv("HYPERSMART_AB_RESEARCH_ACK", "1")
+    monkeypatch.setenv("HYPERSMART_LEDGER_SCOPE", "EXPERIMENTAL")
     state = UiState()
     report = apply_fusion_paper_orders_to_state(state, _fusion_status_with_direct_order(), current_ms=1_000)
     assert report["applied_count"] == 1

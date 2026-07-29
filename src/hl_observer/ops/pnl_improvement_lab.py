@@ -33,6 +33,8 @@ CANONICAL_LEDGER_NAME = "simulation_pnl_ledger_latest.jsonl"
 DEFAULT_COMPARISON_NOTIONAL_USDT = 50.0
 LEGACY_UNEVIDENCED_MARKER = "LEGACY_UNEVIDENCED"
 MIN_TOTAL_TRADES = 30
+MIN_COIN_BLACKLIST_TRADES = 30
+MIN_COIN_BLACKLIST_TIME_SLICES = 3
 
 
 @dataclass(frozen=True, slots=True)
@@ -697,6 +699,8 @@ def compute_metrics(
         else None,
         "comparison_notional_usdt": comparison_notional_usdt,
         "normalized_net_usdc": round(sum(normalized_values), 8),
+        "linear_notional_projection_status": "RESEARCH_ONLY_NONLINEAR_DEPTH_UNPROVEN",
+        "capacity_promotable_from_linear_projection": False,
         "profit_factor_normalized": (
             round(value, 8)
             if (value := _profit_factor(normalized_gains, normalized_losses)) is not None
@@ -827,7 +831,9 @@ def build_candidate_rules(train: Sequence[HistoricalTrade]) -> tuple[RuleSpec, .
         (
             (compute_metrics(rows)["normalized_net_usdc"], coin)
             for coin, rows in by_coin.items()
-            if len(rows) >= 3 and compute_metrics(rows)["normalized_net_usdc"] < 0
+            if len(rows) >= MIN_COIN_BLACKLIST_TRADES
+            and len({row.session_id for row in rows}) >= MIN_COIN_BLACKLIST_TIME_SLICES
+            and compute_metrics(rows)["net_pnl_actual_usdc"] < 0
         ),
         key=lambda item: (item[0], item[1]),
     )
@@ -850,8 +856,47 @@ def build_candidate_rules(train: Sequence[HistoricalTrade]) -> tuple[RuleSpec, .
 
 
 def _pf_for_gate(metrics: dict[str, Any]) -> float:
-    value = metrics.get("profit_factor_normalized")
+    value = metrics.get("profit_factor_actual")
     return float(value) if value is not None else 0.0
+
+
+def _purged_three_way_split(
+    eligible: Sequence[HistoricalTrade],
+    *,
+    embargo_ms: int,
+) -> tuple[list[HistoricalTrade], list[HistoricalTrade], list[HistoricalTrade], dict[str, int]]:
+    train_end = max(1, int(len(eligible) * 0.60))
+    validation_end = max(train_end + 1, int(len(eligible) * 0.80))
+    validation_end = min(validation_end, len(eligible) - 1)
+    validation_start_ms = eligible[train_end].opened_at_ms
+    holdout_start_ms = eligible[validation_end].opened_at_ms
+    train_raw = eligible[:train_end]
+    validation_raw = eligible[train_end:validation_end]
+    holdout_raw = eligible[validation_end:]
+    train = [trade for trade in train_raw if trade.closed_at_ms < validation_start_ms]
+    validation = [
+        trade
+        for trade in validation_raw
+        if trade.opened_at_ms >= validation_start_ms + embargo_ms
+        and trade.closed_at_ms < holdout_start_ms
+    ]
+    holdout = [
+        trade for trade in holdout_raw if trade.opened_at_ms >= holdout_start_ms + embargo_ms
+    ]
+    audit = {
+        "embargo_ms": int(embargo_ms),
+        "purged_train": len(train_raw) - len(train),
+        "purged_validation": len(validation_raw) - len(validation),
+        "purged_holdout": len(holdout_raw) - len(holdout),
+    }
+    return train, validation, holdout, audit
+
+
+def _research_objective(metrics: dict[str, Any]) -> float:
+    pf = _pf_for_gate(metrics)
+    net = float(metrics.get("net_pnl_actual_usdc") or 0.0)
+    drawdown = float(metrics.get("max_drawdown_normalized_usdc") or 0.0)
+    return max(-10.0, min(10.0, pf)) + (net / (1.0 + drawdown))
 
 
 def evaluate_candidate_rules(
@@ -859,6 +904,7 @@ def evaluate_candidate_rules(
     *,
     comparison_notional_usdt: float = DEFAULT_COMPARISON_NOTIONAL_USDT,
     min_total_trades: int = MIN_TOTAL_TRADES,
+    embargo_ms: int = 1_000,
 ) -> dict[str, Any]:
     """Chronological train/validation selection followed by untouched holdout."""
 
@@ -875,12 +921,10 @@ def evaluate_candidate_rules(
             "candidates": [],
         }
 
-    train_end = max(1, int(len(eligible) * 0.60))
-    validation_end = max(train_end + 1, int(len(eligible) * 0.80))
-    validation_end = min(validation_end, len(eligible) - 1)
-    train = eligible[:train_end]
-    validation = eligible[train_end:validation_end]
-    holdout = eligible[validation_end:]
+    train, validation, holdout, split_audit = _purged_three_way_split(
+        eligible,
+        embargo_ms=max(0, int(embargo_ms)),
+    )
     rules = build_candidate_rules(train)
     minimum_train = max(6, int(len(train) * 0.20))
     minimum_validation = max(3, int(len(validation) * 0.25))
@@ -908,8 +952,8 @@ def evaluate_candidate_rules(
             rule.key != "baseline_all"
             and metrics["train"]["trades"] >= minimum_train
             and metrics["validation"]["trades"] >= minimum_validation
-            and metrics["train"]["normalized_net_usdc"] > 0
-            and metrics["validation"]["normalized_net_usdc"] > 0
+            and metrics["train"]["net_pnl_actual_usdc"] > 0
+            and metrics["validation"]["net_pnl_actual_usdc"] > 0
             and _pf_for_gate(metrics["train"]) >= 1.0
             and _pf_for_gate(metrics["validation"]) >= 1.05
         )
@@ -918,16 +962,15 @@ def evaluate_candidate_rules(
         elif metrics["holdout"]["trades"] < minimum_holdout:
             verdict = "INSUFFICIENT_HOLDOUT"
         elif (
-            metrics["holdout"]["normalized_net_usdc"] > 0
+            metrics["holdout"]["net_pnl_actual_usdc"] > 0
             and _pf_for_gate(metrics["holdout"]) >= 1.0
         ):
-            verdict = "ROBUST_HOLDOUT"
+            verdict = "HYPOTHESIS_HOLDOUT_PASSED"
         else:
             verdict = "FAILED_HOLDOUT"
         selection_score = min(
-            _pf_for_gate(metrics["train"]),
-            _pf_for_gate(metrics["validation"]),
-            10.0,
+            _research_objective(metrics["train"]),
+            _research_objective(metrics["validation"]),
         )
         candidates.append(
             {
@@ -938,13 +981,15 @@ def evaluate_candidate_rules(
                 "selected_before_holdout": selected_before_holdout,
                 "selection_score_train_validation_only": round(selection_score, 8),
                 "verdict": verdict,
+                "promotion_eligible": False,
+                "requires_forward_paper_post_freeze": True,
                 "metrics": metrics,
             }
         )
 
     candidates.sort(
         key=lambda item: (
-            item["verdict"] != "ROBUST_HOLDOUT",
+            item["verdict"] != "HYPOTHESIS_HOLDOUT_PASSED",
             item["verdict"] != "INSUFFICIENT_HOLDOUT",
             -float(item["selection_score_train_validation_only"]),
             item["key"],
@@ -957,7 +1002,10 @@ def evaluate_candidate_rules(
             "train": len(train),
             "validation": len(validation),
             "holdout": len(holdout),
+            **split_audit,
         },
+        "validation_stage": "HISTORICAL_HOLDOUT_HYPOTHESIS_ONLY",
+        "promotion_eligible": False,
         "selection_uses_holdout": False,
         "automatic_activation": False,
         "comparison_notional_usdt": comparison_notional_usdt,
@@ -1002,7 +1050,7 @@ def _build_findings(
     robust = [
         item["description"]
         for item in validation.get("candidates", [])
-        if item.get("verdict") == "ROBUST_HOLDOUT"
+        if item.get("verdict") == "HYPOTHESIS_HOLDOUT_PASSED"
     ]
     confirm = [
         item["description"]

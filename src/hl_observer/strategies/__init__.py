@@ -7,6 +7,8 @@ from hl_observer.strategies.models import (
     PaperIntent,
     StrategyDefinition,
     StrategyKind,
+    StrategyLane,
+    StrategyState,
     approve_with_risk,
     is_actionable,
     make_strategy,
@@ -30,6 +32,8 @@ from hl_observer.strategies.github_distillation import (
 
 __all__ = [
     "StrategyKind",
+    "StrategyLane",
+    "StrategyState",
     "IntentSide",
     "IntentAction",
     "PaperIntent",

@@ -3,6 +3,7 @@ from __future__ import annotations
 import math
 import uuid
 from dataclasses import asdict, dataclass, field, replace
+from enum import Enum
 from hashlib import sha256
 
 from hl_observer.simulation.accounting_truth import first_not_none, named_roi_metrics
@@ -406,6 +407,47 @@ class PaperLedger:
         return sha256(material.encode("utf-8")).hexdigest()
 
 
+class LedgerScope(str, Enum):
+    STRICT = "STRICT"
+    EXPERIMENTAL = "EXPERIMENTAL"
+
+
+@dataclass(slots=True)
+class ScopedLedgerBook:
+    """Independent capital, positions, drawdown and reports per research lane."""
+
+    strict_starting_balance_usdc: float = 1_000.0
+    experimental_starting_balance_usdc: float = 1_000.0
+    session_id: str = field(default_factory=lambda: f"paper-book:{uuid.uuid4().hex}")
+    _ledgers: dict[LedgerScope, PaperLedger] = field(init=False)
+
+    def __post_init__(self) -> None:
+        self._ledgers = {
+            LedgerScope.STRICT: PaperLedger(
+                starting_balance_usdc=float(self.strict_starting_balance_usdc),
+                session_id=f"{self.session_id}:STRICT",
+            ),
+            LedgerScope.EXPERIMENTAL: PaperLedger(
+                starting_balance_usdc=float(self.experimental_starting_balance_usdc),
+                session_id=f"{self.session_id}:EXPERIMENTAL",
+            ),
+        }
+
+    def ledger(self, scope: LedgerScope | str) -> PaperLedger:
+        normalized = scope if isinstance(scope, LedgerScope) else LedgerScope(str(scope).upper())
+        return self._ledgers[normalized]
+
+    def snapshot(self) -> dict[str, object]:
+        return {
+            "session_id": self.session_id,
+            "strict": self.ledger(LedgerScope.STRICT).snapshot(),
+            "experimental": self.ledger(LedgerScope.EXPERIMENTAL).snapshot(),
+            "capital_isolated": True,
+            "positions_isolated": True,
+            "drawdown_isolated": True,
+        }
+
+
 def _finite_positive(value: object) -> bool:
     try:
         parsed = float(value)
@@ -414,4 +456,4 @@ def _finite_positive(value: object) -> bool:
     return math.isfinite(parsed) and parsed > 0
 
 
-__all__ = ["LedgerPosition", "PaperLedger"]
+__all__ = ["LedgerPosition", "PaperLedger", "LedgerScope", "ScopedLedgerBook"]

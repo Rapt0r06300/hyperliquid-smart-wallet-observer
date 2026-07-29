@@ -132,6 +132,16 @@ def test_un_sharpe_solide_sur_beaucoup_de_trades_et_peu_d_essais_SURVIT():
     assert v.motif == MOTIF_OK
 
 
+def test_distribution_reelle_des_sharpes_est_tracee_et_utilisee():
+    rng = random.Random(17)
+    pnls = [rng.gauss(0.25, 1.0) for _ in range(200)]
+    distribution = [-0.5, -0.2, 0.0, 0.15, 0.4, 0.8]
+    verdict = evaluer(pnls, n_essais=3, trial_sharpes=distribution)
+    assert verdict.n_essais == 3
+    assert verdict.n_sharpes_distribution == len(distribution)
+    assert 0.0 <= verdict.proba_deflatee <= 1.0
+
+
 # ============================================================ 3. L'INVARIANT DE CABLAGE
 
 

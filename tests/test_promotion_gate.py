@@ -7,7 +7,20 @@ from hl_observer.backtesting.promotion_gate import (
 
 
 def _ok(**kw):
-    d = dict(pnl_paper=100.0, profit_factor=1.5, n_trades=50, survit=True, parite_ok=True)
+    d = dict(
+        pnl_paper=100.0,
+        profit_factor=1.5,
+        n_trades=50,
+        survit=True,
+        parite_ok=True,
+        candidate_id="candidate-A",
+        evidence_candidate_id="candidate-A",
+        validation_stage="FORWARD_PAPER_POST_FREEZE",
+        frozen_at_ms=1_000,
+        observed_at_ms=2_000,
+        replay_pipeline_hash="pipeline-1",
+        forward_pipeline_hash="pipeline-1",
+    )
     d.update(kw)
     return d
 
@@ -41,6 +54,25 @@ def test_parite_ko_reste_paper():
 def test_donnee_manquante_deny_by_default():
     v = decision_promotion(pnl_paper=None, profit_factor=None, n_trades=None, survit=None, parite_ok=None)
     assert v.decision == RESTE_PAPER and len(v.motifs) >= 4
+
+
+def test_holdout_historique_ne_peut_pas_etre_appele_forward():
+    v = decision_promotion(**_ok(validation_stage="HISTORICAL_HOLDOUT_HYPOTHESIS_ONLY"))
+    assert v.decision == RESTE_PAPER
+    assert "HOLDOUT_HISTORIQUE_N_EST_PAS_FORWARD_PAPER" in v.motifs
+
+
+def test_preuve_d_un_autre_candidat_ne_peut_pas_promouvoir():
+    v = decision_promotion(**_ok(evidence_candidate_id="candidate-B"))
+    assert v.decision == RESTE_PAPER
+    assert "PREUVE_NON_SPECIFIQUE_AU_CANDIDAT" in v.motifs
+
+
+def test_forward_doit_etre_post_freeze_et_utiliser_le_meme_moteur():
+    before_freeze = decision_promotion(**_ok(observed_at_ms=999))
+    pipeline_mismatch = decision_promotion(**_ok(forward_pipeline_hash="pipeline-2"))
+    assert "OBSERVATION_NON_POSTERIEURE_AU_FREEZE" in before_freeze.motifs
+    assert "PARITE_MOTEUR_EVENEMENTS_NON_PROUVEE" in pipeline_mismatch.motifs
 
 
 def test_jamais_mainnet():

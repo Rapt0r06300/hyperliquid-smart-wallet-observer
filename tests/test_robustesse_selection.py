@@ -53,3 +53,33 @@ def test_le_bruit_reste_sur_ajuste_meme_avec_un_gros_net():
     M = [[1.0 if i == b else 0.0 for b in range(8)] for i in range(8)]
     r = R.verdict_robustesse(M, 50, net_gagnant=999.0, sigma_null=1.0)
     assert r["robuste"] is False            # un gros net ne sauve pas une procedure qui sur-ajuste
+
+
+def test_configurations_identiques_sont_insuffisantes_pas_robustes():
+    result = R.pbo_cscv([[1.0] * 8, [1.0] * 8, [1.0] * 8])
+    assert result["pbo"] is None
+    assert result["verdict"] == "INSUFFISANT_CONFIGURATIONS_IDENTIQUES"
+
+
+def test_registre_global_compte_les_essais_tues_et_renommes(tmp_path):
+    registry = R.GlobalTrialRegistry(tmp_path / "trials.jsonl")
+    registry.append(R.TrialRecord(
+        trial_id="t-1", hypothesis_id="h-1", parameters_hash="a",
+        horizon="1m", coin="BTC", regime="trend", state="KILLED", sharpe=-0.2,
+    ))
+    registry.append(R.TrialRecord(
+        trial_id="t-2", hypothesis_id="h-1", parameters_hash="b",
+        horizon="1m", coin="BTC", regime="trend", state="RENAMED",
+        renamed_from="t-1", sharpe=0.1,
+    ))
+    assert registry.n_trials == 2
+    assert registry.hypothesis_attempts("h-1") == 2
+    assert registry.trial_sharpes == (-0.2, 0.1)
+    assert len((tmp_path / "trials.jsonl").read_text(encoding="utf-8").splitlines()) == 2
+
+
+def test_placebos_durs_couvrent_temps_direction_coin_couts_l2_latence():
+    assert {
+        "RANDOM_WALLET", "RANDOM_TIME", "RANDOM_DIRECTION",
+        "COIN_MATCHED", "SAME_COSTS", "SAME_L2", "SAME_LATENCY",
+    }.issubset(set(R.HARD_PLACEBO_DIMENSIONS))

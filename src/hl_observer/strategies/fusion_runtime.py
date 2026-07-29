@@ -256,20 +256,21 @@ def run_fusion_strategy_runtime(payload: FusionRuntimeInput) -> FusionRuntimeRes
         # L'edge mesure est negatif a TOUS les horizons (cf. runtime/calibration/empirical_edge.json)
         # -> un OPEN non garde est un trade a esperance NEGATIVE, ouvert en connaissance de cause.
         #
-        # Flag d'echappement pour un A/B explicite, JAMAIS pour la prod :
-        #   HYPERSMART_ALLOW_UNGATED_COPY_FOLLOW=1  (defaut 0 = deny-by-default)
-        _copy_follow_gate_off = _env_flag("HYPERSMART_ALLOW_UNGATED_COPY_FOLLOW", False)
+        # A/B flags may annotate an experimental report, but never bypass the
+        # empirical edge gate of the strict paper ledger.
+        _ungated_copy_requested = _env_flag("HYPERSMART_ALLOW_UNGATED_COPY_FOLLOW", False)
         _moteur_a_refuse = paper_engine.accepted_count == 0
 
         if (
             conflict.decision == "FOLLOW"
             and conflict.winning_side
             and _moteur_a_refuse
-            and not _copy_follow_gate_off
         ):
             # Le consensus dit OUI, le verrou d'edge dit NON. Le verrou gagne.
             # Le motif precis vient de paper_engine.refusal_reasons, merge dans no_trade plus bas.
             no_trade.append("COPY_FOLLOW_BLOCKED_BY_EMPIRICAL_EDGE_GATE")
+            if _ungated_copy_requested:
+                no_trade.append("UNGATED_COPY_EXPERIMENTAL_ONLY")
         elif conflict.decision == "FOLLOW" and conflict.winning_side and not _copy_whitelist_ok(
             conflict, conflict_votes, no_trade
         ):

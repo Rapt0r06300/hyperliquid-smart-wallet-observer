@@ -349,7 +349,12 @@ class PaperEngine:
             timestamp_ms=observed_at_ms,
             fee_bps=0.0,
             position_id=position_id,
-            refs=_ledger_refs(delta, exec_result=exec_result, paper_position_id=position_id),
+            refs=_ledger_refs(
+                delta,
+                exec_result=exec_result,
+                paper_position_id=position_id,
+                decision_context=context,
+            ),
         )
         trade = PaperTrade(
             trade_id=_id("papertrade", position_id, trade_action, observed_at_ms),
@@ -504,7 +509,12 @@ class PaperEngine:
             fee_bps=0.0,
             position_id=position.position_id,
             reason="leader_exit" if remaining_quantity <= 1e-12 else "leader_reduce",
-            refs=_ledger_refs(delta, exec_result=exit_exec, paper_position_id=position.position_id),
+            refs=_ledger_refs(
+                delta,
+                exec_result=exit_exec,
+                paper_position_id=position.position_id,
+                decision_context=decision_context,
+            ),
         )
         trade = PaperTrade(
             trade_id=_id("papertrade", position.position_id, "EXIT", observed_at_ms),
@@ -690,8 +700,35 @@ def _closed_pnl(position: PaperPosition, quantity: float, exit_price: float) -> 
     return (position.entry_price - exit_price) * quantity
 
 
-def _ledger_refs(delta: LeaderDelta, *, exec_result: ExecResult, paper_position_id: str) -> dict[str, object]:
+def _ledger_refs(
+    delta: LeaderDelta,
+    *,
+    exec_result: ExecResult,
+    paper_position_id: str,
+    decision_context: dict[str, object] | None = None,
+) -> dict[str, object]:
+    context = dict(decision_context or {})
+    candidate_id = str(context.get("candidate_id") or delta.delta_id)
+    strategy_id = str(context.get("strategy_id") or "leader_delta_copy_follow")
+    strategy_family = str(context.get("strategy_family") or "COPY_FOLLOW")
+    source_signal_id = str(context.get("source_signal_id") or delta.delta_id)
+    execution_id = str(
+        context.get("execution_id")
+        or _id(
+            "paperexec",
+            candidate_id,
+            paper_position_id,
+            exec_result.execution_snapshot_id or "no-snapshot",
+        )
+    )
     return {
+        "candidate_id": candidate_id,
+        "strategy_id": strategy_id,
+        "strategy_family": strategy_family,
+        "position_instance_id": paper_position_id,
+        "source_signal_id": source_signal_id,
+        "execution_id": execution_id,
+        "ledger_scope": str(context.get("ledger_scope") or "STRICT").upper(),
         "leader_delta_id": delta.delta_id,
         "leader_wallet": delta.wallet,
         "leader_action": getattr(delta.action, "value", str(delta.action)),

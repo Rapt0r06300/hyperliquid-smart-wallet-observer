@@ -12,6 +12,8 @@ from hl_observer.strategies import (
     PaperIntent,
     PaperStrategyRegistry,
     StrategyKind,
+    StrategyLane,
+    StrategyState,
     approve_with_risk,
     is_actionable,
     make_strategy,
@@ -129,3 +131,21 @@ def test_paper_intent_cannot_disable_simulation():
     with pytest.raises(ValueError):
         PaperIntent(strategy_id="x", coin="BTC", side=IntentSide.LONG,
                     action=IntentAction.OPEN, simulation_only=False)
+
+
+def test_external_funding_and_unready_multileg_cannot_open_strict():
+    external = make_strategy(
+        strategy_id="ext_vendor", version=1, kind=StrategyKind.COPY_FOLLOW,
+    )
+    funding = make_strategy(
+        strategy_id="funding_carry", version=1, kind=StrategyKind.COPY_FOLLOW,
+    )
+    multileg = make_strategy(
+        strategy_id="arb", version=1, kind=StrategyKind.ARBITRAGE_SIM,
+    )
+    assert external.state is StrategyState.SHADOW
+    assert external.can_open(StrategyLane.STRICT) is False
+    assert funding.can_open(StrategyLane.STRICT) is False
+    assert funding.can_open(StrategyLane.EXPERIMENTAL) is False
+    assert multileg.can_open(StrategyLane.STRICT) is False
+    assert multileg.can_open(StrategyLane.EXPERIMENTAL) is False

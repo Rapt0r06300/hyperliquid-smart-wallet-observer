@@ -52,16 +52,33 @@ def acquerir(root: Path, nom: str, *, now_ms: float | None = None) -> tuple[bool
     if cur and (now - float(cur.get("heartbeat_ms") or 0)) < TTL_MS and cur.get("pid") != os.getpid():
         return False, {"raison": "INSTANCE_DEJA_ACTIVE", "detenteur": cur}
     info = {"pid": os.getpid(), "run_id": "run-" + uuid.uuid4().hex[:12], "acquis_ms": int(now), "heartbeat_ms": int(now)}
-    p.write_text(json.dumps(info, ensure_ascii=False), encoding="utf-8")
+    if cur:
+        stale = p.with_name(f"{p.name}.stale.{uuid.uuid4().hex}")
+        try:
+            p.replace(stale)
+        except OSError:
+            latest = _lire(p)
+            return False, {"raison": "INSTANCE_RACE_LOST", "detenteur": latest or {}}
+    try:
+        with p.open("x", encoding="utf-8") as handle:
+            handle.write(json.dumps(info, ensure_ascii=False))
+    except FileExistsError:
+        return False, {"raison": "INSTANCE_RACE_LOST", "detenteur": _lire(p) or {}}
     return True, info
 
 
 def heartbeat(root: Path, nom: str, info: dict, *, now_ms: float | None = None) -> None:
     """Rafraîchit le heartbeat du verrou (à appeler périodiquement par le process vivant)."""
     now = float(now_ms if now_ms is not None else time.time() * 1000)
+    current = _lire(_p(root, nom))
+    if not current or current.get("run_id") != info.get("run_id"):
+        return
     info["heartbeat_ms"] = int(now)
     try:
-        _p(root, nom).write_text(json.dumps(info, ensure_ascii=False), encoding="utf-8")
+        target = _p(root, nom)
+        tmp = target.with_name(f"{target.name}.{uuid.uuid4().hex}.tmp")
+        tmp.write_text(json.dumps(info, ensure_ascii=False), encoding="utf-8")
+        os.replace(tmp, target)
     except OSError:
         pass
 
@@ -70,7 +87,11 @@ def liberer(root: Path, nom: str, info: dict) -> None:
     """Libère le verrou si c'est bien le nôtre (à l'arrêt propre)."""
     p = _p(root, nom)
     cur = _lire(p)
-    if cur and cur.get("pid") == info.get("pid"):
+    if (
+        cur
+        and cur.get("pid") == info.get("pid")
+        and cur.get("run_id") == info.get("run_id")
+    ):
         try:
             p.unlink()
         except OSError:

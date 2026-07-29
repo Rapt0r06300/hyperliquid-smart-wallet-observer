@@ -62,6 +62,7 @@ MATERIALIZABLE_STRATEGY_PREFIXES = (
 COPY_LIKE_FAMILY_TOKENS = ("copy", "whale", "mirror", "autonomous_sltp", "direction_hunt")
 EXTERNAL_DIRECT_MATERIALIZATION_ENV = "HYPERSMART_EXTERNAL_GITHUB_DIRECT_MATERIALIZATION"
 AB_RESEARCH_ACK_ENV = "HYPERSMART_AB_RESEARCH_ACK"
+EXPERIMENTAL_LEDGER_SCOPE_ENV = "HYPERSMART_LEDGER_SCOPE"
 _ENABLED_VALUES = {"1", "true", "yes", "on"}
 
 
@@ -70,11 +71,14 @@ def _env_enabled(name: str) -> bool:
 
 
 def _external_direct_materialization_enabled() -> bool:
-    """Double verrou: la matérialisation directe des profils GitHub exige les
-    DEUX flags. Un seul flag ne suffit plus — cela évite qu'un ancien launcher
-    ou une variable oubliée ne rebranche le bus direct par accident."""
+    """Allow explicit A/B materialization only in the experimental ledger lane."""
 
-    return _env_enabled(EXTERNAL_DIRECT_MATERIALIZATION_ENV) and _env_enabled(AB_RESEARCH_ACK_ENV)
+    return (
+        _env_enabled(EXTERNAL_DIRECT_MATERIALIZATION_ENV)
+        and _env_enabled(AB_RESEARCH_ACK_ENV)
+        and str(os.getenv(EXPERIMENTAL_LEDGER_SCOPE_ENV, "")).strip().upper()
+        == "EXPERIMENTAL"
+    )
 
 
 def apply_fusion_paper_orders_to_state(

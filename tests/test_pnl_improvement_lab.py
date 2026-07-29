@@ -313,10 +313,12 @@ def test_rule_selection_never_uses_holdout() -> None:
     report_a = evaluate_candidate_rules(
         [*prefix, *profitable_holdout],
         min_total_trades=30,
+        embargo_ms=0,
     )
     report_b = evaluate_candidate_rules(
         [*prefix, *losing_holdout],
         min_total_trades=30,
+        embargo_ms=0,
     )
     selected_a = {
         row["key"]: row["selected_before_holdout"] for row in report_a["candidates"]
@@ -335,8 +337,10 @@ def test_rule_selection_never_uses_holdout() -> None:
     verdict_b = next(
         row["verdict"] for row in report_b["candidates"] if row["key"] == "consensus_ge_2"
     )
-    assert verdict_a == "ROBUST_HOLDOUT"
+    assert verdict_a == "HYPOTHESIS_HOLDOUT_PASSED"
     assert verdict_b == "FAILED_HOLDOUT"
+    assert report_a["validation_stage"] == "HISTORICAL_HOLDOUT_HYPOTHESIS_ONLY"
+    assert report_a["promotion_eligible"] is False
 
 
 def test_insufficient_history_is_reported_without_promoting_a_flag() -> None:

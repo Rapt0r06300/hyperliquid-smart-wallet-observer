@@ -44,19 +44,48 @@ def demarrer_session(root: str | Path = ".", *, session_id: str | None = None,
                      now_ms: int | None = None) -> str:
     """Écrit le manifeste de session (atomique). Le DÉMARRAGE du lanceur EST la nouvelle
     session — un self-restart du runner n'en crée pas une nouvelle (il hérite de l'env)."""
-    sid = session_id or os.environ.get(SESSION_ENV, "").strip() or generer_session_id(now_ms)
     path = _manifest_path(root)
+    requested = session_id or os.environ.get(SESSION_ENV, "").strip()
+    existing = lire_manifest(root)
+    if (
+        requested
+        and existing
+        and str(existing.get("session_id") or "") == requested
+        and str(existing.get("status") or "ACTIVE").upper() == "COMPLETED"
+    ):
+        requested = ""
+    sid = requested or generer_session_id(now_ms)
     path.parent.mkdir(parents=True, exist_ok=True)
     payload = {
         "session_id": sid,
         "started_at_ms": int(now_ms or time.time() * 1000),
         "pid": os.getpid(),
+        "status": "ACTIVE",
         "real_execution": False,
     }
     tmp = path.with_suffix(f".{os.getpid()}.tmp")
     tmp.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
     os.replace(tmp, path)
     return sid
+
+
+def terminer_session(
+    root: str | Path = ".",
+    *,
+    session_id: str,
+    now_ms: int | None = None,
+    status: str = "COMPLETED",
+) -> bool:
+    path = _manifest_path(root)
+    manifest = lire_manifest(root)
+    if not manifest or str(manifest.get("session_id") or "") != str(session_id):
+        return False
+    manifest["status"] = str(status).upper()
+    manifest["completed_at_ms"] = int(now_ms or time.time() * 1000)
+    tmp = path.with_suffix(f".{os.getpid()}.{uuid.uuid4().hex}.tmp")
+    tmp.write_text(json.dumps(manifest, ensure_ascii=False), encoding="utf-8")
+    os.replace(tmp, path)
+    return True
 
 
 def lire_manifest(root: str | Path = ".") -> dict[str, Any] | None:

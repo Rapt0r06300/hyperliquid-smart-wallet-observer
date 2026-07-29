@@ -163,8 +163,8 @@ def run_copy_votes_through_paper_engine(
         # (qui mesure un edge REEL) refusait au meme instant.
         #
         # Desormais : un edge est MESURE, ou il n'existe pas. Pas de mesure -> NO_TRADE.
-        # DENY-BY-DEFAULT. Le proxy reste accessible pour une comparaison A/B explicite
-        # (HYPERSMART_REQUIRE_EMPIRICAL_EDGE=0), jamais par defaut.
+        # DENY-BY-DEFAULT. A non-empirical proxy may be reported in an experimental
+        # analysis, but can never write to the strict paper ledger.
         _trace.stamp("features")
         _spread_bps, _slip_bps, _execution_truth = _live_execution_inputs(
             conflict.coin,
@@ -176,6 +176,8 @@ def run_copy_votes_through_paper_engine(
 
         _emp = edge_from_calibration(signal_age_ms=signal_age_ms)
         _refus_edge = empirical_edge_refusal(_emp)
+        if _refus_edge is None and not _emp.is_empirical:
+            _refus_edge = "NON_EMPIRICAL_EDGE_EXPERIMENTAL_ONLY"
         _trace.stamp("gates")
         if _refus_edge:
             equity, _, drawdown = engine.mark_to_market({conflict.coin or "UNKNOWN": float(market_price)})
@@ -183,10 +185,7 @@ def run_copy_votes_through_paper_engine(
                 decisions=(), accepted_count=0, equity_usdt=equity, drawdown_usdt=drawdown,
                 refusal_reasons=(_refus_edge,),
             )
-        edge_remaining_bps = (
-            float(_emp.value_bps) if _emp.is_empirical
-            else _consensus_edge_remaining_bps(conflict, distinct_wallets=distinct_wallets)
-        )
+        edge_remaining_bps = float(_emp.value_bps)
         if admission_floor_power is not None:
             # Refonte sélection: le trade copy doit clearer la barre du board unifié
             # (compétition avec toutes les stratégies). Refus AVANT ouverture ->

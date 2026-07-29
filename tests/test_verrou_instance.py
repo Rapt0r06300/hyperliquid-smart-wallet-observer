@@ -28,3 +28,17 @@ def test_liberer(tmp_path):
     VI.liberer(tmp_path, "userfills_live", info)
     ok2, _ = VI.acquerir(tmp_path, "userfills_live", now_ms=1100)   # libéré -> ré-acquérable de suite
     assert ok2 is True
+
+
+def test_ancien_detenteur_ne_peut_ni_rafraichir_ni_liberer_nouveau_lock(tmp_path):
+    import json
+
+    ok, old = VI.acquerir(tmp_path, "userfills_live", now_ms=1_000)
+    assert ok
+    path = tmp_path / "runtime" / "data" / "userfills_live.lock"
+    current = dict(old, run_id="run-new", heartbeat_ms=2_000)
+    path.write_text(json.dumps(current), encoding="utf-8")
+    VI.heartbeat(tmp_path, "userfills_live", old, now_ms=3_000)
+    VI.liberer(tmp_path, "userfills_live", old)
+    assert path.exists()
+    assert json.loads(path.read_text(encoding="utf-8"))["run_id"] == "run-new"
