@@ -43,6 +43,12 @@ build/
 *.egg-info/
 runtime/pytest_tmp_*/
 runtime/research/github_repos_v24/
+# Runs continus du moteur LEGACY (recherche_continue) : ~50 Go, dont
+# episodes.jsonl 32,3 Go et working_set.jsonl 11,5 Go. Git ne peut pas versionner
+# ces fichiers (GitHub bloque a 100 Mo/fichier) et leur indexation rendrait chaque
+# commande git inutilisable. Les donnees restent INTACTES sur le disque et
+# analysables normalement -- elles sont seulement invisibles pour git.
+runtime/research_lab/continuous/
 .cache/
 .vscode/
 .idea/
