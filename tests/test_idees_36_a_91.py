@@ -328,7 +328,22 @@ def test_idea71_source_externe_ne_devient_jamais_un_signal():
 def test_idea78_manifeste_signale_un_arbre_sale():
     m = GF.manifeste_campagne(RACINE, config_economique={"fees_bps": 4.5})
     assert "git_head" in m and "git_dirty" in m and "python" in m
-    assert m["reproductible"] == (bool(m["git_head"]) and not m["git_dirty"])
+    # tri-etat : True (sale) / False (propre) / None (git muet). Jamais "inconnu == propre".
+    assert m["git_dirty"] in (True, False, None)
+    assert m["reproductible"] == (bool(m["git_head"]) and m["git_dirty"] is False)
+
+
+def test_idea78_git_muet_nest_jamais_pris_pour_un_arbre_propre(tmp_path):
+    """Hors depot git, git echoue : l'etat doit etre INCONNU et NON reproductible.
+
+    Avant correction, un timeout/echec rendait "" -> interprete comme arbre PROPRE, donc
+    `reproductible=True` sur un arbre potentiellement sale. Un manifeste qui ment sur sa
+    reproductibilite invalide tout ce qu'il certifie.
+    """
+    m = GF.manifeste_campagne(tmp_path, config_economique={})
+    assert m["git_dirty"] is None
+    assert m["reproductible"] is False
+    assert "INCONNU" in (m["avertissement"] or "")
 
 
 def test_idea79_panne_scanner_nest_pas_un_marche_calme():

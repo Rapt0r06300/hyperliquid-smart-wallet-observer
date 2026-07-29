@@ -58,21 +58,50 @@ def manifeste_campagne(racine: Path, *, config_economique: dict | None = None,
     résultat produit sur un arbre sale doit le dire."""
     import platform
     import sys
-    def _git(*args):
+
+    def _git(*args, timeout=8):
+        """Rend la sortie de git, ou None si git n'a PAS repondu.
+
+        `None` (inconnu) et `""` (sortie vide, ex. arbre propre) sont deux choses
+        differentes : les confondre ferait passer un timeout pour un arbre propre.
+        Sur un disque lent, `subprocess.run(timeout=)` peut rester bloque APRES le
+        kill en attendant un process en I/O ininterruptible : on tue sans attendre.
+        """
+        proc = None
         try:
-            return subprocess.run(["git", *args], cwd=str(racine), capture_output=True,
-                                  text=True, timeout=10).stdout.strip()
+            proc = subprocess.Popen(["git", *args], cwd=str(racine),
+                                    stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+                                    text=True)
+            out, _ = proc.communicate(timeout=timeout)
+            if proc.returncode != 0:
+                return None
+            return (out or "").strip()
         except Exception:  # noqa: BLE001
-            return ""
+            if proc is not None:
+                try:
+                    proc.kill()
+                except Exception:  # noqa: BLE001
+                    pass
+            return None
+
     head = _git("rev-parse", "HEAD")
-    sale = bool(_git("status", "--porcelain").strip())
+    statut = _git("status", "--porcelain")
+    # tri-etat : True (sale) / False (propre) / None (git muet -> INCONNU)
+    sale = None if statut is None else bool(statut.strip())
+    if sale:
+        avertissement = "arbre git SALE : resultat non reproductible tel quel"
+    elif sale is None:
+        avertissement = "etat git INCONNU (git n'a pas repondu) : traite comme NON reproductible"
+    else:
+        avertissement = None
     return {"git_head": head or None, "git_dirty": sale,
             "python": sys.version.split()[0], "plateforme": platform.system(),
             "config_economique": dict(config_economique or {}),
             "fee_model_hash": fee_model_hash, "fill_model_hash": fill_model_hash,
             "sources": dict(sources or {}), "schema_versions": dict(schema_versions or {}),
-            "reproductible": bool(head) and not sale,
-            "avertissement": ("arbre git SALE : resultat non reproductible tel quel" if sale else None)}
+            # deny-by-default : inconnu n'est jamais traite comme propre
+            "reproductible": bool(head) and sale is False,
+            "avertissement": avertissement}
 
 
 def etat_ingestion(*, n_nouveaux_evenements: int | None, erreur_scanner: str | None = None) -> dict:
