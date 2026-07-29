@@ -60,7 +60,11 @@ def test_des_logs_frais_ne_declenchent_RIEN(tmp_path):
     """CONTRE-ÉPREUVE anti garde affamé : vivant = on ne touche à rien."""
     _tous_vivants(tmp_path)
     appels: list[list[str]] = []
-    r = SC.verifier_et_relancer(tmp_path, lanceur=lambda cmd, cwd: appels.append(cmd) or True)
+    r = SC.verifier_et_relancer(
+        tmp_path,
+        profil="research",
+        lanceur=lambda cmd, cwd: appels.append(cmd) or True,
+    )
     assert r["morts"] == [] and r["relances"] == [] and appels == []
 
 
@@ -70,7 +74,11 @@ def test_un_mort_est_RELANCE_avec_la_commande_du_lanceur(tmp_path):
     _tous_vivants(tmp_path)
     _log(tmp_path, "marks-collector", age_s=16 * 60)
     appels: list[list[str]] = []
-    r = SC.verifier_et_relancer(tmp_path, lanceur=lambda cmd, cwd: appels.append(cmd) or True)
+    r = SC.verifier_et_relancer(
+        tmp_path,
+        profil="research",
+        lanceur=lambda cmd, cwd: appels.append(cmd) or True,
+    )
     assert r["relances"] == ["marks-collector"]
     assert len(appels) == 1
     cmd = appels[0]
@@ -88,7 +96,7 @@ def test_la_relance_est_JOURNALISEE(tmp_path):
     """Un processus ressuscité en silence serait un mensonge de plus."""
     _tous_vivants(tmp_path)
     _log(tmp_path, "venues-collector", age_s=25 * 60)
-    SC.verifier_et_relancer(tmp_path, lanceur=lambda cmd, cwd: True)
+    SC.verifier_et_relancer(tmp_path, profil="research", lanceur=lambda cmd, cwd: True)
     journal = SC._lire_journal(tmp_path)
     e = journal.get("venues-collector") or {}
     assert e.get("derniere_relance_ok") is True
@@ -123,16 +131,31 @@ def test_pas_de_MITRAILLAGE_dans_le_cooldown(tmp_path):
     appels: list[list[str]] = []
     lanceur = lambda cmd, cwd: appels.append(cmd) or True                  # noqa: E731
     t0 = time.time()
-    r1 = SC.verifier_et_relancer(tmp_path, maintenant=t0, lanceur=lanceur)
+    r1 = SC.verifier_et_relancer(
+        tmp_path,
+        maintenant=t0,
+        profil="research",
+        lanceur=lanceur,
+    )
     _log(tmp_path, "liq-collector", age_s=30 * 60)                         # toujours mort
-    r2 = SC.verifier_et_relancer(tmp_path, maintenant=t0 + 60, lanceur=lanceur)
+    r2 = SC.verifier_et_relancer(
+        tmp_path,
+        maintenant=t0 + 60,
+        profil="research",
+        lanceur=lanceur,
+    )
     # a t0+601 s, les logs FRAIS de t0 depassent la limite de marks-collector (5 min) : il est
     # legitimement mort lui aussi -- on les rafraichit pour isoler le SEUL effet du cooldown.
     for c in SC.REGISTRE:
         if c["nom"] != "liq-collector":
             _log(tmp_path, c["nom"])
     os_age = SC.COOLDOWN_S + 1
-    r3 = SC.verifier_et_relancer(tmp_path, maintenant=t0 + os_age, lanceur=lanceur)
+    r3 = SC.verifier_et_relancer(
+        tmp_path,
+        maintenant=t0 + os_age,
+        profil="research",
+        lanceur=lanceur,
+    )
     assert r1["relances"] == ["liq-collector"]
     assert r2["relances"] == [] and r2["en_cooldown"] == ["liq-collector"]
     assert "liq-collector" in r3["relances"]
@@ -155,7 +178,7 @@ def test_ne_leve_JAMAIS_meme_si_le_lanceur_explose(tmp_path):
     _log(tmp_path, "marks-collector", age_s=60 * 60)
     def bombe(cmd, cwd):
         raise RuntimeError("boum")
-    r = SC.verifier_et_relancer(tmp_path, lanceur=bombe)
+    r = SC.verifier_et_relancer(tmp_path, profil="research", lanceur=bombe)
     assert r["morts"] == ["marks-collector"] and r["relances"] == []
 
 
@@ -177,16 +200,11 @@ def test_le_REGISTRE_correspond_au_LANCEUR(fichier):
     lanceur unique — la sous-commande `collectors` réutilise la MÊME sous-routine
     :demarrer_collecteurs, donc une seule source de vérité au lieu de deux fichiers.)"""
     texte = (RACINE / fichier).read_text(encoding="utf-8", errors="ignore")
-    lignes = [l for l in texte.splitlines()
-              if "boucle_collecteur.cmd" in l and l.strip().lower().startswith("start")]
-    assert len(lignes) == len(SC.REGISTRE), (
-        "%s démarre %d collecteur(s), le registre en supervise %d — les listes doivent "
-        "évoluer ENSEMBLE" % (fichier, len(lignes), len(SC.REGISTRE)))
-    for c in SC.REGISTRE:
-        ligne = next((l for l in lignes if " %s " % c["nom"] in l), None)
-        assert ligne is not None, "%r est au registre mais pas dans %s" % (c["nom"], fichier)
-        assert c["script"].replace("/", "\\") in ligne.replace("/", "\\")
-        assert (" %d" % c["intervalle_s"]) in ligne
+    assert "HYPERSMART_STARTUP_PROFILE=core" in texte
+    assert "superviseur_collecteurs demarrer-tous core" in texte
+    assert "HYPERSMART_ENABLE_AUX_IA=0" in texte
+    assert "HYPERSMART_ENABLE_AUX_STREAM=1" in texte
+    assert SC.COLLECTEURS_CORE == {"allmids-collector", "bbo-collector"}
 
 
 def test_le_runtime_carry_APPELLE_le_superviseur():

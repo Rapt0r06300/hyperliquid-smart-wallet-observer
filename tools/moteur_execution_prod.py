@@ -16,6 +16,7 @@ leur identité — on ne filtre jamais pour re-zipper ensuite. 0 réseau, 0 ordr
 from __future__ import annotations
 
 import hashlib
+import time
 
 # ─────────── profils de frais VERSIONNÉS/DATÉS (bps par jambe) ───────────
 #: défaut PERP CONSERVATEUR quand userFees manque : taker 4,5 bps / maker 1,5 bp par jambe (2026-07-26).
@@ -196,12 +197,51 @@ def evaluer_episode(ep: dict, *, sens: int, horizon_ms: int, modele_exec: str = 
             "net_bps": round(net_bps, 4)}
 
 
-def evaluer_episodes(corpus, *, sens: int, horizon_ms: int, modele_exec: str = "taker",
-                     notional_usd: float = 100.0, profil: str = PROFIL_DEFAUT) -> list:
+def evaluer_episodes(
+    corpus,
+    *,
+    sens: int,
+    horizon_ms: int,
+    modele_exec: str = "taker",
+    notional_usd: float = 100.0,
+    profil: str = PROFIL_DEFAUT,
+    stop_event=None,
+    progress_callback=None,
+    progress_every: int = 8192,
+    progress_interval_s: float = 0.5,
+) -> list:
     """Liste de MÊME longueur que `corpus` : chaque épisode garde son identité et son status (jamais de
-    filtrage-puis-zip)."""
-    return [evaluer_episode(ep, sens=sens, horizon_ms=horizon_ms, modele_exec=modele_exec,
-                            notional_usd=notional_usd, profil=profil) for ep in corpus]
+    filtrage-puis-zip). Si ``stop_event`` est positionné, retourne le préfixe déjà
+    calculé : l'appelant marque alors explicitement le trial ``interrompu`` et ne
+    le promeut pas. Le résultat reste complet quand aucun arrêt n'est demandé.
+    """
+    total = len(corpus) if hasattr(corpus, "__len__") else None
+    pas = max(128, int(progress_every or 8192))
+    intervalle = max(0.1, float(progress_interval_s or 0.5))
+    prochain_signal_temps = time.monotonic()
+    out = []
+    for i, ep in enumerate(corpus):
+        if i % 128 == 0 and stop_event is not None and stop_event.is_set():
+            break
+        out.append(
+            evaluer_episode(
+                ep,
+                sens=sens,
+                horizon_ms=horizon_ms,
+                modele_exec=modele_exec,
+                notional_usd=notional_usd,
+                profil=profil,
+            )
+        )
+        maintenant = time.monotonic()
+        if progress_callback is not None and (
+            i % pas == 0
+            or maintenant >= prochain_signal_temps
+            or (total is not None and i + 1 == total)
+        ):
+            progress_callback(i + 1, total)
+            prochain_signal_temps = maintenant + intervalle
+    return out
 
 
 def nets_mesures(episodes) -> list:

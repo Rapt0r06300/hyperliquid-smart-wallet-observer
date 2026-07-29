@@ -30,12 +30,15 @@ $iaStdoutLog = Join-Path $logDir "hypersmart_ia_stdout.log"
 $iaStderrLog = Join-Path $logDir "hypersmart_ia_stderr.log"
 $streamStdoutLog = Join-Path $logDir "hypersmart_stream_stdout.log"
 $streamStderrLog = Join-Path $logDir "hypersmart_stream_stderr.log"
+$resourceStdoutLog = Join-Path $logDir "hypersmart_resource_stdout.log"
+$resourceStderrLog = Join-Path $logDir "hypersmart_resource_stderr.log"
 $runtimeStopFile = Join-Path $runtimeDataDir "hypersmart_runtime.stop"
 $startedProcesses = New-Object System.Collections.Generic.List[int]
 $uiProcessId = $null
 $pollProcessId = $null
 $iaProcessId = $null
 $streamProcessId = $null
+$resourceProcessId = $null
 
 function Write-LauncherLog {
     param([string]$Message)
@@ -44,6 +47,17 @@ function Write-LauncherLog {
         Add-Content -LiteralPath $launcherLog -Value "[$stamp] $Message" -ErrorAction Stop
     } catch {
         Write-Host "[HyperSmart][log-warning] launcher log unavailable: $($_.Exception.Message)"
+    }
+}
+
+function Set-HyperSmartBelowNormal {
+    param([int]$ProcessId)
+    if (-not $ProcessId) { return }
+    try {
+        $process = Get-Process -Id $ProcessId -ErrorAction Stop
+        $process.PriorityClass = "BelowNormal"
+    } catch {
+        Write-LauncherLog "BelowNormal non applique pid=$ProcessId : $($_.Exception.Message)"
     }
 }
 
@@ -79,6 +93,24 @@ $env:HL_ENABLE_TESTNET_EXECUTION = "0"
 $env:HYPERSMART_V12_SQLITE_PATH = $v12SqlitePath
 $env:HYPERSMART_MODE = "SIMULATION_ONLY_UNTIL_MANUAL_REVIEW"
 $env:HYPERSMART_RUNTIME_STOP_FILE = $runtimeStopFile
+$startupProfile = [string]$env:HYPERSMART_STARTUP_PROFILE
+if ([string]::IsNullOrWhiteSpace($startupProfile)) {
+    $startupProfile = "core"
+}
+$startupProfile = $startupProfile.Trim().ToLowerInvariant()
+$saladActive = @(
+    Get-Process -ErrorAction SilentlyContinue |
+        Where-Object { $_.ProcessName -like "Salad*" }
+).Count -gt 0
+$threadCap = if ($saladActive) { "1" } else { "2" }
+$env:OMP_NUM_THREADS = $threadCap
+$env:OPENBLAS_NUM_THREADS = $threadCap
+$env:MKL_NUM_THREADS = $threadCap
+$env:NUMEXPR_NUM_THREADS = $threadCap
+$env:HYPERSMART_RESOURCE_PRIORITY = "BELOW_NORMAL"
+$env:HYPERSMART_RESOURCE_NEVER_IDLE = "1"
+$env:HYPERSMART_SALAD_ACTIVE = if ($saladActive) { "1" } else { "0" }
+Set-HyperSmartBelowNormal -ProcessId $PID
 try {
     if (Test-Path -LiteralPath $runtimeStopFile) {
         Remove-Item -LiteralPath $runtimeStopFile -Force -ErrorAction SilentlyContinue
@@ -501,7 +533,9 @@ function Get-HyperSmartRuntimeProcesses {
                 ($_.CommandLine -like "*tools\ia_train_loop.ps1*") -or
                 ($_.CommandLine -like "*tools/ia_train_loop.ps1*") -or
                 ($_.CommandLine -like "*tools\stream_loop.ps1*") -or
+                ($_.CommandLine -like "*tools\resource_policy.py*--watch*") -or
                 ($_.CommandLine -like "*tools/stream_loop.ps1*") -or
+                ($_.CommandLine -like "*tools/resource_policy.py*--watch*") -or
                 ($_.CommandLine -like "*hl_observer copy-run*--network-read*") -or
                 ($_.CommandLine -like "*hl_observer live-user-fills-scan*--network-read*") -or
                 ($_.CommandLine -like "*hl_observer live-user-fills-stream*--network-read*") -or
@@ -641,6 +675,30 @@ if ($RestartExisting) {
     }
 }
 
+$resourceScript = Join-Path $PSScriptRoot "resource_policy.py"
+if (Test-Path -LiteralPath $resourceScript) {
+    Write-LauncherLine (
+        "Ressources HyperSmart: BelowNormal permanent, jamais Idle, aucune pause; " +
+        "Salad=" + $(if ($saladActive) { "actif" } else { "inactif" }) +
+        ", threads=" + $threadCap + "."
+    )
+    $resourceArguments = @(
+        "-u",
+        "`"$resourceScript`"",
+        "--watch",
+        "--root", "`"$Root`"",
+        "--interval-seconds", "15"
+    )
+    $resourceProcess = Start-Process -WindowStyle Hidden -PassThru -FilePath "python" `
+        -ArgumentList $resourceArguments -WorkingDirectory $Root `
+        -RedirectStandardOutput $resourceStdoutLog -RedirectStandardError $resourceStderrLog
+    if ($resourceProcess -and $resourceProcess.Id) {
+        $resourceProcessId = [int]$resourceProcess.Id
+        $startedProcesses.Add([int]$resourceProcess.Id) | Out-Null
+        Set-HyperSmartBelowNormal -ProcessId $resourceProcessId
+    }
+}
+
 try {
     Push-Location $Root
     $initOutput = & python -m hl_observer init-db 2>&1
@@ -659,26 +717,31 @@ try {
     foreach ($line in $prepareLogsOutput) { Write-LauncherLog $line }
     Write-LauncherLine "Logs a envoyer prepares: session fraiche, anciens fichiers deplaces dans _archives."
     Write-LauncherLine "Nouvelle session de logs preparee (capital CONSERVE par defaut; reset uniquement via reset-paper --confirm ou HYPERSMART_RESET_ON_LAUNCH=1)."
-    Write-LauncherLine "Decouverte read-only des marches Hyperliquid pour scanner davantage de coins."
-    $marketsOutput = & python -m hl_observer discover-markets --store --max-coins 80 2>&1
-    foreach ($line in $marketsOutput) { Write-LauncherLog $line }
-    Write-LauncherLine "Scan L2/candles read-only des marches Hyperliquid pour les gates de liquidite."
-    $marketScanOutput = & python -m hl_observer scan-markets --all --store --max-coins 80 --l2book --candles 2>&1
-    foreach ($line in $marketScanOutput) { Write-LauncherLog $line }
-    Write-LauncherLine "Elargissement read-only MASSIF de la shortlist de leaders (scan large = plus d'opportunites qualifiees)."
-    try {
-        $walletsOutput = & python -m hl_observer.collection.run_collect_all --max-coins 200 --target 6000 2>&1
-        foreach ($line in $walletsOutput) { Write-LauncherLog $line }
-    } catch {
-        Write-LauncherLog "collect-all (elargissement wallets) non bloquant: $($_.Exception.Message)"
-    }
-    Write-LauncherLine "Warm scan WebSocket public Hyperliquid: detection immediate de wallets actifs avant l'ouverture de l'UI."
-    Write-LauncherEngineStatus "startup_public_trade_scan" "Warm scan public read-only pour alimenter les premiers slots userFills."
-    try {
-        $warmPublicScanOutput = & python -m hl_observer live-public-scan --network-read --store --duration-seconds 6 --coins AUTO --max-coins 60 --max-wallets 20000 --promote-top $MaxLeaders --no-report 2>&1
-        foreach ($line in $warmPublicScanOutput) { Write-LauncherLog $line }
-    } catch {
-        Write-LauncherLog "warm live-public-scan non bloquant: $($_.Exception.Message)"
+    if ($startupProfile -eq "core") {
+        Write-LauncherLine "Profil CORE: warmup lourd delegue au poller persistant; aucun scan initial duplique."
+    } else {
+        Write-LauncherLine "Profil $startupProfile : warmup read-only explicite."
+        Write-LauncherLine "Decouverte read-only des marches Hyperliquid pour scanner davantage de coins."
+        $marketsOutput = & python -m hl_observer discover-markets --store --max-coins 80 2>&1
+        foreach ($line in $marketsOutput) { Write-LauncherLog $line }
+        Write-LauncherLine "Scan L2/candles read-only des marches Hyperliquid pour les gates de liquidite."
+        $marketScanOutput = & python -m hl_observer scan-markets --all --store --max-coins 80 --l2book --candles 2>&1
+        foreach ($line in $marketScanOutput) { Write-LauncherLog $line }
+        Write-LauncherLine "Elargissement read-only de la shortlist de leaders."
+        try {
+            $walletsOutput = & python -m hl_observer.collection.run_collect_all --max-coins 200 --target 6000 2>&1
+            foreach ($line in $walletsOutput) { Write-LauncherLog $line }
+        } catch {
+            Write-LauncherLog "collect-all (elargissement wallets) non bloquant: $($_.Exception.Message)"
+        }
+        Write-LauncherLine "Warm scan WebSocket public Hyperliquid avant l'ouverture de l'UI."
+        Write-LauncherEngineStatus "startup_public_trade_scan" "Warm scan public read-only."
+        try {
+            $warmPublicScanOutput = & python -m hl_observer live-public-scan --network-read --store --duration-seconds 6 --coins AUTO --max-coins 60 --max-wallets 20000 --promote-top $MaxLeaders --no-report 2>&1
+            foreach ($line in $warmPublicScanOutput) { Write-LauncherLog $line }
+        } catch {
+            Write-LauncherLog "warm live-public-scan non bloquant: $($_.Exception.Message)"
+        }
     }
     Pop-Location
 } catch {
@@ -696,6 +759,7 @@ if (-not (Test-CommandCenter)) {
     if ($uiProcess -and $uiProcess.Id) {
         $uiProcessId = [int]$uiProcess.Id
         $startedProcesses.Add([int]$uiProcess.Id) | Out-Null
+        Set-HyperSmartBelowNormal -ProcessId $uiProcessId
     }
 }
 
@@ -737,6 +801,7 @@ if (-not $pollerAlreadyRunning) {
     if ($pollProcess -and $pollProcess.Id) {
         $pollProcessId = [int]$pollProcess.Id
         $startedProcesses.Add([int]$pollProcess.Id) | Out-Null
+        Set-HyperSmartBelowNormal -ProcessId $pollProcessId
     }
 } else {
     Write-LauncherLine "Un poller simulation tourne deja; pas de doublon."
@@ -767,6 +832,7 @@ if ($env:HYPERSMART_ENABLE_AUX_IA -ne "0") {
         if ($iaProcess -and $iaProcess.Id) {
             $iaProcessId = [int]$iaProcess.Id
             $startedProcesses.Add([int]$iaProcess.Id) | Out-Null
+            Set-HyperSmartBelowNormal -ProcessId $iaProcessId
         }
     } else {
         Write-LauncherLine "IA locale deja active; pas de doublon."
@@ -786,6 +852,7 @@ if ($env:HYPERSMART_ENABLE_AUX_STREAM -ne "0") {
         if ($streamProcess -and $streamProcess.Id) {
             $streamProcessId = [int]$streamProcess.Id
             $startedProcesses.Add([int]$streamProcess.Id) | Out-Null
+            Set-HyperSmartBelowNormal -ProcessId $streamProcessId
         }
     } else {
         Write-LauncherLine "Stream leaders Hyperliquid deja actif; pas de doublon."

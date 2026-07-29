@@ -106,6 +106,7 @@ REFUS_EDGE_FABRIQUE = "NOYAU_EDGE_FABRIQUE_PAR_UNE_FORMULE"
 REFUS_PRIX_NON_EXECUTABLE = "NOYAU_PRIX_NON_EXECUTABLE"
 REFUS_EDGE_NET_INSUFFISANT = "NOYAU_EDGE_NET_INSUFFISANT_APRES_COUTS"
 REFUS_NOTIONAL_INVALIDE = "NOYAU_NOTIONAL_INVALIDE"
+REFUS_QUALITE_FLUX = "NOYAU_QUALITE_FLUX_INSUFFISANTE"
 
 # --- les 4 refus BRANCHES le 2026-07-14 ---
 REFUS_ORDRE_IMPOSSIBLE = "NOYAU_ORDRE_REFUSE_PAR_L_EXCHANGE"      # #576 : notionnel min, tick/lot
@@ -121,6 +122,7 @@ REFUS_JAMBE_SPOT_IMPOSSIBLE = "NOYAU_JAMBE_SPOT_IMPOSSIBLE_CARNET_TROP_MINCE"
 # Un signalement, pas un refus : l'etat de session n'a pas ete fourni.
 # *Un etat absent n'est pas un etat sain.* -> un invariant AST oblige le LIVE a le fournir.
 ETAT_SESSION_NON_FOURNI = "ETAT_SESSION_NON_FOURNI"
+QUALITE_FLUX_NON_FOURNIE = "QUALITE_FLUX_NON_FOURNIE"
 
 # Signalements (n'empechent pas forcement, mais laissent une trace INEFFACABLE)
 EDGE_FOURNI_CONTREDIT_LA_MESURE = "EDGE_FOURNI_PAR_L_APPELANT_CONTREDIT_LA_MESURE"
@@ -213,6 +215,14 @@ class Contexte:
     # *Un etat absent n'est pas un etat sain.*
     etat_session: EtatSession | None = None
 
+    # Quality proof for the feed carrying the book and signal. Runtime callers
+    # provide it from ``runtime/data/feed_quality.json``. ``None`` is retained
+    # only for deterministic legacy/unit calls and is explicitly reported.
+    feed_quality_ready: bool | None = None
+    feed_quality_score: float | None = None
+    feed_quality_reasons: tuple[str, ...] = ()
+    min_feed_quality_score: float = 75.0
+
     # ═════════════════════════════════════════════════════════════════════════════════════════
     # 🔴🔴 LE CARNET **SPOT** — branche le 2026-07-14. *La 18e forme de la maladie.*
     #
@@ -291,6 +301,37 @@ def decider(ctx: Contexte, *, table=None, racine=None) -> Decision:
 
     if not (float(ctx.notional_usd) > 0.0):
         return _refus(REFUS_NOTIONAL_INVALIDE, preuve=preuve)
+
+    # Data quality precedes every economic calculation. An executable price
+    # derived from a desynchronised or stale book is not executable evidence.
+    preuve["feed_quality"] = {
+        "ready": ctx.feed_quality_ready,
+        "score": ctx.feed_quality_score,
+        "minimum": float(ctx.min_feed_quality_score),
+        "reasons": list(ctx.feed_quality_reasons),
+    }
+    if ctx.feed_quality_ready is None:
+        signalements.append(QUALITE_FLUX_NON_FOURNIE)
+    if ctx.feed_quality_ready is False:
+        return _refus(
+            REFUS_QUALITE_FLUX,
+            signalements=tuple(signalements),
+            preuve=preuve,
+        )
+    if ctx.feed_quality_score is not None and (
+        float(ctx.feed_quality_score) < float(ctx.min_feed_quality_score)
+    ):
+        return _refus(
+            REFUS_QUALITE_FLUX,
+            signalements=tuple(signalements),
+            preuve=preuve,
+        )
+    if ctx.feed_quality_ready is True and ctx.feed_quality_score is None:
+        return _refus(
+            REFUS_QUALITE_FLUX,
+            signalements=tuple(signalements),
+            preuve=preuve,
+        )
 
     # ═══════════════════════════════════════════════════════════════════════════════════════════
     # 0. 🔴 #292b — LE DISJONCTEUR DE SESSION (les 11 gates V19), BRANCHE LE 2026-07-14.
@@ -596,10 +637,10 @@ __all__ = [
     "ENTREE", "NO_TRADE",
     "REFUS_ZONE_MORTE", "REFUS_FAMILLE_INCONNUE", "REFUS_EDGE_NON_MESURE",
     "REFUS_EDGE_FABRIQUE", "REFUS_PRIX_NON_EXECUTABLE", "REFUS_EDGE_NET_INSUFFISANT",
-    "REFUS_NOTIONAL_INVALIDE",
+    "REFUS_NOTIONAL_INVALIDE", "REFUS_QUALITE_FLUX",
     "REFUS_ORDRE_IMPOSSIBLE", "REFUS_FLUX_TOXIQUE", "REFUS_COTE_VERROUILLEE",
     "REFUS_SESSION_EN_HALTE", "REFUS_JAMBE_SPOT_IMPOSSIBLE",
-    "ETAT_SESSION_NON_FOURNI",
+    "ETAT_SESSION_NON_FOURNI", "QUALITE_FLUX_NON_FOURNIE",
     "EDGE_FOURNI_CONTREDIT_LA_MESURE", "EDGE_FOURNI_IGNORE",
     "FAMILLE_PAR_STRATEGIE", "FRAIS_ALLER_RETOUR_TAKER_BPS", "PLANCHER_NET_BPS",
     "Contexte", "Decision", "decider", "famille_de_la_strategie",

@@ -75,13 +75,29 @@ def test_dashboard_compteurs_non_nuls_et_duree(tmp_path):
 
 
 def test_premier_ctrlc_arret_propre_puis_rapport(tmp_path):
-    _run(tmp_path)
+    rd = _run(tmp_path)
     RC.boucle_continue(tmp_path, stop_event=threading.Event(), max_cycles=1, intervalle_s=0.0)
     fin = RC.finaliser(tmp_path, partial=False)   # 1er Ctrl+C = arrêt propre
     assert fin["finalisation"] in ("FINALIZATION_COMPLETE", "FINALIZATION_COMPLETE_WITH_EXCLUSIONS")
     assert Path(fin["rapport"]).exists()
     man = json.loads(Path(fin["manifeste"]).read_text())
     assert man["contient_rapport"] and any("RAPPORT" in k for k in man["fichiers"])
+    assert any(k.endswith("FINAL-RUN-SUMMARY.json") for k in man["fichiers"])
+    assert any(k.endswith("FINAL-SAFETY-AUDIT.json") for k in man["fichiers"])
+    for name in (
+        "FINAL-INTERRUPTION-CONTEXT.json",
+        "FINAL-RUN-SUMMARY.json",
+        "FINAL-CAMPAIGN-STATUS.csv",
+        "FINAL-ERRORS.csv",
+        "FINAL-ARTIFACT-INVENTORY.csv",
+        "FINAL-CURSOR-COVERAGE.csv",
+        "FINAL-SAFETY-AUDIT.json",
+    ):
+        assert (rd / "results" / name).exists(), name
+    report_text = Path(fin["rapport"]).read_text(encoding="utf-8")
+    assert "Contexte exact de l'arrêt" in report_text
+    assert "Campagnes terminées et travail interrompu" in report_text
+    assert "Annexes générées au Ctrl+C" in report_text
     assert RC._active_path(tmp_path).exists() is False   # ACTIVE supprimé car cohérent
 
 

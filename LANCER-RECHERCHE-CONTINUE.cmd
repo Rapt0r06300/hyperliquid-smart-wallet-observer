@@ -1,52 +1,106 @@
 @echo off
 REM ============================================================================
-REM  LANCER-RECHERCHE-CONTINUE — LANCEMENT AUTOMATIQUE, PAPER-ONLY (Flo, PF-1)
-REM  Double-clic = dry-run rapide -> REPRISE si un run existe, sinon DEMARRAGE. AUCUN menu.
-REM  Collecteurs read-only + moteur + dashboard COMPACT (Rich Live) demarrent automatiquement.
-REM  Ctrl+C = arret propre + rapport final. Le menu manuel est dans LANCER-RECHERCHE-CONTINUE-ADMIN.cmd.
-REM  SECURITE : 0 /exchange, 0 signature, 0 cle, 0 ordre reel, 0 executor, 0 depot/retrait.
+REM  HyperSmart - recherche continue locale, paper/read-only.
+REM  Double-clic: precontrole, reprise ou nouveau run, tableau de bord temps reel.
+REM  Ctrl+C: arret cooperatif, rapport Markdown, audit puis manifeste SHA-256.
 REM ============================================================================
-setlocal EnableDelayedExpansion
+setlocal EnableExtensions EnableDelayedExpansion
 cd /d "%~dp0"
+chcp 65001 >nul
+title HyperSmart - Recherche continue
 set "PYTHONPATH=%CD%\src;%CD%\tools"
 set "PYTHONIOENCODING=utf-8"
+set "PYTHONUTF8=1"
 set "PYTHONUNBUFFERED=1"
+set "HYPERSMART_DASHBOARD_FULLSCREEN=1"
+set "HYPERSMART_DASHBOARD_REFRESH_MS=1000"
+set "HYPERSMART_18H_MAX_CPU_PERCENT=45"
+set "HYPERSMART_18H_MAX_RAM_GB=8"
+set "HYPERSMART_18H_MAX_WORKERS=2"
+set "HYPERSMART_18H_MAX_SOURCES_PER_BOOTSTRAP=256"
+set "HYPERSMART_18H_MAX_BOOTSTRAP_MEGABYTES=512"
+set "HYPERSMART_RESOURCE_PRIORITY=BELOW_NORMAL"
+set "HYPERSMART_RESOURCE_NEVER_IDLE=1"
+set "ENGINE_EXIT=0"
+set "FINAL_EXIT=1"
 
 echo ============================================================
-echo   HYPERSMART - LANCEMENT AUTOMATIQUE (paper-only)
+echo   HYPERSMART - RECHERCHE CONTINUE PAPER / READ-ONLY
 echo ============================================================
+echo   Console plein ecran : progression globale + boucle interne.
+echo   Affichage 1 fois/seconde + preuve de vie ecrite chaque seconde.
+echo   Les calculs longs restent visibles sans bloquer le moteur.
+echo   Priorite BelowNormal permanente, jamais Idle, aucune pause de travail.
+echo   Avec Salad: lots et concurrence reduits automatiquement, calcul continu.
+echo   Ctrl+C une fois = arret propre et rapport garanti.
+echo   Ctrl+C deux fois = rapport partiel d'urgence.
+echo ============================================================
+echo.
 
-REM 1) verification rapide (securite + disque). En cas d'echec : voir le menu ADMIN pour le detail.
-python -u tools\recherche_continue.py dry-run >nul 2>&1
+echo [1/4] Precontrole securite, disque et dependances...
+python -u tools\recherche_continue.py dry-run
 if errorlevel 1 (
-  echo [ECHEC] Verification rapide KO. Ouvre LANCER-RECHERCHE-CONTINUE-ADMIN.cmd ^> 6 pour le detail.
-  pause
-  goto :quit
+  echo.
+  echo [ECHEC] Le precontrole a refuse le demarrage. Aucun calcul n'a ete lance.
+  echo Consulte les lignes ci-dessus pour connaitre la cause exacte.
+  set "ENGINE_EXIT=2"
+  goto :fin
 )
-echo [OK] Verification rapide passee.
+echo [OK] Precontrole valide.
+echo.
 
-REM 2) pointeur de run efface avant tout demarrage (jamais d'ancien run verifie par erreur)
-del /q "runtime\research_lab\continuous\DERNIER_RUN_LANCE.txt" 2>nul
-
-REM 3) REPRISE si un run est reprenable, sinon DEMARRAGE d'un nouveau. Moteur AU PREMIER PLAN (Ctrl+C = rapport).
-python -u tools\recherche_continue.py peut-reprendre >nul 2>&1
+echo [2/4] Recherche d'un run incomplet a reprendre...
+python -u tools\recherche_continue.py peut-reprendre
 if errorlevel 1 (
-  echo Aucun run a reprendre -^> DEMARRAGE d'un nouveau laboratoire. Ctrl+C = rapport final.
+  echo [INFO] Aucun run incomplet: creation d'un nouveau laboratoire.
+  echo [INFO] Le tableau de bord va afficher chaque sous-tache et son pourcentage.
   python -u tools\recherche_continue.py start
 ) else (
-  echo Run existant detecte -^> REPRISE. Ctrl+C = rapport final.
+  echo [INFO] Run incomplet detecte: reprise exacte des artefacts existants.
+  echo [INFO] Aucun ancien rapport ni resultat n'est supprime.
   python -u tools\recherche_continue.py resume
 )
+set "ENGINE_EXIT=!ERRORLEVEL!"
+echo.
+echo [3/4] Le moteur principal est revenu avec le code !ENGINE_EXIT!.
 
-REM 4) verification de la finalisation du MEME run (SHA du manifeste recalcules)
 set "RID="
 for /f "usebackq tokens=* delims=" %%R in (`python -u tools\recherche_continue.py dernier-run-lance`) do set "RID=%%R"
-if "%RID%"=="" (
-  echo [ATTENTION] run_id introuvable - finalisation NON verifiee.
-) else (
-  python -u tools\recherche_continue.py verifier-finalisation --run-id "%RID%"
-  if errorlevel 1 ( echo [ATTENTION] Finalisation NON confirmee pour %RID%. ) else ( echo [OK] Finalisation confirmee ^(SHA recalcules, meme run^). )
+if "!RID!"=="" (
+  echo [ERREUR] Aucun run_id lance n'a ete retrouve.
+  echo Le pointeur n'a pas ete efface: les artefacts restent sur disque.
+  goto :fin
 )
+
+echo [INFO] Run verifie: !RID!
+echo [4/4] Verification du rapport et de toutes les empreintes SHA-256...
+python -u tools\recherche_continue.py verifier-finalisation --run-id "!RID!"
+set "FINAL_EXIT=!ERRORLEVEL!"
+
+if not "!FINAL_EXIT!"=="0" (
+  echo.
+  echo [ATTENTION] La finalisation complete n'est pas encore confirmee.
+  echo [SECOURS] Le processus principal est revenu; demande de finalisation du meme run...
+  python -u tools\recherche_continue.py stop --run-id "!RID!"
+  timeout /t 2 /nobreak >nul
+  python -u tools\recherche_continue.py verifier-finalisation --run-id "!RID!"
+  set "FINAL_EXIT=!ERRORLEVEL!"
+)
+
+if "!FINAL_EXIT!"=="0" (
+  echo.
+  echo [OK] Rapport final confirme pour !RID!.
+  echo [OK] Les SHA-256 ont ete recalcules et concordent.
+) else (
+  echo.
+  echo [ATTENTION] Un rapport partiel ou de secours a ete conserve.
+  echo [ATTENTION] La sortie ci-dessus donne son chemin et la cause exacte.
+)
+
+:fin
+echo.
+echo ============================================================
+echo   Fin du lanceur. Aucun ordre reel, aucune cle, aucune signature.
+echo ============================================================
 pause
-:quit
-endlocal
+endlocal & exit /b %ENGINE_EXIT%

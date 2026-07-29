@@ -28,7 +28,10 @@ class LoopEngineeringRunner:
 
     def __post_init__(self) -> None:
         if self.decision_engine is None:
-            self.decision_engine = LocalDecisionEngine(self.settings)
+            self.decision_engine = LocalDecisionEngine(
+                self.settings,
+                feed_quality_path=Path("runtime") / "data" / "feed_quality.json",
+            )
         if self.memory is None:
             self.memory = LoopMemoryStore(default_loop_memory_dir())
 

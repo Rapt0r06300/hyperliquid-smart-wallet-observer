@@ -19,6 +19,33 @@ Le runtime officiel est **Hyperliquid-first**. Les modules dYdX historiques sont
 conserves comme legacy/mockable, mais ils ne doivent pas etre lances par le
 launcher principal ni montes dans l'UI Hyperliquid.
 
+## Version portable Windows
+
+HyperSmart peut etre transporte sur un autre PC **Windows 10/11 x64** sans
+installer Python :
+
+1. creer le paquet avec `LANCER_HYPERSMART.cmd portable-build` ;
+2. copier puis extraire entierement le ZIP cree sur le Bureau ;
+3. double-cliquer sur l'unique lanceur `LANCER_HYPERSMART.cmd`.
+
+Le paquet embarque un CPython officiel, ses dependances et des chemins
+entierement relatifs. Il ne lit pas le Python utilisateur du PC cible. Une
+connexion Internet reste necessaire pour les donnees publiques Hyperliquid.
+
+L'archive exclut volontairement `runtime/`, `data/`, `logs/`, les bases SQLite
+actives, les secrets et les caches. Le bot portable demarre donc avec une
+session locale propre, sans risquer de copier une base verrouillee ou un
+historique incoherent. Le guide complet est dans
+[`docs/PORTABILITE_WINDOWS.md`](docs/PORTABILITE_WINDOWS.md).
+
+Commandes de maintenance :
+
+```bat
+LANCER_HYPERSMART.cmd portable-check
+LANCER_HYPERSMART.cmd portable-install
+LANCER_HYPERSMART.cmd portable-build
+```
+
 > **Doc maître** (état, méthode, architecture, config, roadmap) : `docs/ETAT_ET_FEUILLE_DE_ROUTE.md`.
 > Règles agent : `CLAUDE.md` et `AGENTS.md`. Objectif condensé : `OBJECTIF.md`.
 
@@ -197,16 +224,30 @@ Autorise:
 
 ---
 
-## Lanceur principal
+## Deux lanceurs, deux usages
 
-Le point d'entree utilisateur est:
+Le runtime quotidien demarre avec :
 
 ```text
 LANCER_HYPERSMART.cmd
 ```
 
-Il lance le serveur local et le poller de simulation en mode visible. Fermer
-proprement avec la commande affichee dans la fenetre du lanceur.
+Il lance uniquement le profil CORE : serveur local, poller persistant,
+flux leaders read-only, allMids, BBO et surveillance des ressources. Les
+collecteurs deja actifs sont reutilises et les travaux lourds ne sont plus
+dupliques au demarrage.
+
+Les backtests, replays, comparaisons A/B et audits historiques demarrent avec :
+
+```text
+ANALYSER_BACKTESTS_REPLAYS.cmd
+```
+
+Ce second lanceur est local-only, limite ses ressources et produit un rapport
+consolide. Il ne demarre jamais automatiquement avec le bot. Le guide complet
+est dans [`docs/LANCEURS_HYPERSMART.md`](docs/LANCEURS_HYPERSMART.md).
+
+Fermer le runtime proprement avec la commande affichee dans sa fenetre.
 
 URL locale par defaut:
 

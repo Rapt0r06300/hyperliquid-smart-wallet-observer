@@ -9,7 +9,9 @@ moteur exact ; les autres types sont normalisés et rendus disponibles avec leur
 """
 from __future__ import annotations
 
+from bisect import bisect_left
 import sys
+import time
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
@@ -17,6 +19,15 @@ import lecteurs_18h as LEC  # noqa: E402
 
 HORIZONS_MS = (100, 250, 500, 1000, 2000, 3000, 5000, 10000, 15000, 30000, 60000,
                120000, 300000, 900000, 1800000, 3600000)
+
+
+def _publier_progression(callback, *, courant: int, total: int | None, detail: str, unite: str) -> None:
+    if callback is None:
+        return
+    try:
+        callback(courant=courant, total=total, detail=detail, unite=unite)
+    except TypeError:
+        callback(courant, total, detail)
 
 
 def _num(d: dict, *cles):
@@ -91,7 +102,14 @@ def cle_dedup(d: dict, typ: str, prov: dict) -> tuple:
     return (typ, prov["payload_hash"])
 
 
-def construire(sources: list[dict], *, root: Path, max_par_source: int = 200_000) -> dict:
+def construire(
+    sources: list[dict],
+    *,
+    root: Path,
+    max_par_source: int | None = 200_000,
+    progress_callback=None,
+    stop_event=None,
+) -> dict:
     """Lit les sources (chemins + format + sha), normalise, DÉDUPLIQUE selon la source, agrège par coin, et
     construit les épisodes BBO avec prix forward causaux. Rend {episodes, comptes, par_source, lineage_seeds}."""
     root = Path(root)
@@ -100,7 +118,12 @@ def construire(sources: list[dict], *, root: Path, max_par_source: int = 200_000
     comptes = {"lus": 0, "filtres": 0, "dedup": 0, "utilises": 0, "par_type": {}}
     par_source = {}
     lineage_seeds = []
-    for s in sources:
+    total_sources = len(sources)
+    dernier_affichage = 0.0
+    for numero_source, s in enumerate(sources, 1):
+        if stop_event is not None and stop_event.is_set():
+            comptes["arret_demande"] = True
+            break
         fmt = s.get("format")
         chemin = root / s["chemin"] if not Path(s["chemin"]).is_absolute() else Path(s["chemin"])
         lecteur = LEC.LECTEURS.get(fmt)
@@ -109,49 +132,91 @@ def construire(sources: list[dict], *, root: Path, max_par_source: int = 200_000
         sha = s.get("sha256") or ""
         cs = {"lus": 0, "dedup": 0, "utilises": 0}
         try:
-            it = list(lecteur(chemin, max_records=max_par_source))   # matérialise ici pour capter les erreurs de lecteur (ex: Parquet sans moteur)
+            it = lecteur(chemin, max_records=max_par_source)
+            for offset, d in it:
+                if stop_event is not None and stop_event.is_set():
+                    comptes["arret_demande"] = True
+                    break
+                if not isinstance(d, dict) or d.get("_invalide"):
+                    comptes["filtres"] += 1
+                    continue
+                comptes["lus"] += 1
+                cs["lus"] += 1
+                typ = classer_type(d, s["chemin"])
+                comptes["par_type"][typ] = comptes["par_type"].get(typ, 0) + 1
+                prov = provenance(d, source=s["chemin"], sha=sha, offset=offset, typ=typ)
+                cle = cle_dedup(d, typ, prov)
+                if cle in vus:
+                    comptes["dedup"] += 1
+                    cs["dedup"] += 1
+                    continue
+                vus.add(cle)
+                comptes["utilises"] += 1
+                cs["utilises"] += 1
+                if typ == "BBO":
+                    b, a = _num(d, "bid", "hl_bid"), _num(d, "ask", "hl_ask")
+                    ts = prov["recv_ts"] or prov["exchange_ts"]
+                    if b and a and a > b > 0 and ts is not None:
+                        c = prov["coin"] or "?"
+                        bbo_par_coin.setdefault(c, []).append(
+                            (float(ts) / (1e6 if ts > 1e14 else 1.0), b, a, prov)
+                        )
+                if len(lineage_seeds) < 50:
+                    lineage_seeds.append(prov)
+                maintenant = time.monotonic()
+                if maintenant - dernier_affichage >= 0.5:
+                    _publier_progression(
+                        progress_callback,
+                        courant=comptes["lus"],
+                        total=None,
+                        detail=(
+                            f"normalisation source {numero_source}/{total_sources} "
+                            f"{chemin.name} : {cs['lus']} événements"
+                        ),
+                        unite="evenements",
+                    )
+                    dernier_affichage = maintenant
         except Exception as e:  # noqa: BLE001 — une source illisible est comptée+EXCLUE, jamais ignorée en silence
             par_source[s["chemin"]] = {"erreur": str(e)[:120], "exclue": True}
             continue
-        for offset, d in it:
-            if not isinstance(d, dict) or d.get("_invalide"):
-                comptes["filtres"] += 1
-                continue
-            comptes["lus"] += 1; cs["lus"] += 1
-            typ = classer_type(d, s["chemin"])
-            comptes["par_type"][typ] = comptes["par_type"].get(typ, 0) + 1
-            prov = provenance(d, source=s["chemin"], sha=sha, offset=offset, typ=typ)
-            cle = cle_dedup(d, typ, prov)
-            if cle in vus:
-                comptes["dedup"] += 1; cs["dedup"] += 1
-                continue
-            vus.add(cle)
-            comptes["utilises"] += 1; cs["utilises"] += 1
-            if typ == "BBO":
-                b, a = _num(d, "bid", "hl_bid"), _num(d, "ask", "hl_ask")
-                ts = prov["recv_ts"] or prov["exchange_ts"]
-                if b and a and a > b > 0 and ts is not None:
-                    c = prov["coin"] or "?"
-                    bbo_par_coin.setdefault(c, []).append((float(ts) / (1e6 if ts > 1e14 else 1.0), b, a, prov))
-            if len(lineage_seeds) < 50:
-                lineage_seeds.append(prov)
         par_source[s["chemin"]] = cs
-    episodes = _episodes_depuis_bbo(bbo_par_coin)
+        _publier_progression(
+            progress_callback,
+            courant=comptes["lus"],
+            total=None,
+            detail=(
+                f"source {numero_source}/{total_sources} terminée : "
+                f"{cs['lus']} lus, {cs['utilises']} utiles, {cs['dedup']} doublons"
+            ),
+            unite="evenements",
+        )
+    episodes = _episodes_depuis_bbo(
+        bbo_par_coin,
+        progress_callback=progress_callback,
+        stop_event=stop_event,
+    )
     comptes["episodes"] = len(episodes)
     return {"episodes": episodes, "comptes": comptes, "par_source": par_source, "lineage_seeds": lineage_seeds}
 
 
-def _episodes_depuis_bbo(bbo_par_coin: dict) -> list[dict]:
+def _episodes_depuis_bbo(bbo_par_coin: dict, *, progress_callback=None, stop_event=None) -> list[dict]:
     eps = []
+    total_ticks = sum(len(ticks) for ticks in bbo_par_coin.values())
+    faits = 0
+    dernier_affichage = 0.0
     for coin, ticks in bbo_par_coin.items():
+        if stop_event is not None and stop_event.is_set():
+            break
         ticks.sort(key=lambda x: x[0])
         mids = [(ts, (b + a) / 2.0, b, a, prov) for ts, b, a, prov in ticks]
+        timestamps = [ligne[0] for ligne in mids]
         for i, (ts, mid, bid, ask, prov) in enumerate(mids):
+            if stop_event is not None and stop_event.is_set():
+                break
+            faits += 1
             fwd, fwd_b, fwd_a = {}, {}, {}
             for h in HORIZONS_MS:
-                j = i
-                while j < len(mids) and mids[j][0] - ts < h:
-                    j += 1
+                j = bisect_left(timestamps, ts + h, lo=i)
                 if j < len(mids):
                     fwd[h] = mids[j][1]
                     fwd_b[h] = mids[j][2]                     # vrai BID futur du tick ultérieur (FWD_BOOK causal)
@@ -164,6 +229,26 @@ def _episodes_depuis_bbo(bbo_par_coin: dict) -> list[dict]:
                         "queue_devant_sz": 200.0, "vol_traversant_sz": 600.0,
                         "fees_bps": 1.5, "slippage_bps": 0.8, "impact_bps": 0.2, "latence_bps": 0.3,
                         "fwd_mid": fwd, "fwd_bid": fwd_b, "fwd_ask": fwd_a, "provenance": prov})
+            maintenant = time.monotonic()
+            if maintenant - dernier_affichage >= 0.5:
+                _publier_progression(
+                    progress_callback,
+                    courant=faits,
+                    total=total_ticks,
+                    detail=(
+                        f"reconstruction causale {coin} : {faits}/{total_ticks} ticks, "
+                        f"{len(eps)} épisodes exploitables"
+                    ),
+                    unite="ticks",
+                )
+                dernier_affichage = maintenant
+    _publier_progression(
+        progress_callback,
+        courant=faits,
+        total=total_ticks,
+        detail=f"reconstruction terminée : {len(eps)} épisodes sur {faits} ticks",
+        unite="ticks",
+    )
     return eps
 
 

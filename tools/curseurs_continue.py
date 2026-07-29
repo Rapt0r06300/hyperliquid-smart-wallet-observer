@@ -116,13 +116,14 @@ def scanner_nouveautes(root: Path, rundir: Path, *, dossiers=DOSSIERS_INGESTION,
         for p in sorted(base.rglob("*")):
             if not p.is_file() or any(seg in p.parts for seg in IGNORER):
                 continue
+            source_rel = p.relative_to(root).as_posix()
             if p.suffix.lower() in EXTS_STREAM:
                 news, info = nouveaux_evenements(root, rundir, p, max_events=max_events_par_source)
                 if news:
                     avec += 1
                     for d in news:
-                        new_events.append({**d, "_source": str(p.relative_to(root))})
-                    par_source[str(p.relative_to(root))] = info["n_nouveaux"]
+                        new_events.append({**d, "_source": source_rel})
+                    par_source[source_rel] = info["n_nouveaux"]
             elif p.suffix.lower() in CAT.EXTS:
                 # non-JSONL : suivi par identité (sha des 64 premiers Ko + taille) — nouveauté = identité changée
                 cle = str(p.resolve())
@@ -132,7 +133,7 @@ def scanner_nouveautes(root: Path, rundir: Path, *, dossiers=DOSSIERS_INGESTION,
                     continue
                 if snap.get(cle, {}).get("sig") != sig:
                     avec += 1
-                    par_source[str(p.relative_to(root))] = "IDENTITE_CHANGEE"
+                    par_source[source_rel] = "IDENTITE_CHANGEE"
                     ident_updates[cle] = {"sig": sig}
     if ident_updates:                         # relire APRÈS les offsets jsonl, fusionner l'identité, sauver
         cur = _charger(rundir)

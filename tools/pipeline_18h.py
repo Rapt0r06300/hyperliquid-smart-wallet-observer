@@ -15,6 +15,7 @@ from __future__ import annotations
 import json
 import statistics
 import sys
+import time
 from pathlib import Path
 
 RACINE = Path(__file__).resolve().parents[1]
@@ -56,12 +57,27 @@ def moteur_exact(ep: dict, *, sens: int, horizon_ms: int, modele_exec: str = "ta
             "maker": modele_exec != "taker", "statut": "OK", "episode": o}
 
 
-def nets_exact(corpus: list[dict], *, sens: int, horizon_ms: int, modele_exec: str = "taker") -> list[dict]:
+def nets_exact(
+    corpus: list[dict],
+    *,
+    sens: int,
+    horizon_ms: int,
+    modele_exec: str = "taker",
+    stop_event=None,
+    progress_callback=None,
+) -> list[dict]:
     """Renvoie UN OBJET PAR ÉPISODE (episode_id, entry_ts, exit_ts, status, net_bps, …), de MÊME longueur que
     `corpus`. On ne filtre JAMAIS pour re-zipper : UNMEASURABLE/NO_FILL/NO_DATA gardent leur identité.
     Pour la liste des net mesurés, utiliser `_nets_ok(...)`."""
     import moteur_execution_prod as MEP
-    return MEP.evaluer_episodes(corpus, sens=sens, horizon_ms=horizon_ms, modele_exec=modele_exec)
+    return MEP.evaluer_episodes(
+        corpus,
+        sens=sens,
+        horizon_ms=horizon_ms,
+        modele_exec=modele_exec,
+        stop_event=stop_event,
+        progress_callback=progress_callback,
+    )
 
 
 def _nets_ok(episodes: list[dict]) -> list[float]:
@@ -80,11 +96,36 @@ def _nets_promo(episodes: list[dict]) -> list[float]:
 
 
 # ─────────────── FAST_SCREEN (approx, ne promeut jamais) ───────────────
-def fast_screen_variante(corpus: list[dict], *, sens: int, horizon_ms: int,
-                         cout_ar_bps: float = COUT_APPROX_AR_BPS) -> dict:
+def fast_screen_variante(
+    corpus: list[dict],
+    *,
+    sens: int,
+    horizon_ms: int,
+    cout_ar_bps: float = COUT_APPROX_AR_BPS,
+    stop_event=None,
+    progress_callback=None,
+) -> dict:
     """Approx : net = médiane(brut top-of-book) − coût forfaitaire conservateur. Marqué NON éligible."""
     bruts = []
-    for ep in corpus:
+    total = len(corpus)
+    prochain_signal = time.monotonic()
+    for i, ep in enumerate(corpus):
+        if i % 256 == 0 and stop_event is not None and stop_event.is_set():
+            return {
+                "moteur": "FAST_SCREEN",
+                "n": len(bruts),
+                "net_approx_bps": None,
+                "garder": False,
+                "interrompu": True,
+                "drapeaux": ["INTERRUPTED", "NOT_ELIGIBLE_FOR_FORWARD"],
+                "peut_promouvoir": False,
+            }
+        maintenant = time.monotonic()
+        if progress_callback is not None and (
+            i % 8192 == 0 or maintenant >= prochain_signal or i + 1 == total
+        ):
+            progress_callback(i + 1, total)
+            prochain_signal = maintenant + 0.5
         mid = (float(ep["bid"]) + float(ep["ask"])) / 2.0
         fwd = (ep.get("fwd_mid") or {}).get(horizon_ms) or (ep.get("fwd_mid") or {}).get(str(horizon_ms))
         if fwd is None or mid <= 0:
@@ -116,12 +157,32 @@ def embargo_reel(horizons, *, latence_max_ms: float = LATENCE_MAX_MS, feature_du
     return max([float(h) for h in horizons] + [float(latence_max_ms), float(feature_dur_max_ms)])
 
 
-def _filtrer_corpus(corpus, *, coin=None, regime=None, predicat=None, family=None, seuil=None):
+def _filtrer_corpus(
+    corpus,
+    *,
+    coin=None,
+    regime=None,
+    predicat=None,
+    family=None,
+    seuil=None,
+    stop_event=None,
+    progress_callback=None,
+):
     """Filtre par coin/régime ET, si `predicat` fourni, par le prédicat RÉEL de la famille sur l'épisode.
     Une famille dont la donnée ne porte pas le prédicat renvoie 0 épisode -> DATA_MISSING honnête (jamais
     un net générique mal étiqueté)."""
     out = []
-    for e in corpus:
+    total = len(corpus)
+    prochain_signal = time.monotonic()
+    for i, e in enumerate(corpus):
+        if i % 256 == 0 and stop_event is not None and stop_event.is_set():
+            break
+        maintenant = time.monotonic()
+        if progress_callback is not None and (
+            i % 8192 == 0 or maintenant >= prochain_signal or i + 1 == total
+        ):
+            progress_callback(i + 1, total)
+            prochain_signal = maintenant + 0.5
         if coin is not None and e.get("coin") != coin:
             continue
         if regime is not None and e.get("regime") != regime:
@@ -138,7 +199,7 @@ def _publier_progres(fait: int, total: int, *, job=None, ensuite=None):
     module n'est pas là (18h/tests), on ne casse rien. Le dashboard cesse ainsi de rester bloqué à 2/7."""
     try:
         import progres_live as PROG
-        PROG.publier(int(fait), int(total), job=job, ensuite=ensuite)
+        PROG.sous_phase(int(fait), int(total), job=job, ensuite=ensuite)
     except Exception:  # noqa: BLE001
         pass
 
@@ -152,10 +213,50 @@ def phase_discovery(rundir: Path, corpus_disc: list[dict], variantes: list[dict]
     n_prereg = n_fast = n_exact = 0
     survivants = []
     _ntot = max(1, len(variantes))
+    # Une même sous-population est utilisée pour plusieurs directions/horizons.
+    # La recalculer 8 à 16 fois ne changeait aucun résultat mais pouvait coûter
+    # des heures sur 500k+ événements. Cache borné de références, sans sampling.
+    sous_corpus_cache = {}
+    cache_ordre = []
+    cache_max = 12
+
+    def _progression_interne(i_var, libelle):
+        def callback(fait_interne, total_interne):
+            try:
+                import progres_live as PROG
+                PROG.sous_phase(
+                    i_var,
+                    _ntot,
+                    detail=libelle,
+                    traite=fait_interne,
+                    traite_total=total_interne,
+                    unite="événements",
+                )
+            except Exception:  # noqa: BLE001
+                pass
+        return callback
+
     for i, v in enumerate(variantes):
-        if i % 25 == 0 or i == _ntot - 1:                    # progression FINE (point 1) : chaque ~25 trials
-            _publier_progres(i, _ntot, job="test des idées %d/%d (fast-screen + rejeu exact)" % (i, _ntot),
-                             ensuite="validation")
+        etiquette = "%s %s %sms seuil=%s" % (
+            v.get("family"),
+            v.get("coin"),
+            v.get("horizon_ms"),
+            (v.get("params") or {}).get("seuil"),
+        )
+        try:
+            import progres_live as PROG
+            PROG.sous_phase(
+                i,
+                _ntot,
+                job="test des idées · variante %d/%d : %s" % (i + 1, _ntot, etiquette),
+                ensuite="validation",
+                detail="préparation du sous-corpus",
+                traite=0,
+                traite_total=len(corpus_disc),
+                unite="événements",
+            )
+        except Exception:  # noqa: BLE001
+            pass
         if stop_event is not None and stop_event.is_set():   # interruption rapide en plein replay
             break
         ph = REG.parameter_hash({**v["params"], "dir": v["direction"], "h": v["horizon_ms"],
@@ -169,9 +270,52 @@ def phase_discovery(rundir: Path, corpus_disc: list[dict], variantes: list[dict]
                                     "direction": v["direction"], "cost_model": "AR_complet", "latency_model": "feed+dec+entry+resp",
                                     "fill_model": "taker", "code_sha": code_sha, "params": v["params"]})
         n_prereg += 1
-        sub = _filtrer_corpus(corpus_disc, coin=v["coin"], regime=v["regime"], predicat=predicat,
-                              family=v["family"], seuil=(v.get("params") or {}).get("seuil"))
-        fs = fast_screen_variante(sub, sens=v["direction"], horizon_ms=v["horizon_ms"])
+        cle_cache = (
+            v.get("coin"),
+            v.get("regime"),
+            v.get("family"),
+            (v.get("params") or {}).get("seuil"),
+        )
+        sub = sous_corpus_cache.get(cle_cache)
+        if sub is None:
+            sub = _filtrer_corpus(
+                corpus_disc,
+                coin=v["coin"],
+                regime=v["regime"],
+                predicat=predicat,
+                family=v["family"],
+                seuil=(v.get("params") or {}).get("seuil"),
+                stop_event=stop_event,
+                progress_callback=_progression_interne(i, "filtrage exact du corpus"),
+            )
+            if stop_event is not None and stop_event.is_set():
+                break
+            sous_corpus_cache[cle_cache] = sub
+            cache_ordre.append(cle_cache)
+            if len(cache_ordre) > cache_max:
+                sous_corpus_cache.pop(cache_ordre.pop(0), None)
+        else:
+            try:
+                import progres_live as PROG
+                PROG.sous_phase(
+                    i,
+                    _ntot,
+                    detail="sous-corpus réutilisé sans rescan",
+                    traite=len(sub),
+                    traite_total=len(sub),
+                    unite="événements",
+                )
+            except Exception:  # noqa: BLE001
+                pass
+        fs = fast_screen_variante(
+            sub,
+            sens=v["direction"],
+            horizon_ms=v["horizon_ms"],
+            stop_event=stop_event,
+            progress_callback=_progression_interne(i, "fast-screen sur prix futurs"),
+        )
+        if fs.get("interrompu") or (stop_event is not None and stop_event.is_set()):
+            break
         n_fast += 1
         if not fs["garder"]:
             REG.enregistrer_resultat(rundir, tid, {"family": v["family"], "variant": tid, "phase": "discovery",
@@ -179,7 +323,17 @@ def phase_discovery(rundir: Path, corpus_disc: list[dict], variantes: list[dict]
                                                    "sharpe": None, "pf": None, "verdict": "KILL_FAST"})
             continue
         # EXACT_REPLAY sur le survivant : SEULS les nets PROMOUVABLES (FWD_BOOK) décident du survivant (P0)
-        nets = _nets_promo(nets_exact(sub, sens=v["direction"], horizon_ms=v["horizon_ms"]))
+        nets = _nets_promo(
+            nets_exact(
+                sub,
+                sens=v["direction"],
+                horizon_ms=v["horizon_ms"],
+                stop_event=stop_event,
+                progress_callback=_progression_interne(i, "rejeu exact prix/frais/slippage"),
+            )
+        )
+        if stop_event is not None and stop_event.is_set():
+            break
         n_exact += 1
         net_med = statistics.median(nets) if nets else None
         sh = VAL.sharpe(nets) if len(nets) >= 2 else None
@@ -192,6 +346,12 @@ def phase_discovery(rundir: Path, corpus_disc: list[dict], variantes: list[dict]
                                                "direction": v["direction"]})
         if verdict == "SURVIVANT_DISCOVERY":
             survivants.append({"trial_id": tid, **v, "net_median_bps": net_med, "sharpe": sh, "pf": pf, "nets": nets})
+        _publier_progres(
+            i + 1,
+            _ntot,
+            job="test des idées · variante %d/%d terminée : %s" % (i + 1, _ntot, etiquette),
+            ensuite="variante suivante puis validation",
+        )
     survivants.sort(key=lambda s: -(s["net_median_bps"] or -1e9))
     survivants = survivants[:top_survivants]                # successive halving : on ne garde que le haut du panier
     (rundir / "resultats").mkdir(parents=True, exist_ok=True)
@@ -248,13 +408,55 @@ def phase_validation(rundir: Path, corpus_val: list[dict], *, survivants: list[d
     perf_pbo, rapports = {}, []
     interrompu = False
     _nsv = max(1, len(survivants))
+
+    def _progression_validation(i_candidat, detail):
+        def callback(fait_interne, total_interne):
+            try:
+                import progres_live as PROG
+                PROG.sous_phase(
+                    i_candidat,
+                    _nsv,
+                    job="validation solidité %d/%d" % (i_candidat + 1, _nsv),
+                    ensuite="holdout",
+                    detail=detail,
+                    traite=fait_interne,
+                    traite_total=total_interne,
+                    unite="événements",
+                )
+            except Exception:  # noqa: BLE001
+                pass
+        return callback
+
     for i, s in enumerate(survivants):
-        _publier_progres(i, _nsv, job="validation solidité %d/%d (WF/placebo/DSR)" % (i, _nsv), ensuite="holdout")
+        _publier_progres(
+            i,
+            _nsv,
+            job="validation solidité %d/%d (WF/placebo/DSR)" % (i + 1, _nsv),
+            ensuite="holdout",
+        )
         if stop_event is not None and stop_event.is_set():   # arrêt coopératif en pleine validation
             interrompu = True
             break
-        sub = _filtrer_corpus(corpus_val, coin=s["coin"], regime=s["regime"])
-        episodes = nets_exact(sub, sens=s["direction"], horizon_ms=s["horizon_ms"])
+        sub = _filtrer_corpus(
+            corpus_val,
+            coin=s["coin"],
+            regime=s["regime"],
+            stop_event=stop_event,
+            progress_callback=_progression_validation(i, "filtrage du corpus de validation"),
+        )
+        if stop_event is not None and stop_event.is_set():
+            interrompu = True
+            break
+        episodes = nets_exact(
+            sub,
+            sens=s["direction"],
+            horizon_ms=s["horizon_ms"],
+            stop_event=stop_event,
+            progress_callback=_progression_validation(i, "rejeu exact du candidat"),
+        )
+        if stop_event is not None and stop_event.is_set():
+            interrompu = True
+            break
         nets = _nets_promo(episodes)                          # P0 : seuls les PROMOUVABLES (FWD_BOOK) valident
         # walk-forward par ÉPISODE PROMOUVABLE (ts propre, jamais un zip filtrer→réassocier)
         eps = [{"ts_ms": o["entry_ts"], "net_bps": o["net_bps"]} for o in episodes
@@ -262,11 +464,42 @@ def phase_validation(rundir: Path, corpus_val: list[dict], *, survivants: list[d
         emb_s = embargo_reel([s["horizon_ms"]])               # FX-9 : embargo RÉEL = max(horizon,latence,features), jamais 1 ms
         wf = V18.walk_forward(eps, k=3, embargo_ms=emb_s)
         # PLACEBO direction opposée RÉELLEMENT rejoué (recalcul par prix)
-        nets_opp = _nets_promo(nets_exact(sub, sens=-s["direction"], horizon_ms=s["horizon_ms"]))
+        nets_opp = _nets_promo(
+            nets_exact(
+                sub,
+                sens=-s["direction"],
+                horizon_ms=s["horizon_ms"],
+                stop_event=stop_event,
+                progress_callback=_progression_validation(i, "placebo direction opposée"),
+            )
+        )
+        if stop_event is not None and stop_event.is_set():
+            interrompu = True
+            break
         # PLACEBO coin aléatoire compatible (autre coin, même régime)
         autres = [c for c in {e["coin"] for e in corpus_val} if c != s["coin"]]
-        nets_coin = _nets_promo(nets_exact(_filtrer_corpus(corpus_val, coin=(autres[0] if autres else s["coin"]), regime=s["regime"]),
-                                           sens=s["direction"], horizon_ms=s["horizon_ms"]))
+        sub_coin = _filtrer_corpus(
+            corpus_val,
+            coin=(autres[0] if autres else s["coin"]),
+            regime=s["regime"],
+            stop_event=stop_event,
+            progress_callback=_progression_validation(i, "filtrage du placebo autre marché"),
+        )
+        if stop_event is not None and stop_event.is_set():
+            interrompu = True
+            break
+        nets_coin = _nets_promo(
+            nets_exact(
+                sub_coin,
+                sens=s["direction"],
+                horizon_ms=s["horizon_ms"],
+                stop_event=stop_event,
+                progress_callback=_progression_validation(i, "placebo autre marché"),
+            )
+        )
+        if stop_event is not None and stop_event.is_set():
+            interrompu = True
+            break
         boot = V18.bootstrap_bloc(nets)
         d = VAL.dsr(nets, sharpes_essais=sharpes_tous) if len(nets) >= 8 else {"dsr": None}
         perf_pbo[s["trial_id"]] = nets
@@ -278,6 +511,12 @@ def phase_validation(rundir: Path, corpus_val: list[dict], *, survivants: list[d
                "placebo_coin_median_bps": (statistics.median(nets_coin) if nets_coin else None),
                "ic_bas_bps": boot.get("ic_bas"), "ic_haut_bps": boot.get("ic_haut"), "dsr": d.get("dsr")}
         rapports.append(rap)
+        _publier_progres(
+            i + 1,
+            _nsv,
+            job="candidat %d/%d validé" % (i + 1, _nsv),
+            ensuite="candidat suivant puis holdout",
+        )
     pbo = VAL.pbo_cscv(perf_pbo, s=4) if len(perf_pbo) >= 2 else {"pbo": None}
     (rundir / "resultats" / "validation.json").write_text(
         json.dumps({"rapports": rapports, "pbo": pbo.get("pbo"), "n_sharpes_dsr": len(sharpes_tous)},
@@ -591,6 +830,24 @@ def executer_pipeline_complet(root: Path, rundir: Path, corpus: list[dict], *, c
         vnorm.append({**v, "coin": c, "regime": reg, "params": v.get("params") or {"seuil": 8}})
     d = phase_discovery(rundir, disc or corpus, vnorm, code_sha=code_sha, source_hash=source_hash,
                         stop_event=stop_event, predicat=predicat)
+    if stop_event is not None and stop_event.is_set():
+        resume = {
+            "n_variantes": len(vnorm),
+            **{k: d[k] for k in ("n_preregistres", "n_fast_screen", "n_exact_replays", "n_survivants")},
+            "n_candidats_figes": 0,
+            "n_valides": 0,
+            "pbo": None,
+            "n_holdout": 0,
+            "n_forward_events": 0,
+            "n_pass": 0,
+            "interrompu": True,
+            "phase_interrompue": "DISCOVERY",
+        }
+        (rundir / "resultats" / "pipeline_resume.json").write_text(
+            json.dumps(resume, ensure_ascii=False, indent=1),
+            encoding="utf-8",
+        )
+        return resume
     fr = phase_freeze(rundir, d["survivants"], code_sha=code_sha)
     v = phase_validation(rundir, val or corpus, survivants=d["survivants"], stop_event=stop_event)
     # arrêt coopératif (PT-8) : si stop demandé, on ne lance PAS le holdout/forward (partiel honnête)
@@ -617,7 +874,8 @@ def executer_pipeline_donnees_completes(root: Path, rundir: Path, *, code_sha: s
                                         dossiers=None, ledgers_logs=None,
                                         variantes=None, stop_event=None, predicat=None,
                                         new_events=None, affected_windows=None, hist_dir=None, securise=None,
-                                        episodes_prets=None, portefeuille_global_dir=None) -> dict:
+                                        episodes_prets=None, portefeuille_global_dir=None,
+                                        progress_callback=None) -> dict:
     """LOT18H-DATA-COMPLETE : catalogue COMPLET (sans plafond silencieux) → CORPUS canonique réellement
     consommé (provenance + dedup selon la source) → 7 phases → analyse des LOGS (refus rejoués, gate vs
     no-gate) → LIGNÉE des PnL → CSVs d'utilisation. Une source cataloguée ne compte que si elle est CONSOMMÉE."""
@@ -635,19 +893,42 @@ def executer_pipeline_donnees_completes(root: Path, rundir: Path, *, code_sha: s
     ingestion = {"mode": "FULL"}
     if new_events is None and affected_windows is None:
         # comportement HISTORIQUE (18h) : catalogue complet à chaque appel
-        cat = CAT.cataloguer_complet(root, rundir, **kw)
+        cat = CAT.cataloguer_complet(
+            root,
+            rundir,
+            progress_callback=progress_callback,
+            stop_event=stop_event,
+            **kw,
+        )
         sources = cat["sources"]
-        cons = COR.construire(sources, root=root)
+        cons = COR.construire(
+            sources,
+            root=root,
+            progress_callback=progress_callback,
+            stop_event=stop_event,
+        )
         corpus = cons["episodes"]
     else:
         # INCRÉMENTAL (continu, PT-2) : corpus historique IMMUABLE (cache au niveau RUN) + segments neufs +
         # fenêtre active ; le cycle 2 NE recatalogue PAS et NE rejoue PAS tout l'historique.
         import corpus_incremental as INC
         hd = Path(hist_dir) if hist_dir else rundir
-        hist = INC.preparer_historique(root, hd, cataloguer=lambda r, rd: CAT.cataloguer_complet(r, rd, **kw),
-                                       construire=COR.construire)
+        hist = INC.preparer_historique(
+            root,
+            hd,
+            cataloguer=lambda r, rd, **extra: CAT.cataloguer_complet(r, rd, **kw, **extra),
+            construire=COR.construire,
+            progress_callback=progress_callback,
+            stop_event=stop_event,
+        )
         new_segs = INC.segments_incrementaux(new_events or [])
-        fen = INC.fenetre_active(hist["corpus"], new_segs, affected_windows)
+        fen = INC.fenetre_active(
+            hist["corpus"],
+            new_segs,
+            affected_windows,
+            progress_callback=progress_callback,
+            stop_event=stop_event,
+        )
         corpus = fen["working"] or hist["corpus"]
         cat = {"sources": [], "accounting": hist["manifest"].get("accounting", {})}
         cons = {"episodes": corpus, "comptes": {"utilises": len(corpus)}}
@@ -659,7 +940,10 @@ def executer_pipeline_donnees_completes(root: Path, rundir: Path, *, code_sha: s
                      "n_sources_parsees_ce_cycle": hist["n_sources_parsees_ce_cycle"],
                      "n_hist_total": fen["n_hist_total"], "n_hist_rejoues": fen["n_hist_rejoues"],
                      "n_new_segments": fen["n_new_segments"], "n_episodes_muris": len(prets),
-                     "coins_actifs": fen["coins"]}
+                     "coins_actifs": fen["coins"],
+                     "bootstrap_complete": hist.get("bootstrap_complete"),
+                     "bootstrap_progress_pct": hist.get("bootstrap_progress_pct"),
+                     "n_sources_deferred": hist.get("n_sources_deferred")}
         sources = cat["sources"]
     if not corpus:                                         # honnête : pas d'épisode marché exploitable
         corpus = corpus_fixtures()
@@ -668,6 +952,24 @@ def executer_pipeline_donnees_completes(root: Path, rundir: Path, *, code_sha: s
                                        source_hash=(sources[0]["sha256"] if sources and sources[0].get("sha256") else "corpus"),
                                        variantes=variantes, stop_event=stop_event, predicat=predicat, securise=securise,
                                        portefeuille_global_dir=portefeuille_global_dir)
+    if stop_event is not None and stop_event.is_set():
+        resume.update({
+            "accounting": cat["accounting"],
+            "corpus_comptes": cons["comptes"],
+            "ingestion": ingestion,
+            "interrompu": True,
+            "phase_interrompue": resume.get("phase_interrompue") or "PIPELINE",
+            "post_analyse_ignoree": True,
+        })
+        (rundir / "resultats" / "cycle_ingestion.json").write_text(
+            json.dumps(ingestion, ensure_ascii=False, indent=1),
+            encoding="utf-8",
+        )
+        (rundir / "resultats" / "pipeline_resume.json").write_text(
+            json.dumps(resume, ensure_ascii=False, indent=1),
+            encoding="utf-8",
+        )
+        return resume
     # analyse des logs / ledgers (refus rejoués + gate vs no-gate)
     if ledgers_logs is None:
         ledgers_logs = _ledgers_logs_par_defaut(root)

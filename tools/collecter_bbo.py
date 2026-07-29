@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import json
 import time
+from collections import deque
 from pathlib import Path
 from typing import Any
 
@@ -25,6 +26,8 @@ WS_BINANCE = "wss://fstream.binance.com/stream"
 SORTIE = Path("runtime") / "data" / "bbo_synchro.jsonl"
 TAPE = Path("runtime") / "data" / "bbo_tape.jsonl"     # chaque message BBO (monotone) -> lead-lag fin
 HEARTBEAT = Path("runtime") / "data" / "bbo_heartbeat.json"
+FEED_QUALITY = Path("runtime") / "data" / "feed_quality.json"
+TICK_DATASET_DIR = Path("runtime") / "data" / "market_ticks"
 MARQUEUR = Path("runtime") / "data" / "lanceur_session_marqueur.txt"
 AGE_MAX_MS = 750.0                 # au-delà (horloge MONOTONE), quote périmée -> rejet
 FENETRE_SYNCHRO_MS = 250.0         # HL et Binance frais à moins de ça l'un de l'autre (monotone)
@@ -37,6 +40,7 @@ SHARDS_DIR = Path("runtime") / "data" / "bbo_shards"
 ARCHIVE_DIR = Path("runtime") / "data" / "bbo_shards_archive"   # historique PRÉSERVÉ (jamais supprimé, Flo 25/07)
 SHARD_OCTETS = 80 * 1024 * 1024
 MAX_SHARDS = 60                    # ~60 shards gz (~0,6-1 Go compresses, plusieurs jours) puis purge FIFO
+TICK_QUEUE_MAX = 100_000           # protege la socket; toute eviction est comptee et degrade la qualite
 
 _EXCEPTIONS = {"PEPE": "1000PEPEUSDT", "SHIB": "1000SHIBUSDT", "BONK": "1000BONKUSDT",
                "FLOKI": "1000FLOKIUSDT", "LUNC": "1000LUNCUSDT", "SATS": "1000SATSUSDT",
@@ -104,6 +108,40 @@ def parser_bbo_hl(msg: Any) -> dict | None:
     return {"coin": str(d.get("coin") or "").upper(), "bid": b, "ask": a,
             "bid_sz": _f(bid.get("sz")) or 0.0, "ask_sz": _f(ask.get("sz")) or 0.0,
             "ts_ex": float(d.get("time") or 0.0)}
+
+
+def parser_l2_hl(msg: Any) -> dict | None:
+    """WS HL ``l2Book`` -> full snapshot, never an invented incremental update."""
+    if not isinstance(msg, dict) or msg.get("channel") != "l2Book":
+        return None
+    data = msg.get("data") or {}
+    levels = data.get("levels") or []
+    if not isinstance(levels, list) or len(levels) < 2:
+        return None
+    bids = levels[0] if isinstance(levels[0], list) else []
+    asks = levels[1] if isinstance(levels[1], list) else []
+    if not bids or not asks:
+        return None
+    return {
+        "coin": str(data.get("coin") or "").upper(),
+        "bids": bids,
+        "asks": asks,
+        "ts_ex": int(float(data.get("time") or 0.0)),
+    }
+
+
+def parser_trades_hl(msg: Any) -> list[dict]:
+    """WS HL public ``trades`` -> independent exchange events.
+
+    The channel is not labelled as an initial snapshot by Hyperliquid, so this
+    parser never guesses ``isSnapshot`` from "first message on a connection".
+    """
+    if not isinstance(msg, dict) or msg.get("channel") != "trades":
+        return []
+    data = msg.get("data") or []
+    if not isinstance(data, list):
+        return []
+    return [trade for trade in data if isinstance(trade, dict)]
 
 
 def parser_bookticker_binance(msg: Any) -> dict | None:
@@ -239,22 +277,111 @@ def sceller_shard(root: Path, *, seuil_octets: int = SHARD_OCTETS, max_shards: i
 async def _boucle(root: Path, coins: list[str]) -> None:  # pragma: no cover (I/O réseau)
     import asyncio
     import websockets
+    from hl_observer.collection.tick_dataset import TickDatasetWriter, TickEnvelope
+    from hl_observer.normalization.market_events import (
+        CanonicalEventWriter,
+        canonicalize_tick_record,
+    )
+    from hl_observer.realtime.feed_quality import (
+        FeedEventKind,
+        FeedMode,
+        FeedQualityConfig,
+        FeedQualityGate,
+        stable_event_id,
+    )
     mag = MagasinBBO()
     sym = {c: symbole_binance(c) for c in coins if symbole_binance(c)}
     coins_set = set(coins)   # LIQUIDATION_LIVE_COVERAGE : le HL bbo est écrit pour TOUS les coins (memes/HL-only
     #                          inclus) ; la jambe Binance (sym) ne couvre que les coins réellement listés là-bas.
     from hl_observer.collection import collecte_fiable as CF
     cache = CF.CacheDedup()
+    dataset = TickDatasetWriter(root / TICK_DATASET_DIR, flush_every=1)
+    canonical_writer = CanonicalEventWriter(
+        root / "runtime" / "data" / "canonical_events" / "canonical_market_events.jsonl"
+    )
+    raw_queue: deque[TickEnvelope] = deque()
+    quality_config = FeedQualityConfig(
+        max_age_ms=1_500.0,
+        heartbeat_max_age_ms=3_000.0,
+        max_gap_ms=GAP_MS,
+        max_jitter_ms=1_000.0,
+        max_latency_ms=1_500.0,
+        max_spread_bps=1_000.0,
+        max_mid_jump_fraction=0.15,
+        min_coherent_events=2,
+        min_score=75.0,
+    )
+    quality_gates: dict[tuple[str, str], FeedQualityGate] = {}
+    for coin in coins:
+        for channel, mode in (
+            ("bbo", FeedMode.FULL_SNAPSHOT),
+            ("l2Book", FeedMode.FULL_SNAPSHOT),
+            ("trades", FeedMode.EVENT_STREAM),
+        ):
+            quality_gates[(channel, coin)] = FeedQualityGate(
+                source_id="hyperliquid_mainnet_readonly",
+                channel=channel,
+                instrument=coin,
+                mode=mode,
+                config=quality_config,
+            )
+    local_sequences: dict[tuple[str, str], int] = {}
+    hl_connection_serial = 0
     #: TAPE BRUTE par message (horloge MONOTONE) — indispensable pour un lead-lag à 50/100 ms : un
     #: snapshot échantillonné à 250 ms ne peut PAS mesurer une réaction sous 250 ms. On enregistre
     #: chaque BBO reçu ; `lead_lag_shadow` reconstruit ensuite la réaction HL à n'importe quel horizon.
     tape: list[dict] = []
     stats = {"ecrits": 0, "rejets": 0, "reconnexions_hl": 0, "reconnexions_bin": 0, "trous": 0,
              "frames_bookticker": 0, "frames_trades": 0, "shards_scelles": 0,
+             "frames_l2_hl": 0, "frames_trades_hl": 0, "raw_frames_received": 0,
+             "raw_records_written": 0, "raw_queue_drops": 0, "parse_errors_hl": 0,
+             "canonical_events_written": 0, "canonical_events_rejected": 0,
              "dernier_hl_ns": 0, "dernier_bin_ns": 0, "debut_mono_ns": time.monotonic_ns()}
     marqueur0 = MARQUEUR.read_text(encoding="utf-8").strip() if MARQUEUR.exists() else ""
 
-    async def hl():
+    def next_sequence(channel: str, coin: str) -> int:
+        key = (channel, coin)
+        value = local_sequences.get(key, 0) + 1
+        local_sequences[key] = value
+        return value
+
+    def queue_raw(envelope: TickEnvelope) -> None:
+        if len(raw_queue) >= TICK_QUEUE_MAX:
+            dropped = raw_queue.popleft()
+            stats["raw_queue_drops"] += 1
+            gate = quality_gates.get((dropped.channel, dropped.instrument))
+            if gate is not None:
+                gate.mark_gap(reason="LOCAL_RAW_QUEUE_OVERFLOW")
+        raw_queue.append(envelope)
+
+    def mark_hl_gap(*, received_ts_ms: int, connection_id: str, gap_ms: float) -> None:
+        for gate in quality_gates.values():
+            gate.mark_gap(reason="HYPERLIQUID_WS_TEMPORAL_GAP")
+        queue_raw(
+            TickEnvelope(
+                source_id="hyperliquid_mainnet_readonly",
+                channel="connection",
+                instrument="*",
+                event_kind=FeedEventKind.GAP,
+                raw_payload={
+                    "gap_ms": round(gap_ms, 3),
+                    "reason": "HYPERLIQUID_WS_TEMPORAL_GAP",
+                },
+                received_ts_ms=received_ts_ms,
+                local_monotonic_ns=time.monotonic_ns(),
+                connection_id=connection_id,
+                reconnect_count=stats["reconnexions_hl"],
+                gap_count=stats["trous"],
+                provenance={
+                    "url": WS_HL,
+                    "network": "mainnet",
+                    "access": "read_only",
+                    "transport": "websocket",
+                },
+            )
+        )
+
+    async def hl_legacy():
         while True:
             try:
                 async with websockets.connect(WS_HL, ping_interval=20) as ws:
@@ -273,6 +400,248 @@ async def _boucle(root: Path, coins: list[str]) -> None:  # pragma: no cover (I/
                                          "mid": (q["bid"] + q["ask"]) / 2, "bid": q["bid"], "ask": q["ask"],
                                          "ts_wall_ms": time.time() * 1000, "ts_ex": q["ts_ex"]})
             except Exception:  # noqa: BLE001 — reconnecte SEULEMENT sur panne
+                stats["reconnexions_hl"] += 1
+                await asyncio.sleep(1.0)
+
+    def hl_provenance(channel: str) -> dict[str, Any]:
+        return {
+            "url": WS_HL,
+            "network": "mainnet",
+            "access": "read_only",
+            "transport": "websocket",
+            "channel_semantics": (
+                "full_snapshot" if channel in {"bbo", "l2Book"} else "event_stream"
+            ),
+        }
+
+    async def hl():
+        nonlocal hl_connection_serial
+        while True:
+            try:
+                async with websockets.connect(WS_HL, ping_interval=20) as ws:
+                    hl_connection_serial += 1
+                    connection_id = "hl-%d-%d" % (
+                        int(time.time() * 1000),
+                        hl_connection_serial,
+                    )
+                    if hl_connection_serial > 1:
+                        reconnect_ts = int(time.time() * 1000)
+                        for gate in quality_gates.values():
+                            gate.mark_reconnect(
+                                received_ts_ms=reconnect_ts,
+                                connection_id=connection_id,
+                            )
+                        queue_raw(
+                            TickEnvelope(
+                                source_id="hyperliquid_mainnet_readonly",
+                                channel="connection",
+                                instrument="*",
+                                event_kind=FeedEventKind.RECONNECT,
+                                raw_payload={
+                                    "connection_id": connection_id,
+                                    "reconnect_count": stats["reconnexions_hl"],
+                                },
+                                received_ts_ms=reconnect_ts,
+                                local_monotonic_ns=time.monotonic_ns(),
+                                connection_id=connection_id,
+                                reconnect_count=stats["reconnexions_hl"],
+                                gap_count=stats["trous"],
+                                provenance=hl_provenance("connection"),
+                            )
+                        )
+                    for coin_name in coins:
+                        for subscription_type in ("bbo", "l2Book", "trades"):
+                            await ws.send(
+                                json.dumps(
+                                    {
+                                        "method": "subscribe",
+                                        "subscription": {
+                                            "type": subscription_type,
+                                            "coin": coin_name,
+                                        },
+                                    }
+                                )
+                            )
+                    async for raw in ws:
+                        received_mono_ns = time.monotonic_ns()
+                        received_ts_ms = int(time.time() * 1000)
+                        gap_ms = (
+                            (received_mono_ns - stats["dernier_hl_ns"]) / 1e6
+                            if stats["dernier_hl_ns"]
+                            else 0.0
+                        )
+                        if gap_ms > GAP_MS:
+                            stats["trous"] += 1
+                            mark_hl_gap(
+                                received_ts_ms=received_ts_ms,
+                                connection_id=connection_id,
+                                gap_ms=gap_ms,
+                            )
+                        stats["dernier_hl_ns"] = received_mono_ns
+                        stats["raw_frames_received"] += 1
+                        try:
+                            message = json.loads(raw)
+                        except (TypeError, ValueError):
+                            stats["parse_errors_hl"] += 1
+                            queue_raw(
+                                TickEnvelope(
+                                    source_id="hyperliquid_mainnet_readonly",
+                                    channel="invalid_json",
+                                    instrument="*",
+                                    event_kind=FeedEventKind.EVENT,
+                                    raw_payload=raw,
+                                    received_ts_ms=received_ts_ms,
+                                    local_monotonic_ns=received_mono_ns,
+                                    connection_id=connection_id,
+                                    reconnect_count=stats["reconnexions_hl"],
+                                    gap_count=stats["trous"],
+                                    provenance=hl_provenance("invalid_json"),
+                                )
+                            )
+                            continue
+
+                        channel = str(message.get("channel") or "control")
+                        data = message.get("data")
+                        coin_name = ""
+                        if isinstance(data, dict):
+                            coin_name = str(data.get("coin") or "").upper()
+                        elif isinstance(data, list) and data and isinstance(data[0], dict):
+                            coin_name = str(data[0].get("coin") or "").upper()
+                        exchange_ts_ms: int | None = None
+                        if isinstance(data, dict) and data.get("time") is not None:
+                            exchange_ts_ms = int(float(data["time"]))
+                        elif isinstance(data, list):
+                            exchange_times = [
+                                int(float(item["time"]))
+                                for item in data
+                                if isinstance(item, dict) and item.get("time") is not None
+                            ]
+                            exchange_ts_ms = max(exchange_times) if exchange_times else None
+                        sequence = next_sequence(channel, coin_name or "*")
+                        envelope = TickEnvelope(
+                            source_id="hyperliquid_mainnet_readonly",
+                            channel=channel,
+                            instrument=coin_name or "*",
+                            event_kind=(
+                                FeedEventKind.SNAPSHOT
+                                if channel in {"bbo", "l2Book"}
+                                else FeedEventKind.EVENT
+                            ),
+                            raw_payload=raw,
+                            exchange_ts_ms=exchange_ts_ms,
+                            received_ts_ms=received_ts_ms,
+                            local_monotonic_ns=received_mono_ns,
+                            connection_id=connection_id,
+                            sequence=sequence,
+                            reconnect_count=stats["reconnexions_hl"],
+                            gap_count=stats["trous"],
+                            provenance=hl_provenance(channel),
+                        )
+                        queue_raw(envelope)
+
+                        quote = parser_bbo_hl(message)
+                        if quote and quote["coin"] in coins_set:
+                            gate = quality_gates[("bbo", quote["coin"])]
+                            gate.mark_heartbeat(received_ts_ms=received_ts_ms)
+                            quality = gate.ingest_book_snapshot(
+                                bids=[{"px": quote["bid"], "sz": quote["bid_sz"]}],
+                                asks=[{"px": quote["ask"], "sz": quote["ask_sz"]}],
+                                exchange_ts_ms=int(quote["ts_ex"] or received_ts_ms),
+                                received_ts_ms=received_ts_ms,
+                                event_id=stable_event_id(message),
+                                sequence=sequence,
+                            )
+                            envelope.parsed_summary = {
+                                "best_bid": quote["bid"],
+                                "best_ask": quote["ask"],
+                                "bid_size": quote["bid_sz"],
+                                "ask_size": quote["ask_sz"],
+                                "feed_quality_score": quality.feed_quality_score,
+                                "data_gate_ready": quality.ready,
+                                "quality_reasons": list(quality.reasons),
+                            }
+                            mag.maj_hl(quote, recu_mono_ns=received_mono_ns)
+                            tape.append(
+                                {
+                                    "venue": "HL",
+                                    "coin": quote["coin"],
+                                    "recu_ns": received_mono_ns,
+                                    "mid": (quote["bid"] + quote["ask"]) / 2,
+                                    "bid": quote["bid"],
+                                    "ask": quote["ask"],
+                                    "ts_wall_ms": received_ts_ms,
+                                    "ts_ex": quote["ts_ex"],
+                                }
+                            )
+                            continue
+
+                        book = parser_l2_hl(message)
+                        if book and book["coin"] in coins_set:
+                            stats["frames_l2_hl"] += 1
+                            gate = quality_gates[("l2Book", book["coin"])]
+                            gate.mark_heartbeat(received_ts_ms=received_ts_ms)
+                            quality = gate.ingest_book_snapshot(
+                                bids=book["bids"],
+                                asks=book["asks"],
+                                exchange_ts_ms=book["ts_ex"] or received_ts_ms,
+                                received_ts_ms=received_ts_ms,
+                                event_id=stable_event_id(message),
+                                sequence=sequence,
+                            )
+                            try:
+                                bid_depth_usd = sum(
+                                    float(level["px"]) * float(level["sz"])
+                                    for level in book["bids"]
+                                )
+                                ask_depth_usd = sum(
+                                    float(level["px"]) * float(level["sz"])
+                                    for level in book["asks"]
+                                )
+                            except (KeyError, TypeError, ValueError):
+                                bid_depth_usd = ask_depth_usd = 0.0
+                            envelope.parsed_summary = {
+                                "bid_levels": len(book["bids"]),
+                                "ask_levels": len(book["asks"]),
+                                "bid_depth_usd": round(bid_depth_usd, 6),
+                                "ask_depth_usd": round(ask_depth_usd, 6),
+                                "feed_quality_score": quality.feed_quality_score,
+                                "data_gate_ready": quality.ready,
+                                "quality_reasons": list(quality.reasons),
+                            }
+                            continue
+
+                        trades = parser_trades_hl(message)
+                        if trades:
+                            stats["frames_trades_hl"] += 1
+                            quality_by_coin: dict[str, dict[str, Any]] = {}
+                            for trade in trades:
+                                trade_coin = str(trade.get("coin") or coin_name).upper()
+                                gate = quality_gates.get(("trades", trade_coin))
+                                if gate is None:
+                                    continue
+                                gate.mark_heartbeat(received_ts_ms=received_ts_ms)
+                                trade_ts = int(float(trade.get("time") or received_ts_ms))
+                                trade_id = "%s|%s|%s" % (
+                                    trade_ts,
+                                    trade_coin,
+                                    trade.get("tid", trade.get("hash", "")),
+                                )
+                                quality = gate.ingest_event(
+                                    payload=trade,
+                                    exchange_ts_ms=trade_ts,
+                                    received_ts_ms=received_ts_ms,
+                                    event_id=trade_id,
+                                )
+                                quality_by_coin[trade_coin] = {
+                                    "feed_quality_score": quality.feed_quality_score,
+                                    "data_gate_ready": quality.ready,
+                                    "quality_reasons": list(quality.reasons),
+                                }
+                            envelope.parsed_summary = {
+                                "trade_count": len(trades),
+                                "quality_by_coin": quality_by_coin,
+                            }
+            except Exception:  # noqa: BLE001 - reconnect only after a real failure
                 stats["reconnexions_hl"] += 1
                 await asyncio.sleep(1.0)
 
@@ -337,9 +706,64 @@ async def _boucle(root: Path, coins: list[str]) -> None:  # pragma: no cover (I/
                 tape.clear()
                 if sceller_shard(root):                        # scelle un shard gz immuable si la tape est pleine
                     stats["shards_scelles"] += 1
+            if raw_queue:
+                batch = [raw_queue.popleft() for _ in range(min(5_000, len(raw_queue)))]
+                durable_records = await asyncio.to_thread(
+                    dataset.append_batch_records,
+                    batch,
+                )
+                stats["raw_records_written"] += len(durable_records)
+                canonical_results = [
+                    canonicalize_tick_record(record) for record in durable_records
+                ]
+                canonical_events = [
+                    result.event for result in canonical_results if result.event is not None
+                ]
+                stats["canonical_events_rejected"] += sum(
+                    1 for result in canonical_results if result.event is None
+                )
+                stats["canonical_events_written"] += await asyncio.to_thread(
+                    canonical_writer.append,
+                    canonical_events,
+                )
+            now_wall_ms = int(time.time() * 1000)
+            feed_snapshots = {
+                "hyperliquid:%s:%s" % (channel, coin): gate.snapshot(
+                    now_ms=now_wall_ms
+                ).as_dict()
+                for (channel, coin), gate in quality_gates.items()
+            }
+            quality_payload = {
+                "schema_version": "hypersmart.feed_quality.v1",
+                "generated_at_ms": now_wall_ms,
+                "feeds": feed_snapshots,
+                "ready_feeds": sum(
+                    1 for snapshot in feed_snapshots.values() if snapshot["ready"]
+                ),
+                "total_feeds": len(feed_snapshots),
+                "raw_queue_depth": len(raw_queue),
+                "raw_queue_drops": stats["raw_queue_drops"],
+                "dataset": dataset.stats(),
+                "canonical_events": {
+                    "path": str(canonical_writer.path),
+                    "written": canonical_writer.written,
+                    "duplicates": canonical_writer.duplicates,
+                    "rejected_by_quality_gate": stats["canonical_events_rejected"],
+                },
+                "read_only": True,
+                "real_execution": False,
+            }
+            CF.ecrire_atomique(
+                root / FEED_QUALITY,
+                json.dumps(quality_payload, ensure_ascii=False),
+            )
             duree_s = (now_ns - stats["debut_mono_ns"]) / 1e9
             hb = {"ts": time.time(), "duree_continue_s": round(duree_s, 1), **stats,
-                  "taux_rejet": round(stats["rejets"] / max(1, stats["ecrits"] + stats["rejets"]), 4)}
+                  "taux_rejet": round(stats["rejets"] / max(1, stats["ecrits"] + stats["rejets"]), 4),
+                  "raw_queue_depth": len(raw_queue),
+                  "feed_quality_ready": quality_payload["ready_feeds"],
+                  "feed_quality_total": quality_payload["total_feeds"],
+                  "tick_dataset": dataset.stats()}
             CF.ecrire_atomique(root / HEARTBEAT, json.dumps(hb, ensure_ascii=False))
             marq = MARQUEUR.read_text(encoding="utf-8").strip() if MARQUEUR.exists() else marqueur0
             if marq != marqueur0:                              # anti-orphelin : la session a changé -> stop
@@ -357,6 +781,26 @@ async def _boucle(root: Path, coins: list[str]) -> None:  # pragma: no cover (I/
         for t in taches:
             t.cancel()
         await asyncio.gather(*taches, return_exceptions=True)
+        while raw_queue:
+            batch = [raw_queue.popleft() for _ in range(min(5_000, len(raw_queue)))]
+            durable_records = await asyncio.to_thread(
+                dataset.append_batch_records,
+                batch,
+            )
+            stats["raw_records_written"] += len(durable_records)
+            canonical_results = [
+                canonicalize_tick_record(record) for record in durable_records
+            ]
+            canonical_events = [
+                result.event for result in canonical_results if result.event is not None
+            ]
+            stats["canonical_events_rejected"] += sum(
+                1 for result in canonical_results if result.event is None
+            )
+            stats["canonical_events_written"] += await asyncio.to_thread(
+                canonical_writer.append,
+                canonical_events,
+            )
 
 
 def main(argv: list[str] | None = None) -> int:  # pragma: no cover
@@ -376,7 +820,7 @@ def main(argv: list[str] | None = None) -> int:  # pragma: no cover
         print("[bbo] MODULE `websockets` MANQUANT -> lance:  pip install websockets  (collecteur inactif "
               "tant qu'il n'est pas installe).", flush=True)
         return 0
-    print("[bbo] demarrage PERSISTANT : %d coins mappes, WS HL bbo + Binance bookTicker/aggTrade..."
+    print("[bbo] demarrage PERSISTANT : %d coins, WS HL bbo+l2Book+trades + Binance bookTicker/trades..."
           % len(coins), flush=True)
     try:
         asyncio.run(_boucle(Path(a.root), coins))            # PERSISTANT : sort seulement sur fin de session
@@ -400,9 +844,11 @@ def resume(root: str | Path = ".") -> dict[str, Any]:
         return {"duree_continue_s": 0, "ecrits": 0, "taux_rejet": None, "verdict": "PAS_ENCORE_LANCE"}
 
 
-__all__ = ["symbole_binance", "parser_bbo_hl", "parser_bookticker_binance", "parser_aggtrade_binance",
+__all__ = ["symbole_binance", "parser_bbo_hl", "parser_l2_hl", "parser_trades_hl",
+           "parser_bookticker_binance", "parser_aggtrade_binance",
            "MagasinBBO", "mesurer_lead_lag", "sceller_shard", "resume",
-           "AGE_MAX_MS", "FENETRE_SYNCHRO_MS", "GAP_MS", "SHARD_OCTETS", "MAX_SHARDS", "SORTIE"]
+           "AGE_MAX_MS", "FENETRE_SYNCHRO_MS", "GAP_MS", "SHARD_OCTETS", "MAX_SHARDS",
+           "SORTIE", "FEED_QUALITY", "TICK_DATASET_DIR", "TICK_QUEUE_MAX"]
 
 
 if __name__ == "__main__":                                 # 🔴 MANQUAIT : sans ce garde, le script

@@ -47,7 +47,7 @@ def _agreger(rundir: Path):
     """Agrège les campagnes : trials, verdicts finaux, accounting, logs. Rend un dict de séries."""
     rundir = Path(rundir)
     camps = sorted((rundir / "campagnes").glob("camp-*")) if (rundir / "campagnes").exists() else []
-    trials, finals, coverage, gate, missed, exclusions = [], [], [], [], [], []
+    trials, finals, gate, exclusions = [], [], [], []
     tot = {"fast_screen": 0, "exact_replays": 0, "survivants": 0, "forward_events": 0, "pass": 0,
            "sources_detectees": 0, "sources_parsees": 0, "sources_exclues": 0, "events": 0}
     for c in camps:
@@ -116,6 +116,18 @@ def construire(rundir, ident, *, final: bool = True, partial: bool = False, reto
     _csv(res / "regime_matrix.csv", ["regime", "net_median_bps", "n"], _mat("regime"))
     _csv(res / "pnl_by_coin.csv", ["coin", "net_median_bps", "n"], _mat("coin"))
     _csv(res / "gate_analysis.csv", ["campaign", "n_refuses_rejoues", "opportunites_bloquees", "gain_manque_median_bps", "pertes_evitees"], ag["gate"])
+    detail_md = ""
+    try:
+        import rapport_arret_continue as DETAIL
+        detail = DETAIL.collecter(rundir, ident)
+        detail_md = DETAIL.markdown(detail)
+    except Exception as exc:  # noqa: BLE001 - le rapport principal reste toujours disponible
+        detail_md = (
+            "## 46. Audit détaillé de l'arrêt\n"
+            "- L'annexe détaillée n'a pas pu être construite : `%s: %s`.\n"
+            "- Les CSV principaux, la réconciliation et le manifeste restent conservés.\n"
+            % (type(exc).__name__, str(exc)[:300])
+        )
 
     typ = "FINAL" if final else "SNAPSHOT (intermédiaire — PAS le rapport final)"
     L = []
@@ -219,6 +231,7 @@ def construire(rundir, ident, *, final: bool = True, partial: bool = False, reto
     L.append("## 44. Reproduction")
     L.append("```\nLANCER-RECHERCHE-CONTINUE.cmd start   # meme code_sha %s\n```\n" % ident.get("code_sha"))
     L.append("## 45. Manifeste\n- SHA256_MANIFEST_FINAL.json (écrit en DERNIER, contient ce rapport + tous les results)\n")
+    L.append(detail_md)
     if partial:
         L.append("> ⚠️ **FINALIZATION_PARTIAL** : arrêt d'urgence (2e Ctrl+C). Complet : campagnes écrites + CSV. "
                  "Incomplet : cycle en cours interrompu. Aucune perte silencieuse.\n")

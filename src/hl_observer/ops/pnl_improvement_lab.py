@@ -1,0 +1,1407 @@
+"""Historical PnL lab for local HyperSmart paper sessions.
+
+The live dashboard intentionally ignores stale logs. Historical research must
+do the opposite: read every canonical archived session, while preserving
+session boundaries and chronology. This module reconstructs OPEN -> CLOSE
+round trips, reconciles stored gross PnL from prices, and evaluates only entry
+rules that were knowable before a trade closed.
+
+Nothing in this module changes runtime flags. Results are research hypotheses
+until they survive chronological train/validation/holdout checks and a later
+exact replay on market marks.
+"""
+from __future__ import annotations
+
+import argparse
+import json
+import math
+from collections import defaultdict
+from collections.abc import Callable, Iterable, Sequence
+from dataclasses import dataclass
+from datetime import datetime, timezone
+from pathlib import Path
+from statistics import median
+from typing import Any
+
+CANONICAL_LEDGER_NAME = "simulation_pnl_ledger_latest.jsonl"
+DEFAULT_COMPARISON_NOTIONAL_USDT = 50.0
+LEGACY_UNEVIDENCED_MARKER = "LEGACY_UNEVIDENCED"
+MIN_TOTAL_TRADES = 30
+
+
+@dataclass(frozen=True, slots=True)
+class HistoricalTrade:
+    trade_id: str
+    session_id: str
+    source_path: str
+    opened_at_ms: int
+    closed_at_ms: int
+    coin: str
+    side: str
+    strategy: str
+    exit_method: str
+    notional_usdt: float
+    entry_price: float
+    exit_price: float
+    gross_pnl_usdc: float
+    net_pnl_usdc: float
+    fees_reported_usdc: float
+    edge_remaining_bps: float | None
+    signal_age_ms: int | None
+    consensus_wallets: int | None
+    copy_degradation_bps: float | None
+    liquidity_score: float | None
+    leader_score: float | None
+    reconciliation_error_usdc: float
+    eligible_for_learning: bool
+    exclusion_reasons: tuple[str, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class RuleSpec:
+    key: str
+    description: str
+    clauses: tuple[tuple[str, str, object], ...]
+    learned_from_train: bool = False
+
+
+def _utc_now() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+
+def _to_float(value: Any) -> float | None:
+    try:
+        result = float(value)
+    except (TypeError, ValueError):
+        return None
+    return result if math.isfinite(result) else None
+
+
+def _to_int(value: Any) -> int | None:
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _event_timestamp_ms(row: dict[str, Any]) -> int:
+    return int(
+        _to_int(
+            row.get("timestamp_ms")
+            or row.get("observed_at_ms")
+            or row.get("recorded_at_ms")
+            or row.get("closed_at_ms")
+        )
+        or 0
+    )
+
+
+def _wallet_count(row: dict[str, Any]) -> int | None:
+    explicit = _to_int(row.get("consensus_wallets") or row.get("wallet_count"))
+    if explicit is not None:
+        return max(0, explicit)
+    wallets = str(row.get("wallet_address") or row.get("leader_wallet") or "")
+    distinct = {part.strip().lower() for part in wallets.split(",") if part.strip()}
+    return len(distinct) or None
+
+
+def _open_position_key(row: dict[str, Any]) -> str:
+    explicit = str(row.get("matched_position_key") or "").strip()
+    if explicit:
+        return explicit
+    return "|".join(
+        (
+            str(row.get("wallet_address") or row.get("leader_wallet") or "").strip(),
+            str(row.get("coin") or row.get("market_id") or "").strip().upper(),
+            str(row.get("leader_side") or row.get("side") or "").strip().upper(),
+        )
+    )
+
+
+def _event_identity(row: dict[str, Any], line_number: int) -> str:
+    explicit = (
+        row.get("dedupe_identity")
+        or row.get("paper_position_instance_id")
+        or row.get("v9_paper_order_id")
+        or row.get("delta_key")
+        or row.get("evidence_hash")
+    )
+    return "|".join(
+        str(part or "")
+        for part in (
+            row.get("paper_action_type") or row.get("event_type"),
+            explicit or line_number,
+            _event_timestamp_ms(row),
+            row.get("coin"),
+            row.get("estimated_net_pnl_usdc"),
+        )
+    )
+
+
+def _strategy_name(open_row: dict[str, Any]) -> str:
+    text = " ".join(
+        str(open_row.get(key) or "")
+        for key in ("strategy_mode", "strategie", "bot_decision", "reason", "leader_action")
+    ).upper()
+    if "FUNDING" in text:
+        return "FUNDING"
+    if "ARBITRAGE" in text or "ARB_" in text:
+        return "ARBITRAGE"
+    if "FUSION" in text:
+        return "FUSION"
+    if "CONSENSUS" in text:
+        return "CONSENSUS"
+    if "COPY" in text or "LEADER" in text:
+        return "COPY"
+    return "LEGACY_OR_UNKNOWN"
+
+
+def discover_session_ledgers(log_dir: Path) -> tuple[Path, ...]:
+    """Return active and archived canonical ledgers in deterministic order."""
+
+    paths: list[Path] = []
+    active = log_dir / CANONICAL_LEDGER_NAME
+    if active.exists() and active.is_file() and active.stat().st_size > 0:
+        paths.append(active)
+    archive_root = log_dir / "_archives"
+    if archive_root.exists():
+        paths.extend(
+            path
+            for path in archive_root.rglob(CANONICAL_LEDGER_NAME)
+            if path.is_file() and path.stat().st_size > 0
+        )
+    return tuple(sorted(dict.fromkeys(paths), key=lambda path: str(path).lower()))
+
+
+def _iter_json_rows(path: Path) -> Iterable[tuple[int, dict[str, Any] | None]]:
+    try:
+        handle = path.open("r", encoding="utf-8-sig", errors="replace")
+    except OSError:
+        return
+    with handle:
+        for line_number, line in enumerate(handle, start=1):
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                payload = json.loads(line)
+            except json.JSONDecodeError:
+                yield line_number, None
+                continue
+            yield line_number, payload if isinstance(payload, dict) else None
+
+
+def _build_trade(
+    *,
+    session_id: str,
+    source_path: Path,
+    open_row: dict[str, Any],
+    close_row: dict[str, Any],
+    ordinal: int,
+) -> HistoricalTrade:
+    coin = str(close_row.get("coin") or open_row.get("coin") or "?").upper()
+    side = str(open_row.get("leader_side") or close_row.get("leader_side") or "").upper()
+    opened_at_ms = _event_timestamp_ms(open_row)
+    closed_at_ms = _event_timestamp_ms(close_row)
+    entry_price = float(
+        _to_float(
+            close_row.get("average_entry_price")
+            or close_row.get("entry_price")
+            or open_row.get("entry_price")
+            or open_row.get("average_entry_price")
+        )
+        or 0.0
+    )
+    exit_price = float(_to_float(close_row.get("exit_price") or close_row.get("leader_price")) or 0.0)
+    notional = float(
+        _to_float(
+            close_row.get("notional_closed_usdt")
+            or open_row.get("copied_notional_usdt")
+            or open_row.get("v9_paper_notional_usdc")
+            or open_row.get("leader_notional_usdc")
+        )
+        or 0.0
+    )
+    gross = float(_to_float(close_row.get("gross_pnl_usdc") or close_row.get("gross_pnl")) or 0.0)
+    net = float(
+        _to_float(
+            close_row.get("estimated_net_pnl_usdc")
+            or close_row.get("event_net_pnl_usdc")
+            or close_row.get("net_pnl")
+        )
+        or 0.0
+    )
+    entry_fee = float(_to_float(open_row.get("fee_cost_usdc") or open_row.get("fee_paid")) or 0.0)
+    exit_fee = float(_to_float(close_row.get("fee_cost_usdc") or close_row.get("fee_paid")) or 0.0)
+
+    recomputed_gross = gross
+    if entry_price > 0 and exit_price > 0 and notional > 0 and side in {"LONG", "SHORT"}:
+        size = notional / entry_price
+        move = exit_price - entry_price
+        recomputed_gross = size * (move if side == "LONG" else -move)
+    reconciliation_error = recomputed_gross - gross
+
+    exit_method = str(close_row.get("exit_method") or close_row.get("reason") or "UNKNOWN").upper()
+    reasons: list[str] = []
+    if LEGACY_UNEVIDENCED_MARKER in exit_method:
+        reasons.append("LEGACY_UNEVIDENCED_EXIT")
+    if side not in {"LONG", "SHORT"}:
+        reasons.append("SIDE_UNKNOWN")
+    if entry_price <= 0 or exit_price <= 0:
+        reasons.append("PRICE_MISSING")
+    if notional <= 0:
+        reasons.append("NOTIONAL_MISSING")
+    if opened_at_ms <= 0 or closed_at_ms <= opened_at_ms:
+        reasons.append("TIMESTAMP_INVALID")
+    tolerance = max(0.02, abs(gross) * 0.02)
+    if abs(reconciliation_error) > tolerance:
+        reasons.append("PNL_RECONCILIATION_MISMATCH")
+
+    position_key = str(close_row.get("matched_position_key") or _open_position_key(open_row))
+    trade_id = f"{session_id}|{position_key}|{opened_at_ms}|{closed_at_ms}|{ordinal}"
+    return HistoricalTrade(
+        trade_id=trade_id,
+        session_id=session_id,
+        source_path=str(source_path),
+        opened_at_ms=opened_at_ms,
+        closed_at_ms=closed_at_ms,
+        coin=coin,
+        side=side,
+        strategy=_strategy_name(open_row),
+        exit_method=exit_method,
+        notional_usdt=notional,
+        entry_price=entry_price,
+        exit_price=exit_price,
+        gross_pnl_usdc=gross,
+        net_pnl_usdc=net,
+        fees_reported_usdc=entry_fee + exit_fee,
+        edge_remaining_bps=_to_float(
+            open_row.get("edge_remaining_bps")
+            or open_row.get("v9_edge_remaining_bps_after_market")
+        ),
+        signal_age_ms=_to_int(open_row.get("signal_age_ms")),
+        consensus_wallets=_wallet_count(open_row),
+        copy_degradation_bps=_to_float(open_row.get("copy_degradation_bps")),
+        liquidity_score=_to_float(
+            open_row.get("liquidity_score") or open_row.get("v9_liquidity_score")
+        ),
+        leader_score=_to_float(open_row.get("leader_score")),
+        reconciliation_error_usdc=reconciliation_error,
+        eligible_for_learning=not reasons,
+        exclusion_reasons=tuple(reasons),
+    )
+
+
+def extract_historical_trades(log_dir: Path) -> tuple[tuple[HistoricalTrade, ...], dict[str, Any]]:
+    """Read stale archives explicitly and pair canonical OPEN/CLOSE events."""
+
+    trades: list[HistoricalTrade] = []
+    quality: dict[str, Any] = {
+        "ledger_files": 0,
+        "json_errors": 0,
+        "duplicate_events": 0,
+        "open_events": 0,
+        "close_events": 0,
+        "paired_round_trips": 0,
+        "orphan_closes": 0,
+        "still_open": 0,
+        "non_monotonic_events": 0,
+        "ignored_non_pnl_rows": 0,
+    }
+    for path in discover_session_ledgers(log_dir):
+        quality["ledger_files"] += 1
+        session_id = path.parent.name if path.parent != log_dir else "active"
+        open_by_key: defaultdict[str, list[dict[str, Any]]] = defaultdict(list)
+        seen: set[str] = set()
+        previous_timestamp = 0
+        for line_number, row in _iter_json_rows(path):
+            if row is None:
+                quality["json_errors"] += 1
+                continue
+            identity = _event_identity(row, line_number)
+            if identity in seen:
+                quality["duplicate_events"] += 1
+                continue
+            seen.add(identity)
+            timestamp = _event_timestamp_ms(row)
+            if timestamp and previous_timestamp and timestamp < previous_timestamp:
+                quality["non_monotonic_events"] += 1
+            if timestamp:
+                previous_timestamp = max(previous_timestamp, timestamp)
+
+            action = str(row.get("paper_action_type") or row.get("event_type") or "").upper()
+            if action == "OPEN":
+                quality["open_events"] += 1
+                open_by_key[_open_position_key(row)].append(row)
+                continue
+            if action != "CLOSE":
+                quality["ignored_non_pnl_rows"] += 1
+                continue
+            quality["close_events"] += 1
+            key = str(row.get("matched_position_key") or "").strip()
+            candidates = open_by_key.get(key)
+            open_row = candidates.pop(0) if candidates else None
+            if open_row is None:
+                quality["orphan_closes"] += 1
+                continue
+            if not candidates:
+                open_by_key.pop(key, None)
+            trades.append(
+                _build_trade(
+                    session_id=session_id,
+                    source_path=path,
+                    open_row=open_row,
+                    close_row=row,
+                    ordinal=len(trades) + 1,
+                )
+            )
+        quality["still_open"] += sum(len(rows) for rows in open_by_key.values())
+
+    quality["paired_round_trips"] = len(trades)
+    quality["eligible_round_trips"] = sum(trade.eligible_for_learning for trade in trades)
+    quality["excluded_round_trips"] = len(trades) - quality["eligible_round_trips"]
+    exclusion_counts: defaultdict[str, int] = defaultdict(int)
+    for trade in trades:
+        for reason in trade.exclusion_reasons:
+            exclusion_counts[reason] += 1
+    quality["exclusion_reasons"] = dict(sorted(exclusion_counts.items()))
+    return tuple(sorted(trades, key=lambda trade: (trade.opened_at_ms, trade.trade_id))), quality
+
+
+def _profit_factor(gains: float, losses: float) -> float | None:
+    if losses <= 0:
+        return None if gains <= 0 else 999.0
+    return gains / losses
+
+
+def compute_metrics(
+    trades: Sequence[HistoricalTrade],
+    *,
+    comparison_notional_usdt: float = DEFAULT_COMPARISON_NOTIONAL_USDT,
+) -> dict[str, Any]:
+    ordered = sorted(trades, key=lambda trade: (trade.closed_at_ms, trade.trade_id))
+    actual_values = [trade.net_pnl_usdc for trade in ordered]
+    normalized_values = [
+        (
+            trade.net_pnl_usdc / trade.notional_usdt * comparison_notional_usdt
+            if trade.notional_usdt > 0
+            else 0.0
+        )
+        for trade in ordered
+    ]
+    gains = sum(value for value in actual_values if value > 0)
+    losses = abs(sum(value for value in actual_values if value < 0))
+    normalized_gains = sum(value for value in normalized_values if value > 0)
+    normalized_losses = abs(sum(value for value in normalized_values if value < 0))
+    equity = 0.0
+    peak = 0.0
+    max_drawdown = 0.0
+    for value in normalized_values:
+        equity += value
+        peak = max(peak, equity)
+        max_drawdown = max(max_drawdown, peak - equity)
+    gross_abs = sum(abs(trade.gross_pnl_usdc) for trade in ordered)
+    return {
+        "trades": len(ordered),
+        "sessions": len({trade.session_id for trade in ordered}),
+        "net_pnl_actual_usdc": round(sum(actual_values), 8),
+        "gross_pnl_actual_usdc": round(sum(trade.gross_pnl_usdc for trade in ordered), 8),
+        "fees_reported_usdc": round(sum(trade.fees_reported_usdc for trade in ordered), 8),
+        "fee_drag_over_abs_gross": round(sum(trade.fees_reported_usdc for trade in ordered) / gross_abs, 8)
+        if gross_abs > 0
+        else None,
+        "profit_factor_actual": (
+            round(value, 8) if (value := _profit_factor(gains, losses)) is not None else None
+        ),
+        "win_rate": round(sum(value > 0 for value in actual_values) / len(actual_values), 8)
+        if actual_values
+        else None,
+        "average_win_usdc": round(gains / sum(value > 0 for value in actual_values), 8)
+        if any(value > 0 for value in actual_values)
+        else None,
+        "average_loss_usdc": round(
+            losses / sum(value < 0 for value in actual_values), 8
+        )
+        if any(value < 0 for value in actual_values)
+        else None,
+        "comparison_notional_usdt": comparison_notional_usdt,
+        "normalized_net_usdc": round(sum(normalized_values), 8),
+        "profit_factor_normalized": (
+            round(value, 8)
+            if (value := _profit_factor(normalized_gains, normalized_losses)) is not None
+            else None
+        ),
+        "max_drawdown_normalized_usdc": round(max_drawdown, 8),
+        "median_normalized_trade_usdc": round(median(normalized_values), 8)
+        if normalized_values
+        else None,
+    }
+
+
+def _field_value(trade: HistoricalTrade, field: str) -> object:
+    return getattr(trade, field)
+
+
+def rule_matches(trade: HistoricalTrade, rule: RuleSpec) -> bool:
+    for field, operator, target in rule.clauses:
+        value = _field_value(trade, field)
+        if operator == "eq" and value != target:
+            return False
+        if operator == "ge" and (value is None or float(value) < float(target)):
+            return False
+        if operator == "le" and (value is None or float(value) > float(target)):
+            return False
+        if operator == "not_in" and value in set(target if isinstance(target, tuple) else (target,)):
+            return False
+    return True
+
+
+def _feature_coverage(trades: Sequence[HistoricalTrade]) -> dict[str, dict[str, float | int]]:
+    fields = (
+        "edge_remaining_bps",
+        "signal_age_ms",
+        "consensus_wallets",
+        "copy_degradation_bps",
+        "liquidity_score",
+        "leader_score",
+    )
+    total = len(trades)
+    return {
+        field: {
+            "present": sum(_field_value(trade, field) is not None for trade in trades),
+            "total": total,
+            "ratio": round(
+                sum(_field_value(trade, field) is not None for trade in trades) / total, 6
+            )
+            if total
+            else 0.0,
+        }
+        for field in fields
+    }
+
+
+def build_candidate_rules(train: Sequence[HistoricalTrade]) -> tuple[RuleSpec, ...]:
+    """Build deterministic rules using train data only."""
+
+    rules: list[RuleSpec] = [
+        RuleSpec("baseline_all", "Toutes les entrees eligibles", ()),
+        RuleSpec("side_long", "Sens LONG uniquement", (("side", "eq", "LONG"),)),
+        RuleSpec("side_short", "Sens SHORT uniquement", (("side", "eq", "SHORT"),)),
+    ]
+    for minimum in (2, 3, 4):
+        rules.append(
+            RuleSpec(
+                f"consensus_ge_{minimum}",
+                f"Consensus d'au moins {minimum} wallets",
+                (("consensus_wallets", "ge", minimum),),
+            )
+        )
+
+    coverage = _feature_coverage(train)
+    minimum_coverage = max(8, int(len(train) * 0.35))
+    if coverage["edge_remaining_bps"]["present"] >= minimum_coverage:
+        for threshold in (10.0, 20.0, 30.0, 40.0, 50.0):
+            rules.append(
+                RuleSpec(
+                    f"edge_ge_{threshold:g}",
+                    f"Edge restant >= {threshold:g} bps",
+                    (("edge_remaining_bps", "ge", threshold),),
+                )
+            )
+    if coverage["signal_age_ms"]["present"] >= minimum_coverage:
+        for threshold in (1_000, 2_000, 4_000, 8_000):
+            rules.append(
+                RuleSpec(
+                    f"age_le_{threshold}",
+                    f"Age du signal <= {threshold} ms",
+                    (("signal_age_ms", "le", threshold),),
+                )
+            )
+    if coverage["copy_degradation_bps"]["present"] >= minimum_coverage:
+        for threshold in (10.0, 20.0, 30.0):
+            rules.append(
+                RuleSpec(
+                    f"degradation_le_{threshold:g}",
+                    f"Degradation de copie <= {threshold:g} bps",
+                    (("copy_degradation_bps", "le", threshold),),
+                )
+            )
+    if coverage["liquidity_score"]["present"] >= minimum_coverage:
+        for threshold in (0.5, 0.65, 0.8):
+            rules.append(
+                RuleSpec(
+                    f"liquidity_ge_{threshold:g}",
+                    f"Liquidite >= {threshold:g}",
+                    (("liquidity_score", "ge", threshold),),
+                )
+            )
+
+    strategy_counts: defaultdict[str, int] = defaultdict(int)
+    for trade in train:
+        strategy_counts[trade.strategy] += 1
+    for strategy, count in sorted(strategy_counts.items()):
+        if count >= 5:
+            rules.append(
+                RuleSpec(
+                    f"strategy_{strategy.lower()}",
+                    f"Strategie {strategy} uniquement",
+                    (("strategy", "eq", strategy),),
+                )
+            )
+
+    by_coin: defaultdict[str, list[HistoricalTrade]] = defaultdict(list)
+    for trade in train:
+        by_coin[trade.coin].append(trade)
+    losing_coins = sorted(
+        (
+            (compute_metrics(rows)["normalized_net_usdc"], coin)
+            for coin, rows in by_coin.items()
+            if len(rows) >= 3 and compute_metrics(rows)["normalized_net_usdc"] < 0
+        ),
+        key=lambda item: (item[0], item[1]),
+    )
+    for count in (1, 3, 5):
+        excluded = tuple(coin for _net, coin in losing_coins[:count])
+        if len(excluded) == count:
+            rules.append(
+                RuleSpec(
+                    f"exclude_train_losers_{count}",
+                    "Exclure les coins perdants appris sur train: " + ", ".join(excluded),
+                    (("coin", "not_in", excluded),),
+                    learned_from_train=True,
+                )
+            )
+
+    unique: dict[str, RuleSpec] = {}
+    for rule in rules:
+        unique.setdefault(rule.key, rule)
+    return tuple(unique.values())
+
+
+def _pf_for_gate(metrics: dict[str, Any]) -> float:
+    value = metrics.get("profit_factor_normalized")
+    return float(value) if value is not None else 0.0
+
+
+def evaluate_candidate_rules(
+    trades: Sequence[HistoricalTrade],
+    *,
+    comparison_notional_usdt: float = DEFAULT_COMPARISON_NOTIONAL_USDT,
+    min_total_trades: int = MIN_TOTAL_TRADES,
+) -> dict[str, Any]:
+    """Chronological train/validation selection followed by untouched holdout."""
+
+    eligible = sorted(
+        (trade for trade in trades if trade.eligible_for_learning),
+        key=lambda trade: (trade.opened_at_ms, trade.trade_id),
+    )
+    if len(eligible) < min_total_trades:
+        return {
+            "status": "INSUFFICIENT_DATA",
+            "reason": f"{len(eligible)} trades eligibles; minimum {min_total_trades}.",
+            "eligible_trades": len(eligible),
+            "automatic_activation": False,
+            "candidates": [],
+        }
+
+    train_end = max(1, int(len(eligible) * 0.60))
+    validation_end = max(train_end + 1, int(len(eligible) * 0.80))
+    validation_end = min(validation_end, len(eligible) - 1)
+    train = eligible[:train_end]
+    validation = eligible[train_end:validation_end]
+    holdout = eligible[validation_end:]
+    rules = build_candidate_rules(train)
+    minimum_train = max(6, int(len(train) * 0.20))
+    minimum_validation = max(3, int(len(validation) * 0.25))
+    minimum_holdout = max(3, int(len(holdout) * 0.25))
+    baseline = {
+        "train": compute_metrics(train, comparison_notional_usdt=comparison_notional_usdt),
+        "validation": compute_metrics(
+            validation, comparison_notional_usdt=comparison_notional_usdt
+        ),
+        "holdout": compute_metrics(holdout, comparison_notional_usdt=comparison_notional_usdt),
+    }
+
+    candidates: list[dict[str, Any]] = []
+    for rule in rules:
+        subsets = {
+            "train": [trade for trade in train if rule_matches(trade, rule)],
+            "validation": [trade for trade in validation if rule_matches(trade, rule)],
+            "holdout": [trade for trade in holdout if rule_matches(trade, rule)],
+        }
+        metrics = {
+            split: compute_metrics(rows, comparison_notional_usdt=comparison_notional_usdt)
+            for split, rows in subsets.items()
+        }
+        selected_before_holdout = (
+            rule.key != "baseline_all"
+            and metrics["train"]["trades"] >= minimum_train
+            and metrics["validation"]["trades"] >= minimum_validation
+            and metrics["train"]["normalized_net_usdc"] > 0
+            and metrics["validation"]["normalized_net_usdc"] > 0
+            and _pf_for_gate(metrics["train"]) >= 1.0
+            and _pf_for_gate(metrics["validation"]) >= 1.05
+        )
+        if not selected_before_holdout:
+            verdict = "REJECTED_SELECTION"
+        elif metrics["holdout"]["trades"] < minimum_holdout:
+            verdict = "INSUFFICIENT_HOLDOUT"
+        elif (
+            metrics["holdout"]["normalized_net_usdc"] > 0
+            and _pf_for_gate(metrics["holdout"]) >= 1.0
+        ):
+            verdict = "ROBUST_HOLDOUT"
+        else:
+            verdict = "FAILED_HOLDOUT"
+        selection_score = min(
+            _pf_for_gate(metrics["train"]),
+            _pf_for_gate(metrics["validation"]),
+            10.0,
+        )
+        candidates.append(
+            {
+                "key": rule.key,
+                "description": rule.description,
+                "clauses": [list(clause) for clause in rule.clauses],
+                "learned_from_train": rule.learned_from_train,
+                "selected_before_holdout": selected_before_holdout,
+                "selection_score_train_validation_only": round(selection_score, 8),
+                "verdict": verdict,
+                "metrics": metrics,
+            }
+        )
+
+    candidates.sort(
+        key=lambda item: (
+            item["verdict"] != "ROBUST_HOLDOUT",
+            item["verdict"] != "INSUFFICIENT_HOLDOUT",
+            -float(item["selection_score_train_validation_only"]),
+            item["key"],
+        )
+    )
+    return {
+        "status": "COMPLETED",
+        "eligible_trades": len(eligible),
+        "split": {
+            "train": len(train),
+            "validation": len(validation),
+            "holdout": len(holdout),
+        },
+        "selection_uses_holdout": False,
+        "automatic_activation": False,
+        "comparison_notional_usdt": comparison_notional_usdt,
+        "multiple_testing_warning": (
+            f"{len(rules)} hypotheses testees; aucune promotion sans replay exact supplementaire."
+        ),
+        "baseline": baseline,
+        "candidates": candidates,
+    }
+
+
+def _group_metrics(
+    trades: Sequence[HistoricalTrade],
+    getter: Callable[[HistoricalTrade], str],
+    *,
+    comparison_notional_usdt: float,
+) -> list[dict[str, Any]]:
+    grouped: defaultdict[str, list[HistoricalTrade]] = defaultdict(list)
+    for trade in trades:
+        grouped[getter(trade)].append(trade)
+    rows = [
+        {
+            "group": group,
+            **compute_metrics(values, comparison_notional_usdt=comparison_notional_usdt),
+        }
+        for group, values in grouped.items()
+    ]
+    return sorted(
+        rows,
+        key=lambda row: (float(row["normalized_net_usdc"]), str(row["group"])),
+    )
+
+
+def _build_findings(
+    trades: Sequence[HistoricalTrade],
+    quality: dict[str, Any],
+    validation: dict[str, Any],
+    groups: dict[str, list[dict[str, Any]]],
+) -> dict[str, list[str]]:
+    eligible = [trade for trade in trades if trade.eligible_for_learning]
+    metrics = compute_metrics(eligible)
+    robust = [
+        item["description"]
+        for item in validation.get("candidates", [])
+        if item.get("verdict") == "ROBUST_HOLDOUT"
+    ]
+    confirm = [
+        item["description"]
+        for item in validation.get("candidates", [])
+        if item.get("verdict") == "INSUFFICIENT_HOLDOUT"
+    ][:8]
+    rejected = [
+        f"{item['description']} ({item['verdict']})"
+        for item in validation.get("candidates", [])
+        if item.get("verdict") in {"FAILED_HOLDOUT", "REJECTED_SELECTION"}
+        and item.get("key") != "baseline_all"
+    ][:12]
+    missing: list[str] = []
+    coverage = _feature_coverage(eligible)
+    for field, detail in coverage.items():
+        if float(detail["ratio"]) < 0.80:
+            missing.append(
+                f"{field}: {detail['present']}/{detail['total']} trades ({float(detail['ratio']):.1%})."
+            )
+    if quality.get("orphan_closes"):
+        missing.append(
+            f"{quality['orphan_closes']} clotures sans OPEN canonique dans la meme session."
+        )
+    if quality.get("excluded_round_trips"):
+        missing.append(
+            f"{quality['excluded_round_trips']} round-trips exclus de l'apprentissage: "
+            f"{quality.get('exclusion_reasons', {})}."
+        )
+
+    experiments: list[str] = []
+    exit_rows = {row["group"]: row for row in groups.get("by_exit_method", [])}
+    stop = exit_rows.get("SLTP_STOP_LOSS")
+    timeout = exit_rows.get("SLTP_TIMEOUT")
+    take_profit = exit_rows.get("SLTP_TAKE_PROFIT")
+    if stop and float(stop["net_pnl_actual_usdc"]) < 0:
+        experiments.append(
+            "A/B exact SL/TP a risque et notionnel constants: le STOP_LOSS concentre "
+            f"{stop['net_pnl_actual_usdc']:.2f} USDC sur {stop['trades']} sorties."
+        )
+    if timeout and float(timeout["net_pnl_actual_usdc"]) < 0:
+        experiments.append(
+            "A/B de duree maximale sur marks reels: les TIMEOUT cumulent "
+            f"{timeout['net_pnl_actual_usdc']:.2f} USDC sur {timeout['trades']} sorties."
+        )
+    if not take_profit or int(take_profit["trades"]) < 5:
+        experiments.append(
+            "Verifier le cablage TAKE_PROFIT: moins de 5 sorties TP appariables, "
+            "donc l'asymetrie TP/SL n'est pas validable."
+        )
+    if metrics.get("fee_drag_over_abs_gross") and float(metrics["fee_drag_over_abs_gross"]) > 0.20:
+        experiments.append(
+            "Rejouer un plancher d'edge net couvrant le cout aller-retour; "
+            f"drag de frais observe {float(metrics['fee_drag_over_abs_gross']):.1%}."
+        )
+    experiments.append(
+        "Promouvoir un flag uniquement si PF net > 1 sur validation ET holdout, "
+        "puis sur un replay exact sans lookahead."
+    )
+    return {
+        "robust_opportunities": robust,
+        "needs_confirmation": confirm,
+        "rejected_hypotheses": rejected,
+        "missing_evidence": missing,
+        "next_exact_ab_experiments": experiments,
+    }
+
+
+def _build_experiment_backlog(
+    trades: Sequence[HistoricalTrade],
+    quality: dict[str, Any],
+    groups: dict[str, list[dict[str, Any]]],
+) -> list[dict[str, Any]]:
+    """Translate measured loss causes into reproducible, non-activating experiments."""
+
+    eligible = [trade for trade in trades if trade.eligible_for_learning]
+    metrics = compute_metrics(eligible)
+    exits = {row["group"]: row for row in groups.get("by_exit_method", [])}
+    experiments: list[dict[str, Any]] = []
+
+    def add(
+        experiment_id: str,
+        priority: int,
+        title: str,
+        hypothesis: str,
+        evidence: dict[str, Any],
+        parameter_grid: dict[str, list[object]],
+        required_evidence: list[str],
+    ) -> None:
+        experiments.append(
+            {
+                "experiment_id": experiment_id,
+                "priority": priority,
+                "title": title,
+                "hypothesis": hypothesis,
+                "evidence": evidence,
+                "parameter_grid": parameter_grid,
+                "required_evidence": required_evidence,
+                "validation_protocol": (
+                    "Selection sur train + validation chronologiques; holdout intact; "
+                    "replay exact sans lookahead; notionnel constant 50 USDT."
+                ),
+                "promotion_gates": [
+                    "profit_factor_net_validation > 1.0",
+                    "profit_factor_net_holdout > 1.0",
+                    "net_pnl_holdout > 0",
+                    "minimum_30_trades_mesurables",
+                    "aucune_regression_data_quality",
+                ],
+                "automatic_activation": False,
+            }
+        )
+
+    orphan_closes = int(quality.get("orphan_closes") or 0)
+    excluded = int(quality.get("excluded_round_trips") or 0)
+    if orphan_closes or excluded:
+        add(
+            "LEDGER_PAIRING_RECONCILIATION",
+            1,
+            "Fiabiliser les round-trips canoniques",
+            (
+                "Une attribution OPEN/CLOSE complete augmente la puissance statistique "
+                "et empeche de calibrer le PnL sur un sous-ensemble biaise."
+            ),
+            {
+                "orphan_closes": orphan_closes,
+                "excluded_round_trips": excluded,
+                "eligible_round_trips": int(quality.get("eligible_round_trips") or 0),
+            },
+            {},
+            [
+                "paper_position_instance_id stable",
+                "matched_position_key stable",
+                "OPEN, REDUCE et CLOSE dans la meme session canonique",
+            ],
+        )
+
+    stop = exits.get("SLTP_STOP_LOSS")
+    if stop and float(stop.get("net_pnl_actual_usdc") or 0.0) < 0:
+        add(
+            "EXIT_SLTP_GEOMETRY",
+            2,
+            "Rejouer la geometrie stop-loss / take-profit",
+            (
+                "Le stop actuel concentre une part importante des pertes; une geometrie "
+                "cout-aware peut ameliorer l'esperance sans augmenter le risque nominal."
+            ),
+            {
+                "stop_loss_trades": int(stop.get("trades") or 0),
+                "stop_loss_net_usdc": float(stop.get("net_pnl_actual_usdc") or 0.0),
+                "stop_loss_fees_usdc": float(stop.get("fees_reported_usdc") or 0.0),
+            },
+            {
+                "stop_loss_bps": [12, 20, 30, 40, 60, 90],
+                "take_profit_bps": [20, 30, 45, 60, 90, 120, 180],
+                "trailing_bps": [0, 15, 25, 40, 60],
+            },
+            [
+                "marks reels couvrant tout le trade",
+                "spread, slippage, fees et latence",
+                "sortie explicite TP, SL, trailing ou timeout",
+            ],
+        )
+
+    timeout = exits.get("SLTP_TIMEOUT")
+    if timeout and float(timeout.get("net_pnl_actual_usdc") or 0.0) < 0:
+        add(
+            "EXIT_TIMEOUT_HORIZON",
+            3,
+            "Rejouer les horizons de sortie",
+            (
+                "Les sorties au timeout sont nettes negatives; la duree maximale doit "
+                "etre calibree par regime et mesuree apres tous les couts."
+            ),
+            {
+                "timeout_trades": int(timeout.get("trades") or 0),
+                "timeout_net_usdc": float(timeout.get("net_pnl_actual_usdc") or 0.0),
+                "timeout_fees_usdc": float(timeout.get("fees_reported_usdc") or 0.0),
+            },
+            {"horizon_minutes": [5, 15, 30, 60, 120, 240]},
+            [
+                "marks monotones en temps",
+                "couverture complete de chaque horizon",
+                "regime de volatilite connu a l'entree",
+            ],
+        )
+
+    fee_drag = float(metrics.get("fee_drag_over_abs_gross") or 0.0)
+    if fee_drag > 0.20:
+        add(
+            "ENTRY_COST_AWARE_EDGE",
+            4,
+            "Exiger un edge net couvrant le cout aller-retour",
+            (
+                "Les frais absorbent une part excessive du mouvement brut; augmenter "
+                "le nombre de trades sans edge net mesurable aggrave mecaniquement le PnL."
+            ),
+            {
+                "fee_drag_over_abs_gross": fee_drag,
+                "fees_reported_usdc": float(metrics.get("fees_reported_usdc") or 0.0),
+            },
+            {
+                "edge_buffer_above_round_trip_cost_bps": [0, 5, 10, 20, 30],
+                "comparison_notional_usdt": [50],
+            },
+            [
+                "edge_remaining_bps a l'entree",
+                "spread et slippage par coin",
+                "fee tier maker/taker",
+            ],
+        )
+
+    coverage = _feature_coverage(eligible)
+    incomplete = {
+        field: detail
+        for field, detail in coverage.items()
+        if float(detail.get("ratio") or 0.0) < 0.80
+    }
+    if incomplete:
+        add(
+            "ENTRY_FEATURE_COVERAGE",
+            5,
+            "Completer les preuves connues a l'entree",
+            (
+                "Les seuils edge, fraicheur, degradation, liquidite et leader ne peuvent "
+                "pas etre calibres proprement tant que leur couverture reste partielle."
+            ),
+            {"coverage": incomplete},
+            {},
+            [
+                "edge_remaining_bps",
+                "signal_age_ms",
+                "copy_degradation_bps",
+                "liquidity_score",
+                "leader_score",
+            ],
+        )
+
+    recurring_coins = [
+        row
+        for row in groups.get("by_coin", [])
+        if int(row.get("trades") or 0) >= 3
+        and float(row.get("normalized_net_usdc") or 0.0) < 0
+    ]
+    if recurring_coins:
+        add(
+            "COIN_REGIME_STABILITY",
+            6,
+            "Tester la stabilite par coin et regime",
+            (
+                "Les pertes recurrentes doivent etre distinguees d'un accident de regime; "
+                "aucune blacklist n'est justifiee par le seul PnL in-sample."
+            ),
+            {
+                "coins": [
+                    {
+                        "coin": row.get("group"),
+                        "trades": int(row.get("trades") or 0),
+                        "normalized_net_usdc": float(
+                            row.get("normalized_net_usdc") or 0.0
+                        ),
+                    }
+                    for row in recurring_coins[:10]
+                ]
+            },
+            {
+                "minimum_coin_sample": [10, 20, 30],
+                "minimum_profitable_time_slices": [3, 4],
+            },
+            [
+                "labels de regime sans lookahead",
+                "minimum de trades par coin",
+                "plusieurs tranches temporelles",
+            ],
+        )
+
+    return sorted(experiments, key=lambda item: (item["priority"], item["experiment_id"]))
+
+
+def build_lab_report(
+    log_dir: Path,
+    *,
+    comparison_notional_usdt: float = DEFAULT_COMPARISON_NOTIONAL_USDT,
+    min_total_trades: int = MIN_TOTAL_TRADES,
+) -> dict[str, Any]:
+    trades, quality = extract_historical_trades(log_dir)
+    eligible = [trade for trade in trades if trade.eligible_for_learning]
+    validation = evaluate_candidate_rules(
+        trades,
+        comparison_notional_usdt=comparison_notional_usdt,
+        min_total_trades=min_total_trades,
+    )
+    groups = {
+        "by_exit_method": _group_metrics(
+            eligible,
+            lambda trade: trade.exit_method,
+            comparison_notional_usdt=comparison_notional_usdt,
+        ),
+        "by_side": _group_metrics(
+            eligible,
+            lambda trade: trade.side,
+            comparison_notional_usdt=comparison_notional_usdt,
+        ),
+        "by_strategy": _group_metrics(
+            eligible,
+            lambda trade: trade.strategy,
+            comparison_notional_usdt=comparison_notional_usdt,
+        ),
+        "by_coin": _group_metrics(
+            eligible,
+            lambda trade: trade.coin,
+            comparison_notional_usdt=comparison_notional_usdt,
+        ),
+    }
+    experiment_backlog = _build_experiment_backlog(trades, quality, groups)
+    return {
+        "schema_version": 1,
+        "generated_at": _utc_now(),
+        "source_dir": str(log_dir),
+        "local_historical_data_only": True,
+        "network_used": False,
+        "real_execution": False,
+        "automatic_activation": False,
+        "comparison_note": (
+            "La verite PnL conserve les notionnels paper reels. Les comparaisons de regles "
+            f"sont normalisees a {comparison_notional_usdt:g} USDT pour eviter qu'un gros "
+            "notionnel domine artificiellement le classement."
+        ),
+        "quality": quality,
+        "truth": {
+            "all_paired": compute_metrics(
+                trades, comparison_notional_usdt=comparison_notional_usdt
+            ),
+            "eligible_for_learning": compute_metrics(
+                eligible, comparison_notional_usdt=comparison_notional_usdt
+            ),
+            "feature_coverage": _feature_coverage(eligible),
+        },
+        "groups": groups,
+        "temporal_validation": validation,
+        "findings": _build_findings(trades, quality, validation, groups),
+        "experiment_backlog": experiment_backlog,
+    }
+
+
+def _markdown_metrics(metrics: dict[str, Any]) -> str:
+    pf = metrics.get("profit_factor_actual")
+    pf_text = "indisponible" if pf is None else f"{float(pf):.3f}"
+    return (
+        f"{metrics.get('trades', 0)} trades, net {float(metrics.get('net_pnl_actual_usdc', 0)):.2f} "
+        f"USDC, PF {pf_text}, drawdown normalise "
+        f"{float(metrics.get('max_drawdown_normalized_usdc', 0)):.2f} USDC"
+    )
+
+
+def _format_pf(value: object) -> str:
+    parsed = _to_float(value)
+    return "n/a" if parsed is None else f"{parsed:.3f}"
+
+
+def _group_table(
+    title: str,
+    rows: Sequence[dict[str, Any]],
+    *,
+    minimum_trades: int = 1,
+    limit: int | None = None,
+    reverse: bool = False,
+) -> list[str]:
+    selected = [
+        row for row in rows if int(row.get("trades", 0)) >= minimum_trades
+    ]
+    selected.sort(
+        key=lambda row: (
+            float(row.get("normalized_net_usdc", 0.0)),
+            str(row.get("group", "")),
+        ),
+        reverse=reverse,
+    )
+    if limit is not None:
+        selected = selected[:limit]
+    lines = [
+        f"### {title}",
+        "",
+        "| Groupe | Trades | Net reel | PF reel | Net normalise | PF normalise | Frais |",
+        "|---|---:|---:|---:|---:|---:|---:|",
+    ]
+    if not selected:
+        lines.append("| Aucun groupe mesurable | 0 | 0.00 | n/a | 0.00 | n/a | 0.00 |")
+        return lines
+    for row in selected:
+        lines.append(
+            "| "
+            f"{row.get('group', 'UNKNOWN')} | "
+            f"{int(row.get('trades', 0))} | "
+            f"{float(row.get('net_pnl_actual_usdc', 0.0)):.2f} | "
+            f"{_format_pf(row.get('profit_factor_actual'))} | "
+            f"{float(row.get('normalized_net_usdc', 0.0)):.2f} | "
+            f"{_format_pf(row.get('profit_factor_normalized'))} | "
+            f"{float(row.get('fees_reported_usdc', 0.0)):.2f} |"
+        )
+    return lines
+
+
+def _candidate_table(candidates: Sequence[dict[str, Any]]) -> list[str]:
+    lines = [
+        "| Hypothese | Train n/PF | Validation n/PF | Holdout n/PF | Verdict |",
+        "|---|---:|---:|---:|---|",
+    ]
+    if not candidates:
+        lines.append("| Aucune hypothese mesurable | 0/n/a | 0/n/a | 0/n/a | INSUFFICIENT_DATA |")
+        return lines
+    ordered = sorted(
+        candidates,
+        key=lambda row: (
+            bool(row.get("selected_before_holdout")),
+            float(row.get("selection_score_train_validation_only", 0.0)),
+            str(row.get("key", "")),
+        ),
+        reverse=True,
+    )
+    for candidate in ordered[:30]:
+        metrics = candidate.get("metrics", {})
+        split_cells: list[str] = []
+        for split in ("train", "validation", "holdout"):
+            split_metrics = metrics.get(split, {})
+            split_cells.append(
+                f"{int(split_metrics.get('trades', 0))}/"
+                f"{_format_pf(split_metrics.get('profit_factor_normalized'))}"
+            )
+        lines.append(
+            "| "
+            f"{candidate.get('description', candidate.get('key', 'UNKNOWN'))} | "
+            f"{split_cells[0]} | {split_cells[1]} | {split_cells[2]} | "
+            f"{candidate.get('verdict', 'UNKNOWN')} |"
+        )
+    return lines
+
+
+def write_lab_outputs(report: dict[str, Any], output_dir: Path) -> tuple[Path, Path]:
+    output_dir.mkdir(parents=True, exist_ok=True)
+    json_path = output_dir / "pnl_improvement_lab.json"
+    json_path.write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
+    truth = report["truth"]
+    validation = report["temporal_validation"]
+    findings = report["findings"]
+    lines = [
+        "# Laboratoire d'amelioration PnL HyperSmart",
+        "",
+        f"- Genere : `{report['generated_at']}`",
+        "- Source : ledgers paper canoniques locaux, sessions actives et archivees",
+        "- Reseau : non utilise",
+        "- Activation automatique : **non**",
+        "",
+        "## Verite PnL",
+        "",
+        f"- Tous les round-trips apparies : {_markdown_metrics(truth['all_paired'])}.",
+        f"- Echantillon eligible pour apprendre : {_markdown_metrics(truth['eligible_for_learning'])}.",
+        "",
+        "## Qualite des preuves",
+        "",
+        f"- Ledgers canoniques lus : `{report['quality'].get('ledger_files', 0)}`.",
+        f"- Ouvertures / fermetures : `{report['quality'].get('open_events', 0)}` / "
+        f"`{report['quality'].get('close_events', 0)}`.",
+        f"- Round-trips apparies / eligibles : `{report['quality'].get('paired_round_trips', 0)}` / "
+        f"`{report['quality'].get('eligible_round_trips', 0)}`.",
+        f"- Fermetures orphelines / positions encore ouvertes : "
+        f"`{report['quality'].get('orphan_closes', 0)}` / "
+        f"`{report['quality'].get('still_open', 0)}`.",
+        f"- Evenements non monotones / erreurs JSON : "
+        f"`{report['quality'].get('non_monotonic_events', 0)}` / "
+        f"`{report['quality'].get('json_errors', 0)}`.",
+        f"- Exclusions : `{report['quality'].get('exclusion_reasons', {})}`.",
+        "",
+    ]
+    groups = report.get("groups", {})
+    eligible_truth = truth["eligible_for_learning"]
+    lines.extend(
+        [
+            "## Causes mesurees",
+            "",
+            (
+                "- Drag de frais sur le brut absolu : "
+                f"`{float(eligible_truth.get('fee_drag_over_abs_gross') or 0.0):.1%}`."
+            ),
+            "- Les tableaux suivants sont descriptifs. Ils ne suffisent jamais a activer une regle.",
+            "",
+        ]
+    )
+    lines.extend(_group_table("Attribution par methode de sortie", groups.get("by_exit_method", [])))
+    lines.extend([""])
+    lines.extend(_group_table("Attribution par sens", groups.get("by_side", [])))
+    lines.extend([""])
+    lines.extend(
+        _group_table(
+            "Strategies les plus couteuses",
+            groups.get("by_strategy", []),
+            minimum_trades=2,
+            limit=8,
+        )
+    )
+    lines.extend([""])
+    lines.extend(
+        _group_table(
+            "Coins recurrents les plus couteux",
+            groups.get("by_coin", []),
+            minimum_trades=2,
+            limit=8,
+        )
+    )
+    lines.extend([""])
+    lines.extend(
+        _group_table(
+            "Coins recurrents les moins mauvais ou positifs",
+            groups.get("by_coin", []),
+            minimum_trades=2,
+            limit=8,
+            reverse=True,
+        )
+    )
+    lines.extend(
+        [
+            "",
+            "Les rangs par coin et strategie restent exploratoires : ils doivent etre "
+            "confirmes hors echantillon avec frais et notionnel constants.",
+            "",
+            "## Validation temporelle",
+            "",
+            f"- Statut : `{validation.get('status')}`",
+            f"- Split : `{validation.get('split', {})}`",
+            f"- Holdout utilise pour selectionner : `{validation.get('selection_uses_holdout', False)}`",
+            f"- Avertissement : {validation.get('multiple_testing_warning', validation.get('reason', ''))}",
+            "",
+            "### Matrice des hypotheses",
+            "",
+        ]
+    )
+    lines.extend(_candidate_table(validation.get("candidates", [])))
+    lines.extend(
+        [
+            "",
+            "## Pistes robustes",
+            "",
+        ]
+    )
+    robust = findings["robust_opportunities"]
+    lines.extend(f"- {item}" for item in robust)
+    if not robust:
+        lines.append("- Aucune piste n'a encore passe train + validation + holdout.")
+    lines.extend(["", "## Pistes a confirmer", ""])
+    lines.extend(f"- {item}" for item in findings["needs_confirmation"])
+    if not findings["needs_confirmation"]:
+        lines.append("- Aucune piste selectionnee avec holdout insuffisant.")
+    lines.extend(["", "## Hypotheses rejetees", ""])
+    lines.extend(f"- {item}" for item in findings["rejected_hypotheses"])
+    if not findings["rejected_hypotheses"]:
+        lines.append("- Aucune hypothese rejetee enregistrable.")
+    lines.extend(["", "## Donnees manquantes", ""])
+    lines.extend(f"- {item}" for item in findings["missing_evidence"])
+    if not findings["missing_evidence"]:
+        lines.append("- Couverture suffisante sur les champs controles.")
+    lines.extend(["", "## Prochains A/B exacts", ""])
+    lines.extend(f"- {item}" for item in findings["next_exact_ab_experiments"])
+    lines.extend(["", "## Backlog d'experiences priorise", ""])
+    backlog = report.get("experiment_backlog", [])
+    if isinstance(backlog, list) and backlog:
+        for experiment in backlog:
+            if not isinstance(experiment, dict):
+                continue
+            lines.extend(
+                [
+                    (
+                        f"### P{experiment.get('priority')} - "
+                        f"{experiment.get('title', experiment.get('experiment_id'))}"
+                    ),
+                    "",
+                    f"- Identifiant : `{experiment.get('experiment_id')}`",
+                    f"- Hypothese : {experiment.get('hypothesis')}",
+                    (
+                        "- Grille : `"
+                        f"{json.dumps(experiment.get('parameter_grid', {}), ensure_ascii=False)}"
+                        "`"
+                    ),
+                    (
+                        "- Preuves requises : "
+                        + ", ".join(
+                            str(value)
+                            for value in experiment.get("required_evidence", [])
+                        )
+                        + "."
+                    ),
+                    f"- Validation : {experiment.get('validation_protocol')}",
+                    "- Activation automatique : **non**",
+                    "",
+                ]
+            )
+    else:
+        lines.extend(
+            [
+                "- Aucun experiment exploitable tant que les donnees restent insuffisantes.",
+                "",
+            ]
+        )
+    lines.extend(
+        [
+            "## Regle de promotion",
+            "",
+            "Aucun flag n'est active par ce rapport. Une piste doit garder un PF net > 1 "
+            "sur validation et holdout chronologiques, puis survivre au replay exact avec "
+            "frais, spread, slippage et latence.",
+            "",
+            "**Un resultat historique ne garantit jamais un profit futur.**",
+            "",
+        ]
+    )
+    markdown_path = output_dir / "PNL_IMPROVEMENT_LAB.md"
+    markdown_path.write_text("\n".join(lines), encoding="utf-8")
+    return json_path, markdown_path
+
+
+def build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(
+        description="Autopsie historique et recherche PnL sans lookahead sur ledgers locaux."
+    )
+    parser.add_argument("--logs-dir", required=True)
+    parser.add_argument("--output-dir", required=True)
+    parser.add_argument(
+        "--comparison-notional",
+        type=float,
+        default=DEFAULT_COMPARISON_NOTIONAL_USDT,
+    )
+    parser.add_argument("--min-trades", type=int, default=MIN_TOTAL_TRADES)
+    return parser
+
+
+def main(argv: Iterable[str] | None = None) -> int:
+    args = build_parser().parse_args(list(argv) if argv is not None else None)
+    comparison_notional = max(1.0, float(args.comparison_notional))
+    report = build_lab_report(
+        Path(args.logs_dir),
+        comparison_notional_usdt=comparison_notional,
+        min_total_trades=max(12, int(args.min_trades)),
+    )
+    json_path, markdown_path = write_lab_outputs(report, Path(args.output_dir))
+    truth = report["truth"]["eligible_for_learning"]
+    print(
+        "pnl_lab="
+        f"trades:{truth['trades']} net:{truth['net_pnl_actual_usdc']:.6f} "
+        f"pf:{truth['profit_factor_actual']} status:{report['temporal_validation']['status']}"
+    )
+    print(f"pnl_lab_json={json_path}")
+    print(f"pnl_lab_markdown={markdown_path}")
+    print("automatic_activation=false")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
+
+
+__all__ = [
+    "CANONICAL_LEDGER_NAME",
+    "DEFAULT_COMPARISON_NOTIONAL_USDT",
+    "HistoricalTrade",
+    "RuleSpec",
+    "build_candidate_rules",
+    "build_lab_report",
+    "compute_metrics",
+    "discover_session_ledgers",
+    "evaluate_candidate_rules",
+    "extract_historical_trades",
+    "main",
+    "rule_matches",
+    "write_lab_outputs",
+]

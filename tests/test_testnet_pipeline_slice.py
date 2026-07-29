@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from pathlib import Path
 
 from hl_observer.config.settings import Settings
 from hl_observer.decision_engine.local_engine import DecisionAction, LocalDecisionEngine
@@ -95,6 +96,30 @@ def test_G2_le_noyau_REFUSE_le_candidat_qui_apporte_son_propre_edge(monkeypatch)
     assert noyau["autoritaire"] is True
     assert noyau["edge_brut_bps"] is None, "le noyau n'a meme pas eu a calculer un edge"
     assert noyau["real_execution"] is False
+
+
+def test_boucle_runtime_refuse_si_la_preuve_de_qualite_est_absente(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    monkeypatch.setenv("HYPERSMART_NOYAU_AUTORITAIRE", "1")
+
+    decision = LocalDecisionEngine(
+        Settings(),
+        feed_quality_path=tmp_path / "feed_quality.json",
+    ).decide_from_candidate(
+        _candidat_qui_s_auto_autorise(),
+        notional_usdc=2.0,
+        cloid="quality-gated-testnet-btc-open",
+    )
+
+    assert decision.action is DecisionAction.NO_TRADE
+    assert decision.order_request is None
+    assert decision.reasons == ["NOYAU_QUALITE_FLUX_INSUFFISANTE"]
+    quality = decision.evidence["noyau"]["preuve"]["feed_quality"]
+    assert quality["ready"] is False
+    assert quality["score"] is None
+    assert quality["reasons"] == ["FEED_QUALITY_FILE_MISSING"]
 
 
 def test_le_plomberie_testnet_reste_correcte_quand_le_noyau_est_consultatif(monkeypatch) -> None:

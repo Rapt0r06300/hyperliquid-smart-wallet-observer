@@ -61,7 +61,7 @@ def _compter_panne_interne(site: str) -> None:
 #: nouveau collecteur mourrait SANS supervision, exactement la panne qu'on vient de payer.
 #: limite_minutes : au-delà de ce silence du log, le collecteur est déclaré MORT.
 #: (le log est écrit à CHAQUE passe ; silence sain max ≈ cadence + durée d'une passe)
-#: 25/07 — REGISTRE ÉTENDU aux 17 collecteurs RÉELLEMENT démarrés par l'AUTOPILOT (avant : 7, dont
+#: 27/07 — REGISTRE ÉTENDU aux 19 collecteurs RÉELLEMENT démarrés par l'AUTOPILOT (avant : 7, dont
 #: carry-feeder qui était COUPÉ dans le lanceur -> canari 17 vs 7 rouge). Désormais SOURCE UNIQUE
 #: utilisée par : AUTOPILOT (`demarrer_tous`), `status` (status_detaille), watchdog (verifier_et_relancer),
 #: arrêt ciblé (arreter_cible) et les tests. Une seule liste, plus de dérive possible.
@@ -105,7 +105,59 @@ REGISTRE: tuple[dict[str, Any], ...] = (
      "intervalle_s": 21600, "args": (), "limite_minutes": 570.0},
     {"nom": "rapport-quotidien", "script": "tools/rapport_quotidien.py",
      "intervalle_s": 21600, "args": (), "limite_minutes": 570.0},
+    {"nom": "research-lab", "script": "tools/lancer_research_parallel.py",
+     "intervalle_s": 60, "args": ("--max-ticks", "1"), "limite_minutes": 10.0,
+     "heartbeat": "runtime/research_lab/heartbeat.json"},
+    {"nom": "lab-microstructure", "script": "tools/collecter_lab_microstructure.py",
+     "intervalle_s": 30, "args": (), "limite_minutes": 5.0,
+     "heartbeat": "runtime/research_lab/micro_heartbeat.json"},
 )
+
+# Le runtime principal ne doit pas devenir un laboratoire permanent. Ces profils
+# gardent tous les collecteurs disponibles, mais seuls les deux flux de marche
+# indispensables sont auto-demarres avec le bot.
+PROFILS_VALIDES = ("core", "maintenance", "research", "all")
+COLLECTEURS_CORE = frozenset({
+    "allmids-collector",
+    "bbo-collector",
+})
+COLLECTEURS_MAINTENANCE = frozenset({
+    "copy-whitelist",
+    "rapport-quotidien",
+})
+COLLECTEURS_RESEARCH = frozenset(
+    c["nom"]
+    for c in REGISTRE
+    if c["nom"] not in COLLECTEURS_CORE | COLLECTEURS_MAINTENANCE
+)
+
+
+def normaliser_profil(profil: str | None, *, defaut: str = "core") -> str:
+    aliases = {
+        "analyse": "research",
+        "analysis": "research",
+        "recherche": "research",
+        "tous": "all",
+    }
+    valeur = aliases.get(str(profil or defaut).strip().lower(), str(profil or defaut).strip().lower())
+    if valeur not in PROFILS_VALIDES:
+        raise ValueError("profil collecteurs invalide: %s" % valeur)
+    return valeur
+
+
+def profil_collecteur(nom: str) -> str:
+    if nom in COLLECTEURS_CORE:
+        return "core"
+    if nom in COLLECTEURS_MAINTENANCE:
+        return "maintenance"
+    return "research"
+
+
+def collecteurs_pour_profil(profil: str | None = "core") -> tuple[dict[str, Any], ...]:
+    profil_normalise = normaliser_profil(profil)
+    if profil_normalise == "all":
+        return REGISTRE
+    return tuple(c for c in REGISTRE if profil_collecteur(c["nom"]) == profil_normalise)
 
 
 def actif() -> bool:
@@ -136,13 +188,19 @@ def age_vie_minutes(root: Path, c: dict[str, Any], *, maintenant: float | None =
     return age_log_minutes(root, c["nom"], maintenant=maintenant)
 
 
-def etat_collecteurs(root: Path, *, maintenant: float | None = None) -> list[dict[str, Any]]:
+def etat_collecteurs(
+    root: Path,
+    *,
+    maintenant: float | None = None,
+    profil: str = "all",
+) -> list[dict[str, Any]]:
     """Un dict par collecteur du REGISTRE : {nom, age_minutes, limite_minutes, mort}."""
     out: list[dict[str, Any]] = []
-    for c in REGISTRE:
+    for c in collecteurs_pour_profil(profil):
         age = age_vie_minutes(root, c, maintenant=maintenant)
         out.append({
             "nom": c["nom"],
+            "profil": profil_collecteur(c["nom"]),
             "age_minutes": None if age is None else round(age, 1),
             "limite_minutes": c["limite_minutes"],
             # log absent = mort (jamais démarré), log figé au-delà de la limite = mort.
@@ -206,6 +264,7 @@ def verifier_et_relancer(
     maintenant: float | None = None,
     lanceur: Callable[[list[str], Path], bool] | None = None,
     cooldown_s: float = COOLDOWN_S,
+    profil: str = "core",
 ) -> dict[str, Any]:
     """Une passe de supervision. Retourne un rapport, ne lève JAMAIS.
 
@@ -213,8 +272,16 @@ def verifier_et_relancer(
     """
     try:
         racine = Path(root)
+        profil_normalise = normaliser_profil(profil)
+        collecteurs = collecteurs_pour_profil(profil_normalise)
         if not actif():
-            return {"actif": False, "morts": [], "relances": [], "en_cooldown": []}
+            return {
+                "actif": False,
+                "profil": profil_normalise,
+                "morts": [],
+                "relances": [],
+                "en_cooldown": [],
+            }
         now = maintenant if maintenant is not None else time.time()
         lancer = lanceur if lanceur is not None else _lanceur_windows
         journal = _lire_journal(racine)
@@ -222,7 +289,10 @@ def verifier_et_relancer(
         relances: list[str] = []
         en_cooldown: list[str] = []
 
-        for c, etat in zip(REGISTRE, etat_collecteurs(racine, maintenant=now)):
+        for c, etat in zip(
+            collecteurs,
+            etat_collecteurs(racine, maintenant=now, profil=profil_normalise),
+        ):
             if not etat["mort"]:
                 continue
             morts.append(c["nom"])
@@ -246,7 +316,7 @@ def verifier_et_relancer(
         if morts:
             journal["derniere_passe_ts"] = now
             _ecrire_journal(racine, journal)
-        return {"actif": True, "morts": morts, "relances": relances,
+        return {"actif": True, "profil": profil_normalise, "morts": morts, "relances": relances,
                 "en_cooldown": en_cooldown}
     except Exception as exc:  # noqa: BLE001 — jamais d'exception vers le moteur
         try:
@@ -255,7 +325,7 @@ def verifier_et_relancer(
         except Exception:  # noqa: BLE001
             # meme le compteur officiel est en panne : on compte LOCALEMENT (jamais muet)
             _compter_panne_interne("noter_indisponible")
-        return {"actif": True, "morts": [], "relances": [], "en_cooldown": [],
+        return {"actif": True, "profil": str(profil), "morts": [], "relances": [], "en_cooldown": [],
                 "erreur": str(exc)[:200]}
 
 
@@ -300,16 +370,47 @@ def _lire_pids(root: str | Path) -> dict[str, Any]:
         return {}
 
 
-def demarrer_tous(root: str | Path, *, run_id: str | None = None,
-                  spawner: Callable[[dict, Path], int | None] | None = None) -> dict[str, Any]:
-    """Démarre les 17 collecteurs du REGISTRE et ENREGISTRE leur PID (base de l'arrêt CIBLÉ).
+def _pid_collecteur_existant(c: dict[str, Any], procs: list[dict[str, Any]]) -> int | None:
+    nom = c["nom"]
+    script = str(c["script"]).split("/")[-1]
+    for proc in procs:
+        ligne = str(proc.get("cmd") or "")
+        if ((" %s " % nom) in (" " + ligne + " ")) or script in ligne:
+            pid = proc.get("pid")
+            if isinstance(pid, int):
+                return pid
+    return None
+
+
+def demarrer_tous(
+    root: str | Path,
+    *,
+    run_id: str | None = None,
+    spawner: Callable[[dict, Path], int | None] | None = None,
+    profil: str = "core",
+    procs: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
+    """Démarre tous les collecteurs du REGISTRE et ENREGISTRE leur PID (base de l'arrêt CIBLÉ).
     Ne lève jamais. Rend {run_id, pids, manquants}."""
     racine = Path(root)
+    profil_normalise = normaliser_profil(profil)
+    collecteurs = collecteurs_pour_profil(profil_normalise)
     rid = run_id or ("run-" + os.urandom(6).hex())
     lance = spawner if spawner is not None else _spawn_pid
+    processus = (
+        list(procs)
+        if procs is not None
+        else (_processus_projet(racine) if spawner is None else [])
+    )
     pids: dict[str, int] = {}
     manquants: list[str] = []
-    for c in REGISTRE:
+    reutilises: list[str] = []
+    for c in collecteurs:
+        pid_existant = _pid_collecteur_existant(c, processus)
+        if pid_existant is not None:
+            pids[c["nom"]] = pid_existant
+            reutilises.append(c["nom"])
+            continue
         try:
             pid = lance(c, racine)
         except Exception:  # noqa: BLE001 — un spawner injecté ne doit pas nous tuer
@@ -318,14 +419,32 @@ def demarrer_tous(root: str | Path, *, run_id: str | None = None,
             pids[c["nom"]] = int(pid)
         else:
             manquants.append(c["nom"])
+    # Le fichier PID est commun aux profils. Conserver uniquement les autres
+    # collecteurs dont le processus est encore effectivement signe et vivant,
+    # puis ajouter ceux de ce demarrage. Un profil manuel ne fait ainsi jamais
+    # oublier les PID CORE et aucun PID ancien/recycle n'est conserve aveuglement.
+    pids_registre: dict[str, int] = {}
+    for c in REGISTRE:
+        pid_vivant = _pid_collecteur_existant(c, processus)
+        if pid_vivant is not None:
+            pids_registre[c["nom"]] = pid_vivant
+    pids_registre.update(pids)
     try:
         p = racine / PIDS_RELPATH
         p.parent.mkdir(parents=True, exist_ok=True)
-        p.write_text(json.dumps({"run_id": rid, "ts_ms": int(time.time() * 1000), "pids": pids},
+        p.write_text(json.dumps({"run_id": rid, "ts_ms": int(time.time() * 1000),
+                                 "profil": profil_normalise, "pids": pids_registre},
                                 ensure_ascii=False, indent=1), encoding="utf-8")
     except OSError:
         _compter_panne_interne("pids_inecrivable")
-    return {"run_id": rid, "pids": pids, "manquants": manquants}
+    return {
+        "run_id": rid,
+        "profil": profil_normalise,
+        "selectionnes": len(collecteurs),
+        "pids": pids,
+        "reutilises": reutilises,
+        "manquants": manquants,
+    }
 
 
 def demarrer_un(root: str | Path, nom: str, *, spawner=None) -> int | None:
@@ -345,16 +464,22 @@ def demarrer_un(root: str | Path, nom: str, *, spawner=None) -> int | None:
     return pid
 
 
-def enregistrer_pids(root: str | Path, *, run_id: str | None = None,
-                     procs: list[dict] | None = None) -> dict[str, Any]:
+def enregistrer_pids(
+    root: str | Path,
+    *,
+    run_id: str | None = None,
+    procs: list[dict] | None = None,
+    profil: str = "all",
+) -> dict[str, Any]:
     """Après le démarrage (le lanceur spawn en `start /b`, éprouvé), TROUVE les PID des collecteurs qui
     tournent (par signature du REGISTRE) et les enregistre → base de l'arrêt CIBLÉ (Fix 5) SANS changer le
     spawn. Ne lève jamais. Rend {run_id, pids}."""
     racine = Path(root)
     procs = procs if procs is not None else _processus_projet(root)
     rid = run_id or ("run-" + os.urandom(6).hex())
+    profil_normalise = normaliser_profil(profil, defaut="all")
     pids: dict[str, int] = {}
-    for c in REGISTRE:
+    for c in collecteurs_pour_profil(profil_normalise):
         nom, script = c["nom"], str(c["script"]).split("/")[-1]
         for p in procs:
             cl = p.get("cmd") or ""
@@ -362,14 +487,21 @@ def enregistrer_pids(root: str | Path, *, run_id: str | None = None,
                 if isinstance(p.get("pid"), int):
                     pids[nom] = p["pid"]
                     break
+    pids_registre: dict[str, int] = {}
+    for c in REGISTRE:
+        pid_vivant = _pid_collecteur_existant(c, procs)
+        if pid_vivant is not None:
+            pids_registre[c["nom"]] = pid_vivant
+    pids_registre.update(pids)
     try:
         pf = racine / PIDS_RELPATH
         pf.parent.mkdir(parents=True, exist_ok=True)
-        pf.write_text(json.dumps({"run_id": rid, "ts_ms": int(time.time() * 1000), "pids": pids},
+        pf.write_text(json.dumps({"run_id": rid, "ts_ms": int(time.time() * 1000),
+                                  "profil": profil_normalise, "pids": pids_registre},
                                  ensure_ascii=False, indent=1), encoding="utf-8")
     except OSError:
         _compter_panne_interne("pids_inecrivable")
-    return {"run_id": rid, "pids": pids}
+    return {"run_id": rid, "profil": profil_normalise, "pids": pids}
 
 
 def _ps(commande: str) -> str:
@@ -425,20 +557,28 @@ def _heartbeat_userfills(root: str | Path) -> int | None:
         return None
 
 
-def status_detaille(root: str | Path, *, maintenant: float | None = None) -> list[dict[str, Any]]:
+def status_detaille(
+    root: str | Path,
+    *,
+    maintenant: float | None = None,
+    profil: str = "all",
+) -> list[dict[str, Any]]:
     """Les 17 composants : pid enregistré, nb d'instances vivantes, heartbeat, âge du dernier log, état réel.
     Registry-driven. Sur Windows : instances/pid réels ; en sandbox : fraîcheur des logs seule."""
+    profil_normalise = normaliser_profil(profil, defaut="all")
+    collecteurs = collecteurs_pour_profil(profil_normalise)
     reg_pids = _lire_pids(root).get("pids", {})
     reg_pids = reg_pids if isinstance(reg_pids, dict) else {}
     procs = _processus_projet(root)
     hb_uf = _heartbeat_userfills(root)
-    etats = etat_collecteurs(root, maintenant=maintenant)
+    etats = etat_collecteurs(root, maintenant=maintenant, profil=profil_normalise)
     out = []
-    for c, e in zip(REGISTRE, etats):
+    for c, e in zip(collecteurs, etats):
         nom, script = c["nom"], str(c["script"]).split("/")[-1]
         insts = [p for p in procs if (" %s " % nom) in (" " + (p["cmd"] or "") + " ") or script in (p["cmd"] or "")]
         vivant = (len(insts) > 0) if procs else (not e["mort"])
-        out.append({"nom": nom, "pid_enregistre": reg_pids.get(nom), "instances": len(insts),
+        out.append({"nom": nom, "profil": profil_collecteur(nom),
+                    "pid_enregistre": reg_pids.get(nom), "instances": len(insts),
                     "heartbeat_ms": hb_uf if nom == "userfills-live" else None,
                     "age_log_min": e["age_minutes"], "limite_min": e["limite_minutes"],
                     "log_mort": e["mort"], "etat": "VIVANT" if vivant else "MORT"})
@@ -496,14 +636,25 @@ def _cli(argv: list[str]) -> int:
     root = Path.cwd()
     cmd = argv[0] if argv else "status"
     if cmd == "demarrer-tous":
-        r = demarrer_tous(root)
+        profil = argv[1] if len(argv) > 1 else "core"
+        try:
+            r = demarrer_tous(root, profil=profil)
+        except ValueError as exc:
+            print("[collecteurs] REFUS: %s (attendus: %s)" % (
+                exc, ", ".join(PROFILS_VALIDES)), flush=True)
+            return 2
         print("[collecteurs] run_id=%s demarres=%d/%d manquants=%s" % (
-            r["run_id"], len(r["pids"]), len(REGISTRE), r["manquants"] or "aucun"), flush=True)
+            r["run_id"], len(r["pids"]), r["selectionnes"], r["manquants"] or "aucun"), flush=True)
+        print("[collecteurs] profil=%s reutilises=%s" % (
+            r["profil"], r["reutilises"] or "aucun"), flush=True)
         return 0
     if cmd == "enregistrer-pids":
-        rid = argv[1] if len(argv) > 1 else None
-        r = enregistrer_pids(root, run_id=rid)
-        print("[collecteurs] PID enregistres : %d/%d (run_id=%s)" % (len(r["pids"]), len(REGISTRE), r["run_id"]), flush=True)
+        profil = argv[1] if len(argv) > 1 and argv[1] in PROFILS_VALIDES else "all"
+        rid_index = 2 if profil != "all" or (len(argv) > 1 and argv[1] == "all") else 1
+        rid = argv[rid_index] if len(argv) > rid_index else None
+        r = enregistrer_pids(root, run_id=rid, profil=profil)
+        print("[collecteurs] PID enregistres : %d/%d (profil=%s run_id=%s)" % (
+            len(r["pids"]), len(collecteurs_pour_profil(profil)), profil, r["run_id"]), flush=True)
         return 0
     if cmd == "demarrer" and len(argv) > 1:
         print("[collecteurs] %s -> pid=%s" % (argv[1], demarrer_un(root, argv[1])), flush=True)
@@ -513,15 +664,22 @@ def _cli(argv: list[str]) -> int:
         print("[collecteurs] arret CIBLE : %d process arretes (port8794=%s ; jamais de kill global)"
               % (len(r["arretes"]), r["port_owner"]), flush=True)
         return 0
-    print("===  STATUT DES 17 COLLECTEURS  (registre unique)  ===", flush=True)
+    profil = argv[1] if len(argv) > 1 else "all"
+    try:
+        collecteurs = collecteurs_pour_profil(profil)
+    except ValueError as exc:
+        print("[collecteurs] REFUS: %s" % exc, flush=True)
+        return 2
+    print("===  STATUT DES %d COLLECTEURS  (profil=%s)  ===" % (
+        len(collecteurs), normaliser_profil(profil, defaut="all")), flush=True)
     vivants = 0
-    for s in status_detaille(root):
+    for s in status_detaille(root, profil=profil):
         vivants += 1 if s["etat"] == "VIVANT" else 0
         hb = "" if s["heartbeat_ms"] is None else (" hb=%s" % s["heartbeat_ms"])
         age = "?" if s["age_log_min"] is None else ("%.1fmin" % s["age_log_min"])
         print("  %-24s %-6s inst=%d pid=%s log=%s%s" % (
             s["nom"], s["etat"], s["instances"], s["pid_enregistre"], age, hb), flush=True)
-    print("  -> %d/%d VIVANTS" % (vivants, len(REGISTRE)), flush=True)
+    print("  -> %d/%d VIVANTS" % (vivants, len(collecteurs)), flush=True)
     return 0
 
 

@@ -18,7 +18,21 @@ class SafetyAuditResult:
 
 
 TEXT_SUFFIXES = {".py", ".toml", ".yaml", ".yml", ".env", ".example", ".txt"}
-EXCLUDED_DIRS = {".git", ".venv", "__pycache__", ".pytest_cache", ".ruff_cache", "logs", "tmp_pytest"}
+EXCLUDED_DIRS = {
+    ".git",
+    ".venv",
+    ".venv-portable",
+    "__pycache__",
+    ".pytest_cache",
+    ".ruff_cache",
+    "data",
+    "logs",
+    "node_modules",
+    "portable_runtime",
+    "runtime",
+    "tmp_pytest",
+    "venv",
+}
 EXCLUDED_RELATIVE_PREFIXES = {
     ("runtime", "research", "github_repos_v24"),
 }

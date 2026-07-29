@@ -10,7 +10,14 @@ from __future__ import annotations
 import os
 import shutil
 
-CLES = ("MAX_CPU_PERCENT", "MAX_RAM_GB", "MAX_WORKERS", "MIN_FREE_DISK_GB")
+CLES = (
+    "MAX_CPU_PERCENT",
+    "MAX_RAM_GB",
+    "MAX_WORKERS",
+    "MAX_SOURCES_PER_BOOTSTRAP",
+    "MAX_BOOTSTRAP_MEGABYTES",
+    "MIN_FREE_DISK_GB",
+)
 
 
 def _cpu_count() -> int:
@@ -58,6 +65,8 @@ def limites(chemin: str = ".") -> dict:
         "MAX_CPU_PERCENT": _envf("MAX_CPU_PERCENT", 75.0),
         "MAX_RAM_GB": _envf("MAX_RAM_GB", round(max(2.0, ram - 4.0), 1)),
         "MAX_WORKERS": int(_envf("MAX_WORKERS", min(12, max(1, ncpu - 1)))),
+        "MAX_SOURCES_PER_BOOTSTRAP": int(_envf("MAX_SOURCES_PER_BOOTSTRAP", 256)),
+        "MAX_BOOTSTRAP_MEGABYTES": int(_envf("MAX_BOOTSTRAP_MEGABYTES", 512)),
         "MIN_FREE_DISK_GB": _envf("MIN_FREE_DISK_GB", 5.0),
         "machine": {"cpu_logiques": ncpu, "ram_totale_gb": round(ram, 1),
                     "disque_libre_gb": round(_disk_libre_gb(chemin), 1)},

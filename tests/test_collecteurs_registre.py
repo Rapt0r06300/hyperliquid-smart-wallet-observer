@@ -13,10 +13,10 @@ from pathlib import Path
 from hl_observer.ops import superviseur_collecteurs as SC
 
 
-def test_registre_17_coherent():
-    assert len(SC.REGISTRE) == 17
+def test_registre_19_coherent():
+    assert len(SC.REGISTRE) == 19
     noms = [c["nom"] for c in SC.REGISTRE]
-    assert len(set(noms)) == 17, "noms uniques"
+    assert len(set(noms)) == len(noms), "noms uniques"
     for c in SC.REGISTRE:                       # limite > 1,5x cadence (règle anti-relance d'un vivant)
         assert c["limite_minutes"] * 60.0 > c["intervalle_s"] * 1.5, c["nom"]
     # les 17 scripts existent sur le disque
@@ -34,11 +34,82 @@ def _root(tmp_path):
 
 def test_demarrer_tous_enregistre_les_pids(tmp_path):
     root = _root(tmp_path)
-    r = SC.demarrer_tous(root, run_id="run-X", spawner=lambda c, cwd: 1000 + SC.REGISTRE.index(c))
-    assert len(r["pids"]) == 17 and r["run_id"] == "run-X"
+    r = SC.demarrer_tous(
+        root,
+        run_id="run-X",
+        profil="all",
+        spawner=lambda c, cwd: 1000 + SC.REGISTRE.index(c),
+    )
+    assert len(r["pids"]) == len(SC.REGISTRE) and r["run_id"] == "run-X"
     reg = json.loads((root / SC.PIDS_RELPATH).read_text(encoding="utf-8"))
-    assert reg["run_id"] == "run-X" and len(reg["pids"]) == 17
+    assert reg["run_id"] == "run-X" and len(reg["pids"]) == len(SC.REGISTRE)
     assert reg["pids"]["bbo-collector"] and reg["pids"]["userfills-live"]
+
+
+def test_demarrer_tous_par_defaut_ne_lance_que_le_core(tmp_path):
+    root = _root(tmp_path)
+    appels = []
+    r = SC.demarrer_tous(
+        root,
+        run_id="run-core",
+        spawner=lambda c, cwd: appels.append(c["nom"]) or (2000 + len(appels)),
+    )
+    assert r["profil"] == "core"
+    assert set(appels) == set(SC.COLLECTEURS_CORE)
+    assert r["selectionnes"] == len(SC.COLLECTEURS_CORE)
+    assert set(r["pids"]) == set(SC.COLLECTEURS_CORE)
+
+
+def test_demarrer_tous_reutilise_un_collecteur_deja_vivant(tmp_path):
+    root = _root(tmp_path)
+    appels = []
+    procs = [
+        {
+            "pid": 321,
+            "ppid": 1,
+            "name": "python.exe",
+            "cmd": "python tools\\collecter_bbo.py",
+        }
+    ]
+    r = SC.demarrer_tous(
+        root,
+        run_id="run-dedupe",
+        profil="core",
+        procs=procs,
+        spawner=lambda c, cwd: appels.append(c["nom"]) or 999,
+    )
+    assert r["pids"]["bbo-collector"] == 321
+    assert r["reutilises"] == ["bbo-collector"]
+    assert appels == ["allmids-collector"]
+
+
+def test_un_profil_ne_fait_pas_oublier_les_autres_pids_vivants(tmp_path):
+    root = _root(tmp_path)
+    procs = [
+        {
+            "pid": 321,
+            "ppid": 1,
+            "name": "python.exe",
+            "cmd": "python tools\\collecter_bbo.py",
+        },
+        {
+            "pid": 654,
+            "ppid": 1,
+            "name": "python.exe",
+            "cmd": "python tools\\ecrire_copy_whitelist.py",
+        },
+    ]
+    SC.demarrer_tous(
+        root,
+        run_id="run-preserve",
+        profil="core",
+        procs=procs,
+        spawner=lambda c, cwd: 999,
+    )
+    stored = json.loads((root / SC.PIDS_RELPATH).read_text(encoding="utf-8"))
+    assert stored["pids"]["bbo-collector"] == 321
+    assert stored["pids"]["copy-whitelist"] == 654
+    assert stored["pids"]["allmids-collector"] == 999
 
 
 def test_enregistrer_pids_mappe_par_signature(tmp_path):
@@ -52,10 +123,10 @@ def test_enregistrer_pids_mappe_par_signature(tmp_path):
     assert r["pids"]["userfills-live"] == 200
 
 
-def test_status_detaille_rend_17(tmp_path):
+def test_status_detaille_rend_tout_le_registre(tmp_path):
     root = _root(tmp_path)
     st = SC.status_detaille(root)
-    assert len(st) == 17
+    assert len(st) == len(SC.REGISTRE)
     assert all(set(s) >= {"nom", "pid_enregistre", "instances", "age_log_min", "etat"} for s in st)
 
 

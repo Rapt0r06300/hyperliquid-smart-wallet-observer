@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 from dataclasses import asdict, dataclass, field
 from enum import Enum
+from pathlib import Path
 from typing import Any
 
 from hl_observer.config.settings import Settings
@@ -11,6 +12,7 @@ from hl_observer.risk.session_gate import etat_session_courant   # #292b — les
 from hl_observer.hyperliquid.schemas import SignalCandidate
 from hl_observer.risk.gates import RiskContext
 from hl_observer.risk.risk_engine import RiskEngine
+from hl_observer.realtime.feed_quality_reader import read_coin_feed_quality
 from hl_observer.testnet.models import TestnetAction, TestnetOrderRequest, TestnetSide, unix_ms
 
 # G2 -- LE NOYAU EST BRANCHE ICI.
@@ -71,6 +73,7 @@ class LocalDecision:
 @dataclass(slots=True)
 class LocalDecisionEngine:
     settings: Settings
+    feed_quality_path: Path | None = None
 
     def decide_from_candidate(
         self,
@@ -182,8 +185,11 @@ class LocalDecisionEngine:
             evidence=evidence,
         )
 
-    @staticmethod
-    def _contexte_noyau(candidate: SignalCandidate, notional_usdc: float) -> noyau.Contexte:
+    def _contexte_noyau(
+        self,
+        candidate: SignalCandidate,
+        notional_usdc: float,
+    ) -> noyau.Contexte:
         """Traduit un candidat en question posee au noyau.
 
         🔴 `edge_fourni_bps=candidate.edge_remaining_bps` : on le donne au noyau *pour qu'il le
@@ -200,6 +206,11 @@ class LocalDecisionEngine:
         `NOYAU_PRIX_NON_EXECUTABLE` si jamais la famille redevenait vivante. On n'invente jamais
         un prix pour combler un trou.
         """
+        quality = (
+            read_coin_feed_quality(self.feed_quality_path, coin=candidate.coin)
+            if self.feed_quality_path is not None
+            else None
+        )
         return noyau.Contexte(
             strategie="COPY",
             coin=candidate.coin,
@@ -240,6 +251,9 @@ class LocalDecisionEngine:
             # Si le ledger n'est pas branche, `etat_session_courant()` rend `None`, et le noyau
             # **SIGNALE** au lieu de faire semblant. *Un etat absent n'est pas un etat sain.*
             etat_session=etat_session_courant(),
+            feed_quality_ready=None if quality is None else quality.ready,
+            feed_quality_score=None if quality is None else quality.feed_quality_score,
+            feed_quality_reasons=() if quality is None else quality.reasons,
         )
 
     @staticmethod

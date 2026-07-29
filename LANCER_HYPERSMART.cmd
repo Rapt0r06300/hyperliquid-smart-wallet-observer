@@ -1,13 +1,19 @@
 @echo off
 setlocal
 cd /d "%~dp0"
+REM PORTABILITE : choisit en priorite le Python embarque relatif au dossier.
+REM Le PATH est modifie uniquement pour cette session du lanceur et ses enfants.
+call "%~dp0tools\portable_env.cmd"
+if errorlevel 1 (
+  echo   HyperSmart ne peut pas demarrer sans runtime Python valide.
+  goto :fin
+)
 REM ============================================================================
-REM  LANCER_HYPERSMART.cmd  --  LE FICHIER .cmd UNIQUE DU PROJET (2026-07-25)
+REM  LANCER_HYPERSMART.cmd  --  LANCEUR RUNTIME OFFICIEL (2026-07-28)
 REM ----------------------------------------------------------------------------
-REM  Double-clic SANS argument = AUTOPILOT : prevol securite/paper-only, verrou
-REM  d'instance unique, registre PID/run_id, moteur + dashboard + TOUS les
-REM  collecteurs (userFills, BBO/L2, Binance, liquidation, RAW/OOS/shadows),
-REM  verificateur OOS local, un seul terminal. Tout tourne harmonieusement ici.
+REM  Double-clic SANS argument = RUNTIME CORE : prevol securite/paper-only,
+REM  verrou d'instance unique, moteur + dashboard + poller + stream leaders,
+REM  allMids et BBO. Les backtests/replays/recherches restent hors du hot path.
 REM
 REM  Sous-commandes (LANCER_HYPERSMART.cmd <cmd>) :
 REM    status stop restart restart-userfills collectors report test audit
@@ -15,7 +21,8 @@ REM    replay moisson verify-oos github-push menu self-test
 REM  Avances : audit-moissonneur premier-raw kill-userfills verif-l2 sonde notif-test
 REM
 REM  Les anciens .cmd de la racine sont ABSORBES ici (archives en .cmd.txt dans
-REM  docs\archive\legacy_cmd\). Aucun lanceur parallele ne subsiste.
+REM  docs\archive\legacy_cmd\). Le seul second lanceur officiel est
+REM  ANALYSER_BACKTESTS_REPLAYS.cmd, reserve aux analyses hors runtime.
 REM  Securite : lecture seule marche. 0 ordre reel, 0 argent, 0 cle, 0 signature.
 REM ============================================================================
 if not "%~1"=="" goto :dispatch
@@ -34,14 +41,15 @@ REM ---- PREVOL : registre PID/run_id + dossier logs du lanceur ----
 if not exist "runtime\data" mkdir "runtime\data" >nul 2>&1
 if not exist "runtime\logs\launcher" mkdir "runtime\logs\launcher" >nul 2>&1
 powershell -NoProfile -Command "$o=[ordered]@{ role='launcher_autopilot'; ps_pid=$PID; run_id=([guid]::NewGuid().ToString('N').Substring(0,12)); port=8794; demarre=(Get-Date).ToString('s'); commit=(& git rev-parse --short HEAD 2>$null) }; ($o | ConvertTo-Json -Compress) | Set-Content -Encoding UTF8 (Join-Path '%~dp0' 'runtime\data\launcher_pids.json')" 2>nul
-REM ---- PREVOL : verificateur OOS local (re)pointe sur le lanceur unique (idempotent, lecture seule) ----
-schtasks /Create /SC MINUTE /MO 30 /TN "HyperSmart_VerifOOS" /TR "\"%~dp0LANCER_HYPERSMART.cmd\" verify-oos run" /F >nul 2>&1
+REM Le verificateur OOS planifie est strictement opt-in.
+REM Utiliser "LANCER_HYPERSMART.cmd verify-oos install" pour l'activer explicitement.
 
 set "PYTHONPATH=%~dp0src;%PYTHONPATH%"
 set "HL_ENV=paper"
 set "HL_ENABLE_MAINNET_EXECUTION=0"
 set "HL_ENABLE_TESTNET_EXECUTION=0"
 set "HYPERSMART_MODE=SIMULATION_ONLY_UNTIL_MANUAL_REVIEW"
+set "HYPERSMART_STARTUP_PROFILE=core"
 set "HYPERSMART_V12_SQLITE_PATH=%~dp0runtime\data\hypersmart_v12_artifacts.sqlite3"
 rem ANTI-BLOAT: coupe le stockage brut (payloads L2/leaderboard/fills) qui a fait
 rem gonfler la DB a 29 Go puis crasher. Le PnL/ledger n en depend pas. Mettre a 0
@@ -319,11 +327,9 @@ REM Les anciens modules d'analyse multi-plateforme restent sur disque, non lance
 REM Les auxiliaires HyperSmart utiles (IA shadow + stream read-only) sont demarres par le script
 REM principal, rattaches a la meme session, et stoppes avec Q.
 
-REM ENTRAINEMENT IA AUTO (V13): demarre en arriere-plan des le lancement, apprend des trades
-REM clotures et met a jour le panneau "Modele IA" (progression: n_trades, Brier, accuracy).
-REM Paper-only / lecture seule. Fenetre minimisee "HyperSmart IA" - ferme-la pour stopper l'apprentissage.
-REM IA rattachee au lanceur principal; pas de fenetre separee.
-set "HYPERSMART_ENABLE_AUX_IA=1"
+REM L'entrainement IA n'est pas necessaire au runtime de collecte/decision. Il reste
+REM disponible comme outil d'analyse explicite, sans consommer de ressources au demarrage.
+set "HYPERSMART_ENABLE_AUX_IA=0"
 
 REM MOTEUR TEMPS REEL (V16, 2026-06-26): flux WebSocket Hyperliquid PERSISTANT sur les 10 MEILLEURS
 REM leaders (cap HL = 10 wallets). Stocke chaque fill FRAIS a la seconde ou il arrive (sub-seconde)
@@ -377,13 +383,11 @@ REM plus jamais deux carry-feeders en parallele apres un Q, une croix ou un cras
 if not exist "runtime\data" mkdir "runtime\data" >nul 2>&1
 echo %random%-%random%-%date%-%time% > "runtime\data\lanceur_session_marqueur.txt"
 call :demarrer_collecteurs
-REM AUTO-VERIFICATION + REGISTRE PID (25/07) : on laisse les 17 collecteurs ecrire leur 1re ligne,
-REM puis on ENREGISTRE leurs PID (base de l'arret CIBLE, Fix 5) et on affiche l'etat du REGISTRE
-REM UNIQUE des 17 (source: hl_observer.ops.superviseur_collecteurs).
-ping -n 7 127.0.0.1 >nul 2>&1
-python -m hl_observer.ops.superviseur_collecteurs enregistrer-pids
-python -m hl_observer.ops.superviseur_collecteurs status
-echo   [collecteurs] sans fenetre. Journaux : runtime\logs\  ^|  arret cible : LANCER_HYPERSMART.cmd stop
+REM Le superviseur enregistre directement les PID et reutilise les instances deja
+REM vivantes. Aucun second passage de detection, aucun demarrage en double.
+ping -n 3 127.0.0.1 >nul 2>&1
+python -m hl_observer.ops.superviseur_collecteurs status core
+echo   [collecteurs CORE] allMids + BBO. Recherche/backtests hors runtime.
 
 powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0tools\start_hypersmart_simulation.ps1" -Port 8794 -IntervalSeconds 15 -MaxLeaders 50 -Interactive
 
@@ -400,6 +404,16 @@ REM #  Le canari test_superviseur_collecteurs compte ces lignes 'start' : NE PAS
 REM #  en ajouter/retirer sans mettre a jour le registre du superviseur.
 REM ############################################################################
 :demarrer_collecteurs
+REM Profil CORE officiel : allMids + BBO uniquement. Le superviseur refuse les
+REM doublons et enregistre lui-meme les PID pour l'arret cible.
+python -m hl_observer.ops.superviseur_collecteurs demarrer-tous core
+exit /b %ERRORLEVEL%
+
+REM ---------------------------------------------------------------------------
+REM REFERENCE LEGACY CONSERVEE, MAIS INATTEIGNABLE.
+REM Ces collecteurs sont disponibles via les profils maintenance/research/all.
+REM Ils ne doivent plus etre lances avec le bot principal.
+REM ---------------------------------------------------------------------------
 REM [SHADOW 23/07] carry-feeder COUPE : le carry historique n'ouvre plus -> inputs spot inutiles.
 REM (Reactiver cette ligne uniquement si on re-litige le carry historique, une piste refutee.)
 REM start "" /b tools\boucle_collecteur.cmd carry-feeder tools\ecrire_carry_spot_inputs.py 240
@@ -522,6 +536,9 @@ if /I "%SUB%"=="stop"              goto :cmd_stop
 if /I "%SUB%"=="restart"           goto :cmd_restart
 if /I "%SUB%"=="restart-userfills" goto :cmd_ruserfills
 if /I "%SUB%"=="collectors"        goto :cmd_collectors
+if /I "%SUB%"=="collectors-maintenance" goto :cmd_collectors_maintenance
+if /I "%SUB%"=="collectors-research"    goto :cmd_collectors_research
+if /I "%SUB%"=="collectors-all"         goto :cmd_collectors_all
 if /I "%SUB%"=="report"            goto :cmd_report
 if /I "%SUB%"=="test"              goto :cmd_test
 if /I "%SUB%"=="audit"             goto :cmd_audit
@@ -538,6 +555,9 @@ if /I "%SUB%"=="kill-userfills"    goto :cmd_killuserfills
 if /I "%SUB%"=="verif-l2"          goto :cmd_verifl2
 if /I "%SUB%"=="sonde"             goto :cmd_sonde
 if /I "%SUB%"=="notif-test"        goto :cmd_notiftest
+if /I "%SUB%"=="portable-check"    goto :cmd_portablecheck
+if /I "%SUB%"=="portable-install"  goto :cmd_portableinstall
+if /I "%SUB%"=="portable-build"    goto :cmd_portablebuild
 echo.
 echo   Sous-commande inconnue : "%SUB%"
 goto :cmd_menu
@@ -545,28 +565,53 @@ goto :cmd_menu
 :cmd_menu
 echo.
 echo   =================  LANCER_HYPERSMART.cmd  =================
-echo   Double-clic sans argument = AUTOPILOT ^(moteur + dashboard + tous les collecteurs^).
+echo   Double-clic sans argument = RUNTIME CORE ^(moteur + dashboard + flux essentiels^).
 echo.
 echo   Controle :
 echo     status              etat des processus du lanceur ^(lecture seule^)
 echo     stop                arret cible ^(collecteurs + userfills^), jamais un kill global
 echo     restart             stop puis autopilot
 echo     restart-userfills   recharge le collecteur userfills avec le code courant
-echo     collectors          reanime les collecteurs sans toucher au moteur
+echo     collectors          demarre/reanime uniquement allMids + BBO ^(CORE^)
+echo     collectors-maintenance   outils periodiques explicites
+echo     collectors-research      collecteurs de recherche explicites
+echo     collectors-all           tous les collecteurs ^(diagnostic exceptionnel^)
 echo   Rapports / recherche :
 echo     report              rapport du jour
 echo     self-test           verification rapide 7 sections
 echo     test                suite complete TOUT-TESTER
 echo     audit               audit ~180 controles ^(resultat-audit.md^)
-echo     replay              recherche de scenarios / pepites
+echo     replay              lance ANALYSER_BACKTESTS_REPLAYS.cmd
 echo     moisson [github^|relire^|voir^|stop]     moissonneur de recherche
 echo   Ops :
 echo     verify-oos [install^|uninstall^|run^|diag^|test-notif]   verificateur OOS local
 echo     github-push     push git fast-forward EXPLICITE ^(jamais de force^)
 echo     reset-paper --confirm   remise a zero VOLONTAIRE ^(sauvegarde horodatee avant^)
+echo     portable-check          verifie le runtime Python relocalisable
+echo     portable-install        installe/repare le runtime Windows x64 local
+echo     portable-build          cree le ZIP portable verifie sur le Bureau
 echo     menu                cette aide
 echo.
 echo   Securite : lecture seule marche. 0 ordre reel, 0 cle, 0 signature.
+echo.
+goto :fin
+
+REM -------- PORTABILITE WINDOWS --------
+:cmd_portablecheck
+echo.
+python tools\portable_runtime.py --root "%~dp0." check
+echo.
+goto :fin
+
+:cmd_portableinstall
+echo.
+powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0tools\install_portable_runtime.ps1" -ProjectRoot "%~dp0."
+echo.
+goto :fin
+
+:cmd_portablebuild
+echo.
+powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0tools\create_portable_bundle.ps1" -ProjectRoot "%~dp0."
 echo.
 goto :fin
 
@@ -576,7 +621,7 @@ echo.
 echo   ===  STATUT HYPERSMART  ^(lecture seule^)  ===
 if exist "runtime\data\launcher_pids.json" ( echo   Registre lanceur : & type "runtime\data\launcher_pids.json" & echo. ) else ( echo   Pas de registre lanceur. )
 powershell -NoProfile -Command "try { $ok=(Test-NetConnection -ComputerName 127.0.0.1 -Port 8794 -WarningAction SilentlyContinue -InformationLevel Quiet) } catch { $ok=$false }; Write-Host ('  UI 8794 : ' + $(if($ok){'ACTIVE'}else{'inactive'}))"
-python -m hl_observer.ops.superviseur_collecteurs status
+python -m hl_observer.ops.superviseur_collecteurs status core
 echo.
 goto :fin
 
@@ -619,9 +664,30 @@ goto :fin
 REM -------- COLLECTORS (absorbe REANIMER-COLLECTEURS ; reutilise la source unique) --------
 :cmd_collectors
 echo.
-echo   Reanimation des collecteurs ^(idempotent ; les lecteurs dedupliquent^)...
+echo   Reanimation du profil CORE ^(idempotent, sans doublon^)...
 call :demarrer_collecteurs
-echo   Collecteurs relances. Journaux : runtime\logs\. Le moteur n'a pas ete touche.
+echo   Profil CORE actif. Journaux : runtime\logs\. Le moteur n'a pas ete touche.
+echo.
+goto :fin
+
+:cmd_collectors_maintenance
+echo.
+python -m hl_observer.ops.superviseur_collecteurs demarrer-tous maintenance
+python -m hl_observer.ops.superviseur_collecteurs status maintenance
+echo.
+goto :fin
+
+:cmd_collectors_research
+echo.
+python -m hl_observer.ops.superviseur_collecteurs demarrer-tous research
+python -m hl_observer.ops.superviseur_collecteurs status research
+echo.
+goto :fin
+
+:cmd_collectors_all
+echo.
+python -m hl_observer.ops.superviseur_collecteurs demarrer-tous all
+python -m hl_observer.ops.superviseur_collecteurs status all
 echo.
 goto :fin
 
@@ -650,19 +716,11 @@ echo.
 pause
 goto :fin
 
-REM -------- REPLAY (absorbe RECHERCHE-SCENARIO-REPLAY) --------
+REM -------- REPLAY / BACKTESTS (outil separe du runtime principal) --------
 :cmd_replay
 echo.
-echo   [1/4] Rassemblement des donnees ^(candidats + prix, archives incluses^)...
-python -m hl_observer.runtime.replay_recorder --base runtime\replay
-echo   [2/4] Audit QUALITE des donnees...
-python tools\qualite_donnees_replay.py .
-echo   [3/4] Recherche module par module ^(Ctrl-C = pause sans perte, reprise auto^)...
-python -c "from hl_observer.backtesting.recherche_scenario import chercher_toutes; chercher_toutes('.')"
-echo   [4/4] Rapports : runtime\replay\RESULTATS_RECHERCHE.md ^| PEPITES.md ^| QUALITE_DONNEES.md
-echo.
-pause
-goto :fin
+call "%~dp0ANALYSER_BACKTESTS_REPLAYS.cmd" %2 %3 %4 %5 %6 %7 %8 %9
+exit /b %ERRORLEVEL%
 
 REM -------- MOISSON (absorbe LANCER-MOISSON-12H / MOISSONNER-GITHUB / RELIRE / VOIR / FERMER + workers) --------
 :cmd_moisson
@@ -711,7 +769,7 @@ if not exist "runtime\rapports\checkpoint_oos_shadow" mkdir "runtime\rapports\ch
 python tools\verif_checkpoint_oos_shadow.py >> "runtime\rapports\checkpoint_oos_shadow\verif.log" 2>&1
 goto :fin
 :oos_install
-schtasks /Create /SC MINUTE /MO 30 /TN "HyperSmart_VerifOOS" /TR "\"%~dp0LANCER_HYPERSMART.cmd\" verify-oos run" /F
+schtasks /Create /SC MINUTE /MO 30 /TN "HyperSmart_VerifOOS" /TR "wscript.exe \"%~dp0tools\run_verify_oos_silent.vbs\"" /F
 schtasks /Query /TN "HyperSmart_VerifOOS" /V /FO LIST 2>nul | findstr /I "TaskName Next Task_To_Run Scheduled"
 echo.
 pause

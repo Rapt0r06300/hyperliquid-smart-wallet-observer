@@ -22,6 +22,7 @@ import json
 import os
 import signal
 import sys
+import tempfile
 import threading
 import time
 from pathlib import Path
@@ -32,6 +33,7 @@ sys.path.insert(0, str(RACINE / "tools"))
 
 from hl_observer.research_parallel import isolation as ISO  # noqa: E402
 import config_18h as CFG  # noqa: E402
+import resource_policy as RES  # noqa: E402
 import securite_18h as SEC  # noqa: E402
 
 RUN_ROOT_REL = ISO.LAB_REL / "continuous"
@@ -41,10 +43,98 @@ CYCLE_PHASES = ("INGESTION", "NORMALISATION", "INDEXATION", "DISCOVERY", "FAST_S
 # état d'arrêt partagé (Ctrl+C). _ARRET = 1er signal (arrêt propre) ; _URGENCE = 2e signal (partiel).
 _ARRET = threading.Event()
 _URGENCE = threading.Event()
+_FINALISATION_DEMARREE = threading.Event()
+_FINALISATION_TERMINEE = threading.Event()
+_FINALISATION_LOCK = threading.Lock()
+_FINALISATION_ETAT: dict = {}
+_ATOMIC_LOCKS_GUARD = threading.Lock()
+_ATOMIC_LOCKS: dict[str, threading.Lock] = {}
+_SIGNAL_COUNT = 0
 
 
 def _run_root(root: Path) -> Path:
     return Path(root) / RUN_ROOT_REL
+
+
+def _finalisation_path(rundir: Path) -> Path:
+    return Path(rundir) / "results" / "FINALIZATION-STATE.json"
+
+
+def _publier_finalisation(
+    rundir: Path,
+    *,
+    etape: str,
+    fait: int,
+    total: int,
+    detail: str,
+    statut: str = "EN_COURS",
+    rapport: str | None = None,
+    traite: int | None = None,
+    traite_total: int | None = None,
+    unite: str = "éléments",
+) -> dict:
+    """Publie chaque étape de finalisation dans le terminal et sur disque.
+
+    Le rapport provisoire est créé avant les opérations longues. Même si un audit
+    ou le manifeste prend du temps, l'utilisateur voit donc l'étape, le
+    pourcentage et le chemin exact du rapport au lieu d'un écran figé.
+    """
+    maintenant = time.time()
+    with _FINALISATION_LOCK:
+        debut = float(_FINALISATION_ETAT.get("debut_wall") or maintenant)
+        fraction = (
+            min(1.0, max(0.0, float(traite) / float(traite_total)))
+            if traite is not None and traite_total
+            else 0.0
+        )
+        avance = min(float(total), max(0.0, float(fait) + fraction))
+        pct = round(100.0 * avance / max(1, int(total)), 1)
+        _FINALISATION_ETAT.update({
+            "statut": statut,
+            "etape": etape,
+            "detail": detail,
+            "fait": int(fait),
+            "total": int(total),
+            "pourcentage": pct,
+            "debut_wall": debut,
+            "maj_wall": maintenant,
+            "duree_s": round(maintenant - debut, 1),
+            "rapport": rapport or _FINALISATION_ETAT.get("rapport"),
+            "traite": traite,
+            "traite_total": traite_total,
+            "unite": unite,
+        })
+        etat = dict(_FINALISATION_ETAT)
+    try:
+        _ecrire_atomique(_finalisation_path(rundir), json.dumps(etat, ensure_ascii=False, indent=1))
+    except OSError:
+        pass
+    try:
+        import progres_live as PROG
+        PROG.publier(
+            int(fait),
+            int(total),
+            job="finalisation : %s" % etape,
+            ensuite=("rapport prêt" if fait >= total else "étape suivante de finalisation"),
+            detail=detail,
+            traite=traite,
+            traite_total=traite_total,
+            unite=unite,
+        )
+    except Exception:  # noqa: BLE001
+        pass
+    return etat
+
+
+def _lire_finalisation(rundir: Path) -> dict:
+    with _FINALISATION_LOCK:
+        etat = dict(_FINALISATION_ETAT)
+    if etat:
+        return etat
+    try:
+        return json.loads(_finalisation_path(rundir).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
 
 
 def _active_path(root: Path) -> Path:
@@ -105,10 +195,48 @@ def _code_sha() -> str:
 
 
 def _ecrire_atomique(p: Path, contenu: str) -> None:
+    """Écrit sans collision entre dashboard, moteur et finalisation.
+
+    L'ancien fichier ``<cible>.tmp`` était partagé par tous les threads. Sous
+    Windows, deux remplacements simultanés pouvaient produire ``WinError 5``.
+    Chaque écriture a désormais son temporaire unique, un verrou par cible et
+    un retry court si un antivirus/indexeur tient momentanément le fichier.
+    """
     p.parent.mkdir(parents=True, exist_ok=True)
-    tmp = p.with_suffix(p.suffix + ".tmp")
-    tmp.write_text(contenu, encoding="utf-8")
-    os.replace(tmp, p)
+    cle = str(p.resolve())
+    with _ATOMIC_LOCKS_GUARD:
+        verrou = _ATOMIC_LOCKS.setdefault(cle, threading.Lock())
+    with verrou:
+        tmp_path = None
+        try:
+            with tempfile.NamedTemporaryFile(
+                mode="w",
+                encoding="utf-8",
+                newline="",
+                prefix=".%s.%s.%s." % (p.name, os.getpid(), threading.get_ident()),
+                suffix=".tmp",
+                dir=p.parent,
+                delete=False,
+            ) as tmp:
+                tmp.write(contenu)
+                tmp.flush()
+                os.fsync(tmp.fileno())
+                tmp_path = Path(tmp.name)
+            derniere_erreur = None
+            for tentative in range(20):
+                try:
+                    os.replace(tmp_path, p)
+                    return
+                except PermissionError as exc:
+                    derniere_erreur = exc
+                    time.sleep(min(0.25, 0.01 * (1.45 ** tentative)))
+            raise derniere_erreur or PermissionError("remplacement atomique refusé")
+        finally:
+            if tmp_path is not None:
+                try:
+                    tmp_path.unlink(missing_ok=True)
+                except OSError:
+                    pass
 
 
 # ─────────────── curseurs (compat : détection grossière de nouveauté par taille) ───────────────
@@ -149,10 +277,20 @@ def _maj_curseurs_et_nouveaute(root: Path, rundir: Path) -> tuple[bool, dict]:
 def _scanner_nouveautes(root: Path, rundir: Path) -> dict:
     """N'extrait que les NOUVEAUX événements par source (offsets octet + rotation), pas tout l'historique."""
     import curseurs_continue as CUR
+    erreur = None
     try:
-        return CUR.scanner_nouveautes(root, rundir)
-    except Exception:  # noqa: BLE001 — un souci de curseur ne bloque pas le cycle (travail de fond)
-        return {"new_events": [], "par_source": {}, "n_new": 0, "sources_avec_nouveaute": 0}
+        r = CUR.scanner_nouveautes(root, rundir)
+    except Exception as e:  # noqa: BLE001 — un souci de curseur ne bloque pas le cycle (travail de fond)
+        erreur = str(e)[:200]
+        r = {"new_events": [], "par_source": {}, "n_new": 0, "sources_avec_nouveaute": 0}
+    # WIRING (IDEA-79) : une PANNE de collecte ne doit jamais ressembler a un marche calme. `ingestion`
+    # porte la sante (VERTE/ROUGE) et le droit de promouvoir ; l'incident est journalise. Defensif.
+    try:
+        import cablage_idees as CAB
+        r["ingestion"] = CAB.verdict_ingestion(rundir, n_nouveaux=r.get("n_new"), erreur=erreur)
+    except Exception:  # noqa: BLE001
+        r["ingestion"] = {"statut": "INCONNU", "sante": "INCONNUE", "promotion_autorisee": True}
+    return r
 
 
 # ─────────────── signatures déjà vues (jamais rejouer le même trial) (FINAL-5) ───────────────
@@ -197,6 +335,16 @@ def _maturer_live(rundir: Path, new_events: list) -> tuple[list, dict]:
     except Exception:  # noqa: BLE001
         return [], {"canonical": "INDISPONIBLE"}
     rundir = Path(rundir)
+    # WIRING (IDEA-1/2/4/9/10) : RAW -> CANONICAL (3 horloges, provenance, drapeaux qualité) puis dédup
+    # DURABLE (survit aux crashs). Les doublons sont journalisés, jamais jetés en silence. Défensif.
+    _norm = {"actif": False}
+    try:
+        import cablage_idees as CAB
+        _norm = CAB.normaliser_et_dedupliquer(rundir, new_events)
+        if _norm.get("actif"):
+            new_events = _norm["evenements"]
+    except Exception:  # noqa: BLE001
+        _norm = {"actif": False}
     buf = rundir / "canonical" / "marche.jsonl"
     buf.parent.mkdir(parents=True, exist_ok=True)
     with buf.open("a", encoding="utf-8") as f:               # buffer marché append-only (ticks futurs)
@@ -222,8 +370,13 @@ def _maturer_live(rundir: Path, new_events: list) -> tuple[list, dict]:
     mat = store.maturer(marche, maintenant_ms=maintenant)
     prets = store.consommer()
     _ecrire_atomique(rundir / "canonical" / "maturation.json",
-                     json.dumps({**mat, "consommes": len(prets), "compte": store.compte()}, ensure_ascii=False, indent=1))
-    return prets, {"muris": mat.get("maries"), "consommes": len(prets), "backlog": mat.get("backlog"), "compte": store.compte()}
+                     json.dumps({**mat, "consommes": len(prets), "compte": store.compte(),
+                                 "normalisation": {k: _norm.get(k) for k in
+                                                   ("actif", "n_entree", "n_canoniques", "n_doublons", "flags")}},
+                                ensure_ascii=False, indent=1))
+    return prets, {"muris": mat.get("maries"), "consommes": len(prets), "backlog": mat.get("backlog"),
+                   "compte": store.compte(),
+                   "n_doublons_ecartes": _norm.get("n_doublons"), "canonique": _norm.get("actif")}
 
 
 def _securite_run(root: Path, rundir: Path) -> bool:
@@ -263,6 +416,23 @@ def executer_cycle(root: Path, rundir: Path, *, cycle: int, code_sha: str,
                 PROG.publier(n, 7, job=job, ensuite=ensuite)
             except Exception:  # noqa: BLE001
                 pass
+    def _prog_pipeline(*, courant=0, total=None, detail="", unite="éléments"):
+        """Relie les boucles lourdes du pipeline au tableau de bord sans fabriquer de progression."""
+        if PROG is None:
+            return
+        try:
+            PROG.publier(
+                2,
+                7,
+                job="rejeu exact + validation (le gros du calcul)",
+                ensuite="portefeuille + jobs de fond",
+                detail=detail,
+                traite=int(courant or 0),
+                traite_total=int(total or 0),
+                unite=unite,
+            )
+        except Exception:  # noqa: BLE001
+            pass
     t0 = time.time()
     scan = _scanner_nouveautes(root, rundir)
     new_events = scan["new_events"]
@@ -303,7 +473,9 @@ def executer_cycle(root: Path, rundir: Path, *, cycle: int, code_sha: str,
             root, camp_dir, code_sha=code_sha, variantes=variantes, stop_event=stop_event,
             predicat=FAM.predicat, new_events=new_events, affected_windows=fen, hist_dir=rundir,
             securise=_securite_run(root, rundir), episodes_prets=prets,
-            portefeuille_global_dir=(rundir / "global_portfolio"))   # AF-P3 : UN portefeuille pour tout le run
+            portefeuille_global_dir=(rundir / "global_portfolio"),
+            progress_callback=_prog_pipeline,
+        )   # AF-P3 : UN portefeuille pour tout le run
     except Exception as e:  # noqa: BLE001 — un cycle qui échoue est journalisé, la boucle continue
         (rundir / "errors.csv").open("a", encoding="utf-8").write("%d,%s\n" % (cycle, str(e)[:160].replace(",", ";")))
         resume = {"erreur": str(e)[:160]}
@@ -312,6 +484,34 @@ def executer_cycle(root: Path, rundir: Path, *, cycle: int, code_sha: str,
     # Une variante interrompue reste RETRYABLE (non persistée -> régénérée au prochain cycle).
     n_term = int(resume.get("n_preregistres", 0 if interrompu else len(variantes)))
     _sauver_signatures(rundir, SCH.marquer_vues(deja, variantes, n_term))
+    if interrompu:
+        # Le premier Ctrl+C signifie « aucun nouveau travail ». Les anciennes
+        # versions lançaient encore champions, stress, optimisateurs et suivi
+        # live, ce qui pouvait retarder le rapport de plusieurs heures.
+        resume.update({
+            "campaign_id": camp_id,
+            "cycle": cycle,
+            "interrompu": True,
+            "nouvelles_donnees": bool(scan["n_new"]),
+            "n_new_events": scan["n_new"],
+            "n_variantes_nouvelles": len(variantes),
+            "affected_windows": fen,
+            "maturation": mat,
+            "jobs": {"ignores_apres_arret": True},
+            "duree_cycle_s": round(time.time() - t0, 2),
+        })
+        with (rundir / "LIVE-RESEARCH-EVENTS.jsonl").open("a", encoding="utf-8") as f:
+            f.write(json.dumps({
+                "ts_ms": int(time.time() * 1000),
+                "cycle": cycle,
+                "campaign_id": camp_id,
+                "type": "CYCLE_INTERRUPPU",
+                "n_new_events": scan["n_new"],
+                "n_variantes_terminees": n_term,
+            }, ensure_ascii=False) + "\n")
+        _checkpoint(rundir, max(0, cycle - 1), camp_id + "-INTERRUPTED")
+        _prog(7, "arrêt du calcul confirmé", "finalisation et rapport")
+        return resume
     _prog(3, "enregistrement des champions", "jobs de fond")
     _enregistrer_champions(camp_dir, rundir)               # candidats/statuts append-only (FINAL-11)
     _prog(4, "jobs de fond (stress/placebo/WF/LOCO/LORO)", "outils d'optimisation")
@@ -620,6 +820,19 @@ def _promouvoir_pass_live(rundir: Path) -> dict:
         if (strict_dir / "ledger.jsonl").exists():
             global_ok = bool(PG.PortefeuilleGlobal(strict_dir).reconcilier().get("coherent"))
         camps = sorted((Path(rundir) / "campagnes").glob("camp-*")) if (Path(rundir) / "campagnes").exists() else []
+        # WIRING (IDEA-11/36/80) : VERROU DE VÉRITÉ avant toute promotion. Ledger illisible, chaîne
+        # événement→PnL→dashboard incohérente, ou verdict adossé à des données SYNTHÉTIQUES => aucune
+        # promotion ce cycle. Défensif : si le contrôle est indisponible, on ne bloque pas le run.
+        verite = {"promotion_autorisee": True, "raisons": []}
+        try:
+            import cablage_idees as CAB
+            verite = CAB.controler_verite(rundir)
+        except Exception:  # noqa: BLE001
+            pass
+        if not verite.get("promotion_autorisee", True):
+            return {"n_promus": 0, "global_reconcilie": global_ok, "n_campagnes_revisitees": len(camps),
+                    "promotion_bloquee": True, "raisons_verite": verite.get("raisons", []),
+                    "detail_verite": verite}
         n_promus = 0
         for camp in camps:
             fpath = camp / "resultats" / "final_verdicts.json"
@@ -794,10 +1007,26 @@ def _donnees_live(root: Path, rundir: Path) -> dict:
         debit = round(len(ticks) / span, 1) if span > 0 else None
     if ticks and max(ticks) > 1e12:                          # epoch ms -> âge réel du dernier événement
         age_ev = round((time.time() * 1000.0 - max(ticks)) / 1000.0, 1)
-    return {"collecteurs": n_col, "debit": ("%s ev/s" % debit if debit is not None else "…"),
-            "age_dernier": ("%ss" % age_ev if age_ev is not None else "…"),
-            "etat": ("frais" if (hb_age is not None and hb_age < 120_000) else "en attente"),
-            "heartbeat_age_ms": hb_age}
+    collecteur_frais = bool(hb_age is not None and hb_age < 120_000)
+    evenement_frais = bool(age_ev is not None and 0 <= age_ev < 10.0)
+    if collecteur_frais and evenement_frais:
+        etat = "collecte active · événements frais"
+    elif collecteur_frais:
+        etat = "collecteur actif · dernier événement ancien"
+    elif evenement_frais:
+        etat = "événement frais · heartbeat collecteur absent"
+    else:
+        etat = "en attente de données fraîches"
+    return {
+        "collecteurs": n_col,
+        "debit": ("%s ev/s" % debit if debit is not None else "…"),
+        "age_dernier": ("%ss" % age_ev if age_ev is not None else "…"),
+        "age_dernier_s": age_ev,
+        "etat": etat,
+        "etat_collecteur": ("ACTIF" if collecteur_frais else "INACTIF_OU_INCONNU"),
+        "etat_evenements": ("FRAIS" if evenement_frais else "ANCIENS_OU_ABSENTS"),
+        "heartbeat_age_ms": hb_age,
+    }
 
 
 STALL_SECONDES = 60.0                                       # aucun compteur ne bouge > 60 s -> CALCUL LONG / TÂCHE BLOQUÉE
@@ -810,6 +1039,14 @@ def _sante_et_stall(root: Path, rundir: Path, etat: dict) -> dict:
     tot = etat.get("totaux", {})
     sig = [etat.get("cycles_termines"), tot.get("testees"), tot.get("forward_events"),
            tot.get("events_utilises"), tot.get("idees_trouvees")]
+    try:
+        import progres_live as PROG
+        pg = PROG.lire()
+        # La progression interne constitue une preuve d'activité réelle. Sans
+        # elle, un replay de 500k événements était faussement marqué « bloqué ».
+        sig.extend([pg.get("fait"), pg.get("detail"), pg.get("traite")])
+    except Exception:  # noqa: BLE001
+        pass
     p = Path(rundir) / ".stall.json"
     now = time.time()
     try:
@@ -857,6 +1094,17 @@ def _enrichir_etat_dashboard(root, rundir, etat, *, cycle, phase, tot, interessa
     etat["sante"] = _sh["sante"]
     etat["stall"] = _sh
     etat["donnees_live"] = _donnees_live(root, rundir)     # POINT 2 : débit / âge dernier événement / collecteurs RÉELS
+    # WIRING (IDEA-10/85) : les incidents RÉELLEMENT rencontres remontent au dashboard et au rapport ; un
+    # incident bloquant (PNL_UNTRUSTED / LEDGER_MISMATCH / DATA_MISSING) interdit la promotion. Défensif.
+    try:
+        import cablage_idees as CAB
+        inc = CAB.incidents(rundir)
+        etat["incidents"] = {k: inc.get(k) for k in ("n_incidents", "par_type", "n_bloquants",
+                                                     "promotion_interdite", "scenarios")}
+        if inc.get("promotion_interdite"):
+            etat["donnees_live"]["etat"] = "INCIDENT_BLOQUANT"
+    except Exception:  # noqa: BLE001
+        etat["incidents"] = {}
     # progression RÉELLE (FX-2) : position de la phase dans le cycle (l'état est réécrit à CHAQUE phase, donc ça
     # bouge), FUSIONNÉE avec la progression fine publiée par le moteur pendant un long calcul (progres_live).
     phases = list(CYCLE_PHASES)
@@ -877,12 +1125,34 @@ def _enrichir_etat_dashboard(root, rundir, etat, *, cycle, phase, tot, interessa
         "pourcentage": (pg.get("pourcentage") if a_fin else round(100.0 * idx / ntot, 1)),
         "vitesse": (pg.get("vitesse") if a_fin else vit_ph),
         "eta": (pg.get("eta") if a_fin else eta_ph),
+        "eta_source": pg.get("eta_source"), "eta_confiance_pct": pg.get("eta_confiance_pct"),
+        "eta_mode": pg.get("eta_mode"), "debit_projection": pg.get("debit_projection"),
+        "detail": pg.get("detail"), "traite": pg.get("traite"),
+        "sous_fait": pg.get("sous_fait"), "sous_total": pg.get("sous_total"),
+        "traite_total": pg.get("traite_total"), "unite": pg.get("unite"),
+        "debit_interne": pg.get("debit_interne"), "age_maj_s": pg.get("age_maj_s"),
+        "age_heartbeat_s": pg.get("age_heartbeat_s"),
+        "duree_progression_s": pg.get("duree_s"),
+        "statut_progression": pg.get("statut_progression"),
         "ensuite": (pg.get("ensuite") or "tester d'autres réglages")}
+    # Politique de ressources : toujours BelowNormal, jamais Idle et jamais de
+    # pause. Salad ne change que la concurrence, l'affinité et la taille des lots.
+    try:
+        politique = RES.effective_policy()
+    except Exception:  # noqa: BLE001
+        politique = {
+            "priority": "BELOW_NORMAL",
+            "never_idle": True,
+            "pause_workload": False,
+            "salad_active": False,
+        }
+    etat["resource_policy"] = politique
     # système (psutil si dispo)
     try:
         import psutil  # type: ignore
         etat["systeme"] = {"cpu": psutil.cpu_percent(interval=0.0), "ram": psutil.virtual_memory().percent,
-                           "disque": psutil.disk_usage(str(root)).percent, "workers": None,
+                           "disque": psutil.disk_usage(str(root)).percent,
+                           "workers": politique.get("max_workers"),
                            "collecteurs": None, "bloquees": 0, "redemarrages": None, "erreurs": None}
     except Exception:  # noqa: BLE001
         etat["systeme"] = {}
@@ -960,8 +1230,68 @@ def _dernier_checkpoint(rundir: Path):
 
 
 # ─────────────── boucle continue ───────────────
-def boucle_continue(root: Path, *, stop_event: threading.Event | None = None, max_cycles: int | None = None,
-                    intervalle_s: float = 2.0, afficher: bool = False) -> dict:
+def _journaliser_erreur_cycle(
+    rundir: Path,
+    *,
+    cycle: int,
+    phase: str,
+    erreur: BaseException,
+    reprise_dans_s: float,
+    erreurs_consecutives: int,
+) -> None:
+    """Journal append-only des erreurs récupérables de la boucle 24 h / 24."""
+    ligne = {
+        "ts": time.time(),
+        "iso": time.strftime("%Y-%m-%dT%H:%M:%S"),
+        "cycle": int(cycle),
+        "phase": str(phase),
+        "type": type(erreur).__name__,
+        "erreur": str(erreur)[:500],
+        "reprise_dans_s": round(float(reprise_dans_s), 2),
+        "erreurs_consecutives": int(erreurs_consecutives),
+    }
+    try:
+        chemin = Path(rundir) / "results" / "RUN-ERRORS.jsonl"
+        chemin.parent.mkdir(parents=True, exist_ok=True)
+        with chemin.open("a", encoding="utf-8") as handle:
+            handle.write(json.dumps(ligne, ensure_ascii=False) + "\n")
+            handle.flush()
+            os.fsync(handle.fileno())
+    except OSError:
+        pass
+    try:
+        import progres_live as PROG
+        PROG.publier(
+            0,
+            1,
+            job="récupération automatique",
+            ensuite="reprendre le même cycle",
+            detail="%s en %s · reprise dans %.1fs" % (
+                type(erreur).__name__,
+                phase,
+                reprise_dans_s,
+            ),
+            traite=0,
+            traite_total=1,
+            unite="tentative",
+        )
+        PROG.journaliser(
+            "Erreur récupérée en %s : %s" % (phase, str(erreur)[:160]),
+            niveau="ERREUR",
+        )
+    except Exception:  # noqa: BLE001
+        pass
+
+
+def boucle_continue(
+    root: Path,
+    *,
+    stop_event: threading.Event | None = None,
+    max_cycles: int | None = None,
+    intervalle_s: float = 2.0,
+    recovery_backoff_s: float = 2.0,
+    afficher: bool = False,
+) -> dict:
     """Boucle SANS limite de durée. Un cycle par itération jusqu'à l'arrêt (Ctrl+C -> _ARRET, ou stop_event,
     ou max_cycles pour les tests). Écrit l'état à chaque phase. Foreground (le CMD ne détache PAS le moteur) :
     si `afficher`, imprime le dashboard à chaque fin de cycle dans CE terminal."""
@@ -972,19 +1302,60 @@ def boucle_continue(root: Path, *, stop_event: threading.Event | None = None, ma
         return {"boucle": "AUCUN_RUN_ACTIF"}
     rundir = Path(ident["rundir"])
     cycle = int(ident.get("cycle_courant", 0)) + 1
+    erreurs_consecutives = 0
     while not stop_event.is_set():
         if _stop_request_present(root):              # IPC `stop` -> arrêt propre traité par CETTE boucle
             print("\n=== STOP_REQUEST détecté (stop <run_id>) — finalisation propre par la boucle ===", flush=True)
             stop_event.set()
             break
         cycle_t0 = time.time()
-        for phase in CYCLE_PHASES:
-            if stop_event.is_set() or _stop_request_present(root):
-                stop_event.set()
+        phase = "DEMARRAGE"
+        try:
+            for phase in CYCLE_PHASES:
+                if stop_event.is_set() or _stop_request_present(root):
+                    stop_event.set()
+                    break
+                construire_etat(
+                    root,
+                    rundir,
+                    ident,
+                    cycle=cycle,
+                    phase=phase,
+                    tache_t0=time.time(),
+                    cycle_t0=cycle_t0,
+                )
+                if phase == "DISCOVERY":             # le gros du travail se fait dans le cycle pipeline
+                    executer_cycle(
+                        root,
+                        rundir,
+                        cycle=cycle,
+                        code_sha=ident.get("code_sha", "?"),
+                        stop_event=stop_event,
+                    )
+                    if stop_event.is_set():
+                        break
+        except Exception as exc:  # noqa: BLE001 — le run 24/7 reprend, l'erreur reste tracée
+            erreurs_consecutives += 1
+            reprise_dans_s = min(
+                60.0,
+                max(0.05, float(recovery_backoff_s)) * (2 ** min(erreurs_consecutives - 1, 5)),
+            )
+            _journaliser_erreur_cycle(
+                rundir,
+                cycle=cycle,
+                phase=phase,
+                erreur=exc,
+                reprise_dans_s=reprise_dans_s,
+                erreurs_consecutives=erreurs_consecutives,
+            )
+            if stop_event.wait(reprise_dans_s):
                 break
-            construire_etat(root, rundir, ident, cycle=cycle, phase=phase, tache_t0=time.time(), cycle_t0=cycle_t0)
-            if phase == "DISCOVERY":                 # le gros du travail se fait dans le cycle pipeline
-                executer_cycle(root, rundir, cycle=cycle, code_sha=ident.get("code_sha", "?"), stop_event=stop_event)
+            continue
+        if stop_event.is_set():
+            # Ne marque pas un cycle partiel comme terminé. La finalisation
+            # reconstruit le rapport depuis les artefacts effectivement écrits.
+            break
+        erreurs_consecutives = 0
         ident["cycle_courant"] = cycle
         _ecrire_atomique(_active_path(root), json.dumps(ident, ensure_ascii=False, indent=1))
         etat = construire_etat(root, rundir, ident, cycle=cycle, phase="ANALYSE", tache_t0=cycle_t0, cycle_t0=cycle_t0)
@@ -1018,11 +1389,13 @@ def _dependances_optionnelles() -> dict:
 
 def dry_run(root: Path) -> dict:
     root = Path(root)
+    resource_policy = RES.apply_environment_caps()
     sec = SEC.auditer(root)
     dok, dmsg = CFG.disque_ok(str(root))
     return {"commande": "dry-run", "PASS": bool(sec["securise"] and dok),
             "securite": {"securise": sec["securise"], "fichiers": sec["fichiers_scannes"]},
             "disque": {"ok": dok, "detail": dmsg}, "ressources": CFG.limites(str(root)),
+            "politique_processus": resource_policy,
             "outils_optionnels": _dependances_optionnelles(),
             "mode": "CONTINU (sans limite de duree ; Ctrl+C = finalisation)",
             "securite_ligne": "0 ordre reel · 0 argent reel · 0 cle privee · 0 signature · 0 depot/retrait"}
@@ -1227,6 +1600,94 @@ def _maj_index_rapports(dossier_rapports: Path, ident: dict, rapport: Path, etat
         f.write(ligne)
 
 
+def _lire_json_finalisation(path: Path, default):
+    try:
+        return json.loads(Path(path).read_text(encoding="utf-8"))
+    except (OSError, ValueError, TypeError):
+        return default
+
+
+def _capturer_contexte_arret(
+    rundir: Path,
+    ident: dict,
+    *,
+    raison: str,
+    partial: bool,
+    final_state: dict | None = None,
+) -> Path:
+    """Capture l'état exact du run avant les opérations de finalisation.
+
+    Le fichier est mis à jour à la fin avec le résultat de l'audit, mais la
+    première photographie (phase, compteurs, ETA) reste immuable sous
+    ``initial_capture``. Un rapport interrompu au milieu d'un cycle conserve
+    ainsi les chiffres effectivement observés au signal.
+    """
+    rundir = Path(rundir)
+    path = rundir / "results" / "FINAL-INTERRUPTION-CONTEXT.json"
+    precedent = _lire_json_finalisation(path, {})
+    live = _lire_json_finalisation(rundir / "LIVE-RESEARCH-STATE.json", {})
+    campaigns = sorted(
+        (rundir / "campagnes").glob("camp-*"),
+        key=lambda item: item.name,
+    ) if (rundir / "campagnes").exists() else []
+    current_campaign = campaigns[-1] if campaigns else None
+    campaign = (
+        _lire_json_finalisation(current_campaign / "campaign.json", {})
+        if current_campaign is not None
+        else {}
+    )
+    scheduler = (
+        _lire_json_finalisation(current_campaign / "scheduler_state.json", {})
+        if current_campaign is not None
+        else {}
+    )
+    try:
+        import progres_live as PROG
+        progress = PROG.lire()
+    except Exception as exc:  # noqa: BLE001
+        progress = {"unavailable": "%s: %s" % (type(exc).__name__, str(exc)[:200])}
+    now = time.time()
+    initial = precedent.get("initial_capture")
+    if not isinstance(initial, dict):
+        initial = {
+            "captured_at_epoch": now,
+            "captured_at": time.strftime("%Y-%m-%d %H:%M:%S"),
+            "live_state": live,
+            "progress": progress,
+            "campaign": campaign,
+            "scheduler": scheduler,
+        }
+    context = {
+        "schema_version": 1,
+        "run_id": ident.get("run_id"),
+        "reason": raison,
+        "partial_requested": bool(partial),
+        "emergency": bool(_URGENCE.is_set()),
+        "signal_count": int(_SIGNAL_COUNT),
+        "cycle": (
+            live.get("cycle")
+            or live.get("cycle_courant")
+            or ident.get("cycle_courant")
+        ),
+        "phase": live.get("phase") or live.get("etat_phase"),
+        "current_campaign_id": (
+            campaign.get("campaign_id")
+            or (current_campaign.name if current_campaign is not None else None)
+        ),
+        "captured_at_epoch": now,
+        "captured_at": time.strftime("%Y-%m-%d %H:%M:%S"),
+        "progress": initial.get("progress") or progress,
+        "initial_capture": initial,
+        "latest_live_state": live,
+        "latest_progress": progress,
+        "final_state": final_state or precedent.get("final_state"),
+        "read_only": ident.get("read_only"),
+        "real_execution": ident.get("real_execution"),
+    }
+    _ecrire_atomique(path, json.dumps(context, ensure_ascii=False, indent=2, default=str))
+    return path
+
+
 # ─────────────── finalisation (ordre STRICT) ───────────────
 def finaliser(root: Path, *, partial: bool = False, raison: str = "ctrl-c") -> dict:
     """Ordre : 1) stop travaux (déjà via _ARRET) ; 2) checkpoint ; 3) (workers déjà arrêtés) ; 4) valorisation
@@ -1239,69 +1700,326 @@ def finaliser(root: Path, *, partial: bool = False, raison: str = "ctrl-c") -> d
         return {"finalisation": "AUCUN_RUN_ACTIF"}
     rundir = Path(ident["rundir"])
     _ARRET.set()
-    partial = partial or _URGENCE.is_set()                   # 2e Ctrl+C déjà arrivé -> partiel d'emblée
-    _checkpoint(rundir, int(ident.get("cycle_courant", 0)), "FINALIZE")
-    rec = _reconcilier(rundir)                                # réconciliation PnL/ROI/equity/DD AVANT le rapport
-    partial = partial or _URGENCE.is_set()                   # 2e Ctrl+C RELU pendant la finalisation (PT-8)
-    incoherent = (rec.get("coherent") is False)              # FX-7 : ledger ≠ snapshot -> JAMAIS COMPLETE
-    if incoherent:
+    partial = partial or _URGENCE.is_set()
+    erreurs = []
+    total_etapes = 7
+    with _FINALISATION_LOCK:
+        _FINALISATION_ETAT.clear()
+        _FINALISATION_ETAT["debut_wall"] = time.time()
+    try:
+        contexte_arret = _capturer_contexte_arret(
+            rundir,
+            ident,
+            raison=raison,
+            partial=partial,
+        )
+    except Exception as exc:  # noqa: BLE001
+        contexte_arret = rundir / "results" / "FINAL-INTERRUPTION-CONTEXT.json"
+        erreurs.append("contexte_arret:%s" % str(exc)[:160])
         partial = True
-    etat = "FINALIZATION_PARTIAL" if partial else "FINALIZATION_COMPLETE"
+
     date_fin = time.strftime("%Y%m%d-%H%M%S")
-    # dossier racine dédié + SOUS-DOSSIER par run_id (FINAL-17)
     dossier_rapports = root / "Rapports en continu" / ident["run_id"]
     dossier_rapports.mkdir(parents=True, exist_ok=True)
     rapport = dossier_rapports / ("RAPPORT-RECHERCHE-CONTINUE_%s_%s.md" % (ident["run_id"], date_fin))
+    rapport_run = rundir / rapport.name
+    rapport_provisoire = (
+        "# RAPPORT-RECHERCHE-CONTINUE — FINALISATION EN COURS\n\n"
+        "Le premier Ctrl+C a été reçu. Les nouveaux calculs sont arrêtés et les artefacts déjà produits "
+        "sont en cours de réconciliation.\n\n"
+        "- run_id : `%s`\n- démarrage de la finalisation : `%s`\n- raison : `%s`\n\n"
+        "- contexte d'arrêt : `%s`\n\n"
+        "Sécurité : 0 ordre réel · 0 argent réel · 0 clé privée · 0 signature · 0 dépôt/retrait.\n"
+        % (
+            ident["run_id"],
+            time.strftime("%Y-%m-%d %H:%M:%S"),
+            raison,
+            contexte_arret,
+        )
+    )
+    # Garantie forte : un rapport lisible existe AVANT checkpoint, audit et SHA.
+    _ecrire_atomique(rapport, rapport_provisoire)
+    _ecrire_atomique(rapport_run, rapport_provisoire)
+    _publier_finalisation(
+        rundir,
+        etape="sauvegarde immédiate",
+        fait=0,
+        total=total_etapes,
+        detail="rapport provisoire créé; plus aucun nouveau trial",
+        rapport=str(rapport),
+    )
+
+    try:
+        _checkpoint(rundir, int(ident.get("cycle_courant", 0)), "FINALIZE")
+    except Exception as e:  # noqa: BLE001
+        erreurs.append("checkpoint:%s" % str(e)[:160])
+        partial = True
+    _publier_finalisation(
+        rundir,
+        etape="checkpoint",
+        fait=1,
+        total=total_etapes,
+        detail="état, curseurs et artefacts déjà calculés sauvegardés",
+        rapport=str(rapport),
+    )
+
+    try:
+        rec = _reconcilier(rundir)
+    except Exception as e:  # noqa: BLE001
+        erreurs.append("reconciliation:%s" % str(e)[:160])
+        partial = True
+        rec = {"coherent": False, "n_pass": 0, "erreur": str(e)[:160]}
+    partial = partial or _URGENCE.is_set()
+    if rec.get("coherent") is False:
+        partial = True
+    _publier_finalisation(
+        rundir,
+        etape="réconciliation",
+        fait=2,
+        total=total_etapes,
+        detail="PnL/ROI/equity reconstruits depuis les ledgers",
+        rapport=str(rapport),
+    )
+
+    etat = "FINALIZATION_PARTIAL" if partial else "FINALIZATION_COMPLETE"
     try:
         md, exclusions = RAP.construire(rundir, ident, final=True, partial=partial, retourner_exclusions=True)
-        if exclusions:
-            etat = "FINALIZATION_COMPLETE_WITH_EXCLUSIONS" if not partial else etat
-    except Exception as e:  # noqa: BLE001 — une erreur de rapport n'est pas masquée
-        md = "# RAPPORT-RECHERCHE-CONTINUE (%s)\n\nErreur rapport : %s\nSécurité : 0 ordre réel.\n" % (etat, str(e)[:160])
-        etat = "FINALIZATION_PARTIAL" if not partial else "FINALIZATION_FAILED"
-    _ecrire_atomique(rapport, md)
-    _ecrire_atomique(rundir / rapport.name, md)
-    if _URGENCE.is_set() and not partial:                    # 2e Ctrl+C arrivé PENDANT la construction du rapport
+        if exclusions and not partial:
+            etat = "FINALIZATION_COMPLETE_WITH_EXCLUSIONS"
+    except Exception as e:  # noqa: BLE001
+        erreurs.append("rapport:%s" % str(e)[:160])
         partial = True
         etat = "FINALIZATION_PARTIAL"
-    _maj_index_rapports(root / "Rapports en continu", ident, rapport, etat, rec)  # INDEX-RAPPORTS.md
-    sec = SEC.auditer(root)
-    if not sec["securise"]:
+        md = (
+            "# RAPPORT-RECHERCHE-CONTINUE (%s)\n\n"
+            "Le rapport détaillé a rencontré une erreur, mais le checkpoint et la réconciliation ont été conservés.\n\n"
+            "Erreur : `%s`\n\nSécurité : 0 ordre réel · 0 argent réel · 0 clé privée · 0 signature · 0 dépôt/retrait.\n"
+            % (etat, str(e)[:160])
+        )
+    _ecrire_atomique(rapport, md)
+    _ecrire_atomique(rapport_run, md)
+    _publier_finalisation(
+        rundir,
+        etape="rapport détaillé",
+        fait=3,
+        total=total_etapes,
+        detail="rapport Markdown écrit : %s" % rapport,
+        rapport=str(rapport),
+    )
+
+    if _URGENCE.is_set():
+        partial = True
+        etat = "FINALIZATION_PARTIAL"
+
+    try:
+        sec = SEC.auditer(root)
+    except Exception as e:  # noqa: BLE001
+        erreurs.append("audit_securite:%s" % str(e)[:160])
+        sec = {"securise": False, "erreur": str(e)[:160]}
+    if not sec.get("securise"):
         etat = "FINALIZATION_FAILED"
-    # manifeste SHA-256 EN DERNIER (inclut le rapport + tous les results)
+    try:
+        _ecrire_atomique(
+            rundir / "results" / "FINAL-SAFETY-AUDIT.json",
+            json.dumps(sec, ensure_ascii=False, indent=2, default=str),
+        )
+    except Exception as exc:  # noqa: BLE001
+        erreurs.append("audit_securite_ecriture:%s" % str(exc)[:160])
+        partial = True
+    try:
+        _capturer_contexte_arret(
+            rundir,
+            ident,
+            raison=raison,
+            partial=partial,
+            final_state={
+                "stage": "SAFETY_AUDIT_COMPLETE",
+                "status": etat,
+                "security_ok": bool(sec.get("securise")),
+                "reconciliation": rec,
+                "errors": list(erreurs),
+            },
+        )
+    except Exception as exc:  # noqa: BLE001
+        erreurs.append("contexte_arret_final:%s" % str(exc)[:160])
+        partial = True
+    if partial and etat != "FINALIZATION_FAILED":
+        etat = "FINALIZATION_PARTIAL"
+    # Le premier rapport garantit une sortie immédiate. Cette seconde passe,
+    # encore avant le manifeste, ajoute le résultat sécurité et l'état exact
+    # de l'arrêt sans invalider ensuite son empreinte SHA-256.
+    try:
+        md_final, exclusions_finales = RAP.construire(
+            rundir,
+            ident,
+            final=True,
+            partial=partial,
+            retourner_exclusions=True,
+        )
+        if exclusions_finales and etat == "FINALIZATION_COMPLETE":
+            etat = "FINALIZATION_COMPLETE_WITH_EXCLUSIONS"
+        _ecrire_atomique(rapport, md_final)
+        _ecrire_atomique(rapport_run, md_final)
+    except Exception as exc:  # noqa: BLE001
+        erreurs.append("rapport_post_audit:%s" % str(exc)[:160])
+        partial = True
+        if etat != "FINALIZATION_FAILED":
+            etat = "FINALIZATION_PARTIAL"
+    _publier_finalisation(
+        rundir,
+        etape="audit sécurité",
+        fait=4,
+        total=total_etapes,
+        detail=("audit lecture seule validé" if sec.get("securise") else "audit en échec; voir le rapport"),
+        rapport=str(rapport),
+    )
+    try:
+        _maj_index_rapports(root / "Rapports en continu", ident, rapport, etat, rec)
+    except Exception as e:  # noqa: BLE001
+        erreurs.append("index:%s" % str(e)[:160])
+        partial = True
+        if etat != "FINALIZATION_FAILED":
+            etat = "FINALIZATION_PARTIAL"
+    _publier_finalisation(
+        rundir,
+        etape="rapport audité et index",
+        fait=5,
+        total=total_etapes,
+        detail="rapport enrichi par l'audit final et référencé dans l'index",
+        rapport=str(rapport),
+    )
+
     manifeste = {}
-    for f in sorted(rundir.rglob("*")):
-        if f.is_file() and f.name != "SHA256_MANIFEST_FINAL.json":
-            manifeste[str(f.relative_to(rundir))] = _sha(f)
-    manifeste["__RAPPORT__/" + rapport.name] = _sha(rapport)
-    _ecrire_atomique(rundir / "manifeste" / "SHA256_MANIFEST_FINAL.json",
-                     json.dumps({"etat": etat, "securise": sec["securise"], "contient_rapport": True,
-                                 "code_sha": _code_sha(), "fichiers": manifeste}, ensure_ascii=False, indent=1))
+    manifeste_path = rundir / "manifeste" / "SHA256_MANIFEST_FINAL.json"
+    fichiers = [
+        f for f in sorted(rundir.rglob("*"))
+        if f.is_file() and f.name not in ("SHA256_MANIFEST_FINAL.json", "FINALIZATION-STATE.json")
+    ]
+    total_octets = sum((f.stat().st_size if f.exists() else 0) for f in fichiers) + rapport.stat().st_size
+    octets_faits = 0
+    try:
+        for i, f in enumerate(fichiers):
+            if _URGENCE.is_set():
+                partial = True
+                etat = "FINALIZATION_PARTIAL"
+                erreurs.append("manifeste:interrompu_par_2e_ctrl_c")
+                break
+            taille = f.stat().st_size
+
+            def _hash_progress(local_faits, local_total, *, _f=f, _i=i, _base=octets_faits):
+                _publier_finalisation(
+                    rundir,
+                    etape="empreintes SHA-256",
+                    fait=6,
+                    total=total_etapes,
+                    detail="%d/%d : %s" % (_i + 1, len(fichiers) + 1, _f.name),
+                    rapport=str(rapport),
+                    traite=_base + local_faits,
+                    traite_total=total_octets,
+                    unite="octets",
+                )
+
+            manifeste[str(f.relative_to(rundir))] = _sha(f, progress_callback=_hash_progress)
+            octets_faits += taille
+        if not _URGENCE.is_set():
+            manifeste["__RAPPORT__/" + rapport.name] = _sha(
+                rapport,
+                progress_callback=lambda faits, total: _publier_finalisation(
+                    rundir,
+                    etape="empreintes SHA-256",
+                    fait=6,
+                    total=total_etapes,
+                    detail="rapport final",
+                    rapport=str(rapport),
+                    traite=octets_faits + faits,
+                    traite_total=total_octets,
+                    unite="octets",
+                ),
+            )
+        # WIRING (IDEA-78) : provenance de campagne (Git HEAD, arbre sale, Python, config eco) jointe au
+        # manifeste — un resultat produit sur un arbre sale doit le DIRE. Defensif.
+        _prov = {}
+        try:
+            import cablage_idees as CAB
+            _prov = CAB.manifeste(RACINE, rundir, config_economique={"seuils": __import__("validation_18h").SEUILS})
+        except Exception:  # noqa: BLE001
+            _prov = {}
+        _ecrire_atomique(
+            manifeste_path,
+            json.dumps({
+                "etat": etat,
+                "securise": bool(sec.get("securise")),
+                "contient_rapport": True,
+                "code_sha": _code_sha(),
+                "provenance": _prov,
+                "fichiers": manifeste,
+                "erreurs": erreurs,
+            }, ensure_ascii=False, indent=1),
+        )
+    except Exception as e:  # noqa: BLE001
+        erreurs.append("manifeste:%s" % str(e)[:160])
+        partial = True
+        etat = "FINALIZATION_PARTIAL" if sec.get("securise") else "FINALIZATION_FAILED"
+    _publier_finalisation(
+        rundir,
+        etape="manifeste d'intégrité",
+        fait=6,
+        total=total_etapes,
+        detail="%d fichier(s) empreintés" % len(manifeste),
+        statut=("PARTIEL" if partial else "EN_COURS"),
+        rapport=str(rapport),
+    )
+
     coherent = etat in ("FINALIZATION_COMPLETE", "FINALIZATION_COMPLETE_WITH_EXCLUSIONS")
     if coherent:
         try:
             _active_path(root).unlink()
         except OSError:
             pass
-    _effacer_stop_request(root)                              # l'IPC est consommé, on nettoie
+    _effacer_stop_request(root)
+    _publier_finalisation(
+        rundir,
+        etape="terminé",
+        fait=7,
+        total=total_etapes,
+        detail=("rapport complet prêt" if coherent else "rapport partiel prêt; aucune donnée supprimée"),
+        statut=etat,
+        rapport=str(rapport),
+    )
     resume = statut(root)
-    return {"finalisation": etat, "rapport": str(rapport), "dossier_rapport": str(dossier_rapports),
-            "manifeste": str(rundir / "manifeste" / "SHA256_MANIFEST_FINAL.json"),
-            "securise": sec["securise"], "raison": raison, "reconciliation": rec,
-            "resume": resume.get("totaux", {})}
+    return {
+        "finalisation": etat,
+        "rapport": str(rapport),
+        "dossier_rapport": str(dossier_rapports),
+        "manifeste": str(manifeste_path),
+        "securise": bool(sec.get("securise")),
+        "raison": raison,
+        "reconciliation": rec,
+        "erreurs": erreurs,
+        "resume": resume.get("totaux", {}),
+    }
 
 
-def _sha(p: Path) -> str:
+def _sha(p: Path, *, progress_callback=None) -> str:
     h = hashlib.sha256()
+    total = p.stat().st_size
+    fait = 0
+    prochain_signal = 0
     with p.open("rb") as f:
         for b in iter(lambda: f.read(1 << 20), b""):
             h.update(b)
+            fait += len(b)
+            if progress_callback is not None and (fait >= prochain_signal or fait >= total):
+                progress_callback(fait, total)
+                prochain_signal = fait + (32 << 20)
     return h.hexdigest()
 
 
 # ─────────────── Ctrl+C = finalisation ───────────────
 def _installer_signal(root: Path):
     def handler(signum, frame):  # noqa: ARG001
+        global _SIGNAL_COUNT
+        _SIGNAL_COUNT += 1
         if not _ARRET.is_set():
             print("\n=== ARRÊT PROPRE DEMANDÉ (Ctrl+C) — plus de nouveaux trials, finalisation en cours… ===", flush=True)
             _ARRET.set()
@@ -1325,32 +2043,169 @@ def _demarrer_ipc_stop_thread(root: Path, *, intervalle_s: float = 0.5) -> threa
     return t
 
 
-def _demarrer_dashboard_thread(root: Path, ident: dict, *, intervalle_s: float = 0.4) -> threading.Thread:
-    """Dashboard VRAIMENT vivant (FINAL-13 + FX-2). Rich Live + Layout + Progress à ~3 rafraîchissements/s (repli
-    texte si Rich absent), MÊME pendant un long calcul. Fusionne la progression fine publiée par le moteur
-    (progres_live). La touche S appelle la VRAIE fonction snapshot et AFFICHE le chemin du fichier créé (pas une
-    simple vue nommée « snapshot »). Nav 1-7 sans intercepter Ctrl+C."""
+def _demarrer_dashboard_thread(root: Path, ident: dict, *, intervalle_s: float = 1.0) -> threading.Thread:
+    """Console de supervision indépendante du calcul principal.
+
+    Le rendu est rafraîchi une fois par seconde, son heartbeat est persisté
+    chaque seconde et toute erreur d'affichage est journalisée. Une erreur Rich
+    redémarre uniquement l'interface : elle ne stoppe jamais le moteur de
+    recherche. Ctrl+C reste géré par le processus principal.
+    """
+    if intervalle_s == 1.0:
+        try:
+            intervalle_s = max(
+                0.5,
+                min(2.0, int(os.environ.get("HYPERSMART_DASHBOARD_REFRESH_MS", "1000")) / 1000.0),
+            )
+        except (TypeError, ValueError):
+            intervalle_s = 1.0
     rundir = Path(ident["rundir"])
     debut = ident.get("t0_wall_ms", time.time() * 1000) / 1000.0
-    etat_ui = {"vue": "compact", "snapshot_msg": None}      # PF-6 : vue COMPACTE par défaut (détails via 1-7)
+    heartbeat_path = rundir / "DASHBOARD-HEARTBEAT.json"
+    erreurs_path = rundir / "results" / "DASHBOARD-UI-ERRORS.log"
+    etat_ui = {
+        "vue": "compact",
+        "snapshot_msg": None,
+        "tick": 0,
+        "images": 0,
+        "erreurs": 0,
+        "redemarrages_rich": 0,
+        "dernier_heartbeat": 0.0,
+        "derniere_erreur": None,
+        "derniere_erreur_ts": 0.0,
+        "dernier_etat_moteur": None,
+    }
+    arret_vu_a = {"monotonic": None}
+
+    def _noter_erreur(etape: str, erreur: BaseException) -> None:
+        """Conserve l'erreur sans inonder le disque si elle se répète."""
+        message = "%s: %s" % (etape, str(erreur)[:300])
+        now = time.time()
+        if (
+            etat_ui.get("derniere_erreur") == message
+            and now - float(etat_ui.get("derniere_erreur_ts") or 0.0) < 5.0
+        ):
+            return
+        etat_ui["erreurs"] = int(etat_ui.get("erreurs") or 0) + 1
+        etat_ui["derniere_erreur"] = message
+        etat_ui["derniere_erreur_ts"] = now
+        try:
+            erreurs_path.parent.mkdir(parents=True, exist_ok=True)
+            with erreurs_path.open("a", encoding="utf-8") as handle:
+                handle.write("%s\t%s\n" % (
+                    time.strftime("%Y-%m-%dT%H:%M:%S", time.localtime(now)),
+                    message,
+                ))
+        except OSError:
+            pass
+
+    def _doit_continuer() -> bool:
+        """Garde l'affichage pendant la finalisation réelle, puis le ferme."""
+        if _FINALISATION_TERMINEE.is_set():
+            return False
+        if not _ARRET.is_set():
+            arret_vu_a["monotonic"] = None
+            return True
+        if _FINALISATION_DEMARREE.is_set():
+            return True
+        if arret_vu_a["monotonic"] is None:
+            arret_vu_a["monotonic"] = time.monotonic()
+        # Couvre la transition très courte entre Ctrl+C et le bloc finally.
+        return (time.monotonic() - arret_vu_a["monotonic"]) < 0.75
 
     def _etat():
-        etat = json.loads((rundir / "LIVE-RESEARCH-STATE.json").read_text(encoding="utf-8"))
+        now = time.time()
+        etat_ui["tick"] = int(etat_ui.get("tick") or 0) + 1
+        try:
+            etat = json.loads((rundir / "LIVE-RESEARCH-STATE.json").read_text(encoding="utf-8"))
+        except (OSError, ValueError) as exc:
+            etat = {
+                "run_id": ident.get("run_id"),
+                "etat": "DEMARRAGE",
+                "sante": "initialisation du moteur",
+                "totaux": {},
+                "donnees_live": {},
+            }
+            if (rundir / "LIVE-RESEARCH-STATE.json").exists():
+                _noter_erreur("lecture état live", exc)
         ecoule = time.time() - debut                        # horloge RÉELLE recalculée à chaque rafraîchi
         etat["duree"] = {"jours": int(ecoule // 86400), "heures": int(ecoule % 86400 // 3600),
                          "minutes": int(ecoule % 3600 // 60), "secondes": int(ecoule % 60)}
+        pg = {}
         try:                                                # fusion progression FINE live (même process)
             import progres_live as PROG
             pg = PROG.lire()
             if pg.get("total"):
                 cj = dict(etat.get("ce_que_je_fais") or {})
                 cj.update(fait=pg["fait"], total=pg["total"], pourcentage=pg["pourcentage"],
-                          vitesse=pg["vitesse"], eta=pg["eta"], je_fais=(pg.get("job") or cj.get("je_fais")))
+                          vitesse=pg["vitesse"], eta=pg["eta"], je_fais=(pg.get("job") or cj.get("je_fais")),
+                          eta_source=pg.get("eta_source"),
+                          eta_confiance_pct=pg.get("eta_confiance_pct"),
+                          eta_mode=pg.get("eta_mode"),
+                          debit_projection=pg.get("debit_projection"),
+                          detail=pg.get("detail"), traite=pg.get("traite"),
+                          sous_fait=pg.get("sous_fait"), sous_total=pg.get("sous_total"),
+                          traite_total=pg.get("traite_total"), unite=pg.get("unite"),
+                          debit_interne=pg.get("debit_interne"), age_maj_s=pg.get("age_maj_s"),
+                          age_heartbeat_s=pg.get("age_heartbeat_s"),
+                          statut_progression=pg.get("statut_progression"),
+                          duree_progression_s=pg.get("duree_s"),
+                          ensuite=(pg.get("ensuite") or cj.get("ensuite")))
                 etat["ce_que_je_fais"] = cj
-        except Exception:  # noqa: BLE001
-            pass
+        except Exception as exc:  # noqa: BLE001
+            _noter_erreur("lecture progression", exc)
+        fin = _lire_finalisation(rundir)
+        if fin and (_ARRET.is_set() or fin.get("statut") not in (None, "")):
+            etat["finalisation"] = fin
+            etat["sante"] = "finalisation : %s" % (fin.get("statut") or "EN_COURS")
+            etat["etat"] = "FINALISATION"
         if etat_ui["snapshot_msg"]:
             etat["dernier_checkpoint"] = etat_ui["snapshot_msg"]
+
+        etat_moteur = pg.get("statut_progression") or (
+            "FINALISATION" if _FINALISATION_DEMARREE.is_set() else "DÉMARRAGE"
+        )
+        if etat_ui.get("dernier_etat_moteur") != etat_moteur:
+            etat_ui["dernier_etat_moteur"] = etat_moteur
+            try:
+                import progres_live as PROG
+                PROG.journaliser("État moteur : %s" % etat_moteur, niveau="SANTE")
+                pg = PROG.lire()
+            except Exception:  # noqa: BLE001
+                pass
+        etat["supervision"] = {
+            "etat_ui": "ACTIF",
+            "etat_moteur": etat_moteur,
+            "ui_tick": etat_ui["tick"],
+            "images_rendues": etat_ui["images"],
+            "intervalle_ms": int(round(intervalle_s * 1000)),
+            "heure": time.strftime("%H:%M:%S", time.localtime(now)),
+            "age_progression_s": pg.get("age_maj_s"),
+            "erreurs_rendu": etat_ui["erreurs"],
+            "redemarrages_rich": etat_ui["redemarrages_rich"],
+            "derniere_erreur": etat_ui["derniere_erreur"],
+            "heartbeat_path": str(heartbeat_path),
+            "journal": pg.get("journal") or [],
+        }
+        if now - float(etat_ui.get("dernier_heartbeat") or 0.0) >= 1.0:
+            heartbeat = {
+                "run_id": ident.get("run_id"),
+                "pid": os.getpid(),
+                "ts": now,
+                "iso": time.strftime("%Y-%m-%dT%H:%M:%S", time.localtime(now)),
+                "ui_tick": etat_ui["tick"],
+                "images_rendues": etat_ui["images"],
+                "etat_ui": "ACTIF",
+                "etat_moteur": etat_moteur,
+                "age_progression_s": pg.get("age_maj_s"),
+                "erreurs_rendu": etat_ui["erreurs"],
+                "redemarrages_rich": etat_ui["redemarrages_rich"],
+            }
+            try:
+                _ecrire_atomique(heartbeat_path, json.dumps(heartbeat, ensure_ascii=False, indent=1))
+                etat_ui["dernier_heartbeat"] = now
+            except OSError as exc:
+                _noter_erreur("écriture heartbeat UI", exc)
         return etat
 
     def _touche(console=None):
@@ -1379,26 +2234,49 @@ def _demarrer_dashboard_thread(root: Path, ident: dict, *, intervalle_s: float =
         try:
             from rich.console import Console
             from rich.live import Live
+        except Exception as exc:  # noqa: BLE001 — Rich indisponible -> repli texte
+            _noter_erreur("import Rich", exc)
+            Console = None
+            Live = None
+
+        if Console is not None and Live is not None:
             console = Console()
-            with Live(DF.rendre_rich(_etat(), vue=etat_ui["vue"]), console=console,
-                      refresh_per_second=4, screen=False) as live:      # PF-6 : 4 rafraîchissements/s
-                while not _ARRET.is_set():
-                    try:
-                        _touche(console)
-                        live.update(DF.rendre_rich(_etat(), vue=etat_ui["vue"]))
-                    except Exception:  # noqa: BLE001 — un afficheur ne casse jamais le moteur
-                        pass
-                    _ARRET.wait(intervalle_s)
-            return
-        except Exception:  # noqa: BLE001 — Rich indisponible -> repli texte
-            pass
-        while not _ARRET.is_set():                          # repli texte (sans Rich)
+            plein_ecran = bool(
+                console.is_terminal
+                and os.environ.get("HYPERSMART_DASHBOARD_FULLSCREEN", "1") != "0"
+            )
+            while _doit_continuer():
+                try:
+                    premier = DF.rendre_rich(_etat(), vue=etat_ui["vue"])
+                    with Live(
+                        premier,
+                        console=console,
+                        auto_refresh=False,
+                        screen=plein_ecran,
+                        transient=False,
+                        vertical_overflow="crop",
+                    ) as live:
+                        while _doit_continuer():
+                            _touche(console)
+                            rendu = DF.rendre_rich(_etat(), vue=etat_ui["vue"])
+                            live.update(rendu, refresh=True)
+                            etat_ui["images"] = int(etat_ui.get("images") or 0) + 1
+                            _FINALISATION_TERMINEE.wait(intervalle_s)
+                    return
+                except Exception as exc:  # noqa: BLE001
+                    _noter_erreur("rendu Rich", exc)
+                    etat_ui["redemarrages_rich"] = int(etat_ui.get("redemarrages_rich") or 0) + 1
+                    if _doit_continuer():
+                        _FINALISATION_TERMINEE.wait(0.75)
+
+        while _doit_continuer():                            # repli texte (sans Rich)
             try:
                 _touche(None)
-                print("\033c" + DF.rendre_texte(_etat(), vue=etat_ui["vue"]), flush=True)
-            except Exception:  # noqa: BLE001
-                pass
-            _ARRET.wait(max(0.5, intervalle_s))
+                print("\033[2J\033[H" + DF.rendre_texte(_etat(), vue=etat_ui["vue"]), flush=True)
+                etat_ui["images"] = int(etat_ui.get("images") or 0) + 1
+            except Exception as exc:  # noqa: BLE001
+                _noter_erreur("rendu texte", exc)
+            _FINALISATION_TERMINEE.wait(max(0.25, intervalle_s))
 
     t = threading.Thread(target=loop, name="dashboard-live", daemon=True)
     t.start()
@@ -1464,8 +2342,14 @@ def demarrer_foreground(root: Path, *, exiger_flux: bool = True, max_cycles: int
     """Démarre le run et TRAVAILLE au premier plan jusqu'au Ctrl+C, puis finalise proprement (partiel si 2e
     Ctrl+C). `mode` distingue START (nouveau run) de RESUME (reprise). Le moteur N'est PAS détaché (sinon
     Ctrl+C ne contrôlerait pas la finalisation). Un Superviseur relance les collecteurs read-only en option."""
+    global _SIGNAL_COUNT
     root = Path(root)
-    _ARRET.clear(); _URGENCE.clear()
+    resource_policy = RES.apply_environment_caps()
+    RES.apply_process_tree_priority()
+    _SIGNAL_COUNT = 0
+    _ARRET.clear(); _URGENCE.clear(); _FINALISATION_DEMARREE.clear(); _FINALISATION_TERMINEE.clear()
+    with _FINALISATION_LOCK:
+        _FINALISATION_ETAT.clear()
     _effacer_dernier_run_lance(root)                         # GR-3 : jamais de pointeur périmé si le démarrage échoue
     r = creer_ou_reprendre(root, exiger_flux=exiger_flux, mode=mode)
     if r.get("start") in ("PRECHECK_ECHEC", "RUN_ACTIF_EXISTE", "AUCUN_RUN_A_REPRENDRE"):
@@ -1474,6 +2358,20 @@ def demarrer_foreground(root: Path, *, exiger_flux: bool = True, max_cycles: int
     _ecrire_dernier_run_lance(root, ident.get("run_id"))     # FX-1 : run_id RÉELLEMENT lancé (le CMD vérifiera CE run)
     _installer_signal(root)
     sup = watch = None
+    resource_guardian = RES.start_guardian(
+        stop_event=_FINALISATION_TERMINEE,
+        root=root,
+        interval_s=float(resource_policy["guardian_interval_s"]),
+    )
+    print(
+        "[HyperSmart] Ressources : BelowNormal permanent, jamais Idle, "
+        "aucune pause, Salad=%s, workers=%s, lot=%s source(s)."
+        % (
+            "oui" if resource_policy["salad_active"] else "non",
+            resource_policy["max_workers"],
+            resource_policy["max_sources_per_bootstrap"],
+        )
+    )
     if collecteurs:                                          # supervision optionnelle (read-only), sinon rien
         try:
             import superviseur_continue as SUP
@@ -1484,11 +2382,22 @@ def demarrer_foreground(root: Path, *, exiger_flux: bool = True, max_cycles: int
             sup = None
     dash = _demarrer_dashboard_thread(root, ident) if afficher_live else None
     ipc = _demarrer_ipc_stop_thread(root)                    # STOP_REQUEST -> _ARRET immédiat (arrêt coopératif)
+    resultat_final = None
     try:
         boucle_continue(root, stop_event=_ARRET, max_cycles=max_cycles, afficher=False)
     finally:
-        if dash is not None:
-            dash.join(timeout=3.0)
+        _FINALISATION_DEMARREE.set()
+        _ARRET.set()
+        try:
+            _publier_finalisation(
+                Path(ident["rundir"]),
+                etape="arrêt des travaux",
+                fait=0,
+                total=7,
+                detail="arrêt coopératif des collecteurs et des nouveaux calculs",
+            )
+        except Exception:  # noqa: BLE001
+            pass
         ipc.join(timeout=2.0)
         if watch is not None:
             watch.join(timeout=3.0)
@@ -1497,7 +2406,48 @@ def demarrer_foreground(root: Path, *, exiger_flux: bool = True, max_cycles: int
                 sup.arreter_tous()                           # arrêt EXPLICITE des collecteurs à la finalisation
             except Exception:  # noqa: BLE001
                 pass
-    return finaliser(root, partial=_URGENCE.is_set(), raison="ctrl-c")
+        try:
+            resultat_final = finaliser(root, partial=_URGENCE.is_set(), raison="ctrl-c")
+        except Exception as e:  # noqa: BLE001 — dernier filet : le rapport doit exister même en cas d'erreur inattendue
+            dossier = root / "Rapports en continu" / str(ident.get("run_id") or "run-inconnu")
+            dossier.mkdir(parents=True, exist_ok=True)
+            secours = dossier / ("RAPPORT-RECHERCHE-CONTINUE_SECOURS_%s.md" % time.strftime("%Y%m%d-%H%M%S"))
+            _ecrire_atomique(
+                secours,
+                "# Rapport de secours\n\n"
+                "La finalisation détaillée a échoué après l'arrêt coopératif.\n\n"
+                "Erreur : `%s`\n\n"
+                "Les données du run n'ont pas été supprimées.\n\n"
+                "Sécurité : 0 ordre réel · 0 argent réel · 0 clé privée · 0 signature · 0 dépôt/retrait.\n"
+                % str(e)[:240],
+            )
+            resultat_final = {
+                "finalisation": "FINALIZATION_FAILED",
+                "rapport": str(secours),
+                "erreurs": [str(e)[:240]],
+            }
+            try:
+                _publier_finalisation(
+                    Path(ident["rundir"]),
+                    etape="rapport de secours",
+                    fait=7,
+                    total=7,
+                    detail="rapport minimal garanti : %s" % secours,
+                    statut="FINALIZATION_FAILED",
+                    rapport=str(secours),
+                )
+            except Exception:  # noqa: BLE001
+                pass
+        finally:
+            _FINALISATION_TERMINEE.set()
+            if resource_guardian is not None:
+                resource_guardian.join(timeout=2.0)
+            if dash is not None:
+                dash.join(timeout=3.0)
+    if resultat_final and resultat_final.get("rapport"):
+        print("\n[HYPERSMART] Rapport final : %s" % resultat_final["rapport"], flush=True)
+        print("[HYPERSMART] État : %s" % resultat_final.get("finalisation"), flush=True)
+    return resultat_final or {"finalisation": "FINALIZATION_FAILED", "erreurs": ["résultat final absent"]}
 
 
 def _verifier_manifeste_sha(man: Path, rundir: Path) -> dict:
@@ -1551,7 +2501,9 @@ def verifier_finalisation(root: Path, run_id: str | None = None) -> dict:
             verif = _verifier_manifeste_sha(man, rundir)      # RECALCULE tous les SHA (pas une simple présence)
             shas_ok = bool(verif.get("ok"))
         ok = bool(rapports and man.exists() and etat_ok and shas_ok)
+        rapport_dernier = str(sorted(rapports)[-1]) if rapports else None
         return {"finalisation_confirmee": ok, "run_id": run_id, "rapport": bool(rapports),
+                "rapport_chemin": rapport_dernier,
                 "manifeste": man.exists(), "etat_complete": etat_ok, "sha_presents": shas_ok,
                 "sha_recalcule": verif}
     dossier = root / "Rapports en continu"

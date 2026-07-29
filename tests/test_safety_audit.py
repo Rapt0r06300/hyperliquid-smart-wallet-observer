@@ -1,7 +1,7 @@
 from pathlib import Path
 
 from hl_observer.security.fake_data_scanner import scan_for_fake_data
-from hl_observer.security.safety_audit import run_safety_audit
+from hl_observer.security.safety_audit import _iter_scannable_files, run_safety_audit
 from hl_observer.security.secrets import contains_secret_pattern, scan_file_for_secret
 
 
@@ -28,3 +28,17 @@ def test_no_fabricated_data_generators_in_runtime():
     no fake price / PnL / fill / wallet generator anywhere in src/hl_observer."""
     findings = scan_for_fake_data()
     assert findings == [], "\n".join(str(f) for f in findings)
+
+
+def test_safety_audit_does_not_scan_embedded_third_party_runtime(tmp_path):
+    app_file = tmp_path / "src" / "app.py"
+    third_party = tmp_path / "portable_runtime" / "python" / "Lib" / "site-packages" / "vendor.py"
+    app_file.parent.mkdir(parents=True)
+    third_party.parent.mkdir(parents=True)
+    app_file.write_text("SAFE = True\n", encoding="utf-8")
+    third_party.write_text("PRIVATE_KEY = 'third-party-license-token'\n", encoding="utf-8")
+
+    files = _iter_scannable_files(tmp_path)
+
+    assert app_file in files
+    assert third_party not in files

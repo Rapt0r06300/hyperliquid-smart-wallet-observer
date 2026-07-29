@@ -184,13 +184,33 @@ def _premiers_resultats_absents(etat: dict) -> bool:
 
 
 def _barre(pct) -> str:
-    """Petite barre de progression texte (animée par Rich Live à 4 fps)."""
+    """Barre de progression lisible, stable et assez précise pour les longs calculs."""
     try:
         p = max(0.0, min(100.0, float(pct)))
     except (TypeError, ValueError):
         return "…"
-    n = int(round(p / 10.0))
-    return "[%s%s] %s%%" % ("#" * n, "·" * (10 - n), int(p))
+    largeur = 30
+    n = int(round(p * largeur / 100.0))
+    return "[%s%s] %7.3f%%" % ("#" * n, "·" * (largeur - n), p)
+
+
+def _fmt_nombre(v) -> str:
+    try:
+        return f"{int(v):,}".replace(",", " ")
+    except (TypeError, ValueError):
+        return "…"
+
+
+def _fmt_duree(secondes) -> str:
+    try:
+        s = max(0, int(float(secondes)))
+    except (TypeError, ValueError):
+        return "…"
+    if s < 60:
+        return "%ds" % s
+    if s < 3600:
+        return "%dm %02ds" % (s // 60, s % 60)
+    return "%dh %02dm" % (s // 3600, (s % 3600) // 60)
 
 
 def construire_vue_compacte(etat: dict) -> list:
@@ -201,12 +221,59 @@ def construire_vue_compacte(etat: dict) -> list:
     res = etat.get("resultats_idees", {})
     sim = etat.get("simulation", {})
     live = etat.get("donnees_live", {})
+    fin = etat.get("finalisation") or {}
+    supervision = etat.get("supervision") or {}
+    ressources = etat.get("resource_policy") or {}
     duree = "%sj %sh %sm %ss" % (d.get("jours", 0), d.get("heures", 0), d.get("minutes", 0), d.get("secondes", 0))
-    etat_donnees = "%s · débit %s · âge %s" % (
-        (etat.get("sante") or "démarrage…"), live.get("debit", "…"), live.get("age_dernier", "…"))
-    prog = "%s · %s/%s · %s/s · ETA %s" % (
+    etat_donnees = "%s · débit %s · collecteur %s · dernier événement %s" % (
+        live.get("etat_collecteur") or etat.get("sante") or "démarrage…",
+        live.get("debit", "…"),
+        _fmt_duree((live.get("heartbeat_age_ms") or 0) / 1000.0),
+        live.get("age_dernier", "…"),
+    )
+    prog = "%s · %s/%s · %s étape/s · ETA %s" % (
         _barre(fait.get("pourcentage")), fait.get("fait", "…"), fait.get("total", "…"),
-        fait.get("vitesse", "…"), fait.get("eta", "…"))
+        fait.get("vitesse", "…"), _fmt_duree(fait.get("eta")))
+    eta_detail = "%s · confiance %s%% · débit projeté %s/s · compteur %s" % (
+        fait.get("eta_source") or "projection initiale",
+        fait.get("eta_confiance_pct", 0),
+        fait.get("debit_projection", "…"),
+        fait.get("eta_mode") or "global",
+    )
+    politique_ressources = (
+        "%s permanent · jamais Idle · aucune pause · Salad %s · "
+        "%s worker(s) · lot %s source(s) / %s Mio"
+        % (
+            ressources.get("priority") or "BELOW_NORMAL",
+            "actif" if ressources.get("salad_active") else "inactif",
+            ressources.get("max_workers", "…"),
+            ressources.get("max_sources_per_bootstrap", "…"),
+            ressources.get("max_bootstrap_megabytes", "…"),
+        )
+    )
+    sous_fait = fait.get("sous_fait")
+    sous_total = fait.get("sous_total")
+    if sous_fait is not None and sous_total:
+        progression_sous_phase = "%s/%s sous-étapes · %s" % (
+            _fmt_nombre(sous_fait),
+            _fmt_nombre(sous_total),
+            fait.get("detail") or "calcul",
+        )
+    else:
+        progression_sous_phase = "aucune sous-phase mesurable annoncée"
+    traite = fait.get("traite")
+    traite_total = fait.get("traite_total")
+    if traite is not None and traite_total:
+        pct_interne = 100.0 * float(traite) / max(1.0, float(traite_total))
+        progression_interne = "%s · %s/%s %s · %s/s" % (
+            _barre(pct_interne),
+            _fmt_nombre(traite),
+            _fmt_nombre(traite_total),
+            fait.get("unite") or "éléments",
+            fait.get("debit_interne") or "…",
+        )
+    else:
+        progression_interne = "initialisation de la sous-tâche…"
     attente = _premiers_resultats_absents(etat)
     def _ou(v):
         return "En attente des premiers résultats…" if attente else (v if v not in (None, "") else "…")
@@ -214,8 +281,27 @@ def construire_vue_compacte(etat: dict) -> list:
         ("État des données", etat_donnees),
         ("Durée", duree),
         ("Travail actuel", fait.get("je_fais", "…")),
+        ("Détail exact", fait.get("detail") or "préparation de l'étape"),
         ("Pourquoi", fait.get("parce_que", "…")),
         ("Progression", prog),
+        ("Projection ETA", eta_detail),
+        ("Sous-phase", progression_sous_phase),
+        ("Progression interne", progression_interne),
+        ("Dernière activité", "compteur il y a %s · heartbeat il y a %s · calcul actif depuis %s" % (
+            _fmt_duree(fait.get("age_compteur_s", fait.get("age_maj_s"))),
+            _fmt_duree(fait.get("age_heartbeat_s")),
+            _fmt_duree(fait.get("duree_progression_s")))),
+        ("Supervision UI", "%s · image %s · rafraîchissement %sms" % (
+            supervision.get("etat_ui", "DÉMARRAGE"),
+            supervision.get("ui_tick", "…"),
+            supervision.get("intervalle_ms", "…"),
+        )),
+        ("État moteur", "%s · dernière progression %s · erreurs UI %s" % (
+            supervision.get("etat_moteur", "DÉMARRAGE"),
+            _fmt_duree(supervision.get("age_progression_s")),
+            supervision.get("erreurs_rendu", 0),
+        )),
+        ("Ressources", politique_ressources),
         ("Événements reçus", _ou(tot.get("events_utilises") or tot.get("forward_events"))),
         ("Combinaisons testées", _ou(tot.get("testees"))),
         ("Idées trouvées", _ou(tot.get("idees_trouvees"))),
@@ -224,15 +310,26 @@ def construire_vue_compacte(etat: dict) -> list:
         ("Prochaine tâche", fait.get("ensuite", "…")),
         ("Ctrl+C", "= rapport final (arrêt propre)"),
     ]
+    if fin:
+        lignes[2:2] = [
+            ("Finalisation", "%s · %s" % (_barre(fin.get("pourcentage")), fin.get("etape") or fin.get("statut"))),
+            ("Rapport", fin.get("rapport") or "création du chemin en cours"),
+        ]
     return lignes
 
 
 def rendre_rich(etat: dict, *, vue: str = "compact"):
-    """VUE PRINCIPALE = COMPACTE (PF-6, Rich Live + Layout + Progress, animée à 4 fps). Les 12 panneaux détaillés
-    restent accessibles en arrière-plan via vue != 'compact'. Repli texte si Rich absent."""
+    """Console plein écran stable : progression, métriques, supervision et journal.
+
+    La géométrie reste fixe entre deux rafraîchissements afin que le terminal ne
+    saute pas pendant les calculs longs. Les vues détaillées 1-7 restent
+    accessibles sans modifier le moteur.
+    """
     try:
+        from rich.layout import Layout
         from rich.panel import Panel
         from rich.table import Table
+        from rich.text import Text
     except Exception:  # noqa: BLE001
         return rendre_texte(etat, vue=("tout" if vue != "compact" else "compact"))
     if vue and vue != "compact":                             # vues détaillées (12 panneaux) en arrière-plan
@@ -240,13 +337,99 @@ def rendre_rich(etat: dict, *, vue: str = "compact"):
         P = construire_panneaux(etat)
         return Columns([Panel("\n".join(str(x) for x in l), title=t, expand=True) for t, l in P.items()],
                        equal=True, expand=True)
-    t = Table.grid(padding=(0, 1))
-    t.add_column(justify="right", style="bold cyan", no_wrap=True)
-    t.add_column()
-    for label, valeur in construire_vue_compacte(etat):
-        t.add_row(label, str(valeur))
-    return Panel(t, title="HYPERSMART — RECHERCHE CONTINUE", subtitle="[1-7] détails · [S] snapshot · Ctrl+C = rapport",
-                 expand=True)
+
+    rows = dict(construire_vue_compacte(etat))
+    supervision = etat.get("supervision") or {}
+    fait = etat.get("ce_que_je_fais") or {}
+    layout = Layout(name="root")
+    layout.split_column(
+        Layout(name="header", size=3),
+        Layout(name="progression", size=12),
+        Layout(name="mesures", size=10),
+        Layout(name="journal", size=8),
+        Layout(name="footer", size=3),
+    )
+
+    header = Table.grid(expand=True)
+    header.add_column(ratio=3)
+    header.add_column(justify="right", ratio=2)
+    header.add_row(
+        Text("HYPERSMART · RECHERCHE CONTINUE", style="bold cyan"),
+        Text(
+            "%s · cycle %s · %s · %s" % (
+                supervision.get("etat_ui", "DÉMARRAGE"),
+                etat.get("cycle_actuel", "…"),
+                etat.get("phase") or etat.get("etat") or "…",
+                supervision.get("heure") or "…",
+            ),
+            style="bold green" if supervision.get("etat_ui") == "ACTIF" else "bold yellow",
+        ),
+    )
+    layout["header"].update(Panel(header, border_style="cyan"))
+
+    progress = Table.grid(padding=(0, 1), expand=True)
+    progress.add_column(width=22, style="bold cyan", no_wrap=True)
+    progress.add_column(ratio=1)
+    progress.add_row("Travail actuel", Text(str(rows.get("Travail actuel", "…"))))
+    progress.add_row("Détail exact", Text(str(rows.get("Détail exact", "…"))))
+    progress.add_row("Pourquoi", Text(str(rows.get("Pourquoi", "…"))))
+    progress.add_row("Progression globale", Text(str(rows.get("Progression", "…")), style="bold green"))
+    progress.add_row("Projection ETA", Text(str(rows.get("Projection ETA", "…")), style="yellow"))
+    progress.add_row("Sous-phase", Text(str(rows.get("Sous-phase", "…"))))
+    progress.add_row("Boucle interne", Text(str(rows.get("Progression interne", "…")), style="green"))
+    progress.add_row("Ensuite", Text(str(rows.get("Prochaine tâche", "…"))))
+    layout["progression"].update(Panel(progress, title="Calcul en cours", border_style="blue"))
+
+    layout["mesures"].split_row(Layout(name="direct"), Layout(name="health"))
+    direct = Table.grid(padding=(0, 1), expand=True)
+    direct.add_column(width=22, style="cyan", no_wrap=True)
+    direct.add_column(ratio=1)
+    for label in (
+        "Événements reçus",
+        "Combinaisons testées",
+        "Idées trouvées",
+        "Pépites possibles",
+        "PnL / ROI paper",
+    ):
+        direct.add_row(label, Text(str(rows.get(label, "…"))))
+    layout["direct"].update(Panel(direct, title="Résultats réels", border_style="green"))
+
+    health = Table.grid(padding=(0, 1), expand=True)
+    health.add_column(width=20, style="cyan", no_wrap=True)
+    health.add_column(ratio=1)
+    health.add_row("Données", Text(str(rows.get("État des données", "…"))))
+    health.add_row("Moteur", Text(str(rows.get("État moteur", "…"))))
+    health.add_row("Interface", Text(str(rows.get("Supervision UI", "…"))))
+    health.add_row("Ressources", Text(str(rows.get("Ressources", "…"))))
+    health.add_row("Activité", Text(str(rows.get("Dernière activité", "…"))))
+    health.add_row("Durée", Text(str(rows.get("Durée", "…"))))
+    layout["health"].update(Panel(health, title="Santé 24 h / 24", border_style="yellow"))
+
+    journal_table = Table.grid(padding=(0, 1), expand=True)
+    journal_table.add_column(width=10, style="dim cyan", no_wrap=True)
+    journal_table.add_column(width=10, style="bold", no_wrap=True)
+    journal_table.add_column(ratio=1)
+    journal = list(supervision.get("journal") or [])[-5:]
+    if journal:
+        for item in journal:
+            journal_table.add_row(
+                str(item.get("heure") or "…"),
+                str(item.get("niveau") or "INFO"),
+                Text(str(item.get("message") or "…")),
+            )
+    else:
+        journal_table.add_row("…", "ATTENTE", "Le moteur prépare sa première activité.")
+    layout["journal"].update(Panel(journal_table, title="Journal des dernières actions", border_style="magenta"))
+
+    footer = Table.grid(expand=True)
+    footer.add_column(ratio=3)
+    footer.add_column(justify="right", ratio=2)
+    footer.add_row(
+        Text("[1-7] détails  ·  [0] accueil  ·  [S] snapshot", style="cyan"),
+        Text("Ctrl+C = arrêt propre + rapport final", style="bold yellow"),
+    )
+    layout["footer"].update(Panel(footer, border_style="cyan"))
+    return layout
 
 
 def lire_touche_non_bloquante():

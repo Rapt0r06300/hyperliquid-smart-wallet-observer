@@ -22,13 +22,17 @@ CLI : ``python -m hl_observer.backtesting.ab_flag_replay --candidates F --marks 
 from __future__ import annotations
 
 import json
+import sys
 from dataclasses import dataclass, field
+from hashlib import sha256
+from pathlib import Path
 
 from hl_observer.paper_trading.sl_tp import SLTPConfig, evaluate_sl_tp
 
 CONTEXT = "REPLAY"
 DEFAULT_HORIZON_MIN = 240.0
 DEFAULT_COST_BPS = 12.0
+ANALYSIS_CACHE_SCHEMA_VERSION = 1
 
 # Bras B par défaut : les vetos d'entrée + barrières vol (mesure de L1+L2+L4+L5+L7+L8)
 DEFAULT_ARM_B_ENV = {
@@ -93,6 +97,79 @@ def load_jsonl(path: str) -> list[dict]:
     return out
 
 
+def build_analysis_cache_key(
+    candidates_path: str | Path,
+    marks_path: str | Path,
+    *,
+    horizon_min: float,
+    fixed_notional_usd: float,
+) -> str:
+    """Fingerprint replay inputs and code so regenerated identical merges reuse work."""
+
+    def source_signature(path_value: str | Path) -> dict[str, object]:
+        path = Path(path_value).resolve()
+        stat = path.stat()
+        digest = sha256()
+        with path.open("rb") as handle:
+            for chunk in iter(lambda: handle.read(4 * 1024 * 1024), b""):
+                digest.update(chunk)
+        return {
+            "path": str(path),
+            "size": stat.st_size,
+            "sha256": digest.hexdigest(),
+        }
+
+    module_stat = Path(__file__).stat()
+    payload = {
+        "schema": ANALYSIS_CACHE_SCHEMA_VERSION,
+        "python": list(sys.version_info[:3]),
+        "module_mtime_ns": module_stat.st_mtime_ns,
+        "candidates": source_signature(candidates_path),
+        "marks": source_signature(marks_path),
+        "horizon_min": float(horizon_min),
+        "fixed_notional_usd": float(fixed_notional_usd),
+        "cost_bps": DEFAULT_COST_BPS,
+        "base_config": repr(SLTPConfig()),
+        "arm_b_env": DEFAULT_ARM_B_ENV,
+    }
+    canonical = json.dumps(payload, sort_keys=True, separators=(",", ":"))
+    return sha256(canonical.encode("utf-8")).hexdigest()
+
+
+def load_cached_report(cache_path: str | Path, cache_key: str) -> dict | None:
+    """Return a verified cached report, or None when any evidence changed."""
+
+    path = Path(cache_path)
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+    if not isinstance(payload, dict) or payload.get("cache_key") != cache_key:
+        return None
+    report = payload.get("report")
+    return report if isinstance(report, dict) else None
+
+
+def write_cached_report(cache_path: str | Path, cache_key: str, report: dict) -> None:
+    """Persist an analysis-only cache atomically outside source data."""
+
+    path = Path(cache_path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = path.with_suffix(path.suffix + ".tmp")
+    temporary.write_text(
+        json.dumps(
+            {
+                "cache_schema": ANALYSIS_CACHE_SCHEMA_VERSION,
+                "cache_key": cache_key,
+                "report": report,
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    temporary.replace(path)
+
+
 def marks_by_coin(mark_rows: list[dict]) -> dict[str, list[tuple[float, float]]]:
     out: dict[str, list[tuple[float, float]]] = {}
     for r in mark_rows:
@@ -132,12 +209,14 @@ def simulate_exit_on_path(
     import bisect as _bi
     debut = _bi.bisect_right(path, (entry_ts, float("inf")))
     fin = _bi.bisect_right(path, (entry_ts + horizon_min * 60.0, float("inf")))
-    future = path[debut:fin]
-    if not future:
+    if debut >= fin:
         return None
     peak = entry_price
-    exit_price = future[-1][1]  # défaut : timeout d'horizon au dernier mark réel
-    for _, mark in future:
+    # Ne pas copier la fenetre future pour chaque candidat. Sur les archives
+    # reelles, ces slices temporaires dominaient le temps CPU et la memoire.
+    exit_price = path[fin - 1][1]  # timeout d'horizon au dernier mark reel
+    for index in range(debut, fin):
+        mark = path[index][1]
         peak = max(peak, mark) if side == "LONG" else min(peak, mark)
         d = evaluate_sl_tp(side=side, entry_price=entry_price, current_price=mark, peak_price=peak, config=config)
         if d.exit:
@@ -158,6 +237,7 @@ def _evaluate_arm(
     base_config: SLTPConfig,
     horizon_min: float,
     cost_bps: float,
+    fixed_notional_usd: float | None = None,
 ) -> ArmMetrics:
     from hl_observer.paper_trading.vol_adjusted_barriers import (
         MidVolEstimator,
@@ -188,12 +268,9 @@ def _evaluate_arm(
     # L'ordre chronologique est aussi ce que le replay doit faire par nature : on ne peut pas
     # nourrir un estimateur avec des prix qui arrivent dans le desordre sans mentir sur ce que
     # l'on savait a l'instant t.
-    candidats_tries = sorted(
-        (c for c in candidates if isinstance(c, dict)),
-        key=lambda c: (float(c.get("recorded_at") or 0.0), str(c.get("coin") or "")))
     curseur: dict[str, int] = {}
 
-    for cand in candidats_tries:
+    for cand in candidates:
         coin = str(cand.get("coin") or "").upper()
         side = str(cand.get("direction") or "").upper()
         edge = cand.get("edge_remaining_bps")
@@ -226,10 +303,16 @@ def _evaluate_arm(
         if vol_on:
             factor = vol_factor_for_coin(coin, estimator=estimator, env=env, now=ts)
             cfg = adjust_config(base_config, factor, sl_floor_bps=12.0)
+        leader_notional = float(cand.get("leader_notional_usdt") or 0.0)
+        comparison_notional = (
+            float(fixed_notional_usd)
+            if fixed_notional_usd is not None and fixed_notional_usd > 0
+            else (leader_notional if leader_notional > 0 else 50.0)
+        )
         pnl = simulate_exit_on_path(
             side=side, entry_price=entry, path=marks.get(coin, []), entry_ts=ts,
             config=cfg, horizon_min=horizon_min, cost_bps=cost_bps,
-            notional_usd=float(cand.get("leader_notional_usdt") or 50.0) if float(cand.get("leader_notional_usdt") or 0) > 0 else 50.0,
+            notional_usd=comparison_notional,
         )
         if pnl is None:
             m.unmeasurable += 1
@@ -247,6 +330,7 @@ def run_ab_replay(
     base_config: SLTPConfig | None = None,
     horizon_min: float = DEFAULT_HORIZON_MIN,
     cost_bps: float = DEFAULT_COST_BPS,
+    fixed_notional_usd: float | None = None,
 ) -> dict:
     """Compare bras A (V26 OFF) vs bras B (V26 ON). Déterministe, REPLAY-only."""
     marks = marks_by_coin(mark_rows)
@@ -254,10 +338,19 @@ def run_ab_replay(
     env_b = dict(DEFAULT_ARM_B_ENV)
     if arm_b_env:
         env_b.update({k: str(v) for k, v in arm_b_env.items()})
-    a = _evaluate_arm("A_baseline_v26_off", dict(ARM_A_ENV), candidates, marks,
-                      base_config=cfg, horizon_min=horizon_min, cost_bps=cost_bps)
-    b = _evaluate_arm("B_v26_on", env_b, candidates, marks,
-                      base_config=cfg, horizon_min=horizon_min, cost_bps=cost_bps)
+    ordered_candidates = sorted(
+        (candidate for candidate in candidates if isinstance(candidate, dict)),
+        key=lambda candidate: (
+            float(candidate.get("recorded_at") or 0.0),
+            str(candidate.get("coin") or ""),
+        ),
+    )
+    a = _evaluate_arm("A_baseline_v26_off", dict(ARM_A_ENV), ordered_candidates, marks,
+                      base_config=cfg, horizon_min=horizon_min, cost_bps=cost_bps,
+                      fixed_notional_usd=fixed_notional_usd)
+    b = _evaluate_arm("B_v26_on", env_b, ordered_candidates, marks,
+                      base_config=cfg, horizon_min=horizon_min, cost_bps=cost_bps,
+                      fixed_notional_usd=fixed_notional_usd)
     ra, rb = a.report(), b.report()
     # VALID-GATES: chaque bras passe par les gates de validation unifiees ; on ne
     # recommande d'activer B que s'il passe TOUS les gates ET ameliore le net vs A.
@@ -268,6 +361,7 @@ def run_ab_replay(
     return {
         "context": CONTEXT,
         "honesty": "metriques descriptives sur donnees enregistrees ; aucune promesse de PnL",
+        "comparison_notional_usd": fixed_notional_usd,
         "arm_a": ra,
         "arm_b": rb,
         "delta_net_usd": round((rb["net_total_usd"] or 0) - (ra["net_total_usd"] or 0), 4),
@@ -344,8 +438,38 @@ def main(argv: list[str] | None = None) -> int:  # pragma: no cover — CLI minc
     ap.add_argument("--marks", required=True)
     ap.add_argument("--out", default="")
     ap.add_argument("--horizon-min", type=float, default=DEFAULT_HORIZON_MIN)
+    ap.add_argument(
+        "--notional-usd",
+        type=float,
+        default=50.0,
+        help="Notionnel constant par trade pour une comparaison A/B equitable.",
+    )
+    ap.add_argument(
+        "--cache-path",
+        default="",
+        help="Cache local verifie; invalide si donnees, code ou parametres changent.",
+    )
     args = ap.parse_args(argv)
-    report = run_ab_replay(load_jsonl(args.candidates), load_jsonl(args.marks), horizon_min=args.horizon_min)
+    fixed_notional = max(1.0, float(args.notional_usd))
+    cache_key = build_analysis_cache_key(
+        args.candidates,
+        args.marks,
+        horizon_min=args.horizon_min,
+        fixed_notional_usd=fixed_notional,
+    )
+    report = load_cached_report(args.cache_path, cache_key) if args.cache_path else None
+    if report is None:
+        print("analysis_cache=miss", flush=True)
+        report = run_ab_replay(
+            load_jsonl(args.candidates),
+            load_jsonl(args.marks),
+            horizon_min=args.horizon_min,
+            fixed_notional_usd=fixed_notional,
+        )
+        if args.cache_path:
+            write_cached_report(args.cache_path, cache_key, report)
+    else:
+        print("analysis_cache=hit", flush=True)
     text = json.dumps(report, indent=2, ensure_ascii=False)
     if args.out:
         with open(args.out, "w", encoding="utf-8") as fh:
@@ -358,6 +482,16 @@ if __name__ == "__main__":  # pragma: no cover
     raise SystemExit(main())
 
 __all__ = [
-    "CONTEXT", "ArmMetrics", "load_jsonl", "marks_by_coin",
-    "simulate_exit_on_path", "run_ab_replay", "net_baseline_seul", "DEFAULT_ARM_B_ENV",
+    "ANALYSIS_CACHE_SCHEMA_VERSION",
+    "CONTEXT",
+    "ArmMetrics",
+    "DEFAULT_ARM_B_ENV",
+    "build_analysis_cache_key",
+    "load_cached_report",
+    "load_jsonl",
+    "marks_by_coin",
+    "net_baseline_seul",
+    "run_ab_replay",
+    "simulate_exit_on_path",
+    "write_cached_report",
 ]

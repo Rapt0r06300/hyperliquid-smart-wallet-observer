@@ -29,7 +29,9 @@ def test_single_hypersmart_launcher_exists_and_forces_simulation_mode():
     assert "-IntervalSeconds 15" in text
     assert "-MaxLeaders 50" in text
     assert "-Interactive" in text
-    assert "HYPERSMART_ENABLE_AUX_IA=1" in text
+    # L'IA shadow reste disponible, mais elle n'est pas un composant necessaire
+    # au runtime de collecte/decision et ne doit plus alourdir le double-clic.
+    assert "HYPERSMART_ENABLE_AUX_IA=0" in text
     assert "HYPERSMART_ENABLE_AUX_STREAM=1" in text
     assert 'start "HyperSmart IA"' not in text
     assert 'start "HyperSmart Stream"' not in text

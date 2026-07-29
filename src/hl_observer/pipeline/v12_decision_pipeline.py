@@ -51,6 +51,7 @@ class V12DecisionPipelineConfig:
     top_depth_usdt: float | None = 100_000.0
     wallet_score: float = 90.0
     signal_score: float = 85.0
+    min_feed_quality_score: float = 75.0
     cluster_config: ClusterConfig = field(default_factory=ClusterConfig)
     paper_config: PaperEngineConfig = field(default_factory=PaperEngineConfig)
 

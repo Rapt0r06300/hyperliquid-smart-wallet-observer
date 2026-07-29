@@ -54,6 +54,20 @@ collecte 24/7, multi-sources, backfill massif, toute analyse, tout backtest, tou
 Une modif dans `src/` ne prend effet **qu'au prochain redémarrage** de Flo. Le dire dans le
 rapport final, toujours.
 
+## Separation runtime / analyses (2026-07-28)
+
+- `LANCER_HYPERSMART.cmd` demarre uniquement le profil `CORE` : UI, poller
+  persistant, flux leaders read-only, allMids, BBO et surveillance ressources.
+- Les collecteurs deja vivants sont reutilises. Aucun second warmup lourd ne
+  doit dupliquer la collecte du poller persistant.
+- Les profils `maintenance`, `research` et `all` existent, mais exigent une
+  sous-commande explicite. Ils ne font pas partie du double-clic normal.
+- L'IA auxiliaire reste hors du hot path et n'est pas auto-demarree.
+- `ANALYSER_BACKTESTS_REPLAYS.cmd` est l'entree unique pour backtests, replays,
+  comparaisons A/B et rapport historique. Il ne doit jamais etre appele par le
+  demarrage normal du bot.
+- Guide source : `docs/LANCEURS_HYPERSMART.md`.
+
 ## Ne jamais toucher
 
 - la session en cours quand Flo dit qu'elle tourne (lecture seule sur `runtime/`) ;
@@ -165,9 +179,11 @@ n'existe pas déjà :
 - `collection/collecte_fiable.py` — socle réutilisable : dedup borné, écriture atomique (fsync),
   backoff+jitter, limiteur de débit, provenance, porte de qualité. « Plus de données SANS ban ni
   poubelle. »
-- Collecteurs **auto-démarrés avec le bot** (LANCER_HYPERSMART + REANIMER-COLLECTEURS + REGISTRE
-  du superviseur) : carry-feeder, marks, liq, venues, **carnet**, copy-whitelist, rapport. Les
-  **trois listes bougent ENSEMBLE** (canari `test_le_REGISTRE_correspond_au_LANCEUR`).
+- Collecteurs **auto-démarrés avec le bot** : uniquement `allmids-collector`
+  et `bbo-collector` (profil `CORE`). Les collecteurs historiques, de
+  maintenance et de recherche restent inscrits au registre, mais exigent une
+  commande explicite. Le superviseur réutilise les processus vivants et refuse
+  les doubles démarrages.
 - Rétention : le cap des shards replay **ARCHIVE** l'overflow (`_archive/`), ne le supprime plus ;
   `merge_replay(include_archive=True)` le fait remonter dans `_merged` que TOUT-TESTER mange.
   **Rien d'important n'est perdu à la fermeture.**
@@ -189,8 +205,11 @@ n'existe pas déjà :
 - **Lois mesurées** → `docs/LOIS_MESUREES.md`
 - **Objectif condensé** → `OBJECTIF.md`
 - **Config détaillée** → `docs/CONFIG_FLAGS.md`
-- **Tout lancer en une fois** → `TOUT-TESTER.cmd` (sécurité, tests, invariants, câblage,
-  qualité des données, backtests carry+arbitrage, recherche de pépites, santé live)
+- **Runtime quotidien** → `LANCER_HYPERSMART.cmd` (profil CORE uniquement)
+- **Backtests/replays/A-B** → `ANALYSER_BACKTESTS_REPLAYS.cmd` (outil séparé,
+  rapports consolidés sous `runtime/reports/backtest_replay/`)
+- **Suite historique exhaustive** → `TOUT-TESTER.cmd` (outil manuel, jamais
+  auto-démarré avec le runtime)
 - **Rapports produits** : `RECAP-COMPLET.md`, `rapports/RAPPORT_DU_JOUR.md`,
   `runtime/replay/BACKTEST_CARRY.md`, `runtime/replay/BACKTEST_ARBITRAGE.md`,
   `runtime/replay/RESULTATS_RECHERCHE.md`

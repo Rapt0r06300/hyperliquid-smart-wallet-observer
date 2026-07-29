@@ -118,11 +118,23 @@ def test_le_lanceur_unique_n_est_pas_archive():
 
 # ------------------------------------------------------------------ 4. racine nettoyee
 
-def test_la_racine_ne_contient_que_le_lanceur_unique():
-    """UN SEUL lanceur unifie en racine : LANCER_HYPERSMART.cmd. Seule exception TOLEREE (demande de Flo) :
-    POUSSER-GITHUB-FORCE.cmd, escape-hatch de force-push manuel (le sous-commande github-push reste
-    fast-forward-only). Tout le reste est absorbe en sous-commandes."""
+def test_la_racine_contient_les_deux_lanceurs_officiels():
+    """Runtime et analyses historiques ont chacun un lanceur explicite.
+
+    Les anciens outils de laboratoire restent conserves pour ne rien supprimer
+    brutalement, mais ils ne font pas partie du demarrage principal.
+    """
     cmd_racine = {p.name for p in RACINE.glob("*.cmd")}
-    assert "LANCER_HYPERSMART.cmd" in cmd_racine, "le lanceur unifie doit exister"
-    reste = cmd_racine - {"LANCER_HYPERSMART.cmd", "POUSSER-GITHUB-FORCE.cmd"}
-    assert reste == set(), "aucun autre .cmd que le lanceur (+ POUSSER-GITHUB-FORCE.cmd tolere) ; trouve : %r" % sorted(reste)
+    officiels = {"LANCER_HYPERSMART.cmd", "ANALYSER_BACKTESTS_REPLAYS.cmd"}
+    assert officiels <= cmd_racine
+    outils_conserves = {
+        "LANCER_LABO.cmd",
+        "LANCER_MICRO.cmd",
+        "LANCER-RECHERCHE-14H.cmd",
+        "LANCER-RECHERCHE-18H.cmd",
+        "LANCER-RECHERCHE-CONTINUE.cmd",
+        "LANCER-RECHERCHE-CONTINUE-ADMIN.cmd",
+        "POUSSER-GITHUB-FORCE.cmd",
+        "RECETTE-WINDOWS.cmd",
+    }
+    assert cmd_racine <= officiels | outils_conserves

@@ -28,7 +28,9 @@ from hl_observer.decision_engine.noyau_unique import (
     REFUS_FAMILLE_INCONNUE,
     REFUS_NOTIONAL_INVALIDE,
     REFUS_PRIX_NON_EXECUTABLE,
+    REFUS_QUALITE_FLUX,
     REFUS_ZONE_MORTE,
+    QUALITE_FLUX_NON_FOURNIE,
     Contexte,
     decider,
     famille_de_la_strategie,
@@ -211,6 +213,31 @@ def test_le_SLIPPAGE_reel_entre_dans_les_couts(monkeypatch):
 def test_un_notional_invalide_REFUSE_avant_tout():
     assert decider(_ctx(notional_usd=0.0)).raison == REFUS_NOTIONAL_INVALIDE
     assert decider(_ctx(notional_usd=-1.0)).raison == REFUS_NOTIONAL_INVALIDE
+
+
+def test_qualite_flux_runtime_explicitement_mauvaise_refuse_avant_l_edge():
+    d = decider(_ctx(feed_quality_ready=False, feed_quality_score=92.0,
+                     feed_quality_reasons=("UNRESOLVED_GAP",)))
+    assert d.verdict == NO_TRADE
+    assert d.raison == REFUS_QUALITE_FLUX
+    assert d.preuve["feed_quality"]["reasons"] == ["UNRESOLVED_GAP"]
+
+
+def test_score_qualite_flux_sous_le_plancher_refuse():
+    d = decider(_ctx(feed_quality_ready=True, feed_quality_score=74.99))
+    assert d.raison == REFUS_QUALITE_FLUX
+    assert d.preuve["feed_quality"]["score"] == pytest.approx(74.99)
+
+
+def test_qualite_dite_prete_sans_score_mesurable_refuse():
+    d = decider(_ctx(feed_quality_ready=True, feed_quality_score=None))
+    assert d.raison == REFUS_QUALITE_FLUX
+
+
+def test_appel_legacy_sans_qualite_reste_trace():
+    d = decider(_ctx(strategie="COPY"))
+    assert d.raison == REFUS_ZONE_MORTE
+    assert QUALITE_FLUX_NON_FOURNIE in d.signalements
 
 
 def test_le_noyau_ne_pretend_JAMAIS_a_une_execution_reelle(monkeypatch):

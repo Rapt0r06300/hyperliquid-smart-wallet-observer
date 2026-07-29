@@ -18,9 +18,18 @@ verrouillent les deux proprietes : le prix n'entre qu'UNE fois, et le PnL ne bou
 from __future__ import annotations
 
 import time
+from pathlib import Path
 
 from hl_observer.backtesting.ab_flag_replay import (
-    SLTPConfig, marks_by_coin, net_baseline_seul, run_ab_replay, simulate_exit_on_path)
+    SLTPConfig,
+    build_analysis_cache_key,
+    load_cached_report,
+    marks_by_coin,
+    net_baseline_seul,
+    run_ab_replay,
+    simulate_exit_on_path,
+    write_cached_report,
+)
 
 
 def _marks(coin: str, n: int, t0: float = 1000.0, px: float = 100.0) -> list[dict]:
@@ -43,7 +52,7 @@ def test_net_baseline_seul_EGALE_le_bras_A_de_run_ab_replay():
             r["mid"] *= (1.0 + 0.01 * rng.uniform(-1, 1))
         marks += base
     cands: list[dict] = []
-    for i in range(120):
+    for _i in range(120):
         coin, px = rng.choice([("BTC", 100.0), ("ETH", 50.0), ("SOL", 12.0), ("ARB", 3.0)])
         cands.append({"coin": coin, "direction": rng.choice(["LONG", "SHORT"]),
                       "current_mid": px * (1.0 + 0.002 * rng.uniform(-1, 1)),
@@ -57,7 +66,9 @@ def test_net_baseline_seul_EGALE_le_bras_A_de_run_ab_replay():
             rapide = net_baseline_seul(cands, marks, base_config=cfg, horizon_min=h)["arm_a"]
             # rapport COMPLET identique (net, profit factor, win rate, drawdown, comptes) — pas juste
             # le net : la vectorisation sert AUSSI l'évaluation complète, qui lit PF et drawdown.
-            assert rapide == plein, "cfg=%s h=%s :\n  rapide %s\n  bras A %s" % (cfg, h, rapide, plein)
+            assert rapide == plein, (
+                f"cfg={cfg} h={h} :\n  rapide {rapide}\n  bras A {plein}"
+            )
 
 
 def test_net_baseline_seul_accepte_un_index_marks_deja_construit():
@@ -69,6 +80,48 @@ def test_net_baseline_seul_accepte_un_index_marks_deja_construit():
     via_index = net_baseline_seul(cands, idx, base_config=cfg, horizon_min=120.0)
     via_brut = net_baseline_seul(cands, marks, base_config=cfg, horizon_min=120.0)
     assert via_index == via_brut
+
+
+def test_replay_peut_comparer_a_notionnel_constant():
+    marks = _marks("BTC", 200)
+    candidates = _cands("BTC", 4)
+    small = [dict(candidate, leader_notional_usdt=50.0) for candidate in candidates]
+    huge = [dict(candidate, leader_notional_usdt=50_000.0) for candidate in candidates]
+
+    small_report = run_ab_replay(small, marks, fixed_notional_usd=50.0)
+    huge_report = run_ab_replay(huge, marks, fixed_notional_usd=50.0)
+
+    assert small_report["comparison_notional_usd"] == 50.0
+    assert small_report["arm_a"] == huge_report["arm_a"]
+    assert small_report["arm_b"] == huge_report["arm_b"]
+
+
+def test_cache_exact_est_invalide_si_une_source_change(tmp_path: Path):
+    candidates = tmp_path / "candidates.jsonl"
+    marks = tmp_path / "marks.jsonl"
+    candidates.write_text('{"coin":"BTC"}\n', encoding="utf-8")
+    marks.write_text('{"coin":"BTC","mid":100}\n', encoding="utf-8")
+    key_before = build_analysis_cache_key(
+        candidates,
+        marks,
+        horizon_min=240.0,
+        fixed_notional_usd=50.0,
+    )
+    cache = tmp_path / "cache.json"
+    report = {"arm_a": {"trades": 1}}
+    write_cached_report(cache, key_before, report)
+
+    assert load_cached_report(cache, key_before) == report
+
+    candidates.write_text('{"coin":"BTC"}\n{"coin":"ETH"}\n', encoding="utf-8")
+    key_after = build_analysis_cache_key(
+        candidates,
+        marks,
+        horizon_min=240.0,
+        fixed_notional_usd=50.0,
+    )
+    assert key_after != key_before
+    assert load_cached_report(cache, key_after) is None
 
 
 def _cands(coin: str, n: int, t0: float = 1000.0) -> list[dict]:
@@ -125,9 +178,10 @@ def test_chaque_mark_n_entre_QU_UNE_FOIS_dans_l_estimateur(monkeypatch):
     par_mark = Counter(vus)
     pire = max(par_mark.values())
     assert pire == 2, (
-        "un mark est enregistre %d fois (attendu : 2, une par bras). Au-dela, la volatilite "
+        f"un mark est enregistre {pire} fois (attendu : 2, une par bras). "
+        "Au-dela, la volatilite "
         "est calculee sur des DOUBLONS -- et c'est elle qui regle les barrieres SL/TP du bras B."
-        % pire)
+    )
 
 
 def test_le_resultat_ne_depend_PAS_de_l_ordre_des_candidats():
@@ -152,6 +206,8 @@ def test_le_replay_tient_l_echelle():
     duree = time.time() - debut
     assert r["arm_a"]["trades"] > 0
     assert duree < 20.0, (
-        "le replay met %.1f s sur 3 000 candidats x 4 000 marks : la complexite est repartie "
+        f"le replay met {duree:.1f} s sur 3 000 candidats x 4 000 marks : "
+        "la complexite est repartie "
         "en quadratique. Sur les vraies donnees (331 k x 109 k) il ne rendra JAMAIS de "
-        "resultat." % duree)
+        "resultat."
+    )

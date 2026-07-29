@@ -15,6 +15,8 @@ import time
 from pathlib import Path
 
 RACINE = Path(__file__).resolve().parents[1]
+import resource_policy as RES
+
 HEARTBEAT_MAX_AGE_MS = 120_000            # au-delà -> collecteur figé (heartbeat trop vieux)
 EXCHANGE_MAX_AGE_MS = 300_000             # au-delà -> flux figé (dernier exchange_ts trop vieux)
 BACKOFF_S = 20.0                          # anti-tempête : pas plus d'un restart par collecteur / BACKOFF_S
@@ -97,13 +99,76 @@ class Superviseur:
         dernier = self._dernier_restart.get(nom, 0.0)
         return (time.time() - dernier) >= self.backoff_s
 
+    def _processus_du_script(self, nom: str) -> list[dict]:
+        """Repère les collecteurs déjà lancés, même s'ils viennent d'un ancien run.
+
+        L'ancien anti-doublon ne connaissait que le PID de ``superviseur.json``.
+        Après un crash du lanceur, un collecteur pouvait donc survivre puis être
+        lancé une seconde fois, doublant CPU, réseau et écritures. On adopte un
+        processus existant; on signale les doublons sans les tuer automatiquement.
+        """
+        try:
+            import psutil  # type: ignore
+        except Exception:  # noqa: BLE001
+            return []
+        argv = self.collecteurs.get(nom) or []
+        if not argv:
+            return []
+        script = Path(argv[0])
+        cible = (script if script.is_absolute() else self.root / script).resolve()
+        trouves = []
+        for p in psutil.process_iter(["pid", "cmdline", "create_time", "cwd"]):
+            try:
+                if int(p.info["pid"]) == os.getpid():
+                    continue
+                cmdline = p.info.get("cmdline") or []
+                cwd = Path(p.info.get("cwd") or self.root)
+                correspond = False
+                for arg in cmdline[1:]:
+                    if not str(arg).lower().endswith(".py"):
+                        continue
+                    ap = Path(arg)
+                    resolu = (ap if ap.is_absolute() else cwd / ap).resolve()
+                    if resolu == cible:
+                        correspond = True
+                        break
+                if correspond:
+                    trouves.append({
+                        "pid": int(p.info["pid"]),
+                        "start": float(p.info.get("create_time") or 0.0) or None,
+                        "script": str(cible),
+                    })
+            except Exception:  # noqa: BLE001
+                continue
+        return sorted(trouves, key=lambda x: (x.get("start") or 0.0, x["pid"]))
+
     # ── cycle de vie ──
     def demarrer_un(self, nom: str, *, lancer=None) -> dict:
         """Démarre un collecteur s'il n'est pas déjà vivant (anti-doublon au resume). `lancer` injectable
         pour les tests (sinon subprocess read-only, stderr capturé dans un fichier)."""
         e = self.etat.get(nom, {"restart_count": 0})
         if e.get("pid") and _proc_vivant(e["pid"], e.get("start")):
-            return {"nom": nom, "etat": "DEJA_VIVANT", "pid": e["pid"]}
+            existants = self._processus_du_script(nom)
+            return {"nom": nom, "etat": "DEJA_VIVANT", "pid": e["pid"],
+                    "doublons_detectes": max(0, len(existants) - 1)}
+        existants = self._processus_du_script(nom)
+        if existants:
+            adopte = existants[0]
+            self.etat[nom] = {
+                "pid": adopte["pid"],
+                "start": adopte["start"],
+                "restart_count": e.get("restart_count", 0),
+                "derniere_erreur": None,
+                "adopte_processus_existant": True,
+                "doublons_detectes": max(0, len(existants) - 1),
+            }
+            self._sauver()
+            return {
+                "nom": nom,
+                "etat": "ADOPTE_EXISTANT",
+                "pid": adopte["pid"],
+                "doublons_detectes": max(0, len(existants) - 1),
+            }
         try:
             if lancer is not None:
                 pid = int(lancer(nom, self.collecteurs[nom]))
@@ -114,6 +179,7 @@ class Superviseur:
                 flags = 0
                 if os.name == "nt":
                     flags = getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
+                flags = RES.subprocess_creation_flags(flags)
                 p = subprocess.Popen([sys.executable, *self.collecteurs[nom]], cwd=str(RACINE),
                                      stdout=subprocess.DEVNULL, stderr=err, creationflags=flags)
                 self.procs[nom] = p
@@ -126,8 +192,28 @@ class Superviseur:
         self._sauver()
         return {"nom": nom, "etat": "DEMARRE", "pid": self.etat[nom].get("pid")}
 
-    def demarrer_tous(self, *, lancer=None) -> dict:
-        return {n: self.demarrer_un(n, lancer=lancer) for n in self.collecteurs}
+    def demarrer_tous(self, *, lancer=None, etaler: bool = True, dormir=None) -> dict:
+        """IDEA-7 (staggered startup) : les collecteurs ne démarrent plus TOUS dans la même milliseconde.
+        Un plan de démarrage déterministe (décalage + jitter stable par nom) évite le burst synchronisé et
+        le thundering herd sur les limites Hyperliquid (10 connexions/IP, 30 nouvelles connexions/min).
+        `dormir` est injectable pour les tests (aucune attente réelle)."""
+        noms = list(self.collecteurs)
+        if not etaler:
+            return {n: self.demarrer_un(n, lancer=lancer) for n in noms}
+        try:
+            import demarrage_etale as DEM
+            plan = DEM.plan_demarrage(noms)
+        except Exception:  # noqa: BLE001 — sans le module, on démarre comme avant (jamais de blocage)
+            plan = [(n, 0.0) for n in noms]
+        attendre = dormir if dormir is not None else time.sleep
+        out, precedent = {}, 0.0
+        for nom, delai_ms in plan:
+            pause = max(0.0, float(delai_ms) - precedent) / 1000.0
+            if pause > 0:
+                attendre(pause)
+            precedent = float(delai_ms)
+            out[nom] = {**self.demarrer_un(nom, lancer=lancer), "delai_demarrage_ms": delai_ms}
+        return out
 
     def surveiller(self, *, lancer=None, maintenant_ms=None) -> dict:
         """Redémarre INDIVIDUELLEMENT les collecteurs MORTS ou VIVANTS-MAIS-FIGÉS (heartbeat trop vieux),

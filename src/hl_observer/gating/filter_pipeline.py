@@ -43,6 +43,11 @@ class ContexteDecision:
     edge_recent_bps: float | None = None    # crowding : edge récent
 
 
+    feed_quality_ready: bool | None = None
+    feed_quality_score: float | None = None
+    min_feed_quality_score: float = 75.0
+
+
 @dataclass(frozen=True, slots=True)
 class ResultatFiltres:
     accepte: bool
@@ -83,6 +88,18 @@ def appliquer_filtres(ctx: ContexteDecision) -> ResultatFiltres:
         abst.append("FRAICHEUR_AGE_ABSENT")
 
     # --- G5 WALLET STRUCTUREL : exclure infra/MM structurel (armé si stats absentes) ---
+    # DATA QUALITY GATE: a reconnecting or incoherent feed cannot create an entry.
+    if ctx.feed_quality_ready is False:
+        refus.append("FEED_NOT_SYNCHRONIZED")
+    elif ctx.feed_quality_ready is None:
+        abst.append("FEED_QUALITY_ABSENT")
+    if ctx.feed_quality_score is not None:
+        notes["feed_quality_score"] = float(ctx.feed_quality_score)
+        if float(ctx.feed_quality_score) < float(ctx.min_feed_quality_score):
+            refus.append("FEED_QUALITY_TOO_LOW")
+    elif ctx.feed_quality_ready is not None:
+        refus.append("FEED_QUALITY_UNMEASURABLE")
+
     if ctx.wallet_stats is not None:
         if est_structurel(ctx.wallet_stats):
             refus.append("WALLET_STRUCTUREL")

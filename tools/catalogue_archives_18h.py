@@ -13,12 +13,22 @@ import hashlib
 import io
 import json
 from pathlib import Path
+import time
 
 DOSSIERS = ("runtime/data", "runtime/research_lab", "data", "logs", "archives", "backups", "reports")
 EXTS = (".jsonl", ".json", ".csv", ".parquet", ".sqlite", ".sqlite3", ".db", ".gz", ".zip")
 PARSE_LIGNES = (".jsonl",)          # seuls formats parsés ligne à ligne ; le reste = métadonnées seules
 MAX_LIGNES = 200_000                 # borne de lecture par fichier (anti-saturation)
 STATUTS = ("VALID", "PARTIAL", "STALE", "TRUNCATED", "SCHEMA_MISMATCH", "DUPLICATED", "CORRUPTED", "UNUSABLE")
+
+
+def _publier_progression(callback, *, courant: int, total: int | None, detail: str, unite: str) -> None:
+    if callback is None:
+        return
+    try:
+        callback(courant=courant, total=total, detail=detail, unite=unite)
+    except TypeError:
+        callback(courant, total, detail)
 
 
 def _sha256(p: Path, *, cap: int = 64 * 1024 * 1024) -> str:
@@ -208,8 +218,20 @@ def cataloguer(root: str | Path, rundir: str | Path, *, dossiers=DOSSIERS, max_f
     return resume
 
 
-def cataloguer_complet(root: str | Path, rundir: str | Path, *, dossiers=DOSSIERS,
-                       max_events_par_source: int = 200_000, sha_integral_max_octets: int = 256 * 1024 * 1024) -> dict:
+def cataloguer_complet(
+    root: str | Path,
+    rundir: str | Path,
+    *,
+    dossiers=DOSSIERS,
+    max_events_par_source: int | None = None,
+    sha_integral_max_octets: int = 256 * 1024 * 1024,
+    source_offset: int = 0,
+    max_sources: int | None = None,
+    max_batch_bytes: int | None = None,
+    source_paths: list[str] | None = None,
+    progress_callback=None,
+    stop_event=None,
+) -> dict:
     """CATALOGUE COMPLET (LOT18H-DATA-COMPLETE) — AUCUN plafond silencieux de fichiers. Chaque source détectée
     est soit PARSÉE (via le lecteur de son format) et comptée, soit EXCLUE avec une RAISON précise. SHA-256
     INTÉGRAL (prefix_hash seulement au-delà d'un seuil de taille, marqué). Écrit data_source_accounting.csv +
@@ -224,27 +246,95 @@ def cataloguer_complet(root: str | Path, rundir: str | Path, *, dossiers=DOSSIER
     detectees = catalogue = parsees = inutilisables = exclues = erreurs = 0
     octets = events = 0
     entrees, exclusions = [], []
-    for dd in dossiers:
-        base = root / dd
-        if not base.exists():
-            continue
-        for p in sorted(base.rglob("*")):
-            if not p.is_file() or p.suffix.lower() not in EXTS + tuple("." + e for e in LEC.FORMATS_TEXTE):
+    candidats: list[Path] = []
+    dernier_affichage = 0.0
+    if source_paths is not None:
+        for raw_path in source_paths:
+            p = Path(raw_path)
+            candidats.append(p if p.is_absolute() else root / p)
+    else:
+        for dd in dossiers:
+            base = root / dd
+            if not base.exists():
                 continue
-            if str(rundir) in str(p):
-                continue
-            # anti self-ingestion : ne jamais cataloguer les SORTIES du labo (ses propres runs) comme des
-            # sources de recherche -> sinon le corpus grossit tout seul a chaque cycle. Les ledgers/logs
-            # utiles restent lus par logs_18h ; les donnees marche vivent dans runtime/data.
-            if ("continuous" in p.parts) or any("overnight" in part for part in p.parts):
-                continue
+            for p in sorted(base.rglob("*")):
+                if stop_event is not None and stop_event.is_set():
+                    break
+                if not p.is_file() or p.suffix.lower() not in EXTS + tuple("." + e for e in LEC.FORMATS_TEXTE):
+                    continue
+                if str(rundir) in str(p):
+                    continue
+                # anti self-ingestion : ne jamais cataloguer les SORTIES du labo (ses propres runs) comme des
+                # sources de recherche -> sinon le corpus grossit tout seul a chaque cycle. Les ledgers/logs
+                # utiles restent lus par logs_18h ; les donnees marche vivent dans runtime/data.
+                if ("continuous" in p.parts) or any("overnight" in part for part in p.parts):
+                    continue
+                candidats.append(p)
+                maintenant = time.monotonic()
+                if maintenant - dernier_affichage >= 0.5:
+                    _publier_progression(
+                        progress_callback,
+                        courant=len(candidats),
+                        total=None,
+                        detail=f"découverte des sources : {len(candidats)} fichier(s) trouvé(s)",
+                        unite="sources",
+                    )
+                    dernier_affichage = maintenant
+    total_candidats = len(candidats)
+    source_offset = max(0, min(int(source_offset), total_candidats))
+    fin = total_candidats if max_sources is None else min(
+        total_candidats,
+        source_offset + max(1, int(max_sources)),
+    )
+    lot = candidats[source_offset:fin]
+    if max_batch_bytes is not None and lot:
+        budget = max(1, int(max_batch_bytes))
+        lot_borne: list[Path] = []
+        octets_lot = 0
+        for p in lot:
+            try:
+                taille = max(0, int(p.stat().st_size))
+            except OSError:
+                taille = 0
+            if lot_borne and octets_lot + taille > budget:
+                break
+            lot_borne.append(p)
+            octets_lot += taille
+        lot = lot_borne or lot[:1]
+    fin_lot = source_offset + len(lot)
+    _publier_progression(
+        progress_callback,
+        courant=source_offset,
+        total=total_candidats,
+        detail=(
+            f"inventaire terminé : lot {source_offset + 1 if lot else source_offset}/"
+            f"{fin_lot} sur {total_candidats} source(s)"
+        ),
+        unite="sources",
+    )
+    for numero_lot, p in enumerate(lot, 1):
+            numero_source = source_offset + numero_lot
+            if stop_event is not None and stop_event.is_set():
+                break
             detectees += 1
             fmt = p.suffix.lower().lstrip(".")
             try:
                 taille = p.stat().st_size
             except OSError:
-                erreurs += 1; exclusions.append({"chemin": str(p), "raison": "STAT_ECHEC"}); continue
+                erreurs += 1
+                exclusions.append({"chemin": str(p), "raison": "STAT_ECHEC"})
+                continue
             octets += taille
+            _publier_progression(
+                progress_callback,
+                courant=numero_source - 1,
+                total=total_candidats,
+                detail=(
+                    f"source {numero_source}/{total_candidats} : empreinte et lecture de {p.name} "
+                    f"({taille / (1024 * 1024):.1f} Mio)"
+                ),
+                unite="sources",
+            )
             sha = LEC.sha256_integral(p) if taille <= sha_integral_max_octets else None
             pref = LEC.prefix_hash(p)
             e = {"chemin": str(p.relative_to(root)), "format": fmt, "octets": taille,
@@ -268,7 +358,22 @@ def cataloguer_complet(root: str | Path, rundir: str | Path, *, dossiers=DOSSIER
             n_ev = 0
             try:
                 for _off, _rec in lecteur(p, max_records=max_events_par_source):
+                    if stop_event is not None and stop_event.is_set():
+                        break
                     n_ev += 1
+                    maintenant = time.monotonic()
+                    if maintenant - dernier_affichage >= 0.5:
+                        _publier_progression(
+                            progress_callback,
+                            courant=numero_source - 1,
+                            total=total_candidats,
+                            detail=(
+                                f"source {numero_source}/{total_candidats} {p.name} : "
+                                f"{n_ev} événement(s) vérifié(s)"
+                            ),
+                            unite="sources",
+                        )
+                        dernier_affichage = maintenant
             except ImportError as ie:                    # ex : Parquet sans moteur -> EXCLU avec raison
                 e.update({"statut": "EXCLUDED", "events": 0, "raison": "MOTEUR_ABSENT:%s" % str(ie)[:40]})
                 entrees.append(e); exclues += 1
@@ -284,16 +389,44 @@ def cataloguer_complet(root: str | Path, rundir: str | Path, *, dossiers=DOSSIER
                 parsees += 1
             else:
                 inutilisables += 1
+            _publier_progression(
+                progress_callback,
+                courant=numero_source,
+                total=total_candidats,
+                detail=(
+                    f"source {numero_source}/{total_candidats} terminée : "
+                    f"{n_ev} événement(s), statut {e['statut']}"
+                ),
+                unite="sources",
+            )
     completeness = round(parsees / detectees, 4) if detectees else 0.0
-    acc = {"n_total_detected": detectees, "n_catalogued": catalogue, "n_parsed": parsees,
+    acc = {"n_total_detected": total_candidats, "n_batch_detected": detectees,
+           "n_catalogued": catalogue, "n_parsed": parsees,
            "n_unusable": inutilisables, "n_excluded": exclues, "n_pending": sum(1 for e in entrees if e.get("statut") == "PENDING_EXTRACTION"),
-           "errors": erreurs, "octets": octets, "events": events, "completeness_ratio": completeness}
+           "errors": erreurs, "octets": octets, "events": events, "completeness_ratio": completeness,
+           "source_offset": source_offset, "next_source_offset": fin_lot,
+           "n_deferred": max(0, total_candidats - fin_lot),
+           "bootstrap_complete": bool(fin_lot >= total_candidats)}
     (rundir / "catalogue" / "DATA_CATALOG_COMPLET.json").write_text(
         json.dumps({"accounting": acc, "sources": entrees}, ensure_ascii=False, indent=1), encoding="utf-8")
     _ecrire_csv(rundir / "results" / "data_source_accounting.csv",
                 ["chemin", "format", "statut", "octets", "events", "sha256_integral", "vivant"], entrees)
     _ecrire_csv(rundir / "results" / "data_source_exclusions.csv", ["chemin", "raison"], exclusions)
-    return {"accounting": acc, "n_sources": len(entrees), "sources": entrees}
+    source_plan = []
+    for p in candidats:
+        try:
+            source_plan.append(str(p.relative_to(root)))
+        except ValueError:
+            source_plan.append(str(p))
+    return {
+        "accounting": acc,
+        "n_sources": len(entrees),
+        "sources": entrees,
+        "source_plan": source_plan,
+        "source_offset": source_offset,
+        "next_source_offset": fin_lot,
+        "bootstrap_complete": bool(fin_lot >= total_candidats),
+    }
 
 
 def _ecrire_csv(p: Path, cols: list[str], lignes: list[dict]) -> None:
