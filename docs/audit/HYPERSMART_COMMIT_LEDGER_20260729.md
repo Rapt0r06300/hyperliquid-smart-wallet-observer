@@ -6,6 +6,7 @@ commit correspondant; aucun état `DONE` n'est déduit d'un simple flag.
 
 | Bloc | Objet | SHA code | Tests | Preuve runtime | Statut |
 |---:|---|---|---|---|---|
+| 8 | Execution cross-venue non atomique | `0fb83c7` | 57 tests cross-venue/paper/ledger verts + Ruff | Appel live read-only HL/Binance dans les deux ordres; P50/P95/P99 mesures; snapshots distincts; residu deboucle ou explicite; deux ledgers `TRUSTED`, chaines valides | DONE |
 | 3 | Contrat d'horodatage causal et fraîcheur après redémarrage | `4589481` | 59 tests ciblés verts | Appel runtime : frais à 120 ms, même snapshot refusé à 2120 ms ; données legacy sans wall clock refusées `TS_ABSENT` | DONE |
 | 4 | Coeur d'execution paper canonique | `8cfcb62` | 76 tests cibles verts | Script runtime : coeur direct, `PaperEngine` et `PaperSimConnector` acceptent le meme snapshot L2 avec le meme fill `100.0600059997`, notional `100`, cout `6.00059997 bps`; `parity=true`, `real_execution=false` | DONE |
 | 5 | Book-walk L2 executable et auditable | `5371b43` | 83 tests cibles verts | Script runtime : BUY asks et SELL bids dans l'ordre executable, VWAP exact; demande `500`, profondeur `101`, fill `101`, manque `399`; `passed=true` | DONE |
