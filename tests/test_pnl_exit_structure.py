@@ -124,7 +124,7 @@ def _position(entry: float, size: float, coin: str = "ARB"):
         f"0xw|{coin}|SHORT": {
             "coin": coin, "direction": "SHORT", "side": "SHORT",
             "size": -abs(size), "avg_price": entry, "opened_at_ms": 0,
-            "wallet_address": "0xw",
+            "wallet_address": "0xw", "entry_costs": 0.0,
         }
     }
 
@@ -207,7 +207,9 @@ def test_a_position_cannot_stay_open_forever(monkeypatch):
     t0 = 1_000_000_000
     positions = {
         "0xw|SOL|LONG": {"coin": "SOL", "direction": "LONG", "side": "LONG", "size": 5.0,
-                         "avg_price": 100.0, "opened_at_ms": t0, "wallet_address": "0xw"}
+                         "avg_price": 100.0, "entry_costs": 0.0,
+                         "fee_already_embedded_in_entry_price": False,
+                         "opened_at_ms": t0, "wallet_address": "0xw"}
     }
     ledger: list[dict] = []
     # 8,4 h plus tard, prix INCHANGE : ni TP ni SL ne se declenchent -> avant, la position dormait
@@ -248,7 +250,9 @@ def test_funding_is_charged_to_long_positions(monkeypatch):
     t0 = 1_000_000_000
     positions = {
         "0xw|SOL|LONG": {"coin": "SOL", "direction": "LONG", "side": "LONG", "size": 5.0,
-                         "avg_price": 100.0, "opened_at_ms": t0, "wallet_address": "0xw"}
+                         "avg_price": 100.0, "entry_costs": 0.0,
+                         "fee_already_embedded_in_entry_price": False,
+                         "opened_at_ms": t0, "wallet_address": "0xw"}
     }
     ledger: list[dict] = []
     apply_sltp_exits(positions, ledger, {"SOL": 100.0}, now_ms=t0 + int(8.4 * 3600 * 1000),

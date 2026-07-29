@@ -17,7 +17,17 @@ import math
 import os
 from typing import Any
 
+from hl_observer.collection.l2_snapshot_cache import live_execution_truth_for
 from hl_observer.ops.echec_silencieux import noter as _noter_echec
+from hl_observer.paper_trading.exec_model import (
+    book_notional_for_quantity,
+    simulate_execution,
+)
+from hl_observer.simulation.accounting_truth import (
+    ACCOUNTING_SCHEMA_VERSION,
+    allocated_entry_cost_usdc,
+    finite_number,
+)
 from hl_observer.simulation.session_memory import evaluate_coin_side_session_memory
 from hl_observer.strategies.strategy_mode import (
     GRINDER,
@@ -258,7 +268,7 @@ def apply_fusion_paper_orders_to_state(
             continue
 
         opened_at_ms = int(_safe_float(position.get("opened_at_ms")) or current_ms)
-        entry_costs = notional * (_safe_float(trade.get("fees_and_cost_bps")) or 0.0) / 10_000.0
+        reported_entry_costs = notional * (_safe_float(trade.get("fees_and_cost_bps")) or 0.0) / 10_000.0
         decision_context = decision.get("decision_context") if isinstance(decision.get("decision_context"), dict) else {}
         evidence_fields = _paper_engine_evidence_fields(decision_context)
         leader_wallets_csv = str(evidence_fields.get("leader_wallets_csv") or wallet)
@@ -277,10 +287,16 @@ def apply_fusion_paper_orders_to_state(
             "size": quantity if side == "LONG" else -quantity,
             "avg_price": entry_price,
             "entry_price": entry_price,
-            "entry_costs": round(entry_costs, 8),
+            # PaperEngine's fill price is already all-in (book walk, fee and
+            # latency). Keep the reported cost as evidence, never as a second
+            # accounting debit.
+            "entry_costs": 0.0,
+            "reported_entry_costs_usdc": round(reported_entry_costs, 8),
+            "fee_already_embedded_in_entry_price": True,
             "opened_at_ms": opened_at_ms,
             "last_update_at_ms": current_ms,
             "source_delta_key": delta_key,
+            "paper_position_instance_id": position_key,
             "position_mode": "EXTERNAL_GITHUB_FUSION_PAPER",
             "leader_wallets_csv": leader_wallets_csv,
             "last_replay_action": "FUSION_PAPER_ENTRY",
@@ -310,19 +326,21 @@ def apply_fusion_paper_orders_to_state(
                 "bot_replay_action": "FUSION_PAPER_ENTRY",
                 "strategy_mode": _mode,
                 "paper_action_type": "OPEN",
+                "accounting_schema_version": ACCOUNTING_SCHEMA_VERSION,
+                "paper_position_instance_id": position_key,
                 "status": "LOCAL_REPLAY",
                 "estimated_net_pnl_usdc": None,
                 "gross_pnl_usdc": None,
-                "fee_cost_usdc": round(entry_costs, 8),
-                # This legacy A/B path receives a raw reference price rather than
-                # a PaperEngine fill price. Its explicit entry cost is carried to
-                # the matching close exactly once.
-                "fee_already_embedded_in_entry_price": False,
-                "cost_accounting": "SEPARATE_ENTRY_COST_CARRIED_TO_CLOSE",
+                "fee_cost_usdc": round(reported_entry_costs, 8),
+                "fee_already_embedded_in_entry_price": True,
+                "cost_accounting": "ENTRY_COST_EMBEDDED_IN_FILL_PRICE",
                 "copied_notional_usdt": notional,
                 "bot_position_size_after": quantity if side == "LONG" else -quantity,
+                "filled_quantity": quantity,
+                "entry_executable_price": entry_price,
                 "entry_price": entry_price,
                 "average_entry_price": entry_price,
+                "funding_cost_usdc": 0.0,
                 "reason": "EXTERNAL_GITHUB_FUSION_ACCEPTED_PAPER_ONLY",
                 "evidence_hash": str(decision.get("evidence_hash") or ""),
                 "paper_mode": "PAPER_LOCAL_USDT_ONLY",
@@ -340,7 +358,7 @@ def apply_fusion_paper_orders_to_state(
         )
         state.simulation_processed_delta_keys.add(delta_key)
         state.simulation_reproduced_entries_total += 1
-        state.simulation_entry_costs_paid_usdc += entry_costs
+        state.simulation_entry_costs_paid_usdc += reported_entry_costs
         result["applied_count"] += 1
 
     for order in direct_orders:
@@ -478,11 +496,13 @@ def apply_fusion_paper_orders_to_state(
             "avg_price": entry_price,
             "entry_price": entry_price,
             "entry_costs": round(entry_costs, 8),
+            "fee_already_embedded_in_entry_price": False,
             "execution_cost_bps": execution_cost_bps,
             "execution_cost_status": execution_cost_status,
             "opened_at_ms": current_ms,
             "last_update_at_ms": current_ms,
             "source_delta_key": delta_key,
+            "paper_position_instance_id": position_key,
             "position_mode": _position_mode_for_direct_order(order),
             "leader_wallets_csv": strategy_id,
             "last_replay_action": "FUSION_DIRECT_PAPER_ENTRY",
@@ -517,23 +537,26 @@ def apply_fusion_paper_orders_to_state(
                 "bot_replay_action": "FUSION_DIRECT_PAPER_ENTRY",
                 "strategy_mode": _mode,
                 "paper_action_type": "OPEN",
+                "accounting_schema_version": ACCOUNTING_SCHEMA_VERSION,
+                "paper_position_instance_id": position_key,
                 "status": "LOCAL_REPLAY",
                 "estimated_net_pnl_usdc": None,
                 "gross_pnl_usdc": None,
                 "fee_cost_usdc": round(entry_costs, 8),
                 "execution_cost_bps": execution_cost_bps,
                 "execution_cost_status": execution_cost_status,
-                # PIEGE A DOUBLE COMPTAGE (2026-07-11). Ce cout est DEJA dans `entry_price` :
-                # le PaperEngine pose entry_price = fill_price, cout d'execution inclus
-                # (embedded_cost_model = fill_price_includes_spread_slippage_fee_latency).
-                # `fee_cost_usdc` ci-dessus n'est qu'un REPORT, pas une seconde ponction.
-                # Le soustraire du gross NOIRCIT le PnL. Un outil d'audit s'y est deja fait
-                # prendre. Ce drapeau existe pour que plus personne ne s'y trompe.
-                "fee_already_embedded_in_entry_price": True,
+                # This direct A/B path records a raw reference price and a
+                # separate cost. The matching close carries that entry cost
+                # exactly once; it is not embedded in ``entry_price``.
+                "fee_already_embedded_in_entry_price": False,
+                "cost_accounting": "SEPARATE_ENTRY_COST_CARRIED_TO_CLOSE",
                 "copied_notional_usdt": notional,
                 "bot_position_size_after": quantity if side == "LONG" else -quantity,
+                "filled_quantity": quantity,
+                "entry_executable_price": entry_price,
                 "entry_price": entry_price,
                 "average_entry_price": entry_price,
+                "funding_cost_usdc": 0.0,
                 "reason": _ledger_reason_for_direct_order(order),
                 "evidence_hash": str(order_id),
                 "paper_mode": "PAPER_LOCAL_USDT_ONLY",
@@ -700,29 +723,34 @@ def _record_funding_arb_events(
         coin = str(item.get("coin") or "").upper()
         if not pair_id or not coin:
             continue
-        delta_key = f"funding-arb:{pair_id}:{action}:{current_ms}"
+        event_id = str(item.get("event_id") or "").strip()
+        delta_key = event_id or f"funding-arb:{pair_id}:{action.lower()}"
         if delta_key in state.simulation_processed_delta_keys:
             continue
-        amount = float(item.get("amount_usdc") or 0.0)
+        amount = finite_number(item.get("amount_usdc"))
         # LE TERME QUI MANQUAIT (2026-07-11). Le funding-arb n'a QU'UNE JAMBE : c'est une position
         # NUE. Son PnL comptait le funding encaisse et les couts, mais JAMAIS le mouvement du prix.
         # Un revenu de funding sans risque de marche, ca n'existe pas -- c'etait un PnL fabrique.
         _price_pnl = item.get("price_pnl_usdc")
         _price_inconnu = bool(item.get("price_pnl_unknown"))
-        try:
-            _price_pnl = float(_price_pnl) if _price_pnl is not None else None
-        except (TypeError, ValueError):
-            _price_pnl = None
-        if action == "ACCRUAL":
-            pnl_delta = amount
-        else:
-            pnl_delta = -abs(amount)
-            if action == "CLOSE" and _price_pnl is not None:
-                pnl_delta += _price_pnl
-        state.simulation_realized_pnl_usdc += pnl_delta
+        _price_pnl = finite_number(_price_pnl)
+        round_trip_net = finite_number(item.get("net_pnl_usdc"))
+        close_measurable = (
+            action == "CLOSE"
+            and not _price_inconnu
+            and _price_pnl is not None
+            and round_trip_net is not None
+        )
+        # OPEN and ACCRUAL are evidence for a still-open round trip. They do
+        # not enter strict realized PnL independently. Only a measurable CLOSE
+        # books the full entry + funding + price + exit result exactly once.
+        pnl_delta = round_trip_net if close_measurable else None
+        if pnl_delta is not None:
+            state.simulation_realized_pnl_usdc += pnl_delta
         if action != "ACCRUAL":
-            state.simulation_exit_costs_paid_usdc += abs(amount) if action == "CLOSE" else 0.0
-            state.simulation_entry_costs_paid_usdc += abs(amount) if action == "OPEN" else 0.0
+            known_cost = abs(amount) if amount is not None else 0.0
+            state.simulation_exit_costs_paid_usdc += known_cost if action == "CLOSE" else 0.0
+            state.simulation_entry_costs_paid_usdc += known_cost if action == "OPEN" else 0.0
         state.simulation_ledger_events.append(
             {
                 "delta_key": delta_key,
@@ -731,7 +759,7 @@ def _record_funding_arb_events(
                 "leader_action": f"FUNDING_ARB_{action}",
                 "leader_side": "NEUTRAL",
                 "leader_price": None,
-                "leader_notional_usdc": float(item.get("amount_usdc") or 0.0),
+                "leader_notional_usdc": amount,
                 "observed_at_ms": current_ms,
                 "bot_replay_action": f"FUNDING_ARB_PAPER_{action}",
                 # PISTE 11 -- le funding-arb EST le Grinder. Sans ce champ il restait invisible
@@ -739,13 +767,34 @@ def _record_funding_arb_events(
                 "strategy_mode": GRINDER,
                 "paper_action_type": "FUNDING_ARB_" + action,
                 "status": "LOCAL_REPLAY",
-                "estimated_net_pnl_usdc": round(pnl_delta, 8),
-                "gross_pnl_usdc": round(pnl_delta, 8) if action == "ACCRUAL" else None,
-                "fee_cost_usdc": abs(amount) if action in {"OPEN", "CLOSE"} else 0.0,
+                "estimated_net_pnl_usdc": (
+                    round(pnl_delta, 8) if pnl_delta is not None else None
+                ),
+                "gross_pnl_usdc": (
+                    round(_price_pnl, 8) if close_measurable else None
+                ),
+                "fee_cost_usdc": (
+                    abs(amount)
+                    if amount is not None and action in {"OPEN", "CLOSE"}
+                    else None
+                ),
+                "funding_accrual_usdc": (
+                    amount if amount is not None and action == "ACCRUAL" else None
+                ),
+                "round_trip_net_pnl_usdc": round_trip_net,
+                "pnl_accounting_status": (
+                    "STRICT_ROUND_TRIP_MEASURED"
+                    if close_measurable
+                    else (
+                        "PNL_UNMEASURABLE"
+                        if action == "CLOSE"
+                        else "DEFERRED_UNTIL_CLOSE"
+                    )
+                ),
                 "copied_notional_usdt": 0.0,
                 "bot_position_size_after": None,
                 "reason": (
-                    "INSUFFICIENT_DATA_PRICE_UNKNOWN_" + str(item.get("reason") or action)
+                    "PNL_UNMEASURABLE_PRICE_UNKNOWN_" + str(item.get("reason") or action)
                     if (action == "CLOSE" and _price_inconnu)
                     else str(item.get("reason") or action)
                 ),
@@ -754,6 +803,7 @@ def _record_funding_arb_events(
                 "price_pnl_unknown": _price_inconnu,
                 "rate_bps_per_hour": item.get("rate_bps_per_hour"),
                 "pair_id": pair_id,
+                "event_id": delta_key,
                 "position_mode": "FUNDING_ARB_DELTA_NEUTRAL_PAPER",
                 "paper_mode": "PAPER_LOCAL_USDT_ONLY",
                 "research_only": True,
@@ -1495,24 +1545,141 @@ def _apply_direct_paper_close_order(
         result["reasons"].append("INVALID_DIRECT_PAPER_CLOSE_POSITION_NUMBERS")
         state.simulation_processed_delta_keys.add(delta_key)
         return
-    closed_notional = abs(size * exit_price)
-    gross_pnl = (exit_price - entry_price) * size
-    entry_costs = _safe_float(position.get("entry_costs"))
-    if entry_costs is None or not math.isfinite(entry_costs) or entry_costs < 0:
+    open_quantity = abs(size)
+    entry_costs = allocated_entry_cost_usdc(
+        position,
+        close_quantity=open_quantity,
+        open_quantity=open_quantity,
+    )
+    if entry_costs is None:
         result["skipped_count"] += 1
         result["reasons"].append("DIRECT_ENTRY_COST_UNMEASURABLE")
+        _record_direct_order_refusal(
+            state,
+            order,
+            delta_key=delta_key,
+            current_ms=current_ms,
+            reason="DIRECT_ENTRY_COST_UNMEASURABLE",
+        )
         state.simulation_processed_delta_keys.add(delta_key)
         return
     execution_cost_bps, execution_cost_status = _direct_execution_cost_bps(metadata)
+    execution_snapshot_id: str | None = None
+    requested_notional = open_quantity * exit_price
+    filled_notional = requested_notional
+    missed_notional = 0.0
+    close_quantity = open_quantity
+    fill_ratio = 1.0
+    partial = False
+    exit_cost_embedded = False
+
     if execution_cost_bps is None:
+        truth = live_execution_truth_for(coin, decision_ts_ms=current_ms)
+        if truth is None:
+            result["skipped_count"] += 1
+            result["reasons"].append("DIRECT_EXECUTION_COST_UNMEASURABLE")
+            _record_direct_order_refusal(
+                state,
+                order,
+                delta_key=delta_key,
+                current_ms=current_ms,
+                reason="DIRECT_EXECUTION_COST_UNMEASURABLE",
+            )
+            state.simulation_processed_delta_keys.add(delta_key)
+            return
+        exit_side = "SELL" if side == "LONG" else "BUY"
+        requested_notional = book_notional_for_quantity(
+            truth,
+            side=exit_side,
+            quantity=open_quantity,
+            fallback_price=exit_price,
+        )
+        if requested_notional <= 0:
+            result["skipped_count"] += 1
+            result["reasons"].append("DIRECT_EXIT_NO_VISIBLE_DEPTH")
+            _record_direct_order_refusal(
+                state,
+                order,
+                delta_key=delta_key,
+                current_ms=current_ms,
+                reason="DIRECT_EXIT_NO_VISIBLE_DEPTH",
+            )
+            state.simulation_processed_delta_keys.add(delta_key)
+            return
+        execution = simulate_execution(
+            side=exit_side,
+            notional_usdc=requested_notional,
+            mid_price=truth.mid_price,
+            execution_truth=truth,
+            decision_ts_ms=current_ms,
+            max_book_age_ms=5_000,
+            strict_book=True,
+            min_fill_ratio=0.0,
+        )
+        if (
+            execution.fill_price is None
+            or execution.net_cost_bps is None
+            or execution.cost_status != "MEASURED"
+            or execution.execution_snapshot_id is None
+            or execution.filled_quantity <= 0
+        ):
+            reason = execution.reason or "DIRECT_EXECUTION_COST_UNMEASURABLE"
+            result["skipped_count"] += 1
+            result["reasons"].append(reason)
+            _record_direct_order_refusal(
+                state,
+                order,
+                delta_key=delta_key,
+                current_ms=current_ms,
+                reason=reason,
+            )
+            state.simulation_processed_delta_keys.add(delta_key)
+            return
+        close_quantity = min(open_quantity, execution.filled_quantity)
+        fill_ratio = min(1.0, close_quantity / open_quantity)
+        partial = fill_ratio < 0.999999
+        exit_price = execution.fill_price
+        filled_notional = execution.filled_notional_usdc
+        missed_notional = max(0.0, (open_quantity - close_quantity) * truth.mid_price)
+        execution_cost_bps = execution.net_cost_bps
+        execution_cost_status = execution.cost_status
+        execution_snapshot_id = execution.execution_snapshot_id
+        exit_cost_embedded = True
+
+    allocated_entry_cost = allocated_entry_cost_usdc(
+        position,
+        close_quantity=close_quantity,
+        open_quantity=open_quantity,
+    )
+    if allocated_entry_cost is None:
         result["skipped_count"] += 1
-        result["reasons"].append("DIRECT_EXECUTION_COST_UNMEASURABLE")
+        result["reasons"].append("DIRECT_ENTRY_COST_UNMEASURABLE")
+        _record_direct_order_refusal(
+            state,
+            order,
+            delta_key=delta_key,
+            current_ms=current_ms,
+            reason="DIRECT_ENTRY_COST_UNMEASURABLE",
+        )
         state.simulation_processed_delta_keys.add(delta_key)
         return
-    exit_costs = closed_notional * execution_cost_bps / 10_000.0
-    net_pnl = gross_pnl - entry_costs - exit_costs
+    closed_notional = close_quantity * exit_price
+    signed_close_quantity = close_quantity if side == "LONG" else -close_quantity
+    gross_pnl = (exit_price - entry_price) * signed_close_quantity
+    exit_costs = filled_notional * execution_cost_bps / 10_000.0
+    net_pnl = gross_pnl - allocated_entry_cost
+    if not exit_cost_embedded:
+        net_pnl -= exit_costs
+    remaining_quantity = max(0.0, open_quantity - close_quantity)
+    remaining_entry_cost = max(0.0, entry_costs - allocated_entry_cost)
     strategy_id = str(order.get("strategy_id") or "")
     order_id = str(order.get("order_id") or "")
+    paper_action = "REDUCE" if partial else "CLOSE"
+    replay_action = (
+        "FUSION_DIRECT_PAPER_REDUCE"
+        if partial
+        else "FUSION_DIRECT_PAPER_CLOSE"
+    )
 
     state.simulation_ledger_events.append(
         {
@@ -1524,27 +1691,49 @@ def _apply_direct_paper_close_order(
             "leader_price": exit_price,
             "leader_notional_usdc": closed_notional,
             "observed_at_ms": current_ms,
-            "bot_replay_action": "FUSION_DIRECT_PAPER_CLOSE",
+            "bot_replay_action": replay_action,
             "strategy_mode": mode_of_position(position),
-            "paper_action_type": "CLOSE",
+            "paper_action_type": paper_action,
+            "accounting_schema_version": ACCOUNTING_SCHEMA_VERSION,
             "status": "LOCAL_REPLAY",
             "estimated_net_pnl_usdc": round(net_pnl, 8),
             "gross_pnl_usdc": round(gross_pnl, 8),
             "fee_cost_usdc": round(exit_costs, 8),
-            "entry_cost_carried_usdc": round(entry_costs, 8),
-            "total_round_trip_cost_usdc": round(entry_costs + exit_costs, 8),
-            "fee_already_embedded_in_entry_price": False,
-            "fee_already_embedded_in_exit_price": False,
-            "cost_accounting": "ROUND_TRIP_COST_SUBTRACTED_EXACTLY_ONCE",
+            "entry_cost_carried_usdc": round(allocated_entry_cost, 8),
+            "remaining_entry_cost_usdc": round(remaining_entry_cost, 8),
+            "total_round_trip_cost_usdc": round(allocated_entry_cost + exit_costs, 8),
+            "fee_already_embedded_in_entry_price": position.get(
+                "fee_already_embedded_in_entry_price"
+            )
+            is True,
+            "fee_already_embedded_in_exit_price": exit_cost_embedded,
+            "cost_accounting": (
+                "EXIT_COST_EMBEDDED_ENTRY_COST_SUBTRACTED_EXACTLY_ONCE"
+                if exit_cost_embedded
+                else "ROUND_TRIP_COST_SUBTRACTED_EXACTLY_ONCE"
+            ),
             "execution_cost_bps": execution_cost_bps,
             "execution_cost_status": execution_cost_status,
+            "execution_snapshot_id": execution_snapshot_id,
+            "requested_notional_usdc": round(requested_notional, 8),
+            "filled_notional_usdc": round(filled_notional, 8),
+            "missed_notional_usdc": round(missed_notional, 8),
+            "requested_quantity": round(open_quantity, 12),
+            "filled_quantity": round(close_quantity, 12),
+            "fill_ratio": round(fill_ratio, 8),
+            "partial": partial,
             "copied_notional_usdt": closed_notional,
-            "bot_position_size_after": 0.0,
+            "bot_position_size_after": (
+                remaining_quantity if side == "LONG" else -remaining_quantity
+            ),
             "matched_position_key": position_key,
+            "paper_position_instance_id": position_key,
             "source_delta_key": position.get("source_delta_key"),
+            "exit_executable_price": exit_price,
             "entry_price": entry_price,
             "exit_price": exit_price,
             "average_entry_price": entry_price,
+            "funding_cost_usdc": 0.0,
             "reason": str(metadata.get("close_reason") or "EXTERNAL_GITHUB_FUSION_CLOSE_PAPER_ONLY"),
             "evidence_hash": order_id,
             "paper_mode": "PAPER_LOCAL_USDT_ONLY",
@@ -1560,8 +1749,14 @@ def _apply_direct_paper_close_order(
             "secret_material_used": False,
         }
     )
-    _release_processed_key_for_position(state, position)
-    del state.simulation_virtual_positions[position_key]
+    if partial:
+        position["size"] = remaining_quantity if side == "LONG" else -remaining_quantity
+        position["entry_costs"] = round(remaining_entry_cost, 8)
+        position["last_update_at_ms"] = current_ms
+        position["last_replay_action"] = replay_action
+    else:
+        _release_processed_key_for_position(state, position)
+        del state.simulation_virtual_positions[position_key]
     state.simulation_processed_delta_keys.add(delta_key)
     state.simulation_realized_pnl_usdc += net_pnl
     state.simulation_exit_costs_paid_usdc += exit_costs
@@ -1640,7 +1835,13 @@ def _env_float(name: str, default: float) -> float:
 
 
 def _trim_ledger(state: UiState) -> None:
-    state.simulation_ledger_events[:] = state.simulation_ledger_events[-20_000:]
+    """Keep the canonical accounting history complete.
+
+    Read-only dashboard projections may be sliced, but mutating this source
+    list erased opens_today, attribution and dedupe evidence.
+    """
+
+    return None
 
 
 __all__ = ["apply_fusion_paper_orders_to_state"]

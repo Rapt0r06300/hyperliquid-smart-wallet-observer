@@ -7,7 +7,12 @@ from hashlib import sha256
 
 from hl_observer.config.settings import Settings
 from hl_observer.hyperliquid.schemas import RiskDecision
-from hl_observer.paper_trading.exec_model import ExecModelConfig, ExecResult, simulate_execution
+from hl_observer.paper_trading.exec_model import (
+    ExecModelConfig,
+    ExecResult,
+    book_notional_for_quantity,
+    simulate_execution,
+)
 from hl_observer.paper_trading.execution_truth import ExecutionTruth
 from hl_observer.position_lifecycle.reconstructor import LifecycleAction
 from hl_observer.risk.gates import RiskContext
@@ -417,7 +422,7 @@ class PaperEngine:
         close_fraction = 1.0 if delta.action in {LifecycleAction.CLOSE_LONG, LifecycleAction.CLOSE_SHORT} else _reduce_fraction(position, delta)
         requested_close_quantity = position.quantity * close_fraction
         exit_side = "SELL" if position.side == "LONG" else "BUY"
-        requested_close_notional = _book_notional_for_quantity(
+        requested_close_notional = book_notional_for_quantity(
             execution_truth,
             side=exit_side,
             quantity=requested_close_quantity,
@@ -747,29 +752,6 @@ def _risk_depth(execution_truth: ExecutionTruth | None) -> float | None:
         execution_truth.visible_notional("BUY"),
         execution_truth.visible_notional("SELL"),
     )
-
-
-def _book_notional_for_quantity(
-    execution_truth: ExecutionTruth | None,
-    *,
-    side: str,
-    quantity: float,
-    fallback_price: float,
-) -> float:
-    requested_quantity = float(quantity)
-    if not math.isfinite(requested_quantity) or requested_quantity <= 0:
-        return 0.0
-    if execution_truth is None:
-        return requested_quantity * fallback_price
-    remaining = requested_quantity
-    quote_notional = 0.0
-    for price, available_quantity in execution_truth.levels_for_side(side):
-        take_quantity = min(remaining, available_quantity)
-        quote_notional += take_quantity * price
-        remaining -= take_quantity
-        if remaining <= 1e-12:
-            break
-    return quote_notional
 
 
 def _execution_context(result: ExecResult) -> dict[str, object]:

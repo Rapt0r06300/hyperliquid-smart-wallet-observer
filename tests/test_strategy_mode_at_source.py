@@ -45,6 +45,7 @@ def _position(mode: str | None, *, side: str = "LONG", avg: float = 100.0) -> di
         "direction": side,
         "size": 5.0 if side == "LONG" else -5.0,
         "avg_price": avg,
+        "entry_costs": 0.0,
         "opened_at_ms": NOW - 600_000,
         "wallet_address": "0x" + "a" * 40,
     }

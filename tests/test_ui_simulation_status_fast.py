@@ -15,6 +15,8 @@ for _k in list(os.environ):
 import pytest
 
 from starlette.testclient import TestClient
+from hl_observer.collection.l2_snapshot_cache import clear as clear_l2_cache
+from hl_observer.collection.l2_snapshot_cache import push_book
 from hl_observer.cli import _settings
 from hl_observer.ui.persistent_state import simulation_state_path
 from hl_observer.ui.app import create_ui_app
@@ -63,6 +65,30 @@ def _planchers_permissifs_pour_tester_la_persistance(monkeypatch):
         ("HYPERSMART_LEADER_MID_FALLBACK_MAX_AGE_MS", "600000"),
     ):
         monkeypatch.setenv(var, val)
+
+
+@pytest.fixture(autouse=True)
+def _isolate_recorded_execution_books():
+    clear_l2_cache()
+    yield
+    clear_l2_cache()
+
+
+def _seed_recorded_execution_book(monkeypatch, *, coin: str, mid: float, observed_at_ms: int) -> None:
+    """Give persistence tests the exact recorded L2 truth needed for a fill."""
+
+    monkeypatch.setenv("HYPERSMART_V26_LIVE_BOOK_COSTS", "1")
+    # These tests exercise persistence, not empirical-edge calibration. The
+    # legacy proxy is therefore enabled explicitly and remains test-local.
+    monkeypatch.setenv("HYPERSMART_REQUIRE_EMPIRICAL_EDGE", "0")
+    push_book(
+        coin,
+        bids=((mid - 0.01, 10_000.0),),
+        asks=((mid + 0.01, 10_000.0),),
+        received_ts_ms=observed_at_ms,
+        exchange_ts_ms=max(1, observed_at_ms - 1),
+        source="recorded_hyperliquid_l2_fixture",
+    )
 
 
 def test_status_is_fast_and_readonly():
@@ -392,6 +418,7 @@ def test_fusion_status_route_runs_only_from_explicit_engine_input(tmp_path, monk
     heartbeat_path = simulation_state_path(settings).parent / "hypersmart_engine_status.json"
     heartbeat_path.parent.mkdir(parents=True, exist_ok=True)
     event_ms = int(time.time() * 1000)
+    _seed_recorded_execution_book(monkeypatch, coin="HYPE", mid=70.05, observed_at_ms=event_ms)
     heartbeat_path.write_text(
         json.dumps(
             {
@@ -500,6 +527,7 @@ def test_status_persists_accepted_fusion_paper_order_into_simulation_state(tmp_p
     engine = create_sqlite_engine(settings.database_url)
     factory = create_session_factory(engine)
     event_ms = int(time.time() * 1000)
+    _seed_recorded_execution_book(monkeypatch, coin="HYPE", mid=70.05, observed_at_ms=event_ms)
     with factory() as session:
         session.add(MarketSnapshot(source="allMids", exchange_ts=event_ms, raw_json={"HYPE": "70.50"}))
         session.commit()
@@ -540,7 +568,9 @@ def test_status_persists_accepted_fusion_paper_order_into_simulation_state(tmp_p
     duplicate_payload = client.get("/api/simulation/status").json()
 
     assert payload["fusion_runtime"]["status"] == "OK_LIVE_FUSION_RUNTIME"
-    assert payload["fusion_persistent_adapter"]["applied_count"] == 1
+    assert payload["fusion_persistent_adapter"]["applied_count"] == 1, json.dumps(
+        payload["fusion_persistent_adapter"], indent=2, sort_keys=True
+    )
     assert payload["open_positions"] == 1
     assert payload["positions"][0]["coin"] == "HYPE"
     assert payload["positions"][0]["direction"] == "LONG"
@@ -553,7 +583,7 @@ def test_status_persists_accepted_fusion_paper_order_into_simulation_state(tmp_p
     assert len(state.simulation_virtual_positions) == 1
 
 
-def test_status_persists_external_arbitrage_paper_order_when_copy_conflicts(tmp_path, monkeypatch):
+def test_status_rejects_external_arbitrage_without_measured_execution_costs(tmp_path, monkeypatch):
     monkeypatch.setenv("HL_DATABASE_URL", f"sqlite:///{(tmp_path / 'session.sqlite3').as_posix()}")
     monkeypatch.setenv("HL_LOGS_DIR", str(tmp_path / "logs"))
     monkeypatch.setenv("HYPERSMART_EXTERNAL_GITHUB_DIRECT_MATERIALIZATION", "1")
@@ -566,6 +596,7 @@ def test_status_persists_external_arbitrage_paper_order_when_copy_conflicts(tmp_
     engine = create_sqlite_engine(settings.database_url)
     factory = create_session_factory(engine)
     event_ms = int(time.time() * 1000)
+    _seed_recorded_execution_book(monkeypatch, coin="HYPE", mid=72.05, observed_at_ms=event_ms)
     with factory() as session:
         session.add(MarketSnapshot(source="allMids", exchange_ts=event_ms, raw_json={"HYPE": "70.50"}))
         session.commit()
@@ -608,27 +639,19 @@ def test_status_persists_external_arbitrage_paper_order_when_copy_conflicts(tmp_
 
     assert payload["fusion_runtime"]["status"] == "OK_LIVE_FUSION_RUNTIME"
     assert payload["fusion_runtime"]["paper_engine_accepted"] == 0
-    assert payload["fusion_persistent_adapter"]["applied_count"] == 1
-    assert payload["open_positions"] == 1
-    position = payload["positions"][0]
-    assert position["coin"] == "HYPE"
-    assert position["direction"] == "LONG"
-    assert position["position_mode"] == "EXTERNAL_GITHUB_ARBITRAGE_PAPER"
-    assert payload["mark_to_market"]["marks_used"] == 1
-    # Le nom de la strategie depend du CATALOGUE EXTERNE : `fusion_runtime._first_available_profile()`
-    # prefere un profil GitHub (`ext_jack_hl_arbitrage_spread`) s'il est actif, sinon il retombe sur
-    # le moteur interne (`ws_price_discrepancy_paper`). Depuis le pivot shadow-only (ff7aeec), les
-    # profils externes sont desactives par defaut -> c'est le nom INTERNE qui sort. Le test exigeait
-    # uniquement le nom externe : il testait une config qui n'existe plus. Ce qui doit etre garanti,
-    # c'est que l'ordre d'arbitrage ARRIVE AU LEDGER -- pas le repo dont il porte le nom.
-    arbitrage_strategy_ids = {
-        str(row.get("strategy_id") or "") for row in state.simulation_ledger_events
-    }
-    assert arbitrage_strategy_ids & {"ext_jack_hl_arbitrage_spread", "ws_price_discrepancy_paper"}, (
-        f"aucun evenement d'arbitrage au ledger : {sorted(arbitrage_strategy_ids)}"
-    )
+    assert payload["fusion_persistent_adapter"]["applied_count"] == 0
+    assert "DIRECT_EXECUTION_COST_UNMEASURABLE" in payload["fusion_persistent_adapter"]["reasons"]
+    assert payload["open_positions"] == 0
+    refusal_rows = [
+        row
+        for row in state.simulation_ledger_events
+        if isinstance(row, dict) and row.get("reason") == "DIRECT_EXECUTION_COST_UNMEASURABLE"
+    ]
+    assert refusal_rows, "the unmeasurable two-leg execution cost must be auditable"
+    assert all(row.get("paper_action_type") == "NO_TRADE" for row in refusal_rows)
+    assert all(row.get("estimated_net_pnl_usdc") is None for row in refusal_rows)
     assert duplicate_payload["fusion_persistent_adapter"]["applied_count"] == 0
-    assert len(state.simulation_virtual_positions) == 1
+    assert len(state.simulation_virtual_positions) == 0
 
 
 def test_status_can_close_existing_paper_position_when_fusion_consensus_flips(tmp_path, monkeypatch):
@@ -644,6 +667,7 @@ def test_status_can_close_existing_paper_position_when_fusion_consensus_flips(tm
     engine = create_sqlite_engine(settings.database_url)
     factory = create_session_factory(engine)
     event_ms = int(time.time() * 1000)
+    _seed_recorded_execution_book(monkeypatch, coin="HYPE", mid=72.05, observed_at_ms=event_ms)
     with factory() as session:
         session.add(MarketSnapshot(source="allMids", exchange_ts=event_ms, raw_json={"HYPE": "72.00"}))
         session.commit()
@@ -680,6 +704,7 @@ def test_status_can_close_existing_paper_position_when_fusion_consensus_flips(tm
     assert open_payload["open_positions"] == 1
     assert state.simulation_reproduced_entries_total == 1
 
+    _seed_recorded_execution_book(monkeypatch, coin="HYPE", mid=73.05, observed_at_ms=event_ms + 1)
     heartbeat_path.write_text(
         json.dumps(
             {
@@ -707,7 +732,9 @@ def test_status_can_close_existing_paper_position_when_fusion_consensus_flips(tm
     close_payload = client.get("/api/simulation/status").json()
 
     assert close_payload["fusion_runtime"]["status"] == "OK_LIVE_FUSION_RUNTIME"
-    assert state.simulation_reproduced_exits_total == 1
+    assert state.simulation_reproduced_exits_total == 1, json.dumps(
+        close_payload["fusion_persistent_adapter"], indent=2, sort_keys=True
+    )
     assert any(row.get("bot_replay_action") == "FUSION_DIRECT_PAPER_CLOSE" for row in state.simulation_ledger_events)
     assert state.simulation_realized_pnl_usdc > 0
 
@@ -872,7 +899,7 @@ def test_status_marks_existing_paper_position_with_latest_hyperliquid_snapshot(t
     state = UiState()
     state.simulation_started_at_ms = now_ms() - 2_000
     state.simulation_starting_equity_usdt = 1000.0
-    state.simulation_realized_pnl_usdc = -0.02
+    state.simulation_realized_pnl_usdc = 0.0
     state.simulation_virtual_positions = {
         f"{leader}|ETH|LONG": {
             "wallet_address": leader,
@@ -898,7 +925,8 @@ def test_status_marks_existing_paper_position_with_latest_hyperliquid_snapshot(t
 
     # LONG 0.1 ETH from 2000 to 2010 = +1.00 gross.
     # Fast status uses the same conservative exit-cost model: 201 USDT * 12 bps = 0.2412.
-    # Realized entry cost already paid in state: -0.02. Expected net = 1 - 0.2412 - 0.02.
+    # The open position carries its 0.02 entry cost until close.
+    # Expected net = 1 - 0.2412 - 0.02.
     assert payload["open_positions"] == 1
     assert payload["mark_to_market"]["source"] == "LIVE_HYPERLIQUID_ALLMIDS_OR_LOCAL_SNAPSHOTS"
     assert payload["mark_to_market"]["marks_used"] == 1
@@ -910,7 +938,7 @@ def test_status_marks_existing_paper_position_with_latest_hyperliquid_snapshot(t
     assert payload["mark_diagnostics"]["graph_should_move"] is True
     assert payload["mark_diagnostics"]["marks_used"] == 1
     assert payload["mark_diagnostics"]["positions"][0]["reason"] == "OK_REAL_MARK"
-    assert payload["positions"][0]["unrealized_pnl_usdc"] == 0.7588
+    assert payload["positions"][0]["unrealized_pnl_usdc"] == 0.7388
     assert payload["equity_usdt"] == 1000.7388
     assert payload["net_pnl_usdt"] == 0.7388
     assert state.simulation_equity_history[-1]["source"] == "FAST_STATUS_MARK_TO_MARKET_HYPERLIQUID"
@@ -1014,7 +1042,7 @@ def test_status_exposes_recent_orphan_position_cleanup(tmp_path, monkeypatch):
     assert payload["position_integrity"]["pnl_impact"] == "NONE_FOR_INVALID_ORPHAN_CLEANUP"
 
 
-def test_status_quality_guard_holds_legacy_unevidenced_copy_position_when_close_is_fee_drag(tmp_path, monkeypatch):
+def test_status_quality_guard_holds_legacy_unevidenced_copy_position_when_entry_cost_is_unknown(tmp_path, monkeypatch):
     monkeypatch.setenv("HL_DATABASE_URL", f"sqlite:///{(tmp_path / 'session.sqlite3').as_posix()}")
     monkeypatch.setenv("HYPERSMART_LEGACY_POSITION_MIN_AGE_MS", "0")
     settings = _settings()
@@ -1047,7 +1075,7 @@ def test_status_quality_guard_holds_legacy_unevidenced_copy_position_when_close_
     payload = TestClient(create_ui_app(settings, state=state), raise_server_exceptions=False).get("/api/simulation/status").json()
 
     assert payload["quality_guard_runtime"]["closed_count"] == 0
-    assert payload["quality_guard_runtime"]["skipped"][0]["reason"] == "QUALITY_GUARD_HOLD_TO_AVOID_FEE_DRAG"
+    assert payload["quality_guard_runtime"]["skipped"][0]["reason"] == "QUALITY_CLOSE_ENTRY_COST_UNMEASURABLE"
     assert payload["open_positions"] == 1
     assert state.simulation_virtual_positions
     assert state.simulation_reproduced_exits_total == 0
@@ -1074,6 +1102,8 @@ def test_status_quality_guard_can_close_legacy_unevidenced_copy_position_when_ne
             "direction": "SHORT",
             "size": -1.0,
             "avg_price": 70.0,
+            "entry_costs": 0.0,
+            "fee_already_embedded_in_entry_price": False,
             "opened_at_ms": now_ms() - 120_000,
             "source_delta_key": "legacy-copy-without-edge",
             "position_mode": "EXTERNAL_GITHUB_COPY_PAPER",
@@ -1331,6 +1361,8 @@ def test_status_can_mark_open_position_from_live_all_mids_when_launcher_enables_
             "direction": "SHORT",
             "size": 3.0,
             "avg_price": 70.0,
+            "entry_costs": 0.0,
+            "fee_already_embedded_in_entry_price": False,
             "source_delta_key": "hash:paper-short-live",
         }
     }

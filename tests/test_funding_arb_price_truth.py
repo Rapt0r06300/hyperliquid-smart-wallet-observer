@@ -117,9 +117,12 @@ def test_the_funding_alone_can_no_longer_carry_the_pnl():
 def test_an_unknown_price_is_flagged_not_invented():
     """RÈGLE DURE : pas de prix → on NE SAIT PAS ce qu'a fait la position. On ne l'invente pas."""
     pos = _position("SHORT", entry_price=100.0)
-    close, _ = _fermer(pos, prix_sortie=0.0)                  # prix indisponible
+    close, report = _fermer(pos, prix_sortie=0.0)             # prix indisponible
     assert close.price_pnl_usdc is None
     assert close.price_pnl_unknown is True
+    assert close.net_pnl_usdc is None
+    assert report.realized_pnl_usdc == 0.0
+    assert "PNL_UNMEASURABLE" in close.reason
 
 
 def test_a_legacy_position_without_entry_price_is_flagged():
@@ -128,6 +131,24 @@ def test_a_legacy_position_without_entry_price_is_flagged():
     close, _ = _fermer(pos, prix_sortie=105.0)
     assert close.price_pnl_usdc is None
     assert close.price_pnl_unknown is True
+
+
+def test_funding_unknown_price_pnl_never_enters_strict_realized():
+    pos = _position("SHORT", entry_price=100.0)
+    close, report = _fermer(pos, prix_sortie=0.0)
+
+    assert close.net_pnl_usdc is None
+    assert report.realized_pnl_usdc == 0.0
+
+
+def test_funding_event_identity_is_stable_across_replays():
+    pos = _position("SHORT", entry_price=100.0)
+
+    first, _ = _fermer(pos, prix_sortie=98.0)
+    second, _ = _fermer(pos, prix_sortie=98.0)
+
+    assert first.event_id == second.event_id
+    assert first.event_id == f"{pos.pair_id}:close"
 
 
 def test_a_new_position_records_its_entry_price():

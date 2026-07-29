@@ -28,3 +28,21 @@ def test_append_never_raises(tmp_path):
     append_equity_point(timestamp_ms="bad", equity_usdt=None, runtime_data_dir=tmp_path)  # ne doit pas lever
     # valeurs invalides ignorées proprement, pas de crash
     assert isinstance(read_equity_points(runtime_data_dir=tmp_path), list)
+
+
+def test_missing_baseline_preserves_unmeasurable_pnl(tmp_path):
+    append_equity_point(
+        timestamp_ms=1_000,
+        equity_usdt=987.5,
+        pnl_usdc=None,
+        starting_equity_usdt=None,
+        session_id="paper:no-baseline",
+        runtime_data_dir=tmp_path,
+    )
+
+    point = read_equity_points(runtime_data_dir=tmp_path)[0]
+
+    assert point["equity"] == 987.5
+    assert point["pnl"] is None
+    assert point["starting_equity_usdt"] is None
+    assert point["accounting_status"] == "BASELINE_UNMEASURABLE"

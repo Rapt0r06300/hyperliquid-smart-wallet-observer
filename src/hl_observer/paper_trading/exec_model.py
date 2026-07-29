@@ -427,6 +427,36 @@ def simulate_depth_execution(
     )
 
 
+def book_notional_for_quantity(
+    execution_truth: ExecutionTruth | None,
+    *,
+    side: str,
+    quantity: float,
+    fallback_price: float,
+) -> float:
+    """Return the quote notional required to consume an exact book quantity.
+
+    When visible depth is insufficient, only the actually visible quote
+    notional is returned. Callers must compare the resulting filled quantity
+    with the requested quantity and retain the unfilled position remainder.
+    """
+
+    requested_quantity = _finite_positive(quantity, "quantity")
+    reference_price = _finite_positive(fallback_price, "fallback_price")
+    if execution_truth is None:
+        return requested_quantity * reference_price
+
+    remaining = requested_quantity
+    quote_notional = 0.0
+    for price, available_quantity in execution_truth.levels_for_side(side):
+        take_quantity = min(remaining, available_quantity)
+        quote_notional += take_quantity * price
+        remaining -= take_quantity
+        if remaining <= 1e-12:
+            break
+    return quote_notional
+
+
 def _clean_levels(
     raw_levels: list[tuple[float, float]] | tuple[tuple[float, float], ...],
     *,
@@ -561,6 +591,7 @@ __all__ = [
     "DepthExecutionResult",
     "ExecModelConfig",
     "ExecResult",
+    "book_notional_for_quantity",
     "estimate_slippage_bps",
     "round_trip_cost_bps",
     "simulate_depth_execution",

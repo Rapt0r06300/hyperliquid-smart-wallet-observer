@@ -15,7 +15,9 @@ from __future__ import annotations
 import json
 import os
 from pathlib import Path
+
 from hl_observer.ops.echec_silencieux import noter as _noter_echec
+from hl_observer.simulation.accounting_truth import finite_number
 
 FILE_NAME = "equity_history.jsonl"
 DEFAULT_MAX_POINTS = 12_000          # ~48h à un point / 15 s ; fichier < 1 Mo
@@ -34,19 +36,43 @@ def _path(runtime_data_dir=None) -> Path:
 
 
 def append_equity_point(
-    *, timestamp_ms: int, equity_usdt: float, pnl_usdc: float = 0.0,
+    *,
+    timestamp_ms: int,
+    equity_usdt: float,
+    pnl_usdc: float | None = None,
+    starting_equity_usdt: float | None = None,
+    session_id: str | None = None,
+    accounting_status: str | None = None,
     runtime_data_dir: str | Path | None = None, max_points: int = DEFAULT_MAX_POINTS,
 ) -> None:
-    """Ajoute un point {t, equity, pnl} au JSONL persistant (best-effort)."""
+    """Ajoute un point d'equity sans inventer un PnL ou une baseline."""
     try:
+        timestamp = int(timestamp_ms)
+        equity = finite_number(equity_usdt)
+        pnl = finite_number(pnl_usdc)
+        starting = finite_number(starting_equity_usdt)
+        if timestamp <= 0 or equity is None:
+            return
         d = _dir(runtime_data_dir)
         d.mkdir(parents=True, exist_ok=True)
         p = d / FILE_NAME
-        line = json.dumps({
-            "t": int(timestamp_ms),
-            "equity": round(float(equity_usdt), 6),
-            "pnl": round(float(pnl_usdc), 6),
-        })
+        line = json.dumps(
+            {
+                "t": timestamp,
+                "equity": round(equity, 6),
+                "pnl": round(pnl, 6) if pnl is not None else None,
+                "starting_equity_usdt": (
+                    round(starting, 6) if starting is not None and starting > 0 else None
+                ),
+                "session_id": str(session_id) if session_id else None,
+                "accounting_status": str(
+                    accounting_status
+                    or ("MEASURABLE" if pnl is not None else "BASELINE_UNMEASURABLE")
+                ),
+            },
+            allow_nan=False,
+            sort_keys=True,
+        )
         with p.open("a", encoding="utf-8") as f:
             f.write(line + "\n")
         # cap taille (rare): si trop gros, garder les derniers max_points
@@ -73,7 +99,25 @@ def read_equity_points(*, max: int = 600, runtime_data_dir: str | Path | None = 
         for ln in lines:
             try:
                 o = json.loads(ln)
-                out.append({"t": int(o.get("t") or 0), "equity": float(o.get("equity") or 0.0), "pnl": float(o.get("pnl") or 0.0)})
+                timestamp = int(o.get("t"))
+                equity = finite_number(o.get("equity"))
+                pnl = finite_number(o.get("pnl"))
+                starting = finite_number(o.get("starting_equity_usdt"))
+                if timestamp <= 0 or equity is None:
+                    continue
+                out.append(
+                    {
+                        "t": timestamp,
+                        "equity": equity,
+                        "pnl": pnl,
+                        "starting_equity_usdt": starting,
+                        "session_id": o.get("session_id"),
+                        "accounting_status": str(
+                            o.get("accounting_status")
+                            or ("MEASURABLE" if pnl is not None else "BASELINE_UNMEASURABLE")
+                        ),
+                    }
+                )
             except Exception:
                 continue
         return out

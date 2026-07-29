@@ -23,6 +23,10 @@ import os
 from typing import Any
 
 from hl_observer.paper_trading.sl_tp import SLTPConfig, evaluate_sl_tp, SLTPDecision, signed_pnl_bps
+from hl_observer.simulation.accounting_truth import (
+    round_trip_net_pnl_usdc,
+    separate_entry_cost_usdc,
+)
 
 
 def _f(name: str, default: float) -> float:
@@ -188,7 +192,24 @@ def apply_sltp_exits(
         except Exception:
             funding_cost = None
 
-        net = gross - exit_cost - (funding_cost or 0.0)
+        entry_cost = separate_entry_cost_usdc(position)
+        net = round_trip_net_pnl_usdc(
+            gross_pnl_usdc=gross,
+            entry_cost_usdc=entry_cost,
+            exit_cost_usdc=exit_cost,
+            # Funding is reported separately when it is unavailable. The
+            # strict entry/exit accounting remains measurable, while the
+            # completeness flag below prevents calling it fully cost-complete.
+            funding_cost_usdc=funding_cost if funding_cost is not None else 0.0,
+        )
+        if net is None:
+            # The protective exit still removes paper exposure, but an
+            # unmeasurable round trip is never inserted into realized PnL.
+            net_status = "ENTRY_COST_UNMEASURABLE"
+        elif funding_cost is None:
+            net_status = "ENTRY_EXIT_COSTS_KNOWN_FUNDING_UNMEASURABLE"
+        else:
+            net_status = "STRICT_ALL_COSTS_KNOWN"
         matched_position_key = f"{wallet}|{coin}|{side}"
         instance_id = _paper_position_instance_id(
             matched_position_key=matched_position_key,
@@ -233,9 +254,19 @@ def apply_sltp_exits(
                 "paper_action_type": "CLOSE",
                 "exit_method": "SLTP_" + decision.reason,
                 "reason": "SLTP_" + decision.reason + "_LOCAL_REPLAY_NOT_AN_ORDER",
-                "estimated_net_pnl_usdc": round(net, 6),
+                "estimated_net_pnl_usdc": round(net, 6) if net is not None else None,
                 "gross_pnl_usdc": round(gross, 6),
                 "fee_cost_usdc": round(exit_cost, 6),
+                "entry_cost_carried_usdc": round(entry_cost, 8) if entry_cost is not None else None,
+                "total_round_trip_cost_usdc": (
+                    round(entry_cost + exit_cost, 8) if entry_cost is not None else None
+                ),
+                "pnl_accounting_status": net_status,
+                "pnl_strict": net_status == "STRICT_ALL_COSTS_KNOWN",
+                "fee_already_embedded_in_entry_price": bool(
+                    position.get("fee_already_embedded_in_entry_price") is True
+                ),
+                "fee_already_embedded_in_exit_price": False,
                 # None = pas de donnee de funding pour ce coin (on n'invente pas un chiffre)
                 "funding_cost_usdc": (round(funding_cost, 8) if funding_cost is not None else None),
                 "funding_hours": round(age_ms / 3_600_000.0, 4),
@@ -276,7 +307,7 @@ def apply_sltp_exits(
                 "coin": coin,
                 "side": side,
                 "reason": decision.reason,
-                "net_pnl_usdc": round(net, 6),
+                "net_pnl_usdc": round(net, 6) if net is not None else None,
                 "matched_position_key": matched_position_key,
                 "source_delta_key": position.get("source_delta_key"),
                 "paper_position_instance_id": instance_id,

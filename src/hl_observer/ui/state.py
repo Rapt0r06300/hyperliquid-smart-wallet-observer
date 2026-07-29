@@ -33,6 +33,12 @@ class UiState:
     simulation_reproduced_entries_total: int = 0
     simulation_reproduced_exits_total: int = 0
     simulation_equity_history: list[dict[str, Any]] = field(default_factory=list)
+    simulation_session_id: str = ""
+    simulation_accounting_status: str = "OK"
+    simulation_pnl_trusted: bool = True
+    simulation_recovery_source: str = "STATE_SNAPSHOT"
+    simulation_ledger_last_seq: int = 0
+    simulation_ledger_last_hash: str = ""
 
     def add_event(
         self,

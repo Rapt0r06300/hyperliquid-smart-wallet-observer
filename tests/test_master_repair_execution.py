@@ -4,7 +4,10 @@ import math
 
 import pytest
 
-from hl_observer.paper_trading.exec_model import simulate_execution
+from hl_observer.paper_trading.exec_model import (
+    book_notional_for_quantity,
+    simulate_execution,
+)
 from hl_observer.paper_trading.execution_truth import ExecutionTruth
 from hl_observer.paper_trading.paper_engine import PaperEngine, PaperEngineConfig
 from hl_observer.position_lifecycle.reconstructor import LifecycleAction
@@ -116,6 +119,48 @@ def test_execution_uses_real_l2_capacity() -> None:
     assert result.filled_notional_usdc == pytest.approx(50.75)
     assert result.fill_price is not None and result.fill_price > 101.0
     assert result.cost_status == "MEASURED"
+
+
+def test_exit_quantity_walk_uses_exact_visible_levels_and_preserves_remainder() -> None:
+    truth = _truth(
+        bids=((99.0, 0.4), (98.0, 0.6)),
+        asks=((101.0, 2.0),),
+    )
+    requested = book_notional_for_quantity(
+        truth,
+        side="SELL",
+        quantity=0.75,
+        fallback_price=100.0,
+    )
+    assert requested == pytest.approx(0.4 * 99.0 + 0.35 * 98.0)
+
+    result = simulate_execution(
+        side="SELL",
+        notional_usdc=requested,
+        mid_price=truth.mid_price,
+        execution_truth=truth,
+        decision_ts_ms=1_020,
+        strict_book=True,
+    )
+    assert result.filled_quantity == pytest.approx(0.75)
+    assert result.execution_snapshot_id == truth.snapshot_id
+
+    visible_only = book_notional_for_quantity(
+        truth,
+        side="SELL",
+        quantity=2.0,
+        fallback_price=100.0,
+    )
+    partial = simulate_execution(
+        side="SELL",
+        notional_usdc=visible_only,
+        mid_price=truth.mid_price,
+        execution_truth=truth,
+        decision_ts_ms=1_020,
+        strict_book=True,
+    )
+    assert partial.filled_quantity == pytest.approx(1.0)
+    assert 2.0 - partial.filled_quantity == pytest.approx(1.0)
 
 
 def test_missing_live_book_blocks_strict_open() -> None:

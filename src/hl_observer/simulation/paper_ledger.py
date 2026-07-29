@@ -1,10 +1,13 @@
 from __future__ import annotations
 
 import math
-from dataclasses import asdict, dataclass, field
+import uuid
+from dataclasses import asdict, dataclass, field, replace
 from hashlib import sha256
 
+from hl_observer.simulation.accounting_truth import first_not_none, named_roi_metrics
 from hl_observer.simulation.fee_model import compute_fee_usdc
+from hl_observer.simulation.ledger_integrity import GENESIS_HASH, seal_event, verify_chain
 from hl_observer.simulation.paper_event import PaperEvent, PaperEventType
 from hl_observer.simulation.pnl_reconciliation import PnlReconciliation, reconcile_pnl
 
@@ -33,6 +36,7 @@ class LedgerPosition:
 @dataclass(slots=True)
 class PaperLedger:
     starting_balance_usdc: float = 1_000.0
+    session_id: str = field(default_factory=lambda: f"paper:{uuid.uuid4().hex}")
     events: list[PaperEvent] = field(default_factory=list)
     positions: dict[str, LedgerPosition] = field(default_factory=dict)
     realized_pnl_usdc: float = 0.0
@@ -51,7 +55,8 @@ class PaperLedger:
 
     @property
     def equity_usdc(self) -> float:
-        return round(float(self.cash_balance_usdc or 0.0) + self.unrealized_pnl_usdc, 10)
+        cash = first_not_none(self.cash_balance_usdc, 0.0)
+        return round(float(cash) + self.unrealized_pnl_usdc, 10)
 
     def open_position(
         self,
@@ -156,7 +161,8 @@ class PaperLedger:
         notional = close_qty * float(fill_price)
         fee = compute_fee_usdc(notional, fee_bps)
         self.realized_pnl_usdc = round(self.realized_pnl_usdc + gross, 10)
-        self.cash_balance_usdc = round(float(self.cash_balance_usdc or 0.0) + gross, 10)
+        cash = first_not_none(self.cash_balance_usdc, 0.0)
+        self.cash_balance_usdc = round(float(cash) + gross, 10)
         self._charge_fee(fee, coin=coin, side=normalized_side, timestamp_ms=timestamp_ms)
         pos.quantity -= close_qty
         pos.last_mark_price = float(fill_price)
@@ -189,7 +195,8 @@ class PaperLedger:
             total += pos.unrealized()
         self.unrealized_pnl_usdc = round(total, 10)
         equity = self.equity_usdc
-        self.high_water_equity_usdc = max(float(self.high_water_equity_usdc or equity), equity)
+        high_water = first_not_none(self.high_water_equity_usdc, equity)
+        self.high_water_equity_usdc = max(float(high_water), equity)
         self.drawdown_usdc = round(max(0.0, float(self.high_water_equity_usdc) - equity), 10)
         event = PaperEvent.create(
             PaperEventType.EQUITY_UPDATED,
@@ -211,7 +218,8 @@ class PaperLedger:
         refs: dict | None = None,
     ) -> PaperEvent:
         self.funding_net_usdc += float(amount_usdc)
-        self.cash_balance_usdc = float(self.cash_balance_usdc or 0.0) + float(amount_usdc)
+        cash = first_not_none(self.cash_balance_usdc, 0.0)
+        self.cash_balance_usdc = float(cash) + float(amount_usdc)
         event_type = PaperEventType.FUNDING_RECEIVED if amount_usdc >= 0 else PaperEventType.FUNDING_CHARGED
         return self._append(
             PaperEvent.create(
@@ -254,9 +262,14 @@ class PaperLedger:
         )
 
     def snapshot(self) -> dict[str, object]:
+        net_pnl = self.equity_usdc - self.starting_balance_usdc
+        roi_metrics = named_roi_metrics(
+            pnl_usdc=net_pnl,
+            initial_capital_usdc=self.starting_balance_usdc,
+        )
         return {
             "starting_balance_usdc": round(self.starting_balance_usdc, 10),
-            "cash_balance_usdc": round(float(self.cash_balance_usdc or 0.0), 10),
+            "cash_balance_usdc": round(float(first_not_none(self.cash_balance_usdc, 0.0)), 10),
             "realized_pnl_usdc": round(self.realized_pnl_usdc, 10),
             "unrealized_pnl_usdc": round(self.unrealized_pnl_usdc, 10),
             "fees_paid_usdc": round(self.fees_paid_usdc, 10),
@@ -276,13 +289,18 @@ class PaperLedger:
                 for key, pos in sorted(self.positions.items())
             },
             "event_count": len(self.events),
+            "session_id": self.session_id,
+            "last_event_seq": self.events[-1].event_seq if self.events else 0,
+            "last_event_hash": self.events[-1].event_hash if self.events else GENESIS_HASH,
+            "roi": roi_metrics.to_dict(),
             "reconciliation": asdict(self.reconciliation()),
         }
 
     def _charge_fee(self, fee_usdc: float, *, coin: str, side: str, timestamp_ms: int) -> None:
         fee = max(0.0, float(fee_usdc))
         self.fees_paid_usdc = round(self.fees_paid_usdc + fee, 10)
-        self.cash_balance_usdc = round(float(self.cash_balance_usdc or 0.0) - fee, 10)
+        cash = first_not_none(self.cash_balance_usdc, 0.0)
+        self.cash_balance_usdc = round(float(cash) - fee, 10)
         self._append(
             PaperEvent.create(
                 PaperEventType.FEE_CHARGED,
@@ -294,8 +312,26 @@ class PaperLedger:
         )
 
     def _append(self, event: PaperEvent) -> PaperEvent:
-        self.events.append(event)
-        return event
+        previous_hash = self.events[-1].event_hash if self.events else GENESIS_HASH
+        row = seal_event(
+            event.to_dict(),
+            event_seq=len(self.events) + 1,
+            session_id=self.session_id,
+            prev_hash=str(previous_hash),
+        )
+        sealed = replace(
+            event,
+            event_seq=int(row["event_seq"]),
+            session_id=str(row["session_id"]),
+            prev_hash=str(row["prev_hash"]),
+            event_hash=str(row["event_hash"]),
+        )
+        self.events.append(sealed)
+        return sealed
+
+    def verify_event_chain(self) -> bool:
+        verify_chain(event.to_dict() for event in self.events)
+        return True
 
     @staticmethod
     def _key(coin: str, side: str) -> str:

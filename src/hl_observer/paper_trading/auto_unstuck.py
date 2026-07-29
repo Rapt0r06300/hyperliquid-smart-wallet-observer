@@ -19,6 +19,11 @@ from hl_observer.strategies.strategy_mode import mode_of_position
 import os
 from typing import Any
 
+from hl_observer.simulation.accounting_truth import (
+    allocated_entry_cost_usdc,
+    round_trip_net_pnl_usdc,
+)
+
 MASTER_FLAG = "HYPERSMART_V26_AUTO_UNSTUCK"
 UNDERWATER_ENV = "HYPERSMART_V26_UNSTUCK_UNDERWATER_BPS"   # stuck si perte latente >= X bps
 MIN_AGE_ENV = "HYPERSMART_V26_UNSTUCK_MIN_AGE_MIN"          # et âge >= X minutes
@@ -148,7 +153,25 @@ def apply_auto_unstuck(
         close_size = size * fraction
         gross = (mark - avg) * close_size if side == "LONG" else (avg - mark) * close_size
         exit_cost = abs(close_size * mark) * cost_bps / 10_000.0
-        net = gross - exit_cost
+        entry_cost = allocated_entry_cost_usdc(
+            pos,
+            close_quantity=close_size,
+            open_quantity=size,
+        )
+        net = round_trip_net_pnl_usdc(
+            gross_pnl_usdc=gross,
+            entry_cost_usdc=entry_cost,
+            exit_cost_usdc=exit_cost,
+        )
+        if net is None:
+            actions.append(
+                {
+                    "action": "UNSTUCK_SKIPPED",
+                    "reason": "ENTRY_COST_UNMEASURABLE",
+                    "coin": coin,
+                }
+            )
+            continue
         # respect strict du budget : si cette perte dépasse le restant, on réduit la part
         if net < 0 and -net > remaining_budget:
             scale = remaining_budget / (-net)
@@ -158,7 +181,13 @@ def apply_auto_unstuck(
             close_size *= scale
             gross *= scale
             exit_cost *= scale
-            net = gross - exit_cost
+            entry_cost *= scale
+            net = round_trip_net_pnl_usdc(
+                gross_pnl_usdc=gross,
+                entry_cost_usdc=entry_cost,
+                exit_cost_usdc=exit_cost,
+            )
+            assert net is not None
         new_size = max(0.0, size - close_size)
         matched_key = f"{wallet}|{coin}|{side}"
         ledger_events.append({
@@ -172,6 +201,10 @@ def apply_auto_unstuck(
             "estimated_net_pnl_usdc": round(net, 6),
             "gross_pnl_usdc": round(gross, 6),
             "fee_cost_usdc": round(exit_cost, 6),
+            "entry_cost_carried_usdc": round(entry_cost, 6),
+            "total_round_trip_cost_usdc": round(entry_cost + exit_cost, 6),
+            "fee_already_embedded_in_entry_price": False,
+            "fee_already_embedded_in_exit_price": False,
             "average_entry_price": round(avg, 8),
             "exit_price": round(mark, 8),
             "notional_closed_usdt": round(abs(close_size * mark), 6),
@@ -192,6 +225,11 @@ def apply_auto_unstuck(
             positions.pop(key, None)
         else:
             pos["size"] = new_size if float(pos.get("size") or 0.0) >= 0 else -new_size
+            remaining_entry_cost = max(
+                0.0,
+                float(pos.get("entry_costs") or 0.0) - entry_cost,
+            )
+            pos["entry_costs"] = remaining_entry_cost
         if net < 0:
             remaining_budget -= -net
         actions.append({

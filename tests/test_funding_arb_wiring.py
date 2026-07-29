@@ -63,7 +63,16 @@ def _fusion_status_with_funding_events() -> dict:
                 "events": [
                     {"action": "OPEN", "coin": "HYPE", "pair_id": "fundingarb:HYPE:0", "reason": "FUNDING_EDGE_SHORT_RECEIVES", "amount_usdc": 0.0075},
                     {"action": "ACCRUAL", "coin": "HYPE", "pair_id": "fundingarb:HYPE:0", "reason": "FUNDING_ACCRUED_2H", "amount_usdc": 0.025},
-                    {"action": "CLOSE", "coin": "HYPE", "pair_id": "fundingarb:HYPE:0", "reason": "FUNDING_EDGE_COLLAPSED", "amount_usdc": 0.0075, "net_pnl_usdc": 0.01},
+                    {
+                        "action": "CLOSE",
+                        "coin": "HYPE",
+                        "pair_id": "fundingarb:HYPE:0",
+                        "reason": "FUNDING_EDGE_COLLAPSED",
+                        "amount_usdc": 0.0075,
+                        "price_pnl_usdc": 0.0,
+                        "price_pnl_unknown": False,
+                        "net_pnl_usdc": 0.01,
+                    },
                 ],
             },
         },
@@ -81,7 +90,11 @@ def test_adapter_credits_funding_events_to_ledger_without_double_count():
     assert len(funding_events) == 3
     assert all(e["execution"] == "forbidden" and e["real_execution"] is False for e in funding_events)
     # Rejouer le même tick: dédupliqué, PnL inchangé
-    report2 = apply_fusion_paper_orders_to_state(state, _fusion_status_with_funding_events(), current_ms=5_000)
+    report2 = apply_fusion_paper_orders_to_state(
+        state,
+        _fusion_status_with_funding_events(),
+        current_ms=999_999,
+    )
     assert report2["funding_arb_events_recorded"] == 0
     assert abs(state.simulation_realized_pnl_usdc - 0.01) < 1e-9
 

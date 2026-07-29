@@ -21,6 +21,7 @@ from sqlalchemy.orm import Session
 from hl_observer.storage.models import MarketSnapshot, PositionDeltaModel, TopWallet
 from hl_observer.utils.time import now_ms
 from hl_observer.ops.echec_silencieux import noter as _noter_echec
+from hl_observer.simulation.accounting_truth import first_not_none
 
 
 ENTRY_ACTIONS = {"OPEN_LONG", "OPEN_SHORT", "ADD", "INCREASE", "ADD_LONG", "ADD_SHORT", "INCREASE_LONG", "INCREASE_SHORT"}
@@ -75,7 +76,7 @@ def build_fusion_runtime_input_from_session(
     fresh_window_ms: int = DEFAULT_FRESH_WINDOW_MS,
     max_votes: int = DEFAULT_MAX_VOTES,
     current_ms: int | None = None,
-    starting_equity_usdt: float = 1000.0,
+    starting_equity_usdt: float | None = None,
     current_equity_usdt: float | None = None,
     peak_equity_usdt: float | None = None,
     open_exposure_usdt: float | None = None,
@@ -228,6 +229,24 @@ def build_fusion_runtime_input_from_session(
             latest_delta_age_ms=latest_delta_age_ms,
         )
 
+    starting_equity = _safe_float(starting_equity_usdt)
+    current_equity = _safe_float(current_equity_usdt)
+    peak_equity = _safe_float(peak_equity_usdt)
+    if starting_equity is None or starting_equity <= 0:
+        return FusionHeartbeatBuildReport(
+            status="ACCOUNTING_BASELINE_UNAVAILABLE",
+            message="Baseline de session absente; aucun input fusion comptable n'est produit.",
+            votes_count=len(votes),
+            price_events_count=len(price_events),
+            coins=tuple(sorted(usable_coins)),
+            reasons=("ACCOUNTING_BASELINE_UNAVAILABLE",),
+            fusion_runtime_input=None,
+            recent_deltas_count=recent_deltas_count,
+            recent_entry_deltas_count=len(votes),
+            latest_delta_age_ms=latest_delta_age_ms,
+        )
+    current_equity = float(first_not_none(current_equity, starting_equity))
+    peak_equity = float(first_not_none(peak_equity, current_equity))
     payload = {
         "session_id": f"local-fusion-{current_ms}",
         "leader_votes": votes,
@@ -236,10 +255,13 @@ def build_fusion_runtime_input_from_session(
         "funding_rows": _build_funding_rows(usable_coins),
         "triangular_edges": [],
         "latencies_ms": [],
-        "starting_equity": round(max(1.0, float(starting_equity_usdt or 1000.0)), 6),
-        "peak_equity": round(float(peak_equity_usdt if peak_equity_usdt is not None else current_equity_usdt if current_equity_usdt is not None else starting_equity_usdt), 6),
-        "current_equity": round(float(current_equity_usdt if current_equity_usdt is not None else starting_equity_usdt), 6),
-        "open_exposure_usdt": round(float(open_exposure_usdt or 0.0), 6),
+        "starting_equity": round(starting_equity, 6),
+        "peak_equity": round(peak_equity, 6),
+        "current_equity": round(current_equity, 6),
+        "open_exposure_usdt": round(
+            float(first_not_none(_safe_float(open_exposure_usdt), 0.0)),
+            6,
+        ),
         "copy_ratio": 0.05,
         "input_source": "local_db_position_deltas_and_market_snapshots",
         "created_at_ms": current_ms,
@@ -312,8 +334,21 @@ def write_fusion_runtime_input_to_engine_status(
             "fusion_runtime_recent_entry_deltas": str(report.recent_entry_deltas_count),
             "fusion_runtime_latest_delta_age_ms": str(report.latest_delta_age_ms if report.latest_delta_age_ms is not None else ""),
             "fusion_runtime_state_source": state_summary["source"],
-            "fusion_runtime_current_equity_usdt": str(state_summary["current_equity_usdt"]),
-            "fusion_runtime_peak_equity_usdt": str(state_summary["peak_equity_usdt"]),
+            "fusion_runtime_starting_equity_usdt": str(
+                state_summary["starting_equity_usdt"]
+                if state_summary["starting_equity_usdt"] is not None
+                else ""
+            ),
+            "fusion_runtime_current_equity_usdt": str(
+                state_summary["current_equity_usdt"]
+                if state_summary["current_equity_usdt"] is not None
+                else ""
+            ),
+            "fusion_runtime_peak_equity_usdt": str(
+                state_summary["peak_equity_usdt"]
+                if state_summary["peak_equity_usdt"] is not None
+                else ""
+            ),
             "fusion_runtime_open_exposure_usdt": str(state_summary["open_exposure_usdt"]),
         }
     )
@@ -503,8 +538,17 @@ def _read_json_object(path: Path) -> dict[str, Any]:
 
 def _read_ui_state_summary(path: Path) -> dict[str, Any]:
     payload = _read_json_object(path)
-    starting = _safe_float(payload.get("simulation_starting_equity_usdt")) or 1000.0
-    realized = _safe_float(payload.get("simulation_realized_pnl_usdc")) or 0.0
+    starting = _safe_float(payload.get("simulation_starting_equity_usdt"))
+    realized = _safe_float(payload.get("simulation_realized_pnl_usdc"))
+    if starting is None or starting <= 0:
+        return {
+            "starting_equity_usdt": None,
+            "current_equity_usdt": None,
+            "peak_equity_usdt": None,
+            "open_exposure_usdt": 0.0,
+            "source": "missing_session_baseline",
+        }
+    realized = float(first_not_none(realized, 0.0))
     current = starting + realized
     open_exposure = 0.0
     peak = current
@@ -526,8 +570,8 @@ def _read_ui_state_summary(path: Path) -> dict[str, Any]:
         for raw in positions.values():
             if not isinstance(raw, dict):
                 continue
-            size = abs(_safe_float(raw.get("size")) or 0.0)
-            price = _safe_float(raw.get("avg_price")) or 0.0
+            size = abs(float(first_not_none(_safe_float(raw.get("size")), 0.0)))
+            price = float(first_not_none(_safe_float(raw.get("avg_price")), 0.0))
             estimated_exposure += size * price
         if estimated_exposure > 0:
             open_exposure = estimated_exposure

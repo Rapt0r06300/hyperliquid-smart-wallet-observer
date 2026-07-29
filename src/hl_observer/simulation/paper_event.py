@@ -58,6 +58,10 @@ class PaperEvent:
     reason: str | None = None
     refs: dict[str, Any] = field(default_factory=dict)
     raw: dict[str, Any] = field(default_factory=dict)
+    event_seq: int | None = None
+    session_id: str | None = None
+    prev_hash: str | None = None
+    event_hash: str | None = None
 
     @classmethod
     def create(cls, event_type: PaperEventType, **kwargs: Any) -> "PaperEvent":

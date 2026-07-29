@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import json
 
+from hl_observer.runtime.equity_history_store import read_equity_points
 from hl_observer.runtime.persistent_poll_runner import (
     EXIT_SELF_RESTART,
     EXIT_STOP,
@@ -142,3 +143,30 @@ def test_self_restart_exit_code(tmp_path):
     runner, journal, _ = _mk(tmp_path, max_runs=10, restart_every=2)
     assert runner.run() == EXIT_SELF_RESTART
     assert _invoked(journal).count("copy-run") == 2  # exactement 2 polls avant rotation
+
+
+def test_runner_uses_canonical_session_baseline_not_hardcoded_1000(tmp_path):
+    runner, _, cfg = _mk(tmp_path, max_runs=1)
+    runner._session_id = "paper:baseline-1250"
+    runner.metrics["fusion_runtime_starting_equity_usdt"] = "1250"
+    runner.metrics["fusion_runtime_current_equity_usdt"] = "1275"
+
+    runner.write_engine_status("sleeping", "test")
+
+    point = read_equity_points(runtime_data_dir=cfg.runtime_data_dir)[-1]
+    assert point["starting_equity_usdt"] == 1250.0
+    assert point["equity"] == 1275.0
+    assert point["pnl"] == 25.0
+
+
+def test_runner_never_invents_pnl_when_session_baseline_is_missing(tmp_path):
+    runner, _, cfg = _mk(tmp_path, max_runs=1)
+    runner._session_id = "paper:no-baseline"
+    runner.metrics["fusion_runtime_current_equity_usdt"] = "1275"
+
+    runner.write_engine_status("sleeping", "test")
+
+    point = read_equity_points(runtime_data_dir=cfg.runtime_data_dir)[-1]
+    assert point["equity"] == 1275.0
+    assert point["pnl"] is None
+    assert point["accounting_status"] == "BASELINE_UNMEASURABLE"

@@ -33,6 +33,11 @@ from hl_observer.signals.entry_supply_diagnostics import (
     BOTTLENECK_SUPPLY,
 )
 from hl_observer.simulation.pnl_reconciliation import reconcile_pnl
+from hl_observer.simulation.accounting_truth import (
+    first_not_none,
+    round_trip_net_pnl_usdc,
+    separate_entry_cost_usdc,
+)
 from hl_observer.strategies.engine_pnl import rapport_par_moteur as _rapport_par_moteur
 from hl_observer.storage.database import create_session_factory, create_sqlite_engine
 from hl_observer.storage.models import MarketSnapshot
@@ -495,13 +500,15 @@ def _apply_fast_status_quality_exits(state: UiState, market_marks: dict[str, Any
         if mark_price is None or mark_price <= 0:
             skipped.append({"position_key": str(position_key), "coin": coin, "reason": "NO_REAL_MARK_FOR_QUALITY_EXIT"})
             continue
-        entry_price = (
-            _safe_float(position.get("entry_price"))
-            or _safe_float(position.get("avg_price"))
-            or _safe_float(position.get("avg_entry_price"))
-            or 0.0
+        entry_price = first_not_none(
+            _safe_float(position.get("entry_price")),
+            _safe_float(position.get("avg_price")),
+            _safe_float(position.get("avg_entry_price")),
+            0.0,
         )
-        size = _safe_float(position.get("size")) or 0.0
+        size = first_not_none(_safe_float(position.get("size")), 0.0)
+        assert entry_price is not None
+        assert size is not None
         if entry_price <= 0 or size == 0:
             skipped.append({"position_key": str(position_key), "coin": coin, "reason": "INVALID_POSITION_NUMBERS"})
             continue
@@ -542,7 +549,23 @@ def _apply_fast_status_quality_exits(state: UiState, market_marks: dict[str, Any
         closed_notional = abs(size * mark_price)
         gross_pnl = (mark_price - entry_price) * size
         exit_cost = closed_notional * FAST_STATUS_EXIT_COST_BPS / 10_000.0
-        net_pnl = gross_pnl - exit_cost
+        entry_cost = separate_entry_cost_usdc(position)
+        net_pnl = round_trip_net_pnl_usdc(
+            gross_pnl_usdc=gross_pnl,
+            entry_cost_usdc=entry_cost,
+            exit_cost_usdc=exit_cost,
+        )
+        if net_pnl is None:
+            skipped.append(
+                {
+                    "position_key": str(position_key),
+                    "coin": coin,
+                    "reason": "QUALITY_CLOSE_ENTRY_COST_UNMEASURABLE",
+                    "gross_pnl_usdc": round(gross_pnl, 8),
+                    "exit_cost_usdc": round(exit_cost, 8),
+                }
+            )
+            continue
         if net_pnl < min_net_pnl_usdc and not realize_negative:
             skipped.append(
                 {
@@ -551,7 +574,9 @@ def _apply_fast_status_quality_exits(state: UiState, market_marks: dict[str, Any
                     "reason": "QUALITY_GUARD_HOLD_TO_AVOID_FEE_DRAG",
                     "quality_reason": quality_reason,
                     "gross_pnl_usdc": round(gross_pnl, 8),
+                    "entry_cost_carried_usdc": round(entry_cost, 8),
                     "fee_cost_usdc": round(exit_cost, 8),
+                    "total_round_trip_cost_usdc": round(entry_cost + exit_cost, 8),
                     "estimated_net_pnl_usdc": round(net_pnl, 8),
                     "min_net_pnl_usdc": round(min_net_pnl_usdc, 8),
                 }
@@ -575,6 +600,10 @@ def _apply_fast_status_quality_exits(state: UiState, market_marks: dict[str, Any
             "estimated_net_pnl_usdc": round(net_pnl, 8),
             "gross_pnl_usdc": round(gross_pnl, 8),
             "fee_cost_usdc": round(exit_cost, 8),
+            "entry_cost_carried_usdc": round(entry_cost, 8),
+            "total_round_trip_cost_usdc": round(entry_cost + exit_cost, 8),
+            "fee_already_embedded_in_entry_price": False,
+            "fee_already_embedded_in_exit_price": False,
             "copied_notional_usdt": closed_notional,
             "bot_position_size_after": 0.0,
             "matched_position_key": str(position_key),
@@ -835,8 +864,14 @@ def _mark_to_market_positions(
             else:
                 gross_unrealized = (float(mark_price) - entry_price) * size
             exit_cost_estimate = position_notional * FAST_STATUS_EXIT_COST_BPS / 10_000.0
-            net_unrealized = gross_unrealized - exit_cost_estimate
-            unrealized_pnl += net_unrealized
+            entry_cost = separate_entry_cost_usdc(normalized)
+            net_unrealized = round_trip_net_pnl_usdc(
+                gross_pnl_usdc=gross_unrealized,
+                entry_cost_usdc=entry_cost,
+                exit_cost_usdc=exit_cost_estimate,
+            )
+            if net_unrealized is not None:
+                unrealized_pnl += net_unrealized
         else:
             marks_missing += 1
             mark_price = None
@@ -845,6 +880,7 @@ def _mark_to_market_positions(
             gross_unrealized = 0.0
             exit_cost_estimate = 0.0
             net_unrealized = 0.0
+            entry_cost = separate_entry_cost_usdc(normalized)
         enriched = dict(normalized)
         enriched.update(
             {
@@ -854,10 +890,20 @@ def _mark_to_market_positions(
                 "market_mark_available": bool(market_mark_available),
                 "notional_usdt": round(position_notional, 6),
                 "gross_unrealized_pnl_usdc": round(gross_unrealized, 6),
+                "entry_cost_carried_usdc": round(entry_cost, 6) if entry_cost is not None else None,
                 "exit_cost_estimate_usdc": round(exit_cost_estimate, 6),
-                "unrealized_pnl_usdc": round(net_unrealized, 6),
+                "unrealized_pnl_usdc": round(net_unrealized, 6) if net_unrealized is not None else None,
+                "pnl_accounting_status": (
+                    "STRICT_ROUND_TRIP_COSTS_KNOWN"
+                    if net_unrealized is not None
+                    else "ENTRY_COST_UNMEASURABLE"
+                ),
                 "last_mark_at_ms": int(market_marks.get("latest_exchange_ts") or current_ms) if market_mark_available else None,
-                "mark_formula": "short: (entry-mark)*size-cost" if direction == "SHORT" else "long: (mark-entry)*size-cost",
+                "mark_formula": (
+                    "short: (entry-mark)*size-entry_cost-exit_cost"
+                    if direction == "SHORT"
+                    else "long: (mark-entry)*size-entry_cost-exit_cost"
+                ),
                 "research_only": True,
             }
         )
@@ -1602,16 +1648,18 @@ def _copy_position_quality_exit_reason(position: dict[str, Any], *, current_ms: 
 def _normalize_position_for_status(raw_position: dict[str, Any], *, index: int) -> dict[str, Any]:
     coin = _infer_status_coin(raw_position, index=index) or "UNKNOWN"
     direction = str(raw_position.get("direction") or raw_position.get("side") or "").upper()
-    raw_size = _safe_float(raw_position.get("size")) or 0.0
+    raw_size = first_not_none(_safe_float(raw_position.get("size")), 0.0)
+    assert raw_size is not None
     if direction not in {"LONG", "SHORT"}:
         direction = "SHORT" if raw_size < 0 else "LONG"
     size = abs(raw_size)
-    entry_price = (
-        _safe_float(raw_position.get("avg_price"))
-        or _safe_float(raw_position.get("avg_entry_price"))
-        or _safe_float(raw_position.get("entry_price"))
-        or 0.0
+    entry_price = first_not_none(
+        _safe_float(raw_position.get("avg_price")),
+        _safe_float(raw_position.get("avg_entry_price")),
+        _safe_float(raw_position.get("entry_price")),
+        0.0,
     )
+    assert entry_price is not None
     leader_wallets = _csv_count(raw_position.get("leader_wallets_csv"))
     if leader_wallets <= 0:
         leader_wallets = _safe_int(raw_position.get("leader_wallets_count")) or _safe_int(raw_position.get("wallet_count")) or 1
@@ -1627,6 +1675,10 @@ def _normalize_position_for_status(raw_position: dict[str, Any], *, index: int) 
         "size": round(size, 12),
         "entry_price": round(entry_price, 8),
         "avg_entry_price": round(entry_price, 8),
+        "entry_costs": separate_entry_cost_usdc(raw_position),
+        "fee_already_embedded_in_entry_price": raw_position.get(
+            "fee_already_embedded_in_entry_price"
+        ),
         "opened_at_ms": _safe_int(raw_position.get("opened_at_ms")) or 0,
         "last_update_at_ms": _safe_int(raw_position.get("last_update_at_ms")) or 0,
         "position_mode": str(raw_position.get("position_mode") or "SINGLE_LEADER"),

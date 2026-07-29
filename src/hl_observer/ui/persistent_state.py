@@ -2,16 +2,31 @@ from __future__ import annotations
 
 import json
 import os
+import time
 from pathlib import Path
 from urllib.parse import unquote
 
 from hl_observer.config.settings import Settings
+from hl_observer.simulation.accounting_truth import first_not_none
+from hl_observer.simulation.ledger_integrity import (
+    GENESIS_HASH,
+    LEDGER_CORRUPTED,
+    LEDGER_OK,
+    RECOVERY_REQUIRED,
+    latest_checkpoint,
+    read_chain,
+    write_chain_atomic,
+)
 from hl_observer.ui.state import UiState
 from hl_observer.utils.time import now_ms
 
 
 STATE_VERSION = 1
 STATE_FILENAME = "ui_simulation_state.json"
+LEDGER_FILENAME = "ui_simulation_ledger.jsonl"
+# Display projections may be bounded, but the canonical accounting ledger may
+# not be truncated: risk budgets, opens_today, attribution and recovery depend
+# on its complete event sequence.
 MAX_PERSISTED_LEDGER_EVENTS = 20_000
 MAX_PERSISTED_DELTA_KEYS = 10_000
 MAX_PERSISTED_EQUITY_POINTS = 5_000
@@ -30,14 +45,99 @@ def simulation_state_path(settings: Settings) -> Path:
     return Path("data") / "runtime" / STATE_FILENAME
 
 
+def simulation_ledger_path(settings: Settings) -> Path:
+    return simulation_state_path(settings).with_name(LEDGER_FILENAME)
+
+
 def load_or_create_ui_state(settings: Settings) -> UiState:
     path = simulation_state_path(settings)
+    ledger_path = simulation_ledger_path(settings)
     path.parent.mkdir(parents=True, exist_ok=True)
-    if path.exists():
-        loaded = _load_state_file(path)
+
+    snapshot_payload = _read_state_payload(path) if path.exists() else None
+    ledger_result = read_chain(ledger_path)
+    if ledger_result.status == LEDGER_CORRUPTED:
+        return _blocked_recovery_state(
+            snapshot_payload,
+            status=LEDGER_CORRUPTED,
+            state_path=path,
+            ledger_path=ledger_path,
+            errors=list(ledger_result.errors),
+        )
+
+    checkpoint = latest_checkpoint(ledger_result.events)
+    if checkpoint is not None:
+        checkpoint_hash = str(ledger_result.events[-1].get("event_hash") or "")
+        snapshot_hash = (
+            str(snapshot_payload.get("simulation_ledger_last_hash") or "")
+            if isinstance(snapshot_payload, dict)
+            else ""
+        )
+        source_payload = snapshot_payload if snapshot_payload is not None and snapshot_hash == checkpoint_hash else checkpoint
+        loaded = _state_from_payload(source_payload)
         if loaded is not None:
+            loaded.simulation_session_id = str(
+                first_not_none(
+                    source_payload.get("simulation_session_id"),
+                    ledger_result.events[-1].get("session_id"),
+                    f"ui:{loaded.simulation_started_at_ms}",
+                )
+            )
+            loaded.simulation_accounting_status = LEDGER_OK
+            loaded.simulation_pnl_trusted = True
+            loaded.simulation_recovery_source = (
+                "STATE_SNAPSHOT" if source_payload is snapshot_payload else "LEDGER_CHECKPOINT"
+            )
+            loaded.simulation_ledger_last_seq = int(ledger_result.events[-1].get("event_seq") or 0)
+            loaded.simulation_ledger_last_hash = checkpoint_hash
+            loaded.add_event(
+                "simulation_state_restored",
+                (
+                    "Session simulation restauree depuis le snapshot atomique."
+                    if source_payload is snapshot_payload
+                    else "Session simulation reconstruite depuis le ledger canonique."
+                ),
+                payload={
+                    "state_path": str(path),
+                    "ledger_path": str(ledger_path),
+                    "recovery_source": loaded.simulation_recovery_source,
+                },
+            )
             return loaded
+
+    if ledger_path.exists() and ledger_result.events:
+        return _blocked_recovery_state(
+            snapshot_payload,
+            status=RECOVERY_REQUIRED,
+            state_path=path,
+            ledger_path=ledger_path,
+            errors=[{"error": "ledger exists without a recoverable STATE_CHECKPOINT"}],
+        )
+
+    if snapshot_payload is not None:
+        loaded = _state_from_payload(snapshot_payload)
+        if loaded is not None:
+            loaded.simulation_session_id = str(
+                first_not_none(
+                    snapshot_payload.get("simulation_session_id"),
+                    f"ui:{loaded.simulation_started_at_ms}",
+                )
+            )
+            loaded.simulation_recovery_source = "LEGACY_STATE_MIGRATION"
+            persist_simulation_state(settings, loaded)
+            return loaded
+
+    if path.exists():
+        return _blocked_recovery_state(
+            None,
+            status=RECOVERY_REQUIRED,
+            state_path=path,
+            ledger_path=ledger_path,
+            errors=[{"error": "state snapshot is unreadable and no canonical ledger exists"}],
+        )
+
     state = UiState()
+    state.simulation_session_id = f"ui:{state.simulation_started_at_ms}"
     try:
         persist_simulation_state(settings, state)
     except OSError as exc:
@@ -55,6 +155,10 @@ def reset_simulation_state(settings: Settings, *, starting_equity_usdt: float = 
     state = UiState()
     state.simulation_started_at_ms = now_ms()
     state.simulation_starting_equity_usdt = max(1.0, float(starting_equity_usdt))
+    state.simulation_session_id = f"ui:{state.simulation_started_at_ms}"
+    state.simulation_accounting_status = LEDGER_OK
+    state.simulation_pnl_trusted = True
+    state.simulation_recovery_source = "EXPLICIT_SESSION_RESET"
     state.simulation_equity_history = [
         _initial_equity_point(state.simulation_started_at_ms, state.simulation_starting_equity_usdt)
     ]
@@ -71,12 +175,40 @@ def reset_simulation_state(settings: Settings, *, starting_equity_usdt: float = 
 
 def persist_simulation_state(settings: Settings, state: UiState) -> Path:
     path = simulation_state_path(settings)
+    ledger_path = simulation_ledger_path(settings)
     path.parent.mkdir(parents=True, exist_ok=True)
-    payload = {
+    if state.simulation_accounting_status in {LEDGER_CORRUPTED, RECOVERY_REQUIRED}:
+        raise OSError(
+            f"strict persistence blocked while accounting status is {state.simulation_accounting_status}"
+        )
+    if not state.simulation_session_id:
+        state.simulation_session_id = f"ui:{state.simulation_started_at_ms}"
+    payload = _state_payload(state)
+    ledger_records = _ledger_records(payload)
+    sealed = write_chain_atomic(
+        ledger_path,
+        ledger_records,
+        session_id=state.simulation_session_id,
+    )
+    last_row = sealed[-1]
+    state.simulation_ledger_last_seq = int(last_row["event_seq"])
+    state.simulation_ledger_last_hash = str(last_row["event_hash"])
+    state.simulation_accounting_status = LEDGER_OK
+    state.simulation_pnl_trusted = True
+    payload["simulation_ledger_last_seq"] = state.simulation_ledger_last_seq
+    payload["simulation_ledger_last_hash"] = state.simulation_ledger_last_hash
+    payload["simulation_accounting_status"] = state.simulation_accounting_status
+    payload["simulation_pnl_trusted"] = state.simulation_pnl_trusted
+    _atomic_write_json(path, payload)
+    return path
+
+
+def _state_payload(state: UiState) -> dict:
+    return {
         "version": STATE_VERSION,
         "simulation_started_at_ms": int(state.simulation_started_at_ms),
         "simulation_starting_equity_usdt": float(state.simulation_starting_equity_usdt),
-        "simulation_processed_delta_keys": sorted(state.simulation_processed_delta_keys)[-MAX_PERSISTED_DELTA_KEYS:],
+        "simulation_processed_delta_keys": sorted(state.simulation_processed_delta_keys),
         "simulation_virtual_positions": _safe_position_payload(state.simulation_virtual_positions),
         "simulation_ledger_events": _safe_ledger_payload(state.simulation_ledger_events),
         "simulation_realized_pnl_usdc": float(state.simulation_realized_pnl_usdc),
@@ -85,19 +217,29 @@ def persist_simulation_state(settings: Settings, state: UiState) -> Path:
         "simulation_reproduced_entries_total": int(state.simulation_reproduced_entries_total),
         "simulation_reproduced_exits_total": int(state.simulation_reproduced_exits_total),
         "simulation_equity_history": _safe_equity_history_payload(state.simulation_equity_history),
+        "simulation_session_id": str(
+            first_not_none(state.simulation_session_id, f"ui:{state.simulation_started_at_ms}")
+        ),
+        "simulation_accounting_status": str(state.simulation_accounting_status),
+        "simulation_pnl_trusted": bool(state.simulation_pnl_trusted),
+        "simulation_recovery_source": str(state.simulation_recovery_source),
+        "simulation_ledger_last_seq": int(state.simulation_ledger_last_seq),
+        "simulation_ledger_last_hash": str(state.simulation_ledger_last_hash),
         "updated_at_ms": now_ms(),
         "runtime_only": True,
         "notes": "Local UI simulation session state. No secrets, no orders.",
     }
-    path.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
-    return path
 
 
-def _load_state_file(path: Path) -> UiState | None:
+def _read_state_payload(path: Path) -> dict | None:
     try:
         payload = json.loads(path.read_text(encoding="utf-8-sig"))
     except (OSError, json.JSONDecodeError):
         return None
+    return payload if isinstance(payload, dict) else None
+
+
+def _state_from_payload(payload: dict) -> UiState | None:
     started = _safe_int(payload.get("simulation_started_at_ms"))
     equity = _safe_float(payload.get("simulation_starting_equity_usdt"))
     if started is None or started <= 0:
@@ -120,14 +262,24 @@ def _load_state_file(path: Path) -> UiState | None:
     if isinstance(ledger, list):
         state.simulation_ledger_events = [
             item
-            for item in ledger[-MAX_PERSISTED_LEDGER_EVENTS:]
+            for item in ledger
             if isinstance(item, dict)
         ]
-    state.simulation_realized_pnl_usdc = _safe_float(payload.get("simulation_realized_pnl_usdc")) or 0.0
-    state.simulation_entry_costs_paid_usdc = _safe_float(payload.get("simulation_entry_costs_paid_usdc")) or 0.0
-    state.simulation_exit_costs_paid_usdc = _safe_float(payload.get("simulation_exit_costs_paid_usdc")) or 0.0
-    state.simulation_reproduced_entries_total = _safe_int(payload.get("simulation_reproduced_entries_total")) or 0
-    state.simulation_reproduced_exits_total = _safe_int(payload.get("simulation_reproduced_exits_total")) or 0
+    state.simulation_realized_pnl_usdc = float(
+        first_not_none(_safe_float(payload.get("simulation_realized_pnl_usdc")), 0.0)
+    )
+    state.simulation_entry_costs_paid_usdc = float(
+        first_not_none(_safe_float(payload.get("simulation_entry_costs_paid_usdc")), 0.0)
+    )
+    state.simulation_exit_costs_paid_usdc = float(
+        first_not_none(_safe_float(payload.get("simulation_exit_costs_paid_usdc")), 0.0)
+    )
+    state.simulation_reproduced_entries_total = int(
+        first_not_none(_safe_int(payload.get("simulation_reproduced_entries_total")), 0)
+    )
+    state.simulation_reproduced_exits_total = int(
+        first_not_none(_safe_int(payload.get("simulation_reproduced_exits_total")), 0)
+    )
     equity_history = payload.get("simulation_equity_history")
     if isinstance(equity_history, list):
         state.simulation_equity_history = [
@@ -135,12 +287,118 @@ def _load_state_file(path: Path) -> UiState | None:
             for item in equity_history[-MAX_PERSISTED_EQUITY_POINTS:]
             if isinstance(item, dict)
         ]
-    state.add_event(
-        "simulation_state_restored",
-        "Session simulation restauree depuis data/runtime; le PnL ne repart pas a zero apres reconnexion.",
-        payload={"state_path": str(path), "simulation_started_at_ms": started},
+    state.simulation_session_id = str(
+        first_not_none(payload.get("simulation_session_id"), f"ui:{started}")
+    )
+    state.simulation_accounting_status = str(
+        first_not_none(payload.get("simulation_accounting_status"), LEDGER_OK)
+    )
+    state.simulation_pnl_trusted = bool(
+        first_not_none(payload.get("simulation_pnl_trusted"), True)
+    )
+    state.simulation_recovery_source = str(
+        first_not_none(payload.get("simulation_recovery_source"), "STATE_SNAPSHOT")
+    )
+    state.simulation_ledger_last_seq = int(
+        first_not_none(_safe_int(payload.get("simulation_ledger_last_seq")), 0)
+    )
+    state.simulation_ledger_last_hash = str(
+        first_not_none(payload.get("simulation_ledger_last_hash"), "")
     )
     return state
+
+
+def _ledger_records(payload: dict) -> list[dict]:
+    session_id = str(payload["simulation_session_id"])
+    records: list[dict] = [
+        {
+            "record_type": "SESSION_START",
+            "event_id": f"{session_id}:start",
+            "timestamp_ms": int(payload["simulation_started_at_ms"]),
+            "starting_equity_usdt": float(payload["simulation_starting_equity_usdt"]),
+        }
+    ]
+    for index, event in enumerate(payload.get("simulation_ledger_events") or (), start=1):
+        row = {
+            "record_type": "SIMULATION_EVENT",
+            "simulation_event": dict(event),
+        }
+        causal_id = event.get("event_id") or event.get("delta_key")
+        if causal_id:
+            row["event_id"] = f"{session_id}:event:{causal_id}"
+        else:
+            row["event_id"] = f"{session_id}:event-index:{index}"
+        records.append(row)
+    checkpoint = dict(payload)
+    checkpoint["simulation_ledger_last_seq"] = 0
+    checkpoint["simulation_ledger_last_hash"] = ""
+    records.append(
+        {
+            "record_type": "STATE_CHECKPOINT",
+            "event_id": f"{session_id}:checkpoint:{payload.get('updated_at_ms')}",
+            "timestamp_ms": int(payload.get("updated_at_ms") or now_ms()),
+            "state": checkpoint,
+        }
+    )
+    return records
+
+
+def _blocked_recovery_state(
+    snapshot_payload: dict | None,
+    *,
+    status: str,
+    state_path: Path,
+    ledger_path: Path,
+    errors: list[dict],
+) -> UiState:
+    state = _state_from_payload(snapshot_payload) if snapshot_payload is not None else None
+    if state is None:
+        state = UiState()
+        state.simulation_starting_equity_usdt = 0.0
+        state.simulation_realized_pnl_usdc = 0.0
+        state.simulation_equity_history = []
+    state.simulation_accounting_status = status
+    state.simulation_pnl_trusted = False
+    state.simulation_recovery_source = status
+    state.add_event(
+        "simulation_accounting_blocked",
+        "PnL strict bloque: etat/ledger non recuperable sans intervention.",
+        level="ERROR",
+        payload={
+            "status": status,
+            "state_path": str(state_path),
+            "ledger_path": str(ledger_path),
+            "errors": errors[:10],
+        },
+    )
+    return state
+
+
+def _atomic_write_json(path: Path, payload: dict, *, retries: int = 5) -> None:
+    encoded = json.dumps(payload, indent=2, sort_keys=True, allow_nan=False)
+    last_error: OSError | None = None
+    for attempt in range(max(1, retries)):
+        temporary = path.with_name(f".{path.name}.{os.getpid()}.{attempt}.tmp")
+        try:
+            with temporary.open("w", encoding="utf-8", newline="\n") as handle:
+                handle.write(encoded)
+                handle.flush()
+                os.fsync(handle.fileno())
+            os.replace(temporary, path)
+            return
+        except OSError as exc:
+            last_error = exc
+            if attempt + 1 < retries:
+                time.sleep(0.02 * (attempt + 1))
+        finally:
+            if temporary.exists():
+                try:
+                    temporary.unlink()
+                except OSError:
+                    pass
+    if last_error is not None:
+        raise last_error
+    raise OSError(f"unable to persist {path}")
 
 
 def _sqlite_path_from_url(database_url: str) -> Path | None:
@@ -182,7 +440,7 @@ def _safe_position_payload(positions: dict[str, dict]) -> dict[str, dict]:
 
 def _safe_ledger_payload(events: list[dict]) -> list[dict]:
     safe_events: list[dict] = []
-    for event in events[-MAX_PERSISTED_LEDGER_EVENTS:]:
+    for event in events:
         if not isinstance(event, dict):
             continue
         safe_events.append(

@@ -197,3 +197,4 @@ def test_write_fusion_heartbeat_input_preserves_safety_flags_and_merges_metrics(
     assert written["metrics"]["fusion_runtime_votes"] == "1"
     assert written["metrics"]["fusion_runtime_distilled_candidates"] == "0"
     assert written["metrics"]["fusion_runtime_state_source"] == "ui_simulation_state"
+    assert written["metrics"]["fusion_runtime_starting_equity_usdt"] == "1000.0"

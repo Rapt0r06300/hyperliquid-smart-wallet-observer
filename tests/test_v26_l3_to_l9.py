@@ -85,8 +85,8 @@ def test_l5_empty_book_never_blocks():
 
 def _stuck_positions():
     return {
-        "w|BTC|LONG": {"size": 1.0, "avg_price": 100.0, "opened_at_ms": NOW_MS - 4_000_000, "coin": "BTC"},
-        "w|ETH|LONG": {"size": 1.0, "avg_price": 100.0, "opened_at_ms": NOW_MS - 4_000_000, "coin": "ETH"},
+        "w|BTC|LONG": {"size": 1.0, "avg_price": 100.0, "entry_costs": 0.0, "opened_at_ms": NOW_MS - 4_000_000, "coin": "BTC"},
+        "w|ETH|LONG": {"size": 1.0, "avg_price": 100.0, "entry_costs": 0.0, "opened_at_ms": NOW_MS - 4_000_000, "coin": "ETH"},
     }
 
 
@@ -376,8 +376,22 @@ def test_exit_pipeline_ingests_and_unstucks_via_wrapper(monkeypatch):
     monkeypatch.delenv("HYPERSMART_V26_RECORD_CANDIDATES", raising=False)
     cfg = SLTPConfig(stop_loss_bps=400.0, take_profit_bps=800.0)
     positions = {
-        "w|BTC|LONG": {"size": 1.0, "avg_price": 100.0, "opened_at_ms": NOW_MS - 100_000, "coin": "BTC"},
-        "w|ETH|LONG": {"size": 1.0, "avg_price": 100.0, "opened_at_ms": NOW_MS - 4_000_000, "coin": "ETH"},
+        "w|BTC|LONG": {
+            "size": 1.0,
+            "avg_price": 100.0,
+            "entry_costs": 0.0,
+            "fee_already_embedded_in_entry_price": False,
+            "opened_at_ms": NOW_MS - 100_000,
+            "coin": "BTC",
+        },
+        "w|ETH|LONG": {
+            "size": 1.0,
+            "avg_price": 100.0,
+            "entry_costs": 0.0,
+            "fee_already_embedded_in_entry_price": False,
+            "opened_at_ms": NOW_MS - 4_000_000,
+            "coin": "ETH",
+        },
     }
     ledger: list[dict] = []
     # BTC -500bps => SL(400) le stoppe ; ETH -200bps vieux => pas stoppé, candidat unstuck

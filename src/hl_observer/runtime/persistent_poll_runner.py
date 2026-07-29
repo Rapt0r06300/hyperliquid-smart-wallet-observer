@@ -67,7 +67,8 @@ _FUSION_PRESERVED_METRICS = (
     "fusion_runtime_coins", "fusion_runtime_reasons", "fusion_runtime_recent_deltas",
     "fusion_runtime_recent_entry_deltas", "fusion_runtime_latest_delta_age_ms",
     "fusion_runtime_state_source", "fusion_runtime_current_equity_usdt",
-    "fusion_runtime_peak_equity_usdt", "fusion_runtime_open_exposure_usdt",
+    "fusion_runtime_starting_equity_usdt", "fusion_runtime_peak_equity_usdt",
+    "fusion_runtime_open_exposure_usdt",
 )
 
 
@@ -259,16 +260,48 @@ class PersistentPollRunner:
                 # Historique d'equity persiste par le MOTEUR (survit a Chrome ferme).
                 try:
                     from hl_observer.runtime.equity_history_store import append_equity_point
-                    _eq = float(self.metrics.get("fusion_runtime_current_equity_usdt") or 0.0)
-                    if _eq > 0:
-                        append_equity_point(timestamp_ms=self._now_ms(), equity_usdt=_eq,
-                                             pnl_usdc=_eq - 1000.0,
-                                             runtime_data_dir=self.config.runtime_data_dir)
+                    from hl_observer.simulation.accounting_truth import finite_number
+
+                    _eq = finite_number(self.metrics.get("fusion_runtime_current_equity_usdt"))
+                    _starting = finite_number(
+                        self.metrics.get("fusion_runtime_starting_equity_usdt")
+                    )
+                    _pnl = (
+                        _eq - _starting
+                        if _eq is not None
+                        and _starting is not None
+                        and _eq > 0
+                        and _starting > 0
+                        else None
+                    )
+                    if _eq is not None and _eq > 0:
+                        append_equity_point(
+                            timestamp_ms=self._now_ms(),
+                            equity_usdt=_eq,
+                            pnl_usdc=_pnl,
+                            starting_equity_usdt=_starting,
+                            session_id=self._session_id,
+                            accounting_status=(
+                                "MEASURABLE"
+                                if _pnl is not None
+                                else "BASELINE_UNMEASURABLE"
+                            ),
+                            runtime_data_dir=self.config.runtime_data_dir,
+                        )
                     # LOGS-MAX: une ligne SYSTEM par poll (equity/pnl/positions) pour tout revoir.
                     from hl_observer.runtime import detailed_logger as _dl
                     _dl.log("SYSTEM", f"poll {self.current_poll} done", sev="INFO",
-                            poll_index=self.current_poll, equity_usdt=round(_eq, 4),
-                            pnl_usdc=round(_eq - 1000.0, 4),
+                            poll_index=self.current_poll,
+                            equity_usdt=(round(_eq, 4) if _eq is not None else None),
+                            starting_equity_usdt=(
+                                round(_starting, 4) if _starting is not None else None
+                            ),
+                            pnl_usdc=(round(_pnl, 4) if _pnl is not None else None),
+                            pnl_accounting_status=(
+                                "MEASURABLE"
+                                if _pnl is not None
+                                else "BASELINE_UNMEASURABLE"
+                            ),
                             open_positions=self.metrics.get("fusion_runtime_open_positions"),
                             runtime_data_dir=str(self.config.runtime_data_dir))
                 except Exception:

@@ -116,6 +116,7 @@ class FundingArbEvent:
     # None = prix inconnu -> on NE SAIT PAS ce qu'a fait la position. On ne l'invente pas.
     price_pnl_usdc: float | None = None
     price_pnl_unknown: bool = False
+    event_id: str | None = None
     paper_only: bool = True
     real_execution: bool = False
 
@@ -153,6 +154,22 @@ def _hourly_rate_bps(rates: list[float]) -> float | None:
     return float(rates[-1]) * 10_000.0
 
 
+def _funding_event_id(
+    pair_id: str,
+    action: str,
+    *,
+    causal_timestamp_ms: int | None = None,
+) -> str:
+    """Build a replay-stable identity from causal funding state."""
+
+    suffix = (
+        f":{int(causal_timestamp_ms)}"
+        if causal_timestamp_ms is not None and action.upper() == "ACCRUAL"
+        else ""
+    )
+    return f"{pair_id}:{action.lower()}{suffix}"
+
+
 def evaluate_funding_arb(
     *,
     funding_rows: tuple[dict[str, object], ...],
@@ -182,12 +199,32 @@ def evaluate_funding_arb(
             # Donnée manquante: on n'invente rien, on ferme proprement au coût.
             close_costs = 2 * pos.leg_notional_usdt * (cfg.exit_cost_bps_per_leg + cfg.hedge_venue_extra_bps / 2) / 10_000.0
             _px = _price_pnl_usdc(pos, float(prices.get(coin, 0.0) or 0.0))
-            net = pos.accrued_funding_usdc + (_px or 0.0) - pos.entry_costs_usdc - close_costs
-            realized += net
-            _reason = "FUNDING_DATA_MISSING" if _px is not None else "INSUFFICIENT_DATA_PRICE_UNKNOWN_FUNDING_DATA_MISSING"
-            events.append(FundingArbEvent("CLOSE", coin, pos.pair_id, _reason, None, round(close_costs, 8), round(net, 8),
-                                          price_pnl_usdc=(round(_px, 8) if _px is not None else None),
-                                          price_pnl_unknown=(_px is None)))
+            net = (
+                pos.accrued_funding_usdc + _px - pos.entry_costs_usdc - close_costs
+                if _px is not None
+                else None
+            )
+            if net is not None:
+                realized += net
+            _reason = (
+                "FUNDING_DATA_MISSING"
+                if _px is not None
+                else "PNL_UNMEASURABLE_PRICE_UNKNOWN_FUNDING_DATA_MISSING"
+            )
+            events.append(
+                FundingArbEvent(
+                    "CLOSE",
+                    coin,
+                    pos.pair_id,
+                    _reason,
+                    None,
+                    round(close_costs, 8),
+                    round(net, 8) if net is not None else None,
+                    price_pnl_usdc=(round(_px, 8) if _px is not None else None),
+                    price_pnl_unknown=(_px is None),
+                    event_id=_funding_event_id(pos.pair_id, "CLOSE"),
+                )
+            )
             continue
         receiving_rate = rate_bps if pos.receiving_side == "SHORT" else -rate_bps
         hours_open = max(0.0, (now_ms - (pos.last_accrual_at_ms or pos.opened_at_ms)) / 3_600_000.0)
@@ -200,21 +237,51 @@ def evaluate_funding_arb(
                 accrued_funding_usdc=round(pos.accrued_funding_usdc + accrual, 8),
                 last_accrual_at_ms=(pos.last_accrual_at_ms or pos.opened_at_ms) + whole_hours * 3_600_000,
             )
-            events.append(FundingArbEvent("ACCRUAL", coin, pos.pair_id, f"FUNDING_ACCRUED_{whole_hours}H", round(receiving_rate, 4), round(accrual, 8)))
+            events.append(
+                FundingArbEvent(
+                    "ACCRUAL",
+                    coin,
+                    pos.pair_id,
+                    f"FUNDING_ACCRUED_{whole_hours}H",
+                    round(receiving_rate, 4),
+                    round(accrual, 8),
+                    event_id=_funding_event_id(
+                        pos.pair_id,
+                        "ACCRUAL",
+                        causal_timestamp_ms=pos.last_accrual_at_ms,
+                    ),
+                )
+            )
 
         age_hours = (now_ms - pos.opened_at_ms) / 3_600_000.0
         edge_alive = abs(receiving_rate) >= cfg.exit_edge_bps_per_hour and receiving_rate > 0
         if not edge_alive or age_hours >= cfg.max_hold_hours:
             close_costs = 2 * pos.leg_notional_usdt * (cfg.exit_cost_bps_per_leg + cfg.hedge_venue_extra_bps / 2) / 10_000.0
             _px = _price_pnl_usdc(pos, float(prices.get(coin, 0.0) or 0.0))
-            net = pos.accrued_funding_usdc + (_px or 0.0) - pos.entry_costs_usdc - close_costs
-            realized += net
+            net = (
+                pos.accrued_funding_usdc + _px - pos.entry_costs_usdc - close_costs
+                if _px is not None
+                else None
+            )
+            if net is not None:
+                realized += net
             reason = "MAX_HOLD_REACHED" if age_hours >= cfg.max_hold_hours else "FUNDING_EDGE_COLLAPSED"
             if _px is None:
-                reason = "INSUFFICIENT_DATA_PRICE_UNKNOWN_" + reason
-            events.append(FundingArbEvent("CLOSE", coin, pos.pair_id, reason, round(receiving_rate, 4), round(close_costs, 8), round(net, 8),
-                                          price_pnl_usdc=(round(_px, 8) if _px is not None else None),
-                                          price_pnl_unknown=(_px is None)))
+                reason = "PNL_UNMEASURABLE_PRICE_UNKNOWN_" + reason
+            events.append(
+                FundingArbEvent(
+                    "CLOSE",
+                    coin,
+                    pos.pair_id,
+                    reason,
+                    round(receiving_rate, 4),
+                    round(close_costs, 8),
+                    round(net, 8) if net is not None else None,
+                    price_pnl_usdc=(round(_px, 8) if _px is not None else None),
+                    price_pnl_unknown=(_px is None),
+                    event_id=_funding_event_id(pos.pair_id, "CLOSE"),
+                )
+            )
             continue
         survivors[coin] = pos
 
@@ -270,7 +337,17 @@ def evaluate_funding_arb(
             last_accrual_at_ms=now_ms,
         )
         total_notional += pair_notional
-        events.append(FundingArbEvent("OPEN", coin, pair_id, f"FUNDING_EDGE_{receiving_side}_RECEIVES", round(rate_bps, 4), round(entry_costs, 8)))
+        events.append(
+            FundingArbEvent(
+                "OPEN",
+                coin,
+                pair_id,
+                f"FUNDING_EDGE_{receiving_side}_RECEIVES",
+                round(rate_bps, 4),
+                round(entry_costs, 8),
+                event_id=_funding_event_id(pair_id, "OPEN"),
+            )
+        )
 
     return FundingArbReport(
         positions=tuple(survivors.values()),

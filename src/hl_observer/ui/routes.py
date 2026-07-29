@@ -116,7 +116,6 @@ from hl_observer.storage.models import (
 from hl_observer.ui.action_catalog import build_action_catalog
 from hl_observer.ui.event_bus import UiEventBus
 from hl_observer.ui.persistent_state import (
-    MAX_PERSISTED_LEDGER_EVENTS,
     persist_simulation_state,
     simulation_state_path,
 )
@@ -902,7 +901,7 @@ def create_router(settings: Settings, state: UiState, bus: UiEventBus) -> APIRou
             }
         ledger_events: list[dict[str, Any]] = [
             dict(row)
-            for row in (existing_events or [])[-MAX_PERSISTED_LEDGER_EVENTS:]
+            for row in (existing_events or [])
             if isinstance(row, dict)
         ]
         if maintenance_events:
@@ -2310,9 +2309,10 @@ def create_router(settings: Settings, state: UiState, bus: UiEventBus) -> APIRou
                     gross_pnl = (previous["avg_price"] - float(row.price)) * close_size
                 exit_cost = close_size * float(row.price) * cost_bps / 10_000.0
                 allocated_entry_cost = previous["entry_costs"] * (close_size / previous["size"])
-                # Entry costs are recorded when a virtual entry is opened; close events
-                # only subtract exit costs to avoid double-counting fees in the graph.
-                net_pnl = gross_pnl - exit_cost
+                # Entry costs are carried by the open position and allocated
+                # exactly once to each reduce/close. They are not part of
+                # realized PnL before the matching exit.
+                net_pnl = gross_pnl - allocated_entry_cost - exit_cost
                 notional_to_close = close_size * float(row.price)
                 if action == "REDUCE":
                     refusal_reason = ""
@@ -2390,6 +2390,10 @@ def create_router(settings: Settings, state: UiState, bus: UiEventBus) -> APIRou
                         "estimated_net_pnl_usdc": round(net_pnl, 6),
                         "gross_pnl_usdc": round(gross_pnl, 6),
                         "fee_cost_usdc": round(exit_cost, 6),
+                        "entry_cost_carried_usdc": round(allocated_entry_cost, 6),
+                        "total_round_trip_cost_usdc": round(allocated_entry_cost + exit_cost, 6),
+                        "fee_already_embedded_in_entry_price": False,
+                        "fee_already_embedded_in_exit_price": False,
                         "bot_position_size_after": round(remaining_size, 10),
                         "copied_notional_usdt": round(close_size * float(row.price), 6),
                         "reason": "LOCAL_REPLAY_ONLY_NOT_AN_ORDER",
@@ -2456,7 +2460,7 @@ def create_router(settings: Settings, state: UiState, bus: UiEventBus) -> APIRou
             else:
                 gross_unrealized = (position["avg_price"] - mark_price) * position["size"]
             exit_cost_estimate = abs(position["size"] * mark_price) * cost_bps / 10_000.0
-            net_unrealized = gross_unrealized - exit_cost_estimate
+            net_unrealized = gross_unrealized - float(position["entry_costs"]) - exit_cost_estimate
             unrealized_pnl += net_unrealized
             open_positions.append(
                 {

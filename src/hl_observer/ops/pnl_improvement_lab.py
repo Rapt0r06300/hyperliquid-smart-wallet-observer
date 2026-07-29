@@ -14,7 +14,6 @@ from __future__ import annotations
 
 import argparse
 import json
-import math
 from collections import defaultdict
 from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass
@@ -22,6 +21,13 @@ from datetime import datetime, timezone
 from pathlib import Path
 from statistics import median
 from typing import Any
+
+from hl_observer.simulation.accounting_truth import (
+    ACCOUNTING_SCHEMA_VERSION,
+    finite_number,
+    first_not_none,
+    round_trip_net_pnl_usdc,
+)
 
 CANONICAL_LEDGER_NAME = "simulation_pnl_ledger_latest.jsonl"
 DEFAULT_COMPARISON_NOTIONAL_USDT = 50.0
@@ -55,6 +61,14 @@ class HistoricalTrade:
     reconciliation_error_usdc: float
     eligible_for_learning: bool
     exclusion_reasons: tuple[str, ...]
+    reported_gross_pnl_usdc: float | None = None
+    reported_net_pnl_usdc: float | None = None
+    recomputed_gross_pnl_usdc: float | None = None
+    recomputed_net_pnl_usdc: float | None = None
+    net_reconciliation_error_usdc: float | None = None
+    accounting_measurable: bool = True
+    accounting_schema_version: str | None = ACCOUNTING_SCHEMA_VERSION
+    strict_accounting_eligible: bool = True
 
 
 @dataclass(frozen=True, slots=True)
@@ -70,11 +84,7 @@ def _utc_now() -> str:
 
 
 def _to_float(value: Any) -> float | None:
-    try:
-        result = float(value)
-    except (TypeError, ValueError):
-        return None
-    return result if math.isfinite(result) else None
+    return finite_number(value)
 
 
 def _to_int(value: Any) -> int | None:
@@ -85,19 +95,21 @@ def _to_int(value: Any) -> int | None:
 
 
 def _event_timestamp_ms(row: dict[str, Any]) -> int:
-    return int(
-        _to_int(
-            row.get("timestamp_ms")
-            or row.get("observed_at_ms")
-            or row.get("recorded_at_ms")
-            or row.get("closed_at_ms")
+    parsed = _to_int(
+        first_not_none(
+            row.get("timestamp_ms"),
+            row.get("observed_at_ms"),
+            row.get("recorded_at_ms"),
+            row.get("closed_at_ms"),
         )
-        or 0
     )
+    return 0 if parsed is None else parsed
 
 
 def _wallet_count(row: dict[str, Any]) -> int | None:
-    explicit = _to_int(row.get("consensus_wallets") or row.get("wallet_count"))
+    explicit = _to_int(
+        first_not_none(row.get("consensus_wallets"), row.get("wallet_count"))
+    )
     if explicit is not None:
         return max(0, explicit)
     wallets = str(row.get("wallet_address") or row.get("leader_wallet") or "")
@@ -105,32 +117,47 @@ def _wallet_count(row: dict[str, Any]) -> int | None:
     return len(distinct) or None
 
 
-def _open_position_key(row: dict[str, Any]) -> str:
-    explicit = str(row.get("matched_position_key") or "").strip()
-    if explicit:
-        return explicit
-    return "|".join(
-        (
-            str(row.get("wallet_address") or row.get("leader_wallet") or "").strip(),
-            str(row.get("coin") or row.get("market_id") or "").strip().upper(),
-            str(row.get("leader_side") or row.get("side") or "").strip().upper(),
-        )
+def _first_float(row: dict[str, Any], *keys: str) -> float | None:
+    return _to_float(first_not_none(*(row.get(key) for key in keys)))
+
+
+def _first_int(row: dict[str, Any], *keys: str) -> int | None:
+    return _to_int(first_not_none(*(row.get(key) for key in keys)))
+
+
+def _first_float_across(
+    *candidates: tuple[dict[str, Any], tuple[str, ...]],
+) -> float | None:
+    values: list[Any] = []
+    for row, keys in candidates:
+        values.extend(row.get(key) for key in keys)
+    return _to_float(first_not_none(*values))
+
+
+def _position_instance_id(row: dict[str, Any]) -> str:
+    value = first_not_none(
+        row.get("paper_position_instance_id"),
+        row.get("position_instance_id"),
+        row.get("matched_position_key"),
     )
+    return "" if value is None else str(value).strip()
 
 
 def _event_identity(row: dict[str, Any], line_number: int) -> str:
-    explicit = (
-        row.get("dedupe_identity")
-        or row.get("paper_position_instance_id")
-        or row.get("v9_paper_order_id")
-        or row.get("delta_key")
-        or row.get("evidence_hash")
+    explicit = first_not_none(
+        row.get("dedupe_identity"),
+        row.get("paper_position_instance_id"),
+        row.get("v9_paper_order_id"),
+        row.get("delta_key"),
+        row.get("evidence_hash"),
     )
+    action = first_not_none(row.get("paper_action_type"), row.get("event_type"))
+    identity = line_number if explicit is None else explicit
     return "|".join(
-        str(part or "")
+        "" if part is None else str(part)
         for part in (
-            row.get("paper_action_type") or row.get("event_type"),
-            explicit or line_number,
+            action,
+            identity,
             _event_timestamp_ms(row),
             row.get("coin"),
             row.get("estimated_net_pnl_usdc"),
@@ -154,6 +181,108 @@ def _strategy_name(open_row: dict[str, Any]) -> str:
     if "COPY" in text or "LEADER" in text:
         return "COPY"
     return "LEGACY_OR_UNKNOWN"
+
+
+def _accounting_schema(
+    open_row: dict[str, Any],
+    close_row: dict[str, Any],
+) -> str | None:
+    value = first_not_none(
+        close_row.get("accounting_schema_version"),
+        open_row.get("accounting_schema_version"),
+    )
+    return None if value is None else str(value).strip() or None
+
+
+def _entry_cost_usdc(open_row: dict[str, Any]) -> float | None:
+    if open_row.get("fee_already_embedded_in_entry_price") is True:
+        return 0.0
+    return _first_float(
+        open_row,
+        "entry_cost_usdc",
+        "entry_costs_usdc",
+        "entry_costs",
+        "fee_cost_usdc",
+        "fee_paid",
+    )
+
+
+def _exit_cost_usdc(close_row: dict[str, Any]) -> float | None:
+    if close_row.get("fee_already_embedded_in_exit_price") is True:
+        return 0.0
+    return _first_float(
+        close_row,
+        "exit_cost_usdc",
+        "exit_costs_usdc",
+        "exit_costs",
+        "fee_cost_usdc",
+        "fee_paid",
+    )
+
+
+def _funding_cost_usdc(
+    open_row: dict[str, Any],
+    close_row: dict[str, Any],
+) -> float | None:
+    explicit_cost = _first_float_across(
+        (close_row, ("funding_cost_usdc",)),
+        (open_row, ("funding_cost_usdc",)),
+    )
+    if explicit_cost is not None:
+        return explicit_cost
+    signed_pnl = _first_float_across(
+        (close_row, ("funding_pnl_usdc", "funding_net_usdc")),
+        (open_row, ("funding_pnl_usdc", "funding_net_usdc")),
+    )
+    return None if signed_pnl is None else -signed_pnl
+
+
+def _contamination_reasons(
+    open_row: dict[str, Any],
+    close_row: dict[str, Any],
+) -> list[str]:
+    combined = {**open_row, **close_row}
+    reasons: list[str] = []
+    origin_text = " ".join(
+        str(combined.get(key) or "").upper()
+        for key in (
+            "data_origin",
+            "source_kind",
+            "execution_source",
+            "execution_truth_mode",
+            "price_source",
+            "book_source",
+        )
+    )
+    if any(token in origin_text for token in ("SYNTHETIC", "FAKE", "DEMO")):
+        reasons.append("SYNTHETIC_OR_FAKE_DATA")
+    if any(
+        combined.get(key) is True
+        for key in (
+            "maker_fill_assumed",
+            "assumed_full_fill",
+            "fictitious_depth",
+            "synthetic_depth",
+        )
+    ):
+        reasons.append("UNEVIDENCED_EXECUTION_ASSUMPTION")
+    if (
+        "MID" in origin_text
+        and _first_float(close_row, "exit_executable_price") is None
+        and _first_float(open_row, "entry_executable_price") is None
+    ):
+        reasons.append("MID_PRICE_NOT_EXECUTABLE")
+    if any(
+        combined.get(key) is True
+        for key in (
+            "cost_defaulted_to_zero",
+            "state_reset_detected",
+            "double_count_detected",
+            "degraded_constant_costs",
+        )
+    ):
+        reasons.append("KNOWN_ACCOUNTING_CONTAMINATION")
+    return reasons
 
 
 def discover_session_ledgers(log_dir: Path) -> tuple[Path, ...]:
@@ -203,62 +332,128 @@ def _build_trade(
     side = str(open_row.get("leader_side") or close_row.get("leader_side") or "").upper()
     opened_at_ms = _event_timestamp_ms(open_row)
     closed_at_ms = _event_timestamp_ms(close_row)
-    entry_price = float(
-        _to_float(
-            close_row.get("average_entry_price")
-            or close_row.get("entry_price")
-            or open_row.get("entry_price")
-            or open_row.get("average_entry_price")
-        )
-        or 0.0
+    entry_price_value = _first_float_across(
+        (open_row, ("entry_executable_price", "fill_price", "entry_price", "average_entry_price")),
+        (close_row, ("average_entry_price", "entry_executable_price", "entry_price")),
     )
-    exit_price = float(_to_float(close_row.get("exit_price") or close_row.get("leader_price")) or 0.0)
-    notional = float(
-        _to_float(
-            close_row.get("notional_closed_usdt")
-            or open_row.get("copied_notional_usdt")
-            or open_row.get("v9_paper_notional_usdc")
-            or open_row.get("leader_notional_usdc")
-        )
-        or 0.0
+    exit_price_value = _first_float(
+        close_row,
+        "exit_executable_price",
+        "fill_price",
+        "exit_price",
+        "leader_price",
     )
-    gross = float(_to_float(close_row.get("gross_pnl_usdc") or close_row.get("gross_pnl")) or 0.0)
-    net = float(
-        _to_float(
-            close_row.get("estimated_net_pnl_usdc")
-            or close_row.get("event_net_pnl_usdc")
-            or close_row.get("net_pnl")
-        )
-        or 0.0
+    quantity = _first_float_across(
+        (close_row, ("filled_quantity", "closed_quantity", "quantity", "size_closed")),
+        (open_row, ("filled_quantity", "quantity", "size")),
     )
-    entry_fee = float(_to_float(open_row.get("fee_cost_usdc") or open_row.get("fee_paid")) or 0.0)
-    exit_fee = float(_to_float(close_row.get("fee_cost_usdc") or close_row.get("fee_paid")) or 0.0)
+    if quantity is not None:
+        quantity = abs(quantity)
+    explicit_notional = _first_float_across(
+        (close_row, ("notional_closed_usdt", "notional_usdt")),
+        (
+            open_row,
+            (
+                "copied_notional_usdt",
+                "v9_paper_notional_usdc",
+                "leader_notional_usdc",
+                "notional_usdt",
+            ),
+        ),
+    )
+    reported_gross = _first_float(close_row, "gross_pnl_usdc", "gross_pnl")
+    reported_net = _first_float(
+        close_row,
+        "estimated_net_pnl_usdc",
+        "event_net_pnl_usdc",
+        "net_pnl",
+    )
+    entry_cost = _entry_cost_usdc(open_row)
+    exit_cost = _exit_cost_usdc(close_row)
+    funding_cost = _funding_cost_usdc(open_row, close_row)
 
-    recomputed_gross = gross
-    if entry_price > 0 and exit_price > 0 and notional > 0 and side in {"LONG", "SHORT"}:
-        size = notional / entry_price
-        move = exit_price - entry_price
-        recomputed_gross = size * (move if side == "LONG" else -move)
-    reconciliation_error = recomputed_gross - gross
+    recomputed_gross: float | None = None
+    if (
+        entry_price_value is not None
+        and entry_price_value > 0
+        and exit_price_value is not None
+        and exit_price_value > 0
+        and quantity is not None
+        and quantity > 0
+        and side in {"LONG", "SHORT"}
+    ):
+        move = exit_price_value - entry_price_value
+        recomputed_gross = quantity * (move if side == "LONG" else -move)
+    recomputed_net = round_trip_net_pnl_usdc(
+        gross_pnl_usdc=recomputed_gross,
+        entry_cost_usdc=entry_cost,
+        exit_cost_usdc=exit_cost,
+        funding_cost_usdc=funding_cost,
+    )
+    notional_value = explicit_notional
+    if (
+        notional_value is None
+        and quantity is not None
+        and quantity > 0
+        and entry_price_value is not None
+        and entry_price_value > 0
+    ):
+        notional_value = quantity * entry_price_value
+
+    gross_error = (
+        recomputed_gross - reported_gross
+        if recomputed_gross is not None and reported_gross is not None
+        else None
+    )
+    net_error = (
+        recomputed_net - reported_net
+        if recomputed_net is not None and reported_net is not None
+        else None
+    )
 
     exit_method = str(close_row.get("exit_method") or close_row.get("reason") or "UNKNOWN").upper()
     reasons: list[str] = []
+    reasons.extend(_contamination_reasons(open_row, close_row))
     if LEGACY_UNEVIDENCED_MARKER in exit_method:
         reasons.append("LEGACY_UNEVIDENCED_EXIT")
+    schema = _accounting_schema(open_row, close_row)
+    if schema != ACCOUNTING_SCHEMA_VERSION:
+        reasons.append("HISTORICAL_ACCOUNTING_SCHEMA_UNVERIFIED")
     if side not in {"LONG", "SHORT"}:
         reasons.append("SIDE_UNKNOWN")
-    if entry_price <= 0 or exit_price <= 0:
-        reasons.append("PRICE_MISSING")
-    if notional <= 0:
+    if (
+        entry_price_value is None
+        or entry_price_value <= 0
+        or exit_price_value is None
+        or exit_price_value <= 0
+    ):
+        reasons.append("EXECUTABLE_PRICE_MISSING")
+    if quantity is None or quantity <= 0:
+        reasons.append("FILLED_QUANTITY_MISSING")
+    if notional_value is None or notional_value <= 0:
         reasons.append("NOTIONAL_MISSING")
+    if entry_cost is None or exit_cost is None or funding_cost is None:
+        reasons.append("ROUND_TRIP_COST_UNMEASURABLE")
+    if reported_gross is None:
+        reasons.append("LEDGER_REPORTED_GROSS_MISSING")
+    if reported_net is None:
+        reasons.append("LEDGER_REPORTED_NET_MISSING")
     if opened_at_ms <= 0 or closed_at_ms <= opened_at_ms:
         reasons.append("TIMESTAMP_INVALID")
-    tolerance = max(0.02, abs(gross) * 0.02)
-    if abs(reconciliation_error) > tolerance:
-        reasons.append("PNL_RECONCILIATION_MISMATCH")
+    gross_reference = 0.0 if reported_gross is None else reported_gross
+    net_reference = 0.0 if reported_net is None else reported_net
+    gross_tolerance = max(0.000001, abs(gross_reference) * 0.0001)
+    net_tolerance = max(0.000001, abs(net_reference) * 0.0001)
+    if gross_error is not None and abs(gross_error) > gross_tolerance:
+        reasons.append("GROSS_PNL_RECONCILIATION_MISMATCH")
+    if net_error is not None and abs(net_error) > net_tolerance:
+        reasons.append("NET_PNL_RECONCILIATION_MISMATCH")
+    if recomputed_net is None:
+        reasons.append("PNL_UNMEASURABLE")
 
-    position_key = str(close_row.get("matched_position_key") or _open_position_key(open_row))
+    position_key = _position_instance_id(close_row) or _position_instance_id(open_row)
     trade_id = f"{session_id}|{position_key}|{opened_at_ms}|{closed_at_ms}|{ordinal}"
+    accounting_measurable = recomputed_gross is not None and recomputed_net is not None
     return HistoricalTrade(
         trade_id=trade_id,
         session_id=session_id,
@@ -269,26 +464,43 @@ def _build_trade(
         side=side,
         strategy=_strategy_name(open_row),
         exit_method=exit_method,
-        notional_usdt=notional,
-        entry_price=entry_price,
-        exit_price=exit_price,
-        gross_pnl_usdc=gross,
-        net_pnl_usdc=net,
-        fees_reported_usdc=entry_fee + exit_fee,
+        notional_usdt=0.0 if notional_value is None else notional_value,
+        entry_price=0.0 if entry_price_value is None else entry_price_value,
+        exit_price=0.0 if exit_price_value is None else exit_price_value,
+        gross_pnl_usdc=0.0 if recomputed_gross is None else recomputed_gross,
+        net_pnl_usdc=0.0 if recomputed_net is None else recomputed_net,
+        fees_reported_usdc=(
+            0.0
+            if entry_cost is None or exit_cost is None
+            else entry_cost + exit_cost
+        ),
         edge_remaining_bps=_to_float(
-            open_row.get("edge_remaining_bps")
-            or open_row.get("v9_edge_remaining_bps_after_market")
+            first_not_none(
+                open_row.get("edge_remaining_bps"),
+                open_row.get("v9_edge_remaining_bps_after_market"),
+            )
         ),
         signal_age_ms=_to_int(open_row.get("signal_age_ms")),
         consensus_wallets=_wallet_count(open_row),
         copy_degradation_bps=_to_float(open_row.get("copy_degradation_bps")),
         liquidity_score=_to_float(
-            open_row.get("liquidity_score") or open_row.get("v9_liquidity_score")
+            first_not_none(
+                open_row.get("liquidity_score"),
+                open_row.get("v9_liquidity_score"),
+            )
         ),
         leader_score=_to_float(open_row.get("leader_score")),
-        reconciliation_error_usdc=reconciliation_error,
+        reconciliation_error_usdc=0.0 if gross_error is None else gross_error,
         eligible_for_learning=not reasons,
-        exclusion_reasons=tuple(reasons),
+        exclusion_reasons=tuple(dict.fromkeys(reasons)),
+        reported_gross_pnl_usdc=reported_gross,
+        reported_net_pnl_usdc=reported_net,
+        recomputed_gross_pnl_usdc=recomputed_gross,
+        recomputed_net_pnl_usdc=recomputed_net,
+        net_reconciliation_error_usdc=net_error,
+        accounting_measurable=accounting_measurable,
+        accounting_schema_version=schema,
+        strict_accounting_eligible=accounting_measurable and not reasons,
     )
 
 
@@ -305,13 +517,18 @@ def extract_historical_trades(log_dir: Path) -> tuple[tuple[HistoricalTrade, ...
         "paired_round_trips": 0,
         "orphan_closes": 0,
         "still_open": 0,
+        "open_events_missing_position_instance": 0,
+        "close_events_missing_position_instance": 0,
+        "duplicate_position_instances": 0,
+        "ambiguous_position_events": 0,
         "non_monotonic_events": 0,
         "ignored_non_pnl_rows": 0,
     }
     for path in discover_session_ledgers(log_dir):
         quality["ledger_files"] += 1
         session_id = path.parent.name if path.parent != log_dir else "active"
-        open_by_key: defaultdict[str, list[dict[str, Any]]] = defaultdict(list)
+        open_by_instance: dict[str, dict[str, Any]] = {}
+        ambiguous_instances: set[str] = set()
         seen: set[str] = set()
         previous_timestamp = 0
         for line_number, row in _iter_json_rows(path):
@@ -332,20 +549,35 @@ def extract_historical_trades(log_dir: Path) -> tuple[tuple[HistoricalTrade, ...
             action = str(row.get("paper_action_type") or row.get("event_type") or "").upper()
             if action == "OPEN":
                 quality["open_events"] += 1
-                open_by_key[_open_position_key(row)].append(row)
+                instance_id = _position_instance_id(row)
+                if not instance_id:
+                    quality["open_events_missing_position_instance"] += 1
+                    quality["ambiguous_position_events"] += 1
+                    continue
+                if instance_id in open_by_instance or instance_id in ambiguous_instances:
+                    open_by_instance.pop(instance_id, None)
+                    ambiguous_instances.add(instance_id)
+                    quality["duplicate_position_instances"] += 1
+                    quality["ambiguous_position_events"] += 1
+                    continue
+                open_by_instance[instance_id] = row
                 continue
             if action != "CLOSE":
                 quality["ignored_non_pnl_rows"] += 1
                 continue
             quality["close_events"] += 1
-            key = str(row.get("matched_position_key") or "").strip()
-            candidates = open_by_key.get(key)
-            open_row = candidates.pop(0) if candidates else None
+            instance_id = _position_instance_id(row)
+            if not instance_id:
+                quality["close_events_missing_position_instance"] += 1
+                quality["ambiguous_position_events"] += 1
+                continue
+            if instance_id in ambiguous_instances:
+                quality["ambiguous_position_events"] += 1
+                continue
+            open_row = open_by_instance.pop(instance_id, None)
             if open_row is None:
                 quality["orphan_closes"] += 1
                 continue
-            if not candidates:
-                open_by_key.pop(key, None)
             trades.append(
                 _build_trade(
                     session_id=session_id,
@@ -355,11 +587,37 @@ def extract_historical_trades(log_dir: Path) -> tuple[tuple[HistoricalTrade, ...
                     ordinal=len(trades) + 1,
                 )
             )
-        quality["still_open"] += sum(len(rows) for rows in open_by_key.values())
+        quality["still_open"] += len(open_by_instance)
 
     quality["paired_round_trips"] = len(trades)
     quality["eligible_round_trips"] = sum(trade.eligible_for_learning for trade in trades)
     quality["excluded_round_trips"] = len(trades) - quality["eligible_round_trips"]
+    quality["contaminated_round_trips"] = sum(
+        not trade.accounting_measurable
+        or trade.accounting_schema_version != ACCOUNTING_SCHEMA_VERSION
+        or any(
+            reason
+            in {
+                "SYNTHETIC_OR_FAKE_DATA",
+                "UNEVIDENCED_EXECUTION_ASSUMPTION",
+                "MID_PRICE_NOT_EXECUTABLE",
+                "KNOWN_ACCOUNTING_CONTAMINATION",
+                "HISTORICAL_ACCOUNTING_SCHEMA_UNVERIFIED",
+            }
+            for reason in trade.exclusion_reasons
+        )
+        for trade in trades
+    )
+    quality["strict_history_status"] = (
+        "BLOCKED_CORRUPT_JSON"
+        if quality["json_errors"]
+        else (
+            "PARTIAL_CONTAMINATED"
+            if quality["contaminated_round_trips"]
+            or quality["ambiguous_position_events"]
+            else "STRICT_RECONCILED"
+        )
+    )
     exclusion_counts: defaultdict[str, int] = defaultdict(int)
     for trade in trades:
         for reason in trade.exclusion_reasons:
@@ -379,7 +637,15 @@ def compute_metrics(
     *,
     comparison_notional_usdt: float = DEFAULT_COMPARISON_NOTIONAL_USDT,
 ) -> dict[str, Any]:
-    ordered = sorted(trades, key=lambda trade: (trade.closed_at_ms, trade.trade_id))
+    source_rows = list(trades)
+    ordered = sorted(
+        (
+            trade
+            for trade in source_rows
+            if trade.accounting_measurable and trade.strict_accounting_eligible
+        ),
+        key=lambda trade: (trade.closed_at_ms, trade.trade_id),
+    )
     actual_values = [trade.net_pnl_usdc for trade in ordered]
     normalized_values = [
         (
@@ -402,6 +668,11 @@ def compute_metrics(
         max_drawdown = max(max_drawdown, peak - equity)
     gross_abs = sum(abs(trade.gross_pnl_usdc) for trade in ordered)
     return {
+        "input_trades": len(source_rows),
+        "unmeasurable_trades": sum(
+            not trade.accounting_measurable for trade in source_rows
+        ),
+        "strict_excluded_trades": len(source_rows) - len(ordered),
         "trades": len(ordered),
         "sessions": len({trade.session_id for trade in ordered}),
         "net_pnl_actual_usdc": round(sum(actual_values), 8),

@@ -12,6 +12,7 @@ from hl_observer.ops.pnl_improvement_lab import (
     extract_historical_trades,
     write_lab_outputs,
 )
+from hl_observer.simulation.accounting_truth import ACCOUNTING_SCHEMA_VERSION
 
 
 def _trade(
@@ -53,14 +54,18 @@ def _trade(
 def _open_close_rows(index: int, *, legacy: bool = False) -> list[dict]:
     wallet = f"0x{index:040x}"
     coin = f"C{index}"
-    key = f"{wallet}|{coin}|LONG"
+    key = f"paper-position:{index}"
     open_row = {
         "paper_action_type": "OPEN",
+        "accounting_schema_version": ACCOUNTING_SCHEMA_VERSION,
+        "paper_position_instance_id": key,
         "timestamp_ms": 1_000 + index * 100,
         "wallet_address": wallet,
         "coin": coin,
         "leader_side": "LONG",
+        "entry_executable_price": 100.0,
         "entry_price": 100.0,
+        "filled_quantity": 0.5,
         "copied_notional_usdt": 50.0,
         "edge_remaining_bps": 25.0,
         "signal_age_ms": 400,
@@ -68,15 +73,19 @@ def _open_close_rows(index: int, *, legacy: bool = False) -> list[dict]:
     }
     close_row = {
         "paper_action_type": "CLOSE",
+        "accounting_schema_version": ACCOUNTING_SCHEMA_VERSION,
         "timestamp_ms": 1_050 + index * 100,
         "matched_position_key": key,
         "coin": coin,
         "leader_side": "LONG",
         "average_entry_price": 100.0,
+        "exit_executable_price": 101.0,
         "exit_price": 101.0,
+        "filled_quantity": 0.5,
         "gross_pnl_usdc": 0.5,
-        "estimated_net_pnl_usdc": 0.45,
+        "estimated_net_pnl_usdc": 0.43,
         "fee_cost_usdc": 0.05,
+        "funding_cost_usdc": 0.0,
         "exit_method": (
             "QUALITY_GUARD_LEGACY_UNEVIDENCED" if legacy else "SLTP_TRAILING_STOP"
         ),
@@ -106,6 +115,168 @@ def test_archived_canonical_ledgers_are_read_even_when_stale(tmp_path: Path) -> 
     assert quality["eligible_round_trips"] == 1
     assert quality["ignored_non_pnl_rows"] == 1
     assert quality["exclusion_reasons"]["LEGACY_UNEVIDENCED_EXIT"] == 1
+
+
+def test_pnl_lab_preserves_legitimate_zero_values(tmp_path: Path) -> None:
+    log_dir = tmp_path / "logs a envoyer"
+    ledger = log_dir / "simulation_pnl_ledger_latest.jsonl"
+    ledger.parent.mkdir(parents=True)
+    open_row, close_row = _open_close_rows(11)
+    open_row.update(
+        {
+            "consensus_wallets": 0,
+            "wallet_count": 9,
+            "entry_executable_price": 100.0,
+            "fee_cost_usdc": 0.0,
+        }
+    )
+    close_row.update(
+        {
+            "exit_executable_price": 100.0,
+            "exit_price": 100.0,
+            "gross_pnl_usdc": 0.0,
+            "gross_pnl": 99.0,
+            "estimated_net_pnl_usdc": 0.0,
+            "event_net_pnl_usdc": 88.0,
+            "fee_cost_usdc": 0.0,
+            "funding_cost_usdc": 0.0,
+        }
+    )
+    ledger.write_text(
+        json.dumps(open_row) + "\n" + json.dumps(close_row) + "\n",
+        encoding="utf-8",
+    )
+
+    trades, quality = extract_historical_trades(log_dir)
+
+    assert quality["eligible_round_trips"] == 1
+    assert len(trades) == 1
+    assert trades[0].reported_gross_pnl_usdc == 0.0
+    assert trades[0].reported_net_pnl_usdc == 0.0
+    assert trades[0].gross_pnl_usdc == 0.0
+    assert trades[0].net_pnl_usdc == 0.0
+    assert trades[0].consensus_wallets == 0
+
+
+def test_historical_open_close_pairing_uses_unique_position_instance(
+    tmp_path: Path,
+) -> None:
+    log_dir = tmp_path / "logs a envoyer"
+    ledger = log_dir / "simulation_pnl_ledger_latest.jsonl"
+    ledger.parent.mkdir(parents=True)
+    first_open, first_close = _open_close_rows(21)
+    second_open, second_close = _open_close_rows(22)
+    for row in (first_open, first_close, second_open, second_close):
+        row["wallet_address"] = "0x" + "1" * 40
+        row["coin"] = "BTC"
+        row["leader_side"] = "LONG"
+    first_open["entry_executable_price"] = first_open["entry_price"] = 100.0
+    first_close["average_entry_price"] = 100.0
+    first_close["exit_executable_price"] = first_close["exit_price"] = 102.0
+    first_close["gross_pnl_usdc"] = 1.0
+    first_close["estimated_net_pnl_usdc"] = 0.93
+    second_open["entry_executable_price"] = second_open["entry_price"] = 200.0
+    second_close["average_entry_price"] = 200.0
+    second_close["exit_executable_price"] = second_close["exit_price"] = 198.0
+    second_close["gross_pnl_usdc"] = -1.0
+    second_close["estimated_net_pnl_usdc"] = -1.07
+    # The closes intentionally arrive in reverse order. FIFO-by-wallet/coin/side
+    # would associate each close with the wrong entry.
+    rows = [first_open, second_open, second_close, first_close]
+    ledger.write_text(
+        "".join(json.dumps(row) + "\n" for row in rows),
+        encoding="utf-8",
+    )
+
+    trades, quality = extract_historical_trades(log_dir)
+
+    assert quality["paired_round_trips"] == 2
+    assert quality["ambiguous_position_events"] == 0
+    by_instance = {
+        trade.trade_id.split("|")[1]: trade
+        for trade in trades
+    }
+    assert by_instance["paper-position:21"].entry_price == 100.0
+    assert by_instance["paper-position:21"].gross_pnl_usdc == 1.0
+    assert by_instance["paper-position:22"].entry_price == 200.0
+    assert by_instance["paper-position:22"].gross_pnl_usdc == -1.0
+
+
+def test_historical_fifo_pairing_without_unique_instance_is_rejected(
+    tmp_path: Path,
+) -> None:
+    log_dir = tmp_path / "logs a envoyer"
+    ledger = log_dir / "simulation_pnl_ledger_latest.jsonl"
+    ledger.parent.mkdir(parents=True)
+    open_row, close_row = _open_close_rows(31)
+    open_row.pop("paper_position_instance_id")
+    close_row.pop("matched_position_key")
+    ledger.write_text(
+        json.dumps(open_row) + "\n" + json.dumps(close_row) + "\n",
+        encoding="utf-8",
+    )
+
+    trades, quality = extract_historical_trades(log_dir)
+
+    assert trades == ()
+    assert quality["open_events_missing_position_instance"] == 1
+    assert quality["close_events_missing_position_instance"] == 1
+    assert quality["ambiguous_position_events"] == 2
+
+
+def test_historical_net_is_recomputed_independently_and_mismatch_is_excluded(
+    tmp_path: Path,
+) -> None:
+    log_dir = tmp_path / "logs a envoyer"
+    ledger = log_dir / "simulation_pnl_ledger_latest.jsonl"
+    ledger.parent.mkdir(parents=True)
+    open_row, close_row = _open_close_rows(41)
+    close_row["estimated_net_pnl_usdc"] = 123.0
+    ledger.write_text(
+        json.dumps(open_row) + "\n" + json.dumps(close_row) + "\n",
+        encoding="utf-8",
+    )
+
+    trades, quality = extract_historical_trades(log_dir)
+
+    assert len(trades) == 1
+    trade = trades[0]
+    assert trade.reported_net_pnl_usdc == 123.0
+    assert trade.recomputed_net_pnl_usdc == 0.43
+    assert trade.net_pnl_usdc == 0.43
+    assert trade.eligible_for_learning is False
+    assert "NET_PNL_RECONCILIATION_MISMATCH" in trade.exclusion_reasons
+    assert quality["eligible_round_trips"] == 0
+
+
+def test_contaminated_historical_pnl_is_visible_but_invalidated(
+    tmp_path: Path,
+) -> None:
+    log_dir = tmp_path / "logs a envoyer"
+    ledger = log_dir / "simulation_pnl_ledger_latest.jsonl"
+    ledger.parent.mkdir(parents=True)
+    open_row, close_row = _open_close_rows(51)
+    open_row.pop("accounting_schema_version")
+    close_row.pop("accounting_schema_version")
+    open_row["data_origin"] = "SYNTHETIC_FIXTURE"
+    ledger.write_text(
+        json.dumps(open_row) + "\n" + json.dumps(close_row) + "\n",
+        encoding="utf-8",
+    )
+
+    trades, quality = extract_historical_trades(log_dir)
+    metrics = compute_metrics(trades)
+
+    assert len(trades) == 1
+    assert trades[0].accounting_measurable is True
+    assert trades[0].eligible_for_learning is False
+    assert "HISTORICAL_ACCOUNTING_SCHEMA_UNVERIFIED" in trades[0].exclusion_reasons
+    assert "SYNTHETIC_OR_FAKE_DATA" in trades[0].exclusion_reasons
+    assert quality["contaminated_round_trips"] == 1
+    assert quality["strict_history_status"] == "PARTIAL_CONTAMINATED"
+    assert metrics["input_trades"] == 1
+    assert metrics["trades"] == 0
+    assert metrics["strict_excluded_trades"] == 1
 
 
 def test_pnl_is_reconciled_from_prices_and_fixed_notional_comparison_is_fair(
