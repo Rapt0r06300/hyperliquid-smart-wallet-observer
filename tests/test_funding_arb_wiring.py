@@ -30,21 +30,24 @@ def test_runtime_disabled_by_default(monkeypatch):
     monkeypatch.delenv("HYPERSMART_FUNDING_ARB_PAPER", raising=False)
     reset_funding_arb_store()
     result = run_fusion_strategy_runtime(_input(1_000_000))
-    assert result.funding_arb == {}
+    assert result.funding_arb["enabled"] is False
+    assert result.funding_arb["requested_by_environment"] is False
+    assert result.funding_arb["events"] == []
 
 
-def test_runtime_opens_then_accrues_across_ticks(monkeypatch):
+def test_official_runtime_refuses_legacy_funding_flag(monkeypatch):
     monkeypatch.setenv("HYPERSMART_FUNDING_ARB_PAPER", "1")
     reset_funding_arb_store()
     first = run_fusion_strategy_runtime(_input(0))
-    assert first.funding_arb["enabled"] is True
-    assert first.funding_arb["open_pairs"] == 1
-    assert any(e["action"] == "OPEN" for e in first.funding_arb["events"])
+    assert first.funding_arb["enabled"] is False
+    assert first.funding_arb["requested_by_environment"] is True
+    assert first.funding_arb["events"] == []
+    assert first.funding_arb["positions"] == []
+    assert first.delta_neutral_positions == ()
+    assert first.funding_payments == ()
+    assert "STRATEGY_SCOPE_BLOCKED_FUNDING_CARRY" in first.no_trade_reasons
     second = run_fusion_strategy_runtime(_input(2 * 3_600_000))
-    accruals = [e for e in second.funding_arb["events"] if e["action"] == "ACCRUAL"]
-    assert len(accruals) == 1
-    assert abs(accruals[0]["amount_usdc"] - 25.0 * (5.0 / 10_000.0) * 2) < 0.002
-    assert all(e["real_execution"] is False for e in second.funding_arb["events"])
+    assert second.funding_arb["events"] == []
     reset_funding_arb_store()
 
 

@@ -157,7 +157,8 @@ Set-HyperSmartDefaultEnv "HYPERSMART_SLTP_ENABLED" "1"
 # purement et simplement ETEINT -- et personne ne le voyait. Meme famille de bug que la double
 # source de verite deja corrigee : le .cmd propose, le .ps1 dispose.
 # Le funding-arb est la SEULE strategie dont l'esperance ne repose sur AUCUNE prediction.
-[Environment]::SetEnvironmentVariable("HYPERSMART_FUNDING_ARB_PAPER", "1", "Process")
+# V2 scope: funding remains collectable/read-only but cannot enter paper economics.
+[Environment]::SetEnvironmentVariable("HYPERSMART_FUNDING_ARB_PAPER", "0", "Process")
 [Environment]::SetEnvironmentVariable("HYPERSMART_V26_FUNDING_POLLER", "1", "Process")
 [Environment]::SetEnvironmentVariable("HYPERSMART_V26_FUNDING_POLL_INTERVAL_S", "120", "Process")
 # ATTENTION -- SEUIL NON MESURE. `min_entry_edge_bps_per_hour = 2.5` exige un funding horaire

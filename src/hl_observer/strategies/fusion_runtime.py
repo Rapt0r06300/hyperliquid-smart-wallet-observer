@@ -44,15 +44,10 @@ from hl_observer.copy_wallet.copy_conflict_resolver import (
 from hl_observer.copy_wallet.copy_latency_profiler import LatencyProfile, profile_copy_latency
 from hl_observer.copy_wallet.copy_session_controller import CopySessionState, start_copy_session
 from hl_observer.funding.funding_rate_scanner import FundingSignal, scan_funding_rates
-from hl_observer.funding.funding_arb_paper import (
-    evaluate_funding_arb,
-    funding_arb_paper_enabled,
-    get_open_funding_arb_positions,
-    set_open_funding_arb_positions,
-)
+from hl_observer.funding.funding_arb_paper import funding_arb_paper_enabled
 from hl_observer.market_making.market_making_paper import PaperMakerQuote, build_paper_maker_quote
-from hl_observer.paper_trading.delta_neutral_position import DeltaNeutralPosition, build_delta_neutral_position
-from hl_observer.paper_trading.funding_payment_tracker import FundingPayment, compute_funding_payment
+from hl_observer.paper_trading.delta_neutral_position import DeltaNeutralPosition
+from hl_observer.paper_trading.funding_payment_tracker import FundingPayment
 from hl_observer.paper_trading.fusion_paper_engine_adapter import (
     FusionPaperEngineSummary,
     run_copy_votes_through_paper_engine,
@@ -66,10 +61,14 @@ from hl_observer.signals.distilled_opportunity_detector import (
     DistilledSignalCandidate,
     detect_distilled_opportunities,
 )
+from hl_observer.strategies.active_scope import (
+    strategy_can_materialize,
+    strategy_scope_payload,
+    strategy_scope_refusal,
+)
 from hl_observer.strategies.controller import StrategyController, StrategyDecision
 from hl_observer.strategies.external_simulation_bus import (
     ExternalProfileExecution,
-    run_external_profile_simulation_bus,
     summarize_external_profile_executions,
 )
 from hl_observer.strategies.external_github_bridge import build_external_github_bridge_payload
@@ -107,6 +106,7 @@ class FusionRuntimeResult:
     paper_engine: FusionPaperEngineSummary
     distilled_opportunity_report: DistilledOpportunityReport
     no_trade_reasons: tuple[str, ...]
+    strategy_scope: dict[str, object] = field(default_factory=strategy_scope_payload)
     external_profile_priority: tuple[dict[str, object], ...] = field(default_factory=tuple)
     funding_arb: dict[str, object] = field(default_factory=dict)
     external_profile_executions: tuple[ExternalProfileExecution, ...] = field(default_factory=tuple)
@@ -146,6 +146,7 @@ class FusionRuntimeResult:
                 "message": self.distilled_opportunity_report.message,
             },
             "no_trade_reasons": list(self.no_trade_reasons),
+            "strategy_scope": dict(self.strategy_scope),
             "external_profile_priority": [dict(item) for item in self.external_profile_priority],
             "funding_arb": dict(self.funding_arb),
             "external_profile_execution_summary": dict(self.external_profile_execution_summary),
@@ -279,7 +280,11 @@ def run_fusion_strategy_runtime(payload: FusionRuntimeInput) -> FusionRuntimeRes
             # whitelist C12 (markout forward reel, deny-by-default). Le motif precis
             # (ABSENTE / VIDE / PERIMEE / HORS_WHITELIST / SANS_ADRESSE) est deja dans no_trade.
             pass
-        elif conflict.decision == "FOLLOW" and conflict.winning_side:
+        elif (
+            conflict.decision == "FOLLOW"
+            and conflict.winning_side
+            and strategy_can_materialize("copy_vault")
+        ):
             strategy_id = _first_available_profile(
                 external_ids,
                 (
@@ -381,6 +386,9 @@ def run_fusion_strategy_runtime(payload: FusionRuntimeInput) -> FusionRuntimeRes
             paper_order_strategy_ids.append(close_order.strategy_id)
 
         for discrepancy in discrepancies[:3]:
+            if not strategy_can_materialize("cross_venue_dislocation"):
+                no_trade.append(strategy_scope_refusal("cross_venue_dislocation"))
+                break
             strategy_id = _first_available_profile(
                 external_ids,
                 (
@@ -419,135 +427,31 @@ def run_fusion_strategy_runtime(payload: FusionRuntimeInput) -> FusionRuntimeRes
             )
             paper_order_strategy_ids.append(strategy_id)
 
-        for signal in funding:
-            if signal.decision == "FUNDING_SPIKE":
-                delta_neutral.append(build_delta_neutral_position(coin=signal.coin, long_notional_usdt=50.0, short_notional_usdt=50.0))
-                funding_payments.append(compute_funding_payment(coin=signal.coin, side="SHORT", notional_usdt=50.0, funding_rate=0.0001))
-                strategy_id = _first_available_profile(
-                    external_ids,
-                    ("ext_hl_drift_funding_spread", "ext_funding_arb_basis"),
-                    fallback="funding_delta_neutral_paper",
-                )
-                reference_price = _latest_mid_for_coin(ordered_events, signal.coin)
-                paper_orders.append(
-                    controller.run_once(
-                        StrategyDecision(
-                            strategy_id,
-                            PaperOrderRequest(
-                                signal.coin,
-                                "HEDGE",
-                                50.0,
-                                action="OPEN",
-                                order_type="PAPER_DELTA_NEUTRAL_FUNDING",
-                                strategy_id=strategy_id,
-                                reference_price=reference_price,
-                                metadata={
-                                    "source": "funding_rate_scanner",
-                                    "z_score": signal.z_score,
-                                    "reason": signal.reason,
-                                    "profile_family": "funding_arbitrage",
-                                    "paper_only": True,
-                                },
-                            ),
-                        )
-                    )
-                )
-                paper_order_strategy_ids.append(strategy_id)
+        # Funding/carry, triangular arbitrage and market-making remain observable,
+        # but V2 explicitly excludes them from the canonical economic path.
+        if any(signal.decision == "FUNDING_SPIKE" for signal in funding):
+            no_trade.append(strategy_scope_refusal("funding_carry"))
+        if any(opportunity.accepted for opportunity in triangular):
+            no_trade.append(strategy_scope_refusal("triangular_arbitrage"))
+        if maker_quotes:
+            no_trade.append(strategy_scope_refusal("market_making"))
 
-        for opportunity in triangular[:2]:
-            if opportunity.accepted:
-                strategy_id = _first_available_profile(
-                    external_ids,
-                    ("ext_drakkar_triangular_arbitrage", "ext_interexchange_arbitrage", "ext_crypto_arbitrage_spread"),
-                    fallback="triangular_paper_detection",
-                )
-                paper_orders.append(
-                    controller.run_once(
-                        StrategyDecision(
-                            strategy_id,
-                            PaperOrderRequest(
-                                "/".join(opportunity.cycle.path),
-                                "ARBITRAGE",
-                                15.0,
-                                action="OPEN",
-                                order_type="PAPER_TRIANGULAR_ARBITRAGE_SIGNAL",
-                                strategy_id=strategy_id,
-                                metadata={
-                                    "source": "triangular_opportunity_detector",
-                                    "path": list(opportunity.cycle.path),
-                                    "net_edge_bps": opportunity.net_edge_bps,
-                                    "profile_family": "triangular_arbitrage",
-                                    "paper_only": True,
-                                },
-                            ),
-                        )
-                    )
-                )
-                paper_order_strategy_ids.append(strategy_id)
-            else:
-                no_trade.append(opportunity.reason or "TRIANGULAR_NO_TRADE")
+    funding_arb_payload: dict[str, object] = {
+        "enabled": False,
+        "scope_status": "DISABLED",
+        "reason": strategy_scope_refusal("funding_carry"),
+        "requested_by_environment": funding_arb_paper_enabled(),
+        "events": [],
+        "positions": [],
+    }
+    if funding_arb_payload["requested_by_environment"]:
+        no_trade.append(strategy_scope_refusal("funding_carry"))
 
-    funding_arb_payload: dict[str, object] = {}
-    if funding_arb_paper_enabled():
-        latest_prices: dict[str, float] = {}
-        for event in payload.price_events:
-            latest_prices[event.coin.upper()] = float(event.mid)
-        now_ms = max((e.event_time_ms for e in payload.price_events), default=0)
-        arb_report = evaluate_funding_arb(
-            funding_rows=tuple(payload.funding_rows),
-            prices=latest_prices,
-            positions=get_open_funding_arb_positions(),
-            now_ms=int(now_ms),
-        )
-        set_open_funding_arb_positions(arb_report.positions)
-        funding_arb_payload = {
-            "enabled": True,
-            "open_pairs": arb_report.open_pairs,
-            "total_notional_usdt": arb_report.total_notional_usdt,
-            "realized_pnl_usdc_step": arb_report.realized_pnl_usdc,
-            "events": [
-                {
-                    "action": e.action,
-                    "coin": e.coin,
-                    "pair_id": e.pair_id,
-                    "reason": e.reason,
-                    "rate_bps_per_hour": e.rate_bps_per_hour,
-                    "amount_usdc": e.amount_usdc,
-                    "net_pnl_usdc": e.net_pnl_usdc,
-                    # la jambe est NUE : sans ce terme, le ledger enregistrerait un revenu de
-                    # funding SANS RISQUE DE MARCHE -- une fiction.
-                    "price_pnl_usdc": e.price_pnl_usdc,
-                    "price_pnl_unknown": e.price_pnl_unknown,
-                    "paper_only": True,
-                    "real_execution": False,
-                }
-                for e in arb_report.events
-            ],
-            "positions": [
-                {
-                    "pair_id": p.pair_id,
-                    "coin": p.coin,
-                    "receiving_side": p.receiving_side,
-                    "leg_notional_usdt": p.leg_notional_usdt,
-                    "entry_rate_bps_per_hour": p.entry_rate_bps_per_hour,
-                    "accrued_funding_usdc": p.accrued_funding_usdc,
-                    "opened_at_ms": p.opened_at_ms,
-                    "paper_only": True,
-                }
-                for p in arb_report.positions
-            ],
-            "message": arb_report.message,
-        }
-
-    external_profile_executions = run_external_profile_simulation_bus(
-        leader_votes=payload.leader_votes,
-        conflict=conflict,
-        price_discrepancies=discrepancies,
-        funding_signals=funding,
-        triangular_opportunities=triangular,
-        maker_quotes=maker_quotes,
-        paper_orders=tuple(paper_orders),
-    )
+    # The retired external-profile bus can still be called by isolated research
+    # tools, but the official fusion runtime never lets it create economic events.
+    external_profile_executions: tuple[ExternalProfileExecution, ...] = ()
+    if os.environ.get("HYPERSMART_EXTERNAL_PROFILES_SCOPE", "off").strip().lower() != "off":
+        no_trade.append(strategy_scope_refusal("external_github_profiles"))
 
     # ---------------------------------------------------------------------------------
     # BUG 2026-07-12 -- LE REFUS LE PLUS IMPORTANT DU BOT ETAIT INVISIBLE.
@@ -584,7 +488,8 @@ def run_fusion_strategy_runtime(payload: FusionRuntimeInput) -> FusionRuntimeRes
         paper_order_strategy_ids=tuple(paper_order_strategy_ids),
         paper_engine=paper_engine,
         distilled_opportunity_report=distilled_report,
-        no_trade_reasons=tuple(no_trade),
+        no_trade_reasons=tuple(dict.fromkeys(no_trade)),
+        strategy_scope=strategy_scope_payload(),
         external_profile_priority=external_priority,
         external_profile_executions=external_profile_executions,
         external_profile_execution_summary=summarize_external_profile_executions(external_profile_executions),

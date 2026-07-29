@@ -287,7 +287,7 @@ set "HYPERSMART_MAX_POSITION_USDT=50"
 REM ===== MODE GRINDER (session P1 2026-07-07, flags ON pour collecte de donnees A/B) =====
 set "HYPERSMART_EXECUTION_STYLE=maker"
 set "HYPERSMART_MAKER_ADVERSE_SELECTION_BPS=2"
-set "HYPERSMART_FUNDING_ARB_PAPER=1"
+set "HYPERSMART_FUNDING_ARB_PAPER=0"
 REM 2026-07-08: poller funding ACTIVE — sans lui, funding_rows restait vide et le funding-arb
 REM ne pouvait jamais ouvrir de paire (cause racine du "grinder qui ne trade pas").
 set "HYPERSMART_V26_FUNDING_POLLER=1"

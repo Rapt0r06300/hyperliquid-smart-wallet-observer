@@ -53,8 +53,8 @@ def _payload(**overrides):
     return FusionRuntimeInput(**payload)
 
 
-def test_fusion_strategy_runtime_routes_multiple_paper_strategies(monkeypatch):
-    # Mode recherche locale: valide le bus complet historique (plus le mode normal).
+def test_fusion_strategy_runtime_routes_only_v2_active_paper_strategies(monkeypatch):
+    # Même explicitement demandé, l'ancien bus reste hors du chemin économique.
     monkeypatch.setenv("HYPERSMART_EXTERNAL_PROFILES_SCOPE", "all")
     # EDGE FABRIQUE (2026-07-11) : par defaut le bot refuse un edge non empirique.
     # Ce test exerce l'ANCIEN chemin (proxy de vote) -> mode A/B explicite.
@@ -65,7 +65,13 @@ def test_fusion_strategy_runtime_routes_multiple_paper_strategies(monkeypatch):
     assert result.price_discrepancies
     assert result.funding_signals[0].decision == "FUNDING_SPIKE"
     assert result.triangular_opportunities
-    assert len(result.paper_orders) >= 3
+    assert len(result.paper_orders) == 1
+    assert result.paper_orders[0].metadata["profile_family"] == "cross_exchange_arbitrage"
+    assert result.delta_neutral_positions == ()
+    assert result.funding_payments == ()
+    assert "STRATEGY_SCOPE_BLOCKED_FUNDING_CARRY" in result.no_trade_reasons
+    assert "STRATEGY_SCOPE_BLOCKED_TRIANGULAR_ARBITRAGE" in result.no_trade_reasons
+    assert "STRATEGY_SCOPE_BLOCKED_EXTERNAL_GITHUB_PROFILES" in result.no_trade_reasons
     assert result.paper_engine.accepted_count == 1
     assert result.paper_engine.equity_usdt > 0
     assert result.paper_engine.drawdown_usdt >= 0
@@ -80,11 +86,8 @@ def test_fusion_strategy_runtime_routes_multiple_paper_strategies(monkeypatch):
     assert all(item.get("paper_only") is True for item in result.external_profile_priority)
     assert all(item.get("read_only") is True for item in result.external_profile_priority)
     _sum = result.external_profile_execution_summary
-    assert _sum["profiles_total"] >= 34
-    # The bus does not create an additional order: it only attributes canonical
-    # local paper orders to matching profile labels for diagnostics. Every row
-    # remains read-only and incapable of direct or real execution.
-    assert _sum["paper_orders_total"] <= len(result.paper_orders)
+    assert _sum["profiles_total"] == 0
+    assert _sum["paper_orders_total"] == 0
     assert all(row.direct_external_execution is False for row in result.external_profile_executions)
     assert all(row.real_execution is False for row in result.external_profile_executions)
     assert all(row.paper_only is True for row in result.external_profile_executions)
