@@ -13,6 +13,7 @@ from importlib import import_module
 from typing import Any
 
 from hl_observer.paper_trading.exec_model import (
+    BookLevelFill,
     DepthExecutionResult,
     ExecModelConfig,
     ExecResult,
@@ -57,6 +58,7 @@ def __getattr__(name: str) -> Any:
 __all__ = [
     "ExecModelConfig",
     "ExecResult",
+    "BookLevelFill",
     "DepthExecutionResult",
     "DeltaNeutralPosition",
     "FundingPayment",

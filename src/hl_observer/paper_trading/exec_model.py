@@ -60,6 +60,16 @@ class BookLevel:
 
 
 @dataclass(frozen=True, slots=True)
+class BookLevelFill:
+    """Exact quantity consumed at one executable price level."""
+
+    price: float
+    available_quantity: float
+    filled_quantity: float
+    filled_notional_usdc: float
+
+
+@dataclass(frozen=True, slots=True)
 class DepthExecutionResult:
     requested_notional_usdc: float
     filled_notional_usdc: float
@@ -72,6 +82,7 @@ class DepthExecutionResult:
     levels_consumed: int
     reason: str
     filled_quantity: float = 0.0
+    level_fills: tuple[BookLevelFill, ...] = ()
 
 
 def estimate_slippage_bps(
@@ -378,14 +389,24 @@ def simulate_depth_execution(
     remaining = requested
     filled_notional = 0.0
     filled_qty = 0.0
-    consumed = 0
+    level_fills: list[BookLevelFill] = []
     for level in levels:
         available_notional = level.price * level.size
         take_notional = min(remaining, available_notional)
+        if take_notional <= 0:
+            continue
+        take_quantity = take_notional / level.price
         filled_notional += take_notional
-        filled_qty += take_notional / level.price
+        filled_qty += take_quantity
         remaining -= take_notional
-        consumed += 1
+        level_fills.append(
+            BookLevelFill(
+                price=round(level.price, 12),
+                available_quantity=round(level.size, 12),
+                filled_quantity=round(take_quantity, 12),
+                filled_notional_usdc=round(take_notional, 8),
+            )
+        )
         if remaining <= 1e-9:
             break
 
@@ -421,9 +442,10 @@ def simulate_depth_execution(
         partial=partial,
         missed=missed,
         slippage_bps=round(slippage, 8),
-        levels_consumed=consumed,
+        levels_consumed=len(level_fills),
         reason="MISSED_FILL" if missed else "PARTIAL_FILL" if partial else "FILLED",
         filled_quantity=round(filled_qty, 12),
+        level_fills=tuple(level_fills),
     )
 
 
@@ -463,7 +485,15 @@ def _clean_levels(
     reverse: bool,
 ) -> list[BookLevel]:
     levels: list[BookLevel] = []
-    for price, size in raw_levels:
+    for item in raw_levels:
+        if isinstance(item, dict):
+            price = item.get("px", item.get("price"))
+            size = item.get("sz", item.get("size"))
+        else:
+            try:
+                price, size = item
+            except (TypeError, ValueError):
+                continue
         try:
             parsed_price = float(price)
             parsed_size = float(size)
@@ -588,6 +618,7 @@ def _no_fill_result(
 
 __all__ = [
     "BookLevel",
+    "BookLevelFill",
     "DepthExecutionResult",
     "ExecModelConfig",
     "ExecResult",
