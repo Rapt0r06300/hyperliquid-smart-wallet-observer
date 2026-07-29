@@ -7,11 +7,15 @@ from hashlib import sha256
 
 from hl_observer.config.settings import Settings
 from hl_observer.hyperliquid.schemas import RiskDecision
+from hl_observer.paper_trading.canonical_execution import (
+    CausalMarketSnapshot,
+    PaperExecutionIntent,
+    execute_paper_intent,
+)
 from hl_observer.paper_trading.exec_model import (
     ExecModelConfig,
     ExecResult,
     book_notional_for_quantity,
-    simulate_execution,
 )
 from hl_observer.paper_trading.execution_truth import ExecutionTruth
 from hl_observer.position_lifecycle.reconstructor import LifecycleAction
@@ -258,10 +262,30 @@ class PaperEngine:
         # sans le moindre cout de copie -- et dans 8 cas sur 20 le bot entrait a un prix MEILLEUR
         # que le marche, ce qui est physiquement impossible.
         _signal_age_ms = max(0, observed_at_ms - (delta.leader_event_time_ms or observed_at_ms))
-        exec_result = simulate_execution(
-            side=side,
-            notional_usdc=notional,
-            mid_price=market_price,
+        canonical_execution = execute_paper_intent(
+            _paper_intent_for_delta(
+                delta,
+                side=side,
+                action=(
+                    "ADD"
+                    if delta.action in {LifecycleAction.ADD, LifecycleAction.INCREASE}
+                    else "OPEN"
+                ),
+                notional_usdt=notional,
+                observed_at_ms=observed_at_ms,
+                decision_context=context,
+            ),
+            CausalMarketSnapshot(
+                coin=delta.coin,
+                reference_mid=market_price,
+                decision_ts_ms=observed_at_ms,
+                execution_truth=execution_truth,
+                source=execution_truth.source if execution_truth is not None else "paper_engine_compat",
+            ),
+            config=self.config.exec_model,
+            strict_book=self.config.strict_execution_truth,
+            min_fill_ratio=self.config.min_execution_fill_ratio,
+            max_book_age_ms=self.config.max_execution_book_age_ms,
             top_depth_usdc=top_depth_usdt,
             is_maker=_maker_execution_style_enabled(),
             latency_sec=_signal_age_ms / 1000.0,
@@ -269,13 +293,10 @@ class PaperEngine:
             queue_depletion_usdc=queue_depletion_usdt,
             traded_through_usdc=traded_through_usdt,
             adverse_selection_bps=adverse_selection_bps,
-            execution_truth=execution_truth,
-            decision_ts_ms=observed_at_ms if execution_truth is not None else None,
-            max_book_age_ms=self.config.max_execution_book_age_ms,
-            strict_book=self.config.strict_execution_truth,
-            min_fill_ratio=self.config.min_execution_fill_ratio,
-            config=self.config.exec_model,
         )
+        exec_result = canonical_execution.execution
+        context["canonical_execution_plan_id"] = canonical_execution.plan.plan_id
+        context["canonical_ledger_event_id"] = canonical_execution.ledger_event.event_id
         context["execution_result"] = _execution_context(exec_result)
         execution_reasons = _execution_refusal_reasons(exec_result, strict=self.config.strict_execution_truth)
         if execution_reasons:
@@ -433,10 +454,26 @@ class PaperEngine:
             quantity=requested_close_quantity,
             fallback_price=market_price,
         )
-        exit_exec = simulate_execution(
-            side=exit_side,
-            notional_usdc=requested_close_notional,
-            mid_price=market_price,
+        canonical_execution = execute_paper_intent(
+            _paper_intent_for_delta(
+                delta,
+                side=position.side,
+                action="CLOSE" if close_fraction >= 0.999 else "REDUCE",
+                notional_usdt=requested_close_notional,
+                observed_at_ms=observed_at_ms,
+                decision_context=decision_context,
+            ),
+            CausalMarketSnapshot(
+                coin=delta.coin,
+                reference_mid=market_price,
+                decision_ts_ms=observed_at_ms,
+                execution_truth=execution_truth,
+                source=execution_truth.source if execution_truth is not None else "paper_engine_compat",
+            ),
+            config=self.config.exec_model,
+            strict_book=self.config.strict_execution_truth,
+            min_fill_ratio=self.config.min_execution_fill_ratio,
+            max_book_age_ms=self.config.max_execution_book_age_ms,
             top_depth_usdc=None,
             is_maker=False,
             latency_sec=max(
@@ -444,13 +481,10 @@ class PaperEngine:
                 observed_at_ms - (delta.leader_event_time_ms or observed_at_ms),
             )
             / 1000.0,
-            execution_truth=execution_truth,
-            decision_ts_ms=observed_at_ms if execution_truth is not None else None,
-            max_book_age_ms=self.config.max_execution_book_age_ms,
-            strict_book=self.config.strict_execution_truth,
-            min_fill_ratio=self.config.min_execution_fill_ratio,
-            config=self.config.exec_model,
         )
+        exit_exec = canonical_execution.execution
+        decision_context["canonical_execution_plan_id"] = canonical_execution.plan.plan_id
+        decision_context["canonical_ledger_event_id"] = canonical_execution.ledger_event.event_id
         decision_context["execution_result"] = _execution_context(exit_exec)
         reasons.extend(
             _execution_refusal_reasons(
@@ -686,6 +720,37 @@ def _side_for_exit(delta: LeaderDelta) -> str | None:
         if delta.previous_size < 0 or delta.current_size < 0:
             return "SHORT"
     return None
+
+
+def _paper_intent_for_delta(
+    delta: LeaderDelta,
+    *,
+    side: str,
+    action: str,
+    notional_usdt: float,
+    observed_at_ms: int,
+    decision_context: dict[str, object],
+) -> PaperExecutionIntent:
+    """Create the canonical strategy intent after risk admission.
+
+    ``PaperEngine`` remains responsible for risk and position accounting.  The
+    resulting intent is consumed only by the local canonical fill core.
+    """
+
+    return PaperExecutionIntent(
+        strategy_id=str(
+            decision_context.get("strategy_id")
+            or decision_context.get("strategy_family")
+            or "leader_delta_copy_follow"
+        ),
+        coin=str(delta.coin).upper(),
+        position_side=str(side).upper(),
+        action=str(action).upper(),
+        target_notional_usdc=float(notional_usdt),
+        confidence=float(delta.confidence),
+        reasons=tuple(delta.reason_codes),
+        created_at_ms=int(observed_at_ms),
+    )
 
 
 def _position_unrealized(position: PaperPosition, mark: float) -> float:

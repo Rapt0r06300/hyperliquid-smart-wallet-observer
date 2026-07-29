@@ -95,10 +95,10 @@ def test_paper_engine_passes_the_signal_age_to_the_execution_model():
     from pathlib import Path
 
     src = Path("src/hl_observer/paper_trading/paper_engine.py").read_text(encoding="utf-8")
-    bloc = src[src.index("exec_result = simulate_execution(") :][:600]
-    assert "latency_sec=" in bloc, (
-        "PaperEngine n'envoie pas `latency_sec` a simulate_execution : le retard de copie est "
-        "factures ZERO et le paper trade entre au prix du leader."
+    assert "canonical_execution = execute_paper_intent(" in src
+    assert "latency_sec=_signal_age_ms / 1000.0" in src, (
+        "PaperEngine n'envoie pas l'age du signal au coeur d'execution canonique : "
+        "le retard de copie serait facture ZERO et le paper trade entrerait au prix du leader."
     )
 
 

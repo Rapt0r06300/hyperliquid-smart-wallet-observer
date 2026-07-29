@@ -10,7 +10,13 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass, field
 from hashlib import sha256
 
-from hl_observer.paper_trading.exec_model import ExecModelConfig, ExecResult, simulate_depth_execution, simulate_execution
+from hl_observer.paper_trading.canonical_execution import (
+    CausalMarketSnapshot,
+    PaperExecutionIntent,
+    execute_paper_intent,
+)
+from hl_observer.paper_trading.exec_model import ExecModelConfig, ExecResult, simulate_depth_execution
+from hl_observer.paper_trading.execution_truth import ExecutionTruth
 from hl_observer.strategies.models import ApprovedPaperIntent, IntentAction, IntentSide, is_actionable
 
 
@@ -88,9 +94,32 @@ class PaperSimConnector:
         notional = max(0.0, float(intent.target_notional_usdt or 0.0))
         if notional <= 0:
             return _reject("PAPER_NOTIONAL_MISSING", approved_intent, observed_at_ms=observed_at_ms)
+        canonical_intent = PaperExecutionIntent(
+            strategy_id=intent.strategy_id,
+            coin=intent.coin,
+            position_side=intent.side.value,
+            action=intent.action.value,
+            target_notional_usdc=notional,
+            confidence=float(intent.confidence),
+            reasons=tuple(intent.reasons),
+            created_at_ms=max(1, int(intent.created_at_ms or observed_at_ms)),
+        )
 
         depth_result = None
-        if asks or bids:
+        truth = None
+        # A strict observed book needs both sides. One-sided inputs are kept as
+        # a labelled compatibility path for historical unit/replay callers;
+        # they never masquerade as strict execution truth.
+        if asks and bids:
+            truth = ExecutionTruth.from_levels(
+                coin=intent.coin,
+                bids=bids,
+                asks=asks,
+                received_ts_ms=max(1, int(observed_at_ms)),
+                source="paper_sim_connector_observed_l2",
+                data_origin="RECORDED_REAL",
+            )
+        elif asks or bids:
             depth_result = simulate_depth_execution(
                 side=side,
                 notional_usdc=notional,
@@ -107,14 +136,35 @@ class PaperSimConnector:
                 mid_price = depth_result.average_fill_price
                 top_depth_usdt = max(float(top_depth_usdt or 0.0), depth_result.filled_notional_usdc)
 
-        exec_result = simulate_execution(
-            side=side,
-            notional_usdc=notional,
-            mid_price=float(mid_price),
+        canonical = execute_paper_intent(
+            canonical_intent,
+            CausalMarketSnapshot(
+                coin=intent.coin,
+                reference_mid=float(mid_price),
+                decision_ts_ms=max(1, int(observed_at_ms)),
+                execution_truth=truth,
+                source=truth.source if truth is not None else "paper_sim_connector_compat",
+            ),
+            config=self.exec_config,
+            strict_book=truth is not None,
+            min_fill_ratio=min_fill_ratio,
             top_depth_usdc=top_depth_usdt,
             is_maker=False,
-            config=self.exec_config,
         )
+        exec_result = canonical.execution
+        if exec_result.missed or exec_result.fill_price is None or exec_result.net_cost_bps is None:
+            rejected = _reject(
+                exec_result.reason or "NO_EXECUTABLE_FILL",
+                approved_intent,
+                observed_at_ms=observed_at_ms,
+            )
+            rejected.evidence.update(
+                {
+                    "canonical_execution": canonical.as_dict(),
+                    "depth_execution": asdict(depth_result) if depth_result else None,
+                }
+            )
+            return rejected
         fill = PaperSimFill(
             fill_id=_fill_id(intent.strategy_id, intent.coin, intent.action.value, observed_at_ms, exec_result),
             strategy_id=intent.strategy_id,
@@ -140,6 +190,7 @@ class PaperSimConnector:
                 "risk_reasons": list(approved_intent.risk_reasons),
                 "exec_model": asdict(exec_result),
                 "depth_execution": asdict(depth_result) if depth_result else None,
+                "canonical_execution": canonical.as_dict(),
             },
         )
 
