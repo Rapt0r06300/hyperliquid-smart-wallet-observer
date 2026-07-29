@@ -51,6 +51,7 @@ class ExecResult:
     adverse_selection_bps: float | None = None
     execution_snapshot_id: str | None = None
     filled_quantity: float = 0.0
+    level_fills: tuple[BookLevelFill, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -229,6 +230,7 @@ def simulate_execution(
             adverse_selection_bps=None,
             execution_snapshot_id=execution_truth.snapshot_id,
             filled_quantity=depth_result.filled_quantity,
+            level_fills=depth_result.level_fills,
         )
 
     # Legacy/replay approximation. It is intentionally marked and is rejected

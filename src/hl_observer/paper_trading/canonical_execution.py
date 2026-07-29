@@ -19,6 +19,10 @@ from hashlib import sha256
 
 from hl_observer.paper_trading.exec_model import ExecModelConfig, ExecResult, simulate_execution
 from hl_observer.paper_trading.execution_truth import ExecutionTruth
+from hl_observer.paper_trading.liquidity_consumption import (
+    LiquidityConsumptionLedger,
+    LiquidityReservation,
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -188,6 +192,7 @@ class CanonicalExecutionResult:
     position_mutation: PositionMutation
     ledger_event: LedgerEvent
     equity_event: EquityEvent
+    liquidity_reservation: LiquidityReservation | None = None
 
     @property
     def accepted(self) -> bool:
@@ -205,6 +210,11 @@ class CanonicalExecutionResult:
             "position_mutation": asdict(self.position_mutation),
             "ledger_event": asdict(self.ledger_event),
             "equity_event": asdict(self.equity_event),
+            "liquidity_reservation": (
+                asdict(self.liquidity_reservation)
+                if self.liquidity_reservation is not None
+                else None
+            ),
             "paper_only": True,
             "real_execution": False,
         }
@@ -269,28 +279,56 @@ def execute_paper_intent(
     queue_depletion_usdc: float | None = None,
     traded_through_usdc: float | None = None,
     adverse_selection_bps: float | None = None,
+    liquidity_ledger: LiquidityConsumptionLedger | None = None,
 ) -> CanonicalExecutionResult:
     """Execute one intent with the unique fill model and produce mutations."""
 
     plan = build_execution_plan(intent, market, strict_book=strict_book)
-    execution = simulate_execution(
-        side=plan.execution_side,
-        notional_usdc=plan.requested_notional_usdc,
-        mid_price=market.reference_mid,
-        top_depth_usdc=top_depth_usdc,
-        is_maker=is_maker,
-        latency_sec=latency_sec,
-        queue_ahead_usdc=queue_ahead_usdc,
-        queue_depletion_usdc=queue_depletion_usdc,
-        traded_through_usdc=traded_through_usdc,
-        adverse_selection_bps=adverse_selection_bps,
-        execution_truth=market.execution_truth,
-        decision_ts_ms=market.decision_ts_ms if market.execution_truth is not None else None,
-        max_book_age_ms=max_book_age_ms,
-        strict_book=strict_book,
-        min_fill_ratio=min_fill_ratio,
-        config=config,
-    )
+    def run_execution(truth: ExecutionTruth | None) -> ExecResult:
+        if market.execution_truth is not None and truth is None:
+            return _consumed_book_result(
+                requested_notional_usdc=plan.requested_notional_usdc,
+                snapshot_id=market.execution_truth.snapshot_id,
+            )
+        return simulate_execution(
+            side=plan.execution_side,
+            notional_usdc=plan.requested_notional_usdc,
+            mid_price=market.reference_mid,
+            top_depth_usdc=top_depth_usdc,
+            is_maker=is_maker,
+            latency_sec=latency_sec,
+            queue_ahead_usdc=queue_ahead_usdc,
+            queue_depletion_usdc=queue_depletion_usdc,
+            traded_through_usdc=traded_through_usdc,
+            adverse_selection_bps=adverse_selection_bps,
+            execution_truth=truth,
+            decision_ts_ms=(
+                market.decision_ts_ms
+                if market.execution_truth is not None
+                else None
+            ),
+            max_book_age_ms=max_book_age_ms,
+            strict_book=strict_book,
+            min_fill_ratio=min_fill_ratio,
+            config=config,
+        )
+
+    reservation = None
+    if (
+        liquidity_ledger is not None
+        and market.execution_truth is not None
+        and not is_maker
+    ):
+        outcome = liquidity_ledger.execute_once(
+            plan_id=plan.plan_id,
+            truth=market.execution_truth,
+            execution_side=plan.execution_side,
+            execute=run_execution,
+        )
+        execution = outcome.result
+        reservation = outcome.reservation
+    else:
+        execution = run_execution(market.execution_truth)
     signed_quantity = execution.filled_quantity
     if plan.action in {"REDUCE", "CLOSE"}:
         signed_quantity = -signed_quantity
@@ -344,6 +382,7 @@ def execute_paper_intent(
         position_mutation=mutation,
         ledger_event=ledger_event,
         equity_event=equity_event,
+        liquidity_reservation=reservation,
     )
 
 
@@ -376,6 +415,34 @@ def _intent_id(intent: PaperExecutionIntent) -> str:
         )
     )
     return "paper-intent:" + sha256(material.encode("utf-8")).hexdigest()
+
+
+def _consumed_book_result(
+    *,
+    requested_notional_usdc: float,
+    snapshot_id: str,
+) -> ExecResult:
+    requested = round(float(requested_notional_usdc), 8)
+    return ExecResult(
+        fill_price=None,
+        slippage_bps=None,
+        fee_bps=None,
+        latency_bps=0.0,
+        net_cost_bps=None,
+        queue_ratio=None,
+        is_maker=False,
+        notional_usdc=0.0,
+        requested_notional_usdc=requested,
+        filled_notional_usdc=0.0,
+        missed_notional_usdc=requested,
+        fill_ratio=0.0,
+        partial=False,
+        missed=True,
+        reason="LIQUIDITY_ALREADY_CONSUMED",
+        cost_status="MEASURED",
+        execution_snapshot_id=snapshot_id,
+        filled_quantity=0.0,
+    )
 
 
 __all__ = [

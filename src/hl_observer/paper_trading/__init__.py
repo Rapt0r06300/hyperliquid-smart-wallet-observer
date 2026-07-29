@@ -31,6 +31,10 @@ from hl_observer.paper_trading.paper_engine import (
 )
 
 _LAZY_EXPORTS: dict[str, tuple[str, str]] = {
+    "LiquidityConsumptionLedger": (
+        "hl_observer.paper_trading.liquidity_consumption",
+        "LiquidityConsumptionLedger",
+    ),
     "PaperSimConnector": ("hl_observer.paper_trading.paper_connector", "PaperSimConnector"),
     "PaperSimConnectorResult": ("hl_observer.paper_trading.paper_connector", "PaperSimConnectorResult"),
     "PaperSimFill": ("hl_observer.paper_trading.paper_connector", "PaperSimFill"),
@@ -64,6 +68,7 @@ __all__ = [
     "FundingPayment",
     "HedgeReconciliation",
     "LiquidityRoute",
+    "LiquidityConsumptionLedger",
     "PaperDecisionResult",
     "PaperEngine",
     "PaperEngineConfig",

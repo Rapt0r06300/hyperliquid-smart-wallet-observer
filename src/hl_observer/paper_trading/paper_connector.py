@@ -17,6 +17,7 @@ from hl_observer.paper_trading.canonical_execution import (
 )
 from hl_observer.paper_trading.exec_model import ExecModelConfig, ExecResult, simulate_depth_execution
 from hl_observer.paper_trading.execution_truth import ExecutionTruth
+from hl_observer.paper_trading.liquidity_consumption import LiquidityConsumptionLedger
 from hl_observer.strategies.models import ApprovedPaperIntent, IntentAction, IntentSide, is_actionable
 
 
@@ -60,8 +61,14 @@ class PaperSimConnector:
     external_action = False
     name = "paper_sim_connector"
 
-    def __init__(self, *, exec_config: ExecModelConfig | None = None) -> None:
+    def __init__(
+        self,
+        *,
+        exec_config: ExecModelConfig | None = None,
+        liquidity_ledger: LiquidityConsumptionLedger | None = None,
+    ) -> None:
         self.exec_config = exec_config or ExecModelConfig()
+        self.liquidity_ledger = liquidity_ledger or LiquidityConsumptionLedger()
         self._fills: list[PaperSimFill] = []
 
     @property
@@ -150,6 +157,7 @@ class PaperSimConnector:
             min_fill_ratio=min_fill_ratio,
             top_depth_usdc=top_depth_usdt,
             is_maker=False,
+            liquidity_ledger=self.liquidity_ledger,
         )
         exec_result = canonical.execution
         if exec_result.missed or exec_result.fill_price is None or exec_result.net_cost_bps is None:

@@ -18,6 +18,7 @@ from hl_observer.paper_trading.exec_model import (
     book_notional_for_quantity,
 )
 from hl_observer.paper_trading.execution_truth import ExecutionTruth
+from hl_observer.paper_trading.liquidity_consumption import LiquidityConsumptionLedger
 from hl_observer.position_lifecycle.reconstructor import LifecycleAction
 from hl_observer.risk.gates import RiskContext
 from hl_observer.risk.risk_engine import RiskEngine
@@ -103,6 +104,7 @@ class PaperEngine:
         settings: Settings | None = None,
         config: PaperEngineConfig | None = None,
         ledger: PaperLedger | None = None,
+        liquidity_ledger: LiquidityConsumptionLedger | None = None,
     ) -> None:
         self.settings = settings or Settings()
         self.config = config or PaperEngineConfig()
@@ -112,6 +114,7 @@ class PaperEngine:
         self._positions: dict[str, PaperPosition] = {}
         self._high_water_equity = self.cash_usdt
         self.ledger = ledger or PaperLedger(starting_balance_usdc=self.cash_usdt)
+        self.liquidity_ledger = liquidity_ledger or LiquidityConsumptionLedger()
 
     @property
     def positions(self) -> tuple[PaperPosition, ...]:
@@ -293,6 +296,7 @@ class PaperEngine:
             queue_depletion_usdc=queue_depletion_usdt,
             traded_through_usdc=traded_through_usdt,
             adverse_selection_bps=adverse_selection_bps,
+            liquidity_ledger=self.liquidity_ledger,
         )
         exec_result = canonical_execution.execution
         context["canonical_execution_plan_id"] = canonical_execution.plan.plan_id
@@ -481,6 +485,7 @@ class PaperEngine:
                 observed_at_ms - (delta.leader_event_time_ms or observed_at_ms),
             )
             / 1000.0,
+            liquidity_ledger=self.liquidity_ledger,
         )
         exit_exec = canonical_execution.execution
         decision_context["canonical_execution_plan_id"] = canonical_execution.plan.plan_id
