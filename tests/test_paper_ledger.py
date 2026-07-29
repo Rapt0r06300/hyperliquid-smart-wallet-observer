@@ -18,6 +18,9 @@ def test_paper_ledger_open_mark_close_reconciles():
     )
     assert opened.event_type == PaperEventType.POSITION_OPENED
     assert ledger.fees_paid_usdc == 0.05
+    assert opened.refs["position_id"] == "HYPE:LONG"
+    assert opened.refs["fee_accounting"] == "SEPARATE_EVENT"
+    assert opened.refs["fee_event_id"] == ledger.events[0].event_id
 
     ledger.mark_to_market({"HYPE": 11.0}, timestamp_ms=2)
     assert ledger.unrealized_pnl_usdc == 10.0
@@ -34,6 +37,8 @@ def test_paper_ledger_open_mark_close_reconciles():
     assert closed.event_type == PaperEventType.POSITION_CLOSED
     assert ledger.realized_pnl_usdc == 10.0
     assert ledger.fees_paid_usdc == 0.105
+    assert closed.refs["position_id"] == "HYPE:LONG"
+    assert closed.refs["fee_event_id"] == ledger.events[-3].event_id
     assert ledger.reconciliation().ok
 
 

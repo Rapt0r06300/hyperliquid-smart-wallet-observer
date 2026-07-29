@@ -8,6 +8,8 @@ from statistics import median
 import time
 from typing import Any, Iterable
 
+from hl_observer.simulation.accounting_truth import first_not_none
+
 
 DECISION_LOG_FILES = (
     "simulation_pnl_ledger_latest.jsonl",
@@ -294,7 +296,14 @@ def row_from_payload(row: dict[str, Any]) -> LogDecisionRow:
         consensus_wallets=_to_int(row.get("consensus_wallets") or row.get("wallet_count")),
         notional_usdc=_to_float(row.get("copied_notional_usdt") or row.get("notional") or row.get("notional_usdc") or row.get("size")),
         estimated_net_pnl_usdc=_row_event_net_pnl(row) or 0.0,
-        gross_pnl_usdc=_to_float(row.get("gross_pnl_usdc") or row.get("gross_pnl")) or 0.0,
+        gross_pnl_usdc=_to_float(
+            first_not_none(
+                row.get("gross_pnl_usdc"),
+                row.get("gross_pnl"),
+                row.get("realized_pnl_usdc"),
+            )
+        )
+        or 0.0,
         fee_cost_usdc=_row_event_fee(row) or 0.0,
     )
 
@@ -454,10 +463,10 @@ def _row_status(row: dict[str, Any]) -> str:
     status = _to_str(row.get("status"))
     if status:
         return status
-    event_type = (_to_str(row.get("event_type")) or "").upper()
-    if event_type == "NO_TRADE":
+    event_type = _normalized_event_type(row)
+    if event_type in {"NOTRADE", "PAPERNOTRADE"}:
         return "REFUSED"
-    if event_type.startswith("PAPER_"):
+    if event_type.startswith("PAPER"):
         return "LOCAL_REPLAY"
     return "LOCAL_REPLAY"
 
@@ -484,6 +493,17 @@ def _is_accepted_row(row: LogDecisionRow) -> bool:
         return False
     action = (row.action or "").upper()
     status = (row.status or "").upper()
+    if _normalize_token(action) in {
+        "PAPERFEECHARGED",
+        "PAPERFUNDINGCHARGED",
+        "PAPERFUNDINGRECEIVED",
+        "PAPEREQUITYUPDATED",
+        "PAPERMARKPRICEUPDATED",
+        "PAPERUNREALIZEDPNLUPDATED",
+        "PAPERREALIZEDPNLUPDATED",
+        "PAPERDRAWDOWNUPDATED",
+    }:
+        return False
     if action in {"EXTERNAL_GITHUB_PROFILE_EVALUATED", "EVALUATED_DIAGNOSTIC"}:
         return False
     if "ENGINE_EVALUATION" in action or "PROFILE_EVALUATED" in action:
@@ -502,27 +522,62 @@ def _is_accepted_row(row: LogDecisionRow) -> bool:
 
 
 def _row_event_net_pnl(row: dict[str, Any]) -> float | None:
-    event_type = (_to_str(row.get("event_type")) or "").upper()
-    if event_type == "NO_TRADE":
+    event_type = _normalized_event_type(row)
+    if event_type in {"NOTRADE", "PAPERNOTRADE"}:
         return 0.0
-    if event_type == "PAPER_OPEN":
+    if event_type == "PAPEROPEN":
         fee = _to_float(row.get("fee_paid") or row.get("fee_cost_usdc") or row.get("fee"))
         return -fee if fee is not None else 0.0
-    if event_type in {"PAPER_CLOSE", "PAPER_PARTIAL_TP"}:
+    if event_type in {"PAPERCLOSE", "PAPERPARTIALTP"}:
         pnl = _to_float(row.get("net_pnl") or row.get("event_net_pnl_usdc"))
         return pnl if pnl is not None else 0.0
-    return _to_float(row.get("estimated_net_pnl_usdc") or row.get("event_net_pnl_usdc") or row.get("net_pnl") or row.get("realized_pnl"))
-
+    if event_type == "PAPERFEECHARGED":
+        fee = _to_float(row.get("fee_usdc"))
+        return -abs(fee) if fee is not None else None
+    if event_type in {"PAPERFUNDINGCHARGED", "PAPERFUNDINGRECEIVED"}:
+        return _to_float(row.get("funding_usdc"))
+    if event_type in {"PAPERPOSITIONREDUCED", "PAPERPOSITIONCLOSED"}:
+        return _to_float(row.get("realized_pnl_usdc"))
+    if event_type in {
+        "PAPERPOSITIONOPENED",
+        "PAPERPOSITIONINCREASED",
+        "PAPERPARTIALFILL",
+        "PAPERFILLSIMULATED",
+        "PAPEREQUITYUPDATED",
+        "PAPERMARKPRICEUPDATED",
+        "PAPERUNREALIZEDPNLUPDATED",
+        "PAPERREALIZEDPNLUPDATED",
+        "PAPERDRAWDOWNUPDATED",
+    }:
+        return 0.0
+    return _to_float(
+        first_not_none(
+            row.get("estimated_net_pnl_usdc"),
+            row.get("event_net_pnl_usdc"),
+            row.get("net_pnl"),
+            row.get("realized_pnl_usdc"),
+            row.get("realized_pnl"),
+        )
+    )
 
 def _row_event_fee(row: dict[str, Any]) -> float | None:
-    event_type = (_to_str(row.get("event_type")) or "").upper()
-    if event_type == "PAPER_OPEN":
+    event_type = _normalized_event_type(row)
+    if event_type == "PAPEROPEN":
         return _to_float(row.get("fee_paid") or row.get("fee_cost_usdc") or row.get("fee"))
-    if event_type in {"PAPER_CLOSE", "PAPER_PARTIAL_TP"}:
+    if event_type in {"PAPERCLOSE", "PAPERPARTIALTP"}:
         gross = _to_float(row.get("gross_pnl") or row.get("gross_pnl_usdc"))
         net = _to_float(row.get("net_pnl") or row.get("event_net_pnl_usdc"))
         if gross is not None and net is not None:
             return abs(gross - net)
+    if event_type == "PAPERFEECHARGED":
+        return _to_float(row.get("fee_usdc"))
+    if event_type in {
+        "PAPERPOSITIONOPENED",
+        "PAPERPOSITIONINCREASED",
+        "PAPERPOSITIONREDUCED",
+        "PAPERPOSITIONCLOSED",
+    }:
+        return 0.0
     return _to_float(row.get("fee_cost_usdc") or row.get("fee"))
 
 
@@ -536,7 +591,8 @@ def _analysis_event_key(row: dict[str, Any]) -> str:
         or "UNKNOWN"
     ) or "UNKNOWN"
     explicit = (
-        row.get("dedupe_identity")
+        row.get("event_id")
+        or row.get("dedupe_identity")
         or row.get("paper_position_instance_id")
         or row.get("v9_paper_order_id")
         or row.get("delta_key")
@@ -609,3 +665,11 @@ def _to_int(value: Any) -> int | None:
         return int(value)
     except (TypeError, ValueError):
         return None
+
+
+def _normalize_token(value: object) -> str:
+    return "".join(char for char in str(value or "").upper() if char.isalnum())
+
+
+def _normalized_event_type(row: dict[str, Any]) -> str:
+    return _normalize_token(row.get("event_type"))
