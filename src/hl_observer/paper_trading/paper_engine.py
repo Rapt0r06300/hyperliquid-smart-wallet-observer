@@ -481,7 +481,9 @@ class PaperEngine:
             decision_context=context,
         )
 
-    def mark_to_market(self, marks: dict[str, float]) -> tuple[float, float, float]:
+    def mark_to_market(
+        self, marks: dict[str, float], *, liquidatable_marks: dict[str, float] | None = None
+    ) -> tuple[float, float, float]:
         clean_marks = _clean_marks_for_ledger(marks)
         unrealized = sum(
             _position_unrealized(
@@ -493,8 +495,22 @@ class PaperEngine:
         equity = self.cash_usdt + self.realized_pnl_usdt + unrealized
         self._high_water_equity = max(self._high_water_equity, equity)
         drawdown = max(0.0, self._high_water_equity - equity)
-        self.ledger.mark_to_market(clean_marks, timestamp_ms=int(time.time() * 1000))
+        self.ledger.mark_to_market(
+            clean_marks, timestamp_ms=int(time.time() * 1000), liquidatable_marks=liquidatable_marks
+        )
         return round(equity, 8), round(unrealized, 8), round(drawdown, 8)
+
+    def mark_to_market_depuis_bbo(
+        self, marks: dict[str, float], bbo: dict[str, object]
+    ) -> tuple[float, float, float]:
+        """P1A câblage : construit les marks LIQUIDABLES (LONG@bid, SHORT@ask) depuis le BBO CAUSAL et
+        marque le ledger avec — l'equity AUTORITAIRE (`authoritative_equity_usdc`) devient alors mesurable
+        au lieu de rester `UNMEASURABLE_NO_EXECUTABLE_EXIT`. `bbo` = {coin: {"bid":.., "ask":..}}.
+        Sans bid/ask exécutable pour une position, elle reste UNMEASURABLE — jamais un repli sur le mid."""
+        from hl_observer.simulation.liquidatable_marks import marks_depuis_bbo
+
+        liq = marks_depuis_bbo(self.ledger.positions.values(), bbo)
+        return self.mark_to_market(marks, liquidatable_marks=liq)
 
     def _apply_exit_delta(
         self,
