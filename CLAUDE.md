@@ -159,3 +159,21 @@ positif qui se répète. En cas de doute « beau chiffre vs vérité » → **la
   parallèle, RECAP-COMPLET.md ultra riche (à analyser mot par mot), collecte auto-démarrée +
   archivée (rien de supprimé). Détail : `docs/audit/TOUT-TESTER_50_AMELIORATIONS.md` et
   `docs/audit/50_AMELIORATIONS_DATA.md`.
+
+## Addendum 2026-07-30 — Contexte permanent & scope (mémorisation, supersede le carry actif)
+
+**Objectif absolu.** PnL PAPER NET **ultra positif** + ROI PAPER NET **ultra positif**, mais UNIQUEMENT s'ils survivent, reproductibles, à : fees + spread + slippage + latence + partial fills + queue/non-fill + capacité + stress adverse + OOS/walk-forward + forward post-freeze. **Jamais** fabriquer du PnL en abaissant coûts, latence, gates ou exigences statistiques. Négatif après preuve → `KILL` ; données insuffisantes → `MORE_DATA` ; positif → prouver qu'il le reste sous toutes les contraintes réelles.
+
+**Scope stratégique ACTIF (seul autorisé à créer des effets paper) :** 1) **Cross-Venue** — dislocations de prix réellement exécutables ; 2) **Lead-Lag** — surtout Binance → Hyperliquid, conditionné microstructure/régime ; 3) **Copy-Wallet / Copy-Vault**. En **recherche / SHADOW** jusqu'à validation : TWAP/metaorders, OFI/MLOFI/microprice/queue depletion, entity consensus, Global L4/order-intent, wallet×Binance anticipation, maker queue-aware execution, liquidations/TP-SL/order-priority/mempool.
+
+**CARRY / FUNDING = ABANDONNÉ.** `funding_carry = LEGACY / DISABLED_BY_SCOPE`. Conservé seulement pour historique/audit/réconciliation : **aucun** signal actif, position paper, PnL actif, allocation de capital, influence sur le scoreboard, ni optimisation. Ne **jamais** contourner l'allowlist autoritaire (`strategies/active_scope.py`).
+
+**Direction technique.** GLOBAL HL DATA → Orders/L4/Fills/TWAP → Wallet/Entity Intelligence → Binance Lead-Lag → L2/L4 Microstructure → Executable Edge → Canonical Paper Engine → PnL/ROI OOS+Forward. 10 subscriptions user-specific HL = slots premium : **8 CORE + 2 CHALLENGERS**. Scoring sur **notre** copyability/executability, jamais le PnL brut du leader.
+
+**Statistiques.** Jamais « 1 fill = 1 observation indépendante ». Regrouper par métaordre/burst/wallet×coin×episode/jour ; cluster/block bootstrap, placebos, DSR/PBO, temporal OOS, wallet/day/regime holdout, forward post-freeze.
+
+**Exécution paper — une seule vérité.** Signal → Gate → PaperIntent → Canonical Execution → Fill → Position → Ledger → Liquidatable Equity. Prix : jamais simple mid ; BBO/L2 causal, VWAP, partial fills, capacité, consommation de liquidité, latence réelle, queue model si maker.
+
+**Git (règle dure).** Par bloc logique réellement terminé : audit → code → tests verts → preuve runtime/replay → `git diff --check` → **COMMIT IMMÉDIAT sur `main`** → SHA au commit ledger. 1 bloc = 1 commit. Pas de gros commit final. Jamais `reset --hard`, `clean` destructif, rebase destructif. Toujours vérifier HEAD + worktree ; préserver le travail local/non poussé ; ne jamais croire un ancien `DONE` sans vérifier code+appelant+données+runtime+ledger+tests.
+
+**Sécurité.** PAPER / READ-ONLY UNIQUEMENT : 0 ordre réel, 0 `/exchange`, 0 clé privée, 0 signature, 0 dépôt/retrait, aucune exécution mainnet/testnet.
