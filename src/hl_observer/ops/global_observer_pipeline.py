@@ -195,8 +195,27 @@ def markout_bps(index: Mapping[str, Mapping[str, Sequence]], *, coin: str, ts_ms
             "horizon_ms": int(horizon_ms), "cadence_ms": cadence_ms}
 
 
+def cadence_ms_par_coin(index: Mapping[str, Mapping[str, Sequence]]) -> dict[str, float]:
+    """Cadence médiane du feed (ms entre deux cotations) par coin — pour DÉRIVER la tolérance (§3.1).
+
+    Mesurer un markout à un horizon plus court que la cadence réelle est impossible : on préfère
+    `None` (non mesurable) à une cotation postérieure maquillée en « markout à h ». `0.0` si la
+    cadence est indéterminable (< 2 points) → l'appelant obtiendra alors `None`, jamais un chiffre.
+    """
+    cadences: dict[str, float] = {}
+    for coin, bloc in index.items():
+        temps = list(bloc.get("ts") or [])
+        if len(temps) < 2:
+            cadences[str(coin).upper()] = 0.0
+            continue
+        deltas = sorted(float(b - a) for a, b in zip(temps, temps[1:]) if b > a)
+        cadences[str(coin).upper()] = deltas[len(deltas) // 2] if deltas else 0.0
+    return cadences
+
+
 def executer(root: Path | str, *, sources: Sequence[tuple[str, str]] = SOURCES_DEFAUT,
              prix_relpath: str | None = PRIX_DEFAUT, horizon_markout_ms: int = 5_000,
+             latence_ms: float = 0.0,
              cout_ar_bps: float = 9.0, max_fills: int | None = None,
              max_lignes_prix: int = 400_000, min_episodes: int = WS.MIN_EPISODES) -> dict[str, Any]:
     """Exécute la chaîne complète et rend le rapport chiffré. Ne lève jamais sur donnée absente."""
@@ -244,11 +263,16 @@ def executer(root: Path | str, *, sources: Sequence[tuple[str, str]] = SOURCES_D
     coins = {e["coin"] for e in reconstruction.episodes}
     index_prix = charger_prix(racine / prix_relpath, coins=coins,
                               max_lignes=max_lignes_prix) if prix_relpath else {}
+    cadences = cadence_ms_par_coin(index_prix)          # §3.1 — tolérance dérivée du feed, plus de 60 s fixe
     n_avec_markout = 0
     for episodes in par_wallet.values():
         for e in episodes:
-            m = markout_bps(index_prix, coin=e["coin"], ts_ms=e["ts_ms"], sens=e["sens"],
-                            horizon_ms=horizon_markout_ms)
+            cad = cadences.get(str(e["coin"]).upper())
+            # §3.3 — mesurer à partir du 1er instant réellement exécutable (après notre latence de copie),
+            # jamais du timestamp d'exchange du fill leader.
+            ts_executable = float(e["ts_ms"]) + float(latence_ms)
+            m = markout_bps(index_prix, coin=e["coin"], ts_ms=ts_executable, sens=e["sens"],
+                            horizon_ms=horizon_markout_ms, cadence_ms=cad)
             if m is not None:
                 e["markouts_bps"] = {int(horizon_markout_ms): m}
                 n_avec_markout += 1
@@ -277,6 +301,8 @@ def executer(root: Path | str, *, sources: Sequence[tuple[str, str]] = SOURCES_D
         },
         "markouts": {
             "horizon_ms": int(horizon_markout_ms),
+            "tolerance": "DERIVEE_DE_CADENCE",            # §3.1 — plus de tolérance fixe 60 s
+            "latence_appliquee_ms": float(latence_ms),    # §3.3 — départ après la latence de copie
             "n_episodes_avec_markout": n_avec_markout,
             "couverture": round(n_avec_markout / max(1, resume_reco["n_episodes"]), 4),
             "coins_couverts": sorted(set(index_prix) & coins),
