@@ -203,3 +203,61 @@ def test_episode_id_present_est_compte_comme_identite_reelle():
     r = F.lignes_depuis_ledger(_seal(raw))
     assert r.identite_couverture["n_episode_id"] == 1
     assert _par_strat(r)["copy_vault"].n_independent == 1
+
+
+# --- P2.3 : scoreboard RÉELLEMENT alimenté (mesures + porte de promotion) ----
+def _ledger_n_episodes(strat, n, pnl=1.0):
+    raw = []
+    for i in range(n):
+        pid = f"{strat}-p{i}"
+        raw += [
+            _ev(f"o{strat}{i}", OPEN, coin="BTC", side="LONG", quantity=1.0,
+                refs={"strategy": strat, "position_id": pid}),
+            _ev(f"c{strat}{i}", CLOSE, coin="BTC", side="LONG", quantity=1.0,
+                realized_pnl_usdc=pnl, refs={"strategy": strat, "position_id": pid}),
+        ]
+    return raw
+
+
+def test_sans_mesures_les_couts_restent_unmeasurable():
+    raw = _episode("p1", "BTC", "LONG", "o1", "c1", 5.0, "copy_vault")
+    r = F.lignes_depuis_ledger(_seal(raw))
+    cv = _par_strat(r)["copy_vault"]
+    assert cv.pnl_usd == 5.0 and cv.net_bps is None and cv.costs_bps is None
+
+
+def test_scoreboard_alimente_calcule_net_et_promotion():
+    from hl_observer.simulation.scoreboard_promotion import ScoreboardPromotionEvidence
+    raw = _ledger_n_episodes("copy_vault", 25, pnl=2.0)      # 25 épisodes clos → n_independent=25
+    mesures = {"copy_vault": {
+        "gross_edge_bps": 25.0, "fees_bps": 1.0, "spread_bps": 2.0, "slippage_bps": 1.0,
+        "latency_bps": 1.0, "capacity_usd": 5000.0, "fill_ratios": [1.0, 0.95],
+        "latency_p50_ms": 100.0, "latency_p95_ms": 200.0, "oos_net_bps": 6.0,
+        "forward_net_bps": 4.0, "roi_denominator_usd": 1000.0,
+    }}
+    evidence = {"copy_vault": ScoreboardPromotionEvidence(
+        ledger_trusted=True, placebo_beaten=True, pbo_robuste=True, dsr_ok=True,
+        lower_confidence_bound_bps=3.0, concentration=0.1, n_days=10, n_regimes=3, n_coins=2, min_coins=1,
+    )}
+    r = F.lignes_depuis_ledger(_seal(raw), mesures_par_strategie=mesures, evidence_par_strategie=evidence)
+    cv = _par_strat(r)["copy_vault"]
+    assert cv.net_bps == 20.0 and cv.capacity_usd == 5000.0 and cv.latency_p95_ms == 200.0
+    assert r.promotions["copy_vault"]["verdict"] == "PROMOTE"     # PLOMBERIE (ledger synthétique)
+
+
+def test_promotion_more_data_si_capacite_absente_des_mesures():
+    from hl_observer.simulation.scoreboard_promotion import ScoreboardPromotionEvidence
+    raw = _ledger_n_episodes("copy_vault", 25, pnl=2.0)
+    mesures = {"copy_vault": {  # capacité OMISE
+        "gross_edge_bps": 25.0, "fees_bps": 1.0, "spread_bps": 2.0, "slippage_bps": 1.0,
+        "latency_bps": 1.0, "fill_ratios": [1.0], "latency_p50_ms": 100.0, "latency_p95_ms": 200.0,
+        "oos_net_bps": 6.0, "forward_net_bps": 4.0,
+    }}
+    evidence = {"copy_vault": ScoreboardPromotionEvidence(
+        ledger_trusted=True, placebo_beaten=True, pbo_robuste=True, dsr_ok=True,
+        lower_confidence_bound_bps=3.0, concentration=0.1, n_days=10, n_regimes=3, n_coins=2, min_coins=1,
+    )}
+    r = F.lignes_depuis_ledger(_seal(raw), mesures_par_strategie=mesures, evidence_par_strategie=evidence)
+    assert r.promotions["copy_vault"]["verdict"] == "MORE_DATA"
+    assert "capacity_measured" in r.promotions["copy_vault"]["manquants"]
+    assert r.to_dict()["promotions"]["copy_vault"]["verdict"] == "MORE_DATA"

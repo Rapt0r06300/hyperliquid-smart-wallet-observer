@@ -118,6 +118,7 @@ class ResultatScoreboard:
     manques_globaux: tuple[str, ...]  # union des champs UNMEASURABLE sur toutes les lignes
     raison: str | None = None
     identite_couverture: dict[str, Any] = field(default_factory=dict)
+    promotions: dict[str, Any] = field(default_factory=dict)   # verdict de promotion par stratégie (si evidence fournie)
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -127,6 +128,7 @@ class ResultatScoreboard:
             "rows": [r.to_dict() for r in self.rows],
             "manques_globaux": list(self.manques_globaux),
             "identite_couverture": dict(self.identite_couverture),
+            "promotions": dict(self.promotions),
             "raison": self.raison,
             "paper_only": True,
             "real_execution": False,
@@ -142,17 +144,59 @@ def _union_manques(rows: Sequence[ScoreboardRow]) -> tuple[str, ...]:
     return tuple(vus)
 
 
+_CHAMPS_MESURE = (
+    "gross_edge_bps", "fees_bps", "spread_bps", "slippage_bps", "latency_bps",
+    "capacity_usd", "fill_ratios", "latency_p50_ms", "latency_p95_ms",
+    "oos_net_bps", "forward_net_bps",
+)
+
+
+def _ligne_alimentee(strategy, pnls_par_strat, roi_denom, mesures):
+    """Assemble une ligne : PnL/N depuis le ledger, coûts/capacité/latence/OOS/forward depuis les mesures."""
+    kw = {k: mesures.get(k) for k in _CHAMPS_MESURE if mesures.get(k) is not None}
+    denom = mesures.get("roi_denominator_usd")
+    return assembler_ligne(
+        strategy,
+        closed_pnls=pnls_par_strat.get(strategy) or None,
+        n_independent=(len(pnls_par_strat[strategy]) if strategy in pnls_par_strat else None),
+        roi_denominator_usd=(denom if denom is not None else roi_denom),
+        **kw,
+    )
+
+
+def _promotions(rows, evidence_par_strategie):
+    """Évalue la porte de promotion deny-by-default par stratégie, si une evidence est fournie."""
+    if not evidence_par_strategie:
+        return {}
+    from hl_observer.simulation.scoreboard_promotion import evaluer_promotion_scoreboard
+    out: dict[str, Any] = {}
+    for row in rows:
+        ev = evidence_par_strategie.get(row.strategy)
+        if ev is not None:
+            out[row.strategy] = evaluer_promotion_scoreboard(row, ev).to_dict()
+    return out
+
+
 def lignes_depuis_ledger(
     events: Iterable[Mapping[str, Any]],
     *,
     snapshot: Mapping[str, Any] | None = None,
     roi_denominateurs: Mapping[str, float] | None = None,
     strategies_attendues: Sequence[str] | None = None,
+    mesures_par_strategie: Mapping[str, Mapping[str, Any]] | None = None,
+    evidence_par_strategie: Mapping[str, Any] | None = None,
 ) -> ResultatScoreboard:
-    """Assemble les lignes de scoreboard depuis un ledger canonique. `TRUSTED` obligatoire pour un PnL."""
+    """Assemble les lignes de scoreboard depuis un ledger canonique. `TRUSTED` obligatoire pour un PnL.
+
+    `mesures_par_strategie` — alimente RÉELLEMENT chaque ligne : gross_edge_bps, fees/spread/slippage/
+    latency_bps, capacity_usd, fill_ratios, latency_p50/p95_ms, oos/forward_net_bps, roi_denominator_usd.
+    Sans mesure, le champ reste UNMEASURABLE (le PnL réalisé, lui, vient toujours du ledger). §4.3 :
+    un scoreboard positif obtenu sur ledger SYNTHÉTIQUE est une preuve de PLOMBERIE, jamais un PnL réel.
+    `evidence_par_strategie` — si fournie, la porte de promotion deny-by-default est évaluée par stratégie."""
     rows_in = [dict(r) for r in events]
     attendues = tuple(strategies_attendues) if strategies_attendues is not None else _familles_actives()
     roi_denominateurs = dict(roi_denominateurs or {})
+    mesures = dict(mesures_par_strategie or {})
 
     audit = audit_paper_ledger(rows_in, snapshot=snapshot)
     if audit.status != TRUSTED:
@@ -162,6 +206,7 @@ def lignes_depuis_ledger(
             status=audit.status, rows=rows, n_episodes_clos=0,
             manques_globaux=_union_manques(rows),
             raison=f"ledger {audit.status}: PnL par stratégie non calculable (deny-by-default)",
+            promotions=_promotions(rows, evidence_par_strategie),
         )
 
     # Ledger TRUSTED : reconstruire les épisodes (OPEN→CLOSE) dans l'ordre, un par cycle.
@@ -207,18 +252,14 @@ def lignes_depuis_ledger(
     # Une ligne par stratégie ATTENDUE (même vide → MORE_DATA explicite) + toute stratégie vue.
     strategies = list(dict.fromkeys([*attendues, *sorted(pnls_par_strat)]))
     rows = tuple(
-        assembler_ligne(
-            s,
-            closed_pnls=pnls_par_strat.get(s) or None,
-            n_independent=(len(pnls_par_strat[s]) if s in pnls_par_strat else None),
-            roi_denominator_usd=roi_denominateurs.get(s),
-        )
+        _ligne_alimentee(s, pnls_par_strat, roi_denominateurs.get(s), mesures.get(s) or {})
         for s in strategies
     )
+    promotions = _promotions(rows, evidence_par_strategie)
     return ResultatScoreboard(
         status=TRUSTED, rows=rows, n_episodes_clos=len(episodes),
         manques_globaux=_union_manques(rows), raison=None,
-        identite_couverture=identite_couverture,
+        identite_couverture=identite_couverture, promotions=promotions,
     )
 
 
@@ -228,6 +269,8 @@ def depuis_fichier_ledger(
     snapshot: Mapping[str, Any] | None = None,
     roi_denominateurs: Mapping[str, float] | None = None,
     strategies_attendues: Sequence[str] | None = None,
+    mesures_par_strategie: Mapping[str, Mapping[str, Any]] | None = None,
+    evidence_par_strategie: Mapping[str, Any] | None = None,
 ) -> ResultatScoreboard:
     """Câblage réel : lit le ledger SCELLÉ (`ledger_integrity.read_chain`) puis assemble le scoreboard.
 
@@ -244,10 +287,12 @@ def depuis_fichier_ledger(
             status=lecture.status, rows=rows, n_episodes_clos=0,
             manques_globaux=_union_manques(rows),
             raison=f"ledger illisible/rompu ({lecture.status}): PnL non calculable",
+            promotions=_promotions(rows, evidence_par_strategie),
         )
     return lignes_depuis_ledger(
         lecture.events, snapshot=snapshot,
         roi_denominateurs=roi_denominateurs, strategies_attendues=strategies_attendues,
+        mesures_par_strategie=mesures_par_strategie, evidence_par_strategie=evidence_par_strategie,
     )
 
 
