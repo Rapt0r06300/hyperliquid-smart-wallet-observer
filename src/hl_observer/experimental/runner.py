@@ -14,6 +14,7 @@ from typing import Any
 
 from hl_observer.experimental import moteur_paper as MP
 from hl_observer.experimental.signaux import COLLECTEURS
+from hl_observer.market_data.live_l2_service import LiveL2Service
 
 STATUS_RELPATH = MP.STATUS_RELPATH  # versionné (v2) : la v1 reste en quarantaine
 
@@ -443,7 +444,11 @@ def _gerer_sorties(store: dict, root: Path, *, now_ms: float) -> list[dict]:
 
 
 def tick(
-    root: str | Path = ".", *, now_ms: float | None = None, moteurs: tuple[str, ...] | None = None
+    root: str | Path = ".",
+    *,
+    now_ms: float | None = None,
+    moteurs: tuple[str, ...] | None = None,
+    lecteur_l2=None,
 ) -> dict[str, Any]:
     """Un cycle complet. Renvoie {ouvertures, fermetures, refus, premier_signal, resume}."""
     root = Path(root)
@@ -453,12 +458,16 @@ def tick(
     ouvertures: list[dict] = []
     refus: list[dict] = []
     premier_signal: dict | None = None
+    l2_reader = lecteur_l2 or LiveL2Service(root).as_legacy_reader()
     for m in moteurs or MP.MOTEURS:
         adaptateur = COLLECTEURS.get(m)
         if not adaptateur:
             continue
         try:
-            sigs, refs = adaptateur(root, now_ms=now)
+            if m == "copy_vault":
+                sigs, refs = adaptateur(root, now_ms=now, lecteur_l2=l2_reader)
+            else:
+                sigs, refs = adaptateur(root, now_ms=now)
         except Exception as exc:  # noqa: BLE001 — un moteur qui échoue n'arrête pas les autres
             refus.append({"moteur": m, "motif": "ADAPTATEUR_ERREUR", "detail": str(exc)[:120]})
             continue

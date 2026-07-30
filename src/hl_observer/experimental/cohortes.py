@@ -121,7 +121,7 @@ def charger_table(coh: Cohorte, root: Path) -> dict[str, dict]:
 
 def _mark(coin: str, root: Path, now_ms: float, lecteur_l2) -> float | None:
     l2 = _l2_pour_coin(coin, lecteur_l2=lecteur_l2, bbo=_snapshots_bbo(root),
-                       carnet=_carnet_l2_frais(root, now_ms=now_ms), now_ms=now_ms)
+                       carnet=_carnet_l2_frais(root, now_ms=now_ms), now_ms=now_ms, root=root)
     if l2:
         return (l2["hl_bid"] + l2["hl_ask"]) / 2.0
     return _allmids(root, now_ms=now_ms).get(coin)
@@ -531,7 +531,7 @@ def traiter_fill(coh: Cohorte, etat: dict, fill: dict, root: Path, *, now_ms: fl
     if store["cash"] < min_notional:
         return {"refus": "BUDGET_EPUISE", "coin": coin}
     l2 = _l2_pour_coin(coin, lecteur_l2=lecteur_l2, bbo=_snapshots_bbo(root),
-                       carnet=_carnet_l2_frais(root, now_ms=now), now_ms=now)
+                       carnet=_carnet_l2_frais(root, now_ms=now), now_ms=now, root=root)
     t_l2 = time.monotonic()                                      # MONOTONE : L2 obtenu
     if not l2:
         return {"refus": "L2_INDISPONIBLE_1S", "coin": coin}

@@ -20,6 +20,7 @@ from hl_observer.backtesting.lead_lag_evidence import (
 from hl_observer.core.causal_time import current_record_age_ms
 from hl_observer.experimental.moteur_paper import LIMITES, Signal
 from hl_observer.experimental.roi_estimateur import roi_depuis_signal
+from hl_observer.market_data.live_l2_service import LiveL2Service
 
 #: P8 — fraîcheur des ÉVÉNEMENTS-source (trade Binance / snapshot leader) : au-delà = STALE ; dans le futur = skew.
 STALE_SIGNAL_MS = 30_000.0
@@ -559,7 +560,7 @@ def _carnet_l2_frais(root: Path, *, now_ms: float, age_max_ms: float = AGE_L2_MA
     return out
 
 
-def _l2_pour_coin(coin: str, *, lecteur_l2, bbo: dict, carnet: dict, now_ms: float) -> dict | None:
+def _l2_pour_coin_legacy(coin: str, *, lecteur_l2, bbo: dict, carnet: dict, now_ms: float) -> dict | None:
     """L2 HL FRAIS (< 1 s) pour un coin, par ordre de fraîcheur : (1) lecture À LA DEMANDE (WS/REST au
     signal, fournie en live) ; (2) flux BBO synchro (<1 s) ; (3) carnet <1 s. Rend {hl_bid, hl_ask,
     depth_usd, src, age_ms} ou None si aucune source < 1 s (rectif Flo : 120 s était trop vieux)."""
@@ -599,6 +600,26 @@ def _l2_pour_coin(coin: str, *, lecteur_l2, bbo: dict, carnet: dict, now_ms: flo
             "age_ms": now_ms - ts,
         }
     return None
+
+
+def _l2_pour_coin(
+    coin: str,
+    *,
+    lecteur_l2,
+    bbo: dict,
+    carnet: dict,
+    now_ms: float,
+    root: str | Path = ".",
+) -> dict | None:
+    """Resolve one fresh L2 observation through the canonical local service."""
+
+    service = LiveL2Service(
+        root,
+        on_demand_reader=lecteur_l2,
+        max_age_ms=int(AGE_L2_MAX_MS),
+    )
+    snapshot = service.resolve(coin, now_ms=int(now_ms), bbo=bbo, carnet=carnet)
+    return None if snapshot is None else snapshot.as_legacy_payload(now_ms=int(now_ms))
 
 
 def _filer_coins_au_carnet(root: Path, coins: list[str], *, now_ms: float) -> None:
@@ -742,7 +763,14 @@ def signaux_vaults(
                 )
                 continue
         # (a) L2 HL frais < 1 s obligatoire (on-demand ou BBO WS) : prix + profondeur + coût de sortie réels
-        l2 = _l2_pour_coin(best_coin, lecteur_l2=lecteur_l2, bbo=bbo, carnet=carnet, now_ms=now)
+        l2 = _l2_pour_coin(
+            best_coin,
+            lecteur_l2=lecteur_l2,
+            bbo=bbo,
+            carnet=carnet,
+            now_ms=now,
+            root=root,
+        )
         if not l2:
             refus.append(
                 {"moteur": "copy_vault", "vault": adr[:10], "motif": "L2_INDISPONIBLE_1S", "coin": best_coin}

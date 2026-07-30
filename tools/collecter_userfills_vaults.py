@@ -24,6 +24,11 @@ sys.path.insert(0, str(RACINE / "tools"))
 from hl_observer.collection import userfills_live as UL  # noqa: E402
 from hl_observer.collection import verrou_instance as VI  # noqa: E402
 from hl_observer.experimental import cohortes as CO  # noqa: E402
+from hl_observer.market_data.live_l2_service import (  # noqa: E402
+    LiveL2Snapshot,
+    snapshot_from_mapping,
+    write_dynamic_snapshot,
+)
 from hl_observer.experimental import liquidation_sentinels as LS  # noqa: E402  (LIQUIDATOR_SENTINELS_V2)
 import sonde_confirmation_vaults as SD  # noqa: E402  (helpers de réconciliation par CLÉ COMPOSITE, partagés)
 
@@ -241,6 +246,21 @@ def _depth_executable(rep: dict, mid: float, *, n: int = 5) -> float:
     return min(somme(bids), somme(asks))
 
 
+def _full_levels(rep: dict) -> tuple[list[tuple[float, float]], list[tuple[float, float]]]:
+    """Return every valid observed level; never extend the visible book."""
+
+    try:
+        raw_bids, raw_asks = rep["levels"][0], rep["levels"][1]
+        bids = [(float(row["px"]), float(row["sz"])) for row in raw_bids]
+        asks = [(float(row["px"]), float(row["sz"])) for row in raw_asks]
+    except (KeyError, IndexError, TypeError, ValueError):
+        return [], []
+    return (
+        [(px, sz) for px, sz in bids if px > 0 and sz > 0],
+        [(px, sz) for px, sz in asks if px > 0 and sz > 0],
+    )
+
+
 def _lecteur_l2_ondemand(coin: str) -> dict | None:
     """L2 HL FRAIS (<1 s) pour `coin`, à la demande (POST public l2Book). Rend
     {hl_bid, hl_ask, depth_usd, age_ms} ou None. Cache court pour ne pas marteler l'API."""
@@ -271,7 +291,20 @@ def _lecteur_l2_ondemand(coin: str) -> dict | None:
     bid, ask, bsz, asz = p
     mid = 0.5 * (bid + ask)
     depth = _depth_executable(rep, mid) or (min(bsz, asz) * mid)   # top-5 niveaux (secours : top tick)
-    d = {"hl_bid": bid, "hl_ask": ask, "depth_usd": round(depth, 2), "age_ms": 0.0}
+    bids, asks = _full_levels(rep)
+    received_ts_ms = int(time.time() * 1_000)
+    d = {
+        "hl_bid": bid,
+        "hl_ask": ask,
+        "depth_usd": round(depth, 2),
+        "age_ms": 0.0,
+        "received_ts_ms": received_ts_ms,
+        "exchange_ts_ms": rep.get("time") if isinstance(rep, dict) else None,
+        "source": "hyperliquid:/info:l2Book:on_demand",
+        "data_origin": "REAL",
+        "bids": bids,
+        "asks": asks,
+    }
     _L2_CACHE[coin] = (now, d)
     return d
 
@@ -322,18 +355,33 @@ def _parse_l2_ws(d: dict) -> tuple | None:
     return bid, ask, round(_depth_executable(d, 0.5 * (bid + ask)), 2)
 
 
-def _ecrire_book_live(root: Path, coin: str, bid: float, ask: float, depth: float) -> None:
-    p = root / RAW_L2_LIVE
+def _ecrire_book_live(
+    root: Path,
+    coin: str,
+    bid: float,
+    ask: float,
+    depth: float,
+    *,
+    bids: list[tuple[float, float]] | None = None,
+    asks: list[tuple[float, float]] | None = None,
+    received_ts_ms: int | None = None,
+    exchange_ts_ms: int | None = None,
+) -> None:
+    received = int(received_ts_ms or time.time() * 1_000)
     try:
-        cur = json.loads(p.read_text(encoding="utf-8")) if p.exists() else {}
-    except (OSError, ValueError):
-        cur = {}
-    cur[coin] = {"hl_bid": bid, "hl_ask": ask, "depth_usd": depth, "collecte_ts": time.time()}
-    try:
-        tmp = p.with_suffix(".json.tmp")
-        tmp.write_text(json.dumps(cur, ensure_ascii=False), encoding="utf-8")
-        tmp.replace(p)
-    except OSError:
+        snapshot = LiveL2Snapshot(
+            coin=str(coin).upper(),
+            best_bid=float(bid),
+            best_ask=float(ask),
+            depth_usd=float(depth),
+            source="hyperliquid:ws:l2Book:dynamic",
+            received_ts_ms=received,
+            exchange_ts_ms=exchange_ts_ms,
+            bids=tuple(bids or ()),
+            asks=tuple(asks or ()),
+        )
+        write_dynamic_snapshot(root, snapshot, relpath=RAW_L2_LIVE)
+    except (OSError, TypeError, ValueError):
         pass
 
 
@@ -343,13 +391,19 @@ def _book_ws_frais(coin: str, *, age_max_s: float = 1.5) -> dict | None:
         d = (json.loads((_ROOT_LIVE / RAW_L2_LIVE).read_text(encoding="utf-8")) or {}).get(coin)
     except (OSError, ValueError):
         return None
-    if not d or float(d.get("hl_bid") or 0) <= 0 or float(d.get("hl_ask") or 0) <= 0:
+    now_ms = int(time.time() * 1_000)
+    snapshot = snapshot_from_mapping(
+        coin,
+        d,
+        source="hyperliquid:ws:l2Book:dynamic",
+        now_ms=now_ms,
+    )
+    if snapshot is None:
         return None
-    age = time.time() - float(d.get("collecte_ts") or 0)
-    if age > age_max_s:
+    age_ms = snapshot.age_ms(now_ms)
+    if age_ms > age_max_s * 1_000:
         return None
-    return {"hl_bid": float(d["hl_bid"]), "hl_ask": float(d["hl_ask"]),
-            "depth_usd": float(d.get("depth_usd") or 0.0), "age_ms": age * 1000.0}
+    return snapshot.as_legacy_payload(now_ms=now_ms)
 
 
 def _lecteur_l2_marquage(coin: str) -> dict | None:
@@ -401,7 +455,24 @@ async def _l2_dynamique(root: Path, *, sync_s: float = 1.0) -> None:
                         d = msg.get("data") or {}
                         coin, b = d.get("coin"), _parse_l2_ws(d)
                         if coin and b:
-                            _ecrire_book_live(root, coin, b[0], b[1], b[2])
+                            bids, asks = _full_levels(d)
+                            received_ts_ms = int(time.time() * 1_000)
+                            raw_exchange_ts = d.get("time")
+                            try:
+                                exchange_ts_ms = int(raw_exchange_ts) if raw_exchange_ts is not None else None
+                            except (TypeError, ValueError):
+                                exchange_ts_ms = None
+                            _ecrire_book_live(
+                                root,
+                                coin,
+                                b[0],
+                                b[1],
+                                b[2],
+                                bids=bids,
+                                asks=asks,
+                                received_ts_ms=received_ts_ms,
+                                exchange_ts_ms=exchange_ts_ms,
+                            )
                             if coin not in premier:
                                 premier.add(coin)
                                 _log_l2(root, "L2_PREMIER_BOOK", coin, {"hl_bid": b[0], "hl_ask": b[1], "depth_usd": b[2]})

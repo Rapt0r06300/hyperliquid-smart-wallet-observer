@@ -80,7 +80,7 @@ def test_demarrer_tous_reutilise_un_collecteur_deja_vivant(tmp_path):
     )
     assert r["pids"]["bbo-collector"] == 321
     assert r["reutilises"] == ["bbo-collector"]
-    assert appels == ["allmids-collector"]
+    assert appels == ["allmids-collector", "userfills-live"]
 
 
 def test_un_profil_ne_fait_pas_oublier_les_autres_pids_vivants(tmp_path):

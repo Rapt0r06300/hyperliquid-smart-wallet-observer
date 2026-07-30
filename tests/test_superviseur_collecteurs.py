@@ -204,7 +204,7 @@ def test_le_REGISTRE_correspond_au_LANCEUR(fichier):
     assert "superviseur_collecteurs demarrer-tous core" in texte
     assert "HYPERSMART_ENABLE_AUX_IA=0" in texte
     assert "HYPERSMART_ENABLE_AUX_STREAM=1" in texte
-    assert SC.COLLECTEURS_CORE == {"allmids-collector", "bbo-collector"}
+    assert SC.COLLECTEURS_CORE == {"allmids-collector", "bbo-collector", "userfills-live"}
 
 
 def test_le_runtime_carry_APPELLE_le_superviseur():

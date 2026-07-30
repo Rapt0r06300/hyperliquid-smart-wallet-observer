@@ -13,7 +13,7 @@ REM  LANCER_HYPERSMART.cmd  --  LANCEUR RUNTIME OFFICIEL (2026-07-28)
 REM ----------------------------------------------------------------------------
 REM  Double-clic SANS argument = RUNTIME CORE : prevol securite/paper-only,
 REM  verrou d'instance unique, moteur + dashboard + poller + stream leaders,
-REM  allMids et BBO. Les backtests/replays/recherches restent hors du hot path.
+REM  allMids, BBO et userFills read-only. Les backtests/replays/recherches restent hors du hot path.
 REM
 REM  Sous-commandes (LANCER_HYPERSMART.cmd <cmd>) :
 REM    status stop restart restart-userfills collectors report test audit
@@ -387,7 +387,7 @@ REM Le superviseur enregistre directement les PID et reutilise les instances dej
 REM vivantes. Aucun second passage de detection, aucun demarrage en double.
 ping -n 3 127.0.0.1 >nul 2>&1
 python -m hl_observer.ops.superviseur_collecteurs status core
-echo   [collecteurs CORE] allMids + BBO. Recherche/backtests hors runtime.
+echo   [collecteurs CORE] allMids + BBO + userFills read-only. Recherche/backtests hors runtime.
 
 powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0tools\start_hypersmart_simulation.ps1" -Port 8794 -IntervalSeconds 15 -MaxLeaders 50 -Interactive
 
@@ -404,7 +404,7 @@ REM #  Le canari test_superviseur_collecteurs compte ces lignes 'start' : NE PAS
 REM #  en ajouter/retirer sans mettre a jour le registre du superviseur.
 REM ############################################################################
 :demarrer_collecteurs
-REM Profil CORE officiel : allMids + BBO uniquement. Le superviseur refuse les
+REM Profil CORE officiel : allMids + BBO + userFills read-only. Le superviseur refuse les
 REM doublons et enregistre lui-meme les PID pour l'arret cible.
 python -m hl_observer.ops.superviseur_collecteurs demarrer-tous core
 exit /b %ERRORLEVEL%
@@ -572,7 +572,7 @@ echo     status              etat des processus du lanceur ^(lecture seule^)
 echo     stop                arret cible ^(collecteurs + userfills^), jamais un kill global
 echo     restart             stop puis autopilot
 echo     restart-userfills   recharge le collecteur userfills avec le code courant
-echo     collectors          demarre/reanime uniquement allMids + BBO ^(CORE^)
+echo     collectors          demarre/reanime allMids + BBO + userFills ^(CORE^)
 echo     collectors-maintenance   outils periodiques explicites
 echo     collectors-research      collecteurs de recherche explicites
 echo     collectors-all           tous les collecteurs ^(diagnostic exceptionnel^)

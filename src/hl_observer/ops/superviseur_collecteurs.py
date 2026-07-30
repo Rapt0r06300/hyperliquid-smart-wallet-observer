@@ -114,12 +114,14 @@ REGISTRE: tuple[dict[str, Any], ...] = (
 )
 
 # Le runtime principal ne doit pas devenir un laboratoire permanent. Ces profils
-# gardent tous les collecteurs disponibles, mais seuls les deux flux de marche
-# indispensables sont auto-demarres avec le bot.
+# gardent tous les collecteurs disponibles. Le profil essentiel demarre les
+# prix/microstructure et userFills : sans ce dernier, copy-vault ne peut pas
+# observer les transitions leader en temps reel.
 PROFILS_VALIDES = ("core", "maintenance", "research", "all")
 COLLECTEURS_CORE = frozenset({
     "allmids-collector",
     "bbo-collector",
+    "userfills-live",
 })
 COLLECTEURS_MAINTENANCE = frozenset({
     "copy-whitelist",
