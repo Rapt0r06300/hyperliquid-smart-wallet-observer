@@ -1,51 +1,41 @@
 # HYPERSMART — ONE-RUN PROGRESS (OPUS 4.8) — 2026-07-30
 
-> Fichier de reprise. Pour chaque bloc : statut, SHA, tests, preuve, résultat économique,
-> blocage, next. Ne pas passer de temps à l'embellir : il sert uniquement à reprendre si le
-> quota coupe la session. Baseline du run : `654f243`.
+> Fichier de reprise. Baseline du run : `654f243`. Aucun push (Flo pousse). 1 unité = 1 commit.
+> Statuts : `DONE` (code+testé+prouvé+commit) · `IN_PROGRESS` · `SHADOW` · `BLOCKED_EXTERNAL` · `TODO`.
 
-## Convention
-- Statuts : `DONE` (code+branché+testé+prouvé+commit) · `IN_PROGRESS` · `SHADOW` · `BLOCKED_EXTERNAL` · `TODO`.
-- Aucun push (Flo pousse). 1 unité logique = 1 commit local. Jamais `git add -A`.
+## Commits de ce run (au-dessus de 654f243)
+| Bloc | SHA | Tests | Contenu |
+|---|---|---|---|
+| P0 | `a25b8ee` | doc | tasklist ACTIVE régénérée depuis active_scope, carry DISABLED_BY_SCOPE, archive + progress |
+| P1A | `ece68f4` | 11 | builder marks liquidables (LONG@bid/SHORT@ask) → equity autoritaire mesurable, sinon UNMEASURABLE (prouvé sur le vrai PaperLedger) |
+| P1B | `a38f28c` | 12 | contrat coûts/latence : guard anti-double-compte + taxonomie latence MEASURED/ASSUMED/UNMEASURABLE |
+| P1C | `4198358` | 10 | identité économique (bundle refs, clés non ambiguës, episode_id déterministe, hash-chain intacte) |
+| P1D | `2d78854` | +2 | scoreboard feed honore episode_id + publie la couverture d'identité |
+| P2.1 | `512596a` | 19 | porte économique de promotion deny-by-default (17 portes §4.1) composée avec la porte de déploiement |
+| P2.2 | `336b231` | 8 | ventilation N indépendant (metaorder/burst/wallet-coin-jour + LCB) réutilise scoring_robuste |
 
----
+Baseline du run (déjà prouvé avant) : scoreboard_metrics `4c1ef42`, scoreboard_feeder `6404ae3`,
+cost_components `654f243`.
 
-## Blocs déjà prouvés AVANT ce run (baseline, ne pas refaire)
-- Scoreboard réconcilié : `scoreboard_metrics` (`4c1ef42`), `scoreboard_feeder` (`6404ae3`),
-  `cost_components` (`654f243`) — 51 tests. P2 doit finir leur câblage runtime.
-- Blocs 1–20 + ALPHA-5..8 + E/G/H (commit ledger 2026-07-29) : cross-venue, lead-lag, TWAP,
-  microstructure, consensus, copy-vault, capacité, Global Observer, cycle de vie wallet,
-  parité replay/forward (bloc 17). **Vérité mesurée : aucune stratégie nette-positive**
-  (raw_probe −5,9 bps ; markout brut ~2,6 bps < ~9 bps de coûts).
+## État par bloc
+- **P0 DONE** (`a25b8ee`). active_scope faisait déjà foi ; docs réalignées.
+- **P1 DONE** (A `ece68f4` / B `a38f28c` / C `4198358` / D `2d78854`).
+  - Restant (câblage runtime, non bloquant) : passer `liquidatable_marks` depuis PaperEngine (le
+    builder + la mécanique ledger sont prouvés) ; router la latence live via executable_replay
+    plutôt que la taxe scalaire (le chemin causal existe déjà : `market_truth/executable_replay.py`).
+- **P2 DONE** (2.1 `512596a` / 2.2 `336b231`). Restant P2.3 : brancher ces portes sur le ledger LIVE
+  (produire réellement gross/costs/net/fill/capacity/latence par stratégie au runtime).
+- P3 Data haute résolution — TODO. Live HL/Binance = **BLOCKED_EXTERNAL** (pas de réseau exchange en
+  sandbox) ; faisable en pur : clock contract + universe manager + qualité/replay.
+- P4 Global Observer à l'échelle — TODO (réutiliser G1-G3/H1-H2).
+- P5 Wallet×Binance anticipation — TODO (le cœur reste BLOCKED_EXTERNAL sur data live ; logique pure OK).
+- P6 TWAP residual — SHADOW/TODO. P8 microstructure — TODO. P9 cross-venue 2 jambes — TODO (bug capacité directionnelle à corriger).
+- P10 maker — TODO. P11 lead-lag v2 — TODO. P12 wallet intelligence — TODO. P13 replay=forward — TODO (étend bloc 17).
+- P14 statistiques/placebo — TODO (réutiliser robustesse_selection). P7 L4 — BLOCKED_EXTERNAL probable.
+- P15 providers — BLOCKED_EXTERNAL (interfaces). P16 wiring — TODO. P17 dette — TODO (rejouer auditer_cablage).
+- P18 CI/Windows — TODO (CI verte = après push Flo). P19 recette éco finale — TODO.
 
----
-
-## P0 — Vérité unique scope/docs
-- Statut : IN_PROGRESS → (SHA à renseigner au commit)
-- Fait : `active_scope.py` confirmé conforme (3 ACTIVE, carry DISABLED). `docs/TASKLIST_ACTIVE.md`
-  carry-centrique archivée → `docs/archive/TASKLIST_ACTIVE_20260730_archivee.md` ; tasklist
-  régénérée depuis active_scope. Ce fichier de progress créé.
-- Tests : n/a (doc). Preuve : diff docs.
-- Next : P1.
-
-## P1 — Comptabilité/PnL/latence — TODO
-- P1A equity liquidable autoritaire · P1B contrat coûts/latence · P1C identité bout-en-bout · P1D scoreboard feed.
-
-## P2 — Scoreboard qui ne peut pas mentir — TODO
-## P3 — Data haute résolution — TODO (live BLOCKED_EXTERNAL)
-## P4 — Global Observer à l'échelle — TODO
-## P5 — Wallet×Binance anticipation — TODO
-## P6 — TWAP residual (SHADOW) — TODO
-## P8 — Microstructure state-first — TODO
-## P9 — Cross-venue 2 jambes — TODO
-## P10 — Maker queue-aware — TODO
-## P11 — Lead-lag v2 — TODO
-## P12 — Wallet intelligence — TODO
-## P13 — Replay=forward — TODO
-## P14 — Statistiques/anti-overfit — TODO
-## P7 — L4/Order Intent — TODO (BLOCKED_EXTERNAL probable)
-## P15 — Providers externes — BLOCKED_EXTERNAL (interfaces only)
-## P16 — Runtime producteur→consommateur — TODO
-## P17 — Dette de câblage — TODO
-## P18 — CI/Windows/robustesse — TODO (CI verte = après push Flo)
-## P19 — Mesure économique finale — TODO
+## Vérité économique (inchangée, à ne pas maquiller)
+Aucune stratégie nette-positive à ce jour : raw_probe ≈ −5,9 bps ; markout brut ~2,6 bps < ~9 bps de
+coûts. Contrainte dominante : alpha brut < coûts + résolution data. Les portes ci-dessus garantissent
+qu'aucun faux PROMOTE ne passe ; l'edge réel reste à trouver (P3/P5/P6).
