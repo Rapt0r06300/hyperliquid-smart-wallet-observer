@@ -126,6 +126,53 @@ class PaperEngine:
     def positions(self) -> tuple[PaperPosition, ...]:
         return tuple(self._positions.values())
 
+    def restore_position(
+        self,
+        position: PaperPosition,
+        *,
+        refs: dict[str, object] | None = None,
+    ) -> None:
+        """Restore one recorded paper position without inventing a new fill.
+
+        Runtime adapters may restart while a paper position remains open.  The
+        recorded effective entry price and quantity are therefore imported as
+        an opening ledger event with zero additional fee.  Calling this method
+        twice for the same identity is idempotent; conflicting identities are
+        rejected instead of silently changing economic history.
+        """
+
+        existing = self._positions.get(position.position_id)
+        if existing is not None:
+            if existing != position:
+                raise ValueError("paper position restore identity conflict")
+            return
+        if (
+            not _finite_positive_or_false(position.quantity)
+            or not _finite_positive_or_false(position.entry_price)
+            or not _finite_positive_or_false(position.notional_usdt)
+            or position.side not in {"LONG", "SHORT"}
+        ):
+            raise ValueError("invalid paper position restore payload")
+        self._positions[position.position_id] = position
+        self.ledger.open_position(
+            coin=position.coin,
+            side=position.side,
+            notional_usdc=position.notional_usdt,
+            quantity=position.quantity,
+            fill_price=position.entry_price,
+            timestamp_ms=position.opened_at_ms,
+            fee_bps=0.0,
+            leverage_effective=max(1.0, position.leverage_effective),
+            leg_notional_usd=position.leg_notional_usdt or (position.notional_usdt,),
+            leg_direction=((1 if position.side == "LONG" else -1),),
+            position_id=position.position_id,
+            refs={
+                "restore": "RECORDED_PAPER_POSITION",
+                "no_new_fill": True,
+                **dict(refs or {}),
+            },
+        )
+
     def apply_delta(
         self,
         delta: LeaderDelta,

@@ -13,14 +13,23 @@ def _setup(root):
     (root / "config").mkdir(parents=True, exist_ok=True)
     (root / "config" / "frais_venues.json").write_text(json.dumps({"hl_taker_bps": 3.5, "bin_taker_bps": 4.5}))
     (root / "runtime" / "data" / "vaults_scores.json").write_text(json.dumps({
-        "retenus": ["0xV"], "classement": [{"vault": "0xV", "retenu": True, "facteurs": {}}]}))
+        "retenus": ["0xV"], "classement": [{"vault": "0xV", "retenu": True, "score": 100.0, "facteurs": {}}]}))
     (root / "runtime" / "data" / "copy_prelim_gele_v1.json").write_text(json.dumps(
-        {"table": {"SOL": {"edge_brut_bps": 35.0, "net_bps": 23.0, "horizon_ms": 3_600_000.0,
+        {"table": {"SOL": {"edge_brut_bps": 60.0, "net_bps": 48.0, "horizon_ms": 3_600_000.0,
                            "stop_bps": 35.0, "take_profit_bps": 54.0}}}))
 
 
 def _l2(coin):
-    return {"hl_bid": 149.98, "hl_ask": 150.02, "depth_usd": 5000.0, "age_ms": 50}
+    return {
+        "hl_bid": 149.98,
+        "hl_ask": 150.02,
+        "depth_usd": 5000.0,
+        "age_ms": 50,
+        "bids": [[149.98, 100.0], [149.95, 100.0]],
+        "asks": [[150.02, 100.0], [150.05, 100.0]],
+        "source": "test:recorded-real-l2",
+        "data_origin": "RECORDED_REAL",
+    }
 
 
 def _fill(**kw):
@@ -36,30 +45,23 @@ def test_ouvre_inline_sur_open_add_significatif(tmp_path):
     etat = CO.etat_initial(CO.ALPHA, tmp_path)
     r = CO.traiter_fill(CO.ALPHA, etat, _fill(), tmp_path, now_ms=now, lecteur_l2=_l2, token=etat["token"])   # 20×150 = 3000$ ≥ 2000
     assert r and r.get("ouverture") and r["ouverture"]["coin"] == "SOL"
-    assert r["ouverture"]["prix_entree"] == 150.02 and r["paire"] == "SOL"                  # ask L2, clé paire = coin (ALPHA)
+    assert r["ouverture"]["prix_entree"] > 150.02 and r["paire"] == "SOL"                   # prix effectif all-in, clé paire = coin
     assert r["latence_ws_open_ms"] is not None                                             # latence MONOTONE locale
     st = CO.statut(CO.ALPHA, tmp_path, now_ms=now)
     assert st["positions_ouvertes"] == 1 and st["cohorte"] == "ALPHA_PAPER" and st["real_execution"] is False
 
 
-def test_raw_probe_ouvre_sans_edge_par_paire(tmp_path):
-    """RAW_PROBE : ouvre sur tout OPEN/ADD candidat liquide SANS edge requis, clé PAR PAIRE vault+coin,
-    mini 10 $ (position exécutable), marquée NON_VALIDEE (sert à MESURER la paire)."""
+def test_raw_probe_sans_edge_reste_shadow_sans_pnl(tmp_path):
+    """RAW_PROBE may observe a pair, but never creates economic PnL without measurable edge."""
     _setup(tmp_path)
     now = 1_000_000_000_500.0
     etat = CO.etat_initial(CO.RAW_PROBE, tmp_path)
-    # DOGE n'est dans AUCUNE table prélim -> ALPHA/PROBE refuseraient. RAW ouvre quand même (liquide).
-    fill = _fill(coin="DOGE", sz=2, px=150.0)                       # 2×150 = 300 ≥ seuil RAW 200
+    fill = _fill(coin="DOGE", sz=2, px=150.0)
     r = CO.traiter_fill(CO.RAW_PROBE, etat, fill, tmp_path, now_ms=now, lecteur_l2=_l2, token=etat["token"])
-    assert r and r.get("ouverture")
-    pos = r["ouverture"]
-    assert pos["paire"] == "0xV|DOGE" and pos["notional_usd"] == 10.0                       # clé paire + mini 10 $
-    assert pos["meta"]["statut"] == "NON_VALIDEE" and pos["edge_estime_bps"] is None         # sans edge, non validée
-    assert r["latence_ws_open_ms"] is not None
-    # max 2 positions : une 2e paire ouvre, une 3e est refusée
-    CO.traiter_fill(CO.RAW_PROBE, etat, _fill(coin="WLD", sz=2, px=150.0, hash="w"), tmp_path, now_ms=now, lecteur_l2=_l2, token=etat["token"])
-    r3 = CO.traiter_fill(CO.RAW_PROBE, etat, _fill(coin="LDO", sz=2, px=150.0, hash="l"), tmp_path, now_ms=now, lecteur_l2=_l2, token=etat["token"])
-    assert r3 and r3.get("refus") == "LIMITE_POSITIONS"
+    assert r and r.get("refus") == "EDGE_UNMEASURABLE"
+    assert "EDGE_UNMEASURABLE" in r["raisons"]
+    assert etat["store"]["ouvertes"] == {}
+    assert etat["store"]["realise_total_usd"] == 0.0
 
 
 def test_gate_age_refuse_fill_catchup(tmp_path):
@@ -78,7 +80,7 @@ def test_declencheur_relatif_au_vault(tmp_path):
     _setup(tmp_path)
     (tmp_path / "runtime" / "data" / "vaults_scores.json").write_text(json.dumps({
         "retenus": ["0xV"], "classement": [{"vault": "0xV", "retenu": True,
-                                            "facteurs": {"tvl_usd": 1_000_000.0}}]}))
+                                            "score": 100.0, "facteurs": {"tvl_usd": 1_000_000.0}}]}))
     now = 1_000_000_000_500.0
     etat = CO.etat_initial(CO.RAW_PROBE, tmp_path)
     sous = CO.traiter_fill(CO.RAW_PROBE, etat, _fill(coin="DOGE", px=1.0, sz=1999.0), tmp_path,
@@ -86,7 +88,8 @@ def test_declencheur_relatif_au_vault(tmp_path):
     assert sous is None                                             # 1 999 $ < 0.2 % de 1 M$ -> pas significatif
     sur = CO.traiter_fill(CO.RAW_PROBE, etat, _fill(coin="PEPE", px=1.0, sz=2001.0, hash="h2"), tmp_path,
                           now_ms=now, lecteur_l2=_l2, token=etat["token"])
-    assert sur and sur.get("ouverture")                            # 2 001 $ > seuil relatif -> ouvre
+    assert sur and sur.get("refus") == "EDGE_UNMEASURABLE"
+    assert etat["store"]["ouvertes"] == {}
 
 
 def test_declencheur_plafonne_ne_bloque_pas_les_grands_vaults(tmp_path):
@@ -95,31 +98,31 @@ def test_declencheur_plafonne_ne_bloque_pas_les_grands_vaults(tmp_path):
     _setup(tmp_path)
     (tmp_path / "runtime" / "data" / "vaults_scores.json").write_text(json.dumps({
         "retenus": ["0xV"], "classement": [{"vault": "0xV", "retenu": True,
-                                            "facteurs": {"tvl_usd": 100_000_000.0}}]}))
+                                            "score": 100.0, "facteurs": {"tvl_usd": 100_000_000.0}}]}))
     now = 1_000_000_000_500.0
     etat = CO.etat_initial(CO.RAW_PROBE, tmp_path)
     r = CO.traiter_fill(CO.RAW_PROBE, etat, _fill(coin="DOGE", px=1.0, sz=2001.0), tmp_path,
                         now_ms=now, lecteur_l2=_l2, token=etat["token"])
-    assert r and r.get("ouverture")                                # plafonné à 2 000 $ -> ouvre malgré TVL géant
+    assert r and r.get("refus") == "EDGE_UNMEASURABLE"
+    assert etat["store"]["ouvertes"] == {}
 
 
-def test_close_retire_la_paire_et_desabonne(tmp_path):
-    """Clôture leader d'une position RAW : la PAIRE vault|coin est retirée (fix pop par paire) et le coin
-    sort de raw_coins_actifs.json (désabonnement à la clôture)."""
+def test_close_canonique_retire_position_et_desabonne(tmp_path):
+    """A canonical ALPHA close removes the position and its active L2 subscription."""
     _setup(tmp_path)
     now = 1_000_000_000_500.0
-    etat = CO.etat_initial(CO.RAW_PROBE, tmp_path)
-    o = CO.traiter_fill(CO.RAW_PROBE, etat, _fill(coin="DOGE", sz=2, px=150.0), tmp_path,
+    etat = CO.etat_initial(CO.ALPHA, tmp_path)
+    o = CO.traiter_fill(CO.ALPHA, etat, _fill(coin="SOL", sz=20, px=150.0), tmp_path,
                         now_ms=now, lecteur_l2=_l2, token=etat["token"])
-    assert o and o.get("ouverture") and "0xV|DOGE" in etat["store"]["ouvertes"]
+    assert o and o.get("ouverture") and "SOL" in etat["store"]["ouvertes"]
     actifs = json.loads((tmp_path / "runtime" / "data" / "raw_coins_actifs.json").read_text())["coins"]
-    assert "DOGE" in actifs                                         # abonné à l'ouverture
-    c = CO.traiter_fill(CO.RAW_PROBE, etat, _fill(coin="DOGE", sz=2, px=150.0, signe=-1, dir="Close Long",
-                        start_position=2.0, hash="c1"), tmp_path, now_ms=now + 1000, lecteur_l2=_l2, token=etat["token"])
+    assert "SOL" in actifs
+    c = CO.traiter_fill(CO.ALPHA, etat, _fill(coin="SOL", sz=20, px=150.0, signe=-1, dir="Close Long",
+                        start_position=20.0, hash="c1"), tmp_path, now_ms=now + 1000, lecteur_l2=_l2, token=etat["token"])
     assert c and c.get("fermeture")
-    assert "0xV|DOGE" not in etat["store"]["ouvertes"]              # paire retirée (pop par paire, pas par coin)
+    assert "SOL" not in etat["store"]["ouvertes"]
     actifs2 = json.loads((tmp_path / "runtime" / "data" / "raw_coins_actifs.json").read_text())["coins"]
-    assert "DOGE" not in actifs2                                    # désabonné à la clôture
+    assert "SOL" not in actifs2
 
 
 def test_agrege_plusieurs_petits_open(tmp_path):
@@ -277,29 +280,29 @@ def test_entree_trop_tardive_refusee(tmp_path, monkeypatch):
     assert r and r.get("refus") == "ENTREE_TROP_TARDIVE"          # 300 ms > plafond 100 ms
 
 
-def test_trigger_version_et_placebo_au_cycle(tmp_path):
+def test_trigger_version_et_placebo_au_cycle_canonique(tmp_path):
     """OPEN+CLOSE estampillés trigger_version ; âge total journalisé ; placebo marché (BTC) -> alpha calculé."""
     _setup(tmp_path)
     now1 = 1_000_000_000_500.0
     (tmp_path / "runtime" / "data" / "hl_allmids.json").write_text(json.dumps(
-        {"ts_ms": now1, "mids": {"BTC": 60000.0, "DOGE": 150.0}}))
-    etat = CO.etat_initial(CO.RAW_PROBE, tmp_path, git_commit="deadbeef1234", transport_version="tport_test")
-    o = CO.traiter_fill(CO.RAW_PROBE, etat, _fill(coin="DOGE", sz=3, px=150.0), tmp_path,
+        {"ts_ms": now1, "mids": {"BTC": 60000.0, "SOL": 150.0}}))
+    etat = CO.etat_initial(CO.ALPHA, tmp_path, git_commit="deadbeef1234", transport_version="tport_test")
+    o = CO.traiter_fill(CO.ALPHA, etat, _fill(coin="SOL", sz=20, px=150.0), tmp_path,
                         now_ms=now1, lecteur_l2=_l2, token=etat["token"])
     assert o and o.get("ouverture") and o["age_at_paper_fill_ms"] is not None
     cyc = o["ouverture"]["meta"]["cycle_id"]
     ch = o["ouverture"]["meta"]["config_hash"]
     assert o["ouverture"]["meta"]["trigger_version"] == "v1" and cyc.startswith("cyc-") and ch.startswith("cfg-")
     assert o["ouverture"]["meta"]["placebo"]["mid_marche_open"] == 60000.0
-    led = [json.loads(x) for x in (tmp_path / "runtime" / "data" / "raw_probe_ledger.jsonl").read_text().splitlines()]
+    led = [json.loads(x) for x in (tmp_path / "runtime" / "data" / "exploratory_paper_ledger.jsonl").read_text().splitlines()]
     opn = [e for e in led if e["evt"] == "OPEN"][0]
     assert opn["trigger_version"] == "v1" and opn["age_at_paper_fill_ms"] is not None and opn["cycle_id"] == cyc
     # clôture au HORIZON sous un AUTRE run (redémarrage) : BTC baisse 1 % -> ret_marche/placebo/alpha calculés
     now2 = now1 + 3_600_001
     (tmp_path / "runtime" / "data" / "hl_allmids.json").write_text(json.dumps(
-        {"ts_ms": now2, "mids": {"BTC": 59400.0, "DOGE": 150.0}}))
-    assert CO.gerer_exits(CO.RAW_PROBE, tmp_path, now_ms=now2, lecteur_l2=_l2, close_run_id="run-CLOSE")
-    led2 = [json.loads(x) for x in (tmp_path / "runtime" / "data" / "raw_probe_ledger.jsonl").read_text().splitlines()]
+        {"ts_ms": now2, "mids": {"BTC": 59400.0, "SOL": 150.0}}))
+    assert CO.gerer_exits(CO.ALPHA, tmp_path, now_ms=now2, lecteur_l2=_l2, close_run_id="run-CLOSE")
+    led2 = [json.loads(x) for x in (tmp_path / "runtime" / "data" / "exploratory_paper_ledger.jsonl").read_text().splitlines()]
     clo = [e for e in led2 if e["evt"] == "CLOSE"][0]
     assert clo["trigger_version"] == "v1" and clo["ret_marche_bps"] is not None
     assert clo["placebo_marche_bps"] is not None and clo["alpha_vs_marche_bps"] is not None

@@ -19,11 +19,29 @@ import json
 import time
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
 
-from hl_observer.experimental import moteur_paper as MP
-from hl_observer.experimental.signaux import (_l2_pour_coin, _snapshots_bbo, _carnet_l2_frais, _allmids,
-                                              _vaults_retenus, _filer_coins_au_carnet)
+from hl_observer.experimental.cohort_paper_bridge import (
+    ECONOMIC_SOURCE,
+    available_margin_usdt,
+    canonical_execution_truth,
+)
+from hl_observer.experimental.cohort_paper_bridge import (
+    apply_entry as _apply_canonical_entry,
+)
+from hl_observer.experimental.cohort_paper_bridge import (
+    apply_exit as _apply_canonical_exit,
+)
+from hl_observer.experimental.cohort_paper_bridge import (
+    build_engine as _build_canonical_engine,
+)
+from hl_observer.experimental.signaux import (
+    _allmids,
+    _carnet_l2_frais,
+    _filer_coins_au_carnet,
+    _l2_pour_coin,
+    _snapshots_bbo,
+    _vaults_retenus,
+)
 
 FENETRE_AGG_MS = 5_000.0          # on agrège les OPEN/ADD d'un (vault,coin) sur 5 s
 NOTIONAL_MIN_USD = 8.0
@@ -77,9 +95,14 @@ def _cle(coh: Cohorte, vault: str, coin: str) -> str:
 
 def charger_store(coh: Cohorte, root: Path) -> dict:
     try:
-        return json.loads(_p(coh, root, "positions.json").read_text(encoding="utf-8"))
+        store = json.loads(_p(coh, root, "positions.json").read_text(encoding="utf-8"))
     except (OSError, ValueError):
-        return {"cash": coh.budget_usd, "ouvertes": {}, "realise_total_usd": 0.0}
+        store = {"cash": coh.budget_usd, "ouvertes": {}, "realise_total_usd": 0.0}
+    store.setdefault("ouvertes", {})
+    store.setdefault("realise_total_usd", 0.0)
+    store["economic_source"] = ECONOMIC_SOURCE
+    store["cash"] = available_margin_usdt(coh, store)
+    return store
 
 
 def _sauver(coh: Cohorte, root: Path, store: dict) -> None:
@@ -153,10 +176,22 @@ def etat_initial(coh: Cohorte, root: Path, *, run_id: str | None = None, token: 
                  git_commit: str = "", transport_version: str = "") -> dict:
     import secrets
     import uuid
-    return {"store": charger_store(coh, root), "agg": {}, "vus": set(),
+    return {"store": charger_store(coh, root), "agg": {}, "vus": set(), "paper_engine": None,
             "run_id": run_id or ("run-" + uuid.uuid4().hex[:12]), "git_commit": git_commit,
             "transport_version": transport_version,        # transport WS (hors config_hash) : compare latence avant/après
             "token": token or secrets.token_hex(16)}      # provenance HORS PAYLOAD (en mémoire)
+
+
+def _paper_engine(coh: Cohorte, etat: dict, *, taker_fee_bps: float):
+    engine = etat.get("paper_engine")
+    if engine is None:
+        engine = _build_canonical_engine(
+            coh,
+            etat["store"],
+            taker_fee_bps=taker_fee_bps,
+        )
+        etat["paper_engine"] = engine
+    return engine
 
 
 def _expectancy(coh: Cohorte, root: Path, *, run_id: str | None = None, trigger_version: str | None = None,
@@ -332,9 +367,10 @@ def _maj_coins_prewarm(root: Path, coin: str, *, now_ms: float) -> None:
         pass
 
 
-def _ouvrir(coh: Cohorte, store: dict, root: Path, *, cle, coin, sens, notional, prix, cfg, cout_ar,
-            spread, slippage, fhl, vault, now_ms, fill_ts, lat_mono, run_id="", src_l2="", marque="",
-            trigger_version="", placebo=None, config_hash="", git_commit="", transport_version="") -> dict:
+def _ouvrir_legacy_disabled(coh: Cohorte, store: dict, root: Path, *, cle, coin, sens, notional, prix, cfg, cout_ar,
+                            spread, slippage, fhl, vault, now_ms, fill_ts, lat_mono, run_id="", src_l2="", marque="",
+                            trigger_version="", placebo=None, config_hash="", git_commit="", transport_version="") -> dict:
+    raise RuntimeError("legacy cohort execution is disabled; use PaperEngine")
     import uuid
     eb = cfg.get("edge_brut_bps")
     edge_net = (float(eb) - cout_ar) if eb is not None else None    # RAW : pas d'edge (NON_VALIDEE)
@@ -371,9 +407,16 @@ def _ouvrir(coh: Cohorte, store: dict, root: Path, *, cle, coin, sens, notional,
     return pos
 
 
-def _sortir(coh: Cohorte, pos: dict, store: dict, root: Path, *, prix_sortie, cout_sortie_bps, raison,
-            now_ms, mae_bps=None, mfe_bps=None, close_run_id=None) -> dict:
-    realized = round(MP.pnl_courant_usd(pos, mark=prix_sortie, now_ms=now_ms) - cout_sortie_bps / 1e4 * pos["notional_usd"], 6)
+def _legacy_pnl_forbidden(*_args, **_kwargs) -> float:
+    """Prevent the disabled cohort path from becoming an economic source again."""
+
+    raise RuntimeError("legacy cohort PnL is disabled; use PaperEngine/PaperLedger")
+
+
+def _sortir_legacy_disabled(coh: Cohorte, pos: dict, store: dict, root: Path, *, prix_sortie, cout_sortie_bps, raison,
+                            now_ms, mae_bps=None, mfe_bps=None, close_run_id=None) -> dict:
+    raise RuntimeError("legacy cohort execution is disabled; use PaperEngine")
+    realized = round(_legacy_pnl_forbidden(pos, mark=prix_sortie, now_ms=now_ms) - cout_sortie_bps / 1e4 * pos["notional_usd"], 6)
     meta = pos.get("meta", {})
     pl = meta.get("placebo") or {}                                   # PLACEBO même coin/même instant : alpha vs marché
     mc0, mm0 = float(pl.get("mid_coin_open") or 0.0), float(pl.get("mid_marche_open") or 0.0)
@@ -407,13 +450,14 @@ def _sortir(coh: Cohorte, pos: dict, store: dict, root: Path, *, prix_sortie, co
     return {"coin": pos["coin"], "realized_usd": realized, "raison": raison}
 
 
-def _reduire(coh: Cohorte, pos: dict, store: dict, root: Path, *, fraction: float, prix: float,
-             cout_sortie_bps: float, now_ms: float) -> dict:
+def _reduire_legacy_disabled(coh: Cohorte, pos: dict, store: dict, root: Path, *, fraction: float, prix: float,
+                             cout_sortie_bps: float, now_ms: float) -> dict:
+    raise RuntimeError("legacy cohort execution is disabled; use PaperEngine")
     """REDUCE : réduit la copie de `fraction` (0<f<1) proportionnellement au leader — réalise le PnL sur
     la part fermée, garde le reste ouvert."""
     frac = max(0.0, min(1.0, fraction))
     part = round(pos["notional_usd"] * frac, 2)
-    realized = round(MP.pnl_courant_usd(pos, mark=prix, now_ms=now_ms) * frac - cout_sortie_bps / 1e4 * part, 6)
+    realized = round(_legacy_pnl_forbidden(pos, mark=prix, now_ms=now_ms) * frac - cout_sortie_bps / 1e4 * part, 6)
     pos["notional_usd"] = round(pos["notional_usd"] - part, 2)
     store["cash"] = round(store["cash"] + part + realized, 6)
     store["realise_total_usd"] = round(store.get("realise_total_usd", 0.0) + realized, 6)
@@ -423,6 +467,463 @@ def _reduire(coh: Cohorte, pos: dict, store: dict, root: Path, *, fraction: floa
                         "vault": pos.get("meta", {}).get("vault")})
     _sauver(coh, root, store)
     return {"coin": pos["coin"], "realized_usd": realized, "raison": "LEADER_A_REDUIT", "fraction": round(frac, 3)}
+
+
+def _canonical_refusal(
+    coh: Cohorte,
+    store: dict,
+    root: Path,
+    *,
+    coin: str,
+    result,
+    now_ms: float,
+    run_id: str = "",
+) -> dict:
+    reasons = tuple(dict.fromkeys(str(reason) for reason in result.reason_codes))
+    refusal = {
+        "refus": reasons[0] if reasons else "PAPER_ENGINE_REJECTED",
+        "raisons": list(reasons),
+        "coin": coin,
+        "evidence_hash": result.evidence_hash,
+        "economic_source": ECONOMIC_SOURCE,
+    }
+    if result.trade is not None:
+        refusal["paper_trade_id"] = result.trade.trade_id
+    store["last_no_trade"] = refusal
+    store["canonical_ledger_snapshot"] = result.ledger_snapshot
+    _ledger(
+        coh,
+        root,
+        {
+            "evt": "NO_TRADE",
+            "ts_ms": now_ms,
+            "coin": coin,
+            "run_id": run_id,
+            "source": SOURCE_LIVE,
+            "economic_source": ECONOMIC_SOURCE,
+            "reason_codes": list(reasons),
+            "evidence_hash": result.evidence_hash,
+            "paper_trade_id": (
+                result.trade.trade_id if result.trade is not None else None
+            ),
+        },
+    )
+    _sauver(coh, root, store)
+    return refusal
+
+
+def _ouvrir(
+    coh: Cohorte,
+    store: dict,
+    root: Path,
+    *,
+    cle,
+    coin,
+    sens,
+    notional,
+    prix,
+    cfg,
+    cout_ar,
+    spread,
+    slippage,
+    fhl,
+    vault,
+    now_ms,
+    fill_ts,
+    lat_mono,
+    engine,
+    execution_truth,
+    evidence_ref,
+    run_id="",
+    src_l2="",
+    marque="",
+    trigger_version="",
+    placebo=None,
+    config_hash="",
+    git_commit="",
+    transport_version="",
+) -> dict:
+    del prix
+    import uuid
+
+    from hl_observer.experimental.selecteur_audit import snapshot_selecteur
+
+    edge_brut = cfg.get("edge_brut_bps")
+    edge_net = (
+        None if edge_brut is None else float(edge_brut) - float(cout_ar)
+    )
+    selector = snapshot_selecteur(root, vault)
+    wallet_score = selector.get("score_at_open")
+    signal_score = max(
+        0.0,
+        min(
+            100.0,
+            100.0
+            * (
+                1.0
+                - max(0.0, float(now_ms) - float(fill_ts))
+                / max(1.0, AGE_MAX_PAPER_FILL_MS)
+            ),
+        ),
+    )
+    result = _apply_canonical_entry(
+        engine,
+        wallet=str(vault),
+        coin=str(coin),
+        side_sign=int(sens),
+        leader_size=max(
+            1e-12,
+            float(notional) / max(execution_truth.mid_price, 1e-12),
+        ),
+        observed_at_ms=int(now_ms),
+        leader_event_time_ms=int(fill_ts),
+        evidence_ref=str(evidence_ref),
+        edge_remaining_bps=edge_net,
+        wallet_score=(
+            None if wallet_score is None else float(wallet_score)
+        ),
+        signal_score=signal_score,
+        estimated_slippage_bps=float(slippage),
+        target_notional_usdt=float(notional),
+        execution_truth=execution_truth,
+        decision_context={
+            "cohort": coh.nom,
+            "run_id": run_id,
+            "config_hash": config_hash,
+            "trigger_version": trigger_version,
+        },
+    )
+    if not result.accepted or result.position is None or result.trade is None:
+        return _canonical_refusal(
+            coh,
+            store,
+            root,
+            coin=str(coin),
+            result=result,
+            now_ms=now_ms,
+            run_id=run_id,
+        )
+
+    position = result.position
+    trade = result.trade
+    cycle_id = "cyc-" + uuid.uuid4().hex[:12]
+    projection = {
+        "coin": coin,
+        "paire": cle,
+        "moteur": "copy_" + coh.nom,
+        "sens": sens,
+        "type_pnl": "directional",
+        "notional_usd": round(position.notional_usdt, 8),
+        "quantity": round(position.quantity, 12),
+        "margin_locked_usd": round(position.margin_locked_usdt, 8),
+        "prix_entree": trade.fill_price,
+        "ts_ouverture_ms": now_ms,
+        "cout_entree_bps": round(trade.fees_and_cost_bps, 8),
+        "edge_estime_bps": (
+            round(edge_net, 8) if edge_net is not None else None
+        ),
+        "spread_bps": round(spread, 8),
+        "frais_bps": fhl,
+        "slippage_bps": round(slippage, 8),
+        "hold_h": float(cfg.get("horizon_ms") or 0.0) / 3_600_000.0,
+        "meta": {
+            "vault": vault,
+            "coin": coin,
+            "stop_bps": cfg.get("stop_bps"),
+            "take_profit_bps": cfg.get("take_profit_bps"),
+            "latence_ws_open_ms": lat_mono.get("ws_open_ms"),
+            "latences_mono": lat_mono,
+            "fill_leader_ts_ms": int(fill_ts),
+            "run_id": run_id,
+            "source": SOURCE_LIVE,
+            "src_l2": src_l2,
+            "statut": marque or "VALIDEE",
+            "trigger_version": trigger_version,
+            "placebo": placebo,
+            "config_hash": config_hash,
+            "cycle_id": cycle_id,
+            "open_run_id": run_id,
+            "notional_open_usd": round(position.notional_usdt, 8),
+            "git_commit": git_commit,
+            "transport_version": transport_version,
+            "selecteur": selector,
+            "paper_position_id": position.position_id,
+            "paper_trade_id": trade.trade_id,
+            "source_delta_id": position.source_delta_id,
+            "canonical_evidence_hash": result.evidence_hash,
+            "execution_snapshot_id": trade.execution_snapshot_id,
+            "economic_source": ECONOMIC_SOURCE,
+        },
+    }
+    store["ouvertes"][cle] = projection
+    store["cash"] = available_margin_usdt(coh, store)
+    store["canonical_ledger_snapshot"] = result.ledger_snapshot
+    _ledger(
+        coh,
+        root,
+        {
+            "evt": "OPEN",
+            "ts_ms": now_ms,
+            "paire": cle,
+            "coin": coin,
+            "sens": sens,
+            "notional_usd": projection["notional_usd"],
+            "quantity": projection["quantity"],
+            "prix_entree": trade.fill_price,
+            "edge_net_bps": projection["edge_estime_bps"],
+            "latences_mono": lat_mono,
+            "vault": vault,
+            "run_id": run_id,
+            "source": SOURCE_LIVE,
+            "src_l2": src_l2,
+            "statut": marque or "VALIDEE",
+            "trigger_version": trigger_version,
+            "age_at_paper_fill_ms": lat_mono.get("age_at_paper_fill_ms"),
+            "cycle_id": cycle_id,
+            "open_run_id": run_id,
+            "config_hash": config_hash,
+            "git_commit": git_commit,
+            "transport_version": transport_version,
+            "selecteur": selector,
+            "vault_role_at_open": selector.get("vault_role_at_open"),
+            "roster_hash": selector.get("roster_hash"),
+            "score_model_version": selector.get("score_model_version"),
+            "score_snapshot_ts": selector.get("score_snapshot_ts"),
+            "paper_position_id": position.position_id,
+            "paper_trade_id": trade.trade_id,
+            "source_delta_id": position.source_delta_id,
+            "evidence_hash": result.evidence_hash,
+            "execution_snapshot_id": trade.execution_snapshot_id,
+            "economic_source": ECONOMIC_SOURCE,
+            "motif": "canonical PaperEngine OPEN with executable L2",
+        },
+    )
+    _sauver(coh, root, store)
+    _maj_coins_actifs(root, coin, ajouter=True, now_ms=now_ms)
+    return projection
+
+
+def _executer_sortie(
+    coh: Cohorte,
+    pos: dict,
+    store: dict,
+    root: Path,
+    *,
+    engine,
+    execution_truth,
+    fraction: float,
+    raison: str,
+    now_ms: float,
+    evidence_ref: str,
+    leader_event_time_ms: float | None = None,
+    close_run_id=None,
+    mae_bps=None,
+    mfe_bps=None,
+) -> dict:
+    result = _apply_canonical_exit(
+        engine,
+        position_payload=pos,
+        fraction=fraction,
+        observed_at_ms=int(now_ms),
+        leader_event_time_ms=int(
+            leader_event_time_ms
+            if leader_event_time_ms is not None
+            else now_ms
+        ),
+        evidence_ref=str(evidence_ref),
+        execution_truth=execution_truth,
+        reason=raison,
+        decision_context={
+            "cohort": coh.nom,
+            "close_run_id": close_run_id,
+        },
+    )
+    if not result.accepted or result.trade is None:
+        return _canonical_refusal(
+            coh,
+            store,
+            root,
+            coin=str(pos.get("coin") or ""),
+            result=result,
+            now_ms=now_ms,
+            run_id=str(close_run_id or ""),
+        )
+
+    trade = result.trade
+    meta = dict(pos.get("meta") or {})
+    key = str(pos.get("paire") or pos.get("coin"))
+    notional_before = float(pos.get("notional_usd") or 0.0)
+    closed_fraction = min(
+        1.0,
+        trade.quantity / max(float(pos.get("quantity") or 0.0), 1e-12),
+    )
+    if result.position is None:
+        store["ouvertes"].pop(key, None)
+    else:
+        pos["quantity"] = round(result.position.quantity, 12)
+        pos["notional_usd"] = round(result.position.notional_usdt, 8)
+        pos["margin_locked_usd"] = round(
+            result.position.margin_locked_usdt,
+            8,
+        )
+        store["ouvertes"][key] = pos
+    store["realise_total_usd"] = round(
+        float(store.get("realise_total_usd") or 0.0)
+        + float(trade.realized_pnl_usdt),
+        8,
+    )
+    store["cash"] = available_margin_usdt(coh, store)
+    store["canonical_ledger_snapshot"] = result.ledger_snapshot
+
+    placebo = meta.get("placebo") or {}
+    coin_open = float(placebo.get("mid_coin_open") or 0.0)
+    market_open = float(placebo.get("mid_marche_open") or 0.0)
+    market_now = float(_allmids(root, now_ms=now_ms).get("BTC") or 0.0)
+    exit_price = float(trade.fill_price or 0.0)
+    ret_coin_bps = (
+        round((exit_price / coin_open - 1.0) * 1e4, 3)
+        if coin_open > 0 and exit_price > 0
+        else None
+    )
+    ret_market_bps = (
+        round((market_now / market_open - 1.0) * 1e4, 3)
+        if market_open > 0 and market_now > 0
+        else None
+    )
+    placebo_market_bps = (
+        round(int(pos.get("sens") or 0) * ret_market_bps, 3)
+        if ret_market_bps is not None
+        else None
+    )
+    alpha_bps = (
+        round(
+            int(pos.get("sens") or 0) * ret_coin_bps
+            - placebo_market_bps,
+            3,
+        )
+        if ret_coin_bps is not None and placebo_market_bps is not None
+        else None
+    )
+    event_name = "CLOSE" if result.position is None else "REDUCE"
+    _ledger(
+        coh,
+        root,
+        {
+            "evt": event_name,
+            "ts_ms": now_ms,
+            "coin": pos["coin"],
+            "sens": pos["sens"],
+            "notional_usd": notional_before,
+            "closed_fraction": round(closed_fraction, 8),
+            "part_notional_usd": round(trade.notional_usdt, 8),
+            "prix_entree": pos["prix_entree"],
+            "prix_sortie": trade.fill_price,
+            "realized_usd": trade.realized_pnl_usdt,
+            "raison": raison,
+            "mae_bps": mae_bps,
+            "mfe_bps": mfe_bps,
+            "run_id": meta.get("run_id"),
+            "trigger_version": meta.get("trigger_version"),
+            "source": SOURCE_LIVE,
+            "vault": meta.get("vault"),
+            "cycle_id": meta.get("cycle_id"),
+            "open_run_id": meta.get("open_run_id") or meta.get("run_id"),
+            "close_run_id": close_run_id,
+            "config_hash": meta.get("config_hash"),
+            "git_commit": meta.get("git_commit"),
+            "transport_version": meta.get("transport_version"),
+            "selecteur": meta.get("selecteur"),
+            "ret_coin_bps": ret_coin_bps,
+            "ret_marche_bps": ret_market_bps,
+            "placebo_marche_bps": placebo_market_bps,
+            "alpha_vs_marche_bps": alpha_bps,
+            "paper_position_id": meta.get("paper_position_id"),
+            "paper_trade_id": trade.trade_id,
+            "source_delta_id": trade.source_delta_id,
+            "evidence_hash": result.evidence_hash,
+            "execution_snapshot_id": trade.execution_snapshot_id,
+            "economic_source": ECONOMIC_SOURCE,
+        },
+    )
+    _sauver(coh, root, store)
+    if not any(
+        opened.get("coin") == pos["coin"]
+        for opened in store["ouvertes"].values()
+    ):
+        _maj_coins_actifs(root, pos["coin"], ajouter=False, now_ms=now_ms)
+    return {
+        "coin": pos["coin"],
+        "realized_usd": trade.realized_pnl_usdt,
+        "raison": raison,
+        "fraction": round(closed_fraction, 8),
+        "paper_trade_id": trade.trade_id,
+        "evidence_hash": result.evidence_hash,
+        "economic_source": ECONOMIC_SOURCE,
+    }
+
+
+def _sortir(
+    coh: Cohorte,
+    pos: dict,
+    store: dict,
+    root: Path,
+    *,
+    engine,
+    execution_truth,
+    raison,
+    now_ms,
+    evidence_ref,
+    leader_event_time_ms=None,
+    mae_bps=None,
+    mfe_bps=None,
+    close_run_id=None,
+) -> dict:
+    return _executer_sortie(
+        coh,
+        pos,
+        store,
+        root,
+        engine=engine,
+        execution_truth=execution_truth,
+        fraction=1.0,
+        raison=raison,
+        now_ms=now_ms,
+        evidence_ref=evidence_ref,
+        leader_event_time_ms=leader_event_time_ms,
+        mae_bps=mae_bps,
+        mfe_bps=mfe_bps,
+        close_run_id=close_run_id,
+    )
+
+
+def _reduire(
+    coh: Cohorte,
+    pos: dict,
+    store: dict,
+    root: Path,
+    *,
+    engine,
+    execution_truth,
+    fraction: float,
+    now_ms: float,
+    evidence_ref: str,
+    leader_event_time_ms: float | None = None,
+    close_run_id=None,
+) -> dict:
+    return _executer_sortie(
+        coh,
+        pos,
+        store,
+        root,
+        engine=engine,
+        execution_truth=execution_truth,
+        fraction=fraction,
+        raison="LEADER_A_REDUIT",
+        now_ms=now_ms,
+        evidence_ref=evidence_ref,
+        leader_event_time_ms=leader_event_time_ms,
+        close_run_id=close_run_id,
+    )
 
 
 def traiter_fill(coh: Cohorte, etat: dict, fill: dict, root: Path, *, now_ms: float | None = None,
@@ -456,28 +957,92 @@ def traiter_fill(coh: Cohorte, etat: dict, fill: dict, root: Path, *, now_ms: fl
         pos = store["ouvertes"].get(_cle(coh, vault, coin))
         if not (pos and pos.get("meta", {}).get("vault") == vault):
             return None
-        mark = _mark(coin, root, now, lecteur_l2) or pos["prix_entree"]
-        cout = float(pos.get("spread_bps") or 0.0) / 2.0 + float(pos.get("frais_bps") or 0.0) + float(pos.get("slippage_bps") or 0.0)
+        l2 = _l2_pour_coin(
+            coin,
+            lecteur_l2=lecteur_l2,
+            bbo=_snapshots_bbo(root),
+            carnet=_carnet_l2_frais(root, now_ms=now),
+            now_ms=now,
+            root=root,
+        )
+        execution_truth = canonical_execution_truth(
+            coin,
+            l2,
+            now_ms=int(now),
+        )
+        if execution_truth is None:
+            return {
+                "refus": "NO_LIVE_EXECUTABLE_BOOK",
+                "coin": coin,
+                "action": "CLOSE",
+            }
+        from hl_observer.experimental.carry_deux_jambes import frais_venues
+
+        engine = _paper_engine(
+            coh,
+            etat,
+            taker_fee_bps=frais_venues(root)[0],
+        )
+        evidence_ref = str(
+            fill.get("hash")
+            or fill.get("tid")
+            or fill.get("oid")
+            or fill.get("ts_ms")
+            or f"{vault}:{coin}:{int(now)}"
+        )
+        leader_event_time_ms = float(fill.get("ts_ms") or now)
         start = fill.get("start_position")
         sz = abs(float(fill.get("sz") or 0.0))
         if start is None or abs(start) < 1e-9:                     # info absente -> fermeture prudente complète
-            return {"fermeture": _sortir(coh, pos, store, root, prix_sortie=mark, cout_sortie_bps=cout,
-                                         raison="LEADER_A_CLOS", now_ms=now, close_run_id=etat.get("run_id"))}
+            outcome = _sortir(
+                coh, pos, store, root, engine=engine,
+                execution_truth=execution_truth, raison="LEADER_A_CLOS",
+                now_ms=now, evidence_ref=evidence_ref,
+                leader_event_time_ms=leader_event_time_ms,
+                close_run_id=etat.get("run_id"),
+            )
+            return outcome if outcome.get("refus") else {"fermeture": outcome}
         pos_after = start + sens * sz
         if abs(pos_after) < 1e-9:                                  # CLOSE : le leader ferme entièrement -> on ferme tout
-            return {"fermeture": _sortir(coh, pos, store, root, prix_sortie=mark, cout_sortie_bps=cout,
-                                         raison="LEADER_A_CLOS", now_ms=now, close_run_id=etat.get("run_id"))}
+            outcome = _sortir(
+                coh, pos, store, root, engine=engine,
+                execution_truth=execution_truth, raison="LEADER_A_CLOS",
+                now_ms=now, evidence_ref=evidence_ref,
+                leader_event_time_ms=leader_event_time_ms,
+                close_run_id=etat.get("run_id"),
+            )
+            return outcome if outcome.get("refus") else {"fermeture": outcome}
         if (start > 0) != (pos_after > 0):                        # FLIP : fermer puis REPASSER l'admission (résidu = nouvel OPEN)
-            ferm = _sortir(coh, pos, store, root, prix_sortie=mark, cout_sortie_bps=cout, raison="LEADER_A_FLIP",
-                           now_ms=now, close_run_id=etat.get("run_id"))
+            ferm = _sortir(
+                coh, pos, store, root, engine=engine,
+                execution_truth=execution_truth, raison="LEADER_A_FLIP",
+                now_ms=now, evidence_ref=evidence_ref,
+                leader_event_time_ms=leader_event_time_ms,
+                close_run_id=etat.get("run_id"),
+            )
+            if ferm.get("refus"):
+                return ferm
             etat["agg"][(vault, coin)] = {"sens": 1 if pos_after > 0 else -1, "notional": abs(pos_after) * float(fill.get("px") or 0.0),
                                           "t0": now, "fill_ts": int(fill.get("ts_ms") or now)}
             return {"fermeture": ferm, "flip": True}
         fraction = min(1.0, sz / abs(start))                      # REDUCE : réduire la copie de la même fraction
         if fraction >= 0.999:
-            return {"fermeture": _sortir(coh, pos, store, root, prix_sortie=mark, cout_sortie_bps=cout,
-                                         raison="LEADER_A_CLOS", now_ms=now, close_run_id=etat.get("run_id"))}
-        return {"reduction": _reduire(coh, pos, store, root, fraction=fraction, prix=mark, cout_sortie_bps=cout, now_ms=now)}
+            outcome = _sortir(
+                coh, pos, store, root, engine=engine,
+                execution_truth=execution_truth, raison="LEADER_A_CLOS",
+                now_ms=now, evidence_ref=evidence_ref,
+                leader_event_time_ms=leader_event_time_ms,
+                close_run_id=etat.get("run_id"),
+            )
+            return outcome if outcome.get("refus") else {"fermeture": outcome}
+        outcome = _reduire(
+            coh, pos, store, root, engine=engine,
+            execution_truth=execution_truth, fraction=fraction,
+            now_ms=now, evidence_ref=evidence_ref,
+            leader_event_time_ms=leader_event_time_ms,
+            close_run_id=etat.get("run_id"),
+        )
+        return outcome if outcome.get("refus") else {"reduction": outcome}
     if "open" not in dir_bas:
         return None
     # GATE D'ÂGE STRICT : un fill de CATCH-UP vieux de plusieurs secondes ne doit JAMAIS ouvrir (on n'agit
@@ -535,6 +1100,13 @@ def traiter_fill(coh: Cohorte, etat: dict, fill: dict, root: Path, *, now_ms: fl
     t_l2 = time.monotonic()                                      # MONOTONE : L2 obtenu
     if not l2:
         return {"refus": "L2_INDISPONIBLE_1S", "coin": coin}
+    execution_truth = canonical_execution_truth(
+        coin,
+        l2,
+        now_ms=int(now),
+    )
+    if execution_truth is None:
+        return {"refus": "NO_LIVE_EXECUTABLE_BOOK", "coin": coin}
     from hl_observer.experimental.carry_deux_jambes import frais_venues
     fhl = frais_venues(root)[0]
     hl_bid, hl_ask = l2["hl_bid"], l2["hl_ask"]
@@ -543,7 +1115,9 @@ def traiter_fill(coh: Cohorte, etat: dict, fill: dict, root: Path, *, now_ms: fl
     if ref and ref > 0 and abs(mid - ref) / ref > 0.10:           # >10 % d'écart = L2 aberrant/injecté -> refus
         return {"refus": "L2_ABERRANT", "coin": coin, "mid": round(mid, 6), "ref": round(ref, 6)}
     spread = (hl_ask - hl_bid) / mid * 1e4
-    depth = float(l2.get("depth_usd") or 0.0)
+    depth = execution_truth.visible_notional(
+        "BUY" if sens > 0 else "SELL"
+    )
     if not coh.edge_requis and depth < coh.depth_min_usd:         # RAW : coin doit être LIQUIDE
         return {"refus": "COIN_TROP_ILLIQUIDE_RAW", "coin": coin, "depth_usd": round(depth, 1)}
     cible_notional = coh.notional_usd
@@ -573,11 +1147,46 @@ def traiter_fill(coh: Cohorte, etat: dict, fill: dict, root: Path, *, now_ms: fl
                 "age_at_paper_fill_ms": age_paper}                              # DÉLAI TOTAL à l'exécution paper
     _chash = _config_hash(coh, cfg, fhl, root)                   # STAMP : cfg RÉEL (stop/TP/horizon par coin) + frais réels
     placebo = {"mid_coin_open": round(mid, 8), "mid_marche_open": _allmids(root, now_ms=now).get("BTC"), "ts_open": now}
-    pos = _ouvrir(coh, store, root, cle=cle, coin=coin, sens=sens, notional=notional, prix=prix, cfg=cfg,
-                  cout_ar=cout_ar, spread=spread, slippage=slippage, fhl=fhl, vault=vault, now_ms=now,
-                  fill_ts=ag["fill_ts"], lat_mono=lat_mono, run_id=etat.get("run_id", ""), src_l2=l2.get("src", ""),
-                  marque=coh.marque, trigger_version=_trig, placebo=placebo, config_hash=_chash,
-                  git_commit=etat.get("git_commit", ""), transport_version=etat.get("transport_version", ""))
+    engine = _paper_engine(coh, etat, taker_fee_bps=fhl)
+    evidence_ref = str(
+        fill.get("hash")
+        or fill.get("tid")
+        or fill.get("oid")
+        or fill.get("ts_ms")
+        or f"{vault}:{coin}:{int(now)}"
+    )
+    pos = _ouvrir(
+        coh,
+        store,
+        root,
+        cle=cle,
+        coin=coin,
+        sens=sens,
+        notional=notional,
+        prix=prix,
+        cfg=cfg,
+        cout_ar=cout_ar,
+        spread=spread,
+        slippage=slippage,
+        fhl=fhl,
+        vault=vault,
+        now_ms=now,
+        fill_ts=ag["fill_ts"],
+        lat_mono=lat_mono,
+        engine=engine,
+        execution_truth=execution_truth,
+        evidence_ref=evidence_ref,
+        run_id=etat.get("run_id", ""),
+        src_l2=str(l2.get("src") or execution_truth.source),
+        marque=coh.marque,
+        trigger_version=_trig,
+        placebo=placebo,
+        config_hash=_chash,
+        git_commit=etat.get("git_commit", ""),
+        transport_version=etat.get("transport_version", ""),
+    )
+    if pos.get("refus"):
+        return pos
     return {"ouverture": pos, "latence_ws_open_ms": lat_mono["ws_open_ms"], "paire": cle,
             "age_at_paper_fill_ms": age_paper}
 
@@ -606,18 +1215,38 @@ def gerer_exits(coh: Cohorte, root: Path, *, now_ms: float | None = None, lecteu
     MAE/MFE suivis en continu."""
     now = float(now_ms if now_ms is not None else time.time() * 1000)
     store = charger_store(coh, root)
+    from hl_observer.experimental.carry_deux_jambes import frais_venues
+
+    etat = {"store": store, "paper_engine": None}
+    engine = _paper_engine(
+        coh,
+        etat,
+        taker_fee_bps=frais_venues(root)[0],
+    )
     fermetures = []
     for pos in list(store["ouvertes"].values()):
-        mark = _mark(pos["coin"], root, now, lecteur_l2)
-        if mark is None or not pos.get("prix_entree"):
+        l2 = _l2_pour_coin(
+            pos["coin"],
+            lecteur_l2=lecteur_l2,
+            bbo=_snapshots_bbo(root),
+            carnet=_carnet_l2_frais(root, now_ms=now),
+            now_ms=now,
+            root=root,
+        )
+        execution_truth = canonical_execution_truth(
+            pos["coin"],
+            l2,
+            now_ms=int(now),
+        )
+        if execution_truth is None or not pos.get("prix_entree"):
             continue
+        mark = execution_truth.mid_price
         exc = pos["sens"] * (mark - pos["prix_entree"]) / pos["prix_entree"] * 1e4
         pos["mae_bps"] = round(min(pos.get("mae_bps", 0.0), exc), 3)
         pos["mfe_bps"] = round(max(pos.get("mfe_bps", 0.0), exc), 3)
         meta = pos.get("meta", {})
         stop = float(meta.get("stop_bps") or coh.stop_bps_defaut)
         tp = meta.get("take_profit_bps")
-        cout = float(pos.get("spread_bps") or 0.0) / 2.0 + float(pos.get("frais_bps") or 0.0) + float(pos.get("slippage_bps") or 0.0)
         raison = None
         if exc <= -stop:
             raison = "STOP_PERTE"
@@ -626,8 +1255,25 @@ def gerer_exits(coh: Cohorte, root: Path, *, now_ms: float | None = None, lecteu
         elif (now - float(pos.get("ts_ouverture_ms") or now)) >= float(pos.get("hold_h") or 1.0) * 3_600_000.0:
             raison = "HORIZON_ATTEINT"
         if raison:
-            fermetures.append(_sortir(coh, pos, store, root, prix_sortie=mark, cout_sortie_bps=cout, raison=raison,
-                                      now_ms=now, mae_bps=pos.get("mae_bps"), mfe_bps=pos.get("mfe_bps"), close_run_id=close_run_id))
+            outcome = _sortir(
+                coh,
+                pos,
+                store,
+                root,
+                engine=engine,
+                execution_truth=execution_truth,
+                raison=raison,
+                now_ms=now,
+                evidence_ref=(
+                    f"exit:{pos.get('meta', {}).get('paper_position_id')}:"
+                    f"{raison}:{int(now)}"
+                ),
+                leader_event_time_ms=now,
+                mae_bps=pos.get("mae_bps"),
+                mfe_bps=pos.get("mfe_bps"),
+                close_run_id=close_run_id,
+            )
+            fermetures.append(outcome)
     _sauver(coh, root, store)
     return fermetures
 
@@ -636,18 +1282,46 @@ def statut(coh: Cohorte, root: Path, *, now_ms: float | None = None, lecteur_l2=
            run_id: str | None = None, trigger_version: str | None = None, config_hash: str | None = None) -> dict:
     now = float(now_ms if now_ms is not None else time.time() * 1000)
     store = charger_store(coh, root)
-    non_realise = 0.0
+    from hl_observer.experimental.carry_deux_jambes import frais_venues
+
+    engine = _build_canonical_engine(
+        coh,
+        store,
+        taker_fee_bps=frais_venues(root)[0],
+    )
+    marks: dict[str, float] = {}
     for pos in store["ouvertes"].values():
-        mark = _mark(pos["coin"], root, now, lecteur_l2)
-        if mark is not None:
-            non_realise += MP.pnl_courant_usd(pos, mark=mark, now_ms=now)
-    equity = round(store["cash"] + sum(p["notional_usd"] for p in store["ouvertes"].values()) + non_realise, 4)
+        l2 = _l2_pour_coin(
+            pos["coin"],
+            lecteur_l2=lecteur_l2,
+            bbo=_snapshots_bbo(root),
+            carnet=_carnet_l2_frais(root, now_ms=now),
+            now_ms=now,
+            root=root,
+        )
+        execution_truth = canonical_execution_truth(
+            pos["coin"],
+            l2,
+            now_ms=int(now),
+        )
+        if execution_truth is not None:
+            marks[pos["coin"]] = (
+                execution_truth.best_bid
+                if int(pos.get("sens") or 0) > 0
+                else execution_truth.best_ask
+            )
+    equity, non_realise, drawdown = engine.mark_to_market(marks)
+    ledger_snapshot = engine.ledger.snapshot()
+    store["canonical_ledger_snapshot"] = ledger_snapshot
     st = {"cohorte": coh.nom, "real_execution": False, "ts_ms": int(now),
           "active": cohorte_active(coh, root, run_id=run_id, trigger_version=trigger_version, config_hash=config_hash),
           "config": {"run_id": run_id, "trigger_version": trigger_version, "config_hash": config_hash},
           "budget_usd": coh.budget_usd, "cash": store["cash"], "positions_ouvertes": len(store["ouvertes"]),
           "realise_total_usd": store.get("realise_total_usd", 0.0), "non_realise_usd": round(non_realise, 4),
-          "equity_usd": equity, "roi_cumulatif_pct": round((equity - coh.budget_usd) / coh.budget_usd * 100, 3),
+          "equity_usd": round(equity, 4), "drawdown_usd": round(drawdown, 4),
+          "roi_cumulatif_pct": round((equity - coh.budget_usd) / coh.budget_usd * 100, 3),
+          "economic_source": ECONOMIC_SOURCE, "mark_source": "EXECUTABLE_L2_ONLY",
+          "canonical_ledger_snapshot": ledger_snapshot,
           "expectancy": _expectancy(coh, root, run_id=run_id, trigger_version=trigger_version, config_hash=config_hash),
           "positions": [{"coin": p["coin"], "sens": p["sens"], "notional_usd": p["notional_usd"],
                          "prix_entree": p["prix_entree"], "vault": p.get("meta", {}).get("vault"),
