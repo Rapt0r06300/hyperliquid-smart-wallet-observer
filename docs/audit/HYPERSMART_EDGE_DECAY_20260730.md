@@ -39,6 +39,24 @@ n'est pas là.
 - **Le prochain gain de mesure** est la bande BBO causale sur les coins des wallets — c'est elle qui ouvrira
   la moitié gauche de la courbe.
 
+## 3bis. P4 — mesure exécutable : le verdict est un constat de couverture
+
+Le markout exécutable (achat à l'**ask**, sortie au **bid**) est implémenté et testé. Appliqué aux données
+réelles, il ne peut **rien** mesurer :
+
+| Bande | Cadence | Problème |
+|---|---:|---|
+| `bbo_tape` | 2 ms | sa fenêtre **commence après** le dernier fill des wallets → **0 épisode commun** |
+| `bbo_synchro` | 264 ms | ne couvre que les majors → **6 épisodes** seulement, sous le minimum de 20 |
+| `allMids` | 16,7 s | couvre 99 coins, mais c'est un **mid** → screening seulement |
+
+**Aucune mesure promouvable n'est possible sur les données actuelles.** Ce n'est pas un résultat de
+stratégie, c'est un constat de couverture — et l'écrire vaut mieux que de tirer une courbe de 6 épisodes,
+ce qui aurait fabriqué un faux edge.
+
+Ce qu'il faut : une **collecte BBO simultanée** des fills et des carnets, sur les coins que ces wallets
+tradent réellement. Aucun besoin d'AWS — un run ciblé suffit.
+
 ## 4. Ce qui n'a pas été fait dans ce run
 
 P1 (S3 requester-pays / node non-validating), P3 (TWAP réel), P4 (markout L2 exécutable), P5 (réparation
