@@ -31,7 +31,10 @@ def fichiers_de_test(racine: Path | str = RACINE, *, dossier: str = DOSSIER_TEST
     base = Path(racine) / dossier
     if not base.is_dir():
         return []
-    return sorted(p.as_posix() for p in (Path(dossier) / f.name for f in base.glob(motif)))
+    # rglob (récursif) + chemin relatif PRÉSERVÉ : sinon les sous-dossiers (dydx_v4/, ui/) sont
+    # silencieusement exclus de tout shard (jamais lancés en CI), et deux fichiers homonymes de
+    # dossiers différents se masquent (aplatissement historique sur f.name).
+    return sorted((Path(dossier) / f.relative_to(base)).as_posix() for f in base.rglob(motif))
 
 
 def shard(fichiers: Sequence[str], index: int, total: int) -> list[str]:
