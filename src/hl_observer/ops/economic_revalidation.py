@@ -241,8 +241,26 @@ def _lire_jsonl(chemin: Path, *, max_lignes: int = 200_000) -> list[dict[str, An
     return lignes
 
 
+def _capacite_du_lot(racine: Path, episodes: Sequence[Episode], carnet_relpath: str | None) -> dict[str, Any] | None:
+    """Étape 2/3 — joint la profondeur exécutable causale. Absence de carnet ⇒ `None`, jamais une estimation."""
+    if not carnet_relpath:
+        return None
+    chemin = racine / carnet_relpath
+    if not chemin.exists() or not episodes:
+        return None
+    try:
+        from hl_observer.ops.episode_capacity import charger_carnets, enrichir_episodes
+        index = charger_carnets(chemin, coins={e.coin for e in episodes})
+        resume = enrichir_episodes(episodes, index)
+    except Exception:  # noqa: BLE001 — une capacité manquante ne doit jamais casser la revalidation
+        return None
+    resume.pop("details", None)          # le détail par épisode reste disponible via le module dédié
+    return resume
+
+
 def revalider(root: Path | str, *, starting_equity_usd: float = 1000.0,
-              ledgers: Mapping[str, str] | None = None) -> dict[str, Any]:
+              ledgers: Mapping[str, str] | None = None,
+              carnet_relpath: str | None = "runtime/data/carnet_venues.jsonl") -> dict[str, Any]:
     """Revalide chaque ledger connu. Ledger absent ou non appariable ⇒ statut explicite, jamais un zéro."""
     racine = Path(root)
     table = dict(ledgers or LEDGERS_CONNUS)
@@ -263,11 +281,17 @@ def revalider(root: Path | str, *, starting_equity_usd: float = 1000.0,
         lignes = _lire_jsonl(chemin)
         norm = normaliser_episodes(lignes, strategie=strategie)
         eps = norm["episodes"]
+        capacite = _capacite_du_lot(racine, eps, carnet_relpath)
         rapport["strategies"][strategie] = {
             "chemin": relpath, "n_lignes": len(lignes), "n_episodes": norm["n_episodes"],
             "rejets": norm["rejets"],
             "statut": "MESURE" if eps else "AUCUN_EPISODE_MESURABLE",
-            "enveloppes": enveloppes(eps, starting_equity_usd=starting_equity_usd) if eps else None,
+            "capacite": capacite,
+            "enveloppes": enveloppes(
+                eps, starting_equity_usd=starting_equity_usd,
+                capacite_usd=(capacite or {}).get("capacite_mediane_usd"),
+                fill_ratio=(capacite or {}).get("fill_ratio_median"),
+            ) if eps else None,
         }
     return rapport
 

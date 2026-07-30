@@ -1,6 +1,6 @@
 {
   "schema_version": "hypersmart.economic_revalidation.v1",
-  "genere_le": "2026-07-30T09:58:10.473667+00:00",
+  "genere_le": "2026-07-30T10:22:37.149538+00:00",
   "starting_equity_usd": 1000.0,
   "degradations_adverses_bps": {
     "ADVERSE_P95": 6.0,
@@ -19,6 +19,7 @@
         "FERMETURE_ORPHELINE": 90
       },
       "statut": "AUCUN_EPISODE_MESURABLE",
+      "capacite": null,
       "enveloppes": null
     },
     "experimental_paper_v2": {
@@ -33,11 +34,26 @@
         "FERMETURE_ORPHELINE": 67
       },
       "statut": "MESURE",
+      "capacite": {
+        "schema_version": "hypersmart.episode_capacity.v1",
+        "n_episodes": 19,
+        "n_avec_carnet_causal": 4,
+        "couverture": 0.2105,
+        "capacite_mediane_usd": 318.49,
+        "fill_ratio_median": 1.0,
+        "fill_ratio_min": 0.613,
+        "motifs_non_joints": {
+          "CARNET_PERIME": 9,
+          "SANS_CARNET_CAUSAL": 6
+        },
+        "qualite": "TOP_OF_BOOK_ONLY",
+        "note": "haut de carnet uniquement : une capacite multi-niveaux exige la tape L2"
+      },
       "enveloppes": {
         "BASE_CALIBRATED": {
           "n_episodes": 19,
-          "capacite_usd": null,
-          "fill_ratio": null,
+          "capacite_usd": 318.49,
+          "fill_ratio": 1.0,
           "statut": "MESURE",
           "net_pnl_usd": -0.168358,
           "net_bps_par_trade": -5.8759,
@@ -60,8 +76,8 @@
         },
         "ADVERSE_P95": {
           "n_episodes": 19,
-          "capacite_usd": null,
-          "fill_ratio": null,
+          "capacite_usd": 318.49,
+          "fill_ratio": 1.0,
           "statut": "MESURE",
           "net_pnl_usd": -0.276358,
           "net_bps_par_trade": -11.8759,
@@ -86,8 +102,8 @@
         },
         "ADVERSE_P99": {
           "n_episodes": 19,
-          "capacite_usd": null,
-          "fill_ratio": null,
+          "capacite_usd": 318.49,
+          "fill_ratio": 1.0,
           "statut": "MESURE",
           "net_pnl_usd": -0.384358,
           "net_bps_par_trade": -17.8759,
@@ -112,8 +128,8 @@
         },
         "OPTIMISTIC_DIAGNOSTIC_ONLY": {
           "n_episodes": 19,
-          "capacite_usd": null,
-          "fill_ratio": null,
+          "capacite_usd": 318.49,
+          "fill_ratio": 1.0,
           "statut": "MESURE",
           "net_pnl_usd": -0.114358,
           "net_bps_par_trade": -2.8759,
