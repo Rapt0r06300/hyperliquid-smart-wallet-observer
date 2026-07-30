@@ -9,6 +9,8 @@ Paper only : 0 réseau, 0 ordre réel, 0 clé, 0 signature.
 from __future__ import annotations
 
 import sys
+
+import pytest
 from pathlib import Path
 
 RACINE = Path(__file__).resolve().parents[1]
@@ -165,3 +167,105 @@ def test_securite_aucun_appel_reel():
     for interdit in ('"/exchange"', "'/exchange'", "requests.get", "requests.post", "import websocket",
                      "websockets.connect", "eth_account", "Account.from_key", "private_key"):
         assert interdit not in src, "appel interdit dans economic_revalidation: %s" % interdit
+
+
+# ═══════════════ V3 §4.1 — REDUCE partiel : un lot, pas une fermeture totale ═══════════════
+def _ouvrir(coin="BTC", sens=1, notional=1_000.0, px=100.0, ts=1):
+    return {"evt": "OPEN", "coin": coin, "sens": sens, "notional_usd": notional,
+            "prix_entree": px, "ts_ms": ts}
+
+
+def _reduire(coin="BTC", sens=1, notional=None, px=110.0, ts=2, evt="REDUCE"):
+    l = {"evt": evt, "coin": coin, "sens": sens, "prix_sortie": px, "ts_ms": ts}
+    if notional is not None:
+        l["notional_usd"] = notional
+    return l
+
+
+@pytest.mark.parametrize("fraction", [0.10, 0.25, 0.50, 1.00])
+def test_un_reduce_ne_realise_que_la_quantite_fermee(fraction):
+    """Le leader allège de `fraction` : on ne réalise QUE cette part, le reliquat reste ouvert.
+
+    Sur une fermeture, `notional_usd` est exprime au prix de SORTIE : reduire `fraction` d'une position
+    de 10 unites ouvertes a 100 correspond donc a `10 * fraction * prix_sortie`.
+    """
+    quantite_ouverte = 1_000.0 / 100.0                       # 10 unites a 100
+    r = ER.normaliser_episodes(
+        [_ouvrir(), _reduire(notional=quantite_ouverte * fraction * 110.0)], strategie="t")
+    assert r["n_episodes"] == 1
+    e = r["episodes"][0]
+    assert round(e.quantite, 6) == round(quantite_ouverte * fraction, 6)
+    assert round(e.notional_usd, 6) == round(1_000.0 * fraction, 6)     # notionnel a l'ENTREE
+    assert round(e.pnl_net_usd(), 6) == round(100.0 * fraction, 6)      # +10 % sur la part fermee
+    reste = r["positions_ouvertes_restantes"]
+    if fraction < 1.0:
+        assert len(reste) == 1 and reste[0]["quantite"] > 0
+    else:
+        assert reste == []
+
+
+def test_plusieurs_add_puis_reduce_utilisent_le_prix_moyen_pondere():
+    lignes = [_ouvrir(notional=1_000.0, px=100.0, ts=1),
+              {"evt": "ADD", "coin": "BTC", "sens": 1, "notional_usd": 1_000.0,
+               "prix_entree": 200.0, "ts_ms": 2},
+              _reduire(notional=None, px=200.0, ts=3, evt="CLOSE")]
+    r = ER.normaliser_episodes(lignes, strategie="t")
+    e = r["episodes"][0]
+    # 10 unites a 100 + 5 unites a 200 => 15 unites, prix moyen 133,333...
+    assert round(e.quantite, 6) == 15.0
+    assert round(e.prix_entree, 4) == round(2000.0 / 15.0, 4)
+
+
+def test_un_flip_ferme_lancienne_quantite_et_ouvre_le_reliquat_oppose():
+    r = ER.normaliser_episodes(
+        [_ouvrir(notional=1_000.0, px=100.0), _reduire(notional=3_000.0, px=100.0, evt="FLIP")],
+        strategie="t")
+    assert r["n_episodes"] == 1 and round(r["episodes"][0].notional_usd, 6) == 1_000.0
+    reste = r["positions_ouvertes_restantes"]
+    assert len(reste) == 1 and reste[0]["sens"] == -1        # le reliquat ouvre le sens oppose
+
+
+def test_long_et_short_sont_symetriques_sur_un_reduce_partiel():
+    haut = ER.normaliser_episodes([_ouvrir(sens=1), _reduire(sens=1, notional=500.0, px=110.0)],
+                                  strategie="t")["episodes"][0]
+    bas = ER.normaliser_episodes([_ouvrir(sens=-1), _reduire(sens=-1, notional=500.0, px=110.0)],
+                                 strategie="t")["episodes"][0]
+    assert round(haut.pnl_net_usd(), 6) == -round(bas.pnl_net_usd(), 6)
+
+
+def test_chaque_episode_pointe_vers_la_position_reellement_ouverte():
+    r = ER.normaliser_episodes([_ouvrir(), _reduire(notional=400.0), _reduire(notional=600.0, ts=3)],
+                               strategie="t")
+    ids = {e.position_id for e in r["episodes"]}
+    assert len(r["episodes"]) == 2 and len(ids) == 1 and next(iter(ids)).startswith("t:BTC:L:")
+
+
+# ═══════════════ V3 §4.3 — les fermetures orphelines sont classées par cause ═══════════════
+def test_les_causes_des_fermetures_orphelines_sont_nommees():
+    lignes = [_reduire(px=100.0, ts=1),                                   # aucun OPEN
+              {"evt": "CLOSE", "coin": "ETH", "sens": 0, "prix_sortie": 50.0, "ts_ms": 2},
+              _ouvrir(coin="SOL", sens=1, ts=3),
+              {"evt": "CLOSE", "coin": "SOL", "sens": -1, "prix_sortie": 90.0, "ts_ms": 4}]
+    r = ER.normaliser_episodes(lignes, strategie="t")
+    causes = r["causes_fermetures_orphelines"]
+    assert sum(causes.values()) == 3
+    assert causes.get("OPEN_HORS_FENETRE_OU_LEDGER_TRONQUE") == 1
+    assert causes.get("SENS_ABSENT_APPARIEMENT_IMPOSSIBLE") == 1
+    assert causes.get("SENS_OPPOSE_OUVERT_SEULEMENT") == 1
+
+
+# ═══════════════ V3 §4.4 — frais absents ≠ frais nuls ═══════════════
+def test_des_frais_absents_du_ledger_ne_valent_jamais_zero():
+    r = ER.normaliser_episodes([_ouvrir(), _reduire(notional=1_000.0)], strategie="t")
+    assert r["frais_non_mesures"] == 1 and r["episodes"][0].frais_mesures is False
+    m = ER.metriques(r["episodes"], starting_equity_usd=1_000.0)
+    assert m["fees_statut"] == "FEES_UNMEASURABLE" and "ne valent pas zero" in m["fees_note"]
+
+
+def test_des_frais_presents_sont_declares_mesures():
+    # fermeture TOTALE : 10 unites au prix de sortie 110
+    lignes = [{**_ouvrir(), "frais_usd": 0.2}, {**_reduire(notional=1_100.0), "frais_usd": 0.25}]
+    r = ER.normaliser_episodes(lignes, strategie="t")
+    e = r["episodes"][0]
+    assert e.frais_mesures is True and round(e.frais_usd, 6) == 0.45
+    assert ER.metriques([e], starting_equity_usd=1_000.0)["fees_statut"] == "FEES_MESURES"

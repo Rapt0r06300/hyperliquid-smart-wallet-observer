@@ -57,6 +57,9 @@ class Episode:
     marge_usd: float | None = None
     ts_open_ms: int | None = None
     ts_close_ms: int | None = None
+    position_id: str | None = None          # §4.2 — la sortie pointe vers l'exposition reellement ouverte
+    quantite: float | None = None
+    frais_mesures: bool = True              # §4.4 — False => frais ABSENTS du ledger, pas nuls
 
     def pnl_brut_usd(self) -> float:
         return self.sens * (self.prix_sortie - self.prix_entree) / self.prix_entree * self.notional_usd
@@ -82,58 +85,151 @@ def _positif(valeur: Any) -> float | None:
 
 
 # ════════════════════════════ normalisation ════════════════════════════
+@dataclass
+class _Lot:
+    """Exposition ouverte pour un (coin, sens). Un REDUCE n'en ferme qu'une PART."""
+
+    quantite: float
+    prix_moyen: float
+    frais: float = 0.0
+    frais_mesures: bool = True
+    position_id: str = ""
+    ts_open_ms: int | None = None
+
+
+def _qte(notional: float | None, prix: float | None) -> float | None:
+    if notional is None or prix is None or prix <= 0:
+        return None
+    return notional / prix
+
+
 def normaliser_episodes(lignes: Iterable[Mapping[str, Any]], *, strategie: str) -> dict[str, Any]:
-    """Appaire OPEN/CLOSE par (coin, sens). Tout ce qui n'a pas ses deux prix devient `NON_MESURABLE`."""
-    ouvertes: dict[tuple[str, int], list[dict[str, Any]]] = {}
+    """§4.1 — moteur de LOTS : un REDUCE ne ferme que la quantite reduite.
+
+    L'ancien normaliseur traitait tout REDUCE comme la fermeture d'un OPEN entier : un leader qui allege
+    de 10 % voyait 100 % de sa position realisee, et le reliquat disparaissait. Ici :
+    quantite ouverte, prix moyen pondere, PnL realise **sur la seule quantite fermee**, reliquat conserve,
+    frais proportionnels, et FLIP = fermeture de l'ancienne quantite + ouverture du reliquat oppose.
+
+    §4.3 — chaque fermeture orpheline est classee par CAUSE au lieu d'etre comptee en bloc.
+    §4.4 — des frais absents du ledger ne valent JAMAIS zero : l'episode porte `frais_mesures=False`.
+    """
+    lots: dict[tuple[str, int], _Lot] = {}
     episodes: list[Episode] = []
     rejets: dict[str, int] = {}
+    causes_orphelines: dict[str, int] = {}
+    compteur = {"n": 0}
 
     def rejeter(motif: str) -> None:
         rejets[motif] = rejets.get(motif, 0) + 1
 
+    def nouvelle_position(coin: str, sens: int) -> str:
+        compteur["n"] += 1
+        return "%s:%s:%s:%04d" % (strategie, coin, "L" if sens > 0 else "S", compteur["n"])
+
+    ordonnees = []
     for ligne in lignes:
+        ts = _f(ligne.get("ts_ms")) or _f(ligne.get("recorded_at_ms")) or 0.0
+        ordonnees.append((ts, ligne))
+    ordonnees.sort(key=lambda x: x[0])
+
+    for _ts, ligne in ordonnees:
         evt = str(ligne.get("evt") or ligne.get("kind") or ligne.get("type") or "").upper()
         coin = str(ligne.get("coin") or "")
         if not coin:
             rejeter("COIN_ABSENT")
             continue
-        sens_brut = ligne.get("sens")
-        sens = int(sens_brut) if sens_brut in (1, -1, "1", "-1") else 0
-        prix = _positif(ligne.get("prix_entree") if evt in {"OPEN", "RENFORT"} else ligne.get("prix_sortie"))
+        brut_sens = ligne.get("sens")
+        sens = int(brut_sens) if brut_sens in (1, -1, "1", "-1") else 0
+        ouverture = evt in {"OPEN", "ADD", "RENFORT", "INCREASE"}
+        fermeture = evt in {"CLOSE", "REDUCE", "EXIT", "FLIP"}
+        if not ouverture and not fermeture:
+            rejeter("EVENEMENT_HORS_CYCLE")
+            continue
+
+        prix = _positif(ligne.get("prix_entree") if ouverture else ligne.get("prix_sortie"))
         if prix is None:
             prix = _positif(ligne.get("price") or ligne.get("prix"))
         notional = _positif(ligne.get("notional_usd") or ligne.get("notional_usdt"))
+        frais_ligne = _f(ligne.get("frais_usd"))
+        frais_mesures = frais_ligne is not None
+        ts_ms = ligne.get("ts_ms") or ligne.get("recorded_at_ms")
 
-        if evt in {"OPEN", "RENFORT", "ADD"}:
+        if ouverture:
             if prix is None or notional is None:
                 rejeter("OUVERTURE_SANS_PRIX_OU_NOTIONNEL")
                 continue
-            ouvertes.setdefault((coin, sens), []).append(
-                {"prix": prix, "notional": notional, "ts": ligne.get("ts_ms"),
-                 "frais": _f(ligne.get("frais_usd")) or 0.0, "marge": _f(ligne.get("marge_usd"))})
-        elif evt in {"CLOSE", "REDUCE", "EXIT"}:
-            pile = ouvertes.get((coin, sens)) or []
-            if not pile:
-                rejeter("FERMETURE_ORPHELINE")
-                continue
-            ouverture = pile.pop(0)
-            if prix is None:
-                rejeter("FERMETURE_SANS_PRIX_EXECUTABLE")
-                continue
-            episodes.append(Episode(
-                strategie=strategie, coin=coin, sens=sens or 1,
-                notional_usd=ouverture["notional"], prix_entree=ouverture["prix"], prix_sortie=prix,
-                frais_usd=(ouverture["frais"] or 0.0) + (_f(ligne.get("frais_usd")) or 0.0),
-                marge_usd=ouverture["marge"], ts_open_ms=ouverture["ts"], ts_close_ms=ligne.get("ts_ms"),
-            ))
-        else:
-            rejeter("EVENEMENT_HORS_CYCLE")
+            q = _qte(notional, prix)
+            cle = (coin, sens or 1)
+            lot = lots.get(cle)
+            if lot is None:
+                lots[cle] = _Lot(quantite=q, prix_moyen=prix, frais=(frais_ligne or 0.0),
+                                 frais_mesures=frais_mesures, position_id=nouvelle_position(coin, sens or 1),
+                                 ts_open_ms=ts_ms)
+            else:
+                total = lot.quantite + q
+                lot.prix_moyen = (lot.prix_moyen * lot.quantite + prix * q) / total if total > 0 else prix
+                lot.quantite = total
+                lot.frais += (frais_ligne or 0.0)
+                lot.frais_mesures = lot.frais_mesures and frais_mesures
+            continue
 
-    non_fermees = sum(len(v) for v in ouvertes.values())
+        # ── fermeture (REDUCE partiel, CLOSE, FLIP)
+        cle = (coin, sens or 1)
+        lot = lots.get(cle)
+        if lot is None:
+            rejeter("FERMETURE_ORPHELINE")
+            # §4.3 : nommer la cause au lieu de compter en bloc
+            if prix is None:
+                cause = "ORPHELINE_ET_SANS_PRIX"
+            elif sens == 0:
+                cause = "SENS_ABSENT_APPARIEMENT_IMPOSSIBLE"
+            elif any(c == coin for c, _s in lots):
+                cause = "SENS_OPPOSE_OUVERT_SEULEMENT"
+            else:
+                cause = "OPEN_HORS_FENETRE_OU_LEDGER_TRONQUE"
+            causes_orphelines[cause] = causes_orphelines.get(cause, 0) + 1
+            continue
+        if prix is None:
+            rejeter("FERMETURE_SANS_PRIX_EXECUTABLE")
+            continue
+
+        q_demandee = _qte(notional, prix) if notional is not None else lot.quantite
+        q_fermee = min(q_demandee, lot.quantite)
+        if q_fermee <= 0:
+            rejeter("FERMETURE_DE_QUANTITE_NULLE")
+            continue
+        part = q_fermee / lot.quantite if lot.quantite > 0 else 1.0
+        frais_part = lot.frais * part + (frais_ligne or 0.0)
+        episodes.append(Episode(
+            strategie=strategie, coin=coin, sens=sens or 1,
+            notional_usd=q_fermee * lot.prix_moyen, prix_entree=lot.prix_moyen, prix_sortie=prix,
+            frais_usd=frais_part, ts_open_ms=lot.ts_open_ms, ts_close_ms=ts_ms,
+            position_id=lot.position_id, quantite=q_fermee,
+            frais_mesures=lot.frais_mesures and frais_mesures,
+        ))
+        lot.frais -= lot.frais * part
+        lot.quantite -= q_fermee
+        if lot.quantite <= 1e-12:
+            del lots[cle]
+
+        # FLIP : l'exces au-dela de la position ouvre le sens oppose
+        exces = q_demandee - q_fermee
+        if exces > 1e-12:
+            oppose = (coin, -(sens or 1))
+            lots[oppose] = _Lot(quantite=exces, prix_moyen=prix, frais=0.0, frais_mesures=frais_mesures,
+                                position_id=nouvelle_position(coin, -(sens or 1)), ts_open_ms=ts_ms)
+
+    non_fermees = sum(1 for _ in lots)
     if non_fermees:
         rejets["POSITION_ENCORE_OUVERTE"] = non_fermees
     return {"episodes": episodes, "rejets": rejets, "n_episodes": len(episodes),
-            "n_non_mesurables": sum(rejets.values())}
+            "n_non_mesurables": sum(rejets.values()),
+            "causes_fermetures_orphelines": causes_orphelines,
+            "positions_ouvertes_restantes": [
+                {"coin": c, "sens": s, "quantite": round(l.quantite, 10), "position_id": l.position_id}
+                for (c, s), l in sorted(lots.items())],
+            "frais_non_mesures": sum(1 for e in episodes if not e.frais_mesures)}
 
 
 # ════════════════════════════ métriques ════════════════════════════
@@ -191,6 +287,10 @@ def metriques(episodes: Sequence[Episode], *, starting_equity_usd: float | None 
         "hit_rate": round(len(gains) / n, 4),
         "turnover_usd": round(turnover, 6),
         "fees_usd": round(fees, 6),
+        "fees_statut": ("FEES_UNMEASURABLE" if any(not e.frais_mesures for e in episodes)
+                        else "FEES_MESURES"),
+        "fees_note": ("des frais absents du ledger ne valent pas zero : le net ci-dessus est un net "
+                      "HORS frais reels" if any(not e.frais_mesures for e in episodes) else None),
         "roi": {
             "ROI_starting_equity": roi(starting_equity_usd),
             "ROI_avg_margin_locked": roi(marge_moyenne_usd),
@@ -285,6 +385,9 @@ def revalider(root: Path | str, *, starting_equity_usd: float = 1000.0,
         rapport["strategies"][strategie] = {
             "chemin": relpath, "n_lignes": len(lignes), "n_episodes": norm["n_episodes"],
             "rejets": norm["rejets"],
+            "causes_fermetures_orphelines": norm.get("causes_fermetures_orphelines"),
+            "positions_ouvertes_restantes": norm.get("positions_ouvertes_restantes"),
+            "frais_non_mesures": norm.get("frais_non_mesures"),
             "statut": "MESURE" if eps else "AUCUN_EPISODE_MESURABLE",
             "capacite": capacite,
             "enveloppes": enveloppes(
