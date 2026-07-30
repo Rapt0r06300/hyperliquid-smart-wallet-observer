@@ -260,6 +260,8 @@ def test_executer_runner_injecte_courbe_execs_prereg_et_n_ouvre_rien(tmp_path):
     # Le fill sans twapId reste un métaordre inféré distinct : aucune propagation
     # heuristique d'un identifiant TWAP à un fill non prouvé.
     assert res["n_signaux"] == 2 and res["n_metaordres"] == 2
+    assert res["microstructure_ablation"]["status"] == "SHADOW_ABLATION_ONLY"
+    assert res["microstructure_ablation"]["promotion_eligible"] is False
     # budget EXACT : userFillsByTime(2)=20 + userTwapSliceFills(1)=20 + l2Book=2 -> 42
     assert res["poids_passe"] == 42 and res["n_appels"] == 3
     stats = json.loads((tmp_path / M.STATS_RELPATH).read_text(encoding="utf-8"))

@@ -17,8 +17,9 @@ indépendantes) :
 
 TROIS ÂGES séparés (réconciliation « 60 s » vs « 382 ms ») : âge du fill HL (skew événement) ≠ latence locale
 (pipeline WS→open, ~382 ms médian en live, N/A en shadow) ≠ âge du stade (depuis le FIRST_SLICE). Détail :
-`docs/METAORDER_SHADOW_V1.md`. OFI top-5 : fonction pure prête (`ofi_top5`) mais NON branchée par-signal tant
-qu'un stade n'est pas mesuré proprement (étape suivante, exige un tape de carnet). 0 ordre, 0 clé, 0 signature.
+`docs/METAORDER_SHADOW_V1.md`. Le tape L2 causal fournit OFI multi-niveaux, microprice, depletion de file,
+forme de profondeur et flux agressif lorsqu'ils sont reellement observables. Le gate et son ablation restent
+strictement SHADOW : aucune entree paper, aucune promotion automatique, 0 ordre, 0 cle, 0 signature.
 """
 from __future__ import annotations
 
@@ -1003,6 +1004,8 @@ def executer(root: str | Path, vaults: list, *, fills_provider=None, twap_provid
         a_book = bool(ent.get("bids")) and MT.est_eligible(c)
         s["l2_synchronise"] = a_book
         s["l2_eligibilite"] = MT.statut_eligibilite(c) if c else "ABSENT"
+        s["microstructure_features"] = (c or {}).get("microstructure_features")
+        s["microstructure_gate"] = (c or {}).get("microstructure_gate")
         if a_book:
             book_sync[(s.get("coin"), s.get("hash"), s.get("fill_time"))] = {
                 "levels": [[{"px": b[0], "sz": b[1]} for b in ent.get("bids", [])],
@@ -1015,6 +1018,7 @@ def executer(root: str | Path, vaults: list, *, fills_provider=None, twap_provid
     stats = stats_par_stade(signaux)
     wf = walk_forward_purge(signaux, horizon_ms=horizon_ms)
     delais = evaluer_delais_entree(signaux, tape, horizon_ms=horizon_ms)
+    microstructure_ablation = MT.ablation_microstructure(signaux)
     poids = SD.poids_info(appels_budget)
     SD.journaliser_budget(root, "metaorder_shadow", poids, 600.0)
     budget = SD.budget_total(root)
@@ -1026,7 +1030,7 @@ def executer(root: str | Path, vaults: list, *, fills_provider=None, twap_provid
         "n_dans_tape_l2": len(tape_l2),
         "stats_par_stade": stats, "courbe_edge_cout_par_notional": courbe,
         "execution_comparee_continuation_late": execs, "walk_forward_purge": wf,
-        "delais_entree_shadow": delais,
+        "delais_entree_shadow": delais, "microstructure_ablation": microstructure_ablation,
         "par_vault": agreger_par(signaux, "vault"), "par_coin": agreger_par(signaux, "coin"),
         "par_jour": agreger_par(signaux, "jour"), "twap_statut_par_vault": n_twap,
         "preregistration": str(prereg.name),
@@ -1035,7 +1039,8 @@ def executer(root: str | Path, vaults: list, *, fills_provider=None, twap_provid
     return {"n_signaux": len(signaux), "n_metaordres": len({s["metaorder_id"] for s in signaux}),
             "poids_passe": poids, "n_appels": len(appels_budget), "budget_total": budget,
             "l2_synchronise_pct": round(100 * n_sync / len(signaux), 1) if signaux else 0.0,
-            "stats": stats, "courbe": courbe, "execs": execs, "delais": delais}
+            "stats": stats, "courbe": courbe, "execs": execs, "delais": delais,
+            "microstructure_ablation": microstructure_ablation}
 
 
 def _comparer_stades(signaux: list, tape: dict, book_par_coin: dict, fee_ar: float, horizon_ms: float,

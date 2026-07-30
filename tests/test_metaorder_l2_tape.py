@@ -33,6 +33,100 @@ def test_ofi_par_niveau_agrege_et_normalise():
     assert T.ofi_par_niveau(None, cur) is None                                   # sans pré -> None
 
 
+def test_ofi_multi_niveaux_microprice_et_forme_profondeur():
+    prev = {
+        "bid": 99.99, "ask": 100.01, "mid": 100.0, "spread_bps": 2.0,
+        "bids5": [[99.99, 10.0, 1], [99.98, 10.0, 1], [99.97, 10.0, 1]],
+        "asks5": [[100.01, 10.0, 1], [100.02, 10.0, 1], [100.03, 10.0, 1]],
+    }
+    cur = {
+        "bid": 99.99, "ask": 100.01, "mid": 100.0, "spread_bps": 2.0,
+        "bids5": [[99.99, 15.0, 1], [99.98, 11.0, 1], [99.97, 10.0, 1]],
+        "asks5": [[100.01, 8.0, 1], [100.02, 9.0, 1], [100.03, 10.0, 1]],
+    }
+    multi = T.ofi_multi_niveaux(prev, cur)
+    assert multi["ofi_l1"] == 7.0
+    assert multi["ofi_l3"] == 9.0
+    assert multi["ofi_l5"] == 9.0
+    assert multi["integrated_ofi_normalized"] > 0
+    assert T.microprice(cur) > cur["mid"]
+    assert T.microprice_deviation_bps(cur) > 0
+    shape = T.depth_shape(cur)
+    assert set(shape) == {
+        "bid_depth_slope", "ask_depth_slope",
+        "bid_depth_convexity", "ask_depth_convexity",
+    }
+
+
+def test_depletion_flux_agressif_et_add_cancel_restent_mesurables_seulement_si_observes():
+    prev = {
+        "bids5": [[99.99, 10.0, 1]],
+        "asks5": [[100.01, 20.0, 1]],
+    }
+    cur = {
+        "bids5": [[99.99, 5.0, 1]],
+        "asks5": [[100.01, 10.0, 1]],
+    }
+    depletion = T.queue_depletion(prev, cur)
+    assert depletion["status"] == "MEASURED_SAME_PRICE_LEVEL"
+    assert depletion["bid_depletion_ratio"] == 0.5
+    assert depletion["ask_depletion_ratio"] == 0.5
+    trades = [
+        {"side": "B", "px": 100, "sz": 3},
+        {"side": "A", "px": 100, "sz": 1},
+    ]
+    assert T.aggressive_trade_imbalance(trades) == 0.5
+    assert T.aggressive_trade_imbalance([]) is None
+    assert T.add_cancel_imbalance([])["status"] == "ADD_CANCEL_UNMEASURABLE_FROM_SNAPSHOTS"
+    events = [
+        {"action": "ADD", "side": "BID", "size": 3},
+        {"action": "CANCEL", "side": "ASK", "size": 1},
+        {"action": "ADD", "side": "ASK", "size": 2},
+    ]
+    assert T.add_cancel_imbalance(events)["value"] == round((3 + 1 - 2) / 6, 8)
+
+
+def test_gate_microstructure_abstient_si_opposee_ou_non_mesurable():
+    prev = {
+        "bid": 99.99, "ask": 100.01, "mid": 100.0, "spread_bps": 2.0,
+        "bids5": [[99.99, 10.0, 1]], "asks5": [[100.01, 10.0, 1]],
+    }
+    aligned = {
+        "bid": 99.99, "ask": 100.01, "mid": 100.0, "spread_bps": 2.0,
+        "bids5": [[99.99, 18.0, 1]], "asks5": [[100.01, 4.0, 1]],
+    }
+    opposed = {
+        "bid": 99.99, "ask": 100.01, "mid": 100.0, "spread_bps": 2.0,
+        "bids5": [[99.99, 4.0, 1]], "asks5": [[100.01, 18.0, 1]],
+    }
+    assert T.microstructure_timing_gate(prev, aligned, sens=1)["decision"] == "ALLOW_SHADOW"
+    rejected = T.microstructure_timing_gate(prev, opposed, sens=1)
+    assert rejected["decision"] == "ABSTAIN_SHADOW"
+    assert "OFI_OPPOSED" in rejected["reasons"]
+    missing = T.microstructure_timing_gate(None, aligned, sens=1)
+    assert missing["decision"] == "ABSTAIN_SHADOW"
+    assert "OFI_UNMEASURABLE" in missing["reasons"]
+
+
+def test_ablation_microstructure_ne_promeut_qu_avec_gain_net_et_echantillon():
+    rows = [
+        {
+            "pnl_net_bps": 5.0 if index < 30 else -5.0,
+            "microstructure_gate": {
+                "decision": "ALLOW_SHADOW" if index < 30 else "ABSTAIN_SHADOW",
+            },
+        }
+        for index in range(60)
+    ]
+    result = T.ablation_microstructure(rows)
+    assert result["base_n"] == 60
+    assert result["allowed_n"] == 30
+    assert result["base_mean_net_bps"] == 0.0
+    assert result["allowed_mean_net_bps"] == 5.0
+    assert result["promotion_eligible"] is True
+    assert result["real_execution"] is False
+
+
 def test_latence_pipeline_toujours_positive():
     assert T.latence_pipeline_ms(1000.0, 1300.0) == 300.0 and T.latence_pipeline_ms(1000.0, 900.0) is None
 
@@ -67,6 +161,8 @@ def test_ligne_fill_niveaux_bruts_ofi_non_mesurable_et_horloges():
     assert l["latence_pipeline_ms"] == 300.0 and l["fill_exchange_time"] == 1000 and l["book_exchange_time"] == 1200
     assert l["entree"]["bids"][0] == [99.9, 1000.0, 3] and l["pre"]["bids"] and len(l["posts"]) == 1   # NIVEAUX BRUTS
     assert l["ofi_par_niveau"] is not None and l["ofi_statut"] == "OK" and l["book_imbalance_top5"] is not None
+    assert l["microstructure_features"]["shadow"] is True
+    assert l["microstructure_gate"]["real_execution"] is False
     l2 = T.ligne_fill(fill, metaorder_id="mo-x", stade="FIRST_SLICE", pre=None, entree=ent, posts=[], fill_recv_mono=5200.0)
     assert l2["ofi_statut"] == "OFI_NON_MESURABLE" and l2["ofi_par_niveau"] is None and l2["ofi_mesurable"] is False
     assert T.ligne_fill(fill, metaorder_id="mo-x", stade="X", pre=pre, entree=None, posts=[], fill_recv_mono=5200.0) is None

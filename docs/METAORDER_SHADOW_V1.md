@@ -71,6 +71,31 @@ normalement emises toutes les 30 secondes et le rattrapage peut atteindre
 trois fois la tranche normale. Ces constantes servent a decrire les preuves,
 jamais a fabriquer un etat absent.
 
+## Timing microstructure SHADOW (2026-07-29)
+
+Le tape L2 causal rattache maintenant a chaque signal les mesures observables
+au meme prefixe temporel:
+
+- OFI L1/L3/L5 et OFI integre normalise par la profondeur;
+- microprice et deviation au mid;
+- depletion de file uniquement si le prix du niveau est reste identique;
+- pente et convexite de profondeur top-5;
+- imbalance des trades agressifs quand le cote est public;
+- imbalance ADD/CANCEL uniquement avec des evenements identifies;
+- regime de spread et validite du BBO.
+
+Une mesure absente reste `None` avec un statut explicite. Un snapshot seul ne
+permet notamment pas d'inventer des ADD/CANCEL ni une place dans la file. Le
+`microstructure_timing_gate` est deny-by-default et produit seulement
+`ALLOW_SHADOW` ou `ABSTAIN_SHADOW`. Un carnet croise, un spread trop large, un
+OFI absent ou un flux oppose provoque une abstention SHADOW.
+
+L'ablation compare le signal de base au sous-ensemble autorise, net de couts.
+Elle exige au moins 30 observations dans les deux groupes et un gain moyen net
+strictement positif avant de rendre `promotion_eligible=true`. Ce statut reste
+une preuve de recherche: il ne cree ni position paper, ni PnL canonique, ni
+ordre externe.
+
 ## Gouvernance RAW (cfg-6d8a2937)
 Baseline **jamais promue**. Cap **20 cycles clôturés** (config courante) → `RAW_BASELINE_FIGEE_20` (gel pour
 décision KILL/OBSERVE). RAW est exemptée de l'auto-KILL d'expectancy pour atteindre l'échantillon de 20 ; la
