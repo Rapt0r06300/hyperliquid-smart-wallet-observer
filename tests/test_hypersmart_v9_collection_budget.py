@@ -49,12 +49,12 @@ def test_v9_budget_estimates_official_read_weight_conservatively():
         time_range_items_expected=41,
     )
 
-    assert estimate_readonly_rest_weight(request) == 2 + 4 + 60 + 40 + 60
+    assert estimate_readonly_rest_weight(request) == 2 + 4 + 60 + 40 + 3
     plan = plan_readonly_collection_budget(request)
 
     assert plan.allowed is True
     assert plan.safe_rest_budget == 840
-    assert plan.rest_weight_remaining_after == 840 - 166
+    assert plan.rest_weight_remaining_after == 840 - 109
 
 
 def test_v9_budget_rejects_cycles_above_safe_rest_margin():

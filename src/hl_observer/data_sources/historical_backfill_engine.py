@@ -5,6 +5,7 @@ import hashlib
 import json
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
+
 try:
     from enum import StrEnum
 except ImportError:
@@ -20,11 +21,12 @@ from hl_observer.data_sources.acquisition_engine import (
     FetchResult,
     RequestBudgetManager,
 )
-
-
-INFO_TIME_RANGE_PAGE_LIMIT = 500
-USER_FILLS_RECENT_LIMIT = 2_000
-USER_FILLS_BY_TIME_MAX_RECENT = 10_000
+from hl_observer.hyperliquid.rate_weights import (
+    HYPERSMART_USER_FILLS_BY_TIME_MAX_RECENT as USER_FILLS_BY_TIME_MAX_RECENT,
+)
+from hl_observer.hyperliquid.rate_weights import (
+    HYPERSMART_USER_FILLS_RECENT_LIMIT as USER_FILLS_RECENT_LIMIT,
+)
 
 
 class BackfillStopReason(StrEnum):

@@ -15,12 +15,21 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Iterator
 
-
-WS_MAX_CONNECTIONS = 10
-WS_MAX_NEW_CONNECTIONS_PER_MINUTE = 30
-WS_MAX_SUBSCRIPTIONS = 1_000
-WS_MAX_UNIQUE_USERS = 10
-WS_MAX_MESSAGES_PER_MINUTE = 2_000
+from hl_observer.hyperliquid.rate_weights import (
+    HYPERSMART_WS_MAX_CONNECTIONS as WS_MAX_CONNECTIONS,
+)
+from hl_observer.hyperliquid.rate_weights import (
+    HYPERSMART_WS_MAX_MESSAGES_PER_MIN as WS_MAX_MESSAGES_PER_MINUTE,
+)
+from hl_observer.hyperliquid.rate_weights import (
+    HYPERSMART_WS_MAX_NEW_CONNECTIONS_PER_MIN as WS_MAX_NEW_CONNECTIONS_PER_MINUTE,
+)
+from hl_observer.hyperliquid.rate_weights import (
+    HYPERSMART_WS_MAX_SUBSCRIPTIONS as WS_MAX_SUBSCRIPTIONS,
+)
+from hl_observer.hyperliquid.rate_weights import (
+    HYPERSMART_WS_MAX_UNIQUE_USERS as WS_MAX_UNIQUE_USERS,
+)
 
 
 class GlobalWsBudgetError(RuntimeError):

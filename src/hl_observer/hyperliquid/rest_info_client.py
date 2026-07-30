@@ -12,15 +12,19 @@ if TYPE_CHECKING:
     from hl_observer.sources.collection_recorder import CollectionRecorder
 
 from hl_observer.hyperliquid.rate_limits import AsyncRateLimiter
-from hl_observer.security.mainnet_guard import assert_info_endpoint_only
+from hl_observer.hyperliquid.rate_weights import (
+    HYPERSMART_USER_FILLS_RECENT_LIMIT,
+    HYPERSMART_USER_TWAP_SLICE_FILLS_RECENT_LIMIT,
+)
 from hl_observer.hyperliquid.schemas import (
+    REJECTED_ORDER_STATUSES,
     OrderStatus,
     OrderStatusKind,
-    REJECTED_ORDER_STATUSES,
 )
 from hl_observer.ops.echec_silencieux import noter as _noter_echec
+from hl_observer.security.mainnet_guard import assert_info_endpoint_only
 
-MAX_USER_FILLS_PAGE_SIZE = 2000
+MAX_USER_FILLS_PAGE_SIZE = HYPERSMART_USER_FILLS_RECENT_LIMIT
 READ_ONLY_INFO_TYPES = {
     "meta",
     "activeAssetCtx",
@@ -31,6 +35,7 @@ READ_ONLY_INFO_TYPES = {
     "frontendOpenOrders",
     "userFills",
     "userFillsByTime",
+    "userTwapSliceFills",
     "orderStatus",
     "candleSnapshot",
     "portfolio",
@@ -143,6 +148,10 @@ def build_user_fills_by_time_payload(
     if aggregate_by_time:
         payload["aggregateByTime"] = True
     return payload
+
+
+def build_user_twap_slice_fills_payload(user: str) -> dict[str, Any]:
+    return {"type": "userTwapSliceFills", "user": user}
 
 
 def build_order_status_payload(user: str, oid_or_cloid: int | str) -> dict[str, Any]:
@@ -400,6 +409,21 @@ class HyperliquidInfoClient:
             raise HyperliquidInfoError("userFillsByTime returned a non-list payload")
         if len(data) > MAX_USER_FILLS_PAGE_SIZE:
             raise HyperliquidInfoError("userFillsByTime exceeded the documented 2000 item limit")
+        return data
+
+    async def user_twap_slice_fills(
+        self,
+        user: str,
+    ) -> list[dict[str, Any]]:
+        data = await self._post_info("userTwapSliceFills", {"user": user})
+        if not isinstance(data, list):
+            raise HyperliquidInfoError(
+                "userTwapSliceFills returned a non-list payload"
+            )
+        if len(data) > HYPERSMART_USER_TWAP_SLICE_FILLS_RECENT_LIMIT:
+            raise HyperliquidInfoError(
+                "userTwapSliceFills exceeded the documented 2000 item limit"
+            )
         return data
 
     async def iter_user_fills_by_time(
