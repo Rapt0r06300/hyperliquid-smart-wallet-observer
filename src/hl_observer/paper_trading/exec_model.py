@@ -25,6 +25,9 @@ class ExecModelConfig:
     impact_coef_bps: float = 10.0
     latency_cost_bps_per_sec: float = 0.20
     max_latency_cost_bps: float = 15.0
+    # P1B: "CAUSAL" => la latence vient du carnet causal (non refoldee comme taxe scalaire ; celui-ci
+    # n'est plus qu'un STRESS). "SCALAR_STRESS" (defaut) preserve l'ancien comportement.
+    latency_mode: str = "SCALAR_STRESS"
     unknown_depth_impact_bps: float = 25.0
 
 
@@ -147,6 +150,10 @@ def simulate_execution(
             "latency_cost_bps_per_sec",
         ),
     )
+    if getattr(cfg, "latency_mode", "SCALAR_STRESS") == "CAUSAL" and execution_truth is not None:
+        # P1B: en mode CAUSAL la latence est DÉJÀ dans le carnet causal d'exécution — ne pas la refold
+        # comme taxe scalaire (double compte). Le coût de latence autoritaire est mesuré par latency_truth.
+        latency_bps = 0.0
 
     if execution_truth is not None:
         if decision_ts_ms is None:
