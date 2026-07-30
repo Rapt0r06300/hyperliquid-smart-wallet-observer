@@ -42,6 +42,103 @@ FACTEUR_RESOLUTION = 1.0
 MIN_EPISODES_CELLULE = 20
 
 
+#: Venues acceptées comme carnet Hyperliquid dans une bande multi-venues.
+VENUES_HL = {"HL", "HYPERLIQUID"}
+
+
+def charger_bbo(chemin: Path | str, *, coins: Iterable[str] | None = None,
+                max_lignes: int = 400_000) -> dict[str, dict[str, list]]:
+    """Index {coin: {ts, bid, ask}} depuis une bande BBO. Deux schémas du dépôt sont acceptés :
+
+      • `bbo_synchro` — `{"coin", "ts_ms", "hl_bid", "hl_ask"}` (cadence mesurée ~264 ms)
+      • `bbo_tape`    — `{"venue", "coin", "ts_wall_ms", "bid", "ask"}` (cadence ~2 ms)
+
+    Dans la bande multi-venues, **seules les lignes Hyperliquid sont retenues** : un carnet Binance ne dit
+    rien du prix auquel NOUS pourrions exécuter sur HL.
+    """
+    voulus = {str(c).upper() for c in coins} if coins else None
+    brut: dict[str, list[tuple[int, float, float]]] = {}
+    p = Path(chemin)
+    if not p.exists():
+        return {}
+    with p.open("r", encoding="utf-8", errors="replace") as fh:
+        for i, ligne in enumerate(fh):
+            if i >= int(max_lignes):
+                break
+            ligne = ligne.strip()
+            if not ligne:
+                continue
+            try:
+                r = json.loads(ligne)
+            except ValueError:
+                continue
+            if not isinstance(r, dict):
+                continue
+            coin = str(r.get("coin") or "").upper()
+            if not coin or (voulus is not None and coin not in voulus):
+                continue
+            venue = str(r.get("venue") or "").upper()
+            if venue and venue not in VENUES_HL:
+                continue                                   # carnet d'une autre venue : hors sujet
+            bid, ask = r.get("hl_bid"), r.get("hl_ask")
+            if bid is None or ask is None:
+                bid, ask = r.get("bid"), r.get("ask")
+            ts = r.get("ts_ms") or r.get("ts_wall_ms")
+            if not isinstance(ts, (int, float)) or isinstance(ts, bool):
+                continue
+            if not isinstance(bid, (int, float)) or not isinstance(ask, (int, float)):
+                continue
+            if bid <= 0 or ask <= 0 or bid > ask:
+                continue
+            brut.setdefault(coin, []).append((int(ts), float(bid), float(ask)))
+    index: dict[str, dict[str, list]] = {}
+    for coin, lignes in brut.items():
+        lignes.sort(key=lambda x: x[0])
+        index[coin] = {"ts": [x[0] for x in lignes], "bid": [x[1] for x in lignes],
+                       "ask": [x[2] for x in lignes]}
+    return index
+
+
+def _cote_a(index: Mapping[str, Mapping[str, Sequence]], coin: str, ts: float,
+            *, tolerance_ms: float) -> tuple[float, float] | None:
+    """Premier (bid, ask) observé **à ou après** `ts`, dans la tolérance."""
+    from bisect import bisect_left
+
+    bloc = index.get(str(coin).upper())
+    if not bloc or not bloc.get("ts"):
+        return None
+    temps = bloc["ts"]
+    i = bisect_left(temps, int(ts))
+    if i >= len(temps) or temps[i] - ts > float(tolerance_ms):
+        return None
+    return float(bloc["bid"][i]), float(bloc["ask"][i])
+
+
+def markout_executable_bps(index_bbo: Mapping[str, Mapping[str, Sequence]], *, coin: str, ts_ms: float,
+                           sens: int, horizon_ms: int, tolerance_ms: float = 5_000.0) -> float | None:
+    """Markout au prix **exécutable**, pas au mid.
+
+    Un acheteur paie l'ASK et ressort au BID ; un vendeur frappe le BID et rachète à l'ASK. Le spread est
+    donc déjà **dans** le chiffre : il ne doit plus être ajouté aux coûts, sous peine de le compter deux fois.
+    C'est la seule mesure admissible pour promouvoir un wallet — un edge calculé au mid n'est pas exécutable.
+    """
+    if sens not in (1, -1):
+        return None
+    entree = _cote_a(index_bbo, coin, ts_ms, tolerance_ms=tolerance_ms)
+    sortie = _cote_a(index_bbo, coin, ts_ms + int(horizon_ms), tolerance_ms=tolerance_ms)
+    if entree is None or sortie is None:
+        return None
+    bid_e, ask_e = entree
+    bid_s, ask_s = sortie
+    if sens > 0:
+        prix_entree, prix_sortie = ask_e, bid_s          # achat a l'ask, revente au bid
+    else:
+        prix_entree, prix_sortie = bid_e, ask_s          # vente au bid, rachat a l'ask
+    if prix_entree <= 0:
+        return None
+    return round(sens * (prix_sortie - prix_entree) / prix_entree * 1e4, 6)
+
+
 def cadence_par_coin(index: Mapping[str, Mapping[str, Sequence]]) -> dict[str, float | None]:
     """Cadence MÉDIANE entre deux cotations, par coin. C'est elle qui borne les horizons mesurables."""
     out: dict[str, float | None] = {}
@@ -86,9 +183,16 @@ def _agreger(valeurs: Sequence[float], *, cout_ar_bps: float,
 def grille(episodes_par_wallet: Mapping[str, Sequence[Mapping[str, Any]]],
            index_prix: Mapping[str, Mapping[str, Sequence]], *, cout_ar_bps: float = 9.0,
            horizons: Iterable[int] = HORIZONS_MS,
-           min_episodes: int = MIN_EPISODES_CELLULE) -> dict[str, Any]:
-    """Grille complète horizon × segmentation. Rend aussi ce qui n'a PAS pu être mesuré, et pourquoi."""
-    cadences = cadence_par_coin(index_prix)
+           min_episodes: int = MIN_EPISODES_CELLULE,
+           index_bbo: Mapping[str, Mapping[str, Sequence]] | None = None) -> dict[str, Any]:
+    """Grille complète horizon × segmentation. Rend aussi ce qui n'a PAS pu être mesuré, et pourquoi.
+
+    Avec `index_bbo`, les markouts sont **exécutables** (ask→bid) : le spread est déjà dans le chiffre, donc
+    `cout_ar_bps` ne doit plus porter que les frais. Sans lui, la mesure est au mid — screening seulement.
+    """
+    executable = index_bbo is not None
+    source = index_bbo if executable else index_prix
+    cadences = cadence_par_coin(source)
     horizons = tuple(int(h) for h in horizons)
 
     par_horizon: dict[int, list[float]] = {h: [] for h in horizons}
@@ -110,8 +214,12 @@ def grille(episodes_par_wallet: Mapping[str, Sequence[Mapping[str, Any]]],
                     non_mesurables["HORIZON_SOUS_LA_CADENCE"] = non_mesurables.get(
                         "HORIZON_SOUS_LA_CADENCE", 0) + 1
                     continue
-                m = markout_bps(index_prix, coin=coin, ts_ms=episode.get("ts_ms"),
-                                sens=episode.get("sens"), horizon_ms=h)
+                if executable:
+                    m = markout_executable_bps(index_bbo, coin=coin, ts_ms=episode.get("ts_ms"),
+                                               sens=episode.get("sens"), horizon_ms=h)
+                else:
+                    m = markout_bps(index_prix, coin=coin, ts_ms=episode.get("ts_ms"),
+                                    sens=episode.get("sens"), horizon_ms=h)
                 if m is None:
                     non_mesurables["PRIX_ABSENT_A_LHORIZON"] = non_mesurables.get(
                         "PRIX_ABSENT_A_LHORIZON", 0) + 1
@@ -139,6 +247,9 @@ def grille(episodes_par_wallet: Mapping[str, Sequence[Mapping[str, Any]]],
     return {
         "schema_version": SCHEMA_VERSION,
         "genere_le": datetime.now(timezone.utc).isoformat(),
+        "mode": "EXECUTABLE_ASK_BID" if executable else "MID_SCREENING_SEULEMENT",
+        "spread_inclus_dans_le_prix": bool(executable),
+        "promouvable": bool(executable),
         "cout_ar_bps": float(cout_ar_bps), "min_episodes_cellule": int(min_episodes),
         "horizons_preenregistres_ms": list(horizons),
         "cadence_mediane_ms": {c: cadences.get(c) for c in sorted(coins_vus & set(cadences))},
@@ -168,6 +279,8 @@ def main(argv: Iterable[str] | None = None) -> int:
     p.add_argument("--cout-ar-bps", type=float, default=9.0)
     p.add_argument("--max-lignes-prix", type=int, default=200_000)
     p.add_argument("--min-episodes", type=int, default=MIN_EPISODES_CELLULE)
+    p.add_argument("--bbo", default=None, help="bande BBO -> markout EXECUTABLE (ask->bid)")
+    p.add_argument("--max-lignes-bbo", type=int, default=400_000)
     a = p.parse_args(list(argv) if argv is not None else None)
     racine = Path(a.root).resolve()
 
@@ -181,8 +294,11 @@ def main(argv: Iterable[str] | None = None) -> int:
     coins = {e["coin"] for e in reconstruction.episodes}
     index = charger_prix(racine / PRIX_DEFAUT, coins=coins, max_lignes=int(a.max_lignes_prix))
 
+    index_bbo = None
+    if a.bbo:
+        index_bbo = charger_bbo(racine / a.bbo, coins=coins, max_lignes=int(a.max_lignes_bbo))
     rapport = grille(par_wallet, index, cout_ar_bps=float(a.cout_ar_bps),
-                     min_episodes=int(a.min_episodes))
+                     min_episodes=int(a.min_episodes), index_bbo=index_bbo)
     rapport["ingestion"] = stats.resume()
     rapport["n_wallets_fiables"] = len(par_wallet)
     chemin = racine / RAPPORT_RELPATH
@@ -201,7 +317,8 @@ def main(argv: Iterable[str] | None = None) -> int:
     return 0
 
 
-__all__ = ["SCHEMA_VERSION", "HORIZONS_MS", "ACTIONS", "FACTEUR_RESOLUTION", "MIN_EPISODES_CELLULE",
+__all__ = ["SCHEMA_VERSION", "HORIZONS_MS", "ACTIONS", "VENUES_HL", "charger_bbo",
+           "markout_executable_bps", "FACTEUR_RESOLUTION", "MIN_EPISODES_CELLULE",
            "cadence_par_coin", "horizons_mesurables", "grille", "main"]
 
 

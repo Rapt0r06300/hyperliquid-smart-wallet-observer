@@ -131,6 +131,81 @@ def test_la_grille_dhorizons_est_preenregistree():
                               120_000, 300_000)
 
 
+# ═══════════════ P4 — markout EXÉCUTABLE (ask→bid), pas au mid ═══════════════
+def _bbo(pas_ms=250, n=2_000, coin="BTC", spread=0.10, pente=0.0, venue=None):
+    ts = [T0 + i * pas_ms for i in range(n)]
+    bid = [100.0 + i * pente for i in range(n)]
+    ask = [b + spread for b in bid]
+    idx = {coin: {"ts": ts, "bid": bid, "ask": ask}}
+    return idx
+
+
+def _ecrire_bbo(tmp_path, lignes, nom="bbo.jsonl"):
+    import json as _j
+    p = tmp_path / nom
+    p.write_text("\n".join(_j.dumps(x) for x in lignes) + "\n", encoding="utf-8")
+    return p
+
+
+def test_le_schema_bbo_synchro_est_lu(tmp_path):
+    p = _ecrire_bbo(tmp_path, [{"coin": "BTC", "ts_ms": T0, "hl_bid": 100.0, "hl_ask": 100.1}])
+    idx = ED.charger_bbo(p)
+    assert idx["BTC"]["bid"] == [100.0] and idx["BTC"]["ask"] == [100.1]
+
+
+def test_seules_les_lignes_hyperliquid_sont_retenues(tmp_path):
+    p = _ecrire_bbo(tmp_path, [
+        {"venue": "HL", "coin": "BTC", "ts_wall_ms": T0, "bid": 100.0, "ask": 100.1},
+        {"venue": "BIN", "coin": "BTC", "ts_wall_ms": T0 + 1, "bid": 200.0, "ask": 200.1}])
+    idx = ED.charger_bbo(p)
+    assert len(idx["BTC"]["ts"]) == 1 and idx["BTC"]["bid"] == [100.0]
+
+
+def test_un_carnet_croise_est_rejete(tmp_path):
+    p = _ecrire_bbo(tmp_path, [{"coin": "BTC", "ts_ms": T0, "hl_bid": 101.0, "hl_ask": 100.0}])
+    assert ED.charger_bbo(p) == {}
+
+
+def test_le_markout_executable_inclut_le_spread():
+    """Prix plat : un aller-retour ask->bid coûte exactement le spread, jamais 0."""
+    idx = _bbo(spread=0.10, pente=0.0)          # spread 10 bps sur 100
+    m = ED.markout_executable_bps(idx, coin="BTC", ts_ms=T0, sens=1, horizon_ms=1_000)
+    assert m is not None and round(m, 1) == -10.0
+    assert m < 0, "franchir le spread ne peut pas etre gratuit"
+
+
+def test_le_markout_executable_est_plus_severe_que_le_mid():
+    from hl_observer.ops.global_observer_pipeline import markout_bps as mid_markout
+    exe = _bbo(spread=0.10, pente=0.01)
+    mid = {"BTC": {"ts": exe["BTC"]["ts"],
+                   "mid": [(b + a) / 2 for b, a in zip(exe["BTC"]["bid"], exe["BTC"]["ask"])]}}
+    m_exe = ED.markout_executable_bps(exe, coin="BTC", ts_ms=T0, sens=1, horizon_ms=1_000)
+    m_mid = mid_markout(mid, coin="BTC", ts_ms=T0, sens=1, horizon_ms=1_000)
+    assert m_exe < m_mid, "le mid flatte toujours par rapport au prix executable"
+
+
+def test_le_short_execute_au_bid_et_rachete_a_lask():
+    idx = _bbo(spread=0.10, pente=0.0)
+    m = ED.markout_executable_bps(idx, coin="BTC", ts_ms=T0, sens=-1, horizon_ms=1_000)
+    assert round(m, 1) == -10.0                 # symetrique : le spread se paie dans les deux sens
+
+
+def test_sans_cote_a_lhorizon_aucun_markout_executable():
+    idx = _bbo(n=3, pas_ms=250)
+    assert ED.markout_executable_bps(idx, coin="BTC", ts_ms=T0, sens=1, horizon_ms=300_000) is None
+    assert ED.markout_executable_bps(idx, coin="DOGE", ts_ms=T0, sens=1, horizon_ms=1_000) is None
+
+
+def test_le_mode_executable_est_signale_et_promouvable():
+    episodes = {"w": _episodes(60, pas_ms=1_000)}
+    mid = ED.grille(episodes, _index(pas_ms=250, n=5_000), min_episodes=5)
+    exe = ED.grille(episodes, {}, index_bbo=_bbo(pas_ms=250, n=5_000, pente=0.01),
+                    cout_ar_bps=4.5, min_episodes=5)
+    assert mid["mode"] == "MID_SCREENING_SEULEMENT" and mid["promouvable"] is False
+    assert exe["mode"] == "EXECUTABLE_ASK_BID" and exe["promouvable"] is True
+    assert exe["spread_inclus_dans_le_prix"] is True
+
+
 def test_securite_aucun_appel_reel():
     src = (RACINE / "src" / "hl_observer" / "ops" / "edge_decay.py").read_text(encoding="utf-8")
     for interdit in ('"/exchange"', "'/exchange'", "requests.get", "requests.post", "import websocket",
