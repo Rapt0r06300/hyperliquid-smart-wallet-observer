@@ -59,9 +59,13 @@ tradent réellement. Aucun besoin d'AWS — un run ciblé suffit.
 
 ## 4. Ce qui n'a pas été fait dans ce run
 
-P1 (S3 requester-pays / node non-validating), P3 (TWAP réel), P4 (markout L2 exécutable), P5 (réparation
-DESYNC), P6 (tape cross-venue synchronisée), P7 (dYdX), P8 (dette : 101 orphelins / 372 testés-non-branchés /
-HS-070→100), P9 (scoreboard multi-stratégies), P10 (recette Windows).
+P1 (S3 requester-pays / node non-validating), P3 (TWAP réel), P5 (réparation DESYNC), P6 (tape cross-venue
+synchronisée), P7 (dYdX), P8 (dette : 101 orphelins / 372 testés-non-branchés / HS-070→100), P9 (scoreboard
+multi-stratégies), P10 (recette Windows).
+
+P4 est **fait** (markout exécutable ask→bid, §3bis) ; c'est la **donnée** qui manque pour l'exploiter, pas
+le code. Le profondeur multi-niveaux L2 (consommation, fills partiels) reste à brancher une fois la
+couverture obtenue — la mesurer aujourd'hui n'aurait aucun épisode sur lequel s'appliquer.
 
 La CI est réparée mais **non déclenchée** : je ne peux pas pousser ni lancer GitHub Actions depuis ce
 sandbox. Le premier run vert devra être constaté après un push.
