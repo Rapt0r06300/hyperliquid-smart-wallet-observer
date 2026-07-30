@@ -40,6 +40,23 @@ def _nombre_ou_none(d: dict[str, Any] | None, cle: str) -> float | None:
     return None if f != f else f
 
 
+def _prix_journal(*candidats: Any) -> float | None:
+    """Premier prix STRICTEMENT POSITIF parmi les candidats, sinon `None`.
+
+    Le ledger carry ecrivait `price: None` sur 100 % de ses ouvertures : la position portait pourtant
+    `prix_perp_entree` / `entry_perp_px`, personne ne les transmettait. Resultat mesure : 0 episode
+    exploitable sur 190 lignes. Un prix absent reste `None` (jamais 0, jamais un mid de confort) — mais
+    quand il existe, il DOIT arriver au ledger, sinon l'episode est economiquement mort a l'ecriture.
+    """
+    for valeur in candidats:
+        if isinstance(valeur, bool) or not isinstance(valeur, (int, float)):
+            continue
+        f = float(valeur)
+        if f == f and f > 0:
+            return f
+    return None
+
+
 MARGE_USD = 50.0                       # notre marge fixe par position (perp). notional = marge × levier.
 COUT_SORTIE_2_JAMBES_BPS = 11.0        # sortie maker 2 jambes (miroir exact de l'entrée maker)
 AGE_MAX_H_DEFAUT = 24.0 * 14.0         # 14 j : au-delà on ferme pour revalider (pas de zombie)
@@ -358,6 +375,7 @@ class GestionnaireCarry:
                 realized = pnl_realise(pos, base_bps_courant=base_sortie)
                 self.journal.record(kind="CLOSE", coin=coin, side="CARRY",
                                     notional_usdt=pos["notional_usdt"], realized_net_pnl_usdc=realized,
+                                    price=_prix_journal(_nombre_ou_none(inputs, "perp_px")),
                                     reason=motif, now_ms=int(now_ms))
                 self.ouvertes.pop(coin, None)
                 evt["ferme"] = motif
@@ -395,6 +413,7 @@ class GestionnaireCarry:
                     self.journal.record(kind="RENFORT", coin=coin, side="CARRY",
                                         notional_usdt=float(pos["notional_usdt"]) - avant,
                                         realized_net_pnl_usdc=0.0, reason=MOTIF_RENFORT,
+                                        price=_prix_journal(_nombre_ou_none(inputs, "perp_px")),
                                         now_ms=int(now_ms))
                     evt["renfort"] = {"notional_ajoute": round(
                         float(pos["notional_usdt"]) - avant, 4)}
@@ -437,6 +456,8 @@ class GestionnaireCarry:
             self.ouvertes[coin] = pos
             self.journal.record(kind="OPEN", coin=coin, side="CARRY",
                                 notional_usdt=pos["notional_usdt"], reason="CARRY_NEUTRE_OUVERTURE",
+                                price=_prix_journal(pos.get("prix_perp_entree"),
+                                                    pos.get("entry_perp_px")),
                                 now_ms=int(now_ms))
             evt["ouvert"] = True
         return evt
