@@ -32,9 +32,15 @@ def test_le_carry_et_le_legacy_ne_peuvent_pas_emettre_dintent(legacy):
         PC.PaperIntent(strategy=legacy, coin="BTC", side=1, notional_usd=50.0, signal_observable_at_ms=1)
 
 
-def test_les_cinq_strategies_actives_sont_le_scope_declare():
-    assert set(PC.STRATEGIES_ACTIVES) == {"cross_venue_dislocation", "lead_lag", "copy_wallet",
-                                          "copy_vault", "twap_metaorder"}
+def test_les_strategies_actives_derivent_de_lautorite_unique():
+    from hl_observer.strategies.active_scope import (
+        active_strategy_families, strategy_scope_status, StrategyScopeStatus)
+    # P0 : paper_canonique DÉRIVE le scope de l'autorité unique (active_scope), il ne le redéclare pas.
+    assert set(PC.STRATEGIES_ACTIVES) == set(active_strategy_families())
+    assert set(PC.STRATEGIES_ACTIVES) == {"cross_venue_dislocation", "lead_lag", "copy_vault"}
+    # twap_metaorder est SHADOW dans l'autorité -> il NE matérialise PAS d'économie paper.
+    assert "twap_metaorder" not in PC.STRATEGIES_ACTIVES
+    assert strategy_scope_status("twap_metaorder") is StrategyScopeStatus.SHADOW
     assert "carry" not in PC.STRATEGIES_ACTIVES and "carry" in PC.STRATEGIES_LEGACY_OFF
 
 

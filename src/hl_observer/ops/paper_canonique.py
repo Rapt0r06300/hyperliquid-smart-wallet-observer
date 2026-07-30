@@ -26,12 +26,20 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any, Mapping, Sequence
 
+from hl_observer.strategies.active_scope import (
+    active_strategy_families as _active_strategy_families,
+    strategy_scope_status as _strategy_scope_status,
+    StrategyScopeStatus as _StrategyScopeStatus,
+)
+
 SCHEMA_VERSION = "hypersmart.paper_canonique.v1"
 
-#: §7 — allowlist stratégique AUTORITATIVE, au point d'émission du signal. Le carry en est ABSENT.
-STRATEGIES_ACTIVES = ("cross_venue_dislocation", "lead_lag", "copy_wallet", "copy_vault",
-                      "twap_metaorder")
-#: Familles legacy neutralisées : elles ne produisent ni signal, ni PnL, ni influence scoreboard.
+#: P0 — UNE SEULE vérité de scope : `strategies.active_scope` est l'autorité UNIQUE. Ce module ne
+#: redéclare AUCUNE allowlist concurrente ; il DÉRIVE l'ensemble matérialisant de l'autorité. Une
+#: famille SHADOW (ex. twap_metaorder) ou DISABLED (carry/funding) ne peut donc JAMAIS émettre un
+#: intent économique via paper_canonique — même si une liste locale réapparaissait ailleurs.
+STRATEGIES_ACTIVES: tuple[str, ...] = tuple(sorted(_active_strategy_families()))
+#: Familles legacy neutralisées : jamais de signal, PnL, capital ni influence scoreboard.
 STRATEGIES_LEGACY_OFF = ("carry", "funding", "triangular", "market_making")
 
 
