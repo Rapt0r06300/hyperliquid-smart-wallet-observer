@@ -25,6 +25,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterable, Mapping, Sequence
 
+from hl_observer.following import fills_dedup as FD
 from hl_observer.following import fills_sources as FS
 from hl_observer.following import wallet_reconstruction as WR
 from hl_observer.following import wallet_scoring_shortlist as WS
@@ -253,6 +254,10 @@ def executer(root: Path | str, *, sources: Sequence[tuple[str, str]] = SOURCES_D
                 "raison": "aucune source autoritative exploitable"}
 
     # ── reconstruction + gate DESYNC ────────────────────────────────────────────
+    # V3 §2.3 — dédup multi-source + fusion des champs autoritatifs, AVANT reconstruction.
+    dedup = FD.dedup_merge(fills)
+    fills = dedup.fills
+    rapport["dedup"] = dedup.resume()
     reconstruction = WR.reconstruire(fills)
     resume_reco = reconstruction.resume()
     par_wallet = WR.episodes_par_wallet(reconstruction)
