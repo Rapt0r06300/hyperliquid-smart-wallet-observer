@@ -1,0 +1,129 @@
+{
+  "analysis": {
+    "detail": "aucun horizon observable (HL trop lent / peu de data)",
+    "intervalles_hl": {
+      "n_coins_mesures": 5,
+      "p50_ms_par_coin_median": 7129.28
+    },
+    "statut": "NEED_MORE_DATA",
+    "strategie": "lead_lag_shadow"
+  },
+  "coins": [
+    "AAVE",
+    "AVAX",
+    "BTC",
+    "DASH",
+    "ETH",
+    "FARTCOIN",
+    "INJ",
+    "KBONK",
+    "KPEPE",
+    "LINK",
+    "MORPHO",
+    "NEO",
+    "ONDO",
+    "SOL",
+    "TRUMP",
+    "VVV",
+    "WLD",
+    "XLM"
+  ],
+  "control_coins": [
+    "DOGE",
+    "XRP"
+  ],
+  "frozen_evidence": {
+    "bootstrap_mean_ci95_bps": {},
+    "coins": [
+      "AAVE",
+      "AVAX",
+      "BTC",
+      "DASH",
+      "ETH",
+      "FARTCOIN",
+      "INJ",
+      "KBONK",
+      "KPEPE",
+      "LINK",
+      "MORPHO",
+      "NEO",
+      "ONDO",
+      "SOL",
+      "TRUMP",
+      "VVV",
+      "WLD",
+      "XLM"
+    ],
+    "control_coins": [
+      "DOGE",
+      "XRP"
+    ],
+    "control_edge_by_horizon_bps": {},
+    "costs": {
+      "executable": true,
+      "model": "real_hl_bid_ask_plus_configured_fees_and_slippage",
+      "round_trip_bps": 6.0
+    },
+    "criteria": {
+      "bootstrap_positive": false,
+      "controls_non_winning": false,
+      "costs_executable": true,
+      "dsr_acceptable": false,
+      "minimum_sample": false,
+      "net_positive": false,
+      "observable_horizon": false,
+      "pbo_acceptable": false,
+      "period_stability": false,
+      "placebo_beaten": false
+    },
+    "dataset_hash": "sha256:11b0c9da10b19189b443da281217db31548b9eccfa5a3d1987e447af5e4ba2ce",
+    "dsr_by_horizon": {},
+    "edge_net_par_horizon_bps": {},
+    "freeze_ts": "2026-07-29T23:28:23.845251+00:00",
+    "freeze_ts_ms": 1785367703845,
+    "frequency": {
+      "events_per_day": null
+    },
+    "global_trials": {
+      "added": 5,
+      "count": 5,
+      "ledger": "C:\\Users\\flo\\Desktop\\Projet invest\\runtime\\research_lab\\ledgers\\global_trials.jsonl"
+    },
+    "information_coefficient": {
+      "status": "UNMEASURABLE",
+      "value": null
+    },
+    "minimum_events": 30,
+    "observable_horizons_ms": [],
+    "pbo": {},
+    "period_stability_by_horizon": {},
+    "pipeline_hash": "sha256:5038a50b5cc9729f263eba23cd141e6455249bebd8beddb507afed5bd74f2068",
+    "placebo_edge_by_horizon_bps": {},
+    "promotion_status": "REJECTED",
+    "real_execution": false,
+    "regimes": {},
+    "requested_horizons_ms": [
+      50.0,
+      100.0,
+      250.0,
+      500.0,
+      1000.0
+    ],
+    "sample_n_by_horizon": {},
+    "schema_version": "hypersmart.lead_lag_frozen_evidence.v2",
+    "seuil_choc_bps": 8.0,
+    "source_detail": "aucun horizon observable (HL trop lent / peu de data)",
+    "source_status": "NEED_MORE_DATA",
+    "strategy": "lead_lag_shadow",
+    "unobservable_horizons_ms": [
+      50.0,
+      100.0,
+      250.0,
+      500.0,
+      1000.0
+    ]
+  },
+  "local_data_only": true,
+  "real_execution": false,
+  "schema_version": 1
+}

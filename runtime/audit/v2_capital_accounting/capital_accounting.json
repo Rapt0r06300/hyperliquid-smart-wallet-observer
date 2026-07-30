@@ -1,0 +1,206 @@
+{
+  "status": "PASS",
+  "checks": {
+    "gross_sums_both_legs": true,
+    "margin_is_explicit": true,
+    "hedged_net_is_zero": true,
+    "liquidatable_pnl_authoritative": true,
+    "partial_close_scales_exposure": true,
+    "turnover_counts_open_and_close": true,
+    "event_chain_valid": true
+  },
+  "before_reduce": {
+    "starting_balance_usdc": 1000.0,
+    "cash_balance_usdc": 1000.0,
+    "realized_pnl_usdc": 0.0,
+    "unrealized_pnl_usdc": 1.0,
+    "fees_paid_usdc": 0.0,
+    "funding_net_usdc": 0.0,
+    "equity_usdc": 1001.0,
+    "drawdown_usdc": 0.0,
+    "turnover_usdc": 200.0,
+    "positions": {
+      "pair:audit": {
+        "coin": "PAIR",
+        "position_id": "pair:audit",
+        "side": "LONG",
+        "quantity": 1.0,
+        "average_entry_price": 100.0,
+        "last_mark_price": 101.0,
+        "unrealized_pnl_usdc": 1.0,
+        "liquidatable_pnl_usdc": 0.5,
+        "leverage_effective": 10.0,
+        "leg_notional_usd": [
+          100.0,
+          100.0
+        ],
+        "leg_direction": [
+          1,
+          -1
+        ],
+        "liquidation_buffer_bps": 300.0
+      }
+    },
+    "event_count": 3,
+    "session_id": "audit:capital-accounting:v2",
+    "last_event_seq": 3,
+    "last_event_hash": "9c4620186ea75293dcfb372c14a9e999f9c6f609d8226fb4ecbe19b155ede149",
+    "roi": {
+      "pnl_usdc": 1.0,
+      "roi_on_initial_capital_pct": 0.1,
+      "roi_on_peak_margin_pct": null,
+      "roi_on_average_capital_at_risk_pct": null,
+      "initial_capital_usdc": 1000.0,
+      "peak_margin_usdc": null,
+      "average_capital_at_risk_usdc": null
+    },
+    "reconciliation": {
+      "ok": true,
+      "expected_equity_usdc": 1001.0,
+      "actual_equity_usdc": 1001.0,
+      "diff_usdc": 0.0,
+      "warnings": []
+    },
+    "capital_accounting": {
+      "starting_equity_usd": 1000.0,
+      "free_cash_usd": 980.0,
+      "margin_locked_usd": 20.0,
+      "gross_exposure_usd": 200.0,
+      "net_directional_exposure_usd": 0.0,
+      "leg_notional_usd": [
+        100.0,
+        100.0
+      ],
+      "leverage_effective": 10.0,
+      "liquidation_buffer_bps": 300.0,
+      "realized_pnl_usd": 0.0,
+      "unrealized_mid_pnl_usd": 1.0,
+      "liquidatable_pnl_usd": 0.5,
+      "mid_equity_usd": 1001.0,
+      "liquidatable_equity_usd": 1000.5,
+      "turnover_usd": 200.0,
+      "avg_margin_locked_usd": 20.0,
+      "peak_margin_locked_usd": 20.0,
+      "ROI_starting_equity": 0.0005,
+      "ROI_avg_margin_locked": 0.025,
+      "ROI_peak_margin_locked": 0.025,
+      "return_on_gross_exposure": 0.0025,
+      "roi_status": "LIQUIDATABLE_EXECUTABLE"
+    },
+    "pnl_audit": {
+      "status": "TRUSTED",
+      "pnl_valid": true,
+      "events_checked": 3,
+      "realized_pnl_usdc": 0.0,
+      "fees_paid_usdc": 0.0,
+      "funding_net_usdc": 0.0,
+      "unrealized_pnl_usdc": 1.0,
+      "recalculated_equity_usdc": 1001.0,
+      "recalculated_net_pnl_usdc": 1.0,
+      "open_positions": {
+        "pair:audit": 1.0
+      },
+      "issues": []
+    },
+    "authoritative_equity_usdc": 1000.5,
+    "strict_pnl_allowed": true,
+    "strict_roi_allowed": true
+  },
+  "after_reduce": {
+    "starting_balance_usdc": 1000.0,
+    "cash_balance_usdc": 1000.5,
+    "realized_pnl_usdc": 0.5,
+    "unrealized_pnl_usdc": 0.5,
+    "fees_paid_usdc": 0.0,
+    "funding_net_usdc": 0.0,
+    "equity_usdc": 1001.0,
+    "drawdown_usdc": 0.0,
+    "turnover_usdc": 300.0,
+    "positions": {
+      "pair:audit": {
+        "coin": "PAIR",
+        "position_id": "pair:audit",
+        "side": "LONG",
+        "quantity": 0.5,
+        "average_entry_price": 100.0,
+        "last_mark_price": 101.0,
+        "unrealized_pnl_usdc": 0.5,
+        "liquidatable_pnl_usdc": 0.375,
+        "leverage_effective": 10.0,
+        "leg_notional_usd": [
+          50.0,
+          50.0
+        ],
+        "leg_direction": [
+          1,
+          -1
+        ],
+        "liquidation_buffer_bps": 300.0
+      }
+    },
+    "event_count": 7,
+    "session_id": "audit:capital-accounting:v2",
+    "last_event_seq": 7,
+    "last_event_hash": "3cc2a54c18d5769c8a7b230c2cfb92b51000c99b07d346d36208d85074c66b4e",
+    "roi": {
+      "pnl_usdc": 1.0,
+      "roi_on_initial_capital_pct": 0.1,
+      "roi_on_peak_margin_pct": null,
+      "roi_on_average_capital_at_risk_pct": null,
+      "initial_capital_usdc": 1000.0,
+      "peak_margin_usdc": null,
+      "average_capital_at_risk_usdc": null
+    },
+    "reconciliation": {
+      "ok": true,
+      "expected_equity_usdc": 1001.0,
+      "actual_equity_usdc": 1001.0,
+      "diff_usdc": 0.0,
+      "warnings": []
+    },
+    "capital_accounting": {
+      "starting_equity_usd": 1000.0,
+      "free_cash_usd": 990.5,
+      "margin_locked_usd": 10.0,
+      "gross_exposure_usd": 100.0,
+      "net_directional_exposure_usd": 0.0,
+      "leg_notional_usd": [
+        50.0,
+        50.0
+      ],
+      "leverage_effective": 10.0,
+      "liquidation_buffer_bps": 300.0,
+      "realized_pnl_usd": 0.5,
+      "unrealized_mid_pnl_usd": 0.5,
+      "liquidatable_pnl_usd": 0.375,
+      "mid_equity_usd": 1001.0,
+      "liquidatable_equity_usd": 1000.875,
+      "turnover_usd": 300.0,
+      "avg_margin_locked_usd": 15.0,
+      "peak_margin_locked_usd": 20.0,
+      "ROI_starting_equity": 0.000875,
+      "ROI_avg_margin_locked": 0.0583333333,
+      "ROI_peak_margin_locked": 0.04375,
+      "return_on_gross_exposure": 0.00875,
+      "roi_status": "LIQUIDATABLE_EXECUTABLE"
+    },
+    "pnl_audit": {
+      "status": "TRUSTED",
+      "pnl_valid": true,
+      "events_checked": 7,
+      "realized_pnl_usdc": 0.5,
+      "fees_paid_usdc": 0.0,
+      "funding_net_usdc": 0.0,
+      "unrealized_pnl_usdc": 0.5,
+      "recalculated_equity_usdc": 1001.0,
+      "recalculated_net_pnl_usdc": 1.0,
+      "open_positions": {
+        "pair:audit": 0.5
+      },
+      "issues": []
+    },
+    "authoritative_equity_usdc": 1000.875,
+    "strict_pnl_allowed": true,
+    "strict_roi_allowed": true
+  }
+}
