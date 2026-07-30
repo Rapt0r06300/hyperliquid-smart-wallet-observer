@@ -1,6 +1,6 @@
 {
   "schema_version": "hypersmart.global_observer_pipeline.v1",
-  "genere_le": "2026-07-30T10:57:11.063195+00:00",
+  "genere_le": "2026-07-30T13:29:43.202851+00:00",
   "sources": [
     {
       "chemin": "runtime/data/vault_fills.jsonl",
@@ -29,7 +29,7 @@
       "vault_fills_live": 15590
     }
   },
-  "horizon_markout_ms": 5000,
+  "horizon_markout_ms": 30000,
   "cout_ar_bps": 9.0,
   "paper_only": true,
   "real_execution": false,
@@ -38,14 +38,14 @@
     "n_episodes": 7469,
     "par_action": {
       "OPEN": 189,
-      "ADD": 3553,
-      "REDUCE": 3618,
+      "ADD": 3554,
+      "REDUCE": 3617,
       "FLIP": 38,
       "CLOSE": 71
     },
     "n_twap": 0,
     "n_wallets": 14,
-    "n_desyncs": 1682,
+    "n_desyncs": 651,
     "n_doublons": 17439,
     "refus": {},
     "fiable": false
@@ -58,7 +58,7 @@
     "eligibles_core": 0
   },
   "markouts": {
-    "horizon_ms": 5000,
+    "horizon_ms": 30000,
     "n_episodes_avec_markout": 4594,
     "couverture": 0.6151,
     "coins_couverts": [

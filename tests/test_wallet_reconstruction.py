@@ -165,6 +165,70 @@ def test_le_resume_compte_les_actions_et_les_positions_ouvertes():
     assert resume["real_execution"] is False
 
 
+# ═══════════════ §2.1 — le premier fill observé n'est jamais un DESYNC ═══════════════
+def test_une_position_ouverte_avant_notre_fenetre_nest_pas_un_desync():
+    """Le wallet tenait déjà 100 avant qu'on regarde : notre zéro est une convention, pas une vérité."""
+    fills = [_fill(0, "A", 10.0, start_pos=100.0), _fill(1, "A", 10.0, start_pos=90.0)]
+    r = WR.reconstruire(fills)
+    resume = r.resume()
+    assert resume["n_desyncs"] == 0 and resume["fiable"] is True
+    assert resume["n_bootstraps"] == 1 and resume["wallets_bootstrappes"] == [W]
+    assert r.episodes[0]["bootstrap_etat_initial"] is True
+    assert r.episodes[0]["position_avant"] == 100.0 and r.episodes[0]["action"] == "REDUCE"
+    assert r.positions[(W, "BTC")].origine == "BOOTSTRAPPED_FROM_START_POSITION"
+
+
+def test_un_fill_reellement_manquant_reste_un_desync_apres_le_bootstrap():
+    """Fail-closed conservé : à partir du 2e fill, un écart signifie qu'il manque des fills."""
+    fills = [_fill(0, "B", 1.0, start_pos=100.0), _fill(1, "A", 1.0, start_pos=555.0)]
+    r = WR.reconstruire(fills)
+    assert r.resume()["n_desyncs"] == 1 and r.resume()["fiable"] is False
+    assert r.desyncs[0]["motif"] == "TRUE_DESYNC_MISSING_FILL"
+    assert r.episodes[0]["bootstrap_etat_initial"] is True and r.episodes[1]["desync"] is True
+
+
+def test_le_bootstrap_est_par_wallet_et_par_coin():
+    fills = [_fill(0, "A", 1.0, start_pos=50.0), _fill(1, "A", 1.0, start_pos=10.0, coin="ETH")]
+    r = WR.reconstruire(fills)
+    assert r.resume()["n_bootstraps"] == 2 and r.resume()["n_desyncs"] == 0
+
+
+def test_sans_start_pos_aucun_bootstrap_nest_invente():
+    r = WR.reconstruire([_fill(0, "B", 1.0)])
+    assert r.resume()["n_bootstraps"] == 0
+    assert r.positions[(W, "BTC")].origine == "ZERO_PAR_DEFAUT"
+
+
+# ═══════════════ §2.2 — ordre causal, pas lexical ═══════════════
+def test_les_tid_sont_ordonnes_numeriquement_pas_alphabetiquement():
+    """`tid:100` vs `tid:99` : en texte, 100 passe avant 99 et l'ordre d'execution s'inverse."""
+    a = _fill(0, "B", 1.0); a["tid"] = 100
+    b = dict(a); b["tid"] = 99; b["sz"] = 2.0
+    r = WR.reconstruire([a, b])          # meme timestamp
+    assert [e["tid"] for e in r.episodes] == [99, 100]
+
+
+def test_une_sequence_officielle_prime_sur_le_tid():
+    a = _fill(0, "B", 1.0); a["tid"] = 1; a["seq"] = 20
+    b = _fill(0, "B", 2.0); b["tid"] = 2; b["seq"] = 10
+    r = WR.reconstruire([a, b])
+    assert [e["tid"] for e in r.episodes] == [2, 1]
+
+
+def test_le_bloc_prime_sur_la_sequence():
+    a = _fill(0, "B", 1.0); a["tid"] = 1; a["block"] = 7
+    b = _fill(0, "B", 2.0); b["tid"] = 2; b["block"] = 5
+    r = WR.reconstruire([a, b])
+    assert [e["tid"] for e in r.episodes] == [2, 1]
+
+
+def test_sans_identifiant_ordonnable_lordre_darrivee_est_conserve():
+    a = {"user": W, "coin": "BTC", "side": "B", "sz": 1.0, "px": 100.0, "time": T0, "oid": 1}
+    b = {"user": W, "coin": "BTC", "side": "B", "sz": 2.0, "px": 100.0, "time": T0, "oid": 2}
+    r = WR.reconstruire([a, b])
+    assert [e["taille"] for e in r.episodes] == [1.0, 2.0]     # stable, jamais reordonne au hasard
+
+
 def test_securite_aucun_appel_reel():
     src = (RACINE / "src" / "hl_observer" / "following" / "wallet_reconstruction.py").read_text(
         encoding="utf-8")

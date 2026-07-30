@@ -73,6 +73,7 @@ class EtatPosition:
     prix_moyen: float | None = None
     ouverte_depuis_ms: int | None = None
     n_fills: int = 0
+    origine: str = "ZERO_PAR_DEFAUT"      # ou BOOTSTRAPPED_FROM_START_POSITION (§2.1)
 
 
 @dataclass
@@ -83,6 +84,7 @@ class Reconstruction:
     positions: dict[tuple[str, str], EtatPosition] = field(default_factory=dict)
     refus: dict[str, int] = field(default_factory=dict)
     desyncs: list[dict[str, Any]] = field(default_factory=list)
+    bootstraps: list[dict[str, Any]] = field(default_factory=list)
     doublons: int = 0
 
     def resume(self) -> dict[str, Any]:
@@ -100,6 +102,8 @@ class Reconstruction:
             "refus": dict(self.refus),
             "n_doublons": self.doublons,
             "n_desyncs": len(self.desyncs),
+            "n_bootstraps": len(self.bootstraps),
+            "wallets_bootstrappes": sorted({b["wallet"] for b in self.bootstraps}),
             "fiable": not self.desyncs,
             "note_desync": (None if not self.desyncs else
                             "des fills manquent : le cycle de vie reconstruit n'est pas fiable sur ces (wallet, coin)"),
@@ -116,6 +120,33 @@ def _classer(avant: float, apres: float) -> str:
     if (avant > 0) != (apres > 0):
         return "FLIP"
     return "ADD" if abs(apres) > abs(avant) else "REDUCE"
+
+
+def _entier_ou_none(valeur: Any) -> int | None:
+    if isinstance(valeur, bool) or valeur is None:
+        return None
+    try:
+        return int(valeur)
+    except (TypeError, ValueError):
+        return None
+
+
+def _cle_ordre(ts: int, fill: Mapping[str, Any], rang: int) -> tuple:
+    """§2.2 — ordre CAUSAL, pas lexical.
+
+    `tid:100` et `tid:99` compares comme du texte donnent 100 < 99 : l'ordre d'execution serait inverse.
+    Priorite : horodatage exchange, puis sequence/block officielle, puis `tid` NUMERIQUE, puis l'index
+    d'arrivee (stable), et seulement en dernier recours la cle textuelle.
+    """
+    sequence = _entier_ou_none(fill.get("seq") if "seq" in fill else fill.get("sequence"))
+    bloc = _entier_ou_none(fill.get("block") if "block" in fill else fill.get("block_number"))
+    tid_num = _entier_ou_none(fill.get("tid"))
+    return (int(ts),
+            bloc if bloc is not None else 1 << 62,
+            sequence if sequence is not None else 1 << 62,
+            tid_num if tid_num is not None else 1 << 62,
+            int(rang),
+            cle_fill(fill))
 
 
 def reconstruire(fills: Iterable[Mapping[str, Any]], *, utiliser_start_pos: bool = True) -> Reconstruction:
@@ -138,10 +169,10 @@ def reconstruire(fills: Iterable[Mapping[str, Any]], *, utiliser_start_pos: bool
         if ts is None:
             resultat.refus["HORODATAGE_ABSENT"] = resultat.refus.get("HORODATAGE_ABSENT", 0) + 1
             continue
-        lisibles.append((int(ts), fill))
-    lisibles.sort(key=lambda p: (p[0], cle_fill(p[1])))
+        lisibles.append((int(ts), fill, len(lisibles)))
+    lisibles.sort(key=lambda p: _cle_ordre(p[0], p[1], p[2]))
 
-    for ts, fill in lisibles:
+    for ts, fill, _rang in lisibles:
         cle = cle_fill(fill)
         if cle in vus:
             resultat.doublons += 1
@@ -167,11 +198,25 @@ def reconstruire(fills: Iterable[Mapping[str, Any]], *, utiliser_start_pos: bool
         suivi = etat.quantite
         declare = _f(fill.get("start_pos") if "start_pos" in fill else fill.get("startPosition"))
         desync = None
-        if utiliser_start_pos and declare is not None and abs(declare - suivi) > max(
+        bootstrap = False
+
+        # §2.1 — le PREMIER fill observé d'un (wallet, coin) ne peut PAS etre un desync.
+        # Notre accumulateur demarre a 0 par convention, mais le wallet pouvait deja tenir une position
+        # AVANT notre fenetre. Comparer a ce zero artificiel accusait a tort des wallets sains : c'est ce
+        # qui marquait 6 wallets sur 14 en DESYNC. Le premier `start_pos` valide BOOTSTRAPPE l'etat.
+        if utiliser_start_pos and declare is not None and etat.n_fills == 0:
+            bootstrap = True
+            etat.origine = "BOOTSTRAPPED_FROM_START_POSITION"
+            resultat.bootstraps.append(
+                {"wallet": wallet, "coin": coin, "ts_ms": ts, "position_initiale": declare,
+                 "motif": "INITIAL_STATE_BOOTSTRAP"})
+        elif utiliser_start_pos and declare is not None and abs(declare - suivi) > max(
                 TOLERANCE_DESYNC, abs(declare) * 1e-6):
+            # A partir du 2e fill, un ecart signifie qu'un fill MANQUE reellement. Fail-closed.
             desync = {"wallet": wallet, "coin": coin, "ts_ms": ts,
                       "position_declaree": declare, "position_suivie": round(suivi, 10),
-                      "ecart": round(declare - suivi, 10)}
+                      "ecart": round(declare - suivi, 10),
+                      "motif": "TRUE_DESYNC_MISSING_FILL"}
             resultat.desyncs.append(desync)
         avant = declare if (utiliser_start_pos and declare is not None) else suivi
 
@@ -202,6 +247,7 @@ def reconstruire(fills: Iterable[Mapping[str, Any]], *, utiliser_start_pos: bool
             "oid": fill.get("oid"), "tid": fill.get("tid"),
             "twap_id": (None if twap_id in (None, "", 0, "0") else twap_id),
             "source_start_pos": bool(declare is not None),
+            "bootstrap_etat_initial": bool(bootstrap),
             "desync": desync is not None,
             "real_execution": False,
         })
@@ -216,5 +262,5 @@ def episodes_par_wallet(reconstruction: Reconstruction) -> dict[str, list[dict[s
     return par_wallet
 
 
-__all__ = ["SCHEMA_VERSION", "ACTIONS", "REFUS", "TOLERANCE_DESYNC", "EtatPosition", "Reconstruction",
+__all__ = ["SCHEMA_VERSION", "ACTIONS", "REFUS", "TOLERANCE_DESYNC", "_cle_ordre", "EtatPosition", "Reconstruction",
            "cle_fill", "reconstruire", "episodes_par_wallet"]
