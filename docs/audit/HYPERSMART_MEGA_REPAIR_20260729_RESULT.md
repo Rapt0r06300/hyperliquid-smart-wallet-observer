@@ -3,7 +3,7 @@
 ## 1. HEAD avant / après
 
 - **Avant** : `15071edc10169dc4ea32816632ec5c78eee5ad85`
-- **Après** : voir §7 (dernier SHA du run)
+- **Après** : `3950b95`
 - Branche : `main`, sans branche annexe, sans réécriture d'historique, sans force.
 
 ## 2. Bugs trouvés, avec cause racine
@@ -51,6 +51,13 @@ Détail : `docs/audit/HYPERSMART_MASTER_WIRING_EVIDENCE_20260729.md`.
 - **Non résorbé par ce run** : les 372 testés-non-branchés. Le dire est le seul choix honnête.
 - IDEA 9/10/11/36/71/78-80 protègent encore depuis le **legacy** ⇒ `TODO_ACTIVE`, pas `DONE`.
 - HS-070→100 : **`A_REVALIDER` en bloc** — je n'ai pas rejoué les 31 preuves ici.
+
+## 6bis. SHA créés dans ce run
+
+`33df446` ALPHA-5 · `e50382c` ledger · `318887c` ALPHA-6 · `2aaa525` ledger · `ebf291e` ALPHA-7 ·
+`b53101b` ledger · `9209ab6` ALPHA-8 · `f496448` ledger · `65b9255` bloc 17 · `3dc7d9c` ledger ·
+`0420753` bloc 18 · `b1cb828` ledger · `5d4be75` bloc 19a · `6c9cc84` bloc 19b · `a230469` preuves
+runtime · `3950b95` rapport final.
 
 ## 7. Tests
 
