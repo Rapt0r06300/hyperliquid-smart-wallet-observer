@@ -42,10 +42,16 @@ def simuler_unwind(
     entry_price: float,
     carnet_bids=(),
     carnet_asks=(),
-    fee_bps: float = 3.5,
+    venue: object = None,
+    fee_bps: float | None = None,
     entry_fee_bps: float | None = None,
 ) -> dict[str, Any]:
-    """Débouclage RÉEL de la jambe nue contre un carnet causal. LONG→vendre les bids, SHORT→acheter les asks."""
+    """Débouclage RÉEL de la jambe nue contre un carnet causal. LONG→vendre les bids, SHORT→acheter les asks.
+
+    Frais : source UNIQUE `config.frais_venues.frais_taker_bps(venue)` si `fee_bps` non fourni."""
+    if fee_bps is None:
+        from hl_observer.config.frais_venues import frais_taker_bps
+        fee_bps = frais_taker_bps(venue)
     side = str(position_side or "").strip().upper()
     long = side in _LONG
     short = side in _SHORT
@@ -83,7 +89,7 @@ def simuler_hedge(
     carnet_unwind: Mapping[str, Any] | None = None,
     position_side: object = None,
     entry_price: float | None = None,
-    fee_bps_unwind: float = 3.5,
+    fee_bps_unwind: float | None = None,
 ) -> dict[str, Any]:
     """Simule un cycle de hedge ; si une jambe reste nue et un `carnet_unwind` est fourni, SIMULE l'unwind.
 

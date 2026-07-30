@@ -51,10 +51,15 @@ def cout_round_trip(
     entree: dict,
     sortie: dict,
     notional_usd: float,
-    fee_bps_hl: float = 3.5,
-    fee_bps_binance: float = 4.5,
+    fee_bps_hl: float | None = None,
+    fee_bps_binance: float | None = None,
 ) -> dict[str, Any]:
-    """Coût de round-trip complet (4 jambes + 4 frais). `entree`/`sortie` = {hl_bids,hl_asks,bin_bids,bin_asks}."""
+    """Coût de round-trip complet (4 jambes + 4 frais). `entree`/`sortie` = {hl_bids,hl_asks,bin_bids,bin_asks}.
+
+    Frais : source UNIQUE `config.frais_venues.frais_taker_bps` si non fournis (aucun hardcode concurrent)."""
+    from hl_observer.config.frais_venues import frais_taker_bps
+    fee_bps_hl = frais_taker_bps("HYPERLIQUID") if fee_bps_hl is None else float(fee_bps_hl)
+    fee_bps_binance = frais_taker_bps("BINANCE") if fee_bps_binance is None else float(fee_bps_binance)
     plan = _plan(direction)
     if plan is None:
         return {"schema_version": SCHEMA_VERSION, "statut": DIRECTION_INCONNUE,
