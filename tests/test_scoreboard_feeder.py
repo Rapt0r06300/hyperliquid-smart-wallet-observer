@@ -165,3 +165,41 @@ def test_to_dict_marque_paper_only_et_schema():
     assert d["paper_only"] is True and d["real_execution"] is False
     assert d["schema_version"] == F.SCHEMA_VERSION
     assert isinstance(d["rows"], list) and isinstance(d["manques_globaux"], list)
+
+
+# --- P1D : identité propagée jusqu'au scoreboard feed -----------------------
+def test_identite_couverture_compte_les_niveaux():
+    raw = (
+        _episode("p1", "BTC", "LONG", "o1", "c1", 5.0, "copy_vault")     # position_id, pas d'episode_id
+        + [
+            _ev("o2", OPEN, coin="ETH", side="SHORT", quantity=1.0,
+                refs={"strategy": "lead_lag", "position_id": "p2", "episode_id": "E:z"}),
+            _ev("c2", CLOSE, coin="ETH", side="SHORT", quantity=1.0, realized_pnl_usdc=3.0,
+                refs={"strategy": "lead_lag", "position_id": "p2", "episode_id": "E:z"}),
+        ]
+        + [
+            _ev("o3", OPEN, coin="SOL", side="LONG", quantity=1.0, refs={"strategy": "copy_vault"}),
+            _ev("c3", CLOSE, coin="SOL", side="LONG", quantity=1.0, realized_pnl_usdc=1.0,
+                refs={"strategy": "copy_vault"}),
+        ]
+    )
+    r = F.lignes_depuis_ledger(_seal(raw))
+    assert r.status == "TRUSTED"
+    cov = r.identite_couverture
+    assert cov["n_episodes"] == 3
+    assert cov["n_episode_id"] == 1          # E:z
+    assert cov["n_position_id"] == 1         # p1 (position_id sans episode_id)
+    assert cov["n_coin_side_fallback"] == 1  # SOL (ni episode_id ni position_id → ambigu)
+    assert r.to_dict()["identite_couverture"]["n_episode_id"] == 1
+
+
+def test_episode_id_present_est_compte_comme_identite_reelle():
+    raw = [
+        _ev("o1", OPEN, coin="BTC", side="LONG", quantity=1.0,
+            refs={"strategy": "copy_vault", "episode_id": "E:a"}),
+        _ev("c1", CLOSE, coin="BTC", side="LONG", quantity=1.0, realized_pnl_usdc=4.0,
+            refs={"strategy": "copy_vault", "episode_id": "E:a"}),
+    ]
+    r = F.lignes_depuis_ledger(_seal(raw))
+    assert r.identite_couverture["n_episode_id"] == 1
+    assert _par_strat(r)["copy_vault"].n_independent == 1

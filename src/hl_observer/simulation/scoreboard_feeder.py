@@ -74,6 +74,24 @@ def _cle_position(row: Mapping[str, Any], refs: Mapping[str, Any]) -> str:
     return f"{str(row.get('coin') or '').upper()}:{str(row.get('side') or '').upper()}"
 
 
+def _cle_episode(row: Mapping[str, Any], refs: Mapping[str, Any]) -> str:
+    """Clé d'épisode : `refs.episode_id` (identité RÉELLE stampée par economic_identity, P1C) prioritaire,
+    sinon la position (`position_id`, sinon `COIN:SIDE`). Aligne le feeder sur `EconomicIdentity.episode_key`."""
+    ep = refs.get("episode_id")
+    if ep not in (None, ""):
+        return str(ep)
+    return _cle_position(row, refs)
+
+
+def _niveau_identite(refs: Mapping[str, Any]) -> str:
+    """Niveau d'identité d'un épisode : `episode_id` réel > `position_id` > repli ambigu `coin_side`."""
+    if refs.get("episode_id") not in (None, ""):
+        return "episode_id"
+    if refs.get("position_id") not in (None, ""):
+        return "position_id"
+    return "coin_side"
+
+
 def _resoudre_strategie(strats: set[str]) -> str:
     """Une seule stratégie observée sur l'épisode → elle ; plusieurs → AMBIGUE ; aucune → ABSENTE."""
     nettoyees = {s for s in strats if s}
@@ -99,6 +117,7 @@ class ResultatScoreboard:
     n_episodes_clos: int
     manques_globaux: tuple[str, ...]  # union des champs UNMEASURABLE sur toutes les lignes
     raison: str | None = None
+    identite_couverture: dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -107,6 +126,7 @@ class ResultatScoreboard:
             "n_episodes_clos": self.n_episodes_clos,
             "rows": [r.to_dict() for r in self.rows],
             "manques_globaux": list(self.manques_globaux),
+            "identite_couverture": dict(self.identite_couverture),
             "raison": self.raison,
             "paper_only": True,
             "real_execution": False,
@@ -147,19 +167,20 @@ def lignes_depuis_ledger(
     # Ledger TRUSTED : reconstruire les épisodes (OPEN→CLOSE) dans l'ordre, un par cycle.
     ouvertes: dict[str, dict[str, Any]] = {}
     episodes: list[tuple[str, float]] = []          # (stratégie résolue, PnL réalisé du cycle)
+    niveaux: list[str] = []                         # niveau d'identité par épisode clos (P1C/P1D)
     for row in rows_in:
         et = _token(row.get("event_type"))
         refs = _refs(row)
         strat = _strategie(refs)
         if et in _OUVRANTS:
-            cle = _cle_position(row, refs)
-            ep = ouvertes.setdefault(cle, {"realized": 0.0, "strats": set()})
+            cle = _cle_episode(row, refs)
+            ep = ouvertes.setdefault(cle, {"realized": 0.0, "strats": set(), "niveau": _niveau_identite(refs)})
             if strat:
                 ep["strats"].add(strat)
             continue
         if et in _REALISANTS:
-            cle = _cle_position(row, refs)
-            ep = ouvertes.setdefault(cle, {"realized": 0.0, "strats": set()})
+            cle = _cle_episode(row, refs)
+            ep = ouvertes.setdefault(cle, {"realized": 0.0, "strats": set(), "niveau": _niveau_identite(refs)})
             if strat:
                 ep["strats"].add(strat)
             p = _finite(row.get("realized_pnl_usdc"))
@@ -167,8 +188,17 @@ def lignes_depuis_ledger(
                 ep["realized"] += p
             if et == _CLOTURANT:
                 episodes.append((_resoudre_strategie(ep["strats"]), round(ep["realized"], 10)))
+                niveaux.append(str(ep["niveau"]))
                 ouvertes.pop(cle, None)
             continue
+
+    # §3.5 — rendre VISIBLE la qualité d'identité (episode_id réel vs repli ambigu coin:side).
+    identite_couverture = {
+        "n_episodes": len(episodes),
+        "n_episode_id": niveaux.count("episode_id"),
+        "n_position_id": niveaux.count("position_id"),
+        "n_coin_side_fallback": niveaux.count("coin_side"),
+    }
 
     pnls_par_strat: dict[str, list[float]] = {}
     for strat, pnl in episodes:
@@ -188,6 +218,7 @@ def lignes_depuis_ledger(
     return ResultatScoreboard(
         status=TRUSTED, rows=rows, n_episodes_clos=len(episodes),
         manques_globaux=_union_manques(rows), raison=None,
+        identite_couverture=identite_couverture,
     )
 
 
