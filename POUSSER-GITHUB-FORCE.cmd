@@ -2,17 +2,16 @@
 chcp 65001 >nul
 cd /d "%~dp0"
 echo ============================================================
-echo   HyperSmart : etat du repo (ce script ne modifie RIEN)
-echo   Aucun git add, aucun commit, aucun push. Tu pousses toi-meme.
+echo   HyperSmart : PUSH des commits (faits par Claude) vers GitHub
+echo   Ce script POUSSE seulement : aucun git add, aucun commit, aucun --force.
 echo ============================================================
 echo.
-echo === git status ===
-git status --short
+git push origin main
 echo.
-echo === 8 derniers commits locaux ===
-git log --oneline -8
-echo.
-echo Pour pousser quand TU veux : git push origin main
-echo (ni add, ni commit, ni push --force ne sont faits ici)
+if %ERRORLEVEL%==0 (
+  echo OK : commits pousses sur https://github.com/Rapt0r06300/hyperliquid-smart-wallet-observer
+) else (
+  echo ECHEC : lis le message ci-dessus.
+)
 echo.
 pause
