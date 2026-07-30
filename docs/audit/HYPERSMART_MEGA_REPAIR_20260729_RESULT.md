@@ -106,6 +106,19 @@ déjà établie du projet (edge de copie négatif). Aucun résultat positif n'a 
 
 Classement fondé sur ce qui **débloque une mesure**, pas sur une intuition d'edge.
 
+## 10bis. Les 3 expériences ont été EXÉCUTÉES (suite du run)
+
+| # | Étape | SHA | Résultat réel |
+|---|---|---|---|
+| 1 | Réparer le producteur carry | `1fc005a` | Cause racine : la position portait `prix_perp_entree`, les 3 écritures (OPEN/CLOSE/RENFORT) ne le transmettaient **jamais**. Corrigé + canari. **Les 190 lignes déjà écrites restent non mesurables** — la donnée n'a jamais été capturée. |
+| 2 | Joindre la profondeur L2 aux épisodes | `0769e20` | Couverture **21 % (4/19)**, capacité médiane **318,49 USD**, `fill_ratio` médian 1,0 / min 0,613. Non joints nommés : 9 `CARNET_PERIME`, 6 `SANS_CARNET_CAUSAL`. Qualité `TOP_OF_BOOK_ONLY`. |
+| 3 | Campagne ALPHA-5 sur tape réelle | `395e047` | BTC 8 chocs · SOL 25 · INJ 50. **36 essais par coin, tous `SHADOW_DONNEES_INSUFFISANTES`.** La tape est trop courte pour conclure sur la moindre condition. |
+
+**Ce que ces trois résultats disent ensemble** : les instruments fonctionnent, la donnée ne suit pas encore.
+Le seuil de 8 bps n'a **pas** été baissé pour fabriquer des événements — ce serait le retune après lecture
+que la roadmap interdit. Ce qui manque est une campagne de collecte simultanée (carnets + BBO + sonde), pas
+du code.
+
 ## 11. Limite majeure
 
 **Rien n'a été exécuté sous Windows.** Ni `LANCER_HYPERSMART.cmd self-test`, ni
