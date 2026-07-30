@@ -38,6 +38,10 @@ COUT_AR_DEFAUT_BPS = 16.0             # coût aller-retour de SCREENING (fallbac
 COPY_NOTIONAL_USD = 500.0            # TAILLE DE COPIE pour le coût L2 : on tradrait PETIT, PAS la taille du leader
 LATE_FRAC = 0.66
 JOUR_MS = 86_400_000.0
+DELAIS_ENTREE_MS = (50, 100, 250, 500, 1000, 2000, 5000)
+TWAP_SLICE_INTERVAL_MS = 30_000.0
+TWAP_CATCH_UP_RATIO = 1.25
+ZERO_TWAP_HASH = "0x" + ("0" * 64)
 # coûts L2 réels (mêmes hypothèses que la cohorte RAW)
 SLIPPAGE_BASE_BPS = 1.0
 SLIPPAGE_IMPACT_COEF = 8.0
@@ -77,8 +81,31 @@ def dedup_fills(fills: list) -> list:
 
 def metaorder_id(vault: str, coin: str, sens: int, t0: int) -> str:
     """ID STABLE et déterministe d'un métaordre = hash court de (vault, coin, sens, t0 du 1er slice)."""
-    brut = "%s|%s|%d|%d" % (str(vault).lower(), str(coin).upper(), int(sens), int(t0))
+    brut = f"{str(vault).lower()}|{str(coin).upper()}|{int(sens)}|{int(t0)}"
     return "mo-" + hashlib.sha1(brut.encode("utf-8")).hexdigest()[:12]
+
+
+def twap_metaorder_id(vault: str, coin: str, twap_id) -> str:
+    """ID stable d'un TWAP visible, indépendant du découpage temporel local."""
+    brut = f"{str(vault).lower()}|{str(coin).upper()}|{twap_id}"
+    return "twap-" + hashlib.sha1(brut.encode("utf-8")).hexdigest()[:12]
+
+
+def _fill_identity_keys(fill: dict | None) -> tuple:
+    """Identités fortes d'un fill, sans utiliser le hash nul des TWAP."""
+    fill = fill or {}
+    keys: list[tuple[str, str]] = []
+    tid = fill.get("tid")
+    if tid is not None:
+        keys.append(("tid", str(tid)))
+    oid = fill.get("oid")
+    ts = fill.get("time")
+    if oid is not None and ts is not None:
+        keys.append(("oid_time", f"{oid}:{ts}"))
+    raw_hash = str(fill.get("hash") or "").lower()
+    if raw_hash and raw_hash != ZERO_TWAP_HASH:
+        keys.append(("hash", raw_hash))
+    return tuple(keys)
 
 
 def index_twap(twap_slice_fills) -> dict:
@@ -86,14 +113,231 @@ def index_twap(twap_slice_fills) -> dict:
     for s in (twap_slice_fills or []):
         f = (s or {}).get("fill") or {}
         tw = (s or {}).get("twapId")
-        for k in (f.get("tid"), f.get("hash")):
-            if k is not None:
-                idx[k] = tw
+        if tw is None:
+            continue
+        for key in _fill_identity_keys(f):
+            idx[key] = tw
     return idx
 
 
+def twap_id_fill(fill: dict | None, idx_twap: dict) -> int | str | None:
+    for key in _fill_identity_keys(fill):
+        if key in (idx_twap or {}):
+            return idx_twap[key]
+    # Compatibilité avec les index historiques tid/hash sans préfixe.
+    for legacy_key in ((fill or {}).get("tid"), (fill or {}).get("hash")):
+        if legacy_key is not None and legacy_key in (idx_twap or {}):
+            return idx_twap[legacy_key]
+    return None
+
+
 def est_twap(f, idx_twap: dict) -> bool:
-    return bool(idx_twap) and ((f or {}).get("tid") in idx_twap or (f or {}).get("hash") in idx_twap)
+    return twap_id_fill(f, idx_twap) is not None
+
+
+def normaliser_twap_states(payload, *, observed_at_ms: int | None = None) -> dict:
+    """Normalise le format officiel ``states: Array<[twapId, TwapState]>``."""
+    data = payload or {}
+    if isinstance(data, dict) and data.get("channel") == "twapStates":
+        data = data.get("data") or {}
+    if isinstance(data, dict):
+        observed = data.get("observed_at_ms", data.get("received_at_ms", observed_at_ms))
+        states = data.get("states") or []
+    else:
+        observed = observed_at_ms
+        states = data if isinstance(data, list) else []
+    out: dict = {}
+    for item in states:
+        if not isinstance(item, (list, tuple)) or len(item) != 2 or not isinstance(item[1], dict):
+            continue
+        twap_id, state = item
+        try:
+            total = float(state.get("sz"))
+            executed = float(state.get("executedSz") or 0.0)
+            minutes = float(state.get("minutes") or 0.0)
+            started_at = int(state.get("timestamp") or 0)
+            executed_ntl = float(state.get("executedNtl") or 0.0)
+        except (TypeError, ValueError):
+            continue
+        if total <= 0:
+            continue
+        expected_slices = max(1.0, minutes * 2.0)
+        out[twap_id] = {
+            "twap_id": twap_id,
+            "coin": str(state.get("coin") or "").upper(),
+            "side": str(state.get("side") or "").upper(),
+            "reduce_only": bool(state.get("reduceOnly")),
+            "randomize": bool(state.get("randomize")),
+            "total_size": total,
+            "executed_size": max(0.0, executed),
+            "executed_notional": executed_ntl,
+            "minutes": minutes,
+            "started_at_ms": started_at,
+            "normal_slice_size": total / expected_slices,
+            "fraction_executed": min(1.0, max(0.0, executed) / total),
+            "residual_size": max(0.0, total - max(0.0, executed)),
+            "observed_at_ms": int(observed) if observed is not None else None,
+            "source": "hyperliquid_ws:twapStates",
+        }
+    return out
+
+
+def etat_twap_observable(twap_state_snapshots, twap_id, *, as_of_ms: int) -> dict | None:
+    """Dernier état reçu avant la décision ; un état non horodaté est refusé."""
+    chosen = None
+    chosen_at = -1
+    for snapshot in twap_state_snapshots or []:
+        if not isinstance(snapshot, dict):
+            continue
+        observed = snapshot.get("observed_at_ms", snapshot.get("received_at_ms"))
+        try:
+            observed_i = int(observed)
+        except (TypeError, ValueError):
+            continue
+        if observed_i > int(as_of_ms) or observed_i < chosen_at:
+            continue
+        states = normaliser_twap_states(snapshot, observed_at_ms=observed_i)
+        state = states.get(twap_id)
+        if state is None:
+            state = next(
+                (candidate for key, candidate in states.items() if str(key) == str(twap_id)),
+                None,
+            )
+        if state is not None:
+            chosen = state
+            chosen_at = observed_i
+    return chosen
+
+
+def rejouer_metaordres_causaux(
+    fills: list,
+    *,
+    vault: str,
+    idx_twap: dict,
+    twap_state_snapshots=None,
+    intervalle_ms: float = INTERVALLE_METAORDRE_MS,
+) -> list:
+    """Rejoue les slices dans l'ordre sans consulter un événement futur."""
+    events = sorted(dedup_fills(fills), key=lambda f: int((f or {}).get("time") or 0))
+    groups: dict[str, dict] = {}
+    inferred_by_coin: dict[str, str] = {}
+    previous_side_by_coin: dict[str, int] = {}
+    out: list = []
+    for fill in events:
+        side = sens_fill(fill)
+        if side == 0:
+            continue
+        coin = str(fill.get("coin") or "").upper()
+        event_time = int(fill.get("time") or 0)
+        decision_time = int(fill.get("_received_at_ms") or fill.get("received_at_ms") or event_time)
+        direct_twap_id = twap_id_fill(fill, idx_twap)
+        source = "DIRECT_TWAP_ID" if direct_twap_id is not None else "INFERRED_METAORDER"
+        if direct_twap_id is not None:
+            group_id = twap_metaorder_id(vault, coin, direct_twap_id)
+        else:
+            group_id = inferred_by_coin.get(coin)
+            prior = groups.get(group_id or "")
+            if (
+                prior is None
+                or prior["side"] != side
+                or event_time - prior["last_time_ms"] > intervalle_ms
+            ):
+                group_id = metaorder_id(vault, coin, side, event_time)
+                inferred_by_coin[coin] = group_id
+        current = groups.get(group_id)
+        is_new = current is None
+        reversal = bool(is_new and previous_side_by_coin.get(coin) == -side)
+        if current is None:
+            current = {
+                "side": side,
+                "first_time_ms": event_time,
+                "last_time_ms": event_time,
+                "slice_count": 0,
+                "executed_from_fills": 0.0,
+            }
+            groups[group_id] = current
+            previous_side_by_coin[coin] = side
+        previous_time = current["last_time_ms"]
+        current["slice_count"] += 1
+        current["last_time_ms"] = event_time
+        try:
+            slice_size = abs(float(fill.get("sz") or 0.0))
+        except (TypeError, ValueError):
+            slice_size = 0.0
+        current["executed_from_fills"] += slice_size
+
+        observed_state = None
+        if direct_twap_id is not None:
+            observed_state = etat_twap_observable(
+                twap_state_snapshots,
+                direct_twap_id,
+                as_of_ms=decision_time,
+            )
+        total_size = (observed_state or {}).get("total_size")
+        executed_size = max(
+            current["executed_from_fills"],
+            float((observed_state or {}).get("executed_size") or 0.0),
+        )
+        if total_size:
+            residual_size = max(0.0, float(total_size) - executed_size)
+            fraction_executed = min(1.0, executed_size / float(total_size))
+            residual_status = "MEASURED_FROM_TWAP_STATE"
+        else:
+            residual_size = None
+            fraction_executed = None
+            residual_status = "RESIDUAL_UNMEASURABLE"
+        if reversal:
+            stage = "REVERSAL"
+        elif fraction_executed is not None and fraction_executed >= LATE_FRAC:
+            stage = "LATE_STAGE"
+        elif current["slice_count"] == 1:
+            stage = "FIRST_SLICE"
+        else:
+            stage = "CONTINUATION"
+
+        normal_slice_size = (observed_state or {}).get("normal_slice_size")
+        catch_up_ratio = (
+            slice_size / float(normal_slice_size)
+            if normal_slice_size and float(normal_slice_size) > 0
+            else None
+        )
+        if catch_up_ratio is None:
+            slice_mode = "UNMEASURABLE"
+        elif catch_up_ratio > TWAP_CATCH_UP_RATIO:
+            slice_mode = "CATCH_UP"
+        else:
+            slice_mode = "NORMAL"
+        started_at = int((observed_state or {}).get("started_at_ms") or current["first_time_ms"])
+        duration_ms = float((observed_state or {}).get("minutes") or 0.0) * 60_000.0
+        eta_ms = max(0, round(started_at + duration_ms - decision_time)) if duration_ms > 0 else None
+        out.append({
+            "_fill": fill,
+            "metaorder_id": group_id,
+            "twap_id": direct_twap_id,
+            "metaorder_source": source,
+            "is_twap": direct_twap_id is not None,
+            "stade": stage,
+            "metaorder_started_at_ms": current["first_time_ms"],
+            "slice_i": current["slice_count"] - 1,
+            "n_slices_observed": current["slice_count"],
+            "slice_size": slice_size,
+            "slice_mode": slice_mode,
+            "catch_up_ratio": round(catch_up_ratio, 6) if catch_up_ratio is not None else None,
+            "cadence_ms": event_time - previous_time if current["slice_count"] > 1 else None,
+            "estimated_total_size": total_size,
+            "executed_cumulative_size": round(executed_size, 12),
+            "fraction_executed": round(fraction_executed, 8) if fraction_executed is not None else None,
+            "residual_estimated_size": round(residual_size, 12) if residual_size is not None else None,
+            "residual_status": residual_status,
+            "eta_ms": eta_ms,
+            "reduce_only": (observed_state or {}).get("reduce_only"),
+            "twap_state_observed_at_ms": (observed_state or {}).get("observed_at_ms"),
+            "decision_time_ms": decision_time,
+            "causal_replay": True,
+            "shadow": True,
+            "real_execution": False,
+        })
+    return out
 
 
 def detecter_metaordres(fills: list, *, intervalle_ms: float = INTERVALLE_METAORDRE_MS) -> list:
@@ -123,12 +367,14 @@ def detecter_metaordres(fills: list, *, intervalle_ms: float = INTERVALLE_METAOR
 
 
 def classer_stade(i: int, n: int, meta: dict, *, late_frac: float = LATE_FRAC) -> str:
+    """Classe un préfixe causal ; `n` reste accepté pour compatibilité mais n'est pas consulté."""
     if meta.get("reversal") and i == 0:
         return "REVERSAL"
+    fraction = meta.get("fraction_executed")
+    if fraction is not None and float(fraction) >= late_frac:
+        return "LATE_STAGE"
     if i == 0:
         return "FIRST_SLICE"
-    if n <= 1 or i >= n - 1 or (i / n) >= late_frac:
-        return "LATE_STAGE"
     return "CONTINUATION"
 
 
@@ -207,7 +453,8 @@ def _cout_screening(coin, taille_usd) -> tuple[float, str]:
 
 def construire_signaux(fills: list, *, vault: str, idx_twap: dict, tape_coin: list, tape_btc: list,
                        cout_fn=None, horizon_ms: float = HORIZON_FWD_MS, copy_notional_usd: float = COPY_NOTIONAL_USD,
-                       intervalle_ms: float = INTERVALLE_METAORDRE_MS, maintenant_ms: float | None = None) -> list:
+                       intervalle_ms: float = INTERVALLE_METAORDRE_MS, maintenant_ms: float | None = None,
+                       twap_state_snapshots=None) -> list:
     """CŒUR TESTABLE : fills BRUTS d'un (vault, coin) → un signal par slice, avec metaorder_id STABLE, stade,
     TWAP, taille rel, maker/taker, les 3 âges, jour, coût L2 réel (via cout_fn) et PnL forward net + placebo.
     IMPORTANT : le coût L2 est calculé pour NOTRE taille de copie (`copy_notional_usd`, petite), PAS pour la
@@ -215,44 +462,105 @@ def construire_signaux(fills: list, *, vault: str, idx_twap: dict, tape_coin: li
     N'ouvre RIEN ; slice sans forward → pnl_net_bps=None (jamais inventé). Fills dédupliqués en amont."""
     now = maintenant_ms if maintenant_ms is not None else time.time() * 1000
     cfn = cout_fn or _cout_screening
-    metas = detecter_metaordres(fills, intervalle_ms=intervalle_ms)
+    replay = rejouer_metaordres_causaux(
+        fills,
+        vault=vault,
+        idx_twap=idx_twap,
+        twap_state_snapshots=twap_state_snapshots,
+        intervalle_ms=intervalle_ms,
+    )
     out: list = []
-    for meta in metas:
-        n = len(meta["fills"])
-        coin0 = str(meta["fills"][0].get("coin") or "").upper()
-        mid_id = metaorder_id(vault, coin0, meta["sens"], meta["t0"])
-        for i, f in enumerate(meta["fills"]):
-            t = int(f.get("time") or 0)
-            sens = meta["sens"]
-            sz = abs(float(f.get("sz") or 0.0))
-            px = f.get("px")
-            try:
-                taille_usd = sz * float(px) if px is not None else None
-            except (TypeError, ValueError):
-                taille_usd = None
-            cout_bps, cout_src = cfn(coin0, copy_notional_usd)   # coût pour NOTRE taille de copie, pas celle du leader
-            pe_coin = prix_au(tape_coin, t) if tape_coin else (float(px) if px is not None else None)
-            pf_coin = prix_au(tape_coin, t + horizon_ms) if tape_coin else None
-            pe_btc = prix_au(tape_btc, t) if tape_btc else None
-            pf_btc = prix_au(tape_btc, t + horizon_ms) if tape_btc else None
-            plc = placebo_bps(pe_coin, pf_coin, pe_btc, pf_btc, sens) or {}
-            ref = meta["sz_tot"] * float(px) if px is not None else None
-            out.append({
-                "metaorder_id": mid_id, "stade": classer_stade(i, n, meta), "is_twap": est_twap(f, idx_twap),
-                "sens": sens, "vault": vault, "coin": coin0, "slice_i": i, "n_slices": n,
-                "taille_usd": round(taille_usd, 2) if taille_usd is not None else None,
-                "taille_relative": round(taille_usd / ref, 4) if (taille_usd and ref) else None,
-                "maker_taker": maker_taker(f),
-                "age_stade_ms": t - meta["t0"], "age_fill_hl_ms": round(now - t), "latence_locale_ms": None,
-                "jour": int(t // JOUR_MS),
-                "horizon_ms": horizon_ms, "cout_ar_bps": cout_bps, "cout_source": cout_src,
-                "cout_notional_usd": copy_notional_usd,
-                "pnl_net_bps": pnl_forward_net_bps(pe_coin, pf_coin, sens, cout_bps),
-                "ret_coin_bps": plc.get("ret_coin_bps"), "ret_marche_bps": plc.get("ret_marche_bps"),
-                "alpha_vs_marche_bps": plc.get("alpha_vs_marche_bps"),
-                "fill_time": t, "tid": f.get("tid"), "hash": f.get("hash"),
-            })
+    for evidence in replay:
+        f = evidence["_fill"]
+        t = int(f.get("time") or 0)
+        sens = sens_fill(f)
+        coin0 = str(f.get("coin") or "").upper()
+        sz = abs(float(f.get("sz") or 0.0))
+        px = f.get("px")
+        try:
+            taille_usd = sz * float(px) if px is not None else None
+        except (TypeError, ValueError):
+            taille_usd = None
+        cout_bps, cout_src = cfn(coin0, copy_notional_usd)
+        pe_coin = prix_au(tape_coin, t) if tape_coin else (float(px) if px is not None else None)
+        pf_coin = prix_au(tape_coin, t + horizon_ms) if tape_coin else None
+        pe_btc = prix_au(tape_btc, t) if tape_btc else None
+        pf_btc = prix_au(tape_btc, t + horizon_ms) if tape_btc else None
+        plc = placebo_bps(pe_coin, pf_coin, pe_btc, pf_btc, sens) or {}
+        total_size = evidence.get("estimated_total_size")
+        public_evidence = {key: value for key, value in evidence.items() if key != "_fill"}
+        out.append({
+            **public_evidence,
+            "sens": sens,
+            "vault": vault,
+            "coin": coin0,
+            "n_slices": evidence["n_slices_observed"],
+            "taille_usd": round(taille_usd, 2) if taille_usd is not None else None,
+            "taille_relative": round(sz / float(total_size), 4) if total_size else None,
+            "maker_taker": maker_taker(f),
+            "age_stade_ms": t - int(evidence["metaorder_started_at_ms"]),
+            "age_fill_hl_ms": round(now - t),
+            "latence_locale_ms": None,
+            "jour": int(t // JOUR_MS),
+            "horizon_ms": horizon_ms,
+            "cout_ar_bps": cout_bps,
+            "cout_source": cout_src,
+            "cout_notional_usd": copy_notional_usd,
+            "pnl_net_bps": pnl_forward_net_bps(pe_coin, pf_coin, sens, cout_bps),
+            "ret_coin_bps": plc.get("ret_coin_bps"),
+            "ret_marche_bps": plc.get("ret_marche_bps"),
+            "alpha_vs_marche_bps": plc.get("alpha_vs_marche_bps"),
+            "fill_time": t,
+            "tid": f.get("tid"),
+            "oid": f.get("oid"),
+            "hash": f.get("hash"),
+        })
     return out
+
+
+def evaluer_delais_entree(
+    signaux: list,
+    tape_par_coin: dict,
+    *,
+    delays_ms=DELAIS_ENTREE_MS,
+    horizon_ms: float = HORIZON_FWD_MS,
+) -> dict:
+    """Mesure SHADOW des délais pré-enregistrés, avec une sortie à horizon fixe."""
+    result: dict = {}
+    for delay in delays_ms:
+        by_stage: dict[str, list[float]] = {}
+        n_unmeasurable = 0
+        for signal in signaux or []:
+            coin = str(signal.get("coin") or "").upper()
+            tape = (tape_par_coin or {}).get(coin) or []
+            t0 = int(signal.get("fill_time") or 0)
+            entry = prix_au(tape, t0 + int(delay))
+            exit_price = prix_au(tape, t0 + int(horizon_ms))
+            pnl = pnl_forward_net_bps(
+                entry,
+                exit_price,
+                int(signal.get("sens") or 0),
+                float(signal.get("cout_ar_bps") or 0.0),
+            )
+            if pnl is None:
+                n_unmeasurable += 1
+                continue
+            by_stage.setdefault(str(signal.get("stade") or "UNKNOWN"), []).append(pnl)
+        result[str(int(delay))] = {
+            "delay_ms": int(delay),
+            "n_mesurable": sum(len(values) for values in by_stage.values()),
+            "n_non_mesurable": n_unmeasurable,
+            "par_stade": {
+                stage: {
+                    "n": len(values),
+                    "pnl_net_bps_moy": round(sum(values) / len(values), 6),
+                }
+                for stage, values in sorted(by_stage.items())
+            },
+            "shadow": True,
+            "real_execution": False,
+        }
+    return result
 
 
 def bootstrap_clusterise(paires: list, *, n: int = 2000, seed: int = 0, alpha: float = 0.05) -> dict:
@@ -600,7 +908,7 @@ def _resume_book(book) -> dict | None:
 
 
 def executer(root: str | Path, vaults: list, *, fills_provider=None, twap_provider=None, book_provider=None,
-             tape=None, horizon_ms: float = HORIZON_FWD_MS, fenetre_ms: float = 7_200_000.0,
+             twap_state_provider=None, tape=None, horizon_ms: float = HORIZON_FWD_MS, fenetre_ms: float = 7_200_000.0,
              config_hash: str = "", git_commit: str = "", maintenant_ms: float | None = None) -> dict:
     """Passe SHADOW : par vault, `userFillsByTime` + `userTwapSliceFills` (statut TWAP) ; carnet BRUT par coin
     (VWAP-walk) → coût per-signal + **courbe edge/coûts par notional** (10..500 $, spread/slippage/frais séparés,
@@ -629,7 +937,9 @@ def executer(root: str | Path, vaults: list, *, fills_provider=None, twap_provid
         fee_config = round(2.0 * float(frais_venues(root)[0]), 3)  # palier CONFIG (donnée de sensibilité, PAS le défaut)
     except Exception:  # noqa: BLE001
         fee_config = 7.0
-    from hl_observer.experimental import metaorder_l2_tape as MT   # tape L2 synchronisée (coût entrée/sortie horodaté)
+    from hl_observer.experimental import (
+        metaorder_l2_tape as MT,  # tape L2 synchronisée (coût entrée/sortie horodaté)
+    )
     tape_l2 = MT.charger_tape(root)
     tape_btc = tape.get("BTC") or []
     start = int(now - fenetre_ms)
@@ -662,6 +972,10 @@ def executer(root: str | Path, vaults: list, *, fills_provider=None, twap_provid
             twap_statut[v] = "couvert_avec_twap" if (isinstance(twaps, list) and twaps) else "couvert_vide"
         except Exception:  # noqa: BLE001
             twaps, twap_statut[v] = [], "non_couvert"           # endpoint indisponible ≠ aucun TWAP
+        try:
+            twap_states = twap_state_provider(v, now) if twap_state_provider is not None else []
+        except Exception:  # noqa: BLE001
+            twap_states = []
         if not isinstance(fills, list):
             continue
         idx = index_twap(twaps if isinstance(twaps, list) else [])
@@ -671,7 +985,8 @@ def executer(root: str | Path, vaults: list, *, fills_provider=None, twap_provid
                 par_coin.setdefault(str(f.get("coin") or "").upper(), []).append(f)
         for coin, fs in par_coin.items():
             sigs = construire_signaux(fs, vault=v, idx_twap=idx, tape_coin=tape.get(coin) or [],
-                                      tape_btc=tape_btc, cout_fn=_cout_fn, horizon_ms=horizon_ms, maintenant_ms=now)
+                                      tape_btc=tape_btc, cout_fn=_cout_fn, horizon_ms=horizon_ms, maintenant_ms=now,
+                                      twap_state_snapshots=twap_states)
             for s in sigs:
                 s.update({"version": VERSION, "config_hash": config_hash, "git_commit": git_commit,
                           "shadow": True, "real_execution": False, "ts_ms": int(now)})
@@ -699,6 +1014,7 @@ def executer(root: str | Path, vaults: list, *, fills_provider=None, twap_provid
     prereg = write_preregistration(root, horizon_ms=horizon_ms)
     stats = stats_par_stade(signaux)
     wf = walk_forward_purge(signaux, horizon_ms=horizon_ms)
+    delais = evaluer_delais_entree(signaux, tape, horizon_ms=horizon_ms)
     poids = SD.poids_info(appels_budget)
     SD.journaliser_budget(root, "metaorder_shadow", poids, 600.0)
     budget = SD.budget_total(root)
@@ -710,6 +1026,7 @@ def executer(root: str | Path, vaults: list, *, fills_provider=None, twap_provid
         "n_dans_tape_l2": len(tape_l2),
         "stats_par_stade": stats, "courbe_edge_cout_par_notional": courbe,
         "execution_comparee_continuation_late": execs, "walk_forward_purge": wf,
+        "delais_entree_shadow": delais,
         "par_vault": agreger_par(signaux, "vault"), "par_coin": agreger_par(signaux, "coin"),
         "par_jour": agreger_par(signaux, "jour"), "twap_statut_par_vault": n_twap,
         "preregistration": str(prereg.name),
@@ -718,7 +1035,7 @@ def executer(root: str | Path, vaults: list, *, fills_provider=None, twap_provid
     return {"n_signaux": len(signaux), "n_metaordres": len({s["metaorder_id"] for s in signaux}),
             "poids_passe": poids, "n_appels": len(appels_budget), "budget_total": budget,
             "l2_synchronise_pct": round(100 * n_sync / len(signaux), 1) if signaux else 0.0,
-            "stats": stats, "courbe": courbe, "execs": execs}
+            "stats": stats, "courbe": courbe, "execs": execs, "delais": delais}
 
 
 def _comparer_stades(signaux: list, tape: dict, book_par_coin: dict, fee_ar: float, horizon_ms: float,
@@ -772,9 +1089,11 @@ def _ecrire(root: Path, signaux: list, resume: dict, now: float) -> None:
     tmp.replace(p)
 
 
-__all__ = ["VERSION", "sens_fill", "maker_taker", "dedup_fills", "metaorder_id", "index_twap", "est_twap",
-           "detecter_metaordres", "classer_stade", "pnl_forward_net_bps", "placebo_bps", "ofi_top5", "prix_au",
-           "cout_l2_reel_bps", "construire_signaux", "bootstrap_clusterise", "walk_forward_purge",
+__all__ = ["VERSION", "sens_fill", "maker_taker", "dedup_fills", "metaorder_id", "twap_metaorder_id",
+           "index_twap", "twap_id_fill", "est_twap", "normaliser_twap_states", "etat_twap_observable",
+           "rejouer_metaordres_causaux", "detecter_metaordres", "classer_stade", "pnl_forward_net_bps",
+           "placebo_bps", "ofi_top5", "prix_au", "cout_l2_reel_bps", "construire_signaux",
+           "evaluer_delais_entree", "DELAIS_ENTREE_MS", "bootstrap_clusterise", "walk_forward_purge",
            "stats_par_stade", "agreger_par", "vwap_slippage", "cout_composants", "courbe_edge_cout",
            "comparer_executions", "write_preregistration", "NOTIONALS_DEFAUT", "executer",
            "LEDGER_RELPATH", "STATS_RELPATH", "PREREG_RELPATH"]

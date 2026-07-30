@@ -44,6 +44,33 @@ event-loop, poids estimé journalisé (`poids~…/1200 IP·min`). Le budget REST
 sera journalisé au prochain redémarrage naturel (note différée, avec `aggregateByTime:false` explicite et la
 clé enrichie `px/sz/side`).
 
+## Contrat causal V2 (2026-07-29)
+
+Cette section remplace les descriptions historiques d'identite et de stade
+ci-dessus lorsqu'elles divergent.
+
+- `userTwapSliceFills` est relie au fill par `tid`, puis par `(oid, time)`.
+  Le hash TWAP nul (`0x00...00`) n'est jamais utilise comme identite globale:
+  plusieurs slices officielles partagent ce hash.
+- Un `twapId` officiel groupe les slices meme si leur cadence depasse la
+  fenetre heuristique locale. Sans `twapId`, le groupe reste explicitement
+  `INFERRED_METAORDER`.
+- Le stade est calcule avec le prefixe observable seulement. Un futur slice ne
+  peut plus transformer retrospectivement `FIRST_SLICE` ou `CONTINUATION` en
+  `LATE_STAGE`.
+- `LATE_STAGE`, la fraction executee, le residuel, le mode `NORMAL/CATCH_UP` et
+  l'ETA utilisent uniquement le dernier `twapStates` recu avant la decision.
+  Sans etat horodate, le residuel reste `RESIDUAL_UNMEASURABLE`.
+- Le replay SHADOW mesure les delais pre-enregistres
+  `50/100/250/500/1000/2000/5000 ms`. Ces mesures ne materialisent ni ordre
+  paper ni PnL canonique.
+
+Le schema read-only suivi est celui documente par Hyperliquid:
+`twapStates` expose des paires `[twapId, TwapState]`; les slices TWAP sont
+normalement emises toutes les 30 secondes et le rattrapage peut atteindre
+trois fois la tranche normale. Ces constantes servent a decrire les preuves,
+jamais a fabriquer un etat absent.
+
 ## Gouvernance RAW (cfg-6d8a2937)
 Baseline **jamais promue**. Cap **20 cycles clôturés** (config courante) → `RAW_BASELINE_FIGEE_20` (gel pour
 décision KILL/OBSERVE). RAW est exemptée de l'auto-KILL d'expectancy pour atteindre l'échantillon de 20 ; la

@@ -33,7 +33,8 @@ def test_detecter_metaordres_regroupe_et_reversal():
 def test_classer_stade():
     assert M.classer_stade(0, 4, {"reversal": False}) == "FIRST_SLICE"
     assert M.classer_stade(1, 4, {"reversal": False}) == "CONTINUATION"
-    assert M.classer_stade(3, 4, {"reversal": False}) == "LATE_STAGE"
+    assert M.classer_stade(3, 4, {"reversal": False}) == "CONTINUATION"
+    assert M.classer_stade(1, 2, {"reversal": False, "fraction_executed": 0.8}) == "LATE_STAGE"
     assert M.classer_stade(0, 2, {"reversal": True}) == "REVERSAL"
 
 
@@ -71,12 +72,93 @@ def test_construire_signaux_metaorder_cout_et_trois_ages():
     sigs = M.construire_signaux(fills, vault="0xV", idx_twap={}, tape_coin=tape_coin, tape_btc=[],
                                 cout_fn=lambda c, t: (10.0, "l2_courant_par_taille"),
                                 horizon_ms=300_000, maintenant_ms=1_000_000)
-    assert [s["stade"] for s in sigs] == ["FIRST_SLICE", "LATE_STAGE"]
+    assert [s["stade"] for s in sigs] == ["FIRST_SLICE", "CONTINUATION"]
     assert sigs[0]["metaorder_id"] == sigs[1]["metaorder_id"]     # même métaordre parent
+    assert [s["n_slices"] for s in sigs] == [1, 2]               # préfixe causal, jamais le total futur
     assert sigs[0]["cout_ar_bps"] == 10.0 and sigs[0]["pnl_net_bps"] == 90.0   # +100 bruts - 10 de coût L2
     assert sigs[0]["age_stade_ms"] == 0 and sigs[1]["age_stade_ms"] == 1000    # âge du stade
     assert sigs[0]["age_fill_hl_ms"] == 999_000 and sigs[0]["latence_locale_ms"] is None
     assert sigs[0]["jour"] == 1000 // 86_400_000
+
+
+def test_twap_direct_ignore_hash_nul_et_regroupe_par_twap_id():
+    zero = "0x" + ("0" * 64)
+    f1 = _f("B", 1000, sz=5, tid=1, hsh=zero, oid=10)
+    f2 = _f("B", 70_000, sz=10, tid=2, hsh=zero, oid=11)
+    f1["_received_at_ms"] = 1200
+    f2["_received_at_ms"] = 70_200
+    idx = M.index_twap([
+        {"fill": f1, "twapId": 7},
+        {"fill": f2, "twapId": 7},
+    ])
+    assert ("hash", zero) not in idx
+    snapshots = [
+        {"observed_at_ms": 1100, "states": [[7, {
+            "coin": "SOL", "side": "B", "sz": 40, "executedSz": 5,
+            "executedNtl": 500, "minutes": 4, "timestamp": 1000,
+            "reduceOnly": False, "randomize": False,
+        }]]},
+        {"observed_at_ms": 70_100, "states": [[7, {
+            "coin": "SOL", "side": "B", "sz": 40, "executedSz": 30,
+            "executedNtl": 3000, "minutes": 4, "timestamp": 1000,
+            "reduceOnly": False, "randomize": False,
+        }]]},
+    ]
+    replay = M.rejouer_metaordres_causaux(
+        [f1, f2],
+        vault="0xV",
+        idx_twap=idx,
+        twap_state_snapshots=snapshots,
+    )
+    assert replay[0]["metaorder_id"] == replay[1]["metaorder_id"]
+    assert replay[0]["metaorder_source"] == "DIRECT_TWAP_ID"
+    assert [row["stade"] for row in replay] == ["FIRST_SLICE", "LATE_STAGE"]
+    assert replay[1]["residual_estimated_size"] == 10.0
+    assert replay[1]["slice_mode"] == "CATCH_UP"
+    assert replay[1]["causal_replay"] is True
+    assert replay[1]["real_execution"] is False
+
+
+def test_replay_twap_prefix_stable_et_residuel_non_invente():
+    fill = _f("B", 1000, sz=5, tid=1, hsh="0x" + ("0" * 64), oid=10)
+    fill["_received_at_ms"] = 1200
+    idx = M.index_twap([{"fill": fill, "twapId": 7}])
+    future = [{"observed_at_ms": 2000, "states": [[7, {
+        "coin": "SOL", "side": "B", "sz": 40, "executedSz": 30,
+        "executedNtl": 3000, "minutes": 4, "timestamp": 1000,
+        "reduceOnly": False, "randomize": False,
+    }]]}]
+    prefix = M.rejouer_metaordres_causaux(
+        [fill],
+        vault="0xV",
+        idx_twap=idx,
+        twap_state_snapshots=[],
+    )[0]
+    with_future = M.rejouer_metaordres_causaux(
+        [fill],
+        vault="0xV",
+        idx_twap=idx,
+        twap_state_snapshots=future,
+    )[0]
+    for field in ("stade", "residual_status", "residual_estimated_size", "fraction_executed"):
+        assert prefix[field] == with_future[field]
+    assert prefix["residual_status"] == "RESIDUAL_UNMEASURABLE"
+    assert prefix["residual_estimated_size"] is None
+
+
+def test_grille_delais_entree_shadow_complete():
+    signal = {
+        "coin": "SOL", "sens": 1, "fill_time": 1000,
+        "stade": "CONTINUATION", "cout_ar_bps": 10.0,
+    }
+    tape = {"SOL": [
+        (1050, 100.0), (1100, 100.0), (1250, 100.0), (1500, 100.0),
+        (2000, 100.0), (3000, 100.0), (6000, 100.0), (301_000, 101.0),
+    ]}
+    result = M.evaluer_delais_entree([signal], tape)
+    assert tuple(int(key) for key in result) == M.DELAIS_ENTREE_MS
+    assert all(row["n_mesurable"] == 1 for row in result.values())
+    assert all(row["real_execution"] is False for row in result.values())
 
 
 def test_stats_par_stade_compte_metaordres_uniques():
@@ -125,8 +207,8 @@ def test_vwap_slippage_et_composants_separes():
 def test_courbe_capacite_exige_IC_bas_positif_ET_synchronise():
     b = _book(20.0)
     # 3 métaordres IDENTIQUES (variance ~0) -> IC serré ; net = gross40 - (spread20+fee9) = +11 ; SYNCHRONISÉS
-    sig = [{"stade": "LATE_STAGE", "metaorder_id": "m%d" % i, "coin": "SOL", "sens": 1, "ret_coin_bps": 40.0,
-            "hash": "h%d" % i, "fill_time": 1000 + i, "l2_synchronise": True} for i in range(3)]
+    sig = [{"stade": "LATE_STAGE", "metaorder_id": f"m{i}", "coin": "SOL", "sens": 1, "ret_coin_bps": 40.0,
+            "hash": f"h{i}", "fill_time": 1000 + i, "l2_synchronise": True} for i in range(3)]
     c = M.courbe_edge_cout(sig, {"SOL": b}, fee_ar_bps=9.0, fees_tiers=(9.0, 7.0), n_boot=300)["LATE_STAGE"]
     assert c["courbe"]["100"]["net_ic95"][0] > 0                 # BORNE BASSE > 0 = edge prouvé
     assert c["l2_synchronise_pct"] == 100.0 and c["capacite_edge_prouve_usd"] == 500.0
@@ -135,8 +217,8 @@ def test_courbe_capacite_exige_IC_bas_positif_ET_synchronise():
     sig2 = [dict(s, l2_synchronise=False) for s in sig]
     assert M.courbe_edge_cout(sig2, {"SOL": b}, fee_ar_bps=9.0)["LATE_STAGE"]["capacite_edge_prouve_usd"] == 0.0
     # point positif MAIS IC traverse 0 (variance) -> capacité d'edge prouvé = 0
-    sigv = [{"stade": "LATE_STAGE", "metaorder_id": "m%d" % i, "coin": "SOL", "sens": 1, "ret_coin_bps": g,
-             "hash": "hv%d" % i, "fill_time": i, "l2_synchronise": True} for i, g in enumerate([40, 40, 40, -100, 200])]
+    sigv = [{"stade": "LATE_STAGE", "metaorder_id": f"m{i}", "coin": "SOL", "sens": 1, "ret_coin_bps": g,
+             "hash": f"hv{i}", "fill_time": i, "l2_synchronise": True} for i, g in enumerate([40, 40, 40, -100, 200])]
     cv = M.courbe_edge_cout(sigv, {"SOL": b}, fee_ar_bps=9.0, n_boot=400)["LATE_STAGE"]
     assert cv["courbe"]["100"]["net_moy_bps"] > 0 and cv["capacite_edge_prouve_usd"] == 0.0
 
@@ -175,7 +257,9 @@ def test_executer_runner_injecte_courbe_execs_prereg_et_n_ouvre_rien(tmp_path):
                      twap_provider=lambda v, s: [{"fill": {"tid": 1, "hash": "h1"}, "twapId": 7}],
                      book_provider=lambda c: _book(20.0),
                      tape=tape, horizon_ms=300_000, maintenant_ms=now)
-    assert res["n_signaux"] == 2 and res["n_metaordres"] == 1
+    # Le fill sans twapId reste un métaordre inféré distinct : aucune propagation
+    # heuristique d'un identifiant TWAP à un fill non prouvé.
+    assert res["n_signaux"] == 2 and res["n_metaordres"] == 2
     # budget EXACT : userFillsByTime(2)=20 + userTwapSliceFills(1)=20 + l2Book=2 -> 42
     assert res["poids_passe"] == 42 and res["n_appels"] == 3
     stats = json.loads((tmp_path / M.STATS_RELPATH).read_text(encoding="utf-8"))
