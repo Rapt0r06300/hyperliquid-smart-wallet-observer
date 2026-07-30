@@ -15,6 +15,7 @@ from __future__ import annotations
 from collections import defaultdict
 from dataclasses import dataclass, field
 
+from hl_observer.following.entity_consensus import entity_consensus_gate
 from hl_observer.signals.opportunity_ranker import OpportunityInput, RankerConfig, rank_opportunities
 
 ENTRY_ACTIONS = {"OPEN_LONG", "OPEN_SHORT", "ADD", "INCREASE"}
@@ -30,6 +31,7 @@ class DistilledOpportunityConfig:
     max_copy_degradation_bps: float = 35.0
     max_opportunities: int = 5
     max_per_coin: int = 2
+    strict_entity_consensus: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -45,6 +47,10 @@ class DistilledSignalCandidate:
     leader_score: float = 50.0
     copy_degradation_bps: float = 0.0
     source_profile: str = "canonical"
+    public_entity_id: str | None = None
+    twap_cadence_ms: float | None = None
+    funding_profile: str | None = None
+    hedge_profile: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -59,6 +65,9 @@ class DistilledOpportunity:
     max_signal_age_ms: int
     power_score: float
     source_profiles: tuple[str, ...]
+    entity_cluster_count: int = 0
+    effective_independent_votes: float = 0.0
+    independence_measurable: bool = False
     reasons: tuple[str, ...] = field(default_factory=tuple)
     paper_only: bool = True
     read_only: bool = True
@@ -118,6 +127,15 @@ def detect_distilled_opportunities(
         if len(wallets) < int(cfg.min_wallets):
             _count(rejected, "cluster_below_min_wallets")
             continue
+        entity_gate = entity_consensus_gate(
+            [_entity_vote(row) for row, _ in rows],
+            min_independent_votes=cfg.min_wallets,
+            strict=cfg.strict_entity_consensus,
+            time_window_ms=cfg.max_signal_age_ms,
+        )
+        if cfg.strict_entity_consensus and entity_gate["decision"] != "ALLOW_SHADOW":
+            _count(rejected, "entity_consensus_below_minimum")
+            continue
         total_notional = sum(max(0.0, float(row.leader_notional_usdc or 0.0)) for row, _ in rows)
         if total_notional < float(cfg.min_total_notional_usdc):
             _count(rejected, "cluster_below_min_notional")
@@ -134,7 +152,10 @@ def detect_distilled_opportunities(
                     side=side,
                     net_edge_bps=average_edge,
                     signal_age_ms=max_age,
-                    consensus_wallets=len(wallets),
+                    consensus_wallets=max(
+                        1,
+                        int(float(entity_gate["effective_independent_votes"])),
+                    ),
                     liquidity_score=average_liquidity,
                     leader_winrate=leader_winrate_proxy,
                 )
@@ -154,11 +175,15 @@ def detect_distilled_opportunities(
         reasons = ["FRESH_CONSENSUS", "EDGE_AFTER_COST", "LIQUIDITY_OK"]
         if len(wallets) >= 3:
             reasons.append("THREE_PLUS_WALLETS")
+        reasons.extend(entity_gate["warnings"])
         opportunities.append(
             DistilledOpportunity(
                 coin=coin,
                 side=side,
                 wallet_count=len(wallets),
+                entity_cluster_count=int(entity_gate["entity_cluster_count"]),
+                effective_independent_votes=float(entity_gate["effective_independent_votes"]),
+                independence_measurable=bool(entity_gate["independence_measurable"]),
                 wallets=wallets,
                 total_notional_usdc=round(total_notional, 6),
                 average_edge_bps=round(average_edge, 6),
@@ -181,6 +206,20 @@ def detect_distilled_opportunities(
 
 def _count(target: dict[str, int], reason: str) -> None:
     target[reason] = target.get(reason, 0) + 1
+
+
+def _entity_vote(candidate: DistilledSignalCandidate) -> dict:
+    return {
+        "wallet": candidate.leader_wallet,
+        "coin": candidate.coin,
+        "side": candidate.side,
+        "event_time_ms": candidate.event_time_ms,
+        "leader_notional_usdc": candidate.leader_notional_usdc,
+        "public_entity_id": candidate.public_entity_id,
+        "twap_cadence_ms": candidate.twap_cadence_ms,
+        "funding_profile": candidate.funding_profile,
+        "hedge_profile": candidate.hedge_profile,
+    }
 
 
 __all__ = [

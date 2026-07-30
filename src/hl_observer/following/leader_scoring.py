@@ -9,6 +9,10 @@
 
 from __future__ import annotations
 
+import math
+
+from hl_observer.following.entity_consensus import infer_entity_consensus
+
 
 def leader_market_winrate(closed_trades: list[dict], wallet: str, coin: str) -> dict:
     """Winrate d'un wallet sur un coin depuis ses trades clos."""
@@ -52,24 +56,31 @@ def shortlist_by_net_pf(closed_trades: list[dict], wallets: list[str], *, min_pf
 
 
 def count_consensus_clusters(votes: list[dict], *, time_window_ms: int = 3_000) -> dict:
-    """Regroupe les wallets qui votent identiquement (coin/side) dans une fenêtre.
+    """Expose le consensus brut et sa normalisation SHADOW par entite."""
 
-    Chaque groupe fenêtré = 1 cluster (potentiellement 1 seul acteur). Le vrai
-    consensus = nombre de clusters distincts, pas de wallets.
-    """
-    buckets: dict[tuple, list[dict]] = {}
-    for v in votes or []:
-        if not isinstance(v, dict):
-            continue
-        coin = str(v.get("coin") or "").upper()
-        side = str(v.get("side") or "").upper()
-        ts = int(v.get("ts_ms") or 0)
-        bucket_ts = ts // max(1, time_window_ms)
-        buckets.setdefault((coin, side, bucket_ts), []).append(v)
-    clusters = len(buckets)
-    wallets = len({str(v.get("wallet") or "") for v in votes if isinstance(v, dict)})
-    return {"raw_wallets": wallets, "consensus_clusters": clusters,
-            "inflation_ratio": round(wallets / clusters, 3) if clusters else 0.0}
+    result = infer_entity_consensus(votes, time_window_ms=time_window_ms)
+    effective = float(result["effective_independent_votes"])
+    legacy_clusters = math.floor(effective) if effective > 0 else 0
+    return {
+        "raw_wallets": result["wallet_count"],
+        "consensus_clusters": legacy_clusters,
+        "entity_cluster_count": result["entity_cluster_count"],
+        "effective_independent_votes": effective,
+        "independence_measurable": result["independence_measurable"],
+        "confidence_penalty": result["confidence_penalty"],
+        "inflation_ratio": (
+            round(result["wallet_count"] / legacy_clusters, 3)
+            if legacy_clusters > 0
+            else 0.0
+        ),
+        "effective_inflation_ratio": (
+            round(result["wallet_count"] / effective, 3) if effective > 0 else 0.0
+        ),
+        "entity_clusters": result["clusters"],
+        "entity_warnings": result["warnings"],
+        "shadow": True,
+        "real_execution": False,
+    }
 
 
 def is_vault_leader(wallet_meta: dict) -> bool:

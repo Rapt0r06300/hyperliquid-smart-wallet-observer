@@ -66,6 +66,9 @@ def test_consensus_leader_selector_prioritizes_same_coin_same_direction_cluster(
     assert report.groups[0].coin == "ETH"
     assert report.groups[0].direction == "LONG"
     assert report.groups[0].wallet_count == 2
+    assert report.groups[0].entity_cluster_count == 2
+    assert report.groups[0].effective_independent_votes == 1.0
+    assert report.groups[0].independence_measurable is False
     assert report.selected_wallets == [wallet_a, wallet_b]
 
 
@@ -88,3 +91,23 @@ def test_consensus_leader_selector_refuses_stale_or_single_wallet_clusters():
     assert report.selected_wallets == []
     assert report.groups_seen == 0
     assert report.rejected_reasons["stale_outside_active_window"] == 2
+
+
+def test_consensus_leader_selector_strict_mode_penalizes_unmeasured_independence():
+    wallet_a = "0x" + "a" * 40
+    wallet_b = "0x" + "b" * 40
+    report = select_consensus_leaders_from_deltas(
+        [
+            _delta(wallet_a, ms=10_000),
+            _delta(wallet_b, ms=10_100),
+        ],
+        [_leader(wallet_a, 98), _leader(wallet_b, 92)],
+        now_timestamp_ms=11_000,
+        max_leaders=2,
+        active_window_ms=60_000,
+        consensus_window_ms=4_000,
+        min_wallets=2,
+        strict_entity_consensus=True,
+    )
+    assert report.selected_wallets == []
+    assert report.rejected_reasons["entity_consensus_below_minimum"] >= 1

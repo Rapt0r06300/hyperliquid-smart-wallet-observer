@@ -14,7 +14,10 @@ import os
 from hl_observer.exits.exit_engine import decide_exit
 from hl_observer.following.leader_behavior import classify_leader
 from hl_observer.following.leader_scoring import (
-    count_consensus_clusters, market_score_multiplier, profit_factor_net, shortlist_by_net_pf,
+    count_consensus_clusters,
+    market_score_multiplier,
+    profit_factor_net,
+    shortlist_by_net_pf,
 )
 
 
@@ -68,6 +71,11 @@ def consensus_and_coin_score(*, votes: list[dict], wallet: str, coin: str, close
     return {
         "consensus_clusters": clusters["consensus_clusters"],
         "raw_wallets": clusters["raw_wallets"],
+        "entity_cluster_count": clusters["entity_cluster_count"],
+        "effective_independent_votes": clusters["effective_independent_votes"],
+        "independence_measurable": clusters["independence_measurable"],
+        "entity_confidence_penalty": clusters["confidence_penalty"],
+        "entity_warnings": clusters["entity_warnings"],
         "coin_score_multiplier": coin_mult,
         "leader_pf": profit_factor_net(closed_trades, wallet)["profit_factor_net"],
     }
@@ -96,7 +104,9 @@ def refine_shortlist_with_quality(
     Trie les wallets par score raffiné décroissant.
     """
     from hl_observer.wallets.quality_score import (
-        compute_wallet_quality, quality_scoring_enabled, refine_discovery_score,
+        compute_wallet_quality,
+        quality_scoring_enabled,
+        refine_discovery_score,
     )
 
     if not quality_scoring_enabled():

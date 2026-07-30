@@ -2,9 +2,9 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
+from hl_observer.following.entity_consensus import entity_consensus_gate
 from hl_observer.storage.models import PositionDeltaModel, TopWallet
 from hl_observer.wallets.delta_utils import copy_delta_action, copy_delta_direction, delta_event_time_ms
-
 
 ENTRY_ACTIONS = {"OPEN_LONG", "OPEN_SHORT", "ADD", "INCREASE"}
 
@@ -21,6 +21,10 @@ class ConsensusLeaderGroup:
     average_leader_score: float
     consensus_score: float
     age_ms: int
+    entity_cluster_count: int = 0
+    effective_independent_votes: float = 0.0
+    independence_measurable: bool = False
+    entity_confidence_penalty: float = 0.0
     warnings: list[str] = field(default_factory=list)
 
 
@@ -43,6 +47,7 @@ def select_consensus_leaders_from_deltas(
     consensus_window_ms: int = 4_000,
     min_wallets: int = 2,
     min_notional_usdc: float = 0.0,
+    strict_entity_consensus: bool = False,
 ) -> ConsensusLeaderSelectionReport:
     """Select wallets taking part in fresh same-coin/same-direction clusters.
 
@@ -104,6 +109,15 @@ def select_consensus_leaders_from_deltas(
                 continue
             wallet_scores = [score_by_wallet.get(wallet, 50.0) for wallet in wallets]
             avg_score = sum(wallet_scores) / max(1, len(wallet_scores))
+            entity_gate = entity_consensus_gate(
+                [_entity_vote(row) for row in cluster_rows],
+                min_independent_votes=min_wallets,
+                strict=strict_entity_consensus,
+                time_window_ms=consensus_window_ms,
+            )
+            if strict_entity_consensus and entity_gate["decision"] != "ALLOW_SHADOW":
+                _count(rejected, "entity_consensus_below_minimum")
+                continue
             first_seen = min(delta_event_time_ms(row) for row in cluster_rows)
             last_seen = max(delta_event_time_ms(row) for row in cluster_rows)
             span_ms = max(0, last_seen - first_seen)
@@ -113,7 +127,7 @@ def select_consensus_leaders_from_deltas(
             score = min(
                 100.0,
                 30.0
-                + len(wallets) * 12.0
+                + float(entity_gate["effective_independent_votes"]) * 12.0
                 + avg_score * 0.20
                 + recency_score * 20.0
                 + tightness_score * 12.0
@@ -124,6 +138,7 @@ def select_consensus_leaders_from_deltas(
                 warnings.append("crowding_risk_many_wallets_same_direction")
             if recency_score < 0.35:
                 warnings.append("cluster_is_getting_stale")
+            warnings.extend(entity_gate["warnings"])
             groups.append(
                 ConsensusLeaderGroup(
                     coin=coin,
@@ -136,6 +151,10 @@ def select_consensus_leaders_from_deltas(
                     average_leader_score=round(avg_score, 6),
                     consensus_score=round(score, 6),
                     age_ms=max(0, now_timestamp_ms - last_seen),
+                    entity_cluster_count=int(entity_gate["entity_cluster_count"]),
+                    effective_independent_votes=float(entity_gate["effective_independent_votes"]),
+                    independence_measurable=bool(entity_gate["independence_measurable"]),
+                    entity_confidence_penalty=float(entity_gate["confidence_penalty"]),
                     warnings=warnings,
                 )
             )
@@ -181,6 +200,8 @@ def format_consensus_leader_report(report: ConsensusLeaderSelectionReport) -> st
             lines.append(
                 "- "
                 f"{group.coin} {group.direction} wallets={group.wallet_count} "
+                f"entities={group.entity_cluster_count} "
+                f"effective_votes={group.effective_independent_votes:.2f} "
                 f"score={group.consensus_score:.2f} age_ms={group.age_ms} "
                 f"notional={group.total_notional_usdc:.2f} warnings={warnings}"
             )
@@ -195,6 +216,21 @@ def format_consensus_leader_report(report: ConsensusLeaderSelectionReport) -> st
 
 def _coin_direction(row: PositionDeltaModel) -> tuple[str, str]:
     return str(row.coin or "").upper(), str(copy_delta_direction(row, copy_delta_action(row)) or "UNKNOWN")
+
+
+def _entity_vote(row: PositionDeltaModel) -> dict:
+    raw = row.raw_json if isinstance(getattr(row, "raw_json", None), dict) else {}
+    return {
+        "wallet": str(row.wallet_address or "").lower(),
+        "coin": str(row.coin or "").upper(),
+        "side": copy_delta_direction(row, copy_delta_action(row)),
+        "ts_ms": delta_event_time_ms(row),
+        "size": abs(float(row.delta_notional_usdc or row.delta_size or 0.0)),
+        "public_entity_id": raw.get("public_entity_id") or raw.get("onchain_entity_id"),
+        "twap_cadence_ms": raw.get("twap_cadence_ms"),
+        "funding_profile": raw.get("funding_profile"),
+        "hedge_profile": raw.get("hedge_profile"),
+    }
 
 
 def _dedupe_groups(groups: list[ConsensusLeaderGroup]) -> list[ConsensusLeaderGroup]:

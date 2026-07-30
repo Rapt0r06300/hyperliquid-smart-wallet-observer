@@ -4,7 +4,6 @@ from hl_observer.signals.distilled_opportunity_detector import (
     detect_distilled_opportunities,
 )
 
-
 NOW = 1_000_000
 
 
@@ -19,6 +18,7 @@ def _candidate(
     liquidity: float = 0.8,
     degradation: float = 12.0,
     score: float = 80.0,
+    public_entity_id: str | None = None,
 ) -> DistilledSignalCandidate:
     return DistilledSignalCandidate(
         coin=coin,
@@ -32,6 +32,7 @@ def _candidate(
         leader_score=score,
         copy_degradation_bps=degradation,
         source_profile="distilled_test",
+        public_entity_id=public_entity_id,
     )
 
 
@@ -52,6 +53,9 @@ def test_distilled_detector_accepts_fresh_multi_wallet_consensus():
     assert opportunity.coin == "HYPE"
     assert opportunity.side == "LONG"
     assert opportunity.wallet_count == 3
+    assert opportunity.entity_cluster_count == 3
+    assert opportunity.effective_independent_votes == 1.5
+    assert opportunity.independence_measurable is False
     assert opportunity.total_notional_usdc == 14_000.0
     assert opportunity.average_edge_bps == 24.0
     assert opportunity.power_score > 0
@@ -110,3 +114,37 @@ def test_distilled_detector_rejects_copy_degradation_and_low_liquidity():
     assert report.opportunities == ()
     assert report.rejected_reasons["copy_degradation_too_high"] == 1
     assert report.rejected_reasons["liquidity_too_low"] == 1
+
+
+def test_distilled_detector_strict_entity_consensus_uses_public_labels():
+    candidates = [
+        _candidate("0x" + "1" * 40, public_entity_id="desk-a"),
+        _candidate("0x" + "2" * 40, public_entity_id="desk-b"),
+        _candidate("0x" + "3" * 40, public_entity_id="desk-c"),
+    ]
+    accepted = detect_distilled_opportunities(
+        candidates,
+        now_ms=NOW,
+        config=DistilledOpportunityConfig(
+            min_wallets=3,
+            strict_entity_consensus=True,
+        ),
+    )
+    assert len(accepted.opportunities) == 1
+    assert accepted.opportunities[0].effective_independent_votes == 3.0
+
+    correlated = [
+        _candidate("0x" + "1" * 40, public_entity_id="desk-a"),
+        _candidate("0x" + "2" * 40, public_entity_id="desk-a"),
+        _candidate("0x" + "3" * 40, public_entity_id="desk-b"),
+    ]
+    rejected = detect_distilled_opportunities(
+        correlated,
+        now_ms=NOW,
+        config=DistilledOpportunityConfig(
+            min_wallets=3,
+            strict_entity_consensus=True,
+        ),
+    )
+    assert rejected.opportunities == ()
+    assert rejected.rejected_reasons["entity_consensus_below_minimum"] == 1
