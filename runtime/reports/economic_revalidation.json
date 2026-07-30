@@ -1,0 +1,143 @@
+{
+  "schema_version": "hypersmart.economic_revalidation.v1",
+  "genere_le": "2026-07-30T09:58:10.473667+00:00",
+  "starting_equity_usd": 1000.0,
+  "degradations_adverses_bps": {
+    "ADVERSE_P95": 6.0,
+    "ADVERSE_P99": 12.0
+  },
+  "avertissement": "les degradations adverses sont ASSUMED : sans ordre reel, la queue de couts n'est pas observable",
+  "paper_only": true,
+  "real_execution": false,
+  "strategies": {
+    "carry_paper": {
+      "chemin": "runtime/data/carry_paper_ledger.jsonl",
+      "n_lignes": 190,
+      "n_episodes": 0,
+      "rejets": {
+        "OUVERTURE_SANS_PRIX_OU_NOTIONNEL": 100,
+        "FERMETURE_ORPHELINE": 90
+      },
+      "statut": "AUCUN_EPISODE_MESURABLE",
+      "enveloppes": null
+    },
+    "experimental_paper_v2": {
+      "statut": "LEDGER_ABSENT",
+      "chemin": "runtime/data/experimental_paper_V2_ledger.jsonl"
+    },
+    "raw_probe": {
+      "chemin": "runtime/data/raw_probe_ledger.jsonl",
+      "n_lignes": 105,
+      "n_episodes": 19,
+      "rejets": {
+        "FERMETURE_ORPHELINE": 67
+      },
+      "statut": "MESURE",
+      "enveloppes": {
+        "BASE_CALIBRATED": {
+          "n_episodes": 19,
+          "capacite_usd": null,
+          "fill_ratio": null,
+          "statut": "MESURE",
+          "net_pnl_usd": -0.168358,
+          "net_bps_par_trade": -5.8759,
+          "profit_factor": 0.6605,
+          "profit_factor_note": null,
+          "max_drawdown_usd": -0.240558,
+          "expected_shortfall_usd": null,
+          "avg_win_usd": 0.04095,
+          "avg_loss_usd": -0.049596,
+          "hit_rate": 0.4211,
+          "turnover_usd": 360.0,
+          "fees_usd": 0.0,
+          "roi": {
+            "ROI_starting_equity": -0.00016836,
+            "ROI_avg_margin_locked": null,
+            "ROI_peak_margin_locked": null,
+            "return_on_gross_exposure": -0.00093532
+          },
+          "gross_exposure_usd": 180.0
+        },
+        "ADVERSE_P95": {
+          "n_episodes": 19,
+          "capacite_usd": null,
+          "fill_ratio": null,
+          "statut": "MESURE",
+          "net_pnl_usd": -0.276358,
+          "net_bps_par_trade": -11.8759,
+          "profit_factor": 0.5082,
+          "profit_factor_note": null,
+          "max_drawdown_usd": -0.336558,
+          "expected_shortfall_usd": null,
+          "avg_win_usd": 0.0357,
+          "avg_loss_usd": -0.051087,
+          "hit_rate": 0.4211,
+          "turnover_usd": 360.0,
+          "fees_usd": 0.108,
+          "roi": {
+            "ROI_starting_equity": -0.00027636,
+            "ROI_avg_margin_locked": null,
+            "ROI_peak_margin_locked": null,
+            "return_on_gross_exposure": -0.00153532
+          },
+          "gross_exposure_usd": 180.0,
+          "degradation_bps": 6.0,
+          "origine": "ASSUMED"
+        },
+        "ADVERSE_P99": {
+          "n_episodes": 19,
+          "capacite_usd": null,
+          "fill_ratio": null,
+          "statut": "MESURE",
+          "net_pnl_usd": -0.384358,
+          "net_bps_par_trade": -17.8759,
+          "profit_factor": 0.3879,
+          "profit_factor_note": null,
+          "max_drawdown_usd": -0.432558,
+          "expected_shortfall_usd": null,
+          "avg_win_usd": 0.03045,
+          "avg_loss_usd": -0.057087,
+          "hit_rate": 0.4211,
+          "turnover_usd": 360.0,
+          "fees_usd": 0.216,
+          "roi": {
+            "ROI_starting_equity": -0.00038436,
+            "ROI_avg_margin_locked": null,
+            "ROI_peak_margin_locked": null,
+            "return_on_gross_exposure": -0.00213532
+          },
+          "gross_exposure_usd": 180.0,
+          "degradation_bps": 12.0,
+          "origine": "ASSUMED"
+        },
+        "OPTIMISTIC_DIAGNOSTIC_ONLY": {
+          "n_episodes": 19,
+          "capacite_usd": null,
+          "fill_ratio": null,
+          "statut": "MESURE",
+          "net_pnl_usd": -0.114358,
+          "net_bps_par_trade": -2.8759,
+          "profit_factor": 0.7546,
+          "profit_factor_note": null,
+          "max_drawdown_usd": -0.207745,
+          "expected_shortfall_usd": null,
+          "avg_win_usd": 0.039066,
+          "avg_loss_usd": -0.046596,
+          "hit_rate": 0.4737,
+          "turnover_usd": 360.0,
+          "fees_usd": -0.054,
+          "roi": {
+            "ROI_starting_equity": -0.00011436,
+            "ROI_avg_margin_locked": null,
+            "ROI_peak_margin_locked": null,
+            "return_on_gross_exposure": -0.00063532
+          },
+          "gross_exposure_usd": 180.0,
+          "gain_retire_bps": 3.0,
+          "promouvable": false,
+          "note": "diagnostic seulement : une strategie n'est jamais bonne parce que l'optimiste est positif"
+        }
+      }
+    }
+  }
+}
