@@ -104,6 +104,50 @@ def taxonomie_latence(
     return out
 
 
+#: §5.3 — les horloges causales que CHAQUE événement doit porter, dans l'ordre.
+CLOCKS_CAUSAUX_MS = (
+    "exchange_ts_ms", "receive_ts_ms", "normalize_ts_ms",
+    "signal_ts_ms", "decision_ts_ms", "fill_ts_ms",
+)
+
+
+def valider_contrat_horloges(
+    event: Mapping[str, Any],
+    *,
+    requis: tuple[str, ...] = CLOCKS_CAUSAUX_MS,
+    exiger_monotonic: bool = True,
+) -> dict[str, Any]:
+    """§5.3 — contrat d'horloge : chaque événement porte-t-il toutes ses horloges, en ordre causal ?
+
+    Un horodatage manquant vaut `UNMEASURABLE` (listé dans `manquants`), **jamais** remplacé par `now`.
+    `exiger_monotonic` : une horloge monotone locale (`receive_monotonic_ns`) est requise en plus (elle
+    ne se compare pas aux ms wall-clock, mais doit exister). `statut` ∈ COMPLET / INCOMPLET / ORDRE_INCOHERENT."""
+    ev = event or {}
+    presents = [c for c in requis if _num(ev.get(c)) is not None]
+    manquants = [c for c in requis if _num(ev.get(c)) is None]     # UNMEASURABLE, jamais `now`
+    ordonnes = [(c, _num(ev.get(c))) for c in requis if _num(ev.get(c)) is not None]
+    violations = [f"{c2}<{c1}" for (c1, v1), (c2, v2) in zip(ordonnes, ordonnes[1:]) if v2 < v1]
+    monotonic_present = _num(ev.get("receive_monotonic_ns")) is not None
+    mono_ok = (not exiger_monotonic) or monotonic_present
+
+    if manquants or not mono_ok:
+        statut = "INCOMPLET"
+    elif violations:
+        statut = "ORDRE_INCOHERENT"
+    else:
+        statut = "COMPLET"
+    return {
+        "schema_version": SCHEMA_VERSION,
+        "statut": statut,
+        "presents": presents,
+        "manquants": manquants,                # = UNMEASURABLE, à combler par la collecte, jamais par now
+        "ordre_causal_ok": not violations,
+        "violations_ordre": violations,
+        "monotonic_present": monotonic_present,
+        "real_execution": False,
+    }
+
+
 @dataclass(frozen=True, slots=True)
 class ComposanteCout:
     name: str
@@ -161,4 +205,5 @@ def verifier_convention_couts(gross_edge_bps: float | None, composantes: Sequenc
 __all__ = [
     "SCHEMA_VERSION", "MEASURED", "ASSUMED", "UNMEASURABLE",
     "taxonomie_latence", "ComposanteCout", "VerificationCouts", "verifier_convention_couts",
+    "CLOCKS_CAUSAUX_MS", "valider_contrat_horloges",
 ]

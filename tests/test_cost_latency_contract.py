@@ -92,3 +92,44 @@ def test_to_dict_marque_real_execution_false():
     d = r.to_dict()
     assert d["real_execution"] is False and d["schema_version"] == K.SCHEMA_VERSION
     assert d["net_bps"] == 15.5
+
+
+# --- §5.3 contrat d'horloge -------------------------------------------------
+def _event_complet(**over):
+    ev = {"exchange_ts_ms": 1000, "receive_ts_ms": 1005, "normalize_ts_ms": 1006,
+          "signal_ts_ms": 1007, "decision_ts_ms": 1008, "fill_ts_ms": 1258,
+          "receive_monotonic_ns": 123456789}
+    ev.update(over)
+    return ev
+
+
+def test_contrat_horloges_complet():
+    r = K.valider_contrat_horloges(_event_complet())
+    assert r["statut"] == "COMPLET" and r["manquants"] == [] and r["ordre_causal_ok"] is True
+
+
+def test_contrat_horloges_incomplet_liste_les_manquants_jamais_now():
+    ev = _event_complet()
+    del ev["signal_ts_ms"]
+    r = K.valider_contrat_horloges(ev)
+    assert r["statut"] == "INCOMPLET" and "signal_ts_ms" in r["manquants"]
+
+
+def test_contrat_horloges_ordre_incoherent():
+    r = K.valider_contrat_horloges(_event_complet(fill_ts_ms=900))    # fill avant tout le reste
+    assert r["statut"] == "ORDRE_INCOHERENT" and r["ordre_causal_ok"] is False
+    assert any("fill_ts_ms" in v for v in r["violations_ordre"])
+
+
+def test_contrat_horloges_monotonic_requis():
+    ev = _event_complet()
+    del ev["receive_monotonic_ns"]
+    r = K.valider_contrat_horloges(ev)
+    assert r["statut"] == "INCOMPLET" and r["monotonic_present"] is False
+
+
+def test_contrat_horloges_monotonic_optionnel():
+    ev = _event_complet()
+    del ev["receive_monotonic_ns"]
+    r = K.valider_contrat_horloges(ev, exiger_monotonic=False)
+    assert r["statut"] == "COMPLET"
