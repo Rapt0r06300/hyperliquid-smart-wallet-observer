@@ -39,8 +39,30 @@ SOURCES_DEFAUT: tuple[tuple[str, str], ...] = (
 )
 PRIX_DEFAUT = "runtime/data/hl_allmids_tape.jsonl"   # bande LARGE : tous les coins
 
-#: Tolérance d'appariement d'un prix : au-delà, le markout est déclaré non mesurable.
+#: Tolérance d'appariement d'un prix. Repli seulement : la vraie tolérance est DÉRIVÉE (voir ci-dessous).
 TOLERANCE_PRIX_MS = 60_000.0
+
+#: §3.1 — une tolérance FIXE de 60 s est incompatible avec un markout de 5 s : le prix utilisé pouvait être
+#: postérieur de 12 horizons. La tolérance est donc dérivée de la cadence réelle du feed ET de l'horizon.
+#: Règle PRÉ-ENREGISTRÉE : on accepte au plus une cotation de retard, et jamais plus d'une fraction de
+#: l'horizon mesuré — sinon le "markout à h" mesure surtout le temps écoulé en trop.
+FRACTION_HORIZON_MAX = 0.25
+CADENCES_TOLEREES = 1.0
+
+
+def tolerance_pour(horizon_ms: float, cadence_ms: float | None) -> float | None:
+    """Tolérance temporelle admissible pour un horizon donné. `None` si la cadence l'interdit.
+
+    Un horizon plus court que la cadence du feed n'est pas mesurable : le refuser vaut mieux que de
+    prendre la cotation suivante et de l'appeler « markout à 100 ms ».
+    """
+    h = float(horizon_ms)
+    if cadence_ms is None or float(cadence_ms) <= 0:
+        return None
+    c = float(cadence_ms)
+    if h < c:
+        return None
+    return max(0.0, min(c * CADENCES_TOLEREES, h * FRACTION_HORIZON_MAX))
 
 
 def _ts_ms(r: Mapping[str, Any]) -> int | None:
@@ -123,26 +145,54 @@ def charger_prix(chemin: Path | str, *, coins: Iterable[str] | None = None,
 def _prix_a(index: Mapping[str, Mapping[str, Sequence]], coin: str, ts: float,
             *, tolerance_ms: float = TOLERANCE_PRIX_MS) -> float | None:
     """Premier prix observé **à ou après** `ts`, dans la tolérance. Sinon `None`."""
+    detail = _prix_detaille(index, coin, ts, tolerance_ms=tolerance_ms)
+    return None if detail is None else detail["prix"]
+
+
+def _prix_detaille(index: Mapping[str, Mapping[str, Sequence]], coin: str, ts: float,
+                   *, tolerance_ms: float) -> dict[str, Any] | None:
+    """§3.1 — rend aussi l'horodatage CIBLE, celui RÉELLEMENT utilisé et l'erreur, pour que la mesure
+    soit auditable au lieu d'être crue sur parole."""
     bloc = index.get(str(coin).upper())
     if not bloc or not bloc.get("ts"):
         return None
     temps = bloc["ts"]
     i = bisect_left(temps, int(ts))
-    if i >= len(temps) or temps[i] - ts > float(tolerance_ms):
+    if i >= len(temps):
         return None
-    return float(bloc["mid"][i])
+    erreur = float(temps[i]) - float(ts)
+    if erreur > float(tolerance_ms):
+        return None
+    return {"prix": float(bloc["mid"][i]), "ts_cible": int(ts), "ts_utilise": int(temps[i]),
+            "erreur_ms": round(erreur, 3), "tolerance_ms": round(float(tolerance_ms), 3)}
 
 
 def markout_bps(index: Mapping[str, Mapping[str, Sequence]], *, coin: str, ts_ms: float, sens: int,
-                horizon_ms: int, tolerance_ms: float = TOLERANCE_PRIX_MS) -> float | None:
-    """Markout signé du fill : ce que le prix a fait DANS le sens du wallet après `horizon_ms`."""
+                horizon_ms: int, tolerance_ms: float | None = None,
+                cadence_ms: float | None = None, detail: bool = False):
+    """Markout signé du fill : ce que le prix a fait DANS le sens du wallet après `horizon_ms`.
+
+    §3.1 — si `cadence_ms` est fourni, la tolérance est DÉRIVÉE (au plus une cotation de retard, et au plus
+    `FRACTION_HORIZON_MAX` de l'horizon). Sans cadence, on retombe sur `tolerance_ms` explicite ou le repli
+    historique — mais un appelant sérieux passe la cadence.
+    """
     if sens not in (1, -1):
         return None
-    p0 = _prix_a(index, coin, ts_ms, tolerance_ms=tolerance_ms)
-    p1 = _prix_a(index, coin, ts_ms + int(horizon_ms), tolerance_ms=tolerance_ms)
-    if p0 is None or p1 is None or p0 <= 0:
+    if cadence_ms is not None:
+        tol = tolerance_pour(horizon_ms, cadence_ms)
+        if tol is None:
+            return None                      # horizon sous la cadence : non mesurable, jamais approxime
+    else:
+        tol = float(TOLERANCE_PRIX_MS if tolerance_ms is None else tolerance_ms)
+    d0 = _prix_detaille(index, coin, ts_ms, tolerance_ms=tol)
+    d1 = _prix_detaille(index, coin, ts_ms + int(horizon_ms), tolerance_ms=tol)
+    if d0 is None or d1 is None or d0["prix"] <= 0:
         return None
-    return round(sens * (p1 - p0) / p0 * 1e4, 6)
+    valeur = round(sens * (d1["prix"] - d0["prix"]) / d0["prix"] * 1e4, 6)
+    if not detail:
+        return valeur
+    return {"markout_bps": valeur, "entree": d0, "sortie": d1, "tolerance_derivee_ms": tol,
+            "horizon_ms": int(horizon_ms), "cadence_ms": cadence_ms}
 
 
 def executer(root: Path | str, *, sources: Sequence[tuple[str, str]] = SOURCES_DEFAUT,
@@ -273,6 +323,7 @@ def main(argv: Iterable[str] | None = None) -> int:
 
 
 __all__ = ["SCHEMA_VERSION", "SOURCES_DEFAUT", "PRIX_DEFAUT", "TOLERANCE_PRIX_MS",
+           "FRACTION_HORIZON_MAX", "CADENCES_TOLEREES", "tolerance_pour",
            "charger_prix", "markout_bps", "executer", "ecrire_rapport", "main"]
 
 

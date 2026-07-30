@@ -166,3 +166,42 @@ def test_securite_aucun_appel_reel():
     for interdit in ('"/exchange"', "'/exchange'", "requests.get", "requests.post", "import websocket",
                      "websockets.connect", "eth_account", "Account.from_key", "private_key"):
         assert interdit not in src, "appel interdit dans global_observer_pipeline: %s" % interdit
+
+
+# ═══════════════ V3 §3.1 — tolérance dérivée, plus jamais 60 s en dur ═══════════════
+def test_la_tolerance_est_derivee_de_la_cadence_et_de_lhorizon():
+    assert GOP.tolerance_pour(5_000, 250) == 250.0        # au plus une cotation de retard
+    assert GOP.tolerance_pour(400, 250) == 100.0          # ...et au plus 25 % de l'horizon
+    assert GOP.tolerance_pour(300_000, 16_701) == 16_701.0
+
+
+def test_un_horizon_sous_la_cadence_na_aucune_tolerance_admissible():
+    assert GOP.tolerance_pour(100, 16_701) is None
+    assert GOP.tolerance_pour(5_000, None) is None
+    assert GOP.tolerance_pour(5_000, 0) is None
+
+
+def test_avec_cadence_un_horizon_non_mesurable_ne_produit_aucun_markout(tmp_path):
+    idx = GOP.charger_prix(_prix_large(tmp_path, n=50, pas_ms=16_000))
+    assert GOP.markout_bps(idx, coin="BTC", ts_ms=T0, sens=1, horizon_ms=5_000,
+                           cadence_ms=16_000) is None
+
+
+def test_la_tolerance_de_60s_ne_sapplique_plus_quand_la_cadence_est_fournie(tmp_path):
+    """Avant : un prix a +16 s pouvait servir de "markout a 5 s". Desormais il est refuse."""
+    lignes = [{"ts_ms": T0, "mids": {"BTC": 100.0}}, {"ts_ms": T0 + 16_000, "mids": {"BTC": 101.0}}]
+    idx = GOP.charger_prix(_ecrire(tmp_path / "p.jsonl", lignes))
+    assert GOP.markout_bps(idx, coin="BTC", ts_ms=T0, sens=1, horizon_ms=5_000,
+                           tolerance_ms=60_000) is not None          # ancien comportement
+    assert GOP.markout_bps(idx, coin="BTC", ts_ms=T0, sens=1, horizon_ms=5_000,
+                           cadence_ms=250) is None                   # nouveau : refuse
+
+
+def test_le_detail_publie_cible_utilise_et_erreur(tmp_path):
+    idx = GOP.charger_prix(_prix_large(tmp_path, n=500, pas_ms=250))
+    d = GOP.markout_bps(idx, coin="BTC", ts_ms=T0, sens=1, horizon_ms=1_000,
+                        cadence_ms=250, detail=True)
+    assert set(d) >= {"markout_bps", "entree", "sortie", "tolerance_derivee_ms"}
+    for cote in ("entree", "sortie"):
+        assert set(d[cote]) >= {"ts_cible", "ts_utilise", "erreur_ms", "tolerance_ms"}
+        assert d[cote]["erreur_ms"] <= d[cote]["tolerance_ms"]
