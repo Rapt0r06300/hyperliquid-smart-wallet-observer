@@ -27,6 +27,21 @@ def test_forward_frozen_scelle_et_refuse_retune():
     assert ff.etat("c1")["net_moyen_forward_bps"] == 4.0
 
 
+def test_forward_frozen_persistant_reprise(tmp_path):
+    # FIX-47 : l'etat survit au process (journal JSONL rechargé)
+    p = str(tmp_path / "forward.jsonl")
+    ff = FF.ForwardFrozen(p)
+    ff.promouvoir("cand", {"seuil": 5})
+    ff.observer("cand", {"net_bps": 6.0})
+    ff.observer("cand", {"net_bps": 8.0})
+    # nouveau process : on relit le journal
+    ff2 = FF.ForwardFrozen(p)
+    assert ff2.candidats() == ["cand"]
+    assert ff2.etat("cand")["n_observations"] == 2 and ff2.etat("cand")["net_moyen_forward_bps"] == 7.0
+    with pytest.raises(ValueError):                        # config scellee -> retune refuse apres reprise
+        ff2.promouvoir("cand", {"seuil": 99})
+
+
 def test_purged_cv():
     folds = PC.splits_purged(100, n_folds=5, horizon=2, embargo=1)
     assert len(folds) == 5
