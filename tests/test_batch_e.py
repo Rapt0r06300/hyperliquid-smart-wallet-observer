@@ -95,6 +95,37 @@ def test_portfolio_allocation():
     assert al["verdict"] == "ALLOUE" and abs(sum(al["poids"].values()) - 1.0) < 1e-2   # tolérance arrondi 4 déc.
 
 
+def test_fix51_chevauchement_entites_penalise_les_redondants():
+    # FIX-51 : deux alphas peu corrélés en PnL mais sur LES MÊMES entités sont redondants -> pénalisés ;
+    # l'alpha sur une entité distincte gagne du poids. (l'indépendance ne se juge pas qu'au PnL)
+    s1 = [1.0, 2.0, 1.0, 2.0, 1.0, 2.0]
+    s2 = [2.0, 1.0, 2.0, 1.0, 2.0, 1.0]      # anti-corrélé de s1 (corr⁺=0) mais mêmes entités
+    d = [1.5, 1.5, 1.5, 1.5, 1.5, 1.5]
+    base = PF.allocation({"s1": s1, "s2": s2, "d": d})
+    avec = PF.allocation({"s1": s1, "s2": s2, "d": d},
+                         entites={"s1": {"BTC"}, "s2": {"BTC"}, "d": {"SOL"}})
+    assert avec["poids"]["d"] > base["poids"]["d"]        # l'alpha à entité distincte gagne
+    assert avec["poids"]["s1"] < base["poids"]["s1"]      # les redondants (mêmes entités) sont pénalisés
+    assert avec["verdict"] == "ALLOUE"
+
+
+def test_fix51_beta_covariance_et_chevauchements():
+    pnl = [1.0, 2.0, 3.0, 4.0, 5.0]
+    fac = [1.0, 2.0, 3.0, 4.0, 5.0]
+    assert abs(PF.beta(pnl, fac) - 1.0) < 1e-9           # bêta 1 : parfaitement exposé au facteur commun
+    assert PF.covariance(pnl, fac) > 0
+    assert PF.chevauchement_temporel([0, 100, 200], [50, 150, 250], fenetre_ms=1000) == 1.0
+    assert PF.chevauchement_temporel([0, 100], [10000, 10100], fenetre_ms=1000) == 0.0
+    assert PF.chevauchement_entites({"BTC", "ETH"}, {"ETH"}) == 0.5
+
+
+def test_fix51_un_seul_survivant_positif_est_SOLO():
+    seul = {"a": [1.0, 2.0, 1.0, 2.0, 1.0, 2.0], "b": [-1.0, -2.0, -1.0, -2.0, -1.0, -2.0]}
+    al = PF.allocation(seul)
+    assert al["verdict"] == "SOLO" and al["n_positifs"] == 1       # portefeuille non pertinent avec 1 survivant
+    assert al["poids"]["a"] == 1.0 and al["poids"]["b"] == 0.0
+
+
 def test_feature_cache_invariance():
     fc = FC.FeatureCache()
     calls = {"n": 0}
