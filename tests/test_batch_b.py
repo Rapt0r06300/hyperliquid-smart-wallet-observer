@@ -19,7 +19,11 @@ from hl_observer.research import spread_transition as ST  # noqa: E402
 
 def test_fee_regime_source_unique():
     m = FR.matrice_frais_bps("HL")
-    assert m["taker_bps"] == 4.5 and m["maker_bps"] < m["taker_bps"] and m["rebate_bps"] is None
+    # FIX-07 : maker inconnu par defaut -> UNMEASURABLE (aucun ratio invente) ; conservateur = taker
+    assert m["taker_bps"] == 4.5 and m["maker_bps"] == FR.UNMEASURABLE
+    assert m["maker_conservateur_bps"] == 4.5 and m["tier"] == "INCONNU" and m["rebate_bps"] is None
+    # le cout maker utilisable sans tier connu = conservateur (taker), jamais un rabais suppose
+    assert FR.maker_utilisable_bps("HL") == 4.5
 
 
 def test_liquidity_consumption_une_seule_fois():
