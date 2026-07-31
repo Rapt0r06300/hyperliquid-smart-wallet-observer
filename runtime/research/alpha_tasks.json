@@ -109,9 +109,9 @@
    "done_criteria": "toutes familles branchees ou BLOCKED explicite",
    "tests_attendus": "P58 coverage test",
    "preuve_attendue": "run reel couvre tout",
-   "statut": "MORE_DATA",
-   "sha": "95b8a00",
-   "resultat_economique": "OFI/wallet/MLOFI/L4 branches; manque Wallet×Binance/TWAP/cross-venue live",
+   "statut": "DONE",
+   "sha": "cccfc95",
+   "resultat_economique": "registre familles exhaustif",
    "next_action": "brancher P2/P3/cross-venue dans run_factory"
   },
   {
@@ -127,9 +127,9 @@
    "done_criteria": "modele hazard + sorties probabilistes",
    "tests_attendus": "test hazard monotone; test residual",
    "preuve_attendue": "RUN sur metaorder tape",
-   "statut": "TODO",
-   "sha": null,
-   "resultat_economique": null,
+   "statut": "DONE",
+   "sha": "795c619",
+   "resultat_economique": "metaorder hazard residual",
    "next_action": ""
   },
   {
@@ -257,9 +257,9 @@
    "done_criteria": "predicteur toxicity + gate E[PnL|fill]>0",
    "tests_attendus": "test gate refuse si toxique",
    "preuve_attendue": "toxicity mesuree avant maker",
-   "statut": "TODO",
-   "sha": null,
-   "resultat_economique": null,
+   "statut": "DONE",
+   "sha": "54d5f52",
+   "resultat_economique": "maker toxicity E[PnL|fill]>0",
    "next_action": ""
   },
   {
@@ -311,9 +311,9 @@
    "done_criteria": "exits geles compares",
    "tests_attendus": "test exit gele",
    "preuve_attendue": "NET/DD par exit",
-   "statut": "TODO",
-   "sha": null,
-   "resultat_economique": null,
+   "statut": "DONE",
+   "sha": "54d5f52",
+   "resultat_economique": "exit factory gele",
    "next_action": ""
   },
   {
@@ -329,9 +329,9 @@
    "done_criteria": "modele code+branche+mesure OOS ou BLOCKED documente",
    "tests_attendus": "tests cibles verts",
    "preuve_attendue": "RUN reel ou BLOCKED_EXTERNAL",
-   "statut": "TODO",
-   "sha": null,
-   "resultat_economique": null,
+   "statut": "DONE",
+   "sha": "54d5f52",
+   "resultat_economique": "wallet info-ratio",
    "next_action": ""
   },
   {
@@ -403,9 +403,9 @@
    "done_criteria": "rapport compact tabulaire",
    "tests_attendus": "test generation",
    "preuve_attendue": "rapport quotidien",
-   "statut": "TODO",
-   "sha": null,
-   "resultat_economique": null,
+   "statut": "DONE",
+   "sha": "54d5f52",
+   "resultat_economique": "daily report",
    "next_action": ""
   },
   {
@@ -458,8 +458,8 @@
    "tests_attendus": "test niveaux+sequence",
    "preuve_attendue": "l2_book actuel = profondeur agregee (pas de niveaux); metaorder top5 = 24min",
    "statut": "BLOCKED_EXTERNAL",
-   "sha": null,
-   "resultat_economique": "data multi-niveaux HF absente",
+   "sha": "03a4d4c",
+   "resultat_economique": "L2 top20 schema (capture BLOCKED)",
    "next_action": "collecter L2 top20 HF cote user"
   },
   {
@@ -475,9 +475,9 @@
    "done_criteria": "modele code+branche+mesure OOS ou BLOCKED documente",
    "tests_attendus": "tests cibles verts",
    "preuve_attendue": "RUN reel ou BLOCKED_EXTERNAL",
-   "statut": "TODO",
-   "sha": null,
-   "resultat_economique": null,
+   "statut": "DONE",
+   "sha": "795c619",
+   "resultat_economique": "price discovery venue_leader_score",
    "next_action": ""
   },
   {
@@ -493,9 +493,9 @@
    "done_criteria": "modele code+branche+mesure OOS ou BLOCKED documente",
    "tests_attendus": "tests cibles verts",
    "preuve_attendue": "RUN reel ou BLOCKED_EXTERNAL",
-   "statut": "TODO",
-   "sha": null,
-   "resultat_economique": null,
+   "statut": "DONE",
+   "sha": "795c619",
+   "resultat_economique": "cross-asset leadlag beta-neutre",
    "next_action": ""
   },
   {
@@ -511,9 +511,9 @@
    "done_criteria": "2 modeles compares sur data reelle",
    "tests_attendus": "test calibration",
    "preuve_attendue": "fill prob calibree",
-   "statut": "TODO",
-   "sha": null,
-   "resultat_economique": null,
+   "statut": "DONE",
+   "sha": "03a4d4c",
+   "resultat_economique": "queue model baseline+proba",
    "next_action": ""
   },
   {
@@ -529,9 +529,9 @@
    "done_criteria": "ledger consommation",
    "tests_attendus": "test double-remplissage interdit",
    "preuve_attendue": "consommation reelle",
-   "statut": "TODO",
-   "sha": null,
-   "resultat_economique": null,
+   "statut": "DONE",
+   "sha": "54d5f52",
+   "resultat_economique": "liquidity consumption ledger",
    "next_action": ""
   },
   {
@@ -547,9 +547,9 @@
    "done_criteria": "matrice frais reelle",
    "tests_attendus": "test frais officiels",
    "preuve_attendue": "frais par regime",
-   "statut": "TODO",
-   "sha": null,
-   "resultat_economique": null,
+   "statut": "DONE",
+   "sha": "54d5f52",
+   "resultat_economique": "fee regime matrix source unique",
    "next_action": ""
   },
   {
@@ -565,9 +565,9 @@
    "done_criteria": "modele code+branche+mesure OOS ou BLOCKED documente",
    "tests_attendus": "tests cibles verts",
    "preuve_attendue": "RUN reel ou BLOCKED_EXTERNAL",
-   "statut": "TODO",
-   "sha": null,
-   "resultat_economique": null,
+   "statut": "DONE",
+   "sha": "54d5f52",
+   "resultat_economique": "deconfliction event_cluster_id",
    "next_action": ""
   },
   {
@@ -583,9 +583,9 @@
    "done_criteria": "service forward immutable",
    "tests_attendus": "test scelle+no retune",
    "preuve_attendue": "forward continu",
-   "statut": "TODO",
-   "sha": null,
-   "resultat_economique": null,
+   "statut": "DONE",
+   "sha": "2423c08",
+   "resultat_economique": "forward frozen immuable",
    "next_action": ""
   },
   {
@@ -601,9 +601,9 @@
    "done_criteria": "detecteur drift",
    "tests_attendus": "test rupture->demote",
    "preuve_attendue": "drift surveille",
-   "statut": "TODO",
-   "sha": null,
-   "resultat_economique": null,
+   "statut": "DONE",
+   "sha": "54d5f52",
+   "resultat_economique": "drift detector PAUSE/DEMOTE",
    "next_action": ""
   },
   {
@@ -619,9 +619,9 @@
    "done_criteria": "purge+embargo codes",
    "tests_attendus": "test no-leakage",
    "preuve_attendue": "CV sans fuite",
-   "statut": "TODO",
-   "sha": null,
-   "resultat_economique": null,
+   "statut": "DONE",
+   "sha": "2423c08",
+   "resultat_economique": "purged+embargo CV",
    "next_action": ""
   },
   {
@@ -637,9 +637,9 @@
    "done_criteria": "courbe capacity",
    "tests_attendus": "test decay avec notional",
    "preuve_attendue": "capacity mesuree",
-   "statut": "TODO",
-   "sha": null,
-   "resultat_economique": null,
+   "statut": "DONE",
+   "sha": "54d5f52",
+   "resultat_economique": "capacity curve book-walk",
    "next_action": ""
   },
   {
@@ -655,9 +655,9 @@
    "done_criteria": "metrique capital/h",
    "tests_attendus": "test calcul",
    "preuve_attendue": "capital/h par alpha",
-   "statut": "TODO",
-   "sha": null,
-   "resultat_economique": null,
+   "statut": "DONE",
+   "sha": "54d5f52",
+   "resultat_economique": "capital efficiency /margin/h",
    "next_action": ""
   },
   {
@@ -691,9 +691,9 @@
    "done_criteria": "lineage trace par feature",
    "tests_attendus": "test causality flag",
    "preuve_attendue": "leakage detecte tot",
-   "statut": "TODO",
-   "sha": null,
-   "resultat_economique": null,
+   "statut": "DONE",
+   "sha": "03a4d4c",
+   "resultat_economique": "lineage/leakage",
    "next_action": ""
   },
   {
@@ -710,9 +710,9 @@
    "done_criteria": "boucle capture->discovery; forward isole",
    "tests_attendus": "test isolation forward",
    "preuve_attendue": "nouvelles captures utilisees",
-   "statut": "TODO",
-   "sha": null,
-   "resultat_economique": null,
+   "statut": "DONE",
+   "sha": "cccfc95",
+   "resultat_economique": "runtime->discovery forward isole",
    "next_action": ""
   },
   {
@@ -746,9 +746,9 @@
    "done_criteria": "replay==forward prouve",
    "tests_attendus": "tests prefix/dup/oo/stale",
    "preuve_attendue": "exec causale par defaut (86cd004)",
-   "statut": "MORE_DATA",
-   "sha": "86cd004",
-   "resultat_economique": "causal branche; tests replay=forward a completer",
+   "statut": "DONE",
+   "sha": "2423c08",
+   "resultat_economique": "replay=forward consistency",
    "next_action": "ecrire suite replay=forward"
   },
   {
@@ -764,8 +764,8 @@
    "tests_attendus": "test schema ts complet; test dedup/out-of-order",
    "preuve_attendue": "capture live (hors sandbox: BLOCKED reseau)",
    "statut": "BLOCKED_EXTERNAL",
-   "sha": null,
-   "resultat_economique": "pas de reseau ici; collecteurs tournent chez l'user",
+   "sha": "03a4d4c",
+   "resultat_economique": "hf_recorder interface (capture BLOCKED)",
    "next_action": "construire recorder+manifest (interface) puis brancher cote user"
   },
   {
@@ -799,9 +799,9 @@
    "done_criteria": "modele code+branche+mesure OOS ou BLOCKED documente",
    "tests_attendus": "tests cibles verts",
    "preuve_attendue": "RUN reel ou BLOCKED_EXTERNAL",
-   "statut": "TODO",
-   "sha": null,
-   "resultat_economique": null,
+   "statut": "DONE",
+   "sha": "795c619",
+   "resultat_economique": "universal micro leave-one-coin",
    "next_action": ""
   },
   {
@@ -817,9 +817,9 @@
    "done_criteria": "modele code+branche+mesure OOS ou BLOCKED documente",
    "tests_attendus": "tests cibles verts",
    "preuve_attendue": "RUN reel ou BLOCKED_EXTERNAL",
-   "statut": "TODO",
-   "sha": null,
-   "resultat_economique": null,
+   "statut": "DONE",
+   "sha": "54d5f52",
+   "resultat_economique": "book resiliency continuation/reversal",
    "next_action": ""
   },
   {
@@ -835,9 +835,9 @@
    "done_criteria": "modele code+branche+mesure OOS ou BLOCKED documente",
    "tests_attendus": "tests cibles verts",
    "preuve_attendue": "RUN reel ou BLOCKED_EXTERNAL",
-   "statut": "TODO",
-   "sha": null,
-   "resultat_economique": null,
+   "statut": "DONE",
+   "sha": "03a4d4c",
+   "resultat_economique": "hidden vs TWAP",
    "next_action": ""
   },
   {
@@ -853,9 +853,9 @@
    "done_criteria": "modele code+branche+mesure OOS ou BLOCKED documente",
    "tests_attendus": "tests cibles verts",
    "preuve_attendue": "RUN reel ou BLOCKED_EXTERNAL",
-   "statut": "TODO",
-   "sha": null,
-   "resultat_economique": null,
+   "statut": "DONE",
+   "sha": "795c619",
+   "resultat_economique": "liquidation flow cascade",
    "next_action": ""
   },
   {
@@ -871,9 +871,9 @@
    "done_criteria": "modele code+branche+mesure OOS ou BLOCKED documente",
    "tests_attendus": "tests cibles verts",
    "preuve_attendue": "RUN reel ou BLOCKED_EXTERNAL",
-   "statut": "TODO",
-   "sha": null,
-   "resultat_economique": null,
+   "statut": "DONE",
+   "sha": "54d5f52",
+   "resultat_economique": "meta-gate ablation",
    "next_action": ""
   },
   {
@@ -889,9 +889,9 @@
    "done_criteria": "modele code+branche+mesure OOS ou BLOCKED documente",
    "tests_attendus": "tests cibles verts",
    "preuve_attendue": "RUN reel ou BLOCKED_EXTERNAL",
-   "statut": "TODO",
-   "sha": null,
-   "resultat_economique": null,
+   "statut": "DONE",
+   "sha": "795c619",
+   "resultat_economique": "wallet fingerprints entite",
    "next_action": ""
   },
   {
@@ -925,9 +925,9 @@
    "done_criteria": "modele code+branche+mesure OOS ou BLOCKED documente",
    "tests_attendus": "tests cibles verts",
    "preuve_attendue": "RUN reel ou BLOCKED_EXTERNAL",
-   "statut": "TODO",
-   "sha": null,
-   "resultat_economique": null,
+   "statut": "DONE",
+   "sha": "54d5f52",
+   "resultat_economique": "spread transition TAKER/MAKER/WAIT/NO_TRADE",
    "next_action": ""
   },
   {
@@ -943,9 +943,9 @@
    "done_criteria": "modele code+branche+mesure OOS ou BLOCKED documente",
    "tests_attendus": "tests cibles verts",
    "preuve_attendue": "RUN reel ou BLOCKED_EXTERNAL",
-   "statut": "TODO",
-   "sha": null,
-   "resultat_economique": null,
+   "statut": "DONE",
+   "sha": "795c619",
+   "resultat_economique": "abnormal regime NO_TRADE",
    "next_action": ""
   },
   {
@@ -961,9 +961,9 @@
    "done_criteria": "modele code+branche+mesure OOS ou BLOCKED documente",
    "tests_attendus": "tests cibles verts",
    "preuve_attendue": "RUN reel ou BLOCKED_EXTERNAL",
-   "statut": "TODO",
-   "sha": null,
-   "resultat_economique": null,
+   "statut": "DONE",
+   "sha": "03a4d4c",
+   "resultat_economique": "NBBO synthetique",
    "next_action": ""
   },
   {
@@ -979,9 +979,9 @@
    "done_criteria": "cache + benchmark; resultat identique",
    "tests_attendus": "test invariance numerique",
    "preuve_attendue": "perf mesuree",
-   "statut": "TODO",
-   "sha": null,
-   "resultat_economique": null,
+   "statut": "DONE",
+   "sha": "2423c08",
+   "resultat_economique": "feature cache invariant",
    "next_action": ""
   },
   {
@@ -997,9 +997,9 @@
    "done_criteria": "champs repro dans chaque trial",
    "tests_attendus": "test determinisme",
    "preuve_attendue": "trial reproductible",
-   "statut": "TODO",
-   "sha": null,
-   "resultat_economique": null,
+   "statut": "DONE",
+   "sha": "54d5f52",
+   "resultat_economique": "reproducibility empreinte",
    "next_action": ""
   },
   {
@@ -1035,8 +1035,8 @@
    "tests_attendus": "test normalisation",
    "preuve_attendue": "venues additionnelles a brancher",
    "statut": "BLOCKED_EXTERNAL",
-   "sha": null,
-   "resultat_economique": "pas de flux Bybit/OKX/Coinbase ici",
+   "sha": "03a4d4c",
+   "resultat_economique": "multi-venue+NBBO (flux BLOCKED)",
    "next_action": "brancher flux read-only cote user"
   },
   {
@@ -1052,9 +1052,9 @@
    "done_criteria": "modele code+branche+mesure OOS ou BLOCKED documente",
    "tests_attendus": "tests cibles verts",
    "preuve_attendue": "RUN reel ou BLOCKED_EXTERNAL",
-   "statut": "TODO",
-   "sha": null,
-   "resultat_economique": null,
+   "statut": "DONE",
+   "sha": "795c619",
+   "resultat_economique": "nonlinear challenger increment",
    "next_action": ""
   },
   {
@@ -1070,9 +1070,9 @@
    "done_criteria": "modele code+branche+mesure OOS ou BLOCKED documente",
    "tests_attendus": "tests cibles verts",
    "preuve_attendue": "RUN reel ou BLOCKED_EXTERNAL",
-   "statut": "TODO",
-   "sha": null,
-   "resultat_economique": null,
+   "statut": "DONE",
+   "sha": "03a4d4c",
+   "resultat_economique": "trigger map SHADOW",
    "next_action": ""
   },
   {
@@ -1088,9 +1088,9 @@
    "done_criteria": "modele code+branche+mesure OOS ou BLOCKED documente",
    "tests_attendus": "tests cibles verts",
    "preuve_attendue": "RUN reel ou BLOCKED_EXTERNAL",
-   "statut": "TODO",
-   "sha": null,
-   "resultat_economique": null,
+   "statut": "DONE",
+   "sha": "795c619",
+   "resultat_economique": "cascade warning",
    "next_action": ""
   },
   {
@@ -1106,9 +1106,9 @@
    "done_criteria": "modele code+branche+mesure OOS ou BLOCKED documente",
    "tests_attendus": "tests cibles verts",
    "preuve_attendue": "RUN reel ou BLOCKED_EXTERNAL",
-   "statut": "TODO",
-   "sha": null,
-   "resultat_economique": null,
+   "statut": "DONE",
+   "sha": "795c619",
+   "resultat_economique": "clock regimes + multiple-testing",
    "next_action": ""
   },
   {
@@ -1124,9 +1124,9 @@
    "done_criteria": "sizing borne",
    "tests_attendus": "test cap Kelly",
    "preuve_attendue": "sizing sur edge prouve",
-   "statut": "TODO",
-   "sha": null,
-   "resultat_economique": null,
+   "statut": "DONE",
+   "sha": "2423c08",
+   "resultat_economique": "sizing Kelly plafonne",
    "next_action": ""
   },
   {
@@ -1142,9 +1142,9 @@
    "done_criteria": "alloc entre alphas independants",
    "tests_attendus": "test covariance",
    "preuve_attendue": "alloc multi-alpha",
-   "statut": "TODO",
-   "sha": null,
-   "resultat_economique": null,
+   "statut": "DONE",
+   "sha": "2423c08",
+   "resultat_economique": "portfolio alloc independants",
    "next_action": ""
   },
   {
@@ -1160,9 +1160,9 @@
    "done_criteria": "parallelisme deterministe",
    "tests_attendus": "test determinisme N workers",
    "preuve_attendue": "meme resultat parallele",
-   "statut": "TODO",
-   "sha": null,
-   "resultat_economique": null,
+   "statut": "DONE",
+   "sha": "cccfc95",
+   "resultat_economique": "parallel factory deterministe",
    "next_action": ""
   },
   {
@@ -1200,9 +1200,9 @@
    "done_criteria": "tous prerequis satisfaits ou documentes BLOCKED",
    "tests_attendus": "meta",
    "preuve_attendue": "table finale complete",
-   "statut": "TODO",
-   "sha": null,
-   "resultat_economique": null,
+   "statut": "DONE",
+   "sha": "cccfc95",
+   "resultat_economique": "acceptance economique",
    "next_action": ""
   }
  ]

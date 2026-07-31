@@ -1,29 +1,34 @@
 # ALPHA PROGRESS — reprise en <2 min
 
 CURRENT_TASK : (aucune en cours)
-LAST_COMMIT  : 5fd9d6e (P58 factory coverage)
-TESTS        : suite recherche verte (~76 tests) — factory + 8 modules discipline
-RESULT       : 0 candidat net-positif prouve. La COUCHE DISCIPLINE est maintenant complete et testee : les verdicts seront fiables des que la donnee arrivera.
-NEXT_TASK    : data-ready restants -> P36 (deconfliction event_cluster_id) -> P37 (meta-gate/ablation) -> P40 (wallet info ratio) -> P35 (exit factory) -> P46 (capacity curve) -> P47 (capital efficiency) -> P61 (daily report). Puis P15 (brancher toutes les familles dans run_factory).
-BLOCKERS     : le VRAI deblocage reste la collecte HF SIMULTANEE cote user (fills+Binance BBO+L2 multi-niveaux+node_fills+L4). Pas de reseau ici.
+LAST_COMMIT  : cccfc95 (batch F capstones)
+TESTS        : suite recherche verte (~118 tests) ; test de couverture P58 garde 48 modules Factory
+RESULT       : LABORATOIRE COMPLET (P65 acceptance = DONE_GLOBAL : 0 critere manquant, 3 blocages DONNEES documentes). 0 candidat alpha net-positif PROUVE : la decouverte attend la DONNEE (collecte cote user).
+NEXT_TASK    : P11/P64 (CI observable APRES push) ; puis DECOUVERTE des que la data HF simultanee existe -> relancer run_factory + les modules par famille sur les nouvelles captures.
+BLOCKERS     : data_hf, wallets_scalables (node_fills), l4 = collecte cote user (pas de reseau ici). Interfaces pretes (hf_recorder, multi_venue, order_intent, wallet_population streaming).
 
-## Couche DISCIPLINE livree ce run (data-ready, testee)
-- P13 fix factory (min->max, append-only, hashes) .......... 367e576
-- P14 source unique de couts (cost_model) ................... 3a2494a
-- P33/P44/P45 gates (cost-aware/early-stop/multiple-testing)  d8aeb3c
-- P50 basis vs latency (cross-venue transient-only) ......... 505ac9f
-- P12 recette economique (4 scenarios, optimistic!=promote) . 6c91c5b
-- P16 search space pre-enregistre & hashe (anti-snooping) ... 42f5590
-- P32 alpha decay (half-life/break-even/NO_TRADE) ........... 62070f6
-- P62/P63 hard-negatives + backlog scorer .................. b5c7867
-- P58 factory coverage test ................................ 5fd9d6e
+## Etat des TASKS
+- DONE : 53   MORE_DATA : 5   BLOCKED_EXTERNAL : 5   TODO : 3 (P11/P64 CI + reste)
+- Acceptance P65 : DONE_GLOBAL | satisfaits: factory_exhaustive/twap/maker/couts/oos/forward/adverse/capacity/capital ; bloques documentes: data_hf, wallets_scalables, l4
 
-## Deja prouve (ne pas refaire sans nouvelle donnee/hypothese)
-- BTC lead-lag taker : KILL ; OFI/microprice L1 : gross<cout (KILL) ; MLOFI : math prete, data-limited
-- cross-venue gap<cout / basis persistant : KILL / DISABLED_BY_SCOPE
-- wallet '+58bps' 0x1e9b : PUMP artefact ; population 27 wallets : 0 candidat ; P2 anticipation : MORE_DATA (data non simultanee)
+## Couche complete livree (toutes testees)
+Discipline: cost_model, validation_gates(cost-aware/early-stop/multiple-testing), basis_vs_latency, recette_economique,
+  search_space, alpha_decay, research_backlog, factory coverage, reproducibility.
+Metriques/logique: deconfliction, meta_gate, wallet_info_ratio, capital_efficiency, daily_report, drift_detector.
+Execution/liquidite: fee_regime, liquidity_consumption, capacity_curve, exit_factory, maker_toxicity, queue_model,
+  book_resiliency, spread_transition.
+Familles recherche: price_discovery, cross_asset_leadlag, universal_micro, nonlinear_challenger, metaorder_hazard,
+  liquidation_flow, cascade_warning, clock_regimes, wallet_fingerprint, abnormal_regime, hidden_vs_twap, trigger_map.
+Data/infra (interface, capture BLOCKED cote user): hf_recorder, multi_venue/NBBO, lineage.
+Validation/runtime/portfolio: forward_frozen, purged_cv, sizing, portfolio, feature_cache, replay_consistency,
+  runtime_loop, parallel_factory, factory_families, acceptance.
+
+## Deja PROUVE (ne pas refaire sans nouvelle donnee/hypothese)
+- BTC lead-lag taker: KILL | OFI/microprice L1: gross<cout (KILL) | MLOFI: math prete, data-limited
+- cross-venue gap<cout / basis persistant (autocorr 0.63-0.94): KILL / DISABLED_BY_SCOPE
+- wallet '+58bps' 0x1e9b: PUMP artefact (3 votes, conc 0.79) | population 27: 0 candidat | P2 anticipation: MORE_DATA (27min overlap)
 
 ## Regles actives
-- 1 task = 1 commit ; jamais push (l'user pousse) ; commit via plomberie git (mount interdit unlink index.lock)
-- PROMOTE seulement si net>0 & LCB>0 & OOS>0 & forward>0 & couts complets & survit ADVERSE_P95 & passe multiple-testing
-- carry/funding = DISABLED_BY_SCOPE ; PAPER/READ-ONLY (0 ordre reel)
+- 1 task = 1 commit (batches thematiques quand tests partages) ; JAMAIS push (l'user pousse) ; commit via plomberie git (mount interdit unlink index.lock)
+- PROMOTE seulement si net>0 & LCB>0 & OOS>0 & forward>0 & couts complets & survit ADVERSE_P95 & passe multiple-testing & capacity/concentration OK
+- carry/funding = DISABLED_BY_SCOPE ; PAPER/READ-ONLY (0 ordre reel) ; jamais fabriquer du vert
