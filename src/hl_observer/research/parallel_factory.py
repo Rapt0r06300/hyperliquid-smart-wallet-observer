@@ -11,7 +11,10 @@ from __future__ import annotations
 
 import hashlib
 import json
-from collections.abc import Mapping, Sequence
+import time
+import tracemalloc
+from collections.abc import Callable, Mapping, Sequence
+from concurrent.futures import ThreadPoolExecutor
 from typing import Any
 
 
@@ -46,4 +49,62 @@ def resultat_invariant(merge_a: Sequence[Mapping[str, Any]], merge_b: Sequence[M
     return [_empreinte(r) for r in merge_a] == [_empreinte(r) for r in merge_b]
 
 
-__all__ = ["merge_deterministe", "resultat_invariant"]
+def sharder(items: Sequence[Any], n_shards: int) -> list[list[Any]]:
+    """Répartit les items en `n_shards` groupes contigus stables (même découpe pour un même n)."""
+    n_shards = max(1, int(n_shards))
+    return [list(items[i::n_shards]) for i in range(n_shards)]
+
+
+def executer_parallele(items: Sequence[Any], worker_fn: Callable[[Sequence[Any]], Sequence[Mapping[str, Any]]], *,
+                       n_workers: int = 4, parallele: bool = True) -> list[dict[str, Any]]:
+    """Découpe `items` en shards READ-ONLY, exécute `worker_fn(shard)` (threads si `parallele`), puis FUSIONNE
+    de façon déterministe. Le nombre de workers ne change JAMAIS le résultat (merge trié + anti-conflit)."""
+    shards = sharder(items, n_workers)
+    if parallele and n_workers > 1:
+        with ThreadPoolExecutor(max_workers=n_workers) as ex:
+            resultats = list(ex.map(worker_fn, shards))
+    else:
+        resultats = [worker_fn(s) for s in shards]
+    return merge_deterministe(resultats)
+
+
+def prouver_puis_executer(items: Sequence[Any], worker_fn: Callable[[Sequence[Any]], Sequence[Mapping[str, Any]]],
+                          *, n_workers: int = 4) -> dict[str, Any]:
+    """Parallélisation SEULEMENT après déterminisme prouvé : calcule le résultat séquentiel (référence) ET le
+    résultat à `n_workers`, vérifie l'invariance. Si invariant → on garde le parallèle ; sinon → repli séquentiel
+    (on ne fait JAMAIS confiance à un parallélisme non déterministe). Un conflit id/contenu = non déterministe."""
+    sequentiel = executer_parallele(items, worker_fn, n_workers=1, parallele=False)
+    try:
+        parallele = executer_parallele(items, worker_fn, n_workers=n_workers, parallele=True)
+        invariant = resultat_invariant(sequentiel, parallele)
+    except ValueError:
+        invariant = False
+    return {"parallelise": invariant, "resultat": (parallele if invariant else sequentiel),
+            "n_workers": (n_workers if invariant else 1),
+            "raison": (None if invariant else "non-déterminisme détecté entre workers → repli séquentiel")}
+
+
+def benchmark(items: Sequence[Any], worker_fn: Callable[[Sequence[Any]], Sequence[Mapping[str, Any]]], *,
+              n_workers: int = 4) -> dict[str, Any]:
+    """Mesure RÉELLE temps + pic mémoire (tracemalloc) du séquentiel vs parallèle, et l'invariance. Aucune
+    promesse de speedup : on rapporte les vrais chiffres (le GIL peut annuler le gain sur du CPU-bound Python)."""
+    tracemalloc.start()
+    t0 = time.perf_counter()
+    seq = executer_parallele(items, worker_fn, n_workers=1, parallele=False)
+    seq_ms = (time.perf_counter() - t0) * 1e3
+    seq_peak = tracemalloc.get_traced_memory()[1]
+    tracemalloc.reset_peak()
+    t1 = time.perf_counter()
+    par = executer_parallele(items, worker_fn, n_workers=n_workers, parallele=True)
+    par_ms = (time.perf_counter() - t1) * 1e3
+    par_peak = tracemalloc.get_traced_memory()[1]
+    tracemalloc.stop()
+    return {"n_items": len(items), "n_workers": n_workers,
+            "seq_ms": round(seq_ms, 3), "par_ms": round(par_ms, 3),
+            "seq_peak_kb": round(seq_peak / 1024, 1), "par_peak_kb": round(par_peak / 1024, 1),
+            "speedup": (round(seq_ms / par_ms, 3) if par_ms > 0 else None),
+            "invariant": resultat_invariant(seq, par)}
+
+
+__all__ = ["merge_deterministe", "resultat_invariant", "sharder", "executer_parallele",
+           "prouver_puis_executer", "benchmark"]

@@ -38,6 +38,43 @@ def test_parallel_factory_conflit_contenu_error():
         PF.merge_deterministe([w1, w2])
 
 
+def _worker_det(shard):
+    return [{"trial_id": "t%03d" % i, "config_hash": "t%03d" % i, "valeur": i * i} for i in shard]
+
+
+def _worker_nondet(shard):
+    # contenu dépend de la TAILLE du shard -> change avec le nombre de workers -> NON déterministe
+    return [{"trial_id": "t%03d" % i, "config_hash": "t%03d" % i, "taille_shard": len(shard)} for i in shard]
+
+
+def test_fix54_sharder_stable():
+    assert PF.sharder([1, 2, 3, 4, 5], 2) == [[1, 3, 5], [2, 4]]
+    assert PF.sharder([1, 2, 3], 1) == [[1, 2, 3]]
+
+
+def test_fix54_parallelisation_seulement_apres_determinisme_prouve():
+    items = list(range(60))
+    res = PF.prouver_puis_executer(items, _worker_det, n_workers=4)
+    assert res["parallelise"] is True and res["n_workers"] == 4      # déterministe -> parallélisation validée
+    seq = PF.executer_parallele(items, _worker_det, n_workers=1, parallele=False)
+    assert PF.resultat_invariant(res["resultat"], seq)               # 1 worker == N workers (contenu identique)
+
+
+def test_fix54_non_determinisme_force_repli_sequentiel():
+    items = list(range(60))
+    res = PF.prouver_puis_executer(items, _worker_nondet, n_workers=4)
+    assert res["parallelise"] is False and res["n_workers"] == 1     # non déterministe -> on ne parallélise PAS
+    assert "non-déterminisme" in res["raison"]
+    assert all(r["taille_shard"] == 60 for r in res["resultat"])     # repli séquentiel cohérent (1 shard = tout)
+
+
+def test_fix54_benchmark_rapporte_temps_et_ram_reels():
+    bench = PF.benchmark(list(range(300)), _worker_det, n_workers=4)
+    assert bench["invariant"] is True and bench["n_items"] == 300
+    assert bench["seq_ms"] >= 0 and bench["par_ms"] >= 0 and bench["speedup"] is not None
+    assert bench["seq_peak_kb"] > 0 and bench["par_peak_kb"] > 0     # pic mémoire réel mesuré (tracemalloc)
+
+
 def test_runtime_loop_forward_isole():
     caps = [{"cible_candidat": "frozen1"}, {"cible_candidat": None}, {"cible_candidat": "libre"}]
     r = RL.router_capture(caps, forward_frozen_ids={"frozen1"})
