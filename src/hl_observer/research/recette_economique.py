@@ -9,7 +9,7 @@ Un PROMOTE exige de survivre au moins jusqu'à ADVERSE_P95. Pur, 0 réseau, 0 or
 """
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from typing import Any
 
 UNMEASURABLE = "UNMEASURABLE"
@@ -57,5 +57,64 @@ def verdict_bloque_si_optimiste(scenario_source: str, verdict: str) -> str:
     return verdict
 
 
+# ── FIX-58 : RECETTE FINALE — table économique complète par survivant + PROMOTE si TOUS les gates passent ──
+#: colonnes de la table finale (task FIX-58). L'optimistic reste DIAGNOSTIC (jamais promote).
+COLONNES_FINALES = ("idea", "N", "gross_bps", "fees_bps", "spread_bps", "slippage_bps", "latency_bps",
+                    "net_base_bps", "lcb_net_bps", "pf", "dd", "es", "fill_ratio", "capacity_usd",
+                    "oos_net_bps", "forward_net_bps", "net_adverse_p95_bps", "net_adverse_p99_bps",
+                    "net_optimistic_diag_bps", "verdict")
+
+
+def _cout_base_bps(profil: Mapping[str, Any]) -> Any:
+    parts = [profil.get(k) for k in ("fees_bps", "spread_bps", "slippage_bps", "latency_bps")]
+    mesures = [float(x) for x in parts if isinstance(x, (int, float))]
+    return sum(mesures) if mesures else UNMEASURABLE
+
+
+def ligne_finale(profil: Mapping[str, Any]) -> dict[str, Any]:
+    """Une ligne de la recette finale : nets par scénario + les 4 GATES. PROMOTE seulement si survit à
+    ADVERSE_P95 ET LCB(net)>0 ET OOS>0 ET forward>0 (tout mesuré). L'optimistic ne promeut jamais."""
+    gross, cout = profil.get("gross_bps"), _cout_base_bps(profil)
+    rec = evaluer_recette(gross, cout)
+    nets = rec["nets"]
+    lcb, oos, fwd = profil.get("lcb_net_bps"), profil.get("oos_net_bps"), profil.get("forward_net_bps")
+    gates = {
+        "adverse_p95": bool(rec.get("promote_si_adverse_p95")),
+        "lcb_net_positif": isinstance(lcb, (int, float)) and lcb > 0,
+        "oos_positif": isinstance(oos, (int, float)) and oos > 0,
+        "forward_positif": isinstance(fwd, (int, float)) and fwd > 0,
+    }
+    base = nets.get("BASE_CALIBRATED")
+    if all(gates.values()):
+        verdict = "PROMOTE"
+    elif isinstance(base, (int, float)) and base <= 0:
+        verdict = "KILL"
+    else:
+        verdict = "MORE_DATA"
+    row = {c: profil.get(c) for c in COLONNES_FINALES}
+    row.update({"idea": profil.get("idea") or profil.get("_famille"),
+                "net_base_bps": base, "net_adverse_p95_bps": nets.get("ADVERSE_P95"),
+                "net_adverse_p99_bps": nets.get("ADVERSE_P99"),
+                "net_optimistic_diag_bps": nets.get("OPTIMISTIC_DIAGNOSTIC_ONLY"),
+                "cout_base_bps": (round(cout, 4) if isinstance(cout, (int, float)) else cout),
+                "gates": gates, "verdict": verdict})
+    return row
+
+
+def recette_finale(survivants: Sequence[Mapping[str, Any]] | None) -> dict[str, Any]:
+    """Chaque survivant (issu de la Factory H24) passe BASE_CALIBRATED → ADVERSE_P95 → ADVERSE_P99. Table
+    complète + comptes. Sans survivant → rien à promouvoir (honnête : la recette vient APRÈS les survivants)."""
+    survivants = list(survivants or [])
+    table = [ligne_finale(p) for p in survivants]
+    n = {"PROMOTE": 0, "KILL": 0, "MORE_DATA": 0}
+    for r in table:
+        n[r["verdict"]] = n.get(r["verdict"], 0) + 1
+    return {"colonnes": list(COLONNES_FINALES), "table": table, "n_survivants": len(table),
+            "n_promote": n["PROMOTE"], "n_kill": n["KILL"], "n_more_data": n["MORE_DATA"],
+            "note": "OPTIMISTIC = diagnostic seulement ; PROMOTE exige adverse_p95 + LCB + OOS + forward",
+            "real_execution": False}
+
+
 __all__ = ["SCENARIOS", "SCENARIOS_PROMOTE", "peut_promote", "net_sous_scenario",
-           "evaluer_recette", "verdict_bloque_si_optimiste", "UNMEASURABLE"]
+           "evaluer_recette", "verdict_bloque_si_optimiste", "COLONNES_FINALES", "ligne_finale",
+           "recette_finale", "UNMEASURABLE"]
