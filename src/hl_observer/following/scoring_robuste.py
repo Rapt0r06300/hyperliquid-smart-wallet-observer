@@ -55,12 +55,39 @@ def _jour(ts_ms: Any) -> int | None:
 
 # ════════════════════════ §12.1 — grappes indépendantes ════════════════════════
 def cle_grappe(episode: Mapping[str, Any]) -> str:
-    """Identité de grappe d'un épisode. Deux fills du même métaordre partagent la même clé."""
+    """Identité de grappe d'un épisode. Deux fills du même métaordre partagent la même clé.
+
+    FIX-35 : au niveau wallet:coin:jour, l'identité utilisée est l'`entite` si elle est renseignée (voir
+    `annoter_entites`) — deux wallets d'une MÊME entité (co-trade) partagent alors la grappe et ne comptent
+    PAS pour deux voix faussement indépendantes."""
     for cle in ("metaorder_id", "twap_id", "burst_id"):
         v = episode.get(cle)
         if v not in (None, "", 0, "0"):
             return "%s:%s" % (cle, v)
-    return "wcj:%s:%s:%s" % (episode.get("wallet"), episode.get("coin"), _jour(episode.get("ts_ms")))
+    ident = episode.get("entite") or episode.get("wallet") or episode.get("adresse")
+    return "wcj:%s:%s:%s" % (ident, episode.get("coin"), _jour(episode.get("ts_ms")))
+
+
+def annoter_entites(episodes: Sequence[Mapping[str, Any]],
+                    clusters: Iterable[Sequence[Any]]) -> list[dict[str, Any]]:
+    """FIX-35 — marque chaque épisode d'une `entite` : tous les wallets d'un même cluster de co-trade
+    partagent l'identité d'entité (le wallet minimal du cluster, choix déterministe). Ainsi une entité qui
+    pilote plusieurs wallets sur le même coin/jour ne produit qu'UNE voix indépendante, pas une par wallet.
+    Conservateur (réduit N) : on ne fabrique JAMAIS d'indépendance qui n'existe pas."""
+    wallet_to_entite: dict[str, str] = {}
+    for grp in clusters:
+        membres = [str(w) for w in grp if w not in (None, "")]
+        if len(membres) < 2:
+            continue
+        canon = min(membres)
+        for w in membres:
+            wallet_to_entite[w] = canon
+    out: list[dict[str, Any]] = []
+    for e in episodes:
+        w = str(e.get("wallet") or e.get("adresse") or "")
+        ent = wallet_to_entite.get(w)
+        out.append({**e, "entite": ent} if ent else dict(e))
+    return out
 
 
 def agreger_en_grappes(episodes: Sequence[Mapping[str, Any]], *, cle_valeur: str = "net_bps") -> dict[str, Any]:
@@ -214,5 +241,5 @@ def variantes_de_copie() -> tuple[str, ...]:
 
 
 __all__ = ["SCHEMA_VERSION", "CLES_GRAPPE", "ACTIONS_COPY", "MIN_VOTES_INDEPENDANTS",
-           "cle_grappe", "agreger_en_grappes", "borne_basse_confiance", "critere_core",
+           "cle_grappe", "annoter_entites", "agreger_en_grappes", "borne_basse_confiance", "critere_core",
            "separer_decouverte_validation", "statut_expiration", "decision_copy", "variantes_de_copie"]

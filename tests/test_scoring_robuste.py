@@ -37,6 +37,25 @@ def test_sans_metaorder_la_grappe_retombe_sur_wallet_coin_jour():
     assert SR.cle_grappe(e).startswith("wcj:0xa:BTC:2")
 
 
+def test_fix35_meme_entite_ne_compte_pas_pour_deux_voix():
+    # 2 wallets, memes coins/jours. Independants -> 8 voix ; MEME entite (co-trade) -> 4 voix (conservateur).
+    eps = [{"wallet": w, "coin": "BTC", "ts_ms": d * JOUR, "net_bps": 10.0}
+           for w in ("0xA", "0xB") for d in range(4)]
+    assert SR.agreger_en_grappes(eps)["n_votes_independants"] == 8
+    eps_ent = SR.annoter_entites(eps, [["0xA", "0xB"]])
+    agg = SR.agreger_en_grappes(eps_ent)
+    assert agg["n_votes_independants"] == 4                 # une entite x 4 jours, pas 2 wallets x 4 jours
+    # un wallet seul (cluster singleton ignore) garde son identite
+    assert SR.cle_grappe(SR.annoter_entites(
+        [{"wallet": "0xC", "coin": "ETH", "ts_ms": 0, "net_bps": 1.0}], [["0xC"]])[0]).startswith("wcj:0xC:ETH:")
+
+
+def test_fix35_metaorder_prime_sur_entite():
+    # un id de metaordre explicite reste la grappe (l'entite n'ecrase pas un identifiant plus fin)
+    e = SR.annoter_entites([{"wallet": "0xA", "metaorder_id": "m9", "net_bps": 1.0}], [["0xA", "0xB"]])[0]
+    assert SR.cle_grappe(e) == "metaorder_id:m9"
+
+
 # ═══════════════ §12.2 — critères CORE au-delà de N ═══════════════
 def _eps_independants(n, net=5.0, coins=("BTC",), regimes=("calme", "actif"), jours=5):
     out = []
