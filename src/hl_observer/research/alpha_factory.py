@@ -41,7 +41,7 @@ COMPOSANTES_COUT = ("fees_bps", "spread_bps", "slippage_bps", "latency_bps")
 
 #: Champs de la ligne canonique (ordre stable).
 CHAMPS = (
-    "trial_id", "config_hash", "dataset_hash", "pipeline_hash",
+    "trial_id", "config_hash", "dataset_hash", "pipeline_hash", "code_sha",
     "idea", "config_frozen", *DIMENSIONS,
     "n_raw", "n_independent", "gross_bps",
     *COMPOSANTES_COUT, "cost_total_bps", "cost_incomplet",
@@ -75,7 +75,8 @@ def ligne_canonique(idea: str, *, config_frozen: Mapping[str, Any] | str, verdic
                     fill_ratio: Any = UNMEASURABLE, capacity_usd: Any = UNMEASURABLE,
                     discovery: Any = UNMEASURABLE, oos: Any = UNMEASURABLE, forward: Any = UNMEASURABLE,
                     notes: str = "", sha: str = UNMEASURABLE,
-                    dataset_hash: str = UNMEASURABLE, pipeline_hash: str = UNMEASURABLE) -> dict[str, Any]:
+                    dataset_hash: str = UNMEASURABLE, pipeline_hash: str = UNMEASURABLE,
+                    code_sha: str = UNMEASURABLE) -> dict[str, Any]:
     """Construit une ligne canonique ; tout champ non fourni reste UNMEASURABLE (jamais 0).
 
     P13: chaque ligne porte trial_id + config_hash (deterministe sur idea+config+dimensions) + dataset_hash
@@ -83,7 +84,7 @@ def ligne_canonique(idea: str, *, config_frozen: Mapping[str, Any] | str, verdic
     config_hash = _hash(idea, config_frozen, data, event, state, filter, horizon, execution)
     row: dict[str, Any] = {
         "trial_id": config_hash[:12], "config_hash": config_hash,
-        "dataset_hash": dataset_hash, "pipeline_hash": pipeline_hash,
+        "dataset_hash": dataset_hash, "pipeline_hash": pipeline_hash, "code_sha": code_sha,
         "idea": idea, "config_frozen": config_frozen, "data": data, "event": event, "state": state,
         "filter": filter, "horizon": horizon, "execution": execution, "n_raw": n_raw,
         "n_independent": n_independent, "gross_bps": gross_bps, "fees_bps": fees_bps,
@@ -99,16 +100,31 @@ def ligne_canonique(idea: str, *, config_frozen: Mapping[str, Any] | str, verdic
 
 
 class TrialRegistry:
-    """Registre global append-only (JSONL). Tous les essais, positifs comme négatifs."""
+    """Registre global APPEND-ONLY (JSONL) avec DÉDUP explicite. Tous les essais DISTINCTS conservés (négatifs inclus).
+
+    FIX-03 : dédup par empreinte byte-identique (un même essai relancé à l'identique n'est PAS ré-écrit), sans
+    jamais reset ni écraser un essai distinct. Deux essais différents (config/résultat) restent tous les deux.
+    """
 
     def __init__(self, path: str) -> None:
         self.path = path
+        self._seen: set[str] = set()
+        for r in self.load():
+            self._seen.add(self._empreinte(r))
 
-    def record(self, row: Mapping[str, Any]) -> dict[str, Any]:
+    @staticmethod
+    def _empreinte(row: Mapping[str, Any]) -> str:
+        return hashlib.sha1(json.dumps(dict(row), sort_keys=True, default=str).encode("utf-8")).hexdigest()
+
+    def record(self, row: Mapping[str, Any], *, force: bool = False) -> dict[str, Any]:
         r = dict(row)
         if "cost_total_bps" not in r:
             total, incomplet = cout_total(r)
             r["cost_total_bps"], r["cost_incomplet"] = total, incomplet
+        emp = self._empreinte(r)
+        if emp in self._seen and not force:
+            return {**r, "_deduped": True}                   # essai byte-identique déjà enregistré
+        self._seen.add(emp)
         with open(self.path, "a", encoding="utf-8") as f:
             f.write(json.dumps(r, ensure_ascii=False) + "\n")
         return r

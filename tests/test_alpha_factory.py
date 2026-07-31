@@ -48,7 +48,22 @@ def test_p13_registre_append_only(tmp_path):
     reg.record(F.ligne_canonique("a", config_frozen="c", verdict="KILL"))
     reg.record(F.ligne_canonique("b", config_frozen="c", verdict="KILL"))
     reg.record(F.ligne_canonique("c", config_frozen="c", verdict="KILL"))
-    assert len(reg.load()) == 3                                 # append pur, rien n'est ecrase
+    assert len(reg.load()) == 3                                 # 3 essais DISTINCTS conserves
+
+
+def test_fix03_dedup_et_code_sha(tmp_path):
+    reg = F.TrialRegistry(str(tmp_path / "r.jsonl"))
+    row = F.ligne_canonique("a", config_frozen="c", verdict="KILL", code_sha="deadbeef")
+    reg.record(row)
+    r2 = reg.record(row)                                        # byte-identique -> dedup
+    assert r2.get("_deduped") is True and len(reg.load()) == 1
+    assert reg.load()[0]["code_sha"] == "deadbeef"
+    # persistance : un nouveau registre relit l'empreinte -> toujours dedup (aucun reset)
+    reg2 = F.TrialRegistry(str(tmp_path / "r.jsonl"))
+    reg2.record(row)
+    assert len(reg2.load()) == 1
+    reg2.record(F.ligne_canonique("b", config_frozen="c", verdict="KILL"))   # distinct -> ajoute
+    assert len(reg2.load()) == 2
 
 
 def test_emit_table_candidats_en_tete():

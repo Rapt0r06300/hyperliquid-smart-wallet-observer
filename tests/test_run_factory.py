@@ -34,9 +34,9 @@ def test_run_all_avec_wallet_tape(tmp_path):
     assert len(RF.F.TrialRegistry(str(tmp_path / "r.jsonl")).load()) == out["n_trials"]
 
 
-def test_p13_reset_defaut_est_append_only(tmp_path):
+def test_p13_reset_defaut_est_append_only_avec_dedup(tmp_path):
     reg = str(tmp_path / "r.jsonl")
     out1 = RF.run_all(data_dir=str(tmp_path), registry_path=reg, coins_l2=("BTC",))       # reset defaut = False
-    out2 = RF.run_all(data_dir=str(tmp_path), registry_path=reg, coins_l2=("BTC",))
-    # append-only : le 2e run n'ecrase pas le 1er
-    assert len(RF.F.TrialRegistry(reg).load()) == out1["n_trials"] + out2["n_trials"]
+    RF.run_all(data_dir=str(tmp_path), registry_path=reg, coins_l2=("BTC",))              # 2e run IDENTIQUE
+    # FIX-03 : append-only SANS wipe, mais le 2e run identique est DEDUP -> pas de doublons
+    assert len(RF.F.TrialRegistry(reg).load()) == out1["n_trials"]
