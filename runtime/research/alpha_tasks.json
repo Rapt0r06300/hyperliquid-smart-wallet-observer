@@ -1387,22 +1387,22 @@
    "section": "F",
    "objectif": "Wallet×Binance: matching horizon = prix AUTOUR de T+h avec tolerance bornee (pas 'dernier<=T+h' vieux de secondes)",
    "prio_eco": 5,
-   "statut": "TODO",
-   "sha": null,
+   "statut": "DONE",
+   "sha": "4cbec6f",
    "depends": [],
    "done_criteria": "code+wire+experience/preuve+commit (BLOCKED n'est jamais DONE)",
-   "next_action": ""
+   "next_action": "matching horizon = point le plus proche de T±h, tolerance bornee <=h/2 ; teste (stale rejete)."
   },
   {
    "id": "FIX-17",
    "section": "F",
    "objectif": "direction depuis lifecycle OPEN/ADD/REDUCE/CLOSE/FLIP + position_side (CLOSE/REDUCE SHORT=BUY, LONG=SELL)",
    "prio_eco": 5,
-   "statut": "TODO",
-   "sha": null,
+   "statut": "DONE",
+   "sha": "7be5726",
    "depends": [],
    "done_criteria": "code+wire+experience/preuve+commit (BLOCKED n'est jamais DONE)",
-   "next_action": ""
+   "next_action": "direction_trade: lifecycle x position_side (close/reduce SHORT=BUY, LONG=SELL, flip, side B/A) ; teste."
   },
   {
    "id": "FIX-18",
@@ -1586,10 +1586,10 @@
    "objectif": "chaque trial: N raw/N ind/gross/fees/spread/slippage/latency/net/LCB/PF/DD/ES/fill/capacity/OOS/forward/verdict",
    "prio_eco": 1,
    "statut": "PARTIAL",
-   "sha": null,
+   "sha": "255ec73(sandbox; bridge sync pending)",
    "depends": [],
    "done_criteria": "code+wire+experience/preuve+commit (BLOCKED n'est jamais DONE)",
-   "next_action": ""
+   "next_action": "helpers pf/es/drawdown + wire population (pf/es/net/n_ind reels, verdict<->net coherent). RESTE: exposer les votes dans ofi/leadlag/mlofi/anticipation pour pf/es par famille ; slippage/latency/fill/capacity restent data-BLOCKED."
   },
   {
    "id": "FIX-35",
