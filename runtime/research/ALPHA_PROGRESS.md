@@ -1,10 +1,10 @@
 # ALPHA PROGRESS — reprise en <2 min
 
 ETAT_GLOBAL  : LAB_READY_DATA_BLOCKED  (aucun DONE_GLOBAL premature ; 0 alpha net-positif prouve)
-LAST_COMMIT  : bridge 4313d34 (FIX-14) ; sandbox = miroir. Ce run: FIX-16, FIX-17, FIX-34(PARTIAL), FIX-35, FIX-18, FIX-20, FIX-14 + trackers (1 tache = 1 commit).
+LAST_COMMIT  : bridge bdc8f6c (tracker) ; sandbox = miroir. Ce run: FIX-16, FIX-17, FIX-34(PARTIAL), FIX-35, FIX-18, FIX-20, FIX-14, FIX-15, FIX-36(PARTIAL), FIX-39(PARTIAL) + trackers (1 tache = 1 commit).
 TESTS        : suite recherche verte (unitaire). « vert unitaire » != « execute dans la factory sur vraie data ».
-RESULT       : corrections = 25 DONE / 14 PARTIAL / 4 TODO / 7 BLOCKED_EXTERNAL / 5 MORE_DATA / 3 RESEARCH_READY.
-NEXT_TASK    : par priorite eco, data-ready d'abord — FIX-34 (finir pf/es par famille: exposer les votes dans ofi/leadlag/mlofi/anticipation) ; FIX-10 (cross-venue end-to-end) ; FIX-15 (entity fingerprint sizes/coins/cadence, pas que co-trade timing) ; FIX-36 (purged CV/DSR/PBO/multiple-testing wire) ; FIX-39/41 (alpha decay, exit factory) ; FIX-44 (replay=forward end-to-end) ; FIX-50/51 (sizing, portfolio) ; FIX-52/53/54 (cache/streaming/parallel) ; FIX-55/56 (CI observable, fault injection) ; FIX-58 (recette finale BASE/ADVERSE_P95/P99/OPTIMISTIC).
+RESULT       : corrections = 26 DONE / 14 PARTIAL / 3 TODO / 7 BLOCKED_EXTERNAL / 5 MORE_DATA / 3 RESEARCH_READY.
+NEXT_TASK    : par priorite eco, data-ready d'abord — FIX-34 (finir pf/es par famille: exposer les votes dans ofi/leadlag/mlofi/anticipation) ; FIX-36 (cabler DSR dans le verdict factory + PBO + placebos) ; FIX-39 (appeler mesurer_decay_par_age par famille dans run_factory) ; FIX-10 (cross-venue end-to-end) ; FIX-41 (exit factory) ; FIX-44 (replay=forward end-to-end) ; FIX-26/27 (maker queue/toxicite) ; FIX-50/51 (sizing, portfolio) ; FIX-52/53/54 (cache/streaming/parallel) ; FIX-55/56 (CI observable, fault injection) ; FIX-58 (recette finale BASE/ADVERSE_P95/P99/OPTIMISTIC).
 BLOCKERS     : data HF simultanee HL+Binance, node_fills wallets, userTwapSliceFills, L4 intent, multi-venue = collecte cote user. Livrer recorders/scripts prets, statut BLOCKED_EXTERNAL PRECIS, jamais DONE.
 
 ## SYNC BRIDGE (important — mecanisme fiable etabli ce run)
@@ -30,6 +30,9 @@ DONE_GLOBAL interdit tant qu'une dependance essentielle est bloquee. BLOCKED_EXT
 - FIX-18 : dedup des fills par identite d'evenement (event_id/fill_hash/tid/oid, sinon empreinte).
 - FIX-20 : discipline DECOUVERTE->FREEZE->OOS dans l'anticipation ; verdict+LCB sur l'OOS disjoint (l'edge doit survivre hors-echantillon).
 - FIX-14 : classer_desync (SCHEMA/DUPLICATE/ORDERING/SOURCE_GAP/STALE/BOOTSTRAP/OK ; seuls OK propres).
+- FIX-15 : entity fingerprint (coins/taille/cadence) ; clusters_entite unit co-trade timing OU empreinte (une entite = une voix meme sans co-trade au meme instant). Reste 'infra'(IP) = data-BLOCKED.
+- FIX-36 (PARTIAL) : Deflated Sharpe Ratio (Bailey-LdP) deflated_sharpe.py — un beau SR parmi 1000 essais devient insignifiant. RESTE : PBO, placebos, cabler dans le verdict factory.
+- FIX-39 (PARTIAL) : mesurer_decay_par_age — edge net par age du signal -> half_life/break_even/max_signal_age ; au-dela NO_TRADE. RESTE : appeler par famille dans run_factory.
 
 ## Deja PROUVE (ne pas refaire sans nouvelle donnee)
 BTC lead-lag KILL ; OFI/microprice L1 gross<cout KILL ; cross-venue basis=out-of-scope ; wallet 0x1e9b +58bps=artefact PUMP ; 27 wallets population=0 candidat ; Wallet×Binance anticipation=MORE_DATA (overlap trop court).
