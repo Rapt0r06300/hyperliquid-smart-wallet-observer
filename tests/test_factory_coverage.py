@@ -19,6 +19,8 @@ FACTORY_MODULES = [
     "deconfliction", "meta_gate", "wallet_info_ratio", "capital_efficiency", "daily_report", "drift_detector",
     "fee_regime", "liquidity_consumption", "capacity_curve", "exit_factory", "maker_toxicity",
     "book_resiliency", "spread_transition", "reproducibility",
+    "price_discovery", "cross_asset_leadlag", "universal_micro", "nonlinear_challenger", "metaorder_hazard",
+    "liquidation_flow", "cascade_warning", "clock_regimes", "wallet_fingerprint", "abnormal_regime",
 ]
 
 
