@@ -24,7 +24,7 @@ FACTORY_MODULES = [
     "hf_recorder", "multi_venue", "queue_model", "trigger_map", "hidden_vs_twap", "lineage",
     "forward_frozen", "purged_cv", "sizing", "portfolio", "feature_cache", "replay_consistency",
     "factory_families", "parallel_factory", "runtime_loop", "acceptance", "deflated_sharpe",
-    "jsonl_stream",
+    "jsonl_stream", "fault_injection",
 ]
 
 
