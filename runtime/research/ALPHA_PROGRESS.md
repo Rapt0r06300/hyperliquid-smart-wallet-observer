@@ -2,10 +2,10 @@
 
 ETAT_GLOBAL  : LAB_READY_DATA_BLOCKED  (fini DONE_GLOBAL premature)
 CURRENT_TASK : FIX (corrections) — commencer par la Factory + cost/book_walk (data-ready)
-LAST_COMMIT  : (voir ledger) — reclassement honnete + 58 corrections
+LAST_COMMIT  : 7f96e4b (FIX-47 forward persistant) | ce run: A + FIX-06/07/08/09/03/04/47 (1 commit/fix)
 TESTS        : suite recherche verte ; MAIS "vert unitaire" != "execute dans la factory sur vraie data"
 RESULT       : 0 alpha net-positif prouve. 33 DONE reels (utilitaires), 9 PARTIAL, 13 RESEARCH_READY, 6 MORE_DATA, 5 BLOCKED.
-NEXT_TASK    : FIX-08 book_walk (math), FIX-06 cost strict, FIX-07 fees, FIX-03 registry dedup, FIX-04 parallel contenu, FIX-01 run_factory execution reelle, FIX-02 coverage chaine reelle, FIX-16 walletxbinance horizon. (data-ready, 1 task=1 commit)
+NEXT_TASK    : FIX-01 run_factory execute reellement chaque famille -> trial ou BLOCKED ; FIX-02 coverage chaine (famille->adapter->experience appelee->trial) ; FIX-16 walletxbinance horizon (tolerance autour T+h) ; FIX-17 direction lifecycle ; FIX-44 replay=forward end-to-end. (data-ready d'abord)
 BLOCKERS     : data HF simultanee, node_fills, userTwap*, L4, multi-venue = collecte cote user (recorders/scripts a livrer prets, statut BLOCKED_EXTERNAL PRECIS, jamais DONE)
 
 ## Niveaux d'etat (gradue)
