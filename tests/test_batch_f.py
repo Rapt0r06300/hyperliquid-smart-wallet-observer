@@ -6,6 +6,8 @@ from pathlib import Path
 RACINE = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(RACINE / "src"))
 
+import pytest  # noqa: E402
+
 from hl_observer.research import acceptance as AC  # noqa: E402
 from hl_observer.research import factory_families as FF  # noqa: E402
 from hl_observer.research import parallel_factory as PF  # noqa: E402
@@ -26,7 +28,14 @@ def test_parallel_factory_deterministe():
     m1 = PF.merge_deterministe([w1, w2])
     m2 = PF.merge_deterministe([w2, w1])                 # ordre workers inverse
     assert [r["trial_id"] for r in m1] == ["a", "b", "c"]
-    assert PF.resultat_invariant(m1, m2) is True         # meme resultat quel que soit l'ordre
+    assert PF.resultat_invariant(m1, m2) is True         # meme CONTENU quel que soit l'ordre
+
+
+def test_parallel_factory_conflit_contenu_error():
+    w1 = [{"trial_id": "a", "net_bps": 1}]
+    w2 = [{"trial_id": "a", "net_bps": 999}]              # meme id, CONTENU different -> non-determinisme
+    with pytest.raises(ValueError):
+        PF.merge_deterministe([w1, w2])
 
 
 def test_runtime_loop_forward_isole():
