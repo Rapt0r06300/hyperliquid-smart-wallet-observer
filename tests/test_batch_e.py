@@ -83,3 +83,22 @@ def test_replay_consistency():
     evs = [{"seq": 1}, {"seq": 1}, {"seq": 0}, {"seq": 2, "book_ts_ms": 0}]
     r = RC.filtre_evenements(evs, dernier_seq=0, now_ms=10000, book_max_age_ms=5000)
     assert r["rejets"]["doublon"] >= 1 and r["rejets"]["out_of_order"] >= 1 and r["rejets"]["stale"] >= 1
+
+
+def test_fix14_classer_desync_taxonomie():
+    evs = [
+        {"seq": 0},                                   # OK
+        {"seq": 1},                                   # OK
+        {"seq": 1},                                   # DUPLICATE (seq 1 deja vue)
+        {"seq": 5},                                   # SOURCE_GAP (1 -> 5, evenements manquants)
+        {"seq": 3},                                   # ORDERING (3 < dernier=5, jamais vue)
+        {"seq": 6, "is_snapshot": True},              # BOOTSTRAP (backfill, pas du live)
+        {"px": 1},                                    # SCHEMA (pas de seq)
+        {"seq": 7, "book_ts_ms": 0},                  # STALE (now=10000, max=5000)
+    ]
+    r = RC.classer_desync(evs, now_ms=10000, book_max_age_ms=5000)
+    c = r["compteur"]
+    assert c["OK"] == 2 and c["DUPLICATE"] == 1 and c["ORDERING"] == 1
+    assert c["SOURCE_GAP"] == 1 and c["BOOTSTRAP"] == 1 and c["SCHEMA"] == 1 and c["STALE"] == 1
+    assert r["n_propres"] == 2 and [e["seq"] for e in r["propres"]] == [0, 1]   # seuls les OK sont propres
+    assert sum(c.values()) == r["n_total"] == 8
