@@ -21,6 +21,7 @@ from hl_observer.research import alpha_decay as _decay   # FIX-39 : courbe de de
 from hl_observer.research import alpha_factory as F
 from hl_observer.research import exit_factory as _ef      # FIX-41 : exits choisis en decouverte puis GELES
 from hl_observer.research import factory_families as _fam
+from hl_observer.research import feature_cache as _fc      # FIX-52 : cache features immuable, reutilise entre familles
 from hl_observer.research import mlofi as _ml
 from hl_observer.research import ofi_microprice as _ofi
 from hl_observer.research import wallet_binance_anticipation as _wba
@@ -106,13 +107,25 @@ def _existe(path: str) -> bool:
     return bool(path) and os.path.exists(path)
 
 
+def _bin_series(cache: Any, bbo: str) -> Any:
+    """FIX-52 : parse bbo_synchro UNE fois par run et le réutilise entre familles (anticipation, exits...)."""
+    fn = lambda: _wba.charger_bin_series(bbo, {"BTC", "ETH", "SOL"}, max_lignes=600000)  # noqa: E731
+    return cache.get_or_compute(_fc.cle_feature(bbo, "charger_bin_series"), fn) if cache else fn()
+
+
+def _fills_list(cache: Any, path: str) -> Any:
+    """FIX-52 : parse leader_fills UNE fois par run et le réutilise entre familles."""
+    fn = lambda: _wba.charger_fills(path)  # noqa: E731
+    return cache.get_or_compute(_fc.cle_feature(path, "charger_fills"), fn) if cache else fn()
+
+
 def _blocked(famille: str, raison: str) -> dict[str, Any]:
     return F.ligne_canonique("[%s]" % famille, config_frozen="—", verdict="BLOCKED_EXTERNAL",
                              data="absente", notes=raison)
 
 
 # ── Adaptateurs : chacun EXÉCUTE ou renvoie BLOCKED précis ─────────────────────────────
-def _adapt_ofi(data_dir: str, fee_bps: float) -> dict[str, Any]:
+def _adapt_ofi(data_dir: str, fee_bps: float, cache: Any = None) -> dict[str, Any]:
     best_row = None
     for coin in ("BTC", "ETH", "SOL", "HYPE"):
         path = os.path.join(data_dir, "_ofi_%s.csv" % coin)
@@ -139,7 +152,7 @@ def _adapt_ofi(data_dir: str, fee_bps: float) -> dict[str, Any]:
     return best_row or _blocked("ofi_microstructure", "aucun _ofi_<coin>.csv exploitable dans data_dir")
 
 
-def _adapt_population(data_dir: str, fee_bps: float) -> dict[str, Any]:
+def _adapt_population(data_dir: str, fee_bps: float, cache: Any = None) -> dict[str, Any]:
     path = os.path.join(data_dir, "leader_fills_forward.jsonl")
     if not _existe(path):
         return _blocked("copy_population", "leader_fills_forward.jsonl absent")
@@ -166,7 +179,7 @@ def _adapt_population(data_dir: str, fee_bps: float) -> dict[str, Any]:
                                    % (len(cand), out["n_clusters_entite"], len(edges))), edges)
 
 
-def _adapt_mlofi(data_dir: str, fee_bps: float) -> dict[str, Any]:
+def _adapt_mlofi(data_dir: str, fee_bps: float, cache: Any = None) -> dict[str, Any]:
     path = os.path.join(data_dir, "metaorder_l2_tape.jsonl")
     if not _existe(path):
         return _blocked("mlofi", "metaorder_l2_tape.jsonl (top5) absent")
@@ -195,7 +208,7 @@ def _adapt_mlofi(data_dir: str, fee_bps: float) -> dict[str, Any]:
                              verdict="MORE_DATA", n_raw=pairs, notes="tape trop court: %d paires top5, aucun coin>=60" % pairs)
 
 
-def _adapt_leadlag(data_dir: str, fee_bps: float) -> dict[str, Any]:
+def _adapt_leadlag(data_dir: str, fee_bps: float, cache: Any = None) -> dict[str, Any]:
     try:
         from hl_observer.research import hl_binance_leadlag as _ll
     except Exception:
@@ -218,13 +231,13 @@ def _adapt_leadlag(data_dir: str, fee_bps: float) -> dict[str, Any]:
     return _blocked("lead_lag", "extrait _alpha_leadlag_*.csv absent")
 
 
-def _adapt_anticipation(data_dir: str, fee_bps: float) -> dict[str, Any]:
+def _adapt_anticipation(data_dir: str, fee_bps: float, cache: Any = None) -> dict[str, Any]:
     bbo = os.path.join(data_dir, "bbo_synchro.jsonl")
     fills = os.path.join(data_dir, "leader_fills_forward.jsonl")
     if not (_existe(bbo) and _existe(fills)):
         return _blocked("wallet_binance_anticipation", "bbo_synchro.jsonl (HL+Binance simultane) absent")
-    bin_by_coin = _wba.charger_bin_series(bbo, {"BTC", "ETH", "SOL"}, max_lignes=600000)
-    fills_list = _wba.charger_fills(fills)
+    bin_by_coin = _bin_series(cache, bbo)                  # FIX-52 : lecture mise en cache (immuable)
+    fills_list = _fills_list(cache, fills)
     r = _wba.experience_anticipation(fills_list, bin_by_coin, horizon_ms=5000, cout_bps=fee_bps)
     best = r["classement"][0] if r["classement"] else None
     votes = best.get("votes_net_oos") if best else []
@@ -242,16 +255,16 @@ def _adapt_anticipation(data_dir: str, fee_bps: float) -> dict[str, Any]:
 _EXIT_HORIZONS_MS = (500, 1000, 2000, 3000, 5000, 10000)   # FIX-41 : pas du chemin de markout
 
 
-def _adapt_exits(data_dir: str, fee_bps: float) -> dict[str, Any]:
+def _adapt_exits(data_dir: str, fee_bps: float, cache: Any = None) -> dict[str, Any]:
     """FIX-41 — EXIT FACTORY câblée : construit un chemin de markout signé par fill (le « signal survivant »),
     choisit la règle d'exit sur la DÉCOUVERTE, la GÈLE, puis la mesure sur l'OOS disjoint. Net après coût."""
     bbo = os.path.join(data_dir, "bbo_synchro.jsonl")
     fills = os.path.join(data_dir, "leader_fills_forward.jsonl")
     if not (_existe(bbo) and _existe(fills)):
         return _blocked("exits", "chemins de markout requis (bbo_synchro + leader_fills = signal survivant) absents")
-    bin_by_coin = _wba.charger_bin_series(bbo, {"BTC", "ETH", "SOL"}, max_lignes=600000)
+    bin_by_coin = _bin_series(cache, bbo)                  # FIX-52 : réutilise le parse de l'anticipation
     paths = []
-    for f in _wba.charger_fills(fills):
+    for f in _fills_list(cache, fills):
         coin, ts, sens = f.get("coin"), f.get("ts_ms"), _wba.direction_trade(f)
         serie = bin_by_coin.get(coin)
         if serie is None or ts is None or sens is None:
@@ -286,7 +299,7 @@ def _adapt_exits(data_dir: str, fee_bps: float) -> dict[str, Any]:
                                  regle, oos_net, fee_bps, net, len(oos)), **base)
 
 
-def _adapt_cross_venue(data_dir: str, fee_bps: float) -> dict[str, Any]:
+def _adapt_cross_venue(data_dir: str, fee_bps: float, cache: Any = None) -> dict[str, Any]:
     bbo = os.path.join(data_dir, "bbo_synchro.jsonl")
     if not _existe(bbo):
         return _blocked("cross_venue", "bbo_synchro.jsonl absent (edge exec + desync non calculables)")
@@ -342,18 +355,22 @@ RAISONS_BLOCKED = {
 }
 
 
-def run_all(*, data_dir: str, registry_path: str, fee_bps: float = 9.0, reset: bool = False) -> dict[str, Any]:
-    """Exécute TOUTES les familles du registre via leur adaptateur → un trial ou un BLOCKED précis chacune."""
+def run_all(*, data_dir: str, registry_path: str, fee_bps: float = 9.0, reset: bool = False,
+            use_cache: bool = True) -> dict[str, Any]:
+    """Exécute TOUTES les familles du registre via leur adaptateur → un trial ou un BLOCKED précis chacune.
+    FIX-52 : un cache de features IMMUABLE (partagé entre familles) évite de relire le même JSONL par trial ;
+    le résultat est IDENTIQUE avec ou sans cache (invariance)."""
     reg = F.TrialRegistry(registry_path)
     if reset:
         open(registry_path, "w").close()
+    cache = _fc.FeatureCache() if use_cache else None
     familles = list(_fam.FAMILLES)
     rows: list[dict[str, Any]] = []
     for fam in familles:
         adapter = ADAPTERS.get(fam)
         try:
             if adapter is not None:
-                row = adapter(data_dir, fee_bps)
+                row = adapter(data_dir, fee_bps, cache=cache)
             else:
                 row = _blocked(fam, RAISONS_BLOCKED.get(fam, "adaptateur absent"))
         except Exception as exc:                      # une famille qui casse ne casse pas le run
@@ -392,7 +409,8 @@ def run_all(*, data_dir: str, registry_path: str, fee_bps: float = 9.0, reset: b
     familles_couvertes = {r["_famille"] for r in rows}
     return {"n_trials": len(rows), "rows": rows, "table": F.emit_table(rows),
             "familles_couvertes": sorted(familles_couvertes),
-            "n_familles": len(familles)}
+            "n_familles": len(familles),
+            "cache": ({"hits": cache.hits, "miss": cache.miss} if cache else None)}
 
 
 __all__ = ["run_all", "ADAPTERS", "RAISONS_BLOCKED"]

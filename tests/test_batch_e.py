@@ -138,6 +138,18 @@ def test_feature_cache_invariance():
     assert calls["n"] == 1 and fc.invariance_ok("k", lambda: 42) is True
 
 
+def test_fix52_cle_feature_et_immutabilite_stricte():
+    import pytest
+    fc = FC.FeatureCache()
+    cle = FC.cle_feature("sha_source", "charger_fills", version="v1")
+    assert fc.get_or_compute(cle, lambda: [1, 2, 3]) == [1, 2, 3]
+    assert fc.get_or_compute(cle, lambda: [9, 9, 9]) == [1, 2, 3]   # write-once : ne recalcule/écrase jamais
+    assert fc.hits == 1 and fc.miss == 1
+    with pytest.raises(ValueError):
+        fc.poser_immuable(cle, [9, 9, 9])                          # re-poser une valeur divergente = violation
+    assert fc.poser_immuable(cle, [1, 2, 3]) == [1, 2, 3]          # ré-poser la MÊME valeur = OK
+
+
 def test_replay_consistency():
     assert RC.deterministe([1, 2, 3], [1, 2, 3]) is True
     assert RC.prefix_stable([1, 2, 3, 4], [1, 2]) is True

@@ -162,6 +162,21 @@ def test_fix41_exits_famille_gele_une_regle_et_mesure_en_oos(tmp_path):
     assert "regle GELEE=" in (ex.get("notes") or "")
 
 
+def test_fix52_feature_cache_reutilise_les_lectures_sans_changer_le_resultat(tmp_path):
+    # FIX-52 : le cache de features IMMUABLE est réellement utilisé — exits réutilise le parse (bbo + fills) de
+    # l'anticipation (hits > 0), et le résultat est IDENTIQUE avec ou sans cache (invariance numérique).
+    pts, fills = _serie_decay_et_fills()
+    (tmp_path / "bbo_synchro.jsonl").write_text(
+        "\n".join(json.dumps({"coin": "BTC", "ts_ms": t, "bin_mid": p}) for t, p in pts), encoding="utf-8")
+    (tmp_path / "leader_fills_forward.jsonl").write_text(
+        "\n".join(json.dumps(f) for f in fills), encoding="utf-8")
+    avec = RF.run_all(data_dir=str(tmp_path), registry_path=str(tmp_path / "r1.jsonl"), use_cache=True)
+    sans = RF.run_all(data_dir=str(tmp_path), registry_path=str(tmp_path / "r2.jsonl"), use_cache=False)
+    assert avec["cache"]["hits"] >= 2 and sans["cache"] is None      # lectures réutilisées entre familles
+    proj = lambda out: [(r["_famille"], r["verdict"], r.get("net_bps")) for r in out["rows"]]   # noqa: E731
+    assert proj(avec) == proj(sans)                                  # perf sans changer le résultat
+
+
 def test_p13_reset_defaut_est_append_only_avec_dedup(tmp_path):
     reg = str(tmp_path / "r.jsonl")
     out1 = RF.run_all(data_dir=str(tmp_path), registry_path=reg)
