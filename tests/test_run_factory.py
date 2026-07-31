@@ -99,6 +99,53 @@ def test_fix36_gate_anti_overfit_depromeut_selon_le_nb_dessais(tmp_path):
     assert beaucoup["verdict"] == "MORE_DATA" and "anti-overfit" in (beaucoup.get("notes") or "")
 
 
+def _serie_decay_et_fills(nfills=12):
+    # Alpha qui DÉCROÎT avec l'âge du signal : un fill LONG BTC à T, prix Binance qui monte de +60 bps
+    # linéairement sur [T, T+5s] puis plateau. Entrer tôt (age~0, hold 5s) capte +60 bps ; entrer tard
+    # capte de moins en moins -> le net (−9 bps de coût) traverse 0 -> half_life/break_even MESURABLES.
+    pts, fills = [], []
+    for k in range(nfills):
+        T = k * 120_000 + 30_000                       # épisodes espacés (aucun chevauchement de fenêtres)
+        fills.append({"adresse": "0xDECAY", "coin": "BTC", "side": "LONG", "ts_ms": T})
+        t = T - 2000
+        while t <= T + 36_000:
+            u = t - T
+            p = 100.0 if u <= 0 else (100.0 * (1.0 + 0.006 * (u / 5000.0)) if u <= 5000 else 100.6)
+            pts.append((t, p))
+            t += 250
+    return pts, fills
+
+
+def test_fix39_anticipation_porte_une_courbe_decay_reelle(tmp_path):
+    # FIX-39 : la famille anticipation (signaux discrets = fills + prix denses) DOIT porter une courbe de decay
+    # RÉELLE (half_life / break_even / max_signal_age numériques) via run_all, et le gate no_trade doit être
+    # cohérent avec la borne attachée. Jamais 0 fabriqué : ici la donnée existe -> valeurs mesurées.
+    from hl_observer.research import alpha_decay as DEC
+    pts, fills = _serie_decay_et_fills()
+    (tmp_path / "bbo_synchro.jsonl").write_text(
+        "\n".join(json.dumps({"coin": "BTC", "ts_ms": t, "bin_mid": p}) for t, p in pts), encoding="utf-8")
+    (tmp_path / "leader_fills_forward.jsonl").write_text(
+        "\n".join(json.dumps(f) for f in fills), encoding="utf-8")
+    out = RF.run_all(data_dir=str(tmp_path), registry_path=str(tmp_path / "r.jsonl"))
+    anti = [r for r in out["rows"] if r["_famille"] == "wallet_binance_anticipation"][0]
+    # courbe de decay mesurée (pas UNMEASURABLE) : l'alpha décroît -> le net traverse 0
+    assert isinstance(anti["half_life_ms"], float) and anti["half_life_ms"] > 0
+    assert isinstance(anti["break_even_latency_ms"], float) and anti["break_even_latency_ms"] > 0
+    assert isinstance(anti["max_signal_age_ms"], float)
+    assert anti["half_life_ms"] < anti["max_signal_age_ms"]         # demi-vie avant la mort du signal
+    assert isinstance(anti["decay_net_par_age_ms"], dict) and anti["decay_net_par_age_ms"]
+    assert "decay: NO_TRADE au-dela" in (anti.get("notes") or "")
+    # gate no_trade cohérent avec la borne attachée : au-delà du break-even -> NO_TRADE, avant -> tradeable
+    courbe = {"max_signal_age_ms": anti["max_signal_age_ms"]}
+    assert DEC.no_trade(anti["max_signal_age_ms"] + 1.0, courbe) is True
+    assert DEC.no_trade(0.0, courbe) is False
+    # FIX-39 « pour CHAQUE famille » : toute ligne porte un statut de decay (mesuré OU UNMEASURABLE, jamais absent)
+    for r in out["rows"]:
+        assert "max_signal_age_ms" in r and "half_life_ms" in r and "break_even_latency_ms" in r
+    autres = [r for r in out["rows"] if r["_famille"] != "wallet_binance_anticipation"]
+    assert autres and all(r["max_signal_age_ms"] == DEC.UNMEASURABLE for r in autres)   # honnête, jamais 0
+
+
 def test_p13_reset_defaut_est_append_only_avec_dedup(tmp_path):
     reg = str(tmp_path / "r.jsonl")
     out1 = RF.run_all(data_dir=str(tmp_path), registry_path=reg)

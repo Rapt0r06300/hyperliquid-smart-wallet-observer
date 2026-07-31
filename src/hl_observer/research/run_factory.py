@@ -17,6 +17,7 @@ import os
 from typing import Any
 
 from hl_observer.backtesting import anti_overfit_gate as _aog   # FIX-36 : gate DSR déjà éprouvé (pas de doublon)
+from hl_observer.research import alpha_decay as _decay   # FIX-39 : courbe de decay reelle par famille
 from hl_observer.research import alpha_factory as F
 from hl_observer.research import factory_families as _fam
 from hl_observer.research import mlofi as _ml
@@ -75,6 +76,29 @@ def _sharpes_du_run(rows: list[dict[str, Any]]) -> list[float]:
         if v and len(v) >= 2:
             out.append(_aog.sharpe(v))
     return out
+
+
+def _attacher_decay(row: dict[str, Any], fills: Any, prix_par_coin: Any, cout_bps: float) -> dict[str, Any]:
+    """FIX-39 : mesure la courbe de decay REELLE d'une famille a signaux discrets (fills) + prix denses, et
+    l'attache au trial (half_life / break_even_latency / max_signal_age). `sens` = direction_trade du fill.
+    Au-dela de `max_signal_age_ms` le signal est mort -> NO_TRADE (voir `alpha_decay.no_trade`). Sans donnee
+    exploitable la courbe reste UNMEASURABLE (jamais 0)."""
+    signaux = []
+    for f in fills or []:
+        d = _wba.direction_trade(f)
+        ts, coin = f.get("ts_ms"), f.get("coin")
+        if d is None or ts is None or coin not in (prix_par_coin or {}):
+            continue
+        signaux.append({"ts_ms": ts, "coin": coin, "sens": d})
+    dec = _decay.mesurer_decay_par_age(signaux, prix_par_coin or {}, cout_bps=cout_bps)
+    row["half_life_ms"] = dec["half_life_ms"]
+    row["break_even_latency_ms"] = dec["break_even_latency_ms"]
+    row["max_signal_age_ms"] = dec["max_signal_age_ms"]
+    row["decay_net_par_age_ms"] = dec["net_par_age_ms"]
+    mx = dec["max_signal_age_ms"]
+    if isinstance(mx, (int, float)):
+        row["notes"] = ((row.get("notes") or "") + " | decay: NO_TRADE au-dela de %.0f ms" % mx)[:300]
+    return dec
 
 
 def _existe(path: str) -> bool:
@@ -199,16 +223,19 @@ def _adapt_anticipation(data_dir: str, fee_bps: float) -> dict[str, Any]:
     if not (_existe(bbo) and _existe(fills)):
         return _blocked("wallet_binance_anticipation", "bbo_synchro.jsonl (HL+Binance simultane) absent")
     bin_by_coin = _wba.charger_bin_series(bbo, {"BTC", "ETH", "SOL"}, max_lignes=600000)
-    r = _wba.experience_anticipation(_wba.charger_fills(fills), bin_by_coin, horizon_ms=5000, cout_bps=fee_bps)
+    fills_list = _wba.charger_fills(fills)
+    r = _wba.experience_anticipation(fills_list, bin_by_coin, horizon_ms=5000, cout_bps=fee_bps)
     best = r["classement"][0] if r["classement"] else None
     votes = best.get("votes_net_oos") if best else []
     pf, es = _pf_es(votes)
-    return _avec_votes(F.ligne_canonique("Wallet x Binance anticipation", config_frozen="h=5s; grappes; OOS disjoint",
-                             data="bbo_synchro x leader_fills", event="wallet fill vs Binance", execution="TAKER/TAKER",
-                             n_independent=(best["n_independent"] if best else U),
-                             net_bps=(best["net_after_cout_bps"] if best else U), fees_bps=fee_bps,
-                             pf=pf, es=es, verdict=(best["verdict"] if best else "MORE_DATA"),
-                             notes="%d wallets mesures" % r["n_wallets_mesures"]), votes)
+    row = F.ligne_canonique("Wallet x Binance anticipation", config_frozen="h=5s; grappes; OOS disjoint",
+                            data="bbo_synchro x leader_fills", event="wallet fill vs Binance", execution="TAKER/TAKER",
+                            n_independent=(best["n_independent"] if best else U),
+                            net_bps=(best["net_after_cout_bps"] if best else U), fees_bps=fee_bps,
+                            pf=pf, es=es, verdict=(best["verdict"] if best else "MORE_DATA"),
+                            notes="%d wallets mesures" % r["n_wallets_mesures"])
+    _attacher_decay(row, fills_list, bin_by_coin, fee_bps)   # FIX-39 : courbe de decay reelle (fills = signaux)
+    return _avec_votes(row, votes)
 
 
 def _adapt_cross_venue(data_dir: str, fee_bps: float) -> dict[str, Any]:
@@ -285,6 +312,13 @@ def run_all(*, data_dir: str, registry_path: str, fee_bps: float = 9.0, reset: b
             row = F.ligne_canonique("[%s] ERREUR" % fam, config_frozen="—", verdict="ERROR", notes=str(exc)[:160])
         row["_famille"] = fam
         rows.append(row)
+    # FIX-39 : CHAQUE famille porte un statut de decay. Les adaptateurs à signaux discrets + prix denses
+    # (anticipation) ont attaché une vraie courbe ; les autres restent UNMEASURABLE (jamais 0, jamais absent —
+    # prix denses ou timestamps d'événement-signal non disponibles ici pour OFI/MLOFI/lead-lag/population).
+    for r in rows:
+        r.setdefault("half_life_ms", U)
+        r.setdefault("break_even_latency_ms", U)
+        r.setdefault("max_signal_age_ms", U)
     # FIX-36 : porte anti-overfitting AVANT enregistrement — un verdict PROMOUVABLE qui ne survit pas au
     # Deflated Sharpe (déflation par le nombre GLOBAL d'essais) + placebo de permutation est dé-promu en MORE_DATA.
     n_hist = len({str(r.get("config_hash")) for r in reg.load() if r.get("config_hash")})
