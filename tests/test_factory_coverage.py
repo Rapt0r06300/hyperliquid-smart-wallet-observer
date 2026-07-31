@@ -21,6 +21,7 @@ FACTORY_MODULES = [
     "book_resiliency", "spread_transition", "reproducibility",
     "price_discovery", "cross_asset_leadlag", "universal_micro", "nonlinear_challenger", "metaorder_hazard",
     "liquidation_flow", "cascade_warning", "clock_regimes", "wallet_fingerprint", "abnormal_regime",
+    "hf_recorder", "multi_venue", "queue_model", "trigger_map", "hidden_vs_twap", "lineage",
 ]
 
 
