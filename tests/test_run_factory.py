@@ -193,6 +193,37 @@ def test_fix53_cache_fichier_reutilise_les_parses_entre_runs(tmp_path):
     assert proj(a) == proj(b)                          # invariance inter-runs
 
 
+def _bbo_gap(kind, n=600):
+    # génère bbo_synchro.jsonl (BTC, desync 0) avec un gap inter-venues soit BASIS persistant (marche
+    # aléatoire, autocorr~1) soit TRANSIENT (iid, autocorr~0, grande amplitude -> edge exécutable réel).
+    recs, s, gap = [], (12345 if kind == "persistent" else 999), (15.0 if kind == "persistent" else 0.0)
+    for _ in range(n):
+        s = (1103515245 * s + 12345) & 0x7FFFFFFF
+        gap = (gap + ((s % 20) - 10) / 50.0) if kind == "persistent" else ((s % 600) - 300) / 10.0
+        hl_mid = 100.0
+        bin_mid = hl_mid * (1 + gap / 1e4)
+        recs.append({"coin": "BTC", "desync_ms": 0, "hl_mid": hl_mid, "hl_bid": 99.99, "hl_ask": 100.01,
+                     "bin_bid": round(bin_mid - 0.01, 6), "bin_ask": round(bin_mid + 0.01, 6)})
+    return recs
+
+
+def test_fix10_cross_venue_e2e_elimine_le_basis_et_more_data_sans_L2(tmp_path):
+    # FIX-10 : basis persistant ÉLIMINÉ (KILL), transient tradable mais sans profondeur L2 -> MORE_DATA honnête.
+    dpb = tmp_path / "pb"; dpb.mkdir()
+    (dpb / "bbo_synchro.jsonl").write_text(
+        "\n".join(json.dumps(r) for r in _bbo_gap("persistent")), encoding="utf-8")
+    pb = [r for r in RF.run_all(data_dir=str(dpb), registry_path=str(dpb / "r.jsonl"))["rows"]
+          if r["_famille"] == "cross_venue"][0]
+    assert pb["verdict"] == "KILL" and "PERSISTENT_BASIS" in (pb.get("notes") or "")   # basis != arb, éliminé
+
+    dtr = tmp_path / "tr"; dtr.mkdir()
+    (dtr / "bbo_synchro.jsonl").write_text(
+        "\n".join(json.dumps(r) for r in _bbo_gap("transient")), encoding="utf-8")
+    tr = [r for r in RF.run_all(data_dir=str(dtr), registry_path=str(dtr / "r.jsonl"))["rows"]
+          if r["_famille"] == "cross_venue"][0]
+    assert tr["verdict"] == "MORE_DATA" and "TRANSIENT" in (tr.get("notes") or "")     # jambes L2 requises, jamais inventées
+
+
 def test_p13_reset_defaut_est_append_only_avec_dedup(tmp_path):
     reg = str(tmp_path / "r.jsonl")
     out1 = RF.run_all(data_dir=str(tmp_path), registry_path=reg)

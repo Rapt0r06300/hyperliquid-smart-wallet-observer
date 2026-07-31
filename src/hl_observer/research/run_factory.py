@@ -19,6 +19,7 @@ from typing import Any
 from hl_observer.backtesting import anti_overfit_gate as _aog   # FIX-36 : gate DSR déjà éprouvé (pas de doublon)
 from hl_observer.research import alpha_decay as _decay   # FIX-39 : courbe de decay reelle par famille
 from hl_observer.research import alpha_factory as F
+from hl_observer.research import basis_vs_latency as _bvl  # FIX-10 : episode cross-venue de bout en bout
 from hl_observer.research import exit_factory as _ef      # FIX-41 : exits choisis en decouverte puis GELES
 from hl_observer.research import factory_families as _fam
 from hl_observer.research import feature_cache as _fc      # FIX-52 : cache features immuable, reutilise entre familles
@@ -322,26 +323,37 @@ def _adapt_cross_venue(data_dir: str, fee_bps: float, cache: Any = None) -> dict
     bbo = os.path.join(data_dir, "bbo_synchro.jsonl")
     if not _existe(bbo):
         return _blocked("cross_venue", "bbo_synchro.jsonl absent (edge exec + desync non calculables)")
-    # mesure legere sur echantillon frais (desync<50ms), BTC — lecture STREAMING (FIX-53), jamais tout en RAM
-    edges = []
+    # FIX-10 : revalidation cross-venue de BOUT EN BOUT. On collecte en STREAMING (desync<50ms, BTC) :
+    # l'edge exécutable (gross), la SÉRIE de gap inter-venues (pour classer basis vs transient), et la
+    # distribution du coût roundtrip (pour la règle gross<=P95=KILL).
+    edges, gaps, roundtrips = [], [], []
     for x in _js.stream_jsonl(bbo, max_lignes=300000):
         if x.get("coin") != "BTC" or abs(x.get("desync_ms", 1e9)) > 50:
             continue
-        mid = x.get("hl_mid")
-        if not mid:
+        hl_mid = x.get("hl_mid")
+        bb, ba, hb, ha = x.get("bin_bid"), x.get("bin_ask"), x.get("hl_bid"), x.get("hl_ask")
+        if not hl_mid or None in (bb, ba, hb, ha):
             continue
-        e = max(x["bin_bid"] - x["hl_ask"], x["hl_bid"] - x["bin_ask"]) / mid * 1e4
-        edges.append(e)
+        edges.append(max(bb - ha, hb - ba) / hl_mid * 1e4)
+        bin_mid = (bb + ba) / 2.0
+        gaps.append((bin_mid - hl_mid) / hl_mid * 1e4)
+        spread = ((ba - bb) / bin_mid + (ha - hb) / hl_mid) / 2.0 * 1e4 if bin_mid > 0 else 0.0
+        roundtrips.append(spread + fee_bps)                       # demi-spreads des 2 jambes + frais roundtrip
     if len(edges) < 500:
         return _blocked("cross_venue", "trop peu de snapshots BTC frais (%d)" % len(edges))
-    edges.sort()
-    p99 = edges[int(0.99 * len(edges))]
-    net = p99 - fee_bps
-    return F.ligne_canonique("Cross-venue latency arb (BTC, fresh)", config_frozen="desync<50ms; edge exec 2-jambes",
-                             data="bbo_synchro", event="dislocation", state="fresh", execution="TAKER/TAKER",
-                             n_raw=len(edges), gross_bps=round(p99, 4), fees_bps=fee_bps, net_bps=round(net, 4),
-                             verdict=("KILL" if net <= 0 else "MORE_DATA"),
-                             notes="P99 edge exec=%.2f bps ; gross<=P95 cout => KILL" % p99)
+    p99 = sorted(edges)[int(0.99 * len(edges))]
+    # jambes exécutées via l'épisode complet ; le bbo n'a QUE le top-of-book -> jambes MORE_DATA (jamais inventées),
+    # mais basis persistant ÉLIMINÉ et gross<=P95 roundtrip = KILL sont revalidés ici de bout en bout.
+    ep = _bvl.episode_cross_venue(serie_gap_bps=gaps, gross_edge_bps=p99, notional_usd=500.0,
+                                  roundtrip_costs_bps=roundtrips, fee_bps=fee_bps / 2.0)
+    _MAP = {"NO_ARB_PERSISTENT_BASIS": "KILL", "NO_TRADE": "KILL", "NO_FILL_A": "KILL"}
+    verdict = _MAP.get(ep["verdict"], ep["verdict"])
+    return F.ligne_canonique("Cross-venue episode e2e (BTC, fresh)",
+                             config_frozen="desync<50ms; detect->gate->legs->hedge->unwind->PnL; basis!=arb",
+                             data="bbo_synchro", event="dislocation", state=ep.get("classe", U),
+                             execution="TAKER/TAKER", n_raw=len(edges), gross_bps=round(p99, 4), fees_bps=fee_bps,
+                             verdict=verdict,
+                             notes="classe=%s ; %s" % (ep.get("classe"), ep.get("raison", ""))[:300])
 
 
 # famille -> adaptateur (ou None = BLOCKED avec raison generique)
