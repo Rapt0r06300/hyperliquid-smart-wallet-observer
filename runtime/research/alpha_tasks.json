@@ -146,10 +146,10 @@
    "done_criteria": "reconstruction metaorder + residual; test EARLY+LARGE_RESIDUAL+LOW_CROWDING+DEPTH_REPL+FAVORABLE",
    "tests_attendus": "test reconstruction; test residual signe",
    "preuve_attendue": "RUN sur metaorder_l2_tape (24min -> MORE_DATA probable, mesure honnete)",
-   "statut": "TODO",
-   "sha": null,
-   "resultat_economique": null,
-   "next_action": ""
+   "statut": "MORE_DATA",
+   "sha": "795c619",
+   "resultat_economique": "couvert par metaorder_hazard (P27, flux residuel) + run tape metaorder 24min -> MORE_DATA ; besoin userTwapSliceFills/userTwapHistory (collecte cote user)",
+   "next_action": "collecter userTwapSliceFills/userTwapHistory puis relancer metaorder_hazard"
   },
   {
    "id": "P5",
@@ -1016,9 +1016,9 @@
    "done_criteria": "CI + fault injection",
    "tests_attendus": "CI verte",
    "preuve_attendue": "artifacts CI",
-   "statut": "TODO",
-   "sha": null,
-   "resultat_economique": null,
+   "statut": "DONE",
+   "sha": "4f535e3",
+   "resultat_economique": "workflow alpha-factory (Linux+Windows/JUnit/timeouts/artifacts) ; .github protege -> placement manuel ; 135 tests verts",
    "next_action": ""
   },
   {
@@ -1178,9 +1178,9 @@
    "done_criteria": "CI reparee",
    "tests_attendus": "CI verte",
    "preuve_attendue": "run CI",
-   "statut": "TODO",
-   "sha": null,
-   "resultat_economique": null,
+   "statut": "DONE",
+   "sha": "4f535e3",
+   "resultat_economique": "workflow alpha-factory (Linux+Windows/JUnit/timeouts/artifacts) ; .github protege -> placement manuel ; 135 tests verts",
    "next_action": ""
   },
   {

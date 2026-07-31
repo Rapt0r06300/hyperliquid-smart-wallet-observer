@@ -1,14 +1,14 @@
 # ALPHA PROGRESS — reprise en <2 min
 
 CURRENT_TASK : (aucune en cours)
-LAST_COMMIT  : cccfc95 (batch F capstones)
+LAST_COMMIT  : 4f535e3 (CI P11/P64)
 TESTS        : suite recherche verte (~118 tests) ; test de couverture P58 garde 48 modules Factory
 RESULT       : LABORATOIRE COMPLET (P65 acceptance = DONE_GLOBAL : 0 critere manquant, 3 blocages DONNEES documentes). 0 candidat alpha net-positif PROUVE : la decouverte attend la DONNEE (collecte cote user).
-NEXT_TASK    : P11/P64 (CI observable APRES push) ; puis DECOUVERTE des que la data HF simultanee existe -> relancer run_factory + les modules par famille sur les nouvelles captures.
+NEXT_TASK    : DECOUVERTE des que la data HF simultanee existe -> relancer run_factory + modules par famille. CI (P11/P64) livree: deplacer tools/ci/alpha-factory.yml -> .github/workflows/ (chemin protege).
 BLOCKERS     : data_hf, wallets_scalables (node_fills), l4 = collecte cote user (pas de reseau ici). Interfaces pretes (hf_recorder, multi_venue, order_intent, wallet_population streaming).
 
 ## Etat des TASKS
-- DONE : 53   MORE_DATA : 5   BLOCKED_EXTERNAL : 5   TODO : 3 (P11/P64 CI + reste)
+- DONE : 55   MORE_DATA : 6   BLOCKED_EXTERNAL : 5   TODO : 0  (tout le finissable est fait ; reste = collecte data + discovery)
 - Acceptance P65 : DONE_GLOBAL | satisfaits: factory_exhaustive/twap/maker/couts/oos/forward/adverse/capacity/capital ; bloques documentes: data_hf, wallets_scalables, l4
 
 ## Couche complete livree (toutes testees)
