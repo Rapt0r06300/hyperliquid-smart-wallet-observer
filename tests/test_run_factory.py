@@ -146,6 +146,22 @@ def test_fix39_anticipation_porte_une_courbe_decay_reelle(tmp_path):
     assert autres and all(r["max_signal_age_ms"] == DEC.UNMEASURABLE for r in autres)   # honnête, jamais 0
 
 
+def test_fix41_exits_famille_gele_une_regle_et_mesure_en_oos(tmp_path):
+    # FIX-41 : la famille `exits` (câblée) construit des chemins de markout depuis fills+bbo, GÈLE une règle
+    # d'exit sur la découverte et la mesure sur l'OOS -> trial réel (jamais BLOCKED quand la donnée existe).
+    pts, fills = _serie_decay_et_fills()
+    (tmp_path / "bbo_synchro.jsonl").write_text(
+        "\n".join(json.dumps({"coin": "BTC", "ts_ms": t, "bin_mid": p}) for t, p in pts), encoding="utf-8")
+    (tmp_path / "leader_fills_forward.jsonl").write_text(
+        "\n".join(json.dumps(f) for f in fills), encoding="utf-8")
+    out = RF.run_all(data_dir=str(tmp_path), registry_path=str(tmp_path / "r.jsonl"))
+    ex = [r for r in out["rows"] if r["_famille"] == "exits"][0]
+    assert ex["verdict"] != "BLOCKED_EXTERNAL"                 # famille câblée : elle PRODUIT un trial
+    assert ex["verdict"] == "CANDIDAT" and isinstance(ex["net_bps"], float) and ex["net_bps"] > 0
+    assert "GELEE" in ex["config_frozen"]                      # la règle a bien été gelée avant l'OOS
+    assert "regle GELEE=" in (ex.get("notes") or "")
+
+
 def test_p13_reset_defaut_est_append_only_avec_dedup(tmp_path):
     reg = str(tmp_path / "r.jsonl")
     out1 = RF.run_all(data_dir=str(tmp_path), registry_path=reg)

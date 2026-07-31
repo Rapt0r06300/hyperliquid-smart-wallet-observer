@@ -69,6 +69,34 @@ def test_exit_factory_stop_loss():
     assert "STOP_LOSS" in comp and comp["STOP_LOSS"]["n"] == 1
 
 
+def test_fix41_convergence_sort_au_retour_vers_le_fair():
+    # markout monte à +40 puis reflue ; CONVERGENCE (conv_frac=0.5) sort quand il rend la moitié du pic.
+    chemin = [0.0, 20.0, 40.0, 30.0, 15.0, -5.0]
+    o = EF.simuler_exit(chemin, regle="CONVERGENCE", conv_frac=0.5)
+    assert o["cause"] == "CONV" and o["sortie_pas"] == 4 and o["net_bps"] == 15.0   # 15 <= 0.5*40
+
+
+def test_fix41_deterioration_micro_exige_une_sante_micro():
+    chemin = [0.0, 10.0, 20.0, 30.0]
+    # sans série de santé micro -> UNMEASURABLE (jamais un 0 fabriqué), pas une fausse sortie
+    assert EF.simuler_exit(chemin, regle="DETERIORATION_MICRO")["net_bps"] is None
+    # avec santé micro qui passe sous le seuil au pas 2 -> sortie au pas 2
+    o = EF.simuler_exit(chemin, regle="DETERIORATION_MICRO", sante_micro=[1.0, 1.0, -0.5, 1.0], micro_seuil=0.0)
+    assert o["cause"] == "MICRO" and o["sortie_pas"] == 2 and o["net_bps"] == 20.0
+
+
+def test_fix41_discovery_freeze_oos_ne_reselectionne_pas():
+    # DÉCOUVERTE : TAKE_PROFIT domine (spike +50 puis crash) -> gelé. OOS : la règle gelée est MESURÉE même
+    # si un autre exit aurait fait mieux sur l'OOS (preuve : aucune re-sélection sur l'OOS).
+    disc = [[0.0, 20.0, 50.0, 10.0, -20.0]] * 6
+    choix = EF.choisir_regle_gelee(disc)
+    assert choix["regle"] == "TAKE_PROFIT"
+    oos = [[0.0, 45.0, 100.0, 100.0, 100.0]] * 5      # HORIZON_FIXE ferait +100, mais TP est gelé
+    res = EF.factory_exit(disc, oos)
+    assert res["regle_gelee"] == "TAKE_PROFIT"
+    assert res["oos"]["regle"] == "TAKE_PROFIT" and res["oos"]["net_moyen_bps"] == 45.0   # +45, jamais +100
+
+
 def test_maker_toxicity_gate():
     tox = MT.toxicity_score(aggr_flow_norm=0.9, queue_depletion=0.8)["toxicity"]
     e = MT.esperance_pnl_fill_bps(20.0, tox, spread_capture_bps=2.0, maker_fee_bps=1.5)

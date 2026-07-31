@@ -19,6 +19,7 @@ from typing import Any
 from hl_observer.backtesting import anti_overfit_gate as _aog   # FIX-36 : gate DSR déjà éprouvé (pas de doublon)
 from hl_observer.research import alpha_decay as _decay   # FIX-39 : courbe de decay reelle par famille
 from hl_observer.research import alpha_factory as F
+from hl_observer.research import exit_factory as _ef      # FIX-41 : exits choisis en decouverte puis GELES
 from hl_observer.research import factory_families as _fam
 from hl_observer.research import mlofi as _ml
 from hl_observer.research import ofi_microprice as _ofi
@@ -238,6 +239,53 @@ def _adapt_anticipation(data_dir: str, fee_bps: float) -> dict[str, Any]:
     return _avec_votes(row, votes)
 
 
+_EXIT_HORIZONS_MS = (500, 1000, 2000, 3000, 5000, 10000)   # FIX-41 : pas du chemin de markout
+
+
+def _adapt_exits(data_dir: str, fee_bps: float) -> dict[str, Any]:
+    """FIX-41 — EXIT FACTORY câblée : construit un chemin de markout signé par fill (le « signal survivant »),
+    choisit la règle d'exit sur la DÉCOUVERTE, la GÈLE, puis la mesure sur l'OOS disjoint. Net après coût."""
+    bbo = os.path.join(data_dir, "bbo_synchro.jsonl")
+    fills = os.path.join(data_dir, "leader_fills_forward.jsonl")
+    if not (_existe(bbo) and _existe(fills)):
+        return _blocked("exits", "chemins de markout requis (bbo_synchro + leader_fills = signal survivant) absents")
+    bin_by_coin = _wba.charger_bin_series(bbo, {"BTC", "ETH", "SOL"}, max_lignes=600000)
+    paths = []
+    for f in _wba.charger_fills(fills):
+        coin, ts, sens = f.get("coin"), f.get("ts_ms"), _wba.direction_trade(f)
+        serie = bin_by_coin.get(coin)
+        if serie is None or ts is None or sens is None:
+            continue
+        a = _wba.anticipation_fill(serie, f, horizons_ms=_EXIT_HORIZONS_MS)
+        chemin = [a[h]["after"] for h in _EXIT_HORIZONS_MS]
+        if any(v is None for v in chemin):        # chemin partiel -> honnêtement écarté (jamais complété par 0)
+            continue
+        paths.append((ts, chemin))
+    base = dict(data="bbo_synchro x leader_fills", event="markout path/exit", execution="TAKER/TAKER",
+                fees_bps=fee_bps)
+    if len(paths) < 8:
+        return F.ligne_canonique("Exit factory (freeze avant OOS)", config_frozen="horizons=%s" % (_EXIT_HORIZONS_MS,),
+                                 n_independent=len(paths), verdict="MORE_DATA",
+                                 notes="%d chemins de markout complets (< 8) -> plus de data" % len(paths), **base)
+    paths.sort(key=lambda p: p[0])
+    n_disc = max(1, int(0.6 * len(paths)))
+    disc = [c for _, c in paths[:n_disc]]
+    oos = [c for _, c in paths[n_disc:]]
+    res = _ef.factory_exit(disc, oos)          # choisit+GÈLE sur découverte, MESURE sur OOS (aucune re-sélection)
+    regle, oos_net = res["regle_gelee"], res["oos"]["net_moyen_bps"]
+    if regle is None or oos_net is None or not oos:
+        return F.ligne_canonique("Exit factory (freeze avant OOS)", config_frozen="horizons=%s" % (_EXIT_HORIZONS_MS,),
+                                 n_independent=len(oos), verdict="MORE_DATA",
+                                 notes="règle gelée=%s ; OOS non mesurable" % regle, **base)
+    net = round(oos_net - fee_bps, 4)          # net après coût round-trip
+    return F.ligne_canonique("Exit factory: %s (gelée avant OOS)" % regle,
+                             config_frozen="regle=%s GELEE sur decouverte; horizons=%s" % (regle, _EXIT_HORIZONS_MS),
+                             n_independent=len(oos), gross_bps=round(oos_net, 4), net_bps=net,
+                             dd=res["oos"]["dd_moyen_bps"], verdict=("KILL" if net <= 0 else "CANDIDAT"),
+                             notes="regle GELEE=%s ; OOS net=%.2f-%.2f=%.2f bps / %d chemins" % (
+                                 regle, oos_net, fee_bps, net, len(oos)), **base)
+
+
 def _adapt_cross_venue(data_dir: str, fee_bps: float) -> dict[str, Any]:
     bbo = os.path.join(data_dir, "bbo_synchro.jsonl")
     if not _existe(bbo):
@@ -281,13 +329,13 @@ ADAPTERS = {
     "mlofi": _adapt_mlofi,
     "lead_lag": _adapt_leadlag,
     "wallet_binance_anticipation": _adapt_anticipation,
+    "exits": _adapt_exits,             # FIX-41 : exit factory (freeze avant OOS) câblée
     "cross_venue": _adapt_cross_venue,
     "twap_metaorder": _adapt_mlofi,   # meme tape metaorder (residual/hazard) — mesure honnete MORE_DATA
 }
 RAISONS_BLOCKED = {
     "maker_execution": "signaux a gross prometteur + queue/trade-through reels requis",
     "liquidations_triggers": "flux de liquidations/triggers absent (SHADOW)",
-    "exits": "chemins de markout par strategie requis (depend d'un signal survivant)",
     "multi_venue": "flux read-only Bybit/OKX/Coinbase absent",
     "l4_intent": "flux node/L4 (ORDER/MODIFY/CANCEL/FILL) absent",
     "hf_data": "capture live HL+Binance cote user (pas de reseau ici)",
