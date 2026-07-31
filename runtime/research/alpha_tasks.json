@@ -14,9 +14,9 @@
    "done_criteria": "JSON P0-P65 + progress + jamais suppr. task non finie",
    "tests_attendus": "n/a",
    "preuve_attendue": "fichiers commit + relisibles",
-   "statut": "IN_PROGRESS",
-   "sha": null,
-   "resultat_economique": null,
+   "statut": "DONE",
+   "sha": "e2247ec",
+   "resultat_economique": "systeme de tasks livre",
    "next_action": "commit le systeme puis executer P13"
   },
   {
@@ -35,9 +35,9 @@
    "done_criteria": "min->max corrige; reset defaut False; hashes presents; registry append-only prouve",
    "tests_attendus": "test selection best=max; test reset defaut n'ecrase pas; test hashes presents",
    "preuve_attendue": "run reel montre la BONNE meilleure cellule; registry conserve l'historique",
-   "statut": "TODO",
-   "sha": null,
-   "resultat_economique": null,
+   "statut": "DONE",
+   "sha": "367e576",
+   "resultat_economique": "best net OOS=max (bug min corrige), registre append-only, trial_id+hashes; 24 tests",
    "next_action": ""
   },
   {
@@ -54,9 +54,9 @@
    "done_criteria": "mesure move_before/after Binance autour des fills wallet; ranking anticipation; OOS disjoint; verdict par wallet",
    "tests_attendus": "test sens anticipation; test follower->KILL; test OOS disjoint",
    "preuve_attendue": "RUN reel sur bbo_synchro x leader_fills: table wallets par edge d'anticipation net",
-   "statut": "TODO",
-   "sha": null,
-   "resultat_economique": null,
+   "statut": "MORE_DATA",
+   "sha": "039b440",
+   "resultat_economique": "recouvrement fills x Binance BBO=~27min/86 fills, <=3 votes/wallet, move_after~0 -> MORE_DATA; besoin collecte SIMULTANEE longue fenetre",
    "next_action": "coder + mesurer sur bbo_synchro(HL+Bin) x leader_fills"
   },
   {
