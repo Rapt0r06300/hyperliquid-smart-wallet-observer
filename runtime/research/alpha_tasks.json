@@ -1409,11 +1409,11 @@
    "section": "F",
    "objectif": "dedup event_id/tid/oid",
    "prio_eco": 5,
-   "statut": "TODO",
-   "sha": null,
+   "statut": "DONE",
+   "sha": "6d095e2",
    "depends": [],
    "done_criteria": "code+wire+experience/preuve+commit (BLOCKED n'est jamais DONE)",
-   "next_action": ""
+   "next_action": "charger_fills deduplique par event_id/fill_hash/tid/oid (sinon empreinte) ; teste."
   },
   {
    "id": "FIX-19",
@@ -1431,11 +1431,11 @@
    "section": "F",
    "objectif": "DISCOVERY->RANK->FREEZE->OOS intact->FORWARD ; aucun retune ; score=notre copyable net edge",
    "prio_eco": 5,
-   "statut": "TODO",
-   "sha": null,
+   "statut": "DONE",
+   "sha": "06d2d06",
    "depends": [],
    "done_criteria": "code+wire+experience/preuve+commit (BLOCKED n'est jamais DONE)",
-   "next_action": ""
+   "next_action": "experience_anticipation: split decouverte/OOS disjoint, verdict+LCB sur l'OOS (edge doit survivre) ; teste."
   },
   {
    "id": "FIX-21",
@@ -1596,11 +1596,11 @@
    "section": "K",
    "objectif": "N independant: metaorder/burst/wallet×coin×episode-day/entity cluster",
    "prio_eco": 1,
-   "statut": "PARTIAL",
-   "sha": null,
+   "statut": "DONE",
+   "sha": "dcf6f25",
    "depends": [],
    "done_criteria": "code+wire+experience/preuve+commit (BLOCKED n'est jamais DONE)",
-   "next_action": ""
+   "next_action": "annoter_entites collapse les wallets co-tradant en une seule voix (metaorder prime, conservateur) ; teste."
   },
   {
    "id": "FIX-36",
