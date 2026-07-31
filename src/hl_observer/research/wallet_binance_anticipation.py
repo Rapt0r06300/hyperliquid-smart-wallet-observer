@@ -53,8 +53,9 @@ def charger_bin_series(bbo_path: str, coins: set[str], *, max_lignes: int | None
     return out
 
 
-def _idx_a(ts_list: Sequence[int], t: int, *, tol_ms: int) -> int | None:
-    """Index du dernier point ≤ t, None si aucun point à moins de `tol_ms`."""
+def _idx_ref(ts_list: Sequence[int], t: int, *, tol_ms: int) -> int | None:
+    """Point de RÉFÉRENCE causal à l'instant t : dernier point ≤ t (prix en vigueur), None si trop vieux
+    (> tol_ms). Pour m0 au fill : jamais de look-ahead au-delà de T."""
     if not ts_list:
         return None
     i = bisect.bisect_right(ts_list, t) - 1
@@ -63,25 +64,53 @@ def _idx_a(ts_list: Sequence[int], t: int, *, tol_ms: int) -> int | None:
     return i
 
 
+def _idx_proche(ts_list: Sequence[int], t_cible: int, *, tol_ms: int) -> int | None:
+    """FIX-16 : index du point le PLUS PROCHE de `t_cible` (avant OU après), None si le plus proche est à
+    plus de `tol_ms`. Corrige le biais « dernier ≤ T+h » qui pouvait renvoyer un point vieux de plusieurs
+    secondes et l'appeler « prix à l'horizon exact » : on cherche AUTOUR de la cible, tolérance bornée."""
+    if not ts_list:
+        return None
+    i = bisect.bisect_left(ts_list, t_cible)
+    best: int | None = None
+    best_d: int | None = None
+    for j in (i - 1, i):
+        if 0 <= j < len(ts_list):
+            d = abs(int(ts_list[j]) - t_cible)
+            if best_d is None or d < best_d:
+                best_d, best = d, j
+    if best is None or best_d is None or best_d > tol_ms:
+        return None
+    return best
+
+
+def _tol_horizon(h: int, tol_ms: int) -> int:
+    """Tolérance bornée pour matcher T±h (FIX-16) : ≤ tol_ms (résolution attendue du tape) ET ≤ h/2 (jamais
+    élargir la fenêtre au point de mesurer un autre horizon). Empêche « point à h ms de la cible = horizon »."""
+    return max(1, min(tol_ms, h // 2))
+
+
 def anticipation_fill(serie: tuple[Sequence[int], Sequence[float]], fill: Mapping[str, Any], *,
                       horizons_ms: Sequence[int], tol_ms: int = 1000) -> dict[int, dict[str, float | None]]:
     """Pour un fill, move_before/after Binance signés par sens, à chaque horizon (None si non mesurable).
 
-    `before`/`after` exigent un point STRICTEMENT antérieur/postérieur au point de référence T — sinon le
-    mouvement serait 0 fabriqué (horizon sous la cadence du tape) → UNMEASURABLE, jamais 0.
+    Référence m0 = dernier mid ≤ T (causal, pas de look-ahead). Points d'horizon T−h / T+h = mid le PLUS
+    PROCHE de la cible dans une tolérance BORNÉE (FIX-16) — jamais un point stale de plusieurs secondes
+    rebaptisé « horizon exact ». `before`/`after` exigent un point strictement antérieur/postérieur à la
+    référence T — sinon le mouvement serait 0 fabriqué (horizon sous la cadence du tape) → UNMEASURABLE.
     """
     ts_list, mid_list = serie
     T = int(fill["ts_ms"])
     sens = 1.0 if str(fill.get("side", "")).upper() == "LONG" else -1.0
-    i0 = _idx_a(ts_list, T, tol_ms=tol_ms)
+    i0 = _idx_ref(ts_list, T, tol_ms=tol_ms)
     res: dict[int, dict[str, float | None]] = {}
     if i0 is None:
         return {h: {"before": None, "after": None} for h in horizons_ms}
     m0 = mid_list[i0]
     t0 = ts_list[i0]
     for h in horizons_ms:
-        ib = _idx_a(ts_list, T - h, tol_ms=tol_ms)
-        ia = _idx_a(ts_list, T + h, tol_ms=max(tol_ms, h))
+        tol_h = _tol_horizon(h, tol_ms)
+        ib = _idx_proche(ts_list, T - h, tol_ms=tol_h)
+        ia = _idx_proche(ts_list, T + h, tol_ms=tol_h)
         before = (sens * (m0 / mid_list[ib] - 1.0) * 1e4) if (ib is not None and ts_list[ib] < t0) else None
         after = (sens * (mid_list[ia] / m0 - 1.0) * 1e4) if (ia is not None and ts_list[ia] > t0) else None
         res[h] = {"before": (round(before, 4) if before is not None else None),

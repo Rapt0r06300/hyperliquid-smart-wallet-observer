@@ -36,6 +36,23 @@ def test_horizon_sous_cadence_non_mesurable():
     assert r[50]["after"] is None                      # aucun point Binance à ±50ms -> UNMEASURABLE
 
 
+def test_fix16_point_stale_loin_de_horizon_rejete():
+    # FIX-16 : à T+h=15000, le SEUL point <= 15000 est stale (11000, 4 s trop vieux). L'ancien code
+    # ("dernier <= T+h") l'aurait pris et appelé "horizon 5000". Le nouveau exige un point PROCHE de 15000.
+    serie = _serie([(10000, 100.0), (11000, 100.5)])   # rien près de 15000
+    r = A.anticipation_fill(serie, {"side": "LONG", "ts_ms": 10000}, horizons_ms=(5000,), tol_ms=1000)
+    assert r[5000]["after"] is None                    # pas de mid à ±(<=h/2) de 15000 -> UNMEASURABLE, jamais le stale
+
+
+def test_fix16_prend_le_point_le_plus_proche_pas_le_dernier_avant():
+    # Deux points encadrent T+h=15000 : un stale AVANT (12000, d=3000) et un frais APRES (15100, d=100).
+    # "dernier <= T+h" prendrait le stale 12000 ; le fix prend 15100 (le plus proche).
+    serie = _serie([(10000, 100.0), (12000, 100.3), (15100, 100.9)])
+    r = A.anticipation_fill(serie, {"side": "LONG", "ts_ms": 10000}, horizons_ms=(5000,), tol_ms=1000)
+    # doit refléter 15100 (100.9 -> +90 bps), PAS le stale 12000 (100.3 -> +30 bps)
+    assert r[5000]["after"] == 90.0
+
+
 def _bin_series_anticipee(coin_base=100.0, n_days=4):
     # série Binance dense ; à chaque "fill time" Binance monte de +20 bps sur les 5 s suivantes
     pts = []
