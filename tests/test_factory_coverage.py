@@ -16,6 +16,9 @@ FACTORY_MODULES = [
     "order_intent", "alpha_factory", "run_factory", "execution_maker", "alpha_inputs", "feature_increment",
     "cost_model", "validation_gates", "basis_vs_latency", "recette_economique", "search_space",
     "alpha_decay", "research_backlog",
+    "deconfliction", "meta_gate", "wallet_info_ratio", "capital_efficiency", "daily_report", "drift_detector",
+    "fee_regime", "liquidity_consumption", "capacity_curve", "exit_factory", "maker_toxicity",
+    "book_resiliency", "spread_transition", "reproducibility",
 ]
 
 

@@ -1,0 +1,76 @@
+"""ALPHA batch B — fee_regime, liquidity_consumption, capacity_curve, exit_factory, maker_toxicity,
+book_resiliency, spread_transition, reproducibility."""
+
+import sys
+from pathlib import Path
+
+RACINE = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(RACINE / "src"))
+
+from hl_observer.research import book_resiliency as BR  # noqa: E402
+from hl_observer.research import capacity_curve as CC  # noqa: E402
+from hl_observer.research import exit_factory as EF  # noqa: E402
+from hl_observer.research import fee_regime as FR  # noqa: E402
+from hl_observer.research import liquidity_consumption as LC  # noqa: E402
+from hl_observer.research import maker_toxicity as MT  # noqa: E402
+from hl_observer.research import reproducibility as RP  # noqa: E402
+from hl_observer.research import spread_transition as ST  # noqa: E402
+
+
+def test_fee_regime_source_unique():
+    m = FR.matrice_frais_bps("HL")
+    assert m["taker_bps"] == 4.5 and m["maker_bps"] < m["taker_bps"] and m["rebate_bps"] is None
+
+
+def test_liquidity_consumption_une_seule_fois():
+    led = LC.LiquidityLedger()
+    led.nouvelle_update("s1", {100.0: 5.0})
+    r1 = led.consommer(100.0, 3.0)
+    r2 = led.consommer(100.0, 3.0)                          # il ne reste que 2
+    assert r1["rempli"] == 3.0 and r2["rempli"] == 2.0 and r2["refuse"] == 1.0
+
+
+def test_capacity_curve():
+    # carnet ask : 1 unite @100, 1 @100.1, 10 @101
+    niveaux = [(100.0, 1.0), (100.1, 1.0), (101.0, 10.0)]
+    w = CC.book_walk(niveaux, 100.0)                        # notional 100 USD ~ 1 unite -> slippage ~0
+    assert isinstance(w["slippage_bps"], float)
+    c = CC.capacity_curve(niveaux, edge_bps=50.0, notionals=(50, 100, 500))
+    assert c["capacity_before_edge_decay_usd"] >= 50.0
+
+
+def test_exit_factory_stop_loss():
+    chemin = [0.0, -10.0, -35.0, 5.0]
+    o = EF.simuler_exit(chemin, regle="STOP_LOSS", sl_bps=30.0)
+    assert o["cause"] == "SL" and o["net_bps"] == -35.0
+    comp = EF.comparer_exits([chemin], regles=("STOP_LOSS", "HORIZON_FIXE"))
+    assert "STOP_LOSS" in comp and comp["STOP_LOSS"]["n"] == 1
+
+
+def test_maker_toxicity_gate():
+    tox = MT.toxicity_score(aggr_flow_norm=0.9, queue_depletion=0.8)["toxicity"]
+    e = MT.esperance_pnl_fill_bps(20.0, tox, spread_capture_bps=2.0, maker_fee_bps=1.5)
+    assert MT.maker_autorise(e) is False                    # toxique -> maker refuse
+    e_ok = MT.esperance_pnl_fill_bps(5.0, 0.05, spread_capture_bps=4.0, maker_fee_bps=1.0)
+    assert MT.maker_autorise(e_ok) is True
+
+
+def test_book_resiliency():
+    r = BR.resilience([2.0, 3.0, 9.5], profondeur_avant=10.0)   # recupere ~95%
+    assert r["regime"] == "REVERSAL"
+    r2 = BR.resilience([2.0, 2.0, 3.0], profondeur_avant=10.0)  # reste bas
+    assert r2["regime"] == "CONTINUATION"
+
+
+def test_spread_transition_decisions():
+    assert ST.decision(spread_bps=2.0, spread_tendance=-1.0, depth_tendance=1.0)["action"] == "MAKER"
+    assert ST.decision(spread_bps=12.0, spread_tendance=1.0, depth_tendance=-1.0)["action"] == "NO_TRADE"
+    assert ST.decision(spread_bps=3.0, spread_tendance=1.0, depth_tendance=0.0)["action"] == "TAKER_NOW"
+
+
+def test_reproducibility():
+    a = RP.empreinte_repro(code_sha="abc", dataset_hash="d1", config_hash="c1", seed=42, start_ts_ms=1, end_ts_ms=9)
+    b = RP.empreinte_repro(code_sha="abc", dataset_hash="d1", config_hash="c1", seed=42, start_ts_ms=100, end_ts_ms=200)
+    assert RP.meme_repro(a, b) is True                      # timestamps ignores
+    c = RP.empreinte_repro(code_sha="abc", dataset_hash="d2", config_hash="c1", seed=42)
+    assert RP.meme_repro(a, c) is False
