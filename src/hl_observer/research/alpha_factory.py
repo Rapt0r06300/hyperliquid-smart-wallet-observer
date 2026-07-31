@@ -16,12 +16,22 @@ Pur, 0 réseau, 0 ordre réel.
 """
 from __future__ import annotations
 
+import hashlib
 import json
 from collections.abc import Mapping, Sequence
 from typing import Any
 
 SCHEMA_VERSION = "hypersmart.alpha_factory.v1"
 UNMEASURABLE = "UNMEASURABLE"
+
+
+def _hash(*parts: Any) -> str:
+    """Hash déterministe court (repro : même entrée -> même hash)."""
+    h = hashlib.sha1()
+    for p in parts:
+        h.update(str(p).encode("utf-8"))
+        h.update(b"\x00")
+    return h.hexdigest()[:16]
 
 #: Dimensions de l'espace de recherche (pour tracer chaque essai sans ambiguïté).
 DIMENSIONS = ("data", "event", "state", "filter", "horizon", "execution")
@@ -31,6 +41,7 @@ COMPOSANTES_COUT = ("fees_bps", "spread_bps", "slippage_bps", "latency_bps")
 
 #: Champs de la ligne canonique (ordre stable).
 CHAMPS = (
+    "trial_id", "config_hash", "dataset_hash", "pipeline_hash",
     "idea", "config_frozen", *DIMENSIONS,
     "n_raw", "n_independent", "gross_bps",
     *COMPOSANTES_COUT, "cost_total_bps", "cost_incomplet",
@@ -63,9 +74,16 @@ def ligne_canonique(idea: str, *, config_frozen: Mapping[str, Any] | str, verdic
                     pf: Any = UNMEASURABLE, dd: Any = UNMEASURABLE, es: Any = UNMEASURABLE,
                     fill_ratio: Any = UNMEASURABLE, capacity_usd: Any = UNMEASURABLE,
                     discovery: Any = UNMEASURABLE, oos: Any = UNMEASURABLE, forward: Any = UNMEASURABLE,
-                    notes: str = "", sha: str = UNMEASURABLE) -> dict[str, Any]:
-    """Construit une ligne canonique ; tout champ non fourni reste UNMEASURABLE (jamais 0)."""
+                    notes: str = "", sha: str = UNMEASURABLE,
+                    dataset_hash: str = UNMEASURABLE, pipeline_hash: str = UNMEASURABLE) -> dict[str, Any]:
+    """Construit une ligne canonique ; tout champ non fourni reste UNMEASURABLE (jamais 0).
+
+    P13: chaque ligne porte trial_id + config_hash (deterministe sur idea+config+dimensions) + dataset_hash
+    + pipeline_hash, pour la reproductibilite et la correction multiple-testing."""
+    config_hash = _hash(idea, config_frozen, data, event, state, filter, horizon, execution)
     row: dict[str, Any] = {
+        "trial_id": config_hash[:12], "config_hash": config_hash,
+        "dataset_hash": dataset_hash, "pipeline_hash": pipeline_hash,
         "idea": idea, "config_frozen": config_frozen, "data": data, "event": event, "state": state,
         "filter": filter, "horizon": horizon, "execution": execution, "n_raw": n_raw,
         "n_independent": n_independent, "gross_bps": gross_bps, "fees_bps": fees_bps,

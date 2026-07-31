@@ -35,7 +35,8 @@ def _experience_ofi(data_dir: str, coin: str, fee_bps: float) -> dict[str, Any]:
         return F.ligne_canonique("OFI/microprice %s" % coin, config_frozen="l2_book %s" % coin,
                                  verdict="MORE_DATA", n_raw=len(serie), data="l2_book %s" % coin)
     r = _ofi.experience_complete(serie, coin=coin, horizon_pas=2, fee_bps=fee_bps)
-    best = min((v for v in r["par_feature"].values() if isinstance(v.get("net_bps_oos"), (int, float))),
+    # P13 FIX: le MEILLEUR cellule = net OOS le plus HAUT (max), pas le plus bas. `min` selectionnait le pire.
+    best = max((v for v in r["par_feature"].values() if isinstance(v.get("net_bps_oos"), (int, float))),
               key=lambda v: v["net_bps_oos"], default=None)
     net = best["net_bps_oos"] if best else U
     lcb = best["lcb_net_bps"] if best else U
@@ -104,8 +105,11 @@ def _experience_mlofi(data_dir: str, fee_bps: float) -> dict[str, Any]:
 
 
 def run_all(*, data_dir: str, registry_path: str, coins_l2: tuple[str, ...] = ("BTC", "ETH", "SOL", "HYPE"),
-            fee_bps: float = 9.0, reset: bool = True) -> dict[str, Any]:
-    """Lance le pipeline complet et retourne {n_trials, table, rows}."""
+            fee_bps: float = 9.0, reset: bool = False) -> dict[str, Any]:
+    """Lance le pipeline complet et retourne {n_trials, table, rows}.
+
+    P13: `reset=False` par defaut — le registre est APPEND-ONLY (aucun reset destructif implicite).
+    Passer `reset=True` explicitement pour repartir de zero (usage rare, jamais par defaut)."""
     reg = F.TrialRegistry(registry_path)
     if reset:
         open(registry_path, "w").close()

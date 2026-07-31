@@ -32,3 +32,11 @@ def test_run_all_avec_wallet_tape(tmp_path):
     assert pop and pop[0]["verdict"] in ("KILL", "CANDIDAT")
     # registre relu = mêmes lignes
     assert len(RF.F.TrialRegistry(str(tmp_path / "r.jsonl")).load()) == out["n_trials"]
+
+
+def test_p13_reset_defaut_est_append_only(tmp_path):
+    reg = str(tmp_path / "r.jsonl")
+    out1 = RF.run_all(data_dir=str(tmp_path), registry_path=reg, coins_l2=("BTC",))       # reset defaut = False
+    out2 = RF.run_all(data_dir=str(tmp_path), registry_path=reg, coins_l2=("BTC",))
+    # append-only : le 2e run n'ecrase pas le 1er
+    assert len(RF.F.TrialRegistry(reg).load()) == out1["n_trials"] + out2["n_trials"]

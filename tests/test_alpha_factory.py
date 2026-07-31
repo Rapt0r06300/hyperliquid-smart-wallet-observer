@@ -34,6 +34,23 @@ def test_registre_append_et_relit(tmp_path):
     assert len(rows) == 2 and rows[0]["idea"] == "a"
 
 
+def test_p13_hashes_deterministes_et_trial_id():
+    a = F.ligne_canonique("idee", config_frozen="c", verdict="KILL", event="e", horizon="h")
+    b = F.ligne_canonique("idee", config_frozen="c", verdict="KILL", event="e", horizon="h")
+    diff = F.ligne_canonique("idee", config_frozen="c", verdict="KILL", event="AUTRE", horizon="h")
+    assert a["config_hash"] == b["config_hash"]                 # meme config -> meme hash
+    assert a["config_hash"] != diff["config_hash"]              # config differente -> hash different
+    assert a["trial_id"] == a["config_hash"][:12] and len(a["trial_id"]) == 12
+
+
+def test_p13_registre_append_only(tmp_path):
+    reg = F.TrialRegistry(str(tmp_path / "r.jsonl"))
+    reg.record(F.ligne_canonique("a", config_frozen="c", verdict="KILL"))
+    reg.record(F.ligne_canonique("b", config_frozen="c", verdict="KILL"))
+    reg.record(F.ligne_canonique("c", config_frozen="c", verdict="KILL"))
+    assert len(reg.load()) == 3                                 # append pur, rien n'est ecrase
+
+
 def test_emit_table_candidats_en_tete():
     rows = [
         F.ligne_canonique("mort", config_frozen="c", verdict="KILL", lcb_net_bps=-8.0),
