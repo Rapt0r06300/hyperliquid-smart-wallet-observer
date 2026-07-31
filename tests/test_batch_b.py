@@ -30,13 +30,31 @@ def test_liquidity_consumption_une_seule_fois():
     assert r1["rempli"] == 3.0 and r2["rempli"] == 2.0 and r2["refuse"] == 1.0
 
 
+def test_book_walk_buy_asks_analytique():
+    book = {"asks": [(100.0, 1.0), (101.0, 1.0), (110.0, 10.0)], "bids": [(99.0, 5.0)]}
+    w = CC.book_walk(book, 100.0, side="BUY")               # remplit exactement 1 base @100
+    assert abs(w["vwap"] - 100.0) < 1e-9 and w["slippage_bps"] == 0.0 and w["partial"] is False
+    # 150$: 100$@100 (base 1) + 50$@101 (base 0.49505) -> vwap 100.331 -> slippage ~33.1 bps
+    w2 = CC.book_walk(book, 150.0, side="BUY")
+    assert abs(w2["slippage_bps"] - 33.12) < 0.3 and w2["partial"] is False
+
+
+def test_book_walk_sell_consomme_bids():
+    book = {"asks": [(101.0, 5.0)], "bids": [(99.0, 1.0), (98.0, 1.0), (90.0, 10.0)]}
+    w = CC.book_walk(book, 99.0, side="SELL")               # 1 base @99
+    assert abs(w["vwap"] - 99.0) < 1e-9 and w["slippage_bps"] == 0.0
+
+
+def test_book_walk_partial_fill():
+    book = {"asks": [(100.0, 1.0)]}                          # seulement 100$ disponibles
+    w = CC.book_walk(book, 200.0, side="BUY")
+    assert w["partial"] is True and abs(w["quote_rempli_usd"] - 100.0) < 1e-6
+
+
 def test_capacity_curve():
-    # carnet ask : 1 unite @100, 1 @100.1, 10 @101
-    niveaux = [(100.0, 1.0), (100.1, 1.0), (101.0, 10.0)]
-    w = CC.book_walk(niveaux, 100.0)                        # notional 100 USD ~ 1 unite -> slippage ~0
-    assert isinstance(w["slippage_bps"], float)
-    c = CC.capacity_curve(niveaux, edge_bps=50.0, notionals=(50, 100, 500))
-    assert c["capacity_before_edge_decay_usd"] >= 50.0
+    book = {"asks": [(100.0, 1.0), (100.05, 5.0), (100.1, 100.0)]}
+    c = CC.capacity_curve(book, edge_bps=20.0, side="BUY", notionals=(50, 100, 500))
+    assert c["capacity_before_edge_decay_usd"] >= 100.0     # rempli plein sous 20 bps
 
 
 def test_exit_factory_stop_loss():
