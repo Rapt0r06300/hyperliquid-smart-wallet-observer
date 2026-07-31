@@ -27,6 +27,50 @@ from hl_observer.following.scoring_robuste import agreger_en_grappes, borne_bass
 UNMEASURABLE = "UNMEASURABLE"
 HORIZONS_MS_DEFAUT = (500, 1000, 2000, 5000, 10000, 30000)
 
+# FIX-17 — vocabulaire lifecycle : le sens BUY/SELL dépend de l'ACTION × position_side, PAS du seul side.
+_ACTIONS_OPEN = {"OPEN", "ADD", "INCREASE", "ENTRY", "ENTER", "LONG_OPEN", "SHORT_OPEN"}
+_ACTIONS_CLOSE = {"CLOSE", "REDUCE", "DECREASE", "EXIT", "COVER", "TRIM"}
+_ACTIONS_FLIP = {"FLIP", "REVERSE"}
+
+
+def direction_trade(fill: Mapping[str, Any]) -> float | None:
+    """FIX-17 — direction MARCHÉ signée d'un fill : +1.0 = BUY (achat), −1.0 = SELL (vente), None si indéterminable.
+
+    Le sens ne se déduit PAS du seul position_side : **fermer/réduire un SHORT est un ACHAT** (rachat), fermer/
+    réduire un LONG est une VENTE. Priorité des sources (la plus fiable d'abord) :
+      1. `dir`/`direction` texte Hyperliquid : « Open Long »/« Close Short » = BUY ; « Open Short »/« Close Long »
+         = SELL ; « Long > Short » = SELL (flip), « Short > Long » = BUY ;
+      2. `side` trade explicite : b/buy/bid = BUY ; a/s/sell/ask = SELL ;
+      3. (`action` lifecycle OPEN/ADD/REDUCE/CLOSE/FLIP) × `position_side` : OPEN long=BUY, OPEN short=SELL,
+         CLOSE long=SELL, CLOSE short=BUY, FLIP→côté résultant (long=BUY net, short=SELL net) ;
+      4. rétro-compat : `side` = long/short SANS lifecycle → OPEN implicite (long=BUY, short=SELL).
+    Conforme à la convention canonique de `normalization/fills._signed_delta`.
+    """
+    txt = str(fill.get("dir") or fill.get("direction") or "").strip().lower()
+    if txt:
+        if "open long" in txt or "close short" in txt:
+            return 1.0
+        if "open short" in txt or "close long" in txt:
+            return -1.0
+        if "long" in txt and "short" in txt:                 # flip « long > short » / « short > long »
+            return -1.0 if txt.find("long") < txt.find("short") else 1.0
+    st = str(fill.get("side") or "").strip().lower()
+    if st in {"b", "buy", "bid"}:
+        return 1.0
+    if st in {"a", "s", "sell", "ask"}:
+        return -1.0
+    action = str(fill.get("action") or fill.get("lifecycle") or "").strip().upper()
+    pos = str(fill.get("position_side") or "").strip().lower()
+    if not pos and st in {"long", "short"}:
+        pos = st                                             # schéma research : `side` porte le position_side
+    if pos in {"long", "short"}:
+        long_pos = pos == "long"
+        if action in _ACTIONS_CLOSE:
+            return -1.0 if long_pos else 1.0                 # FIX-17 : close/reduce SHORT=BUY, LONG=SELL
+        # OPEN / FLIP-vers-côté-résultant / (pas de lifecycle → OPEN implicite) : long=BUY, short=SELL
+        return 1.0 if long_pos else -1.0
+    return None
+
 
 def charger_bin_series(bbo_path: str, coins: set[str], *, max_lignes: int | None = None) -> dict[str, Any]:
     """Streame bbo_synchro → {coin: (liste_ts triée, liste_bin_mid alignée)}. `max_lignes` borne la lecture."""
@@ -100,10 +144,10 @@ def anticipation_fill(serie: tuple[Sequence[int], Sequence[float]], fill: Mappin
     """
     ts_list, mid_list = serie
     T = int(fill["ts_ms"])
-    sens = 1.0 if str(fill.get("side", "")).upper() == "LONG" else -1.0
+    sens = direction_trade(fill)                              # FIX-17 : BUY/SELL réel (lifecycle × position_side)
     i0 = _idx_ref(ts_list, T, tol_ms=tol_ms)
     res: dict[int, dict[str, float | None]] = {}
-    if i0 is None:
+    if sens is None or i0 is None:                            # direction indéterminable → jamais un sens fabriqué
         return {h: {"before": None, "after": None} for h in horizons_ms}
     m0 = mid_list[i0]
     t0 = ts_list[i0]
@@ -186,4 +230,4 @@ def charger_fills(path: str) -> list[dict[str, Any]]:
 
 
 __all__ = ["charger_bin_series", "anticipation_fill", "experience_anticipation", "charger_fills",
-           "HORIZONS_MS_DEFAUT", "UNMEASURABLE"]
+           "direction_trade", "HORIZONS_MS_DEFAUT", "UNMEASURABLE"]

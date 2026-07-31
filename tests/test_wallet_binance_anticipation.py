@@ -53,6 +53,39 @@ def test_fix16_prend_le_point_le_plus_proche_pas_le_dernier_avant():
     assert r[5000]["after"] == 90.0
 
 
+def test_fix17_close_short_est_un_achat_close_long_une_vente():
+    # FIX-17 : le sens NE vient PAS du seul position_side. Fermer un SHORT = ACHAT (+1) ; fermer un LONG = VENTE (-1).
+    assert A.direction_trade({"dir": "Close Short"}) == 1.0
+    assert A.direction_trade({"dir": "Close Long"}) == -1.0
+    assert A.direction_trade({"action": "CLOSE", "position_side": "short"}) == 1.0
+    assert A.direction_trade({"action": "REDUCE", "position_side": "long"}) == -1.0
+
+
+def test_fix17_open_et_side_explicite_et_flip():
+    assert A.direction_trade({"dir": "Open Long"}) == 1.0
+    assert A.direction_trade({"dir": "Open Short"}) == -1.0
+    assert A.direction_trade({"side": "B"}) == 1.0 and A.direction_trade({"side": "A"}) == -1.0
+    assert A.direction_trade({"dir": "Long > Short"}) == -1.0      # flip long->short = vente nette
+    assert A.direction_trade({"dir": "Short > Long"}) == 1.0       # flip short->long = achat net
+    # rétro-compat : side long/short seul = OPEN implicite
+    assert A.direction_trade({"side": "LONG"}) == 1.0 and A.direction_trade({"side": "SHORT"}) == -1.0
+
+
+def test_fix17_indeterminable_rend_unmeasurable():
+    assert A.direction_trade({"coin": "BTC", "ts_ms": 1}) is None
+    serie = _serie([(0, 100.0), (1000, 100.0), (6000, 100.5)])
+    r = A.anticipation_fill(serie, {"ts_ms": 1000}, horizons_ms=(5000,))   # pas de direction -> UNMEASURABLE
+    assert r[5000]["after"] is None and r[5000]["before"] is None
+
+
+def test_fix17_close_short_inverse_le_signe_de_move_after():
+    # Binance MONTE de +50 bps apres le fill. Un CLOSE SHORT est un ACHAT -> move_after favorable = +50.
+    # L'ancien code (side=SHORT -> -1) l'aurait compte -50 : un vrai anticipateur maquille en follower.
+    serie = _serie([(0, 100.0), (1000, 100.0), (6000, 100.5)])
+    r = A.anticipation_fill(serie, {"dir": "Close Short", "ts_ms": 1000}, horizons_ms=(5000,))
+    assert r[5000]["after"] == 50.0                                # +1 * (100.5/100 - 1) * 1e4
+
+
 def _bin_series_anticipee(coin_base=100.0, n_days=4):
     # série Binance dense ; à chaque "fill time" Binance monte de +20 bps sur les 5 s suivantes
     pts = []
