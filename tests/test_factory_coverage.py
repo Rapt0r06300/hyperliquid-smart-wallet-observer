@@ -43,3 +43,26 @@ def test_chaque_module_factory_est_teste():
     blob = _blob_tests()
     non_testes = [m for m in FACTORY_MODULES if m not in blob]
     assert not non_testes, f"modules factory sans test (import absent): {non_testes}"
+
+
+def test_fix02_chaine_reelle_famille_vers_trial(tmp_path):
+    """FIX-02 : chaque famille du registre doit REELLEMENT produire un trial (adaptateur appele) ou un BLOCKED
+    explicite. Pas seulement 'le nom du module apparait dans un test'."""
+    from hl_observer.research import factory_families as FAM
+    from hl_observer.research import run_factory as RF
+    out = RF.run_all(data_dir=str(tmp_path), registry_path=str(tmp_path / "r.jsonl"))
+    # chaine famille -> adapter -> experience appelee -> trial produit : une ligne PAR famille
+    assert set(out["familles_couvertes"]) == set(FAM.FAMILLES)
+    verdicts_ok = {"KILL", "KILL_FOLLOWER", "KILL_CONCENTRE", "CANDIDAT", "FORWARD_REQUIS", "MORE_DATA",
+                   "OOS_POSITIF_A_FORWARD", "ANTICIPATEUR_A_FORWARD", "BLOCKED_EXTERNAL"}
+    for r in out["rows"]:
+        # jamais ERROR, jamais un statut inconnu, jamais une famille qui ne produit rien
+        assert r["verdict"] in verdicts_ok, f"{r['_famille']} a produit un verdict inattendu: {r['verdict']}"
+
+
+def test_fix02_famille_active_sans_adapter_serait_detectee(tmp_path):
+    """Une famille ACTIVE/SHADOW sans adaptateur sortirait BLOCKED 'adaptateur absent' (jamais silencieusement OK)."""
+    from hl_observer.research import factory_families as FAM
+    from hl_observer.research import run_factory as RF
+    a_couvrir = set(FAM.familles_a_couvrir())
+    assert a_couvrir.issubset(set(RF.ADAPTERS) | set(RF.RAISONS_BLOCKED))
