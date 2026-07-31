@@ -1,34 +1,24 @@
 # ALPHA PROGRESS — reprise en <2 min
 
-CURRENT_TASK : (aucune en cours)
-LAST_COMMIT  : 4f535e3 (CI P11/P64)
-TESTS        : suite recherche verte (~118 tests) ; test de couverture P58 garde 48 modules Factory
-RESULT       : LABORATOIRE COMPLET (P65 acceptance = DONE_GLOBAL : 0 critere manquant, 3 blocages DONNEES documentes). 0 candidat alpha net-positif PROUVE : la decouverte attend la DONNEE (collecte cote user).
-NEXT_TASK    : DECOUVERTE des que la data HF simultanee existe -> relancer run_factory + modules par famille. CI (P11/P64) livree: deplacer tools/ci/alpha-factory.yml -> .github/workflows/ (chemin protege).
-BLOCKERS     : data_hf, wallets_scalables (node_fills), l4 = collecte cote user (pas de reseau ici). Interfaces pretes (hf_recorder, multi_venue, order_intent, wallet_population streaming).
+ETAT_GLOBAL  : LAB_READY_DATA_BLOCKED  (fini DONE_GLOBAL premature)
+CURRENT_TASK : FIX (corrections) — commencer par la Factory + cost/book_walk (data-ready)
+LAST_COMMIT  : (voir ledger) — reclassement honnete + 58 corrections
+TESTS        : suite recherche verte ; MAIS "vert unitaire" != "execute dans la factory sur vraie data"
+RESULT       : 0 alpha net-positif prouve. 33 DONE reels (utilitaires), 9 PARTIAL, 13 RESEARCH_READY, 6 MORE_DATA, 5 BLOCKED.
+NEXT_TASK    : FIX-08 book_walk (math), FIX-06 cost strict, FIX-07 fees, FIX-03 registry dedup, FIX-04 parallel contenu, FIX-01 run_factory execution reelle, FIX-02 coverage chaine reelle, FIX-16 walletxbinance horizon. (data-ready, 1 task=1 commit)
+BLOCKERS     : data HF simultanee, node_fills, userTwap*, L4, multi-venue = collecte cote user (recorders/scripts a livrer prets, statut BLOCKED_EXTERNAL PRECIS, jamais DONE)
 
-## Etat des TASKS
-- DONE : 55   MORE_DATA : 6   BLOCKED_EXTERNAL : 5   TODO : 0  (tout le finissable est fait ; reste = collecte data + discovery)
-- Acceptance P65 : DONE_GLOBAL | satisfaits: factory_exhaustive/twap/maker/couts/oos/forward/adverse/capacity/capital ; bloques documentes: data_hf, wallets_scalables, l4
+## Niveaux d'etat (gradue)
+LAB_READY_DATA_BLOCKED -> RESEARCH_READY -> OOS_CANDIDATES -> FORWARD_VALIDATED -> ECONOMICALLY_VALIDATED -> DONE_GLOBAL
+DONE_GLOBAL interdit tant qu'une dependance essentielle est bloquee. BLOCKED_EXTERNAL n'est JAMAIS DONE.
 
-## Couche complete livree (toutes testees)
-Discipline: cost_model, validation_gates(cost-aware/early-stop/multiple-testing), basis_vs_latency, recette_economique,
-  search_space, alpha_decay, research_backlog, factory coverage, reproducibility.
-Metriques/logique: deconfliction, meta_gate, wallet_info_ratio, capital_efficiency, daily_report, drift_detector.
-Execution/liquidite: fee_regime, liquidity_consumption, capacity_curve, exit_factory, maker_toxicity, queue_model,
-  book_resiliency, spread_transition.
-Familles recherche: price_discovery, cross_asset_leadlag, universal_micro, nonlinear_challenger, metaorder_hazard,
-  liquidation_flow, cascade_warning, clock_regimes, wallet_fingerprint, abnormal_regime, hidden_vs_twap, trigger_map.
-Data/infra (interface, capture BLOCKED cote user): hf_recorder, multi_venue/NBBO, lineage.
-Validation/runtime/portfolio: forward_frozen, purged_cv, sizing, portfolio, feature_cache, replay_consistency,
-  runtime_loop, parallel_factory, factory_families, acceptance.
+## Regles (renforcees)
+- 1 TASK = 1 COMMIT (fini les batches de 6/10). Stage uniquement les fichiers de la task. Jamais push.
+- Reclasse honnete: helper/interface/unit-test/in-memory/verifier != DONE ; module existant != module execute.
+- >70% temps = DATA/EXPERIENCES/OOS/FORWARD ; <30% helpers sauf blocker direct.
+- PROMOTE seulement si net>0 & LCB>0 & OOS>0 & forward>0 & couts complets & latency/fill/capacity mesures & concentration ok & placebos/stat gates & ADVERSE_P95 survit.
 
-## Deja PROUVE (ne pas refaire sans nouvelle donnee/hypothese)
-- BTC lead-lag taker: KILL | OFI/microprice L1: gross<cout (KILL) | MLOFI: math prete, data-limited
-- cross-venue gap<cout / basis persistant (autocorr 0.63-0.94): KILL / DISABLED_BY_SCOPE
-- wallet '+58bps' 0x1e9b: PUMP artefact (3 votes, conc 0.79) | population 27: 0 candidat | P2 anticipation: MORE_DATA (27min overlap)
+## 58 corrections = section "corrections" de alpha_tasks.json (FIX-01..FIX-58), toutes persistantes.
+## Faux DONE reclasses: P15/P24/P41/P56/P58/P60/P9/P46=PARTIAL ; P65 verdict corrige ; familles recherche=RESEARCH_READY.
 
-## Regles actives
-- 1 task = 1 commit (batches thematiques quand tests partages) ; JAMAIS push (l'user pousse) ; commit via plomberie git (mount interdit unlink index.lock)
-- PROMOTE seulement si net>0 & LCB>0 & OOS>0 & forward>0 & couts complets & survit ADVERSE_P95 & passe multiple-testing & capacity/concentration OK
-- carry/funding = DISABLED_BY_SCOPE ; PAPER/READ-ONLY (0 ordre reel) ; jamais fabriquer du vert
+## Deja PROUVE (ne pas refaire sans nouvelle donnee): BTC lead-lag KILL ; OFI L1 gross<cout ; cross-venue basis=scope ; wallet +58bps=PUMP artefact ; 27 wallets=0 candidat.
