@@ -40,7 +40,9 @@ class PaperEngineConfig:
     strict_execution_truth: bool = True
     max_execution_book_age_ms: int = 5_000
     min_execution_fill_ratio: float = 0.0
-    exec_model: ExecModelConfig = field(default_factory=ExecModelConfig)
+    # P1B: le moteur exécute contre le carnet causal (execution_truth) — la latence AUTORITAIRE vient
+    # de ce carnet (latency_truth), pas de la taxe scalaire. Mode CAUSAL par défaut au runtime.
+    exec_model: ExecModelConfig = field(default_factory=lambda: ExecModelConfig(latency_mode="CAUSAL"))
 
 
 @dataclass(frozen=True, slots=True)

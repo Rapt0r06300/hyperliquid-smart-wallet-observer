@@ -53,3 +53,9 @@ def test_position_sans_bbo_reste_unmeasurable_pas_de_repli_mid():
     eng.mark_to_market_depuis_bbo({"BTC": 110.0}, {"ETH": {"bid": 1.0, "ask": 2.0}})   # pas de BBO BTC
     assert pos.last_liquidatable_price is None
     assert eng.ledger.snapshot()["authoritative_equity_usdc"] is None
+
+
+def test_engine_config_defaut_latency_mode_causal():
+    # P1B câblage : le moteur route l'exécution vers la latence causale (pas la taxe scalaire).
+    from hl_observer.paper_trading.paper_engine import PaperEngineConfig
+    assert PaperEngineConfig().exec_model.latency_mode == "CAUSAL"
