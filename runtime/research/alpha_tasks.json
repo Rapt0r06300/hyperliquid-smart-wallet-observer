@@ -73,9 +73,9 @@
    "done_criteria": "1 seule source frais; 0 hardcode concurrent; cost_incomplet bloque promote",
    "tests_attendus": "test source unique; test cost_incomplet bloque",
    "preuve_attendue": "tous les modules lisent la meme source",
-   "statut": "TODO",
-   "sha": null,
-   "resultat_economique": null,
+   "statut": "DONE",
+   "sha": "3a2494a",
+   "resultat_economique": "source unique couts (frais_venues), decomposition, cost_incomplet bloque promote",
    "next_action": ""
   },
   {
@@ -184,9 +184,9 @@
    "done_criteria": "classifieur basis/transient branche",
    "tests_attendus": "test basis persistant->rejet; test transient",
    "preuve_attendue": "cross-venue: gros gaps=basis (autocorr>0.6) deja mesure",
-   "statut": "MORE_DATA",
-   "sha": null,
-   "resultat_economique": "gaps illiquides=basis DISABLED_BY_SCOPE",
+   "statut": "DONE",
+   "sha": "505ac9f",
+   "resultat_economique": "classifieur basis persistant vs transient + gate cross-venue transient-only",
    "next_action": "formaliser classifieur"
   },
   {
@@ -239,9 +239,9 @@
    "done_criteria": "4 scenarios; optimistic!=promote; table",
    "tests_attendus": "test optimistic bloque promote",
    "preuve_attendue": "table par scenario",
-   "statut": "TODO",
-   "sha": null,
-   "resultat_economique": null,
+   "statut": "DONE",
+   "sha": "6c91c5b",
+   "resultat_economique": "4 scenarios; OPTIMISTIC ne promeut jamais; survie ADVERSE_P95 requise",
    "next_action": ""
   },
   {
@@ -275,9 +275,9 @@
    "done_criteria": "courbes decay + break_even_latency",
    "tests_attendus": "test decay decroit; test NO_TRADE apres max age",
    "preuve_attendue": "courbe par famille",
-   "statut": "TODO",
-   "sha": null,
-   "resultat_economique": null,
+   "statut": "DONE",
+   "sha": "62070f6",
+   "resultat_economique": "courbes decay half_life/break_even_latency/max_signal_age; NO_TRADE apres max age",
    "next_action": ""
   },
   {
@@ -293,9 +293,9 @@
    "done_criteria": "gate LCB>P95cout implemente+branche",
    "tests_attendus": "test gate refuse si LCB<=P95",
    "preuve_attendue": "gate applique dans la factory",
-   "statut": "TODO",
-   "sha": null,
-   "resultat_economique": null,
+   "statut": "DONE",
+   "sha": "d8aeb3c",
+   "resultat_economique": "cost-aware gate LCB>P95cout+marge",
    "next_action": ""
   },
   {
@@ -347,9 +347,9 @@
    "done_criteria": "regle early-stop codee+branchee",
    "tests_attendus": "test KILL rapide; test MORE_DATA",
    "preuve_attendue": "verdicts precoces coherents",
-   "statut": "TODO",
-   "sha": null,
-   "resultat_economique": null,
+   "statut": "DONE",
+   "sha": "d8aeb3c",
+   "resultat_economique": "early-stop sequentiel KILL/MORE_DATA/CONTINUE",
    "next_action": ""
   },
   {
@@ -367,9 +367,9 @@
    "done_criteria": "correction multiple-testing branchee sur N registry",
    "tests_attendus": "test seuil PROMOTE monte avec N",
    "preuve_attendue": "PROMOTE plus dur si + d'essais",
-   "statut": "TODO",
-   "sha": null,
-   "resultat_economique": null,
+   "statut": "DONE",
+   "sha": "d8aeb3c",
+   "resultat_economique": "multiple-testing E[max N bruits]=sigma*sqrt(2lnN)",
    "next_action": ""
   },
   {
@@ -421,9 +421,9 @@
    "done_criteria": "scorer priorise le backlog",
    "tests_attendus": "test tri",
    "preuve_attendue": "prochaine task auto",
-   "statut": "TODO",
-   "sha": null,
-   "resultat_economique": null,
+   "statut": "DONE",
+   "sha": "b5c7867",
+   "resultat_economique": "backlog scorer impact*readiness*independence/cost -> prochaine task auto",
    "next_action": ""
   },
   {
@@ -439,9 +439,9 @@
    "done_criteria": "espace ecrit+hashe avant OOS; selection gelee",
    "tests_attendus": "test hash stable; test OOS ne voit pas discovery",
    "preuve_attendue": "config_hash scelle par trial",
-   "statut": "TODO",
-   "sha": null,
-   "resultat_economique": null,
+   "statut": "DONE",
+   "sha": "42f5590",
+   "resultat_economique": "search space pre-enregistre & hashe, freeze avant OOS, refus hors espace",
    "next_action": ""
   },
   {
@@ -673,9 +673,9 @@
    "done_criteria": "test coverage familles",
    "tests_attendus": "meta-test",
    "preuve_attendue": "aucun module oublie",
-   "statut": "TODO",
-   "sha": null,
-   "resultat_economique": null,
+   "statut": "DONE",
+   "sha": "5fd9d6e",
+   "resultat_economique": "coverage: echoue si un module Alpha Factory n'a pas de test",
    "next_action": ""
   },
   {
@@ -728,9 +728,9 @@
    "done_criteria": "librairie KILL persistante",
    "tests_attendus": "test skip retest",
    "preuve_attendue": "KILL memorises",
-   "statut": "TODO",
-   "sha": null,
-   "resultat_economique": null,
+   "statut": "DONE",
+   "sha": "b5c7867",
+   "resultat_economique": "hard-negatives: skip retest sauf nouvelle donnee/hypothese",
    "next_action": ""
   },
   {
