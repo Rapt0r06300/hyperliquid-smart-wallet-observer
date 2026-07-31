@@ -125,6 +125,34 @@ def test_experience_anticipateur_ou_more_data():
     assert v["verdict"] in ("ANTICIPATEUR_A_FORWARD", "MORE_DATA")
 
 
+def _fills_par_jour(after_by_day, wallet="0xW"):
+    # un fill LONG par jour ; Binance bouge de `frac` sur [T, T+5s]. after_bps = frac*1e4.
+    pts, fills = [], []
+    for d, frac in enumerate(after_by_day):
+        T = d * JOUR + 30_000
+        pts += [(T, 100.0), (T + 5000, 100.0 * (1.0 + frac))]
+        fills.append({"adresse": wallet, "coin": "BTC", "side": "LONG", "ts_ms": T})
+    return _serie(pts), fills
+
+
+def test_fix20_edge_qui_ne_survit_pas_en_oos_est_KILL():
+    # +60 bps en DÉCOUVERTE (14 jours), puis -10 bps en OOS (10 jours) : l'edge repéré NE survit PAS -> KILL.
+    serie, fills = _fills_par_jour([0.006] * 14 + [-0.001] * 10)
+    r = A.experience_anticipation(fills, {"BTC": serie}, horizon_ms=5000, cout_bps=9.0, min_fills_wallet=8)
+    v = r["classement"][0]
+    assert v["verdict"] == "KILL"                           # jamais promu sur la seule fenêtre de découverte
+    assert v["lcb_decouverte_bps"] > 0 and v["lcb_net_bps"] <= 0   # bon en découverte, mort en OOS
+
+
+def test_fix20_edge_confirme_en_oos_est_anticipateur():
+    # +55/+65 bps sur découverte ET OOS : l'edge survit hors-échantillon -> ANTICIPATEUR_A_FORWARD.
+    serie, fills = _fills_par_jour([0.0055, 0.0065] * 12)   # 24 jours, alternance légère
+    r = A.experience_anticipation(fills, {"BTC": serie}, horizon_ms=5000, cout_bps=9.0, min_fills_wallet=8)
+    v = r["classement"][0]
+    assert v["verdict"] == "ANTICIPATEUR_A_FORWARD"
+    assert v["lcb_decouverte_bps"] > 0 and v["lcb_net_bps"] > 0 and v["n_independent"] >= 8
+
+
 def test_experience_follower_est_KILL():
     # Binance monte AVANT chaque fill -> follower
     pts, fills = [], []

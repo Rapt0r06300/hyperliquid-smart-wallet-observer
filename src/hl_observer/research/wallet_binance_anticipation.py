@@ -22,7 +22,8 @@ import json
 from collections.abc import Mapping, Sequence
 from typing import Any
 
-from hl_observer.following.scoring_robuste import agreger_en_grappes, borne_basse_confiance
+from hl_observer.following.scoring_robuste import (
+    agreger_en_grappes, borne_basse_confiance, separer_decouverte_validation)
 
 UNMEASURABLE = "UNMEASURABLE"
 HORIZONS_MS_DEFAUT = (500, 1000, 2000, 5000, 10000, 30000)
@@ -164,11 +165,13 @@ def anticipation_fill(serie: tuple[Sequence[int], Sequence[float]], fill: Mappin
 
 def experience_anticipation(fills: Sequence[Mapping[str, Any]], bin_by_coin: Mapping[str, Any], *,
                             horizon_ms: int = 5000, cout_bps: float = 9.0, tol_ms: int = 1000,
-                            min_fills_wallet: int = 8) -> dict[str, Any]:
-    """Par wallet : move_before/after moyens (votes indépendants), classification follower/anticipateur, verdict.
+                            min_fills_wallet: int = 8, fraction_decouverte: float = 0.6) -> dict[str, Any]:
+    """Par wallet : move_before/after (votes indépendants), classification follower/anticipateur, verdict OOS.
 
-    Verdict (à `horizon_ms`) : FOLLOWER si before domine ; sinon anticipation nette = after − coût, jugée par
-    LCB sur votes indépendants (grappes). Trop peu de votes → MORE_DATA.
+    FIX-20 — discipline DÉCOUVERTE → FREEZE → OOS (jamais de retune) : on repère l'anticipation sur la fenêtre
+    de DÉCOUVERTE (première fraction temporelle) puis on EXIGE que l'edge net survive sur la fenêtre OOS
+    DISJOINTE (le reste). Le verdict et la LCB reportés sont ceux de l'OOS — l'edge mesuré sur les données qui
+    ont servi à repérer le wallet serait circulaire. FOLLOWER (before domine) = KILL. Peu de votes OOS → MORE_DATA.
     """
     par_wallet: dict[str, list[dict[str, Any]]] = {}
     for fl in fills:
@@ -188,29 +191,39 @@ def experience_anticipation(fills: Sequence[Mapping[str, Any]], bin_by_coin: Map
     for adr, eps in par_wallet.items():
         if len(eps) < min_fills_wallet:
             continue
-        votes_after = agreger_en_grappes(eps, cle_valeur="after_bps")["votes_bps"]
-        votes_net = agreger_en_grappes(eps, cle_valeur="net_bps")["votes_bps"]
         befs = [e["before_bps"] for e in eps if e["before_bps"] is not None]
-        after_moy = round(sum(votes_after) / len(votes_after), 4) if votes_after else None
+        after_moy = _moy(agreger_en_grappes(eps, cle_valeur="after_bps")["votes_bps"])
         before_moy = round(sum(befs) / len(befs), 4) if befs else None
-        lcb_net = borne_basse_confiance(votes_net) if votes_net else None
         follower = (before_moy is not None and after_moy is not None and before_moy >= max(after_moy, 0.0))
-        if len(votes_net) < 8 or lcb_net is None:
-            verdict = "MORE_DATA"
-        elif follower:
+        # FIX-20 : coupe temporelle disjointe ; on repère en découverte, on valide en OOS.
+        sep = separer_decouverte_validation(eps, fraction_decouverte=fraction_decouverte)
+        votes_dec = agreger_en_grappes(sep["decouverte"], cle_valeur="net_bps")["votes_bps"]
+        votes_oos = agreger_en_grappes(sep["validation"], cle_valeur="net_bps")["votes_bps"]
+        lcb_dec = borne_basse_confiance(votes_dec) if votes_dec else None
+        lcb_oos = borne_basse_confiance(votes_oos) if votes_oos else None
+        if follower:
             verdict = "KILL_FOLLOWER"
-        elif lcb_net <= 0:
-            verdict = "KILL"
+        elif len(votes_oos) < 8 or lcb_oos is None or lcb_dec is None:
+            verdict = "MORE_DATA"                              # pas de quoi valider hors-échantillon
+        elif lcb_dec <= 0:
+            verdict = "KILL"                                   # aucun edge même en découverte
+        elif lcb_oos <= 0:
+            verdict = "KILL"                                   # edge repéré mais NE SURVIT PAS en OOS (snooping)
         else:
-            verdict = "ANTICIPATEUR_A_FORWARD"
-        lignes.append({"wallet": adr, "n_raw": len(eps), "n_independent": len(votes_net),
+            verdict = "ANTICIPATEUR_A_FORWARD"                 # positif en découverte ET confirmé en OOS
+        lignes.append({"wallet": adr, "n_raw": len(eps), "n_independent": len(votes_oos),
                        "move_before_bps": before_moy, "move_after_bps": after_moy,
                        "net_after_cout_bps": (round(after_moy - cout_bps, 4) if after_moy is not None else None),
-                       "lcb_net_bps": lcb_net, "follower": follower, "verdict": verdict})
+                       "lcb_net_bps": lcb_oos, "lcb_decouverte_bps": lcb_dec,
+                       "follower": follower, "verdict": verdict})
     rang = {"ANTICIPATEUR_A_FORWARD": 0, "MORE_DATA": 1, "KILL": 2, "KILL_FOLLOWER": 3}
     lignes.sort(key=lambda l: (rang.get(l["verdict"], 9), -(l["lcb_net_bps"] or -1e9)))
     return {"horizon_ms": horizon_ms, "cout_bps": cout_bps, "n_wallets_mesures": len(lignes),
             "classement": lignes, "real_execution": False}
+
+
+def _moy(xs: Sequence[float]) -> float | None:
+    return round(sum(xs) / len(xs), 4) if xs else None
 
 
 def cle_dedup_fill(d: Mapping[str, Any]) -> str:
