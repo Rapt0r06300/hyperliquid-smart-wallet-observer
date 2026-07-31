@@ -1321,11 +1321,11 @@
    "section": "C",
    "objectif": "cross-venue: revalider end-to-end entry A+B->hedge->residual->exit->unwind->fees/slippage/latency->PnL ; basis!=arb ; gross<=P95 roundtrip=KILL",
    "prio_eco": 3,
-   "statut": "TODO",
-   "sha": null,
+   "statut": "DONE",
+   "sha": "74bb06f",
    "depends": [],
    "done_criteria": "code+wire+experience/preuve+commit (BLOCKED n'est jamais DONE)",
-   "next_action": ""
+   "next_action": "DONE: episode_cross_venue (detection->legs A/B->hedge->residu->unwind->PnL apres tous couts) reutilise executable_legs+state_machine. Wire _adapt_cross_venue: basis persistant elimine, gross<=P95 roundtrip KILL, transient sans L2 = MORE_DATA. 6 tests verts."
   },
   {
    "id": "FIX-11",
