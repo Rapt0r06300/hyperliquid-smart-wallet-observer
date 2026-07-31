@@ -177,6 +177,22 @@ def test_fix52_feature_cache_reutilise_les_lectures_sans_changer_le_resultat(tmp
     assert proj(avec) == proj(sans)                                  # perf sans changer le résultat
 
 
+def test_fix53_cache_fichier_reutilise_les_parses_entre_runs(tmp_path):
+    # FIX-53 : un CacheParFichier persistant évite de RE-lire les JSONL entre runs tant qu'ils n'ont pas changé.
+    from hl_observer.research import jsonl_stream as JS
+    pts, fills = _serie_decay_et_fills()
+    (tmp_path / "bbo_synchro.jsonl").write_text(
+        "\n".join(json.dumps({"coin": "BTC", "ts_ms": t, "bin_mid": p}) for t, p in pts), encoding="utf-8")
+    (tmp_path / "leader_fills_forward.jsonl").write_text(
+        "\n".join(json.dumps(f) for f in fills), encoding="utf-8")
+    cf = JS.CacheParFichier()
+    a = RF.run_all(data_dir=str(tmp_path), registry_path=str(tmp_path / "r1.jsonl"), cache_fichier=cf)
+    b = RF.run_all(data_dir=str(tmp_path), registry_path=str(tmp_path / "r2.jsonl"), cache_fichier=cf)
+    assert cf.miss == 2 and cf.hits == 2               # 2 parses au 1er run, 0 relecture au 2e (fichiers inchangés)
+    proj = lambda out: [(r["_famille"], r["verdict"], r.get("net_bps")) for r in out["rows"]]   # noqa: E731
+    assert proj(a) == proj(b)                          # invariance inter-runs
+
+
 def test_p13_reset_defaut_est_append_only_avec_dedup(tmp_path):
     reg = str(tmp_path / "r.jsonl")
     out1 = RF.run_all(data_dir=str(tmp_path), registry_path=reg)

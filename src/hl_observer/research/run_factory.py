@@ -22,6 +22,7 @@ from hl_observer.research import alpha_factory as F
 from hl_observer.research import exit_factory as _ef      # FIX-41 : exits choisis en decouverte puis GELES
 from hl_observer.research import factory_families as _fam
 from hl_observer.research import feature_cache as _fc      # FIX-52 : cache features immuable, reutilise entre familles
+from hl_observer.research import jsonl_stream as _js       # FIX-53 : lecture streaming + cache par identite fichier
 from hl_observer.research import mlofi as _ml
 from hl_observer.research import ofi_microprice as _ofi
 from hl_observer.research import wallet_binance_anticipation as _wba
@@ -117,6 +118,24 @@ def _fills_list(cache: Any, path: str) -> Any:
     """FIX-52 : parse leader_fills UNE fois par run et le réutilise entre familles."""
     fn = lambda: _wba.charger_fills(path)  # noqa: E731
     return cache.get_or_compute(_fc.cle_feature(path, "charger_fills"), fn) if cache else fn()
+
+
+#: FIX-53 : parses lourds réutilisables entre RUNS via une identité de fichier (taille+mtime).
+_PARSES_LOURDS = (
+    ("bbo_synchro.jsonl", "charger_bin_series",
+     lambda p: _wba.charger_bin_series(p, {"BTC", "ETH", "SOL"}, max_lignes=600000)),
+    ("leader_fills_forward.jsonl", "charger_fills", lambda p: _wba.charger_fills(p)),
+)
+
+
+def _preseed_fichier(cache: Any, cache_fichier: Any, data_dir: str) -> None:
+    """FIX-53 : pré-alimente le cache de run depuis un cache PERSISTANT par identité de fichier. Deux runs sur
+    le MÊME fichier inchangé ne le relisent pas ; un fichier modifié est réanalysé (invalidation)."""
+    for nom, transfo, loader in _PARSES_LOURDS:
+        p = os.path.join(data_dir, nom)
+        if os.path.exists(p):
+            val = cache_fichier.obtenir(p, transfo, lambda p=p, loader=loader: loader(p))
+            cache.poser_immuable(_fc.cle_feature(p, transfo), val)
 
 
 def _blocked(famille: str, raison: str) -> dict[str, Any]:
@@ -303,25 +322,16 @@ def _adapt_cross_venue(data_dir: str, fee_bps: float, cache: Any = None) -> dict
     bbo = os.path.join(data_dir, "bbo_synchro.jsonl")
     if not _existe(bbo):
         return _blocked("cross_venue", "bbo_synchro.jsonl absent (edge exec + desync non calculables)")
-    # mesure legere sur echantillon frais (desync<50ms), BTC
+    # mesure legere sur echantillon frais (desync<50ms), BTC — lecture STREAMING (FIX-53), jamais tout en RAM
     edges = []
-    n = 0
-    with open(bbo, encoding="utf-8") as f:
-        for line in f:
-            if n > 300000:
-                break
-            n += 1
-            try:
-                x = json.loads(line)
-            except Exception:
-                continue
-            if x.get("coin") != "BTC" or abs(x.get("desync_ms", 1e9)) > 50:
-                continue
-            mid = x.get("hl_mid")
-            if not mid:
-                continue
-            e = max(x["bin_bid"] - x["hl_ask"], x["hl_bid"] - x["bin_ask"]) / mid * 1e4
-            edges.append(e)
+    for x in _js.stream_jsonl(bbo, max_lignes=300000):
+        if x.get("coin") != "BTC" or abs(x.get("desync_ms", 1e9)) > 50:
+            continue
+        mid = x.get("hl_mid")
+        if not mid:
+            continue
+        e = max(x["bin_bid"] - x["hl_ask"], x["hl_bid"] - x["bin_ask"]) / mid * 1e4
+        edges.append(e)
     if len(edges) < 500:
         return _blocked("cross_venue", "trop peu de snapshots BTC frais (%d)" % len(edges))
     edges.sort()
@@ -356,14 +366,17 @@ RAISONS_BLOCKED = {
 
 
 def run_all(*, data_dir: str, registry_path: str, fee_bps: float = 9.0, reset: bool = False,
-            use_cache: bool = True) -> dict[str, Any]:
+            use_cache: bool = True, cache_fichier: Any = None) -> dict[str, Any]:
     """Exécute TOUTES les familles du registre via leur adaptateur → un trial ou un BLOCKED précis chacune.
     FIX-52 : un cache de features IMMUABLE (partagé entre familles) évite de relire le même JSONL par trial ;
-    le résultat est IDENTIQUE avec ou sans cache (invariance)."""
+    le résultat est IDENTIQUE avec ou sans cache (invariance). FIX-53 : `cache_fichier` (CacheParFichier
+    persistant, optionnel) évite de RE-lire le fichier entre RUNS tant qu'il n'a pas changé."""
     reg = F.TrialRegistry(registry_path)
     if reset:
         open(registry_path, "w").close()
     cache = _fc.FeatureCache() if use_cache else None
+    if cache is not None and cache_fichier is not None:
+        _preseed_fichier(cache, cache_fichier, data_dir)      # FIX-53 : réutilise les parses inter-runs
     familles = list(_fam.FAMILLES)
     rows: list[dict[str, Any]] = []
     for fam in familles:
