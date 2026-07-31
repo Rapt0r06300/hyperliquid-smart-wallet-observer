@@ -213,8 +213,24 @@ def experience_anticipation(fills: Sequence[Mapping[str, Any]], bin_by_coin: Map
             "classement": lignes, "real_execution": False}
 
 
+def cle_dedup_fill(d: Mapping[str, Any]) -> str:
+    """FIX-18 — clé de déduplication d'un fill : un identifiant d'événement stable prime (event_id/fill_hash/
+    tid/oid) ; à défaut, empreinte (adresse, coin, sens, ts_ms, prix/taille). Un même fill rejoué (firehose,
+    reconnexion WS, backfill qui recouvre) NE compte qu'UNE fois — sinon N indépendant est artificiellement gonflé."""
+    for k in ("event_id", "fill_hash", "hash", "tid", "oid"):
+        v = d.get(k)
+        if v not in (None, "", 0, "0"):
+            return "%s:%s" % (k, v)
+    px = d.get("px", d.get("price", d.get("mid_at_fill")))
+    sz = d.get("sz", d.get("size"))
+    return "raw:%s:%s:%s:%s:%s:%s" % (d.get("adresse"), d.get("coin"), d.get("side"),
+                                      d.get("ts_ms"), px, sz)
+
+
 def charger_fills(path: str) -> list[dict[str, Any]]:
+    """Charge les fills (JSONL) en DÉDUPLIQUANT par identité d'événement (FIX-18). Ordre d'arrivée préservé."""
     out: list[dict[str, Any]] = []
+    vus: set[str] = set()
     with open(path, encoding="utf-8") as f:
         for line in f:
             line = line.strip()
@@ -225,9 +241,13 @@ def charger_fills(path: str) -> list[dict[str, Any]]:
             except json.JSONDecodeError:
                 continue
             if d.get("adresse") and d.get("coin") and d.get("side") and d.get("ts_ms"):
+                k = cle_dedup_fill(d)
+                if k in vus:
+                    continue                                   # fill déjà vu → jamais recompté
+                vus.add(k)
                 out.append(d)
     return out
 
 
 __all__ = ["charger_bin_series", "anticipation_fill", "experience_anticipation", "charger_fills",
-           "direction_trade", "HORIZONS_MS_DEFAUT", "UNMEASURABLE"]
+           "cle_dedup_fill", "direction_trade", "HORIZONS_MS_DEFAUT", "UNMEASURABLE"]

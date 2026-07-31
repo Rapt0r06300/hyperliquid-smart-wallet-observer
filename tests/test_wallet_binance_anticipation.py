@@ -86,6 +86,22 @@ def test_fix17_close_short_inverse_le_signe_de_move_after():
     assert r[5000]["after"] == 50.0                                # +1 * (100.5/100 - 1) * 1e4
 
 
+def test_fix18_charger_fills_deduplique_par_evenement(tmp_path):
+    import json as _j
+    rows = [
+        {"adresse": "0xA", "coin": "BTC", "side": "LONG", "ts_ms": 1, "tid": "t1"},
+        {"adresse": "0xA", "coin": "BTC", "side": "LONG", "ts_ms": 1, "tid": "t1"},        # meme tid -> doublon
+        {"adresse": "0xA", "coin": "BTC", "side": "LONG", "ts_ms": 2, "tid": "t2"},        # distinct
+        {"adresse": "0xB", "coin": "ETH", "side": "SHORT", "ts_ms": 5, "px": 100, "sz": 3},
+        {"adresse": "0xB", "coin": "ETH", "side": "SHORT", "ts_ms": 5, "px": 100, "sz": 3},  # raw-doublon (sans id)
+    ]
+    p = tmp_path / "fills.jsonl"
+    p.write_text("\n".join(_j.dumps(r) for r in rows), encoding="utf-8")
+    fills = A.charger_fills(str(p))
+    assert len(fills) == 3                                  # 2 doublons retires (tid t1, et le raw ETH)
+    assert A.cle_dedup_fill({"tid": "x", "adresse": "0xA"}) == "tid:x"   # id explicite prime sur l'empreinte
+
+
 def _bin_series_anticipee(coin_base=100.0, n_days=4):
     # série Binance dense ; à chaque "fill time" Binance monte de +20 bps sur les 5 s suivantes
     pts = []
