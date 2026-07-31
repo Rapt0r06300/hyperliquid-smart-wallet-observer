@@ -18,6 +18,7 @@ Pur, 0 réseau, 0 ordre réel.
 from __future__ import annotations
 
 import json
+import statistics
 from collections.abc import Iterator, Mapping, Sequence
 from typing import Any
 
@@ -102,6 +103,73 @@ def _clusters_cotrade(events: list[tuple[Any, float, str]], *, fenetre_ms: int) 
     return {k: sorted(v) for k, v in clusters.items() if len(v) > 1}
 
 
+def fingerprint_wallet(recs: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
+    """FIX-15 — empreinte comportementale d'un wallet : coins tradés, taille médiane, cadence (fills/jour).
+    Deux wallets qui partagent la même empreinte ne sont PROBABLEMENT pas deux preuves indépendantes."""
+    coins = frozenset(r.get("coin") for r in recs if r.get("coin"))
+    sizes = [float(r["sz"]) for r in recs if isinstance(r.get("sz"), (int, float)) and not isinstance(r.get("sz"), bool)]
+    ts = [float(r["ts_ms"]) for r in recs if isinstance(r.get("ts_ms"), (int, float)) and not isinstance(r.get("ts_ms"), bool)]
+    span_j = max(1.0, (max(ts) - min(ts)) / JOUR_MS) if len(ts) >= 2 else 1.0
+    return {"coins": coins, "med_size": (statistics.median(sizes) if sizes else None),
+            "cadence": round(len(recs) / span_j, 4), "n": len(recs)}
+
+
+def fingerprints_similaires(fa: Mapping[str, Any], fb: Mapping[str, Any], *, jaccard_min: float = 0.8,
+                            size_ratio_max: float = 1.25, cadence_ratio_max: float = 1.5) -> bool:
+    """FIX-15 — vrai si deux empreintes « se ressemblent » assez pour être une même entité : mêmes coins
+    (Jaccard ≥ seuil) ET tailles médianes proches (ratio borné) ET cadences proches. Toutes conditions requises
+    (haute précision : on ne fusionne pas deux wallets distincts sur un seul indice)."""
+    ca_set, cb_set = fa.get("coins") or frozenset(), fb.get("coins") or frozenset()
+    union = len(ca_set | cb_set)
+    if not union or len(ca_set & cb_set) / union < jaccard_min:
+        return False
+    a, b = fa.get("med_size"), fb.get("med_size")
+    if a and b and max(a, b) / min(a, b) > size_ratio_max:
+        return False
+    ca, cb = fa.get("cadence"), fb.get("cadence")
+    if ca and cb and max(ca, cb) / min(ca, cb) > cadence_ratio_max:
+        return False
+    return True
+
+
+def clusters_entite(par_wallet: Mapping[str, Sequence[Mapping[str, Any]]], *, fenetre_ms: int = 2000,
+                    **kw: Any) -> dict[str, list[str]]:
+    """FIX-15 — clusters d'entité par DEUX critères unis : (1) co-trade (même coin, < fenetre_ms) OU (2) empreinte
+    comportementale très proche (coins/taille/cadence). Étend `_clusters_cotrade` (timing seul). Deux wallets liés
+    par l'un OU l'autre = UNE entité (conservateur pour l'indépendance). O(n²) sur les empreintes (population bornée)."""
+    parent: dict[str, str] = {}
+
+    def find(x: str) -> str:
+        parent.setdefault(x, x)
+        while parent[x] != x:
+            parent[x] = parent[parent[x]]
+            x = parent[x]
+        return x
+
+    def union(a: str, b: str) -> None:
+        ra, rb = find(a), find(b)
+        if ra != rb:
+            parent[rb] = ra
+
+    events = _collect_events(par_wallet)                       # co-trade timing (comme _clusters_cotrade)
+    for i in range(1, len(events)):
+        c0, t0, w0 = events[i - 1]
+        c1, t1, w1 = events[i]
+        if c0 == c1 and w0 != w1 and (t1 - t0) <= fenetre_ms:
+            union(w0, w1)
+    fps = {w: fingerprint_wallet(recs) for w, recs in par_wallet.items()}
+    wallets = list(par_wallet)
+    for i in range(len(wallets)):
+        for j in range(i + 1, len(wallets)):
+            wa, wb = wallets[i], wallets[j]
+            if find(wa) != find(wb) and fingerprints_similaires(fps[wa], fps[wb], **kw):
+                union(wa, wb)
+    clusters: dict[str, list[str]] = {}
+    for w in par_wallet:
+        clusters.setdefault(find(w), []).append(w)
+    return {k: sorted(v) for k, v in clusters.items() if len(v) > 1}
+
+
 def classer_population(path: str, *, cout_bps: float = FRAIS_TAKER_ROUNDTRIP_BPS, min_fills: int = 8) -> dict[str, Any]:
     """Streame le tape, groupe par wallet, évalue l'edge net copyable + enrichit, classe les candidats d'abord."""
     par_wallet: dict[str, list[dict[str, Any]]] = {}
@@ -131,4 +199,5 @@ def classer_population(path: str, *, cout_bps: float = FRAIS_TAKER_ROUNDTRIP_BPS
             "n_clusters_entite": len(clusters), "classement": lignes}
 
 
-__all__ = ["flux_fills", "archetype", "independance_entite", "classer_population"]
+__all__ = ["flux_fills", "archetype", "independance_entite", "fingerprint_wallet",
+           "fingerprints_similaires", "clusters_entite", "classer_population"]

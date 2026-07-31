@@ -30,6 +30,26 @@ def test_independance_entite_detecte_cotrade():
     assert "0xA" in lie and "0xB" in lie and "0xC" not in lie
 
 
+def test_fix15_fingerprint_lie_les_wallets_sans_cotrade():
+    # 2 wallets memes coins, tailles/cadences ~ identiques, mais JAMAIS au meme instant (pas de co-trade timing).
+    recs_a = [{"coin": "BTC", "ts_ms": d * JOUR, "sz": 10.0} for d in range(6)]
+    recs_b = [{"coin": "BTC", "ts_ms": d * JOUR + 100_000, "sz": 10.5} for d in range(6)]  # +100s -> pas co-trade
+    assert P.fingerprints_similaires(P.fingerprint_wallet(recs_a), P.fingerprint_wallet(recs_b)) is True
+    # co-trade seul ne les lie pas ; l'empreinte oui
+    assert not P.independance_entite({"0xA": recs_a, "0xB": recs_b}, fenetre_ms=2000)
+    clusters = P.clusters_entite({"0xA": recs_a, "0xB": recs_b}, fenetre_ms=2000)
+    lie = {w for grp in clusters.values() for w in grp}
+    assert "0xA" in lie and "0xB" in lie
+
+
+def test_fix15_coins_differents_ne_lient_pas():
+    fa = P.fingerprint_wallet([{"coin": "BTC", "ts_ms": 0, "sz": 10.0},
+                               {"coin": "BTC", "ts_ms": JOUR, "sz": 10.0}])
+    fb = P.fingerprint_wallet([{"coin": "DOGE", "ts_ms": 0, "sz": 10.0},
+                               {"coin": "DOGE", "ts_ms": JOUR, "sz": 10.0}])
+    assert P.fingerprints_similaires(fa, fb) is False        # coins disjoints -> pas la meme entite
+
+
 def test_classer_population_streaming(tmp_path):
     recs = []
     for d in range(4):
