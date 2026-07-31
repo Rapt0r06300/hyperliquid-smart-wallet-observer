@@ -71,6 +71,34 @@ def test_fix34_population_gagnante_est_candidat_net_positif(tmp_path):
     assert pop["net_bps"] > 0 and pop["verdict"] == "CANDIDAT"
 
 
+def test_fix36_gate_anti_overfit_depromeut_selon_le_nb_dessais(tmp_path):
+    # FIX-36 : un edge MARGINAL (Sharpe faible) qui aurait ete CANDIDAT est DE-PROMU par le Deflated Sharpe,
+    # et la barre monte avec le nombre GLOBAL d'essais (proba deflatee baisse). Un vainqueur parmi N tirages
+    # de bruit n'est pas un champion.
+    recs = []
+    for k in range(26):                                  # >= MIN_TRADES(25) votes independants
+        net = -10 + k                                    # edges -10..+15 : moyenne +2.5, Sharpe faible
+        fwd = 100.0 * (1 + (net + 9) / 1e4)
+        for day in range(4):
+            for ci, coin in enumerate(("BTC", "ETH", "SOL")):
+                recs.append({"adresse": "0xW%02d" % k, "coin": coin, "side": "LONG",
+                             "ts_ms": day * 86_400_000 + k * 4000 + ci * 300, "mid_at_fill": 100.0, "mid_forward": fwd})
+    (tmp_path / "leader_fills_forward.jsonl").write_text(
+        "\n".join(json.dumps(x) for x in recs), encoding="utf-8")
+
+    def _run(nb_essais):
+        reg = tmp_path / ("r%d.jsonl" % nb_essais)
+        reg.write_text("\n".join(json.dumps({"config_hash": "c%d" % i, "verdict": "KILL"})
+                                 for i in range(nb_essais)) if nb_essais else "", encoding="utf-8")
+        out = RF.run_all(data_dir=str(tmp_path), registry_path=str(reg))
+        return [r for r in out["rows"] if r["_famille"] == "copy_population"][0]
+
+    peu, beaucoup = _run(0), _run(50000)
+    assert isinstance(peu["proba_deflatee"], float) and isinstance(beaucoup["proba_deflatee"], float)
+    assert beaucoup["proba_deflatee"] < peu["proba_deflatee"]          # plus d'essais -> proba deflatee plus basse
+    assert beaucoup["verdict"] == "MORE_DATA" and "anti-overfit" in (beaucoup.get("notes") or "")
+
+
 def test_p13_reset_defaut_est_append_only_avec_dedup(tmp_path):
     reg = str(tmp_path / "r.jsonl")
     out1 = RF.run_all(data_dir=str(tmp_path), registry_path=reg)

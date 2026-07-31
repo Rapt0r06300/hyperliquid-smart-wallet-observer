@@ -16,6 +16,7 @@ import json
 import os
 from typing import Any
 
+from hl_observer.backtesting import anti_overfit_gate as _aog   # FIX-36 : gate DSR déjà éprouvé (pas de doublon)
 from hl_observer.research import alpha_factory as F
 from hl_observer.research import factory_families as _fam
 from hl_observer.research import mlofi as _ml
@@ -25,11 +26,55 @@ from hl_observer.research import wallet_population as _wp
 
 U = F.UNMEASURABLE
 
+#: FIX-36 : verdicts « promouvables » soumis à la porte anti-overfitting (déflation par le nombre d'essais).
+_PROMOUVABLES = {"CANDIDAT", "OOS_POSITIF_A_FORWARD", "ANTICIPATEUR_A_FORWARD", "FORWARD_REQUIS"}
+
 
 def _pf_es(votes: Any) -> tuple[Any, Any]:
     """FIX-34 : pf/es d'un trial depuis sa distribution de votes nets INDÉPENDANTS (UNMEASURABLE si vide)."""
     m = F.metriques_distribution(list(votes or []))
     return m["pf"], m["es"]
+
+
+def _avec_votes(row: dict[str, Any], votes: Any) -> dict[str, Any]:
+    """FIX-36 : attache la distribution de votes du trial (champ privé, retiré avant enregistrement) pour que
+    `run_all` puisse appliquer la porte anti-overfitting avec le nombre GLOBAL d'essais."""
+    row["_votes_net_oos"] = list(votes or [])
+    return row
+
+
+class _Rng:
+    """PRNG déterministe (LCG) — Math.random interdit ici ; reproductible pour le placebo."""
+
+    def __init__(self, seed: int) -> None:
+        self._s = (int(seed) & 0xFFFFFFFF) or 1
+
+    def bit(self) -> int:
+        self._s = (1103515245 * self._s + 12345) & 0x7FFFFFFF
+        return (self._s >> 16) & 1
+
+
+def _placebo_permutation(votes: list[float], *, n_perm: int = 500, seed: int = 0) -> dict[str, Any]:
+    """FIX-36 placebo : sous H0 (pas d'edge), le signe de chaque vote est aléatoire. p = P(moyenne permutée ≥
+    observée). `concluant` seulement si ≥ 8 votes. `passe` = p < 0.05 (edge distinguable du hasard)."""
+    xs = [float(v) for v in votes if isinstance(v, (int, float)) and not isinstance(v, bool)]
+    if len(xs) < 8:
+        return {"concluant": False, "passe": False, "p": None}
+    obs = sum(xs) / len(xs)
+    rng = _Rng(seed)
+    ge = sum(1 for _ in range(n_perm) if sum(x if rng.bit() else -x for x in xs) / len(xs) >= obs)
+    p = ge / float(n_perm)
+    return {"concluant": True, "passe": bool(p < 0.05), "p": round(p, 4)}
+
+
+def _sharpes_du_run(rows: list[dict[str, Any]]) -> list[float]:
+    """FIX-36 : distribution des Sharpes bruts des trials mesurés ce run (entrée `trial_sharpes` du DSR)."""
+    out = []
+    for r in rows:
+        v = r.get("_votes_net_oos")
+        if v and len(v) >= 2:
+            out.append(_aog.sharpe(v))
+    return out
 
 
 def _existe(path: str) -> bool:
@@ -58,11 +103,11 @@ def _adapt_ofi(data_dir: str, fee_bps: float) -> dict[str, Any]:
         if best is None:
             continue
         pf, es = _pf_es(best.get("votes_net_oos"))
-        row = F.ligne_canonique("OFI/microstructure %s" % coin, config_frozen="l2_book; DISC->FREEZE->OOS; h=2",
+        row = _avec_votes(F.ligne_canonique("OFI/microstructure %s" % coin, config_frozen="l2_book; DISC->FREEZE->OOS; h=2",
                                 data="l2_book %s" % coin, event="imbalance/OFI/micro", execution="TAKER/TAKER",
                                 n_independent=best.get("n_votes_independants"), gross_bps=best.get("gross_bps_oos"),
                                 fees_bps=fee_bps, net_bps=best.get("net_bps_oos"), lcb_net_bps=best.get("lcb_net_bps"),
-                                pf=pf, es=es, verdict=best.get("verdict", "MORE_DATA"))
+                                pf=pf, es=es, verdict=best.get("verdict", "MORE_DATA")), best.get("votes_net_oos"))
         if best_row is None or (isinstance(row["net_bps"], (int, float))
                                 and isinstance(best_row["net_bps"], (int, float)) and row["net_bps"] > best_row["net_bps"]):
             best_row = row
@@ -87,13 +132,13 @@ def _adapt_population(data_dir: str, fee_bps: float) -> dict[str, Any]:
     # propre gate : verdict et net_bps ne peuvent plus se contredire (jamais CANDIDAT avec net négatif).
     edge_positif = isinstance(net_moy, (int, float)) and net_moy > 0
     verdict = "CANDIDAT" if (cand and edge_positif) else "KILL"
-    return F.ligne_canonique("Copy population (%d wallets)" % out["n_evalues"],
+    return _avec_votes(F.ligne_canonique("Copy population (%d wallets)" % out["n_evalues"],
                              config_frozen="grappes wallet:coin:jour; net copyable edge", data="leader_fills_forward",
                              event="wallet fills", execution="TAKER/TAKER", n_raw=out["n_lignes_streamees"],
                              n_independent=(len(edges) or U), gross_bps=gross_moy, fees_bps=fee_bps, net_bps=net_moy,
                              pf=m["pf"], es=m["es"], verdict=verdict,
                              notes="%d candidats indep ; %d clusters entite ; pf/es/net sur %d wallets independants"
-                                   % (len(cand), out["n_clusters_entite"], len(edges)))
+                                   % (len(cand), out["n_clusters_entite"], len(edges))), edges)
 
 
 def _adapt_mlofi(data_dir: str, fee_bps: float) -> dict[str, Any]:
@@ -116,10 +161,10 @@ def _adapt_mlofi(data_dir: str, fee_bps: float) -> dict[str, Any]:
         if len(books) >= 60:
             r = _ml.experience_mlofi(books, niveaux=5, horizon_pas=1, fee_bps=fee_bps)
             pf, es = _pf_es(r.get("votes_net_oos"))
-            return F.ligne_canonique("MLOFI multi-niveaux (%s)" % coin, config_frozen="top5; L1/L3/L5; h=1",
+            return _avec_votes(F.ligne_canonique("MLOFI multi-niveaux (%s)" % coin, config_frozen="top5; L1/L3/L5; h=1",
                                      data="metaorder top5", event="MLOFI", execution="TAKER/TAKER",
                                      n_independent=r.get("n_oos_MLOFI"), net_bps=r.get("net_oos_MLOFI"),
-                                     fees_bps=fee_bps, pf=pf, es=es, verdict=r.get("verdict", "MORE_DATA"))
+                                     fees_bps=fee_bps, pf=pf, es=es, verdict=r.get("verdict", "MORE_DATA")), r.get("votes_net_oos"))
     pairs = sum(max(0, len(v) - 1) for v in bycoin.values())
     return F.ligne_canonique("MLOFI multi-niveaux", config_frozen="top5", data="metaorder top5", event="MLOFI",
                              verdict="MORE_DATA", n_raw=pairs, notes="tape trop court: %d paires top5, aucun coin>=60" % pairs)
@@ -140,11 +185,11 @@ def _adapt_leadlag(data_dir: str, fee_bps: float) -> dict[str, Any]:
         coin = max(series, key=lambda c: len(series[c]))
         r = _ll.experience(series[coin], cout_bps=fee_bps)
         pf, es = _pf_es(r.get("votes_net_oos"))
-        return F.ligne_canonique("Lead-lag HL<-Binance (%s)" % coin, config_frozen="choc>=seuil gele; DISC/OOS",
+        return _avec_votes(F.ligne_canonique("Lead-lag HL<-Binance (%s)" % coin, config_frozen="choc>=seuil gele; DISC/OOS",
                                  data=name, event="Binance move", execution="TAKER/TAKER",
                                  n_independent=r.get("n_independent_oos"), gross_bps=r.get("gross_bps_oos"),
                                  fees_bps=fee_bps, net_bps=r.get("net_bps_oos"), lcb_net_bps=r.get("lcb_net_bps"),
-                                 pf=pf, es=es, verdict=r.get("verdict", "MORE_DATA"), notes="peak_lag=%s" % r.get("peak_lag"))
+                                 pf=pf, es=es, verdict=r.get("verdict", "MORE_DATA"), notes="peak_lag=%s" % r.get("peak_lag")), r.get("votes_net_oos"))
     return _blocked("lead_lag", "extrait _alpha_leadlag_*.csv absent")
 
 
@@ -156,13 +201,14 @@ def _adapt_anticipation(data_dir: str, fee_bps: float) -> dict[str, Any]:
     bin_by_coin = _wba.charger_bin_series(bbo, {"BTC", "ETH", "SOL"}, max_lignes=600000)
     r = _wba.experience_anticipation(_wba.charger_fills(fills), bin_by_coin, horizon_ms=5000, cout_bps=fee_bps)
     best = r["classement"][0] if r["classement"] else None
-    pf, es = _pf_es(best.get("votes_net_oos") if best else [])
-    return F.ligne_canonique("Wallet x Binance anticipation", config_frozen="h=5s; grappes; OOS disjoint",
+    votes = best.get("votes_net_oos") if best else []
+    pf, es = _pf_es(votes)
+    return _avec_votes(F.ligne_canonique("Wallet x Binance anticipation", config_frozen="h=5s; grappes; OOS disjoint",
                              data="bbo_synchro x leader_fills", event="wallet fill vs Binance", execution="TAKER/TAKER",
                              n_independent=(best["n_independent"] if best else U),
                              net_bps=(best["net_after_cout_bps"] if best else U), fees_bps=fee_bps,
                              pf=pf, es=es, verdict=(best["verdict"] if best else "MORE_DATA"),
-                             notes="%d wallets mesures" % r["n_wallets_mesures"])
+                             notes="%d wallets mesures" % r["n_wallets_mesures"]), votes)
 
 
 def _adapt_cross_venue(data_dir: str, fee_bps: float) -> dict[str, Any]:
@@ -239,6 +285,26 @@ def run_all(*, data_dir: str, registry_path: str, fee_bps: float = 9.0, reset: b
             row = F.ligne_canonique("[%s] ERREUR" % fam, config_frozen="—", verdict="ERROR", notes=str(exc)[:160])
         row["_famille"] = fam
         rows.append(row)
+    # FIX-36 : porte anti-overfitting AVANT enregistrement — un verdict PROMOUVABLE qui ne survit pas au
+    # Deflated Sharpe (déflation par le nombre GLOBAL d'essais) + placebo de permutation est dé-promu en MORE_DATA.
+    n_hist = len({str(r.get("config_hash")) for r in reg.load() if r.get("config_hash")})
+    n_trials_global = max(1, n_hist + len({str(r.get("config_hash")) for r in rows if r.get("config_hash")}))
+    trial_srs = _sharpes_du_run(rows)
+    for r in rows:
+        votes = r.pop("_votes_net_oos", None)
+        if not (votes and r.get("verdict") in _PROMOUVABLES):
+            continue
+        v = _aog.evaluer(votes, n_essais=n_trials_global, trial_sharpes=trial_srs)   # DSR déflaté par le nb d'essais
+        plac = _placebo_permutation(votes)                                            # placebo par permutation de signe
+        r["proba_deflatee"] = round(v.proba_deflatee, 6)
+        # dé-promu UNIQUEMENT sur un échec CONCLUANT : DSR = bruit (≥25 trades) OU placebo concluant échoué.
+        echec_dsr = v.motif == _aog.MOTIF_NOISE
+        echec_plac = plac["concluant"] and not plac["passe"]
+        if echec_dsr or echec_plac:
+            raison = ("DSR bruit (proba=%.3f, %d essais)" % (v.proba_deflatee, n_trials_global) if echec_dsr
+                      else "placebo p=%.3f (edge ~ hasard)" % (plac["p"] or 0.0))
+            r["verdict"] = "MORE_DATA"
+            r["notes"] = ((r.get("notes") or "") + " | anti-overfit: %s" % raison)[:300]
     for r in rows:
         reg.record(r)
     familles_couvertes = {r["_famille"] for r in rows}
