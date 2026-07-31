@@ -26,6 +26,12 @@ from hl_observer.research import wallet_population as _wp
 U = F.UNMEASURABLE
 
 
+def _pf_es(votes: Any) -> tuple[Any, Any]:
+    """FIX-34 : pf/es d'un trial depuis sa distribution de votes nets INDÉPENDANTS (UNMEASURABLE si vide)."""
+    m = F.metriques_distribution(list(votes or []))
+    return m["pf"], m["es"]
+
+
 def _existe(path: str) -> bool:
     return bool(path) and os.path.exists(path)
 
@@ -51,11 +57,12 @@ def _adapt_ofi(data_dir: str, fee_bps: float) -> dict[str, Any]:
                    key=lambda v: v["net_bps_oos"], default=None)
         if best is None:
             continue
+        pf, es = _pf_es(best.get("votes_net_oos"))
         row = F.ligne_canonique("OFI/microstructure %s" % coin, config_frozen="l2_book; DISC->FREEZE->OOS; h=2",
                                 data="l2_book %s" % coin, event="imbalance/OFI/micro", execution="TAKER/TAKER",
                                 n_independent=best.get("n_votes_independants"), gross_bps=best.get("gross_bps_oos"),
                                 fees_bps=fee_bps, net_bps=best.get("net_bps_oos"), lcb_net_bps=best.get("lcb_net_bps"),
-                                verdict=best.get("verdict", "MORE_DATA"))
+                                pf=pf, es=es, verdict=best.get("verdict", "MORE_DATA"))
         if best_row is None or (isinstance(row["net_bps"], (int, float))
                                 and isinstance(best_row["net_bps"], (int, float)) and row["net_bps"] > best_row["net_bps"]):
             best_row = row
@@ -108,10 +115,11 @@ def _adapt_mlofi(data_dir: str, fee_bps: float) -> dict[str, Any]:
         books = [t for _, t in seq]
         if len(books) >= 60:
             r = _ml.experience_mlofi(books, niveaux=5, horizon_pas=1, fee_bps=fee_bps)
+            pf, es = _pf_es(r.get("votes_net_oos"))
             return F.ligne_canonique("MLOFI multi-niveaux (%s)" % coin, config_frozen="top5; L1/L3/L5; h=1",
                                      data="metaorder top5", event="MLOFI", execution="TAKER/TAKER",
                                      n_independent=r.get("n_oos_MLOFI"), net_bps=r.get("net_oos_MLOFI"),
-                                     fees_bps=fee_bps, verdict=r.get("verdict", "MORE_DATA"))
+                                     fees_bps=fee_bps, pf=pf, es=es, verdict=r.get("verdict", "MORE_DATA"))
     pairs = sum(max(0, len(v) - 1) for v in bycoin.values())
     return F.ligne_canonique("MLOFI multi-niveaux", config_frozen="top5", data="metaorder top5", event="MLOFI",
                              verdict="MORE_DATA", n_raw=pairs, notes="tape trop court: %d paires top5, aucun coin>=60" % pairs)
@@ -131,11 +139,12 @@ def _adapt_leadlag(data_dir: str, fee_bps: float) -> dict[str, Any]:
             continue
         coin = max(series, key=lambda c: len(series[c]))
         r = _ll.experience(series[coin], cout_bps=fee_bps)
+        pf, es = _pf_es(r.get("votes_net_oos"))
         return F.ligne_canonique("Lead-lag HL<-Binance (%s)" % coin, config_frozen="choc>=seuil gele; DISC/OOS",
                                  data=name, event="Binance move", execution="TAKER/TAKER",
                                  n_independent=r.get("n_independent_oos"), gross_bps=r.get("gross_bps_oos"),
                                  fees_bps=fee_bps, net_bps=r.get("net_bps_oos"), lcb_net_bps=r.get("lcb_net_bps"),
-                                 verdict=r.get("verdict", "MORE_DATA"), notes="peak_lag=%s" % r.get("peak_lag"))
+                                 pf=pf, es=es, verdict=r.get("verdict", "MORE_DATA"), notes="peak_lag=%s" % r.get("peak_lag"))
     return _blocked("lead_lag", "extrait _alpha_leadlag_*.csv absent")
 
 
@@ -147,11 +156,12 @@ def _adapt_anticipation(data_dir: str, fee_bps: float) -> dict[str, Any]:
     bin_by_coin = _wba.charger_bin_series(bbo, {"BTC", "ETH", "SOL"}, max_lignes=600000)
     r = _wba.experience_anticipation(_wba.charger_fills(fills), bin_by_coin, horizon_ms=5000, cout_bps=fee_bps)
     best = r["classement"][0] if r["classement"] else None
+    pf, es = _pf_es(best.get("votes_net_oos") if best else [])
     return F.ligne_canonique("Wallet x Binance anticipation", config_frozen="h=5s; grappes; OOS disjoint",
                              data="bbo_synchro x leader_fills", event="wallet fill vs Binance", execution="TAKER/TAKER",
                              n_independent=(best["n_independent"] if best else U),
                              net_bps=(best["net_after_cout_bps"] if best else U), fees_bps=fee_bps,
-                             verdict=(best["verdict"] if best else "MORE_DATA"),
+                             pf=pf, es=es, verdict=(best["verdict"] if best else "MORE_DATA"),
                              notes="%d wallets mesures" % r["n_wallets_mesures"])
 
 

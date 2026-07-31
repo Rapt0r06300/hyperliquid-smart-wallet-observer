@@ -164,6 +164,7 @@ def experience(serie: Sequence[tuple[int, float, float]], *, cout_bps: float = 9
         "peak_lag": ll["peak_lag"], "binance_mene": ll["binance_mene"], "hl_mene": ll["hl_mene"],
         "seuil_gele_bps": seuil_gele, "horizon_pas": horizon_pas, "cout_bps": cout_bps,
         "n_independent_oos": mo["n"], "gross_bps_oos": mo["gross_bps"], "net_bps_oos": mo["net_bps"],
+        "votes_net_oos": [round(float(m) - float(cout_bps), 4) for m in mo["markouts"]],   # FIX-34 : pf/es
         "lcb_gross_bps": lcb, "lcb_net_bps": lcb_net, "verdict": verdict,
         "n_rends": n, "real_execution": False,
     }

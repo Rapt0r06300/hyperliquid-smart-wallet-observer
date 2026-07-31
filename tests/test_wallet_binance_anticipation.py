@@ -153,6 +153,17 @@ def test_fix20_edge_confirme_en_oos_est_anticipateur():
     assert v["lcb_decouverte_bps"] > 0 and v["lcb_net_bps"] > 0 and v["n_independent"] >= 8
 
 
+def test_fix34_anticipation_expose_votes_net_oos_pour_pf_es():
+    # FIX-34 : l'experience expose sa distribution de votes nets OOS -> pf/es mesurables par famille.
+    from hl_observer.research import alpha_factory as F
+    serie, fills = _fills_par_jour([0.0055, 0.0065] * 12)   # 24 jours -> OOS >= 8 votes
+    r = A.experience_anticipation(fills, {"BTC": serie}, horizon_ms=5000, cout_bps=9.0, min_fills_wallet=8)
+    v = r["classement"][0]
+    assert isinstance(v["votes_net_oos"], list) and len(v["votes_net_oos"]) >= 8
+    m = F.metriques_distribution(v["votes_net_oos"])
+    assert isinstance(m["es"], float)                       # ES mesurable depuis la vraie distribution
+
+
 def test_experience_follower_est_KILL():
     # Binance monte AVANT chaque fill -> follower
     pts, fills = [], []

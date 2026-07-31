@@ -145,7 +145,8 @@ def experience_mlofi(books: Sequence[Mapping[str, Any]], *, niveaux: int = 5, ho
                 t += horizon_pas
             else:
                 t += 1
-        return {"n": len(nets), "net_bps": (round(sum(nets) / len(nets), 4) if nets else None)}
+        return {"n": len(nets), "net_bps": (round(sum(nets) / len(nets), 4) if nets else None),
+                "votes": [round(float(x), 4) for x in nets]}       # FIX-34 : distribution pour pf/es
 
     r_l1 = net_oos("ofi_l1"); r_ml = net_oos("mlofi_integre")
     inc = (round(r_ml["net_bps"] - r_l1["net_bps"], 4)
@@ -158,6 +159,7 @@ def experience_mlofi(books: Sequence[Mapping[str, Any]], *, niveaux: int = 5, ho
     return {"n_paires": len(feats), "niveaux": niveaux,
             "net_oos_L1": r_l1["net_bps"], "n_oos_L1": r_l1["n"],
             "net_oos_MLOFI": r_ml["net_bps"], "n_oos_MLOFI": r_ml["n"],
+            "votes_net_oos": r_ml.get("votes", []),               # FIX-34 : distribution MLOFI pour pf/es
             "increment_multiniveaux_bps": inc, "verdict": verdict, "real_execution": False}
 
 

@@ -284,6 +284,7 @@ def experience_feature(feats: Sequence[Mapping[str, Any]], *, feature_key: str, 
         "feature": feature_key, "sens": sens, "horizon_pas": horizon_pas, "fee_bps": fee_bps,
         "seuil_gele": round(seuil_gele, 8), "seuils_testes": list(seuils),
         "n_independent_oos": mo["n"], "n_votes_independants": len(votes),
+        "votes_net_oos": [round(float(v), 4) for v in votes],   # FIX-34 : distribution pour pf/es
         "gross_bps_oos": mo["gross_bps"], "net_bps_oos": mo["net_bps"],
         "cout_moyen_bps": mo.get("cout_moyen_bps"), "lcb_net_bps": lcb_net,
         "verdict": verdict, "real_execution": False,

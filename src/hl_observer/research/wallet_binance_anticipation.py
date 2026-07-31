@@ -215,6 +215,7 @@ def experience_anticipation(fills: Sequence[Mapping[str, Any]], bin_by_coin: Map
                        "move_before_bps": before_moy, "move_after_bps": after_moy,
                        "net_after_cout_bps": (round(after_moy - cout_bps, 4) if after_moy is not None else None),
                        "lcb_net_bps": lcb_oos, "lcb_decouverte_bps": lcb_dec,
+                       "votes_net_oos": [round(float(v), 4) for v in votes_oos],   # FIX-34 : distribution pf/es
                        "follower": follower, "verdict": verdict})
     rang = {"ANTICIPATEUR_A_FORWARD": 0, "MORE_DATA": 1, "KILL": 2, "KILL_FOLLOWER": 3}
     lignes.sort(key=lambda l: (rang.get(l["verdict"], 9), -(l["lcb_net_bps"] or -1e9)))
