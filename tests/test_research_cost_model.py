@@ -15,15 +15,17 @@ def test_fees_roundtrip_source_unique():
 
 
 def test_decomposer_total_et_incomplet():
-    c = C.decomposer_cout(fees_bps=9.0, spread_bps=1.0)       # slippage/latency absents mais non requis
-    assert c["cost_total_bps"] == 10.0 and c["cost_incomplet"] is False
-    c2 = C.decomposer_cout(fees_bps=9.0)                       # spread requis manquant
-    assert c2["cost_incomplet"] is True
+    # FIX-06 : slippage/latency MANQUANTS -> coût INCOMPLET (les 4 composantes requises par défaut)
+    c = C.decomposer_cout(fees_bps=9.0, spread_bps=1.0)
+    assert c["cost_total_bps"] == 10.0 and c["cost_incomplet"] is True
+    complet = C.decomposer_cout(fees_bps=9.0, spread_bps=1.0, slippage_bps=0.5, latency_bps=0.0)
+    assert complet["cost_total_bps"] == 10.5 and complet["cost_incomplet"] is False
 
 
 def test_cout_bloque_promote():
-    assert C.cout_bloque_promote(C.decomposer_cout(fees_bps=9.0)) is True
-    assert C.cout_bloque_promote(C.decomposer_cout(fees_bps=9.0, spread_bps=1.0)) is False
+    assert C.cout_bloque_promote(C.decomposer_cout(fees_bps=9.0, spread_bps=1.0)) is True   # slippage/latency manquants
+    complet = C.decomposer_cout(fees_bps=9.0, spread_bps=1.0, slippage_bps=0.5, latency_bps=0.0)
+    assert C.cout_bloque_promote(complet) is False
 
 
 def test_cout_executable():

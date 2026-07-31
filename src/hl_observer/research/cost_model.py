@@ -29,8 +29,12 @@ def _num(x: Any) -> float | None:
 
 def decomposer_cout(*, fees_bps: Any = UNMEASURABLE, spread_bps: Any = UNMEASURABLE,
                     slippage_bps: Any = UNMEASURABLE, latency_bps: Any = UNMEASURABLE,
-                    requis: tuple[str, ...] = ("fees_bps", "spread_bps")) -> dict[str, Any]:
-    """Décompose le coût ; total = somme des composantes mesurables ; `cost_incomplet` si un `requis` manque."""
+                    requis: tuple[str, ...] = ("fees_bps", "spread_bps", "slippage_bps", "latency_bps")) -> dict[str, Any]:
+    """Décompose le coût ; total = somme des composantes mesurables ; `cost_incomplet` si un `requis` manque.
+
+    FIX-06 : par DÉFAUT les QUATRE composantes (fees+spread+slippage+latency) sont requises. Une slippage ou
+    latency inconnue rend le coût INCOMPLET → interdit CANDIDAT/PROMOTE. Le caller doit fournir explicitement
+    chaque composante (même 0.0 quand elle est réellement nulle, ex. latency=0 en exécution causale)."""
     comp = {"fees_bps": _num(fees_bps), "spread_bps": _num(spread_bps),
             "slippage_bps": _num(slippage_bps), "latency_bps": _num(latency_bps)}
     presents = [v for v in comp.values() if v is not None]
