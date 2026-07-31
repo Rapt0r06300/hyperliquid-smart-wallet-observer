@@ -57,6 +57,36 @@ def test_sizing_ne_repare_pas_mauvais_edge():
     assert 0 < bon["notional_usd"] <= 50.0                 # borné par capacité
 
 
+def test_fix50_sizing_interdit_avant_preuve_oos_forward():
+    # FIX-50 : le sizing ne PARIE pas sur un edge non prouvé. Sans OOS+forward positifs -> notional 0.
+    r0 = SZ.sizing_apres_preuve(oos_net_bps=None, forward_net_bps=None, edge_net_bps=10.0,
+                                variance_bps2=4.0, capital_usd=1000)
+    assert r0["notional_usd"] == 0.0 and "INTERDIT" in r0["raison"]
+    r1 = SZ.sizing_apres_preuve(oos_net_bps=8.0, forward_net_bps=-1.0, edge_net_bps=10.0,
+                                variance_bps2=4.0, capital_usd=1000)
+    assert r1["notional_usd"] == 0.0                        # forward négatif -> toujours interdit
+    r2 = SZ.sizing_apres_preuve(oos_net_bps=8.0, forward_net_bps=5.0, edge_net_bps=10.0,
+                                variance_bps2=4.0, capital_usd=1000, capacity_usd=50.0)
+    assert r2["notional_usd"] > 0 and r2["preuve"] == "OOS+FORWARD>0"   # OOS ET forward >0 -> autorisé
+
+
+def test_fix50_es_borne_reellement_la_taille():
+    # FIX-50 : es_bps n'est plus un paramètre mort — un ES (tail loss) élevé plafonne la taille.
+    sans = SZ.taille_notionnelle(50.0, 1.0, capital_usd=1000)                          # Kelly plafonné cap=0.02 -> 20
+    avec = SZ.taille_notionnelle(50.0, 1.0, capital_usd=1000, es_bps=1000.0, es_budget_bps=10.0)
+    assert avec["notional_usd"] < sans["notional_usd"] and avec["borne_es"] == 1000.0
+
+
+def test_fix50_sizing_fixe_alimente_un_paperintent():
+    from hl_observer.ops.paper_canonique import PaperIntent
+    fixe = SZ.sizing_apres_preuve(oos_net_bps=8.0, forward_net_bps=5.0, edge_net_bps=10.0,
+                                  variance_bps2=4.0, capital_usd=1000, mode="fixe", frac_fixe=0.01)
+    assert fixe["notional_usd"] == 10.0 and fixe["mode"] == "FIXE"
+    intent = PaperIntent(strategy="lead_lag", coin="BTC", side=1,
+                         notional_usd=fixe["notional_usd"], signal_observable_at_ms=0)
+    assert intent.as_dict()["notional_usd"] == 10.0 and intent.as_dict()["real_execution"] is False
+
+
 def test_portfolio_allocation():
     a = [1.0, 2.0, 1.5, 2.0, 1.0, 1.8]
     b = [1.0, 2.0, 1.5, 2.0, 1.0, 1.8]                     # identique -> corrélé -> pénalisé
