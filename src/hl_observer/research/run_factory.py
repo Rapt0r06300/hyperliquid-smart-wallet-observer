@@ -67,12 +67,26 @@ def _adapt_population(data_dir: str, fee_bps: float) -> dict[str, Any]:
     if not _existe(path):
         return _blocked("copy_population", "leader_fills_forward.jsonl absent")
     out = _wp.classer_population(path, cout_bps=fee_bps, min_fills=8)
-    cand = [l for l in out["classement"] if l.get("verdict") in ("CANDIDAT", "FORWARD_REQUIS")]
+    classement = out["classement"]
+    # FIX-34 : distribution des edges nets par wallet INDÉPENDANT (hors entités co-tradant) → pf/es réels du trial.
+    indep = [l for l in classement if not l.get("entite_potentiellement_liee")]
+    cand = [l for l in indep if l.get("verdict") in ("CANDIDAT", "FORWARD_REQUIS")]
+    edges = [l["net_bps_mean"] for l in indep if isinstance(l.get("net_bps_mean"), (int, float))]
+    gross = [l["gross_bps"] for l in indep if isinstance(l.get("gross_bps"), (int, float))]
+    m = F.metriques_distribution(edges)
+    gross_moy = round(sum(gross) / len(gross), 4) if gross else U
+    net_moy = round(sum(edges) / len(edges), 4) if edges else U
+    # « Copy population » n'est un CANDIDAT que si l'edge net moyen INDÉPENDANT est > 0 ET qu'un wallet passe son
+    # propre gate : verdict et net_bps ne peuvent plus se contredire (jamais CANDIDAT avec net négatif).
+    edge_positif = isinstance(net_moy, (int, float)) and net_moy > 0
+    verdict = "CANDIDAT" if (cand and edge_positif) else "KILL"
     return F.ligne_canonique("Copy population (%d wallets)" % out["n_evalues"],
                              config_frozen="grappes wallet:coin:jour; net copyable edge", data="leader_fills_forward",
                              event="wallet fills", execution="TAKER/TAKER", n_raw=out["n_lignes_streamees"],
-                             fees_bps=fee_bps, verdict=("CANDIDAT" if cand else "KILL"),
-                             notes="%d candidats ; %d clusters entite" % (len(cand), out["n_clusters_entite"]))
+                             n_independent=(len(edges) or U), gross_bps=gross_moy, fees_bps=fee_bps, net_bps=net_moy,
+                             pf=m["pf"], es=m["es"], verdict=verdict,
+                             notes="%d candidats indep ; %d clusters entite ; pf/es/net sur %d wallets independants"
+                                   % (len(cand), out["n_clusters_entite"], len(edges)))
 
 
 def _adapt_mlofi(data_dir: str, fee_bps: float) -> dict[str, Any]:

@@ -55,6 +55,39 @@ def _num(x: Any) -> float | None:
     return float(x) if isinstance(x, (int, float)) and not isinstance(x, bool) else None
 
 
+def metriques_distribution(returns: Sequence[Any], *, es_q: float = 0.1) -> dict[str, Any]:
+    """FIX-34 — PF et ES (Expected Shortfall) d'une distribution de rendements INDÉPENDANTS (bps), SANS hypothèse
+    d'ordre temporel (donc valides sur des votes agrégés en grappes).
+
+    PF (profit factor) = Σ gains / |Σ pertes| ; UNMEASURABLE si aucune perte observée (downside non mesuré →
+    on ne fabrique pas un PF infini). ES = moyenne du pire quantile `es_q` (perte moyenne de la queue, signée).
+    Distribution vide → tout UNMEASURABLE (jamais 0)."""
+    xs = [float(r) for r in returns if isinstance(r, (int, float)) and not isinstance(r, bool)]
+    if not xs:
+        return {"pf": UNMEASURABLE, "es": UNMEASURABLE, "n": 0}
+    gains = sum(x for x in xs if x > 0)
+    pertes = -sum(x for x in xs if x < 0)
+    pf = round(gains / pertes, 4) if pertes > 0 else UNMEASURABLE
+    k = max(1, int(len(xs) * es_q))
+    es = round(sum(sorted(xs)[:k]) / k, 4)
+    return {"pf": pf, "es": es, "n": len(xs)}
+
+
+def drawdown(pnl_ordonne: Sequence[Any]) -> Any:
+    """FIX-34 — Max drawdown (bps, ≥0) depuis une SÉQUENCE de pnl par période ORDONNÉE dans le temps (cumulée en
+    interne). Exige un ordre temporel réel (≥2 points) — sinon UNMEASURABLE : un DD sur des votes NON ordonnés
+    n'a pas de sens (on ne le fabrique pas)."""
+    xs = [float(x) for x in pnl_ordonne if isinstance(x, (int, float)) and not isinstance(x, bool)]
+    if len(xs) < 2:
+        return UNMEASURABLE
+    eq = pic = dd = 0.0
+    for v in xs:
+        eq += v
+        pic = max(pic, eq)
+        dd = max(dd, pic - eq)
+    return round(dd, 4)
+
+
 def cout_total(row: Mapping[str, Any]) -> tuple[float | str, bool]:
     """Somme des composantes de coût MESURABLES. Retourne (total_ou_UNMEASURABLE, incomplet?)."""
     vals = [(_num(row.get(c))) for c in COMPOSANTES_COUT]
@@ -184,4 +217,4 @@ def emit_table(rows: Sequence[Mapping[str, Any]]) -> str:
 
 
 __all__ = ["SCHEMA_VERSION", "UNMEASURABLE", "DIMENSIONS", "COMPOSANTES_COUT", "CHAMPS",
-           "cout_total", "ligne_canonique", "TrialRegistry", "emit_table"]
+           "cout_total", "metriques_distribution", "drawdown", "ligne_canonique", "TrialRegistry", "emit_table"]

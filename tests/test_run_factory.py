@@ -36,6 +36,41 @@ def test_run_all_execute_reellement_la_population(tmp_path):
     assert pop["verdict"] in ("KILL", "CANDIDAT") and "IDEA | CONFIG FROZEN" in out["table"]
 
 
+def test_fix34_population_trial_porte_pf_es_reels(tmp_path):
+    # population avec gagnants ET perdants indépendants -> le trial doit porter pf/es NUMÉRIQUES (pas UNMEASURABLE).
+    recs = []
+    plans = [("0xWIN1", 100.5, 0), ("0xWIN2", 100.5, 3000), ("0xLOSE1", 99.5, 6000), ("0xLOSE2", 99.5, 9000)]
+    for adr, fwd, off in plans:
+        for d in range(4):
+            for ci, coin in enumerate(("BTC", "ETH", "SOL")):
+                recs.append({"adresse": adr, "coin": coin, "side": "LONG",
+                             "ts_ms": d * 86_400_000 + off + ci * 300, "mid_at_fill": 100.0, "mid_forward": fwd})
+    (tmp_path / "leader_fills_forward.jsonl").write_text(
+        "\n".join(json.dumps(x) for x in recs), encoding="utf-8")
+    out = RF.run_all(data_dir=str(tmp_path), registry_path=str(tmp_path / "r.jsonl"))
+    pop = [r for r in out["rows"] if r["_famille"] == "copy_population"][0]
+    assert isinstance(pop["pf"], float) and isinstance(pop["es"], float)    # FIX-34 : pf/es mesurés
+    assert isinstance(pop["net_bps"], float) and isinstance(pop["n_independent"], int) and pop["n_independent"] >= 2
+    # invariant : un CANDIDAT ne peut JAMAIS afficher un net négatif (verdict et net cohérents)
+    if pop["verdict"] == "CANDIDAT":
+        assert pop["net_bps"] > 0
+
+
+def test_fix34_population_gagnante_est_candidat_net_positif(tmp_path):
+    # population 100% gagnante -> net positif -> CANDIDAT cohérent (verdict aligné sur le net)
+    recs = []
+    for adr, off in [("0xA", 0), ("0xB", 3000), ("0xC", 6000)]:
+        for d in range(4):
+            for ci, coin in enumerate(("BTC", "ETH", "SOL")):
+                recs.append({"adresse": adr, "coin": coin, "side": "LONG",
+                             "ts_ms": d * 86_400_000 + off + ci * 300, "mid_at_fill": 100.0, "mid_forward": 101.0})
+    (tmp_path / "leader_fills_forward.jsonl").write_text(
+        "\n".join(json.dumps(x) for x in recs), encoding="utf-8")
+    out = RF.run_all(data_dir=str(tmp_path), registry_path=str(tmp_path / "r.jsonl"))
+    pop = [r for r in out["rows"] if r["_famille"] == "copy_population"][0]
+    assert pop["net_bps"] > 0 and pop["verdict"] == "CANDIDAT"
+
+
 def test_p13_reset_defaut_est_append_only_avec_dedup(tmp_path):
     reg = str(tmp_path / "r.jsonl")
     out1 = RF.run_all(data_dir=str(tmp_path), registry_path=reg)

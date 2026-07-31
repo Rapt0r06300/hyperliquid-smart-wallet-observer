@@ -66,6 +66,32 @@ def test_fix03_dedup_et_code_sha(tmp_path):
     assert len(reg2.load()) == 2
 
 
+def test_fix34_metriques_distribution_pf_es():
+    # PF = gains/|pertes| ; ES = moyenne du pire decile.
+    r = F.metriques_distribution([10.0, 20.0, -5.0, -5.0], es_q=0.5)
+    assert r["pf"] == 3.0                                        # (10+20)/(5+5)
+    assert r["es"] == -5.0 and r["n"] == 4                       # pire 50% = [-5,-5]
+    # aucune perte -> downside non mesure -> PF UNMEASURABLE (jamais infini fabrique)
+    assert F.metriques_distribution([1.0, 2.0])["pf"] == F.UNMEASURABLE
+    # distribution vide -> tout UNMEASURABLE
+    vide = F.metriques_distribution([])
+    assert vide["pf"] == F.UNMEASURABLE and vide["es"] == F.UNMEASURABLE and vide["n"] == 0
+
+
+def test_fix34_drawdown_ordonne():
+    assert F.drawdown([10.0, -4.0, -3.0, 8.0]) == 7.0            # equity 10,6,3,11 -> pic 10 - creux 3
+    assert F.drawdown([5.0]) == F.UNMEASURABLE                   # <2 points -> pas de DD fabrique
+    assert F.drawdown([]) == F.UNMEASURABLE
+
+
+def test_fix34_ligne_porte_pf_es_dd_dans_le_schema():
+    # les champs risque font partie du schema canonique (mesurables ou UNMEASURABLE, jamais absents)
+    for champ in ("pf", "dd", "es", "n_raw", "n_independent", "capacity_usd", "oos", "forward"):
+        assert champ in F.CHAMPS
+    r = F.ligne_canonique("i", config_frozen="c", verdict="KILL", pf=1.5, es=-3.0, dd=4.0)
+    assert r["pf"] == 1.5 and r["es"] == -3.0 and r["dd"] == 4.0
+
+
 def test_emit_table_candidats_en_tete():
     rows = [
         F.ligne_canonique("mort", config_frozen="c", verdict="KILL", lcb_net_bps=-8.0),
