@@ -23,7 +23,7 @@ FACTORY_MODULES = [
     "liquidation_flow", "cascade_warning", "clock_regimes", "wallet_fingerprint", "abnormal_regime",
     "hf_recorder", "multi_venue", "queue_model", "trigger_map", "hidden_vs_twap", "lineage",
     "forward_frozen", "purged_cv", "sizing", "portfolio", "feature_cache", "replay_consistency",
-    "factory_families", "parallel_factory", "runtime_loop", "acceptance",
+    "factory_families", "parallel_factory", "runtime_loop", "acceptance", "deflated_sharpe",
 ]
 
 
