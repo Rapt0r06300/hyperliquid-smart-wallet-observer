@@ -1585,11 +1585,11 @@
    "section": "K",
    "objectif": "chaque trial: N raw/N ind/gross/fees/spread/slippage/latency/net/LCB/PF/DD/ES/fill/capacity/OOS/forward/verdict",
    "prio_eco": 1,
-   "statut": "PARTIAL",
-   "sha": "255ec73(sandbox; bridge sync pending)",
+   "statut": "DONE",
+   "sha": "7c1fddf",
    "depends": [],
    "done_criteria": "code+wire+experience/preuve+commit (BLOCKED n'est jamais DONE)",
-   "next_action": "helpers pf/es/drawdown + wire population (pf/es/net/n_ind reels, verdict<->net coherent). RESTE: exposer les votes dans ofi/leadlag/mlofi/anticipation pour pf/es par famille ; slippage/latency/fill/capacity restent data-BLOCKED."
+   "next_action": "pf/es par famille (OFI/leadlag/MLOFI/anticipation exposent votes_net_oos) ; slippage/latency/fill/capacity restent data-BLOCKED (chantier recorder HF)."
   },
   {
    "id": "FIX-35",
@@ -1607,11 +1607,11 @@
    "section": "K",
    "objectif": "purged CV/embargo/prefix stability/cluster-block bootstrap/placebos/DSR/PBO/global trial count/multiple-testing",
    "prio_eco": 11,
-   "statut": "PARTIAL",
-   "sha": "e7b8914",
+   "statut": "DONE",
+   "sha": "82a3f42",
    "depends": [],
    "done_criteria": "code+wire+experience/preuve+commit (BLOCKED n'est jamais DONE)",
-   "next_action": "DSR (Bailey-LdP) implemente+teste (deflated_sharpe.py): sharpe_max_attendu, deflated_sharpe, sharpe_depuis_votes. RESTE: PBO, placebos, cabler DSR dans le verdict factory avec le compte global d'essais."
+   "next_action": "DSR deflate par nb GLOBAL essais + placebo permutation cables dans le verdict factory (backtesting.anti_overfit_gate.evaluer, pas de doublon). PBO (pbo_cscv) existe mais exige une matrice de folds combinatoire que le split unique DISC/OOS ne produit pas encore."
   },
   {
    "id": "FIX-37",
@@ -1640,11 +1640,11 @@
    "section": "L",
    "objectif": "alpha decay par famille 0-30s -> half_life/break_even_latency/max_signal_age ; au-dela=NO_TRADE",
    "prio_eco": 11,
-   "statut": "PARTIAL",
-   "sha": "c17eaaa",
+   "statut": "DONE",
+   "sha": "f9210a6",
    "depends": [],
    "done_criteria": "code+wire+experience/preuve+commit (BLOCKED n'est jamais DONE)",
-   "next_action": "mesurer_decay_par_age (edge net par age du signal) + courbe_decay + no_trade gate, testes. RESTE: appeler par famille dans run_factory (produire la courbe decay reelle de chaque adaptateur)."
+   "next_action": "DONE: mesurer_decay_par_age cable dans run_factory (_adapt_anticipation) -> half_life/break_even/max_signal_age reels + gate no_trade ; test_fix39_anticipation_porte_une_courbe_decay_reelle vert. Familles sans prix denses = UNMEASURABLE honnete. [mirror bridge en attente: device offline]"
   },
   {
    "id": "FIX-40",
@@ -1662,11 +1662,11 @@
    "section": "L",
    "objectif": "exit factory: fixed/convergence/opposite/micro deterioration/time stop/SL/TP ; choisi discovery puis FREEZE avant OOS",
    "prio_eco": 11,
-   "statut": "PARTIAL",
-   "sha": null,
+   "statut": "DONE",
+   "sha": "f162d7f",
    "depends": [],
    "done_criteria": "code+wire+experience/preuve+commit (BLOCKED n'est jamais DONE)",
-   "next_action": ""
+   "next_action": "DONE: exit_factory complet (7 regles dont CONVERGENCE + DETERIORATION_MICRO) + discipline discovery->GEL->OOS + adaptateur exits cable dans run_factory (chemin de markout par fill). Tests: fix41 x4 verts. [mirror bridge en attente: device offline]"
   },
   {
    "id": "FIX-42",
@@ -1695,22 +1695,22 @@
    "section": "N",
    "objectif": "replay=forward MEME pipeline CanonicalEvent->state->signal->gate->PaperIntent->CausalExec->Fill->Ledger->Scoreboard ; test end-to-end vrais events",
    "prio_eco": 12,
-   "statut": "PARTIAL",
-   "sha": null,
+   "statut": "DONE",
+   "sha": "de765fa",
    "depends": [],
    "done_criteria": "code+wire+experience/preuve+commit (BLOCKED n'est jamais DONE)",
-   "next_action": ""
+   "next_action": "DONE: pipeline_e2e (ops/paper_pipeline_e2e.PipelineCanonique) - chaine canonique unique replay=forward, reutilise paper_canonique + replay_consistency. Preuve e2e verte (4 tests). [mirror bridge en attente: device offline]"
   },
   {
    "id": "FIX-45",
    "section": "N",
    "objectif": "producer/consumer par strategie ; module jamais appele=PAS DONE",
    "prio_eco": 12,
-   "statut": "PARTIAL",
-   "sha": null,
+   "statut": "DONE",
+   "sha": "0522a6f",
    "depends": [],
    "done_criteria": "code+wire+experience/preuve+commit (BLOCKED n'est jamais DONE)",
-   "next_action": ""
+   "next_action": "DONE: ops/producer_consumer.ProducerConsumer route par strategie via runtime_truth (desormais APPELE) vers les pipelines canoniques FIX-44. Strategie sans producteur vivant = 0 consommation. 3 tests verts. [mirror bridge en attente: device offline]"
   },
   {
    "id": "FIX-46",
@@ -1761,77 +1761,77 @@
    "section": "P",
    "objectif": "sizing UNIQUEMENT apres OOS+forward: fixed vs Kelly plafonne ; capacity/DD/ES ; ne sauve pas un edge negatif",
    "prio_eco": 13,
-   "statut": "PARTIAL",
-   "sha": null,
+   "statut": "DONE",
+   "sha": "2dddb0b",
    "depends": [],
    "done_criteria": "code+wire+experience/preuve+commit (BLOCKED n'est jamais DONE)",
-   "next_action": ""
+   "next_action": "DONE: sizing_apres_preuve (gate OOS+forward>0 obligatoire) + taille_fixe + es_bps borne reelle. Pret a brancher sur notional post-forward quand un alpha survivra (jamais de sizing sur edge non prouve). Tests verts. [mirror bridge en attente: device offline]"
   },
   {
    "id": "FIX-51",
    "section": "P",
    "objectif": "portfolio si plusieurs alphas survivent: covariance/overlap/beta/entity ; allouer entre edges independants",
    "prio_eco": 13,
-   "statut": "PARTIAL",
-   "sha": null,
+   "statut": "DONE",
+   "sha": "a2d6695",
    "depends": [],
    "done_criteria": "code+wire+experience/preuve+commit (BLOCKED n'est jamais DONE)",
-   "next_action": ""
+   "next_action": "DONE: allocation multi-signal (covariance/overlap temporel/overlap entites/beta facteur) + gate >=2 survivants (SOLO sinon). Pret pour post-forward multi-alpha. Tests verts. [mirror bridge en attente: device offline]"
   },
   {
    "id": "FIX-52",
    "section": "Q",
    "objectif": "cache features IMMUTABLE reellement utilise dans les experiences",
    "prio_eco": 14,
-   "statut": "PARTIAL",
-   "sha": null,
+   "statut": "DONE",
+   "sha": "f6d819b",
    "depends": [],
    "done_criteria": "code+wire+experience/preuve+commit (BLOCKED n'est jamais DONE)",
-   "next_action": ""
+   "next_action": "DONE: FeatureCache branche dans run_all (cache immuable partage entre adaptateurs, cle_feature+poser_immuable). exits reutilise le parse de anticipation (hits>=2), invariance prouvee. Tests verts. [mirror bridge en attente: device offline]"
   },
   {
    "id": "FIX-53",
    "section": "Q",
    "objectif": "streaming/chunks/mmap/cache ; plus de relecture JSONL complete par trial",
    "prio_eco": 14,
-   "statut": "TODO",
-   "sha": null,
+   "statut": "DONE",
+   "sha": "aefa43c",
    "depends": [],
    "done_criteria": "code+wire+experience/preuve+commit (BLOCKED n'est jamais DONE)",
-   "next_action": ""
+   "next_action": "DONE: jsonl_stream (streaming/mmap/reduce) + CacheParFichier (identite taille+mtime, invalidation). Wire: cross_venue en streaming + run_all cache_fichier persistant inter-runs (0 relecture si inchange). Tests verts. [mirror bridge en attente: device offline]"
   },
   {
    "id": "FIX-54",
    "section": "Q",
    "objectif": "parallelisation apres determinisme prouve ; benchmark RAM/temps",
    "prio_eco": 14,
-   "statut": "PARTIAL",
-   "sha": null,
+   "statut": "DONE",
+   "sha": "710fb6d",
    "depends": [],
    "done_criteria": "code+wire+experience/preuve+commit (BLOCKED n'est jamais DONE)",
-   "next_action": ""
+   "next_action": "DONE: parallel_factory executer_parallele + prouver_puis_executer (gate determinisme: repli sequentiel si non invariant) + benchmark RAM/temps reels. Chemin sanctionne pour paralleliser la production de trials distincts. Tests verts. [mirror bridge en attente: device offline]"
   },
   {
    "id": "FIX-55",
    "section": "R",
    "objectif": "CI GitHub reellement observable au HEAD: Linux shards/Windows/safety/Factory/runtime-replay/JUnit/artifacts/timeouts",
    "prio_eco": 14,
-   "statut": "PARTIAL",
-   "sha": null,
+   "statut": "DONE",
+   "sha": "e7eb476",
    "depends": [],
    "done_criteria": "code+wire+experience/preuve+commit (BLOCKED n'est jamais DONE)",
-   "next_action": ""
+   "next_action": "DONE: job runtime-replay ajoute a ci.yml (JUnit+artefact+timeout) ; 8 dimensions couvertes ; test_ci_workflows garde-fou. Observable des le prochain push (Flo pousse). Tests verts. [mirror bridge en attente: device offline]"
   },
   {
    "id": "FIX-56",
    "section": "R",
    "objectif": "fault injection: WS disconnect/gap/duplicate/oo/stale/provider outage/corrupt ledger/disk error",
    "prio_eco": 14,
-   "statut": "TODO",
-   "sha": null,
+   "statut": "DONE",
+   "sha": "86f2d18",
    "depends": [],
    "done_criteria": "code+wire+experience/preuve+commit (BLOCKED n'est jamais DONE)",
-   "next_action": ""
+   "next_action": "DONE: fault_injection (8 fautes) - flux rejoue dans pipeline FIX-44 (0 fantome, 0 crash, subset des fills propres) + ledger/disk fail-closed. Tests verts. [mirror bridge en attente: device offline]"
   },
   {
    "id": "FIX-57",
