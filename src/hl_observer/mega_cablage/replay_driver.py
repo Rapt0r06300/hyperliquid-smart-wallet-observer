@@ -13,7 +13,8 @@ from __future__ import annotations
 from typing import Any
 
 from hl_observer.mega_cablage.pipeline import MegaCablage
-from hl_observer.mega_cablage.runner import _EquityMap, charger_evenements_logs
+from hl_observer.mega_cablage.runner import _EquityMap, charger_bundles_logs
+from hl_observer.mega_cablage.feed_adapter import evenements_depuis_bundles
 
 UNMEASURABLE = "UNMEASURABLE"
 
@@ -79,9 +80,9 @@ def rejouer_is_oos_forward(evenements: list[dict[str, Any]], *, fractions: tuple
 
 
 def driver_depuis_logs(chemin: Any, *, source: str = "REEL_LOGS", **kwargs: Any) -> dict[str, Any]:
-    """Charge un flux d'événements depuis des logs jsonl (le run massif RÉEL) puis rejoue IS/OOS/FORWARD. Logs
-    absents/vides → segments vides, réconciliation triviale + note honnête (aucun résultat fabriqué)."""
-    evenements = charger_evenements_logs(chemin)
+    """Run massif RÉEL : charge les logs jsonl → bundles → feed_adapter (MÊME chemin que le runner) → IS/OOS/
+    FORWARD. Logs absents/vides → segments vides + note honnête (aucun résultat fabriqué)."""
+    evenements = evenements_depuis_bundles(charger_bundles_logs(chemin))
     resultat = rejouer_is_oos_forward(evenements, source=source, **kwargs)
     if not evenements:
         resultat["verdict"]["note"] = "AUCUN_EVENEMENT_DANS_LOGS"

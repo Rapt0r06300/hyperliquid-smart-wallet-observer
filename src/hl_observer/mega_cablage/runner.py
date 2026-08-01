@@ -2,10 +2,11 @@
 Elle suit l'idiome existant de refactor_fusion/runner.py (`run_*` pur → dataclass résultat + `format_*`) et se
 lance comme `python -m hl_observer.mega_cablage` (même convention que runtime.persistent_poll_runner).
 
-Deux modes :
-  - run_mega_cablage(...)  : one-shot sur un flux d'événements en mémoire OU chargé depuis des logs jsonl ;
-  - boucle_continue(...)   : runner continu qui tire des batches d'événements d'une source injectée (callable),
-    thread chaque batch dans le pipeline, jusqu'à épuisement / max_iterations.
+CHEMIN UNIQUE consolidé : messages bruts (bundles) → feed_adapter.evenements_depuis_bundles → MegaCablage
+.traiter_replay. run_mega_cablage, boucle_continue et --from-logs empruntent TOUS exactement ce chemin ; les
+messages bruts userFills/L2/BBO/trades passent donc automatiquement par le feed_adapter. Un flux d'événements
+déjà normalisés est accepté comme passe-plat ({evenements:[...]}) sans court-circuiter le chemin.
+
 PAPER STRICT : dry_run only — toute tentative hors dry-run est REFUSÉE (aucune exécution réelle). 0 réseau.
 """
 from __future__ import annotations
@@ -16,12 +17,15 @@ from pathlib import Path
 from typing import Any, Callable
 
 from hl_observer.mega_cablage.pipeline import MegaCablage
+from hl_observer.mega_cablage.feed_adapter import evenements_depuis_bundles
 
 
 @dataclass(frozen=True)
 class MegaCablageRunResult:
     ticks: int
     events_traites: int
+    fills_executes: int
+    cross_venue_executes: int
     equity: float
     realized: float
     unrealized: float
@@ -65,13 +69,39 @@ def _signe(row: dict[str, Any]) -> int:
     return 0
 
 
-def charger_evenements_logs(chemin: str | Path) -> list[dict[str, Any]]:
-    """Charge un flux d'événements depuis un jsonl (ou un dossier de jsonl). Mapping tolérant des noms de champs
-    (px/price/mid, sz/size/qty, side/leader_side→signe, time/timestamp_ms→ts_ms, user/wallet_address→vault,
-    book, mid). Une ligne sans prix produira un événement rejeté honnêtement en aval (pas de fill fabriqué)."""
+def _row_to_event(row: dict[str, Any]) -> dict[str, Any]:
+    px = row.get("px", row.get("price", row.get("mid")))
+    return {"coin": str(row.get("coin", "")).upper(), "px": _f(px),
+            "sz": _f(row.get("sz", row.get("size", row.get("qty")))), "signe": _signe(row),
+            "ts_ms": row.get("ts_ms", row.get("time", row.get("timestamp_ms", row.get("original_timestamp_ms")))),
+            "vault": row.get("vault", row.get("user", row.get("wallet_address", row.get("adresse", "")))),
+            "book": row.get("book"), "mid": _f(row.get("mid", px))}
+
+
+def _row_to_bundle(row: dict[str, Any]) -> dict[str, Any]:
+    """Ligne de log → bundle. Un frame WS BRUT ({channel:...}) est routé par canal (→ passe par le feed_adapter) ;
+    sinon la ligne est une observation déjà normalisée → passe-plat {evenements:[event]}."""
+    canal = row.get("channel")
+    if canal == "userFills":
+        return {"userfills_msg": row}
+    if canal == "l2Book":
+        data = row.get("data", row)
+        return {"l2_par_coin": {str(data.get("coin", "")).upper(): data}}
+    if canal == "bbo":
+        data = row.get("data", row)
+        return {"bbo_par_coin": {str(data.get("coin", "")).upper(): data}}
+    if canal == "trades":
+        return {"trades_msg": row}
+    return {"evenements": [_row_to_event(row)]}
+
+
+def charger_bundles_logs(chemin: str | Path) -> list[dict[str, Any]]:
+    """Charge des bundles depuis un jsonl (ou un dossier de jsonl). Frames bruts → bundles par canal (passent par
+    le feed_adapter) ; lignes normalisées → passe-plat. Une ligne sans prix produit un événement rejeté
+    honnêtement en aval (pas de fill fabriqué)."""
     p = Path(chemin)
     fichiers = sorted(p.glob("*.jsonl")) if p.is_dir() else ([p] if p.is_file() else [])
-    evenements: list[dict[str, Any]] = []
+    bundles: list[dict[str, Any]] = []
     for fichier in fichiers:
         try:
             lignes = fichier.read_text(encoding="utf-8").splitlines()
@@ -85,62 +115,65 @@ def charger_evenements_logs(chemin: str | Path) -> list[dict[str, Any]]:
                 row = json.loads(ligne)
             except json.JSONDecodeError:
                 continue
-            if not isinstance(row, dict):
-                continue
-            px = row.get("px", row.get("price", row.get("mid")))
-            evenements.append({
-                "coin": str(row.get("coin", "")).upper(),
-                "px": _f(px), "sz": _f(row.get("sz", row.get("size", row.get("qty")))),
-                "signe": _signe(row),
-                "ts_ms": row.get("ts_ms", row.get("time", row.get("timestamp_ms",
-                          row.get("original_timestamp_ms")))),
-                "vault": row.get("vault", row.get("user", row.get("wallet_address", row.get("adresse", "")))),
-                "book": row.get("book"), "mid": _f(row.get("mid", px))})
-    return evenements
+            if isinstance(row, dict):
+                bundles.append(_row_to_bundle(row))
+    return bundles
+
+
+def _flux_evenements(*, bundles: list[dict[str, Any]] | None, evenements: list[dict[str, Any]] | None,
+                     from_logs: str | Path | None) -> tuple[list[dict[str, Any]], list[str]]:
+    """Assemble TOUS les bundles (bundles fournis + évènements passe-plat + logs) puis passe par le feed_adapter :
+    chemin unique et identique quel que soit le point d'entrée."""
+    tous: list[dict[str, Any]] = list(bundles or [])
+    if evenements:
+        tous.append({"evenements": list(evenements)})
+    notes: list[str] = []
+    if from_logs is not None:
+        charges = charger_bundles_logs(from_logs)
+        tous.extend(charges)
+        if not charges:
+            notes.append("AUCUN_EVENEMENT_DANS_LOGS")
+    return evenements_depuis_bundles(tous), notes
 
 
 def _resultat(pipe: MegaCablage, n_events: int, dry_run: bool,
               notes: tuple[str, ...] = ()) -> MegaCablageRunResult:
     r = pipe.resume()
     pnl = r["pnl"]
-    return MegaCablageRunResult(ticks=r["ticks"], events_traites=n_events, equity=pnl["equity"],
-                                realized=pnl["realized"], unrealized=pnl["unrealized"], fees=pnl["fees"],
-                                reconcilie=bool(pnl["reconcilie"]), dry_run=dry_run, notes=notes)
+    return MegaCablageRunResult(ticks=r["ticks"], events_traites=n_events,
+                                fills_executes=r["fills_executes"], cross_venue_executes=r["cross_venue_executes"],
+                                equity=pnl["equity"], realized=pnl["realized"], unrealized=pnl["unrealized"],
+                                fees=pnl["fees"], reconcilie=bool(pnl["reconcilie"]), dry_run=dry_run, notes=notes)
 
 
-def run_mega_cablage(*, evenements: list[dict[str, Any]] | None = None, from_logs: str | Path | None = None,
+def run_mega_cablage(*, bundles: list[dict[str, Any]] | None = None,
+                     evenements: list[dict[str, Any]] | None = None, from_logs: str | Path | None = None,
                      notre_equity: float = 1000.0, notional_max: float = 500.0, fee_bps: float = 4.5,
                      leader_equity_par_vault: dict[str, Any] | None = None,
                      leader_equity_defaut: float | None = None, verifier_unite: bool = True,
-                     dry_run: bool = True) -> MegaCablageRunResult:
-    """One-shot. Refuse hors dry-run (paper only). Charge depuis logs si from_logs fourni."""
+                     cross_venue_paper: bool = True, dry_run: bool = True) -> MegaCablageRunResult:
+    """One-shot sur le chemin unique (feed_adapter → traiter_replay). Refuse hors dry-run (paper only)."""
     if not dry_run:
         raise ValueError("mega-cablage is paper/dry-run only — real execution is forbidden")
-    flux = list(evenements or [])
-    notes: list[str] = []
-    if from_logs is not None:
-        charges = charger_evenements_logs(from_logs)
-        flux.extend(charges)
-        if not charges:
-            notes.append("AUCUN_EVENEMENT_DANS_LOGS")
+    flux, notes = _flux_evenements(bundles=bundles, evenements=evenements, from_logs=from_logs)
     pipe = MegaCablage(notre_equity=notre_equity, notional_max=notional_max, fee_bps=fee_bps,
-                       verifier_unite=verifier_unite)
+                       verifier_unite=verifier_unite, cross_venue_paper=cross_venue_paper)
     if not flux:
         return _resultat(pipe, 0, dry_run, tuple(notes) or ("AUCUN_EVENEMENT",))
-    equity_map = _EquityMap(leader_equity_par_vault, leader_equity_defaut)
-    pipe.traiter_replay(flux, leader_equity_par_vault=equity_map)
+    pipe.traiter_replay(flux, leader_equity_par_vault=_EquityMap(leader_equity_par_vault, leader_equity_defaut))
     return _resultat(pipe, len(flux), dry_run, tuple(notes))
 
 
 def boucle_continue(*, source: Callable[[], Any], notre_equity: float = 1000.0, notional_max: float = 500.0,
                     fee_bps: float = 4.5, leader_equity_par_vault: dict[str, Any] | None = None,
                     leader_equity_defaut: float | None = None, max_iterations: int | None = None,
-                    dry_run: bool = True) -> MegaCablageRunResult:
-    """Runner continu. `source()` rend un batch d'événements (list) ou None/[] pour signaler l'arrêt. Chaque
-    batch est threadé par tick. S'arrête sur source vide/None ou max_iterations. Paper strict (dry-run only)."""
+                    cross_venue_paper: bool = True, dry_run: bool = True) -> MegaCablageRunResult:
+    """Runner continu. `source()` rend un batch (liste de bundles OU d'événements) ou None/[] pour l'arrêt. Chaque
+    batch emprunte le MÊME chemin (feed_adapter → traiter_replay). Paper strict (dry-run only)."""
     if not dry_run:
         raise ValueError("mega-cablage is paper/dry-run only — real execution is forbidden")
-    pipe = MegaCablage(notre_equity=notre_equity, notional_max=notional_max, fee_bps=fee_bps)
+    pipe = MegaCablage(notre_equity=notre_equity, notional_max=notional_max, fee_bps=fee_bps,
+                       cross_venue_paper=cross_venue_paper)
     equity_map = _EquityMap(leader_equity_par_vault, leader_equity_defaut)
     n_events = 0
     i = 0
@@ -148,8 +181,14 @@ def boucle_continue(*, source: Callable[[], Any], notre_equity: float = 1000.0, 
         batch = source()
         if not batch:
             break
-        n_events += len(batch)
-        pipe.traiter_replay(list(batch), leader_equity_par_vault=equity_map)
+        bundles = list(batch) if (batch and isinstance(batch[0], dict) and
+                                  any(k in batch[0] for k in ("userfills_msg", "l2_par_coin", "bbo_par_coin",
+                                                              "trades_msg", "allmids", "evenements"))) \
+            else [{"evenements": list(batch)}]
+        flux = evenements_depuis_bundles(bundles)
+        n_events += len(flux)
+        if flux:
+            pipe.traiter_replay(flux, leader_equity_par_vault=equity_map)
         i += 1
     return _resultat(pipe, n_events, dry_run)
 
@@ -157,7 +196,8 @@ def boucle_continue(*, source: Callable[[], Any], notre_equity: float = 1000.0, 
 def format_mega_cablage_run(r: MegaCablageRunResult) -> str:
     lignes = [
         "=== mega-cablage (paper, dry-run=%s) ===" % r.dry_run,
-        "ticks=%d  events=%d" % (r.ticks, r.events_traites),
+        "ticks=%d  events=%d  fills=%d  cross_venue=%d" % (r.ticks, r.events_traites, r.fills_executes,
+                                                           r.cross_venue_executes),
         "equity=%.4f  realized=%.4f  unrealized=%.4f  fees=%.4f" % (r.equity, r.realized, r.unrealized, r.fees),
         "PnL reconcilie=%s" % r.reconcilie,
     ]
@@ -167,4 +207,4 @@ def format_mega_cablage_run(r: MegaCablageRunResult) -> str:
 
 
 __all__ = ["MegaCablageRunResult", "run_mega_cablage", "boucle_continue",
-           "charger_evenements_logs", "format_mega_cablage_run"]
+           "charger_bundles_logs", "format_mega_cablage_run", "_EquityMap"]
