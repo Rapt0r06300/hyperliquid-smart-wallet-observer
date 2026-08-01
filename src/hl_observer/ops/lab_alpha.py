@@ -71,6 +71,9 @@ def lancer_lab(*, racine: str | Path, sortie_dir: str | Path | None = None, budg
     n_grille = 1
     for v in espace.values():
         n_grille *= len(v)
+    # Item 11 : plus de plafond arbitraire de configs (l'ancien 48/32). budget <= 0 => MAXIMAL = grille
+    # entiere (ici 24) : le double-clic explore tout l'espace par defaut, sans cap code en dur.
+    budget = n_grille if int(budget) <= 0 else int(budget)
     total_etapes = 4 + min(n_grille, budget)
     eta = MoteurETA(total_etapes=total_etapes, min_echantillons=3)
     etat: dict[str, Any] = {"titre": source, "total_etapes": total_etapes, "source": source,

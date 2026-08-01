@@ -212,14 +212,19 @@ def test_root_launchers_keep_runtime_and_analysis_separate():
         encoding="utf-8",
         errors="ignore",
     )
-    assert "superviseur_collecteurs demarrer-tous core" in main_launcher
-    assert 'call "%~dp0ANALYSER_BACKTESTS_REPLAYS.cmd"' in main_launcher
+    # Le runtime demarre le profil HARVEST (socle CORE allMids+BBO+userFills OBLIGATOIRE) et ne fait
+    # aucune recherche dans le hot path (l'analyse reste hors runtime).
+    assert "superviseur_collecteurs demarrer-tous harvest" in main_launcher
     assert "chercher_toutes" not in main_launcher
-    assert "run_backtest_replay_suite.py" in analysis_launcher
+    # L'analyse est un lanceur SEPARE, atteignable depuis le runtime (sous-commande replay).
+    assert 'call "%~dp0ANALYSER_BACKTESTS_REPLAYS.cmd"' in main_launcher
+    # ANALYSER : MEME Python que le runtime (portable_env), porte d'entree de SESSION puis laboratoire,
+    # paper strict (aucune execution reelle possible).
+    assert "portable_env.cmd" in analysis_launcher
+    assert "hl_observer.ops.analyser_session" in analysis_launcher
+    assert "hl_observer.ops.lab_alpha" in analysis_launcher
     assert "HL_ENABLE_MAINNET_EXECUTION=0" in analysis_launcher
     assert "HL_ENABLE_TESTNET_EXECUTION=0" in analysis_launcher
-    assert 'if "%~1"=="" set "SUITE_ARGS=--full"' in analysis_launcher
-    assert 'if /i "%~1"=="quick"' in analysis_launcher
-    assert 'if /i "%~1"=="deep"' in analysis_launcher
-    assert 'if /i "%~1"=="maximum"' in analysis_launcher
-    assert "Aucun reglage n'est active automatiquement" in analysis_launcher
+    # item 10 : la porte de session (selection + verification COMPLETE) passe AVANT le laboratoire —
+    # on n'analyse que des donnees COMPLETE verifiees, jamais une session ACTIVE/QUARANTINED.
+    assert analysis_launcher.index("analyser_session") < analysis_launcher.index("lab_alpha")

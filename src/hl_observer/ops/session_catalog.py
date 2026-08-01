@@ -271,6 +271,35 @@ class SessionFigeeError(RuntimeError):
     """Tentative d'écrire dans une session qui n'est plus ACTIVE."""
 
 
+def verifier_catalogue(dossier: str | Path, sources: Mapping[str, Mapping[str, Any]], *,
+                       extensions: Iterable[str] = EXTENSIONS_DONNEES) -> dict:
+    """Vérification READ-ONLY du catalogue vs disque (réutilisée par la clôture ET par ANALYSER, item 10) :
+    chaque artefact catalogué est présent + son checksum RECALCULÉ correspond, et il n'y a AUCUN orphelin.
+    Rend {divergences, orphelins, checksums_ok, zero_orphelin, n_artefacts_verifies, tout_ok}."""
+    dossier = Path(dossier)
+    divergences: list[dict] = []
+    catalogues_rel: set[str] = set()
+    for cle, d in (sources or {}).items():
+        rel = (d or {}).get("chemin") or ""
+        if not rel:
+            continue                      # source déclarée sans artefact (absente/non implémentée)
+        catalogues_rel.add(os.path.normpath(rel))
+        checksum_now, taille_now = sha256_fichier(dossier / rel)
+        if taille_now < 0:
+            divergences.append({"cle": cle, "chemin": rel, "probleme": "MANQUANT"})
+            continue
+        attendu = (d or {}).get("checksum_sha256") or ""
+        if attendu and checksum_now != attendu:
+            divergences.append({"cle": cle, "chemin": rel, "probleme": "CHECKSUM",
+                                "attendu": attendu, "obtenu": checksum_now})
+    orphelins = _detecter_orphelins(dossier, catalogues_rel, tuple(extensions))
+    checksums_ok = not divergences
+    zero_orphelin = not orphelins
+    return {"divergences": divergences, "orphelins": orphelins, "checksums_ok": checksums_ok,
+            "zero_orphelin": zero_orphelin, "n_artefacts_verifies": len(catalogues_rel),
+            "tout_ok": checksums_ok and zero_orphelin}
+
+
 def _detecter_orphelins(dossier: Path, catalogues_rel: set[str], extensions: tuple[str, ...]) -> list[str]:
     """Fichiers de DONNÉES présents dans la session mais ABSENTS du catalogue (item 8 : zéro orphelin)."""
     if not dossier.is_dir():
@@ -322,4 +351,4 @@ def derniere_session_complete(root: str | Path) -> dict | None:
 __all__ = ["SCHEMA_CATALOGUE", "NOM_CATALOGUE", "STATUT_ACTIVE", "STATUT_COMPLETE",
            "STATUT_QUARANTINED", "STATUTS", "EntreeSource", "CatalogueSession", "SessionFigeeError",
            "sha256_fichier", "nouveau_run_id", "chemin_session", "chemin_catalogue",
-           "scanner_sessions", "derniere_session_complete"]
+           "scanner_sessions", "derniere_session_complete", "verifier_catalogue"]
