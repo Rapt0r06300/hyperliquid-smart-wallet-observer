@@ -35,18 +35,31 @@ class MoteurETA:
         self.octets_traites += int(octets)
         self.evenements_traites += int(evenements)
 
+    def _debits(self, elapsed_s: float) -> dict[str, Any]:
+        """Débit RÉEL observé (item 15) : événements/s et octets/s depuis le début. elapsed<=0 → None."""
+        el = float(elapsed_s)
+        if el <= 0:
+            return {"debit_evenements_s": None, "debit_octets_s": None}
+        return {"debit_evenements_s": round(self.evenements_traites / el, 3),
+                "debit_octets_s": round(self.octets_traites / el, 1)}
+
     def progres(self) -> dict[str, Any]:
         pct = round(100.0 * self.etapes_finies / self.total_etapes, 2)
         return {"etapes_finies": self.etapes_finies, "total_etapes": self.total_etapes,
                 "octets_traites": self.octets_traites, "total_octets": self.total_octets,
-                "evenements_traites": self.evenements_traites, "pct": pct}
+                "evenements_traites": self.evenements_traites, "pct": pct,
+                # durée PROPRE de chaque étape (item 15) : dernière + moyenne, pas un cumul trompeur.
+                "derniere_duree_s": round(self._durees[-1], 3) if self._durees else None,
+                "duree_moyenne_s": round(sum(self._durees) / len(self._durees), 3) if self._durees else None}
 
     def estimer(self, *, elapsed_s: float) -> dict[str, Any]:
-        """Retourne l'estimation courante. Calibration tant que < min_echantillons étapes terminées."""
-        base = self.progres()
+        """Retourne l'estimation courante. Calibration tant que < min_echantillons étapes terminées.
+        Expose le débit réel, la durée propre de la dernière étape, l'heure de fin (offset) et
+        l'intervalle d'incertitude [eta_bas, eta_haut]."""
+        base = {**self.progres(), **self._debits(elapsed_s)}
         if self.etapes_finies < self.min:
             return {**base, "calibration": True, "eta_total_s": None, "fin_relative_s": None,
-                    "confiance_s": None, "texte": "ETA EN CALIBRATION"}
+                    "confiance_s": None, "eta_bas_s": None, "eta_haut_s": None, "texte": "ETA EN CALIBRATION"}
         moy = sum(self._durees) / len(self._durees)
         reste = max(0, self.total_etapes - self.etapes_finies)
         eta = moy * reste
@@ -59,6 +72,8 @@ class MoteurETA:
         texte = "ETA %s — confiance +/- %d min" % (format_hms(eta), round(band / 60.0))
         return {**base, "calibration": False, "eta_total_s": round(eta, 3),
                 "fin_relative_s": round(float(elapsed_s) + eta, 3), "confiance_s": round(band, 3),
+                # intervalle d'incertitude explicite (item 15) : bornes basse/haute de l'ETA.
+                "eta_bas_s": round(max(0.0, eta - band), 3), "eta_haut_s": round(eta + band, 3),
                 "texte": texte}
 
 
