@@ -311,6 +311,29 @@ def attendre_readiness(lecteur_etat: Callable[[float], EtatRuntime], *, timeout_
     return dernier
 
 
+def _niveau_ok(etat: EtatRuntime, niveau: str) -> bool:
+    """Condition de passage de la barrière (item 1) : `core` exige READY_CORE ; `harvest` exige au moins
+    CORE vivant (COMPLET ou DEGRADE_DOCUMENTE), jamais DATA_NOT_READY."""
+    if niveau == "core":
+        return bool(etat.ready_core)
+    return etat.niveau_harvest != STATUT_DATA_NOT_READY
+
+
+def evaluer_avec_attente(lecteur: Callable[[], EtatRuntime], *, niveau: str, timeout_s: float,
+                         intervalle_s: float, horloge: Callable[[], float],
+                         dormir: Callable[[float], None]) -> EtatRuntime:
+    """Attente BORNÉE de la preuve de vie au niveau demandé (item 1 : warmup après démarrage des
+    collecteurs). Réévalue `lecteur()` toutes les `intervalle_s` jusqu'à ce que le niveau soit satisfait
+    OU que `timeout_s` soit écoulé. Rend le DERNIER état observé (avec sa raison précise). Injectable
+    (horloge/dormir) → testable sans temps réel."""
+    t0 = horloge()
+    etat = lecteur()
+    while not _niveau_ok(etat, niveau) and (horloge() - t0) < timeout_s:
+        dormir(intervalle_s)
+        etat = lecteur()
+    return etat
+
+
 def format_readiness(etat: EtatRuntime) -> str:
     lignes = ["=== PREUVE DE VIE — %s ===" % etat.statut,
               "  READY_CORE=%s   HARVEST=%s" % (etat.ready_core, etat.niveau_harvest),
@@ -393,21 +416,33 @@ def main(argv: list[str] | None = None) -> int:
     p = argparse.ArgumentParser(description="Preuve de vie bloquante des sources.")
     p.add_argument("racine", nargs="?", default=".")
     p.add_argument("--niveau", choices=("core", "harvest"), default="core")
+    p.add_argument("--attendre", type=float, default=0.0,
+                   help="fenetre de warmup BORNEE en secondes (0 = evaluation unique)")
+    p.add_argument("--intervalle", type=float, default=2.0, help="periode de re-evaluation (s)")
     args = p.parse_args(argv)
-    etat = evaluer_depuis_disque(Path(args.racine), now_ms=time.time() * 1000.0)
+
+    def _lecteur() -> EtatRuntime:
+        return evaluer_depuis_disque(Path(args.racine), now_ms=time.time() * 1000.0)
+
+    if args.attendre and args.attendre > 0:
+        etat = evaluer_avec_attente(_lecteur, niveau=args.niveau, timeout_s=args.attendre,
+                                    intervalle_s=max(0.1, args.intervalle),
+                                    horloge=time.monotonic, dormir=time.sleep)
+    else:
+        etat = _lecteur()
     print(format_readiness(etat), flush=True)
-    if args.niveau == "core":
-        return 0 if etat.ready_core else 2
-    # harvest : CORE vivant requis ; le détail COMPLET/DEGRADE_DOCUMENTE est informatif (va au catalogue).
-    return 0 if etat.niveau_harvest != STATUT_DATA_NOT_READY else 2
+    # exit 0 SEULEMENT si le niveau demandé est réellement atteint ; sinon 2 (DATA_NOT_READY) → le
+    # lanceur NE démarre pas le moteur/UI/poller (item 1).
+    return 0 if _niveau_ok(etat, args.niveau) else 2
 
 
 __all__ = ["STATUT_READY", "STATUT_DEGRADED", "STATUT_DATA_NOT_READY", "SEUIL_HEARTBEAT_MS",
            "NIVEAU_CORE", "NIVEAU_HARVEST", "HARVEST_COMPLET", "HARVEST_DEGRADE", "CAUSE_OK", "CAUSE_MARCHE_CALME", "CAUSE_PANNE_TECHNIQUE",
            "CAUSE_QUOTA", "CAUSE_DONNEE_ABSENTE", "CAUSE_NON_IMPLEMENTEE",
            "SourceAttendue", "PreuveSource", "EtatRuntime", "SOURCES_HARVEST", "preuve_source",
-           "cause_source", "evaluer_readiness", "attendre_readiness", "format_readiness",
-           "evaluer_depuis_disque", "lire_heartbeats_reels", "metriques_depuis_heartbeats", "main"]
+           "cause_source", "evaluer_readiness", "attendre_readiness", "evaluer_avec_attente",
+           "format_readiness", "evaluer_depuis_disque", "lire_heartbeats_reels",
+           "metriques_depuis_heartbeats", "main"]
 
 
 if __name__ == "__main__":

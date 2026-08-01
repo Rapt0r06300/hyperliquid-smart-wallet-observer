@@ -412,8 +412,28 @@ REM vivantes. Aucun second passage de detection, aucun demarrage en double.
 ping -n 3 127.0.0.1 >nul 2>&1
 python -m hl_observer.ops.superviseur_collecteurs status harvest
 echo   [collecteurs HARVEST] allMids + BBO(HL+Binance) + userFills + carnet L2 + marks + liq + venues + vaults + backfills.
-REM Item 7 : preuve de vie initiale (informative ; l'UI affiche READY/DEGRADED/DATA_NOT_READY en continu).
-python -m hl_observer.ops.preuve_de_vie "%~dp0."
+REM === ITEM 1 : BARRIERE READY_CORE **BLOQUANTE** =============================================
+REM Apres le demarrage des collecteurs, on attend (fenetre BORNEE de warmup) que le socle CORE
+REM (allMids + BBO + userFills) PROUVE reellement sa vie. Tant que READY_CORE != true, le moteur,
+REM l'UI et le poller NE demarrent PAS. On verifie ERRORLEVEL immediatement ; sortie non-zero
+REM DATA_NOT_READY avec la SOURCE et la RAISON exactes affichees ci-dessus. Paper strict.
+REM Fenetre de warmup surchargable : set HYPERSMART_WARMUP_CORE_SEC avant le lancement (defaut 90 s).
+set "HYPERSMART_WARMUP_CORE_SEC=%HYPERSMART_WARMUP_CORE_SEC%"
+if "%HYPERSMART_WARMUP_CORE_SEC%"=="" set "HYPERSMART_WARMUP_CORE_SEC=90"
+echo   [READY_CORE] Attente bornee (%HYPERSMART_WARMUP_CORE_SEC% s) de la preuve de vie du socle CORE...
+python -m hl_observer.ops.preuve_de_vie "%~dp0." --niveau core --attendre %HYPERSMART_WARMUP_CORE_SEC% --intervalle 3
+if errorlevel 1 (
+  echo.
+  echo   [READY_CORE] DATA_NOT_READY : allMids/BBO/userFills n'ont PAS prouve leur vie dans la fenetre.
+  echo   Le moteur, l'UI et le poller NE demarrent PAS ^(paper strict, aucune donnee fabriquee^).
+  echo   Source et raison exactes affichees ci-dessus. Corrige puis relance.
+  echo.
+  pause
+  exit /b 4
+)
+echo   [READY_CORE] OK : allMids + BBO + userFills prouves vivants. Demarrage moteur/UI/poller autorise.
+REM Item 4 : niveau HARVEST detaille (COMPLET / DEGRADE_DOCUMENTE) — INFORMATIF, va au catalogue de session.
+python -m hl_observer.ops.preuve_de_vie "%~dp0." --niveau harvest
 
 powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0tools\start_hypersmart_simulation.ps1" -Port 8794 -IntervalSeconds 15 -MaxLeaders 50 -Interactive
 
