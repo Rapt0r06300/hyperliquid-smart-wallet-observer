@@ -131,10 +131,23 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--root", default=".")
     p.add_argument("--autoriser-degrade", action="store_true",
                    help="(reserve) tolerer une session DEGRADE_DOCUMENTE — par defaut on exige COMPLETE")
+    p.add_argument("--emit-run-id", action="store_true",
+                   help="sur GO, ecrit runtime/reports/backtest_replay/SESSION_SELECTIONNEE.txt (run_id) pour le .cmd")
     args = p.parse_args(argv)
     res = analyser(Path(args.root), exiger_complete=not args.autoriser_degrade)
     print("ANALYSE_SESSION verdict=%s run_id=%s : %s" %
           (res["verdict"], res.get("run_id"), res.get("raison")), flush=True)
+    # item 2 : expose le run_id sélectionné pour que ANALYSER.cmd le passe à lab_alpha (--session-dir).
+    if res["verdict"] == GO and res.get("run_id"):
+        print("SELECTED_RUN_ID=%s" % res["run_id"], flush=True)
+        print("SESSION_DIR=%s" % SC.chemin_session(Path(args.root), res["run_id"]), flush=True)
+        if args.emit_run_id:
+            try:
+                pointeur = Path(args.root) / "runtime" / "reports" / "backtest_replay" / "SESSION_SELECTIONNEE.txt"
+                pointeur.parent.mkdir(parents=True, exist_ok=True)
+                pointeur.write_text(str(res["run_id"]), encoding="utf-8")
+            except OSError:
+                pass
     return 0 if res["verdict"] == GO else 2
 
 

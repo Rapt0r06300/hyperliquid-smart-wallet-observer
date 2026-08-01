@@ -38,6 +38,56 @@ def _events_valides(events: list[dict[str, Any]]) -> int:
                if isinstance(e.get("px"), (int, float)) and (e.get("px") or 0) > 0 and e.get("signe"))
 
 
+def _lire_catalogue_session(session_dir: Path) -> dict[str, Any]:
+    """Lit DATA_CATALOG.json d'une session. Absent/illisible → dict vide (aucune analyse fabriquée)."""
+    import json
+    p = Path(session_dir) / "DATA_CATALOG.json"
+    try:
+        return json.loads(p.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+
+
+def _inventaire_session(session_dir: Path, catalogue: dict[str, Any]) -> dict[str, Any]:
+    """Inventaire SCOPÉ (item 2) : UNIQUEMENT les artefacts CATALOGUÉS et présents de la session. Aucun
+    scan global de la racine (pas de mélange sessions/archives/logs/données actives)."""
+    fichiers: list[dict[str, Any]] = []
+    total = 0
+    for s in (catalogue.get("sources") or {}).values():
+        rel = s.get("chemin") or ""
+        if not rel:
+            continue
+        p = Path(session_dir) / rel
+        if not p.is_file():
+            continue
+        taille = p.stat().st_size
+        total += taille
+        fichiers.append({"chemin": str(p), "rel": rel, "octets": taille, "lisible": True})
+    return {"fichiers": fichiers, "total_fichiers": len(fichiers), "lisibles": len(fichiers),
+            "bloques": 0, "total_octets": total, "scope": "SESSION"}
+
+
+def _sha_git(racine: Path) -> str | None:
+    try:
+        from hl_observer.runtime.protections import manifeste_execution
+        return manifeste_execution(racine).get("git_head")
+    except Exception:  # noqa: BLE001
+        return None
+
+
+def _ecrire_manifeste_run(sortie: Path, *, run_id: Any, data_hash: str, git_head: Any,
+                          n_fichiers: int) -> None:
+    """Manifeste de run (item 4) : run_id + hash des données + SHA git → traçabilité + anti-réutilisation."""
+    import json
+    try:
+        (Path(sortie) / "manifeste_run.json").write_text(
+            json.dumps({"run_id": run_id, "data_hash": data_hash, "git_head": git_head,
+                        "n_fichiers": n_fichiers, "real_execution": False}, ensure_ascii=False, indent=2),
+            encoding="utf-8")
+    except OSError:
+        pass
+
+
 def _paires_lead_lag(events: list[dict[str, Any]]) -> list[tuple[Any, Any]]:
     """Paires (signe_leader, Δmid_futur) par coin (ordre temporel) pour mesurer le lead-lag réel."""
     par_coin: dict[str, list] = {}
@@ -57,12 +107,29 @@ def lancer_lab(*, racine: str | Path, sortie_dir: str | Path | None = None, budg
                source: str = "REEL", horodatage: str = "", temps_fn: Callable[[], float] | None = None,
                journal_path: str | Path | None = None, checkpoint_path: str | Path | None = None,
                imprimer: bool = False, max_events: int = 0, min_episodes: int = 30,
-               max_fichiers: int = 20_000, max_ram_events: int = 0) -> dict[str, Any]:
-    """Exécute tout le laboratoire et écrit le rapport. Retourne un résumé (chemins, verdict, compteurs, table)."""
+               max_fichiers: int = 20_000, max_ram_events: int = 0,
+               session_dir: str | Path | None = None) -> dict[str, Any]:
+    """Exécute tout le laboratoire et écrit le rapport. Retourne un résumé (chemins, verdict, compteurs, table).
+
+    `session_dir` (item 2) : si fourni, on n'analyse QUE les artefacts CATALOGUÉS de CETTE session COMPLETE
+    (aucun inventaire global de la racine). Les rapports/shards/checkpoints sont alors NAMESPACÉS par run_id
+    (item 4) → jamais de réutilisation d'un shard d'une autre session."""
     temps = temps_fn or time.monotonic
     t0 = temps()
     racine = Path(racine)
-    sortie = Path(sortie_dir) if sortie_dir else racine / DOSSIER_RAPPORTS
+    # item 2/4 : mode SESSION -> scope + namespacing par run_id (+ SHA git au manifeste).
+    session_meta = None
+    if session_dir:
+        session_dir = Path(session_dir)
+        cat = _lire_catalogue_session(session_dir)
+        session_meta = {"run_id": cat.get("run_id") or session_dir.name, "git_head": cat.get("git_head"),
+                        "statut": cat.get("statut"), "catalogue": cat}
+    if sortie_dir:
+        sortie = Path(sortie_dir)
+    elif session_meta:
+        sortie = racine / DOSSIER_RAPPORTS / session_meta["run_id"]      # namespacé par run_id
+    else:
+        sortie = racine / DOSSIER_RAPPORTS
     sortie.mkdir(parents=True, exist_ok=True)
     journal = Journal(journal_path or sortie / "journal_lab.log")
     checkpoint_path = checkpoint_path or sortie / "checkpoint_recherche.jsonl"
@@ -83,6 +150,15 @@ def lancer_lab(*, racine: str | Path, sortie_dir: str | Path | None = None, budg
                             "cfg_prevues": min(n_grille, budget), "erreurs": 0, "manquantes": 0,
                             "workers": 1, "en_cours": "démarrage", "derniere": "-", "prochaine": "inventaire"}
 
+    # item 10 : chaque étape a son PROPRE timestamp de début. La durée d'une étape = temps depuis le début
+    # de CETTE étape — jamais le cumul `temps() - t0` (qui gonflait toutes les durées et faussait l'ETA).
+    _t_etape = [t0]
+
+    def _fin_etape(**kw: Any) -> None:
+        maintenant = temps()
+        eta.terminer_etape(maintenant - _t_etape[0], **kw)
+        _t_etape[0] = maintenant
+
     def _rafraichir(hh: str) -> None:
         est = eta.estimer(elapsed_s=temps() - t0)
         etat.update({"heure": hh, "ecoule": format_hms(temps() - t0), "eta": est["texte"],
@@ -98,12 +174,17 @@ def lancer_lab(*, racine: str | Path, sortie_dir: str | Path | None = None, budg
     def _jrn(msg: str) -> None:
         journal.ligne(horodatage or "T", msg)
 
-    # 1) INVENTAIRE
+    # 1) INVENTAIRE (item 2 : scopé à la session en mode session, jamais un scan global de la racine)
     etat.update({"en_cours": "inventaire des sources", "prochaine": "lecture"})
     _jrn("inventaire: debut")
-    inv = inventorier(racine, max_fichiers=max_fichiers)
+    if session_meta is not None:
+        inv = _inventaire_session(session_dir, session_meta["catalogue"])
+        _jrn("inventaire SCOPE session %s : %d artefacts catalogues" % (session_meta["run_id"],
+                                                                        inv["total_fichiers"]))
+    else:
+        inv = inventorier(racine, max_fichiers=max_fichiers)
     etat.update({"octets_total": inv["total_octets"], "derniere": "inventaire (%d fichiers)" % inv["total_fichiers"]})
-    eta.terminer_etape(temps() - t0, octets=0)
+    _fin_etape(octets=0)
     _jrn("inventaire: %d fichiers, %d lisibles, %d bloques" % (inv["total_fichiers"], inv["lisibles"], inv["bloques"]))
     _rafraichir(horodatage or "T")
 
@@ -122,17 +203,27 @@ def lancer_lab(*, racine: str | Path, sortie_dir: str | Path | None = None, budg
     octets_lus = sum(int(f["octets"]) for f in inv["fichiers"] if f["lisible"])
     bloques = int(inv.get("bloques", 0))
     fichiers_lisibles = [f["chemin"] for f in inv["fichiers"] if f["lisible"]]
-    shard = sortie / "events_shard.jsonl"
+    # item 4/5 : NAMESPACE shard+checkpoint par run_id (dossier) + HASH des données + SHA git. Un shard
+    # d'une autre session (autre hash) ne peut JAMAIS être réutilisé — le nom du fichier change.
+    import hashlib
+    empreinte_donnees = hashlib.sha256(
+        "|".join("%s:%d" % (Path(c).name, Path(c).stat().st_size if Path(c).is_file() else -1)
+                 for c in sorted(fichiers_lisibles)).encode("utf-8")).hexdigest()[:12]
+    sha_git = (session_meta or {}).get("git_head") or _sha_git(racine)
+    ns = "%s.%s" % (empreinte_donnees, (sha_git or "nogit")[:8])
+    _ecrire_manifeste_run(sortie, run_id=(session_meta or {}).get("run_id"), data_hash=empreinte_donnees,
+                          git_head=sha_git, n_fichiers=len(fichiers_lisibles))
+    shard = sortie / ("events_shard.%s.jsonl" % ns)
     with _refr_ctx():
         info_shard = materialiser_shard(
             fichiers_lisibles, shard, max_events=(max_events if max_events and max_events > 0 else 0),
-            checkpoint_path=sortie / "events_shard.checkpoint.json")
+            checkpoint_path=sortie / ("events_shard.%s.checkpoint.json" % ns))
     etat["events_shardes"] = info_shard["n"]
     events = charger_borne(shard, max_ram=(max_ram_events if max_ram_events and max_ram_events > 0 else 0))
     valides = _events_valides(events)
     etat.update({"octets_lus": octets_lus, "events_lus": len(events), "events_valides": valides,
                  "events_rejetes": len(events) - valides, "derniere": "lecture (%d events)" % len(events)})
-    eta.terminer_etape(temps() - t0, octets=octets_lus, evenements=len(events))
+    _fin_etape(octets=octets_lus, evenements=len(events))
     _jrn("lecture: %d events (%d valides), %d fichiers bloques" % (len(events), valides, bloques))
     _rafraichir(horodatage or "T")
 
@@ -152,7 +243,7 @@ def lancer_lab(*, racine: str | Path, sortie_dir: str | Path | None = None, budg
                                "placebo_net": ll_paper.get("placebo_net")}
     etat.update({"en_cours": "audit cablage", "prochaine": "recherche",
                  "derniere": "audit (%d bricks utilisees)" % audit["resume"].get("CABLE ET UTILISE", 0)})
-    eta.terminer_etape(temps() - t0)
+    _fin_etape()
     _jrn("audit: %s" % audit["resume"])
     _rafraichir(horodatage or "T")
 
@@ -173,7 +264,7 @@ def lancer_lab(*, racine: str | Path, sortie_dir: str | Path | None = None, budg
                      "best_is": best["is"], "best_oos": best["oos"], "best_fwd": best["fwd"],
                      "best_adv95": best["adv95"], "sous_etape": "config %d" % info["evalues"],
                      "derniere": "eval %s -> %s" % (res.get("config", {}).get("notional_max"), res.get("verdict"))})
-        eta.terminer_etape(temps() - t0)
+        _fin_etape()
         _rafraichir(horodatage or "T")
 
     with _refr_ctx():
@@ -186,7 +277,7 @@ def lancer_lab(*, racine: str | Path, sortie_dir: str | Path | None = None, budg
 
     # 5) RAPPORT
     etat.update({"en_cours": "ecriture du rapport", "prochaine": "fin"})
-    eta.terminer_etape(temps() - t0)
+    _fin_etape()
     periode = _periode(events)
     chemins = ecrire_rapport(sortie, horodatage=horodatage or "T", inventaire=inv, audit=audit, recherche=rech,
                              eta_final=format_hms(temps() - t0), source=source, periode=periode,
@@ -216,6 +307,10 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--out", default=None, help="Dossier de sortie des rapports.")
     ap.add_argument("--budget", type=int, default=32, help="Budget d'evaluations de configs.")
     ap.add_argument("--source", default="REEL", help="Etiquette de source (REEL / SYNTHETIQUE).")
+    ap.add_argument("--session-dir", default=None,
+                    help="item 2 : analyser EXCLUSIVEMENT les artefacts catalogues de CETTE session COMPLETE.")
+    ap.add_argument("--max-ram-events", type=int, default=0,
+                    help="item 7 : fenetre RAM bornee pour le replay (0 = tout le shard, jamais un plafond magique).")
     ap.add_argument("--no-dry-run", action="store_true", help="INTERDIT (paper only) : provoque un refus.")
     args = ap.parse_args(argv)
     if args.no_dry_run:
@@ -224,7 +319,8 @@ def main(argv: list[str] | None = None) -> int:
     from datetime import datetime, timezone
     horo = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
     res = lancer_lab(racine=args.root, sortie_dir=args.out, budget=args.budget, source=args.source,
-                     horodatage=horo, imprimer=True)
+                     horodatage=horo, imprimer=True, session_dir=args.session_dir,
+                     max_ram_events=args.max_ram_events)
     print(res["tableau"])
     print("\nVERDICT: %s\nRAPPORT: %s\nJOURNAL: %s\nDUREE: %ss" % (
         res["verdict"], res["rapport"]["latest"], res["journal"], res["duree_s"]))
