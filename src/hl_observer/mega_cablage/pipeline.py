@@ -137,8 +137,11 @@ class MegaCablage:
                           "raison": res.get("raison"), "fill_price": res.get("fill_price"),
                           "filled_notional": res.get("filled_notional")})
         cross_venue = [self._executer_cross_venue(job, ts_ms=ts_ms) for job in jobs_cv]
-        self.executeur.marquer(marks or {k: v for k, v in prix_par_coin.items()
-                                         if isinstance(v, (int, float))}, ts_ms=ts_ms)
+        # ts_ms absent/non numérique (ex. log sans timestamp) → tick non causal : événements déjà rejetés à
+        # l'admission, on NE marque PAS (fail-closed, jamais de mark_to_market fabriqué à un temps inventé).
+        if isinstance(ts_ms, (int, float)) and not isinstance(ts_ms, bool):
+            self.executeur.marquer(marks or {k: v for k, v in prix_par_coin.items()
+                                             if isinstance(v, (int, float))}, ts_ms=ts_ms)
         tick = {"ts_ms": ts_ms, "rejets": rejets, "notes": notes,
                 "self_trade": nr["self_trade"]["self_trade"], "n_candidats": len(nr["candidats"]),
                 "fills": fills, "cross_venue": cross_venue, "pnl": self.executeur.pnl()}

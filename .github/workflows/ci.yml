@@ -204,6 +204,16 @@ jobs:
             tests/test_market_truth_replay_stage.py \
             tests/test_forward_causal_parity_bloc17.py \
             tests/test_batch_e.py
+      - name: Meta-cablage pepites 201-300 (E2E messages bruts -> PnL, cross-venue 2 jambes, IS/OOS/forward)
+        run: |
+          python -m pytest -q -p no:cacheprovider --junitxml=junit-mega-cablage.xml \
+            tests/test_mega_cablage_e2e_raw_to_pnl.py \
+            tests/test_mega_cablage_integration.py \
+            tests/test_mega_cablage_cross_venue_paper_stage.py \
+            tests/test_mega_cablage_feed_adapter.py \
+            tests/test_mega_cablage_runner.py \
+            tests/test_mega_cablage_replay_driver.py \
+            tests/test_mega_cablage_real_logs_report.py
       - uses: actions/upload-artifact@v4
         if: always()
         with:
