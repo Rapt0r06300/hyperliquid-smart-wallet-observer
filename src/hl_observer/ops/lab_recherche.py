@@ -111,7 +111,7 @@ def _grille(espace: dict[str, list]) -> list[dict[str, Any]]:
 
 def rechercher(evenements: list[dict[str, Any]], *, espace: dict[str, list] | None = None,
                leader_equity_defaut: Any = None, budget: int = 64, checkpoint_path: str | Path | None = None,
-               min_episodes: int = 30, source: str = "REEL") -> dict[str, Any]:
+               min_episodes: int = 30, source: str = "REEL", on_eval: Any = None) -> dict[str, Any]:
     """Recherche large→fine avec cache/reprise. Élimine tôt les configs à net IS ≤ 0, approfondit les gagnantes.
     budget = nombre max d'évaluations. Retourne {evalues, caches, candidats(triés par net OOS+FORWARD), meilleur,
     verdict_global, source}. Aucun résultat fabriqué : source non-REELLE → verdict_global NON_ECONOMIQUE."""
@@ -147,12 +147,20 @@ def rechercher(evenements: list[dict[str, Any]], *, espace: dict[str, list] | No
         return res
 
     coarse = _grille(espace)
+    total_prevu = len(coarse)
+
+    def _pousser(res: dict[str, Any]) -> None:
+        candidats.append(res)
+        if on_eval:
+            on_eval({"res": res, "evalues": evalues, "caches": caches, "total_prevu": total_prevu,
+                     "restantes": max(0, total_prevu - len(candidats))})
+
     prometteuses: list[dict[str, Any]] = []
     for cfg in coarse:
         if evalues >= budget:
             break
         res = _evaluer(cfg)
-        candidats.append(res)
+        _pousser(res)
         net_is = res.get("metriques", {}).get("net_pnl")
         if isinstance(net_is, (int, float)) and net_is > 0:
             prometteuses.append(cfg)                 # zone à approfondir
@@ -161,11 +169,12 @@ def rechercher(evenements: list[dict[str, Any]], *, espace: dict[str, list] | No
         if evalues >= budget:
             break
         nm = cfg.get("notional_max", 300.0)
+        total_prevu += 2
         for voisin in ({**cfg, "notional_max": round(nm * 0.75, 2)},
                        {**cfg, "notional_max": round(nm * 1.25, 2)}):
             if evalues >= budget:
                 break
-            candidats.append(_evaluer(voisin))
+            _pousser(_evaluer(voisin))
 
     def _score(res: dict[str, Any]) -> float:
         m = res.get("metriques", {})

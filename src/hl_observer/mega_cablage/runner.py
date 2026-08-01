@@ -71,11 +71,16 @@ def _signe(row: dict[str, Any]) -> int:
 
 def _row_to_event(row: dict[str, Any]) -> dict[str, Any]:
     px = row.get("px", row.get("price", row.get("mid")))
-    return {"coin": str(row.get("coin", "")).upper(), "px": _f(px),
-            "sz": _f(row.get("sz", row.get("size", row.get("qty")))), "signe": _signe(row),
-            "ts_ms": row.get("ts_ms", row.get("time", row.get("timestamp_ms", row.get("original_timestamp_ms")))),
-            "vault": row.get("vault", row.get("user", row.get("wallet_address", row.get("adresse", "")))),
-            "book": row.get("book"), "mid": _f(row.get("mid", px))}
+    ev = {"coin": str(row.get("coin", "")).upper(), "px": _f(px),
+          "sz": _f(row.get("sz", row.get("size", row.get("qty")))), "signe": _signe(row),
+          "ts_ms": row.get("ts_ms", row.get("time", row.get("timestamp_ms", row.get("original_timestamp_ms")))),
+          "vault": row.get("vault", row.get("user", row.get("wallet_address", row.get("adresse", "")))),
+          "book": row.get("book"), "mid": _f(row.get("mid", px))}
+    if isinstance(row.get("cross_venue"), dict):          # contexte cross-venue préservé (exécution 2 jambes)
+        ev["cross_venue"] = row["cross_venue"]
+    if row.get("cross_venue_edge_bps") is not None:
+        ev["cross_venue_edge_bps"] = row["cross_venue_edge_bps"]
+    return ev
 
 
 def _row_to_bundle(row: dict[str, Any]) -> dict[str, Any]:
