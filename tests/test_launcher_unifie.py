@@ -136,5 +136,6 @@ def test_la_racine_contient_les_deux_lanceurs_officiels():
         "LANCER-RECHERCHE-CONTINUE-ADMIN.cmd",
         "POUSSER-GITHUB-FORCE.cmd",
         "RECETTE-WINDOWS.cmd",
+        "RECETTE-LANCEUR.cmd",
     }
     assert cmd_racine <= officiels | outils_conserves
