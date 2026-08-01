@@ -27,9 +27,12 @@ STATUT_READY = "READY"
 STATUT_DEGRADED = "DEGRADED"
 STATUT_DATA_NOT_READY = "DATA_NOT_READY"
 
-# Deux niveaux explicites (item 2).
+# Deux niveaux explicites (item 2) + trois états HARVEST honnêtes (item 4).
 NIVEAU_CORE = "READY_CORE"           # allMids + BBO + userFills réellement vivants
-NIVEAU_HARVEST = "READY_HARVEST"     # toutes les sources utiles vivantes OU clairement déclarées indispo
+NIVEAU_HARVEST = "READY_HARVEST"     # alias legacy (= COMPLET)
+HARVEST_COMPLET = "READY_HARVEST_COMPLET"        # TOUTES les sources réellement nécessaires vivantes
+HARVEST_DEGRADE = "HARVEST_DEGRADE_DOCUMENTE"    # CORE vivant, mais des sources absentes/non implémentées
+# (DATA_NOT_READY réutilisé pour : CORE ou source obligatoire malade)
 
 # Taxonomie de cause (item 2) : ne jamais confondre ces cinq états.
 CAUSE_OK = "OK"
@@ -68,6 +71,17 @@ SOURCES_HARVEST: tuple[SourceAttendue, ...] = (
     SourceAttendue("backfill-candles-vaults", "HYPERLIQUID", "candles", False, exige_exchange_ts=False),
     # dYdX v4 (secondaire) : son absence NE bloque PAS la récolte HL (obligatoire=False).
     SourceAttendue("dydx-live", "DYDX", "trades+book+subaccounts", False, exige_exchange_ts=False),
+    # Sources DÉCLARÉES mais pas encore implémentées (item 3) : JAMAIS omises, statut
+    # SOURCE_NON_IMPLEMENTEE — leur présence empêche READY_HARVEST_COMPLET (item 4).
+    SourceAttendue("node-fills-global", "HYPERLIQUID", "node-fills", False,
+                   exige_exchange_ts=False, non_implementee=True),
+    SourceAttendue("twap-slices", "HYPERLIQUID", "userTwapSliceFills", False,
+                   exige_exchange_ts=False, non_implementee=True),
+    SourceAttendue("hf-recorder", "HYPERLIQUID+BINANCE", "hf-recorder", False,
+                   exige_exchange_ts=False, non_implementee=True),
+    SourceAttendue("l4-order-intent", "HYPERLIQUID", "L4", False,
+                   exige_exchange_ts=False, non_implementee=True),
+    SourceAttendue("bybit", "BYBIT", "trades", False, exige_exchange_ts=False, non_implementee=True),
 )
 
 
@@ -93,8 +107,9 @@ class EtatRuntime:
     raison: str
     preuves: tuple[PreuveSource, ...]
     ready_core: bool = False          # allMids + BBO + userFills réellement vivants (item 2)
-    ready_harvest: bool = False       # toutes utiles vivantes OU clairement déclarées indispo (item 2)
+    ready_harvest: bool = False       # = HARVEST_COMPLET seulement (item 4) : TOUTES vivantes
     causes: tuple[dict[str, Any], ...] = field(default_factory=tuple)  # taxonomie par source (item 2)
+    niveau_harvest: str = STATUT_DATA_NOT_READY  # COMPLET / DEGRADE_DOCUMENTE / DATA_NOT_READY (item 4)
 
     def ready(self) -> bool:
         return self.statut == STATUT_READY
@@ -220,8 +235,18 @@ def evaluer_readiness(sources: Sequence[SourceAttendue], heartbeats: Mapping[str
     )
     _tolere = {CAUSE_NON_IMPLEMENTEE, CAUSE_MARCHE_CALME}          # « clairement déclarée indispo » ou calme
     ready_core = all(p.sain for p in preuves if p.obligatoire)
-    ready_harvest = ready_core and all(
-        p.sain or c["cause"] in _tolere for p, c in zip(preuves, causes))
+    # item 4 — trois états HONNÊTES, jamais présenter une récolte incomplète comme complète :
+    #  COMPLET = TOUTES les sources vivantes (aucune non_implementee, aucune muette) ;
+    #  DEGRADE_DOCUMENTE = CORE vivant mais des sources absentes/non implémentées (chacune avec sa cause) ;
+    #  DATA_NOT_READY = CORE ou source obligatoire malade.
+    harvest_complet = ready_core and all(p.sain for p in preuves)
+    if not ready_core:
+        niveau_harvest = STATUT_DATA_NOT_READY
+    elif harvest_complet:
+        niveau_harvest = HARVEST_COMPLET
+    else:
+        niveau_harvest = HARVEST_DEGRADE
+    ready_harvest = niveau_harvest == HARVEST_COMPLET
 
     obligatoires_malades = [p for p in preuves if p.obligatoire and not p.sain]
     if obligatoires_malades:
@@ -229,15 +254,16 @@ def evaluer_readiness(sources: Sequence[SourceAttendue], heartbeats: Mapping[str
         raison = "source obligatoire %s (%s @ %s): %s" % (p.nom, p.canal, p.venue, p.raison)
         if len(obligatoires_malades) > 1:
             raison += " (+%d autre(s))" % (len(obligatoires_malades) - 1)
-        return EtatRuntime(STATUT_DATA_NOT_READY, raison, preuves, ready_core, ready_harvest, causes)
+        return EtatRuntime(STATUT_DATA_NOT_READY, raison, preuves, ready_core, ready_harvest, causes,
+                           niveau_harvest)
     secondaires_malades = [p for p, c in zip(preuves, causes)
                            if (not p.obligatoire) and not p.sain and c["cause"] not in _tolere]
     if secondaires_malades:
         muettes = ", ".join("%s(%s)" % (p.nom, p.raison) for p in secondaires_malades)
         return EtatRuntime(STATUT_DEGRADED, "sources secondaires muettes: %s" % muettes,
-                           preuves, ready_core, ready_harvest, causes)
+                           preuves, ready_core, ready_harvest, causes, niveau_harvest)
     return EtatRuntime(STATUT_READY, "toutes les sources obligatoires sont saines",
-                       preuves, ready_core, ready_harvest, causes)
+                       preuves, ready_core, ready_harvest, causes, niveau_harvest)
 
 
 def attendre_readiness(lecteur_etat: Callable[[float], EtatRuntime], *, timeout_s: float,
@@ -255,10 +281,15 @@ def attendre_readiness(lecteur_etat: Callable[[float], EtatRuntime], *, timeout_
 
 
 def format_readiness(etat: EtatRuntime) -> str:
-    lignes = ["=== PREUVE DE VIE — %s ===" % etat.statut, "  %s" % etat.raison]
+    lignes = ["=== PREUVE DE VIE — %s ===" % etat.statut,
+              "  READY_CORE=%s   HARVEST=%s" % (etat.ready_core, etat.niveau_harvest),
+              "  %s" % etat.raison]
+    causes = {c["source"]: c["cause"] for c in etat.causes}
     for p in etat.preuves:
         marque = "OK  " if p.sain else ("MANQUE" if p.obligatoire else "muet")
-        lignes.append("  [%s] %-24s %-18s %s" % (marque, p.nom, p.canal, "sain" if p.sain else p.raison))
+        cause = causes.get(p.nom, "")
+        lignes.append("  [%s] %-24s %-18s %-22s %s" % (
+            marque, p.nom, p.canal, cause, "sain" if p.sain else p.raison))
     return "\n".join(lignes)
 
 
@@ -300,16 +331,26 @@ def evaluer_depuis_disque(root: str | Path, sources: Sequence[SourceAttendue] = 
 
 
 def main(argv: list[str] | None = None) -> int:
-    """CLI : `python -m hl_observer.ops.preuve_de_vie [racine]`. Exit 0=READY, 1=DEGRADED, 2=DATA_NOT_READY."""
+    """CLI BLOQUANT (item 1) : `python -m hl_observer.ops.preuve_de_vie [racine] [--niveau core|harvest]`.
+    `--niveau core` (défaut) : exit 0 SEULEMENT si READY_CORE (allMids+BBO+userFills prouvés vivants),
+    sinon 2 (DATA_NOT_READY) → le lanceur ne démarre pas le moteur. `--niveau harvest` : 0 si CORE vivant
+    (COMPLET ou DEGRADE_DOCUMENTE), 2 sinon ; le niveau HARVEST exact est affiché et va au catalogue."""
+    import argparse
     import time
-    racine = Path(argv[0]) if argv else Path.cwd()
-    etat = evaluer_depuis_disque(racine, now_ms=time.time() * 1000.0)
+    p = argparse.ArgumentParser(description="Preuve de vie bloquante des sources.")
+    p.add_argument("racine", nargs="?", default=".")
+    p.add_argument("--niveau", choices=("core", "harvest"), default="core")
+    args = p.parse_args(argv)
+    etat = evaluer_depuis_disque(Path(args.racine), now_ms=time.time() * 1000.0)
     print(format_readiness(etat), flush=True)
-    return {STATUT_READY: 0, STATUT_DEGRADED: 1, STATUT_DATA_NOT_READY: 2}[etat.statut]
+    if args.niveau == "core":
+        return 0 if etat.ready_core else 2
+    # harvest : CORE vivant requis ; le détail COMPLET/DEGRADE_DOCUMENTE est informatif (va au catalogue).
+    return 0 if etat.niveau_harvest != STATUT_DATA_NOT_READY else 2
 
 
 __all__ = ["STATUT_READY", "STATUT_DEGRADED", "STATUT_DATA_NOT_READY", "SEUIL_HEARTBEAT_MS",
-           "NIVEAU_CORE", "NIVEAU_HARVEST", "CAUSE_OK", "CAUSE_MARCHE_CALME", "CAUSE_PANNE_TECHNIQUE",
+           "NIVEAU_CORE", "NIVEAU_HARVEST", "HARVEST_COMPLET", "HARVEST_DEGRADE", "CAUSE_OK", "CAUSE_MARCHE_CALME", "CAUSE_PANNE_TECHNIQUE",
            "CAUSE_QUOTA", "CAUSE_DONNEE_ABSENTE", "CAUSE_NON_IMPLEMENTEE",
            "SourceAttendue", "PreuveSource", "EtatRuntime", "SOURCES_HARVEST", "preuve_source",
            "cause_source", "evaluer_readiness", "attendre_readiness", "format_readiness",
