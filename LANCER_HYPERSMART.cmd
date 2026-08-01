@@ -565,6 +565,7 @@ if /I "%SUB%"=="collectors"        goto :cmd_collectors
 if /I "%SUB%"=="collectors-maintenance" goto :cmd_collectors_maintenance
 if /I "%SUB%"=="collectors-research"    goto :cmd_collectors_research
 if /I "%SUB%"=="collectors-all"         goto :cmd_collectors_all
+if /I "%SUB%"=="sante"             goto :cmd_sante
 if /I "%SUB%"=="report"            goto :cmd_report
 if /I "%SUB%"=="test"              goto :cmd_test
 if /I "%SUB%"=="audit"             goto :cmd_audit
@@ -649,6 +650,13 @@ if exist "runtime\data\launcher_pids.json" ( echo   Registre lanceur : & type "r
 powershell -NoProfile -Command "try { $ok=(Test-NetConnection -ComputerName 127.0.0.1 -Port 8794 -WarningAction SilentlyContinue -InformationLevel Quiet) } catch { $ok=$false }; Write-Host ('  UI 8794 : ' + $(if($ok){'ACTIVE'}else{'inactive'}))"
 python -m hl_observer.ops.superviseur_collecteurs status harvest
 echo.
+goto :fin
+
+REM -------- SANTE LIVE (tableau dynamique + journal horodate) --------
+:cmd_sante
+echo   Tableau de sante live des collecteurs (Ctrl-C pour quitter).
+echo   Journal append-only : runtime\logs\sante_journal.log
+python -m hl_observer.ops.moniteur_sante "%~dp0." --intervalle 2
 goto :fin
 
 REM -------- STOP (cible, jamais de kill global) --------
