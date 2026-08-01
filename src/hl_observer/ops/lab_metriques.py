@@ -85,8 +85,10 @@ def turnover(notional_traite: float, equity: float) -> Any:
 def metriques_candidat(*, segments: dict[str, dict[str, Any]], nets_episodes: list[float],
                        courbe_equity: list[float], notional_traite: float, equity_finale: float,
                        fees: float, contributions_coin: dict[Any, float] | None = None,
-                       capacite: Any = UNMEASURABLE, reconcilie: bool = False) -> dict[str, Any]:
-    """Assemble toutes les métriques. `segments` = {IS/OOS/FORWARD/ADVERSE_P95/ADVERSE_P99: {net, roi}}."""
+                       capacite: Any = UNMEASURABLE, reconcilie: bool = False,
+                       placebo_net: Any = None) -> dict[str, Any]:
+    """Assemble toutes les métriques. `segments` = {IS/OOS/FORWARD/ADVERSE_P95/ADVERSE_P99: {net, roi}}.
+    `placebo_net` (item 18) : PnL des signaux inversés — un vrai edge doit le laisser ≤ 0."""
     def _seg(nom: str, champ: str) -> Any:
         return segments.get(nom, {}).get(champ)
     net = _seg("IS", "net")
@@ -95,24 +97,42 @@ def metriques_candidat(*, segments: dict[str, dict[str, Any]], nets_episodes: li
         "gross_pnl": gross, "net_pnl": net, "roi": _seg("IS", "roi"), "fees": round(float(fees), 8),
         "oos_net": _seg("OOS", "net"), "forward_net": _seg("FORWARD", "net"),
         "adverse_p95_net": _seg("ADVERSE_P95", "net"), "adverse_p99_net": _seg("ADVERSE_P99", "net"),
+        "adverse_p95_oos": _seg("ADVERSE_P95", "net_oos"), "adverse_p95_forward": _seg("ADVERSE_P95", "net_forward"),
         "profit_factor": profit_factor(nets_episodes), "drawdown": drawdown(courbe_equity),
         "expected_shortfall": expected_shortfall(nets_episodes), "lcb": lcb_moyenne(nets_episodes),
         "turnover": turnover(notional_traite, equity_finale),
         "concentration_hhi": hhi(contributions_coin or {}), "capacite": capacite,
         "n_episodes": len(nets_episodes), "reconcilie": bool(reconcilie),
+        "placebo_net": placebo_net,
     }
 
 
-def verdict_promotion(m: dict[str, Any], *, min_episodes: int = 30) -> str:
-    """Applique la règle dure. Retourne PROMU / KILL / MORE_DATA / UNMEASURABLE."""
+def verdict_promotion(m: dict[str, Any], *, min_episodes: int = 30,
+                      hhi_max: float = 0.6, placebo_tol: float = 0.0) -> str:
+    """Applique la règle dure (items 8/18). Retourne PROMU / KILL / MORE_DATA / UNMEASURABLE.
+
+    PROMU ⟺ net>0 ET oos>0 ET forward>0 ET LCB>0 ET ADVERSE_P95>0 (déjà = pire de OOS/FORWARD)
+            ET placebo REJETÉ (placebo_net ≤ tol : l'edge disparaît si on inverse les signaux)
+            ET concentration valide (HHI mesurable et ≤ hhi_max : pas dominé par un seul coin)
+            ET ledger réconcilié ET échantillon suffisant ET capacité mesurable.
+    Sinon KILL / MORE_DATA / UNMEASURABLE."""
     if not m.get("reconcilie"):
         return "KILL"
     if m.get("capacite") in (None, UNMEASURABLE):
         return "UNMEASURABLE"
     if (m.get("n_episodes") or 0) < min_episodes:
         return "MORE_DATA"
+    # concentration : une HHI non mesurable ne prouve pas la diversification -> pas promouvable en l'état.
+    hhi_val = m.get("concentration_hhi")
+    if hhi_val in (None, UNMEASURABLE):
+        return "UNMEASURABLE"
     cles = ("net_pnl", "oos_net", "forward_net", "lcb", "adverse_p95_net")
-    if all(isinstance(m.get(k), (int, float)) and m.get(k) > 0 for k in cles):
+    positifs = all(isinstance(m.get(k), (int, float)) and m.get(k) > 0 for k in cles)
+    # placebo REJETÉ : les signaux inversés ne doivent PAS être profitables (item 18).
+    placebo = m.get("placebo_net")
+    placebo_ok = (placebo is None) or (isinstance(placebo, (int, float)) and placebo <= placebo_tol)
+    concentration_ok = float(hhi_val) <= float(hhi_max)
+    if positifs and placebo_ok and concentration_ok:
         return "PROMU"
     return "KILL"
 

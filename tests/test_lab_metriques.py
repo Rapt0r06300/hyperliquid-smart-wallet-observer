@@ -20,16 +20,30 @@ def test_metriques_de_base():
 def test_promotion_promu():
     seg = {"IS": {"net": 10.0, "roi": 0.01}, "OOS": {"net": 4.0}, "FORWARD": {"net": 3.0},
            "ADVERSE_P95": {"net": 1.0}, "ADVERSE_P99": {"net": 0.5}}
+    # contributions DIVERSIFIÉES (HHI 0.5 ≤ 0.6) + placebo REJETÉ (net inversé négatif).
     m = metriques_candidat(segments=seg, nets_episodes=[1.0] * 40, courbe_equity=[1000, 1010],
                            notional_traite=500.0, equity_finale=1010.0, fees=0.5,
-                           contributions_coin={"BTC": 10.0}, capacite=250.0, reconcilie=True)
+                           contributions_coin={"BTC": 5.0, "ETH": 5.0}, capacite=250.0, reconcilie=True,
+                           placebo_net=-2.0)
     assert m["lcb"] > 0 and verdict_promotion(m) == "PROMU"
 
 
 def test_promotion_kill_more_data_unmeasurable():
     base = {"reconcilie": True, "capacite": 100.0, "n_episodes": 40, "net_pnl": 10.0,
-            "oos_net": -1.0, "forward_net": 3.0, "lcb": 1.0, "adverse_p95_net": 1.0}
+            "oos_net": -1.0, "forward_net": 3.0, "lcb": 1.0, "adverse_p95_net": 1.0,
+            "concentration_hhi": 0.3, "placebo_net": -1.0}
     assert verdict_promotion(base) == "KILL"                          # OOS négatif
     assert verdict_promotion({**base, "n_episodes": 3}) == "MORE_DATA"
     assert verdict_promotion({**base, "capacite": "UNMEASURABLE"}) == "UNMEASURABLE"
     assert verdict_promotion({**base, "reconcilie": False}) == "KILL"
+
+
+def test_promotion_gate_placebo_et_concentration(monkeypatch):
+    # item 8/18 : même avec net/oos/forward/lcb/adverse positifs, PROMU exige placebo rejeté + HHI valide.
+    bon = {"reconcilie": True, "capacite": 100.0, "n_episodes": 40, "net_pnl": 10.0, "oos_net": 4.0,
+           "forward_net": 3.0, "lcb": 1.0, "adverse_p95_net": 1.0, "concentration_hhi": 0.3,
+           "placebo_net": -1.0}
+    assert verdict_promotion(bon) == "PROMU"
+    assert verdict_promotion({**bon, "placebo_net": 5.0}) == "KILL"          # placebo profitable -> refusé
+    assert verdict_promotion({**bon, "concentration_hhi": 0.95}) == "KILL"   # tout sur un coin -> refusé
+    assert verdict_promotion({**bon, "concentration_hhi": "UNMEASURABLE"}) == "UNMEASURABLE"
