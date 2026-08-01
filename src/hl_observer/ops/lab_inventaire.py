@@ -101,7 +101,10 @@ def _lignes_json(chemin: Path) -> Iterator[dict[str, Any]]:
         yield obj
 
 
-def _lignes_sqlite(chemin: Path, *, max_lignes: int = 200_000) -> Iterator[dict[str, Any]]:
+def _lignes_sqlite(chemin: Path, *, max_lignes: int = 0) -> Iterator[dict[str, Any]]:
+    """item 7 : plus de plafond SQLite silencieux. max_lignes<=0 = lit TOUTES les lignes (le streaming en
+    amont garde la mémoire bornée). Si un plafond positif est explicitement fixé ET atteint, on le SIGNALE
+    clairement (stderr) au lieu de tronquer en silence."""
     con = None
     for essai in ("uri", "plain"):                 # read-only si possible, robuste Windows/Linux
         try:
@@ -124,7 +127,11 @@ def _lignes_sqlite(chemin: Path, *, max_lignes: int = 200_000) -> Iterator[dict[
                 for row in con.execute('SELECT * FROM "%s"' % t):
                     yield dict(row)
                     n += 1
-                    if n >= max_lignes:
+                    if max_lignes and max_lignes > 0 and n >= max_lignes:
+                        import sys as _sys
+                        print("[LAB][ATTENTION] SQLite %s tronque a %d lignes (plafond EXPLICITE) : des "
+                              "donnees sont EXCLUES." % (Path(chemin).name, max_lignes),
+                              file=_sys.stderr, flush=True)
                         return
             except sqlite3.Error:
                 continue
@@ -232,17 +239,25 @@ def inventorier(racine: str | Path, *, dossiers: tuple[str, ...] = DOSSIERS_CIBL
                 total_octets += taille
                 d_formats[fmt] = d_formats.get(fmt, 0) + 1
                 n += 1
-                if n >= max_fichiers:
+                if max_fichiers and n >= max_fichiers:
                     break
-            if n >= max_fichiers:
+            if max_fichiers and n >= max_fichiers:
                 break
         dossiers_rap.append({"dossier": rel, "present": True, "n_fichiers": d_formats and sum(d_formats.values()) or 0,
                              "octets": d_octets, "formats": d_formats})
     lisibles = sum(1 for f in fichiers if f["lisible"])
     bloques = sum(1 for f in fichiers if not f["lisible"])
+    # item 7 : si le plafond de fichiers est ATTEINT, on le SIGNALE (jamais une exclusion silencieuse).
+    tronque = bool(max_fichiers and n >= max_fichiers)
+    if tronque:
+        import sys as _sys
+        print("[LAB][ATTENTION] inventaire tronque au plafond de %d fichiers : des fichiers sont EXCLUS. "
+              "Relance avec max_fichiers=0 (illimite) pour tout traiter." % max_fichiers,
+              file=_sys.stderr, flush=True)
     return {"racine": str(racine), "dossiers": dossiers_rap, "fichiers": fichiers,
             "total_fichiers": len(fichiers), "total_octets": total_octets,
-            "lisibles": lisibles, "bloques": bloques}
+            "lisibles": lisibles, "bloques": bloques, "tronque": tronque,
+            "plafond_fichiers": int(max_fichiers)}
 
 
 def bundles_depuis_fichier(chemin: str | Path, *, max_lignes: int = 500_000) -> list[dict[str, Any]]:

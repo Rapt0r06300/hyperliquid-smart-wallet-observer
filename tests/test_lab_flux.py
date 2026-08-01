@@ -65,3 +65,16 @@ def test_plusieurs_fichiers_streames_ensemble(tmp_path):
     f1 = _fichier_events(tmp_path, 12, "a.jsonl")
     f2 = _fichier_events(tmp_path, 8, "b.jsonl")
     assert sum(1 for _ in F.flux_evenements_stream([f1, f2])) == 20
+
+
+def test_inventaire_signale_la_troncature_item7(tmp_path, capsys):
+    from hl_observer.ops.lab_inventaire import inventorier
+    d = tmp_path / "runtime" / "replay"
+    d.mkdir(parents=True)
+    for i in range(6):
+        (d / ("f%d.jsonl" % i)).write_text('{"coin":"BTC","ts_ms":1,"px":1,"signe":1}\n', encoding="utf-8")
+    inv = inventorier(tmp_path, max_fichiers=3)               # plafond ATTEINT
+    assert inv["tronque"] is True and inv["plafond_fichiers"] == 3
+    assert "tronque" in capsys.readouterr().err.lower()       # SIGNALE, jamais silencieux
+    inv2 = inventorier(tmp_path, max_fichiers=0)              # 0 = illimite -> tout traite
+    assert inv2["tronque"] is False and inv2["total_fichiers"] >= 6
