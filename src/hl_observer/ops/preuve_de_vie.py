@@ -15,13 +15,29 @@ n_ecrites_cumul, dernier_exchange_ts). Aucune donnée fabriquée : une source sa
 """
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Mapping, Sequence
+
+# Câblage des protections canoniques (IDEA-79) : une panne de collecte n'est PAS un marché calme.
+# Cet import branche runtime/protections dans un chemin de production (le lanceur appelle ce module).
+from hl_observer.runtime.protections import etat_ingestion
 
 STATUT_READY = "READY"
 STATUT_DEGRADED = "DEGRADED"
 STATUT_DATA_NOT_READY = "DATA_NOT_READY"
+
+# Deux niveaux explicites (item 2).
+NIVEAU_CORE = "READY_CORE"           # allMids + BBO + userFills réellement vivants
+NIVEAU_HARVEST = "READY_HARVEST"     # toutes les sources utiles vivantes OU clairement déclarées indispo
+
+# Taxonomie de cause (item 2) : ne jamais confondre ces cinq états.
+CAUSE_OK = "OK"
+CAUSE_MARCHE_CALME = "MARCHE_CALME"
+CAUSE_PANNE_TECHNIQUE = "PANNE_TECHNIQUE"
+CAUSE_QUOTA = "QUOTA_ATTEINT"
+CAUSE_DONNEE_ABSENTE = "DONNEE_ABSENTE"
+CAUSE_NON_IMPLEMENTEE = "SOURCE_NON_IMPLEMENTEE"
 
 SEUIL_HEARTBEAT_MS = 60_000.0        # un heartbeat plus vieux que 60 s = figé
 
@@ -34,6 +50,7 @@ class SourceAttendue:
     obligatoire: bool = True
     exige_exchange_ts: bool = True    # backfills/scoring locaux n'ont pas toujours un ts exchange live
     chemin_sortie: str | None = None  # fichier/DB de sortie (contrôle de taille en complément)
+    non_implementee: bool = False     # source déclarée indisponible (pas de collecteur réel) — item 2
 
 
 # Profil HARVEST : socle CORE = OBLIGATOIRE ; récolte dense = secondaire (DEGRADED si muette, pas bloquant).
@@ -75,9 +92,41 @@ class EtatRuntime:
     statut: str
     raison: str
     preuves: tuple[PreuveSource, ...]
+    ready_core: bool = False          # allMids + BBO + userFills réellement vivants (item 2)
+    ready_harvest: bool = False       # toutes utiles vivantes OU clairement déclarées indispo (item 2)
+    causes: tuple[dict[str, Any], ...] = field(default_factory=tuple)  # taxonomie par source (item 2)
 
     def ready(self) -> bool:
         return self.statut == STATUT_READY
+
+
+def cause_source(src: SourceAttendue, preuve: PreuveSource, *, ecrites: int,
+                 ecrites_precedentes: int | None, reconnexions: int = 0,
+                 heartbeat_present: bool = True, seuil_reconnexions_quota: int = 20) -> dict[str, Any]:
+    """Distingue les CINQ états (item 2), sans jamais confondre panne et marché calme. S'appuie sur la
+    protection canonique `etat_ingestion` (IDEA-79)."""
+    if src.non_implementee:
+        return {"source": src.nom, "cause": CAUSE_NON_IMPLEMENTEE, "sante": "GRISE",
+                "motif": "aucun collecteur reel branche pour cette source"}
+    if preuve.sain:
+        return {"source": src.nom, "cause": CAUSE_OK, "sante": "VERTE"}
+    if not heartbeat_present:
+        return {"source": src.nom, "cause": CAUSE_DONNEE_ABSENTE, "sante": "ROUGE",
+                "motif": "aucun heartbeat : le collecteur n'a rien rapporte"}
+    if not preuve.process_actif or not preuve.heartbeat_frais:
+        return {"source": src.nom, "cause": CAUSE_PANNE_TECHNIQUE, "sante": "ROUGE",
+                "motif": preuve.raison}
+    if int(reconnexions) >= int(seuil_reconnexions_quota):
+        return {"source": src.nom, "cause": CAUSE_QUOTA, "sante": "ORANGE",
+                "motif": "reconnexions repetees : quota/limite probable (%d)" % int(reconnexions)}
+    if ecrites <= 0 and (ecrites_precedentes is None or ecrites <= int(ecrites_precedentes)):
+        # collecteur vivant mais aucune donnée : panne OU marché calme -> etat_ingestion tranche.
+        ei = etat_ingestion(n_nouveaux_evenements=0)
+        if ei["sante"] == "VERTE":
+            return {"source": src.nom, "cause": CAUSE_MARCHE_CALME, "sante": "VERTE",
+                    "motif": ei["motif"]}
+        return {"source": src.nom, "cause": CAUSE_PANNE_TECHNIQUE, "sante": "ROUGE", "motif": ei["motif"]}
+    return {"source": src.nom, "cause": CAUSE_DONNEE_ABSENTE, "sante": "ROUGE", "motif": preuve.raison}
 
 
 def _int(x: Any) -> int | None:
@@ -92,9 +141,11 @@ def _int(x: Any) -> int | None:
 def preuve_source(src: SourceAttendue, hb: Mapping[str, Any] | None, *, now_ms: float,
                   pid_vivant: Callable[[int], bool], seuil_hb_ms: float = SEUIL_HEARTBEAT_MS,
                   ecrites_precedentes: int | None = None,
-                  taille_sortie: int | None = None) -> PreuveSource:
+                  taille_sortie: int | None = None,
+                  gaps_critiques: int = 0, carnet_desync: bool = False) -> PreuveSource:
     """Établit la preuve de vie d'UNE source à partir de son heartbeat normalisé. Aucun heartbeat =
-    aucune preuve (fail-closed honnête)."""
+    aucune preuve (fail-closed honnête). `gaps_critiques`/`carnet_desync` (item 1) : un trou critique ou
+    un carnet désynchronisé rend la source NON saine même si le heartbeat est frais."""
     hb = hb or {}
     pid = _int(hb.get("pid"))
     ts_ms = _int(hb.get("ts_ms"))
@@ -125,6 +176,8 @@ def preuve_source(src: SourceAttendue, hb: Mapping[str, Any] | None, *, now_ms: 
         ("aucun evenement valide", evenement_valide),
         ("flux ne grossit pas", flux_grossit),
         ("horodatages manquants (exchange/reception)", horodatages_presents),
+        ("gap critique", int(gaps_critiques) <= 0),
+        ("carnet desynchronise", not bool(carnet_desync)),
     ]
     echecs = [nom for nom, ok in controles if not ok]
     sain = not echecs
@@ -137,28 +190,54 @@ def evaluer_readiness(sources: Sequence[SourceAttendue], heartbeats: Mapping[str
                       now_ms: float, pid_vivant: Callable[[int], bool],
                       seuil_hb_ms: float = SEUIL_HEARTBEAT_MS,
                       ecrites_precedentes: Mapping[str, int] | None = None,
-                      tailles: Mapping[str, int] | None = None) -> EtatRuntime:
-    """Rend l'état global : READY / DEGRADED / DATA_NOT_READY (+ raison précise)."""
+                      tailles: Mapping[str, int] | None = None,
+                      metriques: Mapping[str, Mapping[str, Any]] | None = None) -> EtatRuntime:
+    """Rend l'état global : READY / DEGRADED / DATA_NOT_READY (+ raison précise), plus les deux niveaux
+    READY_CORE / READY_HARVEST et la taxonomie de cause par source (item 2). `metriques` (optionnel) :
+    par source gaps_critiques / carnet_desync / reconnexions (feed_quality)."""
     base_prec = ecrites_precedentes or {}
     base_taille = tailles or {}
+    base_met = metriques or {}
+
+    def _met(nom, cle, defaut=0):
+        m = base_met.get(nom) or {}
+        return m.get(cle, defaut)
+
     preuves = tuple(
         preuve_source(s, heartbeats.get(s.nom), now_ms=now_ms, pid_vivant=pid_vivant,
                       seuil_hb_ms=seuil_hb_ms, ecrites_precedentes=base_prec.get(s.nom),
-                      taille_sortie=base_taille.get(s.nom))
+                      taille_sortie=base_taille.get(s.nom),
+                      gaps_critiques=int(_met(s.nom, "gaps_critiques", 0)),
+                      carnet_desync=bool(_met(s.nom, "carnet_desync", False)))
         for s in sources
     )
+    causes = tuple(
+        cause_source(s, p, ecrites=int((heartbeats.get(s.nom) or {}).get("n_ecrites_cumul") or 0),
+                     ecrites_precedentes=base_prec.get(s.nom),
+                     reconnexions=int(_met(s.nom, "reconnects", _met(s.nom, "reconnexions", 0))),
+                     heartbeat_present=bool(heartbeats.get(s.nom)))
+        for s, p in zip(sources, preuves)
+    )
+    _tolere = {CAUSE_NON_IMPLEMENTEE, CAUSE_MARCHE_CALME}          # « clairement déclarée indispo » ou calme
+    ready_core = all(p.sain for p in preuves if p.obligatoire)
+    ready_harvest = ready_core and all(
+        p.sain or c["cause"] in _tolere for p, c in zip(preuves, causes))
+
     obligatoires_malades = [p for p in preuves if p.obligatoire and not p.sain]
     if obligatoires_malades:
         p = obligatoires_malades[0]
         raison = "source obligatoire %s (%s @ %s): %s" % (p.nom, p.canal, p.venue, p.raison)
         if len(obligatoires_malades) > 1:
             raison += " (+%d autre(s))" % (len(obligatoires_malades) - 1)
-        return EtatRuntime(STATUT_DATA_NOT_READY, raison, preuves)
-    secondaires_malades = [p for p in preuves if (not p.obligatoire) and not p.sain]
+        return EtatRuntime(STATUT_DATA_NOT_READY, raison, preuves, ready_core, ready_harvest, causes)
+    secondaires_malades = [p for p, c in zip(preuves, causes)
+                           if (not p.obligatoire) and not p.sain and c["cause"] not in _tolere]
     if secondaires_malades:
         muettes = ", ".join("%s(%s)" % (p.nom, p.raison) for p in secondaires_malades)
-        return EtatRuntime(STATUT_DEGRADED, "sources secondaires muettes: %s" % muettes, preuves)
-    return EtatRuntime(STATUT_READY, "toutes les sources obligatoires sont saines", preuves)
+        return EtatRuntime(STATUT_DEGRADED, "sources secondaires muettes: %s" % muettes,
+                           preuves, ready_core, ready_harvest, causes)
+    return EtatRuntime(STATUT_READY, "toutes les sources obligatoires sont saines",
+                       preuves, ready_core, ready_harvest, causes)
 
 
 def attendre_readiness(lecteur_etat: Callable[[float], EtatRuntime], *, timeout_s: float,
@@ -230,9 +309,11 @@ def main(argv: list[str] | None = None) -> int:
 
 
 __all__ = ["STATUT_READY", "STATUT_DEGRADED", "STATUT_DATA_NOT_READY", "SEUIL_HEARTBEAT_MS",
+           "NIVEAU_CORE", "NIVEAU_HARVEST", "CAUSE_OK", "CAUSE_MARCHE_CALME", "CAUSE_PANNE_TECHNIQUE",
+           "CAUSE_QUOTA", "CAUSE_DONNEE_ABSENTE", "CAUSE_NON_IMPLEMENTEE",
            "SourceAttendue", "PreuveSource", "EtatRuntime", "SOURCES_HARVEST", "preuve_source",
-           "evaluer_readiness", "attendre_readiness", "format_readiness", "evaluer_depuis_disque",
-           "lire_heartbeats_reels", "main"]
+           "cause_source", "evaluer_readiness", "attendre_readiness", "format_readiness",
+           "evaluer_depuis_disque", "lire_heartbeats_reels", "main"]
 
 
 if __name__ == "__main__":

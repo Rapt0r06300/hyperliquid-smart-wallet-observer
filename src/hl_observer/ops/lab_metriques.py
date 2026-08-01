@@ -11,7 +11,19 @@ from __future__ import annotations
 import math
 from typing import Any
 
+# Câblage de la VÉRITÉ de latence (P1B) dans le laboratoire : le stress de latence (item 20) n'est plus
+# un simple coefficient — il réutilise la latence causale autoritaire de paper_trading.latency_truth.
+from hl_observer.paper_trading import latency_truth as _LT
+
 UNMEASURABLE = "UNMEASURABLE"
+
+
+def stress_latence_bps(delay_sec: float, *, coeff_bps_per_sec: float = 0.20,
+                       cap_bps: float = 15.0) -> dict[str, Any]:
+    """Composante LATENCE du stress adverse (item 20). Délègue à la vérité de latence canonique
+    (latency_truth), étiquetée STRESS_ONLY : ne peut jamais être promue comme PnL autoritaire."""
+    return _LT.latence_scalaire_stress_bps(float(delay_sec), coeff_bps_per_sec=coeff_bps_per_sec,
+                                           cap_bps=cap_bps)
 
 
 def profit_factor(nets: list[float]) -> Any:
