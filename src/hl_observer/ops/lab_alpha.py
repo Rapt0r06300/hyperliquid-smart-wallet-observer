@@ -22,6 +22,7 @@ from hl_observer.mega_cablage.feed_adapter import evenements_depuis_bundles
 from hl_observer.mega_cablage.lead_lag_stage import score_lead_lag
 from hl_observer.strategies.lead_lag_paper import signaux_depuis_events, rejouer_lead_lag
 from hl_observer.ops.lab_inventaire import inventorier, bundles_depuis_fichier, LabFormatBloque
+from hl_observer.ops.lab_flux import materialiser_shard, charger_borne
 from hl_observer.ops.lab_audit import auditer
 from hl_observer.ops import lab_recherche as R
 from hl_observer.ops.lab_eta import MoteurETA, format_hms
@@ -55,8 +56,8 @@ def _paires_lead_lag(events: list[dict[str, Any]]) -> list[tuple[Any, Any]]:
 def lancer_lab(*, racine: str | Path, sortie_dir: str | Path | None = None, budget: int = 32,
                source: str = "REEL", horodatage: str = "", temps_fn: Callable[[], float] | None = None,
                journal_path: str | Path | None = None, checkpoint_path: str | Path | None = None,
-               imprimer: bool = False, max_events: int = 200_000, min_episodes: int = 30,
-               max_fichiers: int = 20_000) -> dict[str, Any]:
+               imprimer: bool = False, max_events: int = 0, min_episodes: int = 30,
+               max_fichiers: int = 20_000, max_ram_events: int = 0) -> dict[str, Any]:
     """Exécute tout le laboratoire et écrit le rapport. Retourne un résumé (chemins, verdict, compteurs, table)."""
     temps = temps_fn or time.monotonic
     t0 = temps()
@@ -114,25 +115,20 @@ def lancer_lab(*, racine: str | Path, sortie_dir: str | Path | None = None, budg
         return (RafraichisseurPeriodique(lambda: _rafraichir(horodatage or "T"), intervalle_s=1.0)
                 if imprimer else nullcontext())
 
-    # 2) LECTURE -> bundles -> events (feed_adapter)
-    etat.update({"en_cours": "lecture des donnees", "prochaine": "audit"})
-    bundles: list[dict[str, Any]] = []
-    octets_lus = 0
-    bloques = 0
+    # 2) LECTURE -> events, EN STREAMING À MÉMOIRE BORNÉE (item 5) : plus de plafond arbitraire 200k.
+    # On déverse tous les événements dans un shard sur DISQUE (RAM bornée, checkpoint/reprise), puis on
+    # charge une FENÊTRE bornée pour le replay (budget mémoire EXPLICITE, jamais un nombre magique).
+    etat.update({"en_cours": "lecture des donnees (streaming)", "prochaine": "audit"})
+    octets_lus = sum(int(f["octets"]) for f in inv["fichiers"] if f["lisible"])
+    bloques = int(inv.get("bloques", 0))
+    fichiers_lisibles = [f["chemin"] for f in inv["fichiers"] if f["lisible"]]
+    shard = sortie / "events_shard.jsonl"
     with _refr_ctx():
-        for f in inv["fichiers"]:
-            if not f["lisible"] or len(bundles) >= max_events:
-                continue
-            etat["fichier"] = f["rel"]
-            try:
-                bs = bundles_depuis_fichier(f["chemin"], max_lignes=max_events - len(bundles))
-                bundles.extend(bs)
-                octets_lus += f["octets"]
-            except LabFormatBloque:
-                bloques += 1
-            except Exception:                                 # noqa: BLE001 (lecture défaillante = compte honnête)
-                etat["erreurs"] = etat.get("erreurs", 0) + 1
-    events = evenements_depuis_bundles(bundles)
+        info_shard = materialiser_shard(
+            fichiers_lisibles, shard, max_events=(max_events if max_events and max_events > 0 else 0),
+            checkpoint_path=sortie / "events_shard.checkpoint.json")
+    etat["events_shardes"] = info_shard["n"]
+    events = charger_borne(shard, max_ram=(max_ram_events if max_ram_events and max_ram_events > 0 else 0))
     valides = _events_valides(events)
     etat.update({"octets_lus": octets_lus, "events_lus": len(events), "events_valides": valides,
                  "events_rejetes": len(events) - valides, "derniere": "lecture (%d events)" % len(events)})
