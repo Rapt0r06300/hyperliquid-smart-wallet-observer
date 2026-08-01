@@ -22,6 +22,10 @@ réellement des données, surveille les pannes, et reste **strictement paper / l
 | `514a771` | 7 | 5 | **Persistance dYdX** + branchement WS → stockage |
 | `d06499b` | 8 | 2,7,8,9,10 | Câblage chirurgical du `.cmd` / `.ps1` |
 | `6768310` | 9 | 13 | **Recette E2E** + barrière CI |
+| `d972f01` | 10 | 14 | Rapport + miroir vérifié |
+| `140233c` | 11 | 2/5 | **Auto-démarrage dYdX** live dans HARVEST |
+| `abb1012` | 12 | 11 | **Activation** du stockage brut borné |
+| `5954066` | 13 | 12 | **Affichage continu** du tableau de santé |
 
 Fichiers **créés** : `preflight_lanceur.py`, `preuve_de_vie.py`, `registre_pids.py`, `quota_stockage.py`,
 `tableau_sante_collecteurs.py`, `recette_lanceur.py` (sous `src/hl_observer/ops/`),
@@ -72,6 +76,7 @@ Chaque collecteur ci-dessous a un **vrai runner** présent sur le disque, dédup
 | `scorer-vaults` | scoring de vaults | `tools/scorer_vaults.py` |
 | `backfill-fills` | backfill fills de vaults | `tools/backfill_vault_fills.py` |
 | `backfill-candles-vaults` | backfill candles | `tools/backfill_candles_vaults.py` |
+| `dydx-live` | dYdX v4 **trades + orderbooks + subaccounts** (secondaire, read-only) | `tools/collecter_dydx_live.py` |
 
 Plus, démarrés par le `.ps1` : le **moteur/UI paper** (port 8794), le **poller** simulation, le **stream
 userFills HF**. Les **3 sources CORE** (allMids, BBO, userFills) sont **obligatoires** : si l'une ne
@@ -85,35 +90,36 @@ l'univers massif passe par REST/backfill. Le preflight **vérifie** le budget (1
 
 ## 4. Flux encore BLOQUÉS (honnêtement hors profil — aucune donnée fabriquée)
 
-- **dYdX (live)** : la **persistance est désormais réparée et testée** (bloc 7) — trades, positions,
-  subaccounts et **carnets** sont vraiment écrits en SQLite (avant : normalisés puis **jetés**) ; le
-  branchement WS→stockage (`flux_live.PiloteFluxDydx`), la dédup, le **gap recovery** REST, le heartbeat
-  et la **reprise après crash** existent et sont couverts par 358 tests verts. **MAIS** le profil HARVEST
-  **ne démarre pas encore** de processus collecteur dYdX (il n'y a pas d'entrée dYdX dans le `REGISTRE`
-  du superviseur). Autrement dit : **dYdX est prêt à persister, mais pas encore auto-démarré** par le
-  double-clic. Prochaine étape : un runner `tools/` qui relie `DydxIndexerWsClient` à `PiloteFluxDydx`
-  + une entrée `REGISTRE`.
+- **dYdX (live)** : **désormais auto-démarré** (bloc 11) — persistance trades/positions/subaccounts/
+  carnets, dédup, gap recovery, reprise, le tout couvert par 358 tests verts. La seule partie qui tourne
+  uniquement chez toi est la **connexion WS réelle** (pas de réseau d'échange dans mon bac à sable).
 - **Bybit** : exclu tant que son **vrai collecteur public** n'est pas implémenté et testé (ta condition).
 - **node fills global**, **HF recorder standalone**, **TWAP slice standalone**, **L4 capture** : restent
   `BLOCKED_EXTERNAL` — pas de runner réseau réel, donc **hors profil** (on ne prétend pas les collecter).
 
 ---
 
-## 5. Deux points « prêts mais pas encore activés » — dits franchement
+## 5. Les trois points restants — désormais FAITS (blocs 11-13)
 
-Ces deux modules sont **codés et testés**, mais leur **activation live** demande un branchement
-supplémentaire que je n'ai **pas** fait, pour ne pas casser une protection existante :
+La première version de ce rapport signalait trois points « prêts mais pas encore activés ». Ils sont
+maintenant **branchés, activés et testés** :
 
-1. **Stockage brut borné (item 11).** Le module `quota_stockage` (quota, alarme, rétention sans
-   suppression silencieuse) est complet. Mais le lanceur garde encore `HYPERSMART_DISABLE_RAW_STORAGE=1`
-   — le drapeau qui avait évité le crash de la DB à 29 Go. **Le rebrancher sans câbler la garde dans les
-   writers ré-ouvrirait le risque de saturation.** Activer = plomber `GardeStockage` dans les writers
-   bruts, puis passer le drapeau à 0.
-2. **Tableau de santé (item 12).** Le module produit la zone dynamique + le journal horodaté, et le
-   lanceur affiche déjà un **instantané** de preuve de vie. La **boucle d'affichage continue** dans la
-   fenêtre principale (rafraîchie chaque seconde) reste à câbler dans le `.ps1`/l'UI.
+1. **Auto-démarrage dYdX (item 2/5) — FAIT.** `tools/collecter_dydx_live.py` relie le WS dYdX à la
+   persistance (`PiloteFluxDydx`) ; entrée `REGISTRE` `dydx-live` ajoutée au profil HARVEST (session
+   bornée 290 s, relancée par le superviseur). dYdX est **secondaire** : sa panne ne bloque pas la
+   récolte HL. Souscriptions bornées (budget WS).
+2. **Stockage brut borné (item 11) — FAIT.** `collection/stockage_brut_borne.py` : shards gzip +
+   quota + rétention explicite (archive, jamais de suppression muette). Branché dans le sink brut
+   (`store_raw_event`) via un hook minimal. Le lanceur active `HYPERSMART_RAW_STORAGE_QUOTA_GO=10`
+   (le brut SQL reste coupé : **pas de retour au bloat 29 Go** ; c'est le brut FICHIER borné qui prend
+   le relais).
+3. **Affichage continu du tableau (item 12) — FAIT.** `ops/moniteur_sante.py` : boucle qui rafraîchit
+   la zone dynamique + journalise chaque passe. Accessible via `LANCER_HYPERSMART.cmd sante` (ou
+   `python -m hl_observer.ops.moniteur_sante`), sans perturber la boucle interactive du moteur.
 
-Je préfère te le dire clairement plutôt que cocher une case en vert.
+**Les 14 items sont donc traités.** Le seul « live » qui ne peut pas être prouvé dans mon bac à sable
+Linux (pas de réseau d'échange) est la connexion WS réelle — elle tourne chez toi ; le câblage, lui,
+est prouvé par des tests déterministes.
 
 ---
 
