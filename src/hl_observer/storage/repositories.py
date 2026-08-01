@@ -292,6 +292,14 @@ class CollectionRepository:
         # settings (cause du gonflement DB a 29 Go). No-op => aucun event ecrit.
         import os as _os
         if _os.getenv("HYPERSMART_DISABLE_RAW_STORAGE", "0").strip().lower() in {"1", "true", "yes", "on"}:
+            # Item 11 : le brut SQL reste coupe (anti-bloat 29 Go), MAIS on peut capturer le brut vers un
+            # stockage FICHIER BORNE (shards gzip + quota + retention) si HYPERSMART_RAW_STORAGE_QUOTA_GO>0.
+            try:
+                from hl_observer.collection.stockage_brut_borne import capturer_si_active
+                capturer_si_active(source=source, endpoint=endpoint, request_type=request_type,
+                                   request=request_payload, response=response_payload)
+            except Exception:  # noqa: BLE001 — capture best-effort, jamais bloquante
+                pass
             return None
         fetched_at_ms = now_ms()
         response_hash = stable_payload_hash(response_payload)

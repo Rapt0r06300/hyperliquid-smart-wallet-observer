@@ -55,6 +55,9 @@ rem ANTI-BLOAT: coupe le stockage brut (payloads L2/leaderboard/fills) qui a fai
 rem gonfler la DB a 29 Go puis crasher. Le PnL/ledger n en depend pas. Mettre a 0
 rem seulement si tu veux le replay brut (avec cap manuel).
 set "HYPERSMART_DISABLE_RAW_STORAGE=1"
+rem Item 11 : le brut SQL reste coupe (anti-bloat), mais on ACTIVE un stockage brut FICHIER BORNE
+rem (shards gzip + quota + retention, aucune suppression silencieuse). 10 Go de plafond hot.
+set "HYPERSMART_RAW_STORAGE_QUOTA_GO=10"
 REM REPLAY: enregistre candidates.jsonl + marks.jsonl pour l'A/B replay apres le run.
 REM Ecriture CAPEE (60 Mo marks / 20 Mo candidates, rotation last-N) -> jamais de
 REM re-bloat comme les 29 Go. Sans ce flag, le run 48h ne produit AUCUNE donnee replay.
