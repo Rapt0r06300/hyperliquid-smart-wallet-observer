@@ -121,13 +121,37 @@ def enregistrer_sources_declarees(root: str | Path, run_id: str, *,
     return resume
 
 
-def cloturer_session_courante(root: str | Path, *, writers_arretes: bool, horloge=time.time) -> dict:
-    """Clôt la session pointée par COURANTE (item 8). Sans pointeur → rien à clôturer."""
+def preuve_writers_arretes(root: str | Path, *, pid_vivant=_pid_vivant_reel) -> tuple[bool, list[str]]:
+    """Preuve INDÉPENDANTE (item 4) que les writers sont arrêtés : AUCUN PID de collecteur du registre
+    n'est encore vivant. Rend (arretes, [noms encore vivants]). Jamais un flag aveugle."""
+    try:
+        from hl_observer.ops.registre_pids import lire_registre
+        reg = lire_registre(root)
+    except Exception:  # noqa: BLE001
+        return True, []                      # pas de registre lisible → rien à prouver vivant
+    vivants: list[str] = []
+    for nom, pid in dict(reg.get("collecteurs") or {}).items():
+        try:
+            if isinstance(pid, int) and pid_vivant(int(pid)):
+                vivants.append(str(nom))
+        except Exception:  # noqa: BLE001
+            continue
+    return (not vivants), vivants
+
+
+def cloturer_session_courante(root: str | Path, *, writers_arretes: bool | None = None,
+                              horloge=time.time, pid_vivant=_pid_vivant_reel) -> dict:
+    """Clôt la session pointée par COURANTE (items 4 & 8). La preuve d'arrêt des writers est CALCULÉE
+    indépendamment (registre PID) : un `--writers-arretes` aveugle ne suffit JAMAIS. Si un collecteur est
+    encore vivant → writers_arretes=False → QUARANTINED (WRITERS_ENCORE_ACTIFS). Sans pointeur → rien."""
     rid = run_id_courant(root)
     if not rid:
         return {"statut": "AUCUNE_SESSION", "motifs": ["pas de session courante"]}
-    verdict = SC.CatalogueSession(root, rid).cloturer(writers_arretes=writers_arretes, horloge=horloge)
-    verdict["run_id"] = rid
+    arretes, vivants = preuve_writers_arretes(root, pid_vivant=pid_vivant)
+    # la PREUVE prime ; si l'appelant atteste l'arrêt mais qu'un writer vit encore, la preuve gagne.
+    effectif = bool(arretes) if writers_arretes is None else (bool(writers_arretes) and bool(arretes))
+    verdict = SC.CatalogueSession(root, rid).cloturer(writers_arretes=effectif, horloge=horloge)
+    verdict.update({"run_id": rid, "writers_vivants": vivants, "preuve_writers_arretes": arretes})
     return verdict
 
 
@@ -163,9 +187,12 @@ def main(argv: list[str] | None = None) -> int:
               (r["declarees"], r["vivantes"], r["absentes"]), flush=True)
         return 0
     if args.action == "cloturer":
-        v = cloturer_session_courante(root, writers_arretes=bool(args.writers_arretes))
-        print("CLOTURE statut=%s run_id=%s motifs=%s" %
-              (v.get("statut"), v.get("run_id"), ",".join(v.get("motifs", []) or [])), flush=True)
+        # item 4 : le flag n'est qu'une attestation ; la PREUVE (registre PID) est calculee et prime.
+        atteste = True if args.writers_arretes else None
+        v = cloturer_session_courante(root, writers_arretes=atteste)
+        print("CLOTURE statut=%s run_id=%s writers_vivants=%s motifs=%s" %
+              (v.get("statut"), v.get("run_id"), ",".join(v.get("writers_vivants", []) or []) or "aucun",
+               ",".join(v.get("motifs", []) or [])), flush=True)
         return 0 if v.get("statut") == SC.STATUT_COMPLETE else 2
     st = _statut_session_courante(root)
     print("SESSION run_id=%s statut=%s sources=%s" %

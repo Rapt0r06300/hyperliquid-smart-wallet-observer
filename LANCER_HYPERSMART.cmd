@@ -446,10 +446,17 @@ REM   Boucle CACHEE (start /b) : rafraichit le tableau + APPEND runtime\logs\san
 REM   (READY_CORE/HARVEST, source, PID, heartbeat, events/s, fichier qui grossit, gaps/reconnects/stale,
 REM   carnet sync, statut/raison). Process separe : une panne du moniteur n'affecte pas le moteur. 0 ordre.
 if not exist "%~dp0runtime\logs" mkdir "%~dp0runtime\logs" >nul 2>&1
-start "" /b python -m hl_observer.ops.moniteur_sante "%~dp0." --intervalle 3 1>>"%~dp0runtime\logs\sante_journal.log" 2>&1
+REM item 9 : UN SEUL writer pour sante_journal.log = le module moniteur_sante (journal synthetique).
+REM La sortie CONSOLE redirigee va dans un fichier SEPARE (sante_console.log) -> plus d'ecritures
+REM concurrentes ni de doublons sur le journal.
+start "" /b "%HYPERSMART_PYTHON%" -m hl_observer.ops.moniteur_sante "%~dp0." --intervalle 3 1>>"%~dp0runtime\logs\sante_console.log" 2>&1
 
 powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0tools\start_hypersmart_simulation.ps1" -Port 8794 -IntervalSeconds 15 -MaxLeaders 50 -Interactive
 
+REM item 4 : a la SORTIE du moteur interactif (Q / croix / fin), on arrete REELLEMENT les writers puis on
+REM CLOTURE la session (COMPLETE si tout verifie + zero orphelin + preuve d'arret ; sinon QUARANTINED).
+echo   [ARRET] Sortie du moteur : arret des collecteurs + cloture de session...
+call :stop_impl
 goto :fin
 
 :fin
@@ -705,11 +712,12 @@ goto :fin
 :stop_impl
 REM ARRET CIBLE (Fix 5) : SEULEMENT les PID enregistres du run + enfants verifies + process signes
 REM registre + detenteur valide du port 8794 + verrou userfills. AUCUN motif large (*hl_observer*/*projet*).
-python -m hl_observer.ops.superviseur_collecteurs arreter
-REM === ITEM 8 : CLOTURE SURE de la session courante APRES l'arret des writers. La session ne passe
-REM   COMPLETE que si checksums recalcules OK + fichiers verifies + ZERO orphelin ; sinon QUARANTINED.
-REM   --writers-arretes atteste que les collecteurs/DB viennent d'etre arretes ci-dessus.
-python -m hl_observer.ops.session_harvest cloturer "%~dp0." --writers-arretes
+"%HYPERSMART_PYTHON%" -m hl_observer.ops.superviseur_collecteurs arreter
+REM === ITEMS 4 & 8 : CLOTURE SURE APRES l'arret des writers. On NE passe PLUS --writers-arretes : la
+REM   preuve d'arret est CALCULEE independamment (registre PID -> aucun collecteur vivant). La session ne
+REM   passe COMPLETE que si writers reellement arretes + checksums OK + artefacts reels + ZERO orphelin ;
+REM   sinon QUARANTINED. Un collecteur orphelin encore vivant => QUARANTINED (jamais un faux COMPLETE).
+"%HYPERSMART_PYTHON%" -m hl_observer.ops.session_harvest cloturer "%~dp0."
 exit /b 0
 
 REM -------- RESTART = stop puis autopilot --------

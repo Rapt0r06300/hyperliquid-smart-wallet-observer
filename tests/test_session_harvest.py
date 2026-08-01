@@ -64,9 +64,19 @@ def test_source_core_sans_heartbeat_est_declaree_absente(tmp_path):
     assert bbo["raison_absence"].startswith("aucun heartbeat") and bbo["sante"] == "ROUGE"
 
 
+def _artefact_reel(root, run_id, rel="hl/allmids.jsonl", contenu=b"a\nb\n"):
+    """item 3 : un vrai artefact catalogue (fichier present + non vide) — requis pour COMPLETE."""
+    p = SC.chemin_session(root, run_id) / rel
+    p.parent.mkdir(parents=True, exist_ok=True)
+    p.write_bytes(contenu)
+    SC.CatalogueSession(root, run_id).enregistrer_source(
+        SC.EntreeSource("allmids-collector", "HYPERLIQUID", "allMids", chemin=rel))
+
+
 def test_cloture_propre_donne_complete(tmp_path):
     _battre_core(tmp_path)
     SH.ouvrir_session_harvest(tmp_path, run_id="harvest-fixe-4", now_ms=time.time() * 1000 + 100)
+    _artefact_reel(tmp_path, "harvest-fixe-4")               # item 3 : sans artefact reel, pas de COMPLETE
     v = SH.cloturer_session_courante(tmp_path, writers_arretes=True)
     assert v["statut"] == SC.STATUT_COMPLETE and v["run_id"] == "harvest-fixe-4"
     # la dernière session COMPLETE est retrouvable par ANALYSER.
@@ -87,6 +97,8 @@ def test_cli_ouvrir_status_cloturer(tmp_path, capsys):
     assert "SESSION_OUVERTE" in capsys.readouterr().out
     assert SH.main(["status", str(tmp_path)]) == 0
     assert "statut=ACTIVE" in capsys.readouterr().out
+    rid = SH.run_id_courant(tmp_path)
+    _artefact_reel(tmp_path, rid)                            # item 3 : artefact reel requis pour COMPLETE
     assert SH.main(["cloturer", str(tmp_path), "--writers-arretes"]) == 0
     assert "statut=COMPLETE" in capsys.readouterr().out
 
@@ -97,9 +109,37 @@ def test_le_cmd_ouvre_session_auto_moniteur_et_cloture():
     i_ouvrir = txt.index("session_harvest ouvrir")
     i_moteur = txt.index("start_hypersmart_simulation.ps1", i_ouvrir)
     assert i_ouvrir < i_moteur
-    # item 9 : moniteur auto-démarré (start /b), plus besoin de la sous-commande "sante" manuelle.
-    assert 'start "" /b python -m hl_observer.ops.moniteur_sante' in txt
-    i_moniteur = txt.index('start "" /b python -m hl_observer.ops.moniteur_sante')
+    # item 9 : moniteur auto-démarré (start /b, Python portable), plus besoin de "sante" manuelle.
+    assert 'start "" /b "%HYPERSMART_PYTHON%" -m hl_observer.ops.moniteur_sante' in txt
+    i_moniteur = txt.index('start "" /b "%HYPERSMART_PYTHON%" -m hl_observer.ops.moniteur_sante')
     assert i_ouvrir < i_moniteur < i_moteur
-    # item 8 : clôture de session dans le chemin d'arrêt.
-    assert "session_harvest cloturer" in txt and "--writers-arretes" in txt
+    # items 4 & 8 : clôture dans le chemin d'arrêt, SANS --writers-arretes aveugle (preuve calculee).
+    assert '-m hl_observer.ops.session_harvest cloturer "%~dp0."' in txt
+    assert 'cloturer "%~dp0." --writers-arretes' not in txt
+
+
+def _ecrire_registre(root, collecteurs):
+    from hl_observer.ops.registre_pids import REGISTRE_RELPATH
+    import json as _j
+    p = Path(root) / REGISTRE_RELPATH                                # <root>/runtime/data/lanceur_pids.json
+    p.parent.mkdir(parents=True, exist_ok=True)
+    p.write_text(_j.dumps({"collecteurs": collecteurs}), encoding="utf-8")
+
+
+def test_preuve_writers_arretes_independante_du_registre(tmp_path):
+    _ecrire_registre(tmp_path, {"bbo-collector": 4242})
+    arretes, vivants = SH.preuve_writers_arretes(tmp_path, pid_vivant=lambda pid: pid == 4242)
+    assert arretes is False and "bbo-collector" in vivants           # un collecteur encore vivant
+    arretes2, vivants2 = SH.preuve_writers_arretes(tmp_path, pid_vivant=lambda pid: False)
+    assert arretes2 is True and vivants2 == []                       # tous morts -> preuve d'arret
+
+
+def test_cloture_quarantaine_si_un_writer_vit_encore(tmp_path):
+    # item 4 : meme si l'appelant atteste l'arret, un writer vivant -> QUARANTINED (la preuve prime).
+    _battre_core(tmp_path)
+    rid, _ = SH.ouvrir_session_harvest(tmp_path, run_id="harvest-vivant", now_ms=time.time() * 1000 + 100)
+    _artefact_reel(tmp_path, rid)
+    _ecrire_registre(tmp_path, {"bbo-collector": 4242})
+    v = SH.cloturer_session_courante(tmp_path, writers_arretes=True, pid_vivant=lambda pid: pid == 4242)
+    assert v["statut"] == SC.STATUT_QUARANTINED and "WRITERS_ENCORE_ACTIFS" in v["motifs"]
+    assert v["preuve_writers_arretes"] is False and "bbo-collector" in v["writers_vivants"]

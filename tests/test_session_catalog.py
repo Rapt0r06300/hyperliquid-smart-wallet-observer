@@ -185,3 +185,17 @@ def test_nouveau_run_id_trie_et_unique():
     a = SC.nouveau_run_id("run", horloge=lambda: 1000.0)
     b = SC.nouveau_run_id("run", horloge=lambda: 2000.0)
     assert a != b and a.startswith("run-1000000-") and b.startswith("run-2000000-")
+
+
+def test_cloture_refuse_complete_sans_artefact_reel(tmp_path):
+    # item 3 : une session avec des sources DECLAREES mais AUCUN artefact reel ne devient jamais COMPLETE.
+    rid = "run-sans-artefact"
+    c = CatalogueSession(tmp_path, rid)
+    c.demarrer()
+    c.enregistrer_source(EntreeSource("bybit", "BYBIT", "trades", raison_absence="non implementee"))
+    v = c.cloturer(writers_arretes=True)
+    assert v["statut"] == SC.STATUT_QUARANTINED and "AUCUN_ARTEFACT_REEL" in v["motifs"]
+    # backward-compat explicite : exiger_artefacts=False autorise une cloture technique sans artefact.
+    c2 = CatalogueSession(tmp_path, "run-tech")
+    c2.demarrer()
+    assert c2.cloturer(writers_arretes=True, exiger_artefacts=False)["statut"] == SC.STATUT_COMPLETE

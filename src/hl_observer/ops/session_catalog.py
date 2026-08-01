@@ -194,8 +194,10 @@ class CatalogueSession:
 
     # ── clôture sûre (item 8) ───────────────────────────────────────────────────────────────────
     def cloturer(self, *, writers_arretes: bool, extensions_donnees: Iterable[str] = EXTENSIONS_DONNEES,
-                 horloge=time.time) -> dict:
+                 horloge=time.time, exiger_artefacts: bool = True) -> dict:
         """Passe la session en COMPLETE SEULEMENT si toutes les vérifications passent. Sinon QUARANTINED.
+        `exiger_artefacts` (item 3, défaut True) : une session SANS aucun artefact réel vérifié (fichier
+        présent + non vide) ne peut JAMAIS devenir COMPLETE — elle est QUARANTINED (AUCUN_ARTEFACT_REEL).
         Renvoie le verdict de clôture {statut, verifications, orphelins, divergences, motifs}."""
         cat = self.lire()
         if not cat:
@@ -234,10 +236,19 @@ class CatalogueSession:
         if orphelins:
             motifs.append("ORPHELINS")
 
+        # item 3 : au moins UN artefact réel vérifié (fichier présent + non vide) est requis pour COMPLETE.
+        artefacts_reels = sum(1 for cle, d in sources.items()
+                              if (d.get("chemin") and (d.get("taille_octets") or 0) > 0
+                                  and "MANQUANT" not in [x.get("probleme") for x in divergences
+                                                         if x.get("cle") == cle]))
+        if exiger_artefacts and artefacts_reels <= 0:
+            motifs.append("AUCUN_ARTEFACT_REEL")
+
         verifications = {
             "writers_arretes": bool(writers_arretes),
             "n_sources": len(sources),
             "n_artefacts_verifies": len(catalogues_rel),
+            "n_artefacts_reels": artefacts_reels,
             "orphelins": orphelins,
             "divergences": divergences,
             "checksums_ok": not any(m in ("CHECKSUM_DIVERGENT", "FICHIER_MANQUANT") for m in motifs),
