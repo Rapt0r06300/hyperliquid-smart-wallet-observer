@@ -435,6 +435,19 @@ echo   [READY_CORE] OK : allMids + BBO + userFills prouves vivants. Demarrage mo
 REM Item 4 : niveau HARVEST detaille (COMPLET / DEGRADE_DOCUMENTE) — INFORMATIF, va au catalogue de session.
 python -m hl_observer.ops.preuve_de_vie "%~dp0." --niveau harvest
 
+REM === ITEM 7 (cablage) : ouverture de la SESSION canonique + declaration de TOUTES les sources ========
+REM   Ecrit runtime\data\sessions\<run_id>\DATA_CATALOG.json (ACTIVE) + le pointeur COURANTE.json que le
+REM   moniteur et ANALYSER retrouvent. Chaque source est DECLAREE (vivante avec compteurs reels, ou absente
+REM   avec sa raison). Aucune donnee fabriquee.
+python -m hl_observer.ops.session_harvest ouvrir "%~dp0."
+
+REM === ITEM 9 : MONITEUR de sante INTEGRE AU LANCEMENT (plus besoin de "LANCER_HYPERSMART.cmd sante"). ==
+REM   Boucle CACHEE (start /b) : rafraichit le tableau + APPEND runtime\logs\sante_journal.log en continu
+REM   (READY_CORE/HARVEST, source, PID, heartbeat, events/s, fichier qui grossit, gaps/reconnects/stale,
+REM   carnet sync, statut/raison). Process separe : une panne du moniteur n'affecte pas le moteur. 0 ordre.
+if not exist "%~dp0runtime\logs" mkdir "%~dp0runtime\logs" >nul 2>&1
+start "" /b python -m hl_observer.ops.moniteur_sante "%~dp0." --intervalle 3 1>>"%~dp0runtime\logs\sante_journal.log" 2>&1
+
 powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0tools\start_hypersmart_simulation.ps1" -Port 8794 -IntervalSeconds 15 -MaxLeaders 50 -Interactive
 
 goto :fin
@@ -693,6 +706,10 @@ goto :fin
 REM ARRET CIBLE (Fix 5) : SEULEMENT les PID enregistres du run + enfants verifies + process signes
 REM registre + detenteur valide du port 8794 + verrou userfills. AUCUN motif large (*hl_observer*/*projet*).
 python -m hl_observer.ops.superviseur_collecteurs arreter
+REM === ITEM 8 : CLOTURE SURE de la session courante APRES l'arret des writers. La session ne passe
+REM   COMPLETE que si checksums recalcules OK + fichiers verifies + ZERO orphelin ; sinon QUARANTINED.
+REM   --writers-arretes atteste que les collecteurs/DB viennent d'etre arretes ci-dessus.
+python -m hl_observer.ops.session_harvest cloturer "%~dp0." --writers-arretes
 exit /b 0
 
 REM -------- RESTART = stop puis autopilot --------
