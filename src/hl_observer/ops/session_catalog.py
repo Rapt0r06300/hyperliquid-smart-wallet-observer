@@ -1,0 +1,325 @@
+"""[LANCEUR items 7 & 8] Session canonique + catalogue de données + clôture/quarantaine sûres.
+
+Chaque run de collecte possède UNE session figée sous ``runtime/data/sessions/<run_id>/`` dont le cœur
+est ``DATA_CATALOG.json``. Le catalogue est la SOURCE DE VÉRITÉ que l'analyse (ANALYSER, item 10) relit :
+il déclare, par source/venue/canal, le fichier/DB/shard produit, ses versions de schéma+parser, ses
+premiers/derniers horodatages (exchange ET réception), le compte d'événements reçus/valides/rejetés/
+dédupliqués, les gaps/reconnects/stale/hors-ordre, la couverture, le **checksum SHA-256**, la taille,
+l'état de santé, la raison d'absence d'une source, et les métadonnées (frais...).
+
+Cycle de vie honnête (jamais présenter incomplet comme complet) :
+
+  ACTIVE       — collecte en cours, le catalogue grossit (mise à jour ATOMIQUE à chaque source).
+  COMPLETE     — SEULEMENT après : writers arrêtés, flush/fsync, DB fermées, checksums recalculés,
+                 fichiers vérifiés (présents + taille + hash), ZÉRO orphelin. Sinon on ne clôt pas.
+  QUARANTINED  — une vérification de clôture a échoué (hash divergent, fichier manquant, orphelin,
+                 erreur d'archive/manifeste) → la session est mise en quarantaine, jamais COMPLETE.
+
+0 réseau, 0 ordre. Checksums en STREAMING (mémoire bornée — esprit item 11). Écritures atomiques
+(temp + os.replace + fsync). Aucune suppression brutale : la quarantaine MARQUE, elle ne détruit pas.
+"""
+from __future__ import annotations
+
+import hashlib
+import json
+import os
+import time
+from dataclasses import asdict, dataclass, field
+from pathlib import Path
+from typing import Any, Iterable, Mapping
+
+from hl_observer.runtime.protections import empreinte, manifeste_execution
+
+SCHEMA_CATALOGUE = "hypersmart.data_catalog.v1"
+NOM_CATALOGUE = "DATA_CATALOG.json"
+
+STATUT_ACTIVE = "ACTIVE"
+STATUT_COMPLETE = "COMPLETE"
+STATUT_QUARANTINED = "QUARANTINED"
+STATUTS = (STATUT_ACTIVE, STATUT_COMPLETE, STATUT_QUARANTINED)
+
+# Extensions considérées comme des DONNÉES (pour la détection d'orphelins à la clôture — item 8).
+EXTENSIONS_DONNEES = (".jsonl", ".jsonl.gz", ".json.gz", ".ndjson", ".sqlite3", ".sqlite",
+                      ".db", ".csv", ".parquet", ".gz")
+
+_CHUNK = 1 << 20  # 1 Mo — lecture bornée
+
+
+def nouveau_run_id(prefixe: str = "run", *, horloge=time.time) -> str:
+    """Identifiant de session : horodaté (tri naturel) + suffixe aléatoire (pas de collision)."""
+    return "%s-%d-%s" % (prefixe, int(horloge() * 1000), os.urandom(4).hex())
+
+
+def chemin_session(root: str | Path, run_id: str) -> Path:
+    return Path(root) / "runtime" / "data" / "sessions" / run_id
+
+
+def chemin_catalogue(root: str | Path, run_id: str) -> Path:
+    return chemin_session(root, run_id) / NOM_CATALOGUE
+
+
+def sha256_fichier(chemin: str | Path, *, chunk: int = _CHUNK) -> tuple[str, int]:
+    """SHA-256 en streaming (mémoire bornée) + taille. Fichier absent → ("", -1) (jamais un faux hash)."""
+    p = Path(chemin)
+    if not p.is_file():
+        return "", -1
+    h = hashlib.sha256()
+    taille = 0
+    with p.open("rb") as f:
+        while True:
+            bloc = f.read(chunk)
+            if not bloc:
+                break
+            h.update(bloc)
+            taille += len(bloc)
+    return h.hexdigest(), taille
+
+
+@dataclass
+class EntreeSource:
+    """Une entrée de catalogue = un flux de données (source × venue × canal × artefact)."""
+    source: str
+    venue: str = ""
+    canal: str = ""
+    chemin: str = ""                       # relatif à la session (fichier / DB / shard)
+    type_stockage: str = "fichier"         # fichier / db / shard
+    schema_version: str = ""
+    parser_version: str = ""
+    premier_ts_exchange: int | None = None
+    dernier_ts_exchange: int | None = None
+    premier_ts_reception: int | None = None
+    dernier_ts_reception: int | None = None
+    evenements_recus: int = 0
+    evenements_valides: int = 0
+    evenements_rejetes: int = 0
+    evenements_dedupes: int = 0
+    gaps: int = 0
+    reconnects: int = 0
+    stale: bool = False
+    hors_ordre: int = 0
+    couverture: float | None = None        # ratio 0..1 (fenêtre réellement couverte)
+    checksum_sha256: str = ""
+    taille_octets: int = -1
+    sante: str = "GRISE"                    # VERTE / ORANGE / ROUGE / GRISE
+    raison_absence: str = ""               # renseignée si la source est absente / non implémentée
+    frais: dict = field(default_factory=dict)
+    metadata: dict = field(default_factory=dict)
+
+    def cle(self) -> str:
+        return "%s|%s|%s|%s" % (self.source, self.venue, self.canal, self.chemin)
+
+
+def _ecrire_atomique(cible: Path, contenu: str) -> None:
+    """Écrit + fsync + os.replace (durable, jamais un catalogue à moitié écrit)."""
+    cible.parent.mkdir(parents=True, exist_ok=True)
+    tmp = cible.with_name(".%s.%d.%d.tmp" % (cible.name, os.getpid(), time.time_ns()))
+    try:
+        with tmp.open("w", encoding="utf-8") as f:
+            f.write(contenu)
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(tmp, cible)
+    finally:
+        try:
+            tmp.unlink()
+        except OSError:
+            pass
+
+
+class CatalogueSession:
+    """Gère le DATA_CATALOG.json d'UNE session. Mise à jour atomique, cycle ACTIVE→COMPLETE/QUARANTINED."""
+
+    def __init__(self, root: str | Path, run_id: str):
+        self.root = Path(root)
+        self.run_id = run_id
+        self.dossier = chemin_session(root, run_id)
+        self.chemin = chemin_catalogue(root, run_id)
+
+    # ── création / lecture ────────────────────────────────────────────────────────────────────
+    def demarrer(self, *, git_head: str | None = None, contexte: Mapping[str, Any] | None = None,
+                 horloge=time.time) -> dict:
+        """Crée la session ACTIVE (idempotent : ne réécrase pas une session déjà démarrée)."""
+        if self.chemin.is_file():
+            return self.lire()
+        manifeste = manifeste_execution(self.root, tache="collecte_harvest", run_id=self.run_id)
+        payload = {
+            "schema_catalogue": SCHEMA_CATALOGUE,
+            "run_id": self.run_id,
+            "statut": STATUT_ACTIVE,
+            "git_head": git_head if git_head is not None else manifeste.get("git_head"),
+            "git_dirty": manifeste.get("git_dirty"),
+            "manifeste": manifeste,
+            "debut_ms": int(horloge() * 1000),
+            "fin_ms": None,
+            "sources": {},                 # cle -> entrée
+            "cloture": None,
+            "contexte": dict(contexte or {}),
+            "real_execution": False,
+        }
+        self._sauver(payload)
+        return payload
+
+    def lire(self) -> dict:
+        try:
+            return json.loads(self.chemin.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            return {}
+
+    def _sauver(self, payload: Mapping[str, Any]) -> None:
+        payload = dict(payload)
+        payload["empreinte"] = empreinte({k: v for k, v in payload.items() if k != "empreinte"})
+        _ecrire_atomique(self.chemin, json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True))
+
+    # ── enregistrement d'une source (met à jour le catalogue ACTIVE, atomiquement) ─────────────
+    def enregistrer_source(self, entree: EntreeSource | Mapping[str, Any], *,
+                           calculer_checksum: bool = True) -> dict:
+        """Ajoute/écrase l'entrée d'une source. Si un artefact réel existe, son checksum + taille sont
+        calculés depuis le disque (jamais renseignés à la main)."""
+        cat = self.lire()
+        if not cat:
+            cat = self.demarrer()
+        if cat.get("statut") != STATUT_ACTIVE:
+            raise SessionFigeeError("session %s figée (%s) : plus d'enregistrement" %
+                                    (self.run_id, cat.get("statut")))
+        e = entree if isinstance(entree, EntreeSource) else EntreeSource(**dict(entree))
+        d = asdict(e)
+        if calculer_checksum and e.chemin:
+            artefact = self.dossier / e.chemin
+            checksum, taille = sha256_fichier(artefact)
+            d["checksum_sha256"] = checksum
+            d["taille_octets"] = taille
+        cat.setdefault("sources", {})[e.cle()] = d
+        self._sauver(cat)
+        return d
+
+    # ── clôture sûre (item 8) ───────────────────────────────────────────────────────────────────
+    def cloturer(self, *, writers_arretes: bool, extensions_donnees: Iterable[str] = EXTENSIONS_DONNEES,
+                 horloge=time.time) -> dict:
+        """Passe la session en COMPLETE SEULEMENT si toutes les vérifications passent. Sinon QUARANTINED.
+        Renvoie le verdict de clôture {statut, verifications, orphelins, divergences, motifs}."""
+        cat = self.lire()
+        if not cat:
+            return {"statut": "ABSENTE", "motifs": ["catalogue introuvable"]}
+        if cat.get("statut") == STATUT_COMPLETE:
+            return {"statut": STATUT_COMPLETE, "deja": True, "verifications": cat.get("cloture")}
+
+        motifs: list[str] = []
+        divergences: list[dict] = []
+        if not writers_arretes:
+            motifs.append("WRITERS_ENCORE_ACTIFS")
+
+        sources = cat.get("sources") or {}
+        catalogues_rel: set[str] = set()
+        for cle, d in sources.items():
+            rel = d.get("chemin") or ""
+            if not rel:
+                continue                    # source absente/non-implémentée : pas d'artefact à vérifier
+            catalogues_rel.add(os.path.normpath(rel))
+            artefact = self.dossier / rel
+            checksum_now, taille_now = sha256_fichier(artefact)
+            if taille_now < 0:
+                motifs.append("FICHIER_MANQUANT")
+                divergences.append({"cle": cle, "chemin": rel, "probleme": "MANQUANT"})
+                continue
+            attendu = d.get("checksum_sha256") or ""
+            if attendu and checksum_now != attendu:
+                motifs.append("CHECKSUM_DIVERGENT")
+                divergences.append({"cle": cle, "chemin": rel, "probleme": "CHECKSUM",
+                                    "attendu": attendu, "obtenu": checksum_now})
+            elif not attendu:
+                # jamais catalogué : on le fige maintenant (checksum de clôture) plutôt que mentir.
+                d["checksum_sha256"], d["taille_octets"] = checksum_now, taille_now
+
+        orphelins = _detecter_orphelins(self.dossier, catalogues_rel, tuple(extensions_donnees))
+        if orphelins:
+            motifs.append("ORPHELINS")
+
+        verifications = {
+            "writers_arretes": bool(writers_arretes),
+            "n_sources": len(sources),
+            "n_artefacts_verifies": len(catalogues_rel),
+            "orphelins": orphelins,
+            "divergences": divergences,
+            "checksums_ok": not any(m in ("CHECKSUM_DIVERGENT", "FICHIER_MANQUANT") for m in motifs),
+            "zero_orphelin": not orphelins,
+        }
+        cat["sources"] = sources
+        if motifs:
+            cat["statut"] = STATUT_QUARANTINED
+            cat["quarantaine"] = {"ms": int(horloge() * 1000), "motifs": sorted(set(motifs)),
+                                  "verifications": verifications}
+            self._sauver(cat)
+            return {"statut": STATUT_QUARANTINED, "motifs": sorted(set(motifs)),
+                    "verifications": verifications, "divergences": divergences, "orphelins": orphelins}
+
+        cat["statut"] = STATUT_COMPLETE
+        cat["fin_ms"] = int(horloge() * 1000)
+        cat["cloture"] = verifications
+        self._sauver(cat)
+        return {"statut": STATUT_COMPLETE, "verifications": verifications}
+
+    def quarantiner(self, raison: str, *, horloge=time.time) -> dict:
+        """Met la session en quarantaine (ex. erreur d'archive/rotation) SANS rien supprimer."""
+        cat = self.lire() or self.demarrer()
+        cat["statut"] = STATUT_QUARANTINED
+        cat["quarantaine"] = {"ms": int(horloge() * 1000), "motifs": [str(raison)[:200]]}
+        self._sauver(cat)
+        return {"statut": STATUT_QUARANTINED, "raison": raison}
+
+
+class SessionFigeeError(RuntimeError):
+    """Tentative d'écrire dans une session qui n'est plus ACTIVE."""
+
+
+def _detecter_orphelins(dossier: Path, catalogues_rel: set[str], extensions: tuple[str, ...]) -> list[str]:
+    """Fichiers de DONNÉES présents dans la session mais ABSENTS du catalogue (item 8 : zéro orphelin)."""
+    if not dossier.is_dir():
+        return []
+    orphelins: list[str] = []
+    for p in dossier.rglob("*"):
+        if not p.is_file():
+            continue
+        nom = p.name
+        if nom == NOM_CATALOGUE or nom.startswith(".") or nom.endswith(".tmp") or nom.endswith(".lock"):
+            continue
+        if not any(nom.endswith(ext) for ext in extensions):
+            continue
+        rel = os.path.normpath(str(p.relative_to(dossier)))
+        if rel not in catalogues_rel:
+            orphelins.append(rel)
+    return sorted(orphelins)
+
+
+# ── découverte de sessions (pour ANALYSER, item 10) ─────────────────────────────────────────────
+def scanner_sessions(root: str | Path) -> list[dict]:
+    """Liste (run_id, statut, debut_ms, chemin) de toutes les sessions, triées par début décroissant."""
+    base = Path(root) / "runtime" / "data" / "sessions"
+    out: list[dict] = []
+    if not base.is_dir():
+        return out
+    for d in base.iterdir():
+        cat_p = d / NOM_CATALOGUE
+        if not cat_p.is_file():
+            continue
+        try:
+            cat = json.loads(cat_p.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            continue
+        out.append({"run_id": cat.get("run_id") or d.name, "statut": cat.get("statut"),
+                    "debut_ms": cat.get("debut_ms") or 0, "chemin": str(cat_p)})
+    out.sort(key=lambda x: x.get("debut_ms") or 0, reverse=True)
+    return out
+
+
+def derniere_session_complete(root: str | Path) -> dict | None:
+    """La session COMPLETE la plus récente — ce que ANALYSER doit consommer (jamais ACTIVE/QUARANTINED)."""
+    for s in scanner_sessions(root):
+        if s.get("statut") == STATUT_COMPLETE:
+            return s
+    return None
+
+
+__all__ = ["SCHEMA_CATALOGUE", "NOM_CATALOGUE", "STATUT_ACTIVE", "STATUT_COMPLETE",
+           "STATUT_QUARANTINED", "STATUTS", "EntreeSource", "CatalogueSession", "SessionFigeeError",
+           "sha256_fichier", "nouveau_run_id", "chemin_session", "chemin_catalogue",
+           "scanner_sessions", "derniere_session_complete"]
