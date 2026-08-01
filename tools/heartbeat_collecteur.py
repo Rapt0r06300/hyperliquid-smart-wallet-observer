@@ -11,6 +11,7 @@ import threading
 import time
 from contextlib import contextmanager
 from pathlib import Path
+from typing import Any, Mapping
 
 
 _LOCAL_LOCKS: dict[str, threading.RLock] = {}
@@ -111,12 +112,46 @@ def _ecrire_atomique(p: Path, contenu: str, *, tentatives: int = 8) -> None:
             pass
 
 
-def battre(root: Path, nom: str, *, n_ecrites: int = 0, dernier_exchange_ts=None, note: str = "") -> dict:
-    """Écrit (atomiquement) le heartbeat du collecteur `nom`. Renvoie le dict écrit."""
+# Clés de qualité de flux persistées dans le heartbeat (LANCEUR item 2). Un heartbeat FRAIS ne doit
+# jamais masquer un de ces signaux : le collecteur les reporte à chaque passe, la preuve de vie les lit.
+CLES_METRIQUES = (
+    "gaps_critiques",       # trous critiques détectés (feed_quality)
+    "carnet_desync",        # carnet local désynchronisé du snapshot exchange
+    "sequence_invalide",    # séquence exchange rompue (ex. U/u Binance non contigus)
+    "resync_en_attente",    # resynchronisation demandée, pas encore aboutie
+    "reconnects",           # reconnexions WS cumulées (quota/limite probable)
+    "stale",                # dernière donnée trop vieille malgré un process vivant
+    "hors_ordre",           # événements reçus hors ordre (horodatage régressif)
+)
+
+
+def _metriques_propres(m: Mapping[str, Any] | None) -> dict:
+    """Ne garde que les clés de qualité connues (bornage + robustesse). Types normalisés."""
+    if not m:
+        return {}
+    out: dict = {}
+    for cle in CLES_METRIQUES:
+        if cle in m:
+            v = m[cle]
+            out[cle] = int(v) if cle in ("gaps_critiques", "reconnects", "hors_ordre") else bool(v)
+    return out
+
+
+def battre(root: Path, nom: str, *, n_ecrites: int = 0, dernier_exchange_ts=None, note: str = "",
+           metriques: Mapping[str, Any] | None = None) -> dict:
+    """Écrit (atomiquement) le heartbeat du collecteur `nom`. Renvoie le dict écrit.
+
+    `metriques` (LANCEUR item 2) : qualité RÉELLE du flux (gaps_critiques, carnet_desync,
+    sequence_invalide, resync_en_attente, reconnects, stale, hors_ordre). Fournie → écrite telle quelle
+    (état courant) ; None → l'état précédent est conservé (on ne « nettoie » pas un problème connu par
+    simple oubli). `evaluer_depuis_disque` relit ces métriques et bloque un heartbeat frais qui masquerait
+    un gap/désync/séquence invalide/resync/stale/hors-ordre.
+    """
     p = chemin(root, nom)
     p.parent.mkdir(parents=True, exist_ok=True)
     with _verrou_heartbeat(p):
         prev = _lire_sans_verrou(p)
+        m = _metriques_propres(metriques) if metriques is not None else dict(prev.get("metriques") or {})
         hb = {"nom": nom, "pid": os.getpid(), "ts_ms": int(time.time() * 1000),
               "n_passes": int(prev.get("n_passes", 0)) + 1,
               "n_ecrites_cumul": int(prev.get("n_ecrites_cumul", 0)) + int(n_ecrites),
@@ -125,7 +160,8 @@ def battre(root: Path, nom: str, *, n_ecrites: int = 0, dernier_exchange_ts=None
                   if dernier_exchange_ts is not None
                   else prev.get("dernier_exchange_ts")
               ),
-              "note": note[:120]}
+              "note": note[:120],
+              "metriques": m}
         _ecrire_atomique(p, json.dumps(hb, ensure_ascii=False))
     return hb
 
@@ -153,4 +189,4 @@ def age_ms(root: Path, nom: str, *, maintenant_ms=None) -> float | None:
     return (int(maintenant_ms if maintenant_ms is not None else time.time() * 1000)) - int(ts)
 
 
-__all__ = ["chemin", "battre", "lire", "age_ms"]
+__all__ = ["chemin", "battre", "lire", "age_ms", "CLES_METRIQUES"]

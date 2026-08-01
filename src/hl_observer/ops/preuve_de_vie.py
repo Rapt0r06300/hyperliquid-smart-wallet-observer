@@ -42,6 +42,13 @@ CAUSE_QUOTA = "QUOTA_ATTEINT"
 CAUSE_DONNEE_ABSENTE = "DONNEE_ABSENTE"
 CAUSE_NON_IMPLEMENTEE = "SOURCE_NON_IMPLEMENTEE"
 
+# Raisons de NON-santé qui sont des pannes de QUALITÉ de flux (item 2), pas une absence de donnée ni un
+# marché calme : un process vivant + heartbeat frais qui échoue sur l'une d'elles = PANNE_TECHNIQUE.
+_RAISONS_QUALITE_PANNE = (
+    "gap critique", "carnet desynchronise", "sequence exchange invalide",
+    "resync en attente", "evenements hors ordre", "carnet stale",
+)
+
 SEUIL_HEARTBEAT_MS = 60_000.0        # un heartbeat plus vieux que 60 s = figé
 
 
@@ -134,6 +141,11 @@ def cause_source(src: SourceAttendue, preuve: PreuveSource, *, ecrites: int,
     if int(reconnexions) >= int(seuil_reconnexions_quota):
         return {"source": src.nom, "cause": CAUSE_QUOTA, "sante": "ORANGE",
                 "motif": "reconnexions repetees : quota/limite probable (%d)" % int(reconnexions)}
+    if preuve.raison in _RAISONS_QUALITE_PANNE:
+        # process vivant + heartbeat frais mais qualité de flux dégradée (gap/désync/séquence/resync/
+        # hors-ordre/stale) : c'est une PANNE TECHNIQUE, jamais « donnée absente » ni « marché calme ».
+        return {"source": src.nom, "cause": CAUSE_PANNE_TECHNIQUE, "sante": "ROUGE",
+                "motif": preuve.raison}
     if ecrites <= 0 and (ecrites_precedentes is None or ecrites <= int(ecrites_precedentes)):
         # collecteur vivant mais aucune donnée : panne OU marché calme -> etat_ingestion tranche.
         ei = etat_ingestion(n_nouveaux_evenements=0)
@@ -157,10 +169,16 @@ def preuve_source(src: SourceAttendue, hb: Mapping[str, Any] | None, *, now_ms: 
                   pid_vivant: Callable[[int], bool], seuil_hb_ms: float = SEUIL_HEARTBEAT_MS,
                   ecrites_precedentes: int | None = None,
                   taille_sortie: int | None = None,
-                  gaps_critiques: int = 0, carnet_desync: bool = False) -> PreuveSource:
+                  gaps_critiques: int = 0, carnet_desync: bool = False,
+                  sequence_invalide: bool = False, resync_en_attente: bool = False,
+                  stale: bool = False, hors_ordre: int = 0,
+                  reconnexions: int = 0, seuil_reconnexions: int = 20) -> PreuveSource:
     """Établit la preuve de vie d'UNE source à partir de son heartbeat normalisé. Aucun heartbeat =
-    aucune preuve (fail-closed honnête). `gaps_critiques`/`carnet_desync` (item 1) : un trou critique ou
-    un carnet désynchronisé rend la source NON saine même si le heartbeat est frais."""
+    aucune preuve (fail-closed honnête). Métriques de qualité (item 2) : un heartbeat FRAIS ne masque
+    JAMAIS un trou critique (`gaps_critiques`), un carnet désynchronisé (`carnet_desync`), une séquence
+    exchange invalide (`sequence_invalide`, ex. U/u Binance), un resync en attente (`resync_en_attente`),
+    des événements hors ordre (`hors_ordre`), un carnet stale (`stale`) ou des reconnexions excessives
+    (`reconnexions` ≥ `seuil_reconnexions`)."""
     hb = hb or {}
     pid = _int(hb.get("pid"))
     ts_ms = _int(hb.get("ts_ms"))
@@ -193,6 +211,11 @@ def preuve_source(src: SourceAttendue, hb: Mapping[str, Any] | None, *, now_ms: 
         ("horodatages manquants (exchange/reception)", horodatages_presents),
         ("gap critique", int(gaps_critiques) <= 0),
         ("carnet desynchronise", not bool(carnet_desync)),
+        ("sequence exchange invalide", not bool(sequence_invalide)),
+        ("resync en attente", not bool(resync_en_attente)),
+        ("evenements hors ordre", int(hors_ordre) <= 0),
+        ("carnet stale", not bool(stale)),
+        ("reconnexions excessives", int(reconnexions) < int(seuil_reconnexions)),
     ]
     echecs = [nom for nom, ok in controles if not ok]
     sain = not echecs
@@ -218,18 +241,26 @@ def evaluer_readiness(sources: Sequence[SourceAttendue], heartbeats: Mapping[str
         m = base_met.get(nom) or {}
         return m.get(cle, defaut)
 
+    def _reconnexions(nom):
+        return int(_met(nom, "reconnects", _met(nom, "reconnexions", 0)))
+
     preuves = tuple(
         preuve_source(s, heartbeats.get(s.nom), now_ms=now_ms, pid_vivant=pid_vivant,
                       seuil_hb_ms=seuil_hb_ms, ecrites_precedentes=base_prec.get(s.nom),
                       taille_sortie=base_taille.get(s.nom),
                       gaps_critiques=int(_met(s.nom, "gaps_critiques", 0)),
-                      carnet_desync=bool(_met(s.nom, "carnet_desync", False)))
+                      carnet_desync=bool(_met(s.nom, "carnet_desync", False)),
+                      sequence_invalide=bool(_met(s.nom, "sequence_invalide", False)),
+                      resync_en_attente=bool(_met(s.nom, "resync_en_attente", False)),
+                      stale=bool(_met(s.nom, "stale", False)),
+                      hors_ordre=int(_met(s.nom, "hors_ordre", 0)),
+                      reconnexions=_reconnexions(s.nom))
         for s in sources
     )
     causes = tuple(
         cause_source(s, p, ecrites=int((heartbeats.get(s.nom) or {}).get("n_ecrites_cumul") or 0),
                      ecrites_precedentes=base_prec.get(s.nom),
-                     reconnexions=int(_met(s.nom, "reconnects", _met(s.nom, "reconnexions", 0))),
+                     reconnexions=_reconnexions(s.nom),
                      heartbeat_present=bool(heartbeats.get(s.nom)))
         for s, p in zip(sources, preuves)
     )
@@ -324,10 +355,32 @@ def lire_heartbeats_reels(root: str | Path, sources: Sequence[SourceAttendue]) -
     return out
 
 
+def metriques_depuis_heartbeats(heartbeats: Mapping[str, Mapping[str, Any]]) -> dict[str, dict]:
+    """Extrait, pour chaque source, les VRAIES métriques de qualité écrites par le collecteur (item 2) :
+    sous-dict `metriques` du heartbeat, avec repli sur d'éventuelles clés à plat. C'est ce qui empêche un
+    heartbeat frais de masquer un gap/désync/séquence invalide/resync/stale/hors-ordre/reconnexions."""
+    from tools.heartbeat_collecteur import CLES_METRIQUES
+    out: dict[str, dict] = {}
+    for nom, hb in (heartbeats or {}).items():
+        hb = hb or {}
+        m = dict(hb.get("metriques") or {})
+        for cle in CLES_METRIQUES:                       # repli : métrique éventuellement écrite à plat
+            if cle not in m and cle in hb:
+                m[cle] = hb[cle]
+        if m:
+            out[nom] = m
+    return out
+
+
 def evaluer_depuis_disque(root: str | Path, sources: Sequence[SourceAttendue] = SOURCES_HARVEST, *,
                           now_ms: float) -> EtatRuntime:
+    """Chemin RÉEL (0 réseau, sur la machine de Flo) : lit les heartbeats canoniques ET leurs métriques de
+    qualité, puis évalue. Item 2 : les gaps/désync/reconnexions RÉELS sont chargés et transmis à
+    `evaluer_readiness` — un heartbeat frais ne peut plus masquer une panne de flux."""
     hbs = lire_heartbeats_reels(root, sources)
-    return evaluer_readiness(sources, hbs, now_ms=now_ms, pid_vivant=_pid_vivant_reel)
+    metriques = metriques_depuis_heartbeats(hbs)
+    return evaluer_readiness(sources, hbs, now_ms=now_ms, pid_vivant=_pid_vivant_reel,
+                             metriques=metriques)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -354,7 +407,7 @@ __all__ = ["STATUT_READY", "STATUT_DEGRADED", "STATUT_DATA_NOT_READY", "SEUIL_HE
            "CAUSE_QUOTA", "CAUSE_DONNEE_ABSENTE", "CAUSE_NON_IMPLEMENTEE",
            "SourceAttendue", "PreuveSource", "EtatRuntime", "SOURCES_HARVEST", "preuve_source",
            "cause_source", "evaluer_readiness", "attendre_readiness", "format_readiness",
-           "evaluer_depuis_disque", "lire_heartbeats_reels", "main"]
+           "evaluer_depuis_disque", "lire_heartbeats_reels", "metriques_depuis_heartbeats", "main"]
 
 
 if __name__ == "__main__":
