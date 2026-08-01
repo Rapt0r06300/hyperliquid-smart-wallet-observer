@@ -15,7 +15,7 @@ from typing import Any
 
 from hl_observer.mega_cablage.pipeline import MegaCablage
 from hl_observer.mega_cablage.runner import _EquityMap
-from hl_observer.mega_cablage.replay_driver import separer_temporel
+from hl_observer.mega_cablage.replay_driver import separer_temporel, separer_par_episodes
 from hl_observer.ops import lab_metriques as M
 from hl_observer.paper_trading import latency_truth as _LT
 
@@ -112,7 +112,8 @@ def evaluer_config(evenements: list[dict[str, Any]], config: dict[str, Any], *,
     """Évalue un candidat : IS/OOS/FORWARD + ADVERSE_P95/P99 RÉELS appliqués séparément sur OOS ET FORWARD
     (item 12) + PLACEBO (signes inversés → l'edge doit disparaître). Retourne {config, segments, metriques,
     verdict, placebo_net}."""
-    segs_ev = separer_temporel(evenements, fractions=fractions)
+    # item 14 : découpage par ÉPISODES INDIVISIBLES — aucune position/métaordre/épisode à cheval sur IS/OOS.
+    segs_ev = separer_par_episodes(evenements, fractions=fractions)
     segments: dict[str, dict[str, Any]] = {}
     riche_is = None
     for lab in ("IS", "OOS", "FORWARD"):

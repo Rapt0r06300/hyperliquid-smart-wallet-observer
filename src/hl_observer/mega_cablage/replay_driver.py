@@ -37,6 +37,65 @@ def separer_temporel(evenements: list[dict[str, Any]], *, fractions: tuple[float
     return segments
 
 
+def episodes_indivisibles(evenements: list[dict[str, Any]], *, gap_ms: int = 3_600_000) -> list[list]:
+    """Regroupe les événements en ÉPISODES INDIVISIBLES (item 14) — l'unité qui ne doit JAMAIS être coupée
+    entre IS/OOS/FORWARD : un `episode_id`/`metaorder_id` explicite quand il existe, sinon un run CONTIGU de
+    même (vault, coin, direction) sans trou temporel > `gap_ms`. Un flip de direction, un métaordre/TWAP,
+    un épisode Lead-Lag ou cross-venue complet forme donc UN épisode. Rend la liste d'épisodes (chacun trié
+    par ts)."""
+    ordered = sorted(evenements, key=lambda e: e.get("ts_ms") or 0)
+
+    def _cle(ev: dict[str, Any]):
+        eid = ev.get("episode_id") or ev.get("metaorder_id") or ev.get("episode")
+        if eid is not None:
+            return ("id", eid)
+        signe = 1 if (ev.get("signe") or 0) >= 0 else -1
+        return ("run", ev.get("vault"), ev.get("coin"), signe)
+
+    episodes: list[list] = []
+    courant: list = []
+    prev_cle = None
+    prev_ts = None
+    for ev in ordered:
+        k = _cle(ev)
+        ts = ev.get("ts_ms") or 0
+        rupture = (k != prev_cle) or (prev_ts is not None and (ts - prev_ts) > gap_ms)
+        if courant and rupture:
+            episodes.append(courant)
+            courant = []
+        courant.append(ev)
+        prev_cle, prev_ts = k, ts
+    if courant:
+        episodes.append(courant)
+    return episodes
+
+
+def separer_par_episodes(evenements: list[dict[str, Any]], *, fractions: tuple[float, ...] = (0.6, 0.2, 0.2),
+                         labels: tuple[str, ...] = ("IS", "OOS", "FORWARD"),
+                         gap_ms: int = 3_600_000) -> dict[str, list]:
+    """Découpe IS/OOS/FORWARD par ÉPISODES INDIVISIBLES (item 14) : aucun épisode ne traverse deux segments.
+    Les épisodes sont ordonnés par ts de début et affectés ENTIERS aux segments pour approcher les fractions
+    par compte d'événements. Un run interrompu (position à cheval) est donc impossible par construction."""
+    eps = episodes_indivisibles(evenements, gap_ms=gap_ms)
+    n = sum(len(e) for e in eps)
+    segments: dict[str, list] = {lab: [] for lab in labels}
+    if n == 0:
+        return segments
+    cibles: list[float] = []
+    acc = 0.0
+    for frac in fractions:
+        acc += frac
+        cibles.append(acc * n)
+    seg_idx = 0
+    compte = 0
+    for ep in eps:
+        segments[labels[seg_idx]].extend(ep)          # l'épisode ENTIER va au segment courant
+        compte += len(ep)
+        while seg_idx < len(labels) - 1 and compte >= cibles[seg_idx]:
+            seg_idx += 1
+    return segments
+
+
 def rejouer_segment(evenements: list[dict[str, Any]], *, notre_equity: float = 1000.0,
                     notional_max: float = 500.0, fee_bps: float = 4.5,
                     leader_equity_defaut: float | None = None) -> dict[str, Any]:
