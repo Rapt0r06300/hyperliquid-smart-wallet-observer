@@ -213,7 +213,18 @@ jobs:
             tests/test_mega_cablage_feed_adapter.py \
             tests/test_mega_cablage_runner.py \
             tests/test_mega_cablage_replay_driver.py \
-            tests/test_mega_cablage_real_logs_report.py
+            tests/test_mega_cablage_real_logs_report.py \
+            tests/test_mega_cablage_lead_lag_stage.py
+      - name: Laboratoire alpha (double-clic CMD -> rapport, decouverte, chemin unique, IS/OOS/FORWARD, reprise)
+        run: |
+          python -m pytest -q -p no:cacheprovider --junitxml=junit-lab.xml \
+            tests/test_lab_alpha_e2e.py \
+            tests/test_lab_inventaire.py \
+            tests/test_lab_audit.py \
+            tests/test_lab_metriques.py \
+            tests/test_lab_recherche.py \
+            tests/test_lab_eta.py \
+            tests/test_lab_rapport.py
       - uses: actions/upload-artifact@v4
         if: always()
         with:

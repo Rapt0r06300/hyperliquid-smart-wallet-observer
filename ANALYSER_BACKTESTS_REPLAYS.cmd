@@ -1,88 +1,43 @@
 @echo off
-setlocal
+setlocal EnableExtensions
+REM ============================================================
+REM  ANALYSER_BACKTESTS_REPLAYS.cmd
+REM  Laboratoire automatique de recherche d alpha / PnL net.
+REM  Double-clic => inventaire des donnees -> feed_adapter -> MegaCablage
+REM  (Copy-Vault + Cross-Venue 2 jambes + Lead-Lag) -> netting/routing ->
+REM  risk gates -> fills paper -> PaperLedger -> PnL -> IS/OOS/FORWARD -> rapport.
+REM  PAPER STRICT : 0 ordre reel, 0 cle privee, 0 signature, aucun /exchange.
+REM ============================================================
 cd /d "%~dp0"
-title HyperSmart - Backtests et replays locaux
-
-call "%~dp0tools\portable_env.cmd"
-if errorlevel 1 (
-  echo.
-  echo   ERREUR : aucun runtime Python HyperSmart valide.
-  echo   Lance d'abord LANCER_HYPERSMART.cmd portable-install
-  echo.
-  pause
-  exit /b 2
-)
-
-set "PYTHONPATH=%~dp0src;%~dp0;%PYTHONPATH%"
+set "PYTHONPATH=src;tools"
 set "PYTHONUTF8=1"
 set "PYTHONIOENCODING=utf-8"
 set "HL_ENABLE_MAINNET_EXECUTION=0"
 set "HL_ENABLE_TESTNET_EXECUTION=0"
-set "HYPERSMART_ANALYSIS_LOCAL_ONLY=1"
-set "OMP_NUM_THREADS=2"
-set "OPENBLAS_NUM_THREADS=2"
-set "MKL_NUM_THREADS=2"
-set "NUMEXPR_NUM_THREADS=2"
+set "REAL_MAINNET_TRADING=false"
+set "TESTNET_ONLY=true"
 
-set "SUITE_ARGS=%*"
-set "MODE_LABEL=FULL - validation temporelle et anti-overfit"
-if "%~1"=="" set "SUITE_ARGS=--full"
-if /i "%~1"=="quick" (
-  set "SUITE_ARGS="
-  set "MODE_LABEL=QUICK - diagnostic borne"
-)
-if /i "%~1"=="full" (
-  set "SUITE_ARGS=--full"
-  set "MODE_LABEL=FULL - validation temporelle et anti-overfit"
-)
-if /i "%~1"=="deep" (
-  set "SUITE_ARGS=--deep"
-  set "MODE_LABEL=DEEP - recherche exhaustive reprenable"
-)
-if /i "%~1"=="maximum" (
-  set "SUITE_ARGS=--deep"
-  set "MODE_LABEL=MAXIMUM - recherche exhaustive reprenable"
-)
-if /i "%~1"=="--full" set "MODE_LABEL=FULL - validation temporelle et anti-overfit"
-if /i "%~1"=="--deep" set "MODE_LABEL=DEEP - recherche exhaustive reprenable"
+set "PY=python"
+where py >nul 2>nul && set "PY=py -3"
 
 echo.
-echo   ================================================================
-echo    HYPERSMART - LABORATOIRE PNL + BACKTESTS + REPLAYS
-echo   ================================================================
+echo ============================================================
+echo   LABORATOIRE ALPHA - paper strict (0 ordre reel)
+echo   Le tableau de bord et l ETA vont s afficher en direct.
+echo ============================================================
 echo.
-echo   Mode    : %MODE_LABEL%
-echo   Sources : runtime\replay et logs\logs a envoyer
-echo   Reseau  : non utilise
-echo   Sortie  : runtime\reports\backtest_replay
-echo.
-echo   Double-clic = FULL : laboratoire PnL + walk-forward + anti-overfit
-echo   Argument quick = diagnostic standard plus court
-echo   Argument full  = analyse complete recommandee
-echo   Argument deep  = ajoute la recherche exhaustive reprenable
-echo   Argument maximum = alias explicite du mode deep
-echo.
-echo   Les comparaisons utilisent train / validation / holdout chronologiques.
-echo   Aucun reglage n'est active automatiquement depuis un backtest.
-echo.
+%PY% -m hl_observer.ops.lab_alpha --root "%~dp0." --budget 48 --source REEL
+set "RC=%ERRORLEVEL%"
 
-python -u "%~dp0tools\run_backtest_replay_suite.py" --root "%~dp0." %SUITE_ARGS%
-set "ANALYSIS_CODE=%ERRORLEVEL%"
-
-echo.
-if "%ANALYSIS_CODE%"=="0" (
-  echo   TERMINE : toutes les etapes executables ont reussi.
-) else if "%ANALYSIS_CODE%"=="1" (
-  echo   TERMINE AVEC ALERTES : le rapport indique les etapes en echec.
+set "RAP=%~dp0runtime\reports\backtest_replay\RAPPORT_LATEST.md"
+if exist "%RAP%" (
+  echo.
+  echo Rapport genere : "%RAP%"
+  start "" "%RAP%"
 ) else (
-  echo   TERMINE SANS DONNEE EXPLOITABLE : consulter le rapport.
+  echo ATTENTION: rapport introuvable. Voir runtime\reports\backtest_replay\journal_lab.log
 )
 echo.
-echo   Rapport le plus recent :
-echo   %~dp0runtime\reports\backtest_replay\RAPPORT_LATEST.md
-echo.
-if exist "%~dp0runtime\reports\backtest_replay\RAPPORT_LATEST.md" (
-  start "" notepad.exe "%~dp0runtime\reports\backtest_replay\RAPPORT_LATEST.md"
-)
-pause
-exit /b %ANALYSIS_CODE%
+echo Termine (code %RC%). Appuyez sur une touche pour fermer.
+pause >nul
+endlocal

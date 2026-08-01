@@ -989,6 +989,16 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
+def lancer_lab_alpha(root: "Path | str", **kwargs: object) -> dict:
+    """Branche le LABORATOIRE d'alpha (chemin canonique unique : donnees -> feed_adapter -> MegaCablage ->
+    Copy-Vault + Cross-Venue + Lead-Lag -> netting/routing -> risk -> fills paper -> PaperLedger -> PnL ->
+    IS/OOS/FORWARD) sur la suite d'analyse historique. C'est ce que lance ANALYSER_BACKTESTS_REPLAYS.cmd.
+    Import paresseux (n'alourdit pas l'import de la suite). Paper strict, 0 ordre reel."""
+    from hl_observer.ops.lab_alpha import lancer_lab
+
+    return lancer_lab(racine=root, **kwargs)
+
+
 def main(argv: Iterable[str] | None = None) -> int:
     args = build_parser().parse_args(list(argv) if argv is not None else None)
     timeout = max(60, int(args.stage_timeout_seconds))
@@ -1006,6 +1016,7 @@ __all__ = [
     "StageResult",
     "build_input_inventory",
     "build_stage_plan",
+    "lancer_lab_alpha",
     "main",
     "resolve_logs_dir",
     "run_stage",
