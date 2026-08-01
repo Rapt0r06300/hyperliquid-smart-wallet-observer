@@ -111,6 +111,11 @@ REGISTRE: tuple[dict[str, Any], ...] = (
     {"nom": "lab-microstructure", "script": "tools/collecter_lab_microstructure.py",
      "intervalle_s": 30, "args": (), "limite_minutes": 5.0,
      "heartbeat": "runtime/research_lab/micro_heartbeat.json"},
+    # dYdX v4 LEGACY (read-only) : trades/orderbooks/subaccounts persistés via PiloteFluxDydx.
+    # Sessions bornées (290 s) relancées par le superviseur ; heartbeat canonique.
+    {"nom": "dydx-live", "script": "tools/collecter_dydx_live.py",
+     "intervalle_s": 300, "args": ("--duree-s", "290"), "limite_minutes": 15.0,
+     "heartbeat": "runtime/research_lab/heartbeats/dydx-live.json"},
 )
 
 # Le runtime principal ne doit pas devenir un laboratoire permanent. Ces profils
@@ -145,6 +150,7 @@ _HARVEST_SOUHAITE = frozenset({
     "carnet-collector", "marks-collector", "liq-collector", "venues-collector",
     "overshoot-collector", "vault-collector", "scorer-vaults",
     "backfill-fills", "backfill-candles-vaults",
+    "dydx-live",                                                      # dYdX v4 read-only (item 2/5)
 })
 COLLECTEURS_HARVEST = frozenset(n for n in _HARVEST_SOUHAITE if n in _NOMS_REGISTRE)
 # Sources OBLIGATOIRES : leur échec doit empêcher le passage en READY (le CLI sort non-zero).

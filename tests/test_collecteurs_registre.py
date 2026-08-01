@@ -14,7 +14,7 @@ from hl_observer.ops import superviseur_collecteurs as SC
 
 
 def test_registre_19_coherent():
-    assert len(SC.REGISTRE) == 19
+    assert len(SC.REGISTRE) == 20            # +dydx-live (collecteur dYdX v4 read-only, 2026-08-01)
     noms = [c["nom"] for c in SC.REGISTRE]
     assert len(set(noms)) == len(noms), "noms uniques"
     for c in SC.REGISTRE:                       # limite > 1,5x cadence (règle anti-relance d'un vivant)

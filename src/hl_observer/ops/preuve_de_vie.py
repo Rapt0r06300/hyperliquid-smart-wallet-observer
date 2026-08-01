@@ -49,6 +49,8 @@ SOURCES_HARVEST: tuple[SourceAttendue, ...] = (
     SourceAttendue("scorer-vaults", "LOCAL", "scoring", False, exige_exchange_ts=False),
     SourceAttendue("backfill-fills", "HYPERLIQUID", "fills-backfill", False, exige_exchange_ts=False),
     SourceAttendue("backfill-candles-vaults", "HYPERLIQUID", "candles", False, exige_exchange_ts=False),
+    # dYdX v4 (secondaire) : son absence NE bloque PAS la récolte HL (obligatoire=False).
+    SourceAttendue("dydx-live", "DYDX", "trades+book+subaccounts", False, exige_exchange_ts=False),
 )
 
 

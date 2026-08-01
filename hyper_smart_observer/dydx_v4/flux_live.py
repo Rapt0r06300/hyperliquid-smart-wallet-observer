@@ -58,10 +58,15 @@ class PiloteFluxDydx:
 
     # -- branchement WS -------------------------------------------------------------------------------
     def on_message(self, msg: Any) -> int:
-        """Callback à passer à DydxIndexerWsClient(on_message=...). Persiste le message et bat le cœur."""
+        """Callback à passer à DydxIndexerWsClient(on_message=...). Persiste le message et bat le cœur.
+        Le marché n'est PAS dans `data` mais dans l'id du canal (WsMessage.id) : on l'injecte pour que
+        les trades soient persistés avec le bon market_id."""
         channel = _attr(msg, "channel", defaut="")
         msg_type = _attr(msg, "type", "msg_type", defaut="")
         data = _attr(msg, "data", defaut={}) or {}
+        msg_id = _attr(msg, "id", "msg_id", "channel_id", defaut=None)
+        if isinstance(data, dict) and msg_id is not None and not data.get("id"):
+            data = {**data, "id": msg_id}
         n = int(self.indexer.process_ws_message(channel, msg_type, data, self.network))
         self.stats.messages += 1
         self.stats.elements_persistes += n
@@ -80,6 +85,11 @@ class PiloteFluxDydx:
                 continue
         self.stats.fills_rattrapes += rattrapes
         return rattrapes
+
+    def battre(self, n_ecrites: int = 0, dernier_exchange_ts: Any = None) -> None:
+        """Heartbeat de liveness (à appeler périodiquement même sans message : prouve que le process
+        vit)."""
+        self._battre(n_ecrites, dernier_exchange_ts)
 
     def callbacks(self) -> tuple[Callable[[Any], int], Callable[[str, Any], int]]:
         """(on_message, on_gap) — exactement ce qu'attend DydxIndexerWsClient. LE branchement qui
