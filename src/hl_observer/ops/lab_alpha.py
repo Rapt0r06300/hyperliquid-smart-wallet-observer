@@ -26,6 +26,7 @@ from hl_observer.ops import lab_recherche as R
 from hl_observer.ops.lab_eta import MoteurETA, format_hms
 from hl_observer.ops.lab_dashboard import rendre_tableau, Journal
 from hl_observer.ops.lab_rapport import ecrire_rapport
+from hl_observer.ops.rafraichisseur import RafraichisseurPeriodique
 
 DOSSIER_RAPPORTS = "runtime/reports/backtest_replay"
 
@@ -104,23 +105,32 @@ def lancer_lab(*, racine: str | Path, sortie_dir: str | Path | None = None, budg
     _jrn("inventaire: %d fichiers, %d lisibles, %d bloques" % (inv["total_fichiers"], inv["lisibles"], inv["bloques"]))
     _rafraichir(horodatage or "T")
 
+    # item 15 : rafraîchissement PÉRIODIQUE (1 s) même pendant une phase BLOQUANTE (lecture d'un gros
+    # fichier, recherche/replay). Uniquement en mode interactif (imprimer) → tests déterministes intacts.
+    from contextlib import nullcontext
+
+    def _refr_ctx():
+        return (RafraichisseurPeriodique(lambda: _rafraichir(horodatage or "T"), intervalle_s=1.0)
+                if imprimer else nullcontext())
+
     # 2) LECTURE -> bundles -> events (feed_adapter)
     etat.update({"en_cours": "lecture des donnees", "prochaine": "audit"})
     bundles: list[dict[str, Any]] = []
     octets_lus = 0
     bloques = 0
-    for f in inv["fichiers"]:
-        if not f["lisible"] or len(bundles) >= max_events:
-            continue
-        etat["fichier"] = f["rel"]
-        try:
-            bs = bundles_depuis_fichier(f["chemin"], max_lignes=max_events - len(bundles))
-            bundles.extend(bs)
-            octets_lus += f["octets"]
-        except LabFormatBloque:
-            bloques += 1
-        except Exception:                                     # noqa: BLE001 (lecture défaillante = compte honnête)
-            etat["erreurs"] = etat.get("erreurs", 0) + 1
+    with _refr_ctx():
+        for f in inv["fichiers"]:
+            if not f["lisible"] or len(bundles) >= max_events:
+                continue
+            etat["fichier"] = f["rel"]
+            try:
+                bs = bundles_depuis_fichier(f["chemin"], max_lignes=max_events - len(bundles))
+                bundles.extend(bs)
+                octets_lus += f["octets"]
+            except LabFormatBloque:
+                bloques += 1
+            except Exception:                                 # noqa: BLE001 (lecture défaillante = compte honnête)
+                etat["erreurs"] = etat.get("erreurs", 0) + 1
     events = evenements_depuis_bundles(bundles)
     valides = _events_valides(events)
     etat.update({"octets_lus": octets_lus, "events_lus": len(events), "events_valides": valides,
@@ -162,8 +172,10 @@ def lancer_lab(*, racine: str | Path, sortie_dir: str | Path | None = None, budg
         eta.terminer_etape(temps() - t0)
         _rafraichir(horodatage or "T")
 
-    rech = R.rechercher(events, espace=espace, leader_equity_defaut=leader_equity_defaut, budget=budget,
-                        checkpoint_path=checkpoint_path, min_episodes=min_episodes, source=source, on_eval=_on_eval)
+    with _refr_ctx():
+        rech = R.rechercher(events, espace=espace, leader_equity_defaut=leader_equity_defaut, budget=budget,
+                            checkpoint_path=checkpoint_path, min_episodes=min_episodes, source=source,
+                            on_eval=_on_eval)
     fills = sum(c.get("segments", {}).get("IS", {}).get("fills", 0) or 0 for c in rech["candidats"])
     etat.update({"cfg_testees": rech["evalues"], "fills": fills, "replays": rech["evalues"]})
     _jrn("recherche: %d evaluees, %d cache, verdict %s" % (rech["evalues"], rech["caches"], rech["verdict_global"]))
