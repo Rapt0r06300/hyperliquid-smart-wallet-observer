@@ -211,6 +211,13 @@ def main(argv: list[str] | None = None) -> int:
     args = list(argv or [])
     cmd = args[0] if args else "status"
     racine = Path(args[1]) if len(args) > 1 else Path.cwd()
+    if cmd == "enregistrer":
+        # Capture AUTORITAIRE des vrais PID (par signature dans la table des process + registre
+        # collecteurs). Appelée par le lanceur/PS1 APRÈS le démarrage des composants.
+        rid = args[2] if len(args) > 2 else ""
+        reg = enregistrer_depuis_disque(racine, run_id=rid)
+        print(format_registre(reg), flush=True)
+        return 0
     if cmd == "arreter":
         r = arreter(racine, procs=processus_reels(), killer=_tuer_reel)
         print("[registre-pids] arret cible : %d process ; orphelins detectes : %d"

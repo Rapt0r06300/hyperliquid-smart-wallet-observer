@@ -889,6 +889,15 @@ if (Test-CommandCenter) {
     Write-LauncherLine "Dashboard non ouvert: serveur UI indisponible. Relance apres lecture de $uiStderrLog."
 }
 
+# Item 10 : capture AUTORITAIRE des vrais PID (cmd/UI/poller/stream/collecteurs) -> lanceur_pids.json.
+# registre_pids scanne la table des process PAR SIGNATURE ; l'arret devient cible, zero orphelin.
+try {
+    & python -m hl_observer.ops.registre_pids enregistrer "$Root" 2>&1 | Out-Null
+    Write-LauncherLine "Registre PID reel ecrit (lanceur_pids.json)."
+} catch {
+    Write-LauncherLine "Registre PID: capture non effectuee."
+}
+
 if ($Interactive) {
     Write-Host ""
     Write-Host "HyperSmart tourne en simulation locale."
