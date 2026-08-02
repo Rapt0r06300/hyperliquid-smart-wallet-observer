@@ -160,8 +160,10 @@ def test_real_windows_launcher_can_dispatch_portable_check():
     )
     combined = completed.stdout + completed.stderr
     assert completed.returncode == 0, combined
-    assert "portable: YES" in combined
-    assert "imports: OK" in combined
+    assert '"portable_python_exists": true' in combined
+    assert '"selected_source": "embedded-tools-python"' in combined
+    assert '"missing_imports": []' in combined
+    assert "PORTABLE_LAUNCHER_CHECK_OK" in combined
 
 
 def test_new_portability_files_have_no_user_specific_absolute_path():
