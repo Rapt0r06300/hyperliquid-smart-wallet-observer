@@ -22,7 +22,18 @@ from hl_observer.mega_cablage.feed_adapter import evenements_depuis_bundles
 from hl_observer.mega_cablage.lead_lag_stage import score_lead_lag
 from hl_observer.strategies.lead_lag_paper import signaux_depuis_events, rejouer_lead_lag
 from hl_observer.ops.lab_inventaire import inventorier, bundles_depuis_fichier, LabFormatBloque
-from hl_observer.ops.lab_flux import materialiser_shard, charger_borne
+from hl_observer.ops.lab_flux import fusionner_causalement, charger_borne
+
+
+def _venue_du_fichier(chemin) -> str:
+    """item 9 : déduit la VENUE d'un artefact depuis son chemin (pour l'étiquetage cross-venue).
+    Cross-Venue et Lead-Lag ont besoin de savoir de quelle venue vient chaque tick après la fusion."""
+    bas = str(chemin).lower()
+    for venue in ("binance", "hyperliquid", "dydx", "bybit", "okx", "coinbase"):
+        if venue in bas:
+            return venue
+    from pathlib import Path as _P
+    return _P(chemin).stem
 from hl_observer.ops.lab_audit import auditer
 from hl_observer.ops import lab_recherche as R
 from hl_observer.ops.lab_eta import MoteurETA, format_hms
@@ -253,11 +264,18 @@ def lancer_lab(*, racine: str | Path, sortie_dir: str | Path | None = None, budg
                           git_head=sha_git, n_fichiers=len(fichiers_lisibles))
     shard = sortie / ("events_shard.%s.jsonl" % ns)
     with _refr_ctx():
-        info_shard = materialiser_shard(
-            fichiers_lisibles, shard, max_events=(max_events if max_events and max_events > 0 else 0),
+        # item 9 : FUSION CAUSALE (tri-fusion externe) et non une concaténation naïve fichier-par-fichier.
+        # Le shard global est ordonné exchange_ts→recv_ts→sequence→source ; une FENÊTRE bornée en est
+        # alors un échantillon temporel REPRÉSENTATIF de TOUTES les venues (item 8), pas « tout le
+        # fichier 1 puis le fichier 2 ». Indispensable au Lead-Lag Binance→Hyperliquid et au Cross-Venue.
+        info_shard = fusionner_causalement(
+            fichiers_lisibles, shard, source_de=_venue_du_fichier,
             checkpoint_path=sortie / ("events_shard.%s.checkpoint.json" % ns))
     etat["events_shardes"] = info_shard["n"]
-    events = charger_borne(shard, max_ram=(max_ram_events if max_ram_events and max_ram_events > 0 else 0))
+    etat["fusion_causale"] = {k: info_shard.get(k) for k in ("dedupes", "hors_ordre", "gaps", "sources")}
+    # item 8 : la fenêtre RAM borne le replay ; c'est un échantillon causalement contigu (pas biaisé venue).
+    plafond = [v for v in (max_ram_events, max_events) if v and v > 0]
+    events = charger_borne(shard, max_ram=(min(plafond) if plafond else 0))
     valides = _events_valides(events)
     etat.update({"octets_lus": octets_lus, "events_lus": len(events), "events_valides": valides,
                  "events_rejetes": len(events) - valides, "derniere": "lecture (%d events)" % len(events)})

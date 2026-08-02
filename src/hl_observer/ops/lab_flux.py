@@ -12,13 +12,46 @@ Réutilise les briques canoniques (lab_inventaire.lire_lignes/_row_to_bundle, fe
 """
 from __future__ import annotations
 
+import heapq
 import json
 import os
+import tempfile
 from pathlib import Path
 from typing import Any, Iterable, Iterator
 
 from hl_observer.mega_cablage.feed_adapter import evenements_depuis_bundles
 from hl_observer.ops.lab_inventaire import lire_lignes, _row_to_bundle, LabFormatBloque
+
+# item 9 — ordre CAUSAL global : exchange_ts -> recv_ts -> sequence -> source. Un timestamp absent trie
+# APRÈS les présents (jamais devant), de façon déterministe. Sans cet ordre, Lead-Lag et Cross-Venue sont
+# FAUX : on ne peut pas mesurer que Binance bouge avant Hyperliquid si les événements sont concaténés
+# fichier par fichier au lieu d'être entrelacés dans le temps.
+_INF = float("inf")
+
+
+def cle_causale(ev: Any) -> tuple:
+    """Clé d'ordre causal d'un événement (dict ou objet canonique). Champs manquants -> +inf (fin).
+    Le temps primaire est l'horodatage d'exchange : `exchange_ts_ms` (canonique) OU `ts_ms` (feed lab),
+    puis recv_ts, puis sequence, puis source (venue) — pour départager de façon DÉTERMINISTE."""
+    def _lire(nom, *alias):
+        if isinstance(ev, dict):
+            for k in (nom, *alias):
+                if ev.get(k) is not None:
+                    return ev.get(k)
+            return None
+        for k in (nom, *alias):
+            v = getattr(ev, k, None)
+            if v is not None:
+                return v
+        return None
+    ex = _lire("exchange_ts_ms", "exchange_ts", "ts_ms")
+    rc = _lire("recv_ts_ms", "reception_ts_ms", "recv_ts")
+    sq = _lire("sequence")
+    src = _lire("source", "venue") or ""
+    return (float(ex) if ex is not None else _INF,
+            float(rc) if rc is not None else _INF,
+            float(sq) if sq is not None else _INF,
+            str(src))
 
 
 def flux_evenements_stream(fichiers: Iterable[str | Path], *, max_events: int = 0) -> Iterator[dict[str, Any]]:
@@ -104,5 +137,130 @@ def charger_borne(shard_path: str | Path, *, max_ram: int = 0) -> list[dict[str,
     return out
 
 
-__all__ = ["flux_evenements_stream", "materialiser_shard", "flux_depuis_shard", "compter_shard",
-           "charger_borne"]
+# ── item 9 : FUSION CAUSALE GLOBALE par TRI-FUSION EXTERNE (jamais une concaténation naïve) ────────
+def _ecrire_runs_tries(evs: Iterator[dict[str, Any]], dossier: Path, prefixe: str,
+                       max_ram_tri: int) -> list[Path]:
+    """Découpe un flux en RUNS triés sur DISQUE (tri-fusion externe) : on charge au plus `max_ram_tri`
+    événements, on les TRIE par clé causale, on les déverse ; on répète. RAM bornée par max_ram_tri."""
+    runs: list[Path] = []
+    buf: list[dict[str, Any]] = []
+
+    def _spill(chunk: list[dict[str, Any]]) -> None:
+        chunk.sort(key=cle_causale)
+        p = dossier / ("%s.run%03d.jsonl" % (prefixe, len(runs)))
+        with p.open("w", encoding="utf-8") as fh:
+            for ev in chunk:
+                fh.write(json.dumps(ev, ensure_ascii=False) + "\n")
+        runs.append(p)
+
+    for ev in evs:
+        buf.append(ev)
+        if len(buf) >= max_ram_tri > 0:
+            _spill(buf)
+            buf = []
+    if buf:
+        _spill(buf)
+    return runs
+
+
+def _flux_tagge(fichier: Path, source: str) -> Iterator[dict[str, Any]]:
+    """Étiquette chaque événement d'un fichier avec sa SOURCE (venue). Essentiel pour Cross-Venue /
+    Lead-Lag : après la fusion, on doit toujours savoir de quelle venue vient chaque événement, même si
+    le feed_adapter a laissé tomber le champ venue. On n'écrase JAMAIS une source déjà présente."""
+    for ev in flux_evenements_stream([fichier]):
+        if isinstance(ev, dict) and not (ev.get("source") or ev.get("venue")):
+            ev = {**ev, "source": source}
+        yield ev
+
+
+def fusionner_causalement(fichiers: Iterable[str | Path], sortie: str | Path, *,
+                          max_ram_tri: int = 50_000, checkpoint_path: str | Path | None = None,
+                          source_de=None) -> dict[str, Any]:
+    """Produit un shard GLOBAL trié causalement (exchange_ts→recv_ts→sequence→source) à partir de
+    plusieurs artefacts par-source, par TRI-FUSION EXTERNE : (1) chaque source est découpée en runs
+    triés sur disque (RAM bornée), (2) tous les runs sont k-way-mergés par clé causale (heapq.merge,
+    un événement par run en RAM), (3) dédoublonnage CROISÉ des event_id adjacents (reconnexions /
+    chevauchements de snapshot produisent le MÊME event_id à la MÊME clé → adjacents après tri).
+    Chaque événement est étiqueté de sa SOURCE (venue) — `source_de(fichier)` si fourni, sinon le nom
+    de fichier — pour que Cross-Venue/Lead-Lag sachent toujours d'où vient chaque tick.
+    Compte hors_ordre (toujours 0 après tri : preuve que l'ordre est causal), gaps de séquence par
+    source, et doublons. Rend {n, dedupes, hors_ordre, gaps, sources, runs}. RAM bornée, 0 réseau."""
+    sortie = Path(sortie)
+    sortie.parent.mkdir(parents=True, exist_ok=True)
+    cp = Path(checkpoint_path) if checkpoint_path else None
+    if cp and cp.is_file() and sortie.is_file():
+        try:
+            etat = json.loads(cp.read_text(encoding="utf-8"))
+            if etat.get("complet"):
+                etat = dict(etat)
+                etat["repris"] = True
+                return etat
+        except (OSError, ValueError):
+            pass
+
+    fichiers = [Path(f) for f in fichiers]
+    with tempfile.TemporaryDirectory(prefix="fusion_causale_", dir=str(sortie.parent)) as tmpdir:
+        tmp = Path(tmpdir)
+        runs: list[Path] = []
+        for i, f in enumerate(fichiers):
+            src = source_de(f) if callable(source_de) else f.stem
+            runs.extend(_ecrire_runs_tries(_flux_tagge(f, str(src)), tmp, "src%03d" % i, max_ram_tri))
+        # k-way merge : heapq.merge ne garde qu'UN événement par run en RAM (tri-fusion externe).
+        iterateurs = [flux_depuis_shard(r) for r in runs]
+        fusion = heapq.merge(*iterateurs, key=cle_causale)
+        n = dedupes = hors_ordre = 0
+        gaps = 0
+        derniere_cle = None
+        precedent_ident = None
+        seq_par_source: dict[str, float] = {}
+        tmp_sortie = sortie.with_name(".%s.%d.tmp" % (sortie.name, os.getpid()))
+        with tmp_sortie.open("w", encoding="utf-8") as fh:
+            for ev in fusion:
+                k = cle_causale(ev)
+                if derniere_cle is not None and k < derniere_cle:
+                    hors_ordre += 1                    # ne doit JAMAIS arriver après tri (preuve d'ordre)
+                derniere_cle = k
+                # Identité de dédoublonnage : event_id STABLE si présent (deux fois le même id = le même
+                # événement, quelle que soit la source) ; sinon le CONTENU exact (une reconnexion qui
+                # renvoie le même enregistrement). Une venue différente => contenu différent (source
+                # étiquetée) => jamais fusionnée à tort avec une autre venue.
+                eid = ev.get("event_id") if isinstance(ev, dict) else getattr(ev, "event_id", None)
+                ident = eid if eid is not None else json.dumps(ev, ensure_ascii=False, sort_keys=True)
+                if ident == precedent_ident:
+                    dedupes += 1                        # doublon adjacent (reconnexion/snapshot) -> écarté
+                    continue
+                precedent_ident = ident
+                # gap de séquence par source (trou dans le flux = perte/reconnexion, compté honnêtement).
+                src = (ev.get("source") or ev.get("venue") or "") if isinstance(ev, dict) else ""
+                sq = ev.get("sequence") if isinstance(ev, dict) else None
+                if isinstance(sq, (int, float)):
+                    prev = seq_par_source.get(str(src))
+                    if prev is not None and sq > prev + 1:
+                        gaps += int(sq - prev - 1)
+                    seq_par_source[str(src)] = float(sq)
+                fh.write(json.dumps(ev, ensure_ascii=False) + "\n")
+                n += 1
+            fh.flush()
+            os.fsync(fh.fileno())
+        os.replace(tmp_sortie, sortie)
+    resultat = {"n": n, "dedupes": dedupes, "hors_ordre": hors_ordre, "gaps": gaps,
+                "sources": len(fichiers), "runs": len(runs), "shard": str(sortie), "repris": False}
+    if cp:
+        etat = dict(resultat)
+        etat["complet"] = True
+        cp.write_text(json.dumps(etat), encoding="utf-8")
+    return resultat
+
+
+def flux_causal(fichiers: Iterable[str | Path], *, max_ram_tri: int = 50_000) -> Iterator[dict[str, Any]]:
+    """Confort : fusion causale -> relecture en streaming (RAM bornée). Matérialise un shard temporaire
+    trié puis le relit. Pour un usage répété, préférer fusionner_causalement (shard persistant)."""
+    with tempfile.TemporaryDirectory(prefix="flux_causal_") as d:
+        shard = Path(d) / "global.jsonl"
+        fusionner_causalement(fichiers, shard, max_ram_tri=max_ram_tri)
+        for ev in flux_depuis_shard(shard):
+            yield ev
+
+
+__all__ = ["cle_causale", "flux_evenements_stream", "materialiser_shard", "flux_depuis_shard",
+           "compter_shard", "charger_borne", "fusionner_causalement", "flux_causal"]
