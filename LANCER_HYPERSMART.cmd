@@ -6,7 +6,7 @@ REM Le PATH est modifie uniquement pour cette session du lanceur et ses enfants.
 call "%~dp0tools\portable_env.cmd"
 if errorlevel 1 (
   echo   HyperSmart ne peut pas demarrer sans runtime Python valide.
-  goto :fin
+  endlocal & exit /b 30
 )
 REM ============================================================================
 REM  LANCER_HYPERSMART.cmd  --  LANCEUR RUNTIME OFFICIEL (2026-07-28)
@@ -76,24 +76,24 @@ REM (on chasse un move deja parti), le prix revient et le SL synthetique coupe -
 REM Le snapshot le dit: "les entrees arrivent trop tard; consensus tres chaud vise 4 s". On resserre
 REM a 15000 ms (fresh): admet la latence WS mediane ~11 s, rejette le chasing. Reversible.
 set "HYPERSMART_SIMULATION_MAX_SIGNAL_AGE_MS=10000"
-REM 20/07 — CAPITAL DECLARE (repli de la marge dynamique si l'etat UI est illisible).
+REM 20/07 â€” CAPITAL DECLARE (repli de la marge dynamique si l'etat UI est illisible).
 REM Sans lui : capital=None -> marge 50 $/position -> 40 %% du capital dort. La distance a la
 REM liquidation depend du LEVIER, pas de la taille : deployer plus a levier constant est sur.
 set "HYPERSMART_SIMULATION_INITIAL_EQUITY_USDT=1000"
-REM 21/07 — ARBITRAGE DE DISLOCATION paper v1 (portes dures pre-declarees : ouverture
+REM 21/07 â€” ARBITRAGE DE DISLOCATION paper v1 (portes dures pre-declarees : ouverture
 REM >=35 bps = couts 22 + marge 13 -> edge positif a l entree PAR CONSTRUCTION ; sortie
 REM <=5 bps ou 4 h ; 50$ x2 max). Ecrit au MEME ledger -> PnL unifie. 0 ordre reel.
 set "HYPERSMART_ARB_DISLOCATION_PAPER=1"
-REM 23/07 — VOIE EXPERIMENTAL_PAPER (decision Flo) : ouvre de VRAIES positions SIMULEES tout de suite
+REM 23/07 â€” VOIE EXPERIMENTAL_PAPER (decision Flo) : ouvre de VRAIES positions SIMULEES tout de suite
 REM (cross-venue survivants geles / lead-lag / copy-vaults) SANS attendre la preuve OOS. Ledger, budget
 REM et limites ISOLES du livre live (experimental_paper_ledger.jsonl). Admission = frais + executable +
 REM edge net > 0 apres couts. L'allocateur strict de promotion et le no-real-trade restent intacts.
 set "HYPERSMART_EXPERIMENTAL_PAPER=1"
-REM 23/07 (rectif Flo) — COHORTE EXPLORATORY_PAPER : apprend MAINTENANT sans attendre l'OOS complet.
+REM 23/07 (rectif Flo) â€” COHORTE EXPLORATORY_PAPER : apprend MAINTENANT sans attendre l'OOS complet.
 REM Ouvre sur mouvement LIVE d'un vault retenu + edge PRELIMINAIRE positif (copy_prelim_edge.json) +
 REM L2<1s + VWAP + couts complets + sortie definie. Budget $300, max 3, pertes plafonnees. Isole. 0 reel.
 set "HYPERSMART_EXPLORATORY_PAPER=1"
-REM 23/07 (v2) — CARRY FUNDING SUPPRIME DU SCOPE (rectif Flo) : la v1 cross-venue (funding + hold 168 h)
+REM 23/07 (v2) â€” CARRY FUNDING SUPPRIME DU SCOPE (rectif Flo) : la v1 cross-venue (funding + hold 168 h)
 REM est en QUARANTAINE (fichiers experimental_paper_positions/ledger sans suffixe, plus lus). Le scope
 REM ACTIF est experimental_paper_V2_* : cross-venue COURT TERME (dislocation de prix executable, entree/
 REM sortie rapide, ZERO funding) + lead-lag + copy-vaults. Ce flag ne gele plus que le legacy funding.
@@ -118,20 +118,20 @@ REM les couts (cost_model ~12 bps). "Moins de trades, plus propres": on ne prend
 REM edge net franchement positif. Aucun fake, aucun edge negatif jamais accepte.
 REM 2026-07-08: plancher edge copy releve 28->40 (replay causal: la selectivite passe le PnL net positif,
 REM les 2 gros perdants venaient des trades a edge marginal). Reversible.
-REM ── VOLUME DE DONNEES (decision de Flo, 20/07) : « un replay A/B se fait sur des
-REM    donnees ». Le plafond break-even passe de 120 h a 235 h pour ADMETTRE plus de
+REM â”€â”€ VOLUME DE DONNEES (decision de Flo, 20/07) : Â« un replay A/B se fait sur des
+REM    donnees Â». Le plafond break-even passe de 120 h a 235 h pour ADMETTRE plus de
 REM    carrys (fenetre d'admission doublee) et produire plus d'outcomes de sorties.
-REM    ⚠️ COHERENCE VERROUILLEE PAR TEST : jamais au-dessus de 0,7 x AGE_MAX (336 h),
+REM    âš ï¸ COHERENCE VERROUILLEE PAR TEST : jamais au-dessus de 0,7 x AGE_MAX (336 h),
 REM    sinon on fabrique des positions expulsees AVANT d'avoir amorti = churn garanti.
 set "HYPERSMART_CARRY_MAX_BREAK_EVEN_H=235"
 set "HYPERSMART_SIMULATION_MIN_EDGE_BPS=16"
 set "HYPERSMART_SIMULATION_MIN_LIQUIDITY_SCORE=0.55"
 set "HYPERSMART_SIMULATION_MAX_COPY_DEGRADATION_BPS=24"
-REM 2026-07-18 — MODE SNIPER MONO-WALLET DECLARE FERME (sentinelle >= 1000), pas desactive en
+REM 2026-07-18 â€” MODE SNIPER MONO-WALLET DECLARE FERME (sentinelle >= 1000), pas desactive en
 REM douce : un plancher de 55 (ou 30) laissait croire que le mode vivait, alors que RIEN ne
 REM pouvait le franchir. Nos mesures : edge de copie -7,97 bps sur 24 133 signaux hors
 REM echantillon, leader CONTRARIEN. Copier un seul wallet, c'est payer pour perdre.
-REM ⚠️ Ca ne retire AUCUNE ouverture aujourd'hui (le mode etait deja infranchissable de fait).
+REM âš ï¸ Ca ne retire AUCUNE ouverture aujourd'hui (le mode etait deja infranchissable de fait).
 REM REVERSIBLE : le jour ou on mesure un edge de copie POSITIF, on remet un vrai plancher.
 set "HYPERSMART_SINGLE_WALLET_MIN_EDGE_BPS=9999"
 REM GATE V12 AUTORITATIF (2026-06-24): le gate unifie (source/quotes/fraicheur/liquidite/edge net)
@@ -217,7 +217,7 @@ REM 57%% de reussite, l'esperance est negative. On capture donc NOUS-MEMES les g
 REM les perdants tot: TP 60 bps (+3%% de marge a 5x) >= SL 45 bps (-2.25%%), trailing 30 bps pour
 REM laisser courir un gagnant qui part fort. A 57%% WR: 0.57*60 - 0.43*45 = +15 bps/trade AVANT frais
 REM (12 bps round-trip) = positif. Les entrees sont deja FRAICHES (gates actifs) donc le SL protege
-REM au lieu de hacher (≠ piege du 24/06 ou les entrees etaient tardives). Vrais prix, aucune triche.
+REM au lieu de hacher (â‰  piege du 24/06 ou les entrees etaient tardives). Vrais prix, aucune triche.
 set "HYPERSMART_SLTP_ENABLED=1"
 REM V24: profil paper plus reactif et plus stable pour une session 1000 USDT.
 REM Les logs montraient que levier 5x + sorties tardives amplifiaient les frais
@@ -288,7 +288,7 @@ REM ===== MODE GRINDER (session P1 2026-07-07, flags ON pour collecte de donnees
 set "HYPERSMART_EXECUTION_STYLE=maker"
 set "HYPERSMART_MAKER_ADVERSE_SELECTION_BPS=2"
 set "HYPERSMART_FUNDING_ARB_PAPER=0"
-REM 2026-07-08: poller funding ACTIVE — sans lui, funding_rows restait vide et le funding-arb
+REM 2026-07-08: poller funding ACTIVE â€” sans lui, funding_rows restait vide et le funding-arb
 REM ne pouvait jamais ouvrir de paire (cause racine du "grinder qui ne trade pas").
 set "HYPERSMART_V26_FUNDING_POLLER=1"
 set "HYPERSMART_V26_FUNDING_POLL_INTERVAL_S=120"
@@ -333,7 +333,7 @@ set "HYPERSMART_ENABLE_AUX_IA=0"
 
 REM MOTEUR TEMPS REEL (V16, 2026-06-26): flux WebSocket Hyperliquid PERSISTANT sur les 10 MEILLEURS
 REM leaders (cap HL = 10 wallets). Stocke chaque fill FRAIS a la seconde ou il arrive (sub-seconde)
-REM au lieu du snapshot REST laggé (~10s) -> entrees vraiment fraiches. Lecture seule, 0 ordre.
+REM au lieu du snapshot REST laggÃ© (~10s) -> entrees vraiment fraiches. Lecture seule, 0 ordre.
 REM Fenetre minimisee "HyperSmart Stream" - ferme-la pour stopper le flux temps reel.
 REM Stream rattache au lanceur principal; pas de fenetre separee.
 set "HYPERSMART_ENABLE_AUX_STREAM=1"
@@ -342,7 +342,7 @@ REM ARCHIVE REPLAY (2026-07-09, demande Flo): au lieu de perdre les donnees du r
 REM on les DEPLACE dans runtime\replay\_archive\run_<ts>\ (serveur eteint, avant tout writer).
 REM => le dataset replay s'accumule entre rallumages ; runtime\replay\ reste propre pour le run.
 REM Le replay (merge_replay/include_archive) lit TOUT l'historique. Best-effort, jamais destructif.
-python -m hl_observer.runtime.replay_recorder --archive-run --base "%~dp0runtime\replay" 1>nul 2>nul
+"%HYPERSMART_PYTHON%" -m hl_observer.runtime.replay_recorder --archive-run --base "%~dp0runtime\replay" 1>nul 2>nul
 
 REM -MaxLeaders eleve = scan TRES large (pool de leaders) ; le gate de qualite (smart money) garde la copie etroite.
 REM === CARRY HISTORIQUE : DESACTIVE / SHADOW (decision Flo 2026-07-23) ===
@@ -357,21 +357,21 @@ set "HYPERSMART_CARRY_ETAPE2=0"
 set "HYPERSMART_CARRY_DISABLED=1"
 REM === CARRY : alimentation AUTO des inputs spot (best coin, toutes les 10 min, en arriere-plan) ===
 REM Sans ca, carry_spot_inputs.json n'est jamais ecrit -> le carry refuse tout (INPUTS_SPOT_ABSENTS).
-REM 19/07 — SANS FENETRE. Ces 3 collecteurs ouvraient 3 fenetres cmd a chaque demarrage :
+REM 19/07 â€” SANS FENETRE. Ces 3 collecteurs ouvraient 3 fenetres cmd a chaque demarrage :
 REM insupportable a l'usage, et c'est moi qui les avais ajoutees. Ils tournent desormais CACHES.
-REM ⚠️ Mais un processus cache qui echoue en SILENCE serait exactement la maladie qu'on vient de
+REM âš ï¸ Mais un processus cache qui echoue en SILENCE serait exactement la maladie qu'on vient de
 REM corriger (les 105 `except: pass`). Chacun ecrit donc son journal dans runtime\logs\ :
-REM   runtime\logs\carry-feeder.log · marks-collector.log · liq-collector.log
+REM   runtime\logs\carry-feeder.log Â· marks-collector.log Â· liq-collector.log
 REM En cas de doute : ouvre le .log, ou double-clique le .cmd correspondant pour le voir tourner.
 if not exist "%~dp0runtime\logs" mkdir "%~dp0runtime\logs" >nul 2>&1
-REM ⚠️ `start "" /b` et PAS PowerShell/Start-Process. J'avais d'abord ecrit une ligne PowerShell
+REM âš ï¸ `start "" /b` et PAS PowerShell/Start-Process. J'avais d'abord ecrit une ligne PowerShell
 REM avec trois niveaux de guillemets imbriques sur un chemin qui contient une ESPACE
 REM ("Projet invest") -- du code qui casse en silence, et un collecteur qui ne demarre jamais
 REM sans le dire, c'est exactement la maladie qu'on passe la journee a corriger.
 REM `/b` = pas de nouvelle fenetre (doc Windows), UN seul niveau de guillemets, et toute la
 REM sortie part deja dans le log depuis boucle_collecteur.cmd.
-REM ⚠️ CHEMINS RELATIFS, ZERO GUILLEMET. Ma version precedente passait des chemins ABSOLUS
-REM entre guillemets ; le dossier s'appelle « Projet invest » (avec une ESPACE), et `start /b`
+REM âš ï¸ CHEMINS RELATIFS, ZERO GUILLEMET. Ma version precedente passait des chemins ABSOLUS
+REM entre guillemets ; le dossier s'appelle Â« Projet invest Â» (avec une ESPACE), et `start /b`
 REM lance un .cmd via `cmd /c` qui, des qu'il voit PLUSIEURS paires de guillemets, retire la
 REM premiere et la derniere. Resultat mesure chez Flo :
 REM     'C:\Users\flo\Desktop\Projet' n'est pas reconnu... (x3, un par collecteur)
@@ -386,7 +386,7 @@ call :demarrer_collecteurs
 REM Le superviseur enregistre directement les PID et reutilise les instances deja
 REM vivantes. Aucun second passage de detection, aucun demarrage en double.
 ping -n 3 127.0.0.1 >nul 2>&1
-python -m hl_observer.ops.superviseur_collecteurs status core
+"%HYPERSMART_PYTHON%" -m hl_observer.ops.superviseur_collecteurs status core
 echo   [collecteurs CORE] allMids + BBO + userFills read-only. Recherche/backtests hors runtime.
 
 powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0tools\start_hypersmart_simulation.ps1" -Port 8794 -IntervalSeconds 15 -MaxLeaders 50 -Interactive
@@ -406,7 +406,7 @@ REM ############################################################################
 :demarrer_collecteurs
 REM Profil CORE officiel : allMids + BBO + userFills read-only. Le superviseur refuse les
 REM doublons et enregistre lui-meme les PID pour l'arret cible.
-python -m hl_observer.ops.superviseur_collecteurs demarrer-tous core
+"%HYPERSMART_PYTHON%" -m hl_observer.ops.superviseur_collecteurs demarrer-tous core
 exit /b %ERRORLEVEL%
 
 REM ---------------------------------------------------------------------------
@@ -441,7 +441,7 @@ REM Toutes les autres sont mortes, tuees par nos propres mesures (copy -7,97 bps
 REM funding perp-perp MEME venue 0/120, lead-lag 0/66, liquidations inmesurables).
 REM Celle-ci n'a jamais ete testee : HL et Binance ne cotent pas le meme funding.
 REM Barres de rejet fixees AVANT la donnee : docs\audit\PROTOCOLE_CROSS_VENUE.md
-REM ⚠️ Binance = SOURCE DE PRIX uniquement. Lecture seule, 0 cle, 0 ordre.
+REM âš ï¸ Binance = SOURCE DE PRIX uniquement. Lecture seule, 0 cle, 0 ordre.
 start "" /b tools\boucle_collecteur.cmd venues-collector tools\collecter_dispersion_venues.py 60 --une-fois
 start "" /b tools\boucle_collecteur.cmd carnet-collector tools\collecter_carnet.py 60 --une-fois
 
@@ -449,7 +449,7 @@ REM === EVENEMENTS DE LIQUIDATION (overshoot mark/oracle) : l'infra n1 du 23/07 
 REM La meilleure piste (fade de cascades de liquidations) etait BLOQUEE faute d'events reels.
 REM On capture l'overshoot mid-vs-oracle (le forced-flow deborde le mid de l'oracle puis revient)
 REM + le chemin forward -> matiere du fade. BTC exclu (mort). Etat persiste (survit aux relances).
-REM ⚠️ 2 endpoints PUBLICS en lecture (metaAndAssetCtxs + allMids). 0 cle, 0 ordre, 0 signature.
+REM âš ï¸ 2 endpoints PUBLICS en lecture (metaAndAssetCtxs + allMids). 0 cle, 0 ordre, 0 signature.
 start "" /b tools\boucle_collecteur.cmd overshoot-collector tools\collecter_overshoots.py 10 --une-fois
 
 REM === VAULTS HL (chantier COPY 23/07) : la derniere porte copy non ouverte ===
@@ -457,7 +457,7 @@ REM Le copy de fills est mort (signal 62s, 76%% = 4 wallets MM). Un VAULT tient 
 REM sont negligeables. On capture NAV/positions/levier/PnL latent+realise/drawdown/expo pour mesurer
 REM si repliquer sa trajectoire reste rentable apres delai+couts. Liste = runtime\data\vaults_suivis.json
 REM (vaults DIRECTIONNELS ; les vaults de MARKET-MAKING type HLP sont exclus). Vide -> idle propre.
-REM ⚠️ 2 endpoints PUBLICS en lecture (clearinghouseState + vaultDetails). 0 cle, 0 ordre, 0 signature.
+REM âš ï¸ 2 endpoints PUBLICS en lecture (clearinghouseState + vaultDetails). 0 cle, 0 ordre, 0 signature.
 start "" /b tools\boucle_collecteur.cmd vault-collector tools\collecter_vaults.py 300 --une-fois
 
 REM === SCORE 8-FACTEURS DES VAULTS (rectif Flo 23/07) : on ne selectionne PLUS sur l'APR ===
@@ -488,14 +488,14 @@ REM FRAICHES (rejet des perimees), HORODATEES (exchange+local) -> teste propreme
 REM Binance->HL en shadow. PERSISTANT : reconnecte SEULEMENT sur panne, garde son etat, horloge
 REM MONOTONE a la reception (un skew d'horloge ne doit PAS ressembler a un edge), heartbeat +
 REM anti-orphelin INTERNE (sort si la session change). boucle_collecteur ne relance qu'en cas de crash.
-REM ⚠️ 2 flux PUBLICS en lecture. 0 cle, 0 ordre, 0 signature. Necessite le module python `websockets`.
+REM âš ï¸ 2 flux PUBLICS en lecture. 0 cle, 0 ordre, 0 signature. Necessite le module python `websockets`.
 start "" /b tools\boucle_collecteur.cmd bbo-collector tools\collecter_bbo.py 5
 
 REM ---- VOIE EXPERIMENTAL_PAPER (23/07) : ouvre/gere/sort de VRAIES positions SIMULEES toutes les 60 s
 REM (cross-venue geles + lead-lag + copy-vaults) des qu'un signal est frais + executable + edge net > 0.
 REM Ledger/budget/limites ISOLES du livre live. Gate par HYPERSMART_EXPERIMENTAL_PAPER=1. 0 ordre reel.
 start "" /b tools\boucle_collecteur.cmd experimental-paper tools\experimental_paper_tick.py 60 --une-fois
-REM 23/07 (rectif Flo) — l'ouverture exploratoire est desormais INLINE dans le flux WS userFills
+REM 23/07 (rectif Flo) â€” l'ouverture exploratoire est desormais INLINE dans le flux WS userFills
 REM (voir userfills-live plus bas : 2 cohortes ALPHA + DISCOVERY_PROBE, admission->L2->open dans le
 REM meme flux). L'ancien tick passif exploratory-paper est donc RETIRE (remplace par l'inline).
 
@@ -599,9 +599,15 @@ goto :fin
 REM -------- PORTABILITE WINDOWS --------
 :cmd_portablecheck
 echo.
-python tools\portable_runtime.py --root "%~dp0." check
+"%HYPERSMART_PYTHON%" tools\portable_runtime.py --root "%~dp0." check --require-embedded --json
+set "RC=%ERRORLEVEL%"
 echo.
-goto :fin
+if not "%RC%"=="0" (
+  echo [ERREUR] Verification du runtime embarque echouee ^(code %RC%^).
+  endlocal & exit /b %RC%
+)
+echo PORTABLE_LAUNCHER_CHECK_OK
+endlocal & exit /b 0
 
 :cmd_portableinstall
 echo.
@@ -621,7 +627,7 @@ echo.
 echo   ===  STATUT HYPERSMART  ^(lecture seule^)  ===
 if exist "runtime\data\launcher_pids.json" ( echo   Registre lanceur : & type "runtime\data\launcher_pids.json" & echo. ) else ( echo   Pas de registre lanceur. )
 powershell -NoProfile -Command "try { $ok=(Test-NetConnection -ComputerName 127.0.0.1 -Port 8794 -WarningAction SilentlyContinue -InformationLevel Quiet) } catch { $ok=$false }; Write-Host ('  UI 8794 : ' + $(if($ok){'ACTIVE'}else{'inactive'}))"
-python -m hl_observer.ops.superviseur_collecteurs status core
+"%HYPERSMART_PYTHON%" -m hl_observer.ops.superviseur_collecteurs status core
 echo.
 goto :fin
 
@@ -638,7 +644,7 @@ goto :fin
 :stop_impl
 REM ARRET CIBLE (Fix 5) : SEULEMENT les PID enregistres du run + enfants verifies + process signes
 REM registre + detenteur valide du port 8794 + verrou userfills. AUCUN motif large (*hl_observer*/*projet*).
-python -m hl_observer.ops.superviseur_collecteurs arreter
+"%HYPERSMART_PYTHON%" -m hl_observer.ops.superviseur_collecteurs arreter
 exit /b 0
 
 REM -------- RESTART = stop puis autopilot --------
@@ -672,44 +678,44 @@ goto :fin
 
 :cmd_collectors_maintenance
 echo.
-python -m hl_observer.ops.superviseur_collecteurs demarrer-tous maintenance
-python -m hl_observer.ops.superviseur_collecteurs status maintenance
+"%HYPERSMART_PYTHON%" -m hl_observer.ops.superviseur_collecteurs demarrer-tous maintenance
+"%HYPERSMART_PYTHON%" -m hl_observer.ops.superviseur_collecteurs status maintenance
 echo.
 goto :fin
 
 :cmd_collectors_research
 echo.
-python -m hl_observer.ops.superviseur_collecteurs demarrer-tous research
-python -m hl_observer.ops.superviseur_collecteurs status research
+"%HYPERSMART_PYTHON%" -m hl_observer.ops.superviseur_collecteurs demarrer-tous research
+"%HYPERSMART_PYTHON%" -m hl_observer.ops.superviseur_collecteurs status research
 echo.
 goto :fin
 
 :cmd_collectors_all
 echo.
-python -m hl_observer.ops.superviseur_collecteurs demarrer-tous all
-python -m hl_observer.ops.superviseur_collecteurs status all
+"%HYPERSMART_PYTHON%" -m hl_observer.ops.superviseur_collecteurs demarrer-tous all
+"%HYPERSMART_PYTHON%" -m hl_observer.ops.superviseur_collecteurs status all
 echo.
 goto :fin
 
 REM -------- REPORT (absorbe RAPPORT-DU-JOUR) --------
 :cmd_report
 echo.
-python tools\rapport_quotidien.py
+"%HYPERSMART_PYTHON%" tools\rapport_quotidien.py
 echo.
 pause
 goto :fin
 
 REM -------- TEST (absorbe TOUT-TESTER) --------
 :cmd_test
-python "%~dp0tools\lanceur_tout_tester.py" %2 %3 %4 %5 %6 %7 %8 %9
+"%HYPERSMART_PYTHON%" "%~dp0tools\lanceur_tout_tester.py" %2 %3 %4 %5 %6 %7 %8 %9
 goto :fin
 
 REM -------- AUDIT (absorbe TEST-AUDIT-complet) --------
 :cmd_audit
 echo.
 echo   Lancement de l'audit ^(~180 controles^)...
-python -m pip install -q pytest-timeout coverage 2>nul
-python tools\audit_report.py %2 %3 %4 %5 %6 %7 %8 %9
+"%HYPERSMART_PYTHON%" -m pip install -q pytest-timeout coverage 2>nul
+"%HYPERSMART_PYTHON%" tools\audit_report.py %2 %3 %4 %5 %6 %7 %8 %9
 set "AUDIT_CODE=%ERRORLEVEL%"
 if exist "resultat-audit.md" ( echo   Rapport ecrit : %~dp0resultat-audit.md ) else ( echo   ATTENTION : le rapport n'a pas ete ecrit. )
 echo.
@@ -733,18 +739,18 @@ set /p GITHUB_TOKEN=  Ta cle GitHub ^(vide = 60 req/h, sans recherche code^) :
 :moisson_go
 if exist "%~dp0moisson-termine.flag" del "%~dp0moisson-termine.flag" >nul 2>&1
 if exist "%~dp0moisson-en-cours.txt" del "%~dp0moisson-en-cours.txt" >nul 2>&1
-start "MOISSON 12h - travail (NE PAS FERMER)" /min cmd /c "set PYTHONPATH=%~dp0src;%~dp0& set PYTHONIOENCODING=utf-8& set PYTHONUTF8=1& python tools\moissonner_10h.py --heures 12 > "%~dp0moisson_console.txt" 2>&1& echo done> "%~dp0moisson-termine.flag""
+start "MOISSON 12h - travail (NE PAS FERMER)" /min cmd /c "set PYTHONPATH=%~dp0src;%~dp0& set PYTHONIOENCODING=utf-8& set PYTHONUTF8=1& "%HYPERSMART_PYTHON%" tools\moissonner_10h.py --heures 12 > "%~dp0moisson_console.txt" 2>&1& echo done> "%~dp0moisson-termine.flag""
 powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0tools\voir_dashboard.ps1" -Root "%~dp0"
 echo   Moisson terminee. Resultat : moisson-fini.md
 goto :fin
 :moisson_relire
 if not exist "%~dp0data\reports\moisson_10h_etat.json" ( echo   Aucun etat sauvegarde -- lance d'abord `moisson`. & goto :fin )
 if exist "%~dp0moisson-termine.flag" del "%~dp0moisson-termine.flag" >nul 2>&1
-start "MOISSON 12h - travail (NE PAS FERMER)" /min cmd /c "set PYTHONPATH=%~dp0src;%~dp0& set PYTHONIOENCODING=utf-8& set PYTHONUTF8=1& python tools\moissonner_10h.py --heures 3 --relire > "%~dp0moisson_console.txt" 2>&1& echo done> "%~dp0moisson-termine.flag""
+start "MOISSON 12h - travail (NE PAS FERMER)" /min cmd /c "set PYTHONPATH=%~dp0src;%~dp0& set PYTHONIOENCODING=utf-8& set PYTHONUTF8=1& "%HYPERSMART_PYTHON%" tools\moissonner_10h.py --heures 3 --relire > "%~dp0moisson_console.txt" 2>&1& echo done> "%~dp0moisson-termine.flag""
 powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0tools\voir_dashboard.ps1" -Root "%~dp0"
 goto :fin
 :moisson_github
-python tools\moissonner_10h.py %3 %4 %5 %6 %7 %8 %9
+"%HYPERSMART_PYTHON%" tools\moissonner_10h.py %3 %4 %5 %6 %7 %8 %9
 echo.
 pause
 goto :fin
@@ -766,7 +772,7 @@ if /I "%~2"=="uninstall"  goto :oos_uninstall
 if /I "%~2"=="diag"       goto :oos_diag
 if /I "%~2"=="test-notif" goto :oos_testnotif
 if not exist "runtime\rapports\checkpoint_oos_shadow" mkdir "runtime\rapports\checkpoint_oos_shadow" >nul 2>&1
-python tools\verif_checkpoint_oos_shadow.py >> "runtime\rapports\checkpoint_oos_shadow\verif.log" 2>&1
+"%HYPERSMART_PYTHON%" tools\verif_checkpoint_oos_shadow.py >> "runtime\rapports\checkpoint_oos_shadow\verif.log" 2>&1
 goto :fin
 :oos_install
 schtasks /Create /SC MINUTE /MO 30 /TN "HyperSmart_VerifOOS" /TR "wscript.exe \"%~dp0tools\run_verify_oos_silent.vbs\"" /F
@@ -790,7 +796,7 @@ echo.
 pause
 goto :fin
 :oos_testnotif
-python tools\verif_checkpoint_oos_shadow.py --test-notification
+"%HYPERSMART_PYTHON%" tools\verif_checkpoint_oos_shadow.py --test-notification
 echo   Code de sortie : %ERRORLEVEL%
 echo.
 pause
@@ -822,25 +828,25 @@ REM -------- RESET-PAPER (Fix 1) : remise a zero VOLONTAIRE, sauvegarde horodate
 :cmd_resetpaper
 echo.
 echo   RESET PAPER : efface equity/PnL/positions ^(sauvegarde horodatee AVANT^). Exige --confirm.
-python tools\reset_paper.py %2 %3
+"%HYPERSMART_PYTHON%" tools\reset_paper.py %2 %3
 echo.
 pause
 goto :fin
 
 REM -------- SELF-TEST (absorbe VERIFIER-TOUT) --------
 :cmd_selftest
-python tools\verifier_tout.py %2 %3 %4 %5 %6 %7 %8 %9
+"%HYPERSMART_PYTHON%" tools\verifier_tout.py %2 %3 %4 %5 %6 %7 %8 %9
 echo.
 pause
 goto :fin
 
 REM -------- AVANCES (conservation totale) --------
 :cmd_auditmoiss
-python tools\audit_moissonneur.py > audit_moissonneur.txt 2>&1
+"%HYPERSMART_PYTHON%" tools\audit_moissonneur.py > audit_moissonneur.txt 2>&1
 echo   Rapport : audit_moissonneur.txt
 goto :fin
 :cmd_premierraw
-python -c "from hl_observer.experimental import rapport_raw as R; p=R.ecrire_rapport('.'); print('Rapport ecrit :', p) if p else print('Aucun OPEN RAW pour l instant.')"
+"%HYPERSMART_PYTHON%" -c "from hl_observer.experimental import rapport_raw as R; p=R.ecrire_rapport('.'); print('Rapport ecrit :', p) if p else print('Aucun OPEN RAW pour l instant.')"
 if exist "runtime\rapports\PREMIER_RAW.md" type "runtime\rapports\PREMIER_RAW.md"
 echo.
 pause
@@ -852,18 +858,18 @@ pause
 goto :fin
 :cmd_verifl2
 if not exist "runtime\data" mkdir "runtime\data" >nul 2>&1
-python -c "import sys; sys.path.insert(0,'tools'); import collecter_userfills_vaults as C; [print(c, C._lecteur_l2_ondemand(c)) for c in ('WLD','AERO','TIA','IO','LDO','SOL')]"
+"%HYPERSMART_PYTHON%" -c "import sys; sys.path.insert(0,'tools'); import collecter_userfills_vaults as C; [print(c, C._lecteur_l2_ondemand(c)) for c in ('WLD','AERO','TIA','IO','LDO','SOL')]"
 echo.
 pause
 goto :fin
 :cmd_sonde
 if not exist "runtime\data" mkdir "runtime\data" >nul 2>&1
-python "tools\sonde_confirmation_vaults.py" --shard B
+"%HYPERSMART_PYTHON%" "tools\sonde_confirmation_vaults.py" --shard B
 echo.
 pause
 goto :fin
 :cmd_notiftest
-python tools\verif_checkpoint_oos_shadow.py --test-notification
+"%HYPERSMART_PYTHON%" tools\verif_checkpoint_oos_shadow.py --test-notification
 echo.
 pause
 goto :fin
