@@ -94,6 +94,8 @@ def construire_sbom_cyclonedx(manifeste: dict) -> dict:
 
 def _raison_exclusion(rel: str) -> str:
     low = rel.lower()
+    if low in {"moisson_console.txt", "moisson-termine.flag"}:
+        return "sortie_runtime_machine"
     if ".git" in low:
         return "controle_version_source"
     if any(x in low for x in ("__pycache__", ".pytest_cache", ".mypy_cache", ".ruff_cache")):

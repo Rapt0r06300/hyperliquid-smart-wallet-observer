@@ -63,6 +63,8 @@ SUFFIXES_SECRETS = (".key", ".p12", ".pfx", ".mnemonic", ".seed", ".keystore")
 FICHIERS_EXCLUS = (REGISTRE_RELPATH.as_posix(),                     # registre PID du lanceur
                    "runtime/data/lanceur_session_marqueur.txt",     # marqueur anti-orphelin (machine)
                    "runtime/data/COURANTE.json",                    # pointeur de session vivante
+                   "moisson_console.txt",                           # sortie console locale generee par le lanceur
+                   "moisson-termine.flag",                          # marqueur local de fin de moisson
                    ".analyse.lock", NOM_MANIFESTE)
 # item 20.6 — un chemin absolu machine-specifique ne doit jamais survivre dans les metadonnees.
 _ABSOLU = re.compile(r"(?:[A-Za-z]:\\|\\\\[^\s\"]+|/(?:home|Users)/)")

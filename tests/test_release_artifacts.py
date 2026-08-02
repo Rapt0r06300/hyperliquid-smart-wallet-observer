@@ -29,7 +29,7 @@ def _archive(tmp_path: Path) -> Path:
             "src/hl_observer/collection/source.py": {"sha256": "1" * 64, "taille": 20},
         },
         "sbom": {"licences": ["LICENSE"]},
-        "donnees_exclues": [".git/", "dist/", ".env"],
+        "donnees_exclues": [".git/", "dist/", ".env", "moisson_console.txt"],
     }
     archive = tmp_path / "hypersmart.zip"
     with zipfile.ZipFile(archive, "w") as z:
@@ -77,6 +77,7 @@ def test_produit_tous_les_artefacts_externes(tmp_path):
     assert "src/hl_observer/app.py" in inventaire["inclus"]
     assert {x["justification"] for x in inventaire["exclus"]} >= {
         "controle_version_source", "ancienne_release_interdite", "secret_interdit",
+        "sortie_runtime_machine",
     }
     modules = json.loads(
         (tmp_path / "MODULES_COLLECTEURS_VERIFIES.json").read_text(encoding="utf-8")
