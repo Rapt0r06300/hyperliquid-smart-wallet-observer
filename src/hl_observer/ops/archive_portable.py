@@ -409,7 +409,8 @@ def reverifier_archive(cible: str | Path) -> dict:
 # ── ORCHESTRATEUR (item 20 complet) ──────────────────────────────────────────────────────────
 def creer_archive_portable(root: str | Path, cible: str | Path, *, version: str = "",
                            git_sha: str | None = None, exiger_arret: bool = True,
-                           pid_vivant=None, horloge=time.time) -> dict:
+                           pid_vivant=None, horloge=time.time,
+                           non_suivis_requis: list[str] | None = None) -> dict:
     """Enchaine les 9 etapes de l'item 20 et rend un verdict. Leve ArchiveRefuseeError sur refus dur
     (writers vivants, session ACTIVE, chemin absolu residuel). Ne fabrique JAMAIS une archive
     partielle : au moindre doute, on refuse et rien n'est ecrit."""
@@ -431,9 +432,18 @@ def creer_archive_portable(root: str | Path, cible: str | Path, *, version: str 
                                   % ", ".join(d["base"] for d in echecs_sql))
     # 4+5 : selection.
     inclus, exclus = lister_pour_archive(root)
+    # 4bis : CONTROLE DE COMPLETUDE (item release) — rien d'important ne doit manquer. Un fichier requis
+    # absent / vide / exclu par erreur, un import intra-projet casse ou une reference .cmd manquante
+    # BLOQUE la release avec la liste exacte. Jamais de release allegee en silence.
+    from hl_observer.ops.inventaire_release import controle_completude, formater as _fmt_compl
+    completude = controle_completude(root, inclus, non_suivis=non_suivis_requis)
+    if not completude["complet"]:
+        raise ArchiveRefuseeError("release INCOMPLETE: %s" % _fmt_compl(completude))
     # 7 : manifeste.
     manifeste = construire_manifeste(root, inclus, exclus, version=version,
                                      git_sha=git_sha, horloge=horloge)
+    manifeste["completude"] = {k: (len(v) if isinstance(v, list) else v)
+                               for k, v in completude.items()}
     # 6+8 : ecriture (neutralisation + refus si chemin absolu residuel).
     ecrit = ecrire_archive(root, cible, inclus, manifeste)
     # 9a : re-verification EN MEMOIRE (chaque membre du zip).

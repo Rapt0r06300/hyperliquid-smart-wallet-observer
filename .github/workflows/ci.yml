@@ -264,7 +264,10 @@ jobs:
             tests/test_audit_portabilite.py \
             tests/test_wheelhouse_lock.py \
             tests/test_portable_runtime.py \
-            tests/test_portabilite_multichemin.py
+            tests/test_portabilite_multichemin.py \
+            tests/test_inventaire_release.py \
+            tests/test_release_ready.py \
+            tests/test_budget_ram.py
       - name: Lanceur HARVEST (preflight bloquant, preuve de vie, registre PID, stockage borne, sante, dYdX, E2E)
         run: |
           python -m pytest -q -p no:cacheprovider --junitxml=junit-lanceur.xml \
