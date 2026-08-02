@@ -48,4 +48,6 @@ def test_ci_is_paper_read_only_and_exact_head():
 def test_writer_registry_is_explicit_and_empty():
     assert "lanceur_pids.json" in TEXT
     assert '{\"composants\":{},\"collecteurs\":{}}' in TEXT
-
+    assert "System.Text.UTF8Encoding($false)" in TEXT
+    writer_step = TEXT[TEXT.index("Materialize fail-closed writer proof"):]
+    assert "Set-Content" not in writer_step.split("- name:", 1)[0]

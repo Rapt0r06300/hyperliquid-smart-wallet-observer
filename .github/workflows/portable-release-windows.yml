@@ -61,8 +61,12 @@ jobs:
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force runtime\data | Out-Null
-          '{"composants":{},"collecteurs":{}}' |
-            Set-Content -LiteralPath runtime\data\lanceur_pids.json -Encoding utf8
+          $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
+          [System.IO.File]::WriteAllText(
+            (Join-Path $PWD "runtime\data\lanceur_pids.json"),
+            '{"composants":{},"collecteurs":{}}',
+            $utf8NoBom
+          )
 
       - name: Build twice and validate the extracted ZIP
         id: release
@@ -125,4 +129,3 @@ jobs:
           path: ${{ steps.release.outputs.directory }}
           if-no-files-found: error
           retention-days: 30
-
