@@ -102,3 +102,33 @@ def test_le_cmd_restaure_portable_env_et_pose_la_porte_avant_le_lab():
     assert i_porte < i_lab                                  # la porte AVANT le lab
     assert "exit /b 5" in txt                               # NO_GO bloque l'analyse
     assert "--budget %HYPERSMART_LAB_BUDGET%" in txt        # budget maximal surchargeable
+
+
+def test_item14_refuse_vieille_complete_si_plus_recente_active(tmp_path):
+    # une COMPLETE ancienne + une ACTIVE plus recente -> on NE selectionne PAS la vieille en silence.
+    a = CatalogueSession(tmp_path, "run-vieille-complete")
+    a.demarrer(horloge=lambda: 1000.0)
+    p = SC.chemin_session(tmp_path, "run-vieille-complete") / "x.jsonl"
+    p.parent.mkdir(parents=True, exist_ok=True); p.write_bytes(b"a\n")
+    a.enregistrer_source(EntreeSource("s", chemin="x.jsonl"))
+    a.cloturer(writers_arretes=True, horloge=lambda: 1001.0)
+    CatalogueSession(tmp_path, "run-active-recente").demarrer(horloge=lambda: 9000.0)  # plus recente, ACTIVE
+    res = AS.analyser(tmp_path)
+    assert res["verdict"] == AS.NO_GO and "pas COMPLETE" in res["raison"]
+    # override explicite : autoriser la vieille COMPLETE.
+    res2 = AS.analyser(tmp_path, autoriser_complete_ancienne=True)
+    assert res2["verdict"] == AS.GO and res2["run_id"] == "run-vieille-complete"
+
+
+def test_item14_seuil_de_fraicheur(tmp_path):
+    c = CatalogueSession(tmp_path, "run-fraiche")
+    c.demarrer(horloge=lambda: 1_000_000.0)
+    p = SC.chemin_session(tmp_path, "run-fraiche") / "x.jsonl"
+    p.parent.mkdir(parents=True, exist_ok=True); p.write_bytes(b"a\n")
+    c.enregistrer_source(EntreeSource("s", chemin="x.jsonl"))
+    c.cloturer(writers_arretes=True, horloge=lambda: 1_000_001.0)
+    # "maintenant" = 1_000_050 s -> age ~49 s. seuil 10 s -> trop vieille ; seuil 100 s -> ok.
+    res_vieux = AS.analyser(tmp_path, age_max_s=10.0, horloge=lambda: 1_000_050.0)
+    assert res_vieux["verdict"] == AS.NO_GO and "trop vieille" in res_vieux["raison"]
+    res_ok = AS.analyser(tmp_path, age_max_s=100.0, horloge=lambda: 1_000_050.0)
+    assert res_ok["verdict"] == AS.GO and res_ok["age_s"] is not None

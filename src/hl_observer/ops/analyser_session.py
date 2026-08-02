@@ -25,21 +25,52 @@ GO = "GO"
 NO_GO = "NO_GO"
 
 
-def selectionner_session(root: str | Path, *, exiger_complete: bool = True) -> dict:
-    """Choisit la session la plus récente à analyser. `exiger_complete` (défaut) : SEULEMENT une COMPLETE.
-    Rend {verdict, run_id, statut, raison, sessions}."""
-    sessions = SC.scanner_sessions(root)
-    complete = SC.derniere_session_complete(root)
-    if complete:
-        return {"verdict": GO, "run_id": complete["run_id"], "statut": SC.STATUT_COMPLETE,
-                "raison": "session COMPLETE la plus recente", "sessions": sessions}
-    # aucune COMPLETE : expliquer précisément pourquoi (honnête), jamais analyser une ACTIVE/QUARANTINED.
+def selectionner_session(root: str | Path, *, exiger_complete: bool = True, age_max_s: float | None = None,
+                         maintenant_ms: float | None = None,
+                         autoriser_complete_ancienne: bool = False) -> dict:
+    """Choisit la session à analyser (item 14). Règle dure : la session GLOBALEMENT la plus récente doit
+    être COMPLETE. Si la plus récente est ACTIVE / QUARANTINED / corrompue, on NE retombe PAS en silence
+    sur une vieille COMPLETE — NO_GO (sauf `autoriser_complete_ancienne`). `age_max_s` : seuil de fraîcheur
+    configurable (une COMPLETE trop vieille est refusée). Rend {verdict, run_id, statut, raison, age_s,
+    fraiche, sessions}."""
+    import time as _t
+    sessions = SC.scanner_sessions(root)                 # triées par debut_ms décroissant
+    now_ms = float(maintenant_ms) if maintenant_ms is not None else _t.time() * 1000.0
+
+    def _age_s(s):
+        deb = s.get("debut_ms") or 0
+        return round(max(0.0, (now_ms - float(deb)) / 1000.0), 3) if deb else None
+
     if not sessions:
-        raison = "aucune session sur disque (runtime/data/sessions vide)"
-    else:
+        return {"verdict": NO_GO, "run_id": None, "statut": None, "age_s": None, "fraiche": False,
+                "raison": "aucune session sur disque (runtime/data/sessions vide)", "sessions": sessions}
+
+    plus_recente = sessions[0]
+    complete = next((s for s in sessions if s.get("statut") == SC.STATUT_COMPLETE), None)
+
+    # la plus récente n'est PAS COMPLETE -> on refuse de rejouer une vieille session en silence.
+    if plus_recente.get("statut") != SC.STATUT_COMPLETE and not autoriser_complete_ancienne:
+        etats = ", ".join("%s=%s(age=%ss)" % (s["run_id"], s["statut"], _age_s(s)) for s in sessions[:5])
+        raison = ("la session la plus recente est %s (%s), pas COMPLETE : on n'analyse PAS une vieille "
+                  "session a sa place. Sessions: %s" % (plus_recente["run_id"], plus_recente["statut"], etats))
+        return {"verdict": NO_GO, "run_id": None, "statut": plus_recente.get("statut"),
+                "age_s": _age_s(plus_recente), "fraiche": False, "raison": raison, "sessions": sessions}
+
+    if not complete:
         etats = ", ".join("%s=%s" % (s["run_id"], s["statut"]) for s in sessions[:5])
-        raison = "aucune session COMPLETE ; sessions presentes: %s" % etats
-    return {"verdict": NO_GO, "run_id": None, "statut": None, "raison": raison, "sessions": sessions}
+        return {"verdict": NO_GO, "run_id": None, "statut": None, "age_s": None, "fraiche": False,
+                "raison": "aucune session COMPLETE ; sessions presentes: %s" % etats, "sessions": sessions}
+
+    age = _age_s(complete)
+    fraiche = (age_max_s is None) or (age is not None and age <= float(age_max_s))
+    if not fraiche:
+        return {"verdict": NO_GO, "run_id": complete["run_id"], "statut": SC.STATUT_COMPLETE,
+                "age_s": age, "fraiche": False,
+                "raison": "session COMPLETE %s trop vieille (age=%ss > seuil %ss)" %
+                          (complete["run_id"], age, age_max_s), "sessions": sessions}
+    return {"verdict": GO, "run_id": complete["run_id"], "statut": SC.STATUT_COMPLETE, "age_s": age,
+            "fraiche": True, "raison": "session COMPLETE la plus recente (age=%ss)" % age,
+            "sessions": sessions}
 
 
 def verifier_session(root: str | Path, run_id: str) -> dict:
@@ -96,10 +127,13 @@ def _rapport_markdown(sel: dict, verif: dict | None) -> str:
 
 
 def analyser(root: str | Path, *, exiger_complete: bool = True, ecrire: bool = True,
-             horloge=time.time) -> dict:
-    """Orchestration de la porte d'entree : selection -> verification -> verdict + rapport consolide.
-    Rend {verdict, run_id, verification, rapport_md, chemins}."""
-    sel = selectionner_session(root, exiger_complete=exiger_complete)
+             horloge=time.time, age_max_s: float | None = None,
+             autoriser_complete_ancienne: bool = False) -> dict:
+    """Orchestration de la porte d'entree : selection (avec fraicheur, item 14) -> verification ->
+    verdict + rapport consolide. Rend {verdict, run_id, age_s, verification, rapport_md, chemins}."""
+    sel = selectionner_session(root, exiger_complete=exiger_complete, age_max_s=age_max_s,
+                               maintenant_ms=horloge() * 1000.0,
+                               autoriser_complete_ancienne=autoriser_complete_ancienne)
     verif = None
     verdict = sel["verdict"]
     if verdict == GO:
@@ -110,6 +144,7 @@ def analyser(root: str | Path, *, exiger_complete: bool = True, ecrire: bool = T
                 sel["run_id"], verif.get("raison"))
     rapport_md = _rapport_markdown({**sel, "verdict": verdict}, verif)
     resultat = {"verdict": verdict, "run_id": sel.get("run_id"), "statut": sel.get("statut"),
+                "age_s": sel.get("age_s"), "fraiche": sel.get("fraiche"),
                 "raison": sel.get("raison"), "verification": verif, "rapport_md": rapport_md,
                 "ts_ms": int(horloge() * 1000), "real_execution": False}
     chemins = {}
@@ -133,8 +168,13 @@ def main(argv: list[str] | None = None) -> int:
                    help="(reserve) tolerer une session DEGRADE_DOCUMENTE — par defaut on exige COMPLETE")
     p.add_argument("--emit-run-id", action="store_true",
                    help="sur GO, ecrit runtime/reports/backtest_replay/SESSION_SELECTIONNEE.txt (run_id) pour le .cmd")
+    p.add_argument("--age-max-s", type=float, default=None,
+                   help="item 14 : seuil de fraicheur (une session COMPLETE plus vieille est refusee)")
+    p.add_argument("--autoriser-complete-ancienne", action="store_true",
+                   help="item 14 : tolerer une vieille COMPLETE meme si une session plus recente est ACTIVE/QUARANTINED")
     args = p.parse_args(argv)
-    res = analyser(Path(args.root), exiger_complete=not args.autoriser_degrade)
+    res = analyser(Path(args.root), exiger_complete=not args.autoriser_degrade, age_max_s=args.age_max_s,
+                   autoriser_complete_ancienne=args.autoriser_complete_ancienne)
     print("ANALYSE_SESSION verdict=%s run_id=%s : %s" %
           (res["verdict"], res.get("run_id"), res.get("raison")), flush=True)
     # item 2 : expose le run_id sélectionné pour que ANALYSER.cmd le passe à lab_alpha (--session-dir).
