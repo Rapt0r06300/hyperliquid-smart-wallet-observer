@@ -254,8 +254,17 @@ def test_neutralise_prefixe_racine():
 
 def test_detecte_chemin_absolu_etranger():
     assert AP.chemins_absolus_residuels(r'{"p": "C:\\Users\\autre\\x"}')
+    assert AP.chemins_absolus_residuels(r'{"p": "\\serveur\partage\x"}')
     assert AP.chemins_absolus_residuels('{"p": "/home/autre/x"}')
+    assert AP.chemins_absolus_residuels(
+        r'{"purl": "pkg:cargo/ruff@1?download_url=file://..\\ruff_module"}'
+    ) == []
     assert AP.chemins_absolus_residuels("pas de chemin ici") == []
+
+
+def test_runtime_tiers_reste_octet_exact_et_metadonnees_projet_sont_neutralisees():
+    assert not AP._est_metadonnee("tools/python/Lib/site-packages/pkg/sbom.json")
+    assert AP._est_metadonnee("config/runtime.json")
 
 
 def test_securite_chemins_windows_et_zip_slip(tmp_path):

@@ -70,7 +70,9 @@ FICHIERS_EXCLUS = (REGISTRE_RELPATH.as_posix(),                     # registre P
                    "moisson-fini.md",                               # rapport local genere apres moisson
                    ".analyse.lock", NOM_MANIFESTE)
 # item 20.6 — un chemin absolu machine-specifique ne doit jamais survivre dans les metadonnees.
-_ABSOLU = re.compile(r"(?:[A-Za-z]:\\|\\\\[^\s\"]+|/(?:home|Users)/)")
+_ABSOLU = re.compile(
+    r"(?:[A-Za-z]:\\|\\\\[^\\\s\"]+\\[^\\\s\"]+|/(?:home|Users)/)"
+)
 _CLE_PRIVEE = re.compile(
     rb"-----BEGIN (?:ENCRYPTED |RSA |DSA |EC |OPENSSH )?PRIVATE KEY-----"
     rb"\s+[A-Za-z0-9+/=\r\n]{64,}"
@@ -737,6 +739,12 @@ class ArchiveRefuseeError(RuntimeError):
 
 def _est_metadonnee(rel: str) -> bool:
     low = rel.lower()
+    # Le runtime tiers est une consequence exacte du wheelhouse verrouille. Ses
+    # SBOM/licences peuvent contenir des URL `file://` de build amont : les
+    # modifier casserait la provenance et ne rendrait pas le runtime plus
+    # portable. La neutralisation reste stricte pour les metadonnees du projet.
+    if low.startswith("tools/python/"):
+        return False
     return low.endswith(".json") or low.endswith(".txt") or low.endswith(".cfg") \
         or low.endswith(".ini") or low.endswith(".toml")
 
