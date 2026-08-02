@@ -38,6 +38,16 @@ STATUT_COMPLETE = "COMPLETE"
 STATUT_QUARANTINED = "QUARANTINED"
 STATUTS = (STATUT_ACTIVE, STATUT_COMPLETE, STATUT_QUARANTINED)
 
+# item 12 — PROVENANCE des données, distincte de `real_execution`. `real_execution` reste TOUJOURS
+# False (invariant de sécurité : aucun ordre réel n'est jamais passé, paper strict). `data_origin` dit
+# une autre vérité : ces données ont-elles été RÉELLEMENT collectées sur Hyperliquid (REEL), ou est-ce
+# une FIXTURE synthétique de test (SYNTHETIQUE) ? Un rapport « vert » sur du SYNTHETIQUE est un faux
+# gain : les couches aval (pnl_improvement_lab) rejettent SYNTHETIC/FAKE/DEMO. La collecte de
+# production attest REEL ; toute fixture doit attester SYNTHETIQUE.
+ORIGINE_REEL = "REEL"
+ORIGINE_SYNTHETIQUE = "SYNTHETIQUE"
+ORIGINES = (ORIGINE_REEL, ORIGINE_SYNTHETIQUE)
+
 # Extensions considérées comme des DONNÉES (pour la détection d'orphelins à la clôture — item 8).
 EXTENSIONS_DONNEES = (".jsonl", ".jsonl.gz", ".json.gz", ".ndjson", ".sqlite3", ".sqlite",
                       ".db", ".csv", ".parquet", ".gz")
@@ -175,11 +185,14 @@ class CatalogueSession:
 
     # ── création / lecture ────────────────────────────────────────────────────────────────────
     def demarrer(self, *, git_head: str | None = None, contexte: Mapping[str, Any] | None = None,
-                 horloge=time.time) -> dict:
-        """Crée la session ACTIVE (idempotent : ne réécrase pas une session déjà démarrée)."""
+                 data_origin: str = ORIGINE_REEL, horloge=time.time) -> dict:
+        """Crée la session ACTIVE (idempotent : ne réécrase pas une session déjà démarrée).
+        `data_origin` (item 12) : REEL par défaut (le chemin canonique = collecte de production réelle) ;
+        une FIXTURE de test DOIT passer ORIGINE_SYNTHETIQUE. `real_execution` reste False (sécurité)."""
         if self.chemin.is_file():
             return self.lire()
         manifeste = manifeste_execution(self.root, tache="collecte_harvest", run_id=self.run_id)
+        origine = data_origin if data_origin in ORIGINES else ORIGINE_REEL
         payload = {
             "schema_catalogue": SCHEMA_CATALOGUE,
             "run_id": self.run_id,
@@ -192,7 +205,8 @@ class CatalogueSession:
             "sources": {},                 # cle -> entrée
             "cloture": None,
             "contexte": dict(contexte or {}),
-            "real_execution": False,
+            "real_execution": False,       # invariant sécurité : AUCUN ordre réel, jamais
+            "data_origin": origine,        # item 12 : provenance REELLE vs fixture SYNTHETIQUE
         }
         self._sauver(payload)
         return payload
@@ -437,7 +451,8 @@ def scanner_sessions(root: str | Path) -> list[dict]:
         except (OSError, ValueError):
             continue
         out.append({"run_id": cat.get("run_id") or d.name, "statut": cat.get("statut"),
-                    "debut_ms": cat.get("debut_ms") or 0, "chemin": str(cat_p)})
+                    "debut_ms": cat.get("debut_ms") or 0, "chemin": str(cat_p),
+                    "data_origin": cat.get("data_origin") or ORIGINE_REEL})
     out.sort(key=lambda x: x.get("debut_ms") or 0, reverse=True)
     return out
 
@@ -451,7 +466,8 @@ def derniere_session_complete(root: str | Path) -> dict | None:
 
 
 __all__ = ["SCHEMA_CATALOGUE", "NOM_CATALOGUE", "STATUT_ACTIVE", "STATUT_COMPLETE",
-           "STATUT_QUARANTINED", "STATUTS", "EntreeSource", "CatalogueSession", "SessionFigeeError",
+           "STATUT_QUARANTINED", "STATUTS", "ORIGINE_REEL", "ORIGINE_SYNTHETIQUE", "ORIGINES",
+           "EntreeSource", "CatalogueSession", "SessionFigeeError",
            "sha256_fichier", "nouveau_run_id", "chemin_session", "chemin_catalogue",
            "scanner_sessions", "derniere_session_complete", "verifier_catalogue",
            "CatalogueInvalideError", "valider_chemin_artefact"]

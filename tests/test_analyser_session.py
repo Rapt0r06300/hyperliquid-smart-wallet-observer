@@ -49,6 +49,30 @@ def test_go_sur_session_complete_verifiee(tmp_path):
     assert (tmp_path / "runtime" / "reports" / "backtest_replay" / "ANALYSE_SESSION.md").is_file()
 
 
+def test_item12_data_origin_reel_par_defaut_et_real_execution_toujours_false(tmp_path):
+    # une session COLLECTEE (chemin canonique) est REELLE ; real_execution reste False (aucun ordre reel).
+    _session_complete(tmp_path, "run-reel")
+    res = AS.analyser(tmp_path)
+    assert res["verdict"] == AS.GO
+    assert res["data_origin"] == SC.ORIGINE_REEL
+    assert res["real_execution"] is False                    # invariant securite, INDEPENDANT de data_origin
+
+
+def test_item12_fixture_synthetique_etiquetee_synthetique(tmp_path):
+    # une FIXTURE de test doit s'ETIQUETER SYNTHETIQUE -> jamais confondue avec du reel (faux vert).
+    c = CatalogueSession(tmp_path, "run-synth")
+    c.demarrer(data_origin=SC.ORIGINE_SYNTHETIQUE, horloge=lambda: 1000.0)
+    (SC.chemin_session(tmp_path, "run-synth") / "hl").mkdir(parents=True, exist_ok=True)
+    (SC.chemin_session(tmp_path, "run-synth") / "hl" / "a.jsonl").write_bytes(b"a\nb\n")
+    c.enregistrer_source(EntreeSource("allmids-collector", chemin="hl/a.jsonl"))
+    c.cloturer(writers_arretes=True, horloge=lambda: 1001.0)
+    res = AS.analyser(tmp_path)
+    assert res["verdict"] == AS.GO and res["data_origin"] == SC.ORIGINE_SYNTHETIQUE
+    assert res["real_execution"] is False                    # toujours False, meme sur du synthetique
+    # la provenance est aussi persistee dans le catalogue de la session.
+    assert SC.CatalogueSession(tmp_path, "run-synth").lire()["data_origin"] == SC.ORIGINE_SYNTHETIQUE
+
+
 def test_no_go_si_session_alteree_apres_cloture(tmp_path):
     _session_complete(tmp_path, "run-corrompu")
     # altere le fichier APRES la cloture -> le checksum recalcule par ANALYSER doit diverger.
