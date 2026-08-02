@@ -21,6 +21,15 @@ from tools import heartbeat_collecteur as HB
 CORE = tuple(s for s in SOURCES_HARVEST if s.obligatoire)
 
 
+def _registre_arrete(root):
+    """item 8 : registre PID PRESENT avec 0 collecteur vivant -> preuve d'arret (fail-closed sinon)."""
+    import json
+    from hl_observer.ops.registre_pids import REGISTRE_RELPATH
+    p = Path(root) / REGISTRE_RELPATH
+    p.parent.mkdir(parents=True, exist_ok=True)
+    p.write_text(json.dumps({"collecteurs": {}}), encoding="utf-8")
+
+
 def test_chaine_complete_collecte_session_cloture_analyser(tmp_path):
     # 1) COLLECTE : heartbeats CORE frais.
     for s in CORE:
@@ -42,6 +51,7 @@ def test_chaine_complete_collecte_session_cloture_analyser(tmp_path):
                                              evenements_recus=10, evenements_valides=10))
 
     # 3) ARRET des writers puis CLOTURE : COMPLETE seulement si tout verifie.
+    _registre_arrete(tmp_path)
     verdict = SH.cloturer_session_courante(tmp_path, writers_arretes=True)
     assert verdict["statut"] == SC.STATUT_COMPLETE, verdict
     assert verdict["verifications"]["zero_orphelin"] is True
@@ -79,6 +89,7 @@ def test_chaine_refuse_session_alteree_apres_cloture(tmp_path):
         c.enregistrer_source(SC.EntreeSource(s.nom, s.venue, s.canal, chemin=rel))
         if s.nom == "bbo-collector":
             p_bbo = p
+    _registre_arrete(tmp_path)
     assert SH.cloturer_session_courante(tmp_path, writers_arretes=True)["statut"] == SC.STATUT_COMPLETE
     # altération APRES cloture -> ANALYSER recalcule et refuse.
     p_bbo.write_bytes(b"DONNEES FALSIFIEES APRES CLOTURE\n")

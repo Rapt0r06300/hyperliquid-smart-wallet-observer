@@ -88,6 +88,7 @@ def test_cloture_propre_donne_complete(tmp_path):
     _battre_core(tmp_path)
     SH.ouvrir_session_harvest(tmp_path, run_id="harvest-fixe-4", now_ms=time.time() * 1000 + 100)
     _artefacts_core(tmp_path, "harvest-fixe-4")              # item 5 : artefact pour CHAQUE source vivante
+    _ecrire_registre(tmp_path, {})                          # item 8 : registre present, 0 collecteur vivant
     v = SH.cloturer_session_courante(tmp_path, writers_arretes=True)
     assert v["statut"] == SC.STATUT_COMPLETE and v["run_id"] == "harvest-fixe-4"
     # la dernière session COMPLETE est retrouvable par ANALYSER.
@@ -119,6 +120,7 @@ def test_cli_ouvrir_status_cloturer(tmp_path, capsys):
     assert "statut=ACTIVE" in capsys.readouterr().out
     rid = SH.run_id_courant(tmp_path)
     _artefacts_core(tmp_path, rid)                           # item 5 : artefact pour CHAQUE source vivante
+    _ecrire_registre(tmp_path, {})                          # item 8 : registre present, 0 collecteur vivant
     assert SH.main(["cloturer", str(tmp_path), "--writers-arretes"]) == 0
     assert "statut=COMPLETE" in capsys.readouterr().out
 
@@ -163,3 +165,25 @@ def test_cloture_quarantaine_si_un_writer_vit_encore(tmp_path):
     v = SH.cloturer_session_courante(tmp_path, writers_arretes=True, pid_vivant=lambda pid: pid == 4242)
     assert v["statut"] == SC.STATUT_QUARANTINED and "WRITERS_ENCORE_ACTIFS" in v["motifs"]
     assert v["preuve_writers_arretes"] is False and "bbo-collector" in v["writers_vivants"]
+
+
+def test_preuve_writers_arretes_fail_closed_sans_registre(tmp_path):
+    # item 8 : registre ABSENT -> arret NON prouve (fail-closed), jamais suppose arrete.
+    arretes, motifs = SH.preuve_writers_arretes(tmp_path)
+    assert arretes is False and "REGISTRE_ABSENT" in motifs
+    # cloture sans registre -> QUARANTINED (writers non prouves arretes).
+    _battre_core(tmp_path)
+    SH.ouvrir_session_harvest(tmp_path, run_id="harvest-noreg", now_ms=time.time() * 1000 + 100)
+    _artefacts_core(tmp_path, "harvest-noreg")
+    v = SH.cloturer_session_courante(tmp_path)               # aucune attestation, aucun registre
+    assert v["statut"] == SC.STATUT_QUARANTINED
+
+
+def test_preuve_writers_arretes_fail_closed_registre_incomplet(tmp_path):
+    import json as _j
+    from hl_observer.ops.registre_pids import REGISTRE_RELPATH
+    p = Path(tmp_path) / REGISTRE_RELPATH
+    p.parent.mkdir(parents=True, exist_ok=True)
+    p.write_text(_j.dumps({"role": "launcher"}), encoding="utf-8")   # pas de cle 'collecteurs' = corrompu
+    arretes, motifs = SH.preuve_writers_arretes(tmp_path)
+    assert arretes is False and "REGISTRE_INCOMPLET" in motifs

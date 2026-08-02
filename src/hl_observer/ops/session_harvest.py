@@ -121,21 +121,38 @@ def enregistrer_sources_declarees(root: str | Path, run_id: str, *,
     return resume
 
 
+PROCESSUS_ECRIVAINS = ("ui", "poller", "stream", "moniteur", "resource_watcher", "moteur")
+
+
 def preuve_writers_arretes(root: str | Path, *, pid_vivant=_pid_vivant_reel) -> tuple[bool, list[str]]:
-    """Preuve INDÉPENDANTE (item 4) que les writers sont arrêtés : AUCUN PID de collecteur du registre
-    n'est encore vivant. Rend (arretes, [noms encore vivants]). Jamais un flag aveugle."""
+    """Preuve INDÉPENDANTE et FAIL-CLOSED (item 8) que TOUS les writers sont arrêtés. Un registre PID
+    absent / illisible / sans la clé `collecteurs` = arrêt NON prouvé (on ne suppose jamais l'arrêt).
+    On contrôle les collecteurs ET les autres écrivains connus (ui/poller/stream/moniteur/resource
+    watcher/moteur). Rend (arretes, [motifs/noms vivants]). Ambiguïté = non prouvé."""
     try:
         from hl_observer.ops.registre_pids import lire_registre
         reg = lire_registre(root)
     except Exception:  # noqa: BLE001
-        return True, []                      # pas de registre lisible → rien à prouver vivant
+        return False, ["REGISTRE_ILLISIBLE"]          # fail-closed : illisible ≠ arrêté
+    if not isinstance(reg, dict) or not reg:
+        return False, ["REGISTRE_ABSENT"]             # fail-closed : pas de registre = arrêt non prouvé
+    if "collecteurs" not in reg:
+        return False, ["REGISTRE_INCOMPLET"]          # corrompu / partiel = arrêt non prouvé
+    collecteurs = reg.get("collecteurs")
+    if not isinstance(collecteurs, dict):
+        return False, ["REGISTRE_CORROMPU"]
+    tous: dict[str, Any] = dict(collecteurs)
+    for cle in PROCESSUS_ECRIVAINS:                    # double contrôle : autres process ecrivains
+        v = reg.get(cle)
+        if isinstance(v, int):
+            tous[cle] = v
     vivants: list[str] = []
-    for nom, pid in dict(reg.get("collecteurs") or {}).items():
+    for nom, pid in tous.items():
         try:
             if isinstance(pid, int) and pid_vivant(int(pid)):
                 vivants.append(str(nom))
         except Exception:  # noqa: BLE001
-            continue
+            vivants.append("%s?" % nom)                # ambiguïté sur un PID = non prouvé (fail-closed)
     return (not vivants), vivants
 
 

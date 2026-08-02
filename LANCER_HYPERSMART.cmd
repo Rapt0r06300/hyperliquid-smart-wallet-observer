@@ -1,11 +1,19 @@
 @echo off
 setlocal
 cd /d "%~dp0"
+REM item 9/10 : code de sortie propage de bout en bout. Jamais un exit /b 0 systematique en cas d'echec.
+set "RC=0"
 REM PORTABILITE : choisit en priorite le Python embarque relatif au dossier.
 REM Le PATH est modifie uniquement pour cette session du lanceur et ses enfants.
 call "%~dp0tools\portable_env.cmd"
 if errorlevel 1 (
   echo   HyperSmart ne peut pas demarrer sans runtime Python valide.
+  set "RC=30"
+  goto :fin
+)
+if not defined HYPERSMART_PYTHON (
+  echo   HYPERSMART_PYTHON non defini par portable_env. Abandon.
+  set "RC=31"
   goto :fin
 )
 REM ============================================================================
@@ -343,7 +351,7 @@ set "HYPERSMART_ENABLE_AUX_STREAM=1"
 
 REM === PREFLIGHT BLOQUANT (item 6) — env/deps/disque/dossiers/horloge/endpoints/quotas/schemas/paper.
 REM   NO-GO => le moteur NE demarre PAS. Paper strict, lecture publique HL info uniquement, 0 ordre.
-python -m hl_observer.ops.preflight_lanceur "%~dp0."
+"%HYPERSMART_PYTHON%" -m hl_observer.ops.preflight_lanceur "%~dp0."
 if errorlevel 1 (
   echo.
   echo   [PREFLIGHT] NO-GO : environnement non pret. Le moteur ne demarre pas. Corrige les blocages ci-dessus.
@@ -357,7 +365,7 @@ REM on les DEPLACE dans runtime\replay\_archive\run_<ts>\ (serveur eteint, avant
 REM => le dataset replay s'accumule entre rallumages ; runtime\replay\ reste propre pour le run.
 REM Le replay (merge_replay/include_archive) lit TOUT l'historique. Best-effort, jamais destructif.
 if not exist "%~dp0runtime\logs" mkdir "%~dp0runtime\logs" >nul 2>&1
-python -m hl_observer.runtime.replay_recorder --archive-run --base "%~dp0runtime\replay" 1>>"%~dp0runtime\logs\archive_replay.log" 2>&1
+"%HYPERSMART_PYTHON%" -m hl_observer.runtime.replay_recorder --archive-run --base "%~dp0runtime\replay" 1>>"%~dp0runtime\logs\archive_replay.log" 2>&1
 if errorlevel 1 echo   [ATTENTION] Archivage replay: erreur signalee (non masquee) -- voir runtime\logs\archive_replay.log
 
 REM -MaxLeaders eleve = scan TRES large (pool de leaders) ; le gate de qualite (smart money) garde la copie etroite.
@@ -410,7 +418,7 @@ if errorlevel 1 (
 REM Le superviseur enregistre directement les PID et reutilise les instances deja
 REM vivantes. Aucun second passage de detection, aucun demarrage en double.
 ping -n 3 127.0.0.1 >nul 2>&1
-python -m hl_observer.ops.superviseur_collecteurs status harvest
+"%HYPERSMART_PYTHON%" -m hl_observer.ops.superviseur_collecteurs status harvest
 echo   [collecteurs HARVEST] allMids + BBO(HL+Binance) + userFills + carnet L2 + marks + liq + venues + vaults + backfills.
 REM === ITEM 1 : BARRIERE READY_CORE **BLOQUANTE** =============================================
 REM Apres le demarrage des collecteurs, on attend (fenetre BORNEE de warmup) que le socle CORE
@@ -421,7 +429,7 @@ REM Fenetre de warmup surchargable : set HYPERSMART_WARMUP_CORE_SEC avant le lan
 set "HYPERSMART_WARMUP_CORE_SEC=%HYPERSMART_WARMUP_CORE_SEC%"
 if "%HYPERSMART_WARMUP_CORE_SEC%"=="" set "HYPERSMART_WARMUP_CORE_SEC=90"
 echo   [READY_CORE] Attente bornee (%HYPERSMART_WARMUP_CORE_SEC% s) de la preuve de vie du socle CORE...
-python -m hl_observer.ops.preuve_de_vie "%~dp0." --niveau core --attendre %HYPERSMART_WARMUP_CORE_SEC% --intervalle 3
+"%HYPERSMART_PYTHON%" -m hl_observer.ops.preuve_de_vie "%~dp0." --niveau core --attendre %HYPERSMART_WARMUP_CORE_SEC% --intervalle 3
 if errorlevel 1 (
   echo.
   echo   [READY_CORE] DATA_NOT_READY : allMids/BBO/userFills n'ont PAS prouve leur vie dans la fenetre.
@@ -433,13 +441,13 @@ if errorlevel 1 (
 )
 echo   [READY_CORE] OK : allMids + BBO + userFills prouves vivants. Demarrage moteur/UI/poller autorise.
 REM Item 4 : niveau HARVEST detaille (COMPLET / DEGRADE_DOCUMENTE) — INFORMATIF, va au catalogue de session.
-python -m hl_observer.ops.preuve_de_vie "%~dp0." --niveau harvest
+"%HYPERSMART_PYTHON%" -m hl_observer.ops.preuve_de_vie "%~dp0." --niveau harvest
 
 REM === ITEM 7 (cablage) : ouverture de la SESSION canonique + declaration de TOUTES les sources ========
 REM   Ecrit runtime\data\sessions\<run_id>\DATA_CATALOG.json (ACTIVE) + le pointeur COURANTE.json que le
 REM   moniteur et ANALYSER retrouvent. Chaque source est DECLAREE (vivante avec compteurs reels, ou absente
 REM   avec sa raison). Aucune donnee fabriquee.
-python -m hl_observer.ops.session_harvest ouvrir "%~dp0."
+"%HYPERSMART_PYTHON%" -m hl_observer.ops.session_harvest ouvrir "%~dp0."
 
 REM === ITEM 9 : MONITEUR de sante INTEGRE AU LANCEMENT (plus besoin de "LANCER_HYPERSMART.cmd sante"). ==
 REM   Boucle CACHEE (start /b) : rafraichit le tableau + APPEND runtime\logs\sante_journal.log en continu
@@ -455,13 +463,17 @@ powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0tools\start_hypersmart
 
 REM item 4 : a la SORTIE du moteur interactif (Q / croix / fin), on arrete REELLEMENT les writers puis on
 REM CLOTURE la session (COMPLETE si tout verifie + zero orphelin + preuve d'arret ; sinon QUARANTINED).
+set "RC_MOTEUR=%ERRORLEVEL%"
 echo   [ARRET] Sortie du moteur : arret des collecteurs + cloture de session...
 call :stop_impl
+set "RC_STOP=%ERRORLEVEL%"
+REM item 9 : propage le PREMIER code non nul (moteur PowerShell puis arret/cloture).
+if not "%RC_MOTEUR%"=="0" ( set "RC=%RC_MOTEUR%" ) else ( if not "%RC_STOP%"=="0" set "RC=%RC_STOP%" )
 goto :fin
 
 :fin
-endlocal
-exit /b 0
+REM item 9 : code de sortie reel (0 seulement si tout a reussi), jamais un exit /b 0 systematique.
+endlocal & exit /b %RC%
 
 REM ############################################################################
 REM #  SOUS-ROUTINE PARTAGEE : DEMARRAGE DES COLLECTEURS (source unique)
@@ -472,7 +484,7 @@ REM ############################################################################
 :demarrer_collecteurs
 REM Profil HARVEST officiel (items 1/2) : socle CORE (allMids+BBO+userFills) PLUS la recolte dense
 REM doublons et enregistre lui-meme les PID pour l'arret cible.
-python -m hl_observer.ops.superviseur_collecteurs demarrer-tous harvest
+"%HYPERSMART_PYTHON%" -m hl_observer.ops.superviseur_collecteurs demarrer-tous harvest
 exit /b %ERRORLEVEL%
 
 REM ---------------------------------------------------------------------------
@@ -666,7 +678,7 @@ goto :fin
 REM -------- PORTABILITE WINDOWS --------
 :cmd_portablecheck
 echo.
-python tools\portable_runtime.py --root "%~dp0." check
+"%HYPERSMART_PYTHON%" tools\portable_runtime.py --root "%~dp0." check
 echo.
 goto :fin
 
@@ -688,7 +700,7 @@ echo.
 echo   ===  STATUT HYPERSMART  ^(lecture seule^)  ===
 if exist "runtime\data\launcher_pids.json" ( echo   Registre lanceur : & type "runtime\data\launcher_pids.json" & echo. ) else ( echo   Pas de registre lanceur. )
 powershell -NoProfile -Command "try { $ok=(Test-NetConnection -ComputerName 127.0.0.1 -Port 8794 -WarningAction SilentlyContinue -InformationLevel Quiet) } catch { $ok=$false }; Write-Host ('  UI 8794 : ' + $(if($ok){'ACTIVE'}else{'inactive'}))"
-python -m hl_observer.ops.superviseur_collecteurs status harvest
+"%HYPERSMART_PYTHON%" -m hl_observer.ops.superviseur_collecteurs status harvest
 echo.
 goto :fin
 
@@ -696,7 +708,7 @@ REM -------- SANTE LIVE (tableau dynamique + journal horodate) --------
 :cmd_sante
 echo   Tableau de sante live des collecteurs (Ctrl-C pour quitter).
 echo   Journal append-only : runtime\logs\sante_journal.log
-python -m hl_observer.ops.moniteur_sante "%~dp0." --intervalle 2
+"%HYPERSMART_PYTHON%" -m hl_observer.ops.moniteur_sante "%~dp0." --intervalle 2
 goto :fin
 
 REM -------- STOP (cible, jamais de kill global) --------
@@ -704,8 +716,9 @@ REM -------- STOP (cible, jamais de kill global) --------
 echo.
 echo   Arret cible des collecteurs + userfills ^(par ligne de commande du projet ; aucun kill global^)...
 call :stop_impl
+set "RC=%ERRORLEVEL%"
 echo.
-echo   Collecteurs + userfills + moteur ^(port 8794^) arretes ^(cible par PID/port ; aucun kill global^).
+echo   Arret + cloture termines ^(code %RC%^). QUARANTINED si un writer vivait encore ou un artefact manque.
 echo.
 goto :fin
 
@@ -713,18 +726,30 @@ goto :fin
 REM ARRET CIBLE (Fix 5) : SEULEMENT les PID enregistres du run + enfants verifies + process signes
 REM registre + detenteur valide du port 8794 + verrou userfills. AUCUN motif large (*hl_observer*/*projet*).
 "%HYPERSMART_PYTHON%" -m hl_observer.ops.superviseur_collecteurs arreter
+set "RC_SUP=%ERRORLEVEL%"
 REM === ITEMS 4 & 8 : CLOTURE SURE APRES l'arret des writers. On NE passe PLUS --writers-arretes : la
 REM   preuve d'arret est CALCULEE independamment (registre PID -> aucun collecteur vivant). La session ne
 REM   passe COMPLETE que si writers reellement arretes + checksums OK + artefacts reels + ZERO orphelin ;
 REM   sinon QUARANTINED. Un collecteur orphelin encore vivant => QUARANTINED (jamais un faux COMPLETE).
 "%HYPERSMART_PYTHON%" -m hl_observer.ops.session_harvest cloturer "%~dp0."
-exit /b 0
+set "RC_CLO=%ERRORLEVEL%"
+REM item 9 : PREMIER code non nul (superviseur puis cloture). Jamais un exit /b 0 systematique.
+set "RC_STOP=0"
+if not "%RC_SUP%"=="0" ( set "RC_STOP=%RC_SUP%" ) else ( if not "%RC_CLO%"=="0" set "RC_STOP=%RC_CLO%" )
+exit /b %RC_STOP%
 
 REM -------- RESTART = stop puis autopilot --------
 :cmd_restart
 echo.
 echo   Redemarrage : arret cible ^(collecteurs + userfills + moteur^) puis autopilot...
 call :stop_impl
+set "RC_STOP=%ERRORLEVEL%"
+REM item 9 : un arret/cloture en echec NE redemarre PAS en silence (on propage le code).
+if not "%RC_STOP%"=="0" (
+  echo   [RESTART] Arret/cloture en echec ^(code %RC_STOP%^) : on NE redemarre pas. Corrige d'abord.
+  set "RC=%RC_STOP%"
+  goto :fin
+)
 timeout /t 6 >nul
 goto :autopilot
 
@@ -751,44 +776,44 @@ goto :fin
 
 :cmd_collectors_maintenance
 echo.
-python -m hl_observer.ops.superviseur_collecteurs demarrer-tous maintenance
-python -m hl_observer.ops.superviseur_collecteurs status maintenance
+"%HYPERSMART_PYTHON%" -m hl_observer.ops.superviseur_collecteurs demarrer-tous maintenance
+"%HYPERSMART_PYTHON%" -m hl_observer.ops.superviseur_collecteurs status maintenance
 echo.
 goto :fin
 
 :cmd_collectors_research
 echo.
-python -m hl_observer.ops.superviseur_collecteurs demarrer-tous research
-python -m hl_observer.ops.superviseur_collecteurs status research
+"%HYPERSMART_PYTHON%" -m hl_observer.ops.superviseur_collecteurs demarrer-tous research
+"%HYPERSMART_PYTHON%" -m hl_observer.ops.superviseur_collecteurs status research
 echo.
 goto :fin
 
 :cmd_collectors_all
 echo.
-python -m hl_observer.ops.superviseur_collecteurs demarrer-tous all
-python -m hl_observer.ops.superviseur_collecteurs status all
+"%HYPERSMART_PYTHON%" -m hl_observer.ops.superviseur_collecteurs demarrer-tous all
+"%HYPERSMART_PYTHON%" -m hl_observer.ops.superviseur_collecteurs status all
 echo.
 goto :fin
 
 REM -------- REPORT (absorbe RAPPORT-DU-JOUR) --------
 :cmd_report
 echo.
-python tools\rapport_quotidien.py
+"%HYPERSMART_PYTHON%" tools\rapport_quotidien.py
 echo.
 pause
 goto :fin
 
 REM -------- TEST (absorbe TOUT-TESTER) --------
 :cmd_test
-python "%~dp0tools\lanceur_tout_tester.py" %2 %3 %4 %5 %6 %7 %8 %9
+"%HYPERSMART_PYTHON%" "%~dp0tools\lanceur_tout_tester.py" %2 %3 %4 %5 %6 %7 %8 %9
 goto :fin
 
 REM -------- AUDIT (absorbe TEST-AUDIT-complet) --------
 :cmd_audit
 echo.
 echo   Lancement de l'audit ^(~180 controles^)...
-python -m pip install -q pytest-timeout coverage 2>nul
-python tools\audit_report.py %2 %3 %4 %5 %6 %7 %8 %9
+"%HYPERSMART_PYTHON%" -m pip install -q pytest-timeout coverage 2>nul
+"%HYPERSMART_PYTHON%" tools\audit_report.py %2 %3 %4 %5 %6 %7 %8 %9
 set "AUDIT_CODE=%ERRORLEVEL%"
 if exist "resultat-audit.md" ( echo   Rapport ecrit : %~dp0resultat-audit.md ) else ( echo   ATTENTION : le rapport n'a pas ete ecrit. )
 echo.
@@ -823,7 +848,7 @@ start "MOISSON 12h - travail (NE PAS FERMER)" /min cmd /c "set PYTHONPATH=%~dp0s
 powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0tools\voir_dashboard.ps1" -Root "%~dp0"
 goto :fin
 :moisson_github
-python tools\moissonner_10h.py %3 %4 %5 %6 %7 %8 %9
+"%HYPERSMART_PYTHON%" tools\moissonner_10h.py %3 %4 %5 %6 %7 %8 %9
 echo.
 pause
 goto :fin
@@ -845,7 +870,7 @@ if /I "%~2"=="uninstall"  goto :oos_uninstall
 if /I "%~2"=="diag"       goto :oos_diag
 if /I "%~2"=="test-notif" goto :oos_testnotif
 if not exist "runtime\rapports\checkpoint_oos_shadow" mkdir "runtime\rapports\checkpoint_oos_shadow" >nul 2>&1
-python tools\verif_checkpoint_oos_shadow.py >> "runtime\rapports\checkpoint_oos_shadow\verif.log" 2>&1
+"%HYPERSMART_PYTHON%" tools\verif_checkpoint_oos_shadow.py >> "runtime\rapports\checkpoint_oos_shadow\verif.log" 2>&1
 goto :fin
 :oos_install
 schtasks /Create /SC MINUTE /MO 30 /TN "HyperSmart_VerifOOS" /TR "wscript.exe \"%~dp0tools\run_verify_oos_silent.vbs\"" /F
@@ -869,7 +894,7 @@ echo.
 pause
 goto :fin
 :oos_testnotif
-python tools\verif_checkpoint_oos_shadow.py --test-notification
+"%HYPERSMART_PYTHON%" tools\verif_checkpoint_oos_shadow.py --test-notification
 echo   Code de sortie : %ERRORLEVEL%
 echo.
 pause
@@ -901,25 +926,25 @@ REM -------- RESET-PAPER (Fix 1) : remise a zero VOLONTAIRE, sauvegarde horodate
 :cmd_resetpaper
 echo.
 echo   RESET PAPER : efface equity/PnL/positions ^(sauvegarde horodatee AVANT^). Exige --confirm.
-python tools\reset_paper.py %2 %3
+"%HYPERSMART_PYTHON%" tools\reset_paper.py %2 %3
 echo.
 pause
 goto :fin
 
 REM -------- SELF-TEST (absorbe VERIFIER-TOUT) --------
 :cmd_selftest
-python tools\verifier_tout.py %2 %3 %4 %5 %6 %7 %8 %9
+"%HYPERSMART_PYTHON%" tools\verifier_tout.py %2 %3 %4 %5 %6 %7 %8 %9
 echo.
 pause
 goto :fin
 
 REM -------- AVANCES (conservation totale) --------
 :cmd_auditmoiss
-python tools\audit_moissonneur.py > audit_moissonneur.txt 2>&1
+"%HYPERSMART_PYTHON%" tools\audit_moissonneur.py > audit_moissonneur.txt 2>&1
 echo   Rapport : audit_moissonneur.txt
 goto :fin
 :cmd_premierraw
-python -c "from hl_observer.experimental import rapport_raw as R; p=R.ecrire_rapport('.'); print('Rapport ecrit :', p) if p else print('Aucun OPEN RAW pour l instant.')"
+"%HYPERSMART_PYTHON%" -c "from hl_observer.experimental import rapport_raw as R; p=R.ecrire_rapport('.'); print('Rapport ecrit :', p) if p else print('Aucun OPEN RAW pour l instant.')"
 if exist "runtime\rapports\PREMIER_RAW.md" type "runtime\rapports\PREMIER_RAW.md"
 echo.
 pause
@@ -931,18 +956,18 @@ pause
 goto :fin
 :cmd_verifl2
 if not exist "runtime\data" mkdir "runtime\data" >nul 2>&1
-python -c "import sys; sys.path.insert(0,'tools'); import collecter_userfills_vaults as C; [print(c, C._lecteur_l2_ondemand(c)) for c in ('WLD','AERO','TIA','IO','LDO','SOL')]"
+"%HYPERSMART_PYTHON%" -c "import sys; sys.path.insert(0,'tools'); import collecter_userfills_vaults as C; [print(c, C._lecteur_l2_ondemand(c)) for c in ('WLD','AERO','TIA','IO','LDO','SOL')]"
 echo.
 pause
 goto :fin
 :cmd_sonde
 if not exist "runtime\data" mkdir "runtime\data" >nul 2>&1
-python "tools\sonde_confirmation_vaults.py" --shard B
+"%HYPERSMART_PYTHON%" "tools\sonde_confirmation_vaults.py" --shard B
 echo.
 pause
 goto :fin
 :cmd_notiftest
-python tools\verif_checkpoint_oos_shadow.py --test-notification
+"%HYPERSMART_PYTHON%" tools\verif_checkpoint_oos_shadow.py --test-notification
 echo.
 pause
 goto :fin
