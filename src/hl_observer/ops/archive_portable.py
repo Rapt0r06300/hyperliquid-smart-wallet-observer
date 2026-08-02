@@ -48,7 +48,9 @@ NOM_MANIFESTE = "PORTABLE_MANIFEST.json"
 DOSSIERS_EXCLUS = ("__pycache__", ".git", ".venv", "venv", "env", "node_modules",
                    ".pytest_cache", ".mypy_cache", ".ruff_cache", "portable_runtime",
                    ".venv-portable", "tmp_pytest", "htmlcov", "dist", "build",
-                   ".portable-staging", "portable-build", "cache_moisson", ".hypothesis")
+                   ".portable-staging", "portable-build", "cache_moisson", ".hypothesis",
+                   "_validation_workspace")
+PREFIXES_DOSSIERS_TRANSITOIRES = (".portable-",)
 PREFIXES_EXCLUS = (
     "runtime/research/", "logs/", "data/", "_to_delete/", "archive/",
     "outils de test/rapports/",
@@ -72,7 +74,13 @@ FICHIERS_EXCLUS = (REGISTRE_RELPATH.as_posix(),                     # registre P
 # item 20.6 — un chemin absolu machine-specifique ne doit jamais survivre dans les metadonnees.
 _ABSOLU = re.compile(
     r"(?:[A-Za-z]:\\|\\\\[^\\\s\"]+\\[^\\\s\"]+|/(?:home|Users)/)"
-)
+                   )
+
+
+def _composant_dossier_exclu(nom: str) -> bool:
+    return nom in DOSSIERS_EXCLUS or nom.startswith(PREFIXES_DOSSIERS_TRANSITOIRES)
+
+
 _CLE_PRIVEE = re.compile(
     rb"-----BEGIN (?:ENCRYPTED |RSA |DSA |EC |OPENSSH )?PRIVATE KEY-----"
     rb"\s+[A-Za-z0-9+/=\r\n]{64,}"
@@ -324,7 +332,7 @@ def preparer_sqlite(root: str | Path) -> list[dict]:
     out: list[dict] = []
     for ext in ("*.sqlite", "*.sqlite3", "*.db"):
         for p in root.rglob(ext):
-            if any(part in DOSSIERS_EXCLUS for part in p.relative_to(root).parts):
+            if any(_composant_dossier_exclu(part) for part in p.relative_to(root).parts):
                 continue
             out.append(checkpoint_wal_sqlite(p))
     return out
@@ -337,7 +345,7 @@ def est_exclu(rel: str) -> bool:
             and not rel_posix.startswith("runtime/data/sessions/"):
         return True
     parts = Path(rel).parts
-    if any(part in DOSSIERS_EXCLUS for part in parts):
+    if any(_composant_dossier_exclu(part) for part in parts):
         return True
     if rel_posix.startswith(PREFIXES_EXCLUS):
         return True
@@ -377,7 +385,7 @@ def _dossier_a_elaguer(rel: str) -> bool:
             and not (rel_posix == "runtime/data/sessions"
                      or rel_posix.startswith("runtime/data/sessions/")):
         return True
-    if any(part in DOSSIERS_EXCLUS for part in rel_posix.split("/")):
+    if any(_composant_dossier_exclu(part) for part in rel_posix.split("/")):
         return True
     avec_barre = rel_posix + "/"
     return any(avec_barre.startswith(prefixe) for prefixe in PREFIXES_EXCLUS)
@@ -583,7 +591,9 @@ def construire_manifeste(root: str | Path, inclus: Iterable[str], exclus: Iterab
         "sbom": _sbom(root, fichiers, binaires),           # item 8 : bill-of-materials + licences
         "deps": _deps_verrouillees(root),
         "donnees_incluses": sessions,
-        "donnees_exclues": sorted(set(list(DOSSIERS_EXCLUS) + list(SUFFIXES_EXCLUS)
+        "donnees_exclues": sorted(set(list(DOSSIERS_EXCLUS)
+                                       + list(PREFIXES_DOSSIERS_TRANSITOIRES)
+                                       + list(SUFFIXES_EXCLUS)
                                        + list(FICHIERS_EXCLUS))),
         "commande_verification": "CREER_ARCHIVE_PORTABLE.cmd --verifier <archive.zip>",
         "etat_git": etat_git or {},

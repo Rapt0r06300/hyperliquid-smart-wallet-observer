@@ -82,6 +82,15 @@ def _sqlite_avec_wal(root: Path, rel: str = "runtime/data/marche.sqlite3") -> Pa
 # ── exclusions (items 20.4/20.5) ─────────────────────────────────────────────────────────────
 def test_exclusions_et_conservation(tmp_path):
     _projet(tmp_path)
+    temporaire = tmp_path / ".portable-preflight-ancien" / "test_secret"
+    temporaire.mkdir(parents=True)
+    (temporaire / "cert.pem").write_text(
+        "-----BEGIN PRIVATE KEY-----\nFAUSSE_FIXTURE\n-----END PRIVATE KEY-----\n",
+        encoding="utf-8",
+    )
+    validation = tmp_path / "_validation_workspace"
+    validation.mkdir()
+    (validation / "resultat.json").write_text("{}\n", encoding="utf-8")
     inclus, exclus = AP.lister_pour_archive(tmp_path)
     assert "LANCER_HYPERSMART.cmd" in inclus and "src/app.py" in inclus
     assert "runtime/data/sessions/run_ok/bbo.jsonl" in inclus       # session conservee (item 20.5)
@@ -90,6 +99,9 @@ def test_exclusions_et_conservation(tmp_path):
     assert "runtime/data/lanceur_session_marqueur.txt" in exclus    # marqueur machine exclu
     assert "instance.lock" in exclus and "trace.log" in exclus and "transport.bundle" in exclus
     assert "__pycache__/" in joint                                  # sous-arbre exclu sans le parcourir
+    assert ".portable-preflight-ancien/" in exclus
+    assert "_validation_workspace/" in exclus
+    assert not any(path.startswith(".portable-preflight-") for path in inclus)
 
 
 def test_est_exclu_regles():
@@ -97,6 +109,8 @@ def test_est_exclu_regles():
     assert AP.est_exclu("x/y/.git/config") and AP.est_exclu("a.lock") and AP.est_exclu("b/c.tmp")
     assert AP.est_exclu("db.sqlite3-wal") and AP.est_exclu("db.sqlite3-shm")
     assert AP.est_exclu("archive/racine-machine/trace.txt")
+    assert AP.est_exclu(".portable-preflight-abc/test/cert.pem")
+    assert AP.est_exclu("_validation_workspace/pytest/test.db")
     for sortie in (
         "moisson_console.txt", "moisson-termine.flag", "moisson-en-cours.txt", "moisson-fini.md",
         "outils de test/rapports/analyse_599.txt",
