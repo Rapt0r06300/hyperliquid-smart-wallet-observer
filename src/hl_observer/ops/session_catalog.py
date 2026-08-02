@@ -81,6 +81,7 @@ class EntreeSource:
     source: str
     venue: str = ""
     canal: str = ""
+    source_id: str = ""                     # item 7 : clé STABLE indépendante du chemin (défaut = source)
     chemin: str = ""                       # relatif à la session (fichier / DB / shard)
     type_stockage: str = "fichier"         # fichier / db / shard
     schema_version: str = ""
@@ -105,8 +106,45 @@ class EntreeSource:
     frais: dict = field(default_factory=dict)
     metadata: dict = field(default_factory=dict)
 
+    def __post_init__(self):
+        if not self.source_id:
+            self.source_id = self.source        # item 7 : clé stable par défaut = nom de source
+
     def cle(self) -> str:
         return "%s|%s|%s|%s" % (self.source, self.venue, self.canal, self.chemin)
+
+
+class CatalogueInvalideError(ValueError):
+    """Chemin d'artefact refusé par le catalogue (item 6) : absolu / .. / hors session / symlink sortant /
+    doublon. Aucune donnée hors du dossier de session n'entre jamais au catalogue."""
+
+
+def valider_chemin_artefact(dossier: str | Path, rel: str) -> str:
+    """item 6 : n'autorise QU'un chemin RELATIF, strictement CONTENU dans le dossier de session, sans `..`,
+    sans composante absolue, et dont la cible réelle (après résolution des symlinks) reste DANS la session.
+    Rend le chemin normalisé (posix). Lève CatalogueInvalideError sinon."""
+    dossier = Path(dossier)
+    brut = str(rel or "")
+    if not brut:
+        raise CatalogueInvalideError("chemin d'artefact vide")
+    p = Path(brut)
+    if p.is_absolute() or (len(brut) >= 2 and brut[1] == ":"):          # absolu POSIX ou lecteur Windows
+        raise CatalogueInvalideError("chemin absolu interdit: %s" % brut)
+    parts = p.parts
+    if ".." in parts:
+        raise CatalogueInvalideError("remontee '..' interdite: %s" % brut)
+    # la cible RÉELLE (symlinks résolus) doit rester sous le dossier de session.
+    cible = (dossier / p)
+    try:
+        racine_reelle = dossier.resolve()
+        cible_reelle = cible.resolve()
+    except OSError as e:
+        raise CatalogueInvalideError("chemin irresolvable: %s (%s)" % (brut, e))
+    try:
+        cible_reelle.relative_to(racine_reelle)
+    except ValueError:
+        raise CatalogueInvalideError("artefact HORS de la session (symlink/echappement): %s" % brut)
+    return p.as_posix()
 
 
 def _ecrire_atomique(cible: Path, contenu: str) -> None:
@@ -182,15 +220,36 @@ class CatalogueSession:
             raise SessionFigeeError("session %s figée (%s) : plus d'enregistrement" %
                                     (self.run_id, cat.get("statut")))
         e = entree if isinstance(entree, EntreeSource) else EntreeSource(**dict(entree))
+        sources = cat.setdefault("sources", {})
+        if e.chemin:
+            # item 6 : rejette absolu / .. / hors-session / symlink sortant, et NORMALISE le chemin relatif.
+            e.chemin = valider_chemin_artefact(self.dossier, e.chemin)
+            # item 6 : doublon de chemin interdit (même artefact catalogué deux fois sous des clés ≠).
+            for cle, autre in sources.items():
+                if (autre.get("chemin") or "") and os.path.normpath(autre["chemin"]) == os.path.normpath(e.chemin) \
+                        and cle != e.cle():
+                    raise CatalogueInvalideError("doublon de chemin d'artefact: %s" % e.chemin)
+            # item 7 : une source qui produit un vrai artefact ne garde PAS son entrée vide (chemin="").
+            vide_cle = "%s|%s|%s|" % (e.source, e.venue, e.canal)
+            sources.pop(vide_cle, None)
+            for cle in [k for k, v in sources.items()
+                        if not (v.get("chemin") or "") and (v.get("source_id") or v.get("source")) == e.source_id]:
+                sources.pop(cle, None)
         d = asdict(e)
         if calculer_checksum and e.chemin:
             artefact = self.dossier / e.chemin
             checksum, taille = sha256_fichier(artefact)
             d["checksum_sha256"] = checksum
             d["taille_octets"] = taille
-        cat.setdefault("sources", {})[e.cle()] = d
+        sources[e.cle()] = d
         self._sauver(cat)
         return d
+
+    def enregistrer_artefact_live(self, entree: EntreeSource | Mapping[str, Any]) -> dict:
+        """item 4 : enregistre un artefact ENCORE ACTIF (mutable) SANS checksum final. Le SHA-256 définitif
+        n'est calculé qu'à la CLÔTURE (writers arrêtés → flush/fsync). Un fichier live qui GRANDIT depuis
+        son premier enregistrement ne met donc JAMAIS la session en quarantaine."""
+        return self.enregistrer_source(entree, calculer_checksum=False)
 
     # ── clôture sûre (item 8) ───────────────────────────────────────────────────────────────────
     def cloturer(self, *, writers_arretes: bool, extensions_donnees: Iterable[str] = EXTENSIONS_DONNEES,
@@ -216,12 +275,20 @@ class CatalogueSession:
             rel = d.get("chemin") or ""
             if not rel:
                 continue                    # source absente/non-implémentée : pas d'artefact à vérifier
+            if os.path.normpath(rel) in catalogues_rel:
+                motifs.append("DOUBLON_CHEMIN")        # item 6 : jamais deux entrées pour le même fichier
+                divergences.append({"cle": cle, "chemin": rel, "probleme": "DOUBLON"})
+                continue
             catalogues_rel.add(os.path.normpath(rel))
             artefact = self.dossier / rel
             checksum_now, taille_now = sha256_fichier(artefact)
             if taille_now < 0:
                 motifs.append("FICHIER_MANQUANT")
                 divergences.append({"cle": cle, "chemin": rel, "probleme": "MANQUANT"})
+                continue
+            if taille_now == 0:
+                motifs.append("FICHIER_VIDE")          # item 6 : un artefact vide n'est jamais COMPLETE
+                divergences.append({"cle": cle, "chemin": rel, "probleme": "VIDE"})
                 continue
             attendu = d.get("checksum_sha256") or ""
             if attendu and checksum_now != attendu:
@@ -244,6 +311,15 @@ class CatalogueSession:
         if exiger_artefacts and artefacts_reels <= 0:
             motifs.append("AUCUN_ARTEFACT_REEL")
 
+        # item 5 : une source déclarée VIVANTE (santé VERTE) doit posséder au moins un artefact réel.
+        # Source vivante SANS artefact = QUARANTINED (un seul fichier réel ailleurs ne la couvre pas).
+        vivantes_sans_artefact = sorted({str(d.get("source"))
+                                         for d in sources.values()
+                                         if str(d.get("sante", "")).upper() == "VERTE"
+                                         and not (d.get("chemin") or "")})
+        if exiger_artefacts and vivantes_sans_artefact:
+            motifs.append("SOURCE_VIVANTE_SANS_ARTEFACT")
+
         verifications = {
             "writers_arretes": bool(writers_arretes),
             "n_sources": len(sources),
@@ -251,7 +327,9 @@ class CatalogueSession:
             "n_artefacts_reels": artefacts_reels,
             "orphelins": orphelins,
             "divergences": divergences,
-            "checksums_ok": not any(m in ("CHECKSUM_DIVERGENT", "FICHIER_MANQUANT") for m in motifs),
+            "vivantes_sans_artefact": vivantes_sans_artefact,
+            "checksums_ok": not any(m in ("CHECKSUM_DIVERGENT", "FICHIER_MANQUANT", "FICHIER_VIDE",
+                                          "DOUBLON_CHEMIN") for m in motifs),
             "zero_orphelin": not orphelins,
         }
         cat["sources"] = sources
@@ -294,10 +372,23 @@ def verifier_catalogue(dossier: str | Path, sources: Mapping[str, Mapping[str, A
         rel = (d or {}).get("chemin") or ""
         if not rel:
             continue                      # source déclarée sans artefact (absente/non implémentée)
-        catalogues_rel.add(os.path.normpath(rel))
+        # item 6/15 : re-valider le chemin INTERNE (absolu / .. / symlink sortant) indépendamment.
+        try:
+            rel = valider_chemin_artefact(dossier, rel)
+        except CatalogueInvalideError:
+            divergences.append({"cle": cle, "chemin": rel, "probleme": "CHEMIN_INVALIDE"})
+            continue
+        norm = os.path.normpath(rel)
+        if norm in catalogues_rel:
+            divergences.append({"cle": cle, "chemin": rel, "probleme": "DOUBLON"})
+            continue
+        catalogues_rel.add(norm)
         checksum_now, taille_now = sha256_fichier(dossier / rel)
         if taille_now < 0:
             divergences.append({"cle": cle, "chemin": rel, "probleme": "MANQUANT"})
+            continue
+        if taille_now == 0:
+            divergences.append({"cle": cle, "chemin": rel, "probleme": "VIDE"})
             continue
         attendu = (d or {}).get("checksum_sha256") or ""
         if attendu and checksum_now != attendu:
@@ -362,4 +453,5 @@ def derniere_session_complete(root: str | Path) -> dict | None:
 __all__ = ["SCHEMA_CATALOGUE", "NOM_CATALOGUE", "STATUT_ACTIVE", "STATUT_COMPLETE",
            "STATUT_QUARANTINED", "STATUTS", "EntreeSource", "CatalogueSession", "SessionFigeeError",
            "sha256_fichier", "nouveau_run_id", "chemin_session", "chemin_catalogue",
-           "scanner_sessions", "derniere_session_complete", "verifier_catalogue"]
+           "scanner_sessions", "derniere_session_complete", "verifier_catalogue",
+           "CatalogueInvalideError", "valider_chemin_artefact"]

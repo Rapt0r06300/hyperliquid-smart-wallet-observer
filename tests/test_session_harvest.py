@@ -73,15 +73,35 @@ def _artefact_reel(root, run_id, rel="hl/allmids.jsonl", contenu=b"a\nb\n"):
         SC.EntreeSource("allmids-collector", "HYPERLIQUID", "allMids", chemin=rel))
 
 
+def _artefacts_core(root, run_id):
+    """item 5 : chaque source CORE declaree VIVANTE doit avoir son artefact reel pour devenir COMPLETE."""
+    c = SC.CatalogueSession(root, run_id)
+    for s in CORE:
+        rel = "hl/%s.jsonl" % s.nom
+        p = SC.chemin_session(root, run_id) / rel
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_bytes(("evenements %s\n" % s.nom).encode())
+        c.enregistrer_source(SC.EntreeSource(s.nom, s.venue, s.canal, chemin=rel))
+
+
 def test_cloture_propre_donne_complete(tmp_path):
     _battre_core(tmp_path)
     SH.ouvrir_session_harvest(tmp_path, run_id="harvest-fixe-4", now_ms=time.time() * 1000 + 100)
-    _artefact_reel(tmp_path, "harvest-fixe-4")               # item 3 : sans artefact reel, pas de COMPLETE
+    _artefacts_core(tmp_path, "harvest-fixe-4")              # item 5 : artefact pour CHAQUE source vivante
     v = SH.cloturer_session_courante(tmp_path, writers_arretes=True)
     assert v["statut"] == SC.STATUT_COMPLETE and v["run_id"] == "harvest-fixe-4"
     # la dernière session COMPLETE est retrouvable par ANALYSER.
     derniere = SC.derniere_session_complete(tmp_path)
     assert derniere["run_id"] == "harvest-fixe-4"
+
+
+def test_cloture_quarantaine_si_source_vivante_sans_artefact(tmp_path):
+    # item 5 : 3 CORE declarees VIVANTES mais UN SEUL artefact -> QUARANTINED (un fichier ne couvre pas tout).
+    _battre_core(tmp_path)
+    SH.ouvrir_session_harvest(tmp_path, run_id="harvest-partiel", now_ms=time.time() * 1000 + 100)
+    _artefact_reel(tmp_path, "harvest-partiel")             # seulement allmids
+    v = SH.cloturer_session_courante(tmp_path, writers_arretes=True)
+    assert v["statut"] == SC.STATUT_QUARANTINED and "SOURCE_VIVANTE_SANS_ARTEFACT" in v["motifs"]
 
 
 def test_cloture_sans_writers_arretes_quarantaine(tmp_path):
@@ -98,7 +118,7 @@ def test_cli_ouvrir_status_cloturer(tmp_path, capsys):
     assert SH.main(["status", str(tmp_path)]) == 0
     assert "statut=ACTIVE" in capsys.readouterr().out
     rid = SH.run_id_courant(tmp_path)
-    _artefact_reel(tmp_path, rid)                            # item 3 : artefact reel requis pour COMPLETE
+    _artefacts_core(tmp_path, rid)                           # item 5 : artefact pour CHAQUE source vivante
     assert SH.main(["cloturer", str(tmp_path), "--writers-arretes"]) == 0
     assert "statut=COMPLETE" in capsys.readouterr().out
 

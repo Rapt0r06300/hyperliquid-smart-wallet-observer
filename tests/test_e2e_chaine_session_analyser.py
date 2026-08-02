@@ -68,13 +68,19 @@ def test_chaine_refuse_session_alteree_apres_cloture(tmp_path):
         HB.battre(tmp_path, s.nom, n_ecrites=5, dernier_exchange_ts=int(time.time() * 1000) - 20)
     rid, _ = SH.ouvrir_session_harvest(tmp_path, run_id="e2e-altere", now_ms=time.time() * 1000 + 50)
     dossier = SC.chemin_session(tmp_path, rid)
-    p = dossier / "hl/bbo.jsonl"
-    p.parent.mkdir(parents=True, exist_ok=True)
-    p.write_bytes(b"origine\n")
-    SC.CatalogueSession(tmp_path, rid).enregistrer_source(
-        SC.EntreeSource("bbo-collector", chemin="hl/bbo.jsonl"))
+    c = SC.CatalogueSession(tmp_path, rid)
+    # item 5 : chaque source CORE vivante a son artefact ; on garde une reference sur bbo pour l'alterer.
+    p_bbo = None
+    for s in CORE:
+        rel = "hl/%s.jsonl" % s.nom
+        p = dossier / rel
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_bytes(("origine %s\n" % s.nom).encode())
+        c.enregistrer_source(SC.EntreeSource(s.nom, s.venue, s.canal, chemin=rel))
+        if s.nom == "bbo-collector":
+            p_bbo = p
     assert SH.cloturer_session_courante(tmp_path, writers_arretes=True)["statut"] == SC.STATUT_COMPLETE
     # altération APRES cloture -> ANALYSER recalcule et refuse.
-    p.write_bytes(b"DONNEES FALSIFIEES APRES CLOTURE\n")
+    p_bbo.write_bytes(b"DONNEES FALSIFIEES APRES CLOTURE\n")
     res = AS.analyser(tmp_path)
     assert res["verdict"] == AS.NO_GO and "VERIFICATION ECHOUEE" in res["raison"]
