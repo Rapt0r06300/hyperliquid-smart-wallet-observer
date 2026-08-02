@@ -26,7 +26,7 @@ def _registre_arrete(root: Path) -> None:
     """Registre PID present mais SANS aucun writer vivant -> preuve d'arret (fail-closed satisfait)."""
     p = root / REGISTRE_RELPATH
     p.parent.mkdir(parents=True, exist_ok=True)
-    p.write_text(json.dumps({"collecteurs": {}}), encoding="utf-8")
+    p.write_text(json.dumps({"composants": {}, "collecteurs": {}}), encoding="utf-8")
 
 
 def _session_complete(root: Path, run_id: str) -> None:
@@ -56,8 +56,8 @@ def _projet(root: Path) -> None:
     (root / "transport.bundle").write_text("x", encoding="utf-8")
 
 
-def _sqlite_avec_wal(root: Path) -> Path:
-    base = root / "runtime" / "data" / "marche.sqlite3"
+def _sqlite_avec_wal(root: Path, rel: str = "runtime/data/marche.sqlite3") -> Path:
+    base = root / rel
     base.parent.mkdir(parents=True, exist_ok=True)
     con = sqlite3.connect(str(base))
     con.execute("PRAGMA journal_mode=WAL")
@@ -78,7 +78,7 @@ def test_exclusions_et_conservation(tmp_path):
     assert REGISTRE_RELPATH.as_posix() in exclus                    # PID exclu
     assert "runtime/data/lanceur_session_marqueur.txt" in exclus    # marqueur machine exclu
     assert "instance.lock" in exclus and "trace.log" in exclus and "transport.bundle" in exclus
-    assert "z.pyc" in joint                                          # __pycache__ exclu
+    assert "__pycache__/" in joint                                  # sous-arbre exclu sans le parcourir
 
 
 def test_est_exclu_regles():
@@ -89,9 +89,10 @@ def test_est_exclu_regles():
 
 
 def test_aucune_cle_dans_archive(tmp_path):
-    # item 21 : matiere de cle EXCLUE par extension, mais le code source « private/secret » RESTE.
-    for cle in ("wallet.key", "cert.pem", "id.p12", "backup.pfx", "phrase.mnemonic", ".env", ".env.local"):
+    # Les conteneurs de cle sont exclus, mais un bundle CA public .pem reste livrable.
+    for cle in ("wallet.key", "id.p12", "backup.pfx", "phrase.mnemonic", ".env", ".env.local"):
         assert AP.est_exclu(cle), cle
+    assert not AP.est_exclu("cert.pem")
     assert not AP.est_exclu("src/private_helpers.py")              # code source jamais exclu par sous-chaine
     assert not AP.est_exclu("src/secret_santa.py")
     # round-trip : une cle deposee dans le projet ne se retrouve PAS dans l'archive.
@@ -105,6 +106,23 @@ def test_aucune_cle_dans_archive(tmp_path):
     assert "wallet.key" not in noms and ".env" not in noms
 
 
+def test_pem_public_inclus_et_cle_privee_refusee(tmp_path):
+    _projet(tmp_path)
+    ca = tmp_path / "cert.pem"
+    ca.write_text("-----BEGIN CERTIFICATE-----\nPUBLIC\n-----END CERTIFICATE-----\n", encoding="utf-8")
+    inclus, _ = AP.lister_pour_archive(tmp_path)
+    assert "cert.pem" in inclus
+    ca.write_text(
+        "-----BEGIN PRIVATE KEY-----\n" + ("A" * 96)
+        + "\n-----END PRIVATE KEY-----\n", encoding="utf-8"
+    )
+    try:
+        AP.lister_pour_archive(tmp_path)
+        assert False, "une cle privee mal nommee doit bloquer la release"
+    except AP.ArchiveRefuseeError as exc:
+        assert "cle privee" in str(exc).lower()
+
+
 # ── SQLite WAL (item 20.3) ───────────────────────────────────────────────────────────────────
 def test_checkpoint_wal_rend_base_portante(tmp_path):
     base = _sqlite_avec_wal(tmp_path)
@@ -115,6 +133,52 @@ def test_checkpoint_wal_rend_base_portante(tmp_path):
     n = con.execute("SELECT COUNT(*) FROM t").fetchone()[0]
     con.close()
     assert mode == "delete" and n == 50                             # donnees intactes, WAL fusionne
+
+
+def test_backup_sqlite_staging_ne_modifie_jamais_la_source(tmp_path):
+    source_root = tmp_path / "source"
+    source_root.mkdir()
+    base = _sqlite_avec_wal(source_root)
+    avant = base.read_bytes()
+    con = sqlite3.connect(str(base))
+    mode_avant = con.execute("PRAGMA journal_mode").fetchone()[0].lower()
+    con.close()
+    destination = tmp_path / "stage" / "runtime" / "data" / base.name
+    res = AP.copier_sqlite_vers_staging(base, destination)
+    assert res["ok"] and res["methode"] == "sqlite_backup_api"
+    assert base.read_bytes() == avant
+    con = sqlite3.connect(str(base))
+    assert con.execute("PRAGMA journal_mode").fetchone()[0].lower() == mode_avant == "wal"
+    con.close()
+    copie = sqlite3.connect(str(destination))
+    assert copie.execute("PRAGMA integrity_check").fetchone()[0].lower() == "ok"
+    assert copie.execute("SELECT COUNT(*) FROM t").fetchone()[0] == 50
+    copie.close()
+
+
+def test_staging_externe_hashable_apres_transformations(tmp_path):
+    root = tmp_path / "source"
+    root.mkdir()
+    _projet(root)
+    _sqlite_avec_wal(root, "runtime/data/sessions/run_ok/marche.sqlite3")
+    (root / "config.json").write_text(
+        json.dumps({"racine": str(root), "valeur": 1}), encoding="utf-8")
+    inclus, _ = AP.lister_pour_archive(root)
+    stage = tmp_path / "stage"
+    res = AP.construire_staging(root, stage, inclus)
+    assert "config.json" in res["fichiers"] and res["sqlite"]
+    assert str(root) not in (stage / "config.json").read_text(encoding="utf-8")
+    assert json.loads((root / "config.json").read_text(encoding="utf-8"))["racine"] == str(root)
+
+
+def test_staging_doit_rester_hors_source(tmp_path):
+    _projet(tmp_path)
+    inclus, _ = AP.lister_pour_archive(tmp_path)
+    try:
+        AP.construire_staging(tmp_path, tmp_path / "stage", inclus)
+        assert False, "staging interne interdit"
+    except AP.ArchiveRefuseeError as exc:
+        assert "exterieur" in str(exc).lower()
 
 
 # ── refus durs (items 20.1/20.2) ─────────────────────────────────────────────────────────────
@@ -132,16 +196,18 @@ def test_refuse_si_writer_vivant(tmp_path):
 
 
 def test_checkout_propre_sans_registre_est_quiescent(tmp_path):
-    # item 20.1 : un checkout neuf (lanceur JAMAIS lance -> pas de registre) mais SANS session ACTIVE
-    # est un etat quiescent : l'archive doit se construire (le garde-fou reste « aucune session ACTIVE »).
+    # Une release officielle refuse un registre absent: l'arret serait ambigu.
     (tmp_path / "src").mkdir()
     (tmp_path / "src" / "app.py").write_text("print(1)\n", encoding="utf-8")
     (tmp_path / "LANCER_HYPERSMART.cmd").write_text('cd /d "%~dp0"\n', encoding="utf-8")
-    assert AP.writers_vivants(tmp_path, pid_vivant=lambda _p: False) == []       # aucun writer reel
+    assert AP.preuve_arret(tmp_path, pid_vivant=lambda _p: False) == (False, ["REGISTRE_ABSENT"])
     cible = tmp_path / "out.zip"
-    res = AP.creer_archive_portable(tmp_path, cible, pid_vivant=lambda _p: False, horloge=HORLOGE)
-    assert cible.exists() and res["arret"].startswith("QUIESCENT_SANS_REGISTRE")
-    assert res["verification"]["ok"]
+    try:
+        AP.creer_archive_portable(tmp_path, cible, pid_vivant=lambda _p: False, horloge=HORLOGE)
+        assert False, "registre absent aurait du bloquer"
+    except AP.ArchiveRefuseeError as exc:
+        assert "non prouve" in str(exc).lower()
+    assert not cible.exists()
 
 
 def test_refuse_si_session_active(tmp_path):
@@ -168,6 +234,38 @@ def test_detecte_chemin_absolu_etranger():
     assert AP.chemins_absolus_residuels(r'{"p": "C:\\Users\\autre\\x"}')
     assert AP.chemins_absolus_residuels('{"p": "/home/autre/x"}')
     assert AP.chemins_absolus_residuels("pas de chemin ici") == []
+
+
+def test_securite_chemins_windows_et_zip_slip(tmp_path):
+    for mauvais in ("../evil.py", "C:/evil.py", "//serveur/partage/x", "CON.txt", "a/b. "):
+        try:
+            AP.valider_chemin_relatif(mauvais)
+            assert False, mauvais
+        except AP.ArchiveRefuseeError:
+            pass
+    archive = tmp_path / "attaque.zip"
+    with zipfile.ZipFile(archive, "w") as z:
+        z.writestr("../evil.txt", "x")
+    with zipfile.ZipFile(archive) as z:
+        try:
+            AP.extraire_zip_surement(z, tmp_path / "extract")
+            assert False, "zip-slip aurait du etre refuse"
+        except AP.ArchiveRefuseeError:
+            pass
+    assert not (tmp_path / "evil.txt").exists()
+
+
+def test_collision_windows_insensible_casse_refusee(tmp_path):
+    archive = tmp_path / "collision.zip"
+    with zipfile.ZipFile(archive, "w") as z:
+        z.writestr("Alpha.txt", "a")
+        z.writestr("alpha.TXT", "b")
+    with zipfile.ZipFile(archive) as z:
+        try:
+            AP.valider_membres_zip(z)
+            assert False, "collision Windows aurait du etre refusee"
+        except AP.ArchiveRefuseeError as exc:
+            assert "collision" in str(exc).lower()
 
 
 def test_ecriture_refuse_chemin_absolu_residuel(tmp_path):

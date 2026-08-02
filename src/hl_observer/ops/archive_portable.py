@@ -21,18 +21,23 @@ Tout est en stdlib (zipfile/sqlite3/hashlib) : constructible et testable hors Wi
 from __future__ import annotations
 
 import io
+import hashlib
 import json
 import os
 import platform
 import re
+import shutil
 import sqlite3
+import stat
 import sys
+import tempfile
 import time
 import zipfile
 from pathlib import Path
 from typing import Any, Iterable
 
 from hl_observer.ops import session_catalog as SC
+from hl_observer.ops import registre_pids as RP
 from hl_observer.ops.registre_pids import REGISTRE_RELPATH
 
 SCHEMA_MANIFESTE = "hypersmart.portable_manifest.v1"
@@ -41,20 +46,36 @@ NOM_MANIFESTE = "PORTABLE_MANIFEST.json"
 # item 20.4 — jamais dans une archive portable : identite machine, verrous, temporaires, VCS, venv.
 DOSSIERS_EXCLUS = ("__pycache__", ".git", ".venv", "venv", "env", "node_modules",
                    ".pytest_cache", ".mypy_cache", ".ruff_cache", "portable_runtime",
-                   ".venv-portable", "tmp_pytest", "htmlcov")
+                   ".venv-portable", "tmp_pytest", "htmlcov", "dist", "build",
+                   ".portable-staging", "portable-build", "cache_moisson", ".hypothesis")
+PREFIXES_EXCLUS = ("runtime/research/", "logs/", "data/", "_to_delete/")
 SUFFIXES_EXCLUS = (".pyc", ".pyo", ".log", ".lock", ".pid", ".tmp", ".bundle",
                    ".sqlite3-wal", ".sqlite3-shm", ".sqlite-wal", ".sqlite-shm",
                    "-wal", "-shm", ".db-wal", ".db-shm")
+SUFFIXES_ARCHIVES = (".zip", ".7z", ".rar", ".sha256")
 # item 21 « aucune cle copiee » : matiere de cle exclue par EXTENSION (jamais par sous-chaine, qui
 # ferait tomber du code source legitime comme private_helpers.py). Defense en profondeur : meme si le
 # projet est paper-strict (0 cle reelle), une archive ne doit JAMAIS transporter de secret.
-SUFFIXES_SECRETS = (".key", ".pem", ".p12", ".pfx", ".mnemonic", ".seed", ".keystore")
+SUFFIXES_SECRETS = (".key", ".p12", ".pfx", ".mnemonic", ".seed", ".keystore")
 FICHIERS_EXCLUS = (REGISTRE_RELPATH.as_posix(),                     # registre PID du lanceur
                    "runtime/data/lanceur_session_marqueur.txt",     # marqueur anti-orphelin (machine)
                    "runtime/data/COURANTE.json",                    # pointeur de session vivante
                    ".analyse.lock", NOM_MANIFESTE)
 # item 20.6 — un chemin absolu machine-specifique ne doit jamais survivre dans les metadonnees.
 _ABSOLU = re.compile(r"(?:[A-Za-z]:\\|\\\\[^\s\"]+|/(?:home|Users)/)")
+_CLE_PRIVEE = re.compile(
+    rb"-----BEGIN (?:ENCRYPTED |RSA |DSA |EC |OPENSSH )?PRIVATE KEY-----"
+    rb"\s+[A-Za-z0-9+/=\r\n]{64,}"
+    rb"-----END (?:ENCRYPTED |RSA |DSA |EC |OPENSSH )?PRIVATE KEY-----",
+    re.IGNORECASE,
+)
+_NOMS_WINDOWS_RESERVES = {
+    "CON", "PRN", "AUX", "NUL", "CLOCK$",
+    *("COM%d" % i for i in range(1, 10)),
+    *("LPT%d" % i for i in range(1, 10)),
+}
+_MAX_COMPOSANT_WINDOWS = 240
+_MAX_CHEMIN_RELATIF_WINDOWS = 220
 
 
 # ── PREUVE + SESSIONS ───────────────────────────────────────────────────────────────────────
@@ -68,9 +89,35 @@ _MARQUEURS_REGISTRE = frozenset({"REGISTRE_ABSENT", "REGISTRE_ILLISIBLE", "REGIS
 
 
 def preuve_arret(root: str | Path, *, pid_vivant=None) -> tuple[bool, list[str]]:
-    """item 20.1 : reutilise la preuve FAIL-CLOSED du harvest (jamais une re-implementation)."""
-    from hl_observer.ops.session_harvest import preuve_writers_arretes, _pid_vivant_reel
-    return preuve_writers_arretes(root, pid_vivant=pid_vivant or _pid_vivant_reel)
+    """Preuve fail-closed basee sur le registre PID et un scan independant.
+
+    Le controle de release ne depend pas de l'import de l'orchestrateur harvest:
+    il doit rester utilisable justement lorsque le runtime est arrete.
+    """
+    root = Path(root)
+    chemin = root / REGISTRE_RELPATH
+    if not chemin.is_file():
+        return False, ["REGISTRE_ABSENT"]
+    try:
+        registre = json.loads(chemin.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return False, ["REGISTRE_CORROMPU"]
+    if not isinstance(registre, dict) or not isinstance(registre.get("composants"), dict) \
+            or not isinstance(registre.get("collecteurs"), dict):
+        return False, ["REGISTRE_INCOMPLET"]
+    if pid_vivant is None:
+        from hl_observer.ops.preuve_de_vie import _pid_vivant_reel
+        pid_vivant = _pid_vivant_reel
+    vivants = sorted(pid for pid in RP.pids_enregistres(registre) if pid_vivant(pid))
+    motifs = ["PID_VIVANT:%d" % pid for pid in vivants]
+    # Defense independante: un processus HyperSmart signe mais absent du registre
+    # est un writer ambigu et interdit une release officielle.
+    try:
+        orphelins = RP.detecter_orphelins(RP.processus_reels(), RP.pids_enregistres(registre))
+    except Exception:  # noqa: BLE001 - absence de psutil traitee par processus_reels
+        orphelins = []
+    motifs.extend("PROCESSUS_ORPHELIN:%s" % p.get("pid") for p in orphelins)
+    return not motifs, motifs
 
 
 def writers_vivants(root: str | Path, *, pid_vivant=None) -> list[str]:
@@ -83,6 +130,83 @@ def writers_vivants(root: str | Path, *, pid_vivant=None) -> list[str]:
 def sessions_actives(root: str | Path) -> list[str]:
     """item 20.2 : run_id des sessions encore ACTIVE (elles interdisent la construction)."""
     return [s["run_id"] for s in SC.scanner_sessions(root) if s.get("statut") == SC.STATUT_ACTIVE]
+
+
+# -- SECURITE DES CHEMINS ET DES SECRETS -----------------------------------------
+def contient_cle_privee(chemin: str | Path) -> bool:
+    """Detecte une matiere de cle privee par contenu.
+
+    Les certificats CA publics ``.pem`` sont legitimes et doivent rester dans la
+    release. Les conteneurs de cle connus restent exclus par extension, tandis
+    que ce controle de contenu protege aussi une cle mal nommee.
+    """
+    chemin = Path(chemin)
+    try:
+        with chemin.open("rb") as flux:
+            debut = flux.read(64 * 1024)
+    except OSError:
+        return False
+    return bool(_CLE_PRIVEE.search(debut))
+
+
+def _est_reparse(chemin: Path) -> bool:
+    """Vrai pour un lien symbolique ou un reparse point Windows."""
+    if chemin.is_symlink():
+        return True
+    try:
+        attrs = getattr(chemin.lstat(), "st_file_attributes", 0)
+    except OSError:
+        return False
+    return bool(attrs & getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0x400))
+
+
+def valider_chemin_relatif(rel: str, *, max_rel: int = _MAX_CHEMIN_RELATIF_WINDOWS) -> str:
+    """Valide un membre portable Windows et rend sa forme POSIX canonique."""
+    if not isinstance(rel, str) or not rel:
+        raise ArchiveRefuseeError("chemin vide dans l'inventaire")
+    brut = rel.replace("\\", "/")
+    if brut.startswith(("/", "//")) or re.match(r"^[A-Za-z]:", brut):
+        raise ArchiveRefuseeError("chemin absolu/UNC interdit: %s" % rel)
+    morceaux = brut.split("/")
+    if any(m in ("", ".", "..") for m in morceaux):
+        raise ArchiveRefuseeError("composant relatif dangereux: %s" % rel)
+    for morceau in morceaux:
+        if len(morceau) > _MAX_COMPOSANT_WINDOWS:
+            raise ArchiveRefuseeError("composant Windows trop long: %s" % rel)
+        if morceau[-1:] in (" ", "."):
+            raise ArchiveRefuseeError("nom Windows avec espace/point final: %s" % rel)
+        if any(ord(c) < 32 for c in morceau) or any(c in '<>:"|?*' for c in morceau):
+            raise ArchiveRefuseeError("caractere Windows interdit: %s" % rel)
+        base = morceau.split(".", 1)[0].upper()
+        if base in _NOMS_WINDOWS_RESERVES:
+            raise ArchiveRefuseeError("nom Windows reserve: %s" % rel)
+    canonique = "/".join(morceaux)
+    if len(canonique) > max_rel:
+        raise ArchiveRefuseeError(
+            "chemin trop long pour une extraction Windows standard (%d > %d): %s"
+            % (len(canonique), max_rel, canonique)
+        )
+    return canonique
+
+
+def valider_fichier_source(root: str | Path, chemin: str | Path) -> str:
+    """Refuse lien/reparse et sortie de racine, puis rend le chemin relatif."""
+    root = Path(root).resolve()
+    chemin = Path(chemin)
+    try:
+        rel = chemin.relative_to(root).as_posix()
+    except ValueError as exc:
+        raise ArchiveRefuseeError("fichier hors racine: %s" % chemin) from exc
+    courant = root
+    for morceau in Path(rel).parts:
+        courant = courant / morceau
+        if _est_reparse(courant):
+            raise ArchiveRefuseeError("lien/jonction/reparse interdit: %s" % rel)
+    try:
+        chemin.resolve(strict=True).relative_to(root)
+    except (OSError, ValueError) as exc:
+        raise ArchiveRefuseeError("fichier resolu hors racine: %s" % rel) from exc
+    return valider_chemin_relatif(rel)
 
 
 # ── SQLITE WAL (item 20.3) ───────────────────────────────────────────────────────────────────
@@ -103,6 +227,86 @@ def checkpoint_wal_sqlite(chemin: str | Path) -> dict:
         return {"base": chemin.name, "ok": False, "erreur": str(exc)}
 
 
+def copier_sqlite_vers_staging(source: str | Path, destination: str | Path) -> dict:
+    """Copie coherente SQLite par Backup API sans jamais modifier la source."""
+    source, destination = Path(source), Path(destination)
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    source_uri = source.resolve().as_uri() + "?mode=ro"
+    try:
+        src = sqlite3.connect(source_uri, uri=True)
+        dst = sqlite3.connect(str(destination))
+        try:
+            src.backup(dst)
+            verdict = dst.execute("PRAGMA integrity_check").fetchone()
+            if not verdict or str(verdict[0]).lower() != "ok":
+                raise sqlite3.DatabaseError("integrity_check=%r" % (verdict,))
+            dst.execute("PRAGMA journal_mode=DELETE")
+            dst.commit()
+        finally:
+            dst.close()
+            src.close()
+        return {"base": source.name, "ok": True, "methode": "sqlite_backup_api"}
+    except (OSError, sqlite3.Error) as exc:
+        destination.unlink(missing_ok=True)
+        return {"base": source.name, "ok": False, "erreur": str(exc),
+                "methode": "sqlite_backup_api"}
+
+
+def construire_staging(root: str | Path, staging: str | Path,
+                       inclus: Iterable[str]) -> dict:
+    """Materialise les octets de release dans un staging externe et immuable.
+
+    Les metadonnees sont neutralisees avant tout hash. Les SQLite utilisent une
+    sauvegarde coherente; aucune PRAGMA n'est executee sur la base source.
+    """
+    root, staging = Path(root).resolve(), Path(staging).resolve()
+    try:
+        staging.relative_to(root)
+    except ValueError:
+        pass
+    else:
+        raise ArchiveRefuseeError("le staging doit etre exterieur a la racine source")
+    staging.mkdir(parents=True, exist_ok=False)
+    sqlite_resultats: list[dict] = []
+    neutralises = 0
+    try:
+        for rel in sorted(set(inclus)):
+            rel = valider_chemin_relatif(rel)
+            src = root / Path(rel)
+            valider_fichier_source(root, src)
+            dst = staging / Path(rel)
+            dst.parent.mkdir(parents=True, exist_ok=True)
+            if src.suffix.lower() in (".sqlite", ".sqlite3", ".db"):
+                resultat = copier_sqlite_vers_staging(src, dst)
+                sqlite_resultats.append(resultat)
+                if not resultat["ok"]:
+                    raise ArchiveRefuseeError("copie SQLite impossible: %s" % resultat)
+                continue
+            if _est_metadonnee(rel):
+                try:
+                    texte = src.read_text(encoding="utf-8")
+                except (OSError, UnicodeDecodeError):
+                    shutil.copy2(src, dst)
+                else:
+                    transforme, n = neutraliser_metadonnees(texte, root)
+                    residus = chemins_absolus_residuels(transforme)
+                    if residus:
+                        raise ArchiveRefuseeError(
+                            "chemins absolus residuels dans %s: %s" % (rel, residus)
+                        )
+                    dst.write_text(transforme, encoding="utf-8", newline="\n")
+                    neutralises += n
+            else:
+                shutil.copy2(src, dst)
+        fichiers = sorted(p.relative_to(staging).as_posix()
+                          for p in staging.rglob("*") if p.is_file())
+        return {"fichiers": fichiers, "sqlite": sqlite_resultats,
+                "chemins_neutralises": neutralises}
+    except BaseException:
+        shutil.rmtree(staging, ignore_errors=True)
+        raise
+
+
 def preparer_sqlite(root: str | Path) -> list[dict]:
     root = Path(root)
     out: list[dict] = []
@@ -117,14 +321,24 @@ def preparer_sqlite(root: str | Path) -> list[dict]:
 # ── SELECTION DES FICHIERS (items 20.4/20.5) ─────────────────────────────────────────────────
 def est_exclu(rel: str) -> bool:
     rel_posix = Path(rel).as_posix()
+    if rel_posix.startswith("runtime/") \
+            and not rel_posix.startswith("runtime/data/sessions/"):
+        return True
     parts = Path(rel).parts
     if any(part in DOSSIERS_EXCLUS for part in parts):
+        return True
+    if rel_posix.startswith(PREFIXES_EXCLUS):
         return True
     if rel_posix in FICHIERS_EXCLUS or Path(rel).name in FICHIERS_EXCLUS:
         return True
     low = rel_posix.lower()
     if any(low.endswith(sfx) for sfx in SUFFIXES_EXCLUS):
         return True
+    # Les archives sont exclues sauf fixtures explicites de tests, requises pour
+    # tester les parseurs d'archives sans embarquer d'anciennes releases.
+    if any(low.endswith(sfx) for sfx in SUFFIXES_ARCHIVES):
+        if not (rel_posix.startswith("tests/fixtures/") or "/fixtures/" in rel_posix):
+            return True
     if any(low.endswith(sfx) for sfx in SUFFIXES_SECRETS):          # item 21 : jamais de cle dans l'archive
         return True
     nom = Path(rel).name.lower()
@@ -133,16 +347,59 @@ def est_exclu(rel: str) -> bool:
     return False
 
 
+def _dossier_a_elaguer(rel: str) -> bool:
+    """Vrai si tout le sous-arbre est exclu, sans devoir en enumerer les fichiers."""
+    rel_posix = rel.replace("\\", "/").strip("/")
+    if not rel_posix:
+        return False
+    if rel_posix == "runtime" or rel_posix == "runtime/data":
+        return False
+    if rel_posix.startswith("runtime/") \
+            and not (rel_posix == "runtime/data/sessions"
+                     or rel_posix.startswith("runtime/data/sessions/")):
+        return True
+    if any(part in DOSSIERS_EXCLUS for part in rel_posix.split("/")):
+        return True
+    avec_barre = rel_posix + "/"
+    return any(avec_barre.startswith(prefixe) for prefixe in PREFIXES_EXCLUS)
+
+
 def lister_pour_archive(root: str | Path) -> tuple[list[str], list[str]]:
     """(inclus, exclus) en chemins POSIX relatifs, tries. Les sessions COMPLETE/QUARANTINED sont
     conservees (item 20.5) ; seuls PID/verrous/temporaires/machine tombent (item 20.4)."""
-    root = Path(root)
+    root = Path(root).resolve()
     inclus, exclus = [], []
-    for p in sorted(root.rglob("*")):
-        if not p.is_file():
-            continue
-        rel = p.relative_to(root).as_posix()
-        (exclus if est_exclu(rel) else inclus).append(rel)
+    vus_casse: dict[str, str] = {}
+    for dossier, sous_dossiers, fichiers in os.walk(root, topdown=True, followlinks=False):
+        base = Path(dossier)
+        gardes: list[str] = []
+        for nom in sorted(sous_dossiers, key=str.casefold):
+            chemin = base / nom
+            rel_dir = chemin.relative_to(root).as_posix()
+            if _dossier_a_elaguer(rel_dir):
+                exclus.append(rel_dir + "/")
+                continue
+            if _est_reparse(chemin):
+                raise ArchiveRefuseeError("lien/jonction/reparse interdit: %s" % rel_dir)
+            gardes.append(nom)
+        sous_dossiers[:] = gardes
+        for nom in sorted(fichiers, key=str.casefold):
+            p = base / nom
+            rel = p.relative_to(root).as_posix()
+            if est_exclu(rel):
+                exclus.append(rel)
+                continue
+            rel = valider_fichier_source(root, p)
+            cle = rel.casefold()
+            precedent = vus_casse.get(cle)
+            if precedent is not None and precedent != rel:
+                raise ArchiveRefuseeError(
+                    "collision Windows insensible a la casse: %s / %s" % (precedent, rel)
+                )
+            vus_casse[cle] = rel
+            if contient_cle_privee(p):
+                raise ArchiveRefuseeError("matiere de cle privee detectee: %s" % rel)
+            inclus.append(rel)
     return inclus, sorted(exclus)
 
 
@@ -297,6 +554,60 @@ def _sbom(root: Path, fichiers: dict, binaires: dict) -> dict:
     }
 
 
+def valider_membres_zip(z: zipfile.ZipFile, *, longueur_base: int = 0) -> dict:
+    """Prevalide tous les membres avant extraction (zip-slip + contraintes Windows)."""
+    vus: dict[str, str] = {}
+    chemin_critique = ""
+    longueur_max = 0
+    for info in z.infolist():
+        rel = info.filename.rstrip("/")
+        if not rel:
+            continue
+        rel = valider_chemin_relatif(rel)
+        cle = rel.casefold()
+        if cle in vus and vus[cle] != rel:
+            raise ArchiveRefuseeError(
+                "collision Windows dans le ZIP: %s / %s" % (vus[cle], rel)
+            )
+        vus[cle] = rel
+        mode = (info.external_attr >> 16) & 0xFFFF
+        if stat.S_ISLNK(mode):
+            raise ArchiveRefuseeError("lien symbolique dans le ZIP: %s" % rel)
+        longueur = longueur_base + 1 + len(rel.replace("/", os.sep))
+        if longueur > 259:
+            raise ArchiveRefuseeError(
+                "chemin extrait incompatible Windows (%d): %s" % (longueur, rel)
+            )
+        if longueur > longueur_max:
+            longueur_max, chemin_critique = longueur, rel
+    return {"membres": len(vus), "longueur_max": longueur_max,
+            "chemin_critique": chemin_critique}
+
+
+def extraire_zip_surement(z: zipfile.ZipFile, destination: str | Path) -> dict:
+    """Extrait membre par membre apres validation de l'ensemble de l'archive."""
+    destination = Path(destination).resolve()
+    destination.mkdir(parents=True, exist_ok=True)
+    controle = valider_membres_zip(z, longueur_base=len(str(destination)))
+    for info in z.infolist():
+        rel = info.filename.rstrip("/")
+        if not rel:
+            continue
+        rel = valider_chemin_relatif(rel)
+        cible = (destination / Path(rel)).resolve()
+        try:
+            cible.relative_to(destination)
+        except ValueError as exc:
+            raise ArchiveRefuseeError("zip-slip refuse: %s" % rel) from exc
+        if info.is_dir():
+            cible.mkdir(parents=True, exist_ok=True)
+            continue
+        cible.parent.mkdir(parents=True, exist_ok=True)
+        with z.open(info, "r") as src, cible.open("wb") as dst:
+            shutil.copyfileobj(src, dst)
+    return controle
+
+
 def extraire_et_reverifier(archive: str | Path, *, dossier_extraction: str | Path | None = None) -> dict:
     """item 8 : EXTRACTION physique de controle puis RE-VERIFICATION sur disque. Extrait l'archive dans
     un dossier temporaire et re-hash CHAQUE fichier extrait contre le manifeste embarque. Plus fort que
@@ -312,7 +623,7 @@ def extraire_et_reverifier(archive: str | Path, *, dossier_extraction: str | Pat
             else None
         base = Path(dossier_extraction) if dossier_extraction is not None else Path(ctx.name)
         try:
-            z.extractall(base)
+            securite = extraire_zip_surement(z, base)
             attendus = manifeste.get("fichiers", {})
             divergences, manquants, verifies = [], [], 0
             for rel, meta in attendus.items():
@@ -330,7 +641,7 @@ def extraire_et_reverifier(archive: str | Path, *, dossier_extraction: str | Pat
                 ctx.cleanup()
     ok = not divergences and not manquants
     return {"ok": ok, "verifies": verifies, "divergences": sorted(divergences),
-            "manquants": sorted(manquants)}
+            "manquants": sorted(manquants), "securite_chemins": securite}
 
 
 # ── ECRITURE + RE-VERIFICATION (items 20.8/20.9) ─────────────────────────────────────────────
@@ -408,28 +719,26 @@ def reverifier_archive(cible: str | Path) -> dict:
 
 # ── ORCHESTRATEUR (item 20 complet) ──────────────────────────────────────────────────────────
 def creer_archive_portable(root: str | Path, cible: str | Path, *, version: str = "",
-                           git_sha: str | None = None, exiger_arret: bool = True,
+                           git_sha: str | None = None,
                            pid_vivant=None, horloge=time.time,
                            non_suivis_requis: list[str] | None = None) -> dict:
     """Enchaine les 9 etapes de l'item 20 et rend un verdict. Leve ArchiveRefuseeError sur refus dur
     (writers vivants, session ACTIVE, chemin absolu residuel). Ne fabrique JAMAIS une archive
     partielle : au moindre doute, on refuse et rien n'est ecrit."""
-    root = Path(root)
+    root = Path(root).resolve()
+    cible = Path(cible).resolve()
     # 1+2 : refus durs AVANT tout travail couteux.
     arretes, motifs = preuve_arret(root, pid_vivant=pid_vivant)
     vivants = [m for m in motifs if m not in _MARQUEURS_REGISTRE]
-    if exiger_arret and vivants:                       # de VRAIS writers vivants -> refus dur
+    if not arretes:
+        raise ArchiveRefuseeError("arret des writers non prouve: %s" % ", ".join(motifs))
+    if vivants:
         raise ArchiveRefuseeError("writers encore vivants: %s" % ", ".join(vivants))
-    note_arret = "PROUVE_ARRETE" if arretes else ("QUIESCENT_SANS_REGISTRE (%s)" % ",".join(motifs))
+    note_arret = "PROUVE_ARRETE" if arretes else ("MODE_TEST_SANS_PREUVE (%s)" % ",".join(motifs))
     actives = sessions_actives(root)
     if actives:
         raise ArchiveRefuseeError("sessions ACTIVE (a cloturer d'abord): %s" % ", ".join(actives))
     # 3 : WAL checkpoint.
-    sqlite_prep = preparer_sqlite(root)
-    echecs_sql = [d for d in sqlite_prep if not d.get("ok")]
-    if echecs_sql:
-        raise ArchiveRefuseeError("SQLite non checkpointables: %s"
-                                  % ", ".join(d["base"] for d in echecs_sql))
     # 4+5 : selection.
     inclus, exclus = lister_pour_archive(root)
     # 4bis : CONTROLE DE COMPLETUDE (item release) — rien d'important ne doit manquer. Un fichier requis
@@ -440,27 +749,62 @@ def creer_archive_portable(root: str | Path, cible: str | Path, *, version: str 
     if not completude["complet"]:
         raise ArchiveRefuseeError("release INCOMPLETE: %s" % _fmt_compl(completude))
     # 7 : manifeste.
-    manifeste = construire_manifeste(root, inclus, exclus, version=version,
-                                     git_sha=git_sha, horloge=horloge)
-    manifeste["completude"] = {k: (len(v) if isinstance(v, list) else v)
-                               for k, v in completude.items()}
+    cible.parent.mkdir(parents=True, exist_ok=True)
+    cible_temporaire = cible.with_name(".%s.%d.tmp" % (cible.name, os.getpid()))
+    cible_temporaire.unlink(missing_ok=True)
+    sha_source = git_sha if git_sha is not None else _git_sha_depuis_dossier(root)
+    version_source = version or _version_projet(root)
+    try:
+        with tempfile.TemporaryDirectory(prefix="hypersmart-portable-staging-") as tmp:
+            staging = Path(tmp) / "release"
+            staging_info = construire_staging(root, staging, inclus)
+            staging_inclus = staging_info["fichiers"]
+            source_attendu = set(inclus)
+            stage_reel = set(staging_inclus)
+            if source_attendu != stage_reel:
+                raise ArchiveRefuseeError(
+                    "staging divergent: manquants=%s surplus=%s"
+                    % (sorted(source_attendu - stage_reel), sorted(stage_reel - source_attendu))
+                )
+            manifeste = construire_manifeste(
+                staging, staging_inclus, exclus, version=version_source,
+                git_sha=sha_source, horloge=horloge,
+            )
+            manifeste["completude"] = {
+                k: (len(v) if isinstance(v, list) else v)
+                for k, v in completude.items()
+            }
+            manifeste["staging"] = {
+                "source_immuable": True,
+                "sqlite_backup_api": all(x.get("ok") for x in staging_info["sqlite"]),
+                "sqlite_count": len(staging_info["sqlite"]),
+                "chemins_neutralises": staging_info["chemins_neutralises"],
+            }
     # 6+8 : ecriture (neutralisation + refus si chemin absolu residuel).
-    ecrit = ecrire_archive(root, cible, inclus, manifeste)
-    # 9a : re-verification EN MEMOIRE (chaque membre du zip).
-    verif = reverifier_archive(cible)
-    if not verif.get("ok"):
-        Path(cible).unlink(missing_ok=True)
-        raise ArchiveRefuseeError("re-verification KO: %s" % json.dumps(verif, ensure_ascii=False))
+            ecrit = ecrire_archive(staging, cible_temporaire, staging_inclus, manifeste)
+            verif = reverifier_archive(cible_temporaire)
+            if not verif.get("ok"):
+                raise ArchiveRefuseeError(
+                    "re-verification KO: %s" % json.dumps(verif, ensure_ascii=False)
+                )
     # 9b : item 8 — EXTRACTION physique de controle + re-verification SUR DISQUE (deploiement prouve).
-    verif_extraction = extraire_et_reverifier(cible)
-    if not verif_extraction.get("ok"):
-        Path(cible).unlink(missing_ok=True)
-        raise ArchiveRefuseeError("extraction de controle KO: %s"
-                                  % json.dumps(verif_extraction, ensure_ascii=False))
+            verif_extraction = extraire_et_reverifier(cible_temporaire)
+            if not verif_extraction.get("ok"):
+                raise ArchiveRefuseeError(
+                    "extraction de controle KO: %s"
+                    % json.dumps(verif_extraction, ensure_ascii=False)
+                )
+            os.replace(cible_temporaire, cible)
+    except BaseException:
+        cible_temporaire.unlink(missing_ok=True)
+        raise
     return {"archive": str(cible), "inclus": len(inclus), "exclus": len(exclus),
-            "sqlite": sqlite_prep, "empreinte_globale": manifeste["empreinte_globale"],
-            "arret": note_arret, "verification": verif, "verification_extraction": verif_extraction,
-            "sbom": manifeste.get("sbom"), "manifeste": NOM_MANIFESTE, "ecriture": ecrit}
+            "sqlite": staging_info["sqlite"],
+            "empreinte_globale": manifeste["empreinte_globale"],
+            "arret": note_arret, "verification": verif,
+            "verification_extraction": verif_extraction,
+            "sbom": manifeste.get("sbom"), "manifeste": NOM_MANIFESTE,
+            "ecriture": ecrit, "staging": manifeste["staging"]}
 
 
 def _nom_archive_versionne(root: Path, manifeste_version: str, ts_ms: int) -> str:
@@ -476,8 +820,6 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--sortie", default="", help="chemin .zip (defaut: dist/ versionne)")
     ap.add_argument("--version", default="", help="version HyperSmart a graver dans le manifeste")
     ap.add_argument("--git-sha", default=None, help="SHA git (defaut: lu dans .git)")
-    ap.add_argument("--sans-preuve-arret", action="store_true",
-                    help="ne PAS exiger la preuve d'arret (build de test uniquement)")
     ap.add_argument("--verifier", default="", help="re-verifie une archive existante et sort")
     args = ap.parse_args(argv)
 
@@ -493,8 +835,7 @@ def main(argv: list[str] | None = None) -> int:
     else:
         cible = root / "dist" / _nom_archive_versionne(root, version, int(time.time() * 1000))
     try:
-        res = creer_archive_portable(root, cible, version=version, git_sha=args.git_sha,
-                                     exiger_arret=not args.sans_preuve_arret)
+        res = creer_archive_portable(root, cible, version=version, git_sha=args.git_sha)
     except ArchiveRefuseeError as exc:
         print("ARCHIVE_REFUSEE: %s" % exc, file=sys.stderr)
         return 5
@@ -508,7 +849,10 @@ def main(argv: list[str] | None = None) -> int:
 
 
 __all__ = ["SCHEMA_MANIFESTE", "NOM_MANIFESTE", "ArchiveRefuseeError", "preuve_arret",
-           "writers_vivants", "sessions_actives", "checkpoint_wal_sqlite", "preparer_sqlite", "est_exclu",
+           "writers_vivants", "sessions_actives", "checkpoint_wal_sqlite", "preparer_sqlite",
+           "copier_sqlite_vers_staging", "construire_staging", "contient_cle_privee",
+           "valider_chemin_relatif", "valider_fichier_source", "valider_membres_zip",
+           "extraire_zip_surement", "est_exclu",
            "lister_pour_archive", "neutraliser_metadonnees", "chemins_absolus_residuels",
            "construire_manifeste", "ecrire_archive", "reverifier_archive", "extraire_et_reverifier",
            "creer_archive_portable", "main"]

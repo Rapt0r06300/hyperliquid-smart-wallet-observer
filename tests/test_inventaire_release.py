@@ -61,6 +61,15 @@ def test_cloture_imports_resout_et_detecte_casse(tmp_path):
     assert any(c["module"] == "hl_observer.ops.fantome" for c in clo2["casses"])
 
 
+def test_cloture_imports_resout_import_relatif(tmp_path):
+    _mini_projet(tmp_path)
+    (tmp_path / "src" / "hl_observer" / "ops" / "moteur.py").write_text(
+        "from .util import X\n", encoding="utf-8")
+    clo = IR.cloture_imports(tmp_path)
+    assert clo["casses"] == []
+    assert "src/hl_observer/ops/util.py" in clo["requis"]
+
+
 def test_import_garde_par_try_except_est_optionnel(tmp_path):
     _mini_projet(tmp_path)
     # import best-effort d'un module absent, sous try/except : NE casse PAS la release.
@@ -79,6 +88,44 @@ def test_references_cmd(tmp_path):
     # supprime l'outil reference -> manquant detecte.
     (tmp_path / "tools" / "outil.py").unlink()
     assert "tools/outil.py" in IR.references_cmd(tmp_path)["manquants"]
+
+
+def test_references_dynamiques_et_ressources(tmp_path):
+    _mini_projet(tmp_path)
+    (tmp_path / "config" / "modele.json").write_text("{}\n", encoding="utf-8")
+    (tmp_path / "src" / "hl_observer" / "ops" / "moteur.py").write_text(
+        "import importlib\n"
+        "from pathlib import Path\n"
+        "M = importlib.import_module('hl_observer.ops.util')\n"
+        "CFG = Path('config/modele.json').read_text()\n",
+        encoding="utf-8",
+    )
+    refs = IR.references_dynamiques(tmp_path)
+    assert refs["manquants"] == []
+    assert "src/hl_observer/ops/util.py" in refs["requis"]
+    assert "config/modele.json" in refs["requis"]
+
+
+def test_reference_dynamique_absente_bloque_completude(tmp_path):
+    _mini_projet(tmp_path)
+    (tmp_path / "src" / "hl_observer" / "ops" / "moteur.py").write_text(
+        "open('config/obligatoire.json', 'r', encoding='utf-8')\n", encoding="utf-8")
+    v = IR.controle_completude(tmp_path, _tous_les_fichiers(tmp_path))
+    assert v["complet"] is False
+    assert any(x["reference"] == "config/obligatoire.json"
+               for x in v["references_dynamiques_manquantes"])
+
+
+def test_outils_scripts_certificats_et_fixtures_sont_requis(tmp_path):
+    _mini_projet(tmp_path)
+    (tmp_path / "tools" / "helper.ps1").write_text("Write-Output ok\n", encoding="utf-8")
+    (tmp_path / "tests" / "fixtures").mkdir()
+    (tmp_path / "tests" / "fixtures" / "sample.jsonl").write_text("{}\n", encoding="utf-8")
+    (tmp_path / "ca.pem").write_text("PUBLIC CA\n", encoding="utf-8")
+    requis = IR.fichiers_requis(tmp_path)
+    assert "tools/helper.ps1" in requis
+    assert "tests/fixtures/sample.jsonl" in requis
+    assert "ca.pem" in requis
 
 
 def test_completude_ok_sur_projet_complet(tmp_path):

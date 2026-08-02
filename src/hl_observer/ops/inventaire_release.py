@@ -14,6 +14,8 @@ Pur (ast/pathlib), 0 reseau. Le detecteur de non-suivis prend la sortie git en p
 from __future__ import annotations
 
 import ast
+import importlib.util
+import os
 from pathlib import Path
 
 PAQUET = "hl_observer"
@@ -21,6 +23,72 @@ MAITRES = ("LANCER_HYPERSMART.cmd", "ANALYSER_BACKTESTS_REPLAYS.cmd", "CREER_ARC
 # Fichiers/dossiers socle qui DOIVENT etre dans toute release (au-dela des .py importes).
 SOCLE = ("pyproject.toml", "requirements-portable.txt")
 EXT_CONFIG = (".yaml", ".yml", ".json", ".toml", ".ini", ".cfg")
+EXT_RESSOURCE = (
+    ".jsonl", ".csv", ".tsv", ".sqlite", ".sqlite3", ".db", ".sql",
+    ".html", ".htm", ".css", ".js", ".svg", ".png", ".jpg", ".jpeg",
+    ".gif", ".ico", ".txt", ".md", ".xml", ".xsd", ".j2", ".jinja2",
+    ".crt", ".cer", ".pem", ".ca-bundle", ".dll", ".pyd", ".exe", ".whl",
+)
+
+_DOSSIERS_IGNORES = {
+    ".git", ".venv", "venv", "env", "node_modules", "__pycache__",
+    ".pytest_cache", ".mypy_cache", ".ruff_cache", ".hypothesis",
+    "portable_runtime", ".venv-portable", "dist", "build", "htmlcov",
+    "portable-build", ".portable-staging", "cache_moisson",
+}
+_PREFIXES_IGNORES = ("runtime/research/", "logs/", "data/", "_to_delete/")
+_RACINES_RESSOURCES_OBLIGATOIRES = (
+    "config/", "configs/", "schemas/", "migrations/", "templates/",
+    "static/", "assets/", "tests/fixtures/", "src/hl_observer/",
+)
+
+
+def _sous_arbre_ignore(rel: str) -> bool:
+    rel = rel.replace("\\", "/").strip("/")
+    if not rel:
+        return False
+    if rel == "runtime" or rel == "runtime/data":
+        return False
+    if rel.startswith("runtime/") \
+            and not (rel == "runtime/data/sessions"
+                     or rel.startswith("runtime/data/sessions/")):
+        return True
+    if any(part in _DOSSIERS_IGNORES for part in rel.split("/")):
+        return True
+    return any((rel + "/").startswith(prefixe) for prefixe in _PREFIXES_IGNORES)
+
+
+def _iter_fichiers(root: Path):
+    """Parcours deterministe en elaguant les sous-arbres interdits."""
+    for dossier, sous_dossiers, fichiers in os.walk(root, topdown=True, followlinks=False):
+        base = Path(dossier)
+        sous_dossiers[:] = [
+            nom for nom in sorted(sous_dossiers, key=str.casefold)
+            if not _sous_arbre_ignore((base / nom).relative_to(root).as_posix())
+        ]
+        for nom in sorted(fichiers, key=str.casefold):
+            yield base / nom
+
+
+def _iter_python_projet(root: Path, base_rel: str):
+    """Sources a analyser par AST, hors Python embarque et wheels tierces."""
+    dossier = root / base_rel
+    if not dossier.is_dir():
+        return
+    for base, sous_dossiers, fichiers in os.walk(dossier, topdown=True, followlinks=False):
+        courant = Path(base)
+        gardes = []
+        for nom in sorted(sous_dossiers, key=str.casefold):
+            rel = (courant / nom).relative_to(root).as_posix()
+            if _sous_arbre_ignore(rel):
+                continue
+            if base_rel == "tools" and nom in {"python", "wheelhouse"}:
+                continue
+            gardes.append(nom)
+        sous_dossiers[:] = gardes
+        for nom in sorted(fichiers, key=str.casefold):
+            if nom.lower().endswith(".py"):
+                yield courant / nom
 
 
 # ── INVENTAIRE ────────────────────────────────────────────────────────────────────────────────
@@ -34,9 +102,7 @@ def inventaire(root: str | Path) -> dict:
     cats: dict[str, list[str]] = {k: [] for k in
                                   ("modules", "collecteurs", "strategies", "pipelines", "tools_py",
                                    "cmd", "ps1", "tests", "configs", "certs", "autres")}
-    for p in sorted(root.rglob("*")):
-        if not p.is_file() or ".git" in p.parts or "__pycache__" in p.parts:
-            continue
+    for p in _iter_fichiers(root):
         rel = _rel(root, p)
         bas = rel.lower()
         if rel.startswith("src/hl_observer/") and bas.endswith(".py"):
@@ -94,8 +160,9 @@ def _handler_capte_import(h: ast.ExceptHandler) -> bool:
 
 
 class _ScanImports(ast.NodeVisitor):
-    def __init__(self, paquet: str):
+    def __init__(self, paquet: str, package_courant: str = ""):
         self.paquet = paquet
+        self.package_courant = package_courant
         self.directs: set[str] = set()
         self.froms: set[str] = set()
         self.guardes: set[str] = set()                     # imports sous try/except optionnel
@@ -125,22 +192,27 @@ class _ScanImports(ast.NodeVisitor):
                     self.guardes.add(a.name)
 
     def visit_ImportFrom(self, node: ast.ImportFrom):
-        if not (node.level and node.level > 0):
-            mod = node.module or ""
-            if self._pkg(mod):
-                self.froms.add(mod)
-                if self._garde:
-                    self.guardes.add(mod)
+        mod = node.module or ""
+        if node.level and self.package_courant:
+            try:
+                mod = importlib.util.resolve_name("." * node.level + mod, self.package_courant)
+            except (ImportError, ValueError):
+                return
+        if self._pkg(mod):
+            self.froms.add(mod)
+            if self._garde:
+                self.guardes.add(mod)
 
 
-def _imports_intra(source: str, paquet: str) -> tuple[set[str], set[str], set[str]]:
+def _imports_intra(source: str, paquet: str, package_courant: str = "") \
+        -> tuple[set[str], set[str], set[str]]:
     """(directs, froms, guardes). `directs` = import X.Y.Z (Z doit etre un module). `froms` = from X.Y
     import ... (X.Y doit resoudre). `guardes` = imports sous try/except optionnel (absence toleree)."""
     try:
         arbre = ast.parse(source)
     except SyntaxError:
         return set(), set(), set()
-    s = _ScanImports(paquet)
+    s = _ScanImports(paquet, package_courant)
     s.visit(arbre)
     return s.directs, s.froms, s.guardes
 
@@ -155,15 +227,25 @@ def cloture_imports(root: str | Path, *, paquet: str = PAQUET) -> dict:
     casses: list[dict] = []
     a_scanner: list[Path] = []
     for base in ("src/hl_observer", "tools", "tests"):
-        d = root / base
-        if d.is_dir():
-            a_scanner += [p for p in d.rglob("*.py") if "__pycache__" not in p.parts]
+        a_scanner += list(_iter_python_projet(root, base))
     for p in a_scanner:
         try:
             src = p.read_text(encoding="utf-8", errors="ignore")
         except OSError:
             continue
-        directs, froms, guardes = _imports_intra(src, paquet)
+        package_courant = ""
+        try:
+            rel_src = p.relative_to(root / "src")
+        except ValueError:
+            pass
+        else:
+            parties = list(rel_src.with_suffix("").parts)
+            if parties and parties[-1] == "__init__":
+                parties.pop()
+            else:
+                parties = parties[:-1]
+            package_courant = ".".join(parties)
+        directs, froms, guardes = _imports_intra(src, paquet, package_courant)
         for mod in directs:                                # import X.Y.Z : Z doit etre un module present
             fich = module_vers_fichier(root, mod)
             if fich is None:
@@ -179,6 +261,88 @@ def cloture_imports(root: str | Path, *, paquet: str = PAQUET) -> dict:
             else:
                 requis.add(fich)
     return {"requis": requis, "casses": casses}
+
+
+class _ScanDynamiques(ast.NodeVisitor):
+    """Collecte les imports dynamiques et chemins litteraux utilises au runtime."""
+
+    def __init__(self, paquet: str):
+        self.paquet = paquet
+        self.modules: set[str] = set()
+        self.chemins: set[str] = set()
+        self.chemins_obligatoires: set[str] = set()
+
+    @staticmethod
+    def _chaine(node: ast.AST) -> str | None:
+        return node.value if isinstance(node, ast.Constant) and isinstance(node.value, str) else None
+
+    def visit_Call(self, node: ast.Call):
+        nom = ""
+        if isinstance(node.func, ast.Name):
+            nom = node.func.id
+        elif isinstance(node.func, ast.Attribute):
+            nom = node.func.attr
+        premier = self._chaine(node.args[0]) if node.args else None
+        if premier and nom in ("import_module", "__import__"):
+            if premier == self.paquet or premier.startswith(self.paquet + "."):
+                self.modules.add(premier)
+        if premier and nom in ("files", "open_text", "open_binary"):
+            if premier == self.paquet or premier.startswith(self.paquet + "."):
+                self.modules.add(premier)
+        if premier and nom in ("open", "Path"):
+            brut = premier.replace("\\", "/")
+            if not brut.startswith(("/", "../")) and ":" not in brut:
+                self.chemins.add(brut.lstrip("./"))
+                if nom == "open":
+                    mode = self._chaine(node.args[1]) if len(node.args) > 1 else "r"
+                    if mode is None or not any(c in mode for c in "wax+"):
+                        self.chemins_obligatoires.add(brut.lstrip("./"))
+        if nom in ("read_text", "read_bytes") and isinstance(node.func, ast.Attribute):
+            appel_path = node.func.value
+            if isinstance(appel_path, ast.Call) and appel_path.args:
+                brut = self._chaine(appel_path.args[0])
+                if brut and not brut.startswith(("/", "../")) and ":" not in brut:
+                    brut = brut.replace("\\", "/").lstrip("./")
+                    self.chemins.add(brut)
+                    self.chemins_obligatoires.add(brut)
+        self.generic_visit(node)
+
+
+def references_dynamiques(root: str | Path, *, paquet: str = PAQUET) -> dict:
+    """Resout imports dynamiques et ressources litterales existantes.
+
+    Une reference litterale absente n'est bloquante que si elle ressemble a une
+    ressource livrable; les chemins de sortie runtime restent hors release.
+    """
+    root = Path(root)
+    requis: set[str] = set()
+    manquants: list[dict] = []
+    for base in ("src/hl_observer", "tools", "tests"):
+        for p in _iter_python_projet(root, base):
+            try:
+                arbre = ast.parse(p.read_text(encoding="utf-8", errors="ignore"))
+            except (OSError, SyntaxError):
+                continue
+            scan = _ScanDynamiques(paquet)
+            scan.visit(arbre)
+            for module in scan.modules:
+                fichier = module_vers_fichier(root, module)
+                if fichier:
+                    requis.add(fichier)
+                else:
+                    manquants.append({"depuis": _rel(root, p), "reference": module,
+                                      "genre": "import_dynamique"})
+            for chemin in scan.chemins:
+                candidat = root / chemin
+                if candidat.is_file():
+                    requis.add(_rel(root, candidat))
+                elif (chemin in scan.chemins_obligatoires
+                      and chemin.startswith(_RACINES_RESSOURCES_OBLIGATOIRES)
+                      and Path(chemin).suffix.lower() in (EXT_RESSOURCE + EXT_CONFIG)
+                      and not chemin.startswith("runtime/")):
+                    manquants.append({"depuis": _rel(root, p), "reference": chemin,
+                                      "genre": "ressource_litterale"})
+    return {"requis": requis, "manquants": manquants}
 
 
 def references_cmd(root: str | Path) -> dict:
@@ -218,10 +382,23 @@ def fichiers_requis(root: str | Path) -> set[str]:
         if (root / nom).is_file():
             req.add(nom)
     req.update(inv["modules"])                             # tous les modules runtime
+    req.update(inv["tools_py"])                            # tous les outils Python
+    req.update(inv["cmd"])                                 # toute la fermeture CMD
+    req.update(inv["ps1"])                                 # scripts PowerShell appeles ou auxiliaires
     req.update(inv["tests"])                               # la suite de tests (pas de release allegee)
     req.update(inv["configs"])                             # configs/schemas/migrations
+    req.update(inv["certs"])                               # CA publics requis par TLS
+    prefixes_ressources = (
+        "src/", "tools/", "tests/", "config/", "configs/", "schemas/",
+        "migrations/", "templates/", "static/", "assets/", "runtime/data/sessions/",
+    )
+    for rel in inv["autres"]:
+        low = rel.lower()
+        if rel.startswith(prefixes_ressources) and low.endswith(EXT_RESSOURCE):
+            req.add(rel)
     req.update(cloture_imports(root)["requis"])
     req.update(references_cmd(root)["requis"])
+    req.update(references_dynamiques(root)["requis"])
     # Un fichier DELIBEREMENT exclu (etat machine volatil sous runtime/, secret, cache...) n'est jamais
     # « requis » : sinon on se bloquerait sur ce qu'on exclut a raison. On aligne requis sur includable.
     try:
@@ -247,10 +424,11 @@ def controle_completude(root: str | Path, inclus, *, non_suivis: list[str] | Non
                                if (root / r).is_file() and r not in inclus_set)
     imports = cloture_imports(root)
     refs = references_cmd(root)
+    dyn = references_dynamiques(root)
     ns = set(non_suivis or [])
     non_suivis_requis = sorted(r for r in requis if r in ns)
     complet = not (absents_disque or vides or exclus_par_erreur
-                   or imports["casses"] or refs["manquants"])
+                   or imports["casses"] or refs["manquants"] or dyn["manquants"])
     return {
         "complet": complet,
         "n_requis": len(requis),
@@ -259,6 +437,7 @@ def controle_completude(root: str | Path, inclus, *, non_suivis: list[str] | Non
         "exclus_par_erreur": exclus_par_erreur,
         "imports_casses": imports["casses"],
         "references_cmd_manquantes": refs["manquants"],
+        "references_dynamiques_manquantes": dyn["manquants"],
         "non_suivis_requis": non_suivis_requis,
     }
 
@@ -274,8 +453,13 @@ def formater(v: dict) -> str:
     if v["imports_casses"]:
         lignes.append("  imports_casses : %s"
                       % ", ".join("%s<-%s" % (c["module"], c["depuis"]) for c in v["imports_casses"][:10]))
+    if v.get("references_dynamiques_manquantes"):
+        lignes.append("  references_dynamiques_manquantes : %s"
+                      % ", ".join("%s<-%s" % (c["reference"], c["depuis"])
+                                  for c in v["references_dynamiques_manquantes"][:10]))
     return "\n".join(lignes)
 
 
 __all__ = ["inventaire", "module_vers_fichier", "cloture_imports", "references_cmd",
+           "references_dynamiques",
            "fichiers_requis", "controle_completude", "formater"]
