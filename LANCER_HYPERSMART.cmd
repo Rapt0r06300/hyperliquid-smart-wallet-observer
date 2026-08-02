@@ -65,6 +65,20 @@ REM Le verificateur OOS planifie est strictement opt-in.
 REM Utiliser "LANCER_HYPERSMART.cmd verify-oos install" pour l'activer explicitement.
 
 set "PYTHONPATH=%~dp0src;%PYTHONPATH%"
+REM === ITEM 21 : PREVOL PREMIER-LANCEMENT (PC neuf apres extraction de l'archive). Verifie OS/arch,
+REM   droits d'ecriture, chemin a espaces/accents, horloge, port UI, aucune cle copiee, sessions
+REM   preservees, et REGENERE l'identite machine (PID/verrous perimes/COURANTE, machine-id neuf) pour
+REM   qu'une archive/dossier copiee ne reutilise JAMAIS l'etat de la machine de build. S'execute APRES
+REM   le verrou (notre verrou d'instance vivant est preserve) et AVANT tout collecteur/session.
+"%HYPERSMART_PYTHON%" -m hl_observer.ops.premier_lancement --racine "%~dp0."
+if errorlevel 1 (
+  echo.
+  echo   [PREVOL] Premier lancement NO_GO : environnement inadapte ^(droits d'ecriture, ou cle presente^).
+  echo   Voir le detail ci-dessus. Corrige puis relance. Aucun collecteur n'est demarre.
+  echo.
+  set "RC=7"
+  goto :fin
+)
 set "HL_ENV=paper"
 set "HL_ENABLE_MAINNET_EXECUTION=0"
 set "HL_ENABLE_TESTNET_EXECUTION=0"

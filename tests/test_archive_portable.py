@@ -88,6 +88,23 @@ def test_est_exclu_regles():
     assert not AP.est_exclu("src/app.py") and not AP.est_exclu("runtime/data/sessions/r/bbo.jsonl")
 
 
+def test_aucune_cle_dans_archive(tmp_path):
+    # item 21 : matiere de cle EXCLUE par extension, mais le code source « private/secret » RESTE.
+    for cle in ("wallet.key", "cert.pem", "id.p12", "backup.pfx", "phrase.mnemonic", ".env", ".env.local"):
+        assert AP.est_exclu(cle), cle
+    assert not AP.est_exclu("src/private_helpers.py")              # code source jamais exclu par sous-chaine
+    assert not AP.est_exclu("src/secret_santa.py")
+    # round-trip : une cle deposee dans le projet ne se retrouve PAS dans l'archive.
+    _projet(tmp_path)
+    (tmp_path / "wallet.key").write_text("SECRET", encoding="utf-8")
+    (tmp_path / ".env").write_text("TOKEN=x", encoding="utf-8")
+    cible = tmp_path / "out.zip"
+    AP.creer_archive_portable(tmp_path, cible, pid_vivant=lambda _p: False, horloge=HORLOGE)
+    with zipfile.ZipFile(cible) as z:
+        noms = set(z.namelist())
+    assert "wallet.key" not in noms and ".env" not in noms
+
+
 # ── SQLite WAL (item 20.3) ───────────────────────────────────────────────────────────────────
 def test_checkpoint_wal_rend_base_portante(tmp_path):
     base = _sqlite_avec_wal(tmp_path)

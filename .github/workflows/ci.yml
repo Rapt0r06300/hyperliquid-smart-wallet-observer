@@ -170,7 +170,8 @@ jobs:
             tests/test_e2e_lanceur_harvest.py `
             tests/test_portabilite.py `
             tests/test_archive_portable.py `
-            tests/test_creer_archive_cmd.py
+            tests/test_creer_archive_cmd.py `
+            tests/test_premier_lancement.py
       - name: Audits de securite (Windows)
         shell: pwsh
         env:
@@ -245,12 +246,13 @@ jobs:
             tests/test_lead_lag_paper.py \
             tests/test_lab_eta.py \
             tests/test_lab_rapport.py
-      - name: Portabilite (archive portable auto-verifiee, invariants sans chemin machine)
+      - name: Portabilite (archive portable auto-verifiee, premier lancement PC neuf, invariants sans chemin machine)
         run: |
           python -m pytest -q -p no:cacheprovider --junitxml=junit-portabilite.xml \
             tests/test_portabilite.py \
             tests/test_archive_portable.py \
-            tests/test_creer_archive_cmd.py
+            tests/test_creer_archive_cmd.py \
+            tests/test_premier_lancement.py
       - name: Lanceur HARVEST (preflight bloquant, preuve de vie, registre PID, stockage borne, sante, dYdX, E2E)
         run: |
           python -m pytest -q -p no:cacheprovider --junitxml=junit-lanceur.xml \

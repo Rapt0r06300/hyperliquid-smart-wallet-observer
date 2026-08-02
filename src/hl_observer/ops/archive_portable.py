@@ -45,6 +45,10 @@ DOSSIERS_EXCLUS = ("__pycache__", ".git", ".venv", "venv", "env", "node_modules"
 SUFFIXES_EXCLUS = (".pyc", ".pyo", ".log", ".lock", ".pid", ".tmp", ".bundle",
                    ".sqlite3-wal", ".sqlite3-shm", ".sqlite-wal", ".sqlite-shm",
                    "-wal", "-shm", ".db-wal", ".db-shm")
+# item 21 « aucune cle copiee » : matiere de cle exclue par EXTENSION (jamais par sous-chaine, qui
+# ferait tomber du code source legitime comme private_helpers.py). Defense en profondeur : meme si le
+# projet est paper-strict (0 cle reelle), une archive ne doit JAMAIS transporter de secret.
+SUFFIXES_SECRETS = (".key", ".pem", ".p12", ".pfx", ".mnemonic", ".seed", ".keystore")
 FICHIERS_EXCLUS = (REGISTRE_RELPATH.as_posix(),                     # registre PID du lanceur
                    "runtime/data/lanceur_session_marqueur.txt",     # marqueur anti-orphelin (machine)
                    "runtime/data/COURANTE.json",                    # pointeur de session vivante
@@ -125,6 +129,11 @@ def est_exclu(rel: str) -> bool:
         return True
     low = rel_posix.lower()
     if any(low.endswith(sfx) for sfx in SUFFIXES_EXCLUS):
+        return True
+    if any(low.endswith(sfx) for sfx in SUFFIXES_SECRETS):          # item 21 : jamais de cle dans l'archive
+        return True
+    nom = Path(rel).name.lower()
+    if nom == ".env" or nom.startswith(".env."):                    # secrets d'environnement
         return True
     return False
 
