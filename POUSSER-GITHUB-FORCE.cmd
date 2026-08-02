@@ -18,7 +18,7 @@ if errorlevel 1 (
 
 powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass ^
   -File "%~dp0tools\push_github_safe.ps1" ^
-  -ProjectRoot "%~dp0"
+  -ProjectRoot "%~dp0."
 set "RC=%ERRORLEVEL%"
 
 if not "%RC%"=="0" goto :echec_code

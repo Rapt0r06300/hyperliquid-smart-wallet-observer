@@ -32,6 +32,7 @@ def test_push_launchers_share_one_safe_implementation() -> None:
     helper_text = HELPER.read_text(encoding="utf-8")
 
     assert "tools\\push_github_safe.ps1" in main_text
+    assert '-ProjectRoot "%~dp0."' in main_text
     assert "FETCH_HEAD" not in helper_text
     assert '"push", "origin", "main:main"' in helper_text
     assert "merge-base" in helper_text
