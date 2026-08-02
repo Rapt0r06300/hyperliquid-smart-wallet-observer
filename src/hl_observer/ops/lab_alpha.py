@@ -269,7 +269,7 @@ def lancer_lab(*, racine: str | Path, sortie_dir: str | Path | None = None, budg
         # alors un échantillon temporel REPRÉSENTATIF de TOUTES les venues (item 8), pas « tout le
         # fichier 1 puis le fichier 2 ». Indispensable au Lead-Lag Binance→Hyperliquid et au Cross-Venue.
         info_shard = fusionner_causalement(
-            fichiers_lisibles, shard, source_de=_venue_du_fichier,
+            fichiers_lisibles, shard, source_de=_venue_du_fichier, git_sha=(sha_git or ""),
             checkpoint_path=sortie / ("events_shard.%s.checkpoint.json" % ns))
     etat["events_shardes"] = info_shard["n"]
     etat["fusion_causale"] = {k: info_shard.get(k) for k in ("dedupes", "hors_ordre", "gaps", "sources")}

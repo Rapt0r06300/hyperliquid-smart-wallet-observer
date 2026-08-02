@@ -156,6 +156,40 @@ def test_fusion_causale_reprise_checkpoint(tmp_path):
     assert info2["repris"] is True and shard.stat().st_mtime_ns == mtime1    # pas de recalcul
 
 
+def test_empreinte_sources_change_au_moindre_octet(tmp_path):
+    # item 7 : empreinte complete (rel + SHA-256 + taille + parser + git). Le moindre changement -> diff.
+    f = _fichier_ts(tmp_path, "a.jsonl", [1, 2])
+    e1 = F.empreinte_sources([f])["empreinte"]
+    assert F.empreinte_sources([f])["empreinte"] == e1                       # deterministe
+    assert F.empreinte_sources([f], parser_version="v2")["empreinte"] != e1  # parser different
+    assert F.empreinte_sources([f], git_sha="abc")["empreinte"] != e1        # commit different
+    _fichier_ts(tmp_path, "a.jsonl", [1, 2, 3])                              # 1 octet de plus
+    assert F.empreinte_sources([f])["empreinte"] != e1                       # contenu different
+
+
+def test_reprise_reconstruit_si_source_modifiee(tmp_path):
+    # item 7 : le cache NE se croit PAS valide si une source a change (empreinte differente -> rebuild).
+    f = _fichier_ts(tmp_path, "a.jsonl", [1, 2, 3])
+    shard = tmp_path / "g.jsonl"
+    cp = tmp_path / "g.cp.json"
+    F.fusionner_causalement([f], shard, checkpoint_path=cp)
+    _fichier_ts(tmp_path, "a.jsonl", [1, 2, 3, 4, 5])                        # la source a grossi
+    info = F.fusionner_causalement([f], shard, checkpoint_path=cp)
+    assert info["repris"] is False and info["n"] == 5                        # RECONSTRUIT, pas repris
+
+
+def test_reprise_reconstruit_si_shard_corrompu(tmp_path):
+    # item 7 : shard alteree apres coup -> hash != checkpoint -> reconstruction (jamais un cache pourri).
+    f = _fichier_ts(tmp_path, "a.jsonl", [1, 2, 3])
+    shard = tmp_path / "g.jsonl"
+    cp = tmp_path / "g.cp.json"
+    F.fusionner_causalement([f], shard, checkpoint_path=cp)
+    shard.write_text('{"coin":"BTC","ts_ms":999}\n', encoding="utf-8")       # shard falsifiee
+    info = F.fusionner_causalement([f], shard, checkpoint_path=cp)
+    assert info["repris"] is False                                           # divergence de hash -> rebuild
+    assert [e["ts_ms"] for e in F.charger_borne(shard)] == [1, 2, 3]         # shard reconstruite correcte
+
+
 def test_lab_alpha_utilise_la_fusion_causale_pas_la_concatenation():
     # item 9 : le replay d'ANALYSER passe par la FUSION CAUSALE, jamais la concatenation naive.
     import inspect

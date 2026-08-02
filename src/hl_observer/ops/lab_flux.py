@@ -126,6 +126,12 @@ def compter_shard(shard_path: str | Path) -> int:
     return sum(1 for _ in flux_depuis_shard(shard_path))
 
 
+def _sha_taille(chemin: str | Path) -> tuple[str, int]:
+    from hl_observer.ops.session_catalog import sha256_fichier
+    p = Path(chemin)
+    return sha256_fichier(p) if p.is_file() else ("", -1)
+
+
 def charger_borne(shard_path: str | Path, *, max_ram: int = 0) -> list[dict[str, Any]]:
     """Charge une FENÊTRE bornée du shard (budget mémoire EXPLICITE). `max_ram<=0` = tout le shard. Le
     replay in-memory travaille sur cette fenêtre — jamais un plafond arbitraire codé en dur."""
@@ -135,6 +141,28 @@ def charger_borne(shard_path: str | Path, *, max_ram: int = 0) -> list[dict[str,
             break
         out.append(ev)
     return out
+
+
+# ── item 7 : EMPREINTE DE CACHE (le checkpoint ne se croit JAMAIS valide sans preuve) ─────────────
+def empreinte_sources(fichiers: Iterable[str | Path], *, parser_version: str = "",
+                      git_sha: str = "") -> dict[str, Any]:
+    """Empreinte COMPLÈTE des sources : chemin relatif + SHA-256 + taille de CHAQUE fichier, + version
+    de parser + SHA git. Deux jeux de sources identiques -> même empreinte ; le moindre octet changé, un
+    fichier ajouté/retiré, un parser ou un commit différent -> empreinte différente -> reconstruction."""
+    import hashlib
+    from hl_observer.ops.session_catalog import sha256_fichier
+    entrees = []
+    for f in sorted(str(x) for x in fichiers):
+        p = Path(f)
+        if p.is_file():
+            sha, taille = sha256_fichier(p)
+        else:
+            sha, taille = "", -1
+        entrees.append({"rel": p.name, "sha256": sha, "taille": taille})
+    materiau = json.dumps({"sources": entrees, "parser_version": parser_version,
+                           "git_sha": git_sha}, sort_keys=True, ensure_ascii=False)
+    return {"sources": entrees, "parser_version": parser_version, "git_sha": git_sha,
+            "empreinte": hashlib.sha256(materiau.encode("utf-8")).hexdigest()}
 
 
 # ── item 9 : FUSION CAUSALE GLOBALE par TRI-FUSION EXTERNE (jamais une concaténation naïve) ────────
@@ -175,7 +203,7 @@ def _flux_tagge(fichier: Path, source: str) -> Iterator[dict[str, Any]]:
 
 def fusionner_causalement(fichiers: Iterable[str | Path], sortie: str | Path, *,
                           max_ram_tri: int = 50_000, checkpoint_path: str | Path | None = None,
-                          source_de=None) -> dict[str, Any]:
+                          source_de=None, parser_version: str = "", git_sha: str = "") -> dict[str, Any]:
     """Produit un shard GLOBAL trié causalement (exchange_ts→recv_ts→sequence→source) à partir de
     plusieurs artefacts par-source, par TRI-FUSION EXTERNE : (1) chaque source est découpée en runs
     triés sur disque (RAM bornée), (2) tous les runs sont k-way-mergés par clé causale (heapq.merge,
@@ -187,18 +215,27 @@ def fusionner_causalement(fichiers: Iterable[str | Path], sortie: str | Path, *,
     source, et doublons. Rend {n, dedupes, hors_ordre, gaps, sources, runs}. RAM bornée, 0 réseau."""
     sortie = Path(sortie)
     sortie.parent.mkdir(parents=True, exist_ok=True)
+    fichiers = [Path(f) for f in fichiers]
+    # item 7 : empreinte COMPLÈTE des sources (rel + SHA-256 + taille + parser + git). Le cache n'est
+    # réutilisé que si CETTE empreinte correspond ET que le shard existant a le bon hash + le bon nombre
+    # de lignes. Toute divergence (source modifiée, ajoutée, retirée, parser/commit différent, shard
+    # corrompu) => on RECONSTRUIT. Un checkpoint n'est jamais cru sur parole.
+    emp = empreinte_sources(fichiers, parser_version=parser_version, git_sha=git_sha)
     cp = Path(checkpoint_path) if checkpoint_path else None
     if cp and cp.is_file() and sortie.is_file():
         try:
             etat = json.loads(cp.read_text(encoding="utf-8"))
-            if etat.get("complet"):
+            meme_sources = etat.get("empreinte_sources", {}).get("empreinte") == emp["empreinte"]
+            sha_now, taille_now = _sha_taille(sortie)
+            shard_intact = (etat.get("shard_sha256") == sha_now
+                            and etat.get("lignes") == compter_shard(sortie))
+            if etat.get("complet") and meme_sources and shard_intact:
                 etat = dict(etat)
                 etat["repris"] = True
                 return etat
         except (OSError, ValueError):
             pass
 
-    fichiers = [Path(f) for f in fichiers]
     with tempfile.TemporaryDirectory(prefix="fusion_causale_", dir=str(sortie.parent)) as tmpdir:
         tmp = Path(tmpdir)
         runs: list[Path] = []
@@ -243,12 +280,15 @@ def fusionner_causalement(fichiers: Iterable[str | Path], sortie: str | Path, *,
             fh.flush()
             os.fsync(fh.fileno())
         os.replace(tmp_sortie, sortie)
+    shard_sha, _shard_taille = _sha_taille(sortie)
     resultat = {"n": n, "dedupes": dedupes, "hors_ordre": hors_ordre, "gaps": gaps,
                 "sources": len(fichiers), "runs": len(runs), "shard": str(sortie), "repris": False}
     if cp:
+        # item 7 : le checkpoint contient l'empreinte des sources + le SHA du shard + le nombre EXACT de
+        # lignes + la liste des sources -> toute divergence future forcera une reconstruction.
         etat = dict(resultat)
-        etat["complet"] = True
-        cp.write_text(json.dumps(etat), encoding="utf-8")
+        etat.update({"complet": True, "empreinte_sources": emp, "shard_sha256": shard_sha, "lignes": n})
+        cp.write_text(json.dumps(etat, ensure_ascii=False), encoding="utf-8")
     return resultat
 
 
@@ -262,5 +302,5 @@ def flux_causal(fichiers: Iterable[str | Path], *, max_ram_tri: int = 50_000) ->
             yield ev
 
 
-__all__ = ["cle_causale", "flux_evenements_stream", "materialiser_shard", "flux_depuis_shard",
-           "compter_shard", "charger_borne", "fusionner_causalement", "flux_causal"]
+__all__ = ["cle_causale", "empreinte_sources", "flux_evenements_stream", "materialiser_shard",
+           "flux_depuis_shard", "compter_shard", "charger_borne", "fusionner_causalement", "flux_causal"]
