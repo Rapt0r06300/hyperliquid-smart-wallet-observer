@@ -1,4 +1,5 @@
 """The two release launchers must stay embedded-runtime-only and bounded."""
+import re
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -25,3 +26,15 @@ def test_main_launcher_portable_check_resolves_embedded_python_first():
     assert "portable-check" in lowered
     assert "tools\\portable_runtime.py" in lowered
     assert lowered.index("portable_env.cmd") < lowered.index("portable-check")
+    assert '"%hypersmart_python%" tools\\portable_runtime.py' in lowered
+    assert "--require-embedded --json" in lowered
+    assert "portable_launcher_check_ok" in lowered
+    assert "endlocal & exit /b %rc%" in lowered
+
+
+def test_main_launcher_never_invokes_an_unqualified_python_command():
+    text = (ROOT / "LANCER_HYPERSMART.cmd").read_text(encoding="utf-8", errors="replace")
+    command_lines = [line for line in text.splitlines() if not line.lstrip().upper().startswith("REM")]
+    executable_text = "\n".join(command_lines)
+    assert re.search(r"(?im)^\s*python(?:\.exe)?\s", executable_text) is None
+    assert re.search(r"(?i)&\s*python(?:\.exe)?\s", executable_text) is None

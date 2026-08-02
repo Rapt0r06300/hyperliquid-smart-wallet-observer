@@ -159,9 +159,10 @@ def test_validation_evidence_is_bound_and_not_declarative(tmp_path, monkeypatch)
                 "ledger_reconciliation": {"ok": True},
                 "session_closure": {"statut": "COMPLETE"},
             }), encoding="utf-8")
+        stdout = "PORTABLE_LAUNCHER_CHECK_OK" if name == "launcher" else "OK"
         return {"name": name, "ok": True, "returncode": 0, "timed_out": False,
                 "duration_seconds": 0.01, "command": list(command),
-                "stdout_tail": "OK", "stderr_tail": ""}
+                "stdout_tail": stdout, "stderr_tail": ""}
 
     monkeypatch.setattr(VP, "_run", fake_run)
     monkeypatch.setattr(VP, "_processes_for_root", lambda _root: set())

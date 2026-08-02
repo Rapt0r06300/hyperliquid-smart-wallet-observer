@@ -410,6 +410,12 @@ def valider_archive_portable(
             and smoke.get("ledger_reconciliation", {}).get("ok")
             and smoke.get("session_closure", {}).get("statut") == "COMPLETE"
         )
+        launcher_command = next(row for row in commands if row["name"] == "launcher")
+        launcher_marker = "PORTABLE_LAUNCHER_CHECK_OK"
+        launcher_ok = bool(
+            launcher_command["ok"]
+            and launcher_marker in launcher_command.get("stdout_tail", "")
+        )
         checks = {
             "hashes_extraits": {"ok": all(row["ok"] for row in extractions), "runs": extractions},
             "audit_bootstrap": audit_bootstrap,
@@ -422,7 +428,12 @@ def valider_archive_portable(
                 "ok": all(row["ok"] for row in commands if row["name"] in {"safety_check", "audit_safety"}),
                 "commands": [row for row in commands if row["name"] in {"safety_check", "audit_safety"}],
             },
-            "lanceur_hypersmart": next(row for row in commands if row["name"] == "launcher"),
+            "lanceur_hypersmart": {
+                **launcher_command,
+                "ok": launcher_ok,
+                "success_marker": launcher_marker,
+                "success_marker_seen": launcher_ok,
+            },
             "analyseur_backtests": {
                 **analyser_command,
                 "ok": analyser_ok,
