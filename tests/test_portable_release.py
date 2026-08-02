@@ -1,6 +1,7 @@
 """Atomic portable release orchestration and fail-closed publication."""
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import pytest
@@ -71,6 +72,47 @@ def test_failed_release_keeps_no_candidate_zip(tmp_path, monkeypatch):
         )
     assert not list(output.glob("*.zip"))
     assert (output / "RELEASE_FAILED.json").is_file()
+
+
+def test_dirty_official_release_writes_actionable_failure_report(tmp_path, monkeypatch):
+    root = tmp_path / "project"
+    output = tmp_path / "desktop"
+    root.mkdir()
+    dirty = {**_git_clean(), "dirty": True, "fichiers": ["local.txt"]}
+    monkeypatch.setattr(PR, "etat_git_release", lambda _root: dirty)
+
+    with pytest.raises(ArchiveRefuseeError, match="clean Git checkout"):
+        PR.creer_release_portable(root, output_directory=output)
+
+    report = json.loads((output / "RELEASE_FAILED.json").read_text(encoding="utf-8"))
+    assert report["RELEASE_READY"] is False
+    assert report["archive_kept"] is False
+    assert report["stage"] == "git_state"
+    assert report["git"]["fichiers"] == ["local.txt"]
+    assert not list(output.glob("*.zip"))
+
+
+def test_builder_failure_writes_stage_and_keeps_no_candidate(tmp_path, monkeypatch):
+    root = tmp_path / "project"
+    output = tmp_path / "desktop"
+    root.mkdir()
+    monkeypatch.setattr(PR, "etat_git_release", lambda _root: _git_clean())
+    monkeypatch.setattr(PR, "_version_projet", lambda _root: "1.2.3")
+
+    def broken_builder(*_args, **_kwargs):
+        raise RuntimeError("wheelhouse incomplete")
+
+    with pytest.raises(RuntimeError, match="wheelhouse incomplete"):
+        PR.creer_release_portable(
+            root, output_directory=output, archive_builder=broken_builder,
+            validator=_validator, ready_evaluator=_ready, artifact_writer=_artifacts,
+        )
+
+    report = json.loads((output / "RELEASE_FAILED.json").read_text(encoding="utf-8"))
+    assert report["stage"] == "build_a"
+    assert report["error_type"] == "RuntimeError"
+    assert "wheelhouse incomplete" in report["error"]
+    assert not list(output.glob("*.zip"))
 
 
 def test_output_directory_inside_project_is_rejected(tmp_path, monkeypatch):

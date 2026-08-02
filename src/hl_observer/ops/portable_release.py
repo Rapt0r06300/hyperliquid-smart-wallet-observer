@@ -90,39 +90,49 @@ def creer_release_portable(
     """Build twice, validate extracted bytes, then atomically publish on success."""
     root = Path(root).resolve()
     output = _output_directory(root, output_directory)
-    git = etat_git_release(root)
-    mode = "developpement" if development else "official"
-    if mode == "official" and git.get("dirty"):
-        raise ArchiveRefuseeError("official release requires a clean Git checkout")
-    version = _version_projet(root)
-    if development and git.get("dirty"):
-        version += "-dirty"
-    final_name = _nom_archive_versionne(root, version, str(git.get("sha", "")))
-    final_archive = output / final_name
     output.mkdir(parents=True, exist_ok=True)
-
     failure_report = output / "RELEASE_FAILED.json"
     failure_report.unlink(missing_ok=True)
-    with _release_lock(root):
-        with tempfile.TemporaryDirectory(prefix="hypersmart-portable-release-") as temporary:
-            work = Path(temporary)
-            first = work / "build-a.zip"
-            second = work / "build-b.zip"
-            extraction_parent = work / "extractions"
-            evidence_path = work / "PORTABLE_VALIDATION.json"
-            try:
+
+    stage = "git_state"
+    git: dict[str, Any] = {}
+    final_archive: Path | None = None
+    publishing: Path | None = None
+    try:
+        git = etat_git_release(root)
+        mode = "developpement" if development else "official"
+        if mode == "official" and git.get("dirty"):
+            raise ArchiveRefuseeError("official release requires a clean Git checkout")
+        version = _version_projet(root)
+        if development and git.get("dirty"):
+            version += "-dirty"
+        final_name = _nom_archive_versionne(root, version, str(git.get("sha", "")))
+        final_archive = output / final_name
+
+        stage = "release_lock"
+        with _release_lock(root):
+            with tempfile.TemporaryDirectory(prefix="hypersmart-portable-release-") as temporary:
+                work = Path(temporary)
+                first = work / "build-a.zip"
+                second = work / "build-b.zip"
+                extraction_parent = work / "extractions"
+                evidence_path = work / "PORTABLE_VALIDATION.json"
+                stage = "build_a"
                 first_result = archive_builder(
                     root, first, version=version, mode_release=mode, etat_git=git,
                 )
+                stage = "build_b"
                 second_result = archive_builder(
                     root, second, version=version, mode_release=mode, etat_git=git,
                 )
+                stage = "extracted_validation"
                 evidence = validator(
                     first, archive_repetition=second, ci_proof=ci_proof,
                     extraction_parent=extraction_parent,
                 )
                 write_evidence(evidence_path, evidence)
                 extracted = extraction_parent / "simple"
+                stage = "release_ready"
                 verdict = ready_evaluator(extracted, preuve=evidence_path)
                 if not verdict.get("RELEASE_READY"):
                     failure = {
@@ -141,10 +151,13 @@ def creer_release_portable(
                     raise ArchiveRefuseeError(
                         "RELEASE_READY=false: %s" % ", ".join(verdict.get("manquants", []))
                     )
+                stage = "atomic_publish"
                 publishing = final_archive.with_name(".%s.%d.tmp" % (final_archive.name, os.getpid()))
                 publishing.unlink(missing_ok=True)
                 shutil.copyfile(first, publishing)
                 os.replace(publishing, final_archive)
+                publishing = None
+                stage = "sidecar_artifacts"
                 artifacts = artifact_writer(
                     final_archive,
                     validation={
@@ -167,11 +180,24 @@ def creer_release_portable(
                     "verdict": verdict,
                     "artifacts": artifacts,
                 }
-            except BaseException:
-                final_archive.with_name(".%s.%d.tmp" % (final_archive.name, os.getpid())).unlink(
-                    missing_ok=True
-                )
-                raise
+    except BaseException as exc:
+        if publishing is not None:
+            publishing.unlink(missing_ok=True)
+        if not failure_report.exists():
+            failure = {
+                "schema": "hypersmart.portable_release_failure.v1",
+                "RELEASE_READY": False,
+                "archive_kept": False,
+                "stage": stage,
+                "error_type": type(exc).__name__,
+                "error": str(exc),
+                "git": git,
+            }
+            failure_report.write_text(
+                json.dumps(failure, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
+                encoding="utf-8", newline="\n",
+            )
+        raise
 
 
 def main(argv: list[str] | None = None) -> int:
