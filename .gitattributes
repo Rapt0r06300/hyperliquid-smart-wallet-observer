@@ -24,3 +24,7 @@
 # Cowork: LFS neutralise pour ces types (git-lfs non fiable ici) -> stockage inline
 *.csv -filter -diff -merge
 *.jsonl -filter -diff -merge
+
+# Les scripts Windows restent CRLF au checkout mais sont normalises dans Git.
+*.cmd text eol=crlf
+*.ps1 text eol=crlf

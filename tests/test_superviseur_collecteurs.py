@@ -200,8 +200,12 @@ def test_le_REGISTRE_correspond_au_LANCEUR(fichier):
     lanceur unique — la sous-commande `collectors` réutilise la MÊME sous-routine
     :demarrer_collecteurs, donc une seule source de vérité au lieu de deux fichiers.)"""
     texte = (RACINE / fichier).read_text(encoding="utf-8", errors="ignore")
-    assert "HYPERSMART_STARTUP_PROFILE=core" in texte
-    assert "superviseur_collecteurs demarrer-tous core" in texte
+    # 2026-08-01 : le lanceur demarre desormais le profil HARVEST (socle CORE + recolte dense),
+    # precede du preflight BLOQUANT (item 6) et suivi de la preuve de vie (item 7).
+    assert "HYPERSMART_STARTUP_PROFILE=harvest" in texte
+    assert "superviseur_collecteurs demarrer-tous harvest" in texte
+    assert "hl_observer.ops.preflight_lanceur" in texte
+    assert "hl_observer.ops.preuve_de_vie" in texte
     assert "HYPERSMART_ENABLE_AUX_IA=0" in texte
     assert "HYPERSMART_ENABLE_AUX_STREAM=1" in texte
     assert SC.COLLECTEURS_CORE == {"allmids-collector", "bbo-collector", "userfills-live"}

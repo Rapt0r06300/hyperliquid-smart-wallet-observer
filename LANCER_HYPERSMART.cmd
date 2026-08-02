@@ -40,7 +40,7 @@ if errorlevel 2 (
 REM ---- PREVOL : registre PID/run_id + dossier logs du lanceur ----
 if not exist "runtime\data" mkdir "runtime\data" >nul 2>&1
 if not exist "runtime\logs\launcher" mkdir "runtime\logs\launcher" >nul 2>&1
-powershell -NoProfile -Command "$o=[ordered]@{ role='launcher_autopilot'; ps_pid=$PID; run_id=([guid]::NewGuid().ToString('N').Substring(0,12)); port=8794; demarre=(Get-Date).ToString('s'); commit=(& git rev-parse --short HEAD 2>$null) }; ($o | ConvertTo-Json -Compress) | Set-Content -Encoding UTF8 (Join-Path '%~dp0' 'runtime\data\launcher_pids.json')" 2>nul
+powershell -NoProfile -Command "$o=[ordered]@{ role='launcher_autopilot'; note='pid_reels_dans_lanceur_pids.json'; run_id=([guid]::NewGuid().ToString('N').Substring(0,12)); port=8794; demarre=(Get-Date).ToString('s'); commit=(& git rev-parse --short HEAD 2>$null) }; ($o | ConvertTo-Json -Compress) | Set-Content -Encoding UTF8 (Join-Path '%~dp0' 'runtime\data\launcher_pids.json')" 2>nul
 REM Le verificateur OOS planifie est strictement opt-in.
 REM Utiliser "LANCER_HYPERSMART.cmd verify-oos install" pour l'activer explicitement.
 
@@ -49,12 +49,15 @@ set "HL_ENV=paper"
 set "HL_ENABLE_MAINNET_EXECUTION=0"
 set "HL_ENABLE_TESTNET_EXECUTION=0"
 set "HYPERSMART_MODE=SIMULATION_ONLY_UNTIL_MANUAL_REVIEW"
-set "HYPERSMART_STARTUP_PROFILE=core"
+set "HYPERSMART_STARTUP_PROFILE=harvest"
 set "HYPERSMART_V12_SQLITE_PATH=%~dp0runtime\data\hypersmart_v12_artifacts.sqlite3"
 rem ANTI-BLOAT: coupe le stockage brut (payloads L2/leaderboard/fills) qui a fait
 rem gonfler la DB a 29 Go puis crasher. Le PnL/ledger n en depend pas. Mettre a 0
 rem seulement si tu veux le replay brut (avec cap manuel).
 set "HYPERSMART_DISABLE_RAW_STORAGE=1"
+rem Item 11 : le brut SQL reste coupe (anti-bloat), mais on ACTIVE un stockage brut FICHIER BORNE
+rem (shards gzip + quota + retention, aucune suppression silencieuse). 10 Go de plafond hot.
+set "HYPERSMART_RAW_STORAGE_QUOTA_GO=10"
 REM REPLAY: enregistre candidates.jsonl + marks.jsonl pour l'A/B replay apres le run.
 REM Ecriture CAPEE (60 Mo marks / 20 Mo candidates, rotation last-N) -> jamais de
 REM re-bloat comme les 29 Go. Sans ce flag, le run 48h ne produit AUCUNE donnee replay.
@@ -338,11 +341,24 @@ REM Fenetre minimisee "HyperSmart Stream" - ferme-la pour stopper le flux temps 
 REM Stream rattache au lanceur principal; pas de fenetre separee.
 set "HYPERSMART_ENABLE_AUX_STREAM=1"
 
+REM === PREFLIGHT BLOQUANT (item 6) — env/deps/disque/dossiers/horloge/endpoints/quotas/schemas/paper.
+REM   NO-GO => le moteur NE demarre PAS. Paper strict, lecture publique HL info uniquement, 0 ordre.
+"%HYPERSMART_PYTHON%" -m hl_observer.ops.preflight_lanceur "%~dp0."
+if errorlevel 1 (
+  echo.
+  echo   [PREFLIGHT] NO-GO : environnement non pret. Le moteur ne demarre pas. Corrige les blocages ci-dessus.
+  echo.
+  pause
+  exit /b 2
+)
+
 REM ARCHIVE REPLAY (2026-07-09, demande Flo): au lieu de perdre les donnees du run precedent,
 REM on les DEPLACE dans runtime\replay\_archive\run_<ts>\ (serveur eteint, avant tout writer).
 REM => le dataset replay s'accumule entre rallumages ; runtime\replay\ reste propre pour le run.
 REM Le replay (merge_replay/include_archive) lit TOUT l'historique. Best-effort, jamais destructif.
-"%HYPERSMART_PYTHON%" -m hl_observer.runtime.replay_recorder --archive-run --base "%~dp0runtime\replay" 1>nul 2>nul
+if not exist "%~dp0runtime\logs" mkdir "%~dp0runtime\logs" >nul 2>&1
+"%HYPERSMART_PYTHON%" -m hl_observer.runtime.replay_recorder --archive-run --base "%~dp0runtime\replay" 1>>"%~dp0runtime\logs\archive_replay.log" 2>&1
+if errorlevel 1 echo   [ATTENTION] Archivage replay: erreur signalee (non masquee) -- voir runtime\logs\archive_replay.log
 
 REM -MaxLeaders eleve = scan TRES large (pool de leaders) ; le gate de qualite (smart money) garde la copie etroite.
 REM === CARRY HISTORIQUE : DESACTIVE / SHADOW (decision Flo 2026-07-23) ===
@@ -383,11 +399,21 @@ REM plus jamais deux carry-feeders en parallele apres un Q, une croix ou un cras
 if not exist "runtime\data" mkdir "runtime\data" >nul 2>&1
 echo %random%-%random%-%date%-%time% > "runtime\data\lanceur_session_marqueur.txt"
 call :demarrer_collecteurs
+REM === Item 8 : une source OBLIGATOIRE (CORE) non demarree BLOQUE le moteur (superviseur -> exit 3).
+if errorlevel 1 (
+  echo.
+  echo   [COLLECTEURS] Une source obligatoire n'a pas demarre. Le moteur ne demarre pas. Voir ci-dessus.
+  echo.
+  pause
+  exit /b 3
+)
 REM Le superviseur enregistre directement les PID et reutilise les instances deja
 REM vivantes. Aucun second passage de detection, aucun demarrage en double.
 ping -n 3 127.0.0.1 >nul 2>&1
-"%HYPERSMART_PYTHON%" -m hl_observer.ops.superviseur_collecteurs status core
-echo   [collecteurs CORE] allMids + BBO + userFills read-only. Recherche/backtests hors runtime.
+"%HYPERSMART_PYTHON%" -m hl_observer.ops.superviseur_collecteurs status harvest
+echo   [collecteurs HARVEST] allMids + BBO(HL+Binance) + userFills + carnet L2 + marks + liq + venues + vaults + backfills.
+REM Item 7 : preuve de vie initiale (informative ; l'UI affiche READY/DEGRADED/DATA_NOT_READY en continu).
+"%HYPERSMART_PYTHON%" -m hl_observer.ops.preuve_de_vie "%~dp0."
 
 powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0tools\start_hypersmart_simulation.ps1" -Port 8794 -IntervalSeconds 15 -MaxLeaders 50 -Interactive
 
@@ -404,9 +430,9 @@ REM #  Le canari test_superviseur_collecteurs compte ces lignes 'start' : NE PAS
 REM #  en ajouter/retirer sans mettre a jour le registre du superviseur.
 REM ############################################################################
 :demarrer_collecteurs
-REM Profil CORE officiel : allMids + BBO + userFills read-only. Le superviseur refuse les
+REM Profil HARVEST officiel (items 1/2) : socle CORE (allMids+BBO+userFills) PLUS la recolte dense
 REM doublons et enregistre lui-meme les PID pour l'arret cible.
-"%HYPERSMART_PYTHON%" -m hl_observer.ops.superviseur_collecteurs demarrer-tous core
+"%HYPERSMART_PYTHON%" -m hl_observer.ops.superviseur_collecteurs demarrer-tous harvest
 exit /b %ERRORLEVEL%
 
 REM ---------------------------------------------------------------------------
@@ -539,6 +565,7 @@ if /I "%SUB%"=="collectors"        goto :cmd_collectors
 if /I "%SUB%"=="collectors-maintenance" goto :cmd_collectors_maintenance
 if /I "%SUB%"=="collectors-research"    goto :cmd_collectors_research
 if /I "%SUB%"=="collectors-all"         goto :cmd_collectors_all
+if /I "%SUB%"=="sante"             goto :cmd_sante
 if /I "%SUB%"=="report"            goto :cmd_report
 if /I "%SUB%"=="test"              goto :cmd_test
 if /I "%SUB%"=="audit"             goto :cmd_audit
@@ -627,8 +654,15 @@ echo.
 echo   ===  STATUT HYPERSMART  ^(lecture seule^)  ===
 if exist "runtime\data\launcher_pids.json" ( echo   Registre lanceur : & type "runtime\data\launcher_pids.json" & echo. ) else ( echo   Pas de registre lanceur. )
 powershell -NoProfile -Command "try { $ok=(Test-NetConnection -ComputerName 127.0.0.1 -Port 8794 -WarningAction SilentlyContinue -InformationLevel Quiet) } catch { $ok=$false }; Write-Host ('  UI 8794 : ' + $(if($ok){'ACTIVE'}else{'inactive'}))"
-"%HYPERSMART_PYTHON%" -m hl_observer.ops.superviseur_collecteurs status core
+"%HYPERSMART_PYTHON%" -m hl_observer.ops.superviseur_collecteurs status harvest
 echo.
+goto :fin
+
+REM -------- SANTE LIVE (tableau dynamique + journal horodate) --------
+:cmd_sante
+echo   Tableau de sante live des collecteurs (Ctrl-C pour quitter).
+echo   Journal append-only : runtime\logs\sante_journal.log
+"%HYPERSMART_PYTHON%" -m hl_observer.ops.moniteur_sante "%~dp0." --intervalle 2
 goto :fin
 
 REM -------- STOP (cible, jamais de kill global) --------

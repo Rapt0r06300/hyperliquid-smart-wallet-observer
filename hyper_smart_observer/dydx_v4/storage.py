@@ -162,6 +162,24 @@ CREATE TABLE IF NOT EXISTS dydx_trades (
     UNIQUE(trade_id, network)
 );
 
+-- Carnets d'ordres (snapshots L2 — item 5 : persister les orderbooks, plus seulement en mémoire)
+CREATE TABLE IF NOT EXISTS dydx_orderbooks (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    market_id TEXT NOT NULL,
+    network TEXT NOT NULL,
+    best_bid REAL,
+    best_ask REAL,
+    spread_bps REAL,
+    bids_json TEXT NOT NULL,
+    asks_json TEXT NOT NULL,
+    n_bids INTEGER DEFAULT 0,
+    n_asks INTEGER DEFAULT 0,
+    received_at_ms INTEGER NOT NULL,
+    raw_json TEXT,
+    UNIQUE(market_id, network, received_at_ms)
+);
+CREATE INDEX IF NOT EXISTS idx_orderbooks_market ON dydx_orderbooks(market_id, received_at_ms);
+
 -- Positions
 CREATE TABLE IF NOT EXISTS dydx_positions (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -493,6 +511,123 @@ class DydxStorage:
                 (address, subaccount_number, self.network),
             ).fetchone()
             return row[0] if row and row[0] else None
+
+    # ----------------------------------------------------------------------- #
+    # Trades publics (dédup par trade_id) · Positions · Subaccounts · Orderbooks
+    #   Item 5 : ces flux étaient normalisés PUIS jetés (aucun writer). On les persiste vraiment.
+    # ----------------------------------------------------------------------- #
+
+    @staticmethod
+    def _val(x: object) -> object:
+        return x.value if hasattr(x, "value") else x
+
+    def insert_trade(self, trade: "NormalizedTrade") -> bool:  # noqa: F821
+        """Insérer un trade public. Retourne True si nouveau, False si dupliqué (UNIQUE trade_id)."""
+        try:
+            with self._conn() as conn:
+                conn.execute(
+                    """
+                    INSERT INTO dydx_trades
+                        (trade_id, market_id, network, side, size, price, trade_type,
+                         created_at_ms, raw_json)
+                    VALUES (?,?,?,?,?,?,?,?,?)
+                    """,
+                    (
+                        trade.trade_id, trade.market_id, self.network, self._val(trade.side),
+                        trade.size, trade.price, getattr(trade, "type", None),
+                        trade.created_at_ms, json.dumps(trade.raw),
+                    ),
+                )
+                return True
+        except sqlite3.IntegrityError:
+            return False
+
+    def get_latest_trade_ms(self, market_id: str) -> Optional[int]:
+        """Dernier trade connu pour un marché (cursor de reprise / détection de trou)."""
+        with self._conn() as conn:
+            row = conn.execute(
+                "SELECT MAX(created_at_ms) FROM dydx_trades WHERE market_id=? AND network=?",
+                (market_id, self.network),
+            ).fetchone()
+            return row[0] if row and row[0] else None
+
+    def upsert_position(self, pos: "NormalizedPosition") -> None:  # noqa: F821
+        """État de position (mutable) : upsert par (position_key, network). position_key dérivé de
+        address/subaccount/market → stable et relançable."""
+        key = "%s/%d/%s" % (pos.account_address, pos.subaccount_number, pos.market_id)
+        with self._conn() as conn:
+            conn.execute(
+                """
+                INSERT INTO dydx_positions
+                    (position_key, account_address, subaccount_number, market_id, network,
+                     side, size, entry_price, mark_price, unrealized_pnl, realized_pnl,
+                     net_funding, leverage, liquidation_price, opened_at_ms, updated_at_ms, raw_json)
+                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                ON CONFLICT(position_key, network) DO UPDATE SET
+                    side=excluded.side, size=excluded.size, entry_price=excluded.entry_price,
+                    mark_price=excluded.mark_price, unrealized_pnl=excluded.unrealized_pnl,
+                    realized_pnl=excluded.realized_pnl, net_funding=excluded.net_funding,
+                    leverage=excluded.leverage, liquidation_price=excluded.liquidation_price,
+                    updated_at_ms=excluded.updated_at_ms, raw_json=excluded.raw_json
+                """,
+                (
+                    key, pos.account_address, pos.subaccount_number, pos.market_id, self.network,
+                    self._val(pos.side), pos.size, pos.entry_price, pos.mark_price, pos.unrealized_pnl,
+                    pos.realized_pnl, pos.net_funding, pos.leverage, pos.liquidation_price,
+                    pos.opened_at_ms, pos.updated_at_ms, json.dumps(pos.raw),
+                ),
+            )
+
+    def upsert_subaccount(self, sub: "NormalizedSubaccount") -> None:  # noqa: F821
+        """État d'un subaccount (equity/collatéral/levier) : upsert par (address, number, network)."""
+        with self._conn() as conn:
+            conn.execute(
+                """
+                INSERT INTO dydx_subaccounts
+                    (account_address, subaccount_number, network, equity, free_collateral,
+                     margin_usage, leverage, updated_at_ms, raw_json)
+                VALUES (?,?,?,?,?,?,?,?,?)
+                ON CONFLICT(account_address, subaccount_number, network) DO UPDATE SET
+                    equity=excluded.equity, free_collateral=excluded.free_collateral,
+                    margin_usage=excluded.margin_usage, leverage=excluded.leverage,
+                    updated_at_ms=excluded.updated_at_ms, raw_json=excluded.raw_json
+                """,
+                (
+                    sub.account_address, sub.subaccount_number, self.network, sub.equity,
+                    sub.free_collateral, sub.margin_usage, sub.leverage, sub.updated_at_ms,
+                    json.dumps(sub.raw),
+                ),
+            )
+
+    def insert_orderbook(self, market_id: str, bids: list, asks: list, *, received_at_ms: int,
+                         raw: Optional[dict] = None) -> bool:
+        """Persister un snapshot de carnet L2. bids/asks = listes [[prix, taille], ...]. Dédup par
+        (market_id, network, received_at_ms). Retourne True si nouveau."""
+        bids = list(bids or [])
+        asks = list(asks or [])
+        best_bid = float(bids[0][0]) if bids and bids[0] else None
+        best_ask = float(asks[0][0]) if asks and asks[0] else None
+        spread_bps = None
+        if best_bid and best_ask and best_bid > 0:
+            spread_bps = (best_ask - best_bid) / ((best_ask + best_bid) / 2.0) * 10_000.0
+        try:
+            with self._conn() as conn:
+                conn.execute(
+                    """
+                    INSERT INTO dydx_orderbooks
+                        (market_id, network, best_bid, best_ask, spread_bps, bids_json, asks_json,
+                         n_bids, n_asks, received_at_ms, raw_json)
+                    VALUES (?,?,?,?,?,?,?,?,?,?,?)
+                    """,
+                    (
+                        market_id, self.network, best_bid, best_ask, spread_bps,
+                        json.dumps(bids), json.dumps(asks), len(bids), len(asks),
+                        int(received_at_ms), json.dumps(raw) if raw is not None else None,
+                    ),
+                )
+                return True
+        except sqlite3.IntegrityError:
+            return False
 
     # ----------------------------------------------------------------------- #
     # Paper trades

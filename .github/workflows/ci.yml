@@ -162,7 +162,12 @@ jobs:
             tests/test_global_observer_pipeline.py `
             tests/test_hypersmart_single_launcher.py `
             tests/test_launcher_unifie.py `
-            tests/test_historical_analysis_launcher.py
+            tests/test_historical_analysis_launcher.py `
+            tests/test_superviseur_profil_harvest.py `
+            tests/test_preflight_lanceur.py `
+            tests/test_preuve_de_vie.py `
+            tests/test_registre_pids.py `
+            tests/test_e2e_lanceur_harvest.py
       - name: Audits de securite (Windows)
         shell: pwsh
         env:
@@ -225,6 +230,20 @@ jobs:
             tests/test_lab_recherche.py \
             tests/test_lab_eta.py \
             tests/test_lab_rapport.py
+      - name: Lanceur HARVEST (preflight bloquant, preuve de vie, registre PID, stockage borne, sante, dYdX, E2E)
+        run: |
+          python -m pytest -q -p no:cacheprovider --junitxml=junit-lanceur.xml \
+            tests/test_superviseur_profil_harvest.py \
+            tests/test_preflight_lanceur.py \
+            tests/test_preuve_de_vie.py \
+            tests/test_registre_pids.py \
+            tests/test_quota_stockage.py \
+            tests/test_stockage_brut_borne.py \
+            tests/test_tableau_sante_collecteurs.py \
+            tests/test_moniteur_sante.py \
+            tests/test_e2e_lanceur_harvest.py \
+            tests/test_collecter_dydx_live.py \
+            tests/dydx_v4/test_persistance_flux_live.py
       - uses: actions/upload-artifact@v4
         if: always()
         with:

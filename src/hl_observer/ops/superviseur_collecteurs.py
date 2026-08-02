@@ -111,13 +111,18 @@ REGISTRE: tuple[dict[str, Any], ...] = (
     {"nom": "lab-microstructure", "script": "tools/collecter_lab_microstructure.py",
      "intervalle_s": 30, "args": (), "limite_minutes": 5.0,
      "heartbeat": "runtime/research_lab/micro_heartbeat.json"},
+    # dYdX v4 LEGACY (read-only) : trades/orderbooks/subaccounts persistés via PiloteFluxDydx.
+    # Sessions bornées (290 s) relancées par le superviseur ; heartbeat canonique.
+    {"nom": "dydx-live", "script": "tools/collecter_dydx_live.py",
+     "intervalle_s": 300, "args": ("--duree-s", "290"), "limite_minutes": 15.0,
+     "heartbeat": "runtime/research_lab/heartbeats/dydx-live.json"},
 )
 
 # Le runtime principal ne doit pas devenir un laboratoire permanent. Ces profils
 # gardent tous les collecteurs disponibles. Le profil essentiel demarre les
 # prix/microstructure et userFills : sans ce dernier, copy-vault ne peut pas
 # observer les transitions leader en temps reel.
-PROFILS_VALIDES = ("core", "maintenance", "research", "all")
+PROFILS_VALIDES = ("core", "maintenance", "research", "harvest", "all")
 COLLECTEURS_CORE = frozenset({
     "allmids-collector",
     "bbo-collector",
@@ -132,6 +137,24 @@ COLLECTEURS_RESEARCH = frozenset(
     for c in REGISTRE
     if c["nom"] not in COLLECTEURS_CORE | COLLECTEURS_MAINTENANCE
 )
+
+# Profil officiel HARVEST : récolte DENSE et durable pour LANCER_HYPERSMART.cmd, distinct de research.
+# Il démarre le socle prix/microstructure/userFills (CORE, REQUIS) PLUS les collecteurs de récolte qui
+# tournent réellement aujourd'hui (carnet L2 batch + Binance depth REST, marks, liquidations, dispersion
+# venues, découverte + scoring de vaults, backfills fills/candles). On n'inclut ici QUE des collecteurs
+# possédant un runner réel : les briques encore BLOCKED_EXTERNAL (node fills global, HF recorder standalone,
+# TWAP standalone, dYdX, Bybit) restent honnêtement hors profil tant qu'un vrai collecteur n'est pas branché.
+_NOMS_REGISTRE = frozenset(c["nom"] for c in REGISTRE)
+_HARVEST_SOUHAITE = frozenset({
+    "allmids-collector", "bbo-collector", "userfills-live",           # CORE (requis)
+    "carnet-collector", "marks-collector", "liq-collector", "venues-collector",
+    "overshoot-collector", "vault-collector", "scorer-vaults",
+    "backfill-fills", "backfill-candles-vaults",
+    "dydx-live",                                                      # dYdX v4 read-only (item 2/5)
+})
+COLLECTEURS_HARVEST = frozenset(n for n in _HARVEST_SOUHAITE if n in _NOMS_REGISTRE)
+# Sources OBLIGATOIRES : leur échec doit empêcher le passage en READY (le CLI sort non-zero).
+COLLECTEURS_REQUIS = COLLECTEURS_CORE
 
 
 def normaliser_profil(profil: str | None, *, defaut: str = "core") -> str:
@@ -159,6 +182,9 @@ def collecteurs_pour_profil(profil: str | None = "core") -> tuple[dict[str, Any]
     profil_normalise = normaliser_profil(profil)
     if profil_normalise == "all":
         return REGISTRE
+    if profil_normalise == "harvest":
+        # union explicite (les noms CORE appartiennent à CORE via profil_collecteur ; on les ré-inclut ici).
+        return tuple(c for c in REGISTRE if c["nom"] in COLLECTEURS_HARVEST)
     return tuple(c for c in REGISTRE if profil_collecteur(c["nom"]) == profil_normalise)
 
 
@@ -649,6 +675,13 @@ def _cli(argv: list[str]) -> int:
             r["run_id"], len(r["pids"]), r["selectionnes"], r["manquants"] or "aucun"), flush=True)
         print("[collecteurs] profil=%s reutilises=%s" % (
             r["profil"], r["reutilises"] or "aucun"), flush=True)
+        # Une source OBLIGATOIRE qui n'a pas démarré doit bloquer le lanceur (sortie non-zero),
+        # pas seulement s'afficher : le moteur ne doit pas tourner au-dessus de collecteurs morts.
+        requis_manquants = [n for n in r["manquants"] if n in COLLECTEURS_REQUIS]
+        if requis_manquants:
+            print("[collecteurs] ECHEC: sources obligatoires non demarrees: %s" % ", ".join(
+                requis_manquants), flush=True)
+            return 3
         return 0
     if cmd == "enregistrer-pids":
         profil = argv[1] if len(argv) > 1 and argv[1] in PROFILS_VALIDES else "all"

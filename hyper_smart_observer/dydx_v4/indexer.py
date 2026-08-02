@@ -34,6 +34,9 @@ class IndexerStats:
     markets_updated: int = 0
     positions_updated: int = 0
     subaccounts_updated: int = 0
+    trades_ingested: int = 0
+    trades_deduplicated: int = 0
+    orderbooks_ingested: int = 0
     errors: int = 0
     last_backfill_ms: int = 0
     last_ws_message_ms: int = 0
@@ -98,6 +101,7 @@ class DydxIndexer:
 
             sub = normalize_subaccount(subaccount_raw)
             if sub:
+                self.storage.upsert_subaccount(sub)          # item 5 : persister (n'était que compté)
                 self.stats.subaccounts_updated += 1
                 logger.debug("backfill_subaccount: %s/%d equity=%.2f", address, subaccount_number, sub.equity)
 
@@ -109,6 +113,7 @@ class DydxIndexer:
                 pos_raw["subaccountNumber"] = subaccount_number
                 pos = normalize_position(pos_raw)
                 if pos:
+                    self.storage.upsert_position(pos)        # item 5 : persister (n'était que compté)
                     self.stats.positions_updated += 1
 
             return True
@@ -224,12 +229,21 @@ class DydxIndexer:
         count = 0
         self.stats.last_ws_message_ms = int(time.time() * 1000)
 
-        if channel == "v4_trades" and msg_type == "channel_data":
+        if channel == "v4_trades":
+            # Item 5 : les trades étaient normalisés PUIS jetés. On les PERSISTE (avec dédup par trade_id).
+            # Le marché n'est pas dans chaque trade mais dans l'id du canal → on l'injecte.
+            market_hint = data.get("id") or data.get("market_id") or data.get("ticker")
             trades_raw = data.get("trades", [])
             for t_raw in trades_raw:
+                if market_hint and isinstance(t_raw, dict) and not t_raw.get("market"):
+                    t_raw["market"] = market_hint
                 trade = normalize_trade(t_raw)
                 if trade:
-                    count += 1
+                    if self.storage.insert_trade(trade):
+                        count += 1
+                        self.stats.trades_ingested += 1
+                    else:
+                        self.stats.trades_deduplicated += 1
 
         elif channel == "v4_markets":
             contents = data.get("markets", {}) or data
@@ -241,19 +255,48 @@ class DydxIndexer:
                         self.storage.upsert_market(market)
                         count += 1
 
+        elif channel == "v4_orderbook":
+            # Item 5 : persister les carnets L2 (plus seulement en mémoire).
+            book = data.get("orderbook", data)
+            bids = book.get("bids", []) if isinstance(book, dict) else []
+            asks = book.get("asks", []) if isinstance(book, dict) else []
+            market_id = book.get("market_id") or book.get("ticker") or data.get("id") or ""
+            if market_id and (bids or asks):
+                if self.storage.insert_orderbook(market_id, bids, asks,
+                                                 received_at_ms=int(time.time() * 1000), raw=data):
+                    count += 1
+                    self.stats.orderbooks_ingested += 1
+
         elif channel == "v4_subaccounts":
-            # Mises à jour fills/positions d'un subaccount
-            fills = data.get("fills", []) or data.get("fill", [])
+            # Mises à jour fills/positions/subaccount. Item 5 : positions et subaccount étaient IGNORÉS.
+            contents = data.get("contents", data) if isinstance(data, dict) else {}
+            src = contents if isinstance(contents, dict) else data
+            fills = src.get("fills", []) or src.get("fill", [])
             if isinstance(fills, dict):
                 fills = [fills]
             for fill_raw in fills:
                 fill = normalize_fill(fill_raw)
                 if fill:
-                    is_new = self.storage.insert_fill(fill)
-                    if is_new:
+                    if self.storage.insert_fill(fill):
                         count += 1
                         self.stats.fills_ingested += 1
                     else:
                         self.stats.fills_deduplicated += 1
+            positions = src.get("positions", []) or src.get("perpetualPositions", [])
+            if isinstance(positions, dict):
+                positions = [positions]
+            for pos_raw in positions:
+                pos = normalize_position(pos_raw)
+                if pos:
+                    self.storage.upsert_position(pos)
+                    count += 1
+                    self.stats.positions_updated += 1
+            sub_raw = src.get("subaccount")
+            if isinstance(sub_raw, dict):
+                sub = normalize_subaccount(sub_raw)
+                if sub:
+                    self.storage.upsert_subaccount(sub)
+                    count += 1
+                    self.stats.subaccounts_updated += 1
 
         return count
