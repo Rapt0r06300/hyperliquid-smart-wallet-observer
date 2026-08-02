@@ -7,7 +7,8 @@ compatible, double-clic `LANCER_HYPERSMART.cmd` -> recolte -> cloture -> double-
 `CREER_ARCHIVE_PORTABLE.cmd` appelle ce module. Il, automatiquement (item 20) :
   1. exige la PREUVE que tous les writers sont arretes (reutilise session_harvest, FAIL-CLOSED) ;
   2. REFUSE de construire s'il reste une session ACTIVE (jamais une demi-session dans l'archive) ;
-  3. checkpoint/TRUNCATE le WAL de chaque SQLite puis relache les fichiers -wal/-shm transitoires ;
+  3. ouvre chaque SQLite source en lecture seule, la copie par l'API Backup vers le staging,
+     puis execute `integrity_check` sur cette copie sans modifier la base source ni son WAL ;
   4. exclut PID, verrous, marqueurs machine, temporaires, .git, venv, bundles ;
   5. conserve toutes les sessions COMPLETE/QUARANTINED choisies (historique, PnL) ;
   6. neutralise tout chemin absolu de build dans les metadonnees (sinon REFUS) ;
@@ -858,8 +859,8 @@ def creer_archive_portable(root: str | Path, cible: str | Path, *, version: str 
     actives = sessions_actives(root)
     if actives:
         raise ArchiveRefuseeError("sessions ACTIVE (a cloturer d'abord): %s" % ", ".join(actives))
-    # 3 : WAL checkpoint.
-    # 4+5 : selection.
+    # 3+4+5 : selection. Les SQLite seront sauvegardees en lecture seule vers
+    # le staging par ``construire_staging`` ; aucune mutation n'est faite ici.
     inclus, exclus = lister_pour_archive(root)
     lfs = pointeurs_lfs_non_materialises(root, inclus)
     if lfs:

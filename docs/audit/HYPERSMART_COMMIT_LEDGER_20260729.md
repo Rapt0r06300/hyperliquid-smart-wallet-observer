@@ -1,5 +1,18 @@
 # HyperSmart Commit Ledger - 2026-07-29
 
+## Finalisation portable - 2026-08-02
+
+| Bloc | SHA | Preuve | Statut |
+|---|---|---|---|
+| Runtime embarque unique | `a5f7d53`, `5b064d3` | Python 3.14.2 sous `tools/python`, 12 223 fichiers, aucun fallback ni chemin externe | DONE |
+| Refus fail-closed et preuves structurees | `3d2b52c`, `6a4317a` | tout echec conserve `RELEASE_FAILED.json`; depot dirty reel -> code non nul, 0 ZIP | DONE |
+| Validation extraite bornee | `059fb66`, `70be73f`, `48f7c9d`, `1049e64`, `9b291c2`, `f06ccc1` | environnement hermetique, basetemp externe, tests bornes, lanceurs et ledger verifies | DONE |
+| Hygiene staging et audit | `09dee3e`, `a1077b9` | repertoires `.portable-*` et `_validation_workspace` exclus; runtime embarque audite separement | DONE |
+| Reproductibilite reelle | HEAD `6a4317a` | 2 x 14 230 fichiers, 216 423 144 octets, SHA identique `7a517d2a3717d7fe75700bb5d01d2a05f89d3fd9bf209d31bc2f454939e75fb3` | DONE |
+| Qualification produit | HEAD `6a4317a` | 8 807 passes, 50 echecs, 8 skips; CI exacte absente | BLOCKED |
+
+Le detail est dans `docs/audit/HYPERSMART_PORTABLE_RELEASE_AUDIT_20260802.md`.
+
 Ce registre associe chaque bloc logique de la roadmap V2 à son commit de code,
 ses tests et sa preuve runtime. Les SHA sont ajoutés immédiatement après le
 commit correspondant; aucun état `DONE` n'est déduit d'un simple flag.
