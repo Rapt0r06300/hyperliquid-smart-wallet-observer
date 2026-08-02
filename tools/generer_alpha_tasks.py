@@ -195,7 +195,11 @@ t("P65", 9, "Final economic acceptance: pas de DONE global sans factory exhausti
   ["P15", "P12", "P41", "P46", "P47"], ["docs/audit/"], "tous prerequis satisfaits ou documentes BLOCKED", "meta", "table finale complete", "TODO")
 
 T.sort(key=lambda x: (x["prio_eco"], x["id"]))
-out_dir = os.environ.get("OUT", "/home/claude/hypersmart/runtime/research")
+# [PORTABILITE item 1] défaut PORTABLE calculé depuis l'emplacement de ce fichier (racine réelle du
+# projet), jamais un chemin absolu machine-spécifique. Surchargable par la variable OUT.
+from pathlib import Path as _Path                                        # noqa: E402
+_racine = _Path(__file__).resolve().parents[1]
+out_dir = os.environ.get("OUT") or str(_racine / "runtime" / "research")
 os.makedirs(out_dir, exist_ok=True)
 with open(os.path.join(out_dir, "alpha_tasks.json"), "w", encoding="utf-8") as f:
     json.dump({"schema": "hypersmart.alpha_tasks.v1", "n_tasks": len(T), "tasks": T}, f, ensure_ascii=False, indent=1)

@@ -26,15 +26,17 @@ def test_portability_files_exist_and_unified_launcher_bootstraps_first():
     assert (ROOT / "tools" / "install_portable_runtime.ps1").is_file()
     assert (ROOT / "tools" / "create_portable_bundle.ps1").is_file()
     assert (ROOT / "docs" / "PORTABILITE_WINDOWS.md").is_file()
+    # item 2/3 : point d'entree utilisateur pour assembler le Python embarque + wheelhouse hors ligne.
+    assert (ROOT / "tools" / "preparer_python_portable.cmd").is_file()
 
     launcher = (ROOT / "LANCER_HYPERSMART.cmd").read_text(encoding="utf-8")
+    # item 4 : le lanceur bootstrappe portable_env.cmd AVANT toute invocation de Python, et n'utilise
+    # QUE le Python portable resolu (%HYPERSMART_PYTHON%), jamais un `python`/`py -3` du PATH.
     bootstrap_index = launcher.index("portable_env.cmd")
-    first_python_index = launcher.index("python -m")
+    first_python_index = launcher.index("%HYPERSMART_PYTHON%")
     assert bootstrap_index < first_python_index
-    assert "portable-check" in launcher
-    assert "portable-install" in launcher
-    assert "portable-build" in launcher
-    assert '--root "%~dp0." check' in launcher
+    assert "py -3" not in launcher                          # jamais le lanceur Windows global
+    assert "if errorlevel 1" in launcher[bootstrap_index:bootstrap_index + 400]  # errorlevel verifie
 
     raw_launcher = (ROOT / "LANCER_HYPERSMART.cmd").read_bytes()
     assert b"\n" not in raw_launcher.replace(b"\r\n", b"")

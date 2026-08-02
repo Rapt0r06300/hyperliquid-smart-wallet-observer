@@ -171,7 +171,11 @@ jobs:
             tests/test_portabilite.py `
             tests/test_archive_portable.py `
             tests/test_creer_archive_cmd.py `
-            tests/test_premier_lancement.py
+            tests/test_premier_lancement.py `
+            tests/test_portabilite_racine.py `
+            tests/test_audit_portabilite.py `
+            tests/test_wheelhouse_lock.py `
+            tests/test_portable_runtime.py
       - name: Audits de securite (Windows)
         shell: pwsh
         env:
@@ -246,13 +250,20 @@ jobs:
             tests/test_lead_lag_paper.py \
             tests/test_lab_eta.py \
             tests/test_lab_rapport.py
-      - name: Portabilite (archive portable auto-verifiee, premier lancement PC neuf, invariants sans chemin machine)
+      - name: Portabilite - audit repo-complet (item 12, gate bloquant)
+        run: |
+          PYTHONPATH=src:tools python -m audit_portabilite
+      - name: Portabilite (archive, premier lancement, racine sans cwd, audit, wheelhouse, runtime portable)
         run: |
           python -m pytest -q -p no:cacheprovider --junitxml=junit-portabilite.xml \
             tests/test_portabilite.py \
             tests/test_archive_portable.py \
             tests/test_creer_archive_cmd.py \
-            tests/test_premier_lancement.py
+            tests/test_premier_lancement.py \
+            tests/test_portabilite_racine.py \
+            tests/test_audit_portabilite.py \
+            tests/test_wheelhouse_lock.py \
+            tests/test_portable_runtime.py
       - name: Lanceur HARVEST (preflight bloquant, preuve de vie, registre PID, stockage borne, sante, dYdX, E2E)
         run: |
           python -m pytest -q -p no:cacheprovider --junitxml=junit-lanceur.xml \
