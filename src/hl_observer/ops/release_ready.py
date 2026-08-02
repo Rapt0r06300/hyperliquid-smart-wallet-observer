@@ -1,156 +1,213 @@
-"""[RELEASE item 14] Verdict UNIQUE `RELEASE_READY=true/false`, fail-closed.
+"""Fail-closed RELEASE_READY verdict for an extracted portable release.
 
-Agrege toutes les portes d'une vraie release portable Windows. RELEASE_READY reste FALSE tant qu'une
-seule porte n'est pas prouvee verte :
-  - Python + DLL + wheels REELLEMENT embarques (tools\\python\\python.exe + python*.dll + wheelhouse
-    verrouille) ;
-  - aucun module/collecteur runtime manquant (ils s'importent tous) ;
-  - manifeste + hashes presents et coherents ;
-  - lock du wheelhouse verifie ;
-  - tests verts (entree fournie par la CI) ;
-  - CI du HEAD verte (entree) ;
-  - test hermetique Windows passe (entree) ;
-  - zero ecriture hors du dossier (entree du test hermetique).
-
-Les portes verifiables ICI (embed, modules, manifeste, lock) sont calculees directement. Les portes qui
-exigent une PREUVE externe (tests, CI, run hermetique Windows) sont des ENTREES qui valent False par
-defaut — donc RELEASE_READY est False sur un checkout Linux sans embed, HONNETEMENT. Pur, 0 reseau.
+No command-line switch can declare a gate successful.  Local gates are
+recomputed from extracted bytes; runtime gates are accepted only from a
+validation evidence file cryptographically bound to the same manifest.
 """
 from __future__ import annotations
 
+import argparse
+import hashlib
+import importlib.util
 import json
 from pathlib import Path
+from typing import Any, Mapping
+
+from hl_observer.ops.archive_portable import NOM_MANIFESTE, SCHEMA_MANIFESTE
+from hl_observer.ops.validation_portable import SCHEMA as VALIDATION_SCHEMA
 
 
-def _gate(nom: str, ok: bool, detail: str) -> dict:
-    return {"gate": nom, "ok": bool(ok), "detail": detail}
+def _gate(name: str, ok: bool, detail: str) -> dict[str, Any]:
+    return {"gate": name, "ok": bool(ok), "detail": detail}
 
 
-def _embed_present(root: Path) -> dict:
-    """Python embarque REELLEMENT present : python.exe + au moins une python*.dll a cote."""
-    for rel in ("tools/python", "portable_runtime/python"):
-        d = root / rel
-        exe = d / "python.exe"
-        if exe.is_file():
-            dlls = list(d.glob("python*.dll"))
-            if dlls:
-                return _gate("python_embarque", True, "%s/python.exe + %d DLL" % (rel, len(dlls)))
-            return _gate("python_embarque", False, "%s/python.exe sans python*.dll" % rel)
-    return _gate("python_embarque", False, "tools/python/python.exe absent (embed non construit)")
+def _load_json(path: Path) -> dict[str, Any]:
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    if not isinstance(payload, dict):
+        raise ValueError("JSON root must be an object")
+    return payload
 
 
-def _wheelhouse_ok(root: Path) -> dict:
-    wh = root / "tools" / "wheelhouse"
-    lock = wh / "WHEELHOUSE_LOCK.json"
-    if not wh.is_dir() or not list(wh.glob("*.whl")):
-        return _gate("wheelhouse", False, "wheelhouse absent ou vide")
-    if not lock.is_file():
-        return _gate("wheelhouse", False, "WHEELHOUSE_LOCK.json absent")
-    verifier_verrou = _charger_verifier_verrou(root)
-    if verifier_verrou is None:
-        return _gate("wheelhouse", False, "wheelhouse_lock introuvable")
-    try:
-        res = verifier_verrou(wh, lock)
-    except Exception as exc:  # noqa: BLE001
-        return _gate("wheelhouse", False, "verrou wheelhouse illisible : %s" % exc)
-    return _gate("wheelhouse", bool(res.get("ok")),
-                 "verrou %s (%d verifiees)" % ("OK" if res.get("ok") else "DIVERGENT", res.get("verifiees", 0)))
+def _sha256(path: Path) -> tuple[str, int]:
+    digest = hashlib.sha256()
+    size = 0
+    with path.open("rb") as stream:
+        for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+            digest.update(chunk)
+            size += len(chunk)
+    return digest.hexdigest(), size
 
 
-def _charger_verifier_verrou(root: Path):
-    """tools/ est normalement sur PYTHONPATH ; sinon on charge le module depuis le fichier."""
-    try:
-        from wheelhouse_lock import verifier_verrou  # type: ignore
-        return verifier_verrou
-    except Exception:  # noqa: BLE001
-        pass
-    p = root / "tools" / "wheelhouse_lock.py"
-    if not p.is_file():
+def _manifest_fingerprint(files: Mapping[str, Mapping[str, Any]]) -> str:
+    digest = hashlib.sha256()
+    for relative in sorted(files):
+        digest.update(relative.encode("utf-8"))
+        digest.update(str(files[relative].get("sha256", "")).encode("utf-8"))
+    return digest.hexdigest()
+
+
+def _embedded_runtime(root: Path) -> dict[str, Any]:
+    directory = root / "tools" / "python"
+    exe = directory / "python.exe"
+    dlls = sorted(directory.glob("python*.dll"))
+    pyd = sorted(directory.rglob("*.pyd"))
+    site_packages = directory / "Lib" / "site-packages"
+    certs = sorted(
+        path for path in directory.rglob("*.pem")
+        if "PRIVATE KEY" not in path.read_text(encoding="utf-8", errors="ignore")
+    )
+    ok = exe.is_file() and bool(dlls) and bool(pyd) and site_packages.is_dir() and bool(certs)
+    return _gate(
+        "python_embarque", ok,
+        "python.exe=%s dll=%d pyd=%d site-packages=%s certificats=%d"
+        % (exe.is_file(), len(dlls), len(pyd), site_packages.is_dir(), len(certs)),
+    )
+
+
+def _load_wheel_verifier(root: Path):
+    path = root / "tools" / "wheelhouse_lock.py"
+    if not path.is_file():
         return None
-    try:
-        import importlib.util
-        spec = importlib.util.spec_from_file_location("whl_lock", str(p))
-        mod = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(mod)  # type: ignore
-        return mod.verifier_verrou
-    except Exception:  # noqa: BLE001
+    spec = importlib.util.spec_from_file_location("hypersmart_extracted_wheelhouse_lock", path)
+    if spec is None or spec.loader is None:
         return None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module.verifier_verrou
 
 
-def _manifeste_ok(root: Path) -> dict:
-    p = root / "PORTABLE_MANIFEST.json"
-    if not p.is_file():
-        return _gate("manifeste", False, "PORTABLE_MANIFEST.json absent")
+def _wheelhouse(root: Path) -> dict[str, Any]:
+    directory = root / "tools" / "wheelhouse"
+    lock = directory / "WHEELHOUSE_LOCK.json"
+    requirements = root / "requirements-portable.txt"
+    verifier = _load_wheel_verifier(root)
+    if verifier is None or not lock.is_file() or not requirements.is_file():
+        return _gate("wheelhouse_exact", False, "verifier, lock ou requirements absent")
     try:
-        m = json.loads(p.read_text(encoding="utf-8"))
+        result = verifier(directory, lock, requirements)
+    except Exception as exc:  # noqa: BLE001 - corrupt extracted release is a failed gate
+        return _gate("wheelhouse_exact", False, "verification impossible: %s" % exc)
+    return _gate(
+        "wheelhouse_exact", bool(result.get("ok")),
+        "%d wheels verifiees; manquantes=%d divergentes=%d surplus=%d"
+        % (
+            result.get("verifiees", 0), len(result.get("manquantes", [])),
+            len(result.get("divergentes", [])), len(result.get("surplus", [])),
+        ),
+    )
+
+
+def _manifest(root: Path) -> tuple[dict[str, Any], dict[str, Any]]:
+    path = root / NOM_MANIFESTE
+    try:
+        manifest = _load_json(path)
     except (OSError, ValueError) as exc:
-        return _gate("manifeste", False, "manifeste illisible : %s" % exc)
-    a_hashes = isinstance(m.get("fichiers"), dict) and len(m["fichiers"]) > 0
-    a_empreinte = bool(m.get("empreinte_globale"))
-    return _gate("manifeste", a_hashes and a_empreinte,
-                 "hashes=%s empreinte=%s" % (a_hashes, a_empreinte))
+        return {}, _gate("manifeste_complet", False, "manifest unreadable: %s" % exc)
+    files = manifest.get("fichiers")
+    if manifest.get("schema") != SCHEMA_MANIFESTE or not isinstance(files, dict) or not files:
+        return manifest, _gate("manifeste_complet", False, "schema/files invalid")
+    missing: list[str] = []
+    divergent: list[str] = []
+    for relative, metadata in files.items():
+        candidate = root / relative
+        if not candidate.is_file():
+            missing.append(relative)
+            continue
+        digest, size = _sha256(candidate)
+        if digest != metadata.get("sha256") or size != metadata.get("taille"):
+            divergent.append(relative)
+    expected_fingerprint = _manifest_fingerprint(files)
+    fingerprint_ok = expected_fingerprint == manifest.get("empreinte_globale")
+    ok = not missing and not divergent and fingerprint_ok
+    return manifest, _gate(
+        "manifeste_complet", ok,
+        "files=%d missing=%d divergent=%d fingerprint=%s"
+        % (len(files), len(missing), len(divergent), fingerprint_ok),
+    )
 
 
-def _modules_ok(root: Path, importateur=None) -> dict:
+def _evidence(path: str | Path | None) -> tuple[dict[str, Any], str]:
+    if not path:
+        return {}, "validation evidence absent"
     try:
-        from hl_observer.ops.premier_lancement import verifier_modules_runtime
-        r = verifier_modules_runtime(importateur=importateur)
-        return _gate("modules_runtime", r["statut"] == "OK", r["detail"])
-    except Exception as exc:  # noqa: BLE001
-        return _gate("modules_runtime", False, "verif modules impossible : %s" % exc)
+        payload = _load_json(Path(path))
+    except (OSError, ValueError) as exc:
+        return {}, "validation evidence unreadable: %s" % exc
+    if payload.get("schema") != VALIDATION_SCHEMA:
+        return {}, "validation evidence schema invalid"
+    return payload, "validation evidence loaded"
 
 
-def evaluer_release(root: str | Path, *, tests_verts: bool = False, ci_verte: bool = False,
-                    hermetique_ok: bool = False, aucune_ecriture_externe: bool = False,
-                    importateur=None) -> dict:
-    """Verdict unique. RELEASE_READY = ET logique de toutes les portes. Fail-closed : les preuves
-    externes (tests/CI/hermetique/ecritures) valent False par defaut."""
-    root = Path(root)
+def _check_from_evidence(evidence: Mapping[str, Any], key: str, gate_name: str | None = None) -> dict:
+    item = evidence.get("checks", {}).get(key, {}) if evidence else {}
+    detail = item.get("detail") or item.get("stderr_tail") or item.get("stdout_tail") or "proof absent"
+    return _gate(gate_name or key, bool(item.get("ok")), str(detail)[-2000:])
+
+
+def evaluer_release(root: str | Path, *, preuve: str | Path | None = None) -> dict[str, Any]:
+    """Evaluate extracted bytes and bound evidence; every missing gate fails."""
+    root = Path(root).resolve()
+    manifest, manifest_gate = _manifest(root)
+    evidence, evidence_detail = _evidence(preuve)
+    binding_ok = bool(
+        manifest
+        and evidence
+        and evidence.get("git_sha") == manifest.get("git_sha")
+        and evidence.get("manifest_fingerprint") == manifest.get("empreinte_globale")
+        and evidence.get("paper_read_only") is True
+        and evidence.get("real_execution") is False
+    )
     gates = [
-        _embed_present(root),
-        _wheelhouse_ok(root),
-        _manifeste_ok(root),
-        _modules_ok(root, importateur=importateur),
-        _gate("tests_verts", bool(tests_verts), "fourni par la CI"),
-        _gate("ci_head_verte", bool(ci_verte), "fourni par la CI"),
-        _gate("test_hermetique_windows", bool(hermetique_ok), "run archive hors ligne sur Windows propre"),
-        _gate("zero_ecriture_externe", bool(aucune_ecriture_externe), "prouve par le test hermetique"),
+        _embedded_runtime(root),
+        _wheelhouse(root),
+        manifest_gate,
+        _gate("preuve_liee_archive", binding_ok, evidence_detail),
+        _check_from_evidence(evidence, "modules_collecteurs"),
+        _check_from_evidence(evidence, "tests_archive_extraite"),
+        _check_from_evidence(evidence, "audits_paper_only"),
+        _check_from_evidence(evidence, "lanceur_hypersmart"),
+        _check_from_evidence(evidence, "analyseur_backtests"),
+        _check_from_evidence(evidence, "test_hermetique_windows"),
+        _check_from_evidence(evidence, "zero_ecriture_externe"),
+        _check_from_evidence(evidence, "zero_processus_orphelin"),
+        _check_from_evidence(evidence, "smoke_reseau_readonly"),
+        _check_from_evidence(evidence, "build_reproductible"),
+        _check_from_evidence(evidence, "ci_head_verte"),
     ]
-    manquants = [g["gate"] for g in gates if not g["ok"]]
-    return {"RELEASE_READY": not manquants, "manquants": manquants, "gates": gates}
+    missing = [gate["gate"] for gate in gates if not gate["ok"]]
+    return {
+        "RELEASE_READY": not missing,
+        "manquants": missing,
+        "gates": gates,
+        "git_sha": manifest.get("git_sha", ""),
+        "manifest_fingerprint": manifest.get("empreinte_globale", ""),
+    }
 
 
-def formater(verdict: dict) -> str:
-    lignes = ["RELEASE_READY = %s" % ("true" if verdict["RELEASE_READY"] else "false")]
-    for g in verdict["gates"]:
-        lignes.append("  [%s] %-26s %s" % ("OK" if g["ok"] else "  ", g["gate"], g["detail"]))
+def formater(verdict: Mapping[str, Any]) -> str:
+    lines = ["RELEASE_READY = %s" % ("true" if verdict["RELEASE_READY"] else "false")]
+    for gate in verdict["gates"]:
+        lines.append("  [%s] %-28s %s" % (
+            "OK" if gate["ok"] else "  ", gate["gate"], gate["detail"],
+        ))
     if verdict["manquants"]:
-        lignes.append("  -> bloque par : %s" % ", ".join(verdict["manquants"]))
-    return "\n".join(lignes)
+        lines.append("  -> bloque par : %s" % ", ".join(verdict["manquants"]))
+    return "\n".join(lines)
 
 
 def main(argv: list[str] | None = None) -> int:
-    import argparse
-    from hl_observer.portabilite import racine_projet
-    ap = argparse.ArgumentParser(prog="release_ready",
-                                 description="Verdict unique RELEASE_READY (item 14), fail-closed.")
-    ap.add_argument("--racine", default=None)
-    ap.add_argument("--tests-verts", action="store_true")
-    ap.add_argument("--ci-verte", action="store_true")
-    ap.add_argument("--hermetique-ok", action="store_true")
-    ap.add_argument("--aucune-ecriture-externe", action="store_true")
-    ap.add_argument("--json", action="store_true")
-    args = ap.parse_args(argv)
-    racine = Path(args.racine) if args.racine else racine_projet(Path(__file__))
-    v = evaluer_release(racine, tests_verts=args.tests_verts, ci_verte=args.ci_verte,
-                        hermetique_ok=args.hermetique_ok,
-                        aucune_ecriture_externe=args.aucune_ecriture_externe)
-    print(json.dumps(v, ensure_ascii=False, indent=2) if args.json else formater(v))
-    return 0 if v["RELEASE_READY"] else 1
+    parser = argparse.ArgumentParser(description="Evidence-driven RELEASE_READY verdict")
+    parser.add_argument("--racine", default=".", help="extracted release root")
+    parser.add_argument("--preuve", default="", help="PORTABLE_VALIDATION.json")
+    parser.add_argument("--json", action="store_true")
+    args = parser.parse_args(argv)
+    verdict = evaluer_release(args.racine, preuve=args.preuve or None)
+    print(json.dumps(verdict, ensure_ascii=False, indent=2) if args.json else formater(verdict))
+    return 0 if verdict["RELEASE_READY"] else 1
 
 
 __all__ = ["evaluer_release", "formater", "main"]
 
 
-if __name__ == "__main__":                                # pragma: no cover
+if __name__ == "__main__":  # pragma: no cover
     raise SystemExit(main())
