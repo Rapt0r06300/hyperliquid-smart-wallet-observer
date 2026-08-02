@@ -32,6 +32,12 @@ NETWORK_ENDPOINTS = (
     ("binance", "GET", "https://api.binance.com/api/v3/time", None),
     ("dydx", "GET", "https://indexer.dydx.trade/v4/time", None),
 )
+FATAL_OUTPUT_MARKERS = (
+    "fatal python error",
+    "failed to import encodings module",
+    "modulenotfounderror:",
+    "traceback (most recent call last):",
+)
 
 
 def _sha256(path: Path) -> tuple[str, int]:
@@ -92,7 +98,16 @@ def _hermetic_environment(root: Path, guard_dir: Path) -> dict[str, str]:
     return env
 
 
-def _install_sitecustomize(guard_dir: Path) -> None:
+def _install_sitecustomize(root: Path, guard_dir: Path) -> dict[str, Any]:
+    """Enable the audit hook in every extracted Python child process.
+
+    The shipped interpreter deliberately keeps ``import site`` disabled in its
+    ``._pth`` file so a normal portable run can never absorb a machine user
+    site.  Validation works on a disposable extracted copy: it enables
+    ``site`` there only, with ``PYTHONNOUSERSITE=1``, and installs a local
+    ``sitecustomize``.  Descendant Python processes therefore inherit the
+    network/write guard without changing one byte of the release archive.
+    """
     guard_dir.mkdir(parents=True, exist_ok=True)
     (guard_dir / "sitecustomize.py").write_text(
         "from hl_observer.ops.portable_audit_guard import install_from_environment\n"
@@ -100,6 +115,28 @@ def _install_sitecustomize(guard_dir: Path) -> None:
         encoding="utf-8",
         newline="\n",
     )
+    python_dir = root / "tools" / "python"
+    pth_files = sorted(python_dir.glob("python*._pth"))
+    if len(pth_files) != 1:
+        raise RuntimeError(
+            "one embedded python*._pth is required for the hermetic audit bootstrap"
+        )
+    pth = pth_files[0]
+    lines = [
+        line for line in pth.read_text(encoding="utf-8-sig").splitlines()
+        if line.strip().casefold() != "import site"
+    ]
+    if not any(line.strip().casefold() == "lib\\site-packages" for line in lines):
+        raise RuntimeError("embedded _pth does not expose Lib\\site-packages")
+    lines.append("import site")
+    pth.write_text("\n".join(lines) + "\n", encoding="utf-8", newline="\n")
+    return {
+        "ok": True,
+        "pth": pth.relative_to(root).as_posix(),
+        "sitecustomize": (guard_dir / "sitecustomize.py").relative_to(root).as_posix(),
+        "archive_modified": False,
+        "extracted_copy_only": True,
+    }
 
 
 def _run(
@@ -125,11 +162,15 @@ def _run(
         stdout = (exc.stdout or "") if isinstance(exc.stdout, str) else ""
         stderr = (exc.stderr or "") if isinstance(exc.stderr, str) else ""
         timed_out = True
+    diagnostic = "\n".join((stdout, stderr)).casefold()
+    fatal_markers = [marker for marker in FATAL_OUTPUT_MARKERS if marker in diagnostic]
     return {
         "name": name,
-        "ok": code == 0,
+        "ok": code == 0 and not fatal_markers,
         "returncode": code,
         "timed_out": timed_out,
+        "fatal_output_detected": bool(fatal_markers),
+        "fatal_output_markers": fatal_markers,
         "duration_seconds": round(time.monotonic() - started, 3),
         "command": list(command),
         "stdout_tail": stdout[-12000:],
@@ -290,13 +331,33 @@ def valider_archive_portable(
         validation_dir = primary / "runtime" / "portable-validation"
         guard_dir = primary / "tools" / "python" / "Lib" / "site-packages"
         validation_dir.mkdir(parents=True, exist_ok=True)
-        _install_sitecustomize(guard_dir)
+        audit_bootstrap = _install_sitecustomize(primary, guard_dir)
         env = _hermetic_environment(primary, guard_dir)
         python = primary / "tools" / "python" / "python.exe"
         if not python.is_file():
             raise RuntimeError("embedded tools/python/python.exe missing after extraction")
         process_scanner_available = _process_scanner_available()
         before = _processes_for_root(primary)
+        forbidden_probe = parent / "portable-validation-forbidden-write.txt"
+        forbidden_probe.unlink(missing_ok=True)
+        guard_probe = (
+            "from pathlib import Path\n"
+            f"target=Path({str(forbidden_probe)!r})\n"
+            "try:\n"
+            "  target.write_text('forbidden', encoding='utf-8')\n"
+            "except PermissionError:\n"
+            "  print('PORTABLE_AUDIT_GUARD_OK')\n"
+            "  raise SystemExit(0)\n"
+            "raise SystemExit(91)\n"
+        )
+        commands.append(_run(
+            "audit_guard", [str(python), "-c", guard_probe],
+            cwd=primary, env=env, timeout=60,
+        ))
+        if forbidden_probe.exists():
+            forbidden_probe.unlink(missing_ok=True)
+            commands[-1]["ok"] = False
+            commands[-1]["external_probe_written"] = True
         commands.append(_run(
             "portable_runtime", [str(python), "tools/portable_runtime.py", "--root", str(primary),
                                  "check", "--require-embedded", "--json"],
@@ -351,6 +412,8 @@ def valider_archive_portable(
         )
         checks = {
             "hashes_extraits": {"ok": all(row["ok"] for row in extractions), "runs": extractions},
+            "audit_bootstrap": audit_bootstrap,
+            "audit_guard_actif": next(row for row in commands if row["name"] == "audit_guard"),
             "runtime_python": next(row for row in commands if row["name"] == "portable_runtime"),
             "wheelhouse_exact": next(row for row in commands if row["name"] == "wheelhouse_lock"),
             "modules_collecteurs": next(row for row in commands if row["name"] == "imports"),

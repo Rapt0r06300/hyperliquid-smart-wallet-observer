@@ -78,9 +78,47 @@ def test_audit_guard_is_inherited_and_blocks_external_write(tmp_path):
     assert log.is_file() and "open" in log.read_text(encoding="utf-8")
 
 
+def test_run_rejects_fatal_python_output_even_with_zero_exit(tmp_path):
+    result = VP._run(
+        "masked-fatal",
+        [sys.executable, "-c", "print('Fatal Python error: init_fs_encoding')"],
+        cwd=tmp_path,
+        env=os.environ.copy(),
+        timeout=30,
+    )
+    assert result["returncode"] == 0
+    assert result["ok"] is False
+    assert result["fatal_output_detected"] is True
+    assert "fatal python error" in result["fatal_output_markers"]
+
+
+def test_extracted_audit_bootstrap_is_local_and_enables_site(tmp_path):
+    root = tmp_path / "release"
+    python_dir = root / "tools" / "python"
+    guard_dir = python_dir / "Lib" / "site-packages"
+    python_dir.mkdir(parents=True)
+    pth = python_dir / "python314._pth"
+    pth.write_text(
+        "python314.zip\n.\nLib\\site-packages\n..\\..\\src\n",
+        encoding="utf-8",
+    )
+
+    evidence = VP._install_sitecustomize(root, guard_dir)
+
+    assert evidence["ok"] is True
+    assert evidence["extracted_copy_only"] is True
+    assert pth.read_text(encoding="utf-8").splitlines()[-1] == "import site"
+    assert "install_from_environment" in (guard_dir / "sitecustomize.py").read_text(
+        encoding="utf-8"
+    )
+
+
 def _portable_fixture(path: Path) -> dict:
     files = {
         "tools/python/python.exe": b"MZ",
+        "tools/python/python314._pth": (
+            b"python314.zip\n.\nLib\\site-packages\n..\\..\\src\n"
+        ),
         "src/hl_observer/__init__.py": b"",
     }
     manifest_files = {
