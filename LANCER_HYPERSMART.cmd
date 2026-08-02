@@ -45,6 +45,18 @@ if errorlevel 2 (
   echo.
   goto :fin
 )
+REM === ITEM 11 : VERROU d'instance ATOMIQUE (le seul controle du port ne suffit PAS pendant le warmup,
+REM   avant que l'UI ne lie 8794). Deux double-clics simultanes ne lancent JAMAIS deux recoltes.
+if not exist "runtime\data" mkdir "runtime\data" >nul 2>&1
+"%HYPERSMART_PYTHON%" -m hl_observer.ops.verrou_lanceur acquerir "%~dp0."
+if errorlevel 1 (
+  echo.
+  echo   HyperSmart demarre DEJA ^(warmup en cours, verrou d'instance present^). Un seul lancement a la fois.
+  echo   Pour redemarrer proprement : LANCER_HYPERSMART.cmd restart
+  echo.
+  set "RC=3"
+  goto :fin
+)
 REM ---- PREVOL : registre PID/run_id + dossier logs du lanceur ----
 if not exist "runtime\data" mkdir "runtime\data" >nul 2>&1
 if not exist "runtime\logs\launcher" mkdir "runtime\logs\launcher" >nul 2>&1
@@ -733,6 +745,8 @@ REM   passe COMPLETE que si writers reellement arretes + checksums OK + artefact
 REM   sinon QUARANTINED. Un collecteur orphelin encore vivant => QUARANTINED (jamais un faux COMPLETE).
 "%HYPERSMART_PYTHON%" -m hl_observer.ops.session_harvest cloturer "%~dp0."
 set "RC_CLO=%ERRORLEVEL%"
+REM item 11 : libere le verrou d'instance (le lanceur est autoritaire sur son cycle de vie).
+"%HYPERSMART_PYTHON%" -m hl_observer.ops.verrou_lanceur liberer "%~dp0." >nul 2>&1
 REM item 9 : PREMIER code non nul (superviseur puis cloture). Jamais un exit /b 0 systematique.
 set "RC_STOP=0"
 if not "%RC_SUP%"=="0" ( set "RC_STOP=%RC_SUP%" ) else ( if not "%RC_CLO%"=="0" set "RC_STOP=%RC_CLO%" )
