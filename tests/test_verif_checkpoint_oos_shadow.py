@@ -67,6 +67,9 @@ def _jeu_complet():
 
 def test_pipeline_complet_forward_embargo_oneshot(tmp_path, monkeypatch):
     monkeypatch.setenv("USERPROFILE", str(tmp_path)); monkeypatch.setenv("HOME", str(tmp_path))
+    # Never open a real system-modal MessageBox during an automated Windows
+    # run.  The durable alert files and one-shot lock remain exercised below.
+    monkeypatch.setattr(V, "_fenetre_et_son", lambda *_args, **_kwargs: "affichee")
     repo = tmp_path / "repo"                                          # racine isolée -> Bureau = repo.parent = tmp_path
     tape, led, ids_A, ids_B = _jeu_complet()
     _ecrire(repo, tape, led)
@@ -105,6 +108,7 @@ def test_pipeline_complet_forward_embargo_oneshot(tmp_path, monkeypatch):
 
 def test_test_notification_ne_cree_ni_sentinelle_ni_compteur(tmp_path, monkeypatch):
     monkeypatch.setenv("USERPROFILE", str(tmp_path)); monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setattr(V, "_fenetre_et_son", lambda *_args, **_kwargs: "affichee")
     etat = V.tester_notification()                                  # affichage seul (hors Windows -> 'non_windows')
     assert etat in ("non_windows", "affichee", "erreur")            # ne casse jamais
     # AUCUN fichier créé : ni sentinelle Bureau, ni sortie, ni verrou, ni status
