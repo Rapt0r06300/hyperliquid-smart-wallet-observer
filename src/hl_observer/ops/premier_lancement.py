@@ -242,6 +242,99 @@ def verifier_manifeste(root: str | Path) -> dict:
     return _res("manifeste", INFO, "aucun manifeste portable (dossier non encore prepare)")
 
 
+# ── item 4 : deps tierces REELLES + modules runtime + arch des wheels + certificats TLS ────────
+# CORE = indispensables a l'UI/API, aux collecteurs et aux donnees. OPTIONNELLES = recherche (l'analyse
+# tourne sans, mais on le SIGNALE honnêtement). Absente en CORE = ECHEC ; en optionnelle = AVERT.
+DEPS_CORE = ("fastapi", "httpx", "pydantic", "sqlalchemy", "uvicorn", "websocket", "websockets",
+             "yaml", "psutil", "rich", "requests", "numpy", "scipy", "pandas")
+DEPS_OPTIONNELLES = ("aiohttp", "lz4", "optuna", "cmaes")
+# Modules runtime REELLEMENT utilises (UI/moteur/collecteurs/analyse) — prouve que le paquet se charge.
+MODULES_RUNTIME = ("hl_observer.ops.session_catalog", "hl_observer.ops.session_harvest",
+                   "hl_observer.ops.analyser_session", "hl_observer.ops.archive_portable",
+                   "hl_observer.ops.lab_flux", "hl_observer.normalization.market_events",
+                   "hl_observer.collection.tick_dataset", "hl_observer.market_truth.pipeline",
+                   "hl_observer.paper_trading", "hl_observer.edge.edge_calculator")
+
+
+def verifier_deps_tierces(*, core: tuple[str, ...] | None = None,
+                          optionnelles: tuple[str, ...] | None = None, importateur=None) -> dict:
+    """BLOQUANT sur les deps CORE (fastapi/numpy/...). Les optionnelles manquantes = AVERT (recherche
+    degradee, honnete). Importe REELLEMENT chaque paquet — pas seulement la stdlib (item 4)."""
+    import importlib
+    imp = importateur or importlib.import_module
+    core = core if core is not None else DEPS_CORE
+    opt = optionnelles if optionnelles is not None else DEPS_OPTIONNELLES
+    manque_core = [m for m in core if not _importe(imp, m)]
+    manque_opt = [m for m in opt if not _importe(imp, m)]
+    if manque_core:
+        return _res("deps_tierces", ECHEC, "deps CORE absentes : %s" % ", ".join(manque_core))
+    if manque_opt:
+        return _res("deps_tierces", AVERT, "deps recherche absentes (analyse OK) : %s" % ", ".join(manque_opt))
+    return _res("deps_tierces", OK, "%d deps CORE + %d optionnelles importees" % (len(core), len(opt)))
+
+
+def verifier_modules_runtime(*, modules: tuple[str, ...] | None = None, importateur=None) -> dict:
+    """BLOQUANT : les modules runtime reellement utilises doivent s'importer (le paquet se charge)."""
+    import importlib
+    imp = importateur or importlib.import_module
+    mods = modules if modules is not None else MODULES_RUNTIME
+    manque = [m for m in mods if not _importe(imp, m)]
+    if manque:
+        return _res("modules_runtime", ECHEC, "modules runtime non importables : %s" % ", ".join(manque))
+    return _res("modules_runtime", OK, "%d modules runtime importes" % len(mods))
+
+
+def _importe(imp, nom: str) -> bool:
+    try:
+        imp(nom)
+        return True
+    except Exception:  # noqa: BLE001
+        return False
+
+
+def verifier_wheels_arch(root: str | Path, *, arch: str = "win_amd64", pytag: str = "cp311") -> dict:
+    """item 4 : dans le wheelhouse, chaque roue doit etre soit pure (`*-none-any.whl`) soit de la bonne
+    plateforme (`*win_amd64*`). Une roue d'une autre arch/ABI = INCOMPATIBLE -> ECHEC. Absent = INFO."""
+    wh = Path(root) / "tools" / "wheelhouse"
+    if not wh.is_dir():
+        return _res("wheels_arch", INFO, "pas de wheelhouse (dossier non encore prepare)")
+    roues = list(wh.glob("*.whl"))
+    if not roues:
+        return _res("wheels_arch", INFO, "wheelhouse vide")
+    incompatibles = []
+    for w in roues:
+        bas = w.name.lower()
+        if bas.endswith("-none-any.whl"):
+            continue                                       # pure python : compatible partout
+        if arch in bas:
+            continue                                       # bonne plateforme
+        incompatibles.append(w.name)
+    if incompatibles:
+        return _res("wheels_arch", ECHEC, "roues d'arch incompatible (%s attendu) : %s"
+                    % (arch, ", ".join(incompatibles[:5])))
+    return _res("wheels_arch", OK, "%d roue(s) toutes compatibles %s" % (len(roues), arch))
+
+
+def verifier_certificats_tls() -> dict:
+    """AVERT si aucune autorite de certification n'est chargeable (collecte HTTPS impossible). L'analyse
+    hors-ligne n'en a pas besoin -> jamais bloquant."""
+    import ssl
+    try:
+        ctx = ssl.create_default_context()
+        n = len(ctx.get_ca_certs())
+    except Exception as exc:  # noqa: BLE001
+        return _res("tls_ca", AVERT, "contexte TLS indisponible : %s" % exc)
+    if n <= 0:
+        try:
+            import certifi  # type: ignore
+            if Path(certifi.where()).is_file():
+                return _res("tls_ca", OK, "CA via certifi")
+        except Exception:  # noqa: BLE001
+            pass
+        return _res("tls_ca", AVERT, "aucune autorite de certification chargee (collecte HTTPS a verifier)")
+    return _res("tls_ca", OK, "%d autorites de certification chargees" % n)
+
+
 # ── ACTION : regeneration de l'identite machine ───────────────────────────────────────────────
 def regenerer_identite(root: str | Path, *, generateur: Callable[[], str] | None = None) -> dict:
     """item 21 : purge l'identite machine-specifique qu'une archive copiee aurait pu conserver
@@ -329,8 +422,12 @@ def verifier_premier_lancement(root: str | Path, *, os_info: dict | None = None,
         verifier_horloge(maintenant_ms=maintenant_ms),
         verifier_port(sonde=sonde_port),
         verifier_reseau_tls(sonde=sonde_reseau),
-        verifier_imports(importateur=importateur_imports),     # item 10 (BLOQUANT)
+        verifier_imports(importateur=importateur_imports),     # item 10 (stdlib essentiels, BLOQUANT)
+        verifier_deps_tierces(importateur=importateur_imports),  # item 4 (deps CORE reelles, BLOQUANT)
+        verifier_modules_runtime(importateur=importateur_imports),  # item 4 (modules runtime, BLOQUANT)
         verifier_dll(root, systeme=oi.get("systeme"), dossier_python=dossier_python),  # item 10
+        verifier_wheels_arch(root),                            # item 4 (arch des wheels)
+        verifier_certificats_tls(),                            # item 4 (CA TLS)
         verifier_manifeste(root),                              # item 10
         verifier_aucune_cle(root),
         verifier_sessions_preservees(root),
@@ -372,9 +469,11 @@ def main(argv: list[str] | None = None) -> int:
 
 
 __all__ = ["OK", "INFO", "AVERT", "ECHEC", "PORT_UI", "MACHINE_ID_RELPATH", "CRITIQUES_STDLIB",
+           "DEPS_CORE", "DEPS_OPTIONNELLES", "MODULES_RUNTIME",
            "verifier_os_arch", "verifier_droits_ecriture", "verifier_espace_disque",
            "verifier_chemin_espaces_accents", "verifier_horloge", "verifier_port", "verifier_reseau_tls",
-           "verifier_imports", "verifier_dll", "verifier_manifeste", "verifier_aucune_cle",
+           "verifier_imports", "verifier_deps_tierces", "verifier_modules_runtime", "verifier_dll",
+           "verifier_wheels_arch", "verifier_certificats_tls", "verifier_manifeste", "verifier_aucune_cle",
            "verifier_sessions_preservees", "regenerer_identite", "verifier_premier_lancement",
            "formater", "main"]
 

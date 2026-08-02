@@ -131,6 +131,61 @@ def test_regen_purge_caches_compiles_et_status_volatils(tmp_path):
     assert any("__pycache__" in x for x in res["purges"])
 
 
+# ── item 4 : deps tierces reelles / modules runtime / arch wheels / TLS ──────────────────────
+def test_deps_tierces_core_bloquant_optionnelles_advisory():
+    present = lambda m: None                                        # tout importe
+    assert PL.verifier_deps_tierces(importateur=present)["statut"] == PL.OK
+    # une dep CORE manquante -> ECHEC.
+    def _sans_numpy(m):
+        if m == "numpy":
+            raise ImportError("x")
+    r = PL.verifier_deps_tierces(importateur=_sans_numpy)
+    assert r["statut"] == PL.ECHEC and "numpy" in r["detail"]
+    # une dep OPTIONNELLE manquante -> AVERT (jamais bloquant).
+    def _sans_optuna(m):
+        if m in ("optuna", "cmaes", "aiohttp", "lz4"):
+            raise ImportError("x")
+    assert PL.verifier_deps_tierces(importateur=_sans_optuna)["statut"] == PL.AVERT
+
+
+def test_modules_runtime_bloquant():
+    assert PL.verifier_modules_runtime(importateur=lambda m: None)["statut"] == PL.OK
+    def _casse(m):
+        raise ImportError("x")
+    assert PL.verifier_modules_runtime(importateur=_casse)["statut"] == PL.ECHEC
+
+
+def test_deps_et_modules_reels_importent_dans_le_sandbox():
+    # les vraies deps CORE et les vrais modules runtime s'importent ici (pas d'injection).
+    assert PL.verifier_deps_tierces()["statut"] in (PL.OK, PL.AVERT)   # CORE presentes (opt peut manquer)
+    assert PL.verifier_modules_runtime()["statut"] == PL.OK
+
+
+def test_wheels_arch(tmp_path):
+    assert PL.verifier_wheels_arch(tmp_path)["statut"] == PL.INFO       # pas de wheelhouse
+    wh = tmp_path / "tools" / "wheelhouse"
+    wh.mkdir(parents=True)
+    (wh / "rich-13.7-py3-none-any.whl").write_bytes(b"x")              # pure
+    (wh / "numpy-1.26-cp311-cp311-win_amd64.whl").write_bytes(b"x")    # bonne arch
+    assert PL.verifier_wheels_arch(wh.parent.parent)["statut"] == PL.OK
+    (wh / "numpy-1.26-cp311-cp311-manylinux_x86_64.whl").write_bytes(b"x")   # MAUVAISE arch
+    r = PL.verifier_wheels_arch(wh.parent.parent)
+    assert r["statut"] == PL.ECHEC and "manylinux" in r["detail"]
+
+
+def test_certificats_tls():
+    assert PL.verifier_certificats_tls()["statut"] in (PL.OK, PL.AVERT)   # jamais bloquant
+
+
+def test_orchestrateur_go_avec_vraies_deps(tmp_path):
+    # sur le sandbox, les deps CORE + modules runtime sont presents -> GO tient malgre les checks item 4.
+    _session_complete(tmp_path, "run_ok")
+    v = PL.verifier_premier_lancement(
+        tmp_path, os_info={"systeme": "Linux"}, maintenant_ms=1_735_689_600_000 + 1000,
+        sonde_port=lambda _p: True, generateur_id=lambda: "MID")
+    assert v["go"] is True, v["echecs"]
+
+
 # ── regeneration d'identite (le coeur de l'item 21) ──────────────────────────────────────────
 def test_regenere_identite_purge_et_preserve(tmp_path):
     # etat machine-specifique herite d'une archive copiee...
