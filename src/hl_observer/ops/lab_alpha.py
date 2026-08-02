@@ -33,6 +33,32 @@ from hl_observer.ops.rafraichisseur import RafraichisseurPeriodique
 DOSSIER_RAPPORTS = "runtime/reports/backtest_replay"
 
 
+class AnalyseVerrouilleeError(RuntimeError):
+    """item 13 : une autre analyse écrit déjà dans le même dossier de sortie (rapport/shard/checkpoint)."""
+
+
+def acquerir_verrou_analyse(sortie: str | Path, *, pid_vivant=None) -> Path:
+    """item 13 : verrou d'analyse ATOMIQUE. Deux lancements ne peuvent pas écrire le même rapport/shard/
+    checkpoint. Un verrou dont le PID est mort (crash) est repris ; un verrou dont le PID est VIVANT
+    bloque (AnalyseVerrouilleeError)."""
+    import json
+    import os as _os
+    from hl_observer.ops.preuve_de_vie import _pid_vivant_reel
+    vivant = pid_vivant or _pid_vivant_reel
+    verrou = Path(sortie) / ".analyse.lock"
+    verrou.parent.mkdir(parents=True, exist_ok=True)
+    if verrou.exists():
+        try:
+            pid = int(json.loads(verrou.read_text(encoding="utf-8")).get("pid", -1))
+        except Exception:  # noqa: BLE001
+            pid = -1
+        if pid > 0 and vivant(pid):
+            raise AnalyseVerrouilleeError("analyse deja en cours (pid %d) dans %s" % (pid, sortie))
+        # verrou périmé (PID mort) → on le reprend.
+    verrou.write_text(json.dumps({"pid": _os.getpid()}), encoding="utf-8")
+    return verrou
+
+
 def _events_valides(events: list[dict[str, Any]]) -> int:
     return sum(1 for e in events
                if isinstance(e.get("px"), (int, float)) and (e.get("px") or 0) > 0 and e.get("signe"))
@@ -131,6 +157,8 @@ def lancer_lab(*, racine: str | Path, sortie_dir: str | Path | None = None, budg
     else:
         sortie = racine / DOSSIER_RAPPORTS
     sortie.mkdir(parents=True, exist_ok=True)
+    # item 13 : verrou d'analyse — deux ANALYSER ne peuvent pas ecrire le meme rapport/shard/checkpoint.
+    _verrou_analyse = acquerir_verrou_analyse(sortie)
     journal = Journal(journal_path or sortie / "journal_lab.log")
     checkpoint_path = checkpoint_path or sortie / "checkpoint_recherche.jsonl"
     # Honnêteté dure : run réel → aucune equity leader fictive.
@@ -285,6 +313,10 @@ def lancer_lab(*, racine: str | Path, sortie_dir: str | Path | None = None, budg
     _jrn("rapport: %s (verdict %s)" % (chemins["latest"], chemins["verdict"]))
     _rafraichir(horodatage or "T")
 
+    try:
+        _verrou_analyse.unlink()                 # item 13 : libère le verrou d'analyse en fin de run
+    except OSError:
+        pass
     return {"rapport": chemins, "verdict": chemins["verdict"], "inventaire": inv, "audit": audit,
             "recherche": rech, "events": len(events), "events_valides": valides, "periode": periode,
             "duree_s": round(temps() - t0, 3), "tableau": etat.get("_tableau", ""),
@@ -318,17 +350,28 @@ def main(argv: list[str] | None = None) -> int:
         return 2
     from datetime import datetime, timezone
     horo = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-    res = lancer_lab(racine=args.root, sortie_dir=args.out, budget=args.budget, source=args.source,
-                     horodatage=horo, imprimer=True, session_dir=args.session_dir,
-                     max_ram_events=args.max_ram_events)
+    # item 21 : taxonomie NETTE. Erreur TECHNIQUE (exception, verrou) -> code NON NUL. Sinon le run a
+    # produit un rapport valide (verdict economique POSITIF/NEGATIF/NON_MESURABLE) -> code 0, verdict au
+    # rapport. Un edge negatif (KILL) ou des donnees insuffisantes (UNMEASURABLE) ne sont PAS des echecs
+    # techniques : ce sont des resultats honnetes.
+    try:
+        res = lancer_lab(racine=args.root, sortie_dir=args.out, budget=args.budget, source=args.source,
+                         horodatage=horo, imprimer=True, session_dir=args.session_dir,
+                         max_ram_events=args.max_ram_events)
+    except AnalyseVerrouilleeError as e:
+        print("[LAB][ERREUR] %s" % e, flush=True)
+        return 8                                 # verrou d'analyse : une autre analyse ecrit deja ici
+    except Exception as e:                        # noqa: BLE001 — erreur technique -> code non nul
+        print("[LAB][ERREUR TECHNIQUE] %s: %s" % (type(e).__name__, e), flush=True)
+        return 1
     print(res["tableau"])
     print("\nVERDICT: %s\nRAPPORT: %s\nJOURNAL: %s\nDUREE: %ss" % (
         res["verdict"], res["rapport"]["latest"], res["journal"], res["duree_s"]))
-    return 0
+    return 0                                       # rapport valide produit (issue economique dans le rapport)
 
 
 if __name__ == "__main__":
     raise SystemExit(main())
 
 
-__all__ = ["lancer_lab", "main", "DOSSIER_RAPPORTS"]
+__all__ = ["lancer_lab", "main", "DOSSIER_RAPPORTS", "AnalyseVerrouilleeError", "acquerir_verrou_analyse"]
