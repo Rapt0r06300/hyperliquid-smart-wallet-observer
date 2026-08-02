@@ -1,9 +1,8 @@
 """Portable Windows runtime diagnostics for HyperSmart.
 
-The application is relocatable when it uses ``portable_runtime/python`` and
-all paths are resolved from the project directory. Runtime market data is not
-part of the application bundle: active SQLite/JSONL files are intentionally
-left in place and a new machine starts with a clean local runtime.
+The only release runtime is ``tools/python/python.exe``.  A legacy
+``portable_runtime/python`` tree may be copied once by :func:`migrate_legacy_runtime`,
+but it is never selected as a runtime and is never part of an official archive.
 """
 
 from __future__ import annotations
@@ -12,15 +11,19 @@ import argparse
 import json
 import os
 import platform
+import shutil
 import subprocess
 import sys
+import tempfile
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Mapping, Sequence
 
-PORTABLE_DIR = "portable_runtime"
-PORTABLE_PYTHON_RELATIVE = Path(PORTABLE_DIR) / "python" / "python.exe"
-PORTABLE_MANIFEST_RELATIVE = Path(PORTABLE_DIR) / "portable_runtime_manifest.json"
+PORTABLE_DIR = "tools"
+PORTABLE_PYTHON_RELATIVE = Path("tools") / "python" / "python.exe"
+PORTABLE_MANIFEST_RELATIVE = Path("tools") / "python" / "portable_runtime_manifest.json"
+LEGACY_PYTHON_RELATIVE = Path("portable_runtime") / "python"
+LEGACY_MANIFEST_RELATIVE = Path("portable_runtime") / "portable_runtime_manifest.json"
 
 REQUIRED_IMPORTS: tuple[str, ...] = (
     "fastapi",
@@ -53,6 +56,7 @@ EXCLUDED_TOP_LEVEL: frozenset[str] = frozenset(
         "env",
         "logs",
         "node_modules",
+        "portable_runtime",
         "reports",
         "runtime",
         "venv",
@@ -66,7 +70,6 @@ EXCLUDED_SUFFIXES: tuple[str, ...] = (
     ".db-wal",
     ".log",
     ".p12",
-    ".pem",
     ".pfx",
     ".pyc",
     ".rar",
@@ -134,15 +137,6 @@ def is_safe_bundle_member(relative_path: str | Path) -> bool:
         return False
     if parts[0] in EXCLUDED_TOP_LEVEL:
         return False
-    if (
-        parts[0] == PORTABLE_DIR
-        and len(parts) > 1
-        and (
-            parts[1].startswith("python_backup_")
-            or parts[1].startswith("python_failed_")
-        )
-    ):
-        return False
     lower = normalized.lower()
     if lower == ".env" or lower.endswith("/.env"):
         return False
@@ -150,7 +144,7 @@ def is_safe_bundle_member(relative_path: str | Path) -> bool:
         return False
     if (
         len(parts) == 3
-        and parts[0] == PORTABLE_DIR
+        and parts[0] == "tools"
         and parts[1] == "python"
         and parts[2].startswith("python")
         and parts[2].endswith(".zip")
@@ -168,28 +162,46 @@ def select_python(
     environ: Mapping[str, str] | None = None,
     path_candidates: Sequence[str] | None = None,
 ) -> PythonSelection | None:
+    """Select only the embedded release interpreter.
+
+    ``environ`` and ``path_candidates`` remain accepted for API compatibility;
+    they deliberately cannot influence the official selection.
+    """
+    del environ, path_candidates
     root = _resolved(project_root)
     portable = root / PORTABLE_PYTHON_RELATIVE
     if portable.is_file():
-        return PythonSelection(str(portable), "embedded", True)
-
-    local_venv = root / ".venv-portable" / "Scripts" / "python.exe"
-    if local_venv.is_file():
-        return PythonSelection(str(local_venv), "local-venv", True)
-
-    env = dict(os.environ if environ is None else environ)
-    configured = env.get("HYPERSMART_PYTHON", "").strip()
-    if configured and Path(configured).is_file():
-        return PythonSelection(str(_resolved(Path(configured))), "environment", False)
-
-    candidates = list(path_candidates or ())
-    if not candidates:
-        candidates.append(sys.executable)
-    for candidate in candidates:
-        path = Path(candidate)
-        if path.is_file():
-            return PythonSelection(str(_resolved(path)), "system", False)
+        return PythonSelection(str(portable), "embedded-tools-python", True)
     return None
+
+
+def migrate_legacy_runtime(project_root: Path) -> dict[str, object]:
+    """Copy a valid legacy runtime to ``tools/python`` without deleting it.
+
+    Copying through a sibling temporary directory prevents a half-migrated
+    runtime from being selected after an interrupted operation.
+    """
+    root = _resolved(project_root)
+    destination = root / PORTABLE_PYTHON_RELATIVE.parent
+    legacy = root / LEGACY_PYTHON_RELATIVE
+    if (destination / "python.exe").is_file():
+        return {"migrated": False, "reason": "already_present", "destination": str(destination)}
+    if not (legacy / "python.exe").is_file():
+        return {"migrated": False, "reason": "legacy_missing", "destination": str(destination)}
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    temporary = Path(tempfile.mkdtemp(prefix="python-migration-", dir=str(destination.parent)))
+    try:
+        shutil.copytree(legacy, temporary / "python", dirs_exist_ok=True)
+        legacy_manifest = root / LEGACY_MANIFEST_RELATIVE
+        if legacy_manifest.is_file():
+            shutil.copy2(legacy_manifest, temporary / "python" / "portable_runtime_manifest.json")
+        if not (temporary / "python" / "python.exe").is_file():
+            raise RuntimeError("legacy runtime copy is missing python.exe")
+        (temporary / "python").replace(destination)
+    finally:
+        if temporary.exists():
+            shutil.rmtree(temporary, ignore_errors=True)
+    return {"migrated": True, "reason": "legacy_copied", "destination": str(destination)}
 
 
 def load_manifest(project_root: Path) -> dict[str, object] | None:
@@ -334,12 +346,17 @@ def _build_parser() -> argparse.ArgumentParser:
 
     manifest = subparsers.add_parser("manifest", help="print the portable runtime manifest")
     manifest.add_argument("--json", action="store_true", dest="as_json")
+    subparsers.add_parser("migrate", help="copy a legacy runtime to tools/python")
     return parser
 
 
 def main(argv: Sequence[str] | None = None) -> int:
     args = _build_parser().parse_args(argv)
     root = Path(args.root)
+    if args.command == "migrate":
+        result = migrate_legacy_runtime(root)
+        print(json.dumps(result, ensure_ascii=False, indent=2))
+        return 0 if result["reason"] != "legacy_missing" else 1
     if args.command == "check":
         status = runtime_status(root, require_embedded=bool(args.require_embedded))
         payload = asdict(status)

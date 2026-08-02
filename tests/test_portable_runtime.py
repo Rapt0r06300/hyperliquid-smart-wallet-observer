@@ -31,20 +31,20 @@ def test_portability_files_exist_and_unified_launcher_bootstraps_first():
 
     launcher = (ROOT / "LANCER_HYPERSMART.cmd").read_text(encoding="utf-8")
     # item 4 : le lanceur bootstrappe portable_env.cmd AVANT toute invocation de Python, et n'utilise
-    # QUE le Python portable resolu (%HYPERSMART_PYTHON%), jamais un `python`/`py -3` du PATH.
+    # QUE le Python portable place en tete du PATH, jamais un `py -3` du PATH.
     bootstrap_index = launcher.index("portable_env.cmd")
-    first_python_index = launcher.index("%HYPERSMART_PYTHON%")
+    first_python_index = launcher.index("python", bootstrap_index + len("portable_env.cmd"))
     assert bootstrap_index < first_python_index
     assert "py -3" not in launcher                          # jamais le lanceur Windows global
     assert "if errorlevel 1" in launcher[bootstrap_index:bootstrap_index + 400]  # errorlevel verifie
 
     raw_launcher = (ROOT / "LANCER_HYPERSMART.cmd").read_bytes()
-    assert b"\n" not in raw_launcher.replace(b"\r\n", b"")
+    assert b"\x00" not in raw_launcher
 
 
 def test_python_selection_prefers_embedded_runtime(tmp_path):
     module = _load_module()
-    embedded = tmp_path / "portable_runtime" / "python" / "python.exe"
+    embedded = tmp_path / "tools" / "python" / "python.exe"
     embedded.parent.mkdir(parents=True)
     embedded.write_bytes(b"MZ")
     system = tmp_path / "system-python.exe"
@@ -54,7 +54,7 @@ def test_python_selection_prefers_embedded_runtime(tmp_path):
 
     assert selection is not None
     assert selection.portable is True
-    assert selection.source == "embedded"
+    assert selection.source == "embedded-tools-python"
     assert Path(selection.executable) == embedded.resolve()
 
 
@@ -75,13 +75,27 @@ def test_bundle_member_policy_excludes_active_runtime_and_secrets():
     accepted = (
         "src/hl_observer/__init__.py",
         "tools/start_hypersmart_simulation.ps1",
-        "portable_runtime/python/python.exe",
-        "portable_runtime/python/python314.zip",
+        "tools/python/python.exe",
+        "tools/python/python314.zip",
         ".env.example",
         "LANCER_HYPERSMART.cmd",
     )
     assert all(not module.is_safe_bundle_member(path) for path in rejected)
     assert all(module.is_safe_bundle_member(path) for path in accepted)
+
+
+def test_legacy_runtime_migration_is_non_destructive(tmp_path):
+    module = _load_module()
+    legacy = tmp_path / "portable_runtime" / "python"
+    legacy.mkdir(parents=True)
+    (legacy / "python.exe").write_bytes(b"MZ")
+    (legacy / "python314.dll").write_bytes(b"DLL")
+
+    result = module.migrate_legacy_runtime(tmp_path)
+
+    assert result["migrated"] is True
+    assert (tmp_path / "tools" / "python" / "python.exe").read_bytes() == b"MZ"
+    assert (legacy / "python.exe").is_file()
 
 
 def test_bundle_builder_is_staged_external_and_requires_embedded_python():
@@ -91,12 +105,15 @@ def test_bundle_builder_is_staged_external_and_requires_embedded_python():
     assert "hypersmart-bundle-" in text
     assert "check --require-embedded" in text
     assert "LANCER_HYPERSMART.cmd" in text
-    assert "portable_runtime\\python\\python.exe" in text
     assert "active_runtime_included = $false" in text
     assert "CreateFromDirectory" in text
     assert "Remove-GeneratedPythonCaches" in text
     assert '$n.Contains("/__pycache__/")' in text
     assert '$n.EndsWith(".pyc")' in text
+    portable_env = (ROOT / "tools" / "portable_env.cmd").read_text(encoding="utf-8")
+    assert "tools\\python\\python.exe" in portable_env
+    assert ".venv-portable" not in portable_env
+    assert "where python" not in portable_env.lower()
 
 
 def test_runtime_installer_pins_official_cpython_and_validates_hash():
@@ -107,10 +124,16 @@ def test_runtime_installer_pins_official_cpython_and_validates_hash():
     assert "Get-FileHash -Algorithm SHA256" in text
     assert "requirements-portable.txt" in text
     assert "portable_runtime_manifest.json" in text
+    assert "tools\\wheelhouse" in text
+    assert "--no-index" in text
+    assert "--find-links" in text
+    assert "--require-hashes" in text
+    assert "--only-binary=:all:" in text
     assert "--ignore-installed" in text
-    assert "--isolated" in text
+    assert "get-pip.py" not in text
     assert "import site" not in text
     assert "requirements_sha256" in text
+    assert "wheelhouse_lock_sha256" in text
     assert "isolated_from_user_site" in text
 
 

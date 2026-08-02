@@ -64,3 +64,38 @@ def test_cli_ecrire_et_verifier(tmp_path, capsys):
     assert W.main(["--wheelhouse", str(d), "--ecrire", str(lock)]) == 0
     assert "WHEELHOUSE_LOCK ecrit" in capsys.readouterr().out
     assert W.main(["--wheelhouse", str(d), "--verifier", str(lock)]) == 0
+
+
+def test_refuse_sdist_et_roue_linux(tmp_path):
+    d = _wheelhouse(tmp_path, {"numpy-2.5.1-cp314-cp314-manylinux_x86_64.whl": b"A"})
+    (d / "evil-1.0.tar.gz").write_bytes(b"source")
+    verrou = W.ecrire_verrou(d, tmp_path / "lock.json")
+    resultat = W.verifier_verrou(d, verrou)
+    assert resultat["ok"] is False
+    assert resultat["incompatibles"] == ["numpy-2.5.1-cp314-cp314-manylinux_x86_64.whl"]
+    assert resultat["fichiers_interdits"] == ["evil-1.0.tar.gz"]
+
+
+def test_accepte_roue_native_py3_windows_x64():
+    assert W.roue_windows_x64_compatible("ruff-0.16.1-py3-none-win_amd64.whl") is True
+
+
+def test_requirements_exigent_version_et_hash_exacts(tmp_path):
+    d = _wheelhouse(tmp_path, {"httpx-0.28.1-py3-none-any.whl": b"wheel"})
+    verrou = W.ecrire_verrou(d, tmp_path / "lock.json")
+    sha = verrou["roues"]["httpx-0.28.1-py3-none-any.whl"]["sha256"]
+    req = tmp_path / "requirements.txt"
+    req.write_text(f"httpx==0.28.1 --hash=sha256:{sha}\n", encoding="utf-8")
+    assert W.verifier_verrou(d, verrou, req)["ok"] is True
+    req.write_text(f"httpx==0.27.0 --hash=sha256:{sha}\n", encoding="utf-8")
+    assert W.verifier_verrou(d, verrou, req)["requirements_divergents"] == ["httpx"]
+
+
+def test_requirements_refusent_plage_non_verrouillee(tmp_path):
+    req = tmp_path / "requirements.txt"
+    req.write_text("httpx>=0.27,<1\n", encoding="utf-8")
+    try:
+        W.lire_requirements_verrouilles(req)
+        assert False, "une plage non hashee doit etre refusee"
+    except ValueError as exc:
+        assert "non verrouille" in str(exc)
