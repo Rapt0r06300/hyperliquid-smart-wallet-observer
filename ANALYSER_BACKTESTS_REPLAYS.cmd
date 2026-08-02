@@ -69,7 +69,8 @@ echo.
 
 REM Budget MAXIMAL par defaut (item 11) : --budget 0 = grille entiere. Surchargeable HYPERSMART_LAB_BUDGET.
 if "%HYPERSMART_LAB_BUDGET%"=="" set "HYPERSMART_LAB_BUDGET=0"
-REM item 7 : fenetre RAM du replay explicitement bornable (0 = tout le shard, jamais un plafond magique).
+REM item 6 : fenetre RAM du replay TOUJOURS bornee. 0 (defaut) = budget AUTOMATIQUE borne calcule sur
+REM la RAM disponible (jamais illimite, jamais d'OOM) ; une valeur > 0 impose un plafond explicite.
 if "%HYPERSMART_MAX_RAM_EVENTS%"=="" set "HYPERSMART_MAX_RAM_EVENTS=0"
 "%HYPERSMART_PYTHON%" -m hl_observer.ops.lab_alpha --root "%~dp0." --session-dir "%SESSION_DIR%" ^
    --source REEL --budget %HYPERSMART_LAB_BUDGET% --max-ram-events %HYPERSMART_MAX_RAM_EVENTS%

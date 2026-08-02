@@ -273,9 +273,15 @@ def lancer_lab(*, racine: str | Path, sortie_dir: str | Path | None = None, budg
             checkpoint_path=sortie / ("events_shard.%s.checkpoint.json" % ns))
     etat["events_shardes"] = info_shard["n"]
     etat["fusion_causale"] = {k: info_shard.get(k) for k in ("dedupes", "hors_ordre", "gaps", "sources")}
-    # item 8 : la fenêtre RAM borne le replay ; c'est un échantillon causalement contigu (pas biaisé venue).
-    plafond = [v for v in (max_ram_events, max_events) if v and v > 0]
-    events = charger_borne(shard, max_ram=(min(plafond) if plafond else 0))
+    # item 6 : la fenêtre RAM est TOUJOURS bornée. Un plafond <= 0 ne veut plus dire « tout charger »
+    # (OOM sur gros jeu) mais « budget AUTOMATIQUE borné » calculé sur la RAM disponible. Un plafond
+    # explicite reste respecté. item 8 : la fenêtre est un échantillon causalement contigu (pas biaisé venue).
+    from hl_observer.ops.budget_ram import resoudre_max_events
+    budget = resoudre_max_events(max_ram_events)
+    explicites = [v for v in (max_events,) if v and v > 0]
+    max_ram = min([budget] + explicites)
+    etat["budget_ram_events"] = max_ram
+    events = charger_borne(shard, max_ram=max_ram)
     valides = _events_valides(events)
     etat.update({"octets_lus": octets_lus, "events_lus": len(events), "events_valides": valides,
                  "events_rejetes": len(events) - valides, "derniere": "lecture (%d events)" % len(events)})
