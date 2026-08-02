@@ -29,6 +29,7 @@ import re
 import shutil
 import sqlite3
 import stat
+import subprocess
 import sys
 import tempfile
 import time
@@ -76,6 +77,8 @@ _NOMS_WINDOWS_RESERVES = {
 }
 _MAX_COMPOSANT_WINDOWS = 240
 _MAX_CHEMIN_RELATIF_WINDOWS = 220
+_EPOCH_ZIP_MINIMUM = 315532800  # 1980-01-01 UTC, limite du format ZIP.
+_MARQUEUR_LFS = b"version https://git-lfs.github.com/spec/v1"
 
 
 # ── PREUVE + SESSIONS ───────────────────────────────────────────────────────────────────────
@@ -445,6 +448,80 @@ def _git_sha_depuis_dossier(root: str | Path) -> str:
         return ""
 
 
+def _commande_git(root: Path, *arguments: str) -> str:
+    """Execute Git uniquement pendant le build source et retourne stdout.
+
+    Git n'est jamais requis dans l'archive extraite. Une release officielle a
+    toutefois besoin de la verite du checkout, impossible a deduire d'un simple
+    fichier ``.git/HEAD`` lorsqu'il existe des modifications locales.
+    """
+    try:
+        resultat = subprocess.run(
+            ["git", "-C", str(root), *arguments],
+            check=True, capture_output=True, text=True, encoding="utf-8",
+            errors="strict", timeout=30,
+        )
+    except (OSError, subprocess.SubprocessError, UnicodeError) as exc:
+        raise ArchiveRefuseeError("etat Git impossible a prouver: %s" % exc) from exc
+    return resultat.stdout
+
+
+def etat_git_release(root: str | Path) -> dict:
+    """Etat Git exact utilise par la release officielle.
+
+    Les fichiers dirty/non suivis sont accompagnes de leur hash quand ils
+    existent. Une suppression reste explicite avec ``sha256=None``.
+    """
+    root = Path(root).resolve()
+    sha = _commande_git(root, "rev-parse", "--verify", "HEAD").strip()
+    if not re.fullmatch(r"[0-9a-fA-F]{40,64}", sha):
+        raise ArchiveRefuseeError("SHA Git invalide: %r" % sha)
+    epoch_txt = _commande_git(root, "show", "-s", "--format=%ct", "HEAD").strip()
+    try:
+        source_date_epoch = int(epoch_txt)
+    except ValueError as exc:
+        raise ArchiveRefuseeError("timestamp du commit Git invalide: %r" % epoch_txt) from exc
+    lignes = _commande_git(
+        root, "-c", "core.quotepath=false", "status", "--porcelain=v1",
+        "--untracked-files=all",
+    ).splitlines()
+    fichiers = []
+    for ligne in lignes:
+        if len(ligne) < 4:
+            raise ArchiveRefuseeError("sortie Git status ambigue: %r" % ligne)
+        statut, chemin = ligne[:2], ligne[3:]
+        if " -> " in chemin:
+            chemin = chemin.rsplit(" -> ", 1)[1]
+        rel = chemin.replace("\\", "/")
+        entree = {"statut": statut, "chemin": rel, "sha256": None, "taille": None}
+        p = root / Path(rel)
+        if p.is_file() and not p.is_symlink():
+            entree["sha256"], entree["taille"] = SC.sha256_fichier(p)
+        fichiers.append(entree)
+    return {
+        "sha": sha.lower(),
+        "source_date_epoch": source_date_epoch,
+        "dirty": bool(fichiers),
+        "fichiers": sorted(fichiers, key=lambda x: (x["chemin"].casefold(), x["statut"])),
+    }
+
+
+def pointeurs_lfs_non_materialises(root: str | Path, inclus: Iterable[str]) -> list[str]:
+    """Liste les pointeurs Git LFS embarques au lieu de leur contenu reel."""
+    root = Path(root)
+    trouves = []
+    for rel in sorted(set(inclus)):
+        p = root / Path(rel)
+        try:
+            with p.open("rb") as flux:
+                debut = flux.read(256)
+        except OSError:
+            continue
+        if debut.startswith(_MARQUEUR_LFS):
+            trouves.append(rel)
+    return trouves
+
+
 def _categorie_binaire(rel: str) -> str | None:
     low = rel.lower()
     if low.endswith(".whl"):
@@ -458,7 +535,8 @@ def _categorie_binaire(rel: str) -> str | None:
 
 def construire_manifeste(root: str | Path, inclus: Iterable[str], exclus: Iterable[str], *,
                          version: str = "", git_sha: str | None = None,
-                         horloge=time.time) -> dict:
+                         horloge=time.time, source_date_epoch: int | None = None,
+                         etat_git: dict | None = None) -> dict:
     """item 22 : version+SHA git, python, os/arch, hashes exe/DLL/wheels + tous fichiers requis,
     donnees incluses/exclues, date de build, commande de verification, empreinte globale."""
     root = Path(root)
@@ -473,7 +551,7 @@ def construire_manifeste(root: str | Path, inclus: Iterable[str], exclus: Iterab
     empreinte = _empreinte_manifeste(fichiers)
     sessions = [s["run_id"] for s in SC.scanner_sessions(root)
                 if s.get("statut") in (SC.STATUT_COMPLETE, SC.STATUT_QUARANTINED)]
-    ts = int(horloge() * 1000)
+    epoch = int(source_date_epoch if source_date_epoch is not None else horloge())
     return {
         "schema": SCHEMA_MANIFESTE,
         "hypersmart_version": version or _version_projet(root),
@@ -482,7 +560,7 @@ def construire_manifeste(root: str | Path, inclus: Iterable[str], exclus: Iterab
                    "implementation": platform.python_implementation()},
         "plateforme": {"os": platform.system(), "arch": platform.machine(),
                        "cible": "Windows-x64"},
-        "date_build_ms": ts,
+        "source_date_epoch": epoch,
         "nombre_fichiers": len(fichiers),
         "empreinte_globale": empreinte,
         "binaires": binaires,
@@ -492,6 +570,7 @@ def construire_manifeste(root: str | Path, inclus: Iterable[str], exclus: Iterab
         "donnees_exclues": sorted(set(list(DOSSIERS_EXCLUS) + list(SUFFIXES_EXCLUS)
                                        + list(FICHIERS_EXCLUS))),
         "commande_verification": "CREER_ARCHIVE_PORTABLE.cmd --verifier <archive.zip>",
+        "etat_git": etat_git or {},
         "fichiers": fichiers,
     }
 
@@ -657,34 +736,33 @@ def _est_metadonnee(rel: str) -> bool:
 
 def ecrire_archive(root: str | Path, cible: str | Path, inclus: Iterable[str],
                    manifeste: dict) -> dict:
-    """Ecrit l'archive .zip. Les metadonnees texte sont neutralisees (chemins absolus -> relatifs) ;
-    un chemin absolu RESIDUEL fait ECHOUER (item 20.6). Le manifeste est embarque a la racine."""
+    """Ecrit exactement les octets hashes du staging dans un ZIP canonique."""
     root, cible = Path(root), Path(cible)
     cible.parent.mkdir(parents=True, exist_ok=True)
     inclus = sorted(inclus)
-    neutralises, residus = 0, {}
-    with zipfile.ZipFile(cible, "w", compression=zipfile.ZIP_DEFLATED) as z:
+    epoch = max(int(manifeste.get("source_date_epoch", _EPOCH_ZIP_MINIMUM)), _EPOCH_ZIP_MINIMUM)
+    date_zip = time.gmtime(epoch)[:6]
+
+    def info_zip(rel: str) -> zipfile.ZipInfo:
+        info = zipfile.ZipInfo(rel, date_time=date_zip)
+        info.compress_type = zipfile.ZIP_DEFLATED
+        info.create_system = 3
+        info.external_attr = (stat.S_IFREG | 0o644) << 16
+        info.flag_bits |= 0x800
+        return info
+
+    with zipfile.ZipFile(cible, "w", compression=zipfile.ZIP_DEFLATED,
+                         compresslevel=9, strict_timestamps=False) as z:
         for rel in inclus:
-            src = root / rel
-            if _est_metadonnee(rel):
-                try:
-                    txt = src.read_text(encoding="utf-8")
-                    txt2, n = neutraliser_metadonnees(txt, root)
-                    neutralises += n
-                    abs_res = chemins_absolus_residuels(txt2)
-                    if abs_res:
-                        residus[rel] = abs_res
-                    z.writestr(rel, txt2)
-                    continue
-                except (OSError, UnicodeDecodeError):
-                    pass                               # binaire deguise : on ecrit brut
-            z.write(src, rel)
-        z.writestr(NOM_MANIFESTE, json.dumps(manifeste, ensure_ascii=False, indent=2, sort_keys=True))
-    if residus:
-        cible.unlink(missing_ok=True)
-        raise ArchiveRefuseeError("chemins absolus residuels dans %d metadonnee(s): %s"
-                                  % (len(residus), json.dumps(residus, ensure_ascii=False)))
-    return {"archive": str(cible), "membres": len(inclus) + 1, "chemins_neutralises": neutralises}
+            data = (root / rel).read_bytes()
+            z.writestr(info_zip(rel), data, compress_type=zipfile.ZIP_DEFLATED, compresslevel=9)
+        manifeste_bytes = (json.dumps(
+            manifeste, ensure_ascii=False, sort_keys=True, separators=(",", ":")
+        ) + "\n").encode("utf-8")
+        z.writestr(info_zip(NOM_MANIFESTE), manifeste_bytes,
+                   compress_type=zipfile.ZIP_DEFLATED, compresslevel=9)
+    return {"archive": str(cible), "membres": len(inclus) + 1,
+            "chemins_neutralises": 0, "source_date_epoch": epoch}
 
 
 def reverifier_archive(cible: str | Path) -> dict:
@@ -721,12 +799,22 @@ def reverifier_archive(cible: str | Path) -> dict:
 def creer_archive_portable(root: str | Path, cible: str | Path, *, version: str = "",
                            git_sha: str | None = None,
                            pid_vivant=None, horloge=time.time,
-                           non_suivis_requis: list[str] | None = None) -> dict:
+                           non_suivis_requis: list[str] | None = None,
+                           mode_release: str = "developpement",
+                           etat_git: dict | None = None) -> dict:
     """Enchaine les 9 etapes de l'item 20 et rend un verdict. Leve ArchiveRefuseeError sur refus dur
     (writers vivants, session ACTIVE, chemin absolu residuel). Ne fabrique JAMAIS une archive
     partielle : au moindre doute, on refuse et rien n'est ecrit."""
     root = Path(root).resolve()
     cible = Path(cible).resolve()
+    try:
+        cible.relative_to(root)
+    except ValueError:
+        pass
+    else:
+        raise ArchiveRefuseeError("la sortie ZIP doit etre exterieure au projet: %s" % cible)
+    if mode_release not in {"official", "developpement"}:
+        raise ArchiveRefuseeError("mode release invalide: %s" % mode_release)
     # 1+2 : refus durs AVANT tout travail couteux.
     arretes, motifs = preuve_arret(root, pid_vivant=pid_vivant)
     vivants = [m for m in motifs if m not in _MARQUEURS_REGISTRE]
@@ -741,6 +829,15 @@ def creer_archive_portable(root: str | Path, cible: str | Path, *, version: str 
     # 3 : WAL checkpoint.
     # 4+5 : selection.
     inclus, exclus = lister_pour_archive(root)
+    lfs = pointeurs_lfs_non_materialises(root, inclus)
+    if lfs:
+        raise ArchiveRefuseeError("pointeurs Git LFS non materialises: %s" % ", ".join(lfs))
+    git = dict(etat_git or etat_git_release(root))
+    if mode_release == "official" and git.get("dirty"):
+        chemins_dirty = [x.get("chemin", "?") for x in git.get("fichiers", [])]
+        raise ArchiveRefuseeError(
+            "release officielle refusee: depot dirty (%s)" % ", ".join(chemins_dirty)
+        )
     # 4bis : CONTROLE DE COMPLETUDE (item release) — rien d'important ne doit manquer. Un fichier requis
     # absent / vide / exclu par erreur, un import intra-projet casse ou une reference .cmd manquante
     # BLOQUE la release avec la liste exacte. Jamais de release allegee en silence.
@@ -752,8 +849,10 @@ def creer_archive_portable(root: str | Path, cible: str | Path, *, version: str 
     cible.parent.mkdir(parents=True, exist_ok=True)
     cible_temporaire = cible.with_name(".%s.%d.tmp" % (cible.name, os.getpid()))
     cible_temporaire.unlink(missing_ok=True)
-    sha_source = git_sha if git_sha is not None else _git_sha_depuis_dossier(root)
+    sha_source = git_sha if git_sha is not None else str(git.get("sha", ""))
     version_source = version or _version_projet(root)
+    if mode_release == "developpement" and git.get("dirty") and not version_source.endswith("-dirty"):
+        version_source += "-dirty"
     try:
         with tempfile.TemporaryDirectory(prefix="hypersmart-portable-staging-") as tmp:
             staging = Path(tmp) / "release"
@@ -769,6 +868,8 @@ def creer_archive_portable(root: str | Path, cible: str | Path, *, version: str 
             manifeste = construire_manifeste(
                 staging, staging_inclus, exclus, version=version_source,
                 git_sha=sha_source, horloge=horloge,
+                source_date_epoch=int(git.get("source_date_epoch", horloge())),
+                etat_git=git,
             )
             manifeste["completude"] = {
                 k: (len(v) if isinstance(v, list) else v)
@@ -804,12 +905,14 @@ def creer_archive_portable(root: str | Path, cible: str | Path, *, version: str 
             "arret": note_arret, "verification": verif,
             "verification_extraction": verif_extraction,
             "sbom": manifeste.get("sbom"), "manifeste": NOM_MANIFESTE,
-            "ecriture": ecrit, "staging": manifeste["staging"]}
+            "ecriture": ecrit, "staging": manifeste["staging"],
+            "etat_git": git, "mode_release": mode_release}
 
 
-def _nom_archive_versionne(root: Path, manifeste_version: str, ts_ms: int) -> str:
+def _nom_archive_versionne(root: Path, manifeste_version: str, git_sha: str) -> str:
     v = (manifeste_version or "0.0.0-dev").replace(" ", "_")
-    return "hypersmart_portable_%s_%d.zip" % (v, ts_ms)
+    sha = (git_sha or "sans-git")[:12]
+    return "hypersmart_portable_%s_%s.zip" % (v, sha)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -817,9 +920,10 @@ def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(prog="archive_portable",
                                  description="Archive portable HyperSmart (item 20) + re-verif (item 22).")
     ap.add_argument("--racine", default=".", help="racine du projet (defaut: dossier courant)")
-    ap.add_argument("--sortie", default="", help="chemin .zip (defaut: dist/ versionne)")
+    ap.add_argument("--sortie", default="", help="chemin .zip (defaut: Bureau utilisateur)")
     ap.add_argument("--version", default="", help="version HyperSmart a graver dans le manifeste")
-    ap.add_argument("--git-sha", default=None, help="SHA git (defaut: lu dans .git)")
+    ap.add_argument("--mode-developpement", action="store_true",
+                    help="autorise un checkout dirty et grave -dirty + hashes")
     ap.add_argument("--verifier", default="", help="re-verifie une archive existante et sort")
     args = ap.parse_args(argv)
 
@@ -830,12 +934,21 @@ def main(argv: list[str] | None = None) -> int:
 
     root = Path(args.racine).resolve()
     version = args.version or _version_projet(root)
+    try:
+        git = etat_git_release(root)
+    except ArchiveRefuseeError as exc:
+        print("ARCHIVE_REFUSEE: %s" % exc, file=sys.stderr)
+        return 5
+    mode_release = "developpement" if args.mode_developpement else "official"
+    version_sortie = version + ("-dirty" if git.get("dirty") and mode_release == "developpement" else "")
     if args.sortie:
         cible = Path(args.sortie)
     else:
-        cible = root / "dist" / _nom_archive_versionne(root, version, int(time.time() * 1000))
+        bureau = Path(os.environ.get("USERPROFILE", str(Path.home()))) / "Desktop"
+        cible = bureau / _nom_archive_versionne(root, version_sortie, str(git.get("sha", "")))
     try:
-        res = creer_archive_portable(root, cible, version=version, git_sha=args.git_sha)
+        res = creer_archive_portable(root, cible, version=version, mode_release=mode_release,
+                                     etat_git=git)
     except ArchiveRefuseeError as exc:
         print("ARCHIVE_REFUSEE: %s" % exc, file=sys.stderr)
         return 5
@@ -854,6 +967,7 @@ __all__ = ["SCHEMA_MANIFESTE", "NOM_MANIFESTE", "ArchiveRefuseeError", "preuve_a
            "valider_chemin_relatif", "valider_fichier_source", "valider_membres_zip",
            "extraire_zip_surement", "est_exclu",
            "lister_pour_archive", "neutraliser_metadonnees", "chemins_absolus_residuels",
+           "etat_git_release", "pointeurs_lfs_non_materialises",
            "construire_manifeste", "ecrire_archive", "reverifier_archive", "extraire_et_reverifier",
            "creer_archive_portable", "main"]
 

@@ -18,6 +18,17 @@ from hl_observer.ops import archive_portable as AP        # noqa: E402
 from hl_observer.ops import session_catalog as SC         # noqa: E402
 from hl_observer.ops.registre_pids import REGISTRE_RELPATH  # noqa: E402
 
+ETAT_GIT_PROPRE = {
+    "sha": "a" * 40,
+    "source_date_epoch": 1_700_000,
+    "dirty": False,
+    "fichiers": [],
+}
+
+
+def _cible_externe(root: Path, nom: str = "out.zip") -> Path:
+    return root.parent / (root.name + "-" + nom)
+
 HORLOGE = lambda: 1_700_000.0                              # noqa: E731 — deterministe
 
 
@@ -99,8 +110,9 @@ def test_aucune_cle_dans_archive(tmp_path):
     _projet(tmp_path)
     (tmp_path / "wallet.key").write_text("SECRET", encoding="utf-8")
     (tmp_path / ".env").write_text("TOKEN=x", encoding="utf-8")
-    cible = tmp_path / "out.zip"
-    AP.creer_archive_portable(tmp_path, cible, pid_vivant=lambda _p: False, horloge=HORLOGE)
+    cible = _cible_externe(tmp_path)
+    AP.creer_archive_portable(tmp_path, cible, pid_vivant=lambda _p: False, horloge=HORLOGE,
+                              etat_git=ETAT_GIT_PROPRE)
     with zipfile.ZipFile(cible) as z:
         noms = set(z.namelist())
     assert "wallet.key" not in noms and ".env" not in noms
@@ -184,11 +196,12 @@ def test_staging_doit_rester_hors_source(tmp_path):
 # ── refus durs (items 20.1/20.2) ─────────────────────────────────────────────────────────────
 def test_refuse_si_writer_vivant(tmp_path):
     _projet(tmp_path)
-    cible = tmp_path / "out.zip"
+    cible = _cible_externe(tmp_path)
     # un writer vivant : pid_vivant renvoie True pour le pid enregistre.
     (tmp_path / REGISTRE_RELPATH).write_text(json.dumps({"collecteurs": {"bbo": 4242}}), encoding="utf-8")
     try:
-        AP.creer_archive_portable(tmp_path, cible, pid_vivant=lambda _p: True, horloge=HORLOGE)
+        AP.creer_archive_portable(tmp_path, cible, pid_vivant=lambda _p: True, horloge=HORLOGE,
+                                  etat_git=ETAT_GIT_PROPRE)
         assert False, "aurait du refuser"
     except AP.ArchiveRefuseeError as exc:
         assert "writers" in str(exc).lower()
@@ -201,9 +214,10 @@ def test_checkout_propre_sans_registre_est_quiescent(tmp_path):
     (tmp_path / "src" / "app.py").write_text("print(1)\n", encoding="utf-8")
     (tmp_path / "LANCER_HYPERSMART.cmd").write_text('cd /d "%~dp0"\n', encoding="utf-8")
     assert AP.preuve_arret(tmp_path, pid_vivant=lambda _p: False) == (False, ["REGISTRE_ABSENT"])
-    cible = tmp_path / "out.zip"
+    cible = _cible_externe(tmp_path)
     try:
-        AP.creer_archive_portable(tmp_path, cible, pid_vivant=lambda _p: False, horloge=HORLOGE)
+        AP.creer_archive_portable(tmp_path, cible, pid_vivant=lambda _p: False, horloge=HORLOGE,
+                                  etat_git=ETAT_GIT_PROPRE)
         assert False, "registre absent aurait du bloquer"
     except AP.ArchiveRefuseeError as exc:
         assert "non prouve" in str(exc).lower()
@@ -213,9 +227,10 @@ def test_checkout_propre_sans_registre_est_quiescent(tmp_path):
 def test_refuse_si_session_active(tmp_path):
     _projet(tmp_path)
     SC.CatalogueSession(tmp_path, "run_active").demarrer()                  # laissee ACTIVE
-    cible = tmp_path / "out.zip"
+    cible = _cible_externe(tmp_path)
     try:
-        AP.creer_archive_portable(tmp_path, cible, pid_vivant=lambda _p: False, horloge=HORLOGE)
+        AP.creer_archive_portable(tmp_path, cible, pid_vivant=lambda _p: False, horloge=HORLOGE,
+                                  etat_git=ETAT_GIT_PROPRE)
         assert False, "aurait du refuser"
     except AP.ArchiveRefuseeError as exc:
         assert "active" in str(exc).lower() and "run_active" in str(exc)
@@ -272,14 +287,14 @@ def test_ecriture_refuse_chemin_absolu_residuel(tmp_path):
     _projet(tmp_path)
     # une metadonnee qui contient un chemin absolu ETRANGER (autre machine) -> refus a l'ecriture.
     (tmp_path / "config.json").write_text(r'{"cache": "D:\\autre\\build\\x"}', encoding="utf-8")
-    inclus, exclus = AP.lister_pour_archive(tmp_path)
-    manifeste = AP.construire_manifeste(tmp_path, inclus, exclus, version="9.9", horloge=HORLOGE)
+    inclus, _ = AP.lister_pour_archive(tmp_path)
+    stage = tmp_path.parent / (tmp_path.name + "-stage")
     try:
-        AP.ecrire_archive(tmp_path, tmp_path / "out.zip", inclus, manifeste)
+        AP.construire_staging(tmp_path, stage, inclus)
         assert False, "aurait du refuser"
     except AP.ArchiveRefuseeError as exc:
         assert "residuel" in str(exc).lower()
-    assert not (tmp_path / "out.zip").exists()
+    assert not stage.exists()
 
 
 # ── manifeste (item 22) ──────────────────────────────────────────────────────────────────────
@@ -295,7 +310,7 @@ def test_manifeste_champs_obligatoires(tmp_path):
     assert m["schema"] == AP.SCHEMA_MANIFESTE
     assert m["hypersmart_version"] == "24.1.0" and m["git_sha"] == "deadbeef"
     assert m["python"]["version"] and m["plateforme"]["cible"] == "Windows-x64"
-    assert m["date_build_ms"] == 1_700_000_000
+    assert m["source_date_epoch"] == 1_700_000
     assert "run_ok" in m["donnees_incluses"]                        # session COMPLETE listee
     assert m["empreinte_globale"] and m["nombre_fichiers"] == len(inclus)
     # hashes exe/DLL/wheels (item 22) presents et corrects.
@@ -320,9 +335,10 @@ def test_git_sha_lu_dans_dossier_git(tmp_path):
 def test_round_trip_ok_et_reverification(tmp_path):
     _projet(tmp_path)
     _sqlite_avec_wal(tmp_path)
-    cible = tmp_path / "dist" / "hypersmart_portable.zip"
+    cible = _cible_externe(tmp_path, "roundtrip.zip")
     res = AP.creer_archive_portable(tmp_path, cible, version="24.1.0",
-                                    pid_vivant=lambda _p: False, horloge=HORLOGE)
+                                    pid_vivant=lambda _p: False, horloge=HORLOGE,
+                                    etat_git=ETAT_GIT_PROPRE)
     assert res["verification"]["ok"] is True and cible.exists()
     # l'archive contient bien le manifeste + les fichiers conserves, PAS les exclus.
     with zipfile.ZipFile(cible) as z:
@@ -338,9 +354,10 @@ def test_round_trip_ok_et_reverification(tmp_path):
 
 def test_reverification_detecte_falsification(tmp_path):
     _projet(tmp_path)
-    cible = tmp_path / "out.zip"
+    cible = _cible_externe(tmp_path)
     AP.creer_archive_portable(tmp_path, cible, version="1.0",
-                              pid_vivant=lambda _p: False, horloge=HORLOGE)
+                              pid_vivant=lambda _p: False, horloge=HORLOGE,
+                              etat_git=ETAT_GIT_PROPRE)
     # falsifie un membre APRES coup : la re-verif doit le detecter (divergence de hash).
     with zipfile.ZipFile(cible) as z:
         manifeste = json.loads(z.read(AP.NOM_MANIFESTE).decode("utf-8"))
@@ -369,8 +386,9 @@ def test_sbom_dans_le_manifeste(tmp_path):
 
 def test_extraction_de_controle_reverifie_sur_disque(tmp_path):
     _projet(tmp_path)
-    cible = tmp_path / "out.zip"
-    res = AP.creer_archive_portable(tmp_path, cible, pid_vivant=lambda _p: False, horloge=HORLOGE)
+    cible = _cible_externe(tmp_path)
+    res = AP.creer_archive_portable(tmp_path, cible, pid_vivant=lambda _p: False, horloge=HORLOGE,
+                                    etat_git=ETAT_GIT_PROPRE)
     # la creation a fait l'extraction de controle ET elle est verte.
     assert res["verification_extraction"]["ok"] is True and res["verification_extraction"]["verifies"] >= 3
     assert res["sbom"]["modules_python"] >= 1
@@ -381,8 +399,9 @@ def test_extraction_de_controle_reverifie_sur_disque(tmp_path):
 
 def test_extraction_detecte_membre_falsifie(tmp_path):
     _projet(tmp_path)
-    cible = tmp_path / "out.zip"
-    AP.creer_archive_portable(tmp_path, cible, pid_vivant=lambda _p: False, horloge=HORLOGE)
+    cible = _cible_externe(tmp_path)
+    AP.creer_archive_portable(tmp_path, cible, pid_vivant=lambda _p: False, horloge=HORLOGE,
+                              etat_git=ETAT_GIT_PROPRE)
     # falsifie un membre dans le zip -> l'extraction de controle detecte la divergence.
     import zipfile
     with zipfile.ZipFile(cible) as z:
@@ -398,8 +417,90 @@ def test_extraction_detecte_membre_falsifie(tmp_path):
 
 def test_cli_verifier(tmp_path, capsys):
     _projet(tmp_path)
-    cible = tmp_path / "out.zip"
+    cible = _cible_externe(tmp_path)
     AP.creer_archive_portable(tmp_path, cible, version="1.0",
-                              pid_vivant=lambda _p: False, horloge=HORLOGE)
+                              pid_vivant=lambda _p: False, horloge=HORLOGE,
+                              etat_git=ETAT_GIT_PROPRE)
     code = AP.main(["--verifier", str(cible)])
     assert code == 0 and "true" in capsys.readouterr().out.lower()
+
+
+def test_deux_builds_identiques_meme_commit(tmp_path):
+    root = tmp_path / "source"
+    root.mkdir()
+    _projet(root)
+    a = tmp_path / "a.zip"
+    b = tmp_path / "b.zip"
+    for cible in (a, b):
+        AP.creer_archive_portable(
+            root, cible, version="24.1.0", pid_vivant=lambda _p: False,
+            horloge=HORLOGE, etat_git=ETAT_GIT_PROPRE,
+        )
+    assert a.read_bytes() == b.read_bytes()
+    with zipfile.ZipFile(a) as z:
+        dates = {info.date_time for info in z.infolist()}
+        attributs = {info.external_attr for info in z.infolist()}
+    assert len(dates) == 1
+    assert len(attributs) == 1
+
+
+def test_sortie_dans_le_projet_refusee(tmp_path):
+    _projet(tmp_path)
+    cible = tmp_path / "archive-interdite.zip"
+    try:
+        AP.creer_archive_portable(
+            tmp_path, cible, pid_vivant=lambda _p: False,
+            horloge=HORLOGE, etat_git=ETAT_GIT_PROPRE,
+        )
+        assert False, "une sortie interne au projet doit etre refusee"
+    except AP.ArchiveRefuseeError as exc:
+        assert "exterieure" in str(exc).lower()
+    assert not cible.exists()
+
+
+def test_release_officielle_refuse_dirty_et_dev_le_grave(tmp_path):
+    _projet(tmp_path)
+    dirty = {
+        **ETAT_GIT_PROPRE,
+        "dirty": True,
+        "fichiers": [{
+            "statut": " M", "chemin": "src/app.py",
+            "sha256": "b" * 64, "taille": 12,
+        }],
+    }
+    cible_officielle = _cible_externe(tmp_path, "official.zip")
+    try:
+        AP.creer_archive_portable(
+            tmp_path, cible_officielle, mode_release="official",
+            pid_vivant=lambda _p: False, horloge=HORLOGE, etat_git=dirty,
+        )
+        assert False, "un checkout dirty ne peut pas devenir une release officielle"
+    except AP.ArchiveRefuseeError as exc:
+        assert "dirty" in str(exc).lower()
+    cible_dev = _cible_externe(tmp_path, "dev.zip")
+    AP.creer_archive_portable(
+        tmp_path, cible_dev, version="24.1.0", mode_release="developpement",
+        pid_vivant=lambda _p: False, horloge=HORLOGE, etat_git=dirty,
+    )
+    with zipfile.ZipFile(cible_dev) as z:
+        manifeste = json.loads(z.read(AP.NOM_MANIFESTE))
+    assert manifeste["hypersmart_version"] == "24.1.0-dirty"
+    assert manifeste["etat_git"]["fichiers"] == dirty["fichiers"]
+
+
+def test_pointeur_git_lfs_non_materialise_refuse(tmp_path):
+    _projet(tmp_path)
+    (tmp_path / "modele.bin").write_bytes(
+        b"version https://git-lfs.github.com/spec/v1\n"
+        b"oid sha256:" + b"a" * 64 + b"\nsize 123\n"
+    )
+    cible = _cible_externe(tmp_path)
+    try:
+        AP.creer_archive_portable(
+            tmp_path, cible, pid_vivant=lambda _p: False,
+            horloge=HORLOGE, etat_git=ETAT_GIT_PROPRE,
+        )
+        assert False, "le pointeur LFS doit etre refuse"
+    except AP.ArchiveRefuseeError as exc:
+        assert "lfs" in str(exc).lower()
+    assert not cible.exists()
