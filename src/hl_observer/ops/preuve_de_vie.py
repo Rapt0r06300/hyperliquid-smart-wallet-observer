@@ -185,16 +185,19 @@ def format_readiness(etat: EtatRuntime) -> str:
 
 # ── Lecture réelle (sur la machine de Flo) ──────────────────────────────────────────────────────────
 def _pid_vivant_reel(pid: int) -> bool:
+    """Interroge l'existence du processus sans jamais lui envoyer de signal.
+
+    Sous Windows, ``os.kill(pid, 0)`` n'est pas un test neutre : ``0`` vaut
+    ``CTRL_C_EVENT``. Le garde canonique utilise l'API Win32 en lecture seule
+    et conserve le comportement POSIX sûr sur les autres plateformes.
+    """
     try:
         import psutil
         return psutil.pid_exists(int(pid))
-    except Exception:  # noqa: BLE001 — psutil absent -> repli os.kill
-        import os
-        try:
-            os.kill(int(pid), 0)
-            return True
-        except (OSError, ValueError):
-            return False
+    except Exception:  # noqa: BLE001 — psutil absent ou indisponible
+        from hl_observer.backtesting.runtime_guards import parent_alive
+
+        return parent_alive(pid)
 
 
 def lire_heartbeats_reels(root: str | Path, sources: Sequence[SourceAttendue]) -> dict[str, dict]:
