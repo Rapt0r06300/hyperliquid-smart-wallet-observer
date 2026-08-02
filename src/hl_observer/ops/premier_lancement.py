@@ -171,6 +171,77 @@ def verifier_sessions_preservees(root: str | Path) -> dict:
                 % (len(sessions), len(completes)))
 
 
+# ── item 10 : espace disque / imports / DLL / integrite du manifeste ──────────────────────────
+def verifier_espace_disque(root: str | Path, *, min_mo: int = 200) -> dict:
+    """AVERT si l'espace libre sous la racine est bas (une collecte/DB a besoin de place)."""
+    import shutil
+    try:
+        libre_mo = shutil.disk_usage(str(root)).free // (1024 * 1024)
+    except OSError as exc:
+        return _res("disque", AVERT, "espace disque indeterminable : %s" % exc)
+    if libre_mo < min_mo:
+        return _res("disque", AVERT, "espace libre bas : %d Mo (< %d Mo)" % (libre_mo, min_mo))
+    return _res("disque", OK, "espace libre : %d Mo" % libre_mo)
+
+
+CRITIQUES_STDLIB = ("json", "sqlite3", "hashlib", "ssl", "ctypes", "zipfile", "socket")
+
+
+def verifier_imports(modules: tuple[str, ...] | None = None, *, importateur=None) -> dict:
+    """BLOQUANT : les modules CRITIQUES doivent s'importer (interpreteur/deps fonctionnels). Par defaut
+    des essentiels stdlib qui prouvent que le Python embarque tourne ; l'appelant peut passer la liste
+    complete des deps (fastapi, numpy...). `importateur` injectable pour test."""
+    import importlib
+    imp = importateur or importlib.import_module
+    mods = modules if modules is not None else CRITIQUES_STDLIB
+    echoues: list[str] = []
+    for m in mods:
+        try:
+            imp(m)
+        except Exception:  # noqa: BLE001
+            echoues.append(m)
+    if echoues:
+        return _res("imports", ECHEC, "modules critiques non importables : %s" % ", ".join(echoues))
+    return _res("imports", OK, "%d module(s) critique(s) importes" % len(mods))
+
+
+def verifier_dll(root: str | Path, *, systeme: str | None = None, dossier_python: str | Path | None = None) -> dict:
+    """Sur Windows : le Python embarque doit fournir ses DLL (python*.dll). Hors Windows = INFO."""
+    systeme = systeme if systeme is not None else platform.system()
+    if systeme != "Windows":
+        return _res("dll", INFO, "verif DLL propre a Windows (ici %s)" % systeme)
+    root = Path(root)
+    candidats = [Path(dossier_python)] if dossier_python else [root / "tools" / "python",
+                                                               root / "portable_runtime" / "python"]
+    for d in candidats:
+        if d.is_dir():
+            dlls = list(d.glob("python*.dll"))
+            if dlls:
+                return _res("dll", OK, "DLL Python embarquees presentes (%d)" % len(dlls))
+            return _res("dll", ECHEC, "Python embarque sans python*.dll dans %s" % d)
+    return _res("dll", AVERT, "aucun Python embarque trouve (repli systeme ?)")
+
+
+def verifier_manifeste(root: str | Path) -> dict:
+    """Integrite du manifeste portable s'il existe (PORTABLE_MANIFEST.json ou runtime portable). Present
+    mais corrompu = ECHEC ; absent = INFO (un dossier non encore prepare reste analysable)."""
+    root = Path(root)
+    for rel in ("PORTABLE_MANIFEST.json",
+                "portable_runtime/portable_runtime_manifest.json",
+                "tools/python/portable_runtime_manifest.json"):
+        p = root / rel
+        if p.is_file():
+            try:
+                m = json.loads(p.read_text(encoding="utf-8"))
+            except (OSError, ValueError) as exc:
+                return _res("manifeste", ECHEC, "manifeste %s illisible : %s" % (rel, exc))
+            if not isinstance(m, dict) or not (m.get("schema") or m.get("python_version")
+                                               or m.get("empreinte_globale")):
+                return _res("manifeste", ECHEC, "manifeste %s sans champ d'integrite" % rel)
+            return _res("manifeste", OK, "manifeste %s valide" % rel)
+    return _res("manifeste", INFO, "aucun manifeste portable (dossier non encore prepare)")
+
+
 # ── ACTION : regeneration de l'identite machine ───────────────────────────────────────────────
 def regenerer_identite(root: str | Path, *, generateur: Callable[[], str] | None = None) -> dict:
     """item 21 : purge l'identite machine-specifique qu'une archive copiee aurait pu conserver
@@ -200,6 +271,37 @@ def regenerer_identite(root: str | Path, *, generateur: Callable[[], str] | None
             purges.append(lock.relative_to(root).as_posix())
         except OSError:
             pass
+    # item 6 : dumps de STATUT volatils machine-specifiques (chemins absolus de l'ancien PC).
+    for motif in ("runtime/debug_status*.json", "runtime/debug_fusion_status*.json"):
+        for p in root.glob(motif):
+            try:
+                p.unlink()
+                purges.append(p.relative_to(root).as_posix())
+            except OSError:
+                pass
+    # item 6 : caches compiles (__pycache__) — propres a une version/chemin, jamais transportes.
+    n_caches = 0
+    for pc in list(root.rglob("__pycache__")):
+        if ".git" in pc.parts:
+            continue
+        try:
+            import shutil as _sh
+            _sh.rmtree(pc, ignore_errors=True)
+            n_caches += 1
+        except OSError:
+            pass
+    if n_caches:
+        purges.append("__pycache__ x%d" % n_caches)
+    # item 6 : tache planifiee heritee (chemin absolu de l'ancien PC) — seulement sur Windows.
+    if platform.system() == "Windows":
+        try:
+            import subprocess
+            r = subprocess.run(["schtasks", "/Delete", "/TN", "HyperSmart_VerifOOS", "/F"],
+                               capture_output=True, timeout=15)
+            if r.returncode == 0:
+                purges.append("schtasks:HyperSmart_VerifOOS")
+        except Exception:  # noqa: BLE001 — absence de tache = rien a purger
+            pass
     mid = generateur()
     mp = root / MACHINE_ID_RELPATH
     mp.parent.mkdir(parents=True, exist_ok=True)
@@ -213,6 +315,7 @@ def verifier_premier_lancement(root: str | Path, *, os_info: dict | None = None,
                                sonde_port: Callable[[int], bool] | None = None,
                                sonde_reseau: Callable[[], dict] | None = None,
                                generateur_id: Callable[[], str] | None = None,
+                               importateur_imports=None, dossier_python: str | Path | None = None,
                                regenerer: bool = True) -> dict:
     """Enchaine les controles + (option) la regeneration d'identite. GO seulement si AUCUN ECHEC
     bloquant. Les AVERTISSEMENT n'empechent pas le GO (l'analyse marche, la collecte s'adaptera)."""
@@ -221,10 +324,14 @@ def verifier_premier_lancement(root: str | Path, *, os_info: dict | None = None,
     checks = [
         verifier_os_arch(systeme=oi.get("systeme"), machine=oi.get("machine"), version=oi.get("version")),
         verifier_droits_ecriture(root),
+        verifier_espace_disque(root),                          # item 10
         verifier_chemin_espaces_accents(root),
         verifier_horloge(maintenant_ms=maintenant_ms),
         verifier_port(sonde=sonde_port),
         verifier_reseau_tls(sonde=sonde_reseau),
+        verifier_imports(importateur=importateur_imports),     # item 10 (BLOQUANT)
+        verifier_dll(root, systeme=oi.get("systeme"), dossier_python=dossier_python),  # item 10
+        verifier_manifeste(root),                              # item 10
         verifier_aucune_cle(root),
         verifier_sessions_preservees(root),
     ]
@@ -264,10 +371,12 @@ def main(argv: list[str] | None = None) -> int:
     return 0 if verdict["go"] else 7
 
 
-__all__ = ["OK", "INFO", "AVERT", "ECHEC", "PORT_UI", "MACHINE_ID_RELPATH", "verifier_os_arch",
-           "verifier_droits_ecriture", "verifier_chemin_espaces_accents", "verifier_horloge",
-           "verifier_port", "verifier_reseau_tls", "verifier_aucune_cle", "verifier_sessions_preservees",
-           "regenerer_identite", "verifier_premier_lancement", "formater", "main"]
+__all__ = ["OK", "INFO", "AVERT", "ECHEC", "PORT_UI", "MACHINE_ID_RELPATH", "CRITIQUES_STDLIB",
+           "verifier_os_arch", "verifier_droits_ecriture", "verifier_espace_disque",
+           "verifier_chemin_espaces_accents", "verifier_horloge", "verifier_port", "verifier_reseau_tls",
+           "verifier_imports", "verifier_dll", "verifier_manifeste", "verifier_aucune_cle",
+           "verifier_sessions_preservees", "regenerer_identite", "verifier_premier_lancement",
+           "formater", "main"]
 
 
 if __name__ == "__main__":                              # pragma: no cover

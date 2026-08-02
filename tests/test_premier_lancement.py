@@ -82,6 +82,55 @@ def test_sessions_preservees_comptees(tmp_path):
     assert r["statut"] == PL.OK and "2 session" in r["detail"] and "2 COMPLETE" in r["detail"]
 
 
+# ── item 10 : espace disque / imports / DLL / manifeste ──────────────────────────────────────
+def test_espace_disque(tmp_path):
+    assert PL.verifier_espace_disque(tmp_path, min_mo=0)["statut"] == PL.OK
+    r = PL.verifier_espace_disque(tmp_path, min_mo=10**9)          # seuil absurde -> AVERT
+    assert r["statut"] == PL.AVERT
+
+
+def test_imports_bloquant(tmp_path):
+    assert PL.verifier_imports(("json", "hashlib"))["statut"] == PL.OK
+    r = PL.verifier_imports(("module_qui_nexiste_pas_123",))
+    assert r["statut"] == PL.ECHEC and "module_qui_nexiste_pas_123" in r["detail"]
+    # importateur injectable : simule un echec d'import de dep.
+    def _faux(m):
+        raise ImportError("simule")
+    assert PL.verifier_imports(("numpy",), importateur=_faux)["statut"] == PL.ECHEC
+
+
+def test_dll_info_hors_windows_et_echec_si_embed_sans_dll(tmp_path):
+    assert PL.verifier_dll(tmp_path, systeme="Linux")["statut"] == PL.INFO
+    # Windows + dossier python embarque SANS python*.dll -> ECHEC.
+    d = tmp_path / "tools" / "python"
+    d.mkdir(parents=True)
+    (d / "python.exe").write_bytes(b"MZ")
+    assert PL.verifier_dll(tmp_path, systeme="Windows", dossier_python=d)["statut"] == PL.ECHEC
+    (d / "python314.dll").write_bytes(b"MZ")
+    assert PL.verifier_dll(tmp_path, systeme="Windows", dossier_python=d)["statut"] == PL.OK
+
+
+def test_manifeste_integrite(tmp_path):
+    assert PL.verifier_manifeste(tmp_path)["statut"] == PL.INFO      # absent -> INFO
+    (tmp_path / "PORTABLE_MANIFEST.json").write_text('{"schema":"x","empreinte_globale":"abc"}',
+                                                     encoding="utf-8")
+    assert PL.verifier_manifeste(tmp_path)["statut"] == PL.OK
+    (tmp_path / "PORTABLE_MANIFEST.json").write_text("{ pas du json", encoding="utf-8")
+    assert PL.verifier_manifeste(tmp_path)["statut"] == PL.ECHEC     # present mais corrompu -> ECHEC
+
+
+def test_regen_purge_caches_compiles_et_status_volatils(tmp_path):
+    # item 6 : caches compiles + dumps de statut volatils sont purges.
+    (tmp_path / "src" / "pkg" / "__pycache__").mkdir(parents=True)
+    (tmp_path / "src" / "pkg" / "__pycache__" / "m.pyc").write_bytes(b"x")
+    (tmp_path / "runtime").mkdir()
+    (tmp_path / "runtime" / "debug_status_30s.json").write_text('{"p":"C:\\\\old"}', encoding="utf-8")
+    res = PL.regenerer_identite(tmp_path, generateur=lambda: "M")
+    assert not (tmp_path / "src" / "pkg" / "__pycache__").exists()
+    assert not (tmp_path / "runtime" / "debug_status_30s.json").exists()
+    assert any("__pycache__" in x for x in res["purges"])
+
+
 # ── regeneration d'identite (le coeur de l'item 21) ──────────────────────────────────────────
 def test_regenere_identite_purge_et_preserve(tmp_path):
     # etat machine-specifique herite d'une archive copiee...
