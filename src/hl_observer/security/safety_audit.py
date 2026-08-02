@@ -32,9 +32,19 @@ EXCLUDED_DIRS = {
     "runtime",
     "tmp_pytest",
     "venv",
+    "_validation_workspace",
 }
+EXCLUDED_DIR_PREFIXES = (".portable-",)
 EXCLUDED_RELATIVE_PREFIXES = {
     ("runtime", "research", "github_repos_v24"),
+    # Runtime CPython tiers : son integrite est verifiee par le wheelhouse lock et
+    # le manifeste portable. Ses sources de dependances ne sont pas notre code.
+    ("tools", "python"),
+}
+NON_OPERATIONAL_POLICY_FILES = {
+    "mainnet_guard.py",
+    "safety_audit.py",
+    "validation_portable.py",
 }
 
 
@@ -64,7 +74,9 @@ def _iter_scannable_files(root: Path) -> list[Path]:
         dirnames[:] = [
             d
             for d in dirnames
-            if d not in EXCLUDED_DIRS and not _is_excluded_project_path(root_resolved, current / d)
+            if d not in EXCLUDED_DIRS
+            and not d.startswith(EXCLUDED_DIR_PREFIXES)
+            and not _is_excluded_project_path(root_resolved, current / d)
         ]
         for name in filenames:
             path = current / name
@@ -112,7 +124,7 @@ def run_safety_audit(root: str | Path = ".") -> SafetyAuditResult:
     source_files = [
         path
         for path in (project_root / "src").rglob("*.py")
-        if path.name not in {"safety_audit.py", "mainnet_guard.py"}
+        if path.name not in NON_OPERATIONAL_POLICY_FILES
     ]
     source_text = "\n".join(path.read_text(encoding="utf-8", errors="ignore") for path in source_files)
     forbidden_method = "place" + "_mainnet_order"
