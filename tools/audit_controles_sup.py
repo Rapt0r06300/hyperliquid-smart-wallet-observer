@@ -178,20 +178,28 @@ def controle_sante_runtime(racine: Path = RACINE, *, maintenant: float | None = 
                              % (e["nom"], e["age_minutes"], e["limite_minutes"]))
     except Exception as exc:  # noqa: BLE001
         warns.append("etat collecteurs illisible : %s" % exc)
+    import json
+    p = racine / "runtime" / "data" / "carry_spot_inputs.json"
     try:
-        import json
-        p = racine / "runtime" / "data" / "carry_spot_inputs.json"
         age_min = (now - p.stat().st_mtime) / 60.0
         if age_min > 15.0:
             warns.append("carry_spot_inputs.json perime (%.0f min > 15) : le carry refuse tout "
                          "(INPUTS_SPOT_PERIMES_NO_TRADE) tant que le feeder n'ecrit pas" % age_min)
-        led = racine / "runtime" / "data" / "carry_paper_ledger.jsonl"
+    except FileNotFoundError:
+        warns.append("carry_spot_inputs.json absent : etat carry indisponible")
+    except OSError as exc:
+        warns.append("carry_spot_inputs.json illisible : %s" % exc)
+
+    led = racine / "runtime" / "data" / "carry_paper_ledger.jsonl"
+    try:
         if led.exists():
             evts = [json.loads(l) for l in led.read_text(encoding="utf-8").splitlines() if l.strip()]
             pnl = sum(e.get("realized_net_pnl_usdc") or 0.0 for e in evts if e.get("kind") == "CLOSE")
             n = sum(1 for e in evts if e.get("kind") == "CLOSE")
             warns.append("info: ledger carry = %+.4f $ realises sur %d fermeture(s) "
                          "(reference pour verifier le dashboard)" % (pnl, n))
+        else:
+            warns.append("info: ledger carry = indisponible (fichier absent, aucun PnL invente)")
     except Exception as exc:  # noqa: BLE001
-        warns.append("lecture runtime partielle : %s" % exc)
+        warns.append("info: ledger carry = illisible (%s)" % exc)
     return ("photo operationnelle au moment de l'audit (n'affecte jamais le verdict)", warns)

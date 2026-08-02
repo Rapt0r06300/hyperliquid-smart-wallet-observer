@@ -116,3 +116,13 @@ def test_la_sante_runtime_du_REPO_liste_le_ledger():
     resume, warns = SUP.controle_sante_runtime(RACINE)
     assert any("ledger carry" in w for w in warns), (
         "la photo doit citer le PnL du ledger comme reference croisee du dashboard")
+
+
+def test_un_input_carry_absent_ne_masque_pas_un_ledger_present(tmp_path):
+    data = tmp_path / "runtime" / "data"
+    data.mkdir(parents=True)
+    (data / "carry_paper_ledger.jsonl").write_text(
+        '{"kind":"CLOSE","realized_net_pnl_usdc":1.25}\n', encoding="utf-8"
+    )
+    _, warns = SUP.controle_sante_runtime(tmp_path)
+    assert any("ledger carry = +1.2500" in w for w in warns), warns
