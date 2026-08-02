@@ -1,14 +1,14 @@
-"""[LANCEUR items 7-c?blage & 9] Orchestration de session de r?colte : relie la COLLECTE r?elle au
+"""[LANCEUR items 7-câblage & 9] Orchestration de session de récolte : relie la COLLECTE réelle au
 catalogue canonique (session_catalog) et au moniteur.
 
-Au d?marrage (apr?s READY_CORE), le lanceur ouvre UNE session ACTIVE, ?crit un pointeur `COURANTE.json`
-(pour que moniteur/ANALYSER retrouvent la session vivante), et D?CLARE toutes les sources attendues du
-profil HARVEST dans le catalogue ? chacune avec sa sant?/ses compteurs d?riv?s du heartbeat r?el, ou sa
-raison d'absence (source non impl?ment?e / aucun heartbeat). ? l'arr?t propre, il cl?t la session
-(session COMPLETE seulement si tout est v?rifi? ? item 8).
+Au démarrage (après READY_CORE), le lanceur ouvre UNE session ACTIVE, écrit un pointeur `COURANTE.json`
+(pour que moniteur/ANALYSER retrouvent la session vivante), et DÉCLARE toutes les sources attendues du
+profil HARVEST dans le catalogue — chacune avec sa santé/ses compteurs dérivés du heartbeat réel, ou sa
+raison d'absence (source non implémentée / aucun heartbeat). À l'arrêt propre, il clôt la session
+(session COMPLETE seulement si tout est vérifié — item 8).
 
-CLI (appel?e par LANCER_HYPERSMART.cmd) : `ouvrir` ? `enregistrer` ? `cloturer` ? `status`.
-0 r?seau, 0 ordre. Aucune donn?e fabriqu?e : une source sans preuve reste D?CLAR?E absente.
+CLI (appelée par LANCER_HYPERSMART.cmd) : `ouvrir` · `enregistrer` · `cloturer` · `status`.
+0 réseau, 0 ordre. Aucune donnée fabriquée : une source sans preuve reste DÉCLARÉE absente.
 """
 from __future__ import annotations
 
@@ -49,7 +49,7 @@ def run_id_courant(root: str | Path) -> str | None:
 def ouvrir_session_harvest(root: str | Path, *, run_id: str | None = None, git_head: str | None = None,
                            sources: Sequence[SourceAttendue] = SOURCES_HARVEST,
                            now_ms: float | None = None, horloge=time.time) -> tuple[str, dict]:
-    """Cr?e la session ACTIVE, ?crit le pointeur COURANTE, et d?clare toutes les sources attendues."""
+    """Crée la session ACTIVE, écrit le pointeur COURANTE, et déclare toutes les sources attendues."""
     rid = run_id or SC.nouveau_run_id("harvest", horloge=horloge)
     cat = SC.CatalogueSession(root, rid)
     cat.demarrer(git_head=git_head, contexte={"profil": "HARVEST"}, horloge=horloge)
@@ -63,9 +63,9 @@ def enregistrer_sources_declarees(root: str | Path, run_id: str, *,
                                   sources: Sequence[SourceAttendue] = SOURCES_HARVEST,
                                   now_ms: float, artefacts: Mapping[str, str] | None = None,
                                   pid_vivant=_pid_vivant_reel) -> dict:
-    """D?clare/actualise CHAQUE source attendue dans le catalogue (item 3 : jamais omise). Les compteurs
-    (?v?nements, gaps, reconnects, stale, hors-ordre) et la sant? viennent du heartbeat R?EL ; une source
-    non impl?ment?e ou sans heartbeat est D?CLAR?E absente avec sa raison (jamais invent?e)."""
+    """Déclare/actualise CHAQUE source attendue dans le catalogue (item 3 : jamais omise). Les compteurs
+    (événements, gaps, reconnects, stale, hors-ordre) et la santé viennent du heartbeat RÉEL ; une source
+    non implémentée ou sans heartbeat est DÉCLARÉE absente avec sa raison (jamais inventée)."""
     artefacts = dict(artefacts or {})
     hbs = lire_heartbeats_reels(root, sources)
     metriques = metriques_depuis_heartbeats(hbs)
@@ -117,7 +117,7 @@ def enregistrer_sources_declarees(root: str | Path, run_id: str, *,
             cat.enregistrer_source(entree)
             resume["declarees"] += 1
         except SC.SessionFigeeError:
-            break                    # session d?j? fig?e : on n'?crit plus (honn?te)
+            break                    # session déjà figée : on n'écrit plus (honnête)
     return resume
 
 
@@ -125,24 +125,24 @@ PROCESSUS_ECRIVAINS = ("ui", "poller", "stream", "moniteur", "resource_watcher",
 
 
 def preuve_writers_arretes(root: str | Path, *, pid_vivant=_pid_vivant_reel) -> tuple[bool, list[str]]:
-    """Preuve IND?PENDANTE et FAIL-CLOSED (item 8) que TOUS les writers sont arr?t?s. Un registre PID
-    absent / illisible / sans la cl? `collecteurs` = arr?t NON prouv? (on ne suppose jamais l'arr?t).
-    On contr?le les collecteurs ET les autres ?crivains connus (ui/poller/stream/moniteur/resource
-    watcher/moteur). Rend (arretes, [motifs/noms vivants]). Ambigu?t? = non prouv?."""
+    """Preuve INDÉPENDANTE et FAIL-CLOSED (item 8) que TOUS les writers sont arrêtés. Un registre PID
+    absent / illisible / sans la clé `collecteurs` = arrêt NON prouvé (on ne suppose jamais l'arrêt).
+    On contrôle les collecteurs ET les autres écrivains connus (ui/poller/stream/moniteur/resource
+    watcher/moteur). Rend (arretes, [motifs/noms vivants]). Ambiguïté = non prouvé."""
     try:
         from hl_observer.ops.registre_pids import lire_registre
         reg = lire_registre(root)
     except Exception:  # noqa: BLE001
-        return False, ["REGISTRE_ILLISIBLE"]          # fail-closed : illisible ? arr?t?
+        return False, ["REGISTRE_ILLISIBLE"]          # fail-closed : illisible ≠ arrêté
     if not isinstance(reg, dict) or not reg:
-        return False, ["REGISTRE_ABSENT"]             # fail-closed : pas de registre = arr?t non prouv?
+        return False, ["REGISTRE_ABSENT"]             # fail-closed : pas de registre = arrêt non prouvé
     if "collecteurs" not in reg:
-        return False, ["REGISTRE_INCOMPLET"]          # corrompu / partiel = arr?t non prouv?
+        return False, ["REGISTRE_INCOMPLET"]          # corrompu / partiel = arrêt non prouvé
     collecteurs = reg.get("collecteurs")
     if not isinstance(collecteurs, dict):
         return False, ["REGISTRE_CORROMPU"]
     tous: dict[str, Any] = dict(collecteurs)
-    for cle in PROCESSUS_ECRIVAINS:                    # double contr?le : autres process ecrivains
+    for cle in PROCESSUS_ECRIVAINS:                    # double contrôle : autres process ecrivains
         v = reg.get(cle)
         if isinstance(v, int):
             tous[cle] = v
@@ -152,20 +152,20 @@ def preuve_writers_arretes(root: str | Path, *, pid_vivant=_pid_vivant_reel) -> 
             if isinstance(pid, int) and pid_vivant(int(pid)):
                 vivants.append(str(nom))
         except Exception:  # noqa: BLE001
-            vivants.append("%s?" % nom)                # ambigu?t? sur un PID = non prouv? (fail-closed)
+            vivants.append("%s?" % nom)                # ambiguïté sur un PID = non prouvé (fail-closed)
     return (not vivants), vivants
 
 
 def cloturer_session_courante(root: str | Path, *, writers_arretes: bool | None = None,
                               horloge=time.time, pid_vivant=_pid_vivant_reel) -> dict:
-    """Cl?t la session point?e par COURANTE (items 4 & 8). La preuve d'arr?t des writers est CALCUL?E
-    ind?pendamment (registre PID) : un `--writers-arretes` aveugle ne suffit JAMAIS. Si un collecteur est
-    encore vivant ? writers_arretes=False ? QUARANTINED (WRITERS_ENCORE_ACTIFS). Sans pointeur ? rien."""
+    """Clôt la session pointée par COURANTE (items 4 & 8). La preuve d'arrêt des writers est CALCULÉE
+    indépendamment (registre PID) : un `--writers-arretes` aveugle ne suffit JAMAIS. Si un collecteur est
+    encore vivant → writers_arretes=False → QUARANTINED (WRITERS_ENCORE_ACTIFS). Sans pointeur → rien."""
     rid = run_id_courant(root)
     if not rid:
         return {"statut": "AUCUNE_SESSION", "motifs": ["pas de session courante"]}
     arretes, vivants = preuve_writers_arretes(root, pid_vivant=pid_vivant)
-    # la PREUVE prime ; si l'appelant atteste l'arr?t mais qu'un writer vit encore, la preuve gagne.
+    # la PREUVE prime ; si l'appelant atteste l'arrêt mais qu'un writer vit encore, la preuve gagne.
     effectif = bool(arretes) if writers_arretes is None else (bool(writers_arretes) and bool(arretes))
     verdict = SC.CatalogueSession(root, rid).cloturer(writers_arretes=effectif, horloge=horloge)
     verdict.update({"run_id": rid, "writers_vivants": vivants, "preuve_writers_arretes": arretes})

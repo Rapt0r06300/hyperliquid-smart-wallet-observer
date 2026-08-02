@@ -43,13 +43,17 @@ def acquerir_mutex(nom: str) -> tuple[bool | None, object]:
     return True, handle
 
 
-def acquerir(root: Path, nom: str, *, now_ms: float | None = None) -> tuple[bool, dict]:
-    """Tente d'acquérir le verrou. Rend (ok, info). ok=False si une instance FRAÎCHE tient déjà le verrou."""
+def acquerir(root: Path, nom: str, *, now_ms: float | None = None,
+             ttl_ms: float | None = None) -> tuple[bool, dict]:
+    """Tente d'acquérir le verrou. Rend (ok, info). ok=False si une instance FRAÎCHE tient déjà le verrou.
+    `ttl_ms` (défaut TTL_MS=30 s) : un collecteur rafraîchit son heartbeat, mais le LANCEUR (item 11) qui
+    ne rafraîchit pas pendant le warmup passe un TTL plus long pour couvrir toute la fenêtre de démarrage."""
     now = float(now_ms if now_ms is not None else time.time() * 1000)
+    ttl = float(ttl_ms if ttl_ms is not None else TTL_MS)
     p = _p(root, nom)
     p.parent.mkdir(parents=True, exist_ok=True)
     cur = _lire(p)
-    if cur and (now - float(cur.get("heartbeat_ms") or 0)) < TTL_MS and cur.get("pid") != os.getpid():
+    if cur and (now - float(cur.get("heartbeat_ms") or 0)) < ttl and cur.get("pid") != os.getpid():
         return False, {"raison": "INSTANCE_DEJA_ACTIVE", "detenteur": cur}
     info = {"pid": os.getpid(), "run_id": "run-" + uuid.uuid4().hex[:12], "acquis_ms": int(now), "heartbeat_ms": int(now)}
     if cur:

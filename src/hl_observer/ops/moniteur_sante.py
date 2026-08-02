@@ -13,7 +13,8 @@ import os
 from pathlib import Path
 from typing import Any, Callable, Mapping, Sequence
 
-from hl_observer.ops.preuve_de_vie import SOURCES_HARVEST, SourceAttendue, lire_heartbeats_reels
+from hl_observer.ops.preuve_de_vie import (SOURCES_HARVEST, SourceAttendue, lire_heartbeats_reels,
+                                           metriques_depuis_heartbeats)
 from hl_observer.ops.preuve_de_vie import _pid_vivant_reel as _pid_vivant
 from hl_observer.ops.registre_pids import lire_registre
 from hl_observer.ops.tableau_sante_collecteurs import Tableau, construire_tableau, format_tableau, ligne_journal
@@ -27,7 +28,19 @@ def lire_etat_reel(root: str | Path, sources: Sequence[SourceAttendue]) -> tuple
     hbs = lire_heartbeats_reels(root, sources)
     reg = lire_registre(root)
     pids = {k: int(v) for k, v in dict(reg.get("collecteurs") or {}).items() if isinstance(v, int)}
-    metriques: dict[str, Any] = {}                # feed_quality (gaps/reconnects…) branché ici si dispo
+    # feed_quality RÉEL (item 2/9) : gaps/reconnects/stale/hors-ordre écrits par les collecteurs, lus du
+    # heartbeat — le moniteur affiche donc l'état de flux réel, jamais un tableau vert en trompe-l'œil.
+    # On traduit les clés de readiness (gaps_critiques/stale/hors_ordre) vers les clés canoniques du
+    # tableau (gaps/stale_events/out_of_order/reconnects) pour qu'elles remontent réellement.
+    brut = metriques_depuis_heartbeats(hbs)
+    metriques: dict[str, Any] = {}
+    for nom, m in brut.items():
+        fusion = dict(m)
+        fusion.setdefault("gaps", int(m.get("gaps_critiques", 0)))
+        fusion.setdefault("reconnects", int(m.get("reconnects", 0)))
+        fusion.setdefault("stale_events", int(bool(m.get("stale", False))))
+        fusion.setdefault("out_of_order", int(m.get("hors_ordre", 0)))
+        metriques[nom] = fusion
     return hbs, pids, metriques
 
 

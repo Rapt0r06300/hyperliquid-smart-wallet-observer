@@ -137,9 +137,8 @@ def test_la_racine_contient_les_deux_lanceurs_officiels():
         "POUSSER-GITHUB-FORCE.cmd",
         "POUSSER_TOUT_LE_TRAVAIL.cmd",
         "REPARER_ET_POUSSER.cmd",
-        "CREER_ARCHIVE_PORTABLE.cmd",
-        "COMMITTER_B1_B2.cmd",
         "RECETTE-WINDOWS.cmd",
         "RECETTE-LANCEUR.cmd",
+        "CREER_ARCHIVE_PORTABLE.cmd",   # item 20 : outil de maintenance (archive portable), hors hot path
     }
     assert cmd_racine <= officiels | outils_conserves

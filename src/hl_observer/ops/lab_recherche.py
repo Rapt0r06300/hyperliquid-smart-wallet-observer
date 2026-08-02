@@ -15,8 +15,9 @@ from typing import Any
 
 from hl_observer.mega_cablage.pipeline import MegaCablage
 from hl_observer.mega_cablage.runner import _EquityMap
-from hl_observer.mega_cablage.replay_driver import separer_temporel
+from hl_observer.mega_cablage.replay_driver import separer_temporel, separer_par_episodes
 from hl_observer.ops import lab_metriques as M
+from hl_observer.paper_trading import latency_truth as _LT
 
 ESPACE_DEFAUT = {
     "notional_max": [100.0, 300.0, 500.0],
@@ -24,7 +25,31 @@ ESPACE_DEFAUT = {
     "min_fill_ratio": [0.5, 0.85],
     "seuil_edge_cross_venue_bps": [1.0, 5.0],
 }
-_STRESS = {"ADVERSE_P95": 1.5, "ADVERSE_P99": 2.5}
+# item 12 : sévérité de QUEUE croissante (P95 = queue modérée, P99 = queue extrême). Ce n'est PAS un
+# multiplicateur de fee_bps : il pondère les composantes de MARCHÉ (spread/latence/slippage/adverse).
+_SEVERITE_ADVERSE = {"ADVERSE_P95": 1.0, "ADVERSE_P99": 1.9}
+
+
+def cout_adverse_bps(config: dict[str, Any], *, niveau: str, spread_bps: float | None = None,
+                     delai_sec: float = 1.0) -> dict[str, Any]:
+    """Sur-coût adverse RÉEL (item 12), en bps, EN PLUS des frais de base — jamais un simple fee_bps×1.5.
+    Compose des composantes DISTINCTES et mesurables/majorées : demi-spread, latence causale
+    (latency_truth, STRESS_ONLY), slippage/profondeur, adverse selection. La sévérité de queue (P95<P99)
+    pondère les composantes de marché. Missed/partial fills sont modélisés séparément (min_fill_ratio
+    durci dans `_rejouer_adverse`). Gaps/reconnects/panne de venue : ajoutés depuis les métriques réelles
+    du candidat quand elles existent (sinon documentés absents, jamais inventés)."""
+    fee = float(config.get("fee_bps", 2.5))
+    demi_spread = float(spread_bps if spread_bps is not None else fee)     # défaut prudent ~ frais
+    lat = float(_LT.latence_scalaire_stress_bps(float(delai_sec), coeff_bps_per_sec=0.20,
+                                                cap_bps=15.0).get("latency_stress_bps") or 0.0)
+    sev = _SEVERITE_ADVERSE.get(niveau, 1.0)
+    slippage = 0.5 * fee * sev                     # slippage/profondeur croît avec la taille et la queue
+    adverse_sel = 0.5 * demi_spread * sev          # sélection adverse (on se fait choisir aux pires prix)
+    surcout = demi_spread * sev + lat * sev + slippage + adverse_sel
+    return {"surcout_bps": round(surcout, 4), "fee_base_bps": round(fee, 4),
+            "demi_spread_bps": round(demi_spread, 4), "latence_bps": round(lat, 4),
+            "slippage_bps": round(slippage, 4), "adverse_selection_bps": round(adverse_sel, 4),
+            "severite": sev, "niveau": niveau, "etiquette": "STRESS_ONLY"}
 
 
 def _hash_donnees(evenements: list[dict[str, Any]]) -> str:
@@ -66,12 +91,29 @@ def _rejouer_riche(evenements: list[dict[str, Any]], *, config: dict[str, Any],
             "cross_venue": pipe.resume()["cross_venue_executes"]}
 
 
+def _rejouer_adverse(evenements: list[dict[str, Any]], *, config: dict[str, Any], niveau: str,
+                     leader_equity_defaut: Any) -> dict[str, Any]:
+    """Rejoue un segment sous STRESS ADVERSE réel : frais + sur-coût adverse composé (spread/latence/
+    slippage/adverse selection) AJOUTÉ aux fees, et min_fill_ratio DURCI (modélise missed/partial fills
+    et sélection adverse). item 12 : un vrai stress mesuré, jamais fee_bps×1.5."""
+    comp = cout_adverse_bps(config, niveau=niveau)
+    durcissement = 0.15 if niveau == "ADVERSE_P99" else 0.08
+    cfg = {**config,
+           "fee_bps": round(float(config["fee_bps"]) + comp["surcout_bps"], 6),
+           "min_fill_ratio": min(0.98, float(config["min_fill_ratio"]) + durcissement)}
+    r = _rejouer_riche(evenements, config=cfg, leader_equity_defaut=leader_equity_defaut)
+    r["cout_adverse"] = comp
+    return r
+
+
 def evaluer_config(evenements: list[dict[str, Any]], config: dict[str, Any], *,
                    leader_equity_defaut: Any = None, fractions: tuple[float, ...] = (0.6, 0.2, 0.2),
                    min_episodes: int = 30) -> dict[str, Any]:
-    """Évalue un candidat : IS/OOS/FORWARD + ADVERSE_P95/P99 (fees majorés) + PLACEBO (signes inversés). Retourne
-    {config, segments, metriques, verdict, placebo_net}."""
-    segs_ev = separer_temporel(evenements, fractions=fractions)
+    """Évalue un candidat : IS/OOS/FORWARD + ADVERSE_P95/P99 RÉELS appliqués séparément sur OOS ET FORWARD
+    (item 12) + PLACEBO (signes inversés → l'edge doit disparaître). Retourne {config, segments, metriques,
+    verdict, placebo_net}."""
+    # item 14 : découpage par ÉPISODES INDIVISIBLES — aucune position/métaordre/épisode à cheval sur IS/OOS.
+    segs_ev = separer_par_episodes(evenements, fractions=fractions)
     segments: dict[str, dict[str, Any]] = {}
     riche_is = None
     for lab in ("IS", "OOS", "FORWARD"):
@@ -79,9 +121,18 @@ def evaluer_config(evenements: list[dict[str, Any]], config: dict[str, Any], *,
         segments[lab] = r
         if lab == "IS":
             riche_is = r
-    for lab, mult in _STRESS.items():
-        cfg = {**config, "fee_bps": config["fee_bps"] * mult}
-        segments[lab] = _rejouer_riche(segs_ev["IS"], config=cfg, leader_equity_defaut=leader_equity_defaut)
+    # item 12 : le stress adverse s'applique SÉPARÉMENT sur OOS ET FORWARD (pas seulement IS). Le net
+    # ADVERSE retenu = le PIRE des deux (min) : un edge doit survivre au stress hors-échantillon ET forward.
+    for niveau in ("ADVERSE_P95", "ADVERSE_P99"):
+        a_oos = _rejouer_adverse(segs_ev["OOS"], config=config, niveau=niveau,
+                                 leader_equity_defaut=leader_equity_defaut)
+        a_fwd = _rejouer_adverse(segs_ev["FORWARD"], config=config, niveau=niveau,
+                                 leader_equity_defaut=leader_equity_defaut)
+        pire = a_oos if a_oos["net"] <= a_fwd["net"] else a_fwd
+        segments[niveau] = {**pire, "net_oos": a_oos["net"], "net_forward": a_fwd["net"],
+                            "cout_adverse": a_oos.get("cout_adverse")}
+        segments["%s_OOS" % niveau] = a_oos
+        segments["%s_FORWARD" % niveau] = a_fwd
     # placebo : signes inversés -> l'edge réel doit disparaître.
     placebo_evs = [{**ev, "signe": -(ev.get("signe") or 0)} for ev in segs_ev["IS"]]
     placebo = _rejouer_riche(placebo_evs, config=config, leader_equity_defaut=leader_equity_defaut)
@@ -91,10 +142,13 @@ def evaluer_config(evenements: list[dict[str, Any]], config: dict[str, Any], *,
         nets_episodes=riche_is["nets"], courbe_equity=riche_is["courbe_equity"],
         notional_traite=riche_is["notional_traite"], equity_finale=riche_is["equity"],
         fees=riche_is["fees"], contributions_coin=riche_is["contributions"],
-        capacite=capacite, reconcilie=all(segments[s]["reconcilie"] for s in ("IS", "OOS", "FORWARD")))
+        capacite=capacite, reconcilie=all(segments[s]["reconcilie"] for s in ("IS", "OOS", "FORWARD")),
+        placebo_net=placebo["net"])
     verdict = M.verdict_promotion(metriques, min_episodes=min_episodes)
-    return {"config": config, "segments": {k: {"net": v["net"], "roi": v.get("roi"), "fills": v["fills"],
-                                               "missed": v["missed"]} for k, v in segments.items()},
+    return {"config": config,
+            "segments": {k: {"net": v["net"], "roi": v.get("roi"), "fills": v.get("fills"),
+                             "missed": v.get("missed"), "net_oos": v.get("net_oos"),
+                             "net_forward": v.get("net_forward")} for k, v in segments.items()},
             "metriques": metriques, "verdict": verdict, "placebo_net": placebo["net"],
             "cross_venue": riche_is["cross_venue"]}
 
@@ -199,4 +253,4 @@ def rechercher(evenements: list[dict[str, Any]], *, espace: dict[str, list] | No
             "verdict_global": verdict_global, "source": source, "data_hash": data_hash}
 
 
-__all__ = ["ESPACE_DEFAUT", "evaluer_config", "rechercher"]
+__all__ = ["ESPACE_DEFAUT", "evaluer_config", "rechercher", "cout_adverse_bps"]

@@ -167,7 +167,15 @@ jobs:
             tests/test_preflight_lanceur.py `
             tests/test_preuve_de_vie.py `
             tests/test_registre_pids.py `
-            tests/test_e2e_lanceur_harvest.py
+            tests/test_e2e_lanceur_harvest.py `
+            tests/test_portabilite.py `
+            tests/test_archive_portable.py `
+            tests/test_creer_archive_cmd.py `
+            tests/test_premier_lancement.py `
+            tests/test_portabilite_racine.py `
+            tests/test_audit_portabilite.py `
+            tests/test_wheelhouse_lock.py `
+            tests/test_portable_runtime.py
       - name: Audits de securite (Windows)
         shell: pwsh
         env:
@@ -228,19 +236,56 @@ jobs:
             tests/test_lab_audit.py \
             tests/test_lab_metriques.py \
             tests/test_lab_recherche.py \
+            tests/test_lab_adverse_reel.py \
+            tests/test_lab_flux.py \
+            tests/test_lab_session_scope.py \
+            tests/test_analyser_cmd_hardening.py \
+            tests/test_recette_windows_e2e.py \
+            tests/test_catalogue_integrite.py \
+            tests/test_lancer_cmd_hardening.py \
+            tests/test_lab_verrou_taxonomie.py \
+            tests/test_verrou_lanceur.py \
+            tests/test_episodes_indivisibles.py \
+            tests/test_rafraichisseur.py \
+            tests/test_lead_lag_paper.py \
             tests/test_lab_eta.py \
             tests/test_lab_rapport.py
+      - name: Portabilite - audit repo-complet (item 12, gate bloquant)
+        run: |
+          PYTHONPATH=src:tools python -m audit_portabilite
+      - name: Portabilite (archive, premier lancement, racine sans cwd, audit, wheelhouse, runtime portable)
+        run: |
+          python -m pytest -q -p no:cacheprovider --junitxml=junit-portabilite.xml \
+            tests/test_portabilite.py \
+            tests/test_archive_portable.py \
+            tests/test_creer_archive_cmd.py \
+            tests/test_premier_lancement.py \
+            tests/test_portabilite_racine.py \
+            tests/test_audit_portabilite.py \
+            tests/test_wheelhouse_lock.py \
+            tests/test_portable_runtime.py \
+            tests/test_portabilite_multichemin.py \
+            tests/test_inventaire_release.py \
+            tests/test_release_ready.py \
+            tests/test_budget_ram.py
       - name: Lanceur HARVEST (preflight bloquant, preuve de vie, registre PID, stockage borne, sante, dYdX, E2E)
         run: |
           python -m pytest -q -p no:cacheprovider --junitxml=junit-lanceur.xml \
             tests/test_superviseur_profil_harvest.py \
             tests/test_preflight_lanceur.py \
             tests/test_preuve_de_vie.py \
+            tests/test_preuve_de_vie_niveaux.py \
+            tests/test_preuve_de_vie_metriques_disque.py \
+            tests/test_preuve_de_vie_barriere.py \
             tests/test_registre_pids.py \
             tests/test_quota_stockage.py \
             tests/test_stockage_brut_borne.py \
             tests/test_tableau_sante_collecteurs.py \
             tests/test_moniteur_sante.py \
+            tests/test_session_catalog.py \
+            tests/test_session_harvest.py \
+            tests/test_analyser_session.py \
+            tests/test_e2e_chaine_session_analyser.py \
             tests/test_e2e_lanceur_harvest.py \
             tests/test_collecter_dydx_live.py \
             tests/dydx_v4/test_persistance_flux_live.py

@@ -1,22 +1,22 @@
-"""[LANCEUR items 7 & 8] Session canonique + catalogue de donn?es + cl?ture/quarantaine s?res.
+"""[LANCEUR items 7 & 8] Session canonique + catalogue de données + clôture/quarantaine sûres.
 
-Chaque run de collecte poss?de UNE session fig?e sous ``runtime/data/sessions/<run_id>/`` dont le c?ur
-est ``DATA_CATALOG.json``. Le catalogue est la SOURCE DE V?RIT? que l'analyse (ANALYSER, item 10) relit :
-il d?clare, par source/venue/canal, le fichier/DB/shard produit, ses versions de sch?ma+parser, ses
-premiers/derniers horodatages (exchange ET r?ception), le compte d'?v?nements re?us/valides/rejet?s/
-d?dupliqu?s, les gaps/reconnects/stale/hors-ordre, la couverture, le **checksum SHA-256**, la taille,
-l'?tat de sant?, la raison d'absence d'une source, et les m?tadonn?es (frais...).
+Chaque run de collecte possède UNE session figée sous ``runtime/data/sessions/<run_id>/`` dont le cœur
+est ``DATA_CATALOG.json``. Le catalogue est la SOURCE DE VÉRITÉ que l'analyse (ANALYSER, item 10) relit :
+il déclare, par source/venue/canal, le fichier/DB/shard produit, ses versions de schéma+parser, ses
+premiers/derniers horodatages (exchange ET réception), le compte d'événements reçus/valides/rejetés/
+dédupliqués, les gaps/reconnects/stale/hors-ordre, la couverture, le **checksum SHA-256**, la taille,
+l'état de santé, la raison d'absence d'une source, et les métadonnées (frais...).
 
-Cycle de vie honn?te (jamais pr?senter incomplet comme complet) :
+Cycle de vie honnête (jamais présenter incomplet comme complet) :
 
-  ACTIVE       ? collecte en cours, le catalogue grossit (mise ? jour ATOMIQUE ? chaque source).
-  COMPLETE     ? SEULEMENT apr?s : writers arr?t?s, flush/fsync, DB ferm?es, checksums recalcul?s,
-                 fichiers v?rifi?s (pr?sents + taille + hash), Z?RO orphelin. Sinon on ne cl?t pas.
-  QUARANTINED  ? une v?rification de cl?ture a ?chou? (hash divergent, fichier manquant, orphelin,
-                 erreur d'archive/manifeste) ? la session est mise en quarantaine, jamais COMPLETE.
+  ACTIVE       — collecte en cours, le catalogue grossit (mise à jour ATOMIQUE à chaque source).
+  COMPLETE     — SEULEMENT après : writers arrêtés, flush/fsync, DB fermées, checksums recalculés,
+                 fichiers vérifiés (présents + taille + hash), ZÉRO orphelin. Sinon on ne clôt pas.
+  QUARANTINED  — une vérification de clôture a échoué (hash divergent, fichier manquant, orphelin,
+                 erreur d'archive/manifeste) → la session est mise en quarantaine, jamais COMPLETE.
 
-0 r?seau, 0 ordre. Checksums en STREAMING (m?moire born?e ? esprit item 11). ?critures atomiques
-(temp + os.replace + fsync). Aucune suppression brutale : la quarantaine MARQUE, elle ne d?truit pas.
+0 réseau, 0 ordre. Checksums en STREAMING (mémoire bornée — esprit item 11). Écritures atomiques
+(temp + os.replace + fsync). Aucune suppression brutale : la quarantaine MARQUE, elle ne détruit pas.
 """
 from __future__ import annotations
 
@@ -38,25 +38,25 @@ STATUT_COMPLETE = "COMPLETE"
 STATUT_QUARANTINED = "QUARANTINED"
 STATUTS = (STATUT_ACTIVE, STATUT_COMPLETE, STATUT_QUARANTINED)
 
-# item 12 ? PROVENANCE des donn?es, distincte de `real_execution`. `real_execution` reste TOUJOURS
-# False (invariant de s?curit? : aucun ordre r?el n'est jamais pass?, paper strict). `data_origin` dit
-# une autre v?rit? : ces donn?es ont-elles ?t? R?ELLEMENT collect?es sur Hyperliquid (REEL), ou est-ce
-# une FIXTURE synth?tique de test (SYNTHETIQUE) ? Un rapport ? vert ? sur du SYNTHETIQUE est un faux
+# item 12 — PROVENANCE des données, distincte de `real_execution`. `real_execution` reste TOUJOURS
+# False (invariant de sécurité : aucun ordre réel n'est jamais passé, paper strict). `data_origin` dit
+# une autre vérité : ces données ont-elles été RÉELLEMENT collectées sur Hyperliquid (REEL), ou est-ce
+# une FIXTURE synthétique de test (SYNTHETIQUE) ? Un rapport « vert » sur du SYNTHETIQUE est un faux
 # gain : les couches aval (pnl_improvement_lab) rejettent SYNTHETIC/FAKE/DEMO. La collecte de
 # production attest REEL ; toute fixture doit attester SYNTHETIQUE.
 ORIGINE_REEL = "REEL"
 ORIGINE_SYNTHETIQUE = "SYNTHETIQUE"
 ORIGINES = (ORIGINE_REEL, ORIGINE_SYNTHETIQUE)
 
-# Extensions consid?r?es comme des DONN?ES (pour la d?tection d'orphelins ? la cl?ture ? item 8).
+# Extensions considérées comme des DONNÉES (pour la détection d'orphelins à la clôture — item 8).
 EXTENSIONS_DONNEES = (".jsonl", ".jsonl.gz", ".json.gz", ".ndjson", ".sqlite3", ".sqlite",
                       ".db", ".csv", ".parquet", ".gz")
 
-_CHUNK = 1 << 20  # 1 Mo ? lecture born?e
+_CHUNK = 1 << 20  # 1 Mo — lecture bornée
 
 
 def nouveau_run_id(prefixe: str = "run", *, horloge=time.time) -> str:
-    """Identifiant de session : horodat? (tri naturel) + suffixe al?atoire (pas de collision)."""
+    """Identifiant de session : horodaté (tri naturel) + suffixe aléatoire (pas de collision)."""
     return "%s-%d-%s" % (prefixe, int(horloge() * 1000), os.urandom(4).hex())
 
 
@@ -69,7 +69,7 @@ def chemin_catalogue(root: str | Path, run_id: str) -> Path:
 
 
 def sha256_fichier(chemin: str | Path, *, chunk: int = _CHUNK) -> tuple[str, int]:
-    """SHA-256 en streaming (m?moire born?e) + taille. Fichier absent ? ("", -1) (jamais un faux hash)."""
+    """SHA-256 en streaming (mémoire bornée) + taille. Fichier absent → ("", -1) (jamais un faux hash)."""
     p = Path(chemin)
     if not p.is_file():
         return "", -1
@@ -87,12 +87,12 @@ def sha256_fichier(chemin: str | Path, *, chunk: int = _CHUNK) -> tuple[str, int
 
 @dataclass
 class EntreeSource:
-    """Une entr?e de catalogue = un flux de donn?es (source ? venue ? canal ? artefact)."""
+    """Une entrée de catalogue = un flux de données (source × venue × canal × artefact)."""
     source: str
     venue: str = ""
     canal: str = ""
-    source_id: str = ""                     # item 7 : cl? STABLE ind?pendante du chemin (d?faut = source)
-    chemin: str = ""                       # relatif ? la session (fichier / DB / shard)
+    source_id: str = ""                     # item 7 : clé STABLE indépendante du chemin (défaut = source)
+    chemin: str = ""                       # relatif à la session (fichier / DB / shard)
     type_stockage: str = "fichier"         # fichier / db / shard
     schema_version: str = ""
     parser_version: str = ""
@@ -108,31 +108,31 @@ class EntreeSource:
     reconnects: int = 0
     stale: bool = False
     hors_ordre: int = 0
-    couverture: float | None = None        # ratio 0..1 (fen?tre r?ellement couverte)
+    couverture: float | None = None        # ratio 0..1 (fenêtre réellement couverte)
     checksum_sha256: str = ""
     taille_octets: int = -1
     sante: str = "GRISE"                    # VERTE / ORANGE / ROUGE / GRISE
-    raison_absence: str = ""               # renseign?e si la source est absente / non impl?ment?e
+    raison_absence: str = ""               # renseignée si la source est absente / non implémentée
     frais: dict = field(default_factory=dict)
     metadata: dict = field(default_factory=dict)
 
     def __post_init__(self):
         if not self.source_id:
-            self.source_id = self.source        # item 7 : cl? stable par d?faut = nom de source
+            self.source_id = self.source        # item 7 : clé stable par défaut = nom de source
 
     def cle(self) -> str:
         return "%s|%s|%s|%s" % (self.source, self.venue, self.canal, self.chemin)
 
 
 class CatalogueInvalideError(ValueError):
-    """Chemin d'artefact refus? par le catalogue (item 6) : absolu / .. / hors session / symlink sortant /
-    doublon. Aucune donn?e hors du dossier de session n'entre jamais au catalogue."""
+    """Chemin d'artefact refusé par le catalogue (item 6) : absolu / .. / hors session / symlink sortant /
+    doublon. Aucune donnée hors du dossier de session n'entre jamais au catalogue."""
 
 
 def valider_chemin_artefact(dossier: str | Path, rel: str) -> str:
     """item 6 : n'autorise QU'un chemin RELATIF, strictement CONTENU dans le dossier de session, sans `..`,
-    sans composante absolue, et dont la cible r?elle (apr?s r?solution des symlinks) reste DANS la session.
-    Rend le chemin normalis? (posix). L?ve CatalogueInvalideError sinon."""
+    sans composante absolue, et dont la cible réelle (après résolution des symlinks) reste DANS la session.
+    Rend le chemin normalisé (posix). Lève CatalogueInvalideError sinon."""
     dossier = Path(dossier)
     brut = str(rel or "")
     if not brut:
@@ -143,7 +143,7 @@ def valider_chemin_artefact(dossier: str | Path, rel: str) -> str:
     parts = p.parts
     if ".." in parts:
         raise CatalogueInvalideError("remontee '..' interdite: %s" % brut)
-    # la cible R?ELLE (symlinks r?solus) doit rester sous le dossier de session.
+    # la cible RÉELLE (symlinks résolus) doit rester sous le dossier de session.
     cible = (dossier / p)
     try:
         racine_reelle = dossier.resolve()
@@ -158,7 +158,7 @@ def valider_chemin_artefact(dossier: str | Path, rel: str) -> str:
 
 
 def _ecrire_atomique(cible: Path, contenu: str) -> None:
-    """?crit + fsync + os.replace (durable, jamais un catalogue ? moiti? ?crit)."""
+    """Écrit + fsync + os.replace (durable, jamais un catalogue à moitié écrit)."""
     cible.parent.mkdir(parents=True, exist_ok=True)
     tmp = cible.with_name(".%s.%d.%d.tmp" % (cible.name, os.getpid(), time.time_ns()))
     try:
@@ -175,7 +175,7 @@ def _ecrire_atomique(cible: Path, contenu: str) -> None:
 
 
 class CatalogueSession:
-    """G?re le DATA_CATALOG.json d'UNE session. Mise ? jour atomique, cycle ACTIVE?COMPLETE/QUARANTINED."""
+    """Gère le DATA_CATALOG.json d'UNE session. Mise à jour atomique, cycle ACTIVE→COMPLETE/QUARANTINED."""
 
     def __init__(self, root: str | Path, run_id: str):
         self.root = Path(root)
@@ -183,12 +183,12 @@ class CatalogueSession:
         self.dossier = chemin_session(root, run_id)
         self.chemin = chemin_catalogue(root, run_id)
 
-    # ?? cr?ation / lecture ????????????????????????????????????????????????????????????????????
+    # ── création / lecture ────────────────────────────────────────────────────────────────────
     def demarrer(self, *, git_head: str | None = None, contexte: Mapping[str, Any] | None = None,
                  data_origin: str = ORIGINE_REEL, horloge=time.time) -> dict:
-        """Cr?e la session ACTIVE (idempotent : ne r??crase pas une session d?j? d?marr?e).
-        `data_origin` (item 12) : REEL par d?faut (le chemin canonique = collecte de production r?elle) ;
-        une FIXTURE de test DOIT passer ORIGINE_SYNTHETIQUE. `real_execution` reste False (s?curit?)."""
+        """Crée la session ACTIVE (idempotent : ne réécrase pas une session déjà démarrée).
+        `data_origin` (item 12) : REEL par défaut (le chemin canonique = collecte de production réelle) ;
+        une FIXTURE de test DOIT passer ORIGINE_SYNTHETIQUE. `real_execution` reste False (sécurité)."""
         if self.chemin.is_file():
             return self.lire()
         manifeste = manifeste_execution(self.root, tache="collecte_harvest", run_id=self.run_id)
@@ -202,10 +202,10 @@ class CatalogueSession:
             "manifeste": manifeste,
             "debut_ms": int(horloge() * 1000),
             "fin_ms": None,
-            "sources": {},                 # cle -> entr?e
+            "sources": {},                 # cle -> entrée
             "cloture": None,
             "contexte": dict(contexte or {}),
-            "real_execution": False,       # invariant s?curit? : AUCUN ordre r?el, jamais
+            "real_execution": False,       # invariant sécurité : AUCUN ordre réel, jamais
             "data_origin": origine,        # item 12 : provenance REELLE vs fixture SYNTHETIQUE
         }
         self._sauver(payload)
@@ -222,28 +222,28 @@ class CatalogueSession:
         payload["empreinte"] = empreinte({k: v for k, v in payload.items() if k != "empreinte"})
         _ecrire_atomique(self.chemin, json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True))
 
-    # ?? enregistrement d'une source (met ? jour le catalogue ACTIVE, atomiquement) ?????????????
+    # ── enregistrement d'une source (met à jour le catalogue ACTIVE, atomiquement) ─────────────
     def enregistrer_source(self, entree: EntreeSource | Mapping[str, Any], *,
                            calculer_checksum: bool = True) -> dict:
-        """Ajoute/?crase l'entr?e d'une source. Si un artefact r?el existe, son checksum + taille sont
-        calcul?s depuis le disque (jamais renseign?s ? la main)."""
+        """Ajoute/écrase l'entrée d'une source. Si un artefact réel existe, son checksum + taille sont
+        calculés depuis le disque (jamais renseignés à la main)."""
         cat = self.lire()
         if not cat:
             cat = self.demarrer()
         if cat.get("statut") != STATUT_ACTIVE:
-            raise SessionFigeeError("session %s fig?e (%s) : plus d'enregistrement" %
+            raise SessionFigeeError("session %s figée (%s) : plus d'enregistrement" %
                                     (self.run_id, cat.get("statut")))
         e = entree if isinstance(entree, EntreeSource) else EntreeSource(**dict(entree))
         sources = cat.setdefault("sources", {})
         if e.chemin:
             # item 6 : rejette absolu / .. / hors-session / symlink sortant, et NORMALISE le chemin relatif.
             e.chemin = valider_chemin_artefact(self.dossier, e.chemin)
-            # item 6 : doublon de chemin interdit (m?me artefact catalogu? deux fois sous des cl?s ?).
+            # item 6 : doublon de chemin interdit (même artefact catalogué deux fois sous des clés ≠).
             for cle, autre in sources.items():
                 if (autre.get("chemin") or "") and os.path.normpath(autre["chemin"]) == os.path.normpath(e.chemin) \
                         and cle != e.cle():
                     raise CatalogueInvalideError("doublon de chemin d'artefact: %s" % e.chemin)
-            # item 7 : une source qui produit un vrai artefact ne garde PAS son entr?e vide (chemin="").
+            # item 7 : une source qui produit un vrai artefact ne garde PAS son entrée vide (chemin="").
             vide_cle = "%s|%s|%s|" % (e.source, e.venue, e.canal)
             sources.pop(vide_cle, None)
             for cle in [k for k, v in sources.items()
@@ -260,18 +260,18 @@ class CatalogueSession:
         return d
 
     def enregistrer_artefact_live(self, entree: EntreeSource | Mapping[str, Any]) -> dict:
-        """item 4 : enregistre un artefact ENCORE ACTIF (mutable) SANS checksum final. Le SHA-256 d?finitif
-        n'est calcul? qu'? la CL?TURE (writers arr?t?s ? flush/fsync). Un fichier live qui GRANDIT depuis
+        """item 4 : enregistre un artefact ENCORE ACTIF (mutable) SANS checksum final. Le SHA-256 définitif
+        n'est calculé qu'à la CLÔTURE (writers arrêtés → flush/fsync). Un fichier live qui GRANDIT depuis
         son premier enregistrement ne met donc JAMAIS la session en quarantaine."""
         return self.enregistrer_source(entree, calculer_checksum=False)
 
-    # ?? cl?ture s?re (item 8) ???????????????????????????????????????????????????????????????????
+    # ── clôture sûre (item 8) ───────────────────────────────────────────────────────────────────
     def cloturer(self, *, writers_arretes: bool, extensions_donnees: Iterable[str] = EXTENSIONS_DONNEES,
                  horloge=time.time, exiger_artefacts: bool = True) -> dict:
-        """Passe la session en COMPLETE SEULEMENT si toutes les v?rifications passent. Sinon QUARANTINED.
-        `exiger_artefacts` (item 3, d?faut True) : une session SANS aucun artefact r?el v?rifi? (fichier
-        pr?sent + non vide) ne peut JAMAIS devenir COMPLETE ? elle est QUARANTINED (AUCUN_ARTEFACT_REEL).
-        Renvoie le verdict de cl?ture {statut, verifications, orphelins, divergences, motifs}."""
+        """Passe la session en COMPLETE SEULEMENT si toutes les vérifications passent. Sinon QUARANTINED.
+        `exiger_artefacts` (item 3, défaut True) : une session SANS aucun artefact réel vérifié (fichier
+        présent + non vide) ne peut JAMAIS devenir COMPLETE — elle est QUARANTINED (AUCUN_ARTEFACT_REEL).
+        Renvoie le verdict de clôture {statut, verifications, orphelins, divergences, motifs}."""
         cat = self.lire()
         if not cat:
             return {"statut": "ABSENTE", "motifs": ["catalogue introuvable"]}
@@ -288,9 +288,9 @@ class CatalogueSession:
         for cle, d in sources.items():
             rel = d.get("chemin") or ""
             if not rel:
-                continue                    # source absente/non-impl?ment?e : pas d'artefact ? v?rifier
+                continue                    # source absente/non-implémentée : pas d'artefact à vérifier
             if os.path.normpath(rel) in catalogues_rel:
-                motifs.append("DOUBLON_CHEMIN")        # item 6 : jamais deux entr?es pour le m?me fichier
+                motifs.append("DOUBLON_CHEMIN")        # item 6 : jamais deux entrées pour le même fichier
                 divergences.append({"cle": cle, "chemin": rel, "probleme": "DOUBLON"})
                 continue
             catalogues_rel.add(os.path.normpath(rel))
@@ -310,14 +310,14 @@ class CatalogueSession:
                 divergences.append({"cle": cle, "chemin": rel, "probleme": "CHECKSUM",
                                     "attendu": attendu, "obtenu": checksum_now})
             elif not attendu:
-                # jamais catalogu? : on le fige maintenant (checksum de cl?ture) plut?t que mentir.
+                # jamais catalogué : on le fige maintenant (checksum de clôture) plutôt que mentir.
                 d["checksum_sha256"], d["taille_octets"] = checksum_now, taille_now
 
         orphelins = _detecter_orphelins(self.dossier, catalogues_rel, tuple(extensions_donnees))
         if orphelins:
             motifs.append("ORPHELINS")
 
-        # item 3 : au moins UN artefact r?el v?rifi? (fichier pr?sent + non vide) est requis pour COMPLETE.
+        # item 3 : au moins UN artefact réel vérifié (fichier présent + non vide) est requis pour COMPLETE.
         artefacts_reels = sum(1 for cle, d in sources.items()
                               if (d.get("chemin") and (d.get("taille_octets") or 0) > 0
                                   and "MANQUANT" not in [x.get("probleme") for x in divergences
@@ -325,8 +325,8 @@ class CatalogueSession:
         if exiger_artefacts and artefacts_reels <= 0:
             motifs.append("AUCUN_ARTEFACT_REEL")
 
-        # item 5 : une source d?clar?e VIVANTE (sant? VERTE) doit poss?der au moins un artefact r?el.
-        # Source vivante SANS artefact = QUARANTINED (un seul fichier r?el ailleurs ne la couvre pas).
+        # item 5 : une source déclarée VIVANTE (santé VERTE) doit posséder au moins un artefact réel.
+        # Source vivante SANS artefact = QUARANTINED (un seul fichier réel ailleurs ne la couvre pas).
         vivantes_sans_artefact = sorted({str(d.get("source"))
                                          for d in sources.values()
                                          if str(d.get("sante", "")).upper() == "VERTE"
@@ -371,13 +371,13 @@ class CatalogueSession:
 
 
 class SessionFigeeError(RuntimeError):
-    """Tentative d'?crire dans une session qui n'est plus ACTIVE."""
+    """Tentative d'écrire dans une session qui n'est plus ACTIVE."""
 
 
 def verifier_catalogue(dossier: str | Path, sources: Mapping[str, Mapping[str, Any]], *,
                        extensions: Iterable[str] = EXTENSIONS_DONNEES) -> dict:
-    """V?rification READ-ONLY du catalogue vs disque (r?utilis?e par la cl?ture ET par ANALYSER, item 10) :
-    chaque artefact catalogu? est pr?sent + son checksum RECALCUL? correspond, et il n'y a AUCUN orphelin.
+    """Vérification READ-ONLY du catalogue vs disque (réutilisée par la clôture ET par ANALYSER, item 10) :
+    chaque artefact catalogué est présent + son checksum RECALCULÉ correspond, et il n'y a AUCUN orphelin.
     Rend {divergences, orphelins, checksums_ok, zero_orphelin, n_artefacts_verifies, tout_ok}."""
     dossier = Path(dossier)
     divergences: list[dict] = []
@@ -385,8 +385,8 @@ def verifier_catalogue(dossier: str | Path, sources: Mapping[str, Mapping[str, A
     for cle, d in (sources or {}).items():
         rel = (d or {}).get("chemin") or ""
         if not rel:
-            continue                      # source d?clar?e sans artefact (absente/non impl?ment?e)
-        # item 6/15 : re-valider le chemin INTERNE (absolu / .. / symlink sortant) ind?pendamment.
+            continue                      # source déclarée sans artefact (absente/non implémentée)
+        # item 6/15 : re-valider le chemin INTERNE (absolu / .. / symlink sortant) indépendamment.
         try:
             rel = valider_chemin_artefact(dossier, rel)
         except CatalogueInvalideError:
@@ -417,7 +417,7 @@ def verifier_catalogue(dossier: str | Path, sources: Mapping[str, Mapping[str, A
 
 
 def _detecter_orphelins(dossier: Path, catalogues_rel: set[str], extensions: tuple[str, ...]) -> list[str]:
-    """Fichiers de DONN?ES pr?sents dans la session mais ABSENTS du catalogue (item 8 : z?ro orphelin)."""
+    """Fichiers de DONNÉES présents dans la session mais ABSENTS du catalogue (item 8 : zéro orphelin)."""
     if not dossier.is_dir():
         return []
     orphelins: list[str] = []
@@ -435,9 +435,9 @@ def _detecter_orphelins(dossier: Path, catalogues_rel: set[str], extensions: tup
     return sorted(orphelins)
 
 
-# ?? d?couverte de sessions (pour ANALYSER, item 10) ?????????????????????????????????????????????
+# ── découverte de sessions (pour ANALYSER, item 10) ─────────────────────────────────────────────
 def scanner_sessions(root: str | Path) -> list[dict]:
-    """Liste (run_id, statut, debut_ms, chemin) de toutes les sessions, tri?es par d?but d?croissant."""
+    """Liste (run_id, statut, debut_ms, chemin) de toutes les sessions, triées par début décroissant."""
     base = Path(root) / "runtime" / "data" / "sessions"
     out: list[dict] = []
     if not base.is_dir():
@@ -458,7 +458,7 @@ def scanner_sessions(root: str | Path) -> list[dict]:
 
 
 def derniere_session_complete(root: str | Path) -> dict | None:
-    """La session COMPLETE la plus r?cente ? ce que ANALYSER doit consommer (jamais ACTIVE/QUARANTINED)."""
+    """La session COMPLETE la plus récente — ce que ANALYSER doit consommer (jamais ACTIVE/QUARANTINED)."""
     for s in scanner_sessions(root):
         if s.get("statut") == STATUT_COMPLETE:
             return s
