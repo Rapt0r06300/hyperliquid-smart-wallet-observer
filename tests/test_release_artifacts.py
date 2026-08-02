@@ -29,7 +29,10 @@ def _archive(tmp_path: Path) -> Path:
             "src/hl_observer/collection/source.py": {"sha256": "1" * 64, "taille": 20},
         },
         "sbom": {"licences": ["LICENSE"]},
-        "donnees_exclues": [".git/", "dist/", ".env", "moisson_console.txt"],
+        "donnees_exclues": [
+            ".git/", "dist/", ".env", "moisson_console.txt",
+            "outils de test/rapports/analyse_599.txt",
+        ],
     }
     archive = tmp_path / "hypersmart.zip"
     with zipfile.ZipFile(archive, "w") as z:

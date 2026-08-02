@@ -51,6 +51,7 @@ DOSSIERS_EXCLUS = ("__pycache__", ".git", ".venv", "venv", "env", "node_modules"
                    ".portable-staging", "portable-build", "cache_moisson", ".hypothesis")
 PREFIXES_EXCLUS = (
     "runtime/research/", "logs/", "data/", "_to_delete/", "archive/",
+    "outils de test/rapports/",
 )
 SUFFIXES_EXCLUS = (".pyc", ".pyo", ".log", ".lock", ".pid", ".tmp", ".bundle",
                    ".sqlite3-wal", ".sqlite3-shm", ".sqlite-wal", ".sqlite-shm",
@@ -65,6 +66,8 @@ FICHIERS_EXCLUS = (REGISTRE_RELPATH.as_posix(),                     # registre P
                    "runtime/data/COURANTE.json",                    # pointeur de session vivante
                    "moisson_console.txt",                           # sortie console locale generee par le lanceur
                    "moisson-termine.flag",                          # marqueur local de fin de moisson
+                   "moisson-en-cours.txt",                          # sortie locale de suivi de moisson
+                   "moisson-fini.md",                               # rapport local genere apres moisson
                    ".analyse.lock", NOM_MANIFESTE)
 # item 20.6 — un chemin absolu machine-specifique ne doit jamais survivre dans les metadonnees.
 _ABSOLU = re.compile(r"(?:[A-Za-z]:\\|\\\\[^\s\"]+|/(?:home|Users)/)")
