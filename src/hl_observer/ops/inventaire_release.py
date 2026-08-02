@@ -36,7 +36,9 @@ _DOSSIERS_IGNORES = {
     "portable_runtime", ".venv-portable", "dist", "build", "htmlcov",
     "portable-build", ".portable-staging", "cache_moisson",
 }
-_PREFIXES_IGNORES = ("runtime/research/", "logs/", "data/", "_to_delete/")
+_PREFIXES_IGNORES = (
+    "runtime/research/", "logs/", "data/", "_to_delete/", "archive/",
+)
 _RACINES_RESSOURCES_OBLIGATOIRES = (
     "config/", "configs/", "schemas/", "migrations/", "templates/",
     "static/", "assets/", "tests/fixtures/", "src/hl_observer/",

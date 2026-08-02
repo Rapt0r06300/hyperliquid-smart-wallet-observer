@@ -96,6 +96,7 @@ def test_est_exclu_regles():
     assert AP.est_exclu("runtime/data/lanceur_pids.json")
     assert AP.est_exclu("x/y/.git/config") and AP.est_exclu("a.lock") and AP.est_exclu("b/c.tmp")
     assert AP.est_exclu("db.sqlite3-wal") and AP.est_exclu("db.sqlite3-shm")
+    assert AP.est_exclu("archive/racine-machine/trace.txt")
     assert not AP.est_exclu("src/app.py") and not AP.est_exclu("runtime/data/sessions/r/bbo.jsonl")
 
 

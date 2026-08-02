@@ -42,12 +42,16 @@ def _tous_les_fichiers(root: Path):
 
 def test_inventaire_categorise(tmp_path):
     _mini_projet(tmp_path)
+    archive_machine = tmp_path / "archive" / "ancienne-machine"
+    archive_machine.mkdir(parents=True)
+    (archive_machine / "trace.txt").write_text(r"C:\\Users\\machine\\runtime.db", encoding="utf-8")
     inv = IR.inventaire(tmp_path)
     assert "src/hl_observer/ops/moteur.py" in inv["modules"]
     assert "tools/outil.py" in inv["tools_py"]
     assert "tests/test_x.py" in inv["tests"]
     assert "config/reglages.yaml" in inv["configs"]
     assert "LANCER_HYPERSMART.cmd" in inv["cmd"]
+    assert all(not path.startswith("archive/") for paths in inv.values() for path in paths)
 
 
 def test_cloture_imports_resout_et_detecte_casse(tmp_path):

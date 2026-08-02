@@ -49,7 +49,9 @@ DOSSIERS_EXCLUS = ("__pycache__", ".git", ".venv", "venv", "env", "node_modules"
                    ".pytest_cache", ".mypy_cache", ".ruff_cache", "portable_runtime",
                    ".venv-portable", "tmp_pytest", "htmlcov", "dist", "build",
                    ".portable-staging", "portable-build", "cache_moisson", ".hypothesis")
-PREFIXES_EXCLUS = ("runtime/research/", "logs/", "data/", "_to_delete/")
+PREFIXES_EXCLUS = (
+    "runtime/research/", "logs/", "data/", "_to_delete/", "archive/",
+)
 SUFFIXES_EXCLUS = (".pyc", ".pyo", ".log", ".lock", ".pid", ".tmp", ".bundle",
                    ".sqlite3-wal", ".sqlite3-shm", ".sqlite-wal", ".sqlite-shm",
                    "-wal", "-shm", ".db-wal", ".db-shm")
