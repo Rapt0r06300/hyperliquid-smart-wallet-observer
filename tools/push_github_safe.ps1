@@ -101,7 +101,19 @@ function Import-Bundle {
         }
 
         Invoke-Git @("fetch", "--no-tags", "--force", $bundlePath, "$sourceRef`:$localRef")
-        Merge-IntoMain -Ref $localRef -Label "$BundleName ($sourceRef)"
+        $label = "$BundleName ($sourceRef)"
+        if (Test-Git @("merge-base", "--is-ancestor", $localRef, "main")) {
+            Write-Host "      [DEJA INTEGRE] $label" -ForegroundColor DarkGray
+        }
+        elseif (Test-Git @("merge-base", "--is-ancestor", "main", $localRef)) {
+            Merge-IntoMain -Ref $localRef -Label $label
+        }
+        else {
+            # Un ancien bundle peut representer une ligne de travail deja
+            # remplacee par main. On conserve sa reference nommee pour audit,
+            # mais on ne fabrique jamais automatiquement un merge conflictuel.
+            Write-Host "      [ARCHIVE SANS MERGE] $label diverge de main; reference conservee: $localRef" -ForegroundColor Yellow
+        }
     }
 
     if (-not $foundBranch) {

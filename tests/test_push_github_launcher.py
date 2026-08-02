@@ -72,6 +72,15 @@ def test_safe_push_reconciles_remote_and_skips_stale_bundle(tmp_path: Path) -> N
     _git(local, "config", "user.name", "HyperSmart Test")
     _git(local, "config", "user.email", "hypersmart-test@example.invalid")
 
+    _git(seed, "checkout", "-b", "bundle-divergent", base_sha)
+    (seed / "bundle-only.txt").write_text("bundle only\n", encoding="utf-8")
+    _git(seed, "add", "bundle-only.txt")
+    _git(seed, "commit", "-m", "divergent bundle work")
+    divergent_sha = _git(seed, "rev-parse", "HEAD")
+    divergent_bundle = tmp_path / "hypersmart_428.bundle"
+    _git(seed, "bundle", "create", str(divergent_bundle), "bundle-divergent")
+    _git(seed, "checkout", "main")
+
     (seed / "remote.txt").write_text("remote\n", encoding="utf-8")
     _git(seed, "add", "remote.txt")
     _git(seed, "commit", "-m", "remote work")
@@ -85,6 +94,7 @@ def test_safe_push_reconciles_remote_and_skips_stale_bundle(tmp_path: Path) -> N
     exclude_file = local / ".git" / "info" / "exclude"
     exclude_file.write_text("*.bundle\n", encoding="utf-8")
     shutil.copy2(stale_bundle, local / stale_bundle.name)
+    shutil.copy2(divergent_bundle, local / divergent_bundle.name)
 
     result = _run(
         "powershell.exe",
@@ -100,8 +110,16 @@ def test_safe_push_reconciles_remote_and_skips_stale_bundle(tmp_path: Path) -> N
     )
 
     assert "[DEJA INTEGRE]" in result.stdout
+    assert "[ARCHIVE SANS MERGE]" in result.stdout
     assert "main et origin/main sont identiques" in result.stdout
     remote_main = _git(local, "rev-parse", "refs/remotes/origin/main")
     assert _git(local, "rev-parse", "main") == remote_main
     assert _git(local, "merge-base", "--is-ancestor", remote_work_sha, remote_main) == ""
     assert _git(local, "merge-base", "--is-ancestor", local_work_sha, remote_main) == ""
+    assert _git(local, "rev-parse", "refs/remotes/hypersmart-bundles/hypersmart_428/bundle-divergent") == divergent_sha
+    divergent_in_main = subprocess.run(
+        ("git", "merge-base", "--is-ancestor", divergent_sha, remote_main),
+        cwd=local,
+        capture_output=True,
+    )
+    assert divergent_in_main.returncode == 1
