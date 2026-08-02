@@ -1348,6 +1348,19 @@ def boucle_continue(
                 reprise_dans_s=reprise_dans_s,
                 erreurs_consecutives=erreurs_consecutives,
             )
+            # ``max_cycles`` rend volontairement la boucle bornée pour les
+            # tests, les probes et les validations de release. Une erreur ne
+            # doit pas contourner cette borne en empruntant indéfiniment le
+            # chemin de reprise 24/7.
+            if max_cycles is not None:
+                return {
+                    "boucle": "MAX_CYCLES_FAILED",
+                    "cycles": cycle - 1,
+                    "failed_cycle": cycle,
+                    "phase": phase,
+                    "error_type": type(exc).__name__,
+                    "error": str(exc),
+                }
             if stop_event.wait(reprise_dans_s):
                 break
             continue

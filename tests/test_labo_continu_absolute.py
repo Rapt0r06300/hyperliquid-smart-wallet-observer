@@ -352,6 +352,30 @@ def test_crash_resume(tmp_path):
     assert rr["start"] == "REPRISE" and rr["run_id"] == rid       # reprise du MÊME run après crash
 
 
+def test_bounded_cycle_failure_never_enters_infinite_recovery(tmp_path, monkeypatch):
+    RC._ARRET.clear()
+    d = tmp_path / "runtime" / "research_lab" / "data"; d.mkdir(parents=True)
+    (d / "bbo.jsonl").write_text(json.dumps({"coin": "BTC", "ts_wall_ms": 1, "bid": 1, "ask": 1.1}) + "\n")
+    RC.creer_ou_reprendre(tmp_path, exiger_flux=False)
+
+    def _cycle_en_echec(*args, **kwargs):
+        raise OSError("write probe failed")
+
+    monkeypatch.setattr(RC, "executer_cycle", _cycle_en_echec)
+    resultat = RC.boucle_continue(
+        tmp_path,
+        stop_event=threading.Event(),
+        max_cycles=1,
+        intervalle_s=0.0,
+        recovery_backoff_s=60.0,
+    )
+
+    assert resultat["boucle"] == "MAX_CYCLES_FAILED"
+    assert resultat["failed_cycle"] == 1
+    assert resultat["phase"] == "DISCOVERY"
+    assert resultat["error_type"] == "OSError"
+
+
 def test_ctrl_c_during_each_phase_produces_report(tmp_path):
     RC._ARRET.clear(); RC._URGENCE.clear()
     d = tmp_path / "runtime" / "research_lab" / "data"; d.mkdir(parents=True)

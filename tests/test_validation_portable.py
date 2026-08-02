@@ -18,6 +18,13 @@ sys.path.insert(0, str(ROOT / "src"))
 from hl_observer.ops import validation_portable as VP  # noqa: E402
 
 
+def test_pytest_basetemp_is_isolated_from_runtime_cleanup():
+    source = Path(VP.__file__).read_text(encoding="utf-8")
+
+    assert 'validation_dir = primary / ".portable-validation"' in source
+    assert 'validation_dir = primary / "runtime" / "portable-validation"' not in source
+
+
 class _Response:
     status = 200
 

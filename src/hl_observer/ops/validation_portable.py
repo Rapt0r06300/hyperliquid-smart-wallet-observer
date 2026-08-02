@@ -333,7 +333,11 @@ def valider_archive_portable(
             if index == 1:
                 primary = destination
         assert primary is not None
-        validation_dir = primary / "runtime" / "portable-validation"
+        # Plusieurs tests auditent/nettoient volontairement ``runtime``. Le
+        # basetemp de pytest ne peut donc pas y vivre : une suppression
+        # concurrente faisait disparaître ses fichiers atomiques et pouvait
+        # transformer une validation bornée en attente infinie.
+        validation_dir = primary / ".portable-validation"
         guard_dir = primary / "tools" / "python" / "Lib" / "site-packages"
         validation_dir.mkdir(parents=True, exist_ok=True)
         audit_bootstrap = _install_sitecustomize(primary, guard_dir)
