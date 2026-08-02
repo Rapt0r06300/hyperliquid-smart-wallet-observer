@@ -347,9 +347,16 @@ def est_exclu(rel: str) -> bool:
     if any(low.endswith(sfx) for sfx in SUFFIXES_EXCLUS):
         return True
     # Les archives sont exclues sauf fixtures explicites de tests, requises pour
-    # tester les parseurs d'archives sans embarquer d'anciennes releases.
+    # tester les parseurs d'archives sans embarquer d'anciennes releases. Le ZIP
+    # stdlib de CPython est une composante executable obligatoire du runtime,
+    # pas une release imbriquee : sans lui, Python ne trouve meme pas encodings.
     if any(low.endswith(sfx) for sfx in SUFFIXES_ARCHIVES):
-        if not (rel_posix.startswith("tests/fixtures/") or "/fixtures/" in rel_posix):
+        stdlib_python = (
+            rel_posix.startswith("tools/python/")
+            and re.fullmatch(r"python\d+(?:_d)?\.zip", Path(rel_posix).name, re.IGNORECASE) is not None
+        )
+        fixture_test = rel_posix.startswith("tests/fixtures/") or "/fixtures/" in rel_posix
+        if not (fixture_test or stdlib_python):
             return True
     if any(low.endswith(sfx) for sfx in SUFFIXES_SECRETS):          # item 21 : jamais de cle dans l'archive
         return True

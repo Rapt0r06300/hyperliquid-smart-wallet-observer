@@ -94,7 +94,7 @@ try {
     Expand-Archive -LiteralPath $downloadPath -DestinationPath $buildPython -Force
     $pthFile = Get-ChildItem -LiteralPath $buildPython -Filter "python*._pth" -File | Select-Object -First 1
     if ($null -eq $pthFile) { throw "Embedded Python path file is missing." }
-    @("python314.zip", ".", "Lib\site-packages", "..\..\src", "..\..", "..\..\tools", "import site") |
+    @("python314.zip", ".", "Lib\site-packages", "..\..\src", "..\..", "..\..\tools") |
         Set-Content -LiteralPath $pthFile.FullName -Encoding ASCII
     $buildPythonExe = Join-Path $buildPython "python.exe"
     $sitePackages = Join-Path $buildPython "Lib\site-packages"

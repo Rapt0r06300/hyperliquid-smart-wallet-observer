@@ -103,6 +103,8 @@ def test_est_exclu_regles():
     ):
         assert AP.est_exclu(sortie), sortie
     assert not AP.est_exclu("outils de test/ANALYSER-599.cmd")
+    assert not AP.est_exclu("tools/python/python314.zip")
+    assert AP.est_exclu("tools/python/ancienne-release.zip")
     assert not AP.est_exclu("src/app.py") and not AP.est_exclu("runtime/data/sessions/r/bbo.jsonl")
 
 
