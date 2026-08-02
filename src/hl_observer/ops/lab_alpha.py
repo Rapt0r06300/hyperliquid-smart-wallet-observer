@@ -38,24 +38,34 @@ class AnalyseVerrouilleeError(RuntimeError):
 
 
 def acquerir_verrou_analyse(sortie: str | Path, *, pid_vivant=None) -> Path:
-    """item 13 : verrou d'analyse ATOMIQUE. Deux lancements ne peuvent pas écrire le même rapport/shard/
-    checkpoint. Un verrou dont le PID est mort (crash) est repris ; un verrou dont le PID est VIVANT
-    bloque (AnalyseVerrouilleeError)."""
+    """item 5/13 : verrou d'analyse RÉELLEMENT ATOMIQUE via os.open(O_CREAT|O_EXCL) — pas un exists()
+    suivi d'un write_text() (fenêtre TOCTOU). Deux lancements ne peuvent pas écrire le même rapport/shard/
+    checkpoint. Un verrou dont le PID est mort (crash) est repris atomiquement (os.replace) ; un verrou
+    dont le PID est VIVANT bloque (AnalyseVerrouilleeError)."""
     import json
     import os as _os
     from hl_observer.ops.preuve_de_vie import _pid_vivant_reel
     vivant = pid_vivant or _pid_vivant_reel
     verrou = Path(sortie) / ".analyse.lock"
     verrou.parent.mkdir(parents=True, exist_ok=True)
-    if verrou.exists():
-        try:
-            pid = int(json.loads(verrou.read_text(encoding="utf-8")).get("pid", -1))
-        except Exception:  # noqa: BLE001
-            pid = -1
-        if pid > 0 and vivant(pid):
-            raise AnalyseVerrouilleeError("analyse deja en cours (pid %d) dans %s" % (pid, sortie))
-        # verrou périmé (PID mort) → on le reprend.
-    verrou.write_text(json.dumps({"pid": _os.getpid()}), encoding="utf-8")
+    charge = json.dumps({"pid": _os.getpid()})
+    try:
+        fd = _os.open(str(verrou), _os.O_CREAT | _os.O_EXCL | _os.O_WRONLY, 0o644)   # création ATOMIQUE
+        with _os.fdopen(fd, "w", encoding="utf-8") as f:
+            f.write(charge)
+        return verrou
+    except FileExistsError:
+        pass
+    # le verrou existe déjà : détenteur vivant → bloqué ; mort (crash) → reprise ATOMIQUE (temp+replace).
+    try:
+        pid = int(json.loads(verrou.read_text(encoding="utf-8")).get("pid", -1))
+    except Exception:  # noqa: BLE001
+        pid = -1
+    if pid > 0 and vivant(pid):
+        raise AnalyseVerrouilleeError("analyse deja en cours (pid %d) dans %s" % (pid, sortie))
+    tmp = verrou.with_name(".analyse.%d.tmp" % _os.getpid())
+    tmp.write_text(charge, encoding="utf-8")
+    _os.replace(tmp, verrou)
     return verrou
 
 
