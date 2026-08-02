@@ -85,11 +85,6 @@ def sessions_actives(root: str | Path) -> list[str]:
     return [s["run_id"] for s in SC.scanner_sessions(root) if s.get("statut") == SC.STATUT_ACTIVE]
 
 
-def sessions_actives(root: str | Path) -> list[str]:
-    """item 20.2 : run_id des sessions encore ACTIVE (elles interdisent la construction)."""
-    return [s["run_id"] for s in SC.scanner_sessions(root) if s.get("statut") == SC.STATUT_ACTIVE]
-
-
 # ── SQLITE WAL (item 20.3) ───────────────────────────────────────────────────────────────────
 def checkpoint_wal_sqlite(chemin: str | Path) -> dict:
     """TRUNCATE le WAL d'une base puis repasse en journal DELETE : la base devient auto-portante,
