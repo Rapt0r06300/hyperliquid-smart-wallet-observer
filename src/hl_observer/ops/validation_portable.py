@@ -38,6 +38,7 @@ FATAL_OUTPUT_MARKERS = (
     "modulenotfounderror:",
     "traceback (most recent call last):",
 )
+VALIDATION_WORKSPACE_NAME = "_validation_workspace"
 
 
 def _sha256(path: Path) -> tuple[str, int]:
@@ -62,7 +63,7 @@ def _manifest_from_archive(archive: Path) -> dict[str, Any]:
 def _hermetic_environment(root: Path, guard_dir: Path) -> dict[str, str]:
     python_dir = root / "tools" / "python"
     system_root = Path(os.environ.get("SystemRoot", r"C:\Windows"))
-    writable = root / "runtime" / "portable-validation" / "environment"
+    writable = root / VALIDATION_WORKSPACE_NAME / "environment"
     for name in ("tmp", "home", "appdata", "localappdata"):
         (writable / name).mkdir(parents=True, exist_ok=True)
     path_entries = [python_dir, python_dir / "Scripts", system_root / "System32"]
@@ -84,7 +85,7 @@ def _hermetic_environment(root: Path, guard_dir: Path) -> dict[str, str]:
         "LOCALAPPDATA": str(writable / "localappdata"),
         "HYPERSMART_PORTABLE_AUDIT_ROOT": str(root),
         "HYPERSMART_PORTABLE_AUDIT_LOG": str(
-            root / "runtime" / "portable-validation" / "audit_violations.jsonl"
+            root / VALIDATION_WORKSPACE_NAME / "audit_violations.jsonl"
         ),
         "HL_ENABLE_MAINNET_EXECUTION": "0",
         "HL_ENABLE_TESTNET_EXECUTION": "0",
@@ -337,7 +338,7 @@ def valider_archive_portable(
         # basetemp de pytest ne peut donc pas y vivre : une suppression
         # concurrente faisait disparaître ses fichiers atomiques et pouvait
         # transformer une validation bornée en attente infinie.
-        validation_dir = primary / ".portable-validation"
+        validation_dir = primary / VALIDATION_WORKSPACE_NAME
         guard_dir = primary / "tools" / "python" / "Lib" / "site-packages"
         validation_dir.mkdir(parents=True, exist_ok=True)
         audit_bootstrap = _install_sitecustomize(primary, guard_dir)
@@ -393,6 +394,7 @@ def valider_archive_portable(
         ))
         commands.append(_run(
             "pytest_full", [str(python), "-m", "pytest", "-q", "-p", "no:cacheprovider",
+                            "--timeout=120", "--timeout-method=thread",
                             "--basetemp", str(validation_dir / "pytest-temp")],
             cwd=primary, env=env, timeout=pytest_timeout,
         ))
@@ -529,7 +531,8 @@ def main(argv: list[str] | None = None) -> int:
 
 
 __all__ = [
-    "CI_SCHEMA", "NETWORK_ENDPOINTS", "SCHEMA", "smoke_reseau_readonly",
+    "CI_SCHEMA", "NETWORK_ENDPOINTS", "SCHEMA", "VALIDATION_WORKSPACE_NAME",
+    "smoke_reseau_readonly",
     "valider_archive_portable", "write_evidence",
 ]
 

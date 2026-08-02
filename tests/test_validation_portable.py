@@ -18,11 +18,16 @@ sys.path.insert(0, str(ROOT / "src"))
 from hl_observer.ops import validation_portable as VP  # noqa: E402
 
 
-def test_pytest_basetemp_is_isolated_from_runtime_cleanup():
-    source = Path(VP.__file__).read_text(encoding="utf-8")
+def test_pytest_basetemp_is_isolated_from_runtime_cleanup(tmp_path):
+    root = tmp_path / "release"
+    guard = root / "tools" / "python" / "Lib" / "site-packages"
 
-    assert 'validation_dir = primary / ".portable-validation"' in source
-    assert 'validation_dir = primary / "runtime" / "portable-validation"' not in source
+    env = VP._hermetic_environment(root, guard)
+
+    workspace = root / VP.VALIDATION_WORKSPACE_NAME
+    assert Path(env["TEMP"]).is_relative_to(workspace)
+    assert Path(env["HYPERSMART_PORTABLE_AUDIT_LOG"]).is_relative_to(workspace)
+    assert "runtime" not in Path(env["TEMP"]).relative_to(root).parts
 
 
 class _Response:
@@ -207,6 +212,9 @@ def test_validation_evidence_is_bound_and_not_declarative(tmp_path, monkeypatch)
     assert result["manifest_fingerprint"] == manifest["empreinte_globale"]
     assert result["checks"]["build_reproductible"]["ok"] is True
     assert result["checks"]["analyseur_backtests"]["ledger_reconciled"] is True
+    pytest_command = next(row for row in result["commands"] if row["name"] == "pytest_full")
+    assert "--timeout=120" in pytest_command["command"]
+    assert "--timeout-method=thread" in pytest_command["command"]
     simple = tmp_path / "extracts" / "simple" / "tools" / "python"
     execution = tmp_path / "extracts" / "avec espaces et accents éà" / "tools" / "python"
     assert "import site" not in (simple / "python314._pth").read_text(encoding="utf-8")
