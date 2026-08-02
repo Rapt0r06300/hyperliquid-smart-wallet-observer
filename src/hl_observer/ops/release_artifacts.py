@@ -27,6 +27,7 @@ NOMS_ARTEFACTS = {
     "tests": "TESTS_ARCHIVE_EXTRAITE.json",
     "modules": "MODULES_COLLECTEURS_VERIFIES.json",
     "ecritures": "PREUVE_ZERO_ECRITURE_EXTERNE.json",
+    "validation": "PORTABLE_VALIDATION.json",
 }
 
 
@@ -212,6 +213,7 @@ def produire_artefacts_release(
         NOMS_ARTEFACTS["ecritures"]: _json_bytes(
             validation.get("zero_ecriture_externe", {"ok": False, "detail": "absent"})
         ),
+        NOMS_ARTEFACTS["validation"]: _json_bytes(validation),
         archive.name + ".sha256": ("%s  %s\n" % (archive_sha, archive.name)).encode("ascii"),
     }
     chemins = {}
