@@ -15,6 +15,12 @@ runtime embarque sont actuellement testes pour Windows x64.
 
 1. Extraire entierement l'archive `HyperSmart_Portable_Windows_x64_*.zip`.
 2. Conserver `portable_runtime/` a cote du reste du projet.
+
+Le double-clic sur `CREER_ARCHIVE_PORTABLE.cmd` produit maintenant une copie
+portable locale complete et auto-verifiee sur le Bureau. Le mode historique
+lie a une preuve GitHub Actions reste disponible avec
+`CREER_ARCHIVE_PORTABLE.cmd --release-stricte`; il n'est plus impose a une
+copie locale de transfert entre deux PC.
 3. Double-cliquer sur `LANCER_HYPERSMART.cmd`.
 
 Python n'a pas besoin d'etre installe sur le PC cible. Le lanceur execute d'abord

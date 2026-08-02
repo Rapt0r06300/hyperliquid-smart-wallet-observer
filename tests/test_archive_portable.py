@@ -232,19 +232,30 @@ def test_refuse_si_writer_vivant(tmp_path):
 
 
 def test_checkout_propre_sans_registre_est_quiescent(tmp_path):
-    # Une release officielle refuse un registre absent: l'arret serait ambigu.
+    # Une copie locale autorise l'etat normal apres arret propre (registre
+    # supprime, aucun writer detecte). La release officielle reste fail-closed.
     (tmp_path / "src").mkdir()
     (tmp_path / "src" / "app.py").write_text("print(1)\n", encoding="utf-8")
     (tmp_path / "LANCER_HYPERSMART.cmd").write_text('cd /d "%~dp0"\n', encoding="utf-8")
     assert AP.preuve_arret(tmp_path, pid_vivant=lambda _p: False) == (False, ["REGISTRE_ABSENT"])
     cible = _cible_externe(tmp_path)
+    result = AP.creer_archive_portable(
+        tmp_path, cible, pid_vivant=lambda _p: False, horloge=HORLOGE,
+        etat_git=ETAT_GIT_PROPRE, mode_release="developpement",
+    )
+    assert cible.is_file()
+    assert result["arret"].startswith("AUCUN_WRITER_DETECTE")
+
+    cible_officielle = _cible_externe(tmp_path, "officielle.zip")
     try:
-        AP.creer_archive_portable(tmp_path, cible, pid_vivant=lambda _p: False, horloge=HORLOGE,
-                                  etat_git=ETAT_GIT_PROPRE)
-        assert False, "registre absent aurait du bloquer"
+        AP.creer_archive_portable(
+            tmp_path, cible_officielle, pid_vivant=lambda _p: False,
+            horloge=HORLOGE, etat_git=ETAT_GIT_PROPRE, mode_release="official",
+        )
+        assert False, "la release officielle doit exiger le registre"
     except AP.ArchiveRefuseeError as exc:
         assert "non prouve" in str(exc).lower()
-    assert not cible.exists()
+    assert not cible_officielle.exists()
 
 
 def test_refuse_si_session_active(tmp_path):

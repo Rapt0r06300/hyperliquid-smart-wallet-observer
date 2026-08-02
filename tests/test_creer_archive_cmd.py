@@ -10,7 +10,9 @@ CMD = (ROOT / "CREER_ARCHIVE_PORTABLE.cmd").read_text(encoding="utf-8", errors="
 
 def test_embedded_python_is_the_only_runtime():
     assert 'call "%~dp0tools\\portable_env.cmd"' in CMD
-    assert '"%HYPERSMART_PYTHON%" -m hl_observer.ops.portable_release' in CMD
+    assert '"%HYPERSMART_PYTHON%" -m hl_observer.ops.archive_portable' in CMD
+    assert "--mode-developpement" in CMD
+    assert "--release-stricte" in CMD
     assert "where py" not in CMD and "py -3" not in CMD
     assert "portable_runtime\\python" not in CMD
 
@@ -22,12 +24,12 @@ def test_master_cmd_no_longer_mutates_or_checkpoints_source_session():
 
 
 def test_ok_can_only_be_printed_after_orchestrator_return_code():
-    call = CMD.index("hl_observer.ops.portable_release")
+    call = CMD.index("hl_observer.ops.archive_portable")
     result = CMD.index('set "RC=%ERRORLEVEL%"', call)
     success = CMD.index("[OK]", result)
     assert call < result < success
     assert 'if "%RC%"=="0"' in CMD[result:success]
-    assert "RELEASE_READY" in CMD[success:]
+    assert "reverifiee" in CMD[success:]
 
 
 def test_paper_only_environment_is_explicit():

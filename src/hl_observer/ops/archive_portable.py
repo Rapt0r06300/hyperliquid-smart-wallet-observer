@@ -851,11 +851,22 @@ def creer_archive_portable(root: str | Path, cible: str | Path, *, version: str 
     # 1+2 : refus durs AVANT tout travail couteux.
     arretes, motifs = preuve_arret(root, pid_vivant=pid_vivant)
     vivants = [m for m in motifs if m not in _MARQUEURS_REGISTRE]
-    if not arretes:
+    # Une release officielle exige la preuve positive du registre. Une copie
+    # portable locale en mode developpement peut aussi etre construite lorsque
+    # le registre a disparu apres un arret propre, a condition que le scan
+    # independant ne trouve aucun vrai writer et qu'aucune session ne soit ACTIVE.
+    # Seule l'absence normale du registre apres arret est acceptable ici.
+    # Un registre incomplet/corrompu reste un refus dur: il pourrait masquer
+    # des PID actifs et ne doit jamais etre assimile a un arret propre.
+    registre_seulement = motifs == ["REGISTRE_ABSENT"]
+    if not arretes and not (mode_release == "developpement" and registre_seulement):
         raise ArchiveRefuseeError("arret des writers non prouve: %s" % ", ".join(motifs))
     if vivants:
         raise ArchiveRefuseeError("writers encore vivants: %s" % ", ".join(vivants))
-    note_arret = "PROUVE_ARRETE" if arretes else ("MODE_TEST_SANS_PREUVE (%s)" % ",".join(motifs))
+    note_arret = (
+        "PROUVE_ARRETE" if arretes
+        else "AUCUN_WRITER_DETECTE_REGISTRE_ABSENT (%s)" % ",".join(motifs)
+    )
     actives = sessions_actives(root)
     if actives:
         raise ArchiveRefuseeError("sessions ACTIVE (a cloturer d'abord): %s" % ", ".join(actives))
@@ -908,6 +919,7 @@ def creer_archive_portable(root: str | Path, cible: str | Path, *, version: str 
                 k: (len(v) if isinstance(v, list) else v)
                 for k, v in completude.items()
             }
+            manifeste["mode_release"] = mode_release
             manifeste["staging"] = {
                 "source_immuable": True,
                 "sqlite_backup_api": all(x.get("ok") for x in staging_info["sqlite"]),

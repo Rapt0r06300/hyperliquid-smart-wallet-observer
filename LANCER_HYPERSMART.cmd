@@ -704,7 +704,9 @@ goto :fin
 REM -------- PORTABILITE WINDOWS --------
 :cmd_portablecheck
 echo.
-"%HYPERSMART_PYTHON%" tools\portable_runtime.py --root "%~dp0." check
+"%HYPERSMART_PYTHON%" tools\portable_runtime.py --root "%~dp0." check --require-embedded --json
+set "RC=%ERRORLEVEL%"
+if "%RC%"=="0" echo PORTABLE_LAUNCHER_CHECK_OK
 echo.
 goto :fin
 
@@ -865,14 +867,14 @@ set /p GITHUB_TOKEN=  Ta cle GitHub ^(vide = 60 req/h, sans recherche code^) :
 :moisson_go
 if exist "%~dp0moisson-termine.flag" del "%~dp0moisson-termine.flag" >nul 2>&1
 if exist "%~dp0moisson-en-cours.txt" del "%~dp0moisson-en-cours.txt" >nul 2>&1
-start "MOISSON 12h - travail (NE PAS FERMER)" /min cmd /c "set PYTHONPATH=%~dp0src;%~dp0& set PYTHONIOENCODING=utf-8& set PYTHONUTF8=1& python tools\moissonner_10h.py --heures 12 > "%~dp0moisson_console.txt" 2>&1& echo done> "%~dp0moisson-termine.flag""
+start "MOISSON 12h - travail (NE PAS FERMER)" /min cmd /c "set PYTHONPATH=%~dp0src;%~dp0& set PYTHONIOENCODING=utf-8& set PYTHONUTF8=1& "%HYPERSMART_PYTHON%" tools\moissonner_10h.py --heures 12 > "%~dp0moisson_console.txt" 2>&1& echo done> "%~dp0moisson-termine.flag""
 powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0tools\voir_dashboard.ps1" -Root "%~dp0"
 echo   Moisson terminee. Resultat : moisson-fini.md
 goto :fin
 :moisson_relire
 if not exist "%~dp0data\reports\moisson_10h_etat.json" ( echo   Aucun etat sauvegarde -- lance d'abord `moisson`. & goto :fin )
 if exist "%~dp0moisson-termine.flag" del "%~dp0moisson-termine.flag" >nul 2>&1
-start "MOISSON 12h - travail (NE PAS FERMER)" /min cmd /c "set PYTHONPATH=%~dp0src;%~dp0& set PYTHONIOENCODING=utf-8& set PYTHONUTF8=1& python tools\moissonner_10h.py --heures 3 --relire > "%~dp0moisson_console.txt" 2>&1& echo done> "%~dp0moisson-termine.flag""
+start "MOISSON 12h - travail (NE PAS FERMER)" /min cmd /c "set PYTHONPATH=%~dp0src;%~dp0& set PYTHONIOENCODING=utf-8& set PYTHONUTF8=1& "%HYPERSMART_PYTHON%" tools\moissonner_10h.py --heures 3 --relire > "%~dp0moisson_console.txt" 2>&1& echo done> "%~dp0moisson-termine.flag""
 powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0tools\voir_dashboard.ps1" -Root "%~dp0"
 goto :fin
 :moisson_github

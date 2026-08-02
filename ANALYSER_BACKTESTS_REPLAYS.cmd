@@ -25,6 +25,17 @@ set "HL_ENABLE_TESTNET_EXECUTION=0"
 set "REAL_MAINNET_TRADING=false"
 set "TESTNET_ONLY=true"
 
+REM Smoke portable borne, non interactif : utilise exclusivement Python embarque.
+if /I "%~1"=="portable-smoke" goto :portable_smoke
+goto :analyse_principale
+
+:portable_smoke
+"%HYPERSMART_PYTHON%" -m hl_observer.ops.portable_smoke --root "%~dp0." --json
+set "RC=%ERRORLEVEL%"
+endlocal & exit /b %RC%
+
+:analyse_principale
+
 echo.
 echo ============================================================
 echo   LABORATOIRE ALPHA - paper strict (0 ordre reel)

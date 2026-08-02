@@ -62,7 +62,10 @@ def _manifest_from_archive(archive: Path) -> dict[str, Any]:
 
 def _hermetic_environment(root: Path, guard_dir: Path) -> dict[str, str]:
     python_dir = root / "tools" / "python"
-    system_root = Path(os.environ.get("SystemRoot", r"C:\Windows"))
+    system_root_value = os.environ.get("SystemRoot") or os.environ.get("WINDIR")
+    if not system_root_value:
+        raise RuntimeError("SystemRoot/WINDIR absent: environnement Windows incomplet")
+    system_root = Path(system_root_value)
     writable = root / VALIDATION_WORKSPACE_NAME / "environment"
     for name in ("tmp", "home", "appdata", "localappdata"):
         (writable / name).mkdir(parents=True, exist_ok=True)

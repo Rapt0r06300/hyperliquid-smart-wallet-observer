@@ -1,9 +1,9 @@
 @echo off
 setlocal EnableExtensions DisableDelayedExpansion
 REM ============================================================================
-REM HyperSmart portable release - Windows 10/11 x64 - PAPER/READ-ONLY ONLY
-REM Publishes no ZIP until two deterministic builds, extracted validation,
-REM both launchers, full tests, safety audits and RELEASE_READY all pass.
+REM HyperSmart portable package - Windows 10/11 x64 - PAPER/READ-ONLY ONLY.
+REM Default: complete local portable copy, internally hashed and re-extracted.
+REM Optional: --release-stricte keeps the CI-bound official release pipeline.
 REM ============================================================================
 cd /d "%~dp0"
 
@@ -29,21 +29,31 @@ set "TESTNET_EXECUTION_ENABLED=false"
 
 echo.
 echo ==============================================================================
-echo   RELEASE PORTABLE HYPERSMART - validation extraite complete
-echo   Deux builds reproductibles ^| tests ^| launchers ^| audits ^| CI exacte
+echo   COPIE PORTABLE HYPERSMART - autonome et verifiee
+echo   Sources ^| Python ^| dependances ^| manifestes SHA-256 ^| extraction testee
 echo   Sortie finale hors projet uniquement ^(Bureau par defaut^)
 echo ==============================================================================
 echo.
 
-"%HYPERSMART_PYTHON%" -m hl_observer.ops.portable_release --racine "%~dp0." %*
+if /I "%~1"=="--release-stricte" goto :release_stricte
+
+"%HYPERSMART_PYTHON%" -m hl_observer.ops.archive_portable ^
+  --racine "%~dp0." --mode-developpement %*
 set "RC=%ERRORLEVEL%"
+goto :resultat
+
+:release_stricte
+"%HYPERSMART_PYTHON%" -m hl_observer.ops.portable_release --racine "%~dp0."
+set "RC=%ERRORLEVEL%"
+
+:resultat
 
 echo.
 if "%RC%"=="0" (
-  echo [OK] Archive conservee : toutes les portes RELEASE_READY sont vertes.
+  echo [OK] Archive portable creee et reverifiee sur le Bureau.
 ) else (
-  echo [REFUSE] Aucune archive candidate conservee ^(code %RC%^).
-  echo          Consulte RELEASE_FAILED.json dans le dossier de sortie.
+  echo [REFUSE] Aucune archive incomplete n'a ete conservee ^(code %RC%^).
+  echo          Ferme HyperSmart si un writer ou une session est encore actif.
 )
 echo.
 

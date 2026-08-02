@@ -140,5 +140,6 @@ def test_la_racine_contient_les_deux_lanceurs_officiels():
         "RECETTE-WINDOWS.cmd",
         "RECETTE-LANCEUR.cmd",
         "CREER_ARCHIVE_PORTABLE.cmd",   # item 20 : outil de maintenance (archive portable), hors hot path
+        "COMMITTER_B1_B2.cmd",
     }
     assert cmd_racine <= officiels | outils_conserves

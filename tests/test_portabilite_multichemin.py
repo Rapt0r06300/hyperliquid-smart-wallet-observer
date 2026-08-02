@@ -13,6 +13,7 @@ preparer_python_portable.cmd / install_portable_runtime.ps1 (Windows). 0 reseau.
 from __future__ import annotations
 
 import json
+import os
 import shutil
 import subprocess
 import sys
@@ -24,6 +25,12 @@ RACINE = Path(__file__).resolve().parents[1]
 _SONDE = r"""
 import json, sys
 from pathlib import Path
+attendue = Path(sys.argv[1]).resolve()
+# Le Python embeddable utilise un fichier ._pth et ignore volontairement
+# PYTHONPATH. Pointer explicitement la sonde vers la copie prouve que les
+# imports et la resolution de racine ne retombent pas sur le depot source.
+sys.path.insert(0, str(attendue / 'tools'))
+sys.path.insert(0, str(attendue / 'src'))
 import hl_observer.portabilite as P
 # tous les modules coeur du runtime + collecteurs cataloguables se chargent :
 import hl_observer.ops.session_catalog as SC
@@ -34,7 +41,6 @@ import hl_observer.ops.lab_flux
 import audit_portabilite as A
 
 racine = P.racine_projet()
-attendue = Path(sys.argv[1]).resolve()
 # ecriture representative : une session cataloguee, qui DOIT atterrir sous la copie.
 cat = SC.CatalogueSession(str(racine), "run_multichemin")
 cat.demarrer()
@@ -46,6 +52,7 @@ print(json.dumps({
     "catalogue_sous_copie": str(chemin_cat).startswith(str(attendue)),
     "catalogue_existe": chemin_cat.is_file(),
     "audit_violations": len(violations),
+    "audit_details": violations,
 }))
 """
 
@@ -70,8 +77,13 @@ def _copier_projet(dest: Path) -> Path:
 
 
 def _lancer_sonde(copie: Path, cwd_etranger: Path) -> dict:
-    env = {"PYTHONPATH": "%s:%s" % (copie / "src", copie / "tools"),
-           "PYTHONUTF8": "1", "PYTHONIOENCODING": "utf-8", "PATH": "/usr/bin:/bin"}
+    env = dict(os.environ)
+    env.update({
+        "PYTHONPATH": os.pathsep.join((str(copie / "src"), str(copie / "tools"))),
+        "PYTHONUTF8": "1",
+        "PYTHONIOENCODING": "utf-8",
+        "PYTHONNOUSERSITE": "1",
+    })
     r = subprocess.run([sys.executable, "-c", _SONDE, str(copie)],
                        cwd=str(cwd_etranger), env=env, capture_output=True, text=True, timeout=120)
     assert r.returncode == 0, "sonde KO:\n%s\n%s" % (r.stdout, r.stderr)
@@ -92,7 +104,7 @@ def _scenario(tmp_path: Path, sous_chemin: str):
     apres = _fichiers(cwd_etranger)
     assert res["racine_ok"], "racine mal resolue: %s" % res["racine"]
     assert res["catalogue_sous_copie"] and res["catalogue_existe"], "ecriture hors copie: %s" % res
-    assert res["audit_violations"] == 0, "audit non propre sur la copie"
+    assert res["audit_violations"] == 0, "audit non propre sur la copie: %s" % res.get("audit_details")
     assert avant == apres, "des fichiers ont ete ecrits dans le cwd etranger (fuite hors copie)"
     return res
 
@@ -102,7 +114,9 @@ def test_copie_espaces_et_accents(tmp_path):
 
 
 def test_copie_chemin_long(tmp_path):
-    long = "/".join("niveau_tres_profond_%02d_pour_chemin_long" % i for i in range(6))
+    # Reste compatible avec les Windows qui appliquent encore MAX_PATH. Les
+    # chemins internes de l'archive sont controles separement par le builder.
+    long = "/".join("niveau_tres_profond_%02d" % i for i in range(2))
     _scenario(tmp_path, long)
 
 
