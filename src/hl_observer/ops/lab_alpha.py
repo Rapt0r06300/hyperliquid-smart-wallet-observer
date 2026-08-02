@@ -277,9 +277,9 @@ def lancer_lab(*, racine: str | Path, sortie_dir: str | Path | None = None, budg
     # (OOM sur gros jeu) mais « budget AUTOMATIQUE borné » calculé sur la RAM disponible. Un plafond
     # explicite reste respecté. item 8 : la fenêtre est un échantillon causalement contigu (pas biaisé venue).
     from hl_observer.ops.budget_ram import resoudre_max_events
-    budget = resoudre_max_events(max_ram_events)
+    budget_events_ram = resoudre_max_events(max_ram_events)   # NOTE: distinct du `budget` de recherche lab
     explicites = [v for v in (max_events,) if v and v > 0]
-    max_ram = min([budget] + explicites)
+    max_ram = min([budget_events_ram] + explicites)
     etat["budget_ram_events"] = max_ram
     events = charger_borne(shard, max_ram=max_ram)
     valides = _events_valides(events)
