@@ -78,6 +78,30 @@ def test_audit_guard_is_inherited_and_blocks_external_write(tmp_path):
     assert log.is_file() and "open" in log.read_text(encoding="utf-8")
 
 
+@pytest.mark.skipif(os.name != "nt", reason="Windows null device")
+def test_audit_guard_allows_windows_null_device(tmp_path):
+    extracted = tmp_path / "extracted"
+    extracted.mkdir(parents=True)
+    log = extracted / "violations.jsonl"
+    env = os.environ.copy()
+    env.update({
+        "PYTHONPATH": str(ROOT / "src"),
+        "HYPERSMART_PORTABLE_AUDIT_ROOT": str(extracted),
+        "HYPERSMART_PORTABLE_AUDIT_LOG": str(log),
+        "PYTHONNOUSERSITE": "1",
+    })
+    completed = subprocess.run(
+        [str(ROOT / "tools" / "python" / "python.exe"), "-c",
+         "from hl_observer.ops.portable_audit_guard import install_from_environment; "
+         "install_from_environment(); "
+         "open(r'\\\\.\\NUL', 'w').write('discarded'); print('NULL_DEVICE_OK')"],
+        env=env, capture_output=True, text=True, check=False,
+    )
+    assert completed.returncode == 0, completed.stderr
+    assert "NULL_DEVICE_OK" in completed.stdout
+    assert not log.exists()
+
+
 def test_run_rejects_fatal_python_output_even_with_zero_exit(tmp_path):
     result = VP._run(
         "masked-fatal",
@@ -176,3 +200,8 @@ def test_validation_evidence_is_bound_and_not_declarative(tmp_path, monkeypatch)
     assert result["manifest_fingerprint"] == manifest["empreinte_globale"]
     assert result["checks"]["build_reproductible"]["ok"] is True
     assert result["checks"]["analyseur_backtests"]["ledger_reconciled"] is True
+    simple = tmp_path / "extracts" / "simple" / "tools" / "python"
+    execution = tmp_path / "extracts" / "avec espaces et accents éà" / "tools" / "python"
+    assert "import site" not in (simple / "python314._pth").read_text(encoding="utf-8")
+    assert not (simple / "Lib" / "site-packages" / "sitecustomize.py").exists()
+    assert "import site" in (execution / "python314._pth").read_text(encoding="utf-8")

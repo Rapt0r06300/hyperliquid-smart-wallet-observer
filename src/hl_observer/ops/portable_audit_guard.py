@@ -52,9 +52,18 @@ def _inside(path: Any, root: Path) -> bool:
     if isinstance(path, int) or path is None:
         return True
     try:
-        candidate = Path(os.fsdecode(path))
+        decoded = os.fsdecode(path)
     except (TypeError, ValueError):
         return True
+    # Windows logging libraries legitimately open the null device as either
+    # ``NUL`` or ``\\.\NUL``.  It is a kernel sink, not a persistent write
+    # outside the extraction, so denying it makes the hermetic pytest run fail
+    # without strengthening the filesystem boundary.
+    if os.name == "nt":
+        device = decoded.strip().replace("/", "\\").rstrip("\\").upper()
+        if device in {"NUL", r"\\.\NUL", r"\\?\NUL", r"\??\NUL"}:
+            return True
+    candidate = Path(decoded)
     if not candidate.is_absolute():
         candidate = Path.cwd() / candidate
     try:

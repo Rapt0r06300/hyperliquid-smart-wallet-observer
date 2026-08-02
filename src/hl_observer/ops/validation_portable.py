@@ -325,7 +325,12 @@ def valider_archive_portable(
             result = {"path_kind": name, "ok": bool(disk.get("ok")),
                       "security": security, "disk": disk}
             extractions.append(result)
-            if index == 0:
+            # Keep ``simple`` byte-for-byte identical to the ZIP.  The
+            # executable validation needs a disposable extraction because it
+            # enables sitecustomize and writes reports/runtime state.  Running
+            # it from the accents/spaces extraction also proves that path form
+            # instead of mutating the manifest witness evaluated afterwards.
+            if index == 1:
                 primary = destination
         assert primary is not None
         validation_dir = primary / "runtime" / "portable-validation"
@@ -354,10 +359,19 @@ def valider_archive_portable(
             "audit_guard", [str(python), "-c", guard_probe],
             cwd=primary, env=env, timeout=60,
         ))
+        audit_log = Path(env["HYPERSMART_PORTABLE_AUDIT_LOG"])
+        if audit_log.is_file():
+            commands[-1]["probe_events"] = audit_log.read_text(
+                encoding="utf-8"
+            ).splitlines()
         if forbidden_probe.exists():
             forbidden_probe.unlink(missing_ok=True)
             commands[-1]["ok"] = False
             commands[-1]["external_probe_written"] = True
+        # The denied probe is evidence that the guard works, not an external
+        # mutation by the product.  Start the product/test observation log
+        # empty so only subsequent unexpected attempts fail the release.
+        audit_log.unlink(missing_ok=True)
         commands.append(_run(
             "portable_runtime", [str(python), "tools/portable_runtime.py", "--root", str(primary),
                                  "check", "--require-embedded", "--json"],
@@ -401,7 +415,6 @@ def valider_archive_portable(
         time.sleep(0.2)
         after = _processes_for_root(primary)
         orphaned = sorted(after - before)
-        audit_log = Path(env["HYPERSMART_PORTABLE_AUDIT_LOG"])
         violations = audit_log.read_text(encoding="utf-8").splitlines() if audit_log.is_file() else []
         network = smoke_reseau_readonly(opener=network_opener)
         analyser_command = next(row for row in commands if row["name"] == "analyser")
