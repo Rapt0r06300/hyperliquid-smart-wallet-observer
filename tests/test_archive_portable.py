@@ -256,6 +256,48 @@ def test_reverification_detecte_falsification(tmp_path):
     assert verif["ok"] is False and "src/app.py" in verif["divergences"]
 
 
+def test_sbom_dans_le_manifeste(tmp_path):
+    _projet(tmp_path)
+    (tmp_path / "LICENSE").write_text("MIT", encoding="utf-8")
+    (tmp_path / "requirements-portable.txt").write_text("numpy>=1.24\nrich>=13\n", encoding="utf-8")
+    inclus, exclus = AP.lister_pour_archive(tmp_path)
+    m = AP.construire_manifeste(tmp_path, inclus, exclus, horloge=HORLOGE)
+    sbom = m["sbom"]
+    assert sbom["modules_python"] >= 1                      # src/app.py compte
+    assert "LICENSE" in sbom["licences"]
+    assert any("numpy" in d for d in sbom["deps_verrouillees"])
+    assert "LANCER_HYPERSMART.cmd" in sbom["cmd_maitres"]
+
+
+def test_extraction_de_controle_reverifie_sur_disque(tmp_path):
+    _projet(tmp_path)
+    cible = tmp_path / "out.zip"
+    res = AP.creer_archive_portable(tmp_path, cible, pid_vivant=lambda _p: False, horloge=HORLOGE)
+    # la creation a fait l'extraction de controle ET elle est verte.
+    assert res["verification_extraction"]["ok"] is True and res["verification_extraction"]["verifies"] >= 3
+    assert res["sbom"]["modules_python"] >= 1
+    # extraction independante : re-hash sur disque == manifeste.
+    v = AP.extraire_et_reverifier(cible)
+    assert v["ok"] and not v["divergences"] and not v["manquants"]
+
+
+def test_extraction_detecte_membre_falsifie(tmp_path):
+    _projet(tmp_path)
+    cible = tmp_path / "out.zip"
+    AP.creer_archive_portable(tmp_path, cible, pid_vivant=lambda _p: False, horloge=HORLOGE)
+    # falsifie un membre dans le zip -> l'extraction de controle detecte la divergence.
+    import zipfile
+    with zipfile.ZipFile(cible) as z:
+        membres = {n: z.read(n) for n in z.namelist()}
+    membres["src/app.py"] = b"INJECTE\n"
+    faux = tmp_path / "faux.zip"
+    with zipfile.ZipFile(faux, "w") as z:
+        for n, d in membres.items():
+            z.writestr(n, d)
+    v = AP.extraire_et_reverifier(faux)
+    assert v["ok"] is False and "src/app.py" in v["divergences"]
+
+
 def test_cli_verifier(tmp_path, capsys):
     _projet(tmp_path)
     cible = tmp_path / "out.zip"

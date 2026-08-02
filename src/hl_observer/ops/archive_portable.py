@@ -229,6 +229,7 @@ def construire_manifeste(root: str | Path, inclus: Iterable[str], exclus: Iterab
         "nombre_fichiers": len(fichiers),
         "empreinte_globale": empreinte,
         "binaires": binaires,
+        "sbom": _sbom(root, fichiers, binaires),           # item 8 : bill-of-materials + licences
         "deps": _deps_verrouillees(root),
         "donnees_incluses": sessions,
         "donnees_exclues": sorted(set(list(DOSSIERS_EXCLUS) + list(SUFFIXES_EXCLUS)
@@ -268,6 +269,68 @@ def _deps_verrouillees(root: Path) -> list[str]:
             except OSError:
                 pass
     return []
+
+
+def _licences(root: Path) -> list[str]:
+    """Fichiers de licence presents (references dans le SBOM). N'invente aucune licence."""
+    out = []
+    for motif in ("LICENSE*", "LICENCE*", "COPYING*", "NOTICE*"):
+        for p in sorted(root.glob(motif)):
+            if p.is_file():
+                out.append(p.name)
+    return out
+
+
+def _sbom(root: Path, fichiers: dict, binaires: dict) -> dict:
+    """item 8 : Software Bill Of Materials — de quoi est faite la release, verifiable."""
+    modules_py = sum(1 for rel in fichiers if rel.endswith(".py"))
+    wheels = [rel for rel in binaires if binaires[rel]["categorie"] == "wheel"]
+    dll = [rel for rel in binaires if binaires[rel]["categorie"] == "dll"]
+    exe = [rel for rel in binaires if binaires[rel]["categorie"] == "exe"]
+    return {
+        "modules_python": modules_py,
+        "wheels": len(wheels), "dll": len(dll), "exe": len(exe),
+        "deps_verrouillees": _deps_verrouillees(root),
+        "licences": _licences(root),
+        "cmd_maitres": [n for n in ("LANCER_HYPERSMART.cmd", "ANALYSER_BACKTESTS_REPLAYS.cmd",
+                                    "CREER_ARCHIVE_PORTABLE.cmd") if (root / n).is_file()],
+    }
+
+
+def extraire_et_reverifier(archive: str | Path, *, dossier_extraction: str | Path | None = None) -> dict:
+    """item 8 : EXTRACTION physique de controle puis RE-VERIFICATION sur disque. Extrait l'archive dans
+    un dossier temporaire et re-hash CHAQUE fichier extrait contre le manifeste embarque. Plus fort que
+    la relecture en memoire : prouve que l'archive se deploie ET reste integre sur disque."""
+    import tempfile
+    archive = Path(archive)
+    with zipfile.ZipFile(archive, "r") as z:
+        try:
+            manifeste = json.loads(z.read(NOM_MANIFESTE).decode("utf-8"))
+        except KeyError:
+            return {"ok": False, "raison": "MANIFESTE_ABSENT"}
+        ctx = tempfile.TemporaryDirectory(prefix="verif_extraction_") if dossier_extraction is None \
+            else None
+        base = Path(dossier_extraction) if dossier_extraction is not None else Path(ctx.name)
+        try:
+            z.extractall(base)
+            attendus = manifeste.get("fichiers", {})
+            divergences, manquants, verifies = [], [], 0
+            for rel, meta in attendus.items():
+                p = base / rel
+                if not p.is_file():
+                    manquants.append(rel)
+                    continue
+                sha, taille = SC.sha256_fichier(p)
+                if sha != meta.get("sha256") or taille != meta.get("taille"):
+                    divergences.append(rel)
+                else:
+                    verifies += 1
+        finally:
+            if ctx is not None:
+                ctx.cleanup()
+    ok = not divergences and not manquants
+    return {"ok": ok, "verifies": verifies, "divergences": sorted(divergences),
+            "manquants": sorted(manquants)}
 
 
 # ── ECRITURE + RE-VERIFICATION (items 20.8/20.9) ─────────────────────────────────────────────
@@ -373,15 +436,21 @@ def creer_archive_portable(root: str | Path, cible: str | Path, *, version: str 
                                      git_sha=git_sha, horloge=horloge)
     # 6+8 : ecriture (neutralisation + refus si chemin absolu residuel).
     ecrit = ecrire_archive(root, cible, inclus, manifeste)
-    # 9 : re-verification.
+    # 9a : re-verification EN MEMOIRE (chaque membre du zip).
     verif = reverifier_archive(cible)
     if not verif.get("ok"):
         Path(cible).unlink(missing_ok=True)
         raise ArchiveRefuseeError("re-verification KO: %s" % json.dumps(verif, ensure_ascii=False))
+    # 9b : item 8 — EXTRACTION physique de controle + re-verification SUR DISQUE (deploiement prouve).
+    verif_extraction = extraire_et_reverifier(cible)
+    if not verif_extraction.get("ok"):
+        Path(cible).unlink(missing_ok=True)
+        raise ArchiveRefuseeError("extraction de controle KO: %s"
+                                  % json.dumps(verif_extraction, ensure_ascii=False))
     return {"archive": str(cible), "inclus": len(inclus), "exclus": len(exclus),
             "sqlite": sqlite_prep, "empreinte_globale": manifeste["empreinte_globale"],
-            "arret": note_arret, "verification": verif, "manifeste": NOM_MANIFESTE,
-            "ecriture": ecrit}
+            "arret": note_arret, "verification": verif, "verification_extraction": verif_extraction,
+            "sbom": manifeste.get("sbom"), "manifeste": NOM_MANIFESTE, "ecriture": ecrit}
 
 
 def _nom_archive_versionne(root: Path, manifeste_version: str, ts_ms: int) -> str:
@@ -431,7 +500,7 @@ def main(argv: list[str] | None = None) -> int:
 __all__ = ["SCHEMA_MANIFESTE", "NOM_MANIFESTE", "ArchiveRefuseeError", "preuve_arret",
            "writers_vivants", "sessions_actives", "checkpoint_wal_sqlite", "preparer_sqlite", "est_exclu",
            "lister_pour_archive", "neutraliser_metadonnees", "chemins_absolus_residuels",
-           "construire_manifeste", "ecrire_archive", "reverifier_archive",
+           "construire_manifeste", "ecrire_archive", "reverifier_archive", "extraire_et_reverifier",
            "creer_archive_portable", "main"]
 
 
