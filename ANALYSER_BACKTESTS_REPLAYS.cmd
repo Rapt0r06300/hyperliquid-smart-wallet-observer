@@ -32,13 +32,21 @@ echo   Analyse d'UNE session COMPLETE, verifiee, isolee.
 echo ============================================================
 echo.
 
+REM item 11 : SEUIL DE FRAICHEUR configurable. Par defaut, une session de plus de 48 h est refusee
+REM clairement (donnee trop vieille = analyse trompeuse). Surchargeable via HYPERSMART_AGE_MAX_S
+REM (0 ou vide = pas de limite d'age ; ex. 3600 = 1 h). --autoriser-complete-ancienne leve le refus.
+if "%HYPERSMART_AGE_MAX_S%"=="" set "HYPERSMART_AGE_MAX_S=172800"
+set "OPT_AGE="
+if not "%HYPERSMART_AGE_MAX_S%"=="0" set "OPT_AGE=--age-max-s %HYPERSMART_AGE_MAX_S%"
 REM item 2 : PORTE D'ENTREE — selectionne la DERNIERE session COMPLETE, RECALCULE les checksums, refuse
 REM ACTIVE/QUARANTINED, et EMET le run_id selectionne (SESSION_SELECTIONNEE.txt) pour scoper le lab.
-"%HYPERSMART_PYTHON%" -m hl_observer.ops.analyser_session --root "%~dp0." --emit-run-id
+"%HYPERSMART_PYTHON%" -m hl_observer.ops.analyser_session --root "%~dp0." --emit-run-id %OPT_AGE%
 if errorlevel 1 (
   echo.
-  echo   [ANALYSE_SESSION] NO_GO : aucune session COMPLETE verifiee a analyser.
-  echo   Lance LANCER_HYPERSMART.cmd, laisse-le collecter, puis arrete-le proprement ^(session COMPLETE^).
+  echo   [ANALYSE_SESSION] NO_GO : aucune session COMPLETE FRAICHE a analyser ^(voir la raison exacte ci-dessus^).
+  echo   - Aucune/again : lance LANCER_HYPERSMART.cmd, collecte, puis arrete-le proprement ^(session COMPLETE^).
+  echo   - Session trop VIEILLE ^(seuil actuel %HYPERSMART_AGE_MAX_S% s^) : recolte a nouveau, ou releve le seuil
+  echo     via HYPERSMART_AGE_MAX_S ^(0 = pas de limite^), ou passe --autoriser-complete-ancienne.
   echo   Detail : runtime\reports\backtest_replay\ANALYSE_SESSION.md
   echo.
   pause

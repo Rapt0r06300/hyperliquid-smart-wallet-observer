@@ -37,6 +37,18 @@ def test_fenetre_ram_bornable():
     assert "--max-ram-events" in CMD                          # item 7 : replay a fenetre RAM bornable
 
 
+def test_seuil_fraicheur_configurable():
+    # item 11 : seuil d'age configurable, defaut fini (48 h), passe a analyser_session, override 0 = illimite.
+    assert "HYPERSMART_AGE_MAX_S" in CMD
+    assert 'set "HYPERSMART_AGE_MAX_S=172800"' in CMD         # defaut 48 h (pas d'infini par defaut)
+    assert "--age-max-s %HYPERSMART_AGE_MAX_S%" in CMD        # transmis au selecteur de session
+    i_def = CMD.index("HYPERSMART_AGE_MAX_S=172800")
+    i_use = CMD.index("--age-max-s %HYPERSMART_AGE_MAX_S%")
+    assert i_def < i_use                                      # defaut pose AVANT usage
+    # 0 (ou vide) = pas de limite d'age : l'option n'est alors pas passee.
+    assert 'if not "%HYPERSMART_AGE_MAX_S%"=="0" set "OPT_AGE=--age-max-s %HYPERSMART_AGE_MAX_S%"' in CMD
+
+
 def test_propagation_code_sortie_et_pas_de_vieux_rapport_sur_echec():
     assert "set \"RC=%ERRORLEVEL%\"" in CMD
     # si le run courant echoue -> on N'OUVRE PAS un ancien rapport, on propage RC.
