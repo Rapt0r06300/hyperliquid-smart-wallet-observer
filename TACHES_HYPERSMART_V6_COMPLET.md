@@ -856,3 +856,44 @@ AUD-103, 105, 107, 108, 109, 112, 115, 118, 119, 120, 123, 127, 128, 129, 130 (p
 - **AUD-117 — SHA `~f2`** : completude de pagination OBSERVABLE (stopped_reason classe COMPLET vs TRONQUE + peut_continuer). 4 tests.
 
 **AUD-102..130 : 29/29 clos (20 verifies/done + 9 corriges pytest reel). Aucun partiel restant.**
+
+
+---
+
+## AVANCEMENT — AUD-131..160 (session 2026-08-05, audit + correctifs pytest REEL)
+
+> Methode inchangee : audit de chaque item contre le depot, correctifs test-first (ROUGE->VERT)
+> verifies par pytest REEL dans un clone cloud, puis portes a l'identique sur la machine
+> (archive tar SHA-256 verifiee + py_compile) et commites en LOCAL uniquement. Sans multi-agent.
+> Aucun faux commit, aucune mesure inventee. 0 reseau, 0 ordre reel, 0 cle privee, enveloppe 1000 USD.
+
+### FIXED cette session — 13 items livres (12 modules + 1 suite property), RED->GREEN, 31 tests verts
+Lot 1 — SHA `e4eea56c` (11 tests) :
+- **AUD-131 — Replay contrefactuel par trade** : `simulation/counterfactual_trade_replay.py` — rejoue chaque trade sous des politiques alternatives (taille/latence/skip) et chiffre l'ecart contrefactuel par trade.
+- **AUD-132 — Memoire d'apprentissage inter-run** : `experimental/learning_memory.py` — persiste les lecons d'un run a l'autre (config -> issue), relues au run suivant.
+- **AUD-136 — Priorite du capital STRICT** : `execution_core/capital_priority.py` — la voie STRICT est servie AVANT l'exploratoire dans l'enveloppe unique (STRICT jamais affamee).
+- **AUD-140 — Classement des actions par gain attendu** : `ops/expected_gain_ranking.py` — `classer_actions` ordonne les actions par gain attendu decroissant.
+
+Lot 2 — SHA `71653af5` (part des 20 tests lot2+3) :
+- **AUD-134 — PnL exploratoire != PnL valide** : `simulation/exploratory_vs_validated_pnl.py` — `tier_pnl` (TIER_VALIDE / TIER_EXPLORATOIRE) + `pnl_valide_seulement` (somme le valide seul, `melange_interdit=True`).
+- **AUD-143 — Suivi avant/apres des recommandations** : `ops/recommendation_tracking.py` — `suivre_recommandation` mesure delta, a_aide, objectif_atteint.
+- **AUD-144 — Rapport simple pour Flo** : `ops/rapport_simple.py` — 1 ligne (verdict, PnL net, n_trades, prochaine action ; None -> UNMEASURABLE, jamais un faux zero).
+- **AUD-145 — File d'experiences PnL priorisee** : `ops/pnl_experiment_queue.py` — reutilise `classer_actions` (AUD-140) et attribue un rang.
+- **AUD-146 — Verdict conserver/annuler** : `ops/improvement_verdict.py` — CONSERVER/ANNULER selon amelioration mesuree, avec rollback si degradation.
+
+Lot 3 — SHA `7a65cd38` (part des 20 tests lot2+3) :
+- **AUD-149 — Comparaison fast/exact** : `backtesting/fast_exact_comparison.py` — concordent + faux positifs / faux negatifs du screen rapide vs moteur exact.
+- **AUD-153 — Conserver le front de Pareto** : `backtesting/pareto_front.py` — `front_pareto` retourne les points non-domines (maximisation multi-objectifs).
+- **AUD-155 — Latence feed/order/inter-leg separees** : `simulation/latency_components.py` — decompose la latence en composantes nommees (None -> UNMEASURABLE, pas de zero invente).
+- **AUD-158 — Property-based testing** : `tests/test_property_based_invariants.py` — 500 cas seedes sur `verifier_enveloppe` et `reconcilier_5_vues` (invariants, pas exemples).
+
+### VERIFIED_DONE (17) — impl deja presente, verifiee (fichiers:fonctions + tests dans l'audit)
+AUD-133 (configs perdantes conservees), AUD-135 (capital non multiplie entre cohortes),
+AUD-137 (rapport « erreurs apprises »), AUD-138 (admission exploratoire formalisee : `integration/board_admission.py` + `experimental/cohortes.py`),
+AUD-139 (rapport « comment ameliorer le PnL »), AUD-141 (attribution complete des pertes),
+AUD-142 (opportunites manquees), AUD-147 (orchestrateur DAG), AUD-148 (fast screen vectorise),
+AUD-150 (catalogue de scenarios), AUD-151 (espace de recherche versionne), AUD-152 (multi-objectifs),
+AUD-154 (queue model calibre), AUD-156 (analyse lookahead), AUD-157 (analyse recursive),
+AUD-159 (mutation testing), AUD-160 (differential testing).
+
+**Bilan AUD-131..160 : 30/30 clos = 17 verifies + 13 corriges (nouveau code+tests, pytest reel). 3 commits locaux (`e4eea56c`, `71653af5`, `7a65cd38`) prets pour POUSSER-GITHUB-FORCE.cmd.**
