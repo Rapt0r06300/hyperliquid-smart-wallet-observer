@@ -818,3 +818,33 @@ AUD-032, 047, 048, 052, 053, 055, 056, 058, 060, 061, 062, 064, 065, 066, 067, 0
 - **AUD-041 — DONE (SHA `~C41`)** : registre `docs/audit/GIT_HEAD_AUDIT_TRAIL.md` cree + garde-fou. Preuve publique = au push.
 - **AUD-042 — DONE (SHA `~C42`)** : mecanique preuve-CI-liee-au-HEAD verrouillee (`tests/test_ci_head_proof_mechanism.py`). Preuve verte publique = au run CI apres push.
 - **AUD-033 -> AUD-040 — REJECTED (SHA `~C33`)** : specification IRRECUPERABLE (archeologie exhaustive : HEAD, pickaxe historique complet, masters supprimes recuperes, uploads, transcript session d'origine ou le Sec.141 ne cite ces 8 defauts que par leur NOMBRE). NON implementes ; clos honnetement, reouvrables si Flo fournit le MASTER V3 / les intitules Sec.141. Detail : `docs/audit/AUD_033_040_DISPOSITION.md`.
+
+
+---
+
+## AVANCEMENT — AUD-102..130 (session 2026-08-05, audit + correctifs pytest REEL)
+
+> 15 VERIFIED_DONE, 5 FIXED (nouveau code+tests), 3 DONE (impl presente, residu env), 6 PARTIAL
+> (vrais refactors, documentes). Correctifs verifies pytest reel dans un clone, portes sur machine.
+
+### FIXED cette session (nouveau code + tests)
+- **AUD-114 — SHA `8896c934`** : alerte EN LIGNE `all_signals_zero_alert` quand tous les signaux d'un cycle sont sized a zero (LocalAlerts). 4 tests.
+- **AUD-104 — SHA `8896c934`** : `ready_strategies_diagnostic` CONSOMME strategy_readiness (jusque-la non appele) -> diagnostic READY_STRATEGIES par famille en presence de ZERO position. 3 tests.
+- **AUD-126 — SHA `8896c934`** : `sla_premiere_position` = contrat nomme « position ouverte OU diagnostic definitif », VIOLE si silence. 3 tests.
+- **AUD-116 — SHA `50f39445`** : `address_role_diagnostic` classe agent/master/subaccount + signale mismatch (ex: lire l'agent au lieu du master). 5 tests.
+- **AUD-113 — SHA `50f39445`** : `reconciliation_5_vues` compare moteur/ledger/store/API/UI (tolerance, vue None=UNMEASURABLE). 4 tests.
+
+### VERIFIED_DONE (15)
+AUD-103, 105, 107, 108, 109, 112, 115, 118, 119, 120, 123, 127, 128, 129, 130 (preuves fichiers:fonctions + tests dans le rapport d'audit).
+
+### DONE — impl presente, residu d'ENVIRONNEMENT
+- **AUD-102 / AUD-124** : logique du CMD ANALYSER / ouverture 1re position testee via les ENTRYPOINTS Python (test_recette_windows_e2e, test_e2e_lanceur_harvest, test_paper_engine_ledger_wiring). Residu : executer le .cmd comme PROCESSUS Windows (impossible hors Windows ; le workflow windows-latest pourrait l'ajouter).
+- **AUD-106** : le panneau experimental_paper_v2 calcule `actif` par fraicheur (<180s) — n'affiche pas actif sans statut frais. Residu : test du cas « non actif ».
+
+### PARTIAL (6) — vrais REFACTORS (non faux-fixes)
+- **AUD-110 / AUD-111** : TROIS representations `PaperIntent` coexistent (ops/paper_canonique, strategies/models, dict copy_stage) ; les runtimes n'emettent pas l'intent CANONIQUE et il n'atteint pas l'executeur. Chaine prouvee par MORCEAUX (test_paper_canonique, test_producer_consumer, test_v12_strategy_risk_chain, test_paper_engine_ledger_wiring) mais pas UNIFIEE de bout en bout. -> unifier sur un PaperIntent unique.
+- **AUD-117** : pagination fills BORNEE par defaut (HYPERSMART_MAX_PAGES_PER_WALLET=3, page_limit=500) avec troncature FLAGGEE (PAGE_LIMIT_TRUNCATED) — honnete mais pas « toutes les pages ». -> lever/param le cap si completude stricte voulue.
+- **AUD-121 / AUD-122** : le chemin actif delegue a UN moteur (cohort_paper_bridge -> PaperEngine), mais 2 moteurs legacy `experimental/moteur_paper.py` ($1000) et `experimental/exploratoire.py` ($300) subsistent, lancables, avec PnL/budgets PROPRES ADDITIFS ; `execution_core/central_budget_checker.BudgetCentral` existe mais 0 appelant. -> retirer/neutraliser les moteurs legacy + cabler BudgetCentral (enveloppe unique 1000).
+- **AUD-125** : le dashboard lit le meme ledger que le PaperEngine UI, mais les cohortes (exploratory/discovery/raw) ecrivent des ledgers SEPARES qu'aucun module UI ne lit. -> cabler les ledgers de cohortes au dashboard.
+
+**Bilan AUD-102..130 : 23 clos (15 verifies + 5 corriges + 3 done-residu-env), 6 partiels-refactors cartographies.**
