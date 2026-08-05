@@ -716,3 +716,31 @@ Sévérités : **S0** sécurité/exécution réelle · **S1** faux PnL/corruptio
 - **Gate PnL** : même après TOUT, plus de données/tests/wallets ≠ PnL garanti. Verdict `VALIDATED_POSITIVE_PAPER` ou `NO_VALIDATED_EDGE_FOUND`.
 
 *Fin du registre — 590 tâches (390 AUD + 120 DATA + 80 BUG). Aucune oubliée.*
+
+
+---
+
+## AVANCEMENT — AUD-016 -> AUD-031 (session 2026-08-05, HEAD reel)
+
+> Verification honnete contre le HEAD reel. FIXED = defaut reel corrige ce jour (test rouge->vert + SHA).
+> VERIFIED_DONE = deja implemente+teste (preuve citee). Aucun faux commit, aucune mesure inventee.
+> Familles actives = Copy-Vault / Lead-Lag / Cross-Venue ; Carry = DISABLED_BY_SCOPE.
+
+- **AUD-016 — FIXED (SHA `ea02349a`)** — README presentait Carry (DISABLED) comme moteur « en production paper / actif » et Copy (ACTIVE) comme « verrouille » : l'inverse de l'autorite `src/hl_observer/strategies/active_scope.py`. Correctif : banniere d'autorite de scope + tableau requalifie en instantane HISTORIQUE + ligne Carry -> DISABLED_BY_SCOPE. Garde-fou `tests/test_readme_scope_coherence.py` (RED 4 echecs -> GREEN). Aucune mesure supprimee/inventee.
+- **AUD-017 — VERIFIED_DONE** — Carry/legacy ne contaminent ni le moteur (`tests/test_scope_source_unique.py::test_le_carry_disabled_ne_peut_pas_emettre_un_intent`), ni les docs (README corrige, AUD-016), ni les rapports (le scope empeche funding_carry de materialiser une economie paper). Tests Carry conserves = audit/historique.
+- **AUD-018 — VERIFIED_DONE** — Autorite de scope UNIQUE : `strategies/active_scope.py` ; `ops/paper_canonique.py` en DERIVE (pas de 2e allowlist). Preuve `tests/test_scope_source_unique.py`.
+- **AUD-019 — VERIFIED_DONE** — Chemins runtime/legacy separes : entrees `hl-observer` (canonique) vs `dydx-observer-legacy` (pyproject), CI ne teste QUE le canonique, flags legacy bloques (`tests/test_active_strategy_scope_v2.py::test_official_runtime_blocks_funding_even_when_legacy_flag_is_forced`). Note : `cli.py` reutilise 5 utilitaires legacy (archive/config/dashboard), sans effet economique.
+- **AUD-020 — VERIFIED_DONE** — Scope uniforme : deny-by-default, AUCUN override d'env (`environment_override_allowed=False`), garde anti-2e-allowlist. Preuves `tests/test_active_strategy_scope_v2.py` + `tests/test_scope_source_unique.py`.
+- **AUD-021 — VERIFIED_DONE (S1)** — Resultats contamines marques, jamais comptes « bons » : taxonomie `CONTAMINATED` dans `simulation/pnl_ledger_audit.py`, consommee par `simulation/scoreboard_feeder.py` (TRUSTED|CONTAMINATED|UNMEASURABLE) ; `ops/pnl_improvement_lab.py` (KNOWN_ACCOUNTING_CONTAMINATION / PARTIAL_CONTAMINATED). Tests `test_pnl_ledger_semantic_audit.py`, `test_scoreboard_feeder.py` (16 tests), `test_pnl_improvement_lab.py`.
+- **AUD-022 — VERIFIED_DONE** — Archive portable prouvee : `.github/workflows/portable-release-windows.yml` (build + validation, jette si artefact manquant) + `tests/test_archive_portable.py` (29 tests/109 asserts), `test_portable_release.py`, `test_portable_smoke.py`, `test_validation_portable.py` (7 tests/35 asserts).
+- **AUD-023 — VERIFIED_DONE** — Parite env : `requirements-portable.txt` epingle (pip-compile depuis `.in`), build portable Windows + `src/hl_observer/ops/validation_portable.py`, `test_portable_runtime.py`.
+- **AUD-024 — VERIFIED_DONE (S1, perimetre depot)** — CI rattachee au SHA (`actions/checkout@v4` = commit declencheur ; artefacts `${{ github.sha }}`), job critique bloquant (`securite` -> `needs: securite`), AUCUN `continue-on-error`. Reserve : le caractere « required » des checks est un reglage branch-protection GitHub, hors depot.
+- **AUD-025 — VERIFIED_DONE** — Scripts Windows couverts : `tests/test_portable_launchers.py` (3 tests/17 asserts) + `RECETTE-WINDOWS.cmd`/`RECETTE-LANCEUR.cmd` + workflow release sur `windows-latest`.
+- **AUD-026 — FIXED (SHA `63d22fbe`)** — Politique CRLF (`.gitattributes` eol=crlf pour .cmd/.bat/.ps1) correcte mais NON PROUVEE. Garde-fou machine-independant `tests/test_gitattributes_crlf_windows_scripts.py` (lit la politique, jamais les octets du working tree). WAL/SQLite (`test_v12_sqlite_store.py`), encodage (PYTHONUTF8 CI), horloge (`test_clock_integrity.py`), locks (durcissement `push_github_safe.ps1`, SHA `b5205359`).
+- **AUD-027 — VERIFIED_DONE** — Paquet installe == checkout : CI `pip install -e .` (editable).
+- **AUD-028 — VERIFIED_DONE** — Canonique vs legacy non confondus : entrees separees (`hl-observer` vs `dydx-observer-legacy`), CI cible `hl_observer` (remplace l'ancienne CI legacy-only, cf. en-tete `ci.yml`).
+- **AUD-029 — VERIFIED_DONE** — Validations sur le bon paquet : `ci.yml` importe/teste les modules `hl_observer.*` canoniques (job `securite`).
+- **AUD-030 — VERIFIED_DONE** — Artefacts officiels du chemin strict : le workflow release exige report/validation/sbom presents (`throw "Missing release artifact"`).
+- **AUD-031 — VERIFIED_DONE** — Sources hermetiques : `tests/test_env_hermetique.py` (env runtime vierge, cliquet), `tests/test_wheelhouse_lock.py` (9 tests), `requirements-portable.txt` epingle.
+
+**Bilan session : 2 defauts reels corriges (AUD-016, AUD-026) test rouge->vert + SHA ; 14 verifies deja couverts (preuves ci-dessus) ; aucun faux commit.**
