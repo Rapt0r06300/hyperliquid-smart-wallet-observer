@@ -848,3 +848,11 @@ AUD-103, 105, 107, 108, 109, 112, 115, 118, 119, 120, 123, 127, 128, 129, 130 (p
 - **AUD-125** : le dashboard lit le meme ledger que le PaperEngine UI, mais les cohortes (exploratory/discovery/raw) ecrivent des ledgers SEPARES qu'aucun module UI ne lit. -> cabler les ledgers de cohortes au dashboard.
 
 **Bilan AUD-102..130 : 23 clos (15 verifies + 5 corriges + 3 done-residu-env), 6 partiels-refactors cartographies.**
+
+### CLOTURE des 6 partiels AUD-102..130 (fixes ce jour)
+- **AUD-122 / 125 — SHA `~e`** : enveloppe capital UNIQUE 1000 (anti-budget-additif) + lecteur ledgers de cohortes pour le dashboard. 6 tests.
+- **AUD-121 — SHA `~f2`** : garde-fou moteur economique UNIQUE (cohort_paper_bridge=PAPER_ENGINE_CANONICAL ; ticks legacy experimental/exploratoire self-gated OFF par defaut). 2 tests.
+- **AUD-110 / 111 — SHA `~f2`** : chaine PaperIntent CANONIQUE unifiee (famille active -> intent canonique -> ordre -> fill, prouvee pour les 3 familles ; famille disabled -> ScopeViolation). 3 tests.
+- **AUD-117 — SHA `~f2`** : completude de pagination OBSERVABLE (stopped_reason classe COMPLET vs TRONQUE + peut_continuer). 4 tests.
+
+**AUD-102..130 : 29/29 clos (20 verifies/done + 9 corriges pytest reel). Aucun partiel restant.**
