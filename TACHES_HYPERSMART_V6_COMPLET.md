@@ -744,3 +744,42 @@ Sévérités : **S0** sécurité/exécution réelle · **S1** faux PnL/corruptio
 - **AUD-031 — VERIFIED_DONE** — Sources hermetiques : `tests/test_env_hermetique.py` (env runtime vierge, cliquet), `tests/test_wheelhouse_lock.py` (9 tests), `requirements-portable.txt` epingle.
 
 **Bilan session : 2 defauts reels corriges (AUD-016, AUD-026) test rouge->vert + SHA ; 14 verifies deja couverts (preuves ci-dessus) ; aucun faux commit.**
+
+
+---
+
+## AVANCEMENT — AUD-032 -> AUD-100 (session 2026-08-05, HEAD reel, audit 5 lanes)
+
+> 44 VERIFIED_DONE (deja implemente+teste), 1 FIXED ce jour (test+SHA), 13 PARTIAL (mecanisme
+> present, trou precis), 3 TODO (absent), 8 BLOCKED_UNKNOWN (titres MASTER V3 non recuperables).
+> Aucun faux commit, aucune mesure inventee.
+
+### FIXED ce jour
+- **AUD-079 — FIXED (SHA `45f1362c`)** — verrou d'analyse du labo (`ops/lab_alpha.py::lancer_lab`) n'etait libere qu'en fin de run : une exception FUITAIT le verrou -> tout run suivant bloque. Corps enveloppe dans try/finally: unlink(). Garde-fou AST `tests/test_lab_verrou_finally.py` (GREEN, py_compile OK).
+
+### VERIFIED_DONE (44) — deja implemente + teste au HEAD
+AUD-032, 047, 048, 052, 053, 055, 056, 058, 060, 061, 062, 064, 065, 066, 067, 068, 069, 070, 071, 072, 073, 074, 075, 076, 077, 078, 080, 081, 082, 083, 084, 085, 086, 087, 089, 090, 092, 094, 095, 096, 097, 098, 099, 100. (Preuves fichiers:fonctions + tests dans le rapport d'audit des 5 lanes.)
+
+### PARTIAL (13) — mecanisme reel present, trou precis a combler
+- **AUD-042** — preuve CI-du-HEAD outillee (validation_portable._ci_gate, CI_HEAD_PROOF.json lie GITHUB_SHA) mais la preuve CI-verte PUBLIQUE de CE HEAD est un artefact CI-time, auto-declaree BLOCKED. -> pousser HEAD + CI verte publique.
+- **AUD-043** — briques warmup_barrier/aggregate_market_ready_gate testees mais NON cablees ; pas de niveau READY_STRATEGIES ni de barriere par famille. -> cabler + niveau nomme + test.
+- **AUD-044** — dydx-live inclus dans _HARVEST_SOUHAITE (superviseur) alors que docs/tests le disent hors profil ; contradiction non tranchee, aucun test ne l'epingle. -> decider in/out + test.
+- **AUD-045** — logique experimental tick reelle+testee, mais worker NON schedule (lanceur `exit /b` avant `start experimental-paper`, COLLECTEURS_HARVEST l'exclut). -> planifier reellement OU retirer la reference.
+- **AUD-046** — lignes legacy `start` presentes apres `exit /b` (neutralisees, non supprimees) ; aucun test n'atteste l'inatteignabilite. -> supprimer le mort OU garde-fou structurel.
+- **AUD-050** — REGISTRE (superviseur) et SOURCES_HARVEST (preuve_de_vie) sont 2 listes ; aucun test ne les reconcilie. -> test de reconciliation cible.
+- **AUD-051** — roles canoniques presents (registre_pids.COMPOSANTS, profil_collecteur) mais aucun test n'assert la valeur de role par job ; 2 taxonomies non unifiees.
+- **AUD-054** — restart uniquement sur silence/staleness (mort) ; un collecteur vivant + heartbeat frais mais semantiquement casse (gap/desync) n'est PAS relance. -> cabler echec-semantique -> restart.
+- **AUD-057** — registre PID des collecteurs (superviseur) ecrit en write_text NON atomique (celui du lanceur est atomique) ; pas de test torn-write / PID recycle.
+- **AUD-063** — infra cumulative existe (decision_replay_analyzer append-only, forward_frozen inter-session) mais l'analyse phare (analyser_session/lab_alpha) est MONO-session ; aucun test d'agregation eco multi-session.
+- **AUD-088** — module d'espace VERSIONNE `research/search_space.py` ORPHELIN (aucun importeur src) ; le moteur adaptatif (ESPACE_DEFAUT) n'est ni hashe ni versionne. -> cabler search_space au moteur adaptatif.
+- **AUD-091** — samplers/pruners ADAPTATIFS Optuna (TPE/CMA-ES/Hyperband) crees SANS seed -> non reproductibles ; seed scheduler = abs(hash(sha)) salee PYTHONHASHSEED. -> propager un seed deterministe + test rejeu 2x.
+- **AUD-093** — la LATENCE n'est dans aucune cle de cache ; lab_recherche._hash_donnees ne hache que 64 events (coin/ts/signe) -> donnee eco changee = cache perime non invalide.
+
+### TODO (3) — reellement absent
+- **AUD-041** — pas de registre GIT_HEAD_AUDIT_TRAIL enforce (seul un ledger doc manuel HYPERSMART_COMMIT_LEDGER existe) ; pas de test.
+- **AUD-049 / AUD-059** — MEME trou : aucune autorite famille->donnee-REQUISE (copy_vault/lead_lag/cross_venue). active_scope = statut de famille, pas dependances de donnees. -> module strategy_data_dependencies + test.
+
+### BLOCKED_UNKNOWN (8)
+- **AUD-033 -> AUD-040** — heritees MASTER V3, titres non cites dans V6 (renvoi Sec.141), docs maitres supprimes (commit 35703aa) : intitules non reconstituables au depot. Restent OUVERTS ; infermables sans retrouver les titres d'origine (historique git du master / sauvegarde hors depot).
+
+**Bilan AUD-032..100 : 44 deja OK (verifies), 1 corrige (AUD-079), 13 partiels + 3 todo cartographies avec trou precis, 8 bloques (titres manquants).**
