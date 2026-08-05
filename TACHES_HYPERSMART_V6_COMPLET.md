@@ -813,3 +813,8 @@ AUD-032, 047, 048, 052, 053, 055, 056, 058, 060, 061, 062, 064, 065, 066, 067, 0
 - **AUD-033 -> AUD-040** — hérités MASTER V3, references Sec.141 mais titres non cites dans V6. Verifie : les CODEX masters supprimes (commit 35703aa, recuperes de l'historique) NE contiennent PAS ces titres ; le doc source CHERCHEUR_D_OR n'a jamais ete commite et n'est pas dans les uploads de session. Infermables sans que Flo refournisse le Sec.141 / les titres d'origine.
 
 **Bilan AUD-032..101 : 44 deja OK + AUD-079 + 15 corriges cette session = 60 traites ; 2 bloques-externes (push/CI) ; 8 bloques-inconnus (titres a refournir). 14 commits locaux prets pour POUSSER-GITHUB-FORCE.cmd.**
+
+### CLOTURE AUD-033..042 (mise a jour)
+- **AUD-041 — DONE (SHA `~C41`)** : registre `docs/audit/GIT_HEAD_AUDIT_TRAIL.md` cree + garde-fou. Preuve publique = au push.
+- **AUD-042 — DONE (SHA `~C42`)** : mecanique preuve-CI-liee-au-HEAD verrouillee (`tests/test_ci_head_proof_mechanism.py`). Preuve verte publique = au run CI apres push.
+- **AUD-033 -> AUD-040 — REJECTED (SHA `~C33`)** : specification IRRECUPERABLE (archeologie exhaustive : HEAD, pickaxe historique complet, masters supprimes recuperes, uploads, transcript session d'origine ou le Sec.141 ne cite ces 8 defauts que par leur NOMBRE). NON implementes ; clos honnetement, reouvrables si Flo fournit le MASTER V3 / les intitules Sec.141. Detail : `docs/audit/AUD_033_040_DISPOSITION.md`.
