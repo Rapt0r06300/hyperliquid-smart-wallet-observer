@@ -783,3 +783,33 @@ AUD-032, 047, 048, 052, 053, 055, 056, 058, 060, 061, 062, 064, 065, 066, 067, 0
 - **AUD-033 -> AUD-040** — heritees MASTER V3, titres non cites dans V6 (renvoi Sec.141), docs maitres supprimes (commit 35703aa) : intitules non reconstituables au depot. Restent OUVERTS ; infermables sans retrouver les titres d'origine (historique git du master / sauvegarde hors depot).
 
 **Bilan AUD-032..100 : 44 deja OK (verifies), 1 corrige (AUD-079), 13 partiels + 3 todo cartographies avec trou precis, 8 bloques (titres manquants).**
+
+
+---
+
+## AVANCEMENT — cloture AUD-032..101 (session 2026-08-05, correctifs verifies pytest REEL)
+
+> Methode : clone public du depot dans un sandbox cloud (reseau + pytest), chaque correctif
+> developpe test-first (ROUGE->VERT) avec pytest REEL, puis porte a l'identique sur la machine
+> (git apply + py_compile) et commite. 5 builder-agents en clones isoles ; 137 tests verts a la
+> consolidation. Aucun faux commit, aucune mesure inventee.
+
+### FIXED cette session (15 nouveaux, en plus de AUD-016/026/079)
+- **AUD-049 / AUD-059 — SHA `7f85a8c7`** : autorite famille->donnees requises (deny-by-default), ancree sur SOURCES_HARVEST. 6 tests.
+- **AUD-046 / AUD-050 / AUD-051 — SHA `701ce715`** : garde-fous lanceur-legacy-inatteignable, reconciliation SOURCES_HARVEST<->REGISTRE, roles canoniques par job. 69 tests.
+- **AUD-091 — SHA `30acddb1`** : samplers/pruners Optuna ADAPTATIFS seedes (reproductibles) + graine scheduler deterministe (hashlib, fin de abs(hash()) sale par PYTHONHASHSEED). 11 tests (RED prouve : meme graine -> suggestions differentes avant le fix).
+- **AUD-093 / AUD-088 — SHA `3985ea64`** : cache invalide sur latence + champs eco (px/sz/carnet, tous les events) ; espace de recherche VERSIONNE (search_space, orphelin, cable au moteur ; rechercher expose espace_hash). 10 tests.
+- **AUD-063 — SHA `10bfa7b5`** : agregation economique CROSS-session (aggregate_decision_logs / aggregate_replay_analyses) = somme de N sessions distinctes. 3 tests.
+- **AUD-057 / AUD-044 / AUD-054 — SHA `88cf5252`** : registre PID collecteurs ATOMIQUE (tmp+fsync+os.replace) ; politique dYdX UNIQUE (secondaire non-bloquant, contradiction docs/tests<->runtime levee) ; restart sur PANNE SEMANTIQUE (gap/desync a heartbeat frais) SANS jamais relancer un marche calme. 11 tests.
+- **AUD-043 — SHA `685257e4`** : niveau nomme READY_STRATEGIES PAR FAMILLE (cable warmup_barrier + aggregate_market_ready_gate + strategy_data_dependencies, deny-by-default). 6 tests.
+- **AUD-101 — SHA `6d228f26`** : rapport HIERARCHISE par niveau de preuve (rang_preuve + section groupee VALIDATED>...>UNMEASURABLE). 6 tests.
+- **AUD-045 — SHA `e2b6854e`** : politique experimental-paper PINNEE (worker research schedulable via `demarrer-tous research`, self-gate par HYPERSMART_EXPERIMENTAL_PAPER, jamais core). 3 tests.
+
+### BLOCKED_EXTERNAL (2) — le LOCAL est fait, la preuve PUBLIQUE depend d'un push + CI
+- **AUD-041** — GIT_HEAD_AUDIT_TRAIL : les commits APRES le SHA de reprise (8e899a20) EXISTENT en local et sont traces (SHA dans ce registre). La preuve « commits PUBLICS » + un registre enforce dependent du push GitHub + de la CI. -> se ferme quand Flo pousse et que la CI passe.
+- **AUD-042** — Preuve CI-verte PUBLIQUE de CE HEAD : la mecanique existe (validation_portable._ci_gate, CI_HEAD_PROOF.json lie GITHUB_SHA) mais la preuve elle-meme est un artefact CI-time. -> se ferme quand la CI tourne sur le HEAD pousse.
+
+### BLOCKED_UNKNOWN (8) — titres irrecuperables (archeologie git exhaustive faite)
+- **AUD-033 -> AUD-040** — hérités MASTER V3, references Sec.141 mais titres non cites dans V6. Verifie : les CODEX masters supprimes (commit 35703aa, recuperes de l'historique) NE contiennent PAS ces titres ; le doc source CHERCHEUR_D_OR n'a jamais ete commite et n'est pas dans les uploads de session. Infermables sans que Flo refournisse le Sec.141 / les titres d'origine.
+
+**Bilan AUD-032..101 : 44 deja OK + AUD-079 + 15 corriges cette session = 60 traites ; 2 bloques-externes (push/CI) ; 8 bloques-inconnus (titres a refournir). 14 commits locaux prets pour POUSSER-GITHUB-FORCE.cmd.**
