@@ -41,6 +41,72 @@ function Test-Git {
     return ($LASTEXITCODE -eq 0)
 }
 
+# ---------------------------------------------------------------------------
+# ROBUSTESSE 1 : purge des verrous .lock PERIMES.
+#
+# Un fichier .git\...\*.lock ne represente un vrai danger que si (a) une
+# operation git (merge / rebase / cherry-pick / revert / bisect) est en cours,
+# ou (b) un autre process 'git' tourne encore. Dans TOUS les autres cas c'est
+# un residu (typiquement laisse par un pont distant qui ne peut pas faire
+# 'del'), et il bloque a tort fetch/push. On le retire alors en securite.
+# ---------------------------------------------------------------------------
+function Clear-StaleGitLocks {
+    param([string]$GitDir)
+
+    # (a) Operation git reellement en cours -> on NE touche a rien, on refuse.
+    $opMarkers = [ordered]@{
+        "MERGE_HEAD"       = "un merge est en cours"
+        "CHERRY_PICK_HEAD" = "un cherry-pick est en cours"
+        "REVERT_HEAD"      = "un revert est en cours"
+        "BISECT_LOG"       = "un bisect est en cours"
+        "rebase-apply"     = "un rebase est en cours"
+        "rebase-merge"     = "un rebase est en cours"
+    }
+    foreach ($marker in $opMarkers.Keys) {
+        if (Test-Path -LiteralPath (Join-Path $GitDir $marker)) {
+            throw "Operation Git en cours ($($opMarkers[$marker])). Termine-la ou annule-la a la main avant de pousser. Aucun verrou n'a ete supprime."
+        }
+    }
+
+    # (b) Un autre process 'git' tourne ? Les verrous sont peut-etre legitimes.
+    $gitProcs = @(Get-Process -Name git -ErrorAction SilentlyContinue)
+    if ($gitProcs.Count -gt 0) {
+        $pids = ($gitProcs | ForEach-Object { $_.Id }) -join ', '
+        throw "Un autre process 'git' est actif (PID $pids). Ferme-le puis relance. Aucun verrou n'a ete supprime."
+    }
+
+    # (c) Aucune operation + aucun git actif => tout *.lock est PERIME -> retrait.
+    $locks = @(Get-ChildItem -LiteralPath $GitDir -Recurse -Filter "*.lock" -File -Force -ErrorAction SilentlyContinue)
+    foreach ($lock in $locks) {
+        try {
+            Remove-Item -LiteralPath $lock.FullName -Force -ErrorAction Stop
+            Write-Host "      [VERROU PERIME RETIRE] $($lock.FullName)" -ForegroundColor DarkYellow
+        }
+        catch {
+            throw "Verrou perime impossible a retirer : $($lock.FullName). $($_.Exception.Message)"
+        }
+    }
+
+    # (d) Menage des dossiers-poubelle laisses par un pont distant (best-effort).
+    foreach ($trash in @("_locks_trash", "zz_oldlocks")) {
+        $p = Join-Path $GitDir $trash
+        if (Test-Path -LiteralPath $p) {
+            Remove-Item -LiteralPath $p -Recurse -Force -ErrorAction SilentlyContinue
+        }
+    }
+}
+
+# ---------------------------------------------------------------------------
+# ROBUSTESSE 2 : verite reseau sans verrou local.
+# 'git ls-remote' lit les refs de GitHub directement : il n'ecrit AUCUN .lock
+# local. C'est notre preuve de push fiable, insensible aux residus locaux.
+# ---------------------------------------------------------------------------
+function Get-RemoteMainSha {
+    $line = Get-GitText @("ls-remote", "origin", "refs/heads/main")
+    if (-not $line) { return "" }
+    return (($line -split "\s+")[0]).Trim()
+}
+
 function Merge-IntoMain {
     param(
         [string]$Ref,
@@ -149,12 +215,10 @@ try {
     else {
         Join-Path $ProjectRoot $gitDirText
     }
-    $operationMarkers = @("index.lock", "MERGE_HEAD", "rebase-apply", "rebase-merge")
-    foreach ($marker in $operationMarkers) {
-        if (Test-Path -LiteralPath (Join-Path $gitDir $marker)) {
-            throw "Operation Git en cours ou verrou present : $marker. Le script refuse de le supprimer automatiquement."
-        }
-    }
+
+    # ROBUSTESSE 1 : on purge les verrous perimes AVANT toute commande qui ecrit.
+    Write-Step "Controle des verrous Git perimes..."
+    Clear-StaleGitLocks -GitDir $gitDir
 
     $dirty = Get-GitText @("status", "--porcelain")
     if ($dirty) {
@@ -183,21 +247,35 @@ try {
     Write-Step "Envoi exclusif de la branche locale main vers origin/main..."
     Invoke-Git @("push", "origin", "main:main")
 
-    Invoke-Git @("fetch", "--prune", "origin", "main")
+    # ROBUSTESSE 2 : preuve du push par GitHub lui-meme (ls-remote, zero verrou local).
     $localSha = Get-GitText @("rev-parse", "main")
-    $remoteSha = Get-GitText @("rev-parse", "refs/remotes/origin/main")
+    $remoteSha = Get-RemoteMainSha
+    if (-not $remoteSha) {
+        throw "Impossible de relire origin/main via ls-remote apres le push."
+    }
     if ($localSha -ne $remoteSha) {
-        throw "Verification finale incoherente : main=$localSha, origin/main=$remoteSha."
+        throw "Verification finale incoherente : main=$localSha, origin/main(GitHub)=$remoteSha."
+    }
+
+    # ROBUSTESSE 3 : la mise a jour du ref de SUIVI local est purement COSMETIQUE.
+    # Le push est deja prouve reussi ci-dessus. Si ce fetch bute sur un residu,
+    # on l'IGNORE : jamais un push reussi ne doit etre rapporte en echec.
+    try {
+        Clear-StaleGitLocks -GitDir $gitDir
+        Invoke-Git @("fetch", "--prune", "origin", "main")
+    }
+    catch {
+        Write-Host "  [INFO] Suivi local origin/main non rafraichi (cosmetique, sans impact sur le push) : $($_.Exception.Message)" -ForegroundColor DarkGray
     }
 
     $shortSha = Get-GitText @("rev-parse", "--short=12", "main")
     $remoteUrl = Get-GitText @("remote", "get-url", "origin")
-    Write-Host "`n  [OK] main et origin/main sont identiques : $shortSha" -ForegroundColor Green
+    Write-Host "`n  [OK] main local et origin/main (GitHub) sont identiques : $shortSha" -ForegroundColor Green
     Write-Host "       $remoteUrl" -ForegroundColor Green
     exit 0
 }
 catch {
     Write-Host "`n  [ERREUR] $($_.Exception.Message)" -ForegroundColor Red
-    Write-Host "  Aucun push force, reset destructeur ou suppression de verrou n'a ete effectue." -ForegroundColor Yellow
+    Write-Host "  Aucun push force ni reset destructeur n'a ete effectue." -ForegroundColor Yellow
     exit 1
 }
