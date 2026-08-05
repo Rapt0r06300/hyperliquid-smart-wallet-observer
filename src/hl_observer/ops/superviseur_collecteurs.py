@@ -143,14 +143,19 @@ COLLECTEURS_RESEARCH = frozenset(
 # tournent réellement aujourd'hui (carnet L2 batch + Binance depth REST, marks, liquidations, dispersion
 # venues, découverte + scoring de vaults, backfills fills/candles). On n'inclut ici QUE des collecteurs
 # possédant un runner réel : les briques encore BLOCKED_EXTERNAL (node fills global, HF recorder standalone,
-# TWAP standalone, dYdX, Bybit) restent honnêtement hors profil tant qu'un vrai collecteur n'est pas branché.
+# TWAP standalone, Bybit) restent honnêtement hors profil tant qu'un vrai collecteur n'est pas branché.
+# POLITIQUE dYdX — UNIQUE (AUD-044) : le projet est Hyperliquid-first. dydx-live POSSÈDE un vrai runner
+# (tools/collecter_dydx_live.py) et figure donc dans HARVEST, mais comme source SECONDAIRE NON-BLOQUANTE :
+# elle n'est PAS dans le socle CORE/REQUIS, donc son absence DÉGRADE la récolte sans jamais empêcher READY
+# (miroir de preuve_de_vie.SOURCES_HARVEST où dydx-live est obligatoire=False). Une seule politique, plus de
+# contradiction « hors profil » : dYdX est présent ET secondaire.
 _NOMS_REGISTRE = frozenset(c["nom"] for c in REGISTRE)
 _HARVEST_SOUHAITE = frozenset({
     "allmids-collector", "bbo-collector", "userfills-live",           # CORE (requis)
     "carnet-collector", "marks-collector", "liq-collector", "venues-collector",
     "overshoot-collector", "vault-collector", "scorer-vaults",
     "backfill-fills", "backfill-candles-vaults",
-    "dydx-live",                                                      # dYdX v4 read-only (item 2/5)
+    "dydx-live",                                    # dYdX v4 read-only — SECONDAIRE non-bloquant (item 2/5)
 })
 COLLECTEURS_HARVEST = frozenset(n for n in _HARVEST_SOUHAITE if n in _NOMS_REGISTRE)
 # Sources OBLIGATOIRES : leur échec doit empêcher le passage en READY (le CLI sort non-zero).
@@ -286,6 +291,32 @@ def _ecrire_journal(root: Path, journal: dict[str, Any]) -> None:
         _compter_panne_interne("journal_inecrivable")
 
 
+def _collecteurs_en_panne_semantique(
+    root: Path,
+    now: float,
+    diagnostic: Callable[..., Any] | None = None,
+) -> frozenset[str]:
+    """Noms des collecteurs dont la PREUVE DE VIE diagnostique une PANNE SÉMANTIQUE : process VIVANT +
+    heartbeat FRAIS, mais flux CASSÉ (gap critique / carnet désync / séquence invalide / resync / hors-
+    ordre / carnet stale / reconnexions en rafale). RÉUTILISE la détection existante (`preuve_de_vie`,
+    qui s'appuie sur `protections.etat_ingestion`) — ne RÉINVENTE aucun diagnostic. Un MARCHÉ CALME
+    (0 événement mais collecte OK) reste VERT dans `preuve_de_vie` → jamais classé PANNE_TECHNIQUE →
+    jamais retourné ici → jamais relancé (relancer un collecteur sain en marché calme serait la panne
+    INVERSE). Ne LÈVE JAMAIS : au moindre doute (diagnostic indisponible), ensemble VIDE — on ne relance
+    pas sur une incertitude."""
+    try:
+        from hl_observer.ops.preuve_de_vie import CAUSE_PANNE_TECHNIQUE, evaluer_depuis_disque
+        diag = diagnostic if diagnostic is not None else evaluer_depuis_disque
+        etat = diag(root, now_ms=now * 1000.0)
+        return frozenset(
+            str(c.get("source"))
+            for c in (getattr(etat, "causes", ()) or ())
+            if isinstance(c, dict) and c.get("cause") == CAUSE_PANNE_TECHNIQUE and c.get("source")
+        )
+    except Exception:  # noqa: BLE001 — un diagnostic en panne ne doit ni nous tuer ni relancer à tort
+        return frozenset()
+
+
 def verifier_et_relancer(
     root: str | Path,
     *,
@@ -293,10 +324,15 @@ def verifier_et_relancer(
     lanceur: Callable[[list[str], Path], bool] | None = None,
     cooldown_s: float = COOLDOWN_S,
     profil: str = "core",
+    diagnostic_semantique: Callable[..., Any] | None = None,
 ) -> dict[str, Any]:
     """Une passe de supervision. Retourne un rapport, ne lève JAMAIS.
 
-    rapport = {actif, morts: [noms], relances: [noms], en_cooldown: [noms]}
+    Relance un collecteur MORT (silence : heartbeat/log trop vieux) ET un collecteur VIVANT dont la
+    preuve de vie diagnostique une PANNE SÉMANTIQUE (heartbeat frais mais flux cassé). Un MARCHÉ CALME
+    reste sain : JAMAIS relancé (`preuve_de_vie` le classe VERT, pas PANNE_TECHNIQUE).
+
+    rapport = {actif, morts: [noms], pannes: [noms], relances: [noms], en_cooldown: [noms]}
     """
     try:
         racine = Path(root)
@@ -307,13 +343,18 @@ def verifier_et_relancer(
                 "actif": False,
                 "profil": profil_normalise,
                 "morts": [],
+                "pannes": [],
                 "relances": [],
                 "en_cooldown": [],
             }
         now = maintenant if maintenant is not None else time.time()
         lancer = lanceur if lanceur is not None else _lanceur_windows
         journal = _lire_journal(racine)
+        # Panne SÉMANTIQUE (heartbeat FRAIS mais flux cassé) — diagnostiquée par preuve_de_vie, PAS ici.
+        # MARCHE_CALME y reste VERT → absent de cet ensemble → jamais relancé (piège du marché calme).
+        pannes_semantiques = _collecteurs_en_panne_semantique(racine, now, diagnostic_semantique)
         morts: list[str] = []
+        pannes: list[str] = []
         relances: list[str] = []
         en_cooldown: list[str] = []
 
@@ -321,9 +362,13 @@ def verifier_et_relancer(
             collecteurs,
             etat_collecteurs(racine, maintenant=now, profil=profil_normalise),
         ):
-            if not etat["mort"]:
+            est_mort = bool(etat["mort"])
+            # VIVANT mais SÉMANTIQUEMENT cassé (gap/désync/…) compte AUSSI comme à relancer. Jamais sur
+            # marché calme : pannes_semantiques exclut MARCHE_CALME. Le silence (mort) reste prioritaire.
+            est_panne = (not est_mort) and (c["nom"] in pannes_semantiques)
+            if not est_mort and not est_panne:
                 continue
-            morts.append(c["nom"])
+            (morts if est_mort else pannes).append(c["nom"])
             derniere = journal.get(c["nom"], {}).get("derniere_relance_ts")
             if isinstance(derniere, (int, float)) and (now - derniere) < cooldown_s:
                 en_cooldown.append(c["nom"])
@@ -338,14 +383,15 @@ def verifier_et_relancer(
             entree["derniere_relance_ok"] = ok
             entree["relances_total"] = int(entree.get("relances_total") or 0) + 1
             entree["age_minutes_au_constat"] = etat["age_minutes"]
+            entree["cause_relance"] = "mort" if est_mort else "panne_semantique"
             if ok:
                 relances.append(c["nom"])
 
-        if morts:
+        if morts or pannes:
             journal["derniere_passe_ts"] = now
             _ecrire_journal(racine, journal)
-        return {"actif": True, "profil": profil_normalise, "morts": morts, "relances": relances,
-                "en_cooldown": en_cooldown}
+        return {"actif": True, "profil": profil_normalise, "morts": morts, "pannes": pannes,
+                "relances": relances, "en_cooldown": en_cooldown}
     except Exception as exc:  # noqa: BLE001 — jamais d'exception vers le moteur
         try:
             from hl_observer.ops.echec_silencieux import noter
@@ -353,8 +399,8 @@ def verifier_et_relancer(
         except Exception:  # noqa: BLE001
             # meme le compteur officiel est en panne : on compte LOCALEMENT (jamais muet)
             _compter_panne_interne("noter_indisponible")
-        return {"actif": True, "profil": str(profil), "morts": [], "relances": [], "en_cooldown": [],
-                "erreur": str(exc)[:200]}
+        return {"actif": True, "profil": str(profil), "morts": [], "pannes": [], "relances": [],
+                "en_cooldown": [], "erreur": str(exc)[:200]}
 
 
 # ─────────────────────────────────────────────────────────────────────────────────────────────
@@ -364,6 +410,27 @@ def verifier_et_relancer(
 PIDS_RELPATH = Path("runtime") / "data" / "collecteurs_pids.json"
 PORT_UI = 8794
 LOCK_USERFILLS = Path("runtime") / "data" / "userfills_live.lock"
+
+
+def _ecrire_pids_atomique(root: str | Path, registre: dict[str, Any]) -> bool:
+    """Écrit le registre PID des collecteurs de façon ATOMIQUE (AUD-057) : sérialise dans un fichier
+    temporaire (flush + fsync) PUIS `os.replace` — JAMAIS un `write_text` direct sur la cible. Un crash en
+    cours d'écriture ne peut donc pas laisser un `collecteurs_pids.json` tronqué : l'arrêt CIBLÉ lit toujours
+    un JSON complet (comme `registre_pids._ecrire_atomique` le fait déjà pour le registre du lanceur).
+    Rend True si l'écriture a abouti, False sinon (l'appelant COMPTE la panne, jamais silencieuse)."""
+    cible = Path(root) / PIDS_RELPATH
+    texte = json.dumps(registre, ensure_ascii=False, indent=1)
+    try:
+        cible.parent.mkdir(parents=True, exist_ok=True)
+        tmp = cible.with_suffix(cible.suffix + ".tmp")
+        with tmp.open("w", encoding="utf-8") as fh:
+            fh.write(texte)
+            fh.flush()
+            os.fsync(fh.fileno())
+        os.replace(tmp, cible)
+        return True
+    except OSError:
+        return False
 
 
 def commande_collecteur(c: dict[str, Any]) -> list[str]:
@@ -457,13 +524,8 @@ def demarrer_tous(
         if pid_vivant is not None:
             pids_registre[c["nom"]] = pid_vivant
     pids_registre.update(pids)
-    try:
-        p = racine / PIDS_RELPATH
-        p.parent.mkdir(parents=True, exist_ok=True)
-        p.write_text(json.dumps({"run_id": rid, "ts_ms": int(time.time() * 1000),
-                                 "profil": profil_normalise, "pids": pids_registre},
-                                ensure_ascii=False, indent=1), encoding="utf-8")
-    except OSError:
+    if not _ecrire_pids_atomique(racine, {"run_id": rid, "ts_ms": int(time.time() * 1000),
+                                          "profil": profil_normalise, "pids": pids_registre}):
         _compter_panne_interne("pids_inecrivable")
     return {
         "run_id": rid,
@@ -485,9 +547,7 @@ def demarrer_un(root: str | Path, nom: str, *, spawner=None) -> int | None:
     if pid:
         reg = _lire_pids(root)
         reg.setdefault("pids", {})[nom] = int(pid)
-        try:
-            (Path(root) / PIDS_RELPATH).write_text(json.dumps(reg, ensure_ascii=False, indent=1), encoding="utf-8")
-        except OSError:
+        if not _ecrire_pids_atomique(root, reg):
             _compter_panne_interne("pids_inecrivable")
     return pid
 
@@ -521,13 +581,8 @@ def enregistrer_pids(
         if pid_vivant is not None:
             pids_registre[c["nom"]] = pid_vivant
     pids_registre.update(pids)
-    try:
-        pf = racine / PIDS_RELPATH
-        pf.parent.mkdir(parents=True, exist_ok=True)
-        pf.write_text(json.dumps({"run_id": rid, "ts_ms": int(time.time() * 1000),
-                                  "profil": profil_normalise, "pids": pids_registre},
-                                 ensure_ascii=False, indent=1), encoding="utf-8")
-    except OSError:
+    if not _ecrire_pids_atomique(racine, {"run_id": rid, "ts_ms": int(time.time() * 1000),
+                                          "profil": profil_normalise, "pids": pids_registre}):
         _compter_panne_interne("pids_inecrivable")
     return {"run_id": rid, "profil": profil_normalise, "pids": pids}
 
