@@ -64,9 +64,14 @@ vers un PnL positif qui se répète.
 
 ---
 
-## Où en est le bot (22/07/2026)
+## Où en est le bot
 
-**Un moteur en production paper (Carry), un en guet (Arbitrage), un verrouillé (Copy), une
+> **Périmètre économique officiel — autorité unique : [`src/hl_observer/strategies/active_scope.py`](src/hl_observer/strategies/active_scope.py) (scope V2-20260729).**
+> Trois familles seulement peuvent matérialiser une économie paper canonique : **Copy-Vault** (`copy_vault`), **Lead-Lag** (`lead_lag`) et **Cross-Venue / dislocation** (`cross_venue_dislocation`).
+> **Carry (`funding_carry`) est `DISABLED_BY_SCOPE`** — collecte read-only, conservé pour l'audit historique seulement ; il ne peut émettre aucun intent ni PnL (garde-fou prouvé par `tests/test_scope_source_unique.py` et `tests/test_readme_scope_coherence.py`). Le tableau daté ci-dessous est un instantané **historique** (pré-gel V2 du 29/07) et ne redéfinit pas le scope courant.
+
+
+**Un moteur en paper à l'époque (Carry, hors scope V2), un en guet (Arbitrage), un verrouillé (Copy), une
 mesure en cours (Cross-venue funding), un suspendu (Liquidations).** Chacun avec son verdict
 mesuré — un moteur qui n'ouvre pas le DIT et explique pourquoi.
 
@@ -90,7 +95,7 @@ mesuré — un moteur qui n'ouvre pas le DIT et explique pourquoi.
 
 | Module | État | Pourquoi |
 |---|---|---|
-| **Carry delta-neutre** | 🟢 **actif** — le seul moteur à taux positif (**+0,35 $/j** mesuré ; le **cumul** reste à **−5,73 $**, dette de l'ère churn du 19/07 en cours de remboursement) | Long spot + short perp, funding encaissé. Univers étendu aux tokens Unit (UBTC→BTC…) : 8 → 20 coins scannés, ~7 viables. Marge dynamique (capital réel / positions visées), sortie prise-de-profit dès +0,05 $ net. |
+| **Carry delta-neutre** | ⛔ **DISABLED_BY_SCOPE** (hors scope V2, historique ; mesuré alors) — le seul moteur à taux positif (**+0,35 $/j** mesuré ; le **cumul** reste à **−5,73 $**, dette de l'ère churn du 19/07 en cours de remboursement) | Long spot + short perp, funding encaissé. Univers étendu aux tokens Unit (UBTC→BTC…) : 8 → 20 coins scannés, ~7 viables. Marge dynamique (capital réel / positions visées), sortie prise-de-profit dès +0,05 $ net. |
 | **Copy-trading** | 🔒 **verrouillé, en réhabilitation** | Loi mesurée : **−7,97 bps** sur 24 133 signaux OOS à coût zéro (leader contrarien) ; le laboratoire l'a reconfirmé sur 441 000 candidats. La whitelist C12 (markout forward **par leader**) enregistre les fills depuis le 21/07 : le copy reviendra par la preuve individuelle, jamais par l'espoir. |
 | **Arbitrage de dislocation** | 🟡 **en guet** | Écart de prix du même perp HL↔Binance ; ouvre à ≥ **15 bps** (8 de coûts **2 jambes** + 7 de marge). Les 22 bps annoncés jusqu'au 20/07 supposaient 4 jambes : une dislocation se ferme sur 2. **Convergence mesurée sur 912 écarts : −2,26 bps à 30 min (64,9 % des cas) — soit MOINS que les 8 bps de coûts.** Verdict `LIMITE` : seuls les écarts extrêmes paient. Il attend, et dit pourquoi. |
 | **Cross-venue funding** | 🕐 **en mesure** | Protocole 72 h, barres pré-écrites. Verdict à échéance, jamais avant. |
