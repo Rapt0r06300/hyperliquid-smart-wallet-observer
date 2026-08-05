@@ -921,3 +921,28 @@ AUD-159 (mutation testing), AUD-160 (differential testing).
 - **227** agregation multi-session (test_agregation_multi_session) · **228** capture/atomic_checkpoint.py + arbitrage/episode_idempotency.py + search_space.hash_espace · **229** research/purged_cv.py + backtesting/purged_split.py + cross_validation.combinatorial_purged_splits · **230** cross_validation.purged_walk_forward_splits(embargo=) + purged_split.py.
 
 **Bilan AUD-161..230 : 70/70 clos = 45 corriges (nouveau code+tests, 49 tests pytest reel) + 25 verifies (code+tests existants). 4 commits locaux (`2dcaa60b`, `de63d616`, `f1d69527`, `7063c859`) prets pour POUSSER-GITHUB-FORCE.cmd.**
+
+
+---
+
+## AVANCEMENT — AUD-231..300 (session 2026-08-05, audit + correctifs pytest REEL)
+
+> Methode : audit contre l'arbre COMPLET, correctifs test-first verifies pytest REEL en clone cloud,
+> portes byte-identiques (tar SHA-256 + py_compile) et commites en LOCAL. Sans multi-agent. Aucun
+> faux commit, aucune mesure inventee. 0 reseau, 0 ordre reel, 0 cle privee, enveloppe 1000 USD.
+> HONNETETE : aucun connecteur live n'est declare 'ok' sans preuve reseau (voir BLOCKED_EXTERNAL).
+
+### FIXED cette session — 30 items, nouveau code + tests (RED->GREEN, 27 tests verts)
+- **Lot A — SHA `06479876` (15 tests)** : rigueur promotion (231 chemins CPCV, 235 SPA Hansen + StepM Romano-Wolf, 251/252/253 leave-one-out session/wallet/venue, 250 borne basse nette OBLIGATOIRE, 249 verdict POSITIVE_OR_NO_PROMOTION integrant 254 derive + 260 protocole sans-edge) ; couts (238 stress non-heuristique pire-cas, 239 calibration point-in-time anti-fuite) ; gouvernance (256 dedup clones economiques, 257 comparaison orchestrateurs, 258 garde optimiseurs mode-max, 259 resultat identique apres unification).
+- **Lot B — SHA `de9dfcdb` (12 tests)** : Data Mesh (277/292/293/294 registre sources statut/licence/cout/qualite, 278 lineage, 295/296 ablation + valeur marginale, 297 controle frequence macro) ; 279 symbol master + 280 horloge multi-venue ; 285 resolution entites (union-find) + 286 provenance labels ; 298 politique CEX public-seulement + 299 wallet CEX non-copiable ; 276 registre venues HONNETE.
+
+### VERIFIED_DONE (25) — impl deja presente, verifiee (fichier:symbole + tests)
+- **232** robustesse_selection.py:pbo_cscv/verdict_robustesse · **233** cross_validation.py:whites_reality_check · **234** quant_methods.py:block_bootstrap + validation_stats.stationary_bootstrap · **236** anti_overfit_gate.py (cable lab) · **237** overfit_selection.py:permuter_les_sens/borne_du_hasard (placebos) · **240** ops/equity_canonique.py + copy_vault/equity_ratio_replication.py · **241** pagination fills (AUD-117) · **242** address_role_diagnostic (AUD-116) · **243** realtime/ws_resilience.py + copy_vault/reconnect_overlap_backfill.py.
+- **247** RECETTE-WINDOWS.cmd + RECETTE-LANCEUR.cmd · **255** robustesse_selection.GlobalTrialRegistry + seuil_bruit_multiple_testing · **261-266** suite tests/dydx_v4/ (50+ tests : subaccount scan, wallet harvester, safety_and_config, dydx_is_secondary_mockable_not_runtime, selection_engine) · **267** research/multi_venue.py + market/multi_venue_funding.py · **273** collection/binance_depth_book.py + orchestrator (offline ; E2E live = reseau).
+- **274** arbitrage/cross_venue_roundtrip.py + paper_trading/cross_venue_execution.py · **275** cross_venue_quotes_simultaneous.py + capacity · **287** scoring/wallet_score_v2.py + following/wallet_scoring_shortlist.py · **288** experimental/cohortes.py (cohortes dynamiques) · **289** clusters/crowding_detector.py + signals/crowding.py · **300** capture/atomic_checkpoint.py + collection/stockage_brut_borne.py (raw immutable).
+
+### BLOCKED_EXTERNAL (15) — le LOCAL est fait ; la preuve depend d'un run reseau/CI (JAMAIS de faux vert)
+- **CI (4) — 244/245/246/248** : les workflows `.github/workflows/{ci.yml, labo-continu-ci.yml, portable-release-windows.yml}` PORTENT les gates (install editable, deps research, windows-latest, preuve liee au GITHUB_SHA). La preuve VERTE PUBLIQUE = un run CI sur le HEAD pousse. -> se ferme au push + CI.
+- **Reseau live (11) — 268 Bybit / 269 OKX / 270 Coinbase / 271 Deribit / 272 Kraken / 281 Drift / 282 GMX / 283 Nansen / 284 Dune / 290 Glassnode / 291 DefiLlama** : un connecteur LIVE n'est NI implementable NI prouvable dans une sandbox paper/sans-reseau. LOCAL fait : registre venues HONNETE (`venue_readiness.py` : REQUIRES_NETWORK), symbol master, data mesh = infrastructure plug-in prete + garde anti-faux-vert. -> se ferme quand execute avec acces reseau + credentials read-only. AUCUNE de ces venues n'est declaree connectee tant que ce n'est pas prouve.
+
+**Bilan AUD-231..300 : 70/70 traites = 30 corriges (nouveau code+tests, 27 tests pytest reel) + 25 verifies (code+tests existants) + 15 BLOCKED_EXTERNAL honnetement dispositionnes (4 CI-run, 11 reseau-live). 2 commits locaux code (`06479876`, `de9dfcdb`) prets pour POUSSER-GITHUB-FORCE.cmd.**
