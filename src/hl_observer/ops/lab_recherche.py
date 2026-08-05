@@ -18,6 +18,7 @@ from hl_observer.mega_cablage.runner import _EquityMap
 from hl_observer.mega_cablage.replay_driver import separer_temporel, separer_par_episodes
 from hl_observer.ops import lab_metriques as M
 from hl_observer.paper_trading import latency_truth as _LT
+from hl_observer.research import search_space as _espace_versionne   # AUD-088 : hachage VERSIONNÉ de l'espace
 
 ESPACE_DEFAUT = {
     "notional_max": [100.0, 300.0, 500.0],
@@ -29,19 +30,38 @@ ESPACE_DEFAUT = {
 # multiplicateur de fee_bps : il pondère les composantes de MARCHÉ (spread/latence/slippage/adverse).
 _SEVERITE_ADVERSE = {"ADVERSE_P95": 1.0, "ADVERSE_P99": 1.9}
 
+# AUD-093 : modèle de STRESS latence (paramètres de COÛT du sur-coût adverse). Centralisé ici pour être
+# à la fois (a) l'unique source de vérité de `cout_adverse_bps` et (b) intégré à la CLÉ DE CACHE — ainsi
+# tout changement de ce modèle de latence PÉRIME le cache au lieu de resservir un résultat obsolète.
+_LATENCE_STRESS = {"delai_sec": 1.0, "coeff_bps_per_sec": 0.20, "cap_bps": 15.0}
+
+
+def empreinte_espace_defaut(espace: dict[str, list] | None = None) -> str:
+    """AUD-088 : IDENTITÉ VERSIONNÉE de l'espace de recherche du moteur adaptatif. Empreinte STABLE et
+    DÉTERMINISTE (clés ET valeurs triées) qui CHANGE dès que l'espace change. Réutilise le hachage
+    versionné de `search_space` (l'espace adaptatif est un espace d'EXÉCUTION : notional/fee/fill/seuil),
+    ce qui câble ce module jusqu'ici orphelin et donne une identité inter-modules stable."""
+    espace = ESPACE_DEFAUT if espace is None else espace
+    jetons = ["%s=%s" % (k, ",".join(sorted(str(x) for x in espace[k]))) for k in sorted(espace)]
+    return _espace_versionne.hash_espace({"execution": jetons})
+
 
 def cout_adverse_bps(config: dict[str, Any], *, niveau: str, spread_bps: float | None = None,
-                     delai_sec: float = 1.0) -> dict[str, Any]:
+                     delai_sec: float | None = None) -> dict[str, Any]:
     """Sur-coût adverse RÉEL (item 12), en bps, EN PLUS des frais de base — jamais un simple fee_bps×1.5.
     Compose des composantes DISTINCTES et mesurables/majorées : demi-spread, latence causale
     (latency_truth, STRESS_ONLY), slippage/profondeur, adverse selection. La sévérité de queue (P95<P99)
     pondère les composantes de marché. Missed/partial fills sont modélisés séparément (min_fill_ratio
     durci dans `_rejouer_adverse`). Gaps/reconnects/panne de venue : ajoutés depuis les métriques réelles
-    du candidat quand elles existent (sinon documentés absents, jamais inventés)."""
+    du candidat quand elles existent (sinon documentés absents, jamais inventés).
+
+    Le modèle de latence (delai/coeff/cap) provient de `_LATENCE_STRESS` — même source que la clé de cache."""
     fee = float(config.get("fee_bps", 2.5))
     demi_spread = float(spread_bps if spread_bps is not None else fee)     # défaut prudent ~ frais
-    lat = float(_LT.latence_scalaire_stress_bps(float(delai_sec), coeff_bps_per_sec=0.20,
-                                                cap_bps=15.0).get("latency_stress_bps") or 0.0)
+    delai = float(_LATENCE_STRESS["delai_sec"] if delai_sec is None else delai_sec)
+    lat = float(_LT.latence_scalaire_stress_bps(
+        delai, coeff_bps_per_sec=float(_LATENCE_STRESS["coeff_bps_per_sec"]),
+        cap_bps=float(_LATENCE_STRESS["cap_bps"])).get("latency_stress_bps") or 0.0)
     sev = _SEVERITE_ADVERSE.get(niveau, 1.0)
     slippage = 0.5 * fee * sev                     # slippage/profondeur croît avec la taille et la queue
     adverse_sel = 0.5 * demi_spread * sev          # sélection adverse (on se fait choisir aux pires prix)
@@ -53,15 +73,28 @@ def cout_adverse_bps(config: dict[str, Any], *, niveau: str, spread_bps: float |
 
 
 def _hash_donnees(evenements: list[dict[str, Any]]) -> str:
+    # AUD-093 : digest ROBUSTE — couvre les champs ÉCONOMIQUES (prix, taille, carnet), pas seulement
+    # (coin, ts, signe), et parcourt TOUS les événements (plus une fenêtre de 64). Une donnée
+    # économiquement différente (prix/size/carnet modifié) PÉRIME donc le cache. N'affecte QUE la
+    # sensibilité du cache — jamais la sémantique de recherche.
     h = hashlib.sha256()
     h.update(str(len(evenements)).encode())
-    for ev in evenements[:64]:
-        h.update(("%s|%s|%s|" % (ev.get("coin"), ev.get("ts_ms"), ev.get("signe"))).encode())
+    for ev in evenements:
+        carnet = json.dumps(ev.get("book"), sort_keys=True, default=str, ensure_ascii=False)
+        h.update(("%s|%s|%s|%s|%s|%s|%s|" % (
+            ev.get("coin"), ev.get("ts_ms"), ev.get("signe"),
+            ev.get("px"), ev.get("mid"), ev.get("sz"), carnet)).encode())
     return h.hexdigest()[:16]
 
 
-def _cle_cache(config: dict[str, Any], data_hash: str) -> str:
-    return hashlib.sha256((json.dumps(config, sort_keys=True) + "|" + data_hash).encode()).hexdigest()[:24]
+def _cle_cache(config: dict[str, Any], data_hash: str,
+               latence: dict[str, Any] | None = None) -> str:
+    # AUD-093 : la LATENCE (modèle de stress figé, paramètre de coût pertinent) entre dans la clé — un
+    # changement du modèle de latence périme le cache au lieu de resservir un résultat obsolète.
+    lat = _LATENCE_STRESS if latence is None else latence
+    payload = (json.dumps(config, sort_keys=True) + "|" + data_hash + "|"
+               + json.dumps(lat, sort_keys=True))
+    return hashlib.sha256(payload.encode()).hexdigest()[:24]
 
 
 def _rejouer_riche(evenements: list[dict[str, Any]], *, config: dict[str, Any],
@@ -250,7 +283,8 @@ def rechercher(evenements: list[dict[str, Any]], *, espace: dict[str, list] | No
         verdict_global = "NON_MESURABLE"
     return {"evalues": evalues, "caches": caches, "n_candidats": len(candidats),
             "prometteuses": len(prometteuses), "candidats": candidats, "meilleur": meilleur,
-            "verdict_global": verdict_global, "source": source, "data_hash": data_hash}
+            "verdict_global": verdict_global, "source": source, "data_hash": data_hash,
+            "espace_hash": empreinte_espace_defaut(espace)}   # AUD-088 : identité versionnée de l'espace
 
 
-__all__ = ["ESPACE_DEFAUT", "evaluer_config", "rechercher", "cout_adverse_bps"]
+__all__ = ["ESPACE_DEFAUT", "evaluer_config", "rechercher", "cout_adverse_bps", "empreinte_espace_defaut"]
