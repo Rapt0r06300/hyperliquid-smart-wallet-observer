@@ -180,182 +180,184 @@ def lancer_lab(*, racine: str | Path, sortie_dir: str | Path | None = None, budg
     sortie.mkdir(parents=True, exist_ok=True)
     # item 13 : verrou d'analyse — deux ANALYSER ne peuvent pas ecrire le meme rapport/shard/checkpoint.
     _verrou_analyse = acquerir_verrou_analyse(sortie)
-    journal = Journal(journal_path or sortie / "journal_lab.log")
-    checkpoint_path = checkpoint_path or sortie / "checkpoint_recherche.jsonl"
-    # Honnêteté dure : run réel → aucune equity leader fictive.
-    reel = not str(source).upper().startswith("SYNTH")
-    leader_equity_defaut = None if reel else 100000.0
+    try:
+        journal = Journal(journal_path or sortie / "journal_lab.log")
+        checkpoint_path = checkpoint_path or sortie / "checkpoint_recherche.jsonl"
+        # Honnêteté dure : run réel → aucune equity leader fictive.
+        reel = not str(source).upper().startswith("SYNTH")
+        leader_equity_defaut = None if reel else 100000.0
 
-    espace = R.ESPACE_DEFAUT
-    n_grille = 1
-    for v in espace.values():
-        n_grille *= len(v)
-    # Item 11 : plus de plafond arbitraire de configs (l'ancien 48/32). budget <= 0 => MAXIMAL = grille
-    # entiere (ici 24) : le double-clic explore tout l'espace par defaut, sans cap code en dur.
-    budget = n_grille if int(budget) <= 0 else int(budget)
-    total_etapes = 4 + min(n_grille, budget)
-    eta = MoteurETA(total_etapes=total_etapes, min_echantillons=3)
-    etat: dict[str, Any] = {"titre": source, "total_etapes": total_etapes, "source": source,
-                            "cfg_prevues": min(n_grille, budget), "erreurs": 0, "manquantes": 0,
-                            "workers": 1, "en_cours": "démarrage", "derniere": "-", "prochaine": "inventaire"}
+        espace = R.ESPACE_DEFAUT
+        n_grille = 1
+        for v in espace.values():
+            n_grille *= len(v)
+        # Item 11 : plus de plafond arbitraire de configs (l'ancien 48/32). budget <= 0 => MAXIMAL = grille
+        # entiere (ici 24) : le double-clic explore tout l'espace par defaut, sans cap code en dur.
+        budget = n_grille if int(budget) <= 0 else int(budget)
+        total_etapes = 4 + min(n_grille, budget)
+        eta = MoteurETA(total_etapes=total_etapes, min_echantillons=3)
+        etat: dict[str, Any] = {"titre": source, "total_etapes": total_etapes, "source": source,
+                                "cfg_prevues": min(n_grille, budget), "erreurs": 0, "manquantes": 0,
+                                "workers": 1, "en_cours": "démarrage", "derniere": "-", "prochaine": "inventaire"}
 
-    # item 10 : chaque étape a son PROPRE timestamp de début. La durée d'une étape = temps depuis le début
-    # de CETTE étape — jamais le cumul `temps() - t0` (qui gonflait toutes les durées et faussait l'ETA).
-    _t_etape = [t0]
+        # item 10 : chaque étape a son PROPRE timestamp de début. La durée d'une étape = temps depuis le début
+        # de CETTE étape — jamais le cumul `temps() - t0` (qui gonflait toutes les durées et faussait l'ETA).
+        _t_etape = [t0]
 
-    def _fin_etape(**kw: Any) -> None:
-        maintenant = temps()
-        eta.terminer_etape(maintenant - _t_etape[0], **kw)
-        _t_etape[0] = maintenant
+        def _fin_etape(**kw: Any) -> None:
+            maintenant = temps()
+            eta.terminer_etape(maintenant - _t_etape[0], **kw)
+            _t_etape[0] = maintenant
 
-    def _rafraichir(hh: str) -> None:
-        est = eta.estimer(elapsed_s=temps() - t0)
-        etat.update({"heure": hh, "ecoule": format_hms(temps() - t0), "eta": est["texte"],
-                     "eta_etape": format_hms(est.get("eta_total_s") or 0) if not est["calibration"] else "CALIB",
-                     "fin_estimee": format_hms(est.get("fin_relative_s") or 0) if not est["calibration"] else "-",
-                     "confiance": ("+/- %ss" % round(est.get("confiance_s") or 0)) if not est["calibration"] else "-",
-                     "etape": eta.etapes_finies})
-        tableau = rendre_tableau(etat)
-        etat["_tableau"] = tableau
-        if imprimer:
-            print("\033[2J\033[H" + tableau, flush=True)
+        def _rafraichir(hh: str) -> None:
+            est = eta.estimer(elapsed_s=temps() - t0)
+            etat.update({"heure": hh, "ecoule": format_hms(temps() - t0), "eta": est["texte"],
+                         "eta_etape": format_hms(est.get("eta_total_s") or 0) if not est["calibration"] else "CALIB",
+                         "fin_estimee": format_hms(est.get("fin_relative_s") or 0) if not est["calibration"] else "-",
+                         "confiance": ("+/- %ss" % round(est.get("confiance_s") or 0)) if not est["calibration"] else "-",
+                         "etape": eta.etapes_finies})
+            tableau = rendre_tableau(etat)
+            etat["_tableau"] = tableau
+            if imprimer:
+                print("\033[2J\033[H" + tableau, flush=True)
 
-    def _jrn(msg: str) -> None:
-        journal.ligne(horodatage or "T", msg)
+        def _jrn(msg: str) -> None:
+            journal.ligne(horodatage or "T", msg)
 
-    # 1) INVENTAIRE (item 2 : scopé à la session en mode session, jamais un scan global de la racine)
-    etat.update({"en_cours": "inventaire des sources", "prochaine": "lecture"})
-    _jrn("inventaire: debut")
-    if session_meta is not None:
-        inv = _inventaire_session(session_dir, session_meta["catalogue"])
-        _jrn("inventaire SCOPE session %s : %d artefacts catalogues" % (session_meta["run_id"],
-                                                                        inv["total_fichiers"]))
-    else:
-        inv = inventorier(racine, max_fichiers=max_fichiers)
-    etat.update({"octets_total": inv["total_octets"], "derniere": "inventaire (%d fichiers)" % inv["total_fichiers"]})
-    _fin_etape(octets=0)
-    _jrn("inventaire: %d fichiers, %d lisibles, %d bloques" % (inv["total_fichiers"], inv["lisibles"], inv["bloques"]))
-    _rafraichir(horodatage or "T")
-
-    # item 15 : rafraîchissement PÉRIODIQUE (1 s) même pendant une phase BLOQUANTE (lecture d'un gros
-    # fichier, recherche/replay). Uniquement en mode interactif (imprimer) → tests déterministes intacts.
-    from contextlib import nullcontext
-
-    def _refr_ctx():
-        return (RafraichisseurPeriodique(lambda: _rafraichir(horodatage or "T"), intervalle_s=1.0)
-                if imprimer else nullcontext())
-
-    # 2) LECTURE -> events, EN STREAMING À MÉMOIRE BORNÉE (item 5) : plus de plafond arbitraire 200k.
-    # On déverse tous les événements dans un shard sur DISQUE (RAM bornée, checkpoint/reprise), puis on
-    # charge une FENÊTRE bornée pour le replay (budget mémoire EXPLICITE, jamais un nombre magique).
-    etat.update({"en_cours": "lecture des donnees (streaming)", "prochaine": "audit"})
-    octets_lus = sum(int(f["octets"]) for f in inv["fichiers"] if f["lisible"])
-    bloques = int(inv.get("bloques", 0))
-    fichiers_lisibles = [f["chemin"] for f in inv["fichiers"] if f["lisible"]]
-    # item 4/5 : NAMESPACE shard+checkpoint par run_id (dossier) + HASH des données + SHA git. Un shard
-    # d'une autre session (autre hash) ne peut JAMAIS être réutilisé — le nom du fichier change.
-    import hashlib
-    empreinte_donnees = hashlib.sha256(
-        "|".join("%s:%d" % (Path(c).name, Path(c).stat().st_size if Path(c).is_file() else -1)
-                 for c in sorted(fichiers_lisibles)).encode("utf-8")).hexdigest()[:12]
-    sha_git = (session_meta or {}).get("git_head") or _sha_git(racine)
-    ns = "%s.%s" % (empreinte_donnees, (sha_git or "nogit")[:8])
-    _ecrire_manifeste_run(sortie, run_id=(session_meta or {}).get("run_id"), data_hash=empreinte_donnees,
-                          git_head=sha_git, n_fichiers=len(fichiers_lisibles))
-    shard = sortie / ("events_shard.%s.jsonl" % ns)
-    with _refr_ctx():
-        # item 9 : FUSION CAUSALE (tri-fusion externe) et non une concaténation naïve fichier-par-fichier.
-        # Le shard global est ordonné exchange_ts→recv_ts→sequence→source ; une FENÊTRE bornée en est
-        # alors un échantillon temporel REPRÉSENTATIF de TOUTES les venues (item 8), pas « tout le
-        # fichier 1 puis le fichier 2 ». Indispensable au Lead-Lag Binance→Hyperliquid et au Cross-Venue.
-        info_shard = fusionner_causalement(
-            fichiers_lisibles, shard, source_de=_venue_du_fichier, git_sha=(sha_git or ""),
-            checkpoint_path=sortie / ("events_shard.%s.checkpoint.json" % ns))
-    etat["events_shardes"] = info_shard["n"]
-    etat["fusion_causale"] = {k: info_shard.get(k) for k in ("dedupes", "hors_ordre", "gaps", "sources")}
-    # item 6 : la fenêtre RAM est TOUJOURS bornée. Un plafond <= 0 ne veut plus dire « tout charger »
-    # (OOM sur gros jeu) mais « budget AUTOMATIQUE borné » calculé sur la RAM disponible. Un plafond
-    # explicite reste respecté. item 8 : la fenêtre est un échantillon causalement contigu (pas biaisé venue).
-    from hl_observer.ops.budget_ram import resoudre_max_events
-    budget_events_ram = resoudre_max_events(max_ram_events)   # NOTE: distinct du `budget` de recherche lab
-    explicites = [v for v in (max_events,) if v and v > 0]
-    max_ram = min([budget_events_ram] + explicites)
-    etat["budget_ram_events"] = max_ram
-    events = charger_borne(shard, max_ram=max_ram)
-    valides = _events_valides(events)
-    etat.update({"octets_lus": octets_lus, "events_lus": len(events), "events_valides": valides,
-                 "events_rejetes": len(events) - valides, "derniere": "lecture (%d events)" % len(events)})
-    _fin_etape(octets=octets_lus, evenements=len(events))
-    _jrn("lecture: %d events (%d valides), %d fichiers bloques" % (len(events), valides, bloques))
-    _rafraichir(horodatage or "T")
-
-    # 3) AUDIT CABLAGE (croise import reel + disponibilite donnees)
-    paires_ll = _paires_lead_lag(events)
-    ll = score_lead_lag(paires_ll, min_echantillons=20)
-    a_hedge = any(isinstance(e.get("cross_venue"), dict) for e in events)
-    audit = auditer(a_des_evenements=valides > 0, a_des_carnets_hedge=a_hedge,
-                    a_lead_lag=(ll.get("score") != "UNMEASURABLE"))
-    audit["lead_lag"] = ll
-    # item 13 : Lead-Lag comme VRAIE stratégie paper (signal causal -> entrée -> sortie gelée -> fill ->
-    # coûts -> ledger -> PnL IS/OOS/FORWARD). Consommée ici (chemin ANALYSER), résultat au rapport.
-    sigs_ll = signaux_depuis_events(events)
-    ll_paper = (rejouer_lead_lag(sigs_ll, config={"fee_bps": 2.5}, min_episodes=min_episodes)
-                if sigs_ll else {"verdict": "UNMEASURABLE", "segments": {}, "placebo_net": None})
-    audit["lead_lag_paper"] = {"verdict": ll_paper["verdict"], "segments": ll_paper.get("segments", {}),
-                               "placebo_net": ll_paper.get("placebo_net")}
-    etat.update({"en_cours": "audit cablage", "prochaine": "recherche",
-                 "derniere": "audit (%d bricks utilisees)" % audit["resume"].get("CABLE ET UTILISE", 0)})
-    _fin_etape()
-    _jrn("audit: %s" % audit["resume"])
-    _rafraichir(horodatage or "T")
-
-    # 4) RECHERCHE (chemin canonique) — donnees REELLES uniquement pour le verdict
-    etat.update({"en_cours": "recherche IS/OOS/FORWARD + stress + placebo", "prochaine": "rapport"})
-    best = {"is": None, "oos": None, "fwd": None, "adv95": None, "dd": None}
-
-    def _on_eval(info: dict[str, Any]) -> None:
-        res = info["res"]
-        m = res.get("metriques", {})
-        for k, mk in (("is", "net_pnl"), ("oos", "oos_net"), ("fwd", "forward_net"),
-                      ("adv95", "adverse_p95_net")):
-            v = m.get(mk)
-            if isinstance(v, (int, float)) and (best[k] is None or v > best[k]):
-                best[k] = v
-        etat.update({"cfg_testees": info["evalues"], "cfg_restantes": info["restantes"],
-                     "cfg_eliminees": sum(1 for c in [res] if c.get("verdict") in ("KILL", "MORE_DATA")),
-                     "best_is": best["is"], "best_oos": best["oos"], "best_fwd": best["fwd"],
-                     "best_adv95": best["adv95"], "sous_etape": "config %d" % info["evalues"],
-                     "derniere": "eval %s -> %s" % (res.get("config", {}).get("notional_max"), res.get("verdict"))})
-        _fin_etape()
+        # 1) INVENTAIRE (item 2 : scopé à la session en mode session, jamais un scan global de la racine)
+        etat.update({"en_cours": "inventaire des sources", "prochaine": "lecture"})
+        _jrn("inventaire: debut")
+        if session_meta is not None:
+            inv = _inventaire_session(session_dir, session_meta["catalogue"])
+            _jrn("inventaire SCOPE session %s : %d artefacts catalogues" % (session_meta["run_id"],
+                                                                            inv["total_fichiers"]))
+        else:
+            inv = inventorier(racine, max_fichiers=max_fichiers)
+        etat.update({"octets_total": inv["total_octets"], "derniere": "inventaire (%d fichiers)" % inv["total_fichiers"]})
+        _fin_etape(octets=0)
+        _jrn("inventaire: %d fichiers, %d lisibles, %d bloques" % (inv["total_fichiers"], inv["lisibles"], inv["bloques"]))
         _rafraichir(horodatage or "T")
 
-    with _refr_ctx():
-        rech = R.rechercher(events, espace=espace, leader_equity_defaut=leader_equity_defaut, budget=budget,
-                            checkpoint_path=checkpoint_path, min_episodes=min_episodes, source=source,
-                            on_eval=_on_eval)
-    fills = sum(c.get("segments", {}).get("IS", {}).get("fills", 0) or 0 for c in rech["candidats"])
-    etat.update({"cfg_testees": rech["evalues"], "fills": fills, "replays": rech["evalues"]})
-    _jrn("recherche: %d evaluees, %d cache, verdict %s" % (rech["evalues"], rech["caches"], rech["verdict_global"]))
+        # item 15 : rafraîchissement PÉRIODIQUE (1 s) même pendant une phase BLOQUANTE (lecture d'un gros
+        # fichier, recherche/replay). Uniquement en mode interactif (imprimer) → tests déterministes intacts.
+        from contextlib import nullcontext
 
-    # 5) RAPPORT
-    etat.update({"en_cours": "ecriture du rapport", "prochaine": "fin"})
-    _fin_etape()
-    periode = _periode(events)
-    chemins = ecrire_rapport(sortie, horodatage=horodatage or "T", inventaire=inv, audit=audit, recherche=rech,
-                             eta_final=format_hms(temps() - t0), source=source, periode=periode,
-                             checkpoints=[str(checkpoint_path)])
-    _jrn("rapport: %s (verdict %s)" % (chemins["latest"], chemins["verdict"]))
-    _rafraichir(horodatage or "T")
+        def _refr_ctx():
+            return (RafraichisseurPeriodique(lambda: _rafraichir(horodatage or "T"), intervalle_s=1.0)
+                    if imprimer else nullcontext())
 
-    try:
-        _verrou_analyse.unlink()                 # item 13 : libère le verrou d'analyse en fin de run
-    except OSError:
-        pass
-    return {"rapport": chemins, "verdict": chemins["verdict"], "inventaire": inv, "audit": audit,
-            "recherche": rech, "events": len(events), "events_valides": valides, "periode": periode,
-            "duree_s": round(temps() - t0, 3), "tableau": etat.get("_tableau", ""),
-            "journal": str(journal.chemin), "lead_lag": ll,
-            "lead_lag_paper": audit.get("lead_lag_paper")}
+        # 2) LECTURE -> events, EN STREAMING À MÉMOIRE BORNÉE (item 5) : plus de plafond arbitraire 200k.
+        # On déverse tous les événements dans un shard sur DISQUE (RAM bornée, checkpoint/reprise), puis on
+        # charge une FENÊTRE bornée pour le replay (budget mémoire EXPLICITE, jamais un nombre magique).
+        etat.update({"en_cours": "lecture des donnees (streaming)", "prochaine": "audit"})
+        octets_lus = sum(int(f["octets"]) for f in inv["fichiers"] if f["lisible"])
+        bloques = int(inv.get("bloques", 0))
+        fichiers_lisibles = [f["chemin"] for f in inv["fichiers"] if f["lisible"]]
+        # item 4/5 : NAMESPACE shard+checkpoint par run_id (dossier) + HASH des données + SHA git. Un shard
+        # d'une autre session (autre hash) ne peut JAMAIS être réutilisé — le nom du fichier change.
+        import hashlib
+        empreinte_donnees = hashlib.sha256(
+            "|".join("%s:%d" % (Path(c).name, Path(c).stat().st_size if Path(c).is_file() else -1)
+                     for c in sorted(fichiers_lisibles)).encode("utf-8")).hexdigest()[:12]
+        sha_git = (session_meta or {}).get("git_head") or _sha_git(racine)
+        ns = "%s.%s" % (empreinte_donnees, (sha_git or "nogit")[:8])
+        _ecrire_manifeste_run(sortie, run_id=(session_meta or {}).get("run_id"), data_hash=empreinte_donnees,
+                              git_head=sha_git, n_fichiers=len(fichiers_lisibles))
+        shard = sortie / ("events_shard.%s.jsonl" % ns)
+        with _refr_ctx():
+            # item 9 : FUSION CAUSALE (tri-fusion externe) et non une concaténation naïve fichier-par-fichier.
+            # Le shard global est ordonné exchange_ts→recv_ts→sequence→source ; une FENÊTRE bornée en est
+            # alors un échantillon temporel REPRÉSENTATIF de TOUTES les venues (item 8), pas « tout le
+            # fichier 1 puis le fichier 2 ». Indispensable au Lead-Lag Binance→Hyperliquid et au Cross-Venue.
+            info_shard = fusionner_causalement(
+                fichiers_lisibles, shard, source_de=_venue_du_fichier, git_sha=(sha_git or ""),
+                checkpoint_path=sortie / ("events_shard.%s.checkpoint.json" % ns))
+        etat["events_shardes"] = info_shard["n"]
+        etat["fusion_causale"] = {k: info_shard.get(k) for k in ("dedupes", "hors_ordre", "gaps", "sources")}
+        # item 6 : la fenêtre RAM est TOUJOURS bornée. Un plafond <= 0 ne veut plus dire « tout charger »
+        # (OOM sur gros jeu) mais « budget AUTOMATIQUE borné » calculé sur la RAM disponible. Un plafond
+        # explicite reste respecté. item 8 : la fenêtre est un échantillon causalement contigu (pas biaisé venue).
+        from hl_observer.ops.budget_ram import resoudre_max_events
+        budget_events_ram = resoudre_max_events(max_ram_events)   # NOTE: distinct du `budget` de recherche lab
+        explicites = [v for v in (max_events,) if v and v > 0]
+        max_ram = min([budget_events_ram] + explicites)
+        etat["budget_ram_events"] = max_ram
+        events = charger_borne(shard, max_ram=max_ram)
+        valides = _events_valides(events)
+        etat.update({"octets_lus": octets_lus, "events_lus": len(events), "events_valides": valides,
+                     "events_rejetes": len(events) - valides, "derniere": "lecture (%d events)" % len(events)})
+        _fin_etape(octets=octets_lus, evenements=len(events))
+        _jrn("lecture: %d events (%d valides), %d fichiers bloques" % (len(events), valides, bloques))
+        _rafraichir(horodatage or "T")
+
+        # 3) AUDIT CABLAGE (croise import reel + disponibilite donnees)
+        paires_ll = _paires_lead_lag(events)
+        ll = score_lead_lag(paires_ll, min_echantillons=20)
+        a_hedge = any(isinstance(e.get("cross_venue"), dict) for e in events)
+        audit = auditer(a_des_evenements=valides > 0, a_des_carnets_hedge=a_hedge,
+                        a_lead_lag=(ll.get("score") != "UNMEASURABLE"))
+        audit["lead_lag"] = ll
+        # item 13 : Lead-Lag comme VRAIE stratégie paper (signal causal -> entrée -> sortie gelée -> fill ->
+        # coûts -> ledger -> PnL IS/OOS/FORWARD). Consommée ici (chemin ANALYSER), résultat au rapport.
+        sigs_ll = signaux_depuis_events(events)
+        ll_paper = (rejouer_lead_lag(sigs_ll, config={"fee_bps": 2.5}, min_episodes=min_episodes)
+                    if sigs_ll else {"verdict": "UNMEASURABLE", "segments": {}, "placebo_net": None})
+        audit["lead_lag_paper"] = {"verdict": ll_paper["verdict"], "segments": ll_paper.get("segments", {}),
+                                   "placebo_net": ll_paper.get("placebo_net")}
+        etat.update({"en_cours": "audit cablage", "prochaine": "recherche",
+                     "derniere": "audit (%d bricks utilisees)" % audit["resume"].get("CABLE ET UTILISE", 0)})
+        _fin_etape()
+        _jrn("audit: %s" % audit["resume"])
+        _rafraichir(horodatage or "T")
+
+        # 4) RECHERCHE (chemin canonique) — donnees REELLES uniquement pour le verdict
+        etat.update({"en_cours": "recherche IS/OOS/FORWARD + stress + placebo", "prochaine": "rapport"})
+        best = {"is": None, "oos": None, "fwd": None, "adv95": None, "dd": None}
+
+        def _on_eval(info: dict[str, Any]) -> None:
+            res = info["res"]
+            m = res.get("metriques", {})
+            for k, mk in (("is", "net_pnl"), ("oos", "oos_net"), ("fwd", "forward_net"),
+                          ("adv95", "adverse_p95_net")):
+                v = m.get(mk)
+                if isinstance(v, (int, float)) and (best[k] is None or v > best[k]):
+                    best[k] = v
+            etat.update({"cfg_testees": info["evalues"], "cfg_restantes": info["restantes"],
+                         "cfg_eliminees": sum(1 for c in [res] if c.get("verdict") in ("KILL", "MORE_DATA")),
+                         "best_is": best["is"], "best_oos": best["oos"], "best_fwd": best["fwd"],
+                         "best_adv95": best["adv95"], "sous_etape": "config %d" % info["evalues"],
+                         "derniere": "eval %s -> %s" % (res.get("config", {}).get("notional_max"), res.get("verdict"))})
+            _fin_etape()
+            _rafraichir(horodatage or "T")
+
+        with _refr_ctx():
+            rech = R.rechercher(events, espace=espace, leader_equity_defaut=leader_equity_defaut, budget=budget,
+                                checkpoint_path=checkpoint_path, min_episodes=min_episodes, source=source,
+                                on_eval=_on_eval)
+        fills = sum(c.get("segments", {}).get("IS", {}).get("fills", 0) or 0 for c in rech["candidats"])
+        etat.update({"cfg_testees": rech["evalues"], "fills": fills, "replays": rech["evalues"]})
+        _jrn("recherche: %d evaluees, %d cache, verdict %s" % (rech["evalues"], rech["caches"], rech["verdict_global"]))
+
+        # 5) RAPPORT
+        etat.update({"en_cours": "ecriture du rapport", "prochaine": "fin"})
+        _fin_etape()
+        periode = _periode(events)
+        chemins = ecrire_rapport(sortie, horodatage=horodatage or "T", inventaire=inv, audit=audit, recherche=rech,
+                                 eta_final=format_hms(temps() - t0), source=source, periode=periode,
+                                 checkpoints=[str(checkpoint_path)])
+        _jrn("rapport: %s (verdict %s)" % (chemins["latest"], chemins["verdict"]))
+        _rafraichir(horodatage or "T")
+
+        return {"rapport": chemins, "verdict": chemins["verdict"], "inventaire": inv, "audit": audit,
+                "recherche": rech, "events": len(events), "events_valides": valides, "periode": periode,
+                "duree_s": round(temps() - t0, 3), "tableau": etat.get("_tableau", ""),
+                "journal": str(journal.chemin), "lead_lag": ll,
+                "lead_lag_paper": audit.get("lead_lag_paper")}
+    finally:
+        try:
+            _verrou_analyse.unlink()                 # AUD-079: verrou TOUJOURS libere (meme sur exception)
+        except OSError:
+            pass
 
 
 def _periode(events: list[dict[str, Any]]) -> dict[str, Any]:
