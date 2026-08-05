@@ -69,7 +69,7 @@ def selectionner_session(root: str | Path, *, exiger_complete: bool = True, age_
                 "raison": "session COMPLETE %s trop vieille (age=%ss > seuil %ss)" %
                           (complete["run_id"], age, age_max_s), "sessions": sessions}
     return {"verdict": GO, "run_id": complete["run_id"], "statut": SC.STATUT_COMPLETE, "age_s": age,
-            "fraiche": True, "data_origin": complete.get("data_origin") or SC.ORIGINE_REEL,
+            "fraiche": True, "data_origin": complete.get("data_origin") or SC.ORIGINE_INCONNUE,
             "raison": "session COMPLETE la plus recente (age=%ss)" % age,
             "sessions": sessions}
 
@@ -147,7 +147,7 @@ def analyser(root: str | Path, *, exiger_complete: bool = True, ecrire: bool = T
     # item 12 : deux vérités DISTINCTES. `real_execution` reste TOUJOURS False (aucun ordre réel n'est
     # jamais passé — invariant de sécurité). `data_origin` dit si la donnée analysée est RÉELLEMENT
     # collectée (REEL) ou une fixture SYNTHETIQUE ; un « vert » sur du SYNTHETIQUE serait un faux gain.
-    origine = sel.get("data_origin") or SC.ORIGINE_REEL
+    origine = sel.get("data_origin") or SC.ORIGINE_INCONNUE
     resultat = {"verdict": verdict, "run_id": sel.get("run_id"), "statut": sel.get("statut"),
                 "age_s": sel.get("age_s"), "fraiche": sel.get("fraiche"),
                 "raison": sel.get("raison"), "verification": verif, "rapport_md": rapport_md,

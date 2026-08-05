@@ -46,7 +46,19 @@ STATUTS = (STATUT_ACTIVE, STATUT_COMPLETE, STATUT_QUARANTINED)
 # production attest REEL ; toute fixture doit attester SYNTHETIQUE.
 ORIGINE_REEL = "REEL"
 ORIGINE_SYNTHETIQUE = "SYNTHETIQUE"
-ORIGINES = (ORIGINE_REEL, ORIGINE_SYNTHETIQUE)
+# AUD-001/073 — provenance DENY-BY-DEFAULT. Une absence d'attestation POSITIVE (defaut, valeur
+# inconnue/invalide, catalogue muet) vaut UNKNOWN, JAMAIS REEL : ne pas prouver le reel n'est pas
+# une preuve de reel. Seul le vrai collecteur de production (session_harvest) atteste REEL ; une
+# fixture atteste SYNTHETIQUE. Aucun aval ne promeut sur UNKNOWN/SYNTHETIQUE.
+ORIGINE_INCONNUE = "UNKNOWN"
+ORIGINES = (ORIGINE_REEL, ORIGINE_SYNTHETIQUE, ORIGINE_INCONNUE)
+
+
+def origine_prouvee_reelle(origine) -> bool:
+    """AUD-001/073 : True SEULEMENT pour une attestation REELLE positive (ORIGINE_REEL). UNKNOWN,
+    SYNTHETIQUE ou absent -> False (deny-by-default). Accepte une origine str ou un catalogue dict."""
+    o = origine.get("data_origin") if isinstance(origine, dict) else origine
+    return o == ORIGINE_REEL
 
 # Extensions considérées comme des DONNÉES (pour la détection d'orphelins à la clôture — item 8).
 EXTENSIONS_DONNEES = (".jsonl", ".jsonl.gz", ".json.gz", ".ndjson", ".sqlite3", ".sqlite",
@@ -185,14 +197,14 @@ class CatalogueSession:
 
     # ── création / lecture ────────────────────────────────────────────────────────────────────
     def demarrer(self, *, git_head: str | None = None, contexte: Mapping[str, Any] | None = None,
-                 data_origin: str = ORIGINE_REEL, horloge=time.time) -> dict:
+                 data_origin: str = ORIGINE_INCONNUE, horloge=time.time) -> dict:
         """Crée la session ACTIVE (idempotent : ne réécrase pas une session déjà démarrée).
-        `data_origin` (item 12) : REEL par défaut (le chemin canonique = collecte de production réelle) ;
+        `data_origin` (item 12) : DENY-BY-DEFAULT = UNKNOWN (AUD-001/073) : le collecteur de production atteste REEL ;
         une FIXTURE de test DOIT passer ORIGINE_SYNTHETIQUE. `real_execution` reste False (sécurité)."""
         if self.chemin.is_file():
             return self.lire()
         manifeste = manifeste_execution(self.root, tache="collecte_harvest", run_id=self.run_id)
-        origine = data_origin if data_origin in ORIGINES else ORIGINE_REEL
+        origine = data_origin if data_origin in ORIGINES else ORIGINE_INCONNUE
         payload = {
             "schema_catalogue": SCHEMA_CATALOGUE,
             "run_id": self.run_id,
@@ -452,7 +464,7 @@ def scanner_sessions(root: str | Path) -> list[dict]:
             continue
         out.append({"run_id": cat.get("run_id") or d.name, "statut": cat.get("statut"),
                     "debut_ms": cat.get("debut_ms") or 0, "chemin": str(cat_p),
-                    "data_origin": cat.get("data_origin") or ORIGINE_REEL})
+                    "data_origin": cat.get("data_origin") or ORIGINE_INCONNUE})
     out.sort(key=lambda x: x.get("debut_ms") or 0, reverse=True)
     return out
 
@@ -466,7 +478,8 @@ def derniere_session_complete(root: str | Path) -> dict | None:
 
 
 __all__ = ["SCHEMA_CATALOGUE", "NOM_CATALOGUE", "STATUT_ACTIVE", "STATUT_COMPLETE",
-           "STATUT_QUARANTINED", "STATUTS", "ORIGINE_REEL", "ORIGINE_SYNTHETIQUE", "ORIGINES",
+           "STATUT_QUARANTINED", "STATUTS", "ORIGINE_REEL", "ORIGINE_SYNTHETIQUE", "ORIGINE_INCONNUE",
+           "ORIGINES", "origine_prouvee_reelle",
            "EntreeSource", "CatalogueSession", "SessionFigeeError",
            "sha256_fichier", "nouveau_run_id", "chemin_session", "chemin_catalogue",
            "scanner_sessions", "derniere_session_complete", "verifier_catalogue",

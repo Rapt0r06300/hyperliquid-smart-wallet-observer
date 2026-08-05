@@ -49,13 +49,27 @@ def test_go_sur_session_complete_verifiee(tmp_path):
     assert (tmp_path / "runtime" / "reports" / "backtest_replay" / "ANALYSE_SESSION.md").is_file()
 
 
-def test_item12_data_origin_reel_par_defaut_et_real_execution_toujours_false(tmp_path):
-    # une session COLLECTEE (chemin canonique) est REELLE ; real_execution reste False (aucun ordre reel).
-    _session_complete(tmp_path, "run-reel")
+def test_item12_provenance_deny_by_default_et_real_execution_toujours_false(tmp_path):
+    # AUD-001/073 : une session SANS attestation positive vaut UNKNOWN, jamais REEL par defaut
+    # (une absence d'attestation n'est pas une preuve de donnee reelle). real_execution reste False.
+    _session_complete(tmp_path, "run-inconnu")               # demarrer() sans data_origin -> UNKNOWN
     res = AS.analyser(tmp_path)
     assert res["verdict"] == AS.GO
-    assert res["data_origin"] == SC.ORIGINE_REEL
+    assert res["data_origin"] == SC.ORIGINE_INCONNUE
     assert res["real_execution"] is False                    # invariant securite, INDEPENDANT de data_origin
+
+
+def test_item12_attestation_reelle_positive_est_REEL(tmp_path):
+    # seule une attestation POSITIVE (le vrai collecteur de production) rend la session REELLE.
+    p = SC.chemin_session(tmp_path, "run-reel") / "hl/a.jsonl"
+    p.parent.mkdir(parents=True, exist_ok=True)
+    p.write_bytes(b"a\nb\n")
+    c = CatalogueSession(tmp_path, "run-reel")
+    c.demarrer(data_origin=SC.ORIGINE_REEL, horloge=lambda: 1000.0)
+    c.enregistrer_source(EntreeSource("allmids-collector", chemin="hl/a.jsonl"))
+    c.cloturer(writers_arretes=True, horloge=lambda: 1001.0)
+    res = AS.analyser(tmp_path)
+    assert res["verdict"] == AS.GO and res["data_origin"] == SC.ORIGINE_REEL
 
 
 def test_item12_fixture_synthetique_etiquetee_synthetique(tmp_path):

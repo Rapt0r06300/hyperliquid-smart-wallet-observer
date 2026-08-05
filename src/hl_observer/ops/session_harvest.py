@@ -52,7 +52,8 @@ def ouvrir_session_harvest(root: str | Path, *, run_id: str | None = None, git_h
     """Crée la session ACTIVE, écrit le pointeur COURANTE, et déclare toutes les sources attendues."""
     rid = run_id or SC.nouveau_run_id("harvest", horloge=horloge)
     cat = SC.CatalogueSession(root, rid)
-    cat.demarrer(git_head=git_head, contexte={"profil": "HARVEST"}, horloge=horloge)
+    # AUD-001/073 : HARVEST = vrai collecteur de production -> attestation POSITIVE de provenance REELLE.
+    cat.demarrer(git_head=git_head, contexte={"profil": "HARVEST"}, data_origin=SC.ORIGINE_REEL, horloge=horloge)
     _ecrire_pointeur(root, rid, horloge=horloge)
     enregistrer_sources_declarees(root, rid, sources=sources,
                                   now_ms=now_ms if now_ms is not None else horloge() * 1000.0)
