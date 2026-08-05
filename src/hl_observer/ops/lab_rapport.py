@@ -76,6 +76,40 @@ def _section_recherche(rech: dict[str, Any]) -> list[str]:
     return out
 
 
+# AUD-101 : hiérarchie explicite PAR NIVEAU DE PREUVE. Le rapport ne se contente plus de séparer
+# "meilleur démontré" / "tués" : il classe TOUS les candidats du niveau de preuve le plus FORT au plus
+# faible, selon un ordre canonique (un verdict inconnu retombe au plus bas — deny-by-default).
+_ORDRE_PREUVE = (
+    "VALIDATED_POSITIVE_PAPER", "OR", "ARGENT", "PROMU", "POSITIF", "VALIDE_PARTIEL",
+    "MORE_DATA", "KILL", "UNMEASURABLE", "NON_ECONOMIQUE_SYNTHETIQUE",
+)
+
+
+def rang_preuve(verdict: Any) -> int:
+    """Rang du niveau de preuve : 0 = le plus FORT. Verdict inconnu -> plus bas (fail-closed)."""
+    v = str(verdict).upper()
+    return _ORDRE_PREUVE.index(v) if v in _ORDRE_PREUVE else len(_ORDRE_PREUVE)
+
+
+def _section_hierarchie_preuve(rech: dict[str, Any]) -> list[str]:
+    cands = list(rech.get("candidats", []) or [])
+    if not cands:
+        return []
+    groupes: dict[str, list] = {}
+    for c in cands:
+        groupes.setdefault(str(c.get("verdict")), []).append(c)
+    out = ["## Hiérarchie par niveau de preuve", "",
+           "Tous les candidats, regroupés du niveau de preuve le PLUS FORT au plus faible "
+           "(VALIDATED > VALIDE_PARTIEL > MORE_DATA > KILL > UNMEASURABLE).", ""]
+    for v in sorted(groupes, key=rang_preuve):
+        lot = groupes[v]
+        out.append("### %s (%d) — rang preuve %d" % (v, len(lot), rang_preuve(v)))
+        for c in lot[:10]:
+            out.append("- `%s`" % json.dumps(c.get("config", {}), sort_keys=True))
+        out.append("")
+    return out
+
+
 def construire_markdown(*, horodatage: str, source: str, periode: Any, inv: dict[str, Any],
                         audit: dict[str, Any], rech: dict[str, Any], eta_final: Any = None) -> str:
     verdict = verdict_affiche(rech.get("verdict_global"))
@@ -92,6 +126,7 @@ def construire_markdown(*, horodatage: str, source: str, periode: Any, inv: dict
     lignes += _section_sources(inv)
     lignes += _section_audit(audit)
     lignes += _section_recherche(rech)
+    lignes += _section_hierarchie_preuve(rech)
     lignes += ["## Sécurité", "", "Paper strict : 0 ordre réel, 0 clé privée, 0 signature, aucun appel /exchange.",
                ""]
     return "\n".join(lignes)
