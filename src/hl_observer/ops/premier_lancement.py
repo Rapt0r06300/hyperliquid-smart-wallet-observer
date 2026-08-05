@@ -43,6 +43,18 @@ LOCK_INSTANCE_VIVANT = "lanceur_instance.lock"
 DERIVE_HORLOGE_MAX_MS = 5 * 365 * 24 * 3600 * 1000     # 5 ans : derive « absurde » (pile morte, RTC faux)
 # matiere de cle qui ne doit JAMAIS avoir ete copiee (meme paper-strict) — voir archive_portable.
 _SUFFIXES_SECRETS = (".key", ".pem", ".p12", ".pfx", ".mnemonic", ".seed", ".keystore")
+# [2026-08-05] Dossiers JAMAIS parcourus : caches et metadonnees, aucun secret du projet n'y vit
+# et les traverser coutait des secondes a chaque prevol.
+_DOSSIERS_NON_PARCOURUS = (".git", "__pycache__", ".mypy_cache", ".ruff_cache", ".pytest_cache",
+                           ".hypothesis", "node_modules", ".venv", "venv")
+# [2026-08-05] EXCEPTIONS NOMMEES, jamais silencieuses (elles sont listees dans le detail du verdict).
+# Elles corrigent deux FAUX POSITIFS qui bloquaient le demarrage sans aucun gain de securite :
+#   - `cacert.pem` = magasin d'autorites de certification PUBLIQUES livre par certifi (et par pip).
+#     Le runtime portable tools\python en contient 2 : c'est de la confiance publique, pas notre cle.
+#   - `.env.example` / `.sample` / `.template` / `.dist` = gabarits versionnes SANS secret.
+# Tout le reste (`.env` reel, `*.key`, `*.pem` prive, `*.seed`...) reste BLOQUANT, ou qu'il soit.
+_FICHIERS_PUBLICS_CONNUS = ("cacert.pem",)
+_SUFFIXES_GABARIT = (".example", ".sample", ".template", ".dist")
 
 
 def _res(nom: str, statut: str, detail: str) -> dict:
@@ -144,22 +156,52 @@ def verifier_reseau_tls(*, sonde: Callable[[], dict] | None = None) -> dict:
     return _res("reseau_tls", OK if ok else AVERT, str(r.get("detail", "")) or ("OK" if ok else "indisponible"))
 
 
+def _est_suspect(nom: str) -> bool:
+    """Nom de fichier (deja en minuscules) qui porte de la matiere de cle potentielle."""
+    return (nom == ".env" or nom.startswith(".env.")
+            or any(nom.endswith(sfx) for sfx in _SUFFIXES_SECRETS))
+
+
+def _est_publiquement_connu(nom: str) -> bool:
+    """Faux positif NOMME : magasin d'autorites publiques, ou gabarit sans secret."""
+    return nom in _FICHIERS_PUBLICS_CONNUS or any(nom.endswith(s) for s in _SUFFIXES_GABARIT)
+
+
 def verifier_aucune_cle(root: str | Path) -> dict:
-    """BLOQUANT : aucune matiere de cle ne doit avoir ete copiee (extension, pas sous-chaine)."""
+    """BLOQUANT : aucune matiere de cle ne doit avoir ete copiee (extension, pas sous-chaine).
+
+    [2026-08-05] Deux faux positifs rendaient ce controle TOUJOURS bloquant, donc le lanceur
+    TOUJOURS NO_GO : `.env.example` (gabarit versionne) et les `cacert.pem` de certifi embarques
+    dans le runtime portable. Ils sont desormais reconnus, COMPTES et AFFICHES dans le verdict —
+    jamais masques. Aucun autre assouplissement : un vrai `.env`, un `*.key`, un `*.pem` prive
+    bloquent toujours, partout.
+    """
     root = Path(root)
     trouves: list[str] = []
-    for p in root.rglob("*"):
-        if not p.is_file():
-            continue
-        nom = p.name.lower()
-        if nom == ".env" or nom.startswith(".env."):
-            trouves.append(p.relative_to(root).as_posix())
-        elif any(nom.endswith(sfx) for sfx in _SUFFIXES_SECRETS):
-            trouves.append(p.relative_to(root).as_posix())
+    connus: list[str] = []
+    for dossier, sous_dossiers, fichiers in os.walk(root):
+        sous_dossiers[:] = [d for d in sous_dossiers if d not in _DOSSIERS_NON_PARCOURUS]
+        base = Path(dossier)
+        rel_dir = "" if base == root else base.relative_to(root).as_posix()
+        for fichier in fichiers:
+            nom = fichier.lower()
+            if not _est_suspect(nom):
+                continue
+            rel = "%s/%s" % (rel_dir, fichier) if rel_dir else fichier
+            if _est_publiquement_connu(nom):
+                if len(connus) < 20:
+                    connus.append(rel)
+                continue
+            trouves.append(rel)
+            if len(trouves) >= 20:
+                break
         if len(trouves) >= 20:
             break
     if trouves:
         return _res("aucune_cle", ECHEC, "matiere de cle presente (a retirer) : %s" % ", ".join(trouves))
+    if connus:
+        return _res("aucune_cle", OK, "aucune matiere de cle du projet ; %d fichier(s) public(s)/gabarit "
+                    "reconnu(s) : %s" % (len(connus), ", ".join(connus)))
     return _res("aucune_cle", OK, "aucune matiere de cle copiee")
 
 

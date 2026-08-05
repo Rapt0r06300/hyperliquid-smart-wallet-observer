@@ -75,6 +75,54 @@ def test_aucune_cle_bloquant(tmp_path):
     assert PL.verifier_aucune_cle(tmp_path)["statut"] == PL.OK
 
 
+# ── [2026-08-05] NON-REGRESSION : les 2 faux positifs qui fermaient le lanceur ────────────────
+# Symptome reel : double-clic sur LANCER_HYPERSMART.cmd -> fenetre qui se ferme aussitot. Cause :
+# `verifier_aucune_cle` bloquait sur `.env.example` (gabarit) et sur les `cacert.pem` de certifi
+# embarques dans tools\python -> NO_GO -> exit 7 -> le .cmd sortait sans pause. Reproduit ici.
+def _arbre_reel_faux_positifs(root):
+    (root / ".env.example").write_text("HL_ENV=paper\n", encoding="utf-8")
+    certifi = root / "tools" / "python" / "Lib" / "site-packages" / "certifi"
+    certifi.mkdir(parents=True, exist_ok=True)
+    (certifi / "cacert.pem").write_text("-----BEGIN CERTIFICATE-----\n", encoding="utf-8")
+    pip_certifi = root / "tools" / "python" / "Lib" / "site-packages" / "pip" / "_vendor" / "certifi"
+    pip_certifi.mkdir(parents=True, exist_ok=True)
+    (pip_certifi / "cacert.pem").write_text("-----BEGIN CERTIFICATE-----\n", encoding="utf-8")
+
+
+def test_aucune_cle_ne_bloque_pas_sur_gabarit_ni_magasin_public(tmp_path):
+    _arbre_reel_faux_positifs(tmp_path)
+    r = PL.verifier_aucune_cle(tmp_path)
+    assert r["statut"] == PL.OK                                  # le lanceur doit pouvoir demarrer
+    # ...mais rien n'est masque : les 3 fichiers reconnus sont NOMMES dans le verdict.
+    assert ".env.example" in r["detail"] and r["detail"].count("cacert.pem") == 2
+
+
+def test_orchestrateur_go_malgre_gabarit_et_magasin_public(tmp_path):
+    """Le vrai bug de bout en bout : GO attendu sur un dossier qui contient exactement
+    ce que le projet de Flo contient (gabarit .env.example + runtime portable certifi)."""
+    _session_complete(tmp_path, "run_ok")
+    _arbre_reel_faux_positifs(tmp_path)
+    v = PL.verifier_premier_lancement(tmp_path, os_info={"systeme": "Linux"},
+                                      maintenant_ms=1_735_689_600_000 + 1000,
+                                      sonde_port=lambda _p: True, generateur_id=lambda: "MID")
+    assert "aucune_cle" not in v["echecs"]
+
+
+def test_aucune_cle_bloque_toujours_une_vraie_cle_dans_le_runtime_portable(tmp_path):
+    """Aucun dossier n'est exempte en bloc : une VRAIE cle deposee dans tools\\python bloque."""
+    _arbre_reel_faux_positifs(tmp_path)
+    (tmp_path / "tools" / "python" / "wallet.key").write_text("SECRET", encoding="utf-8")
+    r = PL.verifier_aucune_cle(tmp_path)
+    assert r["statut"] == PL.ECHEC and "wallet.key" in r["detail"]
+
+
+def test_aucune_cle_bloque_toujours_un_vrai_env(tmp_path):
+    """L'exception ne porte QUE sur les gabarits : un `.env` reel reste bloquant."""
+    (tmp_path / ".env").write_text("HL_SECRET=1", encoding="utf-8")
+    r = PL.verifier_aucune_cle(tmp_path)
+    assert r["statut"] == PL.ECHEC and ".env" in r["detail"]
+
+
 def test_sessions_preservees_comptees(tmp_path):
     _session_complete(tmp_path, "run_a")
     _session_complete(tmp_path, "run_b")

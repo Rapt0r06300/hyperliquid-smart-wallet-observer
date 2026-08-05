@@ -11,10 +11,12 @@ REM item 6 : MEME Python que le runtime (portable), ERRORLEVEL verifie IMMEDIATE
 call "%~dp0tools\portable_env.cmd"
 if errorlevel 1 (
   echo   [PYTHON] portable_env a echoue : aucun runtime Python portable valide. Abandon.
+  if /I not "%HYPERSMART_NO_PAUSE%"=="1" pause
   endlocal & exit /b 30
 )
 if not defined HYPERSMART_PYTHON (
   echo   [PYTHON] HYPERSMART_PYTHON non defini par portable_env. Abandon.
+  if /I not "%HYPERSMART_NO_PAUSE%"=="1" pause
   endlocal & exit /b 31
 )
 set "PYTHONPATH=%~dp0src;%~dp0tools"
@@ -66,12 +68,15 @@ if errorlevel 1 (
 set "SEL=%~dp0runtime\reports\backtest_replay\SESSION_SELECTIONNEE.txt"
 if not exist "%SEL%" (
   echo   [ANALYSE_SESSION] run_id selectionne introuvable. Abandon.
+  echo   ^(selection reussie mais le pointeur SESSION_SELECTIONNEE.txt n'a pas ete ecrit^)
+  if /I not "%HYPERSMART_NO_PAUSE%"=="1" pause
   endlocal & exit /b 6
 )
 set "RUN_ID="
 set /p RUN_ID=<"%SEL%"
 if "%RUN_ID%"=="" (
   echo   [ANALYSE_SESSION] run_id vide. Abandon.
+  if /I not "%HYPERSMART_NO_PAUSE%"=="1" pause
   endlocal & exit /b 6
 )
 set "SESSION_DIR=%~dp0runtime\data\sessions\%RUN_ID%"

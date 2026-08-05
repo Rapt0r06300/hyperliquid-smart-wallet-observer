@@ -11,8 +11,8 @@ echo   Installation   : wheelhouse hors ligne, hashes obligatoires
 echo.
 
 echo   [1/3] Verification des entrees de construction...
-if not exist "%ROOT%\requirements-portable.txt" endlocal & exit /b 40
-if not exist "%ROOT%\tools\wheelhouse\WHEELHOUSE_LOCK.json" endlocal & exit /b 41
+if not exist "%ROOT%\requirements-portable.txt" (endlocal & exit /b 40)
+if not exist "%ROOT%\tools\wheelhouse\WHEELHOUSE_LOCK.json" (endlocal & exit /b 41)
 
 echo   [2/3] Construction atomique de tools\python...
 powershell -NoProfile -ExecutionPolicy Bypass -File "%ROOT%\tools\install_portable_runtime.ps1" -ProjectRoot "%ROOT%" -Force
@@ -23,9 +23,9 @@ if errorlevel 1 (
 
 echo   [3/3] Verification finale sans repli...
 call "%ROOT%\tools\portable_env.cmd"
-if errorlevel 1 endlocal & exit /b 43
+if errorlevel 1 (endlocal & exit /b 43)
 "%HYPERSMART_PYTHON%" "%ROOT%\tools\portable_runtime.py" --root "%ROOT%" check --require-embedded
-if errorlevel 1 endlocal & exit /b 44
+if errorlevel 1 (endlocal & exit /b 44)
 
 echo.
 echo   [OK] Runtime portable exact et hors ligne pret :

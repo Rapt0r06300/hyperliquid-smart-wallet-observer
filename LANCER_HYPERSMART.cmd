@@ -499,6 +499,18 @@ goto :fin
 
 :fin
 REM item 9 : code de sortie reel (0 seulement si tout a reussi), jamais un exit /b 0 systematique.
+REM [2026-08-05] JAMAIS de fermeture invisible. Un prevol NO_GO sortait en 7 sans pause : la
+REM fenetre disparaissait avant d'etre lue, et la panne devenait indiagnosticable a l'oeil nu.
+if not "%RC%"=="0" if /I not "%HYPERSMART_NO_PAUSE%"=="1" (
+  echo.
+  echo   ============================================================
+  echo     ARRET sur le code %RC% - la raison exacte est AU-DESSUS.
+  echo     Diagnostic complet : DIAGNOSTIC_LANCEUR.cmd
+  echo     ^(HYPERSMART_NO_PAUSE=1 pour supprimer cette pause en automatise^)
+  echo   ============================================================
+  echo.
+  pause
+)
 endlocal & exit /b %RC%
 
 REM ############################################################################
