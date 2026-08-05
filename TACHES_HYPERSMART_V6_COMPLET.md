@@ -897,3 +897,27 @@ AUD-154 (queue model calibre), AUD-156 (analyse lookahead), AUD-157 (analyse rec
 AUD-159 (mutation testing), AUD-160 (differential testing).
 
 **Bilan AUD-131..160 : 30/30 clos = 17 verifies + 13 corriges (nouveau code+tests, pytest reel). 3 commits locaux (`e4eea56c`, `71653af5`, `7a65cd38`) prets pour POUSSER-GITHUB-FORCE.cmd.**
+
+
+---
+
+## AVANCEMENT — AUD-161..230 (session 2026-08-05, audit + correctifs pytest REEL)
+
+> Methode : audit de chaque item contre l'ARBRE COMPLET (3201 fichiers src), correctifs test-first
+> (ROUGE->VERT) verifies par pytest REEL dans un clone cloud, portes byte-identiques sur la machine
+> (archive tar SHA-256 verifiee + py_compile) et commites en LOCAL. Sans multi-agent. Aucun faux
+> commit, aucune mesure inventee. 0 reseau, 0 ordre reel, 0 cle privee, enveloppe unique 1000 USD.
+
+### FIXED cette session — 45 items, nouveau code + tests (RED->GREEN, 49 tests verts)
+- **Lot 1 — SHA `2dcaa60b` (19 tests)** : infra experiences (162 registre SQLite persistant, 164 recalcul descendant cible, 165 map deterministe, 166 reduce hors-memoire, 178 cache noeud DAG) ; plans d'experiences (175 factoriel + Halton basse-discrepance, 177 successive halving, 212 info-gain) ; auto-decouverte encadree (205 features, 206 regression symbolique bornee, 207 GA compte en multiple-testing, 208 penalite complexite, 209 MAP-Elites, 210 archive niches, 211 quarantaine generateur) ; stats validation (199 MCS, 200 alpha-spending, 204 conforme).
+- **Lot 2 — SHA `de63d616` (14 tests)** : rigueur scenarios (167 couverture mesuree, 169 ablations, 170 contrefactuels systematiques, 171 clustering erreurs, 172 test transfert coin/venue/regime, 174 marche agent-based SYNTHETIQUE, 179 rapport max-pistes) ; rigueur tests (190 flaky!=pass, 191 audit timeouts, 192 dependance a l'ordre, 193 pairwise, 194 couverture t-way, 220 rapport combinatoire, 215 regression memoire, 216 soak).
+- **Lot 3 — SHA `f1d69527` (13 tests)** : robustesse lanceur Windows (180 sequence double-clic, 183 chemins speciaux, 184 codes de sortie, 185 kill arbre process, 218 ecriture atomique tolerante-verrou, 219 locale/TZ forcee UTF-8/UTC) ; supply-chain (187 hashes deps epingles, 188 SBOM) ; gouvernance runtime (202 derive execution cout/fill/latence, 221 orchestrateurs unifies) ; 195 attentes donnees centralisees.
+- **AUD-222 — SHA `7063c859` (3 tests)** : lanceur `ANALYSE_HISTORIQUE_COMPLETE.cmd` -> `hl_observer.ops.historical_analysis_suite` (bootstrap portable_env, meme Python portable, paper strict, code de sortie propage). Preuve process Windows = CI windows-latest.
+
+### VERIFIED_DONE (25) — impl deja presente, verifiee (fichier:symbole + tests dans l'audit)
+- **161** research/fault_injection.py · **163** research/lineage.py + exec_reconciliation/parent_child_lineage.py · **168** optimization/hypothesis_engine.py + research/registre_hypotheses.py · **173** backtesting/scenario_db.py + scenario_search.py + recherche_scenario.py · **176** backtesting/monte_carlo.py:stabilite_parametre + overfit_selection.py:selection_par_plateau · **181** tous les .cmd bootstrap via tools/portable_env.cmd · **182** integration/deferred_features.py.
+- **186** ops/portable_audit_guard.py + validation_portable.py:_hermetic_environment + portable_smoke.py · **189** portable_smoke.py (offline://) + guard deny-network · **196** data_contract/schema_drift_detector.py · **197** quant_methods.py:block_bootstrap (+ experiment_harness.mc_p5) · **198** cross_validation.py:whites_reality_check + anti_overfit_gate.py · **201** quant_methods.py:deflated_sharpe + probabilistic_sharpe_ratio · **203** regime_detection.py:cusum_change_points.
+- **213** agent/sealed_verifier.py (VerificateurScelle/HoldoutViole) + experimental/historical_holdout.py · **214** perf/latency_budget.py + latency_tracker.py · **217** ops/verrou_lanceur.py (verrou anti-double-instance) · **223** research/search_space.py (cardinalite EVENT×STATE×FILTER×HORIZON×EXECUTION, SearchSpace, hash) · **224** search_space + espaces propres par famille (AUD-092) · **225** backtesting/vectorized.py + fast_exact_comparison.py (AUD-149) · **226** scenario_db/grid/search + research/validation_gates.py.
+- **227** agregation multi-session (test_agregation_multi_session) · **228** capture/atomic_checkpoint.py + arbitrage/episode_idempotency.py + search_space.hash_espace · **229** research/purged_cv.py + backtesting/purged_split.py + cross_validation.combinatorial_purged_splits · **230** cross_validation.purged_walk_forward_splits(embargo=) + purged_split.py.
+
+**Bilan AUD-161..230 : 70/70 clos = 45 corriges (nouveau code+tests, 49 tests pytest reel) + 25 verifies (code+tests existants). 4 commits locaux (`2dcaa60b`, `de63d616`, `f1d69527`, `7063c859`) prets pour POUSSER-GITHUB-FORCE.cmd.**
