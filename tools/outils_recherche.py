@@ -30,6 +30,16 @@ def _optuna():
         return None
 
 
+def _instancier_seede(cls, seed: int):
+    """Instancie un sampler Optuna en PROPAGEANT `seed=` (AUD-091 : reproductibilité des tirages
+    adaptatifs TPE/CMA-ES/NSGA-II). Repli propre si la classe n'accepte pas `seed=` (compat versions ou
+    composant déterministe) : on n'a alors juste pas de graine à propager, jamais d'erreur."""
+    try:
+        return cls(seed=seed)
+    except TypeError:
+        return cls()
+
+
 def disponibilite() -> dict:
     """État de disponibilité de chaque outil (rôle + raison si indisponible). JAMAIS compté comme dispo juste
     parce que le nom existe : les samplers/pruners Optuna sont indisponibles honnêtement si optuna est absent."""
@@ -160,18 +170,19 @@ def optimiser(evaluer_params, espace: dict, *, outil: str = "random", n_trials: 
                     p[k] = trial.suggest_float(k, dom["min"], dom["max"])
             return p
 
-        # 1) SAMPLER (proposition des points)
+        # 1) SAMPLER (proposition des points) — SEEDÉ pour la reproductibilité (AUD-091).
         sampler = None
         nm = SAMPLERS_OPTUNA.get(outil)
         if nm and hasattr(opt.samplers, nm):
-            sampler = getattr(opt.samplers, nm)()
+            sampler = _instancier_seede(getattr(opt.samplers, nm), seed)
 
-        # 2) PRUNER — passé en `pruner=`, jamais comme sampler (FX-3). Base sampler = TPE (ou Random).
+        # 2) PRUNER — passé en `pruner=`, jamais comme sampler (FX-3). Base sampler = TPE, SEEDÉ (AUD-091).
         pruner = None
         pn = PRUNERS_OPTUNA.get(outil)
         if pn and hasattr(opt.pruners, pn):
             pruner = getattr(opt.pruners, pn)()
-            sampler = getattr(opt.samplers, "TPESampler")() if hasattr(opt.samplers, "TPESampler") else None
+            sampler = (_instancier_seede(getattr(opt.samplers, "TPESampler"), seed)
+                       if hasattr(opt.samplers, "TPESampler") else None)
 
         # 3) NSGA-II : MULTI-OBJECTIFS (maximiser net ET pf), pas un score scalaire unique.
         if outil in MULTI_OBJECTIF:
@@ -234,11 +245,15 @@ def optimiser(evaluer_params, espace: dict, *, outil: str = "random", n_trials: 
         return {**base, "disponible": True, "lance": False, "raison": "erreur optuna: %s" % str(e)[:120]}
 
 
-def lancer_registre(evaluer_params, espace: dict, *, n_trials: int = 16, storage_dir: Path | None = None) -> dict:
-    """Lance chaque outil DISPONIBLE et rend un tableau d'état (les indisponibles restent listés avec raison)."""
+def lancer_registre(evaluer_params, espace: dict, *, n_trials: int = 16, storage_dir: Path | None = None,
+                    seed: int = 0) -> dict:
+    """Lance chaque outil DISPONIBLE et rend un tableau d'état (les indisponibles restent listés avec raison).
+    `seed` (DÉTERMINISTE, défaut 0) est propagé à CHAQUE outil : les samplers/pruners adaptatifs deviennent
+    reproductibles au même titre que les tirages purs grid/random/QMC (AUD-091)."""
     res = {}
     for o in OUTILS:
-        res[o] = optimiser(evaluer_params, espace, outil=o, n_trials=n_trials, storage_dir=storage_dir)
+        res[o] = optimiser(evaluer_params, espace, outil=o, n_trials=n_trials, storage_dir=storage_dir,
+                           seed=seed)
     return {"outils": res, "n_disponibles": sum(1 for v in res.values() if v.get("disponible")),
             "n_lances": sum(1 for v in res.values() if v.get("lance")),
             "n_avec_trials_reels": sum(1 for v in res.values() if (v.get("trials_termines") or 0) > 0)}

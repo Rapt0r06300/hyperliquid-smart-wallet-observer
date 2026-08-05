@@ -194,6 +194,14 @@ def _code_sha() -> str:
     return h.hexdigest()[:16]
 
 
+def _seed_deterministe(chaine: str, *, modulo: int = 997) -> int:
+    """Graine STABLE ENTRE PROCESSUS dérivée d'une chaîne via SHA-256 (AUD-091). `hash()` est salé par
+    PYTHONHASHSEED : deux process obtiennent des valeurs différentes pour la même chaîne, donc un scheduler
+    non reproductible. Ici, même `code_sha` -> même graine, quel que soit le process."""
+    n = int(hashlib.sha256(str(chaine).encode("utf-8")).hexdigest(), 16)
+    return n % modulo if modulo else n
+
+
 def _ecrire_atomique(p: Path, contenu: str) -> None:
     """Écrit sans collision entre dashboard, moteur et finalisation.
 
@@ -321,7 +329,7 @@ def _variantes_du_cycle(rundir: Path, *, cycle: int, code_sha: str, coins, regim
     meilleurs = [c for c in CH.charger(rundir) if (c.get("net_median_bps") or 0) > 0][-5:]
     vs = SCH.generer(cycle=cycle, deja_vus=deja, familles=familles, directions=directions,
                      horizons=horizons, regimes=regimes, coins=coins, meilleurs=meilleurs,
-                     budget=48, seed=abs(hash(code_sha)) % 997, code_sha=code_sha)
+                     budget=48, seed=_seed_deterministe(code_sha), code_sha=code_sha)
     # NE PAS persister ici : une signature n'est « définitivement vue » qu'après résultat TERMINAL (PT-7).
     return vs, deja
 
