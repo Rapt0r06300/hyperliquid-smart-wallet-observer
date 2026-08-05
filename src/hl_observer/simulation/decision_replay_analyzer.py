@@ -4,7 +4,7 @@ import json
 from collections import Counter, defaultdict
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import Any, Iterable
 
 
 LOGS_TO_SEND_DIRNAME = "logs \u00e0 envoyer"
@@ -117,6 +117,74 @@ def count_decision_events_fast(log_dir: Path) -> int:
     if cached is not None:
         return cached.event_count
     return _count_nonempty_lines(path)
+
+
+def aggregate_replay_analyses(analyses: Iterable[ReplayAnalysis]) -> ReplayAnalysis:
+    """Fold several SINGLE-session analyses into ONE cross-session aggregate.
+
+    The cumulative infra existed (append-only ledger, forward_frozen), but the
+    flagship analysis (analyser_session, lab_alpha) is mono-session: a run that
+    spanned several DISTINCT sessions had no honest combined economic total. This
+    folds N independent ``ReplayAnalysis`` -- one per session -- into a single
+    aggregate whose economics are the SUM of the parts: PnL, fees, accepted /
+    refused / positive / negative counts, per-coin and per-wallet PnL, and action
+    counts all add up. Refusal reasons are merged from each session's top-reasons
+    and re-ranked. Pure and read-only: it never touches the disk.
+    """
+
+    analyses = tuple(analyses)
+    reasons: Counter[str] = Counter()
+    actions: Counter[str] = Counter()
+    pnl_by_coin: defaultdict[str, float] = defaultdict(float)
+    pnl_by_wallet: defaultdict[str, float] = defaultdict(float)
+    events: list[DecisionEvent] = []
+    event_count = accepted = refused = positive = negative = 0
+    total_pnl = 0.0
+    total_fees = 0.0
+    for analysis in analyses:
+        events.extend(analysis.events)
+        event_count += analysis.event_count
+        accepted += analysis.accepted_count
+        refused += analysis.refused_count
+        positive += analysis.positive_count
+        negative += analysis.negative_count
+        total_pnl += analysis.total_estimated_pnl_usdc
+        total_fees += analysis.total_fees_usdc
+        for reason, count in analysis.top_refusal_reasons:
+            reasons[reason] += count
+        for action, count in analysis.action_counts.items():
+            actions[action] += count
+        for coin, value in analysis.pnl_by_coin.items():
+            pnl_by_coin[coin] += value
+        for wallet, value in analysis.pnl_by_wallet.items():
+            pnl_by_wallet[wallet] += value
+    return ReplayAnalysis(
+        source_dir=Path(f"<aggregate:{len(analyses)}_sessions>"),
+        events=tuple(events),
+        event_count=event_count,
+        accepted_count=accepted,
+        refused_count=refused,
+        positive_count=positive,
+        negative_count=negative,
+        total_estimated_pnl_usdc=round(total_pnl, 8),
+        total_fees_usdc=round(total_fees, 8),
+        top_refusal_reasons=tuple(reasons.most_common(20)),
+        pnl_by_coin={key: round(value, 8) for key, value in sorted(pnl_by_coin.items())},
+        pnl_by_wallet={key: round(value, 8) for key, value in sorted(pnl_by_wallet.items())},
+        action_counts=dict(actions),
+    )
+
+
+def aggregate_decision_logs(log_dirs: Iterable[Path]) -> ReplayAnalysis:
+    """Analyze several DISTINCT session log dirs and return their combined aggregate.
+
+    Each ``log_dir`` is a separate session with its own append-only decision
+    ledger. This is the multi-session entry point missing from the mono-session
+    flagship: read each session read-only, then fold them with
+    ``aggregate_replay_analyses``.
+    """
+
+    return aggregate_replay_analyses(analyze_decision_logs(Path(log_dir)) for log_dir in log_dirs)
 
 
 def _analysis_from_events(log_dir: Path, events: tuple[DecisionEvent, ...]) -> ReplayAnalysis:
