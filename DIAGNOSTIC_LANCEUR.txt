@@ -1,0 +1,270 @@
+============================================================
+  DIAGNOSTIC DES LANCEURS HYPERSMART - LECTURE SEULE
+============================================================
+  Date    : 05/08/2026 14:05:35,80
+  Racine  : C:\Users\flo\Desktop\Projet invest\
+  ComSpec : C:\Windows\system32\cmd.exe
+  Windows : Windows_NT  /  processeur : AMD64
+
+------------------------------------------------------------
+  ETAPE 1 : fichiers indispensables du tronc commun
+------------------------------------------------------------
+  [OK]      C:\Users\flo\Desktop\Projet invest\LANCER_HYPERSMART.cmd
+  [OK]      C:\Users\flo\Desktop\Projet invest\ANALYSER_BACKTESTS_REPLAYS.cmd
+  [OK]      C:\Users\flo\Desktop\Projet invest\tools\portable_env.cmd
+  [OK]      C:\Users\flo\Desktop\Projet invest\tools\python\python.exe
+  [OK]      C:\Users\flo\Desktop\Projet invest\tools\python\python314._pth
+  [OK]      dossier C:\Users\flo\Desktop\Projet invest\tools\python\Lib\site-packages
+  [OK]      dossier C:\Users\flo\Desktop\Projet invest\src\hl_observer\ops
+  [OK]      dossier C:\Users\flo\Desktop\Projet invest\hyper_smart_observer
+
+------------------------------------------------------------
+  ETAPE 2 : fins de ligne des .cmd (cmd.exe attend du CRLF)
+------------------------------------------------------------
+  Un .cmd en LF seul peut mal se comporter sous cmd.exe.
+  C'est la regle ecrite dans le .gitattributes de ce projet.
+
+  [CRLF OK] 1003 lignes
+  [CRLF OK] 111 lignes
+  [CRLF OK] 42 lignes
+  [LF SEUL] 0 CRLF / 71 LF nus  -> A CONVERTIR EN CRLF
+
+------------------------------------------------------------
+  ETAPE 3 : appel REEL de tools\portable_env.cmd
+  (c'est la toute premiere instruction des DEUX lanceurs)
+------------------------------------------------------------
+  code retour portable_env  : 0
+  HYPERSMART_PROJECT_ROOT   : [C:\Users\flo\Desktop\Projet invest]
+  HYPERSMART_PYTHON         : [C:\Users\flo\Desktop\Projet invest\tools\python\python.exe]
+  HYPERSMART_PYTHON_SOURCE  : [embedded-tools-python]
+  PYTHONPATH                : [C:\Users\flo\Desktop\Projet invest\src;C:\Users\flo\Desktop\Projet invest;C:\Users\flo\Desktop\Projet invest\tools]
+
+  [OK] portable_env.cmd a fait son travail.
+
+------------------------------------------------------------
+  ETAPE 4 : l'interpreteur portable demarre-t-il ?
+------------------------------------------------------------
+Python 3.14.2
+  code retour : 0
+
+------------------------------------------------------------
+  ETAPE 5 : sondes Python (sys.path, imports, dependances)
+------------------------------------------------------------
+C:\Users\flo\Desktop\Projet invest\tools\diagnostic_lanceur.py:78: DeprecationWarning: The '__version__' attribute is deprecated and will be removed in Click 9.1. Use feature detection or 'importlib.metadata.version("click")' instead.
+  valeur = getattr(module, attribut, None)
+==========================================================================
+  DIAGNOSTIC PYTHON DE LA CHAINE DE LANCEMENT - LECTURE SEULE
+  racine : C:\Users\flo\Desktop\Projet invest
+==========================================================================
+
+--------------------------------------------------------------------------
+  1. INTERPRETEUR PORTABLE
+--------------------------------------------------------------------------
+  [INFO]    executable : C:\Users\flo\Desktop\Projet invest\tools\python\python.exe
+  [INFO]    version    : 3.14.2 (win32)
+  [INFO]    prefix     : C:\Users\flo\Desktop\Projet invest\tools\python
+  [OK]      c'est bien tools\python\python.exe (aucun repli systeme)
+
+--------------------------------------------------------------------------
+  2. SYS.PATH (pilote par python314._pth, PYTHONPATH est IGNORE)
+--------------------------------------------------------------------------
+  - [existe] C:\Users\flo\Desktop\Projet invest\tools\python\python314.zip
+  - [existe] C:\Users\flo\Desktop\Projet invest\tools\python
+  - [existe] C:\Users\flo\Desktop\Projet invest\tools\python\Lib\site-packages
+  - [existe] C:\Users\flo\Desktop\Projet invest\src
+  - [existe] C:\Users\flo\Desktop\Projet invest
+  - [existe] C:\Users\flo\Desktop\Projet invest\tools
+
+  [OK]      src est sur sys.path
+  [OK]      racine du projet est sur sys.path
+  [OK]      tools est sur sys.path
+  [OK]      site-packages est sur sys.path
+
+--------------------------------------------------------------------------
+  3. MODULES APPELES PAR LES DEUX LANCEURS
+--------------------------------------------------------------------------
+  [OK]      hl_observer  (paquet racine (src/hl_observer))
+  [OK]      hl_observer.ops.verrou_lanceur  (LANCER_HYPERSMART - verrou d'instance)
+  [OK]      hl_observer.ops.premier_lancement  (LANCER_HYPERSMART - prevol PC neuf)
+  [OK]      hl_observer.ops.superviseur_collecteurs  (LANCER_HYPERSMART - collecteurs)
+  [OK]      hl_observer.ops.registre_pids  (LANCER_HYPERSMART - arret propre)
+  [OK]      hl_observer.ops.analyser_session  (ANALYSER - porte d'entree session)
+  [OK]      hl_observer.ops.lab_alpha  (ANALYSER - laboratoire alpha)
+  [OK]      hl_observer.ops.portable_smoke  (ANALYSER - smoke portable)
+  [OK]      hl_observer.ops.historical_analysis_suite  (ANALYSER - plan d'etapes)
+  [OK]      hl_observer.ops.recette_lanceur  (RECETTE-LANCEUR)
+
+--------------------------------------------------------------------------
+  4. DEPENDANCES TIERCES
+--------------------------------------------------------------------------
+  [OK]      certifi 2026.07.22
+  [OK]      click 8.4.2
+  [OK]      fastapi 0.141.1
+  [OK]      httpx 0.28.1
+  [OK]      lz4 4.4.5
+  [OK]      numpy 2.5.1
+  [OK]      pandas 2.3.3
+  [OK]      psutil 7.2.2
+  [OK]      pydantic 2.13.4
+  [OK]      requests 2.32.5
+  [OK]      rich ?
+  [OK]      scipy 1.18.0
+  [OK]      sqlalchemy 2.0.51
+  [OK]      typer 0.27.0
+  [OK]      uvicorn 0.52.1
+  [OK]      websocket 1.9.0
+  [OK]      websockets 17.0.1
+  [OK]      yaml 6.0.3
+  [ALERTE]  websockets 17.0.1 : l'ancienne API (websockets.legacy,
+  [ALERTE]    extra_headers=..., WebSocketClientProtocol) a ete retiree.
+  [ALERTE]    requirements.txt epingle encore websockets>=10,<11 : si un
+  [ALERTE]    collecteur utilise l'ancienne API, il casse a l'execution.
+  [INFO]    websockets.legacy : present
+  [INFO]    websockets.asyncio.client : present
+
+--------------------------------------------------------------------------
+  5. CONFIRMATION SECURITE (lecture seule)
+--------------------------------------------------------------------------
+  [OK] HL_ENABLE_MAINNET_EXECUTION = 0
+  [OK] HL_ENABLE_TESTNET_EXECUTION = 0
+  [OK] REAL_MAINNET_TRADING = false
+  [OK] TESTNET_ONLY = true
+  [OK]      aucun .env a la racine
+  [OK]      ce diagnostic n'a passe aucun ordre et n'a signe aucune transaction
+
+--------------------------------------------------------------------------
+  VERDICT
+--------------------------------------------------------------------------
+  [OK]      chaine Python saine : les deux lanceurs peuvent importer tout ce
+  [OK]      qu'ils appellent. Si une fenetre se ferme quand meme, la cause est
+  [OK]      dans le .cmd lui-meme (voir les etapes 1 a 3 du rapport cmd).
+
+  code retour des sondes Python : 0
+
+------------------------------------------------------------
+  ETAPE 6 : premieres instructions propres a chaque lanceur
+------------------------------------------------------------
+  [LANCER_HYPERSMART] verrou d'instance (lecture de l'etat, sans prise)
+   module charge : C:\Users\flo\Desktop\Projet invest\src\hl_observer\ops\verrou_lanceur.py
+  code retour : 0
+
+  [ANALYSER] smoke portable non interactif
+{
+  "created_at_ms": 1785931542042,
+  "data_origin": "SYNTHETIQUE",
+  "ledger": {
+    "authoritative_equity_usdc": 999.974991,
+    "capital_accounting": {
+      "ROI_avg_margin_locked": -0.00050018,
+      "ROI_peak_margin_locked": -0.00050018,
+      "ROI_starting_equity": -2.5009e-05,
+      "avg_margin_locked_usd": 50.0,
+      "free_cash_usd": 999.974991,
+      "gross_exposure_usd": 0,
+      "leg_notional_usd": [],
+      "leverage_effective": null,
+      "liquidatable_equity_usd": 999.974991,
+      "liquidatable_pnl_usd": 0,
+      "liquidation_buffer_bps": null,
+      "margin_locked_usd": 0,
+      "mid_equity_usd": 999.974991,
+      "net_directional_exposure_usd": 0,
+      "peak_margin_locked_usd": 50.0,
+      "realized_pnl_usd": -0.025009,
+      "return_on_gross_exposure": null,
+      "roi_status": "LIQUIDATABLE_EXECUTABLE",
+      "starting_equity_usd": 1000.0,
+      "turnover_usd": 100.0,
+      "unrealized_mid_pnl_usd": 0
+    },
+    "cash_balance_usdc": 999.974991,
+    "drawdown_usdc": 0.025009,
+    "equity_usdc": 999.974991,
+    "event_count": 6,
+    "fees_paid_usdc": 0.045009,
+    "funding_net_usdc": 0.0,
+    "last_event_hash": "59bbcca0bf1d6fc6b6c4d93f61c146040e2d586be460972d5f0eba4d0e97ef30",
+    "last_event_seq": 6,
+    "pnl_audit": {
+      "events_checked": 6,
+      "fees_paid_usdc": 0.045009,
+      "funding_net_usdc": 0.0,
+      "issues": [],
+      "open_positions": {},
+      "pnl_valid": true,
+      "realized_pnl_usdc": 0.02,
+      "recalculated_equity_usdc": 999.974991,
+      "recalculated_net_pnl_usdc": -0.025009,
+      "status": "TRUSTED",
+      "unrealized_pnl_usdc": 0.0
+    },
+    "positions": {},
+    "realized_pnl_usdc": 0.02,
+    "reconciliation": {
+      "actual_equity_usdc": 999.974991,
+      "diff_usdc": 0.0,
+      "expected_equity_usdc": 999.974991,
+      "ok": true,
+      "warnings": []
+    },
+    "roi": {
+      "average_capital_at_risk_usdc": null,
+      "initial_capital_usdc": 1000.0,
+      "peak_margin_usdc": null,
+      "pnl_usdc": -0.02500899999995454,
+      "roi_on_average_capital_at_risk_pct": null,
+      "roi_on_initial_capital_pct": -0.0025009,
+      "roi_on_peak_margin_pct": null
+    },
+    "session_id": "portable-smoke-1785931542042-92ada049",
+    "starting_balance_usdc": 1000.0,
+    "strict_pnl_allowed": true,
+    "strict_roi_allowed": true,
+    "turnover_usdc": 100.0,
+    "unrealized_pnl_usdc": 0.0
+  },
+  "ledger_reconciliation": {
+    "actual_equity_usdc": 999.974991,
+    "diff_usdc": 0.0,
+    "expected_equity_usdc": 999.974991,
+    "ok": true,
+    "warnings": []
+  },
+  "network_used": false,
+  "normalized_fills": 2,
+  "ok": true,
+  "paper_events": 6,
+  "pipeline": [
+    "hyperliquid_fill_normalizer",
+    "paper_ledger_open_mark_close",
+    "pnl_reconciliation",
+    "session_catalog_complete"
+  ],
+  "presented_as_real_market_data": false,
+  "real_execution": false,
+  "report_json": "C:\\Users\\flo\\Desktop\\Projet invest\\runtime\\reports\\backtest_replay\\RAPPORT_PORTABLE_SMOKE.json",
+  "report_md": "C:\\Users\\flo\\Desktop\\Projet invest\\runtime\\reports\\backtest_replay\\RAPPORT_PORTABLE_SMOKE.md",
+  "run_id": "portable-smoke-1785931542042-92ada049",
+  "schema": "hypersmart.portable_smoke.v1",
+  "session_closure": {
+    "statut": "COMPLETE",
+    "verifications": {
+      "checksums_ok": true,
+      "divergences": [],
+      "n_artefacts_reels": 3,
+      "n_artefacts_verifies": 3,
+      "n_sources": 3,
+      "orphelins": [],
+      "vivantes_sans_artefact": [],
+      "writers_arretes": true,
+      "zero_orphelin": true
+    }
+  }
+}
+  code retour du smoke : 0
+
+
+============================================================
+  FIN DU DIAGNOSTIC - aucun fichier du projet n'a ete modifie
+  0 ordre reel, 0 argent reel, 0 cle privee, 0 signature
+============================================================
