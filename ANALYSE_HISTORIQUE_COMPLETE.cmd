@@ -19,13 +19,7 @@ if not defined HYPERSMART_PYTHON (
   if /I not "%HYPERSMART_NO_PAUSE%"=="1" pause
   endlocal ^& exit /b 31
 )
-set "PYTHONPATH=%~dp0src;%~dp0tools"
-set "PYTHONUTF8=1"
-set "PYTHONIOENCODING=utf-8"
-set "HL_ENABLE_MAINNET_EXECUTION=0"
-set "HL_ENABLE_TESTNET_EXECUTION=0"
-set "REAL_MAINNET_TRADING=false"
-set "TESTNET_ONLY=true"
+call "%~dp0tools\hyperlab_env.cmd"
 echo.
 echo ============================================================
 echo   SUITE D'ANALYSE HISTORIQUE COMPLETE - paper strict (0 ordre reel)
