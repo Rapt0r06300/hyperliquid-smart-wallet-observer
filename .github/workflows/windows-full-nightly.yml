@@ -1,0 +1,23 @@
+name: WINDOWS_FULL_NIGHTLY
+# [Bloc 11] Suite Windows nocturne + E2E du CMD double-clic. S'execute sur runner Windows GitHub.
+on:
+  schedule:
+    - cron: '0 3 * * *'
+  workflow_dispatch: {}
+jobs:
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install editable (BLOQUANT)
+        run: pip install -e .
+      - name: Install requirements-recherche (BLOQUANT)
+        run: pip install -r requirements-recherche.txt
+      - name: Suite hyperlab (Windows)
+        run: pytest tests/test_hyperlab_*.py -q
+      - name: E2E CMD double-clic
+        shell: cmd
+        run: cmd /c LANCER_HYPERLAB.cmd
