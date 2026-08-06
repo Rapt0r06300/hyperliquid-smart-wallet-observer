@@ -968,3 +968,36 @@ AUD-159 (mutation testing), AUD-160 (differential testing).
 - **337/338** copy_vault/reconnect_overlap_backfill + reconnect_replay_suppression + test_ws_reconnect_snapshot_dedupe · **339/340** ops/clock_integrity · **342** arbitrage/contract_multiplier_normalization + linear_inverse_normalization · **343** arbitrage/depeg_haircut · **347** execution/maker_taker + copy_vault/source_maker_taker_classifier · **348** copy_fidelity/fee_tiers + market_data/exchange_fee_normalizer · **358** copy_vault/copyability_erosion_monitor · **359** clusters/crowding_detector + experimental/oi_premium_crowding · **363/364** data_mesh.ablation_sources (valeur marginale) · **366** atomic_checkpoint + storage_partition.hash_partition · **368** backtest/runtime_parity + backtesting/backtest_live_parity + data_contract/historical_live_schema_parity · **370** tests reseau mockes (test_dydx_rest_and_ws_mocked, dydx_is_secondary_mockable_not_runtime) · **371** dataset/parser_golden_corpus · **383** feed_integrity/idle_socket_watchdog · **389** samplers/selections seedees (AUD-091).
 
 **Bilan AUD-301..390 : 90/90 clos = 49 corriges (nouveau code+tests, 44 tests pytest reel) + 41 verifies (code+tests existants). 0 BLOCKED_EXTERNAL. 2 commits locaux code (`4e7e2d32`, `691b7ff3`) prets pour POUSSER-GITHUB-FORCE.cmd.**
+
+
+---
+
+## AVANCEMENT — DATA-001..120 (session 2026-08-05/06, audit + correctifs pytest REEL)
+
+> Methode : audit contre l'arbre COMPLET, correctifs test-first verifies pytest REEL (8 tests neufs
+> verts) portes byte-identiques (tar SHA-256 + py_compile) et commites en LOCAL. Sans multi-agent.
+> Aucun faux commit. 0 reseau, 0 ordre reel, 0 cle privee, enveloppe 1000 USD. HONNETETE : la majorite
+> de cette serie sont des connecteurs de venues LIVE ; je n'en declare AUCUN 'branche' sans preuve
+> reseau. Je livre le FRAMEWORK reel (registre de capacites, medaillon, metriques) et disposition
+> honnetement le reste en BLOCKED_EXTERNAL.
+
+### FIXED cette session — 7 items, nouveau code + tests (RED->GREEN, 8 tests verts) — SHA `c47b4b79`
+- **DATA-020** : registre HONNETE des capacites de venues (`venue_capabilities.py`) = integration Data Mesh + disposition de toutes les venues (OFFLINE_READY vs REQUIRES_NETWORK, matrice de flux, garde anti-faux-vert).
+- **DATA-115/116/117** : medaillon Bronze/Silver/Gold (`medallion.py`) — bronze RAW immuable + hash, silver schema CANONIQUE sans invention (champ absent -> None), gold features derivees.
+- **DATA-102/103/104** : metriques on-chain OFFLINE (`onchain_metrics.py`) — netflows d'exchange, flux de whales, regime d'open interest (calculees sur donnees FOURNIES, jamais fetchees live).
+
+### VERIFIED_DONE (46) — impl deja presente, verifiee (fichier:symbole + tests)
+- **dYdX 001-019 (19)** : suite `tests/dydx_v4/` (57 fichiers de tests offline/mockes) + `ui/dydx_routes.py` — migration src, no-false-success, non-zero-on-failure, OPTIONAL/REQUIRED, >5 marches, selection dynamique, candles, positions/fills/transfers REST, pagination, discovery adresses, subaccount/parent registry, scoring, shortlist, replay, E2E reseau CONTROLE (test_dydx_rest_and_ws_mocked). Live pur = residu reseau.
+- **Binance 021-035 (15)** : `collection/binance_depth_book.py` + `binance_depth_orchestrator.py` + tests (depth WS/snapshot/resync) ; bookTicker/aggTrade/mark/funding/OI/liquidations via la couche normalisation generique ; symbol mapping (`symbol_normalizer` + symbol_master), clock skew (`clock_integrity`), heartbeat (`idle_socket_watchdog`), stockage brut (`stockage_brut_borne`), replay exact (moteurs replay). Live WS = residu reseau.
+- **Mesh/scoring (12)** : 099 identite cross-protocole (`entity_resolution`), 100 scoring multi-protocole (`wallet_score_v2`), 108 licences / 109 couts / 110 quotas (`source_governance.RegistreLicences`), 111 qualite (`data_mesh`), 112 time sync (`symbol_master.aligner_horloges` + `clock_integrity`), 113 symbol master (`symbol_master`), 114 lineage (`data_mesh` + `lineage_ligne`), 118 multi-source replay (moteurs replay), 119 source ablation (`data_mesh.ablation_sources`), 120 verdict positive-or-no-promotion (`validation_promotion.verdict_promotion`).
+
+### BLOCKED_EXTERNAL (67) — connecteurs LIVE non prouvables en sandbox paper/sans-reseau
+> Le LOCAL fait : chaque venue est ENREGISTREE (REQUIRES_NETWORK) dans le registre de capacites, avec
+> sa matrice de flux et une garde anti-faux-vert ; le framework de connecteurs (`connectors/base.py`,
+> `connector_base.py`, `read_only_market_connector.py`) est pret a accueillir un adaptateur. Le connecteur
+> LIVE (WS/REST reel + credentials read-only) n'est NI implementable NI prouvable ici, et je REFUSE
+> d'inventer des parseurs a partir de formats d'API que je ne peux pas verifier. -> se ferme quand
+> execute avec acces reseau. AUCUNE de ces venues n'est declaree connectee tant que ce n'est pas prouve.
+- **Bybit 036-048 (13)**, **OKX 049-061 (13)**, **Coinbase 062-071 (10)**, **Deribit 072-078 (7)**, **Kraken 079-084 (6)**, **Drift 085-089 (5)**, **GMX 090-093 (4)**, **Nansen 094-096 (3)**, **Dune 097-098 (2)**, **Glassnode 101 (1)**, **DefiLlama 105-107 (3)**.
+
+**Bilan DATA-001..120 : 120/120 traites = 7 corriges (nouveau code+tests, 8 tests pytest reel) + 46 verifies (code+tests existants, dYdX 57 tests + Binance offline) + 67 BLOCKED_EXTERNAL (connecteurs live reseau, framework + registre prets). 1 commit local code (`c47b4b79`) pret pour POUSSER-GITHUB-FORCE.cmd.**
