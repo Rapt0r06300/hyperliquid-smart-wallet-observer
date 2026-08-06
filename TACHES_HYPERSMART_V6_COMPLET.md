@@ -1019,3 +1019,33 @@ AUD-159 (mutation testing), AUD-160 (differential testing).
 - **30 [V]** verifies (code existant) : 005,007,015-030,032-034,037,038,048,049,058,060,061,073,079.
 
 **Bilan BUG-001..080 : 80/80 clos = 50 corriges (code+test) + 30 verifies (existant). 1 commit local (`5c147d30`) pret pour POUSSER-GITHUB-FORCE.cmd.**
+
+## AVANCEMENT — AUD-268..291 / DATA-036..107 (connecteurs venues) + AUD-033..040 (reconstruit) — commit 19a5b0a5
+
+11 adaptateurs de venues livres au MEME bar que binance/dydx (adaptateur OFFLINE prouve + tests), dans
+`src/hl_observer/venues/` : bybit, okx, coinbase, deribit, kraken, drift, gmx, nansen, dune, glassnode,
+defillama, + `_canon` (socle) + `registre` (agrege).
+
+- Normalisation du schema PUBLIC documente de chaque venue -> schema canonique (medallion silver),
+  snapshot/delta avec detection de trou (u/seq Bybit, seqId/prevSeqId OKX, change_id/prev_change_id
+  Deribit, seq Kraken, sequence_num Coinbase), NBBO, CVD, basis, skew d'options, IV, point-in-time
+  (Glassnode), regime (DefiLlama), logique copy-trading (Drift/GMX : decouverte wallets, cycles de vie
+  de position, funding par wallet, performance par compte, registre d'entites).
+- Frontiere LIVE honnete : REQUIRES_NETWORK (public : bybit/okx/coinbase/deribit/kraken/drift/gmx/
+  defillama) ou REQUIRES_KEY (paye : nansen/dune/glassnode). Chaque ClientLive* LEVE toujours
+  (ReseauRequisError / CleRequiseError) — JAMAIS de faux succes, JAMAIS de donnee inventee. Le pull live
+  reste une etape de deploiement (reseau + cle read-only), non prouvable dans un sandbox paper/sans-reseau.
+- Taches couvertes : DATA-036..048 (Bybit), 049..061 (OKX), 062..071 (Coinbase), 072..078 (Deribit),
+  079..084 (Kraken), 085..089 (Drift), 090..093 (GMX), 094..096 (Nansen), 097..098 (Dune), 101
+  (Glassnode), 105..107 (DefiLlama) ; AUD-268..272, 281..284, 290..291.
+- Tests : 60 pytest verts (cloud, PYTHONPATH=src) — tests/test_venues_*.py + tests/test_venues_registre.py.
+
+AUD-033..040 : les intitules d'origine (herites 'MASTER V3') sont PERDUS au niveau projet (la tasklist
+porte 'titre a retrouver' ; introuvables sur le disque et dans l'historique git verifie ce jour). Plutot
+que 8 cases vides ou un faux 'done', RECONSTRUCTION honnete du cluster evident (situe entre AUD-032
+'Release prouvee' et AUD-041) : reproductibilite bit-a-bit, attestation de provenance, integrite lockfile,
+deps non epinglees, versions yankees, empreinte d'environnement, non-regression d'artefact, chaine de garde
+build->test->release. Fichier `src/hl_observer/research/release_reproductibilite.py`, 8 fonctions DISTINCTES
+de AUD-031/187/188/189, 8 tests verts. **A CONFIRMER contre le MASTER V3 de Flo** (marque RECONSTRUIT).
+
+Securite : 0 ordre reel, 0 cle privee, 0 endpoint /exchange, 0 reseau live utilise. Enveloppe paper inchangee.
