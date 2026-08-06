@@ -5,9 +5,9 @@ Ne prouve PAS le runtime/live (trace a part). Regenerer : `python tools/claude_t
 
 | statut | n |
 |---|---|
-| done_wired | 22 |
-| coded_unwired | 51 |
-| coded_untested | 63 |
-| untraced | 454 |
+| done_wired | 25 |
+| coded_unwired | 49 |
+| coded_untested | 67 |
+| untraced | 449 |
 
-meta : 1728 modules, 1552 tests, 5068 edges d'import.
+meta : 1733 modules, 1560 tests, 5074 edges d'import.

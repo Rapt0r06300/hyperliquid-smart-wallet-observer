@@ -273,9 +273,9 @@
 {"code": "AUD-273", "modules": [], "n_modules": 0, "status": "untraced", "tested": false, "wired": false}
 {"code": "AUD-274", "modules": [], "n_modules": 0, "status": "untraced", "tested": false, "wired": false}
 {"code": "AUD-275", "modules": [], "n_modules": 0, "status": "untraced", "tested": false, "wired": false}
-{"code": "AUD-276", "modules": ["src/hl_observer/research/venue_readiness.py", "src/hl_observer/venues/registre.py"], "n_modules": 2, "status": "coded_unwired", "tested": true, "wired": false}
+{"code": "AUD-276", "modules": ["src/hl_observer/hyperlab/live_ready.py", "src/hl_observer/research/venue_readiness.py", "src/hl_observer/venues/registre.py"], "n_modules": 3, "status": "done_wired", "tested": true, "wired": true}
 {"code": "AUD-277", "modules": ["src/hl_observer/research/data_mesh.py"], "n_modules": 1, "status": "coded_unwired", "tested": true, "wired": false}
-{"code": "AUD-278", "modules": [], "n_modules": 0, "status": "untraced", "tested": false, "wired": false}
+{"code": "AUD-278", "modules": ["src/hl_observer/hyperlab/data_mesh_catalog.py"], "n_modules": 1, "status": "coded_untested", "tested": false, "wired": true}
 {"code": "AUD-279", "modules": ["src/hl_observer/research/symbol_master.py"], "n_modules": 1, "status": "coded_unwired", "tested": true, "wired": false}
 {"code": "AUD-280", "modules": [], "n_modules": 0, "status": "untraced", "tested": false, "wired": false}
 {"code": "AUD-281", "modules": ["src/hl_observer/venues/drift.py"], "n_modules": 1, "status": "coded_untested", "tested": false, "wired": true}
@@ -297,7 +297,7 @@
 {"code": "AUD-297", "modules": [], "n_modules": 0, "status": "untraced", "tested": false, "wired": false}
 {"code": "AUD-298", "modules": ["src/hl_observer/research/cex_policy.py"], "n_modules": 1, "status": "coded_unwired", "tested": true, "wired": false}
 {"code": "AUD-299", "modules": [], "n_modules": 0, "status": "untraced", "tested": false, "wired": false}
-{"code": "AUD-300", "modules": [], "n_modules": 0, "status": "untraced", "tested": false, "wired": false}
+{"code": "AUD-300", "modules": ["src/hl_observer/hyperlab/data_plane.py", "src/hl_observer/hyperlab/medallion_store.py"], "n_modules": 2, "status": "coded_untested", "tested": false, "wired": true}
 {"code": "AUD-301", "modules": ["src/hl_observer/research/storage_partition.py"], "n_modules": 1, "status": "coded_unwired", "tested": true, "wired": false}
 {"code": "AUD-302", "modules": [], "n_modules": 0, "status": "untraced", "tested": false, "wired": false}
 {"code": "AUD-303", "modules": [], "n_modules": 0, "status": "untraced", "tested": false, "wired": false}
@@ -317,11 +317,11 @@
 {"code": "AUD-317", "modules": [], "n_modules": 0, "status": "untraced", "tested": false, "wired": false}
 {"code": "AUD-318", "modules": ["src/hl_observer/research/stream_reliability.py"], "n_modules": 1, "status": "coded_unwired", "tested": true, "wired": false}
 {"code": "AUD-319", "modules": [], "n_modules": 0, "status": "untraced", "tested": false, "wired": false}
-{"code": "AUD-320", "modules": [], "n_modules": 0, "status": "untraced", "tested": false, "wired": false}
+{"code": "AUD-320", "modules": ["src/hl_observer/hyperlab/live_ready.py"], "n_modules": 1, "status": "done_wired", "tested": true, "wired": true}
 {"code": "AUD-321", "modules": [], "n_modules": 0, "status": "untraced", "tested": false, "wired": false}
 {"code": "AUD-322", "modules": [], "n_modules": 0, "status": "untraced", "tested": false, "wired": false}
 {"code": "AUD-323", "modules": [], "n_modules": 0, "status": "untraced", "tested": false, "wired": false}
-{"code": "AUD-324", "modules": [], "n_modules": 0, "status": "untraced", "tested": false, "wired": false}
+{"code": "AUD-324", "modules": ["src/hl_observer/hyperlab/data_mesh_catalog.py"], "n_modules": 1, "status": "coded_untested", "tested": false, "wired": true}
 {"code": "AUD-325", "modules": [], "n_modules": 0, "status": "untraced", "tested": false, "wired": false}
 {"code": "AUD-326", "modules": [], "n_modules": 0, "status": "untraced", "tested": false, "wired": false}
 {"code": "AUD-327", "modules": [], "n_modules": 0, "status": "untraced", "tested": false, "wired": false}
@@ -502,10 +502,10 @@
 {"code": "DATA-112", "modules": [], "n_modules": 0, "status": "untraced", "tested": false, "wired": false}
 {"code": "DATA-113", "modules": [], "n_modules": 0, "status": "untraced", "tested": false, "wired": false}
 {"code": "DATA-114", "modules": [], "n_modules": 0, "status": "untraced", "tested": false, "wired": false}
-{"code": "DATA-115", "modules": ["src/hl_observer/research/medallion.py"], "n_modules": 1, "status": "coded_unwired", "tested": true, "wired": false}
+{"code": "DATA-115", "modules": ["src/hl_observer/hyperlab/medallion_store.py", "src/hl_observer/research/medallion.py"], "n_modules": 2, "status": "done_wired", "tested": true, "wired": true}
 {"code": "DATA-116", "modules": [], "n_modules": 0, "status": "untraced", "tested": false, "wired": false}
 {"code": "DATA-117", "modules": [], "n_modules": 0, "status": "untraced", "tested": false, "wired": false}
-{"code": "DATA-118", "modules": [], "n_modules": 0, "status": "untraced", "tested": false, "wired": false}
+{"code": "DATA-118", "modules": ["src/hl_observer/hyperlab/data_plane.py"], "n_modules": 1, "status": "coded_untested", "tested": false, "wired": false}
 {"code": "DATA-119", "modules": [], "n_modules": 0, "status": "untraced", "tested": false, "wired": false}
 {"code": "DATA-120", "modules": [], "n_modules": 0, "status": "untraced", "tested": false, "wired": false}
 {"code": "BUG-001", "modules": [], "n_modules": 0, "status": "untraced", "tested": true, "wired": false}
