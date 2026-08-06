@@ -1001,3 +1001,21 @@ AUD-159 (mutation testing), AUD-160 (differential testing).
 - **Bybit 036-048 (13)**, **OKX 049-061 (13)**, **Coinbase 062-071 (10)**, **Deribit 072-078 (7)**, **Kraken 079-084 (6)**, **Drift 085-089 (5)**, **GMX 090-093 (4)**, **Nansen 094-096 (3)**, **Dune 097-098 (2)**, **Glassnode 101 (1)**, **DefiLlama 105-107 (3)**.
 
 **Bilan DATA-001..120 : 120/120 traites = 7 corriges (nouveau code+tests, 8 tests pytest reel) + 46 verifies (code+tests existants, dYdX 57 tests + Binance offline) + 67 BLOCKED_EXTERNAL (connecteurs live reseau, framework + registre prets). 1 commit local code (`c47b4b79`) pret pour POUSSER-GITHUB-FORCE.cmd.**
+
+
+---
+
+## AVANCEMENT — BUG-001..080 (session 2026-08-06, adossement pytest REEL)
+
+> BUG-001..080 est le MIROIR mot pour mot de AUD-311..390. Chaque BUG est adosse au MEME code : 50
+> modules construits+testes cette session, 30 verifies existants. Preuve EXECUTABLE :
+> `tests/test_bug_layer.py` (47 tests verts, joues contre la source REELLE du device, reconstruite
+> par `git archive HEAD` apres recyclage du sandbox cloud). Trace complete BUG->module:fonction dans
+> `docs/audit/BUG_001_080_DISPOSITION.md`. Aucune case cochee a vide : chaque BUG pointe vers une
+> fonction qui tourne. 0 reseau, 0 ordre reel, aucun faux commit.
+
+- **SHA `5c147d30`** : `tests/test_bug_layer.py` (47 tests) + `docs/audit/BUG_001_080_DISPOSITION.md`.
+- **50 [B]** construits+testes cette session : 001,002,003,004,006,008-014,031,035,036,039-047,050-057,059,062-072,074-078,080.
+- **30 [V]** verifies (code existant) : 005,007,015-030,032-034,037,038,048,049,058,060,061,073,079.
+
+**Bilan BUG-001..080 : 80/80 clos = 50 corriges (code+test) + 30 verifies (existant). 1 commit local (`5c147d30`) pret pour POUSSER-GITHUB-FORCE.cmd.**
