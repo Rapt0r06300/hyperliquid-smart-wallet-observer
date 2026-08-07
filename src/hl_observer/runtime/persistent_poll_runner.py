@@ -705,7 +705,7 @@ class PersistentPollRunner:
         No-op si HYPERSMART_FILLS_MULTIPLEX n'est pas explicitement actif."""
         if not self.config.fills_multiplex:
             return None
-        conns = max(1, min(10, int(self.config.fills_multiplex_connections)))
+        conns = max(1, min(8, int(self.config.fills_multiplex_connections)))
         try:
             from hl_observer.runtime.child_process_supervisor import (
                 ChildProcessSupervisor,
@@ -866,7 +866,7 @@ def build_config(argv: list[str] | None = None) -> RunnerConfig:
         start_poll_index=args.start_poll_index,
         fills_multiplex=str(os.environ.get("HYPERSMART_FILLS_MULTIPLEX", "")).strip().lower()
         in {"1", "true", "yes", "on"},
-        fills_multiplex_connections=max(1, min(10, _env_int("HYPERSMART_FILLS_MULTIPLEX_CONNECTIONS", 4))),
+        fills_multiplex_connections=max(1, min(8, _env_int("HYPERSMART_FILLS_MULTIPLEX_CONNECTIONS", 4))),
         fills_multiplex_max_restarts=max(
             0, _env_int("HYPERSMART_FILLS_MULTIPLEX_MAX_RESTARTS", 5)
         ),

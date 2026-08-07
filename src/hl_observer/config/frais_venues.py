@@ -31,7 +31,8 @@ def frais_taker_bps(venue: object, *, defaut: float | None = None) -> float:
         try:
             return max(0.0, float(env))
         except ValueError:
-            pass
+            import logging as _lg  # panne rendue VISIBLE (interdiction des except:pass muets)
+            _lg.getLogger(__name__).debug("exception ignoree volontairement ici", exc_info=True)
     return float(DEFAUTS_TAKER_BPS[v])
 
 

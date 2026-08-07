@@ -57,7 +57,11 @@ def test_pas_de_cycle_d_imports_dans_les_paquets_de_decision():
                 tree = ast.parse(p.read_text(encoding="utf-8", errors="ignore"))
             except SyntaxError:
                 continue
-            for n in ast.walk(tree):
+            # 06/08 — seuls les imports TOP-LEVEL forment un cycle AU CHARGEMENT. L'import
+            # paresseux (dans une fonction) est l'idiome sanctionne du depot pour casser un
+            # cycle : archive_portable<->inventaire_release ne s'importent qu'a l'appel, jamais
+            # a l'import. Compter ces imports-la faisait crier l'invariant sur son propre remede.
+            for n in tree.body:
                 if isinstance(n, ast.ImportFrom) and n.module and n.module.startswith("hl_observer."):
                     if any(("hl_observer.%s." % q) in n.module for q in PAQUETS_DECISION):
                         graphe[mod].add(n.module)

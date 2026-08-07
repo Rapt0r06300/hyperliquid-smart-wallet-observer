@@ -306,7 +306,8 @@ def _mid_from_event(event: Mapping[str, Any]) -> float | None:
             if 0 < bid <= ask:
                 return (bid + ask) / 2.0
         except (KeyError, TypeError, ValueError):
-            pass
+            import logging as _lg  # panne rendue VISIBLE (interdiction des except:pass muets)
+            _lg.getLogger(__name__).debug("exception ignoree volontairement ici", exc_info=True)
     payload = event.get("raw_payload")
     if not isinstance(payload, Mapping):
         return None

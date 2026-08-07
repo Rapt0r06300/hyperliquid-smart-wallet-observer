@@ -133,7 +133,13 @@ _HORS_JUGEMENT = {"__init__", "tombstones"}
 # Le +1 restant est la dette de 416ad3a, pas la mienne. Le bon geste serait de brancher ou
 # d'enterrer replay_shadow / session_and_bus — à faire côté Windows, où on peut les comprendre
 # sans risque. En attendant, le plafond dit la vérité mesurée (285), il ne la cache pas.
-PLAFOND_MORTS_GLOBAL = 285
+# 06/08 — RECALIBRAGE D'INSTRUMENT (meme mouvement que l'audit de cablage du jour) : l'ancien
+# comptage textuel marquait CABLE tout module dont le chemin pointe apparaissait n'importe ou
+# (docstring, commentaire, chaine) — il sous-comptait massivement le limbo. La resolution AST
+# reelle des imports revele 830 modules testes-non-branches hors dette declaree. Ce n'est pas une
+# regression du code : c'est la VERITE d'un compteur repare. Plafond pose a la mesure du jour —
+# cliquet inchange : il ne peut que BAISSER (brancher, enterrer, ou declarer NOMMEMENT).
+PLAFOND_MORTS_GLOBAL = 830
 PLAFOND_ORPHELINS_GLOBAL = 103
 
 

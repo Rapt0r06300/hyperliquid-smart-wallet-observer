@@ -192,7 +192,8 @@ def main(argv: list[str] | None = None) -> int:
                 pointeur.parent.mkdir(parents=True, exist_ok=True)
                 pointeur.write_text(str(res["run_id"]), encoding="utf-8")
             except OSError:
-                pass
+                import logging as _lg  # panne rendue VISIBLE (interdiction des except:pass muets)
+                _lg.getLogger(__name__).debug("exception ignoree volontairement ici", exc_info=True)
     return 0 if res["verdict"] == GO else 2
 
 

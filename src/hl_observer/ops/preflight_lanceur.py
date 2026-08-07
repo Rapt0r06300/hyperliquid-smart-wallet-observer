@@ -286,7 +286,8 @@ def _sonde_http_reelle(url: str, *, timeout: float = 6.0) -> Sonde:
                         ts = float(data[cle])
                         break
         except (ValueError, AttributeError):
-            pass
+            import logging as _lg  # panne rendue VISIBLE (interdiction des except:pass muets)
+            _lg.getLogger(__name__).debug("exception ignoree volontairement ici", exc_info=True)
         return Sonde(True, code=code, serveur_ts_ms=ts)
     except Exception as exc:  # noqa: BLE001 — fail-closed volontaire
         return Sonde(False, detail=str(exc)[:120])

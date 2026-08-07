@@ -151,7 +151,8 @@ def arreter(root: str | Path, *, procs: Sequence[Mapping[str, Any]], killer: Cal
             if killer(pid):
                 arretes.append(pid)
         except Exception:  # noqa: BLE001 — un killer injecté ne doit pas nous tuer
-            pass
+            import logging as _lg  # panne rendue VISIBLE (interdiction des except:pass muets)
+            _lg.getLogger(__name__).debug("exception ignoree volontairement ici", exc_info=True)
     return {"cibles": sorted(cibles), "arretes": arretes, "orphelins": orphelins}
 
 

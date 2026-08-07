@@ -1,5 +1,5 @@
 """[AUD-268..291] Registre agrege des venues : 11 adaptateurs offline, frontieres live honnetes."""
-from hl_observer.venues import registre
+from hl_observer.venues import registre_venues as registre
 
 
 def test_onze_venues_offline_ready():

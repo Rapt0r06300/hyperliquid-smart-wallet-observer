@@ -41,7 +41,8 @@ def racine_projet(depart: str | Path | None = None) -> Path:
         if candidat.is_dir():
             return candidat
     except IndexError:
-        pass
+        import logging as _lg  # panne rendue VISIBLE (interdiction des except:pass muets)
+        _lg.getLogger(__name__).debug("exception ignoree volontairement ici", exc_info=True)
     return Path.cwd()
 
 

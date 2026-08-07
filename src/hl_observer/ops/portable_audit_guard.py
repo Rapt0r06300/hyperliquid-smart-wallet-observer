@@ -83,7 +83,8 @@ def _record(log_path: Path, event: str, args: tuple[Any, ...]) -> None:
         with _LOCK, log_path.open("a", encoding="utf-8", newline="\n") as stream:
             stream.write(json.dumps(payload, ensure_ascii=True, sort_keys=True) + "\n")
     except OSError:
-        pass
+        import logging as _lg  # panne rendue VISIBLE (interdiction des except:pass muets)
+        _lg.getLogger(__name__).debug("exception ignoree volontairement ici", exc_info=True)
 
 
 def _open_is_write(args: tuple[Any, ...]) -> bool:

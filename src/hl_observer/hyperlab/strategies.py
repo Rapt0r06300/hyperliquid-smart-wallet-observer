@@ -6,7 +6,7 @@ from __future__ import annotations
 
 from typing import Mapping, Optional
 
-from .paper_engine import PaperIntent
+from .moteur_paper_unique import PaperIntent
 
 FAMILLES_ACTIVES = ("copy_vault", "lead_lag", "cross_venue")
 

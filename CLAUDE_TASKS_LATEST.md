@@ -10,4 +10,4 @@ Ne prouve PAS le runtime/live (trace a part). Regenerer : `python tools/claude_t
 | coded_untested | 83 |
 | untraced | 426 |
 
-meta : 1748 modules, 1569 tests, 5102 edges d'import.
+meta : 1748 modules, 1567 tests, 5100 edges d'import.

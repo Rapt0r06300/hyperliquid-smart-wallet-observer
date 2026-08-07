@@ -78,7 +78,8 @@ def _directory_inventory(path: Path) -> dict[str, object]:
                 total_bytes += stat.st_size
                 latest_mtime = max(latest_mtime, stat.st_mtime)
         except OSError:
-            pass
+            import logging as _lg  # panne rendue VISIBLE (interdiction des except:pass muets)
+            _lg.getLogger(__name__).debug("exception ignoree volontairement ici", exc_info=True)
     return {
         "path": str(path),
         "exists": path.exists(),

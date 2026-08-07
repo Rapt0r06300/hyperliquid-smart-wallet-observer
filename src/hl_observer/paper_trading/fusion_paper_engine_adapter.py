@@ -289,11 +289,22 @@ def run_copy_votes_through_paper_engine(
         _noter_echec("hl_observer/paper_trading/fusion_paper_engine_adapter.py:271")
 
     equity, _, drawdown = engine.mark_to_market({conflict.coin or "UNKNOWN": float(market_price)})
+    _accepted_n = sum(1 for item in decisions if item.accepted)
+    # 06/08 — REGLE DURE (test_a_refusal_is_NEVER_silent) : un refus du NOYAU (RiskEngine /
+    # PaperEngine) remontait un resume MUET — accepted_count=0 sans le moindre motif. On agrege
+    # les reason_codes des decisions rejetees ; a defaut, un motif explicite non-vide.
+    _reasons: tuple[str, ...] = ()
+    if decisions and _accepted_n == 0:
+        _agg: list[str] = []
+        for item in decisions:
+            _agg.extend(str(c) for c in (item.reason_codes or ()) if c)
+        _reasons = tuple(dict.fromkeys(_agg)) or ("NOYAU_REFUS_SANS_CODE",)
     return FusionPaperEngineSummary(
         decisions=tuple(decisions),
-        accepted_count=sum(1 for item in decisions if item.accepted),
+        accepted_count=_accepted_n,
         equity_usdt=equity,
         drawdown_usdt=drawdown,
+        refusal_reasons=_reasons,
     )
 
 

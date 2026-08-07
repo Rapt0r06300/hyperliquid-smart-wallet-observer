@@ -636,6 +636,8 @@ REM 24 coins (vol x OI x liquidations), isole sous research_lab. PERSISTANT : bo
 REM qu'en cas de crash (comme bbo-collector). Debloque la profondeur (VWAP/capacite) + les familles HL
 REM natives (OFI/microprice/absorption/cascade). Necessite le module python `websockets`. 0 cle, 0 ordre.
 start "" /b tools\boucle_collecteur.cmd lab-microstructure tools\collecter_lab_microstructure.py 30
+REM 06/08 - dydx-live etait au REGISTRE du superviseur mais JAMAIS demarre (mourrait en silence).
+start "" /b tools\boucle_collecteur.cmd dydx-live tools\collecter_dydx_live.py 300 --duree-s 290
 
 exit /b 0
 

@@ -1,13 +1,15 @@
 from __future__ import annotations
 
 import subprocess
+from pathlib import Path
+RACINE_REPO = str(Path(__file__).resolve().parents[1])
 import sys
 
 
 def run_cli(*args: str):
     return subprocess.run(
         [sys.executable, "-m", "hyper_smart_observer.app.main", *args],
-        cwd="C:\\Users\\flo\\Desktop\\Projet invest",
+        cwd=RACINE_REPO,
         text=True,
         capture_output=True,
         check=False,

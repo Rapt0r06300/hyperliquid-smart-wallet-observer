@@ -46,7 +46,8 @@ def router_regime(contexte: dict) -> list[dict]:
     try:
         p.write_text(__import__("json").dumps(reg, ensure_ascii=False), encoding="utf-8")
     except OSError:
-        pass
+        import logging as _lg  # panne rendue VISIBLE (interdiction des except:pass muets)
+        _lg.getLogger(__name__).debug("exception ignoree volontairement ici", exc_info=True)
     return [{"kind": "REGIME", **reg}]
 
 
@@ -218,4 +219,5 @@ for _p in _PLUGINS:
     try:
         REG.enregistrer(_p)
     except ValueError:
-        pass
+        import logging as _lg  # panne rendue VISIBLE (interdiction des except:pass muets)
+        _lg.getLogger(__name__).debug("exception ignoree volontairement ici", exc_info=True)

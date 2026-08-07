@@ -411,6 +411,22 @@ def test_status_exposes_engine_heartbeat_without_heavy_overview(tmp_path, monkey
     assert payload["fusion_runtime"]["real_execution"] is False
 
 
+def _seed_copy_whitelist(monkeypatch, tmp_path, wallets):
+    """06/08 — porte #185 (whitelist C12, deny-by-default) : les tests qui attendent une OUVERTURE
+    copy doivent seeder des leaders individuellement PROUVES, comme le fait tools/ecrire_copy_whitelist
+    en production. On pointe la constante du module vers un fichier temporaire (API reelle, zero mock
+    de la logique)."""
+    import json as _json
+    import time as _time
+    from hl_observer.signals import porte_copy_whitelist as _pw
+    chemin = tmp_path / "copy_whitelist.json"
+    chemin.write_text(_json.dumps({
+        "genere_ts": _time.time(),
+        "gardes": [{"adresse": str(w).lower()} for w in wallets],
+    }), encoding="utf-8")
+    monkeypatch.setattr(_pw, "CHEMIN_WHITELIST", chemin)
+
+
 def test_fusion_status_route_runs_only_from_explicit_engine_input(tmp_path, monkeypatch):
     monkeypatch.setenv("HL_DATABASE_URL", f"sqlite:///{(tmp_path / 'session.sqlite3').as_posix()}")
     monkeypatch.setenv("HL_LOGS_DIR", str(tmp_path / "logs"))
@@ -419,6 +435,7 @@ def test_fusion_status_route_runs_only_from_explicit_engine_input(tmp_path, monk
     heartbeat_path.parent.mkdir(parents=True, exist_ok=True)
     event_ms = int(time.time() * 1000)
     _seed_recorded_execution_book(monkeypatch, coin="HYPE", mid=70.05, observed_at_ms=event_ms)
+    _seed_copy_whitelist(monkeypatch, tmp_path, ["0x" + "1" * 40, "0x" + "2" * 40])
     heartbeat_path.write_text(
         json.dumps(
             {
@@ -588,6 +605,9 @@ def test_status_rejects_external_arbitrage_without_measured_execution_costs(tmp_
     monkeypatch.setenv("HL_LOGS_DIR", str(tmp_path / "logs"))
     monkeypatch.setenv("HYPERSMART_EXTERNAL_GITHUB_DIRECT_MATERIALIZATION", "1")
     monkeypatch.setenv("HYPERSMART_AB_RESEARCH_ACK", "1")
+    # 06/08 — durcissement posterieur : la materialisation directe n'est permise que dans la
+    # lane du ledger EXPERIMENTAL (3e condition, en serie avec le flag + l'ACK).
+    monkeypatch.setenv("HYPERSMART_LEDGER_SCOPE", "EXPERIMENTAL")
     settings = _settings()
     from hl_observer.storage.database import create_session_factory, create_sqlite_engine, init_db
     from hl_observer.storage.models import MarketSnapshot
@@ -659,6 +679,9 @@ def test_status_can_close_existing_paper_position_when_fusion_consensus_flips(tm
     monkeypatch.setenv("HL_LOGS_DIR", str(tmp_path / "logs"))
     monkeypatch.setenv("HYPERSMART_EXTERNAL_GITHUB_DIRECT_MATERIALIZATION", "1")
     monkeypatch.setenv("HYPERSMART_AB_RESEARCH_ACK", "1")
+    # 06/08 — durcissement posterieur : la materialisation directe n'est permise que dans la
+    # lane du ledger EXPERIMENTAL (3e condition, en serie avec le flag + l'ACK).
+    monkeypatch.setenv("HYPERSMART_LEDGER_SCOPE", "EXPERIMENTAL")
     settings = _settings()
     from hl_observer.storage.database import create_session_factory, create_sqlite_engine, init_db
     from hl_observer.storage.models import MarketSnapshot
@@ -668,6 +691,7 @@ def test_status_can_close_existing_paper_position_when_fusion_consensus_flips(tm
     factory = create_session_factory(engine)
     event_ms = int(time.time() * 1000)
     _seed_recorded_execution_book(monkeypatch, coin="HYPE", mid=72.05, observed_at_ms=event_ms)
+    _seed_copy_whitelist(monkeypatch, tmp_path, ["0x" + "1" * 40, "0x" + "2" * 40])
     with factory() as session:
         session.add(MarketSnapshot(source="allMids", exchange_ts=event_ms, raw_json={"HYPE": "72.00"}))
         session.commit()

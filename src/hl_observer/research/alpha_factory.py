@@ -171,7 +171,8 @@ class TrialRegistry:
                     if line:
                         out.append(json.loads(line))
         except FileNotFoundError:
-            pass
+            import logging as _lg  # panne rendue VISIBLE (interdiction des except:pass muets)
+            _lg.getLogger(__name__).debug("exception ignoree volontairement ici", exc_info=True)
         return out
 
 

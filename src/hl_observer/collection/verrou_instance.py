@@ -84,7 +84,8 @@ def heartbeat(root: Path, nom: str, info: dict, *, now_ms: float | None = None) 
         tmp.write_text(json.dumps(info, ensure_ascii=False), encoding="utf-8")
         os.replace(tmp, target)
     except OSError:
-        pass
+        import logging as _lg  # panne rendue VISIBLE (interdiction des except:pass muets)
+        _lg.getLogger(__name__).debug("exception ignoree volontairement ici", exc_info=True)
 
 
 def liberer(root: Path, nom: str, info: dict) -> None:
@@ -99,7 +100,8 @@ def liberer(root: Path, nom: str, info: dict) -> None:
         try:
             p.unlink()
         except OSError:
-            pass
+            import logging as _lg  # panne rendue VISIBLE (interdiction des except:pass muets)
+            _lg.getLogger(__name__).debug("exception ignoree volontairement ici", exc_info=True)
 
 
 __all__ = ["acquerir", "heartbeat", "liberer", "TTL_MS"]

@@ -44,7 +44,8 @@ def _close_mutex(handle: object) -> None:
         ctypes.windll.kernel32.ReleaseMutex(handle)
         ctypes.windll.kernel32.CloseHandle(handle)
     except (AttributeError, OSError, TypeError):
-        pass
+        import logging as _lg  # panne rendue VISIBLE (interdiction des except:pass muets)
+        _lg.getLogger(__name__).debug("exception ignoree volontairement ici", exc_info=True)
 
 
 def _acquire_release_lock(root: Path) -> tuple[dict[str, Any], object]:

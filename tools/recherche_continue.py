@@ -1360,15 +1360,25 @@ def boucle_continue(
             # tests, les probes et les validations de release. Une erreur ne
             # doit pas contourner cette borne en empruntant indéfiniment le
             # chemin de reprise 24/7.
+            # 06/08 — reconciliation de DEUX verrous : (a) resilience — une erreur UNIQUE est
+            # RETENTEE et la boucle bornee se termine en MAX_CYCLES ; (b) borne — un echec
+            # PERMANENT ne doit jamais entrer en reprise infinie NI attendre le backoff 24/7.
+            # Regle : en mode borne, UNE reprise immediate (sans consommer le backoff) ; au 2e
+            # echec CONSECUTIF on sort en MAX_CYCLES_FAILED. Le chemin 24/7 (max_cycles=None)
+            # garde sa reprise avec backoff, inchangee.
             if max_cycles is not None:
-                return {
-                    "boucle": "MAX_CYCLES_FAILED",
-                    "cycles": cycle - 1,
-                    "failed_cycle": cycle,
-                    "phase": phase,
-                    "error_type": type(exc).__name__,
-                    "error": str(exc),
-                }
+                if erreurs_consecutives >= 2:
+                    return {
+                        "boucle": "MAX_CYCLES_FAILED",
+                        "cycles": cycle - 1,
+                        "failed_cycle": cycle,
+                        "phase": phase,
+                        "error_type": type(exc).__name__,
+                        "error": str(exc),
+                    }
+                if stop_event.is_set():
+                    break
+                continue
             if stop_event.wait(reprise_dans_s):
                 break
             continue

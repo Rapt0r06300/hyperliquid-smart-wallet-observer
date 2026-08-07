@@ -1,0 +1,45 @@
+name: alpha-factory
+# FIX-55 : la Factory est OBSERVABLE au HEAD, sur Linux ET Windows, avec JUnit + artefacts + bornes.
+on:
+  push:
+    branches: [main]
+  workflow_dispatch: {}
+jobs:
+  factory-linux:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install (BLOQUANT)
+        run: |
+          pip install -e .
+          pip install -r requirements-recherche.txt pytest
+      - name: Factory tests (JUnit)
+        run: pytest tests/test_run_factory.py tests/test_factory_coverage.py -q --junitxml=reports/factory-linux.xml
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: factory-linux-junit
+          path: reports/factory-linux.xml
+  factory-windows:
+    runs-on: windows-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install (BLOQUANT)
+        run: |
+          pip install -e .
+          pip install -r requirements-recherche.txt pytest
+      - name: Factory tests (JUnit)
+        run: pytest tests/test_run_factory.py tests/test_factory_coverage.py -q --junitxml=reports/factory-windows.xml
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: factory-windows-junit
+          path: reports/factory-windows.xml

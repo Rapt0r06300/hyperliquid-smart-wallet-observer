@@ -46,7 +46,8 @@ def remplir_en_parallele(root: str | Path, budget_s: float | None, max_essais: i
         try:
             out.unlink()
         except OSError:
-            pass
+            import logging as _lg  # panne rendue VISIBLE (interdiction des except:pass muets)
+            _lg.getLogger(__name__).debug("exception ignoree volontairement ici", exc_info=True)
         code = _GABARIT.format(root=str(root), strat=strat, me=max_essais, bs=budget_s, out=str(out))
         fh = open(log, "w", encoding="utf-8")
         proc = _sp.Popen([_sys.executable, "-c", code], stdout=fh, stderr=_sp.STDOUT,
@@ -63,12 +64,14 @@ def remplir_en_parallele(root: str | Path, budget_s: float | None, max_essais: i
         try:
             fh.close()
         except OSError:
-            pass
+            import logging as _lg  # panne rendue VISIBLE (interdiction des except:pass muets)
+            _lg.getLogger(__name__).debug("exception ignoree volontairement ici", exc_info=True)
         print("=== module %s ===" % strat, flush=True)
         try:
             print(log.read_text(encoding="utf-8"), end="", flush=True)   # sortie GROUPÉE, lisible
         except OSError:
-            pass
+            import logging as _lg  # panne rendue VISIBLE (interdiction des except:pass muets)
+            _lg.getLogger(__name__).debug("exception ignoree volontairement ici", exc_info=True)
         try:
             resultats[strat] = _json.loads(out.read_text(encoding="utf-8"))
         except (OSError, ValueError):

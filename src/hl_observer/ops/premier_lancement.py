@@ -372,7 +372,8 @@ def verifier_certificats_tls() -> dict:
             if Path(certifi.where()).is_file():
                 return _res("tls_ca", OK, "CA via certifi")
         except Exception:  # noqa: BLE001
-            pass
+            import logging as _lg  # panne rendue VISIBLE (interdiction des except:pass muets)
+            _lg.getLogger(__name__).debug("exception ignoree volontairement ici", exc_info=True)
         return _res("tls_ca", AVERT, "aucune autorite de certification chargee (collecte HTTPS a verifier)")
     return _res("tls_ca", OK, "%d autorites de certification chargees" % n)
 
@@ -395,7 +396,8 @@ def regenerer_identite(root: str | Path, *, generateur: Callable[[], str] | None
                 p.unlink()
                 purges.append(rel.as_posix())
             except OSError:
-                pass
+                import logging as _lg  # panne rendue VISIBLE (interdiction des except:pass muets)
+                _lg.getLogger(__name__).debug("exception ignoree volontairement ici", exc_info=True)
     for lock in list(root.rglob("*.lock")):                # verrous perimes herites d'une copie de dossier
         if lock.name == LOCK_INSTANCE_VIVANT:              # notre verrou vivant : jamais (TTL le gere)
             continue
@@ -405,7 +407,8 @@ def regenerer_identite(root: str | Path, *, generateur: Callable[[], str] | None
             lock.unlink()
             purges.append(lock.relative_to(root).as_posix())
         except OSError:
-            pass
+            import logging as _lg  # panne rendue VISIBLE (interdiction des except:pass muets)
+            _lg.getLogger(__name__).debug("exception ignoree volontairement ici", exc_info=True)
     # item 6 : dumps de STATUT volatils machine-specifiques (chemins absolus de l'ancien PC).
     for motif in ("runtime/debug_status*.json", "runtime/debug_fusion_status*.json"):
         for p in root.glob(motif):
@@ -413,7 +416,8 @@ def regenerer_identite(root: str | Path, *, generateur: Callable[[], str] | None
                 p.unlink()
                 purges.append(p.relative_to(root).as_posix())
             except OSError:
-                pass
+                import logging as _lg  # panne rendue VISIBLE (interdiction des except:pass muets)
+                _lg.getLogger(__name__).debug("exception ignoree volontairement ici", exc_info=True)
     # item 6 : caches compiles (__pycache__) — propres a une version/chemin, jamais transportes.
     n_caches = 0
     for pc in list(root.rglob("__pycache__")):
@@ -424,7 +428,8 @@ def regenerer_identite(root: str | Path, *, generateur: Callable[[], str] | None
             _sh.rmtree(pc, ignore_errors=True)
             n_caches += 1
         except OSError:
-            pass
+            import logging as _lg  # panne rendue VISIBLE (interdiction des except:pass muets)
+            _lg.getLogger(__name__).debug("exception ignoree volontairement ici", exc_info=True)
     if n_caches:
         purges.append("__pycache__ x%d" % n_caches)
     # item 6 : tache planifiee heritee (chemin absolu de l'ancien PC) — seulement sur Windows.
@@ -436,7 +441,8 @@ def regenerer_identite(root: str | Path, *, generateur: Callable[[], str] | None
             if r.returncode == 0:
                 purges.append("schtasks:HyperSmart_VerifOOS")
         except Exception:  # noqa: BLE001 — absence de tache = rien a purger
-            pass
+            import logging as _lg  # panne rendue VISIBLE (interdiction des except:pass muets)
+            _lg.getLogger(__name__).debug("exception ignoree volontairement ici", exc_info=True)
     mid = generateur()
     mp = root / MACHINE_ID_RELPATH
     mp.parent.mkdir(parents=True, exist_ok=True)

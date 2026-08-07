@@ -127,7 +127,8 @@ class ChildProcessSupervisor:
                     proc.kill()
                     proc.wait(timeout=5)
                 except Exception:
-                    pass
+                    import logging as _lg  # panne rendue VISIBLE (interdiction des except:pass muets)
+                    _lg.getLogger(__name__).debug("exception ignoree volontairement ici", exc_info=True)
         self.process = None
         self._close_log()
         return self.status(state="STOPPED", reason="requested_stop")

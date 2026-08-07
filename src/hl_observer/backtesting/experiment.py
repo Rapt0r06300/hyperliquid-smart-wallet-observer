@@ -60,7 +60,11 @@ def run_paper_replay_experiment(
     config: BacktestExperimentConfig | None = None,
 ) -> BacktestExperimentResult:
     cfg = config or BacktestExperimentConfig()
-    engine = PaperEngine(config=cfg.paper)
+    # 06/08 — le REPLAY historique n'a pas de carnet live : la profondeur/les couts sont les
+    # parametres DECLARES de l'experience (cfg). strict_execution_truth=True refusait toute
+    # decision (NO_LIVE_EXECUTABLE_BOOK) et rendait le backtest V12 inoperant.
+    from dataclasses import replace as _dc_replace
+    engine = PaperEngine(config=_dc_replace(cfg.paper, strict_execution_truth=False))
     ticks_by_coin: dict[str, list[PriceTick]] = {}
     for tick in sorted(price_ticks, key=lambda item: item.timestamp_ms):
         if tick.mid_price > 0:

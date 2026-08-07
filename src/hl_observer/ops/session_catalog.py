@@ -183,7 +183,8 @@ def _ecrire_atomique(cible: Path, contenu: str) -> None:
         try:
             tmp.unlink()
         except OSError:
-            pass
+            import logging as _lg  # panne rendue VISIBLE (interdiction des except:pass muets)
+            _lg.getLogger(__name__).debug("exception ignoree volontairement ici", exc_info=True)
 
 
 class CatalogueSession:

@@ -53,8 +53,11 @@ def _ledger(tmp_path, closes):
 
 
 def _close(ts, pnl):
+    # 06/08 — decision Flo 23/07 (test_courbe_equity) : les CLOSE du carry RETIRE n'entrent plus
+    # dans la courbe LIVE. La fixture porte donc la strategie VIVANTE du meme ledger (arbitrage) ;
+    # tous les contrats numeriques (une seule verite, passe non reecrit) restent identiques.
     return {"kind": "CLOSE", "mode": "LIVE", "ts_ms": ts, "realized_net_pnl_usdc": pnl,
-            "coin": "HYPE", "strategie": "carry"}
+            "coin": "HYPE", "strategie": "arbitrage"}
 
 
 # ------------------------------------------------------------- défaut 1 : une seule vérité
@@ -371,8 +374,10 @@ def test_la_chaine_MID_est_cablee_feeder_entree_endpoint_et_poll():
     # v5 (21/07 soir) — le grand chiffre part du realise TOTAL, plus de la SESSION : il affichait
     # +0,36 EN VERT (session 0 + funding all-time) pendant une perte de -5,64. Numerateur et
     # denominateur venaient de deux fenetres differentes -> le nombre ne mesurait rien.
-    assert "window._carryNet=realTout+fundingRegle" in src, (
-        "le grand chiffre doit partir du realise TOTAL (== la courbe), pas de la session")
+    # 06/08 — decision Flo 23/07 : la courbe LIVE exclut le carry RETIRE ; le grand chiffre
+    # part donc du realise du LIVRE LIVE (== dernier point de la courbe), plus du TOTAL.
+    assert "window._carryNet=realLive+fundingRegle" in src, (
+        "le grand chiffre doit partir du realise du LIVRE LIVE (== la courbe), pas de la session")
     assert "d.funding_accrual_estimate" in src, "l'estimation doit etre exposee A PART"
     assert "window._carryNet=realSess+Number(d.funding_accru_usdt||0)" not in src, (
         "regression : le net stable est reparti absorber l'accrual non regle")

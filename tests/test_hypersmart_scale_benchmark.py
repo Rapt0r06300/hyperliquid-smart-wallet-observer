@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import subprocess
+from pathlib import Path
+RACINE_REPO = str(Path(__file__).resolve().parents[1])
 import sys
 
 from hyper_smart_observer.scale.scale_benchmark import run_scale_benchmark
@@ -28,7 +30,7 @@ def test_scale_benchmark_cli_is_available() -> None:
             "--events",
             "50000",
         ],
-        cwd="C:\\Users\\flo\\Desktop\\Projet invest",
+        cwd=RACINE_REPO,
         text=True,
         capture_output=True,
         check=False,

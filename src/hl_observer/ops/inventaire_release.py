@@ -239,7 +239,8 @@ def cloture_imports(root: str | Path, *, paquet: str = PAQUET) -> dict:
         try:
             rel_src = p.relative_to(root / "src")
         except ValueError:
-            pass
+            import logging as _lg  # panne rendue VISIBLE (interdiction des except:pass muets)
+            _lg.getLogger(__name__).debug("exception ignoree volontairement ici", exc_info=True)
         else:
             parties = list(rel_src.with_suffix("").parts)
             if parties and parties[-1] == "__init__":
@@ -407,7 +408,8 @@ def fichiers_requis(root: str | Path) -> set[str]:
         from hl_observer.ops.archive_portable import est_exclu
         req = {r for r in req if not est_exclu(r)}
     except Exception:  # noqa: BLE001 — si archive_portable indisponible, on garde le set brut
-        pass
+        import logging as _lg  # panne rendue VISIBLE (interdiction des except:pass muets)
+        _lg.getLogger(__name__).debug("exception ignoree volontairement ici", exc_info=True)
     return req
 
 

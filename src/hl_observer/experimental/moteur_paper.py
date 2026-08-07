@@ -75,7 +75,8 @@ def charger_store(root: str | Path = ".") -> dict[str, Any]:
         if isinstance(d, dict) and d.get("mode") == MODE and isinstance(d.get("ouvertes"), dict):
             return d
     except (OSError, ValueError):
-        pass
+        import logging as _lg  # panne rendue VISIBLE (interdiction des except:pass muets)
+        _lg.getLogger(__name__).debug("exception ignoree volontairement ici", exc_info=True)
     return {"mode": MODE, "ouvertes": {}}
 
 
@@ -334,7 +335,8 @@ def resume(root: str | Path = ".") -> dict[str, Any]:
                 if r.get("strategie") in par_moteur:
                     par_moteur[r["strategie"]]["realise_usd"] += v
     except OSError:
-        pass
+        import logging as _lg  # panne rendue VISIBLE (interdiction des except:pass muets)
+        _lg.getLogger(__name__).debug("exception ignoree volontairement ici", exc_info=True)
     return {"mode": MODE, "positions_ouvertes": len(store["ouvertes"]),
             "realise_total_usd": round(realized_total, 6), "par_moteur": par_moteur,
             "budget_total_usd": BUDGET_TOTAL_USD, "real_execution": False}

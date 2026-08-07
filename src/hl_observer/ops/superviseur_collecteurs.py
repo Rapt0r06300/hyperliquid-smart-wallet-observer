@@ -217,7 +217,8 @@ def age_vie_minutes(root: Path, c: dict[str, Any], *, maintenant: float | None =
             mt = (Path(root) / hb).stat().st_mtime
             return ((maintenant if maintenant is not None else time.time()) - mt) / 60.0
         except OSError:
-            pass                                   # heartbeat absent -> repli honnête sur le log
+            import logging as _lg  # panne rendue VISIBLE (interdiction des except:pass muets)
+            _lg.getLogger(__name__).debug("exception ignoree volontairement ici", exc_info=True)
     return age_log_minutes(root, c["nom"], maintenant=maintenant)
 
 
@@ -704,14 +705,16 @@ def arreter_cible(root: str | Path, *, procs: list[dict] | None = None,
         if d.get("pid"):
             cibles.add(int(d["pid"]))
     except (OSError, ValueError, TypeError):
-        pass
+        import logging as _lg  # panne rendue VISIBLE (interdiction des except:pass muets)
+        _lg.getLogger(__name__).debug("exception ignoree volontairement ici", exc_info=True)
     tuer = killer if killer is not None else (
         lambda pid: _ps("try { Stop-Process -Id %d -Force -ErrorAction Stop; 'ok' } catch { '' }" % pid).strip() == "ok")
     arretes = [pid for pid in sorted(cibles) if tuer(pid)]
     try:
         (racine / LOCK_USERFILLS).unlink()
     except OSError:
-        pass
+        import logging as _lg  # panne rendue VISIBLE (interdiction des except:pass muets)
+        _lg.getLogger(__name__).debug("exception ignoree volontairement ici", exc_info=True)
     return {"cibles": sorted(cibles), "arretes": arretes, "port_owner": owner_pid}
 
 

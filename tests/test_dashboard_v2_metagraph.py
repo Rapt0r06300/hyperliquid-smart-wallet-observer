@@ -62,9 +62,9 @@ def test_equity_history_sert_la_courbe_du_ledger(tmp_path, monkeypatch):
     p.parent.mkdir(parents=True, exist_ok=True)
     p.write_text("\n".join(_json.dumps(l) for l in [
         {"kind": "CLOSE", "mode": "LIVE", "ts_ms": 1000, "realized_net_pnl_usdc": -2.0,
-         "coin": "HYPE", "strategie": "carry"},
+         "coin": "HYPE", "strategie": "arbitrage"},
         {"kind": "CLOSE", "mode": "LIVE", "ts_ms": 2000, "realized_net_pnl_usdc": +0.5,
-         "coin": "ZEC", "strategie": "carry"},
+         "coin": "ZEC", "strategie": "arbitrage"},
     ]) + "\n", encoding="utf-8")
     payload = _appel(tmp_path, monkeypatch)
     assert payload["count"] == 4                  # départ + 2 événements + maintenant
@@ -97,8 +97,10 @@ def test_le_grand_chiffre_lit_le_realise_TOTAL_pas_celui_de_la_session():
     du réalisé TOTAL, celui-là même que la courbe cumule.
     """
     html = _endpoint("/v2")().body.decode("utf-8")
-    assert "window._carryNet=realTout+fundingRegle;" in html, (
-        "le grand chiffre doit partir du realise TOTAL — sinon il contredit la courbe")
+    # 06/08 — decision Flo 23/07 : la courbe cumule le LIVRE LIVE (carry retire exclu) ; le
+    # grand chiffre part du meme livre, sinon il contredit la courbe.
+    assert "window._carryNet=realLive+fundingRegle;" in html, (
+        "le grand chiffre doit partir du realise du LIVRE LIVE — sinon il contredit la courbe")
     assert "window._carryNet=realSess+" not in html, (
         "la chimere session+all-time ne doit jamais revenir")
     # la fenêtre session reste visible, mais ETIQUETEE et a cote
@@ -124,7 +126,7 @@ def test_le_dernier_point_de_l_endpoint_vaut_le_pnl_stable(tmp_path, monkeypatch
     p.parent.mkdir(parents=True, exist_ok=True)
     p.write_text(_json.dumps({"kind": "CLOSE", "mode": "LIVE", "ts_ms": 1000,
                               "realized_net_pnl_usdc": -6.0, "coin": "BTC",
-                              "strategie": "carry"}) + "\n", encoding="utf-8")
+                              "strategie": "arbitrage"}) + "\n", encoding="utf-8")
     monkeypatch.setattr("hl_observer.funding.carry_positions_store.etat_carry",
                         lambda root=None: {"net_funding_settled": 0.35})
     payload = _appel(tmp_path, monkeypatch)

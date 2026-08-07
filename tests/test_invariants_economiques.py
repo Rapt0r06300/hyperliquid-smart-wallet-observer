@@ -22,6 +22,7 @@ import json
 import pytest
 
 from hl_observer.funding.arb_dislocation_paper import (
+    ECART_MAX_ENTREE_BPS,
     COUT_AR_BPS, NOTIONAL_USD, SEUIL_OUVERTURE_BPS, tick)
 from hl_observer.funding.carry_position_lifecycle import pnl_realise
 from hl_observer.ui.dashboard_v2 import base_mtm_usd
@@ -116,8 +117,11 @@ def test_L5_jamais_d_ouverture_sous_le_seuil(tmp_path, ecart):
 # SOUS le nouveau seuil -> plus d'ouverture -> plus de CLOSE. L'invariant, lui, est intact :
 # une position ouverte qui ne converge pas perd exactement ses couts. On le teste donc
 # JUSTE AU-DESSUS du seuil, quelle que soit sa valeur future.
+# 06/08 — -120 bps depassait ECART_MAX_ENTREE_BPS (plafond de plausibilite du 22/07 :
+# les ecarts enormes sont des appariements structurels, jamais trades -> deny-by-default).
+# L'extreme negatif se teste donc JUSTE SOUS le plafond, quelle que soit sa valeur future.
 @pytest.mark.parametrize("ecart", [SEUIL_OUVERTURE_BPS + 1.0, 60.0,
-                                   -(SEUIL_OUVERTURE_BPS + 1.0), -120.0])
+                                   -(SEUIL_OUVERTURE_BPS + 1.0), -(ECART_MAX_ENTREE_BPS - 1.0)])
 def test_L6_un_aller_retour_SANS_convergence_est_toujours_perdant(tmp_path, ecart):
     _venue(tmp_path, ecart)
     tick(tmp_path, now=1010.0, session_id="S")

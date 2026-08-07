@@ -1,7 +1,10 @@
 """The master archive CMD delegates only to the fail-closed orchestrator."""
 from __future__ import annotations
 
+import os
 import subprocess
+
+import pytest
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -38,6 +41,7 @@ def test_paper_only_environment_is_explicit():
     assert 'set "REAL_MAINNET_TRADING=false"' in CMD
 
 
+@pytest.mark.skipif(os.name != "nt", reason="execute le .cmd via cmd.exe (Windows uniquement)")
 def test_unknown_argument_fails_without_success_banner():
     completed = subprocess.run(
         ["cmd.exe", "/d", "/c", str(ROOT / "CREER_ARCHIVE_PORTABLE.cmd"), "--unknown-option"],

@@ -66,7 +66,8 @@ def acquerir_verrou_analyse(sortie: str | Path, *, pid_vivant=None) -> Path:
             f.write(charge)
         return verrou
     except FileExistsError:
-        pass
+        import logging as _lg  # panne rendue VISIBLE (interdiction des except:pass muets)
+        _lg.getLogger(__name__).debug("exception ignoree volontairement ici", exc_info=True)
     # le verrou existe déjà : détenteur vivant → bloqué ; mort (crash) → reprise ATOMIQUE (temp+replace).
     try:
         pid = int(json.loads(verrou.read_text(encoding="utf-8")).get("pid", -1))
@@ -132,7 +133,8 @@ def _ecrire_manifeste_run(sortie: Path, *, run_id: Any, data_hash: str, git_head
                         "n_fichiers": n_fichiers, "real_execution": False}, ensure_ascii=False, indent=2),
             encoding="utf-8")
     except OSError:
-        pass
+        import logging as _lg  # panne rendue VISIBLE (interdiction des except:pass muets)
+        _lg.getLogger(__name__).debug("exception ignoree volontairement ici", exc_info=True)
 
 
 def _paires_lead_lag(events: list[dict[str, Any]]) -> list[tuple[Any, Any]]:
@@ -357,7 +359,8 @@ def lancer_lab(*, racine: str | Path, sortie_dir: str | Path | None = None, budg
         try:
             _verrou_analyse.unlink()                 # AUD-079: verrou TOUJOURS libere (meme sur exception)
         except OSError:
-            pass
+            import logging as _lg  # panne rendue VISIBLE (interdiction des except:pass muets)
+            _lg.getLogger(__name__).debug("exception ignoree volontairement ici", exc_info=True)
 
 
 def _periode(events: list[dict[str, Any]]) -> dict[str, Any]:

@@ -13,7 +13,7 @@ from typing import Mapping, Optional
 from . import data_plane
 from . import report as _report
 from . import validation as _val
-from .paper_engine import MoteurPaper
+from .moteur_paper_unique import MoteurPaper
 from .strategies import CopyVault, CrossVenue, LeadLag
 
 MODES = {

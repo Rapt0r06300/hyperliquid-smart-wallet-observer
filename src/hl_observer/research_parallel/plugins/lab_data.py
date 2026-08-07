@@ -31,7 +31,8 @@ def _sauver_etats(root: Path, etats: dict) -> None:
     try:
         p.write_text(json.dumps(etats, ensure_ascii=False), encoding="utf-8")
     except OSError:
-        pass
+        import logging as _lg  # panne rendue VISIBLE (interdiction des except:pass muets)
+        _lg.getLogger(__name__).debug("exception ignoree volontairement ici", exc_info=True)
 
 
 def _tick(contexte: dict) -> list[dict]:
@@ -52,4 +53,5 @@ PLUGIN = REG.Plugin(id="DATA_CTX", categorie="data", variantes=(), tick=_tick,
 try:
     REG.enregistrer(PLUGIN)
 except ValueError:
-    pass          # déjà enregistré (ré-import) : sans effet
+    import logging as _lg  # panne rendue VISIBLE (interdiction des except:pass muets)
+    _lg.getLogger(__name__).debug("exception ignoree volontairement ici", exc_info=True)

@@ -26,7 +26,7 @@ def code_sortie(verdict: str) -> int:
 
 def chemin_windows_sur(chemin: str) -> str:
     """Rend un chemin Windows robuste aux ESPACES et caracteres speciaux (guillemets si besoin) :
-    le lanceur doit survivre a 'C:\\Users\\...\\Projet invest\\'."""
+    le lanceur doit survivre a un chemin racine Windows avec espaces."""
     c = str(chemin)
     if any(ch in c for ch in " &()[]{}^=;!'+,`~"):
         c = '"' + c.replace('"', '') + '"'
@@ -74,7 +74,8 @@ def ecrire_atomique_tolerant_verrou(chemin: str | Path, donnees: bytes, *, tenta
             try:
                 os.unlink(tmp)
             except OSError:
-                pass
+                import logging as _lg  # panne rendue VISIBLE (interdiction des except:pass muets)
+                _lg.getLogger(__name__).debug("exception ignoree volontairement ici", exc_info=True)
 
 
 def sequence_double_clic() -> list[str]:

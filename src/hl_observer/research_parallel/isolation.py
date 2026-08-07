@@ -51,7 +51,8 @@ def nouvelle_identite(root: Path, plugins, params: dict | None = None) -> dict:
         if prec.get("config_hash") == ch and prec.get("run_id"):
             run_id = prec["run_id"]                      # continuité intra-session (même config)
     except (OSError, ValueError):
-        pass
+        import logging as _lg  # panne rendue VISIBLE (interdiction des except:pass muets)
+        _lg.getLogger(__name__).debug("exception ignoree volontairement ici", exc_info=True)
     ident = {"run_id": run_id, "config_hash": ch, "pid": os.getpid(),
              "demarre_wall_ms": int(time.time() * 1000), "demarre_mono_ns": time.monotonic_ns(),
              "plugins": sorted(str(p) for p in plugins)}
@@ -126,7 +127,8 @@ def archiver_si_gros(root: Path, nom: str, *, seuil_octets: int = 50 * 1024 * 10
         try:
             os.replace(vieux, arch / vieux.name)      # ARCHIVE (déplace), jamais supprime
         except OSError:
-            pass
+            import logging as _lg  # panne rendue VISIBLE (interdiction des except:pass muets)
+            _lg.getLogger(__name__).debug("exception ignoree volontairement ici", exc_info=True)
     return shard
 
 

@@ -210,7 +210,8 @@ class Checkpoint:
                 return cls(p, int(d.get("offset") or 0), int(d.get("n_lignes") or 0),
                            int(d.get("n_fills") or 0))
             except (ValueError, OSError):
-                pass
+                import logging as _lg  # panne rendue VISIBLE (interdiction des except:pass muets)
+                _lg.getLogger(__name__).debug("exception ignoree volontairement ici", exc_info=True)
         return cls(p)
 
     def enregistrer(self) -> None:

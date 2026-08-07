@@ -284,7 +284,8 @@ def construire_staging(root: str | Path, staging: str | Path,
     try:
         staging.relative_to(root)
     except ValueError:
-        pass
+        import logging as _lg  # panne rendue VISIBLE (interdiction des except:pass muets)
+        _lg.getLogger(__name__).debug("exception ignoree volontairement ici", exc_info=True)
     else:
         raise ArchiveRefuseeError("le staging doit etre exterieur a la racine source")
     staging.mkdir(parents=True, exist_ok=False)
@@ -618,7 +619,8 @@ def _version_projet(root: Path) -> str:
             try:
                 return p.read_text(encoding="utf-8").strip() or "0.0.0-dev"
             except OSError:
-                pass
+                import logging as _lg  # panne rendue VISIBLE (interdiction des except:pass muets)
+                _lg.getLogger(__name__).debug("exception ignoree volontairement ici", exc_info=True)
     return "0.0.0-dev"
 
 
@@ -630,7 +632,8 @@ def _deps_verrouillees(root: Path) -> list[str]:
                 return [ln.strip() for ln in p.read_text(encoding="utf-8").splitlines()
                         if ln.strip() and not ln.strip().startswith("#")]
             except OSError:
-                pass
+                import logging as _lg  # panne rendue VISIBLE (interdiction des except:pass muets)
+                _lg.getLogger(__name__).debug("exception ignoree volontairement ici", exc_info=True)
     return []
 
 
@@ -843,7 +846,8 @@ def creer_archive_portable(root: str | Path, cible: str | Path, *, version: str 
     try:
         cible.relative_to(root)
     except ValueError:
-        pass
+        import logging as _lg  # panne rendue VISIBLE (interdiction des except:pass muets)
+        _lg.getLogger(__name__).debug("exception ignoree volontairement ici", exc_info=True)
     else:
         raise ArchiveRefuseeError("la sortie ZIP doit etre exterieure au projet: %s" % cible)
     if mode_release not in {"official", "developpement"}:

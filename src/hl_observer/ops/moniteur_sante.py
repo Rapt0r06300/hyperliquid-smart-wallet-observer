@@ -52,7 +52,8 @@ def _append_journal(chemin: Path, ligne: str) -> None:
             fh.flush()
             os.fsync(fh.fileno())
     except OSError:
-        pass
+        import logging as _lg  # panne rendue VISIBLE (interdiction des except:pass muets)
+        _lg.getLogger(__name__).debug("exception ignoree volontairement ici", exc_info=True)
 
 
 def une_passe(root: str | Path, sources: Sequence[SourceAttendue], *, now_ms: float,

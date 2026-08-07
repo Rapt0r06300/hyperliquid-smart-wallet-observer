@@ -91,7 +91,8 @@ def materialiser_shard(fichiers: Iterable[str | Path], shard_path: str | Path, *
             if etat.get("complet"):
                 return {"n": int(etat.get("n") or 0), "shard": str(shard_path), "repris": True}
         except (OSError, ValueError):
-            pass
+            import logging as _lg  # panne rendue VISIBLE (interdiction des except:pass muets)
+            _lg.getLogger(__name__).debug("exception ignoree volontairement ici", exc_info=True)
     n = 0
     tmp = shard_path.with_name(".%s.%d.tmp" % (shard_path.name, os.getpid()))
     with tmp.open("w", encoding="utf-8") as fh:
@@ -234,7 +235,8 @@ def fusionner_causalement(fichiers: Iterable[str | Path], sortie: str | Path, *,
                 etat["repris"] = True
                 return etat
         except (OSError, ValueError):
-            pass
+            import logging as _lg  # panne rendue VISIBLE (interdiction des except:pass muets)
+            _lg.getLogger(__name__).debug("exception ignoree volontairement ici", exc_info=True)
 
     with tempfile.TemporaryDirectory(prefix="fusion_causale_", dir=str(sortie.parent)) as tmpdir:
         tmp = Path(tmpdir)

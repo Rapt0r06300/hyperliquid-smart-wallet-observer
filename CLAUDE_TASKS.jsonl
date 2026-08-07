@@ -68,7 +68,7 @@
 {"code": "AUD-068", "modules": ["src/hl_observer/hyperlab/cross_venue_exec.py"], "n_modules": 1, "status": "coded_untested", "tested": false, "wired": true}
 {"code": "AUD-069", "modules": [], "n_modules": 0, "status": "untraced", "tested": false, "wired": false}
 {"code": "AUD-070", "modules": ["src/hl_observer/hyperlab/strategies.py"], "n_modules": 1, "status": "done_wired", "tested": true, "wired": true}
-{"code": "AUD-071", "modules": ["src/hl_observer/hyperlab/master.py", "src/hl_observer/hyperlab/paper_engine.py"], "n_modules": 2, "status": "done_wired", "tested": true, "wired": true}
+{"code": "AUD-071", "modules": ["src/hl_observer/hyperlab/master.py", "src/hl_observer/hyperlab/moteur_paper_unique.py"], "n_modules": 2, "status": "done_wired", "tested": true, "wired": true}
 {"code": "AUD-072", "modules": [], "n_modules": 0, "status": "untraced", "tested": false, "wired": false}
 {"code": "AUD-073", "modules": [], "n_modules": 0, "status": "untraced", "tested": true, "wired": false}
 {"code": "AUD-074", "modules": [], "n_modules": 0, "status": "untraced", "tested": false, "wired": false}
@@ -91,7 +91,7 @@
 {"code": "AUD-091", "modules": [], "n_modules": 0, "status": "untraced", "tested": true, "wired": false}
 {"code": "AUD-092", "modules": [], "n_modules": 0, "status": "untraced", "tested": false, "wired": false}
 {"code": "AUD-093", "modules": ["src/hl_observer/ops/lab_recherche.py"], "n_modules": 1, "status": "done_wired", "tested": true, "wired": true}
-{"code": "AUD-094", "modules": ["src/hl_observer/hyperlab/paper_engine.py"], "n_modules": 1, "status": "done_wired", "tested": true, "wired": true}
+{"code": "AUD-094", "modules": ["src/hl_observer/hyperlab/moteur_paper_unique.py"], "n_modules": 1, "status": "done_wired", "tested": true, "wired": true}
 {"code": "AUD-095", "modules": ["src/hl_observer/hyperlab/session.py"], "n_modules": 1, "status": "coded_untested", "tested": false, "wired": true}
 {"code": "AUD-096", "modules": [], "n_modules": 0, "status": "untraced", "tested": false, "wired": false}
 {"code": "AUD-097", "modules": [], "n_modules": 0, "status": "untraced", "tested": false, "wired": false}
@@ -110,7 +110,7 @@
 {"code": "AUD-110", "modules": ["src/hl_observer/ops/canonical_paper_intent_chain.py"], "n_modules": 1, "status": "coded_unwired", "tested": true, "wired": false}
 {"code": "AUD-111", "modules": ["src/hl_observer/ops/canonical_paper_intent_chain.py"], "n_modules": 1, "status": "coded_unwired", "tested": true, "wired": false}
 {"code": "AUD-112", "modules": [], "n_modules": 0, "status": "untraced", "tested": false, "wired": false}
-{"code": "AUD-113", "modules": ["src/hl_observer/hyperlab/replay.py", "src/hl_observer/simulation/reconciliation_5_vues.py"], "n_modules": 2, "status": "done_wired", "tested": true, "wired": true}
+{"code": "AUD-113", "modules": ["src/hl_observer/hyperlab/replay_parite.py", "src/hl_observer/simulation/reconciliation_5_vues.py"], "n_modules": 2, "status": "done_wired", "tested": true, "wired": true}
 {"code": "AUD-114", "modules": ["src/hl_observer/signals/all_signals_zero_alert.py"], "n_modules": 1, "status": "coded_unwired", "tested": true, "wired": false}
 {"code": "AUD-115", "modules": [], "n_modules": 0, "status": "untraced", "tested": false, "wired": false}
 {"code": "AUD-116", "modules": ["src/hl_observer/signals/address_role_diagnostic.py"], "n_modules": 1, "status": "coded_unwired", "tested": true, "wired": false}
@@ -265,7 +265,7 @@
 {"code": "AUD-265", "modules": [], "n_modules": 0, "status": "untraced", "tested": false, "wired": false}
 {"code": "AUD-266", "modules": [], "n_modules": 0, "status": "untraced", "tested": false, "wired": false}
 {"code": "AUD-267", "modules": [], "n_modules": 0, "status": "untraced", "tested": false, "wired": false}
-{"code": "AUD-268", "modules": ["src/hl_observer/venues/bybit.py", "src/hl_observer/venues/registre.py"], "n_modules": 2, "status": "done_wired", "tested": true, "wired": true}
+{"code": "AUD-268", "modules": ["src/hl_observer/venues/bybit.py", "src/hl_observer/venues/registre_venues.py"], "n_modules": 2, "status": "done_wired", "tested": true, "wired": true}
 {"code": "AUD-269", "modules": ["src/hl_observer/venues/okx.py"], "n_modules": 1, "status": "coded_untested", "tested": false, "wired": true}
 {"code": "AUD-270", "modules": ["src/hl_observer/venues/coinbase.py"], "n_modules": 1, "status": "coded_untested", "tested": false, "wired": true}
 {"code": "AUD-271", "modules": ["src/hl_observer/venues/deribit.py"], "n_modules": 1, "status": "coded_untested", "tested": false, "wired": true}
@@ -273,7 +273,7 @@
 {"code": "AUD-273", "modules": [], "n_modules": 0, "status": "untraced", "tested": false, "wired": false}
 {"code": "AUD-274", "modules": [], "n_modules": 0, "status": "untraced", "tested": false, "wired": false}
 {"code": "AUD-275", "modules": [], "n_modules": 0, "status": "untraced", "tested": false, "wired": false}
-{"code": "AUD-276", "modules": ["src/hl_observer/hyperlab/live_ready.py", "src/hl_observer/research/venue_readiness.py", "src/hl_observer/venues/registre.py"], "n_modules": 3, "status": "done_wired", "tested": true, "wired": true}
+{"code": "AUD-276", "modules": ["src/hl_observer/hyperlab/live_ready.py", "src/hl_observer/research/venue_readiness.py", "src/hl_observer/venues/registre_venues.py"], "n_modules": 3, "status": "done_wired", "tested": true, "wired": true}
 {"code": "AUD-277", "modules": ["src/hl_observer/research/data_mesh.py"], "n_modules": 1, "status": "coded_unwired", "tested": true, "wired": false}
 {"code": "AUD-278", "modules": ["src/hl_observer/hyperlab/data_mesh_catalog.py"], "n_modules": 1, "status": "coded_untested", "tested": false, "wired": true}
 {"code": "AUD-279", "modules": ["src/hl_observer/research/symbol_master.py"], "n_modules": 1, "status": "coded_unwired", "tested": true, "wired": false}
@@ -365,7 +365,7 @@
 {"code": "AUD-365", "modules": [], "n_modules": 0, "status": "untraced", "tested": false, "wired": false}
 {"code": "AUD-366", "modules": [], "n_modules": 0, "status": "untraced", "tested": false, "wired": false}
 {"code": "AUD-367", "modules": [], "n_modules": 0, "status": "untraced", "tested": false, "wired": false}
-{"code": "AUD-368", "modules": ["src/hl_observer/hyperlab/replay.py"], "n_modules": 1, "status": "coded_untested", "tested": false, "wired": true}
+{"code": "AUD-368", "modules": ["src/hl_observer/hyperlab/replay_parite.py"], "n_modules": 1, "status": "coded_untested", "tested": false, "wired": true}
 {"code": "AUD-369", "modules": [], "n_modules": 0, "status": "untraced", "tested": false, "wired": false}
 {"code": "AUD-370", "modules": [], "n_modules": 0, "status": "untraced", "tested": false, "wired": false}
 {"code": "AUD-371", "modules": ["src/hl_observer/venues/bybit.py", "src/hl_observer/venues/drift.py"], "n_modules": 2, "status": "coded_untested", "tested": false, "wired": true}
@@ -435,7 +435,7 @@
 {"code": "DATA-045", "modules": [], "n_modules": 0, "status": "untraced", "tested": false, "wired": false}
 {"code": "DATA-046", "modules": ["src/hl_observer/venues/bybit.py"], "n_modules": 1, "status": "coded_untested", "tested": false, "wired": true}
 {"code": "DATA-047", "modules": ["src/hl_observer/venues/_canon.py", "src/hl_observer/venues/bybit.py"], "n_modules": 2, "status": "done_wired", "tested": true, "wired": true}
-{"code": "DATA-048", "modules": ["src/hl_observer/venues/bybit.py", "src/hl_observer/venues/registre.py"], "n_modules": 2, "status": "coded_untested", "tested": false, "wired": true}
+{"code": "DATA-048", "modules": ["src/hl_observer/venues/bybit.py", "src/hl_observer/venues/registre_venues.py"], "n_modules": 2, "status": "coded_untested", "tested": false, "wired": true}
 {"code": "DATA-049", "modules": ["src/hl_observer/venues/okx.py"], "n_modules": 1, "status": "done_wired", "tested": true, "wired": true}
 {"code": "DATA-050", "modules": ["src/hl_observer/venues/okx.py"], "n_modules": 1, "status": "coded_untested", "tested": false, "wired": true}
 {"code": "DATA-051", "modules": [], "n_modules": 0, "status": "untraced", "tested": false, "wired": false}

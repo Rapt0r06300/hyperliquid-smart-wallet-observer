@@ -206,6 +206,11 @@ def test_cycle_stops_before_post_processing_after_ctrl_c(tmp_path, monkeypatch):
 
 
 def test_continuous_loop_recovers_after_a_cycle_error(tmp_path, monkeypatch):
+    # 06/08 — meme convention que test_labo_continu_absolute : l'etat module (_ARRET/_URGENCE)
+    # fuit entre fichiers de tests ; sans ce clear, la boucle sort en ARRET_DEMANDE herite.
+    RC._ARRET.clear()
+    if hasattr(RC, "_URGENCE"):
+        RC._URGENCE.clear()
     run_dir = tmp_path / "run"
     run_dir.mkdir()
     ident = {

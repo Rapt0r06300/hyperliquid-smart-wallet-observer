@@ -18,6 +18,7 @@ sys.path.insert(0, str(ROOT / "src"))
 from hl_observer.ops import validation_portable as VP  # noqa: E402
 
 
+@pytest.mark.skipif(os.name != "nt", reason="valide l'archive portable via l'environnement Windows (SystemRoot/WINDIR)")
 def test_pytest_basetemp_is_isolated_from_runtime_cleanup(tmp_path):
     root = tmp_path / "release"
     guard = root / "tools" / "python" / "Lib" / "site-packages"
@@ -176,6 +177,7 @@ def _portable_fixture(path: Path) -> dict:
     return manifest
 
 
+@pytest.mark.skipif(os.name != "nt", reason="valide l'archive portable via l'environnement Windows (SystemRoot/WINDIR)")
 def test_validation_evidence_is_bound_and_not_declarative(tmp_path, monkeypatch):
     archive = tmp_path / "release.zip"
     manifest = _portable_fixture(archive)

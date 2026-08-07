@@ -147,8 +147,10 @@ def _tests_verts(root: Path, *, rapide: bool = True) -> dict:
                 "tests/test_lab_microstructure_lot5.py"]
     env = {**os.environ, "PYTHONPATH": str(Path(root) / "src")}
     try:
-        r = subprocess.run([sys.executable, "-m", "pytest", "-q", *fichiers],
-                           cwd=str(root), env=env, capture_output=True, text=True, timeout=300)
+        # 06/08 — isolation du groupe (invariant ctrl-c) : un Ctrl-C de pytest ne tue plus l'outil.
+        from sous_processus_isole import run_isole
+        r = run_isole([sys.executable, "-m", "pytest", "-q", *fichiers],
+                      cwd=str(root), env=env, timeout=300)
         ok = r.returncode == 0
         return {"verts": ok, "resume": (r.stdout.strip().splitlines() or ["?"])[-1][:120]}
     except Exception as e:  # noqa: BLE001

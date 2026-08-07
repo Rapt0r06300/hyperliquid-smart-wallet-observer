@@ -141,5 +141,11 @@ def test_la_racine_contient_les_deux_lanceurs_officiels():
         "RECETTE-LANCEUR.cmd",
         "CREER_ARCHIVE_PORTABLE.cmd",   # item 20 : outil de maintenance (archive portable), hors hot path
         "COMMITTER_B1_B2.cmd",
+        # 06/08 — outils officiels ajoutés (décision assumée) : la suite historique a son
+        # lanceur dédié (exigé par test_cmd_historical_analysis_suite), le diagnostic du
+        # lanceur est un outil de support, et HyperLab est le smoke offline double-clic.
+        "ANALYSE_HISTORIQUE_COMPLETE.cmd",
+        "DIAGNOSTIC_LANCEUR.cmd",
+        "LANCER_HYPERLAB.cmd",
     }
     assert cmd_racine <= officiels | outils_conserves

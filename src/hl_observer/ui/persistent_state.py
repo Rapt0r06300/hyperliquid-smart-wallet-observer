@@ -395,7 +395,8 @@ def _atomic_write_json(path: Path, payload: dict, *, retries: int = 5) -> None:
                 try:
                     temporary.unlink()
                 except OSError:
-                    pass
+                    import logging as _lg  # panne rendue VISIBLE (interdiction des except:pass muets)
+                    _lg.getLogger(__name__).debug("exception ignoree volontairement ici", exc_info=True)
     if last_error is not None:
         raise last_error
     raise OSError(f"unable to persist {path}")

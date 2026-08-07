@@ -1,5 +1,5 @@
 """[Bloc 39-40/46/38-45] Moteur paper unique + enveloppe 1000 USD + les 3 familles -> PaperIntent."""
-from hl_observer.hyperlab.paper_engine import MoteurPaper, PaperIntent
+from hl_observer.hyperlab.moteur_paper_unique import MoteurPaper, PaperIntent
 from hl_observer.hyperlab.strategies import CopyVault, CrossVenue, LeadLag
 
 

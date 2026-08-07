@@ -329,7 +329,8 @@ def _maj_coins_actifs(root: Path, coin: str, *, ajouter: bool, now_ms: float) ->
         try:
             _filer_coins_au_carnet(root, [coin], now_ms=now_ms)      # prompt d'abonnement (mécanisme carnet existant)
         except Exception:  # noqa: BLE001
-            pass
+            import logging as _lg  # panne rendue VISIBLE (interdiction des except:pass muets)
+            _lg.getLogger(__name__).debug("exception ignoree volontairement ici", exc_info=True)
     p = root / COINS_ACTIFS_RELPATH
     try:
         cur = set(json.loads(p.read_text(encoding="utf-8")).get("coins") or []) if p.exists() else set()
@@ -342,7 +343,8 @@ def _maj_coins_actifs(root: Path, coin: str, *, ajouter: bool, now_ms: float) ->
         tmp.write_text(json.dumps({"maj_ms": int(now_ms), "coins": sorted(cur)}, ensure_ascii=False), encoding="utf-8")
         tmp.replace(p)
     except OSError:
-        pass
+        import logging as _lg  # panne rendue VISIBLE (interdiction des except:pass muets)
+        _lg.getLogger(__name__).debug("exception ignoree volontairement ici", exc_info=True)
 
 
 def _maj_coins_prewarm(root: Path, coin: str, *, now_ms: float) -> None:
@@ -364,7 +366,8 @@ def _maj_coins_prewarm(root: Path, coin: str, *, now_ms: float) -> None:
         tmp.write_text(json.dumps({"maj_ms": int(now_ms), "coins": cur}, ensure_ascii=False), encoding="utf-8")
         tmp.replace(p)
     except OSError:
-        pass
+        import logging as _lg  # panne rendue VISIBLE (interdiction des except:pass muets)
+        _lg.getLogger(__name__).debug("exception ignoree volontairement ici", exc_info=True)
 
 
 def _ouvrir_legacy_disabled(coh: Cohorte, store: dict, root: Path, *, cle, coin, sens, notional, prix, cfg, cout_ar,

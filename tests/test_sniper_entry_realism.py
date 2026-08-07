@@ -97,6 +97,12 @@ def test_the_execution_cost_is_never_negative():
     « rebate maker » — un coût négatif fabriquait de l'edge à partir de rien."""
     for side in ("BUY", "SELL"):
         for maker in (False, True):
+            # 06/08 — le modele maker exige desormais une PREUVE de file (queue evidence) : sans
+            # elle il repond honnetement NO_FILL/UNMEASURABLE au lieu d'inventer un fill. On
+            # fournit donc l'evidence mesuree ; la regle testee (jamais de cout negatif, meme
+            # avec rebate maker) reste identique.
+            kw = dict(queue_ahead_usdc=0.0, queue_depletion_usdc=500.0,
+                      adverse_selection_bps=1.0) if maker else {}
             r = simulate_execution(side=side, notional_usdc=500.0, mid_price=100.0,
-                                   top_depth_usdc=1_000_000.0, is_maker=maker)
+                                   top_depth_usdc=1_000_000.0, is_maker=maker, **kw)
             assert r.net_cost_bps > 0.0, f"coût négatif ({side}, maker={maker}) : edge fabriqué"

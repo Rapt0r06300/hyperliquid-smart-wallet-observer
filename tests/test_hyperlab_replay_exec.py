@@ -1,6 +1,6 @@
 """[Bloc 36/53/54/41/42] Parite live/replay, coherence fast/exact, reconciliation 5 vues, cross-venue exec."""
 from hl_observer.hyperlab import cross_venue_exec as cx
-from hl_observer.hyperlab import replay as rp
+from hl_observer.hyperlab import replay_parite as rp
 
 
 def _lignes():

@@ -352,13 +352,24 @@ def _pid_vivant_reel(pid: int) -> bool:
     try:
         import psutil
         return psutil.pid_exists(int(pid))
-    except Exception:  # noqa: BLE001 — psutil absent -> repli os.kill
+    except Exception:  # noqa: BLE001 — psutil absent -> repli SANS os.kill (invariant ctrl-c)
         import os
+        import sys
         try:
-            os.kill(int(pid), 0)
-            return True
-        except (OSError, ValueError):
+            pid_i = int(pid)
+        except (TypeError, ValueError):
             return False
+        if sys.platform.startswith("win"):
+            try:
+                import ctypes
+                h = ctypes.windll.kernel32.OpenProcess(0x1000, False, pid_i)  # PROCESS_QUERY_LIMITED_INFORMATION
+                if not h:
+                    return False
+                ctypes.windll.kernel32.CloseHandle(h)
+                return True
+            except Exception:  # noqa: BLE001 — API indisponible => inconnu = pas vivant prouve
+                return False
+        return os.path.isdir("/proc/%d" % pid_i)
 
 
 def lire_heartbeats_reels(root: str | Path, sources: Sequence[SourceAttendue]) -> dict[str, dict]:

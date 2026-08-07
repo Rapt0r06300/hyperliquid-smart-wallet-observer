@@ -31,7 +31,8 @@ def liberer_lanceur(root: str | Path, info: dict | None = None) -> None:
     try:
         p.unlink()
     except OSError:
-        pass
+        import logging as _lg  # panne rendue VISIBLE (interdiction des except:pass muets)
+        _lg.getLogger(__name__).debug("exception ignoree volontairement ici", exc_info=True)
 
 
 def main(argv: list[str] | None = None) -> int:

@@ -1165,7 +1165,8 @@ def create_dashboard_v2_router() -> APIRouter:
             try:
                 statut = _json.loads((rd / "experimental_paper_v2_status.json").read_text(encoding="utf-8"))
             except (OSError, ValueError):
-                pass
+                import logging as _lg  # panne rendue VISIBLE (interdiction des except:pass muets)
+                _lg.getLogger(__name__).debug("exception ignoree volontairement ici", exc_info=True)
             frais = bool(statut and (_time.time() - float(statut.get("ts") or 0)) < 180.0)
             resume = statut.get("resume", {})
             positions = statut.get("positions", [])

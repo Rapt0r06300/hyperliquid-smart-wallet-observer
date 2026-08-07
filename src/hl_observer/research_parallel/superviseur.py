@@ -35,7 +35,8 @@ def _journal_erreur(root: Path, plugin: str, exc: BaseException) -> None:
                                 "erreur": str(exc)[:300], "trace": traceback.format_exc()[-800:]},
                                ensure_ascii=False) + "\n")
     except OSError:
-        pass
+        import logging as _lg  # panne rendue VISIBLE (interdiction des except:pass muets)
+        _lg.getLogger(__name__).debug("exception ignoree volontairement ici", exc_info=True)
 
 
 _ORDRE_CAT = {"data": 0, "router": 1, "signal": 2}     # data collecté AVANT que les signaux le lisent

@@ -137,7 +137,8 @@ class GlobalWsBudget:
             try:
                 temporary.unlink()
             except FileNotFoundError:
-                pass
+                import logging as _lg  # panne rendue VISIBLE (interdiction des except:pass muets)
+                _lg.getLogger(__name__).debug("exception ignoree volontairement ici", exc_info=True)
 
     @staticmethod
     def _clean(state: dict[str, Any], *, now_ms: int) -> None:

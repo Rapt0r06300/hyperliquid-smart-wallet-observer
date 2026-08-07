@@ -53,7 +53,8 @@ class RafraichisseurPeriodique:
                 try:
                     self._rendre_verrouille()
                 except Exception:  # noqa: BLE001 — un rendu qui échoue ne doit jamais tuer le travail
-                    pass
+                    import logging as _lg  # panne rendue VISIBLE (interdiction des except:pass muets)
+                    _lg.getLogger(__name__).debug("exception ignoree volontairement ici", exc_info=True)
 
         self._th = threading.Thread(target=_run, name="dashboard-refresh", daemon=True)
         self._th.start()

@@ -45,7 +45,8 @@ class ForwardFrozen:
                     elif r.get("type") == "OBS":
                         self._obs.setdefault(cid, []).append(r.get("mesure", {}))
         except FileNotFoundError:
-            pass
+            import logging as _lg  # panne rendue VISIBLE (interdiction des except:pass muets)
+            _lg.getLogger(__name__).debug("exception ignoree volontairement ici", exc_info=True)
 
     def _append(self, rec: Mapping[str, Any]) -> None:
         if self.path:

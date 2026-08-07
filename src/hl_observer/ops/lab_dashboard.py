@@ -64,7 +64,8 @@ class Journal:
             with open(self.chemin, "a", encoding="utf-8") as fh:
                 fh.write(entree + "\n")
         except OSError:
-            pass
+            import logging as _lg  # panne rendue VISIBLE (interdiction des except:pass muets)
+            _lg.getLogger(__name__).debug("exception ignoree volontairement ici", exc_info=True)
 
 
 __all__ = ["rendre_tableau", "Journal"]

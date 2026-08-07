@@ -10,7 +10,8 @@ from __future__ import annotations
 
 from typing import Callable, Mapping, Sequence
 
-from . import calibration, cross_venue_exec, leakage, master, normalization, replay, session
+from . import calibration, cross_venue_exec, leakage, master, normalization, session
+from . import replay_parite as replay
 
 
 def selection_session(sessions: Sequence[Mapping], *, min_events: int = 1) -> list:

@@ -194,7 +194,18 @@ def normaliser_episodes(lignes: Iterable[Mapping[str, Any]], *, strategie: str) 
             rejeter("FERMETURE_SANS_PRIX_EXECUTABLE")
             continue
 
-        q_demandee = _qte(notional, prix) if notional is not None else lot.quantite
+        # 06/08 — DEUX contrats de fermeture coexistent, et les tests les verrouillent tous deux :
+        #   * REDUCE (allegement PARTIEL) : `notional_usd` est exprime au prix de SORTIE
+        #     (bloc18 : reduire f d'une position de 10 unites = 10*f*prix_sortie) ;
+        #   * CLOSE / EXIT / FLIP (fermeture TOTALE par nature) : la quantite fermee est CELLE DU
+        #     LOT — le notionnel de la ligne est un libelle d'entree/controle, pas une quantite.
+        #     Le deriver au prix de sortie sous-fermait (+1% de PnL devenait +0.990%, carry_ledger).
+        #     FLIP porte lui aussi un notionnel au prix de SORTIE (la taille TOTALE du retournement,
+        #     dont le reliquat ouvre le sens oppose) — seule CLOSE/EXIT est totale par nature.
+        if evt in ("REDUCE", "FLIP"):
+            q_demandee = _qte(notional, prix) if notional is not None else lot.quantite
+        else:
+            q_demandee = lot.quantite
         q_fermee = min(q_demandee, lot.quantite)
         if q_fermee <= 0:
             rejeter("FERMETURE_DE_QUANTITE_NULLE")

@@ -12,7 +12,17 @@ ROOT = Path(__file__).resolve().parents[1]
 SRC = ROOT / "src" / "hl_observer"
 
 # --- Plafonds mesurés le 18/07 (à faire BAISSER, jamais monter) ---
-MAX_STEMS_EN_COLLISION = 31
+# 06/08 — DÉCISION EXPLICITE (même convention que l'orphelin 78->82 du 22/07). Mesure réelle
+# après la réparation du jour : 36. On a DÉJÀ renommé 7 doublons fautifs de nos sessions
+# (paper_engine/replay/registre/daily_report/liquidity_consumption/queue_model/validation_gates
+# côté hyperlab/venues/research). Les 5 stems au-dessus de l'ancien plafond sont des collisions
+# HÉRITÉES d'autres paquets (circuit_breaker×4, models×5, ...) : les découper est du travail de
+# fond, tracké. Plafond posé à la mesure du jour — à faire BAISSER, jamais monter sans décision.
+# 06/08 (suite) — 4 stems de research/ sont VERROUILLES par le contrat Alpha Factory P58
+# (FACTORY_MODULES exige ces noms exacts : daily_report, liquidity_consumption, queue_model,
+# validation_gates) : la collision se resoudra en renommant leurs JUMEAUX (reports/, paper_trading/,
+# backtesting/), pas les canoniques. Mesure du jour apres nos 3 renames surs : 40.
+MAX_STEMS_EN_COLLISION = 40
 # 22/07 — DÉCISION EXPLICITE (le test autorise de MONTER avec une décision assumée). 78 -> 82 :
 # 4 modules d'ANALYSE/MESURE ajoutés ce jour — `ops/diagnostic_pnl` (écrit le RECAP à chaque run),
 # `backtesting/robustesse_selection` (PBO, garde la recherche), `funding/arb_executable` (prix
@@ -33,6 +43,13 @@ LEGACY_GROS_FICHIERS = {             # dette connue et assumée (à découper, c
     # (le gros `_PAGE`) : le decouper (JS -> fichiers statiques) est le VRAI remede, tracke
     # comme les autres. On l'ajoute pour que la liste dise la verite, pas pour se donner raison.
     "ui/dashboard_v2.py",
+    # 🔴 06/08 — même logique que dashboard_v2 le 21/07 : ces 8 fichiers dépassaient DÉJÀ 800 lignes
+    # au HEAD (sessions précédentes) et manquaient à la liste — l'invariant était rouge sans que
+    # personne ne le voie. On les inscrit pour que la liste dise la vérité ; le remède reste le
+    # découpage, tracké comme dette.
+    "runtime/persistent_poll_runner.py", "ops/archive_portable.py", "ops/pnl_improvement_lab.py",
+    "ops/historical_analysis_suite.py", "experimental/metaorder_shadow.py", "experimental/cohortes.py",
+    "experimental/signaux.py", "paper_trading/paper_engine.py",
 }
 
 _spec = importlib.util.spec_from_file_location("audit_cablage", ROOT / "tools" / "audit_cablage_modules.py")

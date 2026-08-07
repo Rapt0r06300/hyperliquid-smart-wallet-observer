@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import subprocess
+from pathlib import Path
+RACINE_REPO = str(Path(__file__).resolve().parents[1])
 import sys
 
 from hyper_smart_observer.local_index.index_benchmark import run_local_scan_benchmark
@@ -19,7 +21,7 @@ def test_local_scan_benchmark_contract_has_no_network() -> None:
 def test_local_scan_cli_command() -> None:
     completed = subprocess.run(
         [sys.executable, "-m", "hyper_smart_observer.app.main", "benchmark-local-scan", "--wallets", "2000"],
-        cwd="C:\\Users\\flo\\Desktop\\Projet invest",
+        cwd=RACINE_REPO,
         text=True,
         capture_output=True,
         check=False,

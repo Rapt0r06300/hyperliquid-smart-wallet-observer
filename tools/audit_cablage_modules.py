@@ -40,19 +40,77 @@ def _lire(p: Path) -> str:
         return ""
 
 
+def _imports_resolus(path: Path, text: str, dotted_self: str | None) -> set[str]:
+    """06/08 — resolution REELLE des imports (AST) : absolus, `from X import y` ET relatifs.
+    L'ancienne detection par sous-chaine `dotted in txt` ne voyait ni `from hl_observer.x import y`
+    a moitie, ni AUCUN import relatif -> des modules reellement cables etaient comptes ORPHELINS."""
+    import ast as _ast
+    out: set[str] = set()
+    try:
+        tree = _ast.parse(text)
+    except SyntaxError:
+        return out
+    pkg = dotted_self.rsplit(".", 1)[0] if (dotted_self and "." in dotted_self) else (dotted_self or "")
+    for node in _ast.walk(tree):
+        if isinstance(node, _ast.Import):
+            for a in node.names:
+                if a.name.startswith("hl_observer"):
+                    out.add(a.name)
+        elif isinstance(node, _ast.ImportFrom):
+            if node.level and node.level > 0 and pkg:
+                base = pkg.split(".")
+                up = node.level - 1
+                base = base[: len(base) - up] if up else base
+                mod = ".".join(base) + ("." + node.module if node.module else "")
+                out.add(mod)
+                for a in node.names:
+                    out.add(mod + "." + a.name)
+            elif node.module and node.module.startswith("hl_observer"):
+                out.add(node.module)
+                for a in node.names:
+                    out.add(node.module + "." + a.name)
+    return out
+
+
 def classer() -> dict:
     modules = [p for p in SRC.rglob("*.py") if "__pycache__" not in str(p) and p.name != "__init__.py"]
-    prod = {p: _lire(p) for p in SRC.rglob("*.py") if "__pycache__" not in str(p)}
-    prod.update({p: _lire(p) for p in TOOLS.rglob("*.py") if "__pycache__" not in str(p)})
-    prod.update({p: _lire(p) for p in ROOT.glob("*.py")})
-    test_blob = "\n".join(_lire(t) for t in TESTS.rglob("test_*.py"))
+
+    def _dotted(p: Path) -> str | None:
+        try:
+            return ".".join(p.relative_to(ROOT / "src").with_suffix("").parts)
+        except ValueError:
+            return None
+
+    prod_files = [p for p in SRC.rglob("*.py") if "__pycache__" not in str(p)]
+    prod_files += [p for p in TOOLS.rglob("*.py") if "__pycache__" not in str(p)]
+    prod_files += list(ROOT.glob("*.py"))
+    imports_prod: dict[Path, set[str]] = {
+        p: _imports_resolus(p, _lire(p), _dotted(p)) for p in prod_files}
+    # 06/08 — les lanceurs .cmd (racine + tools) sont des PORTES DE PRODUCTION reelles :
+    # ils invoquent `python -m hl_observer.x.y`. Les ignorer classait ORPHELIN des entrypoints
+    # reellement demarres (run_collect_all, __main__, ...).
+    import re as _re
+    cibles_cmd: set[str] = set()
+    for c in list(ROOT.glob("*.cmd")) + list(TOOLS.glob("*.cmd")) + list(TOOLS.glob("*.ps1")):
+        cibles_cmd |= set(_re.findall(r"hl_observer(?:\.[A-Za-z_][A-Za-z0-9_]*)+", _lire(c)))
+    imports_prod[ROOT / "__lanceurs_cmd__"] = cibles_cmd
+
+    imports_tests: set[str] = set()
+    for t_ in TESTS.rglob("test_*.py"):
+        imports_tests |= _imports_resolus(t_, _lire(t_), None)
+
+    def _cite(cibles: set[str], dotted: str) -> bool:
+        if dotted in cibles:
+            return True
+        pref = dotted + "."
+        return any(c.startswith(pref) for c in cibles)
 
     cat: dict[str, list[str]] = {"CABLE": [], "TESTE_SEULEMENT": [], "ORPHELIN": []}
     detail: dict[str, str] = {}
     for m in modules:
-        dotted = ".".join(m.relative_to(ROOT / "src").with_suffix("").parts)
-        en_prod = any(dotted in txt for p, txt in prod.items() if p != m)
-        en_test = dotted in test_blob
+        dotted = _dotted(m)
+        en_prod = any(_cite(cibles, dotted) for p, cibles in imports_prod.items() if p != m)
+        en_test = _cite(imports_tests, dotted)
         nom = str(m.relative_to(SRC))
         k = "CABLE" if en_prod else ("TESTE_SEULEMENT" if en_test else "ORPHELIN")
         cat[k].append(nom)

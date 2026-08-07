@@ -299,7 +299,8 @@ class CollectionRepository:
                 capturer_si_active(source=source, endpoint=endpoint, request_type=request_type,
                                    request=request_payload, response=response_payload)
             except Exception:  # noqa: BLE001 — capture best-effort, jamais bloquante
-                pass
+                import logging as _lg  # panne rendue VISIBLE (interdiction des except:pass muets)
+                _lg.getLogger(__name__).debug("exception ignoree volontairement ici", exc_info=True)
             return None
         fetched_at_ms = now_ms()
         response_hash = stable_payload_hash(response_payload)

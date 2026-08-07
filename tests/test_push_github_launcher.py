@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+import os
 import shutil
+
+import pytest
 import subprocess
 from pathlib import Path
 
@@ -46,6 +49,7 @@ def test_push_launchers_share_one_safe_implementation() -> None:
         assert "FETCH_HEAD" not in alias_text
 
 
+@pytest.mark.skipif(os.name != "nt", reason="le lanceur GitHub s'execute via Windows PowerShell")
 def test_safe_push_reconciles_remote_and_skips_stale_bundle(tmp_path: Path) -> None:
     if shutil.which("powershell.exe") is None:
         raise AssertionError("Windows PowerShell est requis par le lanceur GitHub")

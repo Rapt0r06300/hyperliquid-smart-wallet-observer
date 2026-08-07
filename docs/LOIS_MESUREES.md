@@ -4,7 +4,14 @@
 > Une loi n'est pas un interdit de penser : c'est un **chiffre à battre**, avec la
 > **donnée** qui justifierait de rouvrir le dossier. Un argument neuf ne suffit pas.
 
-## 🔴 Réfuté par la mesure (13)
+## 🔴 Réfuté par la mesure (14)
+
+### Lead-lag cross-venue Binance→HL en TAKER scalp : aucun edge (le choc ne précède pas HL) — `cross_venue_leadlag_taker_no_edge`
+
+- **le chiffre** : sur données RÉELLES live (bbo_tape : BIN bookTicker + aggTrades + HL BBO, horloge locale recu_ns) : gross markout ~0,2 bps/épisode (AGG_IMBALANCE/TAKER_BURST) à ~1,5 (PRICE_SHOCK) vs coût A/R HL ~10-14 bps (spread plein ask-entrée/bid-sortie + 9 bps taker) → net ~−10 à −11 bps/épisode sur les 3 familles ET les 5 horizons (250 ms-5 s) ; placebo directionnel ≈ net ⇒ aucune directionnalité (coût pur). Ratio signal:coût ≈ 1:50.
+- **mesuré le** : 2026-07-25
+- **pour rouvrir** : entrée MAKER (post-only, éviter le spread) — MAIS MM HL mesuré 0/29 la rend improbable ; OU un choc bien plus rare/extrême dont le markout dépasse le coût A/R HL.
+- **où vérifier** : `tools/rapid_alpha_run.py · src/hl_observer/experimental/cross_venue_events.py`
 
 ### Un gros écart entre venues est une grosse opportunité — `arb_ecart_fige`
 
