@@ -39,7 +39,12 @@ set "RC=%ERRORLEVEL%"
 
 if not "%RC%"=="0" goto :echec_code
 echo.
-echo   [TERMINE] La branche main locale et GitHub sont synchronisees.
+if defined PUSH_OPTION (
+  echo   [TERMINE] Controle dry-run reussi. Aucun merge et aucun push effectues.
+  echo   Relance ce bouton sans --dry-run pour synchroniser main avec GitHub.
+) else (
+  echo   [TERMINE] La branche main locale et GitHub sont synchronisees.
+)
 goto :fin
 
 :echec

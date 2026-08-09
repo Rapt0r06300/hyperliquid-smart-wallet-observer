@@ -39,6 +39,8 @@ def test_push_launchers_share_one_safe_implementation() -> None:
     assert '-GitExecutable "%HYPERSMART_GIT%"' in main_text
     assert '"%~1"=="--dry-run"' in main_text
     assert '-ProjectRoot "%~dp0."' in main_text
+    assert "Controle dry-run reussi" in main_text
+    assert "Relance ce bouton sans --dry-run" in main_text
     assert "FETCH_HEAD" not in helper_text
     assert '"push", "origin", "main:main"' in helper_text
     assert "merge-base" in helper_text
