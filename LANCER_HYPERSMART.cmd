@@ -87,7 +87,7 @@ if errorlevel 1 (
 REM ---- PREVOL : registre PID/run_id + dossier logs du lanceur ----
 if not exist "runtime\data" mkdir "runtime\data" >nul 2>&1
 if not exist "runtime\logs\launcher" mkdir "runtime\logs\launcher" >nul 2>&1
-powershell -NoProfile -Command "$o=[ordered]@{ role='launcher_autopilot'; note='pid_reels_dans_lanceur_pids.json'; run_id=([guid]::NewGuid().ToString('N').Substring(0,12)); port=8794; demarre=(Get-Date).ToString('s'); commit=(& git rev-parse --short HEAD 2>$null) }; ($o | ConvertTo-Json -Compress) | Set-Content -Encoding UTF8 (Join-Path '%~dp0' 'runtime\data\launcher_pids.json')" 2>nul
+powershell -NoProfile -Command "$git=Join-Path '%~dp0' 'tools\git\cmd\git.exe'; $commit=if(Test-Path $git){& $git -C '%~dp0.' rev-parse --short HEAD 2>$null}else{''}; $o=[ordered]@{ role='launcher_autopilot'; note='pid_reels_dans_lanceur_pids.json'; run_id=([guid]::NewGuid().ToString('N').Substring(0,12)); port=8794; demarre=(Get-Date).ToString('s'); commit=$commit }; ($o | ConvertTo-Json -Compress) | Set-Content -Encoding UTF8 (Join-Path '%~dp0' 'runtime\data\launcher_pids.json')" 2>nul
 REM Le verificateur OOS planifie est strictement opt-in.
 REM Utiliser "LANCER_HYPERSMART.cmd verify-oos install" pour l'activer explicitement.
 set "HL_ENV=paper"
@@ -710,6 +710,7 @@ if /I "%SUB%"=="portable-check"    goto :cmd_portablecheck
 if /I "%SUB%"=="portable-install"  goto :cmd_portableinstall
 if /I "%SUB%"=="portable-build"    goto :cmd_portablebuild
 if /I "%SUB%"=="portable-zip"      goto :cmd_portablezip
+if /I "%SUB%"=="portable-proof"    goto :cmd_portableproof
 echo.
 echo   Sous-commande inconnue : "%SUB%"
 goto :cmd_menu
@@ -743,6 +744,7 @@ echo     portable-check          verifie le runtime Python relocalisable
 echo     portable-install        installe/repare le runtime Windows x64 local
 echo     portable-build          clone de secours complet ^(donnees/historique inclus^)
 echo     portable-zip            ZIP application seule, demarrage propre
+echo     portable-proof          preuve PC A vers PC B ^(15 min + replay full/deep^)
 echo     menu                cette aide
 echo.
 echo   Securite : lecture seule marche. 0 ordre reel, 0 cle, 0 signature.
@@ -784,6 +786,13 @@ goto :fin
 :cmd_portablezip
 echo.
 powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0tools\create_portable_bundle.ps1" -ProjectRoot "%~dp0."
+set "RC=%ERRORLEVEL%"
+echo.
+goto :fin
+
+:cmd_portableproof
+echo.
+"%HYPERSMART_PYTHON%" -m hl_observer.ops.portable_transfer_proof --root "%~dp0." --collection-seconds 900
 set "RC=%ERRORLEVEL%"
 echo.
 goto :fin

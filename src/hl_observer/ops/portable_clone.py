@@ -13,10 +13,12 @@ import argparse
 import hashlib
 import json
 import os
+import platform
 import shutil
 import subprocess
 import sys
 import time
+import uuid
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Callable, Iterable
@@ -85,6 +87,21 @@ REPARSE_WHITELIST = frozenset()
 
 class PortableCloneError(RuntimeError):
     """A full clone was refused before publication."""
+
+
+def machine_fingerprint() -> str:
+    """Return a privacy-preserving identifier used only to prove PC A != PC B."""
+    parts = [platform.node(), os.environ.get("COMPUTERNAME", ""), str(uuid.getnode())]
+    if os.name == "nt":
+        try:
+            import winreg
+
+            with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, r"SOFTWARE\Microsoft\Cryptography") as key:
+                parts.append(str(winreg.QueryValueEx(key, "MachineGuid")[0]))
+        except (OSError, ImportError):
+            pass
+    material = "|".join(part.strip().casefold() for part in parts if part.strip())
+    return hashlib.sha256(material.encode("utf-8")).hexdigest()
 
 
 @dataclass(frozen=True)
@@ -539,6 +556,8 @@ def verify_clone(
         if any(token in rel.casefold() for token in ("c:/users/", "c:\\users\\"))
     ]
     manifest_files = set(dict(manifest.get("files", {})))
+    source_machine = str(manifest.get("source_machine_fingerprint") or "")
+    current_machine = machine_fingerprint()
     actual_files: set[str] = set()
     longest_path = len(str(root))
     longest_member = ""
@@ -593,6 +612,9 @@ def verify_clone(
         "longest_path_ok": longest_path_ok,
         "long_path_recommendation": "C:\\HyperSmart" if not longest_path_ok else "",
         "git": git,
+        "source_machine_fingerprint": source_machine,
+        "current_machine_fingerprint": current_machine,
+        "physical_machine_distinct": bool(source_machine and source_machine != current_machine),
     }
 
 
@@ -682,6 +704,7 @@ def create_full_clone(
             "git_history_included": ".git/config" in manifest_files,
             "sqlite_copy_method": "sqlite_backup_api",
             "source_guard": source_guard_end,
+            "source_machine_fingerprint": machine_fingerprint(),
             "source_unchanged": True,
             "files": manifest_files,
             "excluded": list(inv.excluded),
@@ -822,6 +845,7 @@ __all__ = [
     "verify_clone",
     "verify_git_repository",
     "source_worktree_guard",
+    "machine_fingerprint",
 ]
 
 

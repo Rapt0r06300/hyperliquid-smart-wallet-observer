@@ -4,10 +4,9 @@ setlocal EnableExtensions
 cd /d "%~dp0"
 
 set "HYPERSMART_GIT=%~dp0tools\git\cmd\git.exe"
-if not exist "%HYPERSMART_GIT%" set "HYPERSMART_GIT="
-if not defined HYPERSMART_GIT for /f "delims=" %%G in ('where git.exe 2^>nul') do if not defined HYPERSMART_GIT set "HYPERSMART_GIT=%%G"
-if not defined HYPERSMART_GIT (
-  echo   [ERREUR] Git est introuvable.
+if not exist "%HYPERSMART_GIT%" (
+  echo   [ERREUR] Le Git embarque tools\git\cmd\git.exe est introuvable.
+  echo   Aucun repli vers le Git systeme n'est autorise.
   echo   Lance PREPARER_GIT_PORTABLE.cmd une fois, puis relance ce bouton.
   set "RC=2"
   goto :echec_code
