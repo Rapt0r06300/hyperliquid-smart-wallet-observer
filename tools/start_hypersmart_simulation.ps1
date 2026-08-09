@@ -598,6 +598,25 @@ function Stop-HyperSmartProcessTree {
     catch { try { Stop-Process -Id $ProcId -Force -ErrorAction SilentlyContinue } catch {} }
 }
 
+function Test-HyperSmartUiProcess {
+    param([int]$ProcId)
+    if (-not $ProcId) { return $false }
+    try {
+        $candidate = Get-CimInstance Win32_Process -Filter "ProcessId=$ProcId" -ErrorAction Stop
+        if (-not $candidate) { return $false }
+        $command = [string]$candidate.CommandLine
+        $executable = [string]$candidate.ExecutablePath
+        $rootFull = [IO.Path]::GetFullPath($ProjectRoot).TrimEnd('\')
+        $hasUiSignature = $command -match '(?i)(?:-m\s+hl_observer\s+ui|hl_observer\s+ui)'
+        $belongsToRoot = ($command.IndexOf($rootFull, [StringComparison]::OrdinalIgnoreCase) -ge 0) -or
+            ($executable -and $executable.StartsWith($rootFull, [StringComparison]::OrdinalIgnoreCase))
+        return [bool]($hasUiSignature -and $belongsToRoot)
+    } catch {
+        Write-LauncherLog "UI port owner inspection failed pid=$ProcId : $($_.Exception.Message)"
+        return $false
+    }
+}
+
 function Stop-HyperSmartRuntime {
     param([string]$Reason = "manual_stop")
     Write-LauncherLine "Arret local demande ($Reason). Fermeture du serveur UI et du poller read-only..."
@@ -635,8 +654,12 @@ function Stop-HyperSmartRuntime {
         $portPids = @(Get-NetTCPConnection -LocalPort 8794 -State Listen -ErrorAction SilentlyContinue | Select-Object -ExpandProperty OwningProcess -Unique)
         foreach ($pp in $portPids) {
             if ($pp -and $pp -ne $PID) {
-                Write-LauncherLog "Freeing UI port 8794 pid=$pp"
-                Stop-HyperSmartProcessTree -ProcId $pp
+                if (Test-HyperSmartUiProcess -ProcId $pp) {
+                    Write-LauncherLog "Freeing verified HyperSmart UI port 8794 pid=$pp"
+                    Stop-HyperSmartProcessTree -ProcId $pp
+                } else {
+                    Write-LauncherLog "Refusing to stop foreign port owner pid=$pp port=8794"
+                }
             }
         }
     } catch { Write-LauncherLog "port 8794 free skipped: $($_.Exception.Message)" }

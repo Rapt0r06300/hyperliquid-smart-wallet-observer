@@ -41,15 +41,24 @@ if not "%~1"=="" goto :dispatch
 
 :autopilot
 REM ---- PREVOL : verrou d'instance unique (evite tout double lancement) ----
-powershell -NoProfile -Command "try { if ((Test-NetConnection -ComputerName 127.0.0.1 -Port 8794 -WarningAction SilentlyContinue -InformationLevel Quiet)) { exit 2 } else { exit 0 } } catch { exit 0 }"
-if errorlevel 2 (
+set "PYTHONPATH=%~dp0src;%PYTHONPATH%"
+"%HYPERSMART_PYTHON%" -m hl_observer.ops.port_owner --root "%~dp0." --port 8794
+set "PORT_OWNER_RC=%ERRORLEVEL%"
+if "%PORT_OWNER_RC%"=="2" (
   echo.
-  echo   HyperSmart tourne DEJA ^(UI 127.0.0.1:8794 active^).
+  echo   HyperSmart tourne DEJA ^(proprietaire du port 8794 verifie^).
   echo   Pour redemarrer proprement : LANCER_HYPERSMART.cmd restart
   echo.
   goto :fin
 )
-set "PYTHONPATH=%~dp0src;%PYTHONPATH%"
+if not "%PORT_OWNER_RC%"=="0" (
+  echo.
+  echo   [PORT 8794 REFUSE] Un processus etranger occupe le port, ou son proprietaire est inverifiable.
+  echo   HyperSmart ne le tue pas et ne demarre pas. Ferme ce processus manuellement puis relance.
+  echo.
+  set "RC=32"
+  goto :fin
+)
 REM === PORTABILITE INTRINSEQUE ===
 REM Ce prevol s'execute AVANT la creation du verrou/PID du lancement courant. Il ne purge
 REM l'etat machine qu'au tout premier demarrage ou apres un vrai changement de PC/chemin.
