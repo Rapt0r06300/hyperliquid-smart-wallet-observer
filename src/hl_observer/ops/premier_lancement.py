@@ -25,7 +25,9 @@ import json
 import hashlib
 import os
 import platform
+import shutil
 import socket
+import subprocess
 import time
 import uuid
 from pathlib import Path
@@ -36,6 +38,7 @@ from hl_observer.ops.registre_pids import REGISTRE_RELPATH
 
 OK, INFO, AVERT, ECHEC = "OK", "INFO", "AVERTISSEMENT", "ECHEC"
 PORT_UI = 8794
+MAX_WINDOWS_PATH = 259
 MACHINE_ID_RELPATH = Path("runtime") / "data" / "machine_id.txt"
 PORTABLE_HOST_STATE_RELPATH = Path("runtime") / "data" / "portable_host_identity.json"
 # Le verrou d'instance du lanceur COURANT est VIVANT quand ce module tourne (le .cmd acquiert le
@@ -116,6 +119,61 @@ def verifier_chemin_espaces_accents(root: str | Path) -> dict:
     detail = "round-trip accent OK" + (" (chemin avec espace)" if a_espace else "") \
         + (" (chemin avec accent)" if a_accent else "")
     return _res("chemin", OK if ok else ECHEC, detail)
+
+
+def verifier_longueur_chemins(root: str | Path, *, limite: int = MAX_WINDOWS_PATH) -> dict:
+    """Fail closed when the actual target contains a path Windows cannot reliably reopen."""
+    racine = Path(root).resolve()
+    longueur = len(str(racine))
+    membre = "."
+    for dossier, sous_dossiers, fichiers in os.walk(racine, topdown=True, followlinks=False):
+        courant = Path(dossier)
+        for nom in tuple(sous_dossiers) + tuple(fichiers):
+            chemin = courant / nom
+            valeur = len(str(chemin.absolute()))
+            if valeur > longueur:
+                longueur = valeur
+                try:
+                    membre = chemin.relative_to(racine).as_posix()
+                except ValueError:
+                    membre = str(chemin)
+    if longueur > limite:
+        return _res(
+            "longueur_chemins",
+            ECHEC,
+            "%d caracteres > %d (%s) ; deplacer vers C:\\HyperSmart" % (longueur, limite, membre),
+        )
+    return _res("longueur_chemins", OK, "%d/%d caracteres (%s)" % (longueur, limite, membre))
+
+
+def verifier_outils_windows(
+    *,
+    systeme: str | None = None,
+    which: Callable[[str], str | None] | None = None,
+    runner: Callable[..., Any] | None = None,
+) -> dict:
+    """Prove the Windows control-plane commands required by the launcher."""
+    systeme = systeme if systeme is not None else platform.system()
+    if systeme != "Windows":
+        return _res("outils_windows", INFO, "PowerShell/CIM/taskkill/schtasks controles sur la cible Windows")
+    which = which or shutil.which
+    requis = ("powershell.exe", "taskkill.exe", "schtasks.exe")
+    absents = tuple(nom for nom in requis if not which(nom))
+    if absents:
+        return _res("outils_windows", ECHEC, "outils Windows absents : " + ", ".join(absents))
+    runner = runner or subprocess.run
+    try:
+        resultat = runner(
+            [which("powershell.exe") or "powershell.exe", "-NoProfile", "-Command", "Get-Command Get-CimInstance | Out-Null"],
+            check=False,
+            capture_output=True,
+            timeout=15,
+        )
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        return _res("outils_windows", ECHEC, "preuve PowerShell/CIM impossible : %s" % exc)
+    if int(getattr(resultat, "returncode", 1)) != 0:
+        return _res("outils_windows", ECHEC, "PowerShell present mais Get-CimInstance indisponible")
+    return _res("outils_windows", OK, "PowerShell + CIM + taskkill + schtasks disponibles")
 
 
 def verifier_horloge(*, maintenant_ms: float | None = None, reference_ms: float = 1_735_689_600_000) -> dict:
@@ -623,6 +681,8 @@ def verifier_premier_lancement(root: str | Path, *, os_info: dict | None = None,
         verifier_droits_ecriture(root),
         verifier_espace_disque(root),                          # item 10
         verifier_chemin_espaces_accents(root),
+        verifier_longueur_chemins(root),
+        verifier_outils_windows(systeme=oi.get("systeme")),
         verifier_horloge(maintenant_ms=maintenant_ms),
         verifier_port(sonde=sonde_port),
         verifier_reseau_tls(sonde=sonde_reseau),
@@ -680,7 +740,8 @@ def main(argv: list[str] | None = None) -> int:
 __all__ = ["OK", "INFO", "AVERT", "ECHEC", "PORT_UI", "MACHINE_ID_RELPATH", "CRITIQUES_STDLIB",
            "DEPS_CORE", "DEPS_OPTIONNELLES", "MODULES_RUNTIME",
            "verifier_os_arch", "verifier_droits_ecriture", "verifier_espace_disque",
-           "verifier_chemin_espaces_accents", "verifier_horloge", "verifier_port", "verifier_reseau_tls",
+           "verifier_chemin_espaces_accents", "verifier_longueur_chemins", "verifier_outils_windows",
+           "verifier_horloge", "verifier_port", "verifier_reseau_tls",
            "verifier_imports", "verifier_deps_tierces", "verifier_modules_runtime", "verifier_dll",
            "verifier_wheels_arch", "verifier_certificats_tls", "verifier_manifeste", "verifier_aucune_cle",
            "verifier_sessions_preservees", "regenerer_identite", "preparer_identite_portable",

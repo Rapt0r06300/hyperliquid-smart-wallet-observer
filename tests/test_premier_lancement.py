@@ -150,6 +150,38 @@ def test_espace_disque(tmp_path):
     assert r["statut"] == PL.AVERT
 
 
+def test_longueur_chemins_fail_closed_et_recommande_chemin_court(tmp_path):
+    court = PL.verifier_longueur_chemins(tmp_path)
+    assert court["statut"] == PL.OK
+    trop_long = PL.verifier_longueur_chemins(tmp_path, limite=len(str(tmp_path.resolve())) - 1)
+    assert trop_long["statut"] == PL.ECHEC
+    assert "C:\\HyperSmart" in trop_long["detail"]
+
+
+def test_outils_windows_prouvent_powershell_cim_taskkill_schtasks():
+    presents = {
+        "powershell.exe": r"C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe",
+        "taskkill.exe": r"C:\\Windows\\System32\\taskkill.exe",
+        "schtasks.exe": r"C:\\Windows\\System32\\schtasks.exe",
+    }
+
+    class Resultat:
+        returncode = 0
+
+    ok = PL.verifier_outils_windows(
+        systeme="Windows",
+        which=lambda nom: presents.get(nom),
+        runner=lambda *_a, **_k: Resultat(),
+    )
+    assert ok["statut"] == PL.OK
+    manque = PL.verifier_outils_windows(
+        systeme="Windows",
+        which=lambda nom: presents.get(nom) if nom != "schtasks.exe" else None,
+    )
+    assert manque["statut"] == PL.ECHEC
+    assert "schtasks.exe" in manque["detail"]
+
+
 def test_imports_bloquant(tmp_path):
     assert PL.verifier_imports(("json", "hashlib"))["statut"] == PL.OK
     r = PL.verifier_imports(("module_qui_nexiste_pas_123",))

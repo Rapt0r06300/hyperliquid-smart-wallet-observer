@@ -25,6 +25,7 @@ PORTABLE_PYTHON_RELATIVE = Path("tools") / "python" / "python.exe"
 PORTABLE_MANIFEST_RELATIVE = Path("tools") / "python" / "portable_runtime_manifest.json"
 LEGACY_PYTHON_RELATIVE = Path("portable_runtime") / "python"
 LEGACY_MANIFEST_RELATIVE = Path("portable_runtime") / "portable_runtime_manifest.json"
+MAX_WINDOWS_PATH = 259
 
 REQUIRED_IMPORTS: tuple[str, ...] = (
     "fastapi",
@@ -140,6 +141,9 @@ class RelocationStatus:
     relative_launcher_ok: bool
     relative_python_paths_ok: bool
     first_launch_regeneration_ok: bool
+    longest_path: int
+    longest_path_member: str
+    longest_path_ok: bool
     required_files_missing: tuple[str, ...]
     hardcoded_user_paths: tuple[str, ...]
     absolute_python_path_entries: tuple[str, ...]
@@ -471,6 +475,26 @@ def _root_is_writable(project_root: Path) -> bool:
         return False
 
 
+def longest_project_path(project_root: Path) -> tuple[int, str]:
+    """Return the longest absolute path and its member without following links."""
+    root = _resolved(project_root)
+    longest_length = len(str(root))
+    longest_member = "."
+    for directory, subdirectories, names in os.walk(root, topdown=True, followlinks=False):
+        current = Path(directory)
+        entries = tuple(subdirectories) + tuple(names)
+        for name in entries:
+            path = current / name
+            length = len(str(path.absolute()))
+            if length > longest_length:
+                longest_length = length
+                try:
+                    longest_member = path.relative_to(root).as_posix()
+                except ValueError:
+                    longest_member = str(path)
+    return longest_length, longest_member
+
+
 def relocation_status(project_root: Path, *, check_writable: bool = True) -> RelocationStatus:
     """Validate that a raw folder copy can boot from a different Windows path."""
     root = _resolved(project_root)
@@ -489,6 +513,8 @@ def relocation_status(project_root: Path, *, check_writable: bool = True) -> Rel
     platform_ok = system == "Windows"
     architecture_ok = machine in {"amd64", "x86_64"}
     writable = _root_is_writable(root) if check_writable else True
+    longest_path, longest_path_member = longest_project_path(root)
+    longest_path_ok = longest_path <= MAX_WINDOWS_PATH
     recommendations = (
         "Stop HyperSmart cleanly before copying or archiving the whole folder.",
         "Include hidden files, .git, tools/python, tools/git, runtime, data and logs.",
@@ -504,6 +530,7 @@ def relocation_status(project_root: Path, *, check_writable: bool = True) -> Rel
             launcher_ok,
             not absolute_pth,
             first_launch_ok,
+            longest_path_ok,
             not missing,
             not hardcoded,
         )
@@ -518,6 +545,9 @@ def relocation_status(project_root: Path, *, check_writable: bool = True) -> Rel
         relative_launcher_ok=launcher_ok,
         relative_python_paths_ok=not absolute_pth,
         first_launch_regeneration_ok=first_launch_ok,
+        longest_path=longest_path,
+        longest_path_member=longest_path_member,
+        longest_path_ok=longest_path_ok,
         required_files_missing=missing,
         hardcoded_user_paths=hardcoded,
         absolute_python_path_entries=absolute_pth,
@@ -585,6 +615,10 @@ def main(argv: Sequence[str] | None = None) -> int:
             print(f"relative_launcher: {'OK' if status.relative_launcher_ok else 'FAILED'}")
             print(f"relative_python_paths: {'OK' if status.relative_python_paths_ok else 'FAILED'}")
             print(f"first_launch_regeneration: {'OK' if status.first_launch_regeneration_ok else 'FAILED'}")
+            print(
+                f"longest_path: {status.longest_path}/{MAX_WINDOWS_PATH} "
+                f"{'OK' if status.longest_path_ok else 'FAILED'} ({status.longest_path_member})"
+            )
             print(f"writable: {'YES' if status.writable else 'NO'}")
             if status.required_files_missing:
                 print("missing: " + ", ".join(status.required_files_missing))

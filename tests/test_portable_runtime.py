@@ -175,8 +175,32 @@ def test_real_folder_is_relocatable_without_building_an_archive():
     assert status.relative_launcher_ok is True
     assert status.relative_python_paths_ok is True
     assert status.first_launch_regeneration_ok is True
+    assert status.longest_path_ok is True
+    assert status.longest_path <= module.MAX_WINDOWS_PATH
+    assert status.longest_path_member
     assert status.required_files_missing == ()
     assert status.hardcoded_user_paths == ()
+
+
+def test_relocation_refuse_un_chemin_windows_superieur_a_259(tmp_path, monkeypatch):
+    module = _load_module()
+    monkeypatch.setattr(module, "runtime_status", lambda *_a, **_k: type("Runtime", (), {"probe_ok": True})())
+    monkeypatch.setattr(module, "scan_hardcoded_user_paths", lambda _root: ())
+    monkeypatch.setattr(module, "_absolute_python_path_entries", lambda _root: ())
+    monkeypatch.setattr(module, "_launcher_is_relative", lambda _root: True)
+    monkeypatch.setattr(module, "longest_project_path", lambda _root: (260, "trop/long/fichier.txt"))
+    for relative in module.REQUIRED_RELOCATION_FILES:
+        path = tmp_path / relative
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("portable", encoding="utf-8")
+
+    status = module.relocation_status(tmp_path, check_writable=False)
+
+    assert status.ok is False
+    assert status.longest_path_ok is False
+    assert status.longest_path == 260
+    assert status.longest_path_member == "trop/long/fichier.txt"
+    assert any("C:\\HyperSmart" in item for item in status.recommendations)
 
 
 def test_real_windows_launcher_can_dispatch_portable_check():
