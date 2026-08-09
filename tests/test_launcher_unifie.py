@@ -80,9 +80,37 @@ def test_github_push_AUCUN_force_fast_forward_seulement():
     m = re.search(r'(?ms)^:cmd_github\b.*?(?=^goto :fin)', t)
     assert m, "bloc :cmd_github introuvable"
     bloc = m.group(0)
-    assert "git push --ff-only origin main" in bloc, "push FAST-FORWARD uniquement"
-    assert "git status --short" in bloc and "diff --stat" in bloc, "status/diff affiches"
-    assert "REFUS PROPRE" in bloc, "refus propre en cas de divergence"
+    assert "git push" not in bloc.lower()
+    assert "git status" not in bloc.lower()
+    assert "POUSSER-GITHUB-FORCE.cmd" in bloc
+    assert 'set "RC=%ERRORLEVEL%"' in bloc
+
+
+def test_portable_check_revalide_obligatoirement_un_clone_complet():
+    t = _txt()
+    m = re.search(r'(?ms)^:cmd_portablecheck\b.*?(?=^:cmd_portableinstall\b)', t)
+    assert m
+    bloc = m.group(0)
+    assert "PORTABLE_FULL_CLONE_MANIFEST.json" in bloc
+    assert "hl_observer.ops.portable_clone --verify" in bloc
+    assert "--fast-verify" not in bloc
+    assert bloc.index("hl_observer.ops.portable_clone --verify") < bloc.index(
+        "PORTABLE_LAUNCHER_CHECK_OK"
+    )
+
+
+def test_commandes_portables_propaguent_immediatement_errorlevel():
+    t = _txt()
+    for label in ("portableinstall", "portablebuild", "portablezip"):
+        m = re.search(rf'(?ms)^:cmd_{label}\b.*?(?=^:cmd_|\Z)', t)
+        assert m, label
+        lines = [line.strip() for line in m.group(0).splitlines() if line.strip()]
+        invocation = next(
+            index
+            for index, line in enumerate(lines)
+            if ("powershell" in line.lower() or '"%HYPERSMART_PYTHON%"' in line)
+        )
+        assert lines[invocation + 1] == 'set "RC=%ERRORLEVEL%"', label
 
 
 def test_verrou_instance_unique_et_registre_pid():
@@ -147,5 +175,6 @@ def test_la_racine_contient_les_deux_lanceurs_officiels():
         "ANALYSE_HISTORIQUE_COMPLETE.cmd",
         "DIAGNOSTIC_LANCEUR.cmd",
         "LANCER_HYPERLAB.cmd",
+        "PREPARER_GIT_PORTABLE.cmd",
     }
     assert cmd_racine <= officiels | outils_conserves

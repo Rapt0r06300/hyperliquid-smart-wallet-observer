@@ -728,7 +728,7 @@ echo     replay              lance ANALYSER_BACKTESTS_REPLAYS.cmd
 echo     moisson [github^|relire^|voir^|stop]     moissonneur de recherche
 echo   Ops :
 echo     verify-oos [install^|uninstall^|run^|diag^|test-notif]   verificateur OOS local
-echo     github-push     push git fast-forward EXPLICITE ^(jamais de force^)
+echo     github-push     delegue au pousseur securise avec Git embarque
 echo     reset-paper --confirm   remise a zero VOLONTAIRE ^(sauvegarde horodatee avant^)
 echo     portable-check          verifie le runtime Python relocalisable
 echo     portable-install        installe/repare le runtime Windows x64 local
@@ -748,6 +748,11 @@ set "RC=%ERRORLEVEL%"
 if not "%RC%"=="0" goto :portablecheck_fin
 "%HYPERSMART_PYTHON%" tools\portable_runtime.py --root "%~dp0." relocate-check --json
 set "RC=%ERRORLEVEL%"
+if not "%RC%"=="0" goto :portablecheck_fin
+if exist "%~dp0PORTABLE_FULL_CLONE_MANIFEST.json" (
+  "%HYPERSMART_PYTHON%" -m hl_observer.ops.portable_clone --verify "%~dp0."
+  set "RC=%ERRORLEVEL%"
+)
 :portablecheck_fin
 if "%RC%"=="0" echo PORTABLE_LAUNCHER_CHECK_OK
 echo.
@@ -756,18 +761,21 @@ goto :fin
 :cmd_portableinstall
 echo.
 powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0tools\install_portable_runtime.ps1" -ProjectRoot "%~dp0."
+set "RC=%ERRORLEVEL%"
 echo.
 goto :fin
 
 :cmd_portablebuild
 echo.
 "%HYPERSMART_PYTHON%" -m hl_observer.ops.portable_clone --racine "%~dp0."
+set "RC=%ERRORLEVEL%"
 echo.
 goto :fin
 
 :cmd_portablezip
 echo.
 powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0tools\create_portable_bundle.ps1" -ProjectRoot "%~dp0."
+set "RC=%ERRORLEVEL%"
 echo.
 goto :fin
 
@@ -987,26 +995,11 @@ echo.
 pause
 goto :fin
 
-REM -------- GITHUB-PUSH (absorbe POUSSER-GITHUB / POUSSER-GITHUB-FORCE ; jamais automatique) --------
+REM -------- GITHUB-PUSH : un seul chemin securise, Git embarque uniquement --------
 :cmd_github
-echo === Remote configure ===
-git remote -v
+call "%~dp0POUSSER-GITHUB-FORCE.cmd" %2 %3 %4 %5 %6 %7 %8 %9
+set "RC=%ERRORLEVEL%"
 echo.
-echo === Etat local (status court + branche) ===
-git status --short --branch
-echo.
-echo === Diff a pousser (resume) ===
-git --no-pager diff --stat origin/main..HEAD 2>nul
-echo.
-echo === Envoi FAST-FORWARD de la branche main (jamais de force) ===
-git push --ff-only origin main
-if errorlevel 1 (
-  echo.
-  echo   REFUS PROPRE : le distant a diverge -- push fast-forward impossible. AUCUN force-push.
-  echo   Resous d'abord :  git pull --rebase origin main   puis relance  LANCER_HYPERSMART.cmd github-push
-)
-echo.
-pause
 goto :fin
 
 REM -------- RESET-PAPER (Fix 1) : remise a zero VOLONTAIRE, sauvegarde horodatee, exige --confirm --------
