@@ -14,6 +14,7 @@ import hashlib
 import json
 import os
 import shutil
+import subprocess
 import sys
 import time
 from dataclasses import asdict, dataclass
@@ -76,6 +77,10 @@ SECRET_SCAN_SUFFIXES = (
     ".yml",
 )
 MAX_SECRET_SCAN_SIZE = 2 * 1024 * 1024
+MAX_WINDOWS_PATH = 259
+# No link is currently required by the portable runtime. Any future exception
+# must be reviewed and named explicitly here; links are never followed.
+REPARSE_WHITELIST = frozenset()
 
 
 class PortableCloneError(RuntimeError):
@@ -119,6 +124,14 @@ def _is_reparse(path: Path) -> bool:
     except OSError:
         return False
     return bool(attributes & getattr(os.stat_result, "FILE_ATTRIBUTE_REPARSE_POINT", 0x400))
+
+
+def _assert_reparse_allowed(relative_path: str) -> None:
+    normalized = relative_path.replace("\\", "/").rstrip("/")
+    if normalized not in REPARSE_WHITELIST:
+        raise PortableCloneError(
+            "symlink/junction/reparse point refused (not whitelisted): " + normalized
+        )
 
 
 def _is_public_template(name: str) -> bool:
@@ -188,7 +201,8 @@ def inventory(root: str | Path, *, scan_private_key_content: bool = True) -> Clo
                 excluded.append({"path": rel + "/", "reason": "cache_or_generated_directory"})
                 continue
             if _is_reparse(candidate):
-                excluded.append({"path": rel + "/", "reason": "link_or_reparse_point"})
+                _assert_reparse_allowed(rel)
+                excluded.append({"path": rel + "/", "reason": "whitelisted_reparse_not_copied"})
                 continue
             kept_directories.append(name)
         subdirectories[:] = kept_directories
@@ -197,7 +211,8 @@ def inventory(root: str | Path, *, scan_private_key_content: bool = True) -> Clo
             path = current / name
             rel = path.relative_to(source_root).as_posix()
             if _is_reparse(path):
-                excluded.append({"path": rel, "reason": "link_or_reparse_point"})
+                _assert_reparse_allowed(rel)
+                excluded.append({"path": rel, "reason": "whitelisted_reparse_not_copied"})
                 continue
             try:
                 AP.valider_chemin_relatif(rel, max_rel=245)
@@ -284,7 +299,7 @@ def _validate_destination(source_root: Path, destination: Path, inv: CloneInvent
     if destination.exists():
         raise PortableCloneError(f"destination already exists: {destination}")
     longest = len(str(destination)) + 1 + inv.longest_relative_path
-    if longest > 259:
+    if longest > MAX_WINDOWS_PATH:
         raise PortableCloneError(
             "destination path is too long for standard Windows copy/paste "
             f"({longest} characters; choose a short path such as D:\\HS_PORTABLE)"
@@ -333,7 +348,153 @@ def _hash_file(path: Path, *, buffer_size: int = 8 * 1024 * 1024) -> tuple[str, 
     return digest.hexdigest(), size
 
 
-def verify_clone(destination: str | Path, *, full_hash: bool = True) -> dict[str, object]:
+def _embedded_git(root: Path) -> Path:
+    return root / "tools" / "git" / "cmd" / "git.exe"
+
+
+def _git_command(root: Path, *arguments: str, timeout: int = 120) -> subprocess.CompletedProcess[str]:
+    git = _embedded_git(root)
+    if not git.is_file():
+        raise PortableCloneError(f"embedded Git missing: {git}")
+    return subprocess.run(
+        [str(git), "-C", str(root), *arguments],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        timeout=timeout,
+        check=False,
+    )
+
+
+def verify_git_repository(root: str | Path) -> dict[str, object]:
+    """Prove the transported repository with the Git binary it carries."""
+    project = _resolved(root)
+    commands = {
+        "fsck": ("fsck", "--full"),
+        "head": ("rev-parse", "HEAD"),
+        "branch": ("branch", "--show-current"),
+        "remotes": ("remote", "-v"),
+    }
+    outputs: dict[str, str] = {}
+    failures: dict[str, dict[str, object]] = {}
+    for name, args in commands.items():
+        try:
+            completed = _git_command(project, *args, timeout=300 if name == "fsck" else 60)
+        except (OSError, subprocess.SubprocessError, PortableCloneError) as exc:
+            failures[name] = {"returncode": -1, "stderr": str(exc)}
+            continue
+        output = (completed.stdout or "").strip()
+        outputs[name] = output
+        if completed.returncode != 0:
+            failures[name] = {
+                "returncode": completed.returncode,
+                "stderr": (completed.stderr or "").strip(),
+            }
+    head = outputs.get("head", "")
+    branch = outputs.get("branch", "")
+    remotes = outputs.get("remotes", "")
+    if len(head) != 40:
+        failures.setdefault("head", {"returncode": -2, "stderr": "invalid HEAD"})
+    if branch != "main":
+        failures.setdefault("branch", {"returncode": -2, "stderr": f"expected main, got {branch!r}"})
+    if not remotes:
+        failures.setdefault("remotes", {"returncode": -2, "stderr": "no configured remote"})
+    return {
+        "ok": not failures,
+        "git": str(_embedded_git(project)),
+        "head": head,
+        "branch": branch,
+        "remotes": remotes.splitlines(),
+        "fsck": outputs.get("fsck", ""),
+        "failures": failures,
+    }
+
+
+def _active_project_mutators(root: Path) -> list[str]:
+    findings: list[str] = []
+    git_dir = root / ".git"
+    if git_dir.is_dir():
+        for lock in git_dir.rglob("*.lock"):
+            if lock.is_file():
+                findings.append("git-lock:" + lock.relative_to(root).as_posix())
+    if os.name != "nt":
+        return findings
+    script = (
+        "$p='" + str(root).replace("'", "''") + "'; "
+        "Get-CimInstance Win32_Process | Where-Object { "
+        "$_.CommandLine -and $_.CommandLine.IndexOf($p,[StringComparison]::OrdinalIgnoreCase) -ge 0 "
+        "-and ($_.Name -match '^(git|codex)(\\.exe)?$') } | "
+        "Select-Object Name,ProcessId,CommandLine | ConvertTo-Json -Compress"
+    )
+    try:
+        completed = subprocess.run(
+            ["powershell.exe", "-NoProfile", "-Command", script],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=20,
+            check=False,
+        )
+        if completed.returncode == 0 and completed.stdout.strip():
+            parsed = json.loads(completed.stdout)
+            rows = parsed if isinstance(parsed, list) else [parsed]
+            for row in rows:
+                findings.append(f"process:{row.get('Name')}:{row.get('ProcessId')}")
+    except (OSError, subprocess.SubprocessError, json.JSONDecodeError):
+        # Git lock + clean worktree checks remain authoritative if CIM is unavailable.
+        pass
+    return sorted(set(findings))
+
+
+def source_worktree_guard(root: str | Path) -> dict[str, object]:
+    project = _resolved(root)
+    active = _active_project_mutators(project)
+    if active:
+        raise PortableCloneError("active Git/Codex operation refused: " + ", ".join(active))
+    status = _git_command(project, "status", "--porcelain=v1", "--untracked-files=all")
+    if status.returncode != 0:
+        raise PortableCloneError("cannot prove clean worktree: " + (status.stderr or "").strip())
+    dirty = [line for line in status.stdout.splitlines() if line.strip()]
+    if dirty:
+        raise PortableCloneError("full clone requires a clean worktree: " + " | ".join(dirty[:20]))
+    head = _git_command(project, "rev-parse", "HEAD")
+    branch = _git_command(project, "branch", "--show-current")
+    if head.returncode or branch.returncode:
+        raise PortableCloneError("cannot capture source Git identity")
+    return {
+        "head": head.stdout.strip(),
+        "branch": branch.stdout.strip(),
+        "status": dirty,
+        "active_mutators": active,
+    }
+
+
+def _source_file_state(root: Path, inv: CloneInventory) -> dict[str, tuple[int, int]]:
+    state: dict[str, tuple[int, int]] = {}
+    for planned in inv.files:
+        path = root / Path(planned.relative_path)
+        if _is_reparse(path):
+            _assert_reparse_allowed(planned.relative_path)
+        try:
+            info = path.stat()
+        except OSError as exc:
+            raise PortableCloneError(f"source changed or disappeared: {planned.relative_path}: {exc}") from exc
+        state[planned.relative_path] = (int(info.st_size), int(info.st_mtime_ns))
+    return state
+
+
+def _inventory_signature(inv: CloneInventory) -> tuple[tuple[str, int, str], ...]:
+    return tuple((item.relative_path, item.size, item.kind) for item in inv.files)
+
+
+def verify_clone(
+    destination: str | Path,
+    *,
+    full_hash: bool = True,
+    git_verifier: Callable[[str | Path], dict[str, object]] = verify_git_repository,
+) -> dict[str, object]:
     root = _resolved(destination)
     manifest_path = root / MANIFEST_NAME
     if not manifest_path.is_file():
@@ -344,6 +505,7 @@ def verify_clone(destination: str | Path, *, full_hash: bool = True) -> dict[str
         return {"ok": False, "reason": f"manifest_invalid:{exc}", "root": str(root)}
     missing: list[str] = []
     divergent: list[str] = []
+    reparse_points: list[str] = []
     verified = 0
     for rel, metadata in sorted(dict(manifest.get("files", {})).items()):
         path = root / Path(rel)
@@ -376,7 +538,45 @@ def verify_clone(destination: str | Path, *, full_hash: bool = True) -> dict[str
         rel for rel in manifest.get("files", {})
         if any(token in rel.casefold() for token in ("c:/users/", "c:\\users\\"))
     ]
-    ok = not missing and not divergent and not required_missing and not leaks
+    manifest_files = set(dict(manifest.get("files", {})))
+    actual_files: set[str] = set()
+    longest_path = len(str(root))
+    longest_member = ""
+    for directory, subdirectories, names in os.walk(root, topdown=True, followlinks=False):
+        current = Path(directory)
+        for name in list(subdirectories):
+            candidate = current / name
+            rel = candidate.relative_to(root).as_posix()
+            if _is_reparse(candidate):
+                reparse_points.append(rel + "/")
+                subdirectories.remove(name)
+        for name in names:
+            candidate = current / name
+            rel = candidate.relative_to(root).as_posix()
+            if _is_reparse(candidate):
+                reparse_points.append(rel)
+            if rel != MANIFEST_NAME:
+                actual_files.add(rel)
+            length = len(str(candidate))
+            if length > longest_path:
+                longest_path = length
+                longest_member = rel
+    unexpected = sorted(actual_files - manifest_files)
+    longest_path_ok = longest_path <= MAX_WINDOWS_PATH
+    try:
+        git = git_verifier(root)
+    except Exception as exc:  # noqa: BLE001
+        git = {"ok": False, "error": str(exc)}
+    ok = (
+        not missing
+        and not divergent
+        and not required_missing
+        and not leaks
+        and not unexpected
+        and not reparse_points
+        and longest_path_ok
+        and bool(git.get("ok"))
+    )
     return {
         "ok": ok,
         "root": str(root),
@@ -386,6 +586,13 @@ def verify_clone(destination: str | Path, *, full_hash: bool = True) -> dict[str
         "divergent": divergent,
         "required_missing": required_missing,
         "absolute_path_leaks_in_manifest": leaks,
+        "unexpected": unexpected,
+        "reparse_points": sorted(reparse_points),
+        "longest_path": longest_path,
+        "longest_path_member": longest_member,
+        "longest_path_ok": longest_path_ok,
+        "long_path_recommendation": "C:\\HyperSmart" if not longest_path_ok else "",
+        "git": git,
     }
 
 
@@ -397,6 +604,8 @@ def create_full_clone(
     session_probe: Callable[[str | Path], list[str]] = AP.sessions_actives,
     verify_hashes: bool = True,
     progress: Callable[[dict[str, object]], None] | None = None,
+    worktree_guard: Callable[[str | Path], dict[str, object]] = source_worktree_guard,
+    git_verifier: Callable[[str | Path], dict[str, object]] = verify_git_repository,
 ) -> dict[str, object]:
     source_root = _resolved(root)
     writers = list(writer_probe(source_root))
@@ -406,7 +615,10 @@ def create_full_clone(
     if active_sessions:
         raise PortableCloneError("active sessions must be stopped first: " + ", ".join(active_sessions))
 
+    source_guard_start = worktree_guard(source_root)
+
     inv = inventory(source_root)
+    source_state_start = _source_file_state(source_root, inv)
     target = _resolved(destination) if destination else automatic_destination(inv.total_bytes)
     _validate_destination(source_root, target, inv)
     staging = target.with_name(f".{target.name}.partial-{os.getpid()}")
@@ -447,6 +659,19 @@ def create_full_clone(
                     }
                 )
 
+        source_guard_end = worktree_guard(source_root)
+        final_inventory = inventory(source_root, scan_private_key_content=False)
+        source_state_end = _source_file_state(source_root, inv)
+        if source_guard_end != source_guard_start:
+            raise PortableCloneError("source Git/worktree identity changed during clone")
+        if _inventory_signature(final_inventory) != _inventory_signature(inv):
+            raise PortableCloneError("source inventory changed during clone")
+        if source_state_end != source_state_start:
+            changed = sorted(
+                rel for rel, before in source_state_start.items() if source_state_end.get(rel) != before
+            )
+            raise PortableCloneError("source files changed during clone: " + ", ".join(changed[:20]))
+
         manifest = {
             "schema_version": SCHEMA_VERSION,
             "created_at_utc": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
@@ -456,6 +681,8 @@ def create_full_clone(
             "durable_runtime_included": True,
             "git_history_included": ".git/config" in manifest_files,
             "sqlite_copy_method": "sqlite_backup_api",
+            "source_guard": source_guard_end,
+            "source_unchanged": True,
             "files": manifest_files,
             "excluded": list(inv.excluded),
             "excluded_policy": [
@@ -472,10 +699,34 @@ def create_full_clone(
             encoding="utf-8",
             newline="\n",
         )
+        # The staging directory is the transaction boundary. Nothing appears at
+        # the final target name until every file, hash, path and Git proof passes.
+        staging_verification = verify_clone(
+            staging,
+            full_hash=verify_hashes,
+            git_verifier=git_verifier,
+        )
+        if not staging_verification.get("ok"):
+            raise PortableCloneError(
+                "staging verification failed; target not published: "
+                + json.dumps(staging_verification, ensure_ascii=False)
+            )
         os.replace(staging, target)
-        verification = verify_clone(target, full_hash=verify_hashes)
+        verification = verify_clone(target, full_hash=verify_hashes, git_verifier=git_verifier)
         if not verification.get("ok"):
-            raise PortableCloneError("published clone verification failed: " + json.dumps(verification))
+            failed_target = target.with_name(f".{target.name}.failed-{int(time.time())}")
+            os.replace(target, failed_target)
+            try:
+                (failed_target / "PORTABLE_CLONE_FAILED.txt").write_text(
+                    "Post-publication verification failed. Do not launch this directory.\n",
+                    encoding="utf-8",
+                )
+            except OSError:
+                pass
+            raise PortableCloneError(
+                "published clone verification failed and target was withdrawn: "
+                + json.dumps(verification, ensure_ascii=False)
+            )
     except BaseException:
         if staging.exists():
             failure = staging / "PORTABLE_CLONE_FAILED.txt"
@@ -494,6 +745,7 @@ def create_full_clone(
         "excluded": len(inv.excluded),
         "elapsed_seconds": round(time.time() - started, 3),
         "verification": verification,
+        "staging_verification": staging_verification,
         "manifest": str(target / MANIFEST_NAME),
     }
 
@@ -568,6 +820,8 @@ __all__ = [
     "inventory",
     "main",
     "verify_clone",
+    "verify_git_repository",
+    "source_worktree_guard",
 ]
 
 

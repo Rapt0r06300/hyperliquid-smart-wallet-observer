@@ -60,6 +60,26 @@ def _no_sessions(_root: str | Path) -> list[str]:
     return []
 
 
+def _clean_worktree(_root: str | Path) -> dict[str, object]:
+    return {
+        "head": "1" * 40,
+        "branch": "main",
+        "status": [],
+        "active_mutators": [],
+    }
+
+
+def _valid_git(_root: str | Path) -> dict[str, object]:
+    return {
+        "ok": True,
+        "head": "1" * 40,
+        "branch": "main",
+        "remotes": ["origin https://example.invalid/repo.git (fetch)"],
+        "fsck": "",
+        "failures": {},
+    }
+
+
 def test_complete_clone_preserves_history_git_logs_and_coherent_sqlite(tmp_path: Path):
     source = _source(tmp_path)
     destination = tmp_path / "portable"
@@ -69,6 +89,8 @@ def test_complete_clone_preserves_history_git_logs_and_coherent_sqlite(tmp_path:
         destination,
         writer_probe=_no_writers,
         session_probe=_no_sessions,
+        worktree_guard=_clean_worktree,
+        git_verifier=_valid_git,
     )
 
     assert result["ok"] is True
@@ -91,7 +113,10 @@ def test_complete_clone_preserves_history_git_logs_and_coherent_sqlite(tmp_path:
     assert manifest["durable_runtime_included"] is True
     assert manifest["git_history_included"] is True
     assert manifest["files"]["runtime/data/ledger.sqlite3"]["kind"] == "sqlite"
-    assert PC.verify_clone(destination, full_hash=True)["ok"] is True
+    verification = PC.verify_clone(destination, full_hash=True, git_verifier=_valid_git)
+    assert verification["ok"] is True
+    assert verification["git"]["branch"] == "main"
+    assert verification["longest_path_ok"] is True
 
 
 def test_clone_refuses_destination_inside_source(tmp_path: Path):
@@ -102,6 +127,8 @@ def test_clone_refuses_destination_inside_source(tmp_path: Path):
             source / "copy",
             writer_probe=_no_writers,
             session_probe=_no_sessions,
+            worktree_guard=_clean_worktree,
+            git_verifier=_valid_git,
         )
 
 
@@ -114,6 +141,8 @@ def test_clone_refuses_live_writer_before_copy(tmp_path: Path):
             destination,
             writer_probe=lambda _root: ["PID_VIVANT:42"],
             session_probe=_no_sessions,
+            worktree_guard=_clean_worktree,
+            git_verifier=_valid_git,
         )
     assert not destination.exists()
 
@@ -144,3 +173,61 @@ def test_root_cmd_defaults_to_full_clone_and_keeps_small_zip_mode():
     assert "hl_observer.ops.portable_clone" in text
     assert "--application-seule" in text
     assert "hl_observer.ops.archive_portable" in text
+
+
+def test_staging_failure_never_publishes_target(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    source = _source(tmp_path)
+    destination = tmp_path / "portable"
+    monkeypatch.setattr(
+        PC,
+        "verify_clone",
+        lambda *_args, **_kwargs: {"ok": False, "reason": "injected-staging-failure"},
+    )
+    with pytest.raises(PC.PortableCloneError, match="staging verification failed"):
+        PC.create_full_clone(
+            source,
+            destination,
+            writer_probe=_no_writers,
+            session_probe=_no_sessions,
+            worktree_guard=_clean_worktree,
+            git_verifier=_valid_git,
+        )
+    assert not destination.exists()
+    partials = list(tmp_path.glob(".portable.partial-*"))
+    assert len(partials) == 1
+    assert (partials[0] / "PORTABLE_CLONE_FAILED.txt").is_file()
+
+
+def test_clone_refuses_source_change_before_publication(tmp_path: Path):
+    source = _source(tmp_path)
+    destination = tmp_path / "portable"
+    calls = 0
+
+    def changing_guard(_root: str | Path) -> dict[str, object]:
+        nonlocal calls
+        calls += 1
+        payload = _clean_worktree(_root)
+        payload["head"] = str(calls) * 40
+        return payload
+
+    with pytest.raises(PC.PortableCloneError, match="identity changed"):
+        PC.create_full_clone(
+            source,
+            destination,
+            writer_probe=_no_writers,
+            session_probe=_no_sessions,
+            worktree_guard=changing_guard,
+            git_verifier=_valid_git,
+        )
+    assert not destination.exists()
+
+
+def test_inventory_refuses_unapproved_symlink_or_reparse(tmp_path: Path):
+    source = _source(tmp_path)
+    link = source / "linked-runtime"
+    try:
+        link.symlink_to(source / "runtime", target_is_directory=True)
+    except OSError:
+        pytest.skip("symlink creation is not available on this Windows account")
+    with pytest.raises(PC.PortableCloneError, match="reparse point refused"):
+        PC.inventory(source)
