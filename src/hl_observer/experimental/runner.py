@@ -14,7 +14,9 @@ from typing import Any
 
 from hl_observer.experimental import moteur_paper as MP
 from hl_observer.experimental.signaux import COLLECTEURS
+from hl_observer.alerts.local_alerts import LocalAlerts
 from hl_observer.market_data.live_l2_service import LiveL2Service
+from hl_observer.signals.all_signals_zero_alert import evaluer_signaux_tous_a_zero
 
 STATUS_RELPATH = MP.STATUS_RELPATH  # versionné (v2) : la v1 reste en quarantaine
 
@@ -458,6 +460,13 @@ def tick(
     ouvertures: list[dict] = []
     refus: list[dict] = []
     premier_signal: dict | None = None
+    candidats: list[MP.Signal] = []
+    sizing_outcomes: list[dict] = []
+    latences_decision_ms: list[float] = []
+    funnel = {k: 0 for k in (
+        "events", "fresh", "candidates", "l2", "liquidity", "edge", "consensus",
+        "PaperIntent", "PaperFill", "POSITION",
+    )}
     l2_reader = lecteur_l2 or LiveL2Service(root).as_legacy_reader()
     for m in moteurs or MP.MOTEURS:
         adaptateur = COLLECTEURS.get(m)
@@ -465,20 +474,45 @@ def tick(
             continue
         try:
             if m == "copy_vault":
-                sigs, refs = adaptateur(root, now_ms=now, lecteur_l2=l2_reader)
+                from hl_observer.experimental.exploratoire import charger_table_prelim
+
+                sigs, refs = adaptateur(
+                    root,
+                    now_ms=now,
+                    lecteur_l2=l2_reader,
+                    edge_par_coin=charger_table_prelim(root),
+                    experimental_entry_from_add=True,
+                )
+            elif m == "lead_lag":
+                sigs, refs = adaptateur(root, now_ms=now, experimental_calibration=True)
             else:
                 sigs, refs = adaptateur(root, now_ms=now)
         except Exception as exc:  # noqa: BLE001 — un moteur qui échoue n'arrête pas les autres
             refus.append({"moteur": m, "motif": "ADAPTATEUR_ERREUR", "detail": str(exc)[:120]})
             continue
         refus.extend(refs)
+        funnel["events"] += len(sigs) + len(refs)
+        funnel["fresh"] += sum(1 for s in sigs if 0 <= now - float(s.ts_signal_ms) <= MP.AGE_MAX_SIGNAL_MS)
+        funnel["candidates"] += len(sigs)
+        funnel["l2"] += sum(1 for s in sigs if s.prix_entree > 0 and (s.meta or {}).get("src_prix") is not None)
+        funnel["liquidity"] += sum(1 for s in sigs if float((s.meta or {}).get("depth_usd") or s.notional_usd) >= s.notional_usd)
+        funnel["edge"] += sum(1 for s in sigs if s.edge_estime_bps > 0)
+        funnel["consensus"] += sum(1 for s in sigs if int((s.meta or {}).get("consensus_count") or 1) >= 1)
+        candidats.extend(sigs)
         sigs.sort(key=lambda s: -s.edge_estime_bps)  # les meilleurs edges d'abord
         for sig in sigs:
             ok, motif = MP.admettre(sig, store, now_ms=now)
             if not ok:
                 refus.append({"moteur": m, "coin": sig.coin, "motif": motif})
+                sizing_outcomes.append({"coin": sig.coin, "notional_usd": 0.0, "motif": motif})
                 continue
             pos = MP.ouvrir(sig, store, root, now_ms=now)
+            funnel["PaperIntent"] += 1
+            funnel["PaperFill"] += 1 if pos.get("fill_id") else 0
+            funnel["POSITION"] += 1 if pos.get("position_id") else 0
+            decision_latency_ms = max(0.0, now - float(sig.ts_signal_ms))
+            latences_decision_ms.append(decision_latency_ms)
+            sizing_outcomes.append({"coin": sig.coin, "notional_usd": sig.notional_usd})
             info = {
                 "moteur": m,
                 "coin": sig.coin,
@@ -488,6 +522,13 @@ def tick(
                 "edge_estime_bps": sig.edge_estime_bps,
                 "notional_usd": sig.notional_usd,
                 "type_pnl": sig.type_pnl,
+                "entry_origin": (sig.meta or {}).get("entry_origin", "ENTRY_FROM_OPEN"),
+                "decision_latency_ms": round(decision_latency_ms, 1),
+                "intent_id": pos.get("intent_id"),
+                "order_id": pos.get("order_id"),
+                "fill_id": pos.get("fill_id"),
+                "position_id": pos.get("position_id"),
+                "real_execution": False,
             }
             ouvertures.append(info)
             if premier_signal is None:
@@ -571,28 +612,75 @@ def tick(
         positions.append(e)
     from collections import Counter
 
-    refus_par_motif = dict(Counter(r.get("motif") for r in refus))
+    motifs = Counter(str(r.get("motif") or "REFUS_SANS_MOTIF") for r in refus)
+    refus_par_motif = dict(motifs)
+    top_no_trade = [
+        {"reason": motif, "count": count}
+        for motif, count in motifs.most_common(10)
+    ]
+    statut_path = root / STATUS_RELPATH
+    statut_precedent: dict[str, Any] = {}
+    if statut_path.exists():
+        try:
+            statut_precedent = json.loads(statut_path.read_text(encoding="utf-8"))
+        except (OSError, ValueError, TypeError):
+            statut_precedent = {}
+    metriques_precedentes = statut_precedent.get("metriques_cross_venue") or {}
+    metriques_ts_ms = float(statut_precedent.get("metriques_cross_venue_ts_ms") or 0.0)
     try:
         from hl_observer.experimental.signaux import metriques_cross_venue
 
-        metriques = metriques_cross_venue(root)
+        if now - metriques_ts_ms >= 30_000 or not metriques_precedentes:
+            metriques = metriques_cross_venue(root)
+            metriques_ts_ms = now
+        else:
+            metriques = metriques_precedentes
     except Exception:  # noqa: BLE001 — les métriques ne bloquent jamais le tick
-        metriques = {}
+        metriques = metriques_precedentes
+    all_zero = evaluer_signaux_tous_a_zero(
+        sizing_outcomes,
+        alerts=LocalAlerts(enabled=True),
+        now_ms=int(now),
+    )
+    if positions:
+        zero_position_reason = None
+    elif not candidats:
+        zero_position_reason = "AUCUN_CANDIDAT_PRODUIT"
+    elif all_zero["tous_a_zero"]:
+        zero_position_reason = "TOUS_LES_CANDIDATS_DIMENSIONNES_A_ZERO"
+    elif top_no_trade:
+        zero_position_reason = "TOUS_REFUSES:%s" % top_no_trade[0]["reason"]
+    else:
+        zero_position_reason = "AUCUNE_POSITION_APRES_CHAINE_PAPER"
+
+    decision_latency_ms = {
+        "last": round(latences_decision_ms[-1], 1) if latences_decision_ms else None,
+        "max": round(max(latences_decision_ms), 1) if latences_decision_ms else None,
+        "mean": round(sum(latences_decision_ms) / len(latences_decision_ms), 1)
+        if latences_decision_ms
+        else None,
+    }
     statut = {
         "ts": time.time(),
         "now_ms": int(now),
         "ouvertures": ouvertures,
         "fermetures": fermetures,
         "n_refus_ce_tick": len(refus),
+        "top_no_trade": top_no_trade,
+        "decision_funnel": funnel,
+        "all_signals_zero": all_zero,
+        "zero_position_reason": zero_position_reason,
+        "decision_latency_ms": decision_latency_ms,
         "refus_par_motif_ce_tick": refus_par_motif,  # PAR TICK, pas cumulé
         "premier_signal": premier_signal,
         "resume": resume,
         "positions": positions,
         "mtm_total_usd": round(mtm_total, 6),
         "metriques_cross_venue": metriques,
+        "metriques_cross_venue_ts_ms": int(metriques_ts_ms) if metriques_ts_ms else None,
         "real_execution": False,
     }
-    p = root / STATUS_RELPATH
+    p = statut_path
     p.parent.mkdir(parents=True, exist_ok=True)
     tmp = p.with_suffix(".json.tmp")
     tmp.write_text(json.dumps(statut, ensure_ascii=False, indent=1), encoding="utf-8")

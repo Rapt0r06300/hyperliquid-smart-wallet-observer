@@ -100,7 +100,8 @@ REGISTRE: tuple[dict[str, Any], ...] = (
      "intervalle_s": 5, "args": (), "limite_minutes": 5.0,
      "heartbeat": "runtime/data/bbo_heartbeat.json"},
     {"nom": "experimental-paper", "script": "tools/experimental_paper_tick.py",
-     "intervalle_s": 60, "args": ("--une-fois",), "limite_minutes": 20.0},
+     "intervalle_s": 2, "args": ("--une-fois",), "limite_minutes": 2.0,
+     "heartbeat": "runtime/research_lab/heartbeats/experimental-paper.json"},
     {"nom": "copy-whitelist", "script": "tools/ecrire_copy_whitelist.py",
      "intervalle_s": 21600, "args": (), "limite_minutes": 570.0},
     {"nom": "rapport-quotidien", "script": "tools/rapport_quotidien.py",
@@ -158,6 +159,13 @@ COLLECTEURS_HARVEST = frozenset(n for n in _HARVEST_SOUHAITE if n in _NOMS_REGIS
 COLLECTEURS_REQUIS = COLLECTEURS_CORE
 
 
+def experimental_paper_demande() -> bool:
+    """Le worker paper est opt-in, mais un flag actif implique un worker supervise."""
+    return os.environ.get("HYPERSMART_EXPERIMENTAL_PAPER", "0").strip().lower() in {
+        "1", "true", "yes", "oui", "on",
+    }
+
+
 def normaliser_profil(profil: str | None, *, defaut: str = "core") -> str:
     aliases = {
         "analyse": "research",
@@ -185,8 +193,20 @@ def collecteurs_pour_profil(profil: str | None = "core") -> tuple[dict[str, Any]
         return REGISTRE
     if profil_normalise == "harvest":
         # union explicite (les noms CORE appartiennent à CORE via profil_collecteur ; on les ré-inclut ici).
-        return tuple(c for c in REGISTRE if c["nom"] in COLLECTEURS_HARVEST)
+        noms = set(COLLECTEURS_HARVEST)
+        if experimental_paper_demande():
+            noms.add("experimental-paper")
+        return tuple(c for c in REGISTRE if c["nom"] in noms)
     return tuple(c for c in REGISTRE if profil_collecteur(c["nom"]) == profil_normalise)
+
+
+def collecteurs_requis_pour_run(profil: str | None) -> frozenset[str]:
+    """Requis pour ce lancement; experimental-paper ne devient jamais CORE."""
+    normalise = normaliser_profil(profil)
+    requis = set(COLLECTEURS_REQUIS)
+    if experimental_paper_demande() and normalise in {"harvest", "all"}:
+        requis.add("experimental-paper")
+    return frozenset(requis)
 
 
 def actif() -> bool:
@@ -805,7 +825,8 @@ def _cli(argv: list[str]) -> int:
             r["profil"], r["reutilises"] or "aucun"), flush=True)
         # Une source OBLIGATOIRE qui n'a pas démarré doit bloquer le lanceur (sortie non-zero),
         # pas seulement s'afficher : le moteur ne doit pas tourner au-dessus de collecteurs morts.
-        requis_manquants = [n for n in r["manquants"] if n in COLLECTEURS_REQUIS]
+        requis_du_run = collecteurs_requis_pour_run(profil)
+        requis_manquants = [n for n in r["manquants"] if n in requis_du_run]
         if requis_manquants:
             print("[collecteurs] ECHEC: sources obligatoires non demarrees: %s" % ", ".join(
                 requis_manquants), flush=True)

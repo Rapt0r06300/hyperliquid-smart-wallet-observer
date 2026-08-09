@@ -274,6 +274,9 @@ th{letter-spacing:1.2px}
    <table><thead><tr><th style="width:16%">coin · 2 jambes (venue sens @ prix exéc.)</th><th style="width:8%">hedge</th><th style="width:11%">frais RÉELS payés</th><th style="width:14%">funding settled / accru</th><th style="width:9%">basis</th><th style="width:13%">liquidable maintenant</th><th style="width:8%">liq.</th><th style="width:9%;text-align:right">âge min</th></tr></thead><tbody id="xptb"></tbody></table>
    <div class="hint" id="xp-refus" style="margin-top:8px"></div></div>
 
+ <div class="card" style="margin-bottom:12px"><h3>JOURNAL PAPER CANONIQUE <span class="hint">PaperIntent → PaperOrder → PaperFill → position → ledger</span></h3>
+   <table><thead><tr><th style="width:20%">événement</th><th style="width:16%">coin</th><th style="width:44%">identifiant</th><th style="width:20%;text-align:right">PnL</th></tr></thead><tbody id="ledger-tb"></tbody></table></div>
+
  <div class="card" style="margin-bottom:12px"><h3>TOP OPPORTUNITÉS <span class="hint" id="oppsum">— toutes stratégies · edge net après coûts —</span></h3>
    <table><thead><tr><th style="width:7%">#</th><th style="width:23%">coin</th><th style="width:28%">stratégie</th><th style="width:20%">edge net</th><th style="width:22%;text-align:right">power</th></tr></thead><tbody id="opptb"></tbody></table></div>
 
@@ -359,10 +362,9 @@ function renderFeed(){var f=document.getElementById('feed');f.innerHTML=FEED.sli
 // 20/07 : le curseur du flux affichait l'heure du DERNIER evenement (fige 5 min a l'ecran
 // sous l'etiquette « LIVE »). Redessine chaque seconde : l'horloge du curseur dit l'heure vraie.
 setInterval(renderFeed,1000);
-function smoothPath(pts){if(pts.length<2)return pts.length?('M'+pts[0][0]+' '+pts[0][1]):'';
+function smoothPath(pts){if(!pts.length)return '';
   var d='M'+pts[0][0].toFixed(1)+' '+pts[0][1].toFixed(1);
-  for(var i=0;i<pts.length-1;i++){var p0=pts[i>0?i-1:0],p1=pts[i],p2=pts[i+1],p3=pts[i+2<pts.length?i+2:i+1];
-    d+=' C'+(p1[0]+(p2[0]-p0[0])/6).toFixed(1)+' '+(p1[1]+(p2[1]-p0[1])/6).toFixed(1)+','+(p2[0]-(p3[0]-p1[0])/6).toFixed(1)+' '+(p2[1]-(p3[1]-p1[1])/6).toFixed(1)+','+p2[0].toFixed(1)+' '+p2[1].toFixed(1);}
+  for(var i=1;i<pts.length;i++)d+=' L'+pts[i][0].toFixed(1)+' '+pts[i][1].toFixed(1);
   return d;}
 // ══ LE METAGRAPHE, REFAIT ENTIEREMENT (21/07, Flo : « il est completement eclate ») ══
 // CE QUI CLOCHAIT, MESURE : l'historique servi contenait 600 points valant TOUS 1 000,00 $
@@ -438,29 +440,33 @@ function drawMeta(pts,nReels){
 // par defaut est donc TOUT. Zoomer sur 1 h d'une serie etalee sur 3 jours ne montrerait rien.
 window._metaWin=0;
 function ptsFenetre(){
-  var pts=window._metaPts||[],w=window._metaWin||0;
+  var pts=(window._metaPts||[]).slice(),w=window._metaWin||0;
   if(w>0&&pts.length){var cut=Date.now()-w,f=pts.filter(function(p){return p.t>=cut});
     if(f.length>=2)pts=f;}
   window._mgReels=pts.length;
-  // LE POINT VIVANT — construit sur LA MEME serie, donc incapable de produire une falaise :
-  // dernier point REEL + le seul terme qui bouge entre deux evenements, le funding couru
-  // non encore regle. Quand le reglement tombe, le ledger l'absorbe et l'ecart repart de 0.
-  var d=Number(window._mgLiveDelta||0);
-  if(pts.length&&isFinite(d)&&Math.abs(d)>0)
-    pts=pts.concat([{t:Date.now(),equity:pts[pts.length-1].equity+d,vivant:true}]);
   return pts;}
 function drawMetaLive(){var p=ptsFenetre();drawMeta(p,window._mgReels);}
+function upsertStatusGraphPoint(d){
+  var g=d&&d.latest_graph_point;if(!g)return;
+  var t=Number(g.timestamp_ms),eq=Number(g.current_equity_usdt),pnl=Number(g.current_pnl_usdc);
+  if(!isFinite(t)||!isFinite(eq)||eq<=0)return;
+  var pts=(window._metaPts||[]).slice(),point={t:t,equity:eq,pnl:isFinite(pnl)?pnl:(eq-1000),status:true};
+  if(pts.length&&Number(pts[pts.length-1].t)===t)pts[pts.length-1]=point;else pts.push(point);
+  pts.sort(function(a,b){return a.t-b.t;});
+  if(pts.length>600)pts=pts.slice(pts.length-600);
+  window._metaPts=pts;
+}
 function loadMeta(){fetch('/v2/equity_history?max=600').then(function(r){return r.json()}).then(function(d){
   var pts=(d.points||[]).map(function(p){return {t:Number(p.t),equity:Number(p.equity),pnl:Number(p.pnl)}})
     .filter(function(p){return isFinite(p.t)&&isFinite(p.equity)&&p.equity>0});
-  window._metaPts=pts;window._metaMeta=d;
+  window._metaPts=pts;window._metaMeta=d;upsertStatusGraphPoint(window._statusPayload);
   // la BASE du % reste l'equity de DEPART de la serie complete — jamais le debut de la
   // fenetre zoomee (sinon le % mentirait des qu'on zoome).
-  if(pts.length)window._base=pts[0].equity;
+  var merged=window._metaPts||[];if(merged.length)window._base=merged[0].equity;
   var bl=document.getElementById('mg-baselbl');
   if(bl&&d.sources)bl.title='la courbe contient : '+d.sources.join(' + ')
     +(d.copy_motif?(' — '+d.copy_motif):'');
-  if(!pts.length&&d.indisponible){mgDire('courbe indisponible<br><span style="opacity:.6">'+d.indisponible+'</span>');return;}
+  if(!merged.length&&d.indisponible){mgDire('courbe indisponible<br><span style="opacity:.6">'+d.indisponible+'</span>');return;}
   drawMetaLive();}).catch(function(e){signalerPanne('equity',e);});}
 document.addEventListener('DOMContentLoaded',function(){
   var s=document.getElementById('mg-span');
@@ -475,6 +481,7 @@ function modeOf(p){var m=(p.position_mode||'').toUpperCase();
 function led(id,st){var e=document.getElementById(id);e.className='led'+(st==='ok'?'':st==='warn'?' warn':' off');}
 function tick(){
   fetch('/api/simulation/status').then(function(r){return r.json()}).then(function(d){
+    window._statusPayload=d;upsertStatusGraphPoint(d);drawMetaLive();
     if(!BOOTED){BOOTED=true;document.getElementById('boot').textContent='SESSION ATTACHÉE · '+(d.read_only?'READ-ONLY':'?')+' · PAPER SIMULATION';push('ev-sys','SYS','session attachée · lecture seule · ledger canonique');}
     document.getElementById('ro').textContent=d.read_only?'read_only':'??';led('l-safe',d.read_only?'ok':'off');
     var pnl=Number(d.net_pnl_usdt||0),eq=Number(d.equity_usdt||0);
@@ -559,6 +566,10 @@ function tick(){
     cRows.slice(0,16).forEach(function(p){var tr=document.createElement('tr');
       tr.innerHTML='<td>'+p.coin+'</td><td><span class="tag2 tg-g">CARRY</span></td><td>'+n(p.marge)+'</td><td data-carrylive="'+p.coin+'" style="text-align:right;color:'+col(p.accru)+'" title="funding accru — coule en continu (taux mesure)">+'+n(p.accru,6)+'</td>';tb.appendChild(tr);});
     if(!ps.length&&!cRows.length)tb.innerHTML='<tr><td colspan="4" style="color:var(--mut2);border:0;padding-top:10px">— aucune position ouverte —</td></tr>';
+    var ltb=document.getElementById('ledger-tb');if(ltb){ltb.innerHTML='';
+      (d.ledger_recent_events||[]).slice().reverse().slice(0,12).forEach(function(e){var tr=document.createElement('tr');
+        [e.event_type||e.type||e.action||'?',e.coin||'?',e.position_id||e.fill_id||e.order_id||'?',e.realized_pnl_usdc!=null?e.realized_pnl_usdc:(e.pnl_usdc!=null?e.pnl_usdc:'—')].forEach(function(v,i){var td=document.createElement('td');td.textContent=String(v);if(i===3)td.style.textAlign='right';tr.appendChild(td);});ltb.appendChild(tr);});
+      if(!ltb.children.length)ltb.innerHTML='<tr><td colspan="4" style="color:var(--mut2);border:0;padding-top:10px">— aucun événement ledger —</td></tr>';}
     if(window.majAccruLive)majAccruLive();   // anti-saut : jamais une valeur brute a l'ecran
     // wiring
     var pe=(fus.paper_engine)||{},summ=fus.external_profile_execution_summary||{};
@@ -632,53 +643,20 @@ function rendrePannes(){
 // ── UNE SEULE VERITE en haut : POSITIONS = copy + carry (avec le detail), sans melanger l'equity.
 // Les deux loaders (statut copy / carry) stockent leur compte et appellent syncTop -> pas de clignotement.
 function syncTop(){
-  var cp=window._copyPos||0, cy=window._carryPos||0, totPos=cp+cy;
-  var pr=Number(window._copyReal||0), cr=Number(window._carryReal||0);
-  var copyNet=Number(window._copyNet||0), carryNet=Number(window._carryNet||0), totNet=copyNet+carryNet;
-  var el=document.getElementById('pos'); if(el){el.textContent=totPos; el.title=cp+' copy + '+cy+' carry';}
-  // 🔴 19/07 (revue sur la page LIVE) — trois tuiles affichaient du COPY-ONLY sous une etiquette
-  // GLOBALE, et se contredisaient a l'ecran : « POSITIONS 1 » a cote de « 0 OUVERTES »,
-  // « MARGE 0.00 » avec une position ouverte, « TRADES CLOS 0 » alors que le carry en avait 31.
-  // Un chiffre juste sous une mauvaise etiquette reste un chiffre FAUX pour celui qui le lit.
-  var T=document.getElementById('trd');
-  if(T){var tc=(window._copyCloses||0)+(window._carryCloses||0);
-        T.textContent=tc; T.title=(window._copyCloses||0)+' copy + '+(window._carryCloses||0)
-          +' carry — session courante (l\'historique complet vit au ledger + rapport quotidien)';}
-  var X=document.getElementById('expo');
-  if(X){var mg=Number(window._copyExpo||0)/10+Number(window._carryMarge||0);
-        X.textContent=n(mg); X.title='marge copy + marge carry (le levier differe par strategie)';}
-  var bd=document.getElementById('pos-bd'); if(bd){bd.textContent = cy>0 ? '('+cp+'c · '+cy+'y)' : '';}
-  // PnL AFFICHÉ = TOTAL toutes stratégies (copy + carry) — demande de Flo. Equity = equity copy + net carry.
-  // 20/07 soir (Flo) : 6 DECIMALES sur le grand chiffre aussi — le PnL doit VIVRE a l'ecran,
-  // au meme grain que les cellules par position (le ticker 1 s le fait avancer chaque seconde).
-  var P=document.getElementById('pnl'); if(P){P.textContent=(totNet>=0?'+':'')+n(totNet,6); P.className='pnl-big '+(totNet>=0?'pnl-pos':'pnl-neg');
-    P.title='PnL net DEPUIS LE DEBUT = realise TOTAL du ledger + funding COURU. C\'est exactement '
-      +'le dernier point de la courbe : un seul chiffre, une seule verite. Le PnL de la session '
-      +'courante est affiche a cote, etiquete. Le latent de base (reversible) reste HORS du net.';}
-  var eqCopy=Number(window._copyEq||0)||1000; var E=document.getElementById('eq'); if(E){E.textContent=n(eqCopy+carryNet,6);}
-  // ⚠️ 21/07 — `_eqLiveVal` N'ALIMENTE PLUS LE METAGRAPHE. Cette valeur melange l'equity copy
-  // et le net carry de SESSION ; la courbe, elle, cumule le realise TOTAL du ledger. Les
-  // rebrancher l'une sur l'autre recree la falaise verticale. Le graphe lit `_mgLiveDelta`.
-  window._eqLiveVal=eqCopy+carryNet;   // conservee pour l'affichage du bandeau equity uniquement
-  var base=window._base||1000; var chg=base>0?(totNet/base*100):0; var C=document.getElementById('chg'); if(C){C.textContent=(chg>=0?'+':'')+n(chg,2)+'%';C.style.color=col(chg);}
-  var cs=document.getElementById('carry-sub'); if(cs){
-    var lat=Number(window._carryLatent||0);
-    var ns=Number(window._carryNetSess||0);
-    cs.textContent = '  ·  total '+(cp+cy)+' pos · copy '+(copyNet>=0?'+':'')+n(copyNet,2)
-      +'$ · carry RETIRÉ ('+n(Number(window._carryRetireArchive||0),2)+'$ archivé)'
-      +' · latent base '+(lat>=0?'+':'')+n(lat,2)+'$ (réversible)';
-    cs.title='« carry » = depuis le tout debut (= la courbe). « session » = depuis le dernier '
-      +'redemarrage. Les deux sont vraies, elles ne repondent pas a la meme question.';}
-  var st=document.getElementById('strattb');
-  if(st){var mk=function(v){return (v>=0?'+':'')+n(v,2)+'$';};
-    st.innerHTML=
-       '<tr><td>Copy-trading</td><td>'+cp+'</td><td style="color:'+col(copyNet)+'">'+mk(copyNet)+'</td><td style="text-align:right;color:var(--mut)">'+(cp>0?'actif':'attend un edge prouvé (protège le capital)')+'</td></tr>'
-      +'<tr style="opacity:.55"><td>Carry delta-neutre</td><td>0</td><td style="color:var(--mut)">RETIRÉ</td><td style="text-align:right;color:var(--mut)">retiré le 23/07 — historique '+mk(Number(window._carryArchive||0))+' archivé au ledger</td></tr>'
-      // 21/07 : l'ARBITRAGE de dislocation a sa ligne — avec l'ETAT MESURE (« plus gros
-      // ecart X bps < seuil 35 »), jamais un tiret muet. Un module qui attend le DIT.
-      +'<tr><td>Arbitrage dislocation</td><td>'+(window._arbPos||0)+'</td><td style="color:'+col(Number(window._arbReal||0))+'">'+mk(Number(window._arbReal||0))+'</td><td style="text-align:right;color:var(--mut)">'+(window._arbEtat||'—')+'</td></tr>'
-      +'<tr><td>Liquidations</td><td>—</td><td style="color:var(--mut2)">—</td><td style="text-align:right;color:var(--mut)">mesure · données en accumulation</td></tr>'
-      +'<tr style="border-top:1px solid var(--mut2)"><td><b>TOTAL paper</b></td><td><b>'+totPos+'</b></td><td style="color:'+col(totNet)+'"><b>'+mk(totNet)+'</b></td><td></td></tr>';
+  var d=window._statusPayload;if(!d)return;
+  var pos=Number(d.open_positions||0),closed=Number(d.closed_trades||0);
+  var net=Number(d.net_pnl_usdt||0),eq=Number(d.equity_usdt||0),expo=Number(d.open_exposure_usdt||0);
+  var el=document.getElementById('pos');if(el){el.textContent=pos;el.title='MAIN_PAPER canonique';}
+  var T=document.getElementById('trd');if(T){T.textContent=closed;T.title='clôtures du ledger MAIN_PAPER';}
+  var X=document.getElementById('expo');if(X){X.textContent=n(expo);X.title='exposition MAIN_PAPER canonique';}
+  var bd=document.getElementById('pos-bd');if(bd)bd.textContent='MAIN';
+  var P=document.getElementById('pnl');if(P){P.textContent=(net>=0?'+':'')+n(net,6);P.className='pnl-big '+(net>=0?'pnl-pos':'pnl-neg');P.title='source unique : /api/simulation/status';}
+  var E=document.getElementById('eq');if(E)E.textContent=n(eq,6);
+  var base=eq-net;if(!isFinite(base)||base<=0)base=1000;
+  var chg=net/base*100,C=document.getElementById('chg');if(C){C.textContent=(chg>=0?'+':'')+n(chg,2)+'%';C.style.color=col(chg);}
+  var st=document.getElementById('strattb');if(st){var ex=(d.lanes||{}).EXPERIMENTAL||{};
+    st.innerHTML='<tr><td>MAIN_PAPER canonique</td><td>'+pos+'</td><td style="color:'+col(net)+'">'+(net>=0?'+':'')+n(net,2)+'$</td><td style="text-align:right;color:var(--mut)">status + ledger</td></tr>'
+      +'<tr><td>EXPERIMENTAL_PAPER isolé</td><td>'+(Number(ex.positions||0))+'</td><td style="color:var(--mut)">séparé</td><td style="text-align:right;color:var(--mut)">'+(ex.available?'worker supervisé':'désactivé / indisponible')+'</td></tr>';
   }
 }
 // ── Panneau CARRY (poll independant du ledger carry dedie) ──
@@ -871,22 +849,14 @@ function majAccruLive(){
   if(lt){lt.textContent=(mtmTot>=0?'+':'')+n(mtmTot,6)+'$';lt.style.color=col(mtmTot);
     lt.title='MtM de base au MID, toutes positions — REVERSIBLE : ne se realise qu\'a la fermeture (A5). Volontairement HORS du net.';}
   window._carryLatent=mtmTot;
-  window._carryNet=Number(window._carryReal||0)+live;   // _carryReal = LIVRE LIVE (hors carry retiré)
-  // 21/07 — LE POINT VIVANT DU METAGRAPHE. Avant, il valait `equity copy + net carry SESSION`,
-  // c'est-a-dire une AUTRE formule que la serie (qui cumule le realise TOTAL) : l'ecart entre
-  // les deux se lisait comme une falaise verticale. Desormais on ne transmet que le DELTA qui
-  // bouge reellement entre deux evenements du ledger — le funding couru pas encore regle —
-  // et le graphe l'ajoute au dernier point REEL. Continu par construction.
-  window._mgLiveDelta=live-Number(window._carryRegle||0);
-  if(window.syncTop)syncTop();
-  if(window.drawMetaLive)drawMetaLive();   // le metagraphe recoit son point vivant a chaque image
+  window._carryNet=Number(window._carryReal||0)+live;
 }
 // ── FRAICHEUR MAXIMALE PHYSIQUE (20/07 soir, Flo : « chaque milliseconde ! ») ──
 // L'ecran affiche 60-144 images/s (7-16 ms) : plus vite qu'une image est INVISIBLE par
 // construction. requestAnimationFrame cale la mise a jour sur CHAQUE image de l'ecran —
 // c'est le maximum que la physique de l'affichage permet. L'interpolation reste la meme
 // honnetete : taux MESURE x temps ecoule, resnappee a chaque vraie mesure du moteur.
-(function boucleFraicheur(){ majAccruLive(); requestAnimationFrame(boucleFraicheur); })();
+setInterval(majAccruLive,250);
 </script></body></html>"""
 
 

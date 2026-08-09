@@ -18,6 +18,12 @@ from pathlib import Path
 from typing import Any
 
 from hl_observer.experimental import invariants as INV
+from hl_observer.ops.canonical_paper_intent_chain import (
+    fill_vers_position_ledger_open,
+    intent_canonique,
+    intent_vers_ordre_paper,
+    ordre_vers_fill_ledger,
+)
 
 MODE = "EXPERIMENTAL_PAPER"
 VERSION = "v2"                            # v1 (carry-style) EN QUARANTAINE ; v2 = deux jambes VWAP + barème exigeant
@@ -179,8 +185,26 @@ def ouvrir(sig: Signal, store: dict, root: str | Path, *, now_ms: float) -> dict
     cle = "%s:%s" % (sig.moteur, sig.coin.upper())
     notional0 = float(sig.notional_usd)
     cout_entree_usd = round(_cout_usd(sig.cout_entree_bps, notional0), 6)
+    strategie_canonique = {
+        "cross_venue": "cross_venue_dislocation",
+        "lead_lag": "lead_lag",
+        "copy_vault": "copy_vault",
+    }[sig.moteur]
+    intent = intent_canonique(
+        strategy=strategie_canonique,
+        coin=sig.coin,
+        side=int(sig.sens),
+        notional_usd=notional0,
+        signal_observable_at_ms=int(sig.ts_signal_ms),
+        cohort="EXPERIMENTAL",
+    )
+    ordre = intent_vers_ordre_paper(intent)
+    fill = ordre_vers_fill_ledger(ordre, prix=float(sig.prix_entree))
+    position_canonique, ledger_open = fill_vers_position_ledger_open(fill, lane="EXP")
     pos = {
-        "id": cle, "position_id": _nouveau_position_id(sig.moteur, sig.coin, now_ms),
+        "id": cle, "position_id": position_canonique["position_id"],
+        "intent_id": intent.intent_id, "order_id": ordre["order_id"], "fill_id": fill["fill_id"],
+        "lane": "EXP", "paper_only": True, "real_execution": False,
         "moteur": sig.moteur, "coin": sig.coin.upper(), "sens": int(sig.sens),
         "type_pnl": sig.type_pnl, "notional_usd": notional0,
         "initial_paper_notional_usd": notional0,                # P1 : référence FIGÉE (jamais re-multipliée)
@@ -203,7 +227,8 @@ def ouvrir(sig: Signal, store: dict, root: str | Path, *, now_ms: float) -> dict
         "last_vault_snapshot_id": (sig.meta or {}).get("snapshot_id"),
     }
     store["ouvertes"][cle] = pos
-    _ledger(root, {"kind": "OPEN", "position_id": pos["position_id"], "strategie": sig.moteur,
+    _ledger(root, {**ledger_open, "strategie": sig.moteur, "canonical_strategy": strategie_canonique,
+                   "intent_id": intent.intent_id, "order_id": ordre["order_id"], "fill_id": fill["fill_id"],
                    "coin": pos["coin"], "sens": pos["sens"], "notional_usd": pos["notional_usd"],
                    "prix_entree": pos["prix_entree"], "cout_entree_bps": pos["cout_entree_bps"],
                    "edge_estime_bps": pos["edge_estime_bps"], "roi_annuel_pct": sig.roi_annuel_pct,
@@ -241,6 +266,11 @@ def pnl_courant_usd(pos: dict, *, mark: float | None = None, base_courant_bps: f
 def sortir(pos: dict, store: dict, root: str | Path, *, prix_sortie: float | None,
            cout_sortie_bps: float, raison: str, now_ms: float,
            base_courant_bps: float | None = None) -> dict:
+    courante = store.get("ouvertes", {}).get(pos.get("id"))
+    if courante is None or courante.get("position_id") != pos.get("position_id"):
+        return {"coin": pos.get("coin"), "moteur": pos.get("moteur"), "realized_usd": 0.0,
+                "raison": "CLOSE_DUPLICATE_IGNORED", "position_id": pos.get("position_id"),
+                "ignored": True}
     """Ferme la position au bid/ask (prix_sortie), retranche le coût de sortie, journalise CLOSE."""
     notional_ferme = float(pos.get("notional_usd") or 0.0)                 # le résidu, entièrement fermé
     exit_cost_usd = _cout_usd(cout_sortie_bps, notional_ferme)
@@ -296,6 +326,11 @@ def reduire(pos: dict, store: dict, root: str | Path, *, notional_ferme_usd: flo
 
 def sortir_deux_jambes(pos: dict, store: dict, root: str | Path, *, jambes: list[dict], raison: str,
                        now_ms: float) -> dict:
+    courante = store.get("ouvertes", {}).get(pos.get("id"))
+    if courante is None or courante.get("position_id") != pos.get("position_id"):
+        return {"coin": pos.get("coin"), "moteur": pos.get("moteur"), "realized_usd": 0.0,
+                "raison": "CLOSE_DUPLICATE_IGNORED", "position_id": pos.get("position_id"),
+                "ignored": True, "jambes": []}
     """P7 — FERME une DISLOCATION comme DEUX JAMBES réconciliées : le realized = SOMME EXACTE des jambes
     (venue/side/entrée_exec/sortie_exec/taille/frais/slippage), jamais un seul mid HL ni une convergence
     synthétique. Écrit le détail des DEUX jambes dans le ledger CLOSE."""

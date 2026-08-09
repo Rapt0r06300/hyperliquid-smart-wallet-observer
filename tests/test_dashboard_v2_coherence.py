@@ -251,16 +251,17 @@ def test_le_flux_scan_etiquette_les_positions_comme_COPY():
 
 def test_le_grand_pnl_et_l_equity_sont_en_6_decimales():
     src = _src()
-    assert "P.textContent=(totNet>=0?'+':'')+n(totNet,6)" in src
-    assert "E.textContent=n(eqCopy+carryNet,6)" in src
+    assert "fetch('/api/simulation/status')" in src
+    assert "var pnl=Number(d.net_pnl_usdt||0),eq=Number(d.equity_usdt||0)" in src
+    assert "var totNet" not in src
 
 
 def test_la_boucle_de_fraicheur_est_calee_sur_l_ecran_requestAnimationFrame():
     """« chaque milliseconde » : l'ecran affiche 60-144 img/s — plus vite est invisible.
     rAF = le maximum physique, et il se met en pause onglet cache (0 gaspillage)."""
     src = _src()
-    assert "requestAnimationFrame(boucleFraicheur)" in src
-    assert "setInterval(majAccruLive" not in src, "l'ancien tick 1 s doit avoir disparu"
+    assert "requestAnimationFrame(boucleFraicheur)" not in src
+    assert "setInterval(majAccruLive,250)" in src
 
 
 def test_le_metagraphe_recoit_le_point_vivant_et_a_une_fenetre_zoomable():
@@ -270,8 +271,10 @@ def test_le_metagraphe_recoit_le_point_vivant_et_a_une_fenetre_zoomable():
     # non regle), ajoute au dernier point REEL -> continu par construction. Fenetre par defaut
     # TOUT (la serie est evenementielle : zoomer 1 h d'une serie de 3 j ne montrerait rien).
     src = _src()
-    assert "window._mgLiveDelta" in src, "le point vivant vient du delta funding, pas de _eqLiveVal"
-    assert "vivant:true" in src, "le segment vivant est distinct (dessine en pointilles)"
+    assert "window._mgLiveDelta" not in src
+    assert "function upsertStatusGraphPoint(d)" in src
+    assert "d&&d.latest_graph_point" in src
+    assert "window._statusPayload=d;upsertStatusGraphPoint(d);drawMetaLive()" in src
     assert "window._metaWin=0" in src, "fenetre par defaut TOUT (serie evenementielle)"
     assert "(w===0)?86400000:(w===86400000?3600000:0)" in src, "cycle tout -> 24h -> 1h au clic"
     assert "mg-baselbl" in src, "l'etiquette de base dit si c'est l'equity depart ou la fenetre"
@@ -280,7 +283,7 @@ def test_le_metagraphe_recoit_le_point_vivant_et_a_une_fenetre_zoomable():
 def test_la_base_du_pourcentage_vient_de_la_serie_COMPLETE_jamais_de_la_fenetre():
     """Zoomer ne doit JAMAIS changer le % affiche : base = premier point de la serie complete."""
     src = _src()
-    assert "window._base=pts[0].equity" in src
+    assert "window._base=merged[0].equity" in src
     assert "window._base=base" not in src, "l'ancienne base (fenetre courante) mentirait en zoom"
 
 
@@ -397,9 +400,10 @@ def test_l_endpoint_arbitrage_dit_POURQUOI_il_n_ouvre_pas(tmp_path, monkeypatch)
     assert "EN ATTENTE" in d["etat"] or "position" in d["etat"] or "indisponible" in d["etat"]
 
 
-def test_la_ligne_arbitrage_existe_dans_le_tableau_des_strategies():
+def test_le_tableau_principal_separe_main_et_experimental():
     src = _src()
-    assert "Arbitrage dislocation" in src
-    assert "window._arbPos" in src and "window._arbReal" in src and "window._arbEtat" in src
-    assert "loadArb" in src and "setInterval(loadArb,10000)" in src
+    assert "var d=window._statusPayload;if(!d)return" in src
+    assert "var ex=(d.lanes||{}).EXPERIMENTAL||{}" in src
+    assert "MAIN_PAPER canonique" in src
+    assert "EXPERIMENTAL_PAPER isol" in src
     assert "module éteint (flag off)" in src, "le flag off se DIT, il ne se devine pas"

@@ -13,6 +13,7 @@ REAL Hyperliquid signals upstream. If nothing has traded yet it honestly reports
 from __future__ import annotations
 
 from dataclasses import asdict
+from collections import deque
 import json
 import os
 import re
@@ -79,6 +80,11 @@ def create_status_router(state: UiState, settings: Settings | None = None) -> AP
     live_mark_lock = threading.Lock()
 
     def latest_market_marks(raw_positions: list[dict[str, Any]], current_ms: int) -> dict[str, Any]:
+        bbo_marks = _local_bbo_marks(
+            settings,
+            raw_positions=raw_positions,
+            current_ms=current_ms,
+        )
         live_marks = _live_all_mids_marks(
             settings,
             raw_positions=raw_positions,
@@ -86,11 +92,22 @@ def create_status_router(state: UiState, settings: Settings | None = None) -> AP
             cache=live_mark_cache,
             lock=live_mark_lock,
         )
-        if live_marks["prices"]:
-            return live_marks
+        combined = _merge_market_marks(bbo_marks, live_marks)
+        requested = {
+            _infer_status_coin(row, index=index)
+            for index, row in enumerate(raw_positions)
+            if isinstance(row, dict)
+        }
+        requested.discard("")
+        available = {
+            str(key).split("|", 1)[0]
+            for key in (combined.get("prices") or {})
+        }
+        if requested and requested.issubset(available):
+            return combined
         nonlocal cached_session_factory
         if settings is None:
-            return _empty_market_marks("NO_SETTINGS")
+            return combined if combined.get("prices") else _empty_market_marks("NO_SETTINGS")
         try:
             if cached_session_factory is None:
                 cached_session_factory = create_session_factory(create_sqlite_engine(settings.database_url))
@@ -108,7 +125,7 @@ def create_status_router(state: UiState, settings: Settings | None = None) -> AP
         if live_marks.get("error"):
             db_marks["live_read_status"] = live_marks.get("read_status")
             db_marks["live_error"] = live_marks.get("error")
-        return db_marks
+        return _merge_market_marks(combined, db_marks)
 
     @router.get("/api/simulation/status")
     def simulation_status() -> dict[str, Any]:
@@ -118,20 +135,6 @@ def create_status_router(state: UiState, settings: Settings | None = None) -> AP
         raw_positions = list((getattr(state, "simulation_virtual_positions", {}) or {}).values())
         engine_status = _read_engine_status(settings)
         scanner = _scanner_payload_from_engine_status(engine_status, current_ms)
-        latest_equity = None
-        latest_pnl = None
-        history = getattr(state, "simulation_equity_history", None) or []
-        if history and isinstance(history[-1], dict):
-            latest = history[-1]
-            try:
-                latest_equity = float(latest.get("current_equity_usdt"))
-            except (TypeError, ValueError):
-                latest_equity = None
-            try:
-                latest_pnl = float(latest.get("current_pnl_usdc"))
-            except (TypeError, ValueError):
-                latest_pnl = None
-
         market_marks = latest_market_marks(raw_positions, current_ms) if raw_positions else _empty_market_marks("NO_OPEN_POSITION")
         sltp_report = _apply_fast_status_sltp(state, market_marks, current_ms=current_ms)
         if sltp_report["closed_count"]:
@@ -155,8 +158,10 @@ def create_status_router(state: UiState, settings: Settings | None = None) -> AP
             net_pnl = float(marked["estimated_net_pnl_usdc"])
             _append_fast_equity_point(settings, state, marked, current_ms)
         else:
-            equity = round(latest_equity if latest_equity is not None else starting + realized, 6)
-            net_pnl = round(latest_pnl if latest_pnl is not None else equity - starting, 6)
+            # Never resurrect a stale overview point when no executable mark is
+            # available. The only honest flat value is starting + realized.
+            equity = round(starting + realized, 6)
+            net_pnl = round(realized, 6)
             marked["current_equity_usdt"] = equity
             marked["estimated_net_pnl_usdc"] = net_pnl
             marked["realized_pnl_usdc"] = round(realized, 6)
@@ -223,11 +228,21 @@ def create_status_router(state: UiState, settings: Settings | None = None) -> AP
         winning_trades = int(closed_trade_stats.get("winning_trades") or 0)
         losing_trades = int(closed_trade_stats.get("losing_trades") or 0)
         winrate_pct = float(closed_trade_stats.get("winrate_pct") or 0.0)
+        latest_graph_point = {
+            "timestamp_ms": current_ms,
+            "current_equity_usdt": round(equity, 6),
+            "current_pnl_usdc": round(net_pnl, 6),
+            "realized_pnl_usdc": round(realized, 6),
+            "unrealized_pnl_usdc": round(float(marked.get("unrealized_pnl_usdc") or 0.0), 6),
+            "source": "SIMULATION_STATUS_CANONICAL",
+        }
+        experimental_status = _read_experimental_paper_status(settings)
         payload = {
             "running": True,
             "server_running": True,
             "engine_running": scanner["engine_running"],
             "read_only": True,
+            "real_execution": False,
             # Local paper simulation, fed by REAL Hyperliquid market data.
             "mode": "LOCAL_PAPER_SIMULATION_REAL_HYPERLIQUID_DATA",
             "current_time_ms": current_ms,
@@ -251,6 +266,17 @@ def create_status_router(state: UiState, settings: Settings | None = None) -> AP
             "mark_diagnostics": marked["mark_diagnostics"],
             "position_integrity": position_integrity,
             "paper_ledger": paper_ledger,
+            "ledger_recent_events": [row for row in ledger_events if isinstance(row, dict)][-20:],
+            "latest_graph_point": latest_graph_point,
+            "lanes": {
+                "MAIN": {
+                    "positions": marked["positions"],
+                    "equity_usdt": equity,
+                    "net_pnl_usdt": net_pnl,
+                    "real_execution": False,
+                },
+                "EXPERIMENTAL": experimental_status,
+            },
             "v12": build_v12_status_payload(engine_status=engine_status, scanner=scanner),
             "fusion_runtime": fusion_status,
             "fusion_persistent_adapter": fusion_apply_report,
@@ -391,15 +417,169 @@ def _read_engine_status(settings: Settings | None) -> dict[str, Any]:
     return payload
 
 
+def _read_experimental_paper_status(settings: Settings | None) -> dict[str, Any]:
+    if settings is None:
+        return {"available": False, "reason": "NO_SETTINGS", "real_execution": False}
+    path = simulation_state_path(settings).parent / "experimental_paper_v2_status.json"
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        return {"available": False, "reason": "NOT_STARTED", "path": str(path), "real_execution": False}
+    except (OSError, ValueError, TypeError) as exc:
+        return {
+            "available": False,
+            "reason": "INVALID_STATUS",
+            "path": str(path),
+            "error": str(exc),
+            "real_execution": False,
+        }
+    if not isinstance(payload, dict):
+        return {"available": False, "reason": "INVALID_STATUS", "path": str(path), "real_execution": False}
+    result = dict(payload)
+    result.update({"available": True, "path": str(path), "lane": "EXPERIMENTAL", "real_execution": False})
+    return result
+
+
 def _empty_market_marks(reason: str, *, error: str | None = None) -> dict[str, Any]:
     payload: dict[str, Any] = {
         "prices": {},
         "sources": {},
+        "timestamps": {},
         "latest_exchange_ts": None,
         "read_status": reason,
         "error": error,
     }
     return payload
+
+
+def _local_bbo_marks(
+    settings: Settings | None,
+    *,
+    raw_positions: list[dict[str, Any]],
+    current_ms: int,
+    max_lines: int = 20_000,
+) -> dict[str, Any]:
+    """Return executable local Hyperliquid BBO marks for open positions.
+
+    A long is liquidated at the bid and a short at the ask. The generic coin
+    mark remains the mid only for consumers that cannot express direction.
+    Stale/crossed books are ignored rather than turned into a fake mark.
+    """
+
+    if settings is None or not raw_positions:
+        return _empty_market_marks("NO_OPEN_POSITION")
+    requested = {
+        _infer_status_coin(row, index=index)
+        for index, row in enumerate(raw_positions)
+        if isinstance(row, dict)
+    }
+    requested.discard("")
+    if not requested:
+        return _empty_market_marks("NO_OPEN_POSITION_COIN")
+    state_path = simulation_state_path(settings).resolve()
+    if state_path.parent.name.lower() == "data" and state_path.parent.parent.name.lower() == "runtime":
+        root = state_path.parent.parent.parent
+    else:
+        root = Path.cwd().resolve()
+    tape = root / "runtime" / "data" / "bbo_tape.jsonl"
+    if not tape.exists():
+        return _empty_market_marks("LOCAL_BBO_MISSING")
+
+    latest: dict[str, dict[str, Any]] = {}
+    try:
+        with tape.open("r", encoding="utf-8", errors="ignore") as handle:
+            rows = deque(handle, maxlen=max_lines)
+    except OSError as exc:
+        return _empty_market_marks("LOCAL_BBO_READ_FAILED", error=str(exc))
+    for raw in rows:
+        try:
+            row = json.loads(raw)
+        except (TypeError, ValueError):
+            continue
+        coin = _clean_status_coin(row.get("coin"))
+        venue = str(row.get("venue") or "").upper()
+        if coin not in requested or venue not in {"HL", "HYPERLIQUID"}:
+            continue
+        bid = _safe_float(row.get("bid"))
+        ask = _safe_float(row.get("ask"))
+        timestamp = _safe_int(
+            first_not_none(
+                row.get("ts_wall_ms"),
+                row.get("recv_wall_ts_ms"),
+                row.get("ts_ex"),
+            )
+        )
+        if bid is None or ask is None or timestamp is None or bid <= 0 or ask < bid:
+            continue
+        if timestamp < 10_000_000_000:
+            timestamp *= 1000
+        if current_ms - timestamp < 0 or current_ms - timestamp > LIVE_MARKS_MAX_STALE_MS:
+            continue
+        previous = latest.get(coin)
+        if previous is None or timestamp >= int(previous["timestamp"]):
+            latest[coin] = {"bid": bid, "ask": ask, "timestamp": timestamp}
+
+    if not latest:
+        return _empty_market_marks("LOCAL_BBO_NO_FRESH_MARK")
+    prices: dict[str, float] = {}
+    sources: dict[str, str] = {}
+    timestamps: dict[str, int] = {}
+    for coin, quote in latest.items():
+        bid = float(quote["bid"])
+        ask = float(quote["ask"])
+        timestamp = int(quote["timestamp"])
+        values = {
+            coin: ((bid + ask) / 2.0, "LOCAL_BBO_MID"),
+            f"{coin}|LONG": (bid, "LOCAL_BBO_BID"),
+            f"{coin}|SHORT": (ask, "LOCAL_BBO_ASK"),
+        }
+        for key, (price, source) in values.items():
+            prices[key] = price
+            sources[key] = source
+            timestamps[key] = timestamp
+    return {
+        "prices": prices,
+        "sources": sources,
+        "timestamps": timestamps,
+        "latest_exchange_ts": max(timestamps.values()),
+        "read_status": "OK_LOCAL_BBO",
+        "error": None,
+        "read_only": True,
+        "source_path": str(tape),
+    }
+
+
+def _merge_market_marks(primary: dict[str, Any], fallback: dict[str, Any]) -> dict[str, Any]:
+    """Merge mark sources while preserving every primary price and timestamp."""
+
+    primary = primary if isinstance(primary, dict) else {}
+    fallback = fallback if isinstance(fallback, dict) else {}
+    prices = dict(fallback.get("prices") or {})
+    prices.update(primary.get("prices") or {})
+    sources = dict(fallback.get("sources") or {})
+    sources.update(primary.get("sources") or {})
+    timestamps = dict(fallback.get("timestamps") or {})
+    fallback_ts = _safe_int(fallback.get("latest_exchange_ts"))
+    for key in fallback.get("prices") or {}:
+        if fallback_ts is not None:
+            timestamps.setdefault(key, fallback_ts)
+    timestamps.update(primary.get("timestamps") or {})
+    primary_ts = _safe_int(primary.get("latest_exchange_ts"))
+    for key in primary.get("prices") or {}:
+        if primary_ts is not None:
+            timestamps.setdefault(key, primary_ts)
+    latest = max(timestamps.values()) if timestamps else first_not_none(primary_ts, fallback_ts)
+    return {
+        "prices": prices,
+        "sources": sources,
+        "timestamps": timestamps,
+        "latest_exchange_ts": latest,
+        "read_status": str(primary.get("read_status") or fallback.get("read_status") or "NO_USABLE_MARK"),
+        "error": primary.get("error") or fallback.get("error"),
+        "read_only": True,
+        "endpoint": primary.get("endpoint") or fallback.get("endpoint"),
+        "request_type": primary.get("request_type") or fallback.get("request_type"),
+    }
 
 
 def _apply_fast_status_sltp(state: UiState, market_marks: dict[str, Any], *, current_ms: int) -> dict[str, Any]:
@@ -751,6 +931,7 @@ def _marks_from_live_prices(
     return {
         "prices": selected,
         "sources": {coin: "liveAllMidsStatus" for coin in selected},
+        "timestamps": {coin: int(fetched_at_ms) for coin in selected},
         "latest_exchange_ts": int(fetched_at_ms),
         "read_status": read_status if selected else "LIVE_ALLMIDS_NO_MATCHING_MARK",
         "error": None,
@@ -812,6 +993,7 @@ def _latest_market_marks_from_snapshots(snapshots: list[MarketSnapshot]) -> dict
     return {
         "prices": prices,
         "sources": sources,
+        "timestamps": {coin: latest_exchange_ts for coin in prices if latest_exchange_ts is not None},
         "latest_exchange_ts": latest_exchange_ts,
         "read_status": "OK" if prices else "NO_USABLE_MARK",
         "error": None,
@@ -852,8 +1034,10 @@ def _mark_to_market_positions(
                 }
             )
             continue
-        mark_price = prices.get(coin)
-        mark_source = sources.get(coin)
+        directional_mark_key = f"{coin}|{direction}"
+        mark_key = directional_mark_key if directional_mark_key in prices else coin
+        mark_price = prices.get(mark_key)
+        mark_source = sources.get(mark_key)
         market_mark_available = mark_price is not None and mark_price > 0
         if market_mark_available:
             marks_used += 1
@@ -863,7 +1047,15 @@ def _mark_to_market_positions(
                 gross_unrealized = (entry_price - float(mark_price)) * size
             else:
                 gross_unrealized = (float(mark_price) - entry_price) * size
-            exit_cost_estimate = position_notional * FAST_STATUS_EXIT_COST_BPS / 10_000.0
+            explicit_exit_fee_bps = _safe_float(normalized.get("exit_fee_bps"))
+            explicit_slippage_bps = _safe_float(normalized.get("exit_slippage_bps"))
+            if explicit_exit_fee_bps is None and explicit_slippage_bps is None:
+                exit_cost_bps = FAST_STATUS_EXIT_COST_BPS
+            else:
+                exit_cost_bps = max(0.0, explicit_exit_fee_bps or 0.0) + max(
+                    0.0, explicit_slippage_bps or 0.0
+                )
+            exit_cost_estimate = position_notional * exit_cost_bps / 10_000.0
             entry_cost = separate_entry_cost_usdc(normalized)
             net_unrealized = round_trip_net_pnl_usdc(
                 gross_pnl_usdc=gross_unrealized,
@@ -886,12 +1078,15 @@ def _mark_to_market_positions(
             {
                 "mark_price": round(float(mark_price), 8) if mark_price is not None else None,
                 "mark_source": mark_source,
-                "mark_age_ms": _mark_age_ms(market_marks, current_ms) if market_mark_available else None,
+                "mark_age_ms": _mark_age_ms(market_marks, current_ms, key=mark_key)
+                if market_mark_available
+                else None,
                 "market_mark_available": bool(market_mark_available),
                 "notional_usdt": round(position_notional, 6),
                 "gross_unrealized_pnl_usdc": round(gross_unrealized, 6),
                 "entry_cost_carried_usdc": round(entry_cost, 6) if entry_cost is not None else None,
                 "exit_cost_estimate_usdc": round(exit_cost_estimate, 6),
+                "exit_cost_bps": round(exit_cost_bps, 6) if market_mark_available else None,
                 "unrealized_pnl_usdc": round(net_unrealized, 6) if net_unrealized is not None else None,
                 "pnl_accounting_status": (
                     "STRICT_ROUND_TRIP_COSTS_KNOWN"
@@ -1542,8 +1737,16 @@ def _equity_spike_diagnostics(history: list[dict[str, Any]]) -> dict[str, Any]:
     }
 
 
-def _mark_age_ms(market_marks: dict[str, Any], current_ms: int) -> int | None:
-    latest = _safe_int(market_marks.get("latest_exchange_ts"))
+def _mark_age_ms(
+    market_marks: dict[str, Any],
+    current_ms: int,
+    *,
+    key: str | None = None,
+) -> int | None:
+    timestamps = market_marks.get("timestamps") if isinstance(market_marks.get("timestamps"), dict) else {}
+    latest = _safe_int(timestamps.get(key)) if key else None
+    if latest is None:
+        latest = _safe_int(market_marks.get("latest_exchange_ts"))
     if latest is None:
         return None
     return max(0, int(current_ms) - int(latest))
@@ -1676,6 +1879,14 @@ def _normalize_position_for_status(raw_position: dict[str, Any], *, index: int) 
         "entry_price": round(entry_price, 8),
         "avg_entry_price": round(entry_price, 8),
         "entry_costs": separate_entry_cost_usdc(raw_position),
+        "exit_fee_bps": first_not_none(
+            _safe_float(raw_position.get("exit_fee_bps")),
+            _safe_float(raw_position.get("fee_bps")),
+        ),
+        "exit_slippage_bps": first_not_none(
+            _safe_float(raw_position.get("exit_slippage_bps")),
+            _safe_float(raw_position.get("slippage_bps")),
+        ),
         "fee_already_embedded_in_entry_price": raw_position.get(
             "fee_already_embedded_in_entry_price"
         ),

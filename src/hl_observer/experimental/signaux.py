@@ -241,6 +241,16 @@ def signaux_cross_venue(
         }
         cout_ar = car["hl_demi_spread_bps"] + car["bin_demi_spread_bps"] + 2 * (fhl + fbin) + LATENCE_COUT_BPS
         edge_net = gap - cout_ar
+        diagnostics = {
+            "raw_gap_bps": round(gap, 4),
+            "fees_bps": round(2 * (fhl + fbin), 4),
+            "spread_bps": round(car["hl_demi_spread_bps"] + car["bin_demi_spread_bps"], 4),
+            "slippage_bps": 0.0,
+            "latency_ms": LATENCE_MS,
+            "latency_cost_bps": LATENCE_COUT_BPS,
+            "depth_usd": round(depth, 2),
+            "net_edge_bps": round(edge_net, 4),
+        }
         if edge_net <= 0:
             refus.append(
                 {
@@ -249,6 +259,8 @@ def signaux_cross_venue(
                     "motif": "ECART_SOUS_LES_COUTS",
                     "gap_bps": round(gap, 2),
                     "cout_bps": round(cout_ar, 2),
+                    "reason": "ECART_SOUS_LES_COUTS",
+                    **diagnostics,
                 }
             )
             continue
@@ -284,6 +296,8 @@ def signaux_cross_venue(
                 "current_age_ms": round(age, 1),
                 "source_age_at_write_ms": source_age_at_write,
                 "source_event_id": d.get("event_id"),
+                "reason": "SIGNAL_ADMISSIBLE",
+                **diagnostics,
             },
         )
         # ROI mesurable seulement si une fréquence d'événements est mesurée ; ici cross-venue n'en fournit pas
@@ -355,7 +369,8 @@ CONFIG_GELE_RELPATH = Path("runtime") / "data" / "lead_lag_config_gele.json"
 
 
 def signaux_lead_lag(
-    root: str | Path = ".", *, now_ms: float | None = None, max_lignes: int = 40000
+    root: str | Path = ".", *, now_ms: float | None = None, max_lignes: int = 40000,
+    experimental_calibration: bool = False,
 ) -> tuple[list[Signal], list[dict]]:
     """Ouvre une position directionnelle quand un CHOC Binance FRAIS (trade) vient de se produire sur un
     coin de la config GELÉE (horizon validé par placebo), avec bid/ask HL exécutables. Sans config gelée
@@ -363,11 +378,37 @@ def signaux_lead_lag(
     root = Path(root)
     now = float(now_ms if now_ms is not None else time.time() * 1000)
     refus: list[dict] = []
+    lignes = (
+        (root / TAPE_RELPATH).read_text(encoding="utf-8", errors="ignore").splitlines()[-max_lignes:]
+        if (root / TAPE_RELPATH).exists()
+        else []
+    )
+    calibration_only = False
     try:
         cfg = load_frozen_evidence(root / CONFIG_GELE_RELPATH)
     except FrozenLeadLagEvidenceError as exc:
         motif = "CONFIG_NON_GELEE" if exc.code == "CONFIG_NOT_FOUND" else "CONFIG_INCOMPLETE"
-        return [], [{"moteur": "lead_lag", "motif": motif, "detail": exc.code}]
+        if not experimental_calibration:
+            return [], [{"moteur": "lead_lag", "motif": motif, "detail": exc.code}]
+        coins_observes: set[str] = set()
+        for ligne in lignes:
+            try:
+                coin = str(json.loads(ligne).get("coin") or "").upper()
+            except ValueError:
+                continue
+            if coin:
+                coins_observes.add(coin)
+        if not coins_observes:
+            return [], [{"moteur": "lead_lag", "motif": "TAPE_ABSENTE_EXPERIMENTAL"}]
+        calibration_only = True
+        cfg = {
+            "coins": sorted(coins_observes),
+            "control_coins": [],
+            "seuil_choc_bps": float(os.environ.get("HYPERSMART_EXP_LEAD_LAG_SHOCK_BPS", "8")),
+            "costs": {"round_trip_bps": float(os.environ.get("HYPERSMART_EXP_LEAD_LAG_COST_BPS", "12"))},
+            "edge_net_par_horizon_bps": {"60000": 0.0},
+            "frequency": {"events_per_day": None},
+        }
     coins = {c.upper() for c in cfg["coins"]} - {
         c.upper() for c in cfg["control_coins"]
     }
@@ -378,13 +419,8 @@ def signaux_lead_lag(
         for horizon, edge in cfg["edge_net_par_horizon_bps"].items()
     }
     meilleur_h = max(edge_par_h, key=lambda h: edge_par_h[h] or -1e9)
-    if (edge_par_h.get(meilleur_h) or 0) <= 0:
+    if not calibration_only and (edge_par_h.get(meilleur_h) or 0) <= 0:
         return [], [{"moteur": "lead_lag", "motif": "AUCUN_HORIZON_POSITIF"}]
-    lignes = (
-        (root / TAPE_RELPATH).read_text(encoding="utf-8", errors="ignore").splitlines()[-max_lignes:]
-        if (root / TAPE_RELPATH).exists()
-        else []
-    )
     trades: dict[str, list[dict[str, Any]]] = {}
     quotes: dict[str, list[dict[str, Any]]] = {}
     missing_wall_ts: set[str] = set()
@@ -477,6 +513,8 @@ def signaux_lead_lag(
         prix = q["ask"] if sens > 0 else q["bid"]  # entrée EXÉCUTABLE (on paie le spread)
         demi_spread_bps = 1e4 * (q["ask"] - q["bid"]) / (2 * mid) if mid else 0.0
         edge_net = float(edge_par_h[meilleur_h]) - demi_spread_bps  # edge validé − demi-spread payé
+        if calibration_only:
+            edge_net = abs(choc_bps) - frais - demi_spread_bps
         if edge_net <= 0:
             refus.append({"moteur": "lead_lag", "coin": c, "motif": "EDGE_NEGATIF_APRES_SPREAD"})
             continue
@@ -504,6 +542,8 @@ def signaux_lead_lag(
                 "quote_event_id": q.get("event_id"),
                 "trade_connection_id": trade.get("connection_id"),
                 "quote_connection_id": q.get("connection_id"),
+                "calibration_only": calibration_only,
+                "edge_source": "CAUSAL_FORWARD_SHOCK" if calibration_only else "FROZEN_OOS_CONFIG",
             },
         )
         s.roi_annuel_pct = roi_depuis_signal(
@@ -666,6 +706,7 @@ def signaux_vaults(
     edge_par_coin: dict | None = None,
     seuil_move: float = SEUIL_MOVE_FRAC_NAV,
     retenus: set | None = None,
+    experimental_entry_from_add: bool = False,
 ) -> tuple[list[Signal], list[dict]]:
     """Copy-Vaults (rectif Flo 23/07) : détecte le CHANGEMENT D'EXPO PAR COIN (Δszi) d'un vault RETENU
     par le score 8-facteurs (DENY-BY-DEFAULT), ABONNE le coin au carnet, puis N'ADMET QUE si (a) un L2 HL
@@ -715,12 +756,35 @@ def signaux_vaults(
             refus.append({"moteur": "copy_vault", "vault": adr[:10], "motif": "NAV_NULLE"})
             continue
         p0, p1 = _positions_par_coin(av), _positions_par_coin(ap)
-        best_coin, best_dnot, best_dszi = "", 0.0, 0.0
+        best_coin, best_dnot, best_dszi, best_action = "", 0.0, 0.0, ""
         for c in set(p0) | set(p1):
-            dszi = p1.get(c, (0.0, 0.0))[0] - p0.get(c, (0.0, 0.0))[0]
+            ancien = float(p0.get(c, (0.0, 0.0))[0])
+            nouveau = float(p1.get(c, (0.0, 0.0))[0])
+            dszi = nouveau - ancien
+            if ancien == 0.0 and nouveau != 0.0:
+                action = "OPEN"
+            elif ancien * nouveau > 0 and abs(nouveau) > abs(ancien):
+                action = "ADD"
+            elif nouveau == 0.0 and ancien != 0.0:
+                action = "CLOSE"
+            elif ancien * nouveau > 0 and abs(nouveau) < abs(ancien):
+                action = "REDUCE"
+            elif ancien * nouveau < 0:
+                action = "FLIP"
+            else:
+                action = "UNCHANGED"
+            if action == "ADD" and not experimental_entry_from_add:
+                refus.append({"moteur": "copy_vault", "vault": adr[:10], "coin": c,
+                              "motif": "ENTRY_FROM_ADD_EXPERIMENTAL_ONLY"})
+                continue
+            if action not in {"OPEN", "ADD"}:
+                if action != "UNCHANGED":
+                    refus.append({"moteur": "copy_vault", "vault": adr[:10], "coin": c,
+                                  "motif": "REDUCE_OR_CLOSE_NOT_ENTRY", "leader_action": action})
+                continue
             px_ref = p1.get(c, (0.0, 0.0))[1] or p0.get(c, (0.0, 0.0))[1]
             if abs(dszi) * px_ref > abs(best_dnot):
-                best_coin, best_dnot, best_dszi = c, dszi * px_ref, dszi
+                best_coin, best_dnot, best_dszi, best_action = c, dszi * px_ref, dszi, action
         move_frac = (abs(best_dnot) / nav) if nav else 0.0
         if not best_coin or move_frac < seuil_move:
             refus.append(
@@ -734,7 +798,7 @@ def signaux_vaults(
             )
             continue
         coins_bouges.append(best_coin)  # → abonnement dynamique du carnet
-        sens = 1 if best_dszi > 0 else -1
+        sens = 1 if p1.get(best_coin, (0.0, 0.0))[0] > 0 else -1
         # (b) edge POSITIF obligatoire (jamais inventé) : STRICT = gelé OOS ; EXPLORATOIRE = préliminaire par coin
         if exploratoire:
             cfg = edge_par_coin.get(best_coin)
@@ -846,6 +910,8 @@ def signaux_vaults(
             meta={
                 "vault": adr,
                 "coin": best_coin,
+                "entry_origin": "ENTRY_FROM_ADD" if best_action == "ADD" else "ENTRY_FROM_OPEN",
+                "leader_action": best_action,
                 "move_frac": round(move_frac, 3),
                 "src_prix": l2["src"],
                 "snapshot_ts_ms": snap_ts,

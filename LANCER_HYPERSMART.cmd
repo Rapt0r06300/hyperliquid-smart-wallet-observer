@@ -639,10 +639,8 @@ REM anti-orphelin INTERNE (sort si la session change). boucle_collecteur ne rela
 REM ⚠️ 2 flux PUBLICS en lecture. 0 cle, 0 ordre, 0 signature. Necessite le module python `websockets`.
 start "" /b tools\boucle_collecteur.cmd bbo-collector tools\collecter_bbo.py 5
 
-REM ---- VOIE EXPERIMENTAL_PAPER (23/07) : ouvre/gere/sort de VRAIES positions SIMULEES toutes les 60 s
-REM (cross-venue geles + lead-lag + copy-vaults) des qu'un signal est frais + executable + edge net > 0.
-REM Ledger/budget/limites ISOLES du livre live. Gate par HYPERSMART_EXPERIMENTAL_PAPER=1. 0 ordre reel.
-start "" /b tools\boucle_collecteur.cmd experimental-paper tools\experimental_paper_tick.py 60 --une-fois
+REM ---- VOIE EXPERIMENTAL_PAPER : le superviseur harvest est l'unique proprietaire du worker.
+REM Un flag actif impose PID + heartbeat ; aucun second processus manuel concurrent n'est lance ici.
 REM 23/07 (rectif Flo) — l'ouverture exploratoire est desormais INLINE dans le flux WS userFills
 REM (voir userfills-live plus bas : 2 cohortes ALPHA + DISCOVERY_PROBE, admission->L2->open dans le
 REM meme flux). L'ancien tick passif exploratory-paper est donc RETIRE (remplace par l'inline).
