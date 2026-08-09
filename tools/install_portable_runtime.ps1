@@ -117,7 +117,7 @@ try {
     ) -Description "Installing all dependencies from the verified offline wheelhouse"
 
     Invoke-Checked -FilePath $buildPythonExe -Arguments @(
-        "-c", "import fastapi,httpx,pydantic,sqlalchemy,typer,uvicorn,websocket,websockets,yaml,psutil,rich,numpy; print('dependency-smoke: OK')"
+        "-c", "import fastapi,httpx,pydantic,pyarrow,sqlalchemy,typer,uvicorn,websocket,websockets,yaml,psutil,rich,numpy; print('dependency-smoke: OK')"
     ) -Description "Checking embedded dependencies"
 
     New-Item -ItemType Directory -Force -Path $runtimeRoot | Out-Null
@@ -132,9 +132,12 @@ try {
 
     $commit = "UNKNOWN"
     $sourceEpoch = 315532800
+    $embeddedGit = Join-Path $root "tools\git\cmd\git.exe"
     try {
-        $commit = (& git -C $root rev-parse HEAD 2>$null).Trim()
-        $sourceEpoch = [int64](& git -C $root show -s --format=%ct HEAD 2>$null).Trim()
+        if (Test-Path -LiteralPath $embeddedGit -PathType Leaf) {
+            $commit = (& $embeddedGit -C $root rev-parse HEAD 2>$null).Trim()
+            $sourceEpoch = [int64](& $embeddedGit -C $root show -s --format=%ct HEAD 2>$null).Trim()
+        }
     } catch { }
     $createdAt = [DateTimeOffset]::FromUnixTimeSeconds($sourceEpoch).UtcDateTime.ToString("o")
     $manifest = [ordered]@{

@@ -237,7 +237,8 @@ def _post_transfer_assets(
     tls_files = sorted((root / "tools" / "python" / "Lib" / "site-packages").glob("**/cacert.pem"))
     python = root / "tools" / "python" / "python.exe"
     imports = (
-        "import importlib; names=['hl_observer.ops.superviseur_collecteurs',"
+        "import importlib; names=['pyarrow','hl_observer.hyperlab.medallion_store',"
+        "'hl_observer.ops.superviseur_collecteurs',"
         "'hl_observer.ops.session_harvest','hl_observer.ops.portable_smoke',"
         "'hyper_smart_observer.app.main']; [importlib.import_module(n) for n in names];"
         "print('PORTABLE_DYNAMIC_IMPORTS_OK')"

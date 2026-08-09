@@ -127,6 +127,7 @@ def test_bundle_builder_is_staged_external_and_requires_embedded_python():
 
 def test_runtime_installer_pins_official_cpython_and_validates_hash():
     text = (ROOT / "tools" / "install_portable_runtime.ps1").read_text(encoding="utf-8")
+    requirements = (ROOT / "requirements-portable.txt").read_text(encoding="utf-8")
     assert "https://www.python.org/ftp/python/" in text
     assert "python-$PythonVersion-embed-amd64.zip" in text
     assert "F05E28D161C6B15AF64A7CB7F08B4A22B3A6B03EEE71BAEE24EA557B3BDD5798" in text
@@ -144,6 +145,10 @@ def test_runtime_installer_pins_official_cpython_and_validates_hash():
     assert "requirements_sha256" in text
     assert "wheelhouse_lock_sha256" in text
     assert "isolated_from_user_site" in text
+    assert "pyarrow==25.0.0" in requirements
+    assert "import fastapi,httpx,pydantic,pyarrow" in text
+    assert 'tools\\git\\cmd\\git.exe' in text
+    assert "& git -C" not in text
 
 
 def test_portable_probe_rejects_external_python_paths(tmp_path):
