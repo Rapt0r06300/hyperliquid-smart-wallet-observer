@@ -45,12 +45,14 @@ def test_complete_pc_b_command_graph_can_be_proven(tmp_path: Path) -> None:
     result = PTP.prove_transferred_clone(
         tmp_path, collection_seconds=900, runner=runner,
         collection_runner=lambda *_args, **_kwargs: {"ok": True, "returncode": 0},
+        asset_verifier=lambda *_args, **_kwargs: {"ok": True},
         current_fingerprint=lambda: "pc-b",
         clone_verifier=lambda *_args, **_kwargs: {"ok": True, "full_hash": True},
     )
     assert result["portable_ready"] is True
     assert [step["name"] for step in result["steps"]] == [
-        "portable_check", "portable_smoke", "collection_15_minutes_and_clean_stop",
+        "portable_check", "portable_smoke", "github_push_self_check", "archive_self_check",
+        "collection_15_minutes_and_clean_stop",
         "replay_full", "replay_deep",
     ]
     assert any("portable-check" in command for command in calls)
@@ -63,6 +65,7 @@ def test_collection_shorter_than_fifteen_minutes_cannot_certify(tmp_path: Path) 
         tmp_path, collection_seconds=899,
         runner=lambda *_args, **_kwargs: {"ok": True, "returncode": 0},
         collection_runner=lambda *_args, **_kwargs: {"ok": True, "returncode": 0},
+        asset_verifier=lambda *_args, **_kwargs: {"ok": True},
         current_fingerprint=lambda: "pc-b",
         clone_verifier=lambda *_args, **_kwargs: {"ok": True},
     )
@@ -76,8 +79,21 @@ def test_runtime_collection_failure_is_fail_closed(tmp_path: Path) -> None:
         tmp_path, collection_seconds=900,
         runner=lambda *_args, **_kwargs: {"ok": True, "returncode": 0},
         collection_runner=lambda *_args, **_kwargs: {"ok": False, "reason": "ui_health_timeout"},
+        asset_verifier=lambda *_args, **_kwargs: {"ok": True},
         current_fingerprint=lambda: "pc-b",
         clone_verifier=lambda *_args, **_kwargs: {"ok": True},
     )
     assert result["portable_ready"] is False
     assert result["reason"] == "collection_proof_failed"
+
+
+def test_missing_post_transfer_assets_stop_before_launch(tmp_path: Path) -> None:
+    _manifest(tmp_path)
+    result = PTP.prove_transferred_clone(
+        tmp_path,
+        current_fingerprint=lambda: "pc-b",
+        clone_verifier=lambda *_args, **_kwargs: {"ok": True},
+        asset_verifier=lambda *_args, **_kwargs: {"ok": False, "missing": ["tools/python/python.exe"]},
+    )
+    assert result["reason"] == "post_transfer_assets_failed"
+    assert result["steps"] == []

@@ -28,6 +28,8 @@ set "HL_ENABLE_TESTNET_EXECUTION=0"
 set "REAL_MAINNET_TRADING=false"
 set "TESTNET_EXECUTION_ENABLED=false"
 
+if /I "%~1"=="--portable-self-check" goto :portable_self_check
+
 echo.
 echo ==============================================================================
 echo   PORTABILITE HYPERSMART - Windows 10/11 x64
@@ -78,11 +80,18 @@ goto :resultat
 "%HYPERSMART_PYTHON%" -m hl_observer.ops.portable_release --racine "%~dp0."
 set "RC=%ERRORLEVEL%"
 
+goto :resultat
+
+:portable_self_check
+"%HYPERSMART_PYTHON%" -c "import hl_observer.ops.portable_clone, hl_observer.ops.archive_portable; print('PORTABLE_ARCHIVE_CHECK_OK')"
+set "RC=%ERRORLEVEL%"
+goto :resultat
+
 :resultat
 
 echo.
 if "%RC%"=="0" (
-  echo [OK] Operation portable terminee et verifiee.
+  echo [OK] Operation portable terminee et reverifiee.
   echo      Sur le PC cible : ouvre le dossier puis double-clique LANCER_HYPERSMART.cmd.
 ) else (
   echo [REFUSE] Aucun clone final incomplet n'a ete publie ^(code %RC%^).

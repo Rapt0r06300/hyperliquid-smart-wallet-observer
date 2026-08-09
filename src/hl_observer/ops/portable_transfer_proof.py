@@ -10,6 +10,7 @@ import argparse
 import json
 import os
 import subprocess
+import tempfile
 import time
 import urllib.error
 import urllib.request
@@ -19,6 +20,21 @@ from typing import Any, Callable, Sequence
 from hl_observer.ops.portable_clone import machine_fingerprint, verify_clone
 
 REPORT_RELATIVE = Path("runtime") / "reports" / "portability" / "PORTABLE_PC_A_TO_PC_B_PROOF.json"
+
+REQUIRED_POST_TRANSFER_FILES = (
+    "LANCER_HYPERSMART.cmd",
+    "ANALYSER_BACKTESTS_REPLAYS.cmd",
+    "POUSSER-GITHUB-FORCE.cmd",
+    "CREER_ARCHIVE_PORTABLE.cmd",
+    "tools/python/python.exe",
+    "tools/git/cmd/git.exe",
+    "tools/wheelhouse/WHEELHOUSE_LOCK.json",
+    "tools/push_github_safe.ps1",
+    "tools/start_hypersmart_simulation.ps1",
+    "tools/portable_env.cmd",
+    "src/hl_observer/ops/superviseur_collecteurs.py",
+    "src/hl_observer/ops/session_harvest.py",
+)
 
 
 def _run(command: Sequence[str], *, cwd: Path, timeout: int, env: dict[str, str]) -> dict[str, Any]:
@@ -75,6 +91,30 @@ def _health_ok(url: str) -> bool:
         return False
 
 
+def _stop_spawned_launcher(root: Path, process: subprocess.Popen[str], env: dict[str, str]) -> None:
+    """Stop only the launcher spawned by this acceptance proof."""
+    if process.poll() is not None:
+        return
+    try:
+        if process.stdin is not None:
+            process.stdin.write("Q\n")
+            process.stdin.flush()
+            process.stdin.close()
+        process.wait(timeout=60)
+        return
+    except (OSError, BrokenPipeError, subprocess.TimeoutExpired):
+        pass
+    subprocess.run(
+        ["cmd.exe", "/d", "/c", str(root / "LANCER_HYPERSMART.cmd"), "stop"],
+        cwd=str(root), env=env, check=False, timeout=300,
+        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+    )
+    try:
+        process.wait(timeout=60)
+    except subprocess.TimeoutExpired:
+        process.terminate()
+
+
 def _collect_and_stop(root: Path, collection_seconds: int, env: dict[str, str]) -> dict[str, Any]:
     """Run the real launcher, observe a live UI, then send Q for a clean stop."""
     report_dir = root / "runtime" / "reports" / "portability"
@@ -118,6 +158,7 @@ def _collect_and_stop(root: Path, collection_seconds: int, env: dict[str, str]) 
                     break
                 time.sleep(2)
             else:
+                _stop_spawned_launcher(root, process, env)
                 return {
                     "ok": False,
                     "returncode": -1,
@@ -155,17 +196,7 @@ def _collect_and_stop(root: Path, collection_seconds: int, env: dict[str, str]) 
             returncode = process.wait(timeout=300)
     except (OSError, RuntimeError, subprocess.TimeoutExpired) as exc:
         if process is not None and process.poll() is None:
-            # This terminates only the child command created by this proof.  The
-            # normal launcher stop path remains the authoritative cleanup path.
-            subprocess.run(
-                ["cmd.exe", "/d", "/c", str(root / "LANCER_HYPERSMART.cmd"), "stop"],
-                cwd=str(root), env=env, check=False, timeout=300,
-                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-            )
-            try:
-                process.wait(timeout=60)
-            except subprocess.TimeoutExpired:
-                process.terminate()
+            _stop_spawned_launcher(root, process, env)
         return {
             "ok": False,
             "returncode": -1,
@@ -194,12 +225,56 @@ def _collect_and_stop(root: Path, collection_seconds: int, env: dict[str, str]) 
     }
 
 
+def _post_transfer_assets(
+    root: Path,
+    *,
+    runner: Callable[..., dict[str, Any]],
+    env: dict[str, str],
+) -> dict[str, Any]:
+    missing = [relative for relative in REQUIRED_POST_TRANSFER_FILES if not (root / relative).is_file()]
+    wheels = sorted((root / "tools" / "wheelhouse").glob("*.whl"))
+    dlls = sorted((root / "tools" / "python").glob("*.dll"))
+    tls_files = sorted((root / "tools" / "python" / "Lib" / "site-packages").glob("**/cacert.pem"))
+    python = root / "tools" / "python" / "python.exe"
+    imports = (
+        "import importlib; names=['hl_observer.ops.superviseur_collecteurs',"
+        "'hl_observer.ops.session_harvest','hl_observer.ops.portable_smoke',"
+        "'hyper_smart_observer.app.main']; [importlib.import_module(n) for n in names];"
+        "print('PORTABLE_DYNAMIC_IMPORTS_OK')"
+    )
+    import_check = runner(
+        [str(python), "-c", imports], cwd=root, timeout=300, env=env,
+    ) if python.is_file() else {"ok": False, "reason": "embedded_python_missing"}
+    lock_check = runner(
+        [
+            str(python), "tools/wheelhouse_lock.py", "--wheelhouse", "tools/wheelhouse",
+            "--verifier", "tools/wheelhouse/WHEELHOUSE_LOCK.json",
+            "--requirements", "requirements-portable.txt",
+        ],
+        cwd=root, timeout=300, env=env,
+    ) if python.is_file() else {"ok": False, "reason": "embedded_python_missing"}
+    ok = bool(
+        not missing and wheels and dlls and tls_files
+        and import_check.get("ok") and lock_check.get("ok")
+    )
+    return {
+        "ok": ok,
+        "missing": missing,
+        "wheel_count": len(wheels),
+        "dll_count": len(dlls),
+        "tls_ca_files": [str(path.relative_to(root)) for path in tls_files],
+        "dynamic_imports": import_check,
+        "wheelhouse_lock": lock_check,
+    }
+
+
 def prove_transferred_clone(
     root: str | Path,
     *,
     collection_seconds: int = 900,
     runner: Callable[..., dict[str, Any]] = _run,
     collection_runner: Callable[[Path, int, dict[str, str]], dict[str, Any]] = _collect_and_stop,
+    asset_verifier: Callable[..., dict[str, Any]] = _post_transfer_assets,
     clone_verifier: Callable[..., dict[str, Any]] = verify_clone,
     current_fingerprint: Callable[[], str] = machine_fingerprint,
 ) -> dict[str, Any]:
@@ -231,20 +306,30 @@ def prove_transferred_clone(
         "HYPERSMART_NO_PAUSE": "1", "HYPERSMART_NO_OPEN_REPORT": "1",
         "PYTHONPATH": str(project / "src") + os.pathsep + str(project),
     })
+    assets = asset_verifier(project, runner=runner, env=env)
+    if not assets.get("ok"):
+        return {
+            "ok": False, "portable_ready": False, "reason": "post_transfer_assets_failed",
+            "clone_verification": verification, "post_transfer_assets": assets, "steps": [],
+        }
     commands: list[tuple[str, list[str], int]] = [
         ("portable_check", ["cmd.exe", "/d", "/c", str(launcher), "portable-check"], 600),
         ("portable_smoke", [str(python), "-m", "hl_observer.ops.portable_smoke", "--root", str(project), "--json"], 600),
+        ("github_push_self_check", ["cmd.exe", "/d", "/c", str(project / "POUSSER-GITHUB-FORCE.cmd"), "--portable-self-check"], 120),
+        ("archive_self_check", ["cmd.exe", "/d", "/c", str(project / "CREER_ARCHIVE_PORTABLE.cmd"), "--portable-self-check"], 120),
     ]
     steps: list[dict[str, Any]] = []
-    for name, command, timeout in commands:
-        result = runner(command, cwd=project, timeout=timeout, env=env)
-        result["name"] = name
-        steps.append(result)
-        if not result.get("ok"):
-            return {
-                "ok": False, "portable_ready": False, "reason": name + "_failed",
-                "clone_verification": verification, "steps": steps,
-            }
+    with tempfile.TemporaryDirectory(prefix="HyperSmart test espace accent é-") as foreign_cwd:
+        for name, command, timeout in commands:
+            result = runner(command, cwd=Path(foreign_cwd), timeout=timeout, env=env)
+            result["name"] = name
+            result["foreign_cwd"] = foreign_cwd
+            steps.append(result)
+            if not result.get("ok"):
+                return {
+                    "ok": False, "portable_ready": False, "reason": name + "_failed",
+                    "clone_verification": verification, "post_transfer_assets": assets, "steps": steps,
+                }
 
     # The real target proof must collect for at least 15 minutes.  Tests inject
     # a runner and still exercise this exact command graph without waiting.
@@ -255,7 +340,7 @@ def prove_transferred_clone(
         return {
             "ok": False, "portable_ready": False,
             "reason": "collection_proof_failed" if not runtime.get("ok") else "collection_below_900_seconds",
-            "clone_verification": verification, "steps": steps,
+            "clone_verification": verification, "post_transfer_assets": assets, "steps": steps,
         }
 
     for name, mode, timeout in (("replay_full", "full", 7200), ("replay_deep", "deep", 14400)):
@@ -265,12 +350,13 @@ def prove_transferred_clone(
         if not result.get("ok"):
             return {
                 "ok": False, "portable_ready": False, "reason": name + "_failed",
-                "clone_verification": verification, "steps": steps,
+                "clone_verification": verification, "post_transfer_assets": assets, "steps": steps,
             }
     return {
         "ok": True, "portable_ready": True, "reason": "pc_a_to_pc_b_full_proof_passed",
         "source_machine_fingerprint": source_machine, "target_machine_fingerprint": target_machine,
         "collection_seconds": int(collection_seconds), "clone_verification": verification, "steps": steps,
+        "post_transfer_assets": assets,
     }
 
 

@@ -113,10 +113,14 @@ def test_complete_clone_preserves_history_git_logs_and_coherent_sqlite(tmp_path:
     assert manifest["durable_runtime_included"] is True
     assert manifest["git_history_included"] is True
     assert manifest["files"]["runtime/data/ledger.sqlite3"]["kind"] == "sqlite"
+    assert manifest["durable_artifacts"]["ledgers"]["count"] >= 1
+    assert manifest["durable_artifacts"]["histories"]["count"] >= 1
     verification = PC.verify_clone(destination, full_hash=True, git_verifier=_valid_git)
     assert verification["ok"] is True
     assert verification["git"]["branch"] == "main"
     assert verification["longest_path_ok"] is True
+    assert verification["git_identity_matches_source"] is True
+    assert verification["durable_artifacts_match_manifest"] is True
 
 
 def test_clone_refuses_destination_inside_source(tmp_path: Path):

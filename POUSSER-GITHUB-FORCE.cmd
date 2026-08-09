@@ -12,6 +12,8 @@ if not exist "%HYPERSMART_GIT%" (
   goto :echec_code
 )
 
+if /I "%~1"=="--portable-self-check" goto :portable_self_check
+
 set "PUSH_OPTION="
 if /I "%~1"=="--dry-run" set "PUSH_OPTION=-DryRun"
 if /I "%~1"=="dry-run" set "PUSH_OPTION=-DryRun"
@@ -44,6 +46,18 @@ if defined PUSH_OPTION (
 ) else (
   echo   [TERMINE] La branche main locale et GitHub sont synchronisees.
 )
+goto :fin
+
+:portable_self_check
+if not exist "%~dp0tools\push_github_safe.ps1" (
+  echo   [ERREUR] tools\push_github_safe.ps1 est introuvable.
+  set "RC=3"
+  goto :echec_code
+)
+"%HYPERSMART_GIT%" --version >nul 2>&1
+set "RC=%ERRORLEVEL%"
+if not "%RC%"=="0" goto :echec_code
+echo PORTABLE_GITHUB_PUSH_CHECK_OK
 goto :fin
 
 :echec

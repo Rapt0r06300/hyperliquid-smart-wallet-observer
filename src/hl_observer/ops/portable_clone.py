@@ -27,7 +27,7 @@ from hl_observer.ops import archive_portable as AP
 
 
 MANIFEST_NAME = "PORTABLE_FULL_CLONE_MANIFEST.json"
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 SQLITE_SUFFIXES = (".sqlite", ".sqlite3", ".db")
 SQLITE_SIDECARS = (".sqlite-wal", ".sqlite-shm", ".sqlite3-wal", ".sqlite3-shm", ".db-wal", ".db-shm")
 
@@ -87,6 +87,38 @@ REPARSE_WHITELIST = frozenset()
 
 class PortableCloneError(RuntimeError):
     """A full clone was refused before publication."""
+
+
+def _durable_artifact_summary(files: dict[str, dict[str, object]]) -> dict[str, dict[str, object]]:
+    """Summarise durable economic evidence already protected by per-file hashes."""
+    groups: dict[str, list[str]] = {
+        "ledgers": [], "sessions": [], "reports": [], "histories": [],
+    }
+    for relative in sorted(files):
+        lower = relative.casefold()
+        if "ledger" in lower or lower.endswith((".sqlite", ".sqlite3", ".db")):
+            groups["ledgers"].append(relative)
+        if lower.startswith("runtime/data/sessions/"):
+            groups["sessions"].append(relative)
+        if lower.startswith(("reports/", "runtime/reports/", "docs/release/")):
+            groups["reports"].append(relative)
+        if lower.startswith(("logs/", "data/", "runtime/replay/", "runtime/data/")):
+            groups["histories"].append(relative)
+    summary: dict[str, dict[str, object]] = {}
+    for name, members in groups.items():
+        evidence = [
+            {
+                "path": relative,
+                "sha256": str(files[relative].get("sha256") or ""),
+                "size": int(files[relative].get("size") or 0),
+            }
+            for relative in members
+        ]
+        digest = hashlib.sha256(
+            json.dumps(evidence, sort_keys=True, separators=(",", ":")).encode("utf-8")
+        ).hexdigest()
+        summary[name] = {"count": len(members), "sha256": digest}
+    return summary
 
 
 def machine_fingerprint() -> str:
@@ -586,6 +618,14 @@ def verify_clone(
         git = git_verifier(root)
     except Exception as exc:  # noqa: BLE001
         git = {"ok": False, "error": str(exc)}
+    schema_version = int(manifest.get("schema_version") or 1)
+    durable_expected = manifest.get("durable_artifacts")
+    durable_computed = _durable_artifact_summary(dict(manifest.get("files", {})))
+    durable_artifacts_ok = schema_version < 2 or durable_expected == durable_computed
+    source_git = dict(manifest.get("source_git") or {})
+    git_identity_ok = schema_version < 2 or all(
+        git.get(key) == source_git.get(key) for key in ("head", "branch", "remotes")
+    )
     ok = (
         not missing
         and not divergent
@@ -595,6 +635,8 @@ def verify_clone(
         and not reparse_points
         and longest_path_ok
         and bool(git.get("ok"))
+        and durable_artifacts_ok
+        and git_identity_ok
     )
     return {
         "ok": ok,
@@ -612,6 +654,9 @@ def verify_clone(
         "longest_path_ok": longest_path_ok,
         "long_path_recommendation": "C:\\HyperSmart" if not longest_path_ok else "",
         "git": git,
+        "git_identity_matches_source": git_identity_ok,
+        "durable_artifacts": durable_computed,
+        "durable_artifacts_match_manifest": durable_artifacts_ok,
         "source_machine_fingerprint": source_machine,
         "current_machine_fingerprint": current_machine,
         "physical_machine_distinct": bool(source_machine and source_machine != current_machine),
@@ -638,6 +683,9 @@ def create_full_clone(
         raise PortableCloneError("active sessions must be stopped first: " + ", ".join(active_sessions))
 
     source_guard_start = worktree_guard(source_root)
+    source_git_start = git_verifier(source_root)
+    if not source_git_start.get("ok"):
+        raise PortableCloneError("source Git repository failed fsck/identity checks")
 
     inv = inventory(source_root)
     source_state_start = _source_file_state(source_root, inv)
@@ -682,10 +730,16 @@ def create_full_clone(
                 )
 
         source_guard_end = worktree_guard(source_root)
+        source_git_end = git_verifier(source_root)
         final_inventory = inventory(source_root, scan_private_key_content=False)
         source_state_end = _source_file_state(source_root, inv)
         if source_guard_end != source_guard_start:
             raise PortableCloneError("source Git/worktree identity changed during clone")
+        if not source_git_end.get("ok") or any(
+            source_git_end.get(key) != source_git_start.get(key)
+            for key in ("head", "branch", "remotes")
+        ):
+            raise PortableCloneError("source Git fsck/HEAD/branch/remotes changed during clone")
         if _inventory_signature(final_inventory) != _inventory_signature(inv):
             raise PortableCloneError("source inventory changed during clone")
         if source_state_end != source_state_start:
@@ -704,9 +758,11 @@ def create_full_clone(
             "git_history_included": ".git/config" in manifest_files,
             "sqlite_copy_method": "sqlite_backup_api",
             "source_guard": source_guard_end,
+            "source_git": source_git_end,
             "source_machine_fingerprint": machine_fingerprint(),
             "source_unchanged": True,
             "files": manifest_files,
+            "durable_artifacts": _durable_artifact_summary(manifest_files),
             "excluded": list(inv.excluded),
             "excluded_policy": [
                 "machine-specific PID/identity/locks",
