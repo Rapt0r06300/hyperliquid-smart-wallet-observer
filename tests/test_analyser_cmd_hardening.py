@@ -56,3 +56,18 @@ def test_propagation_code_sortie_et_pas_de_vieux_rapport_sur_echec():
     i_open = CMD.index('start "" "%RAP%"')
     assert i_fail < i_open                                    # le garde-fou d'echec est AVANT l'ouverture
     assert CMD.rstrip().endswith("exit /b %RC%")              # code de sortie propage jusqu'au bout
+
+
+def test_profils_documentes_sont_reellement_routes_sans_argument_ignore():
+    assert 'if "%ANALYSIS_MODE%"=="" set "ANALYSIS_MODE=full"' in CMD
+    for profile in ("quick", "full", "deep", "maximum", "portable-smoke", "portable-check"):
+        assert f'"%ANALYSIS_MODE%"=="{profile}"' in CMD
+    assert "goto :usage" in CMD
+    assert "Profil inconnu" in CMD
+
+
+def test_quick_est_borne_et_deep_lance_la_suite_etendue():
+    assert 'set "HYPERSMART_LAB_BUDGET=8"' in CMD
+    assert "hl_observer.ops.historical_analysis_suite" in CMD
+    assert "--deep" in CMD
+    assert 'if /I not "%HYPERSMART_NO_PAUSE%"=="1" pause' in CMD

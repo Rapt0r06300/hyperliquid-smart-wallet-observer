@@ -13,6 +13,7 @@ import argparse
 import asyncio
 import collections
 import json
+import os
 import sys
 import time
 from pathlib import Path
@@ -31,6 +32,7 @@ from hl_observer.market_data.live_l2_service import (  # noqa: E402
 )
 from hl_observer.experimental import liquidation_sentinels as LS  # noqa: E402  (LIQUIDATOR_SENTINELS_V2)
 import sonde_confirmation_vaults as SD  # noqa: E402  (helpers de réconciliation par CLÉ COMPOSITE, partagés)
+import heartbeat_collecteur as HB  # noqa: E402
 
 WS_URL = "wss://api.hyperliquid.xyz/ws"
 FILLS_LIVE = Path("runtime") / "data" / "vault_fills_live.jsonl"
@@ -57,6 +59,8 @@ _WS_PAR_SOCKET: dict = {}                   # socket_id -> connexion WS vivante 
 _WS_KEYS: dict = {}                          # vault -> deque(maxlen) des CLÉS COMPOSITES de fills REÇUES par le WS
 WS_KEYS_CAP = 6000                          # borne par vault (couvre très largement la fenêtre de réconciliation)
 _DEMARRAGE_MS = 0.0                          # instant de démarrage : _WS_KEYS ne peut contenir QUE des fills reçus après
+_HEARTBEAT_WS = {"messages": 0, "fills": 0, "acks": 0, "reconnects": 0,
+                 "drops": 0, "dernier_exchange_ts": None}
 
 
 def _activite_par_vault(root: Path, *, fenetre_h: float = 2.0, max_lignes: int = 4000) -> dict:
@@ -564,29 +568,44 @@ async def _userfills_multiplex(root: Path, vaults: list, file: asyncio.Queue, so
                     if isinstance(msg, dict) and msg.get("channel") == "subscriptionResponse":
                         sub = ((msg.get("data") or {}).get("subscription")) or {}
                         if sub.get("type") == "userFills":
+                            _HEARTBEAT_WS["acks"] += 1
                             print("[userfills] socket %s ACK subscribe userFills %s" % (socket_id, str(sub.get("user") or "")[:10]), flush=True)
                         continue
                     vault = _vault_du_message(msg, connus)
                     if not vault:
                         continue
+                    _HEARTBEAT_WS["messages"] += 1
                     if vault not in confirmes:                     # 1er message (snapshot/fill) = ABONNEMENT CONFIRMÉ (fiable,
                         confirmes.add(vault)                       # contrairement au subscriptionResponse partiel de HL)
                         print("[userfills] socket %s vault CONFIRME (1er msg) %s [%d/%d]" % (socket_id, vault[:10], len(confirmes), len(vaults)), flush=True)
                     bruts = (msg.get("data") or {}).get("fills") or []   # CLÉS COMPOSITES REÇUES (pour REST−WS par id)
                     if bruts:
+                        timestamps = []
+                        for raw_fill in bruts:
+                            try:
+                                timestamps.append(int(raw_fill.get("time")))
+                            except (AttributeError, TypeError, ValueError):
+                                continue
+                        if timestamps:
+                            _HEARTBEAT_WS["dernier_exchange_ts"] = max(
+                                max(timestamps), _HEARTBEAT_WS["dernier_exchange_ts"] or 0
+                            )
                         dq = _WS_KEYS.setdefault(vault, collections.deque(maxlen=WS_KEYS_CAP))
                         for rf in bruts:
                             dq.append(SD.cle_fill(rf))
                     fills = UL.parser_message_userfills(msg, vault=vault)
                     if not fills:
                         continue
+                    _HEARTBEAT_WS["fills"] += len(fills)
                     _journal_liquidations(root, UL.liquidations_confirmees(fills), socket_id=socket_id)  # CONFIRMÉES only
                     t_ws = time.monotonic()                       # HORLOGE MONOTONE LOCALE : réception WS
                     try:
                         file.put_nowait((vault, fills, t_ws))     # ne bloque JAMAIS la réception
                     except asyncio.QueueFull:
+                        _HEARTBEAT_WS["drops"] += len(fills)
                         print("[userfills] FILE SATUREE — drop (%s)" % vault[:10], flush=True)
         except Exception as exc:  # noqa: BLE001 — reconnecte SEULEMENT ce shard de 5 (curseur+dédup -> catch-up)
+            _HEARTBEAT_WS["reconnects"] += 1
             _WS_PAR_SOCKET.pop(socket_id, None)
             print("[userfills] socket %s reconnect (%s)" % (socket_id, str(exc)[:50]), flush=True)
             await asyncio.sleep(3.0)
@@ -655,8 +674,25 @@ async def _exits_periodiques(root: Path, *, intervalle_s: float = 2.0) -> None:
 
 
 async def _heartbeat(root: Path, info: dict, *, intervalle_s: float = 10.0) -> None:
+    derniers_messages = 0
     while True:
         VI.heartbeat(root, NOM_VERROU, info)
+        messages = int(_HEARTBEAT_WS["messages"])
+        HB.battre(
+            root,
+            "userfills-live",
+            pid=os.getppid(),
+            n_ecrites=max(0, messages - derniers_messages),
+            dernier_exchange_ts=_HEARTBEAT_WS["dernier_exchange_ts"],
+            souscription_ack=bool(_HEARTBEAT_WS["acks"] or messages),
+            note="%d WS messages, %d fills" % (messages, int(_HEARTBEAT_WS["fills"])),
+            metriques={
+                "gaps_critiques": int(_HEARTBEAT_WS["drops"]),
+                "reconnects": int(_HEARTBEAT_WS["reconnects"]),
+                "stale": False,
+            },
+        )
+        derniers_messages = messages
         await asyncio.sleep(intervalle_s)
 
 
@@ -848,6 +884,8 @@ async def _boucle(root: Path) -> None:
     _ROOT_LIVE = root
     _TAPE_FILLS = asyncio.Queue(maxsize=5000)                     # fills → tape L2 (réception MONOTONE en process)
     _DEMARRAGE_MS = time.time() * 1000                            # plancher de confiance du garde REST↔WS (clés en mémoire dès ici)
+    _HEARTBEAT_WS.update({"messages": 0, "fills": 0, "acks": 0, "reconnects": 0,
+                          "drops": 0, "dernier_exchange_ts": None})
     TRIGGER_VERSION = CO._params_trigger(root).get("variante", "v1")
     GIT_COMMIT = _git_commit(root)
     import secrets

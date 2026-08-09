@@ -22,6 +22,7 @@ collecteurs ; un ECHEC bloquant stoppe le demarrage avec un diagnostic precis.
 from __future__ import annotations
 
 import json
+import hashlib
 import os
 import platform
 import socket
@@ -36,6 +37,7 @@ from hl_observer.ops.registre_pids import REGISTRE_RELPATH
 OK, INFO, AVERT, ECHEC = "OK", "INFO", "AVERTISSEMENT", "ECHEC"
 PORT_UI = 8794
 MACHINE_ID_RELPATH = Path("runtime") / "data" / "machine_id.txt"
+PORTABLE_HOST_STATE_RELPATH = Path("runtime") / "data" / "portable_host_identity.json"
 # Le verrou d'instance du lanceur COURANT est VIVANT quand ce module tourne (le .cmd acquiert le
 # verrou AVANT le prevol) : ne JAMAIS le purger, sinon un 2e double-clic passerait le garde anti-double
 # lancement. Sa peremption est geree par son propre TTL (collection.verrou_instance), pas ici.
@@ -46,7 +48,12 @@ _SUFFIXES_SECRETS = (".key", ".pem", ".p12", ".pfx", ".mnemonic", ".seed", ".key
 # [2026-08-05] Dossiers JAMAIS parcourus : caches et metadonnees, aucun secret du projet n'y vit
 # et les traverser coutait des secondes a chaque prevol.
 _DOSSIERS_NON_PARCOURUS = (".git", "__pycache__", ".mypy_cache", ".ruff_cache", ".pytest_cache",
-                           ".hypothesis", "node_modules", ".venv", "venv")
+                           ".hypothesis", "node_modules", ".venv", "venv",
+                           # Miroirs tiers archives pour recherche uniquement. Ils ne sont jamais
+                           # importes ni executes par le runtime officiel et contiennent leurs
+                           # propres fixtures `.env.*`. Les scanner ici bloquerait le CORE sur du
+                           # materiel inactif ; les audits d'archive/securite les traitent separement.
+                           "github_repos_v24")
 # [2026-08-05] EXCEPTIONS NOMMEES, jamais silencieuses (elles sont listees dans le detail du verdict).
 # Elles corrigent deux FAUX POSITIFS qui bloquaient le demarrage sans aucun gain de securite :
 #   - `cacert.pem` = magasin d'autorites de certification PUBLIQUES livre par certifi (et par pip).
@@ -274,7 +281,9 @@ def verifier_manifeste(root: str | Path) -> dict:
         p = root / rel
         if p.is_file():
             try:
-                m = json.loads(p.read_text(encoding="utf-8"))
+                # PowerShell 5.1 peut produire un JSON UTF-8 avec BOM. `utf-8-sig`
+                # accepte les deux formes sans masquer un JSON reellement corrompu.
+                m = json.loads(p.read_text(encoding="utf-8-sig"))
             except (OSError, ValueError) as exc:
                 return _res("manifeste", ECHEC, "manifeste %s illisible : %s" % (rel, exc))
             if not isinstance(m, dict) or not (m.get("schema") or m.get("python_version")
@@ -379,7 +388,78 @@ def verifier_certificats_tls() -> dict:
 
 
 # ── ACTION : regeneration de l'identite machine ───────────────────────────────────────────────
-def regenerer_identite(root: str | Path, *, generateur: Callable[[], str] | None = None) -> dict:
+def _empreinte(valeur: str) -> str:
+    return hashlib.sha256(valeur.encode("utf-8", errors="replace")).hexdigest()
+
+
+def _identite_hote() -> str:
+    """Return a stable host token; only its hash is persisted in the project."""
+    morceaux = [platform.node(), platform.machine(), os.environ.get("COMPUTERNAME", "")]
+    if platform.system() == "Windows":
+        try:
+            import winreg
+
+            with winreg.OpenKey(
+                winreg.HKEY_LOCAL_MACHINE, r"SOFTWARE\Microsoft\Cryptography"
+            ) as cle:
+                guid, _ = winreg.QueryValueEx(cle, "MachineGuid")
+                morceaux.append(str(guid))
+        except (OSError, ImportError):
+            pass
+    return "|".join(morceaux)
+
+
+def _iter_verrous_machine(root: Path):
+    """Inspect only small machine-state trees, never datasets or embedded runtimes."""
+    vus: set[Path] = set()
+    for lock in root.glob("*.lock"):
+        if lock.is_file():
+            vus.add(lock)
+            yield lock
+    for rel in (
+        Path("runtime") / "data",
+        Path("runtime") / "research_lab" / "heartbeats",
+        Path("runtime") / "ws",
+        Path("data") / "runtime",
+        Path("logs"),
+    ):
+        base = root / rel
+        if not base.is_dir():
+            continue
+        for lock in base.rglob("*.lock"):
+            if lock.is_file() and lock not in vus:
+                vus.add(lock)
+                yield lock
+
+
+def _iter_caches_source(root: Path):
+    """Yield project bytecode caches without walking the 160 GB data/runtime trees."""
+    direct = root / "__pycache__"
+    if direct.is_dir():
+        yield direct
+    for top in (root / "src", root / "hyper_smart_observer", root / "tools"):
+        if not top.is_dir():
+            continue
+        for dossier, sous_dossiers, _ in os.walk(top, topdown=True):
+            sous_dossiers[:] = [
+                nom
+                for nom in sous_dossiers
+                if nom.casefold()
+                not in {"python", "wheelhouse", "github_repos_v24", ".git"}
+            ]
+            courant = Path(dossier)
+            if courant.name == "__pycache__":
+                sous_dossiers[:] = []
+                yield courant
+
+
+def regenerer_identite(
+    root: str | Path,
+    *,
+    generateur: Callable[[], str] | None = None,
+    preserve_instance_lock: bool = True,
+    nettoyer_caches: bool = True,
+) -> dict:
     """item 21 : purge l'identite machine-specifique qu'une archive copiee aurait pu conserver
     (registre PID, verrous, marqueur anti-orphelin, pointeur COURANTE) et ecrit un machine-id NEUF.
     Ne touche JAMAIS aux sessions/DATA (historique preserve). Rend la liste de ce qui a ete purge."""
@@ -388,7 +468,8 @@ def regenerer_identite(root: str | Path, *, generateur: Callable[[], str] | None
     purges: list[str] = []
     cibles = [REGISTRE_RELPATH,
               Path("runtime") / "data" / "lanceur_session_marqueur.txt",
-              Path("runtime") / "data" / "COURANTE.json"]
+              Path("runtime") / "data" / "COURANTE.json",
+              Path("runtime") / "data" / "sessions" / "COURANTE.json"]
     for rel in cibles:
         p = root / rel
         if p.is_file():
@@ -398,10 +479,8 @@ def regenerer_identite(root: str | Path, *, generateur: Callable[[], str] | None
             except OSError:
                 import logging as _lg  # panne rendue VISIBLE (interdiction des except:pass muets)
                 _lg.getLogger(__name__).debug("exception ignoree volontairement ici", exc_info=True)
-    for lock in list(root.rglob("*.lock")):                # verrous perimes herites d'une copie de dossier
-        if lock.name == LOCK_INSTANCE_VIVANT:              # notre verrou vivant : jamais (TTL le gere)
-            continue
-        if any(part in (".git",) for part in lock.relative_to(root).parts):
+    for lock in list(_iter_verrous_machine(root)):
+        if preserve_instance_lock and lock.name == LOCK_INSTANCE_VIVANT:
             continue
         try:
             lock.unlink()
@@ -419,19 +498,18 @@ def regenerer_identite(root: str | Path, *, generateur: Callable[[], str] | None
                 import logging as _lg  # panne rendue VISIBLE (interdiction des except:pass muets)
                 _lg.getLogger(__name__).debug("exception ignoree volontairement ici", exc_info=True)
     # item 6 : caches compiles (__pycache__) — propres a une version/chemin, jamais transportes.
-    n_caches = 0
-    for pc in list(root.rglob("__pycache__")):
-        if ".git" in pc.parts:
-            continue
-        try:
-            import shutil as _sh
-            _sh.rmtree(pc, ignore_errors=True)
-            n_caches += 1
-        except OSError:
-            import logging as _lg  # panne rendue VISIBLE (interdiction des except:pass muets)
-            _lg.getLogger(__name__).debug("exception ignoree volontairement ici", exc_info=True)
-    if n_caches:
-        purges.append("__pycache__ x%d" % n_caches)
+    if nettoyer_caches:
+        n_caches = 0
+        for pc in list(_iter_caches_source(root)):
+            try:
+                import shutil as _sh
+                _sh.rmtree(pc, ignore_errors=True)
+                n_caches += 1
+            except OSError:
+                import logging as _lg  # panne rendue VISIBLE (interdiction des except:pass muets)
+                _lg.getLogger(__name__).debug("exception ignoree volontairement ici", exc_info=True)
+        if n_caches:
+            purges.append("__pycache__ x%d" % n_caches)
     # item 6 : tache planifiee heritee (chemin absolu de l'ancien PC) — seulement sur Windows.
     if platform.system() == "Windows":
         try:
@@ -448,6 +526,84 @@ def regenerer_identite(root: str | Path, *, generateur: Callable[[], str] | None
     mp.parent.mkdir(parents=True, exist_ok=True)
     mp.write_text(mid, encoding="utf-8")
     return {"machine_id": mid, "purges": sorted(purges)}
+
+
+def preparer_identite_portable(
+    root: str | Path,
+    *,
+    generateur: Callable[[], str] | None = None,
+    identite_hote: str | None = None,
+    force: bool = False,
+) -> dict:
+    """Regenerate machine state once, and only after a real folder relocation.
+
+    The persisted file contains hashes only. A routine launch on the same host and
+    path is therefore non-destructive and does not touch PIDs, locks or sessions.
+    """
+    root = Path(root).resolve()
+    etat_path = root / PORTABLE_HOST_STATE_RELPATH
+    host_fp = _empreinte(identite_hote if identite_hote is not None else _identite_hote())
+    root_fp = _empreinte(os.path.normcase(str(root)))
+    ancien: dict[str, Any] = {}
+    if etat_path.is_file():
+        try:
+            charge = json.loads(etat_path.read_text(encoding="utf-8-sig"))
+            if isinstance(charge, dict):
+                ancien = charge
+        except (OSError, json.JSONDecodeError):
+            ancien = {}
+
+    raisons: list[str] = []
+    if force:
+        raisons.append("FORCE")
+    if not ancien:
+        raisons.append("FIRST_START_OR_LEGACY_COPY")
+    else:
+        if ancien.get("host_fingerprint") != host_fp:
+            raisons.append("HOST_CHANGED")
+        if ancien.get("root_fingerprint") != root_fp:
+            raisons.append("ROOT_CHANGED")
+        if not (root / MACHINE_ID_RELPATH).is_file():
+            raisons.append("MACHINE_ID_MISSING")
+
+    if not raisons:
+        return {
+            "changed": False,
+            "reason": "SAME_HOST_AND_ROOT",
+            "machine_id": (root / MACHINE_ID_RELPATH).read_text(
+                encoding="utf-8-sig", errors="replace"
+            ).strip(),
+            "purges": [],
+        }
+
+    action = regenerer_identite(
+        root,
+        generateur=generateur,
+        preserve_instance_lock=False,
+        nettoyer_caches=False,
+    )
+    etat_path.parent.mkdir(parents=True, exist_ok=True)
+    etat_path.write_text(
+        json.dumps(
+            {
+                "schema": "hypersmart-portable-host-identity-v1",
+                "host_fingerprint": host_fp,
+                "root_fingerprint": root_fp,
+                "machine_id": action["machine_id"],
+                "updated_at_ms": int(time.time() * 1000),
+            },
+            ensure_ascii=True,
+            indent=2,
+            sort_keys=True,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    return {
+        **action,
+        "changed": True,
+        "reason": "+".join(raisons),
+    }
 
 
 # ── ORCHESTRATEUR ─────────────────────────────────────────────────────────────────────────────
@@ -480,9 +636,13 @@ def verifier_premier_lancement(root: str | Path, *, os_info: dict | None = None,
         verifier_aucune_cle(root),
         verifier_sessions_preservees(root),
     ]
-    action = regenerer_identite(root, generateur=generateur_id) if regenerer else {}
     echecs = [c for c in checks if c["statut"] == ECHEC]
     avert = [c for c in checks if c["statut"] == AVERT]
+    action = (
+        preparer_identite_portable(root, generateur=generateur_id)
+        if regenerer and not echecs
+        else {}
+    )
     return {"go": not echecs, "echecs": [c["nom"] for c in echecs],
             "avertissements": [c["nom"] for c in avert], "checks": checks,
             "identite": action, "machine_id": action.get("machine_id", "")}
@@ -495,8 +655,9 @@ def formater(verdict: dict) -> str:
         lignes.append("%s%-16s %s" % (sym.get(c["statut"], "  "), c["nom"], c["detail"]))
     if verdict.get("identite"):
         idn = verdict["identite"]
-        lignes.append("  [ID]  machine-id neuf=%s ; purges=%s"
-                      % (idn.get("machine_id", "")[:8], ", ".join(idn.get("purges", [])) or "aucune"))
+        lignes.append("  [ID]  %s ; machine-id=%s ; purges=%s"
+                      % (idn.get("reason", "UNKNOWN"), idn.get("machine_id", "")[:8],
+                         ", ".join(idn.get("purges", [])) or "aucune"))
     return "\n".join(lignes)
 
 
@@ -522,7 +683,8 @@ __all__ = ["OK", "INFO", "AVERT", "ECHEC", "PORT_UI", "MACHINE_ID_RELPATH", "CRI
            "verifier_chemin_espaces_accents", "verifier_horloge", "verifier_port", "verifier_reseau_tls",
            "verifier_imports", "verifier_deps_tierces", "verifier_modules_runtime", "verifier_dll",
            "verifier_wheels_arch", "verifier_certificats_tls", "verifier_manifeste", "verifier_aucune_cle",
-           "verifier_sessions_preservees", "regenerer_identite", "verifier_premier_lancement",
+           "verifier_sessions_preservees", "regenerer_identite", "preparer_identite_portable",
+           "verifier_premier_lancement", "PORTABLE_HOST_STATE_RELPATH",
            "formater", "main"]
 
 

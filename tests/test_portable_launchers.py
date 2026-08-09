@@ -11,12 +11,22 @@ def test_analysis_launcher_has_noninteractive_portable_smoke():
     )
     lowered = text.casefold()
     assert 'call "%~dp0tools\\portable_env.cmd"' in lowered
-    assert 'if /i "%~1"=="portable-smoke"' in lowered
+    assert '"%analysis_mode%"=="portable-smoke"' in lowered
+    assert '"%analysis_mode%"=="portable-check"' in lowered
     assert "hl_observer.ops.portable_smoke" in lowered
     assert lowered.index("portable-smoke") < lowered.index("hl_observer.ops.lab_alpha")
     assert 'set "py=python"' not in lowered
     assert "where py" not in lowered
     assert "py -3" not in lowered
+
+
+def test_analysis_launcher_routes_all_documented_profiles():
+    text = (ROOT / "ANALYSER_BACKTESTS_REPLAYS.cmd").read_text(
+        encoding="utf-8", errors="replace"
+    ).casefold()
+    for profile in ("quick", "full", "deep", "maximum"):
+        assert f'"%analysis_mode%"=="{profile}"' in text
+    assert "hl_observer.ops.historical_analysis_suite" in text
 
 
 def test_main_launcher_portable_check_resolves_embedded_python_first():

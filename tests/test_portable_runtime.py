@@ -28,6 +28,10 @@ def test_portability_files_exist_and_unified_launcher_bootstraps_first():
     assert (ROOT / "docs" / "PORTABILITE_WINDOWS.md").is_file()
     # item 2/3 : point d'entree utilisateur pour assembler le Python embarque + wheelhouse hors ligne.
     assert (ROOT / "tools" / "preparer_python_portable.cmd").is_file()
+    assert (ROOT / "PREPARER_GIT_PORTABLE.cmd").is_file()
+    assert (ROOT / "tools" / "git" / "cmd" / "git.exe").is_file()
+    assert (ROOT / "POUSSER-GITHUB-FORCE.cmd").is_file()
+    assert (ROOT / "ANALYSER_BACKTESTS_REPLAYS.cmd").is_file()
 
     launcher = (ROOT / "LANCER_HYPERSMART.cmd").read_text(encoding="utf-8")
     # item 4 : le lanceur bootstrappe portable_env.cmd AVANT toute invocation de Python, et n'utilise
@@ -77,6 +81,7 @@ def test_bundle_member_policy_excludes_active_runtime_and_secrets():
         "tools/start_hypersmart_simulation.ps1",
         "tools/python/python.exe",
         "tools/python/python314.zip",
+        "tools/git/cmd/git.exe",
         ".env.example",
         "LANCER_HYPERSMART.cmd",
     )
@@ -110,6 +115,10 @@ def test_bundle_builder_is_staged_external_and_requires_embedded_python():
     assert "Remove-GeneratedPythonCaches" in text
     assert '$n.Contains("/__pycache__/")' in text
     assert '$n.EndsWith(".pyc")' in text
+    assert 'tools\\python\\python.exe' in text
+    assert 'embedded_python = "tools/python/python.exe"' in text
+    assert '"tools/python/portable_runtime_manifest.json"' in text
+    assert '"portable_runtime/python/python.exe"' not in text
     portable_env = (ROOT / "tools" / "portable_env.cmd").read_text(encoding="utf-8")
     assert "tools\\python\\python.exe" in portable_env
     assert ".venv-portable" not in portable_env
@@ -144,6 +153,32 @@ def test_portable_probe_rejects_external_python_paths(tmp_path):
     assert isinstance(payload["external_path_leaks"], list)
 
 
+def test_real_embedded_runtime_status_is_complete_and_not_none():
+    module = _load_module()
+
+    status = module.runtime_status(ROOT, require_embedded=True)
+
+    assert status is not None
+    assert status.probe_ok is True
+    assert status.selected_source == "embedded-tools-python"
+    assert status.missing_imports == ()
+    assert status.external_path_leaks == ()
+
+
+def test_real_folder_is_relocatable_without_building_an_archive():
+    module = _load_module()
+
+    status = module.relocation_status(ROOT)
+
+    assert status.ok is True
+    assert status.embedded_runtime_ok is True
+    assert status.relative_launcher_ok is True
+    assert status.relative_python_paths_ok is True
+    assert status.first_launch_regeneration_ok is True
+    assert status.required_files_missing == ()
+    assert status.hardcoded_user_paths == ()
+
+
 def test_real_windows_launcher_can_dispatch_portable_check():
     if os.name != "nt":
         return
@@ -174,6 +209,10 @@ def test_new_portability_files_have_no_user_specific_absolute_path():
         ROOT / "tools" / "install_portable_runtime.ps1",
         ROOT / "tools" / "create_portable_bundle.ps1",
         ROOT / "docs" / "PORTABILITE_WINDOWS.md",
+        ROOT / "tools" / "install_portable_git.ps1",
+        ROOT / "PREPARER_GIT_PORTABLE.cmd",
+        ROOT / "POUSSER-GITHUB-FORCE.cmd",
+        ROOT / "ANALYSER_BACKTESTS_REPLAYS.cmd",
     )
     for path in paths:
         text = path.read_text(encoding="utf-8")

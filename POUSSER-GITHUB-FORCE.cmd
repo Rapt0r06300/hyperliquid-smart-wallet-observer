@@ -3,6 +3,20 @@ chcp 65001 >nul
 setlocal EnableExtensions
 cd /d "%~dp0"
 
+set "HYPERSMART_GIT=%~dp0tools\git\cmd\git.exe"
+if not exist "%HYPERSMART_GIT%" set "HYPERSMART_GIT="
+if not defined HYPERSMART_GIT for /f "delims=" %%G in ('where git.exe 2^>nul') do if not defined HYPERSMART_GIT set "HYPERSMART_GIT=%%G"
+if not defined HYPERSMART_GIT (
+  echo   [ERREUR] Git est introuvable.
+  echo   Lance PREPARER_GIT_PORTABLE.cmd une fois, puis relance ce bouton.
+  set "RC=2"
+  goto :echec_code
+)
+
+set "PUSH_OPTION="
+if /I "%~1"=="--dry-run" set "PUSH_OPTION=-DryRun"
+if /I "%~1"=="dry-run" set "PUSH_OPTION=-DryRun"
+
 echo ============================================================
 echo   POUSSER vers GitHub - synchronisation sure de main
 echo   Integre GitHub et les anciens bundles sans ecraser de commit.
@@ -18,7 +32,9 @@ if errorlevel 1 (
 
 powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass ^
   -File "%~dp0tools\push_github_safe.ps1" ^
-  -ProjectRoot "%~dp0."
+  -ProjectRoot "%~dp0." ^
+  -GitExecutable "%HYPERSMART_GIT%" ^
+  %PUSH_OPTION%
 set "RC=%ERRORLEVEL%"
 
 if not "%RC%"=="0" goto :echec_code

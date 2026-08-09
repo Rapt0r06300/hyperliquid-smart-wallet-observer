@@ -1,100 +1,113 @@
 # Portabilite Windows de HyperSmart
 
-## Cible supportee
+## Principe
 
-Le paquet portable cible **Windows 10/11 x64**. Il embarque sa propre copie
-officielle de CPython et toutes les dependances necessaires au moteur
-Hyperliquid read-only, au dashboard, a la simulation paper locale, au laboratoire
-de recherche et aux tests locaux.
+Le dossier `Projet invest` complet est l'unite de sauvegarde et de transport.
+Il peut etre copie-colle tel quel, place sur un disque externe, ou archive avec
+l'outil choisi par l'utilisateur. Aucun ZIP special n'est necessaire.
 
-Il n'est pas honnete de promettre le meme binaire sur Windows ARM, macOS et Linux.
-Le code Python reste multiplateforme en grande partie, mais les lanceurs et ce
-runtime embarque sont actuellement testes pour Windows x64.
+La cible supportee est **Windows 10/11 x64**. Le dossier contient son propre
+CPython dans `tools/python`, MinGit dans `tools/git`, les dependances, le code,
+les donnees, les journaux et l'historique. Les lanceurs ne dependent ni d'un
+Python ni d'un Git installes sur le PC.
 
-## Demarrage sur un autre PC
+## Procedure sure
 
-1. Extraire entierement l'archive `HyperSmart_Portable_Windows_x64_*.zip`.
-2. Conserver `portable_runtime/` a cote du reste du projet.
+1. Dans une invite de commandes ouverte dans le projet, executer :
 
-Le double-clic sur `CREER_ARCHIVE_PORTABLE.cmd` produit maintenant une copie
-portable locale complete et auto-verifiee sur le Bureau. Le mode historique
-lie a une preuve GitHub Actions reste disponible avec
-`CREER_ARCHIVE_PORTABLE.cmd --release-stricte`; il n'est plus impose a une
-copie locale de transfert entre deux PC.
-3. Double-cliquer sur `LANCER_HYPERSMART.cmd`.
+   ```bat
+   LANCER_HYPERSMART.cmd stop
+   ```
 
-Python n'a pas besoin d'etre installe sur le PC cible. Le lanceur execute d'abord
-`tools/portable_env.cmd`, qui place `portable_runtime/python/python.exe` en tete
-du `PATH` de cette session uniquement. Tous les chemins applicatifs sont derives
-du dossier du lanceur. Le runtime desactive aussi le site utilisateur Python :
-un paquet installe ailleurs sur le PC ne peut donc pas masquer une dependance
-manquante dans l'archive.
+2. Verifier qu'HyperSmart, ses collecteurs et son dashboard sont arretes.
+3. Copier **tout** le dossier, y compris les fichiers caches et les sous-dossiers
+   `tools/python`, `tools/git`, `runtime`, `data`, `logs` et `.git`.
+4. Sur le PC cible Windows x64, placer le dossier dans un chemin court et
+   inscriptible, par exemple `C:\HyperSmart` ou `D:\HyperSmart`.
+5. Executer `LANCER_HYPERSMART.cmd portable-check`.
+6. Double-cliquer sur `LANCER_HYPERSMART.cmd`.
 
-Une connexion Internet reste necessaire pour lire les donnees publiques
-Hyperliquid. Ollama reste facultatif et externe au paquet : son absence ne doit
-pas bloquer le moteur.
+Une connexion Internet reste necessaire pour lire les flux publics Hyperliquid.
 
-## Construction
+## Pourquoi l'arret est obligatoire
 
-Depuis le dossier projet :
+SQLite et certains JSONL peuvent etre en cours d'ecriture. Une copie ou une
+archive prise pendant le fonctionnement peut contenir des fichiers de moments
+differents. Le dossier serait complet mais son etat runtime pourrait etre
+incoherent. L'arret propre ferme les ecritures avant le copier-coller.
 
-```powershell
-LANCER_HYPERSMART.cmd portable-install
+Ce point vaut aussi pour le clic droit `Ajouter a l'archive` : cette operation
+est compatible, mais elle doit etre lancee apres l'arret du bot.
+
+## Relocalisation automatique
+
+Au premier lancement sur un autre PC ou depuis un autre chemin, le preflight :
+
+- detecte le changement sans enregistrer le nom du PC ni le chemin en clair ;
+- regenere une identite machine locale ;
+- retire seulement les PID, marqueurs de session et verrous lies a l'ancien PC ;
+- preserve le code, les donnees, les bases, les logs et les sessions terminees.
+
+Sur le meme PC et au meme chemin, le preflight est non destructif. Il ne purge
+plus les caches Python ni les fichiers d'etat a chaque lancement.
+
+## Verification
+
+```bat
 LANCER_HYPERSMART.cmd portable-check
-LANCER_HYPERSMART.cmd portable-build
 ```
 
-`portable-build` cree l'archive sur le Bureau, jamais dans le projet. Le script :
+Cette commande verifie :
 
-- utilise un staging temporaire ;
-- embarque le runtime Python relocalisable ;
-- teste les imports et la CLI depuis le staging ;
-- refuse une destination situee dans le projet ;
-- verifie l'archive finale ;
-- affiche son SHA256.
+- le Python embarque et ses imports ;
+- le Git embarque, le lanceur d'analyse et le bouton de synchronisation GitHub ;
+- l'absence de dependance a un chemin utilisateur absolu ;
+- les chemins Python relatifs ;
+- la presence des fichiers necessaires au lancement ;
+- l'ecriture dans le dossier cible ;
+- le mecanisme de premiere relocalisation.
 
-## Pourquoi les 160+ Go de runtime ne sont pas copies
+Le resultat attendu se termine par `PORTABLE_LAUNCHER_CHECK_OK`.
 
-Au moment de l'audit, les ordres de grandeur etaient :
+Verifier aussi l'analyse locale sans lancer un calcul long :
 
-| Zone | Taille observee |
-|---|---:|
-| `src + tools + tests + docs` | environ 70 Mo |
-| `data/` | environ 26 Go |
-| `runtime/` | environ 135 Go |
-| `logs/` | environ 6 Go |
+```bat
+ANALYSER_BACKTESTS_REPLAYS.cmd portable-smoke
+```
 
-Les bases SQLite et JSONL de ces dossiers peuvent etre actives et verrouillees.
-Les copier pendant le fonctionnement peut produire un snapshot incoherent.
-L'archive portable demarre donc avec un runtime local propre. Cela rend le
-programme portable sans mentir sur l'integrite de l'historique.
+Verifier la synchronisation Git sans pousser :
 
-Pour transporter l'historique, arreter d'abord proprement HyperSmart, puis copier
-separement les donnees choisies sur un support suffisamment grand. Ne jamais
-copier une base SQLite active. Le modele et les rapports historiques ne sont pas
-necessaires au premier demarrage du bot portable.
+```bat
+POUSSER-GITHUB-FORCE.cmd --dry-run
+```
 
-## Fichiers de portabilite
+Le bouton Git utilise `tools\git\cmd\git.exe`, travaille seulement sur `main`,
+recupere la reference nommee `origin/main` et n'utilise ni `--force`, ni reset,
+ni `FETCH_HEAD` comme branche. Les changements vivants sous `runtime`, `logs`
+et `data` restent sur le PC ; tout changement de code non committe bloque le
+push pour eviter un oubli. Si `tools/git` manque dans un clone GitHub minimal,
+executer `PREPARER_GIT_PORTABLE.cmd` une fois.
 
-- `requirements-portable.txt` : dependances du paquet autonome ;
-- `tools/install_portable_runtime.ps1` : installation officielle CPython ;
-- `tools/portable_env.cmd` : selection relative de Python ;
-- `tools/portable_runtime.py` : diagnostic et smoke test ;
-- `tools/create_portable_bundle.ps1` : staging, ZIP et verification ;
-- `portable_runtime/portable_runtime_manifest.json` : provenance du runtime.
+## Runtime principal
 
-Le runtime embarque est construit depuis la distribution officielle CPython
-3.14.2 x64. L'installateur verifie avant extraction le SHA256
-`F05E28D161C6B15AF64A7CB7F08B4A22B3A6B03EEE71BAEE24EA557B3BDD5798`.
+Le launcher principal utilise le profil HARVEST Hyperliquid. dYdX reste un
+connecteur legacy/research disponible pour des tests explicites, mais il est
+dormant par defaut et n'est pas lance par `LANCER_HYPERSMART.cmd`.
 
-## Limites et securite
+## Outils optionnels
 
-- environnement cible : Windows x64 ;
-- aucun `.env`, secret, fichier de cle ou base active n'est inclus ;
-- aucune archive imbriquee n'est incluse ;
-- aucun ordre reel n'est ajoute par la portabilite ;
-- le mode marche reste read-only et la simulation reste locale ;
-- le PC cible doit disposer de suffisamment d'espace disque et autoriser les
-  connexions sortantes publiques Hyperliquid.
+Les commandes `portable-install` et `portable-build` restent disponibles pour
+la maintenance ou une distribution applicative sans historique. Elles ne sont
+pas requises pour la sauvegarde complete du dossier.
 
-Sécurité : 0 ordre réel · 0 argent réel · 0 clé privée · 0 signature · 0 dépôt/retrait.
+## Limites honnetes
+
+- cible actuelle : Windows 10/11 x64 ;
+- la copie complete peut depasser 160 Go ;
+- l'espace libre du PC cible doit etre suffisant ;
+- une copie effectuee pendant des ecritures actives n'est pas garantie ;
+- les pare-feu et antivirus du PC cible peuvent demander une autorisation pour
+  Python, Git et les connexions sortantes publiques ;
+- l'historique Git n'est portable que si le dossier cache `.git` est inclus.
+
+**Securite : 0 ordre reel · 0 argent reel · 0 cle privee · 0 signature · 0 depot/retrait.**

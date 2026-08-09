@@ -70,10 +70,11 @@ def test_executer_reprise_souscrit_start_stop_heartbeat():
     assert pilote.battements >= 2 and r["souscriptions"]["marches_trades_book"] == 1
 
 
-def test_dydx_live_dans_registre_harvest_et_sources():
+def test_dydx_live_dans_registre_mais_dormant_harvest():
     from hl_observer.ops import superviseur_collecteurs as SC
     from hl_observer.ops.preuve_de_vie import SOURCES_HARVEST
-    assert "dydx-live" in {c["nom"] for c in SC.REGISTRE} and "dydx-live" in SC.COLLECTEURS_HARVEST
+    assert "dydx-live" in {c["nom"] for c in SC.REGISTRE}
+    assert "dydx-live" not in SC.COLLECTEURS_HARVEST
     src = next((s for s in SOURCES_HARVEST if s.nom == "dydx-live"), None)
     assert src is not None and src.obligatoire is False           # secondaire : ne bloque pas HL
 

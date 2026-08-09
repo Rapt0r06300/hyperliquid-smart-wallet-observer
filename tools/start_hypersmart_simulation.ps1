@@ -552,6 +552,42 @@ function Get-HyperSmartRuntimeProcesses {
     }
 }
 
+function Get-HyperSmartLauncherProcesses {
+    # Wrappers exacts de CE projet seulement. Ils peuvent survivre a un arret externe
+    # en restant bloques dans Read-Host alors que l'UI et le poller sont deja morts.
+    try {
+        $ownPid = $PID
+        $scriptPath = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot "start_hypersmart_simulation.ps1"))
+        return Get-CimInstance Win32_Process | Where-Object {
+            $_.ProcessId -ne $ownPid -and
+            $_.Name -in @("powershell.exe", "pwsh.exe") -and
+            $_.CommandLine -like "*start_hypersmart_simulation.ps1*" -and
+            $_.CommandLine -like ("*" + $scriptPath + "*")
+        }
+    } catch {
+        Write-LauncherLog "launcher wrapper lookup skipped: $($_.Exception.Message)"
+        return @()
+    }
+}
+
+function Stop-HyperSmartLauncherTree {
+    param($LauncherProcess)
+    if ($null -eq $LauncherProcess) { return }
+    $targetPid = [int]$LauncherProcess.ProcessId
+    try {
+        $parent = Get-CimInstance Win32_Process -Filter (
+            "ProcessId=" + [int]$LauncherProcess.ParentProcessId
+        ) -ErrorAction SilentlyContinue
+        if ($parent -and $parent.Name -eq "cmd.exe" -and
+            $parent.CommandLine -like "*LANCER_HYPERSMART.cmd*") {
+            $targetPid = [int]$parent.ProcessId
+        }
+    } catch {
+        Write-LauncherLog "launcher parent lookup skipped pid=$targetPid : $($_.Exception.Message)"
+    }
+    Stop-HyperSmartProcessTree -ProcId $targetPid
+}
+
 function Stop-HyperSmartProcessTree {
     param([int]$ProcId)
     if (-not $ProcId -or $ProcId -eq $PID) { return }
@@ -658,6 +694,11 @@ try {
 
 if ($RestartExisting) {
     try {
+        $staleLaunchers = @(Get-HyperSmartLauncherProcesses)
+        foreach ($launcherProcess in $staleLaunchers) {
+            Write-LauncherLine "Arret ancien wrapper HyperSmart (arbre) pid=$($launcherProcess.ProcessId)"
+            Stop-HyperSmartLauncherTree -LauncherProcess $launcherProcess
+        }
         $stale = @(Get-HyperSmartRuntimeProcesses)
         foreach ($process in $stale) {
             Write-LauncherLine "Arret ancien processus HyperSmart (arbre) pid=$($process.ProcessId)"

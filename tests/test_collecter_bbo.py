@@ -4,6 +4,7 @@ synchronisation, et mesure de lead-lag. Aucun réseau réel : la boucle WS n'est
 from __future__ import annotations
 
 import importlib.util
+import json
 from pathlib import Path
 
 RACINE = Path(__file__).resolve().parents[1]
@@ -23,6 +24,48 @@ def test_mapping_exact_refuse_le_non_mappable():
     assert m.symbole_binance("PEPE") == "1000PEPEUSDT"        # exception connue
     assert m.symbole_binance("HYPE") is None                  # pas sur Binance perp -> REFUS
     assert m.symbole_binance("") is None
+
+
+def test_resolution_hyperliquid_preserve_case_and_reject_unknown():
+    m = _mod()
+    selected, rejected = m.resoudre_symboles_hyperliquid(
+        ["BTC", "KPEPE", "kbonk", "BTC", "DELISTED"],
+        ["BTC", "kPEPE", "kBONK"],
+    )
+    assert selected == ["BTC", "kPEPE", "kBONK"]
+    assert rejected == ["DELISTED"]
+
+
+def test_meta_hyperliquid_uses_read_only_post(monkeypatch):
+    m = _mod()
+    captured = {}
+
+    class Response:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def read(self):
+            payload = {"universe": [{"name": "BTC"}, {"name": "kPEPE"}]}
+            return json.dumps(payload).encode("utf-8")
+
+    def fake_urlopen(request, timeout):
+        captured["url"] = request.full_url
+        captured["method"] = request.get_method()
+        captured["payload"] = json.loads(request.data.decode("utf-8"))
+        captured["timeout"] = timeout
+        return Response()
+
+    monkeypatch.setattr("urllib.request.urlopen", fake_urlopen)
+    assert m.charger_symboles_hyperliquid(timeout=3.0) == ["BTC", "kPEPE"]
+    assert captured == {
+        "url": m.INFO_HL,
+        "method": "POST",
+        "payload": {"type": "meta"},
+        "timeout": 3.0,
+    }
 
 
 def test_parser_bbo_hl():

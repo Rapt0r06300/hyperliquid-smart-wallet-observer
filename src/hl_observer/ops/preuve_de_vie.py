@@ -61,13 +61,16 @@ class SourceAttendue:
     exige_exchange_ts: bool = True    # backfills/scoring locaux n'ont pas toujours un ts exchange live
     chemin_sortie: str | None = None  # fichier/DB de sortie (contrôle de taille en complément)
     non_implementee: bool = False     # source déclarée indisponible (pas de collecteur réel) — item 2
+    exige_souscription_ack: bool = True  # False pour une source REST sans abonnement WS
 
 
 # Profil HARVEST : socle CORE = OBLIGATOIRE ; récolte dense = secondaire (DEGRADED si muette, pas bloquant).
 SOURCES_HARVEST: tuple[SourceAttendue, ...] = (
-    SourceAttendue("allmids-collector", "HYPERLIQUID", "allMids", True),
+    SourceAttendue("allmids-collector", "HYPERLIQUID", "allMids", True,
+                   exige_exchange_ts=False, exige_souscription_ack=False),
     SourceAttendue("bbo-collector", "HYPERLIQUID+BINANCE", "bbo", True),
-    SourceAttendue("userfills-live", "HYPERLIQUID", "userFills", True),
+    SourceAttendue("userfills-live", "HYPERLIQUID", "userFills", True,
+                   exige_exchange_ts=False),
     SourceAttendue("carnet-collector", "HYPERLIQUID", "l2Book", False),
     SourceAttendue("marks-collector", "HYPERLIQUID", "marks", False),
     SourceAttendue("liq-collector", "HYPERLIQUID", "liquidations", False),
@@ -191,7 +194,8 @@ def preuve_source(src: SourceAttendue, hb: Mapping[str, Any] | None, *, now_ms: 
     # ACK de souscription : soit explicite (le collecteur l'a écrit), soit inféré du flux réel (des
     # écritures avec un horodatage exchange PROUVENT que la souscription a été acceptée).
     ack_explicite = bool(hb.get("souscription_ack"))
-    souscription_ack = ack_explicite or (evenement_valide and ex_ts is not None)
+    souscription_ack = ((not src.exige_souscription_ack) or ack_explicite
+                        or (evenement_valide and ex_ts is not None))
     # flux qui grossit : le compteur d'écritures progresse (vs baseline) ; en complément, si un chemin de
     # sortie est fourni, sa taille doit être non nulle.
     if ecrites_precedentes is not None:

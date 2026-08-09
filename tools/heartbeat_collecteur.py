@@ -138,7 +138,8 @@ def _metriques_propres(m: Mapping[str, Any] | None) -> dict:
 
 
 def battre(root: Path, nom: str, *, n_ecrites: int = 0, dernier_exchange_ts=None, note: str = "",
-           metriques: Mapping[str, Any] | None = None) -> dict:
+           metriques: Mapping[str, Any] | None = None, pid: int | None = None,
+           souscription_ack: bool | None = None) -> dict:
     """Écrit (atomiquement) le heartbeat du collecteur `nom`. Renvoie le dict écrit.
 
     `metriques` (LANCEUR item 2) : qualité RÉELLE du flux (gaps_critiques, carnet_desync,
@@ -151,8 +152,15 @@ def battre(root: Path, nom: str, *, n_ecrites: int = 0, dernier_exchange_ts=None
     p.parent.mkdir(parents=True, exist_ok=True)
     with _verrou_heartbeat(p):
         prev = _lire_sans_verrou(p)
+        heartbeat_pid = int(pid if pid is not None else os.getpid())
+        try:
+            previous_pid = int(prev.get("pid"))
+        except (TypeError, ValueError):
+            previous_pid = None
+        if previous_pid != heartbeat_pid:
+            prev = {}
         m = _metriques_propres(metriques) if metriques is not None else dict(prev.get("metriques") or {})
-        hb = {"nom": nom, "pid": os.getpid(), "ts_ms": int(time.time() * 1000),
+        hb = {"nom": nom, "pid": heartbeat_pid, "ts_ms": int(time.time() * 1000),
               "n_passes": int(prev.get("n_passes", 0)) + 1,
               "n_ecrites_cumul": int(prev.get("n_ecrites_cumul", 0)) + int(n_ecrites),
               "dernier_exchange_ts": (
@@ -162,6 +170,10 @@ def battre(root: Path, nom: str, *, n_ecrites: int = 0, dernier_exchange_ts=None
               ),
               "note": note[:120],
               "metriques": m}
+        if souscription_ack is not None:
+            hb["souscription_ack"] = bool(souscription_ack)
+        elif "souscription_ack" in prev:
+            hb["souscription_ack"] = bool(prev.get("souscription_ack"))
         _ecrire_atomique(p, json.dumps(hb, ensure_ascii=False))
     return hb
 

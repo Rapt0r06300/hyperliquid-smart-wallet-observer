@@ -21,21 +21,27 @@ launcher principal ni montes dans l'UI Hyperliquid.
 
 ## Version portable Windows
 
-HyperSmart peut etre transporte sur un autre PC **Windows 10/11 x64** sans
-installer Python :
+Le **dossier complet** est l'unite portable. HyperSmart peut etre transporte sur
+un autre PC **Windows 10/11 x64** sans installer Python :
 
-1. creer le paquet avec `LANCER_HYPERSMART.cmd portable-build` ;
-2. copier puis extraire entierement le ZIP cree sur le Bureau ;
-3. double-cliquer sur l'unique lanceur `LANCER_HYPERSMART.cmd`.
+1. arreter proprement le bot avec `LANCER_HYPERSMART.cmd stop` ;
+2. copier tout le dossier `Projet invest`, fichiers caches compris ;
+3. le coller ou l'extraire dans un chemin court et inscriptible, par exemple
+   `C:\HyperSmart` ;
+4. double-cliquer sur `LANCER_HYPERSMART.cmd`.
 
-Le paquet embarque un CPython officiel, ses dependances et des chemins
-entierement relatifs. Il ne lit pas le Python utilisateur du PC cible. Une
-connexion Internet reste necessaire pour les donnees publiques Hyperliquid.
+Cette methode conserve aussi `runtime/`, `data/`, `logs/`, les bases et
+l'historique. Elle fonctionne avec un copier-coller, un disque externe ou une
+archive creee manuellement par l'utilisateur. Le projet embarque son CPython et
+ses dependances dans `tools/python`, ainsi que MinGit dans `tools/git`; tous les
+chemins actifs sont relatifs. Le lanceur d'analyse et le bouton Git utilisent
+ces runtimes embarques, pas ceux du PC.
 
-L'archive exclut volontairement `runtime/`, `data/`, `logs/`, les bases SQLite
-actives, les secrets et les caches. Le bot portable demarre donc avec une
-session locale propre, sans risquer de copier une base verrouillee ou un
-historique incoherent. Le guide complet est dans
+Il faut obligatoirement arreter le bot avant la copie : aucun outil ne peut
+garantir une copie coherente d'une base SQLite pendant qu'elle est ecrite. Au
+premier lancement apres un changement de PC ou de chemin, HyperSmart regenere
+uniquement l'identite machine et les verrous perimes. Les lancements suivants ne
+purgent plus les caches, PID ou journaux de la session. Le guide complet est dans
 [`docs/PORTABILITE_WINDOWS.md`](docs/PORTABILITE_WINDOWS.md).
 
 Commandes de maintenance :
@@ -44,7 +50,15 @@ Commandes de maintenance :
 LANCER_HYPERSMART.cmd portable-check
 LANCER_HYPERSMART.cmd portable-install
 LANCER_HYPERSMART.cmd portable-build
+ANALYSER_BACKTESTS_REPLAYS.cmd portable-smoke
+POUSSER-GITHUB-FORCE.cmd --dry-run
 ```
+
+`ANALYSER_BACKTESTS_REPLAYS.cmd` accepte `quick`, `full`, `deep` et `maximum`.
+`POUSSER-GITHUB-FORCE.cmd` travaille exclusivement sur `main`, reconcilie
+`origin/main` sans reset ni force, puis pousse `main:main`. Si `tools/git` manque
+dans un clone source, `PREPARER_GIT_PORTABLE.cmd` le retablit depuis l'archive
+officielle MinGit dont le SHA-256 est epingle.
 
 > **Doc maître** (état, méthode, architecture, config, roadmap) : `docs/ETAT_ET_FEUILLE_DE_ROUTE.md`.
 > Règles agent : `CLAUDE.md` et `AGENTS.md`. Objectif condensé : `OBJECTIF.md`.

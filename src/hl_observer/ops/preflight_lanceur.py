@@ -273,7 +273,16 @@ def _sonde_http_reelle(url: str, *, timeout: float = 6.0) -> Sonde:
     import json as _json
     import urllib.request
     try:
-        req = urllib.request.Request(url, headers={"User-Agent": "hypersmart-preflight"}, method="GET")
+        headers = {"User-Agent": "hypersmart-preflight"}
+        data = None
+        method = "GET"
+        # `/info` est public/read-only mais Hyperliquid refuse GET (HTTP 405).
+        # Une sonde de disponibilite valide doit donc utiliser le contrat POST `meta`.
+        if url.rstrip("/").endswith("api.hyperliquid.xyz/info"):
+            method = "POST"
+            data = _json.dumps({"type": "meta"}, separators=(",", ":")).encode("utf-8")
+            headers["Content-Type"] = "application/json"
+        req = urllib.request.Request(url, data=data, headers=headers, method=method)
         with urllib.request.urlopen(req, timeout=timeout) as rep:  # noqa: S310 — https publics fixes
             code = int(getattr(rep, "status", 200) or 200)
             corps = rep.read(4096)

@@ -6,6 +6,7 @@ paper), et que les avertissements (dYdX non branché, dep recommandée) NE bloqu
 """
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 from hl_observer.ops import preflight_lanceur as PF
@@ -92,3 +93,34 @@ def test_preflight_schemas_reels_presents_dans_le_repo():
 def test_cli_sort_2_si_no_go(monkeypatch, tmp_path):
     monkeypatch.setattr(PF, "_sonde_http_reelle", lambda url, **k: PF.Sonde(False, detail="offline"))
     assert PF.main([str(tmp_path)]) == 2                       # HL/Binance injoignables -> NO-GO -> exit 2
+
+
+def test_sonde_hyperliquid_info_utilise_post_meta_read_only(monkeypatch):
+    capture = {}
+
+    class Reponse:
+        status = 200
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def read(self, _limit):
+            return b'{"universe":[]}'
+
+    def fake_urlopen(request, timeout):
+        capture["method"] = request.get_method()
+        capture["body"] = json.loads(request.data.decode("utf-8"))
+        capture["content_type"] = request.headers.get("Content-type")
+        capture["timeout"] = timeout
+        return Reponse()
+
+    monkeypatch.setattr("urllib.request.urlopen", fake_urlopen)
+    sonde = PF._sonde_http_reelle("https://api.hyperliquid.xyz/info", timeout=1.5)
+    assert sonde.joignable and sonde.code == 200
+    assert capture == {
+        "method": "POST", "body": {"type": "meta"},
+        "content_type": "application/json", "timeout": 1.5,
+    }

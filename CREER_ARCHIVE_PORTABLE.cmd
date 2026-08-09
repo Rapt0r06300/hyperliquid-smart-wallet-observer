@@ -1,9 +1,10 @@
 @echo off
 setlocal EnableExtensions DisableDelayedExpansion
 REM ============================================================================
-REM HyperSmart portable package - Windows 10/11 x64 - PAPER/READ-ONLY ONLY.
-REM Default: complete local portable copy, internally hashed and re-extracted.
-REM Optional: --release-stricte keeps the CI-bound official release pipeline.
+REM HyperSmart portability - Windows 10/11 x64 - PAPER/READ-ONLY ONLY.
+REM Default: complete disaster-recovery folder clone, including durable history.
+REM --application-seule creates the smaller clean-start ZIP.
+REM --release-stricte keeps the CI-bound official release pipeline.
 REM ============================================================================
 cd /d "%~dp0"
 
@@ -29,16 +30,47 @@ set "TESTNET_EXECUTION_ENABLED=false"
 
 echo.
 echo ==============================================================================
-echo   COPIE PORTABLE HYPERSMART - autonome et verifiee
-echo   Sources ^| Python ^| dependances ^| manifestes SHA-256 ^| extraction testee
-echo   Sortie finale hors projet uniquement ^(Bureau par defaut^)
+echo   PORTABILITE HYPERSMART - Windows 10/11 x64
+echo   Defaut : clone de secours COMPLET ^(code + Git + donnees + logs + historique^)
+echo   SQLite copie par Backup API ^| identite machine regeneree au premier lancement
+echo   Sortie courte hors projet choisie automatiquement si aucun chemin n'est fourni
 echo ==============================================================================
 echo.
 
 if /I "%~1"=="--release-stricte" goto :release_stricte
+if /I "%~1"=="--application-seule" goto :application_seule
+if /I "%~1"=="--verifier-clone" goto :verifier_clone
+if /I "%~1"=="--dry-run" goto :clone_dry_run
+if not "%~1"=="" goto :clone_destination
 
+"%HYPERSMART_PYTHON%" -m hl_observer.ops.portable_clone --racine "%~dp0."
+set "RC=%ERRORLEVEL%"
+goto :resultat
+
+:clone_destination
+"%HYPERSMART_PYTHON%" -m hl_observer.ops.portable_clone ^
+  --racine "%~dp0." --destination "%~1"
+set "RC=%ERRORLEVEL%"
+goto :resultat
+
+:clone_dry_run
+"%HYPERSMART_PYTHON%" -m hl_observer.ops.portable_clone --racine "%~dp0." --dry-run
+set "RC=%ERRORLEVEL%"
+goto :resultat
+
+:verifier_clone
+if "%~2"=="" (
+  echo [REFUSE] Chemin du clone manquant.
+  set "RC=32"
+  goto :resultat
+)
+"%HYPERSMART_PYTHON%" -m hl_observer.ops.portable_clone --verify "%~2"
+set "RC=%ERRORLEVEL%"
+goto :resultat
+
+:application_seule
 "%HYPERSMART_PYTHON%" -m hl_observer.ops.archive_portable ^
-  --racine "%~dp0." --mode-developpement %*
+  --racine "%~dp0." --mode-developpement
 set "RC=%ERRORLEVEL%"
 goto :resultat
 
@@ -50,9 +82,10 @@ set "RC=%ERRORLEVEL%"
 
 echo.
 if "%RC%"=="0" (
-  echo [OK] Archive portable creee et reverifiee sur le Bureau.
+  echo [OK] Operation portable terminee et verifiee.
+  echo      Sur le PC cible : ouvre le dossier puis double-clique LANCER_HYPERSMART.cmd.
 ) else (
-  echo [REFUSE] Aucune archive incomplete n'a ete conservee ^(code %RC%^).
+  echo [REFUSE] Aucun clone final incomplet n'a ete publie ^(code %RC%^).
   echo          Ferme HyperSmart si un writer ou une session est encore actif.
 )
 echo.

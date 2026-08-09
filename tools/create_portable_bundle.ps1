@@ -32,19 +32,11 @@ function Test-SafeMember([string]$RelativePath) {
         "node_modules", "reports", "runtime", "venv"
     )
     if ($excludedTop -contains $parts[0]) { return $false }
-    if (
-        $parts[0] -eq "portable_runtime" -and
-        $parts.Count -gt 1 -and
-        (
-            $parts[1].StartsWith("python_backup_") -or
-            $parts[1].StartsWith("python_failed_")
-        )
-    ) { return $false }
     if ($parts -contains "__pycache__") { return $false }
     if ($lower -eq ".env" -or $lower.EndsWith("/.env")) { return $false }
     if (
         $parts.Count -eq 3 -and
-        $parts[0] -eq "portable_runtime" -and
+        $parts[0] -eq "tools" -and
         $parts[1] -eq "python" -and
         $parts[2] -match "^python[0-9]+\.zip$"
     ) { return $true }
@@ -133,7 +125,7 @@ if (Test-IsWithin $zipPath $root) {
 }
 
 $installer = Join-Path $root "tools\install_portable_runtime.ps1"
-$portablePython = Join-Path $root "portable_runtime\python\python.exe"
+$portablePython = Join-Path $root "tools\python\python.exe"
 $installArguments = @{
     ProjectRoot = $root
 }
@@ -160,7 +152,6 @@ $includeDirectories = @(
     "config",
     "docs",
     "hyper_smart_observer",
-    "portable_runtime",
     "src",
     "tests",
     "tools"
@@ -215,7 +206,7 @@ try {
         copied_files = $script:CopiedFiles
         copied_bytes = $script:CopiedBytes
         excluded_files = $script:ExcludedFiles
-        embedded_python = "portable_runtime/python/python.exe"
+        embedded_python = "tools/python/python.exe"
         active_runtime_included = $false
         starts_with_clean_runtime = $true
         exclusions = @(
@@ -231,7 +222,7 @@ HYPERSMART PORTABLE - WINDOWS 10/11 X64
 
 1. Extract the whole HyperSmart directory to a writable local disk.
 2. Double-click LANCER_HYPERSMART.cmd.
-3. Keep the portable_runtime directory beside the launcher.
+3. Keep the tools\python directory beside the launcher.
 
 The bundle starts with a clean runtime. Active databases and logs from the
 source PC are intentionally excluded because they can be locked and exceed
@@ -240,7 +231,7 @@ source PC are intentionally excluded because they can be locked and exceed
 Network access is still required for read-only Hyperliquid market data.
 "@ | Set-Content -LiteralPath (Join-Path $staging "PORTABLE_README.txt") -Encoding UTF8
 
-    $stagedPython = Join-Path $staging "portable_runtime\python\python.exe"
+    $stagedPython = Join-Path $staging "tools\python\python.exe"
     & $stagedPython (Join-Path $staging "tools\portable_runtime.py") --root $staging check --require-embedded
     if ($LASTEXITCODE -ne 0) {
         throw "Staged portable runtime failed its relocatability test."
@@ -270,8 +261,8 @@ Network access is still required for read-only Hyperliquid market data.
         $names = @($archive.Entries | ForEach-Object { $_.FullName.Replace("\", "/") })
         $required = @(
             "LANCER_HYPERSMART.cmd",
-            "portable_runtime/python/python.exe",
-            "portable_runtime/portable_runtime_manifest.json",
+            "tools/python/python.exe",
+            "tools/python/portable_runtime_manifest.json",
             "src/hl_observer/__init__.py",
             "tools/start_hypersmart_simulation.ps1",
             "PORTABLE_BUNDLE_MANIFEST.json"
@@ -296,7 +287,7 @@ Network access is still required for read-only Hyperliquid market data.
             $n.EndsWith(".db") -or
             $n.EndsWith(".db-wal") -or
             $n.EndsWith(".db-shm") -or
-            ($n.EndsWith(".zip") -and $n -notmatch "^portable_runtime/python/python[0-9]+\.zip$") -or
+            ($n.EndsWith(".zip") -and $n -notmatch "^tools/python/python[0-9]+\.zip$") -or
             $n.EndsWith(".7z") -or
             $n.EndsWith(".rar")
         })

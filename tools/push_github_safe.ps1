@@ -4,6 +4,9 @@ param(
     [string]$ProjectRoot = (Split-Path -Parent $PSScriptRoot),
 
     [Parameter()]
+    [string]$GitExecutable = "",
+
+    [Parameter()]
     [switch]$DryRun
 )
 
@@ -18,7 +21,7 @@ function Write-Step {
 function Invoke-Git {
     param([string[]]$GitArgs)
 
-    & git @GitArgs
+    & $script:GitExecutable @GitArgs
     if ($LASTEXITCODE -ne 0) {
         throw "git $($GitArgs -join ' ') a echoue (code $LASTEXITCODE)."
     }
@@ -27,7 +30,7 @@ function Invoke-Git {
 function Get-GitText {
     param([string[]]$GitArgs)
 
-    $output = & git @GitArgs 2>&1
+    $output = & $script:GitExecutable @GitArgs 2>&1
     if ($LASTEXITCODE -ne 0) {
         throw "git $($GitArgs -join ' ') a echoue : $($output -join [Environment]::NewLine)"
     }
@@ -37,7 +40,7 @@ function Get-GitText {
 function Test-Git {
     param([string[]]$GitArgs)
 
-    & git @GitArgs *> $null
+    & $script:GitExecutable @GitArgs *> $null
     return ($LASTEXITCODE -eq 0)
 }
 
@@ -132,7 +135,7 @@ function Merge-IntoMain {
         }
     }
     catch {
-        & git merge --abort *> $null
+        & $script:GitExecutable merge --abort *> $null
         throw "Conflit pendant l'integration de $Label. La tentative a ete annulee sans perdre les commits. $($_.Exception.Message)"
     }
 }
@@ -196,9 +199,23 @@ try {
     $ProjectRoot = [IO.Path]::GetFullPath($ProjectRoot).TrimEnd("\", "/")
     Set-Location -LiteralPath $ProjectRoot
 
-    if (-not (Get-Command git -ErrorAction SilentlyContinue)) {
-        throw "Git est introuvable dans le PATH."
+    if ([string]::IsNullOrWhiteSpace($GitExecutable)) {
+        $embeddedGit = Join-Path $ProjectRoot "tools\git\cmd\git.exe"
+        if (Test-Path -LiteralPath $embeddedGit -PathType Leaf) {
+            $GitExecutable = $embeddedGit
+        }
+        else {
+            $gitCommand = Get-Command git.exe -ErrorAction SilentlyContinue
+            if ($null -ne $gitCommand) {
+                $GitExecutable = $gitCommand.Source
+            }
+        }
     }
+    if ([string]::IsNullOrWhiteSpace($GitExecutable) -or -not (Test-Path -LiteralPath $GitExecutable -PathType Leaf)) {
+        throw "Git est introuvable. Lance PREPARER_GIT_PORTABLE.cmd puis relance."
+    }
+    $script:GitExecutable = [IO.Path]::GetFullPath($GitExecutable)
+    Write-Step "Git utilise : $script:GitExecutable"
     if (-not (Test-Git @("rev-parse", "--is-inside-work-tree"))) {
         throw "$ProjectRoot n'est pas un depot Git."
     }
@@ -220,12 +237,40 @@ try {
     Write-Step "Controle des verrous Git perimes..."
     Clear-StaleGitLocks -GitDir $gitDir
 
-    $dirty = Get-GitText @("status", "--porcelain")
+    $dirty = Get-GitText @("-c", "core.quotepath=false", "status", "--porcelain=v1", "--untracked-files=all")
     if ($dirty) {
-        if (-not $DryRun) {
-            throw "Le working tree contient des changements non commites. Committe-les d'abord afin que le push soit complet et explicite.`n$dirty"
+        $runtimeDirty = @()
+        $blockingDirty = @()
+        foreach ($line in ($dirty -split "`r?`n")) {
+            if ([string]::IsNullOrWhiteSpace($line)) { continue }
+            # Get-GitText retire l'espace initial de la toute premiere ligne.
+            # Le regex accepte donc aussi bien " M path" que "M path" et "?? path".
+            $pathText = if ($line -match "^[ MADRCU?!]{1,2}\s+(.*)$") {
+                $Matches[1].Trim('"')
+            }
+            else {
+                $line.Trim('"')
+            }
+            $paths = @($pathText -split " -> ")
+            $runtimeOnly = $true
+            foreach ($candidate in $paths) {
+                $normalized = $candidate.Trim('"').Replace("\", "/")
+                if ($normalized -notmatch "^(runtime|logs|data)/") {
+                    $runtimeOnly = $false
+                    break
+                }
+            }
+            if ($runtimeOnly) { $runtimeDirty += $line } else { $blockingDirty += $line }
         }
-        Write-Host "  [DRY-RUN] Changements locaux detectes; aucun commit ne sera cree." -ForegroundColor Yellow
+        if ($blockingDirty.Count -gt 0) {
+            throw "Du code, de la documentation ou de la configuration n'est pas committe. Le push est refuse pour ne rien oublier.`n$($blockingDirty -join [Environment]::NewLine)"
+        }
+        if ($runtimeDirty.Count -gt 0) {
+            Write-Host "  [INFO] Artefacts runtime vivants ignores pour le push; ils restent intacts sur le PC." -ForegroundColor DarkYellow
+            foreach ($line in $runtimeDirty) {
+                Write-Host "         $line" -ForegroundColor DarkGray
+            }
+        }
     }
 
     Write-Step "Recuperation de origin/main via sa reference distante nommee..."
@@ -270,7 +315,7 @@ try {
 
     $shortSha = Get-GitText @("rev-parse", "--short=12", "main")
     $remoteUrl = Get-GitText @("remote", "get-url", "origin")
-    Write-Host "`n  [OK] main local et origin/main (GitHub) sont identiques : $shortSha" -ForegroundColor Green
+    Write-Host "`n  [OK] main et origin/main sont identiques sur GitHub : $shortSha" -ForegroundColor Green
     Write-Host "       $remoteUrl" -ForegroundColor Green
     exit 0
 }

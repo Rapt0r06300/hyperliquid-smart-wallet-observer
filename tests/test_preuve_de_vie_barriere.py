@@ -68,9 +68,13 @@ def test_cli_core_sort_non_zero_sur_racine_vide(tmp_path):
 
 def test_le_cmd_appelle_la_barriere_bloquante_avant_le_moteur():
     txt = CMD.read_text(encoding="utf-8", errors="ignore")
-    # la barrière core bloquante existe, avec warmup borné et check errorlevel + exit non-zero.
+    # La barrière core bloque avec un code non nul, mais passe par :fin afin que le
+    # double-clic reste ouvert et affiche la cause au lieu de disparaître.
     assert "--niveau core --attendre" in txt
-    assert "exit /b 4" in txt
+    bloc = txt.split("DATA_NOT_READY : allMids/BBO/userFills", 1)[1].split("[READY_CORE] OK", 1)[0]
+    assert "call :stop_impl" in bloc
+    assert 'set "RC=4"' in bloc
+    assert "goto :fin" in bloc
     # elle est AVANT le demarrage du moteur/UI (start_hypersmart_simulation.ps1).
     i_barriere = txt.index("--niveau core --attendre")
     i_moteur = txt.index("start_hypersmart_simulation.ps1", i_barriere)

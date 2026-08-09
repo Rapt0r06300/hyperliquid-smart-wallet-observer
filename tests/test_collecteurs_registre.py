@@ -32,6 +32,24 @@ def _root(tmp_path):
     return tmp_path
 
 
+def test_processus_projet_exclut_le_diagnostic_et_inclut_les_enfants(monkeypatch):
+    """L'inventaire PowerShell ne devient pas un faux userfills-live."""
+    processus = [
+        {"ProcessId": 10, "ParentProcessId": 1, "Name": "powershell.exe",
+         "CommandLine": "Get-CimInstance *collecter_userfills_vaults.py*"},
+        {"ProcessId": 20, "ParentProcessId": 1, "Name": "cmd.exe",
+         "CommandLine": "cmd /c tools\\boucle_collecteur.cmd bbo-collector tools\\collecter_bbo.py 5"},
+        {"ProcessId": 21, "ParentProcessId": 20, "Name": "python.exe",
+         "CommandLine": "python worker-child.py"},
+        {"ProcessId": 99, "ParentProcessId": 1, "Name": "python.exe",
+         "CommandLine": "python C:\\autre\\application.py"},
+    ]
+    monkeypatch.setattr(SC, "_ps", lambda _commande: json.dumps(processus))
+
+    trouves = SC._processus_projet(Path.cwd())
+    assert {p["pid"] for p in trouves} == {20, 21}
+
+
 def test_demarrer_tous_enregistre_les_pids(tmp_path):
     root = _root(tmp_path)
     r = SC.demarrer_tous(
@@ -128,6 +146,31 @@ def test_status_detaille_rend_tout_le_registre(tmp_path):
     st = SC.status_detaille(root)
     assert len(st) == len(SC.REGISTRE)
     assert all(set(s) >= {"nom", "pid_enregistre", "instances", "age_log_min", "etat"} for s in st)
+
+
+def test_status_compte_wrapper_et_worker_comme_une_instance(monkeypatch, tmp_path):
+    processus = [
+        {
+            "pid": 100,
+            "ppid": 10,
+            "name": "cmd.exe",
+            "cmd": "cmd /c tools\\boucle_collecteur.cmd bbo-collector tools\\collecter_bbo.py 5",
+        },
+        {
+            "pid": 101,
+            "ppid": 100,
+            "name": "python.exe",
+            "cmd": "python tools\\collecter_bbo.py",
+        },
+    ]
+    monkeypatch.setattr(SC, "_processus_projet", lambda _root: processus)
+    (tmp_path / "runtime" / "data").mkdir(parents=True)
+    (tmp_path / "runtime" / "data" / "bbo_heartbeat.json").write_text("{}", encoding="utf-8")
+
+    etat = next(s for s in SC.status_detaille(tmp_path) if s["nom"] == "bbo-collector")
+
+    assert etat["instances"] == 1
+    assert etat["processus"] == 2
 
 
 def test_persistant_vivant_par_heartbeat_meme_si_log_fige(tmp_path):

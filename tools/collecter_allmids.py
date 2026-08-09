@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 import time
 import urllib.error
@@ -30,8 +31,10 @@ from typing import Any
 
 RACINE = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(RACINE / "src"))
+sys.path.insert(0, str(RACINE / "tools"))
 
 from hl_observer.collection import collecte_fiable as CF  # noqa: E402
+import heartbeat_collecteur as HB  # noqa: E402
 
 URL_HL = "https://api.hyperliquid.xyz/info"
 SORTIE = Path("runtime") / "data" / "hl_allmids.json"
@@ -95,6 +98,8 @@ def une_passe(root: Path, *, post_allmids=_post_allmids, archiver_tape: bool = F
     if not mids:
         return 0
     n = ecrire_cache(root, mids)
+    HB.battre(root, "allmids-collector", pid=os.getppid(), n_ecrites=1,
+              souscription_ack=True, note="%d real allMids prices" % n)
     if archiver_tape:
         ecrire_tape(root, mids)
     return n

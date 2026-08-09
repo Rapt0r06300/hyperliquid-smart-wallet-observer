@@ -144,18 +144,14 @@ COLLECTEURS_RESEARCH = frozenset(
 # venues, découverte + scoring de vaults, backfills fills/candles). On n'inclut ici QUE des collecteurs
 # possédant un runner réel : les briques encore BLOCKED_EXTERNAL (node fills global, HF recorder standalone,
 # TWAP standalone, Bybit) restent honnêtement hors profil tant qu'un vrai collecteur n'est pas branché.
-# POLITIQUE dYdX — UNIQUE (AUD-044) : le projet est Hyperliquid-first. dydx-live POSSÈDE un vrai runner
-# (tools/collecter_dydx_live.py) et figure donc dans HARVEST, mais comme source SECONDAIRE NON-BLOQUANTE :
-# elle n'est PAS dans le socle CORE/REQUIS, donc son absence DÉGRADE la récolte sans jamais empêcher READY
-# (miroir de preuve_de_vie.SOURCES_HARVEST où dydx-live est obligatoire=False). Une seule politique, plus de
-# contradiction « hors profil » : dYdX est présent ET secondaire.
+# dYdX reste un connecteur legacy read-only disponible dans REGISTRE/research/all,
+# mais il est dormant par défaut. Le runtime officiel HARVEST est Hyperliquid uniquement.
 _NOMS_REGISTRE = frozenset(c["nom"] for c in REGISTRE)
 _HARVEST_SOUHAITE = frozenset({
     "allmids-collector", "bbo-collector", "userfills-live",           # CORE (requis)
     "carnet-collector", "marks-collector", "liq-collector", "venues-collector",
     "overshoot-collector", "vault-collector", "scorer-vaults",
     "backfill-fills", "backfill-candles-vaults",
-    "dydx-live",                                    # dYdX v4 read-only — SECONDAIRE non-bloquant (item 2/5)
 })
 COLLECTEURS_HARVEST = frozenset(n for n in _HARVEST_SOUHAITE if n in _NOMS_REGISTRE)
 # Sources OBLIGATOIRES : leur échec doit empêcher le passage en READY (le CLI sort non-zero).
@@ -478,6 +474,50 @@ def _pid_collecteur_existant(c: dict[str, Any], procs: list[dict[str, Any]]) -> 
     return None
 
 
+def _processus_du_collecteur(
+    c: dict[str, Any], procs: list[dict[str, Any]]
+) -> list[dict[str, Any]]:
+    """Return wrapper and worker processes belonging to one collector."""
+    nom = str(c["nom"])
+    script = str(c["script"]).replace("/", "\\").split("\\")[-1]
+    return [
+        proc
+        for proc in procs
+        if ((" %s " % nom) in (" " + str(proc.get("cmd") or "") + " "))
+        or script in str(proc.get("cmd") or "")
+    ]
+
+
+def _nombre_instances_logiques(
+    c: dict[str, Any], procs: list[dict[str, Any]]
+) -> tuple[int, int]:
+    """Count collectors without counting a CMD wrapper and its child twice."""
+    correspondants = _processus_du_collecteur(c, procs)
+    if not correspondants:
+        return 0, 0
+    nom = str(c["nom"])
+    wrappers = {
+        int(proc["pid"])
+        for proc in correspondants
+        if isinstance(proc.get("pid"), int)
+        and "boucle_collecteur.cmd" in str(proc.get("cmd") or "").lower()
+        and (" %s " % nom) in (" " + str(proc.get("cmd") or "") + " ")
+    }
+    if wrappers:
+        return len(wrappers), len(correspondants)
+    pids = {
+        int(proc["pid"])
+        for proc in correspondants
+        if isinstance(proc.get("pid"), int)
+    }
+    racines = {
+        int(proc["pid"])
+        for proc in correspondants
+        if isinstance(proc.get("pid"), int) and proc.get("ppid") not in pids
+    }
+    return len(racines or pids), len(correspondants)
+
+
 def demarrer_tous(
     root: str | Path,
     *,
@@ -618,10 +658,39 @@ def _parse_ps_process(out: str) -> list[dict[str, Any]]:
 def _processus_projet(root: str | Path) -> list[dict[str, Any]]:
     """Process cmd/python signés NOS collecteurs (signature boucle_collecteur.cmd / script du registre).
     Registry-driven, JAMAIS un motif large type *hl_observer*. [] hors Windows."""
+    # Ne filtre pas avec les signatures dans PowerShell : la commande d'inventaire contient alors
+    # elle-meme ``collecter_userfills_vaults.py`` et se detecte comme un faux collecteur. On ne demande
+    # que cmd/python, puis on applique ici la liste blanche issue du REGISTRE.
     out = _ps("Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -and "
-              "($_.CommandLine -like '*boucle_collecteur.cmd*' -or $_.CommandLine -like '*collecter_userfills_vaults.py*') } "
+              "($_.Name -eq 'cmd.exe' -or $_.Name -eq 'python.exe' -or $_.Name -eq 'pythonw.exe') } "
               "| Select-Object ProcessId,ParentProcessId,Name,CommandLine | ConvertTo-Json -Compress")
-    return _parse_ps_process(out)
+    tous = [
+        p for p in _parse_ps_process(out)
+        if str(p.get("name") or "").lower() in {"cmd.exe", "python.exe", "pythonw.exe"}
+    ]
+    scripts = {str(c["script"]).replace("/", "\\").split("\\")[-1].lower() for c in REGISTRE}
+    noms = {str(c["nom"]).lower() for c in REGISTRE}
+
+    def signe(proc: dict[str, Any]) -> bool:
+        ligne = str(proc.get("cmd") or "").lower()
+        return (
+            "boucle_collecteur.cmd" in ligne
+            or any(script in ligne for script in scripts)
+            or any((" %s " % nom) in (" " + ligne + " ") for nom in noms)
+        )
+
+    retenus = [p for p in tous if signe(p)]
+    pids = {p.get("pid") for p in retenus if isinstance(p.get("pid"), int)}
+    # Inclure recursivement les enfants des wrappers signes. Le Python BBO n'a pas toujours le chemin
+    # du projet dans sa ligne de commande, mais son parent est exactement notre boucle_collecteur.cmd.
+    while True:
+        enfants = [p for p in tous if isinstance(p.get("pid"), int) and p.get("ppid") in pids]
+        nouveaux = [p for p in enfants if p.get("pid") not in pids]
+        if not nouveaux:
+            break
+        retenus.extend(nouveaux)
+        pids.update(p["pid"] for p in nouveaux)
+    return retenus
 
 
 def pid_du_port(port: int = PORT_UI) -> int | None:
@@ -658,11 +727,12 @@ def status_detaille(
     etats = etat_collecteurs(root, maintenant=maintenant, profil=profil_normalise)
     out = []
     for c, e in zip(collecteurs, etats):
-        nom, script = c["nom"], str(c["script"]).split("/")[-1]
-        insts = [p for p in procs if (" %s " % nom) in (" " + (p["cmd"] or "") + " ") or script in (p["cmd"] or "")]
-        vivant = (len(insts) > 0) if procs else (not e["mort"])
+        nom = c["nom"]
+        instances, processus = _nombre_instances_logiques(c, procs)
+        vivant = (instances > 0) if procs else (not e["mort"])
         out.append({"nom": nom, "profil": profil_collecteur(nom),
-                    "pid_enregistre": reg_pids.get(nom), "instances": len(insts),
+                    "pid_enregistre": reg_pids.get(nom), "instances": instances,
+                    "processus": processus,
                     "heartbeat_ms": hb_uf if nom == "userfills-live" else None,
                     "age_log_min": e["age_minutes"], "limite_min": e["limite_minutes"],
                     "log_mort": e["mort"], "etat": "VIVANT" if vivant else "MORT"})

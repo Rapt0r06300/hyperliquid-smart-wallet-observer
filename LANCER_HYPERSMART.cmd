@@ -3,6 +3,10 @@ setlocal
 cd /d "%~dp0"
 REM item 9/10 : code de sortie propage de bout en bout. Jamais un exit /b 0 systematique en cas d'echec.
 set "RC=0"
+REM Un double-clic est une session interactive : meme si le moteur rend la main avec
+REM un code 0, la fenetre reste ouverte pour afficher le bilan au lieu de disparaitre.
+set "HYPERSMART_INTERACTIVE_LAUNCH=0"
+if "%~1"=="" set "HYPERSMART_INTERACTIVE_LAUNCH=1"
 REM PORTABILITE : choisit en priorite le Python embarque relatif au dossier.
 REM Le PATH est modifie uniquement pour cette session du lanceur et ses enfants.
 call "%~dp0tools\portable_env.cmd"
@@ -45,6 +49,20 @@ if errorlevel 2 (
   echo.
   goto :fin
 )
+set "PYTHONPATH=%~dp0src;%PYTHONPATH%"
+REM === PORTABILITE INTRINSEQUE ===
+REM Ce prevol s'execute AVANT la creation du verrou/PID du lancement courant. Il ne purge
+REM l'etat machine qu'au tout premier demarrage ou apres un vrai changement de PC/chemin.
+REM Sur un demarrage ordinaire au meme endroit il est strictement non destructif.
+"%HYPERSMART_PYTHON%" -m hl_observer.ops.premier_lancement --racine "%~dp0."
+if errorlevel 1 (
+  echo.
+  echo   [PREVOL] Environnement NO_GO : droits, runtime ou securite a corriger.
+  echo   Aucun verrou, PID ou collecteur du nouveau lancement n'a ete cree.
+  echo.
+  set "RC=7"
+  goto :fin
+)
 REM === ITEM 11 : VERROU d'instance ATOMIQUE (le seul controle du port ne suffit PAS pendant le warmup,
 REM   avant que l'UI ne lie 8794). Deux double-clics simultanes ne lancent JAMAIS deux recoltes.
 if not exist "runtime\data" mkdir "runtime\data" >nul 2>&1
@@ -63,22 +81,6 @@ if not exist "runtime\logs\launcher" mkdir "runtime\logs\launcher" >nul 2>&1
 powershell -NoProfile -Command "$o=[ordered]@{ role='launcher_autopilot'; note='pid_reels_dans_lanceur_pids.json'; run_id=([guid]::NewGuid().ToString('N').Substring(0,12)); port=8794; demarre=(Get-Date).ToString('s'); commit=(& git rev-parse --short HEAD 2>$null) }; ($o | ConvertTo-Json -Compress) | Set-Content -Encoding UTF8 (Join-Path '%~dp0' 'runtime\data\launcher_pids.json')" 2>nul
 REM Le verificateur OOS planifie est strictement opt-in.
 REM Utiliser "LANCER_HYPERSMART.cmd verify-oos install" pour l'activer explicitement.
-
-set "PYTHONPATH=%~dp0src;%PYTHONPATH%"
-REM === ITEM 21 : PREVOL PREMIER-LANCEMENT (PC neuf apres extraction de l'archive). Verifie OS/arch,
-REM   droits d'ecriture, chemin a espaces/accents, horloge, port UI, aucune cle copiee, sessions
-REM   preservees, et REGENERE l'identite machine (PID/verrous perimes/COURANTE, machine-id neuf) pour
-REM   qu'une archive/dossier copiee ne reutilise JAMAIS l'etat de la machine de build. S'execute APRES
-REM   le verrou (notre verrou d'instance vivant est preserve) et AVANT tout collecteur/session.
-"%HYPERSMART_PYTHON%" -m hl_observer.ops.premier_lancement --racine "%~dp0."
-if errorlevel 1 (
-  echo.
-  echo   [PREVOL] Premier lancement NO_GO : environnement inadapte ^(droits d'ecriture, ou cle presente^).
-  echo   Voir le detail ci-dessus. Corrige puis relance. Aucun collecteur n'est demarre.
-  echo.
-  set "RC=7"
-  goto :fin
-)
 set "HL_ENV=paper"
 set "HL_ENABLE_MAINNET_EXECUTION=0"
 set "HL_ENABLE_TESTNET_EXECUTION=0"
@@ -438,12 +440,22 @@ if errorlevel 1 (
   echo.
   echo   [COLLECTEURS] Une source obligatoire n'a pas demarre. Le moteur ne demarre pas. Voir ci-dessus.
   echo.
-  pause
-  exit /b 3
+  call :stop_impl
+  set "RC=3"
+  goto :fin
 )
 REM Le superviseur enregistre directement les PID et reutilise les instances deja
 REM vivantes. Aucun second passage de detection, aucun demarrage en double.
 ping -n 3 127.0.0.1 >nul 2>&1
+REM Une ancienne boucle peut sortir juste apres le changement du marqueur de session.
+REM Ce second passage idempotent ne duplique rien et recree seulement les collecteurs disparus.
+call :demarrer_collecteurs
+if errorlevel 1 (
+  echo   [COLLECTEURS] Echec de reconciliation apres changement de session.
+  call :stop_impl
+  set "RC=3"
+  goto :fin
+)
 "%HYPERSMART_PYTHON%" -m hl_observer.ops.superviseur_collecteurs status harvest
 echo   [collecteurs HARVEST] allMids + BBO(HL+Binance) + userFills + carnet L2 + marks + liq + venues + vaults + backfills.
 REM === ITEM 1 : BARRIERE READY_CORE **BLOQUANTE** =============================================
@@ -462,8 +474,9 @@ if errorlevel 1 (
   echo   Le moteur, l'UI et le poller NE demarrent PAS ^(paper strict, aucune donnee fabriquee^).
   echo   Source et raison exactes affichees ci-dessus. Corrige puis relance.
   echo.
-  pause
-  exit /b 4
+  call :stop_impl
+  set "RC=4"
+  goto :fin
 )
 echo   [READY_CORE] OK : allMids + BBO + userFills prouves vivants. Demarrage moteur/UI/poller autorise.
 REM Item 4 : niveau HARVEST detaille (COMPLET / DEGRADE_DOCUMENTE) — INFORMATIF, va au catalogue de session.
@@ -501,16 +514,26 @@ goto :fin
 REM item 9 : code de sortie reel (0 seulement si tout a reussi), jamais un exit /b 0 systematique.
 REM [2026-08-05] JAMAIS de fermeture invisible. Un prevol NO_GO sortait en 7 sans pause : la
 REM fenetre disparaissait avant d'etre lue, et la panne devenait indiagnosticable a l'oeil nu.
-if not "%RC%"=="0" if /I not "%HYPERSMART_NO_PAUSE%"=="1" (
-  echo.
-  echo   ============================================================
+if /I "%HYPERSMART_NO_PAUSE%"=="1" goto :fin_exit
+if "%HYPERSMART_INTERACTIVE_LAUNCH%"=="1" goto :fin_pause
+if not "%RC%"=="0" goto :fin_pause
+goto :fin_exit
+
+:fin_pause
+echo.
+echo   ============================================================
+if "%RC%"=="0" (
+  echo     HyperSmart est arrete proprement. Cette fenetre reste ouverte.
+) else (
   echo     ARRET sur le code %RC% - la raison exacte est AU-DESSUS.
   echo     Diagnostic complet : DIAGNOSTIC_LANCEUR.cmd
-  echo     ^(HYPERSMART_NO_PAUSE=1 pour supprimer cette pause en automatise^)
-  echo   ============================================================
-  echo.
-  pause
 )
+echo     ^(HYPERSMART_NO_PAUSE=1 pour supprimer cette pause en automatise^)
+echo   ============================================================
+echo.
+pause
+
+:fin_exit
 endlocal & exit /b %RC%
 
 REM ############################################################################
@@ -636,8 +659,8 @@ REM 24 coins (vol x OI x liquidations), isole sous research_lab. PERSISTANT : bo
 REM qu'en cas de crash (comme bbo-collector). Debloque la profondeur (VWAP/capacite) + les familles HL
 REM natives (OFI/microprice/absorption/cascade). Necessite le module python `websockets`. 0 cle, 0 ordre.
 start "" /b tools\boucle_collecteur.cmd lab-microstructure tools\collecter_lab_microstructure.py 30
-REM 06/08 - dydx-live etait au REGISTRE du superviseur mais JAMAIS demarre (mourrait en silence).
-start "" /b tools\boucle_collecteur.cmd dydx-live tools\collecter_dydx_live.py 300 --duree-s 290
+REM dYdX reste legacy/research et dormant. Aucune commande dYdX n'est executee
+REM par le lanceur Hyperliquid principal, meme dans cette reference inatteignable.
 
 exit /b 0
 
@@ -677,6 +700,7 @@ if /I "%SUB%"=="notif-test"        goto :cmd_notiftest
 if /I "%SUB%"=="portable-check"    goto :cmd_portablecheck
 if /I "%SUB%"=="portable-install"  goto :cmd_portableinstall
 if /I "%SUB%"=="portable-build"    goto :cmd_portablebuild
+if /I "%SUB%"=="portable-zip"      goto :cmd_portablezip
 echo.
 echo   Sous-commande inconnue : "%SUB%"
 goto :cmd_menu
@@ -708,7 +732,8 @@ echo     github-push     push git fast-forward EXPLICITE ^(jamais de force^)
 echo     reset-paper --confirm   remise a zero VOLONTAIRE ^(sauvegarde horodatee avant^)
 echo     portable-check          verifie le runtime Python relocalisable
 echo     portable-install        installe/repare le runtime Windows x64 local
-echo     portable-build          cree le ZIP portable verifie sur le Bureau
+echo     portable-build          clone de secours complet ^(donnees/historique inclus^)
+echo     portable-zip            ZIP application seule, demarrage propre
 echo     menu                cette aide
 echo.
 echo   Securite : lecture seule marche. 0 ordre reel, 0 cle, 0 signature.
@@ -720,6 +745,10 @@ REM -------- PORTABILITE WINDOWS --------
 echo.
 "%HYPERSMART_PYTHON%" tools\portable_runtime.py --root "%~dp0." check --require-embedded --json
 set "RC=%ERRORLEVEL%"
+if not "%RC%"=="0" goto :portablecheck_fin
+"%HYPERSMART_PYTHON%" tools\portable_runtime.py --root "%~dp0." relocate-check --json
+set "RC=%ERRORLEVEL%"
+:portablecheck_fin
 if "%RC%"=="0" echo PORTABLE_LAUNCHER_CHECK_OK
 echo.
 goto :fin
@@ -731,6 +760,12 @@ echo.
 goto :fin
 
 :cmd_portablebuild
+echo.
+"%HYPERSMART_PYTHON%" -m hl_observer.ops.portable_clone --racine "%~dp0."
+echo.
+goto :fin
+
+:cmd_portablezip
 echo.
 powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0tools\create_portable_bundle.ps1" -ProjectRoot "%~dp0."
 echo.
@@ -759,6 +794,7 @@ echo.
 echo   Arret cible des collecteurs + userfills ^(par ligne de commande du projet ; aucun kill global^)...
 call :stop_impl
 set "RC=%ERRORLEVEL%"
+call :stop_launcher_wrappers
 echo.
 echo   Arret + cloture termines ^(code %RC%^). QUARANTINED si un writer vivait encore ou un artefact manque.
 echo.
@@ -782,12 +818,19 @@ set "RC_STOP=0"
 if not "%RC_SUP%"=="0" ( set "RC_STOP=%RC_SUP%" ) else ( if not "%RC_CLO%"=="0" set "RC_STOP=%RC_CLO%" )
 exit /b %RC_STOP%
 
+:stop_launcher_wrappers
+REM Les anciens wrappers PowerShell pouvaient rester bloques sur Read-Host apres que
+REM leurs enfants avaient ete arretes. On cible UNIQUEMENT ce script dans CE projet.
+powershell -NoProfile -ExecutionPolicy Bypass -Command "$root=[IO.Path]::GetFullPath('%~dp0'); $targets=@(Get-CimInstance Win32_Process -ErrorAction SilentlyContinue | Where-Object { $_.ProcessId -ne $PID -and $_.Name -in @('powershell.exe','pwsh.exe') -and $_.CommandLine -like '*start_hypersmart_simulation.ps1*' -and $_.CommandLine -like ('*'+$root+'*') }); foreach($t in $targets){ $killPid=[int]$t.ProcessId; $parent=Get-CimInstance Win32_Process -Filter ('ProcessId='+[int]$t.ParentProcessId) -ErrorAction SilentlyContinue; if($parent -and $parent.Name -eq 'cmd.exe' -and $parent.CommandLine -like '*LANCER_HYPERSMART.cmd*'){ $killPid=[int]$parent.ProcessId }; Write-Host ('  Arret ancien arbre lanceur HyperSmart pid='+$killPid); Start-Process -FilePath taskkill.exe -ArgumentList @('/PID',[string]$killPid,'/T','/F') -Wait -NoNewWindow }"
+exit /b 0
+
 REM -------- RESTART = stop puis autopilot --------
 :cmd_restart
 echo.
 echo   Redemarrage : arret cible ^(collecteurs + userfills + moteur^) puis autopilot...
 call :stop_impl
 set "RC_STOP=%ERRORLEVEL%"
+call :stop_launcher_wrappers
 REM item 9 : un arret/cloture en echec NE redemarre PAS en silence (on propage le code).
 if not "%RC_STOP%"=="0" (
   echo   [RESTART] Arret/cloture en echec ^(code %RC_STOP%^) : on NE redemarre pas. Corrige d'abord.

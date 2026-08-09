@@ -5,9 +5,7 @@
   (prix/microstructure/userFills) plus les collecteurs de récolte qui possèdent un VRAI runner
   présent sur le disque. Les briques encore BLOCKED (node fills, HF recorder, TWAP, Bybit)
   restent honnêtement HORS profil tant qu'un collecteur réseau réel n'est pas branché.
-- POLITIQUE dYdX UNIQUE (AUD-044) : Hyperliquid-first. dydx-live a un vrai runner et figure dans
-  HARVEST comme source SECONDAIRE non-bloquante (obligatoire=False dans preuve_de_vie.SOURCES_HARVEST),
-  JAMAIS dans le socle CORE/REQUIS — son absence dégrade la récolte sans bloquer READY.
+- dYdX reste disponible comme connecteur legacy explicite, mais est dormant dans HARVEST.
 - Le CLI `demarrer-tous` BLOQUE (exit 3) dès qu'un collecteur REQUIS (= CORE) n'a pas démarré :
   le moteur ne doit jamais tourner au-dessus d'une source obligatoire morte.
 """
@@ -61,16 +59,12 @@ def test_cli_demarrer_tous_bloque_si_source_obligatoire_absente(monkeypatch):
     assert SC._cli(["demarrer-tous", "harvest"]) == 0
 
 
-def test_dydx_live_est_une_source_harvest_secondaire_pas_core():
-    """AUD-044 — POLITIQUE dYdX UNIQUE, épinglée. Hyperliquid-first :
-    dydx-live est une source SECONDAIRE du harvest (présente, non-bloquante),
-    JAMAIS dans le socle CORE obligatoire. Épingle l'absence de contradiction
-    « hors profil » et l'alignement inter-module avec preuve_de_vie."""
+def test_dydx_live_est_disponible_mais_dormant_par_defaut():
+    """Le connecteur legacy reste testable sans entrer dans le runtime officiel."""
     harvest = {c["nom"] for c in SC.collecteurs_pour_profil("harvest")}
 
-    # (1) PRÉSENTE dans le harvest, en tant que secondaire avec un vrai runner sur le disque
-    assert "dydx-live" in SC.COLLECTEURS_HARVEST
-    assert "dydx-live" in harvest
+    assert "dydx-live" not in SC.COLLECTEURS_HARVEST
+    assert "dydx-live" not in harvest
     dydx = next(c for c in SC.REGISTRE if c["nom"] == "dydx-live")
     assert (RACINE / dydx["script"]).exists(), dydx["script"]
 
@@ -79,7 +73,20 @@ def test_dydx_live_est_une_source_harvest_secondaire_pas_core():
     assert "dydx-live" not in SC.COLLECTEURS_REQUIS
     assert SC.profil_collecteur("dydx-live") != "core"
 
-    # (3) MÊME politique côté preuve_de_vie : source secondaire, obligatoire=False
+    # La preuve conserve le legacy comme diagnostic secondaire explicite.
     src = {s.nom: s for s in PV.SOURCES_HARVEST}
     assert "dydx-live" in src
     assert src["dydx-live"].obligatoire is False
+
+
+def test_lanceur_principal_ne_contient_aucune_commande_dydx_executable():
+    lignes = (RACINE / "LANCER_HYPERSMART.cmd").read_text(
+        encoding="utf-8-sig", errors="replace"
+    ).splitlines()
+    actives = [
+        ligne
+        for ligne in lignes
+        if "dydx-live" in ligne.lower()
+        and not ligne.lstrip().lower().startswith(("rem ", "::"))
+    ]
+    assert actives == []

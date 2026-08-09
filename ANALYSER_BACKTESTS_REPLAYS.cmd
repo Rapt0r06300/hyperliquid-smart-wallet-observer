@@ -27,9 +27,38 @@ set "HL_ENABLE_TESTNET_EXECUTION=0"
 set "REAL_MAINNET_TRADING=false"
 set "TESTNET_ONLY=true"
 
-REM Smoke portable borne, non interactif : utilise exclusivement Python embarque.
-if /I "%~1"=="portable-smoke" goto :portable_smoke
+REM Profils reels. Le double-clic utilise FULL; aucun argument n'est ignore silencieusement.
+set "ANALYSIS_MODE=%~1"
+if "%ANALYSIS_MODE%"=="" set "ANALYSIS_MODE=full"
+if /I "%ANALYSIS_MODE%"=="portable-smoke" goto :portable_smoke
+if /I "%ANALYSIS_MODE%"=="portable-check" goto :portable_smoke
+if /I "%ANALYSIS_MODE%"=="quick" goto :mode_quick
+if /I "%ANALYSIS_MODE%"=="full" goto :mode_full
+if /I "%ANALYSIS_MODE%"=="deep" goto :mode_deep
+if /I "%ANALYSIS_MODE%"=="maximum" goto :mode_deep
+goto :usage
+
+:mode_quick
+if "%HYPERSMART_LAB_BUDGET%"=="" set "HYPERSMART_LAB_BUDGET=8"
+set "RUN_EXTENDED_SUITE=0"
 goto :analyse_principale
+
+:mode_full
+if "%HYPERSMART_LAB_BUDGET%"=="" set "HYPERSMART_LAB_BUDGET=0"
+set "RUN_EXTENDED_SUITE=0"
+goto :analyse_principale
+
+:mode_deep
+if "%HYPERSMART_LAB_BUDGET%"=="" set "HYPERSMART_LAB_BUDGET=0"
+set "RUN_EXTENDED_SUITE=1"
+goto :analyse_principale
+
+:usage
+echo.
+echo   [ERREUR] Profil inconnu : %ANALYSIS_MODE%
+echo   Usage : ANALYSER_BACKTESTS_REPLAYS.cmd [quick^|full^|deep^|maximum^|portable-smoke]
+if /I not "%HYPERSMART_NO_PAUSE%"=="1" pause
+endlocal & exit /b 2
 
 :portable_smoke
 "%HYPERSMART_PYTHON%" -m hl_observer.ops.portable_smoke --root "%~dp0." --json
@@ -42,6 +71,7 @@ echo.
 echo ============================================================
 echo   LABORATOIRE ALPHA - paper strict (0 ordre reel)
 echo   Analyse d'UNE session COMPLETE, verifiee, isolee.
+echo   Profil : %ANALYSIS_MODE%  -  budget : %HYPERSMART_LAB_BUDGET%
 echo ============================================================
 echo.
 
@@ -62,7 +92,7 @@ if errorlevel 1 (
   echo     via HYPERSMART_AGE_MAX_S ^(0 = pas de limite^), ou passe --autoriser-complete-ancienne.
   echo   Detail : runtime\reports\backtest_replay\ANALYSE_SESSION.md
   echo.
-  pause
+  if /I not "%HYPERSMART_NO_PAUSE%"=="1" pause
   endlocal & exit /b 5
 )
 set "SEL=%~dp0runtime\reports\backtest_replay\SESSION_SELECTIONNEE.txt"
@@ -83,8 +113,7 @@ set "SESSION_DIR=%~dp0runtime\data\sessions\%RUN_ID%"
 echo   [ANALYSE_SESSION] GO : session COMPLETE = %RUN_ID%. Analyse EXCLUSIVE de ses artefacts verifies.
 echo.
 
-REM Budget MAXIMAL par defaut (item 11) : --budget 0 = grille entiere. Surchargeable HYPERSMART_LAB_BUDGET.
-if "%HYPERSMART_LAB_BUDGET%"=="" set "HYPERSMART_LAB_BUDGET=0"
+REM --budget 0 = grille entiere. QUICK pose une limite honnete; les autres profils gardent la grille.
 REM item 6 : fenetre RAM du replay TOUJOURS bornee. 0 (defaut) = budget AUTOMATIQUE borne calcule sur
 REM la RAM disponible (jamais illimite, jamais d'OOM) ; une valeur > 0 impose un plafond explicite.
 if "%HYPERSMART_MAX_RAM_EVENTS%"=="" set "HYPERSMART_MAX_RAM_EVENTS=0"
@@ -98,19 +127,37 @@ if not "%RC%"=="0" (
   echo   [LAB] Le run a ECHOUE ^(code %RC%^). Aucun ancien rapport n'est ouvert. Voir le journal :
   echo   runtime\reports\backtest_replay\%RUN_ID%\journal_lab.log
   echo.
-  pause
+  if /I not "%HYPERSMART_NO_PAUSE%"=="1" pause
   endlocal & exit /b %RC%
 )
+
+REM DEEP/MAXIMUM ajoutent la suite historique large apres le laboratoire canonique scope.
+REM Elle reste locale, read-only et paper strict. FULL ne duplique pas cette analyse couteuse.
+if "%RUN_EXTENDED_SUITE%"=="1" goto :run_extended_suite
+goto :after_extended_suite
+
+:run_extended_suite
+echo.
+echo   [SUITE ETENDUE] Replays, A/B, walk-forward, anti-overfit et recherche reprenable...
+"%HYPERSMART_PYTHON%" -m hl_observer.ops.historical_analysis_suite --root "%~dp0." --deep
+set "RC=%ERRORLEVEL%"
+if not "%RC%"=="0" (
+  echo   [SUITE ETENDUE] Echec ou donnees insuffisantes ^(code %RC%^). Le rapport du laboratoire reste conserve.
+  if /I not "%HYPERSMART_NO_PAUSE%"=="1" pause
+  endlocal & exit /b %RC%
+)
+
+:after_extended_suite
 set "RAP=%~dp0runtime\reports\backtest_replay\%RUN_ID%\RAPPORT_LATEST.md"
 if exist "%RAP%" (
   echo.
   echo   Rapport NEUF de cette session : "%RAP%"
-  start "" "%RAP%"
+  if /I not "%HYPERSMART_NO_OPEN_REPORT%"=="1" start "" "%RAP%"
 ) else (
   echo   ATTENTION: rapport du run courant introuvable. Voir runtime\reports\backtest_replay\%RUN_ID%\journal_lab.log
   set "RC=7"
 )
 echo.
 echo Termine (code %RC%). Appuyez sur une touche pour fermer.
-pause >nul
+if /I not "%HYPERSMART_NO_PAUSE%"=="1" pause >nul
 endlocal & exit /b %RC%

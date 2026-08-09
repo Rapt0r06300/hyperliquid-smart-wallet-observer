@@ -66,21 +66,21 @@ Fichier :
 ANALYSER_BACKTESTS_REPLAYS.cmd
 ```
 
-Le double-clic lance la suite `full`, locale et bornee, qui reutilise les
-moteurs d'analyse existants :
+Le double-clic lance le laboratoire canonique `full`, local et borne a la
+derniere session `COMPLETE` dont les checksums sont valides. Il reutilise les
+moteurs d'analyse existants pour :
 
-1. fusion des shards de replay ;
-2. laboratoire PnL sur les ledgers canoniques actifs et archives ;
-3. controle qualite du replay ;
-4. comparaison A/B exacte a notionnel constant de 50 USDT par trade ;
-5. replay temps reel ;
-6. replay du ledger ferme ;
-7. tournoi de strategies ;
-8. audit PnL ;
-9. attribution des pertes ;
-10. rapport de latence ;
-11. diagnostic de fraicheur ;
-12. walk-forward et controles anti-overfit en mode `full`.
+1. verifier et isoler la session choisie ;
+2. apparier le ledger paper et les preuves `OPEN/CLOSE` ;
+3. recalculer PnL, frais et attribution des pertes ;
+4. comparer les regles A/B a notionnel constant ;
+5. separer train, validation et holdout ;
+6. produire le rapport de pistes sans activer automatiquement un flag.
+
+Le profil `deep`/`maximum` enchaine ensuite la suite historique large : fusion
+des shards, qualite, replays, audit PnL, latence, fraicheur, walk-forward,
+anti-overfit et recherche reprenable. Cette seconde passe est explicite car
+elle est plus longue et travaille sur l'inventaire historique global.
 
 Modes :
 
@@ -92,10 +92,12 @@ ANALYSER_BACKTESTS_REPLAYS.cmd deep
 ANALYSER_BACKTESTS_REPLAYS.cmd maximum
 ```
 
-- double-clic / `full` : mode recommande, avec validation temporelle ;
-- `quick` : controle regulier plus court ;
+- double-clic / `full` : grille complete sur la derniere session valide ;
+- `quick` : meme chemin canonique avec budget de huit combinaisons par defaut ;
 - `deep` : ajoute la recherche exhaustive reprenable, volontairement explicite.
 - `maximum` : alias lisible de `deep`.
+- `portable-smoke` ou `portable-check` : preuve bornee, hors reseau et sans
+  modification de la session, destinee au controle apres copier-coller.
 
 Le laboratoire PnL :
 

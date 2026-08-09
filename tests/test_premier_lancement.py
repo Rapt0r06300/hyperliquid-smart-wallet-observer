@@ -123,6 +123,19 @@ def test_aucune_cle_bloque_toujours_un_vrai_env(tmp_path):
     assert r["statut"] == PL.ECHEC and ".env" in r["detail"]
 
 
+def test_aucune_cle_ignore_le_miroir_github_archive_mais_pas_le_runtime(tmp_path):
+    archive = tmp_path / "runtime" / "research" / "github_repos_v24" / "tiers"
+    archive.mkdir(parents=True)
+    (archive / ".env.test").write_text("SECRET_KEY=dummy-fixture\n", encoding="utf-8")
+    assert PL.verifier_aucune_cle(tmp_path)["statut"] == PL.OK
+
+    actif = tmp_path / "runtime" / "data"
+    actif.mkdir(parents=True)
+    (actif / ".env").write_text("SECRET_KEY=active\n", encoding="utf-8")
+    r = PL.verifier_aucune_cle(tmp_path)
+    assert r["statut"] == PL.ECHEC and "runtime/data/.env" in r["detail"]
+
+
 def test_sessions_preservees_comptees(tmp_path):
     _session_complete(tmp_path, "run_a")
     _session_complete(tmp_path, "run_b")
@@ -165,6 +178,12 @@ def test_manifeste_integrite(tmp_path):
     assert PL.verifier_manifeste(tmp_path)["statut"] == PL.OK
     (tmp_path / "PORTABLE_MANIFEST.json").write_text("{ pas du json", encoding="utf-8")
     assert PL.verifier_manifeste(tmp_path)["statut"] == PL.ECHEC     # present mais corrompu -> ECHEC
+
+
+def test_manifeste_integrite_accepte_bom_windows(tmp_path):
+    (tmp_path / "PORTABLE_MANIFEST.json").write_text(
+        '{"schema":"x","empreinte_globale":"abc"}', encoding="utf-8-sig")
+    assert PL.verifier_manifeste(tmp_path)["statut"] == PL.OK
 
 
 def test_regen_purge_caches_compiles_et_status_volatils(tmp_path):
@@ -240,6 +259,9 @@ def test_regenere_identite_purge_et_preserve(tmp_path):
     (tmp_path / REGISTRE_RELPATH).parent.mkdir(parents=True, exist_ok=True)
     (tmp_path / REGISTRE_RELPATH).write_text('{"collecteurs": {"bbo": 111}}', encoding="utf-8")
     (tmp_path / "runtime" / "data" / "COURANTE.json").write_text('{"run_id": "vieux"}', encoding="utf-8")
+    sessions = tmp_path / "runtime" / "data" / "sessions"
+    sessions.mkdir(parents=True)
+    (sessions / "COURANTE.json").write_text('{"run_id": "vieux2"}', encoding="utf-8")
     (tmp_path / "runtime" / "data" / "lanceur_session_marqueur.txt").write_text("x", encoding="utf-8")
     (tmp_path / "instance.lock").write_text("999", encoding="utf-8")             # verrou perime herite
     # ...le verrou d'instance VIVANT du lanceur courant, qui NE DOIT PAS etre purge...
@@ -253,6 +275,7 @@ def test_regenere_identite_purge_et_preserve(tmp_path):
     # identite machine purgee...
     assert not (tmp_path / REGISTRE_RELPATH).exists()
     assert not (tmp_path / "runtime" / "data" / "COURANTE.json").exists()
+    assert not (sessions / "COURANTE.json").exists()
     assert not (tmp_path / "instance.lock").exists()
     assert "instance.lock" in res["purges"]
     # ...mais le verrou d'instance VIVANT survit (garde anti-double-lancement)...
@@ -260,6 +283,64 @@ def test_regenere_identite_purge_et_preserve(tmp_path):
     assert PL.LOCK_INSTANCE_VIVANT not in " ".join(res["purges"])
     # ...et la session COMPLETE est INTACTE.
     assert SC.CatalogueSession(tmp_path, "run_garde").lire()["statut"] == SC.STATUT_COMPLETE
+
+
+def test_demarrage_ordinaire_ne_purge_jamais_pid_ni_verrou(tmp_path):
+    premier = PL.preparer_identite_portable(
+        tmp_path, generateur=lambda: "MID-STABLE", identite_hote="PC-A"
+    )
+    assert premier["changed"] is True
+
+    registre = tmp_path / REGISTRE_RELPATH
+    registre.parent.mkdir(parents=True, exist_ok=True)
+    registre.write_text('{"pid": 123}', encoding="utf-8")
+    verrou = tmp_path / "runtime" / "research_lab" / "heartbeats" / "bbo.json.lock"
+    verrou.parent.mkdir(parents=True, exist_ok=True)
+    verrou.write_text("live", encoding="utf-8")
+
+    second = PL.preparer_identite_portable(
+        tmp_path, generateur=lambda: "NE-DOIT-PAS-ETRE-UTILISE", identite_hote="PC-A"
+    )
+
+    assert second["changed"] is False
+    assert second["reason"] == "SAME_HOST_AND_ROOT"
+    assert registre.is_file()
+    assert verrou.is_file()
+    assert (tmp_path / PL.MACHINE_ID_RELPATH).read_text(encoding="utf-8") == "MID-STABLE"
+
+
+def test_copie_vers_un_autre_chemin_regenere_une_seule_fois(tmp_path):
+    source = tmp_path / "source"
+    cible = tmp_path / "copie ailleurs"
+    source.mkdir()
+    cible.mkdir()
+    PL.preparer_identite_portable(source, generateur=lambda: "SOURCE", identite_hote="PC-A")
+
+    etat_source = source / PL.PORTABLE_HOST_STATE_RELPATH
+    etat_cible = cible / PL.PORTABLE_HOST_STATE_RELPATH
+    etat_cible.parent.mkdir(parents=True, exist_ok=True)
+    etat_cible.write_bytes(etat_source.read_bytes())
+    machine_cible = cible / PL.MACHINE_ID_RELPATH
+    machine_cible.write_text("SOURCE", encoding="utf-8")
+    stale = cible / "runtime" / "research_lab" / "heartbeats" / "stale.json.lock"
+    stale.parent.mkdir(parents=True, exist_ok=True)
+    stale.write_text("old", encoding="utf-8")
+    cache = cible / "src" / "pkg" / "__pycache__" / "module.pyc"
+    cache.parent.mkdir(parents=True, exist_ok=True)
+    cache.write_bytes(b"portable")
+
+    resultat = PL.preparer_identite_portable(
+        cible, generateur=lambda: "CIBLE", identite_hote="PC-A"
+    )
+
+    assert resultat["changed"] is True
+    assert "ROOT_CHANGED" in resultat["reason"]
+    assert not stale.exists()
+    assert cache.read_bytes() == b"portable"
+    assert not any("__pycache__" in purge for purge in resultat["purges"])
+    assert machine_cible.read_text(encoding="utf-8") == "CIBLE"
+    persiste = json.loads(etat_cible.read_text(encoding="utf-8"))
+    assert "source" not in json.dumps(persiste).casefold()
 
 
 # ── orchestrateur ─────────────────────────────────────────────────────────────────────────────
@@ -302,3 +383,10 @@ def test_lanceur_appelle_premier_lancement_avant_collecteurs():
     i_pl = CMD.index("premier_lancement")
     i_coll = CMD.index("demarrer_collecteurs", i_pl)
     assert i_pl < i_coll                                                 # item 21 : controle AVANT tout writer
+
+
+def test_lanceur_prepare_portabilite_avant_verrou_et_registre_pid():
+    i_pl = CMD.index("hl_observer.ops.premier_lancement")
+    i_lock = CMD.index("hl_observer.ops.verrou_lanceur acquerir")
+    i_pid = CMD.index("launcher_pids.json")
+    assert i_pl < i_lock < i_pid

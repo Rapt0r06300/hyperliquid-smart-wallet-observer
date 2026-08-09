@@ -16,12 +16,19 @@ READ-ONLY / PAPER-ONLY : deux flux PUBLICS en lecture. Aucune clé, aucun ordre,
 from __future__ import annotations
 
 import json
+import os
+import sys
 import time
 from collections import deque
 from pathlib import Path
 from typing import Any
 
+RACINE = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(RACINE / "tools"))
+import heartbeat_collecteur as HB  # noqa: E402
+
 WS_HL = "wss://api.hyperliquid.xyz/ws"
+INFO_HL = "https://api.hyperliquid.xyz/info"
 WS_BINANCE = "wss://fstream.binance.com/stream"
 SORTIE = Path("runtime") / "data" / "bbo_synchro.jsonl"
 TAPE = Path("runtime") / "data" / "bbo_tape.jsonl"     # chaque message BBO (monotone) -> lead-lag fin
@@ -52,6 +59,67 @@ _EXCEPTIONS = {"PEPE": "1000PEPEUSDT", "SHIB": "1000SHIBUSDT", "BONK": "1000BONK
 #: hors des 8 majors). La tape bbo_tape.jsonl EST le ring-buffer (continu, avant + après l'événement).
 MAJORS_BBO = ("BTC", "ETH", "SOL", "INJ", "DASH", "NEO", "AVAX", "LINK")
 LIQ_CONFIRMEES_REL = Path("runtime") / "data" / "liquidations_confirmees.jsonl"
+
+
+def extraire_symboles_hyperliquid(meta: Any) -> list[str]:
+    """Return case-sensitive perpetual symbols exposed by ``/info meta``."""
+
+    if not isinstance(meta, dict) or not isinstance(meta.get("universe"), list):
+        raise ValueError("reponse /info meta invalide")
+    symbols: list[str] = []
+    seen: set[str] = set()
+    for item in meta["universe"]:
+        name = str(item.get("name") or "").strip() if isinstance(item, dict) else ""
+        key = name.upper()
+        if name and key not in seen:
+            symbols.append(name)
+            seen.add(key)
+    if not symbols:
+        raise ValueError("univers Hyperliquid vide")
+    return symbols
+
+
+def charger_symboles_hyperliquid(*, timeout: float = 8.0) -> list[str]:
+    """Read the live universe through Hyperliquid's read-only ``/info`` API."""
+
+    import urllib.request
+
+    request = urllib.request.Request(
+        INFO_HL,
+        data=json.dumps({"type": "meta"}).encode("utf-8"),
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+    with urllib.request.urlopen(request, timeout=timeout) as response:  # noqa: S310 - fixed HTTPS URL
+        payload = json.loads(response.read().decode("utf-8-sig"))
+    return extraire_symboles_hyperliquid(payload)
+
+
+def resoudre_symboles_hyperliquid(
+    coins: list[str],
+    universe: list[str],
+) -> tuple[list[str], list[str]]:
+    """Resolve normalized local names to exact WS names; omit unknown coins."""
+
+    by_normalized = {
+        str(symbol).upper(): str(symbol)
+        for symbol in universe
+        if str(symbol).strip()
+    }
+    selected: list[str] = []
+    rejected: list[str] = []
+    seen: set[str] = set()
+    for raw_coin in coins:
+        normalized = str(raw_coin or "").strip().upper()
+        if not normalized or normalized in seen:
+            continue
+        seen.add(normalized)
+        exact = by_normalized.get(normalized)
+        if exact is None:
+            rejected.append(normalized)
+        else:
+            selected.append(exact)
+    return selected, rejected
 
 
 def coins_couverture(root: Path | str = ".", *, k: int = 16) -> list[str]:
@@ -353,6 +421,10 @@ async def _boucle(root: Path, coins: list[str]) -> None:  # pragma: no cover (I/
     )
     from hl_observer.runtime.lead_lag_event_runtime import LeadLagEventPaperRuntime
 
+    # Hyperliquid subscription names are case-sensitive (for example kPEPE),
+    # while all internal joins intentionally use normalized upper-case keys.
+    symboles_hl = {str(coin).upper(): str(coin) for coin in coins}
+    coins = list(symboles_hl)
     mag = MagasinBBO()
     lead_lag_runtime = LeadLagEventPaperRuntime(root)
     sym = {c: symbole_binance(c) for c in coins if symbole_binance(c)}
@@ -404,6 +476,7 @@ async def _boucle(root: Path, coins: list[str]) -> None:  # pragma: no cover (I/
              "raw_records_written": 0, "raw_queue_drops": 0, "parse_errors_hl": 0,
              "canonical_events_written": 0, "canonical_events_rejected": 0,
              "dernier_hl_ns": 0, "dernier_bin_ns": 0, "debut_mono_ns": time.monotonic_ns()}
+    heartbeat_canonique = {"dernier_ecrit": 0, "dernier_ts_ns": 0}
     marqueur0 = MARQUEUR.read_text(encoding="utf-8").strip() if MARQUEUR.exists() else ""
 
     def next_sequence(channel: str, coin: str) -> int:
@@ -532,7 +605,7 @@ async def _boucle(root: Path, coins: list[str]) -> None:  # pragma: no cover (I/
                                         "method": "subscribe",
                                         "subscription": {
                                             "type": subscription_type,
-                                            "coin": coin_name,
+                                            "coin": symboles_hl[coin_name],
                                         },
                                     }
                                 )
@@ -905,6 +978,30 @@ async def _boucle(root: Path, coins: list[str]) -> None:  # pragma: no cover (I/
                   "feed_quality_total": quality_payload["total_feeds"],
                   "tick_dataset": dataset.stats()}
             CF.ecrire_atomique(root / HEARTBEAT, json.dumps(hb, ensure_ascii=False))
+            if now_ns - heartbeat_canonique["dernier_ts_ns"] >= 2_000_000_000:
+                total_ecrit = int(stats["canonical_events_written"])
+                delta_ecrit = max(0, total_ecrit - int(heartbeat_canonique["dernier_ecrit"]))
+                exchange_timestamps = [
+                    int(snapshot["last_exchange_ts_ms"])
+                    for snapshot in feed_snapshots.values()
+                    if snapshot.get("last_exchange_ts_ms") is not None
+                ]
+                HB.battre(
+                    root,
+                    "bbo-collector",
+                    pid=os.getppid(),
+                    n_ecrites=delta_ecrit,
+                    dernier_exchange_ts=max(exchange_timestamps) if exchange_timestamps else None,
+                    souscription_ack=bool(stats["raw_frames_received"]),
+                    note="%d canonical market events" % total_ecrit,
+                    metriques={
+                        "gaps_critiques": int(stats["raw_queue_drops"]),
+                        "reconnects": int(stats["reconnexions_hl"]),
+                        "stale": not bool(stats["raw_frames_received"]),
+                    },
+                )
+                heartbeat_canonique["dernier_ecrit"] = total_ecrit
+                heartbeat_canonique["dernier_ts_ns"] = now_ns
             marq = MARQUEUR.read_text(encoding="utf-8").strip() if MARQUEUR.exists() else marqueur0
             if marq != marqueur0:                              # anti-orphelin : la session a changé -> stop
                 return
@@ -951,9 +1048,23 @@ def main(argv: list[str] | None = None) -> int:  # pragma: no cover
     p.add_argument("--coins", default="AUTO")   # AUTO = majors + coins fréquents des liquidations (journal)
     a = p.parse_args(argv)
     if a.coins.strip().upper() == "AUTO":
-        coins = coins_couverture(a.root)        # LIQUIDATION_LIVE_COVERAGE : couvre les coins de liquidation
+        requested_coins = coins_couverture(a.root)
     else:
-        coins = [c.strip().upper() for c in a.coins.split(",") if c.strip()]
+        requested_coins = [c.strip() for c in a.coins.split(",") if c.strip()]
+    try:
+        universe = charger_symboles_hyperliquid()
+        coins, rejected = resoudre_symboles_hyperliquid(requested_coins, universe)
+    except Exception as exc:  # noqa: BLE001 - required live source must fail visibly
+        print("[bbo] /info meta indisponible ou invalide: %r" % exc, flush=True)
+        return 2
+    if rejected:
+        print(
+            "[bbo] marches ignorees (absentes de /info meta): %s" % ", ".join(rejected),
+            flush=True,
+        )
+    if not coins:
+        print("[bbo] aucune marche Hyperliquid valide a surveiller.", flush=True)
+        return 2
     try:                                                     # 🔴 sans `websockets`, RIEN ne se collecte
         import websockets  # noqa: F401
     except ImportError:
@@ -984,7 +1095,8 @@ def resume(root: str | Path = ".") -> dict[str, Any]:
         return {"duree_continue_s": 0, "ecrits": 0, "taux_rejet": None, "verdict": "PAS_ENCORE_LANCE"}
 
 
-__all__ = ["symbole_binance", "parser_bbo_hl", "parser_l2_hl", "parser_trades_hl",
+__all__ = ["symbole_binance", "extraire_symboles_hyperliquid", "charger_symboles_hyperliquid",
+           "resoudre_symboles_hyperliquid", "parser_bbo_hl", "parser_l2_hl", "parser_trades_hl",
            "parser_bookticker_binance", "parser_aggtrade_binance", "dispatch_lead_lag_trade",
            "MagasinBBO", "mesurer_lead_lag", "sceller_shard", "resume",
            "AGE_MAX_MS", "FENETRE_SYNCHRO_MS", "GAP_MS", "SHARD_OCTETS", "MAX_SHARDS",
