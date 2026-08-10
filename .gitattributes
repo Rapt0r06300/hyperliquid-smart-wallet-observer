@@ -3,6 +3,10 @@
 *.cmd text eol=crlf
 *.bat text eol=crlf
 *.ps1 text eol=crlf
+# Les snapshots .cmd.txt sont des artefacts historiques verifies par SHA-256. Ils ne sont jamais
+# executes : on les fixe en LF pour que leurs octets (et donc leurs hashes) soient identiques sur
+# Linux et Windows, independamment de core.autocrlf.
+docs/archive/legacy_cmd/**/*.cmd.txt text eol=lf
 # Les scripts POSIX restent en LF.
 *.sh text eol=lf
 
