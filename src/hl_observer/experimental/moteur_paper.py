@@ -1,8 +1,9 @@
 """MOTEUR EXPERIMENTAL_PAPER — cœur commun cross-venue, lead-lag, copy-vaults.
 
 Paper/read-only uniquement. Le ledger v2 est isolé du PnL canonique. Les lignes
-portent désormais une session explicite et le budget global raisonne en
-exposition brute : une dislocation de N USD par jambe consomme 2N de capacité.
+portent une session explicite et le budget global raisonne en exposition brute :
+une dislocation de N USD par jambe consomme 2N de capacité. Chaque épisode a un
+position_id unique, distinct de l'identifiant canonique déterministe de la chaîne.
 """
 from __future__ import annotations
 
@@ -78,8 +79,8 @@ def _session_id(root: str | Path) -> str:
         if run_id:
             return run_id
     except (OSError, TypeError, ValueError):
-        pass
-    # Tests/standalone research without HARVEST still get an explicit scope.
+        import logging as _lg
+        _lg.getLogger(__name__).debug("session pointer experimental indisponible", exc_info=True)
     return "UNSCOPED"
 
 
@@ -97,7 +98,11 @@ def _gross_exposure_for_position(pos: dict[str, Any]) -> float:
 
 
 def _gross_budget_used(store: dict[str, Any]) -> float:
-    return sum(_gross_exposure_for_position(p) for p in (store.get("ouvertes") or {}).values() if isinstance(p, dict))
+    return sum(
+        _gross_exposure_for_position(p)
+        for p in (store.get("ouvertes") or {}).values()
+        if isinstance(p, dict)
+    )
 
 
 def charger_store(root: str | Path = ".") -> dict[str, Any]:
@@ -181,7 +186,6 @@ def admettre(sig: Signal, store: dict, *, now_ms: float, mode: str = "experiment
         return False, "LIMITE_POSITIONS_MOTEUR"
     if sum(float(p.get("notional_usd") or 0.0) for p in ouvertes) + float(sig.notional_usd) > lim["max_notional_usd"]:
         return False, "LIMITE_NOTIONAL_MOTEUR"
-
     gross_incoming = _gross_exposure_for_signal(sig)
     if _gross_budget_used(store) + gross_incoming > BUDGET_TOTAL_USD + 1e-9:
         return False, "BUDGET_GLOBAL_DEPASSE"
@@ -214,9 +218,12 @@ def ouvrir(sig: Signal, store: dict, root: str | Path, *, now_ms: float) -> dict
     ordre = intent_vers_ordre_paper(intent)
     fill = ordre_vers_fill_ledger(ordre, prix=float(sig.prix_entree))
     position_canonique, ledger_open = fill_vers_position_ledger_open(fill, lane="EXP")
+    canonical_position_id = str(position_canonique["position_id"])
+    episode_position_id = _nouveau_position_id(sig.moteur, sig.coin, now_ms)
     pos = {
         "id": cle,
-        "position_id": position_canonique["position_id"],
+        "position_id": episode_position_id,
+        "canonical_position_id": canonical_position_id,
         "intent_id": intent.intent_id,
         "order_id": ordre["order_id"],
         "fill_id": fill["fill_id"],
@@ -260,6 +267,8 @@ def ouvrir(sig: Signal, store: dict, root: str | Path, *, now_ms: float) -> dict
     store["ouvertes"][cle] = pos
     _ledger(root, {
         **ledger_open,
+        "position_id": episode_position_id,
+        "canonical_position_id": canonical_position_id,
         "strategie": sig.moteur,
         "canonical_strategy": strategie_canonique,
         "intent_id": intent.intent_id,
@@ -318,7 +327,8 @@ def sortir(pos: dict, store: dict, root: str | Path, *, prix_sortie: float | Non
     realized = round(mtm - exit_cost_usd, 6)
     entry_cost_alloc = float(pos.get("entry_cost_remaining_usd") or 0.0)
     store["ouvertes"].pop(pos["id"], None)
-    _ledger(root, {"kind": "CLOSE", "position_id": pos.get("position_id"), "strategie": pos["moteur"],
+    _ledger(root, {"kind": "CLOSE", "position_id": pos.get("position_id"),
+                   "canonical_position_id": pos.get("canonical_position_id"), "strategie": pos["moteur"],
                    "coin": pos["coin"], "realized_net_pnl_usdc": realized, "prix_sortie": prix_sortie,
                    "cout_sortie_bps": float(cout_sortie_bps), "raison": raison,
                    "notional_ferme_usd": round(notional_ferme, 6),
@@ -336,10 +346,11 @@ def reduire(pos: dict, store: dict, root: str | Path, *, notional_ferme_usd: flo
             exit_cost_usd: float = 0.0, leader_szi_applied: float | None = None,
             snapshot_ts: float | None = None, snapshot_id=None) -> dict:
     old_notional = float(pos.get("notional_usd") or 0.0)
-    pos["notional_usd"] = round(float(notional_residuel_usd), 6)
-    # Directional/copy reductions preserve the same exposure multiplier.
-    old_gross = _gross_exposure_for_position(pos) if old_notional > 0 else old_notional
+    # Calculer l'exposition AVANT de modifier le résidu : les anciennes positions sans champ
+    # gross_exposure_usd doivent conserver leur multiplicateur historique (2x cross-venue, 1x directionnel).
+    old_gross = _gross_exposure_for_position(pos) if old_notional > 0 else 0.0
     multiplier = (old_gross / old_notional) if old_notional > 0 else 1.0
+    pos["notional_usd"] = round(float(notional_residuel_usd), 6)
     pos["gross_exposure_usd"] = round(float(notional_residuel_usd) * multiplier, 6)
     pos["per_leg_notional_usd"] = round(float(notional_residuel_usd), 6)
     pos["entry_cost_remaining_usd"] = round(max(0.0, float(pos.get("entry_cost_remaining_usd") or 0.0)
@@ -354,7 +365,8 @@ def reduire(pos: dict, store: dict, root: str | Path, *, notional_ferme_usd: flo
         pos["last_vault_snapshot_ts"] = float(snapshot_ts)
     if snapshot_id is not None:
         pos["last_vault_snapshot_id"] = snapshot_id
-    _ledger(root, {"kind": "REDUCE", "position_id": pos.get("position_id"), "strategie": pos["moteur"],
+    _ledger(root, {"kind": "REDUCE", "position_id": pos.get("position_id"),
+                   "canonical_position_id": pos.get("canonical_position_id"), "strategie": pos["moteur"],
                    "coin": pos["coin"], "realized_net_pnl_usdc": round(float(realized_usd), 6),
                    "realized_usd": round(float(realized_usd), 6),
                    "notional_ferme_usd": round(float(notional_ferme_usd), 6),
@@ -381,7 +393,8 @@ def sortir_deux_jambes(pos: dict, store: dict, root: str | Path, *, jambes: list
     entry_cost_alloc = float(pos.get("entry_cost_remaining_usd") or 0.0)
     gross_closed = _gross_exposure_for_position(pos)
     store["ouvertes"].pop(pos["id"], None)
-    _ledger(root, {"kind": "CLOSE", "position_id": pos.get("position_id"), "strategie": pos["moteur"],
+    _ledger(root, {"kind": "CLOSE", "position_id": pos.get("position_id"),
+                   "canonical_position_id": pos.get("canonical_position_id"), "strategie": pos["moteur"],
                    "coin": pos["coin"], "realized_net_pnl_usdc": realized, "raison": raison,
                    "notional_ferme_usd": round(float(pos.get("notional_usd") or 0.0), 6),
                    "gross_exposure_fermee_usd": round(gross_closed, 6),
@@ -438,7 +451,6 @@ def resume(root: str | Path = ".") -> dict[str, Any]:
         "lane": "EXP",
         "session_id": current_session,
         "positions_ouvertes": len(store["ouvertes"]),
-        # Compatibilité : le champ historique devient volontairement SESSION-scoped.
         "realise_total_usd": round(realized_session, 6),
         "realise_session_usd": round(realized_session, 6),
         "realise_lifetime_usd": round(realized_lifetime, 6),
