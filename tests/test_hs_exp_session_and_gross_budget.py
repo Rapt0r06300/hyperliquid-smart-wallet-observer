@@ -29,6 +29,9 @@ def test_cross_venue_open_records_per_leg_and_gross_exposure(tmp_path: Path) -> 
     pos = MP.ouvrir(sig, store, tmp_path, now_ms=1_000_100.0)
     assert pos["per_leg_notional_usd"] == 50.0
     assert pos["gross_exposure_usd"] == 100.0
+    # `ouvrir` mutates the transaction-local store; the runner persists once after the tick.
+    # `resume(root)` is intentionally disk-based, so reproduce the real commit boundary here.
+    MP.sauver_store(tmp_path, store)
     assert MP.resume(tmp_path)["gross_exposure_open_usd"] == 100.0
 
 
