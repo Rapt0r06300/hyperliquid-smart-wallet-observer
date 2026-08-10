@@ -1,10 +1,10 @@
 {
-  "_comment": "Frais SOURCES (pas codes en dur, decision Flo 23/07). Taker perp par venue, en bps du notional.",
-  "hl_taker_bps": 3.5,
+  "_comment": "Frais SOURCES, en bps du notional. Fallback conservateur tant que le tier utilisateur reel n'est pas mesure au runtime.",
+  "hl_taker_bps": 4.5,
   "bin_taker_bps": 4.5,
-  "source": "Hyperliquid docs (perp taker, tier 0) + Binance USDS-M futures taker (standard, sans BNB)",
+  "source": "Hyperliquid official docs: perp base tier 0 taker 0.045% = 4.5 bps. Binance USDS-M standard taker fallback 4.5 bps, sans remise supposee.",
   "url_hl": "https://hyperliquid.gitbook.io/hyperliquid-docs/trading/fees",
   "url_bin": "https://www.binance.com/en/fee/futureFee",
-  "date_verif": "2026-07-23",
-  "note": "Conservateur taker-taker. A ajuster selon le tier reel (volume) ou le discount BNB. Le maker-maker (HL ~1.5 / Bin ~2.0) reduirait les couts mais n'est pas garanti au fill -> on reste taker pour l'executable."
+  "date_verif": "2026-08-10",
+  "note": "Fail-conservative: aucune remise de volume/staking/referral/BNB n'est supposee. Utiliser un taux utilisateur mesure lorsqu'une preuve read-only fiable est disponible; sinon garder ce fallback. Les coûts round-trip doivent payer entrée + sortie sur chaque jambe."
 }
