@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import threading
 from pathlib import Path
 
 from fastapi import FastAPI, Request
@@ -9,12 +10,14 @@ from fastapi.staticfiles import StaticFiles
 from hl_observer.config.loader import load_settings
 from hl_observer.config.settings import Settings
 from hl_observer.storage.database import init_db
+from hl_observer.ui.dashboard_v2 import create_dashboard_v2_router
+from hl_observer.ui.economic_writer import EconomicWriter
 from hl_observer.ui.event_bus import UiEventBus
 from hl_observer.ui.persistent_state import load_or_create_ui_state
+from hl_observer.ui.read_only_status_router import create_read_only_status_router
 from hl_observer.ui.routes import create_router
 from hl_observer.ui.state import UiState
 from hl_observer.ui.status_routes import create_status_router
-from hl_observer.ui.dashboard_v2 import create_dashboard_v2_router
 from hl_observer.ops.echec_silencieux import noter as _noter_echec
 
 
@@ -42,11 +45,35 @@ def create_ui_app(settings: Settings | None = None, state: UiState | None = None
     app = FastAPI(title="HyperSmart Observer - Hyperliquid Command Center")
     static_dir = Path(__file__).with_name("static")
     app.mount("/static", StaticFiles(directory=static_dir), name="static")
+
+    # One lock, one paper-economic writer.  HTTP GETs only project state.
+    economic_lock = threading.RLock()
+    economic_writer = EconomicWriter(state, settings, lock=economic_lock)
+
     app.include_router(create_router(settings, state, bus))
-    # Fast read-only tick endpoint kept out of the huge routes.py (see status_routes).
+    # IMPORTANT: first matching route wins in Starlette/FastAPI. Register the pure
+    # projection before the legacy compatibility router so browser polling cannot
+    # mutate positions, ledger, PnL, disk state or network traffic.
+    app.include_router(
+        create_read_only_status_router(
+            state,
+            settings=settings,
+            economic_writer=economic_writer,
+            lock=economic_lock,
+        )
+    )
+    # Keep other legacy status endpoints (notably /fusion-status) compatible.
+    # Its duplicate /api/simulation/status declaration is intentionally shadowed.
     app.include_router(create_status_router(state, settings=settings))
-    # Dashboard v2 (thème hacker) servi à /v2, read-only, module séparé.
     app.include_router(create_dashboard_v2_router())
+
+    @app.on_event("startup")
+    def _start_economic_writer() -> None:
+        economic_writer.start()
+
+    @app.on_event("shutdown")
+    def _stop_economic_writer() -> None:
+        economic_writer.stop()
 
     @app.middleware("http")
     async def inject_smooth_metagraph(request: Request, call_next):
@@ -55,11 +82,13 @@ def create_ui_app(settings: Settings | None = None, state: UiState | None = None
             try:
                 html = template_path.read_text(encoding="utf-8")
                 return HTMLResponse(_inject_smooth_metagraph_script(html))
-            except OSError:
-                _noter_echec("hl_observer/ui/app.py:58")
+            except OSError as exc:
+                _noter_echec("hl_observer/ui/app.py:index_template", exc)
         return await call_next(request)
 
     app.state.ui_settings = settings
     app.state.ui_state = state
     app.state.ui_bus = bus
+    app.state.economic_lock = economic_lock
+    app.state.economic_writer = economic_writer
     return app
