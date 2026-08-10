@@ -46,9 +46,16 @@ def create_ui_app(settings: Settings | None = None, state: UiState | None = None
     static_dir = Path(__file__).with_name("static")
     app.mount("/static", StaticFiles(directory=static_dir), name="static")
 
-    # One lock, one paper-economic writer.  HTTP GETs only project state.
+    # One lock, one paper-economic writer. HTTP GETs only project state. Prime one
+    # tick as part of SERVER construction so economic correctness never depends on
+    # a browser request or FastAPI lifespan semantics.
     economic_lock = threading.RLock()
     economic_writer = EconomicWriter(state, settings, lock=economic_lock)
+    try:
+        economic_writer.tick()
+    except Exception as exc:  # startup remains available for diagnostics; writer retries later.
+        economic_writer.last_error = f"{exc.__class__.__name__}: {exc}"
+        _noter_echec("hl_observer/ui/app.py:economic_writer_prime", exc)
 
     app.include_router(create_router(settings, state, bus))
     # IMPORTANT: first matching route wins in Starlette/FastAPI. Register the pure
