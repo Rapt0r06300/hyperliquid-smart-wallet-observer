@@ -65,6 +65,11 @@ _DOSSIERS_NON_PARCOURUS = (".git", "__pycache__", ".mypy_cache", ".ruff_cache", 
 # Tout le reste (`.env` reel, `*.key`, `*.pem` prive, `*.seed`...) reste BLOQUANT, ou qu'il soit.
 _FICHIERS_PUBLICS_CONNUS = ("cacert.pem",)
 _SUFFIXES_GABARIT = (".example", ".sample", ".template", ".dist")
+# [2026-08-10] Chemins relatifs EXACTS de certificats publics tiers (CA bundles) qui ne sont PAS
+# des cles privees. Whitelistes par CHEMIN, pas par nom : un `cert.pem` ailleurs reste suspect.
+_CHEMINS_PUBLICS_EXACTS = frozenset({
+    "tools/git/mingw64/etc/ssl/cert.pem",
+})
 
 
 def _res(nom: str, statut: str, detail: str) -> dict:
@@ -227,9 +232,13 @@ def _est_suspect(nom: str) -> bool:
             or any(nom.endswith(sfx) for sfx in _SUFFIXES_SECRETS))
 
 
-def _est_publiquement_connu(nom: str) -> bool:
-    """Faux positif NOMME : magasin d'autorites publiques, ou gabarit sans secret."""
-    return nom in _FICHIERS_PUBLICS_CONNUS or any(nom.endswith(s) for s in _SUFFIXES_GABARIT)
+def _est_publiquement_connu(nom: str, rel: str = "") -> bool:
+    """Faux positif NOMME : magasin d'autorites publiques, chemin public exact, ou gabarit sans secret."""
+    if nom in _FICHIERS_PUBLICS_CONNUS:
+        return True
+    if rel and rel in _CHEMINS_PUBLICS_EXACTS:
+        return True
+    return any(nom.endswith(s) for s in _SUFFIXES_GABARIT)
 
 
 def verifier_aucune_cle(root: str | Path) -> dict:
@@ -253,7 +262,7 @@ def verifier_aucune_cle(root: str | Path) -> dict:
             if not _est_suspect(nom):
                 continue
             rel = "%s/%s" % (rel_dir, fichier) if rel_dir else fichier
-            if _est_publiquement_connu(nom):
+            if _est_publiquement_connu(nom, rel):
                 if len(connus) < 20:
                     connus.append(rel)
                 continue

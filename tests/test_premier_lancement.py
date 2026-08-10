@@ -136,6 +136,41 @@ def test_aucune_cle_ignore_le_miroir_github_archive_mais_pas_le_runtime(tmp_path
     assert r["statut"] == PL.ECHEC and "runtime/data/.env" in r["detail"]
 
 
+# ── [2026-08-10] NON-REGRESSION : cert.pem de Git for Windows (PC B) ─────────────────────────
+# Symptome reel : premier_lancement bloque sur tools/git/mingw64/etc/ssl/cert.pem (CA bundle
+# public livre par Git for Windows). Le chemin EXACT est whiteliste ; un cert.pem ailleurs ou
+# un vrai secret reste bloquant.
+def test_aucune_cle_whiteliste_cert_pem_git_par_chemin_exact(tmp_path):
+    """tools/git/mingw64/etc/ssl/cert.pem = CA bundle public => OK."""
+    git_ssl = tmp_path / "tools" / "git" / "mingw64" / "etc" / "ssl"
+    git_ssl.mkdir(parents=True)
+    (git_ssl / "cert.pem").write_text("-----BEGIN CERTIFICATE-----\n", encoding="utf-8")
+    r = PL.verifier_aucune_cle(tmp_path)
+    assert r["statut"] == PL.OK
+    assert "cert.pem" in r["detail"]  # le fichier est NOMME (jamais masque)
+
+
+def test_aucune_cle_bloque_cert_pem_ailleurs(tmp_path):
+    """Un cert.pem hors du chemin exact whiteliste reste suspect => ECHEC."""
+    autre = tmp_path / "autre" / "private"
+    autre.mkdir(parents=True)
+    (autre / "cert.pem").write_text("-----BEGIN RSA PRIVATE KEY-----\n", encoding="utf-8")
+    r = PL.verifier_aucune_cle(tmp_path)
+    assert r["statut"] == PL.ECHEC
+    assert "cert.pem" in r["detail"]
+
+
+def test_aucune_cle_bloque_secret_key(tmp_path):
+    """Un .key reste toujours bloquant, meme a cote du cert.pem whiteliste."""
+    git_ssl = tmp_path / "tools" / "git" / "mingw64" / "etc" / "ssl"
+    git_ssl.mkdir(parents=True)
+    (git_ssl / "cert.pem").write_text("-----BEGIN CERTIFICATE-----\n", encoding="utf-8")
+    (tmp_path / "secret.key").write_text("SECRET", encoding="utf-8")
+    r = PL.verifier_aucune_cle(tmp_path)
+    assert r["statut"] == PL.ECHEC
+    assert "secret.key" in r["detail"]
+
+
 def test_sessions_preservees_comptees(tmp_path):
     _session_complete(tmp_path, "run_a")
     _session_complete(tmp_path, "run_b")
