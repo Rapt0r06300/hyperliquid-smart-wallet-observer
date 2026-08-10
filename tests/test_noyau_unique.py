@@ -78,59 +78,36 @@ def _ctx(**kw):
     return Contexte(**base)  # type: ignore[arg-type]
 
 
-# ====================================================== 1. LE NOYAU POSSEDE L'EDGE
-
-
 def test_le_noyau_IGNORE_l_edge_fourni_par_l_appelant(monkeypatch):
-    """🔴 LE COEUR DE G2.
-
-    `LocalDecisionEngine` prenait `candidate.edge_remaining_bps` TEL QUEL. Le RiskEngine notait
-    ensuite ce nombre avec une arithmetique impeccable... sur une valeur qu'il n'avait JAMAIS
-    questionnee. C'est comme ca que trois edges FABRIQUES ont vecu des mois.
-
-    Le noyau, lui, VA CHERCHER l'edge. Il ne le RECOIT pas.
-    """
     monkeypatch.setenv("HYPERSMART_EDGE_SOURCE", SOURCE_TABLE)
-    # 🔴 FUNDING lit maintenant le funding REEL (carry-edge, 365 j) : on ne peut plus lui injecter
-    #    un edge de table. La propriete G2 (« le noyau IGNORE l'edge fourni ») se teste donc sur une
-    #    famille qui utilise la TABLE -- ARBITRAGE. L'exercice testE est IDENTIQUE.
     t = _table_avec_edge("ARBITRAGE", "BTC", 40.0)
-
-    # L'appelant pretend avoir 999 bps d'edge. Le noyau mesure 40.
     d = decider(_ctx(edge_fourni_bps=999.0, strategie="ARBITRAGE"), table=t)
-
-    assert d.edge_brut_bps == pytest.approx(40.0, abs=1.0), (
-        "le noyau a utilise l'edge FOURNI (999) au lieu de l'edge MESURE (40)"
-    )
+    assert d.edge_brut_bps == pytest.approx(40.0, abs=1.0)
     assert EDGE_FOURNI_IGNORE in d.signalements
-    assert EDGE_FOURNI_CONTREDIT_LA_MESURE in d.signalements, (
-        "un ecart de 959 bps entre le chiffre de l'appelant et la mesure doit laisser une TRACE"
-    )
+    assert EDGE_FOURNI_CONTREDIT_LA_MESURE in d.signalements
 
 
 def test_un_edge_fourni_COHERENT_ne_declenche_pas_de_contradiction(monkeypatch):
     monkeypatch.setenv("HYPERSMART_EDGE_SOURCE", SOURCE_TABLE)
-    t = _table_avec_edge("ARBITRAGE", "BTC", 40.0)   # famille table (FUNDING lit le carry reel)
+    t = _table_avec_edge("ARBITRAGE", "BTC", 40.0)
     d = decider(_ctx(edge_fourni_bps=39.8, strategie="ARBITRAGE"), table=t)
     assert EDGE_FOURNI_IGNORE in d.signalements
     assert EDGE_FOURNI_CONTREDIT_LA_MESURE not in d.signalements
 
 
 def test_le_noyau_n_appelle_JAMAIS_de_formule_de_secours(monkeypatch):
-    """Il passe `formule_de_secours=None`. Il ne peut donc PAS fabriquer, meme par accident."""
+    """La mécanique table se teste sur une famille table, jamais sur le carry funding réel."""
     monkeypatch.setenv("HYPERSMART_EDGE_SOURCE", SOURCE_TABLE)
-    d = decider(_ctx(coin="INCONNU_XYZ"), table=_table_avec_edge("FUNDING", "BTC", 40.0))
+    d = decider(
+        _ctx(coin="INCONNU_XYZ", strategie="ARBITRAGE"),
+        table=_table_avec_edge("ARBITRAGE", "BTC", 40.0),
+    )
     assert d.verdict == NO_TRADE
     assert d.raison == REFUS_EDGE_NON_MESURE
-    assert d.edge_brut_bps is None, "un edge rendu ici serait un edge INVENTE"
+    assert d.edge_brut_bps is None
 
 
 def test_le_mode_FORMULE_ne_franchit_PAS_le_noyau(monkeypatch):
-    """On PEUT rallumer la formule (flag explicite). Mais elle n'autorise plus d'entree.
-
-    C'est la difference entre « on peut mentir a la machine » et « la machine trade sur un
-    mensonge ». Le premier est un choix d'outillage ; le second est un bug.
-    """
     monkeypatch.setenv("HYPERSMART_EDGE_SOURCE", SOURCE_FORMULE)
     d = decider(_ctx())
     assert d.verdict == NO_TRADE
@@ -138,23 +115,16 @@ def test_le_mode_FORMULE_ne_franchit_PAS_le_noyau(monkeypatch):
     assert d.edge_fabrique is True
 
 
-# ====================================================== 2. LES QUATRE QUESTIONS
-
-
 def test_1_la_ZONE_MORTE_est_refusee_AVANT_tout_calcul(monkeypatch):
-    """Le copy-trading est mort (3 mesures independantes). Inutile de calculer son edge."""
     monkeypatch.setenv("HYPERSMART_EDGE_SOURCE", SOURCE_TABLE)
     d = decider(_ctx(strategie="COPY"), table=_table_avec_edge("COPY", "BTC", 999.0))
     assert d.verdict == NO_TRADE
     assert d.raison == REFUS_ZONE_MORTE
     assert d.famille == DISCRETIONNAIRE_PUBLIC
-    assert d.edge_brut_bps is None, (
-        "le noyau a calcule l'edge d'une zone morte : il aurait pu se laisser convaincre"
-    )
+    assert d.edge_brut_bps is None
 
 
 def test_1b_une_strategie_INCONNUE_est_refusee(monkeypatch):
-    """Deny-by-default. « ma_super_strategie_v2 » n'a pas droit d'entrer par defaut."""
     monkeypatch.setenv("HYPERSMART_EDGE_SOURCE", SOURCE_TABLE)
     d = decider(_ctx(strategie="MA_SUPER_STRATEGIE_V2"))
     assert d.raison == REFUS_FAMILLE_INCONNUE
@@ -162,15 +132,12 @@ def test_1b_une_strategie_INCONNUE_est_refusee(monkeypatch):
 
 
 def test_3_un_PRIX_INEXECUTABLE_est_refuse(monkeypatch):
-    """Carnet trop mince : on ne peut pas acheter 500 $. On n'invente pas le prix."""
     monkeypatch.setenv("HYPERSMART_EDGE_SOURCE", SOURCE_TABLE)
-    t = _table_avec_edge("ARBITRAGE", "BTC", 100.0)   # famille table (FUNDING lit le carry reel)
-    d = decider(_ctx(niveaux_achat=[(100.0, 0.5)], strategie="ARBITRAGE"), table=t)     # ~50 $ dispo
+    t = _table_avec_edge("ARBITRAGE", "BTC", 100.0)
+    d = decider(_ctx(niveaux_achat=[(100.0, 0.5)], strategie="ARBITRAGE"), table=t)
     assert d.verdict == NO_TRADE
     assert d.raison == REFUS_PRIX_NON_EXECUTABLE
-    assert d.edge_brut_bps == pytest.approx(100.0, abs=1.0), (
-        "l'edge etait bien mesure -- c'est le PRIX qui bloque, et la preuve doit le montrer"
-    )
+    assert d.edge_brut_bps == pytest.approx(100.0, abs=1.0)
 
 
 def test_3b_sans_carnet_du_tout_on_REFUSE(monkeypatch):
@@ -180,32 +147,32 @@ def test_3b_sans_carnet_du_tout_on_REFUSE(monkeypatch):
 
 
 def test_4_l_EDGE_NET_est_calcule_APRES_les_vrais_couts(monkeypatch):
-    """40 bps d'edge, 12 bps de frais, 13 bps de degradation -> 15 bps nets. Plancher a 20 -> NON."""
     monkeypatch.setenv("HYPERSMART_EDGE_SOURCE", SOURCE_TABLE)
-    t = _table_avec_edge("ARBITRAGE", "BTC", 40.0)   # famille table (FUNDING lit le carry reel)
-
+    t = _table_avec_edge("ARBITRAGE", "BTC", 40.0)
     d = decider(_ctx(frais_bps=12.0, degradation_copie_bps=13.0, plancher_edge_net_bps=20.0,
-                     strategie="ARBITRAGE"),
-                table=t)
+                     strategie="ARBITRAGE"), table=t)
     assert d.verdict == NO_TRADE
     assert d.raison == REFUS_EDGE_NET_INSUFFISANT
     assert d.couts_bps == pytest.approx(25.0, abs=0.1)
     assert d.edge_net_bps == pytest.approx(15.0, abs=1.0)
-
-    # Meme edge, plancher a 10 -> OUI.
     d2 = decider(_ctx(frais_bps=12.0, degradation_copie_bps=13.0, plancher_edge_net_bps=10.0,
-                      strategie="ARBITRAGE"),
-                 table=t)
+                      strategie="ARBITRAGE"), table=t)
     assert d2.verdict == ENTREE
     assert d2.autorise
 
 
 def test_le_SLIPPAGE_reel_entre_dans_les_couts(monkeypatch):
-    """Le slippage vient du carnet TRAVERSE, pas d'une constante."""
+    """Le slippage directionnel vient du carnet traverse ; le carry a son test 4-jambes dédié."""
     monkeypatch.setenv("HYPERSMART_EDGE_SOURCE", SOURCE_TABLE)
-    t = _table_avec_edge("FUNDING", "BTC", 100.0)
-    # 500 $ : 100 $ a 10.0 puis 400 $ a 10.5 -> slippage REEL, non nul
-    d = decider(_ctx(niveaux_achat=[(10.0, 10.0), (10.5, 1_000.0)], frais_bps=0.0), table=t)
+    t = _table_avec_edge("ARBITRAGE", "BTC", 100.0)
+    d = decider(
+        _ctx(
+            strategie="ARBITRAGE",
+            niveaux_achat=[(10.0, 10.0), (10.5, 1_000.0)],
+            frais_bps=0.0,
+        ),
+        table=t,
+    )
     assert d.slippage_bps is not None and d.slippage_bps > 0.0
     assert d.couts_bps == pytest.approx(d.slippage_bps, abs=1e-6)
 
@@ -248,18 +215,11 @@ def test_le_noyau_ne_pretend_JAMAIS_a_une_execution_reelle(monkeypatch):
 
 
 def test_les_familles_couvrent_les_4_moteurs_de_G2():
-    """Grinder + Sniper + Arbitrage + CopyWallet -- G2 demandait de les FUSIONNER."""
     assert famille_de_la_strategie("GRINDER") == DISCRETIONNAIRE_PUBLIC
     assert famille_de_la_strategie("SNIPER") == DISCRETIONNAIRE_PUBLIC
     assert famille_de_la_strategie("COPY") == DISCRETIONNAIRE_PUBLIC
     assert famille_de_la_strategie("ARBITRAGE") == FLUX_FORCE
     assert famille_de_la_strategie("FUNDING") == CARRY_STRUCTUREL
-    # Consequence DURE, et il faut la dire : TROIS des quatre moteurs de G2 sont dans la MEME
-    # zone morte. Les « fusionner » ne les ressuscite pas -- ca rend juste leur mort visible
-    # depuis un seul endroit, au lieu de trois.
-
-
-# ====================================================== 3. L'INVARIANT : PERSONNE NE CONTOURNE
 
 
 _NOM_EDGE = re.compile(r"(expected_edge|edge_bps|edge_remaining)", re.I)
@@ -296,19 +256,11 @@ _MARQUEUR = "EDGE_NON_FABRIQUE:"
 
 
 def _exemption_justifiee(lignes: list[str], lineno: int) -> bool:
-    """Une exception doit etre VISIBLE, AU BON ENDROIT, et JUSTIFIEE.
-
-    Pas de liste centrale d'exemptions : une liste s'eloigne du code et finit par mentir. Le
-    marqueur `# EDGE_NON_FABRIQUE: <raison>` vit sur les lignes qui PRECEDENT immediatement
-    l'affectation, et il doit porter une vraie raison (>= 60 caracteres). Un marqueur nu serait
-    un blanc-seing ; c'est exactement ce qu'on refuse.
-    """
     debut = max(0, lineno - 9)
     fenetre = lignes[debut : max(0, lineno - 1)]
     for ligne in fenetre:
         if _MARQUEUR in ligne:
             raison = ligne.split(_MARQUEUR, 1)[1].strip()
-            # la raison peut se poursuivre sur les lignes de commentaire suivantes
             suite = "".join(
                 l.strip().lstrip("#").strip()
                 for l in fenetre[fenetre.index(ligne) + 1 :]
@@ -319,13 +271,6 @@ def _exemption_justifiee(lignes: list[str], lineno: int) -> bool:
 
 
 def _est_une_formule_inventee(valeur: ast.AST) -> bool:
-    """Une arithmetique qui melange des CONSTANTES MAGIQUES et des VARIABLES.
-
-    `24.0 + score * 24.0 + copyability * 18.0`  -> OUI (2+ constantes, des variables)
-    `float(x) if mesure else 0.0`               -> non (aucune arithmetique)
-    `edge_bps - couts_bps`                      -> non (aucune constante magique)
-    `x * 10_000.0`                              -> non (une seule constante : une CONVERSION)
-    """
     binops = [n for n in ast.walk(valeur) if isinstance(n, ast.BinOp) and isinstance(n.op, _ARITHMETIQUE)]
     if not binops:
         return False
@@ -339,18 +284,6 @@ def _est_une_formule_inventee(valeur: ast.AST) -> bool:
 
 
 def test_AUCUN_module_de_production_ne_FABRIQUE_un_edge_d_entree():
-    """🔴 L'INVARIANT. Il DECOUVRE par AST -- il ne fait confiance a AUCUNE liste.
-
-    Une liste ecrite a la main expire le jour ou quelqu'un ajoute une formule, et personne ne se
-    plaint. C'est exactement ce qui est arrive : `wallet_mirror_runtime:144` a vecu des mois --
-    et la 4e formule (`ui/routes.py`) a survecu a Q1, qui pretendait pourtant les avoir toutes
-    remplacees. C'est CE TEST qui l'a trouvee.
-
-    Pourquoi l'AST et pas une regex : une regex lit aussi les docstrings et les commentaires. La
-    premiere version de ce test s'accusait elle-meme (elle CITAIT une formule fabriquee en
-    exemple). Un garde-fou qui crie au loup finit ignore ; un faux positif coute aussi cher qu'un
-    faux negatif.
-    """
     coupables = []
     for f in _modules_de_production():
         try:
@@ -374,63 +307,48 @@ def test_AUCUN_module_de_production_ne_FABRIQUE_un_edge_d_entree():
                 f"{f.relative_to(RACINE)}:{getattr(noeud, 'lineno', 0)}  "
                 f"{'/'.join(_cibles(noeud))} = <formule a constantes magiques>"
             )
-
     assert not coupables, (
         "EDGE(S) FABRIQUE(S) trouve(s) dans le code de production :\n  "
         + "\n  ".join(coupables[:10])
-        + "\n\nUn edge d'entree se MESURE (hl_observer.edge.edge_source). Il ne s'invente pas "
-          "avec des constantes. QUATRE formules comme celles-ci ont deja vecu des mois ici."
+        + "\n\nUn edge d'entree se MESURE (hl_observer.edge.edge_source)."
     )
 
 
 def test_l_invariant_ATTRAPE_vraiment_une_formule_fabriquee():
-    """Un garde-fou qui ne peut pas echouer ne garde rien. On lui donne la VRAIE formule.
-
-    Celle-ci a vecu des mois dans `ui/routes.py`, et Q1 -- qui pretendait avoir remplace tous les
-    edges fabriques -- ne l'avait pas vue.
-    """
     vraie = ast.parse(
         "leader_expected_edge_bps = 18.0 + confidence * 34.0 + min(24.0, (n - 1) * 8.0)"
     ).body[0]
     assert isinstance(vraie, ast.Assign)
-    assert _est_une_formule_inventee(vraie.value), "l'invariant ne verrait PAS la vraie formule"
-
-    # ... et il ne doit PAS accuser le code honnete.
+    assert _est_une_formule_inventee(vraie.value)
     honnete = ast.parse("edge_net_bps = edge_brut_bps - couts_bps").body[0]
     assert isinstance(honnete, ast.Assign)
-    assert not _est_une_formule_inventee(honnete.value), "faux positif sur une soustraction de couts"
-
+    assert not _est_une_formule_inventee(honnete.value)
     mesure = ast.parse(
         "leader_expected_edge_bps = float(e.valeur_bps) if e.utilisable else 0.0"
     ).body[0]
     assert isinstance(mesure, ast.Assign)
-    assert not _est_une_formule_inventee(mesure.value), "faux positif sur l'edge MESURE"
+    assert not _est_une_formule_inventee(mesure.value)
 
 
 def test_le_MARQUEUR_d_exemption_n_est_PAS_un_blanc_seing():
-    """Un marqueur nu ne doit RIEN exempter. Sinon l'invariant se contourne en une seconde."""
     nu = ["# EDGE_NON_FABRIQUE:", "edge_bps = 1.0 + x * 2.0"]
-    assert not _exemption_justifiee(nu, 2), "un marqueur SANS raison exempte -- blanc-seing"
-
+    assert not _exemption_justifiee(nu, 2)
     trois_mots = ["# EDGE_NON_FABRIQUE: c'est bon", "edge_bps = 1.0 + x * 2.0"]
-    assert not _exemption_justifiee(trois_mots, 2), "trois mots ne sont pas une justification"
-
+    assert not _exemption_justifiee(trois_mots, 2)
     vrai = [
         "# EDGE_NON_FABRIQUE: c'est un SEUIL de politique de risque, pas une valeur d'edge : on",
         "# ne predit rien, on exige une barre plus haute apres des pertes.",
         "edge_bps = min_edge + 10.0",
     ]
-    assert _exemption_justifiee(vrai, 3), "une exemption VRAIMENT justifiee doit passer"
+    assert _exemption_justifiee(vrai, 3)
 
 
 def test_le_noyau_importe_BIEN_les_trois_verrous():
-    """Q1 (edge mesure) + Q2 (jambes executables) + Q3 (taxonomie). Si un import disparait,
-    le noyau redevient un juge qui note un chiffre sans savoir d'ou il vient."""
     src = (SRC / "decision_engine" / "noyau_unique.py").read_text(encoding="utf-8")
     arbre = ast.parse(src)
     importes = {
         n.module for n in ast.walk(arbre) if isinstance(n, ast.ImportFrom) and n.module
     }
-    assert "hl_observer.edge.edge_source" in importes, "Q1 (edge MESURE) n'est pas branche"
-    assert "hl_observer.arbitrage.executable_legs" in importes, "Q2 (prix EXECUTABLES) absent"
-    assert "hl_observer.signals.signal_taxonomy" in importes, "Q3 (zones mortes) absent"
+    assert "hl_observer.edge.edge_source" in importes
+    assert "hl_observer.arbitrage.executable_legs" in importes
+    assert "hl_observer.signals.signal_taxonomy" in importes
