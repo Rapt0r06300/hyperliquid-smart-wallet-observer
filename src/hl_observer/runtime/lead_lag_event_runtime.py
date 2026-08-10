@@ -1,11 +1,10 @@
 """Event-driven lead-lag paper runtime.
 
-The runtime is called synchronously from the real Binance trade collector.  It
-uses the last already-observed Hyperliquid BBO, frozen promoted evidence and
-the canonical PaperEngine.  It owns no network client and exposes no real
-execution surface.
+Called synchronously from the real Binance trade collector. It owns no network
+client and has no real-execution surface. Runtime state is persisted atomically
+so a BBO collector restart cannot forget open paper positions or fabricate a
+second fill for an already-open episode.
 """
-
 from __future__ import annotations
 
 import json
@@ -14,7 +13,7 @@ import os
 from collections import deque
 from collections.abc import Mapping
 from contextlib import suppress
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any
 
@@ -23,13 +22,19 @@ from hl_observer.backtesting.lead_lag_evidence import (
     load_frozen_evidence,
 )
 from hl_observer.paper_trading.execution_truth import ExecutionTruth
-from hl_observer.paper_trading.paper_engine import PaperDecisionResult, PaperEngine
+from hl_observer.paper_trading.paper_engine import (
+    PaperDecisionResult,
+    PaperEngine,
+    PaperPosition,
+)
 from hl_observer.position_lifecycle.reconstructor import LifecycleAction
 from hl_observer.signals.leader_delta import LeaderDelta
 
 DEFAULT_CONFIG = Path("runtime") / "data" / "lead_lag_config_gele.json"
 DEFAULT_DECISIONS = Path("runtime") / "data" / "lead_lag_event_decisions.jsonl"
 DEFAULT_STATUS = Path("runtime") / "data" / "lead_lag_event_runtime_status.json"
+DEFAULT_STATE = Path("runtime") / "data" / "lead_lag_event_runtime_state.json"
+STATE_SCHEMA = "hypersmart.lead_lag_event_state.v1"
 
 
 @dataclass(frozen=True, slots=True)
@@ -44,7 +49,7 @@ class LeadLagEventOutcome:
 
 
 class LeadLagEventPaperRuntime:
-    """Bounded, fail-closed bridge from a live trade event to local paper."""
+    """Bounded fail-closed bridge from a live trade event to local paper."""
 
     def __init__(
         self,
@@ -53,6 +58,7 @@ class LeadLagEventPaperRuntime:
         config_path: str | Path | None = None,
         decisions_path: str | Path | None = None,
         status_path: str | Path | None = None,
+        state_path: str | Path | None = None,
         paper_engine: PaperEngine | None = None,
         seen_capacity: int = 100_000,
     ) -> None:
@@ -60,6 +66,7 @@ class LeadLagEventPaperRuntime:
         self.config_path = Path(config_path or self.root / DEFAULT_CONFIG)
         self.decisions_path = Path(decisions_path or self.root / DEFAULT_DECISIONS)
         self.status_path = Path(status_path or self.root / DEFAULT_STATUS)
+        self.state_path = Path(state_path or self.root / DEFAULT_STATE)
         self.paper_engine = paper_engine or PaperEngine()
         self._last_trade_price: dict[str, float] = {}
         self._seen_order: deque[str] = deque(maxlen=max(1, int(seen_capacity)))
@@ -67,12 +74,14 @@ class LeadLagEventPaperRuntime:
         self._accepted = 0
         self._rejected = 0
         self._config_error: str | None = None
+        self._state_error: str | None = None
         try:
             self.config = load_frozen_evidence(self.config_path)
         except FrozenLeadLagEvidenceError as exc:
             self.config = None
             self._config_error = exc.code
         self._restore_seen_events()
+        self._restore_state()
         self._write_status(
             code="READY" if self.config is not None else self._config_error or "CONFIG_UNAVAILABLE"
         )
@@ -92,8 +101,6 @@ class LeadLagEventPaperRuntime:
         *,
         now_ms: int,
     ) -> LeadLagEventOutcome:
-        """Evaluate one observed trade immediately, without a timer or worker."""
-
         event_id = str(trade_event.get("event_id") or "")
         coin = str(trade_event.get("coin") or "").upper()
         if not event_id or not coin:
@@ -111,6 +118,7 @@ class LeadLagEventPaperRuntime:
 
         previous_price = self._last_trade_price.get(coin)
         self._last_trade_price[coin] = trade_price
+        self._persist_state()
         if self.config is None:
             return LeadLagEventOutcome(
                 event_id,
@@ -120,7 +128,9 @@ class LeadLagEventPaperRuntime:
         if coin not in set(self.config["coins"]):
             return LeadLagEventOutcome(event_id, coin, "COIN_OUTSIDE_FROZEN_SCOPE")
         if previous_price is None:
-            return LeadLagEventOutcome(event_id, coin, "BASELINE_INITIALIZED")
+            outcome = LeadLagEventOutcome(event_id, coin, "BASELINE_INITIALIZED")
+            self._write_status(code=outcome.code, outcome=outcome)
+            return outcome
 
         shock_bps = (trade_price / previous_price - 1.0) * 10_000.0
         threshold_bps = float(self.config.get("seuil_choc_bps") or 0.0)
@@ -168,13 +178,9 @@ class LeadLagEventPaperRuntime:
             )
 
         earliest_horizon = min(self.config["observable_horizons_ms"])
-        base_edge_bps = float(
-            self.config["edge_net_par_horizon_bps"][earliest_horizon]
-        )
+        base_edge_bps = float(self.config["edge_net_par_horizon_bps"][earliest_horizon])
         edge_remaining_bps = base_edge_bps * math.pow(0.5, latency_ms / half_life_ms)
-        action = (
-            LifecycleAction.OPEN_LONG if shock_bps > 0 else LifecycleAction.OPEN_SHORT
-        )
+        action = LifecycleAction.OPEN_LONG if shock_bps > 0 else LifecycleAction.OPEN_SHORT
         signed_size = 1.0 if action == LifecycleAction.OPEN_LONG else -1.0
         delta = LeaderDelta(
             delta_id=f"lead-lag:{event_id}",
@@ -236,6 +242,7 @@ class LeadLagEventPaperRuntime:
             self._accepted += 1
         else:
             self._rejected += 1
+        self._persist_state()
         self._write_status(code=code, outcome=outcome)
         return outcome
 
@@ -248,14 +255,10 @@ class LeadLagEventPaperRuntime:
         latency_ms: float,
         shock_bps: float,
     ) -> LeadLagEventOutcome:
-        outcome = LeadLagEventOutcome(
-            event_id=event_id,
-            coin=coin,
-            code=code,
-            latency_ms=latency_ms,
-        )
+        outcome = LeadLagEventOutcome(event_id, coin, code, latency_ms=latency_ms)
         self._rejected += 1
         self._record(outcome, shock_bps=shock_bps)
+        self._persist_state()
         self._write_status(code=code, outcome=outcome)
         return outcome
 
@@ -274,6 +277,83 @@ class LeadLagEventPaperRuntime:
         with self.decisions_path.open("a", encoding="utf-8") as handle:
             handle.write(json.dumps(payload, ensure_ascii=False, default=str) + "\n")
 
+    def _state_payload(self) -> dict[str, Any]:
+        return {
+            "schema": STATE_SCHEMA,
+            "real_execution": False,
+            "accepted": self._accepted,
+            "rejected": self._rejected,
+            "last_trade_price": dict(self._last_trade_price),
+            "positions": [asdict(position) for position in self.paper_engine.positions],
+        }
+
+    def _persist_state(self) -> None:
+        """Atomic snapshot; failure is visible in status but never kills collection."""
+        self.state_path.parent.mkdir(parents=True, exist_ok=True)
+        temporary = self.state_path.with_suffix(self.state_path.suffix + ".tmp")
+        try:
+            temporary.write_text(
+                json.dumps(self._state_payload(), ensure_ascii=False, indent=2),
+                encoding="utf-8",
+            )
+            os.replace(temporary, self.state_path)
+            self._state_error = None
+        except OSError as exc:
+            self._state_error = f"STATE_WRITE_FAILED:{exc.__class__.__name__}"
+            with suppress(OSError):
+                temporary.unlink(missing_ok=True)
+
+    def _restore_state(self) -> None:
+        try:
+            payload = json.loads(self.state_path.read_text(encoding="utf-8"))
+        except FileNotFoundError:
+            return
+        except (OSError, TypeError, ValueError) as exc:
+            self._state_error = f"STATE_READ_FAILED:{exc.__class__.__name__}"
+            return
+        if not isinstance(payload, dict) or payload.get("schema") != STATE_SCHEMA:
+            self._state_error = "STATE_SCHEMA_INVALID"
+            return
+        if payload.get("real_execution") is not False:
+            self._state_error = "STATE_SAFETY_INVALID"
+            return
+        restored_prices: dict[str, float] = {}
+        for coin, value in dict(payload.get("last_trade_price") or {}).items():
+            parsed = _finite_positive(value)
+            if parsed is not None:
+                restored_prices[str(coin).upper()] = parsed
+        self._last_trade_price = restored_prices
+        try:
+            self._accepted = max(0, int(payload.get("accepted") or 0))
+            self._rejected = max(0, int(payload.get("rejected") or 0))
+        except (TypeError, ValueError):
+            self._accepted = self._rejected = 0
+        for raw in payload.get("positions") or []:
+            if not isinstance(raw, dict):
+                continue
+            try:
+                position = PaperPosition(
+                    position_id=str(raw["position_id"]),
+                    coin=str(raw["coin"]),
+                    side=str(raw["side"]),
+                    quantity=float(raw["quantity"]),
+                    entry_price=float(raw["entry_price"]),
+                    notional_usdt=float(raw["notional_usdt"]),
+                    opened_at_ms=int(raw["opened_at_ms"]),
+                    source_delta_id=str(raw["source_delta_id"]),
+                    leader_wallet=str(raw["leader_wallet"]),
+                    margin_locked_usdt=float(raw.get("margin_locked_usdt") or 0.0),
+                    leverage_effective=float(raw.get("leverage_effective") or 1.0),
+                    leg_notional_usdt=tuple(float(v) for v in (raw.get("leg_notional_usdt") or ())),
+                )
+                self.paper_engine.restore_position(
+                    position,
+                    refs={"runtime": "lead_lag_event", "state_path": str(self.state_path)},
+                )
+            except (KeyError, TypeError, ValueError):
+                self._state_error = "STATE_POSITION_INVALID"
+                continue
+
     def _write_status(
         self,
         *,
@@ -285,6 +365,8 @@ class LeadLagEventPaperRuntime:
             "real_execution": False,
             "code": code,
             "config_path": str(self.config_path),
+            "state_path": str(self.state_path),
+            "state_error": self._state_error,
             "accepted": self._accepted,
             "rejected": self._rejected,
             "open_paper_positions": len(self.paper_engine.positions),
@@ -301,7 +383,6 @@ class LeadLagEventPaperRuntime:
             )
             os.replace(temporary, self.status_path)
         except OSError:
-            # Status export is diagnostic only; the collector must keep running.
             with suppress(OSError):
                 temporary.unlink(missing_ok=True)
 
