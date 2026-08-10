@@ -26,24 +26,20 @@ def test_portability_files_exist_and_unified_launcher_bootstraps_first():
     assert (ROOT / "tools" / "install_portable_runtime.ps1").is_file()
     assert (ROOT / "tools" / "create_portable_bundle.ps1").is_file()
     assert (ROOT / "docs" / "PORTABILITE_WINDOWS.md").is_file()
-    # item 2/3 : point d'entree utilisateur pour assembler le Python embarque + wheelhouse hors ligne.
+    # Le checkout SOURCE contient les assembleurs, pas forcément leurs binaires générés/ignorés.
     assert (ROOT / "tools" / "preparer_python_portable.cmd").is_file()
     assert (ROOT / "PREPARER_GIT_PORTABLE.cmd").is_file()
-    assert (ROOT / "tools" / "git" / "cmd" / "git.exe").is_file()
+    assert (ROOT / "tools" / "install_portable_git.ps1").is_file()
     assert (ROOT / "POUSSER-GITHUB-FORCE.cmd").is_file()
     assert (ROOT / "ANALYSER_BACKTESTS_REPLAYS.cmd").is_file()
 
     launcher = (ROOT / "LANCER_HYPERSMART.cmd").read_text(encoding="utf-8")
-    # item 4 : le lanceur bootstrappe portable_env.cmd AVANT toute invocation de Python, et n'utilise
-    # QUE le Python portable place en tete du PATH, jamais un `py -3` du PATH.
     bootstrap_index = launcher.index("portable_env.cmd")
     first_python_index = launcher.index("python", bootstrap_index + len("portable_env.cmd"))
     assert bootstrap_index < first_python_index
-    assert "py -3" not in launcher                          # jamais le lanceur Windows global
-    assert "if errorlevel 1" in launcher[bootstrap_index:bootstrap_index + 400]  # errorlevel verifie
-
-    raw_launcher = (ROOT / "LANCER_HYPERSMART.cmd").read_bytes()
-    assert b"\x00" not in raw_launcher
+    assert "py -3" not in launcher
+    assert "if errorlevel 1" in launcher[bootstrap_index:bootstrap_index + 400]
+    assert b"\x00" not in (ROOT / "LANCER_HYPERSMART.cmd").read_bytes()
 
 
 def test_python_selection_prefers_embedded_runtime(tmp_path):
@@ -158,33 +154,43 @@ def test_portable_probe_rejects_external_python_paths(tmp_path):
     assert isinstance(payload["external_path_leaks"], list)
 
 
-def test_real_embedded_runtime_status_is_complete_and_not_none():
+def test_source_checkout_reports_embedded_runtime_honestly():
+    """Git ne versionne pas tools/python; un source checkout ne doit jamais être un faux bundle vert."""
     module = _load_module()
-
+    embedded = ROOT / "tools" / "python" / "python.exe"
     status = module.runtime_status(ROOT, require_embedded=True)
-
     assert status is not None
-    assert status.probe_ok is True
-    assert status.selected_source == "embedded-tools-python"
-    assert status.missing_imports == ()
-    assert status.external_path_leaks == ()
+    if embedded.is_file():
+        assert status.probe_ok is True
+        assert status.selected_source == "embedded-tools-python"
+        assert status.missing_imports == ()
+        assert status.external_path_leaks == ()
+    else:
+        assert status.probe_ok is False
+        assert status.selected_source is None
+        assert "no Python interpreter found" in str(status.error)
 
 
-def test_real_folder_is_relocatable_without_building_an_archive():
+def test_source_folder_relocation_status_distinguishes_unbuilt_bundle():
     module = _load_module()
-
     status = module.relocation_status(ROOT)
+    embedded = ROOT / "tools" / "python" / "python.exe"
 
-    assert status.ok is True
-    assert status.embedded_runtime_ok is True
     assert status.relative_launcher_ok is True
     assert status.relative_python_paths_ok is True
     assert status.first_launch_regeneration_ok is True
     assert status.longest_path_ok is True
     assert status.longest_path <= module.MAX_WINDOWS_PATH
     assert status.longest_path_member
-    assert status.required_files_missing == ()
     assert status.hardcoded_user_paths == ()
+    if embedded.is_file():
+        assert status.ok is True
+        assert status.embedded_runtime_ok is True
+        assert status.required_files_missing == ()
+    else:
+        assert status.ok is False
+        assert status.embedded_runtime_ok is False
+        assert any("portable" in item.casefold() or "python" in item.casefold() for item in status.recommendations)
 
 
 def test_relocation_refuse_un_chemin_windows_superieur_a_259(tmp_path, monkeypatch):
@@ -210,6 +216,10 @@ def test_relocation_refuse_un_chemin_windows_superieur_a_259(tmp_path, monkeypat
 
 def test_real_windows_launcher_can_dispatch_portable_check():
     if os.name != "nt":
+        return
+    # Ce test d'intégration ne peut être vert que sur un BUNDLE construit. Un checkout source
+    # Windows sans tools/python est volontairement NO_GO, pas une régression.
+    if not (ROOT / "tools" / "python" / "python.exe").is_file():
         return
     completed = subprocess.run(
         f'call "{ROOT / "LANCER_HYPERSMART.cmd"}" portable-check',
