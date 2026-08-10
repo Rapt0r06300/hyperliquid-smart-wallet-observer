@@ -1,5 +1,5 @@
 name: hyperlab-ci
-# [Bloc 9-10] pip install -e . et requirements-recherche.txt sont BLOQUANTS (aucun || true).
+# HyperLab CI fail-closed: package + dev/test deps + research deps are mandatory.
 on: [push, pull_request]
 jobs:
   linux:
@@ -9,15 +9,15 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
-      - name: Install editable (BLOQUANT)
-        run: pip install -e .
+      - name: Install editable + dev tests (BLOQUANT)
+        run: python -m pip install -e ".[dev]"
       - name: Install requirements-recherche (BLOQUANT)
-        run: pip install -r requirements-recherche.txt
+        run: python -m pip install -r requirements-recherche.txt
       - name: Regenerer + gates du registre machine
         run: |
           python tools/claude_tasks_scan.py .
-          pytest tests/test_master_every_data_item_has_task.py tests/test_every_done_task_is_wired.py -q
+          python -m pytest tests/test_master_every_data_item_has_task.py tests/test_every_done_task_is_wired.py -q
       - name: Suite hyperlab (spine reel)
-        run: pytest tests/test_hyperlab_*.py -q
+        run: python -m pytest tests/test_hyperlab_*.py -q
       - name: Smoke E2E (chaine complete offline, code retour bloquant)
         run: python -m hl_observer.hyperlab smoke
