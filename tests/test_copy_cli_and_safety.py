@@ -1,5 +1,6 @@
 from pathlib import Path
 
+from click import unstyle
 from typer.testing import CliRunner
 
 from hl_observer.cli import _resolve_public_trade_scan_coins, _selected_top_wallet_rows, _unique_top_wallet_rows, app
@@ -9,11 +10,16 @@ from hl_observer.storage.models import MarketUniverseModel, TopWallet
 from hl_observer.utils.time import now_ms
 
 
+def _plain(output: str) -> str:
+    """Typer/Rich may style help in CliRunner; assertions care about semantic text, not ANSI."""
+    return unstyle(output)
+
+
 def test_copy_run_command_exists_and_defaults_to_dry_run():
     result = CliRunner().invoke(app, ["copy-run", "--help"])
 
     assert result.exit_code == 0
-    help_text = result.output.lower()
+    help_text = _plain(result.output).lower()
     assert "copy-run" in help_text
     assert "dry-run" in help_text
     assert "polling interval" in help_text
@@ -24,23 +30,24 @@ def test_copy_report_command_exists():
     result = CliRunner().invoke(app, ["copy-report", "--help"])
 
     assert result.exit_code == 0
-    assert "--period" in result.output
+    assert "--period" in _plain(result.output)
 
 
 def test_consensus_leader_report_command_exists():
     result = CliRunner().invoke(app, ["consensus-leader-report", "--help"])
 
     assert result.exit_code == 0
-    assert "consensus" in result.output.lower()
-    assert "same-coin" in result.output.lower()
+    assert "consensus" in _plain(result.output).lower()
+    assert "same-coin" in _plain(result.output).lower()
 
 
 def test_copy_preflight_command_exists():
     result = CliRunner().invoke(app, ["copy-preflight", "--help"])
 
     assert result.exit_code == 0
-    assert "--network-read" in result.output
-    assert "--copy-max-leaders" in result.output
+    output = _plain(result.output)
+    assert "--network-read" in output
+    assert "--copy-max-leaders" in output
 
 
 def test_throughput_plan_cli_refuses_bypass_and_keeps_safe_rotation():
@@ -141,7 +148,7 @@ def test_dashboard_export_command_exists():
     result = CliRunner().invoke(app, ["dashboard-export", "--help"])
 
     assert result.exit_code == 0
-    assert "read-only" in result.output.lower()
+    assert "read-only" in _plain(result.output).lower()
 
 
 def test_live_user_fills_scan_command_exists_and_requires_network_read():
@@ -150,9 +157,10 @@ def test_live_user_fills_scan_command_exists_and_requires_network_read():
     refused = runner.invoke(app, ["live-user-fills-scan", "--duration-seconds", "1", "--dry-run"])
 
     assert help_result.exit_code == 0
-    assert "--max-users" in help_result.output
-    assert "--leader-offset" in help_result.output
-    assert "--max-live-fill-age-ms" in help_result.output
+    help_text = _plain(help_result.output)
+    assert "--max-users" in help_text
+    assert "--leader-offset" in help_text
+    assert "--max-live-fill-age-ms" in help_text
     assert refused.exit_code != 0
     assert "--network-read is required" in refused.output
 
@@ -303,7 +311,7 @@ def test_runtime_check_commands_exist():
     assert runner.invoke(app, ["audit-safety", "--help"]).exit_code == 0
     reset_help = runner.invoke(app, ["reset-simulation-state", "--help"])
     assert reset_help.exit_code == 0
-    assert "--starting-equity" in reset_help.output
+    assert "--starting-equity" in _plain(reset_help.output)
 
 
 def test_v23_fusion_cli_aliases_exist():
