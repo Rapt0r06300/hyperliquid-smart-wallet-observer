@@ -1,7 +1,4 @@
-"""[PORTABILITE item 12] L'audit repo-complet DÉTECTE les briseurs de portabilité et PROUVE que le
-runtime actif (src/hl_observer + tools + .cmd maîtres) n'en contient aucun. Verrou permanent : toute
-régression (chemin absolu, C:\\Users, /home/, registre) réintroduite fera échouer ce test. 0 réseau.
-"""
+"""L'audit de portabilité détecte les dépendances machine, pas les diagnostics qui les décrivent."""
 from __future__ import annotations
 
 import sys
@@ -10,7 +7,7 @@ from pathlib import Path
 RACINE = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(RACINE / "tools"))
 
-import audit_portabilite as A                              # noqa: E402
+import audit_portabilite as A  # noqa: E402
 
 
 def _cats(violations):
@@ -36,20 +33,54 @@ def test_detecte_registre(tmp_path):
     assert "registre_windows" in _cats(A.auditer(tmp_path))
 
 
+def test_machineguid_readonly_est_tolere_uniquement_dans_fonction_identite_connue(tmp_path):
+    p = tmp_path / "src" / "hl_observer" / "ops"
+    p.mkdir(parents=True)
+    (p / "portable_clone.py").write_text(
+        "def machine_fingerprint():\n"
+        "    import winreg\n"
+        "    with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, r'SOFTWARE\\\\Microsoft\\\\Cryptography') as k:\n"
+        "        return winreg.QueryValueEx(k, 'MachineGuid')[0]\n",
+        encoding="utf-8",
+    )
+    assert A.auditer(tmp_path) == []
+
+
+def test_machineguid_exception_ne_tolere_jamais_ecriture_registre(tmp_path):
+    p = tmp_path / "src" / "hl_observer" / "ops"
+    p.mkdir(parents=True)
+    (p / "portable_clone.py").write_text(
+        "def machine_fingerprint():\n"
+        "    import winreg\n"
+        "    winreg.SetValueEx(key, 'x', 0, 1, 'y')\n",
+        encoding="utf-8",
+    )
+    assert "registre_windows" in _cats(A.auditer(tmp_path))
+
+
+def test_recommandation_chemin_court_est_du_diagnostic_pas_une_dependance(tmp_path):
+    (tmp_path / "tools").mkdir()
+    (tmp_path / "tools" / "x.py").write_text(
+        'MESSAGE = "Extract to a short writable path such as C:\\\\HyperSmart or D:\\\\HyperSmart."\n',
+        encoding="utf-8",
+    )
+    assert A.auditer(tmp_path) == []
+
+
 def test_ignore_les_commentaires(tmp_path):
-    # un commentaire qui DOCUMENTE l'ancien bug ne casse pas la portabilité -> pas une violation.
     (tmp_path / "LANCER_HYPERSMART.cmd").write_text(
-        "cd /d \"%~dp0\"\nREM 'C:\\Users\\flo\\Desktop\\Projet' n'est pas reconnu\n", encoding="utf-8")
+        "cd /d \"%~dp0\"\nREM 'C:\\Users\\flo\\Desktop\\Projet' n'est pas reconnu\n", encoding="utf-8"
+    )
     assert A.auditer(tmp_path) == []
 
 
 def test_tolere_dp0(tmp_path):
-    # %~dp0 est un chemin DÉRIVÉ portable, jamais une violation.
-    (tmp_path / "LANCER_HYPERSMART.cmd").write_text('call "%~dp0tools\\portable_env.cmd"\n', encoding="utf-8")
+    (tmp_path / "LANCER_HYPERSMART.cmd").write_text(
+        'call "%~dp0tools\\portable_env.cmd"\n', encoding="utf-8"
+    )
     assert A.auditer(tmp_path) == []
 
 
 def test_le_runtime_actif_du_depot_est_portable():
-    # LE verrou : le vrai runtime (src/hl_observer + tools + .cmd maîtres) ne contient AUCUN briseur.
     violations = A.auditer(RACINE)
     assert violations == [], A.formater(violations)
