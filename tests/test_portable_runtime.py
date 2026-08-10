@@ -175,22 +175,27 @@ def test_source_folder_relocation_status_distinguishes_unbuilt_bundle():
     module = _load_module()
     status = module.relocation_status(ROOT)
     embedded = ROOT / "tools" / "python" / "python.exe"
+    pth = ROOT / "tools" / "python" / "python314._pth"
 
     assert status.relative_launcher_ok is True
-    assert status.relative_python_paths_ok is True
     assert status.first_launch_regeneration_ok is True
     assert status.longest_path_ok is True
     assert status.longest_path <= module.MAX_WINDOWS_PATH
     assert status.longest_path_member
     assert status.hardcoded_user_paths == ()
-    if embedded.is_file():
-        assert status.ok is True
-        assert status.embedded_runtime_ok is True
-        assert status.required_files_missing == ()
+
+    if embedded.is_file() and pth.is_file():
+        assert status.relative_python_paths_ok is True
+        assert status.absolute_python_path_entries == ()
     else:
+        # Un checkout GitHub source n'embarque volontairement ni Python ni son ._pth :
+        # le diagnostic doit le dire explicitement et rester NO_GO jusqu'au build portable.
         assert status.ok is False
         assert status.embedded_runtime_ok is False
-        assert any("portable" in item.casefold() or "python" in item.casefold() for item in status.recommendations)
+        assert status.relative_python_paths_ok is False
+        assert "tools/python/python314._pth:MISSING" in status.absolute_python_path_entries
+        assert "tools/python/python.exe" in status.required_files_missing
+        assert any("github source zip" in item.casefold() for item in status.recommendations)
 
 
 def test_relocation_refuse_un_chemin_windows_superieur_a_259(tmp_path, monkeypatch):
