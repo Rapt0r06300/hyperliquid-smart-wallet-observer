@@ -45,7 +45,6 @@ from hl_observer.ops.registre_pids import REGISTRE_RELPATH
 SCHEMA_MANIFESTE = "hypersmart.portable_manifest.v1"
 NOM_MANIFESTE = "PORTABLE_MANIFEST.json"
 
-# item 20.4 — jamais dans une archive portable : identite machine, verrous, temporaires, VCS, venv.
 DOSSIERS_EXCLUS = ("__pycache__", ".git", ".venv", "venv", "env", "node_modules",
                    ".pytest_cache", ".mypy_cache", ".ruff_cache", "portable_runtime",
                    ".venv-portable", "tmp_pytest", "htmlcov", "dist", "build",
@@ -60,19 +59,15 @@ SUFFIXES_EXCLUS = (".pyc", ".pyo", ".log", ".lock", ".pid", ".tmp", ".bundle",
                    ".sqlite3-wal", ".sqlite3-shm", ".sqlite-wal", ".sqlite-shm",
                    "-wal", "-shm", ".db-wal", ".db-shm")
 SUFFIXES_ARCHIVES = (".zip", ".7z", ".rar", ".sha256")
-# item 21 « aucune cle copiee » : matiere de cle exclue par EXTENSION (jamais par sous-chaine, qui
-# ferait tomber du code source legitime comme private_helpers.py). Defense en profondeur : meme si le
-# projet est paper-strict (0 cle reelle), une archive ne doit JAMAIS transporter de secret.
 SUFFIXES_SECRETS = (".key", ".p12", ".pfx", ".mnemonic", ".seed", ".keystore")
-FICHIERS_EXCLUS = (REGISTRE_RELPATH.as_posix(),                     # registre PID du lanceur
-                   "runtime/data/lanceur_session_marqueur.txt",     # marqueur anti-orphelin (machine)
-                   "runtime/data/COURANTE.json",                    # pointeur de session vivante
-                   "moisson_console.txt",                           # sortie console locale generee par le lanceur
-                   "moisson-termine.flag",                          # marqueur local de fin de moisson
-                   "moisson-en-cours.txt",                          # sortie locale de suivi de moisson
-                   "moisson-fini.md",                               # rapport local genere apres moisson
+FICHIERS_EXCLUS = (REGISTRE_RELPATH.as_posix(),
+                   "runtime/data/lanceur_session_marqueur.txt",
+                   "runtime/data/COURANTE.json",
+                   "moisson_console.txt",
+                   "moisson-termine.flag",
+                   "moisson-en-cours.txt",
+                   "moisson-fini.md",
                    ".analyse.lock", NOM_MANIFESTE)
-# item 20.6 — un chemin absolu machine-specifique ne doit jamais survivre dans les metadonnees.
 _ABSOLU = re.compile(
     r"(?:[A-Za-z]:\\|\\\\[^\\\s\"]+\\[^\\\s\"]+|/(?:home|Users)/)"
                    )
@@ -95,27 +90,17 @@ _NOMS_WINDOWS_RESERVES = {
 }
 _MAX_COMPOSANT_WINDOWS = 240
 _MAX_CHEMIN_RELATIF_WINDOWS = 220
-_EPOCH_ZIP_MINIMUM = 315532800  # 1980-01-01 UTC, limite du format ZIP.
+_EPOCH_ZIP_MINIMUM = 315532800
 _MARQUEUR_LFS = b"version https://git-lfs.github.com/spec/v1"
 
 
-# ── PREUVE + SESSIONS ───────────────────────────────────────────────────────────────────────
-# `preuve_writers_arretes` est FAIL-CLOSED pour la CLOTURE (registre absent = arret non prouve, on ne
-# marque jamais COMPLETE dans le doute). Pour l'ARCHIVE, la question est differente : « quelque chose
-# ecrit-il MAINTENANT ? ». Un registre ABSENT/ vide n'est pas un writer vivant — c'est l'etat normal
-# quand le lanceur ne tourne pas ; le garde-fou d'integrite est alors « aucune session ACTIVE » (item
-# 20.2). On distingue donc les VRAIS writers vivants des simples marqueurs d'absence de registre.
 _MARQUEURS_REGISTRE = frozenset({"REGISTRE_ABSENT", "REGISTRE_ILLISIBLE", "REGISTRE_INCOMPLET",
                                  "REGISTRE_CORROMPU"})
 
 
 def preuve_arret(root: str | Path, *, pid_vivant=None) -> tuple[bool, list[str]]:
-    """Preuve fail-closed basee sur le registre PID et un scan independant.
-
-    Le controle de release ne depend pas de l'import de l'orchestrateur harvest:
-    il doit rester utilisable justement lorsque le runtime est arrete.
-    """
-    root = Path(root)
+    """Preuve fail-closed basee sur le registre PID et un scan independant du checkout courant."""
+    root = Path(root).resolve()
     chemin = root / REGISTRE_RELPATH
     if not chemin.is_file():
         return False, ["REGISTRE_ABSENT"]
@@ -129,12 +114,15 @@ def preuve_arret(root: str | Path, *, pid_vivant=None) -> tuple[bool, list[str]]
     if pid_vivant is None:
         from hl_observer.ops.preuve_de_vie import _pid_vivant_reel
         pid_vivant = _pid_vivant_reel
-    vivants = sorted(pid for pid in RP.pids_enregistres(registre) if pid_vivant(pid))
+    pids_connus = RP.pids_enregistres(registre)
+    vivants = sorted(pid for pid in pids_connus if pid_vivant(pid))
     motifs = ["PID_VIVANT:%d" % pid for pid in vivants]
-    # Defense independante: un processus HyperSmart signe mais absent du registre
-    # est un writer ambigu et interdit une release officielle.
     try:
-        orphelins = RP.detecter_orphelins(RP.processus_reels(), RP.pids_enregistres(registre))
+        orphelins = RP.detecter_orphelins(
+            RP.processus_reels(),
+            pids_connus,
+            root=root,
+        )
     except Exception:  # noqa: BLE001 - absence de psutil traitee par processus_reels
         orphelins = []
     motifs.extend("PROCESSUS_ORPHELIN:%s" % p.get("pid") for p in orphelins)
@@ -142,25 +130,15 @@ def preuve_arret(root: str | Path, *, pid_vivant=None) -> tuple[bool, list[str]]
 
 
 def writers_vivants(root: str | Path, *, pid_vivant=None) -> list[str]:
-    """VRAIS processus ecrivains encore vivants (hors marqueurs d'absence de registre). Une liste non
-    vide = quelque chose ecrit -> l'archive doit etre refusee (item 20.1)."""
     _arretes, motifs = preuve_arret(root, pid_vivant=pid_vivant)
     return [m for m in motifs if m not in _MARQUEURS_REGISTRE]
 
 
 def sessions_actives(root: str | Path) -> list[str]:
-    """item 20.2 : run_id des sessions encore ACTIVE (elles interdisent la construction)."""
     return [s["run_id"] for s in SC.scanner_sessions(root) if s.get("statut") == SC.STATUT_ACTIVE]
 
 
-# -- SECURITE DES CHEMINS ET DES SECRETS -----------------------------------------
 def contient_cle_privee(chemin: str | Path) -> bool:
-    """Detecte une matiere de cle privee par contenu.
-
-    Les certificats CA publics ``.pem`` sont legitimes et doivent rester dans la
-    release. Les conteneurs de cle connus restent exclus par extension, tandis
-    que ce controle de contenu protege aussi une cle mal nommee.
-    """
     chemin = Path(chemin)
     try:
         with chemin.open("rb") as flux:
@@ -171,7 +149,6 @@ def contient_cle_privee(chemin: str | Path) -> bool:
 
 
 def _est_reparse(chemin: Path) -> bool:
-    """Vrai pour un lien symbolique ou un reparse point Windows."""
     if chemin.is_symlink():
         return True
     try:
@@ -182,7 +159,6 @@ def _est_reparse(chemin: Path) -> bool:
 
 
 def valider_chemin_relatif(rel: str, *, max_rel: int = _MAX_CHEMIN_RELATIF_WINDOWS) -> str:
-    """Valide un membre portable Windows et rend sa forme POSIX canonique."""
     if not isinstance(rel, str) or not rel:
         raise ArchiveRefuseeError("chemin vide dans l'inventaire")
     brut = rel.replace("\\", "/")
@@ -211,7 +187,6 @@ def valider_chemin_relatif(rel: str, *, max_rel: int = _MAX_CHEMIN_RELATIF_WINDO
 
 
 def valider_fichier_source(root: str | Path, chemin: str | Path) -> str:
-    """Refuse lien/reparse et sortie de racine, puis rend le chemin relatif."""
     root = Path(root).resolve()
     chemin = Path(chemin)
     try:
@@ -230,10 +205,7 @@ def valider_fichier_source(root: str | Path, chemin: str | Path) -> str:
     return valider_chemin_relatif(rel)
 
 
-# ── SQLITE WAL (item 20.3) ───────────────────────────────────────────────────────────────────
 def checkpoint_wal_sqlite(chemin: str | Path) -> dict:
-    """TRUNCATE le WAL d'une base puis repasse en journal DELETE : la base devient auto-portante,
-    les sidecars -wal/-shm disparaissent (et sont de toute facon exclus). Rend un petit verdict."""
     chemin = Path(chemin)
     try:
         con = sqlite3.connect(str(chemin))
@@ -244,12 +216,11 @@ def checkpoint_wal_sqlite(chemin: str | Path) -> dict:
         finally:
             con.close()
         return {"base": chemin.name, "ok": True}
-    except sqlite3.Error as exc:                       # base verrouillee/corrompue = on le DIT
+    except sqlite3.Error as exc:
         return {"base": chemin.name, "ok": False, "erreur": str(exc)}
 
 
 def copier_sqlite_vers_staging(source: str | Path, destination: str | Path) -> dict:
-    """Copie coherente SQLite par Backup API sans jamais modifier la source."""
     source, destination = Path(source), Path(destination)
     destination.parent.mkdir(parents=True, exist_ok=True)
     source_uri = source.resolve().as_uri() + "?mode=ro"
@@ -275,17 +246,12 @@ def copier_sqlite_vers_staging(source: str | Path, destination: str | Path) -> d
 
 def construire_staging(root: str | Path, staging: str | Path,
                        inclus: Iterable[str]) -> dict:
-    """Materialise les octets de release dans un staging externe et immuable.
-
-    Les metadonnees sont neutralisees avant tout hash. Les SQLite utilisent une
-    sauvegarde coherente; aucune PRAGMA n'est executee sur la base source.
-    """
     root, staging = Path(root).resolve(), Path(staging).resolve()
     try:
         staging.relative_to(root)
     except ValueError:
-        import logging as _lg  # panne rendue VISIBLE (interdiction des except:pass muets)
-        _lg.getLogger(__name__).debug("exception ignoree volontairement ici", exc_info=True)
+        import logging as _lg
+        _lg.getLogger(__name__).debug("staging externe confirme", exc_info=True)
     else:
         raise ArchiveRefuseeError("le staging doit etre exterieur a la racine source")
     staging.mkdir(parents=True, exist_ok=False)
@@ -340,7 +306,6 @@ def preparer_sqlite(root: str | Path) -> list[dict]:
     return out
 
 
-# ── SELECTION DES FICHIERS (items 20.4/20.5) ─────────────────────────────────────────────────
 def est_exclu(rel: str) -> bool:
     rel_posix = Path(rel).as_posix()
     if rel_posix.startswith("runtime/") \
@@ -356,10 +321,6 @@ def est_exclu(rel: str) -> bool:
     low = rel_posix.lower()
     if any(low.endswith(sfx) for sfx in SUFFIXES_EXCLUS):
         return True
-    # Les archives sont exclues sauf fixtures explicites de tests, requises pour
-    # tester les parseurs d'archives sans embarquer d'anciennes releases. Le ZIP
-    # stdlib de CPython est une composante executable obligatoire du runtime,
-    # pas une release imbriquee : sans lui, Python ne trouve meme pas encodings.
     if any(low.endswith(sfx) for sfx in SUFFIXES_ARCHIVES):
         stdlib_python = (
             rel_posix.startswith("tools/python/")
@@ -368,16 +329,15 @@ def est_exclu(rel: str) -> bool:
         fixture_test = rel_posix.startswith("tests/fixtures/") or "/fixtures/" in rel_posix
         if not (fixture_test or stdlib_python):
             return True
-    if any(low.endswith(sfx) for sfx in SUFFIXES_SECRETS):          # item 21 : jamais de cle dans l'archive
+    if any(low.endswith(sfx) for sfx in SUFFIXES_SECRETS):
         return True
     nom = Path(rel).name.lower()
-    if nom == ".env" or nom.startswith(".env."):                    # secrets d'environnement
+    if nom == ".env" or nom.startswith(".env."):
         return True
     return False
 
 
 def _dossier_a_elaguer(rel: str) -> bool:
-    """Vrai si tout le sous-arbre est exclu, sans devoir en enumerer les fichiers."""
     rel_posix = rel.replace("\\", "/").strip("/")
     if not rel_posix:
         return False
@@ -394,8 +354,6 @@ def _dossier_a_elaguer(rel: str) -> bool:
 
 
 def lister_pour_archive(root: str | Path) -> tuple[list[str], list[str]]:
-    """(inclus, exclus) en chemins POSIX relatifs, tries. Les sessions COMPLETE/QUARANTINED sont
-    conservees (item 20.5) ; seuls PID/verrous/temporaires/machine tombent (item 20.4)."""
     root = Path(root).resolve()
     inclus, exclus = [], []
     vus_casse: dict[str, str] = {}
@@ -432,9 +390,7 @@ def lister_pour_archive(root: str | Path) -> tuple[list[str], list[str]]:
     return inclus, sorted(exclus)
 
 
-# ── METADONNEES (item 20.6) ──────────────────────────────────────────────────────────────────
 def neutraliser_metadonnees(texte: str, racine: str | Path) -> tuple[str, int]:
-    """Retire le prefixe racine de build des metadonnees (chemins -> relatifs). Rend (texte, nb)."""
     racine_txt = str(Path(racine))
     variantes = {racine_txt, racine_txt.replace("\\", "/"),
                  racine_txt.replace("\\", "\\\\"), str(Path(racine).as_posix())}
@@ -448,13 +404,10 @@ def neutraliser_metadonnees(texte: str, racine: str | Path) -> tuple[str, int]:
 
 
 def chemins_absolus_residuels(texte: str) -> list[str]:
-    """item 20.6 : tout chemin absolu machine-specifique encore present (apres neutralisation)."""
     return sorted({m.group(0) for m in _ABSOLU.finditer(texte)})
 
 
-# ── MANIFESTE (item 22) ──────────────────────────────────────────────────────────────────────
 def _git_sha_depuis_dossier(root: str | Path) -> str:
-    """SHA git LU dans .git (jamais via un `git` du PATH : item 16 interdit le git systeme)."""
     g = Path(root) / ".git"
     try:
         head = (g / "HEAD").read_text(encoding="utf-8").strip()
@@ -469,18 +422,12 @@ def _git_sha_depuis_dossier(root: str | Path) -> str:
                     if ln.strip().endswith(" " + ref):
                         return ln.split(" ", 1)[0].strip()
             return ""
-        return head                                    # HEAD detache = SHA brut
+        return head
     except OSError:
         return ""
 
 
 def _commande_git(root: Path, *arguments: str) -> str:
-    """Execute Git uniquement pendant le build source et retourne stdout.
-
-    Git n'est jamais requis dans l'archive extraite. Une release officielle a
-    toutefois besoin de la verite du checkout, impossible a deduire d'un simple
-    fichier ``.git/HEAD`` lorsqu'il existe des modifications locales.
-    """
     try:
         resultat = subprocess.run(
             ["git", "-C", str(root), *arguments],
@@ -493,11 +440,6 @@ def _commande_git(root: Path, *arguments: str) -> str:
 
 
 def etat_git_release(root: str | Path) -> dict:
-    """Etat Git exact utilise par la release officielle.
-
-    Les fichiers dirty/non suivis sont accompagnes de leur hash quand ils
-    existent. Une suppression reste explicite avec ``sha256=None``.
-    """
     root = Path(root).resolve()
     sha = _commande_git(root, "rev-parse", "--verify", "HEAD").strip()
     if not re.fullmatch(r"[0-9a-fA-F]{40,64}", sha):
@@ -533,7 +475,6 @@ def etat_git_release(root: str | Path) -> dict:
 
 
 def pointeurs_lfs_non_materialises(root: str | Path, inclus: Iterable[str]) -> list[str]:
-    """Liste les pointeurs Git LFS embarques au lieu de leur contenu reel."""
     root = Path(root)
     trouves = []
     for rel in sorted(set(inclus)):
@@ -563,8 +504,6 @@ def construire_manifeste(root: str | Path, inclus: Iterable[str], exclus: Iterab
                          version: str = "", git_sha: str | None = None,
                          horloge=time.time, source_date_epoch: int | None = None,
                          etat_git: dict | None = None) -> dict:
-    """item 22 : version+SHA git, python, os/arch, hashes exe/DLL/wheels + tous fichiers requis,
-    donnees incluses/exclues, date de build, commande de verification, empreinte globale."""
     root = Path(root)
     fichiers: dict[str, dict] = {}
     binaires: dict[str, dict] = {}
@@ -590,7 +529,7 @@ def construire_manifeste(root: str | Path, inclus: Iterable[str], exclus: Iterab
         "nombre_fichiers": len(fichiers),
         "empreinte_globale": empreinte,
         "binaires": binaires,
-        "sbom": _sbom(root, fichiers, binaires),           # item 8 : bill-of-materials + licences
+        "sbom": _sbom(root, fichiers, binaires),
         "deps": _deps_verrouillees(root),
         "donnees_incluses": sessions,
         "donnees_exclues": sorted(set(list(DOSSIERS_EXCLUS)
@@ -604,7 +543,6 @@ def construire_manifeste(root: str | Path, inclus: Iterable[str], exclus: Iterab
 
 
 def _empreinte_manifeste(fichiers: dict[str, dict]) -> str:
-    import hashlib
     h = hashlib.sha256()
     for rel in sorted(fichiers):
         h.update(rel.encode("utf-8"))
@@ -619,8 +557,8 @@ def _version_projet(root: Path) -> str:
             try:
                 return p.read_text(encoding="utf-8").strip() or "0.0.0-dev"
             except OSError:
-                import logging as _lg  # panne rendue VISIBLE (interdiction des except:pass muets)
-                _lg.getLogger(__name__).debug("exception ignoree volontairement ici", exc_info=True)
+                import logging as _lg
+                _lg.getLogger(__name__).debug("version projet illisible", exc_info=True)
     return "0.0.0-dev"
 
 
@@ -632,13 +570,12 @@ def _deps_verrouillees(root: Path) -> list[str]:
                 return [ln.strip() for ln in p.read_text(encoding="utf-8").splitlines()
                         if ln.strip() and not ln.strip().startswith("#")]
             except OSError:
-                import logging as _lg  # panne rendue VISIBLE (interdiction des except:pass muets)
-                _lg.getLogger(__name__).debug("exception ignoree volontairement ici", exc_info=True)
+                import logging as _lg
+                _lg.getLogger(__name__).debug("deps verrouillees illisibles", exc_info=True)
     return []
 
 
 def _licences(root: Path) -> list[str]:
-    """Fichiers de licence presents (references dans le SBOM). N'invente aucune licence."""
     out = []
     for motif in ("LICENSE*", "LICENCE*", "COPYING*", "NOTICE*"):
         for p in sorted(root.glob(motif)):
@@ -648,7 +585,6 @@ def _licences(root: Path) -> list[str]:
 
 
 def _sbom(root: Path, fichiers: dict, binaires: dict) -> dict:
-    """item 8 : Software Bill Of Materials — de quoi est faite la release, verifiable."""
     modules_py = sum(1 for rel in fichiers if rel.endswith(".py"))
     wheels = [rel for rel in binaires if binaires[rel]["categorie"] == "wheel"]
     dll = [rel for rel in binaires if binaires[rel]["categorie"] == "dll"]
@@ -664,7 +600,6 @@ def _sbom(root: Path, fichiers: dict, binaires: dict) -> dict:
 
 
 def valider_membres_zip(z: zipfile.ZipFile, *, longueur_base: int = 0) -> dict:
-    """Prevalide tous les membres avant extraction (zip-slip + contraintes Windows)."""
     vus: dict[str, str] = {}
     chemin_critique = ""
     longueur_max = 0
@@ -694,7 +629,6 @@ def valider_membres_zip(z: zipfile.ZipFile, *, longueur_base: int = 0) -> dict:
 
 
 def extraire_zip_surement(z: zipfile.ZipFile, destination: str | Path) -> dict:
-    """Extrait membre par membre apres validation de l'ensemble de l'archive."""
     destination = Path(destination).resolve()
     destination.mkdir(parents=True, exist_ok=True)
     controle = valider_membres_zip(z, longueur_base=len(str(destination)))
@@ -718,18 +652,13 @@ def extraire_zip_surement(z: zipfile.ZipFile, destination: str | Path) -> dict:
 
 
 def extraire_et_reverifier(archive: str | Path, *, dossier_extraction: str | Path | None = None) -> dict:
-    """item 8 : EXTRACTION physique de controle puis RE-VERIFICATION sur disque. Extrait l'archive dans
-    un dossier temporaire et re-hash CHAQUE fichier extrait contre le manifeste embarque. Plus fort que
-    la relecture en memoire : prouve que l'archive se deploie ET reste integre sur disque."""
-    import tempfile
     archive = Path(archive)
     with zipfile.ZipFile(archive, "r") as z:
         try:
             manifeste = json.loads(z.read(NOM_MANIFESTE).decode("utf-8"))
         except KeyError:
             return {"ok": False, "raison": "MANIFESTE_ABSENT"}
-        ctx = tempfile.TemporaryDirectory(prefix="verif_extraction_") if dossier_extraction is None \
-            else None
+        ctx = tempfile.TemporaryDirectory(prefix="verif_extraction_") if dossier_extraction is None else None
         base = Path(dossier_extraction) if dossier_extraction is not None else Path(ctx.name)
         try:
             securite = extraire_zip_surement(z, base)
@@ -753,17 +682,12 @@ def extraire_et_reverifier(archive: str | Path, *, dossier_extraction: str | Pat
             "manquants": sorted(manquants), "securite_chemins": securite}
 
 
-# ── ECRITURE + RE-VERIFICATION (items 20.8/20.9) ─────────────────────────────────────────────
 class ArchiveRefuseeError(RuntimeError):
-    """Refus explicite (writers vivants, session ACTIVE, chemin absolu residuel...)."""
+    pass
 
 
 def _est_metadonnee(rel: str) -> bool:
     low = rel.lower()
-    # Le runtime tiers est une consequence exacte du wheelhouse verrouille. Ses
-    # SBOM/licences peuvent contenir des URL `file://` de build amont : les
-    # modifier casserait la provenance et ne rendrait pas le runtime plus
-    # portable. La neutralisation reste stricte pour les metadonnees du projet.
     if low.startswith("tools/python/"):
         return False
     return low.endswith(".json") or low.endswith(".txt") or low.endswith(".cfg") \
@@ -772,7 +696,6 @@ def _est_metadonnee(rel: str) -> bool:
 
 def ecrire_archive(root: str | Path, cible: str | Path, inclus: Iterable[str],
                    manifeste: dict) -> dict:
-    """Ecrit exactement les octets hashes du staging dans un ZIP canonique."""
     root, cible = Path(root), Path(cible)
     cible.parent.mkdir(parents=True, exist_ok=True)
     inclus = sorted(inclus)
@@ -802,8 +725,6 @@ def ecrire_archive(root: str | Path, cible: str | Path, inclus: Iterable[str],
 
 
 def reverifier_archive(cible: str | Path) -> dict:
-    """item 20.9 : re-ouvre l'archive, re-hashe CHAQUE membre, compare au manifeste embarque.
-    Rend {ok, verifies, divergences[], manquants[]}. Aucune confiance aveugle dans l'ecriture."""
     cible = Path(cible)
     with zipfile.ZipFile(cible, "r") as z:
         try:
@@ -818,7 +739,6 @@ def reverifier_archive(cible: str | Path) -> dict:
                 manquants.append(rel)
                 continue
             data = z.read(rel)
-            import hashlib
             sha = hashlib.sha256(data).hexdigest()
             if sha != meta.get("sha256") or len(data) != meta.get("taille"):
                 divergences.append(rel)
@@ -831,37 +751,24 @@ def reverifier_archive(cible: str | Path) -> dict:
             "empreinte_globale": manifeste.get("empreinte_globale", "")}
 
 
-# ── ORCHESTRATEUR (item 20 complet) ──────────────────────────────────────────────────────────
 def creer_archive_portable(root: str | Path, cible: str | Path, *, version: str = "",
                            git_sha: str | None = None,
                            pid_vivant=None, horloge=time.time,
                            non_suivis_requis: list[str] | None = None,
                            mode_release: str = "developpement",
                            etat_git: dict | None = None) -> dict:
-    """Enchaine les 9 etapes de l'item 20 et rend un verdict. Leve ArchiveRefuseeError sur refus dur
-    (writers vivants, session ACTIVE, chemin absolu residuel). Ne fabrique JAMAIS une archive
-    partielle : au moindre doute, on refuse et rien n'est ecrit."""
     root = Path(root).resolve()
     cible = Path(cible).resolve()
     try:
         cible.relative_to(root)
     except ValueError:
-        import logging as _lg  # panne rendue VISIBLE (interdiction des except:pass muets)
-        _lg.getLogger(__name__).debug("exception ignoree volontairement ici", exc_info=True)
+        pass
     else:
         raise ArchiveRefuseeError("la sortie ZIP doit etre exterieure au projet: %s" % cible)
     if mode_release not in {"official", "developpement"}:
         raise ArchiveRefuseeError("mode release invalide: %s" % mode_release)
-    # 1+2 : refus durs AVANT tout travail couteux.
     arretes, motifs = preuve_arret(root, pid_vivant=pid_vivant)
     vivants = [m for m in motifs if m not in _MARQUEURS_REGISTRE]
-    # Une release officielle exige la preuve positive du registre. Une copie
-    # portable locale en mode developpement peut aussi etre construite lorsque
-    # le registre a disparu apres un arret propre, a condition que le scan
-    # independant ne trouve aucun vrai writer et qu'aucune session ne soit ACTIVE.
-    # Seule l'absence normale du registre apres arret est acceptable ici.
-    # Un registre incomplet/corrompu reste un refus dur: il pourrait masquer
-    # des PID actifs et ne doit jamais etre assimile a un arret propre.
     registre_seulement = motifs == ["REGISTRE_ABSENT"]
     if not arretes and not (mode_release == "developpement" and registre_seulement):
         raise ArchiveRefuseeError("arret des writers non prouve: %s" % ", ".join(motifs))
@@ -874,8 +781,6 @@ def creer_archive_portable(root: str | Path, cible: str | Path, *, version: str 
     actives = sessions_actives(root)
     if actives:
         raise ArchiveRefuseeError("sessions ACTIVE (a cloturer d'abord): %s" % ", ".join(actives))
-    # 3+4+5 : selection. Les SQLite seront sauvegardees en lecture seule vers
-    # le staging par ``construire_staging`` ; aucune mutation n'est faite ici.
     inclus, exclus = lister_pour_archive(root)
     lfs = pointeurs_lfs_non_materialises(root, inclus)
     if lfs:
@@ -886,14 +791,10 @@ def creer_archive_portable(root: str | Path, cible: str | Path, *, version: str 
         raise ArchiveRefuseeError(
             "release officielle refusee: depot dirty (%s)" % ", ".join(chemins_dirty)
         )
-    # 4bis : CONTROLE DE COMPLETUDE (item release) — rien d'important ne doit manquer. Un fichier requis
-    # absent / vide / exclu par erreur, un import intra-projet casse ou une reference .cmd manquante
-    # BLOQUE la release avec la liste exacte. Jamais de release allegee en silence.
     from hl_observer.ops.inventaire_release import controle_completude, formater as _fmt_compl
     completude = controle_completude(root, inclus, non_suivis=non_suivis_requis)
     if not completude["complet"]:
         raise ArchiveRefuseeError("release INCOMPLETE: %s" % _fmt_compl(completude))
-    # 7 : manifeste.
     cible.parent.mkdir(parents=True, exist_ok=True)
     cible_temporaire = cible.with_name(".%s.%d.tmp" % (cible.name, os.getpid()))
     cible_temporaire.unlink(missing_ok=True)
@@ -930,14 +831,12 @@ def creer_archive_portable(root: str | Path, cible: str | Path, *, version: str 
                 "sqlite_count": len(staging_info["sqlite"]),
                 "chemins_neutralises": staging_info["chemins_neutralises"],
             }
-    # 6+8 : ecriture (neutralisation + refus si chemin absolu residuel).
             ecrit = ecrire_archive(staging, cible_temporaire, staging_inclus, manifeste)
             verif = reverifier_archive(cible_temporaire)
             if not verif.get("ok"):
                 raise ArchiveRefuseeError(
                     "re-verification KO: %s" % json.dumps(verif, ensure_ascii=False)
                 )
-    # 9b : item 8 — EXTRACTION physique de controle + re-verification SUR DISQUE (deploiement prouve).
             verif_extraction = extraire_et_reverifier(cible_temporaire)
             if not verif_extraction.get("ok"):
                 raise ArchiveRefuseeError(
@@ -1001,7 +900,7 @@ def main(argv: list[str] | None = None) -> int:
     except ArchiveRefuseeError as exc:
         print("ARCHIVE_REFUSEE: %s" % exc, file=sys.stderr)
         return 5
-    except Exception as exc:                            # noqa: BLE001 — tout autre echec = code 1
+    except Exception as exc:
         print("ARCHIVE_ERREUR: %s" % exc, file=sys.stderr)
         return 1
     print("ARCHIVE_PORTABLE_OK %s" % res["archive"])
@@ -1021,5 +920,5 @@ __all__ = ["SCHEMA_MANIFESTE", "NOM_MANIFESTE", "ArchiveRefuseeError", "preuve_a
            "creer_archive_portable", "main"]
 
 
-if __name__ == "__main__":                              # pragma: no cover
+if __name__ == "__main__":
     raise SystemExit(main())
