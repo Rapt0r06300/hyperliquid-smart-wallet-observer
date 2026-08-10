@@ -1,18 +1,8 @@
-"""AUDIT DEUX JAMBES du carry cross-venue EXPERIMENTAL_PAPER (correction Flo 23/07).
+"""AUDIT DEUX JAMBES du cross-venue EXPERIMENTAL_PAPER.
 
-Un carry delta-neutre = DEUX jambes perp exécutables (HL + Binance), pas un « mid » unique. Ce module
-construit les deux jambes aux VRAIS bid/ask du carnet (profondeur, demi-spread et frais SÉPARÉS par
-venue), et décompose le PnL en postes distincts :
-  * frais d'entrée RÉELLEMENT payés (demi-spread croisé + taker, les DEUX jambes) — réalisé ;
-  * coût de sortie SEULEMENT estimé (au carnet courant) — pas encore payé ;
-  * funding SETTLED heure par heure (heures pleines franchies) vs funding COURU estimé (heure en cours) ;
-  * PnL de BASIS (dérive hl_px−bin_px, delta-neutre) ;
-  * PnL total LIQUIDABLE maintenant (ce qu'on encaisserait en fermant tout de suite).
-
-Frais takers RÉALISTES (le v1 les sous-estimait) : on croise le spread (fill au bid/ask) ET on paie le
-taker. Profondeur fine -> slippage, voire LIQUIDITE_INSUFFISANTE. Lecture seule, aucun ordre réel.
+Construit les deux jambes aux bid/ask exécutables, avec profondeur, spread,
+frais et slippage séparés par venue. Lecture seule, aucun ordre réel.
 """
-
 from __future__ import annotations
 
 import json
@@ -26,33 +16,31 @@ from hl_observer.arbitrage.cross_venue_contract import (
 )
 
 CARNET_RELPATH = Path("runtime") / "data" / "carnet_venues.jsonl"
-FRAIS_TAKER_HL_BPS = 3.5  # HL perp taker (tier 0, conservateur)
-FRAIS_TAKER_BIN_BPS = 4.5  # Binance USDⓈ-M perp taker (conservateur)
-CARNET_AGE_MAX_S = 120.0  # carnet plus vieux = quote périmée
-NOTIONAL_MIN_UTILE_USD = 20.0  # en dessous, capital immobilisé pour des centimes -> on n'ouvre pas
-LATENCE_MS = 700.0  # latence d'exécution (Binance mène HL ~700 ms) ; coût conservateur
-LATENCE_COUT_BPS = 1.0  # pénalité conservatrice pour la dérive pendant la latence
+# Fallback fail-conservative uniquement si config/frais_venues.json est absent/illisible.
+# Hyperliquid perp base tier-0 taker = 4.5 bps (0.045%).
+FRAIS_TAKER_HL_BPS = 4.5
+FRAIS_TAKER_BIN_BPS = 4.5
+CARNET_AGE_MAX_S = 120.0
+NOTIONAL_MIN_UTILE_USD = 20.0
+LATENCE_MS = 700.0
+LATENCE_COUT_BPS = 1.0
 
 
 def dimensionner_notional(depth_usd: float, cible_usd: float) -> float:
-    """VWAP/profondeur : on ne déploie QUE ce qui tient dans la profondeur top-of-book (VWAP = bid/ask,
-    slippage ~0). En dessous du minimum UTILE -> 0 (refuse le capital-pour-des-centimes)."""
     n = min(float(cible_usd), float(depth_usd or 0.0))
     return n if n >= NOTIONAL_MIN_UTILE_USD else 0.0
 
 
 def frais_venues(root: str | Path = ".") -> tuple[float, float, str]:
-    """Frais takers HL/Binance SOURCÉS (config/frais_venues.json), JAMAIS codés en dur (décision Flo).
-    Renvoie (hl_bps, bin_bps, source). Config absente/illisible -> défaut DOCUMENTÉ."""
+    """Retourne les frais configurés; fallback conservateur si config invalide."""
     try:
         d = json.loads((Path(root) / "config" / "frais_venues.json").read_text(encoding="utf-8"))
         return float(d["hl_taker_bps"]), float(d["bin_taker_bps"]), str(d.get("source") or "config")
     except (OSError, ValueError, KeyError, TypeError):
-        return FRAIS_TAKER_HL_BPS, FRAIS_TAKER_BIN_BPS, "DEFAUT (config absente)"
+        return FRAIS_TAKER_HL_BPS, FRAIS_TAKER_BIN_BPS, "DEFAUT CONSERVATEUR (config absente/illisible)"
 
 
 def carnet_par_coin(root: str | Path = ".", *, max_lignes: int = 60000) -> dict[str, dict]:
-    """{coin: dernière ligne de carnet} (bid/ask des deux venues, demi-spreads, profondeur, ts)."""
     p = Path(root) / CARNET_RELPATH
     if not p.exists():
         return {}
@@ -69,14 +57,12 @@ def carnet_par_coin(root: str | Path = ".", *, max_lignes: int = 60000) -> dict[
 
 
 def _slippage_bps(notional: float, profondeur_usd: float, demi_spread_bps: float) -> float:
-    """Slippage estimé : nul si le notional tient dans la profondeur top-of-book, sinon on « marche »
-    le carnet -> pénalité ∝ au dépassement (proxy conservateur, faute de profondeur multi-niveaux)."""
     prof = float(profondeur_usd or 0.0)
     if prof <= 0:
-        return demi_spread_bps * 4.0  # profondeur inconnue -> pénalité forte
+        return demi_spread_bps * 4.0
     if notional <= prof:
         return 0.0
-    return (notional / prof - 1.0) * demi_spread_bps * 2.0  # dépassement -> slippage croissant
+    return (notional / prof - 1.0) * demi_spread_bps * 2.0
 
 
 def construire_jambes(
@@ -88,10 +74,6 @@ def construire_jambes(
     frais_hl: float | None = None,
     frais_bin: float | None = None,
 ) -> dict[str, Any]:
-    """Les deux jambes exécutables selon des actions de venue explicites.
-
-    Chaque jambe : venue, sens, qté, prix EXÉCUTABLE (bid si on vend, ask si on achète), profondeur,
-    demi-spread, frais (SOURCÉS, pas codés en dur), slippage — tout SÉPARÉ."""
     if not isinstance(direction, CrossVenueDirection):
         raise TypeError("direction must be a CrossVenueDirection, not an ambiguous integer")
     fhl = FRAIS_TAKER_HL_BPS if frais_hl is None else float(frais_hl)
@@ -159,27 +141,24 @@ def decomposer(
     base_courant_bps: float | None,
     now_ms: float,
 ) -> dict[str, Any]:
-    """Décompose le PnL de la position en postes SÉPARÉS (settled vs accrued, basis, coûts réels)."""
     notional = float(pos.get("notional_usd") or 0.0)
     sens = int(pos.get("sens") or 1)
-    d = float(pos.get("d_bps_h") or 0.0)  # funding net/h signé (à l'entrée)
-    ts_ouv = pos.get("ts_ouverture_ms")  # 🔴 pas de `or now` : ts=0 est falsy -> age=0
+    d = float(pos.get("d_bps_h") or 0.0)
+    ts_ouv = pos.get("ts_ouverture_ms")
     ts_ouv = float(ts_ouv) if ts_ouv is not None else now_ms
     age_h = max(0.0, (now_ms - ts_ouv) / 3.6e6)
-    heures_pleines = int(age_h)  # heures FRANCHIES -> funding réglé
-    # frais d'entrée RÉELS (recalculés au carnet, corrige le v1) ; sortie ESTIMÉE au carnet courant
+    heures_pleines = int(age_h)
     direction = direction_from_hyperliquid_sens(sens)
     aud = construire_jambes(pos["coin"], direction, notional, carnet_courant) if carnet_courant else None
     frais_entree_bps = aud["frais_entree_reels_bps"] if aud else float(pos.get("cout_entree_bps") or 0.0) * 2
     cout_sortie_bps = aud["cout_sortie_estime_bps"] if aud else float(pos.get("cout_entree_bps") or 0.0) * 2
     frais_entree_usd = frais_entree_bps / 1e4 * notional
     cout_sortie_usd = cout_sortie_bps / 1e4 * notional
-    funding_settled_usd = abs(d) * heures_pleines / 1e4 * notional  # heures pleines = réglé
-    funding_accru_usd = abs(d) * (age_h - heures_pleines) / 1e4 * notional  # heure en cours = estimé
+    funding_settled_usd = abs(d) * heures_pleines / 1e4 * notional
+    funding_accru_usd = abs(d) * (age_h - heures_pleines) / 1e4 * notional
     base_ent = float(pos.get("base_entree_bps") or 0.0)
     base_cur = float(base_courant_bps if base_courant_bps is not None else base_ent)
     pnl_basis_usd = sens * (base_cur - base_ent) / 1e4 * notional
-    # LIQUIDABLE MAINTENANT : funding réglé + basis − frais entrée payés − coût sortie estimé
     pnl_liquidable = funding_settled_usd + pnl_basis_usd - frais_entree_usd - cout_sortie_usd
     return {
         "frais_entree_payes_usd": round(frais_entree_usd, 6),
