@@ -1,5 +1,9 @@
-"""Dashboard v2 — le compteur POSITIONS du haut unifie copy + carry (une seule vérité).
-Anti-régression : si le câblage syncTop / le total copy+carry disparaît, ce test casse."""
+"""Dashboard v2 — le compteur POSITIONS suit la vérité canonique active.
+
+Carry reste historiquement surfacé dans le dashboard pour compatibilité/diagnostic, mais il est hors
+périmètre du runtime officiel et forcé OFF par le lanceur. Le compteur principal ne doit donc plus
+additionner artificiellement copy + carry lorsqu'une ancienne vue carry existe encore.
+"""
 from __future__ import annotations
 
 import hl_observer.ui.dashboard_v2 as d
@@ -10,14 +14,16 @@ def _html() -> str:
         v = getattr(d, attr, None)
         if isinstance(v, str) and "HYPERSMART" in v:
             return v
-    # repli : concatener toutes les constantes str du module
     return "\n".join(v for v in vars(d).values() if isinstance(v, str))
 
 
-def test_le_compteur_positions_additionne_copy_et_carry():
+def test_le_compteur_positions_reste_ancre_sur_la_verite_canonique_active():
     html = _html()
     assert "syncTop" in html, "la fonction d'unification syncTop doit exister"
-    assert "_copyPos" in html and "_carryPos" in html, "les deux comptes doivent être stockés"
-    assert "cp+cy" in html or "cp + cy" in html, "le total doit être copy + carry"
-    assert 'id="pos-bd"' in html, "le détail (Nc · My) doit être affiché"
-    assert 'id="carry-sub"' in html, "le PnL carry doit être surfacé en haut"
+    assert "_copyPos" in html, "le compte canonique des positions paper doit être stocké"
+    assert "cp+cy" not in html and "cp + cy" not in html, (
+        "Carry est hors scope du runtime officiel : il ne doit pas gonfler le compteur principal"
+    )
+    # Les éléments legacy carry peuvent rester visibles comme diagnostic sans devenir source de vérité.
+    assert "_carryPos" in html and 'id="carry-sub"' in html
+    assert 'id="pos-bd"' in html, "le détail du compteur doit rester affiché"
