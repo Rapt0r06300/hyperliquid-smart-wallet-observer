@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import subprocess
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -132,6 +133,25 @@ def patch_regressions() -> None:
     fix_finalizer_regressions.main()
 
 
+def stage_nonstandard_tool_patch() -> None:
+    """The legacy CI commit step stages src/tests plus the launcher explicitly.
+
+    ``collecter_bbo.py`` also carries a verified strategy-coverage correction, so
+    stage that one extra tool here.  The runner is ephemeral: if any following
+    test fails there is no commit/push and the staged state disappears.
+    """
+    subprocess.run(
+        ["git", "add", "--", "tools/collecter_bbo.py"],
+        cwd=ROOT,
+        check=True,
+    )
+    subprocess.run(
+        ["git", "diff", "--cached", "--check"],
+        cwd=ROOT,
+        check=True,
+    )
+
+
 def main() -> None:
     split_supervisor_registry()
     split_portable_inventory()
@@ -139,6 +159,7 @@ def main() -> None:
     patch_strategy_gaps()
     patch_regressions()
     verify_limits()
+    stage_nonstandard_tool_patch()
     print("FINAL_ARCHITECTURE_SPLIT_OK")
 
 
