@@ -17,6 +17,10 @@ def _replace_py_function(text: str, name: str, replacement: str) -> str:
     return text[: match.start()] + replacement.rstrip() + "\n\n" + text[end:]
 
 
+def _has_py_function(text: str, name: str) -> bool:
+    return re.search(rf"(?m)^def {re.escape(name)}\(", text) is not None
+
+
 def fix_portable_imports() -> None:
     path = ROOT / "src" / "hl_observer" / "ops" / "portable_clone.py"
     text = path.read_text(encoding="utf-8")
@@ -32,10 +36,13 @@ def migrate_writer_owned_tests() -> None:
     path = ROOT / "tests" / "test_ui_simulation_status_fast.py"
     text = path.read_text(encoding="utf-8")
 
-    text = _replace_py_function(
-        text,
-        "test_status_persists_accepted_fusion_paper_order_into_simulation_state",
-        r'''def test_economic_writer_persists_fusion_once_and_status_get_never_reapplies(tmp_path, monkeypatch):
+    old_name = "test_status_persists_accepted_fusion_paper_order_into_simulation_state"
+    new_name = "test_economic_writer_persists_fusion_once_and_status_get_never_reapplies"
+    if _has_py_function(text, old_name):
+        text = _replace_py_function(
+            text,
+            old_name,
+            r'''def test_economic_writer_persists_fusion_once_and_status_get_never_reapplies(tmp_path, monkeypatch):
     monkeypatch.setenv("HL_DATABASE_URL", f"sqlite:///{(tmp_path / 'session.sqlite3').as_posix()}")
     monkeypatch.setenv("HL_LOGS_DIR", str(tmp_path / "logs"))
     settings = _settings()
@@ -97,12 +104,17 @@ def migrate_writer_owned_tests() -> None:
     duplicate = writer.tick(current_ms=event_ms + 1)
     assert duplicate["fusion"]["applied_count"] == 0
     assert len(state.simulation_virtual_positions) == 1''',
-    )
+        )
+    elif not _has_py_function(text, new_name):
+        raise RuntimeError("writer-owned fusion-open test marker missing")
 
-    text = _replace_py_function(
-        text,
-        "test_status_can_close_existing_paper_position_when_fusion_consensus_flips",
-        r'''def test_economic_writer_closes_existing_paper_position_when_fusion_consensus_flips(tmp_path, monkeypatch):
+    old_name = "test_status_can_close_existing_paper_position_when_fusion_consensus_flips"
+    new_name = "test_economic_writer_closes_existing_paper_position_when_fusion_consensus_flips"
+    if _has_py_function(text, old_name):
+        text = _replace_py_function(
+            text,
+            old_name,
+            r'''def test_economic_writer_closes_existing_paper_position_when_fusion_consensus_flips(tmp_path, monkeypatch):
     monkeypatch.setenv("HL_DATABASE_URL", f"sqlite:///{(tmp_path / 'session.sqlite3').as_posix()}")
     monkeypatch.setenv("HL_LOGS_DIR", str(tmp_path / "logs"))
     monkeypatch.setenv("HYPERSMART_EXTERNAL_GITHUB_DIRECT_MATERIALIZATION", "1")
@@ -175,12 +187,17 @@ def migrate_writer_owned_tests() -> None:
         payload = client.get("/api/simulation/status").json()
     assert payload["status_projection_pure"] is True
     assert json.dumps(state.simulation_ledger_events, sort_keys=True, default=str) == before''',
-    )
+        )
+    elif not _has_py_function(text, new_name):
+        raise RuntimeError("writer-owned fusion-close test marker missing")
 
-    text = _replace_py_function(
-        text,
-        "test_status_exports_live_pnl_ledger_to_logs_to_send",
-        r'''def test_status_get_never_exports_diagnostics_or_writes_logs(tmp_path, monkeypatch):
+    old_name = "test_status_exports_live_pnl_ledger_to_logs_to_send"
+    new_name = "test_status_get_never_exports_diagnostics_or_writes_logs"
+    if _has_py_function(text, old_name):
+        text = _replace_py_function(
+            text,
+            old_name,
+            r'''def test_status_get_never_exports_diagnostics_or_writes_logs(tmp_path, monkeypatch):
     monkeypatch.setenv("HL_LOGS_DIR", str(tmp_path / "logs"))
     monkeypatch.setenv("HYPERSMART_DISABLE_ECONOMIC_WRITER", "1")
     settings = _settings()
@@ -207,7 +224,9 @@ def migrate_writer_owned_tests() -> None:
     assert "diagnostic_logs" not in payload
     assert after == before
     assert payload["closed_trades"] == 1''',
-    )
+        )
+    elif not _has_py_function(text, new_name):
+        raise RuntimeError("read-only diagnostic test marker missing")
 
     path.write_text(text, encoding="utf-8", newline="\n")
 
