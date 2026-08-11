@@ -59,6 +59,7 @@ _EXCEPTIONS = {"PEPE": "1000PEPEUSDT", "SHIB": "1000SHIBUSDT", "BONK": "1000BONK
 #: hors des 8 majors). La tape bbo_tape.jsonl EST le ring-buffer (continu, avant + après l'événement).
 MAJORS_BBO = ("BTC", "ETH", "SOL", "INJ", "DASH", "NEO", "AVAX", "LINK")
 LIQ_CONFIRMEES_REL = Path("runtime") / "data" / "liquidations_confirmees.jsonl"
+LEAD_LAG_CONFIG_REL = Path("runtime") / "data" / "lead_lag_config_gele.json"
 
 
 def extraire_symboles_hyperliquid(meta: Any) -> list[str]:
@@ -122,6 +123,32 @@ def resoudre_symboles_hyperliquid(
     return selected, rejected
 
 
+def coins_lead_lag_promus(root: Path | str = ".") -> list[str]:
+    """Return coins from the validated frozen Lead-Lag evidence, or none.
+
+    Invalid/unfrozen evidence never expands live subscriptions. This is coverage
+    only: it cannot create a paper decision and has no execution surface.
+    """
+    path = Path(root) / LEAD_LAG_CONFIG_REL
+    if not path.is_file():
+        return []
+    try:
+        from hl_observer.backtesting.lead_lag_evidence import load_frozen_evidence
+        config = load_frozen_evidence(path)
+    except Exception as exc:  # evidence invalid => fail closed, but observable
+        import logging
+        logging.getLogger(__name__).warning(
+            "lead-lag frozen coverage ignored: %s", exc.__class__.__name__
+        )
+        return []
+    selected: list[str] = []
+    for raw in config.get("coins") or []:
+        coin = str(raw or "").strip().upper()
+        if coin and coin not in selected:
+            selected.append(coin)
+    return selected
+
+
 def coins_couverture(root: Path | str = ".", *, k: int = 16) -> list[str]:
     """Majors + les K coins les PLUS FRÉQUENTS des liquidations confirmées (journal). Relu à CHAQUE
     démarrage -> tout NOUVEAU coin de liquidation entre dans la couverture. Borné (majors + K). Pur."""
@@ -134,7 +161,13 @@ def coins_couverture(root: Path | str = ".", *, k: int = 16) -> list[str]:
             if cu and cu not in coins:
                 coins.append(cu)
     except (OSError, ValueError):
-        pass
+        import logging
+        logging.getLogger(__name__).debug("liquidation coverage journal unavailable", exc_info=True)
+    # A frozen/promoted Lead-Lag coin must never be absent merely because it is
+    # neither a hard-coded major nor a frequent liquidation coin.
+    for coin in coins_lead_lag_promus(root):
+        if coin not in coins:
+            coins.append(coin)
     return coins
 
 

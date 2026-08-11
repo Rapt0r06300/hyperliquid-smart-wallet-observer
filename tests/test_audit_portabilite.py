@@ -33,26 +33,45 @@ def test_detecte_registre(tmp_path):
     assert "registre_windows" in _cats(A.auditer(tmp_path))
 
 
-def test_machineguid_readonly_est_tolere_uniquement_dans_fonction_identite_connue(tmp_path):
+def _write_machineguid_reader(tmp_path: Path, filename: str, *, write_registry: bool = False) -> None:
     p = tmp_path / "src" / "hl_observer" / "ops"
-    p.mkdir(parents=True)
-    (p / "portable_clone.py").write_text(
+    p.mkdir(parents=True, exist_ok=True)
+    body = (
         "def machine_fingerprint():\n"
         "    import winreg\n"
-        "    with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, r'SOFTWARE\\\\Microsoft\\\\Cryptography') as k:\n"
-        "        return winreg.QueryValueEx(k, 'MachineGuid')[0]\n",
-        encoding="utf-8",
     )
+    if write_registry:
+        body += "    winreg.SetValueEx(key, 'x', 0, 1, 'y')\n"
+    else:
+        body += (
+            "    with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, r'SOFTWARE\\\\Microsoft\\\\Cryptography') as k:\n"
+            "        return winreg.QueryValueEx(k, 'MachineGuid')[0]\n"
+        )
+    (p / filename).write_text(body, encoding="utf-8")
+
+
+def test_machineguid_readonly_est_tolere_uniquement_dans_fonction_identite_connue(tmp_path):
+    _write_machineguid_reader(tmp_path, "portable_clone.py")
+    assert A.auditer(tmp_path) == []
+
+
+def test_machineguid_readonly_reste_tolere_apres_split_inventory(tmp_path):
+    _write_machineguid_reader(tmp_path, "portable_clone_inventory.py")
     assert A.auditer(tmp_path) == []
 
 
 def test_machineguid_exception_ne_tolere_jamais_ecriture_registre(tmp_path):
+    _write_machineguid_reader(tmp_path, "portable_clone_inventory.py", write_registry=True)
+    assert "registre_windows" in _cats(A.auditer(tmp_path))
+
+
+def test_machineguid_hors_fonction_connue_reste_interdit(tmp_path):
     p = tmp_path / "src" / "hl_observer" / "ops"
     p.mkdir(parents=True)
-    (p / "portable_clone.py").write_text(
-        "def machine_fingerprint():\n"
+    (p / "portable_clone_inventory.py").write_text(
+        "def autre_fonction():\n"
         "    import winreg\n"
-        "    winreg.SetValueEx(key, 'x', 0, 1, 'y')\n",
+        "    return winreg.QueryValueEx(key, 'MachineGuid')[0]\n",
         encoding="utf-8",
     )
     assert "registre_windows" in _cats(A.auditer(tmp_path))

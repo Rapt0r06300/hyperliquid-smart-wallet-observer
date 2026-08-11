@@ -523,11 +523,35 @@ function Write-LauncherEngineStatus {
     }
 }
 
+function Test-HyperSmartProcessBelongsToRoot {
+    param($Process)
+    if ($null -eq $Process) { return $false }
+    try {
+        $rootFull = [IO.Path]::GetFullPath($Root).TrimEnd([char]92, [char]47)
+        $command = [string]$Process.CommandLine
+        $executable = [string]$Process.ExecutablePath
+        if ($command -and $command.IndexOf($rootFull, [StringComparison]::OrdinalIgnoreCase) -ge 0) {
+            return $true
+        }
+        if ($executable -and $executable.StartsWith($rootFull, [StringComparison]::OrdinalIgnoreCase)) {
+            return $true
+        }
+        return $false
+    } catch {
+        Write-LauncherLog "process ownership proof failed pid=$($Process.ProcessId): $($_.Exception.Message)"
+        return $false
+    }
+}
+
 function Get-HyperSmartRuntimeProcesses {
     try {
         $ownPid = $PID
         return Get-CimInstance Win32_Process | Where-Object {
-            $_.ProcessId -ne $ownPid -and (
+            $belongs = Test-HyperSmartProcessBelongsToRoot -Process $_
+            # MONITEUR_SANTE_PRESERVE: il est lance juste avant ce wrapper par LANCER_HYPERSMART.cmd.
+            # Le tuer ici rendrait le health monitoring mort des le startup.
+            $isHealthMonitor = ([string]$_.CommandLine) -match 'hl_observer\.ops\.moniteur_sante'
+            $_.ProcessId -ne $ownPid -and $belongs -and -not $isHealthMonitor -and (
                 ($_.CommandLine -like "*python* -m hl_observer ui*") -or
                 ($_.CommandLine -like "*hl_observer.runtime.persistent_poll_runner*") -or
                 ($_.CommandLine -like "*hypersmart_simulation_poll_loop.ps1*") -or
@@ -551,7 +575,6 @@ function Get-HyperSmartRuntimeProcesses {
         return @()
     }
 }
-
 function Get-HyperSmartLauncherProcesses {
     # Wrappers exacts de CE projet seulement. Ils peuvent survivre a un arret externe
     # en restant bloques dans Read-Host alors que l'UI et le poller sont deja morts.
@@ -606,7 +629,7 @@ function Test-HyperSmartUiProcess {
         if (-not $candidate) { return $false }
         $command = [string]$candidate.CommandLine
         $executable = [string]$candidate.ExecutablePath
-        $rootFull = [IO.Path]::GetFullPath($ProjectRoot).TrimEnd('\')
+        $rootFull = [IO.Path]::GetFullPath($Root).TrimEnd('\')
         $hasUiSignature = $command -match '(?i)(?:-m\s+hl_observer\s+ui|hl_observer\s+ui)'
         $belongsToRoot = ($command.IndexOf($rootFull, [StringComparison]::OrdinalIgnoreCase) -ge 0) -or
             ($executable -and $executable.StartsWith($rootFull, [StringComparison]::OrdinalIgnoreCase))
@@ -643,8 +666,14 @@ function Stop-HyperSmartRuntime {
         $collectorLoops = @(Get-CimInstance Win32_Process -ErrorAction SilentlyContinue |
             Where-Object { $_.CommandLine -match 'boucle_collecteur' })
         foreach ($loopProc in $collectorLoops) {
+            if (-not (Test-HyperSmartProcessBelongsToRoot -Process $loopProc)) {
+                Write-LauncherLog "Refusing to stop foreign collector loop pid=$($loopProc.ProcessId)"
+                continue
+            }
             Write-LauncherLog "Stopping collector loop tree pid=$($loopProc.ProcessId)"
-            try { Stop-HyperSmartProcessTree -ProcId $loopProc.ProcessId } catch {}
+            try { Stop-HyperSmartProcessTree -ProcId $loopProc.ProcessId } catch {
+                Write-LauncherLog "collector loop stop failed pid=$($loopProc.ProcessId): $($_.Exception.Message)"
+            }
         }
     } catch { Write-LauncherLog "collector loops stop skipped: $($_.Exception.Message)" }
     # Tuer aussi ce qui SQUATTE le port UI 8794 -> sinon la relance recharge l'ancien

@@ -184,7 +184,7 @@ def test_simulation_routes_do_not_block_event_loop_with_sync_sqlite_work():
     assert "async def simulation_overview" not in routes
 
 
-def test_status_uses_latest_persisted_equity_point_without_heavy_overview():
+def test_status_does_not_resurrect_historical_equity_without_current_mark():
     state = UiState()
     state.simulation_starting_equity_usdt = 1000.0
     state.simulation_realized_pnl_usdc = 3.0
@@ -195,10 +195,11 @@ def test_status_uses_latest_persisted_equity_point_without_heavy_overview():
 
     payload = client.get("/api/simulation/status").json()
 
-    assert payload["equity_usdt"] == 1004.25
-    assert payload["net_pnl_usdt"] == 4.25
+    assert payload["equity_usdt"] == 1003.0
+    assert payload["net_pnl_usdt"] == 3.0
     assert payload["realized_pnl_usdt"] == 3.0
-
+    assert payload["status_projection_pure"] is True
+    assert payload["network_reads_from_status"] is False
 
 def test_status_exposes_normal_pnl_ledger_spike_links_without_heavy_overview():
     state = UiState()
@@ -533,7 +534,7 @@ def test_fusion_status_route_runs_only_from_explicit_engine_input(tmp_path, monk
     assert logged["real_execution"] is False
 
 
-def test_status_persists_accepted_fusion_paper_order_into_simulation_state(tmp_path, monkeypatch):
+def test_economic_writer_persists_fusion_once_and_status_get_never_reapplies(tmp_path, monkeypatch):
     monkeypatch.setenv("HL_DATABASE_URL", f"sqlite:///{(tmp_path / 'session.sqlite3').as_posix()}")
     monkeypatch.setenv("HL_LOGS_DIR", str(tmp_path / "logs"))
     settings = _settings()
@@ -551,54 +552,50 @@ def test_status_persists_accepted_fusion_paper_order_into_simulation_state(tmp_p
 
     heartbeat_path = simulation_state_path(settings).parent / "hypersmart_engine_status.json"
     heartbeat_path.parent.mkdir(parents=True, exist_ok=True)
-    heartbeat_path.write_text(
-        json.dumps(
-            {
-                "updated_at_ms": event_ms,
-                "phase": "live_fusion_runtime",
-                "read_only": True,
-                "simulation_only": True,
-                "external_action": False,
-                "fusion_runtime_input": {
-                    "session_id": "ui-live-fusion-persist-test",
-                    "leader_votes": [
-                        {"wallet": "0x" + "1" * 40, "coin": "HYPE", "side": "LONG", "score": 2.0, "observed_at_ms": event_ms},
-                        {"wallet": "0x" + "2" * 40, "coin": "HYPE", "side": "LONG", "score": 1.7, "observed_at_ms": event_ms},
-                    ],
-                    "price_events": [
-                        {"source": "hyperliquid_allMids", "coin": "HYPE", "bid": 70.0, "ask": 70.1, "event_time_ms": event_ms}
-                    ],
-                    "funding_rows": [],
-                    "triangular_edges": [],
-                    "peak_equity": 1000.0,
-                    "current_equity": 1000.0,
-                    "copy_ratio": 0.05,
-                },
-            }
-        ),
-        encoding="utf-8",
-    )
+    heartbeat_path.write_text(json.dumps({
+        "updated_at_ms": event_ms,
+        "phase": "live_fusion_runtime",
+        "read_only": True,
+        "simulation_only": True,
+        "external_action": False,
+        "fusion_runtime_input": {
+            "session_id": "ui-live-fusion-persist-test",
+            "leader_votes": [
+                {"wallet": "0x" + "1" * 40, "coin": "HYPE", "side": "LONG", "score": 2.0, "observed_at_ms": event_ms},
+                {"wallet": "0x" + "2" * 40, "coin": "HYPE", "side": "LONG", "score": 1.7, "observed_at_ms": event_ms},
+            ],
+            "price_events": [
+                {"source": "hyperliquid_allMids", "coin": "HYPE", "bid": 70.0, "ask": 70.1, "event_time_ms": event_ms}
+            ],
+            "funding_rows": [],
+            "triangular_edges": [],
+            "peak_equity": 1000.0,
+            "current_equity": 1000.0,
+            "copy_ratio": 0.05,
+        },
+    }), encoding="utf-8")
     state = UiState()
-    client = TestClient(create_ui_app(settings, state=state), raise_server_exceptions=False)
+    app = create_ui_app(settings, state=state)
+    writer = app.state.economic_writer
 
-    payload = client.get("/api/simulation/status").json()
-    duplicate_payload = client.get("/api/simulation/status").json()
-
-    assert payload["fusion_runtime"]["status"] == "OK_LIVE_FUSION_RUNTIME"
-    assert payload["fusion_persistent_adapter"]["applied_count"] == 1, json.dumps(
-        payload["fusion_persistent_adapter"], indent=2, sort_keys=True
-    )
-    assert payload["open_positions"] == 1
-    assert payload["positions"][0]["coin"] == "HYPE"
-    assert payload["positions"][0]["direction"] == "LONG"
-    assert payload["positions"][0]["position_mode"] == "EXTERNAL_GITHUB_FUSION_PAPER"
-    assert payload["mark_to_market"]["marks_used"] == 1
+    assert writer.last_fusion_report["applied_count"] == 1
     assert state.simulation_reproduced_entries_total == 1
     assert len(state.simulation_virtual_positions) == 1
-    assert duplicate_payload["fusion_persistent_adapter"]["applied_count"] == 0
-    assert duplicate_payload["fusion_persistent_adapter"]["skipped_count"] >= 1
-    assert len(state.simulation_virtual_positions) == 1
+    before_ledger = json.dumps(state.simulation_ledger_events, sort_keys=True, default=str)
+    before_positions = json.dumps(state.simulation_virtual_positions, sort_keys=True, default=str)
 
+    with TestClient(app, raise_server_exceptions=False) as client:
+        first = client.get("/api/simulation/status").json()
+        second = client.get("/api/simulation/status").json()
+
+    assert first["status_projection_pure"] is True
+    assert second["status_projection_pure"] is True
+    assert json.dumps(state.simulation_ledger_events, sort_keys=True, default=str) == before_ledger
+    assert json.dumps(state.simulation_virtual_positions, sort_keys=True, default=str) == before_positions
+
+    duplicate = writer.tick(current_ms=event_ms + 1)
+    assert duplicate["fusion"]["applied_count"] == 0
+    assert len(state.simulation_virtual_positions) == 1
 
 def test_status_rejects_external_arbitrage_without_measured_execution_costs(tmp_path, monkeypatch):
     monkeypatch.setenv("HL_DATABASE_URL", f"sqlite:///{(tmp_path / 'session.sqlite3').as_posix()}")
@@ -674,13 +671,11 @@ def test_status_rejects_external_arbitrage_without_measured_execution_costs(tmp_
     assert len(state.simulation_virtual_positions) == 0
 
 
-def test_status_can_close_existing_paper_position_when_fusion_consensus_flips(tmp_path, monkeypatch):
+def test_economic_writer_closes_existing_paper_position_when_fusion_consensus_flips(tmp_path, monkeypatch):
     monkeypatch.setenv("HL_DATABASE_URL", f"sqlite:///{(tmp_path / 'session.sqlite3').as_posix()}")
     monkeypatch.setenv("HL_LOGS_DIR", str(tmp_path / "logs"))
     monkeypatch.setenv("HYPERSMART_EXTERNAL_GITHUB_DIRECT_MATERIALIZATION", "1")
     monkeypatch.setenv("HYPERSMART_AB_RESEARCH_ACK", "1")
-    # 06/08 — durcissement posterieur : la materialisation directe n'est permise que dans la
-    # lane du ledger EXPERIMENTAL (3e condition, en serie avec le flag + l'ACK).
     monkeypatch.setenv("HYPERSMART_LEDGER_SCOPE", "EXPERIMENTAL")
     settings = _settings()
     from hl_observer.storage.database import create_session_factory, create_sqlite_engine, init_db
@@ -698,70 +693,57 @@ def test_status_can_close_existing_paper_position_when_fusion_consensus_flips(tm
 
     heartbeat_path = simulation_state_path(settings).parent / "hypersmart_engine_status.json"
     heartbeat_path.parent.mkdir(parents=True, exist_ok=True)
-    heartbeat_path.write_text(
-        json.dumps(
-            {
-                "updated_at_ms": event_ms,
-                "phase": "live_fusion_runtime",
-                "read_only": True,
-                "simulation_only": True,
-                "external_action": False,
-                "fusion_runtime_input": {
-                    "session_id": "ui-live-fusion-open-test",
-                    "leader_votes": [
-                        {"wallet": "0x" + "1" * 40, "coin": "HYPE", "side": "LONG", "score": 2.0, "observed_at_ms": event_ms},
-                        {"wallet": "0x" + "2" * 40, "coin": "HYPE", "side": "LONG", "score": 1.7, "observed_at_ms": event_ms},
-                    ],
-                    "price_events": [
-                        {"source": "hyperliquid_allMids", "coin": "HYPE", "bid": 72.0, "ask": 72.1, "event_time_ms": event_ms}
-                    ],
-                    "funding_rows": [],
-                    "triangular_edges": [],
-                },
-            }
-        ),
-        encoding="utf-8",
-    )
+    heartbeat_path.write_text(json.dumps({
+        "updated_at_ms": event_ms,
+        "phase": "live_fusion_runtime",
+        "read_only": True,
+        "simulation_only": True,
+        "external_action": False,
+        "fusion_runtime_input": {
+            "session_id": "ui-live-fusion-open-test",
+            "leader_votes": [
+                {"wallet": "0x" + "1" * 40, "coin": "HYPE", "side": "LONG", "score": 2.0, "observed_at_ms": event_ms},
+                {"wallet": "0x" + "2" * 40, "coin": "HYPE", "side": "LONG", "score": 1.7, "observed_at_ms": event_ms},
+            ],
+            "price_events": [{"source": "hyperliquid_allMids", "coin": "HYPE", "bid": 72.0, "ask": 72.1, "event_time_ms": event_ms}],
+            "funding_rows": [], "triangular_edges": [],
+        },
+    }), encoding="utf-8")
     state = UiState()
-    client = TestClient(create_ui_app(settings, state=state), raise_server_exceptions=False)
-    open_payload = client.get("/api/simulation/status").json()
-    assert open_payload["open_positions"] == 1
+    app = create_ui_app(settings, state=state)
+    writer = app.state.economic_writer
     assert state.simulation_reproduced_entries_total == 1
+    assert len(state.simulation_virtual_positions) == 1
 
     _seed_recorded_execution_book(monkeypatch, coin="HYPE", mid=73.05, observed_at_ms=event_ms + 1)
-    heartbeat_path.write_text(
-        json.dumps(
-            {
-                "updated_at_ms": event_ms + 1,
-                "phase": "live_fusion_runtime",
-                "read_only": True,
-                "simulation_only": True,
-                "external_action": False,
-                "fusion_runtime_input": {
-                    "session_id": "ui-live-fusion-close-test",
-                    "leader_votes": [
-                        {"wallet": "0x" + "3" * 40, "coin": "HYPE", "side": "SHORT", "score": 2.1, "observed_at_ms": event_ms + 1},
-                        {"wallet": "0x" + "4" * 40, "coin": "HYPE", "side": "SHORT", "score": 1.8, "observed_at_ms": event_ms + 1},
-                    ],
-                    "price_events": [
-                        {"source": "hyperliquid_allMids", "coin": "HYPE", "bid": 73.0, "ask": 73.1, "event_time_ms": event_ms + 1}
-                    ],
-                    "funding_rows": [],
-                    "triangular_edges": [],
-                },
-            }
-        ),
-        encoding="utf-8",
-    )
-    close_payload = client.get("/api/simulation/status").json()
+    heartbeat_path.write_text(json.dumps({
+        "updated_at_ms": event_ms + 1,
+        "phase": "live_fusion_runtime",
+        "read_only": True,
+        "simulation_only": True,
+        "external_action": False,
+        "fusion_runtime_input": {
+            "session_id": "ui-live-fusion-close-test",
+            "leader_votes": [
+                {"wallet": "0x" + "3" * 40, "coin": "HYPE", "side": "SHORT", "score": 2.1, "observed_at_ms": event_ms + 1},
+                {"wallet": "0x" + "4" * 40, "coin": "HYPE", "side": "SHORT", "score": 1.8, "observed_at_ms": event_ms + 1},
+            ],
+            "price_events": [{"source": "hyperliquid_allMids", "coin": "HYPE", "bid": 73.0, "ask": 73.1, "event_time_ms": event_ms + 1}],
+            "funding_rows": [], "triangular_edges": [],
+        },
+    }), encoding="utf-8")
 
-    assert close_payload["fusion_runtime"]["status"] == "OK_LIVE_FUSION_RUNTIME"
-    assert state.simulation_reproduced_exits_total == 1, json.dumps(
-        close_payload["fusion_persistent_adapter"], indent=2, sort_keys=True
-    )
+    report = writer.tick(current_ms=event_ms + 1)
+    assert report["fusion"]["applied_count"] == 1
+    assert state.simulation_reproduced_exits_total == 1
     assert any(row.get("bot_replay_action") == "FUSION_DIRECT_PAPER_CLOSE" for row in state.simulation_ledger_events)
     assert state.simulation_realized_pnl_usdc > 0
 
+    before = json.dumps(state.simulation_ledger_events, sort_keys=True, default=str)
+    with TestClient(app, raise_server_exceptions=False) as client:
+        payload = client.get("/api/simulation/status").json()
+    assert payload["status_projection_pure"] is True
+    assert json.dumps(state.simulation_ledger_events, sort_keys=True, default=str) == before
 
 def test_fusion_status_rejects_incomplete_engine_input_without_fake_orders(tmp_path, monkeypatch):
     monkeypatch.setenv("HL_DATABASE_URL", f"sqlite:///{(tmp_path / 'session.sqlite3').as_posix()}")
@@ -1218,56 +1200,33 @@ def test_status_counts_closed_winning_and_losing_trades_from_ledger(tmp_path, mo
     assert payload["bot_simulation"]["closed_trade_stats"]["closed_trades"] == 2
 
 
-def test_status_exports_live_pnl_ledger_to_logs_to_send(tmp_path, monkeypatch):
+def test_status_get_never_exports_diagnostics_or_writes_logs(tmp_path, monkeypatch):
     monkeypatch.setenv("HL_LOGS_DIR", str(tmp_path / "logs"))
-    monkeypatch.setenv("HYPERSMART_STATUS_EXPORT_MIN_MS", "0")
+    monkeypatch.setenv("HYPERSMART_DISABLE_ECONOMIC_WRITER", "1")
     settings = _settings()
     state = UiState()
     state.simulation_starting_equity_usdt = 1000.0
-    state.simulation_ledger_events = [
-        {
-            "delta_key": "entry-live-export",
-            "coin": "HYPE",
-            "leader_side": "LONG",
-            "paper_action_type": "OPEN",
-            "bot_replay_action": "FUSION_PAPER_ENTRY",
-            "status": "LOCAL_REPLAY",
-            "observed_at_ms": now_ms() - 2_000,
-            "fee_cost_usdc": 0.03,
-            "copied_notional_usdt": 30.0,
-            "entry_price": 70.0,
-            "reason": "TEST_ENTRY_EXPORTED_FROM_STATUS",
-        },
-        {
-            "delta_key": "close-live-export",
-            "coin": "HYPE",
-            "leader_side": "LONG",
-            "paper_action_type": "CLOSE",
-            "bot_replay_action": "PAPER_CLOSE_REPLAYED",
-            "status": "LOCAL_REPLAY",
-            "observed_at_ms": now_ms() - 1_000,
-            "estimated_net_pnl_usdc": 0.42,
-            "gross_pnl_usdc": 0.5,
-            "fee_cost_usdc": 0.08,
-            "entry_price": 70.0,
-            "exit_price": 70.5,
-            "reason": "TEST_CLOSE_EXPORTED_FROM_STATUS",
-        },
-    ]
+    state.simulation_ledger_events = [{
+        "delta_key": "close-live-export",
+        "coin": "HYPE",
+        "leader_side": "LONG",
+        "paper_action_type": "CLOSE",
+        "bot_replay_action": "PAPER_CLOSE_REPLAYED",
+        "status": "LOCAL_REPLAY",
+        "observed_at_ms": now_ms() - 1_000,
+        "estimated_net_pnl_usdc": 0.42,
+    }]
+    app = create_ui_app(settings, state=state)
+    before = list((tmp_path / "logs").rglob("*")) if (tmp_path / "logs").exists() else []
 
-    payload = TestClient(create_ui_app(settings, state=state), raise_server_exceptions=False).get("/api/simulation/status").json()
+    with TestClient(app, raise_server_exceptions=False) as client:
+        payload = client.get("/api/simulation/status").json()
 
-    diagnostic_logs = payload["diagnostic_logs"]
-    pnl_path = Path(diagnostic_logs["pnl_ledger_jsonl"])
-    assert diagnostic_logs["directory_status"] in {"OK", "WRITE_WARNINGS", "FALLBACK_USED"}
-    assert "logs à envoyer" in diagnostic_logs["directory"]
-    assert pnl_path.exists()
-    rows = [json.loads(line) for line in pnl_path.read_text(encoding="utf-8-sig").splitlines() if line.strip()]
-    assert any(row.get("delta_key") == "entry-live-export" for row in rows)
-    assert any(row.get("delta_key") == "close-live-export" for row in rows)
+    after = list((tmp_path / "logs").rglob("*")) if (tmp_path / "logs").exists() else []
+    assert payload["status_projection_pure"] is True
+    assert "diagnostic_logs" not in payload
+    assert after == before
     assert payload["closed_trades"] == 1
-    assert payload["paper_ledger"]["event_counts"]["CLOSE"] == 1
-
 
 def test_closed_trade_stats_ignore_duplicate_full_closes():
     duplicated_close = {
@@ -1366,7 +1325,7 @@ def test_status_flags_fusion_paper_position_without_measurable_evidence():
     assert "liquidity_score" in reason
 
 
-def test_status_can_mark_open_position_from_live_all_mids_when_launcher_enables_it(tmp_path, monkeypatch):
+def test_status_get_never_calls_live_all_mids_even_when_launcher_flag_is_enabled(tmp_path, monkeypatch):
     monkeypatch.setenv("HL_DATABASE_URL", f"sqlite:///{(tmp_path / 'session.sqlite3').as_posix()}")
     monkeypatch.setenv("HYPERSMART_STATUS_LIVE_MARKS_ENABLED", "1")
     settings = _settings()
@@ -1377,7 +1336,6 @@ def test_status_can_mark_open_position_from_live_all_mids_when_launcher_enables_
     leader = "0x" + "c" * 40
     state = UiState()
     state.simulation_starting_equity_usdt = 1000.0
-    state.simulation_realized_pnl_usdc = 0.0
     state.simulation_virtual_positions = {
         f"{leader}|HYPE|SHORT": {
             "wallet_address": leader,
@@ -1391,40 +1349,18 @@ def test_status_can_mark_open_position_from_live_all_mids_when_launcher_enables_
         }
     }
 
-    class _Response:
-        def raise_for_status(self):
-            return None
-
-        def json(self):
-            return {"HYPE": "69.5", "BTC": "65000"}
-
-    class _Client:
+    class _NetworkForbidden:
         def __init__(self, *args, **kwargs):
-            self.kwargs = kwargs
+            raise AssertionError("status GET must never instantiate an HTTP client")
 
-        def __enter__(self):
-            return self
-
-        def __exit__(self, *args):
-            return None
-
-        def post(self, url, json):
-            assert url.endswith("/info")
-            assert json == {"type": "allMids"}
-            return _Response()
-
-    monkeypatch.setattr(status_routes.httpx, "Client", _Client)
-
+    monkeypatch.setattr(status_routes.httpx, "Client", _NetworkForbidden)
     payload = TestClient(create_ui_app(settings, state=state), raise_server_exceptions=False).get("/api/simulation/status").json()
 
+    assert payload["status_projection_pure"] is True
+    assert payload["network_reads_from_status"] is False
     assert payload["open_positions"] == 1
-    assert payload["mark_to_market"]["read_status"] == "OK_LIVE_ALLMIDS"
-    assert payload["mark_to_market"]["endpoint"] == "/info"
-    assert payload["mark_to_market"]["request_type"] == "allMids"
-    assert payload["positions"][0]["mark_source"] == "liveAllMidsStatus"
-    assert payload["positions"][0]["mark_price"] == 69.5
-    assert payload["net_pnl_usdt"] > 1.0
-
+    assert payload["mark_to_market"]["marks_used"] == 0
+    assert payload["positions"][0]["market_mark_available"] is False
 
 def test_fast_status_tick_purges_legacy_overview_mark_to_market_points(tmp_path, monkeypatch):
     monkeypatch.setenv("HL_DATABASE_URL", f"sqlite:///{(tmp_path / 'session.sqlite3').as_posix()}")

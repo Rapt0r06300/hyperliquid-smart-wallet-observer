@@ -472,7 +472,8 @@ def _identite_hote() -> str:
                 guid, _ = winreg.QueryValueEx(cle, "MachineGuid")
                 morceaux.append(str(guid))
         except (OSError, ImportError):
-            pass
+            import logging as _hs_silent_logging
+            _hs_silent_logging.getLogger(__name__).debug("best-effort exception suppressed", exc_info=True)
     return "|".join(morceaux)
 
 
@@ -685,20 +686,27 @@ def verifier_premier_lancement(root: str | Path, *, os_info: dict | None = None,
     bloquant. Les AVERTISSEMENT n'empechent pas le GO (l'analyse marche, la collecte s'adaptera)."""
     root = Path(root)
     oi = os_info or {}
+    requested_system = oi.get("systeme")
+    host_system = platform.system()
+    # Tests may simulate a target Windows identity on Linux. Platform semantics are
+    # evaluated against requested_system, while host-only probes (PowerShell/CIM/DLL)
+    # must inspect the machine that is actually executing the preflight. A real Windows
+    # launch passes no override, therefore these probes remain fully blocking on Windows.
+    probe_system = host_system if requested_system and requested_system != host_system else requested_system
     checks = [
-        verifier_os_arch(systeme=oi.get("systeme"), machine=oi.get("machine"), version=oi.get("version")),
+        verifier_os_arch(systeme=requested_system, machine=oi.get("machine"), version=oi.get("version")),
         verifier_droits_ecriture(root),
         verifier_espace_disque(root),                          # item 10
         verifier_chemin_espaces_accents(root),
         verifier_longueur_chemins(root),
-        verifier_outils_windows(systeme=oi.get("systeme")),
+        verifier_outils_windows(systeme=probe_system),
         verifier_horloge(maintenant_ms=maintenant_ms),
         verifier_port(sonde=sonde_port),
         verifier_reseau_tls(sonde=sonde_reseau),
         verifier_imports(importateur=importateur_imports),     # item 10 (stdlib essentiels, BLOQUANT)
         verifier_deps_tierces(importateur=importateur_imports),  # item 4 (deps CORE reelles, BLOQUANT)
         verifier_modules_runtime(importateur=importateur_imports),  # item 4 (modules runtime, BLOQUANT)
-        verifier_dll(root, systeme=oi.get("systeme"), dossier_python=dossier_python),  # item 10
+        verifier_dll(root, systeme=probe_system, dossier_python=dossier_python),  # item 10
         verifier_wheels_arch(root),                            # item 4 (arch des wheels)
         verifier_certificats_tls(),                            # item 4 (CA TLS)
         verifier_manifeste(root),                              # item 10
