@@ -6,7 +6,7 @@ tout ce qui rendrait la collecte muette, corrompue ou dangereuse :
   python (version)          · deps exactes importables      · espace disque suffisant
   dossiers inscriptibles    · horloge système (skew serveur) · endpoints publics joignables
   quotas WS respectés       · fichiers de schéma présents    · aucun collecteur orphelin
-  sécurité paper-only (aucune exécution réelle possible)
+  sécurité paper-only (aucune exécution réelle possible)    · contrat exact du profil runtime
 
 RÈGLE DURE : le verdict est GO seulement si TOUS les contrôles marqués `dur=True` passent. Sinon NO-GO,
 avec la raison PRÉCISE de chaque blocage, et le CLI sort non-zero → le .cmd ne lance pas le moteur.
@@ -28,6 +28,7 @@ from hl_observer.hyperliquid.rate_weights import (
     HYPERSMART_WS_MAX_UNIQUE_USERS,
 )
 from hl_observer.ops.clock_integrity import skew_excessif
+from hl_observer.ops.runtime_contract import PREFLIGHT_RUNTIME_FLAGS, verify_runtime_env
 
 # ── Contrats par défaut ──────────────────────────────────────────────────────────────────────────
 DEPS_DURES: tuple[str, ...] = (              # sans elles le moteur/UI ne démarre pas → BLOQUANT
@@ -219,6 +220,18 @@ def verifier_paper(*, env: Mapping[str, str] | None = None) -> Verification:
                         "flags d'execution reelle ACTIFS: %s" % (", ".join(actives) or "aucun"))
 
 
+def verifier_contrat_runtime(*, env: Mapping[str, str] | None = None) -> Verification:
+    """Valide le profil critique exact attendu par le lanceur officiel.
+
+    Cette verification est volontairement opt-in pour les tests unitaires historiques
+    de ``executer_preflight`` (qui injectent souvent un env minimal), mais le CLI reel
+    l'active toujours. Un flag absent ou divergent bloque donc le vrai demarrage.
+    """
+    e = env if env is not None else os.environ
+    result = verify_runtime_env(e, expected=PREFLIGHT_RUNTIME_FLAGS)
+    return Verification("contrat-runtime", "paper", True, result.ok, result.detail)
+
+
 # ── Composition ────────────────────────────────────────────────────────────────────────────────────
 def executer_preflight(racine: str | Path, *, prober: Callable[[str], Sonde] | None = None,
                        local_ts_ms: float, env: Mapping[str, str] | None = None,
@@ -231,10 +244,15 @@ def executer_preflight(racine: str | Path, *, prober: Callable[[str], Sonde] | N
                        ws_connexions: int = HYPERSMART_WS_MAX_CONNECTIONS,
                        ws_utilisateurs: int = HYPERSMART_WS_MAX_UNIQUE_USERS,
                        ws_souscriptions: int = 200,
-                       min_disque_mo: float = MIN_DISQUE_MO_DEFAUT) -> ResultatPreflight:
+                       min_disque_mo: float = MIN_DISQUE_MO_DEFAUT,
+                       enforce_runtime_contract: bool = False) -> ResultatPreflight:
     """Exécute TOUS les contrôles et rend un ResultatPreflight. `prober` (sonde réseau) et `local_ts_ms`
     sont injectés → 0 réseau en test. Sans prober, les endpoints sont marqués injoignables (fail-closed
-    pour les endpoints DURS) et l'horloge devient UNMEASURABLE."""
+    pour les endpoints DURS) et l'horloge devient UNMEASURABLE.
+
+    Le CLI officiel passe ``enforce_runtime_contract=True`` : le vrai lanceur ne peut
+    donc pas demarrer avec un profil legacy ou une securite affaiblie.
+    """
     r = Path(racine)
     vers: list[Verification] = [verifier_python()]
     vers.extend(verifier_deps(present=deps_present))
@@ -253,6 +271,8 @@ def executer_preflight(racine: str | Path, *, prober: Callable[[str], Sonde] | N
     vers.append(verifier_schemas(r, fichiers=schemas))
     vers.append(verifier_orphelins(procs=procs))
     vers.append(verifier_paper(env=env))
+    if enforce_runtime_contract:
+        vers.append(verifier_contrat_runtime(env=env))
     return ResultatPreflight(tuple(vers))
 
 
@@ -307,8 +327,14 @@ def main(argv: list[str] | None = None) -> int:
     l'ERRORLEVEL et ne lance le moteur QUE si GO."""
     import time
     racine = Path(argv[0]) if argv else Path.cwd()
-    res = executer_preflight(racine, prober=_sonde_http_reelle, local_ts_ms=time.time() * 1000.0,
-                             procs=None)
+    res = executer_preflight(
+        racine,
+        prober=_sonde_http_reelle,
+        local_ts_ms=time.time() * 1000.0,
+        procs=None,
+        env=os.environ,
+        enforce_runtime_contract=True,
+    )
     print(format_preflight(res), flush=True)
     return 0 if res.go() else 2
 
@@ -316,7 +342,7 @@ def main(argv: list[str] | None = None) -> int:
 __all__ = ["Sonde", "Verification", "ResultatPreflight", "executer_preflight", "format_preflight",
            "verifier_python", "verifier_deps", "verifier_disque", "verifier_dossiers", "verifier_horloge",
            "verifier_endpoints", "verifier_quotas_ws", "verifier_schemas", "verifier_orphelins",
-           "verifier_paper", "main"]
+           "verifier_paper", "verifier_contrat_runtime", "main"]
 
 
 if __name__ == "__main__":

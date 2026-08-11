@@ -128,10 +128,10 @@ REM 20/07 — CAPITAL DECLARE (repli de la marge dynamique si l'etat UI est illi
 REM Sans lui : capital=None -> marge 50 $/position -> 40 %% du capital dort. La distance a la
 REM liquidation depend du LEVIER, pas de la taille : deployer plus a levier constant est sur.
 set "HYPERSMART_SIMULATION_INITIAL_EQUITY_USDT=1000"
-REM 21/07 — ARBITRAGE DE DISLOCATION paper v1 (portes dures pre-declarees : ouverture
-REM >=35 bps = couts 22 + marge 13 -> edge positif a l entree PAR CONSTRUCTION ; sortie
-REM <=5 bps ou 4 h ; 50$ x2 max). Ecrit au MEME ledger -> PnL unifie. 0 ordre reel.
-set "HYPERSMART_ARB_DISLOCATION_PAPER=1"
+REM Legacy ARBITRAGE DE DISLOCATION paper v1 : QUARANTAINE DEFINITIVE.
+REM Le cross-venue actif est EXPERIMENTAL_PAPER v2 (deux jambes, couts complets, ledger isole).
+REM Re-activer ce flag recreerait un second chemin economique ambigu : contrat runtime = 0.
+set "HYPERSMART_ARB_DISLOCATION_PAPER=0"
 REM 23/07 — VOIE EXPERIMENTAL_PAPER (decision Flo) : ouvre de VRAIES positions SIMULEES tout de suite
 REM (cross-venue survivants geles / lead-lag / copy-vaults) SANS attendre la preuve OOS. Ledger, budget
 REM et limites ISOLES du livre live (experimental_paper_ledger.jsonl). Admission = frais + executable +
