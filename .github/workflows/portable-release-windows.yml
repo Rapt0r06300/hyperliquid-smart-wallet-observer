@@ -12,7 +12,7 @@ permissions:
 
 concurrency:
   group: portable-release-${{ github.ref }}
-  cancel-in-progress: false
+  cancel-in-progress: true
 
 env:
   PYTHONUTF8: "1"
