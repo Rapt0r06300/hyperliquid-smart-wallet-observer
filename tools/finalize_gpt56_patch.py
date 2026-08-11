@@ -28,6 +28,10 @@ def replace_py_function(text: str, name: str, replacement: str) -> str:
     return text[:start] + replacement.rstrip() + "\n\n" + text[end:]
 
 
+def _has_py_function(text: str, name: str) -> bool:
+    return re.search(rf"(?m)^def {re.escape(name)}\(", text) is not None
+
+
 def patch_powershell() -> None:
     path = ROOT / "tools" / "start_hypersmart_simulation.ps1"
     text = path.read_text(encoding="utf-8")
@@ -54,6 +58,8 @@ def patch_powershell() -> None:
 }
 
 '''
+        if marker not in text:
+            raise RuntimeError("runtime process function marker missing")
         text = text.replace(marker, helper + marker, 1)
 
     runtime = r'''function Get-HyperSmartRuntimeProcesses {
@@ -109,9 +115,10 @@ def patch_powershell() -> None:
                 Write-LauncherLog "collector loop stop failed pid=$($loopProc.ProcessId): $($_.Exception.Message)"
             }
         }'''
-    if old not in text:
+    if old in text:
+        text = text.replace(old, new, 1)
+    elif new not in text:
         raise RuntimeError("collector loop shutdown block changed unexpectedly")
-    text = text.replace(old, new, 1)
     if "$ProjectRoot" in text:
         raise RuntimeError("undefined $ProjectRoot remains")
     path.write_text(text, encoding="utf-8", newline="\n")
@@ -122,9 +129,10 @@ def patch_cross_os_preflight() -> None:
     text = path.read_text(encoding="utf-8")
     old = '''    root = Path(root)\n    oi = os_info or {}\n    checks = [\n        verifier_os_arch(systeme=oi.get("systeme"), machine=oi.get("machine"), version=oi.get("version")),'''
     new = '''    root = Path(root)\n    oi = os_info or {}\n    requested_system = oi.get("systeme")\n    host_system = platform.system()\n    # Tests may simulate a target Windows identity on Linux. Platform semantics are\n    # evaluated against requested_system, while host-only probes (PowerShell/CIM/DLL)\n    # must inspect the machine that is actually executing the preflight. A real Windows\n    # launch passes no override, therefore these probes remain fully blocking on Windows.\n    probe_system = host_system if requested_system and requested_system != host_system else requested_system\n    checks = [\n        verifier_os_arch(systeme=requested_system, machine=oi.get("machine"), version=oi.get("version")),'''
-    if old not in text:
+    if old in text:
+        text = text.replace(old, new, 1)
+    elif "requested_system = oi.get(\"systeme\")" not in text:
         raise RuntimeError("premier_lancement orchestrator header changed unexpectedly")
-    text = text.replace(old, new, 1)
     text = text.replace('verifier_outils_windows(systeme=oi.get("systeme"))', 'verifier_outils_windows(systeme=probe_system)', 1)
     text = text.replace('verifier_dll(root, systeme=oi.get("systeme"), dossier_python=dossier_python)', 'verifier_dll(root, systeme=probe_system, dossier_python=dossier_python)', 1)
     path.write_text(text, encoding="utf-8", newline="\n")
@@ -133,10 +141,13 @@ def patch_cross_os_preflight() -> None:
 def patch_status_tests() -> None:
     path = ROOT / "tests" / "test_ui_simulation_status_fast.py"
     text = path.read_text(encoding="utf-8")
-    text = replace_py_function(
-        text,
-        "test_status_uses_latest_persisted_equity_point_without_heavy_overview",
-        '''def test_status_does_not_resurrect_historical_equity_without_current_mark():
+    old_name = "test_status_uses_latest_persisted_equity_point_without_heavy_overview"
+    new_name = "test_status_does_not_resurrect_historical_equity_without_current_mark"
+    if _has_py_function(text, old_name):
+        text = replace_py_function(
+            text,
+            old_name,
+            '''def test_status_does_not_resurrect_historical_equity_without_current_mark():
     state = UiState()
     state.simulation_starting_equity_usdt = 1000.0
     state.simulation_realized_pnl_usdc = 3.0
@@ -152,11 +163,17 @@ def patch_status_tests() -> None:
     assert payload["realized_pnl_usdt"] == 3.0
     assert payload["status_projection_pure"] is True
     assert payload["network_reads_from_status"] is False''',
-    )
-    text = replace_py_function(
-        text,
-        "test_status_can_mark_open_position_from_live_all_mids_when_launcher_enables_it",
-        '''def test_status_get_never_calls_live_all_mids_even_when_launcher_flag_is_enabled(tmp_path, monkeypatch):
+        )
+    elif not _has_py_function(text, new_name):
+        raise RuntimeError("equity status test marker missing")
+
+    old_name = "test_status_can_mark_open_position_from_live_all_mids_when_launcher_enables_it"
+    new_name = "test_status_get_never_calls_live_all_mids_even_when_launcher_flag_is_enabled"
+    if _has_py_function(text, old_name):
+        text = replace_py_function(
+            text,
+            old_name,
+            '''def test_status_get_never_calls_live_all_mids_even_when_launcher_flag_is_enabled(tmp_path, monkeypatch):
     monkeypatch.setenv("HL_DATABASE_URL", f"sqlite:///{(tmp_path / 'session.sqlite3').as_posix()}")
     monkeypatch.setenv("HYPERSMART_STATUS_LIVE_MARKS_ENABLED", "1")
     settings = _settings()
@@ -192,7 +209,9 @@ def patch_status_tests() -> None:
     assert payload["open_positions"] == 1
     assert payload["mark_to_market"]["marks_used"] == 0
     assert payload["positions"][0]["market_mark_available"] is False''',
-    )
+        )
+    elif not _has_py_function(text, new_name):
+        raise RuntimeError("network-free status test marker missing")
     path.write_text(text, encoding="utf-8", newline="\n")
 
 
