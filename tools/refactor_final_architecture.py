@@ -112,10 +112,19 @@ def verify_limits() -> None:
             raise RuntimeError(f"new helper {rel} has {count} lines (>800)")
 
 
+def patch_strategy_gaps() -> None:
+    # Imported lazily so the finalizer remains a simple standalone script and
+    # the strategy patch can be deleted after its one verified use.
+    import finalize_strategy_gaps
+
+    finalize_strategy_gaps.main()
+
+
 def main() -> None:
     split_supervisor_registry()
     split_portable_inventory()
     verify_limits()
+    patch_strategy_gaps()
     print("FINAL_ARCHITECTURE_SPLIT_OK")
 
 
