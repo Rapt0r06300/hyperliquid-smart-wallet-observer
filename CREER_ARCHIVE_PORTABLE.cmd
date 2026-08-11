@@ -5,6 +5,7 @@ REM HyperSmart portability - Windows 10/11 x64 - PAPER/READ-ONLY ONLY.
 REM Default: complete disaster-recovery folder clone, including durable history.
 REM --application-seule creates the smaller clean-start ZIP.
 REM --release-stricte keeps the CI-bound official release pipeline.
+REM --sortie-dir <dir> builds the strict verified ZIP into an explicit directory.
 REM ============================================================================
 cd /d "%~dp0"
 
@@ -39,6 +40,7 @@ echo   Sortie courte hors projet choisie automatiquement si aucun chemin n'est f
 echo ==============================================================================
 echo.
 
+if /I "%~1"=="--sortie-dir" goto :release_output
 if /I "%~1"=="--release-stricte" goto :release_stricte
 if /I "%~1"=="--application-seule" goto :application_seule
 if /I "%~1"=="--verifier-clone" goto :verifier_clone
@@ -73,6 +75,22 @@ goto :resultat
 :application_seule
 "%HYPERSMART_PYTHON%" -m hl_observer.ops.archive_portable ^
   --racine "%~dp0." --mode-developpement
+set "RC=%ERRORLEVEL%"
+goto :resultat
+
+:release_output
+if "%~2"=="" (
+  echo [REFUSE] Dossier de sortie release manquant apres --sortie-dir.
+  set "RC=33"
+  goto :resultat
+)
+if not "%~3"=="" (
+  echo [REFUSE] Arguments supplementaires inattendus apres --sortie-dir.
+  set "RC=34"
+  goto :resultat
+)
+"%HYPERSMART_PYTHON%" -m hl_observer.ops.portable_release ^
+  --racine "%~dp0." --sortie-dir "%~2"
 set "RC=%ERRORLEVEL%"
 goto :resultat
 

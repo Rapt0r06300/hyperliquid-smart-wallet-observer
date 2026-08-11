@@ -20,6 +20,9 @@ def test_windows_release_builds_embedded_runtime_without_setup_python():
 def test_final_cmd_is_the_release_entrypoint_and_uses_external_output():
     assert "CREER_ARCHIVE_PORTABLE.cmd --sortie-dir" in TEXT
     assert "RUNNER_TEMP" in TEXT
+    assert '"hypersmart portable release"' in TEXT
+    assert "cmd.exe /d /c" not in TEXT
+    assert "& .\\CREER_ARCHIVE_PORTABLE.cmd --sortie-dir $releaseDir" in TEXT
     assert "RELEASE_REPORT.json" in TEXT
     assert "PORTABLE_VALIDATION.json" in TEXT
     assert "RELEASE_READY is not true" in TEXT

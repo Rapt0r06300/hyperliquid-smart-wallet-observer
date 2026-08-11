@@ -72,9 +72,10 @@ jobs:
         id: release
         shell: pwsh
         run: |
-          $releaseDir = Join-Path $env:RUNNER_TEMP "hypersmart-portable-release"
+          # The space is deliberate: this is a real regression gate for CMD/PowerShell path quoting.
+          $releaseDir = Join-Path $env:RUNNER_TEMP "hypersmart portable release"
           New-Item -ItemType Directory -Force $releaseDir | Out-Null
-          cmd.exe /d /c "CREER_ARCHIVE_PORTABLE.cmd --sortie-dir `"$releaseDir`""
+          & .\CREER_ARCHIVE_PORTABLE.cmd --sortie-dir $releaseDir
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
           $zip = @(Get-ChildItem -LiteralPath $releaseDir -Filter "hypersmart_portable_*.zip")
