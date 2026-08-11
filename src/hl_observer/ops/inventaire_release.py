@@ -413,6 +413,20 @@ def fichiers_requis(root: str | Path) -> set[str]:
     return req
 
 
+def _marqueur_wheel_runtime_installe_vide(rel: str) -> bool:
+    """Vrai seulement pour une sentinelle .whl vide du runtime Python deja installe.
+
+    Le wheelhouse source reste controle par son lock/hashes. Certains wheels binaires installes par
+    pip --target laissent une sentinelle portant le nom du wheel dans Lib/site-packages. Elle reste
+    incluse et hashee dans l'archive; seuls son caractere vide et cet emplacement exact sont toleres.
+    """
+    canonique = rel.replace("\\", "/")
+    return (
+        canonique.startswith("tools/python/Lib/site-packages/")
+        and canonique.lower().endswith(".whl")
+    )
+
+
 def controle_completude(root: str | Path, inclus, *, non_suivis: list[str] | None = None) -> dict:
     """Compare l'ensemble REQUIS a ce que l'archive INCLUT. Bloque si un requis est absent du disque,
     vide, ou exclu par erreur ; ou si un import intra-projet est casse ; ou si une reference .cmd manque.
@@ -421,9 +435,15 @@ def controle_completude(root: str | Path, inclus, *, non_suivis: list[str] | Non
     inclus_set = set(inclus)
     requis = fichiers_requis(root)
     absents_disque = sorted(r for r in requis if not (root / r).is_file())
-    # un __init__.py VIDE est un marqueur de paquet legitime : ne le compte pas comme « vide requis ».
-    vides = sorted(r for r in requis if Path(r).name != "__init__.py"
-                   and (root / r).is_file() and (root / r).stat().st_size == 0)
+    # Un __init__.py vide est legitime. Une sentinelle .whl vide est toleree UNIQUEMENT dans le
+    # runtime installe; un wheel source vide (tools/wheelhouse) reste un echec de completude.
+    vides = sorted(
+        r for r in requis
+        if Path(r).name != "__init__.py"
+        and not _marqueur_wheel_runtime_installe_vide(r)
+        and (root / r).is_file()
+        and (root / r).stat().st_size == 0
+    )
     exclus_par_erreur = sorted(r for r in requis
                                if (root / r).is_file() and r not in inclus_set)
     imports = cloture_imports(root)
