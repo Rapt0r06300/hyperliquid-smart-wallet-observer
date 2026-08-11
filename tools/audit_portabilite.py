@@ -41,11 +41,14 @@ _REGISTRE_ECRITURE = re.compile(
 )
 _DEF = re.compile(r"^\s*(?:async\s+)?def\s+([A-Za-z_][A-Za-z0-9_]*)\s*\(")
 
-# Deux fonctions peuvent lire MachineGuid en lecture seule pour produire une empreinte hashée.
-# Elles ne configurent rien et leur panne est déjà tolérée : l'archive reste fonctionnelle.
+# Fonctions strictement autorisées à lire MachineGuid en lecture seule afin de
+# produire une empreinte hashée de transfert. Le refactor de portable_clone a
+# déplacé machine_fingerprint dans portable_clone_inventory : l'exception suit
+# donc la fonction, jamais l'ensemble du module ni winreg en général.
 _MACHINE_ID_READERS = {
     "src/hl_observer/ops/premier_lancement.py": {"_identite_hote"},
     "src/hl_observer/ops/portable_clone.py": {"machine_fingerprint"},
+    "src/hl_observer/ops/portable_clone_inventory.py": {"machine_fingerprint"},
 }
 
 
@@ -89,7 +92,6 @@ def auditer(racine: str | Path) -> list[dict]:
                 if match_def:
                     fonction = match_def.group(1)
                 elif ln and not ln[0].isspace() and not ln.lstrip().startswith(("#", "@")):
-                    # Sortie d'une fonction au niveau module.
                     fonction = None
             if _est_commentaire(ln, est_cmd):
                 continue
