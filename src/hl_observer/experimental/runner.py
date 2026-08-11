@@ -104,7 +104,7 @@ def _raison_sortie_carry(pos: dict, m: dict, car: dict | None, *, now_ms: float,
     base_cur = float(m.get("base_bps") if m.get("base_bps") is not None else base_ent)
     if int(pos.get("sens") or 1) * (base_cur - base_ent) < -BASIS_ADVERSE_BPS:
         return "BASIS_ADVERSE"
-    if age_h >= float(pos.get("hold_h") or 168.0):  # durée max AVANT edge (sinon reste_h=0 masque)
+    if age_h >= float(pos.get("hold_h") or 168.0):
         return "HOLD_ATTEINT"
     reste_h = max(0.0, float(pos.get("hold_h") or 168.0) - age_h)
     cout_ar = float((pos.get("meta") or {}).get("cout_ar_bps") or 0.0)
@@ -114,23 +114,21 @@ def _raison_sortie_carry(pos: dict, m: dict, car: dict | None, *, now_ms: float,
 
 
 def _gap_courant_bps(car: dict, sens: int) -> float:
-    """Écart EXÉCUTABLE courant dans le sens d'entrée (bps). Converge vers 0 (ou négatif) quand les
-    deux venues se rejoignent -> c'est le signal de déboucle rentable."""
+    """Écart EXÉCUTABLE courant dans le sens d'entrée (bps)."""
     hl_bid, hl_ask = float(car["hl_bid"]), float(car["hl_ask"])
     bin_bid, bin_ask = float(car["bin_bid"]), float(car["bin_ask"])
     hl_mid, bin_mid = (hl_bid + hl_ask) / 2, (bin_bid + bin_ask) / 2
-    if sens >= 0:  # long HL / short BIN
+    if sens >= 0:
         return (bin_bid - hl_ask) / hl_mid * 1e4 if hl_mid else 0.0
     return (hl_bid - bin_ask) / bin_mid * 1e4 if bin_mid else 0.0
 
 
 def _raison_sortie_dislocation(pos: dict, car: dict | None, *, now_ms: float) -> tuple[str | None, float]:
-    """Sorties dislocation : convergence capturée, écart aggravé (stop), liquidité, quote périmée, durée
-    max. Renvoie (motif|None, gap_courant_bps)."""
+    """Sorties dislocation : convergence, stop, liquidité, quote périmée, durée max."""
     from hl_observer.experimental.carry_deux_jambes import CARNET_AGE_MAX_S
 
     if not car:
-        return None, 0.0  # pas de carnet -> on garde (pas de sortie aveugle)
+        return None, 0.0
     gap_ent = float((pos.get("meta") or {}).get("gap_entree_bps") or 0.0)
     gap_cur = _gap_courant_bps(car, int(pos.get("sens") or 1))
     age_min = (now_ms - float(pos.get("ts_ouverture_ms") or now_ms)) / 60000.0
@@ -138,25 +136,21 @@ def _raison_sortie_dislocation(pos: dict, car: dict | None, *, now_ms: float) ->
         return "QUOTE_PERIMEE", gap_cur
     if float(car.get("taille_min_usd") or 0.0) < float(pos.get("notional_usd") or 0.0):
         return "LIQUIDITE_INSUFFISANTE", gap_cur
-    if gap_cur <= gap_ent * 0.3:  # écart quasi refermé -> on capture
+    if gap_cur <= gap_ent * 0.3:
         return "CONVERGENCE_CAPTUREE", gap_cur
-    if gap_cur > gap_ent * 1.5:  # écart s'aggrave contre nous -> stop
+    if gap_cur > gap_ent * 1.5:
         return "ECART_AGGRAVE", gap_cur
-    if age_min >= float(pos.get("hold_h") or 0.5) * 60.0:  # durée max (court terme)
+    if age_min >= float(pos.get("hold_h") or 0.5) * 60.0:
         return "DUREE_MAX", gap_cur
     return None, gap_cur
 
 
-SNAPSHOT_FRAICHEUR_MAX_MS = 6 * 3.6e6  # un snapshot de vault > 6 h est trop vieux pour conclure (P3)
-BIDASK_FRAICHEUR_MAX_MS = 5_000.0  # un bid/ask HL > 5 s n'est plus « exécutable » (P8)
+SNAPSHOT_FRAICHEUR_MAX_MS = 6 * 3.6e6
+BIDASK_FRAICHEUR_MAX_MS = 5_000.0
 
 
 def _etat_leader(pos: dict, root: Path, *, now_ms: float) -> dict:
-    """P1/P2/P3 — état du LEADER depuis le DERNIER snapshot du BON vault. Renvoie un dict :
-      action ∈ {REDUCE, ADD, CLOSE, FLIP_LONG_SHORT, FLIP_SHORT_LONG, AUCUN, INVALIDE}, motif,
-      entry_szi/current_szi (SIGNÉS), snapshot_ts, snapshot_id.
-    Gardes : snapshot_complet_ok (complet + ts + postérieur à l'entrée + frais), déduplication (snapshot
-    déjà consommé -> AUCUN), coin absent interprété comme flat SEULEMENT si le snapshot est complet."""
+    """État du leader copy-vault depuis un snapshot complet, frais et postérieur à l'entrée."""
     import hashlib
     import json as _j
     from hl_observer.experimental import execution_paper as EP
@@ -199,8 +193,6 @@ def _etat_leader(pos: dict, root: Path, *, now_ms: float) -> dict:
     ts = dernier.get("ts_ms")
     snap_id = dernier.get("snapshot_id") or hashlib.sha1(brut.encode("utf-8", "ignore")).hexdigest()[:12]
     out["snapshot_ts"], out["snapshot_id"] = ts, snap_id
-    # P3 : un snapshot n'est exploitable que COMPLET (positions présentes + nav>0), horodaté, POSTÉRIEUR à
-    # l'entrée et FRAIS. Sinon on NE conclut RIEN (surtout pas un close sur coin « absent »).
     complet = ("positions" in dernier) and (float(dernier.get("nav_usd") or 0.0) > 0)
     ok, motif = EP.snapshot_complet_ok(
         {"complet": complet, "ts_ms": ts},
@@ -212,11 +204,10 @@ def _etat_leader(pos: dict, root: Path, *, now_ms: float) -> dict:
     if not ok:
         out["motif"] = motif
         return out
-    # P1 : déduplication — un snapshot déjà consommé ne redéclenche jamais d'action.
     if pos.get("last_vault_snapshot_id") == snap_id:
         out["motif"] = "SNAPSHOT_DEJA_CONSOMME"
         return out
-    cur = 0.0  # coin absent d'un snapshot COMPLET = réellement flat
+    cur = 0.0
     for p in dernier.get("positions") or []:
         if str(p.get("coin") or "").upper() == coin:
             cur = float(p.get("szi") or 0.0)
@@ -231,39 +222,71 @@ def _etat_leader(pos: dict, root: Path, *, now_ms: float) -> dict:
     return out
 
 
-def _jambes_sortie_dislocation(pos: dict, car: dict | None) -> list[dict] | None:
-    """P7 — construit les DEUX jambes de SORTIE d'une dislocation : entrée = prix exécutés stockés dans
-    meta.jambes ; sortie = bid/ask COURANTS des deux venues (on RACHÈTE ce qu'on a vendu, on VEND ce qu'on a
-    acheté). Delta-neutre : sens>0 = long HL / short BIN. Rend [jambe_hl, jambe_bin] ou None si illisible."""
+def _jambes_sortie_dislocation(
+    pos: dict,
+    car: dict | None,
+    *,
+    stress_slippage_bps: float | None = None,
+) -> list[dict] | None:
+    """Construit toujours une sortie économique à DEUX jambes.
+
+    Avec un carnet lisible, les deux sorties utilisent les bid/ask exécutables.
+    Sans carnet, un ``stress_slippage_bps`` explicite autorise uniquement un
+    scénario conservateur : prix de sortie = prix d'entrée (brut nul) et stress
+    ajouté au slippage de SORTIE de chaque jambe. Si les deux jambes d'entrée ne
+    sont pas réconciliables, retourne ``None`` : le caller doit marquer la position
+    non liquidable plutôt que fabriquer un PnL mono-jambe.
+    """
     meta = pos.get("meta") or {}
     j = meta.get("jambes") or {}
-    if not (j.get("hl") and j.get("bin")) or not car:
+    if not (j.get("hl") and j.get("bin")):
         return None
     try:
-        hl_bid, hl_ask = float(car["hl_bid"]), float(car["hl_ask"])
-        bin_bid, bin_ask = float(car["bin_bid"]), float(car["bin_ask"])
+        stress = 0.0 if stress_slippage_bps is None else float(stress_slippage_bps)
+        if stress < 0:
+            return None
+        sens = int(pos.get("sens") or 1)
+        notional = float(pos.get("notional_usd") or 0.0)
+        hl, bn = j["hl"], j["bin"]
+        hl_entry, bin_entry = float(hl["prix_exec"]), float(bn["prix_exec"])
+        if notional <= 0 or hl_entry <= 0 or bin_entry <= 0:
+            return None
+        if car:
+            hl_bid, hl_ask = float(car["hl_bid"]), float(car["hl_ask"])
+            bin_bid, bin_ask = float(car["bin_bid"]), float(car["bin_ask"])
+            if min(hl_bid, hl_ask, bin_bid, bin_ask) <= 0:
+                return None
+            if sens > 0:
+                hl_exit, bin_exit = hl_bid, bin_ask
+            else:
+                hl_exit, bin_exit = hl_ask, bin_bid
+        elif stress_slippage_bps is not None:
+            hl_exit, bin_exit = hl_entry, bin_entry
+        else:
+            return None
     except (KeyError, TypeError, ValueError):
         return None
-    sens = int(pos.get("sens") or 1)
-    notional = float(pos.get("notional_usd") or 0.0)
-    hl, bn = j["hl"], j["bin"]
-    if sens > 0:  # long HL (sortie: vend au hl_bid) / short BIN (rachète au bin_ask)
-        hl_leg = {"venue": "HL", "side": 1, "entry_px": float(hl["prix_exec"]), "exit_px": hl_bid}
-        bin_leg = {"venue": "BIN", "side": -1, "entry_px": float(bn["prix_exec"]), "exit_px": bin_ask}
-    else:  # short HL (rachète au hl_ask) / long BIN (vend au bin_bid)
-        hl_leg = {"venue": "HL", "side": -1, "entry_px": float(hl["prix_exec"]), "exit_px": hl_ask}
-        bin_leg = {"venue": "BIN", "side": 1, "entry_px": float(bn["prix_exec"]), "exit_px": bin_bid}
+
+    hl_leg = {"venue": "HL", "side": 1 if sens > 0 else -1, "entry_px": hl_entry, "exit_px": hl_exit}
+    bin_leg = {"venue": "BIN", "side": -1 if sens > 0 else 1, "entry_px": bin_entry, "exit_px": bin_exit}
     for leg, src in ((hl_leg, hl), (bin_leg, bn)):
         leg["size_usd"] = notional
         leg["fee_bps"] = float(src.get("frais_bps") or 0.0)
-        leg["slippage_bps"] = float(src.get("slippage_bps") or 0.0)
+        entry_slip = float(src.get("slippage_bps") or 0.0)
+        leg["entry_slippage_bps"] = entry_slip
+        leg["exit_slippage_bps"] = entry_slip + stress
     return [hl_leg, bin_leg]
 
 
+def _marquer_cross_venue_non_liquidable(pos: dict, *, raison: str, now_ms: float) -> None:
+    """Fail-closed : conserve la position et expose pourquoi aucun realized n'est publiable."""
+    pos["liquidation_status"] = "UNLIQUIDATABLE_DATA_MISSING"
+    pos["liquidation_reason"] = raison
+    pos["last_liquidation_attempt_ms"] = int(now_ms)
+
+
 def _gerer_sorties(store: dict, root: Path, *, now_ms: float) -> list[dict]:
-    """Sort les positions dont une condition de sortie est atteinte, au prix exécutable courant.
-    Les sorties CROSS-VENUE sont GELÉES pendant l'audit (HYPERSMART_EXPERIMENTAL_CROSS_VENUE_GELE=1) :
-    on garde la cohorte intacte. Les sorties directionnelles (lead-lag) restent actives."""
+    """Sort les positions avec prix exécutables; Cross-Venue ne publie jamais un faux close mono-jambe."""
     import os
 
     fermetures: list[dict] = []
@@ -274,64 +297,79 @@ def _gerer_sorties(store: dict, root: Path, *, now_ms: float) -> list[dict]:
     gele_cv = os.environ.get("HYPERSMART_EXPERIMENTAL_CROSS_VENUE_GELE", "0") == "1"
     dir_coins = {p["coin"] for p in store["ouvertes"].values() if p.get("type_pnl") == "directional"}
     mids = _marks_hl_mid(root, dir_coins) if dir_coins else {}
-    bidask = _marks_hl_bidask(root, dir_coins) if dir_coins else {}  # LOT14 #4 : prix EXÉCUTABLE de sortie
+    bidask = _marks_hl_bidask(root, dir_coins) if dir_coins else {}
     from hl_observer.experimental import invariants as INV
 
     for pos in list(store["ouvertes"].values()):
         age_h = (now_ms - float(pos.get("ts_ouverture_ms") or now_ms)) / 3.6e6
-        if pos.get("type_pnl") == "dislocation":  # cross-venue COURT TERME : capture/stop rapide
+        if pos.get("type_pnl") == "dislocation":
             from hl_observer.experimental import execution_paper as EP
 
             car = carnet.get(pos["coin"])
             if car:
-                pos["ts_derniere_donnee_ms"] = now_ms  # trace de fraîcheur pour la politique data-missing
+                pos["ts_derniere_donnee_ms"] = now_ms
+                pos.pop("liquidation_status", None)
+                pos.pop("liquidation_reason", None)
             gap_ent = float(
                 (pos.get("meta") or {}).get("gap_entree_bps") or pos.get("base_entree_bps") or 0.0
             )
-            raison, gap_cur = _raison_sortie_dislocation(pos, car, now_ms=now_ms)
-            # 🔴 P6 — DONNÉE MANQUANTE : sans carnet frais, on ne GARDE PAS indéfiniment. Grace courte puis
-            # DATA_MISSING_TIMEOUT. Le gap courant CONSERVATEUR = gap ENTRÉE (brut NUL) — JAMAIS gap_cur=0 qui
-            # simulerait une convergence complète (gain fabriqué). Coûts de stress en plus -> PnL brut <= 0.
+            raison, _gap_cur = _raison_sortie_dislocation(pos, car, now_ms=now_ms)
             if not raison and not car:
                 dm = EP.politique_data_missing(pos, now_ms=now_ms)
                 if dm["action"] == "SORTIE":
-                    cout_dm = float(pos.get("frais_bps") or 0.0) + float(dm["slippage_stress_bps"])
-                    fermetures.append(
-                        MP.sortir(
+                    jambes = _jambes_sortie_dislocation(
+                        pos,
+                        None,
+                        stress_slippage_bps=float(dm["slippage_stress_bps"]),
+                    )
+                    if jambes:
+                        fermetures.append(
+                            MP.sortir_deux_jambes(
+                                pos,
+                                store,
+                                root,
+                                jambes=jambes,
+                                raison="DATA_MISSING_TIMEOUT_TWO_LEG_STRESS",
+                                now_ms=now_ms,
+                            )
+                        )
+                    else:
+                        _marquer_cross_venue_non_liquidable(
                             pos,
-                            store,
-                            root,
-                            prix_sortie=dm["mark_conservateur"],
-                            cout_sortie_bps=cout_dm,
-                            base_courant_bps=gap_ent,
-                            raison="DATA_MISSING_TIMEOUT",
+                            raison="DATA_MISSING_TIMEOUT_ENTRY_LEGS_UNAVAILABLE",
                             now_ms=now_ms,
                         )
-                    )
                     continue
             if raison:
-                # 🔴 P7 — fermer comme DEUX JAMBES au bid/ask des DEUX venues (realized = somme EXACTE des
-                # jambes), quand le carnet est lisible. Repli convergence de base seulement si carnet illisible.
                 jambes = _jambes_sortie_dislocation(pos, car)
-                if jambes:
-                    fermetures.append(
-                        MP.sortir_deux_jambes(pos, store, root, jambes=jambes, raison=raison, now_ms=now_ms)
+                if not jambes:
+                    # Un carnet partiel/illisible ne doit jamais faire basculer vers MP.sortir().
+                    # On utilise le même stress deux-jambes que le timeout si l'entrée est réconciliable.
+                    dm = EP.politique_data_missing(pos, now_ms=now_ms, grace_ms=0.0)
+                    jambes = _jambes_sortie_dislocation(
+                        pos,
+                        None,
+                        stress_slippage_bps=float(dm["slippage_stress_bps"]),
                     )
-                else:
+                if jambes:
+                    suffixe = "" if car else "_TWO_LEG_STRESS"
                     fermetures.append(
-                        MP.sortir(
+                        MP.sortir_deux_jambes(
                             pos,
                             store,
                             root,
-                            prix_sortie=pos.get("prix_entree"),
-                            cout_sortie_bps=float(pos.get("spread_bps") or 0.0)
-                            + float(pos.get("frais_bps") or 0.0),
-                            base_courant_bps=gap_cur,
-                            raison=raison,
+                            jambes=jambes,
+                            raison=raison + suffixe,
                             now_ms=now_ms,
                         )
                     )
-        elif pos.get("type_pnl") == "funding_carry":  # LEGACY (v1 quarantaine) — plus émis en v2
+                else:
+                    _marquer_cross_venue_non_liquidable(
+                        pos,
+                        raison=raison + "_ENTRY_LEGS_UNAVAILABLE",
+                        now_ms=now_ms,
+                    )
+        elif pos.get("type_pnl") == "funding_carry":
             if gele_cv:
                 continue
             m = cv.get(pos["coin"])
@@ -352,7 +390,7 @@ def _gerer_sorties(store: dict, root: Path, *, now_ms: float) -> list[dict]:
                         now_ms=now_ms,
                     )
                 )
-        else:  # directionnel (lead_lag / copy_vault)
+        else:
             from hl_observer.experimental import execution_paper as EP
 
             et = _etat_leader(pos, root, now_ms=now_ms) if pos["moteur"] == "copy_vault" else None
@@ -367,12 +405,10 @@ def _gerer_sorties(store: dict, root: Path, *, now_ms: float) -> list[dict]:
                 "FLIP_SHORT_LONG",
             )
             if not (reduce_partiel or ferme_complet):
-                if et and et.get("snapshot_id"):  # ADD / AUCUN : rien à fermer -> on DIGÈRE le snapshot
+                if et and et.get("snapshot_id"):
                     pos["last_vault_snapshot_id"] = et["snapshot_id"]
                     pos["last_leader_szi_applied"] = et["current_szi"]
                 continue
-            # LOT14 #4/P8 — prix de sortie EXÉCUTABLE et FRAIS (long au bid, short à l'ask), coût SANS double-
-            # spread. Un bid/ask périmé (> BIDASK_FRAICHEUR_MAX_MS) n'est PAS exécutable -> repli conservateur.
             ba = bidask.get(pos["coin"])
             frais_ok = bool(ba) and (
                 ba.get("ts_ms") is None or (now_ms - float(ba["ts_ms"])) <= BIDASK_FRAICHEUR_MAX_MS
@@ -390,10 +426,10 @@ def _gerer_sorties(store: dict, root: Path, *, now_ms: float) -> list[dict]:
                     frais_bps=float(pos.get("frais_bps") or 0.0),
                     slippage_bps=float(pos.get("slippage_bps") or 0.0),
                 )
-            else:  # carnet illisible/périmé -> mid + spread explicite
+            else:
                 prix_sortie = mids.get(pos["coin"]) or pos.get("prix_entree")
                 cout_sortie = float(pos.get("spread_bps") or 0.0) + float(pos.get("frais_bps") or 0.0)
-            if reduce_partiel:  # P1+P4 : cible depuis le NOTIONNEL INITIAL, idempotent
+            if reduce_partiel:
                 rp = EP.reduire_vers_cible(
                     pos,
                     entry_leader_szi=et["entry_szi"],
@@ -423,10 +459,10 @@ def _gerer_sorties(store: dict, root: Path, *, now_ms: float) -> list[dict]:
                             snapshot_id=et["snapshot_id"],
                         )
                     )
-                    continue  # position TOUJOURS ouverte (résidu)
+                    continue
                 if rp.get("action") == "CLOSE_INTEGRAL":
                     ferme_complet = True
-                else:  # AUCUNE (même snapshot / pas de réduction nette)
+                else:
                     pos["last_vault_snapshot_id"] = et["snapshot_id"]
                     pos["last_leader_szi_applied"] = et["current_szi"]
                     continue
@@ -457,7 +493,7 @@ def tick(
     root = Path(root)
     now = float(now_ms if now_ms is not None else time.time() * 1000)
     store = MP.charger_store(root)
-    fermetures = _gerer_sorties(store, root, now_ms=now)  # d'abord les sorties (libère des slots)
+    fermetures = _gerer_sorties(store, root, now_ms=now)
     ouvertures: list[dict] = []
     refus: list[dict] = []
     premier_signal: dict | None = None
@@ -488,7 +524,7 @@ def tick(
                 sigs, refs = adaptateur(root, now_ms=now, experimental_calibration=True)
             else:
                 sigs, refs = adaptateur(root, now_ms=now)
-        except Exception as exc:  # noqa: BLE001 — un moteur qui échoue n'arrête pas les autres
+        except Exception as exc:  # noqa: BLE001
             refus.append({"moteur": m, "motif": "ADAPTATEUR_ERREUR", "detail": str(exc)[:120]})
             continue
         refus.extend(refs)
@@ -496,11 +532,13 @@ def tick(
         funnel["fresh"] += sum(1 for s in sigs if 0 <= now - float(s.ts_signal_ms) <= MP.AGE_MAX_SIGNAL_MS)
         funnel["candidates"] += len(sigs)
         funnel["l2"] += sum(1 for s in sigs if s.prix_entree > 0 and (s.meta or {}).get("src_prix") is not None)
-        funnel["liquidity"] += sum(1 for s in sigs if float((s.meta or {}).get("depth_usd") or s.notional_usd) >= s.notional_usd)
+        funnel["liquidity"] += sum(
+            1 for s in sigs if float((s.meta or {}).get("depth_usd") or s.notional_usd) >= s.notional_usd
+        )
         funnel["edge"] += sum(1 for s in sigs if s.edge_estime_bps > 0)
         funnel["consensus"] += sum(1 for s in sigs if int((s.meta or {}).get("consensus_count") or 1) >= 1)
         candidats.extend(sigs)
-        sigs.sort(key=lambda s: -s.edge_estime_bps)  # les meilleurs edges d'abord
+        sigs.sort(key=lambda s: -s.edge_estime_bps)
         for sig in sigs:
             ok, motif = MP.admettre(sig, store, now_ms=now)
             if not ok:
@@ -536,15 +574,13 @@ def tick(
                 premier_signal = info
     MP.sauver_store(root, store)
     resume = MP.resume(root)
-    # 🔴 MtM COURANT par position -> pour que le dashboard MONTRE le mouvement (funding qui s'accumule,
-    # prix qui bougent). Recalcule les marks une fois ; donnée absente -> MtM = coût d'entrée (honnête).
     from hl_observer.experimental.carry_deux_jambes import carnet_par_coin, decomposer
 
     cv = _marks_cross_venue(root)
     carnet = carnet_par_coin(root)
     dir_coins = {p["coin"] for p in store["ouvertes"].values() if p.get("type_pnl") == "directional"}
     mids = _marks_hl_mid(root, dir_coins) if dir_coins else {}
-    bidask = _marks_hl_bidask(root, dir_coins) if dir_coins else {}  # LOT14 #4 : MtM = valeur LIQUIDABLE
+    bidask = _marks_hl_bidask(root, dir_coins) if dir_coins else {}
     from hl_observer.experimental import invariants as INV
 
     positions = []
@@ -552,14 +588,12 @@ def tick(
     for p in store["ouvertes"].values():
         car = carnet.get(p["coin"])
         typ = p.get("type_pnl")
-        if typ == "dislocation":  # court terme : MtM = convergence de l'écart
+        if typ == "dislocation":
             gap_ent = float((p.get("meta") or {}).get("gap_entree_bps") or 0.0)
             gap_cur = _gap_courant_bps(car, int(p.get("sens") or 1)) if car else gap_ent
             mtm = MP.pnl_courant_usd(p, base_courant_bps=gap_cur, now_ms=now)
         else:
             m = cv.get(p["coin"]) or {}
-            # LOT14 #4 — marque à la valeur RÉELLEMENT liquidable : un long au BID, un short à l'ASK. Repli mid
-            # seulement si le carnet est illisible (jamais un prix plus favorable que ce qu'on obtiendrait).
             ba = bidask.get(p["coin"])
             px_exec = (
                 INV.prix_sortie_executable(
@@ -586,6 +620,9 @@ def tick(
             "mtm_usd": round(mtm, 6),
             "age_min": round((now - float(p["ts_ouverture_ms"])) / 60000.0, 1),
         }
+        if p.get("liquidation_status"):
+            e["liquidation_status"] = p["liquidation_status"]
+            e["liquidation_reason"] = p.get("liquidation_reason")
         if typ == "dislocation":
             e["jambes"] = (p.get("meta") or {}).get("jambes")
             e["hedge_ratio"] = (p.get("meta") or {}).get("hedge_ratio")
@@ -604,7 +641,7 @@ def tick(
                 ),
                 "pnl_liquidable_maintenant_usd": round(mtm, 6),
             }
-        elif typ == "funding_carry":  # legacy quarantaine
+        elif typ == "funding_carry":
             dec = decomposer(p, carnet_courant=car, d_courant=None, base_courant_bps=None, now_ms=now)
             e["decomposition"] = dec
             e["jambes"] = dec.get("jambes") or (p.get("meta") or {}).get("jambes")
@@ -615,10 +652,7 @@ def tick(
 
     motifs = Counter(str(r.get("motif") or "REFUS_SANS_MOTIF") for r in refus)
     refus_par_motif = dict(motifs)
-    top_no_trade = [
-        {"reason": motif, "count": count}
-        for motif, count in motifs.most_common(10)
-    ]
+    top_no_trade = [{"reason": motif, "count": count} for motif, count in motifs.most_common(10)]
     statut_path = root / STATUS_RELPATH
     statut_precedent: dict[str, Any] = {}
     if statut_path.exists():
@@ -636,7 +670,7 @@ def tick(
             metriques_ts_ms = now
         else:
             metriques = metriques_precedentes
-    except Exception:  # noqa: BLE001 — les métriques ne bloquent jamais le tick
+    except Exception:  # noqa: BLE001
         metriques = metriques_precedentes
     all_zero = evaluer_signaux_tous_a_zero(
         sizing_outcomes,
@@ -672,7 +706,7 @@ def tick(
         "all_signals_zero": all_zero,
         "zero_position_reason": zero_position_reason,
         "decision_latency_ms": decision_latency_ms,
-        "refus_par_motif_ce_tick": refus_par_motif,  # PAR TICK, pas cumulé
+        "refus_par_motif_ce_tick": refus_par_motif,
         "premier_signal": premier_signal,
         "resume": resume,
         "positions": positions,
@@ -693,4 +727,10 @@ def tick(
     return statut
 
 
-__all__ = ["LEAD_LAG_EXPERIMENTAL_LANE", "tick", "STATUS_RELPATH"]
+__all__ = [
+    "LEAD_LAG_EXPERIMENTAL_LANE",
+    "_jambes_sortie_dislocation",
+    "_gerer_sorties",
+    "tick",
+    "STATUS_RELPATH",
+]
