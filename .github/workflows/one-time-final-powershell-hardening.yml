@@ -1,0 +1,120 @@
+name: one-time-final-powershell-hardening
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/one-time-final-powershell-hardening.yml
+
+permissions:
+  contents: write
+
+jobs:
+  patch-main:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Apply exact launcher hardening patch
+        shell: python
+        run: |
+          from pathlib import Path
+
+          p = Path("tools/start_hypersmart_simulation.ps1")
+          text = p.read_text(encoding="utf-8")
+          original = text
+
+          anchor = '$Root = Split-Path -Parent $PSScriptRoot\n'
+          insert = '''$Root = Split-Path -Parent $PSScriptRoot
+# PORTABILITE: le wrapper doit utiliser exactement le runtime Python choisi par
+# portable_env.cmd. Un lancement direct du .ps1 accepte uniquement un Python
+# explicitement fourni sous la racine, ou le runtime embarque standard.
+$PythonExe = [string]$env:HYPERSMART_PYTHON
+if ([string]::IsNullOrWhiteSpace($PythonExe)) {
+    $PythonExe = Join-Path $Root "tools\\python\\python.exe"
+}
+try {
+    $PythonExe = [IO.Path]::GetFullPath($PythonExe)
+    $rootFullForPython = [IO.Path]::GetFullPath($Root).TrimEnd([char]92, [char]47)
+} catch {
+    throw "HYPERSMART_PYTHON invalide: $($_.Exception.Message)"
+}
+if (-not (Test-Path -LiteralPath $PythonExe -PathType Leaf)) {
+    throw "Runtime Python HyperSmart introuvable: $PythonExe"
+}
+if (-not $PythonExe.StartsWith($rootFullForPython, [StringComparison]::OrdinalIgnoreCase)) {
+    throw "Runtime Python refuse hors du checkout courant: $PythonExe"
+}
+$env:HYPERSMART_PYTHON = $PythonExe
+'''
+          assert text.count(anchor) == 1, text.count(anchor)
+          text = text.replace(anchor, insert, 1)
+
+          bare_calls = text.count('& python ')
+          assert bare_calls >= 1, bare_calls
+          text = text.replace('& python ', '& $PythonExe ')
+
+          process_calls = text.count('-FilePath "python"')
+          assert process_calls >= 1, process_calls
+          text = text.replace('-FilePath "python"', '-FilePath $PythonExe')
+
+          old_poller = '''    $pollers = Get-CimInstance Win32_Process | Where-Object {
+        ($_.CommandLine -like "*hypersmart_simulation_poll_loop.ps1*") -or
+        ($_.CommandLine -like "*hl_observer copy-run*--network-read*") -or
+        ($_.CommandLine -like "*hl_observer live-user-fills-scan*--network-read*")
+    }
+'''
+          new_poller = '''    $pollers = Get-CimInstance Win32_Process | Where-Object {
+        (Test-HyperSmartProcessBelongsToRoot -Process $_) -and (
+            ($_.CommandLine -like "*hypersmart_simulation_poll_loop.ps1*") -or
+            ($_.CommandLine -like "*hl_observer copy-run*--network-read*") -or
+            ($_.CommandLine -like "*hl_observer live-user-fills-scan*--network-read*")
+        )
+    }
+'''
+          assert text.count(old_poller) == 1, text.count(old_poller)
+          text = text.replace(old_poller, new_poller, 1)
+
+          old_aux = '''        $matches = Get-CimInstance Win32_Process | Where-Object {
+            $_.ProcessId -ne $PID -and $_.CommandLine -like $CommandPattern
+        }
+'''
+          new_aux = '''        $matches = Get-CimInstance Win32_Process | Where-Object {
+            $_.ProcessId -ne $PID -and
+            (Test-HyperSmartProcessBelongsToRoot -Process $_) -and
+            $_.CommandLine -like $CommandPattern
+        }
+'''
+          assert text.count(old_aux) == 1, text.count(old_aux)
+          text = text.replace(old_aux, new_aux, 1)
+
+          assert '& python ' not in text
+          assert '-FilePath "python"' not in text
+          assert '$ProjectRoot' not in text
+          assert text != original
+          p.write_text(text, encoding="utf-8", newline="\n")
+      - name: Static regression assertions
+        shell: python
+        run: |
+          from pathlib import Path
+          t = Path("tools/start_hypersmart_simulation.ps1").read_text(encoding="utf-8")
+          assert '$PythonExe = [string]$env:HYPERSMART_PYTHON' in t
+          assert 'Runtime Python refuse hors du checkout courant' in t
+          assert '& python ' not in t
+          assert '-FilePath "python"' not in t
+          poll = t[t.index('$pollerAlreadyRunning = $false'):t.index('if (-not $pollerAlreadyRunning)')]
+          assert 'Test-HyperSmartProcessBelongsToRoot' in poll
+          aux = t[t.index('function Test-HyperSmartAuxRunning'):]
+          assert 'Test-HyperSmartProcessBelongsToRoot' in aux.split('if ($env:HYPERSMART_ENABLE_AUX_IA',1)[0]
+      - name: Commit exact patch to main
+        shell: bash
+        run: |
+          set -euo pipefail
+          git diff --check
+          git diff -- tools/start_hypersmart_simulation.ps1
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add tools/start_hypersmart_simulation.ps1
+          git commit -m "fix(runtime): pin portable Python and root-scope auxiliaries"
+          git push origin HEAD:main
