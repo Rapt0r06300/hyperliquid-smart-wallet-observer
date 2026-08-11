@@ -267,7 +267,8 @@ def test_P6_data_missing_sans_jambes_reste_non_liquidable(tmp_path):
     # La position reste ouverte et explicitement non-liquidatable plutôt que de
     # fabriquer un close agrégé/mono-jambe.
     assert not [x for x in lignes if x.get("kind") == "CLOSE"]
-    assert pos["position_id"] in store["ouvertes"]
+    assert pos["id"] in store["ouvertes"]
+    assert store["ouvertes"][pos["id"]]["position_id"] == pos["position_id"]
     assert pos["liquidation_status"] == "UNLIQUIDATABLE_DATA_MISSING"
     assert "ENTRY_LEGS_UNAVAILABLE" in pos["liquidation_reason"]
 
