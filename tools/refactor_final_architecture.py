@@ -10,8 +10,12 @@ def split_supervisor_registry() -> None:
     source = SRC / "ops" / "superviseur_collecteurs.py"
     helper = SRC / "ops" / "collecteur_registry.py"
     text = source.read_text(encoding="utf-8")
+    if helper.is_file() and "from hl_observer.ops.collecteur_registry import (" in text:
+        return
     start_marker = "#: 🔴 SOURCE UNIQUE"
     end_marker = "\ndef actif() -> bool:"
+    if start_marker not in text or end_marker not in text:
+        raise RuntimeError("collector registry split markers missing")
     start = text.index(start_marker)
     end = text.index(end_marker, start)
     block = text[start:end].rstrip() + "\n"
@@ -52,8 +56,12 @@ def split_portable_inventory() -> None:
     source = SRC / "ops" / "portable_clone.py"
     helper = SRC / "ops" / "portable_clone_inventory.py"
     text = source.read_text(encoding="utf-8")
+    if helper.is_file() and "from hl_observer.ops.portable_clone_inventory import (" in text:
+        return
     start_marker = 'MANIFEST_NAME = "PORTABLE_FULL_CLONE_MANIFEST.json"'
     end_marker = "\ndef automatic_destination("
+    if start_marker not in text or end_marker not in text:
+        raise RuntimeError("portable inventory split markers missing")
     start = text.index(start_marker)
     end = text.index(end_marker, start)
     block = text[start:end].rstrip() + "\n"
@@ -113,11 +121,15 @@ def verify_limits() -> None:
 
 
 def patch_strategy_gaps() -> None:
-    # Imported lazily so the finalizer remains a simple standalone script and
-    # the strategy patch can be deleted after its one verified use.
     import finalize_strategy_gaps
 
     finalize_strategy_gaps.main()
+
+
+def patch_regressions() -> None:
+    import fix_finalizer_regressions
+
+    fix_finalizer_regressions.main()
 
 
 def main() -> None:
@@ -125,6 +137,8 @@ def main() -> None:
     split_portable_inventory()
     verify_limits()
     patch_strategy_gaps()
+    patch_regressions()
+    verify_limits()
     print("FINAL_ARCHITECTURE_SPLIT_OK")
 
 
