@@ -8,6 +8,24 @@ param(
 
 $ErrorActionPreference = "Continue"
 $Root = Split-Path -Parent $PSScriptRoot
+# PORTABILITE: runtime Python explicite, local au checkout.
+$PythonExe = [string]$env:HYPERSMART_PYTHON
+if ([string]::IsNullOrWhiteSpace($PythonExe)) {
+    $PythonExe = Join-Path $Root "tools\python\python.exe"
+}
+try {
+    $PythonExe = [IO.Path]::GetFullPath($PythonExe)
+    $rootFullForPython = [IO.Path]::GetFullPath($Root).TrimEnd([char]92, [char]47)
+} catch {
+    throw "HYPERSMART_PYTHON invalide: $($_.Exception.Message)"
+}
+if (-not (Test-Path -LiteralPath $PythonExe -PathType Leaf)) {
+    throw "Runtime Python HyperSmart introuvable: $PythonExe"
+}
+if (-not $PythonExe.StartsWith($rootFullForPython, [StringComparison]::OrdinalIgnoreCase)) {
+    throw "Runtime Python refuse hors du checkout courant: $PythonExe"
+}
+$env:HYPERSMART_PYTHON = $PythonExe
 $Url = "http://127.0.0.1:$Port/v2"   # 2026-07-08: nouvelle UI hacker v2 (metagraphe reel) au lieu de l ancienne
 $ApiUrl = "http://127.0.0.1:$Port/api/simulation/overview"
 $HealthUrl = "http://127.0.0.1:$Port/api/simulation/status"
@@ -734,9 +752,9 @@ if (-not $logsToSendWritable) {
 
 try {
     Push-Location $Root
-    $writeCheckOutput = & python -m hl_observer runtime-write-check --from-logs "$logsToSendDir" --stale-after-seconds 60 2>&1
+    $writeCheckOutput = & $PythonExe -m hl_observer runtime-write-check --from-logs "$logsToSendDir" --stale-after-seconds 60 2>&1
     foreach ($line in $writeCheckOutput) { Write-LauncherLog $line }
-    $readinessOutput = & python -m hl_observer simulation-readiness --from-logs "$logsToSendDir" --fresh-window-seconds 120 2>&1
+    $readinessOutput = & $PythonExe -m hl_observer simulation-readiness --from-logs "$logsToSendDir" --fresh-window-seconds 120 2>&1
     foreach ($line in $readinessOutput) { Write-LauncherLog $line }
     Pop-Location
 } catch {
@@ -783,7 +801,7 @@ if (Test-Path -LiteralPath $resourceScript) {
         "--root", "`"$Root`"",
         "--interval-seconds", "15"
     )
-    $resourceProcess = Start-Process -WindowStyle Hidden -PassThru -FilePath "python" `
+    $resourceProcess = Start-Process -WindowStyle Hidden -PassThru -FilePath $PythonExe `
         -ArgumentList $resourceArguments -WorkingDirectory $Root `
         -RedirectStandardOutput $resourceStdoutLog -RedirectStandardError $resourceStderrLog
     if ($resourceProcess -and $resourceProcess.Id) {
@@ -795,19 +813,19 @@ if (Test-Path -LiteralPath $resourceScript) {
 
 try {
     Push-Location $Root
-    $initOutput = & python -m hl_observer init-db 2>&1
+    $initOutput = & $PythonExe -m hl_observer init-db 2>&1
     foreach ($line in $initOutput) { Write-LauncherLog $line }
     if ($env:HYPERSMART_RESET_ON_LAUNCH -eq "1") {
         # RESET seulement si DEMANDE EXPLICITEMENT (=1). Defaut (unset/0) = CONSERVER. AUTOPILOT et
         # restart passent =0 -> jamais de reset. Le vrai reset volontaire passe par reset-paper --confirm.
-        $resetOutput = & python -m hl_observer reset-simulation-state --starting-equity 1000 2>&1
+        $resetOutput = & $PythonExe -m hl_observer reset-simulation-state --starting-equity 1000 2>&1
         foreach ($line in $resetOutput) { Write-LauncherLog $line }
         Write-LauncherLine "Capital virtuel REMIS a 1000 USDT (HYPERSMART_RESET_ON_LAUNCH=1 explicite)."
     } else {
         Write-LauncherLine "Capital virtuel CONSERVE entre lancements (defaut garanti): equity/PnL/ledgers/positions/historique intacts. Reset uniquement via reset-paper --confirm."
     }
     Write-LauncherLine "Nouvelle session simulation: moteur Hyperliquid read-only + paper local actif."
-    $prepareLogsOutput = & python -m hl_observer prepare-simulation-logs 2>&1
+    $prepareLogsOutput = & $PythonExe -m hl_observer prepare-simulation-logs 2>&1
     foreach ($line in $prepareLogsOutput) { Write-LauncherLog $line }
     Write-LauncherLine "Logs a envoyer prepares: session fraiche, anciens fichiers deplaces dans _archives."
     Write-LauncherLine "Nouvelle session de logs preparee (capital CONSERVE par defaut; reset uniquement via reset-paper --confirm ou HYPERSMART_RESET_ON_LAUNCH=1)."
@@ -816,14 +834,14 @@ try {
     } else {
         Write-LauncherLine "Profil $startupProfile : warmup read-only explicite."
         Write-LauncherLine "Decouverte read-only des marches Hyperliquid pour scanner davantage de coins."
-        $marketsOutput = & python -m hl_observer discover-markets --store --max-coins 80 2>&1
+        $marketsOutput = & $PythonExe -m hl_observer discover-markets --store --max-coins 80 2>&1
         foreach ($line in $marketsOutput) { Write-LauncherLog $line }
         Write-LauncherLine "Scan L2/candles read-only des marches Hyperliquid pour les gates de liquidite."
-        $marketScanOutput = & python -m hl_observer scan-markets --all --store --max-coins 80 --l2book --candles 2>&1
+        $marketScanOutput = & $PythonExe -m hl_observer scan-markets --all --store --max-coins 80 --l2book --candles 2>&1
         foreach ($line in $marketScanOutput) { Write-LauncherLog $line }
         Write-LauncherLine "Elargissement read-only de la shortlist de leaders."
         try {
-            $walletsOutput = & python -m hl_observer.collection.run_collect_all --max-coins 200 --target 6000 2>&1
+            $walletsOutput = & $PythonExe -m hl_observer.collection.run_collect_all --max-coins 200 --target 6000 2>&1
             foreach ($line in $walletsOutput) { Write-LauncherLog $line }
         } catch {
             Write-LauncherLog "collect-all (elargissement wallets) non bloquant: $($_.Exception.Message)"
@@ -831,7 +849,7 @@ try {
         Write-LauncherLine "Warm scan WebSocket public Hyperliquid avant l'ouverture de l'UI."
         Write-LauncherEngineStatus "startup_public_trade_scan" "Warm scan public read-only."
         try {
-            $warmPublicScanOutput = & python -m hl_observer live-public-scan --network-read --store --duration-seconds 6 --coins AUTO --max-coins 60 --max-wallets 20000 --promote-top $MaxLeaders --no-report 2>&1
+            $warmPublicScanOutput = & $PythonExe -m hl_observer live-public-scan --network-read --store --duration-seconds 6 --coins AUTO --max-coins 60 --max-wallets 20000 --promote-top $MaxLeaders --no-report 2>&1
             foreach ($line in $warmPublicScanOutput) { Write-LauncherLog $line }
         } catch {
             Write-LauncherLog "warm live-public-scan non bloquant: $($_.Exception.Message)"
@@ -845,7 +863,7 @@ try {
 
 if (-not (Test-CommandCenter)) {
     Write-LauncherLine "Demarrage du serveur UI local sur $Url"
-    $uiProcess = Start-Process -NoNewWindow -PassThru -FilePath "python" -ArgumentList @(
+    $uiProcess = Start-Process -NoNewWindow -PassThru -FilePath $PythonExe -ArgumentList @(
         "-m", "hl_observer", "ui",
         "--host", "127.0.0.1",
         "--port", "$Port"
@@ -860,9 +878,11 @@ if (-not (Test-CommandCenter)) {
 $pollerAlreadyRunning = $false
 try {
     $pollers = Get-CimInstance Win32_Process | Where-Object {
-        ($_.CommandLine -like "*hypersmart_simulation_poll_loop.ps1*") -or
-        ($_.CommandLine -like "*hl_observer copy-run*--network-read*") -or
-        ($_.CommandLine -like "*hl_observer live-user-fills-scan*--network-read*")
+        (Test-HyperSmartProcessBelongsToRoot -Process $_) -and (
+            ($_.CommandLine -like "*hypersmart_simulation_poll_loop.ps1*") -or
+            ($_.CommandLine -like "*hl_observer copy-run*--network-read*") -or
+            ($_.CommandLine -like "*hl_observer live-user-fills-scan*--network-read*")
+        )
     }
     $pollerAlreadyRunning = @($pollers).Count -gt 0
 } catch {
@@ -905,7 +925,9 @@ function Test-HyperSmartAuxRunning {
     param([string]$CommandPattern)
     try {
         $matches = Get-CimInstance Win32_Process | Where-Object {
-            $_.ProcessId -ne $PID -and $_.CommandLine -like $CommandPattern
+            $_.ProcessId -ne $PID -and
+            (Test-HyperSmartProcessBelongsToRoot -Process $_) -and
+            $_.CommandLine -like $CommandPattern
         }
         return @($matches).Count -gt 0
     } catch {
@@ -985,7 +1007,7 @@ if (Test-CommandCenter) {
 # Item 10 : capture AUTORITAIRE des vrais PID (cmd/UI/poller/stream/collecteurs) -> lanceur_pids.json.
 # registre_pids scanne la table des process PAR SIGNATURE ; l'arret devient cible, zero orphelin.
 try {
-    & python -m hl_observer.ops.registre_pids enregistrer "$Root" 2>&1 | Out-Null
+    & $PythonExe -m hl_observer.ops.registre_pids enregistrer "$Root" 2>&1 | Out-Null
     Write-LauncherLine "Registre PID reel ecrit (lanceur_pids.json)."
 } catch {
     Write-LauncherLine "Registre PID: capture non effectuee."
