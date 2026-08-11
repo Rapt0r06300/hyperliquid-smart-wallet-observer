@@ -56,13 +56,13 @@ def test_start_script_initializes_everything_without_execution():
     poll_loop_text = Path("tools/hypersmart_simulation_poll_loop.ps1").read_text(encoding="utf-8")
 
     assert "[int]$Port = 8794" in text
-    assert "python -m hl_observer init-db" in text
+    assert "& $PythonExe -m hl_observer init-db" in text
     assert '$HealthUrl = "http://127.0.0.1:$Port/api/simulation/status"' in text
     assert "Invoke-WebRequest -UseBasicParsing -Uri $HealthUrl" in text
-    assert "python -m hl_observer reset-simulation-state --starting-equity 1000" in text
+    assert "& $PythonExe -m hl_observer reset-simulation-state --starting-equity 1000" in text
     assert 'HYPERSMART_RESET_ON_LAUNCH -eq "1"' in text  # 25/07 Fix1 : reset SEULEMENT si =1 explicite
     assert "CONSERVE par defaut" in text                  # defaut garanti = conserver equity/PnL/ledgers
-    assert "python -m hl_observer discover-markets --store --max-coins 80" in text
+    assert "& $PythonExe -m hl_observer discover-markets --store --max-coins 80" in text
     assert "scan-markets --all --store --max-coins 80 --l2book --candles" in text
     assert "Warm scan WebSocket public Hyperliquid" in text
     assert "startup_public_trade_scan" in text

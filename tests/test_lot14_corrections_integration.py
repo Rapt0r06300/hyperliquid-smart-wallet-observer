@@ -251,7 +251,7 @@ def test_P5_resume_compte_reduce_et_close_et_reconcilie(tmp_path):
 
 
 # ══════════════ P6 — DATA_MISSING ne fabrique pas de convergence ══════════════
-def test_P6_data_missing_pnl_brut_non_positif(tmp_path):
+def test_P6_data_missing_sans_jambes_reste_non_liquidable(tmp_path):
     store = MP.charger_store(tmp_path)
     sig = MP.Signal(moteur="cross_venue", coin="DOT", sens=1, type_pnl="dislocation", notional_usd=100.0,
                     prix_entree=100.0, cout_entree_bps=8.0, edge_estime_bps=40.0, ts_signal_ms=NOW - 1000,
@@ -263,10 +263,13 @@ def test_P6_data_missing_pnl_brut_non_positif(tmp_path):
     # AUCUN carnet écrit -> donnée manquante
     R._gerer_sorties(store, tmp_path, now_ms=NOW)
     lignes = [json.loads(x) for x in (tmp_path / MP.LEDGER_RELPATH).read_text().splitlines()]
-    close = [x for x in lignes if x.get("kind") == "CLOSE"][0]
-    assert close["raison"] == "DATA_MISSING_TIMEOUT"
-    # brut = convergence au gap ENTRÉE (0), donc realized <= 0 (coûts de stress). JAMAIS +40 bps.
-    assert close["realized_net_pnl_usdc"] <= 0.0, "sans donnée, PnL brut nul puis coûts -> jamais un gain fabriqué"
+    # Sans les deux jambes d'entrée réconciliables, on ne publie AUCUN realized.
+    # La position reste ouverte et explicitement non-liquidatable plutôt que de
+    # fabriquer un close agrégé/mono-jambe.
+    assert not [x for x in lignes if x.get("kind") == "CLOSE"]
+    assert pos["position_id"] in store["ouvertes"]
+    assert pos["liquidation_status"] == "UNLIQUIDATABLE_DATA_MISSING"
+    assert "ENTRY_LEGS_UNAVAILABLE" in pos["liquidation_reason"]
 
 
 # ══════════════ P7 — deux jambes réellement câblées au runner ══════════════

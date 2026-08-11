@@ -87,10 +87,10 @@ def test_age_max_sans_convergence_ferme_et_paie_ses_couts_honnetement(tmp_path):
     assert close["realized"] < 0, "pas de convergence = les couts sont PAYES, jamais caches"
 
 
-def test_le_cablage_lanceur_et_runtime_existe():
+def test_le_legacy_v1_reste_quarantaine_et_runtime_existe():
     lanceur = open("LANCER_HYPERSMART.cmd", encoding="utf-8", errors="replace").read()
     runtime = open("src/hl_observer/funding/carry_paper_runtime.py", encoding="utf-8").read()
-    assert 'HYPERSMART_ARB_DISLOCATION_PAPER=1' in lanceur
+    assert 'HYPERSMART_ARB_DISLOCATION_PAPER=0' in lanceur
     assert "arb_dislocation_paper import tick" in runtime
 
 

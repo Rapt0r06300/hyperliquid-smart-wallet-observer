@@ -38,10 +38,10 @@ def test_data_missing_stress_is_exactly_two_leg_and_never_fabricates_convergence
 
     result = EP.pnl_deux_jambes(legs)
     # Par jambe: 4.5 bps entree + 4.5 sortie + 1 entree + 26 sortie = 36 bps.
-    # Deux jambes de 100 USD => -0.072 USD, sans aucun gain de convergence invente.
+    # Deux jambes de 100 USD => -0.72 USD, sans aucun gain de convergence invente.
     assert result["n_jambes"] == 2
-    assert result["realized_usd"] == -0.072
-    assert result["round_trip_cost_usd"] == 0.072
+    assert result["realized_usd"] == -0.72
+    assert result["round_trip_cost_usd"] == 0.72
 
 
 def test_missing_entry_legs_returns_none_instead_of_aggregate_close() -> None:
