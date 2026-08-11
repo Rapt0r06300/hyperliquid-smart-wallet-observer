@@ -46,7 +46,7 @@ def test_paper_only_environment_is_explicit():
 def test_sortie_dir_is_an_explicit_strict_release_contract():
     route = 'if /I "%~1"=="--sortie-dir" goto :release_output'
     assert route in CMD
-    label = CMD.index(":release_output")
+    label = CMD.index("\n:release_output\n")
     strict_call = CMD.index("hl_observer.ops.portable_release", label)
     result = CMD.index('set "RC=%ERRORLEVEL%"', strict_call)
     block = CMD[label:result]
