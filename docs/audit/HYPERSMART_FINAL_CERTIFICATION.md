@@ -2,12 +2,12 @@
 
 Date : 2026-08-12
 
-Ce document fige le candidat de clôture du chantier de durcissement HyperSmart. Il est volontairement descriptif : le verdict CI final doit provenir des GitHub Actions du commit qui ajoute ce fichier, jamais d'une déclaration manuelle.
+Ce document fige le candidat de clôture du chantier de durcissement HyperSmart. Il est volontairement descriptif : le verdict CI final doit provenir des GitHub Actions du commit qui met à jour ce fichier, jamais d'une déclaration manuelle.
 
 ## Candidat fonctionnel immédiatement précédent
 
-- SHA : `c128f20183985dfd537aa2d6b6e5758c57c05dee`
-- Objet : aligner les régressions de tests avec les invariants runtime durcis.
+- SHA : `ea18cca9090c31e3cd6bf7b133886d6e31777b43`
+- Objet : code/runtime/tests de clôture, avec release Windows portable configurée pour annuler les builds de `main` devenus obsolètes et certifier prioritairement le HEAD courant.
 
 ## Invariants de clôture
 
@@ -26,17 +26,20 @@ Ce document fige le candidat de clôture du chantier de durcissement HyperSmart.
 - L'état paper Lead-Lag événementiel est restaurable après redémarrage BBO.
 - Les installations critiques de la CI principale sont fail-closed.
 - Le GET de statut reste une voie d'observation ; les mutations économiques appartiennent au writer runtime dédié selon les tests de non-régression du dépôt.
+- Les builds portables obsolètes de `main` sont annulés lorsqu'un nouveau HEAD doit être certifié, afin qu'un ancien SHA ne bloque pas la release courante.
 
 ## Régressions corrigées juste avant certification
 
 1. Les tests du lanceur vérifient désormais `& $PythonExe -m hl_observer ...` au lieu de réimposer un `python` global.
 2. Le test legacy arbitrage vérifie `HYPERSMART_ARB_DISLOCATION_PAPER=0` au lieu de réactiver la v1.
 3. Le coût stress deux jambes corrige l'arithmétique : 36 bps × 100 USD × 2 jambes = 0.72 USD.
-4. Le test DATA_MISSING sans jambes d'entrée exige désormais l'absence de `CLOSE` fabriqué et le statut `UNLIQUIDATABLE_DATA_MISSING`.
+4. Le test DATA_MISSING sans jambes d'entrée exige l'absence de `CLOSE` fabriqué et le statut `UNLIQUIDATABLE_DATA_MISSING`.
+5. Ce test respecte le contrat réel du store : `pos["id"]` est la clé canonique de `store["ouvertes"]`, tandis que `position_id` reste l'identifiant unique de l'épisode dans la valeur.
+6. Les workflows temporaires utilisés pour les réparations chirurgicales ont été supprimés après application.
 
 ## Critère de DONE
 
-Ce chantier n'est certifié DONE que si les workflows GitHub obligatoires du SHA de ce document sont terminés avec succès, notamment :
+Ce chantier n'est certifié DONE que si les workflows GitHub obligatoires du SHA de ce document sont terminés avec succès :
 
 - `hypersmart-ci` ;
 - `hyperlab-ci` ;
