@@ -1,0 +1,61 @@
+name: gpt56-finalize
+
+on:
+  push:
+    branches:
+      - gpt56/finish-hypersmart-audit-20260811
+
+permissions:
+  contents: write
+
+env:
+  PYTHONPATH: src:tools
+  PYTHONUTF8: "1"
+  PYTHONIOENCODING: utf-8
+  HL_ENABLE_MAINNET_EXECUTION: "0"
+  HL_ENABLE_TESTNET_EXECUTION: "0"
+
+jobs:
+  finalize:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: gpt56/finish-hypersmart-audit-20260811
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - name: Install project fail-closed
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[dev]"
+      - name: Apply deterministic hardening
+        run: python tools/finalize_gpt56_patch.py
+      - name: Targeted non-regression tests
+        run: |
+          python -m pytest -q -p no:cacheprovider \
+            tests/test_process_scope_final.py \
+            tests/test_premier_lancement.py \
+            tests/test_echec_silencieux.py \
+            tests/test_ui_simulation_status_fast.py \
+            tests/test_session_harvest.py \
+            tests/test_lead_lag_event_runtime_v2.py
+      - name: Diff integrity
+        run: |
+          git diff --check
+          git status --short
+      - name: Commit verified patch
+        shell: bash
+        run: |
+          if git diff --quiet; then
+            echo "No patch produced"
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add tools/start_hypersmart_simulation.ps1 src/hl_observer tests/test_ui_simulation_status_fast.py
+          git commit -m "fix(finalize): close process, portability and silent-failure gaps"
+          git push origin HEAD:gpt56/finish-hypersmart-audit-20260811
