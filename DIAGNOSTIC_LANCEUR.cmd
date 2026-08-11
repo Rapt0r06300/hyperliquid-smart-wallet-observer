@@ -9,9 +9,16 @@ REM  rapport lisible, et NE FERME JAMAIS la fenetre.
 REM
 REM  STRICTEMENT LECTURE SEULE : 0 ordre reel, 0 argent reel, 0 cle privee,
 REM  0 seed, 0 signature, 0 depot/retrait, aucun endpoint d'execution.
-REM  Ce script ne modifie aucun fichier du projet.
+REM  Seul le rapport diagnostic est ecrit sous runtime\reports\ (artefact local).
 REM ============================================================================
-set "RAPPORT=%~dp0DIAGNOSTIC_LANCEUR.txt"
+set "RAPPORT_DIR=%~dp0runtime\reports"
+if not exist "%RAPPORT_DIR%\" mkdir "%RAPPORT_DIR%" >nul 2>&1
+if not exist "%RAPPORT_DIR%\" (
+  echo [ERREUR] Impossible de creer le dossier de rapport runtime :
+  echo         %RAPPORT_DIR%
+  endlocal & exit /b 32
+)
+set "RAPPORT=%RAPPORT_DIR%\DIAGNOSTIC_LANCEUR.txt"
 
 echo.
 echo   Diagnostic en cours (lecture seule)... quelques secondes.
@@ -147,7 +154,7 @@ echo.
 :corps_fin
 echo.
 echo ============================================================
-echo   FIN DU DIAGNOSTIC - aucun fichier du projet n'a ete modifie
+echo   FIN DU DIAGNOSTIC - aucune mutation economique, aucun fichier source modifie
 echo   0 ordre reel, 0 argent reel, 0 cle privee, 0 signature
 echo ============================================================
 exit /b 0
