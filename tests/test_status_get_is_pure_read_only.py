@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import copy
+from dataclasses import fields
 
 from fastapi.testclient import TestClient
 
@@ -11,6 +12,18 @@ from hl_observer.ui.state import UiState
 
 def _settings(tmp_path) -> Settings:
     return Settings(database_url=f"sqlite:///{(tmp_path / 'status.sqlite3').as_posix()}")
+
+
+def _snapshot_state(state: UiState) -> dict[str, object]:
+    """Deep snapshot compatible with ``@dataclass(slots=True)``.
+
+    The proof must compare every declared UiState field without relying on
+    ``__dict__``, which intentionally does not exist for this slotted state.
+    """
+    return {
+        item.name: copy.deepcopy(getattr(state, item.name))
+        for item in fields(state)
+    }
 
 
 def test_status_get_100x_is_pure_and_network_free(tmp_path, monkeypatch):
@@ -33,7 +46,7 @@ def test_status_get_100x_is_pure_and_network_free(tmp_path, monkeypatch):
             "source_delta_key": "pure-read-test",
         }
     }
-    before = copy.deepcopy(state.__dict__)
+    before = _snapshot_state(state)
 
     def _network_forbidden(*_a, **_k):
         raise AssertionError("GET /api/simulation/status must never perform network I/O")
@@ -52,4 +65,4 @@ def test_status_get_100x_is_pure_and_network_free(tmp_path, monkeypatch):
         assert payload["mark_to_market"]["read_status"] in {
             "LOCAL_BBO_MISSING", "NO_USABLE_MARK", "NO_SETTINGS", "NO_OPEN_POSITION"
         }
-    assert state.__dict__ == before
+    assert _snapshot_state(state) == before
