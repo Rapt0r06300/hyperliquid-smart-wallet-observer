@@ -335,15 +335,26 @@ def test_dashboard_writes_a_heartbeat_each_second(tmp_path):
     thread = RC._demarrer_dashboard_thread(tmp_path, ident, intervalle_s=0.1)
     heartbeat_path = run_dir / "DASHBOARD-HEARTBEAT.json"
     try:
-        deadline = time.time() + 2.0
-        while not heartbeat_path.exists() and time.time() < deadline:
+        deadline = time.monotonic() + 2.0
+        while not heartbeat_path.exists() and time.monotonic() < deadline:
             time.sleep(0.02)
+        assert heartbeat_path.exists(), "dashboard heartbeat was never created"
         first = json.loads(heartbeat_path.read_text(encoding="utf-8"))
-        time.sleep(1.1)
-        second = json.loads(heartbeat_path.read_text(encoding="utf-8"))
+
+        # A hosted CI runner is not a real-time scheduler: sleeping exactly 1.1 s
+        # can wake before the dashboard thread gets its next time slice. Poll the
+        # observable heartbeat instead, with a hard deadline, so the test still
+        # proves liveness without depending on scheduler precision.
+        advance_deadline = time.monotonic() + 3.0
+        second = first
+        while second["ui_tick"] <= first["ui_tick"] and time.monotonic() < advance_deadline:
+            time.sleep(0.05)
+            second = json.loads(heartbeat_path.read_text(encoding="utf-8"))
+
         assert first["etat_ui"] == "ACTIF"
         assert second["ui_tick"] > first["ui_tick"]
         assert second["ts"] > first["ts"]
+        assert second["ts"] - first["ts"] <= 3.0
         assert thread.is_alive()
     finally:
         RC._FINALISATION_TERMINEE.set()
