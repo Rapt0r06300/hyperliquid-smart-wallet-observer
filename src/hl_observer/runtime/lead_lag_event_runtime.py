@@ -35,6 +35,7 @@ DEFAULT_DECISIONS = Path("runtime") / "data" / "lead_lag_event_decisions.jsonl"
 DEFAULT_STATUS = Path("runtime") / "data" / "lead_lag_event_runtime_status.json"
 DEFAULT_STATE = Path("runtime") / "data" / "lead_lag_event_runtime_state.json"
 STATE_SCHEMA = "hypersmart.lead_lag_event_state.v1"
+LANE_ID = "LEAD_LAG_STRICT_EVENT"
 
 
 @dataclass(frozen=True, slots=True)
@@ -214,6 +215,7 @@ class LeadLagEventPaperRuntime:
             execution_truth=truth,
             decision_context={
                 "event_driven": True,
+                "lane": LANE_ID,
                 "source_event_id": event_id,
                 "shock_bps": shock_bps,
                 "runtime_latency_ms": latency_ms,
@@ -272,6 +274,7 @@ class LeadLagEventPaperRuntime:
             "latency_ms": outcome.latency_ms,
             "edge_remaining_bps": outcome.edge_remaining_bps,
             "real_execution": False,
+            "lane": LANE_ID,
             **extra,
         }
         with self.decisions_path.open("a", encoding="utf-8") as handle:
@@ -280,6 +283,7 @@ class LeadLagEventPaperRuntime:
     def _state_payload(self) -> dict[str, Any]:
         return {
             "schema": STATE_SCHEMA,
+            "lane": LANE_ID,
             "real_execution": False,
             "accepted": self._accepted,
             "rejected": self._rejected,
@@ -362,6 +366,7 @@ class LeadLagEventPaperRuntime:
     ) -> None:
         payload = {
             "enabled": self.enabled,
+            "lane": LANE_ID,
             "real_execution": False,
             "code": code,
             "config_path": str(self.config_path),
@@ -468,4 +473,4 @@ def _positive_int(value: Any) -> int | None:
     return parsed if parsed > 0 else None
 
 
-__all__ = ["LeadLagEventOutcome", "LeadLagEventPaperRuntime"]
+__all__ = ["LANE_ID", "LeadLagEventOutcome", "LeadLagEventPaperRuntime"]

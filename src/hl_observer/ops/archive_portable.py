@@ -762,7 +762,8 @@ def creer_archive_portable(root: str | Path, cible: str | Path, *, version: str 
     try:
         cible.relative_to(root)
     except ValueError:
-        pass
+        import logging as _hs_silent_logging
+        _hs_silent_logging.getLogger(__name__).debug("best-effort exception suppressed", exc_info=True)
     else:
         raise ArchiveRefuseeError("la sortie ZIP doit etre exterieure au projet: %s" % cible)
     if mode_release not in {"official", "developpement"}:

@@ -19,6 +19,7 @@ from hl_observer.market_data.live_l2_service import LiveL2Service
 from hl_observer.signals.all_signals_zero_alert import evaluer_signaux_tous_a_zero
 
 STATUS_RELPATH = MP.STATUS_RELPATH  # versionné (v2) : la v1 reste en quarantaine
+LEAD_LAG_EXPERIMENTAL_LANE = "LEAD_LAG_EXP_CALIBRATION"
 
 
 def _marks_cross_venue(root: Path) -> dict[str, dict]:
@@ -678,6 +679,8 @@ def tick(
         "mtm_total_usd": round(mtm_total, 6),
         "metriques_cross_venue": metriques,
         "metriques_cross_venue_ts_ms": int(metriques_ts_ms) if metriques_ts_ms else None,
+        "lead_lag_lane": LEAD_LAG_EXPERIMENTAL_LANE,
+        "lead_lag_lane_semantics": "calibration_only_separate_from_strict_event",
         "real_execution": False,
     }
     p = statut_path
@@ -690,4 +693,4 @@ def tick(
     return statut
 
 
-__all__ = ["tick", "STATUS_RELPATH"]
+__all__ = ["LEAD_LAG_EXPERIMENTAL_LANE", "tick", "STATUS_RELPATH"]

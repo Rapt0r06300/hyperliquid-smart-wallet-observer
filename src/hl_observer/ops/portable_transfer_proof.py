@@ -103,7 +103,8 @@ def _stop_spawned_launcher(root: Path, process: subprocess.Popen[str], env: dict
         process.wait(timeout=60)
         return
     except (OSError, BrokenPipeError, subprocess.TimeoutExpired):
-        pass
+        import logging as _hs_silent_logging
+        _hs_silent_logging.getLogger(__name__).debug("best-effort exception suppressed", exc_info=True)
     subprocess.run(
         ["cmd.exe", "/d", "/c", str(root / "LANCER_HYPERSMART.cmd"), "stop"],
         cwd=str(root), env=env, check=False, timeout=300,
