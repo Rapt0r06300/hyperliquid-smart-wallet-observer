@@ -20,6 +20,16 @@ def test_page_uses_real_history_endpoint_and_smoothing():
     assert "EQUITY //" in html   # panneau courbe (ex-"METAGRAPHE", renomme a la refonte /v2)
 
 
+def test_metagraph_ne_projette_jamais_un_pnl_cote_navigateur():
+    """Le navigateur trace les mesures serveur/ledger, sans extrapoler entre deux polls."""
+    html = _endpoint("/v2")().body.decode("utf-8")
+
+    assert "var nr=pts.length;" in html
+    assert "var solide=smoothPath(xy);" in html
+    assert "nr<pts.length" not in html
+    assert "Aucune extrapolation client" in html
+
+
 def _isolate_persisted_store(monkeypatch):
     """L'endpoint privilegie l'historique PERSISTE (survit a la fermeture du navigateur).
     En test, ce store lisait les VRAIES donnees runtime -> le test n'etait pas isole (600 points
