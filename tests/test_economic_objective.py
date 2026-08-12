@@ -25,6 +25,7 @@ def _proof(**overrides):
         "oos": {"net_pnl_usd": 4.2, "no_lookahead": True},
         "forward": {"net_pnl_usd": 4.1, "post_freeze": True},
         "placebos": {"beaten": True},
+        "vault_generalization": {"sample_count": 20, "net_bps": 3.0},
     }
     row.update(overrides)
     return row
@@ -40,6 +41,17 @@ def test_objectif_strict_atteint_avec_preuve_complete():
     result = evaluate_objective(_proof())
     assert result["objective_status"] == "ATTEINT"
     assert result["eligible_net_pnl_usd"] == 4.6
+
+
+def test_copy_refuse_heldout_absent_trop_petit_ou_negatif():
+    missing = evaluate_objective(_proof(vault_generalization=None))
+    assert "COPY_HELDOUT_VAULT_PROOF_MISSING" in missing["objective_reasons"]
+
+    small = evaluate_objective(_proof(vault_generalization={"sample_count": 4, "net_bps": 3.0}))
+    assert "COPY_HELDOUT_VAULT_SAMPLE_TOO_SMALL" in small["objective_reasons"]
+
+    negative = evaluate_objective(_proof(vault_generalization={"sample_count": 20, "net_bps": -0.1}))
+    assert "COPY_HELDOUT_VAULT_NET_NOT_POSITIVE" in negative["objective_reasons"]
 
 
 def test_pnl_affiche_sans_slippage_ni_forward_est_non_atteint():
