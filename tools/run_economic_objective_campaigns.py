@@ -1,4 +1,9 @@
-"""Run the three separate read-only/paper economic evidence campaigns."""
+"""Run the three separate read-only/paper economic evidence campaigns.
+
+Each family is evaluated independently against the strict +4 USD realized-net
+contract.  The runner is deliberately fail-closed: missing depth, costs or
+forward evidence remains NON_ATTEINT rather than becoming a modelled gain.
+"""
 
 from __future__ import annotations
 
@@ -14,18 +19,25 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
 from hl_observer.backtesting import lead_lag_shadow  # noqa: E402
+from hl_observer.backtesting.lead_lag_multitape import (  # noqa: E402
+    discover_sources as discover_lead_sources,
+    load_multitape,
+)
 from hl_observer.ops.superviseur_collecteurs import demarrer_tous  # noqa: E402
 from hl_observer.simulation.economic_campaigns import (  # noqa: E402
     REPORT_DIR,
     build_copy_campaign,
     build_cross_campaign,
-    build_lead_lag_campaign,
     dataset_provenance,
     freeze_parameters,
     render_campaign_report,
     write_campaign,
 )
 from hl_observer.simulation.economic_family_scoreboard import export_scoreboards  # noqa: E402
+from hl_observer.simulation.lead_lag_campaign_adapter import (  # noqa: E402
+    campaign_from_replay,
+    run_ledger as run_lead_lag_ledger,
+)
 
 
 def _tool(name: str, path: Path):
@@ -65,12 +77,16 @@ def run_campaigns(
     *,
     cross_budget_s: float = 20.0,
     cross_current_only: bool = False,
+    lead_budget_s: float = 45.0,
+    lead_max_lines: int = 2_000_000,
     start_collection: bool = True,
 ) -> dict[str, Any]:
     assert_execution_disabled()
+    root = Path(root).resolve()
     copy_tool = _tool("hypersmart_copy_pipeline", root / "tools" / "pipeline_copie_reel.py")
     cross_tool = _tool("hypersmart_cross_campaign", root / "tools" / "backtest_dislocation_2jambes.py")
 
+    # ---------------------------------------------------------------- Copy-Vault
     copy_data = dataset_provenance(
         root,
         (
@@ -78,6 +94,7 @@ def run_campaigns(
             "runtime/data/vault_episodes.jsonl",
             "runtime/data/vault_snapshots.jsonl",
             "runtime/data/hl_allmids_tape.jsonl",
+            "runtime/data/carnet_venues.jsonl",
         ),
     )
     copy_freeze: dict[str, Any] | None = None
@@ -86,6 +103,9 @@ def run_campaigns(
         nonlocal copy_freeze
         copy_freeze = freeze_parameters(root, "copy_vault", parameters, copy_data)
 
+    # Cost components stay unmeasured here until the Copy path can causally
+    # align executable L2 observations. Passing None is intentional fail-closed
+    # behaviour, not a zero-cost assumption.
     copy_raw = copy_tool.construire(
         root,
         geler_si_valide=False,
@@ -97,20 +117,68 @@ def run_campaigns(
     copy_campaign["evidence_paths"].append(copy_raw_path.relative_to(root).as_posix())
     write_campaign(root, copy_campaign)
 
-    lead_data = dataset_provenance(root, ("runtime/data/bbo_tape.jsonl",))
+    # ---------------------------------------------------------------- Lead-Lag
+    # The old campaign called lead_lag_shadow.backtest() directly, which only
+    # read the tiny current tape and returned aggregate research metrics.  The
+    # economic campaign now loads sealed append-only history on a common wall
+    # clock and settles causal signals through the closed paper ledger.
+    lead_sources = discover_lead_sources(root)
+    lead_data = dataset_provenance(
+        root,
+        [*lead_sources, root / "runtime" / "data" / "carnet_venues.jsonl"],
+    )
+    lead_horizon_ms = 1_000
+    lead_min_history = 5
+    lead_cost_config = {
+        "notional": 100.0,
+        # Hyperliquid taker base is modelled conservatively as two taker fills
+        # for this single-venue follower leg: 4.5 bps entry + 4.5 bps exit.
+        "fee_bps": 9.0,
+        # Estimated until a causally aligned executable BBO/L2 cost adapter is
+        # available.  Therefore costs_measured MUST remain False.
+        "demi_spread_bps": 4.0,
+        "slippage_bps": 1.0,
+        "min_fill_ratio": 0.5,
+        "costs_measured": False,
+        "equity": 1000.0,
+    }
     lead_params = {
         "seuil_choc_bps": lead_lag_shadow.SEUIL_CHOC_BPS,
-        "frais_slippage_bps": lead_lag_shadow.FRAIS_SLIPPAGE_BPS,
-        "horizons_ms": list(lead_lag_shadow.HORIZONS_MS),
-        "minimum_shocks": lead_lag_shadow.MIN_CHOCS,
+        "horizon_ms": lead_horizon_ms,
+        "minimum_history": lead_min_history,
+        "minimum_episodes": 5,
+        "cost_model": lead_cost_config,
+        "loader_max_lines": int(lead_max_lines),
+        "loader_time_budget_s": float(lead_budget_s),
+        "selection_rule": "FIXED_PRE_EVALUATION",
     }
     lead_freeze = freeze_parameters(root, "lead_lag", lead_params, lead_data)
-    lead_raw = lead_lag_shadow.backtest(root)
+    lead_tape, lead_loader_meta = load_multitape(
+        root,
+        max_lines=max(0, int(lead_max_lines)),
+        time_budget_s=max(0.0, float(lead_budget_s)),
+    )
+    lead_raw = run_lead_lag_ledger(
+        lead_tape,
+        shock_threshold_bps=lead_lag_shadow.SEUIL_CHOC_BPS,
+        horizon_ms=lead_horizon_ms,
+        min_history=lead_min_history,
+        config=lead_cost_config,
+        min_episodes=5,
+    )
+    lead_raw["multitape_meta"] = lead_loader_meta
+    lead_raw["paper_read_only"] = True
+    lead_raw["real_execution"] = False
     lead_raw_path = _write_raw(root, "lead_lag", lead_raw)
-    lead_campaign = build_lead_lag_campaign(lead_raw, freeze=lead_freeze, datasets=lead_data)
-    lead_campaign["evidence_paths"].append(lead_raw_path.relative_to(root).as_posix())
+    lead_campaign = campaign_from_replay(
+        lead_raw,
+        freeze=lead_freeze,
+        datasets=lead_data,
+        evidence_paths=[lead_raw_path.relative_to(root).as_posix()],
+    )
     write_campaign(root, lead_campaign)
 
+    # ---------------------------------------------------------------- Cross-Venue v2
     cross_data = dataset_provenance(
         root,
         (
@@ -192,12 +260,16 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--root", default=str(ROOT))
     parser.add_argument("--cross-budget-s", type=float, default=20.0)
     parser.add_argument("--cross-current-only", action="store_true")
+    parser.add_argument("--lead-budget-s", type=float, default=45.0)
+    parser.add_argument("--lead-max-lines", type=int, default=2_000_000)
     parser.add_argument("--no-start-collection", action="store_true")
     args = parser.parse_args(argv)
     result = run_campaigns(
         Path(args.root).resolve(),
         cross_budget_s=args.cross_budget_s,
         cross_current_only=args.cross_current_only,
+        lead_budget_s=args.lead_budget_s,
+        lead_max_lines=args.lead_max_lines,
         start_collection=not args.no_start_collection,
     )
     for row in result["campaigns"]:
