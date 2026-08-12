@@ -13,6 +13,14 @@ jobs:
         with:
           ref: rescue-codex-20260812
           fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: pip
+      - name: Install project test dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[dev]"
       - name: Apply exact patch and self-delete
         shell: bash
         run: |
