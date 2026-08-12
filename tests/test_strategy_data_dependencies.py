@@ -1,54 +1,62 @@
-"""AUD-049 / AUD-059 — Autorité famille -> données REQUISES (deny-by-default).
-
-`active_scope` dit QUELLES familles peuvent matérialiser une économie paper ; il ne dit rien des
-DONNÉES dont chacune a besoin. Ce test verrouille une autorité UNIQUE qui déclare, par famille
-active, ses sources requises (identifiants canoniques de SOURCES_HARVEST), en deny-by-default :
-famille inconnue -> rien d'offert ; famille active dont une source requise manque -> pas data-ready
-(pas de faux vert). 0 réseau.
-"""
+"""AUD-049 / AUD-059 — runtime vs economic data readiness, deny-by-default."""
 from __future__ import annotations
 
+from hl_observer.ops.preuve_de_vie import SOURCES_HARVEST
 from hl_observer.strategies import strategy_data_dependencies as D
 from hl_observer.strategies.active_scope import active_strategy_families
-from hl_observer.ops.preuve_de_vie import SOURCES_HARVEST
 
 
 def test_chaque_famille_active_a_des_dependances_declarees():
     for fam in active_strategy_families():
-        assert D.required_sources(fam), f"famille active {fam} sans source requise (AUD-049/059)"
+        assert D.required_sources(fam), f"famille active {fam} sans source runtime requise"
+        assert D.economic_required_sources(fam), f"famille active {fam} sans source economique requise"
     assert D.active_families_have_declared_dependencies() is True
+    assert D.active_families_have_declared_economic_dependencies() is True
 
 
 def test_deny_by_default_famille_inconnue():
     assert D.required_sources("famille_bidon") == frozenset()
+    assert D.economic_required_sources("famille_bidon") == frozenset()
     r = D.evaluate_family_data_readiness("famille_bidon", ["bbo-collector"])
+    e = D.evaluate_family_economic_readiness("famille_bidon", ["bbo-collector"])
     assert r.ready is False and r.required == frozenset()
+    assert e.ready is False and e.required == frozenset()
 
 
-def test_famille_active_pas_ready_si_source_requise_absente():
-    r = D.evaluate_family_data_readiness("lead_lag", ["allmids-collector"])
-    assert r.ready is False and "bbo-collector" in r.missing
-
-
-def test_famille_active_ready_si_toutes_sources_presentes():
-    r = D.evaluate_family_data_readiness(
-        "lead_lag", ["bbo-collector", "carnet-collector", "allmids-collector"]
-    )
+def test_runtime_lead_lag_requiert_bbo_sans_exiger_l2():
+    r = D.evaluate_family_data_readiness("lead_lag", ["bbo-collector"])
     assert r.ready is True and r.missing == frozenset()
+    assert D.required_sources("lead_lag") == frozenset({"bbo-collector"})
 
 
-def test_copy_vault_requiert_fills_et_prix():
-    req = D.required_sources("copy_vault")
-    assert "userfills-live" in req and "allmids-collector" in req
+def test_preuve_economique_lead_lag_requiert_l2():
+    r = D.evaluate_family_economic_readiness("lead_lag", ["bbo-collector"])
+    assert r.ready is False and r.missing == frozenset({"carnet-collector"})
+    r2 = D.evaluate_family_economic_readiness("lead_lag", ["bbo-collector", "carnet-collector"])
+    assert r2.ready is True
 
 
-def test_cross_venue_requiert_bbo_et_profondeur_l2():
-    req = D.required_sources("cross_venue_dislocation")
-    assert req == frozenset({"bbo-collector", "carnet-collector"})
+def test_copy_vault_runtime_et_economique():
+    runtime = D.required_sources("copy_vault")
+    economic = D.economic_required_sources("copy_vault")
+    assert runtime == frozenset({"userfills-live", "allmids-collector"})
+    assert economic == frozenset({"userfills-live", "allmids-collector", "carnet-collector"})
+
+
+def test_cross_venue_runtime_bbo_economic_bbo_plus_l2():
+    assert D.required_sources("cross_venue_dislocation") == frozenset({"bbo-collector"})
+    assert D.economic_required_sources("cross_venue_dislocation") == frozenset(
+        {"bbo-collector", "carnet-collector"}
+    )
 
 
 def test_les_sources_requises_sont_reelles_dans_SOURCES_HARVEST():
     noms = {s.nom for s in SOURCES_HARVEST}
-    for fam, sources in D.strategy_data_dependencies().items():
-        for s in sources:
-            assert s in noms, f"{fam} requiert une source absente de SOURCES_HARVEST: {s}"
+    manifests = (
+        D.strategy_data_dependencies(),
+        D.economic_strategy_data_dependencies(),
+    )
+    for manifest in manifests:
+        for fam, sources in manifest.items():
+            for source in sources:
+                assert source in noms, f"{fam} requiert une source absente de SOURCES_HARVEST: {source}"
