@@ -8,6 +8,7 @@ forward evidence remains NON_ATTEINT rather than becoming a modelled gain.
 from __future__ import annotations
 
 import argparse
+import functools
 import importlib.util
 import json
 import os
@@ -24,6 +25,8 @@ from hl_observer.backtesting.lead_lag_multitape import (  # noqa: E402
     load_multitape,
 )
 from hl_observer.ops.superviseur_collecteurs import demarrer_tous  # noqa: E402
+from hl_observer.simulation.copy_campaign_adapter import build_strict_copy_campaign  # noqa: E402
+from hl_observer.simulation.copy_cost_adapter import measure_copy_cost_components  # noqa: E402
 from hl_observer.simulation.cross_venue_depth_adapter import (  # noqa: E402
     DEFAULT_DEPTH_FRESHNESS_MS,
     enrich_trades_with_depth,
@@ -32,7 +35,6 @@ from hl_observer.simulation.cross_venue_depth_adapter import (  # noqa: E402
 )
 from hl_observer.simulation.economic_campaigns import (  # noqa: E402
     REPORT_DIR,
-    build_copy_campaign,
     build_cross_campaign,
     dataset_provenance,
     freeze_parameters,
@@ -78,6 +80,123 @@ def _write_raw(root: Path, name: str, payload: dict[str, Any]) -> Path:
     return target
 
 
+def _copy_tape_and_forward(copy_tool: Any, root: Path, source: str):
+    """Recreate exactly the price source chosen by the Copy research pipeline."""
+    if source == "candles_5m":
+        tape = copy_tool.charger_prix_tape_candles(root, intervalle="5m")
+        forward = functools.partial(
+            copy_tool.rendement_forward_candles,
+            delai_ms=copy_tool.DELAI_COPIE_MS,
+        )
+    elif source == "candles_1m":
+        tape = copy_tool.charger_prix_tape_candles(root, intervalle="1m")
+        forward = functools.partial(
+            copy_tool.rendement_forward_candles,
+            delai_ms=copy_tool.DELAI_COPIE_MS,
+        )
+    else:
+        tape = copy_tool.charger_prix_tape(root)
+        forward = copy_tool.rendement_forward
+    return tape, forward
+
+
+def _enrich_copy_cost_evidence(
+    copy_tool: Any,
+    root: Path,
+    report: dict[str, Any],
+    depth_snapshots: dict[str, list[dict[str, Any]]],
+) -> None:
+    """Attach measured Copy costs without changing TRAIN-selected parameters.
+
+    A complete vector exists only if every economically replayed OOS event has
+    causal entry+exit depth and enough top-of-book capacity. Latency is not
+    subtracted twice: candle forward returns already enter after DELAI_COPIE_MS.
+    """
+    measure = report.get("mesure") if isinstance(report.get("mesure"), dict) else {}
+    oos = measure.get("oos") if isinstance(measure.get("oos"), dict) else {}
+    if measure.get("statut") not in {"PRELIMINAIRE", "VALIDATION"} or not oos:
+        report["cost_evidence"] = {
+            "complete": False,
+            "reason": "NO_SELECTED_OOS_CONFIGURATION",
+            "paper_read_only": True,
+            "real_execution": False,
+        }
+        return
+
+    source = str(report.get("source_prix") or "")
+    tape, forward = _copy_tape_and_forward(copy_tool, root, source)
+    all_events = copy_tool.charger_entrees_alpha(root)
+    t_cut = int(measure.get("t_cut_ms") or 0)
+    threshold = float(oos["seuil"])
+    horizon_ms = float(oos["horizon_ms"])
+    oos_events = [event for event in all_events if int(event.get("ts_ms") or 0) >= t_cut]
+
+    replayed_events: list[dict[str, Any]] = []
+    for event in oos_events:
+        if float(event.get("move_frac") or 0.0) < threshold:
+            continue
+        series = tape.get(str(event.get("coin") or "").upper())
+        if series and forward(event, series, horizon_ms) is not None:
+            replayed_events.append(event)
+
+    notional_usd = 150.0
+    evidence = measure_copy_cost_components(
+        replayed_events,
+        depth_snapshots,
+        notional_usd=notional_usd,
+        copy_delay_ms=float(copy_tool.DELAI_COPIE_MS),
+        horizon_ms=horizon_ms,
+        threshold=threshold,
+        freshness_ms=DEFAULT_DEPTH_FRESHNESS_MS,
+    )
+    report["cost_evidence"] = evidence
+    components = evidence.get("components_bps") if isinstance(evidence, dict) else None
+    if not isinstance(components, dict):
+        return
+
+    keys = ("fees_bps", "spread_bps", "slippage_bps", "latency_bps")
+    total_cost_bps = sum(float(components[key]) for key in keys)
+    report["simulation_paper_oos"] = copy_tool.simuler_paper(
+        oos_events,
+        tape,
+        horizon_ms=horizon_ms,
+        seuil=threshold,
+        notional_usd=notional_usd,
+        cout_ar_bps=total_cost_bps,
+        forward_fn=forward,
+        cost_components_bps=components,
+    )
+
+    # Held-out vault robustness must use the exact same measured cost vector as
+    # the OOS ledger. The research-time 12 bps assumption cannot promote a
+    # family if actual executable costs are worse.
+    generalization = (
+        measure.get("generalisation_par_vault")
+        if isinstance(measure.get("generalisation_par_vault"), dict)
+        else None
+    )
+    if generalization is not None:
+        held_out = {str(value) for value in generalization.get("vaults_held_out") or []}
+        held_events = [
+            event for event in oos_events
+            if str(event.get("vault") or "") in held_out
+        ]
+        held_sim = copy_tool.simuler_paper(
+            held_events,
+            tape,
+            horizon_ms=horizon_ms,
+            seuil=threshold,
+            notional_usd=notional_usd,
+            cout_ar_bps=total_cost_bps,
+            forward_fn=forward,
+            cost_components_bps=components,
+        )
+        generalization["n"] = held_sim.get("n_trades")
+        generalization["net_bps"] = held_sim.get("roi_par_trade_bps")
+        generalization["measured_cost_bps"] = round(total_cost_bps, 6)
+        generalization["LIQUIDATABLE_NET"] = held_sim.get("LIQUIDATABLE_NET") is True
+
+
 def run_campaigns(
     root: Path,
     *,
@@ -91,6 +210,7 @@ def run_campaigns(
     root = Path(root).resolve()
     copy_tool = _tool("hypersmart_copy_pipeline", root / "tools" / "pipeline_copie_reel.py")
     cross_tool = _tool("hypersmart_cross_campaign", root / "tools" / "backtest_dislocation_2jambes.py")
+    depth_snapshots = load_depth_snapshots(root)
 
     # ---------------------------------------------------------------- Copy-Vault
     copy_data = dataset_provenance(
@@ -109,25 +229,19 @@ def run_campaigns(
         nonlocal copy_freeze
         copy_freeze = freeze_parameters(root, "copy_vault", parameters, copy_data)
 
-    # Cost components stay unmeasured here until the Copy path can causally
-    # align executable L2 observations. Passing None is intentional fail-closed
-    # behaviour, not a zero-cost assumption.
     copy_raw = copy_tool.construire(
         root,
         geler_si_valide=False,
         on_parameters_selected=freeze_copy,
         cost_components_bps=None,
     )
+    _enrich_copy_cost_evidence(copy_tool, root, copy_raw, depth_snapshots)
     copy_raw_path = _write_raw(root, "copy_vault", copy_raw)
-    copy_campaign = build_copy_campaign(copy_raw, freeze=copy_freeze, datasets=copy_data)
+    copy_campaign = build_strict_copy_campaign(copy_raw, freeze=copy_freeze, datasets=copy_data)
     copy_campaign["evidence_paths"].append(copy_raw_path.relative_to(root).as_posix())
     write_campaign(root, copy_campaign)
 
     # ---------------------------------------------------------------- Lead-Lag
-    # The old campaign called lead_lag_shadow.backtest() directly, which only
-    # read the tiny current tape and returned aggregate research metrics. The
-    # economic campaign now loads sealed append-only history on a common wall
-    # clock and settles causal signals through the closed paper ledger.
     lead_sources = discover_lead_sources(root)
     lead_data = dataset_provenance(
         root,
@@ -213,7 +327,6 @@ def run_campaigns(
     )
     cross_meta = series.pop("_meta", {})
     cross_trades = cross_tool.backtester(series)
-    depth_snapshots = load_depth_snapshots(root)
     cross_trades = enrich_trades_with_depth(
         cross_trades,
         depth_snapshots,
