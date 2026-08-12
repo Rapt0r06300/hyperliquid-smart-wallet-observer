@@ -38,7 +38,6 @@ _MUTATION_EVENTS = {
     "shutil.copystat",
 }
 _NETWORK_EVENTS = {
-    "socket.bind",
     "socket.connect",
     "socket.connect_ex",
     "socket.getaddrinfo",
@@ -46,6 +45,19 @@ _NETWORK_EVENTS = {
     "socket.gethostbyname",
     "socket.gethostbyname_ex",
 }
+
+
+def _loopback_bind(args: tuple[Any, ...]) -> bool:
+    """Return True only for an explicit IPv4/IPv6 loopback bind.
+
+    Windows and a few standard-library helpers bind an ephemeral loopback
+    socket for local ownership/probe checks.  That does not escape the
+    extracted release.  Wildcard and non-loopback listeners remain denied.
+    """
+    if len(args) < 2 or not isinstance(args[1], tuple) or not args[1]:
+        return False
+    host = str(args[1][0]).strip().lower()
+    return host in {"127.0.0.1", "::1", "localhost"}
 
 
 def _inside(path: Any, root: Path) -> bool:
@@ -108,6 +120,11 @@ def install(root: str | Path, log_path: str | Path) -> None:
         raise ValueError("portable audit log must live inside extraction") from exc
 
     def hook(event: str, args: tuple[Any, ...]) -> None:
+        if event == "socket.bind":
+            if _loopback_bind(args):
+                return
+            _record(audit_log, event, args)
+            raise PermissionError("portable hermetic validation denies network: %s" % event)
         if event in _NETWORK_EVENTS:
             _record(audit_log, event, args)
             raise PermissionError("portable hermetic validation denies network: %s" % event)

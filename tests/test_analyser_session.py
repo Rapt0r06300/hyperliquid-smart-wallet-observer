@@ -116,7 +116,7 @@ def test_cli_exit_codes(tmp_path, capsys):
     assert "verdict=GO" in capsys.readouterr().out
 
 
-def test_budget_maximal_couvre_toute_la_grille(monkeypatch):
+def test_budget_maximal_couvre_toute_la_grille(tmp_path, monkeypatch):
     # item 11 : budget<=0 => grille entiere (plus de plafond 48/32 code en dur).
     n_grille = 1
     for v in R.ESPACE_DEFAUT.values():
@@ -128,7 +128,15 @@ def test_budget_maximal_couvre_toute_la_grille(monkeypatch):
         return {"candidats": [], "evalues": 0, "caches": 0, "verdict_global": "MORE_DATA"}
 
     monkeypatch.setattr(LA.R, "rechercher", faux_rechercher)
-    LA.lancer_lab(racine=".", sortie_dir="/tmp/_lab_maximal_test", budget=0, source="SYNTHETIQUE")
+    # Ce test ne valide que la conversion du budget. Scanner la racine du
+    # depot faisait involontairement ingerer tout le runtime (et demarrer des
+    # centaines de flux) dans la suite complete Windows.
+    LA.lancer_lab(
+        racine=tmp_path,
+        sortie_dir=tmp_path / "lab-maximal",
+        budget=0,
+        source="SYNTHETIQUE",
+    )
     assert vus["budget"] == n_grille                        # maximal = toute la grille
 
 
