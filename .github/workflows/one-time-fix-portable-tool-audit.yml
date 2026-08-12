@@ -1,15 +1,10 @@
 name: one-time-fix-portable-tool-audit
-
 on:
   push:
-    branches:
-      - rescue-codex-20260812
-    paths:
-      - .github/workflows/one-time-fix-portable-tool-audit.yml
-
+    branches: [rescue-codex-20260812]
+    paths: [.github/workflows/one-time-fix-portable-tool-audit.yml]
 permissions:
   contents: write
-
 jobs:
   patch:
     runs-on: ubuntu-latest
@@ -18,73 +13,16 @@ jobs:
         with:
           ref: rescue-codex-20260812
           fetch-depth: 0
-      - name: Patch audit and regression test exactly once
+      - name: Apply exact patch and self-delete
         shell: bash
         run: |
           set -euo pipefail
-          python - <<'PY'
-          from pathlib import Path
-
-          audit_path = Path("src/hl_observer/audit/cablage.py")
-          text = audit_path.read_text(encoding="utf-8-sig")
-          start_marker = "_OUTIL_DANS_UN_LANCEUR = re.compile("
-          end_marker = "\n\n\ndef outils_demarres_par_les_lanceurs"
-          start = text.index(start_marker)
-          end = text.index(end_marker, start)
-          replacement = r'''_PYTHON_OUTIL_DANS_UN_LANCEUR = (
-              r''' + "'''" + r'''(?:python(?:\.exe)?|\"%HYPERSMART_PYTHON%\"|%HYPERSMART_PYTHON%)''' + "'''" + r'''
-          )
-          _OUTIL_DANS_UN_LANCEUR = re.compile(
-              _PYTHON_OUTIL_DANS_UN_LANCEUR
-              + r''' + "'''" + r'''\s+(?:-\S+\s+)*[\"']?(?:%~dp0|\.[\\/])?''' + "'''" + r'''
-              + r''' + "'''" + r'''((?:tools|scripts)[/\\][\w\-./\\]+\.py)''' + "'''" + r''',
-              re.IGNORECASE,
-          )'''
-          text = text[:start] + replacement + text[end:]
-          audit_path.write_text(text, encoding="utf-8", newline="\n")
-
-          test_path = Path("tests/test_audit_cablage.py")
-          tests = test_path.read_text(encoding="utf-8-sig")
-          test_name = "test_un_lanceur_avec_python_portable_est_reconnu_comme_porte_outil"
-          if test_name not in tests:
-              tests += r'''
-
-
-def test_un_lanceur_avec_python_portable_est_reconnu_comme_porte_outil():
-    """Le lanceur officiel utilise HYPERSMART_PYTHON, pas un Python global.
-
-    Cette forme est une vraie porte de recherche et doit etre reconnue par le
-    cliquet de cablage, sinon les modules economiques réellement appeles sont
-    faussement classes comme testes-non-branches.
-    """
-    from hl_observer.audit.cablage import outils_demarres_par_les_lanceurs
-
-    lanceurs = {
-        "LANCER_OBJECTIF_4USD.cmd": (
-            '"%HYPERSMART_PYTHON%" '
-            '"%~dp0tools\\run_economic_objective_campaigns.py" --root "%~dp0."\n'
-        ),
-        "UNQUOTED.cmd": (
-            '%HYPERSMART_PYTHON% '
-            '"%~dp0tools\\run_economic_objective_campaigns.py"\n'
-        ),
-    }
-    demarres = outils_demarres_par_les_lanceurs(lanceurs)
-    assert demarres == ["tools/run_economic_objective_campaigns.py"]
-    # Un executable arbitraire ne doit pas devenir une porte par accident.
-    assert outils_demarres_par_les_lanceurs(
-        {"BAD.cmd": 'py "%~dp0tools\\run_economic_objective_campaigns.py"\n'}
-    ) == []
-'''
-              test_path.write_text(tests, encoding="utf-8", newline="\n")
-
-          Path(".github/workflows/one-time-fix-portable-tool-audit.yml").unlink()
-          PY
-
+          echo 'ZnJvbSBwYXRobGliIGltcG9ydCBQYXRoCgphdWRpdF9wYXRoID0gUGF0aCgic3JjL2hsX29ic2VydmVyL2F1ZGl0L2NhYmxhZ2UucHkiKQp0ZXh0ID0gYXVkaXRfcGF0aC5yZWFkX3RleHQoZW5jb2Rpbmc9InV0Zi04LXNpZyIpCnN0YXJ0X21hcmtlciA9ICJfT1VUSUxfREFOU19VTl9MQU5DRVVSID0gcmUuY29tcGlsZSgiCmVuZF9tYXJrZXIgPSAiXG5cblxuZGVmIG91dGlsc19kZW1hcnJlc19wYXJfbGVzX2xhbmNldXJzIgpzdGFydCA9IHRleHQuaW5kZXgoc3RhcnRfbWFya2VyKQplbmQgPSB0ZXh0LmluZGV4KGVuZF9tYXJrZXIsIHN0YXJ0KQpyZXBsYWNlbWVudCA9ICJcbiIuam9pbihbCiAgICAiX1BZVEhPTl9PVVRJTF9EQU5TX1VOX0xBTkNFVVIgPSAoIiwKICAgICcgICAgciIiIig/OnB5dGhvbig/OlxcLmV4ZSk/fCIlSFlQRVJTTUFSVF9QWVRIT04lInwlSFlQRVJTTUFSVF9QWVRIT04lKSIiIicsCiAgICAiKSIsCiAgICAiX09VVElMX0RBTlNfVU5fTEFOQ0VVUiA9IHJlLmNvbXBpbGUoIiwKICAgICIgICAgX1BZVEhPTl9PVVRJTF9EQU5TX1VOX0xBTkNFVVIiLAogICAgJyAgICArIHIiIiJcXHMrKD86LVxcUytcXHMrKSpbIlxcXCddPyg/OiV+ZHAwfFxcLltcXFxcL10pPyIiIicsCiAgICAnICAgICsgciIiIigoPzp0b29sc3xzY3JpcHRzKVsvXFxcXF1bXFx3XFwtLi9cXFxcXStcXC5weSkiIiIsJywKICAgICIgICAgcmUuSUdOT1JFQ0FTRSwiLAogICAgIikiLApdKQp0ZXh0ID0gdGV4dFs6c3RhcnRdICsgcmVwbGFjZW1lbnQgKyB0ZXh0W2VuZDpdCmF1ZGl0X3BhdGgud3JpdGVfdGV4dCh0ZXh0LCBlbmNvZGluZz0idXRmLTgiLCBuZXdsaW5lPSJcbiIpCgp0ZXN0X3BhdGggPSBQYXRoKCJ0ZXN0cy90ZXN0X2F1ZGl0X2NhYmxhZ2UucHkiKQp0ZXN0cyA9IHRlc3RfcGF0aC5yZWFkX3RleHQoZW5jb2Rpbmc9InV0Zi04LXNpZyIpCnRlc3RfbmFtZSA9ICJ0ZXN0X3VuX2xhbmNldXJfYXZlY19weXRob25fcG9ydGFibGVfZXN0X3JlY29ubnVfY29tbWVfcG9ydGVfb3V0aWwiCmlmIHRlc3RfbmFtZSBub3QgaW4gdGVzdHM6CiAgICBsaW5lcyA9IFsKICAgICAgICAiIiwKICAgICAgICAiIiwKICAgICAgICAiZGVmIHRlc3RfdW5fbGFuY2V1cl9hdmVjX3B5dGhvbl9wb3J0YWJsZV9lc3RfcmVjb25udV9jb21tZV9wb3J0ZV9vdXRpbCgpOiIsCiAgICAgICAgJyAgICAiIiJMZSBsYW5jZXVyIG9mZmljaWVsIHV0aWxpc2UgSFlQRVJTTUFSVF9QWVRIT04sIHBhcyB1biBQeXRob24gZ2xvYmFsLiIiIicsCiAgICAgICAgIiAgICBmcm9tIGhsX29ic2VydmVyLmF1ZGl0LmNhYmxhZ2UgaW1wb3J0IG91dGlsc19kZW1hcnJlc19wYXJfbGVzX2xhbmNldXJzIiwKICAgICAgICAiIiwKICAgICAgICAiICAgIGxhbmNldXJzID0geyIsCiAgICAgICAgJyAgICAgICAgIkxBTkNFUl9PQkpFQ1RJRl80VVNELmNtZCI6ICgnLAogICAgICAgICcgICAgICAgICAgICBcJ1wiJUhZUEVSU01BUlRfUFlUSE9OJVwiIFwnJywKICAgICAgICAnICAgICAgICAgICAgXCdcIiV+ZHAwdG9vbHNcXFxccnVuX2Vjb25vbWljX29iamVjdGl2ZV9jYW1wYWlnbnMucHlcIiAtLXJvb3QgXCIlfmRwMC5cIlxcXFxuXCcnLAogICAgICAgICIgICAgICAgICksIiwKICAgICAgICAnICAgICAgICAiVU5RVU9URUQuY21kIjogKCcsCiAgICAgICAgIiAgICAgICAgICAgICclSFlQRVJTTUFSVF9QWVRIT04lICciLAogICAgICAgICcgICAgICAgICAgICBcJ1wiJX5kcDB0b29sc1xcXFxydW5fZWNvbm9taWNfb2JqZWN0aXZlX2NhbXBhaWducy5weVwiXFxcXG5cJycsCiAgICAgICAgIiAgICAgICAgKSwiLAogICAgICAgICIgICAgfSIsCiAgICAgICAgIiAgICBkZW1hcnJlcyA9IG91dGlsc19kZW1hcnJlc19wYXJfbGVzX2xhbmNldXJzKGxhbmNldXJzKSIsCiAgICAgICAgJyAgICBhc3NlcnQgZGVtYXJyZXMgPT0gWyJ0b29scy9ydW5fZWNvbm9taWNfb2JqZWN0aXZlX2NhbXBhaWducy5weSJdJywKICAgICAgICAiICAgIGFzc2VydCBvdXRpbHNfZGVtYXJyZXNfcGFyX2xlc19sYW5jZXVycygiLAogICAgICAgICcgICAgICAgIHsiQkFELmNtZCI6IFwncHkgIiV+ZHAwdG9vbHNcXFxccnVuX2Vjb25vbWljX29iamVjdGl2ZV9jYW1wYWlnbnMucHkiXFxcXG5cJ30nLAogICAgICAgICIgICAgKSA9PSBbXSIsCiAgICAgICAgIiIsCiAgICBdCiAgICB0ZXN0cyArPSAiXG4iLmpvaW4obGluZXMpCiAgICB0ZXN0X3BhdGgud3JpdGVfdGV4dCh0ZXN0cywgZW5jb2Rpbmc9InV0Zi04IiwgbmV3bGluZT0iXG4iKQoKUGF0aCgiLmdpdGh1Yi93b3JrZmxvd3Mvb25lLXRpbWUtZml4LXBvcnRhYmxlLXRvb2wtYXVkaXQueW1sIikudW5saW5rKCkK' | base64 -d > /tmp/patch.py
+          python /tmp/patch.py
           git diff --check
-          git diff -- src/hl_observer/audit/cablage.py tests/test_audit_cablage.py
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add src/hl_observer/audit/cablage.py tests/test_audit_cablage.py .github/workflows/one-time-fix-portable-tool-audit.yml
-          git commit -m "fix(audit): recognize portable Python tool entrypoints"
+          python -m pytest -q tests/test_audit_cablage.py tests/test_risk_guards_no_limbo.py::test_le_nombre_de_modules_MORTS_ne_doit_JAMAIS_remonter
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -A
+          git commit -m 'fix(audit): recognize portable Python tool entrypoints'
           git push origin HEAD:rescue-codex-20260812
