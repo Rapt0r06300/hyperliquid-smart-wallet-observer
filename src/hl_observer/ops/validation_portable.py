@@ -250,7 +250,9 @@ def _short_execution_root() -> Path:
     if os.name == "nt":
         drive = os.environ.get("SYSTEMDRIVE", "").strip()
         if not drive:
-            system_root = os.environ.get("SYSTEMROOT") or os.environ.get("WINDIR") or r"C:\Windows"
+            system_drive = os.environ.get("SYSTEMDRIVE", "C:")
+            system_root = os.environ.get("SYSTEMROOT") or os.environ.get("WINDIR")
+            system_root = system_root or str(Path(system_drive + "\\") / "Windows")
             drive = Path(system_root).drive or "C:"
         suffix = f"{os.getpid()}-{time.time_ns() % 100_000_000:08d}"
         return (Path(drive + "\\") / ("hspv éà " + suffix)).resolve()
