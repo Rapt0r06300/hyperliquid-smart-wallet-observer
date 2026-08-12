@@ -18,8 +18,6 @@ def test_signals_from_tape_expected_edge_uses_only_prior_shocks():
     ms = 1_000_000
     trades = [(0, 100.0, 1.0)]
     hl = [_quote(0, 100.0)]
-    # Six separated Binance shocks. Each HL response occurs only AFTER its
-    # shock. The first two signals therefore cannot have a historical estimate.
     for i in range(1, 7):
         t = i * 200 * ms
         trades.append((t, 100.0 + 0.2 * i, 1.0))
@@ -59,8 +57,8 @@ def _signals(n: int) -> list[SignalLeadLag]:
     ]
 
 
-def test_campaign_adapter_can_reconcile_closed_is_oos_forward(tmp_path: Path):
-    config = {
+def _measured_config() -> dict:
+    return {
         "notional": 100.0,
         "fee_bps": 2.5,
         "demi_spread_bps": 2.5,
@@ -69,7 +67,10 @@ def test_campaign_adapter_can_reconcile_closed_is_oos_forward(tmp_path: Path):
         "costs_measured": True,
         "equity": 1000.0,
     }
-    replay = rejouer_lead_lag(_signals(30), config=config, min_episodes=5)
+
+
+def test_campaign_adapter_can_reconcile_closed_is_oos_forward(tmp_path: Path):
+    replay = rejouer_lead_lag(_signals(30), config=_measured_config(), min_episodes=5)
     datasets = {"dataset_fingerprint": "d" * 64, "files": []}
     freeze = freeze_parameters(
         tmp_path,
@@ -94,6 +95,29 @@ def test_campaign_adapter_can_reconcile_closed_is_oos_forward(tmp_path: Path):
     assert campaign["placebos"]["beaten"] is True
     assert campaign["net_pnl_usd"] >= 4.0
     assert campaign["objective_status"] == "ATTEINT"
+
+
+def test_historical_forward_before_physical_freeze_is_rejected(tmp_path: Path):
+    replay = rejouer_lead_lag(_signals(30), config=_measured_config(), min_episodes=5)
+    datasets = {"dataset_fingerprint": "d" * 64, "files": []}
+    # All synthetic signal timestamps are < 30_000 ms; this freeze happens later.
+    freeze = freeze_parameters(
+        tmp_path,
+        "lead_lag",
+        {"fixed": True},
+        datasets,
+        campaign_id="lead-late-freeze",
+        frozen_at_ms=1_000_000,
+    )
+    campaign = campaign_from_replay(
+        {"signals": 30, "signals_meta": {}, "replay": replay},
+        freeze=freeze,
+        datasets=datasets,
+    )
+    assert campaign["forward"]["net_pnl_usd"] > 0
+    assert campaign["forward"]["post_freeze"] is False
+    assert campaign["objective_status"] == "NON_ATTEINT"
+    assert "FORWARD_NOT_PROVEN_POST_FREEZE" in campaign["objective_reasons"]
 
 
 def test_estimated_costs_never_become_liquidatable(tmp_path: Path):
