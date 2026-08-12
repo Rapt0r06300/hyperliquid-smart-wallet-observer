@@ -1,7 +1,7 @@
 """Run the three separate read-only/paper economic evidence campaigns.
 
 Each family is evaluated independently against the strict +4 USD realized-net
-contract.  The runner is deliberately fail-closed: missing depth, costs or
+contract. The runner is deliberately fail-closed: missing depth, costs or
 forward evidence remains NON_ATTEINT rather than becoming a modelled gain.
 """
 
@@ -24,6 +24,12 @@ from hl_observer.backtesting.lead_lag_multitape import (  # noqa: E402
     load_multitape,
 )
 from hl_observer.ops.superviseur_collecteurs import demarrer_tous  # noqa: E402
+from hl_observer.simulation.cross_venue_depth_adapter import (  # noqa: E402
+    DEFAULT_DEPTH_FRESHNESS_MS,
+    enrich_trades_with_depth,
+    finalize_judgement as finalize_cross_judgement,
+    load_depth_snapshots,
+)
 from hl_observer.simulation.economic_campaigns import (  # noqa: E402
     REPORT_DIR,
     build_copy_campaign,
@@ -119,7 +125,7 @@ def run_campaigns(
 
     # ---------------------------------------------------------------- Lead-Lag
     # The old campaign called lead_lag_shadow.backtest() directly, which only
-    # read the tiny current tape and returned aggregate research metrics.  The
+    # read the tiny current tape and returned aggregate research metrics. The
     # economic campaign now loads sealed append-only history on a common wall
     # clock and settles causal signals through the closed paper ledger.
     lead_sources = discover_lead_sources(root)
@@ -131,11 +137,11 @@ def run_campaigns(
     lead_min_history = 5
     lead_cost_config = {
         "notional": 100.0,
-        # Hyperliquid taker base is modelled conservatively as two taker fills
-        # for this single-venue follower leg: 4.5 bps entry + 4.5 bps exit.
+        # Conservative single follower leg round trip: 4.5 bps taker on entry
+        # and 4.5 bps on exit. This fee value alone does not make costs measured.
         "fee_bps": 9.0,
-        # Estimated until a causally aligned executable BBO/L2 cost adapter is
-        # available.  Therefore costs_measured MUST remain False.
+        # Still estimates until causally aligned executable depth is attached.
+        # Consequently costs_measured MUST remain false and objective fails closed.
         "demi_spread_bps": 4.0,
         "slippage_bps": 1.0,
         "min_fill_ratio": 0.5,
@@ -196,6 +202,8 @@ def run_campaigns(
         "latence_ms": cross_tool.LATENCE_MS,
         "fees_ar_bps": cross_tool.FEES_AR_BPS,
         "notional_usd": cross_tool.NOTIONAL_USD,
+        "depth_freshness_ms": DEFAULT_DEPTH_FRESHNESS_MS,
+        "depth_rule": "AT_OR_BEFORE_ENTRY_AND_EXIT_TOP_CAPACITY",
     }
     cross_freeze = freeze_parameters(root, "cross_venue_dislocation_v2", cross_params, cross_data)
     series = cross_tool.collecter_series(
@@ -205,12 +213,28 @@ def run_campaigns(
     )
     cross_meta = series.pop("_meta", {})
     cross_trades = cross_tool.backtester(series)
+    depth_snapshots = load_depth_snapshots(root)
+    cross_trades = enrich_trades_with_depth(
+        cross_trades,
+        depth_snapshots,
+        notional_usd=cross_tool.NOTIONAL_USD,
+        freshness_ms=DEFAULT_DEPTH_FRESHNESS_MS,
+    )
+    cross_judgement = finalize_cross_judgement(
+        cross_trades,
+        cross_tool.juger(cross_trades),
+        notional_usd=cross_tool.NOTIONAL_USD,
+    )
     cross_raw = {
         "schema_version": "hypersmart.cross_venue_campaign.v2",
-        "meta": cross_meta,
+        "meta": {
+            **cross_meta,
+            "depth_coins": len(depth_snapshots),
+            "depth_freshness_ms": DEFAULT_DEPTH_FRESHNESS_MS,
+        },
         "quotes_par_coin": {coin: len(values) for coin, values in series.items() if values},
         "params": cross_params,
-        "verdict_realiste_16bps": cross_tool.juger(cross_trades),
+        "verdict_realiste_16bps": cross_judgement,
         "trades": cross_trades,
         "paper_read_only": True,
         "real_execution": False,
