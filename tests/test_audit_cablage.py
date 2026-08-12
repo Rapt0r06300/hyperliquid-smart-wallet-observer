@@ -716,3 +716,24 @@ def test_flags_lus_ignore_un_get_de_dictionnaire_ordinaire():
 def test_un_interrupteur_se_rend_en_dict():
     i = Interrupteur("X", "0", ("a.py",), ())
     assert i.as_dict()["mort"] is True
+
+
+def test_un_lanceur_avec_python_portable_est_reconnu_comme_porte_outil():
+    """Le lanceur officiel utilise HYPERSMART_PYTHON, pas un Python global."""
+    from hl_observer.audit.cablage import outils_demarres_par_les_lanceurs
+
+    lanceurs = {
+        "LANCER_OBJECTIF_4USD.cmd": (
+            '"%HYPERSMART_PYTHON%" '
+            '"%~dp0tools\\run_economic_objective_campaigns.py" --root "%~dp0."\\n'
+        ),
+        "UNQUOTED.cmd": (
+            '%HYPERSMART_PYTHON% '
+            '"%~dp0tools\\run_economic_objective_campaigns.py"\\n'
+        ),
+    }
+    demarres = outils_demarres_par_les_lanceurs(lanceurs)
+    assert demarres == ["tools/run_economic_objective_campaigns.py"]
+    assert outils_demarres_par_les_lanceurs(
+        {"BAD.cmd": 'py "%~dp0tools\\run_economic_objective_campaigns.py"\\n'}
+    ) == []

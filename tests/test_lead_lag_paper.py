@@ -11,9 +11,10 @@ RACINE = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(RACINE / "src"))
 
 from hl_observer.strategies.lead_lag_paper import (   # noqa: E402
-    SignalLeadLag, cout_total_bps, simuler_episode, rejouer_lead_lag)
+    SignalLeadLag, cout_components_bps, cout_total_bps, simuler_episode, rejouer_lead_lag)
 
-CFG = {"notional": 100.0, "fee_bps": 2.5, "demi_spread_bps": 2.5, "min_fill_ratio": 0.5}
+CFG = {"notional": 100.0, "fee_bps": 2.5, "demi_spread_bps": 2.5,
+       "slippage_bps": 1.0, "min_fill_ratio": 0.5, "costs_measured": True}
 
 
 def test_signal_predictif_donne_un_fill_positif_apres_couts():
@@ -26,6 +27,11 @@ def test_signal_predictif_donne_un_fill_positif_apres_couts():
     assert 0 < r["pnl_usd"] < 50.0 / 1e4 * 100.0
     evts = [e["evt"] for e in r["ledger"]]
     assert evts == ["SIGNAL", "ENTREE", "SORTIE", "PNL"] and couts > 0
+    assert r["opened_positions"] == r["closed_positions"] == 1
+    assert r["LIQUIDATABLE_NET"] is True
+    assert r["pnl_usd"] == round(
+        r["gross_pnl_usd"] - r["fees_usd"] - r["spread_cost_usd"]
+        - r["slippage_cost_usd"] - r["latency_cost_usd"], 8)
 
 
 def test_decision_est_CAUSALE_pas_de_look_ahead():
@@ -77,3 +83,21 @@ def test_edge_absent_ne_promeut_pas():
     # signaux non alignés (le leader se trompe) -> net négatif -> KILL, jamais un faux PROMU.
     r = rejouer_lead_lag(_signaux(30, aligne=False), config=CFG, min_episodes=5)
     assert r["segments"]["IS"]["net"] < 0 and r["verdict"] == "KILL"
+
+
+def test_couts_non_prouves_restent_non_liquidables():
+    cfg = {key: value for key, value in CFG.items() if key != "costs_measured"}
+    result = simuler_episode(_signaux(1)[0], config=cfg)
+    assert result["statut"] == "FILLED"
+    assert result["LIQUIDATABLE_NET"] is False
+    assert cout_components_bps(cfg)["costs_measured"] is False
+
+
+def test_segment_deduplique_identite_stable():
+    signals = _signaux(30)
+    signals.insert(1, signals[0])
+    result = rejouer_lead_lag(signals, config=CFG, min_episodes=5)
+    duplicate_count = sum(seg["duplicate_trade_ids"] for seg in result["segments"].values())
+    all_ids = [trade_id for seg in result["segments"].values() for trade_id in seg["trade_ids"]]
+    assert duplicate_count == 1
+    assert len(all_ids) == len(set(all_ids))

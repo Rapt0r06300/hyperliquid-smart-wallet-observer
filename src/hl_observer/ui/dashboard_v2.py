@@ -373,10 +373,9 @@ function smoothPath(pts){if(!pts.length)return '';
 // Trois defauts s'ajoutaient : (a) `rng=(hi-lo)||1` inventait une echelle Y quand l'amplitude
 // etait nulle ; (b) le point vivant venait d'une AUTRE formule que la serie (realise SESSION
 // vs realise TOTAL) — il ne pouvait donc que sauter ; (c) rien ne distinguait ce qui est
-// MESURE de ce qui est extrapole.
-// CE QU'ON FAIT MAINTENANT : la serie vient du LEDGER (chaque CLOSE horodate), le point vivant
-// est le dernier point reel + le seul terme qui bouge vraiment entre deux evenements (le
-// funding couru non encore regle), et le segment vivant est DESSINE EN POINTILLES.
+// MESURE de ce qui est affiche. La serie vient du LEDGER et du dernier point de statut
+// calcule cote serveur avec les vrais marks. Le navigateur ne projette aucun PnL entre deux
+// mesures : une absence de nouvelle mesure reste une ligne plate honnete.
 function mgBornes(eqs){
   // pas de `||1` : une amplitude nulle est un CAS, pas un accident a masquer.
   var lo=Math.min.apply(null,eqs),hi=Math.max.apply(null,eqs);
@@ -390,7 +389,7 @@ function mgDire(msg){
   ['mg-line','mg-area'].forEach(function(id){var e=document.getElementById(id);if(e)e.setAttribute('d','');});
   ['mg-live','mg-ring'].forEach(function(id){var e=document.getElementById(id);if(e)e.setAttribute('r','0');});
   var g=document.getElementById('mg-evts');if(g)g.innerHTML='';}
-function drawMeta(pts,nReels){
+function drawMeta(pts){
   var W=1000,H=210,PAD=14,v=document.getElementById('mg-vide');
   if(!pts||pts.length<2){mgDire(pts&&pts.length===1
       ? 'un seul point mesuré — une courbe en demande deux<br><span style="opacity:.6">le premier trade fermé fera apparaître la ligne</span>'
@@ -403,16 +402,12 @@ function drawMeta(pts,nReels){
   function Y(e){return PAD+(H-2*PAD)*(1-(e-B.lo)/B.rng)}
   var xy=pts.map(function(p){return [X(p.t),Y(p.equity)]}),last=pts[pts.length-1];
   var c=last.equity>=base?'#2ce69b':'#ff5c6a';
-  // le segment VIVANT (dernier point reel -> maintenant) est extrapole : on le dessine en
-  // POINTILLES. Ce qui est mesure et ce qui est projete ne doivent pas se ressembler.
-  var nr=Math.max(2,Math.min(nReels||pts.length,pts.length));
-  var solide=smoothPath(xy.slice(0,nr));
+  // Tous les points sont autoritaires : historique ledger ou point status calcule serveur.
+  // Aucune extrapolation client, meme en pointilles.
+  var nr=pts.length;
+  var solide=smoothPath(xy);
   var L=document.getElementById('mg-line');L.setAttribute('d',solide);L.setAttribute('stroke',c);
-  var ev=document.getElementById('mg-evts'),h='';
-  if(nr<pts.length){var a=xy[nr-1],b=xy[xy.length-1];
-    h+='<path d="M'+a[0].toFixed(1)+' '+a[1].toFixed(1)+' L'+b[0].toFixed(1)+' '+b[1].toFixed(1)
-      +'" fill="none" stroke="'+c+'" stroke-width="1.6" stroke-dasharray="3 4" opacity="0.75"/>';}
-  if(ev)ev.innerHTML=h;
+  var ev=document.getElementById('mg-evts');if(ev)ev.innerHTML='';
   document.getElementById('mg-area').setAttribute('d',solide+' L'+xy[nr-1][0].toFixed(1)+' '+(H-PAD)+' L'+xy[0][0].toFixed(1)+' '+(H-PAD)+' Z');
   var by=Y(base),bl=document.getElementById('mg-base');bl.setAttribute('y1',by);bl.setAttribute('y2',by);bl.setAttribute('stroke',c);
   // grille : 3 reperes horizontaux. Sans eux, on ne sait pas si la pente vaut 1 c ou 100 $.
@@ -445,7 +440,7 @@ function ptsFenetre(){
     if(f.length>=2)pts=f;}
   window._mgReels=pts.length;
   return pts;}
-function drawMetaLive(){var p=ptsFenetre();drawMeta(p,window._mgReels);}
+function drawMetaLive(){var p=ptsFenetre();drawMeta(p);}
 function upsertStatusGraphPoint(d){
   var g=d&&d.latest_graph_point;if(!g)return;
   var t=Number(g.timestamp_ms),eq=Number(g.current_equity_usdt),pnl=Number(g.current_pnl_usdc);

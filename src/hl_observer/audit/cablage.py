@@ -375,9 +375,13 @@ def portes_declarees_par_les_lanceurs(lanceurs: dict[str, str], racine: str = "h
 # script). Le préfixe `%~dp0` faisait rater le match -> `lanceur_tout_tester.py` (démarré par
 # TOUT-TESTER.cmd) passait pour NON lancé, et tout ce qu'il importe pour MORT. On autorise donc un
 # préfixe `%~dp0` ou `.\`/`./` avant le chemin capturé (la capture reste `tools\x.py`, propre).
+_PYTHON_OUTIL_DANS_UN_LANCEUR = (
+    r"""(?:python(?:\.exe)?|"%HYPERSMART_PYTHON%"|%HYPERSMART_PYTHON%)"""
+)
 _OUTIL_DANS_UN_LANCEUR = re.compile(
-    r"""python(?:\.exe)?["']?\s+(?:-\S+\s+)*["']?(?:%~dp0|\.[\\/])?"""
-    r"""((?:tools|scripts)[/\\][\w\-./\\]+\.py)""",
+    _PYTHON_OUTIL_DANS_UN_LANCEUR
+    + r"""\s+(?:-\S+\s+)*["\']?(?:%~dp0|\.[\\/])?"""
+    + r"""((?:tools|scripts)[/\\][\w\-./\\]+\.py)""",
     re.IGNORECASE,
 )
 

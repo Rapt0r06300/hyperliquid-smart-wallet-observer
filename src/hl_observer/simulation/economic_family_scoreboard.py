@@ -13,7 +13,9 @@ from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
-SCHEMA_VERSION = "hypersmart.economic_family_scoreboards.v1"
+from .economic_objective import evaluate_objective
+
+SCHEMA_VERSION = "hypersmart.economic_family_scoreboards.v2"
 ACTIVE_FAMILIES = ("copy_vault", "lead_lag", "cross_venue_dislocation_v2")
 
 
@@ -42,6 +44,7 @@ def _empty_row(family: str) -> dict[str, Any]:
     return {
         "family": family,
         "signal_count": None,
+        "opened_positions": None,
         "no_trade_count": None,
         "top_no_trade_reasons": [],
         "closed_positions": None,
@@ -60,11 +63,42 @@ def _empty_row(family: str) -> dict[str, Any]:
         "forward": None,
         "placebos": None,
         "liquidatable_net": None,
+        "starting_capital_usd": 1000.0,
+        "paper_read_only": True,
         "verdict": "MORE_DATA",
         "verdict_reasons": [],
         "evidence_paths": [],
         "real_execution": False,
     }
+
+
+def _finalize(row: dict[str, Any]) -> dict[str, Any]:
+    """Apply both the promotion and strict economic-objective contracts."""
+
+    if row.get("liquidatable_net") is None:
+        row["liquidatable_net"] = row.get("LIQUIDATABLE_NET")
+    row.pop("LIQUIDATABLE_NET", None)
+    row["verdict"], row["verdict_reasons"] = promotion_verdict(row)
+    row.update(evaluate_objective(row))
+    return row
+
+
+def _campaign(root: Path, family: str) -> dict[str, Any] | None:
+    """Prefer a strict, per-family campaign proof when one is available."""
+
+    path = root / "runtime" / "reports" / "economic_campaigns" / f"{family}.json"
+    report = _load_json(path)
+    if not report or str(report.get("family") or "") != family:
+        return None
+    row = _empty_row(family)
+    row.update(report)
+    evidence_paths = row.get("evidence_paths")
+    if not isinstance(evidence_paths, list):
+        evidence_paths = []
+    relative = path.relative_to(root).as_posix()
+    row["evidence_paths"] = list(dict.fromkeys([*evidence_paths, relative]))
+    row["family"] = family
+    return _finalize(row)
 
 
 def promotion_verdict(row: Mapping[str, Any]) -> tuple[str, list[str]]:
@@ -120,8 +154,7 @@ def _copy_vault(root: Path) -> dict[str, Any]:
         row["forward"] = None
         row["source_status"] = str(measure.get("statut") or "MORE_DATA")
         row["source_note"] = str(measure.get("note") or "")
-    row["verdict"], row["verdict_reasons"] = promotion_verdict(row)
-    return row
+    return _finalize(row)
 
 
 def _lead_lag(root: Path) -> dict[str, Any]:
@@ -142,8 +175,7 @@ def _lead_lag(root: Path) -> dict[str, Any]:
         row["runtime_enabled"] = bool(status.get("enabled"))
         row["runtime_code"] = str(status.get("code") or "")
         row["no_trade_count"] = (_integer(status.get("rejected")) or 0)
-    row["verdict"], row["verdict_reasons"] = promotion_verdict(row)
-    return row
+    return _finalize(row)
 
 
 def _cross_venue(root: Path) -> dict[str, Any]:
@@ -166,13 +198,20 @@ def _cross_venue(root: Path) -> dict[str, Any]:
         }
         # Depth/capacity was absent in the cited evidence, so liquidation remains unproven.
         row["liquidatable_net"] = False
-    row["verdict"], row["verdict_reasons"] = promotion_verdict(row)
-    return row
+    return _finalize(row)
 
 
 def build_scoreboards(root: str | Path = ".") -> dict[str, Any]:
     project_root = Path(root).resolve()
-    rows = [_copy_vault(project_root), _lead_lag(project_root), _cross_venue(project_root)]
+    fallbacks = {
+        "copy_vault": _copy_vault,
+        "lead_lag": _lead_lag,
+        "cross_venue_dislocation_v2": _cross_venue,
+    }
+    rows = [
+        _campaign(project_root, family) or fallbacks[family](project_root)
+        for family in ACTIVE_FAMILIES
+    ]
     return {
         "schema_version": SCHEMA_VERSION,
         "families": {row["family"]: row for row in rows},

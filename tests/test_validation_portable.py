@@ -161,6 +161,55 @@ def test_audit_guard_allows_windows_null_device(tmp_path):
     assert not log.exists()
 
 
+@pytest.mark.skipif(os.name != "nt", reason="embedded Windows Python executable")
+def test_audit_guard_allows_ephemeral_loopback_bind(tmp_path):
+    extracted = tmp_path / "extracted"
+    extracted.mkdir(parents=True)
+    log = extracted / "violations.jsonl"
+    env = os.environ.copy()
+    env.update({
+        "PYTHONPATH": str(ROOT / "src"),
+        "HYPERSMART_PORTABLE_AUDIT_ROOT": str(extracted),
+        "HYPERSMART_PORTABLE_AUDIT_LOG": str(log),
+        "PYTHONNOUSERSITE": "1",
+    })
+    completed = subprocess.run(
+        [str(ROOT / "tools" / "python" / "python.exe"), "-c",
+         "from hl_observer.ops.portable_audit_guard import install_from_environment; "
+         "install_from_environment(); import socket; "
+         "s=socket.socket(socket.AF_INET6); s.bind(('::1', 0)); s.close(); "
+         "print('LOOPBACK_BIND_OK')"],
+        env=env, capture_output=True, text=True, check=False,
+    )
+    assert completed.returncode == 0, completed.stderr
+    assert "LOOPBACK_BIND_OK" in completed.stdout
+    assert not log.exists()
+
+
+@pytest.mark.skipif(os.name != "nt", reason="embedded Windows Python executable")
+def test_audit_guard_denies_wildcard_bind(tmp_path):
+    extracted = tmp_path / "extracted"
+    extracted.mkdir(parents=True)
+    log = extracted / "violations.jsonl"
+    env = os.environ.copy()
+    env.update({
+        "PYTHONPATH": str(ROOT / "src"),
+        "HYPERSMART_PORTABLE_AUDIT_ROOT": str(extracted),
+        "HYPERSMART_PORTABLE_AUDIT_LOG": str(log),
+        "PYTHONNOUSERSITE": "1",
+    })
+    completed = subprocess.run(
+        [str(ROOT / "tools" / "python" / "python.exe"), "-c",
+         "from hl_observer.ops.portable_audit_guard import install_from_environment; "
+         "install_from_environment(); import socket; "
+         "s=socket.socket(); s.bind(('0.0.0.0', 0))"],
+        env=env, capture_output=True, text=True, check=False,
+    )
+    assert completed.returncode != 0
+    assert "denies network: socket.bind" in (completed.stderr + completed.stdout)
+    assert log.is_file() and "socket.bind" in log.read_text(encoding="utf-8")
+
+
 def test_run_rejects_fatal_python_output_even_with_zero_exit(tmp_path):
     result = VP._run(
         "masked-fatal",

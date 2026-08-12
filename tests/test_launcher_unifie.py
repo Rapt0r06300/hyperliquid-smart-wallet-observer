@@ -66,7 +66,6 @@ def test_no_real_trade_preserve():
 def test_pas_de_fenetre_cachee_ni_kill_global():
     t = _txt()
     assert "WindowStyle Hidden" not in t, "les processus du lanceur ne se cachent pas (test single_launcher)"
-    # aucun kill global de python/cmd : on ne cible que par ligne de commande du projet
     assert "taskkill /im python" not in t.lower()
     assert "taskkill /f /im python" not in t.lower()
 
@@ -149,8 +148,9 @@ def test_le_lanceur_unique_n_est_pas_archive():
 def test_la_racine_contient_les_deux_lanceurs_officiels():
     """Runtime et analyses historiques ont chacun un lanceur explicite.
 
-    Les anciens outils de laboratoire restent conserves pour ne rien supprimer
-    brutalement, mais ils ne font pas partie du demarrage principal.
+    Les outils de recherche/maintenance restent autorises a la racine mais ne
+    deviennent pas des demarrages runtime concurrents. L'objectif +4 USD est
+    strictement paper/read-only et appartient a cette categorie d'analyse.
     """
     cmd_racine = {p.name for p in RACINE.glob("*.cmd")}
     officiels = {"LANCER_HYPERSMART.cmd", "ANALYSER_BACKTESTS_REPLAYS.cmd"}
@@ -162,16 +162,14 @@ def test_la_racine_contient_les_deux_lanceurs_officiels():
         "LANCER-RECHERCHE-18H.cmd",
         "LANCER-RECHERCHE-CONTINUE.cmd",
         "LANCER-RECHERCHE-CONTINUE-ADMIN.cmd",
+        "LANCER_OBJECTIF_4USD.cmd",
         "POUSSER-GITHUB-FORCE.cmd",
         "POUSSER_TOUT_LE_TRAVAIL.cmd",
         "REPARER_ET_POUSSER.cmd",
         "RECETTE-WINDOWS.cmd",
         "RECETTE-LANCEUR.cmd",
-        "CREER_ARCHIVE_PORTABLE.cmd",   # item 20 : outil de maintenance (archive portable), hors hot path
+        "CREER_ARCHIVE_PORTABLE.cmd",
         "COMMITTER_B1_B2.cmd",
-        # 06/08 — outils officiels ajoutés (décision assumée) : la suite historique a son
-        # lanceur dédié (exigé par test_cmd_historical_analysis_suite), le diagnostic du
-        # lanceur est un outil de support, et HyperLab est le smoke offline double-clic.
         "ANALYSE_HISTORIQUE_COMPLETE.cmd",
         "DIAGNOSTIC_LANCEUR.cmd",
         "LANCER_HYPERLAB.cmd",
