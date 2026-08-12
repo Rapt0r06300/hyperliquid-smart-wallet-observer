@@ -130,3 +130,14 @@ jobs:
           path: ${{ steps.release.outputs.directory }}
           if-no-files-found: error
           retention-days: 30
+
+      - name: Publish portable failure evidence
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: hypersmart-portable-failure-${{ github.sha }}
+          path: |
+            ${{ runner.temp }}/hypersmart portable release/RELEASE_FAILED.json
+            ${{ runner.temp }}/hypersmart portable release/PORTABLE_VALIDATION.json
+          if-no-files-found: ignore
+          retention-days: 7

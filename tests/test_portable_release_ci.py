@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from pathlib import Path
 
-
 ROOT = Path(__file__).resolve().parents[1]
 WORKFLOW = ROOT / ".github" / "workflows" / "portable-release-windows.yml"
 TEXT = WORKFLOW.read_text(encoding="utf-8")
@@ -40,6 +39,13 @@ def test_publish_and_attestation_are_after_validation():
     assert "SBOM.cyclonedx.json" in TEXT
 
 
+def test_failure_evidence_is_preserved_without_publishing_a_release():
+    assert "Publish portable failure evidence" in TEXT
+    assert "if: failure()" in TEXT
+    assert "RELEASE_FAILED.json" in TEXT
+    assert "hypersmart-portable-failure-${{ github.sha }}" in TEXT
+
+
 def test_ci_is_paper_read_only_and_exact_head():
     assert 'HL_ENABLE_MAINNET_EXECUTION: "0"' in TEXT
     assert 'HL_ENABLE_TESTNET_EXECUTION: "0"' in TEXT
@@ -59,5 +65,8 @@ def test_writer_registry_is_explicit_and_empty():
 
 
 def test_windows_nightly_invokes_pytest_through_configured_python():
+    assert 'python -m pip install -e ".[dev]"' in NIGHTLY_TEXT
+    assert "python -m pip install -r requirements-recherche.txt" in NIGHTLY_TEXT
+    assert "run: pip install" not in NIGHTLY_TEXT
     assert "python -m pytest tests/test_hyperlab_*.py -q" in NIGHTLY_TEXT
     assert "run: pytest " not in NIGHTLY_TEXT

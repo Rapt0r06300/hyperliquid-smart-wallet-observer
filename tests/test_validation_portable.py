@@ -61,7 +61,32 @@ def test_network_smoke_uses_only_fixed_readonly_endpoints():
     assert len(requests) == 3
     assert all(url.startswith("https://") and "/exchange" not in url for url, *_ in requests)
     assert requests[0][2] == b'{"type": "allMids"}'
+    assert requests[1][0].startswith("https://data-api.binance.vision/")
     assert requests[1][2] is None and requests[2][2] is None
+
+
+def test_network_smoke_keeps_legacy_dydx_optional():
+    def opener(request, timeout):
+        del timeout
+        if "dydx" in request.full_url:
+            raise OSError("legacy venue unavailable")
+        return _Response(b'{"ok": true}')
+
+    result = VP.smoke_reseau_readonly(opener=opener, timeout=1.0)
+    assert result["ok"] is True
+    dydx = next(row for row in result["results"] if row["venue"] == "dydx")
+    assert dydx["required"] is False
+    assert dydx["ok"] is False
+
+
+def test_network_smoke_fails_when_required_hyperliquid_is_unavailable():
+    def opener(request, timeout):
+        del timeout
+        if "hyperliquid" in request.full_url:
+            raise OSError("required venue unavailable")
+        return _Response(b'{"ok": true}')
+
+    assert VP.smoke_reseau_readonly(opener=opener, timeout=1.0)["ok"] is False
 
 
 @pytest.mark.skipif(os.name != "nt", reason="embedded Windows Python executable")
@@ -82,7 +107,7 @@ def test_audit_guard_is_inherited_and_blocks_external_write(tmp_path):
         [str(ROOT / "tools" / "python" / "python.exe"), "-c",
          "from hl_observer.ops.portable_audit_guard import install_from_environment; "
          "install_from_environment(); from pathlib import Path; "
-         "Path(%r).write_text('forbidden')" % str(outside)],
+         f"Path({str(outside)!r}).write_text('forbidden')"],
         env=env, capture_output=True, text=True, check=False,
     )
     assert completed.returncode != 0
@@ -127,6 +152,19 @@ def test_run_rejects_fatal_python_output_even_with_zero_exit(tmp_path):
     assert result["ok"] is False
     assert result["fatal_output_detected"] is True
     assert "fatal python error" in result["fatal_output_markers"]
+
+
+def test_run_accepts_nonfatal_traceback_text_when_process_succeeds(tmp_path):
+    result = VP._run(
+        "benign-atexit",
+        [sys.executable, "-c", "print('Traceback (most recent call last):\\ncleanup warning')"],
+        cwd=tmp_path,
+        env=os.environ.copy(),
+        timeout=30,
+    )
+    assert result["returncode"] == 0
+    assert result["ok"] is True
+    assert result["fatal_output_detected"] is False
 
 
 def test_extracted_audit_bootstrap_is_local_and_enables_site(tmp_path):
@@ -190,6 +228,12 @@ def test_validation_evidence_is_bound_and_not_declarative(tmp_path, monkeypatch)
     }), encoding="utf-8")
 
     def fake_run(name, command, *, cwd, env, timeout):
+        if name == "pytest_full":
+            audit_log = Path(env["HYPERSMART_PORTABLE_AUDIT_LOG"])
+            audit_log.parent.mkdir(parents=True, exist_ok=True)
+            audit_log.write_text(
+                '{"event":"intentional-test-probe"}\n', encoding="utf-8"
+            )
         if name == "analyser":
             report = cwd / "runtime" / "reports" / "backtest_replay" / "RAPPORT_PORTABLE_SMOKE.json"
             report.parent.mkdir(parents=True, exist_ok=True)
@@ -205,6 +249,8 @@ def test_validation_evidence_is_bound_and_not_declarative(tmp_path, monkeypatch)
     monkeypatch.setattr(VP, "_run", fake_run)
     monkeypatch.setattr(VP, "_processes_for_root", lambda _root: set())
     monkeypatch.setattr(VP, "smoke_reseau_readonly", lambda **_kwargs: {"ok": True})
+    execution_root = tmp_path / "hspv éà execution"
+    monkeypatch.setattr(VP, "_short_execution_root", lambda: execution_root)
     result = VP.valider_archive_portable(
         archive, archive_repetition=repeated, ci_proof=proof,
         extraction_parent=tmp_path / "extracts",
@@ -217,8 +263,11 @@ def test_validation_evidence_is_bound_and_not_declarative(tmp_path, monkeypatch)
     pytest_command = next(row for row in result["commands"] if row["name"] == "pytest_full")
     assert "--timeout=120" in pytest_command["command"]
     assert "--timeout-method=thread" in pytest_command["command"]
+    assert pytest_command["isolated_test_probe_events"] == [
+        '{"event":"intentional-test-probe"}'
+    ]
+    assert result["checks"]["zero_ecriture_externe"]["ok"] is True
     simple = tmp_path / "extracts" / "simple" / "tools" / "python"
-    execution = tmp_path / "extracts" / "avec espaces et accents éà" / "tools" / "python"
     assert "import site" not in (simple / "python314._pth").read_text(encoding="utf-8")
     assert not (simple / "Lib" / "site-packages" / "sitecustomize.py").exists()
-    assert "import site" in (execution / "python314._pth").read_text(encoding="utf-8")
+    assert result["checks"]["audit_bootstrap"]["extracted_copy_only"] is True

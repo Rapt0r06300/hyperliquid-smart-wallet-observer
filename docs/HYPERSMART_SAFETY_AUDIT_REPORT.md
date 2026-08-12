@@ -1,6 +1,6 @@
 # HyperSmart Safety Audit Report
 
-Generated: 2026-08-09T17:25:07.060925+00:00
+Generated: 2026-08-12T12:41:42.197130+00:00
 
 - OK `no_exchange_path`: matches=0
 - OK `no_signature_calls`: matches=0

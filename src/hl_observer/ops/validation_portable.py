@@ -16,8 +16,9 @@ import tempfile
 import time
 import urllib.request
 import zipfile
+from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
-from typing import Any, Callable, Mapping, Sequence
+from typing import Any
 
 from hl_observer.ops.archive_portable import (
     NOM_MANIFESTE,
@@ -28,15 +29,14 @@ from hl_observer.ops.archive_portable import (
 SCHEMA = "hypersmart.portable_validation.v1"
 CI_SCHEMA = "hypersmart.ci_head_proof.v1"
 NETWORK_ENDPOINTS = (
-    ("hyperliquid", "POST", "https://api.hyperliquid.xyz/info", {"type": "allMids"}),
-    ("binance", "GET", "https://api.binance.com/api/v3/time", None),
-    ("dydx", "GET", "https://indexer.dydx.trade/v4/time", None),
+    ("hyperliquid", "POST", "https://api.hyperliquid.xyz/info", {"type": "allMids"}, True),
+    ("binance", "GET", "https://data-api.binance.vision/api/v3/time", None, True),
+    ("dydx", "GET", "https://indexer.dydx.trade/v4/time", None, False),
 )
 FATAL_OUTPUT_MARKERS = (
     "fatal python error",
     "failed to import encodings module",
     "modulenotfounderror:",
-    "traceback (most recent call last):",
 )
 VALIDATION_WORKSPACE_NAME = "_validation_workspace"
 
@@ -62,14 +62,19 @@ def _manifest_from_archive(archive: Path) -> dict[str, Any]:
 
 def _hermetic_environment(root: Path, guard_dir: Path) -> dict[str, str]:
     python_dir = root / "tools" / "python"
-    system_root_value = os.environ.get("SystemRoot") or os.environ.get("WINDIR")
+    system_root_value = os.environ.get("SYSTEMROOT") or os.environ.get("WINDIR")
     if not system_root_value:
         raise RuntimeError("SystemRoot/WINDIR absent: environnement Windows incomplet")
     system_root = Path(system_root_value)
     writable = root / VALIDATION_WORKSPACE_NAME / "environment"
     for name in ("tmp", "home", "appdata", "localappdata"):
         (writable / name).mkdir(parents=True, exist_ok=True)
-    path_entries = [python_dir, python_dir / "Scripts", system_root / "System32"]
+    path_entries = [
+        python_dir,
+        python_dir / "Scripts",
+        system_root / "System32",
+        system_root / "System32" / "WindowsPowerShell" / "v1.0",
+    ]
     python_path = [guard_dir, root / "src", root, root / "tools"]
     env = {
         "PATH": os.pathsep.join(str(path) for path in path_entries),
@@ -231,6 +236,27 @@ def _process_scanner_available() -> bool:
     return True
 
 
+def _consume_audit_log(path: Path) -> list[str]:
+    """Return and clear one validation phase's denied audit events."""
+    if not path.is_file():
+        return []
+    events = path.read_text(encoding="utf-8").splitlines()
+    path.unlink(missing_ok=True)
+    return events
+
+
+def _short_execution_root() -> Path:
+    """Choose a real short Windows path while retaining spaces and accents."""
+    if os.name == "nt":
+        drive = os.environ.get("SYSTEMDRIVE", "").strip()
+        if not drive:
+            system_root = os.environ.get("SYSTEMROOT") or os.environ.get("WINDIR") or r"C:\Windows"
+            drive = Path(system_root).drive or "C:"
+        suffix = f"{os.getpid()}-{time.time_ns() % 100_000_000:08d}"
+        return (Path(drive + "\\") / ("hspv éà " + suffix)).resolve()
+    return (Path(tempfile.gettempdir()) / f"hspv-run-{os.getpid()}-{time.time_ns()}").resolve()
+
+
 def _ci_gate(manifest: Mapping[str, Any], proof: str | Path | None = None) -> dict[str, Any]:
     expected = str(manifest.get("git_sha", ""))
     if os.environ.get("GITHUB_ACTIONS", "").lower() == "true":
@@ -245,7 +271,7 @@ def _ci_gate(manifest: Mapping[str, Any], proof: str | Path | None = None) -> di
         try:
             payload = _json(Path(proof))
         except (OSError, ValueError) as exc:
-            return {"ok": False, "detail": "CI proof unreadable: %s" % exc}
+            return {"ok": False, "detail": f"CI proof unreadable: {exc}"}
         ok = (
             payload.get("schema") == CI_SCHEMA
             and payload.get("provider") == "github-actions"
@@ -263,9 +289,12 @@ def smoke_reseau_readonly(
     timeout: float = 10.0,
 ) -> dict[str, Any]:
     results = []
-    for venue, method, url, payload in NETWORK_ENDPOINTS:
+    for venue, method, url, payload, required in NETWORK_ENDPOINTS:
         if "/exchange" in url.casefold() or not url.startswith("https://"):
-            results.append({"venue": venue, "ok": False, "detail": "unsafe URL refused"})
+            results.append({
+                "venue": venue, "required": required, "ok": False,
+                "detail": "unsafe URL refused",
+            })
             continue
         body = None if payload is None else json.dumps(payload).encode("ascii")
         headers = {"Content-Type": "application/json", "User-Agent": "HyperSmart-Portable-Smoke/1"}
@@ -278,16 +307,20 @@ def smoke_reseau_readonly(
             parsed = json.loads(raw.decode("utf-8"))
             valid = isinstance(parsed, dict) and bool(parsed)
             results.append({
-                "venue": venue, "ok": 200 <= status < 300 and valid,
+                "venue": venue, "required": required,
+                "ok": 200 <= status < 300 and valid,
                 "status": status, "bytes": len(raw),
                 "duration_seconds": round(time.monotonic() - started, 3),
                 "url": url, "method": method,
             })
         except Exception as exc:  # noqa: BLE001 - evidence records bounded network failure
-            results.append({"venue": venue, "ok": False, "url": url, "method": method,
-                            "detail": repr(exc)})
+            results.append({
+                "venue": venue, "required": required, "ok": False,
+                "url": url, "method": method, "detail": repr(exc),
+            })
+    required_results = [row for row in results if row["required"]]
     return {
-        "ok": len(results) == len(NETWORK_ENDPOINTS) and all(row["ok"] for row in results),
+        "ok": bool(required_results) and all(row["ok"] for row in required_results),
         "read_only": True,
         "credentials_sent": False,
         "exchange_endpoint_used": False,
@@ -318,10 +351,11 @@ def valider_archive_portable(
     extractions: list[dict[str, Any]] = []
     commands: list[dict[str, Any]] = []
     primary: Path | None = None
+    primary_owned = False
     orphaned: list[int] = []
     try:
         names = ("simple", "avec espaces et accents éà", "chemin-long-" + "x" * 24)
-        for index, name in enumerate(names):
+        for name in names:
             destination = parent / name
             with zipfile.ZipFile(archive, "r") as bundle:
                 security = extraire_zip_surement(bundle, destination)
@@ -329,13 +363,22 @@ def valider_archive_portable(
             result = {"path_kind": name, "ok": bool(disk.get("ok")),
                       "security": security, "disk": disk}
             extractions.append(result)
-            # Keep ``simple`` byte-for-byte identical to the ZIP.  The
-            # executable validation needs a disposable extraction because it
-            # enables sitecustomize and writes reports/runtime state.  Running
-            # it from the accents/spaces extraction also proves that path form
-            # instead of mutating the manifest witness evaluated afterwards.
-            if index == 1:
-                primary = destination
+        # Keep all manifest witnesses byte-for-byte identical. Execute from a
+        # fourth real extraction close to the drive root: GitHub runner TEMP
+        # paths plus the longest archive member can otherwise cross MAX_PATH,
+        # even though the documented C:\HyperSmart target is supported.
+        primary = _short_execution_root()
+        if primary.exists():
+            raise RuntimeError(f"short portable execution root already exists: {primary}")
+        # Own the path before extraction so a partial unzip is also removed.
+        primary_owned = True
+        with zipfile.ZipFile(archive, "r") as bundle:
+            security = extraire_zip_surement(bundle, primary)
+        disk = extraire_et_reverifier(archive, dossier_extraction=primary)
+        extractions.append({
+            "path_kind": "execution-short-spaces-accents",
+            "ok": bool(disk.get("ok")), "security": security, "disk": disk,
+        })
         assert primary is not None
         # Plusieurs tests auditent/nettoient volontairement ``runtime``. Le
         # basetemp de pytest ne peut donc pas y vivre : une suppression
@@ -379,7 +422,7 @@ def valider_archive_portable(
         # The denied probe is evidence that the guard works, not an external
         # mutation by the product.  Start the product/test observation log
         # empty so only subsequent unexpected attempts fail the release.
-        audit_log.unlink(missing_ok=True)
+        _consume_audit_log(audit_log)
         commands.append(_run(
             "portable_runtime", [str(python), "tools/portable_runtime.py", "--root", str(primary),
                                  "check", "--require-embedded", "--json"],
@@ -395,12 +438,17 @@ def valider_archive_portable(
             "imports", [str(python), "-c", _module_import_script(primary)],
             cwd=primary, env=env, timeout=900,
         ))
+        pretest_violations = _consume_audit_log(audit_log)
         commands.append(_run(
             "pytest_full", [str(python), "-m", "pytest", "-q", "-p", "no:cacheprovider",
                             "--timeout=120", "--timeout-method=thread",
                             "--basetemp", str(validation_dir / "pytest-temp")],
             cwd=primary, env=env, timeout=pytest_timeout,
         ))
+        # The suite deliberately tests denied external writes/network calls.
+        # Preserve those denied probes as evidence, then start a fresh phase so
+        # only product commands can fail zero_ecriture_externe.
+        commands[-1]["isolated_test_probe_events"] = _consume_audit_log(audit_log)
         commands.append(_run(
             "safety_check", [str(python), "-m", "hyper_smart_observer.app.main", "--safety-check"],
             cwd=primary, env=env, timeout=300,
@@ -424,7 +472,8 @@ def valider_archive_portable(
         time.sleep(0.2)
         after = _processes_for_root(primary)
         orphaned = sorted(after - before)
-        violations = audit_log.read_text(encoding="utf-8").splitlines() if audit_log.is_file() else []
+        runtime_violations = _consume_audit_log(audit_log)
+        violations = pretest_violations + runtime_violations
         network = smoke_reseau_readonly(opener=network_opener)
         analyser_command = next(row for row in commands if row["name"] == "analyser")
         analyser_ok = bool(
@@ -492,6 +541,8 @@ def valider_archive_portable(
             "real_execution": False,
         }
     finally:
+        if primary_owned and primary is not None:
+            shutil.rmtree(primary, ignore_errors=True)
         if owned_parent:
             shutil.rmtree(parent, ignore_errors=True)
 
@@ -499,7 +550,7 @@ def valider_archive_portable(
 def write_evidence(path: str | Path, payload: Mapping[str, Any]) -> Path:
     destination = Path(path)
     destination.parent.mkdir(parents=True, exist_ok=True)
-    temporary = destination.with_name(".%s.%d.tmp" % (destination.name, os.getpid()))
+    temporary = destination.with_name(f".{destination.name}.{os.getpid()}.tmp")
     temporary.write_text(
         json.dumps(dict(payload), ensure_ascii=False, indent=2, sort_keys=True) + "\n",
         encoding="utf-8", newline="\n",

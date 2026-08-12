@@ -12,10 +12,10 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
-      - name: Install editable (BLOQUANT)
-        run: pip install -e .
+      - name: Install editable + test runner (BLOQUANT)
+        run: python -m pip install -e ".[dev]"
       - name: Install requirements-recherche (BLOQUANT)
-        run: pip install -r requirements-recherche.txt
+        run: python -m pip install -r requirements-recherche.txt
       - name: Suite hyperlab (Windows)
         run: python -m pytest tests/test_hyperlab_*.py -q
       - name: E2E CMD double-clic

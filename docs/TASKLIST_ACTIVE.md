@@ -82,6 +82,14 @@ Statuts : `TODO` · `IN_PROGRESS` · `DONE` (= code+branché+testé+prouvé+comm
 | P18 | CI/Windows/robustesse (shards, fault injection) | TODO / CI verte BLOCKED_EXTERNAL | push = Flo |
 | P19 | Mesure économique finale (scoreboard complet, scénarios, verdicts) | TODO | ne rien truquer ; KILL les morts |
 
+### Cloture ciblee P0 du 2026-08-12
+
+- P2 reste `IN_PROGRESS` : l'export separe et fail-closed est livre et teste ; le
+  cablage dashboard/runtime complet n'est pas declare sans preuve.
+- P18 reste `IN_PROGRESS` jusqu'au verdict des workflows du SHA candidat.
+- P19 reste `IN_PROGRESS` : Copy-Vault=`MORE_DATA`, Lead-Lag=`MORE_DATA`,
+  Cross-Venue-v2=`KILL`. Aucune famille n'est promue sans preuve economique complete.
+
 ---
 
 ## 4. RÈGLES D'INGÉNIERIE (rappel)

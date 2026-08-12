@@ -1,6 +1,6 @@
 # HyperSmart Security Audit Deep
 
-Generated: 2026-08-09T17:25:09.985874+00:00
+Generated: 2026-08-12T12:41:45.171780+00:00
 
 ## Findings
 - OK `no_exchange_path`: matches=0

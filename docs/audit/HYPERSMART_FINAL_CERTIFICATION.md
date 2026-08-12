@@ -47,4 +47,24 @@ Ce chantier n'est certifié DONE que si les workflows GitHub obligatoires du SHA
 - `alpha-factory` ;
 - `portable-release-windows`.
 
+## Candidat P0 du 2026-08-12
+
+Le SHA candidat est le commit qui contient cette section. Les corrections et preuves
+locales associees sont les suivantes :
+
+- validation portable depuis une extraction d'execution courte avec espaces et accents,
+  sans modifier les trois extractions temoins du manifeste ;
+- separation des probes negatives intentionnelles de pytest et des ecritures externes
+  reelles du produit ;
+- smoke read-only obligatoire sur Hyperliquid et Binance public, dYdX legacy optionnel ;
+- workflow HyperLab Windows installe les dependances de test puis lance pytest via
+  `python -m pytest` ;
+- les echecs de release portable publient leurs preuves sans publier une fausse release ;
+- scoreboards economiques distincts pour Copy-Vault, Lead-Lag et Cross-Venue v2,
+  avec promotion fail-closed et capital paper unique de 1 000 USD.
+
+Verdicts economiques au moment du gel : Copy-Vault `MORE_DATA`, Lead-Lag `MORE_DATA`,
+Cross-Venue v2 `KILL`. Ces verdicts ne deviennent pas positifs sans preuves OOS,
+forward, placebos, liquidabilite et echantillon suffisant.
+
 Tout rouge doit être analysé depuis son log exact et corrigé avant clôture. Aucun post-commit de documentation ne doit être ajouté après la certification, afin de conserver le même SHA entre le code certifié et le verdict final.
