@@ -63,6 +63,10 @@ def test_status_get_100x_is_pure_and_network_free(tmp_path, monkeypatch):
         assert payload["network_reads_from_status"] is False
         assert payload["equity_usdt"] == 1003.0
         assert payload["mark_to_market"]["read_status"] in {
-            "LOCAL_BBO_MISSING", "NO_USABLE_MARK", "NO_SETTINGS", "NO_OPEN_POSITION"
+            "LOCAL_BBO_MISSING",
+            "LOCAL_BBO_NO_FRESH_MARK",
+            "NO_USABLE_MARK",
+            "NO_SETTINGS",
+            "NO_OPEN_POSITION",
         }
     assert _snapshot_state(state) == before

@@ -6,6 +6,8 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 WORKFLOW = ROOT / ".github" / "workflows" / "portable-release-windows.yml"
 TEXT = WORKFLOW.read_text(encoding="utf-8")
+NIGHTLY_WORKFLOW = ROOT / ".github" / "workflows" / "windows-full-nightly.yml"
+NIGHTLY_TEXT = NIGHTLY_WORKFLOW.read_text(encoding="utf-8")
 
 
 def test_windows_release_builds_embedded_runtime_without_setup_python():
@@ -54,3 +56,8 @@ def test_writer_registry_is_explicit_and_empty():
     assert "System.Text.UTF8Encoding($false)" in TEXT
     writer_step = TEXT[TEXT.index("Materialize fail-closed writer proof"):]
     assert "Set-Content" not in writer_step.split("- name:", 1)[0]
+
+
+def test_windows_nightly_invokes_pytest_through_configured_python():
+    assert "python -m pytest tests/test_hyperlab_*.py -q" in NIGHTLY_TEXT
+    assert "run: pytest " not in NIGHTLY_TEXT

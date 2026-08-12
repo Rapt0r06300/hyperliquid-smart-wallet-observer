@@ -17,7 +17,7 @@ jobs:
       - name: Install requirements-recherche (BLOQUANT)
         run: pip install -r requirements-recherche.txt
       - name: Suite hyperlab (Windows)
-        run: pytest tests/test_hyperlab_*.py -q
+        run: python -m pytest tests/test_hyperlab_*.py -q
       - name: E2E CMD double-clic
         shell: cmd
         run: cmd /c LANCER_HYPERLAB.cmd
