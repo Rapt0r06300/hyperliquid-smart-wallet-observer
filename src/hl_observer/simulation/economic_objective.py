@@ -1,9 +1,11 @@
 """Strict, shared proof contract for per-family paper economic objectives.
 
 The contract deliberately separates a displayed/modelled PnL from a PnL that
-is eligible for an economic claim.  Missing costs, open positions, duplicate
+is eligible for an economic claim. Missing costs, open positions, duplicate
 identities, absent forward evidence, or a non-paper execution mode all fail
-closed.  No function in this module creates a signal or a fill.
+closed. Copy-Vault additionally requires positive held-out-vault
+generalisation so a temporal replay on the same leaders cannot promote alone.
+No function in this module creates a signal or a fill.
 """
 
 from __future__ import annotations
@@ -14,6 +16,7 @@ from typing import Any
 
 TARGET_NET_USD = 4.0
 STARTING_CAPITAL_USD = 1000.0
+COPY_HELDOUT_MIN_N = 20
 CANONICAL_FAMILIES = (
     "copy_vault",
     "lead_lag",
@@ -33,7 +36,6 @@ _ALIASES = {
 
 def canonical_family(value: object) -> str:
     """Collapse aliases so the active arbitrage family can never be counted twice."""
-
     normalized = str(value or "").strip().lower().replace(" ", "_")
     return _ALIASES.get(normalized, normalized)
 
@@ -52,7 +54,6 @@ def evaluate_objective(
     target_net_usd: float = TARGET_NET_USD,
 ) -> dict[str, Any]:
     """Evaluate one family against the strict realized-net proof contract."""
-
     issues: list[str] = []
     family = canonical_family(evidence.get("family"))
     if family not in CANONICAL_FAMILIES:
@@ -71,6 +72,23 @@ def evaluate_objective(
         issues.append("POSITIONS_NOT_FULLY_OPENED_AND_CLOSED")
     if family == "cross_venue_dislocation_v2" and evidence.get("all_positions_two_leg_closed") is not True:
         issues.append("CROSS_VENUE_TWO_LEG_CLOSE_PROOF_MISSING")
+
+    # Copy-Vault must generalise beyond the leaders used in the primary
+    # temporal walk-forward. This closes the methodological relaxation where
+    # same-vault OOS alone could otherwise become an economic promotion.
+    if family == "copy_vault":
+        generalisation = evidence.get("vault_generalization")
+        if not isinstance(generalisation, Mapping):
+            issues.append("COPY_HELDOUT_VAULT_PROOF_MISSING")
+        else:
+            heldout_n = _number(generalisation.get("sample_count"))
+            heldout_net_bps = _number(generalisation.get("net_bps"))
+            if heldout_n is None or heldout_n < COPY_HELDOUT_MIN_N:
+                issues.append("COPY_HELDOUT_VAULT_SAMPLE_TOO_SMALL")
+            if heldout_net_bps is None:
+                issues.append("COPY_HELDOUT_VAULT_NET_MISSING")
+            elif heldout_net_bps <= 0:
+                issues.append("COPY_HELDOUT_VAULT_NET_NOT_POSITIVE")
 
     metric_keys = (
         "gross_pnl_usd",
@@ -96,7 +114,6 @@ def evaluate_objective(
 
     liquidatable_net = evidence.get("liquidatable_net")
     if liquidatable_net is None:
-        # Read legacy artifacts without emitting two case-only keys in new JSON.
         liquidatable_net = evidence.get("LIQUIDATABLE_NET")
     if liquidatable_net is not True:
         issues.append("NOT_LIQUIDATABLE_NET")
@@ -141,6 +158,7 @@ def evaluate_objective(
 
 __all__ = [
     "CANONICAL_FAMILIES",
+    "COPY_HELDOUT_MIN_N",
     "STARTING_CAPITAL_USD",
     "TARGET_NET_USD",
     "canonical_family",
