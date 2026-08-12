@@ -1,9 +1,9 @@
 """Adapter from recorded Lead-Lag tapes to strict economic campaign evidence.
 
-This module is intentionally boring: it converts observed Binance shocks and
-Hyperliquid BBO reactions into causal ``SignalLeadLag`` objects, replays them
-through the closed paper ledger, then emits the same strict +4 USD evidence
-shape as the other families. It never opens a network connection or executes.
+It converts observed Binance shocks and Hyperliquid BBO reactions into causal
+``SignalLeadLag`` objects, replays them through the closed paper ledger, then
+emits the strict +4 USD evidence shape. It never opens a network connection or
+executes. Historical replay is never mislabeled as post-freeze forward.
 """
 from __future__ import annotations
 
@@ -121,6 +121,20 @@ def run_ledger(
     return {"signals_meta": meta, "signals": len(signals), "replay": replay}
 
 
+def _forward_signal_times(replay: Mapping[str, Any]) -> list[int]:
+    ledgers = replay.get("ledgers") if isinstance(replay.get("ledgers"), Mapping) else {}
+    events = ledgers.get("FORWARD") if isinstance(ledgers.get("FORWARD"), list) else []
+    times: list[int] = []
+    for event in events:
+        if not isinstance(event, Mapping) or event.get("evt") != "SIGNAL":
+            continue
+        try:
+            times.append(int(event.get("ts")))
+        except (TypeError, ValueError, OverflowError):
+            continue
+    return times
+
+
 def campaign_from_replay(
     raw: Mapping[str, Any],
     *,
@@ -131,7 +145,10 @@ def campaign_from_replay(
     """Convert closed Lead-Lag ledger segments into strict objective evidence."""
     replay = raw.get("replay") if isinstance(raw.get("replay"), Mapping) else {}
     segments = replay.get("segments") if isinstance(replay.get("segments"), Mapping) else {}
-    ordered = [segments.get(label) if isinstance(segments.get(label), Mapping) else {} for label in ("IS", "OOS", "FORWARD")]
+    ordered = [
+        segments.get(label) if isinstance(segments.get(label), Mapping) else {}
+        for label in ("IS", "OOS", "FORWARD")
+    ]
 
     def total(key: str) -> float:
         return round(sum(float(segment.get(key) or 0.0) for segment in ordered), 8)
@@ -160,14 +177,24 @@ def campaign_from_replay(
     gains = sum(value for value in nets if value > 0)
     losses = -sum(value for value in nets if value < 0)
     profit_factor = (
-        float("inf") if gains > 0 and losses == 0
-        else round(gains / losses, 8) if losses > 0
+        float("inf")
+        if gains > 0 and losses == 0
+        else round(gains / losses, 8)
+        if losses > 0
         else None
     )
     placebo = replay.get("placebo") if isinstance(replay.get("placebo"), Mapping) else {}
     placebo_net = float(placebo.get("net") or 0.0)
     oos = ordered[1]
     forward = ordered[2]
+    frozen_at_ms = int(freeze.get("frozen_at_ms") or 0) if freeze else 0
+    forward_signal_times = _forward_signal_times(replay)
+    forward_post_freeze = bool(
+        frozen_at_ms > 0
+        and forward_signal_times
+        and min(forward_signal_times) > frozen_at_ms
+    )
+
     row: dict[str, Any] = {
         "schema_version": "hypersmart.economic_campaign_evidence.v1",
         "family": "lead_lag",
@@ -188,7 +215,10 @@ def campaign_from_replay(
         "latency_cost_usd": latency,
         "net_pnl_usd": total_net,
         "roi_pct": round(total_net / 1000.0 * 100.0, 8),
-        "max_drawdown_usd": max((float(segment.get("max_drawdown_usd") or 0.0) for segment in ordered), default=0.0),
+        "max_drawdown_usd": max(
+            (float(segment.get("max_drawdown_usd") or 0.0) for segment in ordered),
+            default=0.0,
+        ),
         "hit_rate": round(sum(value > 0 for value in nets) / len(nets), 8) if nets else None,
         "profit_factor": profit_factor,
         "liquidatable_net": all_liquidatable,
@@ -203,7 +233,9 @@ def campaign_from_replay(
         "forward": {
             "net_pnl_usd": forward.get("net"),
             "sample_count": forward.get("closed_positions"),
-            "post_freeze": True,
+            "post_freeze": forward_post_freeze,
+            "first_signal_ts_ms": min(forward_signal_times) if forward_signal_times else None,
+            "frozen_at_ms": frozen_at_ms or None,
         },
         "placebos": {
             "beaten": bool(nets) and total_net > placebo_net,
