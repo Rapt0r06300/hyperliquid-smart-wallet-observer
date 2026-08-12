@@ -15,7 +15,9 @@ import argparse
 import json
 import sys
 import time
+from collections.abc import Callable, Mapping
 from pathlib import Path
+from typing import Any
 
 RACINE = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(RACINE / "src"))
@@ -25,8 +27,11 @@ import functools  # noqa: E402
 from hl_observer.collection import vault_fills_backfill as VB  # noqa: E402
 from hl_observer.experimental.copy_edge_forward import (charger_prix_tape_candles, charger_prix_tape,  # noqa: E402
                                                         rendement_forward, rendement_forward_candles, geler)
-from hl_observer.experimental.copy_edge_oos import (mesurer_oos, simuler_paper, ranger_variantes,  # noqa: E402
-                                                    construire_table_prelim, SEUILS_DEFAUT)
+from hl_observer.experimental.copy_edge_oos import (  # noqa: E402
+    construire_table_prelim,
+    mesurer_oos,
+    simuler_paper,
+)
 
 FILLS = Path("runtime") / "data" / "vault_fills.jsonl"
 PRELIM = Path("runtime") / "data" / "copy_prelim_edge.json"
@@ -76,7 +81,13 @@ def _charger_fills(root: Path) -> list[dict]:
         return []
 
 
-def construire(root: Path, *, geler_si_valide: bool = True) -> dict:
+def construire(
+    root: Path,
+    *,
+    geler_si_valide: bool = True,
+    on_parameters_selected: Callable[[dict[str, Any]], None] | None = None,
+    cost_components_bps: Mapping[str, float] | None = None,
+) -> dict:
     entrees = charger_entrees_alpha(root)
     # RECHERCHE = candles 5m (couvre le train : 5000 bougies = 416 h) -> 1m -> repli allMids récent
     tape, source = charger_prix_tape_candles(root, intervalle="5m"), "candles_5m"
@@ -93,7 +104,12 @@ def construire(root: Path, *, geler_si_valide: bool = True) -> dict:
     kw = {"forward_fn": fwd}
     if horizons:
         kw["horizons_ms"] = horizons
-    m = mesurer_oos(entrees, tape, **kw)
+    m = mesurer_oos(
+        entrees,
+        tape,
+        on_parameters_selected=on_parameters_selected,
+        **kw,
+    )
     # TABLE PRÉLIMINAIRE par coin (edge net POSITIF, descriptif + risque calibré).
     hz = (horizons or HORIZONS_CANDLES_MS)
     # ALPHA : avec KILL risque strict (risque ≫ edge exclu) — source du gate de la cohorte stricte.
@@ -112,11 +128,22 @@ def construire(root: Path, *, geler_si_valide: bool = True) -> dict:
            "n_entrees_alpha": len(entrees), "n_coins_tape": len(tape), "couverture": audit,
            "n_coins_prelim_positifs": len(table_prelim), "mesure": m}
     if m.get("statut") in ("PRELIMINAIRE", "VALIDATION"):
-        variantes = [{"seuil": s, "horizon_ms": h} for s in SEUILS_DEFAUT for h in (horizons or HORIZONS_CANDLES_MS)]
-        rap["ranking_variantes"] = ranger_variantes(entrees, tape, variantes=variantes, forward_fn=fwd)[:8]
+        variantes = list(m.get("grille_train") or [])
+        rap["ranking_variantes_train"] = sorted(
+            variantes, key=lambda row: float(row.get("train_net_bps") or float("-inf")), reverse=True
+        )[:8]
         o = m["oos"]
-        rap["simulation_paper_oos"] = simuler_paper(entrees, tape, horizon_ms=o["horizon_ms"], seuil=o["seuil"],
-                                                    notional_usd=150.0, cout_ar_bps=m.get("frais_bps", 12.0), forward_fn=fwd)
+        entrees_oos = [e for e in entrees if int(e.get("ts_ms") or 0) >= int(m["t_cut_ms"])]
+        rap["simulation_paper_oos"] = simuler_paper(
+            entrees_oos,
+            tape,
+            horizon_ms=o["horizon_ms"],
+            seuil=o["seuil"],
+            notional_usd=150.0,
+            cout_ar_bps=m.get("frais_bps", 12.0),
+            forward_fn=fwd,
+            cost_components_bps=cost_components_bps,
+        )
         if geler_si_valide and m.get("edge_valide_oos"):
             rap["gel"] = geler(root, horizon_ms=o["horizon_ms"], edge_brut_bps=o["brut_bps"],
                                edge_net_mesure_bps=o["net_bps"], source="pipeline_reel_oos")

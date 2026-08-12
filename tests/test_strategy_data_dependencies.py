@@ -31,13 +31,20 @@ def test_famille_active_pas_ready_si_source_requise_absente():
 
 
 def test_famille_active_ready_si_toutes_sources_presentes():
-    r = D.evaluate_family_data_readiness("lead_lag", ["bbo-collector", "allmids-collector"])
+    r = D.evaluate_family_data_readiness(
+        "lead_lag", ["bbo-collector", "carnet-collector", "allmids-collector"]
+    )
     assert r.ready is True and r.missing == frozenset()
 
 
 def test_copy_vault_requiert_fills_et_prix():
     req = D.required_sources("copy_vault")
     assert "userfills-live" in req and "allmids-collector" in req
+
+
+def test_cross_venue_requiert_bbo_et_profondeur_l2():
+    req = D.required_sources("cross_venue_dislocation")
+    assert req == frozenset({"bbo-collector", "carnet-collector"})
 
 
 def test_les_sources_requises_sont_reelles_dans_SOURCES_HARVEST():

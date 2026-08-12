@@ -20,9 +20,10 @@ _REQUISES: dict[str, frozenset[str]] = {
     # Copy-Vault suit les leaders : fills du leader (userFills) + prix/marks pour valoriser les positions.
     "copy_vault": frozenset({"userfills-live", "allmids-collector"}),
     # Lead-Lag est inter-venues (Binance -> HL) : le flux BBO HL+Binance est indispensable.
-    "lead_lag": frozenset({"bbo-collector"}),
-    # Cross-Venue (dislocation) compare deux venues : idem, le BBO HL+Binance.
-    "cross_venue_dislocation": frozenset({"bbo-collector"}),
+    "lead_lag": frozenset({"bbo-collector", "carnet-collector"}),
+    # Cross-Venue compare deux venues. Le BBO prouve le prix top-of-book, mais
+    # le carnet L2 est requis pour mesurer profondeur, capacite et slippage.
+    "cross_venue_dislocation": frozenset({"bbo-collector", "carnet-collector"}),
 }
 
 

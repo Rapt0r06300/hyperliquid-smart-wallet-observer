@@ -1,12 +1,11 @@
-"""EDGE DE COPIE — SÉLECTION SUR TRAIN, VALIDATION WALK-FORWARD PURGÉE, OOS PAR PÉRIODE **ET** PAR
-VAULT (rectif Flo 23/07). Zéro fuite.
+"""EDGE DE COPIE — SÉLECTION SUR TRAIN, VALIDATION WALK-FORWARD PURGÉE.
 
 Règles anti-fuite :
   • le choix (seuil, horizon) se fait UNIQUEMENT sur le TRAIN (vaults de train, période de train) ;
   • PURGE = horizon entre train et OOS (la fenêtre forward d'une entrée de train ne doit pas déborder
     dans la période OOS) ;
-  • OOS = vaults HELD-OUT (jamais vus au train) sur la période POSTÉRIEURE → séparation par période ET
-    par vault ;
+  • OOS primaire = période postérieure, sans utiliser ses résultats pour choisir les seuils ;
+  • généralisation par vault held-out = contrôle secondaire, jamais critère de sélection ;
   • intervalle de confiance BOOTSTRAP sur le net OOS ;
   • n_oos < seuil → statut PRÉLIMINAIRE (un signal, pas une validation) ; ≥ seuil → VALIDATION.
 
@@ -16,8 +15,12 @@ s'il est net>0, bat le placebo, et son IC bas est > 0. Sinon OBSERVE (prélimina
 from __future__ import annotations
 
 import bisect
+import hashlib
+import json
+import math
 import random
-from typing import Any, Iterable
+from collections.abc import Mapping
+from typing import Any, Callable, Iterable
 
 from hl_observer.experimental.copy_edge_forward import rendement_forward
 
@@ -25,6 +28,35 @@ SEUILS_DEFAUT = (0.03, 0.05, 0.10, 0.20)
 FORWARD_DEFAUT = rendement_forward       # tick (allmids) ; passer rendement_forward_candles pour la recherche candles
 HORIZONS_DEFAUT_MS = (60_000.0, 300_000.0, 900_000.0, 3_600_000.0)
 SEUIL_VALIDATION_N = 100          # n_oos >= ça => VALIDATION ; en-dessous => PRÉLIMINAIRE (Flo : 30 = préliminaire)
+
+
+def seuils_depuis_train(events_train: list[dict], *, min_events_train: int = 20) -> tuple[float, ...]:
+    """Build candidate thresholds from TRAIN data only, never from OOS."""
+    values: list[float] = []
+    for event in events_train:
+        try:
+            value = float(event.get("move_frac") or 0.0)
+        except (TypeError, ValueError, OverflowError):
+            continue
+        if math.isfinite(value) and value > 0:
+            values.append(value)
+    if not values:
+        return ()
+    values.sort(reverse=True)
+    targets = (
+        min_events_train,
+        min_events_train * 2,
+        min_events_train * 5,
+        min_events_train * 10,
+        min_events_train * 25,
+    )
+    thresholds = {
+        round(values[min(len(values), target) - 1], 8)
+        for target in targets
+        if target > 0 and len(values) >= target
+    }
+    thresholds.add(round(values[-1], 8))
+    return tuple(sorted(thresholds))
 
 
 def _returns_nets(events: list[dict], tape: dict[str, list[tuple[int, float]]], horizon_ms: float,
@@ -88,15 +120,17 @@ def _split_vaults(events: list[dict]) -> tuple[set[str], set[str]]:
 
 
 def mesurer_oos(events: list[dict], tape: dict[str, list[tuple[int, float]]], *,
-                seuils: Iterable[float] = SEUILS_DEFAUT, horizons_ms: Iterable[float] = HORIZONS_DEFAUT_MS,
+                seuils: Iterable[float] | None = None, horizons_ms: Iterable[float] = HORIZONS_DEFAUT_MS,
                 frais_bps: float = 12.0, frac_train: float = 0.6, min_events_train: int = 20,
                 min_events_oos: int = 20, seuil_validation: int = SEUIL_VALIDATION_N,
-                graine: int = 12345, forward_fn=FORWARD_DEFAUT) -> dict[str, Any]:
+                graine: int = 12345, forward_fn=FORWARD_DEFAUT,
+                on_parameters_selected: Callable[[dict[str, Any]], None] | None = None) -> dict[str, Any]:
     """PRIMAIRE = walk-forward TEMPOREL sur les MÊMES vaults (choix sur période de train, validation sur
     période postérieure, PURGÉE). SECONDAIRE = généralisation par vault held-out (rectif Flo 23/07 : le
     split par vault est un test secondaire). IC bootstrap, vs placebo. Verdict NEED_MORE_DATA /
     PRÉLIMINAIRE / VALIDATION + SCALE/OBSERVE/KILL."""
     ev = sorted(events, key=lambda e: int(e.get("ts_ms") or 0))
+    horizons_ms = tuple(float(h) for h in horizons_ms)
     if len(ev) < (min_events_train + min_events_oos):
         return {"statut": "NEED_MORE_DATA", "n_events": len(ev), "requis": min_events_train + min_events_oos}
     purge = max(horizons_ms)                                       # la fenêtre forward la plus large
@@ -105,6 +139,16 @@ def mesurer_oos(events: list[dict], tape: dict[str, list[tuple[int, float]]], *,
     # PRIMAIRE (temporel, mêmes vaults) : train = fenêtre forward terminée avant la coupe (purge) ; oos = après
     train = [e for e in ev if int(e["ts_ms"]) + purge <= t_cut]
     oos = [e for e in ev if int(e["ts_ms"]) >= t_cut]
+    thresholds_source = "explicit"
+    if seuils is None:
+        seuils = seuils_depuis_train(train, min_events_train=min_events_train)
+        thresholds_source = "train_only_sample_quantiles"
+    seuils = tuple(float(s) for s in seuils)
+    if not seuils:
+        return {"statut": "NEED_MORE_DATA", "n_train": len(train), "n_oos": len(oos),
+                "seuils_source": thresholds_source, "seuils_testes": [],
+                "t_cut_ms": t_cut,
+                "note": "aucun move_frac positif mesurable sur le TRAIN"}
     grille: list[dict] = []
     for s in seuils:
         for h in horizons_ms:
@@ -113,8 +157,24 @@ def mesurer_oos(events: list[dict], tape: dict[str, list[tuple[int, float]]], *,
                 grille.append({"seuil": s, "horizon_ms": h, "train_net_bps": round(_moy(nets), 3), "train_n": len(nets)})
     if not grille:
         return {"statut": "NEED_MORE_DATA", "n_train": len(train), "n_oos": len(oos),
+                "seuils_source": thresholds_source, "seuils_testes": list(seuils),
+                "t_cut_ms": t_cut,
                 "note": "aucune combinaison n'atteint le minimum d'entrées sur le TRAIN"}
     choix = max(grille, key=lambda g: g["train_net_bps"])
+    freeze_record = {
+        "selected_on": "TRAIN_ONLY",
+        "selected_before_oos": True,
+        "t_cut_ms": t_cut,
+        "purge_ms": purge,
+        "seuil": choix["seuil"],
+        "horizon_ms": choix["horizon_ms"],
+        "frais_bps": float(frais_bps),
+        "frac_train": float(frac_train),
+        "graine": int(graine),
+    }
+    if on_parameters_selected is not None:
+        # Invoked before the first OOS return is read: this is the physical freeze boundary.
+        on_parameters_selected(dict(freeze_record))
     nets_oos = _returns_nets(oos, tape, choix["horizon_ms"], choix["seuil"], frais_bps, forward_fn)
     rng = random.Random(graine)
     placebo = _placebo_nets(oos, tape, choix["horizon_ms"], choix["seuil"], frais_bps, rng, forward_fn)
@@ -141,7 +201,9 @@ def mesurer_oos(events: list[dict], tape: dict[str, list[tuple[int, float]]], *,
     elif net_oos > 0 and bat_placebo:
         decision = "OBSERVE"
     return {"statut": statut, "n_events": len(ev), "n_train": len(train), "n_oos": n,
-            "purge_ms": purge, "validation": "temporelle_walk_forward_meme_vaults",
+            "purge_ms": purge, "t_cut_ms": t_cut, "seuils_source": thresholds_source,
+            "seuils_testes": list(seuils), "validation": "temporelle_walk_forward_meme_vaults",
+            "parameters_selected_before_oos": freeze_record,
             "choix_sur_train": choix, "grille_train": grille,
             "oos": {"seuil": choix["seuil"], "horizon_ms": choix["horizon_ms"], "n": n,
                     "net_bps": round(net_oos, 3), "brut_bps": round(net_oos + frais_bps, 3),
@@ -157,7 +219,8 @@ def mesurer_oos(events: list[dict], tape: dict[str, list[tuple[int, float]]], *,
 
 def simuler_paper(events: list[dict], tape: dict[str, list[tuple[int, float]]], *, horizon_ms: float,
                   seuil: float, notional_usd: float, cout_ar_bps: float,
-                  capital_usd: float = 1000.0, graine: int = 7, forward_fn=FORWARD_DEFAUT) -> dict[str, Any]:
+                  capital_usd: float = 1000.0, graine: int = 7, forward_fn=FORWARD_DEFAUT,
+                  cost_components_bps: Mapping[str, float] | None = None) -> dict[str, Any]:
     """Backtest paper des trades de copie. ROI CUMULATIF (PnL/capital) **et** ROI PAR TRADE (bps moyen)
     clairement distingués (rectif Flo). IC bootstrap sur le PnL/trade. Aucune exécution."""
     trades: list[dict] = []
@@ -165,6 +228,8 @@ def simuler_paper(events: list[dict], tape: dict[str, list[tuple[int, float]]], 
     pic = 0.0
     dd_max = 0.0
     pnls_bps: list[float] = []
+    ids_seen: set[str] = set()
+    duplicates = 0
     for e in sorted(events, key=lambda x: int(x.get("ts_ms") or 0)):
         if float(e.get("move_frac", 0.0)) < seuil:
             continue
@@ -174,26 +239,56 @@ def simuler_paper(events: list[dict], tape: dict[str, list[tuple[int, float]]], 
         r = forward_fn(e, serie, horizon_ms)
         if r is None:
             continue
+        identity = {
+            "vault": str(e.get("vault") or ""), "coin": str(e.get("coin") or ""),
+            "direction": int(e.get("direction") or 0), "ts_ms": int(e.get("ts_ms") or 0),
+            "horizon_ms": float(horizon_ms), "seuil": float(seuil),
+        }
+        trade_id = hashlib.sha256(
+            json.dumps(identity, sort_keys=True, separators=(",", ":")).encode("utf-8")
+        ).hexdigest()
+        if trade_id in ids_seen:
+            duplicates += 1
+            continue
+        ids_seen.add(trade_id)
         pnl_bps = r - cout_ar_bps
         pnl_usd = pnl_bps / 1e4 * notional_usd
         equity += pnl_usd
         pic = max(pic, equity)
         dd_max = max(dd_max, pic - equity)
         pnls_bps.append(pnl_bps)
-        trades.append({"ts_ms": e["ts_ms"], "coin": e["coin"], "direction": e["direction"],
+        trades.append({"trade_id": trade_id, "ts_ms": e["ts_ms"], "coin": e["coin"], "direction": e["direction"],
                        "fwd_bps": round(r, 2), "pnl_bps": round(pnl_bps, 2), "pnl_usd": round(pnl_usd, 4)})
     n = len(trades)
     pnl = round(equity, 4)
     gagnants = sum(1 for t in trades if t["pnl_usd"] > 0)
     ic_bas, ic_haut = _bootstrap_ic(pnls_bps, graine=graine)
-    return {"n_trades": n, "pnl_net_usd": pnl,
+    ids_sorted = sorted(ids_seen)
+    ids_hash = hashlib.sha256("\n".join(ids_sorted).encode("utf-8")).hexdigest()
+    required_costs = ("fees_bps", "spread_bps", "slippage_bps", "latency_bps")
+    components = dict(cost_components_bps or {})
+    complete_costs = all(k in components and math.isfinite(float(components[k])) for k in required_costs)
+    reconciled_costs = complete_costs and abs(sum(float(components[k]) for k in required_costs) - cout_ar_bps) <= 1e-6
+    gross_usd = round(sum(t["fwd_bps"] / 1e4 * notional_usd for t in trades), 4)
+    cost_total_usd = round(gross_usd - pnl, 4)
+    breakdown_usd = {
+        k.replace("_bps", "_usd"): (round(float(components[k]) / 1e4 * notional_usd * n, 4)
+                                      if reconciled_costs else None)
+        for k in required_costs
+    }
+    return {"n_trades": n, "positions_ouvertes": n, "positions_fermees": n,
+            "pnl_brut_realise_usd": gross_usd, "cout_total_usd": cost_total_usd,
+            **breakdown_usd, "pnl_net_usd": pnl,
             "roi_cumulatif_pct": round(pnl / capital_usd * 100, 3) if capital_usd else 0.0,   # sur le capital, cumulé
             "roi_par_trade_bps": round(_moy(pnls_bps), 3),                                     # rendement moyen par trade
             "roi_par_trade_ic95_bps": [ic_bas, ic_haut],
             "drawdown_usd": round(dd_max, 4), "drawdown_pct": round(dd_max / capital_usd * 100, 3) if capital_usd else 0.0,
             "winrate_pct": round(gagnants / n * 100, 1) if n else 0.0,
             "capacite_usd_par_trade": round(notional_usd, 2), "capital_usd": capital_usd,
-            "profit_factor": _profit_factor(trades), "trades": trades[:50]}
+            "profit_factor": _profit_factor(trades), "duplicate_events_rejected": duplicates,
+            "trade_ids_count": len(ids_sorted), "trade_ids_sha256": ids_hash,
+            "cost_components_complete": reconciled_costs,
+            "LIQUIDATABLE_NET": bool(reconciled_costs), "trades": trades[:50]}
 
 
 def _profit_factor(trades: list[dict]) -> float:
@@ -334,5 +429,5 @@ def construire_table_prelim(events: list[dict], tape: dict[str, list[tuple[int, 
     return table
 
 
-__all__ = ["mesurer_oos", "simuler_paper", "ranger_variantes", "construire_table_prelim",
+__all__ = ["mesurer_oos", "seuils_depuis_train", "simuler_paper", "ranger_variantes", "construire_table_prelim",
            "mae_mfe", "calibrer_risque", "SEUILS_DEFAUT", "HORIZONS_DEFAUT_MS", "SEUIL_VALIDATION_N"]

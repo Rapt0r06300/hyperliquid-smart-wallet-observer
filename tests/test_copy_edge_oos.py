@@ -3,8 +3,9 @@ vault, IC bootstrap, statut PRÉLIMINAIRE/VALIDATION, décision SCALE/OBSERVE/KI
 trade, ranking de variantes. Aucune exécution."""
 from __future__ import annotations
 
-from hl_observer.experimental.copy_edge_oos import (mesurer_oos, simuler_paper, ranger_variantes,
-                                                    mae_mfe, calibrer_risque, construire_table_prelim)
+from hl_observer.experimental.copy_edge_oos import (calibrer_risque, construire_table_prelim,
+                                                    mae_mfe, mesurer_oos, ranger_variantes,
+                                                    seuils_depuis_train, simuler_paper)
 
 H = 300_000
 
@@ -50,6 +51,32 @@ def test_oos_walk_forward_temporel_primaire_generalisation_vault_secondaire():
     assert r["decision"] in ("SCALE", "OBSERVE") and r["edge_valide_oos"] in (True, False)
 
 
+def test_parametres_sont_physiquement_geles_avant_lecture_oos():
+    events = _events_multi_vault()
+    tape = _tape_pic(events)
+    calls = []
+
+    def freeze(parameters):
+        calls.append(parameters)
+        # The callback receives only train-selected configuration, never an OOS result.
+        assert "oos" not in parameters
+        assert parameters["selected_before_oos"] is True
+
+    result = mesurer_oos(
+        events,
+        tape,
+        seuils=(0.05,),
+        horizons_ms=(H,),
+        frais_bps=12.0,
+        min_events_train=10,
+        min_events_oos=10,
+        on_parameters_selected=freeze,
+    )
+
+    assert calls == [result["parameters_selected_before_oos"]]
+    assert calls[0]["selected_on"] == "TRAIN_ONLY"
+
+
 def test_forward_candles_anti_lookahead():
     """Entrée à la 1re bougie APRÈS signal+délai (jamais la bougie contenant le signal)."""
     from hl_observer.experimental.copy_edge_forward import rendement_forward_candles
@@ -82,6 +109,58 @@ def test_simuler_paper_roi_cumule_vs_par_trade():
     # ROI cumulé = 20 trades × 28 bps × 150$ / 1000$ = +8,4 %  (≠ 28 bps par trade)
     assert round(sim["roi_cumulatif_pct"], 2) == round(20 * 28 / 1e4 * 150 / 1000 * 100, 2)
     assert len(sim["roi_par_trade_ic95_bps"]) == 2 and sim["drawdown_pct"] == 0.0
+    assert sim["LIQUIDATABLE_NET"] is False
+    assert sim["slippage_usd"] is None
+
+
+def test_seuils_sont_derives_du_train_uniquement():
+    train = [
+        {"move_frac": value}
+        for value in (0.001, 0.002, 0.003, 0.004, 0.005, 0.006)
+    ]
+    assert seuils_depuis_train(train, min_events_train=2) == (0.001, 0.003, 0.005)
+    # Une valeur spectaculaire située hors TRAIN ne peut pas changer les seuils.
+    assert seuils_depuis_train(train, min_events_train=2) == seuils_depuis_train(
+        list(train), min_events_train=2
+    )
+
+
+def test_simulation_liquidable_exige_les_quatre_couts_et_reconcilie():
+    ev = _events_multi_vault(n=4)
+    tape = _tape_pic(ev)
+    components = {
+        "fees_bps": 4.0,
+        "spread_bps": 3.0,
+        "slippage_bps": 2.0,
+        "latency_bps": 3.0,
+    }
+    sim = simuler_paper(
+        ev,
+        tape,
+        horizon_ms=H,
+        seuil=0.05,
+        notional_usd=150.0,
+        cout_ar_bps=12.0,
+        cost_components_bps=components,
+    )
+    assert sim["LIQUIDATABLE_NET"] is True
+    costs = sum(sim[key] for key in ("fees_usd", "spread_usd", "slippage_usd", "latency_usd"))
+    assert round(sim["pnl_brut_realise_usd"] - costs, 4) == sim["pnl_net_usd"]
+
+
+def test_simulation_rejette_les_evenements_dupliques():
+    event = _events_multi_vault(n=1)[0]
+    sim = simuler_paper(
+        [event, dict(event)],
+        _tape_pic([event]),
+        horizon_ms=H,
+        seuil=0.05,
+        notional_usd=150.0,
+        cout_ar_bps=12.0,
+    )
+    assert sim["positions_ouvertes"] == sim["positions_fermees"] == 1
+    assert sim["duplicate_events_rejected"] == 1
+    assert sim["trade_ids_count"] == 1
 
 
 def test_mae_mfe_excursions():

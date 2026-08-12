@@ -45,7 +45,32 @@ def test_backtester_entre_et_sort_sur_convergence_sans_lookahead():
     trades = BT.backtester({"ZZZ": evs}, seuil_entree=15.0, seuil_sortie=3.0, fees_ar_bps=0.0)
     assert len(trades) == 1 and trades[0]["sortie"] == "CONVERGENCE"
     assert trades[0]["ts_out"] > trades[0]["ts_in"], "sortie postérieure à l'entrée (causal)"
+    assert trades[0]["ts_in"] >= trades[0]["ts_detect"] + BT.LATENCE_MS
     assert trades[0]["net_bps"] > 0, "convergence de 40 bps hors frais = gain"
+    assert trades[0]["trade_id"]
+
+
+def test_dislocation_disparue_pendant_latence_ne_trade_pas():
+    t = 1_000_000.0
+    evs = [
+        (t, "HL", 100.20, 100.22),
+        (t, "BIN", 99.80, 99.82),
+        (t + 500, "HL", 99.80, 99.82),
+        (t + 500, "BIN", 99.80, 99.82),
+    ]
+    assert BT.backtester({"ZZZ": evs}, latence_ms=400.0, fees_ar_bps=0.0) == []
+
+
+def test_bbo_seul_ne_peut_pas_etre_liquidable_net():
+    t = 1_000_000.0
+    evs = []
+    for i in range(3):
+        evs.extend(((t + i * 500, "HL", 100.20, 100.22), (t + i * 500, "BIN", 99.80, 99.82)))
+    for i in range(3, 6):
+        evs.extend(((t + i * 500, "HL", 99.80, 99.82), (t + i * 500, "BIN", 99.80, 99.82)))
+    summary = BT.juger(BT.backtester({"ZZZ": evs}, fees_ar_bps=0.0))
+    assert summary["LIQUIDATABLE_NET"] is False
+    assert summary["slippage_cost_usd"] is None
 
 
 def test_quote_figee_bloque_la_decision():
