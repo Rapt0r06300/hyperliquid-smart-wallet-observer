@@ -1,0 +1,90 @@
+name: one-time-fix-portable-tool-audit
+
+on:
+  push:
+    branches:
+      - rescue-codex-20260812
+    paths:
+      - .github/workflows/one-time-fix-portable-tool-audit.yml
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: rescue-codex-20260812
+          fetch-depth: 0
+      - name: Patch audit and regression test exactly once
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from pathlib import Path
+
+          audit_path = Path("src/hl_observer/audit/cablage.py")
+          text = audit_path.read_text(encoding="utf-8-sig")
+          start_marker = "_OUTIL_DANS_UN_LANCEUR = re.compile("
+          end_marker = "\n\n\ndef outils_demarres_par_les_lanceurs"
+          start = text.index(start_marker)
+          end = text.index(end_marker, start)
+          replacement = r'''_PYTHON_OUTIL_DANS_UN_LANCEUR = (
+              r''' + "'''" + r'''(?:python(?:\.exe)?|\"%HYPERSMART_PYTHON%\"|%HYPERSMART_PYTHON%)''' + "'''" + r'''
+          )
+          _OUTIL_DANS_UN_LANCEUR = re.compile(
+              _PYTHON_OUTIL_DANS_UN_LANCEUR
+              + r''' + "'''" + r'''\s+(?:-\S+\s+)*[\"']?(?:%~dp0|\.[\\/])?''' + "'''" + r'''
+              + r''' + "'''" + r'''((?:tools|scripts)[/\\][\w\-./\\]+\.py)''' + "'''" + r''',
+              re.IGNORECASE,
+          )'''
+          text = text[:start] + replacement + text[end:]
+          audit_path.write_text(text, encoding="utf-8", newline="\n")
+
+          test_path = Path("tests/test_audit_cablage.py")
+          tests = test_path.read_text(encoding="utf-8-sig")
+          test_name = "test_un_lanceur_avec_python_portable_est_reconnu_comme_porte_outil"
+          if test_name not in tests:
+              tests += r'''
+
+
+def test_un_lanceur_avec_python_portable_est_reconnu_comme_porte_outil():
+    """Le lanceur officiel utilise HYPERSMART_PYTHON, pas un Python global.
+
+    Cette forme est une vraie porte de recherche et doit etre reconnue par le
+    cliquet de cablage, sinon les modules economiques réellement appeles sont
+    faussement classes comme testes-non-branches.
+    """
+    from hl_observer.audit.cablage import outils_demarres_par_les_lanceurs
+
+    lanceurs = {
+        "LANCER_OBJECTIF_4USD.cmd": (
+            '"%HYPERSMART_PYTHON%" '
+            '"%~dp0tools\\run_economic_objective_campaigns.py" --root "%~dp0."\n'
+        ),
+        "UNQUOTED.cmd": (
+            '%HYPERSMART_PYTHON% '
+            '"%~dp0tools\\run_economic_objective_campaigns.py"\n'
+        ),
+    }
+    demarres = outils_demarres_par_les_lanceurs(lanceurs)
+    assert demarres == ["tools/run_economic_objective_campaigns.py"]
+    # Un executable arbitraire ne doit pas devenir une porte par accident.
+    assert outils_demarres_par_les_lanceurs(
+        {"BAD.cmd": 'py "%~dp0tools\\run_economic_objective_campaigns.py"\n'}
+    ) == []
+'''
+              test_path.write_text(tests, encoding="utf-8", newline="\n")
+
+          Path(".github/workflows/one-time-fix-portable-tool-audit.yml").unlink()
+          PY
+
+          git diff --check
+          git diff -- src/hl_observer/audit/cablage.py tests/test_audit_cablage.py
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add src/hl_observer/audit/cablage.py tests/test_audit_cablage.py .github/workflows/one-time-fix-portable-tool-audit.yml
+          git commit -m "fix(audit): recognize portable Python tool entrypoints"
+          git push origin HEAD:rescue-codex-20260812
