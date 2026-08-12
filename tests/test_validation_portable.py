@@ -31,9 +31,12 @@ def test_pytest_basetemp_is_isolated_from_runtime_cleanup(tmp_path):
     assert "runtime" not in Path(env["TEMP"]).relative_to(root).parts
 
 
-def test_pytest_environment_does_not_change_product_guard(tmp_path):
+def test_pytest_environment_does_not_change_product_guard(tmp_path, monkeypatch):
     root = tmp_path / "release"
     guard = root / "tools" / "python" / "Lib" / "site-packages"
+    # Exercise the Windows-only environment builder deterministically on every
+    # CI platform; the test concerns guard isolation, not the runner OS.
+    monkeypatch.setenv("SystemRoot", str(tmp_path / "Windows"))
     product_env = VP._hermetic_environment(root, guard)
 
     pytest_env = VP._pytest_environment(product_env)
