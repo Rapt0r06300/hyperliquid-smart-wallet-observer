@@ -1,12 +1,13 @@
-"""AUD-049 / AUD-059 — Autorité UNIQUE des dépendances famille -> données REQUISES.
+"""Authorities for runtime and economic data dependencies by strategy family.
 
-`strategies.active_scope` dit QUELLES familles peuvent matérialiser une économie paper.
-Ce module dit, pour chacune, QUELLES sources de données lui sont REQUISES. Deny-by-default :
-une famille inconnue n'a AUCUNE donnée « offerte », et une famille active dont une source requise
-est absente n'est PAS data-ready (on refuse un faux vert faute de données).
+Two notions are deliberately distinct:
+- runtime readiness: enough data to observe/detect a strategy safely;
+- economic readiness: enough data to certify executable/liquidatable net PnL.
 
-Les identifiants de source sont les `nom` canoniques de `ops.preuve_de_vie.SOURCES_HARVEST`.
-Read-only ; aucune exécution réelle.
+The economic layer is stricter because L2 depth is required to measure capacity
+and slippage. Keeping both authorities separate prevents an economic proof
+requirement from accidentally disabling a signal pipeline that can still be
+observed from BBO data. Unknown families remain deny-by-default.
 """
 from __future__ import annotations
 
@@ -15,26 +16,41 @@ from typing import Iterable
 
 from hl_observer.strategies.active_scope import active_strategy_families
 
-# Famille -> sources de données REQUISES (identifiants canoniques SOURCES_HARVEST).
-_REQUISES: dict[str, frozenset[str]] = {
-    # Copy-Vault suit les leaders : fills du leader (userFills) + prix/marks pour valoriser les positions.
+# Runtime observation dependencies. These preserve the existing production
+# semantics used by READY_STRATEGIES.
+_RUNTIME_REQUIRED: dict[str, frozenset[str]] = {
     "copy_vault": frozenset({"userfills-live", "allmids-collector"}),
-    # Lead-Lag est inter-venues (Binance -> HL) : le flux BBO HL+Binance est indispensable.
+    "lead_lag": frozenset({"bbo-collector"}),
+    "cross_venue_dislocation": frozenset({"bbo-collector"}),
+}
+
+# Economic proof dependencies. L2 depth is mandatory where executable
+# slippage/capacity must be measured before LIQUIDATABLE_NET can become true.
+_ECONOMIC_REQUIRED: dict[str, frozenset[str]] = {
+    "copy_vault": frozenset({"userfills-live", "allmids-collector", "carnet-collector"}),
     "lead_lag": frozenset({"bbo-collector", "carnet-collector"}),
-    # Cross-Venue compare deux venues. Le BBO prouve le prix top-of-book, mais
-    # le carnet L2 est requis pour mesurer profondeur, capacite et slippage.
     "cross_venue_dislocation": frozenset({"bbo-collector", "carnet-collector"}),
 }
 
 
 def strategy_data_dependencies() -> dict[str, frozenset[str]]:
-    """Manifeste immuable famille -> sources requises (copie défensive)."""
-    return dict(_REQUISES)
+    """Runtime observation dependency manifest (defensive copy)."""
+    return dict(_RUNTIME_REQUIRED)
+
+
+def economic_strategy_data_dependencies() -> dict[str, frozenset[str]]:
+    """Economic/liquidatable-net dependency manifest (defensive copy)."""
+    return dict(_ECONOMIC_REQUIRED)
 
 
 def required_sources(family: str) -> frozenset[str]:
-    """Sources REQUISES d'une famille. Deny-by-default : famille inconnue -> frozenset()."""
-    return _REQUISES.get(str(family).strip().lower(), frozenset())
+    """Runtime sources required by a family. Unknown -> empty (deny-by-default)."""
+    return _RUNTIME_REQUIRED.get(str(family).strip().lower(), frozenset())
+
+
+def economic_required_sources(family: str) -> frozenset[str]:
+    """Sources required to certify executable economic evidence."""
+    return _ECONOMIC_REQUIRED.get(str(family).strip().lower(), frozenset())
 
 
 @dataclass(frozen=True, slots=True)
@@ -45,17 +61,46 @@ class DataReadiness:
     required: frozenset[str]
 
 
-def evaluate_family_data_readiness(family: str, available_sources: Iterable[str]) -> DataReadiness:
-    """Data-ready ssi TOUTES les sources requises sont disponibles. Deny-by-default : sans exigence
-    déclarée, jamais « ready » (une famille inconnue ou non déclarée ne produit pas de faux vert)."""
+def _evaluate(family: str, available_sources: Iterable[str], required: frozenset[str]) -> DataReadiness:
     fam = str(family).strip().lower()
-    req = required_sources(fam)
     avail = {str(s).strip().lower() for s in available_sources}
-    missing = frozenset(s for s in req if s not in avail)
-    ready = bool(req) and not missing
-    return DataReadiness(family=fam, ready=ready, missing=missing, required=req)
+    missing = frozenset(source for source in required if source not in avail)
+    return DataReadiness(
+        family=fam,
+        ready=bool(required) and not missing,
+        missing=missing,
+        required=required,
+    )
+
+
+def evaluate_family_data_readiness(family: str, available_sources: Iterable[str]) -> DataReadiness:
+    """Runtime data readiness used by the production strategy readiness gate."""
+    fam = str(family).strip().lower()
+    return _evaluate(fam, available_sources, required_sources(fam))
+
+
+def evaluate_family_economic_readiness(family: str, available_sources: Iterable[str]) -> DataReadiness:
+    """Stricter readiness used only for economic/liquidatable-net certification."""
+    fam = str(family).strip().lower()
+    return _evaluate(fam, available_sources, economic_required_sources(fam))
 
 
 def active_families_have_declared_dependencies() -> bool:
-    """Invariant : CHAQUE famille active de l'autorité de scope a des dépendances déclarées."""
-    return all(bool(required_sources(f)) for f in active_strategy_families())
+    return all(bool(required_sources(family)) for family in active_strategy_families())
+
+
+def active_families_have_declared_economic_dependencies() -> bool:
+    return all(bool(economic_required_sources(family)) for family in active_strategy_families())
+
+
+__all__ = [
+    "DataReadiness",
+    "active_families_have_declared_dependencies",
+    "active_families_have_declared_economic_dependencies",
+    "economic_required_sources",
+    "economic_strategy_data_dependencies",
+    "evaluate_family_data_readiness",
+    "evaluate_family_economic_readiness",
+    "required_sources",
+    "strategy_data_dependencies",
+]
