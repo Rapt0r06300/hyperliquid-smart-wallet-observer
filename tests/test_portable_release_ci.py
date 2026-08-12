@@ -16,6 +16,8 @@ def test_windows_release_builds_embedded_runtime_without_setup_python():
     assert "actions/setup-python" not in TEXT
     assert "wheelhouse_lock.py" in TEXT
     assert "WHEELHOUSE_LOCK.json" in TEXT
+    assert "tools\\install_portable_git.ps1" in TEXT
+    assert "tools\\git\\cmd\\git.exe --version" in TEXT
 
 
 def test_final_cmd_is_the_release_entrypoint_and_uses_external_output():

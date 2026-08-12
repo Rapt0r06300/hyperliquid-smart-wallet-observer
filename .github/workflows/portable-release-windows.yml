@@ -46,9 +46,13 @@ jobs:
             throw "Portable release requires a clean checkout"
           }
 
-      - name: Build exact embedded Python from audited inputs
+      - name: Build exact embedded Python and Git from audited inputs
         shell: pwsh
         run: |
+          & .\tools\install_portable_git.ps1 -ProjectRoot $PWD.Path
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          & .\tools\git\cmd\git.exe --version
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           & .\tools\install_portable_runtime.ps1 -ProjectRoot $PWD.Path
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           & .\tools\python\python.exe .\tools\wheelhouse_lock.py `

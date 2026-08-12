@@ -31,6 +31,24 @@ def test_pytest_basetemp_is_isolated_from_runtime_cleanup(tmp_path):
     assert "runtime" not in Path(env["TEMP"]).relative_to(root).parts
 
 
+def test_pytest_environment_does_not_change_product_guard(tmp_path):
+    root = tmp_path / "release"
+    guard = root / "tools" / "python" / "Lib" / "site-packages"
+    product_env = VP._hermetic_environment(root, guard)
+
+    pytest_env = VP._pytest_environment(product_env)
+
+    assert "HYPERSMART_PORTABLE_AUDIT_ROOT" in product_env
+    assert "HYPERSMART_PORTABLE_AUDIT_LOG" in product_env
+    assert "HYPERSMART_PORTABLE_AUDIT_ROOT" not in pytest_env
+    assert "HYPERSMART_PORTABLE_AUDIT_LOG" not in pytest_env
+    assert pytest_env["PATH"] == product_env["PATH"]
+    assert pytest_env["TEMP"] == product_env["TEMP"]
+    assert pytest_env["PIP_NO_INDEX"] == "1"
+    assert pytest_env["HL_ENABLE_MAINNET_EXECUTION"] == "0"
+    assert pytest_env["HL_ENABLE_TESTNET_EXECUTION"] == "0"
+
+
 class _Response:
     status = 200
 
@@ -229,11 +247,8 @@ def test_validation_evidence_is_bound_and_not_declarative(tmp_path, monkeypatch)
 
     def fake_run(name, command, *, cwd, env, timeout):
         if name == "pytest_full":
-            audit_log = Path(env["HYPERSMART_PORTABLE_AUDIT_LOG"])
-            audit_log.parent.mkdir(parents=True, exist_ok=True)
-            audit_log.write_text(
-                '{"event":"intentional-test-probe"}\n', encoding="utf-8"
-            )
+            assert "HYPERSMART_PORTABLE_AUDIT_ROOT" not in env
+            assert "HYPERSMART_PORTABLE_AUDIT_LOG" not in env
         if name == "analyser":
             report = cwd / "runtime" / "reports" / "backtest_replay" / "RAPPORT_PORTABLE_SMOKE.json"
             report.parent.mkdir(parents=True, exist_ok=True)
@@ -263,9 +278,8 @@ def test_validation_evidence_is_bound_and_not_declarative(tmp_path, monkeypatch)
     pytest_command = next(row for row in result["commands"] if row["name"] == "pytest_full")
     assert "--timeout=120" in pytest_command["command"]
     assert "--timeout-method=thread" in pytest_command["command"]
-    assert pytest_command["isolated_test_probe_events"] == [
-        '{"event":"intentional-test-probe"}'
-    ]
+    assert pytest_command["product_audit_guard_applied"] is False
+    assert pytest_command["workspace_isolated"] is True
     assert result["checks"]["zero_ecriture_externe"]["ok"] is True
     simple = tmp_path / "extracts" / "simple" / "tools" / "python"
     assert "import site" not in (simple / "python314._pth").read_text(encoding="utf-8")
