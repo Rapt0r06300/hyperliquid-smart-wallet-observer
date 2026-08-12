@@ -17,7 +17,15 @@ jobs:
       - name: Install requirements-recherche (BLOQUANT)
         run: python -m pip install -r requirements-recherche.txt
       - name: Suite hyperlab (Windows)
-        run: python -m pytest tests/test_hyperlab_*.py -q
+        shell: pwsh
+        run: |
+          $tests = @(Get-ChildItem -LiteralPath tests -Filter 'test_hyperlab_*.py' -File |
+            Sort-Object Name |
+            ForEach-Object { $_.FullName })
+          if ($tests.Count -eq 0) {
+            throw 'Aucun test HyperLab trouve sous tests/test_hyperlab_*.py'
+          }
+          python -m pytest @tests -q
       - name: E2E CMD double-clic
         shell: cmd
         run: cmd /c LANCER_HYPERLAB.cmd

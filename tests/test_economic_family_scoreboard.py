@@ -3,10 +3,13 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+from fastapi.testclient import TestClient
+
 from hl_observer.simulation.economic_family_scoreboard import (
     build_scoreboards,
     promotion_verdict,
 )
+from hl_observer.ui.app import create_ui_app
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -90,3 +93,19 @@ def test_public_paper_default_uses_the_unique_1000_usd_capital() -> None:
     env_example = (ROOT / ".env.example").read_text(encoding="utf-8")
     assert "HYPERSMART_PAPER_STARTING_EQUITY=1000.0" in env_example
     assert "HYPERSMART_PAPER_STARTING_EQUITY=10000.0" not in env_example
+
+
+def test_scoreboards_are_reachable_from_the_read_only_runtime() -> None:
+    response = TestClient(create_ui_app(), raise_server_exceptions=True).get(
+        "/api/simulation/economic-scoreboards"
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["active_families"] == [
+        "copy_vault",
+        "lead_lag",
+        "cross_venue_dislocation_v2",
+    ]
+    assert payload["paper_read_only"] is True
+    assert payload["real_execution"] is False

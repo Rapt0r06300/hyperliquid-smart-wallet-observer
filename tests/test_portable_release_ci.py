@@ -68,5 +68,8 @@ def test_windows_nightly_invokes_pytest_through_configured_python():
     assert 'python -m pip install -e ".[dev]"' in NIGHTLY_TEXT
     assert "python -m pip install -r requirements-recherche.txt" in NIGHTLY_TEXT
     assert "run: pip install" not in NIGHTLY_TEXT
-    assert "python -m pytest tests/test_hyperlab_*.py -q" in NIGHTLY_TEXT
+    assert "Get-ChildItem -LiteralPath tests -Filter 'test_hyperlab_*.py' -File" in NIGHTLY_TEXT
+    assert "if ($tests.Count -eq 0)" in NIGHTLY_TEXT
+    assert "python -m pytest @tests -q" in NIGHTLY_TEXT
+    assert "python -m pytest tests/test_hyperlab_*.py -q" not in NIGHTLY_TEXT
     assert "run: pytest " not in NIGHTLY_TEXT

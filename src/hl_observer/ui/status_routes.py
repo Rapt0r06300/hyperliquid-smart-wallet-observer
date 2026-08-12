@@ -34,6 +34,9 @@ from hl_observer.signals.entry_supply_diagnostics import (
     BOTTLENECK_SUPPLY,
 )
 from hl_observer.simulation.pnl_reconciliation import reconcile_pnl
+from hl_observer.simulation.economic_family_scoreboard import (
+    build_scoreboards as build_economic_family_scoreboards,
+)
 from hl_observer.simulation.accounting_truth import (
     first_not_none,
     round_trip_net_pnl_usdc,
@@ -335,6 +338,13 @@ def create_status_router(state: UiState, settings: Settings | None = None) -> AP
             settings=settings,
             current_ms=current_ms,
         ) | {"external_github_bridge": build_external_github_bridge_payload()}
+
+    @router.get("/api/simulation/economic-scoreboards")
+    def simulation_economic_scoreboards() -> dict[str, Any]:
+        """Expose evidence-backed family results without touching paper state."""
+
+        project_root = Path(__file__).resolve().parents[3]
+        return build_economic_family_scoreboards(project_root)
 
     return router
 
