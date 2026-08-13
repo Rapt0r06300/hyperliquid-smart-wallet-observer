@@ -31,6 +31,8 @@ def test_reconstruire_open_add_reduce_close():
     ev = VB.reconstruire_episodes(fills)
     assert [e["action"] for e in ev] == ["OPEN", "ADD", "REDUCE", "CLOSE"]
     assert all(e["direction"] == 1 for e in ev)                        # position longue tout du long
+    assert len({e["fill_id"] for e in ev}) == 4
+    assert all("oid" in e and "hash" in e and "dir" in e for e in ev)
     alpha = VB.entrees_alpha(VB.marquer_retraits(ev))
     assert [e["action"] for e in alpha] == ["OPEN", "ADD"]             # seules les entrées sont copiables
 

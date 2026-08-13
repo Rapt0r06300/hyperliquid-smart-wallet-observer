@@ -13,6 +13,8 @@ Ce module est PUR (parsing, pagination, reconstruction, couverture) → testable
 """
 from __future__ import annotations
 
+import hashlib
+import json
 from typing import Any
 
 MS_PAR_HEURE = 3_600_000
@@ -102,9 +104,19 @@ def reconstruire_episodes(fills: list[dict]) -> list[dict]:
             else:
                 action = "REDUCE"
             direction = 1 if (pos if abs(pos) > 1e-12 else avant) > 0 else -1
+            identity = {
+                "vault": vault, "ts_ms": int(f["ts_ms"]), "coin": coin,
+                "px": float(f["px"]), "sz": float(f["sz"]),
+                "dir": str(f.get("dir") or ""), "oid": f.get("oid"), "hash": f.get("hash"),
+            }
+            fill_id = hashlib.sha256(
+                json.dumps(identity, sort_keys=True, separators=(",", ":")).encode("utf-8")
+            ).hexdigest()
             events.append({"ts_ms": f["ts_ms"], "vault": vault, "coin": coin, "action": action,
                            "direction": direction, "taille_usd": round(taille_usd, 2),
-                           "pos_avant": round(avant, 8), "pos_apres": round(pos, 8), "px": f["px"]})
+                           "pos_avant": round(avant, 8), "pos_apres": round(pos, 8), "px": f["px"],
+                           "sz": f["sz"], "dir": f.get("dir"), "oid": f.get("oid"),
+                           "hash": f.get("hash"), "fill_id": fill_id})
     events.sort(key=lambda e: e["ts_ms"])
     return events
 
