@@ -33,6 +33,14 @@ def _integer(value: object) -> int:
         return 0
 
 
+def _number(value: object) -> float | None:
+    try:
+        number = float(value)
+    except (TypeError, ValueError, OverflowError):
+        return None
+    return number if number == number and abs(number) != float("inf") else None
+
+
 def _freeze(campaign: Mapping[str, Any]) -> dict[str, Any] | None:
     value = campaign.get("parameter_freeze")
     if not isinstance(value, Mapping):
@@ -119,6 +127,10 @@ def _copy_state(campaign: Mapping[str, Any], raw: Mapping[str, Any]) -> dict[str
 def _lead_state(campaign: Mapping[str, Any], raw: Mapping[str, Any]) -> dict[str, Any]:
     executable = _mapping(raw.get("executable_campaign"))
     diagnostics = _mapping(executable.get("diagnostics"))
+    temporal = _mapping(executable.get("temporal_evidence"))
+    oos = _mapping(temporal.get("oos"))
+    forward = _mapping(temporal.get("forward"))
+    placebos = _mapping(temporal.get("placebos"))
     candidate = _integer(diagnostics.get("candidate_observations"))
     liquidatable = _integer(diagnostics.get("liquidatable_observations"))
     missing_sizes = _integer(diagnostics.get("missing_top_sizes"))
@@ -128,9 +140,21 @@ def _lead_state(campaign: Mapping[str, Any], raw: Mapping[str, Any]) -> dict[str
         and executable.get("execution_model") == "causal_marketable_top_v3"
     )
     objective_met = campaign.get("objective_status") == "ATTEINT"
+    oos_net = _number(oos.get("net_pnl_usd"))
+    forward_net = _number(forward.get("net_pnl_usd"))
+    measured_negative = bool(
+        closed > 0
+        and oos_net is not None
+        and oos_net <= 0.0
+        and oos.get("no_lookahead") is True
+        and forward_net is not None
+        and forward_net <= 0.0
+        and forward.get("post_freeze") is True
+    )
     data_only = bool(
         schema_ready
         and not objective_met
+        and not measured_negative
         and closed == 0
         and candidate > 0
         and missing_sizes >= candidate
@@ -138,6 +162,8 @@ def _lead_state(campaign: Mapping[str, Any], raw: Mapping[str, Any]) -> dict[str
     state = (
         "PROVEN"
         if objective_met
+        else "HYPOTHESIS_KILLED_OOS_FORWARD"
+        if measured_negative
         else "FUTURE_SIZED_BBO_REQUIRED"
         if data_only
         else "CONTROLLED_BLOCKER_REMAINS"
@@ -145,7 +171,7 @@ def _lead_state(campaign: Mapping[str, Any], raw: Mapping[str, Any]) -> dict[str
     return {
         "family": "lead_lag",
         "evidence_state": state,
-        "collection_actionable": not objective_met,
+        "collection_actionable": bool(not objective_met and not measured_negative),
         "software_pipeline_ready": schema_ready,
         "future_data_required_only": data_only,
         "objective_status": campaign.get("objective_status"),
@@ -157,22 +183,44 @@ def _lead_state(campaign: Mapping[str, Any], raw: Mapping[str, Any]) -> dict[str
             "missing_top_sizes": missing_sizes,
             "purged_or_unassigned": _integer(diagnostics.get("purged_or_unassigned")),
             "closed_liquidatable_episodes": closed,
+            "net_pnl_usd": _number(campaign.get("net_pnl_usd")),
+            "profit_factor": _number(campaign.get("profit_factor")),
+            "oos_sample_count": _integer(oos.get("sample_count")),
+            "oos_net_pnl_usd": oos_net,
+            "forward_sample_count": _integer(forward.get("sample_count")),
+            "forward_net_pnl_usd": forward_net,
+            "placebo_beaten": placebos.get("beaten") is True,
         },
         "required_collectors": ["bbo-collector", "allmids-collector"],
         "required_artifacts": [
             "runtime/data/bbo_tape.jsonl",
             "runtime/data/bbo_shards/*.jsonl.gz",
         ],
-        "exact_missing_evidence": [
-            "at least 30 post-code shocks with observed bid_sz and ask_sz",
-            "causal pre-signal, entry and exit BBO for each certified episode",
-            "purged positive OOS, positive post-freeze forward, placebo beaten",
-        ],
+        "exact_missing_evidence": (
+            [
+                "the frozen lead-lag rule is negative in both purged OOS and post-freeze forward",
+                "a materially new causal mechanism must be declared and frozen before evaluation",
+                "positive purged OOS and true post-freeze forward remain mandatory",
+            ]
+            if measured_negative
+            else [
+                "at least 30 post-code shocks with observed bid_sz and ask_sz",
+                "causal pre-signal, entry and exit BBO for each certified episode",
+                "purged positive OOS, positive post-freeze forward, placebo beaten",
+            ]
+        ),
         "economic_prior_warning": (
             "legacy observations without top sizes are diagnostic only and cannot certify edge"
         ),
+        "methodology_action": (
+            "KILL_CURRENT_FROZEN_HYPOTHESIS_OR_DECLARE_NEW_MECHANISM"
+            if measured_negative
+            else "CONTINUE_FROZEN_FORWARD_COLLECTION"
+        ),
         "rerun_condition": (
-            "at least 30 new sized BBO shocks exist after the physical freeze boundary"
+            "do not promote by waiting: test only a new predeclared mechanism against the same ledger"
+            if measured_negative
+            else "at least 30 new sized BBO shocks exist after the physical freeze boundary"
         ),
     }
 

@@ -123,6 +123,45 @@ def test_plan_records_exact_collectors_progress_and_freeze() -> None:
     assert plan["collector_state"]["profil"] == "harvest"
 
 
+def test_plan_kills_frozen_lead_lag_negative_oos_and_forward() -> None:
+    raw = _raw_reports()
+    raw["lead_lag"]["executable_campaign"]["temporal_evidence"] = {
+        "oos": {
+            "net_pnl_usd": -0.21,
+            "sample_count": 9,
+            "no_lookahead": True,
+        },
+        "forward": {
+            "net_pnl_usd": -0.60,
+            "sample_count": 15,
+            "post_freeze": True,
+        },
+        "placebos": {"beaten": True},
+    }
+    campaigns = [
+        _campaign("copy_vault"),
+        _campaign(
+            "lead_lag",
+            closed_positions=24,
+            net_pnl_usd=-0.81,
+            profit_factor=0.02,
+        ),
+        _campaign("cross_venue_dislocation_v2", closed_positions=20),
+    ]
+
+    plan = build_collection_plan(campaigns, raw, now_ms=123)
+    lead = next(row for row in plan["families"] if row["family"] == "lead_lag")
+
+    assert lead["evidence_state"] == "HYPOTHESIS_KILLED_OOS_FORWARD"
+    assert lead["collection_actionable"] is False
+    assert lead["future_data_required_only"] is False
+    assert lead["methodology_action"] == "KILL_CURRENT_FROZEN_HYPOTHESIS_OR_DECLARE_NEW_MECHANISM"
+    assert lead["progress"]["oos_net_pnl_usd"] == -0.21
+    assert lead["progress"]["forward_net_pnl_usd"] == -0.60
+    assert "bbo-collector" not in plan["required_collectors"]
+    assert "allmids-collector" not in plan["required_collectors"]
+
+
 def test_write_plan_is_strict_json_and_human_readable(tmp_path: Path) -> None:
     campaigns = [
         _campaign("copy_vault"),
