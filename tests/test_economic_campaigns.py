@@ -12,6 +12,7 @@ from hl_observer.simulation.economic_campaigns import (
     dataset_provenance,
     freeze_or_reuse_parameters,
     freeze_parameters,
+    merge_sources_with_frozen_provenance,
     render_campaign_report,
 )
 
@@ -81,6 +82,26 @@ def test_freeze_identique_est_reutilise_sans_deplacer_frontiere_forward(tmp_path
     assert reused == original
     assert reused["frozen_at_ms"] == 123
     assert len(list((tmp_path / "runtime/reports/economic_campaigns/freezes/lead_lag").glob("*.json"))) == 1
+
+
+def test_frozen_sources_are_preserved_when_latest_window_moves(tmp_path: Path) -> None:
+    frozen = tmp_path / "runtime/data/bbo_shards/frozen.jsonl.gz"
+    current = tmp_path / "runtime/data/bbo_shards/current.jsonl.gz"
+    frozen.parent.mkdir(parents=True)
+    frozen.write_bytes(b"frozen")
+    current.write_bytes(b"current")
+    freeze = {
+        "dataset_provenance": {
+            "files": [
+                {"path": "runtime/data/bbo_shards/frozen.jsonl.gz", "exists": True},
+                {"path": "../../outside.jsonl", "exists": True},
+            ]
+        }
+    }
+
+    merged = merge_sources_with_frozen_provenance(tmp_path, [current], freeze)
+
+    assert merged == [current.resolve(), frozen.resolve()]
 
 
 def test_copy_campaign_never_promotes_without_measured_costs_and_forward() -> None:

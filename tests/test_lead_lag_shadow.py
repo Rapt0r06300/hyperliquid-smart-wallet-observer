@@ -14,6 +14,8 @@ from hl_observer.backtesting.lead_lag_evidence import (
     validate_frozen_evidence,
 )
 from hl_observer.backtesting.lead_lag_shadow import (
+    CAMPAIGN_EXECUTION_MODEL,
+    CAMPAIGN_HORIZON_MS,
     CONFIG_GELE,
     GLOBAL_TRIAL_LEDGER,
     backtest,
@@ -27,6 +29,7 @@ from hl_observer.backtesting.lead_lag_shadow import (
     net_par_horizon,
     selectionner_sources,
     summarize_executable_episodes,
+    walk_forward_protocol_signature,
 )
 from hl_observer.experimental.signaux import signaux_lead_lag
 
@@ -329,6 +332,16 @@ def test_geler_config_ecrit_un_rejet_complet_quand_la_preuve_manque(tmp_path):
     assert set(cfg["criteria"])
     with pytest.raises(FrozenLeadLagEvidenceError, match="EVIDENCE_NOT_PROMOTED"):
         validate_frozen_evidence(cfg)
+
+
+def test_walk_forward_protocol_signature_excludes_growing_dataset_shape():
+    signature = walk_forward_protocol_signature()
+
+    assert signature["execution_model"] == CAMPAIGN_EXECUTION_MODEL
+    assert signature["economic_horizon_ms"] == CAMPAIGN_HORIZON_MS
+    assert signature["minimum_shocks"] > 0
+    assert "history_sources" not in signature
+    assert "dataset_fingerprint" not in signature
 
 
 def test_geler_config_promotes_only_complete_robust_evidence(tmp_path):

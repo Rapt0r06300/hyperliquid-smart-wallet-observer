@@ -55,6 +55,23 @@ CAMPAIGN_MAX_EXIT_LAG_MS = 30_000.0
 CAMPAIGN_EXECUTION_MODEL = "causal_marketable_top_v3"
 
 
+def walk_forward_protocol_signature() -> dict[str, Any]:
+    """Return immutable strategy fields, excluding append-only dataset shape."""
+
+    return {
+        "seuil_choc_bps": SEUIL_CHOC_BPS,
+        "frais_slippage_bps": FRAIS_SLIPPAGE_BPS,
+        "horizons_ms": list(HORIZONS_MS),
+        "economic_horizon_ms": CAMPAIGN_HORIZON_MS,
+        "economic_notional_usd": CAMPAIGN_NOTIONAL_USD,
+        "max_reference_lag_ms": CAMPAIGN_MAX_REFERENCE_LAG_MS,
+        "max_exit_lag_ms": CAMPAIGN_MAX_EXIT_LAG_MS,
+        "execution_model": CAMPAIGN_EXECUTION_MODEL,
+        "minimum_shocks": MIN_CHOCS,
+        "timestamp_clock": "ts_wall_ms_or_recv_wall_ts_ms;recu_ns_fallback",
+    }
+
+
 def selectionner_sources(
     root: str | Path,
     *,
@@ -1248,6 +1265,7 @@ __all__ = [
     "CAMPAIGN_MAX_REFERENCE_LAG_MS",
     "CAMPAIGN_MAX_EXIT_LAG_MS",
     "CAMPAIGN_EXECUTION_MODEL",
+    "walk_forward_protocol_signature",
     "distribution_intervalles",
     "horizons_observables",
     "detecter_chocs",

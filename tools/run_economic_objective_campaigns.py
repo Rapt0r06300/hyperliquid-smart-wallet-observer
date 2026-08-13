@@ -23,7 +23,7 @@ from hl_observer.simulation.economic_campaigns import (  # noqa: E402
     dataset_provenance,
     find_oldest_parameter_freeze,
     freeze_parameters,
-    freeze_or_reuse_parameters,
+    merge_sources_with_frozen_provenance,
     render_campaign_report,
     write_campaign,
 )
@@ -183,26 +183,34 @@ def run_campaigns(
     copy_campaign["evidence_paths"].append(copy_raw_path.relative_to(root).as_posix())
     write_campaign(root, copy_campaign)
 
-    lead_sources = lead_lag_shadow.selectionner_sources(
+    selected_lead_sources = lead_lag_shadow.selectionner_sources(
         root,
         include_history=True,
         max_history_sources=max(0, int(lead_history_sources)),
     )
+    lead_protocol = lead_lag_shadow.walk_forward_protocol_signature()
+    lead_freeze = find_oldest_parameter_freeze(
+        root,
+        "lead_lag",
+        required_parameters=lead_protocol,
+    )
+    if lead_freeze is None:
+        initial_lead_data = dataset_provenance(root, selected_lead_sources)
+        lead_freeze = freeze_parameters(
+            root,
+            "lead_lag",
+            {
+                **lead_protocol,
+                "history_sources_at_freeze": len(selected_lead_sources),
+            },
+            initial_lead_data,
+        )
+    lead_sources = merge_sources_with_frozen_provenance(
+        root,
+        selected_lead_sources,
+        lead_freeze,
+    )
     lead_data = dataset_provenance(root, lead_sources)
-    lead_params = {
-        "seuil_choc_bps": lead_lag_shadow.SEUIL_CHOC_BPS,
-        "frais_slippage_bps": lead_lag_shadow.FRAIS_SLIPPAGE_BPS,
-        "horizons_ms": list(lead_lag_shadow.HORIZONS_MS),
-        "economic_horizon_ms": lead_lag_shadow.CAMPAIGN_HORIZON_MS,
-        "economic_notional_usd": lead_lag_shadow.CAMPAIGN_NOTIONAL_USD,
-        "max_reference_lag_ms": lead_lag_shadow.CAMPAIGN_MAX_REFERENCE_LAG_MS,
-        "max_exit_lag_ms": lead_lag_shadow.CAMPAIGN_MAX_EXIT_LAG_MS,
-        "execution_model": lead_lag_shadow.CAMPAIGN_EXECUTION_MODEL,
-        "minimum_shocks": lead_lag_shadow.MIN_CHOCS,
-        "history_sources": len(lead_sources),
-        "timestamp_clock": "ts_wall_ms_or_recv_wall_ts_ms;recu_ns_fallback",
-    }
-    lead_freeze = freeze_or_reuse_parameters(root, "lead_lag", lead_params, lead_data)
     lead_raw = lead_lag_shadow.backtest(
         root,
         sources=lead_sources,

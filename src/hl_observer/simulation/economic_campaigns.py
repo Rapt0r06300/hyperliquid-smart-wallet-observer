@@ -210,6 +210,40 @@ def find_oldest_parameter_freeze(
     return min(matches, key=lambda payload: int(payload.get("frozen_at_ms") or 0))
 
 
+def merge_sources_with_frozen_provenance(
+    root: str | Path,
+    selected_sources: Iterable[str | Path],
+    freeze: Mapping[str, Any] | None,
+) -> list[Path]:
+    """Preserve frozen input files while append-only datasets grow."""
+
+    project_root = Path(root).resolve()
+    candidates: list[Path] = [Path(value) for value in selected_sources]
+    provenance = freeze.get("dataset_provenance") if isinstance(freeze, Mapping) else None
+    files = provenance.get("files") if isinstance(provenance, Mapping) else None
+    if isinstance(files, list):
+        for item in files:
+            path_text = item.get("path") if isinstance(item, Mapping) else None
+            if isinstance(path_text, str) and path_text.strip():
+                candidates.append(Path(path_text))
+
+    merged: list[Path] = []
+    seen: set[str] = set()
+    for candidate in candidates:
+        absolute = candidate if candidate.is_absolute() else project_root / candidate
+        try:
+            resolved = absolute.resolve()
+            resolved.relative_to(project_root)
+        except (OSError, ValueError):
+            continue
+        key = str(resolved).casefold()
+        if key in seen or not resolved.is_file():
+            continue
+        seen.add(key)
+        merged.append(resolved)
+    return merged
+
+
 def _base(
     family: str,
     *,
@@ -609,6 +643,8 @@ __all__ = [
     "dataset_provenance",
     "freeze_parameters",
     "freeze_or_reuse_parameters",
+    "find_oldest_parameter_freeze",
+    "merge_sources_with_frozen_provenance",
     "render_campaign_report",
     "write_campaign",
 ]
