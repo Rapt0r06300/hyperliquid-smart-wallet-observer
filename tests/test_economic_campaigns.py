@@ -198,7 +198,7 @@ def test_executable_lead_lag_campaign_maps_closed_ledger_and_temporal_proof(
     freeze = freeze_parameters(
         tmp_path,
         "lead_lag",
-        {"execution_model": "causal_marketable_top_v2"},
+        {"execution_model": "causal_marketable_top_v3"},
         datasets,
         campaign_id="lead-executable",
         frozen_at_ms=10,
@@ -207,7 +207,7 @@ def test_executable_lead_lag_campaign_maps_closed_ledger_and_temporal_proof(
         "statut": "PROMETTEUR",
         "chocs_test": 4,
         "executable_campaign": {
-            "execution_model": "causal_marketable_top_v2",
+            "execution_model": "causal_marketable_top_v3",
             "diagnostics": {"candidate_observations": 4, "missing_top_sizes": 0},
             "summary": {
                 "positions_ouvertes": 4,

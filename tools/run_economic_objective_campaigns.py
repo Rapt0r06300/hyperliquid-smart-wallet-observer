@@ -168,6 +168,8 @@ def run_campaigns(
         "horizons_ms": list(lead_lag_shadow.HORIZONS_MS),
         "economic_horizon_ms": lead_lag_shadow.CAMPAIGN_HORIZON_MS,
         "economic_notional_usd": lead_lag_shadow.CAMPAIGN_NOTIONAL_USD,
+        "max_reference_lag_ms": lead_lag_shadow.CAMPAIGN_MAX_REFERENCE_LAG_MS,
+        "max_exit_lag_ms": lead_lag_shadow.CAMPAIGN_MAX_EXIT_LAG_MS,
         "execution_model": lead_lag_shadow.CAMPAIGN_EXECUTION_MODEL,
         "minimum_shocks": lead_lag_shadow.MIN_CHOCS,
         "history_sources": len(lead_sources),

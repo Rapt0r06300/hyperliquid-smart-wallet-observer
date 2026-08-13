@@ -122,7 +122,7 @@ def _lead_state(campaign: Mapping[str, Any], raw: Mapping[str, Any]) -> dict[str
     closed = _integer(campaign.get("closed_positions"))
     schema_ready = (
         executable.get("schema_version") == "hypersmart.lead_lag_executable_campaign.v1"
-        and executable.get("execution_model") == "causal_marketable_top_v2"
+        and executable.get("execution_model") == "causal_marketable_top_v3"
     )
     objective_met = campaign.get("objective_status") == "ATTEINT"
     data_only = bool(

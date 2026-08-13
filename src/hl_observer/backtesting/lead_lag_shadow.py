@@ -50,7 +50,9 @@ N_PERIODES = 4                     # pour juger la stabilité dans le temps
 DEFAULT_HISTORY_SOURCES = 8
 CAMPAIGN_HORIZON_MS = 1000.0
 CAMPAIGN_NOTIONAL_USD = 25.0
-CAMPAIGN_EXECUTION_MODEL = "causal_marketable_top_v2"
+CAMPAIGN_MAX_REFERENCE_LAG_MS = 30_000.0
+CAMPAIGN_MAX_EXIT_LAG_MS = 30_000.0
+CAMPAIGN_EXECUTION_MODEL = "causal_marketable_top_v3"
 
 
 def selectionner_sources(
@@ -309,6 +311,8 @@ def episodes_par_horizon(
     horizons_ms,
     coin: str = "",
     notional_usd: float = 25.0,
+    max_reference_lag_ms: float = CAMPAIGN_MAX_REFERENCE_LAG_MS,
+    max_exit_lag_ms: float = CAMPAIGN_MAX_EXIT_LAG_MS,
 ) -> dict[float, list[dict[str, Any]]]:
     """Build causal closed paper episodes from marketable HL quotes.
 
@@ -327,6 +331,16 @@ def episodes_par_horizon(
             continue
         reference = _hl_a(hl, t0)
         reference_observed_before_signal = reference is not None
+        reference_age_ms = (
+            (t0 - int(reference[0])) / 1e6
+            if reference_observed_before_signal
+            else None
+        )
+        reference_fresh = bool(
+            reference_observed_before_signal
+            and reference_age_ms is not None
+            and 0.0 <= reference_age_ms <= float(max_reference_lag_ms)
+        )
         if reference is None:
             # Keep a directional diagnostic row, but never certify it as
             # liquidatable economic evidence without a pre-signal mark.
@@ -344,6 +358,10 @@ def episodes_par_horizon(
             exit_quote = _hl_apres(hl, target_ns, timestamps=times)
             if exit_quote is None or exit_quote[0] <= entry[0]:
                 continue
+            exit_observation_lag_ms = (exit_quote[0] - target_ns) / 1e6
+            exit_quote_fresh = bool(
+                0.0 <= exit_observation_lag_ms <= float(max_exit_lag_ms)
+            )
             exit_price = exit_quote[2] if direction > 0 else exit_quote[3]
             if exit_price <= 0:
                 continue
@@ -354,7 +372,8 @@ def episodes_par_horizon(
                 else None
             )
             liquidatable = (
-                reference_observed_before_signal
+                reference_fresh
+                and exit_quote_fresh
                 and capacity is not None
                 and requested > 0
                 and capacity >= requested
@@ -404,15 +423,29 @@ def episodes_par_horizon(
                     "exit_ts_ns": int(exit_quote[0]),
                     "horizon_ms": float(horizon),
                     "entry_latency_ms": round((entry[0] - t0) / 1e6, 6),
-                    "exit_observation_lag_ms": round((exit_quote[0] - target_ns) / 1e6, 6),
+                    "exit_observation_lag_ms": round(exit_observation_lag_ms, 6),
                     "entry_price": float(entry_price),
                     "exit_price": float(exit_price),
                     "reference_mid": reference_mid,
+                    "reference_age_ms": (
+                        round(reference_age_ms, 6)
+                        if reference_age_ms is not None
+                        else None
+                    ),
+                    "max_reference_lag_ms": float(max_reference_lag_ms),
                     "reference_status": (
                         "OBSERVED_AT_OR_BEFORE_SIGNAL"
+                        if reference_fresh
+                        else "STALE_PRE_SIGNAL_QUOTE"
                         if reference_observed_before_signal
                         else "MISSING_PRE_SIGNAL_QUOTE"
                     ),
+                    "exit_status": (
+                        "OBSERVED_AT_OR_AFTER_TARGET"
+                        if exit_quote_fresh
+                        else "STALE_EXIT_QUOTE"
+                    ),
+                    "max_exit_lag_ms": float(max_exit_lag_ms),
                     "entry_mid": entry_mid,
                     "exit_mid": exit_mid,
                     "quantity": quantity,
@@ -546,6 +579,8 @@ def executable_campaign_evidence(
     frais_slippage_bps: float = FRAIS_SLIPPAGE_BPS,
     seuil_choc_bps: float = SEUIL_CHOC_BPS,
     notional_usd: float = CAMPAIGN_NOTIONAL_USD,
+    max_reference_lag_ms: float = CAMPAIGN_MAX_REFERENCE_LAG_MS,
+    max_exit_lag_ms: float = CAMPAIGN_MAX_EXIT_LAG_MS,
 ) -> dict[str, Any]:
     """Build the fixed-horizon, purged, post-freeze Lead-Lag paper ledger."""
 
@@ -570,6 +605,8 @@ def executable_campaign_evidence(
                 horizons_ms=(float(horizon_ms),),
                 coin=coin,
                 notional_usd=float(notional_usd),
+                max_reference_lag_ms=float(max_reference_lag_ms),
+                max_exit_lag_ms=float(max_exit_lag_ms),
             )[float(horizon_ms)]
         )
         placebo_shocks = [
@@ -584,6 +621,8 @@ def executable_campaign_evidence(
                 horizons_ms=(float(horizon_ms),),
                 coin=coin,
                 notional_usd=float(notional_usd),
+                max_reference_lag_ms=float(max_reference_lag_ms),
+                max_exit_lag_ms=float(max_exit_lag_ms),
             )[float(horizon_ms)]
         )
 
@@ -652,6 +691,8 @@ def executable_campaign_evidence(
             "seuil_choc_bps": float(seuil_choc_bps),
             "round_trip_fee_bps": float(frais_slippage_bps),
             "notional_usd": float(notional_usd),
+            "max_reference_lag_ms": float(max_reference_lag_ms),
+            "max_exit_lag_ms": float(max_exit_lag_ms),
         },
         "walk_forward_bounds": bounds,
         "summary": combined,
@@ -695,6 +736,14 @@ def executable_campaign_evidence(
             ),
             "missing_top_sizes": sum(
                 1 for row in candidates if row.get("top_capacity_usd") is None
+            ),
+            "stale_pre_signal_quotes": sum(
+                1
+                for row in candidates
+                if row.get("reference_status") == "STALE_PRE_SIGNAL_QUOTE"
+            ),
+            "stale_exit_quotes": sum(
+                1 for row in candidates if row.get("exit_status") == "STALE_EXIT_QUOTE"
             ),
             "purged_or_unassigned": len(candidates) - len(combined_rows),
         },
@@ -1189,9 +1238,24 @@ def _optional_finite_non_negative(value: Any) -> float | None:
     return parsed
 
 
-__all__ = ["SEUIL_CHOC_BPS", "FRAIS_SLIPPAGE_BPS", "HORIZONS_MS", "charger_tape",
-           "CAMPAIGN_HORIZON_MS", "CAMPAIGN_NOTIONAL_USD", "CAMPAIGN_EXECUTION_MODEL",
-           "distribution_intervalles", "horizons_observables", "detecter_chocs",
-           "episodes_par_horizon", "summarize_executable_episodes",
-           "executable_campaign_evidence", "net_par_horizon", "backtest", "geler_config",
-           "GLOBAL_TRIAL_LEDGER"]
+__all__ = [
+    "SEUIL_CHOC_BPS",
+    "FRAIS_SLIPPAGE_BPS",
+    "HORIZONS_MS",
+    "charger_tape",
+    "CAMPAIGN_HORIZON_MS",
+    "CAMPAIGN_NOTIONAL_USD",
+    "CAMPAIGN_MAX_REFERENCE_LAG_MS",
+    "CAMPAIGN_MAX_EXIT_LAG_MS",
+    "CAMPAIGN_EXECUTION_MODEL",
+    "distribution_intervalles",
+    "horizons_observables",
+    "detecter_chocs",
+    "episodes_par_horizon",
+    "summarize_executable_episodes",
+    "executable_campaign_evidence",
+    "net_par_horizon",
+    "backtest",
+    "geler_config",
+    "GLOBAL_TRIAL_LEDGER",
+]

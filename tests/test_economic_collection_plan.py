@@ -41,7 +41,7 @@ def _raw_reports():
         "lead_lag": {
             "executable_campaign": {
                 "schema_version": "hypersmart.lead_lag_executable_campaign.v1",
-                "execution_model": "causal_marketable_top_v2",
+                "execution_model": "causal_marketable_top_v3",
                 "diagnostics": {
                     "candidate_observations": 30,
                     "liquidatable_observations": 0,

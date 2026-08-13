@@ -142,6 +142,45 @@ def test_episode_sans_quote_pre_signal_ne_certifie_pas_le_pnl():
     assert summary["LIQUIDATABLE_NET"] is False
 
 
+def test_episode_refuse_une_reference_pre_signal_issue_d_un_ancien_shard():
+    day_ns = 24 * 60 * 60 * 1_000_000_000
+    signal_ns = 4 * day_ns
+    hl = [
+        (5_000_000, 90.0, 89.99, 90.01, 10.0, 10.0),
+        (signal_ns + 20_000_000, 100.0, 99.99, 100.01, 10.0, 10.0),
+        (signal_ns + 110_000_000, 100.5, 100.49, 100.51, 10.0, 10.0),
+    ]
+    row = episodes_par_horizon(
+        hl,
+        [(signal_ns, 1.0)],
+        frais_slippage_bps=9.0,
+        horizons_ms=[100.0],
+    )[100.0][0]
+
+    assert row["reference_status"] == "STALE_PRE_SIGNAL_QUOTE"
+    assert row["reference_age_ms"] > row["max_reference_lag_ms"]
+    assert row["liquidatable_net"] is False
+    assert summarize_executable_episodes([row])["positions_fermees"] == 0
+
+
+def test_episode_refuse_une_sortie_observee_trop_tard():
+    hl = [
+        (5_000_000, 100.0, 99.99, 100.01, 10.0, 10.0),
+        (15_000_000, 100.1, 100.09, 100.11, 10.0, 10.0),
+        (60_000_000_000, 100.5, 100.49, 100.51, 10.0, 10.0),
+    ]
+    row = episodes_par_horizon(
+        hl,
+        [(10_000_000, 1.0)],
+        frais_slippage_bps=9.0,
+        horizons_ms=[100.0],
+    )[100.0][0]
+
+    assert row["exit_status"] == "STALE_EXIT_QUOTE"
+    assert row["exit_observation_lag_ms"] > row["max_exit_lag_ms"]
+    assert row["liquidatable_net"] is False
+
+
 def test_executable_campaign_separe_oos_et_vrai_forward_post_freeze():
     rows = _rows(30)
     tape = {"ETH": {"HL": [], "BIN": [], "TRADE": []}}
