@@ -119,6 +119,77 @@ def test_copy_campaign_never_promotes_without_measured_costs_and_forward() -> No
     assert "FORWARD_POST_FREEZE_PROOF_MISSING" in campaign["objective_reasons"]
 
 
+def test_executable_copy_campaign_maps_only_closed_liquidatable_evidence(tmp_path: Path) -> None:
+    datasets = {"dataset_fingerprint": "d" * 64, "files": []}
+    freeze = freeze_parameters(
+        tmp_path,
+        "copy_vault",
+        {"calibration_protocol": "copy_vault_executable_walk_forward_v1"},
+        datasets,
+        campaign_id="copy-executable",
+        frozen_at_ms=10,
+    )
+    report = {
+        "schema_version": "hypersmart.copy_vault_executable_campaign.v1",
+        "metaorder_audit": {"metaorders": 3},
+        "summary": {
+            "positions_ouvertes": 2,
+            "positions_fermees": 2,
+            "gross_pnl_usd": 5.0,
+            "fees_usd": 0.2,
+            "spread_cost_usd": 0.3,
+            "slippage_cost_usd": 0.0,
+            "latency_cost_usd": 0.1,
+            "net_pnl_usd": 4.4,
+            "roi_pct": 0.44,
+            "max_drawdown_usd": 0.1,
+            "hit_rate": 1.0,
+            "profit_factor": float("inf"),
+            "LIQUIDATABLE_NET": True,
+            "duplicate_trade_ids": 0,
+            "trade_ids_count": 2,
+            "trade_ids_sha256": "c" * 64,
+        },
+        "temporal_evidence": {
+            "oos": {"net_pnl_usd": 1.0, "sample_count": 1, "no_lookahead": True},
+            "forward": {"net_pnl_usd": 1.0, "sample_count": 1, "post_freeze": True},
+            "placebos": {"beaten": True},
+        },
+    }
+
+    campaign = build_copy_campaign(report, freeze=freeze, datasets=datasets)
+
+    assert campaign["net_pnl_usd"] == 4.4
+    assert campaign["liquidatable_net"] is True
+    assert campaign["objective_status"] == "ATTEINT"
+
+
+def test_executable_copy_campaign_zero_closed_is_non_mesurable() -> None:
+    report = {
+        "schema_version": "hypersmart.copy_vault_executable_campaign.v1",
+        "metaorder_audit": {"metaorders": 21},
+        "summary": {
+            "positions_ouvertes": 0,
+            "positions_fermees": 0,
+            "gross_pnl_usd": 0.0,
+            "fees_usd": 0.0,
+            "spread_cost_usd": 0.0,
+            "slippage_cost_usd": 0.0,
+            "latency_cost_usd": 0.0,
+            "net_pnl_usd": 0.0,
+            "LIQUIDATABLE_NET": False,
+            "duplicate_trade_ids": 0,
+            "trade_ids_count": 0,
+            "trade_ids_sha256": "e" * 64,
+        },
+    }
+    campaign = build_copy_campaign(report, freeze=None, datasets={"files": []})
+
+    assert campaign["net_pnl_usd"] is None
+    assert campaign["gross_pnl_usd"] is None
+    assert "UNMEASURED:net_pnl_usd" in campaign["objective_reasons"]
+
+
 def test_cross_campaign_keeps_unmeasured_slippage_and_two_leg_proof(tmp_path: Path) -> None:
     datasets = {"dataset_fingerprint": "d" * 64, "files": []}
     freeze = freeze_parameters(

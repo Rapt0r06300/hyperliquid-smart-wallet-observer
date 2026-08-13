@@ -269,6 +269,73 @@ def build_copy_campaign(
         datasets=datasets,
         evidence_paths=("runtime/data/copy_edge_rapport_reel.json",),
     )
+    if report.get("schema_version") == "hypersmart.copy_vault_executable_campaign.v1":
+        summary = report.get("summary") if isinstance(report.get("summary"), Mapping) else {}
+        temporal = (
+            report.get("temporal_evidence")
+            if isinstance(report.get("temporal_evidence"), Mapping)
+            else {}
+        )
+        metaorder_audit = (
+            report.get("metaorder_audit")
+            if isinstance(report.get("metaorder_audit"), Mapping)
+            else {}
+        )
+        calibration = (
+            report.get("calibration")
+            if isinstance(report.get("calibration"), Mapping)
+            else {}
+        )
+        closed_count = int(summary.get("positions_fermees") or 0)
+        measured = closed_count > 0
+        def economic_value(key: str) -> Any:
+            return summary.get(key) if measured else None
+        row.update(
+            {
+                "signal_count": metaorder_audit.get("metaorders"),
+                "source_status": (
+                    calibration.get("status")
+                    or (report.get("params") or {}).get("selection_status")
+                ),
+                "opened_positions": summary.get("positions_ouvertes"),
+                "closed_positions": summary.get("positions_fermees"),
+                "gross_pnl_usd": economic_value("gross_pnl_usd"),
+                "fees_usd": economic_value("fees_usd"),
+                "spread_cost_usd": economic_value("spread_cost_usd"),
+                "slippage_cost_usd": economic_value("slippage_cost_usd"),
+                "latency_cost_usd": economic_value("latency_cost_usd"),
+                "net_pnl_usd": economic_value("net_pnl_usd"),
+                "roi_pct": economic_value("roi_pct"),
+                "max_drawdown_usd": economic_value("max_drawdown_usd"),
+                "hit_rate": economic_value("hit_rate"),
+                "profit_factor": economic_value("profit_factor"),
+                "liquidatable_net": summary.get("LIQUIDATABLE_NET") is True,
+                "duplicate_trade_ids": summary.get("duplicate_trade_ids"),
+                "trade_ids_count": summary.get("trade_ids_count"),
+                "trade_ids_sha256": summary.get("trade_ids_sha256"),
+                "oos": temporal.get("oos") if isinstance(temporal.get("oos"), Mapping) else None,
+                "forward": (
+                    temporal.get("forward")
+                    if isinstance(temporal.get("forward"), Mapping)
+                    else None
+                ),
+                "placebos": (
+                    temporal.get("placebos")
+                    if isinstance(temporal.get("placebos"), Mapping)
+                    else None
+                ),
+                "period": {
+                    "walk_forward_bounds": (report.get("params") or {}).get(
+                        "walk_forward_bounds"
+                    ),
+                    "book_meta": report.get("book_meta"),
+                    "canonical_input_audit": report.get("canonical_input_audit"),
+                    "metaorder_audit": metaorder_audit,
+                },
+            }
+        )
+        return _finish(row)
+
     measure = report.get("mesure") if isinstance(report.get("mesure"), Mapping) else {}
     simulation = (
         report.get("simulation_paper_oos")

@@ -13,7 +13,7 @@ from typing import Any
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
-from hl_observer.backtesting import lead_lag_shadow  # noqa: E402
+from hl_observer.backtesting import copy_vault_executable, lead_lag_shadow  # noqa: E402
 from hl_observer.ops.superviseur_collecteurs import demarrer_tous  # noqa: E402
 from hl_observer.simulation.economic_campaigns import (  # noqa: E402
     REPORT_DIR,
@@ -80,21 +80,71 @@ def run_campaigns(
             "runtime/data/vault_fills.jsonl",
             "runtime/data/vault_episodes.jsonl",
             "runtime/data/vault_snapshots.jsonl",
-            "runtime/data/hl_allmids_tape.jsonl",
+            "runtime/data/carnet_venues.jsonl",
         ),
     )
-    copy_freeze: dict[str, Any] | None = None
-
-    def freeze_copy(parameters: dict[str, Any]) -> None:
-        nonlocal copy_freeze
-        copy_freeze = freeze_or_reuse_parameters(root, "copy_vault", parameters, copy_data)
-
-    copy_raw = copy_tool.construire(
-        root,
-        geler_si_valide=False,
-        on_parameters_selected=freeze_copy,
-        cost_components_bps=None,
+    copy_entries, canonical_input_audit = copy_tool.charger_entrees_alpha_avec_audit(root)
+    copy_metaorders, metaorder_audit = copy_vault_executable.cluster_metaorders(copy_entries)
+    copy_books, copy_book_meta = copy_vault_executable.load_observed_books(
+        root, coins={row["coin"] for row in copy_metaorders}
     )
+    copy_protocol = copy_vault_executable.protocol_signature()
+    copy_freeze = find_oldest_parameter_freeze(
+        root, "copy_vault", required_parameters=copy_protocol
+    )
+    copy_calibration = None
+    if copy_freeze is None:
+        copy_calibration = copy_vault_executable.calibrate_train_only(
+            copy_metaorders, copy_books
+        )
+        copy_parameters = {
+            **copy_protocol,
+            "walk_forward_bounds": copy_calibration.get("bounds"),
+            "selected_horizon_ms": copy_calibration.get("selected_horizon_ms"),
+            "training_selection_eligible": copy_calibration.get("selection_eligible") is True,
+            "selection_status": copy_calibration.get("status"),
+        }
+        if copy_calibration.get("selection_eligible") is True:
+            copy_freeze = freeze_parameters(
+                root, "copy_vault", copy_parameters, copy_data
+            )
+    else:
+        copy_parameters = dict(copy_freeze["parameters"])
+    provisional_cutoff_ms = max(
+        (int(row["signal_ts_ms"]) for row in copy_metaorders), default=0
+    )
+    copy_walk_forward = copy_vault_executable.evaluate_frozen(
+        copy_metaorders,
+        copy_books,
+        frozen_parameters=copy_parameters,
+        frozen_at_ms=(
+            int(copy_freeze["frozen_at_ms"]) if copy_freeze is not None
+            else provisional_cutoff_ms
+        ),
+    )
+    copy_segment_trades = copy_walk_forward.get("trades", {})
+    copy_trades = [
+        trade
+        for name in ("train", "validation", "oos", "forward")
+        for trade in copy_segment_trades.get(name, [])
+    ] if isinstance(copy_segment_trades, dict) else []
+    copy_raw = {
+        "schema_version": "hypersmart.copy_vault_executable_campaign.v1",
+        "canonical_input_audit": canonical_input_audit,
+        "metaorder_audit": metaorder_audit,
+        "book_meta": copy_book_meta,
+        "params": copy_parameters,
+        "calibration": copy_calibration,
+        "walk_forward": {
+            key: value for key, value in copy_walk_forward.items() if key != "trades"
+        },
+        "summary": copy_walk_forward.get("combined_summary"),
+        "temporal_evidence": copy_vault_executable.temporal_evidence(copy_walk_forward),
+        "trades": copy_trades,
+        "paper_read_only": True,
+        "real_execution": False,
+        "provisional_without_physical_freeze": copy_freeze is None,
+    }
     copy_raw_path = _write_raw(root, "copy_vault", copy_raw)
     copy_campaign = build_copy_campaign(copy_raw, freeze=copy_freeze, datasets=copy_data)
     copy_campaign["evidence_paths"].append(copy_raw_path.relative_to(root).as_posix())
