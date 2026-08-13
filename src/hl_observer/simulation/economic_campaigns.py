@@ -539,6 +539,10 @@ def build_cross_campaign(
                 temporal.get("placebos")
                 if isinstance(temporal.get("placebos"), Mapping) else None
             ),
+            "hypothesis_audit": (
+                report.get("hypothesis_audit")
+                if isinstance(report.get("hypothesis_audit"), Mapping) else None
+            ),
         }
     )
     return _finish(row)

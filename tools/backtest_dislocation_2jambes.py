@@ -812,6 +812,63 @@ def preuves_temporelles_walk_forward(walk_forward: dict) -> dict:
     }
 
 
+def diagnostiquer_hypothese_walk_forward(walk_forward: dict) -> dict:
+    """Explain whether the frozen mechanism survives without mining its control.
+
+    The inverted replay is a falsification control observed on the same OOS
+    interval.  A positive control is useful evidence that the original economic
+    hypothesis may have the wrong sign, but it is never a strategy eligible for
+    promotion after looking at that interval.
+    """
+
+    segments = walk_forward.get("segments") if isinstance(walk_forward.get("segments"), dict) else {}
+    train = segments.get("train") if isinstance(segments.get("train"), dict) else {}
+    validation = segments.get("validation") if isinstance(segments.get("validation"), dict) else {}
+    oos = segments.get("oos") if isinstance(segments.get("oos"), dict) else {}
+    forward = segments.get("forward") if isinstance(segments.get("forward"), dict) else {}
+    control = walk_forward.get("placebo_oos") if isinstance(walk_forward.get("placebo_oos"), dict) else {}
+
+    current_status = str(walk_forward.get("status") or "UNKNOWN")
+    killed = current_status != "ELIGIBLE_FOR_FORWARD"
+    control_positive = bool(
+        int(control.get("n_trades") or 0) > 0
+        and float(control.get("net_total_usd") or 0.0) > 0.0
+        and float(control.get("profit_factor") or 0.0) > 1.0
+    )
+
+    def compact(summary: dict) -> dict:
+        return {
+            "sample_count": int(summary.get("n_trades") or 0),
+            "net_pnl_usd": float(summary.get("net_total_usd") or 0.0),
+            "profit_factor": float(summary.get("profit_factor") or 0.0),
+        }
+
+    return {
+        "hypothesis_id": "CROSS_VENUE_BASIS_CONVERGENCE_V2",
+        "frozen_mechanism_status": "KILL" if killed else "ELIGIBLE_FOR_FORWARD",
+        "source_walk_forward_status": current_status,
+        "train": compact(train),
+        "validation": compact(validation),
+        "oos": compact(oos),
+        "forward": compact(forward),
+        "inverted_direction_control": {
+            **compact(control),
+            "positive_oos": control_positive,
+            "promotable": False,
+            "non_promotion_reason": "OOS_CONTROL_NOT_A_PREDECLARED_STRATEGY",
+        },
+        "new_mechanism_required": killed,
+        "next_action": (
+            "DECLARE_FREEZE_AND_TEST_A_NEW_DIRECTIONAL_MECHANISM_ON_FUTURE_DATA"
+            if killed and control_positive
+            else "COLLECT_FORWARD_WITH_FROZEN_MECHANISM"
+            if not killed
+            else "KILL_CURRENT_MECHANISM_AND_FORMULATE_A_MATERIALLY_NEW_HYPOTHESIS"
+        ),
+        "retrospective_direction_switch_forbidden": True,
+    }
+
+
 def juger(trades: list[dict]) -> dict:
     count = len(trades)
     summary = _summary(trades)

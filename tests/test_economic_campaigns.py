@@ -309,6 +309,11 @@ def test_cross_campaign_keeps_unmeasured_slippage_and_two_leg_proof(tmp_path: Pa
             {"ts_detect": 10, "ts_out": 20},
             {"ts_detect": 30, "ts_out": 40},
         ],
+        "hypothesis_audit": {
+            "frozen_mechanism_status": "KILL",
+            "retrospective_direction_switch_forbidden": True,
+            "inverted_direction_control": {"promotable": False},
+        },
     }
     campaign = build_cross_campaign(report, freeze=freeze, datasets=datasets)
 
@@ -316,6 +321,8 @@ def test_cross_campaign_keeps_unmeasured_slippage_and_two_leg_proof(tmp_path: Pa
     assert campaign["slippage_cost_usd"] is None
     assert campaign["liquidatable_net"] is False
     assert campaign["objective_status"] == "NON_ATTEINT"
+    assert campaign["hypothesis_audit"]["frozen_mechanism_status"] == "KILL"
+    assert campaign["hypothesis_audit"]["inverted_direction_control"]["promotable"] is False
 
 
 def test_campaign_json_has_no_case_insensitive_duplicate_keys(tmp_path: Path) -> None:

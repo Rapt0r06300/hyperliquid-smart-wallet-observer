@@ -265,6 +265,9 @@ def run_campaigns(
         for trade in segment_trades.get(name, [])
     ] if isinstance(segment_trades, dict) else []
     cross_temporal = cross_tool.preuves_temporelles_walk_forward(cross_walk_forward)
+    cross_hypothesis_audit = cross_tool.diagnostiquer_hypothese_walk_forward(
+        cross_walk_forward
+    )
     cross_raw = {
         "schema_version": "hypersmart.cross_venue_campaign.v2",
         "meta": cross_meta,
@@ -280,6 +283,7 @@ def run_campaigns(
         },
         "verdict_realiste_16bps": cross_tool.juger(cross_trades),
         "temporal_evidence": cross_temporal,
+        "hypothesis_audit": cross_hypothesis_audit,
         "trades": cross_trades,
         "paper_read_only": True,
         "real_execution": False,

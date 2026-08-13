@@ -193,6 +193,28 @@ def test_preuves_temporelles_ne_fabriquent_pas_forward_post_freeze():
     assert evidence["forward"]["post_freeze"] is False
 
 
+def test_controle_inverse_oos_positif_ne_peut_pas_etre_promu_apres_coup():
+    walk_forward = {
+        "status": "KILL_HISTORICAL",
+        "segments": {
+            "train": {"n_trades": 20, "net_total_usd": -2.0, "profit_factor": 0.2},
+            "validation": {"n_trades": 5, "net_total_usd": -0.4, "profit_factor": 0.1},
+            "oos": {"n_trades": 6, "net_total_usd": -0.8, "profit_factor": 0.0},
+            "forward": {"n_trades": 0, "net_total_usd": 0.0, "profit_factor": 0.0},
+        },
+        "placebo_oos": {"n_trades": 6, "net_total_usd": 0.3, "profit_factor": 2.0},
+    }
+
+    audit = BT.diagnostiquer_hypothese_walk_forward(walk_forward)
+
+    assert audit["frozen_mechanism_status"] == "KILL"
+    assert audit["inverted_direction_control"]["positive_oos"] is True
+    assert audit["inverted_direction_control"]["promotable"] is False
+    assert audit["retrospective_direction_switch_forbidden"] is True
+    assert audit["new_mechanism_required"] is True
+    assert "FUTURE_DATA" in audit["next_action"]
+
+
 def test_calibration_ne_transmet_que_le_train_a_la_selection(monkeypatch):
     series = {
         "ZZZ": [
