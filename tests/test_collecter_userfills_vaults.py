@@ -102,7 +102,7 @@ def test_copy_vault_prewarm_restreint_aux_wallets_suivis_et_aux_coins_recents(tm
     )
 
     selected = C._copy_vault_prewarm_coins(
-        tmp_path, ["0xfollow"], max_coins=2
+        tmp_path, ["0xfollow"], max_coins=2, now_ms=400
     )
 
     assert selected == ["ETH", "SOL"]
@@ -121,11 +121,94 @@ def test_copy_vault_prewarm_est_borne_par_le_plafond_dur(tmp_path):
     )
 
     selected = C._copy_vault_prewarm_coins(
-        tmp_path, ["0xFOLLOW"], max_coins=10_000
+        tmp_path,
+        ["0xFOLLOW"],
+        max_coins=10_000,
+        now_ms=C.TAPE_PREWARM_MAX_COINS + 10,
     )
 
     assert len(selected) == C.TAPE_PREWARM_MAX_COINS
     assert selected[0] == f"C{C.TAPE_PREWARM_MAX_COINS + 4}"
+
+
+def test_copy_vault_prewarm_exclut_activite_perimee_et_future(tmp_path):
+    data = tmp_path / "runtime" / "data"
+    data.mkdir(parents=True)
+    now_ms = 10_000_000
+    rows = [
+        {"vault": "0xFOLLOW", "coin": "FRESH", "ts_ms": now_ms - 1_000},
+        {
+            "vault": "0xFOLLOW",
+            "coin": "STALE",
+            "ts_ms": now_ms - C.TAPE_PREWARM_RECENT_WINDOW_MS - 1,
+        },
+        {"vault": "0xFOLLOW", "coin": "FUTURE", "ts_ms": now_ms + 60_001},
+    ]
+    (data / "vault_fills_live.jsonl").write_text(
+        "\n".join(json.dumps(row) for row in rows) + "\n", encoding="utf-8"
+    )
+
+    selected = C._copy_vault_prewarm_coins(
+        tmp_path, ["0xfollow"], now_ms=now_ms
+    )
+
+    assert selected == ["FRESH"]
+
+
+def test_copy_vault_prewarm_ne_lit_quun_tail_borne(tmp_path):
+    data = tmp_path / "runtime" / "data"
+    data.mkdir(parents=True)
+    path = data / "vault_fills_live.jsonl"
+    path.write_bytes(
+        (json.dumps({"vault": "0xFOLLOW", "coin": "OLD", "ts_ms": 999}) + "\n").encode()
+        + b"x" * 300
+        + b"\n"
+        + (json.dumps({"vault": "0xFOLLOW", "coin": "NEW", "ts_ms": 1000}) + "\n").encode()
+    )
+
+    selected = C._copy_vault_prewarm_coins(
+        tmp_path,
+        ["0xfollow"],
+        now_ms=1000,
+        max_tail_bytes=120,
+    )
+
+    assert selected == ["NEW"]
+
+
+def test_copy_vault_prewarm_rotation_remplace_lancien_et_nettoie_actifs(tmp_path, monkeypatch):
+    data = tmp_path / "runtime" / "data"
+    data.mkdir(parents=True)
+    now_ms = 20_000_000
+    (data / "vault_fills_live.jsonl").write_text(
+        json.dumps({"vault": "0xFOLLOW", "coin": "NEW", "ts_ms": now_ms}) + "\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(C, "_TAPE_PREWARM_COINS", {"OLD"})
+    monkeypatch.setattr(
+        C,
+        "_TAPE_COINS_ACTIFS",
+        {
+            "ACTIVE": now_ms - 1_000,
+            "EXPIRED": now_ms - C.TAPE_COIN_TTL_MS - 1,
+        },
+    )
+
+    result = C._refresh_copy_vault_prewarm_once(
+        tmp_path, ["0xfollow"], now_ms=now_ms
+    )
+
+    assert C._TAPE_PREWARM_COINS == {"NEW"}
+    assert C._TAPE_COINS_ACTIFS == {"ACTIVE": now_ms - 1_000}
+    assert result["added"] == ["NEW"]
+    assert result["removed"] == ["OLD"]
+    assert result["expired_active"] == ["EXPIRED"]
+
+
+def test_collecteur_lance_le_refresh_periodique_du_prewarm():
+    source = (RACINE / "tools" / "collecter_userfills_vaults.py").read_text(encoding="utf-8")
+    gather = source.split("await asyncio.gather(", 1)[1]
+    assert "_refresh_copy_vault_prewarm_periodically(root, vaults)" in gather
 
 
 def test_vaults_et_roles(tmp_path):

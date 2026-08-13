@@ -833,7 +833,34 @@ _TAPE_BUFFER: dict = {}                      # coin -> list[{recv_mono, resume}]
 _COPY_VAULT_LAST_SAMPLE_MS: dict[str, int] = {}
 TAPE_BUFFER_MAX = 400
 TAPE_COIN_TTL_MS = 360_000.0                # coin abonné jusqu'à horizon(5 min)+marge après le dernier fill
-TAPE_PREWARM_MAX_COINS = 12                  # abonnement borné ; ne transforme pas le collecteur en firehose
+TAPE_PREWARM_MAX_COINS = 24                  # borne de collecte, tres inferieure au plafond WS Hyperliquid
+TAPE_PREWARM_RECENT_WINDOW_MS = 21_600_000.0 # activite reelle des 6 dernieres heures uniquement
+TAPE_PREWARM_REFRESH_S = 15.0                # suit les rotations de coins sans redemarrage
+TAPE_PREWARM_TAIL_BYTES = 4 * 1024 * 1024    # aucune relecture integrale des journaux append-only
+
+
+def _tail_lines_bounded(path: Path, *, max_lines: int, max_bytes: int) -> list[str]:
+    """Read a bounded complete-line tail without scanning an append-only file."""
+
+    line_limit = max(1, int(max_lines))
+    byte_limit = max(1, int(max_bytes))
+    try:
+        with path.open("rb") as handle:
+            handle.seek(0, os.SEEK_END)
+            size = handle.tell()
+            start = max(0, size - byte_limit)
+            handle.seek(start)
+            raw = handle.read(byte_limit)
+    except OSError:
+        return []
+    if start > 0:
+        separator = raw.find(b"\n")
+        raw = b"" if separator < 0 else raw[separator + 1 :]
+    return [
+        line.decode("utf-8", errors="ignore")
+        for line in raw.splitlines()[-line_limit:]
+        if line.strip()
+    ]
 
 
 def _copy_vault_prewarm_coins(
@@ -842,6 +869,9 @@ def _copy_vault_prewarm_coins(
     *,
     max_coins: int = TAPE_PREWARM_MAX_COINS,
     max_lines_per_source: int = 20_000,
+    max_tail_bytes: int = TAPE_PREWARM_TAIL_BYTES,
+    now_ms: float | None = None,
+    recent_window_ms: float = TAPE_PREWARM_RECENT_WINDOW_MS,
 ) -> list[str]:
     """Select recent real coins for causal L2 capture before the next fill.
 
@@ -856,16 +886,18 @@ def _copy_vault_prewarm_coins(
     limit = min(TAPE_PREWARM_MAX_COINS, max(0, int(max_coins)))
     if not followed or limit <= 0:
         return []
+    reference_ms = float(time.time() * 1000 if now_ms is None else now_ms)
+    cutoff_ms = reference_ms - max(0.0, float(recent_window_ms))
     latest_by_coin: dict[str, int] = {}
     sources = (root / FILLS_LIVE, root / "runtime" / "data" / "vault_fills.jsonl")
     for path in sources:
         if not path.is_file():
             continue
-        try:
-            with path.open("r", encoding="utf-8", errors="ignore") as handle:
-                lines = collections.deque(handle, maxlen=max(1, int(max_lines_per_source)))
-        except OSError:
-            continue
+        lines = _tail_lines_bounded(
+            path,
+            max_lines=max_lines_per_source,
+            max_bytes=max_tail_bytes,
+        )
         for line in lines:
             try:
                 row = json.loads(line)
@@ -874,7 +906,13 @@ def _copy_vault_prewarm_coins(
                 ts_ms = int(row.get("received_at_ms") or row.get("ts_ms") or 0)
             except (TypeError, ValueError, OverflowError, json.JSONDecodeError):
                 continue
-            if vault not in followed or not coin or ts_ms <= 0:
+            if (
+                vault not in followed
+                or not coin
+                or ts_ms <= 0
+                or ts_ms < cutoff_ms
+                or ts_ms > reference_ms + 60_000.0
+            ):
                 continue
             latest_by_coin[coin] = max(ts_ms, latest_by_coin.get(coin, 0))
     return [
@@ -883,6 +921,73 @@ def _copy_vault_prewarm_coins(
             latest_by_coin.items(), key=lambda item: (-item[1], item[0])
         )[:limit]
     ]
+
+
+def _refresh_copy_vault_prewarm_once(
+    root: Path,
+    vaults: list[str],
+    *,
+    now_ms: float | None = None,
+    max_coins: int = TAPE_PREWARM_MAX_COINS,
+) -> dict[str, object]:
+    """Refresh the bounded causal L2 watchlist from observed wallet activity.
+
+    The prewarm set is replaced instead of growing forever. Coins with a live
+    metaorder remain covered independently through ``_TAPE_COINS_ACTIFS`` until
+    the executable exit horizon has elapsed.
+    """
+
+    reference_ms = float(time.time() * 1000 if now_ms is None else now_ms)
+    selected = set(
+        _copy_vault_prewarm_coins(
+            root,
+            vaults,
+            max_coins=max_coins,
+            now_ms=reference_ms,
+        )
+    )
+    previous = set(_TAPE_PREWARM_COINS)
+    expired_active = {
+        coin
+        for coin, last_fill_ms in list(_TAPE_COINS_ACTIFS.items())
+        if reference_ms - float(last_fill_ms) > TAPE_COIN_TTL_MS
+    }
+    for coin in expired_active:
+        _TAPE_COINS_ACTIFS.pop(coin, None)
+    _TAPE_PREWARM_COINS.clear()
+    _TAPE_PREWARM_COINS.update(selected)
+    return {
+        "selected": sorted(selected),
+        "added": sorted(selected - previous),
+        "removed": sorted(previous - selected),
+        "expired_active": sorted(expired_active),
+    }
+
+
+async def _refresh_copy_vault_prewarm_periodically(
+    root: Path,
+    vaults: list[str],
+    *,
+    intervalle_s: float = TAPE_PREWARM_REFRESH_S,
+) -> None:
+    """Keep causal L2 subscriptions aligned with fresh followed-wallet fills."""
+
+    while True:
+        try:
+            result = _refresh_copy_vault_prewarm_once(root, vaults)
+            if result["added"] or result["removed"]:
+                print(
+                    "[userfills] L2 causal prewarm refresh: %d coins (+%d/-%d)"
+                    % (
+                        len(result["selected"]),
+                        len(result["added"]),
+                        len(result["removed"]),
+                    ),
+                    flush=True,
+                )
+        except Exception as exc:  # noqa: BLE001 - never stop userFills collection
+            print("[userfills] L2 causal prewarm refresh err %s" % str(exc)[:80], flush=True)
+        await asyncio.sleep(max(1.0, float(intervalle_s)))
 
 
 async def _tape_l2_buffer(root: Path, *, sync_s: float = 0.5) -> None:
@@ -1054,8 +1159,7 @@ async def _boucle(root: Path) -> None:
     for v, role, why in roles:
         print("[userfills]   %s [%s] %s" % (v[:12], role, why), flush=True)
     vaults = [v for v, _r, _w in roles]
-    _TAPE_PREWARM_COINS.clear()
-    _TAPE_PREWARM_COINS.update(_copy_vault_prewarm_coins(root, vaults))
+    _refresh_copy_vault_prewarm_once(root, vaults)
     print(
         "[userfills] L2 causal prewarm (%d/%d coins reels): %s"
         % (
@@ -1074,6 +1178,7 @@ async def _boucle(root: Path) -> None:
                              _promotion_periodique(root), _rapport_periodique(root), _l2_dynamique(root),
                              _garde_reconciliation_rest(root, shards),   # REST↔WS : reconnecte un shard qui rate un fill
                              _metaorder_shadow_periodique(root, vaults),  # SHADOW : edge par stade de métaordre (n'ouvre rien)
+                             _refresh_copy_vault_prewarm_periodically(root, vaults),
                              _tape_l2_buffer(root), _tape_consumer(root),  # TAPE L2/OFI v2 : buffer WS + états pré/post (n'ouvre rien)
                              *[_userfills_multiplex(root, grp, file, sid) for sid, grp in shards])   # 2 sockets de 5 + L2 = 3 conn
     finally:
