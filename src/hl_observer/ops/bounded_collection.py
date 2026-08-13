@@ -23,7 +23,6 @@ from .collector_lease import DEFAULT_RELPATH as LEASE_RELPATH
 from .collector_lease import create_lease, public_lease, validate_lease
 from .superviseur_collecteurs import _pid_collecteur_existant, _processus_projet
 
-
 SCHEMA_VERSION = "hypersmart.bounded_collection_start.v1"
 STATE_RELPATH = Path("runtime") / "data" / "economic_collection_pids.json"
 
@@ -108,6 +107,26 @@ def _tail(path: Path, *, lines: int = 8) -> list[str]:
     except OSError:
         return []
     return content[-max(1, int(lines)) :]
+
+
+def _active_collector_protocols(
+    root: Path, active: Mapping[str, int]
+) -> dict[str, str]:
+    """Read protocol markers only from heartbeats owned by the active PID."""
+
+    protocols: dict[str, str] = {}
+    heartbeat_dir = root / "runtime" / "research_lab" / "heartbeats"
+    for name, pid in active.items():
+        path = heartbeat_dir / f"{name}.json"
+        try:
+            heartbeat = json.loads(path.read_text(encoding="utf-8"))
+            heartbeat_pid = int(heartbeat.get("pid"))
+        except (OSError, ValueError, TypeError):
+            continue
+        protocol = str(heartbeat.get("protocol") or "").strip()
+        if heartbeat_pid == int(pid) and protocol:
+            protocols[name] = protocol
+    return protocols
 
 
 def start_bounded_collectors(
@@ -312,6 +331,7 @@ def inspect_bounded_collectors(
         if owns_recorded_collector(name, pid)
     }
     stopped = sorted(name for name in recorded if name not in active)
+    protocols = _active_collector_protocols(project_root, active)
 
     lease_public = persisted.get("lease") if isinstance(persisted.get("lease"), dict) else None
     lease_required = bool(persisted.get("demarres_et_verifies"))
@@ -361,6 +381,7 @@ def inspect_bounded_collectors(
         "pids": recorded,
         "actifs": active,
         "arretes": stopped,
+        "protocols": protocols,
         "lease": lease_public,
         "lease_valid": bool(lease_valid),
         "lease_reason": lease_reason,

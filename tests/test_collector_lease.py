@@ -211,6 +211,55 @@ def test_inspection_preserves_verified_active_campaign_without_restart(tmp_path:
     assert inspected["pids"] == started["pids"]
 
 
+def test_inspection_exposes_protocol_only_for_heartbeat_owned_by_active_pid(
+    tmp_path: Path,
+) -> None:
+    def spawn(_command: list[str], _root: Path, _environment: dict[str, str]) -> _FakeProcess:
+        return _FakeProcess(191)
+
+    start_bounded_collectors(
+        tmp_path,
+        ["bbo-collector"],
+        duration_s=60.0,
+        startup_wait_s=0.0,
+        process_inventory=lambda _root: [],
+        spawner=spawn,
+        sleeper=lambda _seconds: None,
+    )
+    heartbeat_dir = tmp_path / "runtime/research_lab/heartbeats"
+    heartbeat_dir.mkdir(parents=True, exist_ok=True)
+    heartbeat = heartbeat_dir / "bbo-collector.json"
+    heartbeat.write_text(
+        json.dumps({"pid": 191, "protocol": "bbo-causal-v2"}),
+        encoding="utf-8",
+    )
+    lease = json.loads(
+        (tmp_path / "runtime/data/economic_collection_lease.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    now = float(lease["issued_at_ms"]) / 1000.0 + 1.0
+    def inventory(_root: Path) -> list[dict[str, object]]:
+        return [
+            {
+                "pid": 191,
+                "ppid": 1,
+                "name": "python.exe",
+                "cmd": "python tools/run_bounded_collector.py --name bbo-collector",
+            }
+        ]
+
+    inspected = inspect_bounded_collectors(tmp_path, process_inventory=inventory, now=now)
+    assert inspected["protocols"] == {"bbo-collector": "bbo-causal-v2"}
+
+    heartbeat.write_text(
+        json.dumps({"pid": 999, "protocol": "forged-protocol"}),
+        encoding="utf-8",
+    )
+    inspected = inspect_bounded_collectors(tmp_path, process_inventory=inventory, now=now)
+    assert inspected["protocols"] == {}
+
+
 def test_inspection_reports_expired_or_missing_process_fail_closed(tmp_path: Path) -> None:
     def spawn(_command: list[str], _root: Path, _environment: dict[str, str]) -> _FakeProcess:
         return _FakeProcess(92)

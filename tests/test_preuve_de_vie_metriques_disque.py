@@ -44,6 +44,17 @@ def test_metriques_none_conserve_l_etat_precedent(tmp_path):
     assert hb3["metriques"]["gaps_critiques"] == 0
 
 
+def test_heartbeat_persiste_le_protocole_runtime(tmp_path):
+    first = HB.battre(tmp_path, "userfills-live", pid=123, protocol="copy-vault-v6")
+    assert first["protocol"] == "copy-vault-v6"
+
+    second = HB.battre(tmp_path, "userfills-live", pid=123)
+    assert second["protocol"] == "copy-vault-v6"
+
+    third = HB.battre(tmp_path, "userfills-live", pid=124)
+    assert "protocol" not in third
+
+
 def _core_tous_sains_sauf(tmp_path, nom_degrade, metriques_degrade):
     dernier = None
     for s in CORE:

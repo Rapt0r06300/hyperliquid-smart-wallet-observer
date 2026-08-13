@@ -14,6 +14,8 @@ from collections.abc import Iterable, Mapping
 from pathlib import Path
 from typing import Any
 
+from hl_observer.backtesting.copy_vault_executable import PROTOCOL_NAME as COPY_VAULT_PROTOCOL
+
 from .economic_campaigns import REPORT_DIR
 from .economic_objective import CANONICAL_FAMILIES, canonical_family
 
@@ -60,7 +62,11 @@ def _freeze(campaign: Mapping[str, Any]) -> dict[str, Any] | None:
     }
 
 
-def _copy_state(campaign: Mapping[str, Any], raw: Mapping[str, Any]) -> dict[str, Any]:
+def _copy_state(
+    campaign: Mapping[str, Any],
+    raw: Mapping[str, Any],
+    collector_state: Mapping[str, Any] | None = None,
+) -> dict[str, Any]:
     audit = _mapping(raw.get("canonical_input_audit"))
     metaorders = _mapping(raw.get("metaorder_audit"))
     books = _mapping(raw.get("book_meta"))
@@ -96,6 +102,13 @@ def _copy_state(campaign: Mapping[str, Any], raw: Mapping[str, Any]) -> dict[str
     closed = _integer(campaign.get("closed_positions"))
     schema_ready = raw.get("schema_version") == "hypersmart.copy_vault_executable_campaign.v1"
     objective_met = campaign.get("objective_status") == "ATTEINT"
+    collector = _mapping(collector_state)
+    active_collectors = _mapping(collector.get("actifs"))
+    protocols = _mapping(collector.get("protocols"))
+    active_protocol = str(protocols.get("userfills-live") or "")
+    collector_protocol_ready: bool | None = None
+    if "userfills-live" in active_collectors:
+        collector_protocol_ready = active_protocol == COPY_VAULT_PROTOCOL
     data_only = bool(
         schema_ready
         and not objective_met
@@ -110,6 +123,8 @@ def _copy_state(campaign: Mapping[str, Any], raw: Mapping[str, Any]) -> dict[str
     state = (
         "PROVEN"
         if objective_met
+        else "CAUSAL_COLLECTOR_PROTOCOL_RESTART_REQUIRED"
+        if collector_protocol_ready is False
         else "FUTURE_CAUSAL_BOOK_AND_VAULT_DATA_REQUIRED"
         if data_only
         else "CONTROLLED_BLOCKER_REMAINS"
@@ -119,7 +134,8 @@ def _copy_state(campaign: Mapping[str, Any], raw: Mapping[str, Any]) -> dict[str
         "evidence_state": state,
         "collection_actionable": not objective_met,
         "software_pipeline_ready": schema_ready,
-        "future_data_required_only": data_only,
+        "running_collector_protocol_ready": collector_protocol_ready,
+        "future_data_required_only": data_only and collector_protocol_ready is not False,
         "objective_status": campaign.get("objective_status"),
         "objective_reasons": list(campaign.get("objective_reasons") or []),
         "freeze": _freeze(campaign),
@@ -144,6 +160,8 @@ def _copy_state(campaign: Mapping[str, Any], raw: Mapping[str, Any]) -> dict[str
             "training_selection_eligible": training_selection_eligible,
             "parameters_frozen": parameters_frozen,
             "closed_liquidatable_episodes": closed,
+            "expected_collector_protocol": COPY_VAULT_PROTOCOL,
+            "active_collector_protocol": active_protocol or None,
         },
         "required_collectors": [
             "vault-collector",
@@ -161,7 +179,15 @@ def _copy_state(campaign: Mapping[str, Any], raw: Mapping[str, Any]) -> dict[str
             "runtime/data/carnet_venues.jsonl",
             "runtime/data/copy_vault_l2_tape.jsonl",
         ],
-        "exact_missing_evidence": [
+        "exact_missing_evidence": (
+            [
+                "restart userfills-live so its heartbeat proves the v6 causal-checkpoint protocol",
+                "capture REFERENCE, ENTRY and EXIT books from live WS or causal /info l2Book checkpoints",
+            ]
+            if collector_protocol_ready is False
+            else []
+        )
+        + [
             "at least 8 causal train metaorders with observed executable BBO",
             "entry and exit books no more than 30 seconds from each copied event",
             "purged positive OOS, positive post-freeze forward, placebo beaten",
@@ -173,7 +199,12 @@ def _copy_state(campaign: Mapping[str, Any], raw: Mapping[str, Any]) -> dict[str
     }
 
 
-def _lead_state(campaign: Mapping[str, Any], raw: Mapping[str, Any]) -> dict[str, Any]:
+def _lead_state(
+    campaign: Mapping[str, Any],
+    raw: Mapping[str, Any],
+    collector_state: Mapping[str, Any] | None = None,
+) -> dict[str, Any]:
+    del collector_state
     executable = _mapping(raw.get("executable_campaign"))
     diagnostics = _mapping(executable.get("diagnostics"))
     temporal = _mapping(executable.get("temporal_evidence"))
@@ -274,7 +305,12 @@ def _lead_state(campaign: Mapping[str, Any], raw: Mapping[str, Any]) -> dict[str
     }
 
 
-def _cross_state(campaign: Mapping[str, Any], raw: Mapping[str, Any]) -> dict[str, Any]:
+def _cross_state(
+    campaign: Mapping[str, Any],
+    raw: Mapping[str, Any],
+    collector_state: Mapping[str, Any] | None = None,
+) -> dict[str, Any]:
+    del collector_state
     verdict = _mapping(raw.get("verdict_realiste_16bps"))
     temporal = _mapping(raw.get("temporal_evidence"))
     oos = _mapping(temporal.get("oos"))
@@ -363,7 +399,11 @@ def build_collection_plan(
         "cross_venue_dislocation_v2": _cross_state,
     }
     families = [
-        builders[name](by_family.get(name, {}), _mapping(raw_reports.get(name)))
+        builders[name](
+            by_family.get(name, {}),
+            _mapping(raw_reports.get(name)),
+            collector_state,
+        )
         for name in CANONICAL_FAMILIES
     ]
     required_collectors = sorted(

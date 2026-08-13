@@ -28,6 +28,7 @@ from hl_observer.backtesting.copy_vault_executable import (  # noqa: E402
     COPY_DELAY_MS as COPY_VAULT_DELAY_MS,
     HORIZONS_MS as COPY_VAULT_HORIZONS_MS,
     MAX_TARGET_LAG_MS as COPY_VAULT_MAX_TARGET_LAG_MS,
+    PROTOCOL_NAME as COPY_VAULT_PROTOCOL,
 )
 from hl_observer.experimental import cohortes as CO  # noqa: E402
 from hl_observer.market_data.live_l2_service import (  # noqa: E402
@@ -807,6 +808,7 @@ async def _heartbeat(root: Path, info: dict, *, intervalle_s: float = 10.0) -> N
                 "reconnects": int(_HEARTBEAT_WS["reconnects"]),
                 "stale": False,
             },
+            protocol=COPY_VAULT_PROTOCOL,
         )
         derniers_messages = messages
         await asyncio.sleep(intervalle_s)

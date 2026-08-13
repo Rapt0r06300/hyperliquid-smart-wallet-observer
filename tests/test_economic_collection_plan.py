@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+from hl_observer.backtesting.copy_vault_executable import PROTOCOL_NAME
 from hl_observer.simulation.economic_collection_plan import (
     build_collection_plan,
     write_collection_plan,
@@ -131,6 +132,42 @@ def test_plan_records_exact_collectors_progress_and_freeze() -> None:
     assert lead["freeze"]["campaign_id"] == "lead-freeze"
     assert lead["progress"]["missing_top_sizes"] == 30
     assert plan["collector_state"]["profil"] == "harvest"
+
+
+def test_copy_plan_requires_running_causal_checkpoint_protocol() -> None:
+    campaigns = [
+        _campaign("copy_vault"),
+        _campaign("lead_lag"),
+        _campaign("cross_venue_dislocation_v2", closed_positions=20),
+    ]
+    stale = build_collection_plan(
+        campaigns,
+        _raw_reports(),
+        collector_state={
+            "actifs": {"userfills-live": 42},
+            "protocols": {},
+        },
+        now_ms=123,
+    )
+    copy = next(row for row in stale["families"] if row["family"] == "copy_vault")
+    assert copy["evidence_state"] == "CAUSAL_COLLECTOR_PROTOCOL_RESTART_REQUIRED"
+    assert copy["running_collector_protocol_ready"] is False
+    assert copy["future_data_required_only"] is False
+    assert "restart userfills-live" in copy["exact_missing_evidence"][0]
+
+    current = build_collection_plan(
+        campaigns,
+        _raw_reports(),
+        collector_state={
+            "actifs": {"userfills-live": 42},
+            "protocols": {"userfills-live": PROTOCOL_NAME},
+        },
+        now_ms=123,
+    )
+    copy = next(row for row in current["families"] if row["family"] == "copy_vault")
+    assert copy["evidence_state"] == "FUTURE_CAUSAL_BOOK_AND_VAULT_DATA_REQUIRED"
+    assert copy["running_collector_protocol_ready"] is True
+    assert copy["progress"]["active_collector_protocol"] == PROTOCOL_NAME
 
 
 def test_plan_kills_frozen_lead_lag_negative_oos_and_forward() -> None:
