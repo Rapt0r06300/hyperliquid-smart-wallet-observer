@@ -73,6 +73,21 @@ REGISTRE: tuple[dict[str, Any], ...] = (
      "heartbeat": "runtime/research_lab/heartbeats/dydx-live.json"},
 )
 
+# Collecteurs strictement reserves aux campagnes de preuve. Ils ne font pas
+# partie du registre du lanceur et ne peuvent donc entrer dans aucun profil
+# CORE/HARVEST/RESEARCH/ALL par accident. Le demarrage borne les attache a une
+# lease economique existante ou en cree une lors d'une campagne explicite.
+COLLECTEURS_CAMPAGNE: tuple[dict[str, Any], ...] = (
+    {
+        "nom": "copy-vault-checkpoints",
+        "script": "tools/collecter_copy_vault_checkpoints.py",
+        "intervalle_s": 1,
+        "args": (),
+        "limite_minutes": 5.0,
+        "heartbeat": "runtime/research_lab/heartbeats/copy-vault-checkpoints.json",
+    },
+)
+
 # Le runtime principal ne doit pas devenir un laboratoire permanent. Ces profils
 # gardent tous les collecteurs disponibles. Le profil essentiel demarre les
 # prix/microstructure et userFills : sans ce dernier, copy-vault ne peut pas

@@ -5,8 +5,13 @@ import sys
 from pathlib import Path
 
 from hl_observer.ops.bounded_collection import (
+    attach_bounded_collectors,
     inspect_bounded_collectors,
     start_bounded_collectors,
+)
+from hl_observer.ops.collecteur_registry import (
+    COLLECTEURS_CAMPAGNE,
+    collecteurs_pour_profil,
 )
 from hl_observer.ops.collector_lease import (
     create_lease,
@@ -22,6 +27,14 @@ class _FakeProcess:
 
     def poll(self) -> int | None:
         return self.returncode
+
+
+def test_checkpoint_companion_is_campaign_only_and_never_in_launcher_profiles() -> None:
+    assert {row["nom"] for row in COLLECTEURS_CAMPAGNE} == {"copy-vault-checkpoints"}
+    for profile in ("core", "maintenance", "research", "harvest", "all"):
+        assert "copy-vault-checkpoints" not in {
+            row["nom"] for row in collecteurs_pour_profil(profile)
+        }
 
 
 def test_lease_is_bounded_replaced_and_never_publicly_exposes_token(tmp_path: Path) -> None:
@@ -333,3 +346,116 @@ def test_inspection_rejects_replaced_lease_and_pid_reuse(tmp_path: Path) -> None
     assert inspected["lease_reason"] == "COLLECTOR_LEASE_REPLACED"
     assert inspected["lease"]["lease_id"] == replacement["lease_id"]
     assert "token" not in json.dumps(inspected)
+
+
+def test_attach_campaign_collector_preserves_active_lease_and_existing_pid(
+    tmp_path: Path,
+) -> None:
+    spawned: list[list[str]] = []
+    environments: list[dict[str, str]] = []
+
+    start_bounded_collectors(
+        tmp_path,
+        ["bbo-collector"],
+        duration_s=600.0,
+        startup_wait_s=0.0,
+        process_inventory=lambda _root: [],
+        spawner=lambda _command, _root, _environment: _FakeProcess(301),
+        sleeper=lambda _seconds: None,
+    )
+    lease_before = json.loads(
+        (tmp_path / "runtime/data/economic_collection_lease.json").read_text(
+            encoding="utf-8"
+        )
+    )
+
+    def inventory(_root: str | Path) -> list[dict[str, object]]:
+        return [
+            {
+                "pid": 301,
+                "ppid": 1,
+                "name": "python.exe",
+                "cmd": "python tools/run_bounded_collector.py --name bbo-collector",
+            }
+        ]
+
+    def spawn(command: list[str], _root: Path, environment: dict[str, str]) -> _FakeProcess:
+        spawned.append(command)
+        environments.append(environment)
+        return _FakeProcess(302)
+
+    result = attach_bounded_collectors(
+        tmp_path,
+        ["copy-vault-checkpoints"],
+        startup_wait_s=1.0,
+        process_inventory=inventory,
+        spawner=spawn,
+        sleeper=lambda _seconds: None,
+        now=float(lease_before["issued_at_ms"]) / 1000.0 + 1.0,
+    )
+    lease_after = json.loads(
+        (tmp_path / "runtime/data/economic_collection_lease.json").read_text(
+            encoding="utf-8"
+        )
+    )
+
+    assert result["attached_without_lease_replacement"] is True
+    assert result["pids"] == {"bbo-collector": 301, "copy-vault-checkpoints": 302}
+    assert result["lease"]["lease_id"] == lease_before["lease_id"]
+    assert lease_after == lease_before
+    assert "token" not in json.dumps(result)
+    assert environments[0]["HYPERSMART_COLLECTOR_LEASE_TOKEN"] == lease_before["token"]
+    assert "collecter_copy_vault_checkpoints.py" in " ".join(spawned[0])
+    assert "--lease-token" not in spawned[0]
+
+
+def test_attach_campaign_collector_rejects_expired_or_replaced_lease(
+    tmp_path: Path,
+) -> None:
+    start_bounded_collectors(
+        tmp_path,
+        ["bbo-collector"],
+        duration_s=60.0,
+        startup_wait_s=0.0,
+        process_inventory=lambda _root: [],
+        spawner=lambda _command, _root, _environment: _FakeProcess(401),
+        sleeper=lambda _seconds: None,
+    )
+    lease = json.loads(
+        (tmp_path / "runtime/data/economic_collection_lease.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    inventory = lambda _root: [  # noqa: E731 - compact deterministic fake
+        {
+            "pid": 401,
+            "ppid": 1,
+            "name": "python.exe",
+            "cmd": "python tools/run_bounded_collector.py --name bbo-collector",
+        }
+    ]
+    after_expiry = float(lease["expires_at_ms"]) / 1000.0 + 1.0
+    try:
+        attach_bounded_collectors(
+            tmp_path,
+            ["copy-vault-checkpoints"],
+            process_inventory=inventory,
+            now=after_expiry,
+        )
+    except RuntimeError as exc:
+        assert "ACTIVE_CAMPAIGN:DEGRADED" in str(exc)
+    else:
+        raise AssertionError("expired lease must fail closed")
+
+    create_lease(tmp_path, duration_s=60.0, now=after_expiry + 10, token="replacement")
+    try:
+        attach_bounded_collectors(
+            tmp_path,
+            ["copy-vault-checkpoints"],
+            process_inventory=inventory,
+            now=after_expiry + 11,
+        )
+    except RuntimeError as exc:
+        assert "ACTIVE_CAMPAIGN:DEGRADED" in str(exc)
+    else:
+        raise AssertionError("replaced lease must fail closed")
