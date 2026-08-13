@@ -42,9 +42,14 @@ from hl_observer.simulation.economic_campaigns import (  # noqa: E402
 )
 from hl_observer.simulation.economic_family_scoreboard import export_scoreboards  # noqa: E402
 from hl_observer.simulation.economic_freeze_registry import reuse_or_create_freeze  # noqa: E402
-from hl_observer.simulation.lead_lag_campaign_adapter import (  # noqa: E402
-    campaign_from_replay,
-    run_ledger as run_lead_lag_ledger,
+from hl_observer.simulation.lead_lag_campaign_adapter import campaign_from_replay  # noqa: E402
+from hl_observer.simulation.lead_lag_l2_history import (  # noqa: E402
+    discover_l2_sources,
+    load_l2_history,
+)
+from hl_observer.simulation.lead_lag_measured_replay import (  # noqa: E402
+    load_runtime_latency_evidence,
+    replay_measured_lead_lag,
 )
 
 
@@ -243,31 +248,34 @@ def run_campaigns(
 
     # ---------------------------------------------------------------- Lead-Lag
     lead_sources = discover_lead_sources(root)
+    lead_l2_sources = discover_l2_sources(root)
+    lead_latency_rel = Path("runtime") / "data" / "lead_lag_event_decisions.jsonl"
     lead_data = dataset_provenance(
         root,
-        [*lead_sources, root / "runtime" / "data" / "carnet_venues.jsonl"],
+        [*lead_sources, *lead_l2_sources, root / lead_latency_rel],
     )
     lead_horizon_ms = 1_000
     lead_min_history = 5
-    lead_cost_config = {
-        "notional": 100.0,
-        # Conservative single follower leg round trip: 4.5 bps taker on entry
-        # and 4.5 bps on exit. This fee value alone does not make costs measured.
-        "fee_bps": 9.0,
-        # Still estimates until causally aligned executable depth is attached.
-        # Consequently costs_measured MUST remain false and objective fails closed.
-        "demi_spread_bps": 4.0,
-        "slippage_bps": 1.0,
-        "min_fill_ratio": 0.5,
-        "costs_measured": False,
-        "equity": 1000.0,
-    }
+    lead_min_episodes = 5
+    lead_notional_usd = 100.0
+    lead_fee_bps = 9.0
+    lead_min_latency_samples = 20
+    lead_max_book_age_ms = 750.0
+    lead_max_execution_observation_delay_ms = 750.0
     lead_params = {
         "seuil_choc_bps": lead_lag_shadow.SEUIL_CHOC_BPS,
         "horizon_ms": lead_horizon_ms,
         "minimum_history": lead_min_history,
-        "minimum_episodes": 5,
-        "cost_model": lead_cost_config,
+        "minimum_episodes": lead_min_episodes,
+        "notional_usd": lead_notional_usd,
+        "fee_bps": lead_fee_bps,
+        "fee_rule": "FROZEN_CONSERVATIVE_TAKER_ROUND_TRIP",
+        "latency_rule": "MEASURED_RUNTIME_P95_EMBEDDED_IN_DELAYED_ENTRY_PRICE",
+        "minimum_latency_samples": lead_min_latency_samples,
+        "l2_rule": "RECORDED_REAL_L2_ENTRY_AND_EXIT_FULL_TOP_CAPACITY",
+        "max_book_age_ms": lead_max_book_age_ms,
+        "max_execution_observation_delay_ms": lead_max_execution_observation_delay_ms,
+        "slippage_rule": "ZERO_ONLY_IF_FULL_NOTIONAL_COVERED_AT_ENTRY_AND_EXIT_TOP",
         "loader_max_lines": int(lead_max_lines),
         "loader_time_budget_s": float(lead_budget_s),
         "selection_rule": "FIXED_PRE_EVALUATION",
@@ -278,17 +286,44 @@ def run_campaigns(
         max_lines=max(0, int(lead_max_lines)),
         time_budget_s=max(0.0, float(lead_budget_s)),
     )
-    lead_raw = run_lead_lag_ledger(
+    lead_l2, lead_l2_meta = load_l2_history(
+        root,
+        max_lines=max(0, int(lead_max_lines)),
+        time_budget_s=max(0.0, float(lead_budget_s)),
+    )
+    lead_latency = load_runtime_latency_evidence(
+        root,
+        min_samples=lead_min_latency_samples,
+    )
+    lead_replay = replay_measured_lead_lag(
         lead_tape,
+        lead_l2,
         shock_threshold_bps=lead_lag_shadow.SEUIL_CHOC_BPS,
         horizon_ms=lead_horizon_ms,
+        latency_evidence=lead_latency,
+        notional_usd=lead_notional_usd,
+        fee_bps=lead_fee_bps,
         min_history=lead_min_history,
-        config=lead_cost_config,
-        min_episodes=5,
+        max_book_age_ms=lead_max_book_age_ms,
+        max_execution_observation_delay_ms=lead_max_execution_observation_delay_ms,
+        min_episodes=lead_min_episodes,
+        equity=1000.0,
     )
-    lead_raw["multitape_meta"] = lead_loader_meta
-    lead_raw["paper_read_only"] = True
-    lead_raw["real_execution"] = False
+    lead_raw = {
+        "schema_version": "hypersmart.lead_lag_economic_replay.v2",
+        "signals": lead_replay.get("signals"),
+        "signals_meta": {
+            "no_lookahead": True,
+            "multitape": lead_loader_meta,
+            "l2_history": lead_l2_meta,
+            "latency_evidence": lead_latency,
+            "coverage": lead_replay.get("coverage"),
+            "costs_measured": lead_replay.get("costs_measured") is True,
+        },
+        "replay": lead_replay,
+        "paper_read_only": True,
+        "real_execution": False,
+    }
     lead_raw_path = _write_raw(root, "lead_lag", lead_raw)
     lead_campaign = campaign_from_replay(
         lead_raw,
