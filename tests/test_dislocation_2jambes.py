@@ -193,6 +193,84 @@ def test_preuves_temporelles_ne_fabriquent_pas_forward_post_freeze():
     assert evidence["forward"]["post_freeze"] is False
 
 
+def test_calibration_ne_transmet_que_le_train_a_la_selection(monkeypatch):
+    series = {
+        "ZZZ": [
+            (float(index * 1000), "ATOMIC", 100.20, 100.22, 99.80, 99.82)
+            for index in range(100)
+        ]
+    }
+    depth = {"ZZZ": [(float(index * 1000), 250.0) for index in range(100)]}
+    calls = []
+
+    def fake_selector(train_series, train_depth):
+        calls.append({
+            "series_max": max(row[0] for rows in train_series.values() for row in rows),
+            "depth_max": max(row[0] for rows in train_depth.values() for row in rows),
+        })
+        return {
+            "status": "KILL_TRAIN",
+            "selected": {
+                "parameters": dict(BT.CROSS_WALK_FORWARD_GRID[0]),
+                "summary": {},
+                "eligible": False,
+            },
+            "candidate_count": 1,
+            "eligible_candidate_count": 0,
+            "candidates": [],
+        }
+
+    monkeypatch.setattr(BT, "selectionner_parametres_train", fake_selector)
+    first = BT.calibrer_walk_forward(series, depth)
+    # Une mutation exclusivement post-train ne peut pas changer ce que voit
+    # la fonction de sélection.
+    series["ZZZ"][-1] = (99_000.0, "ATOMIC", 500.0, 501.0, 1.0, 2.0)
+    second = BT.calibrer_walk_forward(series, depth)
+
+    assert first["bounds"] == second["bounds"]
+    assert len(calls) == 2
+    assert calls[0] == calls[1]
+    assert calls[0]["series_max"] <= first["bounds"]["train_end_ms"]
+    assert calls[0]["depth_max"] <= first["bounds"]["train_end_ms"]
+
+
+def test_walk_forward_purge_et_forward_apres_gel_uniquement(monkeypatch):
+    parameters = dict(BT.CROSS_WALK_FORWARD_GRID[0])
+    frozen = {
+        **BT.walk_forward_protocol_signature(),
+        "walk_forward_bounds": {
+            "status": "READY",
+            "first_observed_ms": 0.0,
+            "train_end_ms": 10_000.0,
+            "validation_start_ms": 20_000.0,
+            "validation_end_ms": 30_000.0,
+            "oos_start_ms": 40_000.0,
+            "calibration_data_end_ms": 50_000.0,
+        },
+        "selected_strategy_parameters": parameters,
+        "training_selection_eligible": False,
+    }
+    calls = []
+
+    def fake_replay(series, depth, params, *, start_ms, end_ms, direction_multiplier=1):
+        calls.append((start_ms, end_ms, direction_multiplier))
+        return [], {}
+
+    monkeypatch.setattr(BT, "_replay_segment", fake_replay)
+    result = BT.evaluer_walk_forward_gelé(
+        {}, {}, frozen_parameters=frozen, frozen_at_ms=60_000.0
+    )
+
+    assert calls[:4] == [
+        (0.0, 10_000.0, 1),
+        (20_000.0, 30_000.0, 1),
+        (40_000.0, 50_000.0, 1),
+        (60_001.0, None, 1),
+    ]
+    assert calls[4] == (40_000.0, 50_000.0, -1)
+    assert result["status"] == "KILL_HISTORICAL"
+
+
 def test_carnet_atomique_rejoue_les_deux_jambes_sans_etat_intermediaire(tmp_path: Path):
     source = tmp_path / "runtime" / "data" / "carnet_venues.jsonl"
     source.parent.mkdir(parents=True)

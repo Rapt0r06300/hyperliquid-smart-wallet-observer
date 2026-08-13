@@ -21,6 +21,8 @@ from hl_observer.simulation.economic_campaigns import (  # noqa: E402
     build_cross_campaign,
     build_lead_lag_campaign,
     dataset_provenance,
+    find_oldest_parameter_freeze,
+    freeze_parameters,
     freeze_or_reuse_parameters,
     render_campaign_report,
     write_campaign,
@@ -125,23 +127,6 @@ def run_campaigns(
             "runtime/data/carnet_venues.jsonl",
         ),
     )
-    cross_params = {
-        "seuil_entree_bps": cross_tool.SEUIL_ENTREE_BPS,
-        "seuil_sortie_bps": cross_tool.SEUIL_SORTIE_BPS,
-        "stop_aggravation_bps": cross_tool.STOP_AGGRAVATION_BPS,
-        "horizon_max_s": cross_tool.HORIZON_MAX_S,
-        "fraicheur_max_ms": cross_tool.FRAICHEUR_MAX_MS,
-        "latence_ms": cross_tool.LATENCE_MS,
-        "fees_ar_bps": cross_tool.FEES_AR_BPS,
-        "notional_usd": cross_tool.NOTIONAL_USD,
-        "depth_freshness_ms": cross_tool.DEPTH_FRESHNESS_MS,
-        "min_executable_edge_bps": cross_tool.MIN_EXECUTABLE_EDGE_BPS,
-        "max_observation_gap_ms": cross_tool.MAX_OBSERVATION_GAP_MS,
-        "source_mode": "ATOMIC_FOUR_SIDE_BOOK",
-    }
-    cross_freeze = freeze_or_reuse_parameters(
-        root, "cross_venue_dislocation_v2", cross_params, cross_data
-    )
     series, cross_depth, cross_meta = cross_tool.collecter_carnet_series(root)
     cross_meta["legacy_bbo_budget_s_unused"] = max(0.0, cross_budget_s)
     cross_meta["legacy_current_only_unused"] = bool(cross_current_only)
@@ -152,29 +137,78 @@ def run_campaigns(
         "coins": cross_meta.get("coins"),
         "capacity_definition": "minimum USD capacity across HL/BIN bid/ask",
     }
-    cross_diagnostics: dict[str, Any] = {}
-    cross_trades = cross_tool.backtester(
-        series,
-        depth_by_coin=cross_depth,
-        diagnostics=cross_diagnostics,
+    cross_protocol = cross_tool.walk_forward_protocol_signature()
+    cross_freeze = find_oldest_parameter_freeze(
+        root,
+        "cross_venue_dislocation_v2",
+        required_parameters=cross_protocol,
     )
-    cross_placebo = cross_tool.backtester(
+    calibration = None
+    if cross_freeze is None:
+        calibration = cross_tool.calibrer_walk_forward(series, cross_depth)
+        selection = calibration.get("selection") if isinstance(calibration, dict) else None
+        selected = selection.get("selected") if isinstance(selection, dict) else None
+        if not isinstance(selected, dict) or not isinstance(selected.get("parameters"), dict):
+            selected_parameters = {
+                "seuil_entree": cross_tool.SEUIL_ENTREE_BPS,
+                "stop_bps": cross_tool.STOP_AGGRAVATION_BPS,
+                "horizon_s": cross_tool.HORIZON_MAX_S,
+                "min_executable_edge_bps": cross_tool.MIN_EXECUTABLE_EDGE_BPS,
+            }
+            selection_eligible = False
+        else:
+            selected_parameters = dict(selected["parameters"])
+            selection_eligible = selected.get("eligible") is True
+        cross_params = {
+            **cross_protocol,
+            "walk_forward_bounds": calibration.get("bounds"),
+            "selected_strategy_parameters": selected_parameters,
+            "training_selection_eligible": selection_eligible,
+            "selection_status": calibration.get("status"),
+            "seuil_sortie_bps": cross_tool.SEUIL_SORTIE_BPS,
+            "fraicheur_max_ms": cross_tool.FRAICHEUR_MAX_MS,
+            "latence_ms": cross_tool.LATENCE_MS,
+            "fees_ar_bps": cross_tool.FEES_AR_BPS,
+            "notional_usd": cross_tool.NOTIONAL_USD,
+            "depth_freshness_ms": cross_tool.DEPTH_FRESHNESS_MS,
+            "max_observation_gap_ms": cross_tool.MAX_OBSERVATION_GAP_MS,
+            "source_mode": "ATOMIC_FOUR_SIDE_BOOK",
+        }
+        cross_freeze = freeze_parameters(
+            root,
+            "cross_venue_dislocation_v2",
+            cross_params,
+            cross_data,
+        )
+    else:
+        cross_params = dict(cross_freeze["parameters"])
+
+    cross_walk_forward = cross_tool.evaluer_walk_forward_gelé(
         series,
-        depth_by_coin=cross_depth,
-        direction_multiplier=-1,
-    )
-    cross_temporal = cross_tool.construire_preuves_temporelles(
-        cross_trades,
-        cross_placebo,
+        cross_depth,
+        frozen_parameters=cross_params,
         frozen_at_ms=float(cross_freeze["frozen_at_ms"]),
     )
+    segment_trades = cross_walk_forward.get("trades", {})
+    cross_trades = [
+        trade
+        for name in ("train", "validation", "oos", "forward")
+        for trade in segment_trades.get(name, [])
+    ] if isinstance(segment_trades, dict) else []
+    cross_temporal = cross_tool.preuves_temporelles_walk_forward(cross_walk_forward)
     cross_raw = {
         "schema_version": "hypersmart.cross_venue_campaign.v2",
         "meta": cross_meta,
         "depth_meta": cross_depth_meta,
-        "decision_diagnostics": cross_diagnostics,
+        "decision_diagnostics": cross_walk_forward.get("diagnostics"),
         "quotes_par_coin": {coin: len(values) for coin, values in series.items() if values},
         "params": cross_params,
+        "calibration": calibration,
+        "walk_forward": {
+            key: value
+            for key, value in cross_walk_forward.items()
+            if key != "trades"
+        },
         "verdict_realiste_16bps": cross_tool.juger(cross_trades),
         "temporal_evidence": cross_temporal,
         "trades": cross_trades,

@@ -171,6 +171,45 @@ def freeze_or_reuse_parameters(
     return freeze_parameters(project_root, normalized, parameters, datasets)
 
 
+def find_oldest_parameter_freeze(
+    root: str | Path,
+    family: str,
+    *,
+    required_parameters: Mapping[str, Any],
+) -> dict[str, Any] | None:
+    """Return the oldest immutable freeze matching a protocol signature.
+
+    This lookup deliberately matches only caller-supplied protocol fields.
+    It lets a forward campaign recover its original temporal boundaries and
+    selected parameters after append-only datasets grow, instead of silently
+    recalibrating on observations that should belong to forward evidence.
+    """
+
+    project_root = Path(root).resolve()
+    normalized = canonical_family(family)
+    directory = project_root / REPORT_DIR / "freezes" / normalized
+    if not directory.is_dir():
+        return None
+    matches: list[dict[str, Any]] = []
+    for path in sorted(directory.glob("*.json")):
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            continue
+        parameters = payload.get("parameters")
+        if not isinstance(parameters, Mapping):
+            continue
+        if (
+            payload.get("family") == normalized
+            and payload.get("selected_before_final_evaluation") is True
+            and all(parameters.get(key) == value for key, value in required_parameters.items())
+        ):
+            matches.append(payload)
+    if not matches:
+        return None
+    return min(matches, key=lambda payload: int(payload.get("frozen_at_ms") or 0))
+
+
 def _base(
     family: str,
     *,

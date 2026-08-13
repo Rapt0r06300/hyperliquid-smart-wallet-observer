@@ -35,6 +35,24 @@ DEPTH_FRESHNESS_MS = 3000.0
 MIN_EXECUTABLE_EDGE_BPS = 0.0
 MAX_OBSERVATION_GAP_MS = 300_000.0
 
+CROSS_WALK_FORWARD_PROTOCOL = "cross_atomic_depth_walk_forward_v1"
+CROSS_TRAIN_FRACTION = 0.60
+CROSS_VALIDATION_FRACTION = 0.20
+CROSS_PURGE_MS = HORIZON_MAX_S * 1000.0
+CROSS_MIN_TRAIN_TRADES = 8
+CROSS_WALK_FORWARD_GRID = tuple(
+    {
+        "seuil_entree": entry,
+        "stop_bps": stop,
+        "horizon_s": horizon,
+        "min_executable_edge_bps": edge,
+    }
+    for entry in (15.0, 30.0)
+    for stop in (15.0, 25.0)
+    for horizon in (900.0, 3600.0, 14400.0)
+    for edge in (0.0, 20.0)
+)
+
 COINS_COMMUNS = ("BTC", "ETH", "SOL", "AVAX", "INJ", "DASH", "NEO", "LINK", "AAVE", "ONDO")
 
 
@@ -499,6 +517,297 @@ def construire_preuves_temporelles(
             "placebo_net_usd": placebo_segment["net_pnl_usd"],
             "candidate_count": candidate_segment["sample_count"],
             "placebo_count": placebo_segment["sample_count"],
+        },
+    }
+
+
+def walk_forward_protocol_signature() -> dict:
+    """Stable signature used to recover the same physical freeze later."""
+
+    grid_material = json.dumps(CROSS_WALK_FORWARD_GRID, sort_keys=True, separators=(",", ":"))
+    return {
+        "calibration_protocol": CROSS_WALK_FORWARD_PROTOCOL,
+        "grid_sha256": hashlib.sha256(grid_material.encode("utf-8")).hexdigest(),
+        "train_fraction": CROSS_TRAIN_FRACTION,
+        "validation_fraction": CROSS_VALIDATION_FRACTION,
+        "purge_ms": CROSS_PURGE_MS,
+        "minimum_train_trades": CROSS_MIN_TRAIN_TRADES,
+    }
+
+
+def calculer_bornes_walk_forward(series: dict) -> dict:
+    """Choose chronological boundaries from timestamps, never from returns."""
+
+    timestamps = sorted(
+        {
+            float(event[0])
+            for coin, events in series.items()
+            if not str(coin).startswith("_")
+            for event in events
+            if event
+        }
+    )
+    if len(timestamps) < 30:
+        return {
+            "status": "INSUFFICIENT_TIMESTAMPS",
+            "observation_timestamps": len(timestamps),
+        }
+    train_index = max(0, min(len(timestamps) - 3, int(len(timestamps) * CROSS_TRAIN_FRACTION) - 1))
+    validation_index = max(
+        train_index + 1,
+        min(
+            len(timestamps) - 2,
+            int(len(timestamps) * (CROSS_TRAIN_FRACTION + CROSS_VALIDATION_FRACTION)) - 1,
+        ),
+    )
+    return {
+        "status": "READY",
+        "observation_timestamps": len(timestamps),
+        "first_observed_ms": timestamps[0],
+        "train_end_ms": timestamps[train_index],
+        "validation_start_ms": timestamps[train_index] + CROSS_PURGE_MS,
+        "validation_end_ms": timestamps[validation_index],
+        "oos_start_ms": timestamps[validation_index] + CROSS_PURGE_MS,
+        "calibration_data_end_ms": timestamps[-1],
+        "purge_ms": CROSS_PURGE_MS,
+    }
+
+
+def _slice_observations(
+    values_by_coin: dict,
+    *,
+    start_ms: float | None = None,
+    end_ms: float | None = None,
+) -> dict:
+    sliced = {}
+    for coin, values in values_by_coin.items():
+        if str(coin).startswith("_"):
+            continue
+        rows = [
+            value
+            for value in values
+            if (start_ms is None or float(value[0]) >= float(start_ms))
+            and (end_ms is None or float(value[0]) <= float(end_ms))
+        ]
+        if rows:
+            sliced[coin] = rows
+    return sliced
+
+
+def _training_rank(summary: dict, parameters: dict) -> tuple:
+    count = int(summary.get("n_trades") or 0)
+    net = float(summary.get("net_total_usd") or 0.0)
+    pf = float(summary.get("profit_factor") or 0.0)
+    if pf == float("inf"):
+        pf = 1000.0
+    eligible = bool(
+        count >= CROSS_MIN_TRAIN_TRADES
+        and summary.get("LIQUIDATABLE_NET") is True
+        and net > 0.0
+        and pf > 1.2
+    )
+    # Net is the primary economic target.  The remaining fields provide a
+    # deterministic tie-break without consulting validation or OOS returns.
+    return (
+        int(eligible),
+        round(net, 12),
+        round(min(pf, 1000.0), 12),
+        count,
+        json.dumps(parameters, sort_keys=True, separators=(",", ":")),
+    )
+
+
+def selectionner_parametres_train(
+    train_series: dict,
+    train_depth: dict,
+    *,
+    grid: tuple[dict, ...] = CROSS_WALK_FORWARD_GRID,
+    replay_fn=None,
+) -> dict:
+    """Select a candidate using training observations only."""
+
+    replay = replay_fn or backtester
+    candidates = []
+    for parameters in grid:
+        diagnostics: dict = {}
+        trades = replay(
+            train_series,
+            depth_by_coin=train_depth,
+            diagnostics=diagnostics,
+            **parameters,
+        )
+        summary = _summary(trades)
+        eligible = _training_rank(summary, parameters)[0] == 1
+        candidates.append(
+            {
+                "parameters": dict(parameters),
+                "summary": summary,
+                "eligible": eligible,
+                "diagnostics": diagnostics,
+            }
+        )
+    if not candidates:
+        return {"status": "NO_GRID", "selected": None, "candidates": []}
+    best = max(
+        candidates,
+        key=lambda row: _training_rank(row["summary"], row["parameters"]),
+    )
+    return {
+        "status": "SELECTED" if best["eligible"] else "KILL_TRAIN",
+        "selected": best,
+        "candidate_count": len(candidates),
+        "eligible_candidate_count": sum(1 for row in candidates if row["eligible"]),
+        "candidates": candidates,
+    }
+
+
+def calibrer_walk_forward(series: dict, depth_by_coin: dict) -> dict:
+    """Compute boundaries and select parameters without reading later returns."""
+
+    bounds = calculer_bornes_walk_forward(series)
+    if bounds.get("status") != "READY":
+        return {"status": bounds.get("status"), "bounds": bounds, "selection": None}
+    train_series = _slice_observations(series, end_ms=bounds["train_end_ms"])
+    train_depth = _slice_observations(depth_by_coin, end_ms=bounds["train_end_ms"])
+    selection = selectionner_parametres_train(train_series, train_depth)
+    return {
+        "status": selection["status"],
+        "bounds": bounds,
+        "selection": selection,
+    }
+
+
+def _replay_segment(
+    series: dict,
+    depth_by_coin: dict,
+    parameters: dict,
+    *,
+    start_ms: float | None,
+    end_ms: float | None,
+    direction_multiplier: int = 1,
+) -> tuple[list[dict], dict]:
+    segment_series = _slice_observations(series, start_ms=start_ms, end_ms=end_ms)
+    segment_depth = _slice_observations(depth_by_coin, start_ms=start_ms, end_ms=end_ms)
+    diagnostics: dict = {}
+    trades = backtester(
+        segment_series,
+        depth_by_coin=segment_depth,
+        direction_multiplier=direction_multiplier,
+        diagnostics=diagnostics,
+        **parameters,
+    )
+    return trades, diagnostics
+
+
+def evaluer_walk_forward_gelé(
+    series: dict,
+    depth_by_coin: dict,
+    *,
+    frozen_parameters: dict,
+    frozen_at_ms: float,
+) -> dict:
+    """Evaluate an already-selected candidate on disjoint causal segments."""
+
+    bounds = frozen_parameters.get("walk_forward_bounds")
+    parameters = frozen_parameters.get("selected_strategy_parameters")
+    if not isinstance(bounds, dict) or bounds.get("status") != "READY" or not isinstance(parameters, dict):
+        return {"status": "INVALID_OR_INCOMPLETE_FREEZE"}
+
+    ranges = {
+        "train": (bounds.get("first_observed_ms"), bounds["train_end_ms"]),
+        "validation": (bounds["validation_start_ms"], bounds["validation_end_ms"]),
+        "oos": (bounds["oos_start_ms"], bounds["calibration_data_end_ms"]),
+        "forward": (
+            max(float(bounds["calibration_data_end_ms"]), float(frozen_at_ms)) + 1.0,
+            None,
+        ),
+    }
+    segments = {}
+    trades_by_segment = {}
+    diagnostics = {}
+    for name, (start_ms, end_ms) in ranges.items():
+        trades, counters = _replay_segment(
+            series,
+            depth_by_coin,
+            parameters,
+            start_ms=start_ms,
+            end_ms=end_ms,
+        )
+        trades_by_segment[name] = trades
+        diagnostics[name] = counters
+        segments[name] = _summary(trades)
+
+    placebo_oos, placebo_diagnostics = _replay_segment(
+        series,
+        depth_by_coin,
+        parameters,
+        start_ms=ranges["oos"][0],
+        end_ms=ranges["oos"][1],
+        direction_multiplier=-1,
+    )
+    placebo_summary = _summary(placebo_oos)
+    train_ok = bool(frozen_parameters.get("training_selection_eligible") is True)
+    validation_ok = bool(
+        segments["validation"]["n_trades"] >= 4
+        and segments["validation"]["net_total_usd"] > 0
+        and segments["validation"]["profit_factor"] > 1.0
+    )
+    oos_ok = bool(
+        segments["oos"]["n_trades"] >= 4
+        and segments["oos"]["net_total_usd"] > 0
+        and segments["oos"]["profit_factor"] > 1.0
+        and segments["oos"]["net_total_usd"] > placebo_summary["net_total_usd"]
+    )
+    return {
+        "status": "ELIGIBLE_FOR_FORWARD" if train_ok and validation_ok and oos_ok else "KILL_HISTORICAL",
+        "protocol": walk_forward_protocol_signature(),
+        "bounds": bounds,
+        "selected_strategy_parameters": dict(parameters),
+        "training_selection_eligible": train_ok,
+        "validation_eligible": validation_ok,
+        "oos_eligible": oos_ok,
+        "segments": segments,
+        "diagnostics": diagnostics,
+        "placebo_oos": placebo_summary,
+        "placebo_diagnostics": placebo_diagnostics,
+        "trades": trades_by_segment,
+    }
+
+
+def preuves_temporelles_walk_forward(walk_forward: dict) -> dict:
+    """Map strict walk-forward results to the shared objective contract."""
+
+    segments = walk_forward.get("segments") if isinstance(walk_forward.get("segments"), dict) else {}
+    oos_summary = segments.get("oos") if isinstance(segments.get("oos"), dict) else {}
+    forward_summary = segments.get("forward") if isinstance(segments.get("forward"), dict) else {}
+    placebo = walk_forward.get("placebo_oos") if isinstance(walk_forward.get("placebo_oos"), dict) else {}
+
+    def objective(summary: dict, *, post_freeze: bool = False) -> dict:
+        count = int(summary.get("n_trades") or 0)
+        return {
+            "net_pnl_usd": float(summary.get("net_total_usd") or 0.0),
+            "sample_count": count,
+            "no_lookahead": True,
+            "post_freeze": bool(post_freeze and count > 0),
+            "LIQUIDATABLE_NET": summary.get("LIQUIDATABLE_NET") is True,
+        }
+
+    return {
+        "is": objective(segments.get("train", {})),
+        "validation": objective(segments.get("validation", {})),
+        "oos": objective(oos_summary),
+        "forward": objective(forward_summary, post_freeze=True),
+        "placebos": {
+            "beaten": bool(
+                oos_summary.get("n_trades")
+                and placebo.get("n_trades")
+                and float(oos_summary.get("net_total_usd") or 0.0)
+                > float(placebo.get("net_total_usd") or 0.0)
+            ),
+            "candidate_net_usd": float(oos_summary.get("net_total_usd") or 0.0),
+            "placebo_net_usd": float(placebo.get("net_total_usd") or 0.0),
+            "candidate_count": int(oos_summary.get("n_trades") or 0),
+            "placebo_count": int(placebo.get("n_trades") or 0),
         },
     }
 

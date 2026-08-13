@@ -173,6 +173,37 @@ def test_campaign_json_has_no_case_insensitive_duplicate_keys(tmp_path: Path) ->
     assert "LIQUIDATABLE_NET" not in campaign
 
 
+def test_protocol_freeze_reuses_oldest_boundary_after_dataset_growth(tmp_path: Path) -> None:
+    protocol = {"calibration_protocol": "wf-v1", "grid_sha256": "a" * 64}
+    old = freeze_parameters(
+        tmp_path,
+        "cross_venue_dislocation_v2",
+        {**protocol, "walk_forward_bounds": {"oos_start_ms": 100}},
+        {"dataset_fingerprint": "old"},
+        campaign_id="old",
+        frozen_at_ms=1000,
+    )
+    freeze_parameters(
+        tmp_path,
+        "cross_venue_dislocation_v2",
+        {**protocol, "walk_forward_bounds": {"oos_start_ms": 999}},
+        {"dataset_fingerprint": "new"},
+        campaign_id="new",
+        frozen_at_ms=2000,
+    )
+
+    from hl_observer.simulation.economic_campaigns import find_oldest_parameter_freeze
+
+    reused = find_oldest_parameter_freeze(
+        tmp_path,
+        "cross_venue_dislocation_v2",
+        required_parameters=protocol,
+    )
+
+    assert reused == old
+    assert reused["parameters"]["walk_forward_bounds"]["oos_start_ms"] == 100
+
+
 def test_markdown_starts_each_family_with_exact_objective_verdict() -> None:
     rows = [
         {"family": "copy_vault", "objective_status": "NON_ATTEINT", "objective_reasons": []},
