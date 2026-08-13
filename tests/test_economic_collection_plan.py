@@ -81,6 +81,10 @@ def test_plan_distinguishes_future_data_from_killed_hypothesis() -> None:
     assert by_family["lead_lag"]["evidence_state"] == "FUTURE_SIZED_BBO_REQUIRED"
     assert by_family["cross_venue_dislocation_v2"]["evidence_state"] == "HYPOTHESIS_KILLED_OOS"
     assert by_family["cross_venue_dislocation_v2"]["future_data_required_only"] is False
+    assert by_family["cross_venue_dislocation_v2"]["collection_actionable"] is False
+    assert "venues-collector" not in plan["required_collectors"]
+    # carnet remains useful for Copy-Vault even though Cross itself is killed.
+    assert "carnet-collector" in plan["required_collectors"]
     assert plan["safe_to_claim_future_data_required_only"] is False
     assert plan["goal_complete"] is False
     assert plan["real_execution"] is False

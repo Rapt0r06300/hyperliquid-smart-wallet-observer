@@ -70,6 +70,7 @@ def _copy_state(campaign: Mapping[str, Any], raw: Mapping[str, Any]) -> dict[str
     return {
         "family": "copy_vault",
         "evidence_state": state,
+        "collection_actionable": not objective_met,
         "software_pipeline_ready": schema_ready,
         "future_data_required_only": data_only,
         "objective_status": campaign.get("objective_status"),
@@ -142,6 +143,7 @@ def _lead_state(campaign: Mapping[str, Any], raw: Mapping[str, Any]) -> dict[str
     return {
         "family": "lead_lag",
         "evidence_state": state,
+        "collection_actionable": not objective_met,
         "software_pipeline_ready": schema_ready,
         "future_data_required_only": data_only,
         "objective_status": campaign.get("objective_status"),
@@ -201,6 +203,10 @@ def _cross_state(campaign: Mapping[str, Any], raw: Mapping[str, Any]) -> dict[st
     return {
         "family": "cross_venue_dislocation_v2",
         "evidence_state": state,
+        # More observations of the same frozen, negative-OOS mechanism cannot
+        # repair it. Collection resumes only after a materially new mechanism
+        # is declared and frozen; shared collectors may still run for Copy/Lead.
+        "collection_actionable": bool(not objective_met and not measured_negative),
         "software_pipeline_ready": schema_ready,
         "future_data_required_only": bool(
             schema_ready and not objective_met and not measured_negative and closed > 0
@@ -266,6 +272,7 @@ def build_collection_plan(
             collector
             for row in families
             if row["objective_status"] != "ATTEINT"
+            and row.get("collection_actionable") is True
             for collector in row["required_collectors"]
         }
     )
