@@ -828,10 +828,61 @@ async def _metaorder_shadow_periodique(root: Path, vaults: list, *, intervalle_s
 #    par fill, VRAI OFI, 4 horloges séparées, latence pipeline ≥ 0). 1 connexion WS de plus (total 4 < 10).
 _TAPE_FILLS = None                           # asyncio.Queue((fill, fill_recv_mono_ms)) — alimentée par le worker
 _TAPE_COINS_ACTIFS: dict = {}                # coin -> dernier fill_recv (ms wall) : fenêtre d'abonnement l2Book
+_TAPE_PREWARM_COINS: set[str] = set()        # coins réels récents suivis avant le prochain fill live
 _TAPE_BUFFER: dict = {}                      # coin -> list[{recv_mono, resume}] (snapshots successifs)
 _COPY_VAULT_LAST_SAMPLE_MS: dict[str, int] = {}
 TAPE_BUFFER_MAX = 400
 TAPE_COIN_TTL_MS = 360_000.0                # coin abonné jusqu'à horizon(5 min)+marge après le dernier fill
+TAPE_PREWARM_MAX_COINS = 12                  # abonnement borné ; ne transforme pas le collecteur en firehose
+
+
+def _copy_vault_prewarm_coins(
+    root: Path,
+    vaults: list[str],
+    *,
+    max_coins: int = TAPE_PREWARM_MAX_COINS,
+    max_lines_per_source: int = 20_000,
+) -> list[str]:
+    """Select recent real coins for causal L2 capture before the next fill.
+
+    Starting L2 only after a fresh fill makes the first event on every coin
+    impossible to replay: no pre-signal/reference book can exist.  This helper
+    uses only already observed fills belonging to the wallets subscribed by
+    this process.  It does not manufacture a signal and remains strictly
+    bounded.
+    """
+
+    followed = {str(vault).lower() for vault in vaults if str(vault).strip()}
+    limit = min(TAPE_PREWARM_MAX_COINS, max(0, int(max_coins)))
+    if not followed or limit <= 0:
+        return []
+    latest_by_coin: dict[str, int] = {}
+    sources = (root / FILLS_LIVE, root / "runtime" / "data" / "vault_fills.jsonl")
+    for path in sources:
+        if not path.is_file():
+            continue
+        try:
+            with path.open("r", encoding="utf-8", errors="ignore") as handle:
+                lines = collections.deque(handle, maxlen=max(1, int(max_lines_per_source)))
+        except OSError:
+            continue
+        for line in lines:
+            try:
+                row = json.loads(line)
+                vault = str(row.get("vault") or "").lower()
+                coin = str(row.get("coin") or "").upper().strip()
+                ts_ms = int(row.get("received_at_ms") or row.get("ts_ms") or 0)
+            except (TypeError, ValueError, OverflowError, json.JSONDecodeError):
+                continue
+            if vault not in followed or not coin or ts_ms <= 0:
+                continue
+            latest_by_coin[coin] = max(ts_ms, latest_by_coin.get(coin, 0))
+    return [
+        coin
+        for coin, _timestamp in sorted(
+            latest_by_coin.items(), key=lambda item: (-item[1], item[0])
+        )[:limit]
+    ]
 
 
 async def _tape_l2_buffer(root: Path, *, sync_s: float = 0.5) -> None:
@@ -847,7 +898,11 @@ async def _tape_l2_buffer(root: Path, *, sync_s: float = 0.5) -> None:
                 abonnes.clear()
                 while True:
                     now = time.time() * 1000
-                    cibles = {c for c, t in _TAPE_COINS_ACTIFS.items() if now - t <= TAPE_COIN_TTL_MS}
+                    cibles = set(_TAPE_PREWARM_COINS)
+                    cibles.update(
+                        c for c, t in _TAPE_COINS_ACTIFS.items()
+                        if now - t <= TAPE_COIN_TTL_MS
+                    )
                     for c in cibles - abonnes:
                         await ws.send(json.dumps({"method": "subscribe", "subscription": {"type": "l2Book", "coin": c}}))
                         abonnes.add(c)
@@ -999,6 +1054,17 @@ async def _boucle(root: Path) -> None:
     for v, role, why in roles:
         print("[userfills]   %s [%s] %s" % (v[:12], role, why), flush=True)
     vaults = [v for v, _r, _w in roles]
+    _TAPE_PREWARM_COINS.clear()
+    _TAPE_PREWARM_COINS.update(_copy_vault_prewarm_coins(root, vaults))
+    print(
+        "[userfills] L2 causal prewarm (%d/%d coins reels): %s"
+        % (
+            len(_TAPE_PREWARM_COINS),
+            TAPE_PREWARM_MAX_COINS,
+            ", ".join(sorted(_TAPE_PREWARM_COINS)) or "aucun",
+        ),
+        flush=True,
+    )
     file: asyncio.Queue = asyncio.Queue(maxsize=FILE_MAX)
     try:
         shards = _shards_userfills(vaults)                            # ≤5 vaults par socket (HL cape ~5/connexion)

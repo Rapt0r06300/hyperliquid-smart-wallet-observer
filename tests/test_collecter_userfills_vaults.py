@@ -88,6 +88,46 @@ def test_tape_copy_vault_persiste_un_l2_causal_et_echantillonne(tmp_path, monkey
     assert rows[0]["capacity_usd"] == min(99 * 2 + 98, 101 * 3 + 102)
 
 
+def test_copy_vault_prewarm_restreint_aux_wallets_suivis_et_aux_coins_recents(tmp_path):
+    data = tmp_path / "runtime" / "data"
+    data.mkdir(parents=True)
+    rows = [
+        {"vault": "0xFOLLOW", "coin": "BTC", "ts_ms": 100},
+        {"vault": "0xOTHER", "coin": "DOGE", "ts_ms": 999},
+        {"vault": "0xFOLLOW", "coin": "ETH", "ts_ms": 300},
+        {"vault": "0xFOLLOW", "coin": "SOL", "ts_ms": 200},
+    ]
+    (data / "vault_fills_live.jsonl").write_text(
+        "\n".join(json.dumps(row) for row in rows) + "\n", encoding="utf-8"
+    )
+
+    selected = C._copy_vault_prewarm_coins(
+        tmp_path, ["0xfollow"], max_coins=2
+    )
+
+    assert selected == ["ETH", "SOL"]
+    assert "DOGE" not in selected
+
+
+def test_copy_vault_prewarm_est_borne_par_le_plafond_dur(tmp_path):
+    data = tmp_path / "runtime" / "data"
+    data.mkdir(parents=True)
+    rows = [
+        {"vault": "0xFOLLOW", "coin": f"C{index}", "ts_ms": index + 1}
+        for index in range(C.TAPE_PREWARM_MAX_COINS + 5)
+    ]
+    (data / "vault_fills.jsonl").write_text(
+        "\n".join(json.dumps(row) for row in rows) + "\n", encoding="utf-8"
+    )
+
+    selected = C._copy_vault_prewarm_coins(
+        tmp_path, ["0xFOLLOW"], max_coins=10_000
+    )
+
+    assert len(selected) == C.TAPE_PREWARM_MAX_COINS
+    assert selected[0] == f"C{C.TAPE_PREWARM_MAX_COINS + 4}"
+
+
 def test_vaults_et_roles(tmp_path):
     (tmp_path / "runtime" / "data").mkdir(parents=True)
     (tmp_path / "runtime" / "data" / "vaults_scores.json").write_text(json.dumps({

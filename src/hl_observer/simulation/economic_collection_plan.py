@@ -98,9 +98,11 @@ def _copy_state(campaign: Mapping[str, Any], raw: Mapping[str, Any]) -> dict[str
         ],
         "required_artifacts": [
             "runtime/data/vault_fills.jsonl",
+            "runtime/data/vault_fills_live.jsonl",
             "runtime/data/vault_episodes.jsonl",
             "runtime/data/vault_snapshots.jsonl",
             "runtime/data/carnet_venues.jsonl",
+            "runtime/data/copy_vault_l2_tape.jsonl",
         ],
         "exact_missing_evidence": [
             "at least 8 causal train metaorders with observed executable BBO",

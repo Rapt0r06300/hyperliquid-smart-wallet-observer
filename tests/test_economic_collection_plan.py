@@ -115,6 +115,9 @@ def test_plan_records_exact_collectors_progress_and_freeze() -> None:
 
     assert "bbo-collector" in plan["required_collectors"]
     assert "vault-collector" in plan["required_collectors"]
+    copy = next(row for row in plan["families"] if row["family"] == "copy_vault")
+    assert "runtime/data/copy_vault_l2_tape.jsonl" in copy["required_artifacts"]
+    assert "runtime/data/vault_fills_live.jsonl" in copy["required_artifacts"]
     assert lead["freeze"]["campaign_id"] == "lead-freeze"
     assert lead["progress"]["missing_top_sizes"] == 30
     assert plan["collector_state"]["profil"] == "harvest"
