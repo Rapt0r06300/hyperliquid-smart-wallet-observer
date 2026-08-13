@@ -133,6 +133,44 @@ def freeze_parameters(
     return payload
 
 
+def freeze_or_reuse_parameters(
+    root: str | Path,
+    family: str,
+    parameters: Mapping[str, Any],
+    datasets: Mapping[str, Any],
+) -> dict[str, Any]:
+    """Reuse the oldest physical freeze for identical parameters.
+
+    Creating a new freeze on every replay would continually move the forward
+    boundary and make post-freeze evidence impossible by construction.  A
+    matching immutable parameter hash is therefore reused; its original data
+    provenance and timestamp remain untouched.
+    """
+
+    project_root = Path(root).resolve()
+    normalized = canonical_family(family)
+    parameter_hash = hashlib.sha256(
+        json.dumps(dict(parameters), sort_keys=True, separators=(",", ":")).encode("utf-8")
+    ).hexdigest()
+    directory = project_root / REPORT_DIR / "freezes" / normalized
+    if directory.is_dir():
+        reusable: list[dict[str, Any]] = []
+        for path in sorted(directory.glob("*.json")):
+            try:
+                payload = json.loads(path.read_text(encoding="utf-8"))
+            except (OSError, ValueError):
+                continue
+            if (
+                payload.get("family") == normalized
+                and payload.get("parameters_sha256") == parameter_hash
+                and payload.get("selected_before_final_evaluation") is True
+            ):
+                reusable.append(payload)
+        if reusable:
+            return min(reusable, key=lambda payload: int(payload.get("frozen_at_ms") or 0))
+    return freeze_parameters(project_root, normalized, parameters, datasets)
+
+
 def _base(
     family: str,
     *,
@@ -294,6 +332,11 @@ def build_cross_campaign(
         else {}
     )
     trades = report.get("trades") if isinstance(report.get("trades"), list) else []
+    temporal = (
+        report.get("temporal_evidence")
+        if isinstance(report.get("temporal_evidence"), Mapping)
+        else {}
+    )
     row.update(
         {
             "source_status": realistic.get("verdict"),
@@ -320,10 +363,17 @@ def build_cross_campaign(
                 "last_close_ms": max((trade.get("ts_out") for trade in trades), default=None),
                 "collection_meta": report.get("meta"),
             },
+            "oos": temporal.get("oos") if isinstance(temporal.get("oos"), Mapping) else None,
+            "forward": (
+                temporal.get("forward")
+                if isinstance(temporal.get("forward"), Mapping) else None
+            ),
+            "placebos": (
+                temporal.get("placebos")
+                if isinstance(temporal.get("placebos"), Mapping) else None
+            ),
         }
     )
-    # Existing BBO replay has no independent post-freeze segment and no depth
-    # slippage.  Reporting either as proven would manufacture eligibility.
     return _finish(row)
 
 
@@ -387,6 +437,7 @@ __all__ = [
     "build_lead_lag_campaign",
     "dataset_provenance",
     "freeze_parameters",
+    "freeze_or_reuse_parameters",
     "render_campaign_report",
     "write_campaign",
 ]

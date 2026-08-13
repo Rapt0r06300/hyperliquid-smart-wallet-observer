@@ -21,7 +21,7 @@ from hl_observer.simulation.economic_campaigns import (  # noqa: E402
     build_cross_campaign,
     build_lead_lag_campaign,
     dataset_provenance,
-    freeze_parameters,
+    freeze_or_reuse_parameters,
     render_campaign_report,
     write_campaign,
 )
@@ -85,7 +85,7 @@ def run_campaigns(
 
     def freeze_copy(parameters: dict[str, Any]) -> None:
         nonlocal copy_freeze
-        copy_freeze = freeze_parameters(root, "copy_vault", parameters, copy_data)
+        copy_freeze = freeze_or_reuse_parameters(root, "copy_vault", parameters, copy_data)
 
     copy_raw = copy_tool.construire(
         root,
@@ -112,7 +112,7 @@ def run_campaigns(
         "history_sources": len(lead_sources),
         "timestamp_clock": "ts_wall_ms_or_recv_wall_ts_ms;recu_ns_fallback",
     }
-    lead_freeze = freeze_parameters(root, "lead_lag", lead_params, lead_data)
+    lead_freeze = freeze_or_reuse_parameters(root, "lead_lag", lead_params, lead_data)
     lead_raw = lead_lag_shadow.backtest(root, sources=lead_sources)
     lead_raw_path = _write_raw(root, "lead_lag", lead_raw)
     lead_campaign = build_lead_lag_campaign(lead_raw, freeze=lead_freeze, datasets=lead_data)
@@ -122,8 +122,6 @@ def run_campaigns(
     cross_data = dataset_provenance(
         root,
         (
-            "runtime/data/bbo_tape.jsonl",
-            "runtime/data/bbo_tape.jsonl.prev",
             "runtime/data/carnet_venues.jsonl",
         ),
     )
@@ -136,21 +134,49 @@ def run_campaigns(
         "latence_ms": cross_tool.LATENCE_MS,
         "fees_ar_bps": cross_tool.FEES_AR_BPS,
         "notional_usd": cross_tool.NOTIONAL_USD,
+        "depth_freshness_ms": cross_tool.DEPTH_FRESHNESS_MS,
+        "min_executable_edge_bps": cross_tool.MIN_EXECUTABLE_EDGE_BPS,
+        "max_observation_gap_ms": cross_tool.MAX_OBSERVATION_GAP_MS,
+        "source_mode": "ATOMIC_FOUR_SIDE_BOOK",
     }
-    cross_freeze = freeze_parameters(root, "cross_venue_dislocation_v2", cross_params, cross_data)
-    series = cross_tool.collecter_series(
-        root,
-        budget_s=max(0.0, cross_budget_s),
-        current_only=cross_current_only,
+    cross_freeze = freeze_or_reuse_parameters(
+        root, "cross_venue_dislocation_v2", cross_params, cross_data
     )
-    cross_meta = series.pop("_meta", {})
-    cross_trades = cross_tool.backtester(series)
+    series, cross_depth, cross_meta = cross_tool.collecter_carnet_series(root)
+    cross_meta["legacy_bbo_budget_s_unused"] = max(0.0, cross_budget_s)
+    cross_meta["legacy_current_only_unused"] = bool(cross_current_only)
+    cross_depth_meta = {
+        "source": cross_meta.get("source"),
+        "source_mode": cross_meta.get("source_mode"),
+        "valid_snapshots": cross_meta.get("valid_snapshots"),
+        "coins": cross_meta.get("coins"),
+        "capacity_definition": "minimum USD capacity across HL/BIN bid/ask",
+    }
+    cross_diagnostics: dict[str, Any] = {}
+    cross_trades = cross_tool.backtester(
+        series,
+        depth_by_coin=cross_depth,
+        diagnostics=cross_diagnostics,
+    )
+    cross_placebo = cross_tool.backtester(
+        series,
+        depth_by_coin=cross_depth,
+        direction_multiplier=-1,
+    )
+    cross_temporal = cross_tool.construire_preuves_temporelles(
+        cross_trades,
+        cross_placebo,
+        frozen_at_ms=float(cross_freeze["frozen_at_ms"]),
+    )
     cross_raw = {
         "schema_version": "hypersmart.cross_venue_campaign.v2",
         "meta": cross_meta,
+        "depth_meta": cross_depth_meta,
+        "decision_diagnostics": cross_diagnostics,
         "quotes_par_coin": {coin: len(values) for coin, values in series.items() if values},
         "params": cross_params,
         "verdict_realiste_16bps": cross_tool.juger(cross_trades),
+        "temporal_evidence": cross_temporal,
         "trades": cross_trades,
         "paper_read_only": True,
         "real_execution": False,

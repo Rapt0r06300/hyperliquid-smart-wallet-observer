@@ -9,6 +9,7 @@ from hl_observer.simulation.economic_campaigns import (
     build_copy_campaign,
     build_cross_campaign,
     dataset_provenance,
+    freeze_or_reuse_parameters,
     freeze_parameters,
     render_campaign_report,
 )
@@ -56,6 +57,29 @@ def test_parameter_freeze_is_physical_and_immutable(tmp_path: Path) -> None:
             campaign_id="fixed",
             frozen_at_ms=123,
         )
+
+
+def test_freeze_identique_est_reutilise_sans_deplacer_frontiere_forward(tmp_path: Path) -> None:
+    datasets = {"dataset_fingerprint": "d" * 64, "files": []}
+    original = freeze_parameters(
+        tmp_path,
+        "lead_lag",
+        {"threshold": 7.0},
+        datasets,
+        campaign_id="physical-freeze",
+        frozen_at_ms=123,
+    )
+
+    reused = freeze_or_reuse_parameters(
+        tmp_path,
+        "lead_lag",
+        {"threshold": 7.0},
+        {"dataset_fingerprint": "new-data", "files": []},
+    )
+
+    assert reused == original
+    assert reused["frozen_at_ms"] == 123
+    assert len(list((tmp_path / "runtime/reports/economic_campaigns/freezes/lead_lag").glob("*.json"))) == 1
 
 
 def test_copy_campaign_never_promotes_without_measured_costs_and_forward() -> None:

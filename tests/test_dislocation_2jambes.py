@@ -7,6 +7,7 @@ sort sur convergence, sans look-ahead ; (3) verdict ARME seulement si net+ 2 moi
 from __future__ import annotations
 
 import importlib.util
+import json
 from pathlib import Path
 
 _ROOT = Path(__file__).resolve().parents[1]
@@ -71,6 +72,155 @@ def test_bbo_seul_ne_peut_pas_etre_liquidable_net():
     summary = BT.juger(BT.backtester({"ZZZ": evs}, fees_ar_bps=0.0))
     assert summary["LIQUIDATABLE_NET"] is False
     assert summary["slippage_cost_usd"] is None
+
+
+def test_profondeur_quatre_cotes_prouve_slippage_zero_et_reconciliation():
+    t = 1_000_000.0
+    evs = []
+    for i in range(3):
+        evs.extend(((t + i * 500, "HL", 100.20, 100.22), (t + i * 500, "BIN", 99.80, 99.82)))
+    for i in range(3, 6):
+        evs.extend(((t + i * 500, "HL", 99.80, 99.82), (t + i * 500, "BIN", 99.80, 99.82)))
+    depth = {"ZZZ": [(t + i * 500, 250.0) for i in range(6)]}
+
+    trades = BT.backtester(
+        {"ZZZ": evs},
+        fees_ar_bps=1.0,
+        depth_by_coin=depth,
+        notional_usd=15.0,
+    )
+    summary = BT.juger(trades)
+
+    assert len(trades) == 1
+    assert trades[0]["slippage_bps"] == 0.0
+    assert trades[0]["entry_capacity_usd"] == 250.0
+    assert trades[0]["exit_capacity_usd"] == 250.0
+    assert trades[0]["LIQUIDATABLE_NET"] is True
+    assert summary["slippage_cost_usd"] == 0.0
+    assert summary["economic_reconciled"] is True
+    assert summary["LIQUIDATABLE_NET"] is True
+
+
+def test_profondeur_perimee_bloque_entree_plutot_que_inventer_fill():
+    t = 1_000_000.0
+    evs = []
+    for i in range(3):
+        evs.extend(((t + i * 500, "HL", 100.20, 100.22), (t + i * 500, "BIN", 99.80, 99.82)))
+    depth = {"ZZZ": [(t - 10_000, 250.0)]}
+    assert BT.backtester({"ZZZ": evs}, depth_by_coin=depth) == []
+
+
+def test_basis_mid_ne_passe_pas_si_quatre_fills_sont_non_rentables():
+    t = 1_000_000.0
+    events = [
+        # Les mids divergent, mais les spreads énormes absorbent toute convergence.
+        (t, "ATOMIC", 99.90, 100.50, 99.50, 100.10),
+        (t + 500, "ATOMIC", 99.90, 100.50, 99.50, 100.10),
+        (t + 1000, "ATOMIC", 99.90, 100.50, 99.50, 100.10),
+    ]
+    depth = {"ZZZ": [(t + i * 500, 250.0) for i in range(3)]}
+    diagnostics = {}
+
+    trades = BT.backtester(
+        {"ZZZ": events},
+        depth_by_coin=depth,
+        fees_ar_bps=1.0,
+        diagnostics=diagnostics,
+    )
+
+    assert trades == []
+    assert diagnostics["rejected_non_positive_executable_edge"] > 0
+
+
+def test_trou_de_carnet_invalide_position_sans_faux_close_ni_pnl():
+    t = 1_000_000.0
+    events = [
+        (t, "ATOMIC", 100.20, 100.22, 99.80, 99.82),
+        (t + 500, "ATOMIC", 100.20, 100.22, 99.80, 99.82),
+        # Le carnet revient une heure plus tard à convergence : ce n'est pas
+        # une preuve du prix de sortie pendant le trou.
+        (t + 3_600_000, "ATOMIC", 99.80, 99.82, 99.80, 99.82),
+    ]
+    depth = {
+        "ZZZ": [
+            (t, 250.0),
+            (t + 500, 250.0),
+            (t + 3_600_000, 250.0),
+        ]
+    }
+    diagnostics = {}
+
+    trades = BT.backtester(
+        {"ZZZ": events},
+        depth_by_coin=depth,
+        fees_ar_bps=1.0,
+        diagnostics=diagnostics,
+    )
+
+    assert trades == []
+    assert diagnostics["positions_invalidated_gap"] == 1
+
+
+def test_preuves_temporelles_ne_fabriquent_pas_forward_post_freeze():
+    def complete_trade(index, net, *, timestamp):
+        notional = 15.0
+        fee = 0.01
+        return {
+            "trade_id": f"id-{index}",
+            "coin": "X",
+            "ts_detect": timestamp,
+            "ts_in": timestamp + 1,
+            "ts_out": timestamp + 2,
+            "net_bps": net / notional * 1e4,
+            "net_usd": net,
+            "notional_usd": notional,
+            "gross_reconciled_bps": (net + fee) / notional * 1e4,
+            "fees_bps": fee / notional * 1e4,
+            "spread_cost_bps": 0.0,
+            "slippage_bps": 0.0,
+            "latency_cost_bps": 0.0,
+            "LIQUIDATABLE_NET": True,
+            "two_leg": True,
+        }
+
+    trades = [complete_trade(i, 0.1, timestamp=1000 + i * 10) for i in range(10)]
+    placebo = [complete_trade(f"p{i}", -0.1, timestamp=1000 + i * 10) for i in range(10)]
+    evidence = BT.construire_preuves_temporelles(trades, placebo, frozen_at_ms=2000)
+
+    assert evidence["oos"]["net_pnl_usd"] > 0
+    assert evidence["placebos"]["beaten"] is True
+    assert evidence["forward"]["sample_count"] == 0
+    assert evidence["forward"]["post_freeze"] is False
+
+
+def test_carnet_atomique_rejoue_les_deux_jambes_sans_etat_intermediaire(tmp_path: Path):
+    source = tmp_path / "runtime" / "data" / "carnet_venues.jsonl"
+    source.parent.mkdir(parents=True)
+    rows = []
+    for index in range(3):
+        rows.append({
+            "coin": "ZZZ", "collecte_ts": 1000.0 + index * 0.5,
+            "hl_bid": 100.20, "hl_ask": 100.22,
+            "bin_bid": 99.80, "bin_ask": 99.82, "taille_min_usd": 250.0,
+        })
+    for index in range(3, 6):
+        rows.append({
+            "coin": "ZZZ", "collecte_ts": 1000.0 + index * 0.5,
+            "hl_bid": 99.80, "hl_ask": 99.82,
+            "bin_bid": 99.80, "bin_ask": 99.82, "taille_min_usd": 250.0,
+        })
+    source.write_text("\n".join(json.dumps(row) for row in rows) + "\n", encoding="utf-8")
+
+    series, depth, meta = BT.collecter_carnet_series(tmp_path)
+    trades = BT.backtester(series, depth_by_coin=depth, fees_ar_bps=1.0)
+
+    assert len(series["ZZZ"]) == 6
+    assert all(event[1] == "ATOMIC" and len(event) == 6 for event in series["ZZZ"])
+    assert meta["valid_snapshots"] == 6
+    assert meta["source_mode"] == "ATOMIC_FOUR_SIDE_BOOK"
+    assert len(trades) == 1
+    assert trades[0]["LIQUIDATABLE_NET"] is True
+    assert trades[0]["sortie"] == "CONVERGENCE"
 
 
 def test_quote_figee_bloque_la_decision():
