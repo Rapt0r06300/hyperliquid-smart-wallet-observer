@@ -37,6 +37,8 @@ def _raw_reports():
                 "causal_protocol_book_rows": 1000,
             },
             "calibration": {
+                "selection_eligible": False,
+                "minimum_train_trades": 8,
                 "grid": [
                     {"diagnostics": {"STALE_OR_MISSING_REFERENCE_BOOK": 9}}
                 ]
@@ -124,6 +126,8 @@ def test_plan_records_exact_collectors_progress_and_freeze() -> None:
     assert "runtime/data/vault_fills_live.jsonl" in copy["required_artifacts"]
     assert copy["progress"]["causal_protocol_metaorders"] == 9
     assert copy["progress"]["causal_protocol_book_rows"] == 1000
+    assert copy["progress"]["stale_or_missing_book_rejections_across_grid"] == 9
+    assert copy["progress"]["book_rejections_across_grid"]["STALE_OR_MISSING_REFERENCE_BOOK"] == 9
     assert lead["freeze"]["campaign_id"] == "lead-freeze"
     assert lead["progress"]["missing_top_sizes"] == 30
     assert plan["collector_state"]["profil"] == "harvest"
@@ -166,6 +170,40 @@ def test_plan_kills_frozen_lead_lag_negative_oos_and_forward() -> None:
     assert lead["progress"]["forward_net_pnl_usd"] == -0.60
     assert "bbo-collector" not in plan["required_collectors"]
     assert "allmids-collector" not in plan["required_collectors"]
+
+
+def test_copy_plan_counts_entry_exit_and_missing_coin_book_rejections() -> None:
+    raw = _raw_reports()
+    raw["copy_vault"]["calibration"]["grid"] = [
+        {
+            "summary": {"positions_fermees": 0},
+            "diagnostics": {
+                "NO_OBSERVED_BOOK_FOR_COIN": 1,
+                "STALE_OR_MISSING_ENTRY_BOOK": 2,
+                "STALE_OR_MISSING_EXIT_BOOK": 3,
+            },
+        }
+    ]
+    campaigns = [
+        _campaign("copy_vault", closed_positions=1, net_pnl_usd=0.75),
+        _campaign("lead_lag"),
+        _campaign("cross_venue_dislocation_v2", closed_positions=20),
+    ]
+
+    plan = build_collection_plan(campaigns, raw, now_ms=123)
+    copy = next(row for row in plan["families"] if row["family"] == "copy_vault")
+
+    assert copy["evidence_state"] == "FUTURE_CAUSAL_BOOK_AND_VAULT_DATA_REQUIRED"
+    assert copy["future_data_required_only"] is True
+    assert copy["progress"]["stale_or_missing_book_rejections_across_grid"] == 6
+    assert copy["progress"]["book_rejections_across_grid"] == {
+        "NO_OBSERVED_BOOK_FOR_COIN": 1,
+        "STALE_OR_MISSING_REFERENCE_BOOK": 0,
+        "STALE_OR_MISSING_ENTRY_BOOK": 2,
+        "STALE_OR_MISSING_EXIT_BOOK": 3,
+        "NON_CAUSAL_FORWARD_BOOK": 0,
+    }
+    assert copy["progress"]["parameters_frozen"] is False
 
 
 def test_write_plan_is_strict_json_and_human_readable(tmp_path: Path) -> None:

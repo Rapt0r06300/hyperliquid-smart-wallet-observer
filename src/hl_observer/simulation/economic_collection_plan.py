@@ -20,6 +20,13 @@ from .economic_objective import CANONICAL_FAMILIES, canonical_family
 SCHEMA_VERSION = "hypersmart.economic_collection_resume.v1"
 STATE_FILENAME = "collection_resume_state.json"
 REPORT_FILENAME = "HYPERSMART_ECONOMIC_COLLECTION_RESUME.md"
+COPY_BOOK_REJECTION_REASONS = (
+    "NO_OBSERVED_BOOK_FOR_COIN",
+    "STALE_OR_MISSING_REFERENCE_BOOK",
+    "STALE_OR_MISSING_ENTRY_BOOK",
+    "STALE_OR_MISSING_EXIT_BOOK",
+    "NON_CAUSAL_FORWARD_BOOK",
+)
 
 
 def _mapping(value: object) -> Mapping[str, Any]:
@@ -60,15 +67,46 @@ def _copy_state(campaign: Mapping[str, Any], raw: Mapping[str, Any]) -> dict[str
     causal = _mapping(raw.get("causal_protocol_audit"))
     calibration = _mapping(raw.get("calibration"))
     grid = calibration.get("grid") if isinstance(calibration.get("grid"), list) else []
-    stale = sum(
-        _integer(_mapping(row).get("diagnostics", {}).get("STALE_OR_MISSING_REFERENCE_BOOK"))
-        for row in grid
-        if isinstance(row, Mapping)
+    book_rejections = {
+        reason: sum(
+            _integer(_mapping(_mapping(row).get("diagnostics")).get(reason))
+            for row in grid
+            if isinstance(row, Mapping)
+        )
+        for reason in COPY_BOOK_REJECTION_REASONS
+    }
+    book_rejection_total = sum(book_rejections.values())
+    train_executable_episodes_max = max(
+        (
+            _integer(_mapping(_mapping(row).get("summary")).get("positions_fermees"))
+            for row in grid
+            if isinstance(row, Mapping)
+        ),
+        default=0,
     )
+    minimum_train_episodes = max(
+        1,
+        _integer(calibration.get("minimum_train_trades")) or 8,
+    )
+    training_selection_eligible = calibration.get("selection_eligible") is True
+    parameters_frozen = bool(
+        campaign.get("parameters_frozen") is True or _freeze(campaign) is not None
+    )
+    causal_metaorders = _integer(causal.get("causal_protocol_metaorders"))
     closed = _integer(campaign.get("closed_positions"))
     schema_ready = raw.get("schema_version") == "hypersmart.copy_vault_executable_campaign.v1"
     objective_met = campaign.get("objective_status") == "ATTEINT"
-    data_only = bool(schema_ready and not objective_met and closed == 0 and stale > 0)
+    data_only = bool(
+        schema_ready
+        and not objective_met
+        and not parameters_frozen
+        and not training_selection_eligible
+        and (
+            causal_metaorders < minimum_train_episodes
+            or train_executable_episodes_max < minimum_train_episodes
+            or book_rejection_total > 0
+        )
+    )
     state = (
         "PROVEN"
         if objective_met
@@ -93,15 +131,18 @@ def _copy_state(campaign: Mapping[str, Any], raw: Mapping[str, Any]) -> dict[str
             ),
             "metaorders": _integer(metaorders.get("metaorders")),
             "historical_metaorders_audit_only": _integer(metaorders.get("all_metaorders")),
-            "causal_protocol_metaorders": _integer(
-                causal.get("causal_protocol_metaorders")
-            ),
+            "causal_protocol_metaorders": causal_metaorders,
             "observed_book_rows": _integer(books.get("valid_rows")),
             "causal_protocol_book_rows": _integer(
                 causal.get("causal_protocol_book_rows")
             ),
             "book_coins": _integer(books.get("coins")),
-            "stale_or_missing_book_rejections_across_grid": stale,
+            "book_rejections_across_grid": book_rejections,
+            "stale_or_missing_book_rejections_across_grid": book_rejection_total,
+            "train_executable_episodes_max": train_executable_episodes_max,
+            "minimum_train_episodes": minimum_train_episodes,
+            "training_selection_eligible": training_selection_eligible,
+            "parameters_frozen": parameters_frozen,
             "closed_liquidatable_episodes": closed,
         },
         "required_collectors": [

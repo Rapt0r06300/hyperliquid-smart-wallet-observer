@@ -667,6 +667,7 @@ def calibrate_train_only(
     return {
         "status": "TRAIN_SELECTED" if selected else "KILL_TRAIN_INSUFFICIENT_EXECUTABLE_EPISODES",
         "selection_eligible": selected is not None,
+        "minimum_train_trades": MIN_TRAIN_TRADES,
         "selected_horizon_ms": selected_horizon,
         "bounds": selected_bounds,
         "grid": grid,
