@@ -14,7 +14,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
 from hl_observer.backtesting import copy_vault_executable, lead_lag_shadow  # noqa: E402
-from hl_observer.ops.superviseur_collecteurs import demarrer_tous  # noqa: E402
+from hl_observer.ops.bounded_collection import start_bounded_collectors  # noqa: E402
 from hl_observer.simulation.economic_campaigns import (  # noqa: E402
     REPORT_DIR,
     build_copy_campaign,
@@ -73,6 +73,8 @@ def run_campaigns(
     cross_current_only: bool = False,
     lead_history_sources: int = lead_lag_shadow.DEFAULT_HISTORY_SOURCES,
     start_collection: bool = True,
+    collection_duration_s: float = 24 * 60 * 60,
+    collection_startup_wait_s: float = 3.0,
 ) -> dict[str, Any]:
     assert_execution_disabled()
     copy_tool = _tool("hypersmart_copy_pipeline", root / "tools" / "pipeline_copie_reel.py")
@@ -289,16 +291,23 @@ def run_campaigns(
     report_path = root / REPORT_DIR / "HYPERSMART_ECONOMIC_OBJECTIVE_CAMPAIGN.md"
     report_path.write_text(markdown, encoding="utf-8", newline="\n")
 
+    raw_reports = {
+        "copy_vault": copy_raw,
+        "lead_lag": lead_raw,
+        "cross_venue_dislocation_v2": cross_raw,
+    }
+    preliminary_plan = build_collection_plan(campaigns, raw_reports)
     collector_state = None
     if start_collection and any(row["objective_status"] != "ATTEINT" for row in campaigns):
-        collector_state = demarrer_tous(root, profil="harvest")
+        collector_state = start_bounded_collectors(
+            root,
+            preliminary_plan["required_collectors"],
+            duration_s=collection_duration_s,
+            startup_wait_s=collection_startup_wait_s,
+        )
     collection_plan = build_collection_plan(
         campaigns,
-        {
-            "copy_vault": copy_raw,
-            "lead_lag": lead_raw,
-            "cross_venue_dislocation_v2": cross_raw,
-        },
+        raw_reports,
         collector_state=collector_state,
     )
     collection_path, collection_report_path = write_collection_plan(root, collection_plan)
@@ -323,6 +332,8 @@ def main(argv: list[str] | None = None) -> int:
         default=lead_lag_shadow.DEFAULT_HISTORY_SOURCES,
     )
     parser.add_argument("--no-start-collection", action="store_true")
+    parser.add_argument("--collection-duration-s", type=float, default=24 * 60 * 60)
+    parser.add_argument("--collection-startup-wait-s", type=float, default=3.0)
     args = parser.parse_args(argv)
     result = run_campaigns(
         Path(args.root).resolve(),
@@ -330,6 +341,8 @@ def main(argv: list[str] | None = None) -> int:
         cross_current_only=args.cross_current_only,
         lead_history_sources=args.lead_history_sources,
         start_collection=not args.no_start_collection,
+        collection_duration_s=args.collection_duration_s,
+        collection_startup_wait_s=args.collection_startup_wait_s,
     )
     for row in result["campaigns"]:
         net = row.get("net_pnl_usd")
