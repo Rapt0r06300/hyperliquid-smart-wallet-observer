@@ -607,18 +607,60 @@ def render_campaign_report(campaigns: Iterable[Mapping[str, Any]]) -> str:
         family = canonical_family(campaign.get("family"))
         status = str(campaign.get("objective_status") or "NON_ATTEINT")
         net = campaign.get("net_pnl_usd")
+        eligible_net = campaign.get("eligible_net_pnl_usd")
         net_text = "NON MESURABLE" if net is None else f"{float(net):+.6f} USD"
+        eligible_text = (
+            "NON ELIGIBLE A LA PREUVE"
+            if eligible_net is None
+            else f"{float(eligible_net):+.6f} USD"
+        )
+        oos = campaign.get("oos") if isinstance(campaign.get("oos"), Mapping) else {}
+        forward = (
+            campaign.get("forward")
+            if isinstance(campaign.get("forward"), Mapping)
+            else {}
+        )
+        placebos = (
+            campaign.get("placebos")
+            if isinstance(campaign.get("placebos"), Mapping)
+            else {}
+        )
+        freeze = (
+            campaign.get("parameter_freeze")
+            if isinstance(campaign.get("parameter_freeze"), Mapping)
+            else {}
+        )
+        datasets = (
+            campaign.get("dataset_provenance")
+            if isinstance(campaign.get("dataset_provenance"), Mapping)
+            else {}
+        )
         lines.extend(
             [
                 f"## {labels.get(family, family)} - OBJECTIF +4 USD : {status}",
                 "",
-                f"- PnL net realise rapporte: {net_text}",
+                f"- PnL net observe (diagnostic): {net_text}",
+                f"- PnL net eligible a la preuve: {eligible_text}",
+                f"- Parametres geles avant evaluation: {campaign.get('parameters_frozen')}",
+                f"- Freeze ID: {freeze.get('campaign_id')}",
+                f"- Dataset SHA-256: {datasets.get('dataset_fingerprint')}",
+                f"- Signaux: {campaign.get('signal_count')}",
                 f"- Positions ouvertes/fermees: {campaign.get('opened_positions')} / {campaign.get('closed_positions')}",
+                f"- PnL brut realise: {campaign.get('gross_pnl_usd')}",
+                f"- Frais entree/sortie: {campaign.get('fees_usd')}",
+                f"- Cout spread: {campaign.get('spread_cost_usd')}",
+                f"- Cout slippage: {campaign.get('slippage_cost_usd')}",
+                f"- Cout latence: {campaign.get('latency_cost_usd')}",
                 f"- LIQUIDATABLE_NET: {campaign.get('liquidatable_net')}",
                 f"- ROI: {campaign.get('roi_pct')}",
                 f"- Drawdown max USD: {campaign.get('max_drawdown_usd')}",
                 f"- Hit rate: {campaign.get('hit_rate')}",
                 f"- Profit factor: {campaign.get('profit_factor')}",
+                f"- Trades uniques / doublons: {campaign.get('trade_ids_count')} / {campaign.get('duplicate_trade_ids')}",
+                f"- Hash des trades: {campaign.get('trade_ids_sha256')}",
+                f"- OOS: n={oos.get('sample_count')} net={oos.get('net_pnl_usd')} no-lookahead={oos.get('no_lookahead')}",
+                f"- Forward post-gel: n={forward.get('sample_count')} net={forward.get('net_pnl_usd')} post-freeze={forward.get('post_freeze')}",
+                f"- Placebo battu: {placebos.get('beaten')}",
                 f"- Raisons: {', '.join(campaign.get('objective_reasons') or [])}",
                 "",
             ]

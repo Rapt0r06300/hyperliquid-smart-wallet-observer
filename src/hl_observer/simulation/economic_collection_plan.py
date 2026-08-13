@@ -426,6 +426,8 @@ def render_collection_plan(plan: Mapping[str, Any]) -> str:
                 f"- Etat de preuve : **{row.get('evidence_state')}**",
                 f"- Pipeline logiciel pret : **{row.get('software_pipeline_ready')}**",
                 f"- Donnees futures uniquement : **{row.get('future_data_required_only')}**",
+                f"- Collecte encore actionnable : **{row.get('collection_actionable')}**",
+                f"- Action methodologique : **{row.get('methodology_action')}**",
                 f"- Progression : `{json.dumps(progress, ensure_ascii=False, sort_keys=True)}`",
                 "- Manque exact : " + "; ".join(row.get("exact_missing_evidence") or []),
                 f"- Condition de relance : {row.get('rerun_condition')}",

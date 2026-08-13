@@ -222,3 +222,4 @@ def test_write_plan_is_strict_json_and_human_readable(tmp_path: Path) -> None:
     assert "NaN" not in state_path.read_text(encoding="utf-8")
     assert "Infinity" not in state_path.read_text(encoding="utf-8")
     assert "HYPOTHESIS_KILLED_OOS" in report_path.read_text(encoding="utf-8")
+    assert "Collecte encore actionnable" in report_path.read_text(encoding="utf-8")

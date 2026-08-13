@@ -402,3 +402,26 @@ def test_markdown_starts_each_family_with_exact_objective_verdict() -> None:
     assert "Lead-Lag - OBJECTIF +4 USD : NON_ATTEINT" in report
     assert "Cross-Venue Dislocation v2 - OBJECTIF +4 USD : NON_ATTEINT" in report
     assert "Carry OFF" in report
+    assert "PnL net eligible a la preuve: NON ELIGIBLE A LA PREUVE" in report
+
+
+def test_markdown_never_presents_provisional_positive_pnl_as_proven() -> None:
+    report = render_campaign_report(
+        [
+            {
+                "family": "copy_vault",
+                "objective_status": "NON_ATTEINT",
+                "objective_reasons": ["PARAMETERS_NOT_FROZEN_BEFORE_EVALUATION"],
+                "net_pnl_usd": 9.0,
+                "eligible_net_pnl_usd": None,
+                "parameters_frozen": False,
+                "oos": {"sample_count": 1, "net_pnl_usd": 9.0, "no_lookahead": True},
+                "forward": {"sample_count": 0, "net_pnl_usd": None},
+                "placebos": {"beaten": True},
+            }
+        ]
+    )
+
+    assert "PnL net observe (diagnostic): +9.000000 USD" in report
+    assert "PnL net eligible a la preuve: NON ELIGIBLE A LA PREUVE" in report
+    assert "OBJECTIF +4 USD : ATTEINT" not in report
