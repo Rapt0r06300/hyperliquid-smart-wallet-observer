@@ -37,11 +37,11 @@ from hl_observer.simulation.economic_campaigns import (  # noqa: E402
     REPORT_DIR,
     build_cross_campaign,
     dataset_provenance,
-    freeze_parameters,
     render_campaign_report,
     write_campaign,
 )
 from hl_observer.simulation.economic_family_scoreboard import export_scoreboards  # noqa: E402
+from hl_observer.simulation.economic_freeze_registry import reuse_or_create_freeze  # noqa: E402
 from hl_observer.simulation.lead_lag_campaign_adapter import (  # noqa: E402
     campaign_from_replay,
     run_ledger as run_lead_lag_ledger,
@@ -227,7 +227,7 @@ def run_campaigns(
 
     def freeze_copy(parameters: dict[str, Any]) -> None:
         nonlocal copy_freeze
-        copy_freeze = freeze_parameters(root, "copy_vault", parameters, copy_data)
+        copy_freeze = reuse_or_create_freeze(root, "copy_vault", parameters, copy_data)
 
     copy_raw = copy_tool.construire(
         root,
@@ -272,7 +272,7 @@ def run_campaigns(
         "loader_time_budget_s": float(lead_budget_s),
         "selection_rule": "FIXED_PRE_EVALUATION",
     }
-    lead_freeze = freeze_parameters(root, "lead_lag", lead_params, lead_data)
+    lead_freeze = reuse_or_create_freeze(root, "lead_lag", lead_params, lead_data)
     lead_tape, lead_loader_meta = load_multitape(
         root,
         max_lines=max(0, int(lead_max_lines)),
@@ -319,7 +319,12 @@ def run_campaigns(
         "depth_freshness_ms": DEFAULT_DEPTH_FRESHNESS_MS,
         "depth_rule": "AT_OR_BEFORE_ENTRY_AND_EXIT_TOP_CAPACITY",
     }
-    cross_freeze = freeze_parameters(root, "cross_venue_dislocation_v2", cross_params, cross_data)
+    cross_freeze = reuse_or_create_freeze(
+        root,
+        "cross_venue_dislocation_v2",
+        cross_params,
+        cross_data,
+    )
     series = cross_tool.collecter_series(
         root,
         budget_s=max(0.0, cross_budget_s),
