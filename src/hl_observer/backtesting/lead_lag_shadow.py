@@ -36,12 +36,13 @@ from hl_observer.backtesting.lead_lag_evidence import (
 )
 from hl_observer.backtesting.quant_methods import block_bootstrap
 from hl_observer.backtesting.robustesse_selection import pbo_cscv
+from hl_observer.config.frais_venues import frais_taker_bps
 
 TAPE = Path("runtime") / "data" / "bbo_tape.jsonl"
 CONFIG_GELE = Path("runtime") / "data" / "lead_lag_config_gele.json"
 GLOBAL_TRIAL_LEDGER = Path("runtime") / "research_lab" / "ledgers" / "global_trials.jsonl"
 SEUIL_CHOC_BPS = 8.0
-FRAIS_SLIPPAGE_BPS = 6.0
+FRAIS_SLIPPAGE_BPS = 2.0 * frais_taker_bps("HYPERLIQUID")
 HORIZONS_MS = (50.0, 100.0, 250.0, 500.0, 1000.0)
 MIN_CHOCS = 30
 N_PERIODES = 4                     # pour juger la stabilité dans le temps
@@ -111,7 +112,16 @@ def _dedupe_key(row: dict[str, Any], timestamp_ns: int) -> tuple[Any, ...]:
     coin = str(row.get("coin") or "").upper()
     if venue == "BIN_TRADE":
         return (venue, coin, timestamp_ns, row.get("px"), row.get("side"), row.get("sz"))
-    return (venue, coin, timestamp_ns, row.get("bid"), row.get("ask"), row.get("mid"))
+    return (
+        venue,
+        coin,
+        timestamp_ns,
+        row.get("bid"),
+        row.get("ask"),
+        row.get("mid"),
+        row.get("bid_sz", row.get("bid_size")),
+        row.get("ask_sz", row.get("ask_size")),
+    )
 
 
 def charger_tape(
@@ -178,6 +188,8 @@ def charger_tape(
                             mid,
                             _flt(d.get("bid")) or mid,
                             _flt(d.get("ask")) or mid,
+                            _positive_or_none(d.get("bid_sz", d.get("bid_size"))),
+                            _positive_or_none(d.get("ask_sz", d.get("ask_size"))),
                         )
                     )
             else:
@@ -208,6 +220,11 @@ def _flt(x):
         return float(x)
     except (TypeError, ValueError):
         return None
+
+
+def _positive_or_none(value: Any) -> float | None:
+    parsed = _flt(value)
+    return parsed if parsed is not None and parsed > 0 else None
 
 
 def distribution_intervalles(evenements: list) -> dict[str, float]:
@@ -254,31 +271,135 @@ def detecter_chocs(trades: list, *, seuil_bps: float,
 
 
 def _hl_a(hl: list, t_ns: int) -> tuple | None:
+    """Last quote at-or-before ``t_ns`` (diagnostics only)."""
+
     i = bisect.bisect_right([e[0] for e in hl], t_ns) - 1
     return hl[i] if i >= 0 else None
 
 
-def net_par_horizon(hl: list, chocs: list, *, frais_slippage_bps: float,
-                    horizons_ms) -> dict[float, list[tuple[float, float]]]:
-    """Pour chaque choc, (net_bps, capacité_usd) forward HL par horizon. ENTRÉE au côté cher, SORTIE au
-    côté défavorable (bid/ask HL RÉELS des deux côtés — le spread est payé aller ET retour, pas modélisé
-    par un forfait). Cœur PUR (testable)."""
-    out: dict[float, list] = {h: [] for h in horizons_ms}
+def _hl_apres(hl: list, t_ns: int, *, timestamps: list[int] | None = None) -> tuple | None:
+    """Return the first quote observable at-or-after ``t_ns``."""
+
+    times = timestamps if timestamps is not None else [event[0] for event in hl]
+    index = bisect.bisect_left(times, t_ns)
+    return hl[index] if index < len(hl) else None
+
+
+def _top_capacity_usd(quote: tuple, *, side: str) -> float | None:
+    if len(quote) < 6:
+        return None
+    if side == "BUY":
+        price, size = _flt(quote[3]), _positive_or_none(quote[5])
+    else:
+        price, size = _flt(quote[2]), _positive_or_none(quote[4])
+    if price is None or size is None:
+        return None
+    return price * size
+
+
+def episodes_par_horizon(
+    hl: list,
+    chocs: list,
+    *,
+    frais_slippage_bps: float,
+    horizons_ms,
+    coin: str = "",
+    notional_usd: float = 25.0,
+) -> dict[float, list[dict[str, Any]]]:
+    """Build causal closed paper episodes from marketable HL quotes.
+
+    Quotes without top sizes remain valid for directional research, but they
+    are explicitly non-liquidatable and cannot certify an economic result.
+    """
+
+    out: dict[float, list[dict[str, Any]]] = {h: [] for h in horizons_ms}
+    if not hl:
+        return out
+    times = [event[0] for event in hl]
+    requested = max(0.0, float(notional_usd))
     for t0, direction in chocs:
-        e0 = _hl_a(hl, t0)
-        if e0 is None:
+        entry = _hl_apres(hl, t0, timestamps=times)
+        if entry is None:
             continue
-        entree = e0[3] if direction > 0 else e0[2]             # long -> on paie l'ASK ; short -> le BID
-        if entree <= 0:
+        entry_price = entry[3] if direction > 0 else entry[2]
+        entry_side = "BUY" if direction > 0 else "SELL"
+        exit_side = "SELL" if direction > 0 else "BUY"
+        if entry_price <= 0:
             continue
-        for h in horizons_ms:
-            eh = _hl_a(hl, t0 + int(h * 1e6))
-            if eh is None or eh[0] <= e0[0]:
+        entry_capacity = _top_capacity_usd(entry, side=entry_side)
+        for horizon in horizons_ms:
+            target_ns = t0 + int(float(horizon) * 1e6)
+            if entry[0] > target_ns:
                 continue
-            sortie = eh[2] if direction > 0 else eh[3]         # long -> on sort au BID ; short -> à l'ASK
-            net = (sortie - entree) / entree * 1e4 * direction - frais_slippage_bps
-            out[h].append((net, e0[2]))                        # capacité proxy = prix (taille au top ailleurs)
+            exit_quote = _hl_apres(hl, target_ns, timestamps=times)
+            if exit_quote is None or exit_quote[0] <= entry[0]:
+                continue
+            exit_price = exit_quote[2] if direction > 0 else exit_quote[3]
+            if exit_price <= 0:
+                continue
+            exit_capacity = _top_capacity_usd(exit_quote, side=exit_side)
+            capacity = (
+                min(entry_capacity, exit_capacity)
+                if entry_capacity is not None and exit_capacity is not None
+                else None
+            )
+            liquidatable = capacity is not None and requested > 0 and capacity >= requested
+            net_bps = (
+                (exit_price - entry_price) / entry_price * 1e4 * direction
+                - float(frais_slippage_bps)
+            )
+            identity = "|".join(
+                (
+                    str(coin).upper(),
+                    str(t0),
+                    f"{float(horizon):g}",
+                    f"{float(direction):g}",
+                    str(entry[0]),
+                    str(exit_quote[0]),
+                )
+            )
+            out[horizon].append(
+                {
+                    "episode_id": hashlib.sha256(identity.encode("utf-8")).hexdigest(),
+                    "coin": str(coin).upper() or None,
+                    "direction": "LONG" if direction > 0 else "SHORT",
+                    "signal_ts_ns": int(t0),
+                    "entry_ts_ns": int(entry[0]),
+                    "exit_ts_ns": int(exit_quote[0]),
+                    "horizon_ms": float(horizon),
+                    "entry_latency_ms": round((entry[0] - t0) / 1e6, 6),
+                    "exit_observation_lag_ms": round((exit_quote[0] - target_ns) / 1e6, 6),
+                    "entry_price": float(entry_price),
+                    "exit_price": float(exit_price),
+                    "entry_side": entry_side,
+                    "exit_side": exit_side,
+                    "configured_round_trip_cost_bps": float(frais_slippage_bps),
+                    "net_bps": float(net_bps),
+                    "requested_notional_usd": requested,
+                    "top_capacity_usd": capacity,
+                    "liquidatable_net": liquidatable,
+                    "closed": True,
+                    "real_execution": False,
+                    "paper_read_only": True,
+                }
+            )
     return out
+
+
+def net_par_horizon(hl: list, chocs: list, *, frais_slippage_bps: float,
+                    horizons_ms) -> dict[float, list[tuple[float, float | None]]]:
+    """Project causal episodes as ``(net_bps, measured_top_capacity_usd)``."""
+
+    episodes = episodes_par_horizon(
+        hl,
+        chocs,
+        frais_slippage_bps=frais_slippage_bps,
+        horizons_ms=horizons_ms,
+    )
+    return {
+        horizon: [(row["net_bps"], row["top_capacity_usd"]) for row in rows]
+        for horizon, rows in episodes.items()
+    }
 
 
 def _metriques(nets: list[float], *, n_periodes: int) -> dict[str, Any]:
@@ -364,7 +485,7 @@ def backtest(root: str | Path = ".", *, seuil_choc_bps: float = SEUIL_CHOC_BPS,
         if coin not in controle:
             test_event_times.extend(t0 for t0, _direction in chocs)
             for h in horizons:
-                cap.extend(x[1] for x in nets[h])
+                cap.extend(x[1] for x in nets[h] if x[1] is not None)
             rng = random.Random(20260723)                      # placebo REPRODUCTIBLE : mêmes t0, sens aléatoire
             faux = [(t0, 1.0 if rng.random() > 0.5 else -1.0) for t0, _ in chocs]
             netpl = net_par_horizon(ev["HL"], faux, frais_slippage_bps=frais_slippage_bps, horizons_ms=horizons)
@@ -408,6 +529,7 @@ def backtest(root: str | Path = ".", *, seuil_choc_bps: float = SEUIL_CHOC_BPS,
             "chocs_test": n_test,
             "intervalles_hl": dist, "horizons_observables": horizons,
             "capacite_mediane_usd": round(st.median(cap), 2) if cap else None,
+            "capacity_status": "MEASURED_TOP_OF_BOOK" if cap else "UNMEASURABLE_NO_TOP_SIZES",
             "net_par_horizon": par_h, "controle_par_horizon": ctrl_h, "placebo_par_horizon": plac_h,
             "dsr_par_horizon": dsr_h,
             "pbo": pbo,

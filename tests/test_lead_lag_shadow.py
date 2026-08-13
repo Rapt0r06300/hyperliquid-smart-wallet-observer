@@ -22,6 +22,7 @@ from hl_observer.backtesting.lead_lag_shadow import (
     distribution_intervalles,
     geler_config,
     horizons_observables,
+    episodes_par_horizon,
     net_par_horizon,
     selectionner_sources,
 )
@@ -42,11 +43,50 @@ def test_detecter_chocs_sur_les_trades():
     assert len(chocs) == 1 and chocs[0][1] == 1.0                     # un seul choc, direction +
 
 
-def test_net_par_horizon_paie_le_demi_spread_reel_et_rend_la_capacite():
-    hl = [(5_000_000, 100.0, 99.99, 100.01), (110_000_000, 100.4, 100.39, 100.41)]
+def test_net_par_horizon_est_causal_et_mesure_la_capacite_top_of_book():
+    hl = [
+        (5_000_000, 100.0, 99.99, 100.01, 2.0, 2.0),
+        (15_000_000, 100.0, 99.99, 100.01, 2.0, 2.0),
+        (110_000_000, 100.4, 100.39, 100.41, 2.0, 2.0),
+    ]
     r = net_par_horizon(hl, [(10_000_000, 1.0)], frais_slippage_bps=6.0, horizons_ms=[100.0])
     net, cap = r[100.0][0]
-    assert 30.0 < net < 34.0 and cap == 99.99                        # réaction 40 − (2×1 + 6) = 32
+    assert 30.0 < net < 34.0
+    assert cap == pytest.approx(200.02)
+
+
+def test_episode_refuse_la_fausse_capacite_si_taille_bbo_absente():
+    hl = [
+        (15_000_000, 100.0, 99.99, 100.01),
+        (110_000_000, 100.4, 100.39, 100.41),
+    ]
+    rows = episodes_par_horizon(
+        hl,
+        [(10_000_000, 1.0)],
+        frais_slippage_bps=6.0,
+        horizons_ms=[100.0],
+        coin="ETH",
+    )[100.0]
+    assert len(rows) == 1
+    assert rows[0]["entry_ts_ns"] >= rows[0]["signal_ts_ns"]
+    assert rows[0]["top_capacity_usd"] is None
+    assert rows[0]["liquidatable_net"] is False
+
+
+def test_episode_ne_peut_pas_entrer_sur_la_cotation_pre_signal():
+    hl = [
+        (5_000_000, 100.0, 99.99, 100.01, 2.0, 2.0),
+        (20_000_000, 101.0, 100.99, 101.01, 2.0, 2.0),
+        (110_000_000, 101.4, 101.39, 101.41, 2.0, 2.0),
+    ]
+    row = episodes_par_horizon(
+        hl,
+        [(10_000_000, 1.0)],
+        frais_slippage_bps=6.0,
+        horizons_ms=[100.0],
+    )[100.0][0]
+    assert row["entry_ts_ns"] == 20_000_000
+    assert row["entry_price"] == 101.01
 
 
 def _rows(n_chocs):
@@ -63,7 +103,8 @@ def _rows(n_chocs):
         for j in range(21):                                          # HL dense : 1 tick / 10 ms
             mid = px if j * 10 < 110 else px_hl
             rows.append({"venue": "HL", "coin": "ETH", "recu_ns": base + j * 10_000_000,
-                         "mid": mid, "bid": mid * 0.9999, "ask": mid * 1.0001})
+                         "mid": mid, "bid": mid * 0.9999, "ask": mid * 1.0001,
+                         "bid_sz": 10.0, "ask_sz": 10.0})
         px = px_haut                                                  # CONTINU : le bloc suivant repart d'ici
     return rows
 
