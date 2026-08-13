@@ -24,6 +24,11 @@ sys.path.insert(0, str(RACINE / "tools"))
 
 from hl_observer.collection import userfills_live as UL  # noqa: E402
 from hl_observer.collection import verrou_instance as VI  # noqa: E402
+from hl_observer.backtesting.copy_vault_executable import (  # noqa: E402
+    COPY_DELAY_MS as COPY_VAULT_DELAY_MS,
+    HORIZONS_MS as COPY_VAULT_HORIZONS_MS,
+    MAX_TARGET_LAG_MS as COPY_VAULT_MAX_TARGET_LAG_MS,
+)
 from hl_observer.experimental import cohortes as CO  # noqa: E402
 from hl_observer.market_data.live_l2_service import (  # noqa: E402
     LiveL2Snapshot,
@@ -273,6 +278,10 @@ def _append_copy_vault_book(
     *,
     received_at_ms: int,
     sample_interval_ms: int = 1_000,
+    source: str = "HYPERLIQUID_L2_WS",
+    checkpoint_stage: str | None = None,
+    checkpoint_target_ms: int | None = None,
+    checkpoint_id: str | None = None,
 ) -> bool:
     """Persist one causal observed L2 sample for executable forward replay."""
 
@@ -286,11 +295,17 @@ def _append_copy_vault_book(
         asks = [[float(row[0]), float(row[1])] for row in resume["asks5"][:5]]
     except (KeyError, IndexError, TypeError, ValueError, OverflowError):
         return False
+    allowed_sources = {
+        "HYPERLIQUID_L2_WS",
+        "HYPERLIQUID_INFO_L2BOOK_CAUSAL_CHECKPOINT",
+    }
     if (
         not symbol
+        or source not in allowed_sources
         or received <= 0
         or exchange_ts <= 0
         or received < exchange_ts
+        or received - exchange_ts > COPY_VAULT_MAX_TARGET_LAG_MS
         or bid <= 0
         or ask <= bid
         or not bids
@@ -299,7 +314,11 @@ def _append_copy_vault_book(
     ):
         return False
     previous = _COPY_VAULT_LAST_SAMPLE_MS.get(symbol)
-    if previous is not None and received - previous < max(1, int(sample_interval_ms)):
+    if (
+        not checkpoint_id
+        and previous is not None
+        and received - previous < max(0, int(sample_interval_ms))
+    ):
         return False
     capacity_usd = min(
         sum(px * size for px, size in bids),
@@ -317,21 +336,27 @@ def _append_copy_vault_book(
         "bids5": bids,
         "asks5": asks,
         "capacity_usd": capacity_usd,
-        "source": "HYPERLIQUID_L2_WS",
+        "source": source,
         "data_origin": "REAL_OBSERVED",
         "causal_observation": True,
         "paper_read_only": True,
         "real_execution": False,
     }
+    if checkpoint_stage:
+        row["checkpoint_stage"] = str(checkpoint_stage)
+    if checkpoint_target_ms is not None:
+        row["checkpoint_target_ms"] = int(checkpoint_target_ms)
+    if checkpoint_id:
+        row["checkpoint_id"] = str(checkpoint_id)
     path = Path(root) / COPY_VAULT_L2_TAPE
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("a", encoding="utf-8") as handle:
         handle.write(json.dumps(row, ensure_ascii=False) + "\n")
-    _COPY_VAULT_LAST_SAMPLE_MS[symbol] = received
+    _COPY_VAULT_LAST_SAMPLE_MS[symbol] = max(int(previous or 0), received)
     return True
 
 
-def _lecteur_l2_ondemand(coin: str) -> dict | None:
+def _lecteur_l2_ondemand(coin: str, *, force_refresh: bool = False) -> dict | None:
     """L2 HL FRAIS (<1 s) pour `coin`, à la demande (POST public l2Book). Rend
     {hl_bid, hl_ask, depth_usd, age_ms} ou None. Cache court pour ne pas marteler l'API."""
     global _L2_POST, _L2_PARSE
@@ -339,7 +364,7 @@ def _lecteur_l2_ondemand(coin: str) -> dict | None:
         return None
     now = time.monotonic()
     hit = _L2_CACHE.get(coin)
-    if hit is not None and (now - hit[0]) < _L2_TTL_S:
+    if not force_refresh and hit is not None and (now - hit[0]) < _L2_TTL_S:
         return hit[1]
     if _L2_POST is None:
         try:
@@ -377,6 +402,30 @@ def _lecteur_l2_ondemand(coin: str) -> dict | None:
     }
     _L2_CACHE[coin] = (now, d)
     return d
+
+
+def _resume_from_info_checkpoint(info: dict | None) -> dict | None:
+    """Convert one actually received public /info l2Book into tape shape."""
+
+    if not info:
+        return None
+    try:
+        bid = float(info["hl_bid"])
+        ask = float(info["hl_ask"])
+        exchange_ts = int(info["exchange_ts_ms"])
+        bids = [[float(px), float(size), 1] for px, size in info["bids"][:5]]
+        asks = [[float(px), float(size), 1] for px, size in info["asks"][:5]]
+    except (KeyError, TypeError, ValueError, OverflowError):
+        return None
+    if bid <= 0 or ask <= bid or not bids or not asks:
+        return None
+    return {
+        "bid": bid,
+        "ask": ask,
+        "book_exchange_time": exchange_ts,
+        "bids5": bids,
+        "asks5": asks,
+    }
 
 
 # ── L2 DYNAMIQUE WS (rectif Flo 24/07) : pour chaque coin à position RAW ouverte, on s'abonne RÉELLEMENT au
@@ -832,7 +881,11 @@ _TAPE_PREWARM_COINS: set[str] = set()        # coins réels récents suivis avan
 _TAPE_BUFFER: dict = {}                      # coin -> list[{recv_mono, resume}] (snapshots successifs)
 _COPY_VAULT_LAST_SAMPLE_MS: dict[str, int] = {}
 TAPE_BUFFER_MAX = 400
-TAPE_COIN_TTL_MS = 360_000.0                # coin abonné jusqu'à horizon(5 min)+marge après le dernier fill
+TAPE_COIN_TTL_MS = float(                    # shortest executable episode + allowed observation lag
+    COPY_VAULT_DELAY_MS
+    + min(COPY_VAULT_HORIZONS_MS)
+    + COPY_VAULT_MAX_TARGET_LAG_MS
+)
 TAPE_PREWARM_MAX_COINS = 24                  # borne de collecte, tres inferieure au plafond WS Hyperliquid
 TAPE_PREWARM_RECENT_WINDOW_MS = 21_600_000.0 # activite reelle des 6 dernieres heures uniquement
 TAPE_PREWARM_REFRESH_S = 15.0                # suit les rotations de coins sans redemarrage
@@ -990,6 +1043,157 @@ async def _refresh_copy_vault_prewarm_periodically(
         await asyncio.sleep(max(1.0, float(intervalle_s)))
 
 
+def _first_ws_checkpoint(
+    buffer: list[dict],
+    *,
+    target_mono_ms: float,
+    target_wall_ms: int,
+    max_lag_ms: int = COPY_VAULT_MAX_TARGET_LAG_MS,
+) -> dict | None:
+    """Return the first genuinely received WS book inside the causal window."""
+
+    for event in buffer:
+        try:
+            recv_mono = float(event["recv_mono"])
+            recv_wall = int(event["recv_wall_ms"])
+            resume = event["resume"]
+            exchange_ts = int(resume["book_exchange_time"])
+        except (KeyError, TypeError, ValueError, OverflowError):
+            continue
+        if recv_mono < float(target_mono_ms):
+            continue
+        if recv_mono - float(target_mono_ms) > int(max_lag_ms):
+            return None
+        if not (0 <= recv_wall - int(target_wall_ms) <= int(max_lag_ms)):
+            continue
+        if not (0 < exchange_ts <= recv_wall and recv_wall - exchange_ts <= int(max_lag_ms)):
+            continue
+        return event
+    return None
+
+
+def _new_metaorder_checkpoints(fill: dict, *, recv_mono_ms: float, metaorder_id: str) -> list[dict]:
+    """Build reference/entry checkpoints from one live first slice."""
+
+    try:
+        coin = str(fill["coin"]).upper().strip()
+        recv_wall_ms = int(fill["received_at_ms"])
+    except (KeyError, TypeError, ValueError, OverflowError):
+        return []
+    if not coin or recv_wall_ms <= 0 or not metaorder_id:
+        return []
+    base = {
+        "coin": coin,
+        "metaorder_id": str(metaorder_id),
+        "attempts": 0,
+    }
+    return [
+        {
+            **base,
+            "stage": "REFERENCE",
+            "checkpoint_id": f"{metaorder_id}:REFERENCE",
+            "target_mono_ms": float(recv_mono_ms),
+            "target_wall_ms": recv_wall_ms,
+        },
+        {
+            **base,
+            "stage": "ENTRY",
+            "checkpoint_id": f"{metaorder_id}:ENTRY",
+            "target_mono_ms": float(recv_mono_ms) + COPY_VAULT_DELAY_MS,
+            "target_wall_ms": recv_wall_ms + COPY_VAULT_DELAY_MS,
+        },
+    ]
+
+
+def _exit_metaorder_checkpoints(entry: dict) -> list[dict]:
+    """Schedule candidate exits from the actually captured entry instant."""
+
+    return [
+        {
+            "coin": entry["coin"],
+            "metaorder_id": entry["metaorder_id"],
+            "stage": f"EXIT_{int(horizon_ms)}",
+            "checkpoint_id": f"{entry['metaorder_id']}:EXIT:{int(horizon_ms)}",
+            "target_mono_ms": float(entry["captured_mono_ms"]) + int(horizon_ms),
+            "target_wall_ms": int(entry["captured_wall_ms"]) + int(horizon_ms),
+            "attempts": 0,
+        }
+        for horizon_ms in COPY_VAULT_HORIZONS_MS
+    ]
+
+
+async def _capture_copy_vault_checkpoint(root: Path, checkpoint: dict) -> dict:
+    """Capture a causal real book from WS, falling back to public /info.
+
+    No historical lookup and no interpolation are allowed. The REST fallback
+    is performed only after the target instant and within the same bounded lag
+    accepted by the executable replay.
+    """
+
+    now_mono = time.monotonic() * 1_000
+    target_mono = float(checkpoint["target_mono_ms"])
+    target_wall = int(checkpoint["target_wall_ms"])
+    if now_mono < target_mono:
+        return {"status": "NOT_DUE"}
+    if now_mono - target_mono > COPY_VAULT_MAX_TARGET_LAG_MS:
+        return {"status": "EXPIRED"}
+    coin = str(checkpoint["coin"]).upper()
+    ws_event = _first_ws_checkpoint(
+        _TAPE_BUFFER.get(coin, []),
+        target_mono_ms=target_mono,
+        target_wall_ms=target_wall,
+    )
+    if ws_event is not None:
+        stored = _append_copy_vault_book(
+            root,
+            coin,
+            ws_event["resume"],
+            received_at_ms=int(ws_event["recv_wall_ms"]),
+            sample_interval_ms=0,
+            source="HYPERLIQUID_L2_WS",
+            checkpoint_stage=str(checkpoint["stage"]),
+            checkpoint_target_ms=target_wall,
+            checkpoint_id=str(checkpoint["checkpoint_id"]),
+        )
+        if stored:
+            return {
+                **checkpoint,
+                "status": "CAPTURED_WS",
+                "captured_mono_ms": float(ws_event["recv_mono"]),
+                "captured_wall_ms": int(ws_event["recv_wall_ms"]),
+            }
+
+    info = await asyncio.to_thread(_lecteur_l2_ondemand, coin, force_refresh=True)
+    resume = _resume_from_info_checkpoint(info)
+    if resume is None:
+        return {"status": "RETRY_NO_BOOK"}
+    try:
+        received = int(info["received_ts_ms"])
+    except (KeyError, TypeError, ValueError, OverflowError):
+        return {"status": "RETRY_NO_RECEIVE_TIME"}
+    if not (0 <= received - target_wall <= COPY_VAULT_MAX_TARGET_LAG_MS):
+        return {"status": "EXPIRED" if received > target_wall else "RETRY_CLOCK_SKEW"}
+    stored = _append_copy_vault_book(
+        root,
+        coin,
+        resume,
+        received_at_ms=received,
+        sample_interval_ms=0,
+        source="HYPERLIQUID_INFO_L2BOOK_CAUSAL_CHECKPOINT",
+        checkpoint_stage=str(checkpoint["stage"]),
+        checkpoint_target_ms=target_wall,
+        checkpoint_id=str(checkpoint["checkpoint_id"]),
+    )
+    if not stored:
+        return {"status": "RETRY_STORE_REJECTED"}
+    return {
+        **checkpoint,
+        "status": "CAPTURED_INFO",
+        "captured_mono_ms": time.monotonic() * 1_000,
+        "captured_wall_ms": received,
+    }
+
+
 async def _tape_l2_buffer(root: Path, *, sync_s: float = 0.5) -> None:
     """Abonne au l2Book WS les coins à métaordre ACTIF (dès le 1er fill = FIRST_SLICE) et BUFFERISE des
     snapshots HORODATÉS (réception MONOTONE) → base du VRAI OFI (variations successives). 1 connexion WS
@@ -1057,6 +1261,8 @@ async def _tape_consumer(root: Path, *, horizon_ms: float = 300_000.0, post_wind
     from hl_observer.experimental import metaorder_l2_tape as T
     en_attente: list = []
     exits: list = []
+    checkpoints: list = []
+    checkpointed_metaorders: dict[str, float] = {}
     meta_etat: dict = {}                                          # (vault,coin) -> métaordre live (id/sens/last_ft)
     await asyncio.sleep(15.0)
     while True:
@@ -1077,12 +1283,47 @@ async def _tape_consumer(root: Path, *, horizon_ms: float = 300_000.0, post_wind
                 entree = T.etat_entree(buf, it["frm"], it["fill"].get("ts_ms"))
                 posts = T.etats_post(buf, entree["recv_mono"], n=3) if entree else []
                 mo, stade = T.stade_live(meta_etat, it["fill"])
+                if stade in {"FIRST_SLICE", "REVERSAL"} and mo not in checkpointed_metaorders:
+                    checkpoints.extend(
+                        _new_metaorder_checkpoints(
+                            it["fill"], recv_mono_ms=it["frm"], metaorder_id=mo,
+                        )
+                    )
+                    checkpointed_metaorders[mo] = mono
                 l = T.ligne_fill(it["fill"], metaorder_id=mo, stade=stade, pre=pre, entree=entree,
                                  posts=posts, fill_recv_mono=it["frm"])
                 if l:
                     lignes.append(l)
                     exits.append({"fill": it["fill"], "frm": it["frm"], "due": it["frm"] + horizon_ms})
             en_attente = reste
+            remaining_checkpoints: list = []
+            new_exit_checkpoints: list = []
+            for checkpoint in checkpoints:
+                if mono < float(checkpoint["target_mono_ms"]):
+                    remaining_checkpoints.append(checkpoint)
+                    continue
+                result = await _capture_copy_vault_checkpoint(root, checkpoint)
+                status = str(result.get("status") or "")
+                if status.startswith("CAPTURED_"):
+                    if checkpoint["stage"] == "ENTRY":
+                        new_exit_checkpoints.extend(_exit_metaorder_checkpoints(result))
+                    continue
+                if status in {
+                    "NOT_DUE", "RETRY_NO_BOOK", "RETRY_NO_RECEIVE_TIME",
+                    "RETRY_CLOCK_SKEW", "RETRY_STORE_REJECTED",
+                }:
+                    checkpoint["attempts"] = int(checkpoint.get("attempts") or 0) + 1
+                    if mono - float(checkpoint["target_mono_ms"]) <= COPY_VAULT_MAX_TARGET_LAG_MS:
+                        remaining_checkpoints.append(checkpoint)
+            checkpoints = remaining_checkpoints + new_exit_checkpoints
+            checkpoint_retention_ms = (
+                COPY_VAULT_DELAY_MS
+                + max(COPY_VAULT_HORIZONS_MS)
+                + COPY_VAULT_MAX_TARGET_LAG_MS
+            )
+            for metaorder_id, registered_mono in list(checkpointed_metaorders.items()):
+                if mono - registered_mono > checkpoint_retention_ms:
+                    checkpointed_metaorders.pop(metaorder_id, None)
             reste_ex: list = []
             for ex in exits:
                 if mono < ex["due"]:

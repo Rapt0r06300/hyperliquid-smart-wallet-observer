@@ -19,7 +19,7 @@ from typing import Any
 from hl_observer.config.frais_venues import frais_taker_bps
 
 SCHEMA_VERSION = "hypersmart.copy_vault_executable.v1"
-PROTOCOL_NAME = "copy_vault_executable_walk_forward_v5_causal_horizon_purge"
+PROTOCOL_NAME = "copy_vault_executable_walk_forward_v6_causal_checkpoints"
 METAORDER_GAP_MS = 60_000
 COPY_DELAY_MS = 60_000
 MAX_REFERENCE_LAG_MS = 30_000
@@ -43,7 +43,10 @@ def protocol_signature() -> dict[str, Any]:
         "notional_usd": NOTIONAL_USD,
         "max_open_positions": MAX_OPEN_POSITIONS,
         "fee_source": "hl_observer.config.frais_venues:frais_taker_bps(HL)",
-        "book_source": "runtime/data/copy_vault_l2_tape.jsonl:HYPERLIQUID_L2_WS_causal",
+        "book_source": (
+            "runtime/data/copy_vault_l2_tape.jsonl:"
+            "HYPERLIQUID_L2_WS_or_INFO_L2BOOK_causal"
+        ),
         "fill_source": "LIVE_WS_non_snapshot_with_receive_time_for_all_protocol_segments",
         "historical_source_policy": "REST_BACKFILL_and_historical_books_audit_only",
         "causal_observation_required_all_segments": True,
@@ -200,7 +203,11 @@ def load_observed_books(
     rows_read = 0
     duplicate_rows = 0
     seen: set[tuple[Any, ...]] = set()
-    source_counts: dict[str, int] = {"historical_observed": 0, "causal_ws": 0}
+    source_counts: dict[str, int] = {
+        "historical_observed": 0,
+        "causal_ws": 0,
+        "causal_info_checkpoint": 0,
+    }
 
     def add_row(
         *, coin: str, ts_ms: int, bid: float, ask: float, capacity_usd: float,
@@ -225,7 +232,12 @@ def load_observed_books(
             "source_line": source_line,
             "causal_observation": causal_observation,
         })
-        source_counts["causal_ws" if causal_observation else "historical_observed"] += 1
+        if not causal_observation:
+            source_counts["historical_observed"] += 1
+        elif source == "HYPERLIQUID_INFO_L2BOOK_CAUSAL_CHECKPOINT":
+            source_counts["causal_info_checkpoint"] += 1
+        else:
+            source_counts["causal_ws"] += 1
 
     if path.is_file():
         with path.open("r", encoding="utf-8", errors="ignore") as handle:
@@ -259,12 +271,17 @@ def load_observed_books(
                         continue
                     received = int(raw["received_at_ms"])
                     exchange_ts = int(raw["exchange_ts_ms"])
+                    allowed_source = raw.get("source") in {
+                        "HYPERLIQUID_L2_WS",
+                        "HYPERLIQUID_INFO_L2BOOK_CAUSAL_CHECKPOINT",
+                    }
                     causal = (
                         raw.get("schema_version") == "hypersmart.copy_vault_l2.v1"
-                        and raw.get("source") == "HYPERLIQUID_L2_WS"
+                        and allowed_source
                         and raw.get("data_origin") == "REAL_OBSERVED"
                         and raw.get("causal_observation") is True
                         and received >= exchange_ts > 0
+                        and received - exchange_ts <= MAX_TARGET_LAG_MS
                     )
                     if not causal:
                         invalid += 1
@@ -275,7 +292,7 @@ def load_observed_books(
                         bid=float(raw["bid"]),
                         ask=float(raw["ask"]),
                         capacity_usd=float(raw["capacity_usd"]),
-                        source=causal_relative_path,
+                        source=str(raw["source"]),
                         source_line=line_number,
                         causal_observation=True,
                     )
@@ -293,7 +310,9 @@ def load_observed_books(
         "duplicate_rows_rejected": duplicate_rows,
         "coins": len(by_coin),
         "source_counts": source_counts,
-        "causal_forward_rows": source_counts["causal_ws"],
+        "causal_forward_rows": (
+            source_counts["causal_ws"] + source_counts["causal_info_checkpoint"]
+        ),
         "capacity_semantics": "minimum_USD_across_HL_and_reference_venue_bid_ask",
     }
 

@@ -154,7 +154,53 @@ def test_loader_separe_historique_et_tape_ws_causale(tmp_path) -> None:
 
     assert [row["causal_observation"] for row in books["BTC"]] == [False, True]
     assert books["BTC"][1]["ts_ms"] == 2_010
-    assert audit["source_counts"] == {"historical_observed": 1, "causal_ws": 1}
+    assert audit["source_counts"] == {
+        "historical_observed": 1,
+        "causal_ws": 1,
+        "causal_info_checkpoint": 0,
+    }
+
+
+def test_loader_accepte_checkpoint_info_causal_frais(tmp_path) -> None:
+    data = tmp_path / "runtime" / "data"
+    data.mkdir(parents=True)
+    row = {
+        "schema_version": "hypersmart.copy_vault_l2.v1",
+        "coin": "BTC", "received_at_ms": 2_010, "exchange_ts_ms": 2_000,
+        "bid": 100.0, "ask": 102.0, "capacity_usd": 700.0,
+        "source": "HYPERLIQUID_INFO_L2BOOK_CAUSAL_CHECKPOINT",
+        "data_origin": "REAL_OBSERVED", "causal_observation": True,
+        "checkpoint_stage": "ENTRY", "checkpoint_target_ms": 2_005,
+    }
+    (data / "copy_vault_l2_tape.jsonl").write_text(
+        json.dumps(row) + "\n", encoding="utf-8"
+    )
+
+    books, audit = load_observed_books(tmp_path, coins={"BTC"})
+
+    assert books["BTC"][0]["source"] == "HYPERLIQUID_INFO_L2BOOK_CAUSAL_CHECKPOINT"
+    assert audit["source_counts"]["causal_info_checkpoint"] == 1
+    assert audit["causal_forward_rows"] == 1
+
+
+def test_loader_refuse_checkpoint_info_dont_horloge_est_trop_vieille(tmp_path) -> None:
+    data = tmp_path / "runtime" / "data"
+    data.mkdir(parents=True)
+    row = {
+        "schema_version": "hypersmart.copy_vault_l2.v1",
+        "coin": "BTC", "received_at_ms": 50_001, "exchange_ts_ms": 1,
+        "bid": 100.0, "ask": 102.0, "capacity_usd": 700.0,
+        "source": "HYPERLIQUID_INFO_L2BOOK_CAUSAL_CHECKPOINT",
+        "data_origin": "REAL_OBSERVED", "causal_observation": True,
+    }
+    (data / "copy_vault_l2_tape.jsonl").write_text(
+        json.dumps(row) + "\n", encoding="utf-8"
+    )
+
+    books, audit = load_observed_books(tmp_path, coins={"BTC"})
+
+    assert books == {}
+    assert audit["invalid_rows"] == 1
 
 
 def test_protocol_inputs_excluent_backfill_et_carnet_non_causal() -> None:

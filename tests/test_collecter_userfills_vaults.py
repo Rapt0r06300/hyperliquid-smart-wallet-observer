@@ -2,8 +2,10 @@
 après reconnexion, seuls les fills inconnus plus récents que le curseur sont rejoués. Poster injecté."""
 from __future__ import annotations
 
+import asyncio
 import importlib.util
 import json
+import time
 from pathlib import Path
 
 RACINE = Path(__file__).resolve().parents[1]
@@ -209,6 +211,137 @@ def test_collecteur_lance_le_refresh_periodique_du_prewarm():
     source = (RACINE / "tools" / "collecter_userfills_vaults.py").read_text(encoding="utf-8")
     gather = source.split("await asyncio.gather(", 1)[1]
     assert "_refresh_copy_vault_prewarm_periodically(root, vaults)" in gather
+
+
+def test_copy_vault_ttl_couvre_episode_executable_le_plus_court():
+    assert C.TAPE_COIN_TTL_MS == (
+        C.COPY_VAULT_DELAY_MS
+        + min(C.COPY_VAULT_HORIZONS_MS)
+        + C.COPY_VAULT_MAX_TARGET_LAG_MS
+    )
+    assert C.TAPE_COIN_TTL_MS > 360_000
+
+
+def test_checkpoints_nouveau_metaordre_et_sorties_sont_deterministes():
+    checkpoints = C._new_metaorder_checkpoints(
+        {"coin": "btc", "received_at_ms": 10_000},
+        recv_mono_ms=20_000.0,
+        metaorder_id="mo-1",
+    )
+
+    assert [row["stage"] for row in checkpoints] == ["REFERENCE", "ENTRY"]
+    assert checkpoints[1]["target_wall_ms"] == 10_000 + C.COPY_VAULT_DELAY_MS
+    captured_entry = {
+        **checkpoints[1],
+        "captured_mono_ms": 80_250.0,
+        "captured_wall_ms": 70_250,
+    }
+    exits = C._exit_metaorder_checkpoints(captured_entry)
+    assert [row["target_wall_ms"] for row in exits] == [
+        70_250 + horizon for horizon in C.COPY_VAULT_HORIZONS_MS
+    ]
+    assert len({row["checkpoint_id"] for row in exits}) == len(C.COPY_VAULT_HORIZONS_MS)
+
+
+def test_checkpoint_prefere_un_book_ws_reel_sans_appel_rest(tmp_path, monkeypatch):
+    now_mono = time.monotonic() * 1_000
+    now_wall = int(time.time() * 1_000)
+    resume = {
+        "bid": 99.0, "ask": 101.0, "book_exchange_time": now_wall,
+        "bids5": [[99.0, 2.0, 1]], "asks5": [[101.0, 2.0, 1]],
+    }
+    monkeypatch.setattr(C, "_TAPE_BUFFER", {
+        "BTC": [{
+            "recv_mono": now_mono,
+            "recv_wall_ms": now_wall,
+            "resume": resume,
+        }]
+    })
+    monkeypatch.setattr(
+        C,
+        "_lecteur_l2_ondemand",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("REST interdit")),
+    )
+    result = asyncio.run(C._capture_copy_vault_checkpoint(tmp_path, {
+        "coin": "BTC", "metaorder_id": "mo-ws", "stage": "REFERENCE",
+        "checkpoint_id": "mo-ws:REFERENCE",
+        "target_mono_ms": now_mono - 10,
+        "target_wall_ms": now_wall - 10,
+        "attempts": 0,
+    }))
+
+    assert result["status"] == "CAPTURED_WS"
+    row = json.loads((tmp_path / C.COPY_VAULT_L2_TAPE).read_text(encoding="utf-8"))
+    assert row["source"] == "HYPERLIQUID_L2_WS"
+    assert row["checkpoint_id"] == "mo-ws:REFERENCE"
+
+
+def test_checkpoint_ws_refuse_retombe_sur_info_public(tmp_path, monkeypatch):
+    now_mono = time.monotonic() * 1_000
+    now_wall = int(time.time() * 1_000)
+    monkeypatch.setattr(C, "_TAPE_BUFFER", {
+        "BTC": [{
+            "recv_mono": now_mono,
+            "recv_wall_ms": now_wall,
+            "resume": {
+                "bid": 99.0, "ask": 101.0, "book_exchange_time": now_wall,
+                "bids5": [[99.0, 0.0, 1]], "asks5": [[101.0, 0.0, 1]],
+            },
+        }]
+    })
+    monkeypatch.setattr(C, "_COPY_VAULT_LAST_SAMPLE_MS", {})
+    monkeypatch.setattr(C, "_lecteur_l2_ondemand", lambda *_args, **_kwargs: {
+        "hl_bid": 99.5, "hl_ask": 100.5,
+        "received_ts_ms": now_wall, "exchange_ts_ms": now_wall - 5,
+        "bids": [(99.5, 2.0)], "asks": [(100.5, 3.0)],
+    })
+
+    result = asyncio.run(C._capture_copy_vault_checkpoint(tmp_path, {
+        "coin": "BTC", "metaorder_id": "mo-fallback", "stage": "ENTRY",
+        "checkpoint_id": "mo-fallback:ENTRY",
+        "target_mono_ms": now_mono - 100,
+        "target_wall_ms": now_wall - 100,
+        "attempts": 0,
+    }))
+
+    assert result["status"] == "CAPTURED_INFO"
+    row = json.loads((tmp_path / C.COPY_VAULT_L2_TAPE).read_text(encoding="utf-8"))
+    assert row["source"] == "HYPERLIQUID_INFO_L2BOOK_CAUSAL_CHECKPOINT"
+
+
+def test_checkpoint_info_public_persiste_provenance_causale(tmp_path, monkeypatch):
+    now_mono = time.monotonic() * 1_000
+    now_wall = int(time.time() * 1_000)
+    monkeypatch.setattr(C, "_TAPE_BUFFER", {})
+    monkeypatch.setattr(C, "_COPY_VAULT_LAST_SAMPLE_MS", {})
+    monkeypatch.setattr(C, "_lecteur_l2_ondemand", lambda *_args, **_kwargs: {
+        "hl_bid": 99.0, "hl_ask": 101.0,
+        "received_ts_ms": now_wall, "exchange_ts_ms": now_wall - 5,
+        "bids": [(99.0, 2.0)], "asks": [(101.0, 3.0)],
+    })
+    result = asyncio.run(C._capture_copy_vault_checkpoint(tmp_path, {
+        "coin": "BTC", "metaorder_id": "mo-info", "stage": "ENTRY",
+        "checkpoint_id": "mo-info:ENTRY",
+        "target_mono_ms": now_mono - 100,
+        "target_wall_ms": now_wall - 100,
+        "attempts": 0,
+    }))
+
+    row = json.loads((tmp_path / C.COPY_VAULT_L2_TAPE).read_text(encoding="utf-8"))
+    assert result["status"] == "CAPTURED_INFO"
+    assert row["source"] == "HYPERLIQUID_INFO_L2BOOK_CAUSAL_CHECKPOINT"
+    assert row["checkpoint_stage"] == "ENTRY"
+    assert row["checkpoint_target_ms"] == now_wall - 100
+    assert row["data_origin"] == "REAL_OBSERVED"
+
+
+def test_collecteur_branche_checkpoints_causaux_dans_consommateur():
+    source = (RACINE / "tools" / "collecter_userfills_vaults.py").read_text(encoding="utf-8")
+    consumer = source.split("async def _tape_consumer", 1)[1].split("def _git_commit", 1)[0]
+    assert "_new_metaorder_checkpoints(" in consumer
+    assert "await _capture_copy_vault_checkpoint(root, checkpoint)" in consumer
+    assert "_exit_metaorder_checkpoints(result)" in consumer
+    assert "checkpointed_metaorders.pop(metaorder_id, None)" in consumer
 
 
 def test_vaults_et_roles(tmp_path):
