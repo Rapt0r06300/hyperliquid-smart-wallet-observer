@@ -36,6 +36,7 @@ import heartbeat_collecteur as HB  # noqa: E402
 
 WS_URL = "wss://api.hyperliquid.xyz/ws"
 FILLS_LIVE = Path("runtime") / "data" / "vault_fills_live.jsonl"
+COPY_VAULT_L2_TAPE = Path("runtime") / "data" / "copy_vault_l2_tape.jsonl"
 JOURNAL = Path("runtime") / "data" / "fills_journal.jsonl"       # CHAQUE fill live non-snapshot + gate + latence
 LIQ_CONFIRMEES = Path("runtime") / "data" / "liquidations_confirmees.jsonl"  # 25/07 : fill.liquidation non-null = REAL_LIQUIDATION
 # 25/07 — userEvents/WsLiquidation NON ajouté À DESSEIN : le champ `liquidation` {liquidatedUser, markPx,
@@ -265,6 +266,71 @@ def _full_levels(rep: dict) -> tuple[list[tuple[float, float]], list[tuple[float
     )
 
 
+def _append_copy_vault_book(
+    root: Path,
+    coin: str,
+    resume: dict,
+    *,
+    received_at_ms: int,
+    sample_interval_ms: int = 1_000,
+) -> bool:
+    """Persist one causal observed L2 sample for executable forward replay."""
+
+    symbol = str(coin or "").upper().strip()
+    try:
+        received = int(received_at_ms)
+        bid = float(resume["bid"])
+        ask = float(resume["ask"])
+        exchange_ts = int(resume["book_exchange_time"])
+        bids = [[float(row[0]), float(row[1])] for row in resume["bids5"][:5]]
+        asks = [[float(row[0]), float(row[1])] for row in resume["asks5"][:5]]
+    except (KeyError, IndexError, TypeError, ValueError, OverflowError):
+        return False
+    if (
+        not symbol
+        or received <= 0
+        or exchange_ts <= 0
+        or received < exchange_ts
+        or bid <= 0
+        or ask <= bid
+        or not bids
+        or not asks
+        or any(px <= 0 or size <= 0 for px, size in bids + asks)
+    ):
+        return False
+    previous = _COPY_VAULT_LAST_SAMPLE_MS.get(symbol)
+    if previous is not None and received - previous < max(1, int(sample_interval_ms)):
+        return False
+    capacity_usd = min(
+        sum(px * size for px, size in bids),
+        sum(px * size for px, size in asks),
+    )
+    if capacity_usd <= 0:
+        return False
+    row = {
+        "schema_version": "hypersmart.copy_vault_l2.v1",
+        "coin": symbol,
+        "received_at_ms": received,
+        "exchange_ts_ms": exchange_ts,
+        "bid": bid,
+        "ask": ask,
+        "bids5": bids,
+        "asks5": asks,
+        "capacity_usd": capacity_usd,
+        "source": "HYPERLIQUID_L2_WS",
+        "data_origin": "REAL_OBSERVED",
+        "causal_observation": True,
+        "paper_read_only": True,
+        "real_execution": False,
+    }
+    path = Path(root) / COPY_VAULT_L2_TAPE
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("a", encoding="utf-8") as handle:
+        handle.write(json.dumps(row, ensure_ascii=False) + "\n")
+    _COPY_VAULT_LAST_SAMPLE_MS[symbol] = received
+    return True
+
+
 def _lecteur_l2_ondemand(coin: str) -> dict | None:
     """L2 HL FRAIS (<1 s) pour `coin`, à la demande (POST public l2Book). Rend
     {hl_bid, hl_ask, depth_usd, age_ms} ou None. Cache court pour ne pas marteler l'API."""
@@ -489,12 +555,13 @@ async def _l2_dynamique(root: Path, *, sync_s: float = 1.0) -> None:
 def _traiter_un(root: Path, fill: dict, coins_a_verifier: set, t_ws_mono: float) -> None:
     import time as _t
     recu = _t.time() * 1000
+    persisted_fill = {**fill, "received_at_ms": int(recu)}
     with (root / FILLS_LIVE).open("a", encoding="utf-8") as f:
-        f.write(json.dumps(fill, ensure_ascii=False) + "\n")
+        f.write(json.dumps(persisted_fill, ensure_ascii=False) + "\n")
     coins_a_verifier.add(fill.get("coin"))
     if _TAPE_FILLS is not None:                                   # → tape L2/OFI : réception MONOTONE (même process)
         try:
-            _TAPE_FILLS.put_nowait((fill, t_ws_mono * 1000))
+            _TAPE_FILLS.put_nowait((persisted_fill, t_ws_mono * 1000))
         except asyncio.QueueFull:
             pass
     for nom, coh in CO.COHORTES.items():
@@ -762,6 +829,7 @@ async def _metaorder_shadow_periodique(root: Path, vaults: list, *, intervalle_s
 _TAPE_FILLS = None                           # asyncio.Queue((fill, fill_recv_mono_ms)) — alimentée par le worker
 _TAPE_COINS_ACTIFS: dict = {}                # coin -> dernier fill_recv (ms wall) : fenêtre d'abonnement l2Book
 _TAPE_BUFFER: dict = {}                      # coin -> list[{recv_mono, resume}] (snapshots successifs)
+_COPY_VAULT_LAST_SAMPLE_MS: dict[str, int] = {}
 TAPE_BUFFER_MAX = 400
 TAPE_COIN_TTL_MS = 360_000.0                # coin abonné jusqu'à horizon(5 min)+marge après le dernier fill
 
@@ -800,10 +868,21 @@ async def _tape_l2_buffer(root: Path, *, sync_s: float = 0.5) -> None:
                         coin = str(d.get("coin") or "").upper()
                         r = T.resume_book(d)
                         if coin and r:
+                            recv_wall_ms = int(time.time() * 1000)
                             buf = _TAPE_BUFFER.setdefault(coin, [])
-                            buf.append({"recv_mono": time.monotonic() * 1000, "resume": r})
+                            buf.append({
+                                "recv_mono": time.monotonic() * 1000,
+                                "recv_wall_ms": recv_wall_ms,
+                                "resume": r,
+                            })
                             if len(buf) > TAPE_BUFFER_MAX:
                                 del buf[:len(buf) - TAPE_BUFFER_MAX]
+                            _append_copy_vault_book(
+                                root,
+                                coin,
+                                r,
+                                received_at_ms=recv_wall_ms,
+                            )
         except Exception as exc:  # noqa: BLE001
             print("[userfills] tape_l2 reconnect (%s)" % str(exc)[:50], flush=True)
             await asyncio.sleep(3.0)

@@ -36,6 +36,7 @@ from hl_observer.experimental.copy_edge_oos import (  # noqa: E402
 )
 
 FILLS = Path("runtime") / "data" / "vault_fills.jsonl"
+FILLS_LIVE = Path("runtime") / "data" / "vault_fills_live.jsonl"
 LEDGER = Path("runtime") / "data" / "vault_ledger.jsonl"
 PRELIM = Path("runtime") / "data" / "copy_prelim_edge.json"
 PRELIM_PROBE = Path("runtime") / "data" / "copy_prelim_probe.json"
@@ -123,10 +124,42 @@ def _nav_asof(
     return nav_usd, nav_ts_ms
 
 
+def _fills_canoniques(root: Path) -> tuple[list[dict], dict[str, Any]]:
+    """Merge backfill and causal WS increments without replaying snapshots."""
+
+    historical = _charger_jsonl(root / FILLS)
+    live_rows = _charger_jsonl(root / FILLS_LIVE)
+    causal_live = [
+        row for row in live_rows
+        if row.get("source") == "LIVE_WS" and row.get("isSnapshot") is False
+    ]
+    # Put causal rows first.  ``dedupliquer`` is stable for equal event times,
+    # so a fill seen both by WS and by a later REST backfill retains the only
+    # provenance that can support a post-freeze forward claim.
+    merged = causal_live + historical
+    deduped = VB.dedupliquer(merged)
+    return deduped, {
+        "historical_fill_rows": len(historical),
+        "live_fill_rows": len(live_rows),
+        "causal_live_fill_rows": len(causal_live),
+        "live_snapshot_rows_rejected": sum(
+            1 for row in live_rows if row.get("isSnapshot") is True
+        ),
+        "live_unprovenanced_rows_rejected": sum(
+            1 for row in live_rows if row.get("source") != "LIVE_WS"
+        ),
+        "merged_fill_rows": len(merged),
+        "deduped_fill_rows": len(deduped),
+        "cross_source_or_internal_duplicates_rejected": len(merged) - len(deduped),
+        "causal_rows_preferred_on_duplicate": True,
+        "live_policy": "LIVE_WS_AND_NOT_SNAPSHOT_ONLY",
+    }
+
+
 def _episodes_canoniques(root: Path) -> tuple[list[dict], dict[str, Any]]:
-    raw_fills = _charger_jsonl(root / FILLS)
-    if raw_fills:
-        fills = VB.dedupliquer(raw_fills)
+    fills, source_audit = _fills_canoniques(root)
+    raw_fill_count = source_audit["merged_fill_rows"]
+    if fills:
         episodes = VB.reconstruire_episodes(fills)
         VL.marquer_retraits_ledger(
             episodes,
@@ -157,9 +190,10 @@ def _episodes_canoniques(root: Path) -> tuple[list[dict], dict[str, Any]]:
         canonical.append(dict(episode, event_id=event_id))
     return canonical, {
         "episode_source": source,
-        "raw_fills": len(raw_fills),
+        **source_audit,
+        "raw_fills": raw_fill_count,
         "deduped_fills": len(fills),
-        "duplicate_fills_rejected": max(0, len(raw_fills) - len(fills)),
+        "duplicate_fills_rejected": source_audit["cross_source_or_internal_duplicates_rejected"],
         "raw_episodes": len(episodes),
         "canonical_episodes": len(canonical),
         "duplicate_episodes_rejected": duplicate_episodes,
@@ -207,10 +241,7 @@ def charger_entrees_alpha(root: Path) -> list[dict]:
 
 
 def _charger_fills(root: Path) -> list[dict]:
-    try:
-        return [json.loads(l) for l in (root / FILLS).read_text(encoding="utf-8", errors="ignore").splitlines() if l.strip()]
-    except OSError:
-        return []
+    return _fills_canoniques(root)[0]
 
 
 def construire(

@@ -26,7 +26,9 @@ def test_snapshot_depuis_positions_format():
 
 def test_parser_message_userfills():
     msg = {"channel": "userFills", "data": {"user": "0xA", "fills": [
-        {"coin": "SOL", "px": "150", "sz": "10", "side": "B", "dir": "Open Long", "time": 1000},
+        {"coin": "SOL", "px": "150", "sz": "10", "side": "B", "dir": "Open Long", "time": 1000,
+         "tid": 7, "oid": 11},
         {"bad": 1}]}}
     fills = UL.parser_message_userfills(msg, vault="0xA")
     assert len(fills) == 1 and fills[0]["coin"] == "SOL" and fills[0]["signe"] == 1 and fills[0]["ts_ms"] == 1000
+    assert fills[0]["tid"] == 7 and fills[0]["oid"] == 11

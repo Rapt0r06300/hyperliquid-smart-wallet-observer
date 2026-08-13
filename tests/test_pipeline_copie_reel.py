@@ -75,6 +75,37 @@ def test_pipeline_reconstruit_depuis_fills_dedupliques_et_preserve_identite(tmp_
     assert audit["episode_source"] == "vault_fills_deduped_reconstructed"
 
 
+def test_pipeline_fusionne_live_causal_exclut_snapshots_et_prefere_preuve_ws(tmp_path):
+    data = tmp_path / "runtime" / "data"
+    data.mkdir(parents=True)
+    shared = {
+        "vault": "0xA", "ts_ms": 200, "coin": "BTC", "px": 100.0,
+        "sz": 1.0, "signe": 1, "dir": "Open Long", "start_position": 0.0,
+        "hash": "0xshared",
+    }
+    (data / "vault_fills.jsonl").write_text(json.dumps({**shared, "oid": 42}), encoding="utf-8")
+    live_rows = [
+        {**shared, "source": "LIVE_WS", "isSnapshot": False, "received_at_ms": 205},
+        {**shared, "hash": "0xsnapshot", "source": "LIVE_WS", "isSnapshot": True},
+        {**shared, "hash": "0xunknown", "isSnapshot": False},
+    ]
+    (data / "vault_fills_live.jsonl").write_text(
+        "\n".join(map(json.dumps, live_rows)), encoding="utf-8"
+    )
+
+    fills, audit = PR._fills_canoniques(tmp_path)
+    episodes, _ = PR._episodes_canoniques(tmp_path)
+
+    assert len(fills) == 1
+    assert fills[0]["source"] == "LIVE_WS" and fills[0]["received_at_ms"] == 205
+    assert len(episodes) == 1 and episodes[0]["observed_at_ms"] == 205
+    assert audit["causal_live_fill_rows"] == 1
+    assert audit["live_snapshot_rows_rejected"] == 1
+    assert audit["live_unprovenanced_rows_rejected"] == 1
+    assert audit["cross_source_or_internal_duplicates_rejected"] == 1
+    assert audit["causal_rows_preferred_on_duplicate"] is True
+
+
 def test_construire_need_more_data_sans_historique(tmp_path):
     (tmp_path / "runtime" / "data").mkdir(parents=True)
     (tmp_path / "runtime" / "data" / "vault_episodes.jsonl").write_text("")

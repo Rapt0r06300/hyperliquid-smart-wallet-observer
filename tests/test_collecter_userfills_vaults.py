@@ -42,6 +42,52 @@ def test_live_filtre_sur_curseur():
     assert [f["ts_ms"] for f in a] == [400, 500] and cur["0xV"] == 500
 
 
+def test_fill_persiste_avec_horodatage_de_reception_causale(tmp_path, monkeypatch):
+    (tmp_path / "runtime" / "data").mkdir(parents=True)
+    monkeypatch.setattr(C, "_TAPE_FILLS", None)
+    monkeypatch.setattr(C.CO, "COHORTES", {})
+    fill = {
+        "vault": "0xV", "coin": "SOL", "ts_ms": 1000, "source": "LIVE_WS",
+        "isSnapshot": False, "hash": "0xfill",
+    }
+
+    C._traiter_un(tmp_path, fill, set(), 1.0)
+
+    saved = json.loads((tmp_path / C.FILLS_LIVE).read_text(encoding="utf-8"))
+    assert saved["received_at_ms"] >= saved["ts_ms"]
+    assert "received_at_ms" not in fill
+
+
+def test_tape_copy_vault_persiste_un_l2_causal_et_echantillonne(tmp_path, monkeypatch):
+    monkeypatch.setattr(C, "_COPY_VAULT_LAST_SAMPLE_MS", {})
+    resume = {
+        "bid": 99.0,
+        "ask": 101.0,
+        "book_exchange_time": 1_000,
+        "bids5": [[99.0, 2.0, 1], [98.0, 1.0, 1]],
+        "asks5": [[101.0, 3.0, 1], [102.0, 1.0, 1]],
+    }
+
+    assert C._append_copy_vault_book(
+        tmp_path, "btc", resume, received_at_ms=1_010,
+    ) is True
+    assert C._append_copy_vault_book(
+        tmp_path, "btc", resume, received_at_ms=1_500,
+    ) is False
+    assert C._append_copy_vault_book(
+        tmp_path, "btc", resume, received_at_ms=2_010,
+    ) is True
+
+    rows = [
+        json.loads(line)
+        for line in (tmp_path / C.COPY_VAULT_L2_TAPE).read_text(encoding="utf-8").splitlines()
+    ]
+    assert len(rows) == 2
+    assert rows[0]["source"] == "HYPERLIQUID_L2_WS"
+    assert rows[0]["causal_observation"] is True
+    assert rows[0]["capacity_usd"] == min(99 * 2 + 98, 101 * 3 + 102)
+
+
 def test_vaults_et_roles(tmp_path):
     (tmp_path / "runtime" / "data").mkdir(parents=True)
     (tmp_path / "runtime" / "data" / "vaults_scores.json").write_text(json.dumps({

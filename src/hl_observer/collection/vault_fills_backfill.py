@@ -57,8 +57,29 @@ def parser_fills(rep: Any, *, vault: str = "") -> list[dict]:
             start_pos = None
         out.append({"vault": vault, "ts_ms": ts, "coin": coin, "px": px, "sz": sz, "signe": signe,
                     "dir": str(f.get("dir") or ""), "start_position": start_pos,
-                    "oid": f.get("oid"), "hash": f.get("hash")})
+                    "tid": f.get("tid"), "oid": f.get("oid"), "hash": f.get("hash")})
     return out
+
+
+def fill_identity(fill: dict) -> tuple:
+    """Return one source-independent identity for a leader fill."""
+
+    event_ref = (
+        fill.get("hash")
+        or fill.get("tid")
+        or fill.get("oid")
+        or fill.get("stable_event_id")
+        or ""
+    )
+    return (
+        str(fill.get("vault") or "").lower(),
+        int(fill.get("ts_ms") or 0),
+        str(fill.get("coin") or "").upper(),
+        float(fill.get("px") or 0.0),
+        float(fill.get("sz") or 0.0),
+        str(fill.get("dir") or ""),
+        str(event_ref),
+    )
 
 
 def dedupliquer(fills: list[dict]) -> list[dict]:
@@ -66,8 +87,7 @@ def dedupliquer(fills: list[dict]) -> list[dict]:
     vus: set[tuple] = set()
     out: list[dict] = []
     for f in sorted(fills, key=lambda x: (x.get("ts_ms", 0), str(x.get("coin")))):
-        cle = (f.get("vault"), f.get("ts_ms"), f.get("coin"), f.get("px"), f.get("sz"),
-               f.get("dir"), f.get("oid") or f.get("hash"))
+        cle = fill_identity(f)
         if cle not in vus:
             vus.add(cle)
             out.append(f)
@@ -107,7 +127,8 @@ def reconstruire_episodes(fills: list[dict]) -> list[dict]:
             identity = {
                 "vault": vault, "ts_ms": int(f["ts_ms"]), "coin": coin,
                 "px": float(f["px"]), "sz": float(f["sz"]),
-                "dir": str(f.get("dir") or ""), "oid": f.get("oid"), "hash": f.get("hash"),
+                "dir": str(f.get("dir") or ""), "tid": f.get("tid"),
+                "oid": f.get("oid"), "hash": f.get("hash"),
             }
             fill_id = hashlib.sha256(
                 json.dumps(identity, sort_keys=True, separators=(",", ":")).encode("utf-8")
@@ -115,8 +136,12 @@ def reconstruire_episodes(fills: list[dict]) -> list[dict]:
             events.append({"ts_ms": f["ts_ms"], "vault": vault, "coin": coin, "action": action,
                            "direction": direction, "taille_usd": round(taille_usd, 2),
                            "pos_avant": round(avant, 8), "pos_apres": round(pos, 8), "px": f["px"],
-                           "sz": f["sz"], "dir": f.get("dir"), "oid": f.get("oid"),
-                           "hash": f.get("hash"), "fill_id": fill_id})
+                           "sz": f["sz"], "dir": f.get("dir"), "tid": f.get("tid"),
+                           "oid": f.get("oid"), "hash": f.get("hash"), "fill_id": fill_id,
+                           "source": f.get("source") or "REST_BACKFILL",
+                           "is_snapshot": bool(f.get("isSnapshot")),
+                           "observed_at_ms": f.get("received_at_ms"),
+                           "stable_event_id": f.get("stable_event_id")})
     events.sort(key=lambda e: e["ts_ms"])
     return events
 
@@ -203,6 +228,6 @@ def auditer_couverture(fills: list[dict], *, cap: int = CAP_USERFILLS, lookback_
             "par_vault": vaults}
 
 
-__all__ = ["plan_de_requetes", "parser_fills", "dedupliquer", "reconstruire_episodes",
+__all__ = ["plan_de_requetes", "parser_fills", "fill_identity", "dedupliquer", "reconstruire_episodes",
            "marquer_retraits", "entrees_alpha", "couverture", "auditer_couverture", "CAP_USERFILLS",
            "MS_PAR_HEURE"]

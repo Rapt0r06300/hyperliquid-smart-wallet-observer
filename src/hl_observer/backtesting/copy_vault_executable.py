@@ -19,7 +19,7 @@ from typing import Any
 from hl_observer.config.frais_venues import frais_taker_bps
 
 SCHEMA_VERSION = "hypersmart.copy_vault_executable.v1"
-PROTOCOL_NAME = "copy_vault_executable_walk_forward_v1"
+PROTOCOL_NAME = "copy_vault_executable_walk_forward_v3"
 METAORDER_GAP_MS = 60_000
 COPY_DELAY_MS = 60_000
 MAX_REFERENCE_LAG_MS = 30_000
@@ -43,7 +43,12 @@ def protocol_signature() -> dict[str, Any]:
         "notional_usd": NOTIONAL_USD,
         "max_open_positions": MAX_OPEN_POSITIONS,
         "fee_source": "hl_observer.config.frais_venues:frais_taker_bps(HL)",
-        "book_source": "runtime/data/carnet_venues.jsonl:observed_HL_BBO_and_four_side_capacity",
+        "book_source": (
+            "train_oos=runtime/data/carnet_venues.jsonl;"
+            "forward=runtime/data/copy_vault_l2_tape.jsonl:HYPERLIQUID_L2_WS_causal"
+        ),
+        "fill_source": "REST_BACKFILL_for_train_oos;LIVE_WS_non_snapshot_with_receive_time_for_forward",
+        "forward_signal_policy": "causal_live_first_fill_observed_after_physical_freeze",
     }
 
 
@@ -92,8 +97,28 @@ def cluster_metaorders(
             duplicate_events += 1
             continue
         seen.add(event_id)
-        canonical.append({**dict(raw), "event_id": event_id, "ts_ms": ts_ms,
-                          "direction": direction, "coin": coin, "vault": vault})
+        observed_at_ms: int | None = None
+        try:
+            candidate = int(raw.get("observed_at_ms") or 0)
+            if candidate >= ts_ms:
+                observed_at_ms = candidate
+        except (TypeError, ValueError, OverflowError):
+            pass
+        causal_live = (
+            raw.get("source") == "LIVE_WS"
+            and raw.get("is_snapshot") is False
+            and observed_at_ms is not None
+        )
+        canonical.append({
+            **dict(raw),
+            "event_id": event_id,
+            "ts_ms": ts_ms,
+            "observed_at_ms": observed_at_ms,
+            "causal_forward_eligible": causal_live,
+            "direction": direction,
+            "coin": coin,
+            "vault": vault,
+        })
     canonical.sort(key=lambda row: (row["ts_ms"], row["event_id"]))
 
     active: dict[tuple[str, str, int], dict[str, Any]] = {}
@@ -108,7 +133,14 @@ def cluster_metaorders(
                 "vault": row["vault"],
                 "coin": row["coin"],
                 "direction": row["direction"],
-                "signal_ts_ms": row["ts_ms"],
+                "first_fill_ts_ms": row["ts_ms"],
+                "signal_ts_ms": (
+                    row["observed_at_ms"]
+                    if row["causal_forward_eligible"]
+                    else row["ts_ms"]
+                ),
+                "signal_source": row.get("source") or "REST_BACKFILL",
+                "causal_forward_eligible": row["causal_forward_eligible"],
                 "last_fill_ts_ms": row["ts_ms"],
                 "fill_count": 0,
                 "leader_notional_usd": 0.0,
@@ -144,6 +176,9 @@ def cluster_metaorders(
         "metaorders": len(completed),
         "sliced_fills_collapsed": max(0, len(canonical) - len(completed)),
         "signal_policy": "first_fill;later_slices_audit_only",
+        "causal_forward_metaorders": sum(
+            1 for row in completed if row.get("causal_forward_eligible") is True
+        ),
     }
 
 
@@ -152,61 +187,113 @@ def load_observed_books(
     *,
     coins: Iterable[str] | None = None,
     relative_path: str = "runtime/data/carnet_venues.jsonl",
+    causal_relative_path: str = "runtime/data/copy_vault_l2_tape.jsonl",
 ) -> tuple[dict[str, list[dict[str, Any]]], dict[str, Any]]:
-    """Load observed HL BBO plus conservative four-side top capacity."""
+    """Load historical books plus causally received Hyperliquid L2 samples."""
 
-    path = Path(root).resolve() / relative_path
+    resolved_root = Path(root).resolve()
+    path = resolved_root / relative_path
+    causal_path = resolved_root / causal_relative_path
     wanted = {str(coin).upper() for coin in coins} if coins is not None else None
     by_coin: dict[str, list[dict[str, Any]]] = {}
     invalid = 0
     rows_read = 0
     duplicate_rows = 0
     seen: set[tuple[Any, ...]] = set()
-    if not path.is_file():
-        return {}, {"source": relative_path, "exists": False, "valid_rows": 0}
-    with path.open("r", encoding="utf-8", errors="ignore") as handle:
-        for line_number, line in enumerate(handle, 1):
-            rows_read += 1
-            try:
-                raw = json.loads(line)
-                coin = str(raw.get("coin") or "").upper()
-                if wanted is not None and coin not in wanted:
-                    continue
-                ts_ms = int(round(float(raw["collecte_ts"]) * 1000.0))
-                bid = float(raw["hl_bid"])
-                ask = float(raw["hl_ask"])
-                capacity_usd = float(raw["taille_min_usd"])
-            except (KeyError, TypeError, ValueError, OverflowError, json.JSONDecodeError):
-                invalid += 1
-                continue
-            if not coin or ts_ms <= 0 or bid <= 0 or ask <= bid or capacity_usd <= 0:
-                invalid += 1
-                continue
-            identity = (coin, ts_ms, bid, ask, capacity_usd)
-            if identity in seen:
-                duplicate_rows += 1
-                continue
-            seen.add(identity)
-            by_coin.setdefault(coin, []).append({
-                "coin": coin,
-                "ts_ms": ts_ms,
-                "bid": bid,
-                "ask": ask,
-                "capacity_usd": capacity_usd,
-                "source": relative_path,
-                "source_line": line_number,
-            })
+    source_counts: dict[str, int] = {"historical_observed": 0, "causal_ws": 0}
+
+    def add_row(
+        *, coin: str, ts_ms: int, bid: float, ask: float, capacity_usd: float,
+        source: str, source_line: int, causal_observation: bool,
+    ) -> None:
+        nonlocal invalid, duplicate_rows
+        if not coin or ts_ms <= 0 or bid <= 0 or ask <= bid or capacity_usd <= 0:
+            invalid += 1
+            return
+        identity = (coin, ts_ms, bid, ask, capacity_usd, causal_observation)
+        if identity in seen:
+            duplicate_rows += 1
+            return
+        seen.add(identity)
+        by_coin.setdefault(coin, []).append({
+            "coin": coin,
+            "ts_ms": ts_ms,
+            "bid": bid,
+            "ask": ask,
+            "capacity_usd": capacity_usd,
+            "source": source,
+            "source_line": source_line,
+            "causal_observation": causal_observation,
+        })
+        source_counts["causal_ws" if causal_observation else "historical_observed"] += 1
+
+    if path.is_file():
+        with path.open("r", encoding="utf-8", errors="ignore") as handle:
+            for line_number, line in enumerate(handle, 1):
+                rows_read += 1
+                try:
+                    raw = json.loads(line)
+                    coin = str(raw.get("coin") or "").upper()
+                    if wanted is not None and coin not in wanted:
+                        continue
+                    add_row(
+                        coin=coin,
+                        ts_ms=int(round(float(raw["collecte_ts"]) * 1000.0)),
+                        bid=float(raw["hl_bid"]),
+                        ask=float(raw["hl_ask"]),
+                        capacity_usd=float(raw["taille_min_usd"]),
+                        source=relative_path,
+                        source_line=line_number,
+                        causal_observation=False,
+                    )
+                except (KeyError, TypeError, ValueError, OverflowError, json.JSONDecodeError):
+                    invalid += 1
+    if causal_path.is_file():
+        with causal_path.open("r", encoding="utf-8", errors="ignore") as handle:
+            for line_number, line in enumerate(handle, 1):
+                rows_read += 1
+                try:
+                    raw = json.loads(line)
+                    coin = str(raw.get("coin") or "").upper()
+                    if wanted is not None and coin not in wanted:
+                        continue
+                    received = int(raw["received_at_ms"])
+                    exchange_ts = int(raw["exchange_ts_ms"])
+                    causal = (
+                        raw.get("schema_version") == "hypersmart.copy_vault_l2.v1"
+                        and raw.get("source") == "HYPERLIQUID_L2_WS"
+                        and raw.get("data_origin") == "REAL_OBSERVED"
+                        and raw.get("causal_observation") is True
+                        and received >= exchange_ts > 0
+                    )
+                    if not causal:
+                        invalid += 1
+                        continue
+                    add_row(
+                        coin=coin,
+                        ts_ms=received,
+                        bid=float(raw["bid"]),
+                        ask=float(raw["ask"]),
+                        capacity_usd=float(raw["capacity_usd"]),
+                        source=causal_relative_path,
+                        source_line=line_number,
+                        causal_observation=True,
+                    )
+                except (KeyError, TypeError, ValueError, OverflowError, json.JSONDecodeError):
+                    invalid += 1
     for rows in by_coin.values():
         rows.sort(key=lambda row: row["ts_ms"])
     valid = sum(len(rows) for rows in by_coin.values())
     return by_coin, {
-        "source": relative_path,
-        "exists": True,
+        "sources": [relative_path, causal_relative_path],
+        "exists": path.is_file() or causal_path.is_file(),
         "rows_read": rows_read,
         "valid_rows": valid,
         "invalid_rows": invalid,
         "duplicate_rows_rejected": duplicate_rows,
         "coins": len(by_coin),
+        "source_counts": source_counts,
+        "causal_forward_rows": source_counts["causal_ws"],
         "capacity_semantics": "minimum_USD_across_HL_and_reference_venue_bid_ask",
     }
 
@@ -233,6 +320,7 @@ def execute_metaorder(
     max_target_lag_ms: int = MAX_TARGET_LAG_MS,
     notional_usd: float = NOTIONAL_USD,
     fee_bps: float | None = None,
+    require_causal_books: bool = False,
 ) -> tuple[dict[str, Any] | None, str]:
     """Execute one closed paper episode or return an explicit refusal code."""
 
@@ -252,6 +340,12 @@ def execute_metaorder(
     exit_book, exit_lag = _first_at_or_after(books, exit_target_ms, max_target_lag_ms)
     if exit_book is None:
         return None, "STALE_OR_MISSING_EXIT_BOOK"
+    causal_books = all(
+        row.get("causal_observation") is True
+        for row in (reference, entry, exit_book)
+    )
+    if require_causal_books and not causal_books:
+        return None, "NON_CAUSAL_FORWARD_BOOK"
     if min(float(entry["capacity_usd"]), float(exit_book["capacity_usd"])) < float(notional_usd):
         return None, "OBSERVED_TOP_CAPACITY_TOO_LOW"
 
@@ -304,6 +398,12 @@ def execute_metaorder(
         "coin": metaorder["coin"],
         "direction": direction,
         "signal_ts_ms": signal_ms,
+        "first_fill_ts_ms": int(metaorder.get("first_fill_ts_ms") or signal_ms),
+        "signal_source": metaorder.get("signal_source") or "REST_BACKFILL",
+        "causal_books_eligible": causal_books,
+        "causal_forward_eligible": (
+            metaorder.get("causal_forward_eligible") is True and causal_books
+        ),
         "reference_ts_ms": reference["ts_ms"],
         "entry_ts_ms": entry["ts_ms"],
         "exit_ts_ms": exit_book["ts_ms"],
@@ -343,6 +443,7 @@ def replay_metaorders(
     start_ms: int | None = None,
     end_ms: int | None = None,
     direction_multiplier: int = 1,
+    require_causal_observation: bool = False,
 ) -> tuple[list[dict[str, Any]], dict[str, int]]:
     counters: dict[str, int] = {
         "metaorders_considered": 0,
@@ -359,11 +460,17 @@ def replay_metaorders(
         if end_ms is not None and signal_ms > int(end_ms):
             continue
         counters["metaorders_considered"] += 1
+        if require_causal_observation and metaorder.get("causal_forward_eligible") is not True:
+            counters["NON_CAUSAL_FORWARD_SIGNAL"] = counters.get(
+                "NON_CAUSAL_FORWARD_SIGNAL", 0
+            ) + 1
+            continue
         trade, reason = execute_metaorder(
             metaorder,
             list(books_by_coin.get(str(metaorder["coin"]), [])),
             horizon_ms=int(horizon_ms),
             direction_multiplier=direction_multiplier,
+            require_causal_books=require_causal_observation,
         )
         if trade is None:
             counters[reason] = counters.get(reason, 0) + 1
@@ -513,7 +620,12 @@ def evaluate_frozen(
     all_trades: list[dict[str, Any]] = []
     for name, (start_ms, end_ms) in segments.items():
         trades, diagnostics = replay_metaorders(
-            metaorders, books_by_coin, horizon_ms=horizon, start_ms=start_ms, end_ms=end_ms
+            metaorders,
+            books_by_coin,
+            horizon_ms=horizon,
+            start_ms=start_ms,
+            end_ms=end_ms,
+            require_causal_observation=name == "forward",
         )
         result["segments"][name] = {"summary": summarize(trades), "diagnostics": diagnostics}
         result["trades"][name] = trades
@@ -545,6 +657,14 @@ def temporal_evidence(evaluation: Mapping[str, Any]) -> dict[str, Any]:
     oos_net = oos_summary.get("net_pnl_usd") if oos_count > 0 else None
     forward_net = forward_summary.get("net_pnl_usd") if forward_count > 0 else None
     placebo_net = placebo_summary.get("net_pnl_usd") if placebo_count > 0 else None
+    forward_trades = (
+        (evaluation.get("trades") or {}).get("forward") or []
+        if isinstance(evaluation.get("trades"), Mapping)
+        else []
+    )
+    causal_forward = bool(forward_trades) and all(
+        row.get("causal_forward_eligible") is True for row in forward_trades
+    )
     return {
         "oos": {
             "net_pnl_usd": oos_net,
@@ -555,7 +675,8 @@ def temporal_evidence(evaluation: Mapping[str, Any]) -> dict[str, Any]:
         "forward": {
             "net_pnl_usd": forward_net,
             "sample_count": forward_count,
-            "post_freeze": True,
+            "post_freeze": causal_forward,
+            "causal_live_only": causal_forward,
         },
         "placebos": {
             "beaten": (

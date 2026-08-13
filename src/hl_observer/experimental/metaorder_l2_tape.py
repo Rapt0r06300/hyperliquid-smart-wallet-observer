@@ -467,7 +467,8 @@ def _snap(e: dict | None) -> dict | None:
     if not e:
         return None
     r = e.get("resume") or {}
-    return {"recv_mono": round(float(e["recv_mono"]), 1), "book_exchange_time": r.get("book_exchange_time"),
+    return {"recv_mono": round(float(e["recv_mono"]), 1), "recv_wall_ms": e.get("recv_wall_ms"),
+            "book_exchange_time": r.get("book_exchange_time"),
             "bids": r.get("bids5"), "asks": r.get("asks5")}
 
 
@@ -494,6 +495,8 @@ def ligne_fill(fill: dict, *, metaorder_id: str, stade: str, pre: dict | None, e
             "fill_id": fill.get("hash"), "stade": stade,
             "sens": int(fill.get("signe") or fill.get("sens") or 0), "vault": str(fill.get("vault") or "")[:42],
             "fill_exchange_time": fx, "book_exchange_time": re_.get("book_exchange_time"),
+            "fill_received_at_ms": fill.get("received_at_ms"),
+            "book_received_at_ms": entree.get("recv_wall_ms"),
             "fill_recv_mono": round(float(fill_recv_mono), 1), "book_recv_mono": round(float(entree["recv_mono"]), 1),
             "latence_pipeline_ms": latence_pipeline_ms(fill_recv_mono, entree["recv_mono"]),
             "pre": _snap(pre), "entree": _snap(entree), "posts": [_snap(p) for p in posts],   # NIVEAUX BRUTS
@@ -513,6 +516,8 @@ def ligne_sortie(fill: dict, *, sortie: dict, capture_recv_mono: float, horizon_
     return {"schema_version": SCHEMA_VERSION, "phase": "sortie", "coin": str(fill.get("coin") or "").upper(),
             "fill_id": fill.get("hash"), "fill_exchange_time": int(fill.get("ts_ms") or 0),
             "book_exchange_time": r.get("book_exchange_time"),
+            "fill_received_at_ms": fill.get("received_at_ms"),
+            "book_received_at_ms": sortie.get("recv_wall_ms"),
             "retard_sortie_ms": round(float(capture_recv_mono) - cible, 1),
             "bids": r.get("bids5"), "asks": r.get("asks5"), "book_imbalance_top5": book_imbalance_top5(r),
             "shadow": True, "real_execution": False}

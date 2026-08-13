@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 import math
+import json
 
 from hl_observer.backtesting.copy_vault_executable import (
     calibrate_train_only,
     cluster_metaorders,
     evaluate_frozen,
     execute_metaorder,
+    load_observed_books,
     replay_metaorders,
     summarize,
     temporal_evidence,
@@ -27,7 +29,15 @@ def _entry(
     }
 
 
-def _book(ts_ms: int, bid: float, ask: float, *, capacity: float = 1_000.0, line: int = 1) -> dict:
+def _book(
+    ts_ms: int,
+    bid: float,
+    ask: float,
+    *,
+    capacity: float = 1_000.0,
+    line: int = 1,
+    causal: bool = False,
+) -> dict:
     return {
         "coin": "BTC",
         "ts_ms": ts_ms,
@@ -35,6 +45,7 @@ def _book(ts_ms: int, bid: float, ask: float, *, capacity: float = 1_000.0, line
         "ask": ask,
         "capacity_usd": capacity,
         "source_line": line,
+        "causal_observation": causal,
     }
 
 
@@ -53,6 +64,92 @@ def test_metaorders_collapse_slices_even_when_other_coin_is_interleaved() -> Non
     assert [row["fill_count"] for row in btc] == [2, 1]
     assert audit["duplicate_events_rejected"] == 1
     assert audit["sliced_fills_collapsed"] == 1
+
+
+def test_metaorder_live_emploie_reception_locale_et_backfill_ne_prouve_pas_forward() -> None:
+    live = {
+        **_entry("live", 1_000),
+        "source": "LIVE_WS",
+        "is_snapshot": False,
+        "observed_at_ms": 1_025,
+    }
+    history = _entry("history", 2_000)
+    metaorders, audit = cluster_metaorders([live, history], gap_ms=1)
+
+    by_id = {row["member_event_ids"][0]: row for row in metaorders}
+    assert by_id["live"]["signal_ts_ms"] == 1_025
+    assert by_id["live"]["causal_forward_eligible"] is True
+    assert by_id["history"]["causal_forward_eligible"] is False
+    assert audit["causal_forward_metaorders"] == 1
+
+    books = {
+        "BTC": [
+            _book(1_025, 99.0, 101.0, line=1, causal=True),
+            _book(61_025, 100.0, 102.0, line=2, causal=True),
+            _book(361_025, 109.0, 111.0, line=3, causal=True),
+            _book(2_000, 99.0, 101.0, line=4),
+            _book(62_000, 100.0, 102.0, line=5),
+            _book(362_000, 109.0, 111.0, line=6),
+        ]
+    }
+    books["BTC"].sort(key=lambda row: row["ts_ms"])
+    trades, diagnostics = replay_metaorders(
+        metaorders,
+        books,
+        horizon_ms=300_000,
+        require_causal_observation=True,
+    )
+
+    assert len(trades) == 1 and trades[0]["signal_source"] == "LIVE_WS"
+    assert diagnostics["NON_CAUSAL_FORWARD_SIGNAL"] == 1
+
+
+def test_forward_refuse_un_carnet_non_causal() -> None:
+    entry = {
+        **_entry("live", 1_000),
+        "source": "LIVE_WS",
+        "is_snapshot": False,
+        "observed_at_ms": 1_025,
+    }
+    metaorder = cluster_metaorders([entry])[0][0]
+    books = [
+        _book(1_025, 99.0, 101.0),
+        _book(61_025, 100.0, 102.0),
+        _book(361_025, 109.0, 111.0),
+    ]
+
+    trades, diagnostics = replay_metaorders(
+        [metaorder], {"BTC": books}, horizon_ms=300_000,
+        require_causal_observation=True,
+    )
+
+    assert trades == []
+    assert diagnostics["NON_CAUSAL_FORWARD_BOOK"] == 1
+
+
+def test_loader_separe_historique_et_tape_ws_causale(tmp_path) -> None:
+    data = tmp_path / "runtime" / "data"
+    data.mkdir(parents=True)
+    (data / "carnet_venues.jsonl").write_text(json.dumps({
+        "coin": "BTC", "collecte_ts": 1.0, "hl_bid": 99.0,
+        "hl_ask": 101.0, "taille_min_usd": 500.0,
+    }) + "\n", encoding="utf-8")
+    causal = {
+        "schema_version": "hypersmart.copy_vault_l2.v1",
+        "coin": "BTC", "received_at_ms": 2_010, "exchange_ts_ms": 2_000,
+        "bid": 100.0, "ask": 102.0, "capacity_usd": 700.0,
+        "source": "HYPERLIQUID_L2_WS", "data_origin": "REAL_OBSERVED",
+        "causal_observation": True,
+    }
+    (data / "copy_vault_l2_tape.jsonl").write_text(
+        json.dumps(causal) + "\n", encoding="utf-8"
+    )
+
+    books, audit = load_observed_books(tmp_path, coins={"BTC"})
+
+    assert [row["causal_observation"] for row in books["BTC"]] == [False, True]
+    assert books["BTC"][1]["ts_ms"] == 2_010
+    assert audit["source_counts"] == {"historical_observed": 1, "causal_ws": 1}
 
 
 def test_stale_reference_is_refused_instead_of_using_future_price() -> None:
@@ -137,20 +234,27 @@ def test_walk_forward_selects_on_train_and_forward_is_strictly_post_freeze() -> 
     entries = []
     books = []
     spacing = 4_000_000
-    for index in range(16):
+    for index in range(20):
         signal = 1_000 + index * spacing
-        entries.append(_entry(f"e-{index}", signal))
+        entries.append({
+            **_entry(f"e-{index}", signal),
+            "source": "LIVE_WS",
+            "is_snapshot": False,
+            "observed_at_ms": signal,
+        })
         books.extend([
-            _book(signal, 99.0, 101.0, line=index * 3 + 1),
-            _book(signal + 60_000, 100.0, 102.0, line=index * 3 + 2),
-            _book(signal + 360_000, 109.0, 111.0, line=index * 3 + 3),
+            _book(signal, 99.0, 101.0, line=index * 3 + 1, causal=True),
+            _book(signal + 60_000, 100.0, 102.0, line=index * 3 + 2, causal=True),
+            _book(signal + 360_000, 109.0, 111.0, line=index * 3 + 3, causal=True),
         ])
     metaorders = cluster_metaorders(entries)[0]
-    calibration = calibrate_train_only(metaorders, {"BTC": books})
+    # Freeze the protocol on the first 16 observations, then expose four
+    # genuinely later causal observations as the forward segment.
+    calibration = calibrate_train_only(metaorders[:16], {"BTC": books})
     assert calibration["selection_scope"] == "TRAIN_ONLY"
     assert calibration["selection_eligible"] is True
 
-    freeze_at = int(metaorders[12]["signal_ts_ms"]) - 1
+    freeze_at = int(metaorders[15]["signal_ts_ms"])
     parameters = {
         "selected_horizon_ms": calibration["selected_horizon_ms"],
         "walk_forward_bounds": calibration["bounds"],

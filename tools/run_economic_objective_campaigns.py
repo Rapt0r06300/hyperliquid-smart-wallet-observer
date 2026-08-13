@@ -84,9 +84,11 @@ def run_campaigns(
         root,
         (
             "runtime/data/vault_fills.jsonl",
+            "runtime/data/vault_fills_live.jsonl",
             "runtime/data/vault_episodes.jsonl",
             "runtime/data/vault_snapshots.jsonl",
             "runtime/data/carnet_venues.jsonl",
+            "runtime/data/copy_vault_l2_tape.jsonl",
         ),
     )
     copy_entries, canonical_input_audit = copy_tool.charger_entrees_alpha_avec_audit(root)
