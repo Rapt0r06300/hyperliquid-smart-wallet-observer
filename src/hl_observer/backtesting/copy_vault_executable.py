@@ -744,16 +744,27 @@ def temporal_evidence(evaluation: Mapping[str, Any]) -> dict[str, Any]:
     causal_forward = bool(forward_trades) and all(
         row.get("causal_forward_eligible") is True for row in forward_trades
     )
+    def proof_segment(summary: Mapping[str, Any], *, count: int) -> dict[str, Any]:
+        return {
+            key: summary.get(key)
+            for key in (
+                "gross_pnl_usd", "fees_usd", "spread_cost_usd",
+                "slippage_cost_usd", "latency_cost_usd", "net_pnl_usd",
+                "trade_ids_count", "trade_ids_sha256", "duplicate_trade_ids",
+            )
+        } | {
+            "sample_count": count,
+            "liquidatable_net": summary.get("LIQUIDATABLE_NET") is True,
+        }
+
     return {
         "oos": {
-            "net_pnl_usd": oos_net,
-            "sample_count": oos_count,
+            **proof_segment(oos_summary, count=oos_count),
             "no_lookahead": True,
             "purged": True,
         },
         "forward": {
-            "net_pnl_usd": forward_net,
-            "sample_count": forward_count,
+            **proof_segment(forward_summary, count=forward_count),
             "post_freeze": causal_forward,
             "causal_live_only": causal_forward,
         },

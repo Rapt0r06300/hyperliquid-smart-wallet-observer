@@ -469,11 +469,19 @@ def _summary(trades: list[dict]) -> dict:
 def _objective_segment(trades: list[dict], *, post_freeze: bool = False) -> dict:
     summary = _summary(trades)
     return {
+        "gross_pnl_usd": summary["gross_pnl_usd"],
+        "fees_usd": summary["fees_usd"],
+        "spread_cost_usd": summary["spread_cost_usd"],
+        "slippage_cost_usd": summary["slippage_cost_usd"],
+        "latency_cost_usd": summary["latency_cost_usd"],
         "net_pnl_usd": summary["net_total_usd"],
         "sample_count": summary["n_trades"],
+        "trade_ids_count": summary["trade_ids_count"],
+        "trade_ids_sha256": summary["trade_ids_sha256"],
+        "duplicate_trade_ids": summary["duplicate_trade_ids"],
         "no_lookahead": True,
         "post_freeze": bool(post_freeze and summary["n_trades"] > 0),
-        "LIQUIDATABLE_NET": summary["LIQUIDATABLE_NET"],
+        "liquidatable_net": summary["LIQUIDATABLE_NET"],
     }
 
 
@@ -785,11 +793,19 @@ def preuves_temporelles_walk_forward(walk_forward: dict) -> dict:
     def objective(summary: dict, *, post_freeze: bool = False) -> dict:
         count = int(summary.get("n_trades") or 0)
         return {
+            "gross_pnl_usd": summary.get("gross_pnl_usd"),
+            "fees_usd": summary.get("fees_usd"),
+            "spread_cost_usd": summary.get("spread_cost_usd"),
+            "slippage_cost_usd": summary.get("slippage_cost_usd"),
+            "latency_cost_usd": summary.get("latency_cost_usd"),
             "net_pnl_usd": float(summary.get("net_total_usd") or 0.0),
             "sample_count": count,
+            "trade_ids_count": summary.get("trade_ids_count"),
+            "trade_ids_sha256": summary.get("trade_ids_sha256"),
+            "duplicate_trade_ids": summary.get("duplicate_trade_ids"),
             "no_lookahead": True,
             "post_freeze": bool(post_freeze and count > 0),
-            "LIQUIDATABLE_NET": summary.get("LIQUIDATABLE_NET") is True,
+            "liquidatable_net": summary.get("LIQUIDATABLE_NET") is True,
         }
 
     return {

@@ -173,8 +173,34 @@ def test_executable_copy_campaign_maps_only_closed_liquidatable_evidence(tmp_pat
             "trade_ids_sha256": "c" * 64,
         },
         "temporal_evidence": {
-            "oos": {"net_pnl_usd": 2.1, "sample_count": 1, "no_lookahead": True},
-            "forward": {"net_pnl_usd": 2.3, "sample_count": 1, "post_freeze": True},
+            "oos": {
+                "gross_pnl_usd": 2.3,
+                "fees_usd": 0.05,
+                "spread_cost_usd": 0.05,
+                "slippage_cost_usd": 0.05,
+                "latency_cost_usd": 0.05,
+                "net_pnl_usd": 2.1,
+                "sample_count": 1,
+                "liquidatable_net": True,
+                "duplicate_trade_ids": 0,
+                "trade_ids_count": 1,
+                "trade_ids_sha256": "d" * 64,
+                "no_lookahead": True,
+            },
+            "forward": {
+                "gross_pnl_usd": 2.5,
+                "fees_usd": 0.05,
+                "spread_cost_usd": 0.05,
+                "slippage_cost_usd": 0.05,
+                "latency_cost_usd": 0.05,
+                "net_pnl_usd": 2.3,
+                "sample_count": 1,
+                "liquidatable_net": True,
+                "duplicate_trade_ids": 0,
+                "trade_ids_count": 1,
+                "trade_ids_sha256": "e" * 64,
+                "post_freeze": True,
+            },
             "placebos": {"beaten": True},
         },
     }
@@ -249,8 +275,34 @@ def test_executable_lead_lag_campaign_maps_closed_ledger_and_temporal_proof(
                 "trade_ids_sha256": "f" * 64,
             },
             "temporal_evidence": {
-                "oos": {"net_pnl_usd": 2.0, "sample_count": 2, "no_lookahead": True},
-                "forward": {"net_pnl_usd": 2.5, "sample_count": 2, "post_freeze": True},
+                "oos": {
+                    "gross_pnl_usd": 2.3,
+                    "fees_usd": 0.1,
+                    "spread_cost_usd": 0.1,
+                    "slippage_cost_usd": 0.05,
+                    "latency_cost_usd": 0.05,
+                    "net_pnl_usd": 2.0,
+                    "sample_count": 2,
+                    "liquidatable_net": True,
+                    "duplicate_trade_ids": 0,
+                    "trade_ids_count": 2,
+                    "trade_ids_sha256": "g" * 64,
+                    "no_lookahead": True,
+                },
+                "forward": {
+                    "gross_pnl_usd": 2.8,
+                    "fees_usd": 0.1,
+                    "spread_cost_usd": 0.1,
+                    "slippage_cost_usd": 0.05,
+                    "latency_cost_usd": 0.05,
+                    "net_pnl_usd": 2.5,
+                    "sample_count": 2,
+                    "liquidatable_net": True,
+                    "duplicate_trade_ids": 0,
+                    "trade_ids_count": 2,
+                    "trade_ids_sha256": "h" * 64,
+                    "post_freeze": True,
+                },
                 "placebos": {"beaten": True},
             },
         },
@@ -425,3 +477,27 @@ def test_markdown_never_presents_provisional_positive_pnl_as_proven() -> None:
     assert "PnL net observe (diagnostic): +9.000000 USD" in report
     assert "PnL net eligible a la preuve: NON ELIGIBLE A LA PREUVE" in report
     assert "OBJECTIF +4 USD : ATTEINT" not in report
+
+
+def test_markdown_separe_les_couts_de_preuve_des_couts_globaux() -> None:
+    campaign = build_copy_campaign({}, freeze=None, datasets={"files": []})
+    campaign.update(
+        {
+            "proof_economics": {
+                "gross_pnl_usd": 5.5,
+                "fees_usd": 0.2,
+                "spread_cost_usd": 0.2,
+                "slippage_cost_usd": 0.1,
+                "latency_cost_usd": 0.1,
+                "trade_ids_count": 4,
+                "trade_ids_sha256": "f" * 64,
+            }
+        }
+    )
+
+    report = render_campaign_report([campaign])
+
+    assert "PnL brut realise (diagnostic global)" in report
+    assert "Preuve OOS+forward brut: 5.5" in report
+    assert "Preuve OOS+forward frais: 0.2" in report
+    assert f"Preuve OOS+forward trades/hash: 4 / {'f' * 64}" in report

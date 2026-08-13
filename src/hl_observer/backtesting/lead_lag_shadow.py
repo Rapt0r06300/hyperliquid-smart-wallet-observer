@@ -718,8 +718,16 @@ def executable_campaign_evidence(
         "temporal_evidence": {
             "oos": (
                 {
-                    "net_pnl_usd": oos["net_pnl_usd"],
+                    **{
+                        key: oos.get(key)
+                        for key in (
+                            "gross_pnl_usd", "fees_usd", "spread_cost_usd",
+                            "slippage_cost_usd", "latency_cost_usd", "net_pnl_usd",
+                            "trade_ids_count", "trade_ids_sha256", "duplicate_trade_ids",
+                        )
+                    },
                     "sample_count": oos["positions_fermees"],
+                    "liquidatable_net": oos.get("LIQUIDATABLE_NET") is True,
                     "no_lookahead": True,
                 }
                 if oos["positions_fermees"] > 0
@@ -727,8 +735,16 @@ def executable_campaign_evidence(
             ),
             "forward": (
                 {
-                    "net_pnl_usd": forward["net_pnl_usd"],
+                    **{
+                        key: forward.get(key)
+                        for key in (
+                            "gross_pnl_usd", "fees_usd", "spread_cost_usd",
+                            "slippage_cost_usd", "latency_cost_usd", "net_pnl_usd",
+                            "trade_ids_count", "trade_ids_sha256", "duplicate_trade_ids",
+                        )
+                    },
                     "sample_count": forward["positions_fermees"],
+                    "liquidatable_net": forward.get("LIQUIDATABLE_NET") is True,
                     "post_freeze": True,
                 }
                 if forward["positions_fermees"] > 0

@@ -3,6 +3,34 @@ from __future__ import annotations
 from hl_observer.simulation.economic_objective import canonical_family, evaluate_objective
 
 
+def _segment(
+    *,
+    gross: float,
+    net: float,
+    count: int,
+    trade_hash: str,
+    fees: float = 0.1,
+    spread: float = 0.1,
+    slippage: float = 0.1,
+    latency: float = 0.1,
+    **flags,
+):
+    return {
+        "gross_pnl_usd": gross,
+        "fees_usd": fees,
+        "spread_cost_usd": spread,
+        "slippage_cost_usd": slippage,
+        "latency_cost_usd": latency,
+        "net_pnl_usd": net,
+        "sample_count": count,
+        "liquidatable_net": True,
+        "duplicate_trade_ids": 0,
+        "trade_ids_count": count,
+        "trade_ids_sha256": trade_hash * 64,
+        **flags,
+    }
+
+
 def _proof(**overrides):
     row = {
         "family": "copy_vault",
@@ -22,8 +50,21 @@ def _proof(**overrides):
         "duplicate_trade_ids": 0,
         "trade_ids_count": 4,
         "trade_ids_sha256": "a" * 64,
-        "oos": {"net_pnl_usd": 2.2, "sample_count": 2, "no_lookahead": True},
-        "forward": {"net_pnl_usd": 2.4, "sample_count": 2, "post_freeze": True},
+        "oos": _segment(
+            gross=2.7,
+            net=2.2,
+            count=2,
+            trade_hash="b",
+            fees=0.2,
+            no_lookahead=True,
+        ),
+        "forward": _segment(
+            gross=2.8,
+            net=2.4,
+            count=2,
+            trade_hash="c",
+            post_freeze=True,
+        ),
         "placebos": {"beaten": True},
     }
     row.update(overrides)
@@ -77,10 +118,22 @@ def test_parametres_non_geles_et_cross_mono_jambe_sont_refuses():
 def test_pnl_train_ne_compte_jamais_dans_la_preuve_quatre_dollars():
     result = evaluate_objective(
         _proof(
-            gross_pnl_usd=100.4,
+            gross_pnl_usd=101.4,
             net_pnl_usd=100.0,
-            oos={"net_pnl_usd": 0.4, "sample_count": 2, "no_lookahead": True},
-            forward={"net_pnl_usd": 0.5, "sample_count": 2, "post_freeze": True},
+            oos=_segment(
+                gross=0.8,
+                net=0.4,
+                count=2,
+                trade_hash="d",
+                no_lookahead=True,
+            ),
+            forward=_segment(
+                gross=0.9,
+                net=0.5,
+                count=2,
+                trade_hash="e",
+                post_freeze=True,
+            ),
         )
     )
 
@@ -100,3 +153,15 @@ def test_preuve_exige_des_echantillons_oos_et_forward_non_vides():
     assert "OOS_SAMPLE_MISSING" in result["objective_reasons"]
     assert "FORWARD_SAMPLE_MISSING" in result["objective_reasons"]
     assert result["eligible_net_pnl_usd"] is None
+
+
+def test_preuve_positive_sans_detail_des_couts_est_refusee():
+    result = evaluate_objective(
+        _proof(
+            oos={"net_pnl_usd": 2.2, "sample_count": 2, "no_lookahead": True},
+        )
+    )
+
+    assert result["proof_net_pnl_usd"] is None
+    assert "OOS_UNMEASURED:fees_usd" in result["objective_reasons"]
+    assert "OOS_TRADE_ID_PROOF_INCOMPLETE" in result["objective_reasons"]

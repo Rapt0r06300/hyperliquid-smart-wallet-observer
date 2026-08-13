@@ -635,6 +635,11 @@ def render_campaign_report(campaigns: Iterable[Mapping[str, Any]]) -> str:
             if isinstance(campaign.get("dataset_provenance"), Mapping)
             else {}
         )
+        proof_economics = (
+            campaign.get("proof_economics")
+            if isinstance(campaign.get("proof_economics"), Mapping)
+            else {}
+        )
         lines.extend(
             [
                 f"## {labels.get(family, family)} - OBJECTIF +4 USD : {status}",
@@ -647,11 +652,17 @@ def render_campaign_report(campaigns: Iterable[Mapping[str, Any]]) -> str:
                 f"- Dataset SHA-256: {datasets.get('dataset_fingerprint')}",
                 f"- Signaux: {campaign.get('signal_count')}",
                 f"- Positions ouvertes/fermees: {campaign.get('opened_positions')} / {campaign.get('closed_positions')}",
-                f"- PnL brut realise: {campaign.get('gross_pnl_usd')}",
-                f"- Frais entree/sortie: {campaign.get('fees_usd')}",
-                f"- Cout spread: {campaign.get('spread_cost_usd')}",
-                f"- Cout slippage: {campaign.get('slippage_cost_usd')}",
-                f"- Cout latence: {campaign.get('latency_cost_usd')}",
+                f"- PnL brut realise (diagnostic global): {campaign.get('gross_pnl_usd')}",
+                f"- Frais entree/sortie (diagnostic global): {campaign.get('fees_usd')}",
+                f"- Cout spread (diagnostic global): {campaign.get('spread_cost_usd')}",
+                f"- Cout slippage (diagnostic global): {campaign.get('slippage_cost_usd')}",
+                f"- Cout latence (diagnostic global): {campaign.get('latency_cost_usd')}",
+                f"- Preuve OOS+forward brut: {proof_economics.get('gross_pnl_usd')}",
+                f"- Preuve OOS+forward frais: {proof_economics.get('fees_usd')}",
+                f"- Preuve OOS+forward spread: {proof_economics.get('spread_cost_usd')}",
+                f"- Preuve OOS+forward slippage: {proof_economics.get('slippage_cost_usd')}",
+                f"- Preuve OOS+forward latence: {proof_economics.get('latency_cost_usd')}",
+                f"- Preuve OOS+forward trades/hash: {proof_economics.get('trade_ids_count')} / {proof_economics.get('trade_ids_sha256')}",
                 f"- LIQUIDATABLE_NET: {campaign.get('liquidatable_net')}",
                 f"- ROI: {campaign.get('roi_pct')}",
                 f"- Drawdown max USD: {campaign.get('max_drawdown_usd')}",
