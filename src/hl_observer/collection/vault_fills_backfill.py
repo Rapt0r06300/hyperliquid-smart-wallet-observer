@@ -133,13 +133,14 @@ def reconstruire_episodes(fills: list[dict]) -> list[dict]:
             fill_id = hashlib.sha256(
                 json.dumps(identity, sort_keys=True, separators=(",", ":")).encode("utf-8")
             ).hexdigest()
+            raw_snapshot = f.get("isSnapshot")
             events.append({"ts_ms": f["ts_ms"], "vault": vault, "coin": coin, "action": action,
                            "direction": direction, "taille_usd": round(taille_usd, 2),
                            "pos_avant": round(avant, 8), "pos_apres": round(pos, 8), "px": f["px"],
                            "sz": f["sz"], "dir": f.get("dir"), "tid": f.get("tid"),
                            "oid": f.get("oid"), "hash": f.get("hash"), "fill_id": fill_id,
                            "source": f.get("source") or "REST_BACKFILL",
-                           "is_snapshot": bool(f.get("isSnapshot")),
+                           "is_snapshot": raw_snapshot if isinstance(raw_snapshot, bool) else None,
                            "observed_at_ms": f.get("received_at_ms"),
                            "stable_event_id": f.get("stable_event_id")})
     events.sort(key=lambda e: e["ts_ms"])

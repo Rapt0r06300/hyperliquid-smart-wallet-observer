@@ -106,6 +106,33 @@ def test_pipeline_fusionne_live_causal_exclut_snapshots_et_prefere_preuve_ws(tmp
     assert audit["causal_rows_preferred_on_duplicate"] is True
 
 
+def test_pipeline_ne_compte_pas_un_ancien_live_sans_horloge_comme_causal(tmp_path):
+    data = tmp_path / "runtime" / "data"
+    data.mkdir(parents=True)
+    historical = {
+        "vault": "0xA", "ts_ms": 200, "coin": "BTC", "px": 100.0,
+        "sz": 1.0, "signe": 1, "dir": "Open Long", "start_position": 0.0,
+        "hash": "0xshared",
+    }
+    legacy_live = {
+        **historical, "source": "LIVE_WS", "isSnapshot": False,
+    }
+    (data / "vault_fills.jsonl").write_text(json.dumps(historical), encoding="utf-8")
+    (data / "vault_fills_live.jsonl").write_text(json.dumps(legacy_live), encoding="utf-8")
+
+    fills, audit = PR._fills_canoniques(tmp_path)
+    episodes, episode_audit = PR._episodes_canoniques(tmp_path)
+
+    assert len(fills) == 1
+    assert fills[0].get("source") != "LIVE_WS"
+    assert episodes[0]["source"] == "REST_BACKFILL"
+    assert episodes[0]["is_snapshot"] is None
+    assert audit["live_incremental_rows"] == 1
+    assert audit["causal_live_fill_rows"] == 0
+    assert audit["live_incremental_without_valid_receive_time_audit_only"] == 1
+    assert episode_audit["causal_live_fill_rows"] == 0
+
+
 def test_construire_need_more_data_sans_historique(tmp_path):
     (tmp_path / "runtime" / "data").mkdir(parents=True)
     (tmp_path / "runtime" / "data" / "vault_episodes.jsonl").write_text("")

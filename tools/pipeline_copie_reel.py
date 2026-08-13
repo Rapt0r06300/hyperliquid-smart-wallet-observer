@@ -129,19 +129,36 @@ def _fills_canoniques(root: Path) -> tuple[list[dict], dict[str, Any]]:
 
     historical = _charger_jsonl(root / FILLS)
     live_rows = _charger_jsonl(root / FILLS_LIVE)
-    causal_live = [
+    live_incremental = [
         row for row in live_rows
         if row.get("source") == "LIVE_WS" and row.get("isSnapshot") is False
     ]
+    causal_live: list[dict] = []
+    unclocked_live: list[dict] = []
+    for row in live_incremental:
+        try:
+            event_ms = int(row.get("ts_ms") or 0)
+            received_ms = int(row.get("received_at_ms") or 0)
+        except (TypeError, ValueError, OverflowError):
+            event_ms = received_ms = 0
+        if event_ms > 0 and received_ms >= event_ms:
+            causal_live.append(row)
+        else:
+            unclocked_live.append(row)
     # Put causal rows first.  ``dedupliquer`` is stable for equal event times,
     # so a fill seen both by WS and by a later REST backfill retains the only
     # provenance that can support a post-freeze forward claim.
-    merged = causal_live + historical
+    # Historical rows precede legacy unclocked WS rows: those old rows remain
+    # useful as audit history, but must never displace a properly labelled
+    # REST observation or be advertised as causal evidence.
+    merged = causal_live + historical + unclocked_live
     deduped = VB.dedupliquer(merged)
     return deduped, {
         "historical_fill_rows": len(historical),
         "live_fill_rows": len(live_rows),
+        "live_incremental_rows": len(live_incremental),
         "causal_live_fill_rows": len(causal_live),
+        "live_incremental_without_valid_receive_time_audit_only": len(unclocked_live),
         "live_snapshot_rows_rejected": sum(
             1 for row in live_rows if row.get("isSnapshot") is True
         ),
@@ -152,7 +169,7 @@ def _fills_canoniques(root: Path) -> tuple[list[dict], dict[str, Any]]:
         "deduped_fill_rows": len(deduped),
         "cross_source_or_internal_duplicates_rejected": len(merged) - len(deduped),
         "causal_rows_preferred_on_duplicate": True,
-        "live_policy": "LIVE_WS_AND_NOT_SNAPSHOT_ONLY",
+        "live_policy": "LIVE_WS_AND_NOT_SNAPSHOT_AND_VALID_LOCAL_RECEIVE_TIME",
     }
 
 
@@ -208,11 +225,18 @@ def charger_entrees_alpha_avec_audit(root: Path) -> tuple[list[dict], dict[str, 
     out: list[dict] = []
     nav_ages: list[int] = []
     rejected = 0
+    causal_nav_rejected = 0
     for episode in alpha:
         ts_ms = int(episode.get("ts_ms") or 0)
         nav = _nav_asof(history, str(episode.get("vault") or ""), ts_ms)
         if nav is None:
             rejected += 1
+            if (
+                episode.get("source") == "LIVE_WS"
+                and episode.get("is_snapshot") is False
+                and int(episode.get("observed_at_ms") or 0) >= ts_ms > 0
+            ):
+                causal_nav_rejected += 1
             continue
         nav_usd, nav_ts_ms = nav
         nav_age_ms = ts_ms - nav_ts_ms
@@ -230,6 +254,25 @@ def charger_entrees_alpha_avec_audit(root: Path) -> tuple[list[dict], dict[str, 
         "alpha_before_nav_gate": len(alpha),
         "alpha_entries": len(out),
         "missing_or_stale_asof_nav_rejected": rejected,
+        "causal_episodes": sum(
+            1 for row in episodes
+            if row.get("source") == "LIVE_WS"
+            and row.get("is_snapshot") is False
+            and int(row.get("observed_at_ms") or 0) >= int(row.get("ts_ms") or 0) > 0
+        ),
+        "causal_alpha_before_nav_gate": sum(
+            1 for row in alpha
+            if row.get("source") == "LIVE_WS"
+            and row.get("is_snapshot") is False
+            and int(row.get("observed_at_ms") or 0) >= int(row.get("ts_ms") or 0) > 0
+        ),
+        "causal_alpha_entries": sum(
+            1 for row in out
+            if row.get("source") == "LIVE_WS"
+            and row.get("is_snapshot") is False
+            and int(row.get("observed_at_ms") or 0) >= int(row.get("ts_ms") or 0) > 0
+        ),
+        "causal_missing_or_stale_asof_nav_rejected": causal_nav_rejected,
         "nav_age_max_ms": max(nav_ages) if nav_ages else None,
         "nav_age_mean_ms": round(sum(nav_ages) / len(nav_ages), 3) if nav_ages else None,
     })
