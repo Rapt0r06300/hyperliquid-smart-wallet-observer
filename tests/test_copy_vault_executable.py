@@ -10,6 +10,7 @@ from hl_observer.backtesting.copy_vault_executable import (
     execute_metaorder,
     load_observed_books,
     replay_metaorders,
+    select_causal_protocol_inputs,
     summarize,
     temporal_evidence,
 )
@@ -150,6 +151,62 @@ def test_loader_separe_historique_et_tape_ws_causale(tmp_path) -> None:
     assert [row["causal_observation"] for row in books["BTC"]] == [False, True]
     assert books["BTC"][1]["ts_ms"] == 2_010
     assert audit["source_counts"] == {"historical_observed": 1, "causal_ws": 1}
+
+
+def test_protocol_inputs_excluent_backfill_et_carnet_non_causal() -> None:
+    historical = cluster_metaorders([_entry("history", 1_000)])[0][0]
+    live = cluster_metaorders([{
+        **_entry("live", 2_000),
+        "source": "LIVE_WS",
+        "is_snapshot": False,
+        "observed_at_ms": 2_025,
+    }])[0][0]
+    books = {
+        "BTC": [
+            _book(1_000, 99.0, 101.0),
+            _book(2_025, 100.0, 102.0, causal=True),
+        ],
+        "ETH": [_book(3_000, 10.0, 11.0, causal=True)],
+    }
+
+    metaorders, causal_books, audit = select_causal_protocol_inputs(
+        [historical, live], books
+    )
+
+    assert [row["metaorder_id"] for row in metaorders] == [live["metaorder_id"]]
+    assert list(causal_books) == ["BTC"]
+    assert len(causal_books["BTC"]) == 1
+    assert audit["causal_protocol_metaorders"] == 1
+    assert audit["historical_or_noncausal_metaorders_excluded"] == 1
+    assert audit["causal_protocol_book_rows"] == 1
+    assert audit["historical_or_noncausal_book_rows_excluded"] == 2
+
+
+def test_calibration_causale_refuse_un_signal_historique() -> None:
+    historical = cluster_metaorders([
+        _entry(f"history-{index}", 1_000 + index * 4_000_000)
+        for index in range(12)
+    ])[0]
+    books = {
+        "BTC": [
+            _book(1_000, 99.0, 101.0, causal=True),
+            _book(61_000, 100.0, 102.0, causal=True),
+            _book(361_000, 109.0, 111.0, causal=True),
+        ]
+    }
+
+    result = calibrate_train_only(
+        historical,
+        books,
+        require_causal_observation=True,
+    )
+
+    assert result["selection_eligible"] is False
+    assert result["causal_observation_required"] is True
+    assert all(
+        row["diagnostics"].get("NON_CAUSAL_FORWARD_SIGNAL", 0) > 0
+        for row in result["grid"]
+    )
 
 
 def test_stale_reference_is_refused_instead_of_using_future_price() -> None:

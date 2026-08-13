@@ -57,6 +57,7 @@ def _copy_state(campaign: Mapping[str, Any], raw: Mapping[str, Any]) -> dict[str
     audit = _mapping(raw.get("canonical_input_audit"))
     metaorders = _mapping(raw.get("metaorder_audit"))
     books = _mapping(raw.get("book_meta"))
+    causal = _mapping(raw.get("causal_protocol_audit"))
     calibration = _mapping(raw.get("calibration"))
     grid = calibration.get("grid") if isinstance(calibration.get("grid"), list) else []
     stale = sum(
@@ -91,7 +92,14 @@ def _copy_state(campaign: Mapping[str, Any], raw: Mapping[str, Any]) -> dict[str
                 audit.get("missing_or_stale_asof_nav_rejected")
             ),
             "metaorders": _integer(metaorders.get("metaorders")),
+            "historical_metaorders_audit_only": _integer(metaorders.get("all_metaorders")),
+            "causal_protocol_metaorders": _integer(
+                causal.get("causal_protocol_metaorders")
+            ),
             "observed_book_rows": _integer(books.get("valid_rows")),
+            "causal_protocol_book_rows": _integer(
+                causal.get("causal_protocol_book_rows")
+            ),
             "book_coins": _integer(books.get("coins")),
             "stale_or_missing_book_rejections_across_grid": stale,
             "closed_liquidatable_episodes": closed,

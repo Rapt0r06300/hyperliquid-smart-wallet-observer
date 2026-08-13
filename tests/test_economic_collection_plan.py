@@ -32,6 +32,10 @@ def _raw_reports():
             },
             "metaorder_audit": {"metaorders": 9},
             "book_meta": {"valid_rows": 1000, "coins": 3},
+            "causal_protocol_audit": {
+                "causal_protocol_metaorders": 9,
+                "causal_protocol_book_rows": 1000,
+            },
             "calibration": {
                 "grid": [
                     {"diagnostics": {"STALE_OR_MISSING_REFERENCE_BOOK": 9}}
@@ -118,6 +122,8 @@ def test_plan_records_exact_collectors_progress_and_freeze() -> None:
     copy = next(row for row in plan["families"] if row["family"] == "copy_vault")
     assert "runtime/data/copy_vault_l2_tape.jsonl" in copy["required_artifacts"]
     assert "runtime/data/vault_fills_live.jsonl" in copy["required_artifacts"]
+    assert copy["progress"]["causal_protocol_metaorders"] == 9
+    assert copy["progress"]["causal_protocol_book_rows"] == 1000
     assert lead["freeze"]["campaign_id"] == "lead-freeze"
     assert lead["progress"]["missing_top_sizes"] == 30
     assert plan["collector_state"]["profil"] == "harvest"

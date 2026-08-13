@@ -19,7 +19,7 @@ from typing import Any
 from hl_observer.config.frais_venues import frais_taker_bps
 
 SCHEMA_VERSION = "hypersmart.copy_vault_executable.v1"
-PROTOCOL_NAME = "copy_vault_executable_walk_forward_v3"
+PROTOCOL_NAME = "copy_vault_executable_walk_forward_v4_causal_only"
 METAORDER_GAP_MS = 60_000
 COPY_DELAY_MS = 60_000
 MAX_REFERENCE_LAG_MS = 30_000
@@ -43,11 +43,10 @@ def protocol_signature() -> dict[str, Any]:
         "notional_usd": NOTIONAL_USD,
         "max_open_positions": MAX_OPEN_POSITIONS,
         "fee_source": "hl_observer.config.frais_venues:frais_taker_bps(HL)",
-        "book_source": (
-            "train_oos=runtime/data/carnet_venues.jsonl;"
-            "forward=runtime/data/copy_vault_l2_tape.jsonl:HYPERLIQUID_L2_WS_causal"
-        ),
-        "fill_source": "REST_BACKFILL_for_train_oos;LIVE_WS_non_snapshot_with_receive_time_for_forward",
+        "book_source": "runtime/data/copy_vault_l2_tape.jsonl:HYPERLIQUID_L2_WS_causal",
+        "fill_source": "LIVE_WS_non_snapshot_with_receive_time_for_all_protocol_segments",
+        "historical_source_policy": "REST_BACKFILL_and_historical_books_audit_only",
+        "causal_observation_required_all_segments": True,
         "forward_signal_policy": "causal_live_first_fill_observed_after_physical_freeze",
     }
 
@@ -295,6 +294,59 @@ def load_observed_books(
         "source_counts": source_counts,
         "causal_forward_rows": source_counts["causal_ws"],
         "capacity_semantics": "minimum_USD_across_HL_and_reference_venue_bid_ask",
+    }
+
+
+def select_causal_protocol_inputs(
+    metaorders: Iterable[Mapping[str, Any]],
+    books_by_coin: Mapping[str, Iterable[Mapping[str, Any]]],
+) -> tuple[list[dict[str, Any]], dict[str, list[dict[str, Any]]], dict[str, Any]]:
+    """Separate certifiable live evidence from historical audit material.
+
+    REST backfills remain useful for discovery and diagnostics, but they were
+    not observed by the running strategy at their event time.  Likewise, a
+    historical cross-venue book must not calibrate a Copy-Vault rule whose
+    forward execution relies on the dedicated causal Hyperliquid L2 tape.
+    """
+
+    all_metaorders = [dict(row) for row in metaorders]
+    causal_metaorders = [
+        row
+        for row in all_metaorders
+        if row.get("causal_forward_eligible") is True
+        and str(row.get("signal_source") or "") == "LIVE_WS"
+    ]
+    causal_metaorders.sort(
+        key=lambda row: (int(row.get("signal_ts_ms") or 0), str(row.get("metaorder_id") or ""))
+    )
+    wanted_coins = {str(row.get("coin") or "").upper() for row in causal_metaorders}
+
+    total_book_rows = 0
+    causal_book_rows = 0
+    causal_books: dict[str, list[dict[str, Any]]] = {}
+    for raw_coin, raw_rows in books_by_coin.items():
+        coin = str(raw_coin or "").upper()
+        rows = [dict(row) for row in raw_rows]
+        total_book_rows += len(rows)
+        if coin not in wanted_coins:
+            continue
+        selected = [row for row in rows if row.get("causal_observation") is True]
+        selected.sort(key=lambda row: int(row.get("ts_ms") or 0))
+        if selected:
+            causal_books[coin] = selected
+            causal_book_rows += len(selected)
+
+    return causal_metaorders, causal_books, {
+        "protocol_scope": "LIVE_WS_SIGNALS_AND_CAUSAL_HYPERLIQUID_L2_ONLY",
+        "all_metaorders": len(all_metaorders),
+        "causal_protocol_metaorders": len(causal_metaorders),
+        "historical_or_noncausal_metaorders_excluded": (
+            len(all_metaorders) - len(causal_metaorders)
+        ),
+        "all_loaded_book_rows": total_book_rows,
+        "causal_protocol_book_rows": causal_book_rows,
+        "historical_or_noncausal_book_rows_excluded": total_book_rows - causal_book_rows,
+        "causal_protocol_coins": len(causal_books),
     }
 
 
@@ -570,7 +622,10 @@ def temporal_bounds(metaorders: list[Mapping[str, Any]]) -> dict[str, int | None
 
 
 def calibrate_train_only(
-    metaorders: list[Mapping[str, Any]], books_by_coin: Mapping[str, list[dict[str, Any]]]
+    metaorders: list[Mapping[str, Any]],
+    books_by_coin: Mapping[str, list[dict[str, Any]]],
+    *,
+    require_causal_observation: bool = False,
 ) -> dict[str, Any]:
     bounds = temporal_bounds(metaorders)
     grid: list[dict[str, Any]] = []
@@ -581,6 +636,7 @@ def calibrate_train_only(
             horizon_ms=horizon,
             start_ms=bounds.get("train_start_ms"),
             end_ms=bounds.get("train_end_ms"),
+            require_causal_observation=require_causal_observation,
         )
         summary = summarize(trades)
         grid.append({"horizon_ms": horizon, "summary": summary, "diagnostics": diagnostics,
@@ -598,6 +654,7 @@ def calibrate_train_only(
         "bounds": bounds,
         "grid": grid,
         "selection_scope": "TRAIN_ONLY",
+        "causal_observation_required": bool(require_causal_observation),
     }
 
 
@@ -610,6 +667,9 @@ def evaluate_frozen(
 ) -> dict[str, Any]:
     bounds = dict(frozen_parameters.get("walk_forward_bounds") or {})
     horizon = int(frozen_parameters.get("selected_horizon_ms") or HORIZONS_MS[0])
+    causal_all_segments = (
+        frozen_parameters.get("causal_observation_required_all_segments") is True
+    )
     segments = {
         "train": (bounds.get("train_start_ms"), bounds.get("train_end_ms")),
         "validation": (bounds.get("validation_start_ms"), bounds.get("validation_end_ms")),
@@ -625,7 +685,7 @@ def evaluate_frozen(
             horizon_ms=horizon,
             start_ms=start_ms,
             end_ms=end_ms,
-            require_causal_observation=name == "forward",
+            require_causal_observation=causal_all_segments or name == "forward",
         )
         result["segments"][name] = {"summary": summarize(trades), "diagnostics": diagnostics}
         result["trades"][name] = trades
@@ -638,6 +698,7 @@ def evaluate_frozen(
         start_ms=bounds.get("oos_start_ms"),
         end_ms=bounds.get("oos_end_ms"),
         direction_multiplier=-1,
+        require_causal_observation=causal_all_segments,
     )
     result["placebo_inverted_oos"] = {
         "summary": summarize(inverted),
@@ -696,4 +757,5 @@ __all__ = [
     "NOTIONAL_USD", "SCHEMA_VERSION", "calibrate_train_only", "cluster_metaorders",
     "evaluate_frozen", "execute_metaorder", "load_observed_books", "protocol_signature",
     "replay_metaorders", "summarize", "temporal_bounds", "temporal_evidence",
+    "select_causal_protocol_inputs",
 ]

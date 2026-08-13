@@ -92,10 +92,34 @@ def run_campaigns(
         ),
     )
     copy_entries, canonical_input_audit = copy_tool.charger_entrees_alpha_avec_audit(root)
-    copy_metaorders, metaorder_audit = copy_vault_executable.cluster_metaorders(copy_entries)
-    copy_books, copy_book_meta = copy_vault_executable.load_observed_books(
-        root, coins={row["coin"] for row in copy_metaorders}
+    all_copy_metaorders, all_metaorder_audit = copy_vault_executable.cluster_metaorders(
+        copy_entries
     )
+    all_copy_books, copy_book_meta = copy_vault_executable.load_observed_books(
+        root, coins={row["coin"] for row in all_copy_metaorders}
+    )
+    copy_metaorders, copy_books, copy_protocol_audit = (
+        copy_vault_executable.select_causal_protocol_inputs(
+            all_copy_metaorders, all_copy_books
+        )
+    )
+    metaorder_audit = {
+        **all_metaorder_audit,
+        "all_metaorders": int(all_metaorder_audit.get("metaorders") or 0),
+        "metaorders": len(copy_metaorders),
+        "historical_or_noncausal_metaorders_excluded": copy_protocol_audit[
+            "historical_or_noncausal_metaorders_excluded"
+        ],
+        "protocol_scope": copy_protocol_audit["protocol_scope"],
+    }
+    copy_book_meta = {
+        **copy_book_meta,
+        "protocol_valid_rows": copy_protocol_audit["causal_protocol_book_rows"],
+        "protocol_coins": copy_protocol_audit["causal_protocol_coins"],
+        "historical_or_noncausal_rows_excluded": copy_protocol_audit[
+            "historical_or_noncausal_book_rows_excluded"
+        ],
+    }
     copy_protocol = copy_vault_executable.protocol_signature()
     copy_freeze = find_oldest_parameter_freeze(
         root, "copy_vault", required_parameters=copy_protocol
@@ -103,7 +127,7 @@ def run_campaigns(
     copy_calibration = None
     if copy_freeze is None:
         copy_calibration = copy_vault_executable.calibrate_train_only(
-            copy_metaorders, copy_books
+            copy_metaorders, copy_books, require_causal_observation=True
         )
         copy_parameters = {
             **copy_protocol,
@@ -141,6 +165,7 @@ def run_campaigns(
         "canonical_input_audit": canonical_input_audit,
         "metaorder_audit": metaorder_audit,
         "book_meta": copy_book_meta,
+        "causal_protocol_audit": copy_protocol_audit,
         "params": copy_parameters,
         "calibration": copy_calibration,
         "walk_forward": {
