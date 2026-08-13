@@ -15,8 +15,8 @@ sys.path.insert(0, str(ROOT / "src"))
 
 from hl_observer.backtesting import copy_vault_executable, lead_lag_shadow  # noqa: E402
 from hl_observer.ops.bounded_collection import (  # noqa: E402
+    ensure_bounded_collectors,
     inspect_bounded_collectors,
-    start_bounded_collectors,
 )
 from hl_observer.simulation.economic_campaigns import (  # noqa: E402
     REPORT_DIR,
@@ -343,7 +343,7 @@ def run_campaigns(
     preliminary_plan = build_collection_plan(campaigns, raw_reports)
     collector_state = inspect_bounded_collectors(root)
     if start_collection and any(row["objective_status"] != "ATTEINT" for row in campaigns):
-        collector_state = start_bounded_collectors(
+        collector_state = ensure_bounded_collectors(
             root,
             preliminary_plan["required_collectors"],
             duration_s=collection_duration_s,

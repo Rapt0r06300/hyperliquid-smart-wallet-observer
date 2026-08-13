@@ -6,6 +6,7 @@ from pathlib import Path
 
 from hl_observer.ops.bounded_collection import (
     attach_bounded_collectors,
+    ensure_bounded_collectors,
     inspect_bounded_collectors,
     start_bounded_collectors,
 )
@@ -459,3 +460,92 @@ def test_attach_campaign_collector_rejects_expired_or_replaced_lease(
         assert "ACTIVE_CAMPAIGN:DEGRADED" in str(exc)
     else:
         raise AssertionError("replaced lease must fail closed")
+
+
+def test_ensure_attaches_campaign_companion_without_replacing_active_lease(
+    tmp_path: Path,
+) -> None:
+    start_bounded_collectors(
+        tmp_path,
+        ["bbo-collector"],
+        duration_s=600.0,
+        startup_wait_s=0.0,
+        process_inventory=lambda _root: [],
+        spawner=lambda _command, _root, _environment: _FakeProcess(501),
+        sleeper=lambda _seconds: None,
+    )
+    lease_path = tmp_path / "runtime/data/economic_collection_lease.json"
+    lease_before = json.loads(lease_path.read_text(encoding="utf-8"))
+
+    result = ensure_bounded_collectors(
+        tmp_path,
+        ["bbo-collector", "copy-vault-checkpoints"],
+        startup_wait_s=0.0,
+        process_inventory=lambda _root: [
+            {
+                "pid": 501,
+                "ppid": 1,
+                "name": "python.exe",
+                "cmd": "python tools/run_bounded_collector.py --name bbo-collector",
+            }
+        ],
+        spawner=lambda _command, _root, _environment: _FakeProcess(502),
+        sleeper=lambda _seconds: None,
+        now=float(lease_before["issued_at_ms"]) / 1000.0 + 1.0,
+    )
+    lease_after = json.loads(lease_path.read_text(encoding="utf-8"))
+
+    assert result["status"] == "ACTIVE"
+    assert result["actifs"] == {
+        "bbo-collector": 501,
+        "copy-vault-checkpoints": 502,
+    }
+    assert result["attached_without_lease_replacement"] is True
+    assert lease_after == lease_before
+    assert result["lease"]["lease_id"] == lease_before["lease_id"]
+    assert "token" not in json.dumps(result)
+
+
+def test_ensure_never_replaces_active_campaign_for_missing_normal_collector(
+    tmp_path: Path,
+) -> None:
+    start_bounded_collectors(
+        tmp_path,
+        ["bbo-collector"],
+        duration_s=600.0,
+        startup_wait_s=0.0,
+        process_inventory=lambda _root: [],
+        spawner=lambda _command, _root, _environment: _FakeProcess(601),
+        sleeper=lambda _seconds: None,
+    )
+    lease_path = tmp_path / "runtime/data/economic_collection_lease.json"
+    lease_before = lease_path.read_bytes()
+    spawn_calls: list[list[str]] = []
+
+    result = ensure_bounded_collectors(
+        tmp_path,
+        ["bbo-collector", "allmids-collector"],
+        startup_wait_s=0.0,
+        process_inventory=lambda _root: [
+            {
+                "pid": 601,
+                "ppid": 1,
+                "name": "python.exe",
+                "cmd": "python tools/run_bounded_collector.py --name bbo-collector",
+            }
+        ],
+        spawner=lambda command, _root, _environment: (
+            spawn_calls.append(command) or _FakeProcess(602)
+        ),
+        sleeper=lambda _seconds: None,
+    )
+
+    assert result["status"] == "DEGRADED"
+    assert result["actifs"] == {"bbo-collector": 601}
+    assert result["manquants"] == ["allmids-collector"]
+    assert result["lease_preserved"] is True
+    assert result["ensure_reason"] == (
+        "ACTIVE_CAMPAIGN_NOT_REPLACED_FOR_NORMAL_COLLECTORS"
+    )
+    assert spawn_calls == []
+    assert lease_path.read_bytes() == lease_before

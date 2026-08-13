@@ -4,6 +4,7 @@ import json
 from pathlib import Path
 
 from hl_observer.backtesting.copy_vault_executable import PROTOCOL_NAME
+from hl_observer.collection.copy_vault_checkpoint_tail import COMPANION_PROTOCOL
 from hl_observer.simulation.economic_collection_plan import (
     build_collection_plan,
     write_collection_plan,
@@ -168,6 +169,26 @@ def test_copy_plan_requires_running_causal_checkpoint_protocol() -> None:
     assert copy["evidence_state"] == "FUTURE_CAUSAL_BOOK_AND_VAULT_DATA_REQUIRED"
     assert copy["running_collector_protocol_ready"] is True
     assert copy["progress"]["active_collector_protocol"] == PROTOCOL_NAME
+
+    companion = build_collection_plan(
+        campaigns,
+        _raw_reports(),
+        collector_state={
+            "actifs": {
+                "userfills-live": 42,
+                "copy-vault-checkpoints": 43,
+            },
+            "protocols": {
+                "copy-vault-checkpoints": COMPANION_PROTOCOL,
+            },
+        },
+        now_ms=123,
+    )
+    copy = next(row for row in companion["families"] if row["family"] == "copy_vault")
+    assert copy["evidence_state"] == "FUTURE_CAUSAL_BOOK_AND_VAULT_DATA_REQUIRED"
+    assert copy["running_collector_protocol_ready"] is True
+    assert copy["progress"]["active_companion_protocol"] == COMPANION_PROTOCOL
+    assert "copy-vault-checkpoints" in copy["required_collectors"]
 
 
 def test_plan_kills_frozen_lead_lag_negative_oos_and_forward() -> None:

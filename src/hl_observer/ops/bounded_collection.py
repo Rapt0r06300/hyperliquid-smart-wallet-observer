@@ -406,10 +406,85 @@ def attach_bounded_collectors(
         },
     }
     _atomic_write(state_path, state)
+    active_protocols = _active_collector_protocols(project_root, combined_pids)
     return {
         **{key: value for key, value in state.items() if key != "startup_log_tails"},
+        "status": "ACTIVE" if not missing else "DEGRADED",
+        "actifs": combined_pids,
+        "arretes": [],
+        "lease_valid": True,
+        "lease_reason": "OK",
+        "protocols": active_protocols,
         "attached_without_lease_replacement": True,
     }
+
+
+def ensure_bounded_collectors(
+    root: str | Path,
+    names: Iterable[str],
+    *,
+    duration_s: float = 24 * 60 * 60,
+    startup_wait_s: float = 3.0,
+    process_inventory: Callable[[str | Path], list[dict[str, Any]]] | None = None,
+    spawner: Spawner | None = None,
+    sleeper: Callable[[float], None] = time.sleep,
+    now: float | None = None,
+) -> dict[str, Any]:
+    """Ensure requested collectors while never replacing a healthy campaign.
+
+    A missing campaign-only companion is attached under the active lease. If a
+    normal collector is missing from an otherwise healthy campaign, the state
+    is reported degraded instead of invalidating every running wrapper.
+    """
+
+    project_root = Path(root).resolve()
+    requested = list(dict.fromkeys(str(name) for name in names))
+    current = inspect_bounded_collectors(
+        project_root,
+        process_inventory=process_inventory,
+        now=now,
+    )
+    if not isinstance(current, dict) or current.get("status") != "ACTIVE":
+        return start_bounded_collectors(
+            project_root,
+            requested,
+            duration_s=duration_s,
+            startup_wait_s=startup_wait_s,
+            process_inventory=process_inventory,
+            spawner=spawner,
+            sleeper=sleeper,
+        )
+
+    active = set(_mapping_keys(current.get("actifs")))
+    missing = [name for name in requested if name not in active]
+    campaign_names = set(_registry(campaign_only=True))
+    campaign_missing = [name for name in missing if name in campaign_names]
+    normal_missing = [name for name in missing if name not in campaign_names]
+    if campaign_missing:
+        current = attach_bounded_collectors(
+            project_root,
+            campaign_missing,
+            startup_wait_s=startup_wait_s,
+            process_inventory=process_inventory,
+            spawner=spawner,
+            sleeper=sleeper,
+            now=now,
+        )
+    if normal_missing:
+        return {
+            **current,
+            "status": "DEGRADED",
+            "manquants": sorted(set(current.get("manquants") or []) | set(normal_missing)),
+            "lease_preserved": True,
+            "ensure_reason": "ACTIVE_CAMPAIGN_NOT_REPLACED_FOR_NORMAL_COLLECTORS",
+        }
+    return current
+
+
+def _mapping_keys(value: object) -> tuple[str, ...]:
+    if not isinstance(value, Mapping):
+        return ()
+    return tuple(str(key) for key in value)
 
 
 def inspect_bounded_collectors(
@@ -558,6 +633,7 @@ __all__ = [
     "SCHEMA_VERSION",
     "STATE_RELPATH",
     "attach_bounded_collectors",
+    "ensure_bounded_collectors",
     "inspect_bounded_collectors",
     "resolve_project_python",
     "start_bounded_collectors",

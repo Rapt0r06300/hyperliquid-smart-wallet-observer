@@ -15,6 +15,9 @@ from pathlib import Path
 from typing import Any
 
 from hl_observer.backtesting.copy_vault_executable import PROTOCOL_NAME as COPY_VAULT_PROTOCOL
+from hl_observer.collection.copy_vault_checkpoint_tail import (
+    COMPANION_PROTOCOL as COPY_VAULT_COMPANION_PROTOCOL,
+)
 
 from .economic_campaigns import REPORT_DIR
 from .economic_objective import CANONICAL_FAMILIES, canonical_family
@@ -106,9 +109,23 @@ def _copy_state(
     active_collectors = _mapping(collector.get("actifs"))
     protocols = _mapping(collector.get("protocols"))
     active_protocol = str(protocols.get("userfills-live") or "")
+    companion_protocol = str(protocols.get("copy-vault-checkpoints") or "")
     collector_protocol_ready: bool | None = None
-    if "userfills-live" in active_collectors:
-        collector_protocol_ready = active_protocol == COPY_VAULT_PROTOCOL
+    protocol_collectors_active = bool(
+        "userfills-live" in active_collectors
+        or "copy-vault-checkpoints" in active_collectors
+    )
+    if protocol_collectors_active:
+        collector_protocol_ready = bool(
+            (
+                "userfills-live" in active_collectors
+                and active_protocol == COPY_VAULT_PROTOCOL
+            )
+            or (
+                "copy-vault-checkpoints" in active_collectors
+                and companion_protocol == COPY_VAULT_COMPANION_PROTOCOL
+            )
+        )
     data_only = bool(
         schema_ready
         and not objective_met
@@ -162,11 +179,14 @@ def _copy_state(
             "closed_liquidatable_episodes": closed,
             "expected_collector_protocol": COPY_VAULT_PROTOCOL,
             "active_collector_protocol": active_protocol or None,
+            "expected_companion_protocol": COPY_VAULT_COMPANION_PROTOCOL,
+            "active_companion_protocol": companion_protocol or None,
         },
         "required_collectors": [
             "vault-collector",
             "scorer-vaults",
             "userfills-live",
+            "copy-vault-checkpoints",
             "carnet-collector",
             "backfill-fills",
             "backfill-candles-vaults",
@@ -181,7 +201,7 @@ def _copy_state(
         ],
         "exact_missing_evidence": (
             [
-                "restart userfills-live so its heartbeat proves the v6 causal-checkpoint protocol",
+                "restart userfills-live or attach copy-vault-checkpoints so a heartbeat proves the causal-checkpoint protocol",
                 "capture REFERENCE, ENTRY and EXIT books from live WS or causal /info l2Book checkpoints",
             ]
             if collector_protocol_ready is False
