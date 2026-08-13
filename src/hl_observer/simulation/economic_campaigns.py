@@ -415,8 +415,69 @@ def build_lead_lag_campaign(
         "observable_horizons_ms": analysis.get("horizons_observables"),
         "hl_intervals": analysis.get("intervalles_hl"),
     }
-    # The shadow aggregate is not a position ledger.  Leave economic fields
-    # unmeasured until causal paper episodes exist.
+    executable = (
+        analysis.get("executable_campaign")
+        if isinstance(analysis.get("executable_campaign"), Mapping)
+        else None
+    )
+    if not executable:
+        return _finish(row)
+    summary = executable.get("summary") if isinstance(executable.get("summary"), Mapping) else {}
+    temporal = (
+        executable.get("temporal_evidence")
+        if isinstance(executable.get("temporal_evidence"), Mapping)
+        else {}
+    )
+    closed = int(summary.get("positions_fermees") or 0)
+    measured = closed > 0
+
+    def economic_value(key: str) -> Any:
+        return summary.get(key) if measured else None
+
+    row.update(
+        {
+            "signal_count": (executable.get("diagnostics") or {}).get(
+                "candidate_observations"
+            ),
+            "source_status": (
+                "EXECUTABLE_LEDGER_MEASURED" if measured else "FUTURE_SIZED_BBO_REQUIRED"
+            ),
+            "opened_positions": summary.get("positions_ouvertes"),
+            "closed_positions": summary.get("positions_fermees"),
+            "gross_pnl_usd": economic_value("gross_pnl_usd"),
+            "fees_usd": economic_value("fees_usd"),
+            "spread_cost_usd": economic_value("spread_cost_usd"),
+            "slippage_cost_usd": economic_value("slippage_cost_usd"),
+            "latency_cost_usd": economic_value("latency_cost_usd"),
+            "net_pnl_usd": economic_value("net_pnl_usd"),
+            "roi_pct": economic_value("roi_pct"),
+            "max_drawdown_usd": economic_value("max_drawdown_usd"),
+            "hit_rate": economic_value("hit_rate"),
+            "profit_factor": economic_value("profit_factor"),
+            "liquidatable_net": summary.get("LIQUIDATABLE_NET") is True,
+            "duplicate_trade_ids": summary.get("duplicate_trade_ids"),
+            "trade_ids_count": summary.get("trade_ids_count"),
+            "trade_ids_sha256": summary.get("trade_ids_sha256"),
+            "oos": temporal.get("oos") if isinstance(temporal.get("oos"), Mapping) else None,
+            "forward": (
+                temporal.get("forward")
+                if isinstance(temporal.get("forward"), Mapping)
+                else None
+            ),
+            "placebos": (
+                temporal.get("placebos")
+                if isinstance(temporal.get("placebos"), Mapping)
+                else None
+            ),
+            "period": {
+                **row["period"],
+                "walk_forward_bounds": executable.get("walk_forward_bounds"),
+                "execution_model": executable.get("execution_model"),
+                "segment_summaries": executable.get("segment_summaries"),
+                "diagnostics": executable.get("diagnostics"),
+            },
+        }
+    )
     return _finish(row)
 
 

@@ -8,6 +8,7 @@ import pytest
 from hl_observer.simulation.economic_campaigns import (
     build_copy_campaign,
     build_cross_campaign,
+    build_lead_lag_campaign,
     dataset_provenance,
     freeze_or_reuse_parameters,
     freeze_parameters,
@@ -187,6 +188,88 @@ def test_executable_copy_campaign_zero_closed_is_non_mesurable() -> None:
 
     assert campaign["net_pnl_usd"] is None
     assert campaign["gross_pnl_usd"] is None
+    assert "UNMEASURED:net_pnl_usd" in campaign["objective_reasons"]
+
+
+def test_executable_lead_lag_campaign_maps_closed_ledger_and_temporal_proof(
+    tmp_path: Path,
+) -> None:
+    datasets = {"dataset_fingerprint": "d" * 64, "files": []}
+    freeze = freeze_parameters(
+        tmp_path,
+        "lead_lag",
+        {"execution_model": "causal_marketable_top_v2"},
+        datasets,
+        campaign_id="lead-executable",
+        frozen_at_ms=10,
+    )
+    report = {
+        "statut": "PROMETTEUR",
+        "chocs_test": 4,
+        "executable_campaign": {
+            "execution_model": "causal_marketable_top_v2",
+            "diagnostics": {"candidate_observations": 4, "missing_top_sizes": 0},
+            "summary": {
+                "positions_ouvertes": 4,
+                "positions_fermees": 4,
+                "gross_pnl_usd": 5.0,
+                "fees_usd": 0.2,
+                "spread_cost_usd": 0.2,
+                "slippage_cost_usd": 0.0,
+                "latency_cost_usd": 0.1,
+                "net_pnl_usd": 4.5,
+                "roi_pct": 0.45,
+                "max_drawdown_usd": 0.1,
+                "hit_rate": 0.75,
+                "profit_factor": 3.0,
+                "LIQUIDATABLE_NET": True,
+                "duplicate_trade_ids": 0,
+                "trade_ids_count": 4,
+                "trade_ids_sha256": "f" * 64,
+            },
+            "temporal_evidence": {
+                "oos": {"net_pnl_usd": 1.0, "sample_count": 1, "no_lookahead": True},
+                "forward": {"net_pnl_usd": 1.0, "sample_count": 1, "post_freeze": True},
+                "placebos": {"beaten": True},
+            },
+        },
+    }
+
+    campaign = build_lead_lag_campaign(report, freeze=freeze, datasets=datasets)
+
+    assert campaign["net_pnl_usd"] == 4.5
+    assert campaign["closed_positions"] == 4
+    assert campaign["liquidatable_net"] is True
+    assert campaign["objective_status"] == "ATTEINT"
+
+
+def test_lead_lag_without_sized_closed_episodes_remains_unmeasured() -> None:
+    report = {
+        "statut": "PAS_D_EDGE",
+        "executable_campaign": {
+            "diagnostics": {"candidate_observations": 20, "missing_top_sizes": 20},
+            "summary": {
+                "positions_ouvertes": 0,
+                "positions_fermees": 0,
+                "gross_pnl_usd": 0.0,
+                "fees_usd": 0.0,
+                "spread_cost_usd": 0.0,
+                "slippage_cost_usd": 0.0,
+                "latency_cost_usd": 0.0,
+                "net_pnl_usd": 0.0,
+                "LIQUIDATABLE_NET": False,
+                "duplicate_trade_ids": 0,
+                "trade_ids_count": 0,
+                "trade_ids_sha256": "0" * 64,
+            },
+        },
+    }
+
+    campaign = build_lead_lag_campaign(report, freeze=None, datasets={"files": []})
+
+    assert campaign["source_status"] == "FUTURE_SIZED_BBO_REQUIRED"
+    assert campaign["net_pnl_usd"] is None
+    assert campaign["objective_status"] == "NON_ATTEINT"
     assert "UNMEASURED:net_pnl_usd" in campaign["objective_reasons"]
 
 

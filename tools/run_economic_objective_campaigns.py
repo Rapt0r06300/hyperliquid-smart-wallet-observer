@@ -160,12 +160,21 @@ def run_campaigns(
         "seuil_choc_bps": lead_lag_shadow.SEUIL_CHOC_BPS,
         "frais_slippage_bps": lead_lag_shadow.FRAIS_SLIPPAGE_BPS,
         "horizons_ms": list(lead_lag_shadow.HORIZONS_MS),
+        "economic_horizon_ms": lead_lag_shadow.CAMPAIGN_HORIZON_MS,
+        "economic_notional_usd": lead_lag_shadow.CAMPAIGN_NOTIONAL_USD,
+        "execution_model": lead_lag_shadow.CAMPAIGN_EXECUTION_MODEL,
         "minimum_shocks": lead_lag_shadow.MIN_CHOCS,
         "history_sources": len(lead_sources),
         "timestamp_clock": "ts_wall_ms_or_recv_wall_ts_ms;recu_ns_fallback",
     }
     lead_freeze = freeze_or_reuse_parameters(root, "lead_lag", lead_params, lead_data)
-    lead_raw = lead_lag_shadow.backtest(root, sources=lead_sources)
+    lead_raw = lead_lag_shadow.backtest(
+        root,
+        sources=lead_sources,
+        economic_frozen_at_ms=int(lead_freeze["frozen_at_ms"]),
+        economic_horizon_ms=lead_lag_shadow.CAMPAIGN_HORIZON_MS,
+        economic_notional_usd=lead_lag_shadow.CAMPAIGN_NOTIONAL_USD,
+    )
     lead_raw_path = _write_raw(root, "lead_lag", lead_raw)
     lead_campaign = build_lead_lag_campaign(lead_raw, freeze=lead_freeze, datasets=lead_data)
     lead_campaign["evidence_paths"].append(lead_raw_path.relative_to(root).as_posix())

@@ -22,9 +22,11 @@ from hl_observer.backtesting.lead_lag_shadow import (
     distribution_intervalles,
     geler_config,
     horizons_observables,
+    executable_campaign_evidence,
     episodes_par_horizon,
     net_par_horizon,
     selectionner_sources,
+    summarize_executable_episodes,
 )
 from hl_observer.experimental.signaux import signaux_lead_lag
 
@@ -87,6 +89,97 @@ def test_episode_ne_peut_pas_entrer_sur_la_cotation_pre_signal():
     )[100.0][0]
     assert row["entry_ts_ns"] == 20_000_000
     assert row["entry_price"] == 101.01
+
+
+def test_episode_reconcilie_tous_les_couts_en_dollars():
+    hl = [
+        (5_000_000, 100.0, 99.99, 100.01, 10.0, 10.0),
+        (15_000_000, 100.1, 100.09, 100.11, 10.0, 10.0),
+        (110_000_000, 100.5, 100.49, 100.51, 10.0, 10.0),
+    ]
+    row = episodes_par_horizon(
+        hl,
+        [(10_000_000, 1.0)],
+        frais_slippage_bps=9.0,
+        horizons_ms=[100.0],
+        coin="ETH",
+        notional_usd=25.0,
+    )[100.0][0]
+
+    assert row["liquidatable_net"] is True
+    assert row["entry_ts_ns"] >= row["signal_ts_ns"]
+    assert row["latency_cost_usd"] > 0
+    assert row["spread_cost_usd"] > 0
+    assert row["fees_usd"] > 0
+    assert row["gross_pnl_usd"] - row["fees_usd"] - row["spread_cost_usd"] \
+        - row["slippage_cost_usd"] - row["latency_cost_usd"] \
+        == pytest.approx(row["net_pnl_usd"])
+
+    summary = summarize_executable_episodes([row])
+    assert summary["positions_ouvertes"] == summary["positions_fermees"] == 1
+    assert summary["economic_reconciliation_ok"] is True
+    assert summary["LIQUIDATABLE_NET"] is True
+    assert summary["trade_ids_count"] == 1
+
+
+def test_episode_sans_quote_pre_signal_ne_certifie_pas_le_pnl():
+    hl = [
+        (15_000_000, 100.1, 100.09, 100.11, 10.0, 10.0),
+        (110_000_000, 100.5, 100.49, 100.51, 10.0, 10.0),
+    ]
+    row = episodes_par_horizon(
+        hl,
+        [(10_000_000, 1.0)],
+        frais_slippage_bps=9.0,
+        horizons_ms=[100.0],
+    )[100.0][0]
+
+    assert row["reference_status"] == "MISSING_PRE_SIGNAL_QUOTE"
+    assert row["liquidatable_net"] is False
+    summary = summarize_executable_episodes([row])
+    assert summary["positions_fermees"] == 0
+    assert summary["observations_non_liquidables"] == 1
+    assert summary["LIQUIDATABLE_NET"] is False
+
+
+def test_executable_campaign_separe_oos_et_vrai_forward_post_freeze():
+    rows = _rows(30)
+    tape = {"ETH": {"HL": [], "BIN": [], "TRADE": []}}
+    for row in rows:
+        timestamp = int(row["recu_ns"])
+        if row["venue"] == "HL":
+            tape["ETH"]["HL"].append(
+                (
+                    timestamp,
+                    row["mid"],
+                    row["bid"],
+                    row["ask"],
+                    row["bid_sz"],
+                    row["ask_sz"],
+                )
+            )
+        else:
+            tape["ETH"]["TRADE"].append(
+                (timestamp, row["px"], 1.0 if row["side"] == "BUY" else -1.0)
+            )
+    evidence = executable_campaign_evidence(
+        tape,
+        frozen_at_ms=20_500,
+        horizon_ms=100.0,
+        frais_slippage_bps=9.0,
+        notional_usd=25.0,
+    )
+
+    assert evidence["summary"]["economic_reconciliation_ok"] is True
+    assert evidence["summary"]["duplicate_trade_ids"] == 0
+    assert evidence["segment_summaries"]["oos"]["positions_fermees"] > 0
+    assert evidence["segment_summaries"]["forward"]["positions_fermees"] > 0
+    assert evidence["temporal_evidence"]["oos"]["no_lookahead"] is True
+    assert evidence["temporal_evidence"]["forward"]["post_freeze"] is True
+    assert all(
+        row["walk_forward_segment"] in {"train", "validation", "oos", "forward"}
+        for row in evidence["trades"]
+    )
 
 
 def _rows(n_chocs):
