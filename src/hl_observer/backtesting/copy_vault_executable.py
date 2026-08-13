@@ -30,6 +30,18 @@ MAX_OPEN_POSITIONS = 6
 MIN_TRAIN_TRADES = 8
 TRAIN_FRACTION = 0.60
 VALIDATION_FRACTION = 0.20
+COPYABLE_ENTRY_ACTIONS = frozenset({"OPEN", "ADD"})
+_OPEN_DIRECTION_BY_LABEL = {
+    "open long": 1,
+    "open short": -1,
+}
+
+
+def expected_open_direction(row: Mapping[str, Any]) -> int | None:
+    """Return the signed direction only for an explicit leader open fill."""
+
+    label = " ".join(str(row.get("dir") or "").strip().casefold().split())
+    return _OPEN_DIRECTION_BY_LABEL.get(label)
 
 
 def protocol_signature() -> dict[str, Any]:
@@ -85,15 +97,30 @@ def cluster_metaorders(
     canonical: list[dict[str, Any]] = []
     seen: set[str] = set()
     duplicate_events = 0
+    input_events = 0
+    invalid_events = 0
+    non_entry_events = 0
+    direction_contradictions = 0
     for raw in entries:
+        input_events += 1
         try:
             ts_ms = int(raw.get("ts_ms") or 0)
             direction = int(raw.get("direction") or 0)
             coin = str(raw.get("coin") or "").upper()
             vault = str(raw.get("vault") or "")
         except (TypeError, ValueError, OverflowError):
+            invalid_events += 1
             continue
         if ts_ms <= 0 or direction not in (-1, 1) or not coin or not vault:
+            invalid_events += 1
+            continue
+        action = str(raw.get("action") or "").strip().upper()
+        expected_direction = expected_open_direction(raw)
+        if action not in COPYABLE_ENTRY_ACTIONS or expected_direction is None:
+            non_entry_events += 1
+            continue
+        if direction != expected_direction:
+            direction_contradictions += 1
             continue
         event_id = _event_identity(raw)
         if event_id in seen:
@@ -119,6 +146,7 @@ def cluster_metaorders(
             "observed_at_ms": observed_at_ms,
             "causal_forward_eligible": causal_live,
             "direction": direction,
+            "action": action,
             "coin": coin,
             "vault": vault,
         })
@@ -129,7 +157,11 @@ def cluster_metaorders(
     for row in canonical:
         key = (row["vault"], row["coin"], row["direction"])
         cluster = active.get(key)
-        if cluster is None or row["ts_ms"] - cluster["last_fill_ts_ms"] > int(gap_ms):
+        if (
+            cluster is None
+            or row["action"] == "OPEN"
+            or row["ts_ms"] - cluster["last_fill_ts_ms"] > int(gap_ms)
+        ):
             if cluster is not None:
                 completed.append(cluster)
             cluster = {
@@ -173,12 +205,16 @@ def cluster_metaorders(
         cluster["move_frac_audit_sum"] = round(cluster["move_frac_audit_sum"], 10)
     completed.sort(key=lambda row: (row["signal_ts_ms"], row["metaorder_id"]))
     return completed, {
-        "input_events": len(canonical) + duplicate_events,
+        "input_events": input_events,
         "canonical_events": len(canonical),
+        "invalid_events_rejected": invalid_events,
+        "non_entry_events_rejected": non_entry_events,
+        "action_direction_contradictions_rejected": direction_contradictions,
         "duplicate_events_rejected": duplicate_events,
         "metaorders": len(completed),
         "sliced_fills_collapsed": max(0, len(canonical) - len(completed)),
         "signal_policy": "first_fill;later_slices_audit_only",
+        "entry_policy": "action_OPEN_or_ADD_and_dir_Open_Long_or_Open_Short",
         "causal_forward_metaorders": sum(
             1 for row in completed if row.get("causal_forward_eligible") is True
         ),

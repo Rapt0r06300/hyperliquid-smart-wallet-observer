@@ -19,7 +19,10 @@ from collections.abc import Callable, Mapping
 from pathlib import Path
 from typing import Any
 
-from hl_observer.backtesting.copy_vault_executable import PROTOCOL_NAME
+from hl_observer.backtesting.copy_vault_executable import (
+    PROTOCOL_NAME,
+    expected_open_direction,
+)
 from hl_observer.experimental.metaorder_l2_tape import metaorder_id
 
 SCHEMA_VERSION = "hypersmart.copy_vault_checkpoint_tail.v1"
@@ -115,6 +118,8 @@ def _default_state(*, offset: int, now_ms: int) -> dict[str, Any]:
             "valid_live_fills": 0,
             "duplicates_rejected": 0,
             "invalid_rejected": 0,
+            "non_entry_rejected": 0,
+            "direction_contradictions_rejected": 0,
             "stale_rejected": 0,
             "out_of_order_rejected": 0,
             "metaorders_started": 0,
@@ -210,6 +215,13 @@ class CopyVaultCheckpointTail:
             and loaded.get("real_execution") is False
             and loaded.get("protocol") == COMPANION_PROTOCOL
         ):
+            counters = loaded.get("counters")
+            if not isinstance(counters, dict):
+                counters = {}
+                loaded["counters"] = counters
+            defaults = _default_state(offset=0, now_ms=self.clock_ms())["counters"]
+            for name, value in defaults.items():
+                counters.setdefault(name, value)
             return loaded
         try:
             offset = self.input_path.stat().st_size
@@ -279,6 +291,16 @@ class CopyVaultCheckpointTail:
             or received_at_ms - fill_ts_ms > MAX_TARGET_LAG_MS
         ):
             self.state["counters"]["invalid_rejected"] += 1
+            return
+        expected_direction = expected_open_direction(fill)
+        if expected_direction is None:
+            meta_state = dict(self.state.get("metaorder_state") or {})
+            meta_state.pop(f"{vault}|{coin}", None)
+            self.state["metaorder_state"] = meta_state
+            self.state["counters"]["non_entry_rejected"] += 1
+            return
+        if direction != expected_direction:
+            self.state["counters"]["direction_contradictions_rejected"] += 1
             return
         if now_ms < received_at_ms or now_ms - received_at_ms > MAX_TARGET_LAG_MS:
             self.state["counters"]["stale_rejected"] += 1

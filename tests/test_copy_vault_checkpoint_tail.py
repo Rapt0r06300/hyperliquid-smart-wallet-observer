@@ -18,7 +18,13 @@ from hl_observer.collection.copy_vault_checkpoint_tail import (
 VAULT = "0x" + "a" * 40
 
 
-def _fill(now_ms: int, *, event: str = "one", direction: int = 1) -> dict:
+def _fill(
+    now_ms: int,
+    *,
+    event: str = "one",
+    direction: int = 1,
+    dir_label: str | None = None,
+) -> dict:
     return {
         "vault": VAULT,
         "coin": "BTC",
@@ -26,7 +32,7 @@ def _fill(now_ms: int, *, event: str = "one", direction: int = 1) -> dict:
         "sz": 0.01,
         "signe": direction,
         "ts_ms": now_ms - 5,
-        "dir": "Open Long" if direction > 0 else "Open Short",
+        "dir": dir_label or ("Open Long" if direction > 0 else "Open Short"),
         "hash": f"0x{event}",
         "tid": event,
         "oid": event,
@@ -35,6 +41,38 @@ def _fill(now_ms: int, *, event: str = "one", direction: int = 1) -> dict:
         "stable_event_id": event,
         "received_at_ms": now_ms,
     }
+
+
+def test_close_et_contradiction_ne_programment_jamais_une_entree(tmp_path: Path) -> None:
+    now = [900_000]
+    engine = CopyVaultCheckpointTail(
+        tmp_path,
+        fetch_book=lambda _coin: _book(now[0]),
+        clock_ms=lambda: now[0],
+    )
+    input_path = tmp_path / INPUT_RELPATH
+
+    _append(input_path, _fill(now[0], event="close", dir_label="Close Short"))
+    close_result = engine.poll_once()
+    assert close_result["captured"] == 0
+    assert close_result["pending"] == 0
+    assert close_result["counters"]["non_entry_rejected"] == 1
+
+    now[0] += 1_000
+    _append(
+        input_path,
+        _fill(now[0], event="contradiction", direction=-1, dir_label="Open Long"),
+    )
+    contradiction_result = engine.poll_once()
+    assert contradiction_result["captured"] == 0
+    assert contradiction_result["pending"] == 0
+    assert contradiction_result["counters"]["direction_contradictions_rejected"] == 1
+
+    now[0] += 1_000
+    _append(input_path, _fill(now[0], event="valid-open"))
+    valid_result = engine.poll_once()
+    assert valid_result["captured"] == 1
+    assert valid_result["pending"] == 1
 
 
 def _append(path: Path, payload: dict, *, newline: bool = True) -> None:

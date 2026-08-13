@@ -21,17 +21,53 @@ from hl_observer.backtesting.copy_vault_executable import (
 
 
 def _entry(
-    event_id: str, ts_ms: int, *, coin: str = "BTC", direction: int = 1, vault: str = "0xA"
+    event_id: str,
+    ts_ms: int,
+    *,
+    coin: str = "BTC",
+    direction: int = 1,
+    vault: str = "0xA",
+    action: str = "ADD",
 ) -> dict:
     return {
         "event_id": event_id,
         "ts_ms": ts_ms,
         "coin": coin,
         "direction": direction,
+        "action": action,
+        "dir": "Open Long" if direction > 0 else "Open Short",
         "vault": vault,
         "taille_usd": 100.0,
         "move_frac": 0.01,
     }
+
+
+def test_metaorders_refusent_les_sorties_et_les_contradictions_de_sens() -> None:
+    open_one = _entry("open-one", 1_000, action="OPEN")
+    add_one = _entry("add-one", 2_000)
+    close = {
+        **_entry("close", 3_000),
+        "action": "CLOSE",
+        "dir": "Close Long",
+        "direction": 1,
+    }
+    reopen = _entry("reopen", 4_000, action="OPEN")
+    contradiction = {
+        **_entry("contradiction", 5_000, direction=-1),
+        "dir": "Open Long",
+    }
+
+    metaorders, audit = cluster_metaorders(
+        [open_one, add_one, close, reopen, contradiction], gap_ms=60_000
+    )
+
+    assert [row["fill_count"] for row in metaorders] == [2, 1]
+    assert [row["member_event_ids"] for row in metaorders] == [
+        ["open-one", "add-one"],
+        ["reopen"],
+    ]
+    assert audit["non_entry_events_rejected"] == 1
+    assert audit["action_direction_contradictions_rejected"] == 1
 
 
 def _book(
