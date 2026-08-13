@@ -19,7 +19,8 @@ from pathlib import Path
 from typing import Any, Protocol
 
 from .collecteur_registry import REGISTRE
-from .collector_lease import create_lease, public_lease
+from .collector_lease import DEFAULT_RELPATH as LEASE_RELPATH
+from .collector_lease import create_lease, public_lease, validate_lease
 from .superviseur_collecteurs import _pid_collecteur_existant, _processus_projet
 
 
@@ -234,9 +235,149 @@ def start_bounded_collectors(
     return state
 
 
+def inspect_bounded_collectors(
+    root: str | Path,
+    *,
+    process_inventory: Callable[[str | Path], list[dict[str, Any]]] | None = None,
+    now: float | None = None,
+) -> dict[str, Any] | None:
+    """Read and verify the current collection campaign without restarting it.
+
+    Reports generated with ``--no-start-collection`` must not erase evidence
+    that an existing bounded campaign is still alive.  This function verifies
+    the persisted safety contract, PID ownership and lease expiry, and never
+    exposes the lease bearer token.
+    """
+
+    project_root = Path(root).resolve()
+    state_path = project_root / STATE_RELPATH
+    try:
+        persisted = json.loads(state_path.read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        return None
+    except (OSError, ValueError, TypeError) as exc:
+        return {
+            "schema_version": SCHEMA_VERSION,
+            "status": "STATE_UNREADABLE",
+            "paper_read_only": True,
+            "real_execution": False,
+            "error": f"{type(exc).__name__}: {exc}",
+        }
+
+    if not isinstance(persisted, dict) or persisted.get("schema_version") != SCHEMA_VERSION:
+        return {
+            "schema_version": SCHEMA_VERSION,
+            "status": "STATE_SCHEMA_INVALID",
+            "paper_read_only": True,
+            "real_execution": False,
+        }
+    if persisted.get("paper_read_only") is not True or persisted.get("real_execution") is not False:
+        return {
+            "schema_version": SCHEMA_VERSION,
+            "status": "STATE_SAFETY_INVALID",
+            "paper_read_only": True,
+            "real_execution": False,
+        }
+
+    inventory = process_inventory or _processus_projet
+    live_rows = list(inventory(project_root))
+    rows_by_pid = {
+        int(row["pid"]): row
+        for row in live_rows
+        if isinstance(row.get("pid"), int)
+    }
+    recorded = {
+        str(name): int(pid)
+        for name, pid in dict(persisted.get("pids") or {}).items()
+        if isinstance(pid, int)
+    }
+    started_names = set(persisted.get("demarres_et_verifies") or [])
+    reused_names = set(persisted.get("reutilises") or [])
+
+    def owns_recorded_collector(name: str, pid: int) -> bool:
+        row = rows_by_pid.get(pid)
+        if row is None:
+            return False
+        command = str(row.get("cmd") or "").lower()
+        if name in started_names:
+            return "run_bounded_collector.py" in command and f"--name {name}" in command
+        if name in reused_names and name in {str(item["nom"]) for item in REGISTRE}:
+            collector = next(item for item in REGISTRE if str(item["nom"]) == name)
+            return _pid_collecteur_existant(collector, [row]) == pid
+        return False
+
+    active = {
+        name: pid
+        for name, pid in recorded.items()
+        if owns_recorded_collector(name, pid)
+    }
+    stopped = sorted(name for name in recorded if name not in active)
+
+    lease_public = persisted.get("lease") if isinstance(persisted.get("lease"), dict) else None
+    lease_required = bool(persisted.get("demarres_et_verifies"))
+    lease_valid = not lease_required
+    lease_reason = ""
+    if lease_required:
+        try:
+            lease_payload = json.loads(
+                (project_root / LEASE_RELPATH).read_text(encoding="utf-8")
+            )
+            token = str(lease_payload.get("token") or "")
+            lease_valid, lease_reason, validated = validate_lease(
+                project_root / LEASE_RELPATH,
+                token,
+                project_root,
+                now=now,
+            )
+            if isinstance(validated, dict):
+                current_public = public_lease(validated)
+                expected_lease_id = str(_mapping_lease_id(lease_public))
+                current_lease_id = str(current_public.get("lease_id") or "")
+                if expected_lease_id and expected_lease_id != current_lease_id:
+                    lease_valid = False
+                    lease_reason = "COLLECTOR_LEASE_REPLACED"
+                lease_public = current_public
+        except (OSError, ValueError, TypeError) as exc:
+            lease_valid = False
+            lease_reason = f"COLLECTOR_LEASE_UNREADABLE:{type(exc).__name__}"
+
+    expected = set(recorded)
+    status = (
+        "ACTIVE"
+        if expected and set(active) == expected and lease_valid
+        else "INACTIVE"
+        if not expected
+        else "DEGRADED"
+    )
+    return {
+        **{
+            key: value
+            for key, value in persisted.items()
+            if key not in {"pids", "lease", "startup_log_tails"}
+        },
+        "status": status,
+        "paper_read_only": True,
+        "real_execution": False,
+        "pids": recorded,
+        "actifs": active,
+        "arretes": stopped,
+        "lease": lease_public,
+        "lease_valid": bool(lease_valid),
+        "lease_reason": lease_reason,
+        "inspected_at_ms": int((time.time() if now is None else float(now)) * 1000),
+    }
+
+
+def _mapping_lease_id(value: object) -> str:
+    if not isinstance(value, Mapping):
+        return ""
+    return str(value.get("lease_id") or "")
+
+
 __all__ = [
     "SCHEMA_VERSION",
     "STATE_RELPATH",
+    "inspect_bounded_collectors",
     "resolve_project_python",
     "start_bounded_collectors",
 ]

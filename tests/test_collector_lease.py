@@ -4,7 +4,10 @@ import json
 import sys
 from pathlib import Path
 
-from hl_observer.ops.bounded_collection import start_bounded_collectors
+from hl_observer.ops.bounded_collection import (
+    inspect_bounded_collectors,
+    start_bounded_collectors,
+)
 from hl_observer.ops.collector_lease import (
     create_lease,
     public_lease,
@@ -165,3 +168,119 @@ def test_old_bounded_wrapper_is_not_reused_after_lease_replacement(tmp_path: Pat
     assert spawned
     assert result["reutilises"] == []
     assert result["pids"] == {"bbo-collector": 51}
+
+
+def test_inspection_preserves_verified_active_campaign_without_restart(tmp_path: Path) -> None:
+    def spawn(_command: list[str], _root: Path, _environment: dict[str, str]) -> _FakeProcess:
+        return _FakeProcess(91)
+
+    started = start_bounded_collectors(
+        tmp_path,
+        ["bbo-collector"],
+        duration_s=60.0,
+        startup_wait_s=0.0,
+        process_inventory=lambda _root: [],
+        spawner=spawn,
+        sleeper=lambda _seconds: None,
+    )
+    lease = json.loads(
+        (tmp_path / "runtime/data/economic_collection_lease.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    now = float(lease["issued_at_ms"]) / 1000.0 + 1.0
+    inspected = inspect_bounded_collectors(
+        tmp_path,
+        process_inventory=lambda _root: [
+            {
+                "pid": 91,
+                "ppid": 1,
+                "name": "python.exe",
+                "cmd": "python tools/run_bounded_collector.py --name bbo-collector",
+            }
+        ],
+        now=now,
+    )
+
+    assert inspected is not None
+    assert inspected["status"] == "ACTIVE"
+    assert inspected["actifs"] == {"bbo-collector": 91}
+    assert inspected["arretes"] == []
+    assert inspected["lease_valid"] is True
+    assert "token" not in json.dumps(inspected)
+    assert inspected["pids"] == started["pids"]
+
+
+def test_inspection_reports_expired_or_missing_process_fail_closed(tmp_path: Path) -> None:
+    def spawn(_command: list[str], _root: Path, _environment: dict[str, str]) -> _FakeProcess:
+        return _FakeProcess(92)
+
+    start_bounded_collectors(
+        tmp_path,
+        ["bbo-collector"],
+        duration_s=60.0,
+        startup_wait_s=0.0,
+        process_inventory=lambda _root: [],
+        spawner=spawn,
+        sleeper=lambda _seconds: None,
+    )
+    lease = json.loads(
+        (tmp_path / "runtime/data/economic_collection_lease.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    after_expiry = float(lease["expires_at_ms"]) / 1000.0 + 1.0
+    inspected = inspect_bounded_collectors(
+        tmp_path,
+        process_inventory=lambda _root: [],
+        now=after_expiry,
+    )
+
+    assert inspected is not None
+    assert inspected["status"] == "DEGRADED"
+    assert inspected["actifs"] == {}
+    assert inspected["arretes"] == ["bbo-collector"]
+    assert inspected["lease_valid"] is False
+    assert inspected["lease_reason"] == "COLLECTOR_LEASE_EXPIRED"
+
+
+def test_inspection_rejects_replaced_lease_and_pid_reuse(tmp_path: Path) -> None:
+    def spawn(_command: list[str], _root: Path, _environment: dict[str, str]) -> _FakeProcess:
+        return _FakeProcess(93)
+
+    start_bounded_collectors(
+        tmp_path,
+        ["bbo-collector"],
+        duration_s=60.0,
+        startup_wait_s=0.0,
+        process_inventory=lambda _root: [],
+        spawner=spawn,
+        sleeper=lambda _seconds: None,
+    )
+    _, replacement = create_lease(
+        tmp_path,
+        duration_s=60.0,
+        now=200.0,
+        token="replacement-token",
+    )
+    inspected = inspect_bounded_collectors(
+        tmp_path,
+        process_inventory=lambda _root: [
+            {
+                "pid": 93,
+                "ppid": 1,
+                "name": "python.exe",
+                "cmd": "python unrelated.py --name bbo-collector",
+            }
+        ],
+        now=201.0,
+    )
+
+    assert inspected is not None
+    assert inspected["status"] == "DEGRADED"
+    assert inspected["actifs"] == {}
+    assert inspected["arretes"] == ["bbo-collector"]
+    assert inspected["lease_valid"] is False
+    assert inspected["lease_reason"] == "COLLECTOR_LEASE_REPLACED"
+    assert inspected["lease"]["lease_id"] == replacement["lease_id"]
+    assert "token" not in json.dumps(inspected)

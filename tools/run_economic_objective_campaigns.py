@@ -14,7 +14,10 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
 from hl_observer.backtesting import copy_vault_executable, lead_lag_shadow  # noqa: E402
-from hl_observer.ops.bounded_collection import start_bounded_collectors  # noqa: E402
+from hl_observer.ops.bounded_collection import (  # noqa: E402
+    inspect_bounded_collectors,
+    start_bounded_collectors,
+)
 from hl_observer.simulation.economic_campaigns import (  # noqa: E402
     REPORT_DIR,
     build_copy_campaign,
@@ -338,7 +341,7 @@ def run_campaigns(
         "cross_venue_dislocation_v2": cross_raw,
     }
     preliminary_plan = build_collection_plan(campaigns, raw_reports)
-    collector_state = None
+    collector_state = inspect_bounded_collectors(root)
     if start_collection and any(row["objective_status"] != "ATTEINT" for row in campaigns):
         collector_state = start_bounded_collectors(
             root,
