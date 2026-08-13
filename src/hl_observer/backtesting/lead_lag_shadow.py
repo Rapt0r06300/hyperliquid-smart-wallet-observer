@@ -17,6 +17,7 @@ PAPER/shadow only : mesurer n'est pas trader.
 from __future__ import annotations
 
 import bisect
+import gzip
 import hashlib
 import json
 import math
@@ -44,39 +45,162 @@ FRAIS_SLIPPAGE_BPS = 6.0
 HORIZONS_MS = (50.0, 100.0, 250.0, 500.0, 1000.0)
 MIN_CHOCS = 30
 N_PERIODES = 4                     # pour juger la stabilité dans le temps
+DEFAULT_HISTORY_SOURCES = 8
 
 
-def charger_tape(root: str | Path) -> dict[str, dict[str, list]]:
-    """{coin: {'HL':[(ns,mid,bid,ask)], 'BIN':[(ns,mid)], 'TRADE':[(ns,px,dir)]}} trié."""
+def selectionner_sources(
+    root: str | Path,
+    *,
+    include_history: bool = False,
+    max_history_sources: int = DEFAULT_HISTORY_SOURCES,
+) -> list[Path]:
+    """Return a deterministic set of local tapes used by the replay.
+
+    The live tape is always first.  Historical gzip shards are selected by
+    their stable filename timestamp, newest first.  ``bbo_tape.jsonl.prev``
+    is used only after shards because older versions generally did not record
+    Binance trades, which are mandatory for this strategy.
+    """
+
+    data = Path(root) / "runtime" / "data"
+    selected = [data / "bbo_tape.jsonl"]
+    if not include_history:
+        return [path for path in selected if path.is_file()]
+    historical = sorted(
+        [
+            *list((data / "bbo_shards").glob("*.jsonl.gz")),
+            *list((data / "bbo_shards_archive").glob("*.jsonl.gz")),
+        ],
+        key=lambda path: path.name,
+        reverse=True,
+    )
+    limit = max(0, int(max_history_sources))
+    selected.extend(historical[:limit])
+    previous = data / "bbo_tape.jsonl.prev"
+    if previous.is_file() and len(historical) < limit:
+        selected.append(previous)
+    return [path for path in selected if path.is_file()]
+
+
+def _iter_lines(path: Path):
+    opener = gzip.open if path.name.endswith(".gz") else open
+    try:
+        with opener(path, "rt", encoding="utf-8", errors="ignore") as handle:
+            yield from handle
+    except OSError:
+        return
+
+
+def _event_time_ns(row: dict[str, Any]) -> int | None:
+    """Use a cross-process wall clock; monotonic ``recu_ns`` is only fallback."""
+
+    wall_ms = row.get("ts_wall_ms", row.get("recv_wall_ts_ms"))
+    try:
+        if wall_ms is not None:
+            return int(float(wall_ms) * 1_000_000.0)
+        return int(row["recu_ns"])
+    except (KeyError, TypeError, ValueError, OverflowError):
+        return None
+
+
+def _dedupe_key(row: dict[str, Any], timestamp_ns: int) -> tuple[Any, ...]:
+    event_id = row.get("event_id")
+    if event_id:
+        return ("event_id", str(event_id))
+    venue = str(row.get("venue") or "")
+    coin = str(row.get("coin") or "").upper()
+    if venue == "BIN_TRADE":
+        return (venue, coin, timestamp_ns, row.get("px"), row.get("side"), row.get("sz"))
+    return (venue, coin, timestamp_ns, row.get("bid"), row.get("ask"), row.get("mid"))
+
+
+def charger_tape(
+    root: str | Path,
+    *,
+    include_history: bool = False,
+    max_history_sources: int = DEFAULT_HISTORY_SOURCES,
+    sources: list[Path] | None = None,
+    return_meta: bool = False,
+) -> dict[str, dict[str, list]] | tuple[dict[str, dict[str, list]], dict[str, Any]]:
+    """Load causal HL quotes and Binance trades from exact local sources.
+
+    Modern tapes are compared with wall timestamps because ``recu_ns`` is a
+    process-local monotonic clock and cannot be ordered across restarts.
+    """
+
     from collections import defaultdict
-    p = Path(root) / TAPE
-    if not p.exists():
-        return {}
+    root_path = Path(root).resolve()
+    selected = list(sources) if sources is not None else selectionner_sources(
+        root_path,
+        include_history=include_history,
+        max_history_sources=max_history_sources,
+    )
     par: dict[str, dict[str, list]] = defaultdict(lambda: {"HL": [], "BIN": [], "TRADE": []})
-    for line in p.read_text(encoding="utf-8", errors="ignore").splitlines():
-        try:
-            d = json.loads(line)
-            coin = str(d["coin"]).upper()
-            r = int(d["recu_ns"])
-        except (KeyError, TypeError, ValueError):
+    seen: set[tuple[Any, ...]] = set()
+    lines_read = duplicates = invalid = 0
+    consumed: list[str] = []
+    for path_value in selected:
+        path = Path(path_value)
+        if not path.is_absolute():
+            path = root_path / path
+        if not path.is_file():
             continue
-        v = d.get("venue")
-        if v == "HL":
-            m = _flt(d.get("mid"))
-            if m:
-                par[coin]["HL"].append((r, m, _flt(d.get("bid")) or m, _flt(d.get("ask")) or m))
-        elif v == "BIN":
-            m = _flt(d.get("mid"))
-            if m:
-                par[coin]["BIN"].append((r, m))
-        elif v == "BIN_TRADE":
-            px = _flt(d.get("px"))
-            if px:
-                par[coin]["TRADE"].append((r, px, 1.0 if d.get("side") == "BUY" else -1.0))
+        try:
+            consumed.append(path.relative_to(root_path).as_posix())
+        except ValueError:
+            consumed.append(str(path))
+        for line in _iter_lines(path):
+            lines_read += 1
+            try:
+                d = json.loads(line)
+                coin = str(d["coin"]).upper()
+            except (KeyError, TypeError, ValueError):
+                invalid += 1
+                continue
+            venue = d.get("venue")
+            if venue not in {"HL", "BIN_TRADE"}:
+                continue
+            timestamp_ns = _event_time_ns(d)
+            if timestamp_ns is None:
+                invalid += 1
+                continue
+            key = _dedupe_key(d, timestamp_ns)
+            if key in seen:
+                duplicates += 1
+                continue
+            seen.add(key)
+            if venue == "HL":
+                mid = _flt(d.get("mid"))
+                if mid:
+                    par[coin]["HL"].append(
+                        (
+                            timestamp_ns,
+                            mid,
+                            _flt(d.get("bid")) or mid,
+                            _flt(d.get("ask")) or mid,
+                        )
+                    )
+            else:
+                price = _flt(d.get("px"))
+                if price:
+                    par[coin]["TRADE"].append(
+                        (timestamp_ns, price, 1.0 if d.get("side") == "BUY" else -1.0)
+                    )
     for c in par:
         for k in par[c]:
             par[c][k].sort()
-    return dict(par)
+    result = dict(par)
+    meta = {
+        "timestamp_clock": "ts_wall_ms_or_recv_wall_ts_ms;recu_ns_fallback",
+        "sources": consumed,
+        "sources_count": len(consumed),
+        "lines_read": lines_read,
+        "relevant_unique_events": len(seen),
+        "duplicates_rejected": duplicates,
+        "invalid_rows": invalid,
+        "complete_sources": True,
+    }
+    return (result, meta) if return_meta else result
 
 
 def _flt(x):
@@ -194,12 +318,22 @@ def _metriques(nets: list[float], *, n_periodes: int) -> dict[str, Any]:
 
 def backtest(root: str | Path = ".", *, seuil_choc_bps: float = SEUIL_CHOC_BPS,
              frais_slippage_bps: float = FRAIS_SLIPPAGE_BPS, horizons_ms=HORIZONS_MS,
-             coins_controle: tuple = (), min_chocs: int = MIN_CHOCS) -> dict[str, Any]:
+             coins_controle: tuple = (), min_chocs: int = MIN_CHOCS,
+             include_history: bool = False,
+             max_history_sources: int = DEFAULT_HISTORY_SOURCES,
+             sources: list[Path] | None = None) -> dict[str, Any]:
     """Verdict lead-lag NET par horizon (gaté par l'observable), par coin, test vs contrôle, avec
     espérance/capacité/drawdown/stabilité. NEED_MORE_DATA tant que trop peu de chocs."""
-    tape = charger_tape(root)
+    tape, source_meta = charger_tape(
+        root,
+        include_history=include_history,
+        max_history_sources=max_history_sources,
+        sources=sources,
+        return_meta=True,
+    )
     if not tape:
-        return {"strategie": "lead_lag_shadow", "statut": "NEED_MORE_DATA", "detail": "tape vide"}
+        return {"strategie": "lead_lag_shadow", "statut": "NEED_MORE_DATA", "detail": "tape vide",
+                "source_meta": source_meta}
     controle = {c.upper() for c in coins_controle}
     # 1) cadence HL PAR COIN (jamais poolée : l'interleaving de N coins donne un p50 illusoire ~0 ms
     #    et ferait croire que 50/100 ms sont observables alors qu'HL n'emet ~qu'aux 100 ms PAR coin).
@@ -210,7 +344,8 @@ def backtest(root: str | Path = ".", *, seuil_choc_bps: float = SEUIL_CHOC_BPS,
     horizons = [h for h in horizons_ms if med_p50 and h >= 2.0 * med_p50]
     if not horizons:
         return {"strategie": "lead_lag_shadow", "statut": "NEED_MORE_DATA",
-                "intervalles_hl": dist, "detail": "aucun horizon observable (HL trop lent / peu de data)"}
+                "intervalles_hl": dist, "detail": "aucun horizon observable (HL trop lent / peu de data)",
+                "source_meta": source_meta}
     # 2) chocs sur trades -> net par horizon, séparé test/contrôle
     import random
     test: dict[float, list] = {h: [] for h in horizons}
@@ -238,7 +373,8 @@ def backtest(root: str | Path = ".", *, seuil_choc_bps: float = SEUIL_CHOC_BPS,
     n_test = max((len(v) for v in test.values()), default=0)
     if n_test < min_chocs:
         return {"strategie": "lead_lag_shadow", "statut": "NEED_MORE_DATA", "chocs_test": n_test,
-                "cible": min_chocs, "intervalles_hl": dist, "horizons_observables": horizons}
+                "cible": min_chocs, "intervalles_hl": dist, "horizons_observables": horizons,
+                "source_meta": source_meta}
     par_h = {h: _metriques(v, n_periodes=N_PERIODES) for h, v in test.items() if v}
     ctrl_h = {h: round(st.mean(v), 3) for h, v in ctrl.items() if v}
     plac_h = {h: round(st.mean(v), 3) for h, v in placebo.items() if v}
@@ -269,6 +405,7 @@ def backtest(root: str | Path = ".", *, seuil_choc_bps: float = SEUIL_CHOC_BPS,
                 and r["esperance_nette_bps"] > plac_h.get(h, 0.0)}
     return {"strategie": "lead_lag_shadow",
             "statut": "PROMETTEUR" if gagnants else "PAS_D_EDGE",
+            "chocs_test": n_test,
             "intervalles_hl": dist, "horizons_observables": horizons,
             "capacite_mediane_usd": round(st.median(cap), 2) if cap else None,
             "net_par_horizon": par_h, "controle_par_horizon": ctrl_h, "placebo_par_horizon": plac_h,
@@ -283,6 +420,7 @@ def backtest(root: str | Path = ".", *, seuil_choc_bps: float = SEUIL_CHOC_BPS,
                 "period_count": N_PERIODES,
                 "stable_horizons_ms": [h for h, row in par_h.items() if row.get("stable")],
             },
+            "source_meta": source_meta,
             "avertissement": "Choc sur trades Binance ; entrée demi-spread HL réel + frais/slippage ; "
                              "horizons GATÉS par l'observable ; stabilité par période. Contrôle > 0 = "
                              "artefact d'horloge. Sub-seconde souvent gagnée par des racers co-localisés."}

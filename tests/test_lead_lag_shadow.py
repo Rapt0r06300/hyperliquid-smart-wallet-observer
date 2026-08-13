@@ -3,6 +3,7 @@ GÈLE les horizons observables, le CHOC vient des trades Binance, l'entrée paie
 et la stabilité se juge PAR PÉRIODE. Tape synthétique, aucun réseau."""
 from __future__ import annotations
 
+import gzip
 import json
 
 import pytest
@@ -16,11 +17,13 @@ from hl_observer.backtesting.lead_lag_shadow import (
     CONFIG_GELE,
     GLOBAL_TRIAL_LEDGER,
     backtest,
+    charger_tape,
     detecter_chocs,
     distribution_intervalles,
     geler_config,
     horizons_observables,
     net_par_horizon,
+    selectionner_sources,
 )
 from hl_observer.experimental.signaux import signaux_lead_lag
 
@@ -77,6 +80,70 @@ def test_backtest_promet_quand_HL_suit_et_est_STABLE_par_periode(tmp_path):
 
 def test_backtest_NEED_MORE_DATA_si_tape_vide(tmp_path):
     assert backtest(tmp_path)["statut"] == "NEED_MORE_DATA"
+
+
+def test_charger_tape_historique_utilise_horloge_murale_et_dedupe(tmp_path):
+    data = tmp_path / "runtime" / "data"
+    shards = data / "bbo_shards"
+    shards.mkdir(parents=True)
+    current = data / "bbo_tape.jsonl"
+    duplicate = {
+        "event_id": "trade-unique",
+        "venue": "BIN_TRADE",
+        "coin": "ETH",
+        "recu_ns": 9_000_000_000,
+        "ts_wall_ms": 2_000,
+        "px": 101.0,
+        "side": "BUY",
+    }
+    current.write_text(
+        "\n".join(
+            json.dumps(row)
+            for row in (
+                duplicate,
+                {
+                    "event_id": "hl-new",
+                    "venue": "HL",
+                    "coin": "ETH",
+                    "recu_ns": 1,
+                    "ts_wall_ms": 2_100,
+                    "mid": 101.0,
+                    "bid": 100.9,
+                    "ask": 101.1,
+                },
+            )
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    historical = shards / "bbo_tape_00000000000000001000.jsonl.gz"
+    with gzip.open(historical, "wt", encoding="utf-8") as handle:
+        for row in (
+            {
+                "event_id": "hl-old",
+                "venue": "HL",
+                "coin": "ETH",
+                # A process-local monotonic clock can restart above/below any
+                # prior process.  Wall time must therefore win the ordering.
+                "recu_ns": 99_000_000_000,
+                "ts_wall_ms": 1_000,
+                "mid": 100.0,
+                "bid": 99.9,
+                "ask": 100.1,
+            },
+            duplicate,
+        ):
+            handle.write(json.dumps(row) + "\n")
+
+    sources = selectionner_sources(tmp_path, include_history=True, max_history_sources=1)
+    assert sources == [current, historical]
+    tape, meta = charger_tape(tmp_path, sources=sources, return_meta=True)
+
+    assert [row[1] for row in tape["ETH"]["HL"]] == [100.0, 101.0]
+    assert len(tape["ETH"]["TRADE"]) == 1
+    assert meta["duplicates_rejected"] == 1
+    assert meta["sources_count"] == 2
+    assert meta["timestamp_clock"].startswith("ts_wall_ms")
 
 
 def test_geler_config_ecrit_un_rejet_complet_quand_la_preuve_manque(tmp_path):

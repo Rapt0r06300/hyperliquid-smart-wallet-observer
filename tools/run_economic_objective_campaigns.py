@@ -65,6 +65,7 @@ def run_campaigns(
     *,
     cross_budget_s: float = 20.0,
     cross_current_only: bool = False,
+    lead_history_sources: int = lead_lag_shadow.DEFAULT_HISTORY_SOURCES,
     start_collection: bool = True,
 ) -> dict[str, Any]:
     assert_execution_disabled()
@@ -97,15 +98,22 @@ def run_campaigns(
     copy_campaign["evidence_paths"].append(copy_raw_path.relative_to(root).as_posix())
     write_campaign(root, copy_campaign)
 
-    lead_data = dataset_provenance(root, ("runtime/data/bbo_tape.jsonl",))
+    lead_sources = lead_lag_shadow.selectionner_sources(
+        root,
+        include_history=True,
+        max_history_sources=max(0, int(lead_history_sources)),
+    )
+    lead_data = dataset_provenance(root, lead_sources)
     lead_params = {
         "seuil_choc_bps": lead_lag_shadow.SEUIL_CHOC_BPS,
         "frais_slippage_bps": lead_lag_shadow.FRAIS_SLIPPAGE_BPS,
         "horizons_ms": list(lead_lag_shadow.HORIZONS_MS),
         "minimum_shocks": lead_lag_shadow.MIN_CHOCS,
+        "history_sources": len(lead_sources),
+        "timestamp_clock": "ts_wall_ms_or_recv_wall_ts_ms;recu_ns_fallback",
     }
     lead_freeze = freeze_parameters(root, "lead_lag", lead_params, lead_data)
-    lead_raw = lead_lag_shadow.backtest(root)
+    lead_raw = lead_lag_shadow.backtest(root, sources=lead_sources)
     lead_raw_path = _write_raw(root, "lead_lag", lead_raw)
     lead_campaign = build_lead_lag_campaign(lead_raw, freeze=lead_freeze, datasets=lead_data)
     lead_campaign["evidence_paths"].append(lead_raw_path.relative_to(root).as_posix())
@@ -192,12 +200,18 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--root", default=str(ROOT))
     parser.add_argument("--cross-budget-s", type=float, default=20.0)
     parser.add_argument("--cross-current-only", action="store_true")
+    parser.add_argument(
+        "--lead-history-sources",
+        type=int,
+        default=lead_lag_shadow.DEFAULT_HISTORY_SOURCES,
+    )
     parser.add_argument("--no-start-collection", action="store_true")
     args = parser.parse_args(argv)
     result = run_campaigns(
         Path(args.root).resolve(),
         cross_budget_s=args.cross_budget_s,
         cross_current_only=args.cross_current_only,
+        lead_history_sources=args.lead_history_sources,
         start_collection=not args.no_start_collection,
     )
     for row in result["campaigns"]:
