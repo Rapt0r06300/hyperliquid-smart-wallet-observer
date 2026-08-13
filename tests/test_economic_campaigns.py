@@ -173,8 +173,8 @@ def test_executable_copy_campaign_maps_only_closed_liquidatable_evidence(tmp_pat
             "trade_ids_sha256": "c" * 64,
         },
         "temporal_evidence": {
-            "oos": {"net_pnl_usd": 1.0, "sample_count": 1, "no_lookahead": True},
-            "forward": {"net_pnl_usd": 1.0, "sample_count": 1, "post_freeze": True},
+            "oos": {"net_pnl_usd": 2.1, "sample_count": 1, "no_lookahead": True},
+            "forward": {"net_pnl_usd": 2.3, "sample_count": 1, "post_freeze": True},
             "placebos": {"beaten": True},
         },
     }
@@ -249,8 +249,8 @@ def test_executable_lead_lag_campaign_maps_closed_ledger_and_temporal_proof(
                 "trade_ids_sha256": "f" * 64,
             },
             "temporal_evidence": {
-                "oos": {"net_pnl_usd": 1.0, "sample_count": 1, "no_lookahead": True},
-                "forward": {"net_pnl_usd": 1.0, "sample_count": 1, "post_freeze": True},
+                "oos": {"net_pnl_usd": 2.0, "sample_count": 2, "no_lookahead": True},
+                "forward": {"net_pnl_usd": 2.5, "sample_count": 2, "post_freeze": True},
                 "placebos": {"beaten": True},
             },
         },

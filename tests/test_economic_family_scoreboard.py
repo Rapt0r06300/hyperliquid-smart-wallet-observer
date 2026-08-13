@@ -114,8 +114,8 @@ def test_strict_campaign_is_preferred_and_never_double_counts_arbitrage(tmp_path
         "duplicate_trade_ids": 0,
         "trade_ids_count": 30,
         "trade_ids_sha256": "a" * 64,
-        "oos": {"net_pnl_usd": 1.0, "no_lookahead": True},
-        "forward": {"net_pnl_usd": 0.5, "post_freeze": True},
+        "oos": {"net_pnl_usd": 2.0, "sample_count": 15, "no_lookahead": True},
+        "forward": {"net_pnl_usd": 2.5, "sample_count": 15, "post_freeze": True},
         "placebos": {"beaten": True},
     }
     _write(

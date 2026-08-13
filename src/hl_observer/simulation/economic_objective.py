@@ -111,29 +111,51 @@ def evaluate_objective(
     oos = evidence.get("oos")
     forward = evidence.get("forward")
     placebos = evidence.get("placebos")
-    if not isinstance(oos, Mapping) or _number(oos.get("net_pnl_usd")) is None:
+    oos_net = _number(oos.get("net_pnl_usd")) if isinstance(oos, Mapping) else None
+    oos_count = _number(oos.get("sample_count")) if isinstance(oos, Mapping) else None
+    forward_net = (
+        _number(forward.get("net_pnl_usd")) if isinstance(forward, Mapping) else None
+    )
+    forward_count = (
+        _number(forward.get("sample_count")) if isinstance(forward, Mapping) else None
+    )
+    if not isinstance(oos, Mapping) or oos_net is None:
         issues.append("OOS_PROOF_MISSING")
-    elif _number(oos.get("net_pnl_usd")) <= 0:
+    elif oos_count is None or oos_count <= 0:
+        issues.append("OOS_SAMPLE_MISSING")
+    elif oos_net <= 0:
         issues.append("OOS_NET_NOT_POSITIVE")
     elif oos.get("no_lookahead") is not True:
         issues.append("OOS_NO_LOOKAHEAD_PROOF_MISSING")
-    if not isinstance(forward, Mapping) or _number(forward.get("net_pnl_usd")) is None:
+    if not isinstance(forward, Mapping) or forward_net is None:
         issues.append("FORWARD_POST_FREEZE_PROOF_MISSING")
-    elif _number(forward.get("net_pnl_usd")) <= 0:
+    elif forward_count is None or forward_count <= 0:
+        issues.append("FORWARD_SAMPLE_MISSING")
+    elif forward_net <= 0:
         issues.append("FORWARD_NET_NOT_POSITIVE")
     elif forward.get("post_freeze") is not True:
         issues.append("FORWARD_NOT_PROVEN_POST_FREEZE")
     if not isinstance(placebos, Mapping) or placebos.get("beaten") is not True:
         issues.append("PLACEBO_NOT_BEATEN")
 
-    net = metrics["net_pnl_usd"]
-    if net is None or net < float(target_net_usd):
+    proof_net = (
+        oos_net + forward_net
+        if oos_net is not None
+        and forward_net is not None
+        and oos_count is not None
+        and oos_count > 0
+        and forward_count is not None
+        and forward_count > 0
+        else None
+    )
+    if proof_net is None or proof_net < float(target_net_usd):
         issues.append("TARGET_NET_USD_NOT_REACHED")
     unique_issues = list(dict.fromkeys(issues))
     return {
         "family": family,
         "target_net_usd": float(target_net_usd),
-        "eligible_net_pnl_usd": net if not unique_issues else None,
+        "proof_net_pnl_usd": proof_net,
+        "eligible_net_pnl_usd": proof_net if not unique_issues else None,
         "objective_status": "ATTEINT" if not unique_issues else "NON_ATTEINT",
         "objective_reasons": unique_issues,
     }

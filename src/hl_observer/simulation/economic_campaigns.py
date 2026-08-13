@@ -640,6 +640,7 @@ def render_campaign_report(campaigns: Iterable[Mapping[str, Any]]) -> str:
                 f"## {labels.get(family, family)} - OBJECTIF +4 USD : {status}",
                 "",
                 f"- PnL net observe (diagnostic): {net_text}",
+                f"- PnL net de preuve OOS + forward: {campaign.get('proof_net_pnl_usd')}",
                 f"- PnL net eligible a la preuve: {eligible_text}",
                 f"- Parametres geles avant evaluation: {campaign.get('parameters_frozen')}",
                 f"- Freeze ID: {freeze.get('campaign_id')}",
