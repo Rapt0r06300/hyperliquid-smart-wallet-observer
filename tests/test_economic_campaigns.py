@@ -125,7 +125,7 @@ def test_executable_copy_campaign_maps_only_closed_liquidatable_evidence(tmp_pat
     freeze = freeze_parameters(
         tmp_path,
         "copy_vault",
-        {"calibration_protocol": "copy_vault_executable_walk_forward_v4_causal_only"},
+        {"calibration_protocol": "copy_vault_executable_walk_forward_v5_causal_horizon_purge"},
         datasets,
         campaign_id="copy-executable",
         frozen_at_ms=10,

@@ -4,6 +4,9 @@ import math
 import json
 
 from hl_observer.backtesting.copy_vault_executable import (
+    COPY_DELAY_MS,
+    HORIZONS_MS,
+    MAX_TARGET_LAG_MS,
     calibrate_train_only,
     cluster_metaorders,
     evaluate_frozen,
@@ -12,6 +15,7 @@ from hl_observer.backtesting.copy_vault_executable import (
     replay_metaorders,
     select_causal_protocol_inputs,
     summarize,
+    temporal_bounds,
     temporal_evidence,
 )
 
@@ -328,3 +332,46 @@ def test_walk_forward_selects_on_train_and_forward_is_strictly_post_freeze() -> 
         for trade in evaluation["trades"]["forward"]
     )
     assert temporal["placebos"]["beaten"] is True
+
+
+def test_calibration_uses_candidate_horizon_specific_purge() -> None:
+    entries = [
+        {
+            **_entry(f"e-{index}", 1_000 + index * 4_000_000),
+            "source": "LIVE_WS",
+            "is_snapshot": False,
+            "observed_at_ms": 1_000 + index * 4_000_000,
+        }
+        for index in range(16)
+    ]
+    metaorders = cluster_metaorders(entries)[0]
+
+    calibration = calibrate_train_only(metaorders, {"BTC": []})
+
+    for row in calibration["grid"]:
+        expected = COPY_DELAY_MS + int(row["horizon_ms"]) + MAX_TARGET_LAG_MS
+        assert row["bounds"]["purge_ms"] == expected
+    assert len({row["bounds"]["purge_ms"] for row in calibration["grid"]}) == len(HORIZONS_MS)
+
+
+def test_selected_bounds_match_selected_horizon_and_default_is_shortest() -> None:
+    entries = [
+        {
+            **_entry(f"e-{index}", 1_000 + index * 4_000_000),
+            "source": "LIVE_WS",
+            "is_snapshot": False,
+            "observed_at_ms": 1_000 + index * 4_000_000,
+        }
+        for index in range(16)
+    ]
+    metaorders = cluster_metaorders(entries)[0]
+
+    result = calibrate_train_only(metaorders, {"BTC": []})
+
+    assert result["selection_eligible"] is False
+    assert result["selected_horizon_ms"] == HORIZONS_MS[0]
+    assert result["bounds"] == result["grid"][0]["bounds"]
+    assert result["bounds"] == temporal_bounds(
+        metaorders,
+        purge_ms=COPY_DELAY_MS + HORIZONS_MS[0] + MAX_TARGET_LAG_MS,
+    )

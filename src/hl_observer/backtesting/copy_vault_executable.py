@@ -19,7 +19,7 @@ from typing import Any
 from hl_observer.config.frais_venues import frais_taker_bps
 
 SCHEMA_VERSION = "hypersmart.copy_vault_executable.v1"
-PROTOCOL_NAME = "copy_vault_executable_walk_forward_v4_causal_only"
+PROTOCOL_NAME = "copy_vault_executable_walk_forward_v5_causal_horizon_purge"
 METAORDER_GAP_MS = 60_000
 COPY_DELAY_MS = 60_000
 MAX_REFERENCE_LAG_MS = 30_000
@@ -48,6 +48,7 @@ def protocol_signature() -> dict[str, Any]:
         "historical_source_policy": "REST_BACKFILL_and_historical_books_audit_only",
         "causal_observation_required_all_segments": True,
         "forward_signal_policy": "causal_live_first_fill_observed_after_physical_freeze",
+        "purge_policy": "copy_delay_plus_candidate_horizon_plus_max_target_lag",
     }
 
 
@@ -594,7 +595,11 @@ def summarize(trades: Iterable[Mapping[str, Any]]) -> dict[str, Any]:
     }
 
 
-def temporal_bounds(metaorders: list[Mapping[str, Any]]) -> dict[str, int | None]:
+def temporal_bounds(
+    metaorders: list[Mapping[str, Any]],
+    *,
+    purge_ms: int | None = None,
+) -> dict[str, int | bool | None]:
     timestamps = sorted(int(row["signal_ts_ms"]) for row in metaorders)
     if len(timestamps) < 3:
         return {key: None for key in (
@@ -606,7 +611,7 @@ def temporal_bounds(metaorders: list[Mapping[str, Any]]) -> dict[str, int | None
         len(timestamps) - 1,
         max(train_index + 1, int(len(timestamps) * (TRAIN_FRACTION + VALIDATION_FRACTION)) - 1),
     )
-    purge = max(HORIZONS_MS)
+    purge = max(HORIZONS_MS) if purge_ms is None else max(0, int(purge_ms))
     train_cut = timestamps[train_index]
     oos_cut = timestamps[validation_index]
     return {
@@ -627,9 +632,10 @@ def calibrate_train_only(
     *,
     require_causal_observation: bool = False,
 ) -> dict[str, Any]:
-    bounds = temporal_bounds(metaorders)
     grid: list[dict[str, Any]] = []
     for horizon in HORIZONS_MS:
+        purge_ms = COPY_DELAY_MS + int(horizon) + MAX_TARGET_LAG_MS
+        bounds = temporal_bounds(metaorders, purge_ms=purge_ms)
         trades, diagnostics = replay_metaorders(
             metaorders,
             books_by_coin,
@@ -639,19 +645,30 @@ def calibrate_train_only(
             require_causal_observation=require_causal_observation,
         )
         summary = summarize(trades)
-        grid.append({"horizon_ms": horizon, "summary": summary, "diagnostics": diagnostics,
-                     "eligible": summary["positions_fermees"] >= MIN_TRAIN_TRADES})
+        grid.append({
+            "horizon_ms": horizon,
+            "bounds": bounds,
+            "summary": summary,
+            "diagnostics": diagnostics,
+            "eligible": summary["positions_fermees"] >= MIN_TRAIN_TRADES,
+        })
     eligible = [row for row in grid if row["eligible"]]
     selected = max(
         eligible,
         key=lambda row: (float(row["summary"]["net_pnl_usd"]), -int(row["horizon_ms"])),
         default=None,
     )
+    selected_horizon = int(selected["horizon_ms"]) if selected else int(HORIZONS_MS[0])
+    selected_bounds = (
+        dict(selected["bounds"])
+        if selected
+        else dict(grid[0]["bounds"])
+    )
     return {
         "status": "TRAIN_SELECTED" if selected else "KILL_TRAIN_INSUFFICIENT_EXECUTABLE_EPISODES",
         "selection_eligible": selected is not None,
-        "selected_horizon_ms": int(selected["horizon_ms"]) if selected else int(HORIZONS_MS[0]),
-        "bounds": bounds,
+        "selected_horizon_ms": selected_horizon,
+        "bounds": selected_bounds,
         "grid": grid,
         "selection_scope": "TRAIN_ONLY",
         "causal_observation_required": bool(require_causal_observation),
