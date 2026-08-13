@@ -28,6 +28,10 @@ from hl_observer.simulation.economic_campaigns import (  # noqa: E402
     write_campaign,
 )
 from hl_observer.simulation.economic_family_scoreboard import export_scoreboards  # noqa: E402
+from hl_observer.simulation.economic_collection_plan import (  # noqa: E402
+    build_collection_plan,
+    write_collection_plan,
+)
 
 
 def _tool(name: str, path: Path):
@@ -288,29 +292,23 @@ def run_campaigns(
     collector_state = None
     if start_collection and any(row["objective_status"] != "ATTEINT" for row in campaigns):
         collector_state = demarrer_tous(root, profil="harvest")
-        collection_path = root / REPORT_DIR / "collection_resume_state.json"
-        _write_raw(root, "collection_resume_state", collector_state)
-        campaigns_with_need = [
-            row["family"] for row in campaigns if row["objective_status"] != "ATTEINT"
-        ]
-        collection_path.write_text(
-            json.dumps(
-                {
-                    **collector_state,
-                    "families_requiring_more_data": campaigns_with_need,
-                    "paper_read_only": True,
-                    "real_execution": False,
-                },
-                ensure_ascii=False,
-                indent=2,
-            ),
-            encoding="utf-8",
-        )
+    collection_plan = build_collection_plan(
+        campaigns,
+        {
+            "copy_vault": copy_raw,
+            "lead_lag": lead_raw,
+            "cross_venue_dislocation_v2": cross_raw,
+        },
+        collector_state=collector_state,
+    )
+    collection_path, collection_report_path = write_collection_plan(root, collection_plan)
     return {
         "campaigns": campaigns,
         "report_path": str(report_path),
         "scoreboards_path": str(scoreboards_path),
         "collector_state": collector_state,
+        "collection_plan_path": str(collection_path),
+        "collection_plan_report_path": str(collection_report_path),
     }
 
 

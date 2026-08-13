@@ -422,8 +422,9 @@ def summarize(trades: Iterable[Mapping[str, Any]]) -> dict[str, Any]:
         "roi_pct": round(net / 1000.0 * 100.0, 8),
         "max_drawdown_usd": round(max_drawdown, 8),
         "hit_rate": round(wins / len(rows), 8) if rows else 0.0,
-        "profit_factor": (round(gains / losses, 8) if losses > 0 else
-                          (float("inf") if gains > 0 else 0.0)),
+        # JSON has no portable Infinity value.  An all-win sample has an
+        # undefined PF, not an infinite economic proof.
+        "profit_factor": round(gains / losses, 8) if losses > 0 else None,
         "LIQUIDATABLE_NET": bool(rows) and all(row.get("liquidatable_net") is True for row in rows),
         "duplicate_trade_ids": duplicates,
         "trade_ids_count": len(set(ids)),

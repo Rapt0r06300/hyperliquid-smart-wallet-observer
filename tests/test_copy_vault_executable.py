@@ -117,6 +117,22 @@ def test_capacity_and_duplicate_trade_guards_fail_closed() -> None:
     assert summarize(trades)["duplicate_trade_ids"] == 0
 
 
+def test_all_win_profit_factor_is_unmeasured_not_json_infinity() -> None:
+    metaorder = cluster_metaorders([_entry("winner", 1_000)])[0][0]
+    books = [
+        _book(1_000, 99.0, 101.0),
+        _book(61_000, 100.0, 102.0),
+        _book(361_000, 109.0, 111.0),
+    ]
+    trade, reason = execute_metaorder(metaorder, books, horizon_ms=300_000)
+
+    assert reason == "LIQUIDATABLE_NET"
+    assert trade is not None and trade["net_pnl_usd"] > 0
+    summary = summarize([trade])
+    assert summary["profit_factor"] is None
+    assert "Infinity" not in __import__("json").dumps(summary)
+
+
 def test_walk_forward_selects_on_train_and_forward_is_strictly_post_freeze() -> None:
     entries = []
     books = []
