@@ -87,6 +87,32 @@ def first_compatible_freeze(
     return None
 
 
+def reuse_or_create_freeze(
+    root: str | Path,
+    family: str,
+    parameters: Mapping[str, Any],
+    datasets: Mapping[str, Any],
+) -> dict[str, Any]:
+    """Reuse the first compatible physical boundary, otherwise create it once.
+
+    Dataset provenance is intentionally *not* part of compatibility.  A freeze
+    records the data that existed when parameters were selected; later runs are
+    expected to see a larger/different dataset while keeping that original
+    timestamp and parameter choice immutable.  This is what makes genuinely
+    post-freeze forward evidence possible instead of moving the boundary on
+    every evaluation.
+    """
+    existing = first_compatible_freeze(root, family, parameters)
+    if existing is not None:
+        return existing
+
+    # Local import avoids an import cycle at module import time:
+    # economic_campaigns owns the physical writer and imports no registry code.
+    from .economic_campaigns import freeze_parameters
+
+    return freeze_parameters(root, family, parameters, datasets)
+
+
 def split_pre_post_freeze(
     rows: list[Mapping[str, Any]],
     freeze: Mapping[str, Any],
@@ -118,5 +144,6 @@ __all__ = [
     "first_freeze",
     "list_freezes",
     "parameter_hash",
+    "reuse_or_create_freeze",
     "split_pre_post_freeze",
 ]
