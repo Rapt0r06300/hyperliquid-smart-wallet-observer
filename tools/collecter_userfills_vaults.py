@@ -24,6 +24,12 @@ sys.path.insert(0, str(RACINE / "tools"))
 
 from hl_observer.collection import userfills_live as UL  # noqa: E402
 from hl_observer.collection import verrou_instance as VI  # noqa: E402
+from hl_observer.backtesting.copy_vault_executable import (  # noqa: E402
+    COPY_DELAY_MS as COPY_VAULT_DELAY_MS,
+    HORIZONS_MS as COPY_VAULT_HORIZONS_MS,
+    MAX_TARGET_LAG_MS as COPY_VAULT_MAX_TARGET_LAG_MS,
+    PROTOCOL_NAME as COPY_VAULT_PROTOCOL,
+)
 from hl_observer.experimental import cohortes as CO  # noqa: E402
 from hl_observer.market_data.live_l2_service import (  # noqa: E402
     LiveL2Snapshot,
@@ -36,6 +42,7 @@ import heartbeat_collecteur as HB  # noqa: E402
 
 WS_URL = "wss://api.hyperliquid.xyz/ws"
 FILLS_LIVE = Path("runtime") / "data" / "vault_fills_live.jsonl"
+COPY_VAULT_L2_TAPE = Path("runtime") / "data" / "copy_vault_l2_tape.jsonl"
 JOURNAL = Path("runtime") / "data" / "fills_journal.jsonl"       # CHAQUE fill live non-snapshot + gate + latence
 LIQ_CONFIRMEES = Path("runtime") / "data" / "liquidations_confirmees.jsonl"  # 25/07 : fill.liquidation non-null = REAL_LIQUIDATION
 # 25/07 — userEvents/WsLiquidation NON ajouté À DESSEIN : le champ `liquidation` {liquidatedUser, markPx,
@@ -265,7 +272,92 @@ def _full_levels(rep: dict) -> tuple[list[tuple[float, float]], list[tuple[float
     )
 
 
-def _lecteur_l2_ondemand(coin: str) -> dict | None:
+def _append_copy_vault_book(
+    root: Path,
+    coin: str,
+    resume: dict,
+    *,
+    received_at_ms: int,
+    sample_interval_ms: int = 1_000,
+    source: str = "HYPERLIQUID_L2_WS",
+    checkpoint_stage: str | None = None,
+    checkpoint_target_ms: int | None = None,
+    checkpoint_id: str | None = None,
+) -> bool:
+    """Persist one causal observed L2 sample for executable forward replay."""
+
+    symbol = str(coin or "").upper().strip()
+    try:
+        received = int(received_at_ms)
+        bid = float(resume["bid"])
+        ask = float(resume["ask"])
+        exchange_ts = int(resume["book_exchange_time"])
+        bids = [[float(row[0]), float(row[1])] for row in resume["bids5"][:5]]
+        asks = [[float(row[0]), float(row[1])] for row in resume["asks5"][:5]]
+    except (KeyError, IndexError, TypeError, ValueError, OverflowError):
+        return False
+    allowed_sources = {
+        "HYPERLIQUID_L2_WS",
+        "HYPERLIQUID_INFO_L2BOOK_CAUSAL_CHECKPOINT",
+    }
+    if (
+        not symbol
+        or source not in allowed_sources
+        or received <= 0
+        or exchange_ts <= 0
+        or received < exchange_ts
+        or received - exchange_ts > COPY_VAULT_MAX_TARGET_LAG_MS
+        or bid <= 0
+        or ask <= bid
+        or not bids
+        or not asks
+        or any(px <= 0 or size <= 0 for px, size in bids + asks)
+    ):
+        return False
+    previous = _COPY_VAULT_LAST_SAMPLE_MS.get(symbol)
+    if (
+        not checkpoint_id
+        and previous is not None
+        and received - previous < max(0, int(sample_interval_ms))
+    ):
+        return False
+    capacity_usd = min(
+        sum(px * size for px, size in bids),
+        sum(px * size for px, size in asks),
+    )
+    if capacity_usd <= 0:
+        return False
+    row = {
+        "schema_version": "hypersmart.copy_vault_l2.v1",
+        "coin": symbol,
+        "received_at_ms": received,
+        "exchange_ts_ms": exchange_ts,
+        "bid": bid,
+        "ask": ask,
+        "bids5": bids,
+        "asks5": asks,
+        "capacity_usd": capacity_usd,
+        "source": source,
+        "data_origin": "REAL_OBSERVED",
+        "causal_observation": True,
+        "paper_read_only": True,
+        "real_execution": False,
+    }
+    if checkpoint_stage:
+        row["checkpoint_stage"] = str(checkpoint_stage)
+    if checkpoint_target_ms is not None:
+        row["checkpoint_target_ms"] = int(checkpoint_target_ms)
+    if checkpoint_id:
+        row["checkpoint_id"] = str(checkpoint_id)
+    path = Path(root) / COPY_VAULT_L2_TAPE
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("a", encoding="utf-8") as handle:
+        handle.write(json.dumps(row, ensure_ascii=False) + "\n")
+    _COPY_VAULT_LAST_SAMPLE_MS[symbol] = max(int(previous or 0), received)
+    return True
+
+
+def _lecteur_l2_ondemand(coin: str, *, force_refresh: bool = False) -> dict | None:
     """L2 HL FRAIS (<1 s) pour `coin`, à la demande (POST public l2Book). Rend
     {hl_bid, hl_ask, depth_usd, age_ms} ou None. Cache court pour ne pas marteler l'API."""
     global _L2_POST, _L2_PARSE
@@ -273,7 +365,7 @@ def _lecteur_l2_ondemand(coin: str) -> dict | None:
         return None
     now = time.monotonic()
     hit = _L2_CACHE.get(coin)
-    if hit is not None and (now - hit[0]) < _L2_TTL_S:
+    if not force_refresh and hit is not None and (now - hit[0]) < _L2_TTL_S:
         return hit[1]
     if _L2_POST is None:
         try:
@@ -311,6 +403,30 @@ def _lecteur_l2_ondemand(coin: str) -> dict | None:
     }
     _L2_CACHE[coin] = (now, d)
     return d
+
+
+def _resume_from_info_checkpoint(info: dict | None) -> dict | None:
+    """Convert one actually received public /info l2Book into tape shape."""
+
+    if not info:
+        return None
+    try:
+        bid = float(info["hl_bid"])
+        ask = float(info["hl_ask"])
+        exchange_ts = int(info["exchange_ts_ms"])
+        bids = [[float(px), float(size), 1] for px, size in info["bids"][:5]]
+        asks = [[float(px), float(size), 1] for px, size in info["asks"][:5]]
+    except (KeyError, TypeError, ValueError, OverflowError):
+        return None
+    if bid <= 0 or ask <= bid or not bids or not asks:
+        return None
+    return {
+        "bid": bid,
+        "ask": ask,
+        "book_exchange_time": exchange_ts,
+        "bids5": bids,
+        "asks5": asks,
+    }
 
 
 # ── L2 DYNAMIQUE WS (rectif Flo 24/07) : pour chaque coin à position RAW ouverte, on s'abonne RÉELLEMENT au
@@ -489,12 +605,13 @@ async def _l2_dynamique(root: Path, *, sync_s: float = 1.0) -> None:
 def _traiter_un(root: Path, fill: dict, coins_a_verifier: set, t_ws_mono: float) -> None:
     import time as _t
     recu = _t.time() * 1000
+    persisted_fill = {**fill, "received_at_ms": int(recu)}
     with (root / FILLS_LIVE).open("a", encoding="utf-8") as f:
-        f.write(json.dumps(fill, ensure_ascii=False) + "\n")
+        f.write(json.dumps(persisted_fill, ensure_ascii=False) + "\n")
     coins_a_verifier.add(fill.get("coin"))
     if _TAPE_FILLS is not None:                                   # → tape L2/OFI : réception MONOTONE (même process)
         try:
-            _TAPE_FILLS.put_nowait((fill, t_ws_mono * 1000))
+            _TAPE_FILLS.put_nowait((persisted_fill, t_ws_mono * 1000))
         except asyncio.QueueFull:
             pass
     for nom, coh in CO.COHORTES.items():
@@ -691,6 +808,7 @@ async def _heartbeat(root: Path, info: dict, *, intervalle_s: float = 10.0) -> N
                 "reconnects": int(_HEARTBEAT_WS["reconnects"]),
                 "stale": False,
             },
+            protocol=COPY_VAULT_PROTOCOL,
         )
         derniers_messages = messages
         await asyncio.sleep(intervalle_s)
@@ -761,9 +879,321 @@ async def _metaorder_shadow_periodique(root: Path, vaults: list, *, intervalle_s
 #    par fill, VRAI OFI, 4 horloges séparées, latence pipeline ≥ 0). 1 connexion WS de plus (total 4 < 10).
 _TAPE_FILLS = None                           # asyncio.Queue((fill, fill_recv_mono_ms)) — alimentée par le worker
 _TAPE_COINS_ACTIFS: dict = {}                # coin -> dernier fill_recv (ms wall) : fenêtre d'abonnement l2Book
+_TAPE_PREWARM_COINS: set[str] = set()        # coins réels récents suivis avant le prochain fill live
 _TAPE_BUFFER: dict = {}                      # coin -> list[{recv_mono, resume}] (snapshots successifs)
+_COPY_VAULT_LAST_SAMPLE_MS: dict[str, int] = {}
 TAPE_BUFFER_MAX = 400
-TAPE_COIN_TTL_MS = 360_000.0                # coin abonné jusqu'à horizon(5 min)+marge après le dernier fill
+TAPE_COIN_TTL_MS = float(                    # shortest executable episode + allowed observation lag
+    COPY_VAULT_DELAY_MS
+    + min(COPY_VAULT_HORIZONS_MS)
+    + COPY_VAULT_MAX_TARGET_LAG_MS
+)
+TAPE_PREWARM_MAX_COINS = 24                  # borne de collecte, tres inferieure au plafond WS Hyperliquid
+TAPE_PREWARM_RECENT_WINDOW_MS = 21_600_000.0 # activite reelle des 6 dernieres heures uniquement
+TAPE_PREWARM_REFRESH_S = 15.0                # suit les rotations de coins sans redemarrage
+TAPE_PREWARM_TAIL_BYTES = 4 * 1024 * 1024    # aucune relecture integrale des journaux append-only
+
+
+def _tail_lines_bounded(path: Path, *, max_lines: int, max_bytes: int) -> list[str]:
+    """Read a bounded complete-line tail without scanning an append-only file."""
+
+    line_limit = max(1, int(max_lines))
+    byte_limit = max(1, int(max_bytes))
+    try:
+        with path.open("rb") as handle:
+            handle.seek(0, os.SEEK_END)
+            size = handle.tell()
+            start = max(0, size - byte_limit)
+            handle.seek(start)
+            raw = handle.read(byte_limit)
+    except OSError:
+        return []
+    if start > 0:
+        separator = raw.find(b"\n")
+        raw = b"" if separator < 0 else raw[separator + 1 :]
+    return [
+        line.decode("utf-8", errors="ignore")
+        for line in raw.splitlines()[-line_limit:]
+        if line.strip()
+    ]
+
+
+def _copy_vault_prewarm_coins(
+    root: Path,
+    vaults: list[str],
+    *,
+    max_coins: int = TAPE_PREWARM_MAX_COINS,
+    max_lines_per_source: int = 20_000,
+    max_tail_bytes: int = TAPE_PREWARM_TAIL_BYTES,
+    now_ms: float | None = None,
+    recent_window_ms: float = TAPE_PREWARM_RECENT_WINDOW_MS,
+) -> list[str]:
+    """Select recent real coins for causal L2 capture before the next fill.
+
+    Starting L2 only after a fresh fill makes the first event on every coin
+    impossible to replay: no pre-signal/reference book can exist.  This helper
+    uses only already observed fills belonging to the wallets subscribed by
+    this process.  It does not manufacture a signal and remains strictly
+    bounded.
+    """
+
+    followed = {str(vault).lower() for vault in vaults if str(vault).strip()}
+    limit = min(TAPE_PREWARM_MAX_COINS, max(0, int(max_coins)))
+    if not followed or limit <= 0:
+        return []
+    reference_ms = float(time.time() * 1000 if now_ms is None else now_ms)
+    cutoff_ms = reference_ms - max(0.0, float(recent_window_ms))
+    latest_by_coin: dict[str, int] = {}
+    sources = (root / FILLS_LIVE, root / "runtime" / "data" / "vault_fills.jsonl")
+    for path in sources:
+        if not path.is_file():
+            continue
+        lines = _tail_lines_bounded(
+            path,
+            max_lines=max_lines_per_source,
+            max_bytes=max_tail_bytes,
+        )
+        for line in lines:
+            try:
+                row = json.loads(line)
+                vault = str(row.get("vault") or "").lower()
+                coin = str(row.get("coin") or "").upper().strip()
+                ts_ms = int(row.get("received_at_ms") or row.get("ts_ms") or 0)
+            except (TypeError, ValueError, OverflowError, json.JSONDecodeError):
+                continue
+            if (
+                vault not in followed
+                or not coin
+                or ts_ms <= 0
+                or ts_ms < cutoff_ms
+                or ts_ms > reference_ms + 60_000.0
+            ):
+                continue
+            latest_by_coin[coin] = max(ts_ms, latest_by_coin.get(coin, 0))
+    return [
+        coin
+        for coin, _timestamp in sorted(
+            latest_by_coin.items(), key=lambda item: (-item[1], item[0])
+        )[:limit]
+    ]
+
+
+def _refresh_copy_vault_prewarm_once(
+    root: Path,
+    vaults: list[str],
+    *,
+    now_ms: float | None = None,
+    max_coins: int = TAPE_PREWARM_MAX_COINS,
+) -> dict[str, object]:
+    """Refresh the bounded causal L2 watchlist from observed wallet activity.
+
+    The prewarm set is replaced instead of growing forever. Coins with a live
+    metaorder remain covered independently through ``_TAPE_COINS_ACTIFS`` until
+    the executable exit horizon has elapsed.
+    """
+
+    reference_ms = float(time.time() * 1000 if now_ms is None else now_ms)
+    selected = set(
+        _copy_vault_prewarm_coins(
+            root,
+            vaults,
+            max_coins=max_coins,
+            now_ms=reference_ms,
+        )
+    )
+    previous = set(_TAPE_PREWARM_COINS)
+    expired_active = {
+        coin
+        for coin, last_fill_ms in list(_TAPE_COINS_ACTIFS.items())
+        if reference_ms - float(last_fill_ms) > TAPE_COIN_TTL_MS
+    }
+    for coin in expired_active:
+        _TAPE_COINS_ACTIFS.pop(coin, None)
+    _TAPE_PREWARM_COINS.clear()
+    _TAPE_PREWARM_COINS.update(selected)
+    return {
+        "selected": sorted(selected),
+        "added": sorted(selected - previous),
+        "removed": sorted(previous - selected),
+        "expired_active": sorted(expired_active),
+    }
+
+
+async def _refresh_copy_vault_prewarm_periodically(
+    root: Path,
+    vaults: list[str],
+    *,
+    intervalle_s: float = TAPE_PREWARM_REFRESH_S,
+) -> None:
+    """Keep causal L2 subscriptions aligned with fresh followed-wallet fills."""
+
+    while True:
+        try:
+            result = _refresh_copy_vault_prewarm_once(root, vaults)
+            if result["added"] or result["removed"]:
+                print(
+                    "[userfills] L2 causal prewarm refresh: %d coins (+%d/-%d)"
+                    % (
+                        len(result["selected"]),
+                        len(result["added"]),
+                        len(result["removed"]),
+                    ),
+                    flush=True,
+                )
+        except Exception as exc:  # noqa: BLE001 - never stop userFills collection
+            print("[userfills] L2 causal prewarm refresh err %s" % str(exc)[:80], flush=True)
+        await asyncio.sleep(max(1.0, float(intervalle_s)))
+
+
+def _first_ws_checkpoint(
+    buffer: list[dict],
+    *,
+    target_mono_ms: float,
+    target_wall_ms: int,
+    max_lag_ms: int = COPY_VAULT_MAX_TARGET_LAG_MS,
+) -> dict | None:
+    """Return the first genuinely received WS book inside the causal window."""
+
+    for event in buffer:
+        try:
+            recv_mono = float(event["recv_mono"])
+            recv_wall = int(event["recv_wall_ms"])
+            resume = event["resume"]
+            exchange_ts = int(resume["book_exchange_time"])
+        except (KeyError, TypeError, ValueError, OverflowError):
+            continue
+        if recv_mono < float(target_mono_ms):
+            continue
+        if recv_mono - float(target_mono_ms) > int(max_lag_ms):
+            return None
+        if not (0 <= recv_wall - int(target_wall_ms) <= int(max_lag_ms)):
+            continue
+        if not (0 < exchange_ts <= recv_wall and recv_wall - exchange_ts <= int(max_lag_ms)):
+            continue
+        return event
+    return None
+
+
+def _new_metaorder_checkpoints(fill: dict, *, recv_mono_ms: float, metaorder_id: str) -> list[dict]:
+    """Build reference/entry checkpoints from one live first slice."""
+
+    try:
+        coin = str(fill["coin"]).upper().strip()
+        recv_wall_ms = int(fill["received_at_ms"])
+    except (KeyError, TypeError, ValueError, OverflowError):
+        return []
+    if not coin or recv_wall_ms <= 0 or not metaorder_id:
+        return []
+    base = {
+        "coin": coin,
+        "metaorder_id": str(metaorder_id),
+        "attempts": 0,
+    }
+    return [
+        {
+            **base,
+            "stage": "REFERENCE",
+            "checkpoint_id": f"{metaorder_id}:REFERENCE",
+            "target_mono_ms": float(recv_mono_ms),
+            "target_wall_ms": recv_wall_ms,
+        },
+        {
+            **base,
+            "stage": "ENTRY",
+            "checkpoint_id": f"{metaorder_id}:ENTRY",
+            "target_mono_ms": float(recv_mono_ms) + COPY_VAULT_DELAY_MS,
+            "target_wall_ms": recv_wall_ms + COPY_VAULT_DELAY_MS,
+        },
+    ]
+
+
+def _exit_metaorder_checkpoints(entry: dict) -> list[dict]:
+    """Schedule candidate exits from the actually captured entry instant."""
+
+    return [
+        {
+            "coin": entry["coin"],
+            "metaorder_id": entry["metaorder_id"],
+            "stage": f"EXIT_{int(horizon_ms)}",
+            "checkpoint_id": f"{entry['metaorder_id']}:EXIT:{int(horizon_ms)}",
+            "target_mono_ms": float(entry["captured_mono_ms"]) + int(horizon_ms),
+            "target_wall_ms": int(entry["captured_wall_ms"]) + int(horizon_ms),
+            "attempts": 0,
+        }
+        for horizon_ms in COPY_VAULT_HORIZONS_MS
+    ]
+
+
+async def _capture_copy_vault_checkpoint(root: Path, checkpoint: dict) -> dict:
+    """Capture a causal real book from WS, falling back to public /info.
+
+    No historical lookup and no interpolation are allowed. The REST fallback
+    is performed only after the target instant and within the same bounded lag
+    accepted by the executable replay.
+    """
+
+    now_mono = time.monotonic() * 1_000
+    target_mono = float(checkpoint["target_mono_ms"])
+    target_wall = int(checkpoint["target_wall_ms"])
+    if now_mono < target_mono:
+        return {"status": "NOT_DUE"}
+    if now_mono - target_mono > COPY_VAULT_MAX_TARGET_LAG_MS:
+        return {"status": "EXPIRED"}
+    coin = str(checkpoint["coin"]).upper()
+    ws_event = _first_ws_checkpoint(
+        _TAPE_BUFFER.get(coin, []),
+        target_mono_ms=target_mono,
+        target_wall_ms=target_wall,
+    )
+    if ws_event is not None:
+        stored = _append_copy_vault_book(
+            root,
+            coin,
+            ws_event["resume"],
+            received_at_ms=int(ws_event["recv_wall_ms"]),
+            sample_interval_ms=0,
+            source="HYPERLIQUID_L2_WS",
+            checkpoint_stage=str(checkpoint["stage"]),
+            checkpoint_target_ms=target_wall,
+            checkpoint_id=str(checkpoint["checkpoint_id"]),
+        )
+        if stored:
+            return {
+                **checkpoint,
+                "status": "CAPTURED_WS",
+                "captured_mono_ms": float(ws_event["recv_mono"]),
+                "captured_wall_ms": int(ws_event["recv_wall_ms"]),
+            }
+
+    info = await asyncio.to_thread(_lecteur_l2_ondemand, coin, force_refresh=True)
+    resume = _resume_from_info_checkpoint(info)
+    if resume is None:
+        return {"status": "RETRY_NO_BOOK"}
+    try:
+        received = int(info["received_ts_ms"])
+    except (KeyError, TypeError, ValueError, OverflowError):
+        return {"status": "RETRY_NO_RECEIVE_TIME"}
+    if not (0 <= received - target_wall <= COPY_VAULT_MAX_TARGET_LAG_MS):
+        return {"status": "EXPIRED" if received > target_wall else "RETRY_CLOCK_SKEW"}
+    stored = _append_copy_vault_book(
+        root,
+        coin,
+        resume,
+        received_at_ms=received,
+        sample_interval_ms=0,
+        source="HYPERLIQUID_INFO_L2BOOK_CAUSAL_CHECKPOINT",
+        checkpoint_stage=str(checkpoint["stage"]),
+        checkpoint_target_ms=target_wall,
+        checkpoint_id=str(checkpoint["checkpoint_id"]),
+    )
+    if not stored:
+        return {"status": "RETRY_STORE_REJECTED"}
+    return {
+        **checkpoint,
+        "status": "CAPTURED_INFO",
+        "captured_mono_ms": time.monotonic() * 1_000,
+        "captured_wall_ms": received,
+    }
 
 
 async def _tape_l2_buffer(root: Path, *, sync_s: float = 0.5) -> None:
@@ -779,7 +1209,11 @@ async def _tape_l2_buffer(root: Path, *, sync_s: float = 0.5) -> None:
                 abonnes.clear()
                 while True:
                     now = time.time() * 1000
-                    cibles = {c for c, t in _TAPE_COINS_ACTIFS.items() if now - t <= TAPE_COIN_TTL_MS}
+                    cibles = set(_TAPE_PREWARM_COINS)
+                    cibles.update(
+                        c for c, t in _TAPE_COINS_ACTIFS.items()
+                        if now - t <= TAPE_COIN_TTL_MS
+                    )
                     for c in cibles - abonnes:
                         await ws.send(json.dumps({"method": "subscribe", "subscription": {"type": "l2Book", "coin": c}}))
                         abonnes.add(c)
@@ -800,10 +1234,21 @@ async def _tape_l2_buffer(root: Path, *, sync_s: float = 0.5) -> None:
                         coin = str(d.get("coin") or "").upper()
                         r = T.resume_book(d)
                         if coin and r:
+                            recv_wall_ms = int(time.time() * 1000)
                             buf = _TAPE_BUFFER.setdefault(coin, [])
-                            buf.append({"recv_mono": time.monotonic() * 1000, "resume": r})
+                            buf.append({
+                                "recv_mono": time.monotonic() * 1000,
+                                "recv_wall_ms": recv_wall_ms,
+                                "resume": r,
+                            })
                             if len(buf) > TAPE_BUFFER_MAX:
                                 del buf[:len(buf) - TAPE_BUFFER_MAX]
+                            _append_copy_vault_book(
+                                root,
+                                coin,
+                                r,
+                                received_at_ms=recv_wall_ms,
+                            )
         except Exception as exc:  # noqa: BLE001
             print("[userfills] tape_l2 reconnect (%s)" % str(exc)[:50], flush=True)
             await asyncio.sleep(3.0)
@@ -818,6 +1263,8 @@ async def _tape_consumer(root: Path, *, horizon_ms: float = 300_000.0, post_wind
     from hl_observer.experimental import metaorder_l2_tape as T
     en_attente: list = []
     exits: list = []
+    checkpoints: list = []
+    checkpointed_metaorders: dict[str, float] = {}
     meta_etat: dict = {}                                          # (vault,coin) -> métaordre live (id/sens/last_ft)
     await asyncio.sleep(15.0)
     while True:
@@ -838,12 +1285,47 @@ async def _tape_consumer(root: Path, *, horizon_ms: float = 300_000.0, post_wind
                 entree = T.etat_entree(buf, it["frm"], it["fill"].get("ts_ms"))
                 posts = T.etats_post(buf, entree["recv_mono"], n=3) if entree else []
                 mo, stade = T.stade_live(meta_etat, it["fill"])
+                if stade in {"FIRST_SLICE", "REVERSAL"} and mo not in checkpointed_metaorders:
+                    checkpoints.extend(
+                        _new_metaorder_checkpoints(
+                            it["fill"], recv_mono_ms=it["frm"], metaorder_id=mo,
+                        )
+                    )
+                    checkpointed_metaorders[mo] = mono
                 l = T.ligne_fill(it["fill"], metaorder_id=mo, stade=stade, pre=pre, entree=entree,
                                  posts=posts, fill_recv_mono=it["frm"])
                 if l:
                     lignes.append(l)
                     exits.append({"fill": it["fill"], "frm": it["frm"], "due": it["frm"] + horizon_ms})
             en_attente = reste
+            remaining_checkpoints: list = []
+            new_exit_checkpoints: list = []
+            for checkpoint in checkpoints:
+                if mono < float(checkpoint["target_mono_ms"]):
+                    remaining_checkpoints.append(checkpoint)
+                    continue
+                result = await _capture_copy_vault_checkpoint(root, checkpoint)
+                status = str(result.get("status") or "")
+                if status.startswith("CAPTURED_"):
+                    if checkpoint["stage"] == "ENTRY":
+                        new_exit_checkpoints.extend(_exit_metaorder_checkpoints(result))
+                    continue
+                if status in {
+                    "NOT_DUE", "RETRY_NO_BOOK", "RETRY_NO_RECEIVE_TIME",
+                    "RETRY_CLOCK_SKEW", "RETRY_STORE_REJECTED",
+                }:
+                    checkpoint["attempts"] = int(checkpoint.get("attempts") or 0) + 1
+                    if mono - float(checkpoint["target_mono_ms"]) <= COPY_VAULT_MAX_TARGET_LAG_MS:
+                        remaining_checkpoints.append(checkpoint)
+            checkpoints = remaining_checkpoints + new_exit_checkpoints
+            checkpoint_retention_ms = (
+                COPY_VAULT_DELAY_MS
+                + max(COPY_VAULT_HORIZONS_MS)
+                + COPY_VAULT_MAX_TARGET_LAG_MS
+            )
+            for metaorder_id, registered_mono in list(checkpointed_metaorders.items()):
+                if mono - registered_mono > checkpoint_retention_ms:
+                    checkpointed_metaorders.pop(metaorder_id, None)
             reste_ex: list = []
             for ex in exits:
                 if mono < ex["due"]:
@@ -920,6 +1402,16 @@ async def _boucle(root: Path) -> None:
     for v, role, why in roles:
         print("[userfills]   %s [%s] %s" % (v[:12], role, why), flush=True)
     vaults = [v for v, _r, _w in roles]
+    _refresh_copy_vault_prewarm_once(root, vaults)
+    print(
+        "[userfills] L2 causal prewarm (%d/%d coins reels): %s"
+        % (
+            len(_TAPE_PREWARM_COINS),
+            TAPE_PREWARM_MAX_COINS,
+            ", ".join(sorted(_TAPE_PREWARM_COINS)) or "aucun",
+        ),
+        flush=True,
+    )
     file: asyncio.Queue = asyncio.Queue(maxsize=FILE_MAX)
     try:
         shards = _shards_userfills(vaults)                            # ≤5 vaults par socket (HL cape ~5/connexion)
@@ -929,6 +1421,7 @@ async def _boucle(root: Path) -> None:
                              _promotion_periodique(root), _rapport_periodique(root), _l2_dynamique(root),
                              _garde_reconciliation_rest(root, shards),   # REST↔WS : reconnecte un shard qui rate un fill
                              _metaorder_shadow_periodique(root, vaults),  # SHADOW : edge par stade de métaordre (n'ouvre rien)
+                             _refresh_copy_vault_prewarm_periodically(root, vaults),
                              _tape_l2_buffer(root), _tape_consumer(root),  # TAPE L2/OFI v2 : buffer WS + états pré/post (n'ouvre rien)
                              *[_userfills_multiplex(root, grp, file, sid) for sid, grp in shards])   # 2 sockets de 5 + L2 = 3 conn
     finally:

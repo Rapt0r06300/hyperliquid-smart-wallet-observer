@@ -139,7 +139,7 @@ def _metriques_propres(m: Mapping[str, Any] | None) -> dict:
 
 def battre(root: Path, nom: str, *, n_ecrites: int = 0, dernier_exchange_ts=None, note: str = "",
            metriques: Mapping[str, Any] | None = None, pid: int | None = None,
-           souscription_ack: bool | None = None) -> dict:
+           souscription_ack: bool | None = None, protocol: str | None = None) -> dict:
     """Écrit (atomiquement) le heartbeat du collecteur `nom`. Renvoie le dict écrit.
 
     `metriques` (LANCEUR item 2) : qualité RÉELLE du flux (gaps_critiques, carnet_desync,
@@ -174,6 +174,10 @@ def battre(root: Path, nom: str, *, n_ecrites: int = 0, dernier_exchange_ts=None
             hb["souscription_ack"] = bool(souscription_ack)
         elif "souscription_ack" in prev:
             hb["souscription_ack"] = bool(prev.get("souscription_ack"))
+        if protocol is not None:
+            hb["protocol"] = str(protocol)[:160]
+        elif "protocol" in prev:
+            hb["protocol"] = str(prev.get("protocol") or "")[:160]
         _ecrire_atomique(p, json.dumps(hb, ensure_ascii=False))
     return hb
 

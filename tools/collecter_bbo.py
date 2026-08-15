@@ -577,6 +577,7 @@ async def _boucle(root: Path, coins: list[str]) -> None:  # pragma: no cover (I/
                             )
                             tape.append({"venue": "HL", "coin": q["coin"], "recu_ns": r,
                                          "mid": (q["bid"] + q["ask"]) / 2, "bid": q["bid"], "ask": q["ask"],
+                                         "bid_sz": q["bid_sz"], "ask_sz": q["ask_sz"],
                                          "ts_wall_ms": recv_wall_ms,
                                          "recv_wall_ts_ms": recv_wall_ms,
                                          "connection_id": "hl-legacy", "ts_ex": q["ts_ex"]})
@@ -756,6 +757,8 @@ async def _boucle(root: Path, coins: list[str]) -> None:  # pragma: no cover (I/
                                     "mid": (quote["bid"] + quote["ask"]) / 2,
                                     "bid": quote["bid"],
                                     "ask": quote["ask"],
+                                    "bid_sz": quote["bid_sz"],
+                                    "ask_sz": quote["ask_sz"],
                                     "ts_wall_ms": received_ts_ms,
                                     "recv_wall_ts_ms": received_ts_ms,
                                     "connection_id": connection_id,

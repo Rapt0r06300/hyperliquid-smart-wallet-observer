@@ -30,6 +30,9 @@ if "%INTERVALLE%"=="" set "INTERVALLE=300"
 
 set "PYTHONIOENCODING=utf-8"
 set "PYTHONPATH=%CD%\src"
+set "PYTHON_EXE=%CD%\portable_runtime\python\python.exe"
+if not exist "%PYTHON_EXE%" set "PYTHON_EXE=%CD%\tools\python\python.exe"
+if not exist "%PYTHON_EXE%" set "PYTHON_EXE=python"
 if not exist "runtime\logs" mkdir "runtime\logs" >nul 2>&1
 set "LOG=runtime\logs\%NOM%.log"
 
@@ -52,14 +55,14 @@ set "MARQUEUR="
 if exist "runtime\data\lanceur_session_marqueur.txt" set /p MARQUEUR=<"runtime\data\lanceur_session_marqueur.txt"
 
 :boucle
-python tools\collecteur_doit_vivre.py "%MARQUEUR%" >> "%LOG%" 2>&1
+"%PYTHON_EXE%" tools\collecteur_doit_vivre.py "%MARQUEUR%" >> "%LOG%" 2>&1
 if errorlevel 1 (
   echo   [arret propre anti-orphelin — la session est terminee] >> "%LOG%"
   exit /b 0
 )
 echo. >> "%LOG%"
 echo --- passe du %date% %time% --- >> "%LOG%"
-python "%SCRIPT%" %4 %5 %6 %7 %8 %9 >> "%LOG%" 2>&1
+"%PYTHON_EXE%" "%SCRIPT%" %4 %5 %6 %7 %8 %9 >> "%LOG%" 2>&1
 echo   [fin de passe, code de sortie = %errorlevel%] >> "%LOG%"
 REM PAUSE PAR `ping` ET PAS `timeout` : `timeout` exige une console interactive et echoue avec
 REM « Input redirection is not supported » des qu'on tourne en arriere-plan (start /b) ou avec

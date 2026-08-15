@@ -17,12 +17,14 @@ PAPER/shadow only : mesurer n'est pas trader.
 from __future__ import annotations
 
 import bisect
+import gzip
 import hashlib
 import json
 import math
 import statistics as st
 from datetime import datetime, timezone
 from pathlib import Path
+from collections.abc import Iterable, Mapping
 from typing import Any
 
 from hl_observer.backtesting.anti_overfit_gate import evaluer as evaluer_dsr
@@ -35,48 +37,205 @@ from hl_observer.backtesting.lead_lag_evidence import (
 )
 from hl_observer.backtesting.quant_methods import block_bootstrap
 from hl_observer.backtesting.robustesse_selection import pbo_cscv
+from hl_observer.config.frais_venues import frais_taker_bps
 
 TAPE = Path("runtime") / "data" / "bbo_tape.jsonl"
 CONFIG_GELE = Path("runtime") / "data" / "lead_lag_config_gele.json"
 GLOBAL_TRIAL_LEDGER = Path("runtime") / "research_lab" / "ledgers" / "global_trials.jsonl"
 SEUIL_CHOC_BPS = 8.0
-FRAIS_SLIPPAGE_BPS = 6.0
+FRAIS_SLIPPAGE_BPS = 2.0 * frais_taker_bps("HYPERLIQUID")
 HORIZONS_MS = (50.0, 100.0, 250.0, 500.0, 1000.0)
 MIN_CHOCS = 30
 N_PERIODES = 4                     # pour juger la stabilité dans le temps
+DEFAULT_HISTORY_SOURCES = 8
+CAMPAIGN_HORIZON_MS = 1000.0
+CAMPAIGN_NOTIONAL_USD = 25.0
+CAMPAIGN_MAX_REFERENCE_LAG_MS = 30_000.0
+CAMPAIGN_MAX_EXIT_LAG_MS = 30_000.0
+CAMPAIGN_EXECUTION_MODEL = "causal_marketable_top_v3"
 
 
-def charger_tape(root: str | Path) -> dict[str, dict[str, list]]:
-    """{coin: {'HL':[(ns,mid,bid,ask)], 'BIN':[(ns,mid)], 'TRADE':[(ns,px,dir)]}} trié."""
+def walk_forward_protocol_signature() -> dict[str, Any]:
+    """Return immutable strategy fields, excluding append-only dataset shape."""
+
+    return {
+        "seuil_choc_bps": SEUIL_CHOC_BPS,
+        "frais_slippage_bps": FRAIS_SLIPPAGE_BPS,
+        "horizons_ms": list(HORIZONS_MS),
+        "economic_horizon_ms": CAMPAIGN_HORIZON_MS,
+        "economic_notional_usd": CAMPAIGN_NOTIONAL_USD,
+        "max_reference_lag_ms": CAMPAIGN_MAX_REFERENCE_LAG_MS,
+        "max_exit_lag_ms": CAMPAIGN_MAX_EXIT_LAG_MS,
+        "execution_model": CAMPAIGN_EXECUTION_MODEL,
+        "minimum_shocks": MIN_CHOCS,
+        "timestamp_clock": "ts_wall_ms_or_recv_wall_ts_ms;recu_ns_fallback",
+    }
+
+
+def selectionner_sources(
+    root: str | Path,
+    *,
+    include_history: bool = False,
+    max_history_sources: int = DEFAULT_HISTORY_SOURCES,
+) -> list[Path]:
+    """Return a deterministic set of local tapes used by the replay.
+
+    The live tape is always first.  Historical gzip shards are selected by
+    their stable filename timestamp, newest first.  ``bbo_tape.jsonl.prev``
+    is used only after shards because older versions generally did not record
+    Binance trades, which are mandatory for this strategy.
+    """
+
+    data = Path(root) / "runtime" / "data"
+    selected = [data / "bbo_tape.jsonl"]
+    if not include_history:
+        return [path for path in selected if path.is_file()]
+    historical = sorted(
+        [
+            *list((data / "bbo_shards").glob("*.jsonl.gz")),
+            *list((data / "bbo_shards_archive").glob("*.jsonl.gz")),
+        ],
+        key=lambda path: path.name,
+        reverse=True,
+    )
+    limit = max(0, int(max_history_sources))
+    selected.extend(historical[:limit])
+    previous = data / "bbo_tape.jsonl.prev"
+    if previous.is_file() and len(historical) < limit:
+        selected.append(previous)
+    return [path for path in selected if path.is_file()]
+
+
+def _iter_lines(path: Path):
+    opener = gzip.open if path.name.endswith(".gz") else open
+    try:
+        with opener(path, "rt", encoding="utf-8", errors="ignore") as handle:
+            yield from handle
+    except OSError:
+        return
+
+
+def _event_time_ns(row: dict[str, Any]) -> int | None:
+    """Use a cross-process wall clock; monotonic ``recu_ns`` is only fallback."""
+
+    wall_ms = row.get("ts_wall_ms", row.get("recv_wall_ts_ms"))
+    try:
+        if wall_ms is not None:
+            return int(float(wall_ms) * 1_000_000.0)
+        return int(row["recu_ns"])
+    except (KeyError, TypeError, ValueError, OverflowError):
+        return None
+
+
+def _dedupe_key(row: dict[str, Any], timestamp_ns: int) -> tuple[Any, ...]:
+    event_id = row.get("event_id")
+    if event_id:
+        return ("event_id", str(event_id))
+    venue = str(row.get("venue") or "")
+    coin = str(row.get("coin") or "").upper()
+    if venue == "BIN_TRADE":
+        return (venue, coin, timestamp_ns, row.get("px"), row.get("side"), row.get("sz"))
+    return (
+        venue,
+        coin,
+        timestamp_ns,
+        row.get("bid"),
+        row.get("ask"),
+        row.get("mid"),
+        row.get("bid_sz", row.get("bid_size")),
+        row.get("ask_sz", row.get("ask_size")),
+    )
+
+
+def charger_tape(
+    root: str | Path,
+    *,
+    include_history: bool = False,
+    max_history_sources: int = DEFAULT_HISTORY_SOURCES,
+    sources: list[Path] | None = None,
+    return_meta: bool = False,
+) -> dict[str, dict[str, list]] | tuple[dict[str, dict[str, list]], dict[str, Any]]:
+    """Load causal HL quotes and Binance trades from exact local sources.
+
+    Modern tapes are compared with wall timestamps because ``recu_ns`` is a
+    process-local monotonic clock and cannot be ordered across restarts.
+    """
+
     from collections import defaultdict
-    p = Path(root) / TAPE
-    if not p.exists():
-        return {}
+    root_path = Path(root).resolve()
+    selected = list(sources) if sources is not None else selectionner_sources(
+        root_path,
+        include_history=include_history,
+        max_history_sources=max_history_sources,
+    )
     par: dict[str, dict[str, list]] = defaultdict(lambda: {"HL": [], "BIN": [], "TRADE": []})
-    for line in p.read_text(encoding="utf-8", errors="ignore").splitlines():
-        try:
-            d = json.loads(line)
-            coin = str(d["coin"]).upper()
-            r = int(d["recu_ns"])
-        except (KeyError, TypeError, ValueError):
+    seen: set[tuple[Any, ...]] = set()
+    lines_read = duplicates = invalid = 0
+    consumed: list[str] = []
+    for path_value in selected:
+        path = Path(path_value)
+        if not path.is_absolute():
+            path = root_path / path
+        if not path.is_file():
             continue
-        v = d.get("venue")
-        if v == "HL":
-            m = _flt(d.get("mid"))
-            if m:
-                par[coin]["HL"].append((r, m, _flt(d.get("bid")) or m, _flt(d.get("ask")) or m))
-        elif v == "BIN":
-            m = _flt(d.get("mid"))
-            if m:
-                par[coin]["BIN"].append((r, m))
-        elif v == "BIN_TRADE":
-            px = _flt(d.get("px"))
-            if px:
-                par[coin]["TRADE"].append((r, px, 1.0 if d.get("side") == "BUY" else -1.0))
+        try:
+            consumed.append(path.relative_to(root_path).as_posix())
+        except ValueError:
+            consumed.append(str(path))
+        for line in _iter_lines(path):
+            lines_read += 1
+            try:
+                d = json.loads(line)
+                coin = str(d["coin"]).upper()
+            except (KeyError, TypeError, ValueError):
+                invalid += 1
+                continue
+            venue = d.get("venue")
+            if venue not in {"HL", "BIN_TRADE"}:
+                continue
+            timestamp_ns = _event_time_ns(d)
+            if timestamp_ns is None:
+                invalid += 1
+                continue
+            key = _dedupe_key(d, timestamp_ns)
+            if key in seen:
+                duplicates += 1
+                continue
+            seen.add(key)
+            if venue == "HL":
+                mid = _flt(d.get("mid"))
+                if mid:
+                    par[coin]["HL"].append(
+                        (
+                            timestamp_ns,
+                            mid,
+                            _flt(d.get("bid")) or mid,
+                            _flt(d.get("ask")) or mid,
+                            _positive_or_none(d.get("bid_sz", d.get("bid_size"))),
+                            _positive_or_none(d.get("ask_sz", d.get("ask_size"))),
+                        )
+                    )
+            else:
+                price = _flt(d.get("px"))
+                if price:
+                    par[coin]["TRADE"].append(
+                        (timestamp_ns, price, 1.0 if d.get("side") == "BUY" else -1.0)
+                    )
     for c in par:
         for k in par[c]:
             par[c][k].sort()
-    return dict(par)
+    result = dict(par)
+    meta = {
+        "timestamp_clock": "ts_wall_ms_or_recv_wall_ts_ms;recu_ns_fallback",
+        "sources": consumed,
+        "sources_count": len(consumed),
+        "lines_read": lines_read,
+        "relevant_unique_events": len(seen),
+        "duplicates_rejected": duplicates,
+        "invalid_rows": invalid,
+        "complete_sources": True,
+    }
+    return (result, meta) if return_meta else result
 
 
 def _flt(x):
@@ -84,6 +243,11 @@ def _flt(x):
         return float(x)
     except (TypeError, ValueError):
         return None
+
+
+def _positive_or_none(value: Any) -> float | None:
+    parsed = _flt(value)
+    return parsed if parsed is not None and parsed > 0 else None
 
 
 def distribution_intervalles(evenements: list) -> dict[str, float]:
@@ -130,162 +294,43 @@ def detecter_chocs(trades: list, *, seuil_bps: float,
 
 
 def _hl_a(hl: list, t_ns: int) -> tuple | None:
+    """Last quote at-or-before ``t_ns`` (diagnostics only)."""
+
     i = bisect.bisect_right([e[0] for e in hl], t_ns) - 1
     return hl[i] if i >= 0 else None
 
 
-def net_par_horizon(hl: list, chocs: list, *, frais_slippage_bps: float,
-                    horizons_ms) -> dict[float, list[tuple[float, float]]]:
-    """Pour chaque choc, (net_bps, capacité_usd) forward HL par horizon. ENTRÉE au côté cher, SORTIE au
-    côté défavorable (bid/ask HL RÉELS des deux côtés — le spread est payé aller ET retour, pas modélisé
-    par un forfait). Cœur PUR (testable)."""
-    out: dict[float, list] = {h: [] for h in horizons_ms}
-    for t0, direction in chocs:
-        e0 = _hl_a(hl, t0)
-        if e0 is None:
-            continue
-        entree = e0[3] if direction > 0 else e0[2]             # long -> on paie l'ASK ; short -> le BID
-        if entree <= 0:
-            continue
-        for h in horizons_ms:
-            eh = _hl_a(hl, t0 + int(h * 1e6))
-            if eh is None or eh[0] <= e0[0]:
-                continue
-            sortie = eh[2] if direction > 0 else eh[3]         # long -> on sort au BID ; short -> à l'ASK
-            net = (sortie - entree) / entree * 1e4 * direction - frais_slippage_bps
-            out[h].append((net, e0[2]))                        # capacité proxy = prix (taille au top ailleurs)
-    return out
+def _hl_apres(hl: list, t_ns: int, *, timestamps: list[int] | None = None) -> tuple | None:
+    """Return the first quote observable at-or-after ``t_ns``."""
+
+    times = timestamps if timestamps is not None else [event[0] for event in hl]
+    index = bisect.bisect_left(times, t_ns)
+    return hl[index] if index < len(hl) else None
 
 
-def _metriques(nets: list[float], *, n_periodes: int) -> dict[str, Any]:
-    """Espérance, drawdown du cumul, et stabilité PAR PÉRIODE (pas le winrate)."""
-    esper = st.mean(nets)
-    cum, pic, dd = 0.0, 0.0, 0.0
-    for x in nets:
-        cum += x
-        pic = max(pic, cum)
-        dd = min(dd, cum - pic)
-    taille = max(1, len(nets) // n_periodes)
-    periodes = [nets[i:i + taille] for i in range(0, len(nets), taille)]
-    moys = [st.mean(p) for p in periodes if p]
-    bootstrap_totals = block_bootstrap(
-        nets,
-        block=max(1, int(math.sqrt(len(nets)))),
-        n=500,
-        seed=20260729,
-    )
-    bootstrap_means = sorted(total / len(nets) for total in bootstrap_totals)
-    lower_index = max(0, int(len(bootstrap_means) * 0.025) - 1)
-    upper_index = min(len(bootstrap_means) - 1, int(len(bootstrap_means) * 0.975))
-    bootstrap_ci = (
-        [round(bootstrap_means[lower_index], 3), round(bootstrap_means[upper_index], 3)]
-        if bootstrap_means
-        else [None, None]
-    )
-    return {"esperance_nette_bps": round(esper, 3), "n": len(nets),
-            "drawdown_cumule_bps": round(dd, 2),
-            "periodes_positives": (
-                f"{sum(1 for value in moys if value > 0)}/{len(moys)}"
-            ),
-            "moyennes_par_periode_bps": [round(value, 3) for value in moys],
-            "bootstrap_mean_ci95_bps": bootstrap_ci,
-            "stable": bool(moys) and all(m > 0 for m in moys)}
+def _top_capacity_usd(quote: tuple, *, side: str) -> float | None:
+    if len(quote) < 6:
+        return None
+    if side == "BUY":
+        price, size = _flt(quote[3]), _positive_or_none(quote[5])
+    else:
+        price, size = _flt(quote[2]), _positive_or_none(quote[4])
+    if price is None or size is None:
+        return None
+    return price * size
 
 
-def backtest(root: str | Path = ".", *, seuil_choc_bps: float = SEUIL_CHOC_BPS,
-             frais_slippage_bps: float = FRAIS_SLIPPAGE_BPS, horizons_ms=HORIZONS_MS,
-             coins_controle: tuple = (), min_chocs: int = MIN_CHOCS) -> dict[str, Any]:
-    """Verdict lead-lag NET par horizon (gaté par l'observable), par coin, test vs contrôle, avec
-    espérance/capacité/drawdown/stabilité. NEED_MORE_DATA tant que trop peu de chocs."""
-    tape = charger_tape(root)
-    if not tape:
-        return {"strategie": "lead_lag_shadow", "statut": "NEED_MORE_DATA", "detail": "tape vide"}
-    controle = {c.upper() for c in coins_controle}
-    # 1) cadence HL PAR COIN (jamais poolée : l'interleaving de N coins donne un p50 illusoire ~0 ms
-    #    et ferait croire que 50/100 ms sont observables alors qu'HL n'emet ~qu'aux 100 ms PAR coin).
-    p50s = [d["p50_ms"] for ev in tape.values() if len(ev["HL"]) >= 5
-            and (d := distribution_intervalles(ev["HL"]))["p50_ms"]]
-    med_p50 = st.median(p50s) if p50s else None
-    dist = {"p50_ms_par_coin_median": round(med_p50, 2) if med_p50 else None, "n_coins_mesures": len(p50s)}
-    horizons = [h for h in horizons_ms if med_p50 and h >= 2.0 * med_p50]
-    if not horizons:
-        return {"strategie": "lead_lag_shadow", "statut": "NEED_MORE_DATA",
-                "intervalles_hl": dist, "detail": "aucun horizon observable (HL trop lent / peu de data)"}
-    # 2) chocs sur trades -> net par horizon, séparé test/contrôle
-    import random
-    test: dict[float, list] = {h: [] for h in horizons}
-    ctrl: dict[float, list] = {h: [] for h in horizons}
-    placebo: dict[float, list] = {h: [] for h in horizons}     # directions MÉLANGÉES -> doit donner ~0
-    cap: list[float] = []
-    test_event_times: list[int] = []
-    for coin, ev in tape.items():
-        chocs = detecter_chocs(ev["TRADE"], seuil_bps=seuil_choc_bps)
-        if not chocs or len(ev["HL"]) < 3:
-            continue
-        nets = net_par_horizon(ev["HL"], chocs, frais_slippage_bps=frais_slippage_bps, horizons_ms=horizons)
-        cible = ctrl if coin in controle else test
-        for h in horizons:
-            cible[h].extend(x[0] for x in nets[h])
-        if coin not in controle:
-            test_event_times.extend(t0 for t0, _direction in chocs)
-            for h in horizons:
-                cap.extend(x[1] for x in nets[h])
-            rng = random.Random(20260723)                      # placebo REPRODUCTIBLE : mêmes t0, sens aléatoire
-            faux = [(t0, 1.0 if rng.random() > 0.5 else -1.0) for t0, _ in chocs]
-            netpl = net_par_horizon(ev["HL"], faux, frais_slippage_bps=frais_slippage_bps, horizons_ms=horizons)
-            for h in horizons:
-                placebo[h].extend(x[0] for x in netpl[h])
-    n_test = max((len(v) for v in test.values()), default=0)
-    if n_test < min_chocs:
-        return {"strategie": "lead_lag_shadow", "statut": "NEED_MORE_DATA", "chocs_test": n_test,
-                "cible": min_chocs, "intervalles_hl": dist, "horizons_observables": horizons}
-    par_h = {h: _metriques(v, n_periodes=N_PERIODES) for h, v in test.items() if v}
-    ctrl_h = {h: round(st.mean(v), 3) for h, v in ctrl.items() if v}
-    plac_h = {h: round(st.mean(v), 3) for h, v in placebo.items() if v}
-    trial_sharpes = [sharpe(values) for values in test.values() if len(values) >= 2]
-    dsr_h = {
-        h: evaluer_dsr(
-            values,
-            n_essais=max(1, len(horizons_ms)),
-            trial_sharpes=trial_sharpes,
-        ).as_dict()
-        for h, values in test.items()
-        if values
-    }
-    pbo_rows = [
-        metrics["moyennes_par_periode_bps"]
-        for metrics in par_h.values()
-        if len(metrics.get("moyennes_par_periode_bps") or ()) >= 4
-    ]
-    pbo = pbo_cscv(pbo_rows) if len(pbo_rows) >= 2 else pbo_cscv([])
-    event_frequency = None
-    if len(test_event_times) >= 2:
-        duration_days = (max(test_event_times) - min(test_event_times)) / 1e9 / 86400.0
-        if duration_days > 0:
-            event_frequency = round(len(test_event_times) / duration_days, 6)
-    # KEEP seulement si : espérance>0, STABLE par période, ET bat le PLACEBO (sinon = artefact d'horloge)
-    gagnants = {h: r for h, r in par_h.items()
-                if r["esperance_nette_bps"] > 0 and r["stable"]
-                and r["esperance_nette_bps"] > plac_h.get(h, 0.0)}
-    return {"strategie": "lead_lag_shadow",
-            "statut": "PROMETTEUR" if gagnants else "PAS_D_EDGE",
-            "intervalles_hl": dist, "horizons_observables": horizons,
-            "capacite_mediane_usd": round(st.median(cap), 2) if cap else None,
-            "net_par_horizon": par_h, "controle_par_horizon": ctrl_h, "placebo_par_horizon": plac_h,
-            "dsr_par_horizon": dsr_h,
-            "pbo": pbo,
-            "frequence_evenements_par_jour": event_frequency,
-            "information_coefficient": {
-                "value": None,
-                "status": "UNMEASURABLE_WITH_DIRECTION_ONLY_SHOCKS",
-            },
-            "regimes": {
-                "period_count": N_PERIODES,
-                "stable_horizons_ms": [h for h, row in par_h.items() if row.get("stable")],
-            },
-            "avertissement": "Choc sur trades Binance ; entrée demi-spread HL réel + frais/slippage ; "
-                             "horizons GATÉS par l'observable ; stabilité par période. Contrôle > 0 = "
-                             "artefact d'horloge. Sub-seconde souvent gagnée par des racers co-localisés."}
+from hl_observer.backtesting.lead_lag_shadow_economics import (
+    _metriques,
+    _placebo_direction,
+    _temporal_bounds,
+    backtest,
+    episodes_par_horizon,
+    executable_campaign_evidence,
+    net_par_horizon,
+    summarize_executable_episodes,
+)
+
 
 
 def _legacy_geler_config(root: str | Path = ".", *, coins: list[str], coins_controle: list[str],
@@ -598,6 +643,25 @@ def _optional_finite_non_negative(value: Any) -> float | None:
     return parsed
 
 
-__all__ = ["SEUIL_CHOC_BPS", "FRAIS_SLIPPAGE_BPS", "HORIZONS_MS", "charger_tape",
-           "distribution_intervalles", "horizons_observables", "detecter_chocs",
-           "net_par_horizon", "backtest", "geler_config", "GLOBAL_TRIAL_LEDGER"]
+__all__ = [
+    "SEUIL_CHOC_BPS",
+    "FRAIS_SLIPPAGE_BPS",
+    "HORIZONS_MS",
+    "charger_tape",
+    "CAMPAIGN_HORIZON_MS",
+    "CAMPAIGN_NOTIONAL_USD",
+    "CAMPAIGN_MAX_REFERENCE_LAG_MS",
+    "CAMPAIGN_MAX_EXIT_LAG_MS",
+    "CAMPAIGN_EXECUTION_MODEL",
+    "walk_forward_protocol_signature",
+    "distribution_intervalles",
+    "horizons_observables",
+    "detecter_chocs",
+    "episodes_par_horizon",
+    "summarize_executable_episodes",
+    "executable_campaign_evidence",
+    "net_par_horizon",
+    "backtest",
+    "geler_config",
+    "GLOBAL_TRIAL_LEDGER",
+]

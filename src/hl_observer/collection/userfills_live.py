@@ -108,6 +108,7 @@ def parser_message_userfills(msg: Any, *, vault: str = "") -> list[dict]:
         entry = {"vault": vault, "coin": coin, "px": px, "sz": sz,
                  "signe": 1 if side == "B" else (-1 if side == "A" else 0),
                  "ts_ms": ts, "dir": str(f.get("dir") or ""), "hash": f.get("hash"),
+                 "tid": f.get("tid"), "oid": f.get("oid"),
                  "start_position": start_pos, "isSnapshot": est_snapshot,
                  "source": "LIVE_WS",
                  "frame_sequence": frame_event.frame_sequence,

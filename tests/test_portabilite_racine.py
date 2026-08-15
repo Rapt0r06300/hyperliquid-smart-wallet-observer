@@ -43,6 +43,7 @@ def test_chemin_runtime_confine_au_projet():
     r = P.racine_projet()
     c = P.chemin_runtime("data", "sessions", racine=r)
     assert c == r / "runtime" / "data" / "sessions"
-    # jamais un profil utilisateur / AppData / registre (item 5).
-    bas = str(c).lower()
-    assert "appdata" not in bas and "users\\flo" not in bas
+    # Le runtime doit ?tre confin? sous la racine du projet,
+    # ind?pendamment de l'emplacement l?gitime du clone Windows.
+    relatif = c.resolve().relative_to(r.resolve())
+    assert relatif.parts[:1] == ("runtime",)

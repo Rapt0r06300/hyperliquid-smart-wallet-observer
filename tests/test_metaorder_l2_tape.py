@@ -152,13 +152,15 @@ def test_stade_live_first_continuation_reversal():
 
 
 def test_ligne_fill_niveaux_bruts_ofi_non_mesurable_et_horloges():
-    fill = {"coin": "sol", "ts_ms": 1000, "hash": "h1", "signe": 1, "vault": "0xV"}
-    ent = {"recv_mono": 5500.0, "resume": T.resume_book(_book(t=1200))}
+    fill = {"coin": "sol", "ts_ms": 1000, "received_at_ms": 1100,
+            "hash": "h1", "signe": 1, "vault": "0xV"}
+    ent = {"recv_mono": 5500.0, "recv_wall_ms": 1300, "resume": T.resume_book(_book(t=1200))}
     pre = {"recv_mono": 5000.0, "resume": {"bids5": [[99.9, 10.0, 1]], "asks5": [[100.1, 10.0, 1]]}}
     post = {"recv_mono": 6000.0, "resume": T.resume_book(_book(t=1400))}
     l = T.ligne_fill(fill, metaorder_id="mo-x", stade="CONTINUATION", pre=pre, entree=ent, posts=[post], fill_recv_mono=5200.0)
     assert l["schema_version"] == "shadow_l2_v3" and l["stade"] == "CONTINUATION" and l["fill_id"] == "h1"
     assert l["latence_pipeline_ms"] == 300.0 and l["fill_exchange_time"] == 1000 and l["book_exchange_time"] == 1200
+    assert l["fill_received_at_ms"] == 1100 and l["book_received_at_ms"] == 1300
     assert l["entree"]["bids"][0] == [99.9, 1000.0, 3] and l["pre"]["bids"] and len(l["posts"]) == 1   # NIVEAUX BRUTS
     assert l["ofi_par_niveau"] is not None and l["ofi_statut"] == "OK" and l["book_imbalance_top5"] is not None
     assert l["microstructure_features"]["shadow"] is True

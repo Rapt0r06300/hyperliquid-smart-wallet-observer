@@ -14,11 +14,26 @@ def test_plan_de_requetes_fenetre():
 
 def test_parser_et_dedup():
     brut = [{"time": 1000, "coin": "SOL", "px": "150", "sz": "10", "side": "B", "dir": "Open Long",
-             "startPosition": "0", "oid": 1},
+             "startPosition": "0", "tid": 7, "oid": 1},
             {"time": 1000, "coin": "SOL", "px": "150", "sz": "10", "side": "B", "dir": "Open Long",
-             "startPosition": "0", "oid": 1}]                          # doublon (bord de pagination)
+             "startPosition": "0", "tid": 7, "oid": 1}]              # doublon (bord de pagination)
     fills = VB.dedupliquer(VB.parser_fills(brut, vault="0xA"))
     assert len(fills) == 1 and fills[0]["signe"] == 1 and fills[0]["coin"] == "SOL"
+    assert fills[0]["tid"] == 7
+
+
+def test_dedup_source_independent_preserve_la_preuve_live_placee_en_premier():
+    common = {
+        "vault": "0xA", "ts_ms": 1000, "coin": "SOL", "px": 150.0,
+        "sz": 10.0, "dir": "Open Long", "hash": "0xfill",
+    }
+    live = {**common, "source": "LIVE_WS", "isSnapshot": False, "received_at_ms": 1002}
+    rest = {**common, "source": "REST_BACKFILL", "oid": 99, "tid": 7}
+
+    fills = VB.dedupliquer([live, rest])
+
+    assert fills == [live]
+    assert VB.fill_identity(live) == VB.fill_identity(rest)
 
 
 def test_reconstruire_open_add_reduce_close():
@@ -31,6 +46,8 @@ def test_reconstruire_open_add_reduce_close():
     ev = VB.reconstruire_episodes(fills)
     assert [e["action"] for e in ev] == ["OPEN", "ADD", "REDUCE", "CLOSE"]
     assert all(e["direction"] == 1 for e in ev)                        # position longue tout du long
+    assert len({e["fill_id"] for e in ev}) == 4
+    assert all("tid" in e and "oid" in e and "hash" in e and "dir" in e for e in ev)
     alpha = VB.entrees_alpha(VB.marquer_retraits(ev))
     assert [e["action"] for e in alpha] == ["OPEN", "ADD"]             # seules les entrées sont copiables
 

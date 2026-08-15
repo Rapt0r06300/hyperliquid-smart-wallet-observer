@@ -1,15 +1,14 @@
 """Strict, shared proof contract for per-family paper economic objectives.
 
 The contract deliberately separates a displayed/modelled PnL from a PnL that
-is eligible for an economic claim. Missing costs, open positions, duplicate
+is eligible for an economic claim.  Missing costs, open positions, duplicate
 identities, absent forward evidence, or a non-paper execution mode all fail
-closed. Copy-Vault additionally requires positive held-out-vault
-generalisation so a temporal replay on the same leaders cannot promote alone.
-No function in this module creates a signal or a fill.
+closed.  No function in this module creates a signal or a fill.
 """
 
 from __future__ import annotations
 
+import hashlib
 import math
 from collections.abc import Mapping
 from typing import Any
@@ -33,9 +32,25 @@ _ALIASES = {
     "cross_venue_dislocation_v2": "cross_venue_dislocation_v2",
 }
 
+_ECONOMIC_KEYS = (
+    "gross_pnl_usd",
+    "fees_usd",
+    "spread_cost_usd",
+    "slippage_cost_usd",
+    "latency_cost_usd",
+    "net_pnl_usd",
+)
+_COST_KEYS = (
+    "fees_usd",
+    "spread_cost_usd",
+    "slippage_cost_usd",
+    "latency_cost_usd",
+)
+
 
 def canonical_family(value: object) -> str:
     """Collapse aliases so the active arbitrage family can never be counted twice."""
+
     normalized = str(value or "").strip().lower().replace(" ", "_")
     return _ALIASES.get(normalized, normalized)
 
@@ -48,12 +63,71 @@ def _number(value: object) -> float | None:
     return result if math.isfinite(result) else None
 
 
+def _segment_economics(
+    segment: Mapping[str, Any] | None,
+    *,
+    label: str,
+    issues: list[str],
+) -> dict[str, Any] | None:
+    """Validate one disjoint proof segment and return reconciled economics."""
+
+    if not isinstance(segment, Mapping):
+        return None
+    metrics = {key: _number(segment.get(key)) for key in _ECONOMIC_KEYS}
+    missing = [key for key, value in metrics.items() if value is None]
+    issues.extend(f"{label}_UNMEASURED:{key}" for key in missing)
+    for key in _COST_KEYS:
+        if metrics[key] is not None and metrics[key] < 0:
+            issues.append(f"{label}_NEGATIVE_COST:{key}")
+
+    reconciled = False
+    if not missing:
+        expected = metrics["gross_pnl_usd"] - sum(metrics[key] for key in _COST_KEYS)
+        reconciled = math.isclose(expected, metrics["net_pnl_usd"], abs_tol=1e-4)
+        if not reconciled:
+            issues.append(f"{label}_ECONOMIC_RECONCILIATION_FAILED")
+
+    count = _number(segment.get("sample_count"))
+    trade_count = _number(segment.get("trade_ids_count"))
+    duplicates = _number(segment.get("duplicate_trade_ids"))
+    trade_hash = str(segment.get("trade_ids_sha256") or "")
+    liquidatable = segment.get("liquidatable_net")
+    if liquidatable is None:
+        liquidatable = segment.get("LIQUIDATABLE_NET")
+    if liquidatable is not True:
+        issues.append(f"{label}_NOT_LIQUIDATABLE_NET")
+    if duplicates != 0:
+        issues.append(f"{label}_DUPLICATE_TRADE_IDENTITIES")
+    if count is None or count <= 0 or trade_count != count or len(trade_hash) != 64:
+        issues.append(f"{label}_TRADE_ID_PROOF_INCOMPLETE")
+
+    complete = bool(
+        not missing
+        and reconciled
+        and count is not None
+        and count > 0
+        and trade_count == count
+        and duplicates == 0
+        and len(trade_hash) == 64
+        and liquidatable is True
+    )
+    if not complete:
+        return None
+    return {
+        **metrics,
+        "sample_count": int(count),
+        "trade_ids_count": int(trade_count),
+        "trade_ids_sha256": trade_hash,
+    }
+
+
 def evaluate_objective(
     evidence: Mapping[str, Any],
     *,
     target_net_usd: float = TARGET_NET_USD,
 ) -> dict[str, Any]:
     """Evaluate one family against the strict realized-net proof contract."""
+
     issues: list[str] = []
     family = canonical_family(evidence.get("family"))
     if family not in CANONICAL_FAMILIES:
@@ -73,9 +147,8 @@ def evaluate_objective(
     if family == "cross_venue_dislocation_v2" and evidence.get("all_positions_two_leg_closed") is not True:
         issues.append("CROSS_VENUE_TWO_LEG_CLOSE_PROOF_MISSING")
 
-    # Copy-Vault must generalise beyond the leaders used in the primary
-    # temporal walk-forward. This closes the methodological relaxation where
-    # same-vault OOS alone could otherwise become an economic promotion.
+    # Copy-Vault doit aussi g?n?raliser ? des vaults r?ellement held-out.
+    # Un OOS temporel sur les m?mes leaders ne suffit jamais ? certifier la famille.
     if family == "copy_vault":
         generalisation = evidence.get("vault_generalization")
         if not isinstance(generalisation, Mapping):
@@ -90,30 +163,23 @@ def evaluate_objective(
             elif heldout_net_bps <= 0:
                 issues.append("COPY_HELDOUT_VAULT_NET_NOT_POSITIVE")
 
-    metric_keys = (
-        "gross_pnl_usd",
-        "fees_usd",
-        "spread_cost_usd",
-        "slippage_cost_usd",
-        "latency_cost_usd",
-        "net_pnl_usd",
-    )
-    metrics = {key: _number(evidence.get(key)) for key in metric_keys}
+    metrics = {key: _number(evidence.get(key)) for key in _ECONOMIC_KEYS}
     missing = [key for key, value in metrics.items() if value is None]
     issues.extend(f"UNMEASURED:{key}" for key in missing)
-    for key in ("fees_usd", "spread_cost_usd", "slippage_cost_usd", "latency_cost_usd"):
+    for key in _COST_KEYS:
         if metrics[key] is not None and metrics[key] < 0:
             issues.append(f"NEGATIVE_COST:{key}")
     if not missing:
         expected = metrics["gross_pnl_usd"] - sum(
             metrics[key]
-            for key in ("fees_usd", "spread_cost_usd", "slippage_cost_usd", "latency_cost_usd")
+            for key in _COST_KEYS
         )
         if not math.isclose(expected, metrics["net_pnl_usd"], abs_tol=1e-4):
             issues.append("ECONOMIC_RECONCILIATION_FAILED")
 
     liquidatable_net = evidence.get("liquidatable_net")
     if liquidatable_net is None:
+        # Read legacy artifacts without emitting two case-only keys in new JSON.
         liquidatable_net = evidence.get("LIQUIDATABLE_NET")
     if liquidatable_net is not True:
         issues.append("NOT_LIQUIDATABLE_NET")
@@ -128,29 +194,75 @@ def evaluate_objective(
     oos = evidence.get("oos")
     forward = evidence.get("forward")
     placebos = evidence.get("placebos")
-    if not isinstance(oos, Mapping) or _number(oos.get("net_pnl_usd")) is None:
+    oos_net = _number(oos.get("net_pnl_usd")) if isinstance(oos, Mapping) else None
+    oos_count = _number(oos.get("sample_count")) if isinstance(oos, Mapping) else None
+    forward_net = (
+        _number(forward.get("net_pnl_usd")) if isinstance(forward, Mapping) else None
+    )
+    forward_count = (
+        _number(forward.get("sample_count")) if isinstance(forward, Mapping) else None
+    )
+    oos_economics = _segment_economics(
+        oos if isinstance(oos, Mapping) else None,
+        label="OOS",
+        issues=issues,
+    )
+    forward_economics = _segment_economics(
+        forward if isinstance(forward, Mapping) else None,
+        label="FORWARD",
+        issues=issues,
+    )
+    if not isinstance(oos, Mapping) or oos_net is None:
         issues.append("OOS_PROOF_MISSING")
-    elif _number(oos.get("net_pnl_usd")) <= 0:
+    elif oos_count is None or oos_count <= 0:
+        issues.append("OOS_SAMPLE_MISSING")
+    elif oos_net <= 0:
         issues.append("OOS_NET_NOT_POSITIVE")
     elif oos.get("no_lookahead") is not True:
         issues.append("OOS_NO_LOOKAHEAD_PROOF_MISSING")
-    if not isinstance(forward, Mapping) or _number(forward.get("net_pnl_usd")) is None:
+    if not isinstance(forward, Mapping) or forward_net is None:
         issues.append("FORWARD_POST_FREEZE_PROOF_MISSING")
-    elif _number(forward.get("net_pnl_usd")) <= 0:
+    elif forward_count is None or forward_count <= 0:
+        issues.append("FORWARD_SAMPLE_MISSING")
+    elif forward_net <= 0:
         issues.append("FORWARD_NET_NOT_POSITIVE")
     elif forward.get("post_freeze") is not True:
         issues.append("FORWARD_NOT_PROVEN_POST_FREEZE")
     if not isinstance(placebos, Mapping) or placebos.get("beaten") is not True:
         issues.append("PLACEBO_NOT_BEATEN")
 
-    net = metrics["net_pnl_usd"]
-    if net is None or net < float(target_net_usd):
+    proof_economics = None
+    if oos_economics is not None and forward_economics is not None:
+        proof_economics = {
+            key: round(float(oos_economics[key]) + float(forward_economics[key]), 8)
+            for key in _ECONOMIC_KEYS
+        }
+        proof_economics["sample_count"] = (
+            int(oos_economics["sample_count"])
+            + int(forward_economics["sample_count"])
+        )
+        proof_economics["trade_ids_count"] = proof_economics["sample_count"]
+        proof_economics["trade_ids_sha256"] = hashlib.sha256(
+            (
+                str(oos_economics["trade_ids_sha256"])
+                + "\n"
+                + str(forward_economics["trade_ids_sha256"])
+            ).encode("utf-8")
+        ).hexdigest()
+    proof_net = (
+        float(proof_economics["net_pnl_usd"])
+        if proof_economics is not None
+        else None
+    )
+    if proof_net is None or proof_net < float(target_net_usd):
         issues.append("TARGET_NET_USD_NOT_REACHED")
     unique_issues = list(dict.fromkeys(issues))
     return {
         "family": family,
         "target_net_usd": float(target_net_usd),
-        "eligible_net_pnl_usd": net if not unique_issues else None,
+        "proof_economics": proof_economics,
+        "proof_net_pnl_usd": proof_net,
+        "eligible_net_pnl_usd": proof_net if not unique_issues else None,
         "objective_status": "ATTEINT" if not unique_issues else "NON_ATTEINT",
         "objective_reasons": unique_issues,
     }

@@ -1,14 +1,8 @@
-"""Run the three separate read-only/paper economic evidence campaigns.
-
-Each family is evaluated independently against the strict +4 USD realized-net
-contract. The runner is deliberately fail-closed: missing depth, costs or
-forward evidence remains NON_ATTEINT rather than becoming a modelled gain.
-"""
+"""Run the three separate read-only/paper economic evidence campaigns."""
 
 from __future__ import annotations
 
 import argparse
-import functools
 import importlib.util
 import json
 import os
@@ -19,37 +13,27 @@ from typing import Any
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
-from hl_observer.backtesting import lead_lag_shadow  # noqa: E402
-from hl_observer.backtesting.lead_lag_multitape import (  # noqa: E402
-    discover_sources as discover_lead_sources,
-    load_multitape,
-)
-from hl_observer.ops.superviseur_collecteurs import demarrer_tous  # noqa: E402
-from hl_observer.simulation.copy_campaign_adapter import build_strict_copy_campaign  # noqa: E402
-from hl_observer.simulation.copy_cost_adapter import measure_copy_cost_components  # noqa: E402
-from hl_observer.simulation.cross_venue_depth_adapter import (  # noqa: E402
-    DEFAULT_DEPTH_FRESHNESS_MS,
-    enrich_trades_with_depth,
-    finalize_judgement as finalize_cross_judgement,
-    load_depth_snapshots,
+from hl_observer.backtesting import copy_vault_executable, lead_lag_shadow  # noqa: E402
+from hl_observer.ops.bounded_collection import (  # noqa: E402
+    ensure_bounded_collectors,
+    inspect_bounded_collectors,
 )
 from hl_observer.simulation.economic_campaigns import (  # noqa: E402
     REPORT_DIR,
+    build_copy_campaign,
     build_cross_campaign,
+    build_lead_lag_campaign,
     dataset_provenance,
+    find_oldest_parameter_freeze,
+    freeze_parameters,
+    merge_sources_with_frozen_provenance,
     render_campaign_report,
     write_campaign,
 )
 from hl_observer.simulation.economic_family_scoreboard import export_scoreboards  # noqa: E402
-from hl_observer.simulation.economic_freeze_registry import reuse_or_create_freeze  # noqa: E402
-from hl_observer.simulation.lead_lag_campaign_adapter import campaign_from_replay  # noqa: E402
-from hl_observer.simulation.lead_lag_l2_history import (  # noqa: E402
-    discover_l2_sources,
-    load_l2_history,
-)
-from hl_observer.simulation.lead_lag_measured_replay import (  # noqa: E402
-    load_runtime_latency_evidence,
-    replay_measured_lead_lag,
+from hl_observer.simulation.economic_collection_plan import (  # noqa: E402
+    build_collection_plan,
+    write_collection_plan,
 )
 
 
@@ -85,309 +69,257 @@ def _write_raw(root: Path, name: str, payload: dict[str, Any]) -> Path:
     return target
 
 
-def _copy_tape_and_forward(copy_tool: Any, root: Path, source: str):
-    """Recreate exactly the price source chosen by the Copy research pipeline."""
-    if source == "candles_5m":
-        tape = copy_tool.charger_prix_tape_candles(root, intervalle="5m")
-        forward = functools.partial(
-            copy_tool.rendement_forward_candles,
-            delai_ms=copy_tool.DELAI_COPIE_MS,
-        )
-    elif source == "candles_1m":
-        tape = copy_tool.charger_prix_tape_candles(root, intervalle="1m")
-        forward = functools.partial(
-            copy_tool.rendement_forward_candles,
-            delai_ms=copy_tool.DELAI_COPIE_MS,
-        )
-    else:
-        tape = copy_tool.charger_prix_tape(root)
-        forward = copy_tool.rendement_forward
-    return tape, forward
-
-
-def _enrich_copy_cost_evidence(
-    copy_tool: Any,
-    root: Path,
-    report: dict[str, Any],
-    depth_snapshots: dict[str, list[dict[str, Any]]],
-) -> None:
-    """Attach measured Copy costs without changing TRAIN-selected parameters.
-
-    A complete vector exists only if every economically replayed OOS event has
-    causal entry+exit depth and enough top-of-book capacity. Latency is not
-    subtracted twice: candle forward returns already enter after DELAI_COPIE_MS.
-    """
-    measure = report.get("mesure") if isinstance(report.get("mesure"), dict) else {}
-    oos = measure.get("oos") if isinstance(measure.get("oos"), dict) else {}
-    if measure.get("statut") not in {"PRELIMINAIRE", "VALIDATION"} or not oos:
-        report["cost_evidence"] = {
-            "complete": False,
-            "reason": "NO_SELECTED_OOS_CONFIGURATION",
-            "paper_read_only": True,
-            "real_execution": False,
-        }
-        return
-
-    source = str(report.get("source_prix") or "")
-    tape, forward = _copy_tape_and_forward(copy_tool, root, source)
-    all_events = copy_tool.charger_entrees_alpha(root)
-    t_cut = int(measure.get("t_cut_ms") or 0)
-    threshold = float(oos["seuil"])
-    horizon_ms = float(oos["horizon_ms"])
-    oos_events = [event for event in all_events if int(event.get("ts_ms") or 0) >= t_cut]
-
-    replayed_events: list[dict[str, Any]] = []
-    for event in oos_events:
-        if float(event.get("move_frac") or 0.0) < threshold:
-            continue
-        series = tape.get(str(event.get("coin") or "").upper())
-        if series and forward(event, series, horizon_ms) is not None:
-            replayed_events.append(event)
-
-    notional_usd = 150.0
-    evidence = measure_copy_cost_components(
-        replayed_events,
-        depth_snapshots,
-        notional_usd=notional_usd,
-        copy_delay_ms=float(copy_tool.DELAI_COPIE_MS),
-        horizon_ms=horizon_ms,
-        threshold=threshold,
-        freshness_ms=DEFAULT_DEPTH_FRESHNESS_MS,
-    )
-    report["cost_evidence"] = evidence
-    components = evidence.get("components_bps") if isinstance(evidence, dict) else None
-    if not isinstance(components, dict):
-        return
-
-    keys = ("fees_bps", "spread_bps", "slippage_bps", "latency_bps")
-    total_cost_bps = sum(float(components[key]) for key in keys)
-    report["simulation_paper_oos"] = copy_tool.simuler_paper(
-        oos_events,
-        tape,
-        horizon_ms=horizon_ms,
-        seuil=threshold,
-        notional_usd=notional_usd,
-        cout_ar_bps=total_cost_bps,
-        forward_fn=forward,
-        cost_components_bps=components,
-    )
-
-    # Held-out vault robustness must use the exact same measured cost vector as
-    # the OOS ledger. The research-time 12 bps assumption cannot promote a
-    # family if actual executable costs are worse.
-    generalization = (
-        measure.get("generalisation_par_vault")
-        if isinstance(measure.get("generalisation_par_vault"), dict)
-        else None
-    )
-    if generalization is not None:
-        held_out = {str(value) for value in generalization.get("vaults_held_out") or []}
-        held_events = [
-            event for event in oos_events
-            if str(event.get("vault") or "") in held_out
-        ]
-        held_sim = copy_tool.simuler_paper(
-            held_events,
-            tape,
-            horizon_ms=horizon_ms,
-            seuil=threshold,
-            notional_usd=notional_usd,
-            cout_ar_bps=total_cost_bps,
-            forward_fn=forward,
-            cost_components_bps=components,
-        )
-        generalization["n"] = held_sim.get("n_trades")
-        generalization["net_bps"] = held_sim.get("roi_par_trade_bps")
-        generalization["measured_cost_bps"] = round(total_cost_bps, 6)
-        generalization["LIQUIDATABLE_NET"] = held_sim.get("LIQUIDATABLE_NET") is True
-
-
 def run_campaigns(
     root: Path,
     *,
     cross_budget_s: float = 20.0,
     cross_current_only: bool = False,
-    lead_budget_s: float = 45.0,
-    lead_max_lines: int = 2_000_000,
+    lead_history_sources: int = lead_lag_shadow.DEFAULT_HISTORY_SOURCES,
     start_collection: bool = True,
+    collection_duration_s: float = 24 * 60 * 60,
+    collection_startup_wait_s: float = 3.0,
 ) -> dict[str, Any]:
     assert_execution_disabled()
-    root = Path(root).resolve()
     copy_tool = _tool("hypersmart_copy_pipeline", root / "tools" / "pipeline_copie_reel.py")
     cross_tool = _tool("hypersmart_cross_campaign", root / "tools" / "backtest_dislocation_2jambes.py")
-    depth_snapshots = load_depth_snapshots(root)
 
-    # ---------------------------------------------------------------- Copy-Vault
     copy_data = dataset_provenance(
         root,
         (
             "runtime/data/vault_fills.jsonl",
+            "runtime/data/vault_fills_live.jsonl",
             "runtime/data/vault_episodes.jsonl",
             "runtime/data/vault_snapshots.jsonl",
-            "runtime/data/hl_allmids_tape.jsonl",
             "runtime/data/carnet_venues.jsonl",
+            "runtime/data/copy_vault_l2_tape.jsonl",
         ),
     )
-    copy_freeze: dict[str, Any] | None = None
-
-    def freeze_copy(parameters: dict[str, Any]) -> None:
-        nonlocal copy_freeze
-        copy_freeze = reuse_or_create_freeze(root, "copy_vault", parameters, copy_data)
-
-    copy_raw = copy_tool.construire(
-        root,
-        geler_si_valide=False,
-        on_parameters_selected=freeze_copy,
-        cost_components_bps=None,
+    copy_entries, canonical_input_audit = copy_tool.charger_entrees_alpha_avec_audit(root)
+    all_copy_metaorders, all_metaorder_audit = copy_vault_executable.cluster_metaorders(
+        copy_entries
     )
-    _enrich_copy_cost_evidence(copy_tool, root, copy_raw, depth_snapshots)
+    all_copy_books, copy_book_meta = copy_vault_executable.load_observed_books(
+        root, coins={row["coin"] for row in all_copy_metaorders}
+    )
+    copy_metaorders, copy_books, copy_protocol_audit = (
+        copy_vault_executable.select_causal_protocol_inputs(
+            all_copy_metaorders, all_copy_books
+        )
+    )
+    metaorder_audit = {
+        **all_metaorder_audit,
+        "all_metaorders": int(all_metaorder_audit.get("metaorders") or 0),
+        "metaorders": len(copy_metaorders),
+        "historical_or_noncausal_metaorders_excluded": copy_protocol_audit[
+            "historical_or_noncausal_metaorders_excluded"
+        ],
+        "protocol_scope": copy_protocol_audit["protocol_scope"],
+    }
+    copy_book_meta = {
+        **copy_book_meta,
+        "protocol_valid_rows": copy_protocol_audit["causal_protocol_book_rows"],
+        "protocol_coins": copy_protocol_audit["causal_protocol_coins"],
+        "historical_or_noncausal_rows_excluded": copy_protocol_audit[
+            "historical_or_noncausal_book_rows_excluded"
+        ],
+    }
+    copy_protocol = copy_vault_executable.protocol_signature()
+    copy_freeze = find_oldest_parameter_freeze(
+        root, "copy_vault", required_parameters=copy_protocol
+    )
+    copy_calibration = None
+    if copy_freeze is None:
+        copy_calibration = copy_vault_executable.calibrate_train_only(
+            copy_metaorders, copy_books, require_causal_observation=True
+        )
+        copy_parameters = {
+            **copy_protocol,
+            "walk_forward_bounds": copy_calibration.get("bounds"),
+            "selected_horizon_ms": copy_calibration.get("selected_horizon_ms"),
+            "training_selection_eligible": copy_calibration.get("selection_eligible") is True,
+            "selection_status": copy_calibration.get("status"),
+        }
+        if copy_calibration.get("selection_eligible") is True:
+            copy_freeze = freeze_parameters(
+                root, "copy_vault", copy_parameters, copy_data
+            )
+    else:
+        copy_parameters = dict(copy_freeze["parameters"])
+    provisional_cutoff_ms = max(
+        (int(row["signal_ts_ms"]) for row in copy_metaorders), default=0
+    )
+    copy_walk_forward = copy_vault_executable.evaluate_frozen(
+        copy_metaorders,
+        copy_books,
+        frozen_parameters=copy_parameters,
+        frozen_at_ms=(
+            int(copy_freeze["frozen_at_ms"]) if copy_freeze is not None
+            else provisional_cutoff_ms
+        ),
+    )
+    copy_segment_trades = copy_walk_forward.get("trades", {})
+    copy_trades = [
+        trade
+        for name in ("train", "validation", "oos", "forward")
+        for trade in copy_segment_trades.get(name, [])
+    ] if isinstance(copy_segment_trades, dict) else []
+    copy_raw = {
+        "schema_version": "hypersmart.copy_vault_executable_campaign.v1",
+        "canonical_input_audit": canonical_input_audit,
+        "metaorder_audit": metaorder_audit,
+        "book_meta": copy_book_meta,
+        "causal_protocol_audit": copy_protocol_audit,
+        "params": copy_parameters,
+        "calibration": copy_calibration,
+        "walk_forward": {
+            key: value for key, value in copy_walk_forward.items() if key != "trades"
+        },
+        "summary": copy_walk_forward.get("combined_summary"),
+        "temporal_evidence": copy_vault_executable.temporal_evidence(copy_walk_forward),
+        "trades": copy_trades,
+        "paper_read_only": True,
+        "real_execution": False,
+        "provisional_without_physical_freeze": copy_freeze is None,
+    }
     copy_raw_path = _write_raw(root, "copy_vault", copy_raw)
-    copy_campaign = build_strict_copy_campaign(copy_raw, freeze=copy_freeze, datasets=copy_data)
+    copy_campaign = build_copy_campaign(copy_raw, freeze=copy_freeze, datasets=copy_data)
     copy_campaign["evidence_paths"].append(copy_raw_path.relative_to(root).as_posix())
     write_campaign(root, copy_campaign)
 
-    # ---------------------------------------------------------------- Lead-Lag
-    lead_sources = discover_lead_sources(root)
-    lead_l2_sources = discover_l2_sources(root)
-    lead_latency_rel = Path("runtime") / "data" / "lead_lag_event_decisions.jsonl"
-    lead_data = dataset_provenance(
+    selected_lead_sources = lead_lag_shadow.selectionner_sources(
         root,
-        [*lead_sources, *lead_l2_sources, root / lead_latency_rel],
+        include_history=True,
+        max_history_sources=max(0, int(lead_history_sources)),
     )
-    lead_horizon_ms = 1_000
-    lead_min_history = 5
-    lead_min_episodes = 5
-    lead_notional_usd = 100.0
-    lead_fee_bps = 9.0
-    lead_min_latency_samples = 20
-    lead_max_book_age_ms = 750.0
-    lead_max_execution_observation_delay_ms = 750.0
-    lead_params = {
-        "seuil_choc_bps": lead_lag_shadow.SEUIL_CHOC_BPS,
-        "horizon_ms": lead_horizon_ms,
-        "minimum_history": lead_min_history,
-        "minimum_episodes": lead_min_episodes,
-        "notional_usd": lead_notional_usd,
-        "fee_bps": lead_fee_bps,
-        "fee_rule": "FROZEN_CONSERVATIVE_TAKER_ROUND_TRIP",
-        "latency_rule": "MEASURED_RUNTIME_P95_EMBEDDED_IN_DELAYED_ENTRY_PRICE",
-        "minimum_latency_samples": lead_min_latency_samples,
-        "l2_rule": "RECORDED_REAL_L2_ENTRY_AND_EXIT_FULL_TOP_CAPACITY",
-        "max_book_age_ms": lead_max_book_age_ms,
-        "max_execution_observation_delay_ms": lead_max_execution_observation_delay_ms,
-        "slippage_rule": "ZERO_ONLY_IF_FULL_NOTIONAL_COVERED_AT_ENTRY_AND_EXIT_TOP",
-        "loader_max_lines": int(lead_max_lines),
-        "loader_time_budget_s": float(lead_budget_s),
-        "selection_rule": "FIXED_PRE_EVALUATION",
-    }
-    lead_freeze = reuse_or_create_freeze(root, "lead_lag", lead_params, lead_data)
-    lead_tape, lead_loader_meta = load_multitape(
+    lead_protocol = lead_lag_shadow.walk_forward_protocol_signature()
+    lead_freeze = find_oldest_parameter_freeze(
         root,
-        max_lines=max(0, int(lead_max_lines)),
-        time_budget_s=max(0.0, float(lead_budget_s)),
+        "lead_lag",
+        required_parameters=lead_protocol,
     )
-    lead_l2, lead_l2_meta = load_l2_history(
+    if lead_freeze is None:
+        initial_lead_data = dataset_provenance(root, selected_lead_sources)
+        lead_freeze = freeze_parameters(
+            root,
+            "lead_lag",
+            {
+                **lead_protocol,
+                "history_sources_at_freeze": len(selected_lead_sources),
+            },
+            initial_lead_data,
+        )
+    lead_sources = merge_sources_with_frozen_provenance(
         root,
-        max_lines=max(0, int(lead_max_lines)),
-        time_budget_s=max(0.0, float(lead_budget_s)),
+        selected_lead_sources,
+        lead_freeze,
     )
-    lead_latency = load_runtime_latency_evidence(
+    lead_data = dataset_provenance(root, lead_sources)
+    lead_raw = lead_lag_shadow.backtest(
         root,
-        min_samples=lead_min_latency_samples,
+        sources=lead_sources,
+        economic_frozen_at_ms=int(lead_freeze["frozen_at_ms"]),
+        economic_horizon_ms=lead_lag_shadow.CAMPAIGN_HORIZON_MS,
+        economic_notional_usd=lead_lag_shadow.CAMPAIGN_NOTIONAL_USD,
     )
-    lead_replay = replay_measured_lead_lag(
-        lead_tape,
-        lead_l2,
-        shock_threshold_bps=lead_lag_shadow.SEUIL_CHOC_BPS,
-        horizon_ms=lead_horizon_ms,
-        latency_evidence=lead_latency,
-        notional_usd=lead_notional_usd,
-        fee_bps=lead_fee_bps,
-        min_history=lead_min_history,
-        max_book_age_ms=lead_max_book_age_ms,
-        max_execution_observation_delay_ms=lead_max_execution_observation_delay_ms,
-        min_episodes=lead_min_episodes,
-        equity=1000.0,
-    )
-    lead_raw = {
-        "schema_version": "hypersmart.lead_lag_economic_replay.v2",
-        "signals": lead_replay.get("signals"),
-        "signals_meta": {
-            "no_lookahead": True,
-            "multitape": lead_loader_meta,
-            "l2_history": lead_l2_meta,
-            "latency_evidence": lead_latency,
-            "coverage": lead_replay.get("coverage"),
-            "costs_measured": lead_replay.get("costs_measured") is True,
-        },
-        "replay": lead_replay,
-        "paper_read_only": True,
-        "real_execution": False,
-    }
     lead_raw_path = _write_raw(root, "lead_lag", lead_raw)
-    lead_campaign = campaign_from_replay(
-        lead_raw,
-        freeze=lead_freeze,
-        datasets=lead_data,
-        evidence_paths=[lead_raw_path.relative_to(root).as_posix()],
-    )
+    lead_campaign = build_lead_lag_campaign(lead_raw, freeze=lead_freeze, datasets=lead_data)
+    lead_campaign["evidence_paths"].append(lead_raw_path.relative_to(root).as_posix())
     write_campaign(root, lead_campaign)
 
-    # ---------------------------------------------------------------- Cross-Venue v2
     cross_data = dataset_provenance(
         root,
         (
-            "runtime/data/bbo_tape.jsonl",
-            "runtime/data/bbo_tape.jsonl.prev",
             "runtime/data/carnet_venues.jsonl",
         ),
     )
-    cross_params = {
-        "seuil_entree_bps": cross_tool.SEUIL_ENTREE_BPS,
-        "seuil_sortie_bps": cross_tool.SEUIL_SORTIE_BPS,
-        "stop_aggravation_bps": cross_tool.STOP_AGGRAVATION_BPS,
-        "horizon_max_s": cross_tool.HORIZON_MAX_S,
-        "fraicheur_max_ms": cross_tool.FRAICHEUR_MAX_MS,
-        "latence_ms": cross_tool.LATENCE_MS,
-        "fees_ar_bps": cross_tool.FEES_AR_BPS,
-        "notional_usd": cross_tool.NOTIONAL_USD,
-        "depth_freshness_ms": DEFAULT_DEPTH_FRESHNESS_MS,
-        "depth_rule": "AT_OR_BEFORE_ENTRY_AND_EXIT_TOP_CAPACITY",
+    series, cross_depth, cross_meta = cross_tool.collecter_carnet_series(root)
+    cross_meta["legacy_bbo_budget_s_unused"] = max(0.0, cross_budget_s)
+    cross_meta["legacy_current_only_unused"] = bool(cross_current_only)
+    cross_depth_meta = {
+        "source": cross_meta.get("source"),
+        "source_mode": cross_meta.get("source_mode"),
+        "valid_snapshots": cross_meta.get("valid_snapshots"),
+        "coins": cross_meta.get("coins"),
+        "capacity_definition": "minimum USD capacity across HL/BIN bid/ask",
     }
-    cross_freeze = reuse_or_create_freeze(
+    cross_protocol = cross_tool.walk_forward_protocol_signature()
+    cross_freeze = find_oldest_parameter_freeze(
         root,
         "cross_venue_dislocation_v2",
-        cross_params,
-        cross_data,
+        required_parameters=cross_protocol,
     )
-    series = cross_tool.collecter_series(
-        root,
-        budget_s=max(0.0, cross_budget_s),
-        current_only=cross_current_only,
+    calibration = None
+    if cross_freeze is None:
+        calibration = cross_tool.calibrer_walk_forward(series, cross_depth)
+        selection = calibration.get("selection") if isinstance(calibration, dict) else None
+        selected = selection.get("selected") if isinstance(selection, dict) else None
+        if not isinstance(selected, dict) or not isinstance(selected.get("parameters"), dict):
+            selected_parameters = {
+                "seuil_entree": cross_tool.SEUIL_ENTREE_BPS,
+                "stop_bps": cross_tool.STOP_AGGRAVATION_BPS,
+                "horizon_s": cross_tool.HORIZON_MAX_S,
+                "min_executable_edge_bps": cross_tool.MIN_EXECUTABLE_EDGE_BPS,
+            }
+            selection_eligible = False
+        else:
+            selected_parameters = dict(selected["parameters"])
+            selection_eligible = selected.get("eligible") is True
+        cross_params = {
+            **cross_protocol,
+            "walk_forward_bounds": calibration.get("bounds"),
+            "selected_strategy_parameters": selected_parameters,
+            "training_selection_eligible": selection_eligible,
+            "selection_status": calibration.get("status"),
+            "seuil_sortie_bps": cross_tool.SEUIL_SORTIE_BPS,
+            "fraicheur_max_ms": cross_tool.FRAICHEUR_MAX_MS,
+            "latence_ms": cross_tool.LATENCE_MS,
+            "fees_ar_bps": cross_tool.FEES_AR_BPS,
+            "notional_usd": cross_tool.NOTIONAL_USD,
+            "depth_freshness_ms": cross_tool.DEPTH_FRESHNESS_MS,
+            "max_observation_gap_ms": cross_tool.MAX_OBSERVATION_GAP_MS,
+            "source_mode": "ATOMIC_FOUR_SIDE_BOOK",
+        }
+        cross_freeze = freeze_parameters(
+            root,
+            "cross_venue_dislocation_v2",
+            cross_params,
+            cross_data,
+        )
+    else:
+        cross_params = dict(cross_freeze["parameters"])
+
+    cross_walk_forward = cross_tool.evaluer_walk_forward_gelé(
+        series,
+        cross_depth,
+        frozen_parameters=cross_params,
+        frozen_at_ms=float(cross_freeze["frozen_at_ms"]),
     )
-    cross_meta = series.pop("_meta", {})
-    cross_trades = cross_tool.backtester(series)
-    cross_trades = enrich_trades_with_depth(
-        cross_trades,
-        depth_snapshots,
-        notional_usd=cross_tool.NOTIONAL_USD,
-        freshness_ms=DEFAULT_DEPTH_FRESHNESS_MS,
-    )
-    cross_judgement = finalize_cross_judgement(
-        cross_trades,
-        cross_tool.juger(cross_trades),
-        notional_usd=cross_tool.NOTIONAL_USD,
+    segment_trades = cross_walk_forward.get("trades", {})
+    cross_trades = [
+        trade
+        for name in ("train", "validation", "oos", "forward")
+        for trade in segment_trades.get(name, [])
+    ] if isinstance(segment_trades, dict) else []
+    cross_temporal = cross_tool.preuves_temporelles_walk_forward(cross_walk_forward)
+    cross_hypothesis_audit = cross_tool.diagnostiquer_hypothese_walk_forward(
+        cross_walk_forward
     )
     cross_raw = {
         "schema_version": "hypersmart.cross_venue_campaign.v2",
-        "meta": {
-            **cross_meta,
-            "depth_coins": len(depth_snapshots),
-            "depth_freshness_ms": DEFAULT_DEPTH_FRESHNESS_MS,
-        },
+        "meta": cross_meta,
+        "depth_meta": cross_depth_meta,
+        "decision_diagnostics": cross_walk_forward.get("diagnostics"),
         "quotes_par_coin": {coin: len(values) for coin, values in series.items() if values},
         "params": cross_params,
-        "verdict_realiste_16bps": cross_judgement,
+        "calibration": calibration,
+        "walk_forward": {
+            key: value
+            for key, value in cross_walk_forward.items()
+            if key != "trades"
+        },
+        "verdict_realiste_16bps": cross_tool.juger(cross_trades),
+        "temporal_evidence": cross_temporal,
+        "hypothesis_audit": cross_hypothesis_audit,
         "trades": cross_trades,
         "paper_read_only": True,
         "real_execution": False,
@@ -403,32 +335,33 @@ def run_campaigns(
     report_path = root / REPORT_DIR / "HYPERSMART_ECONOMIC_OBJECTIVE_CAMPAIGN.md"
     report_path.write_text(markdown, encoding="utf-8", newline="\n")
 
-    collector_state = None
+    raw_reports = {
+        "copy_vault": copy_raw,
+        "lead_lag": lead_raw,
+        "cross_venue_dislocation_v2": cross_raw,
+    }
+    preliminary_plan = build_collection_plan(campaigns, raw_reports)
+    collector_state = inspect_bounded_collectors(root)
     if start_collection and any(row["objective_status"] != "ATTEINT" for row in campaigns):
-        collector_state = demarrer_tous(root, profil="harvest")
-        collection_path = root / REPORT_DIR / "collection_resume_state.json"
-        _write_raw(root, "collection_resume_state", collector_state)
-        campaigns_with_need = [
-            row["family"] for row in campaigns if row["objective_status"] != "ATTEINT"
-        ]
-        collection_path.write_text(
-            json.dumps(
-                {
-                    **collector_state,
-                    "families_requiring_more_data": campaigns_with_need,
-                    "paper_read_only": True,
-                    "real_execution": False,
-                },
-                ensure_ascii=False,
-                indent=2,
-            ),
-            encoding="utf-8",
+        collector_state = ensure_bounded_collectors(
+            root,
+            preliminary_plan["required_collectors"],
+            duration_s=collection_duration_s,
+            startup_wait_s=collection_startup_wait_s,
         )
+    collection_plan = build_collection_plan(
+        campaigns,
+        raw_reports,
+        collector_state=collector_state,
+    )
+    collection_path, collection_report_path = write_collection_plan(root, collection_plan)
     return {
         "campaigns": campaigns,
         "report_path": str(report_path),
         "scoreboards_path": str(scoreboards_path),
         "collector_state": collector_state,
+        "collection_plan_path": str(collection_path),
+        "collection_plan_report_path": str(collection_report_path),
     }
 
 
@@ -437,17 +370,23 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--root", default=str(ROOT))
     parser.add_argument("--cross-budget-s", type=float, default=20.0)
     parser.add_argument("--cross-current-only", action="store_true")
-    parser.add_argument("--lead-budget-s", type=float, default=45.0)
-    parser.add_argument("--lead-max-lines", type=int, default=2_000_000)
+    parser.add_argument(
+        "--lead-history-sources",
+        type=int,
+        default=lead_lag_shadow.DEFAULT_HISTORY_SOURCES,
+    )
     parser.add_argument("--no-start-collection", action="store_true")
+    parser.add_argument("--collection-duration-s", type=float, default=24 * 60 * 60)
+    parser.add_argument("--collection-startup-wait-s", type=float, default=3.0)
     args = parser.parse_args(argv)
     result = run_campaigns(
         Path(args.root).resolve(),
         cross_budget_s=args.cross_budget_s,
         cross_current_only=args.cross_current_only,
-        lead_budget_s=args.lead_budget_s,
-        lead_max_lines=args.lead_max_lines,
+        lead_history_sources=args.lead_history_sources,
         start_collection=not args.no_start_collection,
+        collection_duration_s=args.collection_duration_s,
+        collection_startup_wait_s=args.collection_startup_wait_s,
     )
     for row in result["campaigns"]:
         net = row.get("net_pnl_usd")
