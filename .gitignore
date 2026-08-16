@@ -1,4 +1,4 @@
-﻿.env
+.env
 .env.*
 !.env.example
 *.key
@@ -56,6 +56,10 @@ runtime/research/github_repos_v24/
 runtime/research_lab/continuous/
 # Etat WebSocket genere (budgets globaux, leases et locks) : runtime uniquement.
 /runtime/ws/
+# Heartbeats et verrous regeneres du laboratoire autonome : restent sur le PC,
+# ne doivent jamais rendre le worktree sale ni etre pousses dans le depot source.
+/runtime/research_lab/heartbeats/*.json
+/runtime/research_lab/heartbeats/*.json.lock
 .cache/
 .vscode/
 .idea/
