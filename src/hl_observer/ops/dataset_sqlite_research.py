@@ -21,11 +21,12 @@ def _render_markdown(catalog: Mapping[str, Any]) -> str:
         "",
         "- Sources SQLite ouvertes exclusivement en lecture seule.",
         "- Les colonnes JSON/payload brutes ne sont pas exposées par l'adaptateur de recherche.",
+        "- Les vues dérivées peuvent être filtrées par période, coin, wallet et famille lorsque la table le permet.",
         "- `max_rowid_upper_bound` est une borne/indication de volume, pas un COUNT exact.",
         f"- Bases lisibles : **{catalog.get('readable_database_count', 0)}** / {catalog.get('database_count', 0)}.",
         "",
-        "| Base | Table | Colonnes sûres | Max rowid indicatif |",
-        "|---|---|---:|---:|",
+        "| Base | Table | Colonnes sûres | Temps | Coin | Wallet | Famille | Max rowid indicatif |",
+        "|---|---|---:|---|---|---|---|---:|",
     ]
     databases = catalog.get("databases")
     if isinstance(databases, list):
@@ -34,16 +35,18 @@ def _render_markdown(catalog: Mapping[str, Any]) -> str:
                 continue
             tables = database.get("tables")
             if not isinstance(tables, list) or not tables:
-                lines.append(
-                    f"| `{database.get('path')}` | - | 0 | - |"
-                )
+                lines.append(f"| `{database.get('path')}` | - | 0 | - | non | - | non | - |")
                 continue
             for table in tables:
                 if not isinstance(table, Mapping):
                     continue
                 lines.append(
                     f"| `{database.get('path')}` | `{table.get('name')}` | "
-                    f"{table.get('safe_column_count', 0)} | {table.get('max_rowid_upper_bound')} |"
+                    f"{table.get('safe_column_count', 0)} | `{table.get('time_filter_column') or '-'}` | "
+                    f"{'oui' if table.get('coin_filter_supported') else 'non'} | "
+                    f"`{table.get('wallet_filter_column') or '-'}` | "
+                    f"{'oui' if table.get('family_filter_supported') else 'non'} | "
+                    f"{table.get('max_rowid_upper_bound')} |"
                 )
     lines.extend(
         [
@@ -51,6 +54,17 @@ def _render_markdown(catalog: Mapping[str, Any]) -> str:
             "## Tables autorisées",
             "",
             ", ".join(f"`{name}`" for name in sorted(SAFE_RESEARCH_COLUMNS)),
+            "",
+            "## Exemple de vue ciblée",
+            "",
+            "```powershell",
+            "python -m hl_observer.ops.dataset_sqlite_research `",
+            "  --root \"<workspace>\" `",
+            "  --export-table fills `",
+            "  --start-ms 1780000000000 `",
+            "  --end-ms 1781000000000 `",
+            "  --coin BTC",
+            "```",
             "",
             "> Une table disponible devient une source historique exploitable, mais son contenu doit encore passer les contrôles causaux, les coûts et la validation OOS propres à chaque moteur.",
             "",
@@ -84,8 +98,13 @@ def build_parser() -> argparse.ArgumentParser:
         default=None,
         help="Exporte une vue JSONL dérivée d'une table autorisée.",
     )
-    parser.add_argument("--limit", type=int, default=0, help="0 = toutes les lignes de la vue.")
+    parser.add_argument("--limit", type=int, default=0, help="0 = toutes les lignes correspondant aux filtres.")
     parser.add_argument("--output", default=None, help="Chemin de sortie JSONL optionnel.")
+    parser.add_argument("--start-ms", type=int, default=None, help="Borne temporelle inclusive en millisecondes.")
+    parser.add_argument("--end-ms", type=int, default=None, help="Borne temporelle inclusive en millisecondes.")
+    parser.add_argument("--coin", default=None, help="Filtre coin/symbol quand la table contient `coin`.")
+    parser.add_argument("--wallet", default=None, help="Filtre adresse wallet quand la table le permet.")
+    parser.add_argument("--family", default=None, help="Filtre famille de stratégie quand la table contient `family`.")
     return parser
 
 
@@ -114,6 +133,11 @@ def main(argv: list[str] | None = None) -> int:
                 str(args.export_table),
                 output,
                 limit=max(0, int(args.limit)),
+                start_ms=args.start_ms,
+                end_ms=args.end_ms,
+                coin=args.coin,
+                wallet=args.wallet,
+                family=args.family,
             )
     except (OSError, ValueError, json.JSONDecodeError) as exc:
         print(f"SQLITE_RESEARCH_NO_GO: {type(exc).__name__}: {exc}")
