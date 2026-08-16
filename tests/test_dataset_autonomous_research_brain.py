@@ -3,8 +3,13 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import pytest
+
 from hl_observer.datasets.max_data_policy import (
     choose_max_data_job,
+    completed_suites_from_registry,
+    load_completed_suite_registry,
+    record_completed_suite_from_result,
     targets_reached_from_brain,
 )
 from hl_observer.ops.autonomous_research_brain import build_decision, decide_family
@@ -198,3 +203,59 @@ def test_un_seul_module_atteint_ne_peut_pas_compter_comme_trois() -> None:
         {"family": "cross_venue_dislocation_v2", "priority": 100, "phase": "COMPLETE_EVIDENCE"},
     ]
     assert targets_reached_from_brain(decisions) is False
+
+
+def _job_result(lab_root: Path, **overrides) -> dict[str, object]:
+    workspace = lab_root / "datasets" / "workspaces" / "economic-full" / "1234567890abcdef"
+    workspace.mkdir(parents=True, exist_ok=True)
+    payload: dict[str, object] = {
+        "schema": "alina.autonomous_research_result.v1",
+        "job_id": "job-registry-1",
+        "status": "SUCCESS",
+        "suite": "economic-full",
+        "mode": "economic",
+        "project_sha": "a" * 40,
+        "workspace": str(workspace),
+        "paper_only": True,
+        "real_execution": False,
+        "start_live_collection": False,
+        "exit_code": 0,
+    }
+    payload.update(overrides)
+    return payload
+
+
+def test_registre_max_data_ne_marque_qu_un_vrai_run_reussi(tmp_path: Path) -> None:
+    lab = tmp_path / "lab"
+    lab.mkdir()
+    result_path = tmp_path / "JOB_RESULT.json"
+    result_path.write_text(json.dumps(_job_result(lab)), encoding="utf-8")
+
+    registry_path = record_completed_suite_from_result(lab, result_path)
+    registry = load_completed_suite_registry(lab)
+
+    assert registry_path.is_file()
+    assert completed_suites_from_registry(lab, project_sha="a" * 40) == ("economic-full",)
+    assert completed_suites_from_registry(lab, project_sha="b" * 40) == ()
+    assert registry["suites"]["economic-full"]["paper_only"] is True
+    assert registry["suites"]["economic-full"]["real_execution"] is False
+
+
+def test_registre_max_data_refuse_no_go_prepare_only_et_fichier_corrompu(tmp_path: Path) -> None:
+    for suffix, overrides in (
+        ("no-go", {"status": "NO_GO", "exit_code": 4}),
+        ("prepare", {"mode": "prepare-only"}),
+    ):
+        lab = tmp_path / suffix
+        lab.mkdir()
+        result_path = tmp_path / f"{suffix}.json"
+        result_path.write_text(json.dumps(_job_result(lab, **overrides)), encoding="utf-8")
+        with pytest.raises(ValueError):
+            record_completed_suite_from_result(lab, result_path)
+
+    corrupt_lab = tmp_path / "corrupt"
+    registry = corrupt_lab / "runtime" / "reports" / "autonomous_research" / "COMPLETED_SUITES.json"
+    registry.parent.mkdir(parents=True)
+    registry.write_text("{pas-json", encoding="utf-8")
+    with pytest.raises(ValueError):
+        load_completed_suite_registry(corrupt_lab)

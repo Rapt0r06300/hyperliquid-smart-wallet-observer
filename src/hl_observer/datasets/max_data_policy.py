@@ -4,13 +4,22 @@ import argparse
 import json
 import shutil
 from collections.abc import Iterable, Mapping
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from hl_observer.datasets.archive_library import suite_names
+
 SCHEMA = "alina.max_data_policy.v1"
+COMPLETED_REGISTRY_SCHEMA = "alina.completed_dataset_suites.v1"
+COMPLETED_REGISTRY_RELATIVE = (
+    Path("runtime") / "reports" / "autonomous_research" / "COMPLETED_SUITES.json"
+)
+COMPLETED_HISTORY_LIMIT = 100
 DEFAULT_RESERVE_GIB = 25.0
 MAX_JOB_DOWNLOAD_GIB = 220.0
 TARGET_NET_USD_PER_FAMILY = 4.0
+ANALYSIS_MODES = {"economic", "historical", "historical-full", "historical-deep"}
 
 FAMILY_SUITES = {
     "copy_vault": "copy-vault-full",
@@ -38,6 +47,166 @@ def _load_json(path: Path) -> dict[str, Any]:
     if not isinstance(raw, dict):
         raise ValueError(f"Objet JSON attendu: {path}")
     return raw
+
+
+def _valid_sha(value: object) -> bool:
+    text = str(value or "").strip().lower()
+    return len(text) == 40 and all(ch in "0123456789abcdef" for ch in text)
+
+
+def completed_registry_path(lab_root: str | Path) -> Path:
+    return Path(lab_root).resolve() / COMPLETED_REGISTRY_RELATIVE
+
+
+def _empty_completed_registry() -> dict[str, Any]:
+    return {
+        "schema": COMPLETED_REGISTRY_SCHEMA,
+        "suites": {},
+        "history": [],
+        "paper_only": True,
+        "real_execution": False,
+    }
+
+
+def load_completed_suite_registry(lab_root: str | Path) -> dict[str, Any]:
+    """Charge le registre persistant; un registre présent mais corrompu échoue fermé."""
+
+    path = completed_registry_path(lab_root)
+    if not path.is_file():
+        return _empty_completed_registry()
+    raw = _load_json(path)
+    if raw.get("schema") != COMPLETED_REGISTRY_SCHEMA:
+        raise ValueError(f"Schéma de registre inattendu: {raw.get('schema')}")
+    suites = raw.get("suites")
+    history = raw.get("history")
+    if not isinstance(suites, Mapping) or not isinstance(history, list):
+        raise ValueError("Registre des suites terminé incomplet ou invalide.")
+    if raw.get("paper_only") is not True or raw.get("real_execution") is not False:
+        raise ValueError("Registre des suites sans garde-fous paper/read-only.")
+    return {
+        **raw,
+        "suites": {str(name): dict(row) for name, row in suites.items() if isinstance(row, Mapping)},
+        "history": [dict(row) for row in history if isinstance(row, Mapping)],
+    }
+
+
+def completed_suites_from_registry(
+    lab_root: str | Path,
+    *,
+    project_sha: str | None = None,
+) -> tuple[str, ...]:
+    registry = load_completed_suite_registry(lab_root)
+    if project_sha is None:
+        return tuple(sorted(str(name) for name in registry["suites"]))
+    sha = str(project_sha).strip().lower()
+    if not _valid_sha(sha):
+        raise ValueError("project_sha invalide pour filtrer les suites terminées.")
+    completed = {
+        str(row.get("suite") or "")
+        for row in registry["history"]
+        if str(row.get("project_sha") or "").strip().lower() == sha
+        and row.get("completed") is True
+    }
+    completed.discard("")
+    return tuple(sorted(completed))
+
+
+def record_completed_suite(
+    lab_root: str | Path,
+    *,
+    suite: str,
+    mode: str,
+    job_id: str,
+    project_sha: str,
+    workspace: str | Path,
+    completed_at_utc: str | None = None,
+) -> Path:
+    """Enregistre atomiquement une analyse réellement terminée, jamais une simple préparation."""
+
+    suite_name = str(suite).strip()
+    if suite_name not in suite_names():
+        raise ValueError(f"Suite inconnue dans le registre: {suite_name}")
+    mode_name = str(mode).strip()
+    if mode_name not in ANALYSIS_MODES:
+        raise ValueError(f"Mode non analysant refusé dans le registre: {mode_name}")
+    job = str(job_id).strip()
+    if not job:
+        raise ValueError("job_id absent du registre.")
+    sha = str(project_sha).strip().lower()
+    if not _valid_sha(sha):
+        raise ValueError("project_sha invalide dans le registre.")
+
+    root = Path(lab_root).resolve()
+    workspace_path = Path(workspace).resolve()
+    try:
+        workspace_path.relative_to(root)
+    except ValueError as exc:
+        raise ValueError("Workspace terminé hors du laboratoire persistant.") from exc
+
+    timestamp = completed_at_utc or datetime.now(timezone.utc).isoformat()
+    entry = {
+        "suite": suite_name,
+        "mode": mode_name,
+        "job_id": job,
+        "project_sha": sha,
+        "workspace": str(workspace_path),
+        "completed_at_utc": str(timestamp),
+        "completed": True,
+        "paper_only": True,
+        "real_execution": False,
+    }
+    registry = load_completed_suite_registry(root)
+    suites = dict(registry["suites"])
+    history = list(registry["history"])
+    suites[suite_name] = entry
+    history.append(entry)
+    history = history[-COMPLETED_HISTORY_LIMIT:]
+    payload = {
+        "schema": COMPLETED_REGISTRY_SCHEMA,
+        "suites": suites,
+        "history": history,
+        "completed_suite_count": len(suites),
+        "history_count": len(history),
+        "paper_only": True,
+        "real_execution": False,
+    }
+    path = completed_registry_path(root)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = path.with_suffix(".json.tmp")
+    temporary.write_text(
+        json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+    temporary.replace(path)
+    return path
+
+
+def record_completed_suite_from_result(
+    lab_root: str | Path,
+    job_result_path: str | Path,
+) -> Path:
+    """N'accepte qu'un JOB_RESULT SUCCESS réellement analysant et paper/read-only."""
+
+    result = _load_json(Path(job_result_path))
+    if result.get("schema") != "alina.autonomous_research_result.v1":
+        raise ValueError("JOB_RESULT n'a pas le schéma autonome attendu.")
+    if result.get("status") != "SUCCESS" or int(result.get("exit_code") or 0) != 0:
+        raise ValueError("Seul un job SUCCESS avec exit_code=0 peut compléter une suite.")
+    if result.get("paper_only") is not True or result.get("real_execution") is not False:
+        raise ValueError("JOB_RESULT sans preuve paper/read-only stricte.")
+    if result.get("start_live_collection") is not False:
+        raise ValueError("Une collecte live ne peut pas être enregistrée comme analyse FULL/COLD autonome.")
+    mode = str(result.get("mode") or "")
+    if mode not in ANALYSIS_MODES:
+        raise ValueError("prepare-only ou mode inconnu ne complète jamais une suite analysée.")
+    return record_completed_suite(
+        lab_root,
+        suite=str(result.get("suite") or ""),
+        mode=mode,
+        job_id=str(result.get("job_id") or ""),
+        project_sha=str(result.get("project_sha") or ""),
+        workspace=str(result.get("workspace") or ""),
+    )
 
 
 def load_suite_plans(lab_root: str | Path) -> dict[str, dict[str, Any]]:
@@ -131,7 +300,7 @@ def choose_max_data_job(
     rejected: list[dict[str, Any]] = []
     for suite in ladder:
         if suite in completed:
-            rejected.append({"suite": suite, "reason": "ALREADY_COMPLETED"})
+            rejected.append({"suite": suite, "reason": "ALREADY_COMPLETED_FOR_THIS_CODE"})
             continue
         plan = suite_plans.get(suite)
         if not isinstance(plan, Mapping):
@@ -163,7 +332,7 @@ def choose_max_data_job(
         return {
             "schema": SCHEMA,
             "status": "READY",
-            "reason": "Première suite utile non encore traitée qui tient sur le disque avec réserve de sécurité.",
+            "reason": "Première suite utile non encore traitée pour ce SHA qui tient sur le disque avec réserve de sécurité.",
             "recommended_suite": suite,
             "recommended_mode": mode,
             "download_budget_gib": round(budget, 4),
@@ -183,7 +352,7 @@ def choose_max_data_job(
     return {
         "schema": SCHEMA,
         "status": "NO_GO",
-        "reason": "Aucune suite supplémentaire utile ne peut être sélectionnée avec les plans et l'espace disque actuels.",
+        "reason": "Aucune suite supplémentaire utile ne peut être sélectionnée avec les plans, le SHA et l'espace disque actuels.",
         "recommended_suite": None,
         "recommended_mode": None,
         "download_budget_gib": 0.0,
@@ -212,6 +381,7 @@ def write_decision(output_dir: str | Path, decision: Mapping[str, Any]) -> tuple
         f"- Mode : `{decision.get('recommended_mode')}`",
         f"- Budget téléchargement : **{decision.get('download_budget_gib')} Gio**",
         f"- Famille prioritaire : `{decision.get('top_family')}`",
+        f"- SHA de code pris en compte : `{decision.get('project_sha_scope')}`",
         "- Objectif : **≥ 4,00 $ net séparément sur Copy-Vault, Lead-Lag et Cross-Venue**",
         "- Compensation entre familles : **INTERDITE**",
         "- OOS/forward utilisés comme gradient : **NON**",
@@ -233,6 +403,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--lab-root", required=True)
     parser.add_argument("--output-dir", required=True)
     parser.add_argument("--completed-suite", action="append", default=[])
+    parser.add_argument("--project-sha", default=None)
     parser.add_argument("--reserve-gib", type=float, default=DEFAULT_RESERVE_GIB)
     args = parser.parse_args(argv)
 
@@ -245,15 +416,19 @@ def main(argv: list[str] | None = None) -> int:
     plans = load_suite_plans(lab_root)
     if not plans:
         raise ValueError("BIBLIOTHEQUE_180GO.json absente ou sans plans; exécute dataset_bridge plan-all.")
+    persisted = completed_suites_from_registry(lab_root, project_sha=args.project_sha)
+    completed = sorted(set(args.completed_suite) | set(persisted))
     free_gib = shutil.disk_usage(lab_root).free / (1024**3)
     decision = choose_max_data_job(
         family_decisions=decisions,
         suite_plans=plans,
-        completed_suites=args.completed_suite,
+        completed_suites=completed,
         free_disk_gib=free_gib,
         all_targets_reached=targets_reached_from_brain(decisions),
         reserve_gib=args.reserve_gib,
     )
+    decision["completed_registry_path"] = str(completed_registry_path(lab_root))
+    decision["project_sha_scope"] = str(args.project_sha or "ALL_RECORDED_SHA")
     json_path, md_path = write_decision(args.output_dir, decision)
     print(
         "ALINA_MAX_DATA "
@@ -269,6 +444,9 @@ if __name__ == "__main__":
 
 
 __all__ = [
+    "ANALYSIS_MODES",
+    "COMPLETED_REGISTRY_RELATIVE",
+    "COMPLETED_REGISTRY_SCHEMA",
     "DEFAULT_RESERVE_GIB",
     "FAMILY_SUITES",
     "MAX_JOB_DOWNLOAD_GIB",
@@ -276,7 +454,12 @@ __all__ = [
     "SCHEMA",
     "TARGET_NET_USD_PER_FAMILY",
     "choose_max_data_job",
+    "completed_registry_path",
+    "completed_suites_from_registry",
+    "load_completed_suite_registry",
     "load_suite_plans",
+    "record_completed_suite",
+    "record_completed_suite_from_result",
     "suite_ladder",
     "targets_reached_from_brain",
     "write_decision",
