@@ -234,7 +234,7 @@ jobs:
           exit $rc
 
       - name: Remonter uniquement les petits rapports vérifiables
-        if: always()
+        if: always() && steps.build.outputs.result_dir != ''
         id: upload
         uses: actions/upload-artifact@v4
         with:
@@ -255,14 +255,19 @@ jobs:
           $path = Join-Path $statusDir 'GITHUB_SYNC_STATUS.json'
           $tmp = "$path.$PID.tmp"
           $uploadOk = '${{ steps.upload.outcome }}' -eq 'success'
+          $resultDir = '${{ steps.build.outputs.result_dir }}'
+          $reportCount = 0
+          if (-not [string]::IsNullOrWhiteSpace($resultDir) -and (Test-Path $resultDir -PathType Container)) {
+            $reportCount = @(Get-ChildItem $resultDir -File -Recurse -ErrorAction SilentlyContinue).Count
+          }
           $payload = [ordered]@{
             schema = 'alina.github_sync_status.v1'
             heartbeat_unix = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds() / 1000.0
             job_id = '${{ steps.build.outputs.job_id }}'
-            github_run_id = '$env:GITHUB_RUN_ID'
-            github_sha = '$env:GITHUB_SHA'
+            github_run_id = $env:GITHUB_RUN_ID
+            github_sha = $env:GITHUB_SHA
             results_sent = $uploadOk
-            report_count = if ($uploadOk) { 1 } else { 0 }
+            report_count = $reportCount
             artifact_id = '${{ steps.upload.outputs.artifact-id }}'
             artifact_url = '${{ steps.upload.outputs.artifact-url }}'
             worker_outcome = '${{ steps.research.outcome }}'
