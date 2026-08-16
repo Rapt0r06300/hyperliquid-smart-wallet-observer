@@ -46,6 +46,23 @@ FAMILY_PATTERNS = {
     ),
 }
 
+PRESET_PATTERNS = {
+    "economic-core": (
+        "runtime/data/vault_fills.jsonl",
+        "runtime/data/vault_fills_live.jsonl",
+        "runtime/data/vault_ledger.jsonl",
+        "runtime/data/vault_episodes.jsonl",
+        "runtime/data/vault_snapshots.jsonl",
+        "runtime/data/copy_vault_l2_tape.jsonl",
+        "runtime/data/carnet_venues.jsonl",
+        "runtime/data/bbo_tape.jsonl",
+        "runtime/data/bbo_tape.jsonl.prev",
+        "runtime/data/bbo_shards/",
+        "runtime/data/bbo_shards_archive/",
+        "runtime/data/lead_lag_config_gele.json",
+    ),
+}
+
 
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
@@ -62,6 +79,7 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--contains", action="append", default=[])
     parser.add_argument("--suffix", action="append", default=[])
     parser.add_argument("--family", choices=tuple(FAMILY_PATTERNS), default=None)
+    parser.add_argument("--preset", choices=tuple(PRESET_PATTERNS), default=None)
     parser.add_argument("--limit", type=int, default=None)
     parser.add_argument("--force", action="store_true")
     parser.add_argument(
@@ -82,6 +100,8 @@ def _patterns(args: argparse.Namespace) -> list[str]:
     patterns = list(args.contains)
     if args.family:
         patterns.extend(FAMILY_PATTERNS[args.family])
+    if args.preset:
+        patterns.extend(PRESET_PATTERNS[args.preset])
     return patterns
 
 
@@ -139,6 +159,8 @@ def main(argv: list[str] | None = None) -> int:
             "assets_necessaires": len(asset_names),
             "octets_a_telecharger": total_asset_bytes,
             "gib_a_telecharger": round(total_asset_bytes / (1024**3), 3),
+            "famille": args.family,
+            "preset": args.preset,
             "premiers_fichiers": [item.relative_path for item in selected[:50]],
         }
 
