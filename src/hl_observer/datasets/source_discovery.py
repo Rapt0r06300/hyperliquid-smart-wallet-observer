@@ -77,6 +77,27 @@ def _is_log_source(path: Path) -> bool:
     return False
 
 
+def _is_sqlite_source(path: Path) -> bool:
+    name = path.name.casefold()
+    return ".sqlite3" in name or name.endswith((".db", ".db-wal", ".db-shm"))
+
+
+def _is_research_lab_source(path: Path) -> bool:
+    parts = [part.casefold() for part in path.parts]
+    for index, part in enumerate(parts[:-1]):
+        if part == "research_lab":
+            return True
+        if part == "research-lab":
+            return True
+        # Les copies archivées peuvent conserver le chemin complet sous un préfixe.
+        if part == "runtime" and index + 1 < len(parts) and parts[index + 1] in {
+            "research_lab",
+            "research-lab",
+        }:
+            return True
+    return False
+
+
 def _entry(root: Path, path: Path) -> dict[str, object]:
     try:
         size = path.stat().st_size
@@ -94,6 +115,8 @@ def discover_family_sources(root: str | Path) -> dict[str, list[Path]]:
         "market_ticks": [],
         "replay": [],
         "logs": [],
+        "sqlite": [],
+        "research_lab": [],
     }
     for path in _iter_real_files(resolved):
         name = path.name.casefold()
@@ -109,6 +132,10 @@ def discover_family_sources(root: str | Path) -> dict[str, list[Path]]:
             groups["replay"].append(path)
         if _is_log_source(path):
             groups["logs"].append(path)
+        if _is_sqlite_source(path):
+            groups["sqlite"].append(path)
+        if _is_research_lab_source(path):
+            groups["research_lab"].append(path)
     for key, values in groups.items():
         groups[key] = sorted(set(values), key=lambda item: item.as_posix().casefold())
     return groups
@@ -118,7 +145,7 @@ def write_family_source_manifest(root: str | Path) -> Path:
     resolved = Path(root).resolve()
     groups = discover_family_sources(resolved)
     payload: dict[str, object] = {
-        "schema": "hypersmart.dataset_family_sources.v1",
+        "schema": "hypersmart.dataset_family_sources.v2",
         "dataset_workspace": is_dataset_workspace(resolved),
         "root": str(resolved),
         "groups": {},
@@ -190,7 +217,7 @@ def source_manifest_summary(root: str | Path) -> dict[str, object]:
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
-        description="Inventorie les sources économiques/replay d'un workspace FULL/COLD."
+        description="Inventorie les sources économiques, SQLite et Research Lab d'un workspace FULL/COLD."
     )
     parser.add_argument("--root", required=True)
     args = parser.parse_args(argv)
