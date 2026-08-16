@@ -39,8 +39,10 @@ echo   4. copy-vault-full     ^(famille Copy-Vault complete^)
 echo   5. lead-lag-full       ^(famille Lead-Lag complete^)
 echo   6. cross-venue-full    ^(famille Cross-Venue complete^)
 echo   7. microstructure-full ^(L2, depth, bid/ask, carnets^)
-echo   8. research-lab-full   ^(replays, backtests, historiques, scenarios^)
-echo   9. full-archive        ^(archive complete ~180 Go^)
+echo   8. research-lab-full   ^(gros historiques JSONL + replays + scenarios^)
+echo   9. sqlite-core         ^(2 grosses bases SQLite canoniques seulement^)
+echo  10. sqlite-all-safe     ^(toutes les SQLite non marquees corrompues^)
+echo  11. full-archive        ^(archive complete ~180 Go^)
 echo   0. Quitter
 echo.
 set /p "CHOIX=Choix : "
@@ -53,7 +55,9 @@ if "%CHOIX%"=="5" set "SUITE=lead-lag-full"
 if "%CHOIX%"=="6" set "SUITE=cross-venue-full"
 if "%CHOIX%"=="7" set "SUITE=microstructure-full"
 if "%CHOIX%"=="8" set "SUITE=research-lab-full"
-if "%CHOIX%"=="9" set "SUITE=full-archive"
+if "%CHOIX%"=="9" set "SUITE=sqlite-core"
+if "%CHOIX%"=="10" set "SUITE=sqlite-all-safe"
+if "%CHOIX%"=="11" set "SUITE=full-archive"
 if "%CHOIX%"=="0" goto :fin_ok
 if not defined SUITE goto :menu
 goto :suite
@@ -86,6 +90,7 @@ echo Le plan ci-dessus est un APERCU : rien de lourd n'a encore ete telecharge.
 echo Les assets deja presents dans le cache commun seront reutilises.
 echo Chaque asset recupere sera controle avant reconstruction.
 echo Le workspace de cette suite sera isole par un digest de selection.
+echo Les bases SQLite marquees corrompues sont exclues des suites sqlite-core/sqlite-all-safe.
 echo.
 set /p "CONFIRM=Ecris OUI pour telecharger/reutiliser le cache et reconstruire cette suite : "
 if /I not "%CONFIRM%"=="OUI" (
@@ -140,6 +145,8 @@ goto :fin_ok
 
 :research_suite
 echo Lancement du laboratoire historique principal sur ce workspace...
+echo Le laboratoire inventorie aussi SQLite en read-only et profile le Research Lab en streaming.
+echo Le mode --full reprend les checkpoints et poursuit les gros JSONL jusqu'a EOF lorsqu'ils existent.
 echo Les etapes sans donnee compatible seront marquees SKIPPED, jamais inventees.
 "%HYPERSMART_PYTHON%" -m hl_observer.ops.dataset_research_runner --root "%~dp0." --data-root "%DATA_ROOT%" --suite "%SUITE%" --full
 set "LAB_RC=%ERRORLEVEL%"
