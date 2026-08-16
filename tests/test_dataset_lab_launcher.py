@@ -5,7 +5,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 
 
-def test_labo_180go_est_paper_only_et_demande_confirmation() -> None:
+def test_labo_180go_est_paper_only_demande_confirmation_et_expose_sqlite() -> None:
     text = (ROOT / "LANCER_LABO_180GO.cmd").read_text(
         encoding="utf-8", errors="replace"
     )
@@ -17,6 +17,11 @@ def test_labo_180go_est_paper_only_et_demande_confirmation() -> None:
     assert '--heartbeat-seconds 1' in text
     assert 'set /p "CONFIRM=Ecris OUI' in text
     assert 'set /p "CONFIRM_ALL=Ecris TOUT' in text
+    assert "sqlite-core" in text
+    assert "sqlite-all-safe" in text
+    assert "dataset_research_runner" in text
+    assert "--full" in text
+    assert "bases SQLite marquees corrompues sont exclues" in text
     assert "/exchange" not in text.casefold()
 
 
