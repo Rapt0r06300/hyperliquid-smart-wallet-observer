@@ -10,6 +10,8 @@ on:
       - 'PREPARER_DONNEES_HYPERSMART.cmd'
       - 'ANALYSER_DONNEES_HYPERSMART.cmd'
       - 'LANCER_REPLAY_176GO.cmd'
+      - 'LANCER_LABO_180GO.cmd'
+      - 'docs/DONNEES_HYPERSMART_176G.md'
       - '.github/workflows/donnees-hypersmart.yml'
   workflow_dispatch: {}
 
@@ -36,7 +38,9 @@ jobs:
             tests/test_dataset_economic_preset.py \
             tests/test_dataset_progress_downloader.py \
             tests/test_dataset_result_export.py \
-            tests/test_dataset_launchers.py
+            tests/test_dataset_launchers.py \
+            tests/test_dataset_archive_library.py \
+            tests/test_dataset_lab_launcher.py
 
   test-windows:
     runs-on: windows-latest
@@ -62,4 +66,6 @@ jobs:
             tests/test_dataset_economic_preset.py `
             tests/test_dataset_progress_downloader.py `
             tests/test_dataset_result_export.py `
-            tests/test_dataset_launchers.py
+            tests/test_dataset_launchers.py `
+            tests/test_dataset_archive_library.py `
+            tests/test_dataset_lab_launcher.py

@@ -1,141 +1,245 @@
-# Utiliser les 176 Gio de données HyperSmart
+# Relier les ~180 Go FULL/COLD à Alina SmartFlow
 
-## Ce qui existe maintenant
+## Source de vérité
 
-Les grosses données ne sont pas dans l'historique Git du logiciel. Elles sont dans la Release privée du dépôt `Rapt0r06300/hypersmart-datasets`.
+Les grosses données restent hors de l'historique Git du logiciel. Elles sont conservées dans la Release privée du dépôt `Rapt0r06300/hypersmart-datasets`.
 
 Release utilisée par défaut :
 
 - dépôt : `Rapt0r06300/hypersmart-datasets`
 - release id : `371149058`
 - nom : `HyperSmart FULL/COLD data snapshot v2`
-- environ 176 Gio de données brutes
-- chaque asset possède un SHA-256 vérifiable côté GitHub
+- **150 546 fichiers**
+- **176,0341 Gio bruts**, soit environ **189 Go décimaux**
+- assets GitHub avec empreintes SHA-256
+- reconstruction refusée si taille ou SHA-256 ne correspondent pas
 
-Le logiciel principal ne doit jamais télécharger les 176 Gio sans raison. Le pont commence par les petits manifestes, cherche les chemins utiles, calcule quels gros assets sont nécessaires, puis télécharge seulement ces assets.
+Le but n'est pas de réduire cette archive au seul lot `economic-core`. Les ~180 Go constituent désormais une **bibliothèque historique du projet principal** pour replays, backtests, recherche de régimes, microstructure, comparaisons et validation de stratégies.
 
-## Commande simple
+## Nouveau lanceur principal de la bibliothèque
 
 Double-cliquer sur :
 
 ```text
-PREPARER_DONNEES_HYPERSMART.cmd
+LANCER_LABO_180GO.cmd
 ```
 
-Le menu permet de :
+Il permet de travailler avec les suites suivantes :
 
-1. vérifier que la Release est accessible ;
-2. récupérer seulement les manifestes ;
-3. faire une carte complète des 150 000+ fichiers sans télécharger les gros assets ;
-4. voir le plan Copy-Vault ;
-5. voir le plan Lead-Lag ;
-6. voir le plan Cross-Venue.
+| Suite | Rôle |
+|---|---|
+| `economic-core` | contrôle rapide du pipeline sur les sources canoniques des trois moteurs |
+| `economic-full` | union large des données Copy-Vault + Lead-Lag + Cross-Venue |
+| `copy-vault-full` | toutes les données repérées autour des vaults/leaders/user fills/metaorders/TWAP |
+| `lead-lag-full` | BBO/allMids/microprice/order-flow/OFI |
+| `cross-venue-full` | données de venues/dislocations/Hyperliquid/Binance/dYdX |
+| `microstructure-full` | L2, profondeur, carnet, bid/ask |
+| `research-lab-full` | research_lab, scénarios, replays, backtests, historiques |
+| `full-archive` | totalité de la Release FULL/COLD |
 
-Voir un plan ne télécharge pas les gros fichiers.
+Le lanceur commence toujours par afficher le plan. Aucun gros téléchargement ne démarre avant une confirmation `OUI`. La suite `full-archive` demande en plus la confirmation explicite `TOUT`.
 
-## Commandes détaillées
+## Carte de toute la bibliothèque
 
-Vérifier la Release :
+Commande :
 
 ```bat
-PREPARER_DONNEES_HYPERSMART.cmd status
+LANCER_LABO_180GO.cmd plans
 ```
 
-Télécharger et vérifier uniquement les manifestes :
+ou directement :
 
 ```bat
-PREPARER_DONNEES_HYPERSMART.cmd catalog
+python -m hl_observer.ops.dataset_bridge plan-all --root .
 ```
 
-Construire la carte complète :
-
-```bat
-PREPARER_DONNEES_HYPERSMART.cmd carte
-```
-
-La carte écrit :
+Sorties :
 
 ```text
-runtime/reports/datasets/CATALOGUE_COMPLET.json
-runtime/reports/datasets/CATALOGUE_COMPLET.md
+runtime/reports/datasets/BIBLIOTHEQUE_180GO.md
+runtime/reports/datasets/BIBLIOTHEQUE_180GO.json
 ```
 
-Elle donne notamment les volumes par famille repérée, par extension, par gros dossier, la plage des dates de modification et les plus gros fichiers. Elle ne supprime rien et ne trie rien définitivement.
+Le plan calcule en une lecture du manifeste :
 
-Voir combien de données Copy-Vault seraient nécessaires :
+- nombre de fichiers par suite ;
+- volume brut des fichiers ciblés ;
+- assets GitHub nécessaires ;
+- volume total des assets ;
+- assets déjà présents dans le cache local ;
+- volume restant à récupérer ;
+- assets manquants ;
+- digest reproductible de la sélection ;
+- workspace qui sera utilisé ;
+- usage prévu de la suite.
+
+Les chiffres de cache affichés dans le plan sont un pré-contrôle par taille. Le SHA-256 complet reste vérifié avant usage réel.
+
+## Cache commun, workspaces isolés
+
+Les assets GitHub lourds sont partagés ici :
+
+```text
+data/hypersmart_datasets/assets/
+```
+
+Un asset déjà téléchargé et valide n'a pas besoin d'être téléchargé une seconde fois lorsqu'il sert à plusieurs suites.
+
+En revanche, les fichiers reconstruits ne sont plus tous mélangés dans un seul dossier. Chaque suite reproductible utilise un workspace isolé :
+
+```text
+data/hypersmart_datasets/workspaces/<suite>/<digest>/
+```
+
+Exemple :
+
+```text
+data/hypersmart_datasets/workspaces/economic-full/0123456789abcdef/
+```
+
+Le digest dépend de la liste des fichiers, de leur taille, de leur SHA-256 et de leur mode de stockage. Deux sélections différentes ne partagent donc pas silencieusement le même workspace.
+
+Le pointeur courant est conservé dans :
+
+```text
+data/hypersmart_datasets/workspaces/<suite>/CURRENT.json
+```
+
+Pour retrouver le workspace actif :
 
 ```bat
-PREPARER_DONNEES_HYPERSMART.cmd copy-vault
+python -m hl_observer.ops.dataset_bridge locate --root . --suite economic-full
 ```
 
-Même principe pour Lead-Lag :
+## Premier niveau : contrôle du pipeline
 
-```bat
-PREPARER_DONNEES_HYPERSMART.cmd lead-lag
+`economic-core` reste utile, mais uniquement comme **smoke test**. Il vérifie rapidement :
+
+```text
+Release -> manifestes -> plan -> cache -> SHA-256 -> reconstruction
+-> Copy-Vault -> Lead-Lag -> Cross-Venue -> petit rapport GitHub
 ```
 
-Et Cross-Venue :
+Il ne représente pas l'ensemble des données historiques.
 
-```bat
-PREPARER_DONNEES_HYPERSMART.cmd cross-venue
+## Deuxième niveau : données économiques larges
+
+La suite prioritaire après validation du smoke test est :
+
+```text
+economic-full
 ```
 
-## Télécharger vraiment une sélection
+Elle regroupe toutes les sources repérées pour les trois familles économiques actives et les reconstruit dans un workspace séparé. Le lanceur peut ensuite appeler :
 
-Le téléchargement massif est volontairement explicite. Exemple :
-
-```bat
-python -m hl_observer.ops.dataset_bridge prepare --root . --contains copy_vault --download --max-download-gib 20
+```text
+ANALYSER_DONNEES_HYPERSMART.cmd economic-full
 ```
 
-Le pont :
+Le moteur de campagne existant reste utilisé : aucun second moteur économique parallèle n'est inventé.
 
-1. lit le manifeste complet ;
-2. sélectionne les chemins demandés ;
-3. calcule les assets GitHub réellement nécessaires ;
-4. refuse si le volume dépasse le plafond donné ;
-5. télécharge dans `data/hypersmart_datasets/assets/` ;
-6. vérifie la taille et le SHA-256 de chaque asset ;
-7. reconstruit uniquement les fichiers sélectionnés dans `data/hypersmart_datasets/materialized/` ;
-8. vérifie aussi le SHA-256 du fichier reconstruit ;
-9. écrit un rapport dans `runtime/reports/datasets/DERNIERE_PREPARATION_DATASET.json`.
+## Troisième niveau : recherche ciblée
 
-Mettre `--max-download-gib 0` signifie que le plafond est désactivé. À utiliser seulement lorsque le volume affiché avant téléchargement est accepté.
+Les suites `copy-vault-full`, `lead-lag-full` et `cross-venue-full` servent à préparer des corpus de famille plus larges.
 
-## Pourquoi le dossier `materialized` est important
+Les suites `microstructure-full` et `research-lab-full` servent à exploiter les données qui ne rentrent pas directement dans le replay économique canonique :
 
-Les chemins originaux sont conservés sous :
+- profondeur et L2 ;
+- bid/ask et carnets ;
+- historiques de recherche ;
+- scénarios ;
+- anciennes sorties de replay/backtest ;
+- archives de laboratoire.
+
+Ces corpus doivent alimenter les outils de recherche existants et les futurs adapters dédiés. Ils ne doivent jamais être assimilés automatiquement à une preuve de PnL.
+
+## Archive complète
+
+La suite :
+
+```text
+full-archive
+```
+
+représente les **150 546 fichiers / 176,0341 Gio**.
+
+Elle existe pour que le projet principal puisse adresser la totalité de la sauvegarde avec la même logique de manifestes, cache, SHA-256, provenance et workspace.
+
+Cela ne veut pas dire qu'il faut systématiquement télécharger ~180 Go. Le bon ordre est :
+
+1. planifier ;
+2. réutiliser le cache ;
+3. préparer la suite nécessaire à une expérience ;
+4. exécuter le replay/backtest adapté ;
+5. conserver seulement les petits résultats versionnables ;
+6. passer à la suite suivante.
+
+## Provenance des expériences
+
+Chaque préparation écrit notamment :
+
+```text
+runtime/reports/datasets/DERNIERE_PREPARATION_<suite>.json
+<workspace>/runtime/reports/datasets/SELECTION_PROVENANCE.json
+```
+
+La provenance contient :
+
+- Release source ;
+- suite ;
+- digest de sélection ;
+- nombre de fichiers ;
+- volume brut ;
+- assets utilisés ;
+- workspace ;
+- état paper/read-only.
+
+Les rapports économiques exportés incluent aussi la suite utilisée. Les sorties canoniques légères sont :
+
+```text
+docs/research/datasets/DERNIER_REPLAY_DATASETS.md
+docs/research/datasets/DERNIER_REPLAY_DATASETS.json
+```
+
+Des copies par suite sont également écrites sous `DERNIER_REPLAY_180GO_<suite>.*`. Les anciens noms `DERNIER_REPLAY_176GO.*` restent écrits pour compatibilité.
+
+## Anciennes commandes
+
+`PREPARER_DONNEES_HYPERSMART.cmd` et `LANCER_REPLAY_176GO.cmd` restent disponibles pour compatibilité.
+
+Les nouvelles expériences reproductibles doivent privilégier `LANCER_LABO_180GO.cmd` et `--suite`, car les anciens modes ad hoc reconstruisent encore dans :
 
 ```text
 data/hypersmart_datasets/materialized/
 ```
 
-Exemple : un ancien fichier `runtime/data/copy_vault_l2_tape.jsonl` devient :
-
-```text
-data/hypersmart_datasets/materialized/runtime/data/copy_vault_l2_tape.jsonl
-```
-
-Ainsi les moteurs de replay qui savent travailler avec une racine de données peuvent recevoir `data/hypersmart_datasets/materialized` comme racine sans réécrire le contenu historique.
-
 ## Sécurité et vérité des données
 
 - aucune exécution réelle ;
-- aucun `/exchange` ;
 - aucune signature ;
 - aucune clé privée ;
-- aucun fichier n'est accepté si le SHA-256 distant est absent ou faux ;
-- aucune reconstruction n'est acceptée si sa taille ou son SHA-256 ne correspondent pas au manifeste ;
-- aucun chemin d'archive n'a le droit de sortir du dossier de reconstruction ;
-- une donnée absente provoque un NO_GO, jamais une valeur inventée.
+- mainnet et testnet execution forcés à `0` dans les lanceurs ;
+- aucun fichier accepté si le contrôle d'intégrité échoue ;
+- aucune donnée manquante remplacée par une valeur inventée ;
+- cache partagé, mais workspaces reconstruits isolés ;
+- provenance obligatoire pour les suites ;
+- résultats historiques distincts de la validation future.
 
-## Suite du chantier
+## Méthode de recherche à appliquer aux ~180 Go
 
-Le pont et la carte sont les deux premières étapes. Ensuite il faut :
+Les données servent à **chercher puis falsifier** des hypothèses, pas à fabriquer un résultat gagnant.
 
-1. utiliser la carte pour connaître précisément la couverture par famille, période et résolution ;
-2. produire des vues canoniques pour Copy-Vault, Lead-Lag et Cross-Venue ;
-3. brancher ces vues aux moteurs de replay existants ;
-4. lancer train / validation / OOS / forward ;
-5. mesurer PnL brut, coûts, PnL net, ROI, drawdown et stabilité ;
-6. ne promouvoir une famille que si la preuve économique est positive et reproductible.
+Pour toute stratégie candidate :
+
+1. découverte sur une période d'entraînement ;
+2. paramètres gelés ;
+3. validation sur période distincte ;
+4. OOS temporel ;
+5. forward sur données plus récentes lorsque disponible ;
+6. frais, spread, slippage, latence et capacité inclus ;
+7. placebos/contrôles quand ils sont applicables ;
+8. mesure du PnL net, ROI, drawdown, stabilité et nombre d'observations ;
+9. rejet si le résultat dépend d'un sous-échantillon, d'un réglage fragile ou d'une donnée non causale ;
+10. aucune promotion sur le seul fait qu'un backtest historique est positif.
+
+Les ~180 Go sont donc désormais la **bibliothèque de recherche historique d'Alina SmartFlow**, tandis que les nouvelles collectes postérieures au snapshot restent essentielles pour confirmer ou invalider les découvertes en forward.

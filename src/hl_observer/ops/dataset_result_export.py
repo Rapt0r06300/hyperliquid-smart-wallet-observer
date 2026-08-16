@@ -33,7 +33,17 @@ def _read_small_json(path: Path) -> Any:
     return json.loads(_read_small_text(path))
 
 
-def export_result(project_root: Path, replay_root: Path) -> dict[str, object]:
+def _safe_suite_name(value: str) -> str:
+    safe = "".join(ch if ch.isalnum() or ch in "-_" else "_" for ch in value)
+    return safe or "dataset"
+
+
+def export_result(
+    project_root: Path,
+    replay_root: Path,
+    *,
+    suite: str = "legacy-materialized",
+) -> dict[str, object]:
     project_root = project_root.resolve()
     replay_root = replay_root.resolve()
     campaign_dir = replay_root / "runtime" / "reports" / "economic_campaigns"
@@ -50,13 +60,20 @@ def export_result(project_root: Path, replay_root: Path) -> dict[str, object]:
 
     destination = project_root / "docs" / "research" / "datasets"
     destination.mkdir(parents=True, exist_ok=True)
-    md_path = destination / "DERNIER_REPLAY_176GO.md"
-    json_path = destination / "DERNIER_REPLAY_176GO.json"
+    safe_suite = _safe_suite_name(suite)
+    suite_md_path = destination / f"DERNIER_REPLAY_180GO_{safe_suite}.md"
+    suite_json_path = destination / f"DERNIER_REPLAY_180GO_{safe_suite}.json"
+    canonical_md_path = destination / "DERNIER_REPLAY_DATASETS.md"
+    canonical_json_path = destination / "DERNIER_REPLAY_DATASETS.json"
+    legacy_md_path = destination / "DERNIER_REPLAY_176GO.md"
+    legacy_json_path = destination / "DERNIER_REPLAY_176GO.json"
     generated = datetime.now(timezone.utc).isoformat()
 
     header = (
         "# Dernier replay des données FULL/COLD\n\n"
         f"- Release source : **{RELEASE_ID}**\n"
+        f"- Suite source : **{suite}**\n"
+        f"- Workspace : `{replay_root}`\n"
         f"- Généré UTC : `{generated}`\n"
         f"- SHA-256 rapport campagne : `{_sha256(campaign_md)}`\n"
         f"- SHA-256 scoreboard : `{_sha256(scoreboard_json)}`\n"
@@ -64,12 +81,16 @@ def export_result(project_root: Path, replay_root: Path) -> dict[str, object]:
         "- Exécution réelle : **NON**\n\n"
         "---\n\n"
     )
-    md_path.write_text(header + campaign_text, encoding="utf-8")
+    markdown = header + campaign_text
+    for path in (suite_md_path, canonical_md_path, legacy_md_path):
+        path.write_text(markdown, encoding="utf-8")
 
     payload = {
-        "schema": "hypersmart.dataset_replay_export.v1",
+        "schema": "hypersmart.dataset_replay_export.v2",
         "generated_at_utc": generated,
         "source_release_id": RELEASE_ID,
+        "source_suite": suite,
+        "replay_root": str(replay_root),
         "paper_read_only": True,
         "real_execution": False,
         "campaign_report_sha256": _sha256(campaign_md),
@@ -77,13 +98,18 @@ def export_result(project_root: Path, replay_root: Path) -> dict[str, object]:
         "scoreboards": scoreboards,
         "family_campaigns": family_reports,
     }
-    json_path.write_text(
-        json.dumps(payload, indent=2, ensure_ascii=False, sort_keys=True) + "\n",
-        encoding="utf-8",
-    )
+    serialized = json.dumps(payload, indent=2, ensure_ascii=False, sort_keys=True) + "\n"
+    for path in (suite_json_path, canonical_json_path, legacy_json_path):
+        path.write_text(serialized, encoding="utf-8")
+
     return {
-        "markdown": str(md_path),
-        "json": str(json_path),
+        "markdown": str(suite_md_path),
+        "json": str(suite_json_path),
+        "canonical_markdown": str(canonical_md_path),
+        "canonical_json": str(canonical_json_path),
+        "legacy_markdown": str(legacy_md_path),
+        "legacy_json": str(legacy_json_path),
+        "suite": suite,
         "families": sorted(family_reports),
         "status": "OK",
     }
@@ -95,9 +121,14 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument("--root", default=".")
     parser.add_argument("--replay-root", required=True)
+    parser.add_argument("--suite", default="legacy-materialized")
     args = parser.parse_args(argv)
     try:
-        result = export_result(Path(args.root), Path(args.replay_root))
+        result = export_result(
+            Path(args.root),
+            Path(args.replay_root),
+            suite=args.suite,
+        )
         print(json.dumps(result, indent=2, ensure_ascii=False, sort_keys=True))
         return 0
     except (DatasetBridgeError, OSError, json.JSONDecodeError) as exc:

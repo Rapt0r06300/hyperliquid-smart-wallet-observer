@@ -18,13 +18,31 @@ set "REAL_MAINNET_TRADING=false"
 set "TESTNET_ONLY=true"
 set "HYPERSMART_ANALYSIS_LOCAL_ONLY=1"
 
-set "DATA_ROOT=%~dp0data\hypersmart_datasets\materialized"
+set "DATASET_SUITE=%~1"
+set "DATA_ROOT="
+
+REM Sans argument, on garde la compatibilite avec l'ancien dossier materialized.
+if "%DATASET_SUITE%"=="" (
+  set "DATASET_SUITE=legacy-materialized"
+  set "DATA_ROOT=%~dp0data\hypersmart_datasets\materialized"
+) else (
+  for /f "usebackq delims=" %%I in (`"%HYPERSMART_PYTHON%" -m hl_observer.ops.dataset_bridge locate --root "%~dp0." --suite "%DATASET_SUITE%"`) do set "DATA_ROOT=%%I"
+)
+
+if not defined DATA_ROOT (
+  echo.
+  echo [NO_GO] Aucun workspace courant pour la suite %DATASET_SUITE%.
+  echo Lance d'abord LANCER_LABO_180GO.cmd et prepare cette suite.
+  if /I not "%HYPERSMART_NO_PAUSE%"=="1" pause
+  exit /b 5
+)
+
 if not exist "%DATA_ROOT%\runtime\data" (
   echo.
-  echo [NO_GO] Les donnees FULL/COLD ne sont pas encore reconstruites ici :
+  echo [NO_GO] Les donnees FULL/COLD ne sont pas reconstruites ici :
   echo         %DATA_ROOT%\runtime\data
   echo.
-  echo Commence par PREPARER_DONNEES_HYPERSMART.cmd et regarde le plan du lot economique.
+  echo Suite : %DATASET_SUITE%
   if /I not "%HYPERSMART_NO_PAUSE%"=="1" pause
   exit /b 5
 )
@@ -38,7 +56,8 @@ if errorlevel 1 (
 
 echo.
 echo ============================================================
-echo   REPLAY DES DONNEES FULL/COLD - PAPER STRICT
+echo   ALINA SMARTFLOW - REPLAY FULL/COLD - PAPER STRICT
+echo   Suite : %DATASET_SUITE%
 echo   Copy-Vault + Lead-Lag + Cross-Venue
 echo   Aucune collecte live, aucun ordre reel.
 echo ============================================================
@@ -53,18 +72,18 @@ if "%RC%"=="0" (
   echo Rapport lourd/local : %DATA_ROOT%\runtime\reports\economic_campaigns\HYPERSMART_ECONOMIC_OBJECTIVE_CAMPAIGN.md
   echo.
   echo [EXPORT] Copie du petit verdict dans docs\research\datasets ...
-  "%HYPERSMART_PYTHON%" -m hl_observer.ops.dataset_result_export --root "%~dp0." --replay-root "%DATA_ROOT%"
+  "%HYPERSMART_PYTHON%" -m hl_observer.ops.dataset_result_export --root "%~dp0." --replay-root "%DATA_ROOT%" --suite "%DATASET_SUITE%"
   if errorlevel 1 (
     echo [ATTENTION] Le replay est termine mais le petit export GitHub a echoue.
     set "RC=7"
   ) else (
     echo [OK] Petit verdict pret pour GitHub :
-    echo      docs\research\datasets\DERNIER_REPLAY_176GO.md
-    echo      docs\research\datasets\DERNIER_REPLAY_176GO.json
+    echo      docs\research\datasets\DERNIER_REPLAY_DATASETS.md
+    echo      docs\research\datasets\DERNIER_REPLAY_DATASETS.json
   )
 ) else (
   echo [NO_GO] Replay termine avec le code %RC%.
-  echo Une donnee peut manquer dans le lot reconstruit. Rien n'est invente.
+  echo Une donnee peut manquer dans la suite reconstruite. Rien n'est invente.
 )
 
 if /I not "%HYPERSMART_NO_PAUSE%"=="1" pause
