@@ -114,6 +114,8 @@ Sortie par défaut :
 runtime/reports/datasets/sqlite_views/fills.jsonl
 ```
 
+Les vues SQLite peuvent aussi être filtrées par période, coin, wallet et famille lorsque la table possède une colonne sûre correspondante. Les valeurs sont passées comme paramètres SQL ; les noms de tables/colonnes restent issus d'une allowlist fixe.
+
 Cette vue est une commodité de replay. La source SQLite reste inchangée.
 
 ## Research Lab : scan de dizaines de Gio sans les charger en RAM
@@ -155,7 +157,63 @@ runtime/reports/datasets/RESEARCH_LAB_STREAM_PROFILE.json
 runtime/reports/datasets/RESEARCH_LAB_STREAM_PROFILE.md
 ```
 
+### Progression fiable des `.jsonl.gz`
+
+Un fichier gzip possède deux compteurs différents :
+
+- **octets physiques** : taille/position dans le fichier compressé sur disque ;
+- **octets logiques** : volume JSONL décompressé réellement traité.
+
+Le scanner officiel sépare désormais ces deux valeurs. Pour un `.jsonl.gz`, le pourcentage et l'ETA sont calculés uniquement avec les octets compressés physiques et sont bornés à 100 %. `logical_scanned_gib` reste séparé et peut naturellement dépasser la taille du fichier gzip.
+
+Les `.gz` ne sont pas déclarés reprenables par offset. Les JSONL non compressés conservent leurs checkpoints et leur reprise exacte.
+
 Ces agrégats cartographient les preuves existantes. Ils ne sont pas assimilés à une validation OOS.
+
+## Plan d'expérience ciblé avant un replay
+
+Une fois les profils Research Lab et/ou les schémas SQLite disponibles, il n'est plus nécessaire de rescanner de gros volumes simplement pour savoir quelles sources correspondent à une expérience.
+
+Commande :
+
+```powershell
+python -m hl_observer.ops.dataset_experiment_plan `
+  --root "<workspace>" `
+  --start-ms 1780000000000 `
+  --end-ms 1780100000000 `
+  --family copy_vault `
+  --coin BTC `
+  --wallet 0xabc
+```
+
+Le plan combine :
+
+```text
+critères demandés
++ provenance Release/suite
++ profil Research Lab déjà calculé
++ schémas SQLite read-only
+= digest d'expérience reproductible
+```
+
+Il sélectionne uniquement les chemins Research Lab et les couples base/table SQLite compatibles. Il ne copie aucune donnée brute, ne télécharge aucun asset, ne lance aucun replay et n'utilise aucun réseau.
+
+Sorties :
+
+```text
+runtime/reports/datasets/experiment_plans/experiment_<digest16>.json
+runtime/reports/datasets/experiment_plans/experiment_<digest16>.md
+runtime/reports/datasets/experiment_plans/CURRENT_EXPERIMENT_PLAN.json
+runtime/reports/datasets/experiment_plans/CURRENT_EXPERIMENT_PLAN.md
+```
+
+Bouton Windows pour un workspace déjà reconstruit :
+
+```bat
+PREPARER_EXPERIENCE_FULL_COLD.cmd SUITE [FAMILLE] [COIN] [METRIQUE] [START_MS] [END_MS] [WALLET]
+```
+
+Le guide détaillé est `docs/DATASET_EXPERIMENT_PLANS.md`.
 
 ## Laboratoire historique principal
 
@@ -222,7 +280,9 @@ sqlite-all-safe
 full-archive
 ```
 
-Le launcher garde :
+Pour préparer ensuite une expérience précise sans déclencher un nouveau téléchargement ou un nouveau replay, utiliser `PREPARER_EXPERIENCE_FULL_COLD.cmd`.
+
+Les launchers gardent :
 
 ```text
 HL_ENABLE_MAINNET_EXECUTION=0
@@ -241,6 +301,7 @@ fichier archivé
 -> workspace reconstruit
 -> source découverte
 -> source réellement consommée
+-> plan d'expérience ciblé
 -> métrique mesurée
 -> replay causal
 -> coûts
