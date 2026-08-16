@@ -5,10 +5,14 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 
 
-def test_bouton_experience_reste_local_et_sans_execution_reelle() -> None:
-    text = (ROOT / "PREPARER_EXPERIENCE_FULL_COLD.cmd").read_text(
+def _text() -> str:
+    return (ROOT / "PREPARER_EXPERIENCE_FULL_COLD.cmd").read_text(
         encoding="utf-8", errors="replace"
     )
+
+
+def test_bouton_experience_reste_local_et_sans_execution_reelle() -> None:
+    text = _text()
     assert "HL_ENABLE_MAINNET_EXECUTION=0" in text
     assert "HL_ENABLE_TESTNET_EXECUTION=0" in text
     assert "REAL_MAINNET_TRADING=false" in text
@@ -20,9 +24,7 @@ def test_bouton_experience_reste_local_et_sans_execution_reelle() -> None:
 
 
 def test_bouton_experience_transmet_les_criteres_sans_lancer_de_replay() -> None:
-    text = (ROOT / "PREPARER_EXPERIENCE_FULL_COLD.cmd").read_text(
-        encoding="utf-8", errors="replace"
-    )
+    text = _text()
     assert "--family" in text
     assert "--coin" in text
     assert "--metric" in text
@@ -31,3 +33,12 @@ def test_bouton_experience_transmet_les_criteres_sans_lancer_de_replay() -> None
     assert "--wallet" in text
     assert "ANALYSER_DONNEES_HYPERSMART" not in text
     assert "dataset_research_runner" not in text
+
+
+def test_bouton_experience_quote_directement_le_workspace_et_evite_un_args_fragile() -> None:
+    text = _text()
+    assert '--root "%DATA_ROOT%"' in text
+    assert 'set "ARGS=' not in text
+    assert ':sans_periode' in text
+    assert ':debut_seul' in text
+    assert ':sans_debut' in text
