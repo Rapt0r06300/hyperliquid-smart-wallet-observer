@@ -19,6 +19,7 @@ set "REAL_MAINNET_TRADING=false"
 if "%~1"=="" goto :menu
 if /I "%~1"=="status" goto :status
 if /I "%~1"=="catalog" goto :catalog
+if /I "%~1"=="carte" goto :carte
 if /I "%~1"=="copy-vault" goto :copy
 if /I "%~1"=="lead-lag" goto :leadlag
 if /I "%~1"=="cross-venue" goto :cross
@@ -30,20 +31,22 @@ goto :usage
 :menu
 echo.
 echo ============================================================
-echo   DONNEES HYPERSMART - Release FULL/COLD
- echo ============================================================
-echo   1 - Voir si la Release est accessible
- echo   2 - Telecharger seulement les petits manifestes
- echo   3 - Voir le plan Copy-Vault sans telecharger
- echo   4 - Voir le plan Lead-Lag sans telecharger
- echo   5 - Voir le plan Cross-Venue sans telecharger
- echo.
+echo   DONNEES HYPERSMART - BIBLIOTHEQUE FULL/COLD
+echo ============================================================
+echo   1 - Verifier que la grosse Release est accessible
+echo   2 - Recuperer seulement les petits manifestes
+echo   3 - Faire la carte complete des 150 000+ fichiers
+echo   4 - Voir le plan Copy-Vault sans telecharger
+echo   5 - Voir le plan Lead-Lag sans telecharger
+echo   6 - Voir le plan Cross-Venue sans telecharger
+echo.
 set /p "CHOIX=Choix : "
 if "%CHOIX%"=="1" goto :status
 if "%CHOIX%"=="2" goto :catalog
-if "%CHOIX%"=="3" goto :copy
-if "%CHOIX%"=="4" goto :leadlag
-if "%CHOIX%"=="5" goto :cross
+if "%CHOIX%"=="3" goto :carte
+if "%CHOIX%"=="4" goto :copy
+if "%CHOIX%"=="5" goto :leadlag
+if "%CHOIX%"=="6" goto :cross
 echo Choix invalide.
 pause
 exit /b 2
@@ -54,6 +57,10 @@ goto :fin
 
 :catalog
 "%HYPERSMART_PYTHON%" -m hl_observer.ops.dataset_bridge catalog --root "%~dp0."
+goto :fin
+
+:carte
+"%HYPERSMART_PYTHON%" -m hl_observer.ops.dataset_catalog --root "%~dp0."
 goto :fin
 
 :copy
@@ -73,7 +80,7 @@ goto :fin
 goto :fin
 
 :usage
-echo Usage: PREPARER_DONNEES_HYPERSMART.cmd [status^|catalog^|copy-vault^|lead-lag^|cross-venue]
+echo Usage: PREPARER_DONNEES_HYPERSMART.cmd [status^|catalog^|carte^|copy-vault^|lead-lag^|cross-venue^|tout]
 exit /b 2
 
 :fin
