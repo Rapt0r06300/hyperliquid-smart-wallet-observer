@@ -77,7 +77,7 @@ echo ============================================================
 echo   SUITE SELECTIONNEE : %SUITE%
 echo ============================================================
 echo.
-echo [1/3] Calcul exact des fichiers, assets, cache et volume restant...
+echo [1/4] Calcul exact des fichiers, assets, cache et volume restant...
 "%HYPERSMART_PYTHON%" -m hl_observer.ops.dataset_bridge prepare --root "%~dp0." --suite "%SUITE%"
 if errorlevel 1 goto :erreur
 
@@ -104,34 +104,61 @@ if /I "%SUITE%"=="full-archive" (
 )
 
 echo.
-echo [2/3] Telechargement avec progression + reconstruction isolee...
+echo [2/4] Telechargement avec progression + reconstruction isolee...
 "%HYPERSMART_PYTHON%" -m hl_observer.ops.dataset_bridge prepare --root "%~dp0." --suite "%SUITE%" --download --max-download-gib 0 --heartbeat-seconds 1
 if errorlevel 1 goto :erreur
 
+set "DATA_ROOT="
+for /f "usebackq delims=" %%I in (`"%HYPERSMART_PYTHON%" -m hl_observer.ops.dataset_bridge locate --root "%~dp0." --suite "%SUITE%"`) do set "DATA_ROOT=%%I"
+if not defined DATA_ROOT (
+  echo [NO_GO] Workspace courant introuvable apres reconstruction.
+  goto :erreur
+)
+
 echo.
-echo [3/3] Suite reliee au projet principal.
+echo [3/4] Inventaire de toutes les sources utilisables du workspace...
+"%HYPERSMART_PYTHON%" -m hl_observer.datasets.source_discovery --root "%DATA_ROOT%"
+if errorlevel 1 goto :erreur
+
+echo.
+echo [4/4] Suite reliee au projet principal :
+echo   %DATA_ROOT%
 echo.
 if /I "%SUITE%"=="economic-core" goto :replay_eco
 if /I "%SUITE%"=="economic-full" goto :replay_eco
-
-echo Cette suite est maintenant disponible dans son workspace isole.
-echo Elle alimente les recherches ciblees et les futurs replays dedies.
-echo Pour les trois moteurs economiques ensemble, utilise economic-full.
-goto :fin_ok
+goto :research_suite
 
 :replay_eco
 echo Lancement du replay canonique Copy-Vault + Lead-Lag + Cross-Venue...
 call "%~dp0ANALYSER_DONNEES_HYPERSMART.cmd" "%SUITE%"
 if errorlevel 1 goto :erreur
 echo.
-echo [OK] Replay termine. Le verdict compact est dans :
+echo [OK] Replay economique termine. Verdict compact :
 echo   docs\research\datasets\DERNIER_REPLAY_DATASETS.md
 echo   docs\research\datasets\DERNIER_REPLAY_DATASETS.json
+goto :fin_ok
+
+:research_suite
+echo Lancement du laboratoire historique principal sur ce workspace...
+echo Les etapes sans donnee compatible seront marquees SKIPPED, jamais inventees.
+"%HYPERSMART_PYTHON%" -m hl_observer.ops.dataset_research_runner --root "%~dp0." --data-root "%DATA_ROOT%" --suite "%SUITE%" --full
+set "LAB_RC=%ERRORLEVEL%"
+if "%LAB_RC%"=="2" (
+  echo [NO_GO] Aucune etape historique exploitable sur cette suite.
+  goto :erreur
+)
+if not "%LAB_RC%"=="0" (
+  echo [ATTENTION] Certaines etapes ont echoue. Les journaux sont conserves pour diagnostic.
+  set "RC=%LAB_RC%"
+  goto :erreur_code
+)
+echo [OK] Laboratoire historique termine sur %SUITE%.
 goto :fin_ok
 
 :erreur
 set "RC=%ERRORLEVEL%"
 if "%RC%"=="0" set "RC=1"
+:erreur_code
 echo.
 echo ============================================================
 echo   NO_GO - code %RC%

@@ -40,7 +40,9 @@ jobs:
             tests/test_dataset_result_export.py \
             tests/test_dataset_launchers.py \
             tests/test_dataset_archive_library.py \
-            tests/test_dataset_lab_launcher.py
+            tests/test_dataset_lab_launcher.py \
+            tests/test_dataset_source_discovery.py \
+            tests/test_dataset_research_runner.py
 
   test-windows:
     runs-on: windows-latest
@@ -68,4 +70,6 @@ jobs:
             tests/test_dataset_result_export.py `
             tests/test_dataset_launchers.py `
             tests/test_dataset_archive_library.py `
-            tests/test_dataset_lab_launcher.py
+            tests/test_dataset_lab_launcher.py `
+            tests/test_dataset_source_discovery.py `
+            tests/test_dataset_research_runner.py
