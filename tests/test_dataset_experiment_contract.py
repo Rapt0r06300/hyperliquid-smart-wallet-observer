@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import copy
 import json
 from pathlib import Path
 
@@ -75,9 +76,11 @@ def _ready_plan() -> dict[str, object]:
 def test_contrat_replay_ne_copie_ni_evenement_brut_ni_sql_libre() -> None:
     contract = build_replay_input_contract(_ready_plan())
 
+    assert contract["schema"] == "hypersmart.replay_input_contract.v2"
     assert contract["source_count"] == 2
     assert contract["research_source_count"] == 1
     assert contract["sqlite_source_count"] == 1
+    assert contract["paths_relative_to_workspace"] is True
     assert contract["read_only"] is True
     assert contract["network_used"] is False
     assert contract["raw_data_embedded"] is False
@@ -101,7 +104,9 @@ def test_contrat_replay_est_reproductible(tmp_path: Path) -> None:
     assert first_json == second_json
     assert first_md == second_md
     assert (tmp_path / CURRENT_REPLAY_INPUT_CONTRACT).is_file()
-    assert "Contrat d'entrée du replay ciblé" in first_md.read_text(encoding="utf-8")
+    markdown = first_md.read_text(encoding="utf-8")
+    assert "Contrat d'entrée du replay ciblé" in markdown
+    assert "chemins sont relatifs au workspace" in markdown
 
 
 def test_contrat_refuse_un_plan_non_ready() -> None:
@@ -109,6 +114,68 @@ def test_contrat_refuse_un_plan_non_ready() -> None:
     plan["status"] = "NO_MATCH"
     with pytest.raises(ValueError, match="READY"):
         build_replay_input_contract(plan)
+
+
+def test_contrat_refuse_un_ready_sans_aucune_source() -> None:
+    plan = _ready_plan()
+    plan["research_lab"] = {"status": "NO_MATCH", "files": []}
+    plan["sqlite"] = {"status": "NO_MATCH", "selected": []}
+    with pytest.raises(ValueError, match="aucune source"):
+        build_replay_input_contract(plan)
+
+
+@pytest.mark.parametrize(
+    "dangerous_path",
+    [
+        "../secret.jsonl",
+        "runtime/research_lab/../../secret.jsonl",
+        "/tmp/secret.jsonl",
+        "C:\\Users\\flo\\secret.jsonl",
+    ],
+)
+def test_contrat_refuse_un_chemin_research_hors_workspace(dangerous_path: str) -> None:
+    plan = copy.deepcopy(_ready_plan())
+    plan["research_lab"]["files"][0]["relative_path"] = dangerous_path
+    with pytest.raises(ValueError, match="Chemin Research Lab"):
+        build_replay_input_contract(plan)
+
+
+@pytest.mark.parametrize(
+    "dangerous_path",
+    [
+        "../hl_observer.sqlite3",
+        "data/../../hl_observer.sqlite3",
+        "/tmp/hl_observer.sqlite3",
+        "D:\\data\\hl_observer.sqlite3",
+    ],
+)
+def test_contrat_refuse_un_chemin_sqlite_hors_workspace(dangerous_path: str) -> None:
+    plan = copy.deepcopy(_ready_plan())
+    plan["sqlite"]["selected"][0]["database"] = dangerous_path
+    with pytest.raises(ValueError, match="Chemin SQLite"):
+        build_replay_input_contract(plan)
+
+
+def test_contrat_refuse_une_table_sqlite_hors_allowlist() -> None:
+    plan = copy.deepcopy(_ready_plan())
+    plan["sqlite"]["selected"][0]["table"] = "raw_events"
+    with pytest.raises(ValueError, match="Table SQLite non autorisée"):
+        build_replay_input_contract(plan)
+
+
+def test_contrat_refuse_une_colonne_brute_injectee_dans_la_vue_sqlite() -> None:
+    plan = copy.deepcopy(_ready_plan())
+    plan["sqlite"]["selected"][0]["safe_columns"].append("raw_json")
+    with pytest.raises(ValueError, match="Colonnes SQLite non autorisées"):
+        build_replay_input_contract(plan)
+
+
+def test_contrat_ignore_les_criteres_inconnus_du_plan() -> None:
+    plan = copy.deepcopy(_ready_plan())
+    plan["criteria"]["commande_secrete"] = "DELETE EVERYTHING"
+    contract = build_replay_input_contract(plan)
+    assert "commande_secrete" not in contract["criteria"]
+    assert "DELETE EVERYTHING" not in json.dumps(contract)
 
 
 def test_loader_refuse_si_plan_courant_absent(tmp_path: Path) -> None:
