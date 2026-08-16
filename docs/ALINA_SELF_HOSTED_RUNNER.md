@@ -69,6 +69,24 @@ Le script exige Python 3.11+ et Git. Il obtient le jeton temporaire d'enregistre
 
 Le token GitHub ne doit jamais être écrit dans un fichier du projet ou dans `ALINA_RESEARCH_HOME`.
 
+## Python persistant du service runner
+
+Le Python installé dans le profil Windows de l'utilisateur sert uniquement à **amorcer l'installation**. L'installateur crée ensuite un environnement Python autonome et persistant dans :
+
+```text
+%ALINA_RESEARCH_HOME%\runtime\python\Scripts\python.exe
+```
+
+Son chemin absolu est enregistré dans la variable machine :
+
+```text
+ALINA_PYTHON_EXE
+```
+
+Tous les gros runs GitHub utilisent **exclusivement `ALINA_PYTHON_EXE`**. Ils ne dépendent donc pas du `PATH`, de `py.exe`, d'un terminal déjà ouvert ni du profil de l'utilisateur connecté. Le diagnostic refuse l'état `RUNNER PRÊT` si ce Python persistant est absent, inférieur à 3.11 ou situé ailleurs que dans le laboratoire persistant.
+
+À chaque job, le projet du SHA courant est réinstallé en mode editable dans ce Python avant le diagnostic Alina. Le code change donc avec `main`, mais l'environnement d'exécution reste disponible pour le service Windows.
+
 ## Service Windows et reprise automatique
 
 Le runner est installé comme **service Windows automatique**. L'installateur configure aussi la récupération du service :
@@ -87,6 +105,17 @@ Cette reprise concerne le **service GitHub Actions Runner**. La reprise métier 
 ```
 
 Résultat attendu : `DIAGNOSTIC FINAL : RUNNER PRÊT`.
+
+Le diagnostic valide notamment :
+
+- le service GitHub Actions Runner ;
+- son démarrage automatique ;
+- `ALINA_RESEARCH_HOME` ;
+- `ALINA_PYTHON_EXE` ;
+- le Python persistant 3.11+ ;
+- la réserve disque minimale ;
+- les dossiers persistants ;
+- le cockpit local.
 
 Le service Windows doit être `Running` et le runner doit porter au minimum les labels :
 
@@ -165,6 +194,10 @@ ALINA_RESEARCH_HOME/
     metadata/
     materialized/
     workspaces/
+  runtime/
+    python/
+      Scripts/
+        python.exe
   jobs/
     requests/
   results/
