@@ -4,14 +4,15 @@ import argparse
 import json
 from pathlib import Path
 
-from hl_observer.datasets.research_lab_stream import write_research_stream_profile
+from hl_observer.datasets.research_lab_stream_safe import write_research_stream_profile_safe
 
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description=(
             "Profile en streaming les gros JSONL du Research Lab FULL/COLD. "
-            "Le scan est local, read-only, reprenable et sans chargement complet en RAM."
+            "Le scan est local, read-only, reprenable pour les JSONL non compressés "
+            "et sépare la progression physique/logique des fichiers gzip."
         )
     )
     parser.add_argument("--root", required=True, help="Workspace FULL/COLD reconstruit.")
@@ -25,7 +26,10 @@ def build_parser() -> argparse.ArgumentParser:
         "--max-gib-per-file",
         type=float,
         default=0.0,
-        help="Volume maximal parcouru par fichier pour ce run. 0 = jusqu'à EOF.",
+        help=(
+            "Volume logique maximal traité par fichier pour ce run. 0 = jusqu'à EOF. "
+            "Sur un .gz, le pourcentage reste calculé sur les octets compressés physiques."
+        ),
     )
     parser.add_argument(
         "--max-lines-per-file",
@@ -61,7 +65,7 @@ def main(argv: list[str] | None = None) -> int:
         return 2
     max_bytes = max(0, int(float(args.max_gib_per_file) * 1024**3))
     try:
-        json_path, md_path, profile = write_research_stream_profile(
+        json_path, md_path, profile = write_research_stream_profile_safe(
             root,
             resume=not bool(args.no_resume),
             max_files=max(0, int(args.max_files)),
@@ -80,6 +84,8 @@ def main(argv: list[str] | None = None) -> int:
         "partial_file_count": profile.get("partial_file_count", 0),
         "source_gib": profile.get("source_gib", 0),
         "scanned_gib": profile.get("scanned_gib", 0),
+        "logical_scanned_gib": profile.get("logical_scanned_gib", 0),
+        "progress_basis": profile.get("progress_basis"),
         "lines": profile.get("lines", 0),
         "invalid_json": profile.get("invalid_json", 0),
         "report_json": str(json_path),
