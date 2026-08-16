@@ -6,7 +6,7 @@ Transformer un PC Windows personnel en **worker de calcul HyperSmart** piloté d
 
 Architecture :
 
-`ChatGPT/GitHub -> main -> commande JSON -> GitHub Actions -> runner Windows self-hosted -> ALINA_RESEARCH_HOME -> backtests/replays -> petits rapports GitHub`.
+`ChatGPT/GitHub -> main -> commande JSON -> GitHub Actions -> runner Windows self-hosted -> ALINA_RESEARCH_HOME -> backtests/replays -> ALINA_RETURN.json + petits rapports GitHub -> ChatGPT`.
 
 Les ~170–180 Gio de données, caches, workspaces, checkpoints et gros logs restent localement sur le PC.
 
@@ -14,6 +14,7 @@ Les ~170–180 Gio de données, caches, workspaces, checkpoints et gros logs res
 
 - `.github/workflows/alina-self-hosted.yml` : plan de contrôle GitHub Actions ;
 - `src/hl_observer/ops/self_hosted_control.py` : canonisation et verrouillage des commandes ;
+- `src/hl_observer/ops/self_hosted_return.py` : retour compact machine-lisible après calcul ;
 - `src/hl_observer/ops/autonomous_research_job.py` : worker autonome ;
 - `src/hl_observer/ops/autonomous_research_guard.py` : timebox maximale 18 h ;
 - `src/hl_observer/ops/autonomous_research_brain.py` : choix de la prochaine phase de recherche ;
@@ -193,7 +194,7 @@ Une fois ce circuit validé :
 
 La politique MAX DATA peut choisir l'escalade utile selon les preuves, la famille prioritaire et l'espace disque restant.
 
-## Résultats
+## Résultats et boucle d'analyse
 
 Chaque run crée localement :
 
@@ -203,11 +204,40 @@ Les journaux potentiellement volumineux restent dans :
 
 `%ALINA_RESEARCH_HOME%\job_logs\<JOB_ID>`
 
-Le workflow publie ensuite uniquement les résultats préparés dans un artifact GitHub nommé :
+Avant l'upload, `self_hosted_return.py` construit :
+
+```text
+ALINA_RETURN.json
+ALINA_RETURN.md
+```
+
+`ALINA_RETURN.json` contient uniquement un résumé allowlisté :
+
+- statut technique du job ;
+- SHA et digest de la requête ;
+- suite et mode ;
+- métriques disponibles de Copy-Vault, Lead-Lag et Cross-Venue ;
+- PnL net/coûts/ROI/drawdown/compteurs lorsqu'ils existent ;
+- raisons de refus bornées ;
+- décision du cerveau de recherche ;
+- prochain type de run recommandé.
+
+Il n'embarque pas les fills bruts, payloads `raw_json`, bases SQLite ou gros historiques.
+
+Le workflow publie ensuite uniquement le dossier de résultats préparé dans un artifact GitHub nommé :
 
 `alina-resultats-<GITHUB_RUN_ID>`
 
-Le cockpit reçoit aussi `GITHUB_SYNC_STATUS.json` afin d'afficher si les rapports sont remontés.
+Depuis ChatGPT/GitHub, cet artifact peut être récupéré et `ALINA_RETURN.json` analysé pour préparer **un nouveau JSON immuable** dans `control/alina_jobs/`. Cela ferme la boucle :
+
+`commande -> PC -> calcul -> retour compact -> analyse -> prochain gros run`.
+
+Le cockpit reçoit aussi `GITHUB_SYNC_STATUS.json` afin d'afficher :
+
+- si l'artifact est parti ;
+- si `ALINA_RETURN.json` est prêt ;
+- combien de petits fichiers ont été remontés ;
+- si l'analyse suivante peut commencer.
 
 Un artifact réussi signifie uniquement que les preuves ont été transférées. Il ne prouve pas un PnL positif.
 
