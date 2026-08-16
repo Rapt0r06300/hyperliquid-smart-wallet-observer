@@ -29,6 +29,7 @@ jobs:
         run: |
           pytest -q \
             tests/test_dataset_release_bridge.py \
+            tests/test_dataset_release_gateway.py \
             tests/test_dataset_catalog_profiler.py \
             tests/test_dataset_replay_workspace.py \
             tests/test_dataset_economic_preset.py
@@ -51,6 +52,7 @@ jobs:
         run: |
           pytest -q `
             tests/test_dataset_release_bridge.py `
+            tests/test_dataset_release_gateway.py `
             tests/test_dataset_catalog_profiler.py `
             tests/test_dataset_replay_workspace.py `
             tests/test_dataset_economic_preset.py
