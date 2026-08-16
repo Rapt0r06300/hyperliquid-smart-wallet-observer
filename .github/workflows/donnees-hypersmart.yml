@@ -9,6 +9,7 @@ on:
       - 'src/hl_observer/ops/autonomous_research_job.py'
       - 'src/hl_observer/ops/autonomous_research_guard.py'
       - 'src/hl_observer/ops/autonomous_research_brain.py'
+      - 'src/hl_observer/ops/autonomous_research_status.py'
       - 'src/hl_observer/backtesting/recherche_adaptative_stricte.py'
       - 'tools/run_economic_objective_campaigns.py'
       - 'tools/run_dataset_economic_campaigns.py'
@@ -80,6 +81,7 @@ jobs:
             tests/test_dataset_autonomous_research_job.py \
             tests/test_dataset_autonomous_research_guard.py \
             tests/test_dataset_autonomous_research_brain.py \
+            tests/test_dataset_autonomous_research_status.py \
             tests/test_recherche_adaptative_stricte.py \
             tests/test_dataset_ci_coverage.py
 
@@ -137,5 +139,6 @@ jobs:
             tests/test_dataset_autonomous_research_job.py `
             tests/test_dataset_autonomous_research_guard.py `
             tests/test_dataset_autonomous_research_brain.py `
+            tests/test_dataset_autonomous_research_status.py `
             tests/test_recherche_adaptative_stricte.py `
             tests/test_dataset_ci_coverage.py
