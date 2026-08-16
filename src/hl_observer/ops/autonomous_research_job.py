@@ -19,6 +19,7 @@ from hl_observer.ops.autonomous_research_guard import (
     _popen_process_group_kwargs,
     _terminate_process_tree,
 )
+from hl_observer.ops.autonomous_research_status import status_path, write_status
 
 SCHEMA = "alina.autonomous_research_job.v1"
 CANONICAL_RELEASE_ID = 371149058
@@ -29,6 +30,7 @@ JOB_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,79}$")
 SHA_RE = re.compile(r"^[0-9a-fA-F]{40}$")
 MAX_SMALL_REPORT_BYTES = 5 * 1024 * 1024
 POLL_SECONDS = 0.2
+LIVE_HEARTBEAT_SECONDS = 1.0
 
 
 def _canonical_json(payload: object) -> str:
@@ -177,12 +179,47 @@ def _run_logged(
     cwd: Path,
     log_dir: Path,
     timeout_seconds: int | float | None = None,
+    live_status_path: Path | None = None,
+    live_context: Mapping[str, Any] | None = None,
+    action_fr: str | None = None,
+    next_action_fr: str | None = None,
+    step_index: int | None = None,
+    step_total: int | None = None,
 ) -> dict[str, Any]:
     log_dir.mkdir(parents=True, exist_ok=True)
     log_path = log_dir / f"{name}.log"
     started_wall = time.time()
     started_mono = time.monotonic()
     timed_out = False
+    latest_line = {"value": None}
+    line_lock = threading.Lock()
+    context = dict(live_context or {})
+
+    def publish(state: str, message_fr: str, *, process_id: int | None = None) -> None:
+        if live_status_path is None:
+            return
+        with line_lock:
+            last = latest_line["value"]
+        write_status(
+            live_status_path,
+            job_id=context.get("job_id"),
+            suite=context.get("suite"),
+            mode=context.get("mode"),
+            state=state,
+            action_fr=action_fr or name,
+            message_fr=message_fr,
+            job_started_unix=context.get("job_started_unix"),
+            stage_started_unix=started_wall,
+            step_index=step_index,
+            step_total=step_total,
+            next_action_fr=next_action_fr,
+            log_path=str(log_path),
+            last_log_line=last,
+            workspace=context.get("workspace"),
+            process_id=process_id,
+        )
+
+    publish("STARTING", "L'étape démarre.")
     with log_path.open("w", encoding="utf-8", newline="\n") as handle:
         handle.write("COMMAND=" + json.dumps(command, ensure_ascii=False) + "\n")
         handle.flush()
@@ -205,6 +242,8 @@ def _run_logged(
                 return
             try:
                 for line in stream:
+                    with line_lock:
+                        latest_line["value"] = line.strip()
                     print(line, end="", flush=True)
                     handle.write(line)
                     handle.flush()
@@ -218,10 +257,16 @@ def _run_logged(
         )
         pump.start()
         deadline = None if timeout_seconds is None else started_mono + float(timeout_seconds)
+        next_heartbeat = started_mono
         try:
             while process.poll() is None:
-                if deadline is not None and time.monotonic() >= deadline:
+                now_mono = time.monotonic()
+                if now_mono >= next_heartbeat:
+                    publish("RUNNING", "Le moteur travaille normalement.", process_id=process.pid)
+                    next_heartbeat = now_mono + LIVE_HEARTBEAT_SECONDS
+                if deadline is not None and now_mono >= deadline:
                     timed_out = True
+                    publish("STOPPING", "Le timeout de cette étape est atteint; arrêt propre en cours.", process_id=process.pid)
                     _terminate_process_tree(process)
                     break
                 time.sleep(POLL_SECONDS)
@@ -232,6 +277,13 @@ def _run_logged(
                 _terminate_process_tree(process)
             pump.join(timeout=5)
         return_code = 124 if timed_out else int(process.returncode or 0)
+
+    if return_code == 0:
+        publish("STEP_DONE", "Étape terminée correctement.")
+    elif timed_out:
+        publish("TIMEOUT", "Étape arrêtée après avoir atteint sa limite de temps.")
+    else:
+        publish("STEP_ERROR", f"Étape terminée avec le code {return_code}.")
     return {
         "name": name,
         "return_code": return_code,
@@ -338,6 +390,28 @@ def execute_job(
     lab_root = lab_root.resolve()
     result_dir = result_dir.resolve()
     lab_root.mkdir(parents=True, exist_ok=True)
+    live_path = status_path(lab_root)
+    job_started = time.time()
+    live_context: dict[str, Any] = {
+        "job_id": request["job_id"],
+        "suite": request["suite"],
+        "mode": request["mode"],
+        "job_started_unix": job_started,
+        "workspace": None,
+    }
+    write_status(
+        live_path,
+        job_id=request["job_id"],
+        suite=request["suite"],
+        mode=request["mode"],
+        state="STARTING",
+        action_fr="Vérification du job",
+        message_fr="Alina vérifie la sécurité, le SHA du code et la demande avant de calculer.",
+        job_started_unix=job_started,
+        step_index=1,
+        step_total=4,
+        next_action_fr="Préparer les données et le workspace",
+    )
 
     completion = result_dir / "JOB_RESULT.json"
     if completion.is_file() and not force:
@@ -347,6 +421,18 @@ def execute_job(
             previous = None
         if isinstance(previous, Mapping) and previous.get("request_digest") == digest and previous.get("status") == "SUCCESS":
             print(f"[CACHE JOB OK] {request['job_id']} déjà terminé avec le même digest.", flush=True)
+            write_status(
+                live_path,
+                job_id=request["job_id"],
+                suite=request["suite"],
+                mode=request["mode"],
+                state="SUCCESS_CACHED",
+                action_fr="Aucun calcul nécessaire",
+                message_fr="Ce job a déjà été terminé avec exactement la même demande.",
+                job_started_unix=job_started,
+                step_index=4,
+                step_total=4,
+            )
             return 0
 
     _assert_execution_disabled()
@@ -381,10 +467,36 @@ def execute_job(
             "--heartbeat-seconds",
             "1",
         ]
-        step = _run_logged("01_prepare_dataset", prepare_cmd, cwd=project_root, log_dir=log_dir)
+        step = _run_logged(
+            "01_prepare_dataset",
+            prepare_cmd,
+            cwd=project_root,
+            log_dir=log_dir,
+            live_status_path=live_path,
+            live_context=live_context,
+            action_fr="Préparation des données FULL/COLD",
+            next_action_fr="Vérifier et ouvrir le workspace",
+            step_index=2,
+            step_total=4,
+        )
         steps.append(step)
         if step["return_code"] != 0:
             primary_rc = int(step["return_code"] or 2)
+    else:
+        write_status(
+            live_path,
+            job_id=request["job_id"],
+            suite=request["suite"],
+            mode=request["mode"],
+            state="RUNNING",
+            action_fr="Réutilisation des données locales",
+            message_fr="Aucun téléchargement demandé; Alina réutilise le cache persistant.",
+            job_started_unix=job_started,
+            step_index=2,
+            step_total=4,
+            next_action_fr="Vérifier et ouvrir le workspace",
+        )
+
     if primary_rc == 0:
         try:
             workspace = resolve_current_workspace(lab_root, request["suite"])
@@ -393,6 +505,25 @@ def execute_job(
                 raise RuntimeError("Aucun workspace préparé et download=false.") from exc
             raise
         prepare_replay_workspace(project_root, materialized_root=workspace)
+        live_context["workspace"] = str(workspace)
+        write_status(
+            live_path,
+            job_id=request["job_id"],
+            suite=request["suite"],
+            mode=request["mode"],
+            state="RUNNING",
+            action_fr="Workspace prêt",
+            message_fr="Les données utiles sont prêtes. Le calcul principal peut commencer.",
+            job_started_unix=job_started,
+            step_index=2,
+            step_total=4,
+            next_action_fr=(
+                "Lancer les campagnes économiques"
+                if request["mode"] == "economic"
+                else "Lancer le laboratoire historique"
+            ),
+            workspace=str(workspace),
+        )
 
     if primary_rc == 0 and request["mode"] == "economic":
         command = [
@@ -412,6 +543,12 @@ def execute_job(
             cwd=project_root,
             log_dir=log_dir,
             timeout_seconds=request["stage_timeout_seconds"],
+            live_status_path=live_path,
+            live_context=live_context,
+            action_fr="Backtests économiques Copy-Vault, Lead-Lag et Cross-Venue",
+            next_action_fr="Auditer le raccordement et préparer les rapports",
+            step_index=3,
+            step_total=4,
         )
         steps.append(step)
         primary_rc = int(step["return_code"])
@@ -439,9 +576,30 @@ def execute_job(
             cwd=project_root,
             log_dir=log_dir,
             timeout_seconds=None,
+            live_status_path=live_path,
+            live_context=live_context,
+            action_fr="Replays, walk-forward et recherche historique",
+            next_action_fr="Auditer le raccordement et préparer les rapports",
+            step_index=3,
+            step_total=4,
         )
         steps.append(step)
         primary_rc = int(step["return_code"])
+    elif primary_rc == 0 and request["mode"] == "prepare-only":
+        write_status(
+            live_path,
+            job_id=request["job_id"],
+            suite=request["suite"],
+            mode=request["mode"],
+            state="RUNNING",
+            action_fr="Préparation terminée",
+            message_fr="Le job demandait uniquement de préparer les données; aucun backtest n'est lancé.",
+            job_started_unix=job_started,
+            step_index=3,
+            step_total=4,
+            next_action_fr="Écrire le rapport final",
+            workspace=str(workspace) if workspace else None,
+        )
 
     if primary_rc == 0 and workspace is not None and request["mode"] != "prepare-only":
         step = _run_logged(
@@ -450,11 +608,30 @@ def execute_job(
             cwd=project_root,
             log_dir=log_dir,
             timeout_seconds=1800,
+            live_status_path=live_path,
+            live_context=live_context,
+            action_fr="Vérification finale des sources et des raccordements",
+            next_action_fr="Copier les petits rapports utiles vers GitHub",
+            step_index=4,
+            step_total=4,
         )
         steps.append(step)
         if step["return_code"] != 0:
             primary_rc = int(step["return_code"])
 
+    write_status(
+        live_path,
+        job_id=request["job_id"],
+        suite=request["suite"],
+        mode=request["mode"],
+        state="FINALIZING",
+        action_fr="Préparation du résultat",
+        message_fr="Alina rassemble uniquement les petits rapports et garde les gros fichiers localement.",
+        job_started_unix=job_started,
+        step_index=4,
+        step_total=4,
+        workspace=str(workspace) if workspace else None,
+    )
     copied_reports = _collect_small_reports(project_root, workspace, result_dir, request["suite"]) if workspace else []
     status = "SUCCESS" if primary_rc == 0 else "NO_GO"
     payload = {
@@ -479,6 +656,24 @@ def execute_job(
         "exit_code": primary_rc,
     }
     _write_result(result_dir, payload)
+    write_status(
+        live_path,
+        job_id=request["job_id"],
+        suite=request["suite"],
+        mode=request["mode"],
+        state=status,
+        action_fr=("Job terminé" if primary_rc == 0 else "Job arrêté en NO_GO"),
+        message_fr=(
+            "Le pipeline demandé est terminé techniquement. Les rapports peuvent maintenant être analysés."
+            if primary_rc == 0
+            else "Une étape a échoué ou a refusé de continuer. Consulte le dernier message et le log indiqué."
+        ),
+        job_started_unix=job_started,
+        step_index=4,
+        step_total=4,
+        workspace=str(workspace) if workspace else None,
+        log_path=str(log_dir),
+    )
     return primary_rc
 
 
@@ -503,6 +698,18 @@ def main(argv: Iterable[str] | None = None) -> int:
             force=bool(args.force),
         )
     except (ValueError, RuntimeError, OSError, json.JSONDecodeError) as exc:
+        try:
+            write_status(
+                status_path(Path(args.lab_root)),
+                job_id=None,
+                suite=None,
+                mode=None,
+                state="ERROR",
+                action_fr="Job refusé ou interrompu",
+                message_fr=f"{type(exc).__name__}: {exc}",
+            )
+        except OSError:
+            pass
         print(f"ALINA_AUTONOMOUS_RESEARCH_NO_GO: {type(exc).__name__}: {exc}", flush=True)
         return 20
 
