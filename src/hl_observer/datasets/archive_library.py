@@ -11,6 +11,10 @@ from hl_observer.datasets.github_release_bridge import (
     DatasetRecord,
     ReleaseAsset,
 )
+from hl_observer.datasets.storage_layout import (
+    dataset_asset_cache_dir,
+    dataset_workspace_root,
+)
 
 ECONOMIC_CORE_PATTERNS = (
     "runtime/data/vault_fills.jsonl",
@@ -259,18 +263,12 @@ def selection_digest(records: Iterable[DatasetRecord]) -> str:
 
 
 def asset_cache_dir(project_root: Path) -> Path:
-    return project_root.resolve() / "data" / "hypersmart_datasets" / "assets"
+    return dataset_asset_cache_dir(project_root)
 
 
 def suite_workspace_base(project_root: Path, suite_name: str) -> Path:
     get_suite(suite_name)
-    return (
-        project_root.resolve()
-        / "data"
-        / "hypersmart_datasets"
-        / "workspaces"
-        / suite_name
-    )
+    return dataset_workspace_root(project_root) / suite_name
 
 
 def suite_workspace_for_digest(

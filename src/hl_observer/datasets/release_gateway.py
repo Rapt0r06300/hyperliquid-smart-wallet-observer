@@ -17,6 +17,11 @@ from hl_observer.datasets.github_release_bridge import (
     ReleaseAsset,
     verify_asset,
 )
+from hl_observer.datasets.storage_layout import (
+    dataset_asset_cache_dir,
+    dataset_materialized_dir,
+    dataset_metadata_dir,
+)
 
 
 def _gh_json(arguments: Sequence[str]) -> object:
@@ -139,7 +144,7 @@ def ensure_release_metadata(
 ) -> tuple[dict[str, object], dict[str, ReleaseAsset], Path]:
     release = _load_release(repository, release_id)
     assets = list_all_release_assets(repository, release_id)
-    metadata_dir = root / "data" / "hypersmart_datasets" / "metadata"
+    metadata_dir = dataset_metadata_dir(root)
     metadata_dir.mkdir(parents=True, exist_ok=True)
 
     missing = [name for name in CORE_METADATA_ASSETS if name not in assets]
@@ -178,7 +183,7 @@ def build_release_status(
         "asset_count": len(assets),
         "asset_bytes": sum(asset.size for asset in assets.values()),
         "assets_with_sha256": sum(1 for asset in assets.values() if asset.sha256),
-        "local_metadata_dir": str(root / "data" / "hypersmart_datasets" / "metadata"),
-        "local_asset_cache_dir": str(root / "data" / "hypersmart_datasets" / "assets"),
-        "local_materialized_dir": str(root / "data" / "hypersmart_datasets" / "materialized"),
+        "local_metadata_dir": str(dataset_metadata_dir(root)),
+        "local_asset_cache_dir": str(dataset_asset_cache_dir(root)),
+        "local_materialized_dir": str(dataset_materialized_dir(root)),
     }

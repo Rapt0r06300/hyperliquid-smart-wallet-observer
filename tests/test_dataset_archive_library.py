@@ -4,6 +4,7 @@ from pathlib import Path
 
 from hl_observer.datasets.archive_library import (
     SUITES,
+    asset_cache_dir,
     build_all_suite_plans,
     record_matches_suite,
     resolve_current_workspace,
@@ -145,3 +146,21 @@ def test_workspace_est_versionne_par_digest_et_pointe_sans_melange(tmp_path: Pat
     )
     assert pointer.is_file()
     assert resolve_current_workspace(tmp_path, "economic-full") == workspace.resolve()
+
+
+def test_runner_utilise_un_stockage_persistant_hors_checkout(tmp_path: Path, monkeypatch) -> None:
+    research_home = tmp_path / "alina-research-home"
+    monkeypatch.delenv("ALINA_DATASET_HOME", raising=False)
+    monkeypatch.setenv("ALINA_RESEARCH_HOME", str(research_home))
+
+    digest = "2" * 64
+    cache = asset_cache_dir(tmp_path / "checkout-ephemere")
+    workspace = suite_workspace_for_digest(
+        tmp_path / "checkout-ephemere",
+        "economic-full",
+        digest,
+    )
+
+    expected_root = research_home.resolve() / "datasets"
+    assert cache == expected_root / "assets"
+    assert workspace == expected_root / "workspaces" / "economic-full" / digest[:16]
