@@ -18,6 +18,7 @@ def test_bouton_experience_reste_local_et_sans_execution_reelle() -> None:
     assert "REAL_MAINNET_TRADING=false" in text
     assert "HYPERSMART_ANALYSIS_LOCAL_ONLY=1" in text
     assert "dataset_experiment_plan" in text
+    assert "dataset_experiment_contract" in text
     assert "dataset_bridge locate" in text
     assert "--download" not in text
     assert "/exchange" not in text.casefold()
@@ -42,3 +43,12 @@ def test_bouton_experience_quote_directement_le_workspace_et_evite_un_args_fragi
     assert ':sans_periode' in text
     assert ':debut_seul' in text
     assert ':sans_debut' in text
+
+
+def test_bouton_experience_ne_fabrique_un_contrat_que_si_le_plan_est_ready() -> None:
+    text = _text()
+    assert 'if "%RC%"=="0" goto :contrat' in text
+    assert 'if "%RC%"=="3" (' in text
+    assert "Aucun contrat de replay READY n'est fabrique" in text
+    assert ':contrat' in text
+    assert "CURRENT_REPLAY_INPUT_CONTRACT.md" in text
