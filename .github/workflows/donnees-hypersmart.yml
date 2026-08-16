@@ -14,6 +14,7 @@ on:
       - 'tools/run_economic_objective_campaigns.py'
       - 'tools/run_dataset_economic_campaigns.py'
       - 'tools/run_strict_adaptive_research.py'
+      - 'tools/ALINA_RESEARCH_COCKPIT.ps1'
       - 'tests/test_dataset_*.py'
       - 'tests/test_recherche_adaptative_stricte.py'
       - 'PREPARER_DONNEES_HYPERSMART.cmd'
@@ -142,3 +143,20 @@ jobs:
             tests/test_dataset_autonomous_research_status.py `
             tests/test_recherche_adaptative_stricte.py `
             tests/test_dataset_ci_coverage.py
+      - name: Vérifier le cockpit public avec Windows PowerShell 5.1
+        shell: powershell
+        run: |
+          $path = Resolve-Path '.\tools\ALINA_RESEARCH_COCKPIT.ps1'
+          $tokens = $null
+          $errors = $null
+          [System.Management.Automation.Language.Parser]::ParseFile($path, [ref]$tokens, [ref]$errors) | Out-Null
+          if ($errors.Count -gt 0) {
+            $errors | Format-List
+            throw 'Cockpit public PowerShell invalide.'
+          }
+          $text = Get-Content $path -Raw -Encoding UTF8
+          foreach ($needle in @('CURRENT_STATUS.json','GITHUB_SYNC_STATUS.json','CALCUL','GitHub','Rapports','Gros logs','prochaine analyse','Start-Sleep -Seconds $RefreshSeconds','BLOQU')) {
+            if (-not $text.Contains($needle)) { throw "Cockpit public incomplet: $needle" }
+          }
+          if ($text.Contains('??')) { throw 'Syntaxe PowerShell 7 interdite dans le cockpit Windows 5.1.' }
+          Write-Host 'Cockpit public PowerShell 5.1: OK'
