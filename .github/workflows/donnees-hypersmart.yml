@@ -7,6 +7,7 @@ on:
       - 'src/hl_observer/datasets/**'
       - 'src/hl_observer/ops/dataset_*.py'
       - 'src/hl_observer/ops/autonomous_research_job.py'
+      - 'src/hl_observer/ops/autonomous_research_guard.py'
       - 'tools/run_economic_objective_campaigns.py'
       - 'tools/run_dataset_economic_campaigns.py'
       - 'tests/test_dataset_*.py'
@@ -73,6 +74,7 @@ jobs:
             tests/test_dataset_experiment_pipeline.py \
             tests/test_dataset_experiment_launcher.py \
             tests/test_dataset_autonomous_research_job.py \
+            tests/test_dataset_autonomous_research_guard.py \
             tests/test_dataset_ci_coverage.py
 
   test-windows:
@@ -127,4 +129,5 @@ jobs:
             tests/test_dataset_experiment_pipeline.py `
             tests/test_dataset_experiment_launcher.py `
             tests/test_dataset_autonomous_research_job.py `
+            tests/test_dataset_autonomous_research_guard.py `
             tests/test_dataset_ci_coverage.py
