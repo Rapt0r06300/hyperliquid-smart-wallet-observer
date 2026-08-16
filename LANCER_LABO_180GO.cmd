@@ -141,6 +141,8 @@ echo.
 echo [OK] Replay economique termine. Verdict compact :
 echo   docs\research\datasets\DERNIER_REPLAY_DATASETS.md
 echo   docs\research\datasets\DERNIER_REPLAY_DATASETS.json
+echo Audit du raccordement :
+echo   %DATA_ROOT%\runtime\reports\datasets\DATASET_CONNECTION_AUDIT.md
 goto :fin_ok
 
 :research_suite
@@ -157,8 +159,23 @@ if "%LAB_RC%"=="2" (
 if not "%LAB_RC%"=="0" (
   echo [ATTENTION] Certaines etapes ont echoue. Les journaux sont conserves pour diagnostic.
   set "RC=%LAB_RC%"
-  goto :erreur_code
+  goto :audit_research
 )
+set "RC=0"
+
+:audit_research
+echo.
+echo [AUDIT] Verification finale du raccordement de ce workspace...
+"%HYPERSMART_PYTHON%" -m hl_observer.ops.dataset_connection_audit --root "%DATA_ROOT%"
+set "AUDIT_RC=%ERRORLEVEL%"
+if not "%AUDIT_RC%"=="0" (
+  echo [ATTENTION] Audit de raccordement incomplet - code %AUDIT_RC%.
+  if "%RC%"=="0" set "RC=%AUDIT_RC%"
+) else (
+  echo [OK] Audit de raccordement :
+  echo      %DATA_ROOT%\runtime\reports\datasets\DATASET_CONNECTION_AUDIT.md
+)
+if not "%RC%"=="0" goto :erreur_code
 echo [OK] Laboratoire historique termine sur %SUITE%.
 goto :fin_ok
 
