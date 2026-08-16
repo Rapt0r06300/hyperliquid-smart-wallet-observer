@@ -50,7 +50,18 @@ set "RC=%ERRORLEVEL%"
 echo.
 if "%RC%"=="0" (
   echo [OK] Replay economique termine.
-  echo Rapport : %DATA_ROOT%\runtime\reports\economic_campaigns\HYPERSMART_ECONOMIC_OBJECTIVE_CAMPAIGN.md
+  echo Rapport lourd/local : %DATA_ROOT%\runtime\reports\economic_campaigns\HYPERSMART_ECONOMIC_OBJECTIVE_CAMPAIGN.md
+  echo.
+  echo [EXPORT] Copie du petit verdict dans docs\research\datasets ...
+  "%HYPERSMART_PYTHON%" -m hl_observer.ops.dataset_result_export --root "%~dp0." --replay-root "%DATA_ROOT%"
+  if errorlevel 1 (
+    echo [ATTENTION] Le replay est termine mais le petit export GitHub a echoue.
+    set "RC=7"
+  ) else (
+    echo [OK] Petit verdict pret pour GitHub :
+    echo      docs\research\datasets\DERNIER_REPLAY_176GO.md
+    echo      docs\research\datasets\DERNIER_REPLAY_176GO.json
+  )
 ) else (
   echo [NO_GO] Replay termine avec le code %RC%.
   echo Une donnee peut manquer dans le lot reconstruit. Rien n'est invente.
