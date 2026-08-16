@@ -21,7 +21,7 @@ on:
 jobs:
   test-linux:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -31,7 +31,7 @@ jobs:
         run: |
           pip install -e .
           pip install pytest
-      - name: Tester le pont sans reseau
+      - name: Tester tout le pont de donnees sans reseau
         run: |
           pytest -q \
             tests/test_dataset_release_bridge.py \
@@ -48,11 +48,17 @@ jobs:
             tests/test_dataset_research_runner.py \
             tests/test_dataset_economic_source_wiring.py \
             tests/test_dataset_economic_multi_source.py \
-            tests/test_dataset_economic_runner_wrapper.py
+            tests/test_dataset_economic_runner_wrapper.py \
+            tests/test_dataset_sqlite_profiler.py \
+            tests/test_dataset_sqlite_inventory.py \
+            tests/test_dataset_sqlite_research_source.py \
+            tests/test_dataset_sqlite_research.py \
+            tests/test_dataset_research_lab_stream.py \
+            tests/test_dataset_research_inventory.py
 
   test-windows:
     runs-on: windows-latest
-    timeout-minutes: 20
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -63,7 +69,7 @@ jobs:
         run: |
           pip install -e .
           pip install pytest
-      - name: Tester le pont sans reseau
+      - name: Tester tout le pont de donnees sans reseau
         shell: powershell
         run: |
           pytest -q `
@@ -81,4 +87,10 @@ jobs:
             tests/test_dataset_research_runner.py `
             tests/test_dataset_economic_source_wiring.py `
             tests/test_dataset_economic_multi_source.py `
-            tests/test_dataset_economic_runner_wrapper.py
+            tests/test_dataset_economic_runner_wrapper.py `
+            tests/test_dataset_sqlite_profiler.py `
+            tests/test_dataset_sqlite_inventory.py `
+            tests/test_dataset_sqlite_research_source.py `
+            tests/test_dataset_sqlite_research.py `
+            tests/test_dataset_research_lab_stream.py `
+            tests/test_dataset_research_inventory.py
