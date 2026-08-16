@@ -40,10 +40,17 @@ function Assert-Command([string]$Name, [string]$HelpText) {
     }
 }
 
-function Assert-Python311 {
+function Get-BasePython311 {
     Assert-Command 'py' 'Installe Python 3.11 ou plus avec le Python Launcher puis relance ce script.'
-    & py -3.11 -c "import sys; assert sys.version_info >= (3,11); print(sys.version)"
-    if ($LASTEXITCODE -ne 0) { throw 'Python 3.11+ est obligatoire pour le laboratoire.' }
+    $value = (& py -3.11 -c "import sys; print(sys.executable)" 2>$null | Select-Object -Last 1)
+    if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace([string]$value)) {
+        throw 'Python 3.11+ est obligatoire pour préparer le runtime persistant du laboratoire.'
+    }
+    $python = [System.IO.Path]::GetFullPath(([string]$value).Trim())
+    if (-not (Test-Path $python -PathType Leaf)) { throw "Python 3.11 introuvable: $python" }
+    & $python -c "import sys; assert sys.version_info >= (3,11)" | Out-Null
+    if ($LASTEXITCODE -ne 0) { throw 'Le Python sélectionné est inférieur à 3.11.' }
+    return $python
 }
 
 function Get-RegistrationToken([string]$Repo, [string]$ExplicitToken) {
@@ -124,7 +131,7 @@ function Initialize-Lab([string]$Root, [string]$RepositoryRoot) {
     foreach ($dir in @(
         '', 'datasets', 'datasets\assets', 'datasets\metadata', 'datasets\materialized',
         'datasets\workspaces', 'jobs', 'jobs\requests', 'results', 'results\github',
-        'job_logs', 'status', 'checkpoints', 'tools'
+        'job_logs', 'status', 'checkpoints', 'tools', 'runtime'
     )) {
         $path = if ([string]::IsNullOrWhiteSpace($dir)) { $Root } else { Join-Path $Root $dir }
         New-Item -ItemType Directory -Force -Path $path | Out-Null
@@ -165,6 +172,25 @@ function Initialize-Lab([string]$Root, [string]$RepositoryRoot) {
     $status | ConvertTo-Json -Depth 5 | Set-Content -Path (Join-Path $Root 'status\CURRENT_STATUS.json') -Encoding UTF8
 }
 
+function Initialize-RunnerPython([string]$Root, [string]$BasePython, [string]$RepositoryRoot) {
+    Write-Step 'Création du Python persistant utilisé par le service runner'
+    $venvRoot = Join-Path $Root 'runtime\python'
+    $python = Join-Path $venvRoot 'Scripts\python.exe'
+    if (-not (Test-Path $python -PathType Leaf)) {
+        & $BasePython -m venv $venvRoot
+        if ($LASTEXITCODE -ne 0) { throw 'Création du virtualenv persistant impossible.' }
+    }
+    if (-not (Test-Path $python -PathType Leaf)) { throw "Python du runner absent après création: $python" }
+    & $python -c "import sys; assert sys.version_info >= (3,11); print(sys.executable)"
+    if ($LASTEXITCODE -ne 0) { throw 'Le Python persistant du runner est invalide.' }
+    & $python -m pip install --disable-pip-version-check -e $RepositoryRoot
+    if ($LASTEXITCODE -ne 0) { throw 'Installation initiale du projet dans le Python persistant impossible.' }
+    [Environment]::SetEnvironmentVariable('ALINA_PYTHON_EXE', $python, 'Machine')
+    $env:ALINA_PYTHON_EXE = $python
+    Write-Host "Python persistant runner : $python" -ForegroundColor Green
+    return $python
+}
+
 function Configure-RunnerServiceRecovery([System.ServiceProcess.ServiceController]$Service) {
     Write-Step 'Durcissement du service runner pour les gros runs'
     Set-Service -Name $Service.Name -StartupType Automatic
@@ -177,7 +203,7 @@ function Configure-RunnerServiceRecovery([System.ServiceProcess.ServiceControlle
 }
 
 Assert-Admin
-Assert-Python311
+$basePython = Get-BasePython311
 Assert-Command 'git' 'Installe Git for Windows puis relance ce script.'
 
 $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
@@ -193,11 +219,13 @@ Write-Host "Dépôt               : $Repository"
 Write-Host "Nom du runner        : $RunnerName"
 Write-Host "Laboratoire persistant: $LabRoot"
 Write-Host "Runner               : $RunnerRoot"
+Write-Host "Python source        : $basePython"
 Write-Host ("Disque choisi         : {0} | libre {1:N2} Gio" -f $best.DeviceID, ([double]$best.FreeSpace / 1GB))
 Write-Host 'Trading réel          : BLOQUÉ' -ForegroundColor Green
 Write-Host 'Testnet execution      : BLOQUÉE' -ForegroundColor Green
 
 Initialize-Lab -Root $LabRoot -RepositoryRoot $repoRoot
+$runnerPython = Initialize-RunnerPython -Root $LabRoot -BasePython $basePython -RepositoryRoot $repoRoot
 
 $existingConfigured = Test-Path (Join-Path $RunnerRoot '.runner') -PathType Leaf
 if (-not $existingConfigured) {
@@ -243,6 +271,7 @@ Write-Host ''
 Write-Host 'INSTALLATION ALINA SELF-HOSTED : OK' -ForegroundColor Green
 Write-Host "Service              : $($service.Name) / $($service.Status)" -ForegroundColor Green
 Write-Host "ALINA_RESEARCH_HOME  : $LabRoot" -ForegroundColor Green
+Write-Host "ALINA_PYTHON_EXE     : $runnerPython" -ForegroundColor Green
 Write-Host "Cockpit              : $LabRoot\LANCER_COCKPIT_ALINA.cmd" -ForegroundColor Cyan
 Write-Host 'Labels               : self-hosted, Windows, X64, hypersmart, alina' -ForegroundColor Cyan
 Write-Host 'Reprise service      : automatique après crash' -ForegroundColor Cyan
