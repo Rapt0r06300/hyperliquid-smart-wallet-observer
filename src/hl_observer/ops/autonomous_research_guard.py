@@ -6,11 +6,13 @@ import os
 import signal
 import subprocess
 import sys
+import threading
 import time
 from pathlib import Path
 from typing import Iterable
 
 MAX_ALLOWED_SECONDS = 18 * 60 * 60
+POLL_SECONDS = 0.2
 
 
 def _write_timeout_report(result_dir: Path, *, request: Path, max_seconds: int, elapsed: float) -> None:
@@ -23,13 +25,14 @@ def _write_timeout_report(result_dir: Path, *, request: Path, max_seconds: int, 
     except (OSError, json.JSONDecodeError):
         pass
     payload = {
-        "schema": "alina.autonomous_research_guard.v2",
+        "schema": "alina.autonomous_research_guard.v3",
         "job_id": job_id,
         "status": "TIMEBOX_REACHED",
         "max_seconds": max_seconds,
         "elapsed_seconds": round(elapsed, 3),
         "resume_expected": True,
         "process_tree_stopped": True,
+        "stdout_nonblocking_watchdog": True,
         "paper_only": True,
         "real_execution": False,
         "message": "Le cycle a atteint sa timebox. Tout son arbre de processus est arrêté avant une reprise depuis les checkpoints persistants.",
@@ -45,6 +48,7 @@ def _write_timeout_report(result_dir: Path, *, request: Path, max_seconds: int, 
         f"- Limite du cycle : **{max_seconds} s**\n"
         f"- Durée observée : **{elapsed:.1f} s**\n"
         "- Arbre de processus arrêté : **OUI**\n"
+        "- Watchdog indépendant de stdout : **OUI**\n"
         "- Reprise attendue : **OUI**\n"
         "- Exécution réelle : **NON**\n\n"
         "Le prochain cycle peut réutiliser le cache, les workspaces et les checkpoints persistants.\n",
@@ -93,6 +97,29 @@ def _terminate_process_tree(process: subprocess.Popen[str], *, grace_seconds: fl
     process.wait()
 
 
+def _start_stdout_pump(process: subprocess.Popen[str]) -> threading.Thread:
+    """Vide stdout dans un thread pour que le watchdog ne bloque jamais sur readline()."""
+
+    def pump() -> None:
+        stream = process.stdout
+        if stream is None:
+            return
+        try:
+            for line in stream:
+                print(line, end="", flush=True)
+        except (OSError, ValueError):
+            # La fermeture du pipe pendant taskkill/killpg est normale.
+            return
+
+    thread = threading.Thread(
+        target=pump,
+        name=f"alina-stdout-{getattr(process, 'pid', 'process')}",
+        daemon=True,
+    )
+    thread.start()
+    return thread
+
+
 def run_guarded(command: list[str], *, max_seconds: int, result_dir: Path, request: Path) -> int:
     started = time.monotonic()
     process = subprocess.Popen(
@@ -105,24 +132,21 @@ def run_guarded(command: list[str], *, max_seconds: int, result_dir: Path, reque
         bufsize=1,
         **_popen_process_group_kwargs(),
     )
+    pump = _start_stdout_pump(process)
     timed_out = False
     try:
-        assert process.stdout is not None
-        while True:
-            line = process.stdout.readline()
-            if line:
-                print(line, end="", flush=True)
-            if process.poll() is not None:
-                for rest in process.stdout:
-                    print(rest, end="", flush=True)
-                break
+        while process.poll() is None:
             if time.monotonic() - started >= max_seconds:
                 timed_out = True
                 _terminate_process_tree(process)
                 break
+            time.sleep(POLL_SECONDS)
+        if process.poll() is None:
+            process.wait()
     finally:
         if process.poll() is None:
             _terminate_process_tree(process)
+        pump.join(timeout=5)
     elapsed = time.monotonic() - started
     if timed_out:
         _write_timeout_report(result_dir, request=request, max_seconds=max_seconds, elapsed=elapsed)
