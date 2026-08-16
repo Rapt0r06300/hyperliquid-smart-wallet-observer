@@ -10,11 +10,13 @@ on:
       - 'tools/run_dataset_economic_campaigns.py'
       - 'tests/test_dataset_*.py'
       - 'PREPARER_DONNEES_HYPERSMART.cmd'
+      - 'PREPARER_EXPERIENCE_FULL_COLD.cmd'
       - 'ANALYSER_DONNEES_HYPERSMART.cmd'
       - 'LANCER_REPLAY_176GO.cmd'
       - 'LANCER_LABO_180GO.cmd'
       - 'docs/DONNEES_HYPERSMART_176G.md'
       - 'docs/DATASET_RESEARCH_PIPELINE.md'
+      - 'docs/DATASET_EXPERIMENT_PLANS.md'
       - '.github/workflows/donnees-hypersmart.yml'
   workflow_dispatch: {}
 
@@ -61,7 +63,8 @@ jobs:
             tests/test_dataset_research_lab_selector.py \
             tests/test_dataset_research_select.py \
             tests/test_dataset_experiment_plan.py \
-            tests/test_dataset_experiment_plan_cli.py
+            tests/test_dataset_experiment_plan_cli.py \
+            tests/test_dataset_experiment_launcher.py
 
   test-windows:
     runs-on: windows-latest
@@ -107,4 +110,5 @@ jobs:
             tests/test_dataset_research_lab_selector.py `
             tests/test_dataset_research_select.py `
             tests/test_dataset_experiment_plan.py `
-            tests/test_dataset_experiment_plan_cli.py
+            tests/test_dataset_experiment_plan_cli.py `
+            tests/test_dataset_experiment_launcher.py
