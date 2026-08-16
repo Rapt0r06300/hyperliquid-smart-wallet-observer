@@ -9,12 +9,14 @@ from hl_observer.datasets.github_release_bridge import (
     DEFAULT_REPOSITORY,
     DatasetBridgeError,
     assets_for_records,
-    build_status,
     download_needed_assets,
-    ensure_metadata,
     iter_manifest_records,
     materialize_records,
     select_records,
+)
+from hl_observer.datasets.release_gateway import (
+    build_release_status,
+    ensure_release_metadata,
 )
 
 FAMILY_PATTERNS = {
@@ -111,7 +113,7 @@ def _print_json(payload: object) -> None:
 
 def _load_selected(args: argparse.Namespace):
     root = Path(args.root).resolve()
-    release, assets, metadata_dir = ensure_metadata(
+    release, assets, metadata_dir = ensure_release_metadata(
         root,
         repository=args.repo,
         release_id=args.release_id,
@@ -133,7 +135,7 @@ def main(argv: list[str] | None = None) -> int:
     try:
         if args.action == "status":
             _print_json(
-                build_status(root, repository=args.repo, release_id=args.release_id)
+                build_release_status(root, repository=args.repo, release_id=args.release_id)
             )
             return 0
 
@@ -146,6 +148,7 @@ def main(argv: list[str] | None = None) -> int:
                     "release_name": release.get("name"),
                     "published_at": release.get("published_at"),
                     "asset_count": len(assets),
+                    "assets_with_sha256": sum(1 for asset in assets.values() if asset.sha256),
                     "metadata_dir": str(metadata_dir),
                     "snapshot": summary,
                 }
@@ -153,7 +156,13 @@ def main(argv: list[str] | None = None) -> int:
             return 0
 
         asset_names = assets_for_records(selected)
-        total_asset_bytes = sum(assets[name].size for name in asset_names if name in assets)
+        missing_assets = [name for name in asset_names if name not in assets]
+        if missing_assets:
+            raise DatasetBridgeError(
+                "Le manifeste cite des assets absents de la Release: "
+                + ", ".join(missing_assets[:20])
+            )
+        total_asset_bytes = sum(assets[name].size for name in asset_names)
         preview = {
             "fichiers_selectionnes": len(selected),
             "assets_necessaires": len(asset_names),
