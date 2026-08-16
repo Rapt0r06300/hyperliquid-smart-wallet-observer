@@ -1,0 +1,287 @@
+name: alina-self-hosted
+
+on:
+  workflow_dispatch:
+    inputs:
+      suite:
+        description: "Suite de données à utiliser"
+        required: true
+        default: "economic-full"
+        type: choice
+        options:
+          - economic-core
+          - economic-full
+          - copy-vault-full
+          - lead-lag-full
+          - cross-venue-full
+          - microstructure-full
+          - research-lab-full
+          - sqlite-all-safe
+          - full-archive
+      mode:
+        description: "Mode du worker autonome"
+        required: true
+        default: "economic"
+        type: choice
+        options:
+          - prepare-only
+          - economic
+          - historical
+          - historical-full
+          - historical-deep
+      download:
+        description: "Autoriser la préparation/téléchargement des assets manquants"
+        required: true
+        default: true
+        type: boolean
+      max_download_gib:
+        description: "Plafond de téléchargement de ce cycle en Gio"
+        required: true
+        default: "20"
+        type: string
+      stage_timeout_seconds:
+        description: "Timeout maximum d'une étape"
+        required: true
+        default: "3600"
+        type: string
+      cross_budget_s:
+        description: "Budget Cross-Venue par campagne"
+        required: true
+        default: "20"
+        type: string
+      lead_history_sources:
+        description: "Nombre de sources historiques Lead-Lag"
+        required: true
+        default: "8"
+        type: string
+      max_cycle_seconds:
+        description: "Durée maximum du gros cycle, plafonnée à 18 h"
+        required: true
+        default: "64800"
+        type: string
+      force:
+        description: "Rejouer même si le même digest a déjà réussi"
+        required: true
+        default: false
+        type: boolean
+  push:
+    branches: [main]
+    paths:
+      - 'control/alina_jobs/*.json'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: alina-hypersmart-self-hosted
+  cancel-in-progress: false
+
+jobs:
+  gros-run-hypersmart:
+    # IMPORTANT : aucune PR ne cible ce runner. Seuls main et workflow_dispatch sont autorisés.
+    runs-on: [self-hosted, Windows, X64, hypersmart]
+    timeout-minutes: 1100
+    env:
+      HL_ENABLE_MAINNET_EXECUTION: '0'
+      HL_ENABLE_TESTNET_EXECUTION: '0'
+      REAL_MAINNET_TRADING: 'false'
+      TESTNET_ONLY: 'true'
+      HYPERSMART_ANALYSIS_LOCAL_ONLY: '1'
+      PYTHONUTF8: '1'
+      PYTHONIOENCODING: 'utf-8'
+    steps:
+      - name: Récupérer exactement le code de main demandé
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          clean: true
+          fetch-depth: 2
+          persist-credentials: false
+
+      - name: Vérifier la machine et le laboratoire persistant
+        id: preflight
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $labRoot = [Environment]::GetEnvironmentVariable('ALINA_RESEARCH_HOME', 'Machine')
+          if ([string]::IsNullOrWhiteSpace($labRoot)) { $labRoot = $env:ALINA_RESEARCH_HOME }
+          if ([string]::IsNullOrWhiteSpace($labRoot)) {
+            throw 'ALINA_RESEARCH_HOME absent. Exécuter INSTALLER_ALINA_RUNNER_WINDOWS.ps1 sur le PC.'
+          }
+          $labRoot = [System.IO.Path]::GetFullPath($labRoot)
+          New-Item -ItemType Directory -Force -Path $labRoot | Out-Null
+          foreach ($dir in @('datasets','jobs\requests','results\github','status','job_logs','tools','checkpoints')) {
+            New-Item -ItemType Directory -Force -Path (Join-Path $labRoot $dir) | Out-Null
+          }
+          $python = Get-Command py -ErrorAction SilentlyContinue
+          if (-not $python) { throw 'Python Launcher py.exe absent du runner.' }
+          & py -3.11 -c "import sys; assert sys.version_info >= (3,11); print(sys.version)"
+          if ($LASTEXITCODE -ne 0) { throw 'Python 3.11+ est obligatoire.' }
+          $driveRoot = [System.IO.Path]::GetPathRoot($labRoot)
+          $drive = Get-PSDrive -Name $driveRoot.Substring(0,1) -ErrorAction Stop
+          $freeGiB = [Math]::Round($drive.Free / 1GB, 2)
+          if ($freeGiB -lt 25) { throw "Espace disque insuffisant: $freeGiB Gio libres (<25 Gio de réserve)." }
+          Copy-Item '.\tools\ALINA_RESEARCH_COCKPIT.ps1' (Join-Path $labRoot 'tools\ALINA_RESEARCH_COCKPIT.ps1') -Force
+          "lab_root=$labRoot" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          "free_gib=$freeGiB" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          Write-Host "Laboratoire : $labRoot"
+          Write-Host "Libre : $freeGiB Gio"
+          Write-Host "SHA : $env:GITHUB_SHA"
+
+      - name: Préparer Python sans modifier les garde-fous
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          py -3.11 -m pip install --disable-pip-version-check -e .
+          if ($LASTEXITCODE -ne 0) { throw 'Installation editable du projet impossible.' }
+          py -3.11 .\tools\alina_autonomous_lab.py check
+          if ($LASTEXITCODE -ne 0) { throw 'Diagnostic du laboratoire autonome en échec.' }
+
+      - name: Lire la commande versionnée déposée sur main
+        if: github.event_name == 'push'
+        id: control_push
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $changed = @(git diff-tree --no-commit-id --name-only -r $env:GITHUB_SHA |
+            Where-Object { $_ -match '^control/alina_jobs/[^/]+\.json$' })
+          if ($changed.Count -ne 1) {
+            throw "Un push de commande doit créer/modifier exactement un JSON dans control/alina_jobs/. Trouvés: $($changed.Count)"
+          }
+          $path = (Resolve-Path $changed[0]).Path
+          "control_path=$path" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          Write-Host "Commande GitHub : $path"
+
+      - name: Construire une commande manuelle sûre
+        if: github.event_name == 'workflow_dispatch'
+        id: control_manual
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $dir = Join-Path '${{ steps.preflight.outputs.lab_root }}' 'jobs\manual_controls'
+          New-Item -ItemType Directory -Force -Path $dir | Out-Null
+          $path = Join-Path $dir "manual_$env:GITHUB_RUN_ID.json"
+          $payload = [ordered]@{
+            schema = 'alina.self_hosted_control.v1'
+            job_id = "github-$env:GITHUB_RUN_ID"
+            suite = '${{ inputs.suite }}'
+            mode = '${{ inputs.mode }}'
+            download = [System.Convert]::ToBoolean('${{ inputs.download }}')
+            max_download_gib = [double]'${{ inputs.max_download_gib }}'
+            stage_timeout_seconds = [int]'${{ inputs.stage_timeout_seconds }}'
+            cross_budget_s = [double]'${{ inputs.cross_budget_s }}'
+            lead_history_sources = [int]'${{ inputs.lead_history_sources }}'
+            max_cycle_seconds = [int]'${{ inputs.max_cycle_seconds }}'
+            force = [System.Convert]::ToBoolean('${{ inputs.force }}')
+            requested_by = '${{ github.actor }}'
+            note = 'Déclenchement manuel GitHub Actions.'
+          }
+          $payload | ConvertTo-Json -Depth 5 | Set-Content -Path $path -Encoding UTF8
+          "control_path=$path" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          Write-Host "Commande manuelle : $path"
+
+      - name: Canoniser la commande et verrouiller le SHA de main
+        id: build
+        shell: powershell
+        env:
+          CONTROL_PATH: ${{ steps.control_push.outputs.control_path || steps.control_manual.outputs.control_path }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          if ([string]::IsNullOrWhiteSpace($env:CONTROL_PATH)) { throw 'Commande de contrôle absente.' }
+          $labRoot = '${{ steps.preflight.outputs.lab_root }}'
+          $requestDir = Join-Path $labRoot 'jobs\requests'
+          $resultDir = Join-Path $labRoot "results\github\run_$env:GITHUB_RUN_ID"
+          New-Item -ItemType Directory -Force -Path $requestDir,$resultDir | Out-Null
+          $workerRequest = Join-Path $requestDir "worker_$env:GITHUB_RUN_ID.json"
+          $bundle = Join-Path $requestDir "bundle_$env:GITHUB_RUN_ID.json"
+          py -3.11 -m hl_observer.ops.self_hosted_control `
+            --control $env:CONTROL_PATH `
+            --project-sha $env:GITHUB_SHA `
+            --worker-request $workerRequest `
+            --bundle-output $bundle
+          if ($LASTEXITCODE -ne 0) { throw 'Commande refusée par le contrat self-hosted.' }
+          $bundleObj = Get-Content $bundle -Raw -Encoding UTF8 | ConvertFrom-Json
+          "worker_request=$workerRequest" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          "bundle=$bundle" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          "result_dir=$resultDir" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          "job_id=$($bundleObj.control.job_id)" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          "max_cycle_seconds=$($bundleObj.guard.max_cycle_seconds)" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          if ($bundleObj.guard.force -eq $true) {
+            "force_arg=--force" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          } else {
+            "force_arg=" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          }
+
+      - name: Lancer le gros backtest ou replay sur ce PC
+        id: research
+        continue-on-error: true
+        shell: powershell
+        run: |
+          $labRoot = '${{ steps.preflight.outputs.lab_root }}'
+          $args = @(
+            '-3.11','-m','hl_observer.ops.autonomous_research_guard',
+            '--request','${{ steps.build.outputs.worker_request }}',
+            '--project-root',$env:GITHUB_WORKSPACE,
+            '--lab-root',$labRoot,
+            '--result-dir','${{ steps.build.outputs.result_dir }}',
+            '--max-seconds','${{ steps.build.outputs.max_cycle_seconds }}'
+          )
+          if ('${{ steps.build.outputs.force_arg }}' -eq '--force') { $args += '--force' }
+          & py @args
+          $rc = $LASTEXITCODE
+          "exit_code=$rc" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          Write-Host "Code final du worker : $rc"
+          exit $rc
+
+      - name: Remonter uniquement les petits rapports vérifiables
+        if: always()
+        id: upload
+        uses: actions/upload-artifact@v4
+        with:
+          name: alina-resultats-${{ github.run_id }}
+          path: ${{ steps.build.outputs.result_dir }}
+          if-no-files-found: warn
+          retention-days: 30
+          compression-level: 6
+
+      - name: Écrire la preuve locale de synchronisation GitHub
+        if: always()
+        shell: powershell
+        run: |
+          $labRoot = '${{ steps.preflight.outputs.lab_root }}'
+          if ([string]::IsNullOrWhiteSpace($labRoot)) { exit 0 }
+          $statusDir = Join-Path $labRoot 'status'
+          New-Item -ItemType Directory -Force -Path $statusDir | Out-Null
+          $path = Join-Path $statusDir 'GITHUB_SYNC_STATUS.json'
+          $tmp = "$path.$PID.tmp"
+          $uploadOk = '${{ steps.upload.outcome }}' -eq 'success'
+          $payload = [ordered]@{
+            schema = 'alina.github_sync_status.v1'
+            heartbeat_unix = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds() / 1000.0
+            job_id = '${{ steps.build.outputs.job_id }}'
+            github_run_id = '$env:GITHUB_RUN_ID'
+            github_sha = '$env:GITHUB_SHA'
+            results_sent = $uploadOk
+            report_count = if ($uploadOk) { 1 } else { 0 }
+            artifact_id = '${{ steps.upload.outputs.artifact-id }}'
+            artifact_url = '${{ steps.upload.outputs.artifact-url }}'
+            worker_outcome = '${{ steps.research.outcome }}'
+            worker_exit_code = '${{ steps.research.outputs.exit_code }}'
+            waiting_for_analysis = $true
+            requeued = $false
+            gross_logs_stay_local = $true
+            message_fr = if ($uploadOk) { 'Les petits rapports du cycle sont disponibles sur GitHub; les gros logs restent sur le PC.' } else { 'La remontée GitHub des rapports doit être vérifiée.' }
+          }
+          $payload | ConvertTo-Json -Depth 5 | Set-Content -Path $tmp -Encoding UTF8
+          Move-Item -Path $tmp -Destination $path -Force
+
+      - name: Conclure le cycle sans masquer une erreur du worker
+        if: always()
+        shell: powershell
+        run: |
+          Write-Host "Worker outcome : ${{ steps.research.outcome }}"
+          Write-Host "Worker exit code : ${{ steps.research.outputs.exit_code }}"
+          Write-Host "Artifact : ${{ steps.upload.outputs.artifact-url }}"
+          if ('${{ steps.research.outcome }}' -ne 'success') {
+            throw 'Le gros run HyperSmart n a pas terminé avec succès. Les preuves disponibles ont tout de même été remontées.'
+          }
