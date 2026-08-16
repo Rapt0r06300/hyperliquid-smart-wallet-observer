@@ -33,7 +33,7 @@ def _asset(name: str, size: int) -> ReleaseAsset:
     )
 
 
-def test_suites_couvrent_archive_et_recherche() -> None:
+def test_suites_couvrent_archive_recherche_et_sqlite() -> None:
     assert "economic-core" in SUITES
     assert "economic-full" in SUITES
     assert "copy-vault-full" in SUITES
@@ -41,6 +41,8 @@ def test_suites_couvrent_archive_et_recherche() -> None:
     assert "cross-venue-full" in SUITES
     assert "microstructure-full" in SUITES
     assert "research-lab-full" in SUITES
+    assert "sqlite-core" in SUITES
+    assert "sqlite-all-safe" in SUITES
     assert "full-archive" in SUITES
 
 
@@ -59,26 +61,58 @@ def test_economic_full_reunit_les_trois_familles() -> None:
     ]
 
 
-def test_full_archive_prend_tout() -> None:
+def test_sqlite_core_ne_prend_que_les_deux_bases_canoniques() -> None:
+    rows = [
+        _record("runtime/data/hypersmart_simulation_session.sqlite3", 10, "a.zip"),
+        _record("data/hl_observer.sqlite3", 20, "b.zip"),
+        _record("archive/data/hl_observer.sqlite3", 30, "c.zip"),
+        _record("data/other.sqlite3", 40, "d.zip"),
+    ]
+    selected = select_suite_records(rows, "sqlite-core")
+    assert [row.relative_path for row in selected] == [
+        "runtime/data/hypersmart_simulation_session.sqlite3",
+        "data/hl_observer.sqlite3",
+    ]
+
+
+def test_sqlite_all_safe_refuse_les_noms_corrompus_et_objets_git() -> None:
+    rows = [
+        _record("data/hl_observer.sqlite3", 10, "a.zip"),
+        _record("runtime/data/session.sqlite3", 20, "b.zip"),
+        _record("runtime/data/session.sqlite3.corrupted-20260708", 30, "c.zip"),
+        _record("quarantine/old.sqlite3", 40, "d.zip"),
+        _record(".git/lfs/objects/cache.sqlite3", 50, "e.zip"),
+        _record("runtime/data/session.sqlite3-wal", 60, "f.zip"),
+    ]
+    selected = select_suite_records(rows, "sqlite-all-safe")
+    assert [row.relative_path for row in selected] == [
+        "data/hl_observer.sqlite3",
+        "runtime/data/session.sqlite3",
+    ]
+
+
+def test_full_archive_prend_tout_meme_les_elements_qu_il_faut_quarantainer_apres() -> None:
     rows = [
         _record("runtime/data/a.jsonl", 10, "a.zip"),
-        _record("docs/a.md", 20, "b.zip"),
+        _record("runtime/data/old.sqlite3.corrupted", 20, "b.zip"),
     ]
     suite = SUITES["full-archive"]
     assert all(record_matches_suite(row, suite) for row in rows)
     assert select_suite_records(rows, "full-archive") == rows
 
 
-def test_plan_all_compte_cache_et_volume_restant(tmp_path: Path) -> None:
+def test_plan_all_compte_cache_volume_restant_research_et_sqlite(tmp_path: Path) -> None:
     rows = [
         _record("runtime/data/vault_fills.jsonl", 10, "a.zip"),
         _record("runtime/data/bbo_tape.jsonl", 20, "b.zip"),
         _record("runtime/research_lab/continuous/episodes.jsonl", 30, "c.bin"),
+        _record("data/hl_observer.sqlite3", 40, "d.bin"),
     ]
     assets = {
         "a.zip": _asset("a.zip", 100),
         "b.zip": _asset("b.zip", 200),
         "c.bin": _asset("c.bin", 300),
+        "d.bin": _asset("d.bin", 400),
     }
     cache = tmp_path / "data" / "hypersmart_datasets" / "assets"
     cache.mkdir(parents=True)
@@ -93,6 +127,9 @@ def test_plan_all_compte_cache_et_volume_restant(tmp_path: Path) -> None:
     research = plans["research-lab-full"]
     assert research["matched_files"] == 1
     assert research["download_bytes"] == 300
+    sqlite_plan = plans["sqlite-core"]
+    assert sqlite_plan["matched_files"] == 1
+    assert sqlite_plan["download_bytes"] == 400
 
 
 def test_workspace_est_versionne_par_digest_et_pointe_sans_melange(tmp_path: Path) -> None:
