@@ -9,6 +9,7 @@ import pytest
 from hl_observer.datasets.experiment_contract import (
     CURRENT_REPLAY_INPUT_CONTRACT,
     build_replay_input_contract,
+    calculate_contract_digest,
     load_current_experiment_plan,
     write_replay_input_contract,
 )
@@ -76,7 +77,7 @@ def _ready_plan() -> dict[str, object]:
 def test_contrat_replay_ne_copie_ni_evenement_brut_ni_sql_libre() -> None:
     contract = build_replay_input_contract(_ready_plan())
 
-    assert contract["schema"] == "hypersmart.replay_input_contract.v2"
+    assert contract["schema"] == "hypersmart.replay_input_contract.v3"
     assert contract["source_count"] == 2
     assert contract["research_source_count"] == 1
     assert contract["sqlite_source_count"] == 1
@@ -85,6 +86,8 @@ def test_contrat_replay_ne_copie_ni_evenement_brut_ni_sql_libre() -> None:
     assert contract["network_used"] is False
     assert contract["raw_data_embedded"] is False
     assert contract["sql_strings_embedded"] is False
+    assert contract["research_lab_sources"][0]["source_size"] == 123
+    assert contract["contract_digest"] == calculate_contract_digest(contract)
     rendered = json.dumps(contract, ensure_ascii=False)
     assert "NE_DOIT_PAS_ETRE_COPIE" not in rendered
     assert "family_counts" not in rendered
