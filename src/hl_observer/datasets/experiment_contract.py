@@ -81,6 +81,7 @@ def _research_sources(plan: Mapping[str, Any]) -> list[dict[str, Any]]:
         result.append(
             {
                 "relative_path": relative,
+                "source_size": int(raw.get("source_size") or 0),
                 "timestamp_min_ms": raw.get("timestamp_min_ms"),
                 "timestamp_max_ms": raw.get("timestamp_max_ms"),
                 "complete": raw.get("complete") is True,
@@ -134,6 +135,40 @@ def _sqlite_sources(plan: Mapping[str, Any]) -> list[dict[str, Any]]:
     )
 
 
+def _digest_material(contract: Mapping[str, Any]) -> dict[str, Any]:
+    provenance = contract.get("provenance") if isinstance(contract.get("provenance"), Mapping) else {}
+    research = contract.get("research_lab_sources") if isinstance(contract.get("research_lab_sources"), list) else []
+    sqlite = contract.get("sqlite_sources") if isinstance(contract.get("sqlite_sources"), list) else []
+    return {
+        "experiment_digest": contract.get("experiment_digest"),
+        "criteria": contract.get("criteria") if isinstance(contract.get("criteria"), Mapping) else {},
+        "source_release_id": provenance.get("source_release_id"),
+        "source_suite": provenance.get("suite"),
+        "research": research,
+        "sqlite": [
+            {
+                "database": item.get("database"),
+                "table": item.get("table"),
+                "filters": item.get("filters"),
+                "family_mode": item.get("family_mode"),
+            }
+            for item in sqlite
+            if isinstance(item, Mapping)
+        ],
+    }
+
+
+def calculate_contract_digest(contract: Mapping[str, Any]) -> str:
+    return hashlib.sha256(
+        json.dumps(
+            _digest_material(contract),
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("utf-8")
+    ).hexdigest()
+
+
 def build_replay_input_contract(plan: Mapping[str, Any]) -> dict[str, Any]:
     if plan.get("status") != "READY":
         raise ValueError("Un contrat de replay exige un plan d'expérience READY")
@@ -143,28 +178,9 @@ def build_replay_input_contract(plan: Mapping[str, Any]) -> dict[str, Any]:
     provenance = dict(plan.get("provenance") or {}) if isinstance(plan.get("provenance"), Mapping) else {}
     if not research and not sqlite:
         raise ValueError("Le plan READY ne contient pourtant aucune source autorisée")
-    material = {
-        "experiment_digest": plan.get("experiment_digest"),
-        "criteria": criteria,
-        "source_release_id": provenance.get("source_release_id"),
-        "source_suite": provenance.get("suite"),
-        "research": research,
-        "sqlite": [
-            {
-                "database": item["database"],
-                "table": item["table"],
-                "filters": item["filters"],
-                "family_mode": item["family_mode"],
-            }
-            for item in sqlite
-        ],
-    }
-    digest = hashlib.sha256(
-        json.dumps(material, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
-    ).hexdigest()
-    return {
-        "schema": "hypersmart.replay_input_contract.v2",
-        "contract_digest": digest,
+    contract: dict[str, Any] = {
+        "schema": "hypersmart.replay_input_contract.v3",
+        "contract_digest": None,
         "experiment_digest": plan.get("experiment_digest"),
         "criteria": criteria,
         "provenance": {
@@ -186,6 +202,8 @@ def build_replay_input_contract(plan: Mapping[str, Any]) -> dict[str, Any]:
         "real_execution": False,
         "sql_strings_embedded": False,
     }
+    contract["contract_digest"] = calculate_contract_digest(contract)
+    return contract
 
 
 def render_contract_markdown(contract: Mapping[str, Any]) -> str:
@@ -201,15 +219,16 @@ def render_contract_markdown(contract: Mapping[str, Any]) -> str:
         "",
         "## Research Lab",
         "",
-        "| Fichier | Début | Fin | Complet | Incertain |",
-        "|---|---:|---:|---|---|",
+        "| Fichier | Octets attendus | Début | Fin | Complet | Incertain |",
+        "|---|---:|---:|---:|---|---|",
     ]
     for item in contract.get("research_lab_sources", []):
         if not isinstance(item, Mapping):
             continue
         lines.append(
-            f"| `{item.get('relative_path')}` | {item.get('timestamp_min_ms')} | "
-            f"{item.get('timestamp_max_ms')} | {item.get('complete')} | {item.get('selection_uncertain')} |"
+            f"| `{item.get('relative_path')}` | {item.get('source_size', 0)} | "
+            f"{item.get('timestamp_min_ms')} | {item.get('timestamp_max_ms')} | "
+            f"{item.get('complete')} | {item.get('selection_uncertain')} |"
         )
     lines.extend(
         [
@@ -265,6 +284,7 @@ __all__ = [
     "CURRENT_REPLAY_INPUT_CONTRACT",
     "CURRENT_REPLAY_INPUT_CONTRACT_MD",
     "build_replay_input_contract",
+    "calculate_contract_digest",
     "load_current_experiment_plan",
     "render_contract_markdown",
     "write_replay_input_contract",
