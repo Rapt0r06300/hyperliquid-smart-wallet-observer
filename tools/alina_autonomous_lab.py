@@ -24,7 +24,7 @@ def _check_payload() -> dict[str, object]:
         "job_schema": autonomous_research_job.SCHEMA,
         "control_schema": self_hosted_control.CONTROL_SCHEMA,
         "max_cycle_seconds": autonomous_research_guard.MAX_ALLOWED_SECONDS,
-        "status_schema": autonomous_research_status.SCHEMA,
+        "status_schema": autonomous_research_status.STATUS_SCHEMA,
         "brain_module": autonomous_research_brain.__name__,
         "max_data_module": max_data_policy.__name__,
         "self_hosted_control_module": self_hosted_control.__name__,
