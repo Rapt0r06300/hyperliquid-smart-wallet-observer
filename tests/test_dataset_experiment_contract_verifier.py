@@ -14,6 +14,7 @@ from hl_observer.datasets.experiment_contract_verifier import (
     write_contract_verification,
 )
 from hl_observer.datasets.experiment_plan import CURRENT_EXPERIMENT_PLAN
+from hl_observer.ops.dataset_experiment_contract_verify import main as verify_cli_main
 
 
 def _workspace(root: Path) -> tuple[Path, Path]:
@@ -190,3 +191,18 @@ def test_verification_ecrit_un_rapport_courant(tmp_path: Path) -> None:
     assert json_path.is_file()
     assert md_path.is_file()
     assert "Vérification du contrat de replay ciblé" in md_path.read_text(encoding="utf-8")
+
+
+def test_cli_verification_retourne_zero_quand_le_contrat_est_ready(tmp_path: Path) -> None:
+    _workspace(tmp_path)
+    assert verify_cli_main(["--root", str(tmp_path)]) == 0
+
+
+def test_cli_verification_retourne_quatre_si_une_source_a_change(tmp_path: Path) -> None:
+    research, _ = _workspace(tmp_path)
+    research.write_bytes(b"z" * 124)
+    assert verify_cli_main(["--root", str(tmp_path)]) == 4
+
+
+def test_cli_verification_retourne_deux_si_le_contrat_est_absent(tmp_path: Path) -> None:
+    assert verify_cli_main(["--root", str(tmp_path)]) == 2
