@@ -14,6 +14,7 @@ from hl_observer.ops import autonomous_research_brain
 from hl_observer.ops import autonomous_research_guard
 from hl_observer.ops import autonomous_research_job
 from hl_observer.ops import autonomous_research_status
+from hl_observer.ops import autonomous_research_timebox
 
 
 def _check_payload() -> dict[str, object]:
@@ -23,6 +24,7 @@ def _check_payload() -> dict[str, object]:
         "max_cycle_seconds": autonomous_research_guard.MAX_ALLOWED_SECONDS,
         "status_schema": autonomous_research_status.SCHEMA,
         "brain_module": autonomous_research_brain.__name__,
+        "timebox_module": autonomous_research_timebox.__name__,
         "paper_only": True,
         "real_execution": False,
     }
