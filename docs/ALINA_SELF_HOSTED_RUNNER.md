@@ -21,13 +21,32 @@ Les ~170–180 Gio de données, caches, workspaces, checkpoints et gros logs res
 - `tools/ALINA_RESEARCH_COCKPIT.ps1` : statut seconde par seconde ;
 - `tools/INSTALLER_ALINA_RUNNER_WINDOWS.ps1` : installation du runner ;
 - `tools/VERIFIER_ALINA_RUNNER_WINDOWS.ps1` : diagnostic local ;
+- `PREPARER_PC_ALINA.cmd` : mise à jour sûre de `main`, installation, vérification et ouverture du cockpit ;
 - `control/alina_jobs/` : file de commandes GitHub -> PC.
 
-## Installation unique sur le PC
+## Installation recommandée : une seule procédure
 
-1. Mettre le dossier local HyperSmart à jour sur `main`.
-2. Ouvrir **Windows PowerShell en administrateur** dans la racine du projet.
-3. Lancer :
+Depuis le dossier local HyperSmart, double-cliquer sur :
+
+```text
+PREPARER_PC_ALINA.cmd
+```
+
+Cette procédure :
+
+1. refuse toute branche différente de `main` ;
+2. refuse de toucher à un worktree contenant des modifications locales ;
+3. fait uniquement `git fetch origin main` puis `git pull --ff-only origin main` ;
+4. valide les scripts avec Windows PowerShell 5.1 ;
+5. demande l'élévation administrateur et **attend réellement la fin** de l'installation ;
+6. exécute `VERIFIER_ALINA_RUNNER_WINDOWS.ps1` ;
+7. ouvre le cockpit uniquement si le diagnostic est vert.
+
+Aucun `git reset`, `git clean`, checkout forcé ou écrasement silencieux n'est utilisé.
+
+## Installation PowerShell directe
+
+Pour choisir manuellement les paramètres, ouvrir **Windows PowerShell en administrateur** dans la racine du projet puis lancer :
 
 ```powershell
 Set-ExecutionPolicy -Scope Process Bypass -Force
@@ -48,6 +67,17 @@ Il est possible d'imposer les chemins :
 Le script exige Python 3.11+ et Git. Il obtient le jeton temporaire d'enregistrement via `gh` si GitHub CLI est déjà authentifié. Sinon il demande un token GitHub masqué, l'utilise uniquement pour demander le jeton temporaire du runner puis l'oublie.
 
 Le token GitHub ne doit jamais être écrit dans un fichier du projet ou dans `ALINA_RESEARCH_HOME`.
+
+## Service Windows et reprise automatique
+
+Le runner est installé comme **service Windows automatique**. L'installateur configure aussi la récupération du service :
+
+- premier crash : redémarrage après 1 minute ;
+- deuxième crash : redémarrage après 1 minute ;
+- crash suivant : redémarrage après 5 minutes ;
+- compteur de pannes remis à zéro chaque jour.
+
+Cette reprise concerne le **service GitHub Actions Runner**. La reprise métier des campagnes reste gérée séparément par la timebox, les résultats persistants et les mécanismes de cache/checkpoint du laboratoire.
 
 ## Vérification
 
@@ -73,7 +103,9 @@ Depuis la racine du projet :
 LANCER_COCKPIT_ALINA.cmd
 ```
 
-ou directement depuis le stockage persistant :
+Le lanceur relit directement la variable machine `ALINA_RESEARCH_HOME` si la fenêtre CMD était déjà ouverte avant l'installation.
+
+On peut aussi lancer le cockpit directement depuis le stockage persistant :
 
 ```text
 %ALINA_RESEARCH_HOME%\LANCER_COCKPIT_ALINA.cmd
@@ -87,9 +119,18 @@ Deux voies existent.
 
 ### 1. Commande GitHub versionnée
 
-Créer un nouveau `*.json` dans `control/alina_jobs/` et le commiter sur `main`.
+Créer un **nouveau** `*.json` dans `control/alina_jobs/` et le commiter sur `main`.
 
 C'est la voie prévue pour le contrôle depuis ChatGPT/GitHub : un nouveau fichier de commande provoque automatiquement le workflow `alina-self-hosted`.
+
+Les commandes versionnées sont **immuables** :
+
+- ajout d'un nouveau JSON : autorisé ;
+- modification d'un ancien JSON : refusée par le workflow ;
+- renommage/suppression d'un ancien JSON : refusé ;
+- un gros run = un nouveau fichier = une trace Git indépendante.
+
+Cette règle permet de relier chaque expérience à son SHA, son contrat et ses résultats sans recycler l'historique.
 
 ### 2. GitHub Actions / Run workflow
 
@@ -158,7 +199,11 @@ Chaque run crée localement :
 
 `%ALINA_RESEARCH_HOME%\results\github\run_<GITHUB_RUN_ID>`
 
-Le workflow publie ensuite un artifact GitHub nommé :
+Les journaux potentiellement volumineux restent dans :
+
+`%ALINA_RESEARCH_HOME%\job_logs\<JOB_ID>`
+
+Le workflow publie ensuite uniquement les résultats préparés dans un artifact GitHub nommé :
 
 `alina-resultats-<GITHUB_RUN_ID>`
 
