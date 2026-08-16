@@ -11,20 +11,34 @@ import time
 from pathlib import Path
 from typing import Iterable
 
+from hl_observer.ops.autonomous_research_status import status_path, write_status
+
 MAX_ALLOWED_SECONDS = 18 * 60 * 60
 POLL_SECONDS = 0.2
 WINDOWS_CREATE_NEW_PROCESS_GROUP = 0x00000200
 
 
-def _write_timeout_report(result_dir: Path, *, request: Path, max_seconds: int, elapsed: float) -> None:
-    result_dir.mkdir(parents=True, exist_ok=True)
+def _request_identity(request: Path) -> tuple[str, str | None, str | None]:
     job_id = request.stem
+    suite: str | None = None
+    mode: str | None = None
     try:
         raw = json.loads(request.read_text(encoding="utf-8"))
-        if isinstance(raw, dict) and raw.get("job_id"):
-            job_id = str(raw["job_id"])
+        if isinstance(raw, dict):
+            if raw.get("job_id"):
+                job_id = str(raw["job_id"])
+            if raw.get("suite"):
+                suite = str(raw["suite"])
+            if raw.get("mode"):
+                mode = str(raw["mode"])
     except (OSError, json.JSONDecodeError):
         pass
+    return job_id, suite, mode
+
+
+def _write_timeout_report(result_dir: Path, *, request: Path, max_seconds: int, elapsed: float) -> None:
+    result_dir.mkdir(parents=True, exist_ok=True)
+    job_id, _, _ = _request_identity(request)
     payload = {
         "schema": "alina.autonomous_research_guard.v3",
         "job_id": job_id,
@@ -54,6 +68,30 @@ def _write_timeout_report(result_dir: Path, *, request: Path, max_seconds: int, 
         "- Exécution réelle : **NON**\n\n"
         "Le prochain cycle peut réutiliser le cache, les workspaces et les checkpoints persistants.\n",
         encoding="utf-8",
+    )
+
+
+def _write_timeout_live_status(lab_root: Path, *, request: Path, elapsed: float) -> None:
+    """Remplace immédiatement un éventuel RUNNING devenu obsolète après la timebox globale."""
+
+    job_id, suite, mode = _request_identity(request)
+    write_status(
+        status_path(lab_root),
+        job_id=job_id,
+        suite=suite,
+        mode=mode,
+        state="TIMEBOX_REACHED",
+        action_fr="Cycle arrêté proprement après 18 h maximum",
+        message_fr=(
+            "La limite de ce cycle est atteinte. Tous les processus de calcul ont été arrêtés; "
+            "le cache et les checkpoints restent sur le PC pour la reprise automatique."
+        ),
+        job_started_unix=max(0.0, time.time() - float(elapsed)),
+        next_action_fr="Synchroniser ce cycle sur GitHub puis reprendre depuis les checkpoints",
+        extra={
+            "resume_expected": True,
+            "process_tree_stopped": True,
+        },
     )
 
 
@@ -128,7 +166,14 @@ def _start_stdout_pump(process: subprocess.Popen[str]) -> threading.Thread:
     return thread
 
 
-def run_guarded(command: list[str], *, max_seconds: int, result_dir: Path, request: Path) -> int:
+def run_guarded(
+    command: list[str],
+    *,
+    max_seconds: int,
+    result_dir: Path,
+    request: Path,
+    lab_root: Path | None = None,
+) -> int:
     started = time.monotonic()
     process = subprocess.Popen(
         command,
@@ -158,6 +203,8 @@ def run_guarded(command: list[str], *, max_seconds: int, result_dir: Path, reque
     elapsed = time.monotonic() - started
     if timed_out:
         _write_timeout_report(result_dir, request=request, max_seconds=max_seconds, elapsed=elapsed)
+        if lab_root is not None:
+            _write_timeout_live_status(lab_root, request=request, elapsed=elapsed)
         print(f"ALINA_RESEARCH_TIMEBOX_REACHED elapsed={elapsed:.1f}s", flush=True)
         return 124
     return int(process.returncode or 0)
@@ -180,6 +227,7 @@ def main(argv: Iterable[str] | None = None) -> int:
     if max_seconds < 60 or max_seconds > MAX_ALLOWED_SECONDS:
         print(f"ALINA_RESEARCH_GUARD_NO_GO: max-seconds doit être entre 60 et {MAX_ALLOWED_SECONDS}.")
         return 2
+    lab_root = Path(args.lab_root).resolve()
     command = [
         sys.executable,
         "-m",
@@ -189,7 +237,7 @@ def main(argv: Iterable[str] | None = None) -> int:
         "--project-root",
         str(Path(args.project_root).resolve()),
         "--lab-root",
-        str(Path(args.lab_root).resolve()),
+        str(lab_root),
         "--result-dir",
         str(Path(args.result_dir).resolve()),
     ]
@@ -200,6 +248,7 @@ def main(argv: Iterable[str] | None = None) -> int:
         max_seconds=max_seconds,
         result_dir=Path(args.result_dir).resolve(),
         request=Path(args.request).resolve(),
+        lab_root=lab_root,
     )
 
 
