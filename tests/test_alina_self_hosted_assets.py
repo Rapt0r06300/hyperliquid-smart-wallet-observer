@@ -10,7 +10,9 @@ VERIFIER = ROOT / "tools" / "VERIFIER_ALINA_RUNNER_WINDOWS.ps1"
 COCKPIT = ROOT / "tools" / "ALINA_RESEARCH_COCKPIT.ps1"
 CONTROL_README = ROOT / "control" / "alina_jobs" / "README.md"
 DOC = ROOT / "docs" / "ALINA_SELF_HOSTED_RUNNER.md"
-LAUNCHER = ROOT / "LANCER_COCKPIT_ALINA.cmd"
+COCKPIT_LAUNCHER = ROOT / "LANCER_COCKPIT_ALINA.cmd"
+INSTALLER_LAUNCHER = ROOT / "INSTALLER_ALINA_RUNNER_WINDOWS.cmd"
+PREPARER = ROOT / "PREPARER_PC_ALINA.cmd"
 
 
 def _text(path: Path) -> str:
@@ -87,6 +89,35 @@ def test_verificateur_couvre_service_python_disque_et_cockpit() -> None:
         assert needle in text
 
 
+def test_preparateur_local_est_non_destructeur_et_reste_sur_main() -> None:
+    text = _text(PREPARER)
+    assert 'git branch --show-current' in text
+    assert 'not "%BRANCH%"=="main"' in text
+    assert 'git status --porcelain' in text
+    assert 'git pull --ff-only origin main' in text
+    lowered = text.casefold()
+    assert 'git reset' not in lowered
+    assert 'git clean' not in lowered
+    assert 'checkout -f' not in lowered
+
+
+def test_lanceur_installation_demande_les_droits_administrateur() -> None:
+    text = _text(INSTALLER_LAUNCHER)
+    assert "Start-Process" in text
+    assert "-Verb RunAs" in text
+    assert "INSTALLER_ALINA_RUNNER_WINDOWS.ps1" in text
+
+
 def test_tous_les_points_entree_publics_existent() -> None:
-    for path in (WORKFLOW, INSTALLER, VERIFIER, COCKPIT, CONTROL_README, DOC, LAUNCHER):
+    for path in (
+        WORKFLOW,
+        INSTALLER,
+        VERIFIER,
+        COCKPIT,
+        CONTROL_README,
+        DOC,
+        COCKPIT_LAUNCHER,
+        INSTALLER_LAUNCHER,
+        PREPARER,
+    ):
         assert path.is_file(), str(path)
