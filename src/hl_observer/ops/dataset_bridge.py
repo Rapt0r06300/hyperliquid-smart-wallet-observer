@@ -9,11 +9,11 @@ from hl_observer.datasets.github_release_bridge import (
     DEFAULT_REPOSITORY,
     DatasetBridgeError,
     assets_for_records,
-    download_needed_assets,
     iter_manifest_records,
     materialize_records,
     select_records,
 )
+from hl_observer.datasets.progress_downloader import download_needed_assets_with_progress
 from hl_observer.datasets.release_gateway import (
     build_release_status,
     ensure_release_metadata,
@@ -94,6 +94,12 @@ def _parser() -> argparse.ArgumentParser:
         type=float,
         default=20.0,
         help="Plafond de téléchargement. 0 = illimité. Défaut: 20 Gio.",
+    )
+    parser.add_argument(
+        "--heartbeat-seconds",
+        type=float,
+        default=1.0,
+        help="Fréquence d'affichage pendant un téléchargement. Défaut: 1 seconde.",
     )
     return parser
 
@@ -196,14 +202,19 @@ def main(argv: list[str] | None = None) -> int:
                 "Relève --max-download-gib ou mets 0 si tu veux vraiment tout prendre."
             )
 
-        downloaded = download_needed_assets(
+        downloaded = download_needed_assets_with_progress(
             root,
             assets,
             asset_names,
             repository=args.repo,
             force=args.force,
+            heartbeat_seconds=max(0.2, float(args.heartbeat_seconds)),
         )
         output_root = root / "data" / "hypersmart_datasets" / "materialized"
+        print(
+            f"[RECONSTRUCTION] {len(selected)} fichier(s) sélectionné(s) vers {output_root}",
+            flush=True,
+        )
         created = materialize_records(selected, downloaded, output_root)
         report = {
             **preview,
