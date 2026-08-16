@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
+import signal
 import subprocess
 import sys
 import time
@@ -21,15 +23,16 @@ def _write_timeout_report(result_dir: Path, *, request: Path, max_seconds: int, 
     except (OSError, json.JSONDecodeError):
         pass
     payload = {
-        "schema": "alina.autonomous_research_guard.v1",
+        "schema": "alina.autonomous_research_guard.v2",
         "job_id": job_id,
         "status": "TIMEBOX_REACHED",
         "max_seconds": max_seconds,
         "elapsed_seconds": round(elapsed, 3),
         "resume_expected": True,
+        "process_tree_stopped": True,
         "paper_only": True,
         "real_execution": False,
-        "message": "Le cycle a atteint sa timebox. Les checkpoints persistants peuvent être réutilisés au prochain cycle.",
+        "message": "Le cycle a atteint sa timebox. Tout son arbre de processus est arrêté avant une reprise depuis les checkpoints persistants.",
     }
     (result_dir / "JOB_GUARD_TIMEOUT.json").write_text(
         json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
@@ -41,11 +44,53 @@ def _write_timeout_report(result_dir: Path, *, request: Path, max_seconds: int, 
         "- Statut : **TIMEBOX_REACHED**\n"
         f"- Limite du cycle : **{max_seconds} s**\n"
         f"- Durée observée : **{elapsed:.1f} s**\n"
+        "- Arbre de processus arrêté : **OUI**\n"
         "- Reprise attendue : **OUI**\n"
         "- Exécution réelle : **NON**\n\n"
         "Le prochain cycle peut réutiliser le cache, les workspaces et les checkpoints persistants.\n",
         encoding="utf-8",
     )
+
+
+def _popen_process_group_kwargs() -> dict[str, object]:
+    if os.name == "nt":
+        return {"creationflags": subprocess.CREATE_NEW_PROCESS_GROUP}
+    return {"start_new_session": True}
+
+
+def _terminate_process_tree(process: subprocess.Popen[str], *, grace_seconds: float = 30.0) -> None:
+    if process.poll() is not None:
+        return
+    if os.name == "nt":
+        # taskkill /T est nécessaire : terminer seulement le parent Python peut
+        # laisser un backtest enfant actif sur le workspace persistant.
+        subprocess.run(
+            ["taskkill", "/PID", str(process.pid), "/T", "/F"],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            check=False,
+        )
+        try:
+            process.wait(timeout=grace_seconds)
+        except subprocess.TimeoutExpired:
+            process.kill()
+            process.wait()
+        return
+
+    try:
+        os.killpg(process.pid, signal.SIGTERM)
+    except ProcessLookupError:
+        return
+    try:
+        process.wait(timeout=grace_seconds)
+        return
+    except subprocess.TimeoutExpired:
+        pass
+    try:
+        os.killpg(process.pid, signal.SIGKILL)
+    except ProcessLookupError:
+        pass
+    process.wait()
 
 
 def run_guarded(command: list[str], *, max_seconds: int, result_dir: Path, request: Path) -> int:
@@ -58,6 +103,7 @@ def run_guarded(command: list[str], *, max_seconds: int, result_dir: Path, reque
         encoding="utf-8",
         errors="replace",
         bufsize=1,
+        **_popen_process_group_kwargs(),
     )
     timed_out = False
     try:
@@ -72,17 +118,11 @@ def run_guarded(command: list[str], *, max_seconds: int, result_dir: Path, reque
                 break
             if time.monotonic() - started >= max_seconds:
                 timed_out = True
-                process.terminate()
-                try:
-                    process.wait(timeout=30)
-                except subprocess.TimeoutExpired:
-                    process.kill()
-                    process.wait()
+                _terminate_process_tree(process)
                 break
     finally:
         if process.poll() is None:
-            process.kill()
-            process.wait()
+            _terminate_process_tree(process)
     elapsed = time.monotonic() - started
     if timed_out:
         _write_timeout_report(result_dir, request=request, max_seconds=max_seconds, elapsed=elapsed)
