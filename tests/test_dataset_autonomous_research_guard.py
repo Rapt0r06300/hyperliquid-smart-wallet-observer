@@ -82,8 +82,7 @@ def test_guard_ecrit_un_rapport_reprise_apres_arret_de_tout_le_processus(
     assert payload["real_execution"] is False
 
 
-def test_groupe_de_processus_est_isole_selon_le_systeme(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(guard.os, "name", "nt")
-    assert guard._popen_process_group_kwargs()["creationflags"] == guard.subprocess.CREATE_NEW_PROCESS_GROUP
-    monkeypatch.setattr(guard.os, "name", "posix")
-    assert guard._popen_process_group_kwargs() == {"start_new_session": True}
+def test_groupe_de_processus_est_isole_selon_le_systeme() -> None:
+    windows = guard._popen_process_group_kwargs("nt")
+    assert windows["creationflags"] == guard.subprocess.CREATE_NEW_PROCESS_GROUP
+    assert guard._popen_process_group_kwargs("posix") == {"start_new_session": True}
