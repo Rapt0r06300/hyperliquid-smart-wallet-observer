@@ -14,6 +14,12 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
 from hl_observer.backtesting import copy_vault_executable, lead_lag_shadow  # noqa: E402
+from hl_observer.datasets.source_discovery import (  # noqa: E402
+    is_dataset_workspace,
+    load_family_source_paths,
+    source_manifest_summary,
+    write_family_source_manifest,
+)
 from hl_observer.ops.bounded_collection import (  # noqa: E402
     ensure_bounded_collectors,
     inspect_bounded_collectors,
@@ -80,6 +86,13 @@ def run_campaigns(
     collection_startup_wait_s: float = 3.0,
 ) -> dict[str, Any]:
     assert_execution_disabled()
+    dataset_mode = is_dataset_workspace(root)
+    dataset_manifest_path = None
+    dataset_sources: dict[str, object] | None = None
+    if dataset_mode:
+        dataset_manifest_path = write_family_source_manifest(root)
+        dataset_sources = source_manifest_summary(root)
+
     copy_tool = _tool("hypersmart_copy_pipeline", root / "tools" / "pipeline_copie_reel.py")
     cross_tool = _tool("hypersmart_cross_campaign", root / "tools" / "backtest_dislocation_2jambes.py")
 
@@ -180,17 +193,24 @@ def run_campaigns(
         "paper_read_only": True,
         "real_execution": False,
         "provisional_without_physical_freeze": copy_freeze is None,
+        "dataset_workspace": dataset_mode,
+        "dataset_source_summary": dataset_sources,
     }
     copy_raw_path = _write_raw(root, "copy_vault", copy_raw)
     copy_campaign = build_copy_campaign(copy_raw, freeze=copy_freeze, datasets=copy_data)
     copy_campaign["evidence_paths"].append(copy_raw_path.relative_to(root).as_posix())
     write_campaign(root, copy_campaign)
 
-    selected_lead_sources = lead_lag_shadow.selectionner_sources(
-        root,
-        include_history=True,
-        max_history_sources=max(0, int(lead_history_sources)),
-    )
+    if dataset_mode:
+        # Dans un workspace FULL/COLD, le manifeste explicite est la source de vérité.
+        # On ne tronque plus arbitrairement l'historique à quelques shards.
+        selected_lead_sources = load_family_source_paths(root, "lead_lag")
+    else:
+        selected_lead_sources = lead_lag_shadow.selectionner_sources(
+            root,
+            include_history=True,
+            max_history_sources=max(0, int(lead_history_sources)),
+        )
     lead_protocol = lead_lag_shadow.walk_forward_protocol_signature()
     lead_freeze = find_oldest_parameter_freeze(
         root,
@@ -205,6 +225,7 @@ def run_campaigns(
             {
                 **lead_protocol,
                 "history_sources_at_freeze": len(selected_lead_sources),
+                "dataset_workspace_all_sources": dataset_mode,
             },
             initial_lead_data,
         )
@@ -221,6 +242,12 @@ def run_campaigns(
         economic_horizon_ms=lead_lag_shadow.CAMPAIGN_HORIZON_MS,
         economic_notional_usd=lead_lag_shadow.CAMPAIGN_NOTIONAL_USD,
     )
+    if isinstance(lead_raw, dict):
+        lead_raw["dataset_workspace"] = dataset_mode
+        lead_raw["dataset_manifest_source_count"] = len(selected_lead_sources)
+        lead_raw["dataset_source_manifest"] = (
+            str(dataset_manifest_path) if dataset_manifest_path is not None else None
+        )
     lead_raw_path = _write_raw(root, "lead_lag", lead_raw)
     lead_campaign = build_lead_lag_campaign(lead_raw, freeze=lead_freeze, datasets=lead_data)
     lead_campaign["evidence_paths"].append(lead_raw_path.relative_to(root).as_posix())
@@ -235,6 +262,11 @@ def run_campaigns(
     series, cross_depth, cross_meta = cross_tool.collecter_carnet_series(root)
     cross_meta["legacy_bbo_budget_s_unused"] = max(0.0, cross_budget_s)
     cross_meta["legacy_current_only_unused"] = bool(cross_current_only)
+    if dataset_mode:
+        cross_meta["dataset_source_manifest"] = str(dataset_manifest_path)
+        cross_meta["dataset_sources_discovered"] = (
+            dataset_sources.get("cross_venue") if isinstance(dataset_sources, dict) else None
+        )
     cross_depth_meta = {
         "source": cross_meta.get("source"),
         "source_mode": cross_meta.get("source_mode"),
@@ -323,6 +355,8 @@ def run_campaigns(
         "trades": cross_trades,
         "paper_read_only": True,
         "real_execution": False,
+        "dataset_workspace": dataset_mode,
+        "dataset_source_summary": dataset_sources,
     }
     cross_raw_path = _write_raw(root, "cross_venue_dislocation_v2", cross_raw)
     cross_campaign = build_cross_campaign(cross_raw, freeze=cross_freeze, datasets=cross_data)
@@ -362,6 +396,11 @@ def run_campaigns(
         "collector_state": collector_state,
         "collection_plan_path": str(collection_path),
         "collection_plan_report_path": str(collection_report_path),
+        "dataset_workspace": dataset_mode,
+        "dataset_source_manifest": (
+            str(dataset_manifest_path) if dataset_manifest_path is not None else None
+        ),
+        "dataset_source_summary": dataset_sources,
     }
 
 
@@ -374,6 +413,10 @@ def main(argv: list[str] | None = None) -> int:
         "--lead-history-sources",
         type=int,
         default=lead_lag_shadow.DEFAULT_HISTORY_SOURCES,
+        help=(
+            "Nombre de sources historiques Lead-Lag hors workspace FULL/COLD. "
+            "Dans un workspace dataset, toutes les sources manifestées sont utilisées."
+        ),
     )
     parser.add_argument("--no-start-collection", action="store_true")
     parser.add_argument("--collection-duration-s", type=float, default=24 * 60 * 60)

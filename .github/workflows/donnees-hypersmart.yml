@@ -6,12 +6,14 @@ on:
     paths:
       - 'src/hl_observer/datasets/**'
       - 'src/hl_observer/ops/dataset_*.py'
+      - 'tools/run_economic_objective_campaigns.py'
       - 'tests/test_dataset_*.py'
       - 'PREPARER_DONNEES_HYPERSMART.cmd'
       - 'ANALYSER_DONNEES_HYPERSMART.cmd'
       - 'LANCER_REPLAY_176GO.cmd'
       - 'LANCER_LABO_180GO.cmd'
       - 'docs/DONNEES_HYPERSMART_176G.md'
+      - 'docs/DATASET_RESEARCH_PIPELINE.md'
       - '.github/workflows/donnees-hypersmart.yml'
   workflow_dispatch: {}
 
@@ -42,7 +44,8 @@ jobs:
             tests/test_dataset_archive_library.py \
             tests/test_dataset_lab_launcher.py \
             tests/test_dataset_source_discovery.py \
-            tests/test_dataset_research_runner.py
+            tests/test_dataset_research_runner.py \
+            tests/test_dataset_economic_source_wiring.py
 
   test-windows:
     runs-on: windows-latest
@@ -72,4 +75,5 @@ jobs:
             tests/test_dataset_archive_library.py `
             tests/test_dataset_lab_launcher.py `
             tests/test_dataset_source_discovery.py `
-            tests/test_dataset_research_runner.py
+            tests/test_dataset_research_runner.py `
+            tests/test_dataset_economic_source_wiring.py
