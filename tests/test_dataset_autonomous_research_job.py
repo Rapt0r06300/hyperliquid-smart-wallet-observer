@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import sys
 from pathlib import Path
 
 import pytest
@@ -165,3 +166,17 @@ def test_worker_ne_relance_pas_un_job_success_identique(
         result_dir=result_dir,
     )
     assert rc == 0
+
+
+def test_timeout_etape_reste_actif_si_le_programme_necrit_aucun_log(tmp_path: Path) -> None:
+    result = worker._run_logged(
+        "silent_timeout",
+        [sys.executable, "-c", "import time; time.sleep(5)"],
+        cwd=tmp_path,
+        log_dir=tmp_path / "logs",
+        timeout_seconds=0.5,
+    )
+    assert result["timed_out"] is True
+    assert result["return_code"] == 124
+    assert float(result["duration_seconds"]) < 5.0
+    assert (tmp_path / "logs" / "silent_timeout.log").is_file()
