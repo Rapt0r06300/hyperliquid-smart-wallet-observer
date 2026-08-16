@@ -13,6 +13,7 @@ from typing import Iterable
 
 MAX_ALLOWED_SECONDS = 18 * 60 * 60
 POLL_SECONDS = 0.2
+WINDOWS_CREATE_NEW_PROCESS_GROUP = 0x00000200
 
 
 def _write_timeout_report(result_dir: Path, *, request: Path, max_seconds: int, elapsed: float) -> None:
@@ -61,7 +62,11 @@ def _popen_process_group_kwargs(platform_name: str | None = None) -> dict[str, o
 
     name = os.name if platform_name is None else str(platform_name)
     if name == "nt":
-        return {"creationflags": subprocess.CREATE_NEW_PROCESS_GROUP}
+        # subprocess.CREATE_NEW_PROCESS_GROUP n'existe que sur Windows.
+        # Le fallback 0x200 est la valeur Win32 officielle et permet de tester
+        # la branche Windows depuis la CI Linux sans modifier l'état global.
+        flag = int(getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", WINDOWS_CREATE_NEW_PROCESS_GROUP))
+        return {"creationflags": flag}
     return {"start_new_session": True}
 
 
