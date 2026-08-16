@@ -109,25 +109,24 @@ def test_selection_ecrite_est_reproductible_et_ne_copie_pas_les_evenements(tmp_p
     report.parent.mkdir(parents=True, exist_ok=True)
     report.write_text(json.dumps(_profile()), encoding="utf-8")
 
-    first_path, current, first = write_research_selection(
-        tmp_path,
-        family="copy_vault",
-        coin="BTC",
-        metric="net_pnl_usd",
-        include_unknown_time=False,
-    )
-    second_path, _, second = write_research_selection(
-        tmp_path,
-        family="copy_vault",
-        coin="BTC",
-        metric="net_pnl_usd",
-        include_unknown_time=False,
-    )
+    # La période explicite rend le rejet du fichier legacy sans horodatage déterministe.
+    # Sans filtre temporel, l'inconnu est volontairement conservé plutôt qu'assimilé à absent.
+    kwargs = {
+        "start_ms": 900,
+        "end_ms": 2_100,
+        "family": "copy_vault",
+        "coin": "BTC",
+        "metric": "net_pnl_usd",
+        "include_unknown_time": False,
+    }
+    first_path, current, first = write_research_selection(tmp_path, **kwargs)
+    second_path, _, second = write_research_selection(tmp_path, **kwargs)
 
     assert first["selection_digest"] == second["selection_digest"]
     assert first_path == second_path
     assert current.is_file()
     assert first["selected_file_count"] == 1
+    assert first["uncertain_selected_file_count"] == 0
     assert "family_counts" not in json.dumps(first["files"])
 
 
