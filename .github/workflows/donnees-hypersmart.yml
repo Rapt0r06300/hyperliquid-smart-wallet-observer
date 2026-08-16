@@ -11,6 +11,7 @@ on:
       - 'src/hl_observer/ops/autonomous_research_brain.py'
       - 'src/hl_observer/ops/autonomous_research_status.py'
       - 'src/hl_observer/ops/self_hosted_control.py'
+      - 'src/hl_observer/ops/self_hosted_return.py'
       - 'src/hl_observer/backtesting/recherche_adaptative_stricte.py'
       - 'tools/alina_autonomous_lab.py'
       - 'tools/run_economic_objective_campaigns.py'
@@ -99,7 +100,8 @@ jobs:
             tests/test_dataset_ci_coverage.py \
             tests/test_alina_self_hosted_control.py \
             tests/test_alina_self_hosted_assets.py \
-            tests/test_alina_self_hosted_entrypoint.py
+            tests/test_alina_self_hosted_entrypoint.py \
+            tests/test_alina_self_hosted_return.py
 
   test-windows:
     runs-on: windows-latest
@@ -161,7 +163,8 @@ jobs:
             tests/test_dataset_ci_coverage.py `
             tests/test_alina_self_hosted_control.py `
             tests/test_alina_self_hosted_assets.py `
-            tests/test_alina_self_hosted_entrypoint.py
+            tests/test_alina_self_hosted_entrypoint.py `
+            tests/test_alina_self_hosted_return.py
       - name: Vérifier les scripts publics avec Windows PowerShell 5.1
         shell: powershell
         run: |
@@ -187,7 +190,7 @@ jobs:
             if (-not $cockpit.Contains($needle)) { throw "Cockpit public incomplet: $needle" }
           }
           $installer = Get-Content '.\tools\INSTALLER_ALINA_RUNNER_WINDOWS.ps1' -Raw -Encoding UTF8
-          foreach ($needle in @('--runasservice','hypersmart,alina','registration-token','ALINA_RESEARCH_HOME','ZeroFreeBSTR')) {
+          foreach ($needle in @('--runasservice','hypersmart,alina','registration-token','ALINA_RESEARCH_HOME','ZeroFreeBSTR','sc.exe failure')) {
             if (-not $installer.Contains($needle)) { throw "Installateur runner incomplet: $needle" }
           }
           Write-Host 'Scripts publics PowerShell 5.1: OK'
