@@ -28,12 +28,16 @@ def test_guard_refuse_une_timebox_superieure_a_18_heures(tmp_path: Path) -> None
     assert rc == 2
 
 
-def test_guard_ecrit_un_rapport_reprise_apres_arret_de_tout_le_processus(
+def test_guard_ecrit_un_rapport_et_un_statut_cockpit_apres_timebox(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     request = tmp_path / "job.json"
-    request.write_text(json.dumps({"job_id": "job-timebox"}), encoding="utf-8")
+    request.write_text(
+        json.dumps({"job_id": "job-timebox", "suite": "economic-full", "mode": "economic"}),
+        encoding="utf-8",
+    )
     result_dir = tmp_path / "result"
+    lab_root = tmp_path / "lab"
 
     class FakeStdout:
         def readline(self):
@@ -71,9 +75,11 @@ def test_guard_ecrit_un_rapport_reprise_apres_arret_de_tout_le_processus(
         max_seconds=60,
         result_dir=result_dir,
         request=request,
+        lab_root=lab_root,
     )
     assert rc == 124
     assert stopped == [12345]
+
     payload = json.loads((result_dir / "JOB_GUARD_TIMEOUT.json").read_text(encoding="utf-8"))
     assert payload["status"] == "TIMEBOX_REACHED"
     assert payload["resume_expected"] is True
@@ -81,8 +87,25 @@ def test_guard_ecrit_un_rapport_reprise_apres_arret_de_tout_le_processus(
     assert payload["paper_only"] is True
     assert payload["real_execution"] is False
 
+    live = json.loads((lab_root / "status" / "CURRENT_STATUS.json").read_text(encoding="utf-8"))
+    assert live["state"] == "TIMEBOX_REACHED"
+    assert live["job_id"] == "job-timebox"
+    assert live["suite"] == "economic-full"
+    assert live["mode"] == "economic"
+    assert live["extra"]["resume_expected"] is True
+    assert live["extra"]["process_tree_stopped"] is True
+    assert live["paper_only"] is True
+    assert live["real_execution"] is False
+
 
 def test_groupe_de_processus_est_isole_selon_le_systeme() -> None:
     windows = guard._popen_process_group_kwargs("nt")
-    assert windows["creationflags"] == guard.subprocess.CREATE_NEW_PROCESS_GROUP
+    expected = int(
+        getattr(
+            guard.subprocess,
+            "CREATE_NEW_PROCESS_GROUP",
+            guard.WINDOWS_CREATE_NEW_PROCESS_GROUP,
+        )
+    )
+    assert windows["creationflags"] == expected
     assert guard._popen_process_group_kwargs("posix") == {"start_new_session": True}
