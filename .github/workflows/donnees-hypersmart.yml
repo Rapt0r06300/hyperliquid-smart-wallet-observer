@@ -32,7 +32,8 @@ jobs:
             tests/test_dataset_release_gateway.py \
             tests/test_dataset_catalog_profiler.py \
             tests/test_dataset_replay_workspace.py \
-            tests/test_dataset_economic_preset.py
+            tests/test_dataset_economic_preset.py \
+            tests/test_dataset_progress_downloader.py
 
   test-windows:
     runs-on: windows-latest
@@ -55,4 +56,5 @@ jobs:
             tests/test_dataset_release_gateway.py `
             tests/test_dataset_catalog_profiler.py `
             tests/test_dataset_replay_workspace.py `
-            tests/test_dataset_economic_preset.py
+            tests/test_dataset_economic_preset.py `
+            tests/test_dataset_progress_downloader.py
