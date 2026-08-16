@@ -54,7 +54,11 @@ jobs:
             tests/test_dataset_sqlite_research_source.py \
             tests/test_dataset_sqlite_research.py \
             tests/test_dataset_research_lab_stream.py \
-            tests/test_dataset_research_inventory.py
+            tests/test_dataset_research_inventory.py \
+            tests/test_dataset_connection_audit.py \
+            tests/test_dataset_connection_audit_cli.py \
+            tests/test_dataset_research_lab_selector.py \
+            tests/test_dataset_research_select.py
 
   test-windows:
     runs-on: windows-latest
@@ -93,4 +97,8 @@ jobs:
             tests/test_dataset_sqlite_research_source.py `
             tests/test_dataset_sqlite_research.py `
             tests/test_dataset_research_lab_stream.py `
-            tests/test_dataset_research_inventory.py
+            tests/test_dataset_research_inventory.py `
+            tests/test_dataset_connection_audit.py `
+            tests/test_dataset_connection_audit_cli.py `
+            tests/test_dataset_research_lab_selector.py `
+            tests/test_dataset_research_select.py
