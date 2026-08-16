@@ -10,22 +10,30 @@ on:
       - 'src/hl_observer/ops/autonomous_research_guard.py'
       - 'src/hl_observer/ops/autonomous_research_brain.py'
       - 'src/hl_observer/ops/autonomous_research_status.py'
+      - 'src/hl_observer/ops/self_hosted_control.py'
       - 'src/hl_observer/backtesting/recherche_adaptative_stricte.py'
       - 'tools/run_economic_objective_campaigns.py'
       - 'tools/run_dataset_economic_campaigns.py'
       - 'tools/run_strict_adaptive_research.py'
       - 'tools/ALINA_RESEARCH_COCKPIT.ps1'
+      - 'tools/INSTALLER_ALINA_RUNNER_WINDOWS.ps1'
+      - 'tools/VERIFIER_ALINA_RUNNER_WINDOWS.ps1'
       - 'tests/test_dataset_*.py'
       - 'tests/test_recherche_adaptative_stricte.py'
+      - 'tests/test_alina_self_hosted_*.py'
       - 'PREPARER_DONNEES_HYPERSMART.cmd'
       - 'PREPARER_EXPERIENCE_FULL_COLD.cmd'
       - 'ANALYSER_DONNEES_HYPERSMART.cmd'
       - 'LANCER_REPLAY_176GO.cmd'
       - 'LANCER_LABO_180GO.cmd'
+      - 'LANCER_COCKPIT_ALINA.cmd'
+      - 'control/alina_jobs/**'
       - 'docs/DONNEES_HYPERSMART_176G.md'
       - 'docs/DATASET_RESEARCH_PIPELINE.md'
       - 'docs/DATASET_EXPERIMENT_PLANS.md'
       - 'docs/DATASET_EXPERIMENT_VERIFICATION.md'
+      - 'docs/ALINA_SELF_HOSTED_RUNNER.md'
+      - '.github/workflows/alina-self-hosted.yml'
       - '.github/workflows/donnees-hypersmart.yml'
   workflow_dispatch: {}
 
@@ -85,7 +93,9 @@ jobs:
             tests/test_dataset_autonomous_research_status.py \
             tests/test_dataset_cli_entrypoints.py \
             tests/test_recherche_adaptative_stricte.py \
-            tests/test_dataset_ci_coverage.py
+            tests/test_dataset_ci_coverage.py \
+            tests/test_alina_self_hosted_control.py \
+            tests/test_alina_self_hosted_assets.py
 
   test-windows:
     runs-on: windows-latest
@@ -144,21 +154,35 @@ jobs:
             tests/test_dataset_autonomous_research_status.py `
             tests/test_dataset_cli_entrypoints.py `
             tests/test_recherche_adaptative_stricte.py `
-            tests/test_dataset_ci_coverage.py
-      - name: Vérifier le cockpit public avec Windows PowerShell 5.1
+            tests/test_dataset_ci_coverage.py `
+            tests/test_alina_self_hosted_control.py `
+            tests/test_alina_self_hosted_assets.py
+      - name: Vérifier les scripts publics avec Windows PowerShell 5.1
         shell: powershell
         run: |
-          $path = Resolve-Path '.\tools\ALINA_RESEARCH_COCKPIT.ps1'
-          $tokens = $null
-          $errors = $null
-          [System.Management.Automation.Language.Parser]::ParseFile($path, [ref]$tokens, [ref]$errors) | Out-Null
-          if ($errors.Count -gt 0) {
-            $errors | Format-List
-            throw 'Cockpit public PowerShell invalide.'
+          $paths = @(
+            '.\tools\ALINA_RESEARCH_COCKPIT.ps1',
+            '.\tools\INSTALLER_ALINA_RUNNER_WINDOWS.ps1',
+            '.\tools\VERIFIER_ALINA_RUNNER_WINDOWS.ps1'
+          )
+          foreach ($rawPath in $paths) {
+            $path = Resolve-Path $rawPath
+            $tokens = $null
+            $errors = $null
+            [System.Management.Automation.Language.Parser]::ParseFile($path, [ref]$tokens, [ref]$errors) | Out-Null
+            if ($errors.Count -gt 0) {
+              $errors | Format-List
+              throw "Script PowerShell 5.1 invalide: $rawPath"
+            }
+            $text = Get-Content $path -Raw -Encoding UTF8
+            if ($text.Contains('??')) { throw "Syntaxe PowerShell 7 interdite: $rawPath" }
           }
-          $text = Get-Content $path -Raw -Encoding UTF8
+          $cockpit = Get-Content '.\tools\ALINA_RESEARCH_COCKPIT.ps1' -Raw -Encoding UTF8
           foreach ($needle in @('CURRENT_STATUS.json','GITHUB_SYNC_STATUS.json','CALCUL','GitHub','Rapports','Gros logs','prochaine analyse','Start-Sleep -Seconds $RefreshSeconds','BLOQU')) {
-            if (-not $text.Contains($needle)) { throw "Cockpit public incomplet: $needle" }
+            if (-not $cockpit.Contains($needle)) { throw "Cockpit public incomplet: $needle" }
           }
-          if ($text.Contains('??')) { throw 'Syntaxe PowerShell 7 interdite dans le cockpit Windows 5.1.' }
-          Write-Host 'Cockpit public PowerShell 5.1: OK'
+          $installer = Get-Content '.\tools\INSTALLER_ALINA_RUNNER_WINDOWS.ps1' -Raw -Encoding UTF8
+          foreach ($needle in @('--runasservice','hypersmart,alina','registration-token','ALINA_RESEARCH_HOME','ZeroFreeBSTR')) {
+            if (-not $installer.Contains($needle)) { throw "Installateur runner incomplet: $needle" }
+          }
+          Write-Host 'Scripts publics PowerShell 5.1: OK'
