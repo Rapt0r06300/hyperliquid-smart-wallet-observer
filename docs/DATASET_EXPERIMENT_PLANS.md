@@ -14,6 +14,8 @@ profil Research Lab déjà calculé
 + provenance de la suite
         ↓
 CURRENT_EXPERIMENT_PLAN.json / .md
+        ↓ si READY uniquement
+CURRENT_REPLAY_INPUT_CONTRACT.json / .md
 ```
 
 Le plan **ne copie aucune donnée brute**, **ne télécharge aucun asset**, **ne lance aucun replay** et **n'utilise aucun réseau**. Il décrit seulement les sources compatibles et les filtres qui devront être appliqués.
@@ -60,6 +62,14 @@ PREPARER_EXPERIENCE_FULL_COLD.cmd sqlite-core copy_vault BTC "" 1780000000000 17
 ```
 
 Le bouton retrouve uniquement le workspace courant de la suite avec `dataset_bridge locate`. Il n'appelle jamais `prepare --download` et ne lance pas `ANALYSER_DONNEES_HYPERSMART.cmd`.
+
+Lorsque le plan est `READY`, le bouton génère ensuite automatiquement le contrat de replay avec :
+
+```powershell
+python -m hl_observer.ops.dataset_experiment_contract --root "<workspace>"
+```
+
+Lorsque le plan est `NO_MATCH`, aucun contrat `READY` n'est fabriqué.
 
 ## Sélection Research Lab
 
@@ -133,7 +143,7 @@ Il ne dépend pas du chemin absolu du PC pour les sources situées dans le works
 
 Deux plans identiques sur le même snapshot doivent donc produire le même digest.
 
-## Sorties
+## Sorties du plan
 
 Les rapports sont écrits dans :
 
@@ -152,6 +162,39 @@ CURRENT_EXPERIMENT_PLAN.md
 
 Le fichier `CURRENT_EXPERIMENT_PLAN.*` donne la sélection active la plus récente.
 
+## Contrat d'entrée du replay
+
+Un plan `READY` peut être transformé en un contrat beaucoup plus petit, destiné au futur runner ciblé :
+
+```text
+runtime/reports/datasets/experiment_contracts/
+```
+
+Sorties :
+
+```text
+contract_<digest16>.json
+contract_<digest16>.md
+CURRENT_REPLAY_INPUT_CONTRACT.json
+CURRENT_REPLAY_INPUT_CONTRACT.md
+```
+
+Le contrat conserve seulement :
+
+- digest de l'expérience ;
+- critères ;
+- provenance ;
+- chemins Research Lab sélectionnés ;
+- bornes temporelles et état complet/incertain ;
+- couples base/table SQLite ;
+- colonnes sûres ;
+- filtres paramétrés à appliquer ;
+- mode de rattachement de la famille.
+
+Il ne contient **aucune ligne brute**, **aucun payload**, **aucun `raw_json`**, **aucune chaîne SQL libre** et ne déclenche aucun traitement de marché.
+
+Le digest du contrat permet à un futur replay de prouver exactement quelles entrées il a reçues.
+
 ## Statuts
 
 `READY` signifie qu'au moins une source Research Lab ou un couple SQLite base/table satisfait le plan.
@@ -159,6 +202,8 @@ Le fichier `CURRENT_EXPERIMENT_PLAN.*` donne la sélection active la plus récen
 `NO_MATCH` signifie qu'aucune source connue ne satisfait les critères actuels. Cela ne doit pas être contourné par des données synthétiques : il faut soit corriger une donnée manquante, soit élargir consciemment les critères.
 
 `PROFILE_MISSING` côté Research Lab signifie que le gros scan/profil n'a pas encore produit son rapport. Le plan ne déclenche pas ce scan automatiquement afin d'éviter un long run caché.
+
+Un contrat de replay est refusé si `CURRENT_EXPERIMENT_PLAN` n'est pas `READY`.
 
 ## Progression gzip
 
@@ -173,7 +218,7 @@ Les JSONL non compressés restent reprenables par checkpoint/offset. Les `.gz` n
 
 ## Sécurité
 
-Le plan d'expérience respecte les invariants suivants :
+Le plan d'expérience et le contrat respectent les invariants suivants :
 
 ```text
 HL_ENABLE_MAINNET_EXECUTION=0
@@ -182,13 +227,13 @@ REAL_MAINNET_TRADING=false
 HYPERSMART_ANALYSIS_LOCAL_ONLY=1
 ```
 
-Il n'utilise ni `/exchange`, ni signature, ni ordre, ni collecte live. Il s'agit uniquement d'une couche de préparation reproductible pour la recherche historique locale.
+Ils n'utilisent ni `/exchange`, ni signature, ni ordre, ni collecte live. Il s'agit uniquement de couches de préparation reproductible pour la recherche historique locale.
 
-## Ce que le plan ne prouve pas
+## Ce que le plan et le contrat ne prouvent pas
 
-Un plan `READY` signifie seulement que des sources compatibles existent.
+Un plan `READY` ou un contrat valide signifie seulement que des sources compatibles existent et sont décrites de façon reproductible.
 
-Il ne signifie pas :
+Ils ne signifient pas :
 
 - PnL positif ;
 - ROI positif ;
