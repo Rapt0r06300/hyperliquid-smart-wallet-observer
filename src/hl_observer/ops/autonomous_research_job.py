@@ -8,12 +8,17 @@ import re
 import shutil
 import subprocess
 import sys
+import threading
 import time
 from pathlib import Path
 from typing import Any, Iterable, Mapping
 
 from hl_observer.datasets.archive_library import resolve_current_workspace, suite_names
 from hl_observer.datasets.replay_workspace import prepare_replay_workspace
+from hl_observer.ops.autonomous_research_guard import (
+    _popen_process_group_kwargs,
+    _terminate_process_tree,
+)
 
 SCHEMA = "alina.autonomous_research_job.v1"
 CANONICAL_RELEASE_ID = 371149058
@@ -23,6 +28,7 @@ ECONOMIC_SUITES = {"economic-core", "economic-full"}
 JOB_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,79}$")
 SHA_RE = re.compile(r"^[0-9a-fA-F]{40}$")
 MAX_SMALL_REPORT_BYTES = 5 * 1024 * 1024
+POLL_SECONDS = 0.2
 
 
 def _canonical_json(payload: object) -> str:
@@ -170,13 +176,13 @@ def _run_logged(
     *,
     cwd: Path,
     log_dir: Path,
-    timeout_seconds: int | None = None,
+    timeout_seconds: int | float | None = None,
 ) -> dict[str, Any]:
     log_dir.mkdir(parents=True, exist_ok=True)
     log_path = log_dir / f"{name}.log"
-    started = time.time()
+    started_wall = time.time()
+    started_mono = time.monotonic()
     timed_out = False
-    return_code = 2
     with log_path.open("w", encoding="utf-8", newline="\n") as handle:
         handle.write("COMMAND=" + json.dumps(command, ensure_ascii=False) + "\n")
         handle.flush()
@@ -190,39 +196,47 @@ def _run_logged(
             encoding="utf-8",
             errors="replace",
             bufsize=1,
+            **_popen_process_group_kwargs(),
         )
-        deadline = None if timeout_seconds is None else time.monotonic() + timeout_seconds
-        try:
-            assert process.stdout is not None
-            while True:
-                line = process.stdout.readline()
-                if line:
+
+        def pump_stdout() -> None:
+            stream = process.stdout
+            if stream is None:
+                return
+            try:
+                for line in stream:
                     print(line, end="", flush=True)
                     handle.write(line)
                     handle.flush()
-                if process.poll() is not None:
-                    for rest in process.stdout:
-                        print(rest, end="", flush=True)
-                        handle.write(rest)
-                    break
-                if deadline is not None and time.monotonic() > deadline:
+            except (OSError, ValueError):
+                return
+
+        pump = threading.Thread(
+            target=pump_stdout,
+            name=f"alina-stage-log-{name}",
+            daemon=True,
+        )
+        pump.start()
+        deadline = None if timeout_seconds is None else started_mono + float(timeout_seconds)
+        try:
+            while process.poll() is None:
+                if deadline is not None and time.monotonic() >= deadline:
                     timed_out = True
-                    process.terminate()
-                    try:
-                        process.wait(timeout=20)
-                    except subprocess.TimeoutExpired:
-                        process.kill()
+                    _terminate_process_tree(process)
                     break
-            return_code = int(process.wait())
+                time.sleep(POLL_SECONDS)
+            if process.poll() is None:
+                process.wait()
         finally:
             if process.poll() is None:
-                process.kill()
-                process.wait()
+                _terminate_process_tree(process)
+            pump.join(timeout=5)
+        return_code = 124 if timed_out else int(process.returncode or 0)
     return {
         "name": name,
         "return_code": return_code,
         "timed_out": timed_out,
-        "duration_seconds": round(max(0.0, time.time() - started), 3),
+        "duration_seconds": round(max(0.0, time.time() - started_wall), 3),
         "log_path": str(log_path),
         "command": command,
     }
