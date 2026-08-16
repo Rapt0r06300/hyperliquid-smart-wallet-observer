@@ -59,6 +59,18 @@ def test_workflow_force_paper_et_bloque_mainnet_testnet() -> None:
         assert needle in text
 
 
+def test_workflow_utilise_exclusivement_le_python_persistant_du_runner() -> None:
+    text = _text(WORKFLOW)
+    assert "ALINA_PYTHON_EXE" in text
+    assert "python_exe=$python" in text
+    assert "steps.preflight.outputs.python_exe" in text
+    assert "py -3.11" not in text
+    assert "Get-Command py" not in text
+    assert "& $python -m hl_observer.ops.self_hosted_control" in text
+    assert "& $python @args" in text
+    assert "& $python -m hl_observer.ops.self_hosted_return" in text
+
+
 def test_workflow_produit_un_retour_compact_avant_l_artifact() -> None:
     text = _text(WORKFLOW)
     assert "Construire le retour compact pour GitHub et ChatGPT" in text
@@ -94,6 +106,15 @@ def test_installateur_enregistre_un_service_et_ne_persiste_pas_le_token() -> Non
     assert "token.txt" not in text.casefold()
 
 
+def test_installateur_cree_un_python_persistant_accessible_au_service() -> None:
+    text = _text(INSTALLER)
+    assert "runtime\\python" in text
+    assert "Scripts\\python.exe" in text
+    assert "ALINA_PYTHON_EXE" in text
+    assert "-m venv $venvRoot" in text
+    assert "-m pip install --disable-pip-version-check -e $RepositoryRoot" in text
+
+
 def test_installateur_configure_la_reprise_automatique_du_service() -> None:
     text = _text(INSTALLER)
     assert "Set-Service -Name $Service.Name -StartupType Automatic" in text
@@ -102,16 +123,19 @@ def test_installateur_configure_la_reprise_automatique_du_service() -> None:
     assert "sc.exe failureflag $Service.Name 1" in text
 
 
-def test_verificateur_couvre_service_python_disque_et_cockpit() -> None:
+def test_verificateur_couvre_service_python_persistant_disque_et_cockpit() -> None:
     text = _text(VERIFIER)
     for needle in (
         "actions.runner.*",
-        "Python 3.11+",
+        "ALINA_PYTHON_EXE",
+        "Python persistant 3.11+",
+        "runtime\\python\\Scripts\\python.exe",
         "Réserve disque >= 25 Gio",
         "Cockpit copié",
         "DIAGNOSTIC FINAL : RUNNER PRÊT",
     ):
         assert needle in text
+    assert "py -3.11" not in text
 
 
 def test_preparateur_local_est_non_destructeur_et_reste_sur_main() -> None:
