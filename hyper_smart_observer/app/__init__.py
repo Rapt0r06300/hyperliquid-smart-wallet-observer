@@ -1,1 +1,1 @@
-"""Application bootstrap for HyperSmart Observer."""
+"""Application bootstrap for Alina SmartFlow."""

@@ -9,7 +9,7 @@ from __future__ import annotations
 
 def render_status(snapshot: dict) -> str:
     lines = [
-        "HYPERSMART OBSERVER — PAPER SIMULATION (read-only)",
+        "ALINA SMARTFLOW — PAPER SIMULATION (read-only)",
         f"  mode            : {snapshot.get('mode', 'LIVE')}",
         f"  ws              : {'ON' if snapshot.get('ws_connected') else 'OFF'}",
         f"  open positions  : {int(snapshot.get('open_positions', 0))}",

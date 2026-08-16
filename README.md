@@ -1,6 +1,6 @@
-# HyperSmart Observer
+# Alina SmartFlow
 
-HyperSmart Observer est un logiciel local de surveillance, d'analyse et de
+Alina SmartFlow est un logiciel local de surveillance, d'analyse et de
 simulation paper autour de Hyperliquid.
 
 Objectif actuel: reproduire la partie mesurable du "smart wallet observer" en
@@ -21,7 +21,7 @@ launcher principal ni montes dans l'UI Hyperliquid.
 
 ## Version portable Windows
 
-Le **dossier complet** est l'unite portable. HyperSmart peut etre transporte sur
+Le **dossier complet** est l'unite portable. Alina SmartFlow peut etre transporte sur
 un autre PC **Windows 10/11 x64** sans installer Python :
 
 1. arreter proprement le bot avec `LANCER_HYPERSMART.cmd stop` ;
@@ -39,7 +39,7 @@ ces runtimes embarques, pas ceux du PC.
 
 Il faut obligatoirement arreter le bot avant la copie : aucun outil ne peut
 garantir une copie coherente d'une base SQLite pendant qu'elle est ecrite. Au
-premier lancement apres un changement de PC ou de chemin, HyperSmart regenere
+premier lancement apres un changement de PC ou de chemin, Alina SmartFlow regenere
 uniquement l'identite machine et les verrous perimes. Les lancements suivants ne
 purgent plus les caches, PID ou journaux de la session. Le guide complet est dans
 [`docs/PORTABILITE_WINDOWS.md`](docs/PORTABILITE_WINDOWS.md).
@@ -178,7 +178,7 @@ HISTORICAL PNL IS NOT FUTURE PROFIT
 NO GUARANTEED PROFIT
 ```
 
-HyperSmart peut ouvrir et fermer des **positions virtuelles** en simulation, mais
+Alina SmartFlow peut ouvrir et fermer des **positions virtuelles** en simulation, mais
 il ne place jamais d'ordre reel, ne signe rien et ne demande aucune cle.
 
 ---
@@ -348,7 +348,7 @@ python -m pytest -q tests/test_hyperliquid_runtime_does_not_import_dydx_by_defau
 python -m pytest -q tests/test_dydx_is_secondary_mockable_not_runtime.py
 ```
 
-Tests ciblés HyperSmart:
+Tests ciblés Alina SmartFlow (noms techniques historiques HyperSmart):
 
 ```powershell
 python -m pytest -q tests/test_hypersmart_*.py
@@ -371,10 +371,23 @@ python -m hl_observer ui
 
 ## Limite importante
 
-Un PnL positif ne peut pas etre garanti. HyperSmart doit chercher a reduire les
+Un PnL positif ne peut pas etre garanti. Alina SmartFlow doit chercher a reduire les
 mauvaises decisions, mieux filtrer les signaux et expliquer les pertes, mais ne
 doit jamais tricher sur le graphe, le solde ou les logs.
 
 Si une donnee manque, le logiciel doit l'afficher comme absente.
 Si une action est ambigue, elle doit rester `UNKNOWN`.
 Si l'edge est absent ou negatif, la decision doit etre `NO_TRADE`.
+
+---
+
+## Alina SmartFlow
+
+**Anciennement HyperSmart.**
+
+HyperSmart devient **Alina SmartFlow — HyperSmart Research Engine**.
+
+Le nouveau nom conserve l'identite technique du projet tout en representant son evolution :
+**Alina** pour le nom du logiciel, et **SmartFlow** pour l'analyse des flux, des donnees et des signaux au coeur du systeme.
+
+Les noms techniques historiques (`HYPERSMART_*`, fichiers, commandes et modules) restent conserves pour la compatibilite.

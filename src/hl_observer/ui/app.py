@@ -10,7 +10,7 @@ from fastapi.staticfiles import StaticFiles
 from hl_observer.config.loader import load_settings
 from hl_observer.config.settings import Settings
 from hl_observer.storage.database import init_db
-from hl_observer.ui.dashboard_v2 import create_dashboard_v2_router
+from hl_observer.ui import dashboard_v2 as dashboard_v2_module
 from hl_observer.ui.economic_writer import EconomicWriter
 from hl_observer.ui.event_bus import UiEventBus
 from hl_observer.ui.persistent_state import load_or_create_ui_state
@@ -21,10 +21,24 @@ from hl_observer.ui.status_routes import create_status_router
 from hl_observer.ops.echec_silencieux import noter as _noter_echec
 
 
+BRAND_NAME = "Alina SmartFlow"
 SMOOTH_METAGRAPH_SCRIPT = '<script src="/static/metagraph_smooth_v2.js?v=simulation-ui-20260615-smooth-metagraph-v3"></script>'
 
 
+def _apply_branding(html: str) -> str:
+    replacements = (
+        ("HyperSmart Observer - Hyperliquid Command Center", f"{BRAND_NAME} - Hyperliquid Command Center"),
+        ("HyperSmart Observer - Hyperliquid", f"{BRAND_NAME} - Hyperliquid"),
+        ("Hyperliquid Smart-Wallet Observer - Simulation Paper", f"{BRAND_NAME} - Hyperliquid Smart-Wallet Observer"),
+        ("HYPERSMART // OBSERVER", "ALINA SMARTFLOW // OBSERVER"),
+    )
+    for old, new in replacements:
+        html = html.replace(old, new)
+    return html
+
+
 def _inject_smooth_metagraph_script(html: str) -> str:
+    html = _apply_branding(html)
     if "metagraph_smooth" in html:
         return html
     marker = '<script src="/static/app.js?v=simulation-ui-20260612-antijump-v5"></script>'
@@ -42,7 +56,7 @@ def create_ui_app(settings: Settings | None = None, state: UiState | None = None
     init_db(settings.database_url)
     state = state or load_or_create_ui_state(settings)
     bus = UiEventBus()
-    app = FastAPI(title="HyperSmart Observer - Hyperliquid Command Center")
+    app = FastAPI(title=f"{BRAND_NAME} - Hyperliquid Command Center")
     static_dir = Path(__file__).with_name("static")
     app.mount("/static", StaticFiles(directory=static_dir), name="static")
 
@@ -72,7 +86,9 @@ def create_ui_app(settings: Settings | None = None, state: UiState | None = None
     # Keep other legacy status endpoints (notably /fusion-status) compatible.
     # Its duplicate /api/simulation/status declaration is intentionally shadowed.
     app.include_router(create_status_router(state, settings=settings))
-    app.include_router(create_dashboard_v2_router())
+    if hasattr(dashboard_v2_module, "_PAGE"):
+        dashboard_v2_module._PAGE = _apply_branding(dashboard_v2_module._PAGE)
+    app.include_router(dashboard_v2_module.create_dashboard_v2_router())
 
     @app.on_event("startup")
     def _start_economic_writer() -> None:
