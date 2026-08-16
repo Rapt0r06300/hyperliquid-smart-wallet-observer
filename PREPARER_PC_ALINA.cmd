@@ -23,19 +23,17 @@ if /I not "%BRANCH%"=="main" (
   exit /b 3
 )
 
-git status --porcelain > "%TEMP%\alina_git_status_%RANDOM%.txt"
-set STATUSFILE=%TEMP%\alina_git_status_%RANDOM%.txt
-rem Refaire proprement le status dans un nom connu sans toucher aux fichiers.
-git status --porcelain > "%TEMP%\alina_git_status_current.txt"
-for %%Z in ("%TEMP%\alina_git_status_current.txt") do if %%~zZ GTR 0 (
+set STATUSFILE=%TEMP%\alina_git_status_%RANDOM%_%RANDOM%.txt
+git status --porcelain > "%STATUSFILE%"
+for %%Z in ("%STATUSFILE%") do if %%~zZ GTR 0 (
   echo [ECHEC] Le dossier Git contient des modifications locales.
   echo Aucun reset, clean ou ecrasement automatique ne sera fait.
-  type "%TEMP%\alina_git_status_current.txt"
-  del "%TEMP%\alina_git_status_current.txt" >nul 2>&1
+  type "%STATUSFILE%"
+  del "%STATUSFILE%" >nul 2>&1
   pause
   exit /b 4
 )
-del "%TEMP%\alina_git_status_current.txt" >nul 2>&1
+del "%STATUSFILE%" >nul 2>&1
 
 echo [1/4] Recuperation de main depuis GitHub...
 git fetch origin main
