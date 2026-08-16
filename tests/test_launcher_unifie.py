@@ -149,8 +149,9 @@ def test_la_racine_contient_les_deux_lanceurs_officiels():
     """Runtime et analyses historiques ont chacun un lanceur explicite.
 
     Les outils de recherche/maintenance restent autorises a la racine mais ne
-    deviennent pas des demarrages runtime concurrents. L'objectif +4 USD est
-    strictement paper/read-only et appartient a cette categorie d'analyse.
+    deviennent pas des demarrages runtime concurrents. Les cinq lanceurs
+    FULL/COLD sont des outils paper/read-only de preparation/replay/labo : ils
+    ne deviennent pas des runtimes concurrents.
     """
     cmd_racine = {p.name for p in RACINE.glob("*.cmd")}
     officiels = {"LANCER_HYPERSMART.cmd", "ANALYSER_BACKTESTS_REPLAYS.cmd"}
@@ -174,5 +175,10 @@ def test_la_racine_contient_les_deux_lanceurs_officiels():
         "DIAGNOSTIC_LANCEUR.cmd",
         "LANCER_HYPERLAB.cmd",
         "PREPARER_GIT_PORTABLE.cmd",
+        "LANCER_LABO_180GO.cmd",
+        "PREPARER_EXPERIENCE_FULL_COLD.cmd",
+        "LANCER_REPLAY_176GO.cmd",
+        "PREPARER_DONNEES_HYPERSMART.cmd",
+        "ANALYSER_DONNEES_HYPERSMART.cmd",
     }
     assert cmd_racine <= officiels | outils_conserves

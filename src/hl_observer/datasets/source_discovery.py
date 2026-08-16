@@ -2,8 +2,11 @@ from __future__ import annotations
 
 import argparse
 import json
+import logging
 from pathlib import Path
 from typing import Iterable
+
+LOGGER = logging.getLogger(__name__)
 
 DATASET_PROVENANCE = Path("runtime") / "reports" / "datasets" / "SELECTION_PROVENANCE.json"
 FAMILY_SOURCE_MANIFEST = Path("runtime") / "reports" / "datasets" / "FAMILY_SOURCES.json"
@@ -89,7 +92,6 @@ def _is_research_lab_source(path: Path) -> bool:
             return True
         if part == "research-lab":
             return True
-        # Les copies archivées peuvent conserver le chemin complet sous un préfixe.
         if part == "runtime" and index + 1 < len(parts) and parts[index + 1] in {
             "research_lab",
             "research-lab",
@@ -195,8 +197,12 @@ def load_family_source_paths(root: str | Path, family: str) -> list[Path]:
                     result.append(path)
             if result:
                 return sorted(set(result), key=lambda item: item.as_posix().casefold())
-        except (OSError, json.JSONDecodeError, AttributeError):
-            pass
+        except (OSError, json.JSONDecodeError, AttributeError) as exc:
+            LOGGER.warning(
+                "Manifeste de sources illisible pour %s (%s); redécouverte du workspace.",
+                family,
+                type(exc).__name__,
+            )
     return discover_family_sources(resolved).get(family, [])
 
 

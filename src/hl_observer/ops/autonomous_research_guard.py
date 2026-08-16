@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import logging
 import os
 import signal
 import subprocess
@@ -13,6 +14,7 @@ from typing import Iterable
 
 from hl_observer.ops.autonomous_research_status import status_path, write_status
 
+LOGGER = logging.getLogger(__name__)
 MAX_ALLOWED_SECONDS = 18 * 60 * 60
 POLL_SECONDS = 0.2
 WINDOWS_CREATE_NEW_PROCESS_GROUP = 0x00000200
@@ -31,8 +33,12 @@ def _request_identity(request: Path) -> tuple[str, str | None, str | None]:
                 suite = str(raw["suite"])
             if raw.get("mode"):
                 mode = str(raw["mode"])
-    except (OSError, json.JSONDecodeError):
-        pass
+    except (OSError, json.JSONDecodeError) as exc:
+        LOGGER.warning(
+            "Impossible de lire l'identité du job %s (%s); le nom de fichier est conservé.",
+            request,
+            type(exc).__name__,
+        )
     return job_id, suite, mode
 
 
@@ -100,9 +106,6 @@ def _popen_process_group_kwargs(platform_name: str | None = None) -> dict[str, o
 
     name = os.name if platform_name is None else str(platform_name)
     if name == "nt":
-        # subprocess.CREATE_NEW_PROCESS_GROUP n'existe que sur Windows.
-        # Le fallback 0x200 est la valeur Win32 officielle et permet de tester
-        # la branche Windows depuis la CI Linux sans modifier l'état global.
         flag = int(getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", WINDOWS_CREATE_NEW_PROCESS_GROUP))
         return {"creationflags": flag}
     return {"start_new_session": True}
@@ -112,8 +115,6 @@ def _terminate_process_tree(process: subprocess.Popen[str], *, grace_seconds: fl
     if process.poll() is not None:
         return
     if os.name == "nt":
-        # taskkill /T est nécessaire : terminer seulement le parent Python peut
-        # laisser un backtest enfant actif sur le workspace persistant.
         subprocess.run(
             ["taskkill", "/PID", str(process.pid), "/T", "/F"],
             stdout=subprocess.DEVNULL,
@@ -123,6 +124,7 @@ def _terminate_process_tree(process: subprocess.Popen[str], *, grace_seconds: fl
         try:
             process.wait(timeout=grace_seconds)
         except subprocess.TimeoutExpired:
+            LOGGER.warning("taskkill n'a pas arrêté tout l'arbre PID=%s; kill() de secours.", process.pid)
             process.kill()
             process.wait()
         return
@@ -135,11 +137,11 @@ def _terminate_process_tree(process: subprocess.Popen[str], *, grace_seconds: fl
         process.wait(timeout=grace_seconds)
         return
     except subprocess.TimeoutExpired:
-        pass
+        LOGGER.warning("SIGTERM insuffisant pour PGID=%s; passage à SIGKILL.", process.pid)
     try:
         os.killpg(process.pid, signal.SIGKILL)
     except ProcessLookupError:
-        pass
+        LOGGER.info("Le groupe de processus %s a disparu avant SIGKILL.", process.pid)
     process.wait()
 
 
@@ -154,7 +156,6 @@ def _start_stdout_pump(process: subprocess.Popen[str]) -> threading.Thread:
             for line in stream:
                 print(line, end="", flush=True)
         except (OSError, ValueError):
-            # La fermeture du pipe pendant taskkill/killpg est normale.
             return
 
     thread = threading.Thread(
