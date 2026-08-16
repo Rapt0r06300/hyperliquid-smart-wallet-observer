@@ -106,35 +106,47 @@ jobs:
           $labRoot = [Environment]::GetEnvironmentVariable('ALINA_RESEARCH_HOME', 'Machine')
           if ([string]::IsNullOrWhiteSpace($labRoot)) { $labRoot = $env:ALINA_RESEARCH_HOME }
           if ([string]::IsNullOrWhiteSpace($labRoot)) {
-            throw 'ALINA_RESEARCH_HOME absent. Exécuter INSTALLER_ALINA_RUNNER_WINDOWS.ps1 sur le PC.'
+            throw 'ALINA_RESEARCH_HOME absent. Relancer PREPARER_PC_ALINA.cmd sur le PC.'
           }
           $labRoot = [System.IO.Path]::GetFullPath($labRoot)
           New-Item -ItemType Directory -Force -Path $labRoot | Out-Null
-          foreach ($dir in @('datasets','jobs\requests','results\github','status','job_logs','tools','checkpoints')) {
+          foreach ($dir in @('datasets','jobs\requests','results\github','status','job_logs','tools','checkpoints','runtime')) {
             New-Item -ItemType Directory -Force -Path (Join-Path $labRoot $dir) | Out-Null
           }
-          $python = Get-Command py -ErrorAction SilentlyContinue
-          if (-not $python) { throw 'Python Launcher py.exe absent du runner.' }
-          & py -3.11 -c "import sys; assert sys.version_info >= (3,11); print(sys.version)"
-          if ($LASTEXITCODE -ne 0) { throw 'Python 3.11+ est obligatoire.' }
+
+          $python = [Environment]::GetEnvironmentVariable('ALINA_PYTHON_EXE', 'Machine')
+          if ([string]::IsNullOrWhiteSpace($python)) { $python = $env:ALINA_PYTHON_EXE }
+          if ([string]::IsNullOrWhiteSpace($python)) {
+            throw 'ALINA_PYTHON_EXE absent. Relancer PREPARER_PC_ALINA.cmd pour créer le Python persistant du runner.'
+          }
+          $python = [System.IO.Path]::GetFullPath($python)
+          if (-not (Test-Path $python -PathType Leaf)) {
+            throw "ALINA_PYTHON_EXE invalide: $python"
+          }
+          & $python -c "import sys; assert sys.version_info >= (3,11); print(sys.executable); print(sys.version)"
+          if ($LASTEXITCODE -ne 0) { throw 'Le Python persistant du runner est invalide ou inférieur à 3.11.' }
+
           $driveRoot = [System.IO.Path]::GetPathRoot($labRoot)
           $drive = Get-PSDrive -Name $driveRoot.Substring(0,1) -ErrorAction Stop
           $freeGiB = [Math]::Round($drive.Free / 1GB, 2)
           if ($freeGiB -lt 25) { throw "Espace disque insuffisant: $freeGiB Gio libres (<25 Gio de réserve)." }
           Copy-Item '.\tools\ALINA_RESEARCH_COCKPIT.ps1' (Join-Path $labRoot 'tools\ALINA_RESEARCH_COCKPIT.ps1') -Force
           "lab_root=$labRoot" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          "python_exe=$python" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
           "free_gib=$freeGiB" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
           Write-Host "Laboratoire : $labRoot"
+          Write-Host "Python runner : $python"
           Write-Host "Libre : $freeGiB Gio"
           Write-Host "SHA : $env:GITHUB_SHA"
 
-      - name: Préparer Python sans modifier les garde-fous
+      - name: Préparer le Python persistant sans modifier les garde-fous
         shell: powershell
         run: |
           $ErrorActionPreference = 'Stop'
-          py -3.11 -m pip install --disable-pip-version-check -e .
-          if ($LASTEXITCODE -ne 0) { throw 'Installation editable du projet impossible.' }
-          py -3.11 .\tools\alina_autonomous_lab.py check
+          $python = '${{ steps.preflight.outputs.python_exe }}'
+          & $python -m pip install --disable-pip-version-check -e .
+          if ($LASTEXITCODE -ne 0) { throw 'Installation editable du projet impossible dans le Python persistant.' }
+          & $python .\tools\alina_autonomous_lab.py check
           if ($LASTEXITCODE -ne 0) { throw 'Diagnostic du laboratoire autonome en échec.' }
 
       - name: Lire la nouvelle commande immuable déposée sur main
@@ -192,13 +204,14 @@ jobs:
         run: |
           $ErrorActionPreference = 'Stop'
           if ([string]::IsNullOrWhiteSpace($env:CONTROL_PATH)) { throw 'Commande de contrôle absente.' }
+          $python = '${{ steps.preflight.outputs.python_exe }}'
           $labRoot = '${{ steps.preflight.outputs.lab_root }}'
           $requestDir = Join-Path $labRoot 'jobs\requests'
           $resultDir = Join-Path $labRoot "results\github\run_$env:GITHUB_RUN_ID"
           New-Item -ItemType Directory -Force -Path $requestDir,$resultDir | Out-Null
           $workerRequest = Join-Path $requestDir "worker_$env:GITHUB_RUN_ID.json"
           $bundle = Join-Path $requestDir "bundle_$env:GITHUB_RUN_ID.json"
-          py -3.11 -m hl_observer.ops.self_hosted_control `
+          & $python -m hl_observer.ops.self_hosted_control `
             --control $env:CONTROL_PATH `
             --project-sha $env:GITHUB_SHA `
             --worker-request $workerRequest `
@@ -221,9 +234,10 @@ jobs:
         continue-on-error: true
         shell: powershell
         run: |
+          $python = '${{ steps.preflight.outputs.python_exe }}'
           $labRoot = '${{ steps.preflight.outputs.lab_root }}'
           $args = @(
-            '-3.11','-m','hl_observer.ops.autonomous_research_guard',
+            '-m','hl_observer.ops.autonomous_research_guard',
             '--request','${{ steps.build.outputs.worker_request }}',
             '--project-root',$env:GITHUB_WORKSPACE,
             '--lab-root',$labRoot,
@@ -231,7 +245,7 @@ jobs:
             '--max-seconds','${{ steps.build.outputs.max_cycle_seconds }}'
           )
           if ('${{ steps.build.outputs.force_arg }}' -eq '--force') { $args += '--force' }
-          & py @args
+          & $python @args
           $rc = $LASTEXITCODE
           "exit_code=$rc" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
           Write-Host "Code final du worker : $rc"
@@ -243,7 +257,8 @@ jobs:
         continue-on-error: true
         shell: powershell
         run: |
-          py -3.11 -m hl_observer.ops.self_hosted_return --result-dir '${{ steps.build.outputs.result_dir }}'
+          $python = '${{ steps.preflight.outputs.python_exe }}'
+          & $python -m hl_observer.ops.self_hosted_return --result-dir '${{ steps.build.outputs.result_dir }}'
           $rc = $LASTEXITCODE
           "exit_code=$rc" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
           "json_path=${{ steps.build.outputs.result_dir }}\ALINA_RETURN.json" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
