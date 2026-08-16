@@ -90,13 +90,25 @@ if not "%CONTRACT_RC%"=="0" (
   set "RC=%CONTRACT_RC%"
   goto :erreur_code
 )
+
+echo.
+echo [VERIFICATION] Controle du digest, des fichiers, tailles, bases, tables et colonnes...
+"%HYPERSMART_PYTHON%" -m hl_observer.ops.dataset_experiment_contract_verify --root "%DATA_ROOT%"
+set "VERIFY_RC=%ERRORLEVEL%"
+if not "%VERIFY_RC%"=="0" (
+  echo [NO_GO] Le contrat existe mais ne correspond pas aux sources reelles du workspace.
+  set "RC=%VERIFY_RC%"
+  goto :erreur_code
+)
+
 set "RC=0"
 echo.
-echo [OK] Plan d'experience et contrat de replay prets.
+echo [OK] Plan, contrat et verification des sources sont prets.
 echo Aucune grosse donnee n'a ete copiee et aucun replay n'a ete lance.
 echo Rapports courants :
 echo   %DATA_ROOT%\runtime\reports\datasets\experiment_plans\CURRENT_EXPERIMENT_PLAN.md
 echo   %DATA_ROOT%\runtime\reports\datasets\experiment_contracts\CURRENT_REPLAY_INPUT_CONTRACT.md
+echo   %DATA_ROOT%\runtime\reports\datasets\experiment_contracts\CURRENT_REPLAY_INPUT_CONTRACT_VERIFICATION.md
 goto :fin
 
 :usage
