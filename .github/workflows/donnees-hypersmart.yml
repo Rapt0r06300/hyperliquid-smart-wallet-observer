@@ -27,6 +27,8 @@ on:
       - 'LANCER_REPLAY_176GO.cmd'
       - 'LANCER_LABO_180GO.cmd'
       - 'LANCER_COCKPIT_ALINA.cmd'
+      - 'INSTALLER_ALINA_RUNNER_WINDOWS.cmd'
+      - 'PREPARER_PC_ALINA.cmd'
       - 'control/alina_jobs/**'
       - 'docs/DONNEES_HYPERSMART_176G.md'
       - 'docs/DATASET_RESEARCH_PIPELINE.md'
@@ -95,7 +97,8 @@ jobs:
             tests/test_recherche_adaptative_stricte.py \
             tests/test_dataset_ci_coverage.py \
             tests/test_alina_self_hosted_control.py \
-            tests/test_alina_self_hosted_assets.py
+            tests/test_alina_self_hosted_assets.py \
+            tests/test_alina_self_hosted_entrypoint.py
 
   test-windows:
     runs-on: windows-latest
@@ -156,7 +159,8 @@ jobs:
             tests/test_recherche_adaptative_stricte.py `
             tests/test_dataset_ci_coverage.py `
             tests/test_alina_self_hosted_control.py `
-            tests/test_alina_self_hosted_assets.py
+            tests/test_alina_self_hosted_assets.py `
+            tests/test_alina_self_hosted_entrypoint.py
       - name: Vérifier les scripts publics avec Windows PowerShell 5.1
         shell: powershell
         run: |
