@@ -19,6 +19,7 @@ def test_bouton_experience_reste_local_et_sans_execution_reelle() -> None:
     assert "HYPERSMART_ANALYSIS_LOCAL_ONLY=1" in text
     assert "dataset_experiment_plan" in text
     assert "dataset_experiment_contract" in text
+    assert "dataset_experiment_contract_verify" in text
     assert "dataset_bridge locate" in text
     assert "--download" not in text
     assert "/exchange" not in text.casefold()
@@ -52,3 +53,14 @@ def test_bouton_experience_ne_fabrique_un_contrat_que_si_le_plan_est_ready() -> 
     assert "Aucun contrat de replay READY n'est fabrique" in text
     assert ':contrat' in text
     assert "CURRENT_REPLAY_INPUT_CONTRACT.md" in text
+
+
+def test_bouton_experience_verifie_le_contrat_avant_de_declarer_ok() -> None:
+    text = _text()
+    verify_call = 'hl_observer.ops.dataset_experiment_contract_verify --root "%DATA_ROOT%"'
+    assert verify_call in text
+    assert 'set "VERIFY_RC=%ERRORLEVEL%"' in text
+    assert 'if not "%VERIFY_RC%"=="0" (' in text
+    assert "Le contrat existe mais ne correspond pas aux sources reelles" in text
+    assert "CURRENT_REPLAY_INPUT_CONTRACT_VERIFICATION.md" in text
+    assert text.index(verify_call) < text.index("[OK] Plan, contrat et verification des sources sont prets")
