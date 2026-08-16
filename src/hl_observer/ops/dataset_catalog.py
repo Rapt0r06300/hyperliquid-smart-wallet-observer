@@ -9,8 +9,8 @@ from hl_observer.datasets.github_release_bridge import (
     DEFAULT_RELEASE_ID,
     DEFAULT_REPOSITORY,
     DatasetBridgeError,
-    ensure_metadata,
 )
+from hl_observer.datasets.release_gateway import ensure_release_metadata
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -29,7 +29,7 @@ def main(argv: list[str] | None = None) -> int:
     args = _parser().parse_args(argv)
     root = Path(args.root).resolve()
     try:
-        _, _, metadata_dir = ensure_metadata(
+        _, assets, metadata_dir = ensure_release_metadata(
             root,
             repository=args.repo,
             release_id=args.release_id,
@@ -37,6 +37,10 @@ def main(argv: list[str] | None = None) -> int:
         )
         manifest = metadata_dir / "FULL_UPLOADED_FILE_MANIFEST.jsonl.gz"
         profile = profile_manifest(manifest)
+        profile["release_asset_count"] = len(assets)
+        profile["release_assets_with_sha256"] = sum(
+            1 for asset in assets.values() if asset.sha256
+        )
         report_dir = root / "runtime" / "reports" / "datasets"
         report_dir.mkdir(parents=True, exist_ok=True)
         json_path = report_dir / "CATALOGUE_COMPLET.json"
@@ -46,7 +50,10 @@ def main(argv: list[str] | None = None) -> int:
             encoding="utf-8",
         )
         md_path.write_text(render_markdown(profile), encoding="utf-8")
-        print(f"CATALOGUE_OK fichiers={profile['total_files']} volume={profile['total_gib']} Gio")
+        print(
+            f"CATALOGUE_OK fichiers={profile['total_files']} "
+            f"volume={profile['total_gib']} Gio assets={len(assets)}"
+        )
         print(f"JSON={json_path}")
         print(f"MD={md_path}")
         return 0
