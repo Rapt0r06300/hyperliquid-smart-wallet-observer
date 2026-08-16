@@ -137,20 +137,24 @@ jobs:
           py -3.11 .\tools\alina_autonomous_lab.py check
           if ($LASTEXITCODE -ne 0) { throw 'Diagnostic du laboratoire autonome en échec.' }
 
-      - name: Lire la commande versionnée déposée sur main
+      - name: Lire la nouvelle commande immuable déposée sur main
         if: github.event_name == 'push'
         id: control_push
         shell: powershell
         run: |
           $ErrorActionPreference = 'Stop'
-          $changed = @(git diff-tree --no-commit-id --name-only -r $env:GITHUB_SHA |
-            Where-Object { $_ -match '^control/alina_jobs/[^/]+\.json$' })
-          if ($changed.Count -ne 1) {
-            throw "Un push de commande doit créer/modifier exactement un JSON dans control/alina_jobs/. Trouvés: $($changed.Count)"
+          $rows = @(git diff-tree --no-commit-id --name-status -r $env:GITHUB_SHA |
+            Where-Object { $_ -match '^[A-Z]\s+control/alina_jobs/[^/]+\.json$' })
+          if ($rows.Count -ne 1) {
+            throw "Un push de commande doit toucher exactement un JSON dans control/alina_jobs/. Trouvés: $($rows.Count)"
           }
-          $path = (Resolve-Path $changed[0]).Path
+          $parts = $rows[0] -split '\s+', 2
+          if ($parts.Count -ne 2 -or $parts[0] -ne 'A') {
+            throw 'COMMANDES_IMMUABLES: un job doit être un nouveau JSON ajouté; modifier, renommer ou supprimer un ancien job est refusé.'
+          }
+          $path = (Resolve-Path $parts[1]).Path
           "control_path=$path" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
-          Write-Host "Commande GitHub : $path"
+          Write-Host "Nouvelle commande GitHub immuable : $path"
 
       - name: Construire une commande manuelle sûre
         if: github.event_name == 'workflow_dispatch'
