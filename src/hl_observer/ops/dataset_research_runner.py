@@ -1,8 +1,10 @@
 """Run the existing historical research stack against an isolated FULL/COLD workspace.
 
-This module deliberately does not implement a strategy.  It only separates the
+This module deliberately does not implement a strategy. It separates the
 project/code root from the historical data root so the canonical local replay,
 A/B, walk-forward and diagnostic tools can consume a materialized dataset suite.
+It also connects the large SQLite and Research Lab archives through read-only,
+streaming inventory stages before deeper economic interpretation.
 """
 from __future__ import annotations
 
@@ -56,6 +58,7 @@ def build_dataset_stage_plan(
     candidates = merged / "candidates.jsonl"
     marks = merged / "marks.jsonl"
     logs = _logs_dir(data_root)
+    research_lab = data_root / "runtime" / "research_lab"
     cache = (
         project_root
         / REPORTS_RELATIVE_PATH
@@ -64,6 +67,54 @@ def build_dataset_stage_plan(
     )
 
     stages: list[AnalysisStage] = [
+        AnalysisStage(
+            "sqlite_inventory",
+            "Inventaire SQLite FULL/COLD",
+            "Ouvre les bases saines en lecture seule, décrit leur schéma et quarantaine les noms corrompus.",
+            (
+                py,
+                "-m",
+                "hl_observer.ops.dataset_sqlite_inventory",
+                "--root",
+                str(data_root),
+            ),
+            required_paths=(data_root,),
+            timeout_seconds=max(timeout_seconds, 1_800),
+        ),
+        AnalysisStage(
+            "sqlite_research_catalog",
+            "Catalogue de recherche SQLite FULL/COLD",
+            "Expose uniquement les tables/colonnes économiques autorisées comme sources historiques read-only.",
+            (
+                py,
+                "-m",
+                "hl_observer.ops.dataset_sqlite_research",
+                "--root",
+                str(data_root),
+            ),
+            required_paths=(data_root,),
+            timeout_seconds=max(timeout_seconds, 1_800),
+        ),
+        AnalysisStage(
+            "research_lab_probe",
+            "Sonde streaming du Research Lab",
+            "Parcourt jusqu'à 0,25 Gio sur chacun des trois plus gros JSONL et conserve un checkpoint reprenable.",
+            (
+                py,
+                "-m",
+                "hl_observer.ops.dataset_research_inventory",
+                "--root",
+                str(data_root),
+                "--max-files",
+                "3",
+                "--max-gib-per-file",
+                "0.25",
+                "--heartbeat-seconds",
+                "5",
+            ),
+            required_paths=(research_lab,),
+            timeout_seconds=max(timeout_seconds, 3_600),
+        ),
         AnalysisStage(
             "merge_replay",
             "Consolidation replay FULL/COLD",
@@ -256,8 +307,26 @@ def build_dataset_stage_plan(
     ]
 
     if full or deep:
+        long_timeout = max(timeout_seconds, 21_600)
         stages.extend(
             [
+                AnalysisStage(
+                    "research_lab_full_stream",
+                    "Scan complet reprenable du Research Lab",
+                    "Reprend les checkpoints puis parcourt tous les JSONL Research Lab jusqu'à EOF, sans limite de volume.",
+                    (
+                        py,
+                        "-m",
+                        "hl_observer.ops.dataset_research_inventory",
+                        "--root",
+                        str(data_root),
+                        "--heartbeat-seconds",
+                        "5",
+                    ),
+                    required_paths=(research_lab,),
+                    timeout_seconds=long_timeout,
+                    optional=True,
+                ),
                 AnalysisStage(
                     "walk_forward",
                     "Walk-forward FULL/COLD",
@@ -318,6 +387,16 @@ def build_dataset_stage_plan(
     return tuple(stages)
 
 
+def _read_optional_json(path: Path) -> dict[str, object] | None:
+    if not path.is_file():
+        return None
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+    return payload if isinstance(payload, dict) else None
+
+
 def _augment_report(
     report_json: Path,
     *,
@@ -332,12 +411,20 @@ def _augment_report(
         return
     if not isinstance(payload, dict):
         return
+    dataset_reports = data_root / "runtime" / "reports" / "datasets"
     payload["dataset_suite"] = suite
     payload["project_root"] = str(project_root)
     payload["data_root"] = str(data_root)
     payload["dataset_source_manifest"] = str(source_manifest)
     payload["dataset_source_summary"] = source_manifest_summary(data_root)
     payload["source_release_id"] = 371149058
+    payload["sqlite_inventory"] = _read_optional_json(dataset_reports / "SQLITE_INVENTORY.json")
+    payload["sqlite_research_catalog"] = _read_optional_json(
+        dataset_reports / "SQLITE_RESEARCH_CATALOG.json"
+    )
+    payload["research_lab_stream_profile"] = _read_optional_json(
+        dataset_reports / "RESEARCH_LAB_STREAM_PROFILE.json"
+    )
     report_json.write_text(
         json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
         encoding="utf-8",
