@@ -91,5 +91,19 @@ if "%RC%"=="0" (
   echo Une donnee peut manquer dans la suite reconstruite. Rien n'est invente.
 )
 
+if /I not "%DATASET_SUITE%"=="legacy-materialized" (
+  echo.
+  echo [AUDIT] Verification finale du raccordement de ce workspace...
+  "%HYPERSMART_PYTHON%" -m hl_observer.ops.dataset_connection_audit --root "%DATA_ROOT%"
+  set "AUDIT_RC=%ERRORLEVEL%"
+  if not "%AUDIT_RC%"=="0" (
+    echo [ATTENTION] Audit de raccordement incomplet - code %AUDIT_RC%.
+    if "%RC%"=="0" set "RC=%AUDIT_RC%"
+  ) else (
+    echo [OK] Audit de raccordement :
+    echo      %DATA_ROOT%\runtime\reports\datasets\DATASET_CONNECTION_AUDIT.md
+  )
+)
+
 if /I not "%HYPERSMART_NO_PAUSE%"=="1" pause
 endlocal & exit /b %RC%
