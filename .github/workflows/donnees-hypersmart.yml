@@ -1,0 +1,56 @@
+name: donnees-hypersmart
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'src/hl_observer/datasets/**'
+      - 'src/hl_observer/ops/dataset_*.py'
+      - 'tests/test_dataset_*.py'
+      - 'PREPARER_DONNEES_HYPERSMART.cmd'
+      - 'ANALYSER_DONNEES_HYPERSMART.cmd'
+      - '.github/workflows/donnees-hypersmart.yml'
+  workflow_dispatch: {}
+
+jobs:
+  test-linux:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Installer le projet
+        run: |
+          pip install -e .
+          pip install pytest
+      - name: Tester le pont sans reseau
+        run: |
+          pytest -q \
+            tests/test_dataset_release_bridge.py \
+            tests/test_dataset_catalog_profiler.py \
+            tests/test_dataset_replay_workspace.py \
+            tests/test_dataset_economic_preset.py
+
+  test-windows:
+    runs-on: windows-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Installer le projet
+        shell: powershell
+        run: |
+          pip install -e .
+          pip install pytest
+      - name: Tester le pont sans reseau
+        shell: powershell
+        run: |
+          pytest -q `
+            tests/test_dataset_release_bridge.py `
+            tests/test_dataset_catalog_profiler.py `
+            tests/test_dataset_replay_workspace.py `
+            tests/test_dataset_economic_preset.py
