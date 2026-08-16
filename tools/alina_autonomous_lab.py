@@ -10,6 +10,7 @@ import argparse
 import json
 from typing import Iterable
 
+from hl_observer.datasets import max_data_policy
 from hl_observer.ops import autonomous_research_brain
 from hl_observer.ops import autonomous_research_guard
 from hl_observer.ops import autonomous_research_job
@@ -25,6 +26,8 @@ def _check_payload() -> dict[str, object]:
         "status_schema": autonomous_research_status.SCHEMA,
         "brain_module": autonomous_research_brain.__name__,
         "timebox_module": autonomous_research_timebox.__name__,
+        "max_data_module": max_data_policy.__name__,
+        "target_net_usd_per_family": max_data_policy.TARGET_NET_USD_PER_FAMILY,
         "paper_only": True,
         "real_execution": False,
     }

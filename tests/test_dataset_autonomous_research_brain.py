@@ -3,6 +3,10 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+from hl_observer.datasets.max_data_policy import (
+    choose_max_data_job,
+    targets_reached_from_brain,
+)
 from hl_observer.ops.autonomous_research_brain import build_decision, decide_family
 
 
@@ -114,3 +118,83 @@ def test_missing_mesure_passe_avant_recherche_parametrique(tmp_path: Path) -> No
     decision = build_decision(tmp_path)
     assert decision["next_recommended_job"]["mode"] == "economic"
     assert decision["family_decisions"][0]["priority"] == 100
+
+
+def _plan(remaining: float) -> dict[str, object]:
+    return {
+        "remaining_download_gib": remaining,
+        "download_gib": remaining,
+        "missing_asset_count": 0,
+    }
+
+
+def test_max_data_escalade_vers_la_suite_de_la_famille_prioritaire() -> None:
+    decisions = [
+        {"family": "copy_vault", "priority": 40, "phase": "DIAGNOSE"},
+        {"family": "lead_lag", "priority": 100, "phase": "MECHANISM_SEARCH"},
+        {"family": "cross_venue_dislocation_v2", "priority": 20, "phase": "FREEZE_AND_CONFIRM_FORWARD"},
+    ]
+    plans = {
+        "economic-full": _plan(9.8),
+        "lead-lag-full": _plan(9.8),
+        "microstructure-full": _plan(5.9),
+        "research-lab-full": _plan(61.0),
+        "sqlite-all-safe": _plan(60.7),
+        "full-archive": _plan(158.9),
+    }
+    result = choose_max_data_job(
+        family_decisions=decisions,
+        suite_plans=plans,
+        completed_suites=["economic-full"],
+        free_disk_gib=250.0,
+        all_targets_reached=False,
+    )
+    assert result["status"] == "READY"
+    assert result["recommended_suite"] == "lead-lag-full"
+    assert result["recommended_mode"] == "historical-deep"
+    assert result["holdout_used_for_ranking"] is False
+    assert result["target_contract"]["aggregate_substitution_allowed"] is False
+
+
+def test_max_data_saute_une_suite_trop_grosse_sans_saturer_le_disque() -> None:
+    decisions = [{"family": "copy_vault", "priority": 100, "phase": "COMPLETE_EVIDENCE"}]
+    plans = {
+        "economic-full": _plan(90.0),
+        "copy-vault-full": _plan(4.0),
+        "microstructure-full": _plan(6.0),
+    }
+    result = choose_max_data_job(
+        family_decisions=decisions,
+        suite_plans=plans,
+        free_disk_gib=40.0,
+        all_targets_reached=False,
+        reserve_gib=25.0,
+    )
+    assert result["recommended_suite"] == "copy-vault-full"
+    assert result["rejected_before_selection"][0]["reason"] == "INSUFFICIENT_DISK"
+
+
+def test_max_data_sarrete_quand_les_trois_objectifs_independants_sont_prouves() -> None:
+    decisions = [
+        {"family": family, "priority": 20, "phase": "FREEZE_AND_CONFIRM_FORWARD"}
+        for family in ("copy_vault", "lead_lag", "cross_venue_dislocation_v2")
+    ]
+    assert targets_reached_from_brain(decisions) is True
+    result = choose_max_data_job(
+        family_decisions=decisions,
+        suite_plans={"full-archive": _plan(158.9)},
+        free_disk_gib=500.0,
+        all_targets_reached=True,
+    )
+    assert result["status"] == "STOP_PROOF_REACHED"
+    assert result["recommended_suite"] is None
+    assert result["target_contract"]["target_net_usd_per_family"] == 4.0
+
+
+def test_un_seul_module_atteint_ne_peut_pas_compter_comme_trois() -> None:
+    decisions = [
+        {"family": "copy_vault", "priority": 20, "phase": "FREEZE_AND_CONFIRM_FORWARD"},
+        {"family": "lead_lag", "priority": 100, "phase": "MECHANISM_SEARCH"},
+        {"family": "cross_venue_dislocation_v2", "priority": 100, "phase": "COMPLETE_EVIDENCE"},
+    ]
+    assert targets_reached_from_brain(decisions) is False
