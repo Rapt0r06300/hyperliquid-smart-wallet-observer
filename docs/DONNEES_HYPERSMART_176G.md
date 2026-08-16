@@ -26,9 +26,10 @@ Le menu permet de :
 
 1. vérifier que la Release est accessible ;
 2. récupérer seulement les manifestes ;
-3. voir le plan Copy-Vault ;
-4. voir le plan Lead-Lag ;
-5. voir le plan Cross-Venue.
+3. faire une carte complète des 150 000+ fichiers sans télécharger les gros assets ;
+4. voir le plan Copy-Vault ;
+5. voir le plan Lead-Lag ;
+6. voir le plan Cross-Venue.
 
 Voir un plan ne télécharge pas les gros fichiers.
 
@@ -45,6 +46,21 @@ Télécharger et vérifier uniquement les manifestes :
 ```bat
 PREPARER_DONNEES_HYPERSMART.cmd catalog
 ```
+
+Construire la carte complète :
+
+```bat
+PREPARER_DONNEES_HYPERSMART.cmd carte
+```
+
+La carte écrit :
+
+```text
+runtime/reports/datasets/CATALOGUE_COMPLET.json
+runtime/reports/datasets/CATALOGUE_COMPLET.md
+```
+
+Elle donne notamment les volumes par famille repérée, par extension, par gros dossier, la plage des dates de modification et les plus gros fichiers. Elle ne supprime rien et ne trie rien définitivement.
 
 Voir combien de données Copy-Vault seraient nécessaires :
 
@@ -115,9 +131,9 @@ Ainsi les moteurs de replay qui savent travailler avec une racine de données pe
 
 ## Suite du chantier
 
-Le pont est la première étape. Ensuite il faut :
+Le pont et la carte sont les deux premières étapes. Ensuite il faut :
 
-1. profiler le catalogue complet par type, période, résolution et coin ;
+1. utiliser la carte pour connaître précisément la couverture par famille, période et résolution ;
 2. produire des vues canoniques pour Copy-Vault, Lead-Lag et Cross-Venue ;
 3. brancher ces vues aux moteurs de replay existants ;
 4. lancer train / validation / OOS / forward ;
