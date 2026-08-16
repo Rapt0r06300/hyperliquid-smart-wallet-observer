@@ -64,7 +64,10 @@ jobs:
             tests/test_dataset_research_select.py \
             tests/test_dataset_experiment_plan.py \
             tests/test_dataset_experiment_plan_cli.py \
-            tests/test_dataset_experiment_launcher.py
+            tests/test_dataset_experiment_contract.py \
+            tests/test_dataset_experiment_contract_cli.py \
+            tests/test_dataset_experiment_launcher.py \
+            tests/test_dataset_ci_coverage.py
 
   test-windows:
     runs-on: windows-latest
@@ -111,4 +114,7 @@ jobs:
             tests/test_dataset_research_select.py `
             tests/test_dataset_experiment_plan.py `
             tests/test_dataset_experiment_plan_cli.py `
-            tests/test_dataset_experiment_launcher.py
+            tests/test_dataset_experiment_contract.py `
+            tests/test_dataset_experiment_contract_cli.py `
+            tests/test_dataset_experiment_launcher.py `
+            tests/test_dataset_ci_coverage.py
