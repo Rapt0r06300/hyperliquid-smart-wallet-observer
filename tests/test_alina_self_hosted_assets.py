@@ -85,6 +85,14 @@ def test_installateur_enregistre_un_service_et_ne_persiste_pas_le_token() -> Non
     assert "token.txt" not in text.casefold()
 
 
+def test_installateur_configure_la_reprise_automatique_du_service() -> None:
+    text = _text(INSTALLER)
+    assert "Set-Service -Name $Service.Name -StartupType Automatic" in text
+    assert "sc.exe failure $Service.Name" in text
+    assert "restart/60000/restart/60000/restart/300000" in text
+    assert "sc.exe failureflag $Service.Name 1" in text
+
+
 def test_verificateur_couvre_service_python_disque_et_cockpit() -> None:
     text = _text(VERIFIER)
     for needle in (
@@ -103,17 +111,28 @@ def test_preparateur_local_est_non_destructeur_et_reste_sur_main() -> None:
     assert 'not "%BRANCH%"=="main"' in text
     assert 'git status --porcelain' in text
     assert 'git pull --ff-only origin main' in text
+    assert "VERIFIER_ALINA_RUNNER_WINDOWS.ps1" in text
+    assert "LANCER_COCKPIT_ALINA.cmd" in text
+    assert "[6/6] Ouverture du cockpit temps reel" in text
     lowered = text.casefold()
     assert 'git reset' not in lowered
     assert 'git clean' not in lowered
     assert 'checkout -f' not in lowered
 
 
-def test_lanceur_installation_demande_les_droits_administrateur() -> None:
+def test_lanceur_installation_attend_reellement_l_elevation() -> None:
     text = _text(INSTALLER_LAUNCHER)
     assert "Start-Process" in text
     assert "-Verb RunAs" in text
+    assert "-Wait -PassThru" in text
+    assert "$p.ExitCode" in text
     assert "INSTALLER_ALINA_RUNNER_WINDOWS.ps1" in text
+
+
+def test_cockpit_relit_la_variable_machine_si_la_fenetre_est_ancienne() -> None:
+    text = _text(COCKPIT_LAUNCHER)
+    assert "GetEnvironmentVariable('ALINA_RESEARCH_HOME','Machine')" in text
+    assert "PREPARER_PC_ALINA.cmd" in text
 
 
 def test_tous_les_points_entree_publics_existent() -> None:
