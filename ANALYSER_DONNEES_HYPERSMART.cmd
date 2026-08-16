@@ -20,6 +20,7 @@ set "HYPERSMART_ANALYSIS_LOCAL_ONLY=1"
 
 set "DATASET_SUITE=%~1"
 set "DATA_ROOT="
+set "ECONOMIC_RUNNER=%~dp0tools\run_economic_objective_campaigns.py"
 
 REM Sans argument, on garde la compatibilite avec l'ancien dossier materialized.
 if "%DATASET_SUITE%"=="" (
@@ -27,6 +28,7 @@ if "%DATASET_SUITE%"=="" (
   set "DATA_ROOT=%~dp0data\hypersmart_datasets\materialized"
 ) else (
   for /f "usebackq delims=" %%I in (`"%HYPERSMART_PYTHON%" -m hl_observer.ops.dataset_bridge locate --root "%~dp0." --suite "%DATASET_SUITE%"`) do set "DATA_ROOT=%%I"
+  set "ECONOMIC_RUNNER=%~dp0tools\run_dataset_economic_campaigns.py"
 )
 
 if not defined DATA_ROOT (
@@ -63,13 +65,16 @@ echo   Aucune collecte live, aucun ordre reel.
 echo ============================================================
 echo.
 
-"%HYPERSMART_PYTHON%" "%~dp0tools\run_economic_objective_campaigns.py" --root "%DATA_ROOT%" --no-start-collection --lead-history-sources 8
+"%HYPERSMART_PYTHON%" "%ECONOMIC_RUNNER%" --root "%DATA_ROOT%" --no-start-collection --lead-history-sources 8
 set "RC=%ERRORLEVEL%"
 
 echo.
 if "%RC%"=="0" (
   echo [OK] Replay economique termine.
   echo Rapport lourd/local : %DATA_ROOT%\runtime\reports\economic_campaigns\HYPERSMART_ECONOMIC_OBJECTIVE_CAMPAIGN.md
+  if /I not "%DATASET_SUITE%"=="legacy-materialized" (
+    echo Couverture des sources : %DATA_ROOT%\runtime\reports\datasets\SOURCE_CONSUMPTION_COVERAGE.md
+  )
   echo.
   echo [EXPORT] Copie du petit verdict dans docs\research\datasets ...
   "%HYPERSMART_PYTHON%" -m hl_observer.ops.dataset_result_export --root "%~dp0." --replay-root "%DATA_ROOT%" --suite "%DATASET_SUITE%"
