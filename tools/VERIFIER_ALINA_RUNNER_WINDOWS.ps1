@@ -41,22 +41,34 @@ if ($service) {
     if ($svcInfo) { Write-Host ('Chemin service'.PadRight(34) + ' : ' + $svcInfo.PathName) -ForegroundColor DarkGray }
 }
 
-$py = Get-Command py -ErrorAction SilentlyContinue
-Row 'Python Launcher' ($null -ne $py) $(if ($py) { $py.Source } else { 'py.exe absent' })
-$pythonOk = $false
-if ($py) {
-    & py -3.11 -c "import sys; raise SystemExit(0 if sys.version_info >= (3,11) else 2)"
-    $pythonOk = $LASTEXITCODE -eq 0
+$runnerPython = [Environment]::GetEnvironmentVariable('ALINA_PYTHON_EXE', 'Machine')
+if ([string]::IsNullOrWhiteSpace($runnerPython)) { $runnerPython = $env:ALINA_PYTHON_EXE }
+$pythonPathOk = -not [string]::IsNullOrWhiteSpace($runnerPython)
+if ($pythonPathOk) {
+    try { $runnerPython = [System.IO.Path]::GetFullPath($runnerPython) } catch { $pythonPathOk = $false }
 }
-Row 'Python 3.11+' $pythonOk $(if ($pythonOk) { 'disponible' } else { 'absent ou invalide' })
+if ($pythonPathOk) { $pythonPathOk = Test-Path $runnerPython -PathType Leaf }
+Row 'Variable ALINA_PYTHON_EXE' $pythonPathOk $(if ($runnerPython) { [string]$runnerPython } else { 'absente' })
+
+$pythonOk = $false
+$pythonDetail = 'absent ou invalide'
+if ($pythonPathOk) {
+    $version = (& $runnerPython -c "import sys; print('.'.join(map(str, sys.version_info[:3]))); raise SystemExit(0 if sys.version_info >= (3,11) else 2)" 2>$null | Select-Object -Last 1)
+    $pythonOk = $LASTEXITCODE -eq 0
+    if ($pythonOk) { $pythonDetail = "Python $version | $runnerPython" }
+}
+Row 'Python persistant 3.11+' $pythonOk $pythonDetail
 
 $git = Get-Command git -ErrorAction SilentlyContinue
 Row 'Git for Windows' ($null -ne $git) $(if ($git) { $git.Source } else { 'git.exe absent' })
 
 if ($labOk -and (Test-Path $LabRoot -PathType Container)) {
-    foreach ($relative in @('datasets','jobs\requests','results\github','status','job_logs','checkpoints','tools')) {
+    foreach ($relative in @('datasets','jobs\requests','results\github','status','job_logs','checkpoints','tools','runtime','runtime\python')) {
         Row ("Sous-dossier $relative") (Test-Path (Join-Path $LabRoot $relative) -PathType Container) (Join-Path $LabRoot $relative)
     }
+    $expectedPython = Join-Path $LabRoot 'runtime\python\Scripts\python.exe'
+    Row 'Python dans ALINA_RESEARCH_HOME' ($pythonPathOk -and ([System.IO.Path]::GetFullPath($runnerPython) -eq [System.IO.Path]::GetFullPath($expectedPython))) $expectedPython
+
     $root = [System.IO.Path]::GetPathRoot($LabRoot)
     $drive = Get-PSDrive -Name $root.Substring(0,1) -ErrorAction SilentlyContinue
     if ($drive) {
