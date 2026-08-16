@@ -16,22 +16,26 @@ from hl_observer.ops import autonomous_research_guard
 from hl_observer.ops import autonomous_research_job
 from hl_observer.ops import autonomous_research_status
 from hl_observer.ops import self_hosted_control
+from hl_observer.ops import self_hosted_return
 
 
 def _check_payload() -> dict[str, object]:
     return {
-        "schema": "alina.autonomous_lab_entrypoint.v2",
+        "schema": "alina.autonomous_lab_entrypoint.v3",
         "job_schema": autonomous_research_job.SCHEMA,
         "control_schema": self_hosted_control.CONTROL_SCHEMA,
+        "return_schema": self_hosted_return.SCHEMA,
         "max_cycle_seconds": autonomous_research_guard.MAX_ALLOWED_SECONDS,
         "status_schema": autonomous_research_status.STATUS_SCHEMA,
         "brain_module": autonomous_research_brain.__name__,
         "max_data_module": max_data_policy.__name__,
         "self_hosted_control_module": self_hosted_control.__name__,
+        "self_hosted_return_module": self_hosted_return.__name__,
         "target_net_usd_per_family": max_data_policy.TARGET_NET_USD_PER_FAMILY,
         "paper_only": True,
         "real_execution": False,
         "self_hosted_ready_in_code": True,
+        "compact_return_ready_in_code": True,
     }
 
 
@@ -52,6 +56,11 @@ def main(argv: Iterable[str] | None = None) -> int:
         help="Canonise une commande GitHub en requête worker self-hosted verrouillée.",
     )
     control.add_argument("args", nargs=argparse.REMAINDER)
+    compact_return = sub.add_parser(
+        "return",
+        help="Construit le retour compact GitHub/ChatGPT d'un gros run terminé.",
+    )
+    compact_return.add_argument("args", nargs=argparse.REMAINDER)
     max_data = sub.add_parser(
         "max-data",
         help="Délègue à la politique MAX DATA avec garde disque et objectifs économiques séparés.",
@@ -70,6 +79,8 @@ def main(argv: Iterable[str] | None = None) -> int:
         return autonomous_research_job.main(args.args)
     if args.command == "control":
         return self_hosted_control.main(args.args)
+    if args.command == "return":
+        return self_hosted_return.main(args.args)
     if args.command == "max-data":
         return max_data_policy.main(args.args)
     parser.error("commande inconnue")
