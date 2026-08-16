@@ -59,7 +59,9 @@ jobs:
             tests/test_dataset_connection_audit.py \
             tests/test_dataset_connection_audit_cli.py \
             tests/test_dataset_research_lab_selector.py \
-            tests/test_dataset_research_select.py
+            tests/test_dataset_research_select.py \
+            tests/test_dataset_experiment_plan.py \
+            tests/test_dataset_experiment_plan_cli.py
 
   test-windows:
     runs-on: windows-latest
@@ -103,4 +105,6 @@ jobs:
             tests/test_dataset_connection_audit.py `
             tests/test_dataset_connection_audit_cli.py `
             tests/test_dataset_research_lab_selector.py `
-            tests/test_dataset_research_select.py
+            tests/test_dataset_research_select.py `
+            tests/test_dataset_experiment_plan.py `
+            tests/test_dataset_experiment_plan_cli.py
