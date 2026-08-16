@@ -59,6 +59,15 @@ def test_workflow_force_paper_et_bloque_mainnet_testnet() -> None:
         assert needle in text
 
 
+def test_workflow_produit_un_retour_compact_avant_l_artifact() -> None:
+    text = _text(WORKFLOW)
+    assert "Construire le retour compact pour GitHub et ChatGPT" in text
+    assert "hl_observer.ops.self_hosted_return" in text
+    assert "ALINA_RETURN.json" in text
+    assert "compact_return_ready" in text
+    assert text.index("hl_observer.ops.self_hosted_return") < text.index("actions/upload-artifact@v4")
+
+
 def test_workflow_ne_remonte_que_le_result_dir_prepare_par_le_worker() -> None:
     text = _text(WORKFLOW)
     assert "actions/upload-artifact@v4" in text
