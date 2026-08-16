@@ -88,7 +88,7 @@ def test_copy_adapter_ne_s_active_que_sur_workspace_dataset(tmp_path: Path) -> N
         tmp_path, copy_tool=fake_tool, copy_executable=fake_exec
     )
     assert result["enabled"] is True
-    assert str(fake_tool.FILLS).startswith("runtime/reports/datasets/economic_inputs/")
+    assert fake_tool.FILLS.as_posix().startswith("runtime/reports/datasets/economic_inputs/")
     fake_exec.load_observed_books(tmp_path, coins={"BTC"})
     assert calls
 
