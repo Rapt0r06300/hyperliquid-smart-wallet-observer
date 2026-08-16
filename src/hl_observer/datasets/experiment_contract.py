@@ -2,14 +2,26 @@ from __future__ import annotations
 
 import hashlib
 import json
-from pathlib import Path
+from pathlib import Path, PurePosixPath, PureWindowsPath
 from typing import Any, Mapping
 
 from hl_observer.datasets.experiment_plan import CURRENT_EXPERIMENT_PLAN
+from hl_observer.datasets.sqlite_research_source import SAFE_RESEARCH_COLUMNS
 
 CONTRACT_DIR = Path("runtime") / "reports" / "datasets" / "experiment_contracts"
 CURRENT_REPLAY_INPUT_CONTRACT = CONTRACT_DIR / "CURRENT_REPLAY_INPUT_CONTRACT.json"
 CURRENT_REPLAY_INPUT_CONTRACT_MD = CONTRACT_DIR / "CURRENT_REPLAY_INPUT_CONTRACT.md"
+
+_ALLOWED_CRITERIA = {
+    "start_ms",
+    "end_ms",
+    "family",
+    "coin",
+    "wallet",
+    "metric",
+    "require_complete_research",
+    "include_unknown_time",
+}
 
 
 def load_current_experiment_plan(root: str | Path) -> dict[str, Any]:
@@ -32,6 +44,29 @@ def load_current_experiment_plan(root: str | Path) -> dict[str, Any]:
     return raw
 
 
+def _safe_relative_path(value: object, *, label: str) -> str:
+    text = str(value or "").strip().replace("\\", "/")
+    if not text:
+        raise ValueError(f"{label} vide dans le plan d'expérience")
+    posix = PurePosixPath(text)
+    windows = PureWindowsPath(text)
+    if posix.is_absolute() or windows.is_absolute() or windows.drive:
+        raise ValueError(f"{label} absolu refusé dans le contrat: {text}")
+    if any(part in {"..", ""} for part in posix.parts):
+        raise ValueError(f"{label} avec traversée refusé dans le contrat: {text}")
+    normalized = posix.as_posix()
+    if normalized in {".", ""}:
+        raise ValueError(f"{label} invalide dans le contrat: {text}")
+    return normalized
+
+
+def _criteria(plan: Mapping[str, Any]) -> dict[str, Any]:
+    raw = plan.get("criteria")
+    if not isinstance(raw, Mapping):
+        return {}
+    return {key: raw.get(key) for key in sorted(_ALLOWED_CRITERIA) if key in raw}
+
+
 def _research_sources(plan: Mapping[str, Any]) -> list[dict[str, Any]]:
     research = plan.get("research_lab")
     if not isinstance(research, Mapping):
@@ -42,9 +77,7 @@ def _research_sources(plan: Mapping[str, Any]) -> list[dict[str, Any]]:
     for raw in files:
         if not isinstance(raw, Mapping):
             continue
-        relative = str(raw.get("relative_path") or "").strip()
-        if not relative:
-            continue
+        relative = _safe_relative_path(raw.get("relative_path"), label="Chemin Research Lab")
         result.append(
             {
                 "relative_path": relative,
@@ -67,16 +100,23 @@ def _sqlite_sources(plan: Mapping[str, Any]) -> list[dict[str, Any]]:
     for raw in selected:
         if not isinstance(raw, Mapping):
             continue
-        database = str(raw.get("database") or "").strip()
+        database = _safe_relative_path(raw.get("database"), label="Chemin SQLite")
         table = str(raw.get("table") or "").strip()
-        if not database or not table:
-            continue
+        if table not in SAFE_RESEARCH_COLUMNS:
+            raise ValueError(f"Table SQLite non autorisée dans le contrat: {table}")
+        raw_safe_columns = [str(item) for item in (raw.get("safe_columns") or [])]
+        allowed_columns = set(SAFE_RESEARCH_COLUMNS[table])
+        disallowed = [column for column in raw_safe_columns if column not in allowed_columns]
+        if disallowed:
+            raise ValueError(
+                f"Colonnes SQLite non autorisées pour {table}: {', '.join(disallowed)}"
+            )
         filters = raw.get("filters") if isinstance(raw.get("filters"), Mapping) else {}
         result.append(
             {
                 "database": database,
                 "table": table,
-                "safe_columns": [str(item) for item in (raw.get("safe_columns") or [])],
+                "safe_columns": raw_safe_columns,
                 "filters": {
                     "start_ms": filters.get("start_ms"),
                     "end_ms": filters.get("end_ms"),
@@ -99,8 +139,10 @@ def build_replay_input_contract(plan: Mapping[str, Any]) -> dict[str, Any]:
         raise ValueError("Un contrat de replay exige un plan d'expérience READY")
     research = _research_sources(plan)
     sqlite = _sqlite_sources(plan)
-    criteria = dict(plan.get("criteria") or {}) if isinstance(plan.get("criteria"), Mapping) else {}
+    criteria = _criteria(plan)
     provenance = dict(plan.get("provenance") or {}) if isinstance(plan.get("provenance"), Mapping) else {}
+    if not research and not sqlite:
+        raise ValueError("Le plan READY ne contient pourtant aucune source autorisée")
     material = {
         "experiment_digest": plan.get("experiment_digest"),
         "criteria": criteria,
@@ -121,7 +163,7 @@ def build_replay_input_contract(plan: Mapping[str, Any]) -> dict[str, Any]:
         json.dumps(material, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
     ).hexdigest()
     return {
-        "schema": "hypersmart.replay_input_contract.v1",
+        "schema": "hypersmart.replay_input_contract.v2",
         "contract_digest": digest,
         "experiment_digest": plan.get("experiment_digest"),
         "criteria": criteria,
@@ -137,6 +179,7 @@ def build_replay_input_contract(plan: Mapping[str, Any]) -> dict[str, Any]:
         "research_source_count": len(research),
         "sqlite_source_count": len(sqlite),
         "source_count": len(research) + len(sqlite),
+        "paths_relative_to_workspace": True,
         "read_only": True,
         "network_used": False,
         "raw_data_embedded": False,
@@ -153,6 +196,7 @@ def render_contract_markdown(contract: Mapping[str, Any]) -> str:
         f"- Expérience : `{contract.get('experiment_digest')}`",
         f"- Sources Research Lab : **{contract.get('research_source_count', 0)}**",
         f"- Sources SQLite : **{contract.get('sqlite_source_count', 0)}**",
+        "- Tous les chemins sont relatifs au workspace et refusent toute traversée `..`.",
         "- Contrat local/read-only : aucune ligne brute, aucune requête SQL libre, aucun réseau.",
         "",
         "## Research Lab",
