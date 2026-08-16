@@ -2,7 +2,7 @@
 
 Ce module ne lance rien par défaut. Il rend les briques autonomes joignables depuis
 un outil de production versionné dans le dépôt principal et fournit un diagnostic
-simple. Les vrais jobs restent déclenchés par le plan de contrôle privé.
+simple. Les vrais jobs restent déclenchés par le plan de contrôle GitHub/self-hosted.
 """
 from __future__ import annotations
 
@@ -15,19 +15,23 @@ from hl_observer.ops import autonomous_research_brain
 from hl_observer.ops import autonomous_research_guard
 from hl_observer.ops import autonomous_research_job
 from hl_observer.ops import autonomous_research_status
+from hl_observer.ops import self_hosted_control
 
 
 def _check_payload() -> dict[str, object]:
     return {
-        "schema": "alina.autonomous_lab_entrypoint.v1",
+        "schema": "alina.autonomous_lab_entrypoint.v2",
         "job_schema": autonomous_research_job.SCHEMA,
+        "control_schema": self_hosted_control.CONTROL_SCHEMA,
         "max_cycle_seconds": autonomous_research_guard.MAX_ALLOWED_SECONDS,
         "status_schema": autonomous_research_status.SCHEMA,
         "brain_module": autonomous_research_brain.__name__,
         "max_data_module": max_data_policy.__name__,
+        "self_hosted_control_module": self_hosted_control.__name__,
         "target_net_usd_per_family": max_data_policy.TARGET_NET_USD_PER_FAMILY,
         "paper_only": True,
         "real_execution": False,
+        "self_hosted_ready_in_code": True,
     }
 
 
@@ -43,6 +47,11 @@ def main(argv: Iterable[str] | None = None) -> int:
     brain.add_argument("args", nargs=argparse.REMAINDER)
     job = sub.add_parser("job", help="Délègue au worker autonome validé.")
     job.add_argument("args", nargs=argparse.REMAINDER)
+    control = sub.add_parser(
+        "control",
+        help="Canonise une commande GitHub en requête worker self-hosted verrouillée.",
+    )
+    control.add_argument("args", nargs=argparse.REMAINDER)
     max_data = sub.add_parser(
         "max-data",
         help="Délègue à la politique MAX DATA avec garde disque et objectifs économiques séparés.",
@@ -59,6 +68,8 @@ def main(argv: Iterable[str] | None = None) -> int:
         return autonomous_research_brain.main(args.args)
     if args.command == "job":
         return autonomous_research_job.main(args.args)
+    if args.command == "control":
+        return self_hosted_control.main(args.args)
     if args.command == "max-data":
         return max_data_policy.main(args.args)
     parser.error("commande inconnue")
