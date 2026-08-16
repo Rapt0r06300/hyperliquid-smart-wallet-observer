@@ -70,21 +70,34 @@ goto :apres_plan
 
 :apres_plan
 set "RC=%ERRORLEVEL%"
-if "%RC%"=="0" (
-  echo.
-  echo [OK] Plan d'experience pret.
-  echo Le plan ne copie aucune grosse donnee et ne lance aucun replay.
-  echo Rapport courant :
-  echo   %DATA_ROOT%\runtime\reports\datasets\experiment_plans\CURRENT_EXPERIMENT_PLAN.md
-  goto :fin
-)
+if "%RC%"=="0" goto :contrat
 if "%RC%"=="3" (
   echo.
   echo [NO_MATCH] Le plan est ecrit mais aucune source ne satisfait tous les criteres.
+  echo Aucun contrat de replay READY n'est fabrique.
   echo Verifie le rapport courant avant d'elargir les criteres.
   goto :fin
 )
 goto :erreur_code
+
+:contrat
+echo.
+echo [CONTRAT] Gel des chemins et filtres autorises pour le futur replay...
+"%HYPERSMART_PYTHON%" -m hl_observer.ops.dataset_experiment_contract --root "%DATA_ROOT%"
+set "CONTRACT_RC=%ERRORLEVEL%"
+if not "%CONTRACT_RC%"=="0" (
+  echo [NO_GO] Le plan est READY mais le contrat de replay n'a pas pu etre produit.
+  set "RC=%CONTRACT_RC%"
+  goto :erreur_code
+)
+set "RC=0"
+echo.
+echo [OK] Plan d'experience et contrat de replay prets.
+echo Aucune grosse donnee n'a ete copiee et aucun replay n'a ete lance.
+echo Rapports courants :
+echo   %DATA_ROOT%\runtime\reports\datasets\experiment_plans\CURRENT_EXPERIMENT_PLAN.md
+echo   %DATA_ROOT%\runtime\reports\datasets\experiment_contracts\CURRENT_REPLAY_INPUT_CONTRACT.md
+goto :fin
 
 :usage
 echo Usage :
