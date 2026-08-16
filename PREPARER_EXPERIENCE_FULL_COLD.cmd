@@ -36,14 +36,6 @@ if not defined DATA_ROOT (
   goto :erreur
 )
 
-set "ARGS=--root ^"%DATA_ROOT%^""
-if not "%FAMILY%"=="" set "ARGS=%ARGS% --family ^"%FAMILY%^""
-if not "%COIN%"=="" set "ARGS=%ARGS% --coin ^"%COIN%^""
-if not "%METRIC%"=="" set "ARGS=%ARGS% --metric ^"%METRIC%^""
-if not "%START_MS%"=="" set "ARGS=%ARGS% --start-ms %START_MS%"
-if not "%END_MS%"=="" set "ARGS=%ARGS% --end-ms %END_MS%"
-if not "%WALLET%"=="" set "ARGS=%ARGS% --wallet ^"%WALLET%^""
-
 echo ============================================================
 echo   ALINA SMARTFLOW - PLAN D'EXPERIENCE FULL/COLD
 echo   Suite : %SUITE%
@@ -59,7 +51,24 @@ echo Fin ms  : %END_MS%
 echo Wallet  : %WALLET%
 echo.
 
-call "%HYPERSMART_PYTHON%" -m hl_observer.ops.dataset_experiment_plan %ARGS%
+if "%START_MS%"=="" goto :sans_debut
+if "%END_MS%"=="" goto :debut_seul
+"%HYPERSMART_PYTHON%" -m hl_observer.ops.dataset_experiment_plan --root "%DATA_ROOT%" --family "%FAMILY%" --coin "%COIN%" --metric "%METRIC%" --wallet "%WALLET%" --start-ms %START_MS% --end-ms %END_MS%
+goto :apres_plan
+
+:debut_seul
+"%HYPERSMART_PYTHON%" -m hl_observer.ops.dataset_experiment_plan --root "%DATA_ROOT%" --family "%FAMILY%" --coin "%COIN%" --metric "%METRIC%" --wallet "%WALLET%" --start-ms %START_MS%
+goto :apres_plan
+
+:sans_debut
+if "%END_MS%"=="" goto :sans_periode
+"%HYPERSMART_PYTHON%" -m hl_observer.ops.dataset_experiment_plan --root "%DATA_ROOT%" --family "%FAMILY%" --coin "%COIN%" --metric "%METRIC%" --wallet "%WALLET%" --end-ms %END_MS%
+goto :apres_plan
+
+:sans_periode
+"%HYPERSMART_PYTHON%" -m hl_observer.ops.dataset_experiment_plan --root "%DATA_ROOT%" --family "%FAMILY%" --coin "%COIN%" --metric "%METRIC%" --wallet "%WALLET%"
+
+:apres_plan
 set "RC=%ERRORLEVEL%"
 if "%RC%"=="0" (
   echo.
