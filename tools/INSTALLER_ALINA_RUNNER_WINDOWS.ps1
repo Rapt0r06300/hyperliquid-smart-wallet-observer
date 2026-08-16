@@ -165,6 +165,17 @@ function Initialize-Lab([string]$Root, [string]$RepositoryRoot) {
     $status | ConvertTo-Json -Depth 5 | Set-Content -Path (Join-Path $Root 'status\CURRENT_STATUS.json') -Encoding UTF8
 }
 
+function Configure-RunnerServiceRecovery([System.ServiceProcess.ServiceController]$Service) {
+    Write-Step 'Durcissement du service runner pour les gros runs'
+    Set-Service -Name $Service.Name -StartupType Automatic
+    # Après un crash du runner: reprise à 1 min, puis 1 min, puis 5 min. Le compteur est remis à zéro chaque jour.
+    & sc.exe failure $Service.Name 'reset=' 86400 'actions=' 'restart/60000/restart/60000/restart/300000' | Out-Null
+    if ($LASTEXITCODE -ne 0) { throw 'Impossible de configurer la reprise automatique du service runner.' }
+    & sc.exe failureflag $Service.Name 1 | Out-Null
+    if ($LASTEXITCODE -ne 0) { throw 'Impossible d activer les actions de récupération du service runner.' }
+    Write-Host 'Récupération service : automatique après crash (1 min / 1 min / 5 min).' -ForegroundColor Green
+}
+
 Assert-Admin
 Assert-Python311
 Assert-Command 'git' 'Installe Git for Windows puis relance ce script.'
@@ -221,6 +232,7 @@ $service = Get-Service -ErrorAction SilentlyContinue |
     Where-Object { $_.Name -like 'actions.runner.*' -or $_.DisplayName -like '*GitHub Actions Runner*' } |
     Select-Object -First 1
 if (-not $service) { throw 'Service GitHub Actions Runner non détecté après configuration.' }
+Configure-RunnerServiceRecovery -Service $service
 if ($service.Status -ne 'Running') {
     Start-Service -Name $service.Name
     $service = Get-Service -Name $service.Name
@@ -233,6 +245,7 @@ Write-Host "Service              : $($service.Name) / $($service.Status)" -Foreg
 Write-Host "ALINA_RESEARCH_HOME  : $LabRoot" -ForegroundColor Green
 Write-Host "Cockpit              : $LabRoot\LANCER_COCKPIT_ALINA.cmd" -ForegroundColor Cyan
 Write-Host 'Labels               : self-hosted, Windows, X64, hypersmart, alina' -ForegroundColor Cyan
+Write-Host 'Reprise service      : automatique après crash' -ForegroundColor Cyan
 Write-Host ''
 Write-Host 'Le PC peut maintenant recevoir les gros jobs HyperSmart depuis GitHub.' -ForegroundColor Green
 Write-Host 'Fermer le cockpit ne coupe pas le runner ni les calculs.' -ForegroundColor DarkGray
