@@ -1,11 +1,13 @@
 from __future__ import annotations
 
-import json
-import shutil
-import subprocess
 from pathlib import Path
 from typing import Mapping, Sequence
 
+from hl_observer.datasets.github_api_transport import (
+    GitHubTransportError,
+    download_release_asset,
+    get_json,
+)
 from hl_observer.datasets.github_release_bridge import (
     CORE_METADATA_ASSETS,
     OPTIONAL_METADATA_ASSETS,
@@ -13,37 +15,67 @@ from hl_observer.datasets.github_release_bridge import (
     DEFAULT_REPOSITORY,
     DatasetBridgeError,
     ReleaseAsset,
-    download_asset,
-    load_release,
+    verify_asset,
 )
 
 
-def _gh_path() -> str:
-    gh = shutil.which("gh")
-    if not gh:
-        raise DatasetBridgeError(
-            "GitHub CLI (gh) est introuvable. Impossible de lire la Release privée."
-        )
-    return gh
-
-
 def _gh_json(arguments: Sequence[str]) -> object:
-    process = subprocess.run(
-        [_gh_path(), *arguments],
-        text=True,
-        capture_output=True,
-        encoding="utf-8",
-        errors="replace",
-    )
-    if process.returncode != 0:
-        detail = (process.stderr or process.stdout or "").strip()
-        raise DatasetBridgeError(
-            f"GitHub a refusé la commande ({process.returncode}): {detail}"
-        )
+    """Compatibilité du nom historique; le transport normal est désormais HTTPS+GH_TOKEN."""
+
+    if not arguments:
+        raise DatasetBridgeError("Chemin GitHub absent.")
+    path = str(arguments[-1])
     try:
-        return json.loads(process.stdout)
-    except json.JSONDecodeError as exc:
-        raise DatasetBridgeError("GitHub a renvoyé un JSON illisible.") from exc
+        return get_json(path)
+    except GitHubTransportError as exc:
+        raise DatasetBridgeError(str(exc)) from exc
+
+
+def _load_release(
+    repository: str = DEFAULT_REPOSITORY,
+    release_id: int = DEFAULT_RELEASE_ID,
+) -> dict[str, object]:
+    raw = _gh_json(["api", f"repos/{repository}/releases/{release_id}"])
+    if not isinstance(raw, dict):
+        raise DatasetBridgeError("Réponse GitHub invalide pour la Release HyperSmart.")
+    return raw
+
+
+def _download_asset(
+    asset: ReleaseAsset,
+    destination_dir: Path,
+    *,
+    repository: str,
+    force: bool,
+) -> Path:
+    destination_dir.mkdir(parents=True, exist_ok=True)
+    destination = destination_dir / asset.name
+    if destination.is_file() and not force:
+        try:
+            verify_asset(destination, asset)
+            return destination
+        except DatasetBridgeError:
+            destination.unlink(missing_ok=True)
+
+    if asset.asset_id <= 0:
+        raise DatasetBridgeError(f"Identifiant GitHub invalide pour {asset.name}")
+
+    temporary = destination.with_suffix(destination.suffix + ".part")
+    temporary.unlink(missing_ok=True)
+    try:
+        download_release_asset(
+            repository=repository,
+            asset_id=asset.asset_id,
+            destination=temporary,
+        )
+    except (GitHubTransportError, OSError) as exc:
+        temporary.unlink(missing_ok=True)
+        raise DatasetBridgeError(
+            f"Téléchargement GitHub échoué pour {asset.name}: {exc}"
+        ) from exc
+    temporary.replace(destination)
+    verify_asset(destination, asset)
+    return destination
 
 
 def parse_asset_page(raw: object) -> list[ReleaseAsset]:
@@ -105,7 +137,7 @@ def ensure_release_metadata(
     release_id: int = DEFAULT_RELEASE_ID,
     force: bool = False,
 ) -> tuple[dict[str, object], dict[str, ReleaseAsset], Path]:
-    release = load_release(repository, release_id)
+    release = _load_release(repository, release_id)
     assets = list_all_release_assets(repository, release_id)
     metadata_dir = root / "data" / "hypersmart_datasets" / "metadata"
     metadata_dir.mkdir(parents=True, exist_ok=True)
@@ -117,12 +149,12 @@ def ensure_release_metadata(
         )
 
     for name in CORE_METADATA_ASSETS:
-        download_asset(
+        _download_asset(
             assets[name], metadata_dir, repository=repository, force=force
         )
     for name in OPTIONAL_METADATA_ASSETS:
         if name in assets:
-            download_asset(
+            _download_asset(
                 assets[name], metadata_dir, repository=repository, force=force
             )
     return release, assets, metadata_dir
@@ -134,7 +166,7 @@ def build_release_status(
     repository: str = DEFAULT_REPOSITORY,
     release_id: int = DEFAULT_RELEASE_ID,
 ) -> dict[str, object]:
-    release = load_release(repository, release_id)
+    release = _load_release(repository, release_id)
     assets = list_all_release_assets(repository, release_id)
     return {
         "repository": repository,
