@@ -76,6 +76,21 @@ RESEARCH_LAB_PATTERNS = (
     "histor",
 )
 
+SQLITE_PRIMARY_PATHS = (
+    "runtime/data/hypersmart_simulation_session.sqlite3",
+    "data/hl_observer.sqlite3",
+)
+
+SQLITE_SAFE_SUFFIXES = (".sqlite3",)
+SQLITE_UNSAFE_PATH_PATTERNS = (
+    "corrupt",
+    "broken",
+    "damaged",
+    "quarantine",
+    "invalid",
+    ".git/",
+)
+
 
 def _merge_patterns(*groups: tuple[str, ...]) -> tuple[str, ...]:
     return tuple(dict.fromkeys(item for group in groups for item in group))
@@ -87,6 +102,9 @@ class DatasetSuite:
     label: str
     description: str
     patterns: tuple[str, ...] = ()
+    exact_paths: tuple[str, ...] = ()
+    suffixes: tuple[str, ...] = ()
+    exclude_patterns: tuple[str, ...] = ()
     include_all: bool = False
     runner: str = "inventory_only"
 
@@ -151,6 +169,27 @@ SUITES: dict[str, DatasetSuite] = {
         patterns=RESEARCH_LAB_PATTERNS,
         runner="research_inventory",
     ),
+    "sqlite-core": DatasetSuite(
+        name="sqlite-core",
+        label="Bases SQLite principales",
+        description=(
+            "Les deux grosses bases SQLite canoniques du projet. Les anciennes copies marquées "
+            "corrompues et les sidecars WAL/SHM ne font pas partie de cette suite."
+        ),
+        exact_paths=SQLITE_PRIMARY_PATHS,
+        runner="sqlite_inventory",
+    ),
+    "sqlite-all-safe": DatasetSuite(
+        name="sqlite-all-safe",
+        label="Toutes les bases SQLite saines par leur nom",
+        description=(
+            "Toutes les bases terminant par .sqlite3, hors chemins explicitement marqués "
+            "corrompus/endommages/quarantaine et hors objets internes .git."
+        ),
+        suffixes=SQLITE_SAFE_SUFFIXES,
+        exclude_patterns=SQLITE_UNSAFE_PATH_PATTERNS,
+        runner="sqlite_inventory",
+    ),
     "full-archive": DatasetSuite(
         name="full-archive",
         label="Archive FULL/COLD complète",
@@ -176,10 +215,20 @@ def get_suite(name: str) -> DatasetSuite:
 
 
 def record_matches_suite(record: DatasetRecord, suite: DatasetSuite) -> bool:
+    lowered = record.relative_path.replace("\\", "/").casefold()
     if suite.include_all:
         return True
-    lowered = record.relative_path.casefold()
-    return any(pattern.casefold() in lowered for pattern in suite.patterns)
+    if any(pattern.casefold() in lowered for pattern in suite.exclude_patterns):
+        return False
+    if suite.exact_paths:
+        exact = {path.casefold() for path in suite.exact_paths}
+        if lowered in exact:
+            return True
+    if suite.suffixes and any(lowered.endswith(suffix.casefold()) for suffix in suite.suffixes):
+        return True
+    if suite.patterns and any(pattern.casefold() in lowered for pattern in suite.patterns):
+        return True
+    return False
 
 
 def select_suite_records(
@@ -451,6 +500,8 @@ def render_library_markdown(
             "- `economic-full` est la suite large prioritaire pour les trois moteurs actifs.",
             "- Les suites par famille servent aux recherches ciblées et aux futurs replays dédiés.",
             "- `microstructure-full` et `research-lab-full` alimentent la recherche de nouvelles hypothèses.",
+            "- `sqlite-core` récupère uniquement les deux grosses bases canoniques connues.",
+            "- `sqlite-all-safe` récupère toutes les bases `.sqlite3` dont le nom ne porte pas un marqueur de corruption/quarantaine.",
             "- `full-archive` représente toute la sauvegarde; elle ne doit pas être téléchargée inutilement en bloc.",
             "- Aucun résultat n'est promu sans coûts, séparation temporelle et validation hors échantillon.",
             "",
