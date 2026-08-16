@@ -237,6 +237,19 @@ jobs:
           Write-Host "Code final du worker : $rc"
           exit $rc
 
+      - name: Construire le retour compact pour GitHub et ChatGPT
+        if: always() && steps.build.outputs.result_dir != ''
+        id: compact_return
+        continue-on-error: true
+        shell: powershell
+        run: |
+          py -3.11 -m hl_observer.ops.self_hosted_return --result-dir '${{ steps.build.outputs.result_dir }}'
+          $rc = $LASTEXITCODE
+          "exit_code=$rc" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          "json_path=${{ steps.build.outputs.result_dir }}\ALINA_RETURN.json" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          Write-Host "Code retour compact : $rc"
+          exit $rc
+
       - name: Remonter uniquement les petits rapports vérifiables
         if: always() && steps.build.outputs.result_dir != ''
         id: upload
@@ -259,6 +272,7 @@ jobs:
           $path = Join-Path $statusDir 'GITHUB_SYNC_STATUS.json'
           $tmp = "$path.$PID.tmp"
           $uploadOk = '${{ steps.upload.outcome }}' -eq 'success'
+          $returnOk = '${{ steps.compact_return.outcome }}' -eq 'success'
           $resultDir = '${{ steps.build.outputs.result_dir }}'
           $reportCount = 0
           if (-not [string]::IsNullOrWhiteSpace($resultDir) -and (Test-Path $resultDir -PathType Container)) {
@@ -271,6 +285,8 @@ jobs:
             github_run_id = $env:GITHUB_RUN_ID
             github_sha = $env:GITHUB_SHA
             results_sent = $uploadOk
+            compact_return_ready = $returnOk
+            compact_return_file = if ($returnOk) { 'ALINA_RETURN.json' } else { $null }
             report_count = $reportCount
             artifact_id = '${{ steps.upload.outputs.artifact-id }}'
             artifact_url = '${{ steps.upload.outputs.artifact-url }}'
@@ -279,7 +295,7 @@ jobs:
             waiting_for_analysis = $true
             requeued = $false
             gross_logs_stay_local = $true
-            message_fr = if ($uploadOk) { 'Les petits rapports du cycle sont disponibles sur GitHub; les gros logs restent sur le PC.' } else { 'La remontée GitHub des rapports doit être vérifiée.' }
+            message_fr = if ($uploadOk -and $returnOk) { 'Le retour compact et les petits rapports sont disponibles sur GitHub; les gros logs restent sur le PC.' } elseif ($uploadOk) { 'Les rapports sont sur GitHub mais le retour compact doit être vérifié.' } else { 'La remontée GitHub des rapports doit être vérifiée.' }
           }
           $payload | ConvertTo-Json -Depth 5 | Set-Content -Path $tmp -Encoding UTF8
           Move-Item -Path $tmp -Destination $path -Force
@@ -290,7 +306,11 @@ jobs:
         run: |
           Write-Host "Worker outcome : ${{ steps.research.outcome }}"
           Write-Host "Worker exit code : ${{ steps.research.outputs.exit_code }}"
+          Write-Host "Retour compact : ${{ steps.compact_return.outcome }}"
           Write-Host "Artifact : ${{ steps.upload.outputs.artifact-url }}"
           if ('${{ steps.research.outcome }}' -ne 'success') {
             throw 'Le gros run HyperSmart n a pas terminé avec succès. Les preuves disponibles ont tout de même été remontées.'
+          }
+          if ('${{ steps.compact_return.outcome }}' -ne 'success') {
+            throw 'Le calcul a terminé mais le retour compact GitHub/ChatGPT a échoué. Les autres preuves restent disponibles.'
           }
