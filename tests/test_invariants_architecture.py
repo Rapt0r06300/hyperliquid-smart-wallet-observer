@@ -73,8 +73,12 @@ def test_pas_de_nouveau_doublon_de_nom():
 def test_pas_de_nouvel_orphelin():
     """#8 : un module que personne n'atteint est du code mort — on n'en ajoute plus."""
     r = _audit.classer()
-    n = len(r["cat"]["ORPHELIN"])
-    assert n <= MAX_ORPHELINS, "nouveaux orphelins (%d > %d)" % (n, MAX_ORPHELINS)
+    orphelins = sorted(r["cat"]["ORPHELIN"])
+    n = len(orphelins)
+    assert n <= MAX_ORPHELINS, (
+        "nouveaux orphelins (%d > %d). Liste complète pour corriger le câblage au lieu de relever le plafond :\n- %s"
+        % (n, MAX_ORPHELINS, "\n- ".join(orphelins))
+    )
 
 
 def test_pas_de_nouveau_fichier_geant():
