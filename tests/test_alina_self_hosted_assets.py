@@ -29,6 +29,14 @@ def test_workflow_cible_uniquement_le_runner_windows_hypersmart() -> None:
     assert "cancel-in-progress: false" in text
 
 
+def test_les_commandes_versionnees_sont_immuables() -> None:
+    text = _text(WORKFLOW)
+    assert "git diff-tree --no-commit-id --name-status" in text
+    assert "COMMANDES_IMMUABLES" in text
+    assert "$parts[0] -ne 'A'" in text
+    assert "un job doit être un nouveau JSON ajouté" in text
+
+
 def test_workflow_garde_des_permissions_minimales_et_ne_push_pas() -> None:
     text = _text(WORKFLOW)
     assert "permissions:\n  contents: read" in text
