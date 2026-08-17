@@ -5,7 +5,8 @@ preuves de code/tests 001-100, que les drapeaux d'exécution réelle sont désar
 le dépôt est identifiable, que la configuration ne contient pas de wallet/clé et que
 les incidents runtime bloquants déjà présents ne sont pas masqués.
 
-Il produit un JSON compact réutilisable par CI et par les futurs rehearsals.
+La lecture est non-mutante ; seule l'écriture explicite du rapport de sortie crée un
+fichier. Aucun dossier runtime n'est créé simplement pour constater son absence.
 """
 from __future__ import annotations
 
@@ -19,7 +20,7 @@ from hl_observer.audit.pre_run_001_100 import inspect_coverage
 from hl_observer.runtime.protections import JournalIncidents, manifeste_execution
 from hl_observer.runtime.research_guardrails import verifier_absence_wallet, verifier_plan_websockets
 
-SCHEMA_VERSION = "hypersmart.pre_run_guard_001_100.v1"
+SCHEMA_VERSION = "hypersmart.pre_run_guard_001_100.v2"
 DEFAULT_OUTPUT = Path("runtime") / "reports" / "pre_run_001_100.json"
 
 EXECUTION_FLAGS = (
@@ -77,7 +78,7 @@ def build_report(
     execution = _execution_flag_report(env)
     wallet = _wallet_report(env)
     provenance = manifeste_execution(base, gate="001-100")
-    incidents = JournalIncidents(base / "runtime" / "operational").resume()
+    incidents = JournalIncidents(base / "runtime" / "operational", create=False).resume()
     websocket_guard = verifier_plan_websockets(1, nouvelles_par_minute=1, subscriptions=10, users_uniques=1)
 
     blockers: list[str] = []
