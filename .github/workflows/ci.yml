@@ -8,6 +8,9 @@ on:
     branches: [main]
   workflow_dispatch: {}
 
+permissions:
+  contents: read
+
 concurrency:
   group: hypersmart-ci-${{ github.ref }}
   cancel-in-progress: true
@@ -26,8 +29,10 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
         with:
           python-version: '3.11'
           cache: pip
@@ -70,7 +75,7 @@ jobs:
           python -m hl_observer audit-safety
       - name: Partition des shards valide
         run: python tools/ci_shard.py 1 6 --verifier
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         if: always()
         with:
           name: junit-securite
@@ -87,8 +92,10 @@ jobs:
       matrix:
         shard: [1, 2, 3, 4, 5, 6]
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
         with:
           python-version: '3.11'
           cache: pip
@@ -103,7 +110,7 @@ jobs:
           if [ -z "$FICHIERS" ]; then echo "shard vide"; exit 0; fi
           python -m pytest -q -p no:cacheprovider \
             --junitxml=junit-shard-${{ matrix.shard }}.xml $FICHIERS
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         if: always()
         with:
           name: junit-linux-shard-${{ matrix.shard }}
@@ -116,8 +123,10 @@ jobs:
     needs: securite
     timeout-minutes: 45
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
         with:
           python-version: '3.11'
           cache: pip
@@ -169,7 +178,7 @@ jobs:
         run: |
           python -m hl_observer safety-audit
           python -m hl_observer audit-safety
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         if: always()
         with:
           name: junit-windows
@@ -182,8 +191,10 @@ jobs:
     needs: securite
     timeout-minutes: 20
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
         with:
           python-version: '3.11'
           cache: pip
@@ -270,7 +281,7 @@ jobs:
             tests/test_e2e_lanceur_harvest.py \
             tests/test_collecter_dydx_live.py \
             tests/dydx_v4/test_persistance_flux_live.py
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         if: always()
         with:
           name: junit-runtime-replay
