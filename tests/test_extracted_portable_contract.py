@@ -4,6 +4,17 @@ import importlib
 import os
 from pathlib import Path
 
+import pytest
+
+
+PORTABLE_CONTRACT_ENV = "HYPERSMART_EXTRACTED_PORTABLE_TEST"
+pytestmark = pytest.mark.skipif(
+    os.environ.get(PORTABLE_CONTRACT_ENV) != "1",
+    reason=(
+        "Contrat réservé à l'archive Windows déjà extraite; "
+        f"{PORTABLE_CONTRACT_ENV}=1 est posé uniquement par le workflow portable."
+    ),
+)
 
 ROOT = Path.cwd().resolve()
 

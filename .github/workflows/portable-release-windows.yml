@@ -79,6 +79,10 @@ jobs:
       - name: Build twice and validate the extracted ZIP
         id: release
         shell: pwsh
+        env:
+          # Le test du contrat portable ne doit s'activer que dans cette chaîne
+          # qui construit puis extrait réellement le runtime Windows embarqué.
+          HYPERSMART_EXTRACTED_PORTABLE_TEST: "1"
         run: |
           # The space is deliberate: this is a real regression gate for CMD/PowerShell path quoting.
           $releaseDir = Join-Path $env:RUNNER_TEMP "hypersmart portable release"
