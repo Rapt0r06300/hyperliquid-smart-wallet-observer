@@ -47,6 +47,23 @@ def test_journal_incidents_resume_en_streaming(tmp_path, monkeypatch):
     assert resume["promotion_interdite"] is True
 
 
+def test_journal_read_only_absent_ne_cree_aucun_dossier(tmp_path):
+    dossier = tmp_path / "absent"
+    journal = JournalIncidents(dossier, create=False)
+    assert journal.resume() == {
+        "n_incidents": 0,
+        "par_type": {},
+        "promotion_interdite": False,
+    }
+    assert not dossier.exists()
+    try:
+        journal.enregistrer("WS_GAP")
+    except RuntimeError as exc:
+        assert "read-only" in str(exc)
+    else:
+        raise AssertionError("un lecteur read-only ne doit jamais pouvoir ecrire")
+
+
 def test_journal_refuse_taxonomie_floue(tmp_path):
     journal = JournalIncidents(tmp_path / "op")
     try:
