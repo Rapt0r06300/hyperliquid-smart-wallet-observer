@@ -36,6 +36,18 @@ def test_dedup_source_independent_preserve_la_preuve_live_placee_en_premier():
     assert VB.fill_identity(live) == VB.fill_identity(rest)
 
 
+def test_dedup_legacy_live_sans_horloge_ne_remplace_jamais_rest():
+    common = {
+        "vault": "0xA", "ts_ms": 1000, "coin": "SOL", "px": 150.0,
+        "sz": 10.0, "dir": "Open Long", "hash": "0xfill",
+    }
+    legacy_live = {**common, "source": "LIVE_WS", "isSnapshot": False}
+    rest = {**common, "source": "REST_BACKFILL", "oid": 99, "tid": 7}
+
+    assert VB.dedupliquer([legacy_live, rest]) == [rest]
+    assert VB.dedupliquer([rest, legacy_live]) == [rest]
+
+
 def test_reconstruire_open_add_reduce_close():
     fills = VB.parser_fills([
         {"time": 1, "coin": "SOL", "px": "100", "sz": "10", "side": "B", "dir": "Open Long", "startPosition": "0"},

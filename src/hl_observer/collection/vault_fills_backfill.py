@@ -98,8 +98,9 @@ def fill_identity(fill: dict) -> tuple:
 def _preuve_fill_score(fill: dict) -> tuple[int, int, int]:
     """Préférence déterministe pour conserver la meilleure preuve d'un doublon.
 
-    Un même fill peut arriver du REST puis du WS (ou l'inverse). L'ordre de
-    lecture ne doit jamais décider si la preuve causale LIVE est conservée.
+    Hiérarchie fail-closed : WS causal certifié > source non-live/REST > ancien
+    WS sans horloge de réception valide. Un label ``LIVE_WS`` seul ne suffit
+    jamais à remplacer une preuve historique certifiable.
     """
     source = str(fill.get("source") or "").upper()
     live = source == "LIVE_WS"
@@ -111,7 +112,9 @@ def _preuve_fill_score(fill: dict) -> tuple[int, int, int]:
     except (TypeError, ValueError, OverflowError):
         causal_live = False
     refs = sum(fill.get(name) not in (None, "") for name in ("hash", "tid", "oid", "stable_event_id"))
-    return (1 if causal_live else 0, 1 if live else 0, refs)
+    proof_tier = 2 if causal_live else (0 if live else 1)
+    explicit_rest = 1 if source == "REST_BACKFILL" else 0
+    return (proof_tier, refs, explicit_rest)
 
 
 def dedupliquer(fills: list[dict]) -> list[dict]:
