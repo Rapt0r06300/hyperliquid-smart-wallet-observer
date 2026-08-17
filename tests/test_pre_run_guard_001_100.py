@@ -51,26 +51,19 @@ def test_gate_bloque_un_secret_dans_environnement():
     assert "WALLET_OR_SECRET_CONFIGURATION_PRESENT" in report["blockers"]
 
 
-def test_gate_bloque_incident_runtime_bloquant(tmp_path):
-    # Copie minimale de la structure de preuve : on utilise le vrai root pour coverage,
-    # mais vérifie séparément le comportement via le répertoire operational temporaire
-    # en monkeypatchant ROOT serait fragile ; le contrat incident est déjà couvert par
-    # test_runtime_protections. Ici on vérifie qu'il est bien exposé dans le rapport sain.
+def test_gate_expose_les_incidents_runtime_sans_les_masquer():
     report = build_report(ROOT, environ=_safe_env())
     assert "runtime_incidents" in report
     assert "promotion_interdite" in report["runtime_incidents"]
 
 
-def test_cli_ecrit_un_json_et_exit_zero_sur_head_sain(tmp_path):
+def test_cli_ecrit_un_json_local_paper_only(tmp_path):
     output = tmp_path / "pre_run.json"
-    # L'environnement du runner de test est normalement paper-only. On neutralise ici
-    # explicitement les flags par monkeypatch dans le test dédié de build_report ; la
-    # CLI elle-même est testée sur le contrat de sortie sans require-clean-git.
     rc = main(["--root", str(ROOT), "--output", str(output)])
     assert rc in {0, 2}
     assert output.is_file()
     text = output.read_text(encoding="utf-8")
-    assert '"schema_version": "hypersmart.pre_run_guard_001_100.v1"' in text
+    assert '"schema_version": "hypersmart.pre_run_guard_001_100.v2"' in text
     assert '"real_execution": false' in text
 
 
