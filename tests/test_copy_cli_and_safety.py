@@ -74,6 +74,7 @@ def test_throughput_plan_cli_refuses_bypass_and_keeps_safe_rotation():
     assert "BYPASS_OVERRIDE_ACTIVE" not in override.output
     assert "execution=forbidden" in override.output
     assert rotated.exit_code == 0
+    assert "scanner_starts=yes" in rotated.output
     assert "SAFE_ROTATION_ACTIVE" in rotated.output
     assert "execution=forbidden" in rotated.output
 
