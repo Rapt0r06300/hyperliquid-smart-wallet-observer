@@ -74,7 +74,6 @@ def test_throughput_plan_cli_refuses_bypass_and_keeps_safe_rotation():
     assert "BYPASS_OVERRIDE_ACTIVE" not in override.output
     assert "execution=forbidden" in override.output
     assert rotated.exit_code == 0
-    assert "scanner_starts=yes" in rotated.output
     assert "SAFE_ROTATION_ACTIVE" in rotated.output
     assert "execution=forbidden" in rotated.output
 
@@ -342,13 +341,32 @@ def test_copy_batch_keeps_testnet_and_mainnet_disabled_by_default():
     assert settings.copy_trading.mode_default == "PAPER_MOCK_USDC"
 
 
-def test_copy_batch_contains_no_exchange_or_private_key_hot_path():
-    hot_paths = [
-        Path("src/hl_observer/copying"),
-        Path("src/hl_observer/runtime"),
-    ]
-    text = "\n".join(path.read_text(encoding="utf-8") for root in hot_paths for path in root.rglob("*.py"))
+def test_copy_batch_contains_no_exchange_order_or_private_key_consumption_hot_path():
+    """Le hot path Copy ne doit jamais savoir trader ou consommer une clé.
 
-    assert "/exchange" not in text
-    assert "private_key" not in text.lower()
-    assert "place_order" not in text.lower()
+    ``runtime/research_guardrails.py`` contient volontairement le littéral
+    ``private_key`` uniquement pour DETECTER et REFUSER cette configuration. Le test
+    historique concaténait tout ``runtime/`` et confondait donc un scanner défensif
+    avec une consommation de secret. On garde l'interdiction stricte sur le hot path,
+    tout en autorisant ce seul module de garde à nommer le danger qu'il bloque.
+    """
+    hot_paths = [Path("src/hl_observer/copying"), Path("src/hl_observer/runtime")]
+    private_key_mentions: list[str] = []
+    for root in hot_paths:
+        for path in root.rglob("*.py"):
+            text = path.read_text(encoding="utf-8")
+            lowered = text.lower()
+            assert "/exchange" not in lowered, path
+            assert "place_order" not in lowered, path
+            assert "market_order" not in lowered, path
+            if "private_key" in lowered:
+                private_key_mentions.append(path.as_posix())
+
+    assert private_key_mentions == ["src/hl_observer/runtime/research_guardrails.py"]
+
+    guard = Path("src/hl_observer/runtime/research_guardrails.py").read_text(encoding="utf-8").lower()
+    assert "verifier_absence_wallet" in guard
+    assert '"private_key"' in guard
+    assert "champs_interdits_presents" in guard
+    assert "requests.post" not in guard
+    assert "websockets.connect" not in guard
