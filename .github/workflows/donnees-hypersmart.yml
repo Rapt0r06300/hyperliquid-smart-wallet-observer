@@ -6,7 +6,10 @@ on:
     paths:
       - 'src/hl_observer/datasets/**'
       - 'src/hl_observer/ops/dataset_*.py'
+      - 'src/hl_observer/ops/autonomous_completion.py'
+      - 'src/hl_observer/ops/autonomous_economic_state.py'
       - 'src/hl_observer/ops/autonomous_research_job.py'
+      - 'src/hl_observer/ops/autonomous_research_job_router.py'
       - 'src/hl_observer/ops/autonomous_research_guard.py'
       - 'src/hl_observer/ops/autonomous_research_brain.py'
       - 'src/hl_observer/ops/autonomous_research_status.py'
@@ -21,6 +24,8 @@ on:
       - 'tools/INSTALLER_ALINA_RUNNER_WINDOWS.ps1'
       - 'tools/VERIFIER_ALINA_RUNNER_WINDOWS.ps1'
       - 'tests/test_dataset_*.py'
+      - 'tests/test_autonomous_*.py'
+      - 'tests/test_max_data_*.py'
       - 'tests/test_recherche_adaptative_stricte.py'
       - 'tests/test_alina_self_hosted_*.py'
       - 'PREPARER_DONNEES_HYPERSMART.cmd'
@@ -44,67 +49,6 @@ on:
 jobs:
   test-linux:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: '3.11'
-      - name: Installer le projet
-        run: |
-          pip install -e .
-          pip install pytest
-      - name: Tester tout le pont de donnees sans reseau
-        run: |
-          pytest -q \
-            tests/test_dataset_release_bridge.py \
-            tests/test_dataset_release_gateway.py \
-            tests/test_dataset_catalog_profiler.py \
-            tests/test_dataset_replay_workspace.py \
-            tests/test_dataset_economic_preset.py \
-            tests/test_dataset_progress_downloader.py \
-            tests/test_dataset_result_export.py \
-            tests/test_dataset_launchers.py \
-            tests/test_dataset_archive_library.py \
-            tests/test_dataset_lab_launcher.py \
-            tests/test_dataset_source_discovery.py \
-            tests/test_dataset_research_runner.py \
-            tests/test_dataset_economic_source_wiring.py \
-            tests/test_dataset_economic_multi_source.py \
-            tests/test_dataset_economic_runner_wrapper.py \
-            tests/test_dataset_sqlite_profiler.py \
-            tests/test_dataset_sqlite_inventory.py \
-            tests/test_dataset_sqlite_research_source.py \
-            tests/test_dataset_sqlite_research.py \
-            tests/test_dataset_research_lab_stream.py \
-            tests/test_dataset_research_lab_gzip_progress.py \
-            tests/test_dataset_research_inventory.py \
-            tests/test_dataset_connection_audit.py \
-            tests/test_dataset_connection_audit_cli.py \
-            tests/test_dataset_research_lab_selector.py \
-            tests/test_dataset_research_select.py \
-            tests/test_dataset_experiment_plan.py \
-            tests/test_dataset_experiment_plan_cli.py \
-            tests/test_dataset_experiment_contract.py \
-            tests/test_dataset_experiment_contract_cli.py \
-            tests/test_dataset_experiment_contract_verifier.py \
-            tests/test_dataset_experiment_contract_verify_cli.py \
-            tests/test_dataset_experiment_pipeline.py \
-            tests/test_dataset_experiment_launcher.py \
-            tests/test_dataset_autonomous_research_job.py \
-            tests/test_dataset_autonomous_research_guard.py \
-            tests/test_dataset_autonomous_research_brain.py \
-            tests/test_dataset_autonomous_research_status.py \
-            tests/test_dataset_cli_entrypoints.py \
-            tests/test_recherche_adaptative_stricte.py \
-            tests/test_dataset_ci_coverage.py \
-            tests/test_alina_self_hosted_control.py \
-            tests/test_alina_self_hosted_assets.py \
-            tests/test_alina_self_hosted_entrypoint.py \
-            tests/test_alina_self_hosted_return.py
-
-  test-windows:
-    runs-on: windows-latest
     timeout-minutes: 25
     steps:
       - uses: actions/checkout@v4
@@ -112,55 +56,57 @@ jobs:
         with:
           python-version: '3.11'
       - name: Installer le projet
+        run: |
+          pip install -e .
+          pip install pytest
+      - name: Tester tout le pont de donnees sans reseau
+        env:
+          PYTHONPATH: src:tools
+        run: |
+          mapfile -t DATASET_TESTS < <(find tests -maxdepth 1 -type f -name 'test_dataset_*.py' -print | sort)
+          if [ "${#DATASET_TESTS[@]}" -eq 0 ]; then
+            echo "Aucun test dataset découvert sur Linux"
+            exit 1
+          fi
+          echo "Dataset tests Linux: ${#DATASET_TESTS[@]}"
+          pytest -q "${DATASET_TESTS[@]}" \
+            tests/test_autonomous_completion_contract.py \
+            tests/test_autonomous_research_job_router.py \
+            tests/test_max_data_router.py \
+            tests/test_recherche_adaptative_stricte.py \
+            tests/test_alina_self_hosted_control.py \
+            tests/test_alina_self_hosted_assets.py \
+            tests/test_alina_self_hosted_entrypoint.py \
+            tests/test_alina_self_hosted_return.py
+
+  test-windows:
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Installer le projet
         shell: powershell
         run: |
           pip install -e .
           pip install pytest
       - name: Tester tout le pont de donnees sans reseau
         shell: powershell
+        env:
+          PYTHONPATH: src;tools
         run: |
-          pytest -q `
-            tests/test_dataset_release_bridge.py `
-            tests/test_dataset_release_gateway.py `
-            tests/test_dataset_catalog_profiler.py `
-            tests/test_dataset_replay_workspace.py `
-            tests/test_dataset_economic_preset.py `
-            tests/test_dataset_progress_downloader.py `
-            tests/test_dataset_result_export.py `
-            tests/test_dataset_launchers.py `
-            tests/test_dataset_archive_library.py `
-            tests/test_dataset_lab_launcher.py `
-            tests/test_dataset_source_discovery.py `
-            tests/test_dataset_research_runner.py `
-            tests/test_dataset_economic_source_wiring.py `
-            tests/test_dataset_economic_multi_source.py `
-            tests/test_dataset_economic_runner_wrapper.py `
-            tests/test_dataset_sqlite_profiler.py `
-            tests/test_dataset_sqlite_inventory.py `
-            tests/test_dataset_sqlite_research_source.py `
-            tests/test_dataset_sqlite_research.py `
-            tests/test_dataset_research_lab_stream.py `
-            tests/test_dataset_research_lab_gzip_progress.py `
-            tests/test_dataset_research_inventory.py `
-            tests/test_dataset_connection_audit.py `
-            tests/test_dataset_connection_audit_cli.py `
-            tests/test_dataset_research_lab_selector.py `
-            tests/test_dataset_research_select.py `
-            tests/test_dataset_experiment_plan.py `
-            tests/test_dataset_experiment_plan_cli.py `
-            tests/test_dataset_experiment_contract.py `
-            tests/test_dataset_experiment_contract_cli.py `
-            tests/test_dataset_experiment_contract_verifier.py `
-            tests/test_dataset_experiment_contract_verify_cli.py `
-            tests/test_dataset_experiment_pipeline.py `
-            tests/test_dataset_experiment_launcher.py `
-            tests/test_dataset_autonomous_research_job.py `
-            tests/test_dataset_autonomous_research_guard.py `
-            tests/test_dataset_autonomous_research_brain.py `
-            tests/test_dataset_autonomous_research_status.py `
-            tests/test_dataset_cli_entrypoints.py `
+          $datasetTests = @(Get-ChildItem -LiteralPath tests -Filter 'test_dataset_*.py' -File | Sort-Object Name | ForEach-Object { $_.FullName })
+          if ($datasetTests.Count -eq 0) {
+            throw 'Aucun test dataset découvert sur Windows'
+          }
+          Write-Host "Dataset tests Windows: $($datasetTests.Count)"
+          pytest -q @datasetTests `
+            tests/test_autonomous_completion_contract.py `
+            tests/test_autonomous_research_job_router.py `
+            tests/test_max_data_router.py `
             tests/test_recherche_adaptative_stricte.py `
-            tests/test_dataset_ci_coverage.py `
             tests/test_alina_self_hosted_control.py `
             tests/test_alina_self_hosted_assets.py `
             tests/test_alina_self_hosted_entrypoint.py `
