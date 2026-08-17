@@ -11,7 +11,10 @@ from collections.abc import Iterable
 from pathlib import Path
 from typing import Any
 
-from hl_observer.backtesting import copy_vault_executable as _base
+# Keep this import-free from copy_vault_executable: that module re-exports this
+# loader, so importing it here creates a circular import in a cold interpreter.
+# A regression test asserts equality with the canonical protocol constant.
+MAX_TARGET_LAG_MS = 30_000
 
 
 def load_observed_books(
@@ -110,7 +113,7 @@ def load_observed_books(
                         and raw.get("data_origin") == "REAL_OBSERVED"
                         and raw.get("causal_observation") is True
                         and received >= exchange_ts > 0
-                        and received - exchange_ts <= _base.MAX_TARGET_LAG_MS
+                        and received - exchange_ts <= MAX_TARGET_LAG_MS
                     )
                     if not causal:
                         invalid += 1
@@ -144,3 +147,6 @@ def load_observed_books(
         ),
         "capacity_semantics": "minimum_USD_across_HL_and_reference_venue_bid_ask",
     }
+
+
+__all__ = ["MAX_TARGET_LAG_MS", "load_observed_books"]

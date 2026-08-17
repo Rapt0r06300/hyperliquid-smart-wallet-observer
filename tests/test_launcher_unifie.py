@@ -149,8 +149,8 @@ def test_la_racine_contient_les_deux_lanceurs_officiels():
     """Runtime et analyses historiques ont chacun un lanceur explicite.
 
     Les outils de recherche/maintenance restent autorises a la racine mais ne
-    deviennent pas des demarrages runtime concurrents. Les cinq lanceurs
-    FULL/COLD sont des outils paper/read-only de preparation/replay/labo : ils
+    deviennent pas des demarrages runtime concurrents. Les lanceurs FULL/COLD
+    et Alina sont des outils paper/read-only de preparation/replay/labo : ils
     ne deviennent pas des runtimes concurrents.
     """
     cmd_racine = {p.name for p in RACINE.glob("*.cmd")}
@@ -180,5 +180,8 @@ def test_la_racine_contient_les_deux_lanceurs_officiels():
         "LANCER_REPLAY_176GO.cmd",
         "PREPARER_DONNEES_HYPERSMART.cmd",
         "ANALYSER_DONNEES_HYPERSMART.cmd",
+        "INSTALLER_ALINA_RUNNER_WINDOWS.cmd",
+        "PREPARER_PC_ALINA.cmd",
+        "LANCER_COCKPIT_ALINA.cmd",
     }
     assert cmd_racine <= officiels | outils_conserves
