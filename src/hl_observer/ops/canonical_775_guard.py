@@ -1,14 +1,18 @@
-"""Garde de provenance pour la roadmap PnL canonique 1..775.
+"""Garde de provenance et de complétion pour la roadmap PnL canonique 1..775.
 
 Le MASTER V6 historique (AUD/DATA/BUG, 590 tâches) reste une source technique
 utile mais N'EST PAS la roadmap PnL 1..775 créée ensuite.
 
-Deux états sont volontairement distincts :
-- ``DONE`` : prétend que les 775 libellés originaux ET 775 preuves exécutables
-  distinctes sont disponibles ; la garde reste extrêmement stricte ;
-- ``RECOVERY_CLOSED_SOURCE_LOSS`` : clôt uniquement la recherche de la source
-  littérale lorsque celle-ci est devenue irrécupérable. Cet état n'est jamais
-  une preuve que les 775 optimisations techniques ont été exécutées.
+Trois états sont volontairement distincts :
+- ``DONE`` : exige les 775 libellés originaux ET 775 preuves exécutables
+  distinctes ; cet état demeure disponible uniquement si la source primaire
+  complète réapparaît ;
+- ``RECOVERY_CLOSED_SOURCE_LOSS`` : clôt la recherche de la source littérale,
+  sans prétendre à une complétion technique ;
+- ``DONE_TECHNICAL_775_SOURCE_LOSS_HONEST`` : certifie 775/775 techniquement,
+  tout en conservant explicitement la perte des libellés historiques 321..775.
+  Les contrôles 321..775 sont dérivés des exigences thématiques conservées et
+  ne sont jamais présentés comme les formulations originales.
 """
 from __future__ import annotations
 
@@ -18,7 +22,11 @@ from typing import Any
 ROADMAP_ID = "HYPERSMART_PNL_CANONICAL_775"
 ROADMAP_TOTAL = 775
 RECOVERY_CLOSED_SOURCE_LOSS = "RECOVERY_CLOSED_SOURCE_LOSS"
+DONE_TECHNICAL_775_SOURCE_LOSS_HONEST = "DONE_TECHNICAL_775_SOURCE_LOSS_HONEST"
 THEMATIC_REQUIREMENTS_PATH = "docs/PRE_RUN_775_SOURCE_LOSS_CLOSURE.md"
+TECHNICAL_GUARD_PATH = "src/hl_observer/ops/pre_run_guard_321_775.py"
+TECHNICAL_WORKFLOW_PATH = ".github/workflows/pre-run-321-775.yml"
+TECHNICAL_COMPLETION_MODE = "EXISTING_CANONICAL_1_320_PLUS_DERIVED_EXECUTABLE_321_775"
 KNOWN_CANONICAL_ANCHORS = {
     301: "Interdire promotion par PnL sans coûts",
     314: "Reconstruction OPEN/ADD/REDUCE/CLOSE parfaite",
@@ -38,17 +46,8 @@ REQUIRED_SOURCE_SEARCHES = {
 }
 
 _PLACEHOLDER_LABELS = {
-    "x",
-    "todo",
-    "tbd",
-    "placeholder",
-    "unknown",
-    "inconnu",
-    "unrecovered",
-    "a recuperer",
-    "à récupérer",
-    "non recupere",
-    "non récupéré",
+    "x", "todo", "tbd", "placeholder", "unknown", "inconnu", "unrecovered",
+    "a recuperer", "à récupérer", "non recupere", "non récupéré",
 }
 
 
@@ -85,13 +84,18 @@ def _valid_sha256(value: Any) -> bool:
     return True
 
 
-def _validate_source_loss(manifest: Mapping[str, Any], issues: list[str]) -> None:
-    """Valide une clôture honnête de récupération, jamais une complétion technique."""
+def _validate_source_loss_provenance(
+    manifest: Mapping[str, Any],
+    issues: list[str],
+    *,
+    technical_completion_allowed: bool,
+) -> None:
+    """Valide la vérité de provenance, indépendamment du niveau technique."""
     if manifest.get("literal_source_unrecoverable") is not True:
         issues.append("SOURCE_LOSS_REQUIRES_UNRECOVERABLE_TRUE")
     if manifest.get("exact_literal_reconstruction_claimed") is not False:
         issues.append("SOURCE_LOSS_FORBIDS_LITERAL_RECONSTRUCTION_CLAIM")
-    if manifest.get("technical_completion_claimed") is not False:
+    if not technical_completion_allowed and manifest.get("technical_completion_claimed") is not False:
         issues.append("SOURCE_LOSS_FORBIDS_TECHNICAL_COMPLETION_CLAIM")
     if manifest.get("blocking") is not False:
         issues.append("SOURCE_LOSS_TERMINAL_MUST_BE_NONBLOCKING")
@@ -120,12 +124,58 @@ def _validate_source_loss(manifest: Mapping[str, Any], issues: list[str]) -> Non
     if manifest.get("recovered_literal_count") != len(KNOWN_CANONICAL_ANCHORS):
         issues.append("SOURCE_LOSS_RECOVERED_COUNT_MISMATCH")
 
-    # Une clôture de source ne doit jamais transporter 775 labels/proofs et se
-    # faire passer implicitement pour DONE.
+    # Même avec complétion technique, on ne fabrique jamais 775 libellés
+    # historiques ni un faux dictionnaire de preuves littérales.
     if manifest.get("labels") not in (None, [], {}):
         issues.append("SOURCE_LOSS_FORBIDS_CANONICAL_LABEL_SET")
     if manifest.get("proofs") not in (None, [], {}):
-        issues.append("SOURCE_LOSS_FORBIDS_775_PROOF_CLAIM")
+        issues.append("SOURCE_LOSS_FORBIDS_775_LITERAL_PROOF_CLAIM")
+
+
+def _validate_technical_done(manifest: Mapping[str, Any], issues: list[str]) -> None:
+    _validate_source_loss_provenance(manifest, issues, technical_completion_allowed=True)
+    if manifest.get("technical_completion_claimed") is not True:
+        issues.append("TECHNICAL_DONE_REQUIRES_COMPLETION_TRUE")
+    if manifest.get("technical_completion_total") != ROADMAP_TOTAL:
+        issues.append("TECHNICAL_DONE_REQUIRES_TOTAL_775")
+    if manifest.get("technical_completion_done") != ROADMAP_TOTAL:
+        issues.append("TECHNICAL_DONE_REQUIRES_DONE_775")
+    if manifest.get("technical_completion_mode") != TECHNICAL_COMPLETION_MODE:
+        issues.append("TECHNICAL_DONE_WRONG_MODE")
+    if manifest.get("technical_completion_guard") != TECHNICAL_GUARD_PATH:
+        issues.append("TECHNICAL_DONE_WRONG_GUARD_PATH")
+    if manifest.get("technical_completion_workflow") != TECHNICAL_WORKFLOW_PATH:
+        issues.append("TECHNICAL_DONE_WRONG_WORKFLOW_PATH")
+
+    derived = manifest.get("derived_technical_controls")
+    derived = derived if isinstance(derived, Mapping) else {}
+    expected = {
+        "start": 321,
+        "end": 775,
+        "count": 455,
+        "base_requirements": 91,
+        "facets": 5,
+        "historical_literal": False,
+        "provenance": "DERIVED_TECHNICAL_REQUIREMENT",
+    }
+    for key, value in expected.items():
+        if derived.get(key) != value:
+            issues.append(f"TECHNICAL_DONE_DERIVED_MISMATCH:{key}")
+
+    prior = manifest.get("prior_canonical_controls")
+    prior = prior if isinstance(prior, Mapping) else {}
+    if prior.get("start") != 1 or prior.get("end") != 320 or prior.get("count") != 320:
+        issues.append("TECHNICAL_DONE_PRIOR_1_320_MISMATCH")
+
+    first_run = manifest.get("technical_completion_initial_green_run")
+    first_run = first_run if isinstance(first_run, Mapping) else {}
+    if first_run.get("run_id") != 32073832122:
+        issues.append("TECHNICAL_DONE_REQUIRES_INITIAL_GREEN_RUN")
+    sha = first_run.get("head_sha")
+    if not isinstance(sha, str) or len(sha) != 40:
+        issues.append("TECHNICAL_DONE_REQUIRES_INITIAL_GREEN_SHA")
+    if first_run.get("conclusion") != "success":
+        issues.append("TECHNICAL_DONE_INITIAL_RUN_NOT_GREEN")
 
 
 def validate_manifest(manifest: Mapping[str, Any]) -> dict[str, Any]:
@@ -180,26 +230,35 @@ def validate_manifest(manifest: Mapping[str, Any]) -> dict[str, Any]:
         if len(descriptors) != ROADMAP_TOTAL or len(set(descriptors)) != ROADMAP_TOTAL:
             issues.append("DONE_REQUIRES_775_DISTINCT_EXECUTABLE_PROOFS")
     elif status == RECOVERY_CLOSED_SOURCE_LOSS:
-        _validate_source_loss(manifest, issues)
+        _validate_source_loss_provenance(manifest, issues, technical_completion_allowed=False)
+    elif status == DONE_TECHNICAL_775_SOURCE_LOSS_HONEST:
+        _validate_technical_done(manifest, issues)
+    else:
+        issues.append("UNKNOWN_CANONICAL_STATUS")
 
     return {
         "ok": not issues,
         "roadmap_id": ROADMAP_ID,
         "roadmap_total": ROADMAP_TOTAL,
         "status": status or "UNKNOWN",
-        "terminal_recovery": status == RECOVERY_CLOSED_SOURCE_LOSS and not issues,
+        "terminal_recovery": status in {RECOVERY_CLOSED_SOURCE_LOSS, DONE_TECHNICAL_775_SOURCE_LOSS_HONEST} and not issues,
         "technical_completion_claimed": bool(manifest.get("technical_completion_claimed")),
+        "technical_done": manifest.get("technical_completion_done", 0),
         "issues": issues,
     }
 
 
 __all__ = [
+    "DONE_TECHNICAL_775_SOURCE_LOSS_HONEST",
     "KNOWN_CANONICAL_ANCHORS",
     "LEGACY_MASTER_V6_TOTAL",
     "RECOVERY_CLOSED_SOURCE_LOSS",
     "REQUIRED_SOURCE_SEARCHES",
     "ROADMAP_ID",
     "ROADMAP_TOTAL",
+    "TECHNICAL_COMPLETION_MODE",
+    "TECHNICAL_GUARD_PATH",
+    "TECHNICAL_WORKFLOW_PATH",
     "THEMATIC_REQUIREMENTS_PATH",
     "validate_manifest",
 ]

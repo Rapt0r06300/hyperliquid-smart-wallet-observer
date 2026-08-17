@@ -1,7 +1,7 @@
 {
   "roadmap_id": "HYPERSMART_PNL_CANONICAL_775",
   "total": 775,
-  "status": "RECOVERY_CLOSED_SOURCE_LOSS",
+  "status": "DONE_TECHNICAL_775_SOURCE_LOSS_HONEST",
   "legacy_master_v6_equivalent": false,
   "legacy_master_v6_note": "Le registre historique AUD/DATA/BUG contient 590 taches et ne doit jamais etre utilise comme numerotation de la roadmap PnL 1..775.",
   "anchors": {
@@ -29,7 +29,33 @@
   "blocking": false,
   "literal_source_unrecoverable": true,
   "exact_literal_reconstruction_claimed": false,
-  "technical_completion_claimed": false,
+  "technical_completion_claimed": true,
+  "technical_completion_total": 775,
+  "technical_completion_done": 775,
+  "technical_completion_mode": "EXISTING_CANONICAL_1_320_PLUS_DERIVED_EXECUTABLE_321_775",
+  "technical_completion_guard": "src/hl_observer/ops/pre_run_guard_321_775.py",
+  "technical_completion_workflow": ".github/workflows/pre-run-321-775.yml",
+  "prior_canonical_controls": {
+    "start": 1,
+    "end": 320,
+    "count": 320,
+    "provenance": "EXISTING_EXECUTABLE_SUITES"
+  },
+  "derived_technical_controls": {
+    "start": 321,
+    "end": 775,
+    "count": 455,
+    "base_requirements": 91,
+    "facets": 5,
+    "historical_literal": false,
+    "provenance": "DERIVED_TECHNICAL_REQUIREMENT"
+  },
+  "technical_completion_initial_green_run": {
+    "run_id": 32073832122,
+    "head_sha": "5e9b284bacd30934c91da4f3ed1a74cf9177fc34",
+    "workflow": "pre-run-321-775-and-final-775",
+    "conclusion": "success"
+  },
   "source_searches_completed": [
     "GITHUB_REPOSITORY",
     "GIT_HISTORY",
@@ -40,5 +66,6 @@
   "thematic_requirements_path": "docs/PRE_RUN_775_SOURCE_LOSS_CLOSURE.md",
   "thematic_requirements_sha256": "ec60dfcea2c20ea29a2a9aee80e45ba6c8d01686c970cc581768f85a9eb861b0",
   "recovery_state": "TERMINAL_SOURCE_LOSS_HONEST",
-  "rule": "La récupération littérale est close et non bloquante. Aucun libellé 321→775 ne peut être présenté comme original sans nouvelle source primaire. Ce statut ne prouve jamais l'exécution technique de 775 optimisations."
+  "technical_completion_state": "TERMINAL_DONE_775",
+  "rule": "La récupération littérale 321→775 reste close et irrécupérable. La complétion technique est séparée de cette provenance : 1→320 restent couverts par leurs suites exécutables existantes et 321→775 par 455 contrôles techniques dérivés, traçables et fail-closed. Aucun contrôle dérivé ne peut être présenté comme un libellé historique original."
 }

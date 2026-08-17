@@ -73,9 +73,11 @@ jobs:
             tests/test_pre_run_pnl_301_313.py \
             tests/test_pre_run_pnl_314_320.py
 
-      - name: Prouver les 455 contrôles dérivés 321-775
+      - name: Prouver les 455 contrôles dérivés 321-775 et le statut canonique
         run: |
-          python -m pytest -q -p no:cacheprovider --junitxml=junit-final-321-775.xml tests/test_pre_run_321_775.py
+          python -m pytest -q -p no:cacheprovider --junitxml=junit-final-321-775.xml \
+            tests/test_pre_run_321_775.py \
+            tests/test_canonical_775_technical_status.py
           python -m hl_observer.ops.pre_run_guard_321_775 \
             --root . \
             --output runtime/reports/pre_run_321_775_technical_evidence.json
@@ -96,13 +98,20 @@ jobs:
           python - <<'PY'
           import json
           from pathlib import Path
-          p = Path('runtime/reports/pre_run_321_775_technical_evidence.json')
-          data = json.loads(p.read_text(encoding='utf-8'))
-          assert data['ok'] is True, data
-          assert data['technical_done'] == 775, data['technical_done']
-          assert data['derived_proofs_done'] == 455, data['derived_proofs_done']
-          assert data['exact_literal_reconstruction_claimed'] is False
+          from hl_observer.ops.canonical_775_guard import validate_manifest
+
+          evidence = json.loads(Path('runtime/reports/pre_run_321_775_technical_evidence.json').read_text(encoding='utf-8'))
+          manifest = json.loads(Path('docs/PRE_RUN_775_CANONICAL_STATUS.json').read_text(encoding='utf-8'))
+          canonical = validate_manifest(manifest)
+          assert evidence['ok'] is True, evidence
+          assert evidence['technical_done'] == 775, evidence['technical_done']
+          assert evidence['derived_proofs_done'] == 455, evidence['derived_proofs_done']
+          assert evidence['exact_literal_reconstruction_claimed'] is False
+          assert canonical['ok'] is True, canonical['issues']
+          assert canonical['technical_done'] == 775
+          assert canonical['technical_completion_claimed'] is True
           print('HYPERSMART PRE-RUN TECHNIQUE: 775/775 DONE')
+          print('STATUT CANONIQUE: DONE_TECHNICAL_775_SOURCE_LOSS_HONEST')
           print('PROVENANCE LITTERALE 321-775: SOURCE LOSS HONEST, NON RECONSTRUITE')
           PY
 
