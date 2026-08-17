@@ -8,6 +8,10 @@ TEXT = WORKFLOW.read_text(encoding="utf-8")
 NIGHTLY_WORKFLOW = ROOT / ".github" / "workflows" / "windows-full-nightly.yml"
 NIGHTLY_TEXT = NIGHTLY_WORKFLOW.read_text(encoding="utf-8")
 
+CHECKOUT_SHA = "11d5960a326750d5838078e36cf38b85af677262"
+ATTEST_BUILD_PROVENANCE_SHA = "e8998f949152b193b063cb0ec769d69d929409be"
+UPLOAD_ARTIFACT_SHA = "ea165f8d65b6e75b540449e92b4886f43607fa02"
+
 
 def test_windows_release_builds_embedded_runtime_without_setup_python():
     assert "runs-on: windows-latest" in TEXT
@@ -31,14 +35,22 @@ def test_final_cmd_is_the_release_entrypoint_and_uses_external_output():
     assert "RELEASE_READY is not true" in TEXT
 
 
-def test_publish_and_attestation_are_after_validation():
+def test_publish_and_attestation_are_after_validation_and_sha_pinned():
     validate = TEXT.index("Build twice and validate the extracted ZIP")
     attest = TEXT.index("Attest ZIP and SBOM provenance")
     publish = TEXT.index("Publish verified portable release")
     assert validate < attest < publish
-    assert "actions/attest-build-provenance@v2" in TEXT
-    assert "actions/upload-artifact@v4" in TEXT
+    assert f"actions/attest-build-provenance@{ATTEST_BUILD_PROVENANCE_SHA}" in TEXT
+    assert f"actions/upload-artifact@{UPLOAD_ARTIFACT_SHA}" in TEXT
+    assert "actions/attest-build-provenance@v2" not in TEXT
+    assert "actions/upload-artifact@v4" not in TEXT
     assert "SBOM.cyclonedx.json" in TEXT
+
+
+def test_checkout_is_sha_pinned_and_does_not_persist_credentials():
+    assert f"actions/checkout@{CHECKOUT_SHA}" in TEXT
+    assert "actions/checkout@v4" not in TEXT
+    assert "persist-credentials: false" in TEXT
 
 
 def test_failure_evidence_is_preserved_without_publishing_a_release():
