@@ -19,6 +19,8 @@ from hl_observer.ops import autonomous_research_status
 from hl_observer.ops import self_hosted_control
 from hl_observer.ops import self_hosted_return
 
+MAX_DATA_ROUTE = "src/hl_observer/datasets/max_data_router.py"
+
 
 def _check_payload() -> dict[str, object]:
     return {
@@ -32,6 +34,7 @@ def _check_payload() -> dict[str, object]:
         "brain_module": autonomous_research_brain.__name__,
         "max_data_module": max_data_policy.__name__,
         "max_data_router_module": max_data_router.__name__,
+        "max_data_route": MAX_DATA_ROUTE,
         "self_hosted_control_module": self_hosted_control.__name__,
         "self_hosted_return_module": self_hosted_return.__name__,
         "target_net_usd_per_family": max_data_policy.TARGET_NET_USD_PER_FAMILY,
