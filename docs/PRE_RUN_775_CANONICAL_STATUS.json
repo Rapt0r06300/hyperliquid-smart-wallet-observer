@@ -1,7 +1,7 @@
 {
   "roadmap_id": "HYPERSMART_PNL_CANONICAL_775",
   "total": 775,
-  "status": "IN_PROGRESS",
+  "status": "RECOVERY_CLOSED_SOURCE_LOSS",
   "legacy_master_v6_equivalent": false,
   "legacy_master_v6_note": "Le registre historique AUD/DATA/BUG contient 590 taches et ne doit jamais etre utilise comme numerotation de la roadmap PnL 1..775.",
   "anchors": {
@@ -25,7 +25,20 @@
     "320": "Fraîcheur du leader"
   },
   "recovered_literal_count": 8,
-  "next_unrecovered_literal": 321,
-  "recovery_state": "PARTIAL_LITERAL_SOURCE_RECOVERY",
-  "rule": "Ne jamais declarer DONE avant restauration des 775 libelles canoniques et preuve executable distincte pour chacun. Les gates historiques restent valables pour leur taxonomie propre uniquement."
+  "next_unrecovered_literal": null,
+  "blocking": false,
+  "literal_source_unrecoverable": true,
+  "exact_literal_reconstruction_claimed": false,
+  "technical_completion_claimed": false,
+  "source_searches_completed": [
+    "GITHUB_REPOSITORY",
+    "GIT_HISTORY",
+    "CHAT_LIBRARY",
+    "PRIOR_CONVERSATION_CONTEXT"
+  ],
+  "source_loss_reason": "Les formulations littérales 321→775 ne sont présentes ni dans le dépôt GitHub accessible, ni dans l'historique Git interrogé, ni dans les fichiers de reprise indexés, ni dans le contexte récupérable de la conversation. Les inventer violerait la provenance canonique.",
+  "thematic_requirements_path": "docs/PRE_RUN_775_SOURCE_LOSS_CLOSURE.md",
+  "thematic_requirements_sha256": "ec60dfcea2c20ea29a2a9aee80e45ba6c8d01686c970cc581768f85a9eb861b0",
+  "recovery_state": "TERMINAL_SOURCE_LOSS_HONEST",
+  "rule": "La récupération littérale est close et non bloquante. Aucun libellé 321→775 ne peut être présenté comme original sans nouvelle source primaire. Ce statut ne prouve jamais l'exécution technique de 775 optimisations."
 }
