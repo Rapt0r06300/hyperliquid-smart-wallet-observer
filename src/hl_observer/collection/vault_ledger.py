@@ -17,11 +17,20 @@ from typing import Any
 MS_PAR_HEURE = 3_600_000
 
 
+def _vault_id(value: Any) -> str:
+    """Identité de jointure stable sans modifier l'affichage historique du ledger."""
+    return str(value or "").strip().lower()
+
+
 def parser_ledger(rep: Any, *, vault: str = "") -> list[dict]:
-    """Normalise userNonFundingLedgerUpdates → mouvements {ts_ms, vault, type, delta_usd (signé),
-    est_retrait}. Format HL : [{"time":.., "hash":.., "delta":{"type":"withdraw"/"deposit"/
-    "vaultWithdraw"/..., "usdc"/"amount":..}}]. Illisible → ignoré (jamais inventé)."""
+    """Normalise userNonFundingLedgerUpdates → mouvements de capital.
+
+    Le champ ``vault`` conserve sa casse d'entrée pour compatibilité des rapports ;
+    les jointures économiques utilisent ensuite ``_vault_id`` de façon insensible
+    à la casse.
+    """
     out: list[dict] = []
+    vault_id = str(vault or "").strip()
     for u in (rep or []):
         try:
             ts = int(u["time"])
@@ -39,9 +48,9 @@ def parser_ledger(rep: Any, *, vault: str = "") -> list[dict]:
                     montant = None
                 break
         bas = typ.lower()
-        # un retrait = capital qui SORT du vault (type 'withdraw'/'vaultWithdraw' ou montant négatif)
+        # Capital sortant du vault : type explicite withdraw ou montant négatif.
         est_retrait = ("withdraw" in bas) or (montant is not None and montant < 0)
-        out.append({"ts_ms": ts, "vault": vault, "type": typ,
+        out.append({"ts_ms": ts, "vault": vault_id, "type": typ,
                     "delta_usd": montant, "est_retrait": bool(est_retrait), "hash": u.get("hash")})
     return out
 
@@ -51,7 +60,7 @@ def horaires_retraits(ledger: list[dict]) -> dict[str, list[int]]:
     out: dict[str, list[int]] = {}
     for m in ledger:
         if m.get("est_retrait"):
-            out.setdefault(m.get("vault", ""), []).append(int(m["ts_ms"]))
+            out.setdefault(str(m.get("vault") or ""), []).append(int(m["ts_ms"]))
     for v in out:
         out[v].sort()
     return out
@@ -70,20 +79,30 @@ def _proche(ts: int, horaires: list[int], fenetre_ms: int) -> bool:
 
 def marquer_retraits_ledger(events: list[dict], ledger: list[dict], *, fenetre_ms: int = 10 * 60_000,
                             heuristique_secours=None) -> list[dict]:
-    """Marque `retrait_probable=True` (source='ledger') les REDUCE/CLOSE proches d'un retrait RÉEL du
-    ledger. Puis, en SECOURS uniquement, applique l'heuristique pro-rata sur ce qui n'est pas déjà
-    marqué (source='heuristique'). En place. Rend `events`."""
+    """Marque REDUCE/CLOSE proches d'un retrait ledger réel, puis heuristique secours.
+
+    La jointure vault est volontairement insensible à la casse : une adresse
+    ``0xAB...`` du ledger et ``0xab...`` issue de la reconstruction désignent le
+    même vault et ne doivent jamais être traitées comme deux identités.
+    """
     horaires = horaires_retraits(ledger)
+    horaires_norm: dict[str, list[int]] = {}
+    for vault, timestamps in horaires.items():
+        horaires_norm.setdefault(_vault_id(vault), []).extend(timestamps)
+    for timestamps in horaires_norm.values():
+        timestamps.sort()
+
     for e in events:
         e.setdefault("retrait_probable", False)
         e.setdefault("retrait_source", "")
         if e.get("action") in ("REDUCE", "CLOSE") and not e["retrait_probable"]:
-            if _proche(int(e["ts_ms"]), horaires.get(e.get("vault", ""), []), fenetre_ms):
+            vault = _vault_id(e.get("vault"))
+            if _proche(int(e["ts_ms"]), horaires_norm.get(vault, []), fenetre_ms):
                 e["retrait_probable"] = True
                 e["retrait_source"] = "ledger"
     if heuristique_secours is not None:
         avant = {id(e): e["retrait_probable"] for e in events}
-        heuristique_secours(events)                               # marque d'autres retraits (pro-rata)
+        heuristique_secours(events)
         for e in events:
             if e["retrait_probable"] and not avant.get(id(e)) and not e.get("retrait_source"):
                 e["retrait_source"] = "heuristique"
