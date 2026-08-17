@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
+import shutil
 from pathlib import Path
 
 from hl_observer.datasets.archive_library import (
@@ -27,7 +29,10 @@ from hl_observer.datasets.github_release_bridge import (
     materialize_records,
     select_records,
 )
-from hl_observer.datasets.progress_downloader import download_needed_assets_with_progress
+from hl_observer.datasets.progress_downloader import (
+    cache_transfer_plan,
+    download_needed_assets_with_progress,
+)
 from hl_observer.datasets.release_gateway import (
     build_release_status,
     ensure_release_metadata,
@@ -76,7 +81,13 @@ def _parser() -> argparse.ArgumentParser:
         "--max-download-gib",
         type=float,
         default=20.0,
-        help="Plafond de téléchargement. 0 = illimité. Défaut: 20 Gio.",
+        help="Plafond du trafic réseau restant de ce cycle. 0 = illimité. Défaut: 20 Gio.",
+    )
+    parser.add_argument(
+        "--disk-reserve-gib",
+        type=float,
+        default=5.0,
+        help="Réserve disque minimale conservée après cache+reconstruction estimés. Défaut: 5 Gio.",
     )
     parser.add_argument(
         "--heartbeat-seconds",
@@ -88,6 +99,10 @@ def _parser() -> argparse.ArgumentParser:
 
 
 def _validate_args(args: argparse.Namespace) -> None:
+    if args.max_download_gib < 0:
+        raise DatasetBridgeError("--max-download-gib ne peut pas être négatif.")
+    if args.disk_reserve_gib < 0:
+        raise DatasetBridgeError("--disk-reserve-gib ne peut pas être négatif.")
     if args.suite:
         mixed = bool(
             args.contains
@@ -132,6 +147,46 @@ def _load_context(args: argparse.Namespace):
     )
     manifest = metadata_dir / "FULL_UPLOADED_FILE_MANIFEST.jsonl.gz"
     return root, release, assets, metadata_dir, manifest
+
+
+def snapshot_fingerprint(
+    manifest: Path,
+    release: dict[str, object],
+    assets,
+    *,
+    repository: str,
+    release_id: int,
+) -> str:
+    """Bind a run to the physical manifest and immutable asset descriptors."""
+
+    digest = hashlib.sha256()
+    digest.update(
+        json.dumps(
+            {
+                "repository": repository,
+                "release_id": int(release_id),
+                "release_name": release.get("name"),
+                "tag_name": release.get("tag_name"),
+                "published_at": release.get("published_at"),
+            },
+            sort_keys=True,
+            separators=(",", ":"),
+            ensure_ascii=False,
+        ).encode("utf-8")
+    )
+    if not manifest.is_file():
+        raise DatasetBridgeError(f"Manifeste FULL/COLD absent: {manifest}")
+    with manifest.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(4 * 1024 * 1024), b""):
+            digest.update(chunk)
+    for name in sorted(assets):
+        asset = assets[name]
+        digest.update(
+            f"\n{name}\0{int(asset.size)}\0{str(asset.sha256 or '')}\0{int(asset.asset_id)}".encode(
+                "utf-8"
+            )
+        )
+    return digest.hexdigest()
 
 
 def _legacy_preview(
@@ -206,7 +261,7 @@ def _write_preparation_provenance(
     report_dir.mkdir(parents=True, exist_ok=True)
     path = report_dir / "SELECTION_PROVENANCE.json"
     payload = {
-        "schema": "hypersmart.dataset_selection_provenance.v1",
+        "schema": "hypersmart.dataset_selection_provenance.v2",
         "source_release_id": release_id,
         "source_release_name": release.get("name"),
         "source_tag_name": release.get("tag_name"),
@@ -219,6 +274,26 @@ def _write_preparation_provenance(
         encoding="utf-8",
     )
     return path
+
+
+def _disk_guard(
+    root: Path,
+    *,
+    network_remaining_bytes: int,
+    raw_materialized_bytes: int,
+    reserve_gib: float,
+) -> dict[str, object]:
+    free = int(shutil.disk_usage(root).free)
+    reserve = int(float(reserve_gib) * 1024**3)
+    worst_case_required = max(0, int(network_remaining_bytes)) + max(0, int(raw_materialized_bytes)) + reserve
+    return {
+        "free_bytes": free,
+        "reserve_bytes": reserve,
+        "network_remaining_bytes": max(0, int(network_remaining_bytes)),
+        "raw_materialized_bytes_worst_case": max(0, int(raw_materialized_bytes)),
+        "worst_case_required_bytes": worst_case_required,
+        "ok": free >= worst_case_required,
+    }
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -238,6 +313,13 @@ def main(argv: list[str] | None = None) -> int:
             return 0
 
         root, release, assets, metadata_dir, manifest = _load_context(args)
+        snapshot_sha256 = snapshot_fingerprint(
+            manifest,
+            release,
+            assets,
+            repository=args.repo,
+            release_id=args.release_id,
+        )
 
         if args.action == "catalog":
             summary_path = metadata_dir / "FULL_SNAPSHOT_SUMMARY.json"
@@ -250,6 +332,7 @@ def main(argv: list[str] | None = None) -> int:
                     "assets_with_sha256": sum(1 for asset in assets.values() if asset.sha256),
                     "metadata_dir": str(metadata_dir),
                     "snapshot": summary,
+                    "snapshot_fingerprint_sha256": snapshot_sha256,
                     "suites_disponibles": list(suite_names()),
                 }
             )
@@ -270,6 +353,7 @@ def main(argv: list[str] | None = None) -> int:
             payload = {
                 "release_id": args.release_id,
                 "release_name": release.get("name"),
+                "snapshot_fingerprint_sha256": snapshot_sha256,
                 "plans": plans,
                 "rapport_json": str(json_path),
                 "rapport_markdown": str(md_path),
@@ -288,7 +372,6 @@ def main(argv: list[str] | None = None) -> int:
             )
             asset_names = tuple(preview["needed_assets"])
             missing_assets = list(preview["missing_assets"])
-            total_asset_bytes = int(preview["download_bytes"])
             output_root = suite_workspace_for_digest(
                 root,
                 args.suite,
@@ -309,7 +392,6 @@ def main(argv: list[str] | None = None) -> int:
             )
             asset_names = assets_for_records(selected)
             missing_assets = [name for name in asset_names if name not in assets]
-            total_asset_bytes = int(preview["octets_a_telecharger"])
             output_root = root / "data" / "hypersmart_datasets" / "materialized"
 
         if missing_assets:
@@ -317,6 +399,16 @@ def main(argv: list[str] | None = None) -> int:
                 "Le manifeste cite des assets absents de la Release: "
                 + ", ".join(missing_assets[:20])
             )
+
+        transfer_plan = cache_transfer_plan(root, assets, asset_names, force=args.force)
+        preview = {
+            **preview,
+            "snapshot_fingerprint_sha256": snapshot_sha256,
+            "verified_cache_bytes": int(transfer_plan["verified_cache_bytes"]),
+            "partial_cache_bytes": int(transfer_plan["partial_cache_bytes"]),
+            "remaining_network_bytes": int(transfer_plan["remaining_network_bytes"]),
+            "remaining_network_gib": round(int(transfer_plan["remaining_network_bytes"]) / (1024**3), 4),
+        }
 
         if args.action == "find":
             _print_json(preview)
@@ -333,12 +425,29 @@ def main(argv: list[str] | None = None) -> int:
             )
             return 0
 
+        remaining_network_bytes = int(transfer_plan["remaining_network_bytes"])
         max_bytes = int(args.max_download_gib * 1024**3)
-        if max_bytes > 0 and total_asset_bytes > max_bytes:
+        if max_bytes > 0 and remaining_network_bytes > max_bytes:
             raise DatasetBridgeError(
-                f"Le plan demande {total_asset_bytes / (1024**3):.2f} Gio, "
+                f"Le réseau restant demande {remaining_network_bytes / (1024**3):.2f} Gio, "
                 f"au-dessus du plafond de {args.max_download_gib:.2f} Gio. "
-                "Relève --max-download-gib ou mets 0 si tu veux vraiment tout prendre."
+                "Le cache déjà vérifié et les .part repris ne sont pas recomptés. "
+                "Relève --max-download-gib ou mets 0 si tu veux réellement tout prendre."
+            )
+
+        raw_materialized_bytes = sum(int(item.size) for item in selected)
+        disk = _disk_guard(
+            root,
+            network_remaining_bytes=remaining_network_bytes,
+            raw_materialized_bytes=raw_materialized_bytes,
+            reserve_gib=args.disk_reserve_gib,
+        )
+        preview["disk_guard"] = disk
+        if disk["ok"] is not True:
+            raise DatasetBridgeError(
+                "Espace disque insuffisant pour le pire cas cache+reconstruction+réserve: "
+                f"libre={int(disk['free_bytes']) / (1024**3):.2f} Gio, "
+                f"requis={int(disk['worst_case_required_bytes']) / (1024**3):.2f} Gio."
             )
 
         downloaded = download_needed_assets_with_progress(
@@ -358,8 +467,10 @@ def main(argv: list[str] | None = None) -> int:
             **preview,
             "fichiers_reconstruits": len(created),
             "dossier_reconstruit": str(output_root),
+            "source_repository": args.repo,
             "source_release_id": args.release_id,
             "source_release_name": release.get("name"),
+            "snapshot_fingerprint_sha256": snapshot_sha256,
             "etat": "OK",
         }
         provenance_path = _write_preparation_provenance(

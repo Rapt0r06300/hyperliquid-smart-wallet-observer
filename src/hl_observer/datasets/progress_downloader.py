@@ -38,6 +38,60 @@ def human_eta(seconds: float | None) -> str:
     return f"{hours:02d}:{minutes:02d}:{secs:02d}"
 
 
+def cache_transfer_plan(
+    root: Path,
+    assets: Mapping[str, ReleaseAsset],
+    names: Iterable[str],
+    *,
+    force: bool = False,
+) -> dict[str, object]:
+    """Measure logical, verified-cache, partial and actual remaining network bytes."""
+
+    ordered_names = tuple(dict.fromkeys(str(name) for name in names))
+    missing = [name for name in ordered_names if name not in assets]
+    if missing:
+        raise DatasetBridgeError("Assets absents de la Release: " + ", ".join(missing[:20]))
+    cache_dir = root / "data" / "hypersmart_datasets" / "assets"
+    logical_bytes = verified_bytes = partial_bytes = remaining_bytes = 0
+    verified_names: list[str] = []
+    partial_names: list[str] = []
+    for name in ordered_names:
+        asset = assets[name]
+        logical_bytes += int(asset.size)
+        destination = cache_dir / asset.name
+        partial = destination.with_suffix(destination.suffix + ".part")
+        if destination.is_file() and not force:
+            try:
+                verify_asset(destination, asset)
+                verified_bytes += int(asset.size)
+                verified_names.append(name)
+                continue
+            except DatasetBridgeError:
+                pass
+        if force:
+            remaining_bytes += int(asset.size)
+            continue
+        part_size = 0
+        if partial.is_file():
+            try:
+                part_size = max(0, min(int(partial.stat().st_size), int(asset.size)))
+            except OSError:
+                part_size = 0
+        if part_size:
+            partial_bytes += part_size
+            partial_names.append(name)
+        remaining_bytes += max(0, int(asset.size) - part_size)
+    return {
+        "asset_count": len(ordered_names),
+        "logical_asset_bytes": logical_bytes,
+        "verified_cache_bytes": verified_bytes,
+        "partial_cache_bytes": partial_bytes,
+        "remaining_network_bytes": remaining_bytes,
+        "verified_cache_names": verified_names,
+        "partial_cache_names": partial_names,
+    }
+
+
 def _progress_heartbeat(
     *,
     temporary: Path,
@@ -49,10 +103,11 @@ def _progress_heartbeat(
     stop: threading.Event,
     heartbeat_seconds: float,
 ) -> None:
-    """Affiche l'état physique du fichier indépendamment du transport réseau."""
-
     previous_time = time.monotonic()
-    previous_bytes = 0
+    try:
+        previous_bytes = temporary.stat().st_size
+    except OSError:
+        previous_bytes = 0
     smoothed_speed = 0.0
     interval = max(0.2, float(heartbeat_seconds))
     while not stop.wait(interval):
@@ -64,11 +119,7 @@ def _progress_heartbeat(
         delta_t = max(0.001, now - previous_time)
         instant_speed = max(0.0, current_bytes - previous_bytes) / delta_t
         if instant_speed > 0:
-            smoothed_speed = (
-                instant_speed
-                if smoothed_speed <= 0
-                else 0.70 * smoothed_speed + 0.30 * instant_speed
-            )
+            smoothed_speed = instant_speed if smoothed_speed <= 0 else 0.70 * smoothed_speed + 0.30 * instant_speed
         remaining = max(0, asset.size - current_bytes)
         eta = remaining / smoothed_speed if smoothed_speed > 0 else None
         asset_pct = 100.0 * current_bytes / asset.size if asset.size else 100.0
@@ -101,8 +152,7 @@ def _download_one_with_progress(
         try:
             verify_asset(destination, asset)
             print(
-                f"[CACHE OK] {index}/{count} {asset.name} | "
-                f"{human_bytes(asset.size)} déjà vérifiés",
+                f"[CACHE OK] {index}/{count} {asset.name} | {human_bytes(asset.size)} déjà vérifiés",
                 flush=True,
             )
             return destination
@@ -113,8 +163,18 @@ def _download_one_with_progress(
         raise DatasetBridgeError(f"Identifiant GitHub invalide pour {asset.name}")
 
     temporary = destination.with_suffix(destination.suffix + ".part")
-    temporary.unlink(missing_ok=True)
     destination.parent.mkdir(parents=True, exist_ok=True)
+    if force:
+        temporary.unlink(missing_ok=True)
+    try:
+        resumed_from = temporary.stat().st_size
+    except OSError:
+        resumed_from = 0
+    if resumed_from:
+        print(
+            f"[REPRISE] {index}/{count} {asset.name} | {human_bytes(resumed_from)} déjà présents dans .part",
+            flush=True,
+        )
 
     started = time.monotonic()
     stop = threading.Event()
@@ -141,22 +201,32 @@ def _download_one_with_progress(
             destination=temporary,
         )
     except (GitHubTransportError, OSError) as exc:
-        temporary.unlink(missing_ok=True)
+        # Preserve partial bytes so the next execution resumes with HTTP Range.
         raise DatasetBridgeError(
-            f"Téléchargement GitHub échoué pour {asset.name}: {exc}"
+            f"Téléchargement GitHub échoué pour {asset.name}; .part conservé pour reprise: {exc}"
         ) from exc
     finally:
         stop.set()
         heartbeat.join(timeout=max(2.0, float(heartbeat_seconds) + 1.0))
 
+    try:
+        verify_asset(temporary, asset)
+    except DatasetBridgeError as exc:
+        # A complete but hash-invalid partial cannot be resumed safely. Remove
+        # only this corrupt transfer; the next cycle restarts this asset cleanly.
+        temporary.unlink(missing_ok=True)
+        raise DatasetBridgeError(
+            f"SHA-256 invalide après téléchargement de {asset.name}; .part corrompu supprimé."
+        ) from exc
     temporary.replace(destination)
-    verify_asset(destination, asset)
     elapsed = max(0.001, time.monotonic() - started)
+    transferred = max(0, int(asset.size) - int(resumed_from))
     overall_done = min(total_bytes, completed_before + asset.size)
     overall_pct = 100.0 * overall_done / total_bytes if total_bytes else 100.0
     print(
         f"[SHA256 OK] {index}/{count} {asset.name} | {human_bytes(asset.size)} | "
-        f"moyenne={human_bytes(asset.size / elapsed)}/s | TOTAL={overall_pct:5.1f}%",
+        f"transféré_ce_cycle={human_bytes(transferred)} | moyenne={human_bytes(transferred / elapsed)}/s | "
+        f"TOTAL={overall_pct:5.1f}%",
         flush=True,
     )
     return destination
@@ -172,18 +242,17 @@ def download_needed_assets_with_progress(
     heartbeat_seconds: float = 1.0,
 ) -> dict[str, Path]:
     ordered_names = tuple(dict.fromkeys(str(name) for name in names))
-    missing = [name for name in ordered_names if name not in assets]
-    if missing:
-        raise DatasetBridgeError(
-            "Assets absents de la Release: " + ", ".join(missing[:20])
-        )
+    plan = cache_transfer_plan(root, assets, ordered_names, force=force)
     selected = [assets[name] for name in ordered_names]
-    total_bytes = sum(asset.size for asset in selected)
+    total_bytes = int(plan["logical_asset_bytes"])
     cache_dir = root / "data" / "hypersmart_datasets" / "assets"
     cache_dir.mkdir(parents=True, exist_ok=True)
 
     print(
-        f"[PLAN TELECHARGEMENT] {len(selected)} asset(s) | {human_bytes(total_bytes)}",
+        f"[PLAN TELECHARGEMENT] {len(selected)} asset(s) | logique={human_bytes(total_bytes)} | "
+        f"cache_vérifié={human_bytes(int(plan['verified_cache_bytes']))} | "
+        f"partiel={human_bytes(int(plan['partial_cache_bytes']))} | "
+        f"réseau_restant={human_bytes(int(plan['remaining_network_bytes']))}",
         flush=True,
     )
     result: dict[str, Path] = {}
@@ -209,3 +278,11 @@ def download_needed_assets_with_progress(
             flush=True,
         )
     return result
+
+
+__all__ = [
+    "cache_transfer_plan",
+    "download_needed_assets_with_progress",
+    "human_bytes",
+    "human_eta",
+]
