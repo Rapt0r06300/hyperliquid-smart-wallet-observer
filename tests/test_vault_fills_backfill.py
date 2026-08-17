@@ -76,7 +76,9 @@ def test_auditer_couverture_troncature_et_coins_mesurables():
     assert a["n_vaults"] == 2 and a["n_coins_fills"] == 2
     assert a["n_coins_mesurables"] == 1 and a["coins_mesurables"] == ["BTC"]      # OBSCURE sans prix
     assert a["part_coins_avec_prix"] == 0.5 and a["n_vaults_tronques"] == 1        # 0xTRONQ au cap 10k
-    tronq = next(v for v in a["par_vault"] if v["vault"] == "0xTRONQ")
+    # Le rapport publie l'identité canonique du vault (lowercase) pour éviter
+    # qu'une même adresse soit comptée deux fois selon la casse de la source.
+    tronq = next(v for v in a["par_vault"] if v["vault"] == "0xtronq")
     assert tronq["tronque_probable"] is True
 
 
@@ -84,6 +86,7 @@ def test_auditer_troncature_par_debut_manquant():
     # le plus ancien fill est bien APRÈS le début demandé -> troncature (userFillsByTime a coupé l'ancien)
     fills = [{"vault": "0xA", "ts_ms": 100 * VB.MS_PAR_HEURE, "coin": "BTC"}]
     a = VB.auditer_couverture(fills, lookback_debut_ms=0)
+    assert a["par_vault"][0]["vault"] == "0xa"
     assert a["par_vault"][0]["tronque_probable"] is True
 
 
