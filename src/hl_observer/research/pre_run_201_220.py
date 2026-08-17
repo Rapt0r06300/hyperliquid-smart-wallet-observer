@@ -164,7 +164,7 @@ class ExclusiveLaunchGuard:
         try:
             self.path.unlink()
         except FileNotFoundError:
-            pass
+            return
 
     def __enter__(self) -> "ExclusiveLaunchGuard":
         if not self.acquire():
