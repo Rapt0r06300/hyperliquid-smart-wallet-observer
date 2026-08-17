@@ -46,6 +46,13 @@ jobs:
           python -m pip install -e ".[dev]"
           python -m pip install -r requirements-recherche.txt
 
+      - name: Gate initial sur checkout exact et propre
+        run: |
+          python -m hl_observer.ops.pre_run_guard_001_100 \
+            --root . \
+            --output runtime/reports/pre_run_001_100.json \
+            --require-clean-git
+
       - name: Verifier le gate de couverture 001-100
         run: |
           python -m pytest -q -p no:cacheprovider --junitxml=junit-pre-run-core.xml \
@@ -89,12 +96,11 @@ jobs:
             tests/test_v12_strategy_registry.py \
             tests/test_paper_ledger.py
 
-      - name: Gate pre-run fail-closed sur le HEAD exact
+      - name: Gate final sans masquer les fichiers de preuve generes
         run: |
           python -m hl_observer.ops.pre_run_guard_001_100 \
             --root . \
-            --output runtime/reports/pre_run_001_100.json \
-            --require-clean-git
+            --output runtime/reports/pre_run_001_100.json
 
       - name: Audits securite finaux
         run: |
