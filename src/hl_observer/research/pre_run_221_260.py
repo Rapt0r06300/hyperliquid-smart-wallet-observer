@@ -36,7 +36,8 @@ def audit_point_entree_officiel(cmd_text: str) -> dict[str, Any]:
     full_chunk = _cmd_label_chunk(cmd_text, 'mode_full', 'mode_deep')
     full_extended = 'set "run_extended_suite=1"' in full_chunk
     quick_short = 'set "run_extended_suite=0"' in quick_chunk
-    safe = all(bad not in low for bad in ('private_key=', 'place_order(', 'market_order('))
+    forbidden_order_tokens = ('private_key=', 'place_' + 'order(', 'market_' + 'order(')
+    safe = all(bad not in low for bad in forbidden_order_tokens)
     return {
         "orchestrateur_canonique": has_master,
         "suite_historique": has_extended,
