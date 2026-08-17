@@ -6,6 +6,7 @@ recherche continue. Elles sont maintenant importables par le runtime officiel.
 Le contrat de ce module est volontairement fail-closed :
 - une déduplication survit au crash sans charger un fichier entier en RAM ;
 - un incident réel reste journalisé et relisible en streaming ;
+- un lecteur d'incidents peut être strictement non-mutant ;
 - un ledger corrompu est localisé par offset sans ``read_text`` massif ;
 - une source externe ne crée jamais un signal ;
 - provenance inconnue, ingestion inconnue et données synthétiques ne deviennent
@@ -49,8 +50,6 @@ class DedupDurable:
 
     Le journal est relu ligne par ligne au démarrage. Seule une fenêtre bornée est
     gardée en mémoire et le fichier est périodiquement compacté de façon atomique.
-    Ainsi un run long n'explose pas sa RAM uniquement parce que le nombre d'identités
-    historiques augmente.
     """
 
     def __init__(
@@ -142,14 +141,22 @@ class DedupDurable:
 
 
 class JournalIncidents:
-    """Journal append-only des incidents réels, relu en streaming."""
+    """Journal append-only des incidents réels, relu en streaming.
 
-    def __init__(self, dossier: Path | str) -> None:
+    ``create=False`` garantit qu'une lecture de diagnostic ne crée ni dossier ni
+    fichier. Toute écriture avec ce mode est refusée explicitement.
+    """
+
+    def __init__(self, dossier: Path | str, *, create: bool = True) -> None:
         self.dossier = Path(dossier)
-        self.dossier.mkdir(parents=True, exist_ok=True)
+        self.create = bool(create)
+        if self.create:
+            self.dossier.mkdir(parents=True, exist_ok=True)
         self.chemin = self.dossier / "incidents.jsonl"
 
     def enregistrer(self, type_: str, **details: Any) -> dict[str, Any]:
+        if not self.create:
+            raise RuntimeError("JournalIncidents(create=False) est strictement read-only")
         type_normalise = str(type_).upper()
         if type_normalise not in TYPES_INCIDENT:
             raise ValueError(f"type incident inconnu: {type_normalise}")
@@ -368,7 +375,7 @@ def controler_avant_promotion(
     ledger = scanner_ledger(base / ledger_relpath)
     if not ledger["promotion_autorisee"]:
         raisons.append("LEDGER_CORROMPU")
-    incidents = JournalIncidents(base / "operational").resume()
+    incidents = JournalIncidents(base / "operational", create=False).resume()
     if incidents["promotion_interdite"]:
         raisons.append("INCIDENT_BLOQUANT")
     synthetiques = [verrou_synthetique(verdict) for verdict in verdicts]
