@@ -24,6 +24,11 @@ RESULT_SCHEMA = "alina.autonomous_research_result.v1"
 REQUEST_SCHEMA = "alina.autonomous_research_job.v1"
 COMPLETION_EXIT_CODE = 23
 REGISTRY_EXIT_CODE = 24
+ECONOMIC_FAMILY_BY_SUITE = {
+    "copy-vault-full": "copy_vault",
+    "lead-lag-full": "lead_lag",
+    "cross-venue-full": "cross_venue",
+}
 
 
 class AutonomousCompletionError(RuntimeError):
@@ -61,6 +66,15 @@ def _steps_by_name(result: Mapping[str, Any]) -> dict[str, Mapping[str, Any]]:
     }
 
 
+def _explicit_zero(value: object) -> bool:
+    if value is None or isinstance(value, bool):
+        return False
+    try:
+        return int(value) == 0
+    except (TypeError, ValueError, OverflowError):
+        return False
+
+
 def _economic_contract(
     *,
     request: Mapping[str, Any],
@@ -72,7 +86,7 @@ def _economic_contract(
     incomplete_steps = [
         name
         for name in required_steps
-        if name not in steps or int(steps[name].get("return_code") or 0) != 0
+        if name not in steps or not _explicit_zero(steps[name].get("return_code"))
     ]
     economic_report = (
         workspace
@@ -88,12 +102,55 @@ def _economic_contract(
         / "datasets"
         / "DATASET_CONNECTION_AUDIT.json"
     )
-    missing_reports = [
-        str(path)
-        for path in (economic_report, connection_audit)
-        if not path.is_file()
-    ]
-    complete = not incomplete_steps and not missing_reports
+    source_coverage_path = (
+        workspace
+        / "runtime"
+        / "reports"
+        / "datasets"
+        / "SOURCE_CONSUMPTION_COVERAGE.json"
+    )
+    required_reports = (economic_report, connection_audit, source_coverage_path)
+    missing_reports = [str(path) for path in required_reports if not path.is_file()]
+
+    coverage_issues: list[str] = []
+    coverage: dict[str, Any] = {}
+    if source_coverage_path.is_file():
+        coverage = _load_json(source_coverage_path)
+        families = coverage.get("families")
+        if not isinstance(families, Mapping):
+            coverage_issues.append("SOURCE_COVERAGE_FAMILIES_MISSING")
+            families = {}
+        suite = str(request.get("suite") or "")
+        target_family = ECONOMIC_FAMILY_BY_SUITE.get(suite)
+        if target_family is not None:
+            family_row = families.get(target_family) if isinstance(families, Mapping) else None
+            if not isinstance(family_row, Mapping):
+                coverage_issues.append(f"SOURCE_COVERAGE_MISSING:{target_family}")
+            else:
+                try:
+                    discovered = int(family_row.get("discovered_files") or 0)
+                except (TypeError, ValueError, OverflowError):
+                    discovered = 0
+                if discovered <= 0:
+                    coverage_issues.append(f"SOURCE_DISCOVERY_EMPTY:{target_family}")
+                if str(family_row.get("status") or "") != "FULL":
+                    coverage_issues.append(f"SOURCE_COVERAGE_NOT_FULL:{target_family}")
+        else:
+            if coverage.get("all_families_full") is not True:
+                coverage_issues.append("SOURCE_COVERAGE_NOT_FULL:ALL_FAMILIES")
+            discovered_total = 0
+            if isinstance(families, Mapping):
+                for row in families.values():
+                    if not isinstance(row, Mapping):
+                        continue
+                    try:
+                        discovered_total += max(0, int(row.get("discovered_files") or 0))
+                    except (TypeError, ValueError, OverflowError):
+                        continue
+            if discovered_total <= 0:
+                coverage_issues.append("SOURCE_DISCOVERY_EMPTY:ALL_FAMILIES")
+
+    complete = not incomplete_steps and not missing_reports and not coverage_issues
     return {
         "schema": COMPLETION_SCHEMA,
         "mode": request.get("mode"),
@@ -102,6 +159,9 @@ def _economic_contract(
         "required_steps": list(required_steps),
         "incomplete_required_steps": incomplete_steps,
         "missing_required_reports": missing_reports,
+        "source_coverage_report": str(source_coverage_path),
+        "source_coverage_issues": coverage_issues,
+        "source_coverage_all_families_full": coverage.get("all_families_full"),
         "economic_report": str(economic_report),
         "connection_audit": str(connection_audit),
         "paper_only": True,
@@ -209,8 +269,10 @@ def build_completion_contract(
     for key in ("job_id", "suite", "mode", "project_sha"):
         if str(request.get(key) or "") != str(result.get(key) or ""):
             raise AutonomousCompletionError(f"JOB_RESULT ne correspond pas à la requête: {key}")
-    if result.get("status") != "SUCCESS" or int(result.get("exit_code") or 0) != 0:
-        raise AutonomousCompletionError("Le worker n'a pas produit un SUCCESS technique avec exit_code=0.")
+    if result.get("status") != "SUCCESS" or not _explicit_zero(result.get("exit_code")):
+        raise AutonomousCompletionError(
+            "Le worker n'a pas produit un SUCCESS technique avec exit_code=0 explicite."
+        )
     if result.get("paper_only") is not True or result.get("real_execution") is not False:
         raise AutonomousCompletionError("JOB_RESULT sans garde paper/read-only stricte.")
     if result.get("start_live_collection") is not False:
@@ -292,7 +354,7 @@ def finalize_autonomous_completion(
         result["completion_error"] = "REQUIRED_ANALYSIS_INCOMPLETE"
         _atomic_json(result_path, result)
         raise AutonomousCompletionError(
-            "Analyse incomplète: au moins une étape obligatoire n'est pas PASSED."
+            "Analyse incomplète: au moins une étape obligatoire ou une preuve de couverture manque."
         )
 
     try:
@@ -323,6 +385,7 @@ __all__ = [
     "AutonomousCompletionError",
     "COMPLETION_EXIT_CODE",
     "COMPLETION_SCHEMA",
+    "ECONOMIC_FAMILY_BY_SUITE",
     "REGISTRY_EXIT_CODE",
     "build_completion_contract",
     "finalize_autonomous_completion",
