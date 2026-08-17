@@ -7,7 +7,14 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from hyper_smart_observer.backtesting.backtest_report import BacktestReport
+from hyper_smart_observer.backtesting.delta_replay import (
+    DeltaReplayReport,
+    HistoricalPricePoint,
+    ReplayScenario,
+    replay_leader_deltas,
+)
 from hyper_smart_observer.backtesting.wallet_following_simulator import simulate_wallet_following
+from hyper_smart_observer.copy_mode.copy_models import LeaderDelta
 from hyper_smart_observer.copy_mode.copy_run_evidence import apply_runtime_leader_exits_with_evidence
 from hyper_smart_observer.copy_mode.edge import compute_edge_remaining_bps
 from hyper_smart_observer.hyperliquid_client import models as common_data_model
@@ -52,7 +59,28 @@ class ReplayEngine:
     paper_engine_cls = PaperTradingSimulator
 
     def replay_closed_pnl(self, wallet_address: str, closed_pnls: list[float]) -> BacktestReport:
+        """Legacy coarse replay retained for compatibility.
+
+        New HyperSmart evidence should prefer :meth:`replay_deltas`, which uses
+        timestamped LeaderDelta events and delayed observed market prices.
+        """
         return simulate_wallet_following(wallet_address, closed_pnls)
+
+    def replay_deltas(
+        self,
+        deltas: list[LeaderDelta],
+        prices: list[HistoricalPricePoint],
+        scenario: ReplayScenario,
+        *,
+        notional_per_entry: float = 50.0,
+    ) -> DeltaReplayReport:
+        """Replay real leader deltas through deterministic local cost/delay logic."""
+        return replay_leader_deltas(
+            deltas,
+            prices,
+            scenario,
+            notional_per_entry=notional_per_entry,
+        )
 
     def replay_paper_events(
         self,
