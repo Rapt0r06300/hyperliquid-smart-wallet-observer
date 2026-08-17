@@ -294,7 +294,7 @@ def main(argv: Iterable[str] | None = None) -> int:
     command = [
         sys.executable,
         "-m",
-        "hl_observer.ops.autonomous_research_job",
+        "hl_observer.ops.autonomous_research_job_router",
         "--request",
         str(request),
         "--project-root",
