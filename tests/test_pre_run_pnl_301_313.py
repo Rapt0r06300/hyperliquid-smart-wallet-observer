@@ -3,7 +3,12 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from hl_observer.ops.canonical_775_guard import ROADMAP_ID, ROADMAP_TOTAL, validate_manifest
+from hl_observer.ops.canonical_775_guard import (
+    RECOVERY_CLOSED_SOURCE_LOSS,
+    ROADMAP_ID,
+    ROADMAP_TOTAL,
+    validate_manifest,
+)
 from hl_observer.simulation.economic_family_gate import evaluate_all_families
 from hl_observer.simulation.economic_objective import TARGET_NET_USD
 
@@ -125,7 +130,9 @@ def test_manifest_775_courant_est_honnete_et_non_done():
     result = validate_manifest(manifest)
     assert manifest["roadmap_id"] == ROADMAP_ID
     assert manifest["total"] == ROADMAP_TOTAL
-    assert manifest["status"] == "IN_PROGRESS"
+    assert manifest["status"] == RECOVERY_CLOSED_SOURCE_LOSS
+    assert manifest["technical_completion_claimed"] is False
+    assert result["terminal_recovery"] is True
     assert result["ok"] is True
 
 
