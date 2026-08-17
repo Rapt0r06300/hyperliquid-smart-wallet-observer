@@ -14,22 +14,36 @@ from typing import Any
 from hl_observer.hyperliquid.pagination_completeness import evaluer_completude
 
 
+def _cmd_label_chunk(cmd_text: str, label: str, next_label: str) -> str:
+    """Extrait un vrai bloc ``:label`` sans confondre ``goto :label`` avec le label."""
+    lines = cmd_text.lower().splitlines()
+    start = next((i for i, line in enumerate(lines) if line.strip() == f':{label}'), None)
+    if start is None:
+        return ''
+    end = next(
+        (i for i in range(start + 1, len(lines)) if lines[i].strip() == f':{next_label}'),
+        len(lines),
+    )
+    return '\n'.join(lines[start + 1:end])
+
+
 def audit_point_entree_officiel(cmd_text: str) -> dict[str, Any]:
     """AUD-221/222/223/226: le profil FULL officiel doit lancer la suite etendue."""
     low = cmd_text.lower()
     has_master = "hl_observer.ops.lab_alpha" in low
     has_extended = "hl_observer.ops.historical_analysis_suite" in low
-    marker_full = ':mode_full' in low
-    full_chunk = low.split(':mode_full', 1)[1].split(':mode_deep', 1)[0] if marker_full and ':mode_deep' in low else ''
+    quick_chunk = _cmd_label_chunk(cmd_text, 'mode_quick', 'mode_full')
+    full_chunk = _cmd_label_chunk(cmd_text, 'mode_full', 'mode_deep')
     full_extended = 'set "run_extended_suite=1"' in full_chunk
+    quick_short = 'set "run_extended_suite=0"' in quick_chunk
     safe = all(bad not in low for bad in ('private_key=', 'place_order(', 'market_order('))
     return {
         "orchestrateur_canonique": has_master,
         "suite_historique": has_extended,
         "full_etendu": full_extended,
-        "quick_seul_court": 'set "run_extended_suite=0"' in low.split(':mode_quick', 1)[1].split(':mode_full', 1)[0] if ':mode_quick' in low else False,
+        "quick_seul_court": quick_short,
         "paper_safe_surface": safe,
-        "ok": has_master and has_extended and full_extended and safe,
+        "ok": has_master and has_extended and full_extended and quick_short and safe,
     }
 
 
