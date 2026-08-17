@@ -10,8 +10,8 @@ from hl_observer.ops.autonomous_research_job import (
     CANONICAL_DATASET_REPOSITORY,
     CANONICAL_RELEASE_ID,
     SCHEMA as WORKER_SCHEMA,
-    validate_request,
 )
+from hl_observer.ops.autonomous_research_job_router import validate_request
 
 CONTROL_SCHEMA = "alina.self_hosted_control.v1"
 MAX_CYCLE_SECONDS = 18 * 60 * 60
