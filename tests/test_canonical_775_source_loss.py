@@ -5,8 +5,8 @@ import json
 from pathlib import Path
 
 from hl_observer.ops.canonical_775_guard import (
+    DONE_TECHNICAL_775_SOURCE_LOSS_HONEST,
     KNOWN_CANONICAL_ANCHORS,
-    RECOVERY_CLOSED_SOURCE_LOSS,
     REQUIRED_SOURCE_SEARCHES,
     ROADMAP_ID,
     ROADMAP_TOTAL,
@@ -23,19 +23,22 @@ def _manifest() -> dict:
     return json.loads(MANIFEST_PATH.read_text(encoding="utf-8"))
 
 
-def test_source_loss_terminal_est_honnete_et_non_bloquant() -> None:
+def test_source_loss_terminal_est_honnete_et_techniquement_done() -> None:
     manifest = _manifest()
     result = validate_manifest(manifest)
 
     assert result["ok"] is True
-    assert result["status"] == RECOVERY_CLOSED_SOURCE_LOSS
+    assert result["status"] == DONE_TECHNICAL_775_SOURCE_LOSS_HONEST
     assert result["terminal_recovery"] is True
-    assert result["technical_completion_claimed"] is False
+    assert result["technical_completion_claimed"] is True
+    assert result["technical_done"] == ROADMAP_TOTAL
     assert manifest["blocking"] is False
     assert manifest["next_unrecovered_literal"] is None
     assert manifest["literal_source_unrecoverable"] is True
     assert manifest["exact_literal_reconstruction_claimed"] is False
-    assert manifest["technical_completion_claimed"] is False
+    assert manifest["technical_completion_claimed"] is True
+    assert manifest["technical_completion_total"] == ROADMAP_TOTAL
+    assert manifest["technical_completion_done"] == ROADMAP_TOTAL
     assert set(manifest["source_searches_completed"]) >= REQUIRED_SOURCE_SEARCHES
 
 
@@ -87,7 +90,7 @@ def test_source_loss_refuse_un_faux_jeu_de_labels_ou_preuves() -> None:
 
     assert result["ok"] is False
     assert "SOURCE_LOSS_FORBIDS_CANONICAL_LABEL_SET" in result["issues"]
-    assert "SOURCE_LOSS_FORBIDS_775_PROOF_CLAIM" in result["issues"]
+    assert "SOURCE_LOSS_FORBIDS_775_LITERAL_PROOF_CLAIM" in result["issues"]
 
 
 def test_identite_et_total_canoniques_restent_immuables() -> None:
