@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import sys
 from pathlib import Path
 
 import pytest
@@ -10,6 +11,59 @@ CALIBRATION_FIXTURE = RACINE / "tests" / "fixtures" / "empirical_edge_TEST_FIXTU
 
 # Prefixes de TOUTES les variables de calibrage du runtime. Un test ne doit JAMAIS en heriter.
 PREFIXES_RUNTIME = ("HYPERSMART_", "HL_")
+PORTABLE_CONTRACT = RACINE / "tests" / "test_extracted_portable_contract.py"
+
+
+def _portable_extracted_collection_mode() -> bool:
+    """Détecte la validation de l'archive réellement extraite, sans simple flag déclaratif.
+
+    Le mode n'est vrai que si le runtime déclaré est exactement le checkout courant,
+    que le workspace hermétique du validateur existe et que pytest tourne avec le
+    ``python.exe`` embarqué dans cette même archive. Une variable d'environnement
+    isolée dans une CI Linux normale ne peut donc pas réduire la couverture des tests.
+    """
+
+    raw_root = os.environ.get("HYPERSMART_RUNTIME_ROOT", "").strip()
+    if not raw_root:
+        return False
+    try:
+        runtime_root = Path(raw_root).resolve()
+        executable = Path(sys.executable).resolve()
+    except OSError:
+        return False
+    embedded_python = (runtime_root / "tools" / "python" / "python.exe").resolve()
+    return bool(
+        os.name == "nt"
+        and runtime_root == RACINE.resolve()
+        and executable == embedded_python
+        and (runtime_root / "_validation_workspace").is_dir()
+        and os.environ.get("PIP_NO_INDEX") == "1"
+        and os.environ.get("PYTHONNOUSERSITE") == "1"
+    )
+
+
+def pytest_ignore_collect(collection_path: Path, config: pytest.Config) -> bool | None:
+    """Dans l'archive extraite, collecte uniquement son contrat produit dédié.
+
+    La suite de développement complète est déjà exécutée par la CI du dépôt. La
+    relancer depuis le ZIP mélangeait des tests qui exigent un checkout Git, des
+    mocks de développement et des fichiers volontairement non distribués. Ici on
+    prouve le produit extrait : runtime embarqué, garde-fous paper-only, imports
+    critiques et Git embarqué. Toute autre collecte reste inchangée hors de ce mode.
+    """
+
+    del config
+    if not _portable_extracted_collection_mode():
+        return None
+    path = Path(str(collection_path)).resolve()
+    tests_root = (RACINE / "tests").resolve()
+    if path == tests_root or path == PORTABLE_CONTRACT.resolve():
+        return False
+    try:
+        path.relative_to(tests_root)
+    except ValueError:
+        return None
+    return True
 
 
 @pytest.fixture(autouse=True)
@@ -33,10 +87,16 @@ def env_runtime_neutre(monkeypatch: pytest.MonkeyPatch) -> None:
     Chaque test demarre avec un environnement runtime VIERGE. Un test qui veut une valeur la
     pose lui-meme (`monkeypatch.setenv`) -- explicitement, sous ses yeux, dans son propre corps.
 
+    Exception volontaire et bornée : le contrat de l'archive Windows réellement extraite doit
+    au contraire vérifier les garde-fous injectés par le validateur hermétique. Ce mode est
+    identifié physiquement par l'interpréteur embarqué, pas par un simple flag.
+
     C'est la meme regle que pour les logs et la table d'edge : le test parle du CODE, jamais de
     l'etat vivant de la production.
     """
 
+    if _portable_extracted_collection_mode():
+        return
     for cle in [k for k in os.environ if k.startswith(PREFIXES_RUNTIME)]:
         monkeypatch.delenv(cle, raising=False)
 

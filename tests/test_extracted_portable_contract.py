@@ -2,25 +2,49 @@ from __future__ import annotations
 
 import importlib
 import os
+import sys
 from pathlib import Path
 
 import pytest
 
 
 PORTABLE_CONTRACT_ENV = "HYPERSMART_EXTRACTED_PORTABLE_TEST"
+ROOT = Path.cwd().resolve()
+
+
+def _portable_contract_active() -> bool:
+    if os.environ.get(PORTABLE_CONTRACT_ENV) == "1":
+        return True
+    raw_root = os.environ.get("HYPERSMART_RUNTIME_ROOT", "").strip()
+    if not raw_root:
+        return False
+    try:
+        runtime_root = Path(raw_root).resolve()
+        executable = Path(sys.executable).resolve()
+    except OSError:
+        return False
+    return bool(
+        os.name == "nt"
+        and runtime_root == ROOT
+        and executable == (ROOT / "tools" / "python" / "python.exe").resolve()
+        and (ROOT / "_validation_workspace").is_dir()
+        and os.environ.get("PIP_NO_INDEX") == "1"
+        and os.environ.get("PYTHONNOUSERSITE") == "1"
+    )
+
+
 pytestmark = pytest.mark.skipif(
-    os.environ.get(PORTABLE_CONTRACT_ENV) != "1",
+    not _portable_contract_active(),
     reason=(
-        "Contrat réservé à l'archive Windows déjà extraite; "
-        f"{PORTABLE_CONTRACT_ENV}=1 est posé uniquement par le workflow portable."
+        "Contrat réservé à l'archive Windows réellement extraite et exécutée "
+        "avec son Python embarqué."
     ),
 )
-
-ROOT = Path.cwd().resolve()
 
 
 def test_archive_extraite_possede_le_runtime_embarque_et_les_lanceurs() -> None:
     assert (ROOT / "tools" / "python" / "python.exe").is_file()
+    assert Path(sys.executable).resolve() == (ROOT / "tools" / "python" / "python.exe").resolve()
     assert (ROOT / "PORTABLE_MANIFEST.json").is_file()
     for name in (
         "LANCER_HYPERSMART.cmd",
@@ -45,7 +69,10 @@ def test_modules_portables_critiques_s_importent_depuis_l_archive() -> None:
         "hl_observer.backtesting.copy_vault_executable",
         "hyper_smart_observer.app.main",
     ):
-        assert importlib.import_module(module) is not None, module
+        imported = importlib.import_module(module)
+        assert imported is not None, module
+        module_file = Path(getattr(imported, "__file__", "")).resolve()
+        assert ROOT in module_file.parents, f"{module} importé hors archive: {module_file}"
 
 
 def test_archive_extraite_ne_depend_pas_du_git_systeme_pour_demarrer() -> None:

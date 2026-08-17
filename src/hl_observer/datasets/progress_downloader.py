@@ -45,7 +45,13 @@ def cache_transfer_plan(
     *,
     force: bool = False,
 ) -> dict[str, object]:
-    """Measure logical, verified-cache, partial and actual remaining network bytes."""
+    """Measure logical, verified-cache, partial and actual remaining network bytes.
+
+    Un asset final déjà présent mais invalide n'est jamais assimilé à du cache.
+    Il est exposé explicitement dans ``invalid_cached_names`` afin que le cockpit,
+    les tests et les décisions MAX DATA puissent distinguer un vrai cache vérifié
+    d'un fichier à retélécharger. La fonction de planification reste non destructive.
+    """
 
     ordered_names = tuple(dict.fromkeys(str(name) for name in names))
     missing = [name for name in ordered_names if name not in assets]
@@ -55,6 +61,7 @@ def cache_transfer_plan(
     logical_bytes = verified_bytes = partial_bytes = remaining_bytes = 0
     verified_names: list[str] = []
     partial_names: list[str] = []
+    invalid_cached_names: list[str] = []
     for name in ordered_names:
         asset = assets[name]
         logical_bytes += int(asset.size)
@@ -67,7 +74,7 @@ def cache_transfer_plan(
                 verified_names.append(name)
                 continue
             except DatasetBridgeError:
-                pass
+                invalid_cached_names.append(name)
         if force:
             remaining_bytes += int(asset.size)
             continue
@@ -89,6 +96,7 @@ def cache_transfer_plan(
         "remaining_network_bytes": remaining_bytes,
         "verified_cache_names": verified_names,
         "partial_cache_names": partial_names,
+        "invalid_cached_names": invalid_cached_names,
     }
 
 
@@ -252,7 +260,8 @@ def download_needed_assets_with_progress(
         f"[PLAN TELECHARGEMENT] {len(selected)} asset(s) | logique={human_bytes(total_bytes)} | "
         f"cache_vérifié={human_bytes(int(plan['verified_cache_bytes']))} | "
         f"partiel={human_bytes(int(plan['partial_cache_bytes']))} | "
-        f"réseau_restant={human_bytes(int(plan['remaining_network_bytes']))}",
+        f"réseau_restant={human_bytes(int(plan['remaining_network_bytes']))} | "
+        f"cache_invalide={len(plan['invalid_cached_names'])}",
         flush=True,
     )
     result: dict[str, Path] = {}

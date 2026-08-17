@@ -220,6 +220,8 @@ def _job_result(lab_root: Path, **overrides) -> dict[str, object]:
         "real_execution": False,
         "start_live_collection": False,
         "exit_code": 0,
+        "analysis_complete": True,
+        "completion_recorded": True,
     }
     payload.update(overrides)
     return payload
@@ -241,10 +243,13 @@ def test_registre_max_data_ne_marque_qu_un_vrai_run_reussi(tmp_path: Path) -> No
     assert registry["suites"]["economic-full"]["real_execution"] is False
 
 
-def test_registre_max_data_refuse_no_go_prepare_only_et_fichier_corrompu(tmp_path: Path) -> None:
+def test_registre_max_data_refuse_no_go_prepare_only_et_preuves_incompletes(tmp_path: Path) -> None:
     for suffix, overrides in (
         ("no-go", {"status": "NO_GO", "exit_code": 4}),
         ("prepare", {"mode": "prepare-only"}),
+        ("analysis-missing", {"analysis_complete": False}),
+        ("record-missing", {"completion_recorded": False}),
+        ("exit-bool", {"exit_code": False}),
     ):
         lab = tmp_path / suffix
         lab.mkdir()
@@ -253,6 +258,8 @@ def test_registre_max_data_refuse_no_go_prepare_only_et_fichier_corrompu(tmp_pat
         with pytest.raises(ValueError):
             record_completed_suite_from_result(lab, result_path)
 
+
+def test_registre_max_data_refuse_fichier_corrompu(tmp_path: Path) -> None:
     corrupt_lab = tmp_path / "corrupt"
     registry = corrupt_lab / "runtime" / "reports" / "autonomous_research" / "COMPLETED_SUITES.json"
     registry.parent.mkdir(parents=True)
