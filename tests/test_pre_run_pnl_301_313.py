@@ -4,7 +4,7 @@ import json
 from pathlib import Path
 
 from hl_observer.ops.canonical_775_guard import (
-    RECOVERY_CLOSED_SOURCE_LOSS,
+    DONE_TECHNICAL_775_SOURCE_LOSS_HONEST,
     ROADMAP_ID,
     ROADMAP_TOTAL,
     validate_manifest,
@@ -124,14 +124,17 @@ def test_garde_775_refuse_explicitement_l_ancien_master_v6():
     assert "CANONICAL_ANCHOR_MISMATCH:301" in result["issues"]
 
 
-def test_manifest_775_courant_est_honnete_et_non_done():
+def test_manifest_775_courant_est_honnete_et_techniquement_done():
     path = Path("docs/PRE_RUN_775_CANONICAL_STATUS.json")
     manifest = json.loads(path.read_text(encoding="utf-8"))
     result = validate_manifest(manifest)
     assert manifest["roadmap_id"] == ROADMAP_ID
     assert manifest["total"] == ROADMAP_TOTAL
-    assert manifest["status"] == RECOVERY_CLOSED_SOURCE_LOSS
-    assert manifest["technical_completion_claimed"] is False
+    assert manifest["status"] == DONE_TECHNICAL_775_SOURCE_LOSS_HONEST
+    assert manifest["technical_completion_claimed"] is True
+    assert manifest["technical_completion_done"] == 775
+    assert manifest["literal_source_unrecoverable"] is True
+    assert manifest["exact_literal_reconstruction_claimed"] is False
     assert result["terminal_recovery"] is True
     assert result["ok"] is True
 
