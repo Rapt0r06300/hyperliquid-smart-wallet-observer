@@ -26,3 +26,18 @@ def test_all_remaining_546_775_are_specifically_executable_and_green():
             assert all(requirement["facets"].values()), requirement
             assert requirement["evidence_sha256"]
             assert all(len(value) == 64 for value in requirement["evidence_sha256"].values())
+
+
+def test_economic_memory_is_certified_only_after_durable_canonical_completion():
+    family_source = (ROOT / "src/hl_observer/ops/family_economic_job.py").read_text(encoding="utf-8")
+    completion_source = (ROOT / "src/hl_observer/ops/autonomous_completion.py").read_text(encoding="utf-8")
+
+    worker_source = family_source.split("def execute_family_job", 1)[1]
+    assert "record_family_economic_memory(" not in worker_source
+    assert "PENDING_COMPLETION_GUARD" in worker_source
+
+    completion_true = completion_source.index('result["completion_recorded"] = True')
+    durable_write = completion_source.index("_atomic_json(result_path, result)", completion_true)
+    memory_write = completion_source.index("_persist_post_completion_economic_memory(", durable_write)
+    assert completion_true < durable_write < memory_write
+    assert "JOB_RESULT disque non finalisé avant persistance de la mémoire économique" in completion_source
