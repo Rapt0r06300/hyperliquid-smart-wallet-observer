@@ -6,9 +6,13 @@ Les **775 contrôles techniques** sont désormais implémentés par catégories 
 historique littérale 321→775 reste irrécupérable et n'est jamais inventée : les identifiants
 321→775 sont des preuves techniques dérivées, chacune avec cinq facettes exécutables.
 
-Le passage du manifeste canonique à `775/775` reste volontairement séparé de l'implémentation :
-il n'est autorisé qu'après exécution verte de la CI du HEAD qui introduit les preuves 546→775.
-Cette séparation empêche un faux `DONE` écrit avant la preuve GitHub Actions.
+Le manifeste canonique est désormais **scellé à 775/775** sous le statut
+`DONE_TECHNICAL_775_SOURCE_LOSS_HONEST` : **775/775 contrôles techniques**, **455/455 facettes
+dérivées** et **91/91 exigences de base** sont terminés, avec `next_unverified_id = null`.
+Le scellement n'a été effectué qu'après une exécution verte de la CI dédiée. Toute modification
+ultérieure de `main` relance `.github/workflows/pre-run-321-775.yml` et doit conserver le statut
+`hypersmart/pre-run-775 = success`; un rouge invalide immédiatement la clôture du HEAD concerné.
+Cette règle empêche qu'un simple texte `DONE` puisse remplacer une preuve GitHub Actions.
 
 ## Blocs techniques
 
