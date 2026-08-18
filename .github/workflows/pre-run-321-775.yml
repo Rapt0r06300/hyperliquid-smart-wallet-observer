@@ -1,4 +1,4 @@
-name: pre-run-321-775-honest-progress
+name: pre-run-321-775-honest-completion
 
 on:
   push:
@@ -9,7 +9,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: pre-run-progress-775-${{ github.ref }}
+  group: pre-run-completion-775-${{ github.ref }}
   cancel-in-progress: true
 
 env:
@@ -25,10 +25,10 @@ env:
   ENABLE_REAL_ORDERS: "0"
 
 jobs:
-  progression-775:
-    name: Progression technique honnête vers 775
+  completion-775:
+    name: Preuve technique honnête 1→775
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    timeout-minutes: 90
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
@@ -103,7 +103,26 @@ jobs:
             tests/test_cross_venue_economic_provenance.py \
             tests/test_economic_campaigns.py
 
-      - name: Valider le compteur honnête 545-775
+      - name: Prouver spécifiquement 546-775
+        run: |
+          python -m pytest -q -p no:cacheprovider --junitxml=junit-final-546-775.xml \
+            tests/test_pre_run_546_775.py \
+            tests/test_robustness_protocol.py \
+            tests/test_economic_memory.py \
+            tests/test_dataset_untrusted_guard.py \
+            tests/test_pre_full_rehearsal.py \
+            tests/test_self_hosted_go_gate.py \
+            tests/test_family_economic_job.py \
+            tests/test_dataset_economic_runner_purity.py \
+            tests/test_max_data_router.py \
+            tests/test_autonomous_research_job_router.py \
+            tests/test_alina_self_hosted_assets.py \
+            tests/test_portable_release_ci.py \
+            tests/test_runtime_replay_paper_parity.py \
+            tests/test_anti_overfit_gate.py \
+            tests/test_validation_stats.py
+
+      - name: Valider les 455 preuves dérivées 321-775
         run: |
           python -m pytest -q -p no:cacheprovider --junitxml=junit-progress-321-775.xml \
             tests/test_pre_run_321_775.py \
@@ -115,27 +134,35 @@ jobs:
           python - <<'PY'
           import json
           from pathlib import Path
-          from hl_observer.ops.canonical_775_guard import validate_manifest
+          from hl_observer.ops.canonical_775_guard import (
+              DONE_TECHNICAL_775_SOURCE_LOSS_HONEST,
+              IN_PROGRESS_TECHNICAL_775_SOURCE_LOSS_HONEST,
+              validate_manifest,
+          )
 
           evidence = json.loads(Path("runtime/reports/pre_run_321_775_technical_progress.json").read_text(encoding="utf-8"))
           manifest = json.loads(Path("docs/PRE_RUN_775_CANONICAL_STATUS.json").read_text(encoding="utf-8"))
           canonical = validate_manifest(manifest)
           assert evidence["ok"] is True, evidence
-          assert evidence["complete"] is False
-          assert evidence["technical_done"] == 545
-          assert evidence["derived_proofs_done"] == 225
-          assert evidence["base_requirements_done"] == 45
-          assert evidence["next_derived_id"] == 546
-          for category in ("COPY_VAULT", "LEAD_LAG", "CROSS_VENUE"):
-              assert evidence["category_progress"][category]["ok"] is True
+          assert evidence["complete"] is True, evidence
+          assert evidence["technical_done"] == 775
+          assert evidence["derived_proofs_done"] == 455
+          assert evidence["base_requirements_done"] == 91
+          assert evidence["next_derived_id"] is None
+          assert evidence["remaining_546_775"]["requirements_done"] == 46
+          assert evidence["remaining_546_775"]["facets_done"] == 230
+          assert evidence["remaining_546_775"]["ok"] is True
+          for category, progress in evidence["category_progress"].items():
+              assert progress["ok"] is True, (category, progress)
           assert canonical["ok"] is True, canonical["issues"]
-          assert canonical["technical_done"] == 545
-          assert canonical["technical_completion_claimed"] is False
-          print("HYPERSMART PRE-RUN: 545/775 SPECIFIQUEMENT PROUVES")
-          print("COPY-VAULT DERIVE: 321-395 VERT")
-          print("LEAD-LAG DERIVE: 396-465 VERT")
-          print("CROSS-VENUE DERIVE: 466-545 VERT")
-          print("PROCHAIN BLOC: ANTI-OVERFIT A PARTIR DE 546")
+          if canonical["status"] == DONE_TECHNICAL_775_SOURCE_LOSS_HONEST:
+              assert canonical["technical_done"] == 775
+              assert canonical["technical_completion_claimed"] is True
+              print("HYPERSMART PRE-RUN: 775/775 TECHNIQUEMENT PROUVES ET MANIFESTE SCELLE")
+          else:
+              assert canonical["status"] == IN_PROGRESS_TECHNICAL_775_SOURCE_LOSS_HONEST
+              assert canonical["technical_completion_claimed"] is False
+              print("HYPERSMART PRE-RUN: IMPLEMENTATION 775/775 PROUVEE - MANIFESTE EN ATTENTE DU SCELLEMENT POST-CI")
           PY
 
       - name: Garde-fous sécurité finaux
@@ -145,14 +172,16 @@ jobs:
             tests/test_ci_supply_chain_pinning.py \
             tests/test_portable_release_ci.py \
             tests/test_anti_overfit_gate.py \
-            tests/test_validation_stats.py
+            tests/test_validation_stats.py \
+            tests/test_self_hosted_go_gate.py \
+            tests/test_dataset_untrusted_guard.py
           python -m hl_observer safety-audit
           python -m hl_observer audit-safety
 
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         if: always()
         with:
-          name: pre-run-progress-775-${{ github.sha }}
+          name: pre-run-completion-775-${{ github.sha }}
           path: |
             junit-*.xml
             runtime/reports/pre_run_*_final.json

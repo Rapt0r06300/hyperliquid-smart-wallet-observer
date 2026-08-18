@@ -3,7 +3,16 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from hl_observer.ops.pre_run_guard_321_775 import BASE_COUNT, DERIVED_COUNT, DERIVED_END, DERIVED_START, FACETS, base_requirements, evaluate, proof_id
+from hl_observer.ops.pre_run_guard_321_775 import (
+    BASE_COUNT,
+    DERIVED_COUNT,
+    DERIVED_END,
+    DERIVED_START,
+    FACETS,
+    base_requirements,
+    evaluate,
+    proof_id,
+)
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -28,43 +37,46 @@ def test_no_derived_proof_claims_historical_literal_recovery() -> None:
     assert all(proof["provenance"] == "DERIVED_TECHNICAL_REQUIREMENT" for proof in result["proofs"])
 
 
-def test_current_progress_is_honest_545_with_three_specific_families() -> None:
+def test_all_91_requirements_and_455_facets_are_specifically_green() -> None:
     result = evaluate(ROOT)
     assert result["source_contract_ok"] is True and result["prior_1_320_assets_ok"] is True
-    assert result["base_requirements_done"] == 45 and result["derived_proofs_done"] == 225
-    assert result["technical_done"] == 545 and result["next_derived_id"] == 546
-    assert result["technical_completion_claimed"] is False and result["complete"] is False
-    assert result["status"] == "IN_PROGRESS_TECHNICAL_775_SOURCE_LOSS_HONEST" and result["ok"] is True
-    assert result["evaluated_categories"] == ["COPY_VAULT", "LEAD_LAG", "CROSS_VENUE"]
+    assert result["base_requirements_done"] == result["base_requirements_total"] == 91
+    assert result["derived_proofs_done"] == result["derived_proofs_total"] == 455
+    assert result["technical_done"] == 775 and result["next_derived_id"] is None
+    assert result["technical_completion_claimed"] is True and result["complete"] is True
+    assert result["status"] == "DONE_TECHNICAL_775_SOURCE_LOSS_HONEST" and result["ok"] is True
+    assert len(result["evaluated_categories"]) == 12
     for category in result["evaluated_categories"]:
-        assert result["category_progress"][category]["ok"] is True
+        assert result["category_progress"][category]["ok"] is True, category
 
 
-def test_future_categories_are_explicitly_incomplete_not_generic_file_green() -> None:
-    result = evaluate(ROOT); future = [proof for proof in result["proofs"] if proof["id"] >= 546]
-    assert future
-    assert all(proof["ok"] is False for proof in future)
-    assert all(proof["blocker"] == "CATEGORY_NOT_YET_SPECIFICALLY_VERIFIED" for proof in future)
-    assert all(not proof["evidence"] for proof in future)
-
-
-def test_all_declared_321_545_proofs_have_specific_hashed_evidence() -> None:
-    result = evaluate(ROOT); declared = [proof for proof in result["proofs"] if 321 <= proof["id"] <= 545]
-    assert len(declared) == 225 and all(proof["ok"] is True for proof in declared)
-    for proof in declared:
+def test_all_321_775_proofs_have_specific_hashed_evidence() -> None:
+    result = evaluate(ROOT)
+    assert len(result["proofs"]) == 455 and all(proof["ok"] is True for proof in result["proofs"])
+    for proof in result["proofs"]:
         assert proof["evidence"] and proof["evidence_sha256"]
+        assert proof["blocker"] is None
         for digest in proof["evidence_sha256"].values():
-            assert len(digest) == 64; int(digest, 16)
+            assert len(digest) == 64
+            int(digest, 16)
+
+
+def test_remaining_546_775_is_exactly_46_requirements_230_facets() -> None:
+    result = evaluate(ROOT)
+    remaining = result["remaining_546_775"]
+    assert remaining["requirements_done"] == remaining["requirements_total"] == 46
+    assert remaining["facets_done"] == remaining["facets_total"] == 230
+    assert remaining["ok"] is True
 
 
 def test_gate_is_fail_closed_when_source_contract_is_missing(tmp_path: Path) -> None:
     result = evaluate(tmp_path)
     assert result["ok"] is False and result["source_contract_ok"] is False
-    assert result["technical_completion_claimed"] is False and result["technical_done"] < 545
+    assert result["complete"] is False and result["technical_completion_claimed"] is False
+    assert result["technical_done"] < 775
 
 
-def test_status_manifest_still_denies_literal_reconstruction() -> None:
+def test_status_manifest_ne_reconstruit_jamais_les_labels_perdus() -> None:
     status = json.loads((ROOT / "docs/PRE_RUN_775_CANONICAL_STATUS.json").read_text(encoding="utf-8"))
     assert status["literal_source_unrecoverable"] is True
     assert status["exact_literal_reconstruction_claimed"] is False
-    assert status["technical_completion_claimed"] is False

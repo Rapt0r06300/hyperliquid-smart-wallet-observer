@@ -14,8 +14,9 @@ from pathlib import Path
 from typing import Iterable
 
 from hl_observer.ops.pre_run_copy_321_395 import COPY_REQUIREMENTS, evaluate_copy_requirements
-from hl_observer.ops.pre_run_lead_lag_396_465 import LEAD_LAG_REQUIREMENTS, evaluate_lead_lag_requirements
 from hl_observer.ops.pre_run_cross_venue_466_545 import CROSS_VENUE_REQUIREMENTS, evaluate_cross_venue_requirements
+from hl_observer.ops.pre_run_final_546_775 import evaluate_remaining_requirements
+from hl_observer.ops.pre_run_lead_lag_396_465 import LEAD_LAG_REQUIREMENTS, evaluate_lead_lag_requirements
 
 SOURCE_PATH = "docs/PRE_RUN_775_SOURCE_LOSS_CLOSURE.md"
 STATUS_PATH = "docs/PRE_RUN_775_CANONICAL_STATUS.json"
@@ -25,12 +26,14 @@ DERIVED_COUNT = DERIVED_END - DERIVED_START + 1
 BASE_COUNT = 91
 FACETS = ("CONTRACT", "POSITIVE_PATH", "NEGATIVE_FAIL_CLOSED", "DETERMINISM_CAUSALITY", "EVIDENCE_PROVENANCE")
 
+
 @dataclass(frozen=True)
 class BaseRequirement:
     ordinal: int
     category: str
     key: str
     description: str
+
 
 _GROUPS = (
     ("COPY_VAULT", COPY_REQUIREMENTS),
@@ -95,10 +98,12 @@ def _source_contract(root: Path):
 def evaluate(root: Path) -> dict[str, object]:
     root = root.resolve(); source_ok, source_meta = _source_contract(root)
     prior_existing = _existing(root, PRIOR_BLOCK_ASSETS); prior_ok = len(prior_existing) == len(PRIOR_BLOCK_ASSETS)
+    remaining = evaluate_remaining_requirements(root)
     category_results = {
         "COPY_VAULT": evaluate_copy_requirements(root),
         "LEAD_LAG": evaluate_lead_lag_requirements(root),
         "CROSS_VENUE": evaluate_cross_venue_requirements(root),
+        **remaining["categories"],
     }
     category_by_key = {category: {row["key"]: row for row in result["requirements"]} for category, result in category_results.items()}
     proofs=[]; base_done=0
@@ -109,7 +114,7 @@ def evaluate(root: Path) -> dict[str, object]:
             if row is not None:
                 ok=bool(row["facets"][facet]); evidence=list(row["evidence"]); hashes=dict(row["evidence_sha256"]); blocker=None if ok else f"{requirement.category}_REQUIREMENT_FAILED"
             else:
-                ok=False; evidence=[]; hashes={}; blocker="CATEGORY_NOT_YET_SPECIFICALLY_VERIFIED"
+                ok=False; evidence=[]; hashes={}; blocker="CATEGORY_NOT_SPECIFICALLY_VERIFIED"
             facet_results.append(ok)
             proofs.append({"id": pid, "base_ordinal": requirement.ordinal, "category": requirement.category, "key": requirement.key, "description": requirement.description, "facet": facet, "ok": ok, "historical_literal": False, "provenance": "DERIVED_TECHNICAL_REQUIREMENT", "descriptor": f"DERIVED:{pid}:{requirement.category}:{requirement.key}:{facet}", "evidence": evidence, "evidence_sha256": hashes, "blocker": blocker})
         if all(facet_results): base_done += 1
@@ -118,7 +123,7 @@ def evaluate(root: Path) -> dict[str, object]:
     evaluated_ok = all(result["ok"] is True for result in category_results.values()); progress_ok=bool(prior_ok and source_ok and structure_ok and evaluated_ok)
     complete = bool(progress_ok and derived_done == DERIVED_COUNT and base_done == BASE_COUNT); technical_done = 320 + derived_done if prior_ok else derived_done
     category_progress = {category: {"requirements_done": result["requirements_done"], "requirements_total": result["requirements_total"], "facets_done": result["facets_done"], "facets_total": result["facets_total"], "ok": result["ok"]} for category, result in category_results.items()}
-    return {"roadmap_id": "HYPERSMART_PNL_CANONICAL_775", "ok": progress_ok, "complete": complete, "status": "DONE_TECHNICAL_775_SOURCE_LOSS_HONEST" if complete else "IN_PROGRESS_TECHNICAL_775_SOURCE_LOSS_HONEST", "historical_literal_recovery": "TERMINAL_SOURCE_LOSS_HONEST", "exact_literal_reconstruction_claimed": False, "technical_completion_claimed": complete, "prior_1_320_assets_ok": prior_ok, "prior_1_320_asset_count": len(prior_existing), "source_contract_ok": source_ok, "source_contract": source_meta, "evaluated_categories": list(category_results), "category_progress": category_progress, "base_requirements_total": BASE_COUNT, "base_requirements_done": base_done, "derived_proofs_start": DERIVED_START, "derived_proofs_end": DERIVED_END, "derived_proofs_total": DERIVED_COUNT, "derived_proofs_done": derived_done, "technical_total": 775, "technical_done": technical_done, "next_derived_id": next((int(proof["id"]) for proof in proofs if not proof["ok"]), None), "proof_facets": list(FACETS), "proofs": proofs}
+    return {"roadmap_id": "HYPERSMART_PNL_CANONICAL_775", "ok": progress_ok, "complete": complete, "status": "DONE_TECHNICAL_775_SOURCE_LOSS_HONEST" if complete else "IN_PROGRESS_TECHNICAL_775_SOURCE_LOSS_HONEST", "historical_literal_recovery": "TERMINAL_SOURCE_LOSS_HONEST", "exact_literal_reconstruction_claimed": False, "technical_completion_claimed": complete, "prior_1_320_assets_ok": prior_ok, "prior_1_320_asset_count": len(prior_existing), "source_contract_ok": source_ok, "source_contract": source_meta, "evaluated_categories": list(category_results), "remaining_546_775": {"ok": remaining["ok"], "requirements_done": remaining["requirements_done"], "requirements_total": remaining["requirements_total"], "facets_done": remaining["facets_done"], "facets_total": remaining["facets_total"]}, "category_progress": category_progress, "base_requirements_total": BASE_COUNT, "base_requirements_done": base_done, "derived_proofs_start": DERIVED_START, "derived_proofs_end": DERIVED_END, "derived_proofs_total": DERIVED_COUNT, "derived_proofs_done": derived_done, "technical_total": 775, "technical_done": technical_done, "next_derived_id": next((int(proof["id"]) for proof in proofs if not proof["ok"]), None), "proof_facets": list(FACETS), "proofs": proofs}
 
 
 def main(argv=None) -> int:
