@@ -4,8 +4,26 @@
   "status": "IN_PROGRESS_TECHNICAL_775_SOURCE_LOSS_HONEST",
   "legacy_master_v6_equivalent": false,
   "legacy_master_v6_note": "Le registre historique AUD/DATA/BUG contient 590 taches et ne doit jamais etre utilise comme numerotation de la roadmap PnL 1..775.",
-  "anchors": {"301": "Interdire promotion par PnL sans coûts", "314": "Reconstruction OPEN/ADD/REDUCE/CLOSE parfaite", "315": "Retraits/dépôts non confondus avec PnL", "316": "Wallet/vault identity stable", "317": "Backfill complet", "318": "Pagination userFillsByTime", "319": "Déduplication fills", "320": "Fraîcheur du leader"},
-  "recovered_literal_labels": {"301": "Interdire promotion par PnL sans coûts", "314": "Reconstruction OPEN/ADD/REDUCE/CLOSE parfaite", "315": "Retraits/dépôts non confondus avec PnL", "316": "Wallet/vault identity stable", "317": "Backfill complet", "318": "Pagination userFillsByTime", "319": "Déduplication fills", "320": "Fraîcheur du leader"},
+  "anchors": {
+    "301": "Interdire promotion par PnL sans coûts",
+    "314": "Reconstruction OPEN/ADD/REDUCE/CLOSE parfaite",
+    "315": "Retraits/dépôts non confondus avec PnL",
+    "316": "Wallet/vault identity stable",
+    "317": "Backfill complet",
+    "318": "Pagination userFillsByTime",
+    "319": "Déduplication fills",
+    "320": "Fraîcheur du leader"
+  },
+  "recovered_literal_labels": {
+    "301": "Interdire promotion par PnL sans coûts",
+    "314": "Reconstruction OPEN/ADD/REDUCE/CLOSE parfaite",
+    "315": "Retraits/dépôts non confondus avec PnL",
+    "316": "Wallet/vault identity stable",
+    "317": "Backfill complet",
+    "318": "Pagination userFillsByTime",
+    "319": "Déduplication fills",
+    "320": "Fraîcheur du leader"
+  },
   "recovered_literal_count": 8,
   "next_unrecovered_literal": null,
   "blocking": false,
@@ -13,18 +31,47 @@
   "exact_literal_reconstruction_claimed": false,
   "technical_completion_claimed": false,
   "technical_completion_total": 775,
-  "technical_completion_done": 395,
+  "technical_completion_done": 465,
   "technical_completion_mode": "EXISTING_CANONICAL_1_320_PLUS_SPECIFIC_EXECUTABLE_DERIVED_321_775",
   "technical_completion_guard": "src/hl_observer/ops/pre_run_guard_321_775.py",
   "technical_completion_workflow": ".github/workflows/pre-run-321-775.yml",
-  "prior_canonical_controls": {"start": 1, "end": 320, "count": 320, "provenance": "EXISTING_EXECUTABLE_SUITES"},
-  "derived_technical_controls": {"start": 321, "end": 775, "count": 455, "done": 75, "base_requirements": 91, "base_requirements_done": 15, "facets": 5, "historical_literal": false, "provenance": "DERIVED_TECHNICAL_REQUIREMENT", "specifically_verified_categories": ["COPY_VAULT"], "next_unverified_id": 396},
-  "superseded_false_completion": {"status": "WITHDRAWN", "reason": "L'ancienne gate 321..775 reutilisait quelques fichiers generiques comme preuve de dizaines d'exigences distinctes. La presence de fichiers n'est pas une optimisation prouvee.", "previous_claim": 775},
-  "source_searches_completed": ["GITHUB_REPOSITORY", "GIT_HISTORY", "CHAT_LIBRARY", "PRIOR_CONVERSATION_CONTEXT"],
+  "prior_canonical_controls": {
+    "start": 1,
+    "end": 320,
+    "count": 320,
+    "provenance": "EXISTING_EXECUTABLE_SUITES"
+  },
+  "derived_technical_controls": {
+    "start": 321,
+    "end": 775,
+    "count": 455,
+    "done": 145,
+    "base_requirements": 91,
+    "base_requirements_done": 29,
+    "facets": 5,
+    "historical_literal": false,
+    "provenance": "DERIVED_TECHNICAL_REQUIREMENT",
+    "specifically_verified_categories": [
+      "COPY_VAULT",
+      "LEAD_LAG"
+    ],
+    "next_unverified_id": 466
+  },
+  "superseded_false_completion": {
+    "status": "WITHDRAWN",
+    "reason": "L'ancienne gate 321..775 reutilisait quelques fichiers generiques comme preuve de dizaines d'exigences distinctes. La presence de fichiers n'est pas une optimisation prouvee.",
+    "previous_claim": 775
+  },
+  "source_searches_completed": [
+    "GITHUB_REPOSITORY",
+    "GIT_HISTORY",
+    "CHAT_LIBRARY",
+    "PRIOR_CONVERSATION_CONTEXT"
+  ],
   "source_loss_reason": "Les formulations littérales 321→775 ne sont présentes ni dans le dépôt GitHub accessible, ni dans l'historique Git interrogé, ni dans les fichiers de reprise indexés, ni dans le contexte récupérable de la conversation. Les inventer violerait la provenance canonique.",
   "thematic_requirements_path": "docs/PRE_RUN_775_SOURCE_LOSS_CLOSURE.md",
   "thematic_requirements_sha256": "ec60dfcea2c20ea29a2a9aee80e45ba6c8d01686c970cc581768f85a9eb861b0",
   "recovery_state": "TERMINAL_SOURCE_LOSS_HONEST",
-  "technical_completion_state": "IN_PROGRESS_395_OF_775",
+  "technical_completion_state": "IN_PROGRESS_465_OF_775",
   "rule": "La récupération littérale 321→775 reste close. La progression technique n'avance que lorsqu'une exigence dispose de contrôles spécifiques exécutables : chemin positif, fail-closed, déterminisme/causalité et provenance hashée. Aucun fichier générique ne peut valider plusieurs exigences sans contrôle spécifique."
 }

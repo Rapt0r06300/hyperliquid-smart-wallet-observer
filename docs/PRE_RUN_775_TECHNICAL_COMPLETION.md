@@ -2,62 +2,92 @@
 
 ## Verdict courant
 
-**Progression honnête : 395 / 775.**
+**Progression honnête : 465 / 775.**
 
-Le précédent document annonçait 775/775 en s'appuyant sur une gate dérivée qui considérait, pour de nombreuses exigences, que la présence de deux fichiers génériques de la catégorie suffisait à valider chemin positif, fail-closed, déterminisme et provenance. Cette méthode était trop faible et son verdict est retiré.
+La provenance littérale reste inchangée : les formulations historiques originales
+321→775 ne sont pas récupérées et ne sont pas inventées.
 
-La provenance littérale reste inchangée : les formulations historiques originales 321→775 ne sont pas récupérées et ne sont pas inventées.
+Le précédent faux verdict 775/775 reste retiré : une présence de fichiers ne vaut
+pas une preuve technique spécifique.
 
 ## Ce qui est réellement verrouillé
 
-- **1→320** : suites exécutables préexistantes conservées.
-- **321→395** : bloc Copy-Vault dérivé, désormais contrôlé par `src/hl_observer/ops/pre_run_copy_321_395.py`.
-- **396→775** : restent explicitement incomplets jusqu'à ajout de contrôles spécifiques par exigence.
+- **1→320** : suites exécutables préexistantes conservées ;
+- **321→395** : Copy-Vault, 15 exigences × 5 facettes = 75 preuves ;
+- **396→465** : Lead-Lag, 14 exigences × 5 facettes = 70 preuves ;
+- **466→775** : explicitement incomplets tant que leur évaluateur spécifique
+  n'existe pas et ne passe pas.
 
-Le bloc Copy-Vault représente 15 exigences préservées × 5 facettes = 75 preuves spécifiques :
+Les cinq facettes obligatoires restent :
 
-1. userFillsByTime / pagination ;
-2. lifecycle OPEN/ADD/REDUCE/CLOSE ;
-3. dépôts/retraits hors PnL ;
-4. identité wallet/vault stable ;
-5. copyability / fraîcheur ;
-6. latence leader→follower / slippage ;
-7. capacité exécutable ;
-8. consistency / one-big-win ;
-9. drawdown / régimes ;
-10. TWAP / métaordres ;
-11. conflits entre vaults ;
-12. vault réellement jamais vu avant OOS ;
-13. OOS / forward ;
-14. coûts réels / taille d'échantillon ;
-15. PnL net / placebo.
+1. `CONTRACT` ;
+2. `POSITIVE_PATH` ;
+3. `NEGATIVE_FAIL_CLOSED` ;
+4. `DETERMINISM_CAUSALITY` ;
+5. `EVIDENCE_PROVENANCE`.
 
-Pour chacune, cinq facettes doivent être vraies : `CONTRACT`, `POSITIVE_PATH`, `NEGATIVE_FAIL_CLOSED`, `DETERMINISM_CAUSALITY`, `EVIDENCE_PROVENANCE`.
+## Lead-Lag 396→465
 
-## Renforcement Copy-Vault de ce lot
+Le bloc spécifique est dans
+`src/hl_observer/ops/pre_run_lead_lag_396_465.py`.
 
-La preuve held-out exécutable est désormais fail-closed :
+Il couvre :
 
-- un vault est held-out uniquement s'il est absent de toute observation parseable avant la frontière OOS ;
-- les lignes strictes doivent être paper-only et causales ;
-- gross PnL, frais, spread, slippage et latence doivent se réconcilier ;
-- la capacité observée d'entrée et de sortie doit couvrir le notionnel ;
-- les identités de trade dupliquées invalident la preuve économique ;
-- les lignes strictes incomplètes sont rejetées ;
-- les anciennes partitions de vaults ne sont plus éligibles économiquement via l'adaptateur strict.
+1. timestamps certifiables ;
+2. causalité et lag réel ;
+3. multi-horizon ;
+4. régimes ;
+5. frontière seconde / minute ;
+6. horizons 5 min / 15 min ;
+7. OFI / microprice ;
+8. queue depletion ;
+9. ADD/CANCEL ;
+10. profondeur ;
+11. latence ;
+12. univers test / contrôle ;
+13. stress de coûts ;
+14. placebos.
 
-La preuve expose aussi, sans en faire arbitrairement un gradient de tuning : drawdown held-out, ratio de vaults profitables, concentration du plus gros gain, concentration par vault, dépendance one-big-win, régimes de coût dominants, latence observée, marge de capacité et conflits de directions entre vaults.
+### Renforcement de causalité
+
+Le chemin économique certifié n'utilise plus de monkeypatch global de
+`lead_lag_shadow._event_time_ns`.
+
+`src/hl_observer/backtesting/lead_lag_certified_backtest.py` charge une vue
+certifiée séparée :
+
+- `ts_wall_ms` ou `recv_wall_ts_ms` obligatoire ;
+- une ligne avec seulement `recu_ns` est classée
+  `uncertifiable_clock_rows` et exclue de la preuve économique ;
+- les sources brutes restent intactes ;
+- les doublons sont rejetés de façon déterministe ;
+- les métriques économiques utilisent seulement les épisodes fermés avec
+  référence fraîche et capacité top-of-book mesurée ;
+- l'univers test et les coins de contrôle restent séparés ;
+- les placebos sont reproductibles.
+
+`lead_lag_certified_clock.py` reste l'entrée publique utilisée par la campagne
+économique, mais délègue désormais au loader/backtest certifié sans mutation
+globale temporaire.
+
+### Multi-échelle
+
+Les horizons minute, 5 minutes et 15 minutes sont ici des **preuves techniques
+de chronologie/observabilité**. Ils ne sont pas ajoutés silencieusement au
+protocole économique sub-seconde gelé et ne constituent pas une nouvelle
+optimisation sur le holdout.
 
 ## Règle de progression
 
-`src/hl_observer/ops/pre_run_guard_321_775.py` ne déclare plus les catégories futures terminées par simple présence de fichiers. Une catégorie non encore munie d'un évaluateur spécifique reste `CATEGORY_NOT_YET_SPECIFICALLY_VERIFIED`.
+`src/hl_observer/ops/pre_run_guard_321_775.py` ne compte que les catégories avec
+un évaluateur spécifique réellement vert. Les catégories futures restent
+`CATEGORY_NOT_YET_SPECIFICALLY_VERIFIED`.
 
-La CI peut rester verte pendant la progression : vert signifie que le compteur annoncé est honnête et que les blocs déclarés finis sont réellement prouvés. Cela ne signifie pas 775/775.
-
-## Suite
-
-Le prochain identifiant dérivé à traiter est **396**, début du bloc Lead-Lag. Les blocs seront ensuite poursuivis sans saut jusqu'à 775.
+Le prochain identifiant est **466**, début du bloc **Cross-Venue**.
 
 ## Sécurité
 
-Toujours : paper/read-only ; mainnet/testnet execution désactivés ; aucune clé privée ou signature ; aucune commande `/exchange` opérationnelle ; aucun test supprimé pour masquer un rouge ; `PREPARER_PC_ALINA.cmd` non lancé ; runner self-hosted non installé tant que `GO_SELF_HOSTED = TRUE` n'est pas explicitement autorisé.
+Toujours : paper/read-only ; mainnet/testnet execution désactivés ; aucune clé
+privée ou signature ; aucun test supprimé pour masquer un rouge ;
+`PREPARER_PC_ALINA.cmd` non lancé ; runner self-hosted non installé tant que
+`GO_SELF_HOSTED = TRUE` n'est pas explicitement autorisé.

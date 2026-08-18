@@ -54,7 +54,7 @@ def test_manifest_775_courant_est_honnete_et_en_progression_specifique():
     manifest=json.loads(Path("docs/PRE_RUN_775_CANONICAL_STATUS.json").read_text(encoding="utf-8")); result=validate_manifest(manifest)
     assert manifest["roadmap_id"]==ROADMAP_ID and manifest["total"]==ROADMAP_TOTAL
     assert manifest["status"]==IN_PROGRESS_TECHNICAL_775_SOURCE_LOSS_HONEST
-    assert manifest["technical_completion_claimed"] is False and manifest["technical_completion_done"]==395
+    assert manifest["technical_completion_claimed"] is False and manifest["technical_completion_done"]==465
     assert manifest["literal_source_unrecoverable"] is True and manifest["exact_literal_reconstruction_claimed"] is False
     assert result["terminal_recovery"] is True and result["ok"] is True
 

@@ -34,60 +34,117 @@ jobs:
         with:
           persist-credentials: false
           fetch-depth: 2
+
       - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
         with:
           python-version: "3.11"
           cache: pip
+
       - name: Installer dépendances fail-closed
         run: |
           python -m pip install --upgrade pip
           python -m pip install -e ".[dev]"
           python -m pip install -r requirements-recherche.txt
+
       - name: Revalider les preuves 001-100
         run: |
           python -m hl_observer.ops.pre_run_guard_001_100 --root . --output runtime/reports/pre_run_001_100_final.json
-          python -m pytest -q -p no:cacheprovider --junitxml=junit-final-001-100.xml tests/test_pre_run_optimizations_001_100.py tests/test_pre_run_guard_001_100.py
+          python -m pytest -q -p no:cacheprovider --junitxml=junit-final-001-100.xml \
+            tests/test_pre_run_optimizations_001_100.py \
+            tests/test_pre_run_guard_001_100.py
+
       - name: Revalider les preuves 101-200
         run: |
           python -m hl_observer.ops.pre_run_guard_101_200 --root . --output runtime/reports/pre_run_101_200_final.json
-          python -m pytest -q -p no:cacheprovider --junitxml=junit-final-101-200.xml tests/test_pre_run_optimizations_101_200.py tests/test_pre_run_guard_101_200.py
+          python -m pytest -q -p no:cacheprovider --junitxml=junit-final-101-200.xml \
+            tests/test_pre_run_optimizations_101_200.py \
+            tests/test_pre_run_guard_101_200.py
+
       - name: Revalider les preuves 201-300
         run: |
-          python -m pytest -q -p no:cacheprovider --junitxml=junit-final-201-300.xml tests/test_pre_run_201_220_rigor.py tests/test_pre_run_221_260_rigor.py tests/test_pre_run_261_300_rigor.py
+          python -m pytest -q -p no:cacheprovider --junitxml=junit-final-201-300.xml \
+            tests/test_pre_run_201_220_rigor.py \
+            tests/test_pre_run_221_260_rigor.py \
+            tests/test_pre_run_261_300_rigor.py
+
       - name: Revalider les ancres PnL 301-320
         run: |
-          python -m pytest -q -p no:cacheprovider --junitxml=junit-final-301-320.xml tests/test_pre_run_pnl_301_313.py tests/test_pre_run_pnl_314_320.py
+          python -m pytest -q -p no:cacheprovider --junitxml=junit-final-301-320.xml \
+            tests/test_pre_run_pnl_301_313.py \
+            tests/test_pre_run_pnl_314_320.py
+
       - name: Prouver spécifiquement Copy-Vault 321-395
         run: |
-          python -m pytest -q -p no:cacheprovider --junitxml=junit-copy-321-395.xml tests/test_pre_run_copy_321_395.py tests/test_copy_vault_generalization.py tests/test_copy_vault_executable.py tests/test_copy_campaign_adapter.py tests/test_vault_fills_backfill.py tests/test_vault_ledger.py
-      - name: Valider le compteur honnête 395-775
+          python -m pytest -q -p no:cacheprovider --junitxml=junit-copy-321-395.xml \
+            tests/test_pre_run_copy_321_395.py \
+            tests/test_copy_vault_generalization.py \
+            tests/test_copy_vault_executable.py \
+            tests/test_copy_campaign_adapter.py \
+            tests/test_vault_fills_backfill.py \
+            tests/test_vault_ledger.py
+
+      - name: Prouver spécifiquement Lead-Lag 396-465
         run: |
-          python -m pytest -q -p no:cacheprovider --junitxml=junit-progress-321-775.xml tests/test_pre_run_321_775.py tests/test_canonical_775_technical_status.py tests/test_canonical_775_source_loss.py
-          python -m hl_observer.ops.pre_run_guard_321_775 --root . --output runtime/reports/pre_run_321_775_technical_progress.json
+          python -m pytest -q -p no:cacheprovider --junitxml=junit-lead-lag-396-465.xml \
+            tests/test_pre_run_lead_lag_396_465.py \
+            tests/test_lead_lag_certified_clock.py \
+            tests/test_lead_lag_shadow.py \
+            tests/test_causal_timestamp_contract_v2.py \
+            tests/test_metaorder_l2_tape.py
+
+      - name: Valider le compteur honnête 465-775
+        run: |
+          python -m pytest -q -p no:cacheprovider --junitxml=junit-progress-321-775.xml \
+            tests/test_pre_run_321_775.py \
+            tests/test_canonical_775_technical_status.py \
+            tests/test_canonical_775_source_loss.py
+          python -m hl_observer.ops.pre_run_guard_321_775 \
+            --root . \
+            --output runtime/reports/pre_run_321_775_technical_progress.json
           python - <<'PY'
           import json
           from pathlib import Path
           from hl_observer.ops.canonical_775_guard import validate_manifest
-          evidence=json.loads(Path("runtime/reports/pre_run_321_775_technical_progress.json").read_text(encoding="utf-8"))
-          manifest=json.loads(Path("docs/PRE_RUN_775_CANONICAL_STATUS.json").read_text(encoding="utf-8"))
-          canonical=validate_manifest(manifest)
+
+          evidence = json.loads(
+              Path("runtime/reports/pre_run_321_775_technical_progress.json").read_text(
+                  encoding="utf-8"
+              )
+          )
+          manifest = json.loads(
+              Path("docs/PRE_RUN_775_CANONICAL_STATUS.json").read_text(encoding="utf-8")
+          )
+          canonical = validate_manifest(manifest)
+
           assert evidence["ok"] is True, evidence
           assert evidence["complete"] is False
-          assert evidence["technical_done"] == 395
-          assert evidence["derived_proofs_done"] == 75
-          assert evidence["next_derived_id"] == 396
+          assert evidence["technical_done"] == 465
+          assert evidence["derived_proofs_done"] == 145
+          assert evidence["base_requirements_done"] == 29
+          assert evidence["next_derived_id"] == 466
+          assert evidence["category_progress"]["COPY_VAULT"]["ok"] is True
+          assert evidence["category_progress"]["LEAD_LAG"]["ok"] is True
           assert canonical["ok"] is True, canonical["issues"]
-          assert canonical["technical_done"] == 395
+          assert canonical["technical_done"] == 465
           assert canonical["technical_completion_claimed"] is False
-          print("HYPERSMART PRE-RUN: 395/775 SPECIFIQUEMENT PROUVES")
+
+          print("HYPERSMART PRE-RUN: 465/775 SPECIFIQUEMENT PROUVES")
           print("COPY-VAULT DERIVE: 321-395 VERT")
-          print("PROCHAIN BLOC: LEAD-LAG A PARTIR DE 396")
+          print("LEAD-LAG DERIVE: 396-465 VERT")
+          print("PROCHAIN BLOC: CROSS-VENUE A PARTIR DE 466")
           PY
+
       - name: Garde-fous sécurité finaux
         run: |
-          python -m pytest -q -p no:cacheprovider --junitxml=junit-final-safety.xml tests/test_runtime_research_guardrails.py tests/test_ci_supply_chain_pinning.py tests/test_portable_release_ci.py tests/test_anti_overfit_gate.py tests/test_validation_stats.py
+          python -m pytest -q -p no:cacheprovider --junitxml=junit-final-safety.xml \
+            tests/test_runtime_research_guardrails.py \
+            tests/test_ci_supply_chain_pinning.py \
+            tests/test_portable_release_ci.py \
+            tests/test_anti_overfit_gate.py \
+            tests/test_validation_stats.py
           python -m hl_observer safety-audit
           python -m hl_observer audit-safety
+
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         if: always()
         with:
