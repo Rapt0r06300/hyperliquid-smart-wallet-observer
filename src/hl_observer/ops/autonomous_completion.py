@@ -1,9 +1,9 @@
 """Fail-closed completion contract for autonomous FULL/COLD research jobs.
 
 The worker may technically return zero even when an historical stage was
-SKIPPED because its required data was absent.  This module turns the generated
+SKIPPED because its required data was absent. This module turns the generated
 reports into an explicit completion proof before a suite can be persisted in
-COMPLETED_SUITES.  It never sends data to GitHub and never touches an exchange.
+COMPLETED_SUITES. It never sends data to GitHub and never touches an exchange.
 """
 from __future__ import annotations
 
@@ -248,7 +248,6 @@ def _historical_contract(
         "real_execution": False,
     }
 
-    # Make the canonical historical report self-describing for later audits.
     report["autonomous_completion_contract"] = contract
     report["analysis_complete"] = complete
     _atomic_json(report_path, report)
@@ -311,6 +310,51 @@ def build_completion_contract(
     raise AutonomousCompletionError(f"Mode autonome non certifiable: {mode}")
 
 
+def _persist_post_completion_economic_memory(
+    *,
+    result: dict[str, Any],
+    result_path: Path,
+    lab_root: Path,
+) -> tuple[str, str | None]:
+    """Persist the derived family-memory cache only after canonical completion.
+
+    ``JOB_RESULT`` must already contain ``analysis_complete=true`` and
+    ``completion_recorded=true`` on disk. Memory is a derived cache, not the
+    source of completion truth: a cache-write failure is reported but never
+    rewrites a valid canonical completion to NO_GO. The next identical cached
+    invocation can retry it safely.
+    """
+    suite = str(result.get("suite") or "")
+    if suite not in ECONOMIC_FAMILY_BY_SUITE:
+        return str(result.get("economic_memory_status") or "NOT_APPLICABLE"), None
+    if result.get("analysis_complete") is not True or result.get("completion_recorded") is not True:
+        raise AutonomousCompletionError(
+            "La mémoire économique ne peut être persistée avant completion_recorded=true."
+        )
+
+    on_disk = _load_json(result_path)
+    if on_disk.get("analysis_complete") is not True or on_disk.get("completion_recorded") is not True:
+        raise AutonomousCompletionError(
+            "JOB_RESULT disque non finalisé avant persistance de la mémoire économique."
+        )
+
+    from hl_observer.ops.family_economic_job import record_family_economic_memory
+
+    try:
+        memory_record = record_family_economic_memory(
+            lab_root=lab_root.resolve(),
+            workspace=Path(str(result.get("workspace") or "")).resolve(),
+            suite=suite,
+            project_sha=str(result.get("project_sha") or ""),
+        )
+    except (OSError, RuntimeError, ValueError) as exc:
+        return f"CACHE_WRITE_FAILED:{type(exc).__name__}:{exc}", None
+
+    if memory_record is None:
+        return "TARGET_NOT_REACHED", None
+    return "CERTIFIED_RECORDED", str(memory_record.get("key") or "") or None
+
+
 def finalize_autonomous_completion(
     *,
     request_path: Path,
@@ -318,11 +362,14 @@ def finalize_autonomous_completion(
     lab_root: Path,
     result_dir: Path,
 ) -> dict[str, Any]:
-    """Validate completion, persist the local registry and annotate JOB_RESULT.
+    """Validate completion, persist local truth, then derive optional caches.
 
     A prepare-only request stays a successful preparation but is never written
-    to COMPLETED_SUITES.  Any incomplete required analysis rewrites JOB_RESULT
+    to COMPLETED_SUITES. Any incomplete required analysis rewrites JOB_RESULT
     to NO_GO before raising so the public compact return cannot claim success.
+
+    For active-family economic suites, certified economic memory is persisted
+    only *after* the canonical completion registry and JOB_RESULT are durable.
     """
 
     request = _load_json(request_path)
@@ -378,7 +425,23 @@ def finalize_autonomous_completion(
     result["completion_recorded"] = True
     result["completion_registry_path"] = str(registry)
     _atomic_json(result_path, result)
-    return {**contract, "completion_recorded": True, "completion_registry_path": str(registry)}
+
+    memory_status, memory_key = _persist_post_completion_economic_memory(
+        result=result,
+        result_path=result_path,
+        lab_root=lab_root,
+    )
+    result["economic_memory_status"] = memory_status
+    result["economic_memory_key"] = memory_key
+    _atomic_json(result_path, result)
+
+    return {
+        **contract,
+        "completion_recorded": True,
+        "completion_registry_path": str(registry),
+        "economic_memory_status": memory_status,
+        "economic_memory_key": memory_key,
+    }
 
 
 __all__ = [
