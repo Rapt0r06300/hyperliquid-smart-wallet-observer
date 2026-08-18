@@ -2,92 +2,79 @@
 
 ## Verdict courant
 
-**Progression honnête : 465 / 775.**
+**Progression honnête : 545 / 775.**
 
 La provenance littérale reste inchangée : les formulations historiques originales
-321→775 ne sont pas récupérées et ne sont pas inventées.
-
-Le précédent faux verdict 775/775 reste retiré : une présence de fichiers ne vaut
-pas une preuve technique spécifique.
+321→775 ne sont pas récupérées et ne sont pas inventées. Le faux verdict 775/775
+reste retiré : une présence de fichiers ne vaut jamais une preuve spécifique.
 
 ## Ce qui est réellement verrouillé
 
 - **1→320** : suites exécutables préexistantes conservées ;
 - **321→395** : Copy-Vault, 15 exigences × 5 facettes = 75 preuves ;
 - **396→465** : Lead-Lag, 14 exigences × 5 facettes = 70 preuves ;
-- **466→775** : explicitement incomplets tant que leur évaluateur spécifique
-  n'existe pas et ne passe pas.
+- **466→545** : Cross-Venue, 16 exigences × 5 facettes = 80 preuves ;
+- **546→775** : encore incomplets jusqu'à leur évaluateur spécifique.
 
-Les cinq facettes obligatoires restent :
+Les cinq facettes obligatoires restent `CONTRACT`, `POSITIVE_PATH`,
+`NEGATIVE_FAIL_CLOSED`, `DETERMINISM_CAUSALITY` et `EVIDENCE_PROVENANCE`.
 
-1. `CONTRACT` ;
-2. `POSITIVE_PATH` ;
-3. `NEGATIVE_FAIL_CLOSED` ;
-4. `DETERMINISM_CAUSALITY` ;
-5. `EVIDENCE_PROVENANCE`.
+## Cross-Venue 466→545
 
-## Lead-Lag 396→465
+Le bloc spécifique est `src/hl_observer/ops/pre_run_cross_venue_466_545.py`.
 
-Le bloc spécifique est dans
-`src/hl_observer/ops/pre_run_lead_lag_396_465.py`.
+Il couvre : synchronisation/skew, fraîcheur BBO, profondeur/VWAP, mapping exact,
+entrée deux jambes, sortie deux jambes, quatre fills, frais, latence
+inter-jambes, jambe nue, fills partiels, jambe manquée, convergence, durée max,
+panne de venue et rejet spread/profondeur/mapping non exécutables.
 
-Il couvre :
+### Corrections de vérité
 
-1. timestamps certifiables ;
-2. causalité et lag réel ;
-3. multi-horizon ;
-4. régimes ;
-5. frontière seconde / minute ;
-6. horizons 5 min / 15 min ;
-7. OFI / microprice ;
-8. queue depletion ;
-9. ADD/CANCEL ;
-10. profondeur ;
-11. latence ;
-12. univers test / contrôle ;
-13. stress de coûts ;
-14. placebos.
+`tools/collecter_carnet.py` ne construit plus le symbole Binance avec un simple
+`coin + USDT`. Le mapping canonique est centralisé dans
+`src/hl_observer/config/cross_venue_instruments.py`. Un instrument non mappable
+est refusé.
 
-### Renforcement de causalité
+Le collecteur conserve maintenant :
+- les top-5 HL et Binance bruts ;
+- le symbole Binance exact ;
+- l'heure locale de réception de chaque venue ;
+- le skew mesuré entre les deux réponses ;
+- un identifiant d'observation ;
+- le mode de source certifiable ou non.
 
-Le chemin économique certifié n'utilise plus de monkeypatch global de
-`lead_lag_shadow._event_time_ns`.
+Les anciennes lignes de `carnet_venues.jsonl` restent intactes. Elles ne sont
+jamais requalifiées rétroactivement : sans mapping exact, deux timestamps de
+réception, skew borné et profondeur brute, elles restent diagnostic uniquement.
 
-`src/hl_observer/backtesting/lead_lag_certified_backtest.py` charge une vue
-certifiée séparée :
+### Quatre fills et risque de jambe nue
 
-- `ts_wall_ms` ou `recv_wall_ts_ms` obligatoire ;
-- une ligne avec seulement `recu_ns` est classée
-  `uncertifiable_clock_rows` et exclue de la preuve économique ;
-- les sources brutes restent intactes ;
-- les doublons sont rejetés de façon déterministe ;
-- les métriques économiques utilisent seulement les épisodes fermés avec
-  référence fraîche et capacité top-of-book mesurée ;
-- l'univers test et les coins de contrôle restent séparés ;
-- les placebos sont reproductibles.
+`src/hl_observer/backtesting/cross_venue_certified.py` implémente le contrat
+`cross_four_fill_aon_v1` :
+- entrée HL + Binance ;
+- sortie HL + Binance ;
+- VWAP calculé depuis la profondeur observée ;
+- fill partiel explicitement mesuré ;
+- aucune jambe manquante transformée en fill complet ;
+- aucun PnL économique si le cycle n'a pas quatre fills complets ;
+- frais explicites ;
+- durée maximale et causalité de sortie ;
+- skew inter-jambes présenté comme skew d'observation, jamais comme fausse
+  latence d'ordre physique.
 
-`lead_lag_certified_clock.py` reste l'entrée publique utilisée par la campagne
-économique, mais délègue désormais au loader/backtest certifié sans mutation
-globale temporaire.
-
-### Multi-échelle
-
-Les horizons minute, 5 minutes et 15 minutes sont ici des **preuves techniques
-de chronologie/observabilité**. Ils ne sont pas ajoutés silencieusement au
-protocole économique sub-seconde gelé et ne constituent pas une nouvelle
-optimisation sur le holdout.
+Le garde économique commun est fail-closed : un rapport Cross-Venue ne peut pas
+être éligible au +4 USD sans source certifiée v2, mapping exact, skew prouvé,
+snapshots certifiés et contrat quatre fills.
 
 ## Règle de progression
 
 `src/hl_observer/ops/pre_run_guard_321_775.py` ne compte que les catégories avec
-un évaluateur spécifique réellement vert. Les catégories futures restent
-`CATEGORY_NOT_YET_SPECIFICALLY_VERIFIED`.
-
-Le prochain identifiant est **466**, début du bloc **Cross-Venue**.
+un évaluateur spécifique vert. Le prochain identifiant est **546**, début du
+bloc **Anti-overfit**.
 
 ## Sécurité
 
-Toujours : paper/read-only ; mainnet/testnet execution désactivés ; aucune clé
-privée ou signature ; aucun test supprimé pour masquer un rouge ;
-`PREPARER_PC_ALINA.cmd` non lancé ; runner self-hosted non installé tant que
-`GO_SELF_HOSTED = TRUE` n'est pas explicitement autorisé.
+Toujours paper/read-only. Mainnet/testnet execution désactivés, aucune clé privée
+ou signature, aucun test supprimé pour masquer un rouge.
+`PREPARER_PC_ALINA.cmd` reste non lancé et le runner self-hosted reste non
+installé tant que `GO_SELF_HOSTED = TRUE` n'est pas explicitement autorisé.

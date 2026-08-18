@@ -92,7 +92,18 @@ jobs:
             tests/test_causal_timestamp_contract_v2.py \
             tests/test_metaorder_l2_tape.py
 
-      - name: Valider le compteur honnête 465-775
+      - name: Prouver spécifiquement Cross-Venue 466-545
+        run: |
+          python -m pytest -q -p no:cacheprovider --junitxml=junit-cross-venue-466-545.xml \
+            tests/test_pre_run_cross_venue_466_545.py \
+            tests/test_cross_venue_certified.py \
+            tests/test_collecter_carnet.py \
+            tests/test_dislocation_2jambes.py \
+            tests/test_economic_objective.py \
+            tests/test_cross_venue_economic_provenance.py \
+            tests/test_economic_campaigns.py
+
+      - name: Valider le compteur honnête 545-775
         run: |
           python -m pytest -q -p no:cacheprovider --junitxml=junit-progress-321-775.xml \
             tests/test_pre_run_321_775.py \
@@ -106,32 +117,25 @@ jobs:
           from pathlib import Path
           from hl_observer.ops.canonical_775_guard import validate_manifest
 
-          evidence = json.loads(
-              Path("runtime/reports/pre_run_321_775_technical_progress.json").read_text(
-                  encoding="utf-8"
-              )
-          )
-          manifest = json.loads(
-              Path("docs/PRE_RUN_775_CANONICAL_STATUS.json").read_text(encoding="utf-8")
-          )
+          evidence = json.loads(Path("runtime/reports/pre_run_321_775_technical_progress.json").read_text(encoding="utf-8"))
+          manifest = json.loads(Path("docs/PRE_RUN_775_CANONICAL_STATUS.json").read_text(encoding="utf-8"))
           canonical = validate_manifest(manifest)
-
           assert evidence["ok"] is True, evidence
           assert evidence["complete"] is False
-          assert evidence["technical_done"] == 465
-          assert evidence["derived_proofs_done"] == 145
-          assert evidence["base_requirements_done"] == 29
-          assert evidence["next_derived_id"] == 466
-          assert evidence["category_progress"]["COPY_VAULT"]["ok"] is True
-          assert evidence["category_progress"]["LEAD_LAG"]["ok"] is True
+          assert evidence["technical_done"] == 545
+          assert evidence["derived_proofs_done"] == 225
+          assert evidence["base_requirements_done"] == 45
+          assert evidence["next_derived_id"] == 546
+          for category in ("COPY_VAULT", "LEAD_LAG", "CROSS_VENUE"):
+              assert evidence["category_progress"][category]["ok"] is True
           assert canonical["ok"] is True, canonical["issues"]
-          assert canonical["technical_done"] == 465
+          assert canonical["technical_done"] == 545
           assert canonical["technical_completion_claimed"] is False
-
-          print("HYPERSMART PRE-RUN: 465/775 SPECIFIQUEMENT PROUVES")
+          print("HYPERSMART PRE-RUN: 545/775 SPECIFIQUEMENT PROUVES")
           print("COPY-VAULT DERIVE: 321-395 VERT")
           print("LEAD-LAG DERIVE: 396-465 VERT")
-          print("PROCHAIN BLOC: CROSS-VENUE A PARTIR DE 466")
+          print("CROSS-VENUE DERIVE: 466-545 VERT")
+          print("PROCHAIN BLOC: ANTI-OVERFIT A PARTIR DE 546")
           PY
 
       - name: Garde-fous sécurité finaux
