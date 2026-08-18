@@ -1,7 +1,7 @@
 {
   "roadmap_id": "HYPERSMART_PNL_CANONICAL_775",
   "total": 775,
-  "status": "IN_PROGRESS_TECHNICAL_775_SOURCE_LOSS_HONEST",
+  "status": "DONE_TECHNICAL_775_SOURCE_LOSS_HONEST",
   "legacy_master_v6_equivalent": false,
   "legacy_master_v6_note": "Le registre historique AUD/DATA/BUG contient 590 taches et ne doit jamais etre utilise comme numerotation de la roadmap PnL 1..775.",
   "anchors": {
@@ -29,9 +29,9 @@
   "blocking": false,
   "literal_source_unrecoverable": true,
   "exact_literal_reconstruction_claimed": false,
-  "technical_completion_claimed": false,
+  "technical_completion_claimed": true,
   "technical_completion_total": 775,
-  "technical_completion_done": 545,
+  "technical_completion_done": 775,
   "technical_completion_mode": "EXISTING_CANONICAL_1_320_PLUS_SPECIFIC_EXECUTABLE_DERIVED_321_775",
   "technical_completion_guard": "src/hl_observer/ops/pre_run_guard_321_775.py",
   "technical_completion_workflow": ".github/workflows/pre-run-321-775.yml",
@@ -45,18 +45,39 @@
     "start": 321,
     "end": 775,
     "count": 455,
-    "done": 225,
+    "done": 455,
     "base_requirements": 91,
-    "base_requirements_done": 45,
+    "base_requirements_done": 91,
     "facets": 5,
+    "facets_done": 455,
     "historical_literal": false,
     "provenance": "DERIVED_TECHNICAL_REQUIREMENT",
     "specifically_verified_categories": [
       "COPY_VAULT",
       "LEAD_LAG",
-      "CROSS_VENUE"
+      "CROSS_VENUE",
+      "ANTI_OVERFIT",
+      "MAXDATA_AUTONOMY",
+      "DETERMINISM",
+      "SELF_HOSTED_SECURITY",
+      "CI",
+      "WINDOWS_PORTABILITY",
+      "OBSERVABILITY",
+      "DOCS",
+      "REHEARSALS_GO"
     ],
-    "next_unverified_id": 546
+    "next_unverified_id": null
+  },
+  "pre_seal_ci_evidence": {
+    "head_sha": "6ce0770b10b1f433de1e94bbf50af769a1f23d1b",
+    "workflow_run_id": 32189086494,
+    "status_context": "hypersmart/pre-run-775",
+    "status": "success",
+    "technical_done": 775,
+    "derived_proofs_done": 455,
+    "base_requirements_done": 91,
+    "remaining_546_775_requirements_done": 46,
+    "remaining_546_775_facets_done": 230
   },
   "superseded_false_completion": {
     "status": "WITHDRAWN",
@@ -73,6 +94,6 @@
   "thematic_requirements_path": "docs/PRE_RUN_775_SOURCE_LOSS_CLOSURE.md",
   "thematic_requirements_sha256": "ec60dfcea2c20ea29a2a9aee80e45ba6c8d01686c970cc581768f85a9eb861b0",
   "recovery_state": "TERMINAL_SOURCE_LOSS_HONEST",
-  "technical_completion_state": "IN_PROGRESS_545_OF_775",
+  "technical_completion_state": "DONE_775_OF_775",
   "rule": "La récupération littérale 321→775 reste close. La progression technique n'avance que lorsqu'une exigence dispose de contrôles spécifiques exécutables : chemin positif, fail-closed, déterminisme/causalité et provenance hashée. Aucun fichier générique ne peut valider plusieurs exigences sans contrôle spécifique."
 }
