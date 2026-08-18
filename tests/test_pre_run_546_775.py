@@ -15,11 +15,22 @@ def test_registry_remaining_is_exactly_46_requirements_230_facets():
 
 def test_all_remaining_546_775_are_specifically_executable_and_green():
     result = evaluate_remaining_requirements(ROOT)
+    failures = []
+    for category, row in result["categories"].items():
+        for requirement in row["requirements"]:
+            failed_facets = [name for name, value in requirement["facets"].items() if not value]
+            if failed_facets:
+                failures.append({
+                    "category": category,
+                    "key": requirement["key"],
+                    "failed_facets": failed_facets,
+                    "evidence": requirement["evidence"],
+                })
     assert result["requirements_total"] == 46
-    assert result["requirements_done"] == 46, result
+    assert result["requirements_done"] == 46, failures
     assert result["facets_total"] == 230
-    assert result["facets_done"] == 230, result
-    assert result["ok"] is True, result
+    assert result["facets_done"] == 230, failures
+    assert result["ok"] is True, failures
     for category, row in result["categories"].items():
         assert row["ok"] is True, (category, row)
         for requirement in row["requirements"]:
