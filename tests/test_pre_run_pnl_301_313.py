@@ -4,7 +4,13 @@ import json
 from pathlib import Path
 
 from hl_observer.backtesting.cross_venue_certified import FOUR_FILL_CONTRACT_VERSION, SOURCE_MODE
-from hl_observer.ops.canonical_775_guard import IN_PROGRESS_TECHNICAL_775_SOURCE_LOSS_HONEST, ROADMAP_ID, ROADMAP_TOTAL, validate_manifest
+from hl_observer.ops.canonical_775_guard import (
+    DONE_TECHNICAL_775_SOURCE_LOSS_HONEST,
+    IN_PROGRESS_TECHNICAL_775_SOURCE_LOSS_HONEST,
+    ROADMAP_ID,
+    ROADMAP_TOTAL,
+    validate_manifest,
+)
 from hl_observer.simulation.economic_family_gate import evaluate_all_families
 from hl_observer.simulation.economic_objective import TARGET_NET_USD
 
@@ -55,13 +61,28 @@ def test_garde_775_refuse_explicitement_l_ancien_master_v6():
     result = validate_manifest(old); assert result["ok"] is False; assert "WRONG_ROADMAP_TOTAL" in result["issues"] and "CANONICAL_ANCHOR_MISMATCH:301" in result["issues"]
 
 
-def test_manifest_775_courant_est_honnete_et_en_progression_specifique():
+def test_manifest_775_courant_est_honnete_et_valide_dans_sa_phase():
     manifest = json.loads(Path("docs/PRE_RUN_775_CANONICAL_STATUS.json").read_text(encoding="utf-8")); result = validate_manifest(manifest)
     assert manifest["roadmap_id"] == ROADMAP_ID and manifest["total"] == ROADMAP_TOTAL
-    assert manifest["status"] == IN_PROGRESS_TECHNICAL_775_SOURCE_LOSS_HONEST
-    assert manifest["technical_completion_claimed"] is False and manifest["technical_completion_done"] == 545
+    assert manifest["status"] in {
+        IN_PROGRESS_TECHNICAL_775_SOURCE_LOSS_HONEST,
+        DONE_TECHNICAL_775_SOURCE_LOSS_HONEST,
+    }
     assert manifest["literal_source_unrecoverable"] is True and manifest["exact_literal_reconstruction_claimed"] is False
     assert result["terminal_recovery"] is True and result["ok"] is True
+
+    derived = manifest["derived_technical_controls"]
+    if manifest["status"] == DONE_TECHNICAL_775_SOURCE_LOSS_HONEST:
+        assert manifest["technical_completion_claimed"] is True
+        assert manifest["technical_completion_done"] == ROADMAP_TOTAL == 775
+        assert derived["done"] == 455
+        assert derived["base_requirements_done"] == 91
+        assert derived["next_unverified_id"] is None
+    else:
+        assert manifest["technical_completion_claimed"] is False
+        assert 320 <= manifest["technical_completion_done"] < ROADMAP_TOTAL
+        assert 0 <= derived["done"] < 455
+        assert derived["next_unverified_id"] is not None
 
 
 def test_done_775_exige_775_libelles_et_775_preuves():
