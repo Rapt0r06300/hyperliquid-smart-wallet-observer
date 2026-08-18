@@ -106,7 +106,12 @@ def _empty(*, strict_mode: bool, candidate_count: int = 0, rejected: Counter[str
 
 
 def derive_heldout_vault_generalization(trades: Iterable[Mapping[str, Any]], *, oos_start_ms: int | None) -> dict[str, Any] | None:
-    """Build a held-out proof; strict executable evidence fails closed."""
+    """Build a held-out proof; strict executable evidence fails closed.
+
+    Vault identity is compared case-insensitively, while the original spelling is
+    retained for human-readable proof output. This prevents ``A`` and ``a`` from
+    becoming two different vaults without corrupting checksummed/display labels.
+    """
     if oos_start_ms is None:
         return None
     try:
@@ -120,7 +125,8 @@ def derive_heldout_vault_generalization(trades: Iterable[Mapping[str, Any]], *, 
     for raw in trades:
         if not isinstance(raw, Mapping):
             continue
-        vault = str(raw.get("vault") or "").strip().lower()
+        vault_display = str(raw.get("vault") or "").strip()
+        vault = vault_display.casefold()
         coin = str(raw.get("coin") or "").strip().upper()
         try:
             ts_ms = int(raw.get("signal_ts_ms") or 0)
@@ -133,7 +139,8 @@ def derive_heldout_vault_generalization(trades: Iterable[Mapping[str, Any]], *, 
             continue
         strict = _strict_candidate(raw)
         strict_mode = strict_mode or strict
-        parsed.append({**dict(raw), "vault": vault, "coin": coin, "signal_ts_ms": ts_ms,
+        parsed.append({**dict(raw), "vault": vault, "_vault_display": vault_display,
+                       "coin": coin, "signal_ts_ms": ts_ms,
                        "net_pnl_usd": net, "notional_usd": notional, "trade_id": trade_id,
                        "_strict": strict,
                        "_strict_issues": _strict_issues(raw, net=net, notional=notional) if strict else []})
@@ -161,7 +168,7 @@ def derive_heldout_vault_generalization(trades: Iterable[Mapping[str, Any]], *, 
         accepted.append(row)
     if not accepted:
         return _empty(strict_mode=strict_mode, candidate_count=len(candidates), rejected=rejected)
-    by_vault: dict[str, dict[str, float | int]] = {}
+    by_vault: dict[str, dict[str, float | int | str]] = {}
     total_net = total_notional = positive_pnl = 0.0
     positive_trades = 0
     positive_trade_values: list[float] = []
@@ -172,7 +179,11 @@ def derive_heldout_vault_generalization(trades: Iterable[Mapping[str, Any]], *, 
     equity = peak = max_drawdown = 0.0
     for row in accepted:
         vault, net, notional = str(row["vault"]), float(row["net_pnl_usd"]), float(row["notional_usd"])
-        bucket = by_vault.setdefault(vault, {"sample_count": 0, "net_pnl_usd": 0.0, "notional_usd": 0.0})
+        bucket = by_vault.setdefault(
+            vault,
+            {"display_vault": str(row["_vault_display"]), "sample_count": 0,
+             "net_pnl_usd": 0.0, "notional_usd": 0.0},
+        )
         bucket["sample_count"] = int(bucket["sample_count"]) + 1
         bucket["net_pnl_usd"] = float(bucket["net_pnl_usd"]) + net
         bucket["notional_usd"] = float(bucket["notional_usd"]) + notional
@@ -192,7 +203,7 @@ def derive_heldout_vault_generalization(trades: Iterable[Mapping[str, Any]], *, 
     for vault in sorted(by_vault):
         bucket = by_vault[vault]; notional = float(bucket["notional_usd"]); net = float(bucket["net_pnl_usd"])
         if net > 0: positive_vault_values.append(net)
-        vault_rows.append({"vault": vault, "sample_count": int(bucket["sample_count"]),
+        vault_rows.append({"vault": str(bucket["display_vault"]), "sample_count": int(bucket["sample_count"]),
                            "net_pnl_usd": round(net, 8), "notional_usd": round(notional, 8),
                            "net_bps": round(net / notional * 10_000.0, 8) if notional > 0 else None})
     conflicts = 0; by_coin: dict[str, list[dict[str, Any]]] = {}
