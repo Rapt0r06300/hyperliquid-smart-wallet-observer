@@ -108,9 +108,9 @@ def _empty(*, strict_mode: bool, candidate_count: int = 0, rejected: Counter[str
 def derive_heldout_vault_generalization(trades: Iterable[Mapping[str, Any]], *, oos_start_ms: int | None) -> dict[str, Any] | None:
     """Build a held-out proof; strict executable evidence fails closed.
 
-    Vault identity is compared case-insensitively, while the original spelling is
-    retained for human-readable proof output. This prevents ``A`` and ``a`` from
-    becoming two different vaults without corrupting checksummed/display labels.
+    Vault identity is compared case-insensitively. Human-readable symbolic labels
+    keep their source spelling, while 0x-address-like identifiers are rendered in
+    canonical lowercase so proof output cannot vary with address casing.
     """
     if oos_start_ms is None:
         return None
@@ -125,8 +125,9 @@ def derive_heldout_vault_generalization(trades: Iterable[Mapping[str, Any]], *, 
     for raw in trades:
         if not isinstance(raw, Mapping):
             continue
-        vault_display = str(raw.get("vault") or "").strip()
-        vault = vault_display.casefold()
+        vault_raw = str(raw.get("vault") or "").strip()
+        vault = vault_raw.casefold()
+        vault_display = vault if vault.startswith("0x") else vault_raw
         coin = str(raw.get("coin") or "").strip().upper()
         try:
             ts_ms = int(raw.get("signal_ts_ms") or 0)
