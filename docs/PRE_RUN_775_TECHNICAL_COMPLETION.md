@@ -19,7 +19,7 @@ Cette séparation empêche un faux `DONE` écrit avant la preuve GitHub Actions.
 - **546→605** : Anti‑overfit — 12 exigences × 5 facettes ;
 - **606→655** : MAX DATA / autonomie / mémoire économique — 10 × 5 ;
 - **656→670** : déterminisme et suppression des mutations globales — 3 × 5 ;
-- **671→710** : sécurité self‑hosted — 8 × 5 ;
+- **671→710** : sécurité self-hosted — 8 × 5 ;
 - **711→730** : CI — 4 × 5 ;
 - **731→750** : Windows portable — 4 × 5 ;
 - **751→760** : observabilité — 2 × 5 ;
@@ -59,24 +59,24 @@ une fonction isolée avec des dépendances explicitement injectées. Le routage 
 entrées → mêmes décisions, sans mutation cachée du module canonique.
 Replay/paper et digest de dataset restent reproductibles.
 
-## Self‑hosted : toujours NON installé par défaut
+## Self-hosted : toujours NON installé par défaut
 
 `PREPARER_PC_ALINA.cmd`, `INSTALLER_ALINA_RUNNER_WINDOWS.cmd` et le PowerShell installateur refusent
 tous l'installation tant que la variable exacte **`GO_SELF_HOSTED=TRUE`** n'est pas définie.
-Le runner self‑hosted n'est donc pas présenté comme installé par cette roadmap.
+Le runner self-hosted n'est donc pas présenté comme installé par cette roadmap.
 
 Le workflow conserve : `main` uniquement, SHA exact, acteur propriétaire, aucune PR,
 `contents: read`, `persist-credentials: false`, actions pinées par SHA, token dataset dédié,
-paper‑only, exécution réelle false et artifact public allowlisté.
+paper-only, exécution réelle false et artifact public allowlisté.
 
-Le workspace FULL/COLD est traité comme **non fiable** : path traversal/zip‑slip fail‑closed,
+Le workspace FULL/COLD est traité comme **non fiable** : path traversal/zip-slip fail-closed,
 symlinks/reparse points refusés et scripts/exécutables apportés par le dataset refusés avant
 exécution d'un outil projet.
 
 ## CI et Windows portable
 
 La clôture vérifie HyperSmart CI, données Linux/Windows, PowerShell 5.1, HyperLab, Alpha Factory,
-labo continu, portable Windows, replay=forward, sécurité et self‑hosted. Aucun test ne peut être
+labo continu, portable Windows, replay=forward, sécurité et self-hosted. Aucun test ne peut être
 supprimé dans le commit de clôture pour masquer un rouge.
 
 La portabilité conserve Python embarqué, MinGit, wheelhouse/offline, `PYTHONNOUSERSITE=1`, absence
@@ -106,6 +106,6 @@ reproductibilité et documentation actuelle. **Seulement alors** le contrat acce
 ## Ce que 775/775 ne signifie pas
 
 La clôture technique ne prétend ni que les trois stratégies gagnent déjà +4 USD, ni que le FULL
-~180 Go a déjà été exécuté sur le PC self‑hosted. Elle signifie que les **775 contrôles pré‑run sont
-implémentés, testables, fail‑closed et reliés à une preuve spécifique**. Les résultats économiques
+~180 Go a déjà été exécuté sur le PC self-hosted. Elle signifie que les **775 contrôles pré-run sont
+implémentés, testables, fail-closed et reliés à une preuve spécifique**. Les résultats économiques
 restent des résultats de données et doivent être prouvés séparément.
