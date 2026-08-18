@@ -14,7 +14,7 @@ from pathlib import Path
 from typing import Any
 
 from hl_observer.datasets.archive_library import resolve_current_workspace
-from hl_observer.datasets.economic_memory import EconomicMemoryError, record_certified_proof
+from hl_observer.datasets.economic_memory import record_certified_proof
 from hl_observer.datasets.replay_workspace import prepare_replay_workspace
 from hl_observer.ops import autonomous_research_job as canonical_job
 from hl_observer.ops.autonomous_research_status import status_path, write_status
@@ -32,7 +32,6 @@ SUITE_COVERAGE_FAMILY = {
     "lead-lag-full": "lead_lag",
     "cross-venue-full": "cross_venue",
 }
-MEMORY_FAILURE_EXIT_CODE = 25
 
 
 def validate_family_request(raw: Mapping[str, Any]) -> dict[str, Any]:
@@ -68,9 +67,10 @@ def record_family_economic_memory(
 ) -> dict[str, Any] | None:
     """Persist only a fully eligible +4 USD family proof with exact provenance.
 
-    A technically successful analysis below target simply returns ``None``. If
-    a campaign claims ATTEINT but its FULL coverage, freeze or dataset identity
-    is incomplete, this fails closed instead of storing an ambiguous proof.
+    This helper is intentionally called only *after* the canonical autonomous
+    completion guard has persisted ``completion_recorded=true``. A technically
+    successful worker never calls it directly. A campaign below target returns
+    ``None``; an ambiguous ATTEINT claim fails closed.
     """
     campaign_family = SUITE_CAMPAIGN_FAMILY.get(suite)
     coverage_family = SUITE_COVERAGE_FAMILY.get(suite)
@@ -245,28 +245,15 @@ def execute_family_job(
         if step["return_code"] != 0:
             primary_rc = int(step["return_code"])
 
-    memory_record: dict[str, Any] | None = None
-    memory_status = "NOT_EVALUATED"
-    if primary_rc == 0 and workspace is not None:
-        started_memory = time.monotonic()
-        try:
-            memory_record = record_family_economic_memory(
-                lab_root=lab_root, workspace=workspace, suite=request["suite"], project_sha=actual_sha
-            )
-            memory_status = "CERTIFIED_RECORDED" if memory_record is not None else "TARGET_NOT_REACHED"
-            steps.append({
-                "name": "04_economic_memory", "return_code": 0, "timed_out": False,
-                "duration_seconds": round(time.monotonic() - started_memory, 3),
-                "status": memory_status,
-            })
-        except (RuntimeError, EconomicMemoryError, OSError, ValueError) as exc:
-            memory_status = f"NO_GO:{type(exc).__name__}:{exc}"
-            primary_rc = MEMORY_FAILURE_EXIT_CODE
-            steps.append({
-                "name": "04_economic_memory", "return_code": MEMORY_FAILURE_EXIT_CODE,
-                "timed_out": False, "duration_seconds": round(time.monotonic() - started_memory, 3),
-                "status": memory_status,
-            })
+    # Memory certification is deliberately deferred. The canonical completion
+    # guard must first validate required reports/coverage and persist
+    # completion_recorded=true. Only then may autonomous_completion derive the
+    # certified economic-memory cache from this workspace.
+    memory_status = (
+        "PENDING_COMPLETION_GUARD"
+        if primary_rc == 0 and workspace is not None
+        else "NOT_EVALUATED"
+    )
 
     copied_reports = (
         canonical_job._collect_small_reports(project_root, workspace, result_dir, request["suite"])
@@ -285,7 +272,7 @@ def execute_family_job(
         "network_dataset_download_used": bool(request["download"]),
         "analysis_complete": False,
         "economic_memory_status": memory_status,
-        "economic_memory_key": memory_record.get("key") if memory_record else None,
+        "economic_memory_key": None,
         "exit_code": primary_rc,
     }
     canonical_job._write_result(result_dir, payload)
@@ -300,4 +287,10 @@ def execute_family_job(
     return primary_rc
 
 
-__all__ = ["FAMILY_ECONOMIC_SUITES", "MEMORY_FAILURE_EXIT_CODE", "SUITE_CAMPAIGN_FAMILY", "execute_family_job", "record_family_economic_memory", "validate_family_request"]
+__all__ = [
+    "FAMILY_ECONOMIC_SUITES",
+    "SUITE_CAMPAIGN_FAMILY",
+    "execute_family_job",
+    "record_family_economic_memory",
+    "validate_family_request",
+]
