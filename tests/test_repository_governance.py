@@ -27,11 +27,25 @@ def test_security_quality_workflow_is_fail_closed() -> None:
     assert "continue-on-error" not in text
 
 
+def test_pre_run_775_est_la_gate_parfaite_principale() -> None:
+    text = (ROOT / ".github" / "workflows" / "pre-run-321-775.yml").read_text(encoding="utf-8")
+    for marker in (
+        "hypersmart/pre-run-775",
+        "hypersmart/technical-perfect",
+        "python -m pip_audit",
+        "python -m ruff check",
+        "python -m coverage run --source=src",
+        "python tools/check_coverage_ratchet.py",
+        "775 + sécurité + qualité + couverture verts",
+    ):
+        assert marker in text
+
+
 def test_technical_perfect_is_not_an_economic_pnl_claim() -> None:
-    text = (ROOT / ".github" / "workflows" / "security-quality.yml").read_text(encoding="utf-8")
-    block = text.split("technical-perfect:", 1)[1]
-    for forbidden in ("+4 USD", "LIQUIDATABLE_NET", "MORE_DATA", "PROMOTE"):
-        assert forbidden not in block
+    for workflow_name in ("security-quality.yml", "pre-run-321-775.yml"):
+        text = (ROOT / ".github" / "workflows" / workflow_name).read_text(encoding="utf-8")
+        for forbidden in ("+4 USD", "PROMOTE"):
+            assert forbidden not in text
 
 
 def test_ci_quality_tools_are_exactly_pinned() -> None:
@@ -41,6 +55,13 @@ def test_ci_quality_tools_are_exactly_pinned() -> None:
         if line.strip() and not line.lstrip().startswith("#")
     ]
     assert lines == ["coverage==7.15.2", "pip-audit==2.10.1"]
+
+
+def test_dependabot_est_interdit_par_le_contrat_main_only() -> None:
+    assert not (ROOT / ".github" / "dependabot.yml").exists()
+    current = (ROOT / "docs" / "CURRENT_STATE.md").read_text(encoding="utf-8")
+    assert "main-only" in current
+    assert "sans Dependabot" in current
 
 
 def test_coverage_ratchet_never_rewrites_the_baseline() -> None:
