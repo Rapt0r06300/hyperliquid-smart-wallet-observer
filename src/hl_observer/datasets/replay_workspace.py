@@ -26,23 +26,28 @@ def prepare_replay_workspace(
     project_root = project_root.resolve()
     workspace = (materialized_root or default_materialized_root(project_root)).resolve()
 
-    # FULL/COLD is untrusted input. Reject symlinks/reparse points and any
-    # script/executable supplied by the dataset before executing a project tool.
-    # On a resumed workspace, only our two previously copied tools are allowed,
-    # and only when their SHA-256 still matches the current project source.
+    # The public contract reports a missing/unprepared FULL/COLD workspace as a
+    # dataset bridge error. Do this before the untrusted-content scan so callers
+    # get the actionable reconstruction message instead of a lower-level guard
+    # exception when there is simply nothing to inspect yet.
+    runtime_data = workspace / "runtime" / "data"
+    if not workspace.is_dir() or not runtime_data.is_dir():
+        raise DatasetBridgeError(
+            "Aucune donnée reconstruite dans l'espace FULL/COLD. "
+            "Prépare d'abord le lot économique avec dataset_bridge."
+        )
+
+    # FULL/COLD is untrusted input. Once a workspace exists, reject symlinks/
+    # reparse points and any script/executable supplied by the dataset before
+    # executing a project tool. On a resumed workspace, only our two previously
+    # copied tools are allowed, and only when their SHA-256 still matches the
+    # current project source.
     trusted_tools: dict[str, str] = {}
     for name in REQUIRED_TOOL_FILES:
         source = project_root / "tools" / name
         if source.is_file():
             trusted_tools[f"tools/{name}"] = hashlib.sha256(source.read_bytes()).hexdigest()
     untrusted_guard = assert_workspace_safe(workspace, trusted_file_sha256=trusted_tools)
-
-    runtime_data = workspace / "runtime" / "data"
-    if not runtime_data.is_dir():
-        raise DatasetBridgeError(
-            "Aucune donnée reconstruite dans l'espace FULL/COLD. "
-            "Prépare d'abord le lot économique avec dataset_bridge."
-        )
 
     workspace_tools = workspace / "tools"
     workspace_tools.mkdir(parents=True, exist_ok=True)
