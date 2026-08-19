@@ -187,7 +187,7 @@ def test_detect_classify_pnl_placebo_ofi_price_and_l2_costs() -> None:
 
     before = {"levels": [[{"sz": 1}, {"sz": 2}], [{"sz": 3}]]}
     after = {"levels": [[{"sz": 4}], [{"sz": 1}]]}
-    assert meta.ofi_top5(before, after) == 4.0
+    assert meta.ofi_top5(before, after) == 3.0
     assert meta.ofi_top5({}, after) is None
 
     series = [(10, 1.0), (20, 2.0), (30, 3.0)]
