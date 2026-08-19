@@ -30,13 +30,18 @@ def test_final_workflow_isolated_from_legacy_queue() -> None:
 def test_final_workflow_requires_exact_technical_green_before_compute() -> None:
     text = _text(WORKFLOW)
     assert "TECHNICAL_STATUS_NOT_GREEN" in text
+    assert "TECHNICAL_STATUS_WAIT_TIMEOUT" in text
+    assert "SELF_HOSTED_STALE_SHA_REFUSED_DURING_WAIT" in text
+    assert "[DateTimeOffset]::UtcNow.AddMinutes(90)" in text
+    assert "Start-Sleep -Seconds 30" in text
+    assert "TECHNICAL_STATUS_WAIT" in text
     for context in (
         "hypersmart/pre-run-775",
         "hypersmart/technical-perfect",
         "hypersmart/security-quality",
     ):
         assert context in text
-    gate = text.index("Exiger les certifications techniques vertes du SHA exact")
+    gate = text.index("Attendre puis exiger les certifications techniques vertes du SHA exact")
     compute = text.index("Lancer le calcul final paper read-only")
     assert gate < compute
 
