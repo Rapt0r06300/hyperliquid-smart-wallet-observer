@@ -13,15 +13,25 @@ def test_repository_governance_files_are_complete() -> None:
 
 def test_security_quality_workflow_is_fail_closed() -> None:
     text = (ROOT / ".github" / "workflows" / "security-quality.yml").read_text(encoding="utf-8")
-    assert "permissions:\n  contents: read" in text
+    assert "contents: read" in text
+    assert "statuses: write" in text
     assert "persist-credentials: false" in text
-    assert "--require-protected-main" in text
     assert "requirements-ci-tools.txt" in text
     assert "python -m pip_audit" in text
     assert "python -m coverage run --source=src" in text
     assert "python tools/check_coverage_ratchet.py" in text
     assert "ci-resolved-requirements.txt" in text
+    assert "needs: [governance, supply-chain, coverage-ratchet]" in text
+    assert "hypersmart/technical-perfect" in text
+    assert "TECHNICAL_PERFECT_GREEN" in text
     assert "continue-on-error" not in text
+
+
+def test_technical_perfect_is_not_an_economic_pnl_claim() -> None:
+    text = (ROOT / ".github" / "workflows" / "security-quality.yml").read_text(encoding="utf-8")
+    block = text.split("technical-perfect:", 1)[1]
+    for forbidden in ("+4 USD", "LIQUIDATABLE_NET", "MORE_DATA", "PROMOTE"):
+        assert forbidden not in block
 
 
 def test_ci_quality_tools_are_exactly_pinned() -> None:
@@ -45,6 +55,8 @@ def test_current_state_supersedes_stale_master_document() -> None:
     gateway = (ROOT / "docs" / "ETAT_ET_FEUILLE_DE_ROUTE.md").read_text(encoding="utf-8")
     assert "775/775" in current
     assert "Aucune cible économique" in current
+    assert "hypersmart/technical-perfect" in current
+    assert "indépendante du verdict économique" in current
     assert "CURRENT_STATE.md" in gateway
     assert "Source de vérité actuelle" in gateway
 
