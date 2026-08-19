@@ -99,7 +99,7 @@ def test_coverage_target_is_exactly_100_and_zero_missing_lines() -> None:
 
     gate = (ROOT / "tools" / "check_coverage_ratchet.py").read_text(encoding="utf-8")
     assert "missing > max_missing" in gate
-    assert "measured + 1e-9 < minimum" in gate
+    assert "measured + 1e-12 < minimum" in gate
 
     for workflow_name in ("pre-run-321-775.yml", "security-quality.yml"):
         text = (ROOT / ".github" / "workflows" / workflow_name).read_text(encoding="utf-8")
