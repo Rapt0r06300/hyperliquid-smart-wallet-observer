@@ -2,13 +2,15 @@ from __future__ import annotations
 
 import argparse
 import json
+from collections.abc import Mapping
 from pathlib import Path
-from typing import Any, Mapping
+from typing import Any
 
 from hl_observer.ops.autonomous_research_brain import build_decision
+from hl_observer.ops.final_economic_certification import certify_workspace
 from hl_observer.simulation.economic_objective import CANONICAL_FAMILIES
 
-SCHEMA = "alina.self_hosted_return.v1"
+SCHEMA = "alina.self_hosted_return.v2"
 CAMPAIGN_DIR = Path("runtime") / "reports" / "economic_campaigns"
 MAX_REASON_COUNT = 50
 MAX_REASON_CHARS = 500
@@ -16,6 +18,8 @@ MAX_REASON_CHARS = 500
 # Allowlist volontaire : le retour GitHub doit rester petit, lisible et sans payload brut.
 METRIC_KEYS = (
     "objective_status",
+    "eligible_net_pnl_usd",
+    "proof_net_pnl_usd",
     "net_pnl_usd",
     "gross_pnl_usd",
     "total_costs_usd",
@@ -28,10 +32,16 @@ METRIC_KEYS = (
     "signal_count",
     "trade_count",
     "sample_count",
+    "opened_positions",
+    "closed_positions",
     "max_drawdown_usd",
     "max_drawdown_pct",
     "profit_factor",
     "win_rate",
+    "liquidatable_net",
+    "parameters_frozen",
+    "duplicate_trade_ids",
+    "trade_ids_count",
     "proof_status",
     "oos_status",
     "forward_status",
@@ -58,6 +68,34 @@ def _safe_reasons(value: object) -> list[str]:
     return result
 
 
+def _compact_segment(value: object, *, kind: str) -> dict[str, Any] | None:
+    if not isinstance(value, Mapping):
+        return None
+    keys = (
+        "sample_count",
+        "gross_pnl_usd",
+        "fees_usd",
+        "spread_cost_usd",
+        "slippage_cost_usd",
+        "latency_cost_usd",
+        "net_pnl_usd",
+        "liquidatable_net",
+        "LIQUIDATABLE_NET",
+        "duplicate_trade_ids",
+        "trade_ids_count",
+    )
+    compact = {
+        key: value.get(key)
+        for key in keys
+        if isinstance(value.get(key), (str, int, float, bool)) or value.get(key) is None
+    }
+    if kind == "oos":
+        compact["no_lookahead"] = value.get("no_lookahead") is True
+    elif kind == "forward":
+        compact["post_freeze"] = value.get("post_freeze") is True
+    return compact
+
+
 def compact_campaign(payload: Mapping[str, Any]) -> dict[str, Any]:
     compact: dict[str, Any] = {}
     for key in METRIC_KEYS:
@@ -65,6 +103,14 @@ def compact_campaign(payload: Mapping[str, Any]) -> dict[str, Any]:
         if isinstance(value, (str, int, float, bool)) or value is None:
             compact[key] = value
     compact["objective_reasons"] = _safe_reasons(payload.get("objective_reasons"))
+    compact["oos"] = _compact_segment(payload.get("oos"), kind="oos")
+    compact["forward"] = _compact_segment(payload.get("forward"), kind="forward")
+    placebos = payload.get("placebos")
+    compact["placebos"] = (
+        {"beaten": placebos.get("beaten") is True}
+        if isinstance(placebos, Mapping)
+        else None
+    )
     return compact
 
 
@@ -92,6 +138,7 @@ def build_return(result_dir: str | Path) -> dict[str, Any]:
             "suite": None,
             "mode": None,
             "family_summaries": {family: None for family in CANONICAL_FAMILIES},
+            "economic_certification": None,
             "brain_decision": None,
             "next_recommended_job": None,
             "paper_only": True,
@@ -103,6 +150,11 @@ def build_return(result_dir: str | Path) -> dict[str, Any]:
     workspace = Path(str(raw_workspace)).resolve() if raw_workspace else None
     workspace_exists = bool(workspace and workspace.is_dir())
     families = load_family_summaries(workspace if workspace_exists else None)
+    economic_certification = (
+        certify_workspace(workspace)
+        if workspace_exists and any(value is not None for value in families.values())
+        else None
+    )
 
     brain: dict[str, Any] | None = None
     if workspace_exists and any(value is not None for value in families.values()):
@@ -112,6 +164,10 @@ def build_return(result_dir: str | Path) -> dict[str, Any]:
             brain = None
 
     next_job = brain.get("next_recommended_job") if isinstance(brain, Mapping) else None
+    all_certified = bool(
+        isinstance(economic_certification, Mapping)
+        and economic_certification.get("all_families_certified") is True
+    )
     return {
         "schema": SCHEMA,
         "status": "READY_FOR_ANALYSIS",
@@ -124,12 +180,15 @@ def build_return(result_dir: str | Path) -> dict[str, Any]:
         "exit_code": job_result.get("exit_code"),
         "workspace_available": workspace_exists,
         "family_summaries": families,
+        "economic_certification": economic_certification,
         "brain_decision": brain,
         "next_recommended_job": dict(next_job) if isinstance(next_job, Mapping) else None,
         "paper_only": True,
         "real_execution": False,
         "message_fr": (
-            "Retour compact prêt pour analyse GitHub/ChatGPT. Les gros logs et données brutes restent locaux."
+            "Les trois familles sont certifiées séparément avec la gate économique canonique; aucune compensation inter-familles."
+            if all_certified
+            else "Retour compact prêt. La certification économique reste fail-closed tant que chaque famille n'est pas certifiée séparément; aucune compensation inter-familles."
         ),
     }
 
@@ -139,8 +198,16 @@ def write_return(result_dir: str | Path, payload: Mapping[str, Any]) -> tuple[Pa
     target.mkdir(parents=True, exist_ok=True)
     json_path = target / "ALINA_RETURN.json"
     md_path = target / "ALINA_RETURN.md"
-    json_path.write_text(json.dumps(dict(payload), ensure_ascii=False, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    json_path.write_text(
+        json.dumps(dict(payload), ensure_ascii=False, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
 
+    certification = payload.get("economic_certification")
+    all_certified = (
+        isinstance(certification, Mapping)
+        and certification.get("all_families_certified") is True
+    )
     lines = [
         "# Alina SmartFlow — retour compact du gros run",
         "",
@@ -150,23 +217,31 @@ def write_return(result_dir: str | Path, payload: Mapping[str, Any]) -> tuple[Pa
         f"- Mode : `{payload.get('mode')}`",
         f"- SHA : `{payload.get('project_sha')}`",
         "- Trading réel : **NON**",
+        f"- Certification économique 3/3 : **{'OUI' if all_certified else 'NON'}**",
+        "- Compensation PnL entre familles : **INTERDITE**",
         "",
         "## Familles économiques",
         "",
-        "| Famille | Statut objectif | PnL net USD | Signaux/trades |",
-        "|---|---|---:|---:|",
+        "| Famille | Certification | Objectif | Net éligible USD | LIQUIDATABLE_NET | OOS+ | Forward+ post-freeze | Placebo battu |",
+        "|---|---|---|---:|---|---|---|---|",
     ]
     families = payload.get("family_summaries")
+    cert_rows = certification.get("families") if isinstance(certification, Mapping) else {}
     if isinstance(families, Mapping):
         for family in CANONICAL_FAMILIES:
             row = families.get(family)
+            cert = cert_rows.get(family) if isinstance(cert_rows, Mapping) else None
             if isinstance(row, Mapping):
-                count = row.get("signal_count") if row.get("signal_count") is not None else row.get("trade_count")
                 lines.append(
-                    f"| `{family}` | `{row.get('objective_status')}` | {row.get('net_pnl_usd')} | {count} |"
+                    f"| `{family}` | `{cert.get('status') if isinstance(cert, Mapping) else 'NO_GO'}` | "
+                    f"`{row.get('objective_status')}` | {row.get('eligible_net_pnl_usd')} | "
+                    f"{cert.get('liquidatable_net') if isinstance(cert, Mapping) else False} | "
+                    f"{cert.get('oos_positive') if isinstance(cert, Mapping) else False} | "
+                    f"{(cert.get('forward_positive') is True and cert.get('forward_post_freeze') is True) if isinstance(cert, Mapping) else False} | "
+                    f"{cert.get('placebo_beaten') if isinstance(cert, Mapping) else False} |"
                 )
             else:
-                lines.append(f"| `{family}` | `NON_MESURE` | - | - |")
+                lines.append(f"| `{family}` | `NO_GO` | `NON_MESURE` | - | False | False | False | False |")
     next_job = payload.get("next_recommended_job")
     lines.extend(["", "## Prochain run proposé par le cerveau", ""])
     if isinstance(next_job, Mapping):
@@ -192,7 +267,9 @@ def write_return(result_dir: str | Path, payload: Mapping[str, Any]) -> tuple[Pa
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description="Construit le petit retour machine-lisible d'un gros run self-hosted.")
+    parser = argparse.ArgumentParser(
+        description="Construit le petit retour machine-lisible d'un gros run self-hosted."
+    )
     parser.add_argument("--result-dir", required=True)
     args = parser.parse_args(argv)
     payload = build_return(args.result_dir)
