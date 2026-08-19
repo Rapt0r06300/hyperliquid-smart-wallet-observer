@@ -52,16 +52,12 @@ def test_checkout_ne_persiste_aucun_credential_sur_les_workflows_qui_checkout():
 
 
 def test_workflows_ci_et_recherche_sont_read_only_par_defaut():
-    exempt = {
-        "portable-release-windows.yml",  # attestation OIDC: écriture attendue
-        "branch-hygiene-once.yml",       # suppression one-shot de refs dependabot/* uniquement
-    }
     failures: list[str] = []
     for name, text in _texts().items():
         if name == "portable-release-windows.yml":
             assert "contents: read" in text
             continue
-        if name == "branch-hygiene-once.yml":
+        if name == "portable-wheelhouse-security-once.yml":
             assert "contents: write" in text
             continue
         if "permissions:" not in text or "contents: read" not in text:
@@ -69,15 +65,18 @@ def test_workflows_ci_et_recherche_sont_read_only_par_defaut():
     assert not failures, "Workflow sans permissions contents:read explicites: " + ", ".join(failures)
 
 
-def test_nettoyeur_one_shot_ne_peut_pas_toucher_main():
-    path = WORKFLOWS / "branch-hygiene-once.yml"
+def test_reparation_portable_one_shot_est_strictement_bornee_et_auto_supprimee():
+    path = WORKFLOWS / "portable-wheelhouse-security-once.yml"
     if not path.exists():
         return
     text = path.read_text(encoding="utf-8")
-    assert "refs/heads/dependabot/" in text
-    assert "REF == 'refs/heads/main'" in text
-    assert "REFUSED_NON_DEPENDABOT_REF" in text
     assert "contents: write" in text
+    assert "persist-credentials: false" in text
+    assert "pytest-9.0.3-py3-none-any.whl" in text
+    assert "2c5efc453d45394fdd706ade797c0a81091eccd1d6e4bccfcd476e2b8e0ab5d9" in text
+    assert "375249" in text
+    assert "git rm .github/workflows/portable-wheelhouse-security-once.yml" in text
+    assert "git push origin HEAD:main" in text
     assert "pull_request" not in text
 
 
