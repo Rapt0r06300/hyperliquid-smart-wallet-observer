@@ -9,6 +9,8 @@ panneau lit un champ réel du status, sinon état vide honnête.
 
 from __future__ import annotations
 
+from pathlib import Path
+
 from fastapi import APIRouter, Request
 from fastapi.responses import HTMLResponse, JSONResponse
 from hl_observer.ops.echec_silencieux import noter as _noter_echec
