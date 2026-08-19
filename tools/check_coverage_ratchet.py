@@ -1,8 +1,8 @@
 """Gate CI fail-closed pour la couverture de lignes HyperSmart.
 
-Lit un coverage.json produit par coverage.py et compare le pourcentage de lignes
-executees a tools/couverture_lignes_baseline.json. Contrairement a
-couverture_de_lignes.py, ce gate ne modifie jamais la baseline en CI.
+Lit un coverage.json produit par coverage.py et compare la couverture réelle à
+la baseline versionnée. À 100 %, une seule ligne manquante suffit à faire échouer
+la gate, même si un affichage arrondi pouvait montrer 100,00 %.
 """
 from __future__ import annotations
 
@@ -30,8 +30,11 @@ def main() -> int:
 
     try:
         minimum = float(baseline["min_pct_lignes"])
-        measured = float(report["totals"]["percent_covered"])
-        statements = int(report["totals"]["num_statements"])
+        max_missing = int(baseline.get("max_missing_lines", 0 if minimum >= 100.0 else 2**31 - 1))
+        totals = report["totals"]
+        measured = float(totals["percent_covered"])
+        statements = int(totals["num_statements"])
+        missing = int(totals.get("missing_lines", 0))
     except (KeyError, TypeError, ValueError) as exc:
         print(f"COVERAGE_GATE_SCHEMA_INVALID: {exc}")
         return 2
@@ -39,13 +42,31 @@ def main() -> int:
     if statements <= 0:
         print("COVERAGE_GATE_EMPTY: aucune ligne mesuree")
         return 2
+    if missing < 0 or missing > statements:
+        print(f"COVERAGE_GATE_SCHEMA_INVALID: missing_lines={missing} statements={statements}")
+        return 2
 
-    print(f"couverture mesuree={measured:.2f}% baseline={minimum:.2f}% lignes={statements}")
-    if measured + 1e-9 < minimum:
+    print(
+        f"couverture mesuree={measured:.6f}% baseline={minimum:.6f}% "
+        f"lignes={statements} manquantes={missing} max_manquantes={max_missing}"
+    )
+
+    if measured + 1e-12 < minimum:
         print(
-            "COVERAGE_REGRESSION: la couverture de lignes a recule. "
+            "COVERAGE_REGRESSION: la couverture de lignes est sous la cible. "
             "La baseline ne doit jamais etre abaissee pour faire passer la CI."
         )
+        return 1
+
+    if missing > max_missing:
+        print(
+            "COVERAGE_MISSING_LINES: la cible exige zero ligne manquante. "
+            "Ajouter des tests reels; ne pas exclure artificiellement le code."
+        )
+        return 1
+
+    if minimum >= 100.0 and (measured < 100.0 or missing != 0):
+        print("COVERAGE_100_NOT_PROVEN: 100% exact et 0 ligne manquante sont obligatoires")
         return 1
 
     print("COVERAGE_RATCHET_OK")
