@@ -26,7 +26,7 @@ env:
   ENABLE_REAL_ORDERS: "0"
 
 jobs:
-  completion-775:
+  completion_775:
     name: Preuve 1→775 + sécurité + qualité
     runs-on: ubuntu-latest
     timeout-minutes: 150
@@ -234,7 +234,7 @@ jobs:
           if-no-files-found: error
           retention-days: 30
 
-  coverage-ratchet:
+  coverage_ratchet:
     name: Suite complète coverage + cliquet 83.83%
     runs-on: ubuntu-latest
     timeout-minutes: 120
@@ -273,9 +273,9 @@ jobs:
           if-no-files-found: error
           retention-days: 30
 
-  final-verdict:
+  final_verdict:
     name: Verdict final 775 + coverage
-    needs: [completion-775, coverage-ratchet]
+    needs: [completion_775, coverage_ratchet]
     if: always()
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -283,8 +283,8 @@ jobs:
       - name: Publier les verdicts finaux sur le SHA
         env:
           GITHUB_TOKEN: ${{ github.token }}
-          COMPLETION_RESULT: ${{ needs.completion-775.result }}
-          COVERAGE_RESULT: ${{ needs.coverage-ratchet.result }}
+          COMPLETION_RESULT: ${{ needs.completion_775.result }}
+          COVERAGE_RESULT: ${{ needs.coverage_ratchet.result }}
         run: |
           set -euo pipefail
           STATE="failure"
