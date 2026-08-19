@@ -16,11 +16,21 @@ def test_security_quality_workflow_is_fail_closed() -> None:
     assert "permissions:\n  contents: read" in text
     assert "persist-credentials: false" in text
     assert "--require-protected-main" in text
-    assert "pip-audit==2.10.1" in text
+    assert "requirements-ci-tools.txt" in text
     assert "python -m pip_audit" in text
     assert "python -m coverage run --source=src" in text
     assert "python tools/check_coverage_ratchet.py" in text
+    assert "ci-resolved-requirements.txt" in text
     assert "continue-on-error" not in text
+
+
+def test_ci_quality_tools_are_exactly_pinned() -> None:
+    lines = [
+        line.strip()
+        for line in (ROOT / "requirements-ci-tools.txt").read_text(encoding="utf-8").splitlines()
+        if line.strip() and not line.lstrip().startswith("#")
+    ]
+    assert lines == ["coverage==7.15.2", "pip-audit==2.10.1"]
 
 
 def test_coverage_ratchet_never_rewrites_the_baseline() -> None:
