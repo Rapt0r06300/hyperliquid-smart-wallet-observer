@@ -1,0 +1,73 @@
+name: fix-ruff-imports-once
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/fix-ruff-imports-once.yml'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: fix-ruff-imports-once
+  cancel-in-progress: false
+
+jobs:
+  fix:
+    name: Corriger les imports Ruff puis auto-supprimer ce workflow
+    if: github.repository == 'Rapt0r06300/hyperliquid-smart-wallet-observer'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 2
+          persist-credentials: false
+
+      - name: Ajouter uniquement les imports manquants
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          python - <<'PY'
+          from pathlib import Path
+
+          changes = [
+              (
+                  Path('src/hl_observer/experimental/signaux.py'),
+                  'import json\nimport time\n',
+                  'import json\nimport os\nimport time\n',
+              ),
+              (
+                  Path('src/hl_observer/ui/dashboard_v2.py'),
+                  'from __future__ import annotations\n\nfrom fastapi',
+                  'from __future__ import annotations\n\nfrom pathlib import Path\n\nfrom fastapi',
+              ),
+          ]
+          for path, old, new in changes:
+              text = path.read_text(encoding='utf-8')
+              if text.count(old) != 1:
+                  raise SystemExit(f'expected exactly one patch anchor in {path}')
+              path.write_text(text.replace(old, new, 1), encoding='utf-8')
+          PY
+
+      - name: Vérifier Ruff avant commit
+        run: |
+          set -euo pipefail
+          python -m pip install --disable-pip-version-check ruff==0.16.3
+          python -m ruff check --select E9,F63,F7,F82 src tools tests
+
+      - name: Auto-supprimer le workflow et pousser uniquement main
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          git rm .github/workflows/fix-ruff-imports-once.yml
+          git add src/hl_observer/experimental/signaux.py src/hl_observer/ui/dashboard_v2.py
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git commit -m 'Corrige les imports détectés par la gate Ruff'
+          git status --porcelain | grep -q . && { echo 'WORKTREE_NOT_CLEAN'; exit 1; } || true
+          git remote set-url origin "https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
+          git push origin HEAD:main
