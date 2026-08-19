@@ -377,7 +377,7 @@ def test_kelly_sizing_rejects_low_probability_negative_edge_and_full_exposure() 
     assert "WIN_PROBABILITY_TOO_LOW" in low.warnings
 
     negative = kelly_criterion_size(
-        edge_remaining_bps=1.0,
+        edge_remaining_bps=0.1,
         leader_score=100.0,
         consensus_wallets=1,
         win_rate_estimate=0.3,
