@@ -1,10 +1,8 @@
 """Gate locale de gouvernance HyperSmart.
 
-Cette gate certifie ce que le dépôt peut réellement garantir lui-même : fichiers
-obligatoires, vérité documentaire, CI de qualité et contrats de sécurité. Les
-réglages administrateur GitHub (par exemple la protection native de branche)
-sont audités séparément mais ne doivent pas transformer une base de code saine
-en faux rouge impossible à corriger depuis le dépôt.
+Certifie les invariants versionnés du dépôt. La politique main-only interdit les
+robots qui créent des branches automatiques : la surveillance des dépendances
+passe donc par pip-audit/CI, sans Dependabot.
 """
 from __future__ import annotations
 
@@ -14,7 +12,6 @@ ROOT = Path(__file__).resolve().parents[1]
 REQUIRED = (
     Path("SECURITY.md"),
     Path(".github/CODEOWNERS"),
-    Path(".github/dependabot.yml"),
     Path(".github/workflows/security-quality.yml"),
     Path("docs/CURRENT_STATE.md"),
     Path("requirements-ci-tools.txt"),
@@ -29,6 +26,9 @@ def local_failures() -> list[str]:
         path = ROOT / rel
         if not path.is_file() or path.stat().st_size == 0:
             failures.append(f"fichier requis absent/vide: {rel.as_posix()}")
+
+    if (ROOT / ".github" / "dependabot.yml").exists():
+        failures.append("Dependabot interdit: il crée des branches et viole le contrat main-only")
 
     gateway = ROOT / "docs" / "ETAT_ET_FEUILLE_DE_ROUTE.md"
     if not gateway.is_file():
@@ -48,6 +48,8 @@ def local_failures() -> list[str]:
             "security-quality",
             "hypersmart/technical-perfect",
             "indépendante du verdict économique",
+            "main-only",
+            "sans Dependabot",
         ):
             if marker not in text:
                 failures.append(f"CURRENT_STATE incomplet: marqueur absent {marker}")
@@ -64,6 +66,19 @@ def local_failures() -> list[str]:
         ):
             if marker not in text:
                 failures.append(f"security-quality incomplet: marqueur absent {marker}")
+
+    perfect = ROOT / ".github" / "workflows" / "pre-run-321-775.yml"
+    if perfect.is_file():
+        text = perfect.read_text(encoding="utf-8", errors="replace")
+        for marker in (
+            "hypersmart/pre-run-775",
+            "hypersmart/technical-perfect",
+            "python -m pip_audit",
+            "python -m coverage run --source=src",
+            "python tools/check_coverage_ratchet.py",
+        ):
+            if marker not in text:
+                failures.append(f"pre-run perfect incomplet: marqueur absent {marker}")
 
     return failures
 
