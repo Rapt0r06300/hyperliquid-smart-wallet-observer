@@ -52,6 +52,7 @@ def test_runner_config_paths_and_stop_override(tmp_path, monkeypatch) -> None:
 
 def test_runner_log_stop_and_status_write(tmp_path, monkeypatch, capsys) -> None:
     cfg = runner.RunnerConfig(root=tmp_path, max_runs=2, max_leaders=5, leaders_per_poll=2)
+    cfg.logs_dir.mkdir(parents=True, exist_ok=True)
     subject = runner.PersistentPollRunner(
         cfg,
         invoke=lambda argv: (0, ""),
