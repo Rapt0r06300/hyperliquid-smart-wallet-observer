@@ -59,17 +59,20 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install -e ".[dev]"
           python -m pip install -r requirements-recherche.txt
-          python -m pip install pip-audit==2.10.1
+          python -m pip install -r requirements-ci-tools.txt
+      - name: Figer l'environnement réellement résolu
+        run: python -m pip freeze --all | sort > ci-resolved-requirements.txt
       - name: Audit dépendances connues vulnérables
         run: python -m pip_audit --local --skip-editable --progress-spinner off
-      - name: Ruff surfaces critiques et gates
-        run: |
-          python -m ruff check \
-            src/hl_observer/security \
-            src/hl_observer/strategies/active_scope.py \
-            tools/check_coverage_ratchet.py \
-            tools/check_repo_governance.py \
-            tests/test_repository_governance.py
+      - name: Ruff erreurs structurelles sur tout le code
+        run: python -m ruff check --select E9,F63,F7,F82 src tools tests
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
+        with:
+          name: ci-resolved-requirements-${{ github.sha }}
+          path: ci-resolved-requirements.txt
+          if-no-files-found: error
+          retention-days: 14
 
   coverage-ratchet:
     name: Couverture de lignes sans régression
@@ -88,7 +91,7 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install -e ".[dev]"
           python -m pip install -r requirements-recherche.txt
-          python -m pip install coverage==7.15.2
+          python -m pip install -r requirements-ci-tools.txt
       - name: Suite complète sous coverage
         run: python -m coverage run --source=src -m pytest -q -p no:cacheprovider --tb=no
       - name: Rapport JSON
