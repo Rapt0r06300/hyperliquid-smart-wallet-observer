@@ -29,11 +29,20 @@ def local_failures() -> list[str]:
         if not path.is_file() or path.stat().st_size == 0:
             failures.append(f"fichier requis absent/vide: {rel.as_posix()}")
 
-    readme = (ROOT / "README.md").read_text(encoding="utf-8", errors="replace")
-    if "docs/CURRENT_STATE.md" not in readme:
-        failures.append("README ne pointe pas vers docs/CURRENT_STATE.md")
-    if "**Doc maître**" in readme and "ETAT_ET_FEUILLE_DE_ROUTE.md" in readme:
-        failures.append("README declare encore l'ancien ETAT_ET_FEUILLE_DE_ROUTE comme doc maitre")
+    gateway = ROOT / "docs" / "ETAT_ET_FEUILLE_DE_ROUTE.md"
+    if not gateway.is_file():
+        failures.append("passerelle docs/ETAT_ET_FEUILLE_DE_ROUTE.md absente")
+    else:
+        text = gateway.read_text(encoding="utf-8", errors="replace")
+        if "CURRENT_STATE.md" not in text or "Source de vérité actuelle" not in text:
+            failures.append("ancien document maitre ne redirige pas explicitement vers CURRENT_STATE.md")
+
+    current = ROOT / "docs" / "CURRENT_STATE.md"
+    if current.is_file():
+        text = current.read_text(encoding="utf-8", errors="replace")
+        for marker in ("775/775", "MORE_DATA", "Cross-Venue v2", "security-quality"):
+            if marker not in text:
+                failures.append(f"CURRENT_STATE incomplet: marqueur absent {marker}")
 
     return failures
 
