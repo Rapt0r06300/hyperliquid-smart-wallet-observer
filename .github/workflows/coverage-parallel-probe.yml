@@ -14,8 +14,8 @@ permissions:
   statuses: write
 
 concurrency:
-  group: coverage-parallel-probe-main
-  cancel-in-progress: true
+  group: coverage-parallel-probe-${{ github.sha }}
+  cancel-in-progress: false
 
 env:
   PYTHONPATH: src:tools
