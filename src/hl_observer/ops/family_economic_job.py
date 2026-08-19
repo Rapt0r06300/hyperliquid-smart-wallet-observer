@@ -18,6 +18,7 @@ from hl_observer.datasets.economic_memory import record_certified_proof
 from hl_observer.datasets.replay_workspace import prepare_replay_workspace
 from hl_observer.ops import autonomous_research_job as canonical_job
 from hl_observer.ops.autonomous_research_status import status_path, write_status
+from hl_observer.ops.final_economic_certification import certify_campaign
 
 FAMILY_ECONOMIC_SUITES = frozenset(
     {"copy-vault-full", "lead-lag-full", "cross-venue-full"}
@@ -38,9 +39,6 @@ def validate_family_request(raw: Mapping[str, Any]) -> dict[str, Any]:
     suite = str(raw.get("suite") or "").strip()
     if str(raw.get("mode") or "").strip() != "economic" or suite not in FAMILY_ECONOMIC_SUITES:
         raise ValueError("family economic worker accepts only active-family FULL/COLD economic suites")
-    # Reuse every canonical bound/guard while replacing only the canonical suite
-    # allowlist check with a known-safe economic suite. Restore the original suite
-    # immediately in the returned immutable request data.
     shim = dict(raw)
     shim["suite"] = "economic-full"
     validated = canonical_job.validate_request(shim)
@@ -65,12 +63,12 @@ def record_family_economic_memory(
     suite: str,
     project_sha: str,
 ) -> dict[str, Any] | None:
-    """Persist only a fully eligible +4 USD family proof with exact provenance.
+    """Persist only a canonically re-certified +4 USD family proof.
 
-    This helper is intentionally called only *after* the canonical autonomous
-    completion guard has persisted ``completion_recorded=true``. A technically
-    successful worker never calls it directly. A campaign below target returns
-    ``None``; an ambiguous ATTEINT claim fails closed.
+    The campaign's stored ``objective_status`` and eligible PnL are never trusted
+    by themselves. The canonical objective is recomputed from the full campaign
+    (costs, LIQUIDATABLE_NET, OOS, forward, placebo and provenance constraints)
+    before any proof is allowed into durable economic memory.
     """
     campaign_family = SUITE_CAMPAIGN_FAMILY.get(suite)
     coverage_family = SUITE_COVERAGE_FAMILY.get(suite)
@@ -80,13 +78,20 @@ def record_family_economic_memory(
     campaign = _load_json_object(campaign_path)
     if campaign.get("family") != campaign_family:
         raise RuntimeError("campaign family/provenance mismatch")
-    if campaign.get("objective_status") != "ATTEINT":
-        return None
     if campaign.get("paper_read_only") is not True or campaign.get("real_execution") is not False:
         raise RuntimeError("economic campaign lost paper/read-only guards")
-    eligible_net = campaign.get("eligible_net_pnl_usd")
+
+    recertified = certify_campaign(campaign_family, campaign)
+    if recertified.get("certified") is not True:
+        reasons = recertified.get("reasons") if isinstance(recertified.get("reasons"), list) else []
+        if campaign.get("objective_status") == "ATTEINT":
+            detail = ",".join(str(reason) for reason in reasons[:8]) or "UNKNOWN"
+            raise RuntimeError(f"ATTEINT campaign failed canonical recertification: {detail}")
+        return None
+
+    eligible_net = recertified.get("eligible_net_pnl_usd")
     if eligible_net is None or float(eligible_net) < 4.0:
-        raise RuntimeError("ATTEINT campaign has no eligible >=4 USD proof")
+        raise RuntimeError("canonically certified campaign has no eligible >=4 USD proof")
 
     coverage_path = workspace / "runtime" / "reports" / "datasets" / "SOURCE_CONSUMPTION_COVERAGE.json"
     coverage = _load_json_object(coverage_path)
@@ -245,10 +250,6 @@ def execute_family_job(
         if step["return_code"] != 0:
             primary_rc = int(step["return_code"])
 
-    # Memory certification is deliberately deferred. The canonical completion
-    # guard must first validate required reports/coverage and persist
-    # completion_recorded=true. Only then may autonomous_completion derive the
-    # certified economic-memory cache from this workspace.
     memory_status = (
         "PENDING_COMPLETION_GUARD"
         if primary_rc == 0 and workspace is not None
