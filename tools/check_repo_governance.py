@@ -1,14 +1,13 @@
-"""Gate de gouvernance HyperSmart.
+"""Gate locale de gouvernance HyperSmart.
 
-Verifie les fichiers de gouvernance versionnes et, sur GitHub Actions, peut
-refuser un depot dont main n'est pas protegee. Aucun secret n'est imprime.
+Cette gate certifie ce que le dépôt peut réellement garantir lui-même : fichiers
+obligatoires, vérité documentaire, CI de qualité et contrats de sécurité. Les
+réglages administrateur GitHub (par exemple la protection native de branche)
+sont audités séparément mais ne doivent pas transformer une base de code saine
+en faux rouge impossible à corriger depuis le dépôt.
 """
 from __future__ import annotations
 
-import argparse
-import json
-import os
-import urllib.request
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -18,7 +17,9 @@ REQUIRED = (
     Path(".github/dependabot.yml"),
     Path(".github/workflows/security-quality.yml"),
     Path("docs/CURRENT_STATE.md"),
+    Path("requirements-ci-tools.txt"),
     Path("tools/check_coverage_ratchet.py"),
+    Path("tests/test_repository_governance.py"),
 )
 
 
@@ -40,45 +41,35 @@ def local_failures() -> list[str]:
     current = ROOT / "docs" / "CURRENT_STATE.md"
     if current.is_file():
         text = current.read_text(encoding="utf-8", errors="replace")
-        for marker in ("775/775", "MORE_DATA", "Cross-Venue v2", "security-quality"):
+        for marker in (
+            "775/775",
+            "MORE_DATA",
+            "Cross-Venue v2",
+            "security-quality",
+            "hypersmart/technical-perfect",
+            "indépendante du verdict économique",
+        ):
             if marker not in text:
                 failures.append(f"CURRENT_STATE incomplet: marqueur absent {marker}")
+
+    workflow = ROOT / ".github" / "workflows" / "security-quality.yml"
+    if workflow.is_file():
+        text = workflow.read_text(encoding="utf-8", errors="replace")
+        for marker in (
+            "statuses: write",
+            "hypersmart/technical-perfect",
+            "needs: [governance, supply-chain, coverage-ratchet]",
+            "python -m pip_audit",
+            "python tools/check_coverage_ratchet.py",
+        ):
+            if marker not in text:
+                failures.append(f"security-quality incomplet: marqueur absent {marker}")
 
     return failures
 
 
-def main_is_protected(repository: str) -> tuple[bool, str]:
-    url = f"https://api.github.com/repos/{repository}/branches/main"
-    headers = {"Accept": "application/vnd.github+json", "User-Agent": "hypersmart-governance-gate"}
-    token = os.environ.get("GITHUB_TOKEN", "").strip()
-    if token:
-        headers["Authorization"] = f"Bearer {token}"
-    req = urllib.request.Request(url, headers=headers)
-    try:
-        with urllib.request.urlopen(req, timeout=20) as response:
-            payload = json.load(response)
-    except Exception as exc:  # noqa: BLE001 - un gate de gouvernance doit echouer ferme.
-        return False, f"impossible de verifier la protection de main: {type(exc).__name__}: {exc}"
-    protected = bool(payload.get("protected"))
-    return protected, "main protegee" if protected else "main NON protegee"
-
-
 def main() -> int:
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--require-protected-main", action="store_true")
-    parser.add_argument("--repository", default=os.environ.get("GITHUB_REPOSITORY", ""))
-    args = parser.parse_args()
-
     failures = local_failures()
-    if args.require_protected_main:
-        if not args.repository:
-            failures.append("GITHUB_REPOSITORY absent: protection de main non verifiable")
-        else:
-            protected, message = main_is_protected(args.repository)
-            print(message)
-            if not protected:
-                failures.append(message)
-
     if failures:
         print("REPOSITORY_GOVERNANCE_RED")
         for failure in failures:
