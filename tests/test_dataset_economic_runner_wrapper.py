@@ -12,7 +12,11 @@ def test_wrapper_full_cold_installe_les_adaptateurs_et_la_provenance_complete() 
     assert "install_copy_vault_adapter" in text
     assert "install_cross_venue_adapter" in text
     assert "write_economic_source_coverage" in text
-    assert "canonical.dataset_provenance = dataset_provenance" in text
+    # La provenance FULL/COLD doit être injectée dans une copie isolée des
+    # globals du runner canonique : aucun monkeypatch global durable n'est admis.
+    assert 'environment["dataset_provenance"] = provenance_builder' in text
+    assert "canonical.dataset_provenance = dataset_provenance" not in text
+    assert 'result["canonical_globals_mutated"] = False' in text
     assert "load_family_source_paths(data_root, \"lead_lag\")" in text
     assert "start_collection=False" in text
     assert "--no-start-collection est obligatoire" in text
