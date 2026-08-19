@@ -82,7 +82,7 @@ jobs:
           "control_path=$controlPath" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
           Write-Host "FINAL_CONTROL_ONLY_OK : $relative"
 
-      - name: Exiger les certifications techniques vertes du SHA exact
+      - name: Attendre puis exiger les certifications techniques vertes du SHA exact
         shell: powershell
         env:
           GITHUB_TOKEN: ${{ github.token }}
@@ -94,13 +94,32 @@ jobs:
             'X-GitHub-Api-Version' = '2022-11-28'
             'User-Agent' = 'HyperSmart-Final-Runner'
           }
-          $status = Invoke-RestMethod -Method Get -Uri "https://api.github.com/repos/$env:GITHUB_REPOSITORY/commits/$env:GITHUB_SHA/status" -Headers $headers
-          foreach ($context in @('hypersmart/pre-run-775','hypersmart/technical-perfect','hypersmart/security-quality')) {
-            $row = @($status.statuses | Where-Object { [string]$_.context -eq $context } | Sort-Object { [DateTimeOffset]$_.created_at } -Descending | Select-Object -First 1)
-            if ($row.Count -ne 1 -or [string]$row[0].state -ne 'success') {
-              $state = if ($row.Count -eq 1) { [string]$row[0].state } else { 'missing' }
-              throw "TECHNICAL_STATUS_NOT_GREEN: context=$context state=$state sha=$env:GITHUB_SHA"
+          $contexts = @('hypersmart/pre-run-775','hypersmart/technical-perfect','hypersmart/security-quality')
+          $deadline = [DateTimeOffset]::UtcNow.AddMinutes(90)
+          while ($true) {
+            $main = Invoke-RestMethod -Method Get -Uri "https://api.github.com/repos/$env:GITHUB_REPOSITORY/commits/main" -Headers $headers
+            $mainSha = ([string]$main.sha).Trim().ToLowerInvariant()
+            if ($mainSha -ne $env:GITHUB_SHA.ToLowerInvariant()) {
+              throw "SELF_HOSTED_STALE_SHA_REFUSED_DURING_WAIT: job=$env:GITHUB_SHA current_main=$mainSha"
             }
+            $status = Invoke-RestMethod -Method Get -Uri "https://api.github.com/repos/$env:GITHUB_REPOSITORY/commits/$env:GITHUB_SHA/status" -Headers $headers
+            $allGreen = $true
+            $snapshot = @()
+            foreach ($context in $contexts) {
+              $row = @($status.statuses | Where-Object { [string]$_.context -eq $context } | Sort-Object { [DateTimeOffset]$_.created_at } -Descending | Select-Object -First 1)
+              $state = if ($row.Count -eq 1) { ([string]$row[0].state).ToLowerInvariant() } else { 'missing' }
+              $snapshot += "$context=$state"
+              if ($state -in @('failure','error')) {
+                throw "TECHNICAL_STATUS_NOT_GREEN: context=$context state=$state sha=$env:GITHUB_SHA"
+              }
+              if ($state -ne 'success') { $allGreen = $false }
+            }
+            Write-Host ("TECHNICAL_STATUS_WAIT " + ($snapshot -join ' '))
+            if ($allGreen) { break }
+            if ([DateTimeOffset]::UtcNow -ge $deadline) {
+              throw "TECHNICAL_STATUS_WAIT_TIMEOUT: sha=$env:GITHUB_SHA states=$($snapshot -join ',')"
+            }
+            Start-Sleep -Seconds 30
           }
           Write-Host 'TECHNICAL_SHA_CERTIFIED_GREEN' -ForegroundColor Green
 
