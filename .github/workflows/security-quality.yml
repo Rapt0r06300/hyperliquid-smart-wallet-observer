@@ -116,8 +116,8 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ github.token }}
           GOV_RESULT: ${{ needs.governance.result }}
-          SUPPLY_RESULT: ${{ needs.supply-chain.result }}
-          COVERAGE_RESULT: ${{ needs.coverage-ratchet.result }}
+          SUPPLY_RESULT: ${{ needs['supply-chain'].result }}
+          COVERAGE_RESULT: ${{ needs['coverage-ratchet'].result }}
         run: |
           set -euo pipefail
           state=failure
