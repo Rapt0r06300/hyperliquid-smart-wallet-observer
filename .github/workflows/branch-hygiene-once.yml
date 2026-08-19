@@ -1,0 +1,65 @@
+name: branch-hygiene-once
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+
+concurrency:
+  group: branch-hygiene-once
+  cancel-in-progress: false
+
+jobs:
+  cleanup:
+    name: Supprimer uniquement les refs dependabot résiduelles
+    if: github.repository == 'Rapt0r06300/hyperliquid-smart-wallet-observer'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Nettoyage allowlisté des branches automatiques
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          API="https://api.github.com/repos/${GITHUB_REPOSITORY}"
+          JSON=$(curl --fail-with-body --silent --show-error \
+            -H "Accept: application/vnd.github+json" \
+            -H "Authorization: Bearer ${GITHUB_TOKEN}" \
+            -H "X-GitHub-Api-Version: 2022-11-28" \
+            "${API}/git/matching-refs/heads/dependabot/")
+
+          mapfile -t REFS < <(JSON="$JSON" python -c 'import json,os; [print(x["ref"]) for x in json.loads(os.environ["JSON"])]')
+          echo "Branches dependabot détectées: ${#REFS[@]}"
+
+          for REF in "${REFS[@]}"; do
+            if [[ "$REF" == 'refs/heads/main' ]]; then
+              echo "REFUSED_NON_DEPENDABOT_REF: tentative sur main"
+              exit 1
+            fi
+            if [[ "$REF" != refs/heads/dependabot/* ]]; then
+              echo "REFUSED_NON_DEPENDABOT_REF: $REF"
+              exit 1
+            fi
+            REF_PATH="${REF#refs/}"
+            echo "Suppression sûre: $REF"
+            curl --fail-with-body --silent --show-error \
+              -X DELETE \
+              -H "Accept: application/vnd.github+json" \
+              -H "Authorization: Bearer ${GITHUB_TOKEN}" \
+              -H "X-GitHub-Api-Version: 2022-11-28" \
+              "${API}/git/refs/${REF_PATH}"
+          done
+
+          VERIFY=$(curl --fail-with-body --silent --show-error \
+            -H "Accept: application/vnd.github+json" \
+            -H "Authorization: Bearer ${GITHUB_TOKEN}" \
+            -H "X-GitHub-Api-Version: 2022-11-28" \
+            "${API}/git/matching-refs/heads/dependabot/")
+          REMAINING=$(JSON="$VERIFY" python -c 'import json,os; print(len(json.loads(os.environ["JSON"])))')
+          if [[ "$REMAINING" != 0 ]]; then
+            echo "BRANCH_HYGIENE_FAILED: $REMAINING branche(s) dependabot restante(s)"
+            exit 1
+          fi
+          echo "BRANCH_HYGIENE_OK: aucune branche dependabot restante"
