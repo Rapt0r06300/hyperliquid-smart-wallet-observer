@@ -1,0 +1,329 @@
+name: alina-self-hosted-final-v1
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'control/alina_final_jobs/*.json'
+
+permissions:
+  contents: read
+  statuses: write
+
+concurrency:
+  group: alina-hypersmart-self-hosted-final-v1
+  cancel-in-progress: false
+
+jobs:
+  final-economic-run:
+    name: HyperSmart final self-hosted v1
+    runs-on: [self-hosted, Windows, X64, hypersmart-final-v1]
+    timeout-minutes: 1100
+    env:
+      HL_ENABLE_MAINNET_EXECUTION: '0'
+      HL_ENABLE_TESTNET_EXECUTION: '0'
+      REAL_MAINNET_TRADING: 'false'
+      TESTNET_EXECUTION_ENABLED: 'false'
+      HYPERSMART_ENABLE_REAL_ORDERS: '0'
+      ENABLE_REAL_ORDERS: '0'
+      HYPERSMART_ANALYSIS_LOCAL_ONLY: '1'
+      PYTHONUTF8: '1'
+      PYTHONIOENCODING: 'utf-8'
+    steps:
+      - name: Checkout exact du SHA sans credentials persistants
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ github.sha }}
+          clean: true
+          fetch-depth: 2
+          persist-credentials: false
+
+      - name: Refuser acteur ref SHA stale et ancienne file
+        id: trigger_gate
+        shell: powershell
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          if ($env:GITHUB_REF -ne 'refs/heads/main') {
+            throw "SELF_HOSTED_FINAL_REF_REFUSED: $env:GITHUB_REF"
+          }
+          if ($env:GITHUB_ACTOR -ne 'Rapt0r06300') {
+            throw "SELF_HOSTED_FINAL_ACTOR_REFUSED: $env:GITHUB_ACTOR"
+          }
+          $actual = (git rev-parse HEAD).Trim().ToLowerInvariant()
+          if ($actual -ne $env:GITHUB_SHA.ToLowerInvariant()) {
+            throw "SELF_HOSTED_FINAL_SHA_REFUSED: checkout=$actual github=$env:GITHUB_SHA"
+          }
+          $headers = @{
+            Authorization = "Bearer $env:GITHUB_TOKEN"
+            Accept = 'application/vnd.github+json'
+            'X-GitHub-Api-Version' = '2022-11-28'
+            'User-Agent' = 'HyperSmart-Final-Runner'
+          }
+          $main = Invoke-RestMethod -Method Get -Uri "https://api.github.com/repos/$env:GITHUB_REPOSITORY/commits/main" -Headers $headers
+          $mainSha = ([string]$main.sha).Trim().ToLowerInvariant()
+          if ($mainSha -ne $env:GITHUB_SHA.ToLowerInvariant()) {
+            throw "SELF_HOSTED_STALE_SHA_REFUSED: job=$env:GITHUB_SHA current_main=$mainSha"
+          }
+          $rows = @(git diff-tree --no-commit-id --name-status -r $env:GITHUB_SHA)
+          if ($rows.Count -ne 1) {
+            throw "FINAL_CONTROL_ONLY_COMMIT_REQUIRED: changes=$($rows.Count)"
+          }
+          $parts = $rows[0] -split '\s+', 2
+          if ($parts.Count -ne 2 -or $parts[0] -ne 'A') {
+            throw 'FINAL_COMMAND_IMMUTABLE: exactly one newly added JSON is required.'
+          }
+          $relative = ($parts[1] -replace '\\','/').Trim()
+          if ($relative -notmatch '^control/alina_final_jobs/[A-Za-z0-9][A-Za-z0-9._-]{0,79}\.json$') {
+            throw "FINAL_CONTROL_PATH_REFUSED: $relative"
+          }
+          $controlPath = (Resolve-Path -LiteralPath $relative).Path
+          "control_path=$controlPath" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          Write-Host "FINAL_CONTROL_ONLY_OK : $relative"
+
+      - name: Exiger les certifications techniques vertes du SHA exact
+        shell: powershell
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $headers = @{
+            Authorization = "Bearer $env:GITHUB_TOKEN"
+            Accept = 'application/vnd.github+json'
+            'X-GitHub-Api-Version' = '2022-11-28'
+            'User-Agent' = 'HyperSmart-Final-Runner'
+          }
+          $status = Invoke-RestMethod -Method Get -Uri "https://api.github.com/repos/$env:GITHUB_REPOSITORY/commits/$env:GITHUB_SHA/status" -Headers $headers
+          foreach ($context in @('hypersmart/pre-run-775','hypersmart/technical-perfect','hypersmart/security-quality')) {
+            $row = @($status.statuses | Where-Object { [string]$_.context -eq $context } | Sort-Object { [DateTimeOffset]$_.created_at } -Descending | Select-Object -First 1)
+            if ($row.Count -ne 1 -or [string]$row[0].state -ne 'success') {
+              $state = if ($row.Count -eq 1) { [string]$row[0].state } else { 'missing' }
+              throw "TECHNICAL_STATUS_NOT_GREEN: context=$context state=$state sha=$env:GITHUB_SHA"
+            }
+          }
+          Write-Host 'TECHNICAL_SHA_CERTIFIED_GREEN' -ForegroundColor Green
+
+      - name: Préflight du PC final sans exécuter le projet
+        id: preflight
+        shell: powershell
+        env:
+          ALINA_DATASET_READ_TOKEN: ${{ secrets.ALINA_DATASET_READ_TOKEN }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          if ([string]::IsNullOrWhiteSpace($env:ALINA_DATASET_READ_TOKEN)) {
+            throw 'PRIVATE_DATASET_TOKEN_MISSING'
+          }
+          $labRoot = [Environment]::GetEnvironmentVariable('ALINA_RESEARCH_HOME', 'Machine')
+          if ([string]::IsNullOrWhiteSpace($labRoot)) { $labRoot = $env:ALINA_RESEARCH_HOME }
+          if ([string]::IsNullOrWhiteSpace($labRoot)) { throw 'ALINA_RESEARCH_HOME_MISSING' }
+          $labRoot = [System.IO.Path]::GetFullPath($labRoot)
+          foreach ($dir in @('datasets','jobs\requests','results\jobs','status','job_logs','tools','checkpoints','runtime')) {
+            New-Item -ItemType Directory -Force -Path (Join-Path $labRoot $dir) | Out-Null
+          }
+          $python = [Environment]::GetEnvironmentVariable('ALINA_PYTHON_EXE', 'Machine')
+          if ([string]::IsNullOrWhiteSpace($python)) { $python = $env:ALINA_PYTHON_EXE }
+          if ([string]::IsNullOrWhiteSpace($python)) { throw 'ALINA_PYTHON_EXE_MISSING' }
+          $python = [System.IO.Path]::GetFullPath($python)
+          if (-not (Test-Path -LiteralPath $python -PathType Leaf)) { throw "ALINA_PYTHON_EXE_INVALID: $python" }
+          & $python -c "import sys; assert sys.version_info >= (3,11); print(sys.executable); print(sys.version)"
+          if ($LASTEXITCODE -ne 0) { throw 'ALINA_PYTHON_VERSION_INVALID' }
+          $driveRoot = [System.IO.Path]::GetPathRoot($labRoot)
+          $drive = Get-PSDrive -Name $driveRoot.Substring(0,1) -ErrorAction Stop
+          $freeGiB = [Math]::Round($drive.Free / 1GB, 2)
+          if ($freeGiB -lt 25) { throw "ALINA_DISK_RESERVE_TOO_LOW: $freeGiB GiB" }
+          "lab_root=$labRoot" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          "python_exe=$python" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          Write-Host "FINAL_PREFLIGHT_OK lab=$labRoot freeGiB=$freeGiB"
+
+      - name: Canoniser la commande finale
+        id: build
+        shell: powershell
+        env:
+          CONTROL_PATH: ${{ steps.trigger_gate.outputs.control_path }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $python = '${{ steps.preflight.outputs.python_exe }}'
+          $labRoot = '${{ steps.preflight.outputs.lab_root }}'
+          $env:PYTHONPATH = "$env:GITHUB_WORKSPACE\src;$env:GITHUB_WORKSPACE\tools;$env:GITHUB_WORKSPACE"
+          $requestDir = Join-Path $labRoot 'jobs\requests'
+          New-Item -ItemType Directory -Force -Path $requestDir | Out-Null
+          $workerRequest = Join-Path $requestDir "final_worker_$env:GITHUB_RUN_ID.json"
+          $bundle = Join-Path $requestDir "final_bundle_$env:GITHUB_RUN_ID.json"
+          & $python -m hl_observer.ops.self_hosted_control `
+            --control $env:CONTROL_PATH `
+            --project-sha $env:GITHUB_SHA `
+            --worker-request $workerRequest `
+            --bundle-output $bundle
+          if ($LASTEXITCODE -ne 0) { throw 'FINAL_CONTROL_CANONICALIZATION_FAILED' }
+          $bundleObj = Get-Content $bundle -Raw -Encoding UTF8 | ConvertFrom-Json
+          $jobId = [string]$bundleObj.control.job_id
+          if ($jobId -notmatch '^[A-Za-z0-9][A-Za-z0-9._-]{0,79}$') { throw "FINAL_JOB_ID_REFUSED: $jobId" }
+          $resultDir = Join-Path $labRoot ("results\jobs\" + $jobId)
+          New-Item -ItemType Directory -Force -Path $resultDir | Out-Null
+          Copy-Item '.\tools\ALINA_RESEARCH_COCKPIT.ps1' (Join-Path $labRoot 'tools\ALINA_RESEARCH_COCKPIT.ps1') -Force
+          & $python .\tools\alina_autonomous_lab.py check
+          if ($LASTEXITCODE -ne 0) { throw 'FINAL_LAB_DIAGNOSTIC_FAILED' }
+          "worker_request=$workerRequest" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          "result_dir=$resultDir" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          "job_id=$jobId" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          "suite=$([string]$bundleObj.control.suite)" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          "mode=$([string]$bundleObj.control.mode)" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          "max_cycle_seconds=$($bundleObj.guard.max_cycle_seconds)" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          if ($bundleObj.guard.force -eq $true) { "force_arg=--force" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8 } else { "force_arg=" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8 }
+
+      - name: Lancer le calcul final paper read-only
+        id: research
+        continue-on-error: true
+        shell: powershell
+        env:
+          HYPERSMART_DATASET_TOKEN: ${{ secrets.ALINA_DATASET_READ_TOKEN }}
+        run: |
+          $python = '${{ steps.preflight.outputs.python_exe }}'
+          $labRoot = '${{ steps.preflight.outputs.lab_root }}'
+          $env:PYTHONPATH = "$env:GITHUB_WORKSPACE\src;$env:GITHUB_WORKSPACE\tools;$env:GITHUB_WORKSPACE"
+          $args = @(
+            '-m','hl_observer.ops.autonomous_research_guard',
+            '--request','${{ steps.build.outputs.worker_request }}',
+            '--project-root',$env:GITHUB_WORKSPACE,
+            '--lab-root',$labRoot,
+            '--result-dir','${{ steps.build.outputs.result_dir }}',
+            '--max-seconds','${{ steps.build.outputs.max_cycle_seconds }}'
+          )
+          if ('${{ steps.build.outputs.force_arg }}' -eq '--force') { $args += '--force' }
+          & $python @args
+          $rc = $LASTEXITCODE
+          "exit_code=$rc" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          exit $rc
+
+      - name: Construire la preuve économique publique recalculée
+        if: always() && steps.build.outputs.result_dir != ''
+        id: compact_return
+        continue-on-error: true
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $python = '${{ steps.preflight.outputs.python_exe }}'
+          $env:PYTHONPATH = "$env:GITHUB_WORKSPACE\src;$env:GITHUB_WORKSPACE\tools;$env:GITHUB_WORKSPACE"
+          $resultDir = '${{ steps.build.outputs.result_dir }}'
+          & $python -m hl_observer.ops.self_hosted_return --result-dir $resultDir
+          $rc = $LASTEXITCODE
+          $returnPath = Join-Path $resultDir 'ALINA_RETURN.json'
+          $economic3of3 = $false
+          if (Test-Path -LiteralPath $returnPath -PathType Leaf) {
+            $returnObj = Get-Content -LiteralPath $returnPath -Raw -Encoding UTF8 | ConvertFrom-Json
+            if ($null -ne $returnObj.economic_certification -and $returnObj.economic_certification.all_families_certified -eq $true) {
+              $economic3of3 = $true
+            }
+          }
+          $publicDir = Join-Path $resultDir 'github_public'
+          if (Test-Path -LiteralPath $publicDir) { Remove-Item -LiteralPath $publicDir -Recurse -Force }
+          New-Item -ItemType Directory -Force -Path $publicDir | Out-Null
+          foreach ($name in @('ALINA_RETURN.json','ALINA_RETURN.md')) {
+            $source = Join-Path $resultDir $name
+            if (Test-Path -LiteralPath $source -PathType Leaf) { Copy-Item -LiteralPath $source -Destination (Join-Path $publicDir $name) -Force }
+          }
+          $proof = [ordered]@{
+            schema = 'alina.github_public_final_proof.v1'
+            github_run_id = $env:GITHUB_RUN_ID
+            github_sha = $env:GITHUB_SHA
+            job_id = '${{ steps.build.outputs.job_id }}'
+            suite = '${{ steps.build.outputs.suite }}'
+            mode = '${{ steps.build.outputs.mode }}'
+            worker_outcome = '${{ steps.research.outcome }}'
+            worker_exit_code = '${{ steps.research.outputs.exit_code }}'
+            compact_return_exit_code = $rc
+            economic_3of3 = $economic3of3
+            paper_only = $true
+            real_execution = $false
+            raw_data_uploaded = $false
+            local_paths_uploaded = $false
+          }
+          $proof | ConvertTo-Json -Depth 5 | Set-Content -Path (Join-Path $publicDir 'GITHUB_SAFE_FINAL_PROOF.json') -Encoding UTF8
+          "exit_code=$rc" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          "public_dir=$publicDir" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          "economic_3of3=$($economic3of3.ToString().ToLowerInvariant())" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          exit $rc
+
+      - name: Remonter uniquement le retour public final allowlisté
+        if: always() && steps.compact_return.outputs.public_dir != ''
+        id: upload
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: alina-final-resultats-${{ github.run_id }}
+          path: ${{ steps.compact_return.outputs.public_dir }}
+          if-no-files-found: error
+          retention-days: 30
+          compression-level: 6
+
+      - name: Publier le verdict économique 3 sur 3
+        if: always() && steps.build.outputs.mode == 'economic' && steps.build.outputs.suite == 'economic-full'
+        shell: powershell
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $green = ('${{ steps.research.outcome }}' -eq 'success') -and `
+                   ('${{ steps.compact_return.outcome }}' -eq 'success') -and `
+                   ('${{ steps.upload.outcome }}' -eq 'success') -and `
+                   ('${{ steps.compact_return.outputs.economic_3of3 }}' -eq 'true')
+          $state = if ($green) { 'success' } else { 'failure' }
+          $description = if ($green) { '3/3 families separately certified >=4 USD net' } else { '3/3 economic certification not proven' }
+          $target = "$env:GITHUB_SERVER_URL/$env:GITHUB_REPOSITORY/actions/runs/$env:GITHUB_RUN_ID"
+          $payload = [ordered]@{
+            state = $state
+            context = 'hypersmart/economic-3of3'
+            description = $description
+            target_url = $target
+          } | ConvertTo-Json -Compress
+          $headers = @{
+            Authorization = "Bearer $env:GITHUB_TOKEN"
+            Accept = 'application/vnd.github+json'
+            'X-GitHub-Api-Version' = '2022-11-28'
+            'User-Agent' = 'HyperSmart-Final-Runner'
+          }
+          Invoke-RestMethod -Method Post -Uri "https://api.github.com/repos/$env:GITHUB_REPOSITORY/statuses/$env:GITHUB_SHA" -Headers $headers -ContentType 'application/json' -Body $payload | Out-Null
+          Write-Host "ECONOMIC_3OF3_STATUS=$state"
+
+      - name: Écrire la synchronisation locale finale
+        if: always() && steps.preflight.outputs.lab_root != ''
+        shell: powershell
+        run: |
+          $labRoot = '${{ steps.preflight.outputs.lab_root }}'
+          $statusDir = Join-Path $labRoot 'status'
+          New-Item -ItemType Directory -Force -Path $statusDir | Out-Null
+          $path = Join-Path $statusDir 'GITHUB_SYNC_STATUS.json'
+          $tmp = "$path.$PID.tmp"
+          $payload = [ordered]@{
+            schema = 'alina.github_sync_status.v3'
+            heartbeat_unix = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds() / 1000.0
+            job_id = '${{ steps.build.outputs.job_id }}'
+            github_run_id = $env:GITHUB_RUN_ID
+            github_sha = $env:GITHUB_SHA
+            github_ref = $env:GITHUB_REF
+            results_sent = ('${{ steps.upload.outcome }}' -eq 'success')
+            compact_return_ready = ('${{ steps.compact_return.outcome }}' -eq 'success')
+            economic_3of3 = ('${{ steps.compact_return.outputs.economic_3of3 }}' -eq 'true')
+            artifact_id = '${{ steps.upload.outputs.artifact-id }}'
+            artifact_url = '${{ steps.upload.outputs.artifact-url }}'
+            worker_outcome = '${{ steps.research.outcome }}'
+            worker_exit_code = '${{ steps.research.outputs.exit_code }}'
+            gross_logs_stay_local = $true
+            public_artifact_allowlisted = $true
+            paper_only = $true
+            real_execution = $false
+          }
+          $payload | ConvertTo-Json -Depth 5 | Set-Content -Path $tmp -Encoding UTF8
+          Move-Item -Path $tmp -Destination $path -Force
+
+      - name: Conclure sans masquer un rouge technique ou économique
+        if: always()
+        shell: powershell
+        run: |
+          if ('${{ steps.research.outcome }}' -ne 'success') { throw 'FINAL_WORKER_FAILED' }
+          if ('${{ steps.compact_return.outcome }}' -ne 'success') { throw 'FINAL_COMPACT_RETURN_FAILED' }
+          if ('${{ steps.upload.outcome }}' -ne 'success') { throw 'FINAL_PUBLIC_ARTIFACT_FAILED' }
+          if ('${{ steps.build.outputs.mode }}' -eq 'economic' -and '${{ steps.build.outputs.suite }}' -eq 'economic-full' -and '${{ steps.compact_return.outputs.economic_3of3 }}' -ne 'true') {
+            throw 'ECONOMIC_3OF3_NOT_CERTIFIED'
+          }
+          Write-Host 'FINAL_SELF_HOSTED_CYCLE_OK' -ForegroundColor Green

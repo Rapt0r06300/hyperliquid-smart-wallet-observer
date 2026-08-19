@@ -9,6 +9,8 @@ from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
+from hl_observer.simulation.economic_objective import TARGET_NET_USD
+
 SCHEMA = "alina.economic_memory.v1"
 RELATIVE_PATH = Path("runtime") / "reports" / "economic_memory" / "ECONOMIC_MEMORY.json"
 CANONICAL_FAMILIES = {"copy_vault", "lead_lag", "cross_venue_dislocation_v2"}
@@ -35,6 +37,20 @@ def _family(value: object) -> str:
     if name not in CANONICAL_FAMILIES:
         raise EconomicMemoryError(f"non canonical family: {name}")
     return name
+
+
+def _certified_net(value: object, *, label: str) -> float:
+    try:
+        net = float(value)
+    except (TypeError, ValueError, OverflowError) as exc:
+        raise EconomicMemoryError(f"{label} must be finite") from exc
+    if not math.isfinite(net):
+        raise EconomicMemoryError(f"{label} must be finite")
+    if net < TARGET_NET_USD:
+        raise EconomicMemoryError(
+            f"{label} must be >= canonical target {TARGET_NET_USD:.2f} USD"
+        )
+    return net
 
 
 def proof_key(
@@ -108,9 +124,7 @@ def record_certified_proof(
         raise EconomicMemoryError("incomplete or uncertified proof cannot enter economic memory")
     if paper_only is not True or real_execution is not False:
         raise EconomicMemoryError("only paper/read-only proofs are accepted")
-    net = float(net_pnl_usd)
-    if not math.isfinite(net):
-        raise EconomicMemoryError("net_pnl_usd must be finite")
+    net = _certified_net(net_pnl_usd, label="net_pnl_usd")
     project = _sha(project_sha, 40, "project_sha")
     fam = _family(family)
     snapshot = _sha(dataset_snapshot_sha256, 64, "dataset_snapshot_sha256")
@@ -183,6 +197,7 @@ def load_exact_proof(
             raise EconomicMemoryError("runtime proof mismatch")
     if record.get("analysis_complete") is not True or record.get("certified") is not True:
         raise EconomicMemoryError("stored proof is not certified complete")
+    _certified_net(record.get("net_pnl_usd"), label="stored net_pnl_usd")
     return dict(record)
 
 

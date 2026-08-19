@@ -128,13 +128,15 @@ jobs:
             state=success
             description="Governance, supply-chain and coverage are green"
           fi
+          target_url="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
           if [ "$GITHUB_EVENT_NAME" != pull_request ]; then
-            payload=$(STATE="$state" DESCRIPTION="$description" python - <<'PY'
+            payload=$(STATE="$state" DESCRIPTION="$description" TARGET_URL="$target_url" python - <<'PY'
           import json, os
           print(json.dumps({
               "state": os.environ["STATE"],
               "context": "hypersmart/security-quality",
               "description": os.environ["DESCRIPTION"],
+              "target_url": os.environ["TARGET_URL"],
           }))
           PY
             )
