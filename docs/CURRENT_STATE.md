@@ -34,7 +34,7 @@ La politique de signalement est dans `SECURITY.md`.
 
 Le registre canonique des **775 optimisations pré-run est scellé 775/775**. Il n'est pas permis de renuméroter, supprimer ou recycler les identifiants 1–775. Toute découverte réellement nouvelle commence à 776+.
 
-Les gates dédiées restent des preuves de conformité pré-run ; elles ne sont pas, à elles seules, une preuve de rentabilité économique.
+La gate `.github/workflows/pre-run-321-775.yml` est désormais la gate technique principale : elle revalide les 775 puis impose aussi gouvernance, audit de vulnérabilités, analyse statique, suite complète et cliquet de couverture avant de publier le vert.
 
 ## 4. Vérité économique
 
@@ -52,23 +52,39 @@ Un verdict économique `KILL`, `MORE_DATA` ou négatif n'empêche pas le logicie
 
 ## 5. PARFAIT / TOUT VERT — définition machine
 
-La certification technique est **indépendante du verdict économique**. Le statut machine autoritatif est :
+La certification technique est **indépendante du verdict économique**. Les deux statuts machine publiés par la gate principale sur le même SHA sont :
 
-`hypersmart/technical-perfect`
+- `hypersmart/pre-run-775` ;
+- `hypersmart/technical-perfect`.
 
-Il ne peut être publié `success` que lorsque, sur le **même SHA** :
+Ils ne peuvent être publiés `success` que lorsque :
 
-1. la gouvernance versionnée est cohérente ;
-2. l'audit de vulnérabilités Python est vert ;
-3. l'analyse statique bloquante est verte ;
-4. la suite complète sous coverage termine sans rouge ;
-5. le cliquet de couverture ne régresse pas.
+1. 775/775 et les preuves dérivées sont verts ;
+2. la gouvernance versionnée est cohérente ;
+3. l'audit `pip-audit` est vert ;
+4. Ruff ne détecte aucune erreur structurelle bloquante ;
+5. les garde-fous sécurité sont verts ;
+6. la suite complète sous `coverage` termine sans rouge ;
+7. le cliquet de couverture ne descend pas sous la baseline.
 
-Le workflow `security-quality` publie ce statut. S'il manque ou s'il est rouge, il est interdit de dire « PARFAIT / TOUT VERT » pour ce SHA.
+S'il manque l'un de ces statuts ou s'il est rouge, il est interdit de dire « PARFAIT / TOUT VERT » pour ce SHA.
 
 Cette certification ne prétend jamais que les trois familles gagnent de l'argent. La preuve économique garde ses propres gates et ses propres verdicts.
 
-## 6. CI et certification
+## 6. Contrat Git : main-only
+
+Le dépôt suit un contrat **main-only** : à la clôture d'un chantier, aucune branche de travail ou branche robot ne doit rester en plus de `main`.
+
+En conséquence la surveillance des dépendances fonctionne **sans Dependabot**, car Dependabot crée obligatoirement des branches de PR. La surveillance est assurée par :
+
+- `pip-audit` bloquant dans les gates ;
+- le workflow hebdomadaire `security-quality` ;
+- les versions exactes des outils CI dans `requirements-ci-tools.txt` ;
+- les Actions tierces pinées par SHA et contrôlées par tests.
+
+Une branche automatique détectée est une anomalie de gouvernance à nettoyer, pas une nouvelle branche de travail autorisée.
+
+## 7. CI et certification
 
 La certification globale attend au minimum :
 
@@ -78,31 +94,27 @@ La certification globale attend au minimum :
 - `alpha-factory` ;
 - `portable-release-windows` ;
 - `security-quality` ;
-- statut `hypersmart/technical-perfect=success`.
+- `hypersmart/pre-run-775=success` ;
+- `hypersmart/technical-perfect=success`.
 
-Le workflow `security-quality` ajoute :
+La gate 775 principale est volontairement redondante avec `security-quality` sur les contrôles critiques : cette redondance évite qu'un workflow secondaire manquant permette un faux vert.
 
-- gate de gouvernance ;
-- audit de vulnérabilités Python ;
-- analyse statique structurelle ;
-- cliquet de couverture de lignes fail-closed ;
-- publication d'un verdict technique unique sur le SHA exact.
+## 8. Gouvernance GitHub
 
-## 7. Gouvernance GitHub
+La protection native de `main` reste un durcissement serveur recommandé lorsqu'elle est compatible avec le workflow main-only du dépôt. Elle est distincte de la perfection technique du code : un réglage administrateur GitHub que le dépôt ne peut pas modifier lui-même ne doit pas créer un faux rouge permanent.
 
-La protection native de `main` reste un durcissement serveur recommandé lorsqu'elle est compatible avec le workflow du dépôt. Elle est distincte de la perfection technique du code : un réglage administrateur GitHub que le dépôt ne peut pas modifier lui-même ne doit pas créer un faux rouge permanent.
+Aucune protection serveur ne doit conduire à recréer une forêt de branches de travail. Les gates et statuts du SHA exact restent obligatoires pour la certification technique.
 
-La source de vérité technique reste le statut `hypersmart/technical-perfect` et les workflows obligatoires du SHA exact. Aucun réglage serveur ne permet de contourner les tests, la sécurité ou la vérité économique.
-
-## 8. Dépendances et supply-chain
+## 9. Dépendances et supply-chain
 
 - Les GitHub Actions tierces doivent rester pinées sur des SHA immuables.
-- Dependabot surveille Python et GitHub Actions.
+- La surveillance se fait **sans Dependabot** pour respecter `main-only`.
+- `pip-audit` est bloquant et exécuté dans les certifications.
 - La release Windows portable reste la chaîne la plus stricte : wheelhouse exact, hashes, SBOM et provenance.
 - Les outils CI critiques sont pinés dans `requirements-ci-tools.txt`.
 - Chaque passage supply-chain archive l'environnement Python réellement résolu.
 
-## 9. Documents historiques
+## 10. Documents historiques
 
 Les documents suivants sont **historiques** s'ils contredisent ce fichier ou les contrats exécutables actuels :
 
@@ -115,14 +127,16 @@ Les documents suivants sont **historiques** s'ils contredisent ce fichier ou les
 
 Ils restent utiles pour la traçabilité, mais ne doivent plus être utilisés comme état courant.
 
-## 10. Règle de clôture
+## 11. Règle de clôture
 
 Le projet n'est jamais déclaré « parfait » parce qu'un document le dit. Le verdict doit être dérivé du HEAD exact :
 
 1. code et worktree cohérents ;
-2. gates CI obligatoires vertes ;
-3. sécurité paper/read-only verte ;
-4. couverture sans régression ;
-5. gouvernance versionnée conforme ;
-6. statut `hypersmart/technical-perfect=success` ;
-7. aucune preuve économique surclassée artificiellement.
+2. **une seule branche finale : `main`** ;
+3. gates CI obligatoires vertes ;
+4. sécurité paper/read-only verte ;
+5. couverture sans régression ;
+6. gouvernance versionnée conforme ;
+7. `hypersmart/pre-run-775=success` ;
+8. `hypersmart/technical-perfect=success` ;
+9. aucune preuve économique surclassée artificiellement.
