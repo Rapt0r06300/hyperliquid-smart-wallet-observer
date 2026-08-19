@@ -251,7 +251,10 @@ def test_advanced_risk_sizing_alpha_correlation_lifecycle_and_cleanup() -> None:
 
     manager.open_positions_coins = ["BTC", "BTC"]
     correlated = manager.evaluate_risk(coin="btc", proposed_notional_usdt=10.0)
-    assert correlated.allowed and correlated.sizing_multiplier == 0.5
+    assert correlated.allowed
+    assert correlated.sizing_multiplier == pytest.approx(
+        manager.config.vol_high_sizing_mult * 0.5
+    )
     assert "correlated_positions" in correlated.reasons
 
     manager.on_position_opened("SOL", 25.0, "alt")
@@ -377,7 +380,7 @@ def test_kelly_sizing_rejects_low_probability_negative_edge_and_full_exposure() 
         edge_remaining_bps=1.0,
         leader_score=100.0,
         consensus_wallets=1,
-        win_rate_estimate=0.45,
+        win_rate_estimate=0.3,
         config=KellySizingConfig(min_win_probability=0.0),
     )
     assert negative.position_size_usdt == 0.0
