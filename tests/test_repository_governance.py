@@ -37,3 +37,25 @@ def test_current_state_supersedes_stale_master_document() -> None:
     assert "Aucune cible économique" in current
     assert "CURRENT_STATE.md" in gateway
     assert "Source de vérité actuelle" in gateway
+
+
+def test_generated_local_artifacts_do_not_reenter_the_source_tree() -> None:
+    gitignore = (ROOT / ".gitignore").read_text(encoding="utf-8")
+    for pattern in (
+        "/logs-audit/",
+        "/moisson_console.txt",
+        "/runtime/audit/*.txt",
+        "/runtime/rapports/**/*.txt",
+    ):
+        assert pattern in gitignore
+
+    for relative in (
+        "moisson_console.txt",
+        "logs-audit/derniers_echecs.json",
+        "logs-audit/recaps/RECAP-20260722-134021.md",
+        "logs-audit/recaps/RECAP-20260722-135031.md",
+        "runtime/audit/echecs_pytest.txt",
+        "runtime/audit/test_edge.txt",
+        "runtime/rapports/checkpoint_oos_shadow/diag_planif.txt",
+    ):
+        assert not (ROOT / relative).exists(), relative
