@@ -98,13 +98,14 @@ def test_leaderboard_model_to_candidate_preserves_fields() -> None:
         leaderboard_score=88.0,
         selected_for_revalidation=True,
         selected_for_backfill=False,
-        source_confidence="high",
+        source_confidence=0.95,
         notes="n",
     )
     candidate = cli._leaderboard_model_to_candidate(row)
     assert candidate.wallet_address == "0xabc"
     assert candidate.rank == 1
     assert candidate.pnl_usdc == 2.0
+    assert candidate.source_confidence == 0.95
     assert candidate.selected_for_revalidation is True
     assert candidate.selected_for_backfill is False
 
