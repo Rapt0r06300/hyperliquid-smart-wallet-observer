@@ -1,0 +1,85 @@
+name: portable-wheelhouse-security-once
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/portable-wheelhouse-security-once.yml'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: portable-wheelhouse-security-once
+  cancel-in-progress: false
+
+jobs:
+  repair:
+    name: Remplacer pytest vulnérable puis auto-supprimer ce workflow
+    if: github.repository == 'Rapt0r06300/hyperliquid-smart-wallet-observer'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 2
+          persist-credentials: false
+
+      - name: Vérifier le SHA exact et télécharger la roue PyPI attestée
+        env:
+          EXPECTED_SHA256: 2c5efc453d45394fdd706ade797c0a81091eccd1d6e4bccfcd476e2b8e0ab5d9
+          EXPECTED_SIZE: '375249'
+          WHEEL_URL: https://files.pythonhosted.org/packages/d4/24/a372aaf5c9b7208e7112038812994107bc65a84cd00e0354a88c2c77a617/pytest-9.0.3-py3-none-any.whl
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          test -f tools/wheelhouse/pytest-8.4.2-py3-none-any.whl
+          curl --proto '=https' --tlsv1.2 --fail-with-body --location --retry 3 \
+            --output pytest-9.0.3-py3-none-any.whl "$WHEEL_URL"
+          ACTUAL_SHA=$(sha256sum pytest-9.0.3-py3-none-any.whl | awk '{print $1}')
+          ACTUAL_SIZE=$(stat -c '%s' pytest-9.0.3-py3-none-any.whl)
+          test "$ACTUAL_SHA" = "$EXPECTED_SHA256"
+          test "$ACTUAL_SIZE" = "$EXPECTED_SIZE"
+
+      - name: Remplacer la roue et régénérer les deux locks depuis les octets réels
+        run: |
+          set -euo pipefail
+          rm tools/wheelhouse/pytest-8.4.2-py3-none-any.whl
+          mv pytest-9.0.3-py3-none-any.whl tools/wheelhouse/pytest-9.0.3-py3-none-any.whl
+          python - <<'PY'
+          from pathlib import Path
+          path = Path('requirements-portable.txt')
+          text = path.read_text(encoding='utf-8-sig')
+          old = 'pytest==8.4.2 --hash=sha256:872f880de3fc3a5bdc88a11b39c9710c3497a547cfa9320bc3c5e62fbf272e79'
+          new = 'pytest==9.0.3 --hash=sha256:2c5efc453d45394fdd706ade797c0a81091eccd1d6e4bccfcd476e2b8e0ab5d9'
+          if text.count(old) != 1:
+              raise SystemExit('portable pytest 8.4.2 lock line not found exactly once')
+          path.write_text(text.replace(old, new), encoding='utf-8')
+          PY
+          python tools/wheelhouse_lock.py \
+            --wheelhouse tools/wheelhouse \
+            --ecrire tools/wheelhouse/WHEELHOUSE_LOCK.json
+          python tools/wheelhouse_lock.py \
+            --wheelhouse tools/wheelhouse \
+            --verifier tools/wheelhouse/WHEELHOUSE_LOCK.json \
+            --requirements requirements-portable.txt
+          grep -F 'pytest==9.0.3 --hash=sha256:2c5efc453d45394fdd706ade797c0a81091eccd1d6e4bccfcd476e2b8e0ab5d9' requirements-portable.txt
+          test ! -e tools/wheelhouse/pytest-8.4.2-py3-none-any.whl
+          test -e tools/wheelhouse/pytest-9.0.3-py3-none-any.whl
+
+      - name: Auto-supprimer le workflow et pousser uniquement main
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          git rm .github/workflows/portable-wheelhouse-security-once.yml
+          git add requirements-portable.txt tools/wheelhouse/WHEELHOUSE_LOCK.json \
+            tools/wheelhouse/pytest-8.4.2-py3-none-any.whl \
+            tools/wheelhouse/pytest-9.0.3-py3-none-any.whl
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git commit -m 'Sécurise pytest dans le runtime portable Windows'
+          git status --porcelain | grep -q . && { echo 'WORKTREE_NOT_CLEAN'; exit 1; } || true
+          git remote set-url origin "https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
+          git push origin HEAD:main
