@@ -81,7 +81,9 @@ def test_certification_recalcule_la_gate_et_certifie_une_preuve_complete() -> No
     result = certify_campaign("lead_lag", row)
     assert result["certified"] is True
     assert result["eligible_net_pnl_usd"] >= 4.0
+    assert result["proof_net_pnl_usd"] >= 4.0
     assert result["liquidatable_net"] is True
+    assert result["costs_complete"] is True
     assert result["oos_positive"] is True
     assert result["forward_positive"] is True
     assert result["forward_post_freeze"] is True
@@ -100,6 +102,40 @@ def test_certification_refuse_un_statut_atteint_falsifie() -> None:
     assert "FORWARD_NOT_PROVEN_POST_FREEZE" in result["reasons"]
 
 
+def test_certification_refuse_eligible_net_falsifie() -> None:
+    row = _certified_campaign("lead_lag")
+    row["eligible_net_pnl_usd"] = 999.0
+    result = certify_campaign("lead_lag", row)
+    assert result["certified"] is False
+    assert "ELIGIBLE_NET_DRIFT" in result["reasons"]
+
+
+def test_certification_refuse_famille_incoherente() -> None:
+    row = _certified_campaign("lead_lag")
+    row["family"] = "copy_vault"
+    result = certify_campaign("lead_lag", row)
+    assert result["certified"] is False
+    assert any(reason.startswith("FAMILY_MISMATCH:") for reason in result["reasons"])
+
+
+def test_certification_refuse_couts_incomplets() -> None:
+    row = _certified_campaign("lead_lag")
+    row["latency_cost_usd"] = None
+    row.update(evaluate_objective(row))
+    result = certify_campaign("lead_lag", row)
+    assert result["certified"] is False
+    assert result["costs_complete"] is False
+    assert "COSTS_INCOMPLETE" in result["reasons"]
+    assert "UNMEASURED:latency_cost_usd" in result["reasons"]
+
+
+def test_certification_absente_reste_fail_closed() -> None:
+    result = certify_campaign("lead_lag", None)
+    assert result["certified"] is False
+    assert result["eligible_net_pnl_usd"] is None
+    assert result["reasons"] == ["CAMPAIGN_MISSING_OR_UNREADABLE"]
+
+
 def test_workspace_exige_les_trois_familles_sans_compensation(tmp_path: Path) -> None:
     campaign_dir = tmp_path / "runtime" / "reports" / "economic_campaigns"
     campaign_dir.mkdir(parents=True)
@@ -109,7 +145,10 @@ def test_workspace_exige_les_trois_familles_sans_compensation(tmp_path: Path) ->
 
     certified = certify_workspace(tmp_path)
     assert certified["all_families_certified"] is True
+    assert certified["status"] == "ALL_FAMILIES_CERTIFIED"
     assert certified["cross_family_pnl_compensation_allowed"] is False
+    assert certified["paper_only"] is True
+    assert certified["real_execution"] is False
     assert all(row["certified"] for row in certified["families"].values())
 
     weak = _certified_campaign("lead_lag")
@@ -119,6 +158,22 @@ def test_workspace_exige_les_trois_familles_sans_compensation(tmp_path: Path) ->
 
     refused = certify_workspace(tmp_path)
     assert refused["all_families_certified"] is False
+    assert refused["status"] == "NO_GO"
     assert refused["families"]["lead_lag"]["certified"] is False
     assert refused["families"]["copy_vault"]["certified"] is True
     assert refused["families"]["cross_venue_dislocation_v2"]["certified"] is True
+
+
+def test_workspace_refuse_si_une_famille_manque_ou_est_illisible(tmp_path: Path) -> None:
+    campaign_dir = tmp_path / "runtime" / "reports" / "economic_campaigns"
+    campaign_dir.mkdir(parents=True)
+    (campaign_dir / "copy_vault.json").write_text(
+        json.dumps(_certified_campaign("copy_vault")), encoding="utf-8"
+    )
+    (campaign_dir / "lead_lag.json").write_text("{json-invalide", encoding="utf-8")
+
+    result = certify_workspace(tmp_path)
+    assert result["all_families_certified"] is False
+    assert result["families"]["copy_vault"]["certified"] is True
+    assert result["families"]["lead_lag"]["reasons"] == ["CAMPAIGN_MISSING_OR_UNREADABLE"]
+    assert result["families"]["cross_venue_dislocation_v2"]["reasons"] == ["CAMPAIGN_MISSING_OR_UNREADABLE"]
