@@ -23,7 +23,7 @@ def test_fill_and_delta_helpers() -> None:
     assert factory._map_delta_action("ADD", {"side": "LONG"}) == ("add", "long")
     delta = {"coin": "btc", "action": "OPEN_LONG", "price": 100, "detected_at_ms": 123}
     assert factory._parse_position_delta(delta, {}, 999) == (
-        "open", "long", "BTC", 100.0, 123, "OPEN_LONG"
+        "open", "long", "BTC", 100.0, 123_000, "OPEN_LONG"
     )
 
 
