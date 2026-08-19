@@ -75,7 +75,7 @@ jobs:
           python -m hl_observer audit-safety
       - name: Partition des shards valide
         run: python tools/ci_shard.py 1 6 --verifier
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         if: always()
         with:
           name: junit-securite
@@ -110,7 +110,7 @@ jobs:
           if [ -z "$FICHIERS" ]; then echo "shard vide"; exit 0; fi
           python -m pytest -q -p no:cacheprovider \
             --junitxml=junit-shard-${{ matrix.shard }}.xml $FICHIERS
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         if: always()
         with:
           name: junit-linux-shard-${{ matrix.shard }}
@@ -178,7 +178,7 @@ jobs:
         run: |
           python -m hl_observer safety-audit
           python -m hl_observer audit-safety
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         if: always()
         with:
           name: junit-windows
@@ -281,7 +281,7 @@ jobs:
             tests/test_e2e_lanceur_harvest.py \
             tests/test_collecter_dydx_live.py \
             tests/dydx_v4/test_persistance_flux_live.py
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         if: always()
         with:
           name: junit-runtime-replay
