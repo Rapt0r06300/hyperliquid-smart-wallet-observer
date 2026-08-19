@@ -27,23 +27,35 @@ env:
 
 jobs:
   completion-775:
-    name: Preuve technique honnête 1→775
+    name: Preuve parfaite 1→775 + sécurité + qualité
     runs-on: ubuntu-latest
-    timeout-minutes: 90
+    timeout-minutes: 180
     steps:
-      - name: Publier le statut 775 en cours
+      - name: Publier les statuts de certification en cours
         env:
           GITHUB_TOKEN: ${{ github.token }}
         run: |
+          set -euo pipefail
           TARGET_URL="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
-          PAYLOAD=$(printf '{"state":"pending","context":"hypersmart/pre-run-775","description":"Gate technique 1-775 en cours","target_url":"%s"}' "${TARGET_URL}")
-          curl --fail-with-body --silent --show-error \
-            -X POST \
-            -H "Accept: application/vnd.github+json" \
-            -H "Authorization: Bearer ${GITHUB_TOKEN}" \
-            -H "X-GitHub-Api-Version: 2022-11-28" \
-            "https://api.github.com/repos/${GITHUB_REPOSITORY}/statuses/${GITHUB_SHA}" \
-            -d "${PAYLOAD}"
+          for CONTEXT in hypersmart/pre-run-775 hypersmart/technical-perfect; do
+            PAYLOAD=$(CONTEXT="$CONTEXT" TARGET_URL="$TARGET_URL" python - <<'PY'
+          import json, os
+          print(json.dumps({
+              "state": "pending",
+              "context": os.environ["CONTEXT"],
+              "description": "Certification complète en cours",
+              "target_url": os.environ["TARGET_URL"],
+          }))
+          PY
+            )
+            curl --fail-with-body --silent --show-error \
+              -X POST \
+              -H "Accept: application/vnd.github+json" \
+              -H "Authorization: Bearer ${GITHUB_TOKEN}" \
+              -H "X-GitHub-Api-Version: 2022-11-28" \
+              "https://api.github.com/repos/${GITHUB_REPOSITORY}/statuses/${GITHUB_SHA}" \
+              -d "${PAYLOAD}"
+          done
 
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
@@ -60,6 +72,21 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install -e ".[dev]"
           python -m pip install -r requirements-recherche.txt
+          python -m pip install -r requirements-ci-tools.txt
+
+      - name: Figer l'environnement réellement certifié
+        run: python -m pip freeze --all | sort > ci-resolved-requirements.txt
+
+      - name: Gouvernance versionnée obligatoire
+        run: |
+          python tools/check_repo_governance.py
+          python -m pytest -q -p no:cacheprovider tests/test_repository_governance.py tests/test_ci_supply_chain_pinning.py
+
+      - name: Audit vulnérabilités dépendances
+        run: python -m pip_audit --local --skip-editable --progress-spinner off
+
+      - name: Analyse statique bloquante
+        run: python -m ruff check --select E9,F63,F7,F82 src tools tests
 
       - name: Revalider les preuves 001-100
         run: |
@@ -195,35 +222,57 @@ jobs:
           python -m hl_observer safety-audit
           python -m hl_observer audit-safety
 
+      - name: Suite complète sous coverage
+        run: python -m coverage run --source=src -m pytest -q -p no:cacheprovider --tb=no
+
+      - name: Cliquet couverture sans régression
+        run: |
+          python -m coverage json -o coverage.json
+          python tools/check_coverage_ratchet.py
+
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         if: always()
         with:
-          name: pre-run-completion-775-${{ github.sha }}
+          name: pre-run-perfect-775-${{ github.sha }}
           path: |
             junit-*.xml
+            coverage.json
+            ci-resolved-requirements.txt
             runtime/reports/pre_run_*_final.json
             runtime/reports/pre_run_321_775_technical_progress.json
           if-no-files-found: error
           retention-days: 30
 
-      - name: Publier le verdict CI 775 sur le SHA
+      - name: Publier les verdicts finaux sur le SHA
         if: always()
         env:
           GITHUB_TOKEN: ${{ github.token }}
           FINAL_JOB_STATUS: ${{ job.status }}
         run: |
+          set -euo pipefail
           STATE="failure"
-          DESCRIPTION="Gate technique 1-775 en échec"
+          DESCRIPTION="Certification complète en échec"
           if [ "${FINAL_JOB_STATUS}" = "success" ]; then
             STATE="success"
-            DESCRIPTION="Gate technique 1-775 verte"
+            DESCRIPTION="775 + sécurité + qualité + couverture verts"
           fi
           TARGET_URL="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
-          PAYLOAD=$(printf '{"state":"%s","context":"hypersmart/pre-run-775","description":"%s","target_url":"%s"}' "${STATE}" "${DESCRIPTION}" "${TARGET_URL}")
-          curl --fail-with-body --silent --show-error \
-            -X POST \
-            -H "Accept: application/vnd.github+json" \
-            -H "Authorization: Bearer ${GITHUB_TOKEN}" \
-            -H "X-GitHub-Api-Version: 2022-11-28" \
-            "https://api.github.com/repos/${GITHUB_REPOSITORY}/statuses/${GITHUB_SHA}" \
-            -d "${PAYLOAD}"
+          for CONTEXT in hypersmart/pre-run-775 hypersmart/technical-perfect; do
+            PAYLOAD=$(STATE="$STATE" DESCRIPTION="$DESCRIPTION" CONTEXT="$CONTEXT" TARGET_URL="$TARGET_URL" python - <<'PY'
+          import json, os
+          print(json.dumps({
+              "state": os.environ["STATE"],
+              "context": os.environ["CONTEXT"],
+              "description": os.environ["DESCRIPTION"],
+              "target_url": os.environ["TARGET_URL"],
+          }))
+          PY
+            )
+            curl --fail-with-body --silent --show-error \
+              -X POST \
+              -H "Accept: application/vnd.github+json" \
+              -H "Authorization: Bearer ${GITHUB_TOKEN}" \
+              -H "X-GitHub-Api-Version: 2022-11-28" \
+              "https://api.github.com/repos/${GITHUB_REPOSITORY}/statuses/${GITHUB_SHA}" \
+              -d "${PAYLOAD}"
+          done
