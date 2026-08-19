@@ -107,14 +107,14 @@ jobs:
           if-no-files-found: error
           retention-days: 14
 
-  technical-perfect:
-    name: Verdict technique global
+  security-quality-verdict:
+    name: Verdict sécurité et qualité
     needs: [governance, supply-chain, coverage-ratchet]
     if: always()
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
-      - name: Publier hypersmart/technical-perfect sur le SHA exact
+      - name: Publier hypersmart/security-quality sur le SHA exact
         env:
           GITHUB_TOKEN: ${{ github.token }}
           GOV_RESULT: ${{ needs.governance.result }}
@@ -123,7 +123,7 @@ jobs:
         run: |
           set -euo pipefail
           state=failure
-          description="Technical certification failed"
+          description="Security/quality certification failed"
           if [ "$GOV_RESULT" = success ] && [ "$SUPPLY_RESULT" = success ] && [ "$COVERAGE_RESULT" = success ]; then
             state=success
             description="Governance, supply-chain and coverage are green"
@@ -133,7 +133,7 @@ jobs:
           import json, os
           print(json.dumps({
               "state": os.environ["STATE"],
-              "context": "hypersmart/technical-perfect",
+              "context": "hypersmart/security-quality",
               "description": os.environ["DESCRIPTION"],
           }))
           PY
@@ -149,7 +149,7 @@ jobs:
             echo "PR externe/interne: verdict calculé sans écriture du status API."
           fi
           if [ "$state" != success ]; then
-            echo "TECHNICAL_PERFECT_RED governance=$GOV_RESULT supply=$SUPPLY_RESULT coverage=$COVERAGE_RESULT"
+            echo "SECURITY_QUALITY_RED governance=$GOV_RESULT supply=$SUPPLY_RESULT coverage=$COVERAGE_RESULT"
             exit 1
           fi
-          echo "TECHNICAL_PERFECT_GREEN"
+          echo "SECURITY_QUALITY_GREEN"

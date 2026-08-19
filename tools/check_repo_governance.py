@@ -46,6 +46,7 @@ def local_failures() -> list[str]:
             "MORE_DATA",
             "Cross-Venue v2",
             "security-quality",
+            "hypersmart/security-quality",
             "hypersmart/technical-perfect",
             "indépendante du verdict économique",
             "main-only",
@@ -59,13 +60,18 @@ def local_failures() -> list[str]:
         text = workflow.read_text(encoding="utf-8", errors="replace")
         for marker in (
             "statuses: write",
-            "hypersmart/technical-perfect",
+            "hypersmart/security-quality",
             "needs: [governance, supply-chain, coverage-ratchet]",
             "python -m pip_audit",
             "python tools/check_coverage_ratchet.py",
         ):
             if marker not in text:
                 failures.append(f"security-quality incomplet: marqueur absent {marker}")
+        if "hypersmart/technical-perfect" in text:
+            failures.append(
+                "security-quality ne doit pas publier hypersmart/technical-perfect: "
+                "ce contexte appartient uniquement à la gate 775 complète"
+            )
 
     perfect = ROOT / ".github" / "workflows" / "pre-run-321-775.yml"
     if perfect.is_file():

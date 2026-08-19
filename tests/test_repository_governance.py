@@ -22,8 +22,9 @@ def test_security_quality_workflow_is_fail_closed() -> None:
     assert "python tools/check_coverage_ratchet.py" in text
     assert "ci-resolved-requirements.txt" in text
     assert "needs: [governance, supply-chain, coverage-ratchet]" in text
-    assert "hypersmart/technical-perfect" in text
-    assert "TECHNICAL_PERFECT_GREEN" in text
+    assert "hypersmart/security-quality" in text
+    assert "SECURITY_QUALITY_GREEN" in text
+    assert "hypersmart/technical-perfect" not in text
     assert "continue-on-error" not in text
 
 
@@ -39,6 +40,14 @@ def test_pre_run_775_est_la_gate_parfaite_principale() -> None:
         "775 + sécurité + qualité + couverture verts",
     ):
         assert marker in text
+
+
+def test_un_seul_workflow_publie_technical_perfect() -> None:
+    security = (ROOT / ".github" / "workflows" / "security-quality.yml").read_text(encoding="utf-8")
+    pre_run = (ROOT / ".github" / "workflows" / "pre-run-321-775.yml").read_text(encoding="utf-8")
+    assert "hypersmart/technical-perfect" not in security
+    assert "hypersmart/technical-perfect" in pre_run
+    assert "hypersmart/security-quality" in security
 
 
 def test_technical_perfect_is_not_an_economic_pnl_claim() -> None:
@@ -86,6 +95,7 @@ def test_current_state_supersedes_stale_master_document() -> None:
     assert "775/775" in current
     assert "Aucune cible économique" in current
     assert "hypersmart/technical-perfect" in current
+    assert "hypersmart/security-quality" in current
     assert "indépendante du verdict économique" in current
     assert "CURRENT_STATE.md" in gateway
     assert "Source de vérité actuelle" in gateway

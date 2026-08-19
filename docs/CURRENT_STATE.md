@@ -52,12 +52,20 @@ Un verdict économique `KILL`, `MORE_DATA` ou négatif n'empêche pas le logicie
 
 ## 5. PARFAIT / TOUT VERT — définition machine
 
-La certification technique est **indépendante du verdict économique**. Les deux statuts machine publiés par la gate principale sur le même SHA sont :
+La certification technique est **indépendante du verdict économique**.
+
+La gate technique principale `.github/workflows/pre-run-321-775.yml` est l'unique autorité qui publie sur le SHA exact :
 
 - `hypersmart/pre-run-775` ;
 - `hypersmart/technical-perfect`.
 
-Ils ne peuvent être publiés `success` que lorsque :
+Le workflow redondant `.github/workflows/security-quality.yml` publie son propre contexte distinct :
+
+- `hypersmart/security-quality`.
+
+`security-quality` ne doit jamais écrire `hypersmart/technical-perfect`. Cette séparation interdit qu'un workflow secondaire vert écrase le rouge de la gate 775 complète, ou inversement.
+
+`hypersmart/pre-run-775` et `hypersmart/technical-perfect` ne peuvent être publiés `success` que lorsque :
 
 1. 775/775 et les preuves dérivées sont verts ;
 2. la gouvernance versionnée est cohérente ;
@@ -67,7 +75,9 @@ Ils ne peuvent être publiés `success` que lorsque :
 6. la suite complète sous `coverage` termine sans rouge ;
 7. le cliquet de couverture ne descend pas sous la baseline.
 
-S'il manque l'un de ces statuts ou s'il est rouge, il est interdit de dire « PARFAIT / TOUT VERT » pour ce SHA.
+`hypersmart/security-quality` certifie séparément gouvernance, supply-chain et couverture. Il complète la gate principale mais ne peut pas la remplacer.
+
+S'il manque l'un des statuts obligatoires ou s'il est rouge, il est interdit de dire « PARFAIT / TOUT VERT » pour ce SHA.
 
 Cette certification ne prétend jamais que les trois familles gagnent de l'argent. La preuve économique garde ses propres gates et ses propres verdicts.
 
@@ -94,10 +104,11 @@ La certification globale attend au minimum :
 - `alpha-factory` ;
 - `portable-release-windows` ;
 - `security-quality` ;
+- `hypersmart/security-quality=success` ;
 - `hypersmart/pre-run-775=success` ;
 - `hypersmart/technical-perfect=success`.
 
-La gate 775 principale est volontairement redondante avec `security-quality` sur les contrôles critiques : cette redondance évite qu'un workflow secondaire manquant permette un faux vert.
+La gate 775 principale est volontairement redondante avec `security-quality` sur les contrôles critiques, mais **chaque workflow publie un contexte de statut distinct**. La redondance ajoute une contre-vérification ; elle ne doit jamais créer deux auteurs concurrents pour le même verdict machine.
 
 ## 8. Gouvernance GitHub
 
@@ -137,6 +148,7 @@ Le projet n'est jamais déclaré « parfait » parce qu'un document le dit. Le v
 4. sécurité paper/read-only verte ;
 5. couverture sans régression ;
 6. gouvernance versionnée conforme ;
-7. `hypersmart/pre-run-775=success` ;
-8. `hypersmart/technical-perfect=success` ;
-9. aucune preuve économique surclassée artificiellement.
+7. `hypersmart/security-quality=success` ;
+8. `hypersmart/pre-run-775=success` ;
+9. `hypersmart/technical-perfect=success` ;
+10. aucune preuve économique surclassée artificiellement.
