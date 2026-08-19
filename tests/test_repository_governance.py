@@ -48,13 +48,22 @@ def test_technical_perfect_is_not_an_economic_pnl_claim() -> None:
             assert forbidden not in text
 
 
-def test_ci_quality_tools_are_exactly_pinned() -> None:
+def test_ci_quality_tools_are_exactly_pinned_and_non_vulnerable() -> None:
     lines = [
         line.strip()
         for line in (ROOT / "requirements-ci-tools.txt").read_text(encoding="utf-8").splitlines()
         if line.strip() and not line.lstrip().startswith("#")
     ]
-    assert lines == ["coverage==7.15.2", "pip-audit==2.10.1"]
+    assert lines == [
+        "coverage==7.15.2",
+        "pip-audit==2.10.1",
+        "pytest==9.0.3",
+        "setuptools==83.0.0",
+    ]
+    pyproject = (ROOT / "pyproject.toml").read_text(encoding="utf-8")
+    assert '"setuptools>=83.0.0"' in pyproject
+    assert '"pytest>=9.0.3,<10"' in pyproject
+    assert "pytest>=8,<9" not in pyproject
 
 
 def test_dependabot_est_interdit_par_le_contrat_main_only() -> None:
