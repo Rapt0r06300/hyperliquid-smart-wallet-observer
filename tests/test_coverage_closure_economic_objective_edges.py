@@ -86,7 +86,7 @@ def test_segment_economics_fails_closed_for_missing_cost_identity_and_liquidatio
 
 def test_segment_economics_rejects_reconciliation_and_accepts_uppercase_liquidatable() -> None:
     issues: list[str] = []
-    bad = _segment(net=99.0)
+    bad = _segment(net=99.0, gross_pnl_usd=1.0)
     assert objective._segment_economics(bad, label="FORWARD", issues=issues) is None
     assert "FORWARD_ECONOMIC_RECONCILIATION_FAILED" in issues
 
