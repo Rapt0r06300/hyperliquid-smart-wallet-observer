@@ -91,7 +91,7 @@ jobs:
       PYTHONIOENCODING: 'utf-8'
     steps:
       - name: Récupérer exactement le SHA demandé sans persister de credentials
-        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           ref: ${{ github.sha }}
           clean: true
