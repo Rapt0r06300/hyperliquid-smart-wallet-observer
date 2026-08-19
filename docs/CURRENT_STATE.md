@@ -48,7 +48,27 @@ Au gel de certification du 12/08/2026, les verdicts documentés étaient :
 
 Les campagnes et infrastructures ajoutées depuis peuvent produire de nouvelles preuves, mais **un résultat exploratoire, train, synthétique ou observé n'est pas automatiquement un PnL prouvé**. La cible +4 USD par famille ne doit être annoncée que par la gate économique canonique.
 
-## 5. CI et certification
+Un verdict économique `KILL`, `MORE_DATA` ou négatif n'empêche pas le logiciel d'être techniquement parfait : au contraire, refuser honnêtement une stratégie non prouvée fait partie de la qualité attendue.
+
+## 5. PARFAIT / TOUT VERT — définition machine
+
+La certification technique est **indépendante du verdict économique**. Le statut machine autoritatif est :
+
+`hypersmart/technical-perfect`
+
+Il ne peut être publié `success` que lorsque, sur le **même SHA** :
+
+1. la gouvernance versionnée est cohérente ;
+2. l'audit de vulnérabilités Python est vert ;
+3. l'analyse statique bloquante est verte ;
+4. la suite complète sous coverage termine sans rouge ;
+5. le cliquet de couverture ne régresse pas.
+
+Le workflow `security-quality` publie ce statut. S'il manque ou s'il est rouge, il est interdit de dire « PARFAIT / TOUT VERT » pour ce SHA.
+
+Cette certification ne prétend jamais que les trois familles gagnent de l'argent. La preuve économique garde ses propres gates et ses propres verdicts.
+
+## 6. CI et certification
 
 La certification globale attend au minimum :
 
@@ -57,30 +77,32 @@ La certification globale attend au minimum :
 - `labo-continu-ci` ;
 - `alpha-factory` ;
 - `portable-release-windows` ;
-- `security-quality`.
+- `security-quality` ;
+- statut `hypersmart/technical-perfect=success`.
 
 Le workflow `security-quality` ajoute :
 
 - gate de gouvernance ;
-- vérification de protection de `main` ;
 - audit de vulnérabilités Python ;
-- analyse statique ciblée des surfaces critiques ;
-- cliquet de couverture de lignes fail-closed.
+- analyse statique structurelle ;
+- cliquet de couverture de lignes fail-closed ;
+- publication d'un verdict technique unique sur le SHA exact.
 
-## 6. Protection de `main`
+## 7. Gouvernance GitHub
 
-Au début de l'audit du 19/08/2026, GitHub indiquait `main` **non protégée**. Le dépôt contient désormais un gate qui refuse une certification verte tant que GitHub ne renvoie pas `protected=true` pour `main`.
+La protection native de `main` reste un durcissement serveur recommandé lorsqu'elle est compatible avec le workflow du dépôt. Elle est distincte de la perfection technique du code : un réglage administrateur GitHub que le dépôt ne peut pas modifier lui-même ne doit pas créer un faux rouge permanent.
 
-La protection native de branche est un réglage administrateur GitHub : elle doit exiger les checks de certification avant fusion/push selon les possibilités du compte. Le code du dépôt ne peut pas, à lui seul, transformer ce réglage serveur.
+La source de vérité technique reste le statut `hypersmart/technical-perfect` et les workflows obligatoires du SHA exact. Aucun réglage serveur ne permet de contourner les tests, la sécurité ou la vérité économique.
 
-## 7. Dépendances et supply-chain
+## 8. Dépendances et supply-chain
 
 - Les GitHub Actions tierces doivent rester pinées sur des SHA immuables.
 - Dependabot surveille Python et GitHub Actions.
 - La release Windows portable reste la chaîne la plus stricte : wheelhouse exact, hashes, SBOM et provenance.
-- Les installations CI ordinaires restent compatibles avec les plages de `pyproject.toml` mais sont maintenant accompagnées d'un audit de vulnérabilités. Une migration future vers un lock CI multi-plateforme ne doit pas casser le contrat portable existant.
+- Les outils CI critiques sont pinés dans `requirements-ci-tools.txt`.
+- Chaque passage supply-chain archive l'environnement Python réellement résolu.
 
-## 8. Documents historiques
+## 9. Documents historiques
 
 Les documents suivants sont **historiques** s'ils contredisent ce fichier ou les contrats exécutables actuels :
 
@@ -93,7 +115,7 @@ Les documents suivants sont **historiques** s'ils contredisent ce fichier ou les
 
 Ils restent utiles pour la traçabilité, mais ne doivent plus être utilisés comme état courant.
 
-## 9. Règle de clôture
+## 10. Règle de clôture
 
 Le projet n'est jamais déclaré « parfait » parce qu'un document le dit. Le verdict doit être dérivé du HEAD exact :
 
@@ -101,5 +123,6 @@ Le projet n'est jamais déclaré « parfait » parce qu'un document le dit. Le v
 2. gates CI obligatoires vertes ;
 3. sécurité paper/read-only verte ;
 4. couverture sans régression ;
-5. gouvernance GitHub conforme ;
-6. aucune preuve économique surclassée artificiellement.
+5. gouvernance versionnée conforme ;
+6. statut `hypersmart/technical-perfect=success` ;
+7. aucune preuve économique surclassée artificiellement.
