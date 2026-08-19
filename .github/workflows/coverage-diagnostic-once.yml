@@ -1,0 +1,66 @@
+name: coverage-diagnostic-once
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+env:
+  PYTHONPATH: src:tools
+  PYTHONUTF8: "1"
+  PYTHONIOENCODING: utf-8
+  NO_COLOR: "1"
+  HL_ENABLE_MAINNET_EXECUTION: "0"
+  HL_ENABLE_TESTNET_EXECUTION: "0"
+  REAL_MAINNET_TRADING: "false"
+  TESTNET_EXECUTION_ENABLED: "false"
+  HYPERSMART_ENABLE_REAL_ORDERS: "0"
+  ENABLE_REAL_ORDERS: "0"
+
+jobs:
+  diagnose-coverage:
+    name: Diagnostic compact coverage
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: "3.11"
+          cache: pip
+      - name: Installer exactement les dépendances certifiées
+        run: |
+          set -euo pipefail
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[dev]"
+          python -m pip install -r requirements-recherche.txt
+          python -m pip install -r requirements-ci-tools.txt
+      - name: Reproduire le premier échec de la suite complète
+        id: pytest
+        shell: bash
+        run: |
+          set +e
+          python -m coverage run --source=src -m pytest -q -p no:cacheprovider --maxfail=1 --tb=short --junitxml=coverage-diagnostic-junit.xml > coverage-diagnostic.log 2>&1
+          rc=$?
+          echo "exit_code=$rc" >> "$GITHUB_OUTPUT"
+          echo "## Diagnostic suite complète (exit=$rc)" >> "$GITHUB_STEP_SUMMARY"
+          echo '```text' >> "$GITHUB_STEP_SUMMARY"
+          tail -n 160 coverage-diagnostic.log >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+          tail -n 200 coverage-diagnostic.log
+          exit "$rc"
+      - name: Archiver le diagnostic même en cas d'échec
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: coverage-diagnostic-${{ github.sha }}
+          path: |
+            coverage-diagnostic.log
+            coverage-diagnostic-junit.xml
+            .coverage
+          if-no-files-found: warn
+          retention-days: 7
