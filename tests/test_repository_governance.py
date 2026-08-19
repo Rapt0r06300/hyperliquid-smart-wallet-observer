@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 from check_repo_governance import local_failures
@@ -87,6 +88,33 @@ def test_coverage_ratchet_never_rewrites_the_baseline() -> None:
     assert "couverture_lignes_baseline.json" in text
     assert "write_text" not in text
     assert "COVERAGE_REGRESSION" in text
+
+
+def test_coverage_target_is_exactly_100_and_zero_missing_lines() -> None:
+    baseline = json.loads(
+        (ROOT / "tools" / "couverture_lignes_baseline.json").read_text(encoding="utf-8")
+    )
+    assert float(baseline["min_pct_lignes"]) == 100.0
+    assert int(baseline["max_missing_lines"]) == 0
+
+    gate = (ROOT / "tools" / "check_coverage_ratchet.py").read_text(encoding="utf-8")
+    assert "missing > max_missing" in gate
+    assert "measured + 1e-9 < minimum" in gate
+
+    for workflow_name in ("pre-run-321-775.yml", "security-quality.yml"):
+        text = (ROOT / ".github" / "workflows" / workflow_name).read_text(encoding="utf-8")
+        assert "python -m coverage run --source=src" in text
+        assert "--omit" not in text
+        assert "coverage_gap_report.py" in text
+        assert "coverage-gaps.json" in text
+        assert "coverage-gaps.md" in text
+
+
+def test_coverage_full_suite_has_git_parent_for_anti_deletion_proof() -> None:
+    for workflow_name in ("pre-run-321-775.yml", "security-quality.yml"):
+        text = (ROOT / ".github" / "workflows" / workflow_name).read_text(encoding="utf-8")
+        coverage_tail = text.split("coverage", 1)[-1]
+        assert "fetch-depth: 2" in coverage_tail
 
 
 def test_current_state_supersedes_stale_master_document() -> None:
