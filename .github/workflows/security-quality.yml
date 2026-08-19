@@ -126,7 +126,7 @@ jobs:
             state=success
             description="Governance, supply-chain and coverage are green"
           fi
-          payload=$(python - <<'PY'
+          payload=$(STATE="$state" DESCRIPTION="$description" python - <<'PY'
           import json, os
           print(json.dumps({
               "state": os.environ["STATE"],
@@ -147,10 +147,3 @@ jobs:
             exit 1
           fi
           echo "TECHNICAL_PERFECT_GREEN"
-        env:
-          GITHUB_TOKEN: ${{ github.token }}
-          GOV_RESULT: ${{ needs.governance.result }}
-          SUPPLY_RESULT: ${{ needs.supply-chain.result }}
-          COVERAGE_RESULT: ${{ needs.coverage-ratchet.result }}
-          STATE: ${{ (needs.governance.result == 'success' && needs.supply-chain.result == 'success' && needs.coverage-ratchet.result == 'success') && 'success' || 'failure' }}
-          DESCRIPTION: ${{ (needs.governance.result == 'success' && needs.supply-chain.result == 'success' && needs.coverage-ratchet.result == 'success') && 'Governance, supply-chain and coverage are green' || 'Technical certification failed' }}
