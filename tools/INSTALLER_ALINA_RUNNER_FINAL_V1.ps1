@@ -2,9 +2,11 @@
 param(
     [string]$Repository = 'Rapt0r06300/hyperliquid-smart-wallet-observer',
     [string]$LabRoot = '',
-    [string]$RunnerRoot = '',
+    [string]$RunnerRoot = 'C:\actions-runner',
+    [string]$ProjectRoot = '',
     [string]$RunnerName = '',
-    [string]$RunnerToken = ''
+    [string]$RunnerToken = '',
+    [switch]$PrepareOnly
 )
 
 $ErrorActionPreference = 'Stop'
@@ -41,18 +43,91 @@ function Get-BestFixedDrive {
     return $drives[0]
 }
 
-function Get-BasePython311 {
-    if (-not (Get-Command py -ErrorAction SilentlyContinue)) {
-        throw 'Python Launcher introuvable. Installer Python 3.11+ puis relancer.'
+function Get-BasePython311([string]$RepositoryRoot) {
+    $candidates = New-Object System.Collections.Generic.List[string]
+    if (Get-Command py -ErrorAction SilentlyContinue) {
+        $value = (& py -3.11 -c "import sys; print(sys.executable)" 2>$null | Select-Object -Last 1)
+        if ($LASTEXITCODE -eq 0 -and -not [string]::IsNullOrWhiteSpace([string]$value)) {
+            $candidates.Add(([string]$value).Trim()) | Out-Null
+        }
     }
-    $value = (& py -3.11 -c "import sys; print(sys.executable)" 2>$null | Select-Object -Last 1)
-    if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace([string]$value)) {
-        throw 'Python 3.11+ est obligatoire.'
+    $systemPython = Get-Command python -ErrorAction SilentlyContinue
+    if ($systemPython) { $candidates.Add([string]$systemPython.Source) | Out-Null }
+    foreach ($relative in @('portable_runtime\python\python.exe', 'tools\python\python.exe')) {
+        $candidate = Join-Path $RepositoryRoot $relative
+        if (Test-Path -LiteralPath $candidate -PathType Leaf) { $candidates.Add($candidate) | Out-Null }
     }
-    $python = [System.IO.Path]::GetFullPath(([string]$value).Trim())
-    & $python -c "import sys; assert sys.version_info >= (3,11)" | Out-Null
-    if ($LASTEXITCODE -ne 0) { throw 'Python 3.11+ invalide.' }
-    return $python
+    foreach ($candidate in @($candidates | Select-Object -Unique)) {
+        try {
+            $python = [System.IO.Path]::GetFullPath($candidate)
+            & $python -c "import sys; raise SystemExit(0 if sys.version_info >= (3,11) else 2)" 2>$null
+            if ($LASTEXITCODE -eq 0) { return $python }
+        } catch {}
+    }
+    throw 'Python 3.11+ introuvable (py, python et runtimes portables HyperSmart vérifiés).'
+}
+
+function Get-ExactMainSha([string]$RepositoryRoot) {
+    $branch = (& git -C $RepositoryRoot branch --show-current).Trim()
+    if ($LASTEXITCODE -ne 0 -or $branch -ne 'main') { throw "Le dépôt local doit être sur main. Branche actuelle: $branch" }
+    $dirty = @(& git -C $RepositoryRoot status --porcelain)
+    if ($LASTEXITCODE -ne 0 -or $dirty.Count -ne 0) { throw 'Le dépôt local doit être propre avant préparation du runner.' }
+    & git -C $RepositoryRoot fetch origin main --quiet
+    if ($LASTEXITCODE -ne 0) { throw 'Impossible de vérifier le SHA exact de origin/main.' }
+    $head = (& git -C $RepositoryRoot rev-parse HEAD).Trim().ToLowerInvariant()
+    $remote = (& git -C $RepositoryRoot rev-parse origin/main).Trim().ToLowerInvariant()
+    if ($LASTEXITCODE -ne 0 -or $head -notmatch '^[0-9a-f]{40}$') { throw 'SHA local main invalide.' }
+    if ($head -ne $remote) { throw "SHA_REFUSED: HEAD=$head origin/main=$remote. Le runner exige le main exact publié." }
+    return $head
+}
+
+function Set-PaperOnlyMachineGuards {
+    $values = [ordered]@{
+        HL_ENABLE_MAINNET_EXECUTION = '0'
+        HL_ENABLE_TESTNET_EXECUTION = '0'
+        REAL_MAINNET_TRADING = 'false'
+        TESTNET_EXECUTION_ENABLED = 'false'
+        HYPERSMART_ENABLE_REAL_ORDERS = '0'
+        ENABLE_REAL_ORDERS = '0'
+        HYPERSMART_ANALYSIS_LOCAL_ONLY = '1'
+    }
+    foreach ($entry in $values.GetEnumerator()) {
+        [Environment]::SetEnvironmentVariable([string]$entry.Key, [string]$entry.Value, 'Machine')
+        Set-Item -Path ("Env:" + [string]$entry.Key) -Value ([string]$entry.Value)
+    }
+}
+
+function Write-PreparationManifest(
+    [string]$Root,
+    [string]$RepositoryRoot,
+    [string]$ProjectSha,
+    [string]$ResearchRoot,
+    [string]$Label,
+    [string]$Name,
+    [bool]$Configured
+) {
+    $path = Join-Path $Root 'HYPERSMART_RUNNER_PREPARED.json'
+    $tmp = "$path.$PID.tmp"
+    $payload = [ordered]@{
+        schema = 'hypersmart.runner_preparation.v1'
+        prepared_at_utc = [DateTimeOffset]::UtcNow.ToString('o')
+        repository = $Repository
+        project_root = $RepositoryRoot
+        project_sha = $ProjectSha
+        branch = 'main'
+        runner_root = $Root
+        runner_workspace = (Join-Path $Root '_work')
+        runner_name = $Name
+        research_root = $ResearchRoot
+        required_label = $Label
+        configured = $Configured
+        paper_only = $true
+        read_only_mainnet = $true
+        real_execution = $false
+        testnet_execution = $false
+    }
+    $payload | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath $tmp -Encoding UTF8
+    Move-Item -LiteralPath $tmp -Destination $path -Force
 }
 
 function Get-RegistrationToken([string]$Repo, [string]$ExplicitToken) {
@@ -143,17 +218,26 @@ function Initialize-RunnerPython([string]$Root, [string]$BasePython, [string]$Re
 }
 
 function Get-ConfiguredService([string]$Root, [string]$ExpectedRunnerName) {
+    $escapedRoot = [Regex]::Escape([System.IO.Path]::GetFullPath($Root).TrimEnd('\'))
     $serviceFile = Join-Path $Root '.service'
     if (Test-Path $serviceFile -PathType Leaf) {
         $serviceName = (Get-Content $serviceFile -Raw -Encoding UTF8).Trim()
         if (-not [string]::IsNullOrWhiteSpace($serviceName)) {
-            $service = Get-Service -Name $serviceName -ErrorAction SilentlyContinue
-            if ($service) { return $service }
+            $info = Get-CimInstance Win32_Service -Filter "Name='$serviceName'" -ErrorAction SilentlyContinue
+            if ($info -and [string]$info.PathName -match $escapedRoot) {
+                return Get-Service -Name $serviceName -ErrorAction SilentlyContinue
+            }
         }
     }
-    return Get-Service -ErrorAction SilentlyContinue |
-        Where-Object { $_.Name -like 'actions.runner.*' -and ($_.Name -like "*$ExpectedRunnerName*" -or $_.DisplayName -like "*$ExpectedRunnerName*") } |
+    $info = Get-CimInstance Win32_Service -ErrorAction SilentlyContinue |
+        Where-Object {
+            $_.Name -like 'actions.runner.*' -and
+            [string]$_.PathName -match $escapedRoot -and
+            ($_.Name -like "*$ExpectedRunnerName*" -or $_.DisplayName -like "*$ExpectedRunnerName*")
+        } |
         Select-Object -First 1
+    if ($info) { return Get-Service -Name $info.Name -ErrorAction SilentlyContinue }
+    return $null
 }
 
 function Configure-ServiceRecovery([System.ServiceProcess.ServiceController]$Service) {
@@ -165,38 +249,63 @@ function Configure-ServiceRecovery([System.ServiceProcess.ServiceController]$Ser
 }
 
 Assert-Admin
-$basePython = Get-BasePython311
 if (-not (Get-Command git -ErrorAction SilentlyContinue)) { throw 'Git for Windows est obligatoire.' }
-$repoRoot = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
-$branch = (& git -C $repoRoot branch --show-current).Trim()
-if ($LASTEXITCODE -ne 0 -or $branch -ne 'main') { throw "Le dépôt local doit être sur main. Branche actuelle: $branch" }
-$dirty = @(& git -C $repoRoot status --porcelain)
-if ($LASTEXITCODE -ne 0 -or $dirty.Count -ne 0) { throw 'Le dépôt local doit être propre avant installation du runner final.' }
-$best = Get-BestFixedDrive
-if ([string]::IsNullOrWhiteSpace($LabRoot)) { $LabRoot = Join-Path ([string]$best.DeviceID + '\') 'ALINA_RESEARCH_HOME' }
-if ([string]::IsNullOrWhiteSpace($RunnerRoot)) { $RunnerRoot = Join-Path ([string]$best.DeviceID + '\') 'ALINA_RUNNER_HYPERSMART_FINAL_V1' }
+$repoRoot = if ([string]::IsNullOrWhiteSpace($ProjectRoot)) {
+    (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
+} else {
+    (Resolve-Path -LiteralPath $ProjectRoot).Path
+}
+$basePython = Get-BasePython311 -RepositoryRoot $repoRoot
+$projectSha = Get-ExactMainSha -RepositoryRoot $repoRoot
+if ([string]::IsNullOrWhiteSpace($LabRoot)) {
+    $existingLab = [Environment]::GetEnvironmentVariable('ALINA_RESEARCH_HOME', 'Machine')
+    $LabRoot = if ([string]::IsNullOrWhiteSpace($existingLab)) {
+        'C:\HyperSmart-Runner-Data'
+    } else { $existingLab }
+}
 if ([string]::IsNullOrWhiteSpace($RunnerName)) { $RunnerName = 'HyperSmart-FinalV1-' + $env:COMPUTERNAME }
 $LabRoot = [System.IO.Path]::GetFullPath($LabRoot)
 $RunnerRoot = [System.IO.Path]::GetFullPath($RunnerRoot)
+$repoPrefix = $repoRoot.TrimEnd('\') + '\'
+if ($RunnerRoot.StartsWith($repoPrefix, [StringComparison]::OrdinalIgnoreCase)) {
+    throw 'RUNNER_WORKSPACE_REFUSED: le runner doit rester hors du dépôt de développement.'
+}
+if ($LabRoot.StartsWith($repoPrefix, [StringComparison]::OrdinalIgnoreCase)) {
+    throw 'RUNNER_DATA_ROOT_REFUSED: ALINA_RESEARCH_HOME doit rester hors du dépôt de développement.'
+}
+$labDriveId = [System.IO.Path]::GetPathRoot($LabRoot).TrimEnd('\')
+$labDrive = Get-CimInstance Win32_LogicalDisk -Filter "DeviceID='$labDriveId'" -ErrorAction Stop
+if (-not $labDrive -or [double]$labDrive.FreeSpace / 1GB -lt 25) {
+    throw "Moins de 25 Gio libres sur le disque du laboratoire: $labDriveId"
+}
 
 Write-Step 'Préflight runner final isolé des anciennes files'
 Write-Host "Repository           : $Repository"
 Write-Host "RunnerName           : $RunnerName"
 Write-Host "RunnerRoot           : $RunnerRoot"
+Write-Host "Project SHA exact    : $projectSha"
 Write-Host "ALINA_RESEARCH_HOME  : $LabRoot"
 Write-Host "Label final          : $FinalLabel"
 Write-Host 'Ancien label hypersmart: volontairement ABSENT' -ForegroundColor Green
 Write-Host 'Trading réel         : BLOQUÉ' -ForegroundColor Green
-Write-Host ("Disque choisi        : {0} | libre {1:N2} Gio" -f $best.DeviceID, ([double]$best.FreeSpace / 1GB))
-if ([double]$best.FreeSpace / 1GB -lt 25) { throw 'Moins de 25 Gio libres sur le disque choisi.' }
+Write-Host ("Disque laboratoire   : {0} | libre {1:N2} Gio" -f $labDrive.DeviceID, ([double]$labDrive.FreeSpace / 1GB))
 
 Initialize-Lab -Root $LabRoot -RepositoryRoot $repoRoot
 $runnerPython = Initialize-RunnerPython -Root $LabRoot -BasePython $basePython -RepositoryRoot $repoRoot
+Set-PaperOnlyMachineGuards
 $configured = Test-Path (Join-Path $RunnerRoot '.runner') -PathType Leaf
+if (-not (Test-Path (Join-Path $RunnerRoot 'config.cmd') -PathType Leaf)) {
+    Download-LatestRunner -TargetRoot $RunnerRoot
+}
+Write-PreparationManifest -Root $RunnerRoot -RepositoryRoot $repoRoot -ProjectSha $projectSha -ResearchRoot $LabRoot -Label $FinalLabel -Name $RunnerName -Configured $configured
+if ($PrepareOnly) {
+    Write-Host ''
+    Write-Host 'PRÉPARATION RUNNER : OK — aucun enregistrement GitHub et aucun service démarré.' -ForegroundColor Green
+    Write-Host "Runner prêt à enregistrer : $RunnerRoot" -ForegroundColor Cyan
+    Write-Host "SHA main verrouillé       : $projectSha" -ForegroundColor Cyan
+    exit 0
+}
 if (-not $configured) {
-    if (-not (Test-Path (Join-Path $RunnerRoot 'config.cmd') -PathType Leaf)) {
-        Download-LatestRunner -TargetRoot $RunnerRoot
-    }
     Write-Step 'Enregistrement du runner final avec label isolé'
     $temporaryRunnerToken = Get-RegistrationToken -Repo $Repository -ExplicitToken $RunnerToken
     try {
@@ -212,6 +321,8 @@ if (-not $configured) {
     Write-Host 'Runner final déjà configuré dans son dossier dédié.' -ForegroundColor Green
 }
 
+Write-PreparationManifest -Root $RunnerRoot -RepositoryRoot $repoRoot -ProjectSha $projectSha -ResearchRoot $LabRoot -Label $FinalLabel -Name $RunnerName -Configured $true
+
 $service = Get-ConfiguredService -Root $RunnerRoot -ExpectedRunnerName $RunnerName
 if (-not $service) { throw 'Service du runner FINAL_V1 introuvable.' }
 Configure-ServiceRecovery -Service $service
@@ -220,6 +331,16 @@ if ($service.Status -ne 'Running') {
     $service = Get-Service -Name $service.Name
 }
 if ($service.Status -ne 'Running') { throw "Service final non démarré: $($service.Status)" }
+
+$verifier = Join-Path $repoRoot 'tools\VERIFIER_ALINA_RUNNER_WINDOWS.ps1'
+if (-not (Test-Path -LiteralPath $verifier -PathType Leaf)) {
+    throw "VERIFICATEUR_FINAL_ABSENT: $verifier"
+}
+Write-Step 'Diagnostic final fail-closed du runner enregistré'
+& $verifier -LabRoot $LabRoot -RunnerRoot $RunnerRoot -ProjectRoot $repoRoot -RequiredLabel $FinalLabel
+if ($LASTEXITCODE -ne 0) {
+    throw "RUNNER_FINAL_NON_PRET: le diagnostic final a échoué avec le code $LASTEXITCODE"
+}
 
 Write-Host ''
 Write-Host 'ALINA SELF-HOSTED FINAL V1 : PRÊT' -ForegroundColor Green

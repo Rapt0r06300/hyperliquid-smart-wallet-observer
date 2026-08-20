@@ -7,6 +7,8 @@ ROOT = Path(__file__).resolve().parents[1]
 WORKFLOW = ROOT / ".github" / "workflows" / "alina-self-hosted-final-v1.yml"
 INSTALLER = ROOT / "tools" / "INSTALLER_ALINA_RUNNER_FINAL_V1.ps1"
 INSTALLER_LAUNCHER = ROOT / "INSTALLER_ALINA_RUNNER_FINAL_V1.cmd"
+CONTROLLER = ROOT / "tools" / "CONTROLER_ALINA_RUNNER_WINDOWS.ps1"
+VERIFIER = ROOT / "tools" / "VERIFIER_ALINA_RUNNER_WINDOWS.ps1"
 CONTROL_README = ROOT / "control" / "alina_final_jobs" / "README.md"
 
 
@@ -25,6 +27,19 @@ def test_final_workflow_isolated_from_legacy_queue() -> None:
     assert "FINAL_CONTROL_ONLY_COMMIT_REQUIRED" in text
     assert "pull_request:" not in text
     assert "cancel-in-progress: false" in text
+
+
+def test_final_workflow_public_gate_precedes_checkout_and_refuses_forks() -> None:
+    text = _text(WORKFLOW)
+    gate = text.index("Gate GitHub public avant checkout")
+    checkout = text.index("Checkout exact du SHA sans credentials persistants")
+    assert gate < checkout
+    assert "github.event_name == 'push'" in text
+    assert "github.actor == 'Rapt0r06300'" in text
+    assert "github.event.repository.fork == false" in text
+    assert "SELF_HOSTED_PUBLIC_FORK_REFUSED" in text
+    assert "SELF_HOSTED_PUBLIC_SENDER_REFUSED" in text
+    assert "SELF_HOSTED_PUBLIC_SHA_REFUSED" in text
 
 
 def test_final_workflow_requires_exact_technical_green_before_compute() -> None:
@@ -88,13 +103,64 @@ def test_final_workflow_upload_is_allowlisted_and_actions_are_pinned() -> None:
 def test_final_installer_uses_unique_root_name_and_label() -> None:
     text = _text(INSTALLER)
     assert "GO_SELF_HOSTED" in text
-    assert "ALINA_RUNNER_HYPERSMART_FINAL_V1" in text
+    assert "[string]$RunnerRoot = 'C:\\actions-runner'" in text
+    assert "'C:\\HyperSmart-Runner-Data'" in text
+    assert "runner_workspace = (Join-Path $Root '_work')" in text
+    assert "RUNNER_WORKSPACE_REFUSED" in text
+    assert "RUNNER_DATA_ROOT_REFUSED" in text
     assert "HyperSmart-FinalV1-" in text
     assert "$FinalLabel = 'hypersmart-final-v1'" in text
     assert '--labels "$FinalLabel,alina"' in text
     assert "--runasservice" in text
     assert "--labels 'hypersmart,alina'" not in text
     assert "ancien label hypersmart" in text.casefold()
+    assert "VERIFIER_ALINA_RUNNER_WINDOWS.ps1" in text
+    assert "RUNNER_FINAL_NON_PRET" in text
+
+
+def test_final_installer_verrouille_sha_main_et_mode_paper() -> None:
+    text = _text(INSTALLER)
+    assert "Get-ExactMainSha" in text
+    assert "fetch origin main --quiet" in text
+    assert "Le dépôt local doit être propre" in text
+    assert "HEAD=$head origin/main=$remote" in text
+    assert "HYPERSMART_RUNNER_PREPARED.json" in text
+    assert "[switch]$PrepareOnly" in text
+    assert "configured = $Configured" in text
+    for marker in (
+        "HL_ENABLE_MAINNET_EXECUTION = '0'",
+        "HL_ENABLE_TESTNET_EXECUTION = '0'",
+        "REAL_MAINNET_TRADING = 'false'",
+        "TESTNET_EXECUTION_ENABLED = 'false'",
+        "HYPERSMART_ANALYSIS_LOCAL_ONLY = '1'",
+    ):
+        assert marker in text
+
+
+def test_controller_start_resume_are_fail_closed_and_emit_heartbeat() -> None:
+    text = _text(CONTROLLER)
+    assert "ValidateSet('Status', 'Start', 'Stop', 'Resume', 'Heartbeat', 'Diagnostic')" in text
+    assert "RUNNER_NOT_REGISTERED" in text
+    assert "RUNNER_WORKSPACE_REFUSED" in text
+    assert "PREPARED_SHA_STALE" in text
+    assert "PAPER_GUARD_REFUSED" in text
+    assert "RUNNER_HEARTBEAT.json" in text
+    assert "Start-Service" in text
+    assert "Stop-Service" in text
+    assert "real_execution = $false" in text
+
+
+def test_verifier_targets_only_the_expected_runner_and_github_labels() -> None:
+    text = _text(VERIFIER)
+    assert "[string]$RunnerRoot = 'C:\\actions-runner'" in text
+    assert "SHA exact de origin/main" in text
+    assert "Workspace Actions séparé" in text
+    assert "actions.runner.*" in text
+    assert "PathName -match $prefix" in text
+    assert "repos/Rapt0r06300/hyperliquid-smart-wallet-observer/actions/runners" in text
+    for label in ("self-hosted", "Windows", "X64", "$RequiredLabel"):
+        assert label in text
+    assert "DIAGNOSTIC FINAL : RUNNER PRÊT" in text
 
 
 def test_final_installer_keeps_token_ephemeral_and_runtime_persistent() -> None:

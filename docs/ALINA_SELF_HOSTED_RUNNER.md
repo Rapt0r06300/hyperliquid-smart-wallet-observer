@@ -10,6 +10,42 @@ Architecture :
 
 Les ~170–180 Gio de données, caches, workspaces, checkpoints et gros logs restent localement sur le PC.
 
+## Architecture canonique finale
+
+Le runner HyperSmart canonique utilise `C:\actions-runner`, son workspace jetable
+`C:\actions-runner\_work`, le stockage local `C:\HyperSmart-Runner-Data`, le label `hypersmart-final-v1` et le workflow
+`.github/workflows/alina-self-hosted-final-v1.yml`. Le dépôt de développement
+`C:\Users\flo\Desktop\Projet invest` est consulté pour contrôler le SHA et accéder aux
+données locales, mais il n'est jamais un workspace Actions et n'est jamais nettoyé,
+réinitialisé ou écrasé par le runner.
+
+Le déclenchement par ajout d'un JSON sous `control/alina_final_jobs/` sur `main` est
+conservé pour la boucle `ChatGPT -> GitHub -> runner PC -> GitHub -> ChatGPT`. Le contrat
+refuse les PR, forks, autres acteurs, autres branches, SHA obsolètes, modifications
+multiples et commandes shell libres. Les gros datasets restent exclusivement sur le PC.
+
+Installation finale depuis **Windows PowerShell administrateur**, après publication d'un
+`main` propre :
+
+```powershell
+$env:GO_SELF_HOSTED = 'TRUE'
+& 'C:\Users\flo\Desktop\Projet invest\tools\INSTALLER_ALINA_RUNNER_FINAL_V1.ps1' -RunnerRoot 'C:\actions-runner' -ProjectRoot 'C:\Users\flo\Desktop\Projet invest'
+```
+
+Contrôle ciblé du service final :
+
+```powershell
+& 'C:\Users\flo\Desktop\Projet invest\tools\CONTROLER_ALINA_RUNNER_WINDOWS.ps1' -Action Status
+& 'C:\Users\flo\Desktop\Projet invest\tools\CONTROLER_ALINA_RUNNER_WINDOWS.ps1' -Action Heartbeat
+& 'C:\Users\flo\Desktop\Projet invest\tools\CONTROLER_ALINA_RUNNER_WINDOWS.ps1' -Action Diagnostic
+& 'C:\Users\flo\Desktop\Projet invest\tools\CONTROLER_ALINA_RUNNER_WINDOWS.ps1' -Action Stop
+& 'C:\Users\flo\Desktop\Projet invest\tools\CONTROLER_ALINA_RUNNER_WINDOWS.ps1' -Action Resume
+```
+
+GitHub précise qu'un runner self-hosted sur dépôt public présente un risque intrinsèque.
+Les gates ci-dessus réduisent fortement la surface, mais la branche `main`, les droits
+d'écriture et toute modification de workflow doivent rester protégés et revus.
+
 ## Ce qui est versionné dans GitHub
 
 - `.github/workflows/alina-self-hosted.yml` : plan de contrôle GitHub Actions ;
@@ -25,7 +61,10 @@ Les ~170–180 Gio de données, caches, workspaces, checkpoints et gros logs res
 - `PREPARER_PC_ALINA.cmd` : mise à jour sûre de `main`, installation, vérification et ouverture du cockpit ;
 - `control/alina_jobs/` : file de commandes GitHub -> PC.
 
-## Installation recommandée : une seule procédure
+## Installation historique (legacy)
+
+La procédure ci-dessous documente le runner historique `hypersmart`. Pour une nouvelle
+installation, utiliser exclusivement l'architecture canonique finale décrite plus haut.
 
 Depuis le dossier local HyperSmart, double-cliquer sur :
 

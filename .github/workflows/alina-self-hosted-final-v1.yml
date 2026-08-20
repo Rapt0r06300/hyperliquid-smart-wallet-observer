@@ -17,6 +17,12 @@ concurrency:
 jobs:
   final-economic-run:
     name: HyperSmart final self-hosted v1
+    if: >-
+      github.repository == 'Rapt0r06300/hyperliquid-smart-wallet-observer' &&
+      github.event_name == 'push' &&
+      github.ref == 'refs/heads/main' &&
+      github.actor == 'Rapt0r06300' &&
+      github.event.repository.fork == false
     runs-on: [self-hosted, Windows, X64, hypersmart-final-v1]
     timeout-minutes: 1100
     env:
@@ -30,6 +36,32 @@ jobs:
       PYTHONUTF8: '1'
       PYTHONIOENCODING: 'utf-8'
     steps:
+      - name: Gate GitHub public avant checkout
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          if ($env:GITHUB_REPOSITORY -cne 'Rapt0r06300/hyperliquid-smart-wallet-observer') {
+            throw "SELF_HOSTED_PUBLIC_REPOSITORY_REFUSED: $env:GITHUB_REPOSITORY"
+          }
+          if ($env:GITHUB_EVENT_NAME -cne 'push') {
+            throw "SELF_HOSTED_PUBLIC_EVENT_REFUSED: $env:GITHUB_EVENT_NAME"
+          }
+          if ($env:GITHUB_REF -cne 'refs/heads/main') {
+            throw "SELF_HOSTED_PUBLIC_REF_REFUSED: $env:GITHUB_REF"
+          }
+          if ($env:GITHUB_ACTOR -cne 'Rapt0r06300') {
+            throw "SELF_HOSTED_PUBLIC_ACTOR_REFUSED: $env:GITHUB_ACTOR"
+          }
+          $event = Get-Content -LiteralPath $env:GITHUB_EVENT_PATH -Raw -Encoding UTF8 | ConvertFrom-Json
+          if ([string]$event.repository.full_name -cne 'Rapt0r06300/hyperliquid-smart-wallet-observer') {
+            throw 'SELF_HOSTED_PUBLIC_EVENT_REPOSITORY_REFUSED'
+          }
+          if ($event.repository.fork -eq $true) { throw 'SELF_HOSTED_PUBLIC_FORK_REFUSED' }
+          if ([string]$event.ref -cne 'refs/heads/main') { throw 'SELF_HOSTED_PUBLIC_EVENT_REF_REFUSED' }
+          if ([string]$event.sender.login -cne 'Rapt0r06300') { throw 'SELF_HOSTED_PUBLIC_SENDER_REFUSED' }
+          if ([string]$event.after -cne $env:GITHUB_SHA) { throw 'SELF_HOSTED_PUBLIC_SHA_REFUSED' }
+          Write-Host 'SELF_HOSTED_PUBLIC_GATE_OK' -ForegroundColor Green
+
       - name: Checkout exact du SHA sans credentials persistants
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
