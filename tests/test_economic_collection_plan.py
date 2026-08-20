@@ -67,7 +67,12 @@ def _raw_reports():
                 "all_positions_two_leg_closed": True,
             },
             "temporal_evidence": {
-                "oos": {"net_pnl_usd": -0.4, "sample_count": 4},
+                "oos": {
+                    "net_pnl_usd": -0.4,
+                    "sample_count": 4,
+                    "no_lookahead": True,
+                    "liquidatable_net": True,
+                },
                 "forward": {"net_pnl_usd": None, "sample_count": 0},
                 "placebos": {"beaten": False},
             },
@@ -198,11 +203,14 @@ def test_plan_kills_frozen_lead_lag_negative_oos_and_forward() -> None:
             "net_pnl_usd": -0.21,
             "sample_count": 9,
             "no_lookahead": True,
+            "liquidatable_net": True,
         },
         "forward": {
             "net_pnl_usd": -0.60,
             "sample_count": 15,
             "post_freeze": True,
+            "no_lookahead": True,
+            "liquidatable_net": True,
         },
         "placebos": {"beaten": True},
     }
@@ -228,6 +236,72 @@ def test_plan_kills_frozen_lead_lag_negative_oos_and_forward() -> None:
     assert lead["progress"]["forward_net_pnl_usd"] == -0.60
     assert "bbo-collector" not in plan["required_collectors"]
     assert "allmids-collector" not in plan["required_collectors"]
+
+
+def test_plan_kills_copy_vault_after_valid_negative_oos() -> None:
+    raw = _raw_reports()
+    raw["copy_vault"]["temporal_evidence"] = {
+        "oos": {
+            "net_pnl_usd": -1.85,
+            "sample_count": 14,
+            "no_lookahead": True,
+            "liquidatable_net": True,
+        },
+        "forward": {
+            "net_pnl_usd": 0.0,
+            "sample_count": 0,
+            "no_lookahead": True,
+            "post_freeze": False,
+            "liquidatable_net": False,
+        },
+        "placebos": {"beaten": True},
+    }
+    campaigns = [
+        _campaign("copy_vault", closed_positions=49, net_pnl_usd=-9.84),
+        _campaign("lead_lag"),
+        _campaign("cross_venue_dislocation_v2", closed_positions=20),
+    ]
+
+    plan = build_collection_plan(campaigns, raw, now_ms=123)
+    copy = next(row for row in plan["families"] if row["family"] == "copy_vault")
+
+    assert copy["evidence_state"] == "HYPOTHESIS_KILLED_OOS"
+    assert copy["collection_actionable"] is False
+    assert copy["future_data_required_only"] is False
+    assert copy["methodology_action"] == "KILL_CURRENT_FROZEN_HYPOTHESIS_OR_DECLARE_NEW_MECHANISM"
+    assert copy["progress"]["oos_sample_count"] == 14
+    assert copy["progress"]["oos_passes"] is False
+    assert copy["progress"]["post_freeze_trade_deficit_minimum"] == 1
+    assert "vault-collector" not in plan["required_collectors"]
+
+
+def test_plan_kills_lead_lag_after_negative_oos_without_waiting_for_forward() -> None:
+    raw = _raw_reports()
+    raw["lead_lag"]["executable_campaign"]["temporal_evidence"] = {
+        "oos": {
+            "net_pnl_usd": -0.18,
+            "sample_count": 5,
+            "no_lookahead": True,
+            "liquidatable_net": True,
+        },
+        "forward": None,
+        "placebos": {"beaten": False},
+    }
+    campaigns = [
+        _campaign("copy_vault"),
+        _campaign("lead_lag", closed_positions=27, net_pnl_usd=-1.20),
+        _campaign("cross_venue_dislocation_v2", closed_positions=20),
+    ]
+
+    plan = build_collection_plan(campaigns, raw, now_ms=123)
+    lead = next(row for row in plan["families"] if row["family"] == "lead_lag")
+
+    assert lead["evidence_state"] == "HYPOTHESIS_KILLED_OOS"
+    assert lead["collection_actionable"] is False
+    assert lead["future_data_required_only"] is False
+    assert lead["progress"]["oos_valid"] is True
+    assert lead["progress"]["forward_valid"] is False
+    assert "bbo-collector" not in plan["required_collectors"]
 
 
 def test_copy_plan_counts_entry_exit_and_missing_coin_book_rejections() -> None:

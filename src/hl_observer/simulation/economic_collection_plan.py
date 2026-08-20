@@ -22,7 +22,7 @@ from hl_observer.collection.copy_vault_checkpoint_tail import (
 from .economic_campaigns import REPORT_DIR
 from .economic_objective import CANONICAL_FAMILIES, canonical_family
 
-SCHEMA_VERSION = "hypersmart.economic_collection_resume.v1"
+SCHEMA_VERSION = "hypersmart.economic_collection_resume.v2"
 STATE_FILENAME = "collection_resume_state.json"
 REPORT_FILENAME = "HYPERSMART_ECONOMIC_COLLECTION_RESUME.md"
 COPY_BOOK_REJECTION_REASONS = (
@@ -65,6 +65,48 @@ def _freeze(campaign: Mapping[str, Any]) -> dict[str, Any] | None:
     }
 
 
+def _temporal_progress(temporal: Mapping[str, Any]) -> dict[str, Any]:
+    """Return the immutable pass/fail state of OOS and forward evidence.
+
+    A frozen protocol whose valid OOS segment is non-positive can never meet
+    the campaign contract requiring positive OOS.  More future observations
+    may support a *new* predeclared mechanism, but cannot repair that segment.
+    """
+
+    oos = _mapping(temporal.get("oos"))
+    forward = _mapping(temporal.get("forward"))
+    oos_count = _integer(oos.get("sample_count"))
+    forward_count = _integer(forward.get("sample_count"))
+    oos_net = _number(oos.get("net_pnl_usd"))
+    forward_net = _number(forward.get("net_pnl_usd"))
+    oos_valid = bool(
+        oos_count > 0
+        and oos_net is not None
+        and oos.get("no_lookahead") is True
+        and oos.get("liquidatable_net") is True
+    )
+    forward_valid = bool(
+        forward_count > 0
+        and forward_net is not None
+        and forward.get("no_lookahead") is True
+        and forward.get("post_freeze") is True
+        and forward.get("liquidatable_net") is True
+    )
+    return {
+        "oos_sample_count": oos_count,
+        "oos_net_pnl_usd": oos_net,
+        "oos_valid": oos_valid,
+        "oos_passes": bool(oos_valid and oos_net is not None and oos_net > 0.0),
+        "forward_sample_count": forward_count,
+        "forward_net_pnl_usd": forward_net,
+        "forward_valid": forward_valid,
+        "forward_passes": bool(
+            forward_valid and forward_net is not None and forward_net > 0.0
+        ),
+        "post_freeze_trade_deficit_minimum": max(0, 1 - forward_count),
+    }
+
+
 def _copy_state(
     campaign: Mapping[str, Any],
     raw: Mapping[str, Any],
@@ -74,6 +116,9 @@ def _copy_state(
     metaorders = _mapping(raw.get("metaorder_audit"))
     books = _mapping(raw.get("book_meta"))
     causal = _mapping(raw.get("causal_protocol_audit"))
+    temporal = _mapping(raw.get("temporal_evidence"))
+    temporal_progress = _temporal_progress(temporal)
+    placebos = _mapping(temporal.get("placebos"))
     calibration = _mapping(raw.get("calibration"))
     grid = calibration.get("grid") if isinstance(calibration.get("grid"), list) else []
     book_rejections = {
@@ -105,6 +150,12 @@ def _copy_state(
     closed = _integer(campaign.get("closed_positions"))
     schema_ready = raw.get("schema_version") == "hypersmart.copy_vault_executable_campaign.v1"
     objective_met = campaign.get("objective_status") == "ATTEINT"
+    measured_negative = bool(
+        closed > 0
+        and temporal_progress["oos_valid"]
+        and _number(temporal_progress["oos_net_pnl_usd"]) is not None
+        and float(temporal_progress["oos_net_pnl_usd"]) <= 0.0
+    )
     collector = _mapping(collector_state)
     active_collectors = _mapping(collector.get("actifs"))
     protocols = _mapping(collector.get("protocols"))
@@ -129,6 +180,7 @@ def _copy_state(
     data_only = bool(
         schema_ready
         and not objective_met
+        and not measured_negative
         and not parameters_frozen
         and not training_selection_eligible
         and (
@@ -140,6 +192,8 @@ def _copy_state(
     state = (
         "PROVEN"
         if objective_met
+        else "HYPOTHESIS_KILLED_OOS"
+        if measured_negative
         else "CAUSAL_COLLECTOR_PROTOCOL_RESTART_REQUIRED"
         if collector_protocol_ready is False
         else "FUTURE_CAUSAL_BOOK_AND_VAULT_DATA_REQUIRED"
@@ -149,10 +203,12 @@ def _copy_state(
     return {
         "family": "copy_vault",
         "evidence_state": state,
-        "collection_actionable": not objective_met,
+        "collection_actionable": bool(not objective_met and not measured_negative),
         "software_pipeline_ready": schema_ready,
         "running_collector_protocol_ready": collector_protocol_ready,
-        "future_data_required_only": data_only and collector_protocol_ready is not False,
+        "future_data_required_only": bool(
+            data_only and collector_protocol_ready is not False
+        ),
         "objective_status": campaign.get("objective_status"),
         "objective_reasons": list(campaign.get("objective_reasons") or []),
         "freeze": _freeze(campaign),
@@ -181,6 +237,8 @@ def _copy_state(
             "active_collector_protocol": active_protocol or None,
             "expected_companion_protocol": COPY_VAULT_COMPANION_PROTOCOL,
             "active_companion_protocol": companion_protocol or None,
+            **temporal_progress,
+            "placebo_beaten": placebos.get("beaten") is True,
         },
         "required_collectors": [
             "vault-collector",
@@ -201,19 +259,35 @@ def _copy_state(
         ],
         "exact_missing_evidence": (
             [
-                "restart userfills-live or attach copy-vault-checkpoints so a heartbeat proves the causal-checkpoint protocol",
-                "capture REFERENCE, ENTRY and EXIT books from live WS or causal /info l2Book checkpoints",
+                "the frozen Copy-Vault rule is negative in valid purged OOS",
+                "additional forward observations cannot repair its immutable OOS segment",
+                "a materially new causal mechanism must be declared and frozen before evaluation",
             ]
-            if collector_protocol_ready is False
-            else []
+            if measured_negative
+            else (
+                [
+                    "restart userfills-live or attach copy-vault-checkpoints so a heartbeat proves the causal-checkpoint protocol",
+                    "capture REFERENCE, ENTRY and EXIT books from live WS or causal /info l2Book checkpoints",
+                ]
+                if collector_protocol_ready is False
+                else []
+            )
+            + [
+                "at least 8 causal train metaorders with observed executable BBO",
+                "entry and exit books no more than 30 seconds from each copied event",
+                "purged positive OOS, positive post-freeze forward, placebo beaten",
+            ]
         )
-        + [
-            "at least 8 causal train metaorders with observed executable BBO",
-            "entry and exit books no more than 30 seconds from each copied event",
-            "purged positive OOS, positive post-freeze forward, placebo beaten",
-        ],
+        ,
+        "methodology_action": (
+            "KILL_CURRENT_FROZEN_HYPOTHESIS_OR_DECLARE_NEW_MECHANISM"
+            if measured_negative
+            else "CONTINUE_CAUSAL_TRAIN_OR_FORWARD_COLLECTION"
+        ),
         "rerun_condition": (
-            "new causal vault metaorders and matching observed books exist after the latest "
+            "do not promote by waiting: test only a new predeclared mechanism against the same ledger"
+            if measured_negative
+            else "new causal vault metaorders and matching observed books exist after the latest "
             "input boundary; rerun then freeze only if train selection is eligible"
         ),
     }
@@ -228,8 +302,7 @@ def _lead_state(
     executable = _mapping(raw.get("executable_campaign"))
     diagnostics = _mapping(executable.get("diagnostics"))
     temporal = _mapping(executable.get("temporal_evidence"))
-    oos = _mapping(temporal.get("oos"))
-    forward = _mapping(temporal.get("forward"))
+    temporal_progress = _temporal_progress(temporal)
     placebos = _mapping(temporal.get("placebos"))
     candidate = _integer(diagnostics.get("candidate_observations"))
     liquidatable = _integer(diagnostics.get("liquidatable_observations"))
@@ -243,16 +316,18 @@ def _lead_state(
         }
     )
     objective_met = campaign.get("objective_status") == "ATTEINT"
-    oos_net = _number(oos.get("net_pnl_usd"))
-    forward_net = _number(forward.get("net_pnl_usd"))
+    oos_net = _number(temporal_progress["oos_net_pnl_usd"])
+    forward_net = _number(temporal_progress["forward_net_pnl_usd"])
     measured_negative = bool(
         closed > 0
+        and temporal_progress["oos_valid"]
         and oos_net is not None
         and oos_net <= 0.0
-        and oos.get("no_lookahead") is True
+    )
+    forward_negative = bool(
+        temporal_progress["forward_valid"]
         and forward_net is not None
         and forward_net <= 0.0
-        and forward.get("post_freeze") is True
     )
     data_only = bool(
         schema_ready
@@ -265,7 +340,11 @@ def _lead_state(
     state = (
         "PROVEN"
         if objective_met
-        else "HYPOTHESIS_KILLED_OOS_FORWARD"
+        else (
+            "HYPOTHESIS_KILLED_OOS_FORWARD"
+            if forward_negative
+            else "HYPOTHESIS_KILLED_OOS"
+        )
         if measured_negative
         else "FUTURE_SIZED_BBO_REQUIRED"
         if data_only
@@ -288,10 +367,7 @@ def _lead_state(
             "closed_liquidatable_episodes": closed,
             "net_pnl_usd": _number(campaign.get("net_pnl_usd")),
             "profit_factor": _number(campaign.get("profit_factor")),
-            "oos_sample_count": _integer(oos.get("sample_count")),
-            "oos_net_pnl_usd": oos_net,
-            "forward_sample_count": _integer(forward.get("sample_count")),
-            "forward_net_pnl_usd": forward_net,
+            **temporal_progress,
             "placebo_beaten": placebos.get("beaten") is True,
         },
         "required_collectors": ["bbo-collector", "allmids-collector"],
@@ -301,7 +377,8 @@ def _lead_state(
         ],
         "exact_missing_evidence": (
             [
-                "the frozen lead-lag rule is negative in both purged OOS and post-freeze forward",
+                "the frozen lead-lag rule is negative in valid purged OOS",
+                "additional forward observations cannot repair its immutable OOS segment",
                 "a materially new causal mechanism must be declared and frozen before evaluation",
                 "positive purged OOS and true post-freeze forward remain mandatory",
             ]
@@ -336,8 +413,7 @@ def _cross_state(
     del collector_state
     verdict = _mapping(raw.get("verdict_realiste_16bps"))
     temporal = _mapping(raw.get("temporal_evidence"))
-    oos = _mapping(temporal.get("oos"))
-    forward = _mapping(temporal.get("forward"))
+    temporal_progress = _temporal_progress(temporal)
     placebo = _mapping(temporal.get("placebos"))
     closed = _integer(verdict.get("positions_fermees"))
     schema_ready = (
@@ -348,8 +424,9 @@ def _cross_state(
     objective_met = campaign.get("objective_status") == "ATTEINT"
     measured_negative = bool(
         closed > 0
-        and oos.get("net_pnl_usd") is not None
-        and float(oos.get("net_pnl_usd")) <= 0.0
+        and temporal_progress["oos_valid"]
+        and _number(temporal_progress["oos_net_pnl_usd"]) is not None
+        and float(temporal_progress["oos_net_pnl_usd"]) <= 0.0
     )
     state = (
         "PROVEN"
@@ -376,9 +453,7 @@ def _cross_state(
             "closed_atomic_two_leg_positions": closed,
             "net_pnl_usd": verdict.get("net_total_usd"),
             "profit_factor": verdict.get("profit_factor", verdict.get("pf")),
-            "oos_sample_count": _integer(oos.get("sample_count")),
-            "oos_net_pnl_usd": oos.get("net_pnl_usd"),
-            "forward_sample_count": _integer(forward.get("sample_count")),
+            **temporal_progress,
             "placebo_beaten": placebo.get("beaten") is True,
         },
         "required_collectors": ["carnet-collector", "venues-collector"],
