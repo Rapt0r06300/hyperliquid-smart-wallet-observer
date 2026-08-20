@@ -217,32 +217,55 @@ def run_campaigns(
         "lead_lag",
         required_parameters=lead_protocol,
     )
+    lead_calibration = None
     if lead_freeze is None:
-        initial_lead_data = dataset_provenance(root, selected_lead_sources)
-        lead_freeze = freeze_parameters(
+        calibration_tape = lead_lag_shadow.charger_tape(
             root,
-            "lead_lag",
-            {
-                **lead_protocol,
-                "history_sources_at_freeze": len(selected_lead_sources),
-                "dataset_workspace_all_sources": dataset_mode,
-            },
-            initial_lead_data,
+            sources=selected_lead_sources,
         )
-    lead_sources = merge_sources_with_frozen_provenance(
-        root,
-        selected_lead_sources,
-        lead_freeze,
+        lead_calibration = lead_lag_shadow.calibrate_freeze_readiness(
+            calibration_tape,
+            horizon_ms=lead_lag_shadow.CAMPAIGN_HORIZON_MS,
+            frais_slippage_bps=lead_lag_shadow.FRAIS_SLIPPAGE_BPS,
+            seuil_choc_bps=lead_lag_shadow.SEUIL_CHOC_BPS,
+            notional_usd=lead_lag_shadow.CAMPAIGN_NOTIONAL_USD,
+        )
+        if lead_calibration.get("selection_eligible") is True:
+            initial_lead_data = dataset_provenance(root, selected_lead_sources)
+            lead_freeze = freeze_parameters(
+                root,
+                "lead_lag",
+                {
+                    **lead_protocol,
+                    "history_sources_at_freeze": len(selected_lead_sources),
+                    "dataset_workspace_all_sources": dataset_mode,
+                    "structural_calibration": lead_calibration,
+                },
+                initial_lead_data,
+            )
+    lead_sources = (
+        merge_sources_with_frozen_provenance(root, selected_lead_sources, lead_freeze)
+        if lead_freeze is not None
+        else list(selected_lead_sources)
     )
     lead_data = dataset_provenance(root, lead_sources)
+    provisional_lead_cutoff_ms = (
+        int((lead_calibration or {}).get("provisional_frozen_at_ms") or 0) or None
+    )
     lead_raw = lead_lag_shadow.backtest(
         root,
         sources=lead_sources,
-        economic_frozen_at_ms=int(lead_freeze["frozen_at_ms"]),
+        economic_frozen_at_ms=(
+            int(lead_freeze["frozen_at_ms"])
+            if lead_freeze is not None
+            else provisional_lead_cutoff_ms
+        ),
         economic_horizon_ms=lead_lag_shadow.CAMPAIGN_HORIZON_MS,
         economic_notional_usd=lead_lag_shadow.CAMPAIGN_NOTIONAL_USD,
     )
     if isinstance(lead_raw, dict):
+        lead_raw["calibration"] = lead_calibration
+        lead_raw["provisional_without_physical_freeze"] = lead_freeze is None
         lead_raw["dataset_workspace"] = dataset_mode
         lead_raw["dataset_manifest_source_count"] = len(selected_lead_sources)
         lead_raw["dataset_source_manifest"] = (

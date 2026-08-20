@@ -19,6 +19,7 @@ from hl_observer.backtesting.lead_lag_shadow import (
     CONFIG_GELE,
     GLOBAL_TRIAL_LEDGER,
     backtest,
+    calibrate_freeze_readiness,
     charger_tape,
     detecter_chocs,
     distribution_intervalles,
@@ -184,6 +185,30 @@ def test_episode_refuse_une_sortie_observee_trop_tard():
     assert row["liquidatable_net"] is False
 
 
+def test_episode_borne_la_fraicheur_par_l_horizon_economique():
+    hl = [
+        (0, 100.0, 99.99, 100.01, 10.0, 10.0),
+        (250_000_000, 100.1, 100.09, 100.11, 10.0, 10.0),
+        (700_000_000, 100.2, 100.19, 100.21, 10.0, 10.0),
+    ]
+    row = episodes_par_horizon(
+        hl,
+        [(200_000_000, 1.0)],
+        frais_slippage_bps=9.0,
+        horizons_ms=[100.0],
+        max_reference_lag_ms=30_000.0,
+        max_exit_lag_ms=30_000.0,
+    )[100.0][0]
+
+    assert row["configured_max_reference_lag_ms"] == 30_000.0
+    assert row["configured_max_exit_lag_ms"] == 30_000.0
+    assert row["max_reference_lag_ms"] == 100.0
+    assert row["max_exit_lag_ms"] == 100.0
+    assert row["reference_status"] == "STALE_PRE_SIGNAL_QUOTE"
+    assert row["exit_status"] == "STALE_EXIT_QUOTE"
+    assert row["liquidatable_net"] is False
+
+
 def test_executable_campaign_separe_oos_et_vrai_forward_post_freeze():
     rows = _rows(30)
     tape = {"ETH": {"HL": [], "BIN": [], "TRADE": []}}
@@ -242,6 +267,52 @@ def _rows(n_chocs):
                          "bid_sz": 10.0, "ask_sz": 10.0})
         px = px_haut                                                  # CONTINU : le bloc suivant repart d'ici
     return rows
+
+
+def _tape_from_rows(rows):
+    tape = {"ETH": {"HL": [], "BIN": [], "TRADE": []}}
+    for row in rows:
+        timestamp = int(row["recu_ns"])
+        if row["venue"] == "HL":
+            tape["ETH"]["HL"].append(
+                (
+                    timestamp,
+                    row["mid"],
+                    row["bid"],
+                    row["ask"],
+                    row["bid_sz"],
+                    row["ask_sz"],
+                )
+            )
+        else:
+            tape["ETH"]["TRADE"].append(
+                (timestamp, row["px"], 1.0 if row["side"] == "BUY" else -1.0)
+            )
+    return tape
+
+
+def test_freeze_readiness_refuse_un_historique_vide_sans_creer_de_preuve():
+    readiness = calibrate_freeze_readiness({})
+
+    assert readiness["selection_eligible"] is False
+    assert readiness["status"] == "INSUFFICIENT_HISTORY_NO_OBSERVATION"
+    assert readiness["provisional_frozen_at_ms"] is None
+    assert readiness["selection_basis"] == "STRUCTURE_ONLY_NO_PNL"
+
+
+def test_freeze_readiness_ne_selectionne_que_sur_la_structure_des_segments():
+    readiness = calibrate_freeze_readiness(
+        _tape_from_rows(_rows(40)),
+        horizon_ms=100.0,
+        frais_slippage_bps=9.0,
+        min_liquidatable_observations=30,
+    )
+
+    assert readiness["selection_eligible"] is True
+    assert readiness["status"] == "ELIGIBLE_TO_FREEZE"
+    assert readiness["liquidatable_observations"] >= 30
+    assert all(count > 0 for count in readiness["segment_counts"].values())
+    assert readiness["pnl_fields_read_for_selection"] == []
 
 
 def test_backtest_promet_quand_HL_suit_et_est_STABLE_par_periode(tmp_path):
@@ -340,6 +411,8 @@ def test_walk_forward_protocol_signature_excludes_growing_dataset_shape():
     assert signature["execution_model"] == CAMPAIGN_EXECUTION_MODEL
     assert signature["economic_horizon_ms"] == CAMPAIGN_HORIZON_MS
     assert signature["minimum_shocks"] > 0
+    assert signature["freshness_cap_policy"].startswith("min(")
+    assert signature["freeze_readiness_policy"].startswith("static_params")
     assert "history_sources" not in signature
     assert "dataset_fingerprint" not in signature
 

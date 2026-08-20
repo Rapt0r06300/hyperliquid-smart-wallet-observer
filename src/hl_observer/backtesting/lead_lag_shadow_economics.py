@@ -75,11 +75,6 @@ def episodes_par_horizon(
             if reference_observed_before_signal
             else None
         )
-        reference_fresh = bool(
-            reference_observed_before_signal
-            and reference_age_ms is not None
-            and 0.0 <= reference_age_ms <= float(max_reference_lag_ms)
-        )
         if reference is None:
             # Keep a directional diagnostic row, but never certify it as
             # liquidatable economic evidence without a pre-signal mark.
@@ -91,6 +86,22 @@ def episodes_par_horizon(
             continue
         entry_capacity = _top_capacity_usd(entry, side=entry_side)
         for horizon in horizons_ms:
+            # A quote older than the tested alpha horizon cannot establish an
+            # executable lead-lag episode.  The configured limits remain hard
+            # upper bounds, while the horizon supplies the causal upper bound.
+            effective_reference_lag_ms = min(
+                max(0.0, float(max_reference_lag_ms)),
+                max(0.0, float(horizon)),
+            )
+            effective_exit_lag_ms = min(
+                max(0.0, float(max_exit_lag_ms)),
+                max(0.0, float(horizon)),
+            )
+            reference_fresh = bool(
+                reference_observed_before_signal
+                and reference_age_ms is not None
+                and 0.0 <= reference_age_ms <= effective_reference_lag_ms
+            )
             target_ns = t0 + int(float(horizon) * 1e6)
             if entry[0] > target_ns:
                 continue
@@ -99,7 +110,7 @@ def episodes_par_horizon(
                 continue
             exit_observation_lag_ms = (exit_quote[0] - target_ns) / 1e6
             exit_quote_fresh = bool(
-                0.0 <= exit_observation_lag_ms <= float(max_exit_lag_ms)
+                0.0 <= exit_observation_lag_ms <= effective_exit_lag_ms
             )
             exit_price = exit_quote[2] if direction > 0 else exit_quote[3]
             if exit_price <= 0:
@@ -171,7 +182,8 @@ def episodes_par_horizon(
                         if reference_age_ms is not None
                         else None
                     ),
-                    "max_reference_lag_ms": float(max_reference_lag_ms),
+                    "configured_max_reference_lag_ms": float(max_reference_lag_ms),
+                    "max_reference_lag_ms": effective_reference_lag_ms,
                     "reference_status": (
                         "OBSERVED_AT_OR_BEFORE_SIGNAL"
                         if reference_fresh
@@ -184,7 +196,8 @@ def episodes_par_horizon(
                         if exit_quote_fresh
                         else "STALE_EXIT_QUOTE"
                     ),
-                    "max_exit_lag_ms": float(max_exit_lag_ms),
+                    "configured_max_exit_lag_ms": float(max_exit_lag_ms),
+                    "max_exit_lag_ms": effective_exit_lag_ms,
                     "entry_mid": entry_mid,
                     "exit_mid": exit_mid,
                     "quantity": quantity,
@@ -428,6 +441,13 @@ def executable_campaign_evidence(
             "notional_usd": float(notional_usd),
             "max_reference_lag_ms": float(max_reference_lag_ms),
             "max_exit_lag_ms": float(max_exit_lag_ms),
+            "effective_max_reference_lag_ms": min(
+                float(max_reference_lag_ms), float(horizon_ms)
+            ),
+            "effective_max_exit_lag_ms": min(
+                float(max_exit_lag_ms), float(horizon_ms)
+            ),
+            "freshness_cap_policy": "min(configured_lag_ms,economic_horizon_ms)",
         },
         "walk_forward_bounds": bounds,
         "summary": combined,
@@ -501,6 +521,82 @@ def executable_campaign_evidence(
         "trades": combined_rows,
         "paper_read_only": True,
         "real_execution": False,
+    }
+
+
+def calibrate_freeze_readiness(
+    tape: Mapping[str, Mapping[str, list]],
+    *,
+    horizon_ms: float = CAMPAIGN_HORIZON_MS,
+    frais_slippage_bps: float = FRAIS_SLIPPAGE_BPS,
+    seuil_choc_bps: float = SEUIL_CHOC_BPS,
+    notional_usd: float = CAMPAIGN_NOTIONAL_USD,
+    min_liquidatable_observations: int = MIN_CHOCS,
+    max_reference_lag_ms: float = CAMPAIGN_MAX_REFERENCE_LAG_MS,
+    max_exit_lag_ms: float = CAMPAIGN_MAX_EXIT_LAG_MS,
+) -> dict[str, Any]:
+    """Check structural walk-forward readiness without selecting on PnL.
+
+    A physical freeze must never be created against an empty or unsegmentable
+    tape.  This preflight deliberately inspects only timestamps, executable
+    sizing and segment counts.  It does not read segment PnL, hit rate or
+    profit factor and therefore cannot cherry-pick a favourable freeze.
+    """
+
+    observed_timestamps = [
+        int(row[0])
+        for streams in tape.values()
+        for name in ("HL", "TRADE")
+        for row in (streams.get(name) or [])
+        if isinstance(row, (list, tuple)) and row
+    ]
+    if not observed_timestamps:
+        return {
+            "status": "INSUFFICIENT_HISTORY_NO_OBSERVATION",
+            "selection_eligible": False,
+            "provisional_frozen_at_ms": None,
+            "segment_counts": {name: 0 for name in ("train", "validation", "oos")},
+            "liquidatable_observations": 0,
+            "minimum_liquidatable_observations": int(min_liquidatable_observations),
+            "selection_basis": "STRUCTURE_ONLY_NO_PNL",
+        }
+
+    provisional_frozen_at_ms = max(observed_timestamps) // 1_000_000 + 1
+    evidence = executable_campaign_evidence(
+        tape,
+        frozen_at_ms=provisional_frozen_at_ms,
+        horizon_ms=float(horizon_ms),
+        frais_slippage_bps=float(frais_slippage_bps),
+        seuil_choc_bps=float(seuil_choc_bps),
+        notional_usd=float(notional_usd),
+        max_reference_lag_ms=float(max_reference_lag_ms),
+        max_exit_lag_ms=float(max_exit_lag_ms),
+    )
+    summaries = evidence.get("segment_summaries") or {}
+    segment_counts = {
+        name: int((summaries.get(name) or {}).get("positions_fermees") or 0)
+        for name in ("train", "validation", "oos")
+    }
+    liquidatable = int(
+        (evidence.get("diagnostics") or {}).get("liquidatable_observations") or 0
+    )
+    eligible = bool(
+        liquidatable >= max(1, int(min_liquidatable_observations))
+        and all(segment_counts[name] > 0 for name in segment_counts)
+    )
+    return {
+        "status": "ELIGIBLE_TO_FREEZE" if eligible else "INSUFFICIENT_SEGMENTABLE_HISTORY",
+        "selection_eligible": eligible,
+        "provisional_frozen_at_ms": int(provisional_frozen_at_ms),
+        "segment_counts": segment_counts,
+        "liquidatable_observations": liquidatable,
+        "candidate_observations": int(
+            (evidence.get("diagnostics") or {}).get("candidate_observations") or 0
+        ),
+        "minimum_liquidatable_observations": int(min_liquidatable_observations),
+        "walk_forward_bounds": evidence.get("walk_forward_bounds"),
+        "selection_basis": "STRUCTURE_ONLY_NO_PNL",
+        "pnl_fields_read_for_selection": [],
     }
 
 def net_par_horizon(hl: list, chocs: list, *, frais_slippage_bps: float,

@@ -52,7 +52,7 @@ CAMPAIGN_HORIZON_MS = 1000.0
 CAMPAIGN_NOTIONAL_USD = 25.0
 CAMPAIGN_MAX_REFERENCE_LAG_MS = 30_000.0
 CAMPAIGN_MAX_EXIT_LAG_MS = 30_000.0
-CAMPAIGN_EXECUTION_MODEL = "causal_marketable_top_v3"
+CAMPAIGN_EXECUTION_MODEL = "causal_marketable_top_v4_horizon_bounded_freshness"
 
 
 def walk_forward_protocol_signature() -> dict[str, Any]:
@@ -66,6 +66,8 @@ def walk_forward_protocol_signature() -> dict[str, Any]:
         "economic_notional_usd": CAMPAIGN_NOTIONAL_USD,
         "max_reference_lag_ms": CAMPAIGN_MAX_REFERENCE_LAG_MS,
         "max_exit_lag_ms": CAMPAIGN_MAX_EXIT_LAG_MS,
+        "freshness_cap_policy": "min(configured_lag_ms,economic_horizon_ms)",
+        "freeze_readiness_policy": "static_params;structural_segments_only;no_pnl_selection",
         "execution_model": CAMPAIGN_EXECUTION_MODEL,
         "minimum_shocks": MIN_CHOCS,
         "timestamp_clock": "ts_wall_ms_or_recv_wall_ts_ms;recu_ns_fallback",
@@ -325,6 +327,7 @@ from hl_observer.backtesting.lead_lag_shadow_economics import (
     _placebo_direction,
     _temporal_bounds,
     backtest,
+    calibrate_freeze_readiness,
     episodes_par_horizon,
     executable_campaign_evidence,
     net_par_horizon,
@@ -660,6 +663,7 @@ __all__ = [
     "episodes_par_horizon",
     "summarize_executable_episodes",
     "executable_campaign_evidence",
+    "calibrate_freeze_readiness",
     "net_par_horizon",
     "backtest",
     "geler_config",

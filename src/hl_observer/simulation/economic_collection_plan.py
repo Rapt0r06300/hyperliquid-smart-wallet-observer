@@ -237,7 +237,10 @@ def _lead_state(
     closed = _integer(campaign.get("closed_positions"))
     schema_ready = (
         executable.get("schema_version") == "hypersmart.lead_lag_executable_campaign.v1"
-        and executable.get("execution_model") == "causal_marketable_top_v3"
+        and executable.get("execution_model") in {
+            "causal_marketable_top_v3",
+            "causal_marketable_top_v4_horizon_bounded_freshness",
+        }
     )
     objective_met = campaign.get("objective_status") == "ATTEINT"
     oos_net = _number(oos.get("net_pnl_usd"))
