@@ -13,7 +13,7 @@ net session >nul 2>&1
 if %errorlevel%==0 goto :ADMIN
 
 echo Demande des droits administrateur...
-powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -Command "$arg='-NoLogo -NoProfile -ExecutionPolicy Bypass -File ""%~dp0tools\INSTALLER_ALINA_RUNNER_FINAL_V1.ps1""'; $p=Start-Process -FilePath 'powershell.exe' -Verb RunAs -ArgumentList $arg -Wait -PassThru; exit $p.ExitCode"
+powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -Command "$ErrorActionPreference='Stop'; try { $arg='-NoLogo -NoProfile -ExecutionPolicy Bypass -File ""%~dp0tools\INSTALLER_ALINA_RUNNER_FINAL_V1.ps1""'; $p=Start-Process -FilePath 'powershell.exe' -Verb RunAs -ArgumentList $arg -Wait -PassThru; exit $p.ExitCode } catch { Write-Error $_; exit 1223 }"
 set RC=%ERRORLEVEL%
 goto :END
 

@@ -184,6 +184,8 @@ def test_final_installer_launcher_requires_explicit_go_and_waits_for_elevation()
     assert "-Verb RunAs" in text
     assert "-Wait -PassThru" in text
     assert "$p.ExitCode" in text
+    assert "$ErrorActionPreference='Stop'" in text
+    assert "exit 1223" in text
 
 
 def test_final_control_document_exists_and_forbids_legacy_jobs() -> None:
