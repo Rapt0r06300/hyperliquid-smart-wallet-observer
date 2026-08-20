@@ -165,21 +165,25 @@ def _settings(tmp_path: Path) -> Settings:
     )
 
 
-def _contract_app(settings: Settings, state: UiState) -> FastAPI:
-    """Mount the real routers explicitly so this contract is independent of app lifecycle globals."""
-    app = FastAPI()
-    app.include_router(ui_routes.create_router(settings, state, UiEventBus()))
-    app.include_router(
+def _contract_app(settings: Settings, state: UiState) -> tuple[FastAPI, list]:
+    """Mount real routers and retain their source routes across FastAPI router-tree versions."""
+    routers = [
+        ui_routes.create_router(settings, state, UiEventBus()),
         create_read_only_status_router(
             state,
             settings=settings,
             economic_writer=None,
             lock=threading.RLock(),
-        )
-    )
-    app.include_router(create_status_router(state, settings=settings))
-    app.include_router(dashboard_v2.create_dashboard_v2_router())
-    return app
+        ),
+        create_status_router(state, settings=settings),
+        dashboard_v2.create_dashboard_v2_router(),
+    ]
+    app = FastAPI()
+    source_routes = []
+    for router in routers:
+        source_routes.extend(router.routes)
+        app.include_router(router)
+    return app, source_routes
 
 
 def test_every_get_route_serializes_representative_persisted_state(tmp_path, monkeypatch) -> None:
@@ -189,10 +193,10 @@ def test_every_get_route_serializes_representative_persisted_state(tmp_path, mon
     seeded = _seed_every_storage_model(settings)
     assert seeded >= 60
 
-    app = _contract_app(settings, UiState())
+    app, source_routes = _contract_app(settings, UiState())
     client = TestClient(app, raise_server_exceptions=False)
     observed = []
-    for route in app.routes:
+    for route in source_routes:
         if "GET" not in set(getattr(route, "methods", []) or []):
             continue
         path = _path_with_safe_params(route.path)
@@ -237,9 +241,9 @@ def test_every_post_route_stays_offline_and_action_dispatch_is_safe(tmp_path, mo
 
     monkeypatch.setattr(ui_routes, "run_safe_action", fake_run)
 
-    app = _contract_app(_settings(tmp_path), UiState())
+    app, source_routes = _contract_app(_settings(tmp_path), UiState())
     client = TestClient(app, raise_server_exceptions=False)
-    post_routes = [route.path for route in app.routes if "POST" in set(getattr(route, "methods", []) or [])]
+    post_routes = [route.path for route in source_routes if "POST" in set(getattr(route, "methods", []) or [])]
     assert post_routes
 
     for path in post_routes:
