@@ -11,10 +11,29 @@ VRF = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(VRF)
 
 
-def test_registre_8_composants_12_variantes():
+def _ensure_real_plugins_registered():
+    """Recharge les plugins réels seulement si un test précédent a vidé le registre partagé."""
     from hl_observer.research_parallel import registre as REG
-    importlib.import_module("hl_observer.research_parallel.plugins.lab_data")
-    importlib.import_module("hl_observer.research_parallel.plugins.vague1")
+    lab_data = importlib.import_module("hl_observer.research_parallel.plugins.lab_data")
+    vague1 = importlib.import_module("hl_observer.research_parallel.plugins.vague1")
+    if REG.obtenir("DATA_CTX") is None:
+        lab_data = importlib.reload(lab_data)
+    expected = {
+        "REGIME_ROUTER",
+        "RESIDUAL_MOMENTUM",
+        "ABSORPTION_FRAGILITY",
+        "OI_CROWDING",
+        "FUNDING_CLOCK",
+        "OI_CAP_EVENT",
+        "HLP_PRESSURE",
+    }
+    if any(REG.obtenir(pid) is None for pid in expected):
+        importlib.reload(vague1)
+    return REG
+
+
+def test_registre_8_composants_12_variantes():
+    REG = _ensure_real_plugins_registered()
     comps = REG.lister()
     assert len(comps) == 8, "DATA_CTX + REGIME_ROUTER + 6 signaux"
     assert REG.total_variantes() == 12 and REG.total_variantes() <= REG.MAX_VARIANTES_TOTAL
