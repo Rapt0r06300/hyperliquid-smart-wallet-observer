@@ -56,6 +56,7 @@ def test_normalize_control_defaults_bounds_and_truncation() -> None:
     assert normalized["lead_history_sources"] == 8
     assert normalized["requested_by"] == "GitHub"
     assert normalized["note"] == ""
+    assert control.normalize_control(_raw(job_id=" space"))["job_id"] == "space"
 
     long_requested = "R" * 200
     long_note = "N" * 700
@@ -85,7 +86,7 @@ def test_normalize_control_defaults_bounds_and_truncation() -> None:
 def test_normalize_control_rejects_schema_job_and_cycle_bounds() -> None:
     with pytest.raises(ValueError, match="schema"):
         control.normalize_control({"schema": "bad", "job_id": "x"})
-    for bad in ("", " space", "*bad", "a" * 81):
+    for bad in ("", "*bad", "a" * 81):
         with pytest.raises(ValueError, match="job_id invalide"):
             control.normalize_control(_raw(job_id=bad))
     with pytest.raises(ValueError, match="max_cycle_seconds"):
