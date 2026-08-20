@@ -179,13 +179,14 @@ def test_normalize_stats_payload_all_windows_and_edges() -> None:
 
 
 def test_validation_all_source_methods_and_rejections() -> None:
+    uppercase_hex_wallet = "0x" + "A" * 40
     for method, expected in (
         ("network", LeaderboardAddressStatus.NETWORK_FULL_ADDRESS_OK),
         ("dom", LeaderboardAddressStatus.DOM_FULL_ADDRESS_OK),
         ("import", LeaderboardAddressStatus.IMPORTED_FULL_ADDRESS_OK),
         ("other", LeaderboardAddressStatus.FULL_ADDRESS_OK),
     ):
-        result = validate_leaderboard_wallet_address(WALLET.upper(), source_method=method)
+        result = validate_leaderboard_wallet_address(uppercase_hex_wallet, source_method=method)
         assert result.is_full_address is True
         assert result.normalized_value == WALLET
         assert result.validation_status == expected
