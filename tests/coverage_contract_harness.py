@@ -6,6 +6,7 @@ import enum
 import importlib
 import inspect
 import signal
+import socket
 import subprocess
 import types
 import typing
@@ -227,6 +228,12 @@ def run_typed_contracts(target_modules: tuple[str, ...], tmp_path: Path, monkeyp
     }.items():
         monkeypatch.setenv(name, value)
     monkeypatch.chdir(tmp_path)
+
+    def blocked_connect(*args, **kwargs):
+        del args, kwargs
+        raise AssertionError("network access is forbidden in coverage contracts")
+
+    monkeypatch.setattr(socket.socket, "connect", blocked_connect, raising=True)
     monkeypatch.setattr(requests, "get", lambda *args, **kwargs: Dummy(status_code=200), raising=True)
     monkeypatch.setattr(requests, "post", lambda *args, **kwargs: Dummy(status_code=200), raising=True)
     monkeypatch.setattr(requests, "request", lambda *args, **kwargs: Dummy(status_code=200), raising=True)
@@ -239,6 +246,7 @@ def run_typed_contracts(target_modules: tuple[str, ...], tmp_path: Path, monkeyp
         lambda *args, **kwargs: subprocess.CompletedProcess(args, 0, "", ""),
         raising=True,
     )
+    monkeypatch.setattr(subprocess, "Popen", lambda *args, **kwargs: Dummy(), raising=True)
     settings = Settings(database_url=f"sqlite:///{tmp_path / 'long-tail.sqlite3'}", logs_dir=str(tmp_path / "logs"))
 
     attempts = 0
