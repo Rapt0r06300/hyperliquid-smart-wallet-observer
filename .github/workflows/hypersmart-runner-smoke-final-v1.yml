@@ -43,7 +43,7 @@ jobs:
       PYTHONIOENCODING: 'utf-8'
     steps:
       - name: Gate public avant checkout
-        shell: powershell
+        shell: powershell -NoLogo -NoProfile -ExecutionPolicy Bypass -File {0}
         env:
           EXPECTED_SHA: ${{ inputs.expected_sha }}
           CONTROL_PATH: ${{ inputs.control_path }}
@@ -71,7 +71,7 @@ jobs:
 
       - name: Valider le contrat et produire la preuve locale
         id: proof
-        shell: powershell
+        shell: powershell -NoLogo -NoProfile -ExecutionPolicy Bypass -File {0}
         env:
           EXPECTED_SHA: ${{ inputs.expected_sha }}
           CONTROL_PATH: ${{ inputs.control_path }}
@@ -149,7 +149,7 @@ jobs:
           compression-level: 6
 
       - name: Conclure la liaison GitHub PC GitHub
-        shell: powershell
+        shell: powershell -NoLogo -NoProfile -ExecutionPolicy Bypass -File {0}
         run: |
           if ('${{ steps.upload.outcome }}' -ne 'success') { throw 'SMOKE_ARTIFACT_REFUSED' }
           Write-Host 'GITHUB_PC_GITHUB_SMOKE_OK' -ForegroundColor Green

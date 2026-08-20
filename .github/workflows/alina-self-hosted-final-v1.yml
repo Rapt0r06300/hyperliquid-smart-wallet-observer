@@ -37,7 +37,7 @@ jobs:
       PYTHONIOENCODING: 'utf-8'
     steps:
       - name: Gate GitHub public avant checkout
-        shell: powershell
+        shell: powershell -NoLogo -NoProfile -ExecutionPolicy Bypass -File {0}
         run: |
           $ErrorActionPreference = 'Stop'
           if ($env:GITHUB_REPOSITORY -cne 'Rapt0r06300/hyperliquid-smart-wallet-observer') {
@@ -72,7 +72,7 @@ jobs:
 
       - name: Refuser acteur ref SHA stale et ancienne file
         id: trigger_gate
-        shell: powershell
+        shell: powershell -NoLogo -NoProfile -ExecutionPolicy Bypass -File {0}
         env:
           GITHUB_TOKEN: ${{ github.token }}
         run: |
@@ -115,7 +115,7 @@ jobs:
           Write-Host "FINAL_CONTROL_ONLY_OK : $relative"
 
       - name: Attendre puis exiger les certifications techniques vertes du SHA exact
-        shell: powershell
+        shell: powershell -NoLogo -NoProfile -ExecutionPolicy Bypass -File {0}
         env:
           GITHUB_TOKEN: ${{ github.token }}
         run: |
@@ -157,7 +157,7 @@ jobs:
 
       - name: Préflight du PC final sans exécuter le projet
         id: preflight
-        shell: powershell
+        shell: powershell -NoLogo -NoProfile -ExecutionPolicy Bypass -File {0}
         env:
           ALINA_DATASET_READ_TOKEN: ${{ secrets.ALINA_DATASET_READ_TOKEN }}
         run: |
@@ -189,7 +189,7 @@ jobs:
 
       - name: Canoniser la commande finale
         id: build
-        shell: powershell
+        shell: powershell -NoLogo -NoProfile -ExecutionPolicy Bypass -File {0}
         env:
           CONTROL_PATH: ${{ steps.trigger_gate.outputs.control_path }}
         run: |
@@ -226,7 +226,7 @@ jobs:
       - name: Lancer le calcul final paper read-only
         id: research
         continue-on-error: true
-        shell: powershell
+        shell: powershell -NoLogo -NoProfile -ExecutionPolicy Bypass -File {0}
         env:
           HYPERSMART_DATASET_TOKEN: ${{ secrets.ALINA_DATASET_READ_TOKEN }}
         run: |
@@ -251,7 +251,7 @@ jobs:
         if: always() && steps.build.outputs.result_dir != ''
         id: compact_return
         continue-on-error: true
-        shell: powershell
+        shell: powershell -NoLogo -NoProfile -ExecutionPolicy Bypass -File {0}
         run: |
           $ErrorActionPreference = 'Stop'
           $python = '${{ steps.preflight.outputs.python_exe }}'
@@ -309,7 +309,7 @@ jobs:
 
       - name: Publier le verdict économique 3 sur 3
         if: always() && steps.build.outputs.mode == 'economic' && steps.build.outputs.suite == 'economic-full'
-        shell: powershell
+        shell: powershell -NoLogo -NoProfile -ExecutionPolicy Bypass -File {0}
         env:
           GITHUB_TOKEN: ${{ github.token }}
         run: |
@@ -338,7 +338,7 @@ jobs:
 
       - name: Écrire la synchronisation locale finale
         if: always() && steps.preflight.outputs.lab_root != ''
-        shell: powershell
+        shell: powershell -NoLogo -NoProfile -ExecutionPolicy Bypass -File {0}
         run: |
           $labRoot = '${{ steps.preflight.outputs.lab_root }}'
           $statusDir = Join-Path $labRoot 'status'
@@ -369,7 +369,7 @@ jobs:
 
       - name: Conclure sans masquer un rouge technique ou économique
         if: always()
-        shell: powershell
+        shell: powershell -NoLogo -NoProfile -ExecutionPolicy Bypass -File {0}
         run: |
           if ('${{ steps.research.outcome }}' -ne 'success') { throw 'FINAL_WORKER_FAILED' }
           if ('${{ steps.compact_return.outcome }}' -ne 'success') { throw 'FINAL_COMPACT_RETURN_FAILED' }

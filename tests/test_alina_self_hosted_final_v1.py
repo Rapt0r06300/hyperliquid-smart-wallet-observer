@@ -76,6 +76,9 @@ def test_final_workflow_is_paper_only_and_has_minimal_write_permission() -> None
         assert marker in text
     assert "persist-credentials: false" in text
     assert "git push" not in text
+    shell = "shell: powershell -NoLogo -NoProfile -ExecutionPolicy Bypass -File {0}"
+    assert text.count(shell) == 10
+    assert "shell: powershell\n" not in text
 
 
 def test_final_workflow_publishes_honest_three_of_three_status() -> None:

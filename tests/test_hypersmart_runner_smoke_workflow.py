@@ -62,3 +62,10 @@ def test_smoke_uses_a_valid_local_python_and_exact_checkout_import() -> None:
     assert "SMOKE_PYTHON_REFUSED" in text
     assert "SMOKE_PYTHON_VERSION_REFUSED" in text
     assert "SMOKE_EXACT_CHECKOUT_IMPORT_REFUSED" in text
+
+
+def test_smoke_bypasses_only_the_actions_temporary_script_policy() -> None:
+    text = _workflow()
+    shell = "shell: powershell -NoLogo -NoProfile -ExecutionPolicy Bypass -File {0}"
+    assert text.count(shell) == 3
+    assert "shell: powershell\n" not in text
