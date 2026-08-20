@@ -135,12 +135,12 @@ jobs:
       - name: Installer coverage et outils du dépôt
         run: |
           python -m pip install --upgrade pip
-          python -m pip install coverage==7.13.1
-      - name: Télécharger les huit artifacts coverage via API GitHub
+          python -m pip install coverage==7.15.2
+      - name: Télécharger et aplatir les huit artifacts coverage
         env:
           GITHUB_TOKEN: ${{ github.token }}
         run: |
-          mkdir -p coverage-data
+          mkdir -p coverage-data coverage-combine
           curl --fail-with-body --silent --show-error \
             -H "Accept: application/vnd.github+json" \
             -H "Authorization: Bearer ${GITHUB_TOKEN}" \
@@ -172,10 +172,16 @@ jobs:
               -o "/tmp/${ARTIFACT_NAME}.zip"
             unzip -oq "/tmp/${ARTIFACT_NAME}.zip" -d "coverage-data/${ARTIFACT_NAME}"
           done < /tmp/coverage-artifacts.tsv
-          test "$(find coverage-data -type f -name '.coverage.*' | wc -l)" -eq 8
+          mapfile -t COVERAGE_FILES < <(find coverage-data -type f -name '.coverage.*' | sort)
+          test "${#COVERAGE_FILES[@]}" -eq 8
+          for index in "${!COVERAGE_FILES[@]}"; do
+            cp "${COVERAGE_FILES[$index]}" "coverage-combine/.coverage.shard${index}"
+          done
+          test "$(find coverage-combine -maxdepth 1 -type f -name '.coverage.*' | wc -l)" -eq 8
+          ls -la coverage-combine
       - name: Combiner les shards et produire coverage.json
         run: |
-          python -m coverage combine coverage-data
+          python -m coverage combine coverage-combine
           python -m coverage json -o coverage.json
           test -s coverage.json
       - name: Rapport exact des gaps
