@@ -120,14 +120,14 @@ jobs:
           }
           if ([string]::IsNullOrWhiteSpace($python)) { throw 'SMOKE_PYTHON_REFUSED' }
           Write-Host "SMOKE_PYTHON_OK: $python"
-          $env:PYTHONPATH = "$env:GITHUB_WORKSPACE\src;$env:GITHUB_WORKSPACE\tools;$env:GITHUB_WORKSPACE"
+          $env:HYPERSMART_CHECKOUT_SRC = Join-Path $env:GITHUB_WORKSPACE 'src'
           $proofDir = Join-Path $env:RUNNER_TEMP 'hypersmart-runner-smoke'
           New-Item -ItemType Directory -Force -Path $proofDir | Out-Null
           $request = Join-Path $proofDir 'worker_request.json'
           $bundle = Join-Path $proofDir 'control_bundle.json'
-          & $python -m hl_observer.ops.self_hosted_control --control $env:CONTROL_PATH --project-sha $actual --worker-request $request --bundle-output $bundle
+          & $python -c "import os,runpy,sys; sys.path.insert(0, os.environ['HYPERSMART_CHECKOUT_SRC']); runpy.run_module('hl_observer.ops.self_hosted_control', run_name='__main__')" --control $env:CONTROL_PATH --project-sha $actual --worker-request $request --bundle-output $bundle
           if ($LASTEXITCODE -ne 0) { throw 'SMOKE_CONTROL_CONTRACT_REFUSED' }
-          $modulePath = (& $python -c "import pathlib, hl_observer; print(pathlib.Path(hl_observer.__file__).resolve())" | Select-Object -Last 1).Trim()
+          $modulePath = (& $python -c "import os,pathlib,sys; sys.path.insert(0, os.environ['HYPERSMART_CHECKOUT_SRC']); import hl_observer; print(pathlib.Path(hl_observer.__file__).resolve())" | Select-Object -Last 1).Trim()
           if (-not $modulePath.StartsWith((Join-Path $env:GITHUB_WORKSPACE 'src'), [StringComparison]::OrdinalIgnoreCase)) { throw 'SMOKE_EXACT_CHECKOUT_IMPORT_REFUSED' }
           $payload = [ordered]@{
             schema = 'hypersmart.runner_smoke_proof.v1'

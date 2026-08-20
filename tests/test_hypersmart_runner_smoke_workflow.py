@@ -65,6 +65,9 @@ def test_smoke_uses_a_valid_local_python_and_exact_checkout_import() -> None:
     assert "import sys, pydantic" in text
     assert "SMOKE_PYTHON_REFUSED" in text
     assert "SMOKE_PYTHON_OK" in text
+    assert "HYPERSMART_CHECKOUT_SRC" in text
+    assert "runpy.run_module('hl_observer.ops.self_hosted_control'" in text
+    assert "sys.path.insert(0, os.environ['HYPERSMART_CHECKOUT_SRC'])" in text
     assert "SMOKE_EXACT_CHECKOUT_IMPORT_REFUSED" in text
 
 
