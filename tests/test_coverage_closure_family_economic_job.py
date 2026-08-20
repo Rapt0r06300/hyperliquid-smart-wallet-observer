@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-from pathlib import Path
 
 import pytest
 
@@ -59,7 +58,7 @@ def _campaign_workspace(tmp_path, *, suite="copy-vault-full", campaign=None, cov
     workspace = tmp_path / "workspace"
     campaign_family = family.SUITE_CAMPAIGN_FAMILY[suite]
     campaign_path = workspace / "runtime" / "reports" / "economic_campaigns" / f"{campaign_family}.json"
-    campaign_path.parent.mkdir(parents=True)
+    campaign_path.parent.mkdir(parents=True, exist_ok=True)
     default_campaign = {
         "family": campaign_family,
         "paper_read_only": True,
@@ -71,7 +70,7 @@ def _campaign_workspace(tmp_path, *, suite="copy-vault-full", campaign=None, cov
     default_campaign.update(campaign or {})
     campaign_path.write_text(json.dumps(default_campaign), encoding="utf-8")
     coverage_path = workspace / "runtime" / "reports" / "datasets" / "SOURCE_CONSUMPTION_COVERAGE.json"
-    coverage_path.parent.mkdir(parents=True)
+    coverage_path.parent.mkdir(parents=True, exist_ok=True)
     coverage_family = family.SUITE_COVERAGE_FAMILY[suite]
     default_coverage = {"families": {coverage_family: {"status": "FULL", "discovered_files": 1}}}
     if coverage is not None:
@@ -116,7 +115,7 @@ def test_record_family_memory_fail_closed_branches(monkeypatch, tmp_path) -> Non
 
 
 def test_record_family_memory_success_records_canonical_proof(monkeypatch, tmp_path) -> None:
-    workspace, campaign_path = _campaign_workspace(tmp_path)
+    workspace, _ = _campaign_workspace(tmp_path)
     monkeypatch.setattr(family, "certify_campaign", lambda *args: {"certified": True, "eligible_net_pnl_usd": 4.25})
     calls = []
     monkeypatch.setattr(family, "record_certified_proof", lambda root, **kwargs: calls.append((root, kwargs)) or {"saved": True})
@@ -133,9 +132,13 @@ def test_record_family_memory_success_records_canonical_proof(monkeypatch, tmp_p
 
 
 def _wire_execute(monkeypatch, tmp_path, request, *, workspace=None, step_codes=(), prior_result=None):
-    project = tmp_path / "project"; project.mkdir(exist_ok=True)
-    lab = tmp_path / "lab"; result_dir = tmp_path / "result"
-    req_file = tmp_path / "request.json"; req_file.write_text(json.dumps(request), encoding="utf-8")
+    tmp_path.mkdir(parents=True, exist_ok=True)
+    project = tmp_path / "project"
+    project.mkdir(exist_ok=True)
+    lab = tmp_path / "lab"
+    result_dir = tmp_path / "result"
+    req_file = tmp_path / "request.json"
+    req_file.write_text(json.dumps(request), encoding="utf-8")
     monkeypatch.setattr(family.canonical_job, "_load_request", lambda path: dict(request))
     monkeypatch.setattr(family, "validate_family_request", lambda raw: dict(raw))
     monkeypatch.setattr(family.canonical_job, "request_digest", lambda req: "digest")
@@ -145,17 +148,20 @@ def _wire_execute(monkeypatch, tmp_path, request, *, workspace=None, step_codes=
     statuses = []
     monkeypatch.setattr(family, "write_status", lambda path, **kwargs: statuses.append(kwargs))
     if workspace is None:
-        workspace = tmp_path / "workspace"; workspace.mkdir(exist_ok=True)
+        workspace = tmp_path / "workspace"
+        workspace.mkdir(exist_ok=True)
     monkeypatch.setattr(family, "resolve_current_workspace", lambda root, suite: workspace)
     replay = []
     monkeypatch.setattr(family, "prepare_replay_workspace", lambda project_root, materialized_root: replay.append(materialized_root))
     codes = list(step_codes)
     steps = []
+
     def run_logged(name, cmd, **kwargs):
         code = codes.pop(0) if codes else 0
         row = {"name": name, "return_code": code, "cmd": cmd}
         steps.append(row)
         return row
+
     monkeypatch.setattr(family.canonical_job, "_run_logged", run_logged)
     monkeypatch.setattr(family.canonical_job, "_collect_small_reports", lambda *args: ["report.json"])
     written = []
