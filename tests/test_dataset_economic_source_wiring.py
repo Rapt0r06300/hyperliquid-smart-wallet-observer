@@ -17,6 +17,19 @@ def test_full_cold_lead_lag_utilise_toutes_les_sources_manifestees() -> None:
     assert "max_history_sources=max(0, int(lead_history_sources))" in text
 
 
+def test_lead_lag_v3_est_branche_sur_tape_l2_trades_et_latence_mesuree() -> None:
+    text = RUNNER.read_text(encoding="utf-8", errors="replace")
+    assert "replay_lead_lag_queue_maker" in text
+    assert "load_market_microstructure_history(root)" in text
+    assert "load_runtime_latency_evidence(root)" in text
+    assert 'lead_raw["maker_queue_candidates"]' in text
+    assert 'lead_raw["maker_queue_replay"]' in text
+    assert 'lead_raw["lead_lag_microstructure_history"]' in text
+    assert text.index('lead_raw["maker_queue_replay"]') < text.index(
+        'lead_raw["next_hypothesis_v3"]'
+    )
+
+
 def test_campagnes_dataset_restent_paper_et_sans_exchange() -> None:
     text = RUNNER.read_text(encoding="utf-8", errors="replace")
     assert "assert_execution_disabled()" in text

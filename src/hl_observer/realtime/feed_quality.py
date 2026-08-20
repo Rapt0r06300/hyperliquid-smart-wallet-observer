@@ -195,6 +195,7 @@ class FeedQualityGate:
         self._last_heartbeat_ts_ms: int | None = None
         self._last_sequence: int | None = None
         self._connection_id: str | None = None
+        self._last_recovery_frame_ts_ms: int | None = None
 
         self._latencies: deque[float] = deque(maxlen=self.config.sample_window)
         self._intervals: deque[float] = deque(maxlen=self.config.sample_window)
@@ -244,6 +245,7 @@ class FeedQualityGate:
         self._asks.clear()
         self._last_mid = None
         self._last_sequence = None
+        self._last_recovery_frame_ts_ms = None
         self._last_received_ts_ms = int(received_ts_ms)
         self._record_reason("RECONNECT_REQUIRES_RESYNCHRONIZATION")
 
@@ -252,6 +254,7 @@ class FeedQualityGate:
         self._unresolved_gap = True
         self._synchronized = False
         self._coherent_events = 0
+        self._last_recovery_frame_ts_ms = None
         self._record_reason(reason)
 
     def ingest_book_snapshot(
@@ -383,13 +386,13 @@ class FeedQualityGate:
             return self._reject(reasons, received_ts_ms)
 
         self.accepted_events += 1
-        self._coherent_events += 1
         if self.mode is FeedMode.EVENT_STREAM:
-            self._synchronized = (
-                not self._unresolved_gap
-                and self._coherent_events >= self.config.min_coherent_events
+            self._advance_event_stream_recovery(
+                reasons=reasons,
+                received_ts_ms=received_ts_ms,
             )
         else:
+            self._coherent_events += 1
             self._synchronized = (
                 self._snapshot_seen
                 and self._incremental_seen
@@ -422,6 +425,8 @@ class FeedQualityGate:
             frame_sequence=frame_sequence,
         )
         snapshots: list[FeedQualitySnapshot] = []
+        accepted_in_frame = False
+        frame_reasons: list[str] = []
         if is_snapshot:
             self.snapshots += 1
             self._snapshot_seen = True
@@ -444,17 +449,22 @@ class FeedQualityGate:
                 snapshots.append(self._reject(reasons, received_ts_ms))
                 continue
             self.accepted_events += 1
-            self._coherent_events += 1
+            accepted_in_frame = True
+            frame_reasons.extend(reasons)
+            if self.mode is not FeedMode.EVENT_STREAM:
+                self._coherent_events += 1
             self._last_reasons = tuple(dict.fromkeys(reasons))
             snapshots.append(self.snapshot(now_ms=received_ts_ms))
         if not is_snapshot and events:
             self.incrementals += 1
             self._incremental_seen = True
         if self.mode is FeedMode.EVENT_STREAM:
-            self._synchronized = (
-                not self._unresolved_gap
-                and self._coherent_events >= self.config.min_coherent_events
-            )
+            if accepted_in_frame:
+                self._advance_event_stream_recovery(
+                    reasons=frame_reasons,
+                    received_ts_ms=received_ts_ms,
+                )
+                self._last_reasons = tuple(dict.fromkeys(frame_reasons))
         else:
             self._synchronized = (
                 self._snapshot_seen
@@ -590,7 +600,15 @@ class FeedQualityGate:
                 reasons.append("NON_MONOTONIC_RECEIVE_TIMESTAMP")
             else:
                 self._intervals.append(interval)
-                if interval > self.config.max_gap_ms:
+                # Independent event streams (public trades, fills) are sparse by
+                # nature: silence for one instrument is not proof that the
+                # transport dropped data.  Their real transport gaps are marked
+                # explicitly by the websocket supervisor/collector.  Snapshot
+                # and incremental state feeds still require cadence continuity.
+                if (
+                    interval > self.config.max_gap_ms
+                    and self.mode is not FeedMode.EVENT_STREAM
+                ):
                     self.gaps += 1
                     self._gap_durations.append(interval)
                     self._unresolved_gap = True
@@ -617,6 +635,44 @@ class FeedQualityGate:
         for reason in reasons:
             self._record_reason(reason)
         return reasons
+
+    def _advance_event_stream_recovery(
+        self,
+        *,
+        reasons: list[str],
+        received_ts_ms: int,
+    ) -> None:
+        """Recover an independent event stream after coherent future frames.
+
+        A trade stream has no baseline snapshot to request after a reconnect.
+        Each future trade is independently meaningful, so the safe recovery
+        contract is a bounded warm-up over distinct transport frames.  The
+        historical gap remains counted; only future consumption is re-enabled.
+        """
+
+        if any(reason in {"TEMPORAL_GAP", "SEQUENCE_GAP"} for reason in reasons):
+            self._coherent_events = 0
+            self._last_recovery_frame_ts_ms = None
+            self._synchronized = False
+            return
+
+        frame_ts = int(received_ts_ms)
+        if self._last_recovery_frame_ts_ms != frame_ts:
+            self._coherent_events += 1
+            self._last_recovery_frame_ts_ms = frame_ts
+
+        if (
+            self._unresolved_gap
+            and self._coherent_events >= self.config.min_coherent_events
+        ):
+            self._unresolved_gap = False
+            reasons.append("EVENT_STREAM_RECOVERED")
+            self._record_reason("EVENT_STREAM_RECOVERED")
+
+        self._synchronized = (
+            not self._unresolved_gap
+            and self._coherent_events >= self.config.min_coherent_events
+        )
 
     def _validate_book(
         self,

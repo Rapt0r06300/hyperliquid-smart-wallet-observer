@@ -7,6 +7,8 @@ from pathlib import Path
 from hl_observer.simulation.lead_lag_l2_history import (
     discover_l2_sources,
     load_l2_history,
+    load_market_microstructure_history,
+    public_trades_from_tick,
     snapshot_from_tick,
 )
 
@@ -51,6 +53,41 @@ def _write(path: Path, rows: list[dict]) -> None:
             handle.write(json.dumps(row) + "\n")
 
 
+def _trade_record(*, ts_ms: int = 1_786_552_000_000, trade_id: int = 7) -> dict:
+    message = {
+        "channel": "trades",
+        "data": [
+            {
+                "coin": "ETH",
+                "side": "A",
+                "px": "100",
+                "sz": "0.4",
+                "time": ts_ms - 2,
+                "tid": trade_id,
+            }
+        ],
+    }
+    return {
+        "channel": "trades",
+        "instrument": "ETH",
+        "received_ts_ms": ts_ms,
+        "written_ts_ms": ts_ms + 4,
+        "raw_sha256": f"trade-{trade_id}",
+        "raw_payload": json.dumps(message),
+        "parsed_summary": {
+            "quality_by_coin": {
+                "ETH": {
+                    "feed_quality_score": 93.0,
+                    "data_gate_ready": True,
+                    "quality_reasons": [],
+                }
+            }
+        },
+        "read_only": True,
+        "real_execution": False,
+    }
+
+
 def test_snapshot_recovers_real_prices_sizes_and_depth() -> None:
     snapshot = snapshot_from_tick(_record())
     assert snapshot is not None
@@ -91,6 +128,32 @@ def test_non_l2_or_clockless_rows_fail_closed() -> None:
     assert snapshot_from_tick(write_before_receive) is None
 
 
+def test_public_trade_uses_durable_clock_and_real_aggressor_side() -> None:
+    trades = public_trades_from_tick(_trade_record())
+    assert len(trades) == 1
+    assert trades[0]["side"] == "A"
+    assert trades[0]["px"] == 100.0
+    assert trades[0]["sz"] == 0.4
+    assert trades[0]["ts_ms"] == 1_786_552_000_004
+    assert trades[0]["data_gate_ready"] is True
+
+
+def test_microstructure_loader_reads_books_and_trades_once(tmp_path: Path) -> None:
+    directory = tmp_path / "runtime" / "data" / "market_ticks"
+    _write(
+        directory / "hyperliquid_market_ticks.current.jsonl",
+        [_record(), _trade_record()],
+    )
+    books, trades, meta = load_market_microstructure_history(
+        tmp_path, time_budget_s=0
+    )
+    assert len(books["ETH"]) == 1
+    assert len(trades["ETH"]) == 1
+    assert meta["l2_rows"] == 1
+    assert meta["trade_rows"] == 1
+    assert meta["clock"] == "DURABLE_OBSERVABLE_MAX_RECEIVE_WRITE_MS"
+
+
 def test_loader_discovers_current_and_shards_deduplicates_and_sorts(tmp_path: Path) -> None:
     directory = tmp_path / "runtime" / "data" / "market_ticks"
     first = _record(ts_ms=1_786_552_000_002, raw_sha="second")
@@ -112,6 +175,20 @@ def test_loader_discovers_current_and_shards_deduplicates_and_sorts(tmp_path: Pa
     assert meta["duplicates_rejected"] == 1
     assert meta["l2_rows"] == 2
     assert meta["clock"] == "DURABLE_OBSERVABLE_MAX_RECEIVE_WRITE_MS"
+
+
+def test_discovery_includes_root_shards_and_never_evicts_current(tmp_path: Path) -> None:
+    directory = tmp_path / "runtime" / "data" / "market_ticks"
+    current = directory / "hyperliquid_market_ticks.current.jsonl"
+    root_old = directory / "hyperliquid_market_ticks.1-2.1.jsonl.gz"
+    root_new = directory / "hyperliquid_market_ticks.3-4.2.jsonl.gz"
+    legacy = directory / "shards" / "hyperliquid_market_ticks.0-1.0.jsonl.gz"
+    for path in (current, root_old, root_new, legacy):
+        _write(path, [_record(raw_sha=path.name)])
+
+    sources = discover_l2_sources(tmp_path, max_files=2)
+    assert [path.name for path in sources] == [current.name, root_new.name]
+    assert all(path.is_file() for path in sources)
 
 
 def test_loader_is_bounded(tmp_path: Path) -> None:

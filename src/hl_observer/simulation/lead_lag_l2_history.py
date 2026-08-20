@@ -29,18 +29,32 @@ DEFAULT_TIME_BUDGET_S = 30.0
 
 def discover_l2_sources(root: str | Path, *, max_files: int = DEFAULT_MAX_FILES) -> list[Path]:
     directory = Path(root) / TICK_DIR
-    candidates: list[Path] = []
     current = directory / f"{STREAM_NAME}.current.jsonl"
-    if current.is_file():
-        candidates.append(current)
+    current_resolved = current.resolve() if current.is_file() else None
+
+    # Older collectors wrote immutable shards below ``shards/``.  The current
+    # collector seals them directly beside the live file.  Economic replay must
+    # see both layouts or it silently ignores most of the recorded L2 history.
+    shard_candidates = list(directory.glob(f"{STREAM_NAME}.*.jsonl.gz"))
     shards = directory / "shards"
     if shards.is_dir():
-        candidates.extend(shards.glob(f"{STREAM_NAME}.*.jsonl.gz"))
-    unique = sorted({path.resolve() for path in candidates}, key=lambda path: path.as_posix())
-    if max_files > 0 and len(unique) > max_files:
-        # Timestamped immutable shards sort chronologically; keep the recent tail.
-        unique = unique[-max_files:]
-    return unique
+        shard_candidates.extend(shards.glob(f"{STREAM_NAME}.*.jsonl.gz"))
+    immutable = sorted(
+        {
+            path.resolve()
+            for path in shard_candidates
+            if current_resolved is None or path.resolve() != current_resolved
+        },
+        key=lambda path: (path.name, path.as_posix()),
+    )
+
+    if max_files > 0:
+        shard_budget = max(0, int(max_files) - (1 if current_resolved else 0))
+        immutable = immutable[-shard_budget:] if shard_budget else []
+    # Read the live tail first so a bounded ``max_lines`` run cannot spend its
+    # entire budget on sealed history.  The loader sorts observations by their
+    # durable clock afterwards.
+    return [*([current_resolved] if current_resolved else []), *immutable]
 
 
 def _lines(path: Path) -> Iterator[str]:
@@ -205,6 +219,161 @@ def snapshot_from_tick(record: Mapping[str, Any]) -> dict[str, Any] | None:
     }
 
 
+def public_trades_from_tick(record: Mapping[str, Any]) -> list[dict[str, Any]]:
+    """Extract causal public trades from one recorded read-only WS frame."""
+    if str(record.get("channel") or "") != "trades":
+        return []
+    if record.get("real_execution") not in {False, None}:
+        return []
+    local_clocks = _local_timestamps_ms(record)
+    if local_clocks is None:
+        return []
+    received_ts_ms, written_ts_ms, observable_at_ms = local_clocks
+    message = _raw_message(record)
+    if not message or str(message.get("channel") or "") != "trades":
+        return []
+    payload = message.get("data")
+    if not isinstance(payload, Sequence) or isinstance(payload, (str, bytes, bytearray)):
+        return []
+
+    result: list[dict[str, Any]] = []
+    for index, item in enumerate(payload):
+        if not isinstance(item, Mapping):
+            continue
+        coin = str(item.get("coin") or record.get("instrument") or "").strip().upper()
+        side = str(item.get("side") or "").strip().upper()
+        price = _positive(item.get("px"))
+        size = _positive(item.get("sz"))
+        if not coin or side not in {"A", "B"} or price is None or size is None:
+            continue
+        quality_score, gate_ready, quality_reasons = _quality_metadata(record, coin)
+        identity = str(item.get("hash") or item.get("tid") or "")
+        if not identity:
+            identity = f"{record.get('raw_sha256') or ''}:{index}"
+        result.append(
+            {
+                "coin": coin,
+                "ts_ms": observable_at_ms,
+                "received_ts_ms": received_ts_ms,
+                "written_ts_ms": written_ts_ms,
+                "observable_at_ms": observable_at_ms,
+                "exchange_ts_ms": (
+                    int(float(item.get("time"))) if _positive(item.get("time")) else None
+                ),
+                "side": side,
+                "px": price,
+                "sz": size,
+                "trade_id": identity,
+                "feed_quality_score": quality_score,
+                "data_gate_ready": gate_ready,
+                "quality_reasons": quality_reasons,
+                "source": "hyperliquid:recorded:trades",
+                "data_origin": "RECORDED_REAL",
+                "read_only": True,
+                "real_execution": False,
+            }
+        )
+    return result
+
+
+def load_market_microstructure_history(
+    root: str | Path,
+    *,
+    max_files: int = DEFAULT_MAX_FILES,
+    max_lines: int = DEFAULT_MAX_LINES,
+    time_budget_s: float = DEFAULT_TIME_BUDGET_S,
+) -> tuple[
+    dict[str, list[dict[str, Any]]],
+    dict[str, list[dict[str, Any]]],
+    dict[str, Any],
+]:
+    """Load L2 and public trades in one bounded pass over the real tick store."""
+    project_root = Path(root).resolve()
+    sources = discover_l2_sources(project_root, max_files=max_files)
+    books: dict[str, list[dict[str, Any]]] = defaultdict(list)
+    trades: dict[str, list[dict[str, Any]]] = defaultdict(list)
+    seen_books: set[str] = set()
+    seen_trades: set[str] = set()
+    started = time.monotonic()
+    lines_read = invalid = duplicate_books = duplicate_trades = 0
+    stopped_reason = "COMPLETED"
+
+    for source in sources:
+        for line in _lines(source):
+            lines_read += 1
+            if max_lines > 0 and lines_read > max_lines:
+                stopped_reason = "MAX_LINES_REACHED"
+                break
+            if time_budget_s > 0 and lines_read % 10_000 == 0:
+                if time.monotonic() - started >= time_budget_s:
+                    stopped_reason = "TIME_BUDGET_REACHED"
+                    break
+            if '"l2Book"' not in line and '"trades"' not in line:
+                continue
+            try:
+                record = json.loads(line)
+            except (TypeError, ValueError):
+                invalid += 1
+                continue
+            if not isinstance(record, Mapping):
+                invalid += 1
+                continue
+            if str(record.get("channel") or "") == "l2Book":
+                snapshot = snapshot_from_tick(record)
+                if snapshot is None:
+                    invalid += 1
+                    continue
+                identity = str(snapshot.get("raw_sha256") or "") or (
+                    f"{snapshot['coin']}|{snapshot['ts_ms']}|{snapshot['bid']}|{snapshot['ask']}"
+                )
+                if identity in seen_books:
+                    duplicate_books += 1
+                    continue
+                seen_books.add(identity)
+                books[str(snapshot["coin"])].append(snapshot)
+            elif str(record.get("channel") or "") == "trades":
+                parsed = public_trades_from_tick(record)
+                if not parsed:
+                    invalid += 1
+                    continue
+                for trade in parsed:
+                    identity = str(trade["trade_id"])
+                    if identity in seen_trades:
+                        duplicate_trades += 1
+                        continue
+                    seen_trades.add(identity)
+                    trades[str(trade["coin"])].append(trade)
+        if stopped_reason != "COMPLETED":
+            break
+
+    book_result = dict(books)
+    trade_result = dict(trades)
+    for rows in (*book_result.values(), *trade_result.values()):
+        rows.sort(key=lambda row: int(row["ts_ms"]))
+    return book_result, trade_result, {
+        "schema_version": "hypersmart.lead_lag_microstructure_history.v1",
+        "sources": [
+            source.relative_to(project_root).as_posix()
+            if source.is_relative_to(project_root)
+            else str(source)
+            for source in sources
+        ],
+        "sources_read": len(sources),
+        "lines_read": lines_read,
+        "l2_rows": sum(len(rows) for rows in book_result.values()),
+        "trade_rows": sum(len(rows) for rows in trade_result.values()),
+        "coins_with_l2": len(book_result),
+        "coins_with_trades": len(trade_result),
+        "duplicate_l2_rejected": duplicate_books,
+        "duplicate_trades_rejected": duplicate_trades,
+        "invalid_rows": invalid,
+        "stopped_reason": stopped_reason,
+        "clock": "DURABLE_OBSERVABLE_MAX_RECEIVE_WRITE_MS",
+        "read_only": True,
+        "real_execution": False,
+    }
+
+
 def load_l2_history(
     root: str | Path,
     *,
@@ -287,5 +456,7 @@ def load_l2_history(
 __all__ = [
     "discover_l2_sources",
     "load_l2_history",
+    "load_market_microstructure_history",
+    "public_trades_from_tick",
     "snapshot_from_tick",
 ]

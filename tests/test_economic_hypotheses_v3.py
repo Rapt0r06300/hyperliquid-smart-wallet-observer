@@ -94,8 +94,10 @@ def _maker_candidate(*, net: float, segment: str = "train", queue: bool = True) 
         row.update(
             {
                 "initial_qty_ahead": 1.0,
+                "paper_order_qty": 0.25,
+                "required_qty_for_full_fill": 1.25,
                 "queue_events": [
-                    {"book_size_change": -0.4, "traded_qty_at_level": 0.4},
+                    {"book_size_change": -0.6, "traded_qty_at_level": 0.6},
                     {"book_size_change": -0.7, "traded_qty_at_level": 0.7},
                 ],
             }
@@ -124,12 +126,54 @@ def test_lead_lag_v3_accepts_only_queue_proven_profitable_train() -> None:
         _maker_candidate(net=-100.0, segment="oos") for _ in range(10)
     )
     result = qualify_lead_lag_queue_maker_train_only(
-        {"maker_queue_candidates": candidates}
+        {
+            "maker_queue_candidates": candidates,
+            "maker_queue_replay": {
+                "latency_measured": True,
+                "strong_shocks_seen": 8,
+                "train_placebo_net_pnl_usd": 0.5,
+            },
+        }
     )
     assert result["status"] == "TRAIN_ELIGIBLE"
     assert result["queue_proven_fills"] == 8
     assert result["non_train_rows_ignored"] == 10
     assert result["train_net_pnl_usd"] == 1.3
+    assert result["beats_train_placebo"] is True
+
+
+def test_lead_lag_v3_refuses_profitable_train_when_placebo_is_better() -> None:
+    candidates = [
+        _maker_candidate(net=0.20 if index < 7 else -0.10)
+        for index in range(8)
+    ]
+    result = qualify_lead_lag_queue_maker_train_only(
+        {
+            "maker_queue_candidates": candidates,
+            "maker_queue_replay": {
+                "latency_measured": True,
+                "strong_shocks_seen": 8,
+                "train_placebo_net_pnl_usd": 2.0,
+            },
+        }
+    )
+
+    assert result["status"] == "KILL_TRAIN_PLACEBO_NOT_BEATEN"
+    assert result["selection_eligible"] is False
+    assert result["beats_train_placebo"] is False
+
+
+def test_lead_lag_v3_does_not_fill_when_only_queue_ahead_is_consumed() -> None:
+    candidate = _maker_candidate(net=2.0)
+    candidate["queue_events"] = [
+        {"book_size_change": -0.6, "traded_qty_at_level": 0.6},
+        {"book_size_change": -0.5, "traded_qty_at_level": 0.5},
+    ]
+    result = qualify_lead_lag_queue_maker_train_only(
+        {"maker_queue_candidates": [candidate]}
+    )
+    assert result["queue_proven_fills"] == 0
+    assert result["selection_eligible"] is False
 
 
 def _cross_trade(

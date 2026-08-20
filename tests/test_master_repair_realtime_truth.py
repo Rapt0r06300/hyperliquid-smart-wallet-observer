@@ -258,7 +258,9 @@ def test_feed_quality_exposes_latency_jitter_gap_and_rates():
 
     assert snapshot.latency_p99_ms is not None
     assert snapshot.jitter_ema_ms is not None
-    assert snapshot.gap_duration_ms == 100
+    # A sparse independent trade stream is not a websocket transport gap.
+    assert snapshot.gap_duration_ms == 0
+    assert snapshot.gaps == 0
     assert snapshot.stale_rate == 0
     assert snapshot.duplicate_rate == 0
     assert snapshot.out_of_order_rate == 0

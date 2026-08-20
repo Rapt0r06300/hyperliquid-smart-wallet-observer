@@ -26,6 +26,9 @@ from hl_observer.backtesting.lead_lag_certified_clock import (  # noqa: E402
     backtest_with_certified_wall_clock,
     certified_protocol_signature,
 )
+from hl_observer.backtesting.lead_lag_queue_replay import (  # noqa: E402
+    replay_lead_lag_queue_maker,
+)
 from hl_observer.datasets.source_discovery import (  # noqa: E402
     is_dataset_workspace,
     load_family_source_paths,
@@ -54,6 +57,12 @@ from hl_observer.simulation.economic_collection_plan import (  # noqa: E402
     write_collection_plan,
 )
 from hl_observer.simulation.economic_family_scoreboard import export_scoreboards  # noqa: E402
+from hl_observer.simulation.lead_lag_l2_history import (  # noqa: E402
+    load_market_microstructure_history,
+)
+from hl_observer.simulation.lead_lag_measured_replay import (  # noqa: E402
+    load_runtime_latency_evidence,
+)
 
 
 def _tool(name: str, path: Path):
@@ -296,6 +305,22 @@ def run_campaigns(
         lead_raw["dataset_source_manifest"] = (
             str(dataset_manifest_path) if dataset_manifest_path is not None else None
         )
+        lead_tape = lead_lag_shadow.charger_tape(root, sources=lead_sources)
+        l2_history, public_trade_history, microstructure_meta = (
+            load_market_microstructure_history(root)
+        )
+        latency_evidence = load_runtime_latency_evidence(root)
+        maker_queue_replay = replay_lead_lag_queue_maker(
+            lead_tape,
+            l2_history,
+            public_trade_history,
+            latency_evidence=latency_evidence,
+        )
+        lead_raw["maker_queue_candidates"] = maker_queue_replay[
+            "maker_queue_candidates"
+        ]
+        lead_raw["maker_queue_replay"] = maker_queue_replay
+        lead_raw["lead_lag_microstructure_history"] = microstructure_meta
         lead_raw["next_hypothesis_v3"] = qualify_lead_lag_queue_maker_train_only(
             lead_raw
         )

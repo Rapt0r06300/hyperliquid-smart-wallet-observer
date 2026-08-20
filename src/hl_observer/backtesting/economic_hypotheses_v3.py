@@ -227,6 +227,7 @@ def qualify_lead_lag_queue_maker_train_only(
     result = _base_result(LEAD_MAKER_MECHANISM, rows)
     qualified: list[dict[str, Any]] = []
     missing_queue = 0
+    missing_order_qty = 0
     rejected_predeclared = 0
     for row in rows:
         if not _is_train(row):
@@ -239,11 +240,23 @@ def qualify_lead_lag_queue_maker_train_only(
             rejected_predeclared += 1
             continue
         initial_ahead = _number(row.get("initial_qty_ahead"))
+        paper_order_qty = _number(row.get("paper_order_qty"))
         events = _queue_events(row.get("queue_events"))
         if initial_ahead is None or initial_ahead < 0.0 or events is None:
             missing_queue += 1
             continue
-        state = rejouer(initial_ahead, events)
+        if paper_order_qty is None or paper_order_qty <= 0.0:
+            missing_order_qty += 1
+            continue
+        # Consuming only the public quantity ahead means our order has merely
+        # reached the front of the FIFO queue.  A full paper fill additionally
+        # requires public volume equal to our own order quantity.
+        required_qty = initial_ahead + paper_order_qty
+        declared_required = _number(row.get("required_qty_for_full_fill"))
+        if declared_required is not None and not abs(declared_required - required_qty) <= 1e-9:
+            missing_queue += 1
+            continue
+        state = rejouer(required_qty, events)
         if not state.rempli:
             continue
         if (
@@ -255,27 +268,49 @@ def qualify_lead_lag_queue_maker_train_only(
 
     net_values = [_number(row.get("net_pnl_usd")) or 0.0 for row in qualified]
     pf = _profit_factor(net_values)
-    eligible = bool(
+    replay_meta = report.get("maker_queue_replay")
+    diagnostics = replay_meta if isinstance(replay_meta, Mapping) else {}
+    latency_measured = diagnostics.get("latency_measured") is True
+    shocks_seen = int(_number(diagnostics.get("strong_shocks_seen")) or 0)
+    placebo_net = _number(diagnostics.get("train_placebo_net_pnl_usd"))
+    train_net = sum(net_values)
+    beats_placebo = placebo_net is not None and train_net > placebo_net + 1e-12
+    train_economics_positive = bool(
         len(qualified) >= minimum_trades
-        and sum(net_values) > 0.0
+        and train_net > 0.0
         and pf is not None
         and pf > 1.0
     )
+    eligible = bool(train_economics_positive and latency_measured and beats_placebo)
     if eligible:
         status = "TRAIN_ELIGIBLE"
-    elif not rows or missing_queue > 0:
+    elif missing_queue > 0 or missing_order_qty > 0:
         status = "MORE_DATA_QUEUE_EVIDENCE_REQUIRED"
-    elif len(qualified) < minimum_trades:
+    elif not diagnostics:
+        status = "MAKER_REPLAY_EVIDENCE_REQUIRED"
+    elif not latency_measured:
+        status = "MEASURED_LATENCY_REQUIRED"
+    elif shocks_seen == 0:
+        status = "NO_PREDECLARED_STRONG_SHOCKS"
+    elif not rows or len(qualified) < minimum_trades:
         status = "MORE_DATA_QUEUE_PROVEN_FILLS_REQUIRED"
-    else:
+    elif not train_economics_positive:
         status = "KILL_TRAIN_QUEUE_MAKER_NOT_PROFITABLE"
+    elif placebo_net is None:
+        status = "PLACEBO_EVIDENCE_REQUIRED"
+    elif not beats_placebo:
+        status = "KILL_TRAIN_PLACEBO_NOT_BEATEN"
+    else:
+        status = "KILL_TRAIN_QUEUE_MAKER_NOT_ELIGIBLE"
     evidence = {
         "required_coin": required_coin.upper(),
         "minimum_abs_shock_bps": float(minimum_abs_shock_bps),
         "minimum_trades": int(minimum_trades),
         "queue_proven_fills": len(qualified),
-        "train_net_pnl_usd": round(sum(net_values), 8),
+        "train_net_pnl_usd": round(train_net, 8),
         "train_profit_factor": pf,
+        "train_placebo_net_pnl_usd": placebo_net,
+        "beats_train_placebo": beats_placebo,
     }
     return {
         **result,
@@ -287,9 +322,14 @@ def qualify_lead_lag_queue_maker_train_only(
         "candidate_rows_seen": len(rows),
         "queue_proven_fills": len(qualified),
         "missing_queue_evidence": missing_queue,
+        "missing_paper_order_quantity": missing_order_qty,
         "predeclared_filter_rejections": rejected_predeclared,
-        "train_net_pnl_usd": round(sum(net_values), 8),
+        "latency_measured": latency_measured if diagnostics else None,
+        "strong_shocks_seen": shocks_seen if diagnostics else None,
+        "train_net_pnl_usd": round(train_net, 8),
         "train_profit_factor": pf,
+        "train_placebo_net_pnl_usd": placebo_net,
+        "beats_train_placebo": beats_placebo,
         "selection_evidence_sha256": _stable_hash(evidence),
         "exact_next_evidence": (
             []
@@ -299,6 +339,7 @@ def qualify_lead_lag_queue_maker_train_only(
                 "multi-level L2 snapshot plus incremental trades at the passive price",
                 "initial quantity ahead and queue replay proving each maker fill",
                 "at least 8 reconciled queue-proven TRAIN fills profitable after costs",
+                "independently replayed same-shock TRAIN placebo beaten",
             ]
         ),
     }

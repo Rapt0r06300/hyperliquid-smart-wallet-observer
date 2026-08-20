@@ -154,7 +154,7 @@ def test_event_modes_snapshot_incremental_and_batch(monkeypatch) -> None:
 
 
 def test_snapshot_temporal_sequence_future_and_quality_metrics() -> None:
-    gate = _gate(fq.FeedMode.EVENT_STREAM, min_score=99.0)
+    gate = _gate(fq.FeedMode.FULL_SNAPSHOT, min_score=99.0)
     empty = gate.snapshot(now_ms=0)
     assert empty.stale_rate is None and empty.duplicate_rate is None
     assert "LATEST_EVENT_STALE" in empty.reasons and "HEARTBEAT_STALE" in empty.reasons
