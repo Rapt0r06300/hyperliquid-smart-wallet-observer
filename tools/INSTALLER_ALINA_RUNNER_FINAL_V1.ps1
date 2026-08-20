@@ -7,7 +7,8 @@ param(
     [string]$RunnerName = '',
     [string]$RunnerToken = '',
     [switch]$PrepareOnly,
-    [switch]$ConfirmSelfHosted
+    [switch]$ConfirmSelfHosted,
+    [switch]$Elevate
 )
 
 $ErrorActionPreference = 'Stop'
@@ -66,6 +67,24 @@ function Get-BasePython311([string]$RepositoryRoot) {
         } catch {}
     }
     throw 'Python 3.11+ introuvable (py, python et runtimes portables HyperSmart vérifiés).'
+}
+
+function Test-Admin {
+    $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
+    $principal = New-Object Security.Principal.WindowsPrincipal($identity)
+    return $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
+}
+
+if ($Elevate -and -not (Test-Admin)) {
+    $quotedScript = '"' + $PSCommandPath + '"'
+    $arguments = "-NoLogo -NoProfile -ExecutionPolicy Bypass -File $quotedScript -ConfirmSelfHosted"
+    try {
+        $process = Start-Process -FilePath 'powershell.exe' -Verb RunAs -ArgumentList $arguments -Wait -PassThru -ErrorAction Stop
+        exit $process.ExitCode
+    } catch {
+        Write-Error $_
+        exit 1223
+    }
 }
 
 function Get-ExactMainSha([string]$RepositoryRoot) {
