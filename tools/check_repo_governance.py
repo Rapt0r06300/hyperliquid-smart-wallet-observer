@@ -61,17 +61,20 @@ def local_failures() -> list[str]:
         for marker in (
             "statuses: write",
             "hypersmart/security-quality",
-            "needs: [governance, supply-chain, coverage-ratchet]",
+            "needs: [governance, supply-chain]",
             "python -m pip_audit",
-            "python tools/check_coverage_ratchet.py",
+            "python -m ruff check --select E9,F63,F7,F82 src tools tests",
         ):
             if marker not in text:
                 failures.append(f"security-quality incomplet: marqueur absent {marker}")
-        if "hypersmart/technical-perfect" in text:
-            failures.append(
-                "security-quality ne doit pas publier hypersmart/technical-perfect: "
-                "ce contexte appartient uniquement à la gate 775 complète"
-            )
+        for forbidden in (
+            "coverage-ratchet",
+            "python -m coverage run --source=src",
+            "python tools/check_coverage_ratchet.py",
+            "hypersmart/technical-perfect",
+        ):
+            if forbidden in text:
+                failures.append(f"security-quality mélange des responsabilités: marqueur interdit {forbidden}")
 
     perfect = ROOT / ".github" / "workflows" / "pre-run-321-775.yml"
     if perfect.is_file():

@@ -19,10 +19,11 @@ def test_security_quality_workflow_is_fail_closed() -> None:
     assert "persist-credentials: false" in text
     assert "requirements-ci-tools.txt" in text
     assert "python -m pip_audit" in text
-    assert "python -m coverage run --source=src" in text
-    assert "python tools/check_coverage_ratchet.py" in text
     assert "ci-resolved-requirements.txt" in text
-    assert "needs: [governance, supply-chain, coverage-ratchet]" in text
+    assert "needs: [governance, supply-chain]" in text
+    assert "coverage-ratchet" not in text
+    assert "python -m coverage run --source=src" not in text
+    assert "python tools/check_coverage_ratchet.py" not in text
     assert "hypersmart/security-quality" in text
     assert "SECURITY_QUALITY_GREEN" in text
     assert "hypersmart/technical-perfect" not in text
@@ -101,20 +102,18 @@ def test_coverage_target_is_exactly_100_and_zero_missing_lines() -> None:
     assert "missing > max_missing" in gate
     assert "measured + 1e-12 < minimum" in gate
 
-    for workflow_name in ("pre-run-321-775.yml", "security-quality.yml"):
-        text = (ROOT / ".github" / "workflows" / workflow_name).read_text(encoding="utf-8")
-        assert "python -m coverage run --source=src" in text
-        assert "--omit" not in text
-        assert "coverage_gap_report.py" in text
-        assert "coverage-gaps.json" in text
-        assert "coverage-gaps.md" in text
+    text = (ROOT / ".github" / "workflows" / "pre-run-321-775.yml").read_text(encoding="utf-8")
+    assert "python -m coverage run --source=src" in text
+    assert "--omit" not in text
+    assert "coverage_gap_report.py" in text
+    assert "coverage-gaps.json" in text
+    assert "coverage-gaps.md" in text
 
 
 def test_coverage_full_suite_has_git_parent_for_anti_deletion_proof() -> None:
-    for workflow_name in ("pre-run-321-775.yml", "security-quality.yml"):
-        text = (ROOT / ".github" / "workflows" / workflow_name).read_text(encoding="utf-8")
-        coverage_tail = text.split("coverage", 1)[-1]
-        assert "fetch-depth: 2" in coverage_tail
+    text = (ROOT / ".github" / "workflows" / "pre-run-321-775.yml").read_text(encoding="utf-8")
+    coverage_tail = text.split("coverage", 1)[-1]
+    assert "fetch-depth: 2" in coverage_tail
 
 
 def test_current_state_supersedes_stale_master_document() -> None:
