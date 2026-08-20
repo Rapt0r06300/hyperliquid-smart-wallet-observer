@@ -53,7 +53,8 @@ def test_series_par_coin_filters_invalid_and_sorts() -> None:
         {"coin": "HYPE", "value": 4, "ts": None},
     ]
     assert commun.series_par_coin(rows, "value", ts_champ="ts") == {
-        "BTC": [(10.0, 1.0), (20.0, 2.0)]
+        "BTC": [(10.0, 1.0), (20.0, 2.0)],
+        "SOL": [],
     }
 
 
