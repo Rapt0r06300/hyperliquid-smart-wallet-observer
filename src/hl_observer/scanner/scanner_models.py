@@ -1,11 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-try:
-    from enum import StrEnum
-except ImportError:
-    from enum import Enum
-    class StrEnum(str, Enum): pass
+from enum import StrEnum
 from typing import Any
 
 
@@ -110,4 +106,3 @@ class MissedOpportunity:
     next_action: str
     severity: str = "INFO"
     details: dict[str, Any] = field(default_factory=dict)
-
