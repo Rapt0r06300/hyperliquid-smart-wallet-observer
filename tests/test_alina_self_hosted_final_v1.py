@@ -186,6 +186,13 @@ def test_final_installer_launcher_requires_explicit_go_and_waits_for_elevation()
     assert "$p.ExitCode" in text
     assert "$ErrorActionPreference='Stop'" in text
     assert "exit 1223" in text
+    assert text.count("-ConfirmSelfHosted") == 2
+
+
+def test_final_installer_accepts_only_an_explicit_self_hosted_confirmation() -> None:
+    text = _text(INSTALLER)
+    assert "[switch]$ConfirmSelfHosted" in text
+    assert "[string]$env:GO_SELF_HOSTED -cne 'TRUE' -and -not $ConfirmSelfHosted" in text
 
 
 def test_final_control_document_exists_and_forbids_legacy_jobs() -> None:

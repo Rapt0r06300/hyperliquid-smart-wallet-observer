@@ -6,7 +6,8 @@ param(
     [string]$ProjectRoot = '',
     [string]$RunnerName = '',
     [string]$RunnerToken = '',
-    [switch]$PrepareOnly
+    [switch]$PrepareOnly,
+    [switch]$ConfirmSelfHosted
 )
 
 $ErrorActionPreference = 'Stop'
@@ -14,8 +15,8 @@ $ProgressPreference = 'SilentlyContinue'
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
 $FinalLabel = 'hypersmart-final-v1'
 
-if ([string]$env:GO_SELF_HOSTED -cne 'TRUE') {
-    Write-Host '[REFUS] GO_SELF_HOSTED=TRUE est obligatoire.' -ForegroundColor Red
+if ([string]$env:GO_SELF_HOSTED -cne 'TRUE' -and -not $ConfirmSelfHosted) {
+    Write-Host '[REFUS] GO_SELF_HOSTED=TRUE ou -ConfirmSelfHosted est obligatoire.' -ForegroundColor Red
     Write-Host 'Aucun runner final ne sera installé ou démarré.' -ForegroundColor Yellow
     exit 9
 }
