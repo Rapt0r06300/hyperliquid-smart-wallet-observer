@@ -57,6 +57,9 @@ def test_smoke_publishes_only_a_compact_fixed_proof() -> None:
 
 def test_smoke_uses_a_valid_local_python_and_exact_checkout_import() -> None:
     text = _workflow()
+    assert "$env:GIT_CONFIG_COUNT = '1'" in text
+    assert "$env:GIT_CONFIG_KEY_0 = 'safe.directory'" in text
+    assert "$env:GIT_CONFIG_VALUE_0 = $env:GITHUB_WORKSPACE" in text
     assert "ALINA_PYTHON_EXE" in text
     assert r"C:\HyperSmart-Runner-Data\runtime\python\Scripts\python.exe" in text
     assert r"portable_runtime\python\python.exe" in text

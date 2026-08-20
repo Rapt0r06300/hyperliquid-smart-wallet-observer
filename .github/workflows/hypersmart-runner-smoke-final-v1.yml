@@ -78,6 +78,9 @@ jobs:
           GITHUB_TOKEN: ${{ github.token }}
         run: |
           $ErrorActionPreference = 'Stop'
+          $env:GIT_CONFIG_COUNT = '1'
+          $env:GIT_CONFIG_KEY_0 = 'safe.directory'
+          $env:GIT_CONFIG_VALUE_0 = $env:GITHUB_WORKSPACE
           $actual = (git rev-parse HEAD).Trim().ToLowerInvariant()
           if ($actual -cne $env:EXPECTED_SHA) { throw 'SMOKE_CHECKOUT_SHA_REFUSED' }
           $headers = @{
