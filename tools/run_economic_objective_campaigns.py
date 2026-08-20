@@ -172,7 +172,7 @@ def run_campaigns(
     )
     copy_segment_trades = copy_walk_forward.get("trades", {})
     copy_trades = [
-        trade
+        {**trade, "walk_forward_segment": name}
         for name in ("train", "validation", "oos", "forward")
         for trade in copy_segment_trades.get(name, [])
     ] if isinstance(copy_segment_trades, dict) else []
@@ -351,7 +351,7 @@ def run_campaigns(
     )
     segment_trades = cross_walk_forward.get("trades", {})
     cross_trades = [
-        trade
+        {**trade, "walk_forward_segment": name}
         for name in ("train", "validation", "oos", "forward")
         for trade in segment_trades.get(name, [])
     ] if isinstance(segment_trades, dict) else []
