@@ -98,7 +98,13 @@ jobs:
             if ($forbidden -contains ([string]$name).ToLowerInvariant()) { throw "SMOKE_ARBITRARY_FIELD_REFUSED: $name" }
           }
           $python = [Environment]::GetEnvironmentVariable('ALINA_PYTHON_EXE', 'Machine')
+          if ([string]::IsNullOrWhiteSpace($python) -or -not (Test-Path -LiteralPath $python -PathType Leaf)) {
+            $pythonCommand = Get-Command python -ErrorAction SilentlyContinue
+            if ($pythonCommand) { $python = [string]$pythonCommand.Source }
+          }
           if ([string]::IsNullOrWhiteSpace($python) -or -not (Test-Path -LiteralPath $python -PathType Leaf)) { throw 'SMOKE_PYTHON_REFUSED' }
+          & $python -c "import sys; raise SystemExit(0 if sys.version_info >= (3,11) else 2)"
+          if ($LASTEXITCODE -ne 0) { throw 'SMOKE_PYTHON_VERSION_REFUSED' }
           $env:PYTHONPATH = "$env:GITHUB_WORKSPACE\src;$env:GITHUB_WORKSPACE\tools;$env:GITHUB_WORKSPACE"
           $proofDir = Join-Path $env:RUNNER_TEMP 'hypersmart-runner-smoke'
           New-Item -ItemType Directory -Force -Path $proofDir | Out-Null

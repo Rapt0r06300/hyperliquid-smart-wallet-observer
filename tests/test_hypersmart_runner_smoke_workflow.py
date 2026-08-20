@@ -53,3 +53,12 @@ def test_smoke_publishes_only_a_compact_fixed_proof() -> None:
     assert "GITHUB_PC_GITHUB_SMOKE_OK" in text
     assert "real_execution = $false" in text
     assert "arbitrary_command = $false" in text
+
+
+def test_smoke_uses_a_valid_local_python_and_exact_checkout_import() -> None:
+    text = _workflow()
+    assert "ALINA_PYTHON_EXE" in text
+    assert "Get-Command python -ErrorAction SilentlyContinue" in text
+    assert "SMOKE_PYTHON_REFUSED" in text
+    assert "SMOKE_PYTHON_VERSION_REFUSED" in text
+    assert "SMOKE_EXACT_CHECKOUT_IMPORT_REFUSED" in text
