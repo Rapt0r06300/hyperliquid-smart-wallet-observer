@@ -299,6 +299,16 @@ function Configure-ServiceRecovery([System.ServiceProcess.ServiceController]$Ser
     if ($LASTEXITCODE -ne 0) { throw 'Activation failureflag impossible.' }
 }
 
+function Set-CanonicalNetworkServiceIdentity([System.ServiceProcess.ServiceController]$Service) {
+    $info = Get-CimInstance Win32_Service -Filter "Name='$($Service.Name)'" -ErrorAction Stop
+    if ([string]$info.StartName -cne 'NT AUTHORITY\NetworkService') {
+        & sc.exe config $Service.Name 'obj=' 'NT AUTHORITY\NetworkService' 'password=' '' | Out-Null
+        if ($LASTEXITCODE -ne 0) {
+            throw 'Correction du compte NetworkService canonique impossible.'
+        }
+    }
+}
+
 Assert-Admin
 if (-not (Get-Command git -ErrorAction SilentlyContinue)) { throw 'Git for Windows est obligatoire.' }
 $repoRoot = if ([string]::IsNullOrWhiteSpace($ProjectRoot)) {
@@ -359,14 +369,22 @@ if ($PrepareOnly) {
 if (-not $configured) {
     Write-Step 'Enregistrement du runner final avec label isolé'
     $temporaryRunnerToken = Get-RegistrationToken -Repo $Repository -ExplicitToken $RunnerToken
+    $configExitCode = 0
     try {
         Push-Location $RunnerRoot
-        & .\config.cmd --unattended --url "https://github.com/$Repository" --token $temporaryRunnerToken --name $RunnerName --labels "$FinalLabel,alina" --work '_work' --runasservice --replace
-        if ($LASTEXITCODE -ne 0) { throw "config.cmd final a échoué avec le code $LASTEXITCODE" }
+        & .\config.cmd --unattended --url "https://github.com/$Repository" --token $temporaryRunnerToken --name $RunnerName --labels "$FinalLabel,alina" --work '_work' --runasservice --windowslogonaccount 'NT AUTHORITY\NetworkService' --replace
+        $configExitCode = $LASTEXITCODE
     } finally {
         Pop-Location
         $temporaryRunnerToken = $null
         $RunnerToken = $null
+    }
+    if ($configExitCode -ne 0) {
+        $registeredService = Get-ConfiguredService -Root $RunnerRoot -ExpectedRunnerName $RunnerName
+        if (-not $registeredService) {
+            throw "config.cmd final a échoué avec le code $configExitCode sans enregistrer de service récupérable."
+        }
+        Write-Warning "config.cmd a enregistré le service mais son démarrage a échoué (code $configExitCode) ; réparation canonique en cours."
     }
 } else {
     Write-Host 'Runner final déjà configuré dans son dossier dédié.' -ForegroundColor Green
@@ -376,6 +394,7 @@ Write-PreparationManifest -Root $RunnerRoot -RepositoryRoot $repoRoot -ProjectSh
 
 $service = Get-ConfiguredService -Root $RunnerRoot -ExpectedRunnerName $RunnerName
 if (-not $service) { throw 'Service du runner FINAL_V1 introuvable.' }
+Set-CanonicalNetworkServiceIdentity -Service $service
 Configure-ServiceRecovery -Service $service
 if ($service.Status -ne 'Running') {
     Start-Service -Name $service.Name

@@ -115,6 +115,9 @@ def test_final_installer_uses_unique_root_name_and_label() -> None:
     assert "$FinalLabel = 'hypersmart-final-v1'" in text
     assert '--labels "$FinalLabel,alina"' in text
     assert "--runasservice" in text
+    assert "--windowslogonaccount 'NT AUTHORITY\\NetworkService'" in text
+    assert "Set-CanonicalNetworkServiceIdentity" in text
+    assert "config.cmd a enregistré le service" in text
     assert "--labels 'hypersmart,alina'" not in text
     assert "ancien label hypersmart" in text.casefold()
     assert "VERIFIER_ALINA_RUNNER_WINDOWS.ps1" in text
