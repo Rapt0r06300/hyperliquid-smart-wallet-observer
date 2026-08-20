@@ -28,8 +28,16 @@ def _record(*, coin: str = "ETH", ts_ms: int = 1_786_552_000_000, raw_sha: str =
         "channel": "l2Book",
         "instrument": coin,
         "received_ts_ms": ts_ms,
+        "written_ts_ms": ts_ms + 3,
+        "connection_id": "ws-test",
+        "sequence": 7,
         "raw_sha256": raw_sha,
         "raw_payload": json.dumps(message),
+        "parsed_summary": {
+            "feed_quality_score": 96.0,
+            "data_gate_ready": True,
+            "quality_reasons": [],
+        },
         "read_only": True,
         "real_execution": False,
     }
@@ -48,11 +56,20 @@ def test_snapshot_recovers_real_prices_sizes_and_depth() -> None:
     assert snapshot is not None
     assert snapshot["bid"] == 100.0
     assert snapshot["ask"] == 101.0
+    assert snapshot["bid_size"] == 2.0
+    assert snapshot["ask_size"] == 4.0
     assert snapshot["bid_top_usd"] == 200.0
     assert snapshot["ask_top_usd"] == 404.0
     assert snapshot["bid_depth_usd"] == 497.0
     assert snapshot["ask_depth_usd"] == 914.0
     assert snapshot["data_origin"] == "RECORDED_REAL"
+    assert snapshot["received_ts_ms"] == 1_786_552_000_000
+    assert snapshot["written_ts_ms"] == 1_786_552_000_003
+    assert snapshot["observable_at_ms"] == 1_786_552_000_003
+    assert snapshot["ts_ms"] == 1_786_552_000_003
+    assert snapshot["connection_id"] == "ws-test"
+    assert snapshot["feed_quality_score"] == 96.0
+    assert snapshot["data_gate_ready"] is True
     assert snapshot["real_execution"] is False
 
 
@@ -64,6 +81,14 @@ def test_non_l2_or_clockless_rows_fail_closed() -> None:
     clockless = _record()
     clockless.pop("received_ts_ms")
     assert snapshot_from_tick(clockless) is None
+
+    not_durable = _record()
+    not_durable.pop("written_ts_ms")
+    assert snapshot_from_tick(not_durable) is None
+
+    write_before_receive = _record()
+    write_before_receive["written_ts_ms"] = write_before_receive["received_ts_ms"] - 1
+    assert snapshot_from_tick(write_before_receive) is None
 
 
 def test_loader_discovers_current_and_shards_deduplicates_and_sorts(tmp_path: Path) -> None:
@@ -81,12 +106,12 @@ def test_loader_discovers_current_and_shards_deduplicates_and_sorts(tmp_path: Pa
     assert len(sources) == 2
     history, meta = load_l2_history(tmp_path, time_budget_s=0)
     assert [row["ts_ms"] for row in history["ETH"]] == [
-        1_786_552_000_001,
-        1_786_552_000_002,
+        1_786_552_000_004,
+        1_786_552_000_005,
     ]
     assert meta["duplicates_rejected"] == 1
     assert meta["l2_rows"] == 2
-    assert meta["clock"] == "RECEIVE_WALL_MS"
+    assert meta["clock"] == "DURABLE_OBSERVABLE_MAX_RECEIVE_WRITE_MS"
 
 
 def test_loader_is_bounded(tmp_path: Path) -> None:

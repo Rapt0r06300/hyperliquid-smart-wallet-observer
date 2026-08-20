@@ -60,12 +60,53 @@ def _positive(value: object) -> float | None:
     return parsed if math.isfinite(parsed) and parsed > 0 else None
 
 
-def _timestamp_ms(record: Mapping[str, Any]) -> int | None:
-    for key in ("received_ts_ms", "recv_wall_ts_ms", "written_ts_ms", "write_wall_ts_ms"):
-        value = _positive(record.get(key))
-        if value is not None and value >= 1_500_000_000_000:
-            return int(value)
-    return None
+def _local_timestamps_ms(record: Mapping[str, Any]) -> tuple[int, int, int] | None:
+    """Return receive, durable-write and causal observable wall clocks.
+
+    A historical replay may only consume a frame once it was durably written.
+    Requiring both local clocks also prevents silently falling back to an
+    exchange timestamp when a damaged row is encountered.
+    """
+    received = _positive(record.get("received_ts_ms"))
+    if received is None:
+        received = _positive(record.get("recv_wall_ts_ms"))
+    written = _positive(record.get("written_ts_ms"))
+    if written is None:
+        written = _positive(record.get("write_wall_ts_ms"))
+    if (
+        received is None
+        or written is None
+        or received < 1_500_000_000_000
+        or written < 1_500_000_000_000
+        or written < received
+    ):
+        return None
+    received_ms = int(received)
+    written_ms = int(written)
+    return received_ms, written_ms, max(received_ms, written_ms)
+
+
+def _quality_metadata(record: Mapping[str, Any], coin: str) -> tuple[float | None, bool, list[str]]:
+    summary = record.get("parsed_summary")
+    if not isinstance(summary, Mapping):
+        return None, False, ["MISSING_PARSED_SUMMARY"]
+    quality: Mapping[str, Any] = summary
+    by_coin = summary.get("quality_by_coin")
+    if isinstance(by_coin, Mapping) and isinstance(by_coin.get(coin), Mapping):
+        quality = by_coin[coin]
+    score_raw = quality.get("feed_quality_score")
+    try:
+        score = float(score_raw) if score_raw is not None else None
+    except (TypeError, ValueError, OverflowError):
+        score = None
+    reasons_raw = quality.get("quality_reasons", quality.get("reasons", ()))
+    if isinstance(reasons_raw, str):
+        reasons = [item for item in reasons_raw.split("|") if item]
+    elif isinstance(reasons_raw, Sequence):
+        reasons = [str(item) for item in reasons_raw if str(item)]
+    else:
+        reasons = []
+    return score, bool(quality.get("data_gate_ready")), reasons
 
 
 def _raw_message(record: Mapping[str, Any]) -> Mapping[str, Any] | None:
@@ -104,9 +145,10 @@ def snapshot_from_tick(record: Mapping[str, Any]) -> dict[str, Any] | None:
         return None
     if record.get("real_execution") not in {False, None}:
         return None
-    ts_ms = _timestamp_ms(record)
-    if ts_ms is None:
+    local_clocks = _local_timestamps_ms(record)
+    if local_clocks is None:
         return None
+    received_ts_ms, written_ts_ms, observable_at_ms = local_clocks
     message = _raw_message(record)
     if not message or str(message.get("channel") or "") != "l2Book":
         return None
@@ -132,16 +174,29 @@ def snapshot_from_tick(record: Mapping[str, Any]) -> dict[str, Any] | None:
     ask_levels = [parsed for raw in asks if (parsed := _level(raw)) is not None]
     if not bid_levels or not ask_levels:
         return None
+    quality_score, gate_ready, quality_reasons = _quality_metadata(record, coin)
     return {
         "coin": coin,
-        "ts_ms": ts_ms,
+        "ts_ms": observable_at_ms,
+        "received_ts_ms": received_ts_ms,
+        "written_ts_ms": written_ts_ms,
+        "observable_at_ms": observable_at_ms,
         "exchange_ts_ms": int(float(data.get("time"))) if _positive(data.get("time")) else None,
         "bid": best_bid[0],
         "ask": best_ask[0],
+        "bid_size": best_bid[1],
+        "ask_size": best_ask[1],
         "bid_top_usd": best_bid[0] * best_bid[1],
         "ask_top_usd": best_ask[0] * best_ask[1],
         "bid_depth_usd": sum(price * size for price, size in bid_levels),
         "ask_depth_usd": sum(price * size for price, size in ask_levels),
+        "connection_id": record.get("connection_id"),
+        "sequence": record.get("sequence"),
+        "reconnect_count": int(record.get("reconnect_count") or 0),
+        "gap_count": int(record.get("gap_count") or 0),
+        "feed_quality_score": quality_score,
+        "data_gate_ready": gate_ready,
+        "quality_reasons": quality_reasons,
         "raw_sha256": str(record.get("raw_sha256") or ""),
         "source": "hyperliquid:recorded:l2Book",
         "data_origin": "RECORDED_REAL",
@@ -209,7 +264,7 @@ def load_l2_history(
     for rows in result.values():
         rows.sort(key=lambda row: int(row["ts_ms"]))
     return result, {
-        "schema_version": "hypersmart.lead_lag_l2_history.v1",
+        "schema_version": "hypersmart.lead_lag_l2_history.v2",
         "sources": [
             source.relative_to(project_root).as_posix()
             if source.is_relative_to(project_root)
@@ -223,7 +278,7 @@ def load_l2_history(
         "duplicates_rejected": duplicates,
         "invalid_rows": invalid,
         "stopped_reason": stopped_reason,
-        "clock": "RECEIVE_WALL_MS",
+        "clock": "DURABLE_OBSERVABLE_MAX_RECEIVE_WRITE_MS",
         "read_only": True,
         "real_execution": False,
     }
