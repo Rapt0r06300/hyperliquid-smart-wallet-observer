@@ -32,11 +32,7 @@ def create_dydx_router() -> APIRouter:
             return get_engine().get_status()
         except Exception as e:
             logger.error("dydx /status error: %s", e)
-            return {
-                "running": False,
-                "error": str(e),
-                "disclaimer": DISCLAIMER,
-            }
+            return {"running": False, "error": str(e), "disclaimer": DISCLAIMER}
 
     @router.get("/wallets")
     async def dydx_wallets() -> list[dict]:
@@ -107,6 +103,7 @@ def create_dydx_router() -> APIRouter:
         """Rapport vérité simulation paper: sources, PnL, V2, refus."""
         try:
             from hyper_smart_observer.dydx_v4.simulation_truth import truth_report
+
             report = truth_report()
             report["disclaimer"] = DISCLAIMER
             return report
@@ -141,10 +138,7 @@ def create_dydx_router() -> APIRouter:
         """Health check + état de la découverte de wallets."""
         try:
             s = get_engine().get_status()
-            discovery_state = (
-                "running" if s.get("last_error") == "DISCOVERY_RUNNING"
-                else "idle"
-            )
+            discovery_state = "running" if s.get("last_error") == "DISCOVERY_RUNNING" else "idle"
             return {
                 "running": s.get("running", False),
                 "rest_healthy": s.get("rest_healthy", False),
@@ -178,8 +172,5 @@ def create_dydx_router() -> APIRouter:
             }
         except Exception as e:
             return {"enabled": False, "error": str(e), "disclaimer": DISCLAIMER}
-
-    return router
-
 
     return router
