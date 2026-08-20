@@ -238,7 +238,7 @@ function Download-LatestRunner([string]$TargetRoot) {
 
 function Initialize-Lab([string]$Root, [string]$RepositoryRoot) {
     Write-Step 'Préparation du laboratoire persistant final'
-    foreach ($dir in @('', 'datasets', 'datasets\assets', 'datasets\metadata', 'datasets\materialized', 'datasets\workspaces', 'jobs', 'jobs\requests', 'results', 'results\jobs', 'job_logs', 'status', 'checkpoints', 'tools', 'runtime')) {
+    foreach ($dir in @('', 'datasets', 'datasets\assets', 'datasets\metadata', 'datasets\materialized', 'datasets\workspaces', 'jobs', 'jobs\requests', 'results', 'results\jobs', 'results\github', 'job_logs', 'status', 'checkpoints', 'tools', 'runtime')) {
         $path = if ([string]::IsNullOrWhiteSpace($dir)) { $Root } else { Join-Path $Root $dir }
         New-Item -ItemType Directory -Force -Path $path | Out-Null
     }

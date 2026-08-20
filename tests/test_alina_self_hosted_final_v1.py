@@ -111,6 +111,7 @@ def test_final_installer_uses_unique_root_name_and_label() -> None:
     assert "runner_workspace = (Join-Path $Root '_work')" in text
     assert "RUNNER_WORKSPACE_REFUSED" in text
     assert "RUNNER_DATA_ROOT_REFUSED" in text
+    assert "'results\\github'" in text
     assert "HyperSmart-FinalV1-" in text
     assert "$FinalLabel = 'hypersmart-final-v1'" in text
     assert '--labels "$FinalLabel,alina"' in text
