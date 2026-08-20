@@ -14,6 +14,13 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
 from hl_observer.backtesting import copy_vault_executable, lead_lag_shadow  # noqa: E402
+from hl_observer.backtesting.copy_vault_generalization import (  # noqa: E402
+    derive_heldout_vault_generalization,
+)
+from hl_observer.backtesting.lead_lag_certified_clock import (  # noqa: E402
+    backtest_with_certified_wall_clock,
+    certified_protocol_signature,
+)
 from hl_observer.datasets.source_discovery import (  # noqa: E402
     is_dataset_workspace,
     load_family_source_paths,
@@ -180,6 +187,11 @@ def run_campaigns(
         for name in ("train", "validation", "oos", "forward")
         for trade in copy_segment_trades.get(name, [])
     ] if isinstance(copy_segment_trades, dict) else []
+    copy_bounds = copy_walk_forward.get("bounds") if isinstance(copy_walk_forward, dict) else {}
+    copy_generalization = derive_heldout_vault_generalization(
+        copy_trades,
+        oos_start_ms=(copy_bounds or {}).get("oos_start_ms") if isinstance(copy_bounds, dict) else None,
+    )
     copy_raw = {
         "schema_version": "hypersmart.copy_vault_executable_campaign.v1",
         "canonical_input_audit": canonical_input_audit,
@@ -193,6 +205,7 @@ def run_campaigns(
         },
         "summary": copy_walk_forward.get("combined_summary"),
         "temporal_evidence": copy_vault_executable.temporal_evidence(copy_walk_forward),
+        "vault_generalization": copy_generalization,
         "trades": copy_trades,
         "paper_read_only": True,
         "real_execution": False,
@@ -215,7 +228,9 @@ def run_campaigns(
             include_history=True,
             max_history_sources=max(0, int(lead_history_sources)),
         )
-    lead_protocol = lead_lag_shadow.walk_forward_protocol_signature()
+    # Economic proof gets a new protocol fingerprint: old freezes that allowed
+    # process-local recu_ns fallback can never be silently reused.
+    lead_protocol = certified_protocol_signature()
     lead_freeze = find_oldest_parameter_freeze(
         root,
         "lead_lag",
@@ -256,7 +271,7 @@ def run_campaigns(
     provisional_lead_cutoff_ms = (
         int((lead_calibration or {}).get("provisional_frozen_at_ms") or 0) or None
     )
-    lead_raw = lead_lag_shadow.backtest(
+    lead_raw = backtest_with_certified_wall_clock(
         root,
         sources=lead_sources,
         economic_frozen_at_ms=(

@@ -21,18 +21,30 @@ from typing import Any
 MS_PAR_HEURE = 3_600_000
 
 
+def normaliser_vault(vault: Any) -> str:
+    """Identité stable et source-indépendante d'un wallet/vault Hyperliquid."""
+    return str(vault or "").strip().lower()
+
+
 # ─────────────────────────────── pagination ───────────────────────────────
 
 def plan_de_requetes(start_ms: int, end_ms: int, *, fenetre_ms: int = 24 * MS_PAR_HEURE) -> list[tuple[int, int]]:
-    """Découpe [start,end] en fenêtres `userFillsByTime` (l'endpoint plafonne à ~2000 fills/appel).
-    On MESURERA la couverture obtenue, on ne la promet pas."""
+    """Découpe [start,end] en fenêtres `userFillsByTime`.
+
+    Le CLI raffine ensuite adaptativement toute fenêtre qui atteint le cap de
+    l'endpoint ; cette fonction ne promet donc jamais qu'une fenêtre de 24 h
+    est complète à elle seule.
+    """
     if start_ms >= end_ms:
         return []
+    if fenetre_ms <= 0:
+        raise ValueError("fenetre_ms doit etre > 0")
     out: list[tuple[int, int]] = []
     t = int(start_ms)
     while t < end_ms:
-        out.append((t, min(t + fenetre_ms, int(end_ms))))
-        t += fenetre_ms
+        suivant = min(t + int(fenetre_ms), int(end_ms))
+        out.append((t, suivant))
+        t = suivant
     return out
 
 
@@ -42,6 +54,7 @@ def parser_fills(rep: Any, *, vault: str = "") -> list[dict]:
     """Normalise une réponse userFills(ByTime) → fills propres. Champs HL : time, coin, px, sz, side
     ('B'/'A'), dir ('Open Long'/'Close Short'/…), startPosition, oid, hash. Illisible → ignoré."""
     out: list[dict] = []
+    vault_id = str(vault or "").strip()
     for f in (rep or []):
         try:
             coin = str(f["coin"]).upper()
@@ -56,7 +69,7 @@ def parser_fills(rep: Any, *, vault: str = "") -> list[dict]:
             start_pos = float(f.get("startPosition"))
         except (TypeError, ValueError):
             start_pos = None
-        out.append({"vault": vault, "ts_ms": ts, "coin": coin, "px": px, "sz": sz, "signe": signe,
+        out.append({"vault": vault_id, "ts_ms": ts, "coin": coin, "px": px, "sz": sz, "signe": signe,
                     "dir": str(f.get("dir") or ""), "start_position": start_pos,
                     "tid": f.get("tid"), "oid": f.get("oid"), "hash": f.get("hash")})
     return out
@@ -73,7 +86,7 @@ def fill_identity(fill: dict) -> tuple:
         or ""
     )
     return (
-        str(fill.get("vault") or "").lower(),
+        normaliser_vault(fill.get("vault")),
         int(fill.get("ts_ms") or 0),
         str(fill.get("coin") or "").upper(),
         float(fill.get("px") or 0.0),
@@ -107,60 +120,199 @@ def canonical_fill_id(fill: Mapping[str, Any]) -> str:
     ).hexdigest()
 
 
+def _preuve_fill_score(fill: dict) -> tuple[int, int, int]:
+    """Préférence déterministe pour conserver la meilleure preuve d'un doublon.
+
+    Hiérarchie fail-closed : WS causal certifié > source non-live/REST > ancien
+    WS sans horloge de réception valide. Un label ``LIVE_WS`` seul ne suffit
+    jamais à remplacer une preuve historique certifiable.
+    """
+    source = str(fill.get("source") or "").upper()
+    live = source == "LIVE_WS"
+    causal_live = False
+    try:
+        ts_ms = int(fill.get("ts_ms") or 0)
+        received_at_ms = int(fill.get("received_at_ms") or 0)
+        causal_live = live and fill.get("isSnapshot") is False and received_at_ms >= ts_ms > 0
+    except (TypeError, ValueError, OverflowError):
+        causal_live = False
+    refs = sum(fill.get(name) not in (None, "") for name in ("hash", "tid", "oid", "stable_event_id"))
+    proof_tier = 2 if causal_live else (0 if live else 1)
+    explicit_rest = 1 if source == "REST_BACKFILL" else 0
+    return (proof_tier, refs, explicit_rest)
+
+
 def dedupliquer(fills: list[dict]) -> list[dict]:
-    """Dédup stable par (vault, ts, coin, px, sz, dir, oid/hash) — un backfill paginé recouvre les bords."""
-    vus: set[tuple] = set()
-    out: list[dict] = []
-    for f in sorted(fills, key=lambda x: (x.get("ts_ms", 0), str(x.get("coin")))):
+    """Dédup source-indépendante ; conserve la preuve causale la plus forte.
+
+    Les bords de pagination et la fusion REST/WS peuvent contenir le même
+    événement. Le résultat est identique quel que soit l'ordre des sources.
+    """
+    par_cle: dict[tuple, dict] = {}
+    scores: dict[tuple, tuple[int, int, int]] = {}
+    for f in fills:
         cle = fill_identity(f)
-        if cle not in vus:
-            vus.add(cle)
-            out.append(f)
-    return out
+        score = _preuve_fill_score(f)
+        if cle not in par_cle or score > scores[cle]:
+            copie = dict(f)
+            par_cle[cle] = copie
+            scores[cle] = score
+    return sorted(
+        par_cle.values(),
+        key=lambda x: (
+            int(x.get("ts_ms") or 0),
+            str(x.get("coin") or ""),
+            repr(fill_identity(x)),
+        ),
+    )
 
 
 # ─────────────────────────────── reconstruction du cycle de vie ───────────────────────────────
 
+def _fill_id(fill: dict, *, vault: str, coin: str) -> str:
+    return canonical_fill_id({**fill, "vault": vault, "coin": coin})
+
+
+def _event_id(fill_id: str, *, component_index: int, action: str, pos_avant: float, pos_apres: float) -> str:
+    material = {
+        "fill_id": fill_id,
+        "component_index": int(component_index),
+        "action": action,
+        "pos_avant": round(float(pos_avant), 12),
+        "pos_apres": round(float(pos_apres), 12),
+    }
+    return hashlib.sha256(
+        json.dumps(material, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    ).hexdigest()
+
+
 def reconstruire_episodes(fills: list[dict]) -> list[dict]:
-    """Rejoue les fills PAR (vault, coin) pour reconstruire OPEN/ADD/REDUCE/CLOSE. Rend une liste
-    d'ÉVÉNEMENTS : {ts, vault, coin, action, direction, taille_usd, pos_avant, pos_apres}. La position
-    signée est suivie fill par fill ; `startPosition` recale si présent (robuste aux trous de backfill)."""
+    """Rejoue les fills PAR (vault, coin) et reconstruit OPEN/ADD/REDUCE/CLOSE.
+
+    `startPosition`, lorsqu'il est présent, recale CHAQUE fill : un trou de
+    backfill ne contamine donc pas tous les événements suivants. Un fill qui
+    traverse zéro est décomposé en deux composants économiques du même fill :
+    CLOSE de l'ancienne position puis OPEN du reliquat opposé. Aucun reliquat
+    n'est perdu silencieusement.
+    """
     par: dict[tuple[str, str], list[dict]] = {}
     for f in fills:
-        par.setdefault((f.get("vault", ""), f["coin"]), []).append(f)
+        vault = normaliser_vault(f.get("vault"))
+        coin = str(f["coin"]).upper()
+        copie = dict(f)
+        copie["vault"] = vault
+        copie["coin"] = coin
+        par.setdefault((vault, coin), []).append(copie)
+
     events: list[dict] = []
     for (vault, coin), fs in par.items():
-        fs.sort(key=lambda x: x["ts_ms"])
-        pos = None
+        fs.sort(key=lambda x: (int(x["ts_ms"]), repr(fill_identity(x))))
+        pos: float | None = None
         for f in fs:
-            if pos is None:
-                pos = f["start_position"] if f["start_position"] is not None else 0.0
-            avant = pos
-            pos = avant + f["signe"] * f["sz"]
-            taille_usd = f["sz"] * f["px"]
-            if abs(avant) < 1e-12:
-                action = "OPEN"
-            elif (avant > 0) == (f["signe"] > 0):
-                action = "ADD"                                     # renforce dans le même sens
-            elif abs(pos) < 1e-9:
-                action = "CLOSE"
-            elif (avant > 0) != (pos > 0):
-                action = "CLOSE"                                   # flip -> on clôt (le ré-open sera le fill suivant)
+            try:
+                start_position = float(f["start_position"]) if f.get("start_position") is not None else None
+            except (TypeError, ValueError, OverflowError):
+                start_position = None
+            calcule = 0.0 if pos is None else float(pos)
+            avant = start_position if start_position is not None else calcule
+            position_rebased = (
+                pos is not None
+                and start_position is not None
+                and abs(start_position - calcule) > 1e-9
+            )
+            delta = float(f.get("signe") or 0) * float(f["sz"])
+            apres = avant + delta
+            fill_id = _fill_id(f, vault=vault, coin=coin)
+
+            def ajouter(
+                *,
+                action: str,
+                component_index: int,
+                component_count: int,
+                composant_avant: float,
+                composant_apres: float,
+                component_sz: float,
+                direction: int,
+                dir_label: str | None = None,
+            ) -> None:
+                taille_usd = abs(float(component_sz)) * float(f["px"])
+                raw_snapshot = f.get("isSnapshot")
+                label = str(dir_label if dir_label is not None else (f.get("dir") or ""))
+                events.append({
+                    "ts_ms": f["ts_ms"], "vault": vault, "coin": coin, "action": action,
+                    "direction": int(direction), "taille_usd": round(taille_usd, 2),
+                    "pos_avant": round(composant_avant, 8), "pos_apres": round(composant_apres, 8),
+                    "px": f["px"], "sz": abs(float(component_sz)), "dir": label,
+                    "leader_dir": f.get("dir"), "tid": f.get("tid"),
+                    "oid": f.get("oid"), "hash": f.get("hash"), "fill_id": fill_id,
+                    "event_id": _event_id(
+                        fill_id,
+                        component_index=component_index,
+                        action=action,
+                        pos_avant=composant_avant,
+                        pos_apres=composant_apres,
+                    ),
+                    "fill_component_index": int(component_index),
+                    "fill_component_count": int(component_count),
+                    "position_rebased": bool(position_rebased),
+                    "source": f.get("source") or "REST_BACKFILL",
+                    "is_snapshot": raw_snapshot if isinstance(raw_snapshot, bool) else None,
+                    "observed_at_ms": f.get("received_at_ms"),
+                    "stable_event_id": f.get("stable_event_id"),
+                })
+
+            eps = 1e-9
+            if abs(delta) < eps:
+                # Un side illisible ne doit pas fabriquer un événement économique.
+                pos = apres
+                continue
+            if abs(avant) < eps:
+                direction = 1 if apres > 0 else -1
+                ajouter(
+                    action="OPEN", component_index=0, component_count=1,
+                    composant_avant=0.0, composant_apres=apres,
+                    component_sz=abs(apres), direction=direction,
+                )
+            elif (avant > 0) == (delta > 0):
+                direction = 1 if apres > 0 else -1
+                ajouter(
+                    action="ADD", component_index=0, component_count=1,
+                    composant_avant=avant, composant_apres=apres,
+                    component_sz=abs(delta), direction=direction,
+                )
+            elif abs(apres) < eps:
+                direction = 1 if avant > 0 else -1
+                ajouter(
+                    action="CLOSE", component_index=0, component_count=1,
+                    composant_avant=avant, composant_apres=0.0,
+                    component_sz=abs(avant), direction=direction,
+                )
+            elif (avant > 0) == (apres > 0):
+                direction = 1 if avant > 0 else -1
+                ajouter(
+                    action="REDUCE", component_index=0, component_count=1,
+                    composant_avant=avant, composant_apres=apres,
+                    component_sz=abs(delta), direction=direction,
+                )
             else:
-                action = "REDUCE"
-            direction = 1 if (pos if abs(pos) > 1e-12 else avant) > 0 else -1
-            fill_id = canonical_fill_id({**f, "vault": vault, "coin": coin})
-            raw_snapshot = f.get("isSnapshot")
-            events.append({"ts_ms": f["ts_ms"], "vault": vault, "coin": coin, "action": action,
-                           "direction": direction, "taille_usd": round(taille_usd, 2),
-                           "pos_avant": round(avant, 8), "pos_apres": round(pos, 8), "px": f["px"],
-                           "sz": f["sz"], "dir": f.get("dir"), "tid": f.get("tid"),
-                           "oid": f.get("oid"), "hash": f.get("hash"), "fill_id": fill_id,
-                           "source": f.get("source") or "REST_BACKFILL",
-                           "is_snapshot": raw_snapshot if isinstance(raw_snapshot, bool) else None,
-                           "observed_at_ms": f.get("received_at_ms"),
-                           "stable_event_id": f.get("stable_event_id")})
-    events.sort(key=lambda e: e["ts_ms"])
+                # Flip en un seul fill : CLOSE ancien sens + OPEN du reliquat.
+                ancienne_direction = 1 if avant > 0 else -1
+                nouvelle_direction = 1 if apres > 0 else -1
+                ajouter(
+                    action="CLOSE", component_index=0, component_count=2,
+                    composant_avant=avant, composant_apres=0.0,
+                    component_sz=abs(avant), direction=ancienne_direction,
+                    dir_label="Close Long" if ancienne_direction > 0 else "Close Short",
+                )
+                ajouter(
+                    action="OPEN", component_index=1, component_count=2,
+                    composant_avant=0.0, composant_apres=apres,
+                    component_sz=abs(apres), direction=nouvelle_direction,
+                    dir_label="Open Long" if nouvelle_direction > 0 else "Open Short",
+                )
+            pos = apres
+
+    events.sort(key=lambda e: (int(e["ts_ms"]), str(e["fill_id"]), int(e["fill_component_index"]), str(e["event_id"])))
     return events
 
 
@@ -207,7 +359,8 @@ def couverture(fills: list[dict]) -> dict:
     ts = [f["ts_ms"] for f in fills]
     par_vault: dict[str, int] = {}
     for f in fills:
-        par_vault[f.get("vault", "")] = par_vault.get(f.get("vault", ""), 0) + 1
+        vault = normaliser_vault(f.get("vault"))
+        par_vault[vault] = par_vault.get(vault, 0) + 1
     return {"n_fills": len(fills), "span_h": round((max(ts) - min(ts)) / MS_PAR_HEURE, 2),
             "coins": sorted({f["coin"] for f in fills}), "n_vaults": len(par_vault),
             "fills_par_vault": par_vault, "t0_ms": min(ts), "t1_ms": max(ts)}
@@ -218,21 +371,21 @@ CAP_USERFILLS = 10_000            # userFillsByTime plafonne aux ~10k fills RÉC
 
 def auditer_couverture(fills: list[dict], *, cap: int = CAP_USERFILLS, lookback_debut_ms: int | None = None,
                        coins_tape: set[str] | None = None) -> dict:
-    """Audit HONNÊTE de couverture/troncature par vault (rectif Flo 23/07) : n fills, span réel, plus
+    """Audit HONNÊTE de couverture/troncature par vault : n fills, span réel, plus
     ancien/récent, et TRONCATURE probable si le vault a atteint le cap OU si son plus ancien fill est
-    bien postérieur au début demandé (userFillsByTime a coupé l'ancien). `coins_tape` = coins avec prix
-    (candles) → part des coins réellement mesurables. On ne PROMET jamais 14 j : on constate."""
+    bien postérieur au début demandé. `coins_tape` = coins avec prix (candles) → part des coins
+    réellement mesurables. On ne PROMET jamais 14 j : on constate."""
     par: dict[str, list[int]] = {}
     coins_fills: set[str] = set()
     for f in fills:
-        par.setdefault(f.get("vault", ""), []).append(int(f["ts_ms"]))
+        par.setdefault(normaliser_vault(f.get("vault")), []).append(int(f["ts_ms"]))
         coins_fills.add(str(f.get("coin") or "").upper())
     vaults = []
     for v, ts in par.items():
         ts.sort()
         tronque = len(ts) >= cap
         if lookback_debut_ms is not None and ts and (ts[0] - lookback_debut_ms) > 12 * MS_PAR_HEURE:
-            tronque = True                                        # le plus ancien fill est >12 h après le début demandé
+            tronque = True
         vaults.append({"vault": v, "n_fills": len(ts), "t0_ms": ts[0] if ts else None,
                        "t1_ms": ts[-1] if ts else None,
                        "span_h": round((ts[-1] - ts[0]) / MS_PAR_HEURE, 1) if len(ts) >= 2 else 0.0,
@@ -246,6 +399,6 @@ def auditer_couverture(fills: list[dict], *, cap: int = CAP_USERFILLS, lookback_
             "par_vault": vaults}
 
 
-__all__ = ["plan_de_requetes", "parser_fills", "fill_identity", "canonical_fill_id", "dedupliquer", "reconstruire_episodes",
-           "marquer_retraits", "entrees_alpha", "couverture", "auditer_couverture", "CAP_USERFILLS",
-           "MS_PAR_HEURE"]
+__all__ = ["plan_de_requetes", "parser_fills", "normaliser_vault", "fill_identity", "canonical_fill_id", "dedupliquer",
+           "reconstruire_episodes", "marquer_retraits", "entrees_alpha", "couverture", "auditer_couverture",
+           "CAP_USERFILLS", "MS_PAR_HEURE"]

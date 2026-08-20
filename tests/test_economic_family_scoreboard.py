@@ -5,6 +5,7 @@ from pathlib import Path
 
 from fastapi.testclient import TestClient
 
+from hl_observer.backtesting.cross_venue_certified import FOUR_FILL_CONTRACT_VERSION, SOURCE_MODE
 from hl_observer.simulation.economic_family_scoreboard import (
     build_scoreboards,
     promotion_verdict,
@@ -114,6 +115,15 @@ def test_strict_campaign_is_preferred_and_never_double_counts_arbitrage(tmp_path
         "duplicate_trade_ids": 0,
         "trade_ids_count": 30,
         "trade_ids_sha256": "a" * 64,
+        "period": {
+            "collection_meta": {
+                "source_mode": SOURCE_MODE,
+                "certified_snapshots": 30,
+                "mapping_verified": True,
+                "skew_verified": True,
+                "four_fill_contract_version": FOUR_FILL_CONTRACT_VERSION,
+            }
+        },
         "oos": {
             "gross_pnl_usd": 2.5,
             "fees_usd": 0.2,

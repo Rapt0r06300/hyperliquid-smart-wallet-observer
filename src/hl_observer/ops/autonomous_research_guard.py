@@ -12,6 +12,12 @@ import time
 from pathlib import Path
 from typing import Iterable
 
+from hl_observer.ops.autonomous_completion import (
+    AutonomousCompletionError,
+    COMPLETION_EXIT_CODE,
+    REGISTRY_EXIT_CODE,
+    finalize_autonomous_completion,
+)
 from hl_observer.ops.autonomous_research_status import status_path, write_status
 
 LOGGER = logging.getLogger(__name__)
@@ -167,6 +173,46 @@ def _start_stdout_pump(process: subprocess.Popen[str]) -> threading.Thread:
     return thread
 
 
+def _finalize_success(
+    *,
+    request: Path,
+    project_root: Path,
+    lab_root: Path,
+    result_dir: Path,
+) -> int:
+    """Turn a technical worker success into a fail-closed autonomous completion."""
+
+    try:
+        contract = finalize_autonomous_completion(
+            request_path=request,
+            project_root=project_root,
+            lab_root=lab_root,
+            result_dir=result_dir,
+        )
+    except AutonomousCompletionError as exc:
+        print(f"ALINA_COMPLETION_NO_GO: {exc}", flush=True)
+        result_path = result_dir / "JOB_RESULT.json"
+        try:
+            result = json.loads(result_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            result = {}
+        try:
+            code = int(result.get("exit_code") or COMPLETION_EXIT_CODE)
+        except (TypeError, ValueError):
+            code = COMPLETION_EXIT_CODE
+        return code if code in {COMPLETION_EXIT_CODE, REGISTRY_EXIT_CODE} else COMPLETION_EXIT_CODE
+
+    if contract.get("analysis_complete") is True:
+        print(
+            "ALINA_COMPLETION_OK "
+            f"suite={contract.get('suite')} registry={contract.get('completion_registry_path')}",
+            flush=True,
+        )
+    else:
+        print("ALINA_PREPARE_ONLY_OK: aucune suite enregistrée comme analysée.", flush=True)
+    return 0
+
+
 def run_guarded(
     command: list[str],
     *,
@@ -174,6 +220,7 @@ def run_guarded(
     result_dir: Path,
     request: Path,
     lab_root: Path | None = None,
+    project_root: Path | None = None,
 ) -> int:
     started = time.monotonic()
     process = subprocess.Popen(
@@ -208,7 +255,19 @@ def run_guarded(
             _write_timeout_live_status(lab_root, request=request, elapsed=elapsed)
         print(f"ALINA_RESEARCH_TIMEBOX_REACHED elapsed={elapsed:.1f}s", flush=True)
         return 124
-    return int(process.returncode or 0)
+
+    worker_code = int(process.returncode or 0)
+    if worker_code != 0:
+        return worker_code
+    if lab_root is None or project_root is None:
+        # Kept for low-level tests/callers; the production CLI always supplies both.
+        return 0
+    return _finalize_success(
+        request=request,
+        project_root=project_root,
+        lab_root=lab_root,
+        result_dir=result_dir,
+    )
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -229,27 +288,31 @@ def main(argv: Iterable[str] | None = None) -> int:
         print(f"ALINA_RESEARCH_GUARD_NO_GO: max-seconds doit être entre 60 et {MAX_ALLOWED_SECONDS}.")
         return 2
     lab_root = Path(args.lab_root).resolve()
+    project_root = Path(args.project_root).resolve()
+    request = Path(args.request).resolve()
+    result_dir = Path(args.result_dir).resolve()
     command = [
         sys.executable,
         "-m",
-        "hl_observer.ops.autonomous_research_job",
+        "hl_observer.ops.autonomous_research_job_router",
         "--request",
-        str(Path(args.request).resolve()),
+        str(request),
         "--project-root",
-        str(Path(args.project_root).resolve()),
+        str(project_root),
         "--lab-root",
         str(lab_root),
         "--result-dir",
-        str(Path(args.result_dir).resolve()),
+        str(result_dir),
     ]
     if args.force:
         command.append("--force")
     return run_guarded(
         command,
         max_seconds=max_seconds,
-        result_dir=Path(args.result_dir).resolve(),
-        request=Path(args.request).resolve(),
+        result_dir=result_dir,
+        request=request,
         lab_root=lab_root,
+        project_root=project_root,
     )
 
 

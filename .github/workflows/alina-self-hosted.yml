@@ -42,12 +42,12 @@ on:
       stage_timeout_seconds:
         description: "Timeout maximum d'une étape"
         required: true
-        default: "3600"
+        default: "21600"
         type: string
       cross_budget_s:
         description: "Budget Cross-Venue par campagne"
         required: true
-        default: "20"
+        default: "600"
         type: string
       lead_history_sources:
         description: "Nombre de sources historiques Lead-Lag"
@@ -78,7 +78,7 @@ concurrency:
 
 jobs:
   gros-run-hypersmart:
-    # IMPORTANT : aucune PR ne cible ce runner. Seuls main et workflow_dispatch sont autorisés.
+    # Aucun pull_request ne cible le PC. Seuls main + acteur propriétaire sont acceptés.
     runs-on: [self-hosted, Windows, X64, hypersmart]
     timeout-minutes: 1100
     env:
@@ -90,83 +90,91 @@ jobs:
       PYTHONUTF8: '1'
       PYTHONIOENCODING: 'utf-8'
     steps:
-      - name: Récupérer exactement le code de main demandé
-        uses: actions/checkout@v4
+      - name: Récupérer exactement le SHA demandé sans persister de credentials
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
           ref: ${{ github.sha }}
           clean: true
           fetch-depth: 2
           persist-credentials: false
 
-      - name: Vérifier la machine et le laboratoire persistant
-        id: preflight
+      - name: Gate sécurité avant toute exécution du code HyperSmart
+        id: trigger_gate
         shell: powershell
         run: |
           $ErrorActionPreference = 'Stop'
+          if ($env:GITHUB_REF -ne 'refs/heads/main') {
+            throw "SELF_HOSTED_REF_REFUSED: ref réel=$env:GITHUB_REF; seul refs/heads/main est autorisé."
+          }
+          if ($env:GITHUB_ACTOR -ne 'Rapt0r06300') {
+            throw "SELF_HOSTED_ACTOR_REFUSED: acteur=$env:GITHUB_ACTOR"
+          }
+          $actual = (git rev-parse HEAD).Trim().ToLowerInvariant()
+          if ($actual -ne $env:GITHUB_SHA.ToLowerInvariant()) {
+            throw "SELF_HOSTED_SHA_REFUSED: checkout=$actual github=$env:GITHUB_SHA"
+          }
+
+          if ($env:GITHUB_EVENT_NAME -eq 'push') {
+            $rows = @(git diff-tree --no-commit-id --name-status -r $env:GITHUB_SHA)
+            if ($rows.Count -ne 1) {
+              throw "CONTROL_ONLY_COMMIT_REQUIRED: le commit doit contenir exactement un seul changement; trouvés=$($rows.Count)."
+            }
+            $parts = $rows[0] -split '\s+', 2
+            if ($parts.Count -ne 2 -or $parts[0] -ne 'A') {
+              throw 'COMMANDES_IMMUABLES: le seul changement doit être un nouveau fichier JSON ajouté.'
+            }
+            $relative = ($parts[1] -replace '\\','/').Trim()
+            if ($relative -notmatch '^control/alina_jobs/[A-Za-z0-9][A-Za-z0-9._-]{0,79}\.json$') {
+              throw "CONTROL_PATH_REFUSED: $relative"
+            }
+            $path = (Resolve-Path -LiteralPath $relative).Path
+            "control_path=$path" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+            Write-Host "CONTROL_ONLY_COMMIT_OK : $relative"
+          } elseif ($env:GITHUB_EVENT_NAME -eq 'workflow_dispatch') {
+            Write-Host 'MANUAL_MAIN_DISPATCH_OK'
+          } else {
+            throw "SELF_HOSTED_EVENT_REFUSED: $env:GITHUB_EVENT_NAME"
+          }
+
+      - name: Vérifier la machine sans exécuter le projet
+        id: preflight
+        shell: powershell
+        env:
+          ALINA_DATASET_READ_TOKEN: ${{ secrets.ALINA_DATASET_READ_TOKEN }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          if ([string]::IsNullOrWhiteSpace($env:ALINA_DATASET_READ_TOKEN)) {
+            throw 'PRIVATE_DATASET_TOKEN_MISSING: configurer le secret Actions ALINA_DATASET_READ_TOKEN en lecture seule sur hypersmart-datasets.'
+          }
           $labRoot = [Environment]::GetEnvironmentVariable('ALINA_RESEARCH_HOME', 'Machine')
           if ([string]::IsNullOrWhiteSpace($labRoot)) { $labRoot = $env:ALINA_RESEARCH_HOME }
           if ([string]::IsNullOrWhiteSpace($labRoot)) {
-            throw 'ALINA_RESEARCH_HOME absent. Relancer PREPARER_PC_ALINA.cmd sur le PC.'
+            throw 'ALINA_RESEARCH_HOME absent. Relancer PREPARER_PC_ALINA.cmd sur le PC après GO_SELF_HOSTED.'
           }
           $labRoot = [System.IO.Path]::GetFullPath($labRoot)
           New-Item -ItemType Directory -Force -Path $labRoot | Out-Null
-          foreach ($dir in @('datasets','jobs\requests','results\github','status','job_logs','tools','checkpoints','runtime')) {
+          foreach ($dir in @('datasets','jobs\requests','jobs\manual_controls','results\jobs','status','job_logs','tools','checkpoints','runtime')) {
             New-Item -ItemType Directory -Force -Path (Join-Path $labRoot $dir) | Out-Null
           }
 
           $python = [Environment]::GetEnvironmentVariable('ALINA_PYTHON_EXE', 'Machine')
           if ([string]::IsNullOrWhiteSpace($python)) { $python = $env:ALINA_PYTHON_EXE }
           if ([string]::IsNullOrWhiteSpace($python)) {
-            throw 'ALINA_PYTHON_EXE absent. Relancer PREPARER_PC_ALINA.cmd pour créer le Python persistant du runner.'
+            throw 'ALINA_PYTHON_EXE absent. Relancer PREPARER_PC_ALINA.cmd après GO_SELF_HOSTED.'
           }
           $python = [System.IO.Path]::GetFullPath($python)
-          if (-not (Test-Path $python -PathType Leaf)) {
-            throw "ALINA_PYTHON_EXE invalide: $python"
-          }
+          if (-not (Test-Path -LiteralPath $python -PathType Leaf)) { throw "ALINA_PYTHON_EXE invalide: $python" }
           & $python -c "import sys; assert sys.version_info >= (3,11); print(sys.executable); print(sys.version)"
-          if ($LASTEXITCODE -ne 0) { throw 'Le Python persistant du runner est invalide ou inférieur à 3.11.' }
+          if ($LASTEXITCODE -ne 0) { throw 'Python persistant invalide ou inférieur à 3.11.' }
 
           $driveRoot = [System.IO.Path]::GetPathRoot($labRoot)
           $drive = Get-PSDrive -Name $driveRoot.Substring(0,1) -ErrorAction Stop
           $freeGiB = [Math]::Round($drive.Free / 1GB, 2)
-          if ($freeGiB -lt 25) { throw "Espace disque insuffisant: $freeGiB Gio libres (<25 Gio de réserve)." }
-          Copy-Item '.\tools\ALINA_RESEARCH_COCKPIT.ps1' (Join-Path $labRoot 'tools\ALINA_RESEARCH_COCKPIT.ps1') -Force
+          if ($freeGiB -lt 25) { throw "Espace disque insuffisant: $freeGiB Gio libres (<25 Gio de réserve minimale)." }
           "lab_root=$labRoot" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
           "python_exe=$python" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
           "free_gib=$freeGiB" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
-          Write-Host "Laboratoire : $labRoot"
-          Write-Host "Python runner : $python"
-          Write-Host "Libre : $freeGiB Gio"
-          Write-Host "SHA : $env:GITHUB_SHA"
-
-      - name: Préparer le Python persistant sans modifier les garde-fous
-        shell: powershell
-        run: |
-          $ErrorActionPreference = 'Stop'
-          $python = '${{ steps.preflight.outputs.python_exe }}'
-          & $python -m pip install --disable-pip-version-check -e .
-          if ($LASTEXITCODE -ne 0) { throw 'Installation editable du projet impossible dans le Python persistant.' }
-          & $python .\tools\alina_autonomous_lab.py check
-          if ($LASTEXITCODE -ne 0) { throw 'Diagnostic du laboratoire autonome en échec.' }
-
-      - name: Lire la nouvelle commande immuable déposée sur main
-        if: github.event_name == 'push'
-        id: control_push
-        shell: powershell
-        run: |
-          $ErrorActionPreference = 'Stop'
-          $rows = @(git diff-tree --no-commit-id --name-status -r $env:GITHUB_SHA |
-            Where-Object { $_ -match '^[A-Z]\s+control/alina_jobs/[^/]+\.json$' })
-          if ($rows.Count -ne 1) {
-            throw "Un push de commande doit toucher exactement un JSON dans control/alina_jobs/. Trouvés: $($rows.Count)"
-          }
-          $parts = $rows[0] -split '\s+', 2
-          if ($parts.Count -ne 2 -or $parts[0] -ne 'A') {
-            throw 'COMMANDES_IMMUABLES: un job doit être un nouveau JSON ajouté; modifier, renommer ou supprimer un ancien job est refusé.'
-          }
-          $path = (Resolve-Path $parts[1]).Path
-          "control_path=$path" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
-          Write-Host "Nouvelle commande GitHub immuable : $path"
+          Write-Host "SERVICE_PREFLIGHT_OK lab=$labRoot python=$python freeGiB=$freeGiB"
 
       - name: Construire une commande manuelle sûre
         if: github.event_name == 'workflow_dispatch'
@@ -190,25 +198,24 @@ jobs:
             max_cycle_seconds = [int]'${{ inputs.max_cycle_seconds }}'
             force = [System.Convert]::ToBoolean('${{ inputs.force }}')
             requested_by = '${{ github.actor }}'
-            note = 'Déclenchement manuel GitHub Actions.'
+            note = 'Déclenchement manuel GitHub Actions sur refs/heads/main.'
           }
           $payload | ConvertTo-Json -Depth 5 | Set-Content -Path $path -Encoding UTF8
           "control_path=$path" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
-          Write-Host "Commande manuelle : $path"
 
-      - name: Canoniser la commande et verrouiller le SHA de main
+      - name: Canoniser la commande après le gate sécurité
         id: build
         shell: powershell
         env:
-          CONTROL_PATH: ${{ steps.control_push.outputs.control_path || steps.control_manual.outputs.control_path }}
+          CONTROL_PATH: ${{ steps.trigger_gate.outputs.control_path || steps.control_manual.outputs.control_path }}
         run: |
           $ErrorActionPreference = 'Stop'
           if ([string]::IsNullOrWhiteSpace($env:CONTROL_PATH)) { throw 'Commande de contrôle absente.' }
           $python = '${{ steps.preflight.outputs.python_exe }}'
           $labRoot = '${{ steps.preflight.outputs.lab_root }}'
+          $env:PYTHONPATH = "$env:GITHUB_WORKSPACE\src;$env:GITHUB_WORKSPACE\tools;$env:GITHUB_WORKSPACE"
           $requestDir = Join-Path $labRoot 'jobs\requests'
-          $resultDir = Join-Path $labRoot "results\github\run_$env:GITHUB_RUN_ID"
-          New-Item -ItemType Directory -Force -Path $requestDir,$resultDir | Out-Null
+          New-Item -ItemType Directory -Force -Path $requestDir | Out-Null
           $workerRequest = Join-Path $requestDir "worker_$env:GITHUB_RUN_ID.json"
           $bundle = Join-Path $requestDir "bundle_$env:GITHUB_RUN_ID.json"
           & $python -m hl_observer.ops.self_hosted_control `
@@ -218,24 +225,30 @@ jobs:
             --bundle-output $bundle
           if ($LASTEXITCODE -ne 0) { throw 'Commande refusée par le contrat self-hosted.' }
           $bundleObj = Get-Content $bundle -Raw -Encoding UTF8 | ConvertFrom-Json
+          $jobId = [string]$bundleObj.control.job_id
+          if ($jobId -notmatch '^[A-Za-z0-9][A-Za-z0-9._-]{0,79}$') { throw "job_id refusé après canonisation: $jobId" }
+          $resultDir = Join-Path $labRoot ("results\jobs\" + $jobId)
+          New-Item -ItemType Directory -Force -Path $resultDir | Out-Null
+          Copy-Item '.\tools\ALINA_RESEARCH_COCKPIT.ps1' (Join-Path $labRoot 'tools\ALINA_RESEARCH_COCKPIT.ps1') -Force
+          & $python .\tools\alina_autonomous_lab.py check
+          if ($LASTEXITCODE -ne 0) { throw 'Diagnostic du laboratoire autonome en échec.' }
           "worker_request=$workerRequest" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
           "bundle=$bundle" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
           "result_dir=$resultDir" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
-          "job_id=$($bundleObj.control.job_id)" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          "job_id=$jobId" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
           "max_cycle_seconds=$($bundleObj.guard.max_cycle_seconds)" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
-          if ($bundleObj.guard.force -eq $true) {
-            "force_arg=--force" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
-          } else {
-            "force_arg=" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
-          }
+          if ($bundleObj.guard.force -eq $true) { "force_arg=--force" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8 } else { "force_arg=" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8 }
 
       - name: Lancer le gros backtest ou replay sur ce PC
         id: research
         continue-on-error: true
         shell: powershell
+        env:
+          HYPERSMART_DATASET_TOKEN: ${{ secrets.ALINA_DATASET_READ_TOKEN }}
         run: |
           $python = '${{ steps.preflight.outputs.python_exe }}'
           $labRoot = '${{ steps.preflight.outputs.lab_root }}'
+          $env:PYTHONPATH = "$env:GITHUB_WORKSPACE\src;$env:GITHUB_WORKSPACE\tools;$env:GITHUB_WORKSPACE"
           $args = @(
             '-m','hl_observer.ops.autonomous_research_guard',
             '--request','${{ steps.build.outputs.worker_request }}',
@@ -251,28 +264,50 @@ jobs:
           Write-Host "Code final du worker : $rc"
           exit $rc
 
-      - name: Construire le retour compact pour GitHub et ChatGPT
+      - name: Construire le retour public compact et nettoyé
         if: always() && steps.build.outputs.result_dir != ''
         id: compact_return
         continue-on-error: true
         shell: powershell
         run: |
           $python = '${{ steps.preflight.outputs.python_exe }}'
-          & $python -m hl_observer.ops.self_hosted_return --result-dir '${{ steps.build.outputs.result_dir }}'
+          $env:PYTHONPATH = "$env:GITHUB_WORKSPACE\src;$env:GITHUB_WORKSPACE\tools;$env:GITHUB_WORKSPACE"
+          $resultDir = '${{ steps.build.outputs.result_dir }}'
+          & $python -m hl_observer.ops.self_hosted_return --result-dir $resultDir
           $rc = $LASTEXITCODE
+          $publicDir = Join-Path $resultDir 'github_public'
+          if (Test-Path -LiteralPath $publicDir) { Remove-Item -LiteralPath $publicDir -Recurse -Force }
+          New-Item -ItemType Directory -Force -Path $publicDir | Out-Null
+          foreach ($name in @('ALINA_RETURN.json','ALINA_RETURN.md')) {
+            $source = Join-Path $resultDir $name
+            if (Test-Path -LiteralPath $source -PathType Leaf) { Copy-Item -LiteralPath $source -Destination (Join-Path $publicDir $name) -Force }
+          }
+          $proof = [ordered]@{
+            schema = 'alina.github_public_proof.v1'
+            github_run_id = $env:GITHUB_RUN_ID
+            github_sha = $env:GITHUB_SHA
+            job_id = '${{ steps.build.outputs.job_id }}'
+            worker_outcome = '${{ steps.research.outcome }}'
+            worker_exit_code = '${{ steps.research.outputs.exit_code }}'
+            compact_return_exit_code = $rc
+            paper_only = $true
+            real_execution = $false
+            raw_data_uploaded = $false
+            local_paths_uploaded = $false
+          }
+          $proof | ConvertTo-Json -Depth 4 | Set-Content -Path (Join-Path $publicDir 'GITHUB_SAFE_JOB_PROOF.json') -Encoding UTF8
           "exit_code=$rc" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
-          "json_path=${{ steps.build.outputs.result_dir }}\ALINA_RETURN.json" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
-          Write-Host "Code retour compact : $rc"
+          "public_dir=$publicDir" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
           exit $rc
 
-      - name: Remonter uniquement les petits rapports vérifiables
-        if: always() && steps.build.outputs.result_dir != ''
+      - name: Remonter uniquement le retour public allowlisté
+        if: always() && steps.compact_return.outputs.public_dir != ''
         id: upload
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: alina-resultats-${{ github.run_id }}
-          path: ${{ steps.build.outputs.result_dir }}
-          if-no-files-found: warn
+          path: ${{ steps.compact_return.outputs.public_dir }}
+          if-no-files-found: error
           retention-days: 30
           compression-level: 6
 
@@ -288,21 +323,15 @@ jobs:
           $tmp = "$path.$PID.tmp"
           $uploadOk = '${{ steps.upload.outcome }}' -eq 'success'
           $returnOk = '${{ steps.compact_return.outcome }}' -eq 'success'
-          $resultDir = '${{ steps.build.outputs.result_dir }}'
-          $reportCount = 0
-          if (-not [string]::IsNullOrWhiteSpace($resultDir) -and (Test-Path $resultDir -PathType Container)) {
-            $reportCount = @(Get-ChildItem $resultDir -File -Recurse -ErrorAction SilentlyContinue).Count
-          }
           $payload = [ordered]@{
-            schema = 'alina.github_sync_status.v1'
+            schema = 'alina.github_sync_status.v2'
             heartbeat_unix = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds() / 1000.0
             job_id = '${{ steps.build.outputs.job_id }}'
             github_run_id = $env:GITHUB_RUN_ID
             github_sha = $env:GITHUB_SHA
+            github_ref = $env:GITHUB_REF
             results_sent = $uploadOk
             compact_return_ready = $returnOk
-            compact_return_file = if ($returnOk) { 'ALINA_RETURN.json' } else { $null }
-            report_count = $reportCount
             artifact_id = '${{ steps.upload.outputs.artifact-id }}'
             artifact_url = '${{ steps.upload.outputs.artifact-url }}'
             worker_outcome = '${{ steps.research.outcome }}'
@@ -310,7 +339,8 @@ jobs:
             waiting_for_analysis = $true
             requeued = $false
             gross_logs_stay_local = $true
-            message_fr = if ($uploadOk -and $returnOk) { 'Le retour compact et les petits rapports sont disponibles sur GitHub; les gros logs restent sur le PC.' } elseif ($uploadOk) { 'Les rapports sont sur GitHub mais le retour compact doit être vérifié.' } else { 'La remontée GitHub des rapports doit être vérifiée.' }
+            public_artifact_allowlisted = $true
+            message_fr = if ($uploadOk -and $returnOk) { 'Retour compact nettoyé disponible sur GitHub; données, chemins locaux et gros logs restent sur le PC.' } elseif ($uploadOk) { 'Artifact public envoyé mais retour compact à vérifier.' } else { 'Remontée GitHub à vérifier.' }
           }
           $payload | ConvertTo-Json -Depth 5 | Set-Content -Path $tmp -Encoding UTF8
           Move-Item -Path $tmp -Destination $path -Force
@@ -323,9 +353,6 @@ jobs:
           Write-Host "Worker exit code : ${{ steps.research.outputs.exit_code }}"
           Write-Host "Retour compact : ${{ steps.compact_return.outcome }}"
           Write-Host "Artifact : ${{ steps.upload.outputs.artifact-url }}"
-          if ('${{ steps.research.outcome }}' -ne 'success') {
-            throw 'Le gros run HyperSmart n a pas terminé avec succès. Les preuves disponibles ont tout de même été remontées.'
-          }
-          if ('${{ steps.compact_return.outcome }}' -ne 'success') {
-            throw 'Le calcul a terminé mais le retour compact GitHub/ChatGPT a échoué. Les autres preuves restent disponibles.'
-          }
+          if ('${{ steps.research.outcome }}' -ne 'success') { throw 'Le gros run HyperSmart n a pas terminé avec succès.' }
+          if ('${{ steps.compact_return.outcome }}' -ne 'success') { throw 'Le calcul a terminé mais le retour compact a échoué.' }
+          if ('${{ steps.upload.outcome }}' -ne 'success') { throw 'Le retour public allowlisté n a pas été remonté.' }

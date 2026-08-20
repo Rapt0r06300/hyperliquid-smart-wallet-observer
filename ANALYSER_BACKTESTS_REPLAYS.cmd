@@ -45,7 +45,10 @@ goto :analyse_principale
 
 :mode_full
 if "%HYPERSMART_LAB_BUDGET%"=="" set "HYPERSMART_LAB_BUDGET=0"
-set "RUN_EXTENDED_SUITE=0"
+REM AUD-222/223 : FULL est le profil officiel par defaut. Il doit donc lancer la suite
+REM historique large/multi-session apres le laboratoire canonique, sinon le point d'entree
+REM officiel resterait limite a la petite grille locale (24 configs). QUICK seul reste court.
+set "RUN_EXTENDED_SUITE=1"
 goto :analyse_principale
 
 :mode_deep
@@ -131,8 +134,8 @@ if not "%RC%"=="0" (
   endlocal & exit /b %RC%
 )
 
-REM DEEP/MAXIMUM ajoutent la suite historique large apres le laboratoire canonique scope.
-REM Elle reste locale, read-only et paper strict. FULL ne duplique pas cette analyse couteuse.
+REM FULL/DEEP/MAXIMUM ajoutent la suite historique large apres le laboratoire canonique scope.
+REM Elle reste locale, read-only et paper strict. QUICK est volontairement le seul profil court.
 if "%RUN_EXTENDED_SUITE%"=="1" goto :run_extended_suite
 goto :after_extended_suite
 

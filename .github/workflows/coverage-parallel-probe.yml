@@ -1,0 +1,235 @@
+name: coverage-parallel-probe
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'src/hl_observer/**/*.py'
+      - 'tests/**/*.py'
+      - 'tools/coverage_gap_report.py'
+      - 'tools/check_coverage_ratchet.py'
+      - '.github/workflows/coverage-parallel-probe.yml'
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+  actions: read
+  statuses: write
+
+concurrency:
+  group: coverage-parallel-probe-${{ github.sha }}
+  cancel-in-progress: false
+
+env:
+  PYTHONPATH: src:tools
+  PYTHONUTF8: "1"
+  PYTHONIOENCODING: utf-8
+  HL_ENABLE_MAINNET_EXECUTION: "0"
+  HL_ENABLE_TESTNET_EXECUTION: "0"
+  REAL_MAINNET_TRADING: "false"
+  HYPERSMART_ENABLE_REAL_ORDERS: "0"
+  ENABLE_REAL_ORDERS: "0"
+  COVERAGE_SHARDS: "8"
+
+jobs:
+  announce:
+    name: Annonce probe coverage shardé
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Publier le probe en cours
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          curl --fail-with-body --silent --show-error \
+            -X POST \
+            -H "Accept: application/vnd.github+json" \
+            -H "Authorization: Bearer ${GITHUB_TOKEN}" \
+            -H "X-GitHub-Api-Version: 2022-11-28" \
+            "https://api.github.com/repos/${GITHUB_REPOSITORY}/statuses/${GITHUB_SHA}" \
+            -d "{\"state\":\"pending\",\"context\":\"hypersmart/coverage-parallel-probe\",\"description\":\"Mesure coverage 8 shards en cours\",\"target_url\":\"${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}\"}"
+
+  coverage-shard:
+    name: Coverage shard ${{ matrix.shard }}/8
+    needs: announce
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [0, 1, 2, 3, 4, 5, 6, 7]
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+          fetch-depth: 2
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: '3.11'
+          cache: pip
+      - name: Installer dépendances exactes
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e '.[dev]'
+          python -m pip install -r requirements-recherche.txt
+          python -m pip install -r requirements-ci-tools.txt
+      - name: Construire la tranche déterministe
+        env:
+          SHARD_INDEX: ${{ matrix.shard }}
+        run: |
+          python - <<'PY'
+          import os
+          from pathlib import Path
+
+          shard = int(os.environ["SHARD_INDEX"])
+          total = int(os.environ["COVERAGE_SHARDS"])
+          long_tail = Path("tests/test_coverage_closure_typed_long_tail.py")
+          tests = sorted(path for path in Path("tests").glob("test_*.py") if path != long_tail)
+          selected = [str(path) for index, path in enumerate(tests) if index % total == shard]
+          # Le contrat long-tail est déjà lui-même shardé via HYPERSMART_COVERAGE_CONTRACT_SHARD.
+          # On l'ajoute à chaque job, mais chaque job n'exécute qu'un huitième de ses modules.
+          if long_tail.is_file():
+              selected.append(str(long_tail))
+          if not selected:
+              raise SystemExit(f"COVERAGE_SHARD_EMPTY:{shard}")
+          Path("shard-tests.txt").write_text("\n".join(selected) + "\n", encoding="utf-8")
+          print(f"shard={shard}/{total} tests={len(selected)} total_tests_files={len(tests) + int(long_tail.is_file())}")
+          PY
+      - name: Exécuter la tranche sous coverage
+        env:
+          HYPERSMART_COVERAGE_CONTRACT_SHARD: ${{ matrix.shard }}
+        run: |
+          mapfile -t TEST_FILES < shard-tests.txt
+          python -m coverage run --parallel-mode --source=src -m pytest \
+            -q -p no:cacheprovider --tb=no --durations=10 "${TEST_FILES[@]}"
+      - name: Vérifier la donnée coverage du shard
+        if: always()
+        run: |
+          ls -la .coverage.*
+          test "$(find . -maxdepth 1 -type f -name '.coverage.*' | wc -l)" -ge 1
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
+        with:
+          name: coverage-shard-${{ matrix.shard }}-${{ github.sha }}
+          path: .coverage.*
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 3
+
+  aggregate:
+    name: Fusion coverage 8 shards + cible 100%
+    needs: coverage-shard
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Refuser tout shard rouge
+        env:
+          SHARD_RESULT: ${{ needs.coverage-shard.result }}
+        run: |
+          test "${SHARD_RESULT}" = "success" || {
+            echo "COVERAGE_SHARD_FAILURE:${SHARD_RESULT}"
+            exit 1
+          }
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+          fetch-depth: 2
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: '3.11'
+          cache: pip
+      - name: Installer coverage et outils du dépôt
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install coverage==7.15.2
+      - name: Télécharger et aplatir les huit artifacts coverage
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p coverage-data coverage-combine
+          curl --fail-with-body --silent --show-error \
+            -H "Accept: application/vnd.github+json" \
+            -H "Authorization: Bearer ${GITHUB_TOKEN}" \
+            -H "X-GitHub-Api-Version: 2022-11-28" \
+            "https://api.github.com/repos/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}/artifacts?per_page=100" \
+            -o /tmp/artifacts.json
+          python - <<'PY' > /tmp/coverage-artifacts.tsv
+          import json, os
+          data = json.load(open('/tmp/artifacts.json', encoding='utf-8'))
+          prefix = 'coverage-shard-'
+          suffix = '-' + os.environ['GITHUB_SHA']
+          rows = []
+          for item in data.get('artifacts', []):
+              name = str(item.get('name') or '')
+              if name.startswith(prefix) and name.endswith(suffix) and not item.get('expired'):
+                  rows.append((int(item['id']), name))
+          if len(rows) != 8:
+              raise SystemExit(f'COVERAGE_ARTIFACT_COUNT_INVALID:{len(rows)}')
+          for artifact_id, name in sorted(rows):
+              print(f'{artifact_id}\t{name}')
+          PY
+          while IFS=$'\t' read -r ARTIFACT_ID ARTIFACT_NAME; do
+            mkdir -p "coverage-data/${ARTIFACT_NAME}"
+            curl --fail-with-body --silent --show-error --location \
+              -H "Accept: application/vnd.github+json" \
+              -H "Authorization: Bearer ${GITHUB_TOKEN}" \
+              -H "X-GitHub-Api-Version: 2022-11-28" \
+              "https://api.github.com/repos/${GITHUB_REPOSITORY}/actions/artifacts/${ARTIFACT_ID}/zip" \
+              -o "/tmp/${ARTIFACT_NAME}.zip"
+            unzip -oq "/tmp/${ARTIFACT_NAME}.zip" -d "coverage-data/${ARTIFACT_NAME}"
+          done < /tmp/coverage-artifacts.tsv
+          mapfile -t COVERAGE_FILES < <(find coverage-data -type f -name '.coverage.*' | sort)
+          test "${#COVERAGE_FILES[@]}" -eq 8
+          for index in "${!COVERAGE_FILES[@]}"; do
+            cp "${COVERAGE_FILES[$index]}" "coverage-combine/.coverage.shard${index}"
+          done
+          test "$(find coverage-combine -maxdepth 1 -type f -name '.coverage.*' | wc -l)" -eq 8
+          ls -la coverage-combine
+      - name: Combiner les shards et produire coverage.json
+        run: |
+          python -m coverage combine coverage-combine
+          python -m coverage json -o coverage.json
+          test -s coverage.json
+      - name: Rapport exact des gaps
+        run: python tools/coverage_gap_report.py
+      - name: Cliquet 100 pour le probe
+        run: python tools/check_coverage_ratchet.py
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
+        with:
+          name: coverage-parallel-probe-${{ github.sha }}
+          path: |
+            coverage.json
+            coverage-gaps.json
+            coverage-gaps.md
+          if-no-files-found: warn
+          retention-days: 14
+      - name: Publier le verdict du probe
+        if: always()
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          JOB_STATUS: ${{ job.status }}
+        run: |
+          STATE=failure
+          DESCRIPTION="Probe coverage shardé rouge"
+          if [ "${JOB_STATUS}" = "success" ]; then
+            STATE=success
+            DESCRIPTION="Probe coverage shardé 100% vert"
+          fi
+          STATE="$STATE" DESCRIPTION="$DESCRIPTION" python - <<'PY' > /tmp/status.json
+          import json, os
+          print(json.dumps({
+              "state": os.environ["STATE"],
+              "context": "hypersmart/coverage-parallel-probe",
+              "description": os.environ["DESCRIPTION"],
+              "target_url": f"{os.environ['GITHUB_SERVER_URL']}/{os.environ['GITHUB_REPOSITORY']}/actions/runs/{os.environ['GITHUB_RUN_ID']}",
+          }))
+          PY
+          curl --fail-with-body --silent --show-error \
+            -X POST \
+            -H "Accept: application/vnd.github+json" \
+            -H "Authorization: Bearer ${GITHUB_TOKEN}" \
+            -H "X-GitHub-Api-Version: 2022-11-28" \
+            "https://api.github.com/repos/${GITHUB_REPOSITORY}/statuses/${GITHUB_SHA}" \
+            --data-binary @/tmp/status.json

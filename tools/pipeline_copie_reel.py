@@ -58,7 +58,7 @@ def _legacy_latest_nav_par_vault(root: Path) -> dict[str, float]:
             except ValueError:
                 continue
             if d.get("vault") and float(d.get("nav_usd") or 0) > 0:
-                nav[d["vault"]] = float(d["nav_usd"])
+                nav[VB.normaliser_vault(d["vault"])] = float(d["nav_usd"])
     except OSError:
         pass
     return nav
@@ -73,7 +73,7 @@ def _charger_entrees_alpha_legacy(root: Path) -> list[dict]:
     nav = _legacy_latest_nav_par_vault(root)
     out = []
     for e in VB.entrees_alpha(episodes):
-        n = nav.get(e.get("vault"), 0.0)
+        n = nav.get(VB.normaliser_vault(e.get("vault")), 0.0)
         if n > 0:
             out.append(dict(e, move_frac=round(float(e.get("taille_usd") or 0.0) / n, 4)))
     return out
@@ -95,11 +95,11 @@ def _charger_jsonl(path: Path) -> list[dict]:
 
 
 def _nav_history(root: Path) -> dict[str, list[tuple[int, float]]]:
-    """Return sorted observable NAV history; future snapshots are never eligible."""
+    """Return sorted observable NAV history keyed by canonical vault identity."""
     history: dict[str, list[tuple[int, float]]] = {}
     for row in _charger_jsonl(root / SNAP):
         try:
-            vault = str(row["vault"])
+            vault = VB.normaliser_vault(row["vault"])
             ts_ms = int(row["ts_ms"])
             nav_usd = float(row["nav_usd"])
         except (KeyError, TypeError, ValueError):
@@ -114,7 +114,7 @@ def _nav_history(root: Path) -> dict[str, list[tuple[int, float]]]:
 def _nav_asof(
     history: dict[str, list[tuple[int, float]]], vault: str, ts_ms: int
 ) -> tuple[float, int] | None:
-    rows = history.get(vault) or []
+    rows = history.get(VB.normaliser_vault(vault)) or []
     index = bisect.bisect_right(rows, (int(ts_ms), float("inf"))) - 1
     if index < 0:
         return None
@@ -145,12 +145,9 @@ def _fills_canoniques(root: Path) -> tuple[list[dict], dict[str, Any]]:
             causal_live.append(row)
         else:
             unclocked_live.append(row)
-    # Put causal rows first.  ``dedupliquer`` is stable for equal event times,
-    # so a fill seen both by WS and by a later REST backfill retains the only
-    # provenance that can support a post-freeze forward claim.
-    # Historical rows precede legacy unclocked WS rows: those old rows remain
-    # useful as audit history, but must never displace a properly labelled
-    # REST observation or be advertised as causal evidence.
+    # Put causal rows first. ``dedupliquer`` applies the same hierarchy
+    # independently of read order: causal WS > REST/non-live > unclocked WS.
+    # Legacy unclocked WS rows remain audit history but can never displace REST.
     merged = causal_live + historical + unclocked_live
     deduped = VB.dedupliquer(merged)
     return deduped, {

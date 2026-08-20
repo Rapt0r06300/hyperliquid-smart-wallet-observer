@@ -1,11 +1,7 @@
 from __future__ import annotations
 
 import re
-try:
-    from enum import StrEnum
-except ImportError:
-    from enum import Enum
-    class StrEnum(str, Enum): pass
+from enum import StrEnum
 
 from pydantic import BaseModel
 
@@ -84,4 +80,3 @@ def validate_leaderboard_wallet_address(
         validation_status=LeaderboardAddressStatus.INVALID_ADDRESS_REJECTED,
         rejection_reason="not_42_char_hex_address",
     )
-

@@ -54,6 +54,12 @@ def _valid_sha(value: object) -> bool:
     return len(text) == 40 and all(ch in "0123456789abcdef" for ch in text)
 
 
+def _explicit_zero(value: object) -> bool:
+    """Only a real integer 0 is success; bool/string/None fail closed."""
+
+    return isinstance(value, int) and not isinstance(value, bool) and value == 0
+
+
 def completed_registry_path(lab_root: str | Path) -> Path:
     return Path(lab_root).resolve() / COMPLETED_REGISTRY_RELATIVE
 
@@ -185,17 +191,29 @@ def record_completed_suite_from_result(
     lab_root: str | Path,
     job_result_path: str | Path,
 ) -> Path:
-    """N'accepte qu'un JOB_RESULT SUCCESS réellement analysant et paper/read-only."""
+    """Importe uniquement un JOB_RESULT déjà certifié par le completion guard.
+
+    Ce helper n'est pas le chemin primaire de finalisation : il sert à rejouer/importer
+    une preuve déjà finalisée. Toute ambiguïté échoue donc fermée.
+    """
 
     result = _load_json(Path(job_result_path))
     if result.get("schema") != "alina.autonomous_research_result.v1":
         raise ValueError("JOB_RESULT n'a pas le schéma autonome attendu.")
-    if result.get("status") != "SUCCESS" or int(result.get("exit_code") or 0) != 0:
-        raise ValueError("Seul un job SUCCESS avec exit_code=0 peut compléter une suite.")
+    if result.get("status") != "SUCCESS" or not _explicit_zero(result.get("exit_code")):
+        raise ValueError(
+            "Seul un job SUCCESS avec exit_code entier explicite 0 peut compléter une suite."
+        )
+    if result.get("analysis_complete") is not True:
+        raise ValueError("JOB_RESULT sans preuve analysis_complete=true.")
+    if result.get("completion_recorded") is not True:
+        raise ValueError("JOB_RESULT non finalisé: completion_recorded=true est obligatoire.")
     if result.get("paper_only") is not True or result.get("real_execution") is not False:
         raise ValueError("JOB_RESULT sans preuve paper/read-only stricte.")
     if result.get("start_live_collection") is not False:
-        raise ValueError("Une collecte live ne peut pas être enregistrée comme analyse FULL/COLD autonome.")
+        raise ValueError(
+            "Une collecte live ne peut pas être enregistrée comme analyse FULL/COLD autonome."
+        )
     mode = str(result.get("mode") or "")
     if mode not in ANALYSIS_MODES:
         raise ValueError("prepare-only ou mode inconnu ne complète jamais une suite analysée.")
@@ -308,7 +326,11 @@ def choose_max_data_job(
             continue
         missing_assets = int(plan.get("missing_asset_count") or 0)
         if missing_assets:
-            rejected.append({"suite": suite, "reason": "RELEASE_ASSETS_MISSING", "missing_asset_count": missing_assets})
+            rejected.append({
+                "suite": suite,
+                "reason": "RELEASE_ASSETS_MISSING",
+                "missing_asset_count": missing_assets,
+            })
             continue
         remaining = _number(plan.get("remaining_download_gib"))
         if remaining is None:
@@ -318,13 +340,15 @@ def choose_max_data_job(
             continue
         required = remaining + reserve
         if required > free_gib:
-            rejected.append({
-                "suite": suite,
-                "reason": "INSUFFICIENT_DISK",
-                "remaining_download_gib": round(remaining, 4),
-                "required_with_reserve_gib": round(required, 4),
-                "free_disk_gib": round(free_gib, 4),
-            })
+            rejected.append(
+                {
+                    "suite": suite,
+                    "reason": "INSUFFICIENT_DISK",
+                    "remaining_download_gib": round(remaining, 4),
+                    "required_with_reserve_gib": round(required, 4),
+                    "free_disk_gib": round(free_gib, 4),
+                }
+            )
             continue
 
         mode = "economic" if suite == "economic-full" else "historical-deep"
@@ -372,7 +396,10 @@ def write_decision(output_dir: str | Path, decision: Mapping[str, Any]) -> tuple
     target.mkdir(parents=True, exist_ok=True)
     json_path = target / "MAX_DATA_DECISION.json"
     md_path = target / "MAX_DATA_DECISION.md"
-    json_path.write_text(json.dumps(decision, ensure_ascii=False, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    json_path.write_text(
+        json.dumps(decision, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
     lines = [
         "# Alina SmartFlow — décision MAX DATA",
         "",
@@ -392,13 +419,21 @@ def write_decision(output_dir: str | Path, decision: Mapping[str, Any]) -> tuple
         "",
     ]
     lines.extend(f"- `{suite}`" for suite in decision.get("suite_ladder") or [])
-    lines.extend(["", "> MAX DATA signifie utiliser le maximum de données utiles et reproductibles, pas retuner sur un holdout déjà observé.", ""])
+    lines.extend(
+        [
+            "",
+            "> MAX DATA signifie utiliser le maximum de données utiles et reproductibles, pas retuner sur un holdout déjà observé.",
+            "",
+        ]
+    )
     md_path.write_text("\n".join(lines), encoding="utf-8")
     return json_path, md_path
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description="Choisit la prochaine suite FULL/COLD utile avec garde disque et objectif +4 USD par famille.")
+    parser = argparse.ArgumentParser(
+        description="Choisit la prochaine suite FULL/COLD utile avec garde disque et objectif +4 USD par famille."
+    )
     parser.add_argument("--brain-json", required=True)
     parser.add_argument("--lab-root", required=True)
     parser.add_argument("--output-dir", required=True)
@@ -415,7 +450,9 @@ def main(argv: list[str] | None = None) -> int:
     lab_root = Path(args.lab_root).resolve()
     plans = load_suite_plans(lab_root)
     if not plans:
-        raise ValueError("BIBLIOTHEQUE_180GO.json absente ou sans plans; exécute dataset_bridge plan-all.")
+        raise ValueError(
+            "BIBLIOTHEQUE_180GO.json absente ou sans plans; exécute dataset_bridge plan-all."
+        )
     persisted = completed_suites_from_registry(lab_root, project_sha=args.project_sha)
     completed = sorted(set(args.completed_suite) | set(persisted))
     free_gib = shutil.disk_usage(lab_root).free / (1024**3)

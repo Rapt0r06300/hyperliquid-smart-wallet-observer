@@ -1,10 +1,6 @@
 from __future__ import annotations
 
-try:
-    from enum import StrEnum
-except ImportError:
-    from enum import Enum
-    class StrEnum(str, Enum): pass
+from enum import StrEnum
 from typing import Any
 
 from pydantic import BaseModel, Field
@@ -72,4 +68,3 @@ class ExplorerResult(BaseModel):
     def finish(self) -> "ExplorerResult":
         self.finished_at_ms = now_ms()
         return self
-

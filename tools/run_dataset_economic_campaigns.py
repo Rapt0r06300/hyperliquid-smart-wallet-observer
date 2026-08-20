@@ -1,18 +1,20 @@
 """FULL/COLD adapter around the canonical economic campaign runner.
 
-The canonical economic strategies stay untouched.  This wrapper is used only
-for materialized dataset workspaces: it installs deterministic multi-source
+The canonical economic strategies stay untouched. This wrapper is used only
+for materialized dataset workspaces: it supplies deterministic multi-source
 views for Copy-Vault/Cross-Venue, lets Lead-Lag consume its manifest sources,
 and replaces canonical-only provenance with provenance of all original files.
+No canonical module global is monkeypatched: run_campaigns executes with an
+isolated copy of its globals containing the explicit adapters.
 """
 from __future__ import annotations
 
 import argparse
 import importlib.util
 import json
-import os
 import sys
 from pathlib import Path
+from types import FunctionType
 from typing import Any, Iterable
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -80,6 +82,23 @@ def _looks_like_cross_provenance(paths: Iterable[str | Path]) -> bool:
     return names == {"carnet_venues.jsonl"}
 
 
+def _isolated_run_campaigns(canonical, *, tool_loader, provenance_builder):
+    """Clone the function globals instead of mutating the loaded module."""
+    environment = dict(canonical.run_campaigns.__globals__)
+    environment["_tool"] = tool_loader
+    environment["dataset_provenance"] = provenance_builder
+    isolated = FunctionType(
+        canonical.run_campaigns.__code__,
+        environment,
+        name=canonical.run_campaigns.__name__,
+        argdefs=canonical.run_campaigns.__defaults__,
+        closure=canonical.run_campaigns.__closure__,
+    )
+    isolated.__kwdefaults__ = dict(canonical.run_campaigns.__kwdefaults__ or {})
+    isolated.__annotations__ = dict(getattr(canonical.run_campaigns, "__annotations__", {}))
+    return isolated
+
+
 def run_dataset_campaigns(
     data_root: Path,
     *,
@@ -124,8 +143,6 @@ def run_dataset_campaigns(
             )
         return tool
 
-    canonical._tool = dataset_tool_loader
-
     original_provenance = canonical.dataset_provenance
 
     def dataset_provenance(root_value, paths):
@@ -137,9 +154,12 @@ def run_dataset_campaigns(
             return original_provenance(data_root, cross_sources)
         return original_provenance(root_value, values)
 
-    canonical.dataset_provenance = dataset_provenance
-
-    result = canonical.run_campaigns(
+    isolated_run = _isolated_run_campaigns(
+        canonical,
+        tool_loader=dataset_tool_loader,
+        provenance_builder=dataset_provenance,
+    )
+    result = isolated_run(
         data_root,
         cross_budget_s=cross_budget_s,
         cross_current_only=cross_current_only,
@@ -148,6 +168,10 @@ def run_dataset_campaigns(
         collection_duration_s=collection_duration_s,
         collection_startup_wait_s=collection_startup_wait_s,
     )
+    # Strong postcondition: the canonical loaded module was never changed.
+    if canonical._tool is not original_tool_loader or canonical.dataset_provenance is not original_provenance:
+        raise RuntimeError("canonical economic runner globals changed unexpectedly")
+
     coverage_json, coverage_md, coverage = write_economic_source_coverage(
         data_root,
         copy_consumed=copy_sources,
@@ -161,6 +185,7 @@ def run_dataset_campaigns(
     result["source_release_id"] = 371149058
     result["paper_read_only"] = True
     result["real_execution"] = False
+    result["canonical_globals_mutated"] = False
     return result
 
 

@@ -8,6 +8,7 @@ Le moteur central (`moteur_paper`) décide ensuite de l'admission (fraîcheur + 
 from __future__ import annotations
 
 import json
+import os
 import time
 from pathlib import Path
 from typing import Any

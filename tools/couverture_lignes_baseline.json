@@ -1,5 +1,6 @@
 {
-  "min_pct_lignes": 83.83,
+  "min_pct_lignes": 100.0,
   "tests_executes": 3526,
-  "note": "#596 — couverture de LIGNES executees (coverage.py). A lire A COTE de tools/couverture_baseline.json (#121), qui mesure seulement « importe par un test » : ce dernier est une borne OPTIMISTE. Deux chiffres, deux questions. `tests_executes` est la CONTRE-EXPERTISE de la mesure elle-meme (#599) : une couverture calculee sur une suite TRONQUEE est une couverture FAUSSE."
+  "max_missing_lines": 0,
+  "note": "Objectif final HyperSmart: 100% de lignes réellement exécutées sur tout src, avec 0 ligne manquante. Aucun abaissement de baseline, aucune exclusion artificielle du périmètre et aucun arrondi à 100% accepté s'il reste une ligne non couverte. `tests_executes` conserve la dernière référence historique connue et n'autorise jamais une suite tronquée."
 }

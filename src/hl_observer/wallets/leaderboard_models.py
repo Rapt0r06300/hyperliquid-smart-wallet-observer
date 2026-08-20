@@ -1,10 +1,6 @@
 from __future__ import annotations
 
-try:
-    from enum import StrEnum
-except ImportError:
-    from enum import Enum
-    class StrEnum(str, Enum): pass
+from enum import StrEnum
 
 from pydantic import BaseModel, Field
 
@@ -131,10 +127,6 @@ def score_leaderboard_row(row: LeaderboardRowRecord) -> float:
     account_value_score = 50.0 if row.account_value_usdc is None else clamp(row.account_value_usdc / 1_000_000.0 * 100.0, 0.0, 100.0)
     volume_score = 50.0 if row.volume_usdc is None else clamp(row.volume_usdc / 10_000_000.0 * 100.0, 0.0, 100.0)
     rank_score = 50.0 if row.rank is None else clamp(100.0 - max(0, row.rank - 1) / 500.0 * 100.0, 0.0, 100.0)
-    # PRIORITE BALEINES (demande user 2026-06-21): on pondere fortement le PnL et le ROI
-    # realises + la taille du compte (= 0.80 du score). Les "baleines" (gros PnL/ROI) remontent
-    # donc en tete de la shortlist et sont copiees en priorite, SANS exclure les autres wallets
-    # (qui gardent un score et restent eligibles plus bas dans le classement).
     return clamp(
         0.36 * pnl_score
         + 0.28 * roi_score

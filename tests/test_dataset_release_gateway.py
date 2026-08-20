@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
 from hl_observer.datasets import github_api_transport as transport
 from hl_observer.datasets import release_gateway
 
@@ -87,36 +89,56 @@ def test_transport_https_utilise_le_token_runtime_sans_appeler_gh(monkeypatch) -
     assert seen["authorization"] == "Bearer token-test-ne-doit-pas-sortir"
 
 
-def test_transport_https_stream_un_asset_prive_sans_gh(
-    tmp_path: Path, monkeypatch
-) -> None:
-    monkeypatch.setenv("GH_TOKEN", "token-stream-test")
-    destination = tmp_path / "asset.bin"
-    seen: dict[str, object] = {}
+class _StreamResponse:
+    def __init__(
+        self,
+        chunks: tuple[bytes, ...] = (b"abc", b"def"),
+        *,
+        status_code: int | None = 200,
+        headers: dict[str, str] | None = None,
+    ) -> None:
+        self._chunks = chunks
+        if status_code is not None:
+            self.status_code = status_code
+        self.headers = headers or {}
 
-    class FakeStreamResponse:
-        def __enter__(self):
-            return self
+    def __enter__(self):
+        return self
 
-        def __exit__(self, exc_type, exc, tb):
-            return False
+    def __exit__(self, exc_type, exc, tb):
+        return False
 
-        def raise_for_status(self):
-            return None
+    def raise_for_status(self):
+        if getattr(self, "status_code", 200) >= 400:
+            raise transport.requests.HTTPError(str(self.status_code))
+        return None
 
-        def iter_content(self, chunk_size):
-            seen["chunk_size"] = chunk_size
-            yield b"abc"
-            yield b"def"
+    def iter_content(self, chunk_size):
+        yield from self._chunks
 
+
+def _install_stream_get(monkeypatch, response, seen: dict[str, object]) -> None:
     def fake_get(url, *, headers, timeout, stream, allow_redirects):
         seen["url"] = url
         seen["authorization"] = headers.get("Authorization")
+        seen["range"] = headers.get("Range")
         seen["stream"] = stream
         seen["allow_redirects"] = allow_redirects
-        return FakeStreamResponse()
+        return response
 
     monkeypatch.setattr(transport.requests, "get", fake_get)
+
+
+def test_transport_https_stream_un_asset_prive_sans_gh(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """Un ancien mock sans status_code reste un 200 complet, jamais un append."""
+
+    monkeypatch.setenv("GH_TOKEN", "token-stream-test")
+    destination = tmp_path / "asset.bin"
+    seen: dict[str, object] = {}
+    response = _StreamResponse(status_code=None)
+    _install_stream_get(monkeypatch, response, seen)
     monkeypatch.setattr(
         transport,
         "_download_with_gh",
@@ -135,3 +157,125 @@ def test_transport_https_stream_un_asset_prive_sans_gh(
     assert seen["authorization"] == "Bearer token-stream-test"
     assert seen["stream"] is True
     assert seen["allow_redirects"] is True
+
+
+def test_transport_range_206_reprend_exactement_au_content_range(
+    tmp_path: Path, monkeypatch
+) -> None:
+    monkeypatch.setenv("GH_TOKEN", "token-range")
+    destination = tmp_path / "asset.bin"
+    destination.write_bytes(b"abc")
+    seen: dict[str, object] = {}
+    _install_stream_get(
+        monkeypatch,
+        _StreamResponse(
+            (b"def",),
+            status_code=206,
+            headers={"Content-Range": "bytes 3-5/6"},
+        ),
+        seen,
+    )
+
+    transport.download_release_asset(
+        repository="exemple/donnees",
+        asset_id=124,
+        destination=destination,
+    )
+
+    assert seen["range"] == "bytes=3-"
+    assert destination.read_bytes() == b"abcdef"
+
+
+def test_transport_range_200_redemarre_un_partiel_sans_concatener(
+    tmp_path: Path, monkeypatch
+) -> None:
+    monkeypatch.setenv("GH_TOKEN", "token-range")
+    destination = tmp_path / "asset.bin"
+    destination.write_bytes(b"PARTIEL-ANCIEN")
+    seen: dict[str, object] = {}
+    _install_stream_get(
+        monkeypatch,
+        _StreamResponse((b"nouveau",), status_code=200),
+        seen,
+    )
+
+    transport.download_release_asset(
+        repository="exemple/donnees",
+        asset_id=125,
+        destination=destination,
+    )
+
+    assert seen["range"] == f"bytes={len(b'PARTIEL-ANCIEN')}-"
+    assert destination.read_bytes() == b"nouveau"
+
+
+def test_transport_range_416_conserve_le_partiel_pour_hash_aval(
+    tmp_path: Path, monkeypatch
+) -> None:
+    monkeypatch.setenv("GH_TOKEN", "token-range")
+    destination = tmp_path / "asset.bin"
+    destination.write_bytes(b"potentiellement-complet")
+    seen: dict[str, object] = {}
+    _install_stream_get(
+        monkeypatch,
+        _StreamResponse((), status_code=416),
+        seen,
+    )
+
+    transport.download_release_asset(
+        repository="exemple/donnees",
+        asset_id=126,
+        destination=destination,
+    )
+
+    assert destination.read_bytes() == b"potentiellement-complet"
+
+
+def test_transport_range_206_sans_content_range_est_refuse_fail_closed(
+    tmp_path: Path, monkeypatch
+) -> None:
+    monkeypatch.setenv("GH_TOKEN", "token-range")
+    destination = tmp_path / "asset.bin"
+    destination.write_bytes(b"abc")
+    seen: dict[str, object] = {}
+    _install_stream_get(
+        monkeypatch,
+        _StreamResponse((b"def",), status_code=206, headers={}),
+        seen,
+    )
+
+    with pytest.raises(transport.GitHubTransportError, match="sans Content-Range"):
+        transport.download_release_asset(
+            repository="exemple/donnees",
+            asset_id=127,
+            destination=destination,
+        )
+
+    assert destination.read_bytes() == b"abc"
+
+
+def test_transport_range_mismatch_ne_corrompt_pas_le_partiel(
+    tmp_path: Path, monkeypatch
+) -> None:
+    monkeypatch.setenv("GH_TOKEN", "token-range")
+    destination = tmp_path / "asset.bin"
+    destination.write_bytes(b"abc")
+    seen: dict[str, object] = {}
+    _install_stream_get(
+        monkeypatch,
+        _StreamResponse(
+            (b"DEF-NE-DOIT-PAS-ETRE-ECRIT",),
+            status_code=206,
+            headers={"Content-Range": "bytes 2-9/10"},
+        ),
+        seen,
+    )
+
+    with pytest.raises(transport.GitHubTransportError, match="attendu 3"):
+        transport.download_release_asset(
+            repository="exemple/donnees",
+            asset_id=128,
+            destination=destination,
+        )
+
+    assert destination.read_bytes() == b"abc"

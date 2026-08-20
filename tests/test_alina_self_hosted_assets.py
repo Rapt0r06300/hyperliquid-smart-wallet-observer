@@ -29,12 +29,26 @@ def test_workflow_cible_uniquement_le_runner_windows_hypersmart() -> None:
     assert "cancel-in-progress: false" in text
 
 
-def test_les_commandes_versionnees_sont_immuables() -> None:
+def test_workflow_gate_le_ref_acteur_sha_avant_code_projet() -> None:
+    text = _text(WORKFLOW)
+    assert "refs/heads/main" in text
+    assert "SELF_HOSTED_REF_REFUSED" in text
+    assert "SELF_HOSTED_ACTOR_REFUSED" in text
+    assert "SELF_HOSTED_SHA_REFUSED" in text
+    gate = text.index("Gate sécurité avant toute exécution du code HyperSmart")
+    project_execution = text.index("hl_observer.ops.self_hosted_control")
+    assert gate < project_execution
+    assert "pip install --disable-pip-version-check -e ." not in text
+
+
+def test_les_commandes_versionnees_sont_immuables_et_control_only() -> None:
     text = _text(WORKFLOW)
     assert "git diff-tree --no-commit-id --name-status" in text
-    assert "COMMANDES_IMMUABLES" in text
+    assert "CONTROL_ONLY_COMMIT_REQUIRED" in text
+    assert "$rows.Count -ne 1" in text
     assert "$parts[0] -ne 'A'" in text
-    assert "un job doit être un nouveau JSON ajouté" in text
+    assert "COMMANDES_IMMUABLES" in text
+    assert "CONTROL_PATH_REFUSED" in text
 
 
 def test_workflow_garde_des_permissions_minimales_et_ne_push_pas() -> None:
@@ -71,22 +85,44 @@ def test_workflow_utilise_exclusivement_le_python_persistant_du_runner() -> None
     assert "& $python -m hl_observer.ops.self_hosted_return" in text
 
 
+def test_workflow_exige_un_token_dataset_prive_dedie() -> None:
+    text = _text(WORKFLOW)
+    assert "ALINA_DATASET_READ_TOKEN" in text
+    assert "HYPERSMART_DATASET_TOKEN" in text
+    assert "PRIVATE_DATASET_TOKEN_MISSING" in text
+    # Le secret n'est injecté dans le worker qu'après le gate de contrôle.
+    assert text.index("Gate sécurité avant toute exécution du code HyperSmart") < text.index("HYPERSMART_DATASET_TOKEN")
+
+
 def test_workflow_produit_un_retour_compact_avant_l_artifact() -> None:
     text = _text(WORKFLOW)
-    assert "Construire le retour compact pour GitHub et ChatGPT" in text
+    assert "Construire le retour public compact et nettoyé" in text
     assert "hl_observer.ops.self_hosted_return" in text
     assert "ALINA_RETURN.json" in text
-    assert "compact_return_ready" in text
-    assert text.index("hl_observer.ops.self_hosted_return") < text.index("actions/upload-artifact@v4")
+    assert "GITHUB_SAFE_JOB_PROOF.json" in text
+    assert text.index("hl_observer.ops.self_hosted_return") < text.index("actions/upload-artifact@")
 
 
-def test_workflow_ne_remonte_que_le_result_dir_prepare_par_le_worker() -> None:
+def test_workflow_ne_remonte_que_le_dossier_public_allowliste() -> None:
     text = _text(WORKFLOW)
-    assert "actions/upload-artifact@v4" in text
-    assert "path: ${{ steps.build.outputs.result_dir }}" in text
-    assert "ALINA_RESEARCH_HOME" in text
-    assert "gross_logs_stay_local = $true" in text
-    assert "datasets\\assets" not in text.split("uses: actions/upload-artifact@v4", 1)[1]
+    assert "github_public" in text
+    assert "public_dir=$publicDir" in text
+    assert "path: ${{ steps.compact_return.outputs.public_dir }}" in text
+    upload_tail = text.split("uses: actions/upload-artifact@", 1)[1]
+    assert "steps.build.outputs.result_dir" not in upload_tail.split("Écrire la preuve locale", 1)[0]
+    assert "datasets\\assets" not in upload_tail
+
+
+def test_workflow_resultat_est_stable_par_job_id_pour_dedupliquer() -> None:
+    text = _text(WORKFLOW)
+    assert 'results\\jobs\\' in text
+    assert 'results\\github\\run_' not in text
+
+
+def test_workflow_actions_critiques_sont_pinnees_par_sha() -> None:
+    text = _text(WORKFLOW)
+    assert "actions/checkout@11d5960a326750d5838078e36cf38b85af677262" in text
+    assert "actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02" in text
 
 
 def test_installateur_enregistre_un_service_et_ne_persiste_pas_le_token() -> None:

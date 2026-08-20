@@ -4,22 +4,28 @@ on:
   push:
     branches: [main]
   workflow_dispatch: {}
+
+permissions:
+  contents: read
+
 jobs:
   factory-linux:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
         with:
           python-version: '3.11'
       - name: Install (BLOQUANT)
         run: |
-          pip install -e .
-          pip install -r requirements-recherche.txt pytest
+          python -m pip install -e .
+          python -m pip install -r requirements-recherche.txt pytest
       - name: Factory tests (JUnit)
-        run: pytest tests/test_run_factory.py tests/test_factory_coverage.py -q --junitxml=reports/factory-linux.xml
-      - uses: actions/upload-artifact@v4
+        run: python -m pytest tests/test_run_factory.py tests/test_factory_coverage.py -q --junitxml=reports/factory-linux.xml
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         if: always()
         with:
           name: factory-linux-junit
@@ -28,17 +34,19 @@ jobs:
     runs-on: windows-latest
     timeout-minutes: 40
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
         with:
           python-version: '3.11'
       - name: Install (BLOQUANT)
         run: |
-          pip install -e .
-          pip install -r requirements-recherche.txt pytest
+          python -m pip install -e .
+          python -m pip install -r requirements-recherche.txt pytest
       - name: Factory tests (JUnit)
-        run: pytest tests/test_run_factory.py tests/test_factory_coverage.py -q --junitxml=reports/factory-windows.xml
-      - uses: actions/upload-artifact@v4
+        run: python -m pytest tests/test_run_factory.py tests/test_factory_coverage.py -q --junitxml=reports/factory-windows.xml
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         if: always()
         with:
           name: factory-windows-junit

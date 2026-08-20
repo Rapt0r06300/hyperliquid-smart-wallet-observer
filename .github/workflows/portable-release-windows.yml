@@ -19,6 +19,9 @@ env:
   PYTHONIOENCODING: utf-8
   PYTHONNOUSERSITE: "1"
   PIP_NO_INDEX: "1"
+  # L'archive extraite possède son propre contrat pytest. Les 10k+ tests de
+  # développement restent exécutés par hypersmart-ci dans le checkout Git.
+  PYTEST_ADDOPTS: "tests/test_extracted_portable_contract.py"
   HL_ENABLE_MAINNET_EXECUTION: "0"
   HL_ENABLE_TESTNET_EXECUTION: "0"
   REAL_MAINNET_TRADING: "false"
@@ -31,10 +34,11 @@ jobs:
     timeout-minutes: 180
     steps:
       - name: Clean checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
           fetch-depth: 0
           lfs: true
+          persist-credentials: false
 
       - name: Assert exact clean HEAD
         shell: pwsh
@@ -75,6 +79,10 @@ jobs:
       - name: Build twice and validate the extracted ZIP
         id: release
         shell: pwsh
+        env:
+          # Le test du contrat portable ne doit s'activer que dans cette chaîne
+          # qui construit puis extrait réellement le runtime Windows embarqué.
+          HYPERSMART_EXTRACTED_PORTABLE_TEST: "1"
         run: |
           # The space is deliberate: this is a real regression gate for CMD/PowerShell path quoting.
           $releaseDir = Join-Path $env:RUNNER_TEMP "hypersmart portable release"
@@ -121,14 +129,14 @@ jobs:
             Set-Content -LiteralPath "${{ steps.release.outputs.directory }}\CI_HEAD_PROOF.json" -Encoding utf8
 
       - name: Attest ZIP and SBOM provenance
-        uses: actions/attest-build-provenance@v2
+        uses: actions/attest-build-provenance@e8998f949152b193b063cb0ec769d69d929409be
         with:
           subject-path: |
             ${{ steps.release.outputs.zip }}
             ${{ steps.release.outputs.sbom }}
 
       - name: Publish verified portable release
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: hypersmart-portable-${{ github.sha }}
           path: ${{ steps.release.outputs.directory }}
@@ -137,7 +145,7 @@ jobs:
 
       - name: Publish portable failure evidence
         if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: hypersmart-portable-failure-${{ github.sha }}
           path: |

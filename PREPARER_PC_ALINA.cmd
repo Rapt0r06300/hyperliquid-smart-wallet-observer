@@ -3,6 +3,15 @@ setlocal EnableExtensions
 cd /d "%~dp0"
 title Preparation du PC - ALINA SMARTFLOW
 
+if /I not "%GO_SELF_HOSTED%"=="TRUE" (
+  echo ================================================================================
+  echo  [REFUS] RUNNER SELF-HOSTED NON AUTORISE
+  echo ================================================================================
+  echo GO_SELF_HOSTED=TRUE doit etre defini explicitement APRES les audits et rehearsals verts.
+  echo Aucune installation, aucun service et aucun token ne seront touches.
+  exit /b 9
+)
+
 echo ================================================================================
 echo  ALINA SMARTFLOW - MAIN + INSTALLATION + VERIFICATION + COCKPIT
 echo ================================================================================

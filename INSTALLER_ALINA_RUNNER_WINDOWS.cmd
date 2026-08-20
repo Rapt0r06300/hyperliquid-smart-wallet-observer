@@ -2,6 +2,13 @@
 setlocal EnableExtensions
 cd /d "%~dp0"
 title Installation ALINA SMARTFLOW - Runner HyperSmart
+
+if /I not "%GO_SELF_HOSTED%"=="TRUE" (
+  echo [REFUS] GO_SELF_HOSTED=TRUE est obligatoire avant toute installation du runner.
+  echo Aucun service, token ou fichier runner ne sera modifie.
+  exit /b 9
+)
+
 net session >nul 2>&1
 if %errorlevel%==0 goto :ADMIN
 

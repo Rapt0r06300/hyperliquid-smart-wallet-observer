@@ -9,11 +9,12 @@ def test_check_annonce_le_plan_de_controle_self_hosted(capsys) -> None:
     rc = alina_lab.main(["check"])
     assert rc == 0
     payload = json.loads(capsys.readouterr().out)
-    assert payload["schema"] == "alina.autonomous_lab_entrypoint.v3"
+    assert payload["schema"] == "alina.autonomous_lab_entrypoint.v4"
     assert payload["control_schema"] == "alina.self_hosted_control.v1"
     assert payload["return_schema"] == "alina.self_hosted_return.v1"
     assert payload["self_hosted_ready_in_code"] is True
     assert payload["compact_return_ready_in_code"] is True
+    assert payload["max_data_route"] == "src/hl_observer/datasets/max_data_router.py"
     assert payload["paper_only"] is True
     assert payload["real_execution"] is False
 
