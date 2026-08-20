@@ -6,12 +6,24 @@ respecté ; (4) sa dédup persiste entre deux passes one-shot (processus sépar�
 """
 from __future__ import annotations
 
+import importlib
 import json
 from pathlib import Path
 
 from hl_observer.research_parallel import registre as REG
 from hl_observer.research_parallel import superviseur as SUP
 from hl_observer.research_parallel.plugins import lab_data as LD
+
+
+def _ensure_data_plugin_registered() -> None:
+    """Rend ce test indépendant de l'ordre global de pytest.
+
+    Certains tests de contrat manipulent volontairement le registre partagé. Si le module
+    ``lab_data`` a déjà été importé, un simple nouvel import ne rejoue pas son enregistrement.
+    On recharge donc uniquement lorsque DATA_CTX manque réellement.
+    """
+    if REG.obtenir("DATA_CTX") is None:
+        importlib.reload(LD)
 
 
 def _mock_poster():
@@ -27,11 +39,13 @@ def _mock_poster():
 
 
 def test_data_plugin_enregistre():
+    _ensure_data_plugin_registered()
     assert LD.PLUGIN.categorie == "data" and LD.PLUGIN.variantes == ()
     assert REG.obtenir("DATA_CTX") is not None
 
 
 def test_superviseur_collecte_via_le_plugin_data(tmp_path):
+    _ensure_data_plugin_registered()
     ident = SUP.demarrer(tmp_path, plugins=[LD.PLUGIN])
     res = SUP.tick_tous(tmp_path, ident, {"root": str(tmp_path), "poster": _mock_poster()}, plugins=[LD.PLUGIN])
     assert res["DATA_CTX"]["statut"] == "OK"
@@ -52,6 +66,7 @@ def test_ordre_data_avant_signal(tmp_path):
 
 
 def test_dedup_persiste_entre_passes(tmp_path):
+    _ensure_data_plugin_registered()
     ctx = {"root": str(tmp_path), "poster": _mock_poster()}
     ident = SUP.demarrer(tmp_path, plugins=[LD.PLUGIN])
     SUP.tick_tous(tmp_path, ident, ctx, plugins=[LD.PLUGIN])
