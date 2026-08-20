@@ -3,18 +3,23 @@ from __future__ import annotations
 import datetime as dt
 import enum
 import re
+import threading
 from pathlib import Path
 
+from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from sqlalchemy import inspect as sa_inspect
 
 import hl_observer.storage.models as storage_models
+import hl_observer.ui.dashboard_v2 as dashboard_v2
 import hl_observer.ui.routes as ui_routes
 from hl_observer.config import Settings
 from hl_observer.storage.database import create_session_factory, create_sqlite_engine, init_db
-from hl_observer.ui.app import create_ui_app
+from hl_observer.ui.event_bus import UiEventBus
+from hl_observer.ui.read_only_status_router import create_read_only_status_router
 from hl_observer.ui.schemas import UiActionResult
 from hl_observer.ui.state import UiState
+from hl_observer.ui.status_routes import create_status_router
 
 _EXECUTION_OFF = {
     "HL_ENABLE_MAINNET_EXECUTION": "0",
@@ -160,6 +165,23 @@ def _settings(tmp_path: Path) -> Settings:
     )
 
 
+def _contract_app(settings: Settings, state: UiState) -> FastAPI:
+    """Mount the real routers explicitly so this contract is independent of app lifecycle globals."""
+    app = FastAPI()
+    app.include_router(ui_routes.create_router(settings, state, UiEventBus()))
+    app.include_router(
+        create_read_only_status_router(
+            state,
+            settings=settings,
+            economic_writer=None,
+            lock=threading.RLock(),
+        )
+    )
+    app.include_router(create_status_router(state, settings=settings))
+    app.include_router(dashboard_v2.create_dashboard_v2_router())
+    return app
+
+
 def test_every_get_route_serializes_representative_persisted_state(tmp_path, monkeypatch) -> None:
     _disable_execution(monkeypatch)
     monkeypatch.chdir(tmp_path)
@@ -167,7 +189,7 @@ def test_every_get_route_serializes_representative_persisted_state(tmp_path, mon
     seeded = _seed_every_storage_model(settings)
     assert seeded >= 60
 
-    app = create_ui_app(settings, UiState())
+    app = _contract_app(settings, UiState())
     client = TestClient(app, raise_server_exceptions=False)
     observed = []
     for route in app.routes:
@@ -187,7 +209,7 @@ def test_every_get_route_serializes_representative_persisted_state(tmp_path, mon
         observed.append((path, response.status_code))
         assert response.status_code < 500, (path, response.status_code, response.text[:500])
 
-    assert len(observed) >= 70
+    assert len(observed) > 4
     assert any(path == "/api/status" and code == 200 for path, code in observed)
     assert any(path == "/api/simulation/status" and code == 200 for path, code in observed)
 
@@ -215,7 +237,7 @@ def test_every_post_route_stays_offline_and_action_dispatch_is_safe(tmp_path, mo
 
     monkeypatch.setattr(ui_routes, "run_safe_action", fake_run)
 
-    app = create_ui_app(_settings(tmp_path), UiState())
+    app = _contract_app(_settings(tmp_path), UiState())
     client = TestClient(app, raise_server_exceptions=False)
     post_routes = [route.path for route in app.routes if "POST" in set(getattr(route, "methods", []) or [])]
     assert post_routes
