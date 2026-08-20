@@ -33,7 +33,7 @@ def test_coin_cleaning_inference_and_position_normalisation() -> None:
     assert status._clean_status_coin("0x123456789abcdef") == ""
     assert status._clean_status_coin("bad coin!") == ""
     assert status._clean_status_coin("?") == ""
-    assert status._infer_status_coin({"position_id": "wallet|PAXG|LONG"}, index=0) == "PAXG"
+    assert status._infer_status_coin({"position_id": "PAXG|LONG"}, index=0) == "PAXG"
     assert status._infer_status_coin({"coin": "sol-usd"}, index=0) == "SOL"
     assert status._infer_status_coin({}, index=0) == ""
 
@@ -147,7 +147,7 @@ def test_mark_to_market_long_short_missing_and_invalid_positions() -> None:
         {"position_id": "long", "coin": "BTC", "direction": "LONG", "size": 1, "entry_price": 100},
         {"position_id": "short", "coin": "ETH", "direction": "SHORT", "size": 2, "entry_price": 50},
         {"position_id": "missing", "coin": "SOL", "direction": "LONG", "size": 1, "entry_price": 20},
-        {"position_id": "invalid", "coin": "?", "direction": "LONG", "size": 1, "entry_price": 20},
+        {"position_id": "LONG", "coin": "?", "direction": "LONG", "size": 1, "entry_price": 20},
     ]
     marks = {
         "prices": {"BTC|LONG": 110.0, "ETH|SHORT": 45.0},
