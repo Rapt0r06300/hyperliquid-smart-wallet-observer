@@ -207,7 +207,9 @@ def test_final_installer_persists_elevated_diagnostics() -> None:
 def test_final_installer_falls_back_when_py_311_is_unavailable() -> None:
     text = _text(INSTALLER)
     function = text.split("function Get-BasePython311", 1)[1].split("function Test-Admin", 1)[0]
-    assert function.index("Get-Command python") < function.index("Get-Command py")
+    assert function.index("Get-Command python -ErrorAction") < function.index(
+        "Get-Command py -ErrorAction"
+    )
     assert "$previousPreference = $ErrorActionPreference" in function
     assert "$ErrorActionPreference = 'Continue'" in function
     assert "$ErrorActionPreference = $previousPreference" in function
