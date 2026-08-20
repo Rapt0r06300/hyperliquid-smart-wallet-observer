@@ -1,0 +1,33 @@
+name: source-snapshot-for-coverage-closure
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/source-snapshot.yml'
+      - 'control/source_snapshot.trigger'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  export-source:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+          fetch-depth: 1
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: source-snapshot-${{ github.sha }}
+          if-no-files-found: error
+          retention-days: 1
+          path: |
+            src
+            tests
+            tools
+            pyproject.toml
+            requirements*.txt
+            .github/workflows
