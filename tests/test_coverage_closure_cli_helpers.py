@@ -3,6 +3,8 @@ from __future__ import annotations
 import json
 from types import SimpleNamespace
 
+import pytest
+
 import hl_observer.cli as cli
 
 
@@ -30,6 +32,40 @@ class _SessionFactory:
         return self.session
 
 
+class _Query:
+    def __init__(self, *, all_rows=None, first_row=None) -> None:
+        self.all_rows = list(all_rows or [])
+        self.first_row = first_row
+        self.limit_value = None
+
+    def filter(self, *args, **kwargs):
+        return self
+
+    def order_by(self, *args, **kwargs):
+        return self
+
+    def limit(self, value):
+        self.limit_value = value
+        return self
+
+    def all(self):
+        rows = list(self.all_rows)
+        return rows[: self.limit_value] if self.limit_value is not None else rows
+
+    def first(self):
+        return self.first_row
+
+
+class _QuerySession(_Session):
+    def __init__(self, queries) -> None:
+        super().__init__()
+        self.queries = list(queries)
+
+    def query(self, model):
+        assert self.queries, f"unexpected query for {model}"
+        return self.queries.pop(0)
+
+
 def test_settings_wires_logging_and_execution_guard(monkeypatch) -> None:
     settings = SimpleNamespace(log_level="INFO")
     events: list[object] = []
@@ -38,6 +74,22 @@ def test_settings_wires_logging_and_execution_guard(monkeypatch) -> None:
     monkeypatch.setattr(cli, "assert_mainnet_execution_disabled", lambda value: events.append(("guard", value)))
     assert cli._settings() is settings
     assert events == [("logging", "INFO"), ("guard", settings)]
+
+
+def test_session_factory_initializes_database_and_builds_factory(monkeypatch) -> None:
+    settings = SimpleNamespace(database_url="sqlite:///unit.db")
+    calls = []
+    sentinel_engine = object()
+    sentinel_factory = object()
+    monkeypatch.setattr(cli, "initialize_database", lambda url: calls.append(("init", url)))
+    monkeypatch.setattr(cli, "create_sqlite_engine", lambda url: calls.append(("engine", url)) or sentinel_engine)
+    monkeypatch.setattr(cli, "create_session_factory", lambda engine: calls.append(("factory", engine)) or sentinel_factory)
+    assert cli._session_factory(settings) is sentinel_factory
+    assert calls == [
+        ("init", "sqlite:///unit.db"),
+        ("engine", "sqlite:///unit.db"),
+        ("factory", sentinel_engine),
+    ]
 
 
 def test_read_json_file_handles_missing_invalid_non_mapping_and_mapping(tmp_path) -> None:
@@ -125,6 +177,57 @@ def test_store_with_sqlite_retry_success_path(monkeypatch) -> None:
     assert factory.calls == 1
 
 
+def test_store_with_sqlite_retry_retries_locked_database_then_succeeds(monkeypatch) -> None:
+    class FakeOperationalError(Exception):
+        pass
+
+    monkeypatch.setattr(cli, "OperationalError", FakeOperationalError)
+    session = _Session()
+    factory = _SessionFactory(session)
+    monkeypatch.setattr(cli, "_session_factory", lambda settings: factory)
+    sleeps = []
+    monkeypatch.setattr(cli.time, "sleep", lambda value: sleeps.append(value))
+    attempts = {"count": 0}
+
+    def store(current):
+        attempts["count"] += 1
+        if attempts["count"] < 3:
+            raise FakeOperationalError("database is locked")
+
+    cli._store_with_sqlite_retry(SimpleNamespace(), label="locked", store_func=store, attempts=4)
+    assert attempts["count"] == 3
+    assert factory.calls == 3
+    assert session.commits == 1
+    assert sleeps == pytest.approx([0.15, 0.27])
+
+
+def test_store_with_sqlite_retry_reraises_non_lock_and_exhausted_lock(monkeypatch) -> None:
+    class FakeOperationalError(Exception):
+        pass
+
+    monkeypatch.setattr(cli, "OperationalError", FakeOperationalError)
+    session = _Session()
+    factory = _SessionFactory(session)
+    monkeypatch.setattr(cli, "_session_factory", lambda settings: factory)
+    monkeypatch.setattr(cli.time, "sleep", lambda value: None)
+
+    with pytest.raises(FakeOperationalError, match="other sqlite failure"):
+        cli._store_with_sqlite_retry(
+            SimpleNamespace(),
+            label="other",
+            store_func=lambda current: (_ for _ in ()).throw(FakeOperationalError("other sqlite failure")),
+            attempts=3,
+        )
+
+    with pytest.raises(FakeOperationalError, match="database is locked"):
+        cli._store_with_sqlite_retry(
+            SimpleNamespace(),
+            label="locked",
+            store_func=lambda current: (_ for _ in ()).throw(FakeOperationalError("database is locked")),
+            attempts=2,
+        )
+
+
 def test_record_local_snapshots_empty_and_non_empty(monkeypatch) -> None:
     settings = SimpleNamespace()
     monkeypatch.setattr(
@@ -158,6 +261,22 @@ def test_resolve_public_trade_scan_coins_explicit_path_never_opens_database(monk
     assert result == ["BTC", "ETH"]
 
 
+def test_resolve_public_trade_scan_coins_auto_merges_active_perps(monkeypatch) -> None:
+    rows = [
+        SimpleNamespace(coin="PAXG"),
+        SimpleNamespace(coin="BTC"),
+        SimpleNamespace(coin="@107"),
+        SimpleNamespace(coin="#42"),
+    ]
+    session = _QuerySession([_Query(all_rows=rows)])
+    monkeypatch.setattr(cli, "_session_factory", lambda settings: _SessionFactory(session))
+    result = cli._resolve_public_trade_scan_coins(SimpleNamespace(), "AUTO", max_coins=12)
+    assert result[:3] == ["BTC", "ETH", "SOL"]
+    assert "PAXG" in result
+    assert "@107" not in result and "#42" not in result
+    assert result.count("BTC") == 1
+
+
 def test_apply_leader_quality_gate_empty_disabled_and_fail_open(monkeypatch) -> None:
     rows = [SimpleNamespace(wallet_address="0xa")]
     assert cli._apply_leader_quality_gate(object(), [], limit=1) == []
@@ -177,3 +296,55 @@ def test_apply_leader_quality_gate_empty_disabled_and_fail_open(monkeypatch) -> 
 
     monkeypatch.setattr(builtins, "__import__", guarded_import)
     assert cli._apply_leader_quality_gate(object(), rows, limit=1) is rows
+
+
+def test_selected_top_wallet_rows_prefers_active_then_falls_back(monkeypatch) -> None:
+    monkeypatch.setattr(cli, "now_ms", lambda: 1_000_000)
+    monkeypatch.setattr(cli, "_top_wallet_sample_limit", lambda **kwargs: 100)
+    monkeypatch.setattr(cli, "_apply_leader_quality_gate", lambda session, rows, *, limit: rows[:limit])
+
+    active_rows = [SimpleNamespace(wallet_address="0xa"), SimpleNamespace(wallet_address="0xb")]
+    active_session = _QuerySession([_Query(all_rows=active_rows)])
+    selected = cli._selected_top_wallet_rows(active_session, limit=1, offset=0)
+    assert [row.wallet_address for row in selected] == ["0xa"]
+    assert active_session.queries == []
+
+    fallback_rows = [SimpleNamespace(wallet_address="0xc"), SimpleNamespace(wallet_address="0xd")]
+    fallback_session = _QuerySession([_Query(all_rows=[]), _Query(all_rows=fallback_rows)])
+    selected = cli._selected_top_wallet_rows(fallback_session, limit=2, offset=1)
+    assert [row.wallet_address for row in selected] == ["0xd", "0xc"]
+    assert fallback_session.queries == []
+
+
+def test_latest_market_mids_handles_missing_invalid_and_nested_prices() -> None:
+    assert cli._latest_market_mids(_QuerySession([_Query(first_row=None)])) == {}
+    invalid = SimpleNamespace(raw_json=[])
+    assert cli._latest_market_mids(_QuerySession([_Query(first_row=invalid)])) == {}
+
+    row = SimpleNamespace(raw_json={"data": {"btc": "101.5", "ETH": -1, "SOL": "bad", "HYPE": 25}})
+    mids = cli._latest_market_mids(_QuerySession([_Query(first_row=row)]))
+    assert mids == {"BTC": 101.5, "HYPE": 25.0}
+
+
+def test_consensus_top_wallet_rows_reuses_known_and_synthesizes_missing(monkeypatch) -> None:
+    monkeypatch.setattr(cli, "now_ms", lambda: 1_000_000)
+    known = SimpleNamespace(wallet_address="0xa")
+    delta = SimpleNamespace(wallet_address="0xa")
+    session = _QuerySession([_Query(all_rows=[known]), _Query(all_rows=[delta])])
+    report = SimpleNamespace(selected_wallets=["0xa", "0xz"])
+    monkeypatch.setattr(cli, "select_consensus_leaders_from_deltas", lambda *args, **kwargs: report)
+
+    rows, returned_report = cli._consensus_top_wallet_rows(
+        session,
+        limit=2,
+        offset=0,
+        active_window_ms=300_000,
+        consensus_window_ms=4_000,
+        min_wallets=2,
+        max_deltas=100,
+    )
+    assert returned_report is report
+    assert [str(row.wallet_address) for row in rows] == ["0xa", "0xz"]
+    assert rows[0] is known
+    assert rows[1].source == "consensus_delta_cluster"
+    assert rows[1].status == "selected"
