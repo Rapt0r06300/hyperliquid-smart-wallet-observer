@@ -6,6 +6,7 @@ param(
     [string]$ProjectRoot = '',
     [string]$RunnerName = '',
     [string]$RunnerToken = '',
+    [string]$InstallLog = '',
     [switch]$PrepareOnly,
     [switch]$ConfirmSelfHosted,
     [switch]$Elevate
@@ -15,6 +16,11 @@ $ErrorActionPreference = 'Stop'
 $ProgressPreference = 'SilentlyContinue'
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
 $FinalLabel = 'hypersmart-final-v1'
+
+if ([string]::IsNullOrWhiteSpace($InstallLog)) {
+    $projectForLog = [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
+    $InstallLog = Join-Path $projectForLog 'logs\runner_install_latest.log'
+}
 
 if ([string]$env:GO_SELF_HOSTED -cne 'TRUE' -and -not $ConfirmSelfHosted) {
     Write-Host '[REFUS] GO_SELF_HOSTED=TRUE ou -ConfirmSelfHosted est obligatoire.' -ForegroundColor Red
@@ -77,7 +83,8 @@ function Test-Admin {
 
 if ($Elevate -and -not (Test-Admin)) {
     $quotedScript = '"' + $PSCommandPath + '"'
-    $arguments = "-NoLogo -NoProfile -ExecutionPolicy Bypass -File $quotedScript -ConfirmSelfHosted"
+    $quotedLog = '"' + $InstallLog + '"'
+    $arguments = "-NoLogo -NoProfile -ExecutionPolicy Bypass -File $quotedScript -ConfirmSelfHosted -InstallLog $quotedLog"
     try {
         $process = Start-Process -FilePath 'powershell.exe' -Verb RunAs -ArgumentList $arguments -Wait -PassThru -ErrorAction Stop
         exit $process.ExitCode
@@ -85,6 +92,21 @@ if ($Elevate -and -not (Test-Admin)) {
         Write-Error $_
         exit 1223
     }
+}
+
+$installLogDirectory = Split-Path -Parent $InstallLog
+New-Item -ItemType Directory -Force -Path $installLogDirectory | Out-Null
+Set-Content -LiteralPath $InstallLog -Encoding UTF8 -Value @(
+    ('[{0}] Début installation runner HyperSmart' -f [DateTimeOffset]::Now.ToString('o')),
+    ('PowerShell={0} Admin={1} Script={2}' -f $PSVersionTable.PSVersion, (Test-Admin), $PSCommandPath)
+)
+try { Start-Transcript -LiteralPath $InstallLog -Append -Force | Out-Null } catch {}
+trap {
+    $detail = $_ | Out-String
+    try { Add-Content -LiteralPath $InstallLog -Encoding UTF8 -Value ("`nERREUR FATALE:`n" + $detail) } catch {}
+    Write-Error $_
+    try { Stop-Transcript | Out-Null } catch {}
+    exit 1
 }
 
 function Get-ExactMainSha([string]$RepositoryRoot) {

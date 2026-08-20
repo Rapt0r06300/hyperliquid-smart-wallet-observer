@@ -195,6 +195,15 @@ def test_final_installer_accepts_only_an_explicit_self_hosted_confirmation() -> 
     assert "exit 1223" in text
 
 
+def test_final_installer_persists_elevated_diagnostics() -> None:
+    text = _text(INSTALLER)
+    assert "[string]$InstallLog" in text
+    assert "logs\\runner_install_latest.log" in text
+    assert "-InstallLog $quotedLog" in text
+    assert "Start-Transcript -LiteralPath $InstallLog" in text
+    assert "ERREUR FATALE" in text
+
+
 def test_final_control_document_exists_and_forbids_legacy_jobs() -> None:
     text = _text(CONTROL_README)
     assert "hypersmart-final-v1" in text
