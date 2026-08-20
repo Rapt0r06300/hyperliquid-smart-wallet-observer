@@ -13,8 +13,12 @@ from typing import Any
 
 # Keep this import-free from copy_vault_executable: that module re-exports this
 # loader, so importing it here creates a circular import in a cold interpreter.
-# A regression test asserts equality with the canonical protocol constant.
+# Regression tests assert equality with the canonical protocol constants.
 MAX_TARGET_LAG_MS = 30_000
+CHECKPOINT_COLLECTOR_PROTOCOL = (
+    "copy_vault_checkpoint_companion_v2_for_"
+    "copy_vault_executable_walk_forward_v7_exact_checkpoint_binding"
+)
 
 
 def load_observed_books(
@@ -144,7 +148,7 @@ def load_observed_books(
                     checkpoint_binding_valid = (
                         not is_checkpoint
                         or (
-                            collector_protocol == _base.CHECKPOINT_COLLECTOR_PROTOCOL
+                            collector_protocol == CHECKPOINT_COLLECTOR_PROTOCOL
                             and bool(metaorder_id)
                             and bool(checkpoint_stage)
                             and bool(checkpoint_id)
@@ -204,4 +208,8 @@ def load_observed_books(
     }
 
 
-__all__ = ["MAX_TARGET_LAG_MS", "load_observed_books"]
+__all__ = [
+    "CHECKPOINT_COLLECTOR_PROTOCOL",
+    "MAX_TARGET_LAG_MS",
+    "load_observed_books",
+]

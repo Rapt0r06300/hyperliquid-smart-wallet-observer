@@ -9,3 +9,7 @@ def test_copy_vault_book_loader_import_froid_sans_cycle() -> None:
     assert callable(loader.load_observed_books)
     assert executable.load_observed_books is loader.load_observed_books
     assert loader.MAX_TARGET_LAG_MS == executable.MAX_TARGET_LAG_MS
+    assert (
+        loader.CHECKPOINT_COLLECTOR_PROTOCOL
+        == executable.CHECKPOINT_COLLECTOR_PROTOCOL
+    )
