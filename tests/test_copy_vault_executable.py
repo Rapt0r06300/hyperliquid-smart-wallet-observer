@@ -558,3 +558,44 @@ def test_selected_bounds_match_selected_horizon_and_default_is_shortest() -> Non
         metaorders,
         purge_ms=COPY_DELAY_MS + HORIZONS_MS[0] + MAX_TARGET_LAG_MS,
     )
+
+
+def test_calibration_never_selects_the_least_bad_losing_horizon(monkeypatch) -> None:
+    entries = [
+        {
+            **_entry(f"e-{index}", 1_000 + index * 4_000_000),
+            "source": "LIVE_WS",
+            "is_snapshot": False,
+            "observed_at_ms": 1_000 + index * 4_000_000,
+        }
+        for index in range(20)
+    ]
+    metaorders, _ = cluster_metaorders(entries, gap_ms=60_000)
+
+    def losing_replay(*args, horizon_ms, **kwargs):
+        del args, kwargs
+        return [
+                {
+                    "trade_id": f"{horizon_ms}-{index}",
+                    "exit_ts_ms": 10_000 + index,
+                    "gross_pnl_usd": 0.1,
+                "fees_usd": 0.1,
+                "spread_cost_usd": 0.1,
+                "slippage_cost_usd": 0.0,
+                "latency_cost_usd": 0.0,
+                "net_pnl_usd": -0.1,
+                "liquidatable_net": True,
+            }
+            for index in range(8)
+        ], {}
+
+    monkeypatch.setattr(
+        "hl_observer.backtesting.copy_vault_executable.replay_metaorders",
+        losing_replay,
+    )
+    result = calibrate_train_only(metaorders, {"BTC": []})
+
+    assert result["selection_eligible"] is False
+    assert result["status"] == "KILL_TRAIN_NO_POSITIVE_RECONCILED_CANDIDATE"
+    assert all(row["sample_eligible"] is True for row in result["grid"])
+    assert all(row["eligible"] is False for row in result["grid"])

@@ -15,11 +15,13 @@ import math
 from collections.abc import Iterable, Mapping
 from typing import Any
 
+from hl_observer.backtesting.copy_vault_book_loader import load_observed_books
 from hl_observer.config.frais_venues import frais_taker_bps
 from hl_observer.ops.echec_silencieux import noter as _noter_echec
 
 SCHEMA_VERSION = "hypersmart.copy_vault_executable.v1"
 PROTOCOL_NAME = "copy_vault_executable_walk_forward_v7_exact_checkpoint_binding"
+TRAIN_ECONOMIC_GATE_VERSION = "copy_vault_train_economic_gate_v2"
 CHECKPOINT_COLLECTOR_PROTOCOL = (
     f"copy_vault_checkpoint_companion_v2_for_{PROTOCOL_NAME}"
 )
@@ -89,6 +91,7 @@ def classify_live_entry_action(row: Mapping[str, Any]) -> str | None:
 def protocol_signature() -> dict[str, Any]:
     return {
         "calibration_protocol": PROTOCOL_NAME,
+        "train_economic_gate": TRAIN_ECONOMIC_GATE_VERSION,
         "checkpoint_collector_protocol": CHECKPOINT_COLLECTOR_PROTOCOL,
         "metaorder_identity_policy": "immutable_first_observed_fill",
         "checkpoint_binding_policy": "exact_metaorder_stage_and_protocol",
@@ -262,10 +265,6 @@ def cluster_metaorders(
             1 for row in completed if row.get("causal_forward_eligible") is True
         ),
     }
-
-
-from hl_observer.backtesting.copy_vault_book_loader import load_observed_books
-
 
 
 def select_causal_protocol_inputs(
@@ -707,12 +706,44 @@ def calibrate_train_only(
             require_causal_observation=require_causal_observation,
         )
         summary = summarize(trades)
+        profit_factor = summary.get("profit_factor")
+        all_wins_without_loss_denominator = bool(
+            summary["positions_fermees"] >= MIN_TRAIN_TRADES
+            and float(summary.get("net_pnl_usd") or 0.0) > 0.0
+            and float(summary.get("hit_rate") or 0.0) == 1.0
+            and profit_factor is None
+        )
+        economic_gate = bool(
+            summary["positions_fermees"] >= MIN_TRAIN_TRADES
+            and summary.get("LIQUIDATABLE_NET") is True
+            and summary.get("economic_reconciliation_ok") is True
+            and float(summary.get("net_pnl_usd") or 0.0) > 0.0
+            and (
+                all_wins_without_loss_denominator
+                or (
+                    profit_factor is not None
+                    and float(profit_factor) > 1.0
+                )
+            )
+        )
         grid.append({
             "horizon_ms": horizon,
             "bounds": bounds,
             "summary": summary,
             "diagnostics": diagnostics,
-            "eligible": summary["positions_fermees"] >= MIN_TRAIN_TRADES,
+            "sample_eligible": summary["positions_fermees"] >= MIN_TRAIN_TRADES,
+            "economic_gate": {
+                "net_positive": float(summary.get("net_pnl_usd") or 0.0) > 0.0,
+                "profit_factor_above_one": bool(
+                    profit_factor is not None and float(profit_factor) > 1.0
+                ),
+                "all_wins_without_loss_denominator": all_wins_without_loss_denominator,
+                "liquidatable_net": summary.get("LIQUIDATABLE_NET") is True,
+                "economic_reconciliation_ok": (
+                    summary.get("economic_reconciliation_ok") is True
+                ),
+            },
+            "eligible": economic_gate,
         })
     eligible = [row for row in grid if row["eligible"]]
     selected = max(
@@ -726,9 +757,17 @@ def calibrate_train_only(
         if selected
         else dict(grid[0]["bounds"])
     )
+    has_sufficient_sample = any(row["sample_eligible"] for row in grid)
     return {
-        "status": "TRAIN_SELECTED" if selected else "KILL_TRAIN_INSUFFICIENT_EXECUTABLE_EPISODES",
+        "status": (
+            "TRAIN_SELECTED"
+            if selected
+            else "KILL_TRAIN_NO_POSITIVE_RECONCILED_CANDIDATE"
+            if has_sufficient_sample
+            else "KILL_TRAIN_INSUFFICIENT_EXECUTABLE_EPISODES"
+        ),
         "selection_eligible": selected is not None,
+        "train_economic_gate": TRAIN_ECONOMIC_GATE_VERSION,
         "minimum_train_trades": MIN_TRAIN_TRADES,
         "selected_horizon_ms": selected_horizon,
         "bounds": selected_bounds,
@@ -796,7 +835,6 @@ def temporal_evidence(evaluation: Mapping[str, Any]) -> dict[str, Any]:
     forward_count = int(forward_summary.get("positions_fermees") or 0)
     placebo_count = int(placebo_summary.get("positions_fermees") or 0)
     oos_net = oos_summary.get("net_pnl_usd") if oos_count > 0 else None
-    forward_net = forward_summary.get("net_pnl_usd") if forward_count > 0 else None
     placebo_net = placebo_summary.get("net_pnl_usd") if placebo_count > 0 else None
     forward_trades = (
         (evaluation.get("trades") or {}).get("forward") or []

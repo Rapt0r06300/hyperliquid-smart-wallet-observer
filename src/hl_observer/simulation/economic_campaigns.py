@@ -129,8 +129,34 @@ def freeze_parameters(
     except FileExistsError:
         existing = json.loads(target.read_text(encoding="utf-8"))
         if existing != payload:
-            raise RuntimeError(f"immutable freeze collision: {target}")
+            raise RuntimeError(f"immutable freeze collision: {target}") from None
     return payload
+
+
+def freeze_train_selected_parameters(
+    root: str | Path,
+    family: str,
+    parameters: Mapping[str, Any],
+    datasets: Mapping[str, Any],
+    *,
+    selection_eligible: bool,
+) -> dict[str, Any] | None:
+    """Freeze only a train-selected hypothesis that passed its economic gate.
+
+    A ``KILL_TRAIN`` result is evidence against the tested hypothesis, not a
+    parameter selection.  Keeping this guard next to the physical freeze
+    writer prevents campaign runners from accidentally turning a losing or
+    unreconciled calibration into an immutable production candidate.
+    """
+
+    if not selection_eligible:
+        return None
+    declared = parameters.get("training_selection_eligible")
+    if declared is not True:
+        raise ValueError(
+            "refusing parameter freeze: training_selection_eligible must be true"
+        )
+    return freeze_parameters(root, family, parameters, datasets)
 
 
 def freeze_or_reuse_parameters(
@@ -723,6 +749,7 @@ __all__ = [
     "freeze_parameters",
     "freeze_or_reuse_parameters",
     "find_oldest_parameter_freeze",
+    "freeze_train_selected_parameters",
     "merge_sources_with_frozen_provenance",
     "render_campaign_report",
     "write_campaign",

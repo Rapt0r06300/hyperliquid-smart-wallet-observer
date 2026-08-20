@@ -13,6 +13,7 @@ from hl_observer.simulation.economic_campaigns import (
     dataset_provenance,
     freeze_or_reuse_parameters,
     freeze_parameters,
+    freeze_train_selected_parameters,
     merge_sources_with_frozen_provenance,
     render_campaign_report,
 )
@@ -59,6 +60,36 @@ def test_parameter_freeze_is_physical_and_immutable(tmp_path: Path) -> None:
             datasets,
             campaign_id="fixed",
             frozen_at_ms=123,
+        )
+
+
+def test_killed_train_candidate_never_creates_a_physical_freeze(tmp_path: Path) -> None:
+    freeze = freeze_train_selected_parameters(
+        tmp_path,
+        "cross_venue_dislocation_v2",
+        {
+            "training_selection_eligible": False,
+            "selection_status": "KILL_TRAIN",
+        },
+        {"dataset_fingerprint": "d" * 64, "files": []},
+        selection_eligible=False,
+    )
+
+    assert freeze is None
+    assert not (
+        tmp_path
+        / "runtime/reports/economic_campaigns/freezes/cross_venue_dislocation_v2"
+    ).exists()
+
+
+def test_selected_train_freeze_requires_matching_declared_gate(tmp_path: Path) -> None:
+    with pytest.raises(ValueError, match="training_selection_eligible must be true"):
+        freeze_train_selected_parameters(
+            tmp_path,
+            "copy_vault",
+            {"training_selection_eligible": False},
+            {"dataset_fingerprint": "d" * 64, "files": []},
+            selection_eligible=True,
         )
 
 

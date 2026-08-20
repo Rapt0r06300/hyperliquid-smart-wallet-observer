@@ -32,15 +32,16 @@ from hl_observer.simulation.economic_campaigns import (  # noqa: E402
     dataset_provenance,
     find_oldest_parameter_freeze,
     freeze_parameters,
+    freeze_train_selected_parameters,
     merge_sources_with_frozen_provenance,
     render_campaign_report,
     write_campaign,
 )
-from hl_observer.simulation.economic_family_scoreboard import export_scoreboards  # noqa: E402
 from hl_observer.simulation.economic_collection_plan import (  # noqa: E402
     build_collection_plan,
     write_collection_plan,
 )
+from hl_observer.simulation.economic_family_scoreboard import export_scoreboards  # noqa: E402
 
 
 def _tool(name: str, path: Path):
@@ -152,10 +153,13 @@ def run_campaigns(
             "training_selection_eligible": copy_calibration.get("selection_eligible") is True,
             "selection_status": copy_calibration.get("status"),
         }
-        if copy_calibration.get("selection_eligible") is True:
-            copy_freeze = freeze_parameters(
-                root, "copy_vault", copy_parameters, copy_data
-            )
+        copy_freeze = freeze_train_selected_parameters(
+            root,
+            "copy_vault",
+            copy_parameters,
+            copy_data,
+            selection_eligible=copy_calibration.get("selection_eligible") is True,
+        )
     else:
         copy_parameters = dict(copy_freeze["parameters"])
     provisional_cutoff_ms = max(
@@ -334,11 +338,12 @@ def run_campaigns(
             "max_observation_gap_ms": cross_tool.MAX_OBSERVATION_GAP_MS,
             "source_mode": "ATOMIC_FOUR_SIDE_BOOK",
         }
-        cross_freeze = freeze_parameters(
+        cross_freeze = freeze_train_selected_parameters(
             root,
             "cross_venue_dislocation_v2",
             cross_params,
             cross_data,
+            selection_eligible=selection_eligible,
         )
     else:
         cross_params = dict(cross_freeze["parameters"])
@@ -347,7 +352,16 @@ def run_campaigns(
         series,
         cross_depth,
         frozen_parameters=cross_params,
-        frozen_at_ms=float(cross_freeze["frozen_at_ms"]),
+        frozen_at_ms=(
+            float(cross_freeze["frozen_at_ms"])
+            if cross_freeze is not None
+            else float(
+                ((calibration or {}).get("bounds") or {}).get(
+                    "calibration_data_end_ms"
+                )
+                or 0.0
+            )
+        ),
     )
     segment_trades = cross_walk_forward.get("trades", {})
     cross_trades = [
@@ -378,6 +392,7 @@ def run_campaigns(
         "trades": cross_trades,
         "paper_read_only": True,
         "real_execution": False,
+        "provisional_without_physical_freeze": cross_freeze is None,
         "dataset_workspace": dataset_mode,
         "dataset_source_summary": dataset_sources,
     }
