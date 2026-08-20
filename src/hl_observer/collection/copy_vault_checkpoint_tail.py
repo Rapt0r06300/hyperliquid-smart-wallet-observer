@@ -9,7 +9,6 @@ an exchange action.
 
 from __future__ import annotations
 
-import hashlib
 import json
 import os
 import re
@@ -19,16 +18,17 @@ from collections.abc import Callable, Mapping
 from pathlib import Path
 from typing import Any
 
-from hl_observer.ops.echec_silencieux import noter as _noter_echec
-
 from hl_observer.backtesting.copy_vault_executable import (
-    PROTOCOL_NAME,
+    CHECKPOINT_COLLECTOR_PROTOCOL,
+    canonical_metaorder_id,
+    classify_live_entry_action,
     expected_open_direction,
 )
-from hl_observer.experimental.metaorder_l2_tape import metaorder_id
+from hl_observer.collection.vault_fills_backfill import canonical_fill_id
+from hl_observer.ops.echec_silencieux import noter as _noter_echec
 
 SCHEMA_VERSION = "hypersmart.copy_vault_checkpoint_tail.v1"
-COMPANION_PROTOCOL = f"copy_vault_checkpoint_companion_v1_for_{PROTOCOL_NAME}"
+COMPANION_PROTOCOL = CHECKPOINT_COLLECTOR_PROTOCOL
 INPUT_RELPATH = Path("runtime") / "data" / "vault_fills_live.jsonl"
 OUTPUT_RELPATH = Path("runtime") / "data" / "copy_vault_l2_tape.jsonl"
 STATE_RELPATH = Path("runtime") / "data" / "copy_vault_checkpoint_tail_state.json"
@@ -135,18 +135,7 @@ def _default_state(*, offset: int, now_ms: int) -> dict[str, Any]:
 
 
 def _event_identity(fill: Mapping[str, Any]) -> str:
-    material = (
-        str(fill.get("stable_event_id") or ""),
-        str(fill.get("hash") or ""),
-        str(fill.get("tid") or ""),
-        str(fill.get("oid") or ""),
-        int(fill.get("ts_ms") or 0),
-        str(fill.get("vault") or "").lower(),
-        str(fill.get("coin") or "").upper(),
-        str(fill.get("sz") or ""),
-        str(fill.get("px") or ""),
-    )
-    return hashlib.sha256(repr(material).encode("utf-8")).hexdigest()
+    return canonical_fill_id(fill)
 
 
 def _trim(values: list[str], limit: int) -> list[str]:
@@ -304,6 +293,10 @@ class CopyVaultCheckpointTail:
         if direction != expected_direction:
             self.state["counters"]["direction_contradictions_rejected"] += 1
             return
+        entry_action = classify_live_entry_action(fill)
+        if entry_action is None:
+            self.state["counters"]["non_entry_rejected"] += 1
+            return
         if now_ms < received_at_ms or now_ms - received_at_ms > MAX_TARGET_LAG_MS:
             self.state["counters"]["stale_rejected"] += 1
             return
@@ -323,7 +316,8 @@ class CopyVaultCheckpointTail:
             self.state["counters"]["out_of_order_rejected"] += 1
             return
         continuation = bool(
-            previous
+            entry_action == "ADD"
+            and previous
             and int(previous.get("direction") or 0) == direction
             and fill_ts_ms - int(previous.get("last_fill_ts_ms") or 0) <= METAORDER_GAP_MS
         )
@@ -334,7 +328,13 @@ class CopyVaultCheckpointTail:
             self.state["counters"]["continuations"] += 1
             return
 
-        identifier = metaorder_id(vault, coin, direction, fill_ts_ms)
+        identifier = canonical_metaorder_id(
+            vault=vault,
+            coin=coin,
+            direction=direction,
+            signal_ts_ms=received_at_ms,
+            first_event_id=event_id,
+        )
         meta_state[key] = {
             "direction": direction,
             "last_fill_ts_ms": fill_ts_ms,

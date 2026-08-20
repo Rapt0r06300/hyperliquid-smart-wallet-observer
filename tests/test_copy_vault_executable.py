@@ -1,9 +1,10 @@
 from __future__ import annotations
 
-import math
 import json
+import math
 
 from hl_observer.backtesting.copy_vault_executable import (
+    CHECKPOINT_COLLECTOR_PROTOCOL,
     COPY_DELAY_MS,
     HORIZONS_MS,
     MAX_TARGET_LAG_MS,
@@ -107,6 +108,17 @@ def test_metaorders_collapse_slices_even_when_other_coin_is_interleaved() -> Non
     assert audit["sliced_fills_collapsed"] == 1
 
 
+def test_metaorder_id_ne_change_pas_quand_une_slice_future_arrive() -> None:
+    first = _entry("first", 1_000, action="OPEN")
+    future_add = _entry("future-add", 2_000, action="ADD")
+
+    initial = cluster_metaorders([first])[0][0]
+    enriched = cluster_metaorders([first, future_add])[0][0]
+
+    assert initial["metaorder_id"] == enriched["metaorder_id"]
+    assert initial["first_event_id"] == enriched["first_event_id"] == "first"
+
+
 def test_metaorder_live_emploie_reception_locale_et_backfill_ne_prouve_pas_forward() -> None:
     live = {
         **_entry("live", 1_000),
@@ -207,6 +219,8 @@ def test_loader_accepte_checkpoint_info_causal_frais(tmp_path) -> None:
         "source": "HYPERLIQUID_INFO_L2BOOK_CAUSAL_CHECKPOINT",
         "data_origin": "REAL_OBSERVED", "causal_observation": True,
         "checkpoint_stage": "ENTRY", "checkpoint_target_ms": 2_005,
+        "checkpoint_id": "mo-1:ENTRY", "metaorder_id": "mo-1",
+        "collector_protocol": CHECKPOINT_COLLECTOR_PROTOCOL,
     }
     (data / "copy_vault_l2_tape.jsonl").write_text(
         json.dumps(row) + "\n", encoding="utf-8"
@@ -217,6 +231,29 @@ def test_loader_accepte_checkpoint_info_causal_frais(tmp_path) -> None:
     assert books["BTC"][0]["source"] == "HYPERLIQUID_INFO_L2BOOK_CAUSAL_CHECKPOINT"
     assert audit["source_counts"]["causal_info_checkpoint"] == 1
     assert audit["causal_forward_rows"] == 1
+
+
+def test_loader_refuse_checkpoint_ancien_protocole(tmp_path) -> None:
+    data = tmp_path / "runtime" / "data"
+    data.mkdir(parents=True)
+    row = {
+        "schema_version": "hypersmart.copy_vault_l2.v1",
+        "coin": "BTC", "received_at_ms": 2_010, "exchange_ts_ms": 2_000,
+        "bid": 100.0, "ask": 102.0, "capacity_usd": 700.0,
+        "source": "HYPERLIQUID_INFO_L2BOOK_CAUSAL_CHECKPOINT",
+        "data_origin": "REAL_OBSERVED", "causal_observation": True,
+        "checkpoint_stage": "ENTRY", "checkpoint_target_ms": 2_005,
+        "checkpoint_id": "mo-1:ENTRY", "metaorder_id": "mo-1",
+        "collector_protocol": "copy_vault_checkpoint_companion_v1_obsolete",
+    }
+    (data / "copy_vault_l2_tape.jsonl").write_text(
+        json.dumps(row) + "\n", encoding="utf-8"
+    )
+
+    books, audit = load_observed_books(tmp_path, coins={"BTC"})
+
+    assert books == {}
+    assert audit["checkpoint_protocol_mismatches_rejected"] == 1
 
 
 def test_loader_refuse_checkpoint_info_dont_horloge_est_trop_vieille(tmp_path) -> None:
@@ -303,6 +340,70 @@ def test_stale_reference_is_refused_instead_of_using_future_price() -> None:
 
     assert trade is None
     assert reason == "STALE_OR_MISSING_REFERENCE_BOOK"
+
+
+def _checkpoint_book(
+    metaorder_id: str, stage: str, ts_ms: int, target_ms: int, *, line: int
+) -> dict:
+    checkpoint_suffix = (
+        f"EXIT:{stage.removeprefix('EXIT_')}"
+        if stage.startswith("EXIT_")
+        else stage
+    )
+    return {
+        **_book(ts_ms, 99.0 + line, 101.0 + line, line=line, causal=True),
+        "metaorder_id": metaorder_id,
+        "checkpoint_stage": stage,
+        "checkpoint_id": f"{metaorder_id}:{checkpoint_suffix}",
+        "checkpoint_target_ms": target_ms,
+        "collector_protocol": CHECKPOINT_COLLECTOR_PROTOCOL,
+    }
+
+
+def test_executeur_lie_les_trois_books_au_metaordre_exact() -> None:
+    metaorder = cluster_metaorders([_entry("bound", 1_000, action="OPEN")])[0][0]
+    identifier = metaorder["metaorder_id"]
+    books = [
+        _checkpoint_book(identifier, "REFERENCE", 1_000, 1_000, line=1),
+        _checkpoint_book(identifier, "ENTRY", 61_000, 61_000, line=2),
+        _checkpoint_book(identifier, "EXIT_300000", 361_000, 361_000, line=3),
+    ]
+
+    trade, reason = execute_metaorder(metaorder, books, horizon_ms=300_000)
+
+    assert reason == "LIQUIDATABLE_NET"
+    assert trade is not None
+    assert trade["book_binding_method"] == "EXACT_METAORDER_CHECKPOINTS"
+
+
+def test_executeur_ne_peut_pas_emprunter_les_checkpoints_dun_autre_metaordre() -> None:
+    metaorder = cluster_metaorders([_entry("wanted", 1_000, action="OPEN")])[0][0]
+    books = [
+        _checkpoint_book("other", "REFERENCE", 1_000, 1_000, line=1),
+        _checkpoint_book("other", "ENTRY", 61_000, 61_000, line=2),
+        _checkpoint_book("other", "EXIT_300000", 361_000, 361_000, line=3),
+    ]
+
+    trade, reason = execute_metaorder(metaorder, books, horizon_ms=300_000)
+
+    assert trade is None
+    assert reason == "MISSING_EXACT_METAORDER_CHECKPOINT"
+
+
+def test_executeur_refuse_un_checkpoint_id_non_canonique() -> None:
+    metaorder = cluster_metaorders([_entry("bound", 1_000, action="OPEN")])[0][0]
+    identifier = metaorder["metaorder_id"]
+    books = [
+        _checkpoint_book(identifier, "REFERENCE", 1_000, 1_000, line=1),
+        _checkpoint_book(identifier, "ENTRY", 61_000, 61_000, line=2),
+        _checkpoint_book(identifier, "EXIT_300000", 361_000, 361_000, line=3),
+    ]
+    books[-1]["checkpoint_id"] = f"{identifier}:EXIT_300000"
+
+    trade, reason = execute_metaorder(metaorder, books, horizon_ms=300_000)
+
+    assert trade is None
+    assert reason == "CHECKPOINT_ID_BINDING_MISMATCH"
 
 
 def test_long_and_short_use_marketable_prices_and_reconcile_costs() -> None:

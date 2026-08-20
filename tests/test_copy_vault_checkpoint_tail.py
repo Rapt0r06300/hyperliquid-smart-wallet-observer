@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+from hl_observer.backtesting.copy_vault_executable import cluster_metaorders
 from hl_observer.collection.copy_vault_checkpoint_tail import (
     COMPANION_PROTOCOL,
     COPY_DELAY_MS,
@@ -13,6 +14,7 @@ from hl_observer.collection.copy_vault_checkpoint_tail import (
     STATE_RELPATH,
     CopyVaultCheckpointTail,
 )
+from hl_observer.collection.vault_fills_backfill import canonical_fill_id
 
 
 VAULT = "0x" + "a" * 40
@@ -24,6 +26,7 @@ def _fill(
     event: str = "one",
     direction: int = 1,
     dir_label: str | None = None,
+    start_position: float = 0.0,
 ) -> dict:
     return {
         "vault": VAULT,
@@ -33,6 +36,7 @@ def _fill(
         "signe": direction,
         "ts_ms": now_ms - 5,
         "dir": dir_label or ("Open Long" if direction > 0 else "Open Short"),
+        "start_position": start_position,
         "hash": f"0x{event}",
         "tid": event,
         "oid": event,
@@ -179,7 +183,7 @@ def test_partial_duplicate_stale_and_continuation_fills_cannot_fabricate_checkpo
     assert duplicate["counters"]["duplicates_rejected"] == 1
 
     now[0] += 1_000
-    _append(input_path, _fill(now[0], event="continuation"))
+    _append(input_path, _fill(now[0], event="continuation", start_position=0.01))
     continuation = engine.poll_once()
     assert continuation["captured"] == 0
     assert continuation["counters"]["continuations"] == 1
@@ -189,3 +193,55 @@ def test_partial_duplicate_stale_and_continuation_fills_cannot_fabricate_checkpo
     result = engine.poll_once()
     assert result["captured"] == 0
     assert result["counters"]["stale_rejected"] == 1
+
+
+def test_live_tail_et_replay_partagent_identite_immuable(tmp_path: Path) -> None:
+    now = [3_000_000]
+    fill = _fill(now[0], event="identity")
+    engine = CopyVaultCheckpointTail(
+        tmp_path,
+        fetch_book=lambda _coin: _book(now[0]),
+        clock_ms=lambda: now[0],
+    )
+    _append(tmp_path / INPUT_RELPATH, fill)
+
+    assert engine.poll_once()["captured"] == 1
+    checkpoint = json.loads(
+        (tmp_path / OUTPUT_RELPATH).read_text(encoding="utf-8").splitlines()[0]
+    )
+    replay_event = {
+        **fill,
+        "fill_id": canonical_fill_id(fill),
+        "event_id": canonical_fill_id(fill),
+        "direction": 1,
+        "action": "OPEN",
+        "observed_at_ms": fill["received_at_ms"],
+        "is_snapshot": False,
+    }
+    replay_metaorder = cluster_metaorders([replay_event])[0][0]
+
+    assert checkpoint["metaorder_id"] == replay_metaorder["metaorder_id"]
+
+
+def test_open_explicite_redemarre_un_metaordre_meme_dans_la_fenetre(tmp_path: Path) -> None:
+    now = [4_000_000]
+    engine = CopyVaultCheckpointTail(
+        tmp_path,
+        fetch_book=lambda _coin: _book(now[0]),
+        clock_ms=lambda: now[0],
+    )
+    input_path = tmp_path / INPUT_RELPATH
+    _append(input_path, _fill(now[0], event="first", start_position=0.0))
+    assert engine.poll_once()["captured"] == 1
+    first_id = json.loads(
+        (tmp_path / OUTPUT_RELPATH).read_text(encoding="utf-8").splitlines()[0]
+    )["metaorder_id"]
+
+    now[0] += 1_000
+    _append(input_path, _fill(now[0], event="second", start_position=0.0))
+    assert engine.poll_once()["captured"] == 1
+    rows = [
+        json.loads(line)
+        for line in (tmp_path / OUTPUT_RELPATH).read_text(encoding="utf-8").splitlines()
+    ]
+    assert rows[-1]["metaorder_id"] != first_id

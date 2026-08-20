@@ -25,11 +25,15 @@ sys.path.insert(0, str(RACINE / "tools"))
 from hl_observer.collection import userfills_live as UL  # noqa: E402
 from hl_observer.collection import verrou_instance as VI  # noqa: E402
 from hl_observer.backtesting.copy_vault_executable import (  # noqa: E402
+    CHECKPOINT_COLLECTOR_PROTOCOL,
     COPY_DELAY_MS as COPY_VAULT_DELAY_MS,
     HORIZONS_MS as COPY_VAULT_HORIZONS_MS,
     MAX_TARGET_LAG_MS as COPY_VAULT_MAX_TARGET_LAG_MS,
     PROTOCOL_NAME as COPY_VAULT_PROTOCOL,
+    canonical_metaorder_id,
+    classify_live_entry_action,
 )
+from hl_observer.collection.vault_fills_backfill import canonical_fill_id  # noqa: E402
 from hl_observer.experimental import cohortes as CO  # noqa: E402
 from hl_observer.market_data.live_l2_service import (  # noqa: E402
     LiveL2Snapshot,
@@ -283,6 +287,8 @@ def _append_copy_vault_book(
     checkpoint_stage: str | None = None,
     checkpoint_target_ms: int | None = None,
     checkpoint_id: str | None = None,
+    metaorder_id: str | None = None,
+    collector_protocol: str | None = None,
 ) -> bool:
     """Persist one causal observed L2 sample for executable forward replay."""
 
@@ -312,6 +318,18 @@ def _append_copy_vault_book(
         or not bids
         or not asks
         or any(px <= 0 or size <= 0 for px, size in bids + asks)
+    ):
+        return False
+    checkpoint_bound = any(
+        value is not None
+        for value in (checkpoint_stage, checkpoint_target_ms, checkpoint_id, metaorder_id)
+    )
+    if checkpoint_bound and not (
+        checkpoint_stage
+        and checkpoint_target_ms is not None
+        and checkpoint_id
+        and metaorder_id
+        and collector_protocol == CHECKPOINT_COLLECTOR_PROTOCOL
     ):
         return False
     previous = _COPY_VAULT_LAST_SAMPLE_MS.get(symbol)
@@ -349,6 +367,8 @@ def _append_copy_vault_book(
         row["checkpoint_target_ms"] = int(checkpoint_target_ms)
     if checkpoint_id:
         row["checkpoint_id"] = str(checkpoint_id)
+        row["metaorder_id"] = str(metaorder_id)
+        row["collector_protocol"] = str(collector_protocol)
     path = Path(root) / COPY_VAULT_L2_TAPE
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("a", encoding="utf-8") as handle:
@@ -1107,6 +1127,50 @@ def _new_metaorder_checkpoints(fill: dict, *, recv_mono_ms: float, metaorder_id:
     ]
 
 
+def _copy_vault_checkpoint_metaorder(
+    state: dict, fill: dict
+) -> tuple[str | None, str]:
+    """Bind live checkpoint scheduling to the same immutable replay identity."""
+
+    action = classify_live_entry_action(fill)
+    if action is None:
+        return None, "REJECTED"
+    try:
+        vault = str(fill["vault"]).lower()
+        coin = str(fill["coin"]).upper()
+        direction = int(fill.get("signe") or fill.get("sens") or 0)
+        fill_ts_ms = int(fill["ts_ms"])
+        signal_ts_ms = int(fill["received_at_ms"])
+    except (KeyError, TypeError, ValueError, OverflowError):
+        return None, "REJECTED"
+    if direction not in (-1, 1) or not vault or not coin:
+        return None, "REJECTED"
+    key = f"{vault}|{coin}"
+    previous = state.get(key) if isinstance(state.get(key), dict) else None
+    if (
+        action == "ADD"
+        and previous
+        and int(previous.get("direction") or 0) == direction
+        and 0 <= fill_ts_ms - int(previous.get("last_fill_ts_ms") or 0) <= 60_000
+    ):
+        previous["last_fill_ts_ms"] = fill_ts_ms
+        return str(previous["metaorder_id"]), "CONTINUATION"
+    event_id = canonical_fill_id(fill)
+    identifier = canonical_metaorder_id(
+        vault=vault,
+        coin=coin,
+        direction=direction,
+        signal_ts_ms=signal_ts_ms,
+        first_event_id=event_id,
+    )
+    state[key] = {
+        "direction": direction,
+        "last_fill_ts_ms": fill_ts_ms,
+        "metaorder_id": identifier,
+    }
+    return identifier, "FIRST_SLICE"
+
+
 def _exit_metaorder_checkpoints(entry: dict) -> list[dict]:
     """Schedule candidate exits from the actually captured entry instant."""
 
@@ -1156,6 +1220,8 @@ async def _capture_copy_vault_checkpoint(root: Path, checkpoint: dict) -> dict:
             checkpoint_stage=str(checkpoint["stage"]),
             checkpoint_target_ms=target_wall,
             checkpoint_id=str(checkpoint["checkpoint_id"]),
+            metaorder_id=str(checkpoint["metaorder_id"]),
+            collector_protocol=CHECKPOINT_COLLECTOR_PROTOCOL,
         )
         if stored:
             return {
@@ -1185,6 +1251,8 @@ async def _capture_copy_vault_checkpoint(root: Path, checkpoint: dict) -> dict:
         checkpoint_stage=str(checkpoint["stage"]),
         checkpoint_target_ms=target_wall,
         checkpoint_id=str(checkpoint["checkpoint_id"]),
+        metaorder_id=str(checkpoint["metaorder_id"]),
+        collector_protocol=CHECKPOINT_COLLECTOR_PROTOCOL,
     )
     if not stored:
         return {"status": "RETRY_STORE_REJECTED"}
@@ -1266,6 +1334,7 @@ async def _tape_consumer(root: Path, *, horizon_ms: float = 300_000.0, post_wind
     checkpoints: list = []
     checkpointed_metaorders: dict[str, float] = {}
     meta_etat: dict = {}                                          # (vault,coin) -> métaordre live (id/sens/last_ft)
+    checkpoint_meta_state: dict = {}
     await asyncio.sleep(15.0)
     while True:
         try:
@@ -1285,13 +1354,20 @@ async def _tape_consumer(root: Path, *, horizon_ms: float = 300_000.0, post_wind
                 entree = T.etat_entree(buf, it["frm"], it["fill"].get("ts_ms"))
                 posts = T.etats_post(buf, entree["recv_mono"], n=3) if entree else []
                 mo, stade = T.stade_live(meta_etat, it["fill"])
-                if stade in {"FIRST_SLICE", "REVERSAL"} and mo not in checkpointed_metaorders:
+                checkpoint_mo, checkpoint_stage = _copy_vault_checkpoint_metaorder(
+                    checkpoint_meta_state, it["fill"]
+                )
+                if (
+                    checkpoint_stage == "FIRST_SLICE"
+                    and checkpoint_mo
+                    and checkpoint_mo not in checkpointed_metaorders
+                ):
                     checkpoints.extend(
                         _new_metaorder_checkpoints(
-                            it["fill"], recv_mono_ms=it["frm"], metaorder_id=mo,
+                            it["fill"], recv_mono_ms=it["frm"], metaorder_id=checkpoint_mo,
                         )
                     )
-                    checkpointed_metaorders[mo] = mono
+                    checkpointed_metaorders[checkpoint_mo] = mono
                 l = T.ligne_fill(it["fill"], metaorder_id=mo, stade=stade, pre=pre, entree=entree,
                                  posts=posts, fill_recv_mono=it["frm"])
                 if l:

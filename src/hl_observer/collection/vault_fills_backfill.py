@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+from collections.abc import Mapping
 from typing import Any
 
 MS_PAR_HEURE = 3_600_000
@@ -82,6 +83,30 @@ def fill_identity(fill: dict) -> tuple:
     )
 
 
+def canonical_fill_id(fill: Mapping[str, Any]) -> str:
+    """Return the deterministic fill id shared by live capture and replay.
+
+    This identity deliberately excludes reception-only metadata so the same
+    exchange fill receives the same id in a REST backfill and in the live WS
+    stream.  Source provenance remains stored separately on the event.
+    """
+
+    identity = {
+        "vault": str(fill.get("vault") or "").lower(),
+        "ts_ms": int(fill.get("ts_ms") or 0),
+        "coin": str(fill.get("coin") or "").upper(),
+        "px": float(fill.get("px") or 0.0),
+        "sz": float(fill.get("sz") or 0.0),
+        "dir": str(fill.get("dir") or ""),
+        "tid": fill.get("tid"),
+        "oid": fill.get("oid"),
+        "hash": fill.get("hash"),
+    }
+    return hashlib.sha256(
+        json.dumps(identity, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    ).hexdigest()
+
+
 def dedupliquer(fills: list[dict]) -> list[dict]:
     """Dédup stable par (vault, ts, coin, px, sz, dir, oid/hash) — un backfill paginé recouvre les bords."""
     vus: set[tuple] = set()
@@ -124,15 +149,7 @@ def reconstruire_episodes(fills: list[dict]) -> list[dict]:
             else:
                 action = "REDUCE"
             direction = 1 if (pos if abs(pos) > 1e-12 else avant) > 0 else -1
-            identity = {
-                "vault": vault, "ts_ms": int(f["ts_ms"]), "coin": coin,
-                "px": float(f["px"]), "sz": float(f["sz"]),
-                "dir": str(f.get("dir") or ""), "tid": f.get("tid"),
-                "oid": f.get("oid"), "hash": f.get("hash"),
-            }
-            fill_id = hashlib.sha256(
-                json.dumps(identity, sort_keys=True, separators=(",", ":")).encode("utf-8")
-            ).hexdigest()
+            fill_id = canonical_fill_id({**f, "vault": vault, "coin": coin})
             raw_snapshot = f.get("isSnapshot")
             events.append({"ts_ms": f["ts_ms"], "vault": vault, "coin": coin, "action": action,
                            "direction": direction, "taille_usd": round(taille_usd, 2),
@@ -229,6 +246,6 @@ def auditer_couverture(fills: list[dict], *, cap: int = CAP_USERFILLS, lookback_
             "par_vault": vaults}
 
 
-__all__ = ["plan_de_requetes", "parser_fills", "fill_identity", "dedupliquer", "reconstruire_episodes",
+__all__ = ["plan_de_requetes", "parser_fills", "fill_identity", "canonical_fill_id", "dedupliquer", "reconstruire_episodes",
            "marquer_retraits", "entrees_alpha", "couverture", "auditer_couverture", "CAP_USERFILLS",
            "MS_PAR_HEURE"]

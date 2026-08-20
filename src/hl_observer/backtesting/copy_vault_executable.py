@@ -13,14 +13,16 @@ import hashlib
 import json
 import math
 from collections.abc import Iterable, Mapping
-from pathlib import Path
 from typing import Any
 
 from hl_observer.config.frais_venues import frais_taker_bps
 from hl_observer.ops.echec_silencieux import noter as _noter_echec
 
 SCHEMA_VERSION = "hypersmart.copy_vault_executable.v1"
-PROTOCOL_NAME = "copy_vault_executable_walk_forward_v6_causal_checkpoints"
+PROTOCOL_NAME = "copy_vault_executable_walk_forward_v7_exact_checkpoint_binding"
+CHECKPOINT_COLLECTOR_PROTOCOL = (
+    f"copy_vault_checkpoint_companion_v2_for_{PROTOCOL_NAME}"
+)
 METAORDER_GAP_MS = 60_000
 COPY_DELAY_MS = 60_000
 MAX_REFERENCE_LAG_MS = 30_000
@@ -45,9 +47,51 @@ def expected_open_direction(row: Mapping[str, Any]) -> int | None:
     return _OPEN_DIRECTION_BY_LABEL.get(label)
 
 
+def canonical_metaorder_id(
+    *, vault: str, coin: str, direction: int, signal_ts_ms: int, first_event_id: str
+) -> str:
+    """Build an immutable id from facts known at the first observed slice."""
+
+    material = {
+        "vault": str(vault or "").lower(),
+        "coin": str(coin or "").upper(),
+        "direction": int(direction),
+        "signal_ts_ms": int(signal_ts_ms),
+        "first_event_id": str(first_event_id or ""),
+    }
+    return hashlib.sha256(
+        json.dumps(material, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    ).hexdigest()
+
+
+def classify_live_entry_action(row: Mapping[str, Any]) -> str | None:
+    """Classify an explicit open fill using its exchange start position.
+
+    ``OPEN`` always starts a new metaorder. ``ADD`` may extend the active one.
+    Missing or contradictory state is rejected instead of guessed.
+    """
+
+    direction = expected_open_direction(row)
+    if direction is None:
+        return None
+    raw_start = row.get("start_position", row.get("startPosition"))
+    try:
+        start = float(raw_start)
+    except (TypeError, ValueError, OverflowError):
+        return None
+    if abs(start) <= 1e-12:
+        return "OPEN"
+    if (start > 0 and direction > 0) or (start < 0 and direction < 0):
+        return "ADD"
+    return None
+
+
 def protocol_signature() -> dict[str, Any]:
     return {
         "calibration_protocol": PROTOCOL_NAME,
+        "checkpoint_collector_protocol": CHECKPOINT_COLLECTOR_PROTOCOL,
+        "metaorder_identity_policy": "immutable_first_observed_fill",
+        "checkpoint_binding_policy": "exact_metaorder_stage_and_protocol",
         "metaorder_gap_ms": METAORDER_GAP_MS,
         "copy_delay_ms": COPY_DELAY_MS,
         "max_reference_lag_ms": MAX_REFERENCE_LAG_MS,
@@ -183,6 +227,14 @@ def cluster_metaorders(
                 "move_frac_audit_sum": 0.0,
                 "member_event_ids": [],
             }
+            cluster["first_event_id"] = row["event_id"]
+            cluster["metaorder_id"] = canonical_metaorder_id(
+                vault=cluster["vault"],
+                coin=cluster["coin"],
+                direction=cluster["direction"],
+                signal_ts_ms=cluster["signal_ts_ms"],
+                first_event_id=cluster["first_event_id"],
+            )
             active[key] = cluster
         cluster["last_fill_ts_ms"] = row["ts_ms"]
         cluster["fill_count"] += 1
@@ -192,16 +244,6 @@ def cluster_metaorders(
     completed.extend(active.values())
 
     for cluster in completed:
-        material = {
-            "vault": cluster["vault"],
-            "coin": cluster["coin"],
-            "direction": cluster["direction"],
-            "signal_ts_ms": cluster["signal_ts_ms"],
-            "member_event_ids": cluster["member_event_ids"],
-        }
-        cluster["metaorder_id"] = hashlib.sha256(
-            json.dumps(material, sort_keys=True, separators=(",", ":")).encode("utf-8")
-        ).hexdigest()
         cluster["leader_notional_usd"] = round(cluster["leader_notional_usd"], 8)
         cluster["move_frac_audit_sum"] = round(cluster["move_frac_audit_sum"], 10)
     completed.sort(key=lambda row: (row["signal_ts_ms"], row["metaorder_id"]))
@@ -290,6 +332,73 @@ def _first_at_or_after(
     return (rows[index], lag) if 0 <= lag <= int(max_lag_ms) else (None, lag)
 
 
+def _exact_checkpoint_triplet(
+    metaorder: Mapping[str, Any],
+    books: list[dict[str, Any]],
+    *,
+    horizon_ms: int,
+    copy_delay_ms: int,
+    max_reference_lag_ms: int,
+    max_target_lag_ms: int,
+) -> tuple[
+    tuple[dict[str, Any], dict[str, Any], dict[str, Any], int, int, int] | None,
+    str | None,
+]:
+    """Select only checkpoints cryptographically bound to this metaorder."""
+
+    metaorder_id = str(metaorder.get("metaorder_id") or "")
+    matching = [
+        row for row in books
+        if str(row.get("metaorder_id") or "") == metaorder_id
+        and str(row.get("collector_protocol") or "") == CHECKPOINT_COLLECTOR_PROTOCOL
+        and row.get("checkpoint_id")
+    ]
+    if not matching:
+        return None, None
+    expected_stages = ("REFERENCE", "ENTRY", f"EXIT_{int(horizon_ms)}")
+    expected_checkpoint_ids = (
+        f"{metaorder_id}:REFERENCE",
+        f"{metaorder_id}:ENTRY",
+        f"{metaorder_id}:EXIT:{int(horizon_ms)}",
+    )
+    selected: list[dict[str, Any]] = []
+    for stage, checkpoint_id in zip(
+        expected_stages, expected_checkpoint_ids, strict=True
+    ):
+        candidates = [row for row in matching if row.get("checkpoint_stage") == stage]
+        if len(candidates) != 1:
+            return None, (
+                "AMBIGUOUS_EXACT_METAORDER_CHECKPOINT"
+                if len(candidates) > 1
+                else "MISSING_EXACT_METAORDER_CHECKPOINT"
+            )
+        if str(candidates[0].get("checkpoint_id") or "") != checkpoint_id:
+            return None, "CHECKPOINT_ID_BINDING_MISMATCH"
+        selected.append(candidates[0])
+    reference, entry, exit_book = selected
+    signal_ms = int(metaorder["signal_ts_ms"])
+    expected_targets = (
+        signal_ms,
+        signal_ms + int(copy_delay_ms),
+        int(entry["ts_ms"]) + int(horizon_ms),
+    )
+    lags: list[int] = []
+    for index, (row, expected_target) in enumerate(
+        zip(selected, expected_targets, strict=True)
+    ):
+        target = int(row.get("checkpoint_target_ms") or 0)
+        if target != expected_target:
+            return None, "CHECKPOINT_TARGET_BINDING_MISMATCH"
+        lag = int(row["ts_ms"]) - target
+        allowed = max_reference_lag_ms if index == 0 else max_target_lag_ms
+        if lag < 0 or lag > int(allowed):
+            return None, "STALE_EXACT_METAORDER_CHECKPOINT"
+        lags.append(lag)
+    return (
+        reference, entry, exit_book, lags[0], lags[1], lags[2]
+    ), None
+
+
 def execute_metaorder(
     metaorder: Mapping[str, Any],
     books: list[dict[str, Any]],
@@ -308,19 +417,43 @@ def execute_metaorder(
     if not books:
         return None, "NO_OBSERVED_BOOK_FOR_COIN"
     signal_ms = int(metaorder["signal_ts_ms"])
-    reference, reference_lag = _first_at_or_after(
-        books, signal_ms, max_reference_lag_ms
+    checkpoint_triplet, checkpoint_reason = _exact_checkpoint_triplet(
+        metaorder,
+        books,
+        horizon_ms=int(horizon_ms),
+        copy_delay_ms=int(copy_delay_ms),
+        max_reference_lag_ms=int(max_reference_lag_ms),
+        max_target_lag_ms=int(max_target_lag_ms),
     )
-    if reference is None:
-        return None, "STALE_OR_MISSING_REFERENCE_BOOK"
-    entry_target_ms = signal_ms + int(copy_delay_ms)
-    entry, entry_lag = _first_at_or_after(books, entry_target_ms, max_target_lag_ms)
-    if entry is None:
-        return None, "STALE_OR_MISSING_ENTRY_BOOK"
-    exit_target_ms = int(entry["ts_ms"]) + int(horizon_ms)
-    exit_book, exit_lag = _first_at_or_after(books, exit_target_ms, max_target_lag_ms)
-    if exit_book is None:
-        return None, "STALE_OR_MISSING_EXIT_BOOK"
+    if checkpoint_reason is not None:
+        return None, checkpoint_reason
+    if checkpoint_triplet is not None:
+        reference, entry, exit_book, reference_lag, entry_lag, exit_lag = (
+            checkpoint_triplet
+        )
+        book_binding_method = "EXACT_METAORDER_CHECKPOINTS"
+    else:
+        continuous_books = [row for row in books if not row.get("checkpoint_id")]
+        if not continuous_books:
+            return None, "MISSING_EXACT_METAORDER_CHECKPOINT"
+        reference, reference_lag = _first_at_or_after(
+            continuous_books, signal_ms, max_reference_lag_ms
+        )
+        if reference is None:
+            return None, "STALE_OR_MISSING_REFERENCE_BOOK"
+        entry_target_ms = signal_ms + int(copy_delay_ms)
+        entry, entry_lag = _first_at_or_after(
+            continuous_books, entry_target_ms, max_target_lag_ms
+        )
+        if entry is None:
+            return None, "STALE_OR_MISSING_ENTRY_BOOK"
+        exit_target_ms = int(entry["ts_ms"]) + int(horizon_ms)
+        exit_book, exit_lag = _first_at_or_after(
+            continuous_books, exit_target_ms, max_target_lag_ms
+        )
+        if exit_book is None:
+            return None, "STALE_OR_MISSING_EXIT_BOOK"
+        book_binding_method = "CONTINUOUS_CAUSAL_BOOK"
     causal_books = all(
         row.get("causal_observation") is True
         for row in (reference, entry, exit_book)
@@ -385,6 +518,7 @@ def execute_metaorder(
         "causal_forward_eligible": (
             metaorder.get("causal_forward_eligible") is True and causal_books
         ),
+        "book_binding_method": book_binding_method,
         "reference_ts_ms": reference["ts_ms"],
         "entry_ts_ms": entry["ts_ms"],
         "exit_ts_ms": exit_book["ts_ms"],

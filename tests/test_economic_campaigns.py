@@ -5,6 +5,7 @@ from pathlib import Path
 
 import pytest
 
+from hl_observer.backtesting.copy_vault_executable import PROTOCOL_NAME
 from hl_observer.simulation.economic_campaigns import (
     build_copy_campaign,
     build_cross_campaign,
@@ -146,7 +147,7 @@ def test_executable_copy_campaign_maps_only_closed_liquidatable_evidence(tmp_pat
     freeze = freeze_parameters(
         tmp_path,
         "copy_vault",
-        {"calibration_protocol": "copy_vault_executable_walk_forward_v6_causal_checkpoints"},
+        {"calibration_protocol": PROTOCOL_NAME},
         datasets,
         campaign_id="copy-executable",
         frozen_at_ms=10,

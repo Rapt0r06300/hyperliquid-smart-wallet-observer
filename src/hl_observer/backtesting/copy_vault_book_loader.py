@@ -31,6 +31,7 @@ def load_observed_books(
     invalid = 0
     rows_read = 0
     duplicate_rows = 0
+    checkpoint_protocol_mismatches = 0
     seen: set[tuple[Any, ...]] = set()
     source_counts: dict[str, int] = {
         "historical_observed": 0,
@@ -41,17 +42,26 @@ def load_observed_books(
     def add_row(
         *, coin: str, ts_ms: int, bid: float, ask: float, capacity_usd: float,
         source: str, source_line: int, causal_observation: bool,
+        metaorder_id: str | None = None,
+        checkpoint_stage: str | None = None,
+        checkpoint_id: str | None = None,
+        checkpoint_target_ms: int | None = None,
+        collector_protocol: str | None = None,
     ) -> None:
         nonlocal invalid, duplicate_rows
         if not coin or ts_ms <= 0 or bid <= 0 or ask <= bid or capacity_usd <= 0:
             invalid += 1
             return
-        identity = (coin, ts_ms, bid, ask, capacity_usd, causal_observation)
+        identity = (
+            ("checkpoint", checkpoint_id)
+            if checkpoint_id
+            else ("book", coin, ts_ms, bid, ask, capacity_usd, causal_observation)
+        )
         if identity in seen:
             duplicate_rows += 1
             return
         seen.add(identity)
-        by_coin.setdefault(coin, []).append({
+        row = {
             "coin": coin,
             "ts_ms": ts_ms,
             "bid": bid,
@@ -60,7 +70,16 @@ def load_observed_books(
             "source": source,
             "source_line": source_line,
             "causal_observation": causal_observation,
-        })
+        }
+        if checkpoint_id:
+            row.update({
+                "metaorder_id": metaorder_id,
+                "checkpoint_stage": checkpoint_stage,
+                "checkpoint_id": checkpoint_id,
+                "checkpoint_target_ms": checkpoint_target_ms,
+                "collector_protocol": collector_protocol,
+            })
+        by_coin.setdefault(coin, []).append(row)
         if not causal_observation:
             source_counts["historical_observed"] += 1
         elif source == "HYPERLIQUID_INFO_L2BOOK_CAUSAL_CHECKPOINT":
@@ -104,6 +123,36 @@ def load_observed_books(
                         "HYPERLIQUID_L2_WS",
                         "HYPERLIQUID_INFO_L2BOOK_CAUSAL_CHECKPOINT",
                     }
+                    checkpoint_id = str(raw.get("checkpoint_id") or "").strip() or None
+                    is_checkpoint = (
+                        checkpoint_id is not None
+                        or raw.get("source") == "HYPERLIQUID_INFO_L2BOOK_CAUSAL_CHECKPOINT"
+                    )
+                    metaorder_id = str(raw.get("metaorder_id") or "").strip() or None
+                    checkpoint_stage = (
+                        str(raw.get("checkpoint_stage") or "").strip() or None
+                    )
+                    collector_protocol = (
+                        str(raw.get("collector_protocol") or "").strip() or None
+                    )
+                    checkpoint_target_ms = (
+                        int(raw["checkpoint_target_ms"]) if is_checkpoint else None
+                    )
+                    checkpoint_binding_valid = (
+                        not is_checkpoint
+                        or (
+                            collector_protocol == _base.CHECKPOINT_COLLECTOR_PROTOCOL
+                            and bool(metaorder_id)
+                            and bool(checkpoint_stage)
+                            and bool(checkpoint_id)
+                            and checkpoint_target_ms is not None
+                            and checkpoint_target_ms > 0
+                        )
+                    )
+                    if not checkpoint_binding_valid:
+                        checkpoint_protocol_mismatches += 1
+                        invalid += 1
+                        continue
                     causal = (
                         raw.get("schema_version") == "hypersmart.copy_vault_l2.v1"
                         and allowed_source
@@ -124,6 +173,11 @@ def load_observed_books(
                         source=str(raw["source"]),
                         source_line=line_number,
                         causal_observation=True,
+                        metaorder_id=metaorder_id,
+                        checkpoint_stage=checkpoint_stage,
+                        checkpoint_id=checkpoint_id,
+                        checkpoint_target_ms=checkpoint_target_ms,
+                        collector_protocol=collector_protocol,
                     )
                 except (KeyError, TypeError, ValueError, OverflowError, json.JSONDecodeError):
                     invalid += 1
@@ -137,6 +191,7 @@ def load_observed_books(
         "valid_rows": valid,
         "invalid_rows": invalid,
         "duplicate_rows_rejected": duplicate_rows,
+        "checkpoint_protocol_mismatches_rejected": checkpoint_protocol_mismatches,
         "coins": len(by_coin),
         "source_counts": source_counts,
         "causal_forward_rows": (

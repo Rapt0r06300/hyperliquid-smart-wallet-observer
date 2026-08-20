@@ -22,6 +22,18 @@ def test_parser_et_dedup():
     assert fills[0]["tid"] == 7
 
 
+def test_canonical_fill_id_est_source_independant_et_reproductible():
+    base = {
+        "vault": "0xAbC", "ts_ms": 1000, "coin": "sol", "px": 150.0,
+        "sz": 2.0, "dir": "Open Long", "tid": 7, "oid": 8, "hash": "0x9",
+    }
+    live = {**base, "source": "LIVE_WS", "received_at_ms": 1010}
+    rest = {**base, "source": "REST_BACKFILL"}
+
+    assert VB.canonical_fill_id(live) == VB.canonical_fill_id(rest)
+    assert len(VB.canonical_fill_id(live)) == 64
+
+
 def test_dedup_source_independent_preserve_la_preuve_live_placee_en_premier():
     common = {
         "vault": "0xA", "ts_ms": 1000, "coin": "SOL", "px": 150.0,

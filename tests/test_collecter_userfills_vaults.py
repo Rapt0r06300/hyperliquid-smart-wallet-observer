@@ -8,6 +8,8 @@ import json
 import time
 from pathlib import Path
 
+from hl_observer.backtesting.copy_vault_executable import cluster_metaorders
+
 RACINE = Path(__file__).resolve().parents[1]
 
 
@@ -274,6 +276,8 @@ def test_checkpoint_prefere_un_book_ws_reel_sans_appel_rest(tmp_path, monkeypatc
     row = json.loads((tmp_path / C.COPY_VAULT_L2_TAPE).read_text(encoding="utf-8"))
     assert row["source"] == "HYPERLIQUID_L2_WS"
     assert row["checkpoint_id"] == "mo-ws:REFERENCE"
+    assert row["metaorder_id"] == "mo-ws"
+    assert row["collector_protocol"] == C.CHECKPOINT_COLLECTOR_PROTOCOL
 
 
 def test_checkpoint_ws_refuse_retombe_sur_info_public(tmp_path, monkeypatch):
@@ -307,6 +311,8 @@ def test_checkpoint_ws_refuse_retombe_sur_info_public(tmp_path, monkeypatch):
     assert result["status"] == "CAPTURED_INFO"
     row = json.loads((tmp_path / C.COPY_VAULT_L2_TAPE).read_text(encoding="utf-8"))
     assert row["source"] == "HYPERLIQUID_INFO_L2BOOK_CAUSAL_CHECKPOINT"
+    assert row["metaorder_id"] == "mo-fallback"
+    assert row["collector_protocol"] == C.CHECKPOINT_COLLECTOR_PROTOCOL
 
 
 def test_checkpoint_info_public_persiste_provenance_causale(tmp_path, monkeypatch):
@@ -332,7 +338,68 @@ def test_checkpoint_info_public_persiste_provenance_causale(tmp_path, monkeypatc
     assert row["source"] == "HYPERLIQUID_INFO_L2BOOK_CAUSAL_CHECKPOINT"
     assert row["checkpoint_stage"] == "ENTRY"
     assert row["checkpoint_target_ms"] == now_wall - 100
+    assert row["metaorder_id"] == "mo-info"
+    assert row["collector_protocol"] == C.CHECKPOINT_COLLECTOR_PROTOCOL
     assert row["data_origin"] == "REAL_OBSERVED"
+
+
+def _live_open_fill(*, received_at_ms: int, ts_ms: int, start_position: float) -> dict:
+    return {
+        "vault": "0xabc",
+        "coin": "btc",
+        "px": 100.0,
+        "sz": 1.5,
+        "signe": 1,
+        "dir": "Open Long",
+        "start_position": start_position,
+        "ts_ms": ts_ms,
+        "received_at_ms": received_at_ms,
+        "hash": f"hash-{ts_ms}",
+        "tid": ts_ms,
+        "oid": ts_ms + 1,
+    }
+
+
+def test_identite_checkpoint_live_identique_au_replay_causal() -> None:
+    live_fill = _live_open_fill(
+        received_at_ms=10_100,
+        ts_ms=10_000,
+        start_position=0.0,
+    )
+    live_id, stage = C._copy_vault_checkpoint_metaorder({}, live_fill)
+    event_id = C.canonical_fill_id(live_fill)
+    replay_metaorder = cluster_metaorders([{
+        **live_fill,
+        "event_id": event_id,
+        "direction": 1,
+        "action": "OPEN",
+        "observed_at_ms": 10_100,
+        "source": "LIVE_WS",
+        "is_snapshot": False,
+    }])[0][0]
+
+    assert stage == "FIRST_SLICE"
+    assert live_id == replay_metaorder["metaorder_id"]
+
+
+def test_checkpoint_add_continue_et_open_explicite_redemarre() -> None:
+    state: dict = {}
+    first_id, first_stage = C._copy_vault_checkpoint_metaorder(
+        state,
+        _live_open_fill(received_at_ms=10_100, ts_ms=10_000, start_position=0.0),
+    )
+    add_id, add_stage = C._copy_vault_checkpoint_metaorder(
+        state,
+        _live_open_fill(received_at_ms=20_100, ts_ms=20_000, start_position=1.5),
+    )
+    reopened_id, reopened_stage = C._copy_vault_checkpoint_metaorder(
+        state,
+        _live_open_fill(received_at_ms=30_100, ts_ms=30_000, start_position=0.0),
+    )
+
+    assert first_stage == "FIRST_SLICE"
+    assert add_stage == "CONTINUATION" and add_id == first_id
+    assert reopened_stage == "FIRST_SLICE" and reopened_id != first_id
 
 
 def test_collecteur_branche_checkpoints_causaux_dans_consommateur():
