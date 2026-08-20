@@ -65,6 +65,20 @@ def _freeze(campaign: Mapping[str, Any]) -> dict[str, Any] | None:
     }
 
 
+def _next_hypothesis(raw: Mapping[str, Any]) -> dict[str, Any]:
+    hypothesis = _mapping(raw.get("next_hypothesis_v3"))
+    status = str(hypothesis.get("status") or "")
+    return {
+        "mechanism": hypothesis.get("mechanism"),
+        "status": status or None,
+        "selection_eligible": hypothesis.get("selection_eligible") is True,
+        "physical_freeze_allowed": hypothesis.get("physical_freeze_allowed") is True,
+        "collection_actionable": status.startswith("MORE_DATA_"),
+        "exact_next_evidence": list(hypothesis.get("exact_next_evidence") or []),
+        "selection_evidence_sha256": hypothesis.get("selection_evidence_sha256"),
+    }
+
+
 def _temporal_progress(temporal: Mapping[str, Any]) -> dict[str, Any]:
     """Return the immutable pass/fail state of OOS and forward evidence.
 
@@ -118,6 +132,7 @@ def _copy_state(
     causal = _mapping(raw.get("causal_protocol_audit"))
     temporal = _mapping(raw.get("temporal_evidence"))
     temporal_progress = _temporal_progress(temporal)
+    next_hypothesis = _next_hypothesis(raw)
     placebos = _mapping(temporal.get("placebos"))
     calibration = _mapping(raw.get("calibration"))
     grid = calibration.get("grid") if isinstance(calibration.get("grid"), list) else []
@@ -203,7 +218,10 @@ def _copy_state(
     return {
         "family": "copy_vault",
         "evidence_state": state,
-        "collection_actionable": bool(not objective_met and not measured_negative),
+        "collection_actionable": bool(
+            not objective_met
+            and (not measured_negative or next_hypothesis["collection_actionable"])
+        ),
         "software_pipeline_ready": schema_ready,
         "running_collector_protocol_ready": collector_protocol_ready,
         "future_data_required_only": bool(
@@ -239,6 +257,7 @@ def _copy_state(
             "active_companion_protocol": companion_protocol or None,
             **temporal_progress,
             "placebo_beaten": placebos.get("beaten") is True,
+            "next_hypothesis_v3": next_hypothesis,
         },
         "required_collectors": [
             "vault-collector",
@@ -277,8 +296,8 @@ def _copy_state(
                 "entry and exit books no more than 30 seconds from each copied event",
                 "purged positive OOS, positive post-freeze forward, placebo beaten",
             ]
-        )
-        ,
+            + next_hypothesis["exact_next_evidence"]
+        ),
         "methodology_action": (
             "KILL_CURRENT_FROZEN_HYPOTHESIS_OR_DECLARE_NEW_MECHANISM"
             if measured_negative
@@ -303,6 +322,7 @@ def _lead_state(
     diagnostics = _mapping(executable.get("diagnostics"))
     temporal = _mapping(executable.get("temporal_evidence"))
     temporal_progress = _temporal_progress(temporal)
+    next_hypothesis = _next_hypothesis(raw)
     placebos = _mapping(temporal.get("placebos"))
     candidate = _integer(diagnostics.get("candidate_observations"))
     liquidatable = _integer(diagnostics.get("liquidatable_observations"))
@@ -340,6 +360,8 @@ def _lead_state(
     state = (
         "PROVEN"
         if objective_met
+        else "NEW_HYPOTHESIS_QUEUE_DATA_REQUIRED"
+        if measured_negative and next_hypothesis["collection_actionable"]
         else (
             "HYPOTHESIS_KILLED_OOS_FORWARD"
             if forward_negative
@@ -353,7 +375,10 @@ def _lead_state(
     return {
         "family": "lead_lag",
         "evidence_state": state,
-        "collection_actionable": bool(not objective_met and not measured_negative),
+        "collection_actionable": bool(
+            not objective_met
+            and (not measured_negative or next_hypothesis["collection_actionable"])
+        ),
         "software_pipeline_ready": schema_ready,
         "future_data_required_only": data_only,
         "objective_status": campaign.get("objective_status"),
@@ -369,8 +394,17 @@ def _lead_state(
             "profit_factor": _number(campaign.get("profit_factor")),
             **temporal_progress,
             "placebo_beaten": placebos.get("beaten") is True,
+            "next_hypothesis_v3": next_hypothesis,
         },
-        "required_collectors": ["bbo-collector", "allmids-collector"],
+        "required_collectors": [
+            "bbo-collector",
+            "allmids-collector",
+            *(
+                ["carnet-collector"]
+                if next_hypothesis["collection_actionable"]
+                else []
+            ),
+        ],
         "required_artifacts": [
             "runtime/data/bbo_tape.jsonl",
             "runtime/data/bbo_shards/*.jsonl.gz",
@@ -388,12 +422,14 @@ def _lead_state(
                 "causal pre-signal, entry and exit BBO for each certified episode",
                 "purged positive OOS, positive post-freeze forward, placebo beaten",
             ]
-        ),
+        ) + next_hypothesis["exact_next_evidence"],
         "economic_prior_warning": (
             "legacy observations without top sizes are diagnostic only and cannot certify edge"
         ),
         "methodology_action": (
-            "KILL_CURRENT_FROZEN_HYPOTHESIS_OR_DECLARE_NEW_MECHANISM"
+            "COLLECT_PREDECLARED_V3_QUEUE_EVIDENCE"
+            if next_hypothesis["collection_actionable"]
+            else "KILL_CURRENT_FROZEN_HYPOTHESIS_OR_DECLARE_NEW_MECHANISM"
             if measured_negative
             else "CONTINUE_FROZEN_FORWARD_COLLECTION"
         ),
@@ -414,6 +450,7 @@ def _cross_state(
     verdict = _mapping(raw.get("verdict_realiste_16bps"))
     temporal = _mapping(raw.get("temporal_evidence"))
     temporal_progress = _temporal_progress(temporal)
+    next_hypothesis = _next_hypothesis(raw)
     placebo = _mapping(temporal.get("placebos"))
     closed = _integer(verdict.get("positions_fermees"))
     schema_ready = (
@@ -431,6 +468,8 @@ def _cross_state(
     state = (
         "PROVEN"
         if objective_met
+        else "NEW_HYPOTHESIS_ATOMIC_DATA_REQUIRED"
+        if measured_negative and next_hypothesis["collection_actionable"]
         else "HYPOTHESIS_KILLED_OOS"
         if measured_negative
         else "FUTURE_POST_FREEZE_DATA_REQUIRED"
@@ -441,7 +480,10 @@ def _cross_state(
         # More observations of the same frozen, negative-OOS mechanism cannot
         # repair it. Collection resumes only after a materially new mechanism
         # is declared and frozen; shared collectors may still run for Copy/Lead.
-        "collection_actionable": bool(not objective_met and not measured_negative),
+        "collection_actionable": bool(
+            not objective_met
+            and (not measured_negative or next_hypothesis["collection_actionable"])
+        ),
         "software_pipeline_ready": schema_ready,
         "future_data_required_only": bool(
             schema_ready and not objective_met and not measured_negative and closed > 0
@@ -455,6 +497,7 @@ def _cross_state(
             "profit_factor": verdict.get("profit_factor", verdict.get("pf")),
             **temporal_progress,
             "placebo_beaten": placebo.get("beaten") is True,
+            "next_hypothesis_v3": next_hypothesis,
         },
         "required_collectors": ["carnet-collector", "venues-collector"],
         "required_artifacts": ["runtime/data/carnet_venues.jsonl"],
@@ -466,9 +509,11 @@ def _cross_state(
             ]
             if measured_negative
             else ["positive post-freeze forward and placebo-beating evidence"]
-        ),
+        ) + next_hypothesis["exact_next_evidence"],
         "methodology_action": (
-            "KILL_CURRENT_FROZEN_HYPOTHESIS_OR_DECLARE_NEW_MECHANISM"
+            "COLLECT_PREDECLARED_V3_ATOMIC_EVIDENCE"
+            if next_hypothesis["collection_actionable"]
+            else "KILL_CURRENT_FROZEN_HYPOTHESIS_OR_DECLARE_NEW_MECHANISM"
             if measured_negative
             else "CONTINUE_FROZEN_FORWARD_COLLECTION"
         ),

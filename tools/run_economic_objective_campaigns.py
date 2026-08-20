@@ -17,6 +17,11 @@ from hl_observer.backtesting import copy_vault_executable, lead_lag_shadow  # no
 from hl_observer.backtesting.copy_vault_generalization import (  # noqa: E402
     derive_heldout_vault_generalization,
 )
+from hl_observer.backtesting.economic_hypotheses_v3 import (  # noqa: E402
+    qualify_copy_vault_train_only,
+    qualify_cross_venue_train_only,
+    qualify_lead_lag_queue_maker_train_only,
+)
 from hl_observer.backtesting.lead_lag_certified_clock import (  # noqa: E402
     backtest_with_certified_wall_clock,
     certified_protocol_signature,
@@ -213,6 +218,7 @@ def run_campaigns(
         "dataset_workspace": dataset_mode,
         "dataset_source_summary": dataset_sources,
     }
+    copy_raw["next_hypothesis_v3"] = qualify_copy_vault_train_only(copy_trades)
     copy_raw_path = _write_raw(root, "copy_vault", copy_raw)
     copy_campaign = build_copy_campaign(copy_raw, freeze=copy_freeze, datasets=copy_data)
     copy_campaign["evidence_paths"].append(copy_raw_path.relative_to(root).as_posix())
@@ -289,6 +295,9 @@ def run_campaigns(
         lead_raw["dataset_manifest_source_count"] = len(selected_lead_sources)
         lead_raw["dataset_source_manifest"] = (
             str(dataset_manifest_path) if dataset_manifest_path is not None else None
+        )
+        lead_raw["next_hypothesis_v3"] = qualify_lead_lag_queue_maker_train_only(
+            lead_raw
         )
     lead_raw_path = _write_raw(root, "lead_lag", lead_raw)
     lead_campaign = build_lead_lag_campaign(lead_raw, freeze=lead_freeze, datasets=lead_data)
@@ -411,6 +420,10 @@ def run_campaigns(
         "dataset_workspace": dataset_mode,
         "dataset_source_summary": dataset_sources,
     }
+    cross_raw["next_hypothesis_v3"] = qualify_cross_venue_train_only(
+        cross_trades,
+        source_mode=str(cross_params.get("source_mode") or ""),
+    )
     cross_raw_path = _write_raw(root, "cross_venue_dislocation_v2", cross_raw)
     cross_campaign = build_cross_campaign(cross_raw, freeze=cross_freeze, datasets=cross_data)
     cross_campaign["evidence_paths"].append(cross_raw_path.relative_to(root).as_posix())

@@ -304,6 +304,82 @@ def test_plan_kills_lead_lag_after_negative_oos_without_waiting_for_forward() ->
     assert "bbo-collector" not in plan["required_collectors"]
 
 
+def test_plan_collects_only_predeclared_v3_queue_evidence_after_old_rule_dies() -> None:
+    raw = _raw_reports()
+    raw["lead_lag"]["executable_campaign"]["temporal_evidence"] = {
+        "oos": {
+            "net_pnl_usd": -0.18,
+            "sample_count": 5,
+            "no_lookahead": True,
+            "liquidatable_net": True,
+        },
+        "forward": None,
+        "placebos": {"beaten": False},
+    }
+    raw["lead_lag"]["next_hypothesis_v3"] = {
+        "mechanism": "ETH_STRONG_SHOCK_QUEUE_AWARE_MAKER",
+        "status": "MORE_DATA_QUEUE_EVIDENCE_REQUIRED",
+        "selection_eligible": False,
+        "physical_freeze_allowed": False,
+        "exact_next_evidence": ["queue events proving price-time priority"],
+        "selection_evidence_sha256": "b" * 64,
+    }
+    campaigns = [
+        _campaign("copy_vault"),
+        _campaign("lead_lag", closed_positions=27, net_pnl_usd=-1.20),
+        _campaign("cross_venue_dislocation_v2", closed_positions=20),
+    ]
+
+    plan = build_collection_plan(campaigns, raw, now_ms=123)
+    lead = next(row for row in plan["families"] if row["family"] == "lead_lag")
+
+    assert lead["evidence_state"] == "NEW_HYPOTHESIS_QUEUE_DATA_REQUIRED"
+    assert lead["collection_actionable"] is True
+    assert lead["future_data_required_only"] is False
+    assert lead["methodology_action"] == "COLLECT_PREDECLARED_V3_QUEUE_EVIDENCE"
+    assert "queue events proving price-time priority" in lead["exact_missing_evidence"]
+    assert "carnet-collector" in lead["required_collectors"]
+    assert "carnet-collector" in plan["required_collectors"]
+
+
+def test_plan_does_not_restart_collection_for_v3_kill_verdict() -> None:
+    raw = _raw_reports()
+    raw["lead_lag"]["executable_campaign"]["temporal_evidence"] = {
+        "oos": {
+            "net_pnl_usd": -0.18,
+            "sample_count": 5,
+            "no_lookahead": True,
+            "liquidatable_net": True,
+        },
+        "forward": None,
+        "placebos": {"beaten": False},
+    }
+    raw["lead_lag"]["next_hypothesis_v3"] = {
+        "mechanism": "ETH_STRONG_SHOCK_QUEUE_AWARE_MAKER",
+        "status": "KILL_TRAIN_NON_POSITIVE_NET",
+        "selection_eligible": False,
+        "physical_freeze_allowed": False,
+        "exact_next_evidence": [],
+        "selection_evidence_sha256": "c" * 64,
+    }
+    campaigns = [
+        _campaign("copy_vault"),
+        _campaign("lead_lag", closed_positions=27, net_pnl_usd=-1.20),
+        _campaign("cross_venue_dislocation_v2", closed_positions=20),
+    ]
+
+    plan = build_collection_plan(campaigns, raw, now_ms=123)
+    lead = next(row for row in plan["families"] if row["family"] == "lead_lag")
+
+    assert lead["evidence_state"] == "HYPOTHESIS_KILLED_OOS"
+    assert lead["collection_actionable"] is False
+    assert lead["methodology_action"] == (
+        "KILL_CURRENT_FROZEN_HYPOTHESIS_OR_DECLARE_NEW_MECHANISM"
+    )
+    assert "bbo-collector" not in plan["required_collectors"]
+    assert "carnet-collector" not in lead["required_collectors"]
+
+
 def test_copy_plan_counts_entry_exit_and_missing_coin_book_rejections() -> None:
     raw = _raw_reports()
     raw["copy_vault"]["calibration"]["grid"] = [
