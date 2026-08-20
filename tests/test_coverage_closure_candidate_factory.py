@@ -59,7 +59,7 @@ def test_position_delta_mapping_inference_raw_and_values() -> None:
     assert factory._infer_delta_side({"new_size":0}) is None
 
     delta = {"coin":"btc","action":"OPEN_LONG","price":100,"detected_at_ms":123}
-    assert factory._parse_position_delta(delta, {}, 999) == ("open","long","BTC",100.0,123,"OPEN_LONG")
+    assert factory._parse_position_delta(delta, {}, 999) == ("open","long","BTC",100.0,123000,"OPEN_LONG")
     assert factory._parse_position_delta({"action":"OPEN_LONG"}, {}, 1).reason == "missing_coin"
     assert factory._parse_position_delta({"coin":"BTC","action":"FLIP"}, {}, 1).reason == "unknown_delta"
     parsed = factory._parse_position_delta({"coin":"BTC","action":"OPEN_LONG","price":0}, {"BTC":101}, 1)
