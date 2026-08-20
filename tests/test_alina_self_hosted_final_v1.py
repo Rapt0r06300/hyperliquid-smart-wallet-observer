@@ -204,6 +204,15 @@ def test_final_installer_persists_elevated_diagnostics() -> None:
     assert "ERREUR FATALE" in text
 
 
+def test_final_installer_falls_back_when_py_311_is_unavailable() -> None:
+    text = _text(INSTALLER)
+    function = text.split("function Get-BasePython311", 1)[1].split("function Test-Admin", 1)[0]
+    assert function.index("Get-Command python") < function.index("Get-Command py")
+    assert "$previousPreference = $ErrorActionPreference" in function
+    assert "$ErrorActionPreference = 'Continue'" in function
+    assert "$ErrorActionPreference = $previousPreference" in function
+
+
 def test_final_control_document_exists_and_forbids_legacy_jobs() -> None:
     text = _text(CONTROL_README)
     assert "hypersmart-final-v1" in text

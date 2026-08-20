@@ -53,14 +53,23 @@ function Get-BestFixedDrive {
 
 function Get-BasePython311([string]$RepositoryRoot) {
     $candidates = New-Object System.Collections.Generic.List[string]
-    if (Get-Command py -ErrorAction SilentlyContinue) {
-        $value = (& py -3.11 -c "import sys; print(sys.executable)" 2>$null | Select-Object -Last 1)
-        if ($LASTEXITCODE -eq 0 -and -not [string]::IsNullOrWhiteSpace([string]$value)) {
-            $candidates.Add(([string]$value).Trim()) | Out-Null
-        }
-    }
     $systemPython = Get-Command python -ErrorAction SilentlyContinue
     if ($systemPython) { $candidates.Add([string]$systemPython.Source) | Out-Null }
+    if (Get-Command py -ErrorAction SilentlyContinue) {
+        $previousPreference = $ErrorActionPreference
+        try {
+            $ErrorActionPreference = 'Continue'
+            $value = (& py -3.11 -c "import sys; print(sys.executable)" 2>$null | Select-Object -Last 1)
+            $pyExitCode = $LASTEXITCODE
+            if ($pyExitCode -eq 0 -and -not [string]::IsNullOrWhiteSpace([string]$value)) {
+                $candidates.Add(([string]$value).Trim()) | Out-Null
+            }
+        } catch {
+            # Le lanceur py peut exister sans runtime 3.11. Le Python système/portable reste valide.
+        } finally {
+            $ErrorActionPreference = $previousPreference
+        }
+    }
     foreach ($relative in @('portable_runtime\python\python.exe', 'tools\python\python.exe')) {
         $candidate = Join-Path $RepositoryRoot $relative
         if (Test-Path -LiteralPath $candidate -PathType Leaf) { $candidates.Add($candidate) | Out-Null }
@@ -103,7 +112,7 @@ Set-Content -LiteralPath $InstallLog -Encoding UTF8 -Value @(
 try { Start-Transcript -LiteralPath $InstallLog -Append -Force | Out-Null } catch {}
 trap {
     $detail = $_ | Out-String
-    try { Add-Content -LiteralPath $InstallLog -Encoding UTF8 -Value ("`nERREUR FATALE:`n" + $detail) } catch {}
+    Write-Host ("ERREUR FATALE:`n" + $detail) -ForegroundColor Red
     Write-Error $_
     try { Stop-Transcript | Out-Null } catch {}
     exit 1
