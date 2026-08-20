@@ -162,8 +162,9 @@ def test_main_writes_worker_and_optional_bundle(monkeypatch, tmp_path, capsys) -
     assert worker["project_ref"] == "main"
     assert worker["paper_only"] is True
     assert bundle["security"]["real_execution"] is False
-    assert "ALINA_SELF_HOSTED_CONTROL_READY" in capsys.readouterr().out
-    assert "max_cycle=180s" in capsys.readouterr().out if False else True
+    out = capsys.readouterr().out
+    assert "ALINA_SELF_HOSTED_CONTROL_READY" in out
+    assert "max_cycle=180s" in out
 
 
 def test_main_without_bundle_output(monkeypatch, tmp_path, capsys) -> None:
