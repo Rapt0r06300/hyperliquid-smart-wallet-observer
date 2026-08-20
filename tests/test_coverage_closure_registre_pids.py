@@ -1,11 +1,7 @@
 from __future__ import annotations
 
-import json
-import os
 import sys
 from types import SimpleNamespace
-
-import pytest
 
 from hl_observer.ops import registre_pids as reg
 
@@ -53,8 +49,10 @@ def test_atomic_write_read_and_pid_collection(monkeypatch, tmp_path) -> None:
     target = tmp_path / "nested" / "data.json"
     assert reg._ecrire_atomique(target, '{"x":1}') is True
     assert target.read_text() == '{"x":1}'
+    original_replace = reg.os.replace
     monkeypatch.setattr(reg.os, "replace", lambda *args: (_ for _ in ()).throw(OSError("fail")))
     assert reg._ecrire_atomique(tmp_path / "bad.json", "x") is False
+    monkeypatch.setattr(reg.os, "replace", original_replace)
 
     register = {"composants": {"a": {"pid": 1}, "b": {"pid": "x"}, "c": "bad"}, "collecteurs": {"x": 2, "y": "3"}}
     assert reg.pids_enregistres(register) == {1, 2}
@@ -94,20 +92,23 @@ def test_orphans_descendants_and_targeted_stop(tmp_path) -> None:
 
     def raising(pid):
         raise RuntimeError("unit")
+
     result = reg.arreter(tmp_path, procs=[{"pid": 1, "ppid": 0, "cmd": "x"}], killer=raising, registre={"composants": {"x": {"pid": 1}}})
     assert result["arretes"] == []
 
 
-def test_processus_reels_success_and_import_failure(monkeypatch) -> None:
+def test_processus_reels_success(monkeypatch) -> None:
     fake_processes = [
         SimpleNamespace(info={"pid": 1, "ppid": 0, "name": "p", "cmdline": ["python", "x"], "exe": None, "cwd": None}),
         SimpleNamespace(info={"pid": 2, "ppid": 1, "name": "bad", "cmdline": None, "exe": "e", "cwd": "c"}),
     ]
+
     class FakePsutil:
         @staticmethod
         def process_iter(fields):
             assert "cmdline" in fields
             return fake_processes
+
     monkeypatch.setitem(sys.modules, "psutil", FakePsutil)
     out = reg.processus_reels()
     assert out[0]["cmd"] == "python x"
@@ -117,16 +118,22 @@ def test_processus_reels_success_and_import_failure(monkeypatch) -> None:
 
 def test_tuer_reel_psutil_and_os_fallback(monkeypatch) -> None:
     terminated = []
+
     class Proc:
-        def __init__(self, pid): self.pid = pid
-        def terminate(self): terminated.append(self.pid)
-    fake = SimpleNamespace(Process=Proc)
-    monkeypatch.setitem(sys.modules, "psutil", fake)
+        def __init__(self, pid):
+            self.pid = pid
+
+        def terminate(self):
+            terminated.append(self.pid)
+
+    monkeypatch.setitem(sys.modules, "psutil", SimpleNamespace(Process=Proc))
     assert reg._tuer_reel(7) is True
     assert terminated == [7]
 
     class BadProc:
-        def __init__(self, pid): raise RuntimeError("no psutil")
+        def __init__(self, pid):
+            raise RuntimeError("no psutil")
+
     monkeypatch.setitem(sys.modules, "psutil", SimpleNamespace(Process=BadProc))
     calls = []
     monkeypatch.setattr(reg.os, "kill", lambda pid, sig: calls.append((pid, sig)))
@@ -138,6 +145,7 @@ def test_tuer_reel_psutil_and_os_fallback(monkeypatch) -> None:
 
 def test_enregistrer_format_and_main(monkeypatch, tmp_path, capsys) -> None:
     import hl_observer.ops.superviseur_collecteurs as superviseur
+
     root = tmp_path.resolve()
     monkeypatch.setattr(reg, "processus_reels", lambda: [{"pid": 10, "cmd": f"{root}/persistent_poll_runner"}])
     monkeypatch.setattr(superviseur, "_lire_pids", lambda racine: {"pids": {"collector": 20}})
