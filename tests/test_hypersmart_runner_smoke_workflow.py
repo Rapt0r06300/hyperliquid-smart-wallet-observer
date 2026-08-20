@@ -58,9 +58,13 @@ def test_smoke_publishes_only_a_compact_fixed_proof() -> None:
 def test_smoke_uses_a_valid_local_python_and_exact_checkout_import() -> None:
     text = _workflow()
     assert "ALINA_PYTHON_EXE" in text
+    assert r"C:\HyperSmart-Runner-Data\runtime\python\Scripts\python.exe" in text
+    assert r"portable_runtime\python\python.exe" in text
+    assert r"tools\python\python.exe" in text
     assert "Get-Command python -ErrorAction SilentlyContinue" in text
+    assert "import sys, pydantic" in text
     assert "SMOKE_PYTHON_REFUSED" in text
-    assert "SMOKE_PYTHON_VERSION_REFUSED" in text
+    assert "SMOKE_PYTHON_OK" in text
     assert "SMOKE_EXACT_CHECKOUT_IMPORT_REFUSED" in text
 
 

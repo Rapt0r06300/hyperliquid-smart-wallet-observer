@@ -97,14 +97,29 @@ jobs:
           foreach ($name in @($control.PSObject.Properties.Name)) {
             if ($forbidden -contains ([string]$name).ToLowerInvariant()) { throw "SMOKE_ARBITRARY_FIELD_REFUSED: $name" }
           }
-          $python = [Environment]::GetEnvironmentVariable('ALINA_PYTHON_EXE', 'Machine')
-          if ([string]::IsNullOrWhiteSpace($python) -or -not (Test-Path -LiteralPath $python -PathType Leaf)) {
-            $pythonCommand = Get-Command python -ErrorAction SilentlyContinue
-            if ($pythonCommand) { $python = [string]$pythonCommand.Source }
+          $pythonCandidates = New-Object System.Collections.Generic.List[string]
+          $machinePython = [Environment]::GetEnvironmentVariable('ALINA_PYTHON_EXE', 'Machine')
+          if (-not [string]::IsNullOrWhiteSpace($machinePython)) { $pythonCandidates.Add($machinePython) | Out-Null }
+          foreach ($candidate in @(
+            'C:\HyperSmart-Runner-Data\runtime\python\Scripts\python.exe',
+            'C:\Users\flo\Desktop\Projet invest\portable_runtime\python\python.exe',
+            'C:\Users\flo\Desktop\Projet invest\tools\python\python.exe'
+          )) {
+            $pythonCandidates.Add($candidate) | Out-Null
           }
-          if ([string]::IsNullOrWhiteSpace($python) -or -not (Test-Path -LiteralPath $python -PathType Leaf)) { throw 'SMOKE_PYTHON_REFUSED' }
-          & $python -c "import sys; raise SystemExit(0 if sys.version_info >= (3,11) else 2)"
-          if ($LASTEXITCODE -ne 0) { throw 'SMOKE_PYTHON_VERSION_REFUSED' }
+          $pythonCommand = Get-Command python -ErrorAction SilentlyContinue
+          if ($pythonCommand) { $pythonCandidates.Add([string]$pythonCommand.Source) | Out-Null }
+          $python = ''
+          foreach ($candidate in @($pythonCandidates | Select-Object -Unique)) {
+            if ([string]::IsNullOrWhiteSpace($candidate) -or -not (Test-Path -LiteralPath $candidate -PathType Leaf)) { continue }
+            & $candidate -c "import sys, pydantic; raise SystemExit(0 if sys.version_info >= (3,11) else 2)" 2>$null
+            if ($LASTEXITCODE -eq 0) {
+              $python = [System.IO.Path]::GetFullPath($candidate)
+              break
+            }
+          }
+          if ([string]::IsNullOrWhiteSpace($python)) { throw 'SMOKE_PYTHON_REFUSED' }
+          Write-Host "SMOKE_PYTHON_OK: $python"
           $env:PYTHONPATH = "$env:GITHUB_WORKSPACE\src;$env:GITHUB_WORKSPACE\tools;$env:GITHUB_WORKSPACE"
           $proofDir = Join-Path $env:RUNNER_TEMP 'hypersmart-runner-smoke'
           New-Item -ItemType Directory -Force -Path $proofDir | Out-Null
