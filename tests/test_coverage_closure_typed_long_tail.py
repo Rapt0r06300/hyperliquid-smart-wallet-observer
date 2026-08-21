@@ -44,6 +44,6 @@ def test_typed_long_tail_contracts_are_offline_and_bounded(tmp_path, monkeypatch
         monkeypatch,
     )
     assert imported >= max(1, int(len(targets) * 0.95))
-    assert attempts >= max(1, len(targets))
-    assert completed >= max(1, len(targets) // 4)
+    assert attempts >= max(10, len(targets))
+    assert completed >= max(2, len(targets) // 4)
     assert completed + controlled_failures == attempts
