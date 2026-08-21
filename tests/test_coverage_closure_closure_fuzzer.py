@@ -4,6 +4,7 @@ import importlib
 import inspect
 import os
 import pkgutil
+from builtins import BaseExceptionGroup
 from collections import deque
 from pathlib import Path
 
