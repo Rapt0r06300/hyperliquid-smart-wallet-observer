@@ -6,7 +6,7 @@ from pathlib import Path
 
 import hl_observer
 
-from tests.coverage_contract_harness import run_typed_contracts
+from tests.coverage_contract_harness import Dummy, run_typed_contracts
 
 
 def _large_modules() -> tuple[str, ...]:
@@ -30,6 +30,18 @@ def _large_modules() -> tuple[str, ...]:
 
 
 def test_typed_large_tail_contracts_are_offline_bounded_and_shardable(tmp_path, monkeypatch) -> None:
+    # Le Dummy du harnais doit se comporter comme un objet Python normal pour les attributs
+    # protocolaires. Retourner un nouveau Dummy pour ``__clause_element__`` faisait boucler
+    # SQLAlchemy dans ``hasattr`` jusqu'au timeout du shard 23.
+    original_getattr = Dummy.__getattr__
+
+    def safe_getattr(self, name):
+        if name.startswith("__") and name.endswith("__"):
+            raise AttributeError(name)
+        return original_getattr(self, name)
+
+    monkeypatch.setattr(Dummy, "__getattr__", safe_getattr)
+
     modules = _large_modules()
     assert len(modules) >= 100
 
