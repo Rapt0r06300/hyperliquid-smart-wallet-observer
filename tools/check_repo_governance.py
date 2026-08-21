@@ -13,6 +13,8 @@ REQUIRED = (
     Path("SECURITY.md"),
     Path(".github/CODEOWNERS"),
     Path(".github/workflows/security-quality.yml"),
+    Path(".github/workflows/pre-run-321-775.yml"),
+    Path(".github/workflows/coverage-parallel-probe.yml"),
     Path("docs/CURRENT_STATE.md"),
     Path("requirements-ci-tools.txt"),
     Path("tools/check_coverage_ratchet.py"),
@@ -83,11 +85,34 @@ def local_failures() -> list[str]:
             "hypersmart/pre-run-775",
             "hypersmart/technical-perfect",
             "python -m pip_audit",
-            "python -m coverage run --source=src",
+            "hypersmart/coverage-parallel-probe",
+            "COVERAGE_WITNESS_100_ZERO_MISSING_OK",
             "python tools/check_coverage_ratchet.py",
+            "775 + sécurité + qualité + couverture verts",
         ):
             if marker not in text:
                 failures.append(f"pre-run perfect incomplet: marqueur absent {marker}")
+        if "python -m coverage run --source=src" in text:
+            failures.append("pre-run relance inutilement la suite coverage au lieu de réutiliser la preuve shardée")
+
+    probe = ROOT / ".github" / "workflows" / "coverage-parallel-probe.yml"
+    if probe.is_file():
+        text = probe.read_text(encoding="utf-8", errors="replace")
+        for marker in (
+            'COVERAGE_SHARDS: "32"',
+            "Coverage shard ${{ matrix.shard }}/32",
+            "python -m coverage run --parallel-mode --source=src",
+            "python tools/coverage_gap_report.py",
+            "python tools/check_coverage_ratchet.py",
+            "COVERAGE_ARTIFACT_COUNT_INVALID",
+            "test \"${#COVERAGE_FILES[@]}\" -eq 32",
+            "hypersmart/coverage-parallel-probe",
+            "cancel-in-progress: true",
+        ):
+            if marker not in text:
+                failures.append(f"coverage probe incomplet: marqueur absent {marker}")
+        if "--omit" in text:
+            failures.append("coverage probe interdit: --omit masquerait des lignes de production")
 
     return failures
 
