@@ -7,8 +7,6 @@ import importlib
 import inspect
 import socket
 import subprocess
-import sys
-import time
 import types
 import typing
 from builtins import BaseExceptionGroup
@@ -41,11 +39,6 @@ PROCESS_GLOBAL_UNSAFE = {
     ("hl_observer.ops.portable_audit_guard", "install"),
     ("hl_observer.ops.portable_audit_guard", "install_from_environment"),
 }
-_INTERNAL_TIMEOUT_SECONDS = 0.05
-
-
-class _HardTimeout(SystemExit):
-    """Borne dure qui traverse les `except Exception` du code exercé."""
 
 
 class Dummy:
@@ -53,6 +46,11 @@ class Dummy:
         self.__dict__.update(values)
 
     def __getattr__(self, name):
+        # Les attributs protocolaires Python doivent rester réellement absents. Les inventer
+        # casse des bibliothèques qui bouclent volontairement sur hasattr(__dunder__), comme
+        # SQLAlchemy avec __clause_element__.
+        if name.startswith("__") and name.endswith("__"):
+            raise AttributeError(name)
         if name == "json":
             return lambda: {}
         if name in {"status_code", "returncode"}:
@@ -210,27 +208,13 @@ def _invoke(function, mode: int, root: Path, settings: Settings):
         else:
             keyword[parameter.name] = value
 
-    # Ne jamais utiliser SIGALRM ici: coverage.py tient des verrous internes pendant son
-    # traçage et un signal asynchrone peut interrompre précisément une section critique,
-    # provoquant un auto-deadlock. Un profile hook est synchrone avec l'interpréteur,
-    # cohabite avec le traceur coverage et permet de borner les appels synthétiques sans
-    # toucher au gestionnaire de signaux global du processus pytest.
-    previous_profile = sys.getprofile()
-    deadline = time.monotonic() + _INTERNAL_TIMEOUT_SECONDS
-
-    def watchdog(frame, event, arg):
-        if time.monotonic() >= deadline:
-            raise _HardTimeout("synthetic coverage call exceeded hard deadline")
-        if previous_profile is not None:
-            previous_profile(frame, event, arg)
-
-    sys.setprofile(watchdog)
-    try:
-        if inspect.iscoroutinefunction(function):
-            return asyncio.run(function(*positional, **keyword))
-        return function(*positional, **keyword)
-    finally:
-        sys.setprofile(previous_profile)
+    # Ne pas interrompre arbitrairement le code Python depuis un signal ou un profile hook :
+    # coverage/importlib/pyarrow/SQLAlchemy peuvent tenir des verrous internes à cet instant et
+    # rester ensuite bloqués. Le workflow borne déjà chaque test avec pytest-timeout en mode
+    # thread ; le harnais reste donc déterministe sans injecter d'exception asynchrone.
+    if inspect.iscoroutinefunction(function):
+        return asyncio.run(function(*positional, **keyword))
+    return function(*positional, **keyword)
 
 
 def _controlled_group(error: BaseExceptionGroup) -> bool:
