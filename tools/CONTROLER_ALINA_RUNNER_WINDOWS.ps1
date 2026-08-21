@@ -3,11 +3,14 @@ param(
     [ValidateSet('Status', 'Start', 'Stop', 'Resume', 'Heartbeat', 'Diagnostic')]
     [string]$Action = 'Status',
     [string]$RunnerRoot = 'C:\actions-runner',
-    [string]$ProjectRoot = 'C:\Users\flo\Desktop\Projet invest',
+    [string]$ProjectRoot = $env:HYPERSMART_PROJECT_ROOT,
     [string]$RequiredLabel = 'hypersmart-final-v1'
 )
 
 $ErrorActionPreference = 'Stop'
+if ([string]::IsNullOrWhiteSpace($ProjectRoot)) {
+    $ProjectRoot = Split-Path -Parent $PSScriptRoot
+}
 $RunnerRoot = [System.IO.Path]::GetFullPath($RunnerRoot)
 $ProjectRoot = [System.IO.Path]::GetFullPath($ProjectRoot)
 
