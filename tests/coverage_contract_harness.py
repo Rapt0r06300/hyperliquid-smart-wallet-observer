@@ -5,9 +5,9 @@ import dataclasses
 import enum
 import importlib
 import inspect
-import signal
 import socket
 import subprocess
+import sys
 import time
 import types
 import typing
@@ -209,44 +209,28 @@ def _invoke(function, mode: int, root: Path, settings: Settings):
         else:
             keyword[parameter.name] = value
 
-    previous_handler = signal.getsignal(signal.SIGALRM)
-    previous_remaining, previous_interval = signal.getitimer(signal.ITIMER_REAL)
-    started = time.monotonic()
-    outer_is_first = 0 < previous_remaining <= _INTERNAL_TIMEOUT_SECONDS
-    outer_fired = False
+    # Ne jamais utiliser SIGALRM ici: coverage.py tient des verrous internes pendant son
+    # traçage et un signal asynchrone peut interrompre précisément une section critique,
+    # provoquant un auto-deadlock. Un profile hook est synchrone avec l'interpréteur,
+    # cohabite avec le traceur coverage et permet de borner les appels synthétiques sans
+    # toucher au gestionnaire de signaux global du processus pytest.
+    previous_profile = sys.getprofile()
+    deadline = time.monotonic() + _INTERNAL_TIMEOUT_SECONDS
 
-    def timeout_handler(signum, frame):
-        nonlocal outer_fired
-        if outer_is_first:
-            outer_fired = True
-            if callable(previous_handler):
-                return previous_handler(signum, frame)
-            if previous_handler == signal.SIG_IGN:
-                return None
-            raise _HardTimeout("outer SIGALRM deadline reached")
-        raise _HardTimeout("synthetic coverage call exceeded hard deadline")
+    def watchdog(frame, event, arg):
+        del frame, event, arg
+        if time.monotonic() >= deadline:
+            raise _HardTimeout("synthetic coverage call exceeded hard deadline")
+        if previous_profile is not None:
+            previous_profile(None, "call", None)
 
-    signal.signal(signal.SIGALRM, timeout_handler)
-    first_alarm = _INTERNAL_TIMEOUT_SECONDS
-    if previous_remaining > 0:
-        first_alarm = min(first_alarm, previous_remaining)
-    signal.setitimer(signal.ITIMER_REAL, max(1e-6, first_alarm), 0.0)
+    sys.setprofile(watchdog)
     try:
         if inspect.iscoroutinefunction(function):
             return asyncio.run(function(*positional, **keyword))
         return function(*positional, **keyword)
     finally:
-        elapsed = max(0.0, time.monotonic() - started)
-        signal.setitimer(signal.ITIMER_REAL, 0)
-        signal.signal(signal.SIGALRM, previous_handler)
-        if previous_remaining > 0 and not outer_fired:
-            signal.setitimer(
-                signal.ITIMER_REAL,
-                max(1e-6, previous_remaining - elapsed),
-                previous_interval,
-            )
-        elif outer_fired and previous_interval > 0:
-            signal.setitimer(signal.ITIMER_REAL, previous_interval, previous_interval)
+        sys.setprofile(previous_profile)
 
 
 def run_typed_contracts(target_modules: tuple[str, ...], tmp_path: Path, monkeypatch) -> tuple[int, int, int, int]:
