@@ -3,12 +3,6 @@ name: coverage-parallel-probe
 on:
   push:
     branches: [main]
-    paths:
-      - 'src/hl_observer/**/*.py'
-      - 'tests/**/*.py'
-      - 'tools/coverage_gap_report.py'
-      - 'tools/check_coverage_ratchet.py'
-      - '.github/workflows/coverage-parallel-probe.yml'
   workflow_dispatch: {}
 
 permissions:
