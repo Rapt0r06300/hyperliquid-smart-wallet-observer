@@ -224,6 +224,7 @@ def test_320_leader_trop_vieux_est_refuse_avant_checkpoint(tmp_path: Path) -> No
         "px": 100.0,
         "sz": 1.0,
         "signe": 1,
+        "start_position": 0.0,
         "ts_ms": received - 5,
         "dir": "Open Long",
         "hash": "0xstale",
