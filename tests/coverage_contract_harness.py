@@ -218,11 +218,10 @@ def _invoke(function, mode: int, root: Path, settings: Settings):
     deadline = time.monotonic() + _INTERNAL_TIMEOUT_SECONDS
 
     def watchdog(frame, event, arg):
-        del frame, event, arg
         if time.monotonic() >= deadline:
             raise _HardTimeout("synthetic coverage call exceeded hard deadline")
         if previous_profile is not None:
-            previous_profile(None, "call", None)
+            previous_profile(frame, event, arg)
 
     sys.setprofile(watchdog)
     try:
@@ -231,6 +230,17 @@ def _invoke(function, mode: int, root: Path, settings: Settings):
         return function(*positional, **keyword)
     finally:
         sys.setprofile(previous_profile)
+
+
+def _controlled_group(error: BaseExceptionGroup) -> bool:
+    """N'avale que les sorties prévues du harnais, jamais KeyboardInterrupt."""
+    for item in error.exceptions:
+        if isinstance(item, BaseExceptionGroup):
+            if not _controlled_group(item):
+                return False
+        elif not isinstance(item, (Exception, SystemExit)):
+            return False
+    return True
 
 
 def run_typed_contracts(target_modules: tuple[str, ...], tmp_path: Path, monkeypatch) -> tuple[int, int, int, int]:
@@ -249,6 +259,10 @@ def run_typed_contracts(target_modules: tuple[str, ...], tmp_path: Path, monkeyp
         del args, kwargs
         raise AssertionError("network access is forbidden in coverage contracts")
 
+    async def blocked_async_http(*args, **kwargs):
+        del args, kwargs
+        raise AssertionError("network access is forbidden in coverage contracts")
+
     monkeypatch.setattr(socket.socket, "connect", blocked_connect, raising=True)
     monkeypatch.setattr(requests, "get", lambda *args, **kwargs: Dummy(status_code=200), raising=True)
     monkeypatch.setattr(requests, "post", lambda *args, **kwargs: Dummy(status_code=200), raising=True)
@@ -256,6 +270,10 @@ def run_typed_contracts(target_modules: tuple[str, ...], tmp_path: Path, monkeyp
     monkeypatch.setattr(httpx, "get", lambda *args, **kwargs: Dummy(status_code=200), raising=True)
     monkeypatch.setattr(httpx, "post", lambda *args, **kwargs: Dummy(status_code=200), raising=True)
     monkeypatch.setattr(httpx, "request", lambda *args, **kwargs: Dummy(status_code=200), raising=True)
+    monkeypatch.setattr(httpx.AsyncClient, "get", blocked_async_http, raising=True)
+    monkeypatch.setattr(httpx.AsyncClient, "post", blocked_async_http, raising=True)
+    monkeypatch.setattr(httpx.AsyncClient, "request", blocked_async_http, raising=True)
+    monkeypatch.setattr(httpx.AsyncClient, "send", blocked_async_http, raising=True)
     monkeypatch.setattr(
         subprocess,
         "run",
@@ -289,6 +307,10 @@ def run_typed_contracts(target_modules: tuple[str, ...], tmp_path: Path, monkeyp
                 try:
                     _invoke(function, mode, tmp_path, settings)
                     completed += 1
+                except BaseExceptionGroup as error:
+                    if not _controlled_group(error):
+                        raise
+                    controlled_failures += 1
                 except (Exception, SystemExit):
                     controlled_failures += 1
     return imported, attempts, completed, controlled_failures
