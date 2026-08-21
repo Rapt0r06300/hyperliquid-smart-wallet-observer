@@ -60,6 +60,7 @@ jobs:
               Path('tests/test_coverage_closure_typed_large_tail.py'),
               Path('tests/test_coverage_closure_branch_fuzzer.py'),
               Path('tests/test_coverage_closure_branch_fuzzer_v2.py'),
+              Path('tests/test_coverage_closure_closure_fuzzer.py'),
           }
           tests = sorted(
               path for path in Path('tests').glob('test_coverage_closure_*.py')
@@ -95,7 +96,7 @@ jobs:
               "state": os.environ["STATE"],
               "context": "hypersmart/coverage-closure-fast",
               "description": os.environ["DESCRIPTION"],
-              "target_url": f"{os.environ['GITHUB_SERVER_URL']}/{os.environ['GITHUB_REPOSITORY']}/actions/runs/{os.environ['GITHUB_RUN_ID']}",
+              "target_url": f"{os.environ['GITHUB_SERVER_URL']}/{os.environ['GITHUB_REPOSITORY']}/actions/runs/${GITHUB_RUN_ID}",
           }))
           PY
           curl --fail-with-body --silent --show-error \
