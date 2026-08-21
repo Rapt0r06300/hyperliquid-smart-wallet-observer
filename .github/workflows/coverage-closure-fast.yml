@@ -96,7 +96,7 @@ jobs:
               "state": os.environ["STATE"],
               "context": "hypersmart/coverage-closure-fast",
               "description": os.environ["DESCRIPTION"],
-              "target_url": f"{os.environ['GITHUB_SERVER_URL']}/{os.environ['GITHUB_REPOSITORY']}/actions/runs/${GITHUB_RUN_ID}",
+              "target_url": f"{os.environ['GITHUB_SERVER_URL']}/{os.environ['GITHUB_REPOSITORY']}/actions/runs/{os.environ['GITHUB_RUN_ID']}",
           }))
           PY
           curl --fail-with-body --silent --show-error \
