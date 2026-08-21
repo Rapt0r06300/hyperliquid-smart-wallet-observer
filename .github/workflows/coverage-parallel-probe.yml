@@ -104,7 +104,7 @@ jobs:
           mapfile -t TEST_FILES < shard-tests.txt
           python -m coverage run --parallel-mode --source=src -m pytest \
             -q -p no:cacheprovider --tb=short --durations=10 \
-            --timeout=180 --timeout-method=signal "${TEST_FILES[@]}"
+            --timeout=180 --timeout-method=thread "${TEST_FILES[@]}"
       - name: Vérifier la donnée coverage du shard
         if: always()
         run: |
