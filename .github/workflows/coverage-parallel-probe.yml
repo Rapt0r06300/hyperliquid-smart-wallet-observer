@@ -80,6 +80,7 @@ jobs:
           shardable_contracts = (
               Path("tests/test_coverage_closure_typed_long_tail.py"),
               Path("tests/test_coverage_closure_typed_large_tail.py"),
+              Path("tests/test_coverage_closure_branch_fuzzer.py"),
           )
           tests = sorted(
               path for path in Path("tests").glob("test_*.py")
