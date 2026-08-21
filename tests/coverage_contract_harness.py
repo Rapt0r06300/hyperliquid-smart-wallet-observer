@@ -42,6 +42,10 @@ class _Timeout(Exception):
     pass
 
 
+class _HardTimeout(SystemExit):
+    """Borne dure qui traverse les `except Exception` du code exercé."""
+
+
 class Dummy:
     def __init__(self, **values):
         self.__dict__.update(values)
@@ -83,10 +87,6 @@ class Dummy:
     async def __aexit__(self, *args):
         del args
         return False
-
-
-def _timeout_handler(*_args):
-    raise _Timeout()
 
 
 def _value(annotation, name: str, mode: int, root: Path, settings: Settings, depth: int = 0):
@@ -210,9 +210,34 @@ def _invoke(function, mode: int, root: Path, settings: Settings):
 
     previous_handler = signal.getsignal(signal.SIGALRM)
     previous_timer = signal.getitimer(signal.ITIMER_REAL)
+    previous_remaining, previous_interval = previous_timer
     started = time.monotonic()
-    signal.signal(signal.SIGALRM, _timeout_handler)
-    signal.setitimer(signal.ITIMER_REAL, 0.01)
+    outer_deadline = started + previous_remaining if previous_remaining > 0 else None
+    soft_deadline = started + 0.01
+    hard_deadline = started + 0.05
+    outer_fired = False
+
+    def nested_timeout_handler(signum, frame):
+        nonlocal outer_fired
+        now = time.monotonic()
+        if outer_deadline is not None and now >= outer_deadline:
+            outer_fired = True
+            if callable(previous_handler):
+                return previous_handler(signum, frame)
+            if previous_handler == signal.SIG_IGN:
+                return None
+            raise _HardTimeout("outer SIGALRM deadline reached")
+        if now >= hard_deadline:
+            raise _HardTimeout("synthetic coverage call exceeded hard deadline")
+        if now >= soft_deadline:
+            raise _Timeout()
+        raise _Timeout()
+
+    signal.signal(signal.SIGALRM, nested_timeout_handler)
+    first_alarm = 0.01
+    if previous_remaining > 0:
+        first_alarm = min(first_alarm, max(1e-6, previous_remaining))
+    signal.setitimer(signal.ITIMER_REAL, first_alarm, 0.01)
     try:
         if inspect.iscoroutinefunction(function):
             return asyncio.run(function(*positional, **keyword))
@@ -221,13 +246,14 @@ def _invoke(function, mode: int, root: Path, settings: Settings):
         elapsed = max(0.0, time.monotonic() - started)
         signal.setitimer(signal.ITIMER_REAL, 0)
         signal.signal(signal.SIGALRM, previous_handler)
-        previous_remaining, previous_interval = previous_timer
-        if previous_remaining > 0:
+        if previous_remaining > 0 and not outer_fired:
             signal.setitimer(
                 signal.ITIMER_REAL,
                 max(1e-6, previous_remaining - elapsed),
                 previous_interval,
             )
+        elif outer_fired and previous_interval > 0:
+            signal.setitimer(signal.ITIMER_REAL, previous_interval, previous_interval)
 
 
 def run_typed_contracts(target_modules: tuple[str, ...], tmp_path: Path, monkeypatch) -> tuple[int, int, int, int]:
