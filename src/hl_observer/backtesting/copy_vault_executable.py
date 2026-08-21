@@ -1,7 +1,7 @@
 """Causal, executable Copy-Vault paper replay.
 
-The replay consumes canonical leader fills and observed Hyperliquid books.  It
-does not interpolate prices, manufacture liquidity, or call an exchange.  A
+The replay consumes canonical leader fills and observed Hyperliquid books. It
+does not interpolate prices, manufacture liquidity, or call an exchange. A
 paper episode exists only when a fresh reference, delayed entry, and later exit
 are all observable and top-book capacity covers the configured notional.
 """
@@ -16,103 +16,30 @@ from collections.abc import Iterable, Mapping
 from typing import Any
 
 from hl_observer.backtesting.copy_vault_book_loader import load_observed_books
+from hl_observer.backtesting.copy_vault_protocol import (
+    CHECKPOINT_COLLECTOR_PROTOCOL,
+    COPYABLE_ENTRY_ACTIONS,
+    COPY_DELAY_MS,
+    HORIZONS_MS,
+    MAX_OPEN_POSITIONS,
+    MAX_REFERENCE_LAG_MS,
+    MAX_TARGET_LAG_MS,
+    METAORDER_GAP_MS,
+    MIN_TRAIN_TRADES,
+    NOTIONAL_USD,
+    PROTOCOL_NAME,
+    TRAIN_ECONOMIC_GATE_VERSION,
+    TRAIN_FRACTION,
+    VALIDATION_FRACTION,
+    canonical_metaorder_id,
+    classify_live_entry_action,
+    expected_open_direction,
+    protocol_signature,
+)
 from hl_observer.config.frais_venues import frais_taker_bps
 from hl_observer.ops.echec_silencieux import noter as _noter_echec
 
 SCHEMA_VERSION = "hypersmart.copy_vault_executable.v1"
-PROTOCOL_NAME = "copy_vault_executable_walk_forward_v7_exact_checkpoint_binding"
-TRAIN_ECONOMIC_GATE_VERSION = "copy_vault_train_economic_gate_v2"
-CHECKPOINT_COLLECTOR_PROTOCOL = (
-    f"copy_vault_checkpoint_companion_v2_for_{PROTOCOL_NAME}"
-)
-METAORDER_GAP_MS = 60_000
-COPY_DELAY_MS = 60_000
-MAX_REFERENCE_LAG_MS = 30_000
-MAX_TARGET_LAG_MS = 30_000
-HORIZONS_MS = (300_000, 900_000, 1_800_000, 3_600_000)
-NOTIONAL_USD = 150.0
-MAX_OPEN_POSITIONS = 6
-MIN_TRAIN_TRADES = 8
-TRAIN_FRACTION = 0.60
-VALIDATION_FRACTION = 0.20
-COPYABLE_ENTRY_ACTIONS = frozenset({"OPEN", "ADD"})
-_OPEN_DIRECTION_BY_LABEL = {
-    "open long": 1,
-    "open short": -1,
-}
-
-
-def expected_open_direction(row: Mapping[str, Any]) -> int | None:
-    """Return the signed direction only for an explicit leader open fill."""
-
-    label = " ".join(str(row.get("dir") or "").strip().casefold().split())
-    return _OPEN_DIRECTION_BY_LABEL.get(label)
-
-
-def canonical_metaorder_id(
-    *, vault: str, coin: str, direction: int, signal_ts_ms: int, first_event_id: str
-) -> str:
-    """Build an immutable id from facts known at the first observed slice."""
-
-    material = {
-        "vault": str(vault or "").lower(),
-        "coin": str(coin or "").upper(),
-        "direction": int(direction),
-        "signal_ts_ms": int(signal_ts_ms),
-        "first_event_id": str(first_event_id or ""),
-    }
-    return hashlib.sha256(
-        json.dumps(material, sort_keys=True, separators=(",", ":")).encode("utf-8")
-    ).hexdigest()
-
-
-def classify_live_entry_action(row: Mapping[str, Any]) -> str | None:
-    """Classify an explicit open fill using its exchange start position.
-
-    ``OPEN`` always starts a new metaorder. ``ADD`` may extend the active one.
-    Missing or contradictory state is rejected instead of guessed.
-    """
-
-    direction = expected_open_direction(row)
-    if direction is None:
-        return None
-    raw_start = row.get("start_position", row.get("startPosition"))
-    try:
-        start = float(raw_start)
-    except (TypeError, ValueError, OverflowError):
-        return None
-    if abs(start) <= 1e-12:
-        return "OPEN"
-    if (start > 0 and direction > 0) or (start < 0 and direction < 0):
-        return "ADD"
-    return None
-
-
-def protocol_signature() -> dict[str, Any]:
-    return {
-        "calibration_protocol": PROTOCOL_NAME,
-        "train_economic_gate": TRAIN_ECONOMIC_GATE_VERSION,
-        "checkpoint_collector_protocol": CHECKPOINT_COLLECTOR_PROTOCOL,
-        "metaorder_identity_policy": "immutable_first_observed_fill",
-        "checkpoint_binding_policy": "exact_metaorder_stage_and_protocol",
-        "metaorder_gap_ms": METAORDER_GAP_MS,
-        "copy_delay_ms": COPY_DELAY_MS,
-        "max_reference_lag_ms": MAX_REFERENCE_LAG_MS,
-        "max_target_lag_ms": MAX_TARGET_LAG_MS,
-        "horizons_ms": list(HORIZONS_MS),
-        "notional_usd": NOTIONAL_USD,
-        "max_open_positions": MAX_OPEN_POSITIONS,
-        "fee_source": "hl_observer.config.frais_venues:frais_taker_bps(HL)",
-        "book_source": (
-            "runtime/data/copy_vault_l2_tape.jsonl:"
-            "HYPERLIQUID_L2_WS_or_INFO_L2BOOK_causal"
-        ),
-        "fill_source": "LIVE_WS_non_snapshot_with_receive_time_for_all_protocol_segments",
-        "historical_source_policy": "REST_BACKFILL_and_historical_books_audit_only",
-        "causal_observation_required_all_segments": True,
-        "forward_signal_policy": "causal_live_first_fill_observed_after_physical_freeze",
-        "purge_policy": "copy_delay_plus_candidate_horizon_plus_max_target_lag",
-    }
 
 
 def _event_identity(row: Mapping[str, Any]) -> str:
@@ -137,7 +64,7 @@ def cluster_metaorders(
     """Collapse sliced fills without using later slices as independent trades.
 
     Clusters are maintained per vault/coin/direction, so interleaved fills from
-    other markets do not accidentally split one leader metaorder.  The paper
+    other markets do not accidentally split one leader metaorder. The paper
     signal timestamp is the first observable fill; aggregate size is audit-only
     and is never used as a hindsight entry threshold.
     """
@@ -274,7 +201,7 @@ def select_causal_protocol_inputs(
     """Separate certifiable live evidence from historical audit material.
 
     REST backfills remain useful for discovery and diagnostics, but they were
-    not observed by the running strategy at their event time.  Likewise, a
+    not observed by the running strategy at their event time. Likewise, a
     historical cross-venue book must not calibrate a Copy-Vault rule whose
     forward execution relies on the dedicated causal Hyperliquid L2 tape.
     """
@@ -476,7 +403,7 @@ def execute_metaorder(
     latency = max(0.0, signed_latency_usd)
     latency_benefit = max(0.0, -signed_latency_usd)
     # A favourable delayed mark is retained in gross rather than represented
-    # as a negative cost.  An adverse delayed mark is an explicit latency cost.
+    # as a negative cost. An adverse delayed mark is an explicit latency cost.
     # In both cases gross - latency equals the actual delayed-entry mid PnL.
     gross_pnl = gross_from_reference + latency_benefit
     executable_before_fees = quantity * direction * (exit_exec - entry_exec)
@@ -643,7 +570,7 @@ def summarize(trades: Iterable[Mapping[str, Any]]) -> dict[str, Any]:
         "roi_pct": round(net / 1000.0 * 100.0, 8),
         "max_drawdown_usd": round(max_drawdown, 8),
         "hit_rate": round(wins / len(rows), 8) if rows else 0.0,
-        # JSON has no portable Infinity value.  An all-win sample has an
+        # JSON has no portable Infinity value. An all-win sample has an
         # undefined PF, not an infinite economic proof.
         "profit_factor": round(gains / losses, 8) if losses > 0 else None,
         "LIQUIDATABLE_NET": bool(rows) and all(row.get("liquidatable_net") is True for row in rows),
@@ -844,6 +771,7 @@ def temporal_evidence(evaluation: Mapping[str, Any]) -> dict[str, Any]:
     causal_forward = bool(forward_trades) and all(
         row.get("causal_forward_eligible") is True for row in forward_trades
     )
+
     def proof_segment(summary: Mapping[str, Any], *, count: int) -> dict[str, Any]:
         return {
             key: summary.get(key)
@@ -882,9 +810,11 @@ def temporal_evidence(evaluation: Mapping[str, Any]) -> dict[str, Any]:
 
 
 __all__ = [
-    "COPY_DELAY_MS", "HORIZONS_MS", "MAX_OPEN_POSITIONS", "METAORDER_GAP_MS",
-    "NOTIONAL_USD", "SCHEMA_VERSION", "calibrate_train_only", "cluster_metaorders",
-    "evaluate_frozen", "execute_metaorder", "load_observed_books", "protocol_signature",
-    "replay_metaorders", "summarize", "temporal_bounds", "temporal_evidence",
-    "select_causal_protocol_inputs",
+    "CHECKPOINT_COLLECTOR_PROTOCOL", "COPY_DELAY_MS", "HORIZONS_MS",
+    "MAX_OPEN_POSITIONS", "MAX_TARGET_LAG_MS", "METAORDER_GAP_MS", "NOTIONAL_USD",
+    "SCHEMA_VERSION", "calibrate_train_only", "canonical_metaorder_id",
+    "classify_live_entry_action", "cluster_metaorders", "evaluate_frozen",
+    "execute_metaorder", "expected_open_direction", "load_observed_books",
+    "protocol_signature", "replay_metaorders", "select_causal_protocol_inputs",
+    "summarize", "temporal_bounds", "temporal_evidence",
 ]
