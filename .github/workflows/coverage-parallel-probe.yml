@@ -17,8 +17,9 @@ permissions:
   statuses: write
 
 concurrency:
-  group: coverage-parallel-probe-${{ github.sha }}
-  cancel-in-progress: false
+  # Un seul probe de main est utile : un nouveau SHA rend les huit anciens shards obsolètes.
+  group: coverage-parallel-probe-main
+  cancel-in-progress: true
 
 env:
   PYTHONPATH: src:tools
@@ -83,28 +84,26 @@ jobs:
 
           shard = int(os.environ["SHARD_INDEX"])
           total = int(os.environ["COVERAGE_SHARDS"])
-          closure_tests = (
+          shardable_contracts = (
               Path("tests/test_coverage_closure_typed_long_tail.py"),
               Path("tests/test_coverage_closure_typed_large_tail.py"),
           )
           tests = sorted(
               path for path in Path("tests").glob("test_*.py")
-              if path not in closure_tests
+              if path not in shardable_contracts
           )
           selected = [str(path) for index, path in enumerate(tests) if index % total == shard]
-          # Les deux contrats de fermeture se shardent déjà eux-mêmes via
-          # HYPERSMART_COVERAGE_CONTRACT_SHARD. Ils doivent donc être présents
-          # dans chaque job afin que les huit tranches couvrent tous leurs modules.
-          for closure_test in closure_tests:
-              if closure_test.is_file():
-                  selected.append(str(closure_test))
+          # Ces contrats se shardent eux-mêmes avec HYPERSMART_COVERAGE_CONTRACT_SHARD.
+          # Chaque job les exécute donc, mais sur son huitième distinct des modules.
+          for contract in shardable_contracts:
+              if contract.is_file():
+                  selected.append(str(contract))
           if not selected:
               raise SystemExit(f"COVERAGE_SHARD_EMPTY:{shard}")
           Path("shard-tests.txt").write_text("\n".join(selected) + "\n", encoding="utf-8")
-          closure_count = sum(int(path.is_file()) for path in closure_tests)
           print(
               f"shard={shard}/{total} tests={len(selected)} "
-              f"total_tests_files={len(tests) + closure_count}"
+              f"total_tests_files={len(tests) + sum(int(p.is_file()) for p in shardable_contracts)}"
           )
           PY
       - name: Exécuter la tranche sous coverage
@@ -235,7 +234,7 @@ jobs:
               "state": os.environ["STATE"],
               "context": "hypersmart/coverage-parallel-probe",
               "description": os.environ["DESCRIPTION"],
-              "target_url": f"{os.environ['GITHUB_SERVER_URL']}/{os.environ['GITHUB_REPOSITORY']}/actions/runs/{os.environ['GITHUB_RUN_ID']}",
+              "target_url": f"{os.environ['GITHUB_SERVER_URL']}/{os.environ['GITHUB_REPOSITORY']}/actions/runs/${GITHUB_RUN_ID}",
           }))
           PY
           curl --fail-with-body --silent --show-error \
