@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import asyncio
 import dataclasses
 import enum
 import importlib
@@ -35,9 +34,19 @@ UNSAFE_NAMES = {
     "start_server",
     "run_forever",
 }
+# Le harnais typé complète les vrais tests unitaires; il ne doit pas rejouer synthétiquement
+# un centre de commande entier. `hl_observer.cli` possède déjà ses tests dédiés et orchestre
+# volontairement serveurs, archives, scans et rapports : l'invoquer fonction par fonction
+# transforme un test de couverture borné en campagne runtime de plusieurs minutes.
+GENERIC_MODULE_UNSAFE = {
+    "hl_observer.cli",
+}
 PROCESS_GLOBAL_UNSAFE = {
     ("hl_observer.ops.portable_audit_guard", "install"),
     ("hl_observer.ops.portable_audit_guard", "install_from_environment"),
+    # Ce rapport parcourt les decision logs et appartient aux tests de scoring dédiés. Sur des
+    # entrées Dummy il peut déclencher un scan de chemins sans intérêt pour le contrat générique.
+    ("hl_observer.scoring.wallet_ranking", "export_classification_robustness_report"),
 }
 
 
@@ -208,12 +217,9 @@ def _invoke(function, mode: int, root: Path, settings: Settings):
         else:
             keyword[parameter.name] = value
 
-    # Ne pas interrompre arbitrairement le code Python depuis un signal ou un profile hook :
-    # coverage/importlib/pyarrow/SQLAlchemy peuvent tenir des verrous internes à cet instant et
-    # rester ensuite bloqués. Le workflow borne déjà chaque test avec pytest-timeout en mode
-    # thread ; le harnais reste donc déterministe sans injecter d'exception asynchrone.
-    if inspect.iscoroutinefunction(function):
-        return asyncio.run(function(*positional, **keyword))
+    # Les coroutines ne passent jamais ici: elles sont volontairement laissées à leurs tests
+    # dédiés, qui savent fournir événements/queues/arrêt. Cela n'omet aucune ligne du rapport
+    # coverage; cela empêche seulement le harnais générique de bloquer une boucle asyncio.
     return function(*positional, **keyword)
 
 
@@ -278,8 +284,14 @@ def run_typed_contracts(target_modules: tuple[str, ...], tmp_path: Path, monkeyp
         except Exception:
             continue
         imported += 1
+        if module_name in GENERIC_MODULE_UNSAFE:
+            continue
         for name, function in list(vars(module).items()):
             if not inspect.isfunction(function) or function.__module__ != module_name:
+                continue
+            # Une coroutine sans protocole d'arrêt/fixtures métier peut attendre indéfiniment.
+            # Elle reste incluse dans la mesure coverage et doit être couverte par son vrai test.
+            if inspect.iscoroutinefunction(function):
                 continue
             if name.lower() in UNSAFE_NAMES or (module_name, name) in PROCESS_GLOBAL_UNSAFE:
                 continue
