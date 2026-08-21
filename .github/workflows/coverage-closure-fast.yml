@@ -59,6 +59,7 @@ jobs:
               Path('tests/test_coverage_closure_typed_long_tail.py'),
               Path('tests/test_coverage_closure_typed_large_tail.py'),
               Path('tests/test_coverage_closure_branch_fuzzer.py'),
+              Path('tests/test_coverage_closure_branch_fuzzer_v2.py'),
           }
           tests = sorted(
               path for path in Path('tests').glob('test_coverage_closure_*.py')
