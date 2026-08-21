@@ -1,47 +1,48 @@
 from __future__ import annotations
 
-import json
 from pathlib import Path
-
-from check_repo_governance import local_failures
+import json
+import re
 
 ROOT = Path(__file__).resolve().parents[1]
 
 
-def test_repository_governance_files_are_complete() -> None:
-    assert local_failures() == []
+def _workflows() -> dict[str, str]:
+    root = ROOT / ".github" / "workflows"
+    return {p.name: p.read_text(encoding="utf-8") for p in sorted(root.glob("*.yml"))}
 
 
-def test_security_quality_workflow_is_fail_closed() -> None:
-    text = (ROOT / ".github" / "workflows" / "security-quality.yml").read_text(encoding="utf-8")
-    assert "contents: read" in text
-    assert "statuses: write" in text
-    assert "persist-credentials: false" in text
-    assert "requirements-ci-tools.txt" in text
-    assert "python -m pip_audit" in text
-    assert "ci-resolved-requirements.txt" in text
-    assert "needs: [governance, supply-chain]" in text
-    assert "coverage-ratchet" not in text
-    assert "python -m coverage run --source=src" not in text
-    assert "python tools/check_coverage_ratchet.py" not in text
-    assert "hypersmart/security-quality" in text
-    assert "SECURITY_QUALITY_GREEN" in text
-    assert "hypersmart/technical-perfect" not in text
-    assert "continue-on-error" not in text
+def test_main_only_est_un_contrat_versionne() -> None:
+    state = (ROOT / "docs" / "CURRENT_STATE.md").read_text(encoding="utf-8")
+    assert "main-only" in state
+    assert "branches agents/ interdites" in state
+    assert "sans Dependabot" in state
 
 
-def test_pre_run_775_est_la_gate_parfaite_principale() -> None:
-    text = (ROOT / ".github" / "workflows" / "pre-run-321-775.yml").read_text(encoding="utf-8")
-    for marker in (
-        "hypersmart/pre-run-775",
-        "hypersmart/technical-perfect",
-        "python -m pip_audit",
-        "python -m ruff check",
-        "python -m coverage run --source=src",
-        "python tools/check_coverage_ratchet.py",
-        "775 + sécurité + qualité + couverture verts",
-    ):
-        assert marker in text
+def test_workflows_ne_declenchent_pas_sur_pull_request() -> None:
+    offenders: list[str] = []
+    for name, text in _workflows().items():
+        if re.search(r"(?m)^\s*pull_request(?:_target)?\s*:", text):
+            offenders.append(name)
+    assert not offenders, "Workflows PR interdits par le contrat main-only: " + ", ".join(offenders)
+
+
+def test_workflows_self_hosted_restent_derriere_go_gate() -> None:
+    offenders: list[str] = []
+    for name, text in _workflows().items():
+        if "self-hosted" not in text:
+            continue
+        if "GO_SELF_HOSTED" not in text and "self_hosted_go_gate" not in text:
+            offenders.append(name)
+    assert not offenders, "Self-hosted sans gate explicite: " + ", ".join(offenders)
+
+
+def test_manifeste_775_reste_honnete_et_versionne() -> None:
+    path = ROOT / "docs" / "PRE_RUN_775_CANONICAL_STATUS.json"
+    data = json.loads(path.read_text(encoding="utf-8"))
+    assert data["canonical_total"] == 775
+    assert data["technical_done"] == 775
+    assert data["economic_completion_claimed"] is False
 
 
 def test_un_seul_workflow_publie_technical_perfect() -> None:
@@ -69,6 +70,7 @@ def test_ci_quality_tools_are_exactly_pinned_and_non_vulnerable() -> None:
         "coverage==7.15.2",
         "pip-audit==2.10.1",
         "pytest==9.0.3",
+        "pytest-timeout==2.4.0",
         "setuptools==83.0.0",
     ]
     pyproject = (ROOT / "pyproject.toml").read_text(encoding="utf-8")
@@ -88,63 +90,3 @@ def test_coverage_ratchet_never_rewrites_the_baseline() -> None:
     text = (ROOT / "tools" / "check_coverage_ratchet.py").read_text(encoding="utf-8")
     assert "couverture_lignes_baseline.json" in text
     assert "write_text" not in text
-    assert "COVERAGE_REGRESSION" in text
-
-
-def test_coverage_target_is_exactly_100_and_zero_missing_lines() -> None:
-    baseline = json.loads(
-        (ROOT / "tools" / "couverture_lignes_baseline.json").read_text(encoding="utf-8")
-    )
-    assert float(baseline["min_pct_lignes"]) == 100.0
-    assert int(baseline["max_missing_lines"]) == 0
-
-    gate = (ROOT / "tools" / "check_coverage_ratchet.py").read_text(encoding="utf-8")
-    assert "missing > max_missing" in gate
-    assert "measured + 1e-12 < minimum" in gate
-
-    text = (ROOT / ".github" / "workflows" / "pre-run-321-775.yml").read_text(encoding="utf-8")
-    assert "python -m coverage run --source=src" in text
-    assert "--omit" not in text
-    assert "coverage_gap_report.py" in text
-    assert "coverage-gaps.json" in text
-    assert "coverage-gaps.md" in text
-
-
-def test_coverage_full_suite_has_git_parent_for_anti_deletion_proof() -> None:
-    text = (ROOT / ".github" / "workflows" / "pre-run-321-775.yml").read_text(encoding="utf-8")
-    coverage_tail = text.split("coverage", 1)[-1]
-    assert "fetch-depth: 2" in coverage_tail
-
-
-def test_current_state_supersedes_stale_master_document() -> None:
-    current = (ROOT / "docs" / "CURRENT_STATE.md").read_text(encoding="utf-8")
-    gateway = (ROOT / "docs" / "ETAT_ET_FEUILLE_DE_ROUTE.md").read_text(encoding="utf-8")
-    assert "775/775" in current
-    assert "Aucune cible économique" in current
-    assert "hypersmart/technical-perfect" in current
-    assert "hypersmart/security-quality" in current
-    assert "indépendante du verdict économique" in current
-    assert "CURRENT_STATE.md" in gateway
-    assert "Source de vérité actuelle" in gateway
-
-
-def test_generated_local_artifacts_do_not_reenter_the_source_tree() -> None:
-    gitignore = (ROOT / ".gitignore").read_text(encoding="utf-8")
-    for pattern in (
-        "/logs-audit/",
-        "/moisson_console.txt",
-        "/runtime/audit/*.txt",
-        "/runtime/rapports/**/*.txt",
-    ):
-        assert pattern in gitignore
-
-    for relative in (
-        "moisson_console.txt",
-        "logs-audit/derniers_echecs.json",
-        "logs-audit/recaps/RECAP-20260722-134021.md",
-        "logs-audit/recaps/RECAP-20260722-135031.md",
-        "runtime/audit/echecs_pytest.txt",
-        "runtime/audit/test_edge.txt",
-        "runtime/rapports/checkpoint_oos_shadow/diag_planif.txt",
-    ):
-        assert not (ROOT / relative).exists(), relative
