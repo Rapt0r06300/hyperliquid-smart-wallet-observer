@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+import ast
 import dataclasses
 import enum
 import importlib
 import inspect
 import socket
 import subprocess
+import textwrap
 import types
 import typing
 from builtins import BaseExceptionGroup
@@ -33,6 +35,19 @@ UNSAFE_NAMES = {
     "launch",
     "start_server",
     "run_forever",
+}
+# Parametres qui bornent explicitement une boucle de service. Le harnais force ces bornes a 1
+# meme en mode "defaults" afin de ne jamais lancer un superviseur pour une duree indeterminee.
+LOOP_SAFETY_PARAMETERS = {
+    "max_ticks",
+    "max_iterations",
+    "max_loops",
+    "max_cycles",
+    "max_rounds",
+    "max_polls",
+    "max_batches",
+    "max_events",
+    "max_steps",
 }
 # Le harnais typé complète les vrais tests unitaires; il ne doit pas rejouer synthétiquement
 # un centre de commande entier. `hl_observer.cli` possède déjà ses tests dédiés et orchestre
@@ -102,6 +117,8 @@ def _value(annotation, name: str, mode: int, root: Path, settings: Settings, dep
     lower = name.lower()
     origin = typing.get_origin(annotation)
     args = typing.get_args(annotation)
+    if lower in LOOP_SAFETY_PARAMETERS:
+        return 1
     if "setting" in lower:
         return settings
     if lower in {"state", "ui_state"}:
@@ -202,6 +219,24 @@ def _value(annotation, name: str, mode: int, root: Path, settings: Settings, dep
     return Dummy()
 
 
+def _contains_while_loop(function) -> bool:
+    """Détecte les boucles `while` que des arguments synthétiques peuvent rendre non bornées."""
+    try:
+        source = textwrap.dedent(inspect.getsource(function))
+        tree = ast.parse(source)
+    except (OSError, TypeError, IndentationError, SyntaxError):
+        return False
+    return any(isinstance(node, ast.While) for node in ast.walk(tree))
+
+
+def _loop_has_explicit_safety_bound(function) -> bool:
+    try:
+        parameters = inspect.signature(function).parameters
+    except (TypeError, ValueError):
+        return False
+    return any(name.lower() in LOOP_SAFETY_PARAMETERS for name in parameters)
+
+
 def _invoke(function, mode: int, root: Path, settings: Settings):
     signature = inspect.signature(function)
     positional = []
@@ -209,7 +244,8 @@ def _invoke(function, mode: int, root: Path, settings: Settings):
     for parameter in signature.parameters.values():
         if parameter.kind in (parameter.VAR_POSITIONAL, parameter.VAR_KEYWORD):
             continue
-        if parameter.default is not parameter.empty and mode == 0:
+        force_safety_bound = parameter.name.lower() in LOOP_SAFETY_PARAMETERS
+        if parameter.default is not parameter.empty and mode == 0 and not force_safety_bound:
             continue
         value = _value(parameter.annotation, parameter.name, mode, root, settings)
         if parameter.kind is parameter.POSITIONAL_ONLY:
@@ -298,6 +334,11 @@ def run_typed_contracts(target_modules: tuple[str, ...], tmp_path: Path, monkeyp
             try:
                 inspect.signature(function)
             except (TypeError, ValueError):
+                continue
+            # Une boucle `while` n'est appelée que si l'API expose elle-même une borne explicite.
+            # Cela évite qu'un Dummy transforme un superviseur/service en boucle infinie, sans
+            # retirer une seule ligne du rapport coverage ni masquer les tests métier dédiés.
+            if _contains_while_loop(function) and not _loop_has_explicit_safety_bound(function):
                 continue
             for mode in (0, 1, 2):
                 attempts += 1
