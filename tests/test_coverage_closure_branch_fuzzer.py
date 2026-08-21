@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import ast
-import dataclasses
 import enum
 import importlib
 import inspect
@@ -9,6 +8,7 @@ import os
 import pkgutil
 import types
 import typing
+from builtins import BaseExceptionGroup
 from pathlib import Path
 
 import hl_observer
