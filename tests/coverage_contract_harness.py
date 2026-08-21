@@ -36,10 +36,11 @@ UNSAFE_NAMES = {
     "start_server",
     "run_forever",
 }
-
-
-class _Timeout(Exception):
-    pass
+PROCESS_GLOBAL_UNSAFE = {
+    ("hl_observer.ops.portable_audit_guard", "install"),
+    ("hl_observer.ops.portable_audit_guard", "install_from_environment"),
+}
+_INTERNAL_TIMEOUT_SECONDS = 0.05
 
 
 class _HardTimeout(SystemExit):
@@ -209,35 +210,27 @@ def _invoke(function, mode: int, root: Path, settings: Settings):
             keyword[parameter.name] = value
 
     previous_handler = signal.getsignal(signal.SIGALRM)
-    previous_timer = signal.getitimer(signal.ITIMER_REAL)
-    previous_remaining, previous_interval = previous_timer
+    previous_remaining, previous_interval = signal.getitimer(signal.ITIMER_REAL)
     started = time.monotonic()
-    outer_deadline = started + previous_remaining if previous_remaining > 0 else None
-    soft_deadline = started + 0.01
-    hard_deadline = started + 0.05
+    outer_is_first = 0 < previous_remaining <= _INTERNAL_TIMEOUT_SECONDS
     outer_fired = False
 
-    def nested_timeout_handler(signum, frame):
+    def timeout_handler(signum, frame):
         nonlocal outer_fired
-        now = time.monotonic()
-        if outer_deadline is not None and now >= outer_deadline:
+        if outer_is_first:
             outer_fired = True
             if callable(previous_handler):
                 return previous_handler(signum, frame)
             if previous_handler == signal.SIG_IGN:
                 return None
             raise _HardTimeout("outer SIGALRM deadline reached")
-        if now >= hard_deadline:
-            raise _HardTimeout("synthetic coverage call exceeded hard deadline")
-        if now >= soft_deadline:
-            raise _Timeout()
-        raise _Timeout()
+        raise _HardTimeout("synthetic coverage call exceeded hard deadline")
 
-    signal.signal(signal.SIGALRM, nested_timeout_handler)
-    first_alarm = 0.01
+    signal.signal(signal.SIGALRM, timeout_handler)
+    first_alarm = _INTERNAL_TIMEOUT_SECONDS
     if previous_remaining > 0:
-        first_alarm = min(first_alarm, max(1e-6, previous_remaining))
-    signal.setitimer(signal.ITIMER_REAL, first_alarm, 0.01)
+        first_alarm = min(first_alarm, previous_remaining)
+    signal.setitimer(signal.ITIMER_REAL, max(1e-6, first_alarm), 0.0)
     try:
         if inspect.iscoroutinefunction(function):
             return asyncio.run(function(*positional, **keyword))
@@ -301,7 +294,7 @@ def run_typed_contracts(target_modules: tuple[str, ...], tmp_path: Path, monkeyp
         for name, function in list(vars(module).items()):
             if not inspect.isfunction(function) or function.__module__ != module_name:
                 continue
-            if name.lower() in UNSAFE_NAMES:
+            if name.lower() in UNSAFE_NAMES or (module_name, name) in PROCESS_GLOBAL_UNSAFE:
                 continue
             try:
                 inspect.signature(function)
