@@ -7,6 +7,7 @@ on:
       - 'tests/test_coverage_closure_*.py'
       - 'src/hl_observer/**/*.py'
       - '.github/workflows/coverage-closure-fast.yml'
+  workflow_dispatch: {}
 
 permissions:
   contents: read
@@ -49,8 +50,30 @@ jobs:
           python -m pip install -r requirements-ci-tools.txt
       - name: Ruff structurel sur les tests de clôture
         run: python -m ruff check --select E9,F63,F7,F82 tests/test_coverage_closure_*.py
-      - name: Exécuter uniquement les tests de clôture
-        run: python -m pytest -q -p no:cacheprovider --tb=short tests/test_coverage_closure_*.py
+      - name: Construire la suite réellement rapide
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          shardes = {
+              Path('tests/test_coverage_closure_typed_long_tail.py'),
+              Path('tests/test_coverage_closure_typed_large_tail.py'),
+          }
+          tests = sorted(
+              path for path in Path('tests').glob('test_coverage_closure_*.py')
+              if path not in shardes
+          )
+          if not tests:
+              raise SystemExit('COVERAGE_CLOSURE_FAST_EMPTY')
+          Path('closure-fast-tests.txt').write_text(
+              '\n'.join(str(path) for path in tests) + '\n', encoding='utf-8'
+          )
+          print(f'closure_fast_tests={len(tests)} contrats_shardes={len(shardes)}')
+          PY
+      - name: Exécuter uniquement les tests de clôture rapides
+        run: |
+          mapfile -t TEST_FILES < closure-fast-tests.txt
+          python -m pytest -q -p no:cacheprovider --tb=short "${TEST_FILES[@]}"
       - name: Publier le verdict rapide
         if: always()
         env:
