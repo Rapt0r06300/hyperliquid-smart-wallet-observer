@@ -2,13 +2,16 @@
 param(
     [string]$LabRoot = $env:ALINA_RESEARCH_HOME,
     [string]$RunnerRoot = 'C:\actions-runner',
-    [string]$ProjectRoot = 'C:\Users\flo\Desktop\Projet invest',
+    [string]$ProjectRoot = $env:HYPERSMART_PROJECT_ROOT,
     [string]$RequiredLabel = 'hypersmart-final-v1',
     [switch]$AllowPrepared
 )
 
 $ErrorActionPreference = 'SilentlyContinue'
 $failures = New-Object System.Collections.Generic.List[string]
+if ([string]::IsNullOrWhiteSpace($ProjectRoot)) {
+    $ProjectRoot = Split-Path -Parent $PSScriptRoot
+}
 $RunnerRoot = [System.IO.Path]::GetFullPath($RunnerRoot).TrimEnd('\')
 $ProjectRoot = [System.IO.Path]::GetFullPath($ProjectRoot).TrimEnd('\')
 $manifestPath = Join-Path $RunnerRoot 'HYPERSMART_RUNNER_PREPARED.json'
