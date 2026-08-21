@@ -163,7 +163,7 @@ def test_dynamic_router_endpoints_cover_nested_fastapi_paths(tmp_path, monkeypat
             module = importlib.import_module(module_name)
         except Exception:
             continue
-        for factory_name, factory in vars(module).items():
+        for factory_name, factory in list(vars(module).items()):
             if not inspect.isfunction(factory) or factory.__module__ != module_name:
                 continue
             if "router" not in factory_name.lower() or not _safe(factory, module_name, factory_name):
@@ -179,7 +179,7 @@ def test_dynamic_router_endpoints_cover_nested_fastapi_paths(tmp_path, monkeypat
             routes = getattr(router, "routes", None)
             if not isinstance(routes, list):
                 continue
-            for route in routes:
+            for route in list(routes):
                 endpoint = getattr(route, "endpoint", None)
                 endpoint_name = getattr(endpoint, "__name__", "")
                 if not _safe(endpoint, module_name, endpoint_name):
@@ -195,7 +195,7 @@ def test_dynamic_cli_and_argparse_paths_are_finite_and_offline(tmp_path, monkeyp
     settings = _settings(tmp_path, "cli")
     attempts = 0
     module = importlib.import_module("hl_observer.cli")
-    for function_name, function in vars(module).items():
+    for function_name, function in list(vars(module).items()):
         if not inspect.isfunction(function) or function.__module__ != "hl_observer.cli":
             continue
         if _safe(function, "hl_observer.cli", function_name):
@@ -208,7 +208,7 @@ def test_dynamic_cli_and_argparse_paths_are_finite_and_offline(tmp_path, monkeyp
             target = importlib.import_module(module_name)
         except Exception:
             continue
-        for function_name, function in vars(target).items():
+        for function_name, function in list(vars(target).items()):
             if not inspect.isfunction(function) or function.__module__ != module_name:
                 continue
             if function_name.lower() not in {"main", "_main", "_cli", "run"}:
@@ -272,13 +272,13 @@ def test_dynamic_async_callables_are_bounded_and_offline(tmp_path, monkeypatch) 
         except Exception:
             continue
         callables: list[tuple[str, object]] = []
-        for name, function in vars(module).items():
+        for name, function in list(vars(module).items()):
             if inspect.isfunction(function) and _safe(function, module_name, name, allow_async=True):
                 callables.append((name, function))
-        for class_value in vars(module).values():
+        for class_value in list(vars(module).values()):
             if not inspect.isclass(class_value) or class_value.__module__ != module_name:
                 continue
-            for name, descriptor in vars(class_value).items():
+            for name, descriptor in list(vars(class_value).items()):
                 function = _method_function(descriptor)
                 if _safe(function, module_name, name, allow_async=True):
                     callables.append((name, function))
@@ -356,7 +356,7 @@ def test_dynamic_literal_branches_expand_partial_function_coverage(tmp_path, mon
             module = importlib.import_module(module_name)
         except Exception:
             continue
-        for function_name, function in vars(module).items():
+        for function_name, function in list(vars(module).items()):
             if not inspect.isfunction(function) or function.__module__ != module_name:
                 continue
             if not _safe(function, module_name, function_name):
