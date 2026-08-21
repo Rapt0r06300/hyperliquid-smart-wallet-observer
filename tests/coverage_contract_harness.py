@@ -8,6 +8,7 @@ import inspect
 import signal
 import socket
 import subprocess
+import time
 import types
 import typing
 from pathlib import Path
@@ -206,15 +207,27 @@ def _invoke(function, mode: int, root: Path, settings: Settings):
             positional.append(value)
         else:
             keyword[parameter.name] = value
-    previous = signal.signal(signal.SIGALRM, _timeout_handler)
+
+    previous_handler = signal.getsignal(signal.SIGALRM)
+    previous_timer = signal.getitimer(signal.ITIMER_REAL)
+    started = time.monotonic()
+    signal.signal(signal.SIGALRM, _timeout_handler)
     signal.setitimer(signal.ITIMER_REAL, 0.01)
     try:
         if inspect.iscoroutinefunction(function):
             return asyncio.run(function(*positional, **keyword))
         return function(*positional, **keyword)
     finally:
+        elapsed = max(0.0, time.monotonic() - started)
         signal.setitimer(signal.ITIMER_REAL, 0)
-        signal.signal(signal.SIGALRM, previous)
+        signal.signal(signal.SIGALRM, previous_handler)
+        previous_remaining, previous_interval = previous_timer
+        if previous_remaining > 0:
+            signal.setitimer(
+                signal.ITIMER_REAL,
+                max(1e-6, previous_remaining - elapsed),
+                previous_interval,
+            )
 
 
 def run_typed_contracts(target_modules: tuple[str, ...], tmp_path: Path, monkeypatch) -> tuple[int, int, int, int]:
