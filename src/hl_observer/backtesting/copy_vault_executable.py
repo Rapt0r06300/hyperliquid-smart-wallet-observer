@@ -1,44 +1,21 @@
-"""Causal, executable Copy-Vault paper replay.
-
-The replay consumes canonical leader fills and observed Hyperliquid books. It
-does not interpolate prices, manufacture liquidity, or call an exchange. A
-paper episode exists only when a fresh reference, delayed entry, and later exit
-are all observable and top-book capacity covers the configured notional.
-"""
-
+"""Replay Copy-Vault causal et exécutable en PAPER sur carnets observés."""
 from __future__ import annotations
-
 import bisect
 import hashlib
 import json
 import math
 from collections.abc import Iterable, Mapping
 from typing import Any
-
 from hl_observer.backtesting.copy_vault_book_loader import load_observed_books
 from hl_observer.backtesting.copy_vault_protocol import (
-    CHECKPOINT_COLLECTOR_PROTOCOL,
-    COPYABLE_ENTRY_ACTIONS,
-    COPY_DELAY_MS,
-    HORIZONS_MS,
-    MAX_OPEN_POSITIONS,
-    MAX_REFERENCE_LAG_MS,
-    MAX_TARGET_LAG_MS,
-    METAORDER_GAP_MS,
-    MIN_TRAIN_TRADES,
-    NOTIONAL_USD,
-    PROTOCOL_NAME,
-    TRAIN_ECONOMIC_GATE_VERSION,
-    TRAIN_FRACTION,
-    VALIDATION_FRACTION,
-    canonical_metaorder_id,
-    classify_live_entry_action,
-    expected_open_direction,
-    protocol_signature,
+    CHECKPOINT_COLLECTOR_PROTOCOL, COPYABLE_ENTRY_ACTIONS, COPY_DELAY_MS, HORIZONS_MS,
+    MAX_OPEN_POSITIONS, MAX_REFERENCE_LAG_MS, MAX_TARGET_LAG_MS, METAORDER_GAP_MS,
+    MIN_TRAIN_TRADES, NOTIONAL_USD, PROTOCOL_NAME, TRAIN_ECONOMIC_GATE_VERSION,
+    TRAIN_FRACTION, VALIDATION_FRACTION, canonical_metaorder_id,
+    classify_live_entry_action, expected_open_direction, protocol_signature,
 )
 from hl_observer.config.frais_venues import frais_taker_bps
 from hl_observer.ops.echec_silencieux import noter as _noter_echec
-
 SCHEMA_VERSION = "hypersmart.copy_vault_executable.v1"
 
 
@@ -61,14 +38,7 @@ def _event_identity(row: Mapping[str, Any]) -> str:
 def cluster_metaorders(
     entries: Iterable[Mapping[str, Any]], *, gap_ms: int = METAORDER_GAP_MS
 ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
-    """Collapse sliced fills without using later slices as independent trades.
-
-    Clusters are maintained per vault/coin/direction, so interleaved fills from
-    other markets do not accidentally split one leader metaorder. The paper
-    signal timestamp is the first observable fill; aggregate size is audit-only
-    and is never used as a hindsight entry threshold.
-    """
-
+    """Collapse sliced fills without using later slices as independent trades."""
     canonical: list[dict[str, Any]] = []
     seen: set[str] = set()
     duplicate_events = 0
@@ -198,14 +168,7 @@ def select_causal_protocol_inputs(
     metaorders: Iterable[Mapping[str, Any]],
     books_by_coin: Mapping[str, Iterable[Mapping[str, Any]]],
 ) -> tuple[list[dict[str, Any]], dict[str, list[dict[str, Any]]], dict[str, Any]]:
-    """Separate certifiable live evidence from historical audit material.
-
-    REST backfills remain useful for discovery and diagnostics, but they were
-    not observed by the running strategy at their event time. Likewise, a
-    historical cross-venue book must not calibrate a Copy-Vault rule whose
-    forward execution relies on the dedicated causal Hyperliquid L2 tape.
-    """
-
+    """Separate certifiable live evidence from historical audit material."""
     all_metaorders = [dict(row) for row in metaorders]
     causal_metaorders = [
         row
@@ -217,7 +180,6 @@ def select_causal_protocol_inputs(
         key=lambda row: (int(row.get("signal_ts_ms") or 0), str(row.get("metaorder_id") or ""))
     )
     wanted_coins = {str(row.get("coin") or "").upper() for row in causal_metaorders}
-
     total_book_rows = 0
     causal_book_rows = 0
     causal_books: dict[str, list[dict[str, Any]]] = {}
@@ -232,7 +194,6 @@ def select_causal_protocol_inputs(
         if selected:
             causal_books[coin] = selected
             causal_book_rows += len(selected)
-
     return causal_metaorders, causal_books, {
         "protocol_scope": "LIVE_WS_SIGNALS_AND_CAUSAL_HYPERLIQUID_L2_ONLY",
         "all_metaorders": len(all_metaorders),
@@ -271,7 +232,6 @@ def _exact_checkpoint_triplet(
     str | None,
 ]:
     """Select only checkpoints cryptographically bound to this metaorder."""
-
     metaorder_id = str(metaorder.get("metaorder_id") or "")
     matching = [
         row for row in books
@@ -288,9 +248,7 @@ def _exact_checkpoint_triplet(
         f"{metaorder_id}:EXIT:{int(horizon_ms)}",
     )
     selected: list[dict[str, Any]] = []
-    for stage, checkpoint_id in zip(
-        expected_stages, expected_checkpoint_ids, strict=True
-    ):
+    for stage, checkpoint_id in zip(expected_stages, expected_checkpoint_ids, strict=True):
         candidates = [row for row in matching if row.get("checkpoint_stage") == stage]
         if len(candidates) != 1:
             return None, (
@@ -309,9 +267,7 @@ def _exact_checkpoint_triplet(
         int(entry["ts_ms"]) + int(horizon_ms),
     )
     lags: list[int] = []
-    for index, (row, expected_target) in enumerate(
-        zip(selected, expected_targets, strict=True)
-    ):
+    for index, (row, expected_target) in enumerate(zip(selected, expected_targets, strict=True)):
         target = int(row.get("checkpoint_target_ms") or 0)
         if target != expected_target:
             return None, "CHECKPOINT_TARGET_BINDING_MISMATCH"
@@ -320,9 +276,7 @@ def _exact_checkpoint_triplet(
         if lag < 0 or lag > int(allowed):
             return None, "STALE_EXACT_METAORDER_CHECKPOINT"
         lags.append(lag)
-    return (
-        reference, entry, exit_book, lags[0], lags[1], lags[2]
-    ), None
+    return (reference, entry, exit_book, lags[0], lags[1], lags[2]), None
 
 
 def execute_metaorder(
@@ -339,7 +293,6 @@ def execute_metaorder(
     require_causal_books: bool = False,
 ) -> tuple[dict[str, Any] | None, str]:
     """Execute one closed paper episode or return an explicit refusal code."""
-
     if not books:
         return None, "NO_OBSERVED_BOOK_FOR_COIN"
     signal_ms = int(metaorder["signal_ts_ms"])
@@ -354,9 +307,7 @@ def execute_metaorder(
     if checkpoint_reason is not None:
         return None, checkpoint_reason
     if checkpoint_triplet is not None:
-        reference, entry, exit_book, reference_lag, entry_lag, exit_lag = (
-            checkpoint_triplet
-        )
+        reference, entry, exit_book, reference_lag, entry_lag, exit_lag = checkpoint_triplet
         book_binding_method = "EXACT_METAORDER_CHECKPOINTS"
     else:
         continuous_books = [row for row in books if not row.get("checkpoint_id")]
@@ -380,15 +331,11 @@ def execute_metaorder(
         if exit_book is None:
             return None, "STALE_OR_MISSING_EXIT_BOOK"
         book_binding_method = "CONTINUOUS_CAUSAL_BOOK"
-    causal_books = all(
-        row.get("causal_observation") is True
-        for row in (reference, entry, exit_book)
-    )
+    causal_books = all(row.get("causal_observation") is True for row in (reference, entry, exit_book))
     if require_causal_books and not causal_books:
         return None, "NON_CAUSAL_FORWARD_BOOK"
     if min(float(entry["capacity_usd"]), float(exit_book["capacity_usd"])) < float(notional_usd):
         return None, "OBSERVED_TOP_CAPACITY_TOO_LOW"
-
     direction = int(metaorder["direction"]) * (1 if int(direction_multiplier) >= 0 else -1)
     if direction not in (-1, 1):
         return None, "INVALID_DIRECTION"
@@ -402,9 +349,6 @@ def execute_metaorder(
     signed_latency_usd = quantity * direction * (entry_mid - reference_mid)
     latency = max(0.0, signed_latency_usd)
     latency_benefit = max(0.0, -signed_latency_usd)
-    # A favourable delayed mark is retained in gross rather than represented
-    # as a negative cost. An adverse delayed mark is an explicit latency cost.
-    # In both cases gross - latency equals the actual delayed-entry mid PnL.
     gross_pnl = gross_from_reference + latency_benefit
     executable_before_fees = quantity * direction * (exit_exec - entry_exec)
     delayed_mid_pnl = quantity * direction * (exit_mid - entry_mid)
@@ -414,18 +358,14 @@ def execute_metaorder(
     spread_cost = max(0.0, spread_cost)
     rate_bps = float(frais_taker_bps("HL") if fee_bps is None else fee_bps)
     fees = (abs(quantity * entry_exec) + abs(quantity * exit_exec)) * rate_bps / 10_000.0
-    slippage = 0.0  # Full observed top capacity covers both marketable paper fills.
+    slippage = 0.0
     net = gross_pnl - spread_cost - fees - slippage - latency
     expected = executable_before_fees - fees
     if not math.isclose(net, expected, abs_tol=1e-8):
         return None, "ECONOMIC_RECONCILIATION_FAILED"
-
     identity = {
-        "metaorder_id": metaorder["metaorder_id"],
-        "entry_ts_ms": entry["ts_ms"],
-        "exit_ts_ms": exit_book["ts_ms"],
-        "direction": direction,
-        "horizon_ms": int(horizon_ms),
+        "metaorder_id": metaorder["metaorder_id"], "entry_ts_ms": entry["ts_ms"],
+        "exit_ts_ms": exit_book["ts_ms"], "direction": direction, "horizon_ms": int(horizon_ms),
     }
     trade_id = hashlib.sha256(
         json.dumps(identity, sort_keys=True, separators=(",", ":")).encode("utf-8")
@@ -441,9 +381,7 @@ def execute_metaorder(
         "first_fill_ts_ms": int(metaorder.get("first_fill_ts_ms") or signal_ms),
         "signal_source": metaorder.get("signal_source") or "REST_BACKFILL",
         "causal_books_eligible": causal_books,
-        "causal_forward_eligible": (
-            metaorder.get("causal_forward_eligible") is True and causal_books
-        ),
+        "causal_forward_eligible": metaorder.get("causal_forward_eligible") is True and causal_books,
         "book_binding_method": book_binding_method,
         "reference_ts_ms": reference["ts_ms"],
         "entry_ts_ms": entry["ts_ms"],
@@ -479,17 +417,11 @@ def execute_metaorder(
 def replay_metaorders(
     metaorders: Iterable[Mapping[str, Any]],
     books_by_coin: Mapping[str, list[dict[str, Any]]],
-    *,
-    horizon_ms: int,
-    start_ms: int | None = None,
-    end_ms: int | None = None,
-    direction_multiplier: int = 1,
-    require_causal_observation: bool = False,
+    *, horizon_ms: int, start_ms: int | None = None, end_ms: int | None = None,
+    direction_multiplier: int = 1, require_causal_observation: bool = False,
 ) -> tuple[list[dict[str, Any]], dict[str, int]]:
     counters: dict[str, int] = {
-        "metaorders_considered": 0,
-        "completed_positions": 0,
-        "portfolio_capacity_rejected": 0,
+        "metaorders_considered": 0, "completed_positions": 0, "portfolio_capacity_rejected": 0,
     }
     active_exit_times: list[int] = []
     trades: list[dict[str, Any]] = []
@@ -502,15 +434,11 @@ def replay_metaorders(
             continue
         counters["metaorders_considered"] += 1
         if require_causal_observation and metaorder.get("causal_forward_eligible") is not True:
-            counters["NON_CAUSAL_FORWARD_SIGNAL"] = counters.get(
-                "NON_CAUSAL_FORWARD_SIGNAL", 0
-            ) + 1
+            counters["NON_CAUSAL_FORWARD_SIGNAL"] = counters.get("NON_CAUSAL_FORWARD_SIGNAL", 0) + 1
             continue
         trade, reason = execute_metaorder(
-            metaorder,
-            list(books_by_coin.get(str(metaorder["coin"]), [])),
-            horizon_ms=int(horizon_ms),
-            direction_multiplier=direction_multiplier,
+            metaorder, list(books_by_coin.get(str(metaorder["coin"]), [])),
+            horizon_ms=int(horizon_ms), direction_multiplier=direction_multiplier,
             require_causal_books=require_causal_observation,
         )
         if trade is None:
@@ -521,9 +449,7 @@ def replay_metaorders(
             counters["portfolio_capacity_rejected"] += 1
             continue
         if trade["trade_id"] in seen:
-            counters["DUPLICATE_TRADE_ID_REJECTED"] = counters.get(
-                "DUPLICATE_TRADE_ID_REJECTED", 0
-            ) + 1
+            counters["DUPLICATE_TRADE_ID_REJECTED"] = counters.get("DUPLICATE_TRADE_ID_REJECTED", 0) + 1
             continue
         seen.add(trade["trade_id"])
         active_exit_times.append(int(trade["exit_ts_ms"]))
@@ -542,12 +468,8 @@ def summarize(trades: Iterable[Mapping[str, Any]]) -> dict[str, Any]:
     slippage = sum(float(row["slippage_cost_usd"]) for row in rows)
     latency = sum(float(row["latency_cost_usd"]) for row in rows)
     net = sum(float(row["net_pnl_usd"]) for row in rows)
-    equity = 0.0
-    peak = 0.0
-    max_drawdown = 0.0
+    equity = peak = max_drawdown = gains = losses = 0.0
     wins = 0
-    gains = 0.0
-    losses = 0.0
     for row in sorted(rows, key=lambda item: int(item["exit_ts_ms"])):
         pnl = float(row["net_pnl_usd"])
         equity += pnl
@@ -559,23 +481,16 @@ def summarize(trades: Iterable[Mapping[str, Any]]) -> dict[str, Any]:
         elif pnl < 0:
             losses -= pnl
     return {
-        "positions_ouvertes": len(rows),
-        "positions_fermees": len(rows),
-        "gross_pnl_usd": round(gross, 8),
-        "fees_usd": round(fees, 8),
-        "spread_cost_usd": round(spread, 8),
-        "slippage_cost_usd": round(slippage, 8),
-        "latency_cost_usd": round(latency, 8),
-        "net_pnl_usd": round(net, 8),
+        "positions_ouvertes": len(rows), "positions_fermees": len(rows),
+        "gross_pnl_usd": round(gross, 8), "fees_usd": round(fees, 8),
+        "spread_cost_usd": round(spread, 8), "slippage_cost_usd": round(slippage, 8),
+        "latency_cost_usd": round(latency, 8), "net_pnl_usd": round(net, 8),
         "roi_pct": round(net / 1000.0 * 100.0, 8),
         "max_drawdown_usd": round(max_drawdown, 8),
         "hit_rate": round(wins / len(rows), 8) if rows else 0.0,
-        # JSON has no portable Infinity value. An all-win sample has an
-        # undefined PF, not an infinite economic proof.
         "profit_factor": round(gains / losses, 8) if losses > 0 else None,
         "LIQUIDATABLE_NET": bool(rows) and all(row.get("liquidatable_net") is True for row in rows),
-        "duplicate_trade_ids": duplicates,
-        "trade_ids_count": len(set(ids)),
+        "duplicate_trade_ids": duplicates, "trade_ids_count": len(set(ids)),
         "trade_ids_sha256": hashlib.sha256("\n".join(sorted(set(ids))).encode("utf-8")).hexdigest(),
         "economic_reconciliation_ok": math.isclose(
             gross - fees - spread - slippage - latency, net, abs_tol=1e-6
@@ -584,9 +499,7 @@ def summarize(trades: Iterable[Mapping[str, Any]]) -> dict[str, Any]:
 
 
 def temporal_bounds(
-    metaorders: list[Mapping[str, Any]],
-    *,
-    purge_ms: int | None = None,
+    metaorders: list[Mapping[str, Any]], *, purge_ms: int | None = None,
 ) -> dict[str, int | bool | None]:
     timestamps = sorted(int(row["signal_ts_ms"]) for row in metaorders)
     if len(timestamps) < 3:
@@ -603,13 +516,9 @@ def temporal_bounds(
     train_cut = timestamps[train_index]
     oos_cut = timestamps[validation_index]
     return {
-        "train_start_ms": timestamps[0],
-        "train_end_ms": train_cut - purge,
-        "validation_start_ms": train_cut,
-        "validation_end_ms": oos_cut - purge,
-        "oos_start_ms": oos_cut,
-        "oos_end_ms": timestamps[-1],
-        "purge_ms": purge,
+        "train_start_ms": timestamps[0], "train_end_ms": train_cut - purge,
+        "validation_start_ms": train_cut, "validation_end_ms": oos_cut - purge,
+        "oos_start_ms": oos_cut, "oos_end_ms": timestamps[-1], "purge_ms": purge,
         "validation_empty_after_purge": oos_cut - purge < train_cut,
     }
 
@@ -617,19 +526,15 @@ def temporal_bounds(
 def calibrate_train_only(
     metaorders: list[Mapping[str, Any]],
     books_by_coin: Mapping[str, list[dict[str, Any]]],
-    *,
-    require_causal_observation: bool = False,
+    *, require_causal_observation: bool = False,
 ) -> dict[str, Any]:
     grid: list[dict[str, Any]] = []
     for horizon in HORIZONS_MS:
         purge_ms = COPY_DELAY_MS + int(horizon) + MAX_TARGET_LAG_MS
         bounds = temporal_bounds(metaorders, purge_ms=purge_ms)
         trades, diagnostics = replay_metaorders(
-            metaorders,
-            books_by_coin,
-            horizon_ms=horizon,
-            start_ms=bounds.get("train_start_ms"),
-            end_ms=bounds.get("train_end_ms"),
+            metaorders, books_by_coin, horizon_ms=horizon,
+            start_ms=bounds.get("train_start_ms"), end_ms=bounds.get("train_end_ms"),
             require_causal_observation=require_causal_observation,
         )
         summary = summarize(trades)
@@ -637,26 +542,19 @@ def calibrate_train_only(
         all_wins_without_loss_denominator = bool(
             summary["positions_fermees"] >= MIN_TRAIN_TRADES
             and float(summary.get("net_pnl_usd") or 0.0) > 0.0
-            and float(summary.get("hit_rate") or 0.0) == 1.0
-            and profit_factor is None
+            and float(summary.get("hit_rate") or 0.0) == 1.0 and profit_factor is None
         )
         economic_gate = bool(
             summary["positions_fermees"] >= MIN_TRAIN_TRADES
             and summary.get("LIQUIDATABLE_NET") is True
             and summary.get("economic_reconciliation_ok") is True
             and float(summary.get("net_pnl_usd") or 0.0) > 0.0
-            and (
-                all_wins_without_loss_denominator
-                or (
-                    profit_factor is not None
-                    and float(profit_factor) > 1.0
-                )
-            )
+            and (all_wins_without_loss_denominator or (
+                profit_factor is not None and float(profit_factor) > 1.0
+            ))
         )
         grid.append({
-            "horizon_ms": horizon,
-            "bounds": bounds,
-            "summary": summary,
+            "horizon_ms": horizon, "bounds": bounds, "summary": summary,
             "diagnostics": diagnostics,
             "sample_eligible": summary["positions_fermees"] >= MIN_TRAIN_TRADES,
             "economic_gate": {
@@ -666,9 +564,7 @@ def calibrate_train_only(
                 ),
                 "all_wins_without_loss_denominator": all_wins_without_loss_denominator,
                 "liquidatable_net": summary.get("LIQUIDATABLE_NET") is True,
-                "economic_reconciliation_ok": (
-                    summary.get("economic_reconciliation_ok") is True
-                ),
+                "economic_reconciliation_ok": summary.get("economic_reconciliation_ok") is True,
             },
             "eligible": economic_gate,
         })
@@ -679,27 +575,19 @@ def calibrate_train_only(
         default=None,
     )
     selected_horizon = int(selected["horizon_ms"]) if selected else int(HORIZONS_MS[0])
-    selected_bounds = (
-        dict(selected["bounds"])
-        if selected
-        else dict(grid[0]["bounds"])
-    )
+    selected_bounds = dict(selected["bounds"]) if selected else dict(grid[0]["bounds"])
     has_sufficient_sample = any(row["sample_eligible"] for row in grid)
     return {
         "status": (
-            "TRAIN_SELECTED"
-            if selected
-            else "KILL_TRAIN_NO_POSITIVE_RECONCILED_CANDIDATE"
-            if has_sufficient_sample
-            else "KILL_TRAIN_INSUFFICIENT_EXECUTABLE_EPISODES"
+            "TRAIN_SELECTED" if selected else
+            "KILL_TRAIN_NO_POSITIVE_RECONCILED_CANDIDATE" if has_sufficient_sample else
+            "KILL_TRAIN_INSUFFICIENT_EXECUTABLE_EPISODES"
         ),
         "selection_eligible": selected is not None,
         "train_economic_gate": TRAIN_ECONOMIC_GATE_VERSION,
         "minimum_train_trades": MIN_TRAIN_TRADES,
         "selected_horizon_ms": selected_horizon,
-        "bounds": selected_bounds,
-        "grid": grid,
-        "selection_scope": "TRAIN_ONLY",
+        "bounds": selected_bounds, "grid": grid, "selection_scope": "TRAIN_ONLY",
         "causal_observation_required": bool(require_causal_observation),
     }
 
@@ -707,15 +595,11 @@ def calibrate_train_only(
 def evaluate_frozen(
     metaorders: list[Mapping[str, Any]],
     books_by_coin: Mapping[str, list[dict[str, Any]]],
-    *,
-    frozen_parameters: Mapping[str, Any],
-    frozen_at_ms: int,
+    *, frozen_parameters: Mapping[str, Any], frozen_at_ms: int,
 ) -> dict[str, Any]:
     bounds = dict(frozen_parameters.get("walk_forward_bounds") or {})
     horizon = int(frozen_parameters.get("selected_horizon_ms") or HORIZONS_MS[0])
-    causal_all_segments = (
-        frozen_parameters.get("causal_observation_required_all_segments") is True
-    )
+    causal_all_segments = frozen_parameters.get("causal_observation_required_all_segments") is True
     segments = {
         "train": (bounds.get("train_start_ms"), bounds.get("train_end_ms")),
         "validation": (bounds.get("validation_start_ms"), bounds.get("validation_end_ms")),
@@ -726,11 +610,7 @@ def evaluate_frozen(
     all_trades: list[dict[str, Any]] = []
     for name, (start_ms, end_ms) in segments.items():
         trades, diagnostics = replay_metaorders(
-            metaorders,
-            books_by_coin,
-            horizon_ms=horizon,
-            start_ms=start_ms,
-            end_ms=end_ms,
+            metaorders, books_by_coin, horizon_ms=horizon, start_ms=start_ms, end_ms=end_ms,
             require_causal_observation=causal_all_segments or name == "forward",
         )
         result["segments"][name] = {"summary": summarize(trades), "diagnostics": diagnostics}
@@ -738,17 +618,12 @@ def evaluate_frozen(
         all_trades.extend(trades)
     result["combined_summary"] = summarize(all_trades)
     inverted, inverted_diag = replay_metaorders(
-        metaorders,
-        books_by_coin,
-        horizon_ms=horizon,
-        start_ms=bounds.get("oos_start_ms"),
-        end_ms=bounds.get("oos_end_ms"),
-        direction_multiplier=-1,
-        require_causal_observation=causal_all_segments,
+        metaorders, books_by_coin, horizon_ms=horizon,
+        start_ms=bounds.get("oos_start_ms"), end_ms=bounds.get("oos_end_ms"),
+        direction_multiplier=-1, require_causal_observation=causal_all_segments,
     )
     result["placebo_inverted_oos"] = {
-        "summary": summarize(inverted),
-        "diagnostics": inverted_diag,
+        "summary": summarize(inverted), "diagnostics": inverted_diag,
     }
     return result
 
@@ -765,56 +640,38 @@ def temporal_evidence(evaluation: Mapping[str, Any]) -> dict[str, Any]:
     placebo_net = placebo_summary.get("net_pnl_usd") if placebo_count > 0 else None
     forward_trades = (
         (evaluation.get("trades") or {}).get("forward") or []
-        if isinstance(evaluation.get("trades"), Mapping)
-        else []
+        if isinstance(evaluation.get("trades"), Mapping) else []
     )
     causal_forward = bool(forward_trades) and all(
         row.get("causal_forward_eligible") is True for row in forward_trades
     )
 
     def proof_segment(summary: Mapping[str, Any], *, count: int) -> dict[str, Any]:
-        return {
-            key: summary.get(key)
-            for key in (
-                "gross_pnl_usd", "fees_usd", "spread_cost_usd",
-                "slippage_cost_usd", "latency_cost_usd", "net_pnl_usd",
-                "trade_ids_count", "trade_ids_sha256", "duplicate_trade_ids",
-            )
-        } | {
-            "sample_count": count,
-            "liquidatable_net": summary.get("LIQUIDATABLE_NET") is True,
-        }
+        return {key: summary.get(key) for key in (
+            "gross_pnl_usd", "fees_usd", "spread_cost_usd", "slippage_cost_usd",
+            "latency_cost_usd", "net_pnl_usd", "trade_ids_count", "trade_ids_sha256",
+            "duplicate_trade_ids",
+        )} | {"sample_count": count, "liquidatable_net": summary.get("LIQUIDATABLE_NET") is True}
 
     return {
-        "oos": {
-            **proof_segment(oos_summary, count=oos_count),
-            "no_lookahead": True,
-            "purged": True,
-        },
+        "oos": {**proof_segment(oos_summary, count=oos_count), "no_lookahead": True, "purged": True},
         "forward": {
             **proof_segment(forward_summary, count=forward_count),
-            "post_freeze": causal_forward,
-            "causal_live_only": causal_forward,
+            "post_freeze": causal_forward, "causal_live_only": causal_forward,
         },
         "placebos": {
-            "beaten": (
-                oos_net is not None
-                and placebo_net is not None
-                and float(oos_net) > float(placebo_net)
-            ),
-            "candidate_net_usd": oos_net,
-            "placebo_net_usd": placebo_net,
+            "beaten": oos_net is not None and placebo_net is not None and float(oos_net) > float(placebo_net),
+            "candidate_net_usd": oos_net, "placebo_net_usd": placebo_net,
             "method": "same_metaorders_inverted_direction",
         },
     }
 
 
 __all__ = [
-    "CHECKPOINT_COLLECTOR_PROTOCOL", "COPY_DELAY_MS", "HORIZONS_MS",
-    "MAX_OPEN_POSITIONS", "MAX_TARGET_LAG_MS", "METAORDER_GAP_MS", "NOTIONAL_USD",
-    "SCHEMA_VERSION", "calibrate_train_only", "canonical_metaorder_id",
-    "classify_live_entry_action", "cluster_metaorders", "evaluate_frozen",
-    "execute_metaorder", "expected_open_direction", "load_observed_books",
-    "protocol_signature", "replay_metaorders", "select_causal_protocol_inputs",
+    "CHECKPOINT_COLLECTOR_PROTOCOL", "COPY_DELAY_MS", "HORIZONS_MS", "MAX_OPEN_POSITIONS",
+    "MAX_TARGET_LAG_MS", "METAORDER_GAP_MS", "NOTIONAL_USD", "SCHEMA_VERSION",
+    "calibrate_train_only", "canonical_metaorder_id", "classify_live_entry_action",
+    "cluster_metaorders", "evaluate_frozen", "execute_metaorder", "expected_open_direction",
+    "load_observed_books", "protocol_signature", "replay_metaorders", "select_causal_protocol_inputs",
     "summarize", "temporal_bounds", "temporal_evidence",
 ]
