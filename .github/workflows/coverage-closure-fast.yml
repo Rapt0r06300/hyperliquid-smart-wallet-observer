@@ -73,7 +73,8 @@ jobs:
       - name: Exécuter uniquement les tests de clôture rapides
         run: |
           mapfile -t TEST_FILES < closure-fast-tests.txt
-          python -m pytest -q -p no:cacheprovider --tb=short "${TEST_FILES[@]}"
+          python -m pytest -q -p no:cacheprovider --tb=short \
+            --timeout=180 --timeout-method=signal "${TEST_FILES[@]}"
       - name: Publier le verdict rapide
         if: always()
         env:
