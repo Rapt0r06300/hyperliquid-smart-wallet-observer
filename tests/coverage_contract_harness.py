@@ -11,6 +11,7 @@ import sys
 import time
 import types
 import typing
+from builtins import BaseExceptionGroup
 from pathlib import Path
 
 import httpx
