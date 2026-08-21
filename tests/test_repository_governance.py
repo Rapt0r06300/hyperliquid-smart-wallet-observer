@@ -37,11 +37,13 @@ def test_pre_run_775_est_la_gate_parfaite_principale() -> None:
         "hypersmart/technical-perfect",
         "python -m pip_audit",
         "python -m ruff check",
-        "python -m coverage run --source=src",
+        "hypersmart/coverage-parallel-probe",
+        "COVERAGE_WITNESS_100_ZERO_MISSING_OK",
         "python tools/check_coverage_ratchet.py",
         "775 + sécurité + qualité + couverture verts",
     ):
         assert marker in text
+    assert "python -m coverage run --source=src" not in text
 
 
 def test_un_seul_workflow_publie_technical_perfect() -> None:
@@ -103,18 +105,25 @@ def test_coverage_target_is_exactly_100_and_zero_missing_lines() -> None:
     assert "missing > max_missing" in gate
     assert "measured + 1e-12 < minimum" in gate
 
-    text = (ROOT / ".github" / "workflows" / "pre-run-321-775.yml").read_text(encoding="utf-8")
-    assert "python -m coverage run --source=src" in text
-    assert "--omit" not in text
-    assert "coverage_gap_report.py" in text
-    assert "coverage-gaps.json" in text
-    assert "coverage-gaps.md" in text
+    probe = (ROOT / ".github" / "workflows" / "coverage-parallel-probe.yml").read_text(encoding="utf-8")
+    assert 'COVERAGE_SHARDS: "32"' in probe
+    assert "python -m coverage run --parallel-mode --source=src" in probe
+    assert "--omit" not in probe
+    assert "coverage_gap_report.py" in probe
+    assert "coverage-gaps.json" in probe
+    assert "coverage-gaps.md" in probe
+    assert "python tools/check_coverage_ratchet.py" in probe
+
+    pre_run = (ROOT / ".github" / "workflows" / "pre-run-321-775.yml").read_text(encoding="utf-8")
+    assert "hypersmart/coverage-parallel-probe" in pre_run
+    assert "COVERAGE_WITNESS_100_ZERO_MISSING_OK" in pre_run
 
 
-def test_coverage_full_suite_has_git_parent_for_anti_deletion_proof() -> None:
-    text = (ROOT / ".github" / "workflows" / "pre-run-321-775.yml").read_text(encoding="utf-8")
-    coverage_tail = text.split("coverage", 1)[-1]
-    assert "fetch-depth: 2" in coverage_tail
+def test_coverage_probe_has_git_parent_for_anti_deletion_proof() -> None:
+    text = (ROOT / ".github" / "workflows" / "coverage-parallel-probe.yml").read_text(encoding="utf-8")
+    assert "fetch-depth: 2" in text
+    assert "COVERAGE_ARTIFACT_COUNT_INVALID" in text
+    assert "test \"${#COVERAGE_FILES[@]}\" -eq 32" in text
 
 
 def test_current_state_supersedes_stale_master_document() -> None:
