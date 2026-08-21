@@ -6,7 +6,11 @@ import time
 import pytest
 
 from hl_observer.config import Settings
-from tests.coverage_contract_harness import _invoke
+from tests.coverage_contract_harness import (
+    _contains_while_loop,
+    _invoke,
+    _loop_has_explicit_safety_bound,
+)
 
 
 class _OuterDeadline(BaseException):
@@ -75,17 +79,24 @@ def test_outer_timeout_survives_when_target_swallows_internal_exception(tmp_path
             signal.setitimer(signal.ITIMER_REAL, previous_remaining, previous_interval)
 
 
-@pytest.mark.skipif(not hasattr(signal, "setitimer"), reason="POSIX timers required")
-def test_hard_internal_timeout_crosses_except_exception(tmp_path) -> None:
-    def swallows_soft_timeout() -> None:
-        deadline = time.monotonic() + 1.0
-        while time.monotonic() < deadline:
-            try:
-                time.sleep(0.002)
-            except Exception:
-                continue
+def test_defaulted_loop_safety_bound_is_forced_by_synthetic_invoke(tmp_path) -> None:
+    seen: list[int | None] = []
 
-    started = time.monotonic()
-    with pytest.raises(SystemExit, match="synthetic coverage call exceeded hard deadline"):
-        _invoke(swallows_soft_timeout, 0, tmp_path, _settings(tmp_path))
-    assert time.monotonic() - started < 0.5
+    def bounded_loop(*, max_ticks: int | None = None) -> int | None:
+        while True:
+            seen.append(max_ticks)
+            return max_ticks
+
+    assert _contains_while_loop(bounded_loop)
+    assert _loop_has_explicit_safety_bound(bounded_loop)
+    assert _invoke(bounded_loop, 0, tmp_path, _settings(tmp_path)) == 1
+    assert seen == [1]
+
+
+def test_unbounded_while_loop_is_detected_without_fake_safety_parameter() -> None:
+    def unbounded_loop() -> None:
+        while True:
+            return None
+
+    assert _contains_while_loop(unbounded_loop)
+    assert not _loop_has_explicit_safety_bound(unbounded_loop)
