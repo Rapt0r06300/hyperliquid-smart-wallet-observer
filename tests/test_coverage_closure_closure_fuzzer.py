@@ -13,6 +13,7 @@ import hl_observer
 from hl_observer.config import Settings
 from tests import coverage_contract_harness as harness
 from tests import test_coverage_closure_branch_fuzzer_v2 as v2
+from tests.coverage_contract_cache_plugin import _bounded_invoke
 from tests.test_coverage_closure_dynamic_edges import _install_offline_guards, _method_function
 
 MAX_DISCOVERED_PER_MODULE = 320
@@ -83,7 +84,7 @@ def _materialized_functions(function, module_name: str, tmp_path: Path, settings
             tmp_path=tmp_path,
             settings=settings,
         )
-        result = function(*positional, **keyword)
+        result = _bounded_invoke(function)(*positional, **keyword)
     except BaseExceptionGroup as error:
         if not harness._controlled_group(error):
             raise
