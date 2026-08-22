@@ -1,7 +1,13 @@
 from __future__ import annotations
 
+import signal
+import time
 from collections.abc import Callable
 from functools import wraps
+
+
+class _CoverageContractCallTimeout(TimeoutError):
+    """Stop one synthetic coverage invocation without stopping the real test."""
 
 
 def _target_id(value: object) -> int:
@@ -77,6 +83,45 @@ def _memoize_function_only(original: Callable):
     return wrapped
 
 
+def _bounded_invoke(original: Callable, seconds: float = 0.5):
+    """Bound one generic invocation while preserving pytest-timeout's deadline.
+
+    The typed contracts already require POSIX ``setitimer``. A synthetic function
+    may still block without containing a visible ``while`` loop (for example in a
+    library wait/join). Every invocation is therefore attempted exactly as before,
+    but one call cannot monopolize the whole shard. The pre-existing SIGALRM timer
+    is restored with elapsed wall time subtracted, so this helper never extends the
+    outer pytest timeout.
+    """
+    if not hasattr(signal, "setitimer"):
+        return original
+
+    @wraps(original)
+    def wrapped(*args, **kwargs):
+        previous_handler = signal.getsignal(signal.SIGALRM)
+        previous_remaining, previous_interval = signal.getitimer(signal.ITIMER_REAL)
+        started = time.monotonic()
+
+        def _raise_timeout(_signum, _frame):
+            raise _CoverageContractCallTimeout(
+                f"generic coverage invocation exceeded {seconds:.3f}s"
+            )
+
+        signal.signal(signal.SIGALRM, _raise_timeout)
+        signal.setitimer(signal.ITIMER_REAL, seconds)
+        try:
+            return original(*args, **kwargs)
+        finally:
+            signal.setitimer(signal.ITIMER_REAL, 0.0)
+            signal.signal(signal.SIGALRM, previous_handler)
+            if previous_remaining > 0.0:
+                elapsed = time.monotonic() - started
+                remaining = max(1e-6, previous_remaining - elapsed)
+                signal.setitimer(signal.ITIMER_REAL, remaining, previous_interval)
+
+    return wrapped
+
+
 def _install_once(module, name: str, factory: Callable, marker: str) -> None:
     original = getattr(module, name, None)
     if not callable(original) or getattr(original, marker, False):
@@ -87,16 +132,25 @@ def _install_once(module, name: str, factory: Callable, marker: str) -> None:
 
 
 def pytest_configure(config) -> None:
-    """Remove repeated static-analysis work from the real coverage contracts.
+    """Remove repeated static-analysis work and bound synthetic coverage calls.
 
     No production callable, generated input, test case, branch, module, assertion,
-    or coverage gate is skipped. Only immutable discovery/AST-analysis results are
-    reused inside one pytest process; side-effectful candidate builders remain live.
+    or coverage gate is skipped. Immutable discovery/AST-analysis results are reused
+    inside one pytest process, and every typed-contract invocation is still attempted
+    but is prevented from blocking the entire shard indefinitely.
     """
     del config
+    from tests import coverage_contract_harness as harness
     from tests import test_coverage_closure_branch_fuzzer as base
     from tests import test_coverage_closure_branch_fuzzer_v2 as v2
     from tests import test_coverage_closure_dynamic_edges as dynamic
+
+    _install_once(
+        harness,
+        "_invoke",
+        _bounded_invoke,
+        "_coverage_invocation_bounded",
+    )
 
     for module in (dynamic, base, v2):
         _install_once(module, "_tree", _memoize_tree, "_coverage_ast_cached")
