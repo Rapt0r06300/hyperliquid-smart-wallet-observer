@@ -126,10 +126,48 @@ def _install_offline_guards(monkeypatch) -> None:
         def __exit__(self, *_args):
             return False
 
+    # Les contrats de fermeture explorent des fonctions qui utilisent parfois
+    # ProcessPoolExecutor/ThreadPoolExecutor. Lancer de vrais workers avec des
+    # arguments synthétiques rend le fuzzer non déterministe et peut bloquer le
+    # shutdown. Cet exécuteur synchrone conserve les branches submit/map et les
+    # exceptions, sans créer de processus ni de threads réels.
+    import concurrent.futures as futures
+
+    class InlineExecutor:
+        def __init__(self, max_workers=None, initializer=None, initargs=(), **_kwargs):
+            self.max_workers = max_workers
+            if initializer is not None:
+                initializer(*initargs)
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            self.shutdown(wait=True)
+            return False
+
+        def shutdown(self, wait=True, *, cancel_futures=False):
+            return None
+
+        def submit(self, function, /, *args, **kwargs):
+            future = futures.Future()
+            try:
+                future.set_result(function(*args, **kwargs))
+            except BaseException as error:
+                future.set_exception(error)
+            return future
+
+        def map(self, function, *iterables, timeout=None, chunksize=1):
+            del timeout, chunksize
+            for args in zip(*iterables):
+                yield function(*args)
+
     monkeypatch.setattr(socket.socket, "connect", blocked)
     monkeypatch.setattr(requests.sessions.Session, "request", blocked)
     monkeypatch.setattr(httpx.Client, "request", blocked)
     monkeypatch.setattr(httpx.AsyncClient, "request", blocked_async)
+    monkeypatch.setattr(futures, "ProcessPoolExecutor", InlineExecutor)
+    monkeypatch.setattr(futures, "ThreadPoolExecutor", InlineExecutor)
     monkeypatch.setattr(
         subprocess,
         "run",
