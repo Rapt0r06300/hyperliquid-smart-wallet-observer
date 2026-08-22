@@ -49,6 +49,9 @@ _ERROR_ACCESS_DENIED = 5
 
 def _existe_sous_windows(pid: int) -> bool:
     """Teste l'existence d'un PID sans JAMAIS envoyer de signal. Par l'API Win32, directement."""
+    if type(pid) is not int or pid <= 0:
+        return False
+
     import ctypes
     from ctypes import wintypes
 

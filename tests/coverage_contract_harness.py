@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import ast
+import collections.abc
 import dataclasses
 import enum
 import importlib
@@ -72,8 +73,11 @@ class Dummy:
     def __getattr__(self, name):
         # Les attributs protocolaires Python doivent rester réellement absents. Les inventer
         # casse des bibliothèques qui bouclent volontairement sur hasattr(__dunder__), comme
-        # SQLAlchemy avec __clause_element__.
-        if name.startswith("__") and name.endswith("__"):
+        # SQLAlchemy avec __clause_element__, ainsi que les sentinelles ctypes ci-dessous.
+        if (
+            (name.startswith("__") and name.endswith("__"))
+            or name in {"_as_parameter_", "_fields_", "_type_", "_length_"}
+        ):
             raise AttributeError(name)
         if name == "json":
             return lambda: {}
@@ -115,6 +119,9 @@ class Dummy:
 
 def _value(annotation, name: str, mode: int, root: Path, settings: Settings, depth: int = 0):
     lower = name.lower()
+    # Frontière native : un PID synthétique doit rester un scalaire Win32 valide.
+    if lower in {"pid", "ppid", "process_id", "parent_pid", "child_pid"} or lower.endswith("_pid"):
+        return 1
     origin = typing.get_origin(annotation)
     args = typing.get_args(annotation)
     if lower in LOOP_SAFETY_PARAMETERS:
@@ -159,13 +166,13 @@ def _value(annotation, name: str, mode: int, root: Path, settings: Settings, dep
         if mode == 0 and type(None) in args:
             return None
         return _value(non_none[0] if non_none else typing.Any, name, mode, root, settings, depth + 1)
-    if origin in (list, typing.List, typing.Sequence, typing.Iterable):
+    if origin in (list, collections.abc.Sequence, collections.abc.Iterable):
         return [] if mode == 0 else [1]
-    if origin in (dict, typing.Dict, typing.Mapping):
+    if origin in (dict, collections.abc.Mapping):
         return {} if mode == 0 else {"BTC": 100.0}
-    if origin in (set, typing.Set):
+    if origin is set:
         return set() if mode == 0 else {"BTC"}
-    if origin in (tuple, typing.Tuple):
+    if origin is tuple:
         return ()
     if annotation is str:
         return "" if mode == 0 else "unit"

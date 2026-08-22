@@ -34,7 +34,7 @@ def acquerir_mutex(nom: str) -> tuple[bool | None, object]:
     retombe alors sur le verrou fichier). Le handle DOIT être gardé vivant tant que l'instance tourne."""
     try:
         import ctypes  # noqa: PLC0415
-        k = ctypes.windll.kernel32                                # noqa: attr — Windows only
+        k = ctypes.windll.kernel32  # Windows only
     except (AttributeError, OSError, ImportError):
         return None, None                                         # pas Windows -> fallback fichier
     handle = k.CreateMutexW(None, True, "Global\\hypersmart_%s" % nom)
