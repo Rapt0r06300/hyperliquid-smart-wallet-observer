@@ -1,0 +1,68 @@
+name: coverage-sharded-diagnostic
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/coverage-sharded-diagnostic.yml'
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+concurrency:
+  group: coverage-sharded-diagnostic-main
+  cancel-in-progress: true
+
+env:
+  PYTHONPATH: src:tools
+  PYTHONUTF8: "1"
+  PYTHONIOENCODING: utf-8
+  HL_ENABLE_MAINNET_EXECUTION: "0"
+  HL_ENABLE_TESTNET_EXECUTION: "0"
+  REAL_MAINNET_TRADING: "false"
+  HYPERSMART_ENABLE_REAL_ORDERS: "0"
+  ENABLE_REAL_ORDERS: "0"
+  COVERAGE_SHARDS: "32"
+  HYPERSMART_COVERAGE_CONTRACT_SHARD: "6"
+
+jobs:
+  diagnose:
+    name: Diagnostic ${{ matrix.label }} shard 6
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - label: typed-long-tail
+            test: tests/test_coverage_closure_typed_long_tail.py
+          - label: typed-large-tail
+            test: tests/test_coverage_closure_typed_large_tail.py
+          - label: branch-fuzzer
+            test: tests/test_coverage_closure_branch_fuzzer.py
+          - label: branch-fuzzer-v2
+            test: tests/test_coverage_closure_branch_fuzzer_v2.py
+          - label: closure-fuzzer
+            test: tests/test_coverage_closure_closure_fuzzer.py
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+          fetch-depth: 2
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: '3.11'
+          cache: pip
+      - name: Installer dépendances exactes
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e '.[dev]'
+          python -m pip install -r requirements-recherche.txt
+          python -m pip install -r requirements-ci-tools.txt
+      - name: Exécuter le contrat isolé
+        run: |
+          python -m pytest -vv -s -p no:cacheprovider \
+            -p tests.coverage_contract_cache_plugin \
+            --tb=long --durations=0 --timeout=180 --timeout-method=signal \
+            "${{ matrix.test }}"
