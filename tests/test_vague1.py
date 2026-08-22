@@ -85,9 +85,9 @@ def test_pnl_des_refus_sans_donnees_reste_calme(tmp_path):
 
 # ------------------------------------------------------- #13 : whitelist markout
 
-def _fill(adresse, mk):
+def _fill(adresse, mk, ts_ms=1_700_000_000_000):
     return {"adresse": adresse, "side": "LONG", "mid_at_fill": 100.0,
-            "mid_forward": 100.0 * (1 + mk / 1e4)}
+            "mid_forward": 100.0 * (1 + mk / 1e4), "coin": "BTC", "ts_ms": ts_ms}
 
 
 def test_whitelist_garde_le_predicteur_et_rejette_le_contrarien(tmp_path):
@@ -96,7 +96,9 @@ def test_whitelist_garde_le_predicteur_et_rejette_le_contrarien(tmp_path):
     # PERDRAIT quand on le suit. Un vrai predicteur a copier doit BATTRE le cout de copie ;
     # +15 brut -> +6 net survit. Le contrarien (-6) reste rejete. (cf. test_copy_follow_cost_gate)
     m = _outil("ecrire_copy_whitelist")
-    fills = [_fill("0xBON", 15.0) for _ in range(40)] + [_fill("0xMAUVAIS", -6.0) for _ in range(40)]
+    fills = [_fill("0xBON", 15.0, 1_700_000_000_000 + i * 1_800_001) for i in range(40)] + [
+        _fill("0xMAUVAIS", -6.0, 1_700_000_000_000 + i * 1_800_001) for i in range(40)
+    ]
     r = m.construire_whitelist(tmp_path, fills=fills)
     assert [g["adresse"] for g in r["gardes"]] == ["0xBON"]
     assert r["rejetes"] == 1
@@ -112,5 +114,8 @@ def test_whitelist_VIDE_verrouille_deny_by_default(tmp_path):
 def test_whitelist_historique_trop_court_NON_garde(tmp_path):
     """Deny-by-default de C12 : 3 fills geniaux ne prouvent rien."""
     m = _outil("ecrire_copy_whitelist")
-    r = m.construire_whitelist(tmp_path, fills=[_fill("0xJEUNE", 50.0) for _ in range(3)])
+    r = m.construire_whitelist(
+        tmp_path,
+        fills=[_fill("0xJEUNE", 50.0, 1_700_000_000_000 + i * 1_800_001) for i in range(3)],
+    )
     assert r["gardes"] == []

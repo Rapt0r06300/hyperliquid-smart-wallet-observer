@@ -34,6 +34,74 @@ SORTIE = Path("runtime") / "data" / "copy_whitelist.json"
 
 BRUTS_DEFAUT = Path("runtime") / "data" / "leader_fills_bruts.jsonl"
 
+# Le markout forward est mesure a 30 minutes par ``construire_fills_forward``. Deux fills du
+# meme wallet/coin/sens separes de quelques minutes partagent donc presque tout leur futur :
+# les compter comme deux observations gonfle artificiellement la confiance statistique.
+# Sans tid/oid/size dans cette source, la preuve minimale defendable est une observation par
+# fenetre de markout non chevauchante.
+FENETRE_INDEPENDANCE_MS = 30 * 60_000
+# Alias conserve pour les consommateurs historiques du rapport JSON.
+FENETRE_METAORDRE_MS = FENETRE_INDEPENDANCE_MS
+
+
+def _bucket_side(value: object) -> str:
+    side = str(value or "").strip().upper()
+    if side in {"BUY", "LONG", "B"}:
+        return "LONG"
+    if side in {"SELL", "SHORT", "S", "A"}:
+        return "SHORT"
+    return ""
+
+
+def regrouper_fills_independants(
+    fills: list[dict], *, fenetre_ms: int = FENETRE_INDEPENDANCE_MS
+) -> tuple[list[dict], int]:
+    """Retourne un representant par fenetre forward non chevauchante.
+
+    Le premier fill horodate de chaque fenetre est retenu deterministiquement. Un fill sans
+    timestamp/coin/sens ne peut pas prouver une observation independante et est donc refuse.
+    """
+
+    valides: list[tuple[int, str, str, dict]] = []
+    invalides = 0
+    for fill in fills:
+        try:
+            ts_ms = int(float(fill.get("ts_ms") or 0))
+        except (TypeError, ValueError, OverflowError):
+            ts_ms = 0
+        coin = str(fill.get("coin") or "").strip().upper()
+        side = _bucket_side(fill.get("side"))
+        if ts_ms <= 0 or not coin or not side:
+            invalides += 1
+            continue
+        valides.append((ts_ms, coin, side, fill))
+
+    episodes: list[dict] = []
+    debut_par_cle: dict[tuple[str, str], int] = {}
+    episode_par_cle: dict[tuple[str, str], dict] = {}
+    for ts_ms, coin, side, fill in sorted(valides, key=lambda row: row[0]):
+        cle = (coin, side)
+        debut = debut_par_cle.get(cle)
+        if debut is None or ts_ms - debut >= int(fenetre_ms):
+            episode = dict(fill)
+            episode.update(
+                {
+                    "coin": coin,
+                    "side": side,
+                    "episode_start_ts_ms": ts_ms,
+                    "episode_end_ts_ms": ts_ms,
+                    "episode_fill_count": 1,
+                }
+            )
+            episodes.append(episode)
+            episode_par_cle[cle] = episode
+            debut_par_cle[cle] = ts_ms
+        else:
+            episode = episode_par_cle[cle]
+            episode["episode_end_ts_ms"] = ts_ms
+            episode["episode_fill_count"] = int(episode["episode_fill_count"]) + 1
+    return episodes, invalides
+
 
 def construire_fills_forward(root: str | Path = RACINE, *, horizon_min: float = 30.0,
                              max_bruts: int = 60_000) -> int:
@@ -164,7 +232,13 @@ def construire_whitelist(root: str | Path = RACINE, *, fills_path: str | Path | 
         a = str(f.get("adresse") or f.get("wallet") or "").strip()
         if a:
             par_leader[a].append(f)
-    verdicts = selectionner_leaders(par_leader)
+    episodes_par_leader: dict[str, list[dict]] = {}
+    invalides_par_leader: dict[str, int] = {}
+    for adresse, lignes_leader in par_leader.items():
+        episodes, invalides = regrouper_fills_independants(lignes_leader)
+        episodes_par_leader[adresse] = episodes
+        invalides_par_leader[adresse] = invalides
+    verdicts = selectionner_leaders(episodes_par_leader)
     # 🔴 22/07 — LA WHITELIST EXIGE DESORMAIS LE NET, PAS LE BRUT.
     # Le rapport du 22/07 listait 10 leaders « prouves » (markout brut > 0) et disait « copy
     # peut suivre CES leaders ». Or suivre = arriver APRES = taker aller-retour = ~9 bps. Sur
@@ -183,21 +257,34 @@ def construire_whitelist(root: str | Path = RACINE, *, fills_path: str | Path | 
                "markout_net_bps": _net(v), "n_evenements": v.n_evenements}
               for v in verdicts if v.predit and (_net(v) or -9e9) > 0]
     predisent = sum(1 for v in verdicts if v.predit)
+    brut_total = sum(len(rows) for rows in par_leader.values())
+    episodes_total = sum(len(rows) for rows in episodes_par_leader.values())
+    invalides_total = sum(invalides_par_leader.values())
     return {"genere_ts": time.time(), "gardes": gardes,
             "cout_de_suivi_bps": COPY_FOLLOW_COST_BPS,
+            "fenetre_metaordre_ms": FENETRE_METAORDRE_MS,
+            "fenetre_independance_ms": FENETRE_INDEPENDANCE_MS,
+            "fills_bruts": brut_total,
+            "episodes_independants": episodes_total,
+            "fills_sans_preuve_independance_rejetes": invalides_total,
             "predisent_brut": predisent,          # combien passent le brut (avant cout)
             "survivent_net": len(gardes),         # combien passent le NET (apres cout de suivi)
             # 21/07 : la PROGRESSION vers la preuve, ecrite dans le fichier (pas seulement a
             # l'ecran) — « 0 garde » sans detail ressemble a une panne ; avec le detail, on
             # voit le copy revenir : qui est evalue, avec combien de fills, ce qui manque.
             "details": [{"adresse": v.adresse, "n_events": v.n_evenements,
+                         "n_fills_bruts": len(par_leader.get(v.adresse, [])),
+                         "n_episodes_independants": len(episodes_par_leader.get(v.adresse, [])),
+                         "n_fills_invalides": invalides_par_leader.get(v.adresse, 0),
                          "markout_moyen_bps": v.markout_moyen_bps,
                          "markout_net_bps": _net(v),
                          "survit_au_cout": bool((_net(v) or -9e9) > 0),
                          "motif": v.motif, "predit": v.predit} for v in verdicts],
             "rejetes": sum(1 for v in verdicts if not v.predit),
             "regle": "markout NET (brut − %.0f bps de cout de suivi taker A/R) > 0 sur assez "
-                     "d'events ; predire ne suffit pas, il faut battre le cout de copie ; "
+                     "d'episodes independants (fenetres forward non chevauchantes de 30 min) ; "
+                     "predire ne suffit "
+                     "pas, il faut battre le cout de copie ; "
                      "liste vide = copy verrouille (deny-by-default)" % COPY_FOLLOW_COST_BPS,
             "real_execution": False}
 

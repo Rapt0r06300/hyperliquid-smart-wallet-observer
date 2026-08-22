@@ -34,8 +34,9 @@ def test_un_markout_absent_ne_fabrique_pas_d_edge():
 def _fills(adresse, markout_bps, n=40, mid=100.0):
     """Fabrique n fills d'un leader dont le markout moyen vaut ~markout_bps (side LONG)."""
     fwd = mid * (1 + markout_bps / 1e4)
-    return [{"adresse": adresse, "side": "B", "mid_at_fill": mid, "mid_forward": fwd}
-            for _ in range(n)]
+    return [{"adresse": adresse, "coin": "BTC", "side": "B", "mid_at_fill": mid,
+             "mid_forward": fwd, "ts_ms": 1_700_000_000_000 + i * 1_800_001}
+            for i in range(n)]
 
 
 def test_un_leader_qui_PREDIT_mais_PERD_apres_cout_est_verrouille(tmp_path):
