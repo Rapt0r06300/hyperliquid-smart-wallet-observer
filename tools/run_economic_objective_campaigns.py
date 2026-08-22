@@ -14,12 +14,14 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
 from hl_observer.backtesting import copy_vault_executable, lead_lag_shadow  # noqa: E402
-from hl_observer.backtesting.cross_venue_certified import (  # noqa: E402
-    SOURCE_MODE as CERTIFIED_CROSS_SOURCE_MODE,
-    load_certified_atomic_series,
-)
 from hl_observer.backtesting.copy_vault_generalization import (  # noqa: E402
     derive_heldout_vault_generalization,
+)
+from hl_observer.backtesting.cross_venue_certified import (  # noqa: E402
+    SOURCE_MODE as CERTIFIED_CROSS_SOURCE_MODE,
+)
+from hl_observer.backtesting.cross_venue_certified import (  # noqa: E402
+    load_certified_atomic_series,
 )
 from hl_observer.backtesting.economic_hypotheses_v3 import (  # noqa: E402
     qualify_copy_vault_train_only,
@@ -31,6 +33,7 @@ from hl_observer.backtesting.lead_lag_certified_clock import (  # noqa: E402
     certified_protocol_signature,
 )
 from hl_observer.backtesting.lead_lag_queue_replay import (  # noqa: E402
+    detect_rolling_shocks,
     replay_lead_lag_queue_maker,
 )
 from hl_observer.backtesting.lead_lag_source_alignment import (  # noqa: E402
@@ -66,7 +69,7 @@ from hl_observer.simulation.economic_collection_plan import (  # noqa: E402
 )
 from hl_observer.simulation.economic_family_scoreboard import export_scoreboards  # noqa: E402
 from hl_observer.simulation.lead_lag_l2_history import (  # noqa: E402
-    load_market_microstructure_history,
+    load_market_microstructure_event_windows,
 )
 from hl_observer.simulation.lead_lag_measured_replay import (  # noqa: E402
     load_runtime_latency_evidence,
@@ -339,14 +342,16 @@ def run_campaigns(
             root,
             aligned_lead_sources,
         )
-        lead_window_start_ms, lead_window_end_ms = _lead_trade_window_ms(lead_tape)
+        lead_shocks = detect_rolling_shocks(
+            (lead_tape.get("ETH") or {}).get("TRADE") or ()
+        )
         l2_history, public_trade_history, microstructure_meta = (
-            load_market_microstructure_history(
+            load_market_microstructure_event_windows(
                 root,
-                start_ms=lead_window_start_ms,
-                end_ms=lead_window_end_ms,
+                [int(shock["trigger_ts_ms"]) for shock in lead_shocks],
             )
         )
+        microstructure_meta["frozen_shock_count"] = len(lead_shocks)
         latency_evidence = load_runtime_latency_evidence(root)
         maker_queue_replay = replay_lead_lag_queue_maker(
             lead_tape,

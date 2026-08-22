@@ -22,9 +22,10 @@ def test_lead_lag_v3_est_branche_sur_tape_l2_trades_et_latence_mesuree() -> None
     assert "replay_lead_lag_queue_maker" in text
     assert "select_aligned_bbo_sources" in text
     assert "load_aligned_binance_trade_tape" in text
-    assert "_lead_trade_window_ms(lead_tape)" in text
-    assert "start_ms=lead_window_start_ms" in text
-    assert "end_ms=lead_window_end_ms" in text
+    assert "detect_rolling_shocks" in text
+    assert "load_market_microstructure_event_windows" in text
+    assert '[int(shock["trigger_ts_ms"]) for shock in lead_shocks]' in text
+    assert 'microstructure_meta["frozen_shock_count"]' in text
     assert "load_runtime_latency_evidence(root)" in text
     assert 'lead_raw["maker_queue_candidates"]' in text
     assert 'lead_raw["maker_queue_replay"]' in text

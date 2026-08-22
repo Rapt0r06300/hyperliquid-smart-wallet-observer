@@ -54,9 +54,7 @@ def _overlaps(
     source_start, source_end = source_range
     if start_ms is not None and source_end < int(start_ms):
         return False
-    if end_ms is not None and source_start > int(end_ms):
-        return False
-    return True
+    return not (end_ms is not None and source_start > int(end_ms))
 
 
 def _source_sort_key(path: Path) -> tuple[int, int, int, str, str]:
@@ -377,10 +375,13 @@ def load_market_microstructure_history(
             if max_lines > 0 and lines_read > max_lines:
                 stopped_reason = "MAX_LINES_REACHED"
                 break
-            if time_budget_s > 0 and lines_read % 10_000 == 0:
-                if time.monotonic() - started >= time_budget_s:
-                    stopped_reason = "TIME_BUDGET_REACHED"
-                    break
+            if (
+                time_budget_s > 0
+                and lines_read % 10_000 == 0
+                and time.monotonic() - started >= time_budget_s
+            ):
+                stopped_reason = "TIME_BUDGET_REACHED"
+                break
             if '"l2Book"' not in line and '"trades"' not in line:
                 continue
             try:
@@ -454,6 +455,139 @@ def load_market_microstructure_history(
     }
 
 
+def _merge_event_windows(
+    event_ts_ms: Sequence[int],
+    *,
+    before_ms: int,
+    after_ms: int,
+) -> list[tuple[int, int]]:
+    windows: list[tuple[int, int]] = []
+    for raw_timestamp in event_ts_ms:
+        try:
+            timestamp_ms = int(raw_timestamp)
+        except (TypeError, ValueError, OverflowError):
+            continue
+        if timestamp_ms < 1_500_000_000_000:
+            continue
+        windows.append(
+            (
+                timestamp_ms - max(0, int(before_ms)),
+                timestamp_ms + max(0, int(after_ms)),
+            )
+        )
+    windows.sort()
+
+    merged: list[tuple[int, int]] = []
+    for start_ms, end_ms in windows:
+        if not merged or start_ms > merged[-1][1] + 1:
+            merged.append((start_ms, end_ms))
+            continue
+        merged[-1] = (merged[-1][0], max(merged[-1][1], end_ms))
+    return merged
+
+
+def load_market_microstructure_event_windows(
+    root: str | Path,
+    event_ts_ms: Sequence[int],
+    *,
+    before_ms: int = 1_000,
+    after_ms: int = 15_000,
+    max_files_per_window: int = DEFAULT_MAX_FILES,
+    max_lines_per_window: int = DEFAULT_MAX_LINES,
+    time_budget_s_per_window: float = DEFAULT_TIME_BUDGET_S,
+) -> tuple[
+    dict[str, list[dict[str, Any]]],
+    dict[str, list[dict[str, Any]]],
+    dict[str, Any],
+]:
+    """Load sparse causal windows without one distant event starving another.
+
+    A broad lead tape may span weeks while actionable shocks are sparse.  A
+    single global line budget can therefore stop in an early shard and report
+    later execution evidence as absent.  Each merged causal window receives an
+    independent bounded scan; results are then deduplicated deterministically.
+    """
+
+    requested_events = list(event_ts_ms)
+    windows = _merge_event_windows(
+        requested_events,
+        before_ms=before_ms,
+        after_ms=after_ms,
+    )
+    books: dict[str, list[dict[str, Any]]] = defaultdict(list)
+    trades: dict[str, list[dict[str, Any]]] = defaultdict(list)
+    seen_books: set[str] = set()
+    seen_trades: set[str] = set()
+    per_window: list[dict[str, Any]] = []
+    duplicate_books = duplicate_trades = 0
+
+    for start_ms, end_ms in windows:
+        window_books, window_trades, window_meta = load_market_microstructure_history(
+            root,
+            max_files=max_files_per_window,
+            max_lines=max_lines_per_window,
+            time_budget_s=time_budget_s_per_window,
+            start_ms=start_ms,
+            end_ms=end_ms,
+        )
+        per_window.append(window_meta)
+        for coin, rows in window_books.items():
+            for row in rows:
+                identity = str(row.get("raw_sha256") or "") or (
+                    f"{coin}|{row.get('ts_ms')}|{row.get('bid')}|{row.get('ask')}"
+                )
+                if identity in seen_books:
+                    duplicate_books += 1
+                    continue
+                seen_books.add(identity)
+                books[str(coin)].append(row)
+        for coin, rows in window_trades.items():
+            for row in rows:
+                identity = str(row.get("trade_id") or "")
+                if identity in seen_trades:
+                    duplicate_trades += 1
+                    continue
+                seen_trades.add(identity)
+                trades[str(coin)].append(row)
+
+    book_result = dict(books)
+    trade_result = dict(trades)
+    for rows in (*book_result.values(), *trade_result.values()):
+        rows.sort(key=lambda row: int(row["ts_ms"]))
+    child_stops = sorted(
+        {
+            str(meta.get("stopped_reason") or "UNKNOWN")
+            for meta in per_window
+            if str(meta.get("stopped_reason") or "UNKNOWN") != "COMPLETED"
+        }
+    )
+    return book_result, trade_result, {
+        "schema_version": "hypersmart.lead_lag_microstructure_event_windows.v1",
+        "requested_event_count": len(requested_events),
+        "valid_event_count": len(
+            [timestamp for timestamp in requested_events if _positive(timestamp)]
+        ),
+        "merged_window_count": len(windows),
+        "windows": [
+            {"start_ms": start_ms, "end_ms": end_ms} for start_ms, end_ms in windows
+        ],
+        "per_window": per_window,
+        "sources_read": sum(int(meta.get("sources_read") or 0) for meta in per_window),
+        "lines_read": sum(int(meta.get("lines_read") or 0) for meta in per_window),
+        "l2_rows": sum(len(rows) for rows in book_result.values()),
+        "trade_rows": sum(len(rows) for rows in trade_result.values()),
+        "duplicate_l2_rejected_after_merge": duplicate_books,
+        "duplicate_trades_rejected_after_merge": duplicate_trades,
+        "stopped_reason": (
+            "COMPLETED" if not child_stops else "PARTIAL:" + "|".join(child_stops)
+        ),
+        "source_selection_policy": "ONLY_SHARDS_OVERLAPPING_CAUSAL_EVENT_WINDOWS",
+        "clock": "DURABLE_OBSERVABLE_MAX_RECEIVE_WRITE_MS",
+        "read_only": True,
+        "real_execution": False,
+    }
+
+
 def load_l2_history(
     root: str | Path,
     *,
@@ -487,10 +621,13 @@ def load_l2_history(
             if max_lines > 0 and lines_read > max_lines:
                 stopped_reason = "MAX_LINES_REACHED"
                 break
-            if time_budget_s > 0 and lines_read % 10_000 == 0:
-                if time.monotonic() - started >= time_budget_s:
-                    stopped_reason = "TIME_BUDGET_REACHED"
-                    break
+            if (
+                time_budget_s > 0
+                and lines_read % 10_000 == 0
+                and time.monotonic() - started >= time_budget_s
+            ):
+                stopped_reason = "TIME_BUDGET_REACHED"
+                break
             if '"l2Book"' not in line:
                 continue
             try:
@@ -551,6 +688,7 @@ def load_l2_history(
 __all__ = [
     "discover_l2_sources",
     "load_l2_history",
+    "load_market_microstructure_event_windows",
     "load_market_microstructure_history",
     "public_trades_from_tick",
     "snapshot_from_tick",

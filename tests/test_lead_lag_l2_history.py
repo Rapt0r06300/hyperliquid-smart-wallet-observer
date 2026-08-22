@@ -7,6 +7,7 @@ from pathlib import Path
 from hl_observer.simulation.lead_lag_l2_history import (
     discover_l2_sources,
     load_l2_history,
+    load_market_microstructure_event_windows,
     load_market_microstructure_history,
     public_trades_from_tick,
     snapshot_from_tick,
@@ -267,3 +268,38 @@ def test_windowed_loader_filters_current_rows_outside_requested_range(
 
     assert [row["raw_sha256"] for row in history["ETH"]] == ["inside"]
     assert meta["rows_outside_window"] == 2
+
+
+def test_sparse_event_windows_each_receive_an_independent_line_budget(
+    tmp_path: Path,
+) -> None:
+    directory = tmp_path / "runtime" / "data" / "market_ticks" / "shards"
+    first = 1_786_552_000_000
+    second = first + 7 * 24 * 60 * 60 * 1_000
+    for index, timestamp in enumerate((first, second), start=1):
+        _write(
+            directory
+            / f"hyperliquid_market_ticks.{timestamp - 20}-{timestamp + 20}.{index}.jsonl.gz",
+            [
+                _record(ts_ms=timestamp, raw_sha=f"book-{index}"),
+                _trade_record(ts_ms=timestamp + 1, trade_id=index),
+            ],
+        )
+
+    books, trades, meta = load_market_microstructure_event_windows(
+        tmp_path,
+        [first, second],
+        before_ms=10,
+        after_ms=20,
+        max_lines_per_window=2,
+        time_budget_s_per_window=0,
+    )
+
+    assert [row["raw_sha256"] for row in books["ETH"]] == ["book-1", "book-2"]
+    assert [row["trade_id"] for row in trades["ETH"]] == ["1", "2"]
+    assert meta["merged_window_count"] == 2
+    assert meta["lines_read"] == 4
+    assert meta["l2_rows"] == 2
+    assert meta["trade_rows"] == 2
+    assert meta["stopped_reason"] == "COMPLETED"
+    assert all(item["stopped_reason"] == "COMPLETED" for item in meta["per_window"])
