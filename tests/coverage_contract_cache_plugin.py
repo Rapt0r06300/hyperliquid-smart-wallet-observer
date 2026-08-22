@@ -84,12 +84,11 @@ def _memoize_function_only(original: Callable):
 
 
 def _bounded_invoke(original: Callable, seconds: float = 0.5):
-    """Bound one generic invocation while preserving pytest-timeout's deadline.
+    """Bound one synthetic invocation without corrupting pytest's outer timer.
 
-    Every synthetic call is still attempted. A call that blocks in a wait/join or
-    an opaque library boundary is interrupted after a short POSIX deadline. The
-    pre-existing SIGALRM timer is restored with elapsed wall time subtracted, so
-    this helper never extends the outer pytest timeout.
+    Every candidate is still attempted. If pytest-timeout already owns an earlier
+    SIGALRM deadline, that deadline wins. An expired outer timer is never re-armed
+    with a tiny residual value, which avoids stray SIGALRM during coverage teardown.
     """
     if not hasattr(signal, "setitimer"):
         return original
@@ -99,23 +98,59 @@ def _bounded_invoke(original: Callable, seconds: float = 0.5):
         previous_handler = signal.getsignal(signal.SIGALRM)
         previous_remaining, previous_interval = signal.getitimer(signal.ITIMER_REAL)
         started = time.monotonic()
+        outer_wins = previous_remaining > 0.0 and previous_remaining <= seconds
+        armed_for = previous_remaining if outer_wins else seconds
 
-        def _raise_timeout(_signum, _frame):
+        def _raise_timeout(signum, frame):
+            if outer_wins and callable(previous_handler):
+                return previous_handler(signum, frame)
             raise _CoverageContractCallTimeout(
                 f"generic coverage invocation exceeded {seconds:.3f}s"
             )
 
         signal.signal(signal.SIGALRM, _raise_timeout)
-        signal.setitimer(signal.ITIMER_REAL, seconds)
+        signal.setitimer(signal.ITIMER_REAL, armed_for)
         try:
             return original(*args, **kwargs)
         finally:
             signal.setitimer(signal.ITIMER_REAL, 0.0)
             signal.signal(signal.SIGALRM, previous_handler)
             if previous_remaining > 0.0:
-                elapsed = time.monotonic() - started
-                remaining = max(1e-6, previous_remaining - elapsed)
-                signal.setitimer(signal.ITIMER_REAL, remaining, previous_interval)
+                remaining = previous_remaining - (time.monotonic() - started)
+                if remaining > 0.0:
+                    signal.setitimer(signal.ITIMER_REAL, remaining, previous_interval)
+
+    return wrapped
+
+
+def _offline_guards_without_workers(original: Callable):
+    """Keep synthetic offline coverage calls finite without spawning real workers."""
+
+    @wraps(original)
+    def wrapped(monkeypatch):
+        original(monkeypatch)
+        import queue
+        import threading
+
+        original_queue_get = queue.Queue.get
+
+        monkeypatch.setattr(threading.Thread, "start", lambda self: None)
+        monkeypatch.setattr(
+            threading.Thread,
+            "join",
+            lambda self, *_args, **_kwargs: None,
+        )
+        monkeypatch.setattr(
+            threading.Event,
+            "wait",
+            lambda self, timeout=None: self.is_set(),
+        )
+
+        def _queue_get_nowait(self, block=True, timeout=None):
+            del block, timeout
+            return original_queue_get(self, block=False)
+
+        monkeypatch.setattr(queue.Queue, "get", _queue_get_nowait)
 
     return wrapped
 
@@ -130,16 +165,17 @@ def _install_once(module, name: str, factory: Callable, marker: str) -> None:
 
 
 def pytest_configure(config) -> None:
-    """Cache static analysis and bound all generic synthetic coverage invocations.
+    """Cache static analysis and bound generic synthetic coverage invocations.
 
     No production callable, generated input, test case, branch, module, assertion,
-    or coverage gate is skipped. Only immutable analysis is cached; every execution
-    candidate is still attempted under a per-call deadline.
+    or coverage gate is skipped. Immutable analysis is cached and synthetic runtime
+    side effects are kept in-process and finite; every execution candidate remains.
     """
     del config
     from tests import coverage_contract_harness as harness
     from tests import test_coverage_closure_branch_fuzzer as base
     from tests import test_coverage_closure_branch_fuzzer_v2 as v2
+    from tests import test_coverage_closure_closure_fuzzer as closure
     from tests import test_coverage_closure_dynamic_edges as dynamic
 
     _install_once(
@@ -160,6 +196,14 @@ def pytest_configure(config) -> None:
         _bounded_invoke,
         "_coverage_controlled_invoke_bounded",
     )
+
+    for module in (dynamic, base, v2, closure):
+        _install_once(
+            module,
+            "_install_offline_guards",
+            _offline_guards_without_workers,
+            "_coverage_offline_workers_guarded",
+        )
 
     for module in (dynamic, base, v2):
         _install_once(module, "_tree", _memoize_tree, "_coverage_ast_cached")
