@@ -86,12 +86,10 @@ def _memoize_function_only(original: Callable):
 def _bounded_invoke(original: Callable, seconds: float = 0.5):
     """Bound one generic invocation while preserving pytest-timeout's deadline.
 
-    The typed contracts already require POSIX ``setitimer``. A synthetic function
-    may still block without containing a visible ``while`` loop (for example in a
-    library wait/join). Every invocation is therefore attempted exactly as before,
-    but one call cannot monopolize the whole shard. The pre-existing SIGALRM timer
-    is restored with elapsed wall time subtracted, so this helper never extends the
-    outer pytest timeout.
+    Every synthetic call is still attempted. A call that blocks in a wait/join or
+    an opaque library boundary is interrupted after a short POSIX deadline. The
+    pre-existing SIGALRM timer is restored with elapsed wall time subtracted, so
+    this helper never extends the outer pytest timeout.
     """
     if not hasattr(signal, "setitimer"):
         return original
@@ -132,12 +130,11 @@ def _install_once(module, name: str, factory: Callable, marker: str) -> None:
 
 
 def pytest_configure(config) -> None:
-    """Remove repeated static-analysis work and bound synthetic coverage calls.
+    """Cache static analysis and bound all generic synthetic coverage invocations.
 
     No production callable, generated input, test case, branch, module, assertion,
-    or coverage gate is skipped. Immutable discovery/AST-analysis results are reused
-    inside one pytest process, and every typed-contract invocation is still attempted
-    but is prevented from blocking the entire shard indefinitely.
+    or coverage gate is skipped. Only immutable analysis is cached; every execution
+    candidate is still attempted under a per-call deadline.
     """
     del config
     from tests import coverage_contract_harness as harness
@@ -151,6 +148,18 @@ def pytest_configure(config) -> None:
         _bounded_invoke,
         "_coverage_invocation_bounded",
     )
+    _install_once(
+        base,
+        "_controlled",
+        _bounded_invoke,
+        "_coverage_controlled_bounded",
+    )
+    _install_once(
+        v2,
+        "_controlled_invoke",
+        _bounded_invoke,
+        "_coverage_controlled_invoke_bounded",
+    )
 
     for module in (dynamic, base, v2):
         _install_once(module, "_tree", _memoize_tree, "_coverage_ast_cached")
@@ -161,8 +170,6 @@ def pytest_configure(config) -> None:
             "_coverage_modules_cached",
         )
 
-    # Base fuzzer: these helpers only inspect the immutable AST. They are called
-    # repeatedly for every generated value of the same callable/parameter.
     for helper in (
         "_comparison_values",
         "_mapping_keys",
@@ -181,9 +188,6 @@ def pytest_configure(config) -> None:
         "_coverage_cached_environment_names",
     )
 
-    # V2 performs deeper literal/pairwise analysis over the same AST. Cache only
-    # the pure structural queries; actual invocations and generated candidates are
-    # deliberately not cached so the measured execution remains identical.
     for helper in (
         "_comparison_literals",
         "_string_method_literals",
