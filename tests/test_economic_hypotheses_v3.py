@@ -7,6 +7,7 @@ from hl_observer.backtesting.economic_hypotheses_v3 import (
     qualify_cross_venue_train_only,
     qualify_lead_lag_queue_maker_train_only,
 )
+from hl_observer.backtesting.cross_venue_certified import SOURCE_MODE as CERTIFIED_CROSS_SOURCE_MODE
 
 
 def _copy_trade(
@@ -209,13 +210,13 @@ def test_cross_v3_selection_is_train_only() -> None:
     train = _robust_cross_train()
     baseline = qualify_cross_venue_train_only(
         train,
-        source_mode="ATOMIC_FOUR_SIDE_BOOK",
+        source_mode=CERTIFIED_CROSS_SOURCE_MODE,
     )
     changed = deepcopy(train)
     changed.extend(_cross_trade(coin="SAGA", net_bps=50_000.0, segment="oos") for _ in range(20))
     after = qualify_cross_venue_train_only(
         changed,
-        source_mode="ATOMIC_FOUR_SIDE_BOOK",
+        source_mode=CERTIFIED_CROSS_SOURCE_MODE,
     )
     assert baseline["status"] == "TRAIN_ELIGIBLE"
     assert after["selected"] == baseline["selected"]

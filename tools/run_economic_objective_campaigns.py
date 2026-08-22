@@ -14,6 +14,10 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
 from hl_observer.backtesting import copy_vault_executable, lead_lag_shadow  # noqa: E402
+from hl_observer.backtesting.cross_venue_certified import (  # noqa: E402
+    SOURCE_MODE as CERTIFIED_CROSS_SOURCE_MODE,
+    load_certified_atomic_series,
+)
 from hl_observer.backtesting.copy_vault_generalization import (  # noqa: E402
     derive_heldout_vault_generalization,
 )
@@ -358,7 +362,7 @@ def run_campaigns(
             "runtime/data/carnet_venues.jsonl",
         ),
     )
-    series, cross_depth, cross_meta = cross_tool.collecter_carnet_series(root)
+    series, cross_depth, cross_meta = load_certified_atomic_series(root)
     cross_meta["legacy_bbo_budget_s_unused"] = max(0.0, cross_budget_s)
     cross_meta["legacy_current_only_unused"] = bool(cross_current_only)
     if dataset_mode:
@@ -369,9 +373,9 @@ def run_campaigns(
     cross_depth_meta = {
         "source": cross_meta.get("source"),
         "source_mode": cross_meta.get("source_mode"),
-        "valid_snapshots": cross_meta.get("valid_snapshots"),
+        "valid_snapshots": cross_meta.get("certified_snapshots"),
         "coins": cross_meta.get("coins"),
-        "capacity_definition": "minimum USD capacity across HL/BIN bid/ask",
+        "capacity_definition": cross_meta.get("capacity_definition"),
     }
     cross_protocol = cross_tool.walk_forward_protocol_signature()
     cross_freeze = find_oldest_parameter_freeze(
@@ -408,7 +412,7 @@ def run_campaigns(
             "notional_usd": cross_tool.NOTIONAL_USD,
             "depth_freshness_ms": cross_tool.DEPTH_FRESHNESS_MS,
             "max_observation_gap_ms": cross_tool.MAX_OBSERVATION_GAP_MS,
-            "source_mode": "ATOMIC_FOUR_SIDE_BOOK",
+            "source_mode": CERTIFIED_CROSS_SOURCE_MODE,
         }
         cross_freeze = freeze_train_selected_parameters(
             root,

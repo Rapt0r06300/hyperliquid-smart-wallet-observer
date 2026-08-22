@@ -14,6 +14,8 @@ from collections import defaultdict
 from collections.abc import Iterable, Mapping, Sequence
 from typing import Any
 
+from hl_observer.backtesting.cross_venue_certified import SOURCE_MODE as CERTIFIED_CROSS_SOURCE_MODE
+
 from hl_observer.backtesting.queue_model import rejouer
 
 SCHEMA_VERSION = "hypersmart.economic_hypotheses_v3.v1"
@@ -357,7 +359,7 @@ def qualify_cross_venue_train_only(
 
     rows = [dict(row) for row in trades if isinstance(row, Mapping)]
     result = _base_result(CROSS_MECHANISM, rows)
-    atomic_source = source_mode == "ATOMIC_FOUR_SIDE_BOOK"
+    atomic_source = source_mode == CERTIFIED_CROSS_SOURCE_MODE
     grouped: dict[str, list[dict[str, Any]]] = defaultdict(list)
     invalid_train_rows = 0
     for row in rows:

@@ -32,6 +32,13 @@ def test_lead_lag_v3_est_branche_sur_tape_l2_trades_et_latence_mesuree() -> None
     )
 
 
+def test_cross_venue_utilise_uniquement_le_chargeur_atomique_certifie() -> None:
+    text = RUNNER.read_text(encoding="utf-8", errors="replace")
+    assert "load_certified_atomic_series(root)" in text
+    assert "cross_tool.collecter_carnet_series(root)" not in text
+    assert '"source_mode": CERTIFIED_CROSS_SOURCE_MODE' in text
+
+
 def test_campagnes_dataset_restent_paper_et_sans_exchange() -> None:
     text = RUNNER.read_text(encoding="utf-8", errors="replace")
     assert "assert_execution_disabled()" in text

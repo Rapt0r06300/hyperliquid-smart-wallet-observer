@@ -22,6 +22,11 @@ from pathlib import Path
 RACINE = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(RACINE / "src"))
 
+from hl_observer.backtesting.cross_venue_certified import (  # noqa: E402
+    FOUR_FILL_CONTRACT_VERSION,
+    SOURCE_MODE as CERTIFIED_CROSS_SOURCE_MODE,
+)
+
 SEUIL_ENTREE_BPS = 15.0
 SEUIL_SORTIE_BPS = 3.0
 STOP_AGGRAVATION_BPS = 25.0
@@ -35,7 +40,7 @@ DEPTH_FRESHNESS_MS = 3000.0
 MIN_EXECUTABLE_EDGE_BPS = 0.0
 MAX_OBSERVATION_GAP_MS = 300_000.0
 
-CROSS_WALK_FORWARD_PROTOCOL = "cross_atomic_depth_walk_forward_v2_no_failed_freeze"
+CROSS_WALK_FORWARD_PROTOCOL = "cross_certified_atomic_bbo_walk_forward_v3"
 CROSS_TRAIN_FRACTION = 0.60
 CROSS_VALIDATION_FRACTION = 0.20
 CROSS_PURGE_MS = HORIZON_MAX_S * 1000.0
@@ -540,6 +545,9 @@ def walk_forward_protocol_signature() -> dict:
         "validation_fraction": CROSS_VALIDATION_FRACTION,
         "purge_ms": CROSS_PURGE_MS,
         "minimum_train_trades": CROSS_MIN_TRAIN_TRADES,
+        "source_mode": CERTIFIED_CROSS_SOURCE_MODE,
+        "four_fill_contract_version": FOUR_FILL_CONTRACT_VERSION,
+        "capacity_contract": "minimum_four_bbo_top_levels_usd",
     }
 
 

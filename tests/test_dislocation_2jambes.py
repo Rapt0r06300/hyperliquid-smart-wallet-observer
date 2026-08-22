@@ -25,6 +25,14 @@ def test_net_positif_quand_le_basis_converge():
     # avec les frais réels (16 bps), un petit basis de ~20 bps ne couvre pas forcément : on vérifie le signe seul
 
 
+def test_signature_walk_forward_invalide_les_freezes_legacy_non_certifies():
+    signature = BT.walk_forward_protocol_signature()
+    assert signature["calibration_protocol"] == "cross_certified_atomic_bbo_walk_forward_v3"
+    assert signature["source_mode"] == "CERTIFIED_ATOMIC_FOUR_SIDE_BOOK_V2"
+    assert signature["four_fill_contract_version"] == "cross_four_fill_aon_v1"
+    assert signature["capacity_contract"] == "minimum_four_bbo_top_levels_usd"
+
+
 def test_basis_nul_ne_rapporte_que_les_couts():
     q = (0, 100.0, 100.02)
     net = BT._net_trade_bps(q, (0, 100.0, 100.02), q, (0, 100.0, 100.02), sens=+1, fees_ar_bps=16.0)

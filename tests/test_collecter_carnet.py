@@ -4,6 +4,7 @@ from __future__ import annotations
 import importlib.util
 import json
 from pathlib import Path
+import threading
 
 RACINE = Path(__file__).resolve().parents[1]
 
@@ -73,7 +74,28 @@ def test_une_passe_ecrit_provenance_mapping_top5_et_skew(tmp_path):
     assert symbols == ["BTCUSDT"] and row["coin"] == "BTC" and row["binance_symbol"] == "BTCUSDT"
     assert row["instrument_mapping_exact"] is True and row["read_only"] is True and row["real_execution"] is False
     assert len(row["hl_bids5"]) == len(row["bin_asks5"]) == 5
-    assert row["hl_received_at_ms"] <= row["bin_received_at_ms"] and row["venue_skew_ms"] >= 0 and row["observation_id"]
+    assert row["hl_received_at_ms"] > 0 and row["bin_received_at_ms"] > 0
+    assert row["venue_skew_ms"] >= 0 and row["observation_id"]
+    assert row["atomic_snapshot_certified"] is True
+
+
+def test_une_passe_lit_les_deux_venues_en_parallele(tmp_path):
+    barrier = threading.Barrier(2, timeout=1.0)
+    hl = {"levels": [[{"px": "100.0", "sz": "5"}], [{"px": "100.2", "sz": "5"}]]}
+    bn = {"bids": [["99.5", "5"]], "asks": [["99.7", "5"]]}
+
+    def post_hl(coin, **kwargs):
+        barrier.wait()
+        return hl
+
+    def get_binance(symbol, **kwargs):
+        barrier.wait()
+        return bn
+
+    assert K.une_passe(tmp_path, ["BTC"], post_hl=post_hl, get_binance=get_binance) == 1
+    row = json.loads((tmp_path / K.SORTIE).read_text(encoding="utf-8").strip())
+    assert row["source_mode"] == K.CERTIFIED_SOURCE_MODE
+    assert row["venue_skew_ms"] <= K.MAX_VENUE_SKEW_MS
 
 
 def test_deux_observations_memes_prix_ne_sont_plus_ecrasees(tmp_path):

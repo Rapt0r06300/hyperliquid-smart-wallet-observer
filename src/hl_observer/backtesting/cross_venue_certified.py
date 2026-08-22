@@ -142,12 +142,19 @@ def certify_atomic_row(row: Mapping[str, Any], *, max_skew_ms: float = MAX_VENUE
         hl_received is not None or bin_received is not None
     ) else None
     capacity_values: list[float] = []
+    top_level_capacity_values: list[float] = []
     for venue in ("HL", "BIN"):
         for side in ("bids", "asks"):
             levels = books[venue][side]
             if levels:
                 capacity_values.append(sum(price * size for price, size in levels))
+                top_level_capacity_values.append(levels[0][0] * levels[0][1])
     min_capacity = min(capacity_values) if len(capacity_values) == 4 else None
+    min_top_level_capacity = (
+        min(top_level_capacity_values)
+        if len(top_level_capacity_values) == 4
+        else None
+    )
     declared_capacity = _number(row.get("taille_min_usd"))
     if min_capacity is None or min_capacity <= 0:
         reasons.append("FOUR_SIDE_DEPTH_MISSING")
@@ -169,6 +176,11 @@ def certify_atomic_row(row: Mapping[str, Any], *, max_skew_ms: float = MAX_VENUE
         "bin_received_at_ms": bin_received,
         "books": books,
         "minimum_four_side_capacity_usd": round(min_capacity, 8) if min_capacity is not None else None,
+        "minimum_top_level_capacity_usd": (
+            round(min_top_level_capacity, 8)
+            if min_top_level_capacity is not None
+            else None
+        ),
         "four_fill_contract_version": FOUR_FILL_CONTRACT_VERSION,
         "paper_read_only": True,
         "real_execution": False,
@@ -219,7 +231,10 @@ def load_certified_atomic_series(root: str | Path, *, coins: Sequence[str] | Non
                 books = proof["books"]
                 hb, ha = books["HL"]["bids"][0][0], books["HL"]["asks"][0][0]
                 bb, ba = books["BIN"]["bids"][0][0], books["BIN"]["asks"][0][0]
-                capacity = float(proof["minimum_four_side_capacity_usd"])
+                # The replay settles at the recorded BBO.  Only liquidity on
+                # the first level proves that this exact price can fill the
+                # complete notional without inventing incremental slippage.
+                capacity = float(proof["minimum_top_level_capacity_usd"])
                 series.setdefault(coin, []).append((ts, "ATOMIC", hb, ha, bb, ba))
                 depth.setdefault(coin, []).append((ts, capacity))
                 counters["certified_snapshots"] += 1
@@ -236,6 +251,7 @@ def load_certified_atomic_series(root: str | Path, *, coins: Sequence[str] | Non
         "skew_verified": counters["certified_snapshots"] > 0,
         "max_venue_skew_ms": float(max_skew_ms),
         "four_fill_contract_version": FOUR_FILL_CONTRACT_VERSION,
+        "capacity_definition": "minimum USD capacity on the four BBO top levels",
         "legacy_rows_never_upgraded": True,
         "paper_read_only": True,
         "real_execution": False,

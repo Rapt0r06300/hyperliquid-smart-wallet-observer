@@ -38,7 +38,10 @@ def _exit(*, hl_ms=2000.0, bin_ms=2040.0, size=10.0):
 
 
 def test_certification_refuse_mapping_ou_skew_non_prouves():
-    assert certify_atomic_row(_row())["ok"] is True
+    proof = certify_atomic_row(_row())
+    assert proof["ok"] is True
+    assert proof["minimum_top_level_capacity_usd"] == 999.0
+    assert proof["minimum_four_side_capacity_usd"] > proof["minimum_top_level_capacity_usd"]
     assert certify_atomic_row(_row(coin="PEPE", symbol="PEPEUSDT"))["ok"] is False
     assert certify_atomic_row(_row(hl_ms=1000, bin_ms=1500))["ok"] is False
 
@@ -74,5 +77,7 @@ def test_loader_ne_requalifie_jamais_les_anciennes_lignes(tmp_path: Path):
     target.write_text(json.dumps(legacy) + "\n" + json.dumps(certified) + "\n", encoding="utf-8")
     series, depth, meta = load_certified_atomic_series(tmp_path)
     assert len(series["BTC"]) == 1 and len(depth["BTC"]) == 1
+    assert depth["BTC"][0][1] == 999.0
     assert meta["source_mode"] == SOURCE_MODE and meta["certified_snapshots"] == 1
+    assert meta["capacity_definition"] == "minimum USD capacity on the four BBO top levels"
     assert meta["legacy_uncertified_rows_rejected"] == 1 and meta["legacy_rows_never_upgraded"] is True

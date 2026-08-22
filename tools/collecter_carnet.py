@@ -7,6 +7,7 @@ Only exact mapping + bounded measured skew can later certify economic evidence.
 from __future__ import annotations
 
 import argparse
+from concurrent.futures import ThreadPoolExecutor
 import hashlib
 import json
 import sys
@@ -188,21 +189,31 @@ def _get_binance(symbol_or_coin: str, *, timeout_s: float = 8.0) -> Any:
         return json.loads(response.read().decode("utf-8"))
 
 
+def _fetch_with_receive_timestamp(fetch, argument: str) -> tuple[Any, float]:
+    """Timestamp a venue response immediately inside its read-only worker."""
+
+    payload = fetch(argument)
+    return payload, time.time_ns() / 1_000_000.0
+
+
 def une_passe(root: Path, coins: list[str], *, limiteur: CF.Limiteur | None = None, cache: CF.CacheDedup | None = None, post_hl=_post_hl, get_binance=_get_binance) -> int:
     limiteur = limiteur if limiteur is not None else CF.Limiteur(0.15); raw_rows: list[dict] = []
-    for coin in coins:
-        limiteur.attente(); symbol = binance_perp_symbol(coin)
-        if symbol is None:
-            continue
-        try:
-            hl_raw = post_hl(coin); hl_received_at_ms = time.time_ns() / 1_000_000.0
-            bin_raw = get_binance(symbol); bin_received_at_ms = time.time_ns() / 1_000_000.0
-            hl = parser_book_hl(hl_raw); bn = parser_depth_binance(bin_raw)
-        except (urllib.error.URLError, OSError, ValueError, TimeoutError):
-            continue
-        if not hl or not bn:
-            continue
-        raw_rows.append(ligne_carnet(coin, hl, bn, binance_symbol=symbol, hl_bids5=_levels_hl(hl_raw, 0), hl_asks5=_levels_hl(hl_raw, 1), bin_bids5=_levels_binance(bin_raw, "bids"), bin_asks5=_levels_binance(bin_raw, "asks"), hl_received_at_ms=hl_received_at_ms, bin_received_at_ms=bin_received_at_ms))
+    with ThreadPoolExecutor(max_workers=2, thread_name_prefix="cross-venue-readonly") as pool:
+        for coin in coins:
+            limiteur.attente(); symbol = binance_perp_symbol(coin)
+            if symbol is None:
+                continue
+            hl_future = pool.submit(_fetch_with_receive_timestamp, post_hl, coin)
+            bin_future = pool.submit(_fetch_with_receive_timestamp, get_binance, symbol)
+            try:
+                hl_raw, hl_received_at_ms = hl_future.result()
+                bin_raw, bin_received_at_ms = bin_future.result()
+                hl = parser_book_hl(hl_raw); bn = parser_depth_binance(bin_raw)
+            except (urllib.error.URLError, OSError, ValueError, TimeoutError):
+                continue
+            if not hl or not bn:
+                continue
+            raw_rows.append(ligne_carnet(coin, hl, bn, binance_symbol=symbol, hl_bids5=_levels_hl(hl_raw, 0), hl_asks5=_levels_hl(hl_raw, 1), bin_bids5=_levels_binance(bin_raw, "bids"), bin_asks5=_levels_binance(bin_raw, "asks"), hl_received_at_ms=hl_received_at_ms, bin_received_at_ms=bin_received_at_ms))
     clean = CF.collecter_proprement(raw_rows, source="carnet_hl_bin", champs_cle=("observation_id",), cache=cache, champs_prix=("hl_bid", "hl_ask", "bin_bid", "bin_ask"), ecart_bps_max=ECART_PLAUSIBLE_MAX_BPS, champ_ecart="ecart_executable_max_bps")
     if clean:
         CF.append_jsonl(Path(root) / SORTIE, clean)
