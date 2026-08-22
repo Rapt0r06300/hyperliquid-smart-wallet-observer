@@ -40,7 +40,7 @@ DEPTH_FRESHNESS_MS = 3000.0
 MIN_EXECUTABLE_EDGE_BPS = 0.0
 MAX_OBSERVATION_GAP_MS = 300_000.0
 
-CROSS_WALK_FORWARD_PROTOCOL = "cross_certified_atomic_bbo_walk_forward_v3"
+CROSS_WALK_FORWARD_PROTOCOL = "cross_certified_atomic_bbo_walk_forward_v4"
 CROSS_TRAIN_FRACTION = 0.60
 CROSS_VALIDATION_FRACTION = 0.20
 CROSS_PURGE_MS = HORIZON_MAX_S * 1000.0
@@ -181,6 +181,8 @@ def backtester(
         "positions_invalidated_gap": 0,
         "pending_invalidated_gap": 0,
     }
+    invalidated_positions: list[dict] = []
+    residual_positions: list[dict] = []
     trades: list[dict] = []
     for coin, raw_events in series.items():
         if str(coin).startswith("_"):
@@ -201,6 +203,18 @@ def backtester(
                     pending = None
                 if position is not None:
                     counters["positions_invalidated_gap"] += 1
+                    invalidated_positions.append({
+                        "reason": "OBSERVATION_GAP",
+                        "coin": str(coin),
+                        "ts_detect": position["ts_detect"],
+                        "ts_in": position["ts_in"],
+                        "last_observed_ms": previous_observation_ms,
+                        "next_observed_ms": ts,
+                        "gap_ms": float(ts) - float(previous_observation_ms),
+                        "sens": position["sens"],
+                        "basis_in_bps": round(float(position["basis_in"]), 4),
+                        "exit_pending_reason": position.get("exit_pending_reason"),
+                    })
                     position = None
                 latest = {"HL": None, "BIN": None}
             previous_observation_ms = ts
@@ -396,9 +410,22 @@ def backtester(
             position = None
         if position is not None:
             counters["positions_left_open"] += 1
+            residual_positions.append({
+                "reason": "END_OF_DATA",
+                "coin": str(coin),
+                "ts_detect": position["ts_detect"],
+                "ts_in": position["ts_in"],
+                "last_observed_ms": previous_observation_ms,
+                "sens": position["sens"],
+                "basis_in_bps": round(float(position["basis_in"]), 4),
+                "last_basis_bps": round(float(basis), 4),
+                "exit_pending_reason": position.get("exit_pending_reason"),
+            })
     if diagnostics is not None:
         diagnostics.clear()
         diagnostics.update(counters)
+        diagnostics["invalidated_positions"] = invalidated_positions
+        diagnostics["residual_positions"] = residual_positions
     return trades
 
 
@@ -576,7 +603,7 @@ def calculer_bornes_walk_forward(series: dict) -> dict:
             int(len(timestamps) * (CROSS_TRAIN_FRACTION + CROSS_VALIDATION_FRACTION)) - 1,
         ),
     )
-    return {
+    bounds = {
         "status": "READY",
         "observation_timestamps": len(timestamps),
         "first_observed_ms": timestamps[0],
@@ -587,6 +614,19 @@ def calculer_bornes_walk_forward(series: dict) -> dict:
         "calibration_data_end_ms": timestamps[-1],
         "purge_ms": CROSS_PURGE_MS,
     }
+    invalid_purged_ranges = (
+        bounds["validation_start_ms"] > bounds["validation_end_ms"]
+        or bounds["oos_start_ms"] > bounds["calibration_data_end_ms"]
+    )
+    if invalid_purged_ranges:
+        bounds["status"] = "INSUFFICIENT_DURATION_FOR_PURGED_SPLITS"
+        bounds["observed_span_ms"] = timestamps[-1] - timestamps[0]
+        bounds["required_additional_ms"] = max(
+            0.0,
+            bounds["validation_start_ms"] - bounds["validation_end_ms"],
+            bounds["oos_start_ms"] - bounds["calibration_data_end_ms"],
+        )
+    return bounds
 
 
 def _slice_observations(

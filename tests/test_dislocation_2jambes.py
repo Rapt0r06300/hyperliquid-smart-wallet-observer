@@ -27,7 +27,7 @@ def test_net_positif_quand_le_basis_converge():
 
 def test_signature_walk_forward_invalide_les_freezes_legacy_non_certifies():
     signature = BT.walk_forward_protocol_signature()
-    assert signature["calibration_protocol"] == "cross_certified_atomic_bbo_walk_forward_v3"
+    assert signature["calibration_protocol"] == "cross_certified_atomic_bbo_walk_forward_v4"
     assert signature["source_mode"] == "CERTIFIED_ATOMIC_FOUR_SIDE_BOOK_V2"
     assert signature["four_fill_contract_version"] == "cross_four_fill_aon_v1"
     assert signature["capacity_contract"] == "minimum_four_bbo_top_levels_usd"
@@ -167,6 +167,40 @@ def test_trou_de_carnet_invalide_position_sans_faux_close_ni_pnl():
 
     assert trades == []
     assert diagnostics["positions_invalidated_gap"] == 1
+    assert diagnostics["invalidated_positions"] == [{
+        "reason": "OBSERVATION_GAP",
+        "coin": "ZZZ",
+        "ts_detect": t,
+        "ts_in": t + 500,
+        "last_observed_ms": t + 500,
+        "next_observed_ms": t + 3_600_000,
+        "gap_ms": 3_599_500.0,
+        "sens": 1,
+        "basis_in_bps": diagnostics["invalidated_positions"][0]["basis_in_bps"],
+        "exit_pending_reason": None,
+    }]
+
+
+def test_position_residuelle_est_tracee_sans_faux_pnl():
+    t = 1_000_000.0
+    events = [
+        (t, "ATOMIC", 100.20, 100.22, 99.80, 99.82),
+        (t + 500, "ATOMIC", 100.20, 100.22, 99.80, 99.82),
+    ]
+    depth = {"ZZZ": [(t, 250.0), (t + 500, 250.0)]}
+    diagnostics = {}
+
+    trades = BT.backtester(
+        {"ZZZ": events},
+        depth_by_coin=depth,
+        fees_ar_bps=1.0,
+        diagnostics=diagnostics,
+    )
+
+    assert trades == []
+    assert diagnostics["positions_left_open"] == 1
+    assert diagnostics["residual_positions"][0]["reason"] == "END_OF_DATA"
+    assert diagnostics["residual_positions"][0]["coin"] == "ZZZ"
 
 
 def test_preuves_temporelles_ne_fabriquent_pas_forward_post_freeze():
@@ -226,11 +260,11 @@ def test_controle_inverse_oos_positif_ne_peut_pas_etre_promu_apres_coup():
 def test_calibration_ne_transmet_que_le_train_a_la_selection(monkeypatch):
     series = {
         "ZZZ": [
-            (float(index * 1000), "ATOMIC", 100.20, 100.22, 99.80, 99.82)
+            (float(index * 1_000_000), "ATOMIC", 100.20, 100.22, 99.80, 99.82)
             for index in range(100)
         ]
     }
-    depth = {"ZZZ": [(float(index * 1000), 250.0) for index in range(100)]}
+    depth = {"ZZZ": [(float(index * 1_000_000), 250.0) for index in range(100)]}
     calls = []
 
     def fake_selector(train_series, train_depth):
@@ -254,7 +288,7 @@ def test_calibration_ne_transmet_que_le_train_a_la_selection(monkeypatch):
     first = BT.calibrer_walk_forward(series, depth)
     # Une mutation exclusivement post-train ne peut pas changer ce que voit
     # la fonction de sélection.
-    series["ZZZ"][-1] = (99_000.0, "ATOMIC", 500.0, 501.0, 1.0, 2.0)
+    series["ZZZ"][-1] = (99_000_000.0, "ATOMIC", 500.0, 501.0, 1.0, 2.0)
     second = BT.calibrer_walk_forward(series, depth)
 
     assert first["bounds"] == second["bounds"]
@@ -262,6 +296,24 @@ def test_calibration_ne_transmet_que_le_train_a_la_selection(monkeypatch):
     assert calls[0] == calls[1]
     assert calls[0]["series_max"] <= first["bounds"]["train_end_ms"]
     assert calls[0]["depth_max"] <= first["bounds"]["train_end_ms"]
+
+
+def test_calibration_refuse_une_duree_trop_courte_pour_les_purges():
+    series = {
+        "ZZZ": [
+            (float(index * 1000), "ATOMIC", 100.20, 100.22, 99.80, 99.82)
+            for index in range(100)
+        ]
+    }
+    depth = {"ZZZ": [(float(index * 1000), 250.0) for index in range(100)]}
+
+    bounds = BT.calculer_bornes_walk_forward(series)
+    calibration = BT.calibrer_walk_forward(series, depth)
+
+    assert bounds["status"] == "INSUFFICIENT_DURATION_FOR_PURGED_SPLITS"
+    assert bounds["required_additional_ms"] > 0
+    assert calibration["status"] == "INSUFFICIENT_DURATION_FOR_PURGED_SPLITS"
+    assert calibration["selection"] is None
 
 
 def test_walk_forward_purge_et_forward_apres_gel_uniquement(monkeypatch):
