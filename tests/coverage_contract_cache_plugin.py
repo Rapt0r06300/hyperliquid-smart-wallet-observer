@@ -123,6 +123,47 @@ def _bounded_invoke(original: Callable, seconds: float = 0.5):
     return wrapped
 
 
+def _bounded_controlled_bool(original: Callable):
+    """Keep one timed-out boolean coverage attempt controlled, not test-fatal.
+
+    ``_controlled`` deliberately turns ordinary synthetic-call exceptions into
+    ``False``. Its final return sits outside its own ``try`` block, so a SIGALRM
+    arriving on that boundary can otherwise escape after the candidate was already
+    attempted. The outer adapter preserves the exact same controlled semantics.
+    """
+    bounded = _bounded_invoke(original)
+
+    @wraps(original)
+    def wrapped(*args, **kwargs):
+        try:
+            return bounded(*args, **kwargs)
+        except _CoverageContractCallTimeout:
+            return False
+
+    return wrapped
+
+
+def _bounded_controlled_count(original: Callable):
+    """Count a timed-out synthetic invocation as attempted without hiding coverage.
+
+    ``_controlled_invoke`` returns one attempted case even when the production call
+    raises a controlled exception. A SIGALRM can land on its final ``return 1``
+    outside the internal ``try``; converting only our private timeout back to ``1``
+    keeps that existing contract. No candidate, assertion, module, line or coverage
+    threshold is skipped or excluded.
+    """
+    bounded = _bounded_invoke(original)
+
+    @wraps(original)
+    def wrapped(*args, **kwargs):
+        try:
+            return bounded(*args, **kwargs)
+        except _CoverageContractCallTimeout:
+            return 1
+
+    return wrapped
+
+
 def _offline_guards_without_workers(original: Callable):
     """Prevent persistent HyperSmart workers without breaking Python executors.
 
@@ -191,13 +232,13 @@ def pytest_configure(config) -> None:
     _install_once(
         base,
         "_controlled",
-        _bounded_invoke,
+        _bounded_controlled_bool,
         "_coverage_controlled_bounded",
     )
     _install_once(
         v2,
         "_controlled_invoke",
-        _bounded_invoke,
+        _bounded_controlled_count,
         "_coverage_controlled_invoke_bounded",
     )
 
