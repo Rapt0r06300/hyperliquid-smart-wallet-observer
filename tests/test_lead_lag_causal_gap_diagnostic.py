@@ -1,107 +1,126 @@
-from hl_observer.backtesting.lead_lag_causal_gap_diagnostic import (
+from __future__ import annotations
+
+from hl_observer.ops.lead_lag_causal_gap_diagnostic import (
+    DIAGNOSTIC_MAX_BOOK_DELAY_MS,
     DIAGNOSTIC_SHOCK_THRESHOLD_BPS,
+    ECONOMIC_SHOCK_THRESHOLD_BPS,
     diagnose_causal_book_availability,
 )
-
-
-def _shock(ts_ms: int) -> dict:
-    return {"trigger_ts_ms": ts_ms, "lead_shock_bps": 8.5, "direction": 1}
 
 
 def _book(
     ts_ms: int,
     *,
-    connection_id: str = "c1",
-    sequence: int = 1,
+    ready: bool = True,
     gap_count: int = 0,
     reconnect_count: int = 0,
-    ready: bool = True,
 ) -> dict:
     return {
+        "coin": "ETH",
         "ts_ms": ts_ms,
-        "connection_id": connection_id,
-        "sequence": sequence,
+        "received_ts_ms": ts_ms - 2,
+        "written_ts_ms": ts_ms,
+        "exchange_ts_ms": ts_ms - 5,
+        "data_gate_ready": ready,
+        "feed_quality_score": 1.0 if ready else 0.4,
+        "quality_reasons": [] if ready else ["STALE_OR_INCOMPLETE"],
         "gap_count": gap_count,
         "reconnect_count": reconnect_count,
-        "data_gate_ready": ready,
+        "connection_id": "conn-1",
+        "sequence": ts_ms,
+        "source": "hyperliquid:recorded:l2Book",
     }
 
 
-def test_diagnostic_threshold_is_not_the_economic_threshold() -> None:
+def test_diagnostic_threshold_never_replaces_economic_threshold() -> None:
     assert DIAGNOSTIC_SHOCK_THRESHOLD_BPS == 8.0
+    assert ECONOMIC_SHOCK_THRESHOLD_BPS == 20.0
+    assert DIAGNOSTIC_SHOCK_THRESHOLD_BPS < ECONOMIC_SHOCK_THRESHOLD_BPS
+    assert DIAGNOSTIC_MAX_BOOK_DELAY_MS == 750
 
 
-def test_timely_quality_book_is_classified_executable() -> None:
-    trigger = 1_800_000_000_000
+def test_timely_quality_book_is_explicitly_observed() -> None:
+    event = 10_000
     result = diagnose_causal_book_availability(
-        [_shock(trigger)],
-        [
-            _book(trigger - 100, sequence=10),
-            _book(trigger + 500, sequence=11),
-        ],
+        [event],
+        {"ETH": [_book(9_900), _book(10_500)]},
     )
-
-    event = result["events"][0]
-    assert event["classification"] == "EXECUTABLE_BOOK_WITHIN_LIMIT"
-    assert event["following_book_delay_ms"] == 500
-    assert event["explicit_collector_gap_evidence"] is False
-    assert result["strategy_parameters_changed"] is False
-    assert result["economic_shock_threshold_unchanged"] is True
-    assert result["paper_read_only"] is True
-    assert result["real_execution"] is False
+    row = result["events"][0]
+    assert row["classification"] == "CAUSAL_BOOK_WITHIN_750MS"
+    assert row["next_book_delay_ms"] == 500
+    assert row["explicit_collector_gap"] is False
+    assert result["root_cause"] == "EXECUTABLE_CAUSAL_BOOK_OBSERVED_FOR_AT_LEAST_ONE_EVENT"
 
 
-def test_contiguous_capture_distinguishes_slow_book_from_explicit_gap() -> None:
-    trigger = 1_800_000_000_000
+def test_timely_book_can_be_rejected_by_quality_gate() -> None:
     result = diagnose_causal_book_availability(
-        [_shock(trigger)],
-        [
-            _book(trigger - 50, connection_id="same", sequence=20),
-            _book(trigger + 2_295, connection_id="same", sequence=21),
-        ],
+        [10_000],
+        {"ETH": [_book(9_900), _book(10_200, ready=False)]},
     )
-
-    event = result["events"][0]
-    assert event["classification"] == "CONTIGUOUS_CAPTURE_NO_BOOK_WITHIN_LIMIT"
-    assert event["following_book_delay_ms"] == 2_295
-    assert event["contiguous_capture_evidence"] is True
-    assert event["explicit_collector_gap_evidence"] is False
+    row = result["events"][0]
+    assert row["classification"] == "CAUSAL_BOOK_WITHIN_750MS_REJECTED_QUALITY"
+    assert result["root_cause"] == "BOOKS_TIMELY_BUT_QUALITY_GATE_REJECTED"
 
 
-def test_gap_or_reconnect_is_reported_as_collector_gap_evidence() -> None:
-    trigger = 1_800_000_000_000
+def test_late_book_is_collection_gap_only_with_explicit_counter_evidence() -> None:
     result = diagnose_causal_book_availability(
-        [_shock(trigger)],
-        [
-            _book(trigger - 50, connection_id="c1", sequence=30, gap_count=0),
-            _book(
-                trigger + 4_715,
-                connection_id="c2",
-                sequence=1,
-                gap_count=1,
-                reconnect_count=1,
-            ),
-        ],
+        [10_000],
+        {
+            "ETH": [
+                _book(9_900, gap_count=2, reconnect_count=1),
+                _book(12_295, gap_count=3, reconnect_count=1),
+            ]
+        },
     )
+    row = result["events"][0]
+    assert row["classification"] == "EXPLICIT_COLLECTOR_GAP_BEFORE_NEXT_BOOK"
+    assert row["next_book_delay_ms"] == 2_295
+    assert row["gap_count_delta"] == 1
+    assert row["explicit_collector_gap"] is True
+    assert result["root_cause"] == "COLLECTION_GAP_EXPLICITLY_PROVEN_FOR_ALL_EVENTS"
 
-    event = result["events"][0]
-    assert event["classification"] == "COLLECTOR_GAP_EVIDENCE"
-    assert event["following_book_delay_ms"] == 4_715
-    assert event["explicit_collector_gap_evidence"] is True
-    assert event["contiguous_capture_evidence"] is False
 
-
-def test_quality_rejection_does_not_count_as_executable_book() -> None:
-    trigger = 1_800_000_000_000
+def test_late_book_without_gap_counter_stays_unresolved_fail_closed() -> None:
     result = diagnose_causal_book_availability(
-        [_shock(trigger)],
-        [
-            _book(trigger - 10, sequence=7),
-            _book(trigger + 100, sequence=8, ready=False),
-        ],
+        [10_000],
+        {
+            "ETH": [
+                _book(9_900, gap_count=2, reconnect_count=1),
+                _book(14_715, gap_count=2, reconnect_count=1),
+            ]
+        },
     )
+    row = result["events"][0]
+    assert row["classification"] == "NEXT_RECORDED_BOOK_TOO_LATE_NO_GAP_PROOF"
+    assert row["next_book_delay_ms"] == 4_715
+    assert row["explicit_collector_gap"] is False
+    assert result["root_cause"] == "NO_EXECUTABLE_BOOK_OBSERVED_WITHOUT_COLLECTOR_GAP_PROOF"
+    assert "does not prove market absence" in result["interpretation_guard"]
 
-    event = result["events"][0]
-    assert event["classification"] == "BOOK_WITHIN_LIMIT_QUALITY_REJECTED"
-    assert event["timely_book"] is True
-    assert event["following_book_quality_ready"] is False
+
+def test_no_later_book_is_not_mislabeled_as_market_absence() -> None:
+    result = diagnose_causal_book_availability(
+        [10_000],
+        {"ETH": [_book(9_900)]},
+    )
+    assert result["events"][0]["classification"] == "NO_LATER_BOOK_RECORDED"
+    assert result["root_cause"] == "NO_EXECUTABLE_BOOK_OBSERVED_WITHOUT_COLLECTOR_GAP_PROOF"
+
+
+def test_mixed_events_report_mixed_collection_and_unresolved_evidence() -> None:
+    result = diagnose_causal_book_availability(
+        [10_000, 20_000],
+        {
+            "ETH": [
+                _book(9_900, gap_count=0, reconnect_count=0),
+                _book(12_000, gap_count=1, reconnect_count=0),
+                _book(19_900, gap_count=1, reconnect_count=0),
+                _book(22_000, gap_count=1, reconnect_count=0),
+            ]
+        },
+    )
+    assert result["classification_counts"] == {
+        "EXPLICIT_COLLECTOR_GAP_BEFORE_NEXT_BOOK": 1,
+        "NEXT_RECORDED_BOOK_TOO_LATE_NO_GAP_PROOF": 1,
+    }
+    assert result["root_cause"] == "MIXED_COLLECTION_GAP_AND_UNRESOLVED_BOOK_ABSENCE"
