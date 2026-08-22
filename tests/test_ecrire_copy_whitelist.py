@@ -54,7 +54,36 @@ def test_les_episodes_separes_restent_des_observations_independantes(tmp_path):
     result = m.construire_whitelist(tmp_path, fills=rows)
     assert result["episodes_independants"] == 20
     assert result["details"][0]["n_events"] == 20
-    assert result["gardes"][0]["adresse"] == "0xabc"
+    assert result["gardes"] == []
+    assert result["gardes_observation"][0]["adresse"] == "0xabc"
+    assert result["details"][0]["verdict_robuste"] != "CANDIDAT"
+
+
+def test_seule_une_preuve_robuste_deverrouille_la_whitelist(tmp_path):
+    import importlib.util as _u
+    from pathlib import Path as _P
+
+    racine = _P(__file__).resolve().parents[1]
+    spec = _u.spec_from_file_location("wl_robuste", racine / "tools" / "ecrire_copy_whitelist.py")
+    m = _u.module_from_spec(spec)
+    spec.loader.exec_module(m)
+    rows = []
+    for day in range(20):
+        rows.append({
+            "adresse": "0xrobuste",
+            "coin": "BTC",
+            "side": "B",
+            "mid_at_fill": 100.0,
+            "mid_forward": 100.30,
+            "ts_ms": (20_000 + day) * 86_400_000,
+            "regime": "TREND" if day % 2 else "RANGE",
+            "metaorder_id": "meta-%d" % day,
+        })
+    result = m.construire_whitelist(tmp_path, fills=rows)
+    assert result["survivent_net_simple"] == 1
+    assert result["survivent_net"] == 1
+    assert result["gardes"][0]["adresse"] == "0xrobuste"
+    assert result["details"][0]["lcb_net_bps"] > 0
 
 
 def test_des_markouts_30_minutes_qui_se_chevauchent_ne_sont_pas_independants(tmp_path):

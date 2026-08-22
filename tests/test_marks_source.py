@@ -131,6 +131,23 @@ def test_un_repertoire_sans_replay_ne_leve_pas(tmp_path):
     assert ms.charger_marks(tmp_path) == {}
 
 
+def test_le_ruban_allmids_frais_est_lu_sur_la_fenetre_demandee(tmp_path):
+    tape = tmp_path / "runtime" / "data" / "hl_allmids_tape.jsonl"
+    tape.parent.mkdir(parents=True)
+    tape.write_text("\n".join([
+        json.dumps({"ts_ms": 900_000, "mids": {"BTC": 90.0, "ETH": 9.0}}),
+        json.dumps({"ts_ms": 1_000_000, "mids": {"BTC": 100.0, "ETH": 10.0}}),
+        json.dumps({"ts_ms": 1_100_000, "mids": {"BTC": 110.0, "ETH": 11.0}}),
+    ]) + "\n", encoding="utf-8")
+
+    marks = ms.charger_marks(
+        tmp_path, coins={"btc"}, min_ts_s=950.0, max_ts_s=1_050.0
+    )
+
+    assert marks == {"BTC": [(1_000.0, 100.0)]}
+    assert "ETH" not in marks
+
+
 # ─────────────── le pipeline complet ───────────────
 
 def test_le_pipeline_ecrit_son_diagnostic_a_cote(tmp_path):
@@ -159,6 +176,32 @@ def test_le_pipeline_ecrit_son_diagnostic_a_cote(tmp_path):
     assert diag["mesures"] == n and diag["fills"] == 40
     assert 0.0 < diag["couverture_pct"] <= 100.0
     assert diag["real_execution"] is False
+
+
+def test_le_pipeline_joint_les_fills_au_ruban_allmids_sans_replay(tmp_path):
+    from tools.ecrire_copy_whitelist import BRUTS_DEFAUT, FILLS_DEFAUT, construire_fills_forward
+    import time
+
+    t0 = time.time() - 7200.0
+    tape = tmp_path / "runtime" / "data" / "hl_allmids_tape.jsonl"
+    tape.parent.mkdir(parents=True)
+    tape.write_text("\n".join([
+        json.dumps({"ts_ms": int(t0 * 1000), "mids": {"BTC": 100.0}}),
+        json.dumps({"ts_ms": int((t0 + 1800.0) * 1000), "mids": {"BTC": 101.0}}),
+    ]) + "\n", encoding="utf-8")
+    bruts = tmp_path / BRUTS_DEFAUT
+    bruts.write_text(json.dumps({
+        "adresse": "0xabc123def4567890abc123def4567890abc123de",
+        "coin": "BTC", "side": "B", "ts_ms": int(t0 * 1000),
+    }) + "\n", encoding="utf-8")
+
+    assert construire_fills_forward(tmp_path, horizon_min=30.0) == 1
+    mesure = json.loads((tmp_path / FILLS_DEFAUT).read_text(encoding="utf-8"))
+    assert mesure["mid_at_fill"] == 100.0
+    assert mesure["mid_forward"] == 101.0
+    diag = json.loads((tmp_path / FILLS_DEFAUT).with_suffix(".diagnostic.json")
+                      .read_text(encoding="utf-8"))
+    assert diag["sources_marks"]["hl_allmids_tape"] is True
 
 
 def test_aucune_execution_reelle():

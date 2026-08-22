@@ -129,12 +129,17 @@ def construire_fills_forward(root: str | Path = RACINE, *, horizon_min: float = 
     # `marks_source` lit donc le consolide ET les shards frais, prend le mark le plus proche
     # AVANT OU APRES (l'ancienne regle ne regardait qu'apres : un mark 30 s avant etait rejete
     # quand un mark 290 s apres passait), et SIGNALE un recouvrement rompu.
-    from hl_observer.copy_wallet.marks_source import (apparier_avec_cause, charger_marks,
-                                                      diagnostic_recouvrement)
-    tries = charger_marks(racine)
+    from hl_observer.copy_wallet.marks_source import (
+        TOLERANCE_FILL_S,
+        TOLERANCE_FORWARD_S,
+        apparier_avec_cause,
+        charger_marks,
+        diagnostic_recouvrement,
+    )
     lignes = []
     causes: dict[str, int] = {}
     ts_fills: list[float] = []
+    fills_valides: list[tuple[dict, str, float]] = []
     bruts = [l for l in bruts_p.read_text(encoding="utf-8").splitlines() if l.strip()]
     import time as _time
     _now = _time.time()
@@ -161,6 +166,16 @@ def construire_fills_forward(root: str | Path = RACINE, *, horizon_min: float = 
         if not f.get("adresse") or ts <= 0:
             continue
         ts_fills.append(ts)
+        fills_valides.append((f, coin, ts))
+
+    horizon_s = horizon_min * 60.0
+    tries = charger_marks(
+        racine,
+        coins={coin for _, coin, _ in fills_valides if coin},
+        min_ts_s=(min(ts_fills) - TOLERANCE_FILL_S) if ts_fills else None,
+        max_ts_s=(max(ts_fills) + horizon_s + TOLERANCE_FORWARD_S) if ts_fills else None,
+    )
+    for f, coin, ts in fills_valides:
         r = apparier_avec_cause(tries, coin=coin, ts=ts, horizon_s=horizon_min * 60.0)
         if not r.get("ok"):
             causes[r["cause"]] = causes.get(r["cause"], 0) + 1
@@ -199,7 +214,13 @@ def construire_fills_forward(root: str | Path = RACINE, *, horizon_min: float = 
         (racine / FILLS_DEFAUT).with_suffix(".diagnostic.json").write_text(
             json.dumps({**diag, "mesures": len(lignes), "fills": total,
                         "couverture_pct": round(100.0 * len(lignes) / total, 2),
-                        "causes": causes, "real_execution": False},
+                        "causes": causes,
+                        "sources_marks": {
+                            "replay": True,
+                            "hl_allmids_tape": (racine / "runtime" / "data"
+                                                / "hl_allmids_tape.jsonl").exists(),
+                        },
+                        "real_execution": False},
                        ensure_ascii=False, indent=2), encoding="utf-8")
     except OSError:
         pass
@@ -249,18 +270,38 @@ def construire_whitelist(root: str | Path = RACINE, *, fills_path: str | Path | 
     # verrouilles. Meme discipline que les portes carry/arbitrage : le brut n'est jamais l'edge.
     from hl_observer.copy_wallet.leader_markout import (COPY_FOLLOW_COST_BPS,
                                                         markout_net_de_copie_bps)
+    from hl_observer.research.wallet_copy_edge import evaluer_wallet
 
     def _net(v):
         return markout_net_de_copie_bps(v.markout_moyen_bps)
 
-    gardes = [{"adresse": v.adresse, "markout_moyen_bps": v.markout_moyen_bps,
-               "markout_net_bps": _net(v), "n_evenements": v.n_evenements}
-              for v in verdicts if v.predit and (_net(v) or -9e9) > 0]
+    robustes = {
+        adresse: evaluer_wallet(
+            rows,
+            adresse=adresse,
+            cout_bps=COPY_FOLLOW_COST_BPS,
+        )
+        for adresse, rows in par_leader.items()
+    }
+    observations = [
+        {"adresse": v.adresse, "markout_moyen_bps": v.markout_moyen_bps,
+         "markout_net_bps": _net(v), "n_evenements": v.n_evenements,
+         "verdict_robuste": robustes.get(v.adresse, {}).get("verdict")}
+        for v in verdicts if v.predit and (_net(v) or -9e9) > 0
+    ]
+    # Une moyenne nette positive est seulement une piste. La porte live exige aussi une
+    # borne basse positive, assez de grappes/jours/régimes et un edge non concentré.
+    gardes = [
+        observation
+        for observation in observations
+        if observation.get("verdict_robuste") == "CANDIDAT"
+    ]
     predisent = sum(1 for v in verdicts if v.predit)
     brut_total = sum(len(rows) for rows in par_leader.values())
     episodes_total = sum(len(rows) for rows in episodes_par_leader.values())
     invalides_total = sum(invalides_par_leader.values())
     return {"genere_ts": time.time(), "gardes": gardes,
+            "gardes_observation": observations,
             "cout_de_suivi_bps": COPY_FOLLOW_COST_BPS,
             "fenetre_metaordre_ms": FENETRE_METAORDRE_MS,
             "fenetre_independance_ms": FENETRE_INDEPENDANCE_MS,
@@ -268,7 +309,8 @@ def construire_whitelist(root: str | Path = RACINE, *, fills_path: str | Path | 
             "episodes_independants": episodes_total,
             "fills_sans_preuve_independance_rejetes": invalides_total,
             "predisent_brut": predisent,          # combien passent le brut (avant cout)
-            "survivent_net": len(gardes),         # combien passent le NET (apres cout de suivi)
+            "survivent_net_simple": len(observations),
+            "survivent_net": len(gardes),
             # 21/07 : la PROGRESSION vers la preuve, ecrite dans le fichier (pas seulement a
             # l'ecran) — « 0 garde » sans detail ressemble a une panne ; avec le detail, on
             # voit le copy revenir : qui est evalue, avec combien de fills, ce qui manque.
@@ -279,12 +321,18 @@ def construire_whitelist(root: str | Path = RACINE, *, fills_path: str | Path | 
                          "markout_moyen_bps": v.markout_moyen_bps,
                          "markout_net_bps": _net(v),
                          "survit_au_cout": bool((_net(v) or -9e9) > 0),
+                         "verdict_robuste": robustes.get(v.adresse, {}).get("verdict"),
+                         "lcb_net_bps": robustes.get(v.adresse, {}).get("lcb_net_bps"),
+                         "concentration": robustes.get(v.adresse, {}).get("concentration"),
+                         "n_votes_independants": robustes.get(v.adresse, {}).get("n_independent"),
+                         "n_jours": robustes.get(v.adresse, {}).get("n_jours"),
+                         "n_regimes_mesures": robustes.get(v.adresse, {}).get("n_regimes_mesures"),
+                         "raisons_robustes": robustes.get(v.adresse, {}).get("raisons_core", []),
                          "motif": v.motif, "predit": v.predit} for v in verdicts],
             "rejetes": sum(1 for v in verdicts if not v.predit),
-            "regle": "markout NET (brut − %.0f bps de cout de suivi taker A/R) > 0 sur assez "
-                     "d'episodes independants (fenetres forward non chevauchantes de 30 min) ; "
-                     "predire ne suffit "
-                     "pas, il faut battre le cout de copie ; "
+            "regle": "markout NET (brut − %.0f bps de cout de suivi taker A/R) > 0, puis "
+                     "preuve robuste CANDIDAT : borne basse positive, grappes/jours/regimes suffisants "
+                     "et edge non concentre ; une moyenne positive reste en observation seulement ; "
                      "liste vide = copy verrouille (deny-by-default)" % COPY_FOLLOW_COST_BPS,
             "real_execution": False}
 

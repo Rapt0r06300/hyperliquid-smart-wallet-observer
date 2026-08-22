@@ -40,6 +40,8 @@ PAPER only : dater un prix n'est pas passer un ordre.
 from __future__ import annotations
 
 import bisect
+import json
+import math
 from pathlib import Path
 from typing import Any
 
@@ -60,7 +62,54 @@ def _f(v: Any) -> float | None:
     return None if x != x else x
 
 
-def charger_marks(root: str | Path) -> dict[str, list[tuple[float, float]]]:
+def _charger_allmids_tape(
+    chemin: Path,
+    *,
+    coins: set[str],
+    min_ts_s: float | None,
+    max_ts_s: float | None,
+) -> dict[str, list[tuple[float, float]]]:
+    """Lit le ruban ``allMids`` sans materialiser ses gros snapshots en memoire.
+
+    Un snapshot contient plusieurs centaines de marches. Seuls les coins demandes et la
+    fenetre utile aux fills sont conserves ; le JSON brut est libere a chaque ligne.
+    """
+
+    points: dict[str, list[tuple[float, float]]] = {coin: [] for coin in coins}
+    if not chemin.exists() or not coins:
+        return points
+    try:
+        with chemin.open(encoding="utf-8", errors="ignore") as flux:
+            for ligne in flux:
+                try:
+                    row = json.loads(ligne)
+                    ts_ms = _f(row.get("ts_ms"))
+                    ts_s = ts_ms / 1000.0 if ts_ms is not None else _f(row.get("ts"))
+                    mids = row.get("mids")
+                except (AttributeError, TypeError, ValueError, json.JSONDecodeError):
+                    continue
+                if ts_s is None or not isinstance(mids, dict):
+                    continue
+                if min_ts_s is not None and ts_s < min_ts_s:
+                    continue
+                if max_ts_s is not None and ts_s > max_ts_s:
+                    continue
+                for coin in coins:
+                    prix = _f(mids.get(coin))
+                    if prix is not None and math.isfinite(prix) and prix > 0:
+                        points[coin].append((ts_s, prix))
+    except OSError:
+        return points
+    return points
+
+
+def charger_marks(
+    root: str | Path,
+    *,
+    coins: set[str] | None = None,
+    min_ts_s: float | None = None,
+    max_ts_s: float | None = None,
+) -> dict[str, list[tuple[float, float]]]:
     """Les marks du consolidé **ET** des shards plus récents, dédupliqués et triés.
 
     Le consolidé peut avoir des heures de retard (mesuré : 11 h). Les shards, eux, sont écrits
@@ -71,6 +120,7 @@ def charger_marks(root: str | Path) -> dict[str, list[tuple[float, float]]]:
     from hl_observer.backtesting.recherche_scenario import repertoire_replay_consolide
 
     racine = Path(root)
+    coins_cibles = {str(coin).strip().upper() for coin in (coins or set()) if str(coin).strip()}
     base = racine / "runtime" / "replay"
     rows: list[dict] = []
     consolide = repertoire_replay_consolide(racine) / "marks.jsonl"
@@ -83,7 +133,31 @@ def charger_marks(root: str | Path) -> dict[str, list[tuple[float, float]]]:
         except OSError:
             continue
     par_coin = marks_by_coin(rows)
-    return {c: sorted(set(pts)) for c, pts in par_coin.items()}
+    if coins_cibles:
+        par_coin = {coin: par_coin.get(coin, []) for coin in coins_cibles}
+    if min_ts_s is not None or max_ts_s is not None:
+        par_coin = {
+            coin: [
+                (ts, prix)
+                for ts, prix in points
+                if (min_ts_s is None or ts >= min_ts_s)
+                and (max_ts_s is None or ts <= max_ts_s)
+            ]
+            for coin, points in par_coin.items()
+        }
+
+    # Le collecteur actif ecrit ce ruban independamment du replay consolide. Il est volumineux
+    # (snapshots multi-coins), donc on ne le lit que lorsqu'un appelant fournit les coins et la
+    # fenetre exacts dont il a besoin.
+    tape = _charger_allmids_tape(
+        racine / "runtime" / "data" / "hl_allmids_tape.jsonl",
+        coins=coins_cibles,
+        min_ts_s=min_ts_s,
+        max_ts_s=max_ts_s,
+    )
+    for coin, points in tape.items():
+        par_coin.setdefault(coin, []).extend(points)
+    return {c: sorted(set(pts)) for c, pts in par_coin.items() if pts}
 
 
 def mark_le_plus_proche(points: list[tuple[float, float]], cible: float,

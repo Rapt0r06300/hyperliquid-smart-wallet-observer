@@ -44,10 +44,12 @@ def test_un_leader_qui_PREDIT_mais_PERD_apres_cout_est_verrouille(tmp_path):
     from tools.ecrire_copy_whitelist import construire_whitelist
     fills = _fills("0xPERD", 6.0) + _fills("0xGAGNE", 18.0)
     r = construire_whitelist(tmp_path, fills=fills)
-    gardes = {g["adresse"] for g in r["gardes"]}
-    assert "0xGAGNE" in gardes, "brut +18 -> net +9 : survit au cout, garde"
-    assert "0xPERD" not in gardes, "brut +6 -> net -3 : predit mais PERD, verrouille"
-    assert r["predisent_brut"] == 2 and r["survivent_net"] == 1
+    observations = {g["adresse"] for g in r["gardes_observation"]}
+    assert "0xGAGNE" in observations, "brut +18 -> net +9 : observation rentable simple"
+    assert "0xPERD" not in observations, "brut +6 -> net -3 : predit mais PERD, verrouille"
+    assert r["gardes"] == [], "sans jours/regimes independants, aucune promotion live"
+    assert r["predisent_brut"] == 2
+    assert r["survivent_net_simple"] == 1 and r["survivent_net"] == 0
 
 
 def test_les_predisent_mais_perdent_restent_VISIBLES_dans_details(tmp_path):

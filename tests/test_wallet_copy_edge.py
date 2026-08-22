@@ -20,6 +20,9 @@ def test_markout_signe():
     assert W.markout_bps(_rec("0xa", "BTC", "LONG", 1, 100.0, 101.0)) > 0    # long + mid monte
     assert W.markout_bps(_rec("0xa", "BTC", "SHORT", 1, 100.0, 99.0)) > 0    # short + mid baisse
     assert W.markout_bps(_rec("0xa", "BTC", "LONG", 1, 100.0, 99.0)) < 0
+    assert W.markout_bps(_rec("0xa", "BTC", "B", 1, 100.0, 101.0)) > 0
+    assert W.markout_bps(_rec("0xa", "BTC", "S", 1, 100.0, 99.0)) > 0
+    assert W.markout_bps(_rec("0xa", "BTC", "?", 1, 100.0, 101.0)) is None
 
 
 def test_memecoin_un_jour_un_coin_est_MORE_DATA():
@@ -46,6 +49,18 @@ def test_edge_diversifie_positif_survit_LCB():
     r = W.evaluer_wallet(recs, adresse="0xg")
     assert r["n_independent"] >= 8 and r["lcb_net_bps"] is not None and r["lcb_net_bps"] > 0
     assert r["verdict"] in ("CANDIDAT", "FORWARD_REQUIS")       # LCB>0 ; CORE peut manquer régimes
+
+
+def test_regimes_et_metaordres_survivent_a_la_normalisation():
+    recs = []
+    for d in range(20):
+        rec = _rec("0xg", "BTC", "B", 10 + d, 100.0, 100.3)
+        rec.update({"regime": "TREND" if d % 2 else "RANGE", "metaorder_id": "m-%d" % d})
+        recs.append(rec)
+    r = W.evaluer_wallet(recs, adresse="0xg")
+    assert r["n_independent"] == 20
+    assert r["n_regimes_mesures"] == 2
+    assert r["verdict"] == "CANDIDAT"
 
 
 def test_edge_negatif_est_KILL():

@@ -70,7 +70,13 @@ def markout_bps(rec: Mapping[str, Any]) -> float | None:
     m0, m1 = rec.get("mid_at_fill"), rec.get("mid_forward")
     if not (isinstance(m0, (int, float)) and isinstance(m1, (int, float)) and m0 > 0):
         return None
-    sens = 1.0 if str(rec.get("side")).upper() == "LONG" else -1.0
+    side = str(rec.get("side") or "").strip().upper()
+    if side in {"BUY", "LONG", "B"}:
+        sens = 1.0
+    elif side in {"SELL", "SHORT", "S", "A"}:
+        sens = -1.0
+    else:
+        return None
     return sens * (m1 / m0 - 1.0) * 1e4
 
 
@@ -84,10 +90,16 @@ def _episodes(recs: Sequence[Mapping[str, Any]], *, cout_bps: float,
             continue
         coin = str(r.get("coin"))
         c = float((cout_par_coin or {}).get(coin, cout_bps))
-        eps.append({
+        episode = {
             "wallet": str(r.get("adresse")), "coin": coin, "ts_ms": r.get("ts_ms"),
             "gross_bps": round(g, 4), "net_bps": round(g - c, 4), "cout_bps": c,
-        })
+        }
+        # La robustesse dépend de ces dimensions. Les perdre ici rendrait chaque régime
+        # invisible et empêcherait aussi la déduplication des métaordres/TWAP connus.
+        for key in ("regime", "metaorder_id", "twap_id", "burst_id", "entite"):
+            if r.get(key) not in (None, ""):
+                episode[key] = r[key]
+        eps.append(episode)
     return eps
 
 
