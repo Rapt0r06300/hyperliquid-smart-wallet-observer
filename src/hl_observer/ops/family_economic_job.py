@@ -63,13 +63,7 @@ def record_family_economic_memory(
     suite: str,
     project_sha: str,
 ) -> dict[str, Any] | None:
-    """Persist only a canonically re-certified +4 USD family proof.
-
-    The campaign's stored ``objective_status`` and eligible PnL are never trusted
-    by themselves. The canonical objective is recomputed from the full campaign
-    (costs, LIQUIDATABLE_NET, OOS, forward, placebo and provenance constraints)
-    before any proof is allowed into durable economic memory.
-    """
+    """Persist only a canonically re-certified +4 USD family proof."""
     campaign_family = SUITE_CAMPAIGN_FAMILY.get(suite)
     coverage_family = SUITE_COVERAGE_FAMILY.get(suite)
     if campaign_family is None or coverage_family is None:
@@ -151,7 +145,7 @@ def execute_family_job(
         job_id=request["job_id"], suite=request["suite"], mode=request["mode"],
         state="STARTING", action_fr="Vérification du job économique famille",
         message_fr="Alina vérifie le SHA, la sécurité et la suite FULL/COLD avant tout calcul.",
-        job_started_unix=job_started, step_index=1, step_total=5,
+        job_started_unix=job_started, step_index=1, step_total=6,
         next_action_fr="Préparer les données FULL/COLD de la famille",
     )
 
@@ -181,7 +175,7 @@ def execute_family_job(
                 live_path, job_id=request["job_id"], suite=request["suite"], mode=request["mode"],
                 state="SUCCESS_CACHED", action_fr="Aucun recalcul nécessaire",
                 message_fr="Même SHA, même suite et même demande déjà certifiés complets.",
-                job_started_unix=job_started, step_index=4, step_total=5,
+                job_started_unix=job_started, step_index=5, step_total=6,
             )
             return 0
 
@@ -202,7 +196,7 @@ def execute_family_job(
             "01_prepare_dataset", prepare_cmd, cwd=project_root, log_dir=log_dir,
             live_status_path=live_path, live_context=live_context,
             action_fr="Préparation FULL/COLD de la famille",
-            next_action_fr="Vérifier le workspace et le dataset non fiable", step_index=2, step_total=5,
+            next_action_fr="Vérifier le workspace et le dataset non fiable", step_index=2, step_total=6,
         )
         steps.append(step)
         if step["return_code"] != 0:
@@ -232,19 +226,37 @@ def execute_family_job(
             timeout_seconds=request["stage_timeout_seconds"], live_status_path=live_path,
             live_context=live_context,
             action_fr="Backtests économiques FULL/COLD de la famille",
-            next_action_fr="Auditer les sources réellement consommées", step_index=3, step_total=5,
+            next_action_fr="Autopsier la couverture causale Lead-Lag si nécessaire", step_index=3, step_total=6,
         )
         steps.append(step)
         primary_rc = int(step["return_code"])
 
+    if primary_rc == 0 and workspace is not None and request["suite"] == "lead-lag-full":
+        step = canonical_job._run_logged(
+            "03_lead_lag_causal_audit",
+            [
+                canonical_job.sys.executable,
+                str(project_root / "tools" / "lead_lag_causal_audit.py"),
+                "--root", str(workspace),
+            ],
+            cwd=project_root, log_dir=log_dir,
+            timeout_seconds=min(int(request["stage_timeout_seconds"]), 7200),
+            live_status_path=live_path, live_context=live_context,
+            action_fr="Autopsie causale Lead-Lag 8 bps diagnostic-only",
+            next_action_fr="Auditer les sources réellement consommées", step_index=4, step_total=6,
+        )
+        steps.append(step)
+        if step["return_code"] != 0:
+            primary_rc = int(step["return_code"])
+
     if primary_rc == 0 and workspace is not None:
         step = canonical_job._run_logged(
-            "03_connection_audit",
+            "04_connection_audit",
             [canonical_job.sys.executable, "-m", "hl_observer.ops.dataset_connection_audit", "--root", str(workspace)],
             cwd=project_root, log_dir=log_dir, timeout_seconds=1800,
             live_status_path=live_path, live_context=live_context,
             action_fr="Vérification finale des sources et raccordements",
-            next_action_fr="Sceller le résultat compact", step_index=4, step_total=5,
+            next_action_fr="Sceller le résultat compact", step_index=5, step_total=6,
         )
         steps.append(step)
         if step["return_code"] != 0:
@@ -282,7 +294,7 @@ def execute_family_job(
         state=status, action_fr="Job famille terminé" if primary_rc == 0 else "Job famille NO_GO",
         message_fr="Pipeline technique terminé; le completion guard doit encore certifier la complétude."
         if primary_rc == 0 else "Une étape a échoué; aucune certification n'est enregistrée.",
-        job_started_unix=job_started, step_index=4, step_total=5,
+        job_started_unix=job_started, step_index=5, step_total=6,
         workspace=str(workspace) if workspace else None, log_path=str(log_dir),
     )
     return primary_rc
