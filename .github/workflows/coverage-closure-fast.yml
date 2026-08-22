@@ -5,6 +5,7 @@ on:
     branches: [main]
     paths:
       - 'tests/test_coverage_closure_*.py'
+      - 'tests/coverage_contract_cache_plugin.py'
       - 'src/hl_observer/**/*.py'
       - '.github/workflows/coverage-closure-fast.yml'
   workflow_dispatch: {}
@@ -49,7 +50,10 @@ jobs:
           python -m pip install -r requirements-recherche.txt
           python -m pip install -r requirements-ci-tools.txt
       - name: Ruff structurel sur les tests de clôture
-        run: python -m ruff check --select E9,F63,F7,F82 tests/test_coverage_closure_*.py
+        run: |
+          python -m ruff check --select E9,F63,F7,F82 \
+            tests/test_coverage_closure_*.py \
+            tests/coverage_contract_cache_plugin.py
       - name: Construire la suite réellement rapide
         run: |
           python - <<'PY'
@@ -76,7 +80,8 @@ jobs:
       - name: Exécuter uniquement les tests de clôture rapides
         run: |
           mapfile -t TEST_FILES < closure-fast-tests.txt
-          python -m pytest -q -p no:cacheprovider --tb=short \
+          python -m pytest -q -p no:cacheprovider \
+            -p tests.coverage_contract_cache_plugin --tb=short \
             --timeout=180 --timeout-method=signal "${TEST_FILES[@]}"
       - name: Publier le verdict rapide
         if: always()
