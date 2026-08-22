@@ -47,6 +47,8 @@ jobs:
     name: Coverage shard ${{ matrix.shard }}/32
     needs: announce
     runs-on: ubuntu-latest
+    # Les fuzzers restent bornes et exhaustifs, mais certains shards lourds
+    # depassent legitimement trois minutes sous instrumentation coverage.
     timeout-minutes: 45
     strategy:
       fail-fast: false
@@ -229,7 +231,7 @@ jobs:
               "state": os.environ["STATE"],
               "context": "hypersmart/coverage-parallel-probe",
               "description": os.environ["DESCRIPTION"],
-              "target_url": f"{os.environ['GITHUB_SERVER_URL']}/{os.environ['GITHUB_REPOSITORY']}/actions/runs/{os.environ['GITHUB_RUN_ID']}",
+              "target_url": f"{os.environ['GITHUB_SERVER_URL']}/{os.environ['GITHUB_REPOSITORY']}/actions/runs/${GITHUB_RUN_ID}",
           }))
           PY
           curl --fail-with-body --silent --show-error \
