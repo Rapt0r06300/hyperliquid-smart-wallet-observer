@@ -20,7 +20,9 @@ def test_full_cold_lead_lag_utilise_toutes_les_sources_manifestees() -> None:
 def test_lead_lag_v3_est_branche_sur_tape_l2_trades_et_latence_mesuree() -> None:
     text = RUNNER.read_text(encoding="utf-8", errors="replace")
     assert "replay_lead_lag_queue_maker" in text
-    assert "load_market_microstructure_history(root)" in text
+    assert "_lead_trade_window_ms(lead_tape)" in text
+    assert "start_ms=lead_window_start_ms" in text
+    assert "end_ms=lead_window_end_ms" in text
     assert "load_runtime_latency_evidence(root)" in text
     assert 'lead_raw["maker_queue_candidates"]' in text
     assert 'lead_raw["maker_queue_replay"]' in text

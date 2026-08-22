@@ -200,3 +200,70 @@ def test_loader_is_bounded(tmp_path: Path) -> None:
     _history, meta = load_l2_history(tmp_path, max_lines=3, time_budget_s=0)
     assert meta["stopped_reason"] == "MAX_LINES_REACHED"
     assert meta["lines_read"] == 4
+
+
+def test_windowed_loader_reads_only_overlapping_shards_before_line_budget(
+    tmp_path: Path,
+) -> None:
+    directory = tmp_path / "runtime" / "data" / "market_ticks"
+    old_start = 1_786_500_000_000
+    target_start = 1_786_552_000_000
+    _write(
+        directory
+        / "shards"
+        / f"hyperliquid_market_ticks.{old_start}-{old_start + 100}.1.jsonl.gz",
+        [_record(ts_ms=old_start + i, raw_sha=f"old-{i}") for i in range(20)],
+    )
+    target_path = (
+        directory
+        / "shards"
+        / f"hyperliquid_market_ticks.{target_start}-{target_start + 100}.2.jsonl.gz"
+    )
+    _write(
+        target_path,
+        [
+            _record(ts_ms=target_start + 5, raw_sha="target-book"),
+            _trade_record(ts_ms=target_start + 6, trade_id=99),
+        ],
+    )
+
+    books, trades, meta = load_market_microstructure_history(
+        tmp_path,
+        max_lines=3,
+        time_budget_s=0,
+        start_ms=target_start,
+        end_ms=target_start + 100,
+    )
+
+    assert len(books["ETH"]) == 1
+    assert len(trades["ETH"]) == 1
+    assert meta["stopped_reason"] == "COMPLETED"
+    assert meta["source_time_filter_applied"] is True
+    assert meta["requested_start_ms"] == target_start
+    assert meta["requested_end_ms"] == target_start + 100
+    assert meta["sources"] == [target_path.relative_to(tmp_path).as_posix()]
+
+
+def test_windowed_loader_filters_current_rows_outside_requested_range(
+    tmp_path: Path,
+) -> None:
+    directory = tmp_path / "runtime" / "data" / "market_ticks"
+    target = 1_786_552_000_000
+    _write(
+        directory / "hyperliquid_market_ticks.current.jsonl",
+        [
+            _record(ts_ms=target - 100, raw_sha="before"),
+            _record(ts_ms=target + 5, raw_sha="inside"),
+            _record(ts_ms=target + 100, raw_sha="after"),
+        ],
+    )
+
+    history, meta = load_l2_history(
+        tmp_path,
+        time_budget_s=0,
+        start_ms=target,
+        end_ms=target + 10,
+    )
+
+    assert [row["raw_sha256"] for row in history["ETH"]] == ["inside"]
+    assert meta["rows_outside_window"] == 2

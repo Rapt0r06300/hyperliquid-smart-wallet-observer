@@ -97,6 +97,24 @@ def _write_raw(root: Path, name: str, payload: dict[str, Any]) -> Path:
     return target
 
 
+def _lead_trade_window_ms(
+    tape: dict[str, dict[str, list]],
+    *,
+    coin: str = "ETH",
+    trailing_padding_ms: int = 10_000,
+) -> tuple[int | None, int | None]:
+    """Bound execution evidence to the same causal wall-clock range as lead trades."""
+
+    timestamps_ms = [
+        int(float(row[0])) // 1_000_000
+        for row in (tape.get(str(coin).upper()) or {}).get("TRADE", ())
+        if isinstance(row, (list, tuple)) and row and float(row[0]) > 0
+    ]
+    if not timestamps_ms:
+        return None, None
+    return min(timestamps_ms), max(timestamps_ms) + max(0, int(trailing_padding_ms))
+
+
 def run_campaigns(
     root: Path,
     *,
@@ -306,8 +324,13 @@ def run_campaigns(
             str(dataset_manifest_path) if dataset_manifest_path is not None else None
         )
         lead_tape = lead_lag_shadow.charger_tape(root, sources=lead_sources)
+        lead_window_start_ms, lead_window_end_ms = _lead_trade_window_ms(lead_tape)
         l2_history, public_trade_history, microstructure_meta = (
-            load_market_microstructure_history(root)
+            load_market_microstructure_history(
+                root,
+                start_ms=lead_window_start_ms,
+                end_ms=lead_window_end_ms,
+            )
         )
         latency_evidence = load_runtime_latency_evidence(root)
         maker_queue_replay = replay_lead_lag_queue_maker(

@@ -14,6 +14,7 @@ from __future__ import annotations
 import gzip
 import json
 import math
+import re
 import time
 from collections import defaultdict
 from collections.abc import Iterator, Mapping, Sequence
@@ -25,9 +26,53 @@ STREAM_NAME = "hyperliquid_market_ticks"
 DEFAULT_MAX_FILES = 96
 DEFAULT_MAX_LINES = 2_000_000
 DEFAULT_TIME_BUDGET_S = 30.0
+_SHARD_RANGE_RE = re.compile(
+    rf"^{re.escape(STREAM_NAME)}\.(\d+)-(\d+)\.\d+\.jsonl\.gz$"
+)
 
 
-def discover_l2_sources(root: str | Path, *, max_files: int = DEFAULT_MAX_FILES) -> list[Path]:
+def _shard_range_ms(path: Path) -> tuple[int, int] | None:
+    """Return the durable shard range encoded by modern collector names."""
+
+    match = _SHARD_RANGE_RE.match(path.name)
+    if match is None:
+        return None
+    start_ms, end_ms = (int(value) for value in match.groups())
+    if start_ms < 1_500_000_000_000 or end_ms < start_ms:
+        return None
+    return start_ms, end_ms
+
+
+def _overlaps(
+    source_range: tuple[int, int] | None,
+    *,
+    start_ms: int | None,
+    end_ms: int | None,
+) -> bool:
+    if source_range is None or (start_ms is None and end_ms is None):
+        return True
+    source_start, source_end = source_range
+    if start_ms is not None and source_end < int(start_ms):
+        return False
+    if end_ms is not None and source_start > int(end_ms):
+        return False
+    return True
+
+
+def _source_sort_key(path: Path) -> tuple[int, int, int, str, str]:
+    source_range = _shard_range_ms(path)
+    if source_range is not None:
+        return 0, source_range[0], source_range[1], path.name, path.as_posix()
+    return 1, 0, 0, path.name, path.as_posix()
+
+
+def discover_l2_sources(
+    root: str | Path,
+    *,
+    max_files: int = DEFAULT_MAX_FILES,
+    start_ms: int | None = None,
+    end_ms: int | None = None,
+) -> list[Path]:
     directory = Path(root) / TICK_DIR
     current = directory / f"{STREAM_NAME}.current.jsonl"
     current_resolved = current.resolve() if current.is_file() else None
@@ -44,17 +89,38 @@ def discover_l2_sources(root: str | Path, *, max_files: int = DEFAULT_MAX_FILES)
             path.resolve()
             for path in shard_candidates
             if current_resolved is None or path.resolve() != current_resolved
+            if _overlaps(_shard_range_ms(path), start_ms=start_ms, end_ms=end_ms)
         },
-        key=lambda path: (path.name, path.as_posix()),
+        key=_source_sort_key,
     )
 
     if max_files > 0:
         shard_budget = max(0, int(max_files) - (1 if current_resolved else 0))
         immutable = immutable[-shard_budget:] if shard_budget else []
-    # Read the live tail first so a bounded ``max_lines`` run cannot spend its
-    # entire budget on sealed history.  The loader sorts observations by their
-    # durable clock afterwards.
+    # With an explicit causal window, immutable shards are already reduced to
+    # the overlap and are read chronologically before the live tail. Without a
+    # window, preserve the historical live-first bounded behaviour.
+    if start_ms is not None or end_ms is not None:
+        return [*immutable, *([current_resolved] if current_resolved else [])]
     return [*([current_resolved] if current_resolved else []), *immutable]
+
+
+def _outside_window(
+    record: Mapping[str, Any],
+    *,
+    start_ms: int | None,
+    end_ms: int | None,
+) -> bool:
+    if start_ms is None and end_ms is None:
+        return False
+    clocks = _local_timestamps_ms(record)
+    if clocks is None:
+        return False
+    observed_ms = clocks[2]
+    return bool(
+        (start_ms is not None and observed_ms < int(start_ms))
+        or (end_ms is not None and observed_ms > int(end_ms))
+    )
 
 
 def _lines(path: Path) -> Iterator[str]:
@@ -282,6 +348,8 @@ def load_market_microstructure_history(
     max_files: int = DEFAULT_MAX_FILES,
     max_lines: int = DEFAULT_MAX_LINES,
     time_budget_s: float = DEFAULT_TIME_BUDGET_S,
+    start_ms: int | None = None,
+    end_ms: int | None = None,
 ) -> tuple[
     dict[str, list[dict[str, Any]]],
     dict[str, list[dict[str, Any]]],
@@ -289,13 +357,18 @@ def load_market_microstructure_history(
 ]:
     """Load L2 and public trades in one bounded pass over the real tick store."""
     project_root = Path(root).resolve()
-    sources = discover_l2_sources(project_root, max_files=max_files)
+    sources = discover_l2_sources(
+        project_root,
+        max_files=max_files,
+        start_ms=start_ms,
+        end_ms=end_ms,
+    )
     books: dict[str, list[dict[str, Any]]] = defaultdict(list)
     trades: dict[str, list[dict[str, Any]]] = defaultdict(list)
     seen_books: set[str] = set()
     seen_trades: set[str] = set()
     started = time.monotonic()
-    lines_read = invalid = duplicate_books = duplicate_trades = 0
+    lines_read = invalid = duplicate_books = duplicate_trades = outside_window = 0
     stopped_reason = "COMPLETED"
 
     for source in sources:
@@ -317,6 +390,9 @@ def load_market_microstructure_history(
                 continue
             if not isinstance(record, Mapping):
                 invalid += 1
+                continue
+            if _outside_window(record, start_ms=start_ms, end_ms=end_ms):
+                outside_window += 1
                 continue
             if str(record.get("channel") or "") == "l2Book":
                 snapshot = snapshot_from_tick(record)
@@ -367,7 +443,11 @@ def load_market_microstructure_history(
         "duplicate_l2_rejected": duplicate_books,
         "duplicate_trades_rejected": duplicate_trades,
         "invalid_rows": invalid,
+        "rows_outside_window": outside_window,
         "stopped_reason": stopped_reason,
+        "requested_start_ms": int(start_ms) if start_ms is not None else None,
+        "requested_end_ms": int(end_ms) if end_ms is not None else None,
+        "source_time_filter_applied": start_ms is not None or end_ms is not None,
         "clock": "DURABLE_OBSERVABLE_MAX_RECEIVE_WRITE_MS",
         "read_only": True,
         "real_execution": False,
@@ -380,10 +460,17 @@ def load_l2_history(
     max_files: int = DEFAULT_MAX_FILES,
     max_lines: int = DEFAULT_MAX_LINES,
     time_budget_s: float = DEFAULT_TIME_BUDGET_S,
+    start_ms: int | None = None,
+    end_ms: int | None = None,
 ) -> tuple[dict[str, list[dict[str, Any]]], dict[str, Any]]:
     """Load recorded L2 rows by coin with explicit bounded-work diagnostics."""
     project_root = Path(root).resolve()
-    sources = discover_l2_sources(project_root, max_files=max_files)
+    sources = discover_l2_sources(
+        project_root,
+        max_files=max_files,
+        start_ms=start_ms,
+        end_ms=end_ms,
+    )
     grouped: dict[str, list[dict[str, Any]]] = defaultdict(list)
     seen: set[str] = set()
     started = time.monotonic()
@@ -391,6 +478,7 @@ def load_l2_history(
     l2_rows = 0
     duplicates = 0
     invalid = 0
+    outside_window = 0
     stopped_reason = "COMPLETED"
 
     for source in sources:
@@ -412,6 +500,9 @@ def load_l2_history(
                 continue
             if not isinstance(record, Mapping):
                 invalid += 1
+                continue
+            if _outside_window(record, start_ms=start_ms, end_ms=end_ms):
+                outside_window += 1
                 continue
             snapshot = snapshot_from_tick(record)
             if snapshot is None:
@@ -446,7 +537,11 @@ def load_l2_history(
         "coins": len(result),
         "duplicates_rejected": duplicates,
         "invalid_rows": invalid,
+        "rows_outside_window": outside_window,
         "stopped_reason": stopped_reason,
+        "requested_start_ms": int(start_ms) if start_ms is not None else None,
+        "requested_end_ms": int(end_ms) if end_ms is not None else None,
+        "source_time_filter_applied": start_ms is not None or end_ms is not None,
         "clock": "DURABLE_OBSERVABLE_MAX_RECEIVE_WRITE_MS",
         "read_only": True,
         "real_execution": False,
