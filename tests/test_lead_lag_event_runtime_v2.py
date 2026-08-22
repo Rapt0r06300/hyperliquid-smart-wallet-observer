@@ -5,6 +5,7 @@ from pathlib import Path
 
 import pytest
 
+import hl_observer.runtime.lead_lag_event_runtime as runtime_module
 from hl_observer.backtesting.lead_lag_evidence import (
     REQUIRED_CRITERIA,
     SCHEMA_VERSION,
@@ -68,6 +69,18 @@ def _trade(event_id: str, *, price: float, received_ms: int) -> dict:
     }
 
 
+def _trade_with_monotonic(
+    event_id: str,
+    *,
+    price: float,
+    received_ms: int,
+    received_monotonic_ns: int,
+) -> dict:
+    event = _trade(event_id, price=price, received_ms=received_ms)
+    event["recu_ns"] = received_monotonic_ns
+    return event
+
+
 def _quote(*, received_ms: int) -> dict:
     return {
         "coin": "ETH",
@@ -128,6 +141,78 @@ def test_event_is_rejected_when_runtime_latency_consumes_half_life(tmp_path: Pat
     assert outcome.accepted is False
     assert outcome.code == "ALPHA_HALF_LIFE_EXPIRED"
     assert not runtime.paper_engine.positions
+
+
+def test_monotonic_dispatch_latency_overrides_wall_clock_skew(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _write_promoted_config(tmp_path, half_life_ms=100.0, safety_margin_ms=20.0)
+    clock = iter((1_005_000_000, 2_005_000_000))
+    monkeypatch.setattr(runtime_module.time, "monotonic_ns", lambda: next(clock))
+    runtime = LeadLagEventPaperRuntime(tmp_path)
+    runtime.on_trade(
+        _trade_with_monotonic(
+            "trade-1",
+            price=100.0,
+            received_ms=1_000_000,
+            received_monotonic_ns=1_000_000_000,
+        ),
+        None,
+        now_ms=1_000_000,
+    )
+    outcome = runtime.on_trade(
+        _trade_with_monotonic(
+            "trade-2",
+            price=100.20,
+            received_ms=1_000_010,
+            received_monotonic_ns=2_000_000_000,
+        ),
+        _quote(received_ms=1_000_009),
+        now_ms=1_000_095,
+    )
+
+    assert outcome.accepted is True
+    assert outcome.latency_ms == pytest.approx(5.0)
+    rows = [
+        json.loads(line)
+        for line in runtime.decisions_path.read_text(encoding="utf-8").splitlines()
+    ]
+    assert rows[-1]["latency_kind"] == "LOCAL_MONOTONIC_DISPATCH"
+
+
+def test_monotonic_latency_sampling_is_globally_throttled(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _write_promoted_config(tmp_path)
+    clock = iter((1_005_000_000, 1_005_500_000, 2_100_000_000))
+    monkeypatch.setattr(runtime_module.time, "monotonic_ns", lambda: next(clock))
+    runtime = LeadLagEventPaperRuntime(tmp_path, latency_sample_interval_ms=1_000)
+    events = (
+        _trade_with_monotonic(
+            "trade-1", price=100.0, received_ms=1_000_000,
+            received_monotonic_ns=1_000_000_000,
+        ),
+        _trade_with_monotonic(
+            "trade-2", price=100.001, received_ms=1_000_001,
+            received_monotonic_ns=1_005_100_000,
+        ),
+        _trade_with_monotonic(
+            "trade-3", price=100.002, received_ms=1_001_100,
+            received_monotonic_ns=2_095_000_000,
+        ),
+    )
+    for event in events:
+        runtime.on_trade(event, None, now_ms=int(event["recv_wall_ts_ms"]))
+
+    rows = [
+        json.loads(line)
+        for line in runtime.decisions_path.read_text(encoding="utf-8").splitlines()
+    ]
+    samples = [row for row in rows if row.get("sample_only") is True]
+    assert len(samples) == 2
+    assert all(row["latency_kind"] == "LOCAL_MONOTONIC_DISPATCH" for row in samples)
 
 
 def test_rejected_frozen_evidence_keeps_runtime_disabled(tmp_path: Path) -> None:

@@ -41,13 +41,20 @@ def test_processus_projet_exclut_le_diagnostic_et_inclut_les_enfants(monkeypatch
          "CommandLine": "cmd /c tools\\boucle_collecteur.cmd bbo-collector tools\\collecter_bbo.py 5"},
         {"ProcessId": 21, "ParentProcessId": 20, "Name": "python.exe",
          "CommandLine": "python worker-child.py"},
+        {"ProcessId": 30, "ParentProcessId": 1, "Name": "python.exe",
+         "CommandLine": (
+             "python tools\\run_bounded_collector.py --name copy-vault-checkpoints "
+             "--script tools\\collecter_copy_vault_checkpoints.py"
+         )},
+        {"ProcessId": 31, "ParentProcessId": 30, "Name": "python.exe",
+         "CommandLine": "python tools\\collecter_copy_vault_checkpoints.py"},
         {"ProcessId": 99, "ParentProcessId": 1, "Name": "python.exe",
          "CommandLine": "python C:\\autre\\application.py"},
     ]
     monkeypatch.setattr(SC, "_ps", lambda _commande: json.dumps(processus))
 
     trouves = SC._processus_projet(Path.cwd())
-    assert {p["pid"] for p in trouves} == {20, 21}
+    assert {p["pid"] for p in trouves} == {20, 21, 30, 31}
 
 
 def test_demarrer_tous_enregistre_les_pids(tmp_path):

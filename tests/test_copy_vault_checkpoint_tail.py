@@ -3,9 +3,13 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from hl_observer.backtesting.copy_vault_executable import cluster_metaorders
+from hl_observer.backtesting.copy_vault_executable import (
+    cluster_metaorders,
+    select_observed_continuations,
+)
 from hl_observer.collection.copy_vault_checkpoint_tail import (
     COMPANION_PROTOCOL,
+    CONTINUATION_SIGNAL_FILL_COUNT,
     COPY_DELAY_MS,
     HORIZONS_MS,
     INPUT_RELPATH,
@@ -193,6 +197,43 @@ def test_partial_duplicate_stale_and_continuation_fills_cannot_fabricate_checkpo
     result = engine.poll_once()
     assert result["captured"] == 0
     assert result["counters"]["stale_rejected"] == 1
+
+
+def test_troisieme_fill_live_planifie_des_checkpoints_de_continuation(tmp_path: Path) -> None:
+    now = [2_500_000]
+    engine = CopyVaultCheckpointTail(
+        tmp_path,
+        fetch_book=lambda _coin: _book(now[0]),
+        clock_ms=lambda: now[0],
+    )
+    input_path = tmp_path / INPUT_RELPATH
+    fills = [_fill(now[0], event="first", start_position=0.0)]
+    _append(input_path, fills[-1])
+    assert engine.poll_once()["captured"] == 1
+
+    for index in range(2, CONTINUATION_SIGNAL_FILL_COUNT + 1):
+        now[0] += 1_000
+        fills.append(_fill(now[0], event=f"fill-{index}", start_position=0.01 * (index - 1)))
+        _append(input_path, fills[-1])
+        result = engine.poll_once()
+
+    assert result["captured"] == 1
+    assert result["counters"]["continuation_signals_started"] == 1
+    replay_rows = [{
+        **fill,
+        "event_id": canonical_fill_id(fill),
+        "direction": 1,
+        "action": "OPEN" if index == 0 else "ADD",
+        "observed_at_ms": fill["received_at_ms"],
+        "is_snapshot": False,
+    } for index, fill in enumerate(fills)]
+    continuation = select_observed_continuations(cluster_metaorders(replay_rows)[0])[0][0]
+    checkpoints = [
+        json.loads(line)
+        for line in (tmp_path / OUTPUT_RELPATH).read_text(encoding="utf-8").splitlines()
+    ]
+    assert checkpoints[-1]["checkpoint_stage"] == "REFERENCE"
+    assert checkpoints[-1]["metaorder_id"] == continuation["metaorder_id"]
 
 
 def test_live_tail_et_replay_partagent_identite_immuable(tmp_path: Path) -> None:

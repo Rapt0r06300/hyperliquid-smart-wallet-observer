@@ -34,6 +34,7 @@ DEFAULT_MIN_LATENCY_SAMPLES = 20
 DEFAULT_MAX_BOOK_AGE_MS = 750.0
 DEFAULT_MAX_EXECUTION_OBSERVATION_DELAY_MS = 750.0
 DEFAULT_FEE_BPS = 9.0
+LATENCY_KIND_LOCAL_MONOTONIC = "LOCAL_MONOTONIC_DISPATCH"
 
 
 def _number(value: object) -> float | None:
@@ -79,6 +80,11 @@ def load_runtime_latency_evidence(
             invalid += 1
             continue
         total += 1
+        if (
+            row.get("sample_only") is not True
+            or row.get("latency_kind") != LATENCY_KIND_LOCAL_MONOTONIC
+        ):
+            continue
         latency = _number(row.get("latency_ms"))
         if latency is None or latency < 0:
             continue
@@ -86,7 +92,7 @@ def load_runtime_latency_evidence(
     p95 = _percentile_nearest_rank(values, 0.95)
     measured = len(values) >= max(1, int(min_samples)) and p95 is not None
     return {
-        "schema_version": "hypersmart.lead_lag_runtime_latency.v1",
+        "schema_version": "hypersmart.lead_lag_runtime_latency.v2",
         "path": DEFAULT_DECISIONS.as_posix(),
         "rows_seen": total,
         "samples": len(values),
@@ -139,6 +145,31 @@ def _first_at_or_after(
     return row
 
 
+def _book_for_execution(
+    rows: list[Mapping[str, Any]],
+    target_ms: float,
+    *,
+    max_age_ms: float,
+    max_delay_ms: float,
+) -> tuple[Mapping[str, Any], float, str] | None:
+    """Select a causal executable book without pretending a stale mark is current.
+
+    The latest already-observed book is executable at ``target_ms`` while it is
+    still fresh.  Otherwise the replay waits for the first bounded subsequent
+    observation and moves the execution timestamp to that observation.  The
+    latter is delayed execution, not look-ahead at the original target.
+    """
+
+    latest = _latest_at_or_before(rows, target_ms, max_age_ms=max_age_ms)
+    if latest is not None:
+        return latest, float(target_ms), "LAST_CAUSAL_FRESH"
+    following = _first_at_or_after(rows, target_ms, max_delay_ms=max_delay_ms)
+    if following is None:
+        return None
+    observed_ms = float(following.get("ts_ms") or 0)
+    return following, observed_ms, "NEXT_OBSERVED_BOUNDED"
+
+
 def _mid(book: Mapping[str, Any]) -> float:
     return 0.5 * (float(book["bid"]) + float(book["ask"]))
 
@@ -164,9 +195,13 @@ def _settle(
     detection_book: Mapping[str, Any],
     entry_book: Mapping[str, Any],
     exit_book: Mapping[str, Any],
+    entry_execution_ts_ms: float,
+    exit_execution_ts_ms: float,
     notional_usd: float,
     fee_bps: float,
     measured_latency_ms: float,
+    entry_book_selection: str,
+    exit_book_selection: str,
 ) -> dict[str, Any]:
     entry_mid = _mid(entry_book)
     exit_mid = _mid(exit_book)
@@ -208,8 +243,10 @@ def _settle(
         "coin": str(coin).upper(),
         "direction": int(direction),
         "trigger_ts_ms": int(trigger_ts_ms),
-        "entry_ts_ms": int(entry_book["ts_ms"]),
-        "exit_ts_ms": int(exit_book["ts_ms"]),
+        "entry_ts_ms": int(math.ceil(entry_execution_ts_ms)),
+        "exit_ts_ms": int(math.ceil(exit_execution_ts_ms)),
+        "entry_book_observed_ts_ms": int(entry_book["ts_ms"]),
+        "exit_book_observed_ts_ms": int(exit_book["ts_ms"]),
         "detection_mid": detection_mid,
         "entry_mid": entry_mid,
         "exit_mid": exit_mid,
@@ -231,7 +268,11 @@ def _settle(
         "latency_cost_usd": latency_usd,
         "pnl_usd": pnl_usd,
         "measured_runtime_latency_ms": float(measured_latency_ms),
-        "actual_entry_delay_ms": int(entry_book["ts_ms"]) - int(trigger_ts_ms),
+        "actual_entry_delay_ms": float(entry_execution_ts_ms) - float(trigger_ts_ms),
+        "entry_book_age_ms": float(entry_execution_ts_ms) - float(entry_book["ts_ms"]),
+        "exit_book_age_ms": float(exit_execution_ts_ms) - float(exit_book["ts_ms"]),
+        "entry_book_selection": str(entry_book_selection),
+        "exit_book_selection": str(exit_book_selection),
         "latency_embedded_in_entry_price": True,
         "top_level_capacity_measured": True,
         "full_fill": full_fill,
@@ -370,23 +411,27 @@ def replay_measured_lead_lag(
                 coverage["missing_detection_book"] += 1
                 continue
             entry_target = float(trigger_ms) + applied_latency_ms
-            entry = _first_at_or_after(
+            entry_selection = _book_for_execution(
                 rows,
                 entry_target,
+                max_age_ms=min(max_book_age_ms, max_execution_observation_delay_ms),
                 max_delay_ms=max_execution_observation_delay_ms,
             )
-            if entry is None:
+            if entry_selection is None:
                 coverage["missing_entry_book"] += 1
                 continue
-            exit_target = float(entry["ts_ms"]) + float(horizon_ms)
-            exit_book = _first_at_or_after(
+            entry, entry_execution_ts_ms, entry_selection_kind = entry_selection
+            exit_target = entry_execution_ts_ms + float(horizon_ms)
+            exit_selection = _book_for_execution(
                 rows,
                 exit_target,
+                max_age_ms=min(max_book_age_ms, max_execution_observation_delay_ms),
                 max_delay_ms=max_execution_observation_delay_ms,
             )
-            if exit_book is None:
+            if exit_selection is None:
                 coverage["missing_exit_book"] += 1
                 continue
+            exit_book, exit_execution_ts_ms, exit_selection_kind = exit_selection
             event = _settle(
                 coin=str(coin),
                 direction=1 if float(raw_direction) > 0 else -1,
@@ -394,9 +439,13 @@ def replay_measured_lead_lag(
                 detection_book=detection,
                 entry_book=entry,
                 exit_book=exit_book,
+                entry_execution_ts_ms=entry_execution_ts_ms,
+                exit_execution_ts_ms=exit_execution_ts_ms,
                 notional_usd=float(notional_usd),
                 fee_bps=float(fee_bps),
                 measured_latency_ms=applied_latency_ms,
+                entry_book_selection=entry_selection_kind,
+                exit_book_selection=exit_selection_kind,
             )
             event["notional_usd"] = float(notional_usd)
             raw_observations.append(event)

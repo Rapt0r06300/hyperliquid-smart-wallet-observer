@@ -126,6 +126,7 @@ def cluster_metaorders(
                 "leader_notional_usd": 0.0,
                 "move_frac_audit_sum": 0.0,
                 "member_event_ids": [],
+                "member_events": [],
             }
             cluster["first_event_id"] = row["event_id"]
             cluster["metaorder_id"] = canonical_metaorder_id(
@@ -141,6 +142,16 @@ def cluster_metaorders(
         cluster["leader_notional_usd"] += max(0.0, float(row.get("taille_usd") or 0.0))
         cluster["move_frac_audit_sum"] += max(0.0, float(row.get("move_frac") or 0.0))
         cluster["member_event_ids"].append(row["event_id"])
+        cluster["member_events"].append({
+            "event_id": row["event_id"],
+            "ts_ms": row["ts_ms"],
+            "observed_at_ms": row["observed_at_ms"],
+            "source": row.get("source") or "REST_BACKFILL",
+            "causal_forward_eligible": row["causal_forward_eligible"],
+            "action": row["action"],
+            "taille_usd": max(0.0, float(row.get("taille_usd") or 0.0)),
+            "cumulative_leader_notional_usd": cluster["leader_notional_usd"],
+        })
     completed.extend(active.values())
 
     for cluster in completed:
@@ -161,6 +172,73 @@ def cluster_metaorders(
         "causal_forward_metaorders": sum(
             1 for row in completed if row.get("causal_forward_eligible") is True
         ),
+    }
+
+
+def select_observed_continuations(
+    metaorders: Iterable[Mapping[str, Any]], *, required_observed_fills: int = 3,
+) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    """Create causal candidates only when the Nth live fill has been observed.
+
+    The candidate depends exclusively on the prefix available at signal time. Later
+    slices remain audit material and cannot alter its identity or sizing evidence.
+    """
+    required = max(2, int(required_observed_fills))
+    rows = [dict(row) for row in metaorders]
+    selected: list[dict[str, Any]] = []
+    rejected_noncausal = 0
+    rejected_short = 0
+    rejected_nonmonotonic = 0
+    for raw in rows:
+        members = [dict(row) for row in (raw.get("member_events") or [])]
+        if len(members) < required:
+            rejected_short += 1
+            continue
+        prefix = members[:required]
+        if not all(
+            row.get("causal_forward_eligible") is True
+            and str(row.get("source") or "") == "LIVE_WS"
+            and int(row.get("observed_at_ms") or 0) >= int(row.get("ts_ms") or 0) > 0
+            for row in prefix
+        ):
+            rejected_noncausal += 1
+            continue
+        observed_times = [int(row["observed_at_ms"]) for row in prefix]
+        if observed_times != sorted(observed_times):
+            rejected_nonmonotonic += 1
+            continue
+        confirmation = prefix[-1]
+        signal_ts_ms = int(confirmation["observed_at_ms"])
+        candidate = {
+            **dict(raw),
+            "signal_ts_ms": signal_ts_ms,
+            "signal_source": "LIVE_WS",
+            "causal_forward_eligible": True,
+            "confirmation_fill_count": required,
+            "confirmation_event_id": str(confirmation["event_id"]),
+            "leader_notional_usd_at_signal": round(
+                float(confirmation.get("cumulative_leader_notional_usd") or 0.0), 8
+            ),
+            "member_event_ids_at_signal": [str(row["event_id"]) for row in prefix],
+            "continuation_policy": f"enter_after_{required}_observed_live_fills",
+        }
+        candidate["metaorder_id"] = canonical_metaorder_id(
+            vault=str(candidate["vault"]),
+            coin=str(candidate["coin"]),
+            direction=int(candidate["direction"]),
+            signal_ts_ms=signal_ts_ms,
+            first_event_id=str(confirmation["event_id"]),
+        )
+        selected.append(candidate)
+    selected.sort(key=lambda row: (int(row["signal_ts_ms"]), str(row["metaorder_id"])))
+    return selected, {
+        "required_observed_fills": required,
+        "input_metaorders": len(rows),
+        "selected_continuations": len(selected),
+        "insufficient_fill_prefix_rejected": rejected_short,
+        "noncausal_prefix_rejected": rejected_noncausal,
+        "nonmonotonic_observation_rejected": rejected_nonmonotonic,
+        "signal_policy": f"Nth_observed_live_fill_prefix_only;N={required}",
     }
 
 
@@ -673,5 +751,5 @@ __all__ = [
     "calibrate_train_only", "canonical_metaorder_id", "classify_live_entry_action",
     "cluster_metaorders", "evaluate_frozen", "execute_metaorder", "expected_open_direction",
     "load_observed_books", "protocol_signature", "replay_metaorders", "select_causal_protocol_inputs",
-    "summarize", "temporal_bounds", "temporal_evidence",
+    "select_observed_continuations", "summarize", "temporal_bounds", "temporal_evidence",
 ]

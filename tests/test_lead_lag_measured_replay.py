@@ -12,7 +12,23 @@ from hl_observer.simulation.lead_lag_measured_replay import (
 def test_runtime_latency_evidence_requires_real_sample_count(tmp_path: Path) -> None:
     path = tmp_path / "runtime" / "data" / "lead_lag_event_decisions.jsonl"
     path.parent.mkdir(parents=True, exist_ok=True)
-    rows = [{"latency_ms": value, "real_execution": False} for value in range(1, 21)]
+    rows = [
+        {
+            "latency_ms": value,
+            "latency_kind": "LOCAL_MONOTONIC_DISPATCH",
+            "sample_only": True,
+            "real_execution": False,
+        }
+        for value in range(1, 21)
+    ]
+    rows.append(
+        {
+            "latency_ms": 0,
+            "latency_kind": "LEGACY_WALL_DISPATCH",
+            "sample_only": True,
+            "real_execution": False,
+        }
+    )
     path.write_text("\n".join(json.dumps(row) for row in rows) + "\n", encoding="utf-8")
 
     evidence = load_runtime_latency_evidence(tmp_path, min_samples=20)
@@ -80,6 +96,66 @@ def test_measured_replay_uses_delayed_executable_l2_and_full_capacity() -> None:
     assert all_fills > 0
     assert replay["fee_source"] == "FROZEN_CONSERVATIVE_TAKER_ROUND_TRIP"
     assert replay["latency_rule"] == "P95_EMBEDDED_IN_DELAYED_ENTRY_PRICE_NO_DOUBLE_CHARGE"
+
+
+def test_last_causal_book_remains_executable_until_a_new_update() -> None:
+    tape, l2 = _fixture()
+    base_ms = 1_786_552_000_000
+    l2["ETH"] = [
+        row
+        for row in l2["ETH"]
+        if (int(row["ts_ms"]) - base_ms) % 1_000 != 20
+    ]
+
+    replay = replay_measured_lead_lag(
+        tape,
+        l2,
+        shock_threshold_bps=8.0,
+        horizon_ms=100,
+        latency_evidence=_latency(),
+        notional_usd=100.0,
+        fee_bps=1.0,
+        min_history=1,
+        min_episodes=1,
+    )
+
+    assert replay["coverage"]["observable"] >= 5
+    entries = [
+        row
+        for rows in replay["ledgers"].values()
+        for row in rows
+        if row.get("evt") == "ENTREE"
+    ]
+    assert entries
+    assert all(int(row["ts"]) % 1_000 == 20 for row in entries)
+
+
+def test_stale_book_waits_for_next_observation_and_moves_execution_time() -> None:
+    tape, l2 = _fixture()
+    replay = replay_measured_lead_lag(
+        tape,
+        l2,
+        shock_threshold_bps=8.0,
+        horizon_ms=50,
+        latency_evidence=_latency(),
+        notional_usd=100.0,
+        fee_bps=1.0,
+        min_history=1,
+        max_book_age_ms=10.0,
+        max_execution_observation_delay_ms=100.0,
+        min_episodes=1,
+    )
+
+    assert replay["coverage"]["observable"] >= 5
+    exits = [
+        row
+        for rows in replay["ledgers"].values()
+        for row in rows
+        if row.get("evt") == "SORTIE"
+    ]
+    assert exits
+    # target is trigger+70 ms, so the observed +120 ms book delays execution.
+    assert all(int(row["ts"]) % 1_000 == 120 for row in exits)
 
 
 def test_missing_latency_proof_can_never_be_liquidatable() -> None:

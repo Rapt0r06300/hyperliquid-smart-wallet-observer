@@ -15,6 +15,7 @@ from hl_observer.backtesting.copy_vault_executable import (
     load_observed_books,
     replay_metaorders,
     select_causal_protocol_inputs,
+    select_observed_continuations,
     summarize,
     temporal_bounds,
     temporal_evidence,
@@ -117,6 +118,52 @@ def test_metaorder_id_ne_change_pas_quand_une_slice_future_arrive() -> None:
 
     assert initial["metaorder_id"] == enriched["metaorder_id"]
     assert initial["first_event_id"] == enriched["first_event_id"] == "first"
+
+
+def test_continuation_attend_trois_fills_observes_sans_regarder_le_futur() -> None:
+    def live(event_id: str, ts_ms: int, action: str) -> dict:
+        return {
+            **_entry(event_id, ts_ms, action=action),
+            "source": "LIVE_WS",
+            "is_snapshot": False,
+            "observed_at_ms": ts_ms + 25,
+        }
+
+    prefix = [
+        live("first", 1_000, "OPEN"),
+        live("second", 2_000, "ADD"),
+        live("third", 3_000, "ADD"),
+    ]
+    initial = cluster_metaorders(prefix)[0]
+    enriched = cluster_metaorders(prefix + [live("future", 4_000, "ADD")])[0]
+    selected_initial, audit = select_observed_continuations(initial)
+    selected_enriched, _ = select_observed_continuations(enriched)
+
+    assert audit["selected_continuations"] == 1
+    assert selected_initial[0]["signal_ts_ms"] == 3_025
+    assert selected_initial[0]["confirmation_event_id"] == "third"
+    assert selected_initial[0]["member_event_ids_at_signal"] == ["first", "second", "third"]
+    assert selected_initial[0]["leader_notional_usd_at_signal"] == 300.0
+    assert selected_enriched[0]["metaorder_id"] == selected_initial[0]["metaorder_id"]
+    assert selected_enriched[0]["leader_notional_usd_at_signal"] == 300.0
+
+
+def test_continuation_refuse_un_prefix_historique_ou_non_monotone() -> None:
+    rows = [
+        {
+            **_entry("first", 1_000, action="OPEN"),
+            "source": "LIVE_WS", "is_snapshot": False, "observed_at_ms": 1_025,
+        },
+        _entry("history", 2_000, action="ADD"),
+        {
+            **_entry("third", 3_000, action="ADD"),
+            "source": "LIVE_WS", "is_snapshot": False, "observed_at_ms": 3_025,
+        },
+    ]
+    selected, audit = select_observed_continuations(cluster_metaorders(rows)[0])
+
+    assert selected == []
+    assert audit["noncausal_prefix_rejected"] == 1
 
 
 def test_metaorder_live_emploie_reception_locale_et_backfill_ne_prouve_pas_forward() -> None:

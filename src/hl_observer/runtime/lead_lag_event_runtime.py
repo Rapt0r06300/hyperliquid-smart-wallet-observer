@@ -10,6 +10,7 @@ from __future__ import annotations
 import json
 import math
 import os
+import time
 from collections import deque
 from collections.abc import Mapping
 from contextlib import suppress
@@ -36,6 +37,8 @@ DEFAULT_STATUS = Path("runtime") / "data" / "lead_lag_event_runtime_status.json"
 DEFAULT_STATE = Path("runtime") / "data" / "lead_lag_event_runtime_state.json"
 STATE_SCHEMA = "hypersmart.lead_lag_event_state.v1"
 LANE_ID = "LEAD_LAG_STRICT_EVENT"
+LATENCY_KIND_LOCAL_MONOTONIC = "LOCAL_MONOTONIC_DISPATCH"
+LATENCY_KIND_LEGACY_WALL = "LEGACY_WALL_DISPATCH"
 
 
 @dataclass(frozen=True, slots=True)
@@ -62,6 +65,7 @@ class LeadLagEventPaperRuntime:
         state_path: str | Path | None = None,
         paper_engine: PaperEngine | None = None,
         seen_capacity: int = 100_000,
+        latency_sample_interval_ms: int = 1_000,
     ) -> None:
         self.root = Path(root)
         self.config_path = Path(config_path or self.root / DEFAULT_CONFIG)
@@ -74,6 +78,10 @@ class LeadLagEventPaperRuntime:
         self._seen: set[str] = set()
         self._accepted = 0
         self._rejected = 0
+        self._latency_sample_interval_ns = max(
+            1, int(latency_sample_interval_ms)
+        ) * 1_000_000
+        self._last_latency_sample_ns: int | None = None
         self._config_error: str | None = None
         self._state_error: str | None = None
         try:
@@ -117,6 +125,18 @@ class LeadLagEventPaperRuntime:
         if trade_price is None or received_ms is None:
             return LeadLagEventOutcome(event_id, coin, "INVALID_TRADE_EVENT")
 
+        latency_ms, latency_kind, monotonic_now_ns = _dispatch_latency_ms(
+            trade_event,
+            now_ms=now_ms,
+        )
+        self._maybe_record_latency_sample(
+            event_id=event_id,
+            coin=coin,
+            latency_ms=latency_ms,
+            latency_kind=latency_kind,
+            monotonic_now_ns=monotonic_now_ns,
+        )
+
         previous_price = self._last_trade_price.get(coin)
         self._last_trade_price[coin] = trade_price
         self._persist_state()
@@ -138,13 +158,13 @@ class LeadLagEventPaperRuntime:
         if abs(shock_bps) < threshold_bps:
             return LeadLagEventOutcome(event_id, coin, "BELOW_FROZEN_SHOCK_THRESHOLD")
 
-        latency_ms = float(int(now_ms) - received_ms)
         if latency_ms < 0:
             return self._reject(
                 event_id,
                 coin,
                 "NON_CAUSAL_RUNTIME_CLOCK",
                 latency_ms=latency_ms,
+                latency_kind=latency_kind,
                 shock_bps=shock_bps,
             )
         latency_budget = self.config["latency_budget"]
@@ -156,6 +176,7 @@ class LeadLagEventPaperRuntime:
                 coin,
                 "ALPHA_HALF_LIFE_EXPIRED",
                 latency_ms=latency_ms,
+                latency_kind=latency_kind,
                 shock_bps=shock_bps,
             )
 
@@ -175,6 +196,7 @@ class LeadLagEventPaperRuntime:
                 coin,
                 truth_error or "NO_LIVE_EXECUTABLE_BOOK",
                 latency_ms=latency_ms,
+                latency_kind=latency_kind,
                 shock_bps=shock_bps,
             )
 
@@ -219,6 +241,7 @@ class LeadLagEventPaperRuntime:
                 "source_event_id": event_id,
                 "shock_bps": shock_bps,
                 "runtime_latency_ms": latency_ms,
+                "runtime_latency_kind": latency_kind,
                 "alpha_half_life_p95_ms": half_life_ms,
                 "real_execution": False,
             },
@@ -239,6 +262,7 @@ class LeadLagEventPaperRuntime:
             snapshot_id=truth.snapshot_id,
             reason_codes=result.reason_codes,
             ledger_snapshot=result.ledger_snapshot,
+            latency_kind=latency_kind,
         )
         if result.accepted:
             self._accepted += 1
@@ -255,14 +279,53 @@ class LeadLagEventPaperRuntime:
         code: str,
         *,
         latency_ms: float,
+        latency_kind: str,
         shock_bps: float,
     ) -> LeadLagEventOutcome:
         outcome = LeadLagEventOutcome(event_id, coin, code, latency_ms=latency_ms)
         self._rejected += 1
-        self._record(outcome, shock_bps=shock_bps)
+        self._record(
+            outcome,
+            shock_bps=shock_bps,
+            latency_kind=latency_kind,
+        )
         self._persist_state()
         self._write_status(code=code, outcome=outcome)
         return outcome
+
+    def _maybe_record_latency_sample(
+        self,
+        *,
+        event_id: str,
+        coin: str,
+        latency_ms: float,
+        latency_kind: str,
+        monotonic_now_ns: int | None,
+    ) -> None:
+        """Persist bounded local dispatch evidence, independently of signals."""
+        if (
+            latency_kind != LATENCY_KIND_LOCAL_MONOTONIC
+            or monotonic_now_ns is None
+            or latency_ms < 0
+        ):
+            return
+        if (
+            self._last_latency_sample_ns is not None
+            and monotonic_now_ns - self._last_latency_sample_ns
+            < self._latency_sample_interval_ns
+        ):
+            return
+        self._last_latency_sample_ns = monotonic_now_ns
+        self._record(
+            LeadLagEventOutcome(
+                event_id=event_id,
+                coin=coin,
+                code="RUNTIME_LATENCY_SAMPLE",
+                latency_ms=latency_ms,
+            ),
+            latency_kind=latency_kind,
+            sample_only=True,
+        )
 
     def _record(self, outcome: LeadLagEventOutcome, **extra: Any) -> None:
         self.decisions_path.parent.mkdir(parents=True, exist_ok=True)
@@ -455,6 +518,29 @@ def _paper_refusal_code(result: PaperDecisionResult) -> str:
     return "PAPER_ENGINE_REJECTED"
 
 
+def _dispatch_latency_ms(
+    trade_event: Mapping[str, Any],
+    *,
+    now_ms: int,
+) -> tuple[float, str, int | None]:
+    received_monotonic_ns = _positive_int(trade_event.get("recu_ns"))
+    if received_monotonic_ns is not None:
+        monotonic_now_ns = time.monotonic_ns()
+        elapsed_ns = monotonic_now_ns - received_monotonic_ns
+        if elapsed_ns >= 0:
+            return (
+                float(elapsed_ns) / 1_000_000.0,
+                LATENCY_KIND_LOCAL_MONOTONIC,
+                monotonic_now_ns,
+            )
+    received_ms = _positive_int(
+        trade_event.get("recv_wall_ts_ms") or trade_event.get("ts_wall_ms")
+    )
+    if received_ms is None:
+        return -1.0, LATENCY_KIND_LEGACY_WALL, None
+    return float(int(now_ms) - received_ms), LATENCY_KIND_LEGACY_WALL, None
+
+
 def _finite_positive(value: Any) -> float | None:
     try:
         parsed = float(value)
@@ -473,4 +559,9 @@ def _positive_int(value: Any) -> int | None:
     return parsed if parsed > 0 else None
 
 
-__all__ = ["LANE_ID", "LeadLagEventOutcome", "LeadLagEventPaperRuntime"]
+__all__ = [
+    "LANE_ID",
+    "LATENCY_KIND_LOCAL_MONOTONIC",
+    "LeadLagEventOutcome",
+    "LeadLagEventPaperRuntime",
+]

@@ -38,6 +38,7 @@ COPY_DELAY_MS = 60_000
 HORIZONS_MS = (300_000, 900_000, 1_800_000, 3_600_000)
 MAX_TARGET_LAG_MS = 30_000
 METAORDER_GAP_MS = 60_000
+CONTINUATION_SIGNAL_FILL_COUNT = 3
 MAX_EVENT_IDS = 20_000
 MAX_CHECKPOINT_IDS = 20_000
 MAX_PENDING = 5_000
@@ -126,6 +127,7 @@ def _default_state(*, offset: int, now_ms: int) -> dict[str, Any]:
             "out_of_order_rejected": 0,
             "metaorders_started": 0,
             "continuations": 0,
+            "continuation_signals_started": 0,
             "checkpoints_captured": 0,
             "checkpoints_expired": 0,
             "fetch_retries": 0,
@@ -323,6 +325,40 @@ class CopyVaultCheckpointTail:
         )
         if continuation:
             previous["last_fill_ts_ms"] = fill_ts_ms
+            previous["fill_count"] = max(1, int(previous.get("fill_count") or 1)) + 1
+            if (
+                int(previous["fill_count"]) == CONTINUATION_SIGNAL_FILL_COUNT
+                and not previous.get("continuation_metaorder_id")
+            ):
+                continuation_id = canonical_metaorder_id(
+                    vault=vault,
+                    coin=coin,
+                    direction=direction,
+                    signal_ts_ms=received_at_ms,
+                    first_event_id=event_id,
+                )
+                previous["continuation_metaorder_id"] = continuation_id
+                pending = list(self.state.get("pending") or [])
+                base = {"coin": coin, "metaorder_id": continuation_id, "attempts": 0}
+                pending.extend([
+                    {
+                        **base,
+                        "stage": "REFERENCE",
+                        "checkpoint_id": f"{continuation_id}:REFERENCE",
+                        "target_wall_ms": received_at_ms,
+                    },
+                    {
+                        **base,
+                        "stage": "ENTRY",
+                        "checkpoint_id": f"{continuation_id}:ENTRY",
+                        "target_wall_ms": received_at_ms + COPY_DELAY_MS,
+                    },
+                ])
+                self.state["pending"] = pending[-MAX_PENDING:]
+                counters = self.state["counters"]
+                counters["continuation_signals_started"] = int(
+                    counters.get("continuation_signals_started") or 0
+                ) + 1
             meta_state[key] = previous
             self.state["metaorder_state"] = meta_state
             self.state["counters"]["continuations"] += 1
@@ -338,6 +374,7 @@ class CopyVaultCheckpointTail:
         meta_state[key] = {
             "direction": direction,
             "last_fill_ts_ms": fill_ts_ms,
+            "fill_count": 1,
             "metaorder_id": identifier,
         }
         self.state["metaorder_state"] = meta_state

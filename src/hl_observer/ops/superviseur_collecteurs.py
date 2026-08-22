@@ -56,6 +56,7 @@ def _compter_panne_interne(site: str) -> None:
     PANNES_INTERNES[site] = PANNES_INTERNES.get(site, 0) + 1
 
 from hl_observer.ops.collecteur_registry import (
+    COLLECTEURS_CAMPAGNE,
     COLLECTEURS_CORE,
     COLLECTEURS_HARVEST,
     COLLECTEURS_MAINTENANCE,
@@ -549,8 +550,15 @@ def _processus_projet(root: str | Path) -> list[dict[str, Any]]:
         p for p in _parse_ps_process(out)
         if str(p.get("name") or "").lower() in {"cmd.exe", "python.exe", "pythonw.exe"}
     ]
-    scripts = {str(c["script"]).replace("/", "\\").split("\\")[-1].lower() for c in REGISTRE}
-    noms = {str(c["nom"]).lower() for c in REGISTRE}
+    # Les wrappers de campagne sont eux aussi des processus HyperSmart signes.
+    # Sans cette union, ``inspect_bounded_collectors`` perdait le compagnon
+    # Copy-Vault pourtant vivant et marquait la collecte DEGRADED.
+    inventaire = REGISTRE + COLLECTEURS_CAMPAGNE
+    scripts = {
+        str(c["script"]).replace("/", "\\").split("\\")[-1].lower()
+        for c in inventaire
+    }
+    noms = {str(c["nom"]).lower() for c in inventaire}
 
     def signe(proc: dict[str, Any]) -> bool:
         ligne = str(proc.get("cmd") or "").lower()

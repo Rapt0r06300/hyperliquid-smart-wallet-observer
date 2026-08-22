@@ -209,6 +209,80 @@ def test_copy_vault_prewarm_rotation_remplace_lancien_et_nettoie_actifs(tmp_path
     assert result["expired_active"] == ["EXPIRED"]
 
 
+def test_univers_l2_preserve_la_casse_canonique_allmids(tmp_path):
+    data = tmp_path / "runtime" / "data"
+    data.mkdir(parents=True)
+    cache = data / "hl_allmids.json"
+    cache.write_text(
+        json.dumps({"mids": {"KBONK": "1"}}),
+        encoding="utf-8",
+    )
+    calls = []
+
+    symbols = C._active_l2_symbols(
+        tmp_path,
+        now_ms=cache.stat().st_mtime * 1_000 + 1_000,
+        post_allmids=lambda: calls.append(True) or {
+            "BTC": "60000",
+            "kBONK": "0.003",
+            "BAD": "nan",
+        },
+    )
+
+    assert symbols == {"BTC": "BTC", "KBONK": "kBONK"}
+    assert calls == [True]
+
+
+def test_univers_l2_echec_info_est_fail_closed(tmp_path):
+    symbols = C._active_l2_symbols(
+        tmp_path,
+        post_allmids=lambda: (_ for _ in ()).throw(OSError("offline")),
+    )
+
+    assert symbols == {}
+
+
+def test_prewarm_l2_exclut_un_symbole_historique_retire(tmp_path, monkeypatch):
+    data = tmp_path / "runtime" / "data"
+    data.mkdir(parents=True)
+    now_ms = 30_000_000
+    (data / "vault_fills_live.jsonl").write_text(
+        "\n".join(
+            json.dumps({"vault": "0xFOLLOW", "coin": coin, "ts_ms": now_ms})
+            for coin in ("BTC", "KBONK")
+        ) + "\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(C, "_TAPE_PREWARM_COINS", set())
+    monkeypatch.setattr(C, "_TAPE_COINS_ACTIFS", {})
+    monkeypatch.setattr(C, "_TAPE_ACTIVE_L2_SYMBOLS", set())
+    monkeypatch.setattr(C, "_TAPE_L2_CANONICAL", {})
+
+    result = C._refresh_copy_vault_prewarm_once(
+        tmp_path,
+        ["0xfollow"],
+        now_ms=now_ms,
+        active_symbols={"BTC", "SOL"},
+    )
+
+    assert C._TAPE_PREWARM_COINS == {"BTC"}
+    assert result["filtered_inactive"] == ["KBONK"]
+
+
+def test_cibles_l2_intersectent_toujours_lunivers_actif(monkeypatch):
+    now_ms = 40_000_000
+    monkeypatch.setattr(C, "_TAPE_PREWARM_COINS", {"BTC", "KBONK", "DELISTED"})
+    monkeypatch.setattr(C, "_TAPE_COINS_ACTIFS", {"SOL": now_ms - 1_000})
+    monkeypatch.setattr(C, "_TAPE_ACTIVE_L2_SYMBOLS", {"BTC", "SOL", "KBONK"})
+    monkeypatch.setattr(
+        C,
+        "_TAPE_L2_CANONICAL",
+        {"BTC": "BTC", "SOL": "SOL", "KBONK": "kBONK"},
+    )
+
+    assert C._tape_l2_targets(now_ms) == {"BTC", "SOL", "kBONK"}
+
+
 def test_collecteur_lance_le_refresh_periodique_du_prewarm():
     source = (RACINE / "tools" / "collecter_userfills_vaults.py").read_text(encoding="utf-8")
     gather = source.split("await asyncio.gather(", 1)[1]

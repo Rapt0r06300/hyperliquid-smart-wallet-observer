@@ -13,6 +13,7 @@ import argparse
 import asyncio
 import collections
 import json
+import math
 import os
 import sys
 import time
@@ -900,6 +901,8 @@ async def _metaorder_shadow_periodique(root: Path, vaults: list, *, intervalle_s
 _TAPE_FILLS = None                           # asyncio.Queue((fill, fill_recv_mono_ms)) — alimentée par le worker
 _TAPE_COINS_ACTIFS: dict = {}                # coin -> dernier fill_recv (ms wall) : fenêtre d'abonnement l2Book
 _TAPE_PREWARM_COINS: set[str] = set()        # coins réels récents suivis avant le prochain fill live
+_TAPE_ACTIVE_L2_SYMBOLS: set[str] = set()     # univers allMids reellement negociable au dernier refresh
+_TAPE_L2_CANONICAL: dict[str, str] = {}        # symbole normalise -> casse exacte exigee par le WS
 _TAPE_BUFFER: dict = {}                      # coin -> list[{recv_mono, resume}] (snapshots successifs)
 _COPY_VAULT_LAST_SAMPLE_MS: dict[str, int] = {}
 TAPE_BUFFER_MAX = 400
@@ -912,6 +915,8 @@ TAPE_PREWARM_MAX_COINS = 24                  # borne de collecte, tres inferieur
 TAPE_PREWARM_RECENT_WINDOW_MS = 21_600_000.0 # activite reelle des 6 dernieres heures uniquement
 TAPE_PREWARM_REFRESH_S = 15.0                # suit les rotations de coins sans redemarrage
 TAPE_PREWARM_TAIL_BYTES = 4 * 1024 * 1024    # aucune relecture integrale des journaux append-only
+TAPE_ACTIVE_UNIVERSE = Path("runtime") / "data" / "hl_allmids.json"
+TAPE_ACTIVE_UNIVERSE_MAX_AGE_MS = 30_000.0   # sinon relecture publique directe avant abonnement
 
 
 def _tail_lines_bounded(path: Path, *, max_lines: int, max_bytes: int) -> list[str]:
@@ -1004,6 +1009,7 @@ def _refresh_copy_vault_prewarm_once(
     *,
     now_ms: float | None = None,
     max_coins: int = TAPE_PREWARM_MAX_COINS,
+    active_symbols: set[str] | dict[str, str] | None = None,
 ) -> dict[str, object]:
     """Refresh the bounded causal L2 watchlist from observed wallet activity.
 
@@ -1021,6 +1027,27 @@ def _refresh_copy_vault_prewarm_once(
             now_ms=reference_ms,
         )
     )
+    filtered_inactive: set[str] = set()
+    if active_symbols is not None:
+        if isinstance(active_symbols, dict):
+            canonical = {
+                str(coin).upper().strip(): str(exact).strip()
+                for coin, exact in active_symbols.items()
+                if str(coin).strip() and str(exact).strip()
+            }
+        else:
+            canonical = {
+                str(coin).upper().strip(): str(coin).strip()
+                for coin in active_symbols
+                if str(coin).strip()
+            }
+        active = set(canonical)
+        filtered_inactive = selected - active
+        selected.intersection_update(active)
+        _TAPE_ACTIVE_L2_SYMBOLS.clear()
+        _TAPE_ACTIVE_L2_SYMBOLS.update(active)
+        _TAPE_L2_CANONICAL.clear()
+        _TAPE_L2_CANONICAL.update(canonical)
     previous = set(_TAPE_PREWARM_COINS)
     expired_active = {
         coin
@@ -1036,6 +1063,7 @@ def _refresh_copy_vault_prewarm_once(
         "added": sorted(selected - previous),
         "removed": sorted(previous - selected),
         "expired_active": sorted(expired_active),
+        "filtered_inactive": sorted(filtered_inactive),
     }
 
 
@@ -1049,14 +1077,20 @@ async def _refresh_copy_vault_prewarm_periodically(
 
     while True:
         try:
-            result = _refresh_copy_vault_prewarm_once(root, vaults)
-            if result["added"] or result["removed"]:
+            active_symbols = await asyncio.to_thread(_active_l2_symbols, root)
+            result = _refresh_copy_vault_prewarm_once(
+                root,
+                vaults,
+                active_symbols=active_symbols,
+            )
+            if result["added"] or result["removed"] or result["filtered_inactive"]:
                 print(
-                    "[userfills] L2 causal prewarm refresh: %d coins (+%d/-%d)"
+                    "[userfills] L2 causal prewarm refresh: %d coins (+%d/-%d, inactive=%d)"
                     % (
                         len(result["selected"]),
                         len(result["added"]),
                         len(result["removed"]),
+                        len(result["filtered_inactive"]),
                     ),
                     flush=True,
                 )
@@ -1125,6 +1159,78 @@ def _new_metaorder_checkpoints(fill: dict, *, recv_mono_ms: float, metaorder_id:
             "target_wall_ms": recv_wall_ms + COPY_VAULT_DELAY_MS,
         },
     ]
+
+
+def _positive_float(value: object) -> float | None:
+    """Parse a strictly positive market value without accepting NaN/Inf."""
+
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError, OverflowError):
+        return None
+    if not math.isfinite(parsed) or parsed <= 0.0:
+        return None
+    return parsed
+
+
+def _active_l2_symbols(
+    root: Path,
+    *,
+    now_ms: float | None = None,
+    max_age_ms: float = TAPE_ACTIVE_UNIVERSE_MAX_AGE_MS,
+    post_allmids=None,
+) -> dict[str, str]:
+    """Return the current tradable universe used to guard L2 subscriptions.
+
+    Hyperliquid coin names are case-sensitive (for example ``kBONK``). The
+    existing allMids cache intentionally normalises keys for pricing and cannot
+    prove that exact spelling. Therefore this guard performs one bounded public
+    /info read per refresh and returns normalized lookup keys mapped to their
+    exact live spelling. Failure returns an empty mapping: no guessed target.
+    """
+
+    if post_allmids is None:
+        def post_allmids():
+            import urllib.request
+
+            request = urllib.request.Request(
+                "https://api.hyperliquid.xyz/info",
+                data=json.dumps({"type": "allMids"}).encode("utf-8"),
+                headers={"Content-Type": "application/json"},
+                method="POST",
+            )
+            with urllib.request.urlopen(request, timeout=8.0) as response:
+                return json.loads(response.read().decode("utf-8"))
+
+    try:
+        live = post_allmids()
+    except Exception:  # noqa: BLE001 - a public read failure must fail closed
+        return {}
+    mids = live.get("mids") if isinstance(live, dict) else None
+    if not isinstance(mids, dict) and isinstance(live, dict):
+        mids = live
+    if not isinstance(mids, dict):
+        return {}
+    return {
+        str(coin).upper().strip(): str(coin).strip()
+        for coin, mid in mids.items()
+        if str(coin).strip() and _positive_float(mid) is not None
+    }
+
+
+def _tape_l2_targets(now_ms: float) -> set[str]:
+    """Intersect causal candidates with the last proven live market universe."""
+
+    candidates = set(_TAPE_PREWARM_COINS)
+    candidates.update(
+        coin
+        for coin, last_fill_ms in _TAPE_COINS_ACTIFS.items()
+        if now_ms - float(last_fill_ms) <= TAPE_COIN_TTL_MS
+    )
+    return {
+        _TAPE_L2_CANONICAL.get(coin, coin)
+        for coin in candidates.intersection(_TAPE_ACTIVE_L2_SYMBOLS)
+    }
 
 
 def _copy_vault_checkpoint_metaorder(
@@ -1277,11 +1383,7 @@ async def _tape_l2_buffer(root: Path, *, sync_s: float = 0.5) -> None:
                 abonnes.clear()
                 while True:
                     now = time.time() * 1000
-                    cibles = set(_TAPE_PREWARM_COINS)
-                    cibles.update(
-                        c for c, t in _TAPE_COINS_ACTIFS.items()
-                        if now - t <= TAPE_COIN_TTL_MS
-                    )
+                    cibles = _tape_l2_targets(now)
                     for c in cibles - abonnes:
                         await ws.send(json.dumps({"method": "subscribe", "subscription": {"type": "l2Book", "coin": c}}))
                         abonnes.add(c)
