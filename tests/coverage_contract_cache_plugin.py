@@ -124,33 +124,37 @@ def _bounded_invoke(original: Callable, seconds: float = 0.5):
 
 
 def _offline_guards_without_workers(original: Callable):
-    """Keep synthetic offline coverage calls finite without spawning real workers."""
+    """Prevent persistent HyperSmart workers without breaking Python executors.
+
+    The synthetic closure tests may reach production startup paths that create
+    daemon workers. Those project-owned workers must not outlive one candidate,
+    but asyncio and concurrent-futures need their own short-lived threads to start
+    and join normally. Guard only threads explicitly named ``hypersmart-*``.
+    """
 
     @wraps(original)
     def wrapped(monkeypatch):
         original(monkeypatch)
-        import queue
         import threading
 
-        original_queue_get = queue.Queue.get
+        original_start = threading.Thread.start
+        original_join = threading.Thread.join
 
-        monkeypatch.setattr(threading.Thread, "start", lambda self: None)
-        monkeypatch.setattr(
-            threading.Thread,
-            "join",
-            lambda self, *_args, **_kwargs: None,
-        )
-        monkeypatch.setattr(
-            threading.Event,
-            "wait",
-            lambda self, timeout=None: self.is_set(),
-        )
+        def _is_hypersmart_worker(thread: threading.Thread) -> bool:
+            return str(getattr(thread, "name", "")).lower().startswith("hypersmart-")
 
-        def _queue_get_nowait(self, block=True, timeout=None):
-            del block, timeout
-            return original_queue_get(self, block=False)
+        def _start(thread: threading.Thread):
+            if _is_hypersmart_worker(thread):
+                return None
+            return original_start(thread)
 
-        monkeypatch.setattr(queue.Queue, "get", _queue_get_nowait)
+        def _join(thread: threading.Thread, *args, **kwargs):
+            if _is_hypersmart_worker(thread):
+                return None
+            return original_join(thread, *args, **kwargs)
+
+        monkeypatch.setattr(threading.Thread, "start", _start)
+        monkeypatch.setattr(threading.Thread, "join", _join)
 
     return wrapped
 
@@ -168,8 +172,8 @@ def pytest_configure(config) -> None:
     """Cache static analysis and bound generic synthetic coverage invocations.
 
     No production callable, generated input, test case, branch, module, assertion,
-    or coverage gate is skipped. Immutable analysis is cached and synthetic runtime
-    side effects are kept in-process and finite; every execution candidate remains.
+    or coverage gate is skipped. Immutable analysis is cached and persistent
+    project workers are suppressed while standard Python executors remain intact.
     """
     del config
     from tests import coverage_contract_harness as harness
