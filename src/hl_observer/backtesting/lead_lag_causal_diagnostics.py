@@ -1,12 +1,12 @@
 """Fail-closed causal coverage diagnostics for Lead-Lag execution evidence.
 
-This module does not select or tune an economic strategy.  It only answers a
+This module does not select or tune an economic strategy. It only answers a
 narrow provenance question for predeclared shock timestamps: was a causal
-Hyperliquid top-of-book observable quickly enough, and if not, does the
-recorded evidence contain an explicit collector/feed gap signal?
+Hyperliquid top-of-book observable quickly enough, and if not, does recorded
+evidence contain an explicit collector/feed gap signal?
 
 The diagnostic threshold may be lower than the frozen economic trigger solely
-to autopsy already-observed events.  Its output is never eligible economic PnL.
+to autopsy already-observed events. Its output is never eligible economic PnL.
 """
 from __future__ import annotations
 
@@ -28,13 +28,60 @@ def _int(value: object, default: int = 0) -> int:
 def _window_for_timestamp(
     timestamp_ms: int,
     windows: Sequence[Mapping[str, Any]],
-) -> Mapping[str, Any] | None:
-    for row in windows:
+) -> tuple[int, Mapping[str, Any]] | None:
+    for index, row in enumerate(windows):
         start_ms = _int(row.get("start_ms"), -1)
         end_ms = _int(row.get("end_ms"), -1)
         if start_ms <= timestamp_ms <= end_ms:
-            return row
+            return index, row
     return None
+
+
+def _explicit_gap_evidence(
+    *,
+    trigger_ms: int,
+    max_delay_ms: int,
+    candidate: Mapping[str, Any] | None,
+    window_meta: Mapping[str, Any] | None,
+    nearby_books: Sequence[Mapping[str, Any]],
+) -> list[str]:
+    evidence: list[str] = []
+    if window_meta is not None:
+        stopped = str(window_meta.get("stopped_reason") or "COMPLETED")
+        if stopped != "COMPLETED":
+            evidence.append(f"WINDOW_SCAN_{stopped}")
+        for key in ("gap_count", "reconnect_count", "sequence_gaps", "dropped_rows"):
+            value = _int(window_meta.get(key))
+            if value > 0:
+                evidence.append(f"WINDOW_{key.upper()}={value}")
+
+    # Recorded book rows carry collector health directly. A non-zero gap/reconnect
+    # on the first causal row, or on another row inside the diagnostic horizon,
+    # is explicit evidence that collection continuity was impaired. We do not
+    # infer a gap merely because the next valid book is late.
+    relevant_rows: list[Mapping[str, Any]] = []
+    horizon_end = trigger_ms + max(0, int(max_delay_ms))
+    for row in nearby_books:
+        ts_ms = _int(row.get("ts_ms"))
+        if trigger_ms <= ts_ms <= horizon_end:
+            relevant_rows.append(row)
+    if candidate is not None and candidate not in relevant_rows:
+        candidate_ts = _int(candidate.get("ts_ms"))
+        if candidate_ts >= trigger_ms:
+            relevant_rows.append(candidate)
+
+    for row in relevant_rows:
+        for key in ("gap_count", "reconnect_count"):
+            value = _int(row.get(key))
+            if value > 0:
+                evidence.append(f"BOOK_{key.upper()}={value}")
+        reasons = row.get("quality_reasons")
+        if isinstance(reasons, Sequence) and not isinstance(reasons, (str, bytes, bytearray)):
+            for reason in reasons:
+                text = str(reason).upper()
+                if "GAP" in text or "RECONNECT" in text or "SEQUENCE" in text:
+                    evidence.append(f"BOOK_QUALITY_{text}")
+    return sorted(set(evidence))
 
 
 def diagnose_causal_book_coverage(
@@ -52,10 +99,10 @@ def diagnose_causal_book_coverage(
       within the allowed delay;
     - ``BOOK_WITHIN_DELAY_REJECTED_BY_QUALITY``: a timely book exists but its
       recorded data gate rejects it;
-    - ``EXPLICIT_RECORDED_FEED_GAP``: no timely book and the relevant recorded
-      window itself carries an explicit gap/reconnect/partial-scan signal;
+    - ``EXPLICIT_RECORDED_FEED_GAP``: no timely book and recorded metadata or
+      causal book rows carry an explicit gap/reconnect/partial-scan signal;
     - ``NO_CAUSAL_BOOK_WITHOUT_PROVEN_GAP``: no timely book, but the available
-      metadata cannot prove that collection failed.  This must not be rewritten
+      metadata cannot prove that collection failed. This must not be rewritten
       as a collector bug or as proof that the market had no book.
     """
 
@@ -84,36 +131,31 @@ def diagnose_causal_book_coverage(
         delay_ms = None if candidate is None else _int(candidate.get("ts_ms")) - trigger_ms
         timely = candidate is not None and delay_ms is not None and 0 <= delay_ms <= max_delay
 
-        relevant_window = _window_for_timestamp(trigger_ms, windows)
+        matched_window = _window_for_timestamp(trigger_ms, windows)
         relevant_meta: Mapping[str, Any] | None = None
-        if relevant_window is not None:
-            try:
-                relevant_index = windows.index(relevant_window)
-            except ValueError:
-                relevant_index = -1
-            if 0 <= relevant_index < len(per_window):
-                relevant_meta = per_window[relevant_index]
+        if matched_window is not None:
+            window_index, _ = matched_window
+            if window_index < len(per_window):
+                relevant_meta = per_window[window_index]
 
-        explicit_gap = False
-        evidence: list[str] = []
-        if relevant_meta is not None:
-            stopped = str(relevant_meta.get("stopped_reason") or "COMPLETED")
-            if stopped != "COMPLETED":
-                explicit_gap = True
-                evidence.append(f"WINDOW_SCAN_{stopped}")
-            for key in ("gap_count", "reconnect_count", "sequence_gaps", "dropped_rows"):
-                value = _int(relevant_meta.get(key))
-                if value > 0:
-                    explicit_gap = True
-                    evidence.append(f"{key.upper()}={value}")
+        evidence = _explicit_gap_evidence(
+            trigger_ms=trigger_ms,
+            max_delay_ms=max_delay,
+            candidate=candidate,
+            window_meta=relevant_meta,
+            nearby_books=books[max(0, index - 1) : min(len(books), index + 8)],
+        )
 
         if timely and candidate.get("data_gate_ready") is True:
             classification = "EXECUTABLE_CAUSAL_BOOK"
             delays.append(int(delay_ms))
         elif timely:
             classification = "BOOK_WITHIN_DELAY_REJECTED_BY_QUALITY"
-            evidence.extend(str(value) for value in candidate.get("quality_reasons", ()) if value)
-        elif explicit_gap:
+            reasons = candidate.get("quality_reasons", ())
+            if isinstance(reasons, Sequence) and not isinstance(reasons, (str, bytes, bytearray)):
+                evidence.extend(str(value) for value in reasons if value)
+            evidence = sorted(set(evidence))
+        elif evidence:
             classification = "EXPLICIT_RECORDED_FEED_GAP"
         else:
             classification = "NO_CAUSAL_BOOK_WITHOUT_PROVEN_GAP"
@@ -132,8 +174,9 @@ def diagnose_causal_book_coverage(
             }
         )
 
+    ordered_delays = sorted(delays)
     return {
-        "schema_version": "hypersmart.lead_lag_causal_book_coverage.v1",
+        "schema_version": "hypersmart.lead_lag_causal_book_coverage.v2",
         "coin": selected_coin,
         "max_book_delay_ms": max_delay,
         "shock_count": len(rows),
@@ -141,7 +184,7 @@ def diagnose_causal_book_coverage(
         "events": rows,
         "timely_quality_ready_count": counts.get("EXECUTABLE_CAUSAL_BOOK", 0),
         "median_timely_delay_ms": (
-            sorted(delays)[len(delays) // 2] if delays else None
+            ordered_delays[len(ordered_delays) // 2] if ordered_delays else None
         ),
         "interpretation": (
             "DIAGNOSTIC_ONLY_NOT_ECONOMIC_SELECTION; absence without explicit gap remains UNKNOWN_CAUSE"
