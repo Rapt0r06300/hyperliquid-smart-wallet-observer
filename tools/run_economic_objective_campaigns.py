@@ -33,6 +33,10 @@ from hl_observer.backtesting.lead_lag_certified_clock import (  # noqa: E402
 from hl_observer.backtesting.lead_lag_queue_replay import (  # noqa: E402
     replay_lead_lag_queue_maker,
 )
+from hl_observer.backtesting.lead_lag_source_alignment import (  # noqa: E402
+    load_aligned_binance_trade_tape,
+    select_aligned_bbo_sources,
+)
 from hl_observer.datasets.source_discovery import (  # noqa: E402
     is_dataset_workspace,
     load_family_source_paths,
@@ -327,7 +331,14 @@ def run_campaigns(
         lead_raw["dataset_source_manifest"] = (
             str(dataset_manifest_path) if dataset_manifest_path is not None else None
         )
-        lead_tape = lead_lag_shadow.charger_tape(root, sources=lead_sources)
+        aligned_lead_sources, lead_alignment_meta = select_aligned_bbo_sources(
+            root,
+            candidates=lead_sources if dataset_mode else None,
+        )
+        lead_tape, aligned_lead_meta = load_aligned_binance_trade_tape(
+            root,
+            aligned_lead_sources,
+        )
         lead_window_start_ms, lead_window_end_ms = _lead_trade_window_ms(lead_tape)
         l2_history, public_trade_history, microstructure_meta = (
             load_market_microstructure_history(
@@ -348,6 +359,10 @@ def run_campaigns(
         ]
         lead_raw["maker_queue_replay"] = maker_queue_replay
         lead_raw["lead_lag_microstructure_history"] = microstructure_meta
+        lead_raw["lead_lag_source_alignment"] = {
+            **lead_alignment_meta,
+            "aligned_lead_tape": aligned_lead_meta,
+        }
         lead_raw["next_hypothesis_v3"] = qualify_lead_lag_queue_maker_train_only(
             lead_raw
         )
