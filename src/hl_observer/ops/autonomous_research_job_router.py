@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Iterable
+from typing import Iterable, Mapping
 
 from hl_observer.ops import autonomous_research_job as canonical_job
 from hl_observer.ops.family_economic_job import (
@@ -25,6 +25,39 @@ def validate_request(raw):
     if mode == "economic" and suite in FAMILY_ECONOMIC_SUITES:
         return validate_family_request(raw)
     return canonical_job.validate_request(raw)
+
+
+def _print_lead_lag_diagnostic(payload: Mapping[str, object]) -> None:
+    availability = payload.get("causal_book_availability")
+    if not isinstance(availability, Mapping):
+        availability = {}
+    counts = availability.get("classification_counts")
+    print(
+        "LEAD_LAG_CAUSAL_GAP_DIAGNOSTIC "
+        f"diagnostic_bps={payload.get('diagnostic_threshold_bps')} "
+        f"economic_bps={payload.get('economic_threshold_bps')} "
+        f"economic_parameters_modified={payload.get('economic_parameters_modified')} "
+        f"events={availability.get('event_count')} "
+        f"root_cause={availability.get('root_cause')} "
+        f"counts={canonical_job.json.dumps(counts, sort_keys=True)}",
+        flush=True,
+    )
+    events = availability.get("events")
+    if not isinstance(events, list):
+        return
+    for index, row in enumerate(events, start=1):
+        if not isinstance(row, Mapping):
+            continue
+        print(
+            "LEAD_LAG_CAUSAL_GAP_EVENT "
+            f"index={index} ts_ms={row.get('event_ts_ms')} "
+            f"class={row.get('classification')} "
+            f"next_delay_ms={row.get('next_book_delay_ms')} "
+            f"gap_delta={row.get('gap_count_delta')} "
+            f"reconnect_delta={row.get('reconnect_count_delta')} "
+            f"explicit_gap={row.get('explicit_collector_gap')}",
+            flush=True,
+        )
 
 
 def _run_family_postprocessing(*, suite: str, result_dir: Path) -> None:
@@ -50,7 +83,16 @@ def _run_family_postprocessing(*, suite: str, result_dir: Path) -> None:
     workspace = Path(str(workspace_raw)).resolve()
     if not workspace.is_dir():
         raise RuntimeError(f"Lead-Lag diagnostic workspace missing: {workspace}")
-    write_lead_lag_causal_gap_diagnostic(workspace, output_dir=result_dir)
+    json_path, markdown_path, diagnostic = write_lead_lag_causal_gap_diagnostic(
+        workspace,
+        output_dir=result_dir,
+    )
+    _print_lead_lag_diagnostic(diagnostic)
+    print(
+        "LEAD_LAG_CAUSAL_GAP_FILES "
+        f"json={json_path.name} markdown={markdown_path.name} raw_data_uploaded=False",
+        flush=True,
+    )
 
 
 def main(argv: Iterable[str] | None = None) -> int:
@@ -86,6 +128,7 @@ def main(argv: Iterable[str] | None = None) -> int:
 
 __all__ = [
     "FAMILY_ECONOMIC_SUITES",
+    "_print_lead_lag_diagnostic",
     "_run_family_postprocessing",
     "allowed_economic_suites",
     "main",
