@@ -20,6 +20,10 @@ from typing import Any, Iterable
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
+from hl_observer.backtesting.lead_lag_causal_gap_diagnostic import (  # noqa: E402
+    DIAGNOSTIC_SHOCK_THRESHOLD_BPS,
+    diagnose_causal_book_availability,
+)
 from hl_observer.datasets.economic_multi_source import (  # noqa: E402
     install_copy_vault_adapter,
     install_cross_venue_adapter,
@@ -82,11 +86,19 @@ def _looks_like_cross_provenance(paths: Iterable[str | Path]) -> bool:
     return names == {"carnet_venues.jsonl"}
 
 
-def _isolated_run_campaigns(canonical, *, tool_loader, provenance_builder):
+def _isolated_run_campaigns(
+    canonical,
+    *,
+    tool_loader,
+    provenance_builder,
+    overrides: dict[str, object] | None = None,
+):
     """Clone the function globals instead of mutating the loaded module."""
     environment = dict(canonical.run_campaigns.__globals__)
     environment["_tool"] = tool_loader
     environment["dataset_provenance"] = provenance_builder
+    for name, value in (overrides or {}).items():
+        environment[name] = value
     isolated = FunctionType(
         canonical.run_campaigns.__code__,
         environment,
@@ -97,6 +109,75 @@ def _isolated_run_campaigns(canonical, *, tool_loader, provenance_builder):
     isolated.__kwdefaults__ = dict(canonical.run_campaigns.__kwdefaults__ or {})
     isolated.__annotations__ = dict(getattr(canonical.run_campaigns, "__annotations__", {}))
     return isolated
+
+
+def _lead_lag_diagnostic_overrides(canonical) -> dict[str, object]:
+    """Observe 8-bps shocks for data-quality diagnosis without changing economics.
+
+    The canonical queue replay still detects and trades only its frozen 20-bps
+    economic shocks.  The 8-bps detector is used solely to make the already
+    observed sparse events visible to the market-data loader, so we can tell an
+    explicit collector gap from a contiguous capture whose next durable book is
+    simply later than the 750-ms executable bound.
+    """
+
+    original_detect = canonical.detect_rolling_shocks
+    original_loader = canonical.load_market_microstructure_event_windows
+    original_replay = canonical.replay_lead_lag_queue_maker
+    state: dict[str, object] = {"diagnostic_shocks": []}
+
+    def economic_detect_with_diagnostic_capture(trades, *args, **kwargs):
+        economic = original_detect(trades, *args, **kwargs)
+        diagnostic_kwargs = dict(kwargs)
+        diagnostic_kwargs["threshold_bps"] = DIAGNOSTIC_SHOCK_THRESHOLD_BPS
+        state["diagnostic_shocks"] = original_detect(trades, *args, **diagnostic_kwargs)
+        return economic
+
+    def loader_with_diagnostic_windows(root, event_ts_ms, **kwargs):
+        economic_events = [int(value) for value in event_ts_ms]
+        diagnostic_shocks = list(state.get("diagnostic_shocks") or [])
+        diagnostic_events = [
+            int(row["trigger_ts_ms"])
+            for row in diagnostic_shocks
+            if isinstance(row, dict) and row.get("trigger_ts_ms") is not None
+        ]
+        merged_events = sorted(set([*economic_events, *diagnostic_events]))
+        books, trades, meta = original_loader(root, merged_events, **kwargs)
+        meta = dict(meta)
+        meta["economic_event_count_requested"] = len(economic_events)
+        meta["diagnostic_event_count_8bps"] = len(diagnostic_events)
+        meta["diagnostic_shock_threshold_bps"] = DIAGNOSTIC_SHOCK_THRESHOLD_BPS
+        meta["diagnostic_only_expansion"] = True
+        meta["economic_parameters_changed"] = False
+        return books, trades, meta
+
+    def replay_with_gap_diagnostic(tape, l2_history, public_trade_history, **kwargs):
+        replay = original_replay(tape, l2_history, public_trade_history, **kwargs)
+        diagnostic_shocks = list(state.get("diagnostic_shocks") or [])
+        replay = dict(replay)
+        replay["causal_gap_diagnostic"] = diagnose_causal_book_availability(
+            diagnostic_shocks,
+            list(l2_history.get("ETH", ())),
+            max_book_delay_ms=int(
+                (replay.get("parameters") or {}).get("max_book_delay_ms") or 750
+            ),
+        )
+        replay["causal_gap_diagnostic"]["economic_shock_threshold_bps"] = (
+            replay.get("parameters") or {}
+        ).get("shock_threshold_bps")
+        replay["causal_gap_diagnostic"]["economic_shocks_seen"] = replay.get(
+            "strong_shocks_seen"
+        )
+        replay["causal_gap_diagnostic"]["diagnostic_shocks_seen"] = len(
+            diagnostic_shocks
+        )
+        return replay
+
+    return {
+        "detect_rolling_shocks": economic_detect_with_diagnostic_capture,
+        "load_market_microstructure_event_windows": loader_with_diagnostic_windows,
+        "replay_lead_lag_queue_maker": replay_with_gap_diagnostic,
+    }
 
 
 def run_dataset_campaigns(
@@ -158,6 +239,7 @@ def run_dataset_campaigns(
         canonical,
         tool_loader=dataset_tool_loader,
         provenance_builder=dataset_provenance,
+        overrides=_lead_lag_diagnostic_overrides(canonical),
     )
     result = isolated_run(
         data_root,
@@ -186,6 +268,8 @@ def run_dataset_campaigns(
     result["paper_read_only"] = True
     result["real_execution"] = False
     result["canonical_globals_mutated"] = False
+    result["lead_lag_diagnostic_threshold_bps"] = DIAGNOSTIC_SHOCK_THRESHOLD_BPS
+    result["lead_lag_economic_parameters_changed"] = False
     return result
 
 
