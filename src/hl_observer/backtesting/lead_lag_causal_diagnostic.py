@@ -1,83 +1,29 @@
-"""Fail-closed causal availability diagnostic for Lead-Lag execution evidence.
+"""Compatibility facade for the canonical Lead-Lag causal diagnostic.
 
-This module answers one narrow research question without changing the economic
-strategy: when a recorded lead shock occurs, was an executable Hyperliquid book
-observable within the predeclared 750 ms budget, merely late, rejected by data
-quality, or absent with explicit collection-gap evidence?
+The authoritative classifier lives in ``lead_lag_causal_diagnostics.py``.
+This module keeps the older public function name so historical callers do not
+break, but it contains no independent gap logic. In particular, cumulative
+``gap_count``/``reconnect_count`` values are never sufficient by themselves:
+only the canonical event-local delta/window logic can classify a recorded gap.
 
-The diagnostic threshold may be lower than the frozen economic trigger because
-it is used only to inspect source coverage. Its output MUST NOT create trades,
-change economic parameters, or certify PnL.
+The 8 bps threshold remains diagnostic-only. It never changes the frozen 20 bps
+economic strategy, creates trades or certifies PnL.
 """
 from __future__ import annotations
 
-import bisect
-import math
 from collections.abc import Mapping, Sequence
 from typing import Any
 
-SCHEMA_VERSION = "hypersmart.lead_lag_causal_availability.v1"
-DIAGNOSTIC_SHOCK_THRESHOLD_BPS = 8.0
-DEFAULT_MAX_BOOK_DELAY_MS = 750
+from hl_observer.backtesting.lead_lag_causal_diagnostics import (
+    DIAGNOSTIC_MAX_BOOK_DELAY_MS,
+    DIAGNOSTIC_SHOCK_THRESHOLD_BPS,
+    ECONOMIC_SHOCK_THRESHOLD_BPS,
+    diagnose_causal_book_coverage,
+)
+
+SCHEMA_VERSION = "hypersmart.lead_lag_causal_book_coverage.v4"
+DEFAULT_MAX_BOOK_DELAY_MS = DIAGNOSTIC_MAX_BOOK_DELAY_MS
 DEFAULT_LOOKAHEAD_MS = 15_000
-
-
-def _finite(value: object) -> float | None:
-    try:
-        parsed = float(value)
-    except (TypeError, ValueError, OverflowError):
-        return None
-    return parsed if math.isfinite(parsed) else None
-
-
-def _nonnegative_int(value: object) -> int:
-    parsed = _finite(value)
-    return max(0, int(parsed)) if parsed is not None else 0
-
-
-def _book_rows(
-    l2_history: Mapping[str, Sequence[Mapping[str, Any]]],
-    *,
-    coin: str,
-) -> list[dict[str, Any]]:
-    rows = [
-        dict(row)
-        for row in l2_history.get(str(coin).upper(), ())
-        if _nonnegative_int(row.get("ts_ms")) > 0
-    ]
-    rows.sort(key=lambda row: int(row["ts_ms"]))
-    return rows
-
-
-def _explicit_gap_evidence(
-    before: Mapping[str, Any] | None,
-    after: Mapping[str, Any] | None,
-) -> dict[str, Any]:
-    rows = [row for row in (before, after) if isinstance(row, Mapping)]
-    gap_count = max((_nonnegative_int(row.get("gap_count")) for row in rows), default=0)
-    reconnect_count = max(
-        (_nonnegative_int(row.get("reconnect_count")) for row in rows), default=0
-    )
-    reasons = sorted(
-        {
-            str(reason)
-            for row in rows
-            for reason in (
-                row.get("quality_reasons")
-                if isinstance(row.get("quality_reasons"), Sequence)
-                and not isinstance(row.get("quality_reasons"), (str, bytes, bytearray))
-                else ()
-            )
-            if str(reason)
-        }
-    )
-    explicit = bool(gap_count > 0 or reconnect_count > 0 or any("GAP" in reason.upper() for reason in reasons))
-    return {
-        "explicit_gap_evidence": explicit,
-        "nearby_gap_count": gap_count,
-        "nearby_reconnect_count": reconnect_count,
-        "nearby_quality_reasons": reasons[:20],
-    }
 
 
 def diagnose_causal_book_availability(
@@ -88,111 +34,76 @@ def diagnose_causal_book_availability(
     max_book_delay_ms: int = DEFAULT_MAX_BOOK_DELAY_MS,
     lookahead_ms: int = DEFAULT_LOOKAHEAD_MS,
     diagnostic_threshold_bps: float = DIAGNOSTIC_SHOCK_THRESHOLD_BPS,
+    microstructure_meta: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
-    """Classify causal book availability for each already-recorded diagnostic shock.
+    """Delegate all causal classification to the canonical v4 implementation.
 
-    This function never searches for a profitable threshold. The caller supplies
-    shocks independently; ``diagnostic_threshold_bps`` is provenance only. The
-    economic replay remains responsible for its own frozen 20 bps trigger.
+    ``lookahead_ms`` and ``diagnostic_threshold_bps`` remain accepted for API
+    compatibility/provenance only. The classifier itself receives the causal
+    books and the event-window loader metadata. Supplying no metadata is
+    fail-closed: the wrapper cannot invent ``SCAN_INCOMPLETE`` or gap evidence.
     """
 
-    selected_coin = str(coin).upper()
-    books = _book_rows(l2_history, coin=selected_coin)
-    timestamps = [int(row["ts_ms"]) for row in books]
-    max_delay = max(0, int(max_book_delay_ms))
-    lookahead = max(max_delay, int(lookahead_ms))
+    canonical = diagnose_causal_book_coverage(
+        shocks,
+        l2_history,
+        dict(microstructure_meta or {}),
+        coin=coin,
+        max_book_delay_ms=max_book_delay_ms,
+    )
+    counts = canonical.get("classifications")
+    if not isinstance(counts, Mapping):
+        counts = {}
 
-    events: list[dict[str, Any]] = []
-    counts: dict[str, int] = {}
-    for raw in sorted(shocks, key=lambda row: int(row.get("trigger_ts_ms") or 0)):
-        trigger = _nonnegative_int(raw.get("trigger_ts_ms"))
-        if trigger <= 0:
-            continue
-        index = bisect.bisect_left(timestamps, trigger)
-        before = books[index - 1] if index > 0 else None
-        after = books[index] if index < len(books) else None
-        delay_ms = None if after is None else int(after["ts_ms"]) - trigger
-        within_lookahead = delay_ms is not None and 0 <= delay_ms <= lookahead
-        quality_ready = bool(after is not None and after.get("data_gate_ready") is True)
-        gap = _explicit_gap_evidence(before, after)
-
-        if delay_ms is not None and 0 <= delay_ms <= max_delay and quality_ready:
-            classification = "EXECUTABLE_CAUSAL_BOOK"
-        elif delay_ms is not None and 0 <= delay_ms <= max_delay:
-            classification = "BOOK_WITHIN_BUDGET_QUALITY_REJECTED"
-        elif within_lookahead:
-            classification = "LATE_CAUSAL_BOOK"
-        elif gap["explicit_gap_evidence"]:
-            classification = "NO_BOOK_WITH_EXPLICIT_COLLECTION_GAP_EVIDENCE"
-        else:
-            classification = "NO_RECORDED_CAUSAL_BOOK_GAP_UNPROVEN"
-
-        counts[classification] = counts.get(classification, 0) + 1
-        events.append(
-            {
-                "trigger_ts_ms": trigger,
-                "lead_shock_bps": _finite(raw.get("lead_shock_bps")),
-                "direction": int(_finite(raw.get("direction")) or 0),
-                "classification": classification,
-                "first_causal_book_ts_ms": int(after["ts_ms"]) if after is not None else None,
-                "first_causal_book_delay_ms": delay_ms,
-                "first_causal_book_quality_ready": quality_ready if after is not None else None,
-                "first_causal_book_connection_id": after.get("connection_id") if after is not None else None,
-                "previous_book_ts_ms": int(before["ts_ms"]) if before is not None else None,
-                **gap,
-            }
-        )
-
-    delays = [
-        int(event["first_causal_book_delay_ms"])
-        for event in events
-        if event.get("first_causal_book_delay_ms") is not None
-        and int(event["first_causal_book_delay_ms"]) >= 0
-    ]
-    delays.sort()
-    executable = counts.get("EXECUTABLE_CAUSAL_BOOK", 0)
-    explicit_gap_events = counts.get("NO_BOOK_WITH_EXPLICIT_COLLECTION_GAP_EVIDENCE", 0)
-    late = counts.get("LATE_CAUSAL_BOOK", 0)
-    unproven = counts.get("NO_RECORDED_CAUSAL_BOOK_GAP_UNPROVEN", 0)
-    quality_rejected = counts.get("BOOK_WITHIN_BUDGET_QUALITY_REJECTED", 0)
+    executable = int(counts.get("EXECUTABLE_CAUSAL_BOOK", 0) or 0)
+    explicit_gap = int(counts.get("EXPLICIT_RECORDED_FEED_GAP", 0) or 0)
+    quality_rejected = int(
+        counts.get("BOOK_WITHIN_DELAY_REJECTED_BY_QUALITY", 0) or 0
+    )
+    late = int(counts.get("CAUSAL_BOOK_TOO_LATE_NO_GAP_PROOF", 0) or 0)
+    no_later = int(counts.get("NO_LATER_BOOK_RECORDED_NO_GAP_PROOF", 0) or 0)
+    inconclusive = int(counts.get("INCONCLUSIVE_DIAGNOSTIC_SCAN", 0) or 0)
 
     if executable:
         conclusion = "EXECUTABLE_BOOKS_EXIST_IN_DIAGNOSTIC_SAMPLE"
-    elif explicit_gap_events:
+    elif explicit_gap:
         conclusion = "COLLECTION_GAPS_EXPLAIN_AT_LEAST_PART_OF_MISSING_EXECUTION_EVIDENCE"
     elif quality_rejected:
         conclusion = "BOOKS_EXIST_BUT_DATA_QUALITY_GATE_BLOCKS_EXECUTION"
+    elif inconclusive:
+        conclusion = "DIAGNOSTIC_SCAN_INCOMPLETE_FAIL_CLOSED"
     elif late:
         conclusion = "RECORDED_BOOKS_ARE_CAUSAL_BUT_TOO_LATE_FOR_750MS_BUDGET"
-    elif unproven:
+    elif no_later:
         conclusion = "NO_EXECUTABLE_BOOK_AND_NO_EXPLICIT_GAP_PROOF"
     else:
         conclusion = "NO_DIAGNOSTIC_SHOCKS"
 
+    # Preserve a few aggregate aliases used by historical reports while keeping
+    # the canonical schema/classification/event rows untouched.
     return {
+        **canonical,
         "schema_version": SCHEMA_VERSION,
         "purpose": "SOURCE_COVERAGE_DIAGNOSTIC_ONLY_NOT_ECONOMIC_TUNING",
-        "coin": selected_coin,
+        "compatibility_api": "lead_lag_causal_diagnostic.v1->canonical.v4",
         "diagnostic_shock_threshold_bps": float(diagnostic_threshold_bps),
+        "economic_shock_threshold_bps_unchanged": float(
+            ECONOMIC_SHOCK_THRESHOLD_BPS
+        ),
         "economic_threshold_unchanged": True,
-        "max_executable_book_delay_ms": max_delay,
-        "diagnostic_lookahead_ms": lookahead,
-        "shock_count": len(events),
-        "book_count": len(books),
-        "classifications": dict(sorted(counts.items())),
+        "diagnostic_lookahead_ms_legacy_only": max(0, int(lookahead_ms)),
+        "book_count": sum(len(rows) for rows in l2_history.values()),
         "executable_book_events": executable,
-        "explicit_collection_gap_events": explicit_gap_events,
+        "explicit_collection_gap_events": explicit_gap,
         "quality_rejected_events": quality_rejected,
         "late_book_events": late,
-        "gap_unproven_events": unproven,
-        "min_first_book_delay_ms": min(delays) if delays else None,
-        "max_first_book_delay_ms": max(delays) if delays else None,
-        "events": events,
+        "gap_unproven_events": late + no_later,
+        "inconclusive_scan_events": inconclusive,
         "conclusion": conclusion,
-        "paper_read_only": True,
-        "real_execution": False,
         "creates_trades": False,
         "changes_strategy_parameters": False,
+        "paper_read_only": True,
+        "real_execution": False,
     }
 
 
