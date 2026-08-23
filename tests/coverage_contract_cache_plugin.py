@@ -4,10 +4,17 @@ import signal
 import time
 from collections.abc import Callable
 from functools import wraps
+from pathlib import Path
 
 
 class _CoverageContractCallTimeout(TimeoutError):
     """Stop one synthetic coverage invocation without stopping the real test."""
+
+
+_REPO_ROOT = str(Path(__file__).resolve().parents[1]).replace("\\", "/").rstrip("/")
+_REPO_PREFIX = _REPO_ROOT.casefold() + "/"
+_PLUGIN_FILE = str(Path(__file__).resolve()).replace("\\", "/").casefold()
+_UNSAFE_FRAME_RETRY_SECONDS = 0.01
 
 
 def _target_id(value: object) -> int:
@@ -83,12 +90,34 @@ def _memoize_function_only(original: Callable):
     return wrapped
 
 
+def _controlled_timeout_frame(frame: object) -> bool:
+    """Return True only for repository code where our private timeout is catchable.
+
+    Raising an exception from a Python signal handler is asynchronous with respect
+    to the interrupted Python code.  If that interruption lands in a weakref/GC
+    callback or pytest/Pydantic/SQLAlchemy internals, the exception can become
+    unraisable or corrupt pytest's own error rendering.  We therefore inject the
+    private timeout only while execution is visibly back inside repository code.
+    """
+
+    code = getattr(frame, "f_code", None)
+    filename = str(getattr(code, "co_filename", "") or "").replace("\\", "/").casefold()
+    if not filename or filename == _PLUGIN_FILE:
+        return False
+    return filename.startswith(_REPO_PREFIX)
+
+
 def _bounded_invoke(original: Callable, seconds: float = 0.5):
     """Bound one synthetic invocation without corrupting pytest's outer timer.
 
-    Every candidate is still attempted. If pytest-timeout already owns an earlier
-    SIGALRM deadline, that deadline wins. An expired outer timer is never re-armed
-    with a tiny residual value, which avoids stray SIGALRM during coverage teardown.
+    Every candidate is still attempted and the 0.500 s limit is unchanged.  If
+    our SIGALRM lands inside foreign/stdlib/framework code, the timeout is marked
+    as expired and re-armed for a very short interval instead of throwing into an
+    unsafe callback.  The private timeout is then raised as soon as execution is
+    back in repository code, or synchronously when the invocation returns.
+
+    If pytest-timeout already owns an earlier SIGALRM deadline, that deadline wins.
+    An expired outer timer is never hidden by our retry loop.
     """
     if not hasattr(signal, "setitimer"):
         return original
@@ -100,18 +129,43 @@ def _bounded_invoke(original: Callable, seconds: float = 0.5):
         started = time.monotonic()
         outer_wins = previous_remaining > 0.0 and previous_remaining <= seconds
         armed_for = previous_remaining if outer_wins else seconds
+        private_timeout_expired = False
 
         def _raise_timeout(signum, frame):
+            nonlocal private_timeout_expired
+            elapsed = time.monotonic() - started
+            if previous_remaining > 0.0 and elapsed >= previous_remaining:
+                if callable(previous_handler):
+                    return previous_handler(signum, frame)
+                raise _CoverageContractCallTimeout(
+                    "outer coverage/pytest timer expired before controlled interruption"
+                )
             if outer_wins and callable(previous_handler):
                 return previous_handler(signum, frame)
-            raise _CoverageContractCallTimeout(
-                f"generic coverage invocation exceeded {seconds:.3f}s"
-            )
+
+            private_timeout_expired = True
+            if _controlled_timeout_frame(frame):
+                raise _CoverageContractCallTimeout(
+                    f"generic coverage invocation exceeded {seconds:.3f}s"
+                )
+
+            retry = _UNSAFE_FRAME_RETRY_SECONDS
+            if previous_remaining > 0.0:
+                outer_left = previous_remaining - elapsed
+                if outer_left > 0.0:
+                    retry = min(retry, max(0.001, outer_left))
+            signal.setitimer(signal.ITIMER_REAL, retry)
+            return None
 
         signal.signal(signal.SIGALRM, _raise_timeout)
         signal.setitimer(signal.ITIMER_REAL, armed_for)
         try:
-            return original(*args, **kwargs)
+            result = original(*args, **kwargs)
+            if private_timeout_expired:
+                raise _CoverageContractCallTimeout(
+                    f"generic coverage invocation exceeded {seconds:.3f}s"
+                )
+            return result
         finally:
             signal.setitimer(signal.ITIMER_REAL, 0.0)
             signal.signal(signal.SIGALRM, previous_handler)
