@@ -14,6 +14,7 @@ def _book(
     ready: bool = True,
     gap_count: int = 0,
     reconnect_count: int = 0,
+    sequence: int | None = None,
 ) -> dict:
     return {
         "coin": "ETH",
@@ -27,8 +28,15 @@ def _book(
         "gap_count": gap_count,
         "reconnect_count": reconnect_count,
         "connection_id": "conn-1",
-        "sequence": ts_ms,
+        "sequence": sequence,
         "source": "hyperliquid:recorded:l2Book",
+    }
+
+
+def _meta(event: int, *, stopped_reason: str = "COMPLETED") -> dict:
+    return {
+        "windows": [{"start_ms": event - 1_000, "end_ms": event + 15_000}],
+        "per_window": [{"stopped_reason": stopped_reason}],
     }
 
 
@@ -43,84 +51,89 @@ def test_timely_quality_book_is_explicitly_observed() -> None:
     event = 10_000
     result = diagnose_causal_book_availability(
         [event],
-        {"ETH": [_book(9_900), _book(10_500)]},
+        {"ETH": [_book(9_900, sequence=1), _book(10_500, sequence=2)]},
+        microstructure_meta=_meta(event),
     )
     row = result["events"][0]
-    assert row["classification"] == "CAUSAL_BOOK_WITHIN_750MS"
+    assert row["classification"] == "EXECUTABLE_CAUSAL_BOOK"
     assert row["next_book_delay_ms"] == 500
-    assert row["explicit_collector_gap"] is False
+    assert row["explicit_gap_evidence"] == []
     assert result["root_cause"] == "EXECUTABLE_CAUSAL_BOOK_OBSERVED_FOR_AT_LEAST_ONE_EVENT"
 
 
 def test_timely_book_can_be_rejected_by_quality_gate() -> None:
+    event = 10_000
     result = diagnose_causal_book_availability(
-        [10_000],
-        {"ETH": [_book(9_900), _book(10_200, ready=False)]},
+        [event],
+        {"ETH": [_book(9_900, sequence=1), _book(10_200, ready=False, sequence=2)]},
+        microstructure_meta=_meta(event),
     )
     row = result["events"][0]
-    assert row["classification"] == "CAUSAL_BOOK_WITHIN_750MS_REJECTED_QUALITY"
+    assert row["classification"] == "BOOK_WITHIN_DELAY_REJECTED_BY_QUALITY"
     assert result["root_cause"] == "BOOKS_TIMELY_BUT_QUALITY_GATE_REJECTED"
 
 
-def test_late_book_is_collection_gap_only_with_explicit_counter_evidence() -> None:
+def test_late_book_is_collection_gap_only_with_event_local_counter_delta() -> None:
+    event = 10_000
     result = diagnose_causal_book_availability(
-        [10_000],
+        [event],
         {
             "ETH": [
-                _book(9_900, gap_count=2, reconnect_count=1),
-                _book(12_295, gap_count=3, reconnect_count=1),
+                _book(9_900, gap_count=2, reconnect_count=1, sequence=10),
+                _book(12_295, gap_count=3, reconnect_count=1, sequence=11),
             ]
         },
+        microstructure_meta=_meta(event),
     )
     row = result["events"][0]
-    assert row["classification"] == "EXPLICIT_COLLECTOR_GAP_BEFORE_NEXT_BOOK"
+    assert row["classification"] == "EXPLICIT_RECORDED_FEED_GAP"
     assert row["next_book_delay_ms"] == 2_295
     assert row["gap_count_delta"] == 1
-    assert row["explicit_collector_gap"] is True
+    assert "BOOK_GAP_COUNT_DELTA=1" in row["explicit_gap_evidence"]
     assert result["root_cause"] == "COLLECTION_GAP_EXPLICITLY_PROVEN_FOR_ALL_EVENTS"
 
 
-def test_late_book_without_gap_counter_stays_unresolved_fail_closed() -> None:
+def test_old_cumulative_counters_do_not_contaminate_later_event() -> None:
+    event = 10_000
     result = diagnose_causal_book_availability(
-        [10_000],
+        [event],
         {
             "ETH": [
-                _book(9_900, gap_count=2, reconnect_count=1),
-                _book(14_715, gap_count=2, reconnect_count=1),
+                _book(9_900, gap_count=2, reconnect_count=1, sequence=10),
+                _book(14_715, gap_count=2, reconnect_count=1, sequence=11),
             ]
         },
+        microstructure_meta=_meta(event),
     )
     row = result["events"][0]
-    assert row["classification"] == "NEXT_RECORDED_BOOK_TOO_LATE_NO_GAP_PROOF"
+    assert row["classification"] == "CAUSAL_BOOK_TOO_LATE_NO_GAP_PROOF"
     assert row["next_book_delay_ms"] == 4_715
-    assert row["explicit_collector_gap"] is False
+    assert row["gap_count_delta"] == 0
+    assert row["reconnect_count_delta"] == 0
     assert result["root_cause"] == "NO_EXECUTABLE_BOOK_OBSERVED_WITHOUT_COLLECTOR_GAP_PROOF"
-    assert "does not prove market absence" in result["interpretation_guard"]
+    assert "event-local collector gap" in result["interpretation_guard"]
 
 
 def test_no_later_book_is_not_mislabeled_as_market_absence() -> None:
+    event = 10_000
     result = diagnose_causal_book_availability(
-        [10_000],
-        {"ETH": [_book(9_900)]},
+        [event],
+        {"ETH": [_book(9_900, sequence=1)]},
+        microstructure_meta=_meta(event),
     )
-    assert result["events"][0]["classification"] == "NO_LATER_BOOK_RECORDED"
+    assert result["events"][0]["classification"] == "NO_LATER_BOOK_RECORDED_NO_GAP_PROOF"
     assert result["root_cause"] == "NO_EXECUTABLE_BOOK_OBSERVED_WITHOUT_COLLECTOR_GAP_PROOF"
 
 
-def test_mixed_events_report_mixed_collection_and_unresolved_evidence() -> None:
+def test_loader_budget_exhaustion_is_not_promoted_to_collector_gap() -> None:
+    event = 10_000
     result = diagnose_causal_book_availability(
-        [10_000, 20_000],
-        {
-            "ETH": [
-                _book(9_900, gap_count=0, reconnect_count=0),
-                _book(12_000, gap_count=1, reconnect_count=0),
-                _book(19_900, gap_count=1, reconnect_count=0),
-                _book(22_000, gap_count=1, reconnect_count=0),
-            ]
-        },
+        [event],
+        {"ETH": [_book(12_000, sequence=1)]},
+        microstructure_meta=_meta(event, stopped_reason="TIME_BUDGET_REACHED"),
     )
-    assert result["classification_counts"] == {
-        "EXPLICIT_COLLECTOR_GAP_BEFORE_NEXT_BOOK": 1,
-        "NEXT_RECORDED_BOOK_TOO_LATE_NO_GAP_PROOF": 1,
-    }
-    assert result["root_cause"] == "MIXED_COLLECTION_GAP_AND_UNRESOLVED_BOOK_ABSENCE"
+    row = result["events"][0]
+    assert row["classification"] == "INCONCLUSIVE_DIAGNOSTIC_SCAN"
+    assert row["explicit_gap_evidence"] == []
+    assert row["loader_incomplete_evidence"] == ["WINDOW_SCAN_TIME_BUDGET_REACHED"]
+    assert result["root_cause"] == "DIAGNOSTIC_SCAN_INCOMPLETE_FAIL_CLOSED"
