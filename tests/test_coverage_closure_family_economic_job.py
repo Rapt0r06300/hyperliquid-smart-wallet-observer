@@ -200,7 +200,7 @@ def test_execute_family_job_success_download_and_step_failures(monkeypatch, tmp_
     req_file, project, lab, result_dir, workspace, statuses, steps, written, replay = _wire_execute(monkeypatch, tmp_path, request, step_codes=[0, 0, 0])
     rc = family.execute_family_job(req_file, project_root=project, lab_root=lab, result_dir=result_dir)
     assert rc == 0
-    assert [step["name"] for step in steps] == ["01_prepare_dataset", "02_economic_campaigns", "03_connection_audit"]
+    assert [step["name"] for step in steps] == ["01_prepare_dataset", "02_economic_campaigns", "04_connection_audit"]
     assert replay == [workspace]
     payload = written[-1]
     assert payload["status"] == "SUCCESS"
@@ -223,4 +223,4 @@ def test_execute_family_job_success_download_and_step_failures(monkeypatch, tmp_
     request = _request(download=False)
     req_file, project, lab, result_dir, workspace, statuses, steps, written, replay = _wire_execute(monkeypatch, tmp_path / "audit-fail", request, step_codes=[0, 6])
     assert family.execute_family_job(req_file, project_root=project, lab_root=lab, result_dir=result_dir) == 6
-    assert [s["name"] for s in steps] == ["02_economic_campaigns", "03_connection_audit"]
+    assert [s["name"] for s in steps] == ["02_economic_campaigns", "04_connection_audit"]
