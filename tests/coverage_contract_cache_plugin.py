@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import concurrent.futures
 import signal
 import time
 from collections.abc import Callable
@@ -15,6 +16,51 @@ _REPO_ROOT = str(Path(__file__).resolve().parents[1]).replace("\\", "/").rstrip(
 _REPO_PREFIX = _REPO_ROOT.casefold() + "/"
 _PLUGIN_FILE = str(Path(__file__).resolve()).replace("\\", "/").casefold()
 _UNSAFE_FRAME_RETRY_SECONDS = 0.01
+
+
+class _InlineThreadPoolExecutor:
+    """Deterministic ThreadPoolExecutor substitute for synthetic coverage calls.
+
+    Coverage contracts intentionally invoke production callables with synthetic
+    boundary inputs.  Starting real worker threads for those calls adds scheduler
+    latency and can leave executor workers waiting on synthetic callbacks even
+    though the same callback/path can be exercised synchronously.  This adapter
+    preserves ``submit``/``map`` semantics and executes every submitted callable;
+    it only removes concurrency from the coverage harness.  Production code is
+    never patched outside the lifetime of the pytest monkeypatch fixture.
+    """
+
+    def __init__(self, max_workers: int | None = None, *args, **kwargs) -> None:
+        del args, kwargs
+        self.max_workers = max_workers
+        self._shutdown = False
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *_args: object) -> bool:
+        self.shutdown()
+        return False
+
+    def submit(self, fn, /, *args, **kwargs):
+        future: concurrent.futures.Future = concurrent.futures.Future()
+        if self._shutdown:
+            future.set_exception(RuntimeError("cannot schedule new futures after shutdown"))
+            return future
+        try:
+            future.set_result(fn(*args, **kwargs))
+        except BaseException as exc:  # Future must preserve executor exception semantics.
+            future.set_exception(exc)
+        return future
+
+    def map(self, fn, *iterables, timeout=None, chunksize=1, buffersize=None):
+        del timeout, chunksize, buffersize
+        for args in zip(*iterables):
+            yield fn(*args)
+
+    def shutdown(self, wait: bool = True, *, cancel_futures: bool = False) -> None:
+        del wait, cancel_futures
+        self._shutdown = True
 
 
 def _target_id(value: object) -> int:
@@ -219,12 +265,12 @@ def _bounded_controlled_count(original: Callable):
 
 
 def _offline_guards_without_workers(original: Callable):
-    """Prevent persistent HyperSmart workers without breaking Python executors.
+    """Keep synthetic coverage offline and deterministic without skipping work.
 
-    The synthetic closure tests may reach production startup paths that create
-    daemon workers. Those project-owned workers must not outlive one candidate,
-    but asyncio and concurrent-futures need their own short-lived threads to start
-    and join normally. Guard only threads explicitly named ``hypersmart-*``.
+    Project-owned daemon workers must never outlive one candidate.  Asyncio still
+    uses its own short-lived threads when needed, while ``ThreadPoolExecutor`` is
+    replaced by an inline executor so every submitted callable is executed without
+    launching a real pool from synthetic boundary inputs.
     """
 
     @wraps(original)
@@ -250,6 +296,11 @@ def _offline_guards_without_workers(original: Callable):
 
         monkeypatch.setattr(threading.Thread, "start", _start)
         monkeypatch.setattr(threading.Thread, "join", _join)
+        monkeypatch.setattr(
+            concurrent.futures,
+            "ThreadPoolExecutor",
+            _InlineThreadPoolExecutor,
+        )
 
     return wrapped
 
@@ -268,7 +319,8 @@ def pytest_configure(config) -> None:
 
     No production callable, generated input, test case, branch, module, assertion,
     or coverage gate is skipped. Immutable analysis is cached and persistent
-    project workers are suppressed while standard Python executors remain intact.
+    project workers are suppressed while executor callbacks still all execute
+    deterministically inline.
     """
     del config
     from tests import coverage_contract_harness as harness
