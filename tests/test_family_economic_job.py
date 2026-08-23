@@ -98,7 +98,13 @@ def _valid_copy_campaign() -> dict:
         "placebos": {"beaten": True},
         "vault_generalization": {"sample_count": 20, "net_bps": 1.0},
         "dataset_provenance": {"dataset_fingerprint": "b" * 64},
-        "parameter_freeze": {"parameters_sha256": "c" * 64},
+        "parameter_freeze": {
+            "parameters_sha256": "c" * 64,
+            "campaign_id": "copy-vault-fixture-v1",
+            "frozen_at_ms": 1_786_552_000_000,
+            "selected_before_final_evaluation": True,
+            "path": "runtime/reports/economic_campaigns/freezes/copy-vault-fixture-v1.json",
+        },
     }
     campaign.update(evaluate_objective(campaign))
     assert campaign["objective_status"] == "ATTEINT"
