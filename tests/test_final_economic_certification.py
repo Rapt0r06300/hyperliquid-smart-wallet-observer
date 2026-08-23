@@ -42,6 +42,14 @@ def _certified_campaign(family: str) -> dict:
         "paper_read_only": True,
         "real_execution": False,
         "parameters_frozen": True,
+        "parameter_freeze": {
+            "campaign_id": f"freeze-{family}",
+            "frozen_at_ms": 1_799_999_999_999,
+            "selected_before_final_evaluation": True,
+            "parameters_sha256": "e" * 64,
+            "path": f"runtime/reports/economic_campaigns/freezes/{family}/freeze.json",
+        },
+        "dataset_provenance": {"dataset_fingerprint": "d" * 64},
         "opened_positions": 2,
         "closed_positions": 2,
         "gross_pnl_usd": 5.0,
@@ -175,7 +183,19 @@ def test_certification_recalcule_la_gate_et_certifie_une_preuve_complete() -> No
     assert result["forward_positive"] is True
     assert result["forward_post_freeze"] is True
     assert result["placebo_beaten"] is True
+    assert result["proof_provenance"]["dataset_fingerprint"] == "d" * 64
+    assert result["proof_provenance"]["parameters_sha256"] == "e" * 64
+    assert result["proof_provenance"]["complete"] is True
     assert result["reasons"] == []
+
+
+def test_certification_refuse_provenance_incomplete() -> None:
+    row = _certified_campaign("lead_lag")
+    row["dataset_provenance"] = {}
+    result = certify_campaign("lead_lag", row)
+    assert result["certified"] is False
+    assert result["proof_provenance"]["complete"] is False
+    assert "PROOF_PROVENANCE_INCOMPLETE" in result["reasons"]
 
 
 def test_certification_refuse_un_statut_atteint_falsifie() -> None:
