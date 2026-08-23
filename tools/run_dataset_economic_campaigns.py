@@ -21,9 +21,9 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
 from hl_observer.backtesting.economic_vnext_pack import run_economic_vnext_pack  # noqa: E402
-from hl_observer.backtesting.lead_lag_causal_gap_diagnostic import (  # noqa: E402
+from hl_observer.backtesting.lead_lag_causal_diagnostics import (  # noqa: E402
     DIAGNOSTIC_SHOCK_THRESHOLD_BPS,
-    diagnose_causal_book_availability,
+    diagnose_causal_book_coverage,
 )
 from hl_observer.datasets.economic_multi_source import (  # noqa: E402
     install_copy_vault_adapter,
@@ -113,19 +113,22 @@ def _isolated_run_campaigns(
 
 
 def _lead_lag_diagnostic_overrides(canonical) -> dict[str, object]:
-    """Observe 8-bps shocks for data-quality diagnosis without changing economics.
+    """Route every FULL/COLD Lead-Lag causal verdict through canonical v4.
 
-    The canonical queue replay still detects and trades only its frozen 20-bps
-    economic shocks.  The 8-bps detector is used solely to make the already
-    observed sparse events visible to the market-data loader, so we can tell an
-    explicit collector gap from a contiguous capture whose next durable book is
-    simply later than the 750-ms executable bound.
+    The canonical queue replay still detects/trades only its frozen 20-bps
+    economic shocks. The 8-bps sample expands *diagnostic* event windows only.
+    Crucially, campaign, replay and runner audit all consume the same v4
+    classifier, including event-local counter deltas and loader-incomplete
+    evidence. No alternative gap classifier remains active in this path.
     """
 
     original_detect = canonical.detect_rolling_shocks
     original_loader = canonical.load_market_microstructure_event_windows
     original_replay = canonical.replay_lead_lag_queue_maker
-    state: dict[str, object] = {"diagnostic_shocks": []}
+    state: dict[str, object] = {
+        "diagnostic_shocks": [],
+        "microstructure_meta": {},
+    }
 
     def economic_detect_with_diagnostic_capture(trades, *args, **kwargs):
         economic = original_detect(trades, *args, **kwargs)
@@ -150,15 +153,25 @@ def _lead_lag_diagnostic_overrides(canonical) -> dict[str, object]:
         meta["diagnostic_shock_threshold_bps"] = DIAGNOSTIC_SHOCK_THRESHOLD_BPS
         meta["diagnostic_only_expansion"] = True
         meta["economic_parameters_changed"] = False
+        state["microstructure_meta"] = meta
         return books, trades, meta
 
-    def replay_with_gap_diagnostic(tape, l2_history, public_trade_history, **kwargs):
+    def canonical_causal_diagnostic(shocks, l2_history, **kwargs):
+        max_delay = int(kwargs.get("max_book_delay_ms") or 750)
+        return diagnose_causal_book_coverage(
+            list(shocks),
+            l2_history,
+            dict(state.get("microstructure_meta") or {}),
+            max_book_delay_ms=max_delay,
+        )
+
+    def replay_with_canonical_diagnostic(tape, l2_history, public_trade_history, **kwargs):
         replay = original_replay(tape, l2_history, public_trade_history, **kwargs)
         diagnostic_shocks = list(state.get("diagnostic_shocks") or [])
         replay = dict(replay)
-        replay["causal_gap_diagnostic"] = diagnose_causal_book_availability(
+        replay["causal_gap_diagnostic"] = canonical_causal_diagnostic(
             diagnostic_shocks,
-            list(l2_history.get("ETH", ())),
+            l2_history,
             max_book_delay_ms=int(
                 (replay.get("parameters") or {}).get("max_book_delay_ms") or 750
             ),
@@ -177,7 +190,8 @@ def _lead_lag_diagnostic_overrides(canonical) -> dict[str, object]:
     return {
         "detect_rolling_shocks": economic_detect_with_diagnostic_capture,
         "load_market_microstructure_event_windows": loader_with_diagnostic_windows,
-        "replay_lead_lag_queue_maker": replay_with_gap_diagnostic,
+        "diagnose_causal_book_availability": canonical_causal_diagnostic,
+        "replay_lead_lag_queue_maker": replay_with_canonical_diagnostic,
     }
 
 
@@ -276,6 +290,7 @@ def run_dataset_campaigns(
     result["canonical_globals_mutated"] = False
     result["lead_lag_diagnostic_threshold_bps"] = DIAGNOSTIC_SHOCK_THRESHOLD_BPS
     result["lead_lag_economic_parameters_changed"] = False
+    result["lead_lag_causal_diagnostic_schema"] = "hypersmart.lead_lag_causal_book_coverage.v4"
     return result
 
 
