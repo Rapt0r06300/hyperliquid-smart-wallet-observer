@@ -37,8 +37,6 @@ UNSAFE_NAMES = {
     "start_server",
     "run_forever",
 }
-# Parametres qui bornent explicitement une boucle de service. Le harnais force ces bornes a 1
-# meme en mode "defaults" afin de ne jamais lancer un superviseur pour une duree indeterminee.
 LOOP_SAFETY_PARAMETERS = {
     "max_ticks",
     "max_iterations",
@@ -50,30 +48,40 @@ LOOP_SAFETY_PARAMETERS = {
     "max_events",
     "max_steps",
 }
-# Le harnais typé complète les vrais tests unitaires; il ne doit pas rejouer synthétiquement
-# un centre de commande entier. `hl_observer.cli` possède déjà ses tests dédiés et orchestre
-# volontairement serveurs, archives, scans et rapports : l'invoquer fonction par fonction
-# transforme un test de couverture borné en campagne runtime de plusieurs minutes.
 GENERIC_MODULE_UNSAFE = {
     "hl_observer.cli",
 }
 PROCESS_GLOBAL_UNSAFE = {
     ("hl_observer.ops.portable_audit_guard", "install"),
     ("hl_observer.ops.portable_audit_guard", "install_from_environment"),
-    # Ce rapport parcourt les decision logs et appartient aux tests de scoring dédiés. Sur des
-    # entrées Dummy il peut déclencher un scan de chemins sans intérêt pour le contrat générique.
     ("hl_observer.scoring.wallet_ranking", "export_classification_robustness_report"),
 }
 
 
 class Dummy:
+    """Objet synthétique déterministe dont la conversion texte reste portable.
+
+    Certains appels de couverture exploratoires convertissent leurs entrées en
+    texte avant de construire un chemin. Le repr Python par défaut contient une
+    adresse mémoire et les caractères ``<>`` interdits sous Windows; s'il est
+    accidentellement matérialisé par un code de production, il peut alors laisser
+    un fichier impossible à archiver dans le checkout de test. Une représentation
+    stable évite cette pollution non déterministe sans rendre Dummy path-like :
+    ``Path(Dummy())`` continue donc d'échouer et reste fail-closed.
+    """
+
+    TEXT = "coverage-dummy"
+
     def __init__(self, **values):
         self.__dict__.update(values)
 
+    def __str__(self) -> str:
+        return self.TEXT
+
+    def __repr__(self) -> str:
+        return "Dummy()"
+
     def __getattr__(self, name):
-        # Les attributs protocolaires Python doivent rester réellement absents. Les inventer
-        # casse des bibliothèques qui bouclent volontairement sur hasattr(__dunder__), comme
-        # SQLAlchemy avec __clause_element__, ainsi que les sentinelles ctypes ci-dessous.
         if (
             (name.startswith("__") and name.endswith("__"))
             or name in {"_as_parameter_", "_fields_", "_type_", "_length_"}
@@ -119,7 +127,6 @@ class Dummy:
 
 def _value(annotation, name: str, mode: int, root: Path, settings: Settings, depth: int = 0):
     lower = name.lower()
-    # Frontière native : un PID synthétique doit rester un scalaire Win32 valide.
     if lower in {"pid", "ppid", "process_id", "parent_pid", "child_pid"} or lower.endswith("_pid"):
         return 1
     origin = typing.get_origin(annotation)
@@ -227,7 +234,6 @@ def _value(annotation, name: str, mode: int, root: Path, settings: Settings, dep
 
 
 def _contains_while_loop(function) -> bool:
-    """Détecte les boucles `while` que des arguments synthétiques peuvent rendre non bornées."""
     try:
         source = textwrap.dedent(inspect.getsource(function))
         tree = ast.parse(source)
@@ -259,15 +265,10 @@ def _invoke(function, mode: int, root: Path, settings: Settings):
             positional.append(value)
         else:
             keyword[parameter.name] = value
-
-    # Les coroutines ne passent jamais ici: elles sont volontairement laissées à leurs tests
-    # dédiés, qui savent fournir événements/queues/arrêt. Cela n'omet aucune ligne du rapport
-    # coverage; cela empêche seulement le harnais générique de bloquer une boucle asyncio.
     return function(*positional, **keyword)
 
 
 def _controlled_group(error: BaseExceptionGroup) -> bool:
-    """N'avale que les sorties prévues du harnais, jamais KeyboardInterrupt."""
     for item in error.exceptions:
         if isinstance(item, BaseExceptionGroup):
             if not _controlled_group(item):
@@ -332,8 +333,6 @@ def run_typed_contracts(target_modules: tuple[str, ...], tmp_path: Path, monkeyp
         for name, function in list(vars(module).items()):
             if not inspect.isfunction(function) or function.__module__ != module_name:
                 continue
-            # Une coroutine sans protocole d'arrêt/fixtures métier peut attendre indéfiniment.
-            # Elle reste incluse dans la mesure coverage et doit être couverte par son vrai test.
             if inspect.iscoroutinefunction(function):
                 continue
             if name.lower() in UNSAFE_NAMES or (module_name, name) in PROCESS_GLOBAL_UNSAFE:
@@ -342,9 +341,6 @@ def run_typed_contracts(target_modules: tuple[str, ...], tmp_path: Path, monkeyp
                 inspect.signature(function)
             except (TypeError, ValueError):
                 continue
-            # Une boucle `while` n'est appelée que si l'API expose elle-même une borne explicite.
-            # Cela évite qu'un Dummy transforme un superviseur/service en boucle infinie, sans
-            # retirer une seule ligne du rapport coverage ni masquer les tests métier dédiés.
             if _contains_while_loop(function) and not _loop_has_explicit_safety_bound(function):
                 continue
             for mode in (0, 1, 2):
