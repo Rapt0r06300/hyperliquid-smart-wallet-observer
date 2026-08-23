@@ -119,6 +119,13 @@ def _write_economic_reports(
     )
 
 
+def _family_steps(suite: str) -> list[dict[str, object]]:
+    return [
+        {"name": name, "return_code": 0}
+        for name in autonomous_completion.FAMILY_ECONOMIC_REQUIRED_STEPS[suite]
+    ]
+
+
 def test_required_skipped_is_not_a_complete_historical_suite(tmp_path: Path, monkeypatch) -> None:
     project_root = tmp_path / "project"
     lab_root = tmp_path / "lab"
@@ -306,10 +313,7 @@ def test_family_economic_suite_requires_nonempty_full_source_coverage(tmp_path: 
     )
     request = _request(suite="copy-vault-full", mode="economic")
     result = _result(workspace, suite="copy-vault-full", mode="economic")
-    result["steps"] = [
-        {"name": "02_economic_campaigns", "return_code": 0},
-        {"name": "03_connection_audit", "return_code": 0},
-    ]
+    result["steps"] = _family_steps("copy-vault-full")
 
     contract = autonomous_completion.build_completion_contract(
         request=request,
@@ -337,10 +341,7 @@ def test_family_economic_suite_accepts_full_nonempty_target_coverage(tmp_path: P
     )
     request = _request(suite="lead-lag-full", mode="economic")
     result = _result(workspace, suite="lead-lag-full", mode="economic")
-    result["steps"] = [
-        {"name": "02_economic_campaigns", "return_code": 0},
-        {"name": "03_connection_audit", "return_code": 0},
-    ]
+    result["steps"] = _family_steps("lead-lag-full")
 
     contract = autonomous_completion.build_completion_contract(
         request=request,
@@ -351,6 +352,159 @@ def test_family_economic_suite_accepts_full_nonempty_target_coverage(tmp_path: P
 
     assert contract["analysis_complete"] is True
     assert contract["source_coverage_issues"] == []
+    assert contract["required_steps"] == [
+        "02_economic_campaigns",
+        "03_lead_lag_causal_audit",
+        "04_connection_audit",
+    ]
+
+
+@pytest.mark.parametrize(
+    ("suite", "target_family"),
+    [
+        ("copy-vault-full", "copy_vault"),
+        ("lead-lag-full", "lead_lag"),
+        ("cross-venue-full", "cross_venue"),
+    ],
+)
+def test_each_family_suite_accepts_only_its_exact_success_stage_contract(
+    tmp_path: Path,
+    suite: str,
+    target_family: str,
+) -> None:
+    project_root = tmp_path / "project"
+    lab_root = tmp_path / "lab"
+    workspace = lab_root / "datasets" / suite
+    workspace.mkdir(parents=True)
+    statuses = {
+        "copy_vault": (0, "FULL"),
+        "lead_lag": (0, "FULL"),
+        "cross_venue": (0, "FULL"),
+    }
+    statuses[target_family] = (2, "FULL")
+    _write_economic_reports(workspace, family_status=statuses)
+    request = _request(suite=suite, mode="economic")
+    result = _result(workspace, suite=suite, mode="economic")
+    result["steps"] = _family_steps(suite)
+
+    contract = autonomous_completion.build_completion_contract(
+        request=request,
+        result=result,
+        project_root=project_root,
+        lab_root=lab_root,
+    )
+
+    assert contract["analysis_complete"] is True
+    assert contract["required_steps"] == list(
+        autonomous_completion.FAMILY_ECONOMIC_REQUIRED_STEPS[suite]
+    )
+    assert contract["incomplete_required_steps"] == []
+
+
+@pytest.mark.parametrize(
+    ("suite", "target_family", "missing_stage", "legacy_or_renamed_stage"),
+    [
+        ("copy-vault-full", "copy_vault", "04_connection_audit", "03_connection_audit"),
+        (
+            "lead-lag-full",
+            "lead_lag",
+            "03_lead_lag_causal_audit",
+            "03_lead_lag_causal_diagnostic",
+        ),
+        ("cross-venue-full", "cross_venue", "04_connection_audit", "03_connection_audit"),
+    ],
+)
+def test_family_suite_rejects_missing_or_renamed_required_stage(
+    tmp_path: Path,
+    suite: str,
+    target_family: str,
+    missing_stage: str,
+    legacy_or_renamed_stage: str,
+) -> None:
+    project_root = tmp_path / "project"
+    lab_root = tmp_path / "lab"
+    workspace = lab_root / "datasets" / suite
+    workspace.mkdir(parents=True)
+    statuses = {
+        "copy_vault": (0, "FULL"),
+        "lead_lag": (0, "FULL"),
+        "cross_venue": (0, "FULL"),
+    }
+    statuses[target_family] = (2, "FULL")
+    _write_economic_reports(workspace, family_status=statuses)
+    request = _request(suite=suite, mode="economic")
+    result = _result(workspace, suite=suite, mode="economic")
+    result["steps"] = [
+        row
+        for row in _family_steps(suite)
+        if row["name"] != missing_stage
+    ] + [{"name": legacy_or_renamed_stage, "return_code": 0}]
+
+    contract = autonomous_completion.build_completion_contract(
+        request=request,
+        result=result,
+        project_root=project_root,
+        lab_root=lab_root,
+    )
+
+    assert contract["analysis_complete"] is False
+    assert contract["incomplete_required_steps"] == [missing_stage]
+
+
+def test_incomplete_family_job_never_reaches_registry_or_economic_memory(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    project_root = tmp_path / "project"
+    lab_root = tmp_path / "lab"
+    workspace = lab_root / "datasets" / "lead"
+    result_dir = lab_root / "results" / "jobs" / "job-1"
+    workspace.mkdir(parents=True)
+    result_dir.mkdir(parents=True)
+    _write_economic_reports(
+        workspace,
+        family_status={
+            "copy_vault": (0, "FULL"),
+            "lead_lag": (3, "FULL"),
+            "cross_venue": (0, "FULL"),
+        },
+    )
+    request = _request(suite="lead-lag-full", mode="economic")
+    result = _result(workspace, suite="lead-lag-full", mode="economic")
+    result["steps"] = [
+        {"name": "02_economic_campaigns", "return_code": 0},
+        {"name": "04_connection_audit", "return_code": 0},
+    ]
+    request_path = result_dir / "request.json"
+    request_path.write_text(json.dumps(request), encoding="utf-8")
+    (result_dir / "JOB_RESULT.json").write_text(json.dumps(result), encoding="utf-8")
+    memory_called = False
+
+    def _forbidden_memory(**_kwargs):
+        nonlocal memory_called
+        memory_called = True
+        raise AssertionError("economic memory must not run after an incomplete completion guard")
+
+    monkeypatch.setattr(
+        autonomous_completion,
+        "_persist_post_completion_economic_memory",
+        _forbidden_memory,
+    )
+
+    with pytest.raises(autonomous_completion.AutonomousCompletionError):
+        autonomous_completion.finalize_autonomous_completion(
+            request_path=request_path,
+            project_root=project_root,
+            lab_root=lab_root,
+            result_dir=result_dir,
+        )
+
+    final = json.loads((result_dir / "JOB_RESULT.json").read_text(encoding="utf-8"))
+    assert final["status"] == "NO_GO"
+    assert final["analysis_complete"] is False
+    assert final["completion_recorded"] is False
+    assert completed_suites_from_registry(lab_root, project_sha=SHA) == ()
+    assert memory_called is False
 
 
 def test_missing_job_exit_code_is_never_implicit_success(tmp_path: Path) -> None:
