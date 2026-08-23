@@ -29,6 +29,19 @@ ECONOMIC_FAMILY_BY_SUITE = {
     "lead-lag-full": "lead_lag",
     "cross-venue-full": "cross_venue",
 }
+FAMILY_ECONOMIC_REQUIRED_STEPS = {
+    "copy-vault-full": ("02_economic_campaigns", "04_connection_audit"),
+    "lead-lag-full": (
+        "02_economic_campaigns",
+        "03_lead_lag_causal_audit",
+        "04_connection_audit",
+    ),
+    "cross-venue-full": ("02_economic_campaigns", "04_connection_audit"),
+}
+CANONICAL_ECONOMIC_REQUIRED_STEPS = (
+    "02_economic_campaigns",
+    "03_connection_audit",
+)
 
 
 class AutonomousCompletionError(RuntimeError):
@@ -75,6 +88,24 @@ def _explicit_zero(value: object) -> bool:
         return False
 
 
+def _required_economic_steps(suite: str) -> tuple[str, ...]:
+    """Return the exact stage contract emitted by the selected economic worker.
+
+    The canonical all-families worker still uses the historical
+    ``03_connection_audit`` stage. Active family workers use the vNext stage
+    numbering introduced when the Lead-Lag causal audit became an explicit
+    stage: Copy-Vault/Cross-Venue finish on ``04_connection_audit`` and
+    Lead-Lag must additionally prove ``03_lead_lag_causal_audit``.
+
+    This mapping is intentionally fail-closed: an old/renamed stage cannot
+    satisfy a family suite merely because it returned zero.
+    """
+    return FAMILY_ECONOMIC_REQUIRED_STEPS.get(
+        str(suite or ""),
+        CANONICAL_ECONOMIC_REQUIRED_STEPS,
+    )
+
+
 def _economic_contract(
     *,
     request: Mapping[str, Any],
@@ -82,7 +113,8 @@ def _economic_contract(
     workspace: Path,
 ) -> dict[str, Any]:
     steps = _steps_by_name(result)
-    required_steps = ("02_economic_campaigns", "03_connection_audit")
+    suite = str(request.get("suite") or "")
+    required_steps = _required_economic_steps(suite)
     incomplete_steps = [
         name
         for name in required_steps
@@ -120,7 +152,6 @@ def _economic_contract(
         if not isinstance(families, Mapping):
             coverage_issues.append("SOURCE_COVERAGE_FAMILIES_MISSING")
             families = {}
-        suite = str(request.get("suite") or "")
         target_family = ECONOMIC_FAMILY_BY_SUITE.get(suite)
         if target_family is not None:
             family_row = families.get(target_family) if isinstance(families, Mapping) else None
@@ -446,9 +477,11 @@ def finalize_autonomous_completion(
 
 __all__ = [
     "AutonomousCompletionError",
+    "CANONICAL_ECONOMIC_REQUIRED_STEPS",
     "COMPLETION_EXIT_CODE",
     "COMPLETION_SCHEMA",
     "ECONOMIC_FAMILY_BY_SUITE",
+    "FAMILY_ECONOMIC_REQUIRED_STEPS",
     "REGISTRY_EXIT_CODE",
     "build_completion_contract",
     "finalize_autonomous_completion",
