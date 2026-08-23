@@ -22,6 +22,10 @@ def _request(*, suite: str = "copy-vault-full") -> dict[str, object]:
 
 
 def _result(workspace: Path, *, suite: str = "copy-vault-full") -> dict[str, object]:
+    steps = [{"name": "02_economic_campaigns", "return_code": 0}]
+    if suite == "lead-lag-full":
+        steps.append({"name": "03_lead_lag_causal_audit", "return_code": 0})
+    steps.append({"name": "04_connection_audit", "return_code": 0})
     return {
         "schema": autonomous_completion.RESULT_SCHEMA,
         "job_id": "memory-order-test",
@@ -30,10 +34,7 @@ def _result(workspace: Path, *, suite: str = "copy-vault-full") -> dict[str, obj
         "mode": "economic",
         "project_sha": SHA,
         "workspace": str(workspace),
-        "steps": [
-            {"name": "02_economic_campaigns", "return_code": 0},
-            {"name": "03_connection_audit", "return_code": 0},
-        ],
+        "steps": steps,
         "paper_only": True,
         "real_execution": False,
         "start_live_collection": False,
