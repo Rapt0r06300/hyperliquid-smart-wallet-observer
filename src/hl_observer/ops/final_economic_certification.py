@@ -45,6 +45,33 @@ def _sample_count(segment: object) -> int:
     return max(0, int(value or 0))
 
 
+def _proof_provenance(payload: Mapping[str, Any]) -> dict[str, Any]:
+    datasets = payload.get("dataset_provenance")
+    datasets = datasets if isinstance(datasets, Mapping) else {}
+    freeze = payload.get("parameter_freeze")
+    freeze = freeze if isinstance(freeze, Mapping) else {}
+    dataset_fingerprint = str(datasets.get("dataset_fingerprint") or "")
+    parameters_sha256 = str(freeze.get("parameters_sha256") or "")
+    campaign_id = str(freeze.get("campaign_id") or "")
+    frozen_at_ms = _number(freeze.get("frozen_at_ms"))
+    complete = bool(
+        len(dataset_fingerprint) == 64
+        and len(parameters_sha256) == 64
+        and campaign_id
+        and frozen_at_ms is not None
+        and frozen_at_ms > 0
+        and freeze.get("selected_before_final_evaluation") is True
+    )
+    return {
+        "dataset_fingerprint": dataset_fingerprint or None,
+        "parameters_sha256": parameters_sha256 or None,
+        "campaign_id": campaign_id or None,
+        "frozen_at_ms": int(frozen_at_ms) if frozen_at_ms is not None else None,
+        "freeze_path": str(freeze.get("path") or "") or None,
+        "complete": complete,
+    }
+
+
 def _raw_trade_rows(family: str, raw: Mapping[str, Any] | None) -> list[Mapping[str, Any]]:
     """Return the raw rows underlying the OOS/forward campaign proof.
 
@@ -91,6 +118,7 @@ def certify_campaign(expected_family: str, payload: Mapping[str, Any] | None) ->
             "forward_post_freeze": False,
             "placebo_beaten": False,
             "costs_complete": False,
+            "proof_provenance": None,
             "reasons": ["CAMPAIGN_MISSING_OR_UNREADABLE"],
         }
 
@@ -140,6 +168,10 @@ def certify_campaign(expected_family: str, payload: Mapping[str, Any] | None) ->
     if not costs_complete:
         reasons.append("COSTS_INCOMPLETE")
 
+    provenance = _proof_provenance(payload)
+    if provenance["complete"] is not True:
+        reasons.append("PROOF_PROVENANCE_INCOMPLETE")
+
     oos_positive = (_number(oos.get("net_pnl_usd")) or 0.0) > 0.0
     forward_positive = (_number(forward.get("net_pnl_usd")) or 0.0) > 0.0
     forward_post_freeze = forward.get("post_freeze") is True
@@ -156,6 +188,7 @@ def certify_campaign(expected_family: str, payload: Mapping[str, Any] | None) ->
         and proof_net >= TARGET_NET_USD
         and liquidatable
         and costs_complete
+        and provenance["complete"] is True
         and oos_positive
         and forward_positive
         and forward_post_freeze
@@ -174,6 +207,7 @@ def certify_campaign(expected_family: str, payload: Mapping[str, Any] | None) ->
         "forward_post_freeze": forward_post_freeze,
         "placebo_beaten": placebo_beaten,
         "costs_complete": costs_complete,
+        "proof_provenance": provenance,
         "reasons": unique_reasons,
     }
 
@@ -209,17 +243,12 @@ def certify_workspace(workspace: str | Path) -> dict[str, Any]:
 
     global_audit = audit_family_event_sets(identity_audits)
 
-    # A duplicate canonical event inside one family is forbidden even when the
-    # native IDs differ or when the same episode was moved OOS -> forward.
     intra = global_audit.get("intra_family_duplicate_global_events")
     if isinstance(intra, Mapping):
         for family, count in intra.items():
             if int(count or 0) > 0 and family in rows:
                 _append_reason(rows[family], "GLOBAL_TRADE_IDENTITY_DUPLICATE")
 
-    # Cross-family overlap invalidates both owners of the reused event.  This
-    # is independent from PnL and therefore cannot be compensated by a third
-    # profitable family.
     pairwise = global_audit.get("pairwise")
     if isinstance(pairwise, Mapping):
         for pair, detail in pairwise.items():
