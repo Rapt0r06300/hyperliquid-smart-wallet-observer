@@ -43,10 +43,17 @@ def test_construit_une_requete_worker_verrouillee_sur_main_et_paper() -> None:
 
 
 def test_un_json_de_commande_ne_peut_pas_activer_le_trading_ni_la_collecte_live() -> None:
-    request = build_worker_request(
-        _control(real_execution=True, paper_only=False, start_live_collection=True),
-        project_sha=SHA,
-    )
+    # Le schéma final est désormais fermé : ces champs de sécurité ne sont même
+    # plus acceptés comme entrées du plan de contrôle. C'est plus fort que de les
+    # accepter puis les écraser silencieusement, car toute tentative d'injection
+    # est fail-closed avant la construction de la requête worker.
+    with pytest.raises(ValueError, match="schéma fermé"):
+        build_worker_request(
+            _control(real_execution=True, paper_only=False, start_live_collection=True),
+            project_sha=SHA,
+        )
+
+    request = build_worker_request(_control(), project_sha=SHA)
     assert request["paper_only"] is True
     assert request["real_execution"] is False
     assert request["start_live_collection"] is False
