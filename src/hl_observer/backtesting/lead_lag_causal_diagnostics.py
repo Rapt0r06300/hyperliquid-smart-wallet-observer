@@ -1,5 +1,6 @@
 """Fail-closed causal coverage diagnostics for Lead-Lag execution evidence."""
 from __future__ import annotations
+
 import bisect
 import math
 from collections.abc import Mapping, Sequence
@@ -17,7 +18,10 @@ def _int(value: object, default: int = 0) -> int:
         return default
 
 
-def _window_for_timestamp(timestamp_ms: int, windows: Sequence[Mapping[str, Any]]) -> tuple[int, Mapping[str, Any]] | None:
+def _window_for_timestamp(
+    timestamp_ms: int,
+    windows: Sequence[Mapping[str, Any]],
+) -> tuple[int, Mapping[str, Any]] | None:
     for index, row in enumerate(windows):
         start_ms = _int(row.get("start_ms"), -1)
         end_ms = _int(row.get("end_ms"), -1)
@@ -26,34 +30,97 @@ def _window_for_timestamp(timestamp_ms: int, windows: Sequence[Mapping[str, Any]
     return None
 
 
-def _explicit_gap_evidence(*, candidate: Mapping[str, Any] | None, window_meta: Mapping[str, Any] | None, nearby_books: Sequence[Mapping[str, Any]]) -> list[str]:
-    """Return only recorded feed/collector continuity evidence.
-
-    A diagnostic loader timeout or line-budget stop is not a market-data gap:
-    it means the local autopsy was incomplete. Keeping those concepts separate
-    prevents a bounded research scan from manufacturing a collector root cause.
-    """
+def _quality_gap_reasons(row: Mapping[str, Any] | None) -> list[str]:
+    if row is None:
+        return []
+    reasons = row.get("quality_reasons")
+    if not isinstance(reasons, Sequence) or isinstance(reasons, (str, bytes, bytearray)):
+        return []
     evidence: list[str] = []
+    for reason in reasons:
+        text = str(reason).upper()
+        if "GAP" in text or "RECONNECT" in text or "SEQUENCE" in text:
+            evidence.append(f"BOOK_QUALITY_{text}")
+    return evidence
+
+
+def _explicit_gap_evidence(
+    *,
+    previous: Mapping[str, Any] | None,
+    candidate: Mapping[str, Any] | None,
+    window_meta: Mapping[str, Any] | None,
+) -> tuple[list[str], dict[str, Any]]:
+    """Return only event-local recorded feed/collector continuity evidence.
+
+    ``gap_count`` and ``reconnect_count`` are cumulative counters in recorded
+    books.  Their absolute value cannot prove that the gap happened around the
+    current shock.  We therefore require a positive delta between the immediate
+    book before the shock and the first book after it.  This prevents one old
+    reconnect from contaminating every later diagnostic event.
+
+    Window-level counters remain admissible only because they describe the
+    independently loaded causal event window itself.  Loader timeout/line-budget
+    evidence is intentionally handled elsewhere and is never promoted to a
+    collector gap.
+    """
+
+    evidence: list[str] = []
+    details: dict[str, Any] = {
+        "gap_count_delta": None,
+        "reconnect_count_delta": None,
+        "connection_changed": False,
+        "sequence_delta": None,
+    }
+
     if window_meta is not None:
         for key in ("gap_count", "reconnect_count", "sequence_gaps", "dropped_rows"):
             value = _int(window_meta.get(key))
             if value > 0:
                 evidence.append(f"WINDOW_{key.upper()}={value}")
-    relevant_rows = list(nearby_books)
-    if candidate is not None and candidate not in relevant_rows:
-        relevant_rows.append(candidate)
-    for row in relevant_rows:
-        for key in ("gap_count", "reconnect_count"):
-            value = _int(row.get(key))
-            if value > 0:
-                evidence.append(f"BOOK_{key.upper()}={value}")
-        reasons = row.get("quality_reasons")
-        if isinstance(reasons, Sequence) and not isinstance(reasons, (str, bytes, bytearray)):
-            for reason in reasons:
-                text = str(reason).upper()
-                if "GAP" in text or "RECONNECT" in text or "SEQUENCE" in text:
-                    evidence.append(f"BOOK_QUALITY_{text}")
-    return sorted(set(evidence))
+
+    if previous is not None and candidate is not None:
+        previous_gap = _int(previous.get("gap_count"))
+        candidate_gap = _int(candidate.get("gap_count"))
+        gap_delta = max(0, candidate_gap - previous_gap)
+        details["gap_count_delta"] = gap_delta
+        if gap_delta > 0:
+            evidence.append(f"BOOK_GAP_COUNT_DELTA={gap_delta}")
+
+        previous_reconnect = _int(previous.get("reconnect_count"))
+        candidate_reconnect = _int(candidate.get("reconnect_count"))
+        reconnect_delta = max(0, candidate_reconnect - previous_reconnect)
+        details["reconnect_count_delta"] = reconnect_delta
+        if reconnect_delta > 0:
+            evidence.append(f"BOOK_RECONNECT_COUNT_DELTA={reconnect_delta}")
+
+        previous_connection = str(previous.get("connection_id") or "")
+        candidate_connection = str(candidate.get("connection_id") or "")
+        connection_changed = bool(
+            previous_connection
+            and candidate_connection
+            and previous_connection != candidate_connection
+        )
+        details["connection_changed"] = connection_changed
+        if connection_changed:
+            evidence.append("BOOK_CONNECTION_CHANGED")
+
+        previous_sequence = _int(previous.get("sequence"), -1)
+        candidate_sequence = _int(candidate.get("sequence"), -1)
+        if previous_sequence >= 0 and candidate_sequence >= 0:
+            sequence_delta = candidate_sequence - previous_sequence
+            details["sequence_delta"] = sequence_delta
+            if (
+                not connection_changed
+                and candidate_connection == previous_connection
+                and sequence_delta > 1
+            ):
+                evidence.append(f"BOOK_SEQUENCE_JUMP={sequence_delta}")
+
+    # Direct quality metadata can explicitly name a gap/reconnect around either
+    # boundary book.  Unlike cumulative absolute counters, this is row-local.
+    evidence.extend(_quality_gap_reasons(previous))
+    evidence.extend(_quality_gap_reasons(candidate))
+    return sorted(set(evidence)), details
 
 
 def _loader_incomplete_evidence(window_meta: Mapping[str, Any] | None) -> list[str]:
@@ -78,7 +145,14 @@ def _percentile(values: Sequence[int], fraction: float) -> float | None:
     return ordered[lower] * (1.0 - weight) + ordered[upper] * weight
 
 
-def diagnose_causal_book_coverage(shocks: Sequence[Mapping[str, Any]], books_by_coin: Mapping[str, Sequence[Mapping[str, Any]]], microstructure_meta: Mapping[str, Any], *, coin: str = "ETH", max_book_delay_ms: int = DIAGNOSTIC_MAX_BOOK_DELAY_MS) -> dict[str, Any]:
+def diagnose_causal_book_coverage(
+    shocks: Sequence[Mapping[str, Any]],
+    books_by_coin: Mapping[str, Sequence[Mapping[str, Any]]],
+    microstructure_meta: Mapping[str, Any],
+    *,
+    coin: str = "ETH",
+    max_book_delay_ms: int = DIAGNOSTIC_MAX_BOOK_DELAY_MS,
+) -> dict[str, Any]:
     """Classify causal-book availability without inventing missing evidence.
 
     Loader incompleteness is distinct from a recorded feed gap. A clean later
@@ -86,32 +160,53 @@ def diagnose_causal_book_coverage(shocks: Sequence[Mapping[str, Any]], books_by_
     diagnostic classes can select or promote an economic strategy.
     """
     selected_coin = str(coin).upper()
-    books = sorted([dict(row) for row in books_by_coin.get(selected_coin, ())], key=lambda row: _int(row.get("ts_ms")))
+    books = sorted(
+        [dict(row) for row in books_by_coin.get(selected_coin, ())],
+        key=lambda row: _int(row.get("ts_ms")),
+    )
     timestamps = [_int(row.get("ts_ms")) for row in books]
-    windows = [row for row in microstructure_meta.get("windows", ()) if isinstance(row, Mapping)]
-    per_window = [row for row in microstructure_meta.get("per_window", ()) if isinstance(row, Mapping)]
+    windows = [
+        row for row in microstructure_meta.get("windows", ()) if isinstance(row, Mapping)
+    ]
+    per_window = [
+        row
+        for row in microstructure_meta.get("per_window", ())
+        if isinstance(row, Mapping)
+    ]
     rows: list[dict[str, Any]] = []
     counts: dict[str, int] = {}
     timely_delays: list[int] = []
     first_book_delays: list[int] = []
     max_delay = max(0, int(max_book_delay_ms))
+
     for shock in shocks:
         trigger_ms = _int(shock.get("trigger_ts_ms"))
         index = bisect.bisect_left(timestamps, trigger_ms)
+        previous = books[index - 1] if index > 0 else None
         candidate = books[index] if index < len(books) else None
         delay_ms = None if candidate is None else _int(candidate.get("ts_ms")) - trigger_ms
-        timely = candidate is not None and delay_ms is not None and 0 <= delay_ms <= max_delay
+        timely = (
+            candidate is not None
+            and delay_ms is not None
+            and 0 <= delay_ms <= max_delay
+        )
         if delay_ms is not None and delay_ms >= 0:
             first_book_delays.append(int(delay_ms))
+
         matched_window = _window_for_timestamp(trigger_ms, windows)
         relevant_meta = None
         if matched_window is not None:
             window_index, _ = matched_window
             if window_index < len(per_window):
                 relevant_meta = per_window[window_index]
-        nearby_books = books[max(0, index - 1): min(len(books), index + 8)]
-        gap_evidence = _explicit_gap_evidence(candidate=candidate, window_meta=relevant_meta, nearby_books=nearby_books)
+
+        gap_evidence, gap_details = _explicit_gap_evidence(
+            previous=previous,
+            candidate=candidate,
+            window_meta=relevant_meta,
+        )
         loader_evidence = _loader_incomplete_evidence(relevant_meta)
+
         if timely and candidate.get("data_gate_ready") is True:
             classification = "EXECUTABLE_CAUSAL_BOOK"
             timely_delays.append(int(delay_ms))
@@ -125,9 +220,62 @@ def diagnose_causal_book_coverage(shocks: Sequence[Mapping[str, Any]], books_by_
             classification = "CAUSAL_BOOK_TOO_LATE_NO_GAP_PROOF"
         else:
             classification = "NO_LATER_BOOK_RECORDED_NO_GAP_PROOF"
+
         counts[classification] = counts.get(classification, 0) + 1
-        rows.append({"trigger_ts_ms": trigger_ms, "lead_shock_bps": shock.get("lead_shock_bps"), "direction": shock.get("direction"), "classification": classification, "next_book_ts_ms": None if candidate is None else _int(candidate.get("ts_ms")), "next_book_delay_ms": delay_ms, "book_quality_ready": None if candidate is None else candidate.get("data_gate_ready") is True, "explicit_gap_evidence": gap_evidence, "loader_incomplete_evidence": loader_evidence})
-    return {"schema_version": "hypersmart.lead_lag_causal_book_coverage.v3", "coin": selected_coin, "diagnostic_only": True, "diagnostic_shock_threshold_bps": DIAGNOSTIC_SHOCK_THRESHOLD_BPS, "economic_shock_threshold_bps_unchanged": ECONOMIC_SHOCK_THRESHOLD_BPS, "max_book_delay_ms": max_delay, "shock_count": len(rows), "classifications": counts, "events": rows, "timely_quality_ready_count": counts.get("EXECUTABLE_CAUSAL_BOOK", 0), "median_timely_delay_ms": sorted(timely_delays)[len(timely_delays)//2] if timely_delays else None, "first_book_delay_p50_ms": _percentile(first_book_delays, 0.50), "first_book_delay_p95_ms": _percentile(first_book_delays, 0.95), "interpretation": "DIAGNOSTIC_ONLY_NOT_ECONOMIC_SELECTION; loader incompleteness is not collector-gap evidence; absence without explicit recorded gap remains fail-closed", "paper_read_only": True, "real_execution": False}
+        rows.append(
+            {
+                "trigger_ts_ms": trigger_ms,
+                "lead_shock_bps": shock.get("lead_shock_bps"),
+                "direction": shock.get("direction"),
+                "classification": classification,
+                "previous_book_ts_ms": (
+                    None if previous is None else _int(previous.get("ts_ms"))
+                ),
+                "next_book_ts_ms": (
+                    None if candidate is None else _int(candidate.get("ts_ms"))
+                ),
+                "next_book_delay_ms": delay_ms,
+                "book_quality_ready": (
+                    None if candidate is None else candidate.get("data_gate_ready") is True
+                ),
+                "explicit_gap_evidence": gap_evidence,
+                "loader_incomplete_evidence": loader_evidence,
+                **gap_details,
+            }
+        )
+
+    return {
+        "schema_version": "hypersmart.lead_lag_causal_book_coverage.v4",
+        "coin": selected_coin,
+        "diagnostic_only": True,
+        "diagnostic_shock_threshold_bps": DIAGNOSTIC_SHOCK_THRESHOLD_BPS,
+        "economic_shock_threshold_bps_unchanged": ECONOMIC_SHOCK_THRESHOLD_BPS,
+        "max_book_delay_ms": max_delay,
+        "shock_count": len(rows),
+        "classifications": counts,
+        "events": rows,
+        "timely_quality_ready_count": counts.get("EXECUTABLE_CAUSAL_BOOK", 0),
+        "median_timely_delay_ms": (
+            sorted(timely_delays)[len(timely_delays) // 2] if timely_delays else None
+        ),
+        "first_book_delay_p50_ms": _percentile(first_book_delays, 0.50),
+        "first_book_delay_p95_ms": _percentile(first_book_delays, 0.95),
+        "gap_evidence_rule": (
+            "EVENT_LOCAL_DELTAS_OR_ROW_LOCAL_QUALITY_OR_EVENT_WINDOW_COUNTERS; "
+            "ABSOLUTE_CUMULATIVE_BOOK_COUNTERS_ARE_NOT_SUFFICIENT"
+        ),
+        "interpretation": (
+            "DIAGNOSTIC_ONLY_NOT_ECONOMIC_SELECTION; loader incompleteness is not "
+            "collector-gap evidence; absence without explicit recorded gap remains fail-closed"
+        ),
+        "paper_read_only": True,
+        "real_execution": False,
+    }
 
 
-__all__ = ["DIAGNOSTIC_MAX_BOOK_DELAY_MS", "DIAGNOSTIC_SHOCK_THRESHOLD_BPS", "ECONOMIC_SHOCK_THRESHOLD_BPS", "diagnose_causal_book_coverage"]
+__all__ = [
+    "DIAGNOSTIC_MAX_BOOK_DELAY_MS",
+    "DIAGNOSTIC_SHOCK_THRESHOLD_BPS",
+    "ECONOMIC_SHOCK_THRESHOLD_BPS",
+    "diagnose_causal_book_coverage",
+]
