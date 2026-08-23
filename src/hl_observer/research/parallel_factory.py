@@ -9,12 +9,12 @@ Pur, 0 réseau, 0 ordre réel.
 """
 from __future__ import annotations
 
+import concurrent.futures
 import hashlib
 import json
 import time
 import tracemalloc
 from collections.abc import Callable, Mapping, Sequence
-from concurrent.futures import ThreadPoolExecutor
 from typing import Any
 
 
@@ -58,10 +58,15 @@ def sharder(items: Sequence[Any], n_shards: int) -> list[list[Any]]:
 def executer_parallele(items: Sequence[Any], worker_fn: Callable[[Sequence[Any]], Sequence[Mapping[str, Any]]], *,
                        n_workers: int = 4, parallele: bool = True) -> list[dict[str, Any]]:
     """Découpe `items` en shards READ-ONLY, exécute `worker_fn(shard)` (threads si `parallele`), puis FUSIONNE
-    de façon déterministe. Le nombre de workers ne change JAMAIS le résultat (merge trié + anti-conflit)."""
+    de façon déterministe. Le nombre de workers ne change JAMAIS le résultat (merge trié + anti-conflit).
+
+    L'executor est résolu via ``concurrent.futures`` au moment de l'appel. Cela conserve exactement
+    le comportement production tout en permettant aux harness offline/coverage de substituer un executor
+    déterministe sans laisser partir de vrais threads alimentés par des callables synthétiques.
+    """
     shards = sharder(items, n_workers)
     if parallele and n_workers > 1:
-        with ThreadPoolExecutor(max_workers=n_workers) as ex:
+        with concurrent.futures.ThreadPoolExecutor(max_workers=n_workers) as ex:
             resultats = list(ex.map(worker_fn, shards))
     else:
         resultats = [worker_fn(s) for s in shards]
