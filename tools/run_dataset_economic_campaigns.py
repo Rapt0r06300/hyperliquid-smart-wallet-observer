@@ -20,6 +20,7 @@ from typing import Any, Iterable
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
+from hl_observer.backtesting.economic_vnext_pack import run_economic_vnext_pack  # noqa: E402
 from hl_observer.backtesting.lead_lag_causal_gap_diagnostic import (  # noqa: E402
     DIAGNOSTIC_SHOCK_THRESHOLD_BPS,
     diagnose_causal_book_availability,
@@ -260,11 +261,16 @@ def run_dataset_campaigns(
         lead_consumed=lead_sources,
         cross_consumed=cross_sources,
     )
+    # vNext research is intentionally downstream of the canonical campaign.
+    # It can only propose a later freeze and cannot alter the just-computed
+    # canonical verdicts or scoreboards.
+    vnext_research = run_economic_vnext_pack(data_root, lead_sources=lead_sources)
     result["dataset_adapters"] = adapter_state
     result["source_coverage"] = coverage
     result["source_coverage_json"] = str(coverage_json)
     result["source_coverage_markdown"] = str(coverage_md)
     result["source_release_id"] = 371149058
+    result["vnext_research"] = vnext_research
     result["paper_read_only"] = True
     result["real_execution"] = False
     result["canonical_globals_mutated"] = False
@@ -308,6 +314,7 @@ def main(argv: list[str] | None = None) -> int:
         )
     coverage = result.get("source_coverage") or {}
     print(f"source_coverage_all_full={coverage.get('all_families_full')}", flush=True)
+    print(f"vnext_summary={((result.get('vnext_research') or {}).get('summary_path'))}", flush=True)
     print(f"report={result.get('report_path')}", flush=True)
     return 0
 
