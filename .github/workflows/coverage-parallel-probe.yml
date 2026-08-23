@@ -103,12 +103,18 @@ jobs:
       - name: Exécuter la tranche sous coverage
         env:
           HYPERSMART_COVERAGE_CONTRACT_SHARD: ${{ matrix.shard }}
+          SHARD_INDEX: ${{ matrix.shard }}
         run: |
           mapfile -t TEST_FILES < shard-tests.txt
+          set +e
           python -m coverage run --parallel-mode --source=src -m pytest \
-            -q -p no:cacheprovider -p tests.coverage_contract_cache_plugin \
-            --tb=short --durations=10 --timeout=600 --timeout-method=signal \
-            "${TEST_FILES[@]}"
+            -vv -p no:cacheprovider -p tests.coverage_contract_cache_plugin \
+            --tb=short --durations=20 --timeout=600 --timeout-method=signal \
+            "${TEST_FILES[@]}" 2>&1 | tee "coverage-shard-${SHARD_INDEX}.log"
+          PYTEST_RC=${PIPESTATUS[0]}
+          printf '%s\n' "${PYTEST_RC}" > pytest-exit-code.txt
+          echo "COVERAGE_SHARD_PYTEST_EXIT=${PYTEST_RC}"
+          exit "${PYTEST_RC}"
       - name: Vérifier la donnée coverage du shard
         if: always()
         run: |
@@ -118,7 +124,11 @@ jobs:
         if: always()
         with:
           name: coverage-shard-${{ matrix.shard }}-${{ github.sha }}
-          path: .coverage.*
+          path: |
+            .coverage.*
+            shard-tests.txt
+            coverage-shard-${{ matrix.shard }}.log
+            pytest-exit-code.txt
           include-hidden-files: true
           if-no-files-found: error
           retention-days: 3
