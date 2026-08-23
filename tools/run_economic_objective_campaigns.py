@@ -28,6 +28,10 @@ from hl_observer.backtesting.economic_hypotheses_v3 import (  # noqa: E402
     qualify_cross_venue_train_only,
     qualify_lead_lag_queue_maker_train_only,
 )
+from hl_observer.backtesting.lead_lag_causal_diagnostic import (  # noqa: E402
+    DIAGNOSTIC_SHOCK_THRESHOLD_BPS,
+    diagnose_causal_book_availability,
+)
 from hl_observer.backtesting.lead_lag_certified_clock import (  # noqa: E402
     backtest_with_certified_wall_clock,
     certified_protocol_signature,
@@ -342,16 +346,36 @@ def run_campaigns(
             root,
             aligned_lead_sources,
         )
-        lead_shocks = detect_rolling_shocks(
-            (lead_tape.get("ETH") or {}).get("TRADE") or ()
+        lead_trade_rows = (lead_tape.get("ETH") or {}).get("TRADE") or ()
+        # The frozen economic mechanism remains at its predeclared 20 bps threshold.
+        # The separate 8 bps sample below exists ONLY to diagnose source coverage
+        # around the two weaker shocks already observed by Codex; it cannot create
+        # trades, freeze parameters, alter OOS or certify PnL.
+        lead_shocks = detect_rolling_shocks(lead_trade_rows)
+        diagnostic_shocks = detect_rolling_shocks(
+            lead_trade_rows,
+            threshold_bps=DIAGNOSTIC_SHOCK_THRESHOLD_BPS,
+        )
+        event_timestamps = sorted(
+            {
+                int(shock["trigger_ts_ms"])
+                for shock in [*lead_shocks, *diagnostic_shocks]
+            }
         )
         l2_history, public_trade_history, microstructure_meta = (
             load_market_microstructure_event_windows(
                 root,
-                [int(shock["trigger_ts_ms"]) for shock in lead_shocks],
+                event_timestamps,
             )
         )
         microstructure_meta["frozen_shock_count"] = len(lead_shocks)
+        microstructure_meta["diagnostic_shock_count"] = len(diagnostic_shocks)
+        microstructure_meta["diagnostic_threshold_bps"] = DIAGNOSTIC_SHOCK_THRESHOLD_BPS
+        causal_availability = diagnose_causal_book_availability(
+            diagnostic_shocks,
+            l2_history,
+            diagnostic_threshold_bps=DIAGNOSTIC_SHOCK_THRESHOLD_BPS,
+        )
         latency_evidence = load_runtime_latency_evidence(root)
         maker_queue_replay = replay_lead_lag_queue_maker(
             lead_tape,
@@ -364,6 +388,7 @@ def run_campaigns(
         ]
         lead_raw["maker_queue_replay"] = maker_queue_replay
         lead_raw["lead_lag_microstructure_history"] = microstructure_meta
+        lead_raw["lead_lag_causal_availability_diagnostic"] = causal_availability
         lead_raw["lead_lag_source_alignment"] = {
             **lead_alignment_meta,
             "aligned_lead_tape": aligned_lead_meta,
