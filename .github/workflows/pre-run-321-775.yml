@@ -238,7 +238,7 @@ jobs:
   coverage_witness:
     name: Réutiliser et revérifier la preuve coverage 100%
     runs-on: ubuntu-latest
-    timeout-minutes: 50
+    timeout-minutes: 200
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
@@ -251,7 +251,7 @@ jobs:
         run: |
           set -euo pipefail
           FOUND=""
-          for ATTEMPT in $(seq 1 180); do
+          for ATTEMPT in $(seq 1 720); do
             curl --fail-with-body --silent --show-error \
               -H "Accept: application/vnd.github+json" \
               -H "Authorization: Bearer ${GITHUB_TOKEN}" \

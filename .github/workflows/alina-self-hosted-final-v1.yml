@@ -127,7 +127,7 @@ jobs:
             'User-Agent' = 'HyperSmart-Final-Runner'
           }
           $contexts = @('hypersmart/pre-run-775','hypersmart/technical-perfect','hypersmart/security-quality')
-          $deadline = [DateTimeOffset]::UtcNow.AddMinutes(90)
+          $deadline = [DateTimeOffset]::UtcNow.AddMinutes(240)
           while ($true) {
             $main = Invoke-RestMethod -Method Get -Uri "https://api.github.com/repos/$env:GITHUB_REPOSITORY/commits/main" -Headers $headers
             $mainSha = ([string]$main.sha).Trim().ToLowerInvariant()
