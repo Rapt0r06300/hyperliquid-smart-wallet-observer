@@ -16,6 +16,23 @@ from hl_observer.ops.autonomous_research_job_router import validate_request
 CONTROL_SCHEMA = "alina.self_hosted_control.v1"
 MAX_CYCLE_SECONDS = 18 * 60 * 60
 SHA_RE = re.compile(r"^[0-9a-fA-F]{40}$")
+ALLOWED_CONTROL_FIELDS = frozenset(
+    {
+        "schema",
+        "job_id",
+        "suite",
+        "mode",
+        "download",
+        "max_download_gib",
+        "stage_timeout_seconds",
+        "cross_budget_s",
+        "lead_history_sources",
+        "force",
+        "max_cycle_seconds",
+        "requested_by",
+        "note",
+    }
+)
 
 
 def _load_json(path: Path) -> dict[str, Any]:
@@ -40,6 +57,12 @@ def _strict_bool(raw: Mapping[str, Any], key: str, default: bool) -> bool:
 def normalize_control(raw: Mapping[str, Any]) -> dict[str, Any]:
     if raw.get("schema") != CONTROL_SCHEMA:
         raise ValueError(f"schema doit être {CONTROL_SCHEMA}")
+
+    unknown = sorted(str(key) for key in raw if str(key) not in ALLOWED_CONTROL_FIELDS)
+    if unknown:
+        raise ValueError(
+            "Champs de commande refusés (schéma fermé): " + ", ".join(unknown)
+        )
 
     job_id = str(raw.get("job_id") or "").strip()
     if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{0,79}", job_id):
@@ -158,6 +181,7 @@ if __name__ == "__main__":
 
 
 __all__ = [
+    "ALLOWED_CONTROL_FIELDS",
     "CONTROL_SCHEMA",
     "MAX_CYCLE_SECONDS",
     "build_control_bundle",
