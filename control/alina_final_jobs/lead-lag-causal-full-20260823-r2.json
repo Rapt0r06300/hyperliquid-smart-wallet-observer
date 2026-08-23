@@ -1,0 +1,15 @@
+{
+  "schema": "alina.self_hosted_control.v1",
+  "job_id": "lead-lag-causal-full-20260823-r2",
+  "suite": "lead-lag-full",
+  "mode": "economic",
+  "download": true,
+  "max_download_gib": 20.0,
+  "stage_timeout_seconds": 21600,
+  "cross_budget_s": 600.0,
+  "lead_history_sources": 8,
+  "max_cycle_seconds": 64800,
+  "force": true,
+  "requested_by": "ChatGPT-GitHub",
+  "note": "Reprise directe Codex phase F/H Lead-Lag. PAPER/read-only. Exploiter toutes les sources FULL/COLD et les fenetres causales par choc du HEAD. Seuil economique fige inchange; aucun tuning OOS. Diagnostiquer disponibilite carnet causal, latence, queue, couts, validation/OOS/placebo et ne certifier >=4 USD net que par gate canonique."
+}
