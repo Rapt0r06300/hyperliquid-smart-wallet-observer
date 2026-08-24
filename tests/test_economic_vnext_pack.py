@@ -25,7 +25,7 @@ def test_vnext_pack_garde_les_trois_familles_separees_et_ne_certifie_rien(
     )
     monkeypatch.setattr(
         module,
-        "load_certified_atomic_series",
+        "load_preferred_certified_atomic_series",
         lambda _root: ({}, {}, {"source_mode": "CERTIFIED_ATOMIC_FOUR_SIDE_BOOK_V2"}),
     )
     monkeypatch.setattr(

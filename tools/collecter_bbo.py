@@ -25,13 +25,22 @@ from typing import Any
 
 RACINE = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(RACINE / "tools"))
+sys.path.insert(0, str(RACINE / "src"))
 import heartbeat_collecteur as HB  # noqa: E402
+
+from hl_observer.config.cross_venue_instruments import (  # noqa: E402
+    ATOMIC_BBO_SOURCE_MODE,
+    MAPPING_SCHEMA_VERSION,
+    binance_perp_symbol,
+    mapping_record,
+)
 
 WS_HL = "wss://api.hyperliquid.xyz/ws"
 INFO_HL = "https://api.hyperliquid.xyz/info"
 WS_BINANCE = "wss://fstream.binance.com/stream"
 SORTIE = Path("runtime") / "data" / "bbo_synchro.jsonl"
 TAPE = Path("runtime") / "data" / "bbo_tape.jsonl"     # chaque message BBO (monotone) -> lead-lag fin
+ATOMIC_BBO_TAPE = Path("runtime") / "data" / "cross_venue_atomic_bbo.jsonl"
 HEARTBEAT = Path("runtime") / "data" / "bbo_heartbeat.json"
 FEED_QUALITY = Path("runtime") / "data" / "feed_quality.json"
 TICK_DATASET_DIR = Path("runtime") / "data" / "market_ticks"
@@ -48,10 +57,6 @@ ARCHIVE_DIR = Path("runtime") / "data" / "bbo_shards_archive"   # historique PR�
 SHARD_OCTETS = 80 * 1024 * 1024
 MAX_SHARDS = 60                    # ~60 shards gz (~0,6-1 Go compresses, plusieurs jours) puis purge FIFO
 TICK_QUEUE_MAX = 100_000           # protege la socket; toute eviction est comptee et degrade la qualite
-
-_EXCEPTIONS = {"PEPE": "1000PEPEUSDT", "SHIB": "1000SHIBUSDT", "BONK": "1000BONKUSDT",
-               "FLOKI": "1000FLOKIUSDT", "LUNC": "1000LUNCUSDT", "SATS": "1000SATSUSDT",
-               "RATS": "1000RATSUSDT", "XEC": "1000XECUSDT", "WHYPE": None, "HYPE": None}
 
 #: LIQUIDATION_LIVE_COVERAGE_V1 (25/07). Le HL WS bbo couvre N'IMPORTE QUEL coin (memes inclus) ; la
 #: jointure Binance est ignorée si le coin n'y est pas. On garde donc un BBO/L2 synchronisé sur les coins
@@ -173,16 +178,7 @@ def coins_couverture(root: Path | str = ".", *, k: int = 16) -> list[str]:
 
 def symbole_binance(coin_hl: str) -> str | None:
     """Symbole perp Binance correspondant EXACTEMENT au coin HL, ou None si non mappable (refus)."""
-    c = str(coin_hl or "").upper().strip()
-    if not c:
-        return None
-    if c in _EXCEPTIONS:
-        return _EXCEPTIONS[c]
-    if c.startswith("K") and len(c) > 1 and c[1:].isalpha():
-        return "1000" + c[1:] + "USDT"
-    if not c.isalnum():
-        return None
-    return c + "USDT"
+    return binance_perp_symbol(coin_hl)
 
 
 def _f(x: Any) -> float | None:
@@ -347,30 +343,53 @@ class MagasinBBO:
         if desync > self.fenetre_ms:
             return None                                        # pas assez synchrones -> rejet
         hmid, bmid = (h["bid"] + h["ask"]) / 2, (b["bid"] + b["ask"]) / 2
+        mapping = mapping_record(coin, b.get("symbol"))
+        four_side_capacities = (
+            h["bid"] * h["bid_sz"],
+            h["ask"] * h["ask_sz"],
+            b["bid"] * b["bid_sz"],
+            b["ask"] * b["ask_sz"],
+        )
+        minimum_four_side_capacity = min(four_side_capacities)
+        atomic_bbo_certified = bool(
+            mapping["exact"] is True
+            and minimum_four_side_capacity > 0.0
+            and h["ask"] > h["bid"]
+            and b["ask"] > b["bid"]
+        )
         snapshot_wall_ts_ms = int(ts_wall_ms)
-        event_id = "bbo_pair:%s:%s:%s" % (
-            coin,
-            h["recv_wall_ts_ms"],
-            b["recv_wall_ts_ms"],
+        event_id = (
+            f"bbo_pair:{coin}:{h['recv_wall_ts_ms']}:{b['recv_wall_ts_ms']}:"
+            f"{h['recu_ns']}:{b['recu_ns']}"
         )
         return {"coin": coin, "ts_ms": snapshot_wall_ts_ms,
-                "snapshot_wall_ts_ms": snapshot_wall_ts_ms,
+                 "snapshot_wall_ts_ms": snapshot_wall_ts_ms,
                 "write_wall_ts_ms": snapshot_wall_ts_ms,
                 "event_id": event_id,
-                "hl_bid": h["bid"], "hl_ask": h["ask"], "bin_bid": b["bid"], "bin_ask": b["ask"],
-                "hl_mid": hmid, "bin_mid": bmid, "ecart_mid_bps": round(1e4 * (hmid - bmid) / bmid, 3),
-                "taille_top_usd": round(min(h["bid_sz"] * hmid, b["bid_sz"] * bmid), 2),
+                 "hl_bid": h["bid"], "hl_ask": h["ask"], "bin_bid": b["bid"], "bin_ask": b["ask"],
+                 "hl_bid_sz": h["bid_sz"], "hl_ask_sz": h["ask_sz"],
+                 "bin_bid_sz": b["bid_sz"], "bin_ask_sz": b["ask_sz"],
+                 "binance_symbol": b.get("symbol"),
+                 "instrument_mapping_schema": MAPPING_SCHEMA_VERSION,
+                 "instrument_mapping_exact": mapping["exact"] is True,
+                 "hl_mid": hmid, "bin_mid": bmid, "ecart_mid_bps": round(1e4 * (hmid - bmid) / bmid, 3),
+                 "taille_top_usd": round(minimum_four_side_capacity, 8),
+                 "minimum_four_side_top_capacity_usd": round(minimum_four_side_capacity, 8),
                 "ts_ex_hl": h.get("ts_ex"), "ts_ex_bin": b.get("ts_ex"),
                 "exchange_ts_hl_ms": h.get("ts_ex"), "exchange_ts_bin_ms": b.get("ts_ex"),
-                "recv_wall_hl_ms": h["recv_wall_ts_ms"],
-                "recv_wall_bin_ms": b["recv_wall_ts_ms"],
+                 "recv_wall_hl_ms": h["recv_wall_ts_ms"],
+                 "recv_wall_bin_ms": b["recv_wall_ts_ms"],
+                 "hl_received_at_ms": h["recv_wall_ts_ms"],
+                 "bin_received_at_ms": b["recv_wall_ts_ms"],
                 "connection_id_hl": h.get("connection_id"),
                 "connection_id_bin": b.get("connection_id"),
                 "sequence_hl": h.get("sequence"), "sequence_bin": b.get("sequence"),
                 "update_id_bin": b.get("update_id"),
                 "recu_mono_hl_ns": h["recu_ns"], "recu_mono_bin_ns": b["recu_ns"],
-                "age_hl_ms": round(age_h, 2), "age_bin_ms": round(age_b, 2), "desync_ms": round(desync, 2),
-                "read_only": True, "real_execution": False}
+                 "age_hl_ms": round(age_h, 2), "age_bin_ms": round(age_b, 2), "desync_ms": round(desync, 2),
+                 "source_mode": ATOMIC_BBO_SOURCE_MODE if atomic_bbo_certified else "SYNCHRONIZED_BBO_DIAGNOSTIC_V1",
+                 "atomic_bbo_certified": atomic_bbo_certified,
+                 "read_only": True, "real_execution": False}
 
 
 def mesurer_lead_lag(series: list[tuple[float, float, float]], *, lag_ms: float) -> float | None:
@@ -465,6 +484,7 @@ async def _boucle(root: Path, coins: list[str]) -> None:  # pragma: no cover (I/
     #                          inclus) ; la jambe Binance (sym) ne couvre que les coins réellement listés là-bas.
     from hl_observer.collection import collecte_fiable as CF
     cache = CF.CacheDedup()
+    atomic_bbo_cache = CF.CacheDedup()
     dataset = TickDatasetWriter(root / TICK_DATASET_DIR, flush_every=1)
     canonical_writer = CanonicalEventWriter(
         root / "runtime" / "data" / "canonical_events" / "canonical_market_events.jsonl"
@@ -508,6 +528,7 @@ async def _boucle(root: Path, coins: list[str]) -> None:  # pragma: no cover (I/
              "frames_l2_hl": 0, "frames_trades_hl": 0, "raw_frames_received": 0,
              "raw_records_written": 0, "raw_queue_drops": 0, "parse_errors_hl": 0,
              "canonical_events_written": 0, "canonical_events_rejected": 0,
+             "certified_atomic_bbo_written": 0,
              "dernier_hl_ns": 0, "dernier_bin_ns": 0, "debut_mono_ns": time.monotonic_ns()}
     heartbeat_canonique = {"dernier_ecrit": 0, "dernier_ts_ns": 0}
     marqueur0 = MARQUEUR.read_text(encoding="utf-8").strip() if MARQUEUR.exists() else ""
@@ -950,6 +971,20 @@ async def _boucle(root: Path, coins: list[str]) -> None:  # pragma: no cover (I/
                 propres = CF.collecter_proprement(snaps, source="bbo_hl_bin",
                                                   champs_cle=("coin", "ts_ms"), cache=cache)
                 stats["ecrits"] += CF.append_jsonl(root / SORTIE, propres)
+                certified = []
+                for row in propres:
+                    event_id = str(row.get("event_id") or "")
+                    if (
+                        row.get("atomic_bbo_certified") is True
+                        and event_id
+                        and atomic_bbo_cache.neuf(event_id)
+                    ):
+                        certified.append(row)
+                if certified:
+                    stats["certified_atomic_bbo_written"] += CF.append_jsonl(
+                        root / ATOMIC_BBO_TAPE,
+                        certified,
+                    )
             if tape:                                           # flush de la TAPE brute (lead-lag fin)
                 CF.append_jsonl(root / TAPE, list(tape))
                 tape.clear()
@@ -1136,7 +1171,7 @@ __all__ = ["symbole_binance", "extraire_symboles_hyperliquid", "charger_symboles
            "parser_bookticker_binance", "parser_aggtrade_binance", "dispatch_lead_lag_trade",
            "MagasinBBO", "mesurer_lead_lag", "sceller_shard", "resume",
            "AGE_MAX_MS", "FENETRE_SYNCHRO_MS", "GAP_MS", "SHARD_OCTETS", "MAX_SHARDS",
-           "SORTIE", "FEED_QUALITY", "TICK_DATASET_DIR", "TICK_QUEUE_MAX"]
+           "SORTIE", "ATOMIC_BBO_TAPE", "FEED_QUALITY", "TICK_DATASET_DIR", "TICK_QUEUE_MAX"]
 
 
 if __name__ == "__main__":                                 # 🔴 MANQUAIT : sans ce garde, le script

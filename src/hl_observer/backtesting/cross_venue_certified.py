@@ -17,9 +17,14 @@ from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Any
 
-from hl_observer.config.cross_venue_instruments import mapping_record
+from hl_observer.config.cross_venue_instruments import (
+    ATOMIC_BBO_SOURCE_MODE,
+    MAPPING_SCHEMA_VERSION,
+    mapping_record,
+)
 
 SOURCE_MODE = "CERTIFIED_ATOMIC_FOUR_SIDE_BOOK_V2"
+BBO_SOURCE_MODE = ATOMIC_BBO_SOURCE_MODE
 FOUR_FILL_CONTRACT_VERSION = "cross_four_fill_aon_v1"
 MAX_VENUE_SKEW_MS = 250.0
 MAX_SNAPSHOT_AGE_MS = 3_000.0
@@ -187,6 +192,118 @@ def certify_atomic_row(row: Mapping[str, Any], *, max_skew_ms: float = MAX_VENUE
     }
 
 
+def certify_atomic_bbo_row(
+    row: Mapping[str, Any],
+    *,
+    max_skew_ms: float = MAX_VENUE_SKEW_MS,
+    max_age_ms: float = 750.0,
+) -> dict[str, Any]:
+    """Certify a dense BBO row without upgrading incomplete legacy rows."""
+
+    reasons: list[str] = []
+    if row.get("source_mode") != BBO_SOURCE_MODE or row.get("atomic_bbo_certified") is not True:
+        reasons.append("EXPLICIT_ATOMIC_BBO_PROVENANCE_MISSING")
+    mapping = mapping_record(row.get("coin"), row.get("binance_symbol"))
+    if mapping["exact"] is not True:
+        reasons.append("INSTRUMENT_MAPPING_NOT_EXACT")
+    if row.get("instrument_mapping_schema") != MAPPING_SCHEMA_VERSION:
+        reasons.append("INSTRUMENT_MAPPING_SCHEMA_MISSING")
+    if row.get("instrument_mapping_exact") is not True:
+        reasons.append("INSTRUMENT_MAPPING_ASSERTION_MISSING")
+
+    hl_received = _number(row.get("hl_received_at_ms") or row.get("recv_wall_hl_ms"))
+    bin_received = _number(row.get("bin_received_at_ms") or row.get("recv_wall_bin_ms"))
+    hl_mono = _number(row.get("recu_mono_hl_ns"))
+    bin_mono = _number(row.get("recu_mono_bin_ns"))
+    if hl_received is None or bin_received is None:
+        reasons.append("VENUE_RECEIVE_TIMESTAMPS_MISSING")
+    if hl_mono is None or bin_mono is None:
+        reasons.append("MONOTONIC_RECEIVE_TIMESTAMPS_MISSING")
+        skew = None
+    else:
+        skew = abs(hl_mono - bin_mono) / 1_000_000.0
+        if skew > float(max_skew_ms):
+            reasons.append("VENUE_SKEW_TOO_HIGH")
+    declared_skew = _number(row.get("desync_ms"))
+    if skew is None or declared_skew is None or abs(declared_skew - skew) > 0.011:
+        reasons.append("VENUE_SKEW_NOT_RECONCILED")
+
+    age_hl = _number(row.get("age_hl_ms"))
+    age_bin = _number(row.get("age_bin_ms"))
+    if any(age is None or age < 0.0 or age > float(max_age_ms) for age in (age_hl, age_bin)):
+        reasons.append("BBO_NOT_FRESH")
+
+    prices = {
+        "hl_bid": _number(row.get("hl_bid")),
+        "hl_ask": _number(row.get("hl_ask")),
+        "bin_bid": _number(row.get("bin_bid")),
+        "bin_ask": _number(row.get("bin_ask")),
+    }
+    sizes = {
+        "hl_bid_sz": _number(row.get("hl_bid_sz")),
+        "hl_ask_sz": _number(row.get("hl_ask_sz")),
+        "bin_bid_sz": _number(row.get("bin_bid_sz")),
+        "bin_ask_sz": _number(row.get("bin_ask_sz")),
+    }
+    if any(value is None or value <= 0.0 for value in (*prices.values(), *sizes.values())):
+        reasons.append("FOUR_SIDE_BBO_MISSING")
+    if prices["hl_bid"] is not None and prices["hl_ask"] is not None and prices["hl_ask"] <= prices["hl_bid"]:
+        reasons.append("HL_BOOK_INVALID")
+    if prices["bin_bid"] is not None and prices["bin_ask"] is not None and prices["bin_ask"] <= prices["bin_bid"]:
+        reasons.append("BIN_BOOK_INVALID")
+
+    capacity = None
+    if not any(value is None or value <= 0.0 for value in (*prices.values(), *sizes.values())):
+        capacity = min(
+            float(prices["hl_bid"]) * float(sizes["hl_bid_sz"]),
+            float(prices["hl_ask"]) * float(sizes["hl_ask_sz"]),
+            float(prices["bin_bid"]) * float(sizes["bin_bid_sz"]),
+            float(prices["bin_ask"]) * float(sizes["bin_ask_sz"]),
+        )
+    declared_capacity = _number(row.get("minimum_four_side_top_capacity_usd"))
+    compatibility_capacity = _number(row.get("taille_top_usd"))
+    tolerance = max(1e-6, (capacity or 0.0) * 1e-8)
+    if capacity is None or declared_capacity is None or compatibility_capacity is None:
+        reasons.append("FOUR_SIDE_CAPACITY_PROOF_MISSING")
+    elif abs(declared_capacity - capacity) > tolerance or abs(compatibility_capacity - capacity) > tolerance:
+        reasons.append("FOUR_SIDE_CAPACITY_NOT_RECONCILED")
+    if row.get("read_only") is not True or row.get("real_execution") is not False:
+        reasons.append("NOT_READ_ONLY_PROVENANCE")
+    snapshot_ts_ms = _number(row.get("snapshot_wall_ts_ms") or row.get("ts_ms"))
+    if snapshot_ts_ms is None:
+        reasons.append("SNAPSHOT_TIMESTAMP_MISSING")
+
+    books = {
+        "HL": {
+            "bids": [(prices["hl_bid"], sizes["hl_bid_sz"])] if prices["hl_bid"] and sizes["hl_bid_sz"] else [],
+            "asks": [(prices["hl_ask"], sizes["hl_ask_sz"])] if prices["hl_ask"] and sizes["hl_ask_sz"] else [],
+        },
+        "BIN": {
+            "bids": [(prices["bin_bid"], sizes["bin_bid_sz"])] if prices["bin_bid"] and sizes["bin_bid_sz"] else [],
+            "asks": [(prices["bin_ask"], sizes["bin_ask_sz"])] if prices["bin_ask"] and sizes["bin_ask_sz"] else [],
+        },
+    }
+    return {
+        "ok": not reasons,
+        "reasons": sorted(set(reasons)),
+        "source_mode": BBO_SOURCE_MODE,
+        "mapping": mapping,
+        "mapping_verified": mapping["exact"] is True,
+        "skew_ms": round(skew, 6) if skew is not None else None,
+        "skew_verified": skew is not None and skew <= float(max_skew_ms),
+        "max_venue_skew_ms": float(max_skew_ms),
+        "max_snapshot_age_ms": float(max_age_ms),
+        "snapshot_ts_ms": snapshot_ts_ms,
+        "hl_received_at_ms": hl_received,
+        "bin_received_at_ms": bin_received,
+        "books": books,
+        "minimum_top_level_capacity_usd": round(capacity, 8) if capacity is not None else None,
+        "four_fill_contract_version": FOUR_FILL_CONTRACT_VERSION,
+        "paper_read_only": True,
+        "real_execution": False,
+    }
+
+
 def load_certified_atomic_series(root: str | Path, *, coins: Sequence[str] | None = None, max_skew_ms: float = MAX_VENUE_SKEW_MS) -> tuple[dict[str, list[tuple]], dict[str, list[tuple[float, float]]], dict[str, Any]]:
     project_root = Path(root).resolve()
     source = project_root / "runtime/data/carnet_venues.jsonl"
@@ -256,6 +373,95 @@ def load_certified_atomic_series(root: str | Path, *, coins: Sequence[str] | Non
         "paper_read_only": True,
         "real_execution": False,
     }
+
+
+def load_certified_atomic_bbo_series(
+    root: str | Path,
+    *,
+    coins: Sequence[str] | None = None,
+    max_skew_ms: float = MAX_VENUE_SKEW_MS,
+) -> tuple[dict[str, list[tuple]], dict[str, list[tuple[float, float]]], dict[str, Any]]:
+    """Load only explicitly certified high-frequency BBO rows."""
+
+    project_root = Path(root).resolve()
+    source = project_root / "runtime/data/cross_venue_atomic_bbo.jsonl"
+    allowed = {str(coin).upper() for coin in coins} if coins else None
+    series: dict[str, list[tuple]] = {}
+    depth: dict[str, list[tuple[float, float]]] = {}
+    seen: set[str] = set()
+    counters = {
+        "lines_read": 0,
+        "certified_snapshots": 0,
+        "legacy_uncertified_rows_rejected": 0,
+        "invalid_rows": 0,
+        "duplicates_rejected": 0,
+    }
+    try:
+        handle = source.open("r", encoding="utf-8", errors="ignore")
+    except OSError:
+        handle = None
+    if handle is not None:
+        with handle:
+            for line in handle:
+                counters["lines_read"] += 1
+                try:
+                    row = json.loads(line)
+                except (TypeError, ValueError):
+                    counters["invalid_rows"] += 1
+                    continue
+                coin = str(row.get("coin") or "").upper()
+                if allowed is not None and coin not in allowed:
+                    continue
+                proof = certify_atomic_bbo_row(row, max_skew_ms=max_skew_ms)
+                if not proof["ok"]:
+                    counters["legacy_uncertified_rows_rejected"] += 1
+                    continue
+                event_id = str(row.get("event_id") or "")
+                if not event_id or event_id in seen:
+                    counters["duplicates_rejected"] += 1
+                    continue
+                seen.add(event_id)
+                ts = float(proof["snapshot_ts_ms"])
+                books = proof["books"]
+                hb, ha = books["HL"]["bids"][0][0], books["HL"]["asks"][0][0]
+                bb, ba = books["BIN"]["bids"][0][0], books["BIN"]["asks"][0][0]
+                capacity = float(proof["minimum_top_level_capacity_usd"])
+                series.setdefault(coin, []).append((ts, "ATOMIC_BBO", hb, ha, bb, ba))
+                depth.setdefault(coin, []).append((ts, capacity))
+                counters["certified_snapshots"] += 1
+    for rows in series.values():
+        rows.sort()
+    for rows in depth.values():
+        rows.sort()
+    return series, depth, {
+        "source": "runtime/data/cross_venue_atomic_bbo.jsonl",
+        "source_mode": BBO_SOURCE_MODE,
+        **counters,
+        "coins": len(series),
+        "mapping_verified": counters["certified_snapshots"] > 0,
+        "skew_verified": counters["certified_snapshots"] > 0,
+        "max_venue_skew_ms": float(max_skew_ms),
+        "four_fill_contract_version": FOUR_FILL_CONTRACT_VERSION,
+        "capacity_definition": "minimum USD capacity on the four raw BBO sides",
+        "legacy_rows_never_upgraded": True,
+        "paper_read_only": True,
+        "real_execution": False,
+    }
+
+
+def load_preferred_certified_atomic_series(
+    root: str | Path,
+    *,
+    coins: Sequence[str] | None = None,
+) -> tuple[dict[str, list[tuple]], dict[str, list[tuple[float, float]]], dict[str, Any]]:
+    """Prefer event-driven BBO evidence once available, otherwise retain L2."""
+
+    bbo_series, bbo_depth, bbo_meta = load_certified_atomic_bbo_series(root, coins=coins)
+    if int(bbo_meta.get("certified_snapshots") or 0) > 0:
+        return bbo_series, bbo_depth, bbo_meta
+    book_series, book_depth, book_meta = load_certified_atomic_series(root, coins=coins)
+    book_meta["preferred_bbo_source"] = bbo_meta
+    return book_series, book_depth, book_meta
 
 
 def snapshot_fresh(snapshot_ts_ms: object, now_ms: object, *, max_age_ms: float = MAX_SNAPSHOT_AGE_MS) -> bool:
@@ -376,6 +582,7 @@ def build_four_fill_cycle(entry: Mapping[str, Any], exit_: Mapping[str, Any], *,
 
 
 __all__ = [
+    "BBO_SOURCE_MODE",
     "DEFAULT_MAX_HOLDING_MS",
     "DEFAULT_MAX_OBSERVATION_GAP_MS",
     "FOUR_FILL_CONTRACT_VERSION",
@@ -385,8 +592,11 @@ __all__ = [
     "MAX_VENUE_SKEW_MS",
     "SOURCE_MODE",
     "build_four_fill_cycle",
+    "certify_atomic_bbo_row",
     "certify_atomic_row",
+    "load_certified_atomic_bbo_series",
     "load_certified_atomic_series",
+    "load_preferred_certified_atomic_series",
     "observation_gap_ok",
     "snapshot_fresh",
     "spread_bps",

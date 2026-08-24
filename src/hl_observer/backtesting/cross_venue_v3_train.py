@@ -19,7 +19,7 @@ from collections import defaultdict
 from collections.abc import Mapping, Sequence
 from typing import Any
 
-from hl_observer.backtesting.cross_venue_certified import SOURCE_MODE
+from hl_observer.backtesting.cross_venue_certified import BBO_SOURCE_MODE, SOURCE_MODE
 from hl_observer.backtesting.train_statistics import stable_hash, summarize_train_rows
 
 SCHEMA_VERSION = "hypersmart.cross_venue_v3_train.v1"
@@ -326,7 +326,6 @@ def _placebo_net(trades: Sequence[Mapping[str, Any]]) -> float:
         if not isinstance(entry, Mapping) or not isinstance(exit_, Mapping):
             continue
         direction = -int(row.get("direction") or 0)
-        notional = float(row.get("notional_usd") or NOTIONAL_USD)
         # Reuse the same two observed venue moves with the sign inverted.  Costs stay unchanged.
         gross = float(row.get("gross_pnl_usd") or 0.0)
         fees = float(row.get("fees_usd") or 0.0)
@@ -349,7 +348,7 @@ def explore_cross_venue_v3_train(
         for row in series.get(coin, ())
         if row and float(row[0]) > 0
     )
-    if not all_ts or source_mode != SOURCE_MODE:
+    if not all_ts or source_mode not in {SOURCE_MODE, BBO_SOURCE_MODE}:
         return {
             "schema_version": SCHEMA_VERSION,
             "mechanism": MECHANISM,

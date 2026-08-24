@@ -22,6 +22,7 @@ BINANCE_PERP_EXCEPTIONS: dict[str, str | None] = {
 }
 
 MAPPING_SCHEMA_VERSION = "cross_venue_instrument_mapping_v1"
+ATOMIC_BBO_SOURCE_MODE = "CERTIFIED_ATOMIC_FOUR_SIDE_BBO_V1"
 
 
 def normalize_hl_coin(value: object) -> str | None:
@@ -62,6 +63,7 @@ def mapping_is_exact(row: Mapping[str, object]) -> bool:
 
 
 __all__ = [
+    "ATOMIC_BBO_SOURCE_MODE",
     "BINANCE_PERP_EXCEPTIONS",
     "MAPPING_SCHEMA_VERSION",
     "binance_perp_symbol",

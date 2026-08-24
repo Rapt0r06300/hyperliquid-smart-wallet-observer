@@ -141,6 +141,45 @@ def test_snapshot_porte_ecart_ages_timestamps_et_update_id():
     assert s["event_id"].startswith("bbo_pair:ETH:")
 
 
+def test_snapshot_certifie_les_quatre_cotes_et_la_capacite_minimale():
+    m = _mod()
+    mag = m.MagasinBBO()
+    mag.maj_hl(
+        {"coin": "ETH", "bid": 100.0, "ask": 101.0, "bid_sz": 20.0, "ask_sz": 0.5, "ts_ex": 10},
+        recu_mono_ns=_NS,
+        recu_wall_ms=1000,
+    )
+    mag.maj_binance(
+        {"symbol": "ETHUSDT", "bid": 99.0, "ask": 100.0, "bid_sz": 30.0, "ask_sz": 40.0, "ts_ex": 11},
+        "ETH",
+        recu_mono_ns=_NS + 10_000_000,
+        recu_wall_ms=1010,
+    )
+
+    snapshot = mag.snapshot("ETH", now_mono_ns=_NS + 20_000_000, ts_wall_ms=1020.0)
+
+    assert snapshot["atomic_bbo_certified"] is True
+    assert snapshot["source_mode"] == m.ATOMIC_BBO_SOURCE_MODE
+    assert snapshot["instrument_mapping_exact"] is True
+    assert snapshot["binance_symbol"] == "ETHUSDT"
+    assert snapshot["hl_ask_sz"] == 0.5
+    assert snapshot["minimum_four_side_top_capacity_usd"] == 50.5
+    assert snapshot["taille_top_usd"] == 50.5
+
+
+def test_event_id_change_si_le_monotone_change_dans_la_meme_milliseconde():
+    m = _mod()
+    mag = m.MagasinBBO()
+    hl = {"coin": "ETH", "bid": 100.0, "ask": 101.0, "bid_sz": 2.0, "ask_sz": 2.0, "ts_ex": 10}
+    bn = {"symbol": "ETHUSDT", "bid": 99.0, "ask": 100.0, "bid_sz": 2.0, "ask_sz": 2.0, "ts_ex": 11}
+    mag.maj_hl(hl, recu_mono_ns=_NS, recu_wall_ms=1000)
+    mag.maj_binance(bn, "ETH", recu_mono_ns=_NS, recu_wall_ms=1000)
+    first = mag.snapshot("ETH", now_mono_ns=_NS, ts_wall_ms=1000.0)
+    mag.maj_binance(bn, "ETH", recu_mono_ns=_NS + 1, recu_wall_ms=1000)
+    second = mag.snapshot("ETH", now_mono_ns=_NS + 1, ts_wall_ms=1000.0)
+    assert first["event_id"] != second["event_id"]
+
+
 def test_sceller_shard_compresse_immuable_et_retention_bornee(tmp_path):
     m = _mod()
     tape = tmp_path / "runtime" / "data" / "bbo_tape.jsonl"
