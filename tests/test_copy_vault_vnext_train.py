@@ -63,8 +63,28 @@ def test_copy_vnext_selection_ignore_totalement_oos_et_exige_consensus_prior_onl
 
 
 def test_copy_vnext_refuse_de_selectionner_avant_freeze_physique_de_base() -> None:
+    day = 86_400_000
     result = explore_copy_vault_vnext_train(
-        {"provisional_without_physical_freeze": True, "trades": []}
+        {
+            "provisional_without_physical_freeze": True,
+            "trades": [
+                _row(
+                    ts=1_800_000_000_000 + day_index * day + wallet_index * 1_000,
+                    vault=f"0x{wallet_index}",
+                    coin="ETH" if day_index % 2 == 0 else "SOL",
+                )
+                for day_index in range(4)
+                for wallet_index in range(3)
+            ],
+        }
     )
     assert result["status"] == "BASE_COPY_PARAMETERS_NOT_PHYSICALLY_FROZEN"
     assert result["selection_eligible"] is False
+    assert result["physical_freeze_allowed"] is False
+    assert result["freeze_candidate"] is None
+    assert result["diagnostic_only"] is True
+    assert result["diagnostic_not_admitted_pnl"] is True
+    assert result["train_rows_seen"] == 12
+    assert result["diagnostic_train_candidate_count"] >= 1
+    assert result["diagnostic_train_candidate"]["statistics"]["net_pnl_usd"] > 0
+    assert all(variant["eligible"] is False for variant in result["variants"])

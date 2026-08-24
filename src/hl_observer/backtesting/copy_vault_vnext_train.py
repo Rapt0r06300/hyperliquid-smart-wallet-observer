@@ -151,18 +151,7 @@ def _concentration(rows: Sequence[Mapping[str, Any]], field: str) -> float:
 def explore_copy_vault_vnext_train(report: Mapping[str, Any]) -> dict[str, Any]:
     """Select a consensus freeze candidate without reopening heldout outcomes."""
 
-    if report.get("provisional_without_physical_freeze") is True:
-        return {
-            "schema_version": SCHEMA_VERSION,
-            "mechanism": MECHANISM,
-            "status": "BASE_COPY_PARAMETERS_NOT_PHYSICALLY_FROZEN",
-            "selection_eligible": False,
-            "physical_freeze_allowed": False,
-            "selection_scope": "TRAIN_ONLY_PRE_FREEZE",
-            "heldout_evaluated": False,
-            "paper_read_only": True,
-            "real_execution": False,
-        }
+    physical_freeze_blocked = report.get("provisional_without_physical_freeze") is True
     rows = _train_rows(report)
     grid = [
         (window, minimum)
@@ -189,7 +178,7 @@ def explore_copy_vault_vnext_train(report: Mapping[str, Any]) -> dict[str, Any]:
         net = float(stats.get("net_pnl_usd") or 0.0)
         pf = stats.get("profit_factor")
         lcb = stats.get("total_lcb_usd")
-        eligible = bool(
+        train_statistics_eligible = bool(
             len(admitted) >= MIN_TRAIN_TRADES
             and int(stats.get("distinct_days") or 0) >= MIN_DISTINCT_DAYS
             and net > 0.0
@@ -209,9 +198,20 @@ def explore_copy_vault_vnext_train(report: Mapping[str, Any]) -> dict[str, Any]:
                 "largest_coin_trade_share": coin_share,
                 "largest_vault_trade_share": vault_share,
                 "diagnostics": diagnostics,
-                "eligible": eligible,
+                "train_statistics_eligible": train_statistics_eligible,
+                "eligible": train_statistics_eligible and not physical_freeze_blocked,
             }
         )
+    diagnostic_rows = [row for row in variants if row["train_statistics_eligible"]]
+    diagnostic_selected = max(
+        diagnostic_rows,
+        key=lambda row: (
+            float((row["statistics"] or {}).get("total_lcb_usd") or 0.0),
+            float((row["statistics"] or {}).get("net_pnl_usd") or 0.0),
+            int((row["statistics"] or {}).get("sample_count") or 0),
+        ),
+        default=None,
+    )
     eligible_rows = [row for row in variants if row["eligible"]]
     selected = max(
         eligible_rows,
@@ -236,12 +236,23 @@ def explore_copy_vault_vnext_train(report: Mapping[str, Any]) -> dict[str, Any]:
     return {
         "schema_version": SCHEMA_VERSION,
         "mechanism": MECHANISM,
-        "status": "TRAIN_ELIGIBLE_TO_FREEZE" if selected else "NO_ROBUST_TRAIN_CANDIDATE",
+        "status": (
+            "BASE_COPY_PARAMETERS_NOT_PHYSICALLY_FROZEN"
+            if physical_freeze_blocked
+            else "TRAIN_ELIGIBLE_TO_FREEZE"
+            if selected
+            else "NO_ROBUST_TRAIN_CANDIDATE"
+        ),
         "selection_eligible": selected is not None,
         "physical_freeze_allowed": selected is not None,
         "selection_scope": "TRAIN_ONLY_PRE_FREEZE",
         "heldout_evaluated": False,
         "base_parameters_already_frozen": True,
+        "physical_freeze_blocked": physical_freeze_blocked,
+        "diagnostic_only": physical_freeze_blocked,
+        "diagnostic_train_candidate": diagnostic_selected,
+        "diagnostic_train_candidate_count": len(diagnostic_rows),
+        "diagnostic_not_admitted_pnl": physical_freeze_blocked,
         "identity_claim": "DISTINCT_RECORDED_WALLET_ADDRESSES_ONLY_NOT_DISTINCT_HUMANS",
         "train_rows_seen": len(rows),
         "fixed_grid": {

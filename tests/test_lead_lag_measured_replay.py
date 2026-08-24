@@ -190,3 +190,53 @@ def test_top_book_capacity_below_full_notional_is_missed_not_half_filled() -> No
     )
     assert replay["coverage"]["capacity_missed"] > 0
     assert sum(segment["fills"] for segment in replay["segments"].values()) == 0
+
+
+def test_raw_diagnostics_explain_no_trade_without_certifying_pnl() -> None:
+    tape, l2 = _fixture()
+    replay = replay_measured_lead_lag(
+        tape,
+        l2,
+        shock_threshold_bps=8.0,
+        horizon_ms=100,
+        latency_evidence=_latency(),
+        notional_usd=100.0,
+        fee_bps=1.0,
+        min_history=999,
+        min_episodes=1,
+    )
+
+    assert sum(segment["fills"] for segment in replay["segments"].values()) == 0
+    assert replay["decision_counts"] == {
+        "INSUFFICIENT_PRIOR_HISTORY": replay["signals"]
+    }
+    diagnostics = replay["raw_observation_diagnostics"]
+    assert diagnostics["diagnostic_only"] is True
+    assert diagnostics["selection_eligible"] is False
+    assert diagnostics["not_admitted_pnl"] is True
+    assert diagnostics["counted_as_certified_pnl"] is False
+    assert diagnostics["observations"] == replay["signals"]
+    assert diagnostics["full_fill_observations"] == replay["signals"]
+    assert diagnostics["net_pnl_usd_if_all_executable_taken"] > 0.0
+    assert diagnostics["reconciliation_error_usd"] == 0.0
+
+
+def test_raw_diagnostics_do_not_change_with_the_admission_history_gate() -> None:
+    tape, l2 = _fixture()
+    common = {
+        "shock_threshold_bps": 8.0,
+        "horizon_ms": 100,
+        "latency_evidence": _latency(),
+        "notional_usd": 100.0,
+        "fee_bps": 1.0,
+        "min_episodes": 1,
+    }
+
+    admitted = replay_measured_lead_lag(tape, l2, min_history=1, **common)
+    refused = replay_measured_lead_lag(tape, l2, min_history=999, **common)
+
+    assert admitted["raw_observation_diagnostics"] == refused[
+        "raw_observation_diagnostics"
+    ]
+    assert sum(segment["fills"] for segment in admitted["segments"].values()) > 0
+    assert sum(segment["fills"] for segment in refused["segments"].values()) == 0

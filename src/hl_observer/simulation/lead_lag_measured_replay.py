@@ -21,6 +21,7 @@ import hashlib
 import json
 import math
 import statistics
+from collections import Counter
 from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
@@ -364,6 +365,85 @@ def _segment_summary(events: list[dict[str, Any]], *, costs_measured: bool, equi
     }
 
 
+def _raw_observation_diagnostics(events: list[dict[str, Any]]) -> dict[str, Any]:
+    """Describe the causal executable baseline without admitting its PnL.
+
+    These aggregates answer whether the raw mechanism has any economic promise
+    after observed bid/ask and fees.  They deliberately bypass the prior-only
+    admission rule for diagnosis, so they can never be used as certified PnL or
+    make a train variant eligible.
+    """
+    reconciled_full = [
+        event
+        for event in events
+        if event.get("economic_reconciled") is True
+        and event.get("full_fill") is True
+        and _number(event.get("pnl_usd")) is not None
+    ]
+    nets = [float(event["pnl_usd"]) for event in reconciled_full]
+    net_bps = [float(event["net_bps"]) for event in reconciled_full]
+    gross = sum(float(event["gross_pnl_usd"]) for event in reconciled_full)
+    fees = sum(float(event["fees_usd"]) for event in reconciled_full)
+    spread = sum(float(event["spread_cost_usd"]) for event in reconciled_full)
+    slippage = sum(float(event["slippage_cost_usd"]) for event in reconciled_full)
+    latency = sum(float(event["latency_cost_usd"]) for event in reconciled_full)
+    net = sum(nets)
+    positive = sum(value > 0.0 for value in nets)
+    negative = sum(value < 0.0 for value in nets)
+    gross_profit = sum(value for value in nets if value > 0.0)
+    gross_loss = -sum(value for value in nets if value < 0.0)
+    first_trigger = min(
+        (int(event["trigger_ts_ms"]) for event in reconciled_full),
+        default=None,
+    )
+    last_trigger = max(
+        (int(event["trigger_ts_ms"]) for event in reconciled_full),
+        default=None,
+    )
+    total_costs = fees + spread + slippage + latency
+    return {
+        "diagnostic_only": True,
+        "selection_eligible": False,
+        "not_admitted_pnl": True,
+        "counted_as_certified_pnl": False,
+        "observations": len(events),
+        "economically_reconciled_observations": sum(
+            event.get("economic_reconciled") is True for event in events
+        ),
+        "full_fill_observations": len(reconciled_full),
+        "capacity_rejected_observations": sum(
+            event.get("full_fill") is not True for event in events
+        ),
+        "positive_net_observations": positive,
+        "negative_net_observations": negative,
+        "flat_net_observations": len(nets) - positive - negative,
+        "gross_pnl_usd_if_all_executable_taken": round(gross, 8),
+        "fees_usd_if_all_executable_taken": round(fees, 8),
+        "spread_cost_usd_if_all_executable_taken": round(spread, 8),
+        "slippage_cost_usd_if_all_executable_taken": round(slippage, 8),
+        "latency_cost_usd_if_all_executable_taken": round(latency, 8),
+        "total_costs_usd_if_all_executable_taken": round(total_costs, 8),
+        "net_pnl_usd_if_all_executable_taken": round(net, 8),
+        "mean_net_pnl_usd": round(statistics.fmean(nets), 8) if nets else None,
+        "mean_net_bps": round(statistics.fmean(net_bps), 8) if net_bps else None,
+        "median_net_bps": round(statistics.median(net_bps), 8) if net_bps else None,
+        "min_net_bps": round(min(net_bps), 8) if net_bps else None,
+        "max_net_bps": round(max(net_bps), 8) if net_bps else None,
+        "hit_rate": round(positive / len(nets), 8) if nets else None,
+        "profit_factor": (
+            round(gross_profit / gross_loss, 8) if gross_loss > 0.0 else None
+        ),
+        "first_trigger_ts_ms": first_trigger,
+        "last_trigger_ts_ms": last_trigger,
+        "observed_span_ms": (
+            last_trigger - first_trigger
+            if first_trigger is not None and last_trigger is not None
+            else None
+        ),
+        "reconciliation_error_usd": round(net - (gross - total_costs), 10),
+    }
+
+
 def replay_measured_lead_lag(
     tape: Mapping[str, Mapping[str, list]],
     l2_history: Mapping[str, list[Mapping[str, Any]]],
@@ -480,6 +560,14 @@ def replay_measured_lead_lag(
             candidates.append(event)
 
     candidates.sort(key=lambda event: (int(event["trigger_ts_ms"]), str(event["coin"])))
+    decision_counts = dict(
+        sorted(
+            Counter(
+                str(event.get("decision") or "UNKNOWN") for event in candidates
+            ).items()
+        )
+    )
+    raw_observation_diagnostics = _raw_observation_diagnostics(candidates)
     split_input = [
         {
             "ts_ms": int(event["trigger_ts_ms"]),
@@ -505,8 +593,6 @@ def replay_measured_lead_lag(
     placebo_count = 0
     for event in traded:
         # Direction-flip placebo on the exact same executable observations.
-        entry_mid = float(event["entry_mid"])
-        exit_mid = float(event["exit_mid"])
         reverse_gross = -float(event["gross_bps"])
         reverse_latency = 0.0
         reverse_spread = float(event["spread_bps"])
@@ -534,6 +620,8 @@ def replay_measured_lead_lag(
         "ledgers": {label: segment["ledger"] for label, segment in segments.items()},
         "ledger_is": segments["IS"]["ledger"],
         "signals": len(candidates),
+        "decision_counts": decision_counts,
+        "raw_observation_diagnostics": raw_observation_diagnostics,
         "coverage": coverage,
         "latency_evidence": dict(latency_evidence),
         "costs_measured": costs_measured,

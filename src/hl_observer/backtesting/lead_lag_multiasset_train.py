@@ -273,6 +273,10 @@ def _score_report(
         "placebo_net_pnl_usd": placebo_net,
         "coverage": dict(report.get("coverage") or {}),
         "signals": int(report.get("signals") or 0),
+        "decision_counts": dict(report.get("decision_counts") or {}),
+        "raw_observation_diagnostics": dict(
+            report.get("raw_observation_diagnostics") or {}
+        ),
         "eligible": eligible,
     }
 

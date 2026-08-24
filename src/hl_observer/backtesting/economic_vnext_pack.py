@@ -54,10 +54,22 @@ def run_economic_vnext_pack(
     lead_sources: Sequence[str | Path],
 ) -> dict[str, Any]:
     project_root = Path(root).resolve()
+    requested_lead_sources = list(lead_sources)
+    # An empty dataset manifest means that no explicit source override was
+    # available.  It must not silently disable the standard local discovery.
     aligned_lead_sources, lead_alignment = select_aligned_bbo_sources(
         project_root,
-        candidates=lead_sources,
+        candidates=requested_lead_sources or None,
     )
+    lead_alignment = {
+        **lead_alignment,
+        "requested_sources": len(requested_lead_sources),
+        "source_request_mode": (
+            "EXPLICIT_DATASET_MANIFEST"
+            if requested_lead_sources
+            else "LOCAL_AUTO_DISCOVERY_FALLBACK"
+        ),
+    }
     lead = explore_lead_lag_multiasset_train(project_root, aligned_lead_sources)
 
     cross_series, cross_depth, cross_meta = load_preferred_certified_atomic_series(project_root)
