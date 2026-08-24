@@ -132,3 +132,83 @@ def test_import_assiste_fusionne_et_exclut_les_MM(tmp_path):
     hlp = next(iter(m.VAULTS_EXCLUS))
     assert m.importer_vaults(tmp_path, ["0xAAA", hlp, "0xaaa", "0xBBB"]) == 2   # dédup + HLP exclu
     assert set(m.charger_vaults_suivis(tmp_path)) == {"0xaaa", "0xbbb"}
+
+
+def _vault_public(address, *, tvl=250_000, age_days=100, now_ms=2_000_000_000_000,
+                  closed=False, relationship="normal", apr=0.25):
+    return {
+        "apr": apr,
+        "summary": {
+            "vaultAddress": address,
+            "name": f"Vault {address[-4:]}",
+            "tvl": tvl,
+            "isClosed": closed,
+            "relationship": {"type": relationship},
+            "createTimeMillis": now_ms - age_days * 86_400_000,
+        },
+    }
+
+
+def test_parser_univers_public_filtre_et_trie_sans_promouvoir():
+    m = _mod()
+    now_ms = 2_000_000_000_000
+    first = "0x1111111111111111111111111111111111111111"
+    second = "0x2222222222222222222222222222222222222222"
+    payload = [
+        _vault_public(first, tvl=300_000, now_ms=now_ms),
+        _vault_public(second, tvl=900_000, now_ms=now_ms),
+        _vault_public("0x3333333333333333333333333333333333333333", tvl=99_999, now_ms=now_ms),
+        _vault_public("0x4444444444444444444444444444444444444444", age_days=44, now_ms=now_ms),
+        _vault_public("0x5555555555555555555555555555555555555555", closed=True, now_ms=now_ms),
+        _vault_public("0x6666666666666666666666666666666666666666", relationship="child", now_ms=now_ms),
+        _vault_public("0xtronquee...", now_ms=now_ms),
+        _vault_public(second.upper().replace("0X", "0x"), tvl=800_000, now_ms=now_ms),
+    ]
+
+    result = m.parser_univers_public(payload, now_ms=now_ms)
+
+    assert [row["address"] for row in result] == [second, first]
+    assert all(row["observation_only"] is True for row in result)
+    assert result[0]["tvl_usd"] == 900_000
+
+
+def test_rafraichissement_public_preserve_manuel_et_provenance(tmp_path):
+    m = _mod()
+    now_ms = 2_000_000_000_000
+    managed = "0x1111111111111111111111111111111111111111"
+    manual = "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    fresh = "0x2222222222222222222222222222222222222222"
+    destination = tmp_path / m.CONFIG
+    destination.parent.mkdir(parents=True)
+    destination.write_text(json.dumps({
+        "_provenance": {"vaults": [{"address": managed}]},
+        "vaults": [managed, manual],
+    }), encoding="utf-8")
+
+    result = m.rafraichir_univers_public(
+        tmp_path,
+        fetcher=lambda: [_vault_public(fresh, now_ms=now_ms)],
+        now_ms=now_ms,
+    )
+
+    assert result["vaults"] == [fresh, manual]
+    assert result["_provenance"]["source"] == m.URL_VAULTS
+    assert result["_provenance"]["manual_preserved"] == [manual]
+    assert json.loads(destination.read_text(encoding="utf-8")) == result
+
+
+def test_rafraichissement_vide_preserve_strictement_ancien_fichier(tmp_path):
+    m = _mod()
+    destination = tmp_path / m.CONFIG
+    destination.parent.mkdir(parents=True)
+    original = '{"vaults":["0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"]}'
+    destination.write_text(original, encoding="utf-8")
+
+    try:
+        m.rafraichir_univers_public(tmp_path, fetcher=lambda: [])
+    except ValueError as exc:
+        assert "préservé" in str(exc)
+    else:
+        raise AssertionError("un univers vide doit échouer fail-closed")
+
+    assert destination.read_text(encoding="utf-8") == original

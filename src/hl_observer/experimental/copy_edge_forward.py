@@ -16,13 +16,19 @@ C'est l'exact pendant de `lead_lag_shadow` pour la copie. Aucune exécution : le
 from __future__ import annotations
 
 import bisect
+import gzip
 import json
 import random
+import re
 from pathlib import Path
 from typing import Any
 
 VAULTS_SNAP_RELPATH = Path("runtime") / "data" / "vault_snapshots.jsonl"
 PRIX_TAPE_RELPATH = Path("runtime") / "data" / "hl_allmids_tape.jsonl"
+BBO_TAPE_RELPATH = Path("runtime") / "data" / "bbo_tape.jsonl"
+BBO_TAPE_PREV_RELPATH = Path("runtime") / "data" / "bbo_tape.jsonl.prev"
+BBO_SHARDS_RELPATH = Path("runtime") / "data" / "bbo_shards"
+BBO_SHARDS_ARCHIVE_RELPATH = Path("runtime") / "data" / "bbo_shards_archive"
 CONFIG_GELE_RELPATH = Path("runtime") / "data" / "copy_edge_config_gele.json"
 
 SEUIL_MOVE_FRAC_NAV = 0.05         # même seuil que le signal : un move < 5 % du NAV n'est pas une décision
@@ -98,6 +104,250 @@ def charger_prix_tape(root: str | Path) -> dict[str, list[tuple[int, float]]]:
     for c in tape:
         tape[c].sort()
     return tape
+
+
+def charger_prix_tape_ciblee(
+    root: str | Path,
+    cibles_par_coin: dict[str, list[int]],
+    *,
+    horizon_ms: int = 3_600_000,
+    tolerance_ms: int = int(TOL_LOOKUP_MS),
+    max_evenements_total: int = 2_500,
+    max_evenements_par_coin: int = 256,
+    delays_ms: tuple[int, ...] = (),
+    inclure_historique_bbo: bool = False,
+    sources_bbo: list[str | Path] | None = None,
+) -> tuple[dict[str, list[tuple[int, float]]], dict[str, Any]]:
+    """Charge uniquement les vrais prix nécessaires au shadow live.
+
+    Le collecteur longue durée ne doit jamais matérialiser toute la tape
+    ``allMids`` en mémoire : une ligne contient près de mille marchés et
+    l'historique peut peser plusieurs centaines de Mo. Pour chaque OPEN causal,
+    il suffit du premier prix réellement observable à partir de l'événement,
+    des délais d'entrée pré-enregistrés et de ``+horizon``. Cette lecture
+    streame donc le fichier et ne conserve que ces points causaux bornés. Un
+    point antérieur, même plus proche, ne peut jamais servir d'exécution.
+    Si ``allMids`` ne couvre pas une cible, le BBO Hyperliquid brut peut la
+    compléter. Les shards historiques ne sont lus que sur demande explicite :
+    le shadow live reste léger, tandis qu'un replay économique peut exploiter
+    les enregistrements immuables déjà présents sur disque.
+
+    Le bornage prend les événements les plus récents. Il ne change aucun seuil
+    économique et reste exclusivement destiné au classement shadow.
+    """
+
+    path = Path(root) / PRIX_TAPE_RELPATH
+    normalisees: list[tuple[int, str]] = []
+    for coin_raw, timestamps_raw in (cibles_par_coin or {}).items():
+        coin = str(coin_raw or "").strip().upper()
+        if not coin:
+            continue
+        timestamps: set[int] = set()
+        for value in timestamps_raw or []:
+            try:
+                ts_ms = int(value)
+            except (TypeError, ValueError, OverflowError):
+                continue
+            if ts_ms > 0:
+                timestamps.add(ts_ms)
+        for ts_ms in sorted(timestamps)[-max(1, int(max_evenements_par_coin)):]:
+            normalisees.append((ts_ms, coin))
+
+    normalisees.sort(reverse=True)
+    normalisees = normalisees[:max(1, int(max_evenements_total))]
+    retenues: dict[str, list[int]] = {}
+    for ts_ms, coin in normalisees:
+        retenues.setdefault(coin, []).append(ts_ms)
+    for coin in retenues:
+        retenues[coin] = sorted(set(retenues[coin]))
+
+    offsets = tuple(sorted({0, int(horizon_ms), *(max(0, int(value)) for value in delays_ms)}))
+    cibles: dict[str, list[int]] = {
+        coin: sorted({event_ts + offset for event_ts in events for offset in offsets})
+        for coin, events in retenues.items()
+    }
+    meilleurs: dict[str, dict[int, tuple[int, int, float, str]]] = {
+        coin: {} for coin in cibles
+    }
+
+    def retenir(coin: str, ts_ms: int, price: float, source: str) -> None:
+        targets = cibles.get(coin)
+        if not targets or price <= 0:
+            return
+        first = bisect.bisect_left(targets, ts_ms - tolerance_ms)
+        last = bisect.bisect_right(targets, ts_ms)
+        for target in targets[first:last]:
+            delay = ts_ms - target
+            candidate = (delay, ts_ms, price, source)
+            previous = meilleurs[coin].get(target)
+            if previous is None or (delay, ts_ms, source) < (previous[0], previous[1], previous[3]):
+                meilleurs[coin][target] = candidate
+    # La ligne allMids contient près de mille prix. ``json.loads`` créerait
+    # autant d'objets temporaires à chaque tick et le processus longue durée
+    # conserverait plusieurs Go d'arènes Python. Le format est notre JSONL
+    # canonique, une ligne autonome; ce parseur ciblé ne lit que ``ts_ms`` et
+    # les clés explicitement demandées, puis valide chaque nombre.
+    ts_pattern = re.compile(r'"ts_ms"\s*:\s*(\d+)')
+    encoded_coins = {
+        json.dumps(coin, ensure_ascii=False): coin for coin in cibles
+    }
+    number = r"-?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?"
+    price_pattern = (
+        re.compile(
+            r"(" + "|".join(re.escape(value) for value in encoded_coins) + r")\s*:\s*(" + number + r")"
+        )
+        if encoded_coins
+        else None
+    )
+    first_target = min((value for values in cibles.values() for value in values), default=0)
+    last_target = max((value for values in cibles.values() for value in values), default=0)
+    lignes_lues = 0
+    lignes_valides = 0
+    source_details: list[dict[str, Any]] = []
+    source_allmids = str(PRIX_TAPE_RELPATH).replace("\\", "/")
+    if cibles:
+        try:
+            handle = path.open("r", encoding="utf-8", errors="ignore")
+        except OSError:
+            handle = None
+        if handle is not None:
+            with handle:
+                for line in handle:
+                    lignes_lues += 1
+                    ts_match = ts_pattern.search(line)
+                    if ts_match is None:
+                        continue
+                    ts_ms = int(ts_match.group(1))
+                    if ts_ms < first_target - tolerance_ms or ts_ms > last_target + tolerance_ms:
+                        continue
+                    lignes_valides += 1
+                    for price_match in price_pattern.finditer(line) if price_pattern is not None else ():
+                        coin = encoded_coins[price_match.group(1)]
+                        try:
+                            price = float(price_match.group(2))
+                        except (ValueError, OverflowError):
+                            continue
+                        retenir(coin, ts_ms, price, source_allmids)
+
+    source_details.append({
+        "source": source_allmids,
+        "kind": "ALLMIDS",
+        "bytes": path.stat().st_size if path.exists() else 0,
+        "lignes_lues": lignes_lues,
+        "lignes_valides": lignes_valides,
+    })
+
+    def chemins_bbo() -> list[Path]:
+        if sources_bbo is not None:
+            return sorted({
+                (Path(value) if Path(value).is_absolute() else Path(root) / Path(value)).resolve()
+                for value in sources_bbo
+                if (Path(value) if Path(value).is_absolute() else Path(root) / Path(value)).is_file()
+            }, key=lambda value: value.as_posix())
+
+        resultat: list[Path] = []
+        for relpath in (BBO_TAPE_PREV_RELPATH, BBO_TAPE_RELPATH):
+            candidate = Path(root) / relpath
+            if candidate.is_file():
+                resultat.append(candidate.resolve())
+        if not inclure_historique_bbo:
+            return resultat
+
+        shard_pattern = re.compile(r"bbo_tape_(\d+)\.jsonl(?:\.gz)?$")
+        shards: list[tuple[int, Path]] = []
+        for relpath in (BBO_SHARDS_ARCHIVE_RELPATH, BBO_SHARDS_RELPATH):
+            directory = Path(root) / relpath
+            if not directory.is_dir():
+                continue
+            for candidate in directory.glob("bbo_tape_*.jsonl*"):
+                match = shard_pattern.fullmatch(candidate.name)
+                if match is not None:
+                    shards.append((int(match.group(1)) // 1_000_000, candidate.resolve()))
+        shards.sort(key=lambda item: (item[0], item[1].as_posix()))
+        previous_end: int | None = None
+        lower = first_target - tolerance_ms
+        upper = last_target + tolerance_ms
+        for end_ms, candidate in shards:
+            start_ms = previous_end if previous_end is not None else end_ms - 15 * 60_000
+            previous_end = end_ms
+            if end_ms >= lower and start_ms <= upper:
+                resultat.append(candidate)
+        return list(dict.fromkeys(resultat))
+
+    venue_hl_pattern = re.compile(r'"venue"\s*:\s*"HL"')
+    for bbo_path in chemins_bbo() if cibles else []:
+        bbo_lues = 0
+        bbo_valides = 0
+        source_name = (
+            bbo_path.relative_to(Path(root).resolve()).as_posix()
+            if bbo_path.is_relative_to(Path(root).resolve())
+            else str(bbo_path)
+        )
+        opener = gzip.open if bbo_path.suffix == ".gz" else open
+        try:
+            handle = opener(bbo_path, "rt", encoding="utf-8", errors="ignore")
+        except OSError:
+            continue
+        with handle:
+            for line in handle:
+                bbo_lues += 1
+                if venue_hl_pattern.search(line) is None:
+                    continue
+                try:
+                    record = json.loads(line)
+                    coin = str(record.get("coin") or "").strip().upper()
+                    ts_ms = int(record.get("ts_wall_ms") or record.get("recv_wall_ts_ms") or 0)
+                    price = float(record.get("mid") or 0.0)
+                except (AttributeError, TypeError, ValueError, OverflowError):
+                    continue
+                if coin not in cibles or ts_ms < first_target - tolerance_ms or ts_ms > last_target + tolerance_ms:
+                    continue
+                bbo_valides += 1
+                retenir(coin, ts_ms, price, source_name)
+        source_details.append({
+            "source": source_name,
+            "kind": "HL_BBO",
+            "bytes": bbo_path.stat().st_size,
+            "lignes_lues": bbo_lues,
+            "lignes_valides": bbo_valides,
+        })
+
+    tape: dict[str, list[tuple[int, float]]] = {}
+    for coin, matches in meilleurs.items():
+        points = sorted({(match[1], match[2]) for match in matches.values()})
+        if points:
+            tape[coin] = points
+
+    requested_targets = sum(len(values) for values in cibles.values())
+    matched_targets = sum(len(values) for values in meilleurs.values())
+    targets_by_source: dict[str, int] = {}
+    for matches in meilleurs.values():
+        for match in matches.values():
+            targets_by_source[match[3]] = targets_by_source.get(match[3], 0) + 1
+    metadata: dict[str, Any] = {
+        "mode": "EVENT_TARGETED_BOUNDED",
+        "source": source_allmids,
+        "source_mode": "ALLMIDS_THEN_HL_BBO_FALLBACK",
+        "source_bytes": path.stat().st_size if path.exists() else 0,
+        "source_details": source_details,
+        "cibles_par_source": targets_by_source,
+        "historique_bbo_active": bool(inclure_historique_bbo or sources_bbo is not None),
+        "horizon_ms": int(horizon_ms),
+        "delays_ms": list(offset for offset in offsets if offset not in (0, int(horizon_ms))),
+        "tolerance_ms": int(tolerance_ms),
+        "max_evenements_total": int(max_evenements_total),
+        "max_evenements_par_coin": int(max_evenements_par_coin),
+        "evenements_demandes": sum(len(set(values or [])) for values in (cibles_par_coin or {}).values()),
+        "evenements_retenus": len(normalisees),
+        "coins_demandes": len(cibles),
+        "coins_apparies": len(tape),
+        "cibles_prix": requested_targets,
+        "cibles_appariees": matched_targets,
+        "couverture_cibles": round(matched_targets / requested_targets, 6) if requested_targets else 0.0,
+        "lignes_lues": sum(int(item["lignes_lues"]) for item in source_details),
+        "lignes_valides": sum(int(item["lignes_valides"]) for item in source_details),
+    }
+    return tape, metadata
 
 
 CANDLES_HISTORY_DIR = Path("runtime") / "history"
@@ -251,4 +501,12 @@ def config_gelee(root: str | Path) -> dict | None:
         return None
 
 
-__all__ = ["charger_evenements", "charger_prix_tape", "rendement_forward", "mesurer", "geler", "config_gelee"]
+__all__ = [
+    "charger_evenements",
+    "charger_prix_tape",
+    "charger_prix_tape_ciblee",
+    "rendement_forward",
+    "mesurer",
+    "geler",
+    "config_gelee",
+]

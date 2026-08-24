@@ -35,6 +35,27 @@ def test_console_windows_strict_ne_peut_pas_tuer_le_collecteur():
     assert console.erreurs == "replace"
 
 
+def test_journal_conserve_identite_vault_complete(tmp_path):
+    (tmp_path / "runtime" / "data").mkdir(parents=True)
+    vault = "0x1234567890abcdef1234567890abcdef12345678"
+
+    C._journal(
+        tmp_path,
+        {"vault": vault, "coin": "SOL", "dir": "Open Long", "ts_ms": 1000,
+         "source": "LIVE_WS", "isSnapshot": False},
+        "PROBE",
+        {"refus": "EDGE_PRELIM_ABSENT"},
+        1010,
+    )
+
+    saved = json.loads((tmp_path / C.JOURNAL).read_text(encoding="utf-8"))
+    assert saved["vault"] == vault
+    assert saved["vault_short"] == vault[:12]
+    assert saved["source"] == "LIVE_WS"
+    assert saved["isSnapshot"] is False
+    assert saved["received_at_ms"] == 1010
+
+
 def _f(ts, snap=False):
     return {"coin": "SOL", "ts_ms": ts, "isSnapshot": snap, "hash": "h%d" % ts}
 
@@ -297,8 +318,41 @@ def test_cibles_l2_intersectent_toujours_lunivers_actif(monkeypatch):
 
 def test_collecteur_lance_le_refresh_periodique_du_prewarm():
     source = (RACINE / "tools" / "collecter_userfills_vaults.py").read_text(encoding="utf-8")
-    gather = source.split("await asyncio.gather(", 1)[1]
-    assert "_refresh_copy_vault_prewarm_periodically(root, vaults)" in gather
+    supervisor = source.split("async def _superviser_rotation_vaults", 1)[1].split(
+        "async def _tape_l2_buffer", 1
+    )[0]
+    runtime = source.split("async def _boucle", 1)[1]
+    assert "_refresh_copy_vault_prewarm_periodically(root, vaults)" in supervisor
+    assert "_superviser_rotation_vaults(root, file)" in runtime
+
+
+def test_metaorder_shadow_est_un_singleton_global_et_non_une_tache_par_rotation():
+    source = (RACINE / "tools" / "collecter_userfills_vaults.py").read_text(encoding="utf-8")
+    supervisor = source.split("async def _superviser_rotation_vaults", 1)[1].split(
+        "async def _tape_l2_buffer", 1
+    )[0]
+    runtime = source.split("async def _boucle", 1)[1]
+    assert "_metaorder_shadow_periodique(root, vaults)" not in supervisor
+    assert "_metaorder_shadow_periodique(root)" in runtime
+    assert "_METAORDER_RUN_LOCK.acquire(blocking=False)" in source
+
+
+def test_scoring_shadow_lourd_sort_de_levent_loop():
+    source = (RACINE / "tools" / "collecter_userfills_vaults.py").read_text(encoding="utf-8")
+    periodic = source.split("async def _promotion_periodique", 1)[1].split(
+        "async def _rapport_periodique", 1
+    )[0]
+    assert "await asyncio.to_thread(_promotion_une_passe, root)" in periodic
+
+
+def test_scoring_shadow_live_utilise_une_tape_ciblee_et_bornee():
+    source = (RACINE / "tools" / "collecter_userfills_vaults.py").read_text(encoding="utf-8")
+    promotion = source.split("def _promotion_une_passe", 1)[1].split(
+        "async def _promotion_periodique", 1
+    )[0]
+    assert "charger_prix_tape_ciblee" in promotion
+    assert "PC.cibles_prix_shadow(root)" in promotion
+    assert "charger_prix_tape(root)" not in promotion
 
 
 def test_copy_vault_ttl_couvre_episode_executable_le_plus_court():
@@ -511,6 +565,75 @@ def test_vaults_et_roles(tmp_path):
     assert d["0xC1"] == "CORE" and d["0xC2"] == "CORE"             # retenus stricts = CORE (tradent)
     assert d["0xSAFE"] == "CANDIDAT_TRADABLE"                       # passe la sécurité mini -> PROBE l'ouvre
     assert d["0xOBS"] == "CANDIDAT_OBSERVE"                         # trop jeune -> observé seulement
+
+
+def _public_universe_payload(count: int) -> dict:
+    rows = []
+    addresses = []
+    for index in range(count):
+        address = "0x%040x" % (index + 1)
+        addresses.append(address)
+        rows.append({
+            "address": address,
+            "tvl_usd": 1_000_000 - index,
+            "age_j": 100,
+            "observation_only": True,
+        })
+    return {
+        "vaults": addresses,
+        "_provenance": {"vaults": rows},
+    }
+
+
+def test_univers_public_non_score_reste_observation_only_et_tourne(tmp_path):
+    data = tmp_path / "runtime" / "data"
+    data.mkdir(parents=True)
+    (data / "vaults_suivis.json").write_text(
+        json.dumps(_public_universe_payload(20)), encoding="utf-8"
+    )
+
+    page_zero = C.vaults_et_roles(tmp_path, rotation_index=0)
+    page_one = C.vaults_et_roles(tmp_path, rotation_index=1)
+
+    assert len(page_zero) == C.MAX_SLOTS
+    assert len(page_one) == C.MAX_SLOTS
+    assert {vault for vault, _role, _why in page_zero} != {
+        vault for vault, _role, _why in page_one
+    }
+    assert all(role == "CANDIDAT_OBSERVE" for _vault, role, _why in page_zero + page_one)
+    assert all("observation causale" in why for _vault, _role, why in page_zero + page_one)
+
+
+def test_univers_public_ne_duplique_jamais_une_sentinelle(tmp_path, monkeypatch):
+    data = tmp_path / "runtime" / "data"
+    data.mkdir(parents=True)
+    universe = _public_universe_payload(20)
+    sentinel = universe["vaults"][0]
+    (data / "vaults_suivis.json").write_text(json.dumps(universe), encoding="utf-8")
+    monkeypatch.setattr(C, "charger_sentinelles", lambda _root: [sentinel])
+
+    roles = C.vaults_et_roles(tmp_path, rotation_index=0)
+    addresses = [vault for vault, _role, _why in roles]
+
+    assert len(addresses) == C.MAX_SLOTS
+    assert len(addresses) == len(set(addresses))
+    assert dict((vault, role) for vault, role, _why in roles)[sentinel] == "LIQUIDATOR_SENTINEL"
+
+
+def test_promotion_shadow_couvre_aussi_les_vaults_hors_page(tmp_path):
+    data = tmp_path / "runtime" / "data"
+    data.mkdir(parents=True)
+    universe = _public_universe_payload(20)
+    (data / "vaults_suivis.json").write_text(json.dumps(universe), encoding="utf-8")
+
+    assert C._candidats_observes_tous(tmp_path) == set(universe["vaults"])
+
+
+def test_index_rotation_est_persistant_et_monotone(tmp_path):
+    assert C._prochain_index_rotation(tmp_path) == 0
+    assert C._prochain_index_rotation(tmp_path) == 1
+    state = json.loads((tmp_path / C.ROTATION_STATE).read_text(encoding="utf-8"))
+    assert state["next_index"] == 2
 
 
 def test_depth_executable_somme_5_niveaux_cote_le_plus_mince():

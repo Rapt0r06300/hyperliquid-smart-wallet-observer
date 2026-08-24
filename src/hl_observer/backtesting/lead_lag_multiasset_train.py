@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import bisect
 import json
+import math
 from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Any
@@ -34,17 +35,40 @@ from hl_observer.simulation.lead_lag_measured_replay import (
 
 SCHEMA_VERSION = "hypersmart.lead_lag_multiasset_train.v1"
 MECHANISM = "lead_lag_v4_multiasset_measured_taker"
+EXTREME_REVERSAL_MECHANISM = "lead_lag_v5_extreme_shock_reversal_taker"
 DEFAULT_CANDIDATE_COINS = (
     "BTC", "ETH", "SOL", "XRP", "DOGE", "SUI", "LINK", "AVAX", "INJ", "AAVE", "ONDO"
 )
 SHOCK_THRESHOLDS_BPS = (8.0, 12.0, 20.0)
 HORIZONS_MS = (1_000, 5_000)
+EXTREME_REVERSAL_SHOCK_THRESHOLDS_BPS = (20.0, 30.0, 50.0)
+EXTREME_REVERSAL_HORIZONS_MS = (1_000, 5_000, 15_000)
 TRAIN_FRACTION = 0.60
 NOTIONAL_USD = 25.0
 MIN_TRAIN_FILLS = 8
+EXTREME_REVERSAL_MIN_TRAIN_FILLS = 30
 MIN_DISTINCT_DAYS = 3
 MAX_TOP_POSITIVE_SHARE = 0.60
 FAMILY_ALPHA = 0.05
+
+TRAIN_HYPOTHESES = (
+    {
+        "mechanism": MECHANISM,
+        "direction_multiplier": 1,
+        "direction_policy": "SHOCK_CONTINUATION",
+        "shock_thresholds_bps": SHOCK_THRESHOLDS_BPS,
+        "horizons_ms": HORIZONS_MS,
+        "min_train_fills": MIN_TRAIN_FILLS,
+    },
+    {
+        "mechanism": EXTREME_REVERSAL_MECHANISM,
+        "direction_multiplier": -1,
+        "direction_policy": "EXTREME_SHOCK_REVERSAL",
+        "shock_thresholds_bps": EXTREME_REVERSAL_SHOCK_THRESHOLDS_BPS,
+        "horizons_ms": EXTREME_REVERSAL_HORIZONS_MS,
+        "min_train_fills": EXTREME_REVERSAL_MIN_TRAIN_FILLS,
+    },
+)
 
 
 def _in_ranges(timestamp_ms: int, ranges: Sequence[tuple[int, int]]) -> bool:
@@ -92,15 +116,23 @@ def load_multiasset_train_tape(
     *,
     coins: Sequence[str] = DEFAULT_CANDIDATE_COINS,
 ) -> tuple[dict[str, dict[str, list]], dict[str, Any]]:
-    """Scan the aligned Binance sources once and retain only the frozen TRAIN span."""
+    """Scan aligned Binance/Hyperliquid sources once for the frozen TRAIN span.
+
+    ``BIN_TRADE`` and ``HL`` rows recorded in the same source share the local
+    observable wall clock.  Keeping both sides of that recording together
+    avoids joining a dense Binance trade tape to an unrelated, sparse L2 tape.
+    """
 
     project_root = Path(root).resolve()
     allowed = {str(coin).upper() for coin in coins}
     train_ranges, split_meta = _training_ranges(project_root)
     tapes: dict[str, list[tuple[int, float, float]]] = {coin: [] for coin in sorted(allowed)}
-    seen: set[tuple[Any, ...]] = set()
+    books: dict[str, list[dict[str, Any]]] = {coin: [] for coin in sorted(allowed)}
+    seen_trades: set[tuple[Any, ...]] = set()
+    seen_books: set[tuple[Any, ...]] = set()
     consumed: list[str] = []
     lines_read = invalid = outside_train = duplicates = 0
+    book_invalid = book_outside_train = book_duplicates = 0
     for value in sources:
         path = Path(value)
         if not path.is_absolute():
@@ -115,19 +147,89 @@ def load_multiasset_train_tape(
         )
         for line in _lines(path):
             lines_read += 1
-            if "BIN_TRADE" not in line:
+            if (
+                "BIN_TRADE" not in line
+                and '"venue":"HL"' not in line
+                and '"venue": "HL"' not in line
+            ):
                 continue
             try:
                 row = json.loads(line)
             except (TypeError, ValueError):
                 invalid += 1
                 continue
-            if not isinstance(row, Mapping) or str(row.get("venue") or "") != "BIN_TRADE":
+            if not isinstance(row, Mapping):
+                invalid += 1
                 continue
+            venue = str(row.get("venue") or "")
             coin = str(row.get("coin") or "").upper()
             if coin not in allowed:
                 continue
             timestamp_ms = _wall_ms(dict(row))
+            if venue == "HL":
+                try:
+                    bid = float(row.get("bid"))
+                    ask = float(row.get("ask"))
+                    bid_size = float(row.get("bid_sz", row.get("bid_size")))
+                    ask_size = float(row.get("ask_sz", row.get("ask_size")))
+                except (TypeError, ValueError, OverflowError):
+                    bid = ask = bid_size = ask_size = 0.0
+                if (
+                    timestamp_ms is None
+                    or not all(math.isfinite(value) for value in (bid, ask, bid_size, ask_size))
+                    or bid <= 0.0
+                    or ask < bid
+                    or bid_size <= 0.0
+                    or ask_size <= 0.0
+                ):
+                    book_invalid += 1
+                    continue
+                if not _in_ranges(timestamp_ms, train_ranges):
+                    book_outside_train += 1
+                    continue
+                identity = (
+                    coin,
+                    str(row.get("event_id") or ""),
+                    int(timestamp_ms),
+                    float(bid),
+                    float(ask),
+                    float(bid_size),
+                    float(ask_size),
+                )
+                if identity in seen_books:
+                    book_duplicates += 1
+                    continue
+                seen_books.add(identity)
+                books[coin].append(
+                    {
+                        "coin": coin,
+                        "ts_ms": int(timestamp_ms),
+                        "received_ts_ms": row.get("recv_wall_ts_ms"),
+                        "written_ts_ms": row.get("write_wall_ts_ms"),
+                        "observable_at_ms": int(timestamp_ms),
+                        "exchange_ts_ms": row.get("ts_ex"),
+                        "bid": float(bid),
+                        "ask": float(ask),
+                        "bid_size": float(bid_size),
+                        "ask_size": float(ask_size),
+                        "bid_top_usd": float(bid) * float(bid_size),
+                        "ask_top_usd": float(ask) * float(ask_size),
+                        "bid_depth_usd": float(bid) * float(bid_size),
+                        "ask_depth_usd": float(ask) * float(ask_size),
+                        "connection_id": row.get("connection_id"),
+                        "sequence": row.get("sequence"),
+                        "feed_quality_score": row.get("feed_quality_score"),
+                        "data_gate_ready": row.get("data_gate_ready"),
+                        "event_id": row.get("event_id"),
+                        "source": "hyperliquid:recorded:aligned_bbo",
+                        "data_origin": "RECORDED_REAL",
+                        "read_only": True,
+                        "real_execution": False,
+                    }
+                )
+                continue
+            if venue != "BIN_TRADE":
+                continue
             try:
                 price = float(row.get("px"))
             except (TypeError, ValueError, OverflowError):
@@ -148,16 +250,17 @@ def load_multiasset_train_tape(
                 direction,
                 row.get("sz"),
             )
-            if identity in seen:
+            if identity in seen_trades:
                 duplicates += 1
                 continue
-            seen.add(identity)
+            seen_trades.add(identity)
             tapes[coin].append((int(timestamp_ms) * 1_000_000, float(price), direction))
     result: dict[str, dict[str, list]] = {}
     for coin, rows in tapes.items():
         rows.sort()
+        books[coin].sort(key=lambda row: int(row["ts_ms"]))
         if rows:
-            result[coin] = {"HL": [], "BIN": [], "TRADE": rows}
+            result[coin] = {"HL": [], "BIN": [], "TRADE": rows, "HL_BOOK": books[coin]}
     return result, {
         "schema_version": "hypersmart.lead_lag_multiasset_train_tape.v1",
         **split_meta,
@@ -169,7 +272,13 @@ def load_multiasset_train_tape(
         "invalid_rows": invalid,
         "rows_outside_frozen_train": outside_train,
         "duplicates_rejected": duplicates,
+        "hl_book_invalid_rows": book_invalid,
+        "hl_book_rows_outside_frozen_train": book_outside_train,
+        "hl_book_duplicates_rejected": book_duplicates,
         "lead_trades_by_coin": {coin: len(streams["TRADE"]) for coin, streams in result.items()},
+        "hl_books_by_coin": {coin: len(streams["HL_BOOK"]) for coin, streams in result.items()},
+        "hl_book_rows": sum(len(streams["HL_BOOK"]) for streams in result.values()),
+        "hl_book_source": "ALIGNED_BBO_SAME_SHARD_CAUSAL",
         "selection_scope": "TRAIN_ONLY_PRE_FREEZE",
         "heldout_loaded": False,
         "paper_read_only": True,
@@ -233,6 +342,9 @@ def _score_report(
     threshold_bps: float,
     horizon_ms: int,
     trial_count: int,
+    mechanism: str = MECHANISM,
+    direction_multiplier: int = 1,
+    min_train_fills: int = MIN_TRAIN_FILLS,
 ) -> dict[str, Any]:
     rows = _rows_from_ledgers(report)
     stats = summarize_train_rows(
@@ -253,7 +365,7 @@ def _score_report(
     lcb = stats.get("total_lcb_usd")
     eligible = bool(
         report.get("costs_measured") is True
-        and int(stats.get("sample_count") or 0) >= MIN_TRAIN_FILLS
+        and int(stats.get("sample_count") or 0) >= int(min_train_fills)
         and int(stats.get("distinct_days") or 0) >= MIN_DISTINCT_DAYS
         and net > 0.0
         and pf is not None
@@ -265,17 +377,28 @@ def _score_report(
         and all(value > 0.0 for value in internal_fold_nets.values())
     )
     return {
+        "mechanism": str(mechanism),
+        "direction_multiplier": int(direction_multiplier),
+        "direction_policy": (
+            "SHOCK_CONTINUATION"
+            if int(direction_multiplier) == 1
+            else "EXTREME_SHOCK_REVERSAL"
+        ),
         "coin": str(coin).upper(),
         "shock_threshold_bps": float(threshold_bps),
         "horizon_ms": int(horizon_ms),
         "statistics": stats,
         "internal_train_fold_nets": internal_fold_nets,
         "placebo_net_pnl_usd": placebo_net,
+        "minimum_train_fills": int(min_train_fills),
         "coverage": dict(report.get("coverage") or {}),
         "signals": int(report.get("signals") or 0),
         "decision_counts": dict(report.get("decision_counts") or {}),
         "raw_observation_diagnostics": dict(
             report.get("raw_observation_diagnostics") or {}
+        ),
+        "raw_direction_flip_diagnostics": dict(
+            report.get("raw_direction_flip_diagnostics") or {}
         ),
         "eligible": eligible,
     }
@@ -290,42 +413,84 @@ def explore_lead_lag_multiasset_train(
     """Explore the fixed grid without loading the chronological heldout span."""
 
     tape, tape_meta = load_multiasset_train_tape(root, lead_sources, coins=candidate_coins)
-    shock_ts = _shock_timestamps(tape)
-    l2_history, _public_trades, l2_meta = load_market_microstructure_event_windows(
-        root,
-        shock_ts,
-        before_ms=1_000,
-        after_ms=max(HORIZONS_MS) + 2_000,
-    )
+    l2_history = {
+        coin: list(streams.get("HL_BOOK") or [])
+        for coin, streams in tape.items()
+        if streams.get("HL_BOOK")
+    }
+    missing_book_tape = {
+        coin: streams for coin, streams in tape.items() if coin not in l2_history
+    }
+    fallback_meta: dict[str, Any] | None = None
+    if missing_book_tape:
+        fallback_history, _public_trades, fallback_meta = load_market_microstructure_event_windows(
+            root,
+            _shock_timestamps(missing_book_tape),
+            before_ms=1_000,
+            after_ms=max(
+                int(horizon)
+                for hypothesis in TRAIN_HYPOTHESES
+                for horizon in hypothesis["horizons_ms"]
+            )
+            + 2_000,
+        )
+        for coin, rows in fallback_history.items():
+            if rows:
+                l2_history[str(coin).upper()] = list(rows)
+    l2_meta = {
+        "schema_version": "hypersmart.lead_lag_multiasset_books.v1",
+        "primary_source": "ALIGNED_BBO_SAME_SHARD_CAUSAL",
+        "same_shard_rows": sum(
+            len(streams.get("HL_BOOK") or []) for streams in tape.values()
+        ),
+        "same_shard_coins": sorted(
+            coin for coin, streams in tape.items() if streams.get("HL_BOOK")
+        ),
+        "fallback_requested_coins": sorted(missing_book_tape),
+        "fallback": fallback_meta,
+        "selection_scope": "TRAIN_ONLY_PRE_FREEZE",
+        "heldout_loaded": False,
+        "paper_read_only": True,
+        "real_execution": False,
+    }
     latency = load_runtime_latency_evidence(root)
     variants: list[dict[str, Any]] = []
-    trial_count = max(1, len(candidate_coins) * len(SHOCK_THRESHOLDS_BPS) * len(HORIZONS_MS))
-    for coin in candidate_coins:
-        selected_coin = str(coin).upper()
-        if selected_coin not in tape:
-            continue
-        for threshold in SHOCK_THRESHOLDS_BPS:
-            for horizon in HORIZONS_MS:
-                report = replay_measured_lead_lag(
-                    {selected_coin: tape[selected_coin]},
-                    {selected_coin: list(l2_history.get(selected_coin, ()))},
-                    shock_threshold_bps=float(threshold),
-                    horizon_ms=int(horizon),
-                    latency_evidence=latency,
-                    notional_usd=NOTIONAL_USD,
-                    min_history=5,
-                    min_expected_net_bps=0.0,
-                    min_episodes=1,
-                )
-                variants.append(
-                    _score_report(
-                        report,
-                        coin=selected_coin,
-                        threshold_bps=float(threshold),
+    combinations_per_coin = sum(
+        len(hypothesis["shock_thresholds_bps"]) * len(hypothesis["horizons_ms"])
+        for hypothesis in TRAIN_HYPOTHESES
+    )
+    trial_count = max(1, len(candidate_coins) * combinations_per_coin)
+    for hypothesis in TRAIN_HYPOTHESES:
+        for coin in candidate_coins:
+            selected_coin = str(coin).upper()
+            if selected_coin not in tape:
+                continue
+            for threshold in hypothesis["shock_thresholds_bps"]:
+                for horizon in hypothesis["horizons_ms"]:
+                    report = replay_measured_lead_lag(
+                        {selected_coin: tape[selected_coin]},
+                        {selected_coin: list(l2_history.get(selected_coin, ()))},
+                        shock_threshold_bps=float(threshold),
                         horizon_ms=int(horizon),
-                        trial_count=trial_count,
+                        latency_evidence=latency,
+                        notional_usd=NOTIONAL_USD,
+                        min_history=5,
+                        min_expected_net_bps=0.0,
+                        min_episodes=1,
+                        direction_multiplier=int(hypothesis["direction_multiplier"]),
                     )
-                )
+                    variants.append(
+                        _score_report(
+                            report,
+                            coin=selected_coin,
+                            threshold_bps=float(threshold),
+                            horizon_ms=int(horizon),
+                            trial_count=trial_count,
+                            mechanism=str(hypothesis["mechanism"]),
+                            direction_multiplier=int(hypothesis["direction_multiplier"]),
+                            min_train_fills=int(hypothesis["min_train_fills"]),
+                        )
+                    )
     eligible = [row for row in variants if row["eligible"]]
     selected = max(
         eligible,
@@ -338,16 +503,16 @@ def explore_lead_lag_multiasset_train(
     )
     freeze_payload = (
         {
-            "mechanism": MECHANISM,
+            "mechanism": selected["mechanism"],
+            "direction_multiplier": selected["direction_multiplier"],
+            "direction_policy": selected["direction_policy"],
             "coin": selected["coin"],
             "shock_threshold_bps": selected["shock_threshold_bps"],
             "horizon_ms": selected["horizon_ms"],
             "notional_usd": NOTIONAL_USD,
             "candidate_universe": list(DEFAULT_CANDIDATE_COINS),
-            "grid": {
-                "shock_thresholds_bps": list(SHOCK_THRESHOLDS_BPS),
-                "horizons_ms": list(HORIZONS_MS),
-            },
+            "research_family_trial_count": trial_count,
+            "minimum_train_fills": selected["minimum_train_fills"],
             "selection_scope": "TRAIN_ONLY_PRE_FREEZE",
         }
         if selected is not None
@@ -355,7 +520,7 @@ def explore_lead_lag_multiasset_train(
     )
     return {
         "schema_version": SCHEMA_VERSION,
-        "mechanism": MECHANISM,
+        "mechanism": "lead_lag_multi_hypothesis_train_only",
         "status": "TRAIN_ELIGIBLE_TO_FREEZE" if selected else "NO_ROBUST_TRAIN_CANDIDATE",
         "selection_eligible": selected is not None,
         "physical_freeze_allowed": selected is not None,
@@ -363,10 +528,19 @@ def explore_lead_lag_multiasset_train(
         "heldout_evaluated": False,
         "candidate_universe": list(DEFAULT_CANDIDATE_COINS),
         "fixed_grid": {
-            "shock_thresholds_bps": list(SHOCK_THRESHOLDS_BPS),
-            "horizons_ms": list(HORIZONS_MS),
             "notional_usd": NOTIONAL_USD,
             "trial_count": trial_count,
+            "hypotheses": [
+                {
+                    "mechanism": str(hypothesis["mechanism"]),
+                    "direction_multiplier": int(hypothesis["direction_multiplier"]),
+                    "direction_policy": str(hypothesis["direction_policy"]),
+                    "shock_thresholds_bps": list(hypothesis["shock_thresholds_bps"]),
+                    "horizons_ms": list(hypothesis["horizons_ms"]),
+                    "minimum_train_fills": int(hypothesis["min_train_fills"]),
+                }
+                for hypothesis in TRAIN_HYPOTHESES
+            ],
         },
         "selected": selected,
         "freeze_candidate": freeze_payload,
@@ -382,10 +556,15 @@ def explore_lead_lag_multiasset_train(
 
 __all__ = [
     "DEFAULT_CANDIDATE_COINS",
+    "EXTREME_REVERSAL_HORIZONS_MS",
+    "EXTREME_REVERSAL_MECHANISM",
+    "EXTREME_REVERSAL_MIN_TRAIN_FILLS",
+    "EXTREME_REVERSAL_SHOCK_THRESHOLDS_BPS",
     "HORIZONS_MS",
     "MECHANISM",
     "SCHEMA_VERSION",
     "SHOCK_THRESHOLDS_BPS",
+    "TRAIN_HYPOTHESES",
     "explore_lead_lag_multiasset_train",
     "load_multiasset_train_tape",
 ]

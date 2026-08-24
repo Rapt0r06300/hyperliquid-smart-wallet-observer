@@ -27,6 +27,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import sys
 import time
 import urllib.error
@@ -38,18 +39,33 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 from hl_observer.collection import collecte_fiable as CF  # noqa: E402
 
 URL_INFO = "https://api.hyperliquid.xyz/info"
+URL_VAULTS = "https://stats-data.hyperliquid.xyz/Mainnet/vaults"
 SORTIE = Path("runtime") / "data" / "vault_snapshots.jsonl"
 CONFIG = Path("runtime") / "data" / "vaults_suivis.json"
 ETAT = Path("runtime") / "data" / "vaults_etat.json"           # NAV pic + dernière expo (drawdown/delta)
 #: vaults de MARKET-MAKING à ne JAMAIS suivre (copier un MM taker = perte structurelle).
 VAULTS_EXCLUS = frozenset({"0xdfc24b077bc1425ad1dea75bcb6f8158e10df303"})   # HLP (protocol vault)
 POLL_S_DEFAUT = 300.0    # les vaults tiennent des jours : 5 min suffit largement
+MIN_TVL_PUBLIC_USD = 100_000.0
+MIN_AGE_PUBLIC_DAYS = 45.0
+MAX_VAULTS_PUBLICS = 100
+_ADRESSE_COMPLETE = re.compile(r"^0x[0-9a-f]{40}$")
 
 
 def _post_info(charge: dict[str, Any], *, timeout_s: float = 12.0) -> Any:
     corps = json.dumps(charge).encode("utf-8")
     req = urllib.request.Request(URL_INFO, data=corps, headers={"Content-Type": "application/json"})
     with urllib.request.urlopen(req, timeout=timeout_s) as rep:      # noqa: S310 (URL constante)
+        return json.loads(rep.read().decode("utf-8"))
+
+
+def _get_vaults_public(*, timeout_s: float = 20.0) -> Any:
+    """Liste publique officielle des vaults Hyperliquid, en lecture seule."""
+    req = urllib.request.Request(
+        URL_VAULTS,
+        headers={"Accept": "application/json", "User-Agent": "HyperSmart-Observer/1.0"},
+    )
+    with urllib.request.urlopen(req, timeout=timeout_s) as rep:  # noqa: S310 (URL constante)
         return json.loads(rep.read().decode("utf-8"))
 
 
@@ -61,6 +77,131 @@ def _f(x: Any) -> float | None:
         return v if v == v else None
     except (TypeError, ValueError):
         return None
+
+
+def parser_univers_public(
+    payload: Any,
+    *,
+    now_ms: int | None = None,
+    min_tvl_usd: float = MIN_TVL_PUBLIC_USD,
+    min_age_days: float = MIN_AGE_PUBLIC_DAYS,
+    max_vaults: int = MAX_VAULTS_PUBLICS,
+) -> list[dict[str, Any]]:
+    """Normalise l'univers officiel en adresses complètes, ouvertes et assez matures.
+
+    Ce filtre ne constitue jamais une sélection de trading : il fournit uniquement
+    un univers d'observation. Le score causal/net reste obligatoire avant toute
+    promotion paper.
+    """
+    if not isinstance(payload, list):
+        return []
+    current_ms = int(time.time() * 1000) if now_ms is None else int(now_ms)
+    uniques: dict[str, dict[str, Any]] = {}
+    for row in payload:
+        if not isinstance(row, dict):
+            continue
+        summary = row.get("summary")
+        if not isinstance(summary, dict) or summary.get("isClosed") is not False:
+            continue
+        relationship = summary.get("relationship") or row.get("relationship") or {}
+        if not isinstance(relationship, dict) or str(relationship.get("type") or "").lower() != "normal":
+            continue
+        address = str(summary.get("vaultAddress") or "").strip().lower()
+        if not _ADRESSE_COMPLETE.fullmatch(address) or address in VAULTS_EXCLUS:
+            continue
+        tvl = _f(summary.get("tvl"))
+        created_ms = _f(summary.get("createTimeMillis"))
+        if tvl is None or created_ms is None or tvl < float(min_tvl_usd) or created_ms <= 0:
+            continue
+        age_days = max(0.0, (current_ms - created_ms) / 86_400_000.0)
+        if age_days < float(min_age_days):
+            continue
+        apr = _f(row.get("apr"))
+        candidate = {
+            "address": address,
+            "name": str(summary.get("name") or "(sans nom)"),
+            "tvl_usd": round(tvl, 2),
+            "apr_pct": round(apr * 100.0, 4) if apr is not None else None,
+            "age_j": round(age_days, 2),
+            "observation_only": True,
+        }
+        previous = uniques.get(address)
+        if previous is None or candidate["tvl_usd"] > previous["tvl_usd"]:
+            uniques[address] = candidate
+    ordered = sorted(uniques.values(), key=lambda item: (-item["tvl_usd"], item["address"]))
+    return ordered[:max(0, int(max_vaults))]
+
+
+def rafraichir_univers_public(
+    root: str | Path,
+    *,
+    fetcher=None,
+    now_ms: int | None = None,
+    min_tvl_usd: float = MIN_TVL_PUBLIC_USD,
+    min_age_days: float = MIN_AGE_PUBLIC_DAYS,
+    max_vaults: int = MAX_VAULTS_PUBLICS,
+) -> dict[str, Any]:
+    """Rafraîchit atomiquement l'univers d'observation, sans effacer sur échec."""
+    root_path = Path(root)
+    destination = root_path / CONFIG
+    source = fetcher or _get_vaults_public
+    public = parser_univers_public(
+        source(),
+        now_ms=now_ms,
+        min_tvl_usd=min_tvl_usd,
+        min_age_days=min_age_days,
+        max_vaults=max_vaults,
+    )
+    if not public:
+        raise ValueError("univers public vide ou invalide; ancien univers préservé")
+
+    previous: dict[str, Any] = {}
+    try:
+        raw_previous = json.loads(destination.read_text(encoding="utf-8"))
+        if isinstance(raw_previous, dict):
+            previous = raw_previous
+    except (OSError, ValueError):
+        pass
+    managed_before = {
+        str(item.get("address") or "").lower()
+        for item in (previous.get("_provenance", {}).get("vaults") or [])
+        if isinstance(item, dict)
+    }
+    manual = []
+    for address in previous.get("vaults") or []:
+        normalized = str(address or "").strip().lower()
+        if (
+            _ADRESSE_COMPLETE.fullmatch(normalized)
+            and normalized not in VAULTS_EXCLUS
+            and normalized not in managed_before
+        ):
+            manual.append(normalized)
+
+    addresses = list(dict.fromkeys([item["address"] for item in public] + manual))
+    fetched_ms = int(time.time() * 1000) if now_ms is None else int(now_ms)
+    result = {
+        "_comment": (
+            "Univers public Hyperliquid rafraîchi automatiquement. Toutes les nouvelles "
+            "adresses restent observation-only jusqu'à preuve causale et nette."
+        ),
+        "_provenance": {
+            "source": URL_VAULTS,
+            "fetched_at_ms": fetched_ms,
+            "filters": {
+                "relationship": "normal",
+                "isClosed": False,
+                "min_tvl_usd": float(min_tvl_usd),
+                "min_age_days": float(min_age_days),
+                "max_vaults": int(max_vaults),
+            },
+            "vaults": public,
+            "manual_preserved": manual,
+        },
+        "vaults": addresses,
+    }
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    CF.ecrire_atomique(destination, json.dumps(result, ensure_ascii=False, indent=1))
+    return result
 
 
 def parser_clearinghouse(payload: Any) -> dict[str, Any] | None:
@@ -270,8 +411,16 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--root", default=".")
     p.add_argument("--poll", type=float, default=POLL_S_DEFAUT)
     p.add_argument("--une-fois", action="store_true")
+    p.add_argument("--rafraichir-univers", action="store_true")
     a = p.parse_args(argv)
     root = Path(a.root)
+    if a.rafraichir_univers:
+        try:
+            univers = rafraichir_univers_public(root)
+            print("[vaults] univers public rafraichi: %d adresses" % len(univers["vaults"]), flush=True)
+        except (urllib.error.URLError, OSError, ValueError, TimeoutError) as exc:
+            print("[vaults] univers public non rafraichi (%s); ancien univers preserve" % str(exc)[:100], flush=True)
+            return 2
     cache = CF.CacheDedup()
     total, echecs = 0, 0
     while True:

@@ -455,18 +455,28 @@ def replay_measured_lead_lag(
     fee_bps: float = DEFAULT_FEE_BPS,
     min_history: int = 5,
     min_expected_net_bps: float = 0.0,
+    direction_multiplier: int = 1,
     max_book_age_ms: float = DEFAULT_MAX_BOOK_AGE_MS,
     max_execution_observation_delay_ms: float = DEFAULT_MAX_EXECUTION_OBSERVATION_DELAY_MS,
     min_episodes: int = 5,
     equity: float = 1000.0,
 ) -> dict[str, Any]:
     """Replay strictly executable episodes with prior-only admission edge."""
+    if int(direction_multiplier) not in (-1, 1):
+        raise ValueError("direction_multiplier must be -1 or 1")
+    primary_direction_policy = (
+        "SHOCK_CONTINUATION" if int(direction_multiplier) == 1 else "EXTREME_SHOCK_REVERSAL"
+    )
+    placebo_direction_policy = (
+        "EXTREME_SHOCK_REVERSAL" if int(direction_multiplier) == 1 else "SHOCK_CONTINUATION"
+    )
     latency_measured = latency_evidence.get("measured") is True
     latency_p95 = _number(latency_evidence.get("p95_ms"))
     # Research replay may still diagnose coverage with a conservative fallback,
     # but it can never become liquidatable while latency evidence is missing.
     applied_latency_ms = float(latency_p95 if latency_p95 is not None else max_book_age_ms)
     candidates: list[dict[str, Any]] = []
+    direction_flip_diagnostics: list[dict[str, Any]] = []
     coverage = {
         "shocks_seen": 0,
         "missing_detection_book": 0,
@@ -512,9 +522,11 @@ def replay_measured_lead_lag(
                 coverage["missing_exit_book"] += 1
                 continue
             exit_book, exit_execution_ts_ms, exit_selection_kind = exit_selection
+            shock_direction = 1 if float(raw_direction) > 0 else -1
+            primary_direction = shock_direction * int(direction_multiplier)
             event = _settle(
                 coin=str(coin),
-                direction=1 if float(raw_direction) > 0 else -1,
+                direction=primary_direction,
                 trigger_ts_ms=trigger_ms,
                 detection_book=detection,
                 entry_book=entry,
@@ -528,7 +540,42 @@ def replay_measured_lead_lag(
                 exit_book_selection=exit_selection_kind,
             )
             event["notional_usd"] = float(notional_usd)
+            event["raw_shock_direction"] = int(shock_direction)
+            event["direction_multiplier"] = int(direction_multiplier)
+            event["direction_policy"] = primary_direction_policy
+            # Reprice the opposite direction on the exact same causal books.
+            # This is a diagnostic placebo only: it never participates in
+            # admission, selection, segment PnL or promotion.
+            direction_flip = _settle(
+                coin=str(coin),
+                direction=-int(event["direction"]),
+                trigger_ts_ms=trigger_ms,
+                detection_book=detection,
+                entry_book=entry,
+                exit_book=exit_book,
+                entry_execution_ts_ms=entry_execution_ts_ms,
+                exit_execution_ts_ms=exit_execution_ts_ms,
+                notional_usd=float(notional_usd),
+                fee_bps=float(fee_bps),
+                measured_latency_ms=applied_latency_ms,
+                entry_book_selection=entry_selection_kind,
+                exit_book_selection=exit_selection_kind,
+            )
+            direction_flip["notional_usd"] = float(notional_usd)
+            direction_flip["raw_shock_direction"] = int(shock_direction)
+            direction_flip["direction_multiplier"] = -int(direction_multiplier)
+            direction_flip["direction_policy"] = placebo_direction_policy
+            direction_flip["diagnostic_only"] = True
+            direction_flip["selection_eligible"] = False
+            direction_flip["counterfactual_type"] = (
+                "DIRECTION_FLIP_SAME_CAUSAL_EXECUTION_BOOKS"
+            )
+            event["direction_flip_pnl_usd"] = float(direction_flip["pnl_usd"])
+            event["direction_flip_net_bps"] = float(direction_flip["net_bps"])
+            event["direction_flip_gross_bps"] = float(direction_flip["gross_bps"])
+            event["direction_flip_spread_bps"] = float(direction_flip["spread_bps"])
             raw_observations.append(event)
+            direction_flip_diagnostics.append(direction_flip)
             coverage["observable"] += 1
             if event["full_fill"] is not True:
                 coverage["capacity_missed"] += 1
@@ -568,6 +615,24 @@ def replay_measured_lead_lag(
         )
     )
     raw_observation_diagnostics = _raw_observation_diagnostics(candidates)
+    raw_observation_diagnostics.update(
+        {
+            "direction_multiplier": int(direction_multiplier),
+            "direction_policy": primary_direction_policy,
+        }
+    )
+    raw_direction_flip_diagnostics = _raw_observation_diagnostics(
+        direction_flip_diagnostics
+    )
+    raw_direction_flip_diagnostics.update(
+        {
+            "counterfactual_type": "DIRECTION_FLIP_SAME_CAUSAL_EXECUTION_BOOKS",
+            "direction_multiplier": -int(direction_multiplier),
+            "direction_policy": placebo_direction_policy,
+            "selection_eligible": False,
+            "may_change_strategy": False,
+        }
+    )
     split_input = [
         {
             "ts_ms": int(event["trigger_ts_ms"]),
@@ -592,12 +657,8 @@ def replay_measured_lead_lag(
     placebo_net = 0.0
     placebo_count = 0
     for event in traded:
-        # Direction-flip placebo on the exact same executable observations.
-        reverse_gross = -float(event["gross_bps"])
-        reverse_latency = 0.0
-        reverse_spread = float(event["spread_bps"])
-        reverse_net = reverse_gross - float(event["fees_bps"]) - reverse_spread - float(event["slippage_bps"]) - reverse_latency
-        placebo_net += reverse_net / 1e4 * float(notional_usd)
+        # Direction-flip placebo repriced on the opposite executable sides.
+        placebo_net += float(event["direction_flip_pnl_usd"])
         placebo_count += 1
 
     in_sample = segments["IS"]
@@ -616,17 +677,25 @@ def replay_measured_lead_lag(
         "metriques": metrics,
         "verdict": verdict,
         "placebo_net": round(placebo_net, 8),
-        "placebo": {"net": round(placebo_net, 8), "sample_count": placebo_count, "type": "DIRECTION_FLIP_SAME_EXECUTION_TIMES"},
+        "placebo": {
+            "net": round(placebo_net, 8),
+            "sample_count": placebo_count,
+            "type": "DIRECTION_FLIP_SAME_EXECUTION_TIMES",
+        },
         "ledgers": {label: segment["ledger"] for label, segment in segments.items()},
         "ledger_is": segments["IS"]["ledger"],
         "signals": len(candidates),
         "decision_counts": decision_counts,
         "raw_observation_diagnostics": raw_observation_diagnostics,
+        "raw_direction_flip_diagnostics": raw_direction_flip_diagnostics,
         "coverage": coverage,
         "latency_evidence": dict(latency_evidence),
         "costs_measured": costs_measured,
         "fee_bps": float(fee_bps),
         "fee_source": "FROZEN_CONSERVATIVE_TAKER_ROUND_TRIP",
+        "direction_multiplier": int(direction_multiplier),
+        "direction_policy": primary_direction_policy,
+        "placebo_direction_policy": placebo_direction_policy,
         "slippage_rule": "ZERO_ONLY_WHEN_ENTRY_AND_EXIT_TOP_CAPACITY_COVER_FULL_NOTIONAL",
         "latency_rule": "P95_EMBEDDED_IN_DELAYED_ENTRY_PRICE_NO_DOUBLE_CHARGE",
         "paper_read_only": True,

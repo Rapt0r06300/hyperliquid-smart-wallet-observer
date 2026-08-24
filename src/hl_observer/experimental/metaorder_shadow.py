@@ -433,6 +433,20 @@ def prix_au(serie: list, ts_ms) -> float | None:
     return best
 
 
+def prix_au_ou_apres(serie: list, ts_ms, *, tolerance_ms: int = 90_000) -> float | None:
+    """Premier prix observable après ``ts_ms``, sans retour vers le passé."""
+    if not serie or ts_ms is None:
+        return None
+    target = int(ts_ms)
+    for timestamp, price in serie:
+        if int(timestamp) < target:
+            continue
+        if int(timestamp) - target > int(tolerance_ms):
+            return None
+        return float(price)
+    return None
+
+
 def cout_l2_reel_bps(l2: dict | None, taille_usd) -> tuple[float, str]:
     """Coût aller-retour RÉEL depuis le carnet L2 {hl_bid, hl_ask, depth_usd} et la TAILLE : frais taker +
     spread + 2×slippage(taille/profondeur) + latence. Rend (bps, source). Fallback screening 16 si L2 absent."""
@@ -483,10 +497,12 @@ def construire_signaux(fills: list, *, vault: str, idx_twap: dict, tape_coin: li
         except (TypeError, ValueError):
             taille_usd = None
         cout_bps, cout_src = cfn(coin0, copy_notional_usd)
-        pe_coin = prix_au(tape_coin, t) if tape_coin else (float(px) if px is not None else None)
-        pf_coin = prix_au(tape_coin, t + horizon_ms) if tape_coin else None
-        pe_btc = prix_au(tape_btc, t) if tape_btc else None
-        pf_btc = prix_au(tape_btc, t + horizon_ms) if tape_btc else None
+        received_at_ms = int(f.get("_received_at_ms") or f.get("received_at_ms") or t)
+        observed_at_ms = max(t, received_at_ms)
+        pe_coin = prix_au_ou_apres(tape_coin, observed_at_ms) if tape_coin else None
+        pf_coin = prix_au_ou_apres(tape_coin, t + horizon_ms) if tape_coin else None
+        pe_btc = prix_au_ou_apres(tape_btc, observed_at_ms) if tape_btc else None
+        pf_btc = prix_au_ou_apres(tape_btc, t + horizon_ms) if tape_btc else None
         plc = placebo_bps(pe_coin, pf_coin, pe_btc, pf_btc, sens) or {}
         total_size = evidence.get("estimated_total_size")
         public_evidence = {key: value for key, value in evidence.items() if key != "_fill"}
@@ -501,7 +517,9 @@ def construire_signaux(fills: list, *, vault: str, idx_twap: dict, tape_coin: li
             "maker_taker": maker_taker(f),
             "age_stade_ms": t - int(evidence["metaorder_started_at_ms"]),
             "age_fill_hl_ms": round(now - t),
-            "latence_locale_ms": None,
+            "latence_locale_ms": observed_at_ms - t,
+            "signal_observed_at_ms": observed_at_ms,
+            "entry_price_source": "FIRST_MARK_AT_OR_AFTER_LOCAL_OBSERVATION" if pe_coin is not None else None,
             "jour": int(t // JOUR_MS),
             "horizon_ms": horizon_ms,
             "cout_ar_bps": cout_bps,
@@ -535,8 +553,10 @@ def evaluer_delais_entree(
             coin = str(signal.get("coin") or "").upper()
             tape = (tape_par_coin or {}).get(coin) or []
             t0 = int(signal.get("fill_time") or 0)
-            entry = prix_au(tape, t0 + int(delay))
-            exit_price = prix_au(tape, t0 + int(horizon_ms))
+            observed_at_ms = int(signal.get("signal_observed_at_ms") or t0)
+            entry_at_ms = max(observed_at_ms, t0 + int(delay))
+            entry = prix_au_ou_apres(tape, entry_at_ms)
+            exit_price = prix_au_ou_apres(tape, t0 + int(horizon_ms))
             pnl = pnl_forward_net_bps(
                 entry,
                 exit_price,
@@ -813,8 +833,9 @@ def comparer_executions(signal: dict, tape_coin: list, book: dict, *, fee_taker_
     • no_trade : 0. Rend un dict complet. Aucune position inventée."""
     sens = int(signal.get("sens") or 1)
     t = int(signal.get("fill_time") or 0)
-    pe = prix_au(tape_coin, t)
-    pf = prix_au(tape_coin, t + horizon_ms)
+    observed_at_ms = int(signal.get("signal_observed_at_ms") or t)
+    pe = prix_au_ou_apres(tape_coin, observed_at_ms)
+    pf = prix_au_ou_apres(tape_coin, t + horizon_ms)
     res = {"taker_immediat": None, "limite_passive": None, "no_trade": 0.0}
     # taker
     cc = cout_composants(book, notional_usd, sens, fee_taker_ar_bps)
@@ -838,8 +859,9 @@ def comparer_executions(signal: dict, tape_coin: list, book: dict, *, fee_taker_
             res["limite_passive"] = {"rempli": False, "raison": "fill_manque"}
         else:
             net = sens * (pf - limite) / limite * 1e4 - float(fee_maker_ar_bps)   # entrée au touch, frais maker
-            adverse = sens * (prix_au(tape_coin, t_fill + 5_000) - limite) / limite * 1e4 \
-                if prix_au(tape_coin, t_fill + 5_000) is not None else None
+            adverse_price = prix_au_ou_apres(tape_coin, t_fill + 5_000)
+            adverse = sens * (adverse_price - limite) / limite * 1e4 \
+                if adverse_price is not None else None
             res["limite_passive"] = {"rempli": True, "delai_ms": t_fill - t, "queue_devant_usd": round((q_sz or 0) * limite, 1),
                                      "adverse_selection_bps": round(adverse, 3) if adverse is not None else None,
                                      "net_bps": round(net, 3)}
@@ -910,7 +932,8 @@ def _resume_book(book) -> dict | None:
 
 def executer(root: str | Path, vaults: list, *, fills_provider=None, twap_provider=None, book_provider=None,
              twap_state_provider=None, tape=None, horizon_ms: float = HORIZON_FWD_MS, fenetre_ms: float = 7_200_000.0,
-             config_hash: str = "", git_commit: str = "", maintenant_ms: float | None = None) -> dict:
+             config_hash: str = "", git_commit: str = "", maintenant_ms: float | None = None,
+             inclure_historique_bbo: bool = False) -> dict:
     """Passe SHADOW : par vault, `userFillsByTime` + `userTwapSliceFills` (statut TWAP) ; carnet BRUT par coin
     (VWAP-walk) → coût per-signal + **courbe edge/coûts par notional** (10..500 $, spread/slippage/frais séparés,
     VRAIE capacité L2) + **comparaison d'exécutions** (taker/passif/no-trade) sur CONTINUATION/LATE. Pré-enregistre
@@ -926,12 +949,10 @@ def executer(root: str | Path, vaults: list, *, fills_provider=None, twap_provid
         fills_provider = fills_provider or fp
         twap_provider = twap_provider or tp
         book_provider = book_provider or bp
+    tape_ciblee = tape is None
+    tape_meta = {"mode": "INJECTED" if tape is not None else "EVENT_TARGETED_BOUNDED"}
     if tape is None:
-        try:
-            from hl_observer.experimental.copy_edge_forward import charger_prix_tape
-            tape = charger_prix_tape(root)
-        except Exception:  # noqa: BLE001
-            tape = {}
+        tape = {}
     fee_base = FEE_AR_BASE_BPS                                    # 9 bps A/R : scénario CONSERVATEUR de base
     try:
         from hl_observer.experimental.carry_deux_jambes import frais_venues
@@ -942,12 +963,12 @@ def executer(root: str | Path, vaults: list, *, fills_provider=None, twap_provid
         metaorder_l2_tape as MT,  # tape L2 synchronisée (coût entrée/sortie horodaté)
     )
     tape_l2 = MT.charger_tape(root)
-    tape_btc = tape.get("BTC") or []
     start = int(now - fenetre_ms)
     signaux: list = []
     appels_budget: list = []
     twap_statut: dict = {}
     book_cache: dict = {}
+    lots_prepares: list[tuple[str, dict, list, dict[str, list]]] = []
 
     def _book(coin):
         if coin not in book_cache:
@@ -984,6 +1005,38 @@ def executer(root: str | Path, vaults: list, *, fills_provider=None, twap_provid
         for f in fills:
             if int((f or {}).get("time") or 0) <= now - horizon_ms:   # assez vieux : forward disponible
                 par_coin.setdefault(str(f.get("coin") or "").upper(), []).append(f)
+        lots_prepares.append((v, idx, twap_states, par_coin))
+
+    if tape_ciblee:
+        cibles: dict[str, list[int]] = {}
+        for _vault, _idx, _twap_states, par_coin in lots_prepares:
+            for coin, fs in par_coin.items():
+                for fill in fs:
+                    fill_time = int((fill or {}).get("time") or 0)
+                    if fill_time <= 0:
+                        continue
+                    cibles.setdefault(coin, []).append(fill_time)
+                    cibles.setdefault("BTC", []).append(fill_time)
+        try:
+            from hl_observer.experimental.copy_edge_forward import charger_prix_tape_ciblee
+            tape, tape_meta = charger_prix_tape_ciblee(
+                root,
+                cibles,
+                horizon_ms=int(horizon_ms),
+                delays_ms=DELAIS_ENTREE_MS,
+                max_evenements_total=5_000,
+                max_evenements_par_coin=512,
+                inclure_historique_bbo=inclure_historique_bbo,
+            )
+        except Exception as exc:  # noqa: BLE001
+            tape = {}
+            tape_meta = {
+                "mode": "EVENT_TARGETED_BOUNDED_FAILED",
+                "error": type(exc).__name__,
+            }
+
+    tape_btc = tape.get("BTC") or []
+    for v, idx, twap_states, par_coin in lots_prepares:
         for coin, fs in par_coin.items():
             sigs = construire_signaux(fs, vault=v, idx_twap=idx, tape_coin=tape.get(coin) or [],
                                       tape_btc=tape_btc, cout_fn=_cout_fn, horizon_ms=horizon_ms, maintenant_ms=now,
@@ -1025,6 +1078,7 @@ def executer(root: str | Path, vaults: list, *, fills_provider=None, twap_provid
     n_twap = {k: sum(1 for vv in twap_statut.values() if vv == k) for k in set(twap_statut.values())}
     _ecrire(root, signaux, {
         "version": VERSION, "n_signaux": len(signaux), "n_metaordres": len({s["metaorder_id"] for s in signaux}),
+        "price_tape": tape_meta,
         "fee_ar_base_bps": fee_base, "fee_config_bps": fee_config,
         "l2_synchronise_pct": round(100 * n_sync / len(signaux), 1) if signaux else 0.0,
         "n_dans_tape_l2": len(tape_l2),
@@ -1097,7 +1151,7 @@ def _ecrire(root: Path, signaux: list, resume: dict, now: float) -> None:
 __all__ = ["VERSION", "sens_fill", "maker_taker", "dedup_fills", "metaorder_id", "twap_metaorder_id",
            "index_twap", "twap_id_fill", "est_twap", "normaliser_twap_states", "etat_twap_observable",
            "rejouer_metaordres_causaux", "detecter_metaordres", "classer_stade", "pnl_forward_net_bps",
-           "placebo_bps", "ofi_top5", "prix_au", "cout_l2_reel_bps", "construire_signaux",
+           "placebo_bps", "ofi_top5", "prix_au", "prix_au_ou_apres", "cout_l2_reel_bps", "construire_signaux",
            "evaluer_delais_entree", "DELAIS_ENTREE_MS", "bootstrap_clusterise", "walk_forward_purge",
            "stats_par_stade", "agreger_par", "vwap_slippage", "cout_composants", "courbe_edge_cout",
            "comparer_executions", "write_preregistration", "NOTIONALS_DEFAUT", "executer",

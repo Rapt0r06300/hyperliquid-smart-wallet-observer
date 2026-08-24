@@ -16,6 +16,7 @@ import json
 import math
 import os
 import sys
+import threading
 import time
 from pathlib import Path
 
@@ -44,6 +45,7 @@ from hl_observer.market_data.live_l2_service import (  # noqa: E402
 from hl_observer.experimental import liquidation_sentinels as LS  # noqa: E402  (LIQUIDATOR_SENTINELS_V2)
 import sonde_confirmation_vaults as SD  # noqa: E402  (helpers de réconciliation par CLÉ COMPOSITE, partagés)
 import heartbeat_collecteur as HB  # noqa: E402
+import collecter_vaults as CV  # noqa: E402  (univers officiel public, observation-only)
 
 WS_URL = "wss://api.hyperliquid.xyz/ws"
 FILLS_LIVE = Path("runtime") / "data" / "vault_fills_live.jsonl"
@@ -73,6 +75,8 @@ WS_KEYS_CAP = 6000                          # borne par vault (couvre très larg
 _DEMARRAGE_MS = 0.0                          # instant de démarrage : _WS_KEYS ne peut contenir QUE des fills reçus après
 _HEARTBEAT_WS = {"messages": 0, "fills": 0, "acks": 0, "reconnects": 0,
                  "drops": 0, "dernier_exchange_ts": None}
+_CURRENT_ROTATION_VAULTS: tuple[str, ...] = ()
+_METAORDER_RUN_LOCK = threading.Lock()
 
 
 def _activite_par_vault(root: Path, *, fenetre_h: float = 2.0, max_lignes: int = 4000) -> dict:
@@ -109,6 +113,62 @@ def _shadow_par_vault(root: Path) -> dict:
 
 MAX_SLOTS = 10                          # plafond dur des places userFills (inchangé)
 SENTINELLES_K = 3                       # ≤3 slots RÉSERVÉS aux LIQUIDATOR_SENTINELS (top liquidateurs)
+ROLE_ROTATION_SECONDS = max(60.0, float(os.getenv("HYPERSMART_VAULT_ROLE_ROTATION_SECONDS", "120")))
+UNIVERSE_REFRESH_SECONDS = max(900.0, float(os.getenv("HYPERSMART_VAULT_UNIVERSE_REFRESH_SECONDS", "1800")))
+ROTATION_STATE = Path("runtime") / "data" / "vault_role_rotation.json"
+PROMOTION_TAPE_META = Path("runtime") / "data" / "promotion_shadow_tape_meta.json"
+
+
+def _adresse_complete(value: object) -> bool:
+    address = str(value or "").strip().lower()
+    return len(address) == 42 and address.startswith("0x") and all(c in "0123456789abcdef" for c in address[2:])
+
+
+def _univers_observation(root: Path) -> list[dict]:
+    """Univers public non scoré, strictement réservé à l'observation causale."""
+    try:
+        payload = json.loads((root / CV.CONFIG).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return []
+    if not isinstance(payload, dict):
+        return []
+    metadata = {
+        str(row.get("address") or "").lower(): row
+        for row in (payload.get("_provenance", {}).get("vaults") or [])
+        if isinstance(row, dict) and _adresse_complete(row.get("address"))
+    }
+    result = []
+    for raw in payload.get("vaults") or []:
+        address = str(raw or "").strip().lower()
+        if not _adresse_complete(address) or address in CV.VAULTS_EXCLUS:
+            continue
+        meta = metadata.get(address, {})
+        result.append({
+            "vault": address,
+            "retenu": False,
+            "facteurs": {
+                "anciennete_j": float(meta.get("age_j") or 0.0),
+                "tvl_usd": float(meta.get("tvl_usd") or 0.0),
+                "copyabilite": 0.0,
+            },
+            "observation_only": True,
+        })
+    result.sort(key=lambda row: (-row["facteurs"]["tvl_usd"], row["vault"]))
+    return result
+
+
+def _prochain_index_rotation(root: Path) -> int:
+    """Retourne la page courante et persiste la suivante pour survivre aux redémarrages."""
+    path = root / ROTATION_STATE
+    try:
+        current = max(0, int(json.loads(path.read_text(encoding="utf-8")).get("next_index") or 0))
+    except (OSError, ValueError, TypeError):
+        current = 0
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_suffix(".json.tmp")
+    tmp.write_text(json.dumps({"next_index": current + 1, "updated_at_ms": int(time.time() * 1000)}), encoding="utf-8")
+    tmp.replace(path)
+    return current
 
 
 def charger_sentinelles(root: Path, *, k: int = SENTINELLES_K) -> list[str]:
@@ -122,18 +182,19 @@ def charger_sentinelles(root: Path, *, k: int = SENTINELLES_K) -> list[str]:
     return LS.selectionner_sentinelles(recs, k=k)["sentinelles"]
 
 
-def vaults_et_roles(root: Path, *, n_candidats: int = 8) -> list[tuple[str, str, str]]:
+def vaults_et_roles(root: Path, *, n_candidats: int = MAX_SLOTS, rotation_index: int = 0) -> list[tuple[str, str, str]]:
     """(vault, role, raison) sur ≤10 places WS : 2 CORE (retenus stricts, TRADENT ALPHA+PROBE) + ≤3
     LIQUIDATOR_SENTINELS ÉPINGLÉS (top liquidateurs confirmés — pour capter les liquidations forward) +
     le reste en CANDIDATS OBSERVÉS par ROTATION = activité live + qualité shadow + copyabilité. Total borné
     à MAX_SLOTS : les sentinelles NE dépassent JAMAIS la limite et NE volent PAS les slots CORE. PROBE ne
-    TRADE un candidat que s'il passe la sécurité mini. Deny-by-default : sans score, aucun abonnement."""
+    TRADE un candidat que s'il passe la sécurité mini. Un vault public non scoré reste TOUJOURS
+    observation-only ; la rotation sert à obtenir la preuve, jamais à contourner les gates."""
     try:
         d = json.loads((root / SCORES).read_text(encoding="utf-8"))
     except (OSError, ValueError):
-        return []
+        d = {}
     classement = d.get("classement") or []
-    core = [c["vault"] for c in classement if c.get("retenu")][:2]
+    core = [c["vault"] for c in classement if c.get("retenu") and c.get("vault")][:2]
     out = [(v, "CORE", "retenu strict (score) → trade ALPHA+PROBE") for v in core]
     pris = set(core)
     # Sentinelles épinglées (dédupliquées vs CORE), sans jamais dépasser MAX_SLOTS
@@ -152,19 +213,55 @@ def vaults_et_roles(root: Path, *, n_candidats: int = 8) -> list[tuple[str, str,
         cp = float(f.get("copyabilite") or 0.0)                       # copyabilité
         return 0.45 * a + 0.30 * s + 0.25 * cp
     reste = max(0, min(n_candidats, MAX_SLOTS - len(out)))            # les autres slots pour le runtime existant
-    cands = sorted((c for c in classement if c["vault"] not in pris), key=_rotation, reverse=True)
-    for c in cands[:reste]:
+    candidats_par_vault = {
+        c["vault"]: dict(c)
+        for c in classement
+        if c.get("vault") and c["vault"] not in pris
+    }
+    for public in _univers_observation(root):
+        if public["vault"] not in pris:
+            candidats_par_vault.setdefault(public["vault"], public)
+    cands = sorted(
+        candidats_par_vault.values(),
+        key=lambda c: (_rotation(c), float((c.get("facteurs") or {}).get("tvl_usd") or 0.0), c["vault"]),
+        reverse=True,
+    )
+    if reste and cands:
+        start = (max(0, int(rotation_index)) * reste) % len(cands)
+        selection = [cands[(start + offset) % len(cands)] for offset in range(min(reste, len(cands)))]
+    else:
+        selection = []
+    for c in selection:
         f = c.get("facteurs", {})
         sur = (float(f.get("anciennete_j") or 0) >= 45 and float(f.get("drawdown_pct") or 100) <= 45
                and float(f.get("copyabilite") or 0) >= 0.5)
-        role = "CANDIDAT_TRADABLE" if sur else "CANDIDAT_OBSERVE"
+        role = "CANDIDAT_TRADABLE" if sur and not c.get("observation_only") else "CANDIDAT_OBSERVE"
         raison = "observé en WS ; PROBE l'ouvre" if sur else "observé en WS seulement (sécurité mini non passée)"
+        if c.get("observation_only"):
+            raison = "univers public frais ; observation causale avant tout score/paper"
         out.append((c["vault"], role, raison))
     return out
 
 
 def vaults_suivis(root: Path) -> list[str]:
     return [v for v, _r, _why in vaults_et_roles(root)]
+
+
+def _candidats_observes_tous(root: Path) -> set[str]:
+    """Tous les candidats connus, même hors de la page WS courante.
+
+    La promotion analyse ainsi l'ensemble déjà collecté. Cette fonction ne
+    rend aucun vault tradable : elle ne fait qu'élargir le périmètre shadow.
+    """
+    observed = {row["vault"] for row in _univers_observation(root)}
+    try:
+        payload = json.loads((root / SCORES).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        payload = {}
+    for row in payload.get("classement") or []:
+        if isinstance(row, dict) and row.get("vault"):
+            observed.add(str(row["vault"]))
+    return observed
 
 
 def _charger_curseurs(root: Path) -> dict:
@@ -219,9 +316,13 @@ def _journal(root: Path, fill: dict, cohorte: str, decision: dict | None, recu_m
     d = decision or {}
     etat = "OUVERTURE" if d.get("ouverture") else ("FERMETURE" if d.get("fermeture") else (
         "REDUCTION" if d.get("reduction") else ("REFUS:" + str(d.get("refus")) if d.get("refus") else "AUCUN")))
-    ligne = {"recu_ms": int(recu_ms), "cohorte": cohorte, "coin": fill.get("coin"), "vault": str(fill.get("vault") or "")[:12],
+    vault = str(fill.get("vault") or "")
+    ligne = {"recu_ms": int(recu_ms), "cohorte": cohorte, "coin": fill.get("coin"), "vault": vault,
+             "vault_short": vault[:12],
              "dir": fill.get("dir"), "sz": fill.get("sz"), "px": fill.get("px"),
-             "source": fill.get("source"), "fill_ts_ms": fill.get("ts_ms"),
+             "hash": fill.get("hash"), "tid": fill.get("tid"), "oid": fill.get("oid"),
+             "source": fill.get("source"), "isSnapshot": fill.get("isSnapshot"),
+             "received_at_ms": int(recu_ms), "fill_ts_ms": fill.get("ts_ms"),
              "latence_fill_decision_ms": round(recu_ms - float(fill.get("ts_ms") or recu_ms)),
              "decision": etat, "run_id": RUN_ID}
     with (root / JOURNAL).open("a", encoding="utf-8") as f:
@@ -848,20 +949,40 @@ async def _heartbeat(root: Path, info: dict, *, intervalle_s: float = 10.0) -> N
         await asyncio.sleep(intervalle_s)
 
 
-async def _promotion_periodique(root: Path, *, intervalle_s: float = 300.0) -> None:
-    """Note les CANDIDAT_OBSERVE depuis le journal et promeut les 2 meilleurs en mini-PROBE (5-10 $)."""
+def _promotion_une_passe(root: Path) -> None:
+    """Passe shadow bornée, volontairement exécutable hors event loop."""
     from hl_observer.experimental import promotion_candidats as PC
     from hl_observer.experimental import raw_shadow_variantes as RS
     from hl_observer.experimental import cohortes as _CO
-    from hl_observer.experimental.copy_edge_forward import charger_prix_tape
+    from hl_observer.experimental.copy_edge_forward import charger_prix_tape_ciblee
+    observes = _candidats_observes_tous(root)
+    coins_probe = set(_CO.charger_table(_CO.PROBE, root))
+    tape, tape_meta = charger_prix_tape_ciblee(root, PC.cibles_prix_shadow(root))
+    meta_path = root / PROMOTION_TAPE_META
+    meta_path.parent.mkdir(parents=True, exist_ok=True)
+    meta_tmp = meta_path.with_suffix(".json.tmp")
+    meta_tmp.write_text(json.dumps(tape_meta, ensure_ascii=False, indent=1), encoding="utf-8")
+    meta_tmp.replace(meta_path)
+    print(
+        "[userfills] tape shadow bornee: %d/%d cibles, %d coins, %.1f%% couverture"
+        % (
+            tape_meta["cibles_appariees"],
+            tape_meta["cibles_prix"],
+            tape_meta["coins_apparies"],
+            100.0 * tape_meta["couverture_cibles"],
+        ),
+        flush=True,
+    )
+    PC.construire(root, coins_probe=coins_probe, tape=tape, candidats_observes=observes)
+    PC.scorer_paires(root, tape=tape)                     # SHADOW PAR PAIRE (même hors table PROBE)
+    RS.ecrire(root, tape=tape)                            # SHADOW multi-seuils × âge réel (versionné)
+
+
+async def _promotion_periodique(root: Path, *, intervalle_s: float = 300.0) -> None:
+    """Note les candidats en shadow sans jamais bloquer la réception WebSocket."""
     while True:
         try:
-            observes = {v for v, role, _w in vaults_et_roles(root) if role.startswith("CANDIDAT")}
-            coins_probe = set(_CO.charger_table(_CO.PROBE, root))
-            tape = charger_prix_tape(root)
-            PC.construire(root, coins_probe=coins_probe, tape=tape, candidats_observes=observes)
-            PC.scorer_paires(root, tape=tape)                     # SHADOW PAR PAIRE (même hors table PROBE)
-            RS.ecrire(root, tape=tape)                            # SHADOW multi-seuils × âge réel (versionné)
+            await asyncio.to_thread(_promotion_une_passe, root)
         except Exception as exc:  # noqa: BLE001
             print("[userfills] promotion err %s" % str(exc)[:40], flush=True)
         await asyncio.sleep(intervalle_s)
@@ -883,20 +1004,42 @@ async def _rapport_periodique(root: Path, *, intervalle_s: float = 30.0) -> None
         await asyncio.sleep(intervalle_s)
 
 
-async def _metaorder_shadow_periodique(root: Path, vaults: list, *, intervalle_s: float = 600.0) -> None:
+def _metaorder_shadow_une_passe(root: Path, vaults: list[str]) -> dict:
+    """Exécute une seule passe lourde et refuse tout chevauchement de thread."""
+    from hl_observer.experimental import metaorder_shadow as MS
+
+    if not _METAORDER_RUN_LOCK.acquire(blocking=False):
+        return {"status": "SKIPPED_ALREADY_RUNNING"}
+    try:
+        chash = CO.config_hash_courant(CO.RAW_PROBE, root)
+        return MS.executer(
+            root,
+            list(vaults),
+            config_hash=chash,
+            git_commit=GIT_COMMIT,
+        )
+    finally:
+        _METAORDER_RUN_LOCK.release()
+
+
+async def _metaorder_shadow_periodique(root: Path, *, intervalle_s: float = 600.0) -> None:
     """SHADOW METAORDER_V1 : toutes les ~10 min, mesure l'edge par STADE de métaordre (TWAP étiqueté via
     userTwapSliceFills, métaordres cachés agrégés, stades FIRST/CONTINUATION/LATE/REVERSAL, PnL forward net
     après coûts, placebo, taille rel, maker/taker, âges). N'OUVRE AUCUNE POSITION ; ledger SÉPARÉ, jamais
     mélangé au PnL live. REST hors event-loop ; poids journalisé. 0 ordre, 0 clé, 0 signature."""
-    from hl_observer.experimental import metaorder_shadow as MS
     import sonde_confirmation_vaults as SD
-    loop = asyncio.get_event_loop()
     await asyncio.sleep(30.0)                                     # démarrage doux (laisse le live s'installer)
     while True:
         try:
-            chash = CO.config_hash_courant(CO.RAW_PROBE, root)
-            res = await loop.run_in_executor(
-                None, lambda: MS.executer(root, list(vaults), config_hash=chash, git_commit=GIT_COMMIT))
+            vaults = list(_CURRENT_ROTATION_VAULTS)
+            if not vaults:
+                await asyncio.sleep(5.0)
+                continue
+            res = await asyncio.to_thread(_metaorder_shadow_une_passe, root, vaults)
+            if res.get("status") == "SKIPPED_ALREADY_RUNNING":
+                print("[userfills] metaorder_shadow déjà actif — passe ignorée", flush=True)
+                await asyncio.sleep(intervalle_s)
+                continue
             bt = res.get("budget_total") or {}
             stades = {k: (v.get("n_metaordres"), v.get("pnl_net_bps_moy")) for k, v in (res.get("stats") or {}).items()}
             cap = {k: v.get("capacite_edge_prouve_usd") for k, v in (res.get("courbe") or {}).items()}
@@ -907,6 +1050,87 @@ async def _metaorder_shadow_periodique(root: Path, vaults: list, *, intervalle_s
         except Exception as exc:  # noqa: BLE001 — la passe shadow ne fait JAMAIS crasher le collecteur
             print("[userfills] metaorder_shadow err %s" % str(exc)[:60], flush=True)
         await asyncio.sleep(intervalle_s)
+
+
+async def _arreter_page_rotation(tasks: list[asyncio.Task]) -> None:
+    """Ferme uniquement les sockets userFills de la page puis ses tâches."""
+    for ws in list(_WS_PAR_SOCKET.values()):
+        try:
+            await ws.close()
+        except Exception:  # noqa: BLE001 - fermeture best effort, jamais le L2 global
+            pass
+    for task in tasks:
+        task.cancel()
+    if tasks:
+        await asyncio.gather(*tasks, return_exceptions=True)
+    _WS_PAR_SOCKET.clear()
+
+
+async def _superviser_rotation_vaults(root: Path, file: asyncio.Queue) -> None:
+    """Rafraîchit l'univers public et fait tourner dix abonnements bornés.
+
+    Une page publique reste observation-only. Chaque rotation repart avec une
+    fenêtre REST/WS et des clés en mémoire propres, tandis que les curseurs de
+    déduplication restent persistants. Aucune page ne peut dépasser MAX_SLOTS.
+    """
+    global _CURRENT_ROTATION_VAULTS, _DEMARRAGE_MS
+    last_universe_refresh = 0.0
+    while True:
+        now_mono = time.monotonic()
+        if now_mono - last_universe_refresh >= UNIVERSE_REFRESH_SECONDS:
+            try:
+                refreshed = await asyncio.to_thread(CV.rafraichir_univers_public, root)
+                print(
+                    "[userfills] univers public rafraichi: %d vaults observation-only"
+                    % len(refreshed.get("vaults") or []),
+                    flush=True,
+                )
+            except Exception as exc:  # noqa: BLE001 - ancien univers conservé fail-closed
+                print("[userfills] univers public conserve (%s)" % str(exc)[:80], flush=True)
+            last_universe_refresh = time.monotonic()
+
+        page = _prochain_index_rotation(root)
+        roles = vaults_et_roles(root, rotation_index=page)
+        if not roles:
+            print("[userfills] aucun vault valide; nouvelle tentative dans 30s", flush=True)
+            await asyncio.sleep(30.0)
+            continue
+        vaults = [vault for vault, _role, _why in roles]
+        if len(vaults) > MAX_SLOTS:
+            raise RuntimeError("rotation userFills au-dessus du plafond dur")
+
+        _DEMARRAGE_MS = time.time() * 1000
+        _CURRENT_ROTATION_VAULTS = tuple(vaults)
+        for vault in vaults:
+            _WS_KEYS.pop(vault, None)
+        print(
+            "[userfills] PAGE ROTATION %d - %d vaults pendant %.0fs"
+            % (page, len(vaults), ROLE_ROTATION_SECONDS),
+            flush=True,
+        )
+        for vault, role, why in roles:
+            print("[userfills]   %s [%s] %s" % (vault[:12], role, why), flush=True)
+
+        _refresh_copy_vault_prewarm_once(root, vaults)
+        shards = _shards_userfills(vaults)
+        for sid, group in shards:
+            print(
+                "[userfills] shard socket %s (%d vaults): %s"
+                % (sid, len(group), ", ".join(v[:10] for v in group)),
+                flush=True,
+            )
+        page_tasks = [
+            asyncio.create_task(_garde_reconciliation_rest(root, shards)),
+            asyncio.create_task(_refresh_copy_vault_prewarm_periodically(root, vaults)),
+            *[
+                asyncio.create_task(_userfills_multiplex(root, group, file, sid))
+                for sid, group in shards
+            ],
+        ]
+        try:
+            await asyncio.sleep(ROLE_ROTATION_SECONDS)
+        finally:
+            await _arreter_page_rotation(page_tasks)
 
 
 # ── TAPE L2/OFI SHADOW v2 : buffer WS l2Book (snapshots SUCCESSIFS horodatés) + consommateur (états pré/post
@@ -1583,38 +1807,14 @@ async def _boucle(root: Path) -> None:
     for nom, coh in CO.COHORTES.items():
         ETATS[nom] = CO.etat_initial(coh, root, run_id=RUN_ID, token=RUN_TOKEN, git_commit=GIT_COMMIT,
                                      transport_version=TRANSPORT_VERSION)
-    roles = vaults_et_roles(root)
-    if not roles:
-        print("[userfills] aucun vault suivi (deny-by-default) — rien a faire", flush=True)
-        VI.liberer(root, NOM_VERROU, info)
-        return
     (root / FILLS_LIVE).parent.mkdir(parents=True, exist_ok=True)
-    print("[userfills] run_id=%s — VAULTS ABONNES (%d) :" % (RUN_ID, len(roles)), flush=True)
-    for v, role, why in roles:
-        print("[userfills]   %s [%s] %s" % (v[:12], role, why), flush=True)
-    vaults = [v for v, _r, _w in roles]
-    _refresh_copy_vault_prewarm_once(root, vaults)
-    print(
-        "[userfills] L2 causal prewarm (%d/%d coins reels): %s"
-        % (
-            len(_TAPE_PREWARM_COINS),
-            TAPE_PREWARM_MAX_COINS,
-            ", ".join(sorted(_TAPE_PREWARM_COINS)) or "aucun",
-        ),
-        flush=True,
-    )
     file: asyncio.Queue = asyncio.Queue(maxsize=FILE_MAX)
     try:
-        shards = _shards_userfills(vaults)                            # ≤5 vaults par socket (HL cape ~5/connexion)
-        for sid, grp in shards:
-            print("[userfills] shard socket %s (%d vaults) : %s" % (sid, len(grp), ", ".join(v[:10] for v in grp)), flush=True)
         await asyncio.gather(_worker(root, file), _exits_periodiques(root), _heartbeat(root, info),
                              _promotion_periodique(root), _rapport_periodique(root), _l2_dynamique(root),
-                             _garde_reconciliation_rest(root, shards),   # REST↔WS : reconnecte un shard qui rate un fill
-                             _metaorder_shadow_periodique(root, vaults),  # SHADOW : edge par stade de métaordre (n'ouvre rien)
-                             _refresh_copy_vault_prewarm_periodically(root, vaults),
+                             _metaorder_shadow_periodique(root),
                              _tape_l2_buffer(root), _tape_consumer(root),  # TAPE L2/OFI v2 : buffer WS + états pré/post (n'ouvre rien)
-                             *[_userfills_multiplex(root, grp, file, sid) for sid, grp in shards])   # 2 sockets de 5 + L2 = 3 conn
+                             _superviser_rotation_vaults(root, file))
     finally:
         VI.liberer(root, NOM_VERROU, info)
 

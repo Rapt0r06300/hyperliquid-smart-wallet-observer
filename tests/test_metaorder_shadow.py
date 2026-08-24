@@ -51,6 +51,13 @@ def test_pnl_net_et_placebo():
     assert p["ret_coin_bps"] == 100.0 and p["alpha_vs_marche_bps"] == 50.0
 
 
+def test_prix_causal_ne_revient_jamais_avant_la_decision():
+    tape = [(999, 99.0), (1003, 100.0), (1008, 101.0)]
+    assert M.prix_au_ou_apres(tape, 1000, tolerance_ms=10) == 100.0
+    assert M.prix_au_ou_apres(tape, 1004, tolerance_ms=10) == 101.0
+    assert M.prix_au_ou_apres(tape, 1020, tolerance_ms=10) is None
+
+
 def test_bootstrap_clusterise_respecte_les_clusters():
     paires = [("mo1", 1.0), ("mo1", 1.0), ("mo2", 3.0), ("mo2", 3.0)]
     r = M.bootstrap_clusterise(paires, n=500, seed=1)
@@ -77,8 +84,31 @@ def test_construire_signaux_metaorder_cout_et_trois_ages():
     assert [s["n_slices"] for s in sigs] == [1, 2]               # préfixe causal, jamais le total futur
     assert sigs[0]["cout_ar_bps"] == 10.0 and sigs[0]["pnl_net_bps"] == 90.0   # +100 bruts - 10 de coût L2
     assert sigs[0]["age_stade_ms"] == 0 and sigs[1]["age_stade_ms"] == 1000    # âge du stade
-    assert sigs[0]["age_fill_hl_ms"] == 999_000 and sigs[0]["latence_locale_ms"] is None
+    assert sigs[0]["age_fill_hl_ms"] == 999_000 and sigs[0]["latence_locale_ms"] == 0
     assert sigs[0]["jour"] == 1000 // 86_400_000
+
+
+def test_construire_signaux_attend_la_reception_locale_avant_de_mesurer_entree():
+    fill = _f("B", 1000, crossed=True, tid=1)
+    fill["_received_at_ms"] = 1100
+    tape_coin = [(1000, 100.0), (1100, 101.0), (301_000, 102.0)]
+
+    signal = M.construire_signaux(
+        [fill],
+        vault="0xV",
+        idx_twap={},
+        tape_coin=tape_coin,
+        tape_btc=[],
+        cout_fn=lambda _coin, _notional: (10.0, "l2_courant_par_taille"),
+        horizon_ms=300_000,
+        maintenant_ms=1_000_000,
+    )[0]
+
+    expected = round((102.0 - 101.0) / 101.0 * 10_000 - 10.0, 3)
+    assert signal["pnl_net_bps"] == expected
+    assert signal["latence_locale_ms"] == 100
+    assert signal["signal_observed_at_ms"] == 1100
+    assert signal["entry_price_source"] == "FIRST_MARK_AT_OR_AFTER_LOCAL_OBSERVATION"
 
 
 def test_twap_direct_ignore_hash_nul_et_regroupe_par_twap_id():
@@ -269,6 +299,43 @@ def test_executer_runner_injecte_courbe_execs_prereg_et_n_ouvre_rien(tmp_path):
     assert stats["twap_statut_par_vault"].get("couvert_avec_twap") == 1
     assert (tmp_path / M.PREREG_RELPATH).exists()               # pré-enregistrement écrit
     assert json.loads(lines_first(tmp_path))["real_execution"] is False
+
+
+def test_executer_sans_tape_charge_seulement_les_prix_cibles(tmp_path, monkeypatch):
+    from hl_observer.experimental import copy_edge_forward as CE
+
+    now = 10_000_000
+    fills = [_f("B", now - 400_000, tid=1, hsh="h1")]
+    appels = {}
+
+    def charger_ciblee(root, cibles, **kwargs):
+        appels["cibles"] = cibles
+        appels["kwargs"] = kwargs
+        return {
+            "SOL": [(now - 400_000, 100.0), (now - 100_000, 101.0)],
+            "BTC": [(now - 400_000, 50.0), (now - 100_000, 50.1)],
+        }, {"mode": "EVENT_TARGETED_BOUNDED", "cibles_appariees": 4}
+
+    monkeypatch.setattr(CE, "charger_prix_tape_ciblee", charger_ciblee)
+    res = M.executer(
+        tmp_path,
+        ["0xVault"],
+        fills_provider=lambda _v, _s: fills,
+        twap_provider=lambda _v, _s: [],
+        book_provider=lambda _c: _book(20.0),
+        tape=None,
+        horizon_ms=300_000,
+        maintenant_ms=now,
+    )
+
+    assert appels["cibles"]["SOL"] == [now - 400_000]
+    assert appels["cibles"]["BTC"] == [now - 400_000]
+    assert appels["kwargs"]["horizon_ms"] == 300_000
+    assert appels["kwargs"]["delays_ms"] == M.DELAIS_ENTREE_MS
+    assert appels["kwargs"]["inclure_historique_bbo"] is False
+    assert res["n_signaux"] == 1
+    stats = json.loads((tmp_path / M.STATS_RELPATH).read_text(encoding="utf-8"))
+    assert stats["price_tape"]["mode"] == "EVENT_TARGETED_BOUNDED"
 
 
 def lines_first(tmp_path):

@@ -3,6 +3,8 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import pytest
+
 from hl_observer.simulation.lead_lag_measured_replay import (
     load_runtime_latency_evidence,
     replay_measured_lead_lag,
@@ -240,3 +242,95 @@ def test_raw_diagnostics_do_not_change_with_the_admission_history_gate() -> None
     ]
     assert sum(segment["fills"] for segment in admitted["segments"].values()) > 0
     assert sum(segment["fills"] for segment in refused["segments"].values()) == 0
+
+
+def test_direction_flip_is_repriced_and_remains_diagnostic_only() -> None:
+    tape, l2 = _fixture()
+    replay = replay_measured_lead_lag(
+        tape,
+        l2,
+        shock_threshold_bps=8.0,
+        horizon_ms=100,
+        latency_evidence=_latency(),
+        notional_usd=100.0,
+        fee_bps=1.0,
+        min_history=1,
+        min_episodes=1,
+    )
+
+    continuation = replay["raw_observation_diagnostics"]
+    flipped = replay["raw_direction_flip_diagnostics"]
+    assert continuation["net_pnl_usd_if_all_executable_taken"] > 0.0
+    assert flipped["net_pnl_usd_if_all_executable_taken"] < 0.0
+    assert flipped["diagnostic_only"] is True
+    assert flipped["selection_eligible"] is False
+    assert flipped["may_change_strategy"] is False
+    assert flipped["counterfactual_type"] == (
+        "DIRECTION_FLIP_SAME_CAUSAL_EXECUTION_BOOKS"
+    )
+    # The placebo is the actually repriced opposite side, not the original
+    # spread reused with a negated markout.
+    assert replay["placebo"]["sample_count"] > 0
+    assert replay["placebo_net"] < 0.0
+
+
+def test_extreme_reversal_uses_opposite_executable_sides_without_lookahead() -> None:
+    tape, l2 = _fixture()
+    continuation = replay_measured_lead_lag(
+        tape,
+        l2,
+        shock_threshold_bps=8.0,
+        horizon_ms=100,
+        latency_evidence=_latency(),
+        notional_usd=100.0,
+        fee_bps=1.0,
+        min_history=1,
+        min_episodes=1,
+    )
+    reversal = replay_measured_lead_lag(
+        tape,
+        l2,
+        shock_threshold_bps=8.0,
+        horizon_ms=100,
+        latency_evidence=_latency(),
+        notional_usd=100.0,
+        fee_bps=1.0,
+        min_history=1,
+        min_episodes=1,
+        direction_multiplier=-1,
+    )
+
+    assert continuation["direction_policy"] == "SHOCK_CONTINUATION"
+    assert reversal["direction_policy"] == "EXTREME_SHOCK_REVERSAL"
+    assert reversal["placebo_direction_policy"] == "SHOCK_CONTINUATION"
+    assert reversal["raw_observation_diagnostics"]["direction_multiplier"] == -1
+    assert reversal["raw_direction_flip_diagnostics"]["direction_multiplier"] == 1
+    assert (
+        reversal["raw_observation_diagnostics"][
+            "net_pnl_usd_if_all_executable_taken"
+        ]
+        == continuation["raw_direction_flip_diagnostics"][
+            "net_pnl_usd_if_all_executable_taken"
+        ]
+    )
+    assert (
+        reversal["raw_direction_flip_diagnostics"][
+            "net_pnl_usd_if_all_executable_taken"
+        ]
+        == continuation["raw_observation_diagnostics"][
+            "net_pnl_usd_if_all_executable_taken"
+        ]
+    )
+
+
+def test_direction_multiplier_refuses_ambiguous_policy() -> None:
+    tape, l2 = _fixture()
+    with pytest.raises(ValueError, match="direction_multiplier"):
+        replay_measured_lead_lag(
+            tape,
+            l2,
+            shock_threshold_bps=8.0,
+            horizon_ms=100,
+            latency_evidence=_latency(),
+            direction_multiplier=0,
+        )
