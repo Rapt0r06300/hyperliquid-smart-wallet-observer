@@ -201,6 +201,19 @@ def fills_a_traiter(vault: str, fills: list[dict], curseurs: dict) -> list[dict]
 ETATS = {}
 
 
+def _configure_console_output(streams: tuple | list | None = None) -> None:
+    """Keep Windows status output from terminating the read-only collector."""
+
+    for stream in streams or (sys.stdout, sys.stderr):
+        reconfigure = getattr(stream, "reconfigure", None)
+        if not callable(reconfigure):
+            continue
+        try:
+            reconfigure(errors="replace")
+        except (OSError, ValueError):
+            continue
+
+
 def _journal(root: Path, fill: dict, cohorte: str, decision: dict | None, recu_ms: float) -> None:
     """Journalise CHAQUE fill live non-snapshot (même refusé) : gate/motif, latence fill→décision, source."""
     d = decision or {}
@@ -1607,6 +1620,7 @@ async def _boucle(root: Path) -> None:
 
 
 def main(argv: list[str] | None = None) -> int:
+    _configure_console_output()
     p = argparse.ArgumentParser(description="Moteur WS userFills inline 2 cohortes (lecture seule).")
     p.add_argument("--root", default=str(RACINE))
     a = p.parse_args(argv)

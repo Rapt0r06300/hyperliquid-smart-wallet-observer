@@ -23,6 +23,18 @@ def _mod(nom: str):
 C = _mod("collecter_userfills_vaults")
 
 
+def test_console_windows_strict_ne_peut_pas_tuer_le_collecteur():
+    class ConsoleStricte:
+        erreurs = None
+
+        def reconfigure(self, **kwargs):
+            self.erreurs = kwargs.get("errors")
+
+    console = ConsoleStricte()
+    C._configure_console_output([console])
+    assert console.erreurs == "replace"
+
+
 def _f(ts, snap=False):
     return {"coin": "SOL", "ts_ms": ts, "isSnapshot": snap, "hash": "h%d" % ts}
 
