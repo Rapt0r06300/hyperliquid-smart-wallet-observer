@@ -47,7 +47,7 @@ def test_final_workflow_requires_exact_technical_green_before_compute() -> None:
     assert "TECHNICAL_STATUS_NOT_GREEN" in text
     assert "TECHNICAL_STATUS_WAIT_TIMEOUT" in text
     assert "SELF_HOSTED_STALE_SHA_REFUSED_DURING_WAIT" in text
-    assert "[DateTimeOffset]::UtcNow.AddMinutes(90)" in text
+    assert "[DateTimeOffset]::UtcNow.AddMinutes(240)" in text
     assert "Start-Sleep -Seconds 30" in text
     assert "TECHNICAL_STATUS_WAIT" in text
     for context in (

@@ -127,6 +127,18 @@ def test_listing_detects_inclusions_exclusions_private_key_and_case_collision(tm
     (tmp_path / "secret.txt").unlink()
     (tmp_path / "A.txt").write_text("a", encoding="utf-8")
     (tmp_path / "a.txt").write_text("b", encoding="utf-8")
+
+    # Un volume Windows fusionne physiquement ces deux noms. Simuler la liste
+    # source permet de verifier le garde-fou de facon identique sur tout OS.
+    original_walk = archive.os.walk
+
+    def walk_with_case_collision(path, *args, **kwargs):
+        if Path(path).resolve() == tmp_path.resolve():
+            yield str(tmp_path), [], ["A.txt", "a.txt"]
+            return
+        yield from original_walk(path, *args, **kwargs)
+
+    monkeypatch.setattr(archive.os, "walk", walk_with_case_collision)
     with pytest.raises(archive.ArchiveRefuseeError, match="collision Windows"):
         archive.lister_pour_archive(tmp_path)
 

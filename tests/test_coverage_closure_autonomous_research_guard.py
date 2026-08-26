@@ -5,8 +5,6 @@ import signal
 import subprocess
 from pathlib import Path
 
-import pytest
-
 from hl_observer.ops import autonomous_research_guard as guard
 
 
@@ -49,7 +47,7 @@ def test_terminate_process_tree_noops_for_finished_process(monkeypatch) -> None:
         def poll(self):
             return 0
 
-    monkeypatch.setattr(guard.os, "killpg", lambda *args: calls.append(args))
+    monkeypatch.setattr(guard.os, "killpg", lambda *args: calls.append(args), raising=False)
     guard._terminate_process_tree(Process())
     assert calls == []
 
@@ -67,9 +65,11 @@ def test_terminate_process_tree_posix_stops_on_sigterm(monkeypatch) -> None:
             assert timeout == 3.0
             return 0
 
-    monkeypatch.setattr(guard.os, "killpg", lambda pid, sig: calls.append((pid, sig)))
-    guard._terminate_process_tree(Process(), grace_seconds=3.0)
-    assert calls == [(321, signal.SIGTERM)]
+    monkeypatch.setattr(
+        guard.os, "killpg", lambda pid, sig: calls.append((pid, sig)), raising=False
+    )
+    guard._terminate_process_tree(Process(), grace_seconds=3.0, platform_name="posix")
+    assert calls == [(321, guard.POSIX_SIGTERM)]
 
 
 def test_terminate_process_tree_posix_escalates_to_sigkill(monkeypatch) -> None:
@@ -88,9 +88,11 @@ def test_terminate_process_tree_posix_escalates_to_sigkill(monkeypatch) -> None:
                 raise subprocess.TimeoutExpired("worker", timeout)
             return 0
 
-    monkeypatch.setattr(guard.os, "killpg", lambda pid, sig: calls.append((pid, sig)))
-    guard._terminate_process_tree(Process(), grace_seconds=0.01)
-    assert calls == [(654, signal.SIGTERM), (654, signal.SIGKILL)]
+    monkeypatch.setattr(
+        guard.os, "killpg", lambda pid, sig: calls.append((pid, sig)), raising=False
+    )
+    guard._terminate_process_tree(Process(), grace_seconds=0.01, platform_name="posix")
+    assert calls == [(654, guard.POSIX_SIGTERM), (654, guard.POSIX_SIGKILL)]
     assert waits == [0.01, None]
 
 
@@ -104,8 +106,8 @@ def test_terminate_process_tree_tolerates_disappearing_group(monkeypatch) -> Non
     def gone(*args):
         raise ProcessLookupError
 
-    monkeypatch.setattr(guard.os, "killpg", gone)
-    guard._terminate_process_tree(Process())
+    monkeypatch.setattr(guard.os, "killpg", gone, raising=False)
+    guard._terminate_process_tree(Process(), platform_name="posix")
 
 
 def test_stdout_pump_handles_no_stream_and_iterable_stream(capsys) -> None:

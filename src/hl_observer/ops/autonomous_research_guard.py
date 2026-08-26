@@ -9,13 +9,13 @@ import subprocess
 import sys
 import threading
 import time
+from collections.abc import Iterable
 from pathlib import Path
-from typing import Iterable
 
 from hl_observer.ops.autonomous_completion import (
-    AutonomousCompletionError,
     COMPLETION_EXIT_CODE,
     REGISTRY_EXIT_CODE,
+    AutonomousCompletionError,
     finalize_autonomous_completion,
 )
 from hl_observer.ops.autonomous_research_status import status_path, write_status
@@ -24,6 +24,8 @@ LOGGER = logging.getLogger(__name__)
 MAX_ALLOWED_SECONDS = 18 * 60 * 60
 POLL_SECONDS = 0.2
 WINDOWS_CREATE_NEW_PROCESS_GROUP = 0x00000200
+POSIX_SIGTERM = getattr(signal, "SIGTERM", 15)
+POSIX_SIGKILL = getattr(signal, "SIGKILL", 9)
 
 
 def _request_identity(request: Path) -> tuple[str, str | None, str | None]:
@@ -117,10 +119,16 @@ def _popen_process_group_kwargs(platform_name: str | None = None) -> dict[str, o
     return {"start_new_session": True}
 
 
-def _terminate_process_tree(process: subprocess.Popen[str], *, grace_seconds: float = 30.0) -> None:
+def _terminate_process_tree(
+    process: subprocess.Popen[str],
+    *,
+    grace_seconds: float = 30.0,
+    platform_name: str | None = None,
+) -> None:
     if process.poll() is not None:
         return
-    if os.name == "nt":
+    name = os.name if platform_name is None else str(platform_name)
+    if name == "nt":
         subprocess.run(
             ["taskkill", "/PID", str(process.pid), "/T", "/F"],
             stdout=subprocess.DEVNULL,
@@ -136,7 +144,7 @@ def _terminate_process_tree(process: subprocess.Popen[str], *, grace_seconds: fl
         return
 
     try:
-        os.killpg(process.pid, signal.SIGTERM)
+        os.killpg(process.pid, POSIX_SIGTERM)
     except ProcessLookupError:
         return
     try:
@@ -145,7 +153,7 @@ def _terminate_process_tree(process: subprocess.Popen[str], *, grace_seconds: fl
     except subprocess.TimeoutExpired:
         LOGGER.warning("SIGTERM insuffisant pour PGID=%s; passage à SIGKILL.", process.pid)
     try:
-        os.killpg(process.pid, signal.SIGKILL)
+        os.killpg(process.pid, POSIX_SIGKILL)
     except ProcessLookupError:
         LOGGER.info("Le groupe de processus %s a disparu avant SIGKILL.", process.pid)
     process.wait()
