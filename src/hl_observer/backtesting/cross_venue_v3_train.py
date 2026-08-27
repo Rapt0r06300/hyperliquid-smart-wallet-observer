@@ -21,6 +21,7 @@ from typing import Any
 
 from hl_observer.backtesting.cross_venue_certified import BBO_SOURCE_MODE, SOURCE_MODE
 from hl_observer.backtesting.train_statistics import stable_hash, summarize_train_rows
+from hl_observer.config.frais_venues import frais_taker_bps
 
 SCHEMA_VERSION = "hypersmart.cross_venue_v3_train.v1"
 MECHANISM = "cross_venue_v3_leader_impulse_basis_reversion"
@@ -34,7 +35,11 @@ CONVERGENCE_RATIO = 0.50
 LATENCY_MS = 400
 MAX_ENTRY_DELAY_MS = 1_000
 MAX_OBSERVATION_GAP_MS = 3_000
-FEES_ROUND_TRIP_BPS = 16.0
+FEE_BPS_HYPERLIQUID = frais_taker_bps("HYPERLIQUID")
+FEE_BPS_BINANCE = frais_taker_bps("BINANCE")
+# Four aggressive fills: entry + exit on each venue. Bid/ask spread is already
+# embedded in the executable fill prices and must not be charged a second time.
+FEES_ROUND_TRIP_BPS = 2.0 * FEE_BPS_HYPERLIQUID + 2.0 * FEE_BPS_BINANCE
 NOTIONAL_USD = 15.0
 TRAIN_FRACTION = 0.60
 MIN_TRAIN_TRADES = 8
@@ -87,6 +92,26 @@ def _first_at_or_after(
         return None
     delay = float(rows[index][0]) - float(target_ms)
     return (index, rows[index]) if 0.0 <= delay <= float(max_delay_ms) else None
+
+
+def _entry_executable_edge_bps(entry: Sequence[Any], *, direction: int) -> float | None:
+    """Executable convergence budget visible at entry, before fees.
+
+    For a positive basis the cycle sells HL at its bid and buys Binance at its
+    ask.  The negative-basis direction is symmetric.  A non-positive gap means
+    there is no executable dislocation after crossing both books.
+    """
+
+    try:
+        hl_bid, hl_ask, bin_bid, bin_ask = map(float, entry[2:6])
+    except (TypeError, ValueError, IndexError, OverflowError):
+        return None
+    if min(hl_bid, hl_ask, bin_bid, bin_ask) <= 0:
+        return None
+    expensive_sell, cheap_buy = (
+        (hl_bid, bin_ask) if int(direction) > 0 else (bin_bid, hl_ask)
+    )
+    return (expensive_sell - cheap_buy) / cheap_buy * 10_000.0
 
 
 def _executable_cycle(
@@ -255,6 +280,15 @@ def replay_variant_train(
             if entry_capacity is None or entry_capacity[0] < NOTIONAL_USD:
                 diagnostics["ENTRY_CAPACITY_REJECTED"] += 1
                 continue
+            executable_entry_edge = _entry_executable_edge_bps(
+                entry, direction=int(impulse["direction"])
+            )
+            if (
+                executable_entry_edge is None
+                or executable_entry_edge <= FEES_ROUND_TRIP_BPS
+            ):
+                diagnostics["ENTRY_EDGE_CANNOT_COVER_FEES"] += 1
+                continue
             exit_row = None
             previous_ts = float(entry[0])
             for candidate in rows[entry_index + 1 :]:
@@ -308,6 +342,10 @@ def replay_variant_train(
                     "basis_detect_bps": impulse["basis_detect_bps"],
                     "basis_in_bps": float(entry_basis),
                     "basis_out_bps": float(_basis_bps(exit_row) or 0.0),
+                    "entry_executable_edge_bps": float(executable_entry_edge),
+                    "fee_bps_hyperliquid_per_fill": FEE_BPS_HYPERLIQUID,
+                    "fee_bps_binance_per_fill": FEE_BPS_BINANCE,
+                    "fees_round_trip_bps": FEES_ROUND_TRIP_BPS,
                     "depth_freshness_ms": max(entry_capacity[1], exit_capacity[1]),
                 }
             )
@@ -430,6 +468,10 @@ def explore_cross_venue_v3_train(
             "convergence_ratio": CONVERGENCE_RATIO,
             "latency_ms": LATENCY_MS,
             "fees_round_trip_bps": FEES_ROUND_TRIP_BPS,
+            "fee_bps_hyperliquid_per_fill": FEE_BPS_HYPERLIQUID,
+            "fee_bps_binance_per_fill": FEE_BPS_BINANCE,
+            "fee_fill_count": 4,
+            "spread_embedded_in_executable_prices": True,
             "notional_usd": NOTIONAL_USD,
             "source_mode": source_mode,
             "predeclared_coins": list(PREDECLARED_COINS),
@@ -452,6 +494,14 @@ def explore_cross_venue_v3_train(
             "max_holds_ms": list(MAX_HOLDS_MS),
             "predeclared_coins": list(PREDECLARED_COINS),
             "trial_count": trial_count,
+        },
+        "cost_contract": {
+            "fee_bps_hyperliquid_per_fill": FEE_BPS_HYPERLIQUID,
+            "fee_bps_binance_per_fill": FEE_BPS_BINANCE,
+            "fees_round_trip_bps": FEES_ROUND_TRIP_BPS,
+            "fee_fill_count": 4,
+            "spread_embedded_in_executable_prices": True,
+            "entry_must_cover_fee_only_burden": True,
         },
         "selected": selected,
         "freeze_candidate": freeze_candidate,
