@@ -60,3 +60,31 @@ def test_un_dossier_normal_n_est_pas_un_workspace_dataset(tmp_path: Path) -> Non
     path.parent.mkdir(parents=True)
     path.write_text("{}\n", encoding="utf-8")
     assert is_dataset_workspace(tmp_path) is False
+
+
+def test_un_workspace_live_ne_reutilise_pas_un_manifeste_devenu_obsolete(tmp_path: Path) -> None:
+    current = tmp_path / "runtime" / "data" / "bbo_tape.jsonl"
+    current.parent.mkdir(parents=True)
+    current.write_text("{}\n", encoding="utf-8")
+    write_family_source_manifest(tmp_path)
+
+    current.unlink()
+    fresh = tmp_path / "runtime" / "data" / "bbo_shards" / "fresh.jsonl.gz"
+    fresh.parent.mkdir(parents=True)
+    fresh.write_bytes(b"fresh")
+
+    assert load_family_source_paths(tmp_path, "lead_lag") == [fresh]
+
+
+def test_un_workspace_dataset_reste_fige_sur_son_manifeste(tmp_path: Path) -> None:
+    _mark_workspace(tmp_path)
+    frozen = tmp_path / "runtime" / "data" / "bbo_tape.jsonl"
+    frozen.parent.mkdir(parents=True, exist_ok=True)
+    frozen.write_text("{}\n", encoding="utf-8")
+    write_family_source_manifest(tmp_path)
+
+    unlisted = tmp_path / "runtime" / "data" / "bbo_shards" / "new.jsonl.gz"
+    unlisted.parent.mkdir(parents=True)
+    unlisted.write_bytes(b"new")
+
+    assert load_family_source_paths(tmp_path, "lead_lag") == [frozen]

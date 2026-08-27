@@ -174,6 +174,7 @@ def write_family_source_manifest(root: str | Path) -> Path:
 
 def load_family_source_paths(root: str | Path, family: str) -> list[Path]:
     resolved = Path(root).resolve()
+    dataset_workspace = is_dataset_workspace(resolved)
     manifest = resolved / FAMILY_SOURCE_MANIFEST
     if manifest.is_file():
         try:
@@ -182,6 +183,9 @@ def load_family_source_paths(root: str | Path, family: str) -> list[Path]:
             group = groups.get(family, {}) if isinstance(groups, dict) else {}
             files = group.get("files", []) if isinstance(group, dict) else []
             result: list[Path] = []
+            stale_live_manifest = False
+            manifest_mtime_ns = manifest.stat().st_mtime_ns
+            watched_directories: set[Path] = set()
             for item in files:
                 if not isinstance(item, dict):
                     continue
@@ -193,10 +197,40 @@ def load_family_source_paths(root: str | Path, family: str) -> list[Path]:
                     path.relative_to(resolved)
                 except ValueError:
                     continue
+                watched_directories.add(path.parent)
                 if path.is_file():
                     result.append(path)
-            if result:
+                    expected_bytes = item.get("bytes")
+                    if (
+                        not dataset_workspace
+                        and isinstance(expected_bytes, int)
+                        and path.stat().st_size != expected_bytes
+                    ):
+                        stale_live_manifest = True
+                elif not dataset_workspace:
+                    stale_live_manifest = True
+
+            if not dataset_workspace:
+                watched_directories.update(
+                    {
+                        resolved / "runtime" / "data",
+                        resolved / "runtime" / "replay",
+                        resolved / "runtime" / "research_lab",
+                        resolved / "logs",
+                    }
+                )
+                stale_live_manifest = stale_live_manifest or any(
+                    directory.is_dir() and directory.stat().st_mtime_ns > manifest_mtime_ns
+                    for directory in watched_directories
+                )
+
+            if result and not stale_live_manifest:
                 return sorted(set(result), key=lambda item: item.as_posix().casefold())
+            if stale_live_manifest:
+                LOGGER.info(
+                    "Manifeste live obsolète pour %s; redécouverte des sources présentes.",
+                    family,
+                )
         except (OSError, json.JSONDecodeError, AttributeError) as exc:
             LOGGER.warning(
                 "Manifeste de sources illisible pour %s (%s); redécouverte du workspace.",

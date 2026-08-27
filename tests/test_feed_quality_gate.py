@@ -31,7 +31,7 @@ def _full_book_gate(**config: object) -> FeedQualityGate:
     )
 
 
-def test_full_snapshot_feed_requires_coherent_snapshots_and_heartbeat() -> None:
+def test_full_snapshot_feed_is_ready_after_one_complete_snapshot_and_heartbeat() -> None:
     gate = _full_book_gate()
     gate.mark_heartbeat(received_ts_ms=1_010)
 
@@ -42,8 +42,8 @@ def test_full_snapshot_feed_requires_coherent_snapshots_and_heartbeat() -> None:
         received_ts_ms=1_010,
         event_id="book-1",
     )
-    assert not first.ready
-    assert first.synchronized is False
+    assert first.ready
+    assert first.synchronized is True
 
     second = gate.ingest_book_snapshot(
         bids=[{"px": "100.2", "sz": "2.5"}],
@@ -169,7 +169,7 @@ def test_reconnect_resets_readiness_until_a_new_coherent_baseline() -> None:
         received_ts_ms=2_010,
         event_id="after-1",
     )
-    assert not gate.snapshot(now_ms=2_010).ready
+    assert gate.snapshot(now_ms=2_010).ready
     gate.ingest_book_snapshot(
         bids=[("100.1", "1")],
         asks=[("101.1", "1")],
@@ -179,6 +179,37 @@ def test_reconnect_resets_readiness_until_a_new_coherent_baseline() -> None:
     )
     gate.mark_heartbeat(received_ts_ms=2_030)
     assert gate.snapshot(now_ms=2_030).ready
+
+
+def test_full_snapshot_recovers_immediately_after_temporal_gap() -> None:
+    gate = _full_book_gate(max_gap_ms=100)
+    gate.mark_heartbeat(received_ts_ms=1_000)
+    assert gate.ingest_book_snapshot(
+        bids=[("100", "1")],
+        asks=[("101", "1")],
+        exchange_ts_ms=990,
+        received_ts_ms=1_000,
+        event_id="before-gap",
+        sequence=1,
+    ).ready
+
+    gate.mark_heartbeat(received_ts_ms=1_500)
+    recovered = gate.ingest_book_snapshot(
+        bids=[("100.5", "2")],
+        asks=[("101.5", "2")],
+        exchange_ts_ms=1_490,
+        received_ts_ms=1_500,
+        event_id="after-gap",
+        sequence=2,
+    )
+
+    assert recovered.ready
+    assert recovered.synchronized
+    assert not recovered.unresolved_gap
+    assert recovered.gaps == 1
+    assert "TEMPORAL_GAP" in recovered.reasons
+    assert gate.bids == {100.5: 2.0}
+    assert gate.asks == {101.5: 2.0}
 
 
 def test_sparse_event_stream_does_not_invent_a_transport_gap() -> None:

@@ -294,7 +294,18 @@ class FeedQualityGate:
         self._last_mid = mid
         self.accepted_events += 1
         self._coherent_events = 1 if had_gap else self._coherent_events + 1
-        self._synchronized = self._coherent_events >= self.config.min_coherent_events
+        # A FULL_SNAPSHOT replaces the complete venue state.  Requiring a
+        # second snapshot to recover after a quiet interval or reconnect makes
+        # sparse-but-valid snapshot feeds permanently unusable: every next
+        # frame can cross the cadence threshold and reset the warm-up again.
+        # Keep the observed gap in the counters/reasons, but trust the newly
+        # validated complete state immediately.  Incremental feeds still need
+        # the configured coherent-event warm-up below.
+        self._synchronized = (
+            True
+            if self.mode is FeedMode.FULL_SNAPSHOT
+            else self._coherent_events >= self.config.min_coherent_events
+        )
         self._last_reasons = tuple(dict.fromkeys(reasons))
         return self.snapshot(now_ms=received_ts_ms)
 
