@@ -4,6 +4,9 @@ débit, provenance, et porte de qualité (deny-by-default). Aucune donnée rése
 from __future__ import annotations
 
 import json
+from pathlib import Path
+
+import pytest
 
 from hl_observer.collection import collecte_fiable as C
 
@@ -47,7 +50,42 @@ def test_ecrire_atomique_ne_laisse_pas_de_tmp(tmp_path):
     p = tmp_path / "snap.json"
     C.ecrire_atomique(p, '{"ok": true}')
     assert p.read_text(encoding="utf-8") == '{"ok": true}'
-    assert not (tmp_path / "snap.json.tmp").exists()
+    assert not list(tmp_path.glob(".snap.json.*.tmp"))
+
+
+def test_ecrire_atomique_recupere_un_verrou_windows_transitoire(tmp_path, monkeypatch):
+    p = tmp_path / "snap.json"
+    remplacements = 0
+    vrai_replace = C.os.replace
+
+    def replace_transitoire(source: str | Path, cible: str | Path) -> None:
+        nonlocal remplacements
+        remplacements += 1
+        if remplacements < 3:
+            raise PermissionError(13, "verrou transitoire")
+        vrai_replace(source, cible)
+
+    monkeypatch.setattr(C.os, "replace", replace_transitoire)
+    C.ecrire_atomique(p, '{"ok": true}', tentatives=3, delai_s=0)
+
+    assert remplacements == 3
+    assert p.read_text(encoding="utf-8") == '{"ok": true}'
+    assert not list(tmp_path.glob(".snap.json.*.tmp"))
+
+
+def test_ecrire_atomique_propage_un_verrou_persistant_sans_tmp(tmp_path, monkeypatch):
+    p = tmp_path / "snap.json"
+    p.write_text('{"avant": true}', encoding="utf-8")
+
+    def replace_verrouille(_source: str | Path, _cible: str | Path) -> None:
+        raise PermissionError(13, "verrou persistant")
+
+    monkeypatch.setattr(C.os, "replace", replace_verrouille)
+    with pytest.raises(PermissionError, match="verrou persistant"):
+        C.ecrire_atomique(p, '{"apres": true}', tentatives=2, delai_s=0)
+
+    assert p.read_text(encoding="utf-8") == '{"avant": true}'
+    assert not list(tmp_path.glob(".snap.json.*.tmp"))
 
 
 # ─────────────── politesse réseau ───────────────

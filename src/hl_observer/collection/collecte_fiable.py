@@ -19,6 +19,7 @@ import hashlib
 import json
 import os
 import random
+import tempfile
 import time
 from pathlib import Path
 from typing import Any, Iterable, Sequence
@@ -79,20 +80,55 @@ def append_jsonl(chemin: str | Path, enrs: Sequence[dict], *, fsync: bool = True
     return n
 
 
-def ecrire_atomique(chemin: str | Path, texte: str) -> None:
+def ecrire_atomique(
+    chemin: str | Path,
+    texte: str,
+    *,
+    tentatives: int = 8,
+    delai_s: float = 0.025,
+) -> None:
     """Écrit un fichier ENTIER de façon atomique (tmp + fsync + os.replace) : un lecteur ne voit
-    jamais un état intermédiaire. Pour les snapshots/index, pas pour les journaux append-only."""
+    jamais un état intermédiaire. Sous Windows, un antivirus ou un lecteur peut tenir brièvement
+    la destination : on retente alors avec un délai borné. Un verrou persistant reste une erreur
+    visible et le fichier temporaire unique est nettoyé. Pour les snapshots/index, pas pour les
+    journaux append-only.
+    """
     p = Path(chemin)
     p.parent.mkdir(parents=True, exist_ok=True)
-    tmp = p.with_suffix(p.suffix + ".tmp")
-    with tmp.open("w", encoding="utf-8") as fh:
-        fh.write(texte)
-        fh.flush()
+    nombre_tentatives = max(1, int(tentatives))
+    attente = max(0.0, float(delai_s))
+    fd, nom_tmp = tempfile.mkstemp(
+        dir=str(p.parent),
+        prefix=f".{p.name}.",
+        suffix=".tmp",
+        text=True,
+    )
+    tmp = Path(nom_tmp)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as fh:
+            fh.write(texte)
+            fh.flush()
+            try:
+                os.fsync(fh.fileno())
+            except OSError:
+                _noter("collection/collecte_fiable.py:ecrire_atomique_fsync")
+
+        derniere_erreur: PermissionError | None = None
+        for essai in range(nombre_tentatives):
+            try:
+                os.replace(tmp, p)
+                return
+            except PermissionError as exc:
+                derniere_erreur = exc
+                if essai + 1 < nombre_tentatives and attente:
+                    time.sleep(attente * (essai + 1))
+        assert derniere_erreur is not None
+        raise derniere_erreur
+    finally:
         try:
-            os.fsync(fh.fileno())
+            tmp.unlink(missing_ok=True)
         except OSError:
-            _noter("collection/collecte_fiable.py:ecrire_atomique_fsync")
-    os.replace(tmp, p)
+            _noter("collection/collecte_fiable.py:ecrire_atomique_nettoyage_tmp")
 
 
 # ─────────────────────────────── politesse réseau (durer 3 jours, pas 3 minutes) ───────────────

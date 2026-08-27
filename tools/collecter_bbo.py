@@ -460,6 +460,12 @@ async def _boucle(root: Path, coins: list[str]) -> None:  # pragma: no cover (I/
     import websockets
 
     from hl_observer.collection.tick_dataset import TickDatasetWriter, TickEnvelope
+    from hl_observer.collection.lead_lag_causal_checkpoints import (
+        LeadLagCheckpointRequest,
+        RollingShockCheckpointDetector,
+        validate_l2_book_payload,
+    )
+    from hl_observer.hyperliquid.rest_info_client import HyperliquidInfoClient
     from hl_observer.normalization.market_events import (
         CanonicalEventWriter,
         canonicalize_tick_record,
@@ -490,6 +496,10 @@ async def _boucle(root: Path, coins: list[str]) -> None:  # pragma: no cover (I/
         root / "runtime" / "data" / "canonical_events" / "canonical_market_events.jsonl"
     )
     raw_queue: deque[TickEnvelope] = deque()
+    lead_lag_checkpoint_queue: asyncio.Queue[LeadLagCheckpointRequest] = asyncio.Queue(
+        maxsize=128
+    )
+    lead_lag_checkpoint_detector = RollingShockCheckpointDetector()
     quality_config = FeedQualityConfig(
         max_age_ms=1_500.0,
         heartbeat_max_age_ms=3_000.0,
@@ -529,6 +539,12 @@ async def _boucle(root: Path, coins: list[str]) -> None:  # pragma: no cover (I/
              "raw_records_written": 0, "raw_queue_drops": 0, "parse_errors_hl": 0,
              "canonical_events_written": 0, "canonical_events_rejected": 0,
              "certified_atomic_bbo_written": 0,
+             "lead_lag_checkpoint_requests": 0,
+             "lead_lag_checkpoint_captures": 0,
+             "lead_lag_checkpoint_failures": 0,
+             "lead_lag_checkpoint_drops": 0,
+             "lead_lag_checkpoint_last_latency_ms": None,
+             "lead_lag_checkpoint_last_error": "",
              "dernier_hl_ns": 0, "dernier_bin_ns": 0, "debut_mono_ns": time.monotonic_ns()}
     heartbeat_canonique = {"dernier_ecrit": 0, "dernier_ts_ns": 0}
     marqueur0 = MARQUEUR.read_text(encoding="utf-8").strip() if MARQUEUR.exists() else ""
@@ -950,6 +966,19 @@ async def _boucle(root: Path, coins: list[str]) -> None:  # pragma: no cover (I/
                                 "ts_ex": t["ts_ex"],
                             }
                             tape.append(trade_event)
+                            checkpoint = lead_lag_checkpoint_detector.observe(
+                                coin=coin_name,
+                                price=t["px"],
+                                received_monotonic_ns=r,
+                                received_wall_ms=recv_wall_ms,
+                                event_id=trade_event["event_id"],
+                            )
+                            if checkpoint is not None:
+                                try:
+                                    lead_lag_checkpoint_queue.put_nowait(checkpoint)
+                                    stats["lead_lag_checkpoint_requests"] += 1
+                                except asyncio.QueueFull:
+                                    stats["lead_lag_checkpoint_drops"] += 1
                             dispatch_lead_lag_trade(
                                 lead_lag_runtime,
                                 trade_event,
@@ -959,6 +988,89 @@ async def _boucle(root: Path, coins: list[str]) -> None:  # pragma: no cover (I/
             except Exception:  # noqa: BLE001
                 stats["reconnexions_bin"] += 1
                 await asyncio.sleep(1.0)
+
+    async def lead_lag_checkpoint_worker() -> None:
+        """Persist post-shock public L2 evidence without blocking either WS."""
+
+        async with HyperliquidInfoClient(
+            INFO_HL,
+            timeout_seconds=2.0,
+            max_retries=0,
+        ) as client:
+            while True:
+                request = await lead_lag_checkpoint_queue.get()
+                try:
+                    payload = await client.l2_book(request.coin)
+                    received_mono_ns = time.monotonic_ns()
+                    received_ts_ms = int(time.time() * 1000)
+                    book = validate_l2_book_payload(
+                        payload,
+                        expected_coin=request.coin,
+                    )
+                    message = book.wrapped_message(request)
+                    sequence = next_sequence("l2Book", request.coin)
+                    gate = quality_gates[("l2Book", request.coin)]
+                    gate.mark_heartbeat(received_ts_ms=received_ts_ms)
+                    quality = gate.ingest_book_snapshot(
+                        bids=book.bids,
+                        asks=book.asks,
+                        exchange_ts_ms=book.exchange_ts_ms,
+                        received_ts_ms=received_ts_ms,
+                        event_id=stable_event_id(message),
+                        sequence=sequence,
+                    )
+                    latency_ms = max(
+                        0.0,
+                        (received_mono_ns - request.trigger_monotonic_ns) / 1_000_000.0,
+                    )
+                    queue_raw(
+                        TickEnvelope(
+                            source_id="hyperliquid_mainnet_readonly",
+                            channel="l2Book",
+                            instrument=request.coin,
+                            event_kind=FeedEventKind.SNAPSHOT,
+                            raw_payload=message,
+                            exchange_ts_ms=book.exchange_ts_ms,
+                            received_ts_ms=received_ts_ms,
+                            local_monotonic_ns=received_mono_ns,
+                            connection_id="hl-info-lead-lag-checkpoint",
+                            sequence=sequence,
+                            reconnect_count=stats["reconnexions_hl"],
+                            gap_count=stats["trous"],
+                            provenance={
+                                "url": INFO_HL,
+                                "endpoint": "/info",
+                                "request_type": "l2Book",
+                                "network": "mainnet",
+                                "access": "read_only",
+                                "transport": "http",
+                                "purpose": "lead_lag_causal_checkpoint",
+                                "trigger": request.as_dict(),
+                            },
+                            parsed_summary={
+                                "bid_levels": len(book.bids),
+                                "ask_levels": len(book.asks),
+                                "bid_depth_usd": round(book.bid_depth_usd, 6),
+                                "ask_depth_usd": round(book.ask_depth_usd, 6),
+                                "checkpoint_latency_ms": round(latency_ms, 3),
+                                "feed_quality_score": quality.feed_quality_score,
+                                "data_gate_ready": quality.ready,
+                                "quality_reasons": list(quality.reasons),
+                            },
+                        )
+                    )
+                    stats["lead_lag_checkpoint_captures"] += 1
+                    stats["lead_lag_checkpoint_last_latency_ms"] = round(latency_ms, 3)
+                    stats["lead_lag_checkpoint_last_error"] = ""
+                except asyncio.CancelledError:
+                    raise
+                except Exception as exc:  # noqa: BLE001 - fail closed, keep collector alive
+                    stats["lead_lag_checkpoint_failures"] += 1
+                    stats["lead_lag_checkpoint_last_error"] = (
+                        f"{type(exc).__name__}: {exc}"
+                    )[:500]
+                finally:
+                    lead_lag_checkpoint_queue.task_done()
 
     async def ecrire_et_superviser():
         while True:
@@ -1027,6 +1139,17 @@ async def _boucle(root: Path, coins: list[str]) -> None:  # pragma: no cover (I/
                 "total_feeds": len(feed_snapshots),
                 "raw_queue_depth": len(raw_queue),
                 "raw_queue_drops": stats["raw_queue_drops"],
+                "lead_lag_causal_checkpoints": {
+                    "pending": lead_lag_checkpoint_queue.qsize(),
+                    "requests": stats["lead_lag_checkpoint_requests"],
+                    "captures": stats["lead_lag_checkpoint_captures"],
+                    "failures": stats["lead_lag_checkpoint_failures"],
+                    "drops": stats["lead_lag_checkpoint_drops"],
+                    "last_latency_ms": stats["lead_lag_checkpoint_last_latency_ms"],
+                    "last_error": stats["lead_lag_checkpoint_last_error"],
+                    "endpoint": "/info",
+                    "access": "read_only",
+                },
                 "dataset": dataset.stats(),
                 "canonical_events": {
                     "path": str(canonical_writer.path),
@@ -1082,7 +1205,10 @@ async def _boucle(root: Path, coins: list[str]) -> None:  # pragma: no cover (I/
     # l'INFINI via gather -> le process ne mourait JAMAIS -> a la relance suivante, un ZOMBIE gardait
     # les WS ouverts et le heartbeat/tape se figeait (« fichier utilise par un autre processus »).
     # Desormais on n'attend QUE le superviseur, puis on ANNULE les WS -> le process sort et libere tout.
-    taches = [asyncio.create_task(c()) for c in (hl, binance_bt, binance_ag)]
+    taches = [
+        asyncio.create_task(c())
+        for c in (hl, binance_bt, binance_ag, lead_lag_checkpoint_worker)
+    ]
     try:
         await ecrire_et_superviser()
     finally:
