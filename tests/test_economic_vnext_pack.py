@@ -36,7 +36,7 @@ def test_vnext_pack_garde_les_trois_familles_separees_et_ne_certifie_rien(
     )
     monkeypatch.setattr(
         module,
-        "explore_cross_venue_v3_train",
+        "explore_cross_venue_v4_train",
         lambda *_args, **_kwargs: {
             "status": "NO_ROBUST_TRAIN_CANDIDATE",
             "selection_eligible": False,
@@ -100,7 +100,7 @@ def test_vnext_pack_preserve_une_liste_de_sources_explicite(
     )
     monkeypatch.setattr(
         module,
-        "explore_cross_venue_v3_train",
+        "explore_cross_venue_v4_train",
         lambda *_args, **_kwargs: {
             "status": "NO_ROBUST_TRAIN_CANDIDATE",
             "selection_eligible": False,

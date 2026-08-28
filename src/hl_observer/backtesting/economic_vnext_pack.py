@@ -15,7 +15,7 @@ from typing import Any
 
 from hl_observer.backtesting.copy_vault_vnext_train import explore_copy_vault_vnext_train
 from hl_observer.backtesting.cross_venue_certified import load_preferred_certified_atomic_series
-from hl_observer.backtesting.cross_venue_v3_train import explore_cross_venue_v3_train
+from hl_observer.backtesting.cross_venue_v4_train import explore_cross_venue_v4_train
 from hl_observer.backtesting.lead_lag_multiasset_train import explore_lead_lag_multiasset_train
 from hl_observer.backtesting.lead_lag_source_alignment import select_aligned_bbo_sources
 
@@ -73,7 +73,7 @@ def run_economic_vnext_pack(
     lead = explore_lead_lag_multiasset_train(project_root, aligned_lead_sources)
 
     cross_series, cross_depth, cross_meta = load_preferred_certified_atomic_series(project_root)
-    cross = explore_cross_venue_v3_train(
+    cross = explore_cross_venue_v4_train(
         cross_series,
         cross_depth,
         source_mode=str(cross_meta.get("source_mode") or ""),
@@ -97,7 +97,7 @@ def run_economic_vnext_pack(
 
     paths = {
         "lead_lag": _write_json(project_root, "lead_lag_multiasset_train", lead),
-        "cross_venue": _write_json(project_root, "cross_venue_v3_train", cross),
+        "cross_venue": _write_json(project_root, "cross_venue_v4_train", cross),
         "copy_vault": _write_json(project_root, "copy_vault_vnext_train", copy),
     }
     families = {
