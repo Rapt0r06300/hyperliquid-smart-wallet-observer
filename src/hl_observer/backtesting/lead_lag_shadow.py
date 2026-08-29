@@ -295,6 +295,62 @@ def detecter_chocs(trades: list, *, seuil_bps: float,
     return out
 
 
+def detecter_chocs_fenetre(
+    trades: list,
+    *,
+    seuil_bps: float,
+    fenetre_ms: float,
+    fenetre_groupe_ms: float | None = None,
+) -> list[tuple[int, float]]:
+    """Detect causal cumulative shocks over a fixed, predeclared window.
+
+    The legacy detector compares consecutive trades, which only captures a
+    single-print jump.  This variant compares the current observed trade with
+    the latest trade already observed at or before ``t - fenetre_ms``.  A
+    reference older than one additional window is rejected so a market-data
+    gap cannot masquerade as a fresh shock.  Signals are grouped for at least
+    one full window by default to avoid overlapping copies of the same move.
+    """
+
+    window_ns = int(float(fenetre_ms) * 1_000_000.0)
+    if window_ns <= 0:
+        raise ValueError("fenetre_ms must be positive")
+    group_ns = int(
+        float(fenetre_groupe_ms if fenetre_groupe_ms is not None else fenetre_ms)
+        * 1_000_000.0
+    )
+    if group_ns < 0:
+        raise ValueError("fenetre_groupe_ms must be non-negative")
+
+    rows = sorted(trades, key=lambda row: int(row[0]))
+    out: list[tuple[int, float]] = []
+    anchor = 0
+    last_signal_ns = -10**30
+    for index in range(1, len(rows)):
+        timestamp_ns = int(rows[index][0])
+        cutoff_ns = timestamp_ns - window_ns
+        while anchor + 1 < index and int(rows[anchor + 1][0]) <= cutoff_ns:
+            anchor += 1
+        reference_ns = int(rows[anchor][0])
+        if reference_ns > cutoff_ns or cutoff_ns - reference_ns > window_ns:
+            continue
+        try:
+            reference_price = float(rows[anchor][1])
+            current_price = float(rows[index][1])
+        except (TypeError, ValueError, OverflowError, IndexError):
+            continue
+        if reference_price <= 0.0 or current_price <= 0.0:
+            continue
+        move_bps = (current_price - reference_price) / reference_price * 1e4
+        if abs(move_bps) < float(seuil_bps):
+            continue
+        if timestamp_ns - last_signal_ns < group_ns:
+            continue
+        out.append((timestamp_ns, 1.0 if move_bps > 0.0 else -1.0))
+        last_signal_ns = timestamp_ns
+    return out
+
+
 def _hl_a(hl: list, t_ns: int) -> tuple | None:
     """Last quote at-or-before ``t_ns`` (diagnostics only)."""
 
@@ -660,6 +716,7 @@ __all__ = [
     "distribution_intervalles",
     "horizons_observables",
     "detecter_chocs",
+    "detecter_chocs_fenetre",
     "episodes_par_horizon",
     "summarize_executable_episodes",
     "executable_campaign_evidence",

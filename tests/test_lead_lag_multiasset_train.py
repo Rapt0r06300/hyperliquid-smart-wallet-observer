@@ -223,17 +223,34 @@ def test_exploration_utilise_le_bbo_aligne_sans_relire_le_l2_sparse(
     )
 
     expected_calls = sum(
-        len(hypothesis["shock_thresholds_bps"]) * len(hypothesis["horizons_ms"])
+        len(hypothesis["shock_thresholds_bps"])
+        * len(hypothesis["horizons_ms"])
+        * len(hypothesis["shock_windows_ms"])
         for hypothesis in module.TRAIN_HYPOTHESES
     )
     assert len(captured) == expected_calls
     assert all(item == {"ETH": [book]} for item, _kwargs in captured)
     assert {kwargs["direction_multiplier"] for _item, kwargs in captured} == {-1, 1}
+    assert {
+        kwargs["admission_policy"] for _item, kwargs in captured
+    } == {
+        module.ADMISSION_PREDECLARED_ALL_SIGNALS,
+        module.ADMISSION_PRIOR_MEAN_POSITIVE,
+    }
+    assert {kwargs["shock_window_ms"] for _item, kwargs in captured} == {
+        None,
+        250.0,
+        1_000.0,
+    }
     assert report["fixed_grid"]["trial_count"] == expected_calls
     assert {
         hypothesis["direction_policy"]
         for hypothesis in report["fixed_grid"]["hypotheses"]
-    } == {"SHOCK_CONTINUATION", "EXTREME_SHOCK_REVERSAL"}
+    } == {
+        "SHOCK_CONTINUATION",
+        "EXTREME_SHOCK_REVERSAL",
+        "CUMULATIVE_WINDOW_CONTINUATION",
+    }
     assert report["microstructure"]["primary_source"] == "ALIGNED_BBO_SAME_SHARD_CAUSAL"
     assert report["microstructure"]["same_shard_rows"] == 1
     assert report["microstructure"]["fallback_requested_coins"] == []

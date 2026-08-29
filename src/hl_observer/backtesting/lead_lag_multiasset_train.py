@@ -29,6 +29,8 @@ from hl_observer.backtesting.lead_lag_source_alignment import (
 from hl_observer.backtesting.train_statistics import stable_hash, summarize_train_rows
 from hl_observer.simulation.lead_lag_l2_history import load_market_microstructure_event_windows
 from hl_observer.simulation.lead_lag_measured_replay import (
+    ADMISSION_PREDECLARED_ALL_SIGNALS,
+    ADMISSION_PRIOR_MEAN_POSITIVE,
     load_runtime_latency_evidence,
     replay_measured_lead_lag,
 )
@@ -36,6 +38,7 @@ from hl_observer.simulation.lead_lag_measured_replay import (
 SCHEMA_VERSION = "hypersmart.lead_lag_multiasset_train.v1"
 MECHANISM = "lead_lag_v4_multiasset_measured_taker"
 EXTREME_REVERSAL_MECHANISM = "lead_lag_v5_extreme_shock_reversal_taker"
+WINDOW_CONTINUATION_MECHANISM = "lead_lag_v6_cumulative_window_continuation_taker"
 DEFAULT_CANDIDATE_COINS = (
     "BTC", "ETH", "SOL", "XRP", "DOGE", "SUI", "LINK", "AVAX", "INJ", "AAVE", "ONDO"
 )
@@ -43,10 +46,14 @@ SHOCK_THRESHOLDS_BPS = (8.0, 12.0, 20.0)
 HORIZONS_MS = (1_000, 5_000)
 EXTREME_REVERSAL_SHOCK_THRESHOLDS_BPS = (20.0, 30.0, 50.0)
 EXTREME_REVERSAL_HORIZONS_MS = (1_000, 5_000, 15_000)
+WINDOW_SHOCK_WINDOWS_MS = (250, 1_000)
+WINDOW_SHOCK_THRESHOLDS_BPS = (4.0, 8.0, 12.0)
+WINDOW_HORIZONS_MS = (1_000, 5_000)
 TRAIN_FRACTION = 0.60
 NOTIONAL_USD = 25.0
 MIN_TRAIN_FILLS = 8
 EXTREME_REVERSAL_MIN_TRAIN_FILLS = 30
+WINDOW_MIN_TRAIN_FILLS = 30
 MIN_DISTINCT_DAYS = 3
 MAX_TOP_POSITIVE_SHARE = 0.60
 FAMILY_ALPHA = 0.05
@@ -59,6 +66,8 @@ TRAIN_HYPOTHESES = (
         "shock_thresholds_bps": SHOCK_THRESHOLDS_BPS,
         "horizons_ms": HORIZONS_MS,
         "min_train_fills": MIN_TRAIN_FILLS,
+        "shock_windows_ms": (None,),
+        "admission_policy": ADMISSION_PRIOR_MEAN_POSITIVE,
     },
     {
         "mechanism": EXTREME_REVERSAL_MECHANISM,
@@ -67,6 +76,18 @@ TRAIN_HYPOTHESES = (
         "shock_thresholds_bps": EXTREME_REVERSAL_SHOCK_THRESHOLDS_BPS,
         "horizons_ms": EXTREME_REVERSAL_HORIZONS_MS,
         "min_train_fills": EXTREME_REVERSAL_MIN_TRAIN_FILLS,
+        "shock_windows_ms": (None,),
+        "admission_policy": ADMISSION_PRIOR_MEAN_POSITIVE,
+    },
+    {
+        "mechanism": WINDOW_CONTINUATION_MECHANISM,
+        "direction_multiplier": 1,
+        "direction_policy": "CUMULATIVE_WINDOW_CONTINUATION",
+        "shock_thresholds_bps": WINDOW_SHOCK_THRESHOLDS_BPS,
+        "horizons_ms": WINDOW_HORIZONS_MS,
+        "min_train_fills": WINDOW_MIN_TRAIN_FILLS,
+        "shock_windows_ms": WINDOW_SHOCK_WINDOWS_MS,
+        "admission_policy": ADMISSION_PREDECLARED_ALL_SIGNALS,
     },
 )
 
@@ -345,6 +366,8 @@ def _score_report(
     mechanism: str = MECHANISM,
     direction_multiplier: int = 1,
     min_train_fills: int = MIN_TRAIN_FILLS,
+    shock_window_ms: float | None = None,
+    admission_policy: str = ADMISSION_PRIOR_MEAN_POSITIVE,
 ) -> dict[str, Any]:
     rows = _rows_from_ledgers(report)
     stats = summarize_train_rows(
@@ -380,13 +403,21 @@ def _score_report(
         "mechanism": str(mechanism),
         "direction_multiplier": int(direction_multiplier),
         "direction_policy": (
-            "SHOCK_CONTINUATION"
-            if int(direction_multiplier) == 1
-            else "EXTREME_SHOCK_REVERSAL"
+            "CUMULATIVE_WINDOW_CONTINUATION"
+            if shock_window_ms is not None and int(direction_multiplier) == 1
+            else (
+                "SHOCK_CONTINUATION"
+                if int(direction_multiplier) == 1
+                else "EXTREME_SHOCK_REVERSAL"
+            )
         ),
         "coin": str(coin).upper(),
         "shock_threshold_bps": float(threshold_bps),
         "horizon_ms": int(horizon_ms),
+        "shock_window_ms": (
+            float(shock_window_ms) if shock_window_ms is not None else None
+        ),
+        "admission_policy": str(admission_policy),
         "statistics": stats,
         "internal_train_fold_nets": internal_fold_nets,
         "placebo_net_pnl_usd": placebo_net,
@@ -455,8 +486,43 @@ def explore_lead_lag_multiasset_train(
     }
     latency = load_runtime_latency_evidence(root)
     variants: list[dict[str, Any]] = []
+    shock_cache: dict[tuple[str, float, float | None], list[tuple[int, float]]] = {}
+    for coin in candidate_coins:
+        selected_coin = str(coin).upper()
+        streams = tape.get(selected_coin)
+        if not streams:
+            continue
+        trades = list(streams.get("TRADE") or [])
+        for hypothesis in TRAIN_HYPOTHESES:
+            for shock_window_ms in hypothesis["shock_windows_ms"]:
+                for threshold in hypothesis["shock_thresholds_bps"]:
+                    key = (
+                        selected_coin,
+                        float(threshold),
+                        (
+                            float(shock_window_ms)
+                            if shock_window_ms is not None
+                            else None
+                        ),
+                    )
+                    if key in shock_cache:
+                        continue
+                    shock_cache[key] = (
+                        lead_lag_shadow.detecter_chocs(
+                            trades,
+                            seuil_bps=float(threshold),
+                        )
+                        if shock_window_ms is None
+                        else lead_lag_shadow.detecter_chocs_fenetre(
+                            trades,
+                            seuil_bps=float(threshold),
+                            fenetre_ms=float(shock_window_ms),
+                        )
+                    )
     combinations_per_coin = sum(
-        len(hypothesis["shock_thresholds_bps"]) * len(hypothesis["horizons_ms"])
+        len(hypothesis["shock_thresholds_bps"])
+        * len(hypothesis["horizons_ms"])
+        * len(hypothesis["shock_windows_ms"])
         for hypothesis in TRAIN_HYPOTHESES
     )
     trial_count = max(1, len(candidate_coins) * combinations_per_coin)
@@ -465,32 +531,61 @@ def explore_lead_lag_multiasset_train(
             selected_coin = str(coin).upper()
             if selected_coin not in tape:
                 continue
-            for threshold in hypothesis["shock_thresholds_bps"]:
-                for horizon in hypothesis["horizons_ms"]:
-                    report = replay_measured_lead_lag(
-                        {selected_coin: tape[selected_coin]},
-                        {selected_coin: list(l2_history.get(selected_coin, ()))},
-                        shock_threshold_bps=float(threshold),
-                        horizon_ms=int(horizon),
-                        latency_evidence=latency,
-                        notional_usd=NOTIONAL_USD,
-                        min_history=5,
-                        min_expected_net_bps=0.0,
-                        min_episodes=1,
-                        direction_multiplier=int(hypothesis["direction_multiplier"]),
-                    )
-                    variants.append(
-                        _score_report(
-                            report,
-                            coin=selected_coin,
-                            threshold_bps=float(threshold),
+            for shock_window_ms in hypothesis["shock_windows_ms"]:
+                for threshold in hypothesis["shock_thresholds_bps"]:
+                    for horizon in hypothesis["horizons_ms"]:
+                        report = replay_measured_lead_lag(
+                            {selected_coin: tape[selected_coin]},
+                            {selected_coin: list(l2_history.get(selected_coin, ()))},
+                            shock_threshold_bps=float(threshold),
                             horizon_ms=int(horizon),
-                            trial_count=trial_count,
-                            mechanism=str(hypothesis["mechanism"]),
+                            latency_evidence=latency,
+                            notional_usd=NOTIONAL_USD,
+                            min_history=5,
+                            min_expected_net_bps=0.0,
+                            min_episodes=1,
                             direction_multiplier=int(hypothesis["direction_multiplier"]),
-                            min_train_fills=int(hypothesis["min_train_fills"]),
+                            shock_window_ms=(
+                                float(shock_window_ms)
+                                if shock_window_ms is not None
+                                else None
+                            ),
+                            admission_policy=str(hypothesis["admission_policy"]),
+                            precomputed_shocks={
+                                selected_coin: shock_cache[
+                                    (
+                                        selected_coin,
+                                        float(threshold),
+                                        (
+                                            float(shock_window_ms)
+                                            if shock_window_ms is not None
+                                            else None
+                                        ),
+                                    )
+                                ]
+                            },
+                            inputs_sorted=True,
                         )
-                    )
+                        variants.append(
+                            _score_report(
+                                report,
+                                coin=selected_coin,
+                                threshold_bps=float(threshold),
+                                horizon_ms=int(horizon),
+                                trial_count=trial_count,
+                                mechanism=str(hypothesis["mechanism"]),
+                                direction_multiplier=int(
+                                    hypothesis["direction_multiplier"]
+                                ),
+                                min_train_fills=int(hypothesis["min_train_fills"]),
+                                shock_window_ms=(
+                                    float(shock_window_ms)
+                                    if shock_window_ms is not None
+                                    else None
+                                ),
+                                admission_policy=str(hypothesis["admission_policy"]),
+                            )
+                        )
     eligible = [row for row in variants if row["eligible"]]
     selected = max(
         eligible,
@@ -509,6 +604,8 @@ def explore_lead_lag_multiasset_train(
             "coin": selected["coin"],
             "shock_threshold_bps": selected["shock_threshold_bps"],
             "horizon_ms": selected["horizon_ms"],
+            "shock_window_ms": selected["shock_window_ms"],
+            "admission_policy": selected["admission_policy"],
             "notional_usd": NOTIONAL_USD,
             "candidate_universe": list(DEFAULT_CANDIDATE_COINS),
             "research_family_trial_count": trial_count,
@@ -537,6 +634,8 @@ def explore_lead_lag_multiasset_train(
                     "direction_policy": str(hypothesis["direction_policy"]),
                     "shock_thresholds_bps": list(hypothesis["shock_thresholds_bps"]),
                     "horizons_ms": list(hypothesis["horizons_ms"]),
+                    "shock_windows_ms": list(hypothesis["shock_windows_ms"]),
+                    "admission_policy": str(hypothesis["admission_policy"]),
                     "minimum_train_fills": int(hypothesis["min_train_fills"]),
                 }
                 for hypothesis in TRAIN_HYPOTHESES
@@ -549,6 +648,16 @@ def explore_lead_lag_multiasset_train(
         "train_tape": tape_meta,
         "microstructure": l2_meta,
         "latency_evidence": latency,
+        "shock_detection_cache": {
+            "unique_definitions": len(shock_cache),
+            "signals_by_definition": {
+                f"{coin}|{threshold:g}|{window if window is not None else 'consecutive'}": len(
+                    rows
+                )
+                for (coin, threshold, window), rows in shock_cache.items()
+            },
+            "reused_across_horizons": True,
+        },
         "paper_read_only": True,
         "real_execution": False,
     }
@@ -565,6 +674,11 @@ __all__ = [
     "SCHEMA_VERSION",
     "SHOCK_THRESHOLDS_BPS",
     "TRAIN_HYPOTHESES",
+    "WINDOW_CONTINUATION_MECHANISM",
+    "WINDOW_HORIZONS_MS",
+    "WINDOW_MIN_TRAIN_FILLS",
+    "WINDOW_SHOCK_THRESHOLDS_BPS",
+    "WINDOW_SHOCK_WINDOWS_MS",
     "explore_lead_lag_multiasset_train",
     "load_multiasset_train_tape",
 ]

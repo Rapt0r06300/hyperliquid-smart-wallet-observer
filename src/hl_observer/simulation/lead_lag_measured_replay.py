@@ -22,7 +22,7 @@ import json
 import math
 import statistics
 from collections import Counter
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Any
 
@@ -36,6 +36,8 @@ DEFAULT_MAX_BOOK_AGE_MS = 750.0
 DEFAULT_MAX_EXECUTION_OBSERVATION_DELAY_MS = 750.0
 DEFAULT_FEE_BPS = 9.0
 LATENCY_KIND_LOCAL_MONOTONIC = "LOCAL_MONOTONIC_DISPATCH"
+ADMISSION_PRIOR_MEAN_POSITIVE = "PRIOR_MEAN_POSITIVE"
+ADMISSION_PREDECLARED_ALL_SIGNALS = "PREDECLARED_ALL_CAUSAL_SIGNALS"
 
 
 def _number(value: object) -> float | None:
@@ -113,11 +115,14 @@ def _latest_at_or_before(
     target_ms: float,
     *,
     max_age_ms: float,
+    times: Sequence[int] | None = None,
 ) -> Mapping[str, Any] | None:
     if not rows:
         return None
-    times = [int(row.get("ts_ms") or 0) for row in rows]
-    index = bisect.bisect_right(times, int(target_ms)) - 1
+    ordered_times = (
+        times if times is not None else [int(row.get("ts_ms") or 0) for row in rows]
+    )
+    index = bisect.bisect_right(ordered_times, int(target_ms)) - 1
     if index < 0:
         return None
     row = rows[index]
@@ -132,11 +137,14 @@ def _first_at_or_after(
     target_ms: float,
     *,
     max_delay_ms: float,
+    times: Sequence[int] | None = None,
 ) -> Mapping[str, Any] | None:
     if not rows:
         return None
-    times = [int(row.get("ts_ms") or 0) for row in rows]
-    index = bisect.bisect_left(times, int(math.ceil(target_ms)))
+    ordered_times = (
+        times if times is not None else [int(row.get("ts_ms") or 0) for row in rows]
+    )
+    index = bisect.bisect_left(ordered_times, int(math.ceil(target_ms)))
     if index >= len(rows):
         return None
     row = rows[index]
@@ -152,6 +160,7 @@ def _book_for_execution(
     *,
     max_age_ms: float,
     max_delay_ms: float,
+    times: Sequence[int] | None = None,
 ) -> tuple[Mapping[str, Any], float, str] | None:
     """Select a causal executable book without pretending a stale mark is current.
 
@@ -161,10 +170,20 @@ def _book_for_execution(
     latter is delayed execution, not look-ahead at the original target.
     """
 
-    latest = _latest_at_or_before(rows, target_ms, max_age_ms=max_age_ms)
+    latest = _latest_at_or_before(
+        rows,
+        target_ms,
+        max_age_ms=max_age_ms,
+        times=times,
+    )
     if latest is not None:
         return latest, float(target_ms), "LAST_CAUSAL_FRESH"
-    following = _first_at_or_after(rows, target_ms, max_delay_ms=max_delay_ms)
+    following = _first_at_or_after(
+        rows,
+        target_ms,
+        max_delay_ms=max_delay_ms,
+        times=times,
+    )
     if following is None:
         return None
     observed_ms = float(following.get("ts_ms") or 0)
@@ -456,6 +475,10 @@ def replay_measured_lead_lag(
     min_history: int = 5,
     min_expected_net_bps: float = 0.0,
     direction_multiplier: int = 1,
+    shock_window_ms: float | None = None,
+    admission_policy: str = ADMISSION_PRIOR_MEAN_POSITIVE,
+    precomputed_shocks: Mapping[str, Sequence[tuple[int, float]]] | None = None,
+    inputs_sorted: bool = False,
     max_book_age_ms: float = DEFAULT_MAX_BOOK_AGE_MS,
     max_execution_observation_delay_ms: float = DEFAULT_MAX_EXECUTION_OBSERVATION_DELAY_MS,
     min_episodes: int = 5,
@@ -464,6 +487,13 @@ def replay_measured_lead_lag(
     """Replay strictly executable episodes with prior-only admission edge."""
     if int(direction_multiplier) not in (-1, 1):
         raise ValueError("direction_multiplier must be -1 or 1")
+    if admission_policy not in {
+        ADMISSION_PRIOR_MEAN_POSITIVE,
+        ADMISSION_PREDECLARED_ALL_SIGNALS,
+    }:
+        raise ValueError("unsupported admission_policy")
+    if shock_window_ms is not None and float(shock_window_ms) <= 0.0:
+        raise ValueError("shock_window_ms must be positive")
     primary_direction_policy = (
         "SHOCK_CONTINUATION" if int(direction_multiplier) == 1 else "EXTREME_SHOCK_REVERSAL"
     )
@@ -487,16 +517,45 @@ def replay_measured_lead_lag(
     }
 
     for coin, streams in tape.items():
-        trades = sorted(list(streams.get("TRADE") or []))
-        rows = sorted(list(l2_history.get(str(coin).upper()) or []), key=lambda row: int(row.get("ts_ms") or 0))
+        raw_trades = streams.get("TRADE") or []
+        raw_rows = l2_history.get(str(coin).upper()) or []
+        trades = raw_trades if inputs_sorted else sorted(list(raw_trades))
+        rows = (
+            raw_rows
+            if inputs_sorted
+            else sorted(
+                list(raw_rows),
+                key=lambda row: int(row.get("ts_ms") or 0),
+            )
+        )
         if len(trades) < 2 or not rows:
             continue
-        shocks = lead_lag_shadow.detecter_chocs(trades, seuil_bps=float(shock_threshold_bps))
+        row_times = [int(row.get("ts_ms") or 0) for row in rows]
+        if precomputed_shocks is not None:
+            shocks = list(precomputed_shocks.get(str(coin).upper()) or [])
+        else:
+            shocks = (
+                lead_lag_shadow.detecter_chocs(
+                    trades,
+                    seuil_bps=float(shock_threshold_bps),
+                )
+                if shock_window_ms is None
+                else lead_lag_shadow.detecter_chocs_fenetre(
+                    trades,
+                    seuil_bps=float(shock_threshold_bps),
+                    fenetre_ms=float(shock_window_ms),
+                )
+            )
         raw_observations: list[dict[str, Any]] = []
         for shock_ns, raw_direction in shocks:
             coverage["shocks_seen"] += 1
             trigger_ms = int(shock_ns // 1_000_000)
-            detection = _latest_at_or_before(rows, trigger_ms, max_age_ms=max_book_age_ms)
+            detection = _latest_at_or_before(
+                rows,
+                trigger_ms,
+                max_age_ms=max_book_age_ms,
+                times=row_times,
+            )
             if detection is None:
                 coverage["missing_detection_book"] += 1
                 continue
@@ -506,6 +565,7 @@ def replay_measured_lead_lag(
                 entry_target,
                 max_age_ms=min(max_book_age_ms, max_execution_observation_delay_ms),
                 max_delay_ms=max_execution_observation_delay_ms,
+                times=row_times,
             )
             if entry_selection is None:
                 coverage["missing_entry_book"] += 1
@@ -517,6 +577,7 @@ def replay_measured_lead_lag(
                 exit_target,
                 max_age_ms=min(max_book_age_ms, max_execution_observation_delay_ms),
                 max_delay_ms=max_execution_observation_delay_ms,
+                times=row_times,
             )
             if exit_selection is None:
                 coverage["missing_exit_book"] += 1
@@ -592,11 +653,17 @@ def replay_measured_lead_lag(
             ]
             expected = (
                 statistics.fmean(float(previous["net_bps"]) for previous in prior)
-                if len(prior) >= int(min_history)
+                if len(prior) >= int(min_history) and prior
                 else None
             )
             event["expected_net_bps"] = None if expected is None else round(float(expected), 6)
-            if expected is None:
+            if admission_policy == ADMISSION_PREDECLARED_ALL_SIGNALS:
+                event["decision"] = (
+                    "TRADE"
+                    if event.get("full_fill") is True
+                    else "TOP_CAPACITY_INSUFFICIENT"
+                )
+            elif expected is None:
                 event["decision"] = "INSUFFICIENT_PRIOR_HISTORY"
             elif expected <= float(min_expected_net_bps):
                 event["decision"] = "EXPECTED_NET_EDGE_NOT_POSITIVE"
@@ -693,6 +760,16 @@ def replay_measured_lead_lag(
         "costs_measured": costs_measured,
         "fee_bps": float(fee_bps),
         "fee_source": "FROZEN_CONSERVATIVE_TAKER_ROUND_TRIP",
+        "admission_policy": str(admission_policy),
+        "shock_detection_policy": (
+            "CUMULATIVE_FIXED_WINDOW"
+            if shock_window_ms is not None
+            else "CONSECUTIVE_TRADE_JUMP"
+        ),
+        "precomputed_shocks_used": precomputed_shocks is not None,
+        "shock_window_ms": (
+            float(shock_window_ms) if shock_window_ms is not None else None
+        ),
         "direction_multiplier": int(direction_multiplier),
         "direction_policy": primary_direction_policy,
         "placebo_direction_policy": placebo_direction_policy,
@@ -703,4 +780,9 @@ def replay_measured_lead_lag(
     }
 
 
-__all__ = ["load_runtime_latency_evidence", "replay_measured_lead_lag"]
+__all__ = [
+    "ADMISSION_PREDECLARED_ALL_SIGNALS",
+    "ADMISSION_PRIOR_MEAN_POSITIVE",
+    "load_runtime_latency_evidence",
+    "replay_measured_lead_lag",
+]

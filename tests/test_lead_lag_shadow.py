@@ -22,6 +22,7 @@ from hl_observer.backtesting.lead_lag_shadow import (
     calibrate_freeze_readiness,
     charger_tape,
     detecter_chocs,
+    detecter_chocs_fenetre,
     distribution_intervalles,
     geler_config,
     horizons_observables,
@@ -47,6 +48,38 @@ def test_detecter_chocs_sur_les_trades():
     trades = [(0, 100.0, 1.0), (10_000_000, 100.5, 1.0), (20_000_000, 100.51, 1.0)]
     chocs = detecter_chocs(trades, seuil_bps=8.0)                     # +50 bps puis +1 bps
     assert len(chocs) == 1 and chocs[0][1] == 1.0                     # un seul choc, direction +
+
+
+def test_detecter_chocs_fenetre_capture_un_mouvement_cumulatif_causal():
+    trades = [
+        (0, 100.00, 1.0),
+        (100_000_000, 100.03, 1.0),
+        (200_000_000, 100.06, 1.0),
+        (300_000_000, 100.09, 1.0),
+        (400_000_000, 100.12, 1.0),
+    ]
+
+    assert detecter_chocs(trades, seuil_bps=8.0) == []
+    shocks = detecter_chocs_fenetre(
+        trades,
+        seuil_bps=8.0,
+        fenetre_ms=250.0,
+    )
+
+    assert shocks == [(300_000_000, 1.0)]
+
+
+def test_detecter_chocs_fenetre_refuse_une_reference_trop_ancienne():
+    trades = [
+        (0, 100.0, 1.0),
+        (5_000_000_000, 101.0, 1.0),
+    ]
+
+    assert detecter_chocs_fenetre(
+        trades,
+        seuil_bps=8.0,
+        fenetre_ms=250.0,
+    ) == []
 
 
 def test_net_par_horizon_est_causal_et_mesure_la_capacite_top_of_book():

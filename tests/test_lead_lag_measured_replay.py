@@ -6,6 +6,7 @@ from pathlib import Path
 import pytest
 
 from hl_observer.simulation.lead_lag_measured_replay import (
+    ADMISSION_PREDECLARED_ALL_SIGNALS,
     load_runtime_latency_evidence,
     replay_measured_lead_lag,
 )
@@ -244,6 +245,79 @@ def test_raw_diagnostics_do_not_change_with_the_admission_history_gate() -> None
     assert sum(segment["fills"] for segment in refused["segments"].values()) == 0
 
 
+def test_predeclared_admission_prend_les_signaux_sans_lire_leur_resultat() -> None:
+    tape, l2 = _fixture()
+    replay = replay_measured_lead_lag(
+        tape,
+        l2,
+        shock_threshold_bps=8.0,
+        horizon_ms=100,
+        latency_evidence=_latency(),
+        notional_usd=100.0,
+        fee_bps=1.0,
+        min_history=999,
+        admission_policy=ADMISSION_PREDECLARED_ALL_SIGNALS,
+        min_episodes=1,
+    )
+
+    assert replay["admission_policy"] == ADMISSION_PREDECLARED_ALL_SIGNALS
+    assert replay["decision_counts"] == {"TRADE": replay["signals"]}
+    assert sum(segment["fills"] for segment in replay["segments"].values()) > 0
+
+
+def test_replay_expose_le_detecteur_cumulatif_predeclare() -> None:
+    tape, l2 = _fixture()
+    replay = replay_measured_lead_lag(
+        tape,
+        l2,
+        shock_threshold_bps=8.0,
+        shock_window_ms=1_000.0,
+        horizon_ms=100,
+        latency_evidence=_latency(),
+        notional_usd=100.0,
+        fee_bps=1.0,
+        admission_policy=ADMISSION_PREDECLARED_ALL_SIGNALS,
+        min_episodes=1,
+    )
+
+    assert replay["shock_detection_policy"] == "CUMULATIVE_FIXED_WINDOW"
+    assert replay["shock_window_ms"] == 1_000.0
+    assert replay["signals"] > 0
+
+
+def test_replay_reutilise_des_chocs_causaux_precalcules(monkeypatch) -> None:
+    tape, l2 = _fixture()
+    base_ms = 1_786_552_000_000
+    monkeypatch.setattr(
+        "hl_observer.simulation.lead_lag_measured_replay.lead_lag_shadow.detecter_chocs",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("le detecteur ne doit pas etre relance")
+        ),
+    )
+
+    replay = replay_measured_lead_lag(
+        tape,
+        l2,
+        shock_threshold_bps=8.0,
+        horizon_ms=100,
+        latency_evidence=_latency(),
+        notional_usd=100.0,
+        fee_bps=1.0,
+        admission_policy=ADMISSION_PREDECLARED_ALL_SIGNALS,
+        precomputed_shocks={
+            "ETH": [
+                ((base_ms + index * 1_000) * 1_000_000, 1.0)
+                for index in range(1, 7)
+            ]
+        },
+        inputs_sorted=True,
+        min_episodes=1,
+    )
+
+    assert replay["precomputed_shocks_used"] is True
+    assert replay["signals"] == 6
+
+
 def test_direction_flip_is_repriced_and_remains_diagnostic_only() -> None:
     tape, l2 = _fixture()
     replay = replay_measured_lead_lag(
@@ -333,4 +407,17 @@ def test_direction_multiplier_refuses_ambiguous_policy() -> None:
             horizon_ms=100,
             latency_evidence=_latency(),
             direction_multiplier=0,
+        )
+
+
+def test_replay_refuse_une_politique_admission_inconnue() -> None:
+    tape, l2 = _fixture()
+    with pytest.raises(ValueError, match="admission_policy"):
+        replay_measured_lead_lag(
+            tape,
+            l2,
+            shock_threshold_bps=8.0,
+            horizon_ms=100,
+            latency_evidence=_latency(),
+            admission_policy="RESULTAT_FUTUR",
         )
