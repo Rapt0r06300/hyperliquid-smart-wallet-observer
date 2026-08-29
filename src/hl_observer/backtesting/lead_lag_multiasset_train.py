@@ -10,6 +10,7 @@ and a Bonferroni-corrected daily lower confidence bound.
 PAPER/READ-ONLY only.  A selected candidate merely authorizes a later physical
 freeze; it never upgrades the canonical Lead-Lag campaign by itself.
 """
+
 from __future__ import annotations
 
 import bisect
@@ -35,13 +36,12 @@ from hl_observer.simulation.lead_lag_measured_replay import (
     replay_measured_lead_lag,
 )
 
-SCHEMA_VERSION = "hypersmart.lead_lag_multiasset_train.v1"
+SCHEMA_VERSION = "hypersmart.lead_lag_multiasset_train.v2"
 MECHANISM = "lead_lag_v4_multiasset_measured_taker"
 EXTREME_REVERSAL_MECHANISM = "lead_lag_v5_extreme_shock_reversal_taker"
 WINDOW_CONTINUATION_MECHANISM = "lead_lag_v6_cumulative_window_continuation_taker"
-DEFAULT_CANDIDATE_COINS = (
-    "BTC", "ETH", "SOL", "XRP", "DOGE", "SUI", "LINK", "AVAX", "INJ", "AAVE", "ONDO"
-)
+CROSS_ASSET_MECHANISM = "lead_lag_v7_major_to_alt_cumulative_continuation_taker"
+DEFAULT_CANDIDATE_COINS = ("BTC", "ETH", "SOL", "XRP", "DOGE", "SUI", "LINK", "AVAX", "INJ", "AAVE", "ONDO")
 SHOCK_THRESHOLDS_BPS = (8.0, 12.0, 20.0)
 HORIZONS_MS = (1_000, 5_000)
 EXTREME_REVERSAL_SHOCK_THRESHOLDS_BPS = (20.0, 30.0, 50.0)
@@ -54,6 +54,12 @@ NOTIONAL_USD = 25.0
 MIN_TRAIN_FILLS = 8
 EXTREME_REVERSAL_MIN_TRAIN_FILLS = 30
 WINDOW_MIN_TRAIN_FILLS = 30
+CROSS_ASSET_LEADERS = ("BTC", "ETH")
+CROSS_ASSET_FOLLOWERS = ("SOL", "XRP", "DOGE", "SUI", "LINK", "AVAX", "INJ", "AAVE", "ONDO")
+CROSS_ASSET_SHOCK_WINDOWS_MS = (250, 1_000)
+CROSS_ASSET_SHOCK_THRESHOLDS_BPS = (8.0, 12.0, 20.0)
+CROSS_ASSET_HORIZONS_MS = (1_000, 5_000, 15_000)
+CROSS_ASSET_MIN_TRAIN_FILLS = 30
 MIN_DISTINCT_DAYS = 3
 MAX_TOP_POSITIVE_SHARE = 0.60
 FAMILY_ALPHA = 0.05
@@ -90,6 +96,16 @@ TRAIN_HYPOTHESES = (
         "admission_policy": ADMISSION_PREDECLARED_ALL_SIGNALS,
     },
 )
+
+
+def _planned_cross_asset_pairs(candidate_coins: Sequence[str]) -> list[tuple[str, str]]:
+    allowed = {str(coin).upper() for coin in candidate_coins}
+    return [
+        (leader, follower)
+        for leader in CROSS_ASSET_LEADERS
+        for follower in CROSS_ASSET_FOLLOWERS
+        if leader in allowed and follower in allowed and leader != follower
+    ]
 
 
 def _in_ranges(timestamp_ms: int, ranges: Sequence[tuple[int, int]]) -> bool:
@@ -162,17 +178,11 @@ def load_multiasset_train_tape(
         if not path.is_file():
             continue
         consumed.append(
-            path.relative_to(project_root).as_posix()
-            if path.is_relative_to(project_root)
-            else str(path)
+            path.relative_to(project_root).as_posix() if path.is_relative_to(project_root) else str(path)
         )
         for line in _lines(path):
             lines_read += 1
-            if (
-                "BIN_TRADE" not in line
-                and '"venue":"HL"' not in line
-                and '"venue": "HL"' not in line
-            ):
+            if "BIN_TRADE" not in line and '"venue":"HL"' not in line and '"venue": "HL"' not in line:
                 continue
             try:
                 row = json.loads(line)
@@ -312,9 +322,7 @@ def _shock_timestamps(tape: Mapping[str, Mapping[str, list]]) -> list[int]:
     minimum_threshold = min(SHOCK_THRESHOLDS_BPS)
     for streams in tape.values():
         trades = list(streams.get("TRADE") or [])
-        for timestamp_ns, _direction in lead_lag_shadow.detecter_chocs(
-            trades, seuil_bps=minimum_threshold
-        ):
+        for timestamp_ns, _direction in lead_lag_shadow.detecter_chocs(trades, seuil_bps=minimum_threshold):
             timestamps.add(int(timestamp_ns // 1_000_000))
     return sorted(timestamps)
 
@@ -379,8 +387,7 @@ def _score_report(
     )
     segments = report.get("segments") if isinstance(report.get("segments"), Mapping) else {}
     internal_fold_nets = {
-        label: float((segments.get(label) or {}).get("net") or 0.0)
-        for label in ("IS", "OOS", "FORWARD")
+        label: float((segments.get(label) or {}).get("net") or 0.0) for label in ("IS", "OOS", "FORWARD")
     }
     placebo_net = float(report.get("placebo_net") or 0.0)
     net = float(stats.get("net_pnl_usd") or 0.0)
@@ -405,18 +412,12 @@ def _score_report(
         "direction_policy": (
             "CUMULATIVE_WINDOW_CONTINUATION"
             if shock_window_ms is not None and int(direction_multiplier) == 1
-            else (
-                "SHOCK_CONTINUATION"
-                if int(direction_multiplier) == 1
-                else "EXTREME_SHOCK_REVERSAL"
-            )
+            else ("SHOCK_CONTINUATION" if int(direction_multiplier) == 1 else "EXTREME_SHOCK_REVERSAL")
         ),
         "coin": str(coin).upper(),
         "shock_threshold_bps": float(threshold_bps),
         "horizon_ms": int(horizon_ms),
-        "shock_window_ms": (
-            float(shock_window_ms) if shock_window_ms is not None else None
-        ),
+        "shock_window_ms": (float(shock_window_ms) if shock_window_ms is not None else None),
         "admission_policy": str(admission_policy),
         "statistics": stats,
         "internal_train_fold_nets": internal_fold_nets,
@@ -425,12 +426,8 @@ def _score_report(
         "coverage": dict(report.get("coverage") or {}),
         "signals": int(report.get("signals") or 0),
         "decision_counts": dict(report.get("decision_counts") or {}),
-        "raw_observation_diagnostics": dict(
-            report.get("raw_observation_diagnostics") or {}
-        ),
-        "raw_direction_flip_diagnostics": dict(
-            report.get("raw_direction_flip_diagnostics") or {}
-        ),
+        "raw_observation_diagnostics": dict(report.get("raw_observation_diagnostics") or {}),
+        "raw_direction_flip_diagnostics": dict(report.get("raw_direction_flip_diagnostics") or {}),
         "eligible": eligible,
     }
 
@@ -445,13 +442,9 @@ def explore_lead_lag_multiasset_train(
 
     tape, tape_meta = load_multiasset_train_tape(root, lead_sources, coins=candidate_coins)
     l2_history = {
-        coin: list(streams.get("HL_BOOK") or [])
-        for coin, streams in tape.items()
-        if streams.get("HL_BOOK")
+        coin: list(streams.get("HL_BOOK") or []) for coin, streams in tape.items() if streams.get("HL_BOOK")
     }
-    missing_book_tape = {
-        coin: streams for coin, streams in tape.items() if coin not in l2_history
-    }
+    missing_book_tape = {coin: streams for coin, streams in tape.items() if coin not in l2_history}
     fallback_meta: dict[str, Any] | None = None
     if missing_book_tape:
         fallback_history, _public_trades, fallback_meta = load_market_microstructure_event_windows(
@@ -459,9 +452,7 @@ def explore_lead_lag_multiasset_train(
             _shock_timestamps(missing_book_tape),
             before_ms=1_000,
             after_ms=max(
-                int(horizon)
-                for hypothesis in TRAIN_HYPOTHESES
-                for horizon in hypothesis["horizons_ms"]
+                int(horizon) for hypothesis in TRAIN_HYPOTHESES for horizon in hypothesis["horizons_ms"]
             )
             + 2_000,
         )
@@ -471,12 +462,8 @@ def explore_lead_lag_multiasset_train(
     l2_meta = {
         "schema_version": "hypersmart.lead_lag_multiasset_books.v1",
         "primary_source": "ALIGNED_BBO_SAME_SHARD_CAUSAL",
-        "same_shard_rows": sum(
-            len(streams.get("HL_BOOK") or []) for streams in tape.values()
-        ),
-        "same_shard_coins": sorted(
-            coin for coin, streams in tape.items() if streams.get("HL_BOOK")
-        ),
+        "same_shard_rows": sum(len(streams.get("HL_BOOK") or []) for streams in tape.values()),
+        "same_shard_coins": sorted(coin for coin, streams in tape.items() if streams.get("HL_BOOK")),
         "fallback_requested_coins": sorted(missing_book_tape),
         "fallback": fallback_meta,
         "selection_scope": "TRAIN_ONLY_PRE_FREEZE",
@@ -499,11 +486,7 @@ def explore_lead_lag_multiasset_train(
                     key = (
                         selected_coin,
                         float(threshold),
-                        (
-                            float(shock_window_ms)
-                            if shock_window_ms is not None
-                            else None
-                        ),
+                        (float(shock_window_ms) if shock_window_ms is not None else None),
                     )
                     if key in shock_cache:
                         continue
@@ -519,13 +502,36 @@ def explore_lead_lag_multiasset_train(
                             fenetre_ms=float(shock_window_ms),
                         )
                     )
+    planned_cross_pairs = _planned_cross_asset_pairs(candidate_coins)
+    for leader in sorted({pair[0] for pair in planned_cross_pairs}):
+        streams = tape.get(leader)
+        if not streams:
+            continue
+        trades = list(streams.get("TRADE") or [])
+        for shock_window_ms in CROSS_ASSET_SHOCK_WINDOWS_MS:
+            for threshold in CROSS_ASSET_SHOCK_THRESHOLDS_BPS:
+                key = (leader, float(threshold), float(shock_window_ms))
+                if key not in shock_cache:
+                    shock_cache[key] = lead_lag_shadow.detecter_chocs_fenetre(
+                        trades,
+                        seuil_bps=float(threshold),
+                        fenetre_ms=float(shock_window_ms),
+                    )
     combinations_per_coin = sum(
         len(hypothesis["shock_thresholds_bps"])
         * len(hypothesis["horizons_ms"])
         * len(hypothesis["shock_windows_ms"])
         for hypothesis in TRAIN_HYPOTHESES
     )
-    trial_count = max(1, len(candidate_coins) * combinations_per_coin)
+    cross_combinations_per_pair = (
+        len(CROSS_ASSET_SHOCK_THRESHOLDS_BPS)
+        * len(CROSS_ASSET_HORIZONS_MS)
+        * len(CROSS_ASSET_SHOCK_WINDOWS_MS)
+    )
+    trial_count = max(
+        1,
+        len(candidate_coins) * combinations_per_coin + len(planned_cross_pairs) * cross_combinations_per_pair,
+    )
     for hypothesis in TRAIN_HYPOTHESES:
         for coin in candidate_coins:
             selected_coin = str(coin).upper()
@@ -545,22 +551,14 @@ def explore_lead_lag_multiasset_train(
                             min_expected_net_bps=0.0,
                             min_episodes=1,
                             direction_multiplier=int(hypothesis["direction_multiplier"]),
-                            shock_window_ms=(
-                                float(shock_window_ms)
-                                if shock_window_ms is not None
-                                else None
-                            ),
+                            shock_window_ms=(float(shock_window_ms) if shock_window_ms is not None else None),
                             admission_policy=str(hypothesis["admission_policy"]),
                             precomputed_shocks={
                                 selected_coin: shock_cache[
                                     (
                                         selected_coin,
                                         float(threshold),
-                                        (
-                                            float(shock_window_ms)
-                                            if shock_window_ms is not None
-                                            else None
-                                        ),
+                                        (float(shock_window_ms) if shock_window_ms is not None else None),
                                     )
                                 ]
                             },
@@ -574,18 +572,72 @@ def explore_lead_lag_multiasset_train(
                                 horizon_ms=int(horizon),
                                 trial_count=trial_count,
                                 mechanism=str(hypothesis["mechanism"]),
-                                direction_multiplier=int(
-                                    hypothesis["direction_multiplier"]
-                                ),
+                                direction_multiplier=int(hypothesis["direction_multiplier"]),
                                 min_train_fills=int(hypothesis["min_train_fills"]),
                                 shock_window_ms=(
-                                    float(shock_window_ms)
-                                    if shock_window_ms is not None
-                                    else None
+                                    float(shock_window_ms) if shock_window_ms is not None else None
                                 ),
                                 admission_policy=str(hypothesis["admission_policy"]),
                             )
                         )
+    for leader, follower in planned_cross_pairs:
+        leader_streams = tape.get(leader)
+        follower_streams = tape.get(follower)
+        if not leader_streams or not follower_streams:
+            continue
+        follower_books = list(follower_streams.get("HL_BOOK") or [])
+        if not follower_books:
+            continue
+        synthetic_tape = {
+            follower: {
+                "HL": [],
+                "BIN": [],
+                "TRADE": list(leader_streams.get("TRADE") or []),
+            }
+        }
+        for shock_window_ms in CROSS_ASSET_SHOCK_WINDOWS_MS:
+            for threshold in CROSS_ASSET_SHOCK_THRESHOLDS_BPS:
+                shocks = shock_cache.get(
+                    (leader, float(threshold), float(shock_window_ms)),
+                    [],
+                )
+                for horizon in CROSS_ASSET_HORIZONS_MS:
+                    report = replay_measured_lead_lag(
+                        synthetic_tape,
+                        {follower: follower_books},
+                        shock_threshold_bps=float(threshold),
+                        horizon_ms=int(horizon),
+                        latency_evidence=latency,
+                        notional_usd=NOTIONAL_USD,
+                        min_history=5,
+                        min_expected_net_bps=0.0,
+                        min_episodes=1,
+                        direction_multiplier=1,
+                        shock_window_ms=float(shock_window_ms),
+                        admission_policy=ADMISSION_PREDECLARED_ALL_SIGNALS,
+                        precomputed_shocks={follower: shocks},
+                        inputs_sorted=True,
+                    )
+                    scored = _score_report(
+                        report,
+                        coin=follower,
+                        threshold_bps=float(threshold),
+                        horizon_ms=int(horizon),
+                        trial_count=trial_count,
+                        mechanism=CROSS_ASSET_MECHANISM,
+                        direction_multiplier=1,
+                        min_train_fills=CROSS_ASSET_MIN_TRAIN_FILLS,
+                        shock_window_ms=float(shock_window_ms),
+                        admission_policy=ADMISSION_PREDECLARED_ALL_SIGNALS,
+                    )
+                    scored.update(
+                        {
+                            "leader_coin": leader,
+                            "follower_coin": follower,
+                            "direction_policy": "CROSS_ASSET_MAJOR_TO_ALT_CONTINUATION",
+                        }
+                    )
+                    variants.append(scored)
     eligible = [row for row in variants if row["eligible"]]
     selected = max(
         eligible,
@@ -602,6 +654,8 @@ def explore_lead_lag_multiasset_train(
             "direction_multiplier": selected["direction_multiplier"],
             "direction_policy": selected["direction_policy"],
             "coin": selected["coin"],
+            "leader_coin": selected.get("leader_coin"),
+            "follower_coin": selected.get("follower_coin"),
             "shock_threshold_bps": selected["shock_threshold_bps"],
             "horizon_ms": selected["horizon_ms"],
             "shock_window_ms": selected["shock_window_ms"],
@@ -640,6 +694,19 @@ def explore_lead_lag_multiasset_train(
                 }
                 for hypothesis in TRAIN_HYPOTHESES
             ],
+            "cross_asset_hypothesis": {
+                "mechanism": CROSS_ASSET_MECHANISM,
+                "direction_multiplier": 1,
+                "direction_policy": "CROSS_ASSET_MAJOR_TO_ALT_CONTINUATION",
+                "leaders": list(CROSS_ASSET_LEADERS),
+                "followers": list(CROSS_ASSET_FOLLOWERS),
+                "planned_pairs": [list(pair) for pair in planned_cross_pairs],
+                "shock_thresholds_bps": list(CROSS_ASSET_SHOCK_THRESHOLDS_BPS),
+                "horizons_ms": list(CROSS_ASSET_HORIZONS_MS),
+                "shock_windows_ms": list(CROSS_ASSET_SHOCK_WINDOWS_MS),
+                "admission_policy": ADMISSION_PREDECLARED_ALL_SIGNALS,
+                "minimum_train_fills": CROSS_ASSET_MIN_TRAIN_FILLS,
+            },
         },
         "selected": selected,
         "freeze_candidate": freeze_payload,
@@ -651,9 +718,7 @@ def explore_lead_lag_multiasset_train(
         "shock_detection_cache": {
             "unique_definitions": len(shock_cache),
             "signals_by_definition": {
-                f"{coin}|{threshold:g}|{window if window is not None else 'consecutive'}": len(
-                    rows
-                )
+                f"{coin}|{threshold:g}|{window if window is not None else 'consecutive'}": len(rows)
                 for (coin, threshold, window), rows in shock_cache.items()
             },
             "reused_across_horizons": True,
@@ -664,6 +729,13 @@ def explore_lead_lag_multiasset_train(
 
 
 __all__ = [
+    "CROSS_ASSET_FOLLOWERS",
+    "CROSS_ASSET_HORIZONS_MS",
+    "CROSS_ASSET_LEADERS",
+    "CROSS_ASSET_MECHANISM",
+    "CROSS_ASSET_MIN_TRAIN_FILLS",
+    "CROSS_ASSET_SHOCK_THRESHOLDS_BPS",
+    "CROSS_ASSET_SHOCK_WINDOWS_MS",
     "DEFAULT_CANDIDATE_COINS",
     "EXTREME_REVERSAL_HORIZONS_MS",
     "EXTREME_REVERSAL_MECHANISM",
@@ -679,6 +751,8 @@ __all__ = [
     "WINDOW_MIN_TRAIN_FILLS",
     "WINDOW_SHOCK_THRESHOLDS_BPS",
     "WINDOW_SHOCK_WINDOWS_MS",
+    "_planned_cross_asset_pairs",
+    "_score_report",
     "explore_lead_lag_multiasset_train",
     "load_multiasset_train_tape",
 ]

@@ -9,9 +9,7 @@ from hl_observer.backtesting import lead_lag_multiasset_train as module
 from hl_observer.backtesting.lead_lag_source_alignment import SourceWindow
 
 
-def test_multiasset_loader_coupe_le_heldout_avant_de_lire_les_resultats(
-    tmp_path: Path, monkeypatch
-) -> None:
+def test_multiasset_loader_coupe_le_heldout_avant_de_lire_les_resultats(tmp_path: Path, monkeypatch) -> None:
     start = 1_800_000_000_000
     end = start + 10_000
     dummy_market = tmp_path / "market.jsonl.gz"
@@ -72,14 +70,8 @@ def test_score_report_expose_le_diagnostic_brut_sans_le_rendre_eligible() -> Non
     }
     report = {
         "costs_measured": True,
-        "segments": {
-            label: {"net": 0.0}
-            for label in ("IS", "OOS", "FORWARD")
-        },
-        "ledgers": {
-            label: []
-            for label in ("IS", "OOS", "FORWARD")
-        },
+        "segments": {label: {"net": 0.0} for label in ("IS", "OOS", "FORWARD")},
+        "ledgers": {label: [] for label in ("IS", "OOS", "FORWARD")},
         "placebo_net": 0.0,
         "coverage": {"observable": 6},
         "signals": 6,
@@ -102,9 +94,7 @@ def test_score_report_expose_le_diagnostic_brut_sans_le_rendre_eligible() -> Non
     assert scored["eligible"] is False
 
 
-def test_multiasset_loader_conserve_le_bbo_hl_causal_du_meme_shard(
-    tmp_path: Path, monkeypatch
-) -> None:
+def test_multiasset_loader_conserve_le_bbo_hl_causal_du_meme_shard(tmp_path: Path, monkeypatch) -> None:
     start = 1_800_000_000_000
     end = start + 10_000
     dummy_market = tmp_path / "market.jsonl.gz"
@@ -163,9 +153,7 @@ def test_multiasset_loader_conserve_le_bbo_hl_causal_du_meme_shard(
     assert meta["heldout_loaded"] is False
 
 
-def test_exploration_utilise_le_bbo_aligne_sans_relire_le_l2_sparse(
-    tmp_path: Path, monkeypatch
-) -> None:
+def test_exploration_utilise_le_bbo_aligne_sans_relire_le_l2_sparse(tmp_path: Path, monkeypatch) -> None:
     book = {
         "coin": "ETH",
         "ts_ms": 1_800_000_000_000,
@@ -231,9 +219,7 @@ def test_exploration_utilise_le_bbo_aligne_sans_relire_le_l2_sparse(
     assert len(captured) == expected_calls
     assert all(item == {"ETH": [book]} for item, _kwargs in captured)
     assert {kwargs["direction_multiplier"] for _item, kwargs in captured} == {-1, 1}
-    assert {
-        kwargs["admission_policy"] for _item, kwargs in captured
-    } == {
+    assert {kwargs["admission_policy"] for _item, kwargs in captured} == {
         module.ADMISSION_PREDECLARED_ALL_SIGNALS,
         module.ADMISSION_PRIOR_MEAN_POSITIVE,
     }
@@ -243,10 +229,7 @@ def test_exploration_utilise_le_bbo_aligne_sans_relire_le_l2_sparse(
         1_000.0,
     }
     assert report["fixed_grid"]["trial_count"] == expected_calls
-    assert {
-        hypothesis["direction_policy"]
-        for hypothesis in report["fixed_grid"]["hypotheses"]
-    } == {
+    assert {hypothesis["direction_policy"] for hypothesis in report["fixed_grid"]["hypotheses"]} == {
         "SHOCK_CONTINUATION",
         "EXTREME_SHOCK_REVERSAL",
         "CUMULATIVE_WINDOW_CONTINUATION",
@@ -288,3 +271,98 @@ def test_extreme_reversal_requiert_un_echantillon_train_robuste() -> None:
     assert scored["direction_policy"] == "EXTREME_SHOCK_REVERSAL"
     assert scored["minimum_train_fills"] == 30
     assert scored["eligible"] is False
+
+
+def test_cross_asset_utilise_le_choc_du_leader_et_le_carnet_du_suiveur(tmp_path: Path, monkeypatch) -> None:
+    trigger_ns = 1_800_000_000_500_000_000
+    btc_trades = [
+        (1_800_000_000_000_000_000, 100.0, 1.0),
+        (trigger_ns, 101.0, 1.0),
+    ]
+    sol_trades = [
+        (1_800_000_000_000_000_000, 10.0, 1.0),
+        (trigger_ns, 10.01, 1.0),
+    ]
+    btc_book = {
+        "coin": "BTC",
+        "ts_ms": 1_800_000_000_500,
+        "bid": 99.9,
+        "ask": 100.1,
+        "bid_top_usd": 1_000.0,
+        "ask_top_usd": 1_000.0,
+    }
+    sol_book = {
+        "coin": "SOL",
+        "ts_ms": 1_800_000_000_500,
+        "bid": 9.99,
+        "ask": 10.01,
+        "bid_top_usd": 1_000.0,
+        "ask_top_usd": 1_000.0,
+    }
+    tape = {
+        "BTC": {"TRADE": btc_trades, "HL_BOOK": [btc_book]},
+        "SOL": {"TRADE": sol_trades, "HL_BOOK": [sol_book]},
+    }
+    monkeypatch.setattr(
+        module,
+        "load_multiasset_train_tape",
+        lambda *_args, **_kwargs: (tape, {"heldout_loaded": False}),
+    )
+    monkeypatch.setattr(module, "TRAIN_HYPOTHESES", ())
+    monkeypatch.setattr(module, "CROSS_ASSET_LEADERS", ("BTC",))
+    monkeypatch.setattr(module, "CROSS_ASSET_FOLLOWERS", ("SOL",))
+    monkeypatch.setattr(module, "CROSS_ASSET_SHOCK_THRESHOLDS_BPS", (8.0,))
+    monkeypatch.setattr(module, "CROSS_ASSET_SHOCK_WINDOWS_MS", (1_000,))
+    monkeypatch.setattr(module, "CROSS_ASSET_HORIZONS_MS", (5_000,))
+    monkeypatch.setattr(
+        module,
+        "load_runtime_latency_evidence",
+        lambda _root: {"measured": True, "p95_ms": 1.0},
+    )
+    detector_inputs: list[list[tuple[int, float, float]]] = []
+
+    def fake_detector(trades, **_kwargs):
+        detector_inputs.append(list(trades))
+        return [(trigger_ns, 1.0)]
+
+    monkeypatch.setattr(module.lead_lag_shadow, "detecter_chocs_fenetre", fake_detector)
+    captured: list[tuple[dict, dict, dict]] = []
+
+    def fake_replay(replay_tape, l2_history, **kwargs):
+        captured.append((replay_tape, l2_history, kwargs))
+        return {
+            "costs_measured": True,
+            "segments": {label: {"net": 0.0} for label in ("IS", "OOS", "FORWARD")},
+            "ledgers": {label: [] for label in ("IS", "OOS", "FORWARD")},
+            "placebo_net": 0.0,
+            "coverage": {},
+            "signals": 0,
+            "decision_counts": {},
+            "raw_observation_diagnostics": {},
+            "raw_direction_flip_diagnostics": {},
+        }
+
+    monkeypatch.setattr(module, "replay_measured_lead_lag", fake_replay)
+
+    report = module.explore_lead_lag_multiasset_train(
+        tmp_path,
+        [],
+        candidate_coins=("BTC", "SOL"),
+    )
+
+    assert detector_inputs == [btc_trades]
+    assert len(captured) == 1
+    replay_tape, l2_history, kwargs = captured[0]
+    assert replay_tape["SOL"]["TRADE"] == btc_trades
+    assert replay_tape["SOL"]["TRADE"] != sol_trades
+    assert l2_history == {"SOL": [sol_book]}
+    assert kwargs["precomputed_shocks"] == {"SOL": [(trigger_ns, 1.0)]}
+    assert kwargs["admission_policy"] == module.ADMISSION_PREDECLARED_ALL_SIGNALS
+    assert report["fixed_grid"]["trial_count"] == 1
+    assert report["fixed_grid"]["cross_asset_hypothesis"]["planned_pairs"] == [["BTC", "SOL"]]
+    variant = report["variants"][0]
+    assert variant["leader_coin"] == "BTC"
+    assert variant["follower_coin"] == "SOL"
+    assert variant["direction_policy"] == "CROSS_ASSET_MAJOR_TO_ALT_CONTINUATION"
+    assert report["heldout_evaluated"] is False
+    assert report["real_execution"] is False
