@@ -57,6 +57,33 @@ def test_nav_asof_interdit_fuite_future_et_deduplique_episodes(tmp_path):
     assert audit["missing_or_stale_asof_nav_rejected"] == 1
 
 
+def test_notional_fixe_preserve_entree_sans_inventer_nav(tmp_path):
+    data = tmp_path / "runtime" / "data"
+    data.mkdir(parents=True)
+    entry = {
+        "ts_ms": 200,
+        "observed_at_ms": 205,
+        "vault": "0xA",
+        "coin": "BTC",
+        "action": "OPEN",
+        "direction": 1,
+        "taille_usd": 100.0,
+        "source": "LIVE_WS",
+        "is_snapshot": False,
+        "fill_id": "causal-entry",
+    }
+    (data / "vault_episodes.jsonl").write_text(json.dumps(entry), encoding="utf-8")
+
+    entries, audit = PR.charger_entrees_alpha_notional_fixe_avec_audit(tmp_path)
+
+    assert len(entries) == 1
+    assert entries[0]["sizing_policy"] == "FIXED_PAPER_NOTIONAL_USD"
+    assert entries[0]["nav_required"] is False
+    assert "move_frac" not in entries[0]
+    assert audit["causal_alpha_entries"] == 1
+    assert audit["missing_or_stale_asof_nav_rejected"] == 0
+
+
 def test_pipeline_reconstruit_depuis_fills_dedupliques_et_preserve_identite(tmp_path):
     data = tmp_path / "runtime" / "data"
     data.mkdir(parents=True)

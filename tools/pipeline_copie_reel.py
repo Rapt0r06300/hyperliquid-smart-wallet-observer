@@ -276,6 +276,50 @@ def charger_entrees_alpha_avec_audit(root: Path) -> tuple[list[dict], dict[str, 
     return out, audit
 
 
+def charger_entrees_alpha_notional_fixe_avec_audit(
+    root: Path,
+) -> tuple[list[dict], dict[str, Any]]:
+    """Charge les entrées causales sans inventer un NAV pour le sizing fixe.
+
+    Le protocole historique reproduit un ratio de taille leader et exige donc
+    un NAV as-of. La variante de continuation V4 utilise exclusivement le
+    notional paper fixe du protocole exécutable : un NAV absent ne doit ni
+    devenir zéro, ni supprimer une observation autrement causale.
+    """
+
+    episodes, audit = _episodes_canoniques(root)
+    alpha = VB.entrees_alpha(episodes)
+    out: list[dict[str, Any]] = []
+    for episode in alpha:
+        row = dict(episode)
+        row.pop("move_frac", None)
+        row.update(
+            sizing_policy="FIXED_PAPER_NOTIONAL_USD",
+            nav_required=False,
+        )
+        out.append(row)
+    causal = [
+        row
+        for row in out
+        if row.get("source") == "LIVE_WS"
+        and row.get("is_snapshot") is False
+        and int(row.get("observed_at_ms") or 0) >= int(row.get("ts_ms") or 0) > 0
+    ]
+    audit.update(
+        {
+            "nav_policy": "NOT_REQUIRED_FOR_FIXED_PAPER_NOTIONAL",
+            "nav_required": False,
+            "sizing_policy": "FIXED_PAPER_NOTIONAL_USD",
+            "usage_scope": "COPY_VAULT_V4_CAUSAL_CONTINUATION_ONLY",
+            "alpha_before_nav_gate": len(alpha),
+            "alpha_entries": len(out),
+            "causal_alpha_entries": len(causal),
+            "missing_or_stale_asof_nav_rejected": 0,
+        }
+    )
+    return out, audit
+
+
 def charger_entrees_alpha(root: Path) -> list[dict]:
     return charger_entrees_alpha_avec_audit(root)[0]
 

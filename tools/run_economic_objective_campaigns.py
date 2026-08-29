@@ -17,6 +17,9 @@ from hl_observer.backtesting import copy_vault_executable, lead_lag_shadow  # no
 from hl_observer.backtesting.copy_vault_generalization import (  # noqa: E402
     derive_heldout_vault_generalization,
 )
+from hl_observer.backtesting.copy_vault_v4_train import (  # noqa: E402
+    explore_copy_vault_v4_train,
+)
 from hl_observer.backtesting.cross_venue_certified import (  # noqa: E402
     SOURCE_MODE as CERTIFIED_CROSS_SOURCE_MODE,
 )
@@ -174,6 +177,30 @@ def run_campaigns(
             all_copy_metaorders, all_copy_books
         )
     )
+    copy_v4_entries, copy_v4_input_audit = (
+        copy_tool.charger_entrees_alpha_notional_fixe_avec_audit(root)
+    )
+    copy_v4_all_metaorders, copy_v4_metaorder_audit = (
+        copy_vault_executable.cluster_metaorders(copy_v4_entries)
+    )
+    copy_v4_all_books, copy_v4_book_meta = copy_vault_executable.load_observed_books(
+        root, coins={row["coin"] for row in copy_v4_all_metaorders}
+    )
+    copy_v4_metaorders, copy_v4_books, copy_v4_protocol_audit = (
+        copy_vault_executable.select_causal_protocol_inputs(
+            copy_v4_all_metaorders, copy_v4_all_books
+        )
+    )
+    copy_v4 = explore_copy_vault_v4_train(
+        copy_v4_metaorders,
+        copy_v4_books,
+        input_audit={
+            "canonical_input": copy_v4_input_audit,
+            "metaorders": copy_v4_metaorder_audit,
+            "books": copy_v4_book_meta,
+            "causal_protocol": copy_v4_protocol_audit,
+        },
+    )
     metaorder_audit = {
         **all_metaorder_audit,
         "all_metaorders": int(all_metaorder_audit.get("metaorders") or 0),
@@ -261,6 +288,7 @@ def run_campaigns(
         "dataset_source_summary": dataset_sources,
     }
     copy_raw["next_hypothesis_v3"] = qualify_copy_vault_train_only(copy_trades)
+    copy_raw["next_hypothesis_v4"] = copy_v4
     copy_raw_path = _write_raw(root, "copy_vault", copy_raw)
     copy_campaign = build_copy_campaign(copy_raw, freeze=copy_freeze, datasets=copy_data)
     copy_campaign["evidence_paths"].append(copy_raw_path.relative_to(root).as_posix())
