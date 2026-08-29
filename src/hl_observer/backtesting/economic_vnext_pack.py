@@ -16,6 +16,9 @@ from typing import Any
 from hl_observer.backtesting.copy_vault_vnext_train import explore_copy_vault_vnext_train
 from hl_observer.backtesting.cross_venue_certified import load_preferred_certified_atomic_series
 from hl_observer.backtesting.cross_venue_v4_train import explore_cross_venue_v4_train
+from hl_observer.backtesting.cross_venue_v5_persistence_train import (
+    explore_cross_venue_v5_train,
+)
 from hl_observer.backtesting.lead_lag_multiasset_train import explore_lead_lag_multiasset_train
 from hl_observer.backtesting.lead_lag_source_alignment import select_aligned_bbo_sources
 
@@ -79,6 +82,12 @@ def run_economic_vnext_pack(
         source_mode=str(cross_meta.get("source_mode") or ""),
     )
     cross["certified_source_meta"] = cross_meta
+    cross_v5 = explore_cross_venue_v5_train(
+        cross_series,
+        cross_depth,
+        source_mode=str(cross_meta.get("source_mode") or ""),
+    )
+    cross_v5["certified_source_meta"] = cross_meta
 
     copy_raw = _load_copy_raw(project_root)
     if copy_raw is None:
@@ -128,6 +137,11 @@ def run_economic_vnext_pack(
     paths = {
         "lead_lag": _write_json(project_root, "lead_lag_multiasset_train", lead),
         "cross_venue": _write_json(project_root, "cross_venue_v4_train", cross),
+        "cross_venue_persistence_v5": _write_json(
+            project_root,
+            "cross_venue_v5_persistence_train",
+            cross_v5,
+        ),
         "copy_vault": _write_json(project_root, "copy_vault_vnext_train", copy),
         "copy_vault_continuation_v4": _write_json(
             project_root, "copy_vault_v4_train", copy_v4
@@ -157,6 +171,13 @@ def run_economic_vnext_pack(
         },
         "lead_source_alignment": lead_alignment,
         "research_variants": {
+            "cross_venue_persistence_v5": {
+                "status": cross_v5.get("status"),
+                "selection_eligible": cross_v5.get("selection_eligible") is True,
+                "physical_freeze_allowed": cross_v5.get("physical_freeze_allowed") is True,
+                "freeze_candidate_sha256": cross_v5.get("freeze_candidate_sha256"),
+                "heldout_evaluated": cross_v5.get("heldout_evaluated") is True,
+            },
             "copy_vault_continuation_v4": {
                 "status": copy_v4.get("status"),
                 "selection_eligible": copy_v4.get("selection_eligible") is True,

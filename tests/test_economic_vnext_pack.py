@@ -46,6 +46,17 @@ def test_vnext_pack_garde_les_trois_familles_separees_et_ne_certifie_rien(
     )
     monkeypatch.setattr(
         module,
+        "explore_cross_venue_v5_train",
+        lambda *_args, **_kwargs: {
+            "status": "NO_ROBUST_TRAIN_CANDIDATE",
+            "selection_eligible": False,
+            "physical_freeze_allowed": False,
+            "freeze_candidate_sha256": None,
+            "heldout_evaluated": False,
+        },
+    )
+    monkeypatch.setattr(
+        module,
         "_load_copy_raw",
         lambda _root: {
             "next_hypothesis_v4": {
@@ -89,6 +100,13 @@ def test_vnext_pack_garde_les_trois_familles_separees_et_ne_certifie_rien(
         is False
     )
     assert "copy_vault_lifecycle_v5" in result["reports"]
+    assert (
+        result["research_variants"]["cross_venue_persistence_v5"][
+            "heldout_evaluated"
+        ]
+        is False
+    )
+    assert "cross_venue_persistence_v5" in result["reports"]
     assert alignment_calls == [None]
     assert result["lead_source_alignment"]["requested_sources"] == 0
     assert (
@@ -133,6 +151,17 @@ def test_vnext_pack_preserve_une_liste_de_sources_explicite(
             "selection_eligible": False,
             "physical_freeze_allowed": False,
             "freeze_candidate_sha256": None,
+        },
+    )
+    monkeypatch.setattr(
+        module,
+        "explore_cross_venue_v5_train",
+        lambda *_args, **_kwargs: {
+            "status": "NO_ROBUST_TRAIN_CANDIDATE",
+            "selection_eligible": False,
+            "physical_freeze_allowed": False,
+            "freeze_candidate_sha256": None,
+            "heldout_evaluated": False,
         },
     )
     monkeypatch.setattr(module, "_load_copy_raw", lambda _root: None)
