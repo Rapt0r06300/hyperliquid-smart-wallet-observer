@@ -30,7 +30,11 @@ from hl_observer.backtesting.copy_vault_protocol import (
     MAX_TARGET_LAG_MS,
     NOTIONAL_USD,
 )
-from hl_observer.backtesting.copy_vault_v4_train import assess_train_variant
+from hl_observer.backtesting.copy_vault_v4_train import (
+    MIN_DISTINCT_DAYS,
+    MIN_TRAIN_TRADES,
+    assess_train_variant,
+)
 from hl_observer.backtesting.train_statistics import stable_hash
 
 SCHEMA_VERSION = "hypersmart.copy_vault_v5_lifecycle_train.v1"
@@ -38,6 +42,16 @@ MECHANISM = "copy_vault_v5_causal_leader_reduce_or_time_stop"
 REQUIRED_OBSERVED_FILLS = (2, 3, 4, 5)
 LEADER_EXIT_ACTIONS = frozenset({"REDUCE", "CLOSE"})
 EXIT_POLICY = "FULL_FOLLOWER_EXIT_ON_FIRST_CAUSAL_LEADER_REDUCE_OR_CLOSE"
+DATA_ACCUMULATION_REASONS = frozenset(
+    {
+        "INSUFFICIENT_TRAIN_TRADES",
+        "INSUFFICIENT_DISTINCT_DAYS",
+        "MULTIPLICITY_ADJUSTED_LCB_NOT_POSITIVE",
+        "TOP_POSITIVE_TRADE_CONCENTRATION_TOO_HIGH",
+        "COIN_TRADE_CONCENTRATION_TOO_HIGH",
+        "VAULT_TRADE_CONCENTRATION_TOO_HIGH",
+    }
+)
 
 
 def _is_causal_leader_exit(row: Mapping[str, Any]) -> bool:
@@ -401,6 +415,29 @@ def explore_copy_vault_v5_train(
         key=lambda row: float((row["statistics"] or {}).get("net_pnl_usd") or 0.0),
         default=None,
     )
+    best_statistics = dict((diagnostic_best or {}).get("statistics") or {})
+    best_reasons = set((diagnostic_best or {}).get("reasons") or ())
+    fatal_reasons = sorted(best_reasons - DATA_ACCUMULATION_REASONS)
+    collection_actionable = bool(
+        selected is None
+        and diagnostic_best
+        and best_reasons
+        and not fatal_reasons
+        and float(best_statistics.get("net_pnl_usd") or 0.0) > 0.0
+        and float(best_statistics.get("profit_factor") or 0.0) > 1.0
+    )
+    exact_next_evidence = (
+        [
+            "increase independent causal TRAIN trades from "
+            f"{int(best_statistics.get('sample_count') or 0)} to at least {MIN_TRAIN_TRADES}",
+            "increase distinct causal TRAIN days from "
+            f"{int(best_statistics.get('distinct_days') or 0)} to at least {MIN_DISTINCT_DAYS}",
+            "capture leader reductions from additional independent vaults to remove vault concentration",
+            "recompute the multiplicity-adjusted lower bound without opening heldout data",
+        ]
+        if collection_actionable
+        else []
+    )
     freeze_candidate = (
         {
             "mechanism": MECHANISM,
@@ -424,6 +461,16 @@ def explore_copy_vault_v5_train(
         "physical_freeze_allowed": selected is not None,
         "selection_scope": "TRAIN_ONLY_PRE_FREEZE",
         "heldout_evaluated": False,
+        "collection_actionable": collection_actionable,
+        "exact_next_evidence": exact_next_evidence,
+        "collection_diagnostic": {
+            "data_accumulation_reasons": sorted(best_reasons & DATA_ACCUMULATION_REASONS),
+            "fatal_train_reasons": fatal_reasons,
+            "best_sample_count": int(best_statistics.get("sample_count") or 0),
+            "best_distinct_days": int(best_statistics.get("distinct_days") or 0),
+            "best_net_pnl_usd": float(best_statistics.get("net_pnl_usd") or 0.0),
+            "best_profit_factor": best_statistics.get("profit_factor"),
+        },
         "input_metaorders": len(ordered),
         "input_audit": dict(input_audit or {}),
         "leader_exit_audit": exit_audit,

@@ -133,6 +133,25 @@ def _copy_state(
     temporal = _mapping(raw.get("temporal_evidence"))
     temporal_progress = _temporal_progress(temporal)
     next_hypothesis = _next_hypothesis(raw)
+    v5_raw = _mapping(raw.get("next_hypothesis_v5"))
+    v5_collection_actionable = bool(
+        v5_raw.get("status") == "NO_ROBUST_TRAIN_CANDIDATE"
+        and v5_raw.get("collection_actionable") is True
+        and v5_raw.get("selection_eligible") is not True
+        and v5_raw.get("heldout_evaluated") is False
+        and v5_raw.get("paper_read_only") is True
+        and v5_raw.get("real_execution") is False
+    )
+    v5_progress = {
+        "mechanism": v5_raw.get("mechanism"),
+        "status": v5_raw.get("status"),
+        "selection_eligible": v5_raw.get("selection_eligible") is True,
+        "collection_actionable": v5_collection_actionable,
+        "exact_next_evidence": list(v5_raw.get("exact_next_evidence") or []),
+        "collection_diagnostic": dict(
+            _mapping(v5_raw.get("collection_diagnostic"))
+        ),
+    }
     placebos = _mapping(temporal.get("placebos"))
     calibration = _mapping(raw.get("calibration"))
     grid = calibration.get("grid") if isinstance(calibration.get("grid"), list) else []
@@ -204,9 +223,14 @@ def _copy_state(
             or book_rejection_total > 0
         )
     )
+    v5_data_only = bool(schema_ready and not objective_met and v5_collection_actionable)
     state = (
         "PROVEN"
         if objective_met
+        else "CAUSAL_COLLECTOR_PROTOCOL_RESTART_REQUIRED"
+        if v5_data_only and collector_protocol_ready is False
+        else "NEW_HYPOTHESIS_V5_FUTURE_CAUSAL_DATA_REQUIRED"
+        if v5_data_only
         else "HYPOTHESIS_KILLED_OOS"
         if measured_negative
         else "CAUSAL_COLLECTOR_PROTOCOL_RESTART_REQUIRED"
@@ -220,12 +244,16 @@ def _copy_state(
         "evidence_state": state,
         "collection_actionable": bool(
             not objective_met
-            and (not measured_negative or next_hypothesis["collection_actionable"])
+            and (
+                not measured_negative
+                or next_hypothesis["collection_actionable"]
+                or v5_data_only
+            )
         ),
         "software_pipeline_ready": schema_ready,
         "running_collector_protocol_ready": collector_protocol_ready,
         "future_data_required_only": bool(
-            data_only and collector_protocol_ready is not False
+            (data_only or v5_data_only) and collector_protocol_ready is not False
         ),
         "objective_status": campaign.get("objective_status"),
         "objective_reasons": list(campaign.get("objective_reasons") or []),
@@ -258,6 +286,7 @@ def _copy_state(
             **temporal_progress,
             "placebo_beaten": placebos.get("beaten") is True,
             "next_hypothesis_v3": next_hypothesis,
+            "next_hypothesis_v5": v5_progress,
         },
         "required_collectors": [
             "vault-collector",
@@ -278,6 +307,12 @@ def _copy_state(
         ],
         "exact_missing_evidence": (
             [
+                "the frozen canonical Copy-Vault rule remains killed in valid purged OOS",
+                "V5 is a separate TRAIN-only lifecycle hypothesis and cannot reuse that old OOS",
+                *v5_progress["exact_next_evidence"],
+            ]
+            if v5_data_only
+            else [
                 "the frozen Copy-Vault rule is negative in valid purged OOS",
                 "additional forward observations cannot repair its immutable OOS segment",
                 "a materially new causal mechanism must be declared and frozen before evaluation",
@@ -299,12 +334,16 @@ def _copy_state(
             + next_hypothesis["exact_next_evidence"]
         ),
         "methodology_action": (
-            "KILL_CURRENT_FROZEN_HYPOTHESIS_OR_DECLARE_NEW_MECHANISM"
+            "CONTINUE_PREDECLARED_V5_CAUSAL_COLLECTION"
+            if v5_data_only
+            else "KILL_CURRENT_FROZEN_HYPOTHESIS_OR_DECLARE_NEW_MECHANISM"
             if measured_negative
             else "CONTINUE_CAUSAL_TRAIN_OR_FORWARD_COLLECTION"
         ),
         "rerun_condition": (
-            "do not promote by waiting: test only a new predeclared mechanism against the same ledger"
+            "new independent causal V5 leader reductions and matching executable books exist; rerun TRAIN without opening heldouts"
+            if v5_data_only
+            else "do not promote by waiting: test only a new predeclared mechanism against the same ledger"
             if measured_negative
             else "new causal vault metaorders and matching observed books exist after the latest "
             "input boundary; rerun then freeze only if train selection is eligible"

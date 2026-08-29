@@ -275,6 +275,91 @@ def test_plan_kills_copy_vault_after_valid_negative_oos() -> None:
     assert "vault-collector" not in plan["required_collectors"]
 
 
+def test_plan_continue_v5_distinct_sans_reparer_l_ancien_oos() -> None:
+    raw = _raw_reports()
+    raw["copy_vault"]["temporal_evidence"] = {
+        "oos": {
+            "net_pnl_usd": -1.85,
+            "sample_count": 14,
+            "no_lookahead": True,
+            "liquidatable_net": True,
+        },
+        "forward": {"net_pnl_usd": None, "sample_count": 0},
+        "placebos": {"beaten": True},
+    }
+    raw["copy_vault"]["next_hypothesis_v5"] = {
+        "mechanism": "copy_vault_v5_causal_leader_reduce_or_time_stop",
+        "status": "NO_ROBUST_TRAIN_CANDIDATE",
+        "selection_eligible": False,
+        "collection_actionable": True,
+        "heldout_evaluated": False,
+        "paper_read_only": True,
+        "real_execution": False,
+        "exact_next_evidence": ["one more independent causal TRAIN trade"],
+        "collection_diagnostic": {
+            "best_sample_count": 7,
+            "best_distinct_days": 2,
+            "best_net_pnl_usd": 9.87,
+        },
+    }
+    campaigns = [
+        _campaign("copy_vault", closed_positions=49, net_pnl_usd=-9.84),
+        _campaign("lead_lag"),
+        _campaign("cross_venue_dislocation_v2", closed_positions=20),
+    ]
+
+    plan = build_collection_plan(
+        campaigns,
+        raw,
+        collector_state={
+            "actifs": {"userfills-live": 42},
+            "protocols": {"userfills-live": PROTOCOL_NAME},
+        },
+        now_ms=123,
+    )
+    copy = next(row for row in plan["families"] if row["family"] == "copy_vault")
+
+    assert copy["evidence_state"] == "NEW_HYPOTHESIS_V5_FUTURE_CAUSAL_DATA_REQUIRED"
+    assert copy["collection_actionable"] is True
+    assert copy["future_data_required_only"] is True
+    assert copy["methodology_action"] == "CONTINUE_PREDECLARED_V5_CAUSAL_COLLECTION"
+    assert copy["progress"]["next_hypothesis_v5"]["collection_actionable"] is True
+    assert "userfills-live" in plan["required_collectors"]
+    assert "old OOS" in copy["exact_missing_evidence"][1]
+
+
+def test_plan_refuse_de_reactiver_v5_sans_preuve_read_only() -> None:
+    raw = _raw_reports()
+    raw["copy_vault"]["temporal_evidence"] = {
+        "oos": {
+            "net_pnl_usd": -1.85,
+            "sample_count": 14,
+            "no_lookahead": True,
+            "liquidatable_net": True,
+        },
+        "forward": {"net_pnl_usd": None, "sample_count": 0},
+    }
+    raw["copy_vault"]["next_hypothesis_v5"] = {
+        "status": "NO_ROBUST_TRAIN_CANDIDATE",
+        "selection_eligible": False,
+        "collection_actionable": True,
+        "heldout_evaluated": False,
+        "paper_read_only": False,
+        "real_execution": False,
+    }
+    campaigns = [
+        _campaign("copy_vault", closed_positions=49),
+        _campaign("lead_lag"),
+        _campaign("cross_venue_dislocation_v2", closed_positions=20),
+    ]
+
+    plan = build_collection_plan(campaigns, raw, now_ms=123)
+    copy = next(row for row in plan["families"] if row["family"] == "copy_vault")
+
+    assert copy["evidence_state"] == "HYPOTHESIS_KILLED_OOS"
+    assert copy["collection_actionable"] is False
+
+
 def test_plan_kills_lead_lag_after_negative_oos_without_waiting_for_forward() -> None:
     raw = _raw_reports()
     raw["lead_lag"]["executable_campaign"]["temporal_evidence"] = {

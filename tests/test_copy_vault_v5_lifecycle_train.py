@@ -172,5 +172,7 @@ def test_exploration_reste_train_only_et_fail_closed_sans_donnees() -> None:
     assert result["fixed_grid"]["trial_count"] == 16
     assert result["selection_eligible"] is False
     assert result["physical_freeze_allowed"] is False
+    assert result["collection_actionable"] is False
+    assert result["exact_next_evidence"] == []
     assert result["paper_read_only"] is True
     assert result["real_execution"] is False
