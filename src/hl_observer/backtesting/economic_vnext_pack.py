@@ -109,6 +109,21 @@ def run_economic_vnext_pack(
             "real_execution": False,
         }
     )
+    raw_copy_v5 = copy_raw.get("next_hypothesis_v5") if copy_raw is not None else None
+    copy_v5 = (
+        dict(raw_copy_v5)
+        if isinstance(raw_copy_v5, dict)
+        else {
+            "schema_version": "hypersmart.copy_vault_v5_lifecycle_train.v1",
+            "status": "COPY_VAULT_V5_REPORT_MISSING",
+            "selection_eligible": False,
+            "physical_freeze_allowed": False,
+            "selection_scope": "TRAIN_ONLY_PRE_FREEZE",
+            "heldout_evaluated": False,
+            "paper_read_only": True,
+            "real_execution": False,
+        }
+    )
 
     paths = {
         "lead_lag": _write_json(project_root, "lead_lag_multiasset_train", lead),
@@ -116,6 +131,9 @@ def run_economic_vnext_pack(
         "copy_vault": _write_json(project_root, "copy_vault_vnext_train", copy),
         "copy_vault_continuation_v4": _write_json(
             project_root, "copy_vault_v4_train", copy_v4
+        ),
+        "copy_vault_lifecycle_v5": _write_json(
+            project_root, "copy_vault_v5_lifecycle_train", copy_v5
         ),
     }
     families = {
@@ -145,6 +163,13 @@ def run_economic_vnext_pack(
                 "physical_freeze_allowed": copy_v4.get("physical_freeze_allowed") is True,
                 "freeze_candidate_sha256": copy_v4.get("freeze_candidate_sha256"),
                 "heldout_evaluated": copy_v4.get("heldout_evaluated") is True,
+            },
+            "copy_vault_lifecycle_v5": {
+                "status": copy_v5.get("status"),
+                "selection_eligible": copy_v5.get("selection_eligible") is True,
+                "physical_freeze_allowed": copy_v5.get("physical_freeze_allowed") is True,
+                "freeze_candidate_sha256": copy_v5.get("freeze_candidate_sha256"),
+                "heldout_evaluated": copy_v5.get("heldout_evaluated") is True,
             }
         },
         "reports": {

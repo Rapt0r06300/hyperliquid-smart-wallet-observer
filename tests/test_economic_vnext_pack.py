@@ -53,6 +53,12 @@ def test_vnext_pack_garde_les_trois_familles_separees_et_ne_certifie_rien(
                 "selection_eligible": False,
                 "physical_freeze_allowed": False,
                 "heldout_evaluated": False,
+            },
+            "next_hypothesis_v5": {
+                "status": "NO_ROBUST_TRAIN_CANDIDATE",
+                "selection_eligible": False,
+                "physical_freeze_allowed": False,
+                "heldout_evaluated": False,
             }
         },
     )
@@ -78,6 +84,11 @@ def test_vnext_pack_garde_les_trois_familles_separees_et_ne_certifie_rien(
         is False
     )
     assert "copy_vault_continuation_v4" in result["reports"]
+    assert (
+        result["research_variants"]["copy_vault_lifecycle_v5"]["heldout_evaluated"]
+        is False
+    )
+    assert "copy_vault_lifecycle_v5" in result["reports"]
     assert alignment_calls == [None]
     assert result["lead_source_alignment"]["requested_sources"] == 0
     assert (

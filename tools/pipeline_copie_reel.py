@@ -320,6 +320,14 @@ def charger_entrees_alpha_notional_fixe_avec_audit(
     return out, audit
 
 
+def charger_evenements_lifecycle_avec_audit(
+    root: Path,
+) -> tuple[list[dict], dict[str, Any]]:
+    """Expose les événements OPEN/ADD/REDUCE/CLOSE canoniques au replay paper."""
+
+    return _episodes_canoniques(root)
+
+
 def charger_entrees_alpha(root: Path) -> list[dict]:
     return charger_entrees_alpha_avec_audit(root)[0]
 

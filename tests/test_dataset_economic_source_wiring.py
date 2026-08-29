@@ -24,7 +24,8 @@ def test_lead_lag_v3_est_branche_sur_tape_l2_trades_et_latence_mesuree() -> None
     assert "load_aligned_binance_trade_tape" in text
     assert "detect_rolling_shocks" in text
     assert "load_market_microstructure_event_windows" in text
-    assert '[int(shock["trigger_ts_ms"]) for shock in lead_shocks]' in text
+    assert 'int(shock["trigger_ts_ms"])' in text
+    assert "for shock in [*lead_shocks, *diagnostic_shocks]" in text
     assert 'microstructure_meta["frozen_shock_count"]' in text
     assert "load_runtime_latency_evidence(root)" in text
     assert 'lead_raw["maker_queue_candidates"]' in text
@@ -49,3 +50,13 @@ def test_campagnes_dataset_restent_paper_et_sans_exchange() -> None:
     assert '"HL_ENABLE_MAINNET_EXECUTION"' in text
     assert '"HL_ENABLE_TESTNET_EXECUTION"' in text
     assert "/exchange" not in text.casefold()
+
+
+def test_copy_vault_v5_est_branche_sur_les_evenements_lifecycle_causaux() -> None:
+    text = RUNNER.read_text(encoding="utf-8", errors="replace")
+    assert "explore_copy_vault_v5_train" in text
+    assert "charger_evenements_lifecycle_avec_audit" in text
+    assert 'copy_raw["next_hypothesis_v5"]' in text
+    assert text.index("charger_evenements_lifecycle_avec_audit") < text.index(
+        'copy_raw["next_hypothesis_v5"]'
+    )
