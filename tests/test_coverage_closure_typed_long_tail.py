@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import os
 import pkgutil
 import signal
 from pathlib import Path
@@ -8,7 +7,7 @@ from pathlib import Path
 import pytest
 
 import hl_observer
-from tests.coverage_contract_harness import run_typed_contracts
+from tests.coverage_contract_harness import require_explicit_coverage_shard, run_typed_contracts
 
 
 def _small_modules() -> tuple[str, ...]:
@@ -27,17 +26,10 @@ def _small_modules() -> tuple[str, ...]:
 def test_typed_long_tail_contracts_are_offline_and_bounded(tmp_path, monkeypatch) -> None:
     if not hasattr(signal, "setitimer"):
         pytest.skip("POSIX bounded-call support required")
+    shard, total = require_explicit_coverage_shard()
     modules = _small_modules()
     assert len(modules) >= 750
-    shard_raw = os.getenv("HYPERSMART_COVERAGE_CONTRACT_SHARD")
-    if shard_raw is None:
-        targets = modules
-    else:
-        shard = int(shard_raw)
-        total = int(os.getenv("COVERAGE_SHARDS", "8"))
-        assert total >= 1
-        assert 0 <= shard < total
-        targets = modules[shard::total]
+    targets = modules[shard::total]
     imported, attempts, completed, controlled_failures = run_typed_contracts(
         targets,
         tmp_path,

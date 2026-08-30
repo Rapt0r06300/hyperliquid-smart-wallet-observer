@@ -102,6 +102,7 @@ def _materialized_functions(function, module_name: str, tmp_path: Path, settings
 
 
 def test_sharded_closure_fuzzer_executes_nested_real_helpers(tmp_path, monkeypatch) -> None:
+    harness.require_explicit_coverage_shard()
     _install_offline_guards(monkeypatch)
     monkeypatch.setattr("time.sleep", lambda *_args, **_kwargs: None)
     for name, value in {

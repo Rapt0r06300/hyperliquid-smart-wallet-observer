@@ -462,6 +462,7 @@ def _construct_instances(
 
 
 def test_sharded_branch_fuzzer_exercises_real_remaining_paths(tmp_path, monkeypatch) -> None:
+    harness.require_explicit_coverage_shard()
     _install_offline_guards(monkeypatch)
     monkeypatch.setattr("time.sleep", lambda *_args, **_kwargs: None)
     for name, value in {

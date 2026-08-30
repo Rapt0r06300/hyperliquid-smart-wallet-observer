@@ -6,6 +6,7 @@ import dataclasses
 import enum
 import importlib
 import inspect
+import os
 import socket
 import subprocess
 import textwrap
@@ -15,6 +16,7 @@ from builtins import BaseExceptionGroup
 from pathlib import Path
 
 import httpx
+import pytest
 import requests
 
 from hl_observer.config import Settings
@@ -56,6 +58,26 @@ PROCESS_GLOBAL_UNSAFE = {
     ("hl_observer.ops.portable_audit_guard", "install_from_environment"),
     ("hl_observer.scoring.wallet_ranking", "export_classification_robustness_report"),
 }
+
+
+def require_explicit_coverage_shard() -> tuple[int, int]:
+    """Refuse d'executer les fuzzers de couverture hors du workflow sharde.
+
+    Ces contrats explorent volontairement une large surface du runtime. Les lancer sans
+    ``HYPERSMART_COVERAGE_CONTRACT_SHARD`` depuis la suite pytest ordinaire multiplie leur
+    charge par 32 et permet a des valeurs synthetiques d'atteindre les artefacts du checkout.
+    Le workflow ``coverage-parallel-probe`` fournit toujours le shard explicite et conserve
+    donc la couverture complete.
+    """
+
+    raw = os.getenv("HYPERSMART_COVERAGE_CONTRACT_SHARD")
+    if raw is None:
+        pytest.skip("contrat reserve au workflow coverage explicitement sharde")
+    total = int(os.getenv("COVERAGE_SHARDS", "32"))
+    shard = int(raw)
+    if total < 1 or not 0 <= shard < total:
+        raise AssertionError(f"shard coverage invalide: {shard}/{total}")
+    return shard, total
 
 
 class Dummy:

@@ -18,6 +18,8 @@ sys.path.insert(0, str(RACINE / "tools"))
 
 import ci_shard as CS  # noqa: E402
 
+from tests import coverage_contract_harness as coverage_harness  # noqa: E402
+
 
 def test_la_partition_est_complete_et_sans_doublon():
     fichiers = CS.fichiers_de_test(RACINE)
@@ -81,6 +83,20 @@ def test_le_cli_rend_des_chemins_utilisables_par_pytest(capsys):
     sortie = capsys.readouterr().out.strip()
     chemins = sortie.split(" ")
     assert chemins and all(c.startswith("tests/") and c.endswith(".py") for c in chemins)
+
+
+def test_les_contrats_coverage_lourds_exigent_un_shard_explicite(monkeypatch):
+    monkeypatch.delenv("HYPERSMART_COVERAGE_CONTRACT_SHARD", raising=False)
+    with pytest.raises(pytest.skip.Exception):
+        coverage_harness.require_explicit_coverage_shard()
+
+    monkeypatch.setenv("HYPERSMART_COVERAGE_CONTRACT_SHARD", "7")
+    monkeypatch.setenv("COVERAGE_SHARDS", "32")
+    assert coverage_harness.require_explicit_coverage_shard() == (7, 32)
+
+    monkeypatch.setenv("HYPERSMART_COVERAGE_CONTRACT_SHARD", "32")
+    with pytest.raises(AssertionError, match="shard coverage invalide"):
+        coverage_harness.require_explicit_coverage_shard()
 
 
 # ═══════════════ le workflow lui-même ═══════════════

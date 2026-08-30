@@ -11,6 +11,7 @@ CALIBRATION_FIXTURE = RACINE / "tests" / "fixtures" / "empirical_edge_TEST_FIXTU
 
 # Prefixes de TOUTES les variables de calibrage du runtime. Un test ne doit JAMAIS en heriter.
 PREFIXES_RUNTIME = ("HYPERSMART_", "HL_")
+TEST_CONTROL_ENV_ALLOWLIST = {"HYPERSMART_COVERAGE_CONTRACT_SHARD"}
 PORTABLE_CONTRACT = RACINE / "tests" / "test_extracted_portable_contract.py"
 
 
@@ -97,7 +98,11 @@ def env_runtime_neutre(monkeypatch: pytest.MonkeyPatch) -> None:
 
     if _portable_extracted_collection_mode():
         return
-    for cle in [k for k in os.environ if k.startswith(PREFIXES_RUNTIME)]:
+    for cle in [
+        k
+        for k in os.environ
+        if k.startswith(PREFIXES_RUNTIME) and k not in TEST_CONTROL_ENV_ALLOWLIST
+    ]:
         monkeypatch.delenv(cle, raising=False)
 
 

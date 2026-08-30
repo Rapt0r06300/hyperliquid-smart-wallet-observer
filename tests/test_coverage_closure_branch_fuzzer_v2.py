@@ -679,6 +679,7 @@ def _exercise_properties(
 
 
 def test_sharded_branch_fuzzer_v2_exhausts_real_safe_paths(tmp_path, monkeypatch) -> None:
+    harness.require_explicit_coverage_shard()
     _install_offline_guards(monkeypatch)
     monkeypatch.setattr("time.sleep", lambda *_args, **_kwargs: None)
     for name, value in {

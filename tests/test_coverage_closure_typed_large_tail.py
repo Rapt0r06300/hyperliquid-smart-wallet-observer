@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import importlib
 import inspect
-import os
 import pkgutil
 from builtins import BaseExceptionGroup
 from pathlib import Path
@@ -110,6 +109,7 @@ def _exercise_class_methods(targets: tuple[str, ...], tmp_path: Path) -> tuple[i
 
 
 def test_typed_large_tail_contracts_are_offline_bounded_and_shardable(tmp_path, monkeypatch) -> None:
+    shard, total = harness.require_explicit_coverage_shard()
     # Le Dummy du harnais doit se comporter comme un objet Python normal pour les attributs
     # protocolaires. Retourner un nouveau Dummy pour ``__clause_element__`` faisait boucler
     # SQLAlchemy dans ``hasattr`` jusqu'au timeout du shard 23.
@@ -125,14 +125,7 @@ def test_typed_large_tail_contracts_are_offline_bounded_and_shardable(tmp_path, 
     modules = _large_modules()
     assert len(modules) >= 100
 
-    shard_raw = os.getenv("HYPERSMART_COVERAGE_CONTRACT_SHARD")
-    if shard_raw is None:
-        targets = modules
-    else:
-        shard = int(shard_raw)
-        total = int(os.getenv("COVERAGE_SHARDS", "8"))
-        assert 0 <= shard < total
-        targets = modules[shard::total]
+    targets = modules[shard::total]
 
     imported, attempts, completed, controlled_failures = run_typed_contracts(
         targets,
