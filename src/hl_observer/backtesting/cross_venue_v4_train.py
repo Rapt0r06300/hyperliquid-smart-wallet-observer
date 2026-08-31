@@ -17,15 +17,16 @@ from typing import Any
 from hl_observer.backtesting import cross_venue_v3_train as v3
 from hl_observer.backtesting.cross_venue_certified import BBO_SOURCE_MODE, SOURCE_MODE
 from hl_observer.backtesting.train_statistics import stable_hash, summarize_train_rows
+from hl_observer.economics.assumptions import EconomicRunMode
+from hl_observer.economics.families import FamilyEconomicContract
 
 SCHEMA_VERSION = "hypersmart.cross_venue_v4_train.v1"
 MECHANISM = "cross_venue_v4_executable_net_exit"
 
-# Fixed before any held-out evaluation. The 30 bps entry floor covers the
-# measured 18 bps four-fill taker burden plus a 12 bps adverse-selection
-# reserve. Stops below that reserve mostly realize the fee burden instantly.
+# Fixed before any held-out evaluation. The entry floor is derived from the
+# four-fill fee contract plus this predeclared adverse-selection reserve.
 LEADER_THRESHOLD_BPS = 8.0
-MIN_ENTRY_EXECUTABLE_EDGE_BPS = 30.0
+ADVERSE_SELECTION_RESERVE_BPS = 12.0
 MAX_HOLD_MS = 30_000
 MAX_EXIT_DELAY_MS = 1_000
 TAKE_PROFIT_NET_BPS = (2.0, 4.0, 8.0, 12.0)
@@ -35,6 +36,19 @@ MIN_TRAIN_TRADES = 8
 MIN_DISTINCT_DAYS = 3
 MAX_TOP_POSITIVE_SHARE = 0.60
 FAMILY_ALPHA = 0.05
+
+
+def minimum_entry_executable_edge_bps(
+    mode: EconomicRunMode | str = EconomicRunMode.EXPLORATORY,
+) -> float:
+    return float(
+        v3.economic_contract(mode)
+        .registry.get("cross_venue.minimum_entry_edge_bps")
+        .value
+    )
+
+
+MIN_ENTRY_EXECUTABLE_EDGE_BPS = minimum_entry_executable_edge_bps()
 
 
 def _policy_trade_id(
@@ -56,9 +70,21 @@ def _build_train_paths(
     depth: Mapping[str, Sequence[tuple[float, float]]],
     *,
     train_end_ms: float,
+    economic: FamilyEconomicContract | None = None,
 ) -> tuple[list[dict[str, Any]], dict[str, int]]:
     """Build causal entry-to-expiry paths once for the finite policy family."""
 
+    contract = economic or v3.economic_contract()
+    contract.registry.assert_consistent()
+    minimum_entry_edge = float(
+        contract.registry.get("cross_venue.minimum_entry_edge_bps").value
+    )
+    fees_round_trip = float(
+        contract.registry.get("cross_venue.round_trip_fee_bps").value
+    )
+    notional_usd = float(contract.registry.get("cross_venue.paper_notional_usd").value)
+    latency_ms = float(contract.registry.get("cross_venue.entry_latency_ms").value)
+    max_book_age_ms = float(contract.registry.get("cross_venue.max_book_age_ms").value)
     paths: list[dict[str, Any]] = []
     diagnostics: dict[str, int] = defaultdict(int)
     for coin in v3.PREDECLARED_COINS:
@@ -74,7 +100,7 @@ def _build_train_paths(
         for impulse in impulses:
             entry_match = v3._first_at_or_after(
                 rows,
-                float(impulse["detect_ts_ms"]) + v3.LATENCY_MS,
+                float(impulse["detect_ts_ms"]) + latency_ms,
                 max_delay_ms=v3.MAX_ENTRY_DELAY_MS,
             )
             if entry_match is None:
@@ -88,8 +114,12 @@ def _build_train_paths(
             if entry_basis is None or int(impulse["direction"]) * float(entry_basis) <= 0:
                 diagnostics["BASIS_REVERSED_BEFORE_ENTRY"] += 1
                 continue
-            entry_capacity = v3._capacity_at(coin_depth, float(entry[0]))
-            if entry_capacity is None or entry_capacity[0] < v3.NOTIONAL_USD:
+            entry_capacity = v3._capacity_at(
+                coin_depth,
+                float(entry[0]),
+                max_age_ms=max_book_age_ms,
+            )
+            if entry_capacity is None or entry_capacity[0] < notional_usd:
                 diagnostics["ENTRY_CAPACITY_REJECTED"] += 1
                 continue
             executable_entry_edge = v3._entry_executable_edge_bps(
@@ -98,7 +128,7 @@ def _build_train_paths(
             )
             if (
                 executable_entry_edge is None
-                or executable_entry_edge < MIN_ENTRY_EXECUTABLE_EDGE_BPS
+                or executable_entry_edge < minimum_entry_edge
             ):
                 diagnostics["ENTRY_EDGE_RESERVE_REJECTED"] += 1
                 continue
@@ -111,7 +141,7 @@ def _build_train_paths(
                 timestamp = float(candidate[0])
                 if timestamp > float(train_end_ms):
                     break
-                if timestamp - previous_ts > v3.MAX_OBSERVATION_GAP_MS:
+                if timestamp - previous_ts > max_book_age_ms:
                     diagnostics["OBSERVATION_GAP_INVALIDATED"] += 1
                     path_invalidated = True
                     break
@@ -119,16 +149,20 @@ def _build_train_paths(
                 elapsed_ms = timestamp - float(entry[0])
                 if elapsed_ms > MAX_HOLD_MS + MAX_EXIT_DELAY_MS:
                     break
-                exit_capacity = v3._capacity_at(coin_depth, timestamp)
-                if exit_capacity is None or exit_capacity[0] < v3.NOTIONAL_USD:
+                exit_capacity = v3._capacity_at(
+                    coin_depth,
+                    timestamp,
+                    max_age_ms=max_book_age_ms,
+                )
+                if exit_capacity is None or exit_capacity[0] < notional_usd:
                     diagnostics["EXIT_CAPACITY_SKIPPED"] += 1
                     continue
                 cycle = v3._executable_cycle(
                     entry,
                     candidate,
                     direction=int(impulse["direction"]),
-                    notional_usd=v3.NOTIONAL_USD,
-                    fees_bps=v3.FEES_ROUND_TRIP_BPS,
+                    notional_usd=notional_usd,
+                    fees_bps=fees_round_trip,
                     entry_capacity=entry_capacity[0],
                     exit_capacity=exit_capacity[0],
                     detect_ts_ms=float(impulse["detect_ts_ms"]),
@@ -166,6 +200,8 @@ def _build_train_paths(
                     "leader_venue": impulse["leader_venue"],
                     "direction": int(impulse["direction"]),
                     "entry_executable_edge_bps": float(executable_entry_edge),
+                    "minimum_entry_executable_edge_bps": minimum_entry_edge,
+                    "assumption_snapshot_hash": contract.registry.snapshot_hash(),
                     "cycles": cycles,
                 }
             )
@@ -219,7 +255,11 @@ def _settle_policy(
                 "take_profit_net_bps": float(take_profit_net_bps),
                 "stop_loss_net_bps": float(stop_loss_net_bps),
                 "max_hold_ms": MAX_HOLD_MS,
-                "minimum_entry_executable_edge_bps": MIN_ENTRY_EXECUTABLE_EDGE_BPS,
+                "minimum_entry_executable_edge_bps": float(
+                    path.get("minimum_entry_executable_edge_bps")
+                    or MIN_ENTRY_EXECUTABLE_EDGE_BPS
+                ),
+                "assumption_snapshot_hash": path.get("assumption_snapshot_hash"),
                 "paper_read_only": True,
                 "real_execution": False,
             }
@@ -237,13 +277,16 @@ def replay_policy_train(
     take_profit_net_bps: float,
     stop_loss_net_bps: float,
     train_end_ms: float,
+    economic_mode: EconomicRunMode | str = EconomicRunMode.EXPLORATORY,
 ) -> tuple[list[dict[str, Any]], dict[str, int]]:
     """Replay one policy over TRAIN rows; exposed for deterministic tests."""
 
+    contract = v3.economic_contract(economic_mode)
     paths, path_diagnostics = _build_train_paths(
         series,
         depth,
         train_end_ms=float(train_end_ms),
+        economic=contract,
     )
     trades, policy_diagnostics = _settle_policy(
         paths,
@@ -268,9 +311,22 @@ def explore_cross_venue_v4_train(
     depth: Mapping[str, Sequence[tuple[float, float]]],
     *,
     source_mode: str,
+    economic_mode: EconomicRunMode | str = EconomicRunMode.EXPLORATORY,
 ) -> dict[str, Any]:
     """Select only from TRAIN, with a multiplicity-adjusted finite grid."""
 
+    contract = v3.economic_contract(economic_mode)
+    economic_receipt = contract.receipt()
+    minimum_entry_edge = float(
+        contract.registry.get("cross_venue.minimum_entry_edge_bps").value
+    )
+    fees_round_trip = float(
+        contract.registry.get("cross_venue.round_trip_fee_bps").value
+    )
+    fee_hl = float(contract.registry.get("fee.taker.hyperliquid.bps").value)
+    fee_bin = float(contract.registry.get("fee.taker.binance.bps").value)
+    latency_ms = float(contract.registry.get("cross_venue.entry_latency_ms").value)
+    notional_usd = float(contract.registry.get("cross_venue.paper_notional_usd").value)
     all_ts = sorted(
         float(row[0])
         for coin in v3.PREDECLARED_COINS
@@ -287,6 +343,7 @@ def explore_cross_venue_v4_train(
             "selection_scope": "TRAIN_ONLY_PRE_FREEZE",
             "heldout_evaluated": False,
             "source_mode": source_mode,
+            "economic_contract": economic_receipt,
             "paper_read_only": True,
             "real_execution": False,
         }
@@ -297,6 +354,7 @@ def explore_cross_venue_v4_train(
         series,
         depth,
         train_end_ms=train_end_ms,
+        economic=contract,
     )
     grid = [
         (take_profit, stop_loss)
@@ -362,13 +420,13 @@ def explore_cross_venue_v4_train(
         {
             "mechanism": MECHANISM,
             "leader_threshold_bps": LEADER_THRESHOLD_BPS,
-            "minimum_entry_executable_edge_bps": MIN_ENTRY_EXECUTABLE_EDGE_BPS,
+            "minimum_entry_executable_edge_bps": minimum_entry_edge,
             "take_profit_net_bps": selected["take_profit_net_bps"],
             "stop_loss_net_bps": selected["stop_loss_net_bps"],
             "max_hold_ms": MAX_HOLD_MS,
-            "latency_ms": v3.LATENCY_MS,
-            "notional_usd": v3.NOTIONAL_USD,
-            "fees_round_trip_bps": v3.FEES_ROUND_TRIP_BPS,
+            "latency_ms": latency_ms,
+            "notional_usd": notional_usd,
+            "fees_round_trip_bps": fees_round_trip,
             "fee_fill_count": 4,
             "spread_embedded_in_executable_prices": True,
             "predeclared_coins": list(v3.PREDECLARED_COINS),
@@ -389,7 +447,7 @@ def explore_cross_venue_v4_train(
         "train_bounds": {"start_ms": start_ms, "end_ms": train_end_ms, "full_end_ms": end_ms},
         "fixed_grid": {
             "leader_threshold_bps": LEADER_THRESHOLD_BPS,
-            "minimum_entry_executable_edge_bps": MIN_ENTRY_EXECUTABLE_EDGE_BPS,
+            "minimum_entry_executable_edge_bps": minimum_entry_edge,
             "take_profit_net_bps": list(TAKE_PROFIT_NET_BPS),
             "stop_loss_net_bps": list(STOP_LOSS_NET_BPS),
             "max_hold_ms": MAX_HOLD_MS,
@@ -397,13 +455,14 @@ def explore_cross_venue_v4_train(
             "trial_count": trial_count,
         },
         "cost_contract": {
-            "fee_bps_hyperliquid_per_fill": v3.FEE_BPS_HYPERLIQUID,
-            "fee_bps_binance_per_fill": v3.FEE_BPS_BINANCE,
-            "fees_round_trip_bps": v3.FEES_ROUND_TRIP_BPS,
+            "fee_bps_hyperliquid_per_fill": fee_hl,
+            "fee_bps_binance_per_fill": fee_bin,
+            "fees_round_trip_bps": fees_round_trip,
             "fee_fill_count": 4,
             "spread_embedded_in_executable_prices": True,
             "exit_thresholds_use_liquidatable_net_bps": True,
         },
+        "economic_contract": economic_receipt,
         "path_diagnostics": path_diagnostics,
         "selected": selected,
         "diagnostic_best_train_variant": diagnostic_best,
@@ -416,9 +475,11 @@ def explore_cross_venue_v4_train(
 
 
 __all__ = [
+    "ADVERSE_SELECTION_RESERVE_BPS",
     "MECHANISM",
     "MIN_ENTRY_EXECUTABLE_EDGE_BPS",
     "SCHEMA_VERSION",
     "explore_cross_venue_v4_train",
+    "minimum_entry_executable_edge_bps",
     "replay_policy_train",
 ]

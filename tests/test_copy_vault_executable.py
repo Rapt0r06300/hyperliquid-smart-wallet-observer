@@ -3,6 +3,8 @@ from __future__ import annotations
 import json
 import math
 
+import pytest
+
 from hl_observer.backtesting.copy_vault_executable import (
     CHECKPOINT_COLLECTOR_PROTOCOL,
     COPY_DELAY_MS,
@@ -20,6 +22,7 @@ from hl_observer.backtesting.copy_vault_executable import (
     temporal_bounds,
     temporal_evidence,
 )
+from hl_observer.economics.assumptions import EconomicConfigError, EconomicRunMode
 
 
 def _entry(
@@ -421,6 +424,44 @@ def test_executeur_lie_les_trois_books_au_metaordre_exact() -> None:
     assert reason == "LIQUIDATABLE_NET"
     assert trade is not None
     assert trade["book_binding_method"] == "EXACT_METAORDER_CHECKPOINTS"
+
+
+def test_executeur_certifiable_lie_frais_et_raisons_zero_canoniques() -> None:
+    metaorder = cluster_metaorders([_entry("economic", 1_000, action="OPEN")])[0][0]
+    identifier = metaorder["metaorder_id"]
+    books = [
+        _checkpoint_book(identifier, "REFERENCE", 1_000, 1_000, line=1),
+        _checkpoint_book(identifier, "ENTRY", 61_000, 61_000, line=2),
+        _checkpoint_book(identifier, "EXIT_300000", 361_000, 361_000, line=3),
+    ]
+
+    trade, reason = execute_metaorder(
+        metaorder,
+        books,
+        horizon_ms=300_000,
+        economic_mode=EconomicRunMode.CERTIFIABLE,
+    )
+
+    assert reason == "LIQUIDATABLE_NET"
+    assert trade is not None
+    assert trade["fee_provenance_source"] == "CANONICAL_ECONOMIC_ASSUMPTION_REGISTRY"
+    assert trade["economic_contract"]["certification"]["ready"] is True
+    assert len(trade["assumption_snapshot_hash"]) == 64
+    assert trade["cost_component_receipts"]["slippage"]["zero_reason"] == (
+        "NOT_APPLICABLE"
+    )
+
+
+def test_executeur_certifiable_refuse_un_override_local_de_frais() -> None:
+    metaorder = cluster_metaorders([_entry("economic", 1_000, action="OPEN")])[0][0]
+    with pytest.raises(EconomicConfigError, match="fee_bps local interdit"):
+        execute_metaorder(
+            metaorder,
+            [],
+            horizon_ms=300_000,
+            fee_bps=1.0,
+            economic_mode=EconomicRunMode.CERTIFIABLE,
+        )
 
 
 def test_executeur_ne_peut_pas_emprunter_les_checkpoints_dun_autre_metaordre() -> None:

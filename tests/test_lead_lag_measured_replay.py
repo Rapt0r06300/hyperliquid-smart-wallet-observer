@@ -5,6 +5,7 @@ from pathlib import Path
 
 import pytest
 
+from hl_observer.economics.assumptions import EconomicConfigError, EconomicRunMode
 from hl_observer.simulation.lead_lag_measured_replay import (
     ADMISSION_PREDECLARED_ALL_SIGNALS,
     load_runtime_latency_evidence,
@@ -99,6 +100,59 @@ def test_measured_replay_uses_delayed_executable_l2_and_full_capacity() -> None:
     assert all_fills > 0
     assert replay["fee_source"] == "FROZEN_CONSERVATIVE_TAKER_ROUND_TRIP"
     assert replay["latency_rule"] == "P95_EMBEDDED_IN_DELAYED_ENTRY_PRICE_NO_DOUBLE_CHARGE"
+
+
+def test_replay_certifiable_emploie_les_frais_canoniques_et_lie_le_ledger() -> None:
+    tape, l2 = _fixture()
+    replay = replay_measured_lead_lag(
+        tape,
+        l2,
+        shock_threshold_bps=8.0,
+        horizon_ms=100,
+        latency_evidence=_latency(),
+        min_history=1,
+        min_episodes=1,
+        economic_mode=EconomicRunMode.CERTIFIABLE,
+    )
+
+    assert replay["fee_bps"] == 9.0
+    assert replay["fee_provenance_source"] == "CANONICAL_ECONOMIC_ASSUMPTION_REGISTRY"
+    assert replay["economic_contract"]["certification"]["ready"] is True
+    pnl_rows = [
+        row
+        for rows in replay["ledgers"].values()
+        for row in rows
+        if row.get("evt") == "PNL"
+    ]
+    assert pnl_rows
+    for row in pnl_rows:
+        assert row["assumption_snapshot_hash"] == replay["assumption_snapshot_hash"]
+        assert set(row["cost_component_receipts"]) == {
+            "fees",
+            "spread",
+            "slippage",
+            "latency",
+        }
+        assert row["cost_component_receipts"]["slippage"]["zero_reason"] == (
+            "NOT_APPLICABLE"
+        )
+        assert row["cost_component_receipts"]["latency"]["zero_reason"] == (
+            "EMBEDDED_IN_EXECUTABLE_PRICE"
+        )
+
+
+def test_replay_certifiable_refuse_un_override_local_de_frais() -> None:
+    tape, l2 = _fixture()
+    with pytest.raises(EconomicConfigError, match="fee_bps local interdit"):
+        replay_measured_lead_lag(
+            tape,
+            l2,
+            shock_threshold_bps=8.0,
+            horizon_ms=100,
+            latency_evidence=_latency(),
+            fee_bps=1.0,
+            economic_mode=EconomicRunMode.CERTIFIABLE,
+        )
 
 
 def test_last_causal_book_remains_executable_until_a_new_update() -> None:

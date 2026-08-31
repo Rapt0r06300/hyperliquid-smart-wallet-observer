@@ -102,3 +102,21 @@ def test_cross_v4_reste_train_only_et_ne_gel_pas_un_echantillon_insuffisant() ->
     assert result["fixed_grid"]["trial_count"] == 160
     assert result["cost_contract"]["exit_thresholds_use_liquidatable_net_bps"] is True
     assert result["real_execution"] is False
+
+
+def test_cross_v4_recalcule_frais_et_edge_depuis_le_registre(monkeypatch) -> None:
+    monkeypatch.setenv("HYPERSMART_FEE_HYPERLIQUID_BPS", "6")
+    series, depth, _ = _profitable_path()
+
+    result = explore_cross_venue_v4_train(
+        series,
+        depth,
+        source_mode=BBO_SOURCE_MODE,
+    )
+
+    assert result["cost_contract"]["fee_bps_hyperliquid_per_fill"] == 6.0
+    assert result["cost_contract"]["fees_round_trip_bps"] == 21.0
+    assert result["fixed_grid"]["minimum_entry_executable_edge_bps"] == 33.0
+    assert result["economic_contract"]["values"][
+        "cross_venue.paper_notional_usd"
+    ] == 15.0

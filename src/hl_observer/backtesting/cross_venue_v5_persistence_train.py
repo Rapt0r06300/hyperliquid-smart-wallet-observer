@@ -19,6 +19,8 @@ from hl_observer.backtesting import cross_venue_v3_train as v3
 from hl_observer.backtesting import cross_venue_v4_train as v4
 from hl_observer.backtesting.cross_venue_certified import BBO_SOURCE_MODE, SOURCE_MODE
 from hl_observer.backtesting.train_statistics import stable_hash, summarize_train_rows
+from hl_observer.economics.assumptions import EconomicRunMode
+from hl_observer.economics.families import FamilyEconomicContract
 
 SCHEMA_VERSION = "hypersmart.cross_venue_v5_persistence_train.v1"
 MECHANISM = "cross_venue_v5_persistent_executable_dislocation"
@@ -67,6 +69,9 @@ def _confirmed_entry(
     max_confirmation_window_ms: int,
     train_end_ms: float,
     diagnostics: dict[str, int],
+    minimum_entry_edge_bps: float,
+    notional_usd: float,
+    max_book_age_ms: float,
 ) -> tuple[int, Sequence[Any], tuple[float, float], int] | None:
     """Return the last strictly causal confirmation, never the first snapshot."""
 
@@ -90,7 +95,7 @@ def _confirmed_entry(
             if gap_ms < 0:
                 diagnostics["CONFIRMATION_NON_MONOTONIC"] += 1
                 return None
-            if gap_ms > v3.MAX_OBSERVATION_GAP_MS:
+            if gap_ms > float(max_book_age_ms):
                 diagnostics["CONFIRMATION_GAP_INVALIDATED"] += 1
                 return None
 
@@ -99,11 +104,11 @@ def _confirmed_entry(
             diagnostics["CONFIRMATION_BASIS_REVERSED"] += 1
             return None
         executable_edge = v3._entry_executable_edge_bps(row, direction=int(direction))
-        if executable_edge is None or executable_edge < v4.MIN_ENTRY_EXECUTABLE_EDGE_BPS:
+        if executable_edge is None or executable_edge < float(minimum_entry_edge_bps):
             diagnostics["CONFIRMATION_EDGE_LOST"] += 1
             return None
-        capacity = v3._capacity_at(depth, timestamp)
-        if capacity is None or capacity[0] < v3.NOTIONAL_USD:
+        capacity = v3._capacity_at(depth, timestamp, max_age_ms=float(max_book_age_ms))
+        if capacity is None or capacity[0] < float(notional_usd):
             diagnostics["CONFIRMATION_CAPACITY_REJECTED"] += 1
             return None
 
@@ -128,7 +133,19 @@ def _build_train_paths(
     confirmation_count: int,
     max_confirmation_window_ms: int,
     train_end_ms: float,
+    economic: FamilyEconomicContract | None = None,
 ) -> tuple[list[dict[str, Any]], dict[str, int]]:
+    contract = economic or v3.economic_contract()
+    contract.registry.assert_consistent()
+    minimum_entry_edge = float(
+        contract.registry.get("cross_venue.minimum_entry_edge_bps").value
+    )
+    fees_round_trip = float(
+        contract.registry.get("cross_venue.round_trip_fee_bps").value
+    )
+    notional_usd = float(contract.registry.get("cross_venue.paper_notional_usd").value)
+    latency_ms = float(contract.registry.get("cross_venue.entry_latency_ms").value)
+    max_book_age_ms = float(contract.registry.get("cross_venue.max_book_age_ms").value)
     paths: list[dict[str, Any]] = []
     diagnostics: dict[str, int] = defaultdict(int)
     for coin in v3.PREDECLARED_COINS:
@@ -144,7 +161,7 @@ def _build_train_paths(
         for impulse in impulses:
             delayed = v3._first_at_or_after(
                 rows,
-                float(impulse["detect_ts_ms"]) + v3.LATENCY_MS,
+                float(impulse["detect_ts_ms"]) + latency_ms,
                 max_delay_ms=v3.MAX_ENTRY_DELAY_MS,
             )
             if delayed is None:
@@ -160,6 +177,9 @@ def _build_train_paths(
                 max_confirmation_window_ms=int(max_confirmation_window_ms),
                 train_end_ms=float(train_end_ms),
                 diagnostics=diagnostics,
+                minimum_entry_edge_bps=minimum_entry_edge,
+                notional_usd=notional_usd,
+                max_book_age_ms=max_book_age_ms,
             )
             if confirmed is None:
                 continue
@@ -184,7 +204,7 @@ def _build_train_paths(
                 if timestamp <= previous_ts:
                     diagnostics["NON_CAUSAL_EXIT_OBSERVATION_SKIPPED"] += 1
                     continue
-                if timestamp - previous_ts > v3.MAX_OBSERVATION_GAP_MS:
+                if timestamp - previous_ts > max_book_age_ms:
                     diagnostics["OBSERVATION_GAP_INVALIDATED"] += 1
                     path_invalidated = True
                     break
@@ -192,16 +212,20 @@ def _build_train_paths(
                 elapsed_ms = timestamp - float(entry[0])
                 if elapsed_ms > v4.MAX_HOLD_MS + v4.MAX_EXIT_DELAY_MS:
                     break
-                exit_capacity = v3._capacity_at(coin_depth, timestamp)
-                if exit_capacity is None or exit_capacity[0] < v3.NOTIONAL_USD:
+                exit_capacity = v3._capacity_at(
+                    coin_depth,
+                    timestamp,
+                    max_age_ms=max_book_age_ms,
+                )
+                if exit_capacity is None or exit_capacity[0] < notional_usd:
                     diagnostics["EXIT_CAPACITY_SKIPPED"] += 1
                     continue
                 cycle = v3._executable_cycle(
                     entry,
                     candidate,
                     direction=int(impulse["direction"]),
-                    notional_usd=v3.NOTIONAL_USD,
-                    fees_bps=v3.FEES_ROUND_TRIP_BPS,
+                    notional_usd=notional_usd,
+                    fees_bps=fees_round_trip,
                     entry_capacity=entry_capacity[0],
                     exit_capacity=exit_capacity[0],
                     detect_ts_ms=float(impulse["detect_ts_ms"]),
@@ -220,6 +244,8 @@ def _build_train_paths(
                         "confirmation_count": int(confirmation_count),
                         "max_confirmation_window_ms": int(max_confirmation_window_ms),
                         "confirmation_duration_ms": int(confirmation_duration_ms),
+                        "minimum_entry_executable_edge_bps": minimum_entry_edge,
+                        "assumption_snapshot_hash": contract.registry.snapshot_hash(),
                     }
                 )
                 cycles.append(cycle)
@@ -252,6 +278,8 @@ def _build_train_paths(
                     "confirmation_count": int(confirmation_count),
                     "max_confirmation_window_ms": int(max_confirmation_window_ms),
                     "confirmation_duration_ms": int(confirmation_duration_ms),
+                    "minimum_entry_executable_edge_bps": minimum_entry_edge,
+                    "assumption_snapshot_hash": contract.registry.snapshot_hash(),
                     "cycles": cycles,
                 }
             )
@@ -307,7 +335,11 @@ def _settle_policy(
                 "take_profit_net_bps": float(take_profit_net_bps),
                 "stop_loss_net_bps": float(stop_loss_net_bps),
                 "max_hold_ms": v4.MAX_HOLD_MS,
-                "minimum_entry_executable_edge_bps": v4.MIN_ENTRY_EXECUTABLE_EDGE_BPS,
+                "minimum_entry_executable_edge_bps": float(
+                    path.get("minimum_entry_executable_edge_bps")
+                    or v4.MIN_ENTRY_EXECUTABLE_EDGE_BPS
+                ),
+                "assumption_snapshot_hash": path.get("assumption_snapshot_hash"),
                 "paper_read_only": True,
                 "real_execution": False,
             }
@@ -327,13 +359,16 @@ def replay_persistence_policy_train(
     take_profit_net_bps: float,
     stop_loss_net_bps: float,
     train_end_ms: float,
+    economic_mode: EconomicRunMode | str = EconomicRunMode.EXPLORATORY,
 ) -> tuple[list[dict[str, Any]], dict[str, int]]:
+    contract = v3.economic_contract(economic_mode)
     paths, path_diagnostics = _build_train_paths(
         series,
         depth,
         confirmation_count=int(confirmation_count),
         max_confirmation_window_ms=int(max_confirmation_window_ms),
         train_end_ms=float(train_end_ms),
+        economic=contract,
     )
     trades, policy_diagnostics = _settle_policy(
         paths,
@@ -358,7 +393,20 @@ def explore_cross_venue_v5_train(
     depth: Mapping[str, Sequence[tuple[float, float]]],
     *,
     source_mode: str,
+    economic_mode: EconomicRunMode | str = EconomicRunMode.EXPLORATORY,
 ) -> dict[str, Any]:
+    contract = v3.economic_contract(economic_mode)
+    economic_receipt = contract.receipt()
+    minimum_entry_edge = float(
+        contract.registry.get("cross_venue.minimum_entry_edge_bps").value
+    )
+    fees_round_trip = float(
+        contract.registry.get("cross_venue.round_trip_fee_bps").value
+    )
+    fee_hl = float(contract.registry.get("fee.taker.hyperliquid.bps").value)
+    fee_bin = float(contract.registry.get("fee.taker.binance.bps").value)
+    latency_ms = float(contract.registry.get("cross_venue.entry_latency_ms").value)
+    notional_usd = float(contract.registry.get("cross_venue.paper_notional_usd").value)
     all_ts = sorted(
         float(row[0])
         for coin in v3.PREDECLARED_COINS
@@ -375,6 +423,7 @@ def explore_cross_venue_v5_train(
             "selection_scope": "TRAIN_ONLY_PRE_FREEZE",
             "heldout_evaluated": False,
             "source_mode": source_mode,
+            "economic_contract": economic_receipt,
             "paper_read_only": True,
             "real_execution": False,
         }
@@ -396,6 +445,7 @@ def explore_cross_venue_v5_train(
             confirmation_count=confirmation_count,
             max_confirmation_window_ms=max_window_ms,
             train_end_ms=train_end_ms,
+            economic=contract,
         )
         path_diagnostics[f"{confirmation_count}_within_{max_window_ms}ms"] = diagnostics
         for take_profit, stop_loss in exit_grid:
@@ -458,15 +508,15 @@ def explore_cross_venue_v5_train(
         {
             "mechanism": MECHANISM,
             "leader_threshold_bps": v4.LEADER_THRESHOLD_BPS,
-            "minimum_entry_executable_edge_bps": v4.MIN_ENTRY_EXECUTABLE_EDGE_BPS,
+            "minimum_entry_executable_edge_bps": minimum_entry_edge,
             "confirmation_count": selected["confirmation_count"],
             "max_confirmation_window_ms": selected["max_confirmation_window_ms"],
             "take_profit_net_bps": selected["take_profit_net_bps"],
             "stop_loss_net_bps": selected["stop_loss_net_bps"],
             "max_hold_ms": v4.MAX_HOLD_MS,
-            "latency_ms": v3.LATENCY_MS,
-            "notional_usd": v3.NOTIONAL_USD,
-            "fees_round_trip_bps": v3.FEES_ROUND_TRIP_BPS,
+            "latency_ms": latency_ms,
+            "notional_usd": notional_usd,
+            "fees_round_trip_bps": fees_round_trip,
             "fee_fill_count": 4,
             "spread_embedded_in_executable_prices": True,
             "predeclared_coins": list(v3.PREDECLARED_COINS),
@@ -496,7 +546,7 @@ def explore_cross_venue_v5_train(
         },
         "fixed_grid": {
             "leader_threshold_bps": v4.LEADER_THRESHOLD_BPS,
-            "minimum_entry_executable_edge_bps": v4.MIN_ENTRY_EXECUTABLE_EDGE_BPS,
+            "minimum_entry_executable_edge_bps": minimum_entry_edge,
             "confirmation_policies": [
                 {"count": count, "max_window_ms": window}
                 for count, window in CONFIRMATION_POLICIES
@@ -508,14 +558,15 @@ def explore_cross_venue_v5_train(
             "trial_count": trial_count,
         },
         "cost_contract": {
-            "fee_bps_hyperliquid_per_fill": v3.FEE_BPS_HYPERLIQUID,
-            "fee_bps_binance_per_fill": v3.FEE_BPS_BINANCE,
-            "fees_round_trip_bps": v3.FEES_ROUND_TRIP_BPS,
+            "fee_bps_hyperliquid_per_fill": fee_hl,
+            "fee_bps_binance_per_fill": fee_bin,
+            "fees_round_trip_bps": fees_round_trip,
             "fee_fill_count": 4,
             "spread_embedded_in_executable_prices": True,
             "confirmation_enters_on_last_observation": True,
             "exit_thresholds_use_liquidatable_net_bps": True,
         },
+        "economic_contract": economic_receipt,
         "path_diagnostics": path_diagnostics,
         "selected": selected,
         "diagnostic_best_train_variant": diagnostic_best,

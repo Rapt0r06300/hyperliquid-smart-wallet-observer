@@ -27,6 +27,14 @@ from pathlib import Path
 from typing import Any
 
 from hl_observer.backtesting import lead_lag_shadow
+from hl_observer.economics.assumptions import (
+    CostComponentReceipt,
+    EconomicConfigError,
+    EconomicRunMode,
+    ZeroCostReason,
+    is_certifiable_mode,
+)
+from hl_observer.economics.families import build_lead_lag_contract
 from hl_observer.mega_cablage.replay_driver import separer_par_episodes
 from hl_observer.ops import lab_metriques as M
 
@@ -34,7 +42,11 @@ DEFAULT_DECISIONS = Path("runtime") / "data" / "lead_lag_event_decisions.jsonl"
 DEFAULT_MIN_LATENCY_SAMPLES = 20
 DEFAULT_MAX_BOOK_AGE_MS = 750.0
 DEFAULT_MAX_EXECUTION_OBSERVATION_DELAY_MS = 750.0
-DEFAULT_FEE_BPS = 9.0
+DEFAULT_FEE_BPS = float(
+    build_lead_lag_contract()
+    .registry.get("lead_lag.round_trip_fee_bps")
+    .value
+)
 LATENCY_KIND_LOCAL_MONOTONIC = "LOCAL_MONOTONIC_DISPATCH"
 ADMISSION_PRIOR_MEAN_POSITIVE = "PRIOR_MEAN_POSITIVE"
 ADMISSION_PREDECLARED_ALL_SIGNALS = "PREDECLARED_ALL_CAUSAL_SIGNALS"
@@ -259,6 +271,40 @@ def _settle(
         pnl_usd,
         abs_tol=1e-7,
     )
+    cost_component_receipts = {
+        "fees": CostComponentReceipt(
+            component="fees",
+            amount_usd=fees_usd,
+            zero_reason=ZeroCostReason.MEASURED_ZERO if fees_usd == 0.0 else None,
+            formula_id="lead_lag.round_trip_fee.v1",
+            reality_model_version="lead_lag_delayed_executable_bbo.v2",
+            provenance_ids=("lead_lag.round_trip_fee_bps", "lead_lag.paper_notional_usd"),
+        ).as_dict(),
+        "spread": CostComponentReceipt(
+            component="spread",
+            amount_usd=spread_usd,
+            zero_reason=ZeroCostReason.MEASURED_ZERO if spread_usd == 0.0 else None,
+            formula_id="lead_lag.executable_bid_ask_spread.v1",
+            reality_model_version="lead_lag_delayed_executable_bbo.v2",
+            provenance_ids=("entry_book.bid_ask", "exit_book.bid_ask"),
+        ).as_dict(),
+        "slippage": CostComponentReceipt(
+            component="slippage",
+            amount_usd=slippage_usd,
+            zero_reason=ZeroCostReason.NOT_APPLICABLE,
+            formula_id="lead_lag.full_top_capacity.v1",
+            reality_model_version="lead_lag_delayed_executable_bbo.v2",
+            provenance_ids=("entry_capacity_usd", "exit_capacity_usd"),
+        ).as_dict(),
+        "latency": CostComponentReceipt(
+            component="latency",
+            amount_usd=latency_usd,
+            zero_reason=ZeroCostReason.EMBEDDED_IN_EXECUTABLE_PRICE,
+            formula_id="lead_lag.delayed_entry_price.v1",
+            reality_model_version="lead_lag_delayed_executable_bbo.v2",
+            provenance_ids=("measured_runtime_latency_ms", "entry_book_observed_ts_ms"),
+        ).as_dict(),
+    }
     event = {
         "coin": str(coin).upper(),
         "direction": int(direction),
@@ -286,6 +332,9 @@ def _settle(
         "spread_cost_usd": spread_usd,
         "slippage_cost_usd": slippage_usd,
         "latency_cost_usd": latency_usd,
+        "cost_component_receipts": cost_component_receipts,
+        "slippage_zero_reason": ZeroCostReason.NOT_APPLICABLE.value,
+        "latency_zero_reason": ZeroCostReason.EMBEDDED_IN_EXECUTABLE_PRICE.value,
         "pnl_usd": pnl_usd,
         "measured_runtime_latency_ms": float(measured_latency_ms),
         "actual_entry_delay_ms": float(entry_execution_ts_ms) - float(trigger_ts_ms),
@@ -334,11 +383,38 @@ def _segment_summary(events: list[dict[str, Any]], *, costs_measured: bool, equi
             ledger.append({"evt": "MISSED_FILL", "raison": "TOP_CAPACITY_INSUFFICIENT", "trade_id": trade_id})
             continue
         filled.append(event)
-        ledger.extend([
-            {"evt": "ENTREE", "ts": event["entry_ts_ms"], "trade_id": trade_id, "prix": event["entry_px"]},
-            {"evt": "SORTIE", "ts": event["exit_ts_ms"], "trade_id": trade_id, "prix": event["exit_px"], "net_bps": event["net_bps"]},
-            {"evt": "PNL", "trade_id": trade_id, "pnl_usd": event["pnl_usd"], "LIQUIDATABLE_NET": bool(costs_measured and event["LIQUIDATABLE_NET"])},
-        ])
+        ledger.extend(
+            [
+                {
+                    "evt": "ENTREE",
+                    "ts": event["entry_ts_ms"],
+                    "trade_id": trade_id,
+                    "prix": event["entry_px"],
+                },
+                {
+                    "evt": "SORTIE",
+                    "ts": event["exit_ts_ms"],
+                    "trade_id": trade_id,
+                    "prix": event["exit_px"],
+                    "net_bps": event["net_bps"],
+                },
+                {
+                    "evt": "PNL",
+                    "trade_id": trade_id,
+                    "pnl_usd": event["pnl_usd"],
+                    "LIQUIDATABLE_NET": bool(
+                        costs_measured and event["LIQUIDATABLE_NET"]
+                    ),
+                    "assumption_snapshot_hash": event.get(
+                        "assumption_snapshot_hash"
+                    ),
+                    "reality_model_version": event.get("reality_model_version"),
+                    "cost_component_receipts": event.get(
+                        "cost_component_receipts"
+                    ),
+                },
+            ]
+        )
 
     nets = [float(event["pnl_usd"]) for event in filled]
     gross = sum(float(event["gross_pnl_usd"]) for event in filled)
@@ -471,7 +547,7 @@ def replay_measured_lead_lag(
     horizon_ms: int,
     latency_evidence: Mapping[str, Any],
     notional_usd: float = 100.0,
-    fee_bps: float = DEFAULT_FEE_BPS,
+    fee_bps: float | None = None,
     min_history: int = 5,
     min_expected_net_bps: float = 0.0,
     direction_multiplier: int = 1,
@@ -483,8 +559,27 @@ def replay_measured_lead_lag(
     max_execution_observation_delay_ms: float = DEFAULT_MAX_EXECUTION_OBSERVATION_DELAY_MS,
     min_episodes: int = 5,
     equity: float = 1000.0,
+    economic_mode: EconomicRunMode | str = EconomicRunMode.EXPLORATORY,
 ) -> dict[str, Any]:
     """Replay strictly executable episodes with prior-only admission edge."""
+    contract = build_lead_lag_contract(
+        mode=economic_mode,
+        notional_usd=float(notional_usd),
+        max_book_age_ms=float(max_book_age_ms),
+        max_execution_observation_delay_ms=float(max_execution_observation_delay_ms),
+    )
+    canonical_fee_bps = float(
+        contract.registry.get("lead_lag.round_trip_fee_bps").value
+    )
+    assumption_snapshot_hash = contract.registry.snapshot_hash()
+    if fee_bps is not None and is_certifiable_mode(economic_mode):
+        raise EconomicConfigError(
+            "fee_bps local interdit en mode certifiable; utiliser l'autorite de frais canonique",
+            field="fee_bps",
+        )
+    resolved_fee_bps = canonical_fee_bps if fee_bps is None else float(fee_bps)
+    if not math.isfinite(resolved_fee_bps) or resolved_fee_bps < 0.0:
+        raise EconomicConfigError("fee_bps invalide", field="fee_bps")
     if int(direction_multiplier) not in (-1, 1):
         raise ValueError("direction_multiplier must be -1 or 1")
     if admission_policy not in {
@@ -595,11 +690,13 @@ def replay_measured_lead_lag(
                 entry_execution_ts_ms=entry_execution_ts_ms,
                 exit_execution_ts_ms=exit_execution_ts_ms,
                 notional_usd=float(notional_usd),
-                fee_bps=float(fee_bps),
+                fee_bps=resolved_fee_bps,
                 measured_latency_ms=applied_latency_ms,
                 entry_book_selection=entry_selection_kind,
                 exit_book_selection=exit_selection_kind,
             )
+            event["assumption_snapshot_hash"] = assumption_snapshot_hash
+            event["reality_model_version"] = contract.reality_model_version
             event["notional_usd"] = float(notional_usd)
             event["raw_shock_direction"] = int(shock_direction)
             event["direction_multiplier"] = int(direction_multiplier)
@@ -617,11 +714,13 @@ def replay_measured_lead_lag(
                 entry_execution_ts_ms=entry_execution_ts_ms,
                 exit_execution_ts_ms=exit_execution_ts_ms,
                 notional_usd=float(notional_usd),
-                fee_bps=float(fee_bps),
+                fee_bps=resolved_fee_bps,
                 measured_latency_ms=applied_latency_ms,
                 entry_book_selection=entry_selection_kind,
                 exit_book_selection=exit_selection_kind,
             )
+            direction_flip["assumption_snapshot_hash"] = assumption_snapshot_hash
+            direction_flip["reality_model_version"] = contract.reality_model_version
             direction_flip["notional_usd"] = float(notional_usd)
             direction_flip["raw_shock_direction"] = int(shock_direction)
             direction_flip["direction_multiplier"] = -int(direction_multiplier)
@@ -739,6 +838,20 @@ def replay_measured_lead_lag(
     }
     enough = all(segment["closed_positions"] >= int(min_episodes) for segment in segments.values())
     verdict = "PROMU" if enough and metrics["reconciled"] and all(segment["net"] > 0 for segment in segments.values()) else "MORE_DATA"
+    economic_receipt = contract.receipt()
+    if fee_bps is not None:
+        economic_receipt["certification"] = {
+            **dict(economic_receipt["certification"]),
+            "ready": False,
+            "assumption_snapshot_hash": None,
+            "failures": [
+                *list(economic_receipt["certification"].get("failures") or ()),
+                {
+                    "assumption_id": "lead_lag.round_trip_fee_bps",
+                    "reason": "EXPLORATORY_LOCAL_FEE_OVERRIDE",
+                },
+            ],
+        }
     return {
         "segments": {label: {key: value for key, value in segment.items() if key != "ledger"} for label, segment in segments.items()},
         "metriques": metrics,
@@ -758,8 +871,15 @@ def replay_measured_lead_lag(
         "coverage": coverage,
         "latency_evidence": dict(latency_evidence),
         "costs_measured": costs_measured,
-        "fee_bps": float(fee_bps),
+        "fee_bps": resolved_fee_bps,
         "fee_source": "FROZEN_CONSERVATIVE_TAKER_ROUND_TRIP",
+        "fee_provenance_source": (
+            "CANONICAL_ECONOMIC_ASSUMPTION_REGISTRY"
+            if fee_bps is None
+            else "EXPLORATORY_EXPLICIT_NON_CERTIFIABLE_OVERRIDE"
+        ),
+        "economic_contract": economic_receipt,
+        "assumption_snapshot_hash": contract.registry.snapshot_hash(),
         "admission_policy": str(admission_policy),
         "shock_detection_policy": (
             "CUMULATIVE_FIXED_WINDOW"

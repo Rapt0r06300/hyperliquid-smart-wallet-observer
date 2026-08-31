@@ -13,6 +13,8 @@ import json
 from collections.abc import Mapping
 from typing import Any
 
+from hl_observer.economics.families import build_copy_vault_contract
+
 PROTOCOL_NAME = "copy_vault_executable_walk_forward_v7_exact_checkpoint_binding"
 TRAIN_ECONOMIC_GATE_VERSION = "copy_vault_train_economic_gate_v2"
 CHECKPOINT_COLLECTOR_PROTOCOL = (
@@ -78,6 +80,12 @@ def classify_live_entry_action(row: Mapping[str, Any]) -> str | None:
 
 
 def protocol_signature() -> dict[str, Any]:
+    economic = build_copy_vault_contract(
+        notional_usd=NOTIONAL_USD,
+        copy_delay_ms=COPY_DELAY_MS,
+        max_reference_lag_ms=MAX_REFERENCE_LAG_MS,
+        max_target_lag_ms=MAX_TARGET_LAG_MS,
+    )
     return {
         "calibration_protocol": PROTOCOL_NAME,
         "train_economic_gate": TRAIN_ECONOMIC_GATE_VERSION,
@@ -91,7 +99,9 @@ def protocol_signature() -> dict[str, Any]:
         "horizons_ms": list(HORIZONS_MS),
         "notional_usd": NOTIONAL_USD,
         "max_open_positions": MAX_OPEN_POSITIONS,
-        "fee_source": "hl_observer.config.frais_venues:frais_taker_bps(HL)",
+        "fee_source": "hl_observer.economics.families:build_copy_vault_contract",
+        "economic_contract": economic.receipt(),
+        "assumption_snapshot_hash": economic.registry.snapshot_hash(),
         "book_source": (
             "runtime/data/copy_vault_l2_tape.jsonl:"
             "HYPERLIQUID_L2_WS_or_INFO_L2BOOK_causal"

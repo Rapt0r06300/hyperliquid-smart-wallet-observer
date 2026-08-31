@@ -21,7 +21,11 @@ from typing import Any
 
 from hl_observer.backtesting.cross_venue_certified import BBO_SOURCE_MODE, SOURCE_MODE
 from hl_observer.backtesting.train_statistics import stable_hash, summarize_train_rows
-from hl_observer.config.frais_venues import frais_taker_bps
+from hl_observer.economics.assumptions import EconomicRunMode
+from hl_observer.economics.families import (
+    FamilyEconomicContract,
+    build_cross_venue_contract,
+)
 
 SCHEMA_VERSION = "hypersmart.cross_venue_v3_train.v1"
 MECHANISM = "cross_venue_v3_leader_impulse_basis_reversion"
@@ -35,17 +39,37 @@ CONVERGENCE_RATIO = 0.50
 LATENCY_MS = 400
 MAX_ENTRY_DELAY_MS = 1_000
 MAX_OBSERVATION_GAP_MS = 3_000
-FEE_BPS_HYPERLIQUID = frais_taker_bps("HYPERLIQUID")
-FEE_BPS_BINANCE = frais_taker_bps("BINANCE")
-# Four aggressive fills: entry + exit on each venue. Bid/ask spread is already
-# embedded in the executable fill prices and must not be charged a second time.
-FEES_ROUND_TRIP_BPS = 2.0 * FEE_BPS_HYPERLIQUID + 2.0 * FEE_BPS_BINANCE
 NOTIONAL_USD = 15.0
 TRAIN_FRACTION = 0.60
 MIN_TRAIN_TRADES = 8
 MIN_DISTINCT_DAYS = 3
 MAX_TOP_POSITIVE_SHARE = 0.60
 FAMILY_ALPHA = 0.05
+
+
+def economic_contract(
+    mode: EconomicRunMode | str = EconomicRunMode.EXPLORATORY,
+) -> FamilyEconomicContract:
+    return build_cross_venue_contract(
+        mode=mode,
+        notional_usd=NOTIONAL_USD,
+        entry_latency_ms=LATENCY_MS,
+        max_book_age_ms=MAX_OBSERVATION_GAP_MS,
+    )
+
+
+_DEFAULT_ECONOMIC_CONTRACT = economic_contract()
+FEE_BPS_HYPERLIQUID = float(
+    _DEFAULT_ECONOMIC_CONTRACT.registry.get("fee.taker.hyperliquid.bps").value
+)
+FEE_BPS_BINANCE = float(
+    _DEFAULT_ECONOMIC_CONTRACT.registry.get("fee.taker.binance.bps").value
+)
+# Backward-compatible exports. Runtime paths resolve these values from the
+# contract again so an explicit fee change cannot leave stale descendants.
+FEES_ROUND_TRIP_BPS = float(
+    _DEFAULT_ECONOMIC_CONTRACT.registry.get("cross_venue.round_trip_fee_bps").value
+)
 
 
 def _mid(bid: float, ask: float) -> float:
@@ -245,7 +269,18 @@ def replay_variant_train(
     leader_threshold_bps: float,
     max_hold_ms: int,
     train_end_ms: float,
+    economic: FamilyEconomicContract | None = None,
 ) -> tuple[list[dict[str, Any]], dict[str, int]]:
+    contract = economic or economic_contract()
+    contract.registry.assert_consistent()
+    fee_hl = float(contract.registry.get("fee.taker.hyperliquid.bps").value)
+    fee_bin = float(contract.registry.get("fee.taker.binance.bps").value)
+    fees_round_trip = float(
+        contract.registry.get("cross_venue.round_trip_fee_bps").value
+    )
+    notional_usd = float(contract.registry.get("cross_venue.paper_notional_usd").value)
+    latency_ms = float(contract.registry.get("cross_venue.entry_latency_ms").value)
+    max_book_age_ms = float(contract.registry.get("cross_venue.max_book_age_ms").value)
     trades: list[dict[str, Any]] = []
     diagnostics: dict[str, int] = defaultdict(int)
     seen_ids: set[str] = set()
@@ -262,7 +297,7 @@ def replay_variant_train(
         for impulse in impulses:
             entry_match = _first_at_or_after(
                 rows,
-                float(impulse["detect_ts_ms"]) + LATENCY_MS,
+                float(impulse["detect_ts_ms"]) + latency_ms,
                 max_delay_ms=MAX_ENTRY_DELAY_MS,
             )
             if entry_match is None:
@@ -276,8 +311,12 @@ def replay_variant_train(
             if entry_basis is None or int(impulse["direction"]) * float(entry_basis) <= 0:
                 diagnostics["BASIS_REVERSED_BEFORE_ENTRY"] += 1
                 continue
-            entry_capacity = _capacity_at(coin_depth, float(entry[0]))
-            if entry_capacity is None or entry_capacity[0] < NOTIONAL_USD:
+            entry_capacity = _capacity_at(
+                coin_depth,
+                float(entry[0]),
+                max_age_ms=max_book_age_ms,
+            )
+            if entry_capacity is None or entry_capacity[0] < notional_usd:
                 diagnostics["ENTRY_CAPACITY_REJECTED"] += 1
                 continue
             executable_entry_edge = _entry_executable_edge_bps(
@@ -285,7 +324,7 @@ def replay_variant_train(
             )
             if (
                 executable_entry_edge is None
-                or executable_entry_edge <= FEES_ROUND_TRIP_BPS
+                or executable_entry_edge <= fees_round_trip
             ):
                 diagnostics["ENTRY_EDGE_CANNOT_COVER_FEES"] += 1
                 continue
@@ -295,7 +334,7 @@ def replay_variant_train(
                 timestamp = float(candidate[0])
                 if timestamp > float(train_end_ms):
                     break
-                if timestamp - previous_ts > MAX_OBSERVATION_GAP_MS:
+                if timestamp - previous_ts > max_book_age_ms:
                     diagnostics["OBSERVATION_GAP_INVALIDATED"] += 1
                     exit_row = None
                     break
@@ -311,16 +350,20 @@ def replay_variant_train(
             if exit_row is None:
                 diagnostics["NO_CAUSAL_EXIT"] += 1
                 continue
-            exit_capacity = _capacity_at(coin_depth, float(exit_row[0]))
-            if exit_capacity is None or exit_capacity[0] < NOTIONAL_USD:
+            exit_capacity = _capacity_at(
+                coin_depth,
+                float(exit_row[0]),
+                max_age_ms=max_book_age_ms,
+            )
+            if exit_capacity is None or exit_capacity[0] < notional_usd:
                 diagnostics["EXIT_CAPACITY_REJECTED"] += 1
                 continue
             trade = _executable_cycle(
                 entry,
                 exit_row,
                 direction=int(impulse["direction"]),
-                notional_usd=NOTIONAL_USD,
-                fees_bps=FEES_ROUND_TRIP_BPS,
+                notional_usd=notional_usd,
+                fees_bps=fees_round_trip,
                 entry_capacity=entry_capacity[0],
                 exit_capacity=exit_capacity[0],
                 detect_ts_ms=float(impulse["detect_ts_ms"]),
@@ -343,9 +386,10 @@ def replay_variant_train(
                     "basis_in_bps": float(entry_basis),
                     "basis_out_bps": float(_basis_bps(exit_row) or 0.0),
                     "entry_executable_edge_bps": float(executable_entry_edge),
-                    "fee_bps_hyperliquid_per_fill": FEE_BPS_HYPERLIQUID,
-                    "fee_bps_binance_per_fill": FEE_BPS_BINANCE,
-                    "fees_round_trip_bps": FEES_ROUND_TRIP_BPS,
+                    "fee_bps_hyperliquid_per_fill": fee_hl,
+                    "fee_bps_binance_per_fill": fee_bin,
+                    "fees_round_trip_bps": fees_round_trip,
+                    "assumption_snapshot_hash": contract.registry.snapshot_hash(),
                     "depth_freshness_ms": max(entry_capacity[1], exit_capacity[1]),
                 }
             )
@@ -377,9 +421,19 @@ def explore_cross_venue_v3_train(
     depth: Mapping[str, Sequence[tuple[float, float]]],
     *,
     source_mode: str,
+    economic_mode: EconomicRunMode | str = EconomicRunMode.EXPLORATORY,
 ) -> dict[str, Any]:
     """Select a v3 freeze candidate from TRAIN only, never from heldout rows."""
 
+    contract = economic_contract(economic_mode)
+    economic_receipt = contract.receipt()
+    fee_hl = float(contract.registry.get("fee.taker.hyperliquid.bps").value)
+    fee_bin = float(contract.registry.get("fee.taker.binance.bps").value)
+    fees_round_trip = float(
+        contract.registry.get("cross_venue.round_trip_fee_bps").value
+    )
+    notional_usd = float(contract.registry.get("cross_venue.paper_notional_usd").value)
+    latency_ms = float(contract.registry.get("cross_venue.entry_latency_ms").value)
     all_ts = sorted(
         float(row[0])
         for coin in PREDECLARED_COINS
@@ -396,6 +450,7 @@ def explore_cross_venue_v3_train(
             "selection_scope": "TRAIN_ONLY_PRE_FREEZE",
             "heldout_evaluated": False,
             "source_mode": source_mode,
+            "economic_contract": economic_receipt,
             "paper_read_only": True,
             "real_execution": False,
         }
@@ -415,6 +470,7 @@ def explore_cross_venue_v3_train(
             leader_threshold_bps=threshold,
             max_hold_ms=hold,
             train_end_ms=train_end,
+            economic=contract,
         )
         stats = summarize_train_rows(
             trades,
@@ -466,13 +522,13 @@ def explore_cross_venue_v3_train(
             "lagger_max_move_bps": LAGGER_MAX_MOVE_BPS,
             "min_basis_widening_bps": MIN_BASIS_WIDENING_BPS,
             "convergence_ratio": CONVERGENCE_RATIO,
-            "latency_ms": LATENCY_MS,
-            "fees_round_trip_bps": FEES_ROUND_TRIP_BPS,
-            "fee_bps_hyperliquid_per_fill": FEE_BPS_HYPERLIQUID,
-            "fee_bps_binance_per_fill": FEE_BPS_BINANCE,
+            "latency_ms": latency_ms,
+            "fees_round_trip_bps": fees_round_trip,
+            "fee_bps_hyperliquid_per_fill": fee_hl,
+            "fee_bps_binance_per_fill": fee_bin,
             "fee_fill_count": 4,
             "spread_embedded_in_executable_prices": True,
-            "notional_usd": NOTIONAL_USD,
+            "notional_usd": notional_usd,
             "source_mode": source_mode,
             "predeclared_coins": list(PREDECLARED_COINS),
         }
@@ -496,13 +552,14 @@ def explore_cross_venue_v3_train(
             "trial_count": trial_count,
         },
         "cost_contract": {
-            "fee_bps_hyperliquid_per_fill": FEE_BPS_HYPERLIQUID,
-            "fee_bps_binance_per_fill": FEE_BPS_BINANCE,
-            "fees_round_trip_bps": FEES_ROUND_TRIP_BPS,
+            "fee_bps_hyperliquid_per_fill": fee_hl,
+            "fee_bps_binance_per_fill": fee_bin,
+            "fees_round_trip_bps": fees_round_trip,
             "fee_fill_count": 4,
             "spread_embedded_in_executable_prices": True,
             "entry_must_cover_fee_only_burden": True,
         },
+        "economic_contract": economic_receipt,
         "selected": selected,
         "freeze_candidate": freeze_candidate,
         "freeze_candidate_sha256": stable_hash(freeze_candidate) if freeze_candidate else None,
@@ -516,6 +573,7 @@ __all__ = [
     "MECHANISM",
     "PREDECLARED_COINS",
     "SCHEMA_VERSION",
+    "economic_contract",
     "explore_cross_venue_v3_train",
     "replay_variant_train",
 ]

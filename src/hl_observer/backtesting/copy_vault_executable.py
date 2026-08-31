@@ -1,21 +1,43 @@
 """Replay Copy-Vault causal et exécutable en PAPER sur carnets observés."""
 from __future__ import annotations
+
 import bisect
 import hashlib
 import json
 import math
 from collections.abc import Iterable, Mapping
 from typing import Any
+
 from hl_observer.backtesting.copy_vault_book_loader import load_observed_books
 from hl_observer.backtesting.copy_vault_protocol import (
-    CHECKPOINT_COLLECTOR_PROTOCOL, COPYABLE_ENTRY_ACTIONS, COPY_DELAY_MS, HORIZONS_MS,
-    MAX_OPEN_POSITIONS, MAX_REFERENCE_LAG_MS, MAX_TARGET_LAG_MS, METAORDER_GAP_MS,
-    MIN_TRAIN_TRADES, NOTIONAL_USD, PROTOCOL_NAME, TRAIN_ECONOMIC_GATE_VERSION,
-    TRAIN_FRACTION, VALIDATION_FRACTION, canonical_metaorder_id,
-    classify_live_entry_action, expected_open_direction, protocol_signature,
+    CHECKPOINT_COLLECTOR_PROTOCOL,
+    COPY_DELAY_MS,
+    COPYABLE_ENTRY_ACTIONS,
+    HORIZONS_MS,
+    MAX_OPEN_POSITIONS,
+    MAX_REFERENCE_LAG_MS,
+    MAX_TARGET_LAG_MS,
+    METAORDER_GAP_MS,
+    MIN_TRAIN_TRADES,
+    NOTIONAL_USD,
+    TRAIN_ECONOMIC_GATE_VERSION,
+    TRAIN_FRACTION,
+    VALIDATION_FRACTION,
+    canonical_metaorder_id,
+    classify_live_entry_action,
+    expected_open_direction,
+    protocol_signature,
 )
-from hl_observer.config.frais_venues import frais_taker_bps
+from hl_observer.economics.assumptions import (
+    CostComponentReceipt,
+    EconomicConfigError,
+    EconomicRunMode,
+    ZeroCostReason,
+    is_certifiable_mode,
+)
+from hl_observer.economics.families import build_copy_vault_contract
 from hl_observer.ops.echec_silencieux import noter as _noter_echec
+
 SCHEMA_VERSION = "hypersmart.copy_vault_executable.v1"
 
 
@@ -369,8 +391,27 @@ def execute_metaorder(
     notional_usd: float = NOTIONAL_USD,
     fee_bps: float | None = None,
     require_causal_books: bool = False,
+    economic_mode: EconomicRunMode | str = EconomicRunMode.EXPLORATORY,
 ) -> tuple[dict[str, Any] | None, str]:
     """Execute one closed paper episode or return an explicit refusal code."""
+    contract = build_copy_vault_contract(
+        mode=economic_mode,
+        notional_usd=float(notional_usd),
+        copy_delay_ms=float(copy_delay_ms),
+        max_reference_lag_ms=float(max_reference_lag_ms),
+        max_target_lag_ms=float(max_target_lag_ms),
+    )
+    if fee_bps is not None and is_certifiable_mode(economic_mode):
+        raise EconomicConfigError(
+            "fee_bps local interdit en mode certifiable; utiliser l'autorite de frais canonique",
+            field="fee_bps",
+        )
+    canonical_fee_bps = float(
+        contract.registry.get("fee.taker.hyperliquid.bps").value
+    )
+    rate_bps = canonical_fee_bps if fee_bps is None else float(fee_bps)
+    if not math.isfinite(rate_bps) or rate_bps < 0.0:
+        raise EconomicConfigError("fee_bps invalide", field="fee_bps")
     if not books:
         return None, "NO_OBSERVED_BOOK_FOR_COIN"
     signal_ms = int(metaorder["signal_ts_ms"])
@@ -434,7 +475,6 @@ def execute_metaorder(
     if spread_cost < -1e-8:
         return None, "NEGATIVE_SPREAD_COST_INVARIANT"
     spread_cost = max(0.0, spread_cost)
-    rate_bps = float(frais_taker_bps("HL") if fee_bps is None else fee_bps)
     fees = (abs(quantity * entry_exec) + abs(quantity * exit_exec)) * rate_bps / 10_000.0
     slippage = 0.0
     net = gross_pnl - spread_cost - fees - slippage - latency
@@ -449,6 +489,61 @@ def execute_metaorder(
         json.dumps(identity, sort_keys=True, separators=(",", ":")).encode("utf-8")
     ).hexdigest()
     signed_latency_move = direction * (entry_mid - reference_mid) / reference_mid * 10_000.0
+    latency_zero_reason = (
+        ZeroCostReason.NOT_APPLICABLE
+        if latency == 0.0 and signed_latency_usd < 0.0
+        else ZeroCostReason.MEASURED_ZERO
+        if latency == 0.0
+        else None
+    )
+    cost_component_receipts = {
+        "fees": CostComponentReceipt(
+            component="fees",
+            amount_usd=fees,
+            zero_reason=ZeroCostReason.MEASURED_ZERO if fees == 0.0 else None,
+            formula_id="copy_vault.round_trip_fee.v1",
+            reality_model_version=contract.reality_model_version,
+            provenance_ids=("fee.taker.hyperliquid.bps", "copy_vault.paper_notional_usd"),
+        ).as_dict(),
+        "spread": CostComponentReceipt(
+            component="spread",
+            amount_usd=spread_cost,
+            zero_reason=ZeroCostReason.MEASURED_ZERO if spread_cost == 0.0 else None,
+            formula_id="copy_vault.executable_bid_ask_spread.v1",
+            reality_model_version=contract.reality_model_version,
+            provenance_ids=("entry_book.bid_ask", "exit_book.bid_ask"),
+        ).as_dict(),
+        "slippage": CostComponentReceipt(
+            component="slippage",
+            amount_usd=slippage,
+            zero_reason=ZeroCostReason.NOT_APPLICABLE,
+            formula_id="copy_vault.full_top_capacity.v1",
+            reality_model_version=contract.reality_model_version,
+            provenance_ids=("entry_capacity_usd", "exit_capacity_usd"),
+        ).as_dict(),
+        "latency": CostComponentReceipt(
+            component="latency",
+            amount_usd=latency,
+            zero_reason=latency_zero_reason,
+            formula_id="copy_vault.adverse_latency.v1",
+            reality_model_version=contract.reality_model_version,
+            provenance_ids=("reference_ts_ms", "entry_ts_ms"),
+        ).as_dict(),
+    }
+    economic_receipt = contract.receipt()
+    if fee_bps is not None:
+        economic_receipt["certification"] = {
+            **dict(economic_receipt["certification"]),
+            "ready": False,
+            "assumption_snapshot_hash": None,
+            "failures": [
+                *list(economic_receipt["certification"].get("failures") or ()),
+                {
+                    "assumption_id": "fee.taker.hyperliquid.bps",
+                    "reason": "EXPLORATORY_LOCAL_FEE_OVERRIDE",
+                },
+            ],
+        }
     return {
         "trade_id": trade_id,
         "metaorder_id": metaorder["metaorder_id"],
@@ -483,6 +578,18 @@ def execute_metaorder(
         "spread_cost_usd": spread_cost,
         "slippage_cost_usd": slippage,
         "latency_cost_usd": latency,
+        "cost_component_receipts": cost_component_receipts,
+        "slippage_zero_reason": ZeroCostReason.NOT_APPLICABLE.value,
+        "latency_zero_reason": (
+            latency_zero_reason.value if latency_zero_reason is not None else None
+        ),
+        "assumption_snapshot_hash": contract.registry.snapshot_hash(),
+        "economic_contract": economic_receipt,
+        "fee_provenance_source": (
+            "CANONICAL_ECONOMIC_ASSUMPTION_REGISTRY"
+            if fee_bps is None
+            else "EXPLORATORY_EXPLICIT_NON_CERTIFIABLE_OVERRIDE"
+        ),
         "net_pnl_usd": net,
         "liquidatable_net": True,
         "paper_read_only": True,
@@ -497,6 +604,7 @@ def replay_metaorders(
     books_by_coin: Mapping[str, list[dict[str, Any]]],
     *, horizon_ms: int, start_ms: int | None = None, end_ms: int | None = None,
     direction_multiplier: int = 1, require_causal_observation: bool = False,
+    economic_mode: EconomicRunMode | str = EconomicRunMode.EXPLORATORY,
 ) -> tuple[list[dict[str, Any]], dict[str, int]]:
     counters: dict[str, int] = {
         "metaorders_considered": 0, "completed_positions": 0, "portfolio_capacity_rejected": 0,
@@ -518,6 +626,7 @@ def replay_metaorders(
             metaorder, list(books_by_coin.get(str(metaorder["coin"]), [])),
             horizon_ms=int(horizon_ms), direction_multiplier=direction_multiplier,
             require_causal_books=require_causal_observation,
+            economic_mode=economic_mode,
         )
         if trade is None:
             counters[reason] = counters.get(reason, 0) + 1
