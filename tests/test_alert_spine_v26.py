@@ -35,6 +35,13 @@ def _proposal(producer_id: str, sequence: int, *, dedup_key: str | None = None) 
         category="market_event",
         headline=f"Alert {producer_id} {sequence}",
         dedup_key=dedup_key or f"{producer_id}:{sequence}",
+        policy_version="alerts-test.v1",
+        ingestion_code_sha="a" * 40,
+        entity_ids=[f"asset:{producer_id}"],
+        normalized_tickers=["btc"],
+        source_health_state="HEALTHY",
+        freshness_state="FRESH",
+        deterministic_score_components={"source_quality": 0.8},
         payload={"symbol": "BTC", "score": sequence},
     )
 
