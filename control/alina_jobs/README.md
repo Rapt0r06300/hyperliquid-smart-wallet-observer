@@ -24,6 +24,12 @@ Le JSON de contrôle ne peut pas activer le trading réel, le testnet, la collec
 - release et dépôt de datasets canoniques ;
 - cycle plafonné à 18 heures.
 
+La commande est ensuite transformée en `hypersmart.typed_control_event.v1` :
+cible et capacité sont allowlistées, le payload est borné, l'événement est lié
+au SHA de `main`, puis son nonce est réclamé dans un ledger append-only. Le
+texte de `note`, même s'il contient du JSON ou des mots de commande, reste une
+annotation sans autorité.
+
 Le workflow ne se déclenche **jamais sur une pull request**.
 
 ## Exemple de commande

@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from pathlib import Path
 
-
 ROOT = Path(__file__).resolve().parents[1]
 WORKFLOW = ROOT / ".github" / "workflows" / "alina-self-hosted.yml"
 INSTALLER = ROOT / "tools" / "INSTALLER_ALINA_RUNNER_WINDOWS.ps1"
@@ -71,6 +70,15 @@ def test_workflow_force_paper_et_bloque_mainnet_testnet() -> None:
         "hl_observer.ops.autonomous_research_guard",
     ):
         assert needle in text
+
+
+def test_workflow_reclame_un_evenement_type_anti_rejeu() -> None:
+    text = _text(WORKFLOW)
+    assert "CONTROL_EVENT_LEDGER.jsonl" in text
+    assert "--event-ledger $eventLedger" in text
+    assert "typed_control_event" in _text(
+        ROOT / "src" / "hl_observer" / "ops" / "self_hosted_control.py"
+    )
 
 
 def test_workflow_utilise_exclusivement_le_python_persistant_du_runner() -> None:

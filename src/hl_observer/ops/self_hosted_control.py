@@ -3,12 +3,20 @@ from __future__ import annotations
 import argparse
 import json
 import re
+from collections.abc import Mapping
 from pathlib import Path
-from typing import Any, Mapping
+from typing import Any
 
+from hl_observer.control_plane.typed_events import (
+    ControlEventReplayLedger,
+    build_typed_control_event,
+    control_event_receipt,
+)
 from hl_observer.ops.autonomous_research_job import (
     CANONICAL_DATASET_REPOSITORY,
     CANONICAL_RELEASE_ID,
+)
+from hl_observer.ops.autonomous_research_job import (
     SCHEMA as WORKER_SCHEMA,
 )
 from hl_observer.ops.autonomous_research_job_router import validate_request
@@ -123,10 +131,28 @@ def build_worker_request(control: Mapping[str, Any], *, project_sha: str) -> dic
 
 def build_control_bundle(control: Mapping[str, Any], *, project_sha: str) -> dict[str, Any]:
     normalized = normalize_control(control)
+    worker_request = build_worker_request(normalized, project_sha=project_sha)
+    typed_event = build_typed_control_event(
+        event_type="RUN_RESEARCH_JOB",
+        nonce=normalized["job_id"],
+        source_identity=normalized["requested_by"],
+        source_run_id=normalized["job_id"],
+        state_version=str(project_sha).lower(),
+        target="autonomous_research_worker",
+        capability="RUN_PAPER_RESEARCH",
+        payload=worker_request,
+    )
     return {
         "schema": "alina.self_hosted_control_bundle.v1",
         "control": normalized,
-        "worker_request": build_worker_request(normalized, project_sha=project_sha),
+        # The validated typed event is the authority.  This convenience copy is
+        # byte-equivalent to its payload for the existing worker CLI.
+        "worker_request": dict(typed_event.payload),
+        "typed_control_event": typed_event.as_dict(),
+        "typed_control_receipt": control_event_receipt(
+            typed_event,
+            decision="VALIDATED_NOT_CLAIMED",
+        ),
         "guard": {
             "max_cycle_seconds": normalized["max_cycle_seconds"],
             "force": normalized["force"],
@@ -149,11 +175,26 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--project-sha", required=True)
     parser.add_argument("--worker-request", required=True)
     parser.add_argument("--bundle-output")
+    parser.add_argument("--event-ledger")
     args = parser.parse_args(argv)
 
     control_path = Path(args.control).resolve()
     worker_path = Path(args.worker_request).resolve()
     bundle = build_control_bundle(_load_json(control_path), project_sha=args.project_sha)
+    if args.event_ledger:
+        event = build_typed_control_event(
+            event_type=bundle["typed_control_event"]["event_type"],
+            nonce=bundle["typed_control_event"]["nonce"],
+            source_identity=bundle["typed_control_event"]["source_identity"],
+            source_run_id=bundle["typed_control_event"]["source_run_id"],
+            state_version=bundle["typed_control_event"]["state_version"],
+            target=bundle["typed_control_event"]["target"],
+            capability=bundle["typed_control_event"]["capability"],
+            payload=bundle["typed_control_event"]["payload"],
+        )
+        bundle["typed_control_receipt"] = ControlEventReplayLedger(
+            Path(args.event_ledger)
+        ).claim(event)
 
     worker_path.parent.mkdir(parents=True, exist_ok=True)
     worker_path.write_text(

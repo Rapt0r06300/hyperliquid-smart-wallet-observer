@@ -218,11 +218,13 @@ jobs:
           New-Item -ItemType Directory -Force -Path $requestDir | Out-Null
           $workerRequest = Join-Path $requestDir "worker_$env:GITHUB_RUN_ID.json"
           $bundle = Join-Path $requestDir "bundle_$env:GITHUB_RUN_ID.json"
+          $eventLedger = Join-Path $labRoot 'status\CONTROL_EVENT_LEDGER.jsonl'
           & $python -m hl_observer.ops.self_hosted_control `
             --control $env:CONTROL_PATH `
             --project-sha $env:GITHUB_SHA `
             --worker-request $workerRequest `
-            --bundle-output $bundle
+            --bundle-output $bundle `
+            --event-ledger $eventLedger
           if ($LASTEXITCODE -ne 0) { throw 'Commande refusée par le contrat self-hosted.' }
           $bundleObj = Get-Content $bundle -Raw -Encoding UTF8 | ConvertFrom-Json
           $jobId = [string]$bundleObj.control.job_id
