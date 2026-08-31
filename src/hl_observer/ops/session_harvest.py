@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import time
 from pathlib import Path
 from typing import Any, Mapping, Sequence
@@ -21,8 +22,11 @@ from hl_observer.ops.preuve_de_vie import (
     metriques_depuis_heartbeats,
     preuve_source,
 )
+from hl_observer.research.venue_capabilities import registre_par_defaut
+from hl_observer.runtime.protections import manifeste_execution
 
 POINTEUR = "COURANTE.json"
+_SHA_COMPLET = re.compile(r"^[0-9a-f]{40}$")
 
 
 def _chemin_pointeur(root: str | Path) -> Path:
@@ -58,9 +62,19 @@ def ouvrir_session_harvest(
 ) -> tuple[str, dict]:
     rid = run_id or SC.nouveau_run_id("harvest", horloge=horloge)
     cat = SC.CatalogueSession(root, rid)
+    effective_head = str(git_head or manifeste_execution(root).get("git_head") or "").lower()
+    contexte: dict[str, Any] = {"profil": "HARVEST"}
+    if _SHA_COMPLET.fullmatch(effective_head):
+        capabilities = registre_par_defaut().reconcile_loaded(
+            run_id=rid,
+            state_version=effective_head,
+        ).require_ready()
+        contexte["capability_reconciliation"] = capabilities.bind_to_run_receipt(
+            {"run_id": rid, "state_version": effective_head}
+        )
     cat.demarrer(
-        git_head=git_head,
-        contexte={"profil": "HARVEST"},
+        git_head=effective_head or git_head,
+        contexte=contexte,
         data_origin=SC.ORIGINE_REEL,
         horloge=horloge,
     )

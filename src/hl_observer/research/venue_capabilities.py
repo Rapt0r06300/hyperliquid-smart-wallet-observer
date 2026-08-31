@@ -5,7 +5,7 @@ venue porte sa capacite REELLE — OFFLINE_READY (adaptateur + tests offline), R
 On ne declare JAMAIS une venue 'live-ok' sans preuve reseau. stdlib pure, 0 reseau, 0 ordre reel."""
 from __future__ import annotations
 
-from typing import Sequence
+from collections.abc import Sequence
 
 OFFLINE_READY = "OFFLINE_READY"
 REQUIRES_NETWORK = "REQUIRES_NETWORK"
@@ -22,7 +22,7 @@ class RegistreCapacitesVenues:
 
     def declarer(self, venue: str, capacite: str, *, flux: Sequence[str] = (), requis: bool = False) -> None:
         if capacite not in _CAP:
-            raise ValueError("capacite invalide: %s" % capacite)
+            raise ValueError(f"capacite invalide: {capacite}")
         self._v[venue] = {"venue": venue, "capacite": capacite,
                           "flux": {k: (k in set(flux)) for k in FLUX}, "requis": bool(requis)}
 
@@ -43,6 +43,107 @@ class RegistreCapacitesVenues:
         return {"ready": len(non_pretes) == 0, "requises_non_pretes": non_pretes,
                 "offline_ready": self.par_capacite(OFFLINE_READY),
                 "requiert_reseau": self.par_capacite(REQUIRES_NETWORK)}
+
+    def reconcile_loaded(
+        self,
+        *,
+        run_id: str,
+        state_version: str,
+        loaded_venues: Sequence[str] | None = None,
+    ):
+        """Atteste les adaptateurs réellement chargés, sans promouvoir le réseau par déclaration."""
+        from hl_observer.runtime.capability_reconciliation import (
+            CapabilityDisposition,
+            CapabilityDispositionKind,
+            CapabilityKind,
+            CapabilityReconciliationError,
+            ConnectorReadinessCanary,
+            DeclaredCapability,
+            EntitlementClass,
+            LoadedCapability,
+            reconcile_capabilities,
+        )
+
+        effective_loaded = (
+            set(self.par_capacite(OFFLINE_READY))
+            if loaded_venues is None
+            else {str(venue) for venue in loaded_venues}
+        )
+        unknown = sorted(effective_loaded - set(self._v))
+        if unknown:
+            raise CapabilityReconciliationError(
+                "VENUE_LOADED_UNDECLARED", ",".join(unknown)
+            )
+        unproven = sorted(
+            venue
+            for venue in effective_loaded
+            if self._v[venue]["capacite"] != OFFLINE_READY
+        )
+        if unproven:
+            raise CapabilityReconciliationError(
+                "VENUE_LOADED_WITHOUT_OFFLINE_PROOF", ",".join(unproven)
+            )
+        declared = []
+        loaded = []
+        dispositions = []
+        for venue, item in sorted(self._v.items()):
+            capability_id = f"venue:{venue}"
+            operations = tuple(sorted(k for k, ok in item["flux"].items() if ok))
+            declared.append(
+                DeclaredCapability(
+                    capability_id=capability_id,
+                    kind=CapabilityKind.VENUE,
+                    required=item["requis"],
+                    expected_operations=operations or ("health",),
+                    expected_schema="hypersmart.market_data.v1",
+                    entitlement=EntitlementClass.PUBLIC_ZERO_EURO,
+                    preferred_authority=venue,
+                )
+            )
+            if venue in effective_loaded and item["capacite"] == OFFLINE_READY:
+                loaded.append(
+                    LoadedCapability(
+                        capability_id=capability_id,
+                        kind=CapabilityKind.VENUE,
+                        adapter_version="venue-registry.v1",
+                        actual_authority=venue,
+                        canary=ConnectorReadinessCanary(
+                            manifest_schema_parses=True,
+                            registered=True,
+                            operations=operations or ("health",),
+                            authorization_scope_sufficient=True,
+                            returned_schema="hypersmart.market_data.v1",
+                            semantic_canary_passed=True,
+                            read_only=True,
+                        ),
+                    )
+                )
+            elif item["capacite"] == REQUIRES_NETWORK:
+                dispositions.append(
+                    CapabilityDisposition(
+                        capability_id=capability_id,
+                        disposition=CapabilityDispositionKind.INTENTIONALLY_DISABLED,
+                        reason="aucune preuve réseau live attachée à ce bootstrap paper",
+                        evidence_ref="venue-registry:requires-network",
+                    )
+                )
+            elif item["capacite"] == NON_IMPLEMENTE:
+                dispositions.append(
+                    CapabilityDisposition(
+                        capability_id=capability_id,
+                        disposition=CapabilityDispositionKind.UNAVAILABLE,
+                        reason="adaptateur non implémenté",
+                        evidence_ref="venue-registry:non-implemente",
+                    )
+                )
+
+        return reconcile_capabilities(
+            run_id=run_id,
+            state_version=state_version,
+            declared=declared,
+            loaded=loaded,
+            dispositions=dispositions,
+        )
 
 
 def registre_par_defaut() -> RegistreCapacitesVenues:

@@ -45,6 +45,21 @@ def test_ouvrir_cree_session_active_et_declare_toutes_les_sources(tmp_path):
     assert allmids["sante"] == "VERTE" and allmids["evenements_recus"] == 5
 
 
+def test_session_lie_surface_capacites_au_run_et_au_sha(tmp_path):
+    _battre_core(tmp_path)
+    rid, cat = SH.ouvrir_session_harvest(
+        tmp_path,
+        run_id="harvest-capabilities",
+        git_head="d" * 40,
+        now_ms=time.time() * 1000 + 100,
+    )
+    bound = cat["contexte"]["capability_reconciliation"]
+    assert rid == "harvest-capabilities"
+    assert bound["capability_ready"] is True
+    assert bound["capability_counts"]["expected"] == 14
+    assert len(bound["capability_surface_digest"]) == 64
+
+
 def test_metriques_reelles_remontent_dans_le_catalogue(tmp_path):
     _battre_core(tmp_path, metriques_par_nom={"bbo-collector": {"gaps_critiques": 4, "reconnects": 9}})
     rid, cat = SH.ouvrir_session_harvest(tmp_path, run_id="harvest-fixe-2",

@@ -29,6 +29,9 @@ from hl_observer.hyperliquid.rate_weights import (
 )
 from hl_observer.ops.clock_integrity import skew_excessif
 from hl_observer.ops.runtime_contract import PREFLIGHT_RUNTIME_FLAGS, verify_runtime_env
+from hl_observer.research.venue_capabilities import registre_par_defaut
+from hl_observer.runtime.capability_reconciliation import CapabilityReconciliationError
+from hl_observer.runtime.protections import manifeste_execution
 
 # ── Contrats par défaut ──────────────────────────────────────────────────────────────────────────
 DEPS_DURES: tuple[str, ...] = (              # sans elles le moteur/UI ne démarre pas → BLOQUANT
@@ -232,6 +235,39 @@ def verifier_contrat_runtime(*, env: Mapping[str, str] | None = None) -> Verific
     return Verification("contrat-runtime", "paper", True, result.ok, result.detail)
 
 
+def verifier_capacites_chargees(
+    racine: str | Path,
+    *,
+    git_head: str | None = None,
+    run_id: str = "launcher-preflight",
+) -> Verification:
+    """Réconcilie les venues déclarées avec les adaptateurs read-only réellement admis."""
+    try:
+        head = git_head
+        if head is None:
+            head = manifeste_execution(Path(racine)).get("git_head")
+        receipt = registre_par_defaut().reconcile_loaded(
+            run_id=run_id,
+            state_version=str(head or ""),
+        )
+        receipt.require_ready()
+        counts = receipt.counts
+        detail = (
+            f"digest={receipt.surface_digest} expected={counts['expected']} "
+            f"loaded={counts['loaded']} unavailable={counts['unavailable']} "
+            f"disabled={counts['intentionally_disabled']}"
+        )
+        return Verification("capacites-chargees", "capacites", True, True, detail)
+    except CapabilityReconciliationError as exc:
+        return Verification(
+            "capacites-chargees",
+            "capacites",
+            True,
+            False,
+            f"{exc.code}: {exc.message}",
+        )
+
+
 # ── Composition ────────────────────────────────────────────────────────────────────────────────────
 def executer_preflight(racine: str | Path, *, prober: Callable[[str], Sonde] | None = None,
                        local_ts_ms: float, env: Mapping[str, str] | None = None,
@@ -273,6 +309,7 @@ def executer_preflight(racine: str | Path, *, prober: Callable[[str], Sonde] | N
     vers.append(verifier_paper(env=env))
     if enforce_runtime_contract:
         vers.append(verifier_contrat_runtime(env=env))
+        vers.append(verifier_capacites_chargees(r))
     return ResultatPreflight(tuple(vers))
 
 
@@ -342,7 +379,7 @@ def main(argv: list[str] | None = None) -> int:
 __all__ = ["Sonde", "Verification", "ResultatPreflight", "executer_preflight", "format_preflight",
            "verifier_python", "verifier_deps", "verifier_disque", "verifier_dossiers", "verifier_horloge",
            "verifier_endpoints", "verifier_quotas_ws", "verifier_schemas", "verifier_orphelins",
-           "verifier_paper", "verifier_contrat_runtime", "main"]
+           "verifier_paper", "verifier_contrat_runtime", "verifier_capacites_chargees", "main"]
 
 
 if __name__ == "__main__":

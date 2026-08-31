@@ -90,6 +90,17 @@ def test_preflight_schemas_reels_presents_dans_le_repo():
     assert v.ok, v.detail
 
 
+def test_preflight_reconcilie_surface_chargee_avec_sha_complet():
+    v = PF.verifier_capacites_chargees(RACINE_REPO, git_head="a" * 40)
+    assert v.ok is True and v.dur is True
+    assert "expected=14 loaded=3" in v.detail
+
+
+def test_preflight_capacites_refuse_sha_absent():
+    v = PF.verifier_capacites_chargees(RACINE_REPO, git_head="inconnu")
+    assert v.ok is False and "CAPABILITY_STATE_VERSION_INVALID" in v.detail
+
+
 def test_cli_sort_2_si_no_go(monkeypatch, tmp_path):
     monkeypatch.setattr(PF, "_sonde_http_reelle", lambda url, **k: PF.Sonde(False, detail="offline"))
     assert PF.main([str(tmp_path)]) == 2                       # HL/Binance injoignables -> NO-GO -> exit 2
