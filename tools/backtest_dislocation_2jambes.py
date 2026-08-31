@@ -24,20 +24,46 @@ sys.path.insert(0, str(RACINE / "src"))
 
 from hl_observer.backtesting.cross_venue_certified import (  # noqa: E402
     FOUR_FILL_CONTRACT_VERSION,
+)
+from hl_observer.backtesting.cross_venue_certified import (  # noqa: E402
     SOURCE_MODE as CERTIFIED_CROSS_SOURCE_MODE,
 )
+from hl_observer.economics.assumptions import EconomicRunMode  # noqa: E402
+from hl_observer.economics.families import (  # noqa: E402
+    FamilyEconomicContract,
+    build_cross_venue_contract,
+)
+
+
+def economic_contract(
+    mode: EconomicRunMode | str = EconomicRunMode.EXPLORATORY,
+) -> FamilyEconomicContract:
+    return build_cross_venue_contract(mode=mode)
+
+
+_DEFAULT_ECONOMIC_CONTRACT = economic_contract()
 
 SEUIL_ENTREE_BPS = 15.0
 SEUIL_SORTIE_BPS = 3.0
 STOP_AGGRAVATION_BPS = 25.0
 HORIZON_MAX_S = 4 * 3600.0
-FRAICHEUR_MAX_MS = 3000.0
-LATENCE_MS = 400.0
-FEES_AR_BPS = 16.0
+FRAICHEUR_MAX_MS = float(
+    _DEFAULT_ECONOMIC_CONTRACT.registry.get("cross_venue.max_book_age_ms").value
+)
+LATENCE_MS = float(
+    _DEFAULT_ECONOMIC_CONTRACT.registry.get("cross_venue.entry_latency_ms").value
+)
+FEES_AR_BPS = float(
+    _DEFAULT_ECONOMIC_CONTRACT.registry.get("cross_venue.round_trip_fee_bps").value
+)
 ECART_MAX_ENTREE_BPS = 100.0
-NOTIONAL_USD = 15.0
+NOTIONAL_USD = float(
+    _DEFAULT_ECONOMIC_CONTRACT.registry.get("cross_venue.paper_notional_usd").value
+)
 DEPTH_FRESHNESS_MS = 3000.0
-MIN_EXECUTABLE_EDGE_BPS = 0.0
+MIN_EXECUTABLE_EDGE_BPS = float(
+    _DEFAULT_ECONOMIC_CONTRACT.registry.get("cross_venue.minimum_entry_edge_bps").value
+)
 MAX_OBSERVATION_GAP_MS = 300_000.0
 
 CROSS_WALK_FORWARD_PROTOCOL = "cross_certified_atomic_bbo_walk_forward_v4"
@@ -55,7 +81,7 @@ CROSS_WALK_FORWARD_GRID = tuple(
     for entry in (15.0, 30.0)
     for stop in (15.0, 25.0)
     for horizon in (900.0, 3600.0, 14400.0)
-    for edge in (0.0, 20.0)
+    for edge in (MIN_EXECUTABLE_EDGE_BPS,)
 )
 
 COINS_COMMUNS = ("BTC", "ETH", "SOL", "AVAX", "INJ", "DASH", "NEO", "LINK", "AAVE", "ONDO")

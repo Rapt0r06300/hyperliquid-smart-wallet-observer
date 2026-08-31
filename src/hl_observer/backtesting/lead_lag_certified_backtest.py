@@ -24,6 +24,7 @@ from hl_observer.backtesting.lead_lag_shadow_economics import (
     executable_campaign_evidence,
 )
 from hl_observer.backtesting.robustesse_selection import pbo_cscv
+from hl_observer.economics.assumptions import EconomicRunMode
 
 CERTIFIED_TIMESTAMP_POLICY = "ts_wall_ms_or_recv_wall_ts_ms_required"
 
@@ -233,6 +234,7 @@ def backtest_certified(
     economic_frozen_at_ms: int | None = None,
     economic_horizon_ms: float = base.CAMPAIGN_HORIZON_MS,
     economic_notional_usd: float = base.CAMPAIGN_NOTIONAL_USD,
+    economic_mode: EconomicRunMode | str = EconomicRunMode.EXPLORATORY,
 ) -> dict[str, Any]:
     """Backtest Lead-Lag from a strictly certified tape.
 
@@ -455,6 +457,7 @@ def backtest_certified(
             frais_slippage_bps=float(frais_slippage_bps),
             seuil_choc_bps=float(seuil_choc_bps),
             notional_usd=float(economic_notional_usd),
+            economic_mode=economic_mode,
         )
     return result
 

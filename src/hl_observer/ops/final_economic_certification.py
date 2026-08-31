@@ -6,6 +6,7 @@ from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
+from hl_observer.economics.proof_binding import audit_economic_contract_receipt
 from hl_observer.simulation.economic_objective import (
     CANONICAL_FAMILIES,
     TARGET_NET_USD,
@@ -127,6 +128,20 @@ def certify_campaign(expected_family: str, payload: Mapping[str, Any] | None) ->
     if actual_family != expected:
         reasons.append(f"FAMILY_MISMATCH:{actual_family or 'MISSING'}")
 
+    economic_binding = audit_economic_contract_receipt(
+        payload.get("economic_contract"),
+        expected_family=expected,
+        require_certifiable_mode=True,
+    )
+    reasons.extend(
+        f"ECONOMIC_BINDING_INVALID:{reason}"
+        for reason in economic_binding.get("issues") or []
+    )
+    if payload.get("assumption_snapshot_hash") != economic_binding.get(
+        "assumption_snapshot_hash"
+    ):
+        reasons.append("CAMPAIGN_ASSUMPTION_SNAPSHOT_MISMATCH")
+
     recomputed = evaluate_objective(payload)
     stored_status = str(payload.get("objective_status") or "")
     recomputed_status = str(recomputed.get("objective_status") or "")
@@ -135,9 +150,7 @@ def certify_campaign(expected_family: str, payload: Mapping[str, Any] | None) ->
 
     stored_eligible = _number(payload.get("eligible_net_pnl_usd"))
     recomputed_eligible = _number(recomputed.get("eligible_net_pnl_usd"))
-    if (stored_eligible is None) != (recomputed_eligible is None):
-        reasons.append("ELIGIBLE_NET_DRIFT")
-    elif (
+    if (stored_eligible is None) != (recomputed_eligible is None) or (
         stored_eligible is not None
         and recomputed_eligible is not None
         and not math.isclose(stored_eligible, recomputed_eligible, abs_tol=1e-8)
@@ -193,6 +206,7 @@ def certify_campaign(expected_family: str, payload: Mapping[str, Any] | None) ->
         and forward_positive
         and forward_post_freeze
         and placebo_beaten
+        and economic_binding.get("ready") is True
         and not unique_reasons
     )
     return {
@@ -208,6 +222,7 @@ def certify_campaign(expected_family: str, payload: Mapping[str, Any] | None) ->
         "placebo_beaten": placebo_beaten,
         "costs_complete": costs_complete,
         "proof_provenance": provenance,
+        "economic_binding": economic_binding,
         "reasons": unique_reasons,
     }
 

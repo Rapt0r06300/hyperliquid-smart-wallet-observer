@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from copy import deepcopy
+
 import pytest
 
 from hl_observer.config.frais_venues import hypothese_frais_taker
@@ -8,6 +10,7 @@ from hl_observer.economics.assumptions import (
     CostComponentReceipt,
     EconomicConfigError,
     EconomicRunMode,
+    MaturityStage,
     ZeroCostReason,
     make_assumption,
 )
@@ -15,6 +18,13 @@ from hl_observer.economics.families import (
     build_copy_vault_contract,
     build_cross_venue_contract,
     build_lead_lag_contract,
+)
+from hl_observer.economics.proof_binding import (
+    ECONOMIC_POLICY_VERSION,
+    audit_cross_artifact_numeric_consistency,
+    audit_economic_contract_receipt,
+    audit_maturity_chain,
+    build_maturity_transition,
 )
 
 
@@ -119,3 +129,113 @@ def test_un_cout_zero_exige_une_raison_machine_readable() -> None:
     )
     assert embedded.certification_eligible is True
     assert missing.certification_eligible is False
+
+
+def test_chaque_famille_produit_un_bundle_economique_reconstructible() -> None:
+    contracts = (
+        build_cross_venue_contract(mode=EconomicRunMode.CERTIFIABLE),
+        build_lead_lag_contract(mode=EconomicRunMode.CERTIFIABLE),
+        build_copy_vault_contract(
+            mode=EconomicRunMode.CERTIFIABLE,
+            notional_usd=150.0,
+            copy_delay_ms=60_000.0,
+            max_reference_lag_ms=30_000.0,
+            max_target_lag_ms=30_000.0,
+        ),
+    )
+
+    for contract in contracts:
+        receipt = contract.receipt()
+        audit = audit_economic_contract_receipt(
+            receipt, expected_family=contract.family
+        )
+        assert audit["ready"] is True
+        assert audit["issues"] == []
+        assert receipt["policy_version"] == ECONOMIC_POLICY_VERSION
+        assert receipt["economic_evidence_bundle"]["maturity_stage"] == "BUILT"
+        assert set(receipt["numeric_provenance_pointers"]) == set(
+            contract.required_ids
+        )
+
+
+def test_toute_mutation_du_bundle_ou_de_la_lineage_est_detectee() -> None:
+    receipt = build_cross_venue_contract(
+        mode=EconomicRunMode.CERTIFIABLE
+    ).receipt()
+
+    mutated_formula = deepcopy(receipt)
+    mutated_formula["formula_manifest"][0]["expression"] = "tampered"
+    assert audit_economic_contract_receipt(mutated_formula)["ready"] is False
+    assert "FORMULA_SNAPSHOT_HASH_MISMATCH" in audit_economic_contract_receipt(
+        mutated_formula
+    )["issues"]
+
+    mutated_pointer = deepcopy(receipt)
+    key = mutated_pointer["required_assumption_ids"][0]
+    mutated_pointer["numeric_provenance_pointers"][key]["terminal_value"] = -1
+    pointer_audit = audit_economic_contract_receipt(mutated_pointer)
+    assert pointer_audit["ready"] is False
+    assert "NUMERIC_PROVENANCE_HASH_MISMATCH" in pointer_audit["issues"]
+
+    mutated_bundle = deepcopy(receipt)
+    mutated_bundle["economic_evidence_bundle"]["policy_version"] = "stale"
+    bundle_audit = audit_economic_contract_receipt(mutated_bundle)
+    assert bundle_audit["ready"] is False
+    assert "ECONOMIC_EVIDENCE_BUNDLE_HASH_MISMATCH" in bundle_audit["issues"]
+
+
+def test_maturite_ne_peut_etre_inferee_ni_sauter_une_etape() -> None:
+    with pytest.raises(ValueError, match="non adjacente"):
+        build_maturity_transition(
+            family="COPY_VAULT",
+            from_stage=MaturityStage.BUILT,
+            to_stage=MaturityStage.OOS_PASS,
+            evidence_refs=("audit.json#ok",),
+        )
+
+    audit_pass = build_maturity_transition(
+        family="COPY_VAULT",
+        from_stage=MaturityStage.BUILT,
+        to_stage=MaturityStage.ECONOMIC_AUDIT_PASS,
+        evidence_refs=("audit.json#ledger_valid",),
+    )
+    stress_pass = build_maturity_transition(
+        family="COPY_VAULT",
+        from_stage=MaturityStage.ECONOMIC_AUDIT_PASS,
+        to_stage=MaturityStage.STRESS_PASS,
+        evidence_refs=("stress.json#passed",),
+        previous_transition_hash=audit_pass["transition_hash"],
+    )
+    result = audit_maturity_chain("copy_vault", (audit_pass, stress_pass))
+    assert result["ready"] is True
+    assert result["stage"] == MaturityStage.STRESS_PASS.value
+
+    tampered = deepcopy(stress_pass)
+    tampered["previous_transition_hash"] = "0" * 64
+    invalid = audit_maturity_chain("copy_vault", (audit_pass, tampered))
+    assert invalid["ready"] is False
+    assert "MATURITY_PREVIOUS_HASH_MISMATCH:2" in invalid["issues"]
+
+
+def test_consistance_numerique_inter_artefacts_resout_une_autorite_unique() -> None:
+    authority = {"net_pnl_usd": 4.25, "fees_usd": 0.75}
+    valid = audit_cross_artifact_numeric_consistency(
+        authority_name="family_ledger",
+        authority_values=authority,
+        artifacts={
+            "scoreboard": dict(authority),
+            "evidence_bundle": dict(authority),
+            "report": dict(authority),
+        },
+        fields=authority,
+    )
+    assert valid["ready"] is True
+
+    invalid = audit_cross_artifact_numeric_consistency(
+        authority_name="family_ledger",
+        authority_values=authority,
+        artifacts={"scoreboard": {**authority, "net_pnl_usd": 4.5}},
+        fields=authority,
+    )
+    assert invalid["ready"] is False
+    assert "ARTIFACT_VALUE_MISMATCH:scoreboard:net_pnl_usd" in invalid["issues"]

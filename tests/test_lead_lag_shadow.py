@@ -24,15 +24,16 @@ from hl_observer.backtesting.lead_lag_shadow import (
     detecter_chocs,
     detecter_chocs_fenetre,
     distribution_intervalles,
+    episodes_par_horizon,
+    executable_campaign_evidence,
     geler_config,
     horizons_observables,
-    executable_campaign_evidence,
-    episodes_par_horizon,
     net_par_horizon,
     selectionner_sources,
     summarize_executable_episodes,
     walk_forward_protocol_signature,
 )
+from hl_observer.economics.assumptions import EconomicRunMode
 from hl_observer.experimental.signaux import signaux_lead_lag
 
 
@@ -268,6 +269,7 @@ def test_executable_campaign_separe_oos_et_vrai_forward_post_freeze():
         horizon_ms=100.0,
         frais_slippage_bps=9.0,
         notional_usd=25.0,
+        economic_mode=EconomicRunMode.CERTIFIABLE,
     )
 
     assert evidence["summary"]["economic_reconciliation_ok"] is True
@@ -276,8 +278,13 @@ def test_executable_campaign_separe_oos_et_vrai_forward_post_freeze():
     assert evidence["segment_summaries"]["forward"]["positions_fermees"] > 0
     assert evidence["temporal_evidence"]["oos"]["no_lookahead"] is True
     assert evidence["temporal_evidence"]["forward"]["post_freeze"] is True
+    assert evidence["economic_contract"]["certification"]["ready"] is True
+    assert len(evidence["assumption_snapshot_hash"]) == 64
     assert all(
         row["walk_forward_segment"] in {"train", "validation", "oos", "forward"}
+        and row["assumption_snapshot_hash"]
+        == evidence["assumption_snapshot_hash"]
+        and row["economic_contract"] == evidence["economic_contract"]
         for row in evidence["trades"]
     )
 

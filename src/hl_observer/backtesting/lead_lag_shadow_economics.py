@@ -13,14 +13,15 @@ from collections.abc import Iterable, Mapping
 from pathlib import Path
 from typing import Any
 
+# Circularity is intentional and safe: lead_lag_shadow imports this helper only
+# after all primitives below have already been defined.
+from hl_observer.backtesting import lead_lag_shadow as _base
 from hl_observer.backtesting.anti_overfit_gate import evaluer as evaluer_dsr
 from hl_observer.backtesting.anti_overfit_gate import sharpe
 from hl_observer.backtesting.quant_methods import block_bootstrap
 from hl_observer.backtesting.robustesse_selection import pbo_cscv
-
-# Circularity is intentional and safe: lead_lag_shadow imports this helper only
-# after all primitives below have already been defined.
-from hl_observer.backtesting import lead_lag_shadow as _base
+from hl_observer.economics.assumptions import EconomicRunMode
+from hl_observer.economics.families import build_lead_lag_contract
 
 CAMPAIGN_HORIZON_MS = _base.CAMPAIGN_HORIZON_MS
 CAMPAIGN_NOTIONAL_USD = _base.CAMPAIGN_NOTIONAL_USD
@@ -291,7 +292,7 @@ def summarize_executable_episodes(
     }
 
 def _placebo_direction(coin: str, signal_ts_ns: int) -> float:
-    digest = hashlib.sha256(f"{coin}|{signal_ts_ns}|placebo-v1".encode("utf-8")).digest()
+    digest = hashlib.sha256(f"{coin}|{signal_ts_ns}|placebo-v1".encode()).digest()
     return 1.0 if digest[0] & 1 else -1.0
 
 def _temporal_bounds(signal_times: list[int], *, purge_ns: int) -> dict[str, int | None]:
@@ -329,9 +330,35 @@ def executable_campaign_evidence(
     notional_usd: float = CAMPAIGN_NOTIONAL_USD,
     max_reference_lag_ms: float = CAMPAIGN_MAX_REFERENCE_LAG_MS,
     max_exit_lag_ms: float = CAMPAIGN_MAX_EXIT_LAG_MS,
+    economic_mode: EconomicRunMode | str = EconomicRunMode.EXPLORATORY,
 ) -> dict[str, Any]:
     """Build the fixed-horizon, purged, post-freeze Lead-Lag paper ledger."""
 
+    contract = build_lead_lag_contract(
+        mode=economic_mode,
+        notional_usd=float(notional_usd),
+        max_book_age_ms=float(max_reference_lag_ms),
+        max_execution_observation_delay_ms=float(max_exit_lag_ms),
+    )
+    economic_receipt = contract.receipt()
+    canonical_round_trip_fee = float(
+        contract.registry.get("lead_lag.round_trip_fee_bps").value
+    )
+    if not math.isclose(
+        float(frais_slippage_bps), canonical_round_trip_fee, abs_tol=1e-12
+    ):
+        economic_receipt["certification"] = {
+            **dict(economic_receipt["certification"]),
+            "ready": False,
+            "assumption_snapshot_hash": None,
+            "failures": [
+                *list(economic_receipt["certification"].get("failures") or ()),
+                {
+                    "assumption_id": "lead_lag.round_trip_fee_bps",
+                    "reason": "LOCAL_FEE_OVERRIDE_DIFFERS_FROM_CANONICAL_AUTHORITY",
+                },
+            ],
+        }
     frozen_at_ns = int(frozen_at_ms) * 1_000_000
     horizon_ns = int(float(horizon_ms) * 1_000_000.0)
     candidates: list[dict[str, Any]] = []
@@ -407,6 +434,10 @@ def executable_campaign_evidence(
 
     segmented = {name: [] for name in ("train", "validation", "oos", "forward")}
     placebo_segmented = {name: [] for name in segmented}
+    assumption_snapshot_hash = contract.registry.snapshot_hash()
+    for row in [*candidates, *placebos]:
+        row["assumption_snapshot_hash"] = assumption_snapshot_hash
+        row["economic_contract"] = economic_receipt
     for row in candidates:
         name = segment(row)
         if name is not None:
@@ -434,6 +465,8 @@ def executable_campaign_evidence(
     return {
         "schema_version": "hypersmart.lead_lag_executable_campaign.v1",
         "execution_model": CAMPAIGN_EXECUTION_MODEL,
+        "economic_contract": economic_receipt,
+        "assumption_snapshot_hash": assumption_snapshot_hash,
         "params": {
             "horizon_ms": float(horizon_ms),
             "seuil_choc_bps": float(seuil_choc_bps),

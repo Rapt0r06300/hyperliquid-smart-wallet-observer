@@ -14,33 +14,66 @@ from hl_observer.economics.assumptions import (
     FormulaDefinition,
     make_assumption,
 )
+from hl_observer.economics.proof_binding import (
+    CONTRACT_SCHEMA,
+    ECONOMIC_POLICY_VERSION,
+    build_economic_evidence_bundle,
+    build_numeric_provenance_pointers,
+)
 
 
 @dataclass(frozen=True, slots=True)
 class FamilyEconomicContract:
     family: str
+    run_mode: EconomicRunMode
     registry: EconomicAssumptionRegistry
     required_ids: tuple[str, ...]
     direct_measured_fields: tuple[str, ...]
     reality_model_version: str
+    reality_model_components: tuple[tuple[str, str], ...]
 
     def receipt(self) -> dict[str, Any]:
         certification = self.registry.certification_receipt(self.required_ids)
+        assumption_snapshot = self.registry.snapshot()
+        formula_manifest = list(assumption_snapshot["formulas"])
+        numeric_pointers = build_numeric_provenance_pointers(
+            self.registry, self.required_ids
+        )
+        reality_components = dict(self.reality_model_components)
+        evidence_bundle = build_economic_evidence_bundle(
+            family=self.family,
+            registry=self.registry,
+            required_ids=self.required_ids,
+            reality_model_version=self.reality_model_version,
+            reality_model_components=reality_components,
+            run_mode=self.run_mode,
+        )
         return {
-            "schema": "hypersmart.family_economic_contract.v1",
+            "schema": CONTRACT_SCHEMA,
+            "policy_version": ECONOMIC_POLICY_VERSION,
             "family": self.family,
+            "run_mode": self.run_mode.value,
             "reality_model_version": self.reality_model_version,
+            "reality_model_components": reality_components,
+            "reality_model_hash": evidence_bundle["reality_model_hash"],
             "assumption_snapshot_hash": self.registry.snapshot_hash(),
+            "formula_snapshot_hash": evidence_bundle["formula_snapshot_hash"],
+            "numeric_provenance_hash": evidence_bundle["numeric_provenance_hash"],
             "certification": certification,
+            "required_assumption_ids": sorted(set(self.required_ids)),
             "direct_measured_fields": list(self.direct_measured_fields),
             "numeric_provenance": {
                 assumption_id: list(self.registry.provenance_chain(assumption_id))
                 for assumption_id in self.required_ids
             },
+            "numeric_provenance_pointers": numeric_pointers,
             "values": {
                 assumption_id: self.registry.get(assumption_id).value
                 for assumption_id in self.required_ids
             },
+            "assumption_snapshot": assumption_snapshot,
+            "formula_manifest": formula_manifest,
+            "economic_evidence_bundle": evidence_bundle,
         }
 
 
@@ -192,10 +225,22 @@ def build_cross_venue_contract(
     )
     return FamilyEconomicContract(
         family=family,
+        run_mode=EconomicRunMode(str(mode).strip().upper()),
         registry=registry,
         required_ids=required,
         direct_measured_fields=("entry_capacity_usd", "exit_capacity_usd", "bid", "ask"),
         reality_model_version=reality,
+        reality_model_components=(
+            ("fee_treatment", "cross_venue.round_trip_fee.v1:2xHL+2xBINANCE"),
+            ("fill_count", "cross_venue.four_fill_two_venue.v1"),
+            ("funding_treatment", "cross_venue.no_funding_settlement_in_closed_cycle.v1"),
+            ("latency_treatment", "cross_venue.causal_delayed_entry.v1"),
+            (
+                "slippage_capacity_treatment",
+                "cross_venue.full_depth_capacity_or_reject.v1",
+            ),
+            ("spread_treatment", "cross_venue.executable_bid_ask_fills.v1"),
+        ),
     )
 
 
@@ -261,6 +306,7 @@ def build_lead_lag_contract(
     )
     return FamilyEconomicContract(
         family=family,
+        run_mode=EconomicRunMode(str(mode).strip().upper()),
         registry=registry,
         required_ids=required,
         direct_measured_fields=(
@@ -271,6 +317,17 @@ def build_lead_lag_contract(
             "ask",
         ),
         reality_model_version=reality,
+        reality_model_components=(
+            ("fee_treatment", "lead_lag.round_trip_fee.v1:2xHL"),
+            ("fill_count", "lead_lag.two_fill_round_trip.v1"),
+            ("funding_treatment", "lead_lag.no_funding_settlement_in_closed_cycle.v1"),
+            ("latency_treatment", "lead_lag.delayed_executable_entry.v2"),
+            (
+                "slippage_capacity_treatment",
+                "lead_lag.full_top_capacity_or_reject.v1",
+            ),
+            ("spread_treatment", "lead_lag.executable_bid_ask_fills.v1"),
+        ),
     )
 
 
@@ -342,6 +399,7 @@ def build_copy_vault_contract(
     )
     return FamilyEconomicContract(
         family=family,
+        run_mode=EconomicRunMode(str(mode).strip().upper()),
         registry=registry,
         required_ids=required,
         direct_measured_fields=(
@@ -354,6 +412,17 @@ def build_copy_vault_contract(
             "exit_ask",
         ),
         reality_model_version=reality,
+        reality_model_components=(
+            ("fee_treatment", "copy_vault.round_trip_fee.v1:2xHL"),
+            ("fill_count", "copy_vault.two_fill_round_trip.v1"),
+            ("funding_treatment", "copy_vault.no_funding_settlement_in_closed_cycle.v1"),
+            ("latency_treatment", "copy_vault.adverse_latency.v1"),
+            (
+                "slippage_capacity_treatment",
+                "copy_vault.full_top_capacity_or_reject.v1",
+            ),
+            ("spread_treatment", "copy_vault.executable_bid_ask_spread.v1"),
+        ),
     )
 
 

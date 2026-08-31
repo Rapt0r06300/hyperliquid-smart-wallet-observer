@@ -15,6 +15,8 @@ from collections.abc import Iterable, Mapping
 from pathlib import Path
 from typing import Any
 
+from hl_observer.economics.proof_binding import audit_economic_contract_receipt
+
 from .economic_objective import (
     STARTING_CAPITAL_USD,
     canonical_family,
@@ -309,11 +311,63 @@ def _base(
         "forward": None,
         "placebos": None,
         "evidence_paths": list(dict.fromkeys(evidence_paths)),
+        "economic_contract": None,
+        "assumption_snapshot_hash": None,
     }
 
 
+def _extract_economic_contract(payload: Mapping[str, Any]) -> Mapping[str, Any] | None:
+    candidates: list[Mapping[str, Any]] = [payload]
+    for key in ("executable_campaign", "walk_forward"):
+        nested = payload.get(key)
+        if isinstance(nested, Mapping):
+            candidates.append(nested)
+    for candidate in candidates:
+        contract = candidate.get("economic_contract")
+        if isinstance(contract, Mapping):
+            return contract
+        trades = candidate.get("trades")
+        if isinstance(trades, list):
+            for trade in trades:
+                if not isinstance(trade, Mapping):
+                    continue
+                contract = trade.get("economic_contract")
+                if isinstance(contract, Mapping):
+                    return contract
+    return None
+
+
+def _attach_economic_contract(row: dict[str, Any], payload: Mapping[str, Any]) -> None:
+    contract = _extract_economic_contract(payload)
+    if contract is None:
+        return
+    row["economic_contract"] = dict(contract)
+    row["assumption_snapshot_hash"] = contract.get("assumption_snapshot_hash")
+
+
 def _finish(row: dict[str, Any]) -> dict[str, Any]:
-    row.update(evaluate_objective(row))
+    binding = audit_economic_contract_receipt(
+        row.get("economic_contract"),
+        expected_family=row.get("family"),
+        require_certifiable_mode=True,
+    )
+    row["economic_binding"] = binding
+    objective = evaluate_objective(row)
+    if objective.get("objective_status") == "ATTEINT" and binding.get("ready") is not True:
+        objective["objective_status"] = "NON_ATTEINT"
+        objective["eligible_net_pnl_usd"] = None
+        objective["objective_reasons"] = list(
+            dict.fromkeys(
+                [
+                    *list(objective.get("objective_reasons") or []),
+                    *[
+                        f"ECONOMIC_BINDING_INVALID:{reason}"
+                        for reason in binding.get("issues") or ["UNKNOWN"]
+                    ],
+                ]
+            )
+        )
+    row.update(objective)
     return row
 
 
@@ -329,6 +383,7 @@ def build_copy_campaign(
         datasets=datasets,
         evidence_paths=("runtime/data/copy_edge_rapport_reel.json",),
     )
+    _attach_economic_contract(row, report)
     if report.get("schema_version") == "hypersmart.copy_vault_executable_campaign.v1":
         summary = report.get("summary") if isinstance(report.get("summary"), Mapping) else {}
         temporal = (
@@ -493,6 +548,7 @@ def build_lead_lag_campaign(
         datasets=datasets,
         evidence_paths=("runtime/data/bbo_tape.jsonl",),
     )
+    _attach_economic_contract(row, analysis)
     row["source_status"] = analysis.get("statut")
     row["source_detail"] = analysis.get("detail")
     row["signal_count"] = analysis.get("chocs_test")
@@ -578,6 +634,7 @@ def build_cross_campaign(
         datasets=datasets,
         evidence_paths=("runtime/research/dislocation_final_verdict.json",),
     )
+    _attach_economic_contract(row, report)
     realistic = (
         report.get("verdict_realiste_16bps")
         if isinstance(report.get("verdict_realiste_16bps"), Mapping)

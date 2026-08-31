@@ -56,6 +56,7 @@ from hl_observer.datasets.source_discovery import (  # noqa: E402
     source_manifest_summary,
     write_family_source_manifest,
 )
+from hl_observer.economics.assumptions import EconomicRunMode  # noqa: E402
 from hl_observer.ops.bounded_collection import (  # noqa: E402
     ensure_bounded_collectors,
     inspect_bounded_collectors,
@@ -272,6 +273,7 @@ def run_campaigns(
             int(copy_freeze["frozen_at_ms"]) if copy_freeze is not None
             else provisional_cutoff_ms
         ),
+        economic_mode=EconomicRunMode.CERTIFIABLE,
     )
     copy_segment_trades = copy_walk_forward.get("trades", {})
     copy_trades = [
@@ -295,6 +297,10 @@ def run_campaigns(
         "walk_forward": {
             key: value for key, value in copy_walk_forward.items() if key != "trades"
         },
+        "economic_contract": copy_walk_forward.get("economic_contract"),
+        "assumption_snapshot_hash": copy_walk_forward.get(
+            "assumption_snapshot_hash"
+        ),
         "summary": copy_walk_forward.get("combined_summary"),
         "temporal_evidence": copy_vault_executable.temporal_evidence(copy_walk_forward),
         "vault_generalization": copy_generalization,
@@ -376,6 +382,7 @@ def run_campaigns(
         ),
         economic_horizon_ms=lead_lag_shadow.CAMPAIGN_HORIZON_MS,
         economic_notional_usd=lead_lag_shadow.CAMPAIGN_NOTIONAL_USD,
+        economic_mode=EconomicRunMode.CERTIFIABLE,
     )
     if isinstance(lead_raw, dict):
         lead_raw["calibration"] = lead_calibration
@@ -532,8 +539,16 @@ def run_campaigns(
         ),
     )
     segment_trades = cross_walk_forward.get("trades", {})
+    cross_economic = cross_tool.economic_contract(EconomicRunMode.CERTIFIABLE)
+    cross_economic_receipt = cross_economic.receipt()
+    cross_assumption_snapshot_hash = cross_economic.registry.snapshot_hash()
     cross_trades = [
-        {**trade, "walk_forward_segment": name}
+        {
+            **trade,
+            "walk_forward_segment": name,
+            "economic_contract": cross_economic_receipt,
+            "assumption_snapshot_hash": cross_assumption_snapshot_hash,
+        }
         for name in ("train", "validation", "oos", "forward")
         for trade in segment_trades.get(name, [])
     ] if isinstance(segment_trades, dict) else []
@@ -554,6 +569,8 @@ def run_campaigns(
             for key, value in cross_walk_forward.items()
             if key != "trades"
         },
+        "economic_contract": cross_economic_receipt,
+        "assumption_snapshot_hash": cross_assumption_snapshot_hash,
         "verdict_realiste_16bps": cross_tool.juger(cross_trades),
         "temporal_evidence": cross_temporal,
         "hypothesis_audit": cross_hypothesis_audit,

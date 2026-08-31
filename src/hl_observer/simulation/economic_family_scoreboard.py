@@ -13,6 +13,8 @@ from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
+from hl_observer.economics.proof_binding import audit_economic_contract_receipt
+
 from .economic_objective import evaluate_objective
 
 SCHEMA_VERSION = "hypersmart.economic_family_scoreboards.v2"
@@ -69,7 +71,28 @@ def _empty_row(family: str) -> dict[str, Any]:
         "verdict_reasons": [],
         "evidence_paths": [],
         "real_execution": False,
+        "economic_contract": None,
+        "economic_binding": None,
+        "economic_policy_version": None,
+        "assumption_snapshot_hash": None,
+        "formula_snapshot_hash": None,
+        "numeric_provenance_hash": None,
+        "economic_evidence_bundle_hash": None,
     }
+
+
+def _binding_audit(row: Mapping[str, Any]) -> dict[str, Any]:
+    audit = audit_economic_contract_receipt(
+        row.get("economic_contract"),
+        expected_family=row.get("family"),
+        require_certifiable_mode=True,
+    )
+    issues = list(audit.get("issues") or [])
+    declared_snapshot = row.get("assumption_snapshot_hash")
+    bound_snapshot = audit.get("assumption_snapshot_hash")
+    if declared_snapshot is not None and declared_snapshot != bound_snapshot:
+        issues.append("SCOREBOARD_ASSUMPTION_SNAPSHOT_MISMATCH")
+    return {**audit, "ready": not issues, "issues": list(dict.fromkeys(issues))}
 
 
 def _finalize(row: dict[str, Any]) -> dict[str, Any]:
@@ -78,8 +101,30 @@ def _finalize(row: dict[str, Any]) -> dict[str, Any]:
     if row.get("liquidatable_net") is None:
         row["liquidatable_net"] = row.get("LIQUIDATABLE_NET")
     row.pop("LIQUIDATABLE_NET", None)
+    binding = _binding_audit(row)
+    row["economic_binding"] = binding
+    row["economic_policy_version"] = binding.get("policy_version")
+    row["assumption_snapshot_hash"] = binding.get("assumption_snapshot_hash")
+    row["formula_snapshot_hash"] = binding.get("formula_snapshot_hash")
+    row["numeric_provenance_hash"] = binding.get("numeric_provenance_hash")
+    row["economic_evidence_bundle_hash"] = binding.get("bundle_hash")
     row["verdict"], row["verdict_reasons"] = promotion_verdict(row)
-    row.update(evaluate_objective(row))
+    objective = evaluate_objective(row)
+    if objective.get("objective_status") == "ATTEINT" and binding.get("ready") is not True:
+        objective["objective_status"] = "NON_ATTEINT"
+        objective["eligible_net_pnl_usd"] = None
+        objective["objective_reasons"] = list(
+            dict.fromkeys(
+                [
+                    *list(objective.get("objective_reasons") or []),
+                    *[
+                        f"ECONOMIC_BINDING_INVALID:{issue}"
+                        for issue in binding.get("issues") or ["UNKNOWN"]
+                    ],
+                ]
+            )
+        )
+    row.update(objective)
     return row
 
 
@@ -105,6 +150,13 @@ def promotion_verdict(row: Mapping[str, Any]) -> tuple[str, list[str]]:
     """Apply the deny-by-default promotion contract to one family row."""
     if str(row.get("source_verdict") or "").upper() == "KILL":
         return "KILL", ["SOURCE_EVIDENCE_KILL"]
+
+    binding = _binding_audit(row)
+    if binding.get("ready") is not True:
+        return "MORE_DATA", [
+            f"ECONOMIC_BINDING_INVALID:{issue}"
+            for issue in binding.get("issues") or ["UNKNOWN"]
+        ]
 
     required_numeric = (
         "closed_positions",

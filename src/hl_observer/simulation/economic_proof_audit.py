@@ -20,6 +20,8 @@ from collections.abc import Iterable, Mapping
 from pathlib import Path
 from typing import Any
 
+from hl_observer.economics.proof_binding import audit_economic_contract_receipt
+
 from .economic_campaigns import REPORT_DIR
 from .economic_objective import (
     CANONICAL_FAMILIES,
@@ -227,6 +229,19 @@ def audit_family(
     if raw.get("paper_read_only") is False or raw.get("real_execution") is True:
         issues.append("RAW_REAL_EXECUTION_GUARD_FAILED")
 
+    economic_binding = audit_economic_contract_receipt(
+        campaign.get("economic_contract"),
+        expected_family=family,
+        require_certifiable_mode=True,
+    )
+    issues.extend(
+        f"ECONOMIC_BINDING_INVALID:{reason}"
+        for reason in economic_binding.get("issues") or []
+    )
+    bound_snapshot_hash = economic_binding.get("assumption_snapshot_hash")
+    if campaign.get("assumption_snapshot_hash") != bound_snapshot_hash:
+        issues.append("CAMPAIGN_ASSUMPTION_SNAPSHOT_MISMATCH")
+
     raw_rows = _raw_trades(family, raw)
     liquidatable_rows = [row for row in raw_rows if _is_liquidatable(row)]
     if not raw_rows:
@@ -242,6 +257,8 @@ def audit_family(
             issues.append(f"TRADE_ID_MISSING:{index}")
             continue
         all_ids.append(trade_id)
+        if row.get("assumption_snapshot_hash") != bound_snapshot_hash:
+            issues.append(f"TRADE_ASSUMPTION_SNAPSHOT_MISMATCH:{trade_id}")
         economics = _trade_economics(family, row)
         if any(value is None for value in economics.values()):
             issues.append(f"TRADE_ECONOMICS_UNMEASURED:{trade_id}")
@@ -398,6 +415,7 @@ def audit_family(
         "issues": list(dict.fromkeys(issues)),
         "warnings": list(dict.fromkeys(warnings)),
         "objective_reasons": recomputed_objective.get("objective_reasons"),
+        "economic_binding": economic_binding,
         "economics": {
             "total_costs_usd": _rounded(total_costs),
             "cost_to_abs_gross_ratio": (

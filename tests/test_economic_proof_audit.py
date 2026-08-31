@@ -4,6 +4,8 @@ import hashlib
 import json
 from copy import deepcopy
 
+from hl_observer.economics.assumptions import EconomicRunMode
+from hl_observer.economics.families import build_copy_vault_contract
 from hl_observer.simulation.economic_objective import evaluate_objective
 from hl_observer.simulation.economic_proof_audit import (
     audit_family,
@@ -32,7 +34,13 @@ def _segment(trade_id: str, net: float) -> dict:
     }
 
 
-def _trade(trade_id: str, segment: str, signal_ms: int) -> dict:
+def _trade(
+    trade_id: str,
+    segment: str,
+    signal_ms: int,
+    *,
+    assumption_snapshot_hash: str,
+) -> dict:
     return {
         "trade_id": trade_id,
         "vault": "0x" + "1" * 40,
@@ -50,6 +58,7 @@ def _trade(trade_id: str, segment: str, signal_ms: int) -> dict:
         "liquidatable_net": True,
         "paper_read_only": True,
         "real_execution": False,
+        "assumption_snapshot_hash": assumption_snapshot_hash,
         "reference_lag_ms": 5.0,
         "entry_target_lag_ms": 10.0,
         "exit_target_lag_ms": 10.0,
@@ -62,11 +71,21 @@ def _positive_copy_evidence() -> tuple[dict, dict]:
     forward_id = "forward-trade"
     oos = {**_segment(oos_id, 2.5), "no_lookahead": True}
     forward = {**_segment(forward_id, 2.5), "post_freeze": True}
+    economic_contract = build_copy_vault_contract(
+        mode=EconomicRunMode.CERTIFIABLE,
+        notional_usd=150.0,
+        copy_delay_ms=60_000.0,
+        max_reference_lag_ms=30_000.0,
+        max_target_lag_ms=30_000.0,
+    ).receipt()
+    snapshot_hash = economic_contract["assumption_snapshot_hash"]
     campaign = {
         "family": "copy_vault",
         "starting_capital_usd": 1000.0,
         "paper_read_only": True,
         "real_execution": False,
+        "economic_contract": economic_contract,
+        "assumption_snapshot_hash": snapshot_hash,
         "parameters_frozen": True,
         "parameter_freeze": {"campaign_id": "freeze-1", "frozen_at_ms": 1_000},
         "opened_positions": 2,
@@ -92,8 +111,18 @@ def _positive_copy_evidence() -> tuple[dict, dict]:
         "paper_read_only": True,
         "real_execution": False,
         "trades": [
-            _trade(oos_id, "oos", 900),
-            _trade(forward_id, "forward", 1_100),
+            _trade(
+                oos_id,
+                "oos",
+                900,
+                assumption_snapshot_hash=snapshot_hash,
+            ),
+            _trade(
+                forward_id,
+                "forward",
+                1_100,
+                assumption_snapshot_hash=snapshot_hash,
+            ),
         ],
     }
     return campaign, raw
@@ -140,6 +169,16 @@ def test_audit_economic_proof_detecte_un_resume_desynchronise_du_ledger():
 
     assert result["ledger_valid"] is False
     assert any("CAMPAIGN_NET_PNL_USD_MISMATCH" in reason for reason in result["issues"])
+
+
+def test_audit_economic_proof_refuse_un_snapshot_economique_desynchronise():
+    campaign, raw = _positive_copy_evidence()
+    raw["trades"][1]["assumption_snapshot_hash"] = "0" * 64
+
+    result = audit_family(campaign, raw)
+
+    assert result["ledger_valid"] is False
+    assert "TRADE_ASSUMPTION_SNAPSHOT_MISMATCH:forward-trade" in result["issues"]
 
 
 def test_audit_reports_ecrit_les_deux_artefacts(tmp_path):

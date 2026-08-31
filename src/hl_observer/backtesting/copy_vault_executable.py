@@ -20,6 +20,7 @@ from hl_observer.backtesting.copy_vault_protocol import (
     METAORDER_GAP_MS,
     MIN_TRAIN_TRADES,
     NOTIONAL_USD,
+    PROTOCOL_NAME,
     TRAIN_ECONOMIC_GATE_VERSION,
     TRAIN_FRACTION,
     VALIDATION_FRACTION,
@@ -782,8 +783,18 @@ def calibrate_train_only(
 def evaluate_frozen(
     metaorders: list[Mapping[str, Any]],
     books_by_coin: Mapping[str, list[dict[str, Any]]],
-    *, frozen_parameters: Mapping[str, Any], frozen_at_ms: int,
+    *,
+    frozen_parameters: Mapping[str, Any],
+    frozen_at_ms: int,
+    economic_mode: EconomicRunMode | str = EconomicRunMode.EXPLORATORY,
 ) -> dict[str, Any]:
+    contract = build_copy_vault_contract(
+        mode=economic_mode,
+        notional_usd=float(NOTIONAL_USD),
+        copy_delay_ms=float(COPY_DELAY_MS),
+        max_reference_lag_ms=float(MAX_REFERENCE_LAG_MS),
+        max_target_lag_ms=float(MAX_TARGET_LAG_MS),
+    )
     bounds = dict(frozen_parameters.get("walk_forward_bounds") or {})
     horizon = int(frozen_parameters.get("selected_horizon_ms") or HORIZONS_MS[0])
     causal_all_segments = frozen_parameters.get("causal_observation_required_all_segments") is True
@@ -793,12 +804,20 @@ def evaluate_frozen(
         "oos": (bounds.get("oos_start_ms"), bounds.get("oos_end_ms")),
         "forward": (max(int(frozen_at_ms) + 1, int(bounds.get("oos_end_ms") or 0) + 1), None),
     }
-    result: dict[str, Any] = {"horizon_ms": horizon, "bounds": bounds, "segments": {}, "trades": {}}
+    result: dict[str, Any] = {
+        "horizon_ms": horizon,
+        "bounds": bounds,
+        "segments": {},
+        "trades": {},
+        "economic_contract": contract.receipt(),
+        "assumption_snapshot_hash": contract.registry.snapshot_hash(),
+    }
     all_trades: list[dict[str, Any]] = []
     for name, (start_ms, end_ms) in segments.items():
         trades, diagnostics = replay_metaorders(
             metaorders, books_by_coin, horizon_ms=horizon, start_ms=start_ms, end_ms=end_ms,
             require_causal_observation=causal_all_segments or name == "forward",
+            economic_mode=economic_mode,
         )
         result["segments"][name] = {"summary": summarize(trades), "diagnostics": diagnostics}
         result["trades"][name] = trades
@@ -808,6 +827,7 @@ def evaluate_frozen(
         metaorders, books_by_coin, horizon_ms=horizon,
         start_ms=bounds.get("oos_start_ms"), end_ms=bounds.get("oos_end_ms"),
         direction_multiplier=-1, require_causal_observation=causal_all_segments,
+        economic_mode=economic_mode,
     )
     result["placebo_inverted_oos"] = {
         "summary": summarize(inverted), "diagnostics": inverted_diag,
@@ -859,6 +879,6 @@ __all__ = [
     "MAX_TARGET_LAG_MS", "METAORDER_GAP_MS", "NOTIONAL_USD", "SCHEMA_VERSION",
     "calibrate_train_only", "canonical_metaorder_id", "classify_live_entry_action",
     "cluster_metaorders", "evaluate_frozen", "execute_metaorder", "expected_open_direction",
-    "load_observed_books", "protocol_signature", "replay_metaorders", "select_causal_protocol_inputs",
+    "load_observed_books", "PROTOCOL_NAME", "protocol_signature", "replay_metaorders", "select_causal_protocol_inputs",
     "select_observed_continuations", "summarize", "temporal_bounds", "temporal_evidence",
 ]

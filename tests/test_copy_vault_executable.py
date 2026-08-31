@@ -592,12 +592,24 @@ def test_walk_forward_selects_on_train_and_forward_is_strictly_post_freeze() -> 
         "walk_forward_bounds": calibration["bounds"],
     }
     evaluation = evaluate_frozen(
-        metaorders, {"BTC": books}, frozen_parameters=parameters, frozen_at_ms=freeze_at
+        metaorders,
+        {"BTC": books},
+        frozen_parameters=parameters,
+        frozen_at_ms=freeze_at,
+        economic_mode=EconomicRunMode.CERTIFIABLE,
     )
     temporal = temporal_evidence(evaluation)
 
     assert temporal["oos"]["no_lookahead"] is True
     assert temporal["forward"]["post_freeze"] is True
+    assert evaluation["economic_contract"]["certification"]["ready"] is True
+    assert len(evaluation["assumption_snapshot_hash"]) == 64
+    assert all(
+        trade["assumption_snapshot_hash"]
+        == evaluation["assumption_snapshot_hash"]
+        for rows in evaluation["trades"].values()
+        for trade in rows
+    )
     assert all(
         trade["signal_ts_ms"] > freeze_at
         for trade in evaluation["trades"]["forward"]

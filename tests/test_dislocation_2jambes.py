@@ -18,8 +18,10 @@ _spec.loader.exec_module(BT)
 
 def test_net_positif_quand_le_basis_converge():
     # HL cher à l'entrée (100.2 vs 100.0), convergent à l'égalité à la sortie -> SHORT HL / LONG BIN gagne
-    hl_in = (0, 100.19, 100.21); bn_in = (0, 99.99, 100.01)
-    hl_out = (0, 100.00, 100.02); bn_out = (0, 99.99, 100.01)
+    hl_in = (0, 100.19, 100.21)
+    bn_in = (0, 99.99, 100.01)
+    hl_out = (0, 100.00, 100.02)
+    bn_out = (0, 99.99, 100.01)
     net = BT._net_trade_bps(hl_in, bn_in, hl_out, bn_out, sens=+1, fees_ar_bps=0.0)
     assert net > 0, "un basis qui converge (HL cher -> égal) rapporte, hors frais"
     # avec les frais réels (16 bps), un petit basis de ~20 bps ne couvre pas forcément : on vérifie le signe seul
@@ -31,6 +33,18 @@ def test_signature_walk_forward_invalide_les_freezes_legacy_non_certifies():
     assert signature["source_mode"] == "CERTIFIED_ATOMIC_FOUR_SIDE_BOOK_V2"
     assert signature["four_fill_contract_version"] == "cross_four_fill_aon_v1"
     assert signature["capacity_contract"] == "minimum_four_bbo_top_levels_usd"
+
+
+def test_contrat_economique_cross_venue_est_certifiable_et_canonique():
+    receipt = BT.economic_contract(BT.EconomicRunMode.CERTIFIABLE).receipt()
+
+    assert receipt["certification"]["ready"] is True
+    assert receipt["run_mode"] == "CERTIFIABLE"
+    assert receipt["values"]["cross_venue.round_trip_fee_bps"] == BT.FEES_AR_BPS
+    assert (
+        receipt["values"]["cross_venue.minimum_entry_edge_bps"]
+        == BT.MIN_EXECUTABLE_EDGE_BPS
+    )
 
 
 def test_basis_nul_ne_rapporte_que_les_couts():

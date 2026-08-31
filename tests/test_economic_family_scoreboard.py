@@ -6,6 +6,8 @@ from pathlib import Path
 from fastapi.testclient import TestClient
 
 from hl_observer.backtesting.cross_venue_certified import FOUR_FILL_CONTRACT_VERSION, SOURCE_MODE
+from hl_observer.economics.assumptions import EconomicRunMode
+from hl_observer.economics.families import build_cross_venue_contract
 from hl_observer.simulation.economic_family_scoreboard import (
     build_scoreboards,
     promotion_verdict,
@@ -71,7 +73,13 @@ def test_scoreboards_keep_families_separate_and_deny_incomplete_evidence(tmp_pat
 
 
 def test_promotion_requires_positive_oos_forward_placebo_and_sample() -> None:
+    economic_contract = build_cross_venue_contract(
+        mode=EconomicRunMode.CERTIFIABLE
+    ).receipt()
     complete = {
+        "family": "cross_venue_dislocation_v2",
+        "economic_contract": economic_contract,
+        "assumption_snapshot_hash": economic_contract["assumption_snapshot_hash"],
         "closed_positions": 30,
         "net_pnl_usd": 1.0,
         "roi_pct": 0.1,
@@ -91,11 +99,16 @@ def test_promotion_requires_positive_oos_forward_placebo_and_sample() -> None:
 
 
 def test_strict_campaign_is_preferred_and_never_double_counts_arbitrage(tmp_path: Path) -> None:
+    economic_contract = build_cross_venue_contract(
+        mode=EconomicRunMode.CERTIFIABLE
+    ).receipt()
     campaign = {
         "family": "cross_venue_dislocation_v2",
         "starting_capital_usd": 1000.0,
         "paper_read_only": True,
         "real_execution": False,
+        "economic_contract": economic_contract,
+        "assumption_snapshot_hash": economic_contract["assumption_snapshot_hash"],
         "parameters_frozen": True,
         "all_positions_two_leg_closed": True,
         "signal_count": 40,

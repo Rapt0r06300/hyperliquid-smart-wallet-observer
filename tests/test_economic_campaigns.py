@@ -6,6 +6,11 @@ from pathlib import Path
 import pytest
 
 from hl_observer.backtesting.copy_vault_executable import PROTOCOL_NAME
+from hl_observer.economics.assumptions import EconomicRunMode
+from hl_observer.economics.families import (
+    build_copy_vault_contract,
+    build_lead_lag_contract,
+)
 from hl_observer.simulation.economic_campaigns import (
     build_copy_campaign,
     build_cross_campaign,
@@ -183,8 +188,16 @@ def test_executable_copy_campaign_maps_only_closed_liquidatable_evidence(tmp_pat
         campaign_id="copy-executable",
         frozen_at_ms=10,
     )
+    economic_contract = build_copy_vault_contract(
+        mode=EconomicRunMode.CERTIFIABLE,
+        notional_usd=150.0,
+        copy_delay_ms=60_000.0,
+        max_reference_lag_ms=30_000.0,
+        max_target_lag_ms=30_000.0,
+    ).receipt()
     report = {
         "schema_version": "hypersmart.copy_vault_executable_campaign.v1",
+        "economic_contract": economic_contract,
         "vault_generalization": {"sample_count": 20, "net_bps": 3.0},
         "metaorder_audit": {"metaorders": 3},
         "summary": {
@@ -283,10 +296,14 @@ def test_executable_lead_lag_campaign_maps_closed_ledger_and_temporal_proof(
         campaign_id="lead-executable",
         frozen_at_ms=10,
     )
+    economic_contract = build_lead_lag_contract(
+        mode=EconomicRunMode.CERTIFIABLE
+    ).receipt()
     report = {
         "statut": "PROMETTEUR",
         "chocs_test": 4,
         "executable_campaign": {
+            "economic_contract": economic_contract,
             "execution_model": "causal_marketable_top_v3",
             "diagnostics": {"candidate_observations": 4, "missing_top_sizes": 0},
             "summary": {
