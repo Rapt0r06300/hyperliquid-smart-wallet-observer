@@ -194,6 +194,14 @@ V21_EVIDENCE: dict[str, Evidence] = {
     ),
 }
 
+V26_EVIDENCE: dict[str, Evidence] = {
+    "V26-P0-001": _verified(
+        "Spine local multi-producteur avec inbox isolees, writer OS unique, ledger append-only fsync, reprise crash idempotente et projection dashboard reconstruisible.",
+        "tests/test_alert_spine_v26.py; tests/test_collecte_fiable.py; tests/test_jsonl_stream.py; tests/test_raw_spool_et_side_lock.py",
+        "a1a443f0",
+    ),
+}
+
 
 def parse_work_units(text: str) -> list[WorkUnit]:
     lines = text.splitlines()
@@ -244,6 +252,8 @@ def _escape(value: object) -> str:
 def evidence_for(unit: WorkUnit) -> Evidence:
     if unit.identifier in V21_EVIDENCE:
         return V21_EVIDENCE[unit.identifier]
+    if unit.identifier in V26_EVIDENCE:
+        return V26_EVIDENCE[unit.identifier]
     if _trace_only(unit.roadmap_disposition):
         return Evidence(
             state="TRACE_ONLY",

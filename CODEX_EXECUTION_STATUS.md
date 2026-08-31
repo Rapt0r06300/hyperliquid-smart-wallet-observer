@@ -4,14 +4,14 @@
 > `PENDING_AUDIT` signifie que la preuve manque; ce n'est jamais un DONE implicite.
 
 - Roadmap SHA256: `317ab00e61beb0ae5b9b7abacf76b2389aff3b6bfdae96d15c38f143a8af34fc`
-- HEAD audite: `644766063c51cb485b0f74c2e4cf4fb568b1ac33`
+- HEAD audite: `a1a443f0b22fad84b825503099fa8bc431cdfa65`
 - Work units uniques: **720**
-- Etats: `PENDING_AUDIT=676, TRACE_ONLY=18, VERIFIED=26`
+- Etats: `PENDING_AUDIT=675, TRACE_ONLY=18, VERIFIED=27`
 - Invariant: PAPER/READ-ONLY; aucune execution reelle ou testnet.
 
 | ID | Exigence | Disposition roadmap | Etat | Preuve | Tests | Commits | Blocage | Prochaine action |
 |---|---|---|---|---|---|---|---|---|
-| V26-P0-001 | Canonical Alert Spine: Multi-Producer → Single Deterministic Writer | KEEP / P0 / EXTENDS_SINGLE_WRITER | PENDING_AUDIT | Preuve HEAD non encore rattachee. | Aucun test qualifie dans ce ledger. | Aucun commit qualifie dans ce ledger. | Etat actuel insuffisamment audite. | Auditer V26-P0-001 contre code, tests et runtime actuels. |
+| V26-P0-001 | Canonical Alert Spine: Multi-Producer → Single Deterministic Writer | KEEP / P0 / EXTENDS_SINGLE_WRITER | VERIFIED | Spine local multi-producteur avec inbox isolees, writer OS unique, ledger append-only fsync, reprise crash idempotente et projection dashboard reconstruisible. | tests/test_alert_spine_v26.py; tests/test_collecte_fiable.py; tests/test_jsonl_stream.py; tests/test_raw_spool_et_side_lock.py | a1a443f0 | Aucun | Conserver la regression et revalider dans la suite globale. |
 | V26-P0-002 | Canonical Alert Event Envelope + Lifecycle Contract | KEEP / P0 | PENDING_AUDIT | Preuve HEAD non encore rattachee. | Aucun test qualifie dans ce ledger. | Aucun commit qualifie dans ce ledger. | Etat actuel insuffisamment audite. | Auditer V26-P0-002 contre code, tests et runtime actuels. |
 | V26-P0-003 | Alert Idempotency, Ordering, Cursor & Replay Contract | KEEP / P0 / EXTENDS_V25 | PENDING_AUDIT | Preuve HEAD non encore rattachee. | Aucun test qualifie dans ce ledger. | Aucun commit qualifie dans ce ledger. | Etat actuel insuffisamment audite. | Auditer V26-P0-003 contre code, tests et runtime actuels. |
 | V26-P0-004 | Evidence-Derived Alert Score; LLM Conviction Is Non-Authoritative | KEEP / P0 | PENDING_AUDIT | Preuve HEAD non encore rattachee. | Aucun test qualifie dans ce ledger. | Aucun commit qualifie dans ce ledger. | Etat actuel insuffisamment audite. | Auditer V26-P0-004 contre code, tests et runtime actuels. |
@@ -734,4 +734,4 @@
 
 ## Prochaine action canonique
 
-Auditer `V26-P0-001` contre le HEAD, les tests et le runtime, puis fermer uniquement les exigences réellement prouvees.
+Auditer `V26-P0-002` contre le HEAD, les tests et le runtime, puis fermer uniquement les exigences réellement prouvees.

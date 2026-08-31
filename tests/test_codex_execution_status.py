@@ -4,6 +4,7 @@ from pathlib import Path
 
 from tools.build_codex_execution_status import (
     V21_EVIDENCE,
+    V26_EVIDENCE,
     evidence_for,
     parse_work_units,
     render_status,
@@ -46,6 +47,14 @@ def test_v21_rattache_la_passe_independante_a_ses_preuves() -> None:
     assert "64476606" in evidence.commits
     assert "tests/test_economic_proof_audit.py" in evidence.tests
     assert V21_EVIDENCE["V21-P1-010"].state == "VERIFIED"
+
+
+def test_v26_rattache_le_spine_canonique_a_ses_preuves() -> None:
+    evidence = V26_EVIDENCE["V26-P0-001"]
+
+    assert evidence.state == "VERIFIED"
+    assert "a1a443f0" in evidence.commits
+    assert "tests/test_alert_spine_v26.py" in evidence.tests
 
 
 def test_rendu_contient_preuve_tests_commit_blocage_et_action() -> None:
