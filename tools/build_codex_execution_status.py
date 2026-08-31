@@ -132,13 +132,10 @@ V21_EVIDENCE: dict[str, Evidence] = {
         "tests/test_economic_assumption_registry_v21.py; tests/test_final_economic_certification.py",
         "21ebbea6",
     ),
-    "V21-P1-009": Evidence(
-        state="IN_PROGRESS",
-        proof="Audit ligne-a-ligne et scanner disponibles, mais le recu global doit encore prouver toutes les classes en une passe.",
-        tests="tests/test_economic_proof_audit.py; tests/test_economic_hardcode_scanner_v21.py",
-        commits="21ebbea6, b9787ee9",
-        blocker="Integration incomplete du scanner et des diagnostics stale/zero/duplicate dans le recu independant.",
-        next_action="Etendre economic_proof_audit avec un recu de controles independants fail-closed.",
+    "V21-P1-009": _verified(
+        "Recu global fail-closed couvrant reconciliation, couts manquants, peremption, double comptage, hardcodes, zeros, dependances et fraicheur.",
+        "tests/test_economic_proof_audit.py; tests/test_economic_hardcode_scanner_v21.py; tests/test_dislocation_2jambes.py",
+        "64476606",
     ),
     "V21-P1-010": _verified(
         "Vues interactive/headless derivees de la meme requete worker et recu de parite fail-closed.",
@@ -305,12 +302,22 @@ def render_status(*, units: list[WorkUnit], roadmap_sha256: str, head: str) -> s
             )
             + " |"
         )
+    next_pending = next(
+        (unit for unit, row in zip(units, evidence, strict=True) if row.state == "PENDING_AUDIT"),
+        None,
+    )
+    next_action = (
+        f"Auditer `{next_pending.identifier}` contre le HEAD, les tests et le runtime, "
+        "puis fermer uniquement les exigences réellement prouvees."
+        if next_pending is not None
+        else "Executer l'audit final requirement-by-requirement avant toute declaration de completion."
+    )
     lines.extend(
         [
             "",
             "## Prochaine action canonique",
             "",
-            "Fermer `V21-P1-009`, executer la suite V21 globale, puis reprendre le premier `PENDING_AUDIT` prioritaire sans convertir une simple presence de code en preuve.",
+            next_action,
             "",
         ]
     )

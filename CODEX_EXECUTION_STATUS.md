@@ -4,9 +4,9 @@
 > `PENDING_AUDIT` signifie que la preuve manque; ce n'est jamais un DONE implicite.
 
 - Roadmap SHA256: `317ab00e61beb0ae5b9b7abacf76b2389aff3b6bfdae96d15c38f143a8af34fc`
-- HEAD audite: `e38ae14841fe2d20305320dce81b6e43dfc64ec5`
+- HEAD audite: `644766063c51cb485b0f74c2e4cf4fb568b1ac33`
 - Work units uniques: **720**
-- Etats: `IN_PROGRESS=1, PENDING_AUDIT=676, TRACE_ONLY=18, VERIFIED=25`
+- Etats: `PENDING_AUDIT=676, TRACE_ONLY=18, VERIFIED=26`
 - Invariant: PAPER/READ-ONLY; aucune execution reelle ou testnet.
 
 | ID | Exigence | Disposition roadmap | Etat | Preuve | Tests | Commits | Blocage | Prochaine action |
@@ -197,7 +197,7 @@
 | V21-P1-006 | Formula/Reality-Model Binding | UNSPECIFIED | VERIFIED | Recu lie formule, fill-count, frais, spread, latence, funding, slippage et capacite. | tests/test_economic_assumption_registry_v21.py; tests/test_final_economic_certification.py | 21ebbea6 | Aucun | Conserver la regression et revalider dans la suite globale. |
 | V21-P1-007 | Numeric Field Provenance Pointer | UNSPECIFIED | VERIFIED | Pointeurs numeriques reconstruisent la chaine hypothese/formule/evidence. | tests/test_economic_assumption_registry_v21.py; tests/test_economic_family_scoreboard.py | 21ebbea6 | Aucun | Conserver la regression et revalider dans la suite globale. |
 | V21-P1-008 | Build -> Audit -> Stress -> Promote Stage Contract | UNSPECIFIED | VERIFIED | Contrat monotone BUILT->AUDIT->STRESS->OOS->FORWARD->PROMOTABLE. | tests/test_economic_assumption_registry_v21.py; tests/test_final_economic_certification.py | 21ebbea6 | Aucun | Conserver la regression et revalider dans la suite globale. |
-| V21-P1-009 | Independent Economic Audit Pass | UNSPECIFIED | IN_PROGRESS | Audit ligne-a-ligne et scanner disponibles, mais le recu global doit encore prouver toutes les classes en une passe. | tests/test_economic_proof_audit.py; tests/test_economic_hardcode_scanner_v21.py | 21ebbea6, b9787ee9 | Integration incomplete du scanner et des diagnostics stale/zero/duplicate dans le recu independant. | Etendre economic_proof_audit avec un recu de controles independants fail-closed. |
+| V21-P1-009 | Independent Economic Audit Pass | UNSPECIFIED | VERIFIED | Recu global fail-closed couvrant reconciliation, couts manquants, peremption, double comptage, hardcodes, zeros, dependances et fraicheur. | tests/test_economic_proof_audit.py; tests/test_economic_hardcode_scanner_v21.py; tests/test_dislocation_2jambes.py | 64476606 | Aucun | Conserver la regression et revalider dans la suite globale. |
 | V21-P1-010 | Interactive vs Headless Runtime Parity Test | UNSPECIFIED | VERIFIED | Vues interactive/headless derivees de la meme requete worker et recu de parite fail-closed. | tests/test_runtime_harness_parity_v21.py; tests/test_alina_self_hosted_control.py | e38ae148 | Aucun | Conserver la regression et revalider dans la suite globale. |
 | V21-P1-011 | Reader Output Size / Shape Budget | UNSPECIFIED | VERIFIED | Budgets fermes sur tableaux, chaines, profondeur et projection; brut conserve en CAS. | tests/test_untrusted_projection_air_gap_v21.py | 565aa562 | Aucun | Conserver la regression et revalider dans la suite globale. |
 | V21-P1-012 | Control Event Replay Protection | UNSPECIFIED | VERIFIED | Event id, nonce, source run, version d'etat et ledger single-use anti-rejeu. | tests/test_typed_control_events_v21.py | 8839b4b8 | Aucun | Conserver la regression et revalider dans la suite globale. |
@@ -734,4 +734,4 @@
 
 ## Prochaine action canonique
 
-Fermer `V21-P1-009`, executer la suite V21 globale, puis reprendre le premier `PENDING_AUDIT` prioritaire sans convertir une simple presence de code en preuve.
+Auditer `V26-P0-001` contre le HEAD, les tests et le runtime, puis fermer uniquement les exigences réellement prouvees.

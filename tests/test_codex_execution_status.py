@@ -39,8 +39,12 @@ def test_dispositions_rejetees_restent_tracees_sans_reactivation() -> None:
     assert evidence_for(units[1]).state == "TRACE_ONLY"
 
 
-def test_v21_ne_masque_pas_la_passe_independante_encore_en_cours() -> None:
-    assert V21_EVIDENCE["V21-P1-009"].state == "IN_PROGRESS"
+def test_v21_rattache_la_passe_independante_a_ses_preuves() -> None:
+    evidence = V21_EVIDENCE["V21-P1-009"]
+
+    assert evidence.state == "VERIFIED"
+    assert "64476606" in evidence.commits
+    assert "tests/test_economic_proof_audit.py" in evidence.tests
     assert V21_EVIDENCE["V21-P1-010"].state == "VERIFIED"
 
 
