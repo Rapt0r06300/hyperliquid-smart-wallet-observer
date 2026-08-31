@@ -14,6 +14,12 @@ from .assumptions import (
     is_certifiable_mode,
     make_assumption,
 )
+from .hardcode_scanner import (
+    DEFAULT_ECONOMIC_PATHS,
+    EconomicHardcodeFinding,
+    scan_economic_paths,
+    scan_economic_source,
+)
 from .proof_binding import (
     CONTRACT_SCHEMA,
     ECONOMIC_POLICY_VERSION,
@@ -30,9 +36,11 @@ __all__ = [
     "AssumptionClassification",
     "CONTRACT_SCHEMA",
     "CostComponentReceipt",
+    "DEFAULT_ECONOMIC_PATHS",
     "EconomicAssumption",
     "EconomicAssumptionRegistry",
     "EconomicConfigError",
+    "EconomicHardcodeFinding",
     "EconomicRunMode",
     "ECONOMIC_POLICY_VERSION",
     "EVIDENCE_BUNDLE_SCHEMA",
@@ -48,4 +56,6 @@ __all__ = [
     "hash_payload",
     "is_certifiable_mode",
     "make_assumption",
+    "scan_economic_paths",
+    "scan_economic_source",
 ]
