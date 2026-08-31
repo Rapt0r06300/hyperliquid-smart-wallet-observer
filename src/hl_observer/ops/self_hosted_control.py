@@ -15,6 +15,7 @@ from hl_observer.control_plane.typed_events import (
 from hl_observer.ops.autonomous_research_job import (
     CANONICAL_DATASET_REPOSITORY,
     CANONICAL_RELEASE_ID,
+    request_digest,
 )
 from hl_observer.ops.autonomous_research_job import (
     SCHEMA as WORKER_SCHEMA,
@@ -22,6 +23,10 @@ from hl_observer.ops.autonomous_research_job import (
 from hl_observer.ops.autonomous_research_job_router import validate_request
 
 CONTROL_SCHEMA = "alina.self_hosted_control.v1"
+RUNTIME_CONTRACT_SCHEMA = "alina.runtime_contract.v1"
+RUNTIME_HARNESS_VIEW_SCHEMA = "alina.runtime_harness_view.v1"
+RUNTIME_PARITY_RECEIPT_SCHEMA = "alina.runtime_harness_parity_receipt.v1"
+RUNTIME_HARNESSES = frozenset({"interactive", "headless"})
 MAX_CYCLE_SECONDS = 18 * 60 * 60
 SHA_RE = re.compile(r"^[0-9a-fA-F]{40}$")
 ALLOWED_CONTROL_FIELDS = frozenset(
@@ -129,9 +134,150 @@ def build_worker_request(control: Mapping[str, Any], *, project_sha: str) -> dic
     return validate_request(worker)
 
 
-def build_control_bundle(control: Mapping[str, Any], *, project_sha: str) -> dict[str, Any]:
+def canonical_runtime_contract(worker_request: Mapping[str, Any]) -> dict[str, Any]:
+    """Derive every harness invariant from the validated worker request."""
+
+    request = validate_request(worker_request)
+    return {
+        "schema": RUNTIME_CONTRACT_SCHEMA,
+        "workflow_id": "autonomous_research_worker",
+        "request_digest": request_digest(request),
+        "constraints": {
+            "project_ref": request["project_ref"],
+            "project_sha": request["project_sha"],
+            "paper_only": request["paper_only"],
+            "real_execution": request["real_execution"],
+            "start_live_collection": request["start_live_collection"],
+            "dataset_repository": request["dataset_repository"],
+            "release_id": request["release_id"],
+        },
+        "tool_scope": {
+            "capability": "RUN_PAPER_RESEARCH",
+            "entrypoint": "hl_observer.ops.autonomous_research_job",
+            "allowed_operations": [
+                "read_local_datasets",
+                "write_local_evidence",
+                "download_canonical_dataset_if_requested",
+            ],
+            "forbidden_operations": [
+                "arbitrary_shell",
+                "external_order",
+                "mainnet_execution",
+                "private_key_access",
+                "signature",
+                "testnet_execution",
+            ],
+        },
+        "state_semantics": {
+            "authority": "typed_control_event",
+            "idempotency_key": "job_id+request_digest+project_sha",
+            "ledger": "append_only_single_use_control_event",
+            "resume": "same_request_digest_and_project_sha_only",
+            "writer": "single_worker",
+        },
+        "output_schema": {
+            "live_status": "alina.autonomous_live_status.v1",
+            "job_result": "alina.autonomous_research_result.v1",
+            "compact_return": "alina.self_hosted_return.v1",
+            "required_security_fields": {
+                "paper_only": True,
+                "real_execution": False,
+            },
+        },
+    }
+
+
+def render_runtime_harness_contract(
+    worker_request: Mapping[str, Any], *, harness: str
+) -> dict[str, Any]:
+    """Render a harness view without granting the harness semantic authority."""
+
+    normalized_harness = str(harness).strip().lower()
+    if normalized_harness not in RUNTIME_HARNESSES:
+        raise ValueError(f"harness inconnu: {harness}")
+    canonical = canonical_runtime_contract(worker_request)
+    canonical_sha256 = request_digest(canonical)
+    return {
+        "schema": RUNTIME_HARNESS_VIEW_SCHEMA,
+        "harness": normalized_harness,
+        "canonical_contract_sha256": canonical_sha256,
+        "contract": canonical,
+    }
+
+
+def audit_runtime_harness_parity(
+    interactive: Mapping[str, Any], headless: Mapping[str, Any]
+) -> dict[str, Any]:
+    """Fail closed when generated interactive/headless semantics drift."""
+
+    issues: list[str] = []
+    expected_harnesses = ((interactive, "interactive"), (headless, "headless"))
+    contracts: list[Mapping[str, Any]] = []
+    hashes: list[str] = []
+    for view, expected_harness in expected_harnesses:
+        if view.get("schema") != RUNTIME_HARNESS_VIEW_SCHEMA:
+            issues.append(f"{expected_harness.upper()}_VIEW_SCHEMA_INVALID")
+        if view.get("harness") != expected_harness:
+            issues.append(f"{expected_harness.upper()}_HARNESS_INVALID")
+        contract = view.get("contract")
+        if not isinstance(contract, Mapping):
+            issues.append(f"{expected_harness.upper()}_CONTRACT_MISSING")
+            continue
+        contracts.append(contract)
+        actual_hash = request_digest(contract)
+        declared_hash = str(view.get("canonical_contract_sha256") or "")
+        hashes.append(actual_hash)
+        if declared_hash != actual_hash:
+            issues.append(f"{expected_harness.upper()}_CONTRACT_HASH_MISMATCH")
+        if contract.get("schema") != RUNTIME_CONTRACT_SCHEMA:
+            issues.append(f"{expected_harness.upper()}_CONTRACT_SCHEMA_INVALID")
+
+    if len(contracts) == 2:
+        for surface in (
+            "constraints",
+            "tool_scope",
+            "state_semantics",
+            "output_schema",
+        ):
+            if contracts[0].get(surface) != contracts[1].get(surface):
+                issues.append(f"HARNESS_{surface.upper()}_DRIFT")
+        if contracts[0] != contracts[1]:
+            issues.append("HARNESS_CANONICAL_CONTRACT_DRIFT")
+    canonical_hash = hashes[0] if len(hashes) == 2 and len(set(hashes)) == 1 else None
+    body = {
+        "schema": RUNTIME_PARITY_RECEIPT_SCHEMA,
+        "ready": not issues,
+        "issues": sorted(set(issues)),
+        "canonical_contract_sha256": canonical_hash,
+        "surfaces_compared": [
+            "constraints",
+            "tool_scope",
+            "state_semantics",
+            "output_schema",
+        ],
+    }
+    return {**body, "receipt_sha256": request_digest(body)}
+
+
+def build_control_bundle(
+    control: Mapping[str, Any], *, project_sha: str, harness: str = "headless"
+) -> dict[str, Any]:
     normalized = normalize_control(control)
     worker_request = build_worker_request(normalized, project_sha=project_sha)
+    interactive_contract = render_runtime_harness_contract(
+        worker_request, harness="interactive"
+    )
+    headless_contract = render_runtime_harness_contract(
+        worker_request, harness="headless"
+    )
+    parity_receipt = audit_runtime_harness_parity(
+        interactive_contract, headless_contract
+    )
+    if parity_receipt["ready"] is not True:
+        raise RuntimeError("Dérive interactive/headless refusée.")
+    normalized_harness = str(harness).strip().lower()
+    if normalized_harness not in RUNTIME_HARNESSES:
+        raise ValueError(f"harness inconnu: {harness}")
     typed_event = build_typed_control_event(
         event_type="RUN_RESEARCH_JOB",
         nonce=normalized["job_id"],
@@ -153,6 +299,17 @@ def build_control_bundle(control: Mapping[str, Any], *, project_sha: str) -> dic
             typed_event,
             decision="VALIDATED_NOT_CLAIMED",
         ),
+        "runtime_contract": {
+            "selected_harness": normalized_harness,
+            "selected": (
+                interactive_contract
+                if normalized_harness == "interactive"
+                else headless_contract
+            ),
+            "interactive": interactive_contract,
+            "headless": headless_contract,
+            "parity_receipt": parity_receipt,
+        },
         "guard": {
             "max_cycle_seconds": normalized["max_cycle_seconds"],
             "force": normalized["force"],
@@ -176,11 +333,14 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--worker-request", required=True)
     parser.add_argument("--bundle-output")
     parser.add_argument("--event-ledger")
+    parser.add_argument("--harness", choices=sorted(RUNTIME_HARNESSES), default="headless")
     args = parser.parse_args(argv)
 
     control_path = Path(args.control).resolve()
     worker_path = Path(args.worker_request).resolve()
-    bundle = build_control_bundle(_load_json(control_path), project_sha=args.project_sha)
+    bundle = build_control_bundle(
+        _load_json(control_path), project_sha=args.project_sha, harness=args.harness
+    )
     if args.event_ledger:
         event = build_typed_control_event(
             event_type=bundle["typed_control_event"]["event_type"],
@@ -225,7 +385,14 @@ __all__ = [
     "ALLOWED_CONTROL_FIELDS",
     "CONTROL_SCHEMA",
     "MAX_CYCLE_SECONDS",
+    "RUNTIME_CONTRACT_SCHEMA",
+    "RUNTIME_HARNESSES",
+    "RUNTIME_HARNESS_VIEW_SCHEMA",
+    "RUNTIME_PARITY_RECEIPT_SCHEMA",
+    "audit_runtime_harness_parity",
     "build_control_bundle",
     "build_worker_request",
+    "canonical_runtime_contract",
     "normalize_control",
+    "render_runtime_harness_contract",
 ]
