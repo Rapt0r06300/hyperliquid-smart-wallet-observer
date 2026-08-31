@@ -38,6 +38,20 @@ _SOURCE_REF = {
     "BINANCE": "project:src/hl_observer/config/frais_venues.py#DEFAUTS_TAKER_BPS",
 }
 
+# The external fee page was read on the date already encoded in ``_SOURCE_REF``.
+# A certifiable run must stop treating that observation as fresh after the
+# explicit review deadline. Internal project constants remain bound to their
+# source hash and therefore do not need a wall-clock expiry.
+_SOURCE_TEMPORAL = {
+    "HYPERLIQUID": {
+        "observed_at": "2026-07-13T00:00:00Z",
+        "revalidate_after": "2026-10-13T00:00:00Z",
+    },
+    "BINANCE": {
+        "effective_from": "project_source_revision",
+    },
+}
+
 
 def _fallback_assumption(
     *,
@@ -47,6 +61,7 @@ def _fallback_assumption(
     certification_eligible: bool,
     source_ref: str,
 ) -> EconomicAssumption:
+    temporal = _SOURCE_TEMPORAL.get(venue, {})
     return make_assumption(
         assumption_id=f"fee.taker.{venue.lower()}.bps",
         name=f"Frais taker {venue} par fill",
@@ -55,6 +70,9 @@ def _fallback_assumption(
         family_scope=("COPY_VAULT", "LEAD_LAG", "CROSS_VENUE"),
         classification=AssumptionClassification.CONSERVATIVE_DEFAULT,
         source_ref=source_ref,
+        observed_at=temporal.get("observed_at"),
+        effective_from=temporal.get("effective_from"),
+        revalidate_after=temporal.get("revalidate_after"),
         fallback_reason=reason,
         certification_eligible=certification_eligible,
         owner="HyperSmart/economic-config",

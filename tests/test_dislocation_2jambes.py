@@ -118,6 +118,15 @@ def test_profondeur_quatre_cotes_prouve_slippage_zero_et_reconciliation():
     assert trades[0]["entry_capacity_usd"] == 250.0
     assert trades[0]["exit_capacity_usd"] == 250.0
     assert trades[0]["LIQUIDATABLE_NET"] is True
+    receipts = trades[0]["cost_component_receipts"]
+    assert set(receipts) == {"fees", "spread", "slippage", "latency"}
+    assert receipts["slippage"]["zero_reason"] == "MEASURED_ZERO"
+    assert receipts["slippage"]["certification_eligible"] is True
+    assert all(
+        receipt["reality_model_version"]
+        == "cross_venue_four_fill_executable_bbo.v1"
+        for receipt in receipts.values()
+    )
     assert summary["slippage_cost_usd"] == 0.0
     assert summary["economic_reconciled"] is True
     assert summary["LIQUIDATABLE_NET"] is True

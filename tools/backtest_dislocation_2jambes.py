@@ -28,7 +28,11 @@ from hl_observer.backtesting.cross_venue_certified import (  # noqa: E402
 from hl_observer.backtesting.cross_venue_certified import (  # noqa: E402
     SOURCE_MODE as CERTIFIED_CROSS_SOURCE_MODE,
 )
-from hl_observer.economics.assumptions import EconomicRunMode  # noqa: E402
+from hl_observer.economics.assumptions import (  # noqa: E402
+    CostComponentReceipt,
+    EconomicRunMode,
+    ZeroCostReason,
+)
 from hl_observer.economics.families import (  # noqa: E402
     FamilyEconomicContract,
     build_cross_venue_contract,
@@ -42,6 +46,7 @@ def economic_contract(
 
 
 _DEFAULT_ECONOMIC_CONTRACT = economic_contract()
+_CROSS_REALITY_MODEL_VERSION = _DEFAULT_ECONOMIC_CONTRACT.reality_model_version
 
 SEUIL_ENTREE_BPS = 15.0
 SEUIL_SORTIE_BPS = 3.0
@@ -391,6 +396,69 @@ def backtester(
             gross_reconciled = (
                 net + float(fees_ar_bps) + spread_cost + latency_cost + float(slippage_bps or 0.0)
             )
+            fees_usd = float(fees_ar_bps) / 1e4 * float(notional_usd)
+            spread_usd = spread_cost / 1e4 * float(notional_usd)
+            slippage_usd = float(slippage_bps or 0.0) / 1e4 * float(notional_usd)
+            latency_usd = latency_cost / 1e4 * float(notional_usd)
+            spread_zero_reason = (
+                ZeroCostReason.NOT_APPLICABLE
+                if spread_cost == 0.0 and raw_spread_impact < 0.0
+                else ZeroCostReason.MEASURED_ZERO
+                if spread_cost == 0.0
+                else None
+            )
+            latency_zero_reason = (
+                ZeroCostReason.NOT_APPLICABLE
+                if latency_cost == 0.0 and raw_latency_impact < 0.0
+                else ZeroCostReason.MEASURED_ZERO
+                if latency_cost == 0.0
+                else None
+            )
+            slippage_zero_reason = (
+                ZeroCostReason.MEASURED_ZERO
+                if depth_observed
+                else ZeroCostReason.MISSING_UNMEASURABLE
+            )
+            cost_component_receipts = {
+                "fees": CostComponentReceipt(
+                    component="fees",
+                    amount_usd=fees_usd,
+                    zero_reason=(
+                        ZeroCostReason.MEASURED_ZERO if fees_usd == 0.0 else None
+                    ),
+                    formula_id="cross_venue.round_trip_fee.v1",
+                    reality_model_version=_CROSS_REALITY_MODEL_VERSION,
+                    provenance_ids=(
+                        "fee.taker.hyperliquid.bps",
+                        "fee.taker.binance.bps",
+                        "cross_venue.paper_notional_usd",
+                    ),
+                ).as_dict(),
+                "spread": CostComponentReceipt(
+                    component="spread",
+                    amount_usd=spread_usd,
+                    zero_reason=spread_zero_reason,
+                    formula_id="cross_venue.executable_bid_ask_spread.v1",
+                    reality_model_version=_CROSS_REALITY_MODEL_VERSION,
+                    provenance_ids=("entry_bbo.bid_ask", "exit_bbo.bid_ask"),
+                ).as_dict(),
+                "slippage": CostComponentReceipt(
+                    component="slippage",
+                    amount_usd=slippage_usd,
+                    zero_reason=slippage_zero_reason,
+                    formula_id="cross_venue.full_depth_capacity.v1",
+                    reality_model_version=_CROSS_REALITY_MODEL_VERSION,
+                    provenance_ids=("entry_capacity_usd", "exit_capacity_usd"),
+                ).as_dict(),
+                "latency": CostComponentReceipt(
+                    component="latency",
+                    amount_usd=latency_usd,
+                    zero_reason=latency_zero_reason,
+                    formula_id="cross_venue.causal_entry_latency.v1",
+                    reality_model_version=_CROSS_REALITY_MODEL_VERSION,
+                    provenance_ids=("ts_detect", "ts_in"),
+                ).as_dict(),
+            }
             trade_id = _trade_id(
                 coin=str(coin), ts_detect=position["ts_detect"],
                 ts_in=position["ts_in"], ts_out=ts, sens=position["sens"],
@@ -415,6 +483,11 @@ def backtester(
                 "spread_cost_bps": round(spread_cost, 4),
                 "slippage_bps": None if slippage_bps is None else round(slippage_bps, 4),
                 "latency_cost_bps": round(latency_cost, 4),
+                "cost_component_receipts": cost_component_receipts,
+                "slippage_zero_reason": slippage_zero_reason.value,
+                "latency_zero_reason": (
+                    latency_zero_reason.value if latency_zero_reason is not None else None
+                ),
                 "raw_latency_impact_bps": round(raw_latency_impact, 4),
                 "raw_spread_impact_bps": round(raw_spread_impact, 4),
                 "net_bps": round(net, 4),
