@@ -26,11 +26,17 @@ from hl_observer.collection.collecte_fiable import append_jsonl, ecrire_atomique
 PROPOSAL_SCHEMA = "hypersmart.alert_proposal.v1"
 EVENT_SCHEMA = "hypersmart.canonical_alert_event.v1"
 PROJECTION_SCHEMA = "hypersmart.alert_projection.v1"
+LEDGER_LATEST_SCHEMA = "hypersmart.alert_ledger_latest.v1"
 SCORE_POLICY_VERSION = "hypersmart.alert_score.v1"
 _PRODUCER_RE = re.compile(r"^[a-z0-9][a-z0-9_.-]{0,63}$")
 _EPOCH_RE = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,63}$")
 _SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 _CODE_SHA_RE = re.compile(r"^(?:[0-9a-f]{40}|[0-9a-f]{64})$")
+_SEGMENT_RE = re.compile(
+    r"^alerts\.(?P<first>\d{20})-(?P<last>\d{20})\."
+    r"(?P<sha256>[0-9a-f]{64})\.jsonl$"
+)
+_DEFAULT_LEDGER_ROTATE_BYTES = 64 * 1024 * 1024
 _MAX_HEADLINE = 1_000
 _MAX_DEDUP_KEY = 256
 _MAX_ENTITY_COUNT = 128
@@ -106,6 +112,10 @@ def _canonical_bytes(payload: Mapping[str, Any]) -> bytes:
 
 def _sha256(payload: Mapping[str, Any]) -> str:
     return hashlib.sha256(_canonical_bytes(payload)).hexdigest()
+
+
+def _sha256_bytes(payload: bytes) -> str:
+    return hashlib.sha256(payload).hexdigest()
 
 
 def _event_stream_hash(events: list[Mapping[str, Any]]) -> str:
@@ -1053,6 +1063,8 @@ class AlertSpinePaths:
     inflight_root: Path
     acknowledged_root: Path
     ledger_path: Path
+    ledger_segments_root: Path
+    ledger_latest_pointer_path: Path
     projection_path: Path
     writer_lock_path: Path
     writer_cursor_path: Path
@@ -1068,6 +1080,8 @@ class AlertSpinePaths:
             inflight_root=base / "writer_state" / "inflight",
             acknowledged_root=base / "producer_inboxes" / "acknowledged",
             ledger_path=base / "canonical" / "alerts.jsonl",
+            ledger_segments_root=base / "canonical" / "segments",
+            ledger_latest_pointer_path=base / "canonical" / "alerts.latest.json",
             projection_path=base / "projections" / "alerts_dashboard.json",
             writer_lock_path=base / "writer_state" / "canonical_writer.lock",
             writer_cursor_path=base / "writer_state" / "canonical_cursor.json",
@@ -1140,9 +1154,11 @@ class CanonicalAlertWriter:
         paths: AlertSpinePaths,
         *,
         clock_ms: Callable[[], int] | None = None,
+        ledger_rotate_bytes: int = _DEFAULT_LEDGER_ROTATE_BYTES,
     ) -> None:
         self.paths = paths
         self.clock_ms = clock_ms or (lambda: int(time.time() * 1000))
+        self.ledger_rotate_bytes = max(1, int(ledger_rotate_bytes))
 
     def producer(self, producer_id: str) -> AlertProducerInbox:
         return AlertProducerInbox(self.paths.pending_root, producer_id)
@@ -1212,40 +1228,208 @@ class CanonicalAlertWriter:
             json.dumps(payload, ensure_ascii=False, sort_keys=True) + "\n",
         )
 
-    def read_ledger(self) -> list[dict[str, Any]]:
-        path = self.paths.ledger_path
-        if not path.is_file():
+    def _segment_paths(self) -> list[Path]:
+        root = self.paths.ledger_segments_root
+        if not root.is_dir():
             return []
+        paths = sorted(root.glob("alerts.*.jsonl"))
+        for path in paths:
+            if _SEGMENT_RE.fullmatch(path.name) is None:
+                raise CanonicalLedgerCorruption(
+                    f"CANONICAL_SEGMENT_NAME_INVALID:{path.name}"
+                )
+        return paths
+
+    @staticmethod
+    def _segment_receipt(path: Path) -> dict[str, Any]:
+        match = _SEGMENT_RE.fullmatch(path.name)
+        if match is None:
+            raise CanonicalLedgerCorruption(
+                f"CANONICAL_SEGMENT_NAME_INVALID:{path.name}"
+            )
         raw = path.read_bytes()
-        if raw and not raw.endswith(b"\n"):
-            raise CanonicalLedgerCorruption("CANONICAL_LEDGER_TRAILING_PARTIAL_RECORD")
+        digest = _sha256_bytes(raw)
+        if digest != match.group("sha256"):
+            raise CanonicalLedgerCorruption(
+                f"CANONICAL_SEGMENT_CHECKSUM_MISMATCH:{path.name}"
+            )
+        return {
+            "name": path.name,
+            "first_sequence": int(match.group("first")),
+            "last_sequence": int(match.group("last")),
+            "sha256": digest,
+            "bytes": len(raw),
+        }
+
+    def _segment_receipts(self) -> list[dict[str, Any]]:
+        receipts = [self._segment_receipt(path) for path in self._segment_paths()]
+        expected_first = 1
+        for receipt in receipts:
+            if (
+                receipt["first_sequence"] != expected_first
+                or receipt["last_sequence"] < receipt["first_sequence"]
+            ):
+                raise CanonicalLedgerCorruption("CANONICAL_SEGMENT_RANGE_INVALID")
+            expected_first = int(receipt["last_sequence"]) + 1
+        return receipts
+
+    def _latest_pointer_payload(
+        self,
+        events: list[Mapping[str, Any]],
+    ) -> dict[str, Any]:
+        active_raw = (
+            self.paths.ledger_path.read_bytes()
+            if self.paths.ledger_path.is_file()
+            else b""
+        )
+        return {
+            "schema_version": LEDGER_LATEST_SCHEMA,
+            "storage_kind": "NATIVE_JSONL",
+            "ledger_sequence": len(events),
+            "event_id": events[-1]["event_id"] if events else None,
+            "ledger_prefix_hash": _event_stream_hash(list(events)),
+            "segments": self._segment_receipts(),
+            "active_path": self.paths.ledger_path.name,
+            "active_bytes": len(active_raw),
+            "active_sha256": _sha256_bytes(active_raw),
+            "database_promoted": False,
+            "paper_read_only": True,
+            "real_execution": False,
+        }
+
+    def _write_latest_pointer(self, events: list[Mapping[str, Any]]) -> None:
+        payload = self._latest_pointer_payload(events)
+        ecrire_atomique(
+            self.paths.ledger_latest_pointer_path,
+            json.dumps(payload, ensure_ascii=False, sort_keys=True) + "\n",
+        )
+
+    def _validate_latest_pointer(
+        self,
+        events: list[dict[str, Any]],
+    ) -> int:
+        path = self.paths.ledger_latest_pointer_path
+        if not path.is_file():
+            return 0
+        try:
+            pointer = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+            raise CanonicalLedgerCorruption("CANONICAL_LATEST_POINTER_INVALID") from exc
+        if (
+            not isinstance(pointer, Mapping)
+            or pointer.get("schema_version") != LEDGER_LATEST_SCHEMA
+            or pointer.get("storage_kind") != "NATIVE_JSONL"
+            or pointer.get("database_promoted") is not False
+            or pointer.get("paper_read_only") is not True
+            or pointer.get("real_execution") is not False
+        ):
+            raise CanonicalLedgerCorruption("CANONICAL_LATEST_POINTER_SCHEMA_INVALID")
+        try:
+            sequence = int(pointer.get("ledger_sequence"))
+        except (TypeError, ValueError, OverflowError) as exc:
+            raise CanonicalLedgerCorruption(
+                "CANONICAL_LATEST_POINTER_SEQUENCE_INVALID"
+            ) from exc
+        if sequence < 0 or sequence > len(events):
+            raise CanonicalLedgerCorruption("CANONICAL_LATEST_POINTER_AHEAD")
+        prefix = events[:sequence]
+        expected_event_id = prefix[-1]["event_id"] if prefix else None
+        if (
+            pointer.get("event_id") != expected_event_id
+            or pointer.get("ledger_prefix_hash") != _event_stream_hash(prefix)
+        ):
+            raise CanonicalLedgerCorruption("CANONICAL_LATEST_POINTER_MISMATCH")
+        if sequence == len(events):
+            expected = self._latest_pointer_payload(events)
+            if dict(pointer) != expected:
+                raise CanonicalLedgerCorruption(
+                    "CANONICAL_LATEST_POINTER_STORAGE_MISMATCH"
+                )
+        return sequence
+
+    def read_ledger(self) -> list[dict[str, Any]]:
+        sources = self._segment_paths()
+        if self.paths.ledger_path.is_file():
+            sources.append(self.paths.ledger_path)
         events: list[dict[str, Any]] = []
         by_event_id: dict[str, dict[str, Any]] = {}
-        for line_number, line in enumerate(raw.splitlines(), start=1):
-            try:
-                event = json.loads(line)
-            except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        for path in sources:
+            raw = path.read_bytes()
+            if path != self.paths.ledger_path:
+                self._segment_receipt(path)
+            if raw and not raw.endswith(b"\n"):
                 raise CanonicalLedgerCorruption(
-                    f"CANONICAL_LEDGER_JSON_INVALID:{line_number}"
-                ) from exc
-            try:
-                event = _validate_canonical_event(
-                    event,
-                    expected_sequence=line_number,
-                    prior_by_id=by_event_id,
+                    "CANONICAL_LEDGER_TRAILING_PARTIAL_RECORD"
                 )
-            except AlertValidationError as exc:
-                raise CanonicalLedgerCorruption(
-                    f"CANONICAL_LEDGER_EVENT_INVALID:{line_number}:{exc}"
-                ) from exc
-            event_id = str(event["event_id"])
-            if event_id in by_event_id:
-                raise CanonicalLedgerCorruption(
-                    f"CANONICAL_LEDGER_EVENT_ID_DUPLICATE:{line_number}"
-                )
-            by_event_id[event_id] = event
-            events.append(event)
+            first_sequence = len(events) + 1
+            for line in raw.splitlines():
+                line_number = len(events) + 1
+                try:
+                    event = json.loads(line)
+                except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+                    raise CanonicalLedgerCorruption(
+                        f"CANONICAL_LEDGER_JSON_INVALID:{line_number}"
+                    ) from exc
+                try:
+                    event = _validate_canonical_event(
+                        event,
+                        expected_sequence=line_number,
+                        prior_by_id=by_event_id,
+                    )
+                except AlertValidationError as exc:
+                    raise CanonicalLedgerCorruption(
+                        f"CANONICAL_LEDGER_EVENT_INVALID:{line_number}:{exc}"
+                    ) from exc
+                event_id = str(event["event_id"])
+                if event_id in by_event_id:
+                    raise CanonicalLedgerCorruption(
+                        f"CANONICAL_LEDGER_EVENT_ID_DUPLICATE:{line_number}"
+                    )
+                by_event_id[event_id] = event
+                events.append(event)
+            if path != self.paths.ledger_path:
+                receipt = self._segment_receipt(path)
+                if (
+                    receipt["first_sequence"] != first_sequence
+                    or receipt["last_sequence"] != len(events)
+                ):
+                    raise CanonicalLedgerCorruption(
+                        "CANONICAL_SEGMENT_CONTENT_RANGE_MISMATCH"
+                    )
+        self._validate_latest_pointer(events)
         return events
+
+    def _rotate_ledger_if_needed(
+        self,
+        events: list[dict[str, Any]],
+    ) -> Path | None:
+        path = self.paths.ledger_path
+        if not path.is_file() or path.stat().st_size < self.ledger_rotate_bytes:
+            return None
+        raw = path.read_bytes()
+        if not raw or not raw.endswith(b"\n"):
+            raise CanonicalLedgerCorruption(
+                "CANONICAL_LEDGER_ROTATION_SOURCE_INVALID"
+            )
+        line_count = len(raw.splitlines())
+        first_sequence = len(events) - line_count + 1
+        last_sequence = len(events)
+        if first_sequence < 1 or last_sequence < first_sequence:
+            raise CanonicalLedgerCorruption("CANONICAL_LEDGER_ROTATION_RANGE_INVALID")
+        digest = _sha256_bytes(raw)
+        target = self.paths.ledger_segments_root / (
+            f"alerts.{first_sequence:020d}-{last_sequence:020d}.{digest}.jsonl"
+        )
+        target.parent.mkdir(parents=True, exist_ok=True)
+        if target.exists():
+            if target.read_bytes() != raw:
+                raise CanonicalLedgerCorruption(
+                    "CANONICAL_LEDGER_ROTATION_COLLISION"
+                )
+            path.unlink()
+        else:
+            os.replace(path, target)
+        return target
 
     def _pending_paths(self) -> list[Path]:
         if not self.paths.pending_root.is_dir():
@@ -1494,10 +1678,12 @@ class CanonicalAlertWriter:
                 if event.get("ledger_sequence") != len(events) + 1:
                     raise CanonicalLedgerCorruption("INFLIGHT_SEQUENCE_STALE")
                 jsonl_append_fsync(self.paths.ledger_path, event)
-                if after_append is not None:
-                    after_append(event)
                 events.append(event)
                 by_event_id[event_id] = event
+                self._rotate_ledger_if_needed(events)
+                self._write_latest_pointer(events)
+                if after_append is not None:
+                    after_append(event)
                 self._acknowledge(pending, inflight)
                 self._write_cursor(
                     self.paths.writer_cursor_path,
@@ -1510,6 +1696,7 @@ class CanonicalAlertWriter:
                 consumer="canonical-writer",
                 events=events,
             )
+            self._write_latest_pointer(events)
             projection = self.rebuild_projection(events=events)
         return {
             "schema_version": "hypersmart.alert_writer_run.v1",
