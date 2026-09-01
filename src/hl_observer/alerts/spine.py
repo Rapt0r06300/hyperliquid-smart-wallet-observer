@@ -13,6 +13,7 @@ import json
 import math
 import os
 import re
+import tempfile
 import time
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
@@ -427,6 +428,12 @@ def _validate_proposal(payload: object) -> dict[str, Any]:
         raise AlertValidationError("PAYLOAD_NOT_MAPPING")
     normalized_payload = dict(proposal.get("payload") or {})
     _reject_order_capability(normalized_payload)
+    payload_hash = _sha256(normalized_payload)
+    supplied_payload_hash = proposal.get("payload_hash")
+    if supplied_payload_hash is not None and (
+        str(supplied_payload_hash).strip().lower() != payload_hash
+    ):
+        raise AlertValidationError("PAYLOAD_HASH_MISMATCH")
     entity_ids = _bounded_strings(proposal.get("entity_ids"), field="entity_ids")
     normalized_tickers = _bounded_strings(
         proposal.get("normalized_tickers"),
@@ -547,6 +554,7 @@ def _validate_proposal(payload: object) -> dict[str, Any]:
             "revision_of": revision_of,
             "retracts": retracts,
             "payload": normalized_payload,
+            "payload_hash": payload_hash,
             "paper_read_only": True,
             "real_execution": False,
         }
@@ -885,7 +893,15 @@ def _validate_canonical_event(
         raise AlertValidationError("CANONICAL_REVISION_RETRACTION_CONFLICT")
     if not isinstance(event.get("payload"), Mapping):
         raise AlertValidationError("CANONICAL_PAYLOAD_INVALID")
-    _reject_order_capability(event["payload"])
+    normalized_payload = dict(event["payload"])
+    _reject_order_capability(normalized_payload)
+    payload_hash = str(event.get("payload_hash") or "").strip().lower()
+    if (
+        not _SHA256_RE.fullmatch(payload_hash)
+        or event.get("payload_hash") != payload_hash
+        or payload_hash != _sha256(normalized_payload)
+    ):
+        raise AlertValidationError("CANONICAL_PAYLOAD_HASH_INVALID")
     if (
         event.get("economic_admission_state") != "NOT_EVALUATED"
         or event.get("order_intent_allowed") is not False
@@ -1095,20 +1111,24 @@ class AlertProducerInbox:
         if not _is_within(target, self.directory):
             raise AlertValidationError("PRODUCER_PATH_ESCAPE")
         encoded = _canonical_bytes(validated) + b"\n"
+        temporary_descriptor, temporary_name = tempfile.mkstemp(
+            prefix=f".{filename}.",
+            suffix=".tmp",
+            dir=self.directory,
+        )
+        temporary = Path(temporary_name)
         try:
-            descriptor = os.open(
-                str(target),
-                os.O_CREAT | os.O_EXCL | os.O_WRONLY,
-                0o600,
-            )
-        except FileExistsError as exc:
-            if target.read_bytes() != encoded:
-                raise AlertValidationError("PROPOSAL_PATH_COLLISION") from exc
-            return target
-        with os.fdopen(descriptor, "wb") as handle:
-            handle.write(encoded)
-            handle.flush()
-            os.fsync(handle.fileno())
+            with os.fdopen(temporary_descriptor, "wb") as handle:
+                handle.write(encoded)
+                handle.flush()
+                os.fsync(handle.fileno())
+            try:
+                os.link(temporary, target)
+            except FileExistsError as exc:
+                if target.read_bytes() != encoded:
+                    raise AlertValidationError("PROPOSAL_PATH_COLLISION") from exc
+        finally:
+            temporary.unlink(missing_ok=True)
         return target
 
 
@@ -1336,6 +1356,7 @@ class CanonicalAlertWriter:
             "policy_version": proposal["policy_version"],
             "ingestion_code_sha": proposal["ingestion_code_sha"],
             "payload": proposal["payload"],
+            "payload_hash": proposal["payload_hash"],
             "lifecycle_state": "ADMITTED",
             "lifecycle_receipt": [
                 {"state": "DETECTED", "at_ms": proposal["observed_at_ms"]},
@@ -1386,7 +1407,12 @@ class CanonicalAlertWriter:
         acknowledged = self.paths.acknowledged_root / relative
         acknowledged.parent.mkdir(parents=True, exist_ok=True)
         if pending.exists():
-            os.replace(pending, acknowledged)
+            if acknowledged.exists():
+                if acknowledged.read_bytes() != pending.read_bytes():
+                    raise AlertSpineError("ACKNOWLEDGED_PROPOSAL_COLLISION")
+                pending.unlink()
+            else:
+                os.replace(pending, acknowledged)
         elif not acknowledged.is_file():
             raise AlertSpineError("PENDING_AND_ACK_MISSING")
         inflight.unlink(missing_ok=True)
