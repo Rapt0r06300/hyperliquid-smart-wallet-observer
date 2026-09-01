@@ -55,6 +55,10 @@ def test_v26_rattache_le_spine_canonique_a_ses_preuves() -> None:
     assert evidence.state == "VERIFIED"
     assert "a1a443f0" in evidence.commits
     assert "tests/test_alert_spine_v26.py" in evidence.tests
+    envelope = V26_EVIDENCE["V26-P0-002"]
+    assert envelope.state == "VERIFIED"
+    assert "28f0154d" in envelope.commits
+    assert "tests/test_alert_envelope_v26.py" in envelope.tests
 
 
 def test_rendu_contient_preuve_tests_commit_blocage_et_action() -> None:

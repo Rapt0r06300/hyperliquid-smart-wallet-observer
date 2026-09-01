@@ -200,6 +200,11 @@ V26_EVIDENCE: dict[str, Evidence] = {
         "tests/test_alert_spine_v26.py; tests/test_collecte_fiable.py; tests/test_jsonl_stream.py; tests/test_raw_spool_et_side_lock.py",
         "a1a443f0",
     ),
+    "V26-P0-002": _verified(
+        "Enveloppe versionnee fail-closed avec provenance hashee, horloges monotones, cycle ADMITTED immuable et etats PROJECTED/EXPIRED/CORRECTED/RETRACTED derives sans destruction.",
+        "tests/test_alert_envelope_v26.py; tests/test_alert_spine_v26.py",
+        "28f0154d",
+    ),
 }
 
 
