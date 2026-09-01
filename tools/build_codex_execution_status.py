@@ -225,6 +225,11 @@ V26_EVIDENCE: dict[str, Evidence] = {
         "tests/test_replacement_parity_v26.py",
         "8e4a7517",
     ),
+    "V26-P1-001": _verified(
+        "Spools isoles par producteur, publication temporaire fsync puis lien exclusif, schema/epoque/sequence/hash payload verifies, archives immuables et reprise sans perte apres terminaison brutale.",
+        "tests/test_alert_spool_v26.py; tests/test_alert_spine_v26.py",
+        "48ff58fe",
+    ),
 }
 
 

@@ -75,6 +75,10 @@ def test_v26_rattache_le_spine_canonique_a_ses_preuves() -> None:
     assert parity.state == "VERIFIED"
     assert "8e4a7517" in parity.commits
     assert "tests/test_replacement_parity_v26.py" in parity.tests
+    spool = V26_EVIDENCE["V26-P1-001"]
+    assert spool.state == "VERIFIED"
+    assert "48ff58fe" in spool.commits
+    assert "tests/test_alert_spool_v26.py" in spool.tests
 
 
 def test_rendu_contient_preuve_tests_commit_blocage_et_action() -> None:
