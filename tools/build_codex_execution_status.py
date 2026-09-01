@@ -220,6 +220,11 @@ V26_EVIDENCE: dict[str, Evidence] = {
         "tests/test_alert_freshness_v26.py; tests/test_alert_envelope_v26.py",
         "92aa8672",
     ),
+    "V26-P0-006": _verified(
+        "Matrice complete a 18 axes et verdict fail-closed; la configuration Roh/MAX face a Bloomberg reste honnetement PARTIAL_SUBSTITUTE avec recu hashe.",
+        "tests/test_replacement_parity_v26.py",
+        "8e4a7517",
+    ),
 }
 
 

@@ -71,6 +71,10 @@ def test_v26_rattache_le_spine_canonique_a_ses_preuves() -> None:
     assert freshness.state == "VERIFIED"
     assert "92aa8672" in freshness.commits
     assert "tests/test_alert_freshness_v26.py" in freshness.tests
+    parity = V26_EVIDENCE["V26-P0-006"]
+    assert parity.state == "VERIFIED"
+    assert "8e4a7517" in parity.commits
+    assert "tests/test_replacement_parity_v26.py" in parity.tests
 
 
 def test_rendu_contient_preuve_tests_commit_blocage_et_action() -> None:

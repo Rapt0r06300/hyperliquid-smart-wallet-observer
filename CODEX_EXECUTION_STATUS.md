@@ -4,9 +4,9 @@
 > `PENDING_AUDIT` signifie que la preuve manque; ce n'est jamais un DONE implicite.
 
 - Roadmap SHA256: `317ab00e61beb0ae5b9b7abacf76b2389aff3b6bfdae96d15c38f143a8af34fc`
-- HEAD audite: `92aa8672c5ea22fcac734bec58a8fa4a3aaf5477`
+- HEAD audite: `8e4a7517e1d0e5ae59dfab5fd5da5b8234f9ba07`
 - Work units uniques: **720**
-- Etats: `PENDING_AUDIT=671, TRACE_ONLY=18, VERIFIED=31`
+- Etats: `PENDING_AUDIT=670, TRACE_ONLY=18, VERIFIED=32`
 - Invariant: PAPER/READ-ONLY; aucune execution reelle ou testnet.
 
 | ID | Exigence | Disposition roadmap | Etat | Preuve | Tests | Commits | Blocage | Prochaine action |
@@ -16,7 +16,7 @@
 | V26-P0-003 | Alert Idempotency, Ordering, Cursor & Replay Contract | KEEP / P0 / EXTENDS_V25 | VERIFIED | Epoque et sequence producteur explicites, identite source/fallback stable, gaps visibles, curseurs durables hashes, retry a effet unique et hash de projection reproductible. | tests/test_alert_idempotency_v26.py; tests/test_alert_spine_v26.py; tests/test_alert_envelope_v26.py | b4c46c6c | Aucun | Conserver la regression et revalider dans la suite globale. |
 | V26-P0-004 | Evidence-Derived Alert Score; LLM Conviction Is Non-Authoritative | KEEP / P0 | VERIFIED | Score de classement versionne, pondere, hashe et ablate; opinion modele exclue de l autorite, admissibilite economique separee et capacites d ordre interdites. | tests/test_alert_scoring_v26.py; tests/test_alert_idempotency_v26.py | 425f33c0 | Aucun | Conserver la regression et revalider dans la suite globale. |
 | V26-P0-005 | Alert Freshness, Source Health & Detection-to-Display SLO | KEEP / P0 / EXTENDS_V24_V9 | VERIFIED | Horloges source/observation/parsing separees, etats frais/degrades/stale derives, SLO et distributions p50/p95/p99, gaps et NO_NEWS invalides sur source silencieuse. | tests/test_alert_freshness_v26.py; tests/test_alert_envelope_v26.py | 92aa8672 | Aucun | Conserver la regression et revalider dans la suite globale. |
-| V26-P0-006 | Replacement/Parity Claim Decomposition Gate | KEEP / P0 | PENDING_AUDIT | Preuve HEAD non encore rattachee. | Aucun test qualifie dans ce ledger. | Aucun commit qualifie dans ce ledger. | Etat actuel insuffisamment audite. | Auditer V26-P0-006 contre code, tests et runtime actuels. |
+| V26-P0-006 | Replacement/Parity Claim Decomposition Gate | KEEP / P0 | VERIFIED | Matrice complete a 18 axes et verdict fail-closed; la configuration Roh/MAX face a Bloomberg reste honnetement PARTIAL_SUBSTITUTE avec recu hashe. | tests/test_replacement_parity_v26.py | 8e4a7517 | Aucun | Conserver la regression et revalider dans la suite globale. |
 | V26-P1-001 | Durable Per-Producer Inbox / Spool | KEEP / P1 | PENDING_AUDIT | Preuve HEAD non encore rattachee. | Aucun test qualifie dans ce ledger. | Aucun commit qualifie dans ce ledger. | Etat actuel insuffisamment audite. | Auditer V26-P1-001 contre code, tests et runtime actuels. |
 | V26-P1-002 | Native Canonical JSONL Alert Ledger | KEEP / P1 / SEARCH_EXISTING_MAP_EXTEND | PENDING_AUDIT | Preuve HEAD non encore rattachee. | Aucun test qualifie dans ce ledger. | Aucun commit qualifie dans ce ledger. | Etat actuel insuffisamment audite. | Auditer V26-P1-002 contre code, tests et runtime actuels. |
 | V26-P1-003 | Materialized Alert Read Model | KEEP / P1 | PENDING_AUDIT | Preuve HEAD non encore rattachee. | Aucun test qualifie dans ce ledger. | Aucun commit qualifie dans ce ledger. | Etat actuel insuffisamment audite. | Auditer V26-P1-003 contre code, tests et runtime actuels. |
@@ -734,4 +734,4 @@
 
 ## Prochaine action canonique
 
-Auditer `V26-P0-006` contre le HEAD, les tests et le runtime, puis fermer uniquement les exigences réellement prouvees.
+Auditer `V26-P1-001` contre le HEAD, les tests et le runtime, puis fermer uniquement les exigences réellement prouvees.
