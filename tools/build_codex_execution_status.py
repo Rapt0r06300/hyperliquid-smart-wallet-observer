@@ -205,6 +205,11 @@ V26_EVIDENCE: dict[str, Evidence] = {
         "tests/test_alert_envelope_v26.py; tests/test_alert_spine_v26.py",
         "28f0154d",
     ),
+    "V26-P0-003": _verified(
+        "Epoque et sequence producteur explicites, identite source/fallback stable, gaps visibles, curseurs durables hashes, retry a effet unique et hash de projection reproductible.",
+        "tests/test_alert_idempotency_v26.py; tests/test_alert_spine_v26.py; tests/test_alert_envelope_v26.py",
+        "b4c46c6c",
+    ),
 }
 
 

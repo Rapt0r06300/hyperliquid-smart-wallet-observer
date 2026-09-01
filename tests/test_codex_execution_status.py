@@ -59,6 +59,10 @@ def test_v26_rattache_le_spine_canonique_a_ses_preuves() -> None:
     assert envelope.state == "VERIFIED"
     assert "28f0154d" in envelope.commits
     assert "tests/test_alert_envelope_v26.py" in envelope.tests
+    idempotency = V26_EVIDENCE["V26-P0-003"]
+    assert idempotency.state == "VERIFIED"
+    assert "b4c46c6c" in idempotency.commits
+    assert "tests/test_alert_idempotency_v26.py" in idempotency.tests
 
 
 def test_rendu_contient_preuve_tests_commit_blocage_et_action() -> None:

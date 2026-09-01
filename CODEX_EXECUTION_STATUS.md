@@ -4,16 +4,16 @@
 > `PENDING_AUDIT` signifie que la preuve manque; ce n'est jamais un DONE implicite.
 
 - Roadmap SHA256: `317ab00e61beb0ae5b9b7abacf76b2389aff3b6bfdae96d15c38f143a8af34fc`
-- HEAD audite: `28f0154d4aaddffc041d2ae9344e17e57b5b7079`
+- HEAD audite: `b4c46c6c976c276075b04f9cb59d917fda6e233c`
 - Work units uniques: **720**
-- Etats: `PENDING_AUDIT=674, TRACE_ONLY=18, VERIFIED=28`
+- Etats: `PENDING_AUDIT=673, TRACE_ONLY=18, VERIFIED=29`
 - Invariant: PAPER/READ-ONLY; aucune execution reelle ou testnet.
 
 | ID | Exigence | Disposition roadmap | Etat | Preuve | Tests | Commits | Blocage | Prochaine action |
 |---|---|---|---|---|---|---|---|---|
 | V26-P0-001 | Canonical Alert Spine: Multi-Producer → Single Deterministic Writer | KEEP / P0 / EXTENDS_SINGLE_WRITER | VERIFIED | Spine local multi-producteur avec inbox isolees, writer OS unique, ledger append-only fsync, reprise crash idempotente et projection dashboard reconstruisible. | tests/test_alert_spine_v26.py; tests/test_collecte_fiable.py; tests/test_jsonl_stream.py; tests/test_raw_spool_et_side_lock.py | a1a443f0 | Aucun | Conserver la regression et revalider dans la suite globale. |
 | V26-P0-002 | Canonical Alert Event Envelope + Lifecycle Contract | KEEP / P0 | VERIFIED | Enveloppe versionnee fail-closed avec provenance hashee, horloges monotones, cycle ADMITTED immuable et etats PROJECTED/EXPIRED/CORRECTED/RETRACTED derives sans destruction. | tests/test_alert_envelope_v26.py; tests/test_alert_spine_v26.py | 28f0154d | Aucun | Conserver la regression et revalider dans la suite globale. |
-| V26-P0-003 | Alert Idempotency, Ordering, Cursor & Replay Contract | KEEP / P0 / EXTENDS_V25 | PENDING_AUDIT | Preuve HEAD non encore rattachee. | Aucun test qualifie dans ce ledger. | Aucun commit qualifie dans ce ledger. | Etat actuel insuffisamment audite. | Auditer V26-P0-003 contre code, tests et runtime actuels. |
+| V26-P0-003 | Alert Idempotency, Ordering, Cursor & Replay Contract | KEEP / P0 / EXTENDS_V25 | VERIFIED | Epoque et sequence producteur explicites, identite source/fallback stable, gaps visibles, curseurs durables hashes, retry a effet unique et hash de projection reproductible. | tests/test_alert_idempotency_v26.py; tests/test_alert_spine_v26.py; tests/test_alert_envelope_v26.py | b4c46c6c | Aucun | Conserver la regression et revalider dans la suite globale. |
 | V26-P0-004 | Evidence-Derived Alert Score; LLM Conviction Is Non-Authoritative | KEEP / P0 | PENDING_AUDIT | Preuve HEAD non encore rattachee. | Aucun test qualifie dans ce ledger. | Aucun commit qualifie dans ce ledger. | Etat actuel insuffisamment audite. | Auditer V26-P0-004 contre code, tests et runtime actuels. |
 | V26-P0-005 | Alert Freshness, Source Health & Detection-to-Display SLO | KEEP / P0 / EXTENDS_V24_V9 | PENDING_AUDIT | Preuve HEAD non encore rattachee. | Aucun test qualifie dans ce ledger. | Aucun commit qualifie dans ce ledger. | Etat actuel insuffisamment audite. | Auditer V26-P0-005 contre code, tests et runtime actuels. |
 | V26-P0-006 | Replacement/Parity Claim Decomposition Gate | KEEP / P0 | PENDING_AUDIT | Preuve HEAD non encore rattachee. | Aucun test qualifie dans ce ledger. | Aucun commit qualifie dans ce ledger. | Etat actuel insuffisamment audite. | Auditer V26-P0-006 contre code, tests et runtime actuels. |
@@ -734,4 +734,4 @@
 
 ## Prochaine action canonique
 
-Auditer `V26-P0-003` contre le HEAD, les tests et le runtime, puis fermer uniquement les exigences réellement prouvees.
+Auditer `V26-P0-004` contre le HEAD, les tests et le runtime, puis fermer uniquement les exigences réellement prouvees.
