@@ -42,7 +42,7 @@ def _proposal(producer_id: str, sequence: int, *, dedup_key: str | None = None) 
         normalized_tickers=["btc"],
         source_health_state="HEALTHY",
         freshness_state="FRESH",
-        deterministic_score_components={"source_quality": 0.8},
+        deterministic_score_components={"source_authority": 0.8},
         payload={"symbol": "BTC", "score": sequence},
     )
 

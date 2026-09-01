@@ -59,7 +59,10 @@ def _proposal(
         ],
         source_health_state="HEALTHY",
         freshness_state="FRESH",
-        deterministic_score_components={"directness": 1, "freshness": 0.9},
+        deterministic_score_components={
+            "source_directness": 1,
+            "freshness": 0.9,
+        },
         model_opinion={"summary": "metadata only", "conviction": "HIGH"},
         policy_version="alert-admission.v26.1",
         ingestion_code_sha="b" * 40,

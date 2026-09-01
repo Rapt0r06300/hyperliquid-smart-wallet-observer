@@ -64,7 +64,7 @@ def _proposal(
         normalized_tickers=["BTC"],
         source_health_state="HEALTHY",
         freshness_state="FRESH",
-        deterministic_score_components={"source": 1.0},
+        deterministic_score_components={"source_authority": 1.0},
         policy_version="alert-idempotency.v26.1",
         ingestion_code_sha="d" * 40,
         revision_of=revision_of,

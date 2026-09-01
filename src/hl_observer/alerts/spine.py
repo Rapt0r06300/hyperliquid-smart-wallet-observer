@@ -24,6 +24,7 @@ from hl_observer.collection.collecte_fiable import append_jsonl, ecrire_atomique
 PROPOSAL_SCHEMA = "hypersmart.alert_proposal.v1"
 EVENT_SCHEMA = "hypersmart.canonical_alert_event.v1"
 PROJECTION_SCHEMA = "hypersmart.alert_projection.v1"
+SCORE_POLICY_VERSION = "hypersmart.alert_score.v1"
 _PRODUCER_RE = re.compile(r"^[a-z0-9][a-z0-9_.-]{0,63}$")
 _EPOCH_RE = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,63}$")
 _SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
@@ -48,6 +49,31 @@ FRESHNESS_STATES = frozenset({"FRESH", "DEGRADED", "STALE", "UNKNOWN"})
 IMMUTABLE_LIFECYCLE_STATES = ("DETECTED", "FETCHED", "VERIFIED", "ADMITTED")
 PROJECTION_LIFECYCLE_STATES = frozenset(
     {"PROJECTED", "EXPIRED", "CORRECTED", "RETRACTED"}
+)
+SCORE_WEIGHTS_BPS: dict[str, int] = {
+    "source_authority": 1_500,
+    "source_directness": 1_250,
+    "freshness": 1_250,
+    "corroboration_independence": 1_000,
+    "source_health": 1_000,
+    "entity_resolution": 900,
+    "event_specificity": 800,
+    "research_relevance": 700,
+    "contradiction_clarity": 600,
+    "evidence_completeness": 500,
+    "revision_stability": 300,
+    "traceability": 200,
+}
+_FORBIDDEN_ORDER_KEYS = frozenset(
+    {
+        "execute",
+        "exchange_order",
+        "leverage",
+        "order_intent",
+        "private_key",
+        "real_order",
+        "signature",
+    }
 )
 
 
@@ -145,10 +171,10 @@ def _score_components(value: object) -> dict[str, float]:
         return {}
     if not isinstance(value, Mapping) or len(value) > 128:
         raise AlertValidationError("DETERMINISTIC_SCORE_COMPONENTS_INVALID")
-    components: dict[str, float] = {}
+    supplied: dict[str, float] = {}
     for raw_key, raw_value in value.items():
         key = str(raw_key or "").strip()
-        if not key or len(key) > 128:
+        if key not in SCORE_WEIGHTS_BPS:
             raise AlertValidationError("DETERMINISTIC_SCORE_COMPONENTS_INVALID")
         try:
             number = float(raw_value)
@@ -156,10 +182,53 @@ def _score_components(value: object) -> dict[str, float]:
             raise AlertValidationError(
                 "DETERMINISTIC_SCORE_COMPONENTS_INVALID"
             ) from exc
-        if not math.isfinite(number):
+        if not math.isfinite(number) or not 0.0 <= number <= 1.0:
             raise AlertValidationError("DETERMINISTIC_SCORE_COMPONENTS_INVALID")
-        components[key] = number
-    return dict(sorted(components.items()))
+        supplied[key] = number
+    return {key: supplied.get(key, 0.0) for key in SCORE_WEIGHTS_BPS}
+
+
+def _score_receipt(components: Mapping[str, float]) -> dict[str, Any]:
+    contributions = {
+        key: int(round(float(components[key]) * weight))
+        for key, weight in SCORE_WEIGHTS_BPS.items()
+    }
+    total_bps = sum(contributions.values())
+    return {
+        "schema_version": SCORE_POLICY_VERSION,
+        "policy_hash": _sha256(
+            {
+                "version": SCORE_POLICY_VERSION,
+                "weights_bps": SCORE_WEIGHTS_BPS,
+                "missing_component_value": 0.0,
+            }
+        ),
+        "weights_bps": dict(SCORE_WEIGHTS_BPS),
+        "contributions_bps": contributions,
+        "score_bps": total_bps,
+        "score": round(total_bps / 10_000.0, 6),
+        "score_semantics": "RANKING_SCORE_NOT_PROBABILITY",
+        "ablations": {
+            key: {
+                "removed_contribution_bps": contribution,
+                "score_without_component_bps": total_bps - contribution,
+            }
+            for key, contribution in contributions.items()
+        },
+        "model_inputs_used": False,
+    }
+
+
+def _reject_order_capability(value: object, *, path: str = "payload") -> None:
+    if isinstance(value, Mapping):
+        for raw_key, child in value.items():
+            key = str(raw_key).strip().lower()
+            if key in _FORBIDDEN_ORDER_KEYS:
+                raise AlertValidationError(f"ORDER_CAPABILITY_FORBIDDEN:{path}.{key}")
+            _reject_order_capability(child, path=f"{path}.{key}")
+    elif isinstance(value, (list, tuple)):
+        for index, child in enumerate(value):
+            _reject_order_capability(child, path=f"{path}[{index}]")
 
 
 def _evidence_refs(
@@ -282,6 +351,8 @@ def _validate_proposal(payload: object) -> dict[str, Any]:
         raise AlertValidationError("PAPER_READ_ONLY_REQUIRED")
     if not isinstance(proposal.get("payload", {}), Mapping):
         raise AlertValidationError("PAYLOAD_NOT_MAPPING")
+    normalized_payload = dict(proposal.get("payload") or {})
+    _reject_order_capability(normalized_payload)
     entity_ids = _bounded_strings(proposal.get("entity_ids"), field="entity_ids")
     normalized_tickers = _bounded_strings(
         proposal.get("normalized_tickers"),
@@ -341,6 +412,7 @@ def _validate_proposal(payload: object) -> dict[str, Any]:
     if freshness_state not in FRESHNESS_STATES:
         raise AlertValidationError("FRESHNESS_STATE_INVALID")
     components = _score_components(proposal.get("deterministic_score_components"))
+    score_receipt = _score_receipt(components)
     model_opinion_raw = proposal.get("model_opinion")
     if model_opinion_raw is not None and not isinstance(model_opinion_raw, Mapping):
         raise AlertValidationError("MODEL_OPINION_INVALID")
@@ -382,12 +454,16 @@ def _validate_proposal(payload: object) -> dict[str, Any]:
             "source_health_state": source_health_state,
             "freshness_state": freshness_state,
             "deterministic_score_components": components,
+            "deterministic_score": score_receipt["score"],
+            "deterministic_score_receipt": score_receipt,
             "model_opinion": model_opinion,
+            "economic_admission_state": "NOT_EVALUATED",
+            "order_intent_allowed": False,
             "policy_version": policy_version,
             "ingestion_code_sha": ingestion_code_sha,
             "revision_of": revision_of,
             "retracts": retracts,
-            "payload": dict(proposal.get("payload") or {}),
+            "payload": normalized_payload,
             "paper_read_only": True,
             "real_execution": False,
         }
@@ -653,10 +729,17 @@ def _validate_canonical_event(
         raise AlertValidationError("CANONICAL_SOURCE_HEALTH_INVALID")
     if freshness_state not in FRESHNESS_STATES:
         raise AlertValidationError("CANONICAL_FRESHNESS_INVALID")
-    if event.get("deterministic_score_components") != _score_components(
+    canonical_components = _score_components(
         event.get("deterministic_score_components")
-    ):
+    )
+    if event.get("deterministic_score_components") != canonical_components:
         raise AlertValidationError("CANONICAL_SCORE_COMPONENTS_NOT_NORMALIZED")
+    score_receipt = _score_receipt(canonical_components)
+    if (
+        event.get("deterministic_score") != score_receipt["score"]
+        or event.get("deterministic_score_receipt") != score_receipt
+    ):
+        raise AlertValidationError("CANONICAL_SCORE_RECEIPT_INVALID")
     model_opinion = event.get("model_opinion")
     if model_opinion is not None and (
         not isinstance(model_opinion, Mapping)
@@ -675,6 +758,12 @@ def _validate_canonical_event(
         raise AlertValidationError("CANONICAL_REVISION_RETRACTION_CONFLICT")
     if not isinstance(event.get("payload"), Mapping):
         raise AlertValidationError("CANONICAL_PAYLOAD_INVALID")
+    _reject_order_capability(event["payload"])
+    if (
+        event.get("economic_admission_state") != "NOT_EVALUATED"
+        or event.get("order_intent_allowed") is not False
+    ):
+        raise AlertValidationError("CANONICAL_ECONOMIC_AUTHORITY_FORBIDDEN")
     if event.get("paper_read_only") is not True or event.get("real_execution") is not False:
         raise AlertValidationError("CANONICAL_PAPER_READ_ONLY_REQUIRED")
     if "displayed_at_ms" in event or "projected_at_ms" in event:
@@ -1103,7 +1192,13 @@ class CanonicalAlertWriter:
             "deterministic_score_components": proposal[
                 "deterministic_score_components"
             ],
+            "deterministic_score": proposal["deterministic_score"],
+            "deterministic_score_receipt": proposal[
+                "deterministic_score_receipt"
+            ],
             "model_opinion": proposal["model_opinion"],
+            "economic_admission_state": proposal["economic_admission_state"],
+            "order_intent_allowed": proposal["order_intent_allowed"],
             "policy_version": proposal["policy_version"],
             "ingestion_code_sha": proposal["ingestion_code_sha"],
             "payload": proposal["payload"],
@@ -1214,6 +1309,7 @@ class CanonicalAlertWriter:
                         "producer_gap_detected",
                         "producer_gap_size",
                         "lifecycle_receipt",
+                        "model_opinion",
                     }
                     comparable_existing = {
                         key: value
