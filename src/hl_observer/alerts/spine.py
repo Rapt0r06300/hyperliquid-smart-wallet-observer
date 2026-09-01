@@ -25,6 +25,7 @@ PROPOSAL_SCHEMA = "hypersmart.alert_proposal.v1"
 EVENT_SCHEMA = "hypersmart.canonical_alert_event.v1"
 PROJECTION_SCHEMA = "hypersmart.alert_projection.v1"
 _PRODUCER_RE = re.compile(r"^[a-z0-9][a-z0-9_.-]{0,63}$")
+_EPOCH_RE = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,63}$")
 _SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 _CODE_SHA_RE = re.compile(r"^(?:[0-9a-f]{40}|[0-9a-f]{64})$")
 _MAX_HEADLINE = 1_000
@@ -79,6 +80,14 @@ def _sha256(payload: Mapping[str, Any]) -> str:
     return hashlib.sha256(_canonical_bytes(payload)).hexdigest()
 
 
+def _event_stream_hash(events: list[Mapping[str, Any]]) -> str:
+    digest = hashlib.sha256()
+    for event in events:
+        digest.update(_canonical_bytes(event))
+        digest.update(b"\n")
+    return digest.hexdigest()
+
+
 def _is_within(path: Path, parent: Path) -> bool:
     try:
         path.resolve().relative_to(parent.resolve())
@@ -92,6 +101,13 @@ def _validate_producer_id(value: object) -> str:
     if not _PRODUCER_RE.fullmatch(producer_id):
         raise AlertValidationError("PRODUCER_ID_INVALID")
     return producer_id
+
+
+def _validate_producer_epoch(value: object) -> str:
+    producer_epoch = str(value or "").strip()
+    if not _EPOCH_RE.fullmatch(producer_epoch):
+        raise AlertValidationError("PRODUCER_EPOCH_INVALID")
+    return producer_epoch
 
 
 def _bounded_strings(
@@ -200,6 +216,7 @@ def _validate_proposal(payload: object) -> dict[str, Any]:
     if proposal.get("schema_version") != PROPOSAL_SCHEMA:
         raise AlertValidationError("PROPOSAL_SCHEMA_INVALID")
     producer_id = _validate_producer_id(proposal.get("producer_id"))
+    producer_epoch = _validate_producer_epoch(proposal.get("producer_epoch"))
     try:
         producer_seq = int(proposal.get("producer_seq"))
     except (TypeError, ValueError, OverflowError) as exc:
@@ -219,6 +236,14 @@ def _validate_proposal(payload: object) -> dict[str, Any]:
         "source_uri": source_uri,
         "source_content_hash": source_hash,
     }
+    source_event_id_raw = proposal.get("source_event_id")
+    source_event_id = (
+        str(source_event_id_raw).strip() if source_event_id_raw is not None else None
+    )
+    if source_event_id == "":
+        source_event_id = None
+    if source_event_id is not None and len(source_event_id) > 256:
+        raise AlertValidationError("SOURCE_EVENT_ID_INVALID")
     timestamps: list[int] = []
     for field in ("observed_at_ms", "fetched_at_ms", "verified_at_ms"):
         try:
@@ -253,8 +278,6 @@ def _validate_proposal(payload: object) -> dict[str, Any]:
     dedup_key = str(proposal.get("dedup_key") or "").strip()
     if not category or not headline or len(headline) > _MAX_HEADLINE:
         raise AlertValidationError("ALERT_CONTENT_INVALID")
-    if not dedup_key or len(dedup_key) > _MAX_DEDUP_KEY:
-        raise AlertValidationError("DEDUP_KEY_INVALID")
     if proposal.get("paper_read_only") is not True or proposal.get("real_execution") is not False:
         raise AlertValidationError("PAPER_READ_ONLY_REQUIRED")
     if not isinstance(proposal.get("payload", {}), Mapping):
@@ -265,6 +288,44 @@ def _validate_proposal(payload: object) -> dict[str, Any]:
         field="normalized_tickers",
         uppercase=True,
     )
+    source_event_dedup = (
+        "source-event:"
+        + _sha256({"source_id": source_id, "source_event_id": source_event_id})
+        if source_event_id is not None
+        else None
+    )
+    fallback_dedup = "fallback:" + _sha256(
+        {
+            "source_id": source_id,
+            "source_uri": source_uri,
+            "source_content_hash": source_hash,
+            "category": category,
+            "entity_ids": entity_ids,
+            "normalized_tickers": normalized_tickers,
+            "headline": headline,
+        }
+    )
+    declared_origin = str(proposal.get("dedup_key_origin") or "").strip().upper()
+    if dedup_key:
+        dedup_key_origin = declared_origin or "PROVIDED"
+        if dedup_key_origin == "SOURCE_EVENT_ID" and dedup_key != source_event_dedup:
+            raise AlertValidationError("SOURCE_EVENT_DEDUP_MISMATCH")
+        if dedup_key_origin == "CANONICAL_FALLBACK" and dedup_key != fallback_dedup:
+            raise AlertValidationError("FALLBACK_DEDUP_MISMATCH")
+        if dedup_key_origin not in {
+            "PROVIDED",
+            "SOURCE_EVENT_ID",
+            "CANONICAL_FALLBACK",
+        }:
+            raise AlertValidationError("DEDUP_KEY_ORIGIN_INVALID")
+    elif source_event_dedup is not None:
+        dedup_key = source_event_dedup
+        dedup_key_origin = "SOURCE_EVENT_ID"
+    else:
+        dedup_key = fallback_dedup
+        dedup_key_origin = "CANONICAL_FALLBACK"
+    if len(dedup_key) > _MAX_DEDUP_KEY:
+        raise AlertValidationError("DEDUP_KEY_INVALID")
     evidence_refs = _evidence_refs(
         proposal.get("evidence_refs"),
         source_id=source_id,
@@ -301,9 +362,11 @@ def _validate_proposal(payload: object) -> dict[str, Any]:
     proposal.update(
         {
             "producer_id": producer_id,
+            "producer_epoch": producer_epoch,
             "producer_seq": producer_seq,
             "source_receipt": source_receipt,
             "source_receipt_hash": _sha256(source_receipt),
+            "source_event_id": source_event_id,
             "source_event_time_ms": source_event_time_ms,
             "observed_at_ms": timestamps[0],
             "fetched_at_ms": timestamps[1],
@@ -312,6 +375,7 @@ def _validate_proposal(payload: object) -> dict[str, Any]:
             "category": category,
             "headline": headline,
             "dedup_key": dedup_key,
+            "dedup_key_origin": dedup_key_origin,
             "entity_ids": entity_ids,
             "normalized_tickers": normalized_tickers,
             "evidence_refs": evidence_refs,
@@ -340,6 +404,7 @@ def _validate_proposal(payload: object) -> dict[str, Any]:
 def build_alert_proposal(
     *,
     producer_id: str,
+    producer_epoch: str,
     producer_seq: int,
     source_id: str,
     source_uri: str,
@@ -349,9 +414,10 @@ def build_alert_proposal(
     verified_at_ms: int,
     category: str,
     headline: str,
-    dedup_key: str,
+    dedup_key: str | None,
     policy_version: str,
     ingestion_code_sha: str,
+    source_event_id: str | None = None,
     source_event_time_ms: int | None = None,
     expires_at_ms: int | None = None,
     entity_ids: list[str] | tuple[str, ...] | None = None,
@@ -371,12 +437,14 @@ def build_alert_proposal(
         {
             "schema_version": PROPOSAL_SCHEMA,
             "producer_id": producer_id,
+            "producer_epoch": producer_epoch,
             "producer_seq": producer_seq,
             "source_receipt": {
                 "source_id": source_id,
                 "source_uri": source_uri,
                 "source_content_hash": source_content_hash,
             },
+            "source_event_id": source_event_id,
             "source_event_time_ms": source_event_time_ms,
             "observed_at_ms": observed_at_ms,
             "fetched_at_ms": fetched_at_ms,
@@ -406,13 +474,17 @@ def build_alert_proposal(
 
 
 def _event_identity(event: Mapping[str, Any]) -> dict[str, Any]:
-    return {
+    identity: dict[str, Any] = {
         "source_id": event.get("source_id"),
-        "dedup_key": event.get("dedup_key"),
-        "source_content_hash": event.get("source_content_hash"),
         "revision_of": event.get("revision_of"),
         "retracts": event.get("retracts"),
     }
+    if event.get("source_event_id") is not None:
+        identity["source_event_id"] = event.get("source_event_id")
+    else:
+        identity["dedup_key"] = event.get("dedup_key")
+        identity["source_content_hash"] = event.get("source_content_hash")
+    return identity
 
 
 def _validate_lifecycle_receipt(event: Mapping[str, Any]) -> None:
@@ -460,6 +532,7 @@ def _validate_canonical_event(
     if not _SHA256_RE.fullmatch(event_id) or not _SHA256_RE.fullmatch(proposal_id):
         raise AlertValidationError("CANONICAL_EVENT_ID_INVALID")
     producer_id = _validate_producer_id(event.get("producer_id"))
+    producer_epoch = _validate_producer_epoch(event.get("producer_epoch"))
     try:
         producer_seq = int(event.get("producer_seq"))
         ledger_sequence = int(event.get("ledger_sequence"))
@@ -491,6 +564,14 @@ def _validate_canonical_event(
         or event.get("source_receipt_hash") != _sha256(normalized_source)
     ):
         raise AlertValidationError("CANONICAL_SOURCE_RECEIPT_INVALID")
+    source_event_id_raw = event.get("source_event_id")
+    source_event_id = (
+        str(source_event_id_raw).strip() if source_event_id_raw is not None else None
+    )
+    if source_event_id == "":
+        source_event_id = None
+    if source_event_id is not None and len(source_event_id) > 256:
+        raise AlertValidationError("CANONICAL_SOURCE_EVENT_ID_INVALID")
 
     times: list[int] = []
     for field in (
@@ -518,6 +599,13 @@ def _validate_canonical_event(
             ) from exc
         if source_event_time < 0 or source_event_time > times[0]:
             raise AlertValidationError("CANONICAL_SOURCE_EVENT_TIME_IMPOSSIBLE")
+    expected_availability_lag = (
+        times[0] - source_event_time if source_event_time is not None else None
+    )
+    if event.get("source_available_at_ms") != times[0]:
+        raise AlertValidationError("CANONICAL_SOURCE_AVAILABILITY_INVALID")
+    if event.get("availability_lag_ms") != expected_availability_lag:
+        raise AlertValidationError("CANONICAL_AVAILABILITY_LAG_INVALID")
     expires_at = event.get("expires_at_ms")
     if expires_at is not None:
         try:
@@ -536,6 +624,12 @@ def _validate_canonical_event(
         raise AlertValidationError("CANONICAL_ALERT_CONTENT_INVALID")
     if not dedup_key or len(dedup_key) > _MAX_DEDUP_KEY:
         raise AlertValidationError("CANONICAL_DEDUP_KEY_INVALID")
+    if event.get("dedup_key_origin") not in {
+        "PROVIDED",
+        "SOURCE_EVENT_ID",
+        "CANONICAL_FALLBACK",
+    }:
+        raise AlertValidationError("CANONICAL_DEDUP_ORIGIN_INVALID")
     if event.get("entity_ids") != _bounded_strings(
         event.get("entity_ids"), field="entity_ids"
     ):
@@ -590,6 +684,37 @@ def _validate_canonical_event(
     _validate_lifecycle_receipt(event)
 
     if prior_by_id is not None:
+        existing = prior_by_id.get(event_id)
+        same_epoch = [
+            previous
+            for previous in prior_by_id.values()
+            if previous.get("producer_id") == producer_id
+            and previous.get("producer_epoch") == producer_epoch
+        ]
+        expected_producer_seq = (
+            max(int(previous["producer_seq"]) for previous in same_epoch) + 1
+            if same_epoch
+            else 0
+        )
+        if existing is None and producer_seq < expected_producer_seq:
+            raise AlertValidationError("PRODUCER_SEQUENCE_OUT_OF_ORDER")
+        stored_expected = int(event.get("producer_expected_seq", -1))
+        expected_for_event = (
+            int(existing.get("producer_expected_seq", stored_expected))
+            if existing is not None
+            else expected_producer_seq
+        )
+        expected_gap = (
+            int(existing.get("producer_gap_size", 0))
+            if existing is not None
+            else max(0, producer_seq - expected_for_event)
+        )
+        if (
+            stored_expected != expected_for_event
+            or event.get("producer_gap_detected") is not (expected_gap > 0)
+            or event.get("producer_gap_size") != expected_gap
+        ):
+            raise AlertValidationError("PRODUCER_SEQUENCE_GAP_RECEIPT_INVALID")
         for field, reference in (("revision_of", revision_of), ("retracts", retracts)):
             if reference is not None and reference not in prior_by_id:
                 raise AlertValidationError(f"{field.upper()}_TARGET_UNKNOWN")
@@ -607,9 +732,11 @@ def _validate_canonical_event(
         {
             "event_id": event_id,
             "producer_id": producer_id,
+            "producer_epoch": producer_epoch,
             "producer_seq": producer_seq,
             "ledger_sequence": ledger_sequence,
             "source_event_time_ms": source_event_time,
+            "source_event_id": source_event_id,
             "expires_at_ms": expires_at,
             "revision_of": revision_of,
             "retracts": retracts,
@@ -694,6 +821,9 @@ class AlertSpinePaths:
     ledger_path: Path
     projection_path: Path
     writer_lock_path: Path
+    writer_cursor_path: Path
+    projection_cursor_path: Path
+    duplicate_observations_path: Path
 
     @classmethod
     def from_root(cls, root: str | Path) -> AlertSpinePaths:
@@ -706,6 +836,11 @@ class AlertSpinePaths:
             ledger_path=base / "canonical" / "alerts.jsonl",
             projection_path=base / "projections" / "alerts_dashboard.json",
             writer_lock_path=base / "writer_state" / "canonical_writer.lock",
+            writer_cursor_path=base / "writer_state" / "canonical_cursor.json",
+            projection_cursor_path=base / "projections" / "canonical_cursor.json",
+            duplicate_observations_path=(
+                base / "diagnostics" / "duplicate_observations.jsonl"
+            ),
         )
         if _is_within(paths.ledger_path, paths.pending_root):
             raise AlertSpineError("CANONICAL_LEDGER_INSIDE_PRODUCER_INBOX")
@@ -774,6 +909,71 @@ class CanonicalAlertWriter:
     def producer(self, producer_id: str) -> AlertProducerInbox:
         return AlertProducerInbox(self.paths.pending_root, producer_id)
 
+    def _cursor_payload(
+        self,
+        *,
+        consumer: str,
+        events: list[dict[str, Any]],
+    ) -> dict[str, Any]:
+        return {
+            "schema_version": "hypersmart.alert_cursor.v1",
+            "consumer": consumer,
+            "ledger_sequence": len(events),
+            "event_id": events[-1]["event_id"] if events else None,
+            "ledger_prefix_hash": _event_stream_hash(events),
+            "paper_read_only": True,
+            "real_execution": False,
+        }
+
+    def _validate_cursor(
+        self,
+        path: Path,
+        *,
+        consumer: str,
+        events: list[dict[str, Any]],
+    ) -> int:
+        if not path.is_file():
+            return 0
+        try:
+            cursor = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+            raise CanonicalLedgerCorruption("DURABLE_CURSOR_INVALID") from exc
+        if (
+            not isinstance(cursor, Mapping)
+            or cursor.get("schema_version") != "hypersmart.alert_cursor.v1"
+            or cursor.get("consumer") != consumer
+            or cursor.get("paper_read_only") is not True
+            or cursor.get("real_execution") is not False
+        ):
+            raise CanonicalLedgerCorruption("DURABLE_CURSOR_SCHEMA_INVALID")
+        try:
+            sequence = int(cursor.get("ledger_sequence"))
+        except (TypeError, ValueError, OverflowError) as exc:
+            raise CanonicalLedgerCorruption("DURABLE_CURSOR_SEQUENCE_INVALID") from exc
+        if sequence < 0 or sequence > len(events):
+            raise CanonicalLedgerCorruption("DURABLE_CURSOR_AHEAD_OF_LEDGER")
+        prefix = events[:sequence]
+        expected_event_id = prefix[-1]["event_id"] if prefix else None
+        if (
+            cursor.get("event_id") != expected_event_id
+            or cursor.get("ledger_prefix_hash") != _event_stream_hash(prefix)
+        ):
+            raise CanonicalLedgerCorruption("DURABLE_CURSOR_LEDGER_MISMATCH")
+        return sequence
+
+    def _write_cursor(
+        self,
+        path: Path,
+        *,
+        consumer: str,
+        events: list[dict[str, Any]],
+    ) -> None:
+        payload = self._cursor_payload(consumer=consumer, events=events)
+        ecrire_atomique(
+            path,
+            json.dumps(payload, ensure_ascii=False, sort_keys=True) + "\n",
+        )
+
     def read_ledger(self) -> list[dict[str, Any]]:
         path = self.paths.ledger_path
         if not path.is_file():
@@ -819,7 +1019,13 @@ class CanonicalAlertWriter:
             return []
         return sorted(self.paths.inflight_root.glob("*/*.json"))
 
-    def _prepare(self, pending_path: Path, *, ledger_sequence: int) -> Path:
+    def _prepare(
+        self,
+        pending_path: Path,
+        *,
+        ledger_sequence: int,
+        prior_by_id: Mapping[str, Mapping[str, Any]],
+    ) -> Path:
         proposal = _validate_proposal(json.loads(pending_path.read_text(encoding="utf-8")))
         if pending_path.parent.name != proposal["producer_id"]:
             raise AlertValidationError("PRODUCER_INBOX_NAMESPACE_MISMATCH")
@@ -827,18 +1033,57 @@ class CanonicalAlertWriter:
         admitted_at_ms = int(self.clock_ms())
         if admitted_at_ms < proposal["verified_at_ms"]:
             raise AlertValidationError("ADMITTED_BEFORE_VERIFIED")
+        same_epoch = [
+            previous
+            for previous in prior_by_id.values()
+            if previous.get("producer_id") == proposal["producer_id"]
+            and previous.get("producer_epoch") == proposal["producer_epoch"]
+        ]
+        candidate_identity = {
+            "source_id": source["source_id"],
+            "dedup_key": proposal["dedup_key"],
+            "source_content_hash": source["source_content_hash"],
+            "source_event_id": proposal["source_event_id"],
+            "revision_of": proposal["revision_of"],
+            "retracts": proposal["retracts"],
+        }
+        candidate_event_id = _sha256(_event_identity(candidate_identity))
+        existing = prior_by_id.get(candidate_event_id)
+        if existing is not None:
+            expected_producer_seq = int(existing["producer_expected_seq"])
+            producer_gap_size = int(existing["producer_gap_size"])
+        else:
+            expected_producer_seq = (
+                max(int(previous["producer_seq"]) for previous in same_epoch) + 1
+                if same_epoch
+                else 0
+            )
+            if proposal["producer_seq"] < expected_producer_seq:
+                raise AlertValidationError("PRODUCER_SEQUENCE_OUT_OF_ORDER")
+            producer_gap_size = proposal["producer_seq"] - expected_producer_seq
         event = {
             "schema_version": EVENT_SCHEMA,
             "ledger_sequence": int(ledger_sequence),
             "proposal_id": proposal["proposal_id"],
             "producer_id": proposal["producer_id"],
+            "producer_epoch": proposal["producer_epoch"],
             "producer_seq": proposal["producer_seq"],
+            "producer_expected_seq": expected_producer_seq,
+            "producer_gap_detected": producer_gap_size > 0,
+            "producer_gap_size": producer_gap_size,
             "source_receipt": source,
             "source_receipt_hash": proposal["source_receipt_hash"],
             "source_id": source["source_id"],
             "source_uri": source["source_uri"],
             "source_content_hash": source["source_content_hash"],
+            "source_event_id": proposal["source_event_id"],
             "source_event_time_ms": proposal["source_event_time_ms"],
+            "source_available_at_ms": proposal["observed_at_ms"],
+            "availability_lag_ms": (
+                proposal["observed_at_ms"] - proposal["source_event_time_ms"]
+                if proposal["source_event_time_ms"] is not None
+                else None
+            ),
             "observed_at_ms": proposal["observed_at_ms"],
             "fetched_at_ms": proposal["fetched_at_ms"],
             "verified_at_ms": proposal["verified_at_ms"],
@@ -847,6 +1092,7 @@ class CanonicalAlertWriter:
             "category": proposal["category"],
             "headline": proposal["headline"],
             "dedup_key": proposal["dedup_key"],
+            "dedup_key_origin": proposal["dedup_key_origin"],
             "entity_ids": proposal["entity_ids"],
             "normalized_tickers": proposal["normalized_tickers"],
             "revision_of": proposal["revision_of"],
@@ -871,8 +1117,12 @@ class CanonicalAlertWriter:
             "paper_read_only": True,
             "real_execution": False,
         }
-        event["event_id"] = _sha256(_event_identity(event))
-        event = _validate_canonical_event(event, expected_sequence=ledger_sequence)
+        event["event_id"] = candidate_event_id
+        event = _validate_canonical_event(
+            event,
+            expected_sequence=ledger_sequence,
+            prior_by_id=prior_by_id,
+        )
         prepared = {
             "schema_version": "hypersmart.alert_inflight.v1",
             "pending_path": str(pending_path.relative_to(self.paths.pending_root)),
@@ -923,6 +1173,11 @@ class CanonicalAlertWriter:
         deduplicated = 0
         with SingleWriterFileLock(self.paths.writer_lock_path):
             events = self.read_ledger()
+            self._validate_cursor(
+                self.paths.writer_cursor_path,
+                consumer="canonical-writer",
+                events=events,
+            )
             by_event_id = {str(event["event_id"]): event for event in events}
             while max_events is None or accepted + deduplicated < max_events:
                 inflight_paths = self._inflight_paths()
@@ -935,6 +1190,7 @@ class CanonicalAlertWriter:
                     inflight = self._prepare(
                         pending_paths[0],
                         ledger_sequence=len(events) + 1,
+                        prior_by_id=by_event_id,
                     )
                     if after_prepare is not None:
                         _, prepared_event = self._load_inflight(inflight)
@@ -947,19 +1203,36 @@ class CanonicalAlertWriter:
                 event_id = str(event.get("event_id") or "")
                 existing = by_event_id.get(event_id)
                 if existing is not None:
+                    non_economic_metadata = {
+                        "ledger_sequence",
+                        "admitted_at_ms",
+                        "proposal_id",
+                        "producer_id",
+                        "producer_epoch",
+                        "producer_seq",
+                        "producer_expected_seq",
+                        "producer_gap_detected",
+                        "producer_gap_size",
+                        "lifecycle_receipt",
+                    }
                     comparable_existing = {
                         key: value
                         for key, value in existing.items()
-                        if key not in {"ledger_sequence", "admitted_at_ms", "proposal_id", "producer_id", "producer_seq"}
+                        if key not in non_economic_metadata
                     }
                     comparable_event = {
                         key: value
                         for key, value in event.items()
-                        if key not in {"ledger_sequence", "admitted_at_ms", "proposal_id", "producer_id", "producer_seq"}
+                        if key not in non_economic_metadata
                     }
                     if comparable_existing != comparable_event:
                         raise CanonicalLedgerCorruption("EVENT_ID_CONTENT_COLLISION")
                     self._acknowledge(pending, inflight)
+                    self._write_cursor(
+                        self.paths.writer_cursor_path,
+                        consumer="canonical-writer",
+                        events=events,
+                    )
                     deduplicated += 1
                     continue
                 if event.get("ledger_sequence") != len(events) + 1:
@@ -970,7 +1243,17 @@ class CanonicalAlertWriter:
                 events.append(event)
                 by_event_id[event_id] = event
                 self._acknowledge(pending, inflight)
+                self._write_cursor(
+                    self.paths.writer_cursor_path,
+                    consumer="canonical-writer",
+                    events=events,
+                )
                 accepted += 1
+            self._write_cursor(
+                self.paths.writer_cursor_path,
+                consumer="canonical-writer",
+                events=events,
+            )
             projection = self.rebuild_projection(events=events)
         return {
             "schema_version": "hypersmart.alert_writer_run.v1",
@@ -989,6 +1272,11 @@ class CanonicalAlertWriter:
         displayed_at_ms: int | None = None,
     ) -> dict[str, Any]:
         replayed = self.read_ledger() if events is None else list(events)
+        self._validate_cursor(
+            self.paths.projection_cursor_path,
+            consumer="dashboard-projection",
+            events=replayed,
+        )
         projected_at_ms = int(self.clock_ms())
         if any(projected_at_ms < int(event["admitted_at_ms"]) for event in replayed):
             raise AlertValidationError("PROJECTED_BEFORE_ADMITTED")
@@ -1022,12 +1310,16 @@ class CanonicalAlertWriter:
         telemetry: dict[str, int] = {"projected_at_ms": projected_at_ms}
         if displayed_at_ms is not None:
             telemetry["displayed_at_ms"] = displayed_at_ms
-        projection = {
+        deterministic_projection = {
             "schema_version": PROJECTION_SCHEMA,
-            "derived_from": str(self.paths.ledger_path),
             "last_ledger_sequence": len(replayed),
             "alert_count": len(replayed),
             "alerts": projected_alerts,
+        }
+        projection = {
+            **deterministic_projection,
+            "derived_from": str(self.paths.ledger_path),
+            "canonical_projection_hash": _sha256(deterministic_projection),
             "projection_telemetry": telemetry,
             "paper_read_only": True,
             "real_execution": False,
@@ -1035,6 +1327,11 @@ class CanonicalAlertWriter:
         ecrire_atomique(
             self.paths.projection_path,
             json.dumps(projection, ensure_ascii=False, sort_keys=True) + "\n",
+        )
+        self._write_cursor(
+            self.paths.projection_cursor_path,
+            consumer="dashboard-projection",
+            events=replayed,
         )
         return projection
 

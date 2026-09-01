@@ -25,6 +25,7 @@ def _proposal(producer_id: str, sequence: int, *, dedup_key: str | None = None) 
     content = f"source-content:{producer_id}:{sequence}".encode()
     return build_alert_proposal(
         producer_id=producer_id,
+        producer_epoch="test-epoch-1",
         producer_seq=sequence,
         source_id="source-primary",
         source_uri=f"https://example.invalid/{producer_id}/{sequence}",

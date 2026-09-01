@@ -35,6 +35,7 @@ def _proposal(
     source_hash = hashlib.sha256(f"source:{sequence}".encode()).hexdigest()
     return build_alert_proposal(
         producer_id="news-primary",
+        producer_epoch="test-epoch-1",
         producer_seq=sequence,
         source_id="primary-wire",
         source_uri=f"https://example.invalid/event/{sequence}",
