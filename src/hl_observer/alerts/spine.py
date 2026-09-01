@@ -19,6 +19,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from hl_observer.alerts.freshness import project_alert_freshness
 from hl_observer.collection.collecte_fiable import append_jsonl, ecrire_atomique
 
 PROPOSAL_SCHEMA = "hypersmart.alert_proposal.v1"
@@ -324,6 +325,26 @@ def _validate_proposal(payload: object) -> dict[str, Any]:
         timestamps.append(value)
     if timestamps != sorted(timestamps):
         raise AlertValidationError("TIMESTAMP_ORDER_INVALID")
+    parsed_at_raw = proposal.get("parsed_at_ms")
+    try:
+        parsed_at_ms = (
+            timestamps[1] if parsed_at_raw is None else int(parsed_at_raw)
+        )
+    except (TypeError, ValueError, OverflowError) as exc:
+        raise AlertValidationError("TIMESTAMP_INVALID:parsed_at_ms") from exc
+    if not timestamps[1] <= parsed_at_ms <= timestamps[2]:
+        raise AlertValidationError("PARSED_TIMESTAMP_ORDER_INVALID")
+    declared_parsed_origin = str(proposal.get("parsed_at_origin") or "").strip().upper()
+    if parsed_at_raw is None:
+        parsed_at_origin = "FETCHED_AT_FALLBACK"
+    elif declared_parsed_origin:
+        if declared_parsed_origin not in {"FETCHED_AT_FALLBACK", "SOURCE_ADAPTER"}:
+            raise AlertValidationError("PARSED_AT_ORIGIN_INVALID")
+        if declared_parsed_origin == "FETCHED_AT_FALLBACK" and parsed_at_ms != timestamps[1]:
+            raise AlertValidationError("PARSED_AT_FALLBACK_MISMATCH")
+        parsed_at_origin = declared_parsed_origin
+    else:
+        parsed_at_origin = "SOURCE_ADAPTER"
     source_event_time_raw = proposal.get("source_event_time_ms")
     source_event_time_ms: int | None = None
     if source_event_time_raw is not None:
@@ -333,6 +354,59 @@ def _validate_proposal(payload: object) -> dict[str, Any]:
             raise AlertValidationError("TIMESTAMP_INVALID:source_event_time_ms") from exc
         if source_event_time_ms < 0 or source_event_time_ms > timestamps[0]:
             raise AlertValidationError("SOURCE_EVENT_TIME_IMPOSSIBLE")
+    source_publish_raw = proposal.get("source_publish_time_ms")
+    source_publish_time_ms: int | None = None
+    if source_publish_raw is not None:
+        try:
+            source_publish_time_ms = int(source_publish_raw)
+        except (TypeError, ValueError, OverflowError) as exc:
+            raise AlertValidationError(
+                "TIMESTAMP_INVALID:source_publish_time_ms"
+            ) from exc
+        if source_publish_time_ms < 0 or source_publish_time_ms > timestamps[0]:
+            raise AlertValidationError("SOURCE_PUBLISH_TIME_IMPOSSIBLE")
+        if (
+            source_event_time_ms is not None
+            and source_publish_time_ms < source_event_time_ms
+        ):
+            raise AlertValidationError("SOURCE_PUBLISH_BEFORE_EVENT")
+    source_available_raw = proposal.get("source_available_time_ms")
+    try:
+        source_available_time_ms = (
+            timestamps[0]
+            if source_available_raw is None
+            else int(source_available_raw)
+        )
+    except (TypeError, ValueError, OverflowError) as exc:
+        raise AlertValidationError(
+            "TIMESTAMP_INVALID:source_available_time_ms"
+        ) from exc
+    if source_available_time_ms < 0 or source_available_time_ms > timestamps[0]:
+        raise AlertValidationError("SOURCE_AVAILABLE_TIME_IMPOSSIBLE")
+    if (
+        source_publish_time_ms is not None
+        and source_available_time_ms < source_publish_time_ms
+    ):
+        raise AlertValidationError("SOURCE_AVAILABLE_BEFORE_PUBLISH")
+    declared_available_origin = str(
+        proposal.get("source_available_time_origin") or ""
+    ).strip().upper()
+    if source_available_raw is None:
+        source_available_origin = "OBSERVED_AT_FALLBACK"
+    elif declared_available_origin:
+        if declared_available_origin not in {
+            "OBSERVED_AT_FALLBACK",
+            "SOURCE_ADAPTER",
+        }:
+            raise AlertValidationError("SOURCE_AVAILABLE_ORIGIN_INVALID")
+        if (
+            declared_available_origin == "OBSERVED_AT_FALLBACK"
+            and source_available_time_ms != timestamps[0]
+        ):
+            raise AlertValidationError("SOURCE_AVAILABLE_FALLBACK_MISMATCH")
+        source_available_origin = declared_available_origin
+    else:
+        source_available_origin = "SOURCE_ADAPTER"
     expires_at_raw = proposal.get("expires_at_ms")
     expires_at_ms: int | None = None
     if expires_at_raw is not None:
@@ -411,6 +485,10 @@ def _validate_proposal(payload: object) -> dict[str, Any]:
         raise AlertValidationError("SOURCE_HEALTH_STATE_INVALID")
     if freshness_state not in FRESHNESS_STATES:
         raise AlertValidationError("FRESHNESS_STATE_INVALID")
+    if category == "NO_NEWS" and (
+        source_health_state != "HEALTHY" or freshness_state != "FRESH"
+    ):
+        raise AlertValidationError("NO_NEWS_REQUIRES_HEALTHY_FRESH_SOURCE")
     components = _score_components(proposal.get("deterministic_score_components"))
     score_receipt = _score_receipt(components)
     model_opinion_raw = proposal.get("model_opinion")
@@ -440,8 +518,13 @@ def _validate_proposal(payload: object) -> dict[str, Any]:
             "source_receipt_hash": _sha256(source_receipt),
             "source_event_id": source_event_id,
             "source_event_time_ms": source_event_time_ms,
+            "source_publish_time_ms": source_publish_time_ms,
+            "source_available_time_ms": source_available_time_ms,
+            "source_available_time_origin": source_available_origin,
             "observed_at_ms": timestamps[0],
             "fetched_at_ms": timestamps[1],
+            "parsed_at_ms": parsed_at_ms,
+            "parsed_at_origin": parsed_at_origin,
             "verified_at_ms": timestamps[2],
             "expires_at_ms": expires_at_ms,
             "category": category,
@@ -495,6 +578,9 @@ def build_alert_proposal(
     ingestion_code_sha: str,
     source_event_id: str | None = None,
     source_event_time_ms: int | None = None,
+    source_publish_time_ms: int | None = None,
+    source_available_time_ms: int | None = None,
+    parsed_at_ms: int | None = None,
     expires_at_ms: int | None = None,
     entity_ids: list[str] | tuple[str, ...] | None = None,
     normalized_tickers: list[str] | tuple[str, ...] | None = None,
@@ -522,8 +608,11 @@ def build_alert_proposal(
             },
             "source_event_id": source_event_id,
             "source_event_time_ms": source_event_time_ms,
+            "source_publish_time_ms": source_publish_time_ms,
+            "source_available_time_ms": source_available_time_ms,
             "observed_at_ms": observed_at_ms,
             "fetched_at_ms": fetched_at_ms,
+            "parsed_at_ms": parsed_at_ms,
             "verified_at_ms": verified_at_ms,
             "expires_at_ms": expires_at_ms,
             "category": category,
@@ -653,6 +742,7 @@ def _validate_canonical_event(
     for field in (
         "observed_at_ms",
         "fetched_at_ms",
+        "parsed_at_ms",
         "verified_at_ms",
         "admitted_at_ms",
     ):
@@ -665,6 +755,13 @@ def _validate_canonical_event(
         times.append(at_ms)
     if times != sorted(times):
         raise AlertValidationError("CANONICAL_TIMESTAMP_ORDER_INVALID")
+    if event.get("parsed_at_origin") not in {
+        "FETCHED_AT_FALLBACK",
+        "SOURCE_ADAPTER",
+    }:
+        raise AlertValidationError("CANONICAL_PARSED_AT_ORIGIN_INVALID")
+    if event.get("parsed_at_origin") == "FETCHED_AT_FALLBACK" and times[2] != times[1]:
+        raise AlertValidationError("CANONICAL_PARSED_AT_FALLBACK_MISMATCH")
     source_event_time = event.get("source_event_time_ms")
     if source_event_time is not None:
         try:
@@ -675,11 +772,41 @@ def _validate_canonical_event(
             ) from exc
         if source_event_time < 0 or source_event_time > times[0]:
             raise AlertValidationError("CANONICAL_SOURCE_EVENT_TIME_IMPOSSIBLE")
-    expected_availability_lag = (
-        times[0] - source_event_time if source_event_time is not None else None
-    )
-    if event.get("source_available_at_ms") != times[0]:
-        raise AlertValidationError("CANONICAL_SOURCE_AVAILABILITY_INVALID")
+    source_publish_time = event.get("source_publish_time_ms")
+    if source_publish_time is not None:
+        try:
+            source_publish_time = int(source_publish_time)
+        except (TypeError, ValueError, OverflowError) as exc:
+            raise AlertValidationError(
+                "CANONICAL_TIMESTAMP_INVALID:source_publish_time_ms"
+            ) from exc
+        if source_publish_time < 0 or source_publish_time > times[0]:
+            raise AlertValidationError("CANONICAL_SOURCE_PUBLISH_TIME_IMPOSSIBLE")
+        if source_event_time is not None and source_publish_time < source_event_time:
+            raise AlertValidationError("CANONICAL_SOURCE_PUBLISH_BEFORE_EVENT")
+    try:
+        source_available_time = int(event.get("source_available_time_ms"))
+    except (TypeError, ValueError, OverflowError) as exc:
+        raise AlertValidationError(
+            "CANONICAL_TIMESTAMP_INVALID:source_available_time_ms"
+        ) from exc
+    if source_available_time < 0 or source_available_time > times[0]:
+        raise AlertValidationError("CANONICAL_SOURCE_AVAILABLE_TIME_IMPOSSIBLE")
+    if source_publish_time is not None and source_available_time < source_publish_time:
+        raise AlertValidationError("CANONICAL_SOURCE_AVAILABLE_BEFORE_PUBLISH")
+    if event.get("source_available_time_origin") not in {
+        "OBSERVED_AT_FALLBACK",
+        "SOURCE_ADAPTER",
+    }:
+        raise AlertValidationError("CANONICAL_SOURCE_AVAILABLE_ORIGIN_INVALID")
+    if (
+        event.get("source_available_time_origin") == "OBSERVED_AT_FALLBACK"
+        and source_available_time != times[0]
+    ):
+        raise AlertValidationError("CANONICAL_SOURCE_AVAILABLE_FALLBACK_MISMATCH")
+    expected_availability_lag = times[0] - source_available_time
+    if event.get("source_available_at_ms") != source_available_time:
+        raise AlertValidationError("CANONICAL_SOURCE_AVAILABILITY_ALIAS_INVALID")
     if event.get("availability_lag_ms") != expected_availability_lag:
         raise AlertValidationError("CANONICAL_AVAILABILITY_LAG_INVALID")
     expires_at = event.get("expires_at_ms")
@@ -690,7 +817,7 @@ def _validate_canonical_event(
             raise AlertValidationError(
                 "CANONICAL_TIMESTAMP_INVALID:expires_at_ms"
             ) from exc
-        if expires_at < times[3]:
+        if expires_at < times[4]:
             raise AlertValidationError("CANONICAL_EXPIRES_AT_IMPOSSIBLE")
 
     category = str(event.get("category") or "").strip().upper()
@@ -825,6 +952,8 @@ def _validate_canonical_event(
             "producer_seq": producer_seq,
             "ledger_sequence": ledger_sequence,
             "source_event_time_ms": source_event_time,
+            "source_publish_time_ms": source_publish_time,
+            "source_available_time_ms": source_available_time,
             "source_event_id": source_event_id,
             "expires_at_ms": expires_at,
             "revision_of": revision_of,
@@ -1167,14 +1296,19 @@ class CanonicalAlertWriter:
             "source_content_hash": source["source_content_hash"],
             "source_event_id": proposal["source_event_id"],
             "source_event_time_ms": proposal["source_event_time_ms"],
-            "source_available_at_ms": proposal["observed_at_ms"],
+            "source_publish_time_ms": proposal["source_publish_time_ms"],
+            "source_available_time_ms": proposal["source_available_time_ms"],
+            "source_available_time_origin": proposal[
+                "source_available_time_origin"
+            ],
+            "source_available_at_ms": proposal["source_available_time_ms"],
             "availability_lag_ms": (
-                proposal["observed_at_ms"] - proposal["source_event_time_ms"]
-                if proposal["source_event_time_ms"] is not None
-                else None
+                proposal["observed_at_ms"] - proposal["source_available_time_ms"]
             ),
             "observed_at_ms": proposal["observed_at_ms"],
             "fetched_at_ms": proposal["fetched_at_ms"],
+            "parsed_at_ms": proposal["parsed_at_ms"],
+            "parsed_at_origin": proposal["parsed_at_origin"],
             "verified_at_ms": proposal["verified_at_ms"],
             "admitted_at_ms": admitted_at_ms,
             "expires_at_ms": proposal["expires_at_ms"],
@@ -1396,10 +1530,24 @@ class CanonicalAlertWriter:
                 states[str(revision_of)] = "CORRECTED"
             if retracts is not None:
                 states[str(retracts)] = "RETRACTED"
+        freshness_projection = project_alert_freshness(
+            replayed,
+            projected_at_ms=projected_at_ms,
+            displayed_at_ms=displayed_at_ms,
+        )
         projected_alerts = [
             {
                 **event,
                 "projection_lifecycle_state": states[str(event["event_id"])],
+                "effective_freshness_state": freshness_projection[
+                    "event_states"
+                ][str(event["event_id"])]["effective_freshness_state"],
+                "effective_source_health_state": freshness_projection[
+                    "event_states"
+                ][str(event["event_id"])]["effective_source_health_state"],
+                "no_news_conclusion_valid": freshness_projection["event_states"][
+                    str(event["event_id"])
+                ]["no_news_conclusion_valid"],
             }
             for event in replayed
         ]
@@ -1416,6 +1564,7 @@ class CanonicalAlertWriter:
             **deterministic_projection,
             "derived_from": str(self.paths.ledger_path),
             "canonical_projection_hash": _sha256(deterministic_projection),
+            "freshness": freshness_projection,
             "projection_telemetry": telemetry,
             "paper_read_only": True,
             "real_execution": False,
