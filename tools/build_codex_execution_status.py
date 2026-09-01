@@ -215,6 +215,11 @@ V26_EVIDENCE: dict[str, Evidence] = {
         "tests/test_alert_scoring_v26.py; tests/test_alert_idempotency_v26.py",
         "425f33c0",
     ),
+    "V26-P0-005": _verified(
+        "Horloges source/observation/parsing separees, etats frais/degrades/stale derives, SLO et distributions p50/p95/p99, gaps et NO_NEWS invalides sur source silencieuse.",
+        "tests/test_alert_freshness_v26.py; tests/test_alert_envelope_v26.py",
+        "92aa8672",
+    ),
 }
 
 

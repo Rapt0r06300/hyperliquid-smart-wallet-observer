@@ -67,6 +67,10 @@ def test_v26_rattache_le_spine_canonique_a_ses_preuves() -> None:
     assert scoring.state == "VERIFIED"
     assert "425f33c0" in scoring.commits
     assert "tests/test_alert_scoring_v26.py" in scoring.tests
+    freshness = V26_EVIDENCE["V26-P0-005"]
+    assert freshness.state == "VERIFIED"
+    assert "92aa8672" in freshness.commits
+    assert "tests/test_alert_freshness_v26.py" in freshness.tests
 
 
 def test_rendu_contient_preuve_tests_commit_blocage_et_action() -> None:
